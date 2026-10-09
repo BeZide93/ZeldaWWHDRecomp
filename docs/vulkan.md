@@ -79,6 +79,22 @@ With `tools/bench/run_bench.py`, use `--origin-load-steps n` to align both input
 interpolation mode switch to that restored clock; an absolute startup mode switch can change
 random-seed evolution when a load completes one step later.
 
+## Separate cold and warm benchmark caches
+
+For cross-build comparisons, pass `--variant-caches` to `tools/bench/run_bench.py`
+with named `--variant` and `--variant-binary` options. Each variant then uses a
+separate application-cache directory. For a warm comparison, also pass `--warmup`:
+each variant gets a discarded route with its own executable before measured runs
+start. A failed warm-up stops the comparison. Use a fresh output/cache directory
+when the binaries or route change.
+
+For a cold comparison, use `--cold-caches` with a separate output directory and
+omit `--warmup`. Every run and retry receives new application caches. Driver
+caches remain uncontrolled; describe that limitation in results. Use the same
+load-relative route and presentation settings for both comparisons. Host-load
+and exclusivity gates can reject disturbed samples, but do not establish that
+the machine was otherwise idle.
+
 ## Repeatable picture comparisons
 
 Use a clean baseline build and the changed build with the same local state and

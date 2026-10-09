@@ -8,6 +8,50 @@ import run_bench as bench
 
 
 class BenchmarkTests(unittest.TestCase):
+    def test_variant_cache_paths_are_distinct_stable_and_confined(self):
+        args = types.SimpleNamespace(cache_dir=None, variant_caches=True)
+        root = pathlib.Path('/tmp/bench-check')
+        a = bench.variant_cache_dir(args, '../base', str(root))
+        b = bench.variant_cache_dir(args, 'candidate', str(root))
+        self.assertNotEqual(a, b)
+        self.assertEqual(a, bench.variant_cache_dir(args, '../base', str(root)))
+        self.assertEqual(pathlib.Path(a).parent, root / 'cache')
+        self.assertEqual(pathlib.Path(b).parent, root / 'cache')
+        args.variant_caches = False
+        self.assertEqual(bench.variant_cache_dir(args, 'candidate', str(root)), str(root / 'cache'))
+
+    def test_isolated_warmups_use_each_variants_actual_cache_identity(self):
+        variants = [('base', {'FLAG': '0'}), ('candidate', {'FLAG': '1'})]
+        args = types.SimpleNamespace(variant_caches=True)
+        self.assertEqual(bench.warmup_specs(args, variants),
+                         [('base', {'FLAG': '0'}, 'base'), ('candidate', {'FLAG': '1'}, 'candidate')])
+        args.variant_caches = False
+        self.assertEqual(bench.warmup_specs(args, variants), [('warmup', {'FLAG': '0'}, 'base')])
+
+    def test_second_variant_warmup_failure_stops_before_samples(self):
+        with tempfile.TemporaryDirectory() as directory:
+            argv = ['run_bench.py', '--binary', '/unused/base', '--state-dir', '/unused/states',
+                    '--variant', 'base:', '--variant', 'candidate:FLAG=1',
+                    '--variant-binary', 'candidate=/unused/new', '--variant-caches',
+                    '--warmup', '--runs', '3', '--out', directory]
+            launches = []
+            def warm(args, name, env, index, out):
+                launches.append((name, env, index, args.variant_binaries[name],
+                                 bench.variant_cache_dir(args, name, out)))
+                return {'status': 'ok' if name == 'base' else 'load exceeded limit'}
+            with patch.object(bench.sys, 'argv', argv), \
+                 patch.object(bench.os.path, 'exists', return_value=True), \
+                 patch.object(bench.os.path, 'isfile', return_value=True), \
+                 patch.object(bench, 'run_once', side_effect=warm), \
+                 patch.object(bench, 'run_with_retries') as measured:
+                with self.assertRaises(SystemExit) as stopped:
+                    bench.main()
+                self.assertEqual(stopped.exception.code, 1)
+                measured.assert_not_called()
+            self.assertEqual([item[:4] for item in launches],
+                             [('base', {}, 0, '/unused/base'), ('candidate', {'FLAG': '1'}, 0, '/unused/new')])
+            self.assertNotEqual(launches[0][4], launches[1][4])
+
     def test_invalid_warmup_stops_before_measured_runs(self):
         with tempfile.TemporaryDirectory() as directory:
             argv = ['run_bench.py', '--binary', '/unused/game', '--state-dir', '/unused/states',

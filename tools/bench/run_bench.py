@@ -296,6 +296,22 @@ def logic_cpu_samples(lines):
             for match in [re.search(r"main thread CPU per pass: logic " + NUM + r" ms", line)] if match]
 
 
+def variant_cache_dir(args, variant, out_dir):
+    cache = os.path.abspath(args.cache_dir or os.path.join(out_dir, "cache"))
+    if getattr(args, "variant_caches", False):
+        # Variant labels may contain path separators; never use them as paths.
+        token = hashlib.sha256(variant.encode("utf-8")).hexdigest()
+        cache = os.path.join(cache, token)
+    return cache
+
+
+def warmup_specs(args, variants):
+    if getattr(args, "variant_caches", False):
+        # Keep the actual variant name so warmup and samples share its cache.
+        return [(name, env, name) for name, env in variants]
+    return [("warmup", variants[0][1], variants[0][0])]
+
+
 def run_once(args, variant, env_extra, index, out_dir):
     binary = args.variant_binaries.get(variant, args.binary)
     wait_for_quiet(args)
@@ -315,7 +331,7 @@ def run_once(args, variant, env_extra, index, out_dir):
     slot, stick, rstick = SCENES[args.scene]
     slot = args.slot or slot
     load_at, origin = args.load_frame, args.origin
-    cache = os.path.abspath(args.cache_dir or os.path.join(out_dir, "cache"))
+    cache = variant_cache_dir(args, variant, out_dir)
     os.makedirs(cache, exist_ok=True)
     if args.cold_caches:
         cache = tempfile.mkdtemp(prefix="%s_%02d_" % (variant, index), dir=cache)
@@ -526,6 +542,7 @@ def main():
     p.add_argument("--warmup", action="store_true", help="one discarded run first (warms the shader caches)")
     p.add_argument("--stutter-trace", action="store_true", help="record individual Vulkan frame/compilation events to each run's stutter.csv")
     p.add_argument("--cache-dir", help="shader/pipeline caches shared by the runs (default: <out>/cache)")
+    p.add_argument("--variant-caches", action="store_true", help="isolate caches per variant; --warmup warms each variant with its own executable")
     p.add_argument("--cold-caches", action="store_true", help="use a new isolated application cache for every run and retry; leaves driver caches uncontrolled")
     p.add_argument("--timeout", type=float, default=600)
     p.add_argument("--max-load", type=float, default=0, help="wait below this 1-minute load; discard a run if it exceeds the limit (0 disables)")
@@ -570,10 +587,11 @@ def main():
     os.makedirs(args.out, exist_ok=True)
     results = []
     if args.warmup:
-        args.variant_binaries["warmup"] = args.variant_binaries.get(variants[0][0], args.binary)
-        warmup = run_once(args, "warmup", variants[0][1], 0, args.out)
-        if warmup["status"] != "ok":
-            p.exit(1, "warmup failed: %s; no measured runs started\n" % warmup["status"])
+        for name, env, source in warmup_specs(args, variants):
+            args.variant_binaries[name] = args.variant_binaries.get(source, args.binary)
+            warmup = run_once(args, name, env, 0, args.out)
+            if warmup["status"] != "ok":
+                p.exit(1, "warmup failed: %s; no measured runs started\n" % warmup["status"])
     for i in range(args.runs):
         order = variants if i % 2 == 0 else list(reversed(variants))  # A B, B A, ...
         for name, env in order:
@@ -590,7 +608,7 @@ def main():
             stats[k] = run_statistics(vals)
         table[name] = stats
     meta = {k: getattr(args, k) for k in ("scene", "fps", "renderer", "uncapped", "visible", "seconds", "runs", "display_hz",
-                                                   "quiet_load_max", "exclusive_bench", "exclusive_work", "min_free_gb", "retry_disturbed", "load_frame", "origin", "slot", "cold_caches", "stutter_trace", "attempts")}
+                                                   "quiet_load_max", "exclusive_bench", "exclusive_work", "min_free_gb", "retry_disturbed", "load_frame", "origin", "slot", "cold_caches", "variant_caches", "stutter_trace", "attempts")}
     meta.update({k: getattr(args, k) for k in ("max_load_per_core", "max_run_load_per_core", "quiet_seconds")})
     meta["binary"] = os.path.basename(args.binary)
     meta["variant_binaries"] = {name: os.path.basename(path) for name, path in args.variant_binaries.items() if name != "warmup"}
