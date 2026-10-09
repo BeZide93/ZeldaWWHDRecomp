@@ -54,6 +54,10 @@ struct Screen {
  std::vector<ResourceUse> imageUses;
  VkSemaphore acquired=VK_NULL_HANDLE,finished=VK_NULL_HANDLE;
  std::unique_ptr<Surface> scan;
+ // Never overwrite the published scan while the next guest frame is being
+ // built. Publish at swap; reuse the former published allocation next time.
+ std::unique_ptr<Surface> buildingScan;
+ bool buildingScanDirty=false,buildingScanSrgb=false,scanSrgb=false;
  std::atomic<bool> visible{true},srgb{false},resize{false};
  int presentMode=-1,presentWanted=-1; // present mode of the swapchain, and the setting it was made for
  std::atomic<int> width{1280},height{720};
@@ -189,6 +193,8 @@ struct Renderer {
 extern Renderer R;
 // Render-thread checkpoint; failures leave the cache dirty for a later retry.
 void save_pipeline_cache();
+void present_completed_frame_while_pipeline_pending();
+void begin_pipeline_pending_frame();
 // Only guest GX2Flush uses this asynchronous path. flush() remains a drain for
 // readbacks and renderer tools; final presentation also waits synchronously.
 void flush_async();

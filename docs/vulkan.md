@@ -53,7 +53,7 @@ filter), and `gfx/vulkan/present.cpp` draws it. The TV window title starts with 
 | Frame dumps `WWHD_DUMP_FRAMES`, `WWHD_DUMP_PRESENT` | yes | yes |
 | Capture frame (P) | pictures + draw log | pictures only (no draw log) |
 | Screenshot key (F10, `runtime/src/screenshot.h`) | yes | yes (read back at the submission's fence, no wait) |
-| Shader head start (`--warm-shaders`) | yes | no (Vulkan keeps its own SPIR-V / pipeline caches) |
+| Shader head start (`--warm-shaders`) | yes | offline GX2 shader replay and compatible local pipeline warming |
 
 Other builds: `-DWWHD_RENDERER=METAL` (Metal only, no Vulkan dependencies) and
 `-DWWHD_RENDERER=VULKAN` (Vulkan only with the portable SDL3 host: SDL windows, input and audio;
@@ -165,6 +165,35 @@ path is supplied. Caches are matched to the device and pipeline-cache UUID;
 incompatible, truncated, or checksum-invalid files fall back to an empty cache. New data is saved
 atomically after 120 frames without new pipelines. First-time shader translation
 and pipeline creation can still cause stalls.
+
+Successful guest pipelines also retain local, pointer-free recipes in
+`<pipeline-cache-file>.recipes`, bounded to 512 entries / 128 MiB. Recipes are
+saved at orderly shutdown or the scripted test endpoint. On the next start, a
+worker reads compatible recipes and compiles them while the title screen runs.
+It owns separate modules, descriptor layouts and a pipeline cache; the render
+thread takes a ready pipeline only after the exact key, both SPIR-V programs and
+descriptor layouts match. `WWHD_VK_PIPELINE_WARMUP=0` disables this recording and
+replay. Missing or unfinished pipelines use a separate demand compiler with an
+owned state snapshot and independent native cache. Exact guest draws remain at
+the head of the ordered command stream until ready; the renderer can repeat the
+last complete scan image while waiting. It never substitutes state or drops that
+draw. This still delays new guest frames and input response. Presentation/overlay
+pipeline misses currently wait without repeat pumping; this is a remaining
+limitation. `WWHD_VK_ASYNC_PIPELINES=0` selects diagnostic synchronous creation.
+Recipe files contain game-derived shader code and must stay local.
+
+Vulkan also accepts the locally built `tools/shaderprep.py` shader head start in
+offline `--warm-shaders` mode. `WWHD_VK_RECIPE_RECORD=<file>` records the GX2 shader
+microcode, fetch programs, sparse register states and exact Vulkan pipeline recipes; it is not
+the SPIR-V disk cache. Recording is opt-in, bounded, and written at orderly shutdown
+or a scripted test endpoint. Build known shaders and pipelines with `--max 0`, then
+run `--warm-shaders` to populate the Vulkan SPIR-V/device caches before playing.
+`--no-pipelines` builds shaders alone. The startup worker also reads compatible
+pipeline records directly from the head start while the title screen runs.
+Metal pipeline records are skipped explicitly. Shader translation and on-demand
+SPIR-V compilation still have render-thread costs; head-start coverage depends on
+the locally recorded scene states. The README contains
+[Windows/Linux commands](../README.md#vulkan-shader-head-start-on-windows-and-linux).
 
 Vulkan also persists compiled SPIR-V in the host configuration directory's
 `shadercache/vulkan-shaders/spirv.bin`. `WWHD_VK_SHADER_CACHE=/directory` selects

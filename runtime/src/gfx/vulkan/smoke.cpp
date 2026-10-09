@@ -4,6 +4,8 @@
 // No game assets: assertions inspect data returned by the actual Vulkan device.
 #include "backend.h"
 #include "android_shared_image.h"
+#include "pipeline_trace.h"
+#include "present.h"
 #include "buffer_cache.h"
 #include "render_prof.h"
 #include "perf_metrics.h"
@@ -32,6 +34,7 @@
 #include <zlib.h>
 #include <stdexcept>
 #include <string>
+#include <thread>
 
 namespace gfxvk {
 extern uint64_t g_stat_full_checks, g_stat_uploads;
@@ -125,6 +128,38 @@ void bc_surface_check() {
   }
  }
  fprintf(stderr,"[renderer smoke] BC production uploads, sRGB/signed views, mip/layer cache and invalidation passed\n");
+}
+void completed_scan_retention_check() {
+ require(R.tv.scan && R.tv.scan->image, "completed scan missing for repeat check");
+ const auto frame = R.frame;
+ const auto original = read_image(*R.tv.scan, VK_IMAGE_ASPECT_COLOR_BIT, 4);
+ const auto before = compose_offscreen(R.tv, 64, 64, false);
+ Image next(64, 64, 0x1a);
+ const float blue[4] = {0, 0, 1, 1};
+ clear_image(next.s, blue);
+ if (R.tv.buildingScan) destroy_surface_image(R.tv.buildingScan.get());
+ R.tv.buildingScan = std::make_unique<Surface>(std::move(next.s));
+ next.s = {};
+ R.tv.buildingScanDirty = true; R.tv.buildingScanSrgb = false;
+ begin_pipeline_pending_frame();
+ std::this_thread::sleep_for(std::chrono::milliseconds(20));
+ present_completed_frame_while_pipeline_pending();
+ require(R.frame == frame, "repeated presentation advanced guest frame state");
+ require(read_image(*R.tv.scan, VK_IMAGE_ASPECT_COLOR_BIT, 4) == original,
+         "pending presentation exposed or modified the next scan image");
+ const auto repeated = compose_offscreen(R.tv, 64, 64, false);
+ require(repeated == before, "repeated completed composition differs pixel-for-pixel");
+ swap();
+ const uint8_t rgba[4] = {0, 0, 255, 255};
+ rgba_is(read_image(*R.tv.scan, VK_IMAGE_ASPECT_COLOR_BIT, 4), rgba,
+         "completed next scan was not published at swap");
+ if (const char* path = std::getenv("WWHD_VK_PENDING_PROOF_DIR")) {
+  std::filesystem::create_directories(path);
+  write_rgba_png(std::string(path) + "/completed.png", 64, 64, before);
+  write_rgba_png(std::string(path) + "/repeated.png", 64, 64, repeated);
+  write_rgba_png(std::string(path) + "/resumed.png", 64, 64, compose_offscreen(R.tv, 64, 64, false));
+ }
+ fprintf(stderr, "[renderer smoke] pending presentation retained completed pixels; next scan published only at swap\n");
 }
 void upload_arena_check() {
  const uint64_t before=R.uploadAllocations;
@@ -412,7 +447,7 @@ void triangle(Surface& s) {
  VkPipelineColorBlendStateCreateInfo blend{VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};blend.attachmentCount=1;blend.pAttachments=&attachment;
  VkPipelineRenderingCreateInfo rendering{VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};rendering.colorAttachmentCount=1;rendering.pColorAttachmentFormats=&s.fmt.pixel;
  VkGraphicsPipelineCreateInfo info{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};info.pNext=&rendering;info.stageCount=2;info.pStages=stages;info.pVertexInputState=&vertex;info.pInputAssemblyState=&assembly;info.pViewportState=&vp;info.pRasterizationState=&raster;info.pMultisampleState=&ms;info.pColorBlendState=&blend;info.layout=objects.layout;
- vk_check(vkCreateGraphicsPipelines(R.device,R.pipelineCache,1,&info,nullptr,&objects.pipeline),"smoke triangle pipeline");
+ vk_check(stutter::create_graphics(R.frame, "smoke_pipeline", R.device,R.pipelineCache,1,&info,nullptr,&objects.pipeline),"smoke triangle pipeline");
  R.pipelineCacheDirty=true;
  R.pipelineCacheChangedFrame=R.frame;
  transition_image(&s,VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
@@ -455,7 +490,7 @@ void vertex_window_check(Surface& s) {
  VkPipelineColorBlendStateCreateInfo blend{VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};blend.attachmentCount=1;blend.pAttachments=&attachment;
  VkPipelineRenderingCreateInfo rendering{VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};rendering.colorAttachmentCount=1;rendering.pColorAttachmentFormats=&s.fmt.pixel;
  VkGraphicsPipelineCreateInfo info{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};info.pNext=&rendering;info.stageCount=2;info.pStages=stages;info.pVertexInputState=&vertex;info.pInputAssemblyState=&assembly;info.pViewportState=&vp;info.pRasterizationState=&raster;info.pMultisampleState=&ms;info.pColorBlendState=&blend;info.layout=objects.layout;
- vk_check(vkCreateGraphicsPipelines(R.device,R.pipelineCache,1,&info,nullptr,&objects.pipeline),"smoke triangle pipeline");
+ vk_check(stutter::create_graphics(R.frame, "smoke_pipeline", R.device,R.pipelineCache,1,&info,nullptr,&objects.pipeline),"smoke triangle pipeline");
  R.pipelineCacheDirty=true;
  R.pipelineCacheChangedFrame=R.frame;
  std::array<Vertex,128> data{};
@@ -555,7 +590,7 @@ void dynamic_uniform_check(Surface& s) {
  VkDynamicState dynamicState=VK_DYNAMIC_STATE_SCISSOR;
  VkPipelineDynamicStateCreateInfo dynamic{VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};dynamic.dynamicStateCount=1;dynamic.pDynamicStates=&dynamicState;
  VkGraphicsPipelineCreateInfo info{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};info.pNext=&rendering;info.stageCount=2;info.pStages=stages;info.pVertexInputState=&vertex;info.pInputAssemblyState=&assembly;info.pViewportState=&vp;info.pRasterizationState=&raster;info.pMultisampleState=&ms;info.pColorBlendState=&blend;info.layout=objects.layout;info.pDynamicState=&dynamic;
- vk_check(vkCreateGraphicsPipelines(R.device,R.pipelineCache,1,&info,nullptr,&objects.pipeline),"smoke triangle pipeline");
+ vk_check(stutter::create_graphics(R.frame, "smoke_pipeline", R.device,R.pipelineCache,1,&info,nullptr,&objects.pipeline),"smoke triangle pipeline");
  R.pipelineCacheDirty=true;
  R.pipelineCacheChangedFrame=R.frame;
  // Two rounds force a pool reset between freshly allocated descriptor sets.
@@ -962,6 +997,7 @@ int renderer_smoke_test() {
    fprintf(stderr,"[renderer smoke] queued GPU PNG capture passed: %s\n",capturePath.string().c_str());
    require(R.tv.swapchain!=VK_NULL_HANDLE,"smoke presentation did not create a swapchain");LOG("[renderer smoke] scan-buffer swapchain presentation and PNG readback passed");
    volume_target_check();
+   completed_scan_retention_check();
   }
   // Ensure deferred objects left by readback and stack-owned images are actually reclaimed.
   command_buffer();flush();require(R.garbageBuffers.empty()&&R.garbageImages.empty()&&R.garbageCacheRegions.empty(),"deferred Vulkan resources were not reclaimed");

@@ -4,6 +4,7 @@
 #include "../headless_compose.h"
 #include "imgui.h"
 #include "backend.h"
+#include "pipeline_trace.h"
 #include "shaders.h"
 #include "settings.h"
 #include "mods/climb.h"
@@ -272,7 +273,10 @@ VkPipeline pipeline(PresentResources& resources,VkFormat format,Kind kind=kImage
   VkPipelineRenderingCreateInfo rendering{VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};rendering.colorAttachmentCount=1;rendering.pColorAttachmentFormats=&format;
   VkGraphicsPipelineCreateInfo ci{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};ci.pNext=&rendering;ci.stageCount=2;ci.pStages=stages;ci.pVertexInputState=&vi;ci.pInputAssemblyState=&ia;ci.pViewportState=&vp;ci.pRasterizationState=&rs;ci.pMultisampleState=&ms;ci.pColorBlendState=&bs;ci.pDynamicState=&ds;ci.layout=resources.layout;
   const auto started=std::chrono::steady_clock::now();
-  vk_check(resources.api.vkCreateGraphicsPipelines(resources.device,resources.device==R.device?R.pipelineCache:VK_NULL_HANDLE,1,&ci,nullptr,&result),"presentation pipeline");
+  const VkResult compiled=resources.device==R.device ?
+      stutter::create_graphics(R.frame,"present_pipeline",resources.device,R.pipelineCache,1,&ci,nullptr,&result) :
+      resources.api.vkCreateGraphicsPipelines(resources.device,VK_NULL_HANDLE,1,&ci,nullptr,&result);
+  vk_check(compiled,"presentation pipeline");
   if(resources.device==R.device) R.pipelineCreateNs+=std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now()-started).count();
   resources.pipelines.emplace(key,result);
   if(resources.device==R.device) { ++R.pipelineCreates;R.pipelineCacheDirty=true;R.pipelineCacheChangedFrame=R.frame; }
@@ -417,7 +421,7 @@ std::vector<ComposeQuad> screen_quads(Screen& screen,VkExtent2D target,int& filt
  if(!source.scan||!source.scan->image)return quads;
 #ifdef __ANDROID__
  if(gfx::g_has_drc_window) {
-  ComposeQuad q;q.image=source.scan.get();q.sourceLinear=source.srgb.load();
+  ComposeQuad q;q.image=source.scan.get();q.sourceLinear=source.scanSrgb;
   q.box=gfx::display_layout(float(target.width),float(target.height),float(q.image->extent.width),float(q.image->extent.height));
   quads.push_back(q);return quads;
  }
@@ -426,7 +430,7 @@ std::vector<ComposeQuad> screen_quads(Screen& screen,VkExtent2D target,int& filt
   // both window hosts (gfx/display_modes.cpp): the same layout as the Metal renderer
   filter=currentPlan->filter;
   if(&screen==&R.drc) {
-   ComposeQuad q;q.image=R.drc.scan.get();q.sourceLinear=R.drc.srgb.load();
+   ComposeQuad q;q.image=R.drc.scan.get();q.sourceLinear=R.drc.scanSrgb;
    q.box=gfx::display_layout(float(target.width),float(target.height),float(q.image->extent.width),float(q.image->extent.height));
    quads.push_back(q);return quads;
   }
@@ -435,12 +439,12 @@ std::vector<ComposeQuad> screen_quads(Screen& screen,VkExtent2D target,int& filt
   if(p.dw!=float(target.width)||p.dh!=float(target.height))
    p=gfx::display_plan_for(p,float(target.width),float(target.height),float(screen.scan->extent.width),float(screen.scan->extent.height),
                           drc?float(drc->extent.width):0,drc?float(drc->extent.height):0);
-  ComposeQuad tv;tv.image=screen.scan.get();tv.sourceLinear=screen.srgb.load();tv.box=p.tv;quads.push_back(tv);
+  ComposeQuad tv;tv.image=screen.scan.get();tv.sourceLinear=screen.scanSrgb;tv.box=p.tv;quads.push_back(tv);
   if(p.pip_on&&drc) {
    const float op=p.pip_opacity,bw=std::max(1.0f,std::round(p.pip.w/200.0f));
    ComposeQuad frame;frame.solid=true;frame.color[3]=0.6f*op;
    frame.box={p.pip.x-bw,p.pip.y-bw,p.pip.w+2*bw,p.pip.h+2*bw};quads.push_back(frame);
-   ComposeQuad pip;pip.image=drc;pip.sourceLinear=R.drc.srgb.load();pip.box=p.pip;pip.alpha=op;quads.push_back(pip);
+   ComposeQuad pip;pip.image=drc;pip.sourceLinear=R.drc.scanSrgb;pip.box=p.pip;pip.alpha=op;quads.push_back(pip);
   }
   if(p.button.w>0) {
    // touch screens' view button (display_modes.h): a dark square with two light "screens" (rhemfur's
@@ -461,7 +465,7 @@ std::vector<ComposeQuad> screen_quads(Screen& screen,VkExtent2D target,int& filt
  }
  // no plan (outside swap): the picture scaled to fit (Codex's presentation)
  const auto rect=present_rect(screen.scan->extent,target,filter);
- ComposeQuad q;q.image=screen.scan.get();q.sourceLinear=screen.srgb.load();q.box={rect.x,rect.y,rect.width,rect.height};quads.push_back(q);
+ ComposeQuad q;q.image=screen.scan.get();q.sourceLinear=screen.scanSrgb;q.box={rect.x,rect.y,rect.width,rect.height};quads.push_back(q);
  return quads;
 }
 
@@ -505,7 +509,7 @@ void compose_headless_diagnostic(Screen& screen) {
  ensure_resources();
  auto& target=resources.diagnosticTarget;auto& counter=resources.diagnosticCounter;
  counter.require_capacity(diagnostic);
- const uint32_t format=screen.srgb.load()?0x41a:0x1a;
+ const uint32_t format=screen.scanSrgb?0x41a:0x1a;
  if(target.image&&target.format!=format)destroy_surface_image(&target);
  if(!target.image) {
   target.width=gfx::headless_compose::width;target.height=gfx::headless_compose::height;
@@ -641,7 +645,7 @@ bool record_screenshot(Screen& screen,Buffer& buffer,uint32_t& width,uint32_t& h
  if(!screen.scan||!screen.scan->image||!sampleable(*screen.scan))return false;
  width=screen.scan->extent.width;height=screen.scan->extent.height;
  if(!width||!height)return false;
- const bool srgb=screen.srgb.load();
+ const bool srgb=screen.scanSrgb;
  Surface target;target.width=width;target.height=height;target.format=srgb?0x41a:0x1a;target.fmt=format_info(target.format,false);
  // the TV window's format for both pictures: its pipeline exists (the GamePad window may have none)
  const VkFormat sf=R.tv.swapchain?R.tv.swapFormat:VK_FORMAT_UNDEFINED;
@@ -650,7 +654,7 @@ bool record_screenshot(Screen& screen,Buffer& buffer,uint32_t& width,uint32_t& h
  bgra=target.fmt.pixel==VK_FORMAT_B8G8R8A8_UNORM||target.fmt.pixel==VK_FORMAT_B8G8R8A8_SRGB;
  create_surface_image(&target,true,VkExtent3D{width,height,1});
  try {
-  ComposeQuad q;q.image=screen.scan.get();q.sourceLinear=screen.srgb.load();q.box={0,0,float(width),float(height)};
+  ComposeQuad q;q.image=screen.scan.get();q.sourceLinear=screen.scanSrgb;q.box={0,0,float(width),float(height)};
   compose(target.image,target.view,target.layout,VkExtent2D{width,height},target.fmt.pixel,{q},
           VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,0,fxaa_enabled(),nullptr,&target.use);
   buffer=create_readback_buffer(VkDeviceSize(width)*height*4);

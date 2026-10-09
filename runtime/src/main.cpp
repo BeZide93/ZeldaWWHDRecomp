@@ -51,7 +51,7 @@ namespace interp { void set_mode(int); }
 #endif
 
 #ifdef WWHD_HAS_VULKAN
-namespace gfxvk { int renderer_smoke_test(); }
+namespace gfxvk { int renderer_smoke_test(); int warm_headstart_shaders(); }
 #ifdef __ANDROID__
 namespace gfxvk { int android_display_smoke_test(); void save_renderer_caches(); }
 #endif
@@ -518,6 +518,9 @@ int main(int argc, char** argv) {
         // compile the shader head start once (fills the macOS Metal shader cache), then quit
 #ifdef WWHD_HAS_METAL
         if (render::active() == render::Api::Metal) return gfx_headstart_warm();
+#endif
+#ifdef WWHD_HAS_VULKAN
+        if (render::active() == render::Api::Vulkan) return gfxvk::warm_headstart_shaders();
 #endif
         fprintf(stderr, "--warm-shaders fills the Metal shader cache; the %s renderer compiles shaders on first use.\n",
                 render::api_name(render::active()));

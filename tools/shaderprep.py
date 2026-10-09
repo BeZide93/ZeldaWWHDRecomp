@@ -33,8 +33,9 @@ Where the shaders are (Wind Waker HD, USA):
 The head start is written in the runtime's recipe format (runtime/src/gfx/metal_draw.mm, cache_write):
 records of {u32 type, u32 raw size, u32 compressed size, zlib(raw)}; a shader record is
 {u32 vertex, u32 size, u32 fsSize, u32 nregs, microcode, fetch microcode, (u32 reg, u32 value) * nregs};
-a pipeline record is the runtime's PipelineRecipe struct as is (u64 vsKey, psKey, fsKey, render target
-formats, blend state, vertex strides; 168 bytes).
+type 2 is the Metal PipelineRecipe struct (168 bytes). Type 4 is a checked,
+versioned Vulkan database containing exact keys, SPIR-V, descriptors and fixed
+state, plus the local device/driver/features fingerprint. Handles are never stored.
 
 Register state can't be derived from the archives alone (it depends on render targets, vertex layouts,
 textures...). The template (default: game/shadercache/template.bin) holds the states recorded in your
@@ -54,11 +55,17 @@ own runtime cache after playing for a while (the further you get, the more it co
   - type 3 records: every other archive program with up to --max states recorded for programs of the
     same family (identical shader register block). Speculative; only `wwhd --warm-shaders` uses them,
     compiling everything once so the macOS Metal shader cache already has the code later.
+  - type 4 records: local Vulkan pipeline recipes; the Vulkan startup worker compiles compatible
+    records independently of shader translation. Metal skips these records.
+Templates written by this tool use WWHT0002 and explicit pipeline backend tags.
+Legacy WWHT templates remain readable as Metal pipeline records.
 """
 import collections
 import ctypes
 import glob
 import os
+import shlex
+import shutil
 import struct
 import subprocess
 import sys
@@ -69,6 +76,7 @@ ROOT = os.path.dirname(HERE)
 TEMPLATE = os.path.join(ROOT, "game", "shadercache", "template.bin")  # made by `template`, not shipped
 
 REC_SHADER, REC_PIPELINE, REC_SPECULATIVE = 1, 2, 3
+REC_VULKAN_PIPELINE = 4
 VS, PS, GS = 0, 1, 2
 
 
@@ -76,19 +84,70 @@ VS, PS, GS = 0, 1, 2
 _yaz0 = None
 
 
+def yaz0_python(b):
+    """Portable fallback when no local C compiler is available."""
+    if len(b) < 16 or b[:4] != b"Yaz0":
+        return b""
+    n = struct.unpack_from(">I", b, 4)[0]
+    if n > 256 * 1024 * 1024:
+        return b""
+    out, at = bytearray(), 16
+    try:
+        while len(out) < n:
+            code = b[at]
+            at += 1
+            for bit in range(7, -1, -1):
+                if len(out) >= n:
+                    break
+                if code & (1 << bit):
+                    out.append(b[at])
+                    at += 1
+                else:
+                    first, second = b[at], b[at + 1]
+                    at += 2
+                    distance = ((first & 15) << 8 | second) + 1
+                    length = first >> 4
+                    if not length:
+                        length = b[at] + 18
+                        at += 1
+                    else:
+                        length += 2
+                    if distance > len(out):
+                        return b""
+                    for _ in range(min(length, n - len(out))):
+                        out.append(out[-distance])
+    except IndexError:
+        return b""
+    return bytes(out)
+
+
 def yaz0(b):
     global _yaz0
     if _yaz0 is None:
-        lib = os.path.join(ROOT, "build", "libyaz0.dylib")
-        if not os.path.exists(lib):
-            os.makedirs(os.path.dirname(lib), exist_ok=True)
-            subprocess.check_call(["clang", "-O2", "-shared", "-o", lib, os.path.join(HERE, "yaz0.c")])
-        _yaz0 = ctypes.CDLL(lib)
-        _yaz0.yaz0_decompress.restype = ctypes.c_long
+        suffix = ".dll" if os.name == "nt" else ".dylib" if sys.platform == "darwin" else ".so"
+        lib = os.path.join(ROOT, "build", "libyaz0" + suffix)
+        source = os.path.join(HERE, "yaz0.c")
+        try:
+            if not os.path.exists(lib) or os.path.getmtime(lib) < os.path.getmtime(source):
+                os.makedirs(os.path.dirname(lib), exist_ok=True)
+                compiler = shlex.split(os.environ["CC"]) if os.environ.get("CC") else [shutil.which("clang") or shutil.which("gcc") or "clang"]
+                subprocess.check_call(compiler + ["-O2", "-shared"] + ([] if os.name == "nt" else ["-fPIC"]) + ["-o", lib, source])
+            _yaz0 = ctypes.CDLL(lib)
+            _yaz0.yaz0_decompress.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_void_p, ctypes.c_size_t]
+            _yaz0.yaz0_decompress.restype = ctypes.c_long
+        except (OSError, subprocess.CalledProcessError):
+            print("shaderprep: native Yaz0 helper unavailable; using portable Python decoder", file=sys.stderr)
+            _yaz0 = False
+    if _yaz0 is False:
+        return yaz0_python(b)
+    if len(b) < 16 or b[:4] != b"Yaz0":
+        return b""
     n = struct.unpack_from(">I", b, 4)[0]
+    if n > 256 * 1024 * 1024:
+        return b""
     out = ctypes.create_string_buffer(n)
     r = _yaz0.yaz0_decompress(b, len(b), out, n)
-    return out.raw[:r] if r >= 0 else b""
+    return out.raw[:r] if r == n else b""
 
 
 def sarc(b):
@@ -155,15 +214,34 @@ def game_shaders(game):
 
 
 # ---------------------------------------------------------------- recipe records
+def decompress_bounded(data, limit, expected=None):
+    decoder = zlib.decompressobj()
+    raw = decoder.decompress(data, limit + 1)
+    if len(raw) > limit or decoder.unconsumed_tail or not decoder.eof or decoder.unused_data:
+        raise ValueError("invalid or oversized compressed recipe")
+    if expected is not None and len(raw) != expected:
+        raise ValueError("recipe decoded size mismatch")
+    return raw
+
+
 def read_records(path):
-    d = open(path, "rb").read()
-    o = 0
-    while o + 12 <= len(d):
+    if os.path.getsize(path) > 256 * 1024 * 1024:
+        raise ValueError("recipe file size limit")
+    with open(path, "rb") as source:
+        d = source.read()
+    o = total = count = 0
+    while o < len(d):
+        if len(d) - o < 12:
+            raise ValueError("truncated recipe header")
         t, raw, comp = struct.unpack_from("<III", d, o)
         o += 12
-        if o + comp > len(d):
-            break
-        yield t, zlib.decompress(d[o:o + comp])
+        count += 1
+        total += raw
+        if t not in (1, 2, 3, 4) or not 0 < raw <= 16 * 1024 * 1024 or \
+                not 0 < comp <= 16 * 1024 * 1024 or comp > len(d) - o or \
+                count > 100000 or total > 256 * 1024 * 1024:
+            raise ValueError("invalid recipe bounds")
+        yield t, decompress_bounded(d[o:o + comp], raw, raw)
         o += comp
 
 
@@ -238,9 +316,9 @@ def own_block(vertex, w):
 
 # ---------------------------------------------------------------- template
 def cmd_template(cache, out, merge=None):
-    """'WWHT' + zlib( u32 nfetch, {u32 len, bytes}*, u32 nstates,
+    """'WWHT0002' + zlib( u32 nfetch, {u32 len, bytes}*, u32 nstates,
                       {u64 program hash, u32 vertex, i32 fetch index, u32 nregs, (u32 reg, u32 value)*}*,
-                      u32 npipelines, {u32 len, pipeline recipe}* )"""
+                      u32 npipelines, {u32 backend kind, u32 len, pipeline recipe}* )"""
     fetch = {}
     entries = collections.OrderedDict()
     pipelines = collections.OrderedDict()
@@ -252,8 +330,8 @@ def cmd_template(cache, out, merge=None):
         pipelines.update((p, None) for p in old_pipelines)
     drop = (mmSQ_PGM_START_VS, mmSQ_PGM_START_PS, mmSQ_PGM_START_FS)  # addresses in the recording's memory
     for t, r in read_records(cache):
-        if t == REC_PIPELINE:
-            pipelines.setdefault(bytes(r), None)
+        if t in (REC_PIPELINE, REC_VULKAN_PIPELINE):
+            pipelines.setdefault((t, bytes(r)), None)
             continue
         if t != REC_SHADER:
             continue
@@ -269,11 +347,12 @@ def cmd_template(cache, out, merge=None):
         raw += struct.pack("<QIiI", h, vertex, fi, len(regs))
         raw += b"".join(struct.pack("<II", a, v) for a, v in regs)
     raw += struct.pack("<I", len(pipelines))
-    for p in pipelines:
-        raw += struct.pack("<I", len(p)) + p
-    data = b"WWHT" + zlib.compress(bytes(raw), 9)
+    for kind, p in pipelines:
+        raw += struct.pack("<II", kind, len(p)) + p
+    data = b"WWHT0002" + zlib.compress(bytes(raw), 9)
     os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
-    open(out, "wb").write(data)
+    with open(out, "wb") as output:
+        output.write(data)
     print("template: %d states, %d fetch shaders, %d pipelines, %d bytes -> %s" %
           (len(entries), len(fetch), len(pipelines), len(data), out))
 
@@ -283,10 +362,12 @@ def read_template(path):
         sys.exit("no state template at %s\n"
                  "make one from your own runtime cache after playing for a while:\n"
                  "  tools/shaderprep.py template ~/Library/Caches/wwhd/shaders.bin" % path)
-    d = open(path, "rb").read()
+    with open(path, "rb") as source:
+        d = source.read()
     if d[:4] != b"WWHT":
         sys.exit("not a template: " + path)
-    raw = zlib.decompress(d[4:])
+    typed = d.startswith(b"WWHT0002")
+    raw = decompress_bounded(d[8:] if typed else d[4:], 256 * 1024 * 1024)
     o = 4
     fetch = []
     for _ in range(struct.unpack_from("<I", raw, 0)[0]):
@@ -307,9 +388,19 @@ def read_template(path):
         n = struct.unpack_from("<I", raw, o)[0]
         o += 4
         for _ in range(n):
+            kind = REC_PIPELINE
+            if typed:
+                kind = struct.unpack_from("<I", raw, o)[0]
+                o += 4
+                if kind not in (REC_PIPELINE, REC_VULKAN_PIPELINE):
+                    raise ValueError("unknown template pipeline type")
             ln = struct.unpack_from("<I", raw, o)[0]
-            pipelines.append(raw[o + 4:o + 4 + ln])
+            if ln > len(raw) - o - 4:
+                raise ValueError("truncated template pipeline")
+            pipelines.append((kind, raw[o + 4:o + 4 + ln]))
             o += 4 + ln
+    if o != len(raw):
+        raise ValueError("trailing template bytes")
     return states, pipelines
 
 
@@ -365,8 +456,8 @@ def cmd_build(game, out, template, limit, with_pipelines=True):
                 r[pgm[vertex] + 1] = len(code) >> 3  # the loader supplies the program address
                 write_record(f, REC_SHADER, shader_record(1 if vertex else 0, code, fs, sorted(r.items())))
                 known += 1
-        for p in pipelines:
-            write_record(f, REC_PIPELINE, p)
+        for kind, p in pipelines:
+            write_record(f, kind, p)
         for (typ, code), (w, path) in shaders.items():
             vertex = typ == VS
             if (prog_hash(code), vertex) in by_hash:

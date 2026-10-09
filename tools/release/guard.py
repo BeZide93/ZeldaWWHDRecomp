@@ -23,6 +23,7 @@ import hashlib
 import json
 import os
 import re
+import struct
 import sys
 import zipfile
 
@@ -35,8 +36,9 @@ BAD_NAME = [
     (re.compile(r"\.key$", re.I), "key file"),
     (re.compile(r"(^|/)title\.(tik|tmd|cert)$", re.I), "disc ticket/metadata"),
     (re.compile(r"\.sav$", re.I), "save file"),
-    (re.compile(r"(^|/)(shaders|headstart|template|testcache|mycache)\.bin$", re.I), "shader cache"),
-    (re.compile(r"\.metallib$", re.I), "compiled shader cache"),
+    (re.compile(r"(^|/)(shaders|headstart|template|shaderprep_template|spirv|vkpipelines|testcache|mycache)\.bin$", re.I), "shader cache"),
+    (re.compile(r"\.(metallib|spv)$", re.I), "compiled shader cache"),
+    (re.compile(r"(^|/)(shadercache|vulkan-shaders)/", re.I), "local shader cache tree"),
     (re.compile(r"(^|/)(game|content|meta)/"), "game file tree"),
     (re.compile(r"(^|/)build/gen"), "recompiler output"),
     (re.compile(r"(^|/)(lib)?gamecode\.(a|lib)$"), "compiled game code"),
@@ -82,6 +84,16 @@ def check_entry(name, data, problems):
         if rx.search(n):
             problems.append("%s: %s" % (name, why))
     ext = os.path.splitext(n)[1].lower()
+    if data.startswith((b"WWHT", b"WWVKSC", b"WWVKPC", b"WWVKPR", b"\x03\x02\x23\x07")):
+        problems.append("%s: shader template, Vulkan cache or SPIR-V content" % name)
+    if len(data) >= 14:
+        kind, raw, compressed = struct.unpack_from("<III", data)
+        # Runtime recipe streams have no global magic. Identify the record
+        # envelope plus a valid zlib header, even if a file has been renamed.
+        zlib_header = int.from_bytes(data[12:14], "big")
+        if kind in (1, 2, 3, 4) and 0 < raw <= 16 * 1024 * 1024 and \
+                2 <= compressed <= len(data) - 12 and data[12] & 15 == 8 and zlib_header % 31 == 0:
+            problems.append("%s: local shader recipe stream" % name)
     if ext in TEXT_EXT and b"\0" not in data[:8192]:
         for m in KEYLIKE.finditer(data):
             line = data.count(b"\n", 0, m.start()) + 1

@@ -611,6 +611,66 @@ python3 tools/shaderprep.py build                                          # -> 
 picks up `game/shadercache/headstart.bin` automatically (`WWHD_HEADSTART=<file>|0` overrides it).
 See the comment at the top of `tools/shaderprep.py` for the file formats.
 
+### Vulkan shader head start on Windows and Linux
+
+Vulkan can record the shader states from your own sessions and use the same local
+`template` / `build` workflow. Use Python 3. The archive decoder builds a small local
+C helper with Clang/GCC (`CC` overrides the compiler command), or uses its Python
+fallback if no compatible compiler is available. Generated recordings, templates,
+head starts, SPIR-V and device caches contain game-derived data: keep them local and
+exclude them from uploads and release packages.
+
+Windows (PowerShell, from the repository root; adjust the executable path):
+
+```powershell
+$env:WWHD_RENDERER_RUNTIME = "vulkan"
+$env:WWHD_VK_RECIPE_RECORD = "$PWD\game\shadercache\vulkan-recorded.bin"
+.\build\cmake\wwhd.exe --game game
+# Play the scenes you want covered, then close the game normally.
+Remove-Item Env:WWHD_VK_RECIPE_RECORD
+py -3 tools/shaderprep.py template game/shadercache/vulkan-recorded.bin
+py -3 tools/shaderprep.py build --max 0
+.\build\cmake\wwhd.exe --game game --warm-shaders
+```
+
+Linux:
+
+```sh
+WWHD_RENDERER_RUNTIME=vulkan \
+WWHD_VK_RECIPE_RECORD="$PWD/game/shadercache/vulkan-recorded.bin" \
+  ./build/cmake/wwhd --game game
+# Play the scenes you want covered, then close the game normally.
+python3 tools/shaderprep.py template game/shadercache/vulkan-recorded.bin
+python3 tools/shaderprep.py build --max 0
+WWHD_RENDERER_RUNTIME=vulkan ./build/cmake/wwhd --game game --warm-shaders
+```
+
+The recording is opt-in and bounded to 128 MiB. It is written on orderly shutdown;
+forced termination can lose it. `template --merge game/shadercache/template.bin`
+retains states from an earlier local template. `--max 0` builds only known archive
+shaders; archive coverage can be smaller than the recording. `--warm-shaders`
+compiles the result in a separate process before gameplay. Vulkan currently uses
+this file for offline shader warming and background pipeline warming at startup.
+The recording includes exact local Vulkan pipeline recipes; `--no-pipelines`
+omits them if you want shaders alone. Compatible pipelines compile on a worker
+during the next startup/title screen. Missing pipelines also compile on a worker,
+but exact guest draws wait for them while the renderer may repeat the last complete
+picture. This preserves draw ordering and state; it still freezes visual response
+until the pipeline is ready. Presentation/overlay misses currently wait without
+repeat pumping. `WWHD_VK_ASYNC_PIPELINES=0` selects diagnostic synchronous creation. `--warm-shaders` also finishes compatible pipeline recipes
+and merges the worker's native cache before exiting. Metal pipeline records are
+skipped by Vulkan, and Vulkan pipeline records are skipped by Metal.
+
+`WWHD_HEADSTART=<file>` selects a different input (`0` disables it).
+`WWHD_VK_SHADER_CACHE=<directory>` selects the SPIR-V cache directory (`0` disables
+persistence), and `WWHD_VK_PIPELINE_CACHE=<file>` selects the device cache. Their
+defaults are under the host configuration directory's `shadercache` folder; see
+[Vulkan cache controls](docs/vulkan.md). Re-record/rebuild after incompatible
+translation changes; invalid SPIR-V/device caches are treated as misses. Do not
+pass Vulkan's `spirv.bin` to `shaderprep.py template`: it needs the GX2 recording.
+This workflow has been exercised on macOS/MoltenVK; Windows/Linux commands are
+provided for their respective shells but still require native-platform validation.
+
 ## Optional: decompilation tools
 
 `tools/decomp/` names WWHD functions by matching them against the

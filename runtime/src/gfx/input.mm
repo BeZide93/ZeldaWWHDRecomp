@@ -1,4 +1,9 @@
 #include "../mods/fast_forward.h"
+#ifdef WWHD_HAS_VULKAN
+#include "gfx/vulkan/stutter_trace.h"
+#include "gfx/vulkan/headstart.h"
+namespace gx2 { void checkpoint_vulkan_caches(); }
+#endif
 // Keyboard and GameController input, merged into one GamePad state.
 //
 // Which key or controller input drives which GamePad input is the controls mapping (input_map.h,
@@ -583,6 +588,10 @@ static void apply_scenario(PadState& s) {
     true60_test::tick(t, sc.end > 0 && t >= sc.end);  // test aids (true60_test.cpp)
     if (sc.end > 0 && t >= sc.end && !ended.exchange(true)) {
         LOG("[test] t=%.3f s: end", t);
+        #ifdef WWHD_HAS_VULKAN
+        gfxvk::stutter::trace().flush();
+        if (render::active() == render::Api::Vulkan) gx2::checkpoint_vulkan_caches();
+#endif
         if (FILE* f = fopen("test_done", "w")) fclose(f);
     }
     // Opt-in raw controller fixture: exercise bindings and the dead zone before guest delivery.

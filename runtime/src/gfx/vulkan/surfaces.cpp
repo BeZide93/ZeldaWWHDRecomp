@@ -4,6 +4,7 @@
 #include "mods/cemu_pack.h"
 // Guest surfaces backed by Vulkan images. LatteAddrLib supplies guest tiling geometry.
 #include "backend.h"
+#include "pipeline_trace.h"
 #include "buffer_cache.h"
 #include "render_prof.h"
 #include "settings.h"
@@ -844,7 +845,10 @@ VkPipeline depth_copy_pipeline(const FormatInfo& fmt,bool stencilPass) {
         VkGraphicsPipelineCreateInfo ci{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};ci.pNext=&rendering;ci.stageCount=2;ci.pStages=stages;
         ci.pVertexInputState=&vi;ci.pInputAssemblyState=&ia;ci.pViewportState=&vp;ci.pRasterizationState=&rs;ci.pMultisampleState=&ms;
         ci.pDepthStencilState=&dss;ci.pColorBlendState=&bs;ci.pDynamicState=&ds;ci.layout=depthCopy.layout;
-        check_vk(vkCreateGraphicsPipelines(R.device,R.pipelineCache,1,&ci,nullptr,&result),"create depth copy pipeline");
+        check_vk(stutter::create_graphics(R.frame, "surface_pipeline", R.device,R.pipelineCache,1,&ci,nullptr,&result, [] {
+            begin_pipeline_pending_frame();
+            present_completed_frame_while_pipeline_pending();
+        }),"create depth copy pipeline");
         depthCopy.pipelines.emplace(key,result);++R.pipelineCreates;R.pipelineCacheDirty=true;R.pipelineCacheChangedFrame=R.frame;
     } catch(...) {
         if(result)vkDestroyPipeline(R.device,result,nullptr);

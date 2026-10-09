@@ -1,5 +1,7 @@
 // Real Latte microcode -> Cemu GLSL -> SPIR-V for the Vulkan backend.
 #include "shaders.h"
+#include "headstart.h"
+#include "stutter_trace.h"
 #include "mods/cemu_pack.h"
 #include "mods/shader_interface.h"
 #include "graphic_pack_hash.h"
@@ -818,7 +820,11 @@ Shader* translate(const uint32_t* regs, bool vertex, LatteFetchShader* fetch, ui
     Shader* shader = owned.get();
     shader->vertex = vertex;
     shader->kind = gfx::program_kind(ppc_ptr(address), size, vertex);
-    if (!decompile(*shader, regs, vertex, fetch, address, size, base, true, link)) {
+    const auto decompileStart = stutter::trace().enabled() ? stutter::now() : 0;
+    const bool decompiled = decompile(*shader, regs, vertex, fetch, address, size, base, true, link);
+    if (decompileStart) stutter::trace().add("shader_translation", frame, linkage,
+        decompileStart, stutter::now(), decompiled ? 0 : -1);
+    if (!decompiled) {
         // Failures are per linkage: the variant words need the program's analysis.
         shader->key = shader->pipelineId = linkage ^ 0xFA17EDull;
         use.failed = shader;
@@ -827,6 +833,7 @@ Shader* translate(const uint32_t* regs, bool vertex, LatteFetchShader* fetch, ui
         return remember(shader);
     }
     record_shader_variant(regs, vertex, base, fsKey, shader->dec);
+    record_headstart_shader(regs, vertex);
     if (!use.known) {
         const auto& dec = *shader->dec;
         use.unitCount = uint8_t(std::clamp(int(dec.textureUnitListCount), 0, int(LATTE_NUM_MAX_TEX_UNITS)));
@@ -881,6 +888,9 @@ Shader* translate(const uint32_t* regs, bool vertex, LatteFetchShader* fetch, ui
     } else {
         auto compileStart=std::chrono::steady_clock::now();
         shader->spirv = compile_glsl(shader->glsl, vertex, &shader->error);
+        if (stutter::trace().enabled()) stutter::trace().add("spirv_compile", frame, key,
+            std::chrono::duration_cast<std::chrono::nanoseconds>(compileStart.time_since_epoch()).count(),
+            stutter::now(), shader->spirv.empty() ? -1 : 0);
         ++stats.spirvCompiles;
         stats.spirvCompileNs+=std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::steady_clock::now()-compileStart).count();
@@ -996,6 +1006,7 @@ bool finish_disk_save(bool wait) {
 bool shader_cache_dirty() { return diskDirty; }
 uint64_t shader_cache_changed_frame() { return diskChangedFrame; }
 bool save_shader_cache() {
+    save_headstart_recording();
     // Explicit tools/shutdown contract is synchronous: join the old immutable
     // snapshot, then save any revisions compiled while that job was running.
     bool saved=finish_disk_save(true);

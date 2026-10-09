@@ -20,14 +20,27 @@ class BenchmarkTests(unittest.TestCase):
                 self.assertEqual(run.call_count, 1)
                 self.assertEqual(run.call_args.args[1], 'warmup')
 
+    def test_combined_quiet_gate_keeps_upstream_exclusivity_checks(self):
+        args = types.SimpleNamespace(max_load_per_core=None, quiet_seconds=0, wait_for_others=True)
+        with patch.object(bench, 'quiet_reasons', side_effect=[['another build'], []]) as reasons, \
+             patch.object(bench, 'other_games', return_value=[]), \
+             patch.object(bench, 'load1', return_value=5), patch.object(bench.time, 'sleep') as sleep:
+            bench.wait_for_quiet(args)
+        self.assertEqual(reasons.call_count, 2)
+        sleep.assert_called_once_with(5)
+
     def run_fake(self, root, complete, phase=None, profile=True):
         (root / 'source').mkdir()
+        (root / 'base').touch()
+        (root / 'new').touch()
         args = types.SimpleNamespace(binary=str(root / 'base'), variant_binaries={'new': str(root / 'new')},
             save=str(root / 'source'), game='/unused/game', state_dir='/unused/states', scene='still', slot=1,
             load_frame=450, origin=650, cache_dir=None, press_from=120, press_every=30, renderer='metal',
             fps='30', visible=False, display_hz=0, uncapped=False, gate=None, wait_for_others=True,
             watch_others=True, max_load=12, seconds=60, timeout=100, skip_windows=0,
-            quiet_load_max=None, exclusive_bench=False, exclusive_work=False, min_free_gb=0)
+            quiet_load_max=None, exclusive_bench=False, exclusive_work=False, min_free_gb=0,
+            max_load_per_core=None, max_run_load_per_core=None, quiet_seconds=0,
+            cold_caches=False, stutter_trace=False, keep_disturbed=False)
         launched = []
 
         class Process:
@@ -214,7 +227,8 @@ class BenchmarkStatistics(unittest.TestCase):
                         'windows': 3, 'load_before': 11, 'load_after': 13 if disturbed else 11,
                         'summary': {'frame_ms': 6, 'logic_cpu_ms': 4}}
 
-            argv = ['run_bench.py', '--binary', 'fixture', '--state-dir', str(root),
+            (root / 'fixture').touch()
+            argv = ['run_bench.py', '--binary', str(root / 'fixture'), '--state-dir', str(root),
                     '--scene', 'still', '--variant', 'a:', '--variant', 'b:', '--runs', '15',
                     '--warmup', '--retry-disturbed', '--out', str(root / 'out')]
             with mock.patch.object(sys, 'argv', argv), mock.patch('run_bench.run_once', side_effect=sample), contextlib.redirect_stdout(io.StringIO()):

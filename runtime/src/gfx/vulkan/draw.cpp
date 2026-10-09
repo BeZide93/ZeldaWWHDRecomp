@@ -12,6 +12,10 @@
 #include "render_prof.h"
 #include "runtime.h"
 #include "shaders.h"
+#include "stutter_trace.h"
+#include "pipeline_state.h"
+#include "pipeline_worker.h"
+#include "pipeline_demand.h"
 #include "settings.h"
 #include "vertex_formats.h"
 #include "uniform_snapshot.h"
@@ -535,6 +539,7 @@ struct PipelineKeyHash {
   }
 };
 static_assert(sizeof(PipelineKey) % 8 == 0);
+static_assert(sizeof(PipelineKey) == 208, "update the persisted pipeline recipe schema");
 std::unordered_map<PipelineKey, Pipeline, PipelineKeyHash> pipelines;
 PipelineKey pipeline_key(const uint32_t* r, const vk::Shader* vs, const vk::Shader* ps,
                          const LatteFetchShader* fs, VkPrimitiveTopology topology,
@@ -668,9 +673,10 @@ Pipeline &pipeline(const uint32_t *r, vk::Shader *vs, vk::Shader *ps,
   const auto uniformType = p.dynamicUniforms
       ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC
       : VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+  std::array<std::vector<VkDescriptorSetLayoutBinding>, 2> descriptorBindings;
   for (int st = 0; st < 2; st++) {
     auto &m = shaders[st]->mapping;
-    std::vector<VkDescriptorSetLayoutBinding> b;
+    auto& b = descriptorBindings[st];
     auto add = [&](int i, VkDescriptorType t) {
       if (i >= 0)
         b.push_back(
@@ -686,6 +692,22 @@ Pipeline &pipeline(const uint32_t *r, vk::Shader *vs, vk::Shader *ps,
           VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
     if (m.tfStorageBindingPoint >= 0)
       exception_report::raise("Vulkan transform feedback unsupported");
+  }
+  const auto* keyBytes = reinterpret_cast<const uint8_t*>(&key);
+  std::vector<uint8_t> recipeKey(keyBytes, keyBytes + sizeof key);
+  std::array<std::vector<uint32_t>, 2> recipeSpirv{vs->spirv, ps->spirv};
+  WarmPipeline warmed;
+  if (take_warm_pipeline(recipeKey, recipeSpirv, descriptorBindings, p.dynamicUniforms, warmed)) {
+    p.pipeline = warmed.pipeline; p.layout = warmed.layout;
+    std::copy(std::begin(warmed.sets), std::end(warmed.sets), p.sets);
+    if (stutter::trace().enabled()) {
+      const auto now = stutter::now();
+      stutter::trace().add("startup_pipeline_hit", R.frame, PipelineKeyHash{}(key), now, now, 0);
+    }
+    return remember(pipelines.emplace(key, std::move(p)).first->second);
+  }
+  for (int st = 0; st < 2; st++) {
+    auto& b = descriptorBindings[st];
     VkDescriptorSetLayoutCreateInfo ci{
         VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
     ci.bindingCount = b.size();
@@ -968,11 +990,26 @@ Pipeline &pipeline(const uint32_t *r, vk::Shader *vs, vk::Shader *ps,
   ci.pColorBlendState = &bs;
   ci.pDynamicState = &dy;
   ci.layout = p.layout;
+  GraphicsPipelineState pipelineState(ci);
   const auto pipelineStarted = std::chrono::steady_clock::now();
-  auto result = vkCreateGraphicsPipelines(R.device, R.pipelineCache, 1, &ci,
-                                          nullptr, &p.pipeline);
-  R.pipelineCreateNs += std::chrono::duration_cast<std::chrono::nanoseconds>(
-      std::chrono::steady_clock::now()-pipelineStarted).count();
+  VkResult result;
+  uint64_t compileNs = 0;
+  if (async_pipeline_enabled()) {
+    begin_pipeline_pending_frame();
+    auto built = build_pipeline_async(pipelineState, R.frame, PipelineKeyHash{}(key),
+        "guest_pipeline", present_completed_frame_while_pipeline_pending);
+    result = built.result; p.pipeline = built.pipeline; compileNs = built.compileNs;
+  } else {
+    result = vkCreateGraphicsPipelines(R.device, R.pipelineCache, 1, pipelineState.get(),
+        nullptr, &p.pipeline);
+  }
+  const bool recordRecipe = result == VK_SUCCESS;
+  if (!async_pipeline_enabled() && stutter::trace().enabled())
+    stutter::trace().add("guest_pipeline", R.frame, PipelineKeyHash{}(key),
+        std::chrono::duration_cast<std::chrono::nanoseconds>(pipelineStarted.time_since_epoch()).count(),
+        stutter::now(), int(result));
+  R.pipelineCreateNs += async_pipeline_enabled() ? compileNs :
+      std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now()-pipelineStarted).count();
   ++R.pipelineCreates;
   for (auto m : modules)
     vkDestroyShaderModule(R.device, m, nullptr);
@@ -983,8 +1020,9 @@ Pipeline &pipeline(const uint32_t *r, vk::Shader *vs, vk::Shader *ps,
     // stays empty, its draws are skipped, and the two shaders go to captures/
     // (GLSL and SPIR-V) to look at.
     p.pipeline = VK_NULL_HANDLE;
-    LOG("[vulkan] graphics pipeline failed (Vulkan result %d): vs %016llX ps %016llX; its draws are skipped",
-        int(result), (unsigned long long)vs->key, (unsigned long long)ps->key);
+    LOG("[vulkan] graphics pipeline failed (Vulkan result %d): vs %016llX ps %016llX; %s",
+        int(result), (unsigned long long)vs->key, (unsigned long long)ps->key,
+        async_pipeline_enabled() ? "cannot produce a complete frame" : "its draws are skipped (legacy synchronous mode)");
     std::error_code captureDirError;  // this path must not throw: it replaces a crash
     std::filesystem::create_directories("captures", captureDirError);
     for (auto *shader : shaders) {
@@ -1000,9 +1038,18 @@ Pipeline &pipeline(const uint32_t *r, vk::Shader *vs, vk::Shader *ps,
         fclose(f);
       }
     }
+    if (async_pipeline_enabled()) vk_check(result, "graphics pipeline failed; cannot present an incomplete guest frame");
     return remember(pipelines.emplace(key, p).first->second);
   }
   vk_check(result, "graphics pipeline");
+  if (recordRecipe) {
+    auto recipe = std::make_shared<PipelineRecipe>();
+    recipe->key = std::move(recipeKey); recipe->spirv = std::move(recipeSpirv);
+    recipe->descriptors = std::move(descriptorBindings);
+    recipe->dynamicUniforms = p.dynamicUniforms;
+    recipe->state = std::make_unique<GraphicsPipelineState>(std::move(pipelineState));
+    remember_pipeline_recipe(std::move(recipe));
+  }
   R.pipelineCacheDirty = true;
   R.pipelineCacheChangedFrame = R.frame;
   return remember(pipelines.emplace(key, p).first->second);

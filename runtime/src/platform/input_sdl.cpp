@@ -1,4 +1,9 @@
 #include "../mods/fast_forward.h"
+#ifdef WWHD_HAS_VULKAN
+#include "gfx/vulkan/stutter_trace.h"
+#include "gfx/vulkan/headstart.h"
+namespace gx2 { void checkpoint_vulkan_caches(); }
+#endif
 // SDL3 keyboard/gamepad input. Stable key IDs preserve existing controls.json mappings.
 #include "input_sdl.h"
 #include "overlay_trace_sdl.h"
@@ -13,6 +18,7 @@
 #include "../savestate.h"
 #include "../true60.h"
 #include "../screenshot.h"
+#include "../gfx/renderer.h"
 #include "../gfx/vulkan/settings.h"
 #include "../overlay/hostui.h"
 #include "../overlay/overlay.h"
@@ -741,6 +747,10 @@ static void apply_scenario(PadState& s) {
     }
     if (sc.end > 0 && t >= sc.end && !ended.exchange(true)) {
         LOG("[test] t=%.3f s: end", t);
+        #ifdef WWHD_HAS_VULKAN
+        gfxvk::stutter::trace().flush();
+        if (render::active() == render::Api::Vulkan) gx2::checkpoint_vulkan_caches();
+#endif
         if (FILE* f = fopen("test_done", "w")) fclose(f);
     }
     true60_test::tick(t, sc.end > 0 && t >= sc.end);

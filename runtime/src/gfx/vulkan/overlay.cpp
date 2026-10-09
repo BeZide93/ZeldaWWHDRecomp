@@ -4,6 +4,7 @@
 // for every target format (swap images in any encoding, offscreen present dumps).
 #include "../../exception_report.h"
 #include "backend.h"
+#include "pipeline_trace.h"
 #include "present.h"
 #include "shaders.h"
 #include "imgui.h"
@@ -170,7 +171,7 @@ VkPipeline pipeline(VkFormat format,bool additive=false) {
         ci.pColorBlendState = &bs;
         ci.pDynamicState = &ds;
         ci.layout = res.layout;
-        vk_check(vkCreateGraphicsPipelines(R.device, R.pipelineCache, 1, &ci, nullptr, &result), "overlay pipeline");
+        vk_check(stutter::create_graphics(R.frame, "overlay_pipeline", R.device, R.pipelineCache, 1, &ci, nullptr, &result), "overlay pipeline");
     } catch (...) {
         vkDestroyShaderModule(R.device, vs, nullptr);
         if (fs) vkDestroyShaderModule(R.device, fs, nullptr);
