@@ -35,6 +35,7 @@ def summarize(path, worst=20, frame_from=None, frame_to=None):
     pipelines = [e for e in events if e["kind"].endswith("_pipeline") or e["kind"].endswith("_pipeline_retry")]
     requests = [e for e in events if e["kind"] == "pipeline_request"]
     pending = [e for e in events if e["kind"] == "pipeline_pending"]
+    shader_pending = [e for e in events if e["kind"] == "shader_pending"]
     repeats = [e for e in events if e["kind"] == "repeated_frame"]
     repeat_ages = [e["duration_ms"] for e in events if e["kind"] == "repeated_frame_age"]
     render_threads = {e["thread"] for e in frames}
@@ -51,6 +52,7 @@ def summarize(path, worst=20, frame_from=None, frame_to=None):
                         frame["start_ns"] <= e["start_ns"] < frame["end_ns"]]
         slowest.append(dict(frame=frame["frame"], duration_ms=frame["duration_ms"],
                             pipeline_compilations=compilations,
+                            shader_pending=[e for e in shader_pending if frame["start_ns"] <= e["start_ns"] < frame["end_ns"]],
                             pipeline_pending=[e for e in pending if frame["start_ns"] <= e["start_ns"] < frame["end_ns"]],
                             repeated_presentations=sum(frame["start_ns"] <= e["start_ns"] < frame["end_ns"] for e in repeats),
                             shader_events=[e for e in shader_events if
@@ -68,6 +70,13 @@ def summarize(path, worst=20, frame_from=None, frame_to=None):
                 pending_execution=dict(count=len(pending),
                                        total_ms=sum(e["duration_ms"] for e in pending),
                                        max_ms=max((e["duration_ms"] for e in pending), default=0)),
+                shader_requests=sum(e["kind"] == "shader_request" for e in events),
+                max_shader_queue_depth=max((e["result"] for e in events if e["kind"] == "shader_request"), default=0),
+                shader_pending_execution=dict(count=len(shader_pending),
+                    total_ms=sum(e["duration_ms"] for e in shader_pending),
+                    max_ms=max((e["duration_ms"] for e in shader_pending), default=0)),
+                render_thread_spirv_compiles=sum(e["kind"] == "spirv_compile" and e["thread"] in render_threads for e in shader_events),
+                other_thread_spirv_compiles=sum(e["kind"] == "spirv_compile" and e["thread"] not in render_threads for e in shader_events),
                 repeated_presentations=len(repeats),
                 max_repeated_picture_age_ms=max(repeat_ages, default=0),
                 render_thread_pipeline_creation_calls=sum(e["thread"] in render_threads for e in pipelines),

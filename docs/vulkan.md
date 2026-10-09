@@ -190,9 +190,13 @@ or a scripted test endpoint. Build known shaders and pipelines with `--max 0`, t
 run `--warm-shaders` to populate the Vulkan SPIR-V/device caches before playing.
 `--no-pipelines` builds shaders alone. The startup worker also reads compatible
 pipeline records directly from the head start while the title screen runs.
-Metal pipeline records are skipped explicitly. Shader translation and on-demand
-SPIR-V compilation still have render-thread costs; head-start coverage depends on
-the locally recorded scene states. The README contains
+Metal pipeline records are skipped explicitly. On-demand GLSL-to-SPIR-V compilation
+uses a CPU-only worker with owned source strings and bounded input size/queue.
+`WWHD_VK_ASYNC_SHADERS=0` selects diagnostic inline compilation. Guest shader
+misses retain their exact draw and can repeat completed scans while waiting;
+Latte decompilation and cache metadata still have render-thread costs. Speculative
+startup pipelines yield between jobs while demand shader/pipeline work is active.
+Head-start coverage depends on the locally recorded scene states. The README contains
 [Windows/Linux commands](../README.md#vulkan-shader-head-start-on-windows-and-linux).
 
 Vulkan also persists compiled SPIR-V in the host configuration directory's

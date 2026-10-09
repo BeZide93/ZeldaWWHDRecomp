@@ -25,12 +25,19 @@ class StutterSummaryTest(unittest.TestCase):
             ('repeated_frame', 10, '0', 150000000, 160000000, 1, 0),
             ('repeated_frame_age', 10, '0', 100000000, 160000000, 1, 0),
             ('startup_pipeline_hit', 10, 'def', 195000000, 195000000, 1, 0),
+            ('shader_request', 10, 'a', 110000000, 110000000, 1, 1),
+            ('shader_pending', 10, 'a', 110000000, 115000000, 1, 0),
+            ('spirv_compile', 10, 'a', 111000000, 114000000, 3, 0),
         ])
         self.assertEqual(result['max_ms'], 100)
         self.assertEqual(result['pipeline_creation_calls'], 1)
         self.assertEqual(result['render_thread_pipeline_creation_calls'], 0)
         self.assertEqual(result['other_thread_pipeline_creation_calls'], 1)
         self.assertEqual(result['demand_requests'], 1)
+        self.assertEqual(result['shader_requests'], 1)
+        self.assertEqual(result['shader_pending_execution']['total_ms'], 5)
+        self.assertEqual(result['render_thread_spirv_compiles'], 0)
+        self.assertEqual(result['other_thread_spirv_compiles'], 1)
         self.assertEqual(result['startup_pipeline_hits'], 1)
         self.assertEqual(result['pending_execution']['total_ms'], 80)
         self.assertEqual(result['repeated_presentations'], 1)

@@ -657,7 +657,11 @@ during the next startup/title screen. Missing pipelines also compile on a worker
 but exact guest draws wait for them while the renderer may repeat the last complete
 picture. This preserves draw ordering and state; it still freezes visual response
 until the pipeline is ready. Presentation/overlay misses currently wait without
-repeat pumping. `WWHD_VK_ASYNC_PIPELINES=0` selects diagnostic synchronous creation. `--warm-shaders` also finishes compatible pipeline recipes
+repeat pumping. SPIR-V compilation also runs on a worker by default; exact
+shader misses may repeat the completed picture while waiting. Latte decompilation
+and shader metadata still run on the render thread. These worker paths preserve
+ordering but do not remove the frozen-image delay. `WWHD_VK_ASYNC_PIPELINES=0`
+and `WWHD_VK_ASYNC_SHADERS=0` select diagnostic synchronous creation/compilation. `--warm-shaders` also finishes compatible pipeline recipes
 and merges the worker's native cache before exiting. Metal pipeline records are
 skipped by Vulkan, and Vulkan pipeline records are skipped by Metal.
 

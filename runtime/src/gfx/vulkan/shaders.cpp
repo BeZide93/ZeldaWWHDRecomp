@@ -1,5 +1,7 @@
 // Real Latte microcode -> Cemu GLSL -> SPIR-V for the Vulkan backend.
 #include "shaders.h"
+#include "shader_compiler.h"
+#include "backend.h"
 #include "headstart.h"
 #include "stutter_trace.h"
 #include "mods/cemu_pack.h"
@@ -17,9 +19,6 @@
 #include "gx2/gx2_regs.h"
 #include "ppc.h"
 #include "util/helpers/StringBuf.h"
-#include <glslang/Public/ShaderLang.h>
-#include <glslang/Public/ResourceLimits.h>
-#include <glslang/SPIRV/GlslangToSpv.h>
 #include <memory>
 #include <filesystem>
 #include <glslang/build_info.h>
@@ -642,38 +641,16 @@ void verify_key(const uint32_t* regs, bool vertex, LatteFetchShader* fetch, uint
 
 void select_renderer() { g_renderer = std::make_unique<VulkanRenderer>(); }
 
-static std::vector<uint32_t> compile_stage(const std::string& source, EShLanguage stage, std::string* error) {
-    static std::once_flag init;
-    static bool initialized = false;
-    std::call_once(init, [] { initialized = glslang::InitializeProcess(); });
-    if (error) error->clear();
-    auto fail = [&](const std::string& reason) { if (error) *error = reason; return std::vector<uint32_t>{}; };
-    if (!initialized) return fail("glslang initialization failed");
-    glslang::TShader shader(stage);
-    const char* text = source.c_str();
-    shader.setStrings(&text, 1);
-    shader.setEnvInput(glslang::EShSourceGlsl, stage, glslang::EShClientVulkan, 100);
-    shader.setEnvClient(glslang::EShClientVulkan, glslang::EShTargetVulkan_1_1);
-    shader.setEnvTarget(glslang::EShTargetSpv, glslang::EShTargetSpv_1_3);
-    EShMessages messages = static_cast<EShMessages>(EShMsgSpvRules | EShMsgVulkanRules);
-    if (!shader.parse(GetDefaultResources(), 450, false, messages))
-        return fail(std::string(shader.getInfoLog()) + shader.getInfoDebugLog());
-    glslang::TProgram program;
-    program.addShader(&shader);
-    if (!program.link(messages)) return fail(program.getInfoLog());
-    std::vector<uint32_t> words;
-    glslang::SpvOptions options;
-    options.disableOptimizer = true; // no SPIRV-Tools runtime dependency
-    glslang::GlslangToSpv(*program.getIntermediate(stage), words, &options);
-    if (words.empty()) return fail("glslang emitted empty SPIR-V");
-    return words;
-}
-
 std::vector<uint32_t> compile_glsl(const std::string& source, bool vertex, std::string* error) {
-    return compile_stage(source, vertex ? EShLangVertex : EShLangFragment, error);
+    auto result = compile_shader(source, vertex ? ShaderStage::Vertex : ShaderStage::Fragment,
+                                 ~uint64_t{0}, 0, {}, async_shaders_enabled());
+    if (error) *error = std::move(result.error);
+    return std::move(result.words);
 }
 std::vector<uint32_t> compile_compute(const std::string& source, std::string* error) {
-    return compile_stage(source, EShLangCompute, error);
+    auto result = compile_shader(source, ShaderStage::Compute, ~uint64_t{0}, 0, {}, async_shaders_enabled());
+    if (error) *error = std::move(result.error);
+    return std::move(result.words);
 }
 
 DescriptorRankPlan make_descriptor_rank_plan(const LatteDecompilerShaderResourceMapping& mapping,
@@ -886,14 +863,18 @@ Shader* translate(const uint32_t* regs, bool vertex, LatteFetchShader* fetch, ui
         if(cached->second.fromDisk) ++stats.diskHits;
         else ++stats.spirvReuseHits;
     } else {
-        auto compileStart=std::chrono::steady_clock::now();
-        shader->spirv = compile_glsl(shader->glsl, vertex, &shader->error);
-        if (stutter::trace().enabled()) stutter::trace().add("spirv_compile", frame, key,
-            std::chrono::duration_cast<std::chrono::nanoseconds>(compileStart.time_since_epoch()).count(),
-            stutter::now(), shader->spirv.empty() ? -1 : 0);
+        // The exact draw remains ordered while only owned GLSL enters the
+        // compiler. Offline warming has no published frame to service.
+        auto compiled = compile_shader(shader->glsl,
+            vertex ? ShaderStage::Vertex : ShaderStage::Fragment, frame, key,
+            frame == ~uint64_t{0} ? std::function<void()>{} : std::function<void()>{[] {
+                begin_pipeline_pending_frame();
+                present_completed_frame_while_pipeline_pending();
+            }}, async_shaders_enabled());
+        shader->spirv = std::move(compiled.words);
+        shader->error = std::move(compiled.error);
         ++stats.spirvCompiles;
-        stats.spirvCompileNs+=std::chrono::duration_cast<std::chrono::nanoseconds>(
-            std::chrono::steady_clock::now()-compileStart).count();
+        stats.spirvCompileNs += compiled.compileNs;
         if(shader->glsl.size()<=maxSourceBytes &&
            cache_spirv_valid(shader->spirv) && diskShaders.size()<maxCacheEntries) {
             size_t oldBytes=cached==diskShaders.end() ? 0 :
@@ -1006,6 +987,7 @@ bool finish_disk_save(bool wait) {
 bool shader_cache_dirty() { return diskDirty; }
 uint64_t shader_cache_changed_frame() { return diskChangedFrame; }
 bool save_shader_cache() {
+    finish_shader_compiler();
     save_headstart_recording();
     // Explicit tools/shutdown contract is synchronous: join the old immutable
     // snapshot, then save any revisions compiled while that job was running.
@@ -1104,6 +1086,7 @@ void reset_shader_memoization() {
 }
 
 void clear_shader_cache() {
+    finish_shader_compiler();
     for (auto& [key, shader] : shaders) free_decompiler(shader->dec);
     shaders.clear();
     variants.clear();

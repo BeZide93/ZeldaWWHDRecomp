@@ -1,6 +1,7 @@
 #include "pipeline_worker.h"
 #include "headstart.h"
 #include "pipeline_demand.h"
+#include "shader_compiler.h"
 #include "platform/host.h"
 #include "stutter_trace.h"
 #include <algorithm>
@@ -188,7 +189,7 @@ void run(Worker& w, std::vector<uint8_t> seed) {
     for (auto& recipe : loaded) {
       // Demand has its own single compiler; stop issuing speculative work
       // while it is busy. A driver call already in flight cannot be cancelled.
-      while (pipeline_demand_active()) {
+      while (pipeline_demand_active() || vk::shader_compiler_active()) {
         { std::lock_guard lock(w.mutex); if (w.stopped) break; }
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
       }
@@ -231,6 +232,7 @@ void start_pipeline_worker(VkDevice device, PipelineRecipeFingerprint fingerprin
   // Construct the trace first so it outlives a worker still finishing during
   // static destruction after an exceptional shutdown.
   (void)stutter::trace();
+  (void)vk::shader_compiler_active(); // Demand state must outlive startup-worker shutdown.
   auto& w = worker();
   if (w.device || path.empty()) return;
   w.device = device; w.fingerprint = fingerprint; w.path = std::move(path);
