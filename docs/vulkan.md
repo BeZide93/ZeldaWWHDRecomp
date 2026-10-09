@@ -79,6 +79,15 @@ With `tools/bench/run_bench.py`, use `--origin-load-steps n` to align both input
 interpolation mode switch to that restored clock; an absolute startup mode switch can change
 random-seed evolution when a load completes one step later.
 
+Trace CSVs include optional `cpu_ns` samples for shader and pipeline compiler calls
+and the startup worker's lifetime. `-1` means unavailable. CPU time is measured on
+the calling thread only and excludes driver/helper threads. The summary separates
+CPU samples from elapsed time and reports sample coverage. Startup lifetime includes
+recipe loading, waits and cleanup, overlaps individual compilation samples, and is
+not an additional CPU cost to sum with them. Its completion records published-ready
+and failure counts; cancellation counts remain in the runtime log. Queue completion
+does not prove that every pipeline for a later scene is ready.
+
 ## Separate cold and warm benchmark caches
 
 For cross-build comparisons, pass `--variant-caches` to `tools/bench/run_bench.py`

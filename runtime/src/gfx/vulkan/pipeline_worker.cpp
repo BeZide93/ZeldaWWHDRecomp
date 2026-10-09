@@ -4,6 +4,7 @@
 #include "shader_compiler.h"
 #include "platform/host.h"
 #include "stutter_trace.h"
+#include "worker_metrics.h"
 #include <algorithm>
 #include <cstdio>
 #include <filesystem>
@@ -95,10 +96,11 @@ VkResult compile(VkDevice device, VkPipelineCache cache, PipelineRecipe& recipe,
       stages[i].pName = "main"; stages[i].module = modules[i];
     }
     info.pStages = stages; info.layout = out.layout;
+    const auto cpuStart = stutter::trace().enabled() ? stutter::thread_cpu_now() : 0;
     const auto started = stutter::trace().enabled() ? stutter::now() : 0;
     result = vkCreateGraphicsPipelines(device, cache, 1, &info, nullptr, &out.pipeline);
     if (started) stutter::trace().add("startup_pipeline", 0, std::hash<std::string>{}(identity(recipe.key)),
-        started, stutter::now(), int(result));
+        started, stutter::now(), int(result), stutter::cpu_elapsed(cpuStart));
   }
   cleanup();
   if (result != VK_SUCCESS) destroy(device, out);
@@ -160,6 +162,15 @@ void run(Worker& w, std::vector<uint8_t> seed) {
   host::set_thread_name("Vulkan warmup");
   VkPipelineCache cache = VK_NULL_HANDLE;
   size_t completed = 0, failed = 0, cancelled = 0;
+  struct WarmupMetrics {
+    size_t &completed, &failed;
+    uint64_t started = stutter::trace().enabled() ? stutter::now() : 0;
+    uint64_t cpu = started ? stutter::thread_cpu_now() : 0;
+    ~WarmupMetrics() {
+      if (started) stutter::trace().add("startup_warmup", 0, completed, started,
+          stutter::now(), int(failed), stutter::cpu_elapsed(cpu));
+    }
+  } metrics{completed, failed};
   try {
     std::vector<std::shared_ptr<PipelineRecipe>> loaded;
     std::unordered_set<std::string> seen;
@@ -212,6 +223,7 @@ void run(Worker& w, std::vector<uint8_t> seed) {
     }
     std::fprintf(stderr, "[vulkan warmup] %zu ready, %zu failed, %zu cancelled\n", completed, failed, cancelled);
   } catch (const std::exception& error) {
+    ++failed;
     std::fprintf(stderr, "[vulkan warmup] skipped: %s\n", error.what());
   }
   w.cache = cache;

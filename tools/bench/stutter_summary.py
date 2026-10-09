@@ -19,6 +19,7 @@ def summarize(path, worst=20, frame_from=None, frame_to=None):
             event[key] = int(event[key])
         if event["end_ns"] < event["start_ns"]:
             raise ValueError("negative event duration")
+        event["cpu_ns"] = int(event.get("cpu_ns", -1))
         event["duration_ms"] = (event["end_ns"] - event["start_ns"]) / 1e6
     frames = [e for e in events if e["kind"] == "frame"]
     if frame_from is not None or frame_to is not None:
@@ -41,6 +42,19 @@ def summarize(path, worst=20, frame_from=None, frame_to=None):
     render_threads = {e["thread"] for e in frames}
     shader_events = [e for e in events if e["kind"] in ("shader_translation", "spirv_compile")]
     intervals = sorted(e["duration_ms"] for e in frames)
+    compile_events = pipelines + [e for e in events if e["kind"] in ("spirv_compile", "utility_spirv_compile")]
+    cpu_by_kind = {}
+    for kind in sorted({e["kind"] for e in compile_events}):
+        matching = [e for e in compile_events if e["kind"] == kind]
+        sampled = [e for e in matching if e["cpu_ns"] >= 0]
+        cpu_by_kind[kind] = dict(sampled_calls=len(sampled), unavailable_calls=len(matching)-len(sampled),
+                                calling_thread_cpu_ms=sum(e["cpu_ns"] for e in sampled) / 1e6)
+    startup = [dict(elapsed_ms=e["duration_ms"],
+                    calling_thread_cpu_ms=e["cpu_ns"] / 1e6 if e["cpu_ns"] >= 0 else None,
+                    published_ready=int(e["key"], 16), failures=e["result"],
+                    start_ns=e["start_ns"], end_ns=e["end_ns"])
+               for e in events if e["kind"] == "startup_warmup"]
+
 
     def percentile(p):
         return intervals[max(0, math.ceil(len(intervals) * p) - 1)] if intervals else None
@@ -63,6 +77,8 @@ def summarize(path, worst=20, frame_from=None, frame_to=None):
                 frame_count=len(frames), median_ms=percentile(.5), p95_ms=percentile(.95),
                 p99_ms=percentile(.99), max_ms=percentile(1),
                 frames_over_ms={str(t): sum(v > t for v in intervals) for t in (16.67, 33.33, 50, 100)},
+                compilation_cpu_by_kind=cpu_by_kind,
+                startup_warmup=startup,
                 pipeline_creation_calls=len(pipelines),
                 startup_pipeline_hits=sum(e["kind"] == "startup_pipeline_hit" for e in events),
                 demand_requests=len(requests),
@@ -90,7 +106,9 @@ def summarize(path, worst=20, frame_from=None, frame_to=None):
                                          total_ms=sum(e["duration_ms"] for e in shader_events if e["kind"] == kind))
                               for kind in ("shader_translation", "spirv_compile")},
                 worst_frames=slowest,
-                limitations=["Utility pipeline keys are not recorded; guest keys are diagnostic hashes.",
+                limitations=["CPU samples measure only the calling thread, excluding driver/helper threads; unavailable samples are not zero cost. Startup worker lifetime includes reading, waiting and cleanup and overlaps compilation samples.",
+                             "Warmup completion means the finite queue finished/cancelled, not that all scene pipelines are available; check published-ready and failure counts and runtime cancellation logs.",
+                             "Utility pipeline keys are not recorded; guest keys are diagnostic hashes.",
                              "Guest frame intervals retain the full pause; repeats do not turn them into new guest frames.",
                              "Pending execution and picture age are software delay measures, not physical input-to-photon latency.",
                              "First interval omitted; frame IDs can reset on state restore.",

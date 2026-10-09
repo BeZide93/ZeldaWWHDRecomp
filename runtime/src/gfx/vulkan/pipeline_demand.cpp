@@ -1,5 +1,6 @@
 #include "pipeline_demand.h"
 #include "stutter_trace.h"
+#include "worker_metrics.h"
 #include "platform/host.h"
 #include <atomic>
 #include <condition_variable>
@@ -59,13 +60,14 @@ void run(Compiler& c) {
     }
     try {
       PipelineBuildResult result;
+      const auto cpuStart = stutter::trace().enabled() ? stutter::thread_cpu_now() : 0;
       const auto started = stutter::now();
       result.result = cacheResult == VK_SUCCESS
           ? vkCreateGraphicsPipelines(c.device, c.cache, 1, job->state.get(), nullptr, &result.pipeline)
           : cacheResult;
       const auto ended = stutter::now();
       result.compileNs = ended - started;
-      if (stutter::trace().enabled()) stutter::trace().add(job->kind, job->frame, job->key, started, ended, int(result.result));
+      if (stutter::trace().enabled()) stutter::trace().add(job->kind, job->frame, job->key, started, ended, int(result.result), stutter::cpu_elapsed(cpuStart));
       if (result.result != VK_SUCCESS && result.pipeline) {
         vkDestroyPipeline(c.device, result.pipeline, nullptr);
         result.pipeline = VK_NULL_HANDLE;

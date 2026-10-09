@@ -13,7 +13,7 @@ namespace gfxvk::stutter {
 // Written on orderly process exit. Forced termination loses the trace.
 struct Event {
   const char* kind;
-  uint64_t frame, key, start, end, thread;
+  uint64_t frame, key, start, end, thread, cpu;
   int result;
 };
 inline uint64_t now() {
@@ -30,13 +30,13 @@ public:
   Trace() { if (enabled()) events.reserve(65536); }
   bool enabled() const { return path && *path; }
   void add(const char* kind, uint64_t frame, uint64_t key,
-           uint64_t start, uint64_t end, int result) {
+           uint64_t start, uint64_t end, int result, uint64_t cpu = ~uint64_t{0}) {
     if (!enabled()) return;
     std::lock_guard lock(mutex);
     if (stopped) return;
     if (events.size() == 1000000) { ++dropped; return; }
     events.push_back({kind, frame, key, start, end,
-        uint64_t(std::hash<std::thread::id>{}(std::this_thread::get_id())), result});
+        uint64_t(std::hash<std::thread::id>{}(std::this_thread::get_id())), cpu, result});
   }
   void flush() {
     if (!enabled()) return;
@@ -51,12 +51,12 @@ public:
     }
     FILE* f = std::fopen(path, "wb");
     if (!f) { std::fprintf(stderr, "[vulkan trace] cannot write %s\n", path); return; }
-    std::fprintf(f, "kind,frame,key,start_ns,end_ns,thread,result\n");
+    std::fprintf(f, "kind,frame,key,start_ns,end_ns,thread,result,cpu_ns\n");
     for (const auto& e : snapshot)
-      std::fprintf(f, "%s,%llu,%016llx,%llu,%llu,%llu,%d\n", e.kind,
+      std::fprintf(f, "%s,%llu,%016llx,%llu,%llu,%llu,%d,%lld\n", e.kind,
           (unsigned long long)e.frame, (unsigned long long)e.key,
           (unsigned long long)e.start, (unsigned long long)e.end,
-          (unsigned long long)e.thread, e.result);
+          (unsigned long long)e.thread, e.result, e.cpu == ~uint64_t{0} ? -1ll : (long long)e.cpu);
     const bool failed = std::ferror(f);
     const int closed = std::fclose(f);
     std::fprintf(stderr, "[vulkan trace] %zu events, %llu dropped, write %s\n",

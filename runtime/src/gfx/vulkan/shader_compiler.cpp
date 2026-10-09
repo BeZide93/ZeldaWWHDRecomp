@@ -1,5 +1,6 @@
 #include "shader_compiler.h"
 #include "stutter_trace.h"
+#include "worker_metrics.h"
 #include "platform/host.h"
 #include <glslang/Public/ShaderLang.h>
 #include <glslang/Public/ResourceLimits.h>
@@ -54,13 +55,14 @@ ShaderCompileResult execute(const std::string& source, ShaderStage stage, uint64
     default: throw std::runtime_error("invalid shader compiler stage");
     }
     ShaderCompileResult result;
+    const auto cpuStart = stutter::trace().enabled() ? stutter::thread_cpu_now() : 0;
     const auto start = stutter::now();
     result.words = compile_stage(source, language, &result.error);
     const auto end = stutter::now();
     result.compileNs = end - start;
     result.thread = uint64_t(std::hash<std::thread::id>{}(std::this_thread::get_id()));
     stutter::trace().add(frame == ~uint64_t{0} ? "utility_spirv_compile" : "spirv_compile",
-                         frame, key, start, end, result.words.empty() ? -1 : 0);
+                         frame, key, start, end, result.words.empty() ? -1 : 0, stutter::cpu_elapsed(cpuStart));
     return result;
 }
 struct Job {

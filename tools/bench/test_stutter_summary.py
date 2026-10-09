@@ -7,14 +7,36 @@ from stutter_summary import summarize
 
 
 class StutterSummaryTest(unittest.TestCase):
-    def summary(self, rows, **kwargs):
+    def summary(self, rows, with_cpu=False, **kwargs):
         with tempfile.TemporaryDirectory() as directory:
             trace = Path(directory) / 'events.csv'
             with trace.open('w', newline='') as target:
                 writer = csv.writer(target)
-                writer.writerow(('kind', 'frame', 'key', 'start_ns', 'end_ns', 'thread', 'result'))
+                writer.writerow(('kind', 'frame', 'key', 'start_ns', 'end_ns', 'thread', 'result') + (('cpu_ns',) if with_cpu else ()))
                 writer.writerows(rows)
             return summarize(trace, **kwargs)
+
+    def test_cpu_is_separate_from_wall_and_missing_is_not_zero(self):
+        result = self.summary([
+            ('frame', 10, '0', 100000000, 200000000, 1, 0, -1),
+            ('guest_pipeline', 10, 'a', 110000000, 180000000, 2, 0, 5000000),
+            ('guest_pipeline', 10, 'b', 181000000, 190000000, 2, 0, -1),
+            ('spirv_compile', 10, 'c', 120000000, 150000000, 3, 0, 0),
+            ('startup_warmup', 0, 'd', 100000000, 190000000, 4, 2, 8000000),
+        ], with_cpu=True)
+        self.assertEqual(result['pipeline_creation_ms'], 79)
+        self.assertEqual(result['compilation_cpu_by_kind']['guest_pipeline'],
+                         dict(sampled_calls=1, unavailable_calls=1, calling_thread_cpu_ms=5))
+        self.assertEqual(result['compilation_cpu_by_kind']['spirv_compile']['sampled_calls'], 1)
+        self.assertEqual(result['startup_warmup'][0]['published_ready'], 13)
+        self.assertEqual(result['startup_warmup'][0]['failures'], 2)
+        self.assertEqual(result['startup_warmup'][0]['elapsed_ms'], 90)
+        self.assertEqual(result['startup_warmup'][0]['calling_thread_cpu_ms'], 8)
+
+    def test_legacy_trace_reports_cpu_unavailable(self):
+        result = self.summary([('guest_pipeline', 1, 'a', 100, 200, 2, 0)])
+        self.assertEqual(result['compilation_cpu_by_kind']['guest_pipeline'],
+                         dict(sampled_calls=0, unavailable_calls=1, calling_thread_cpu_ms=0))
 
     def test_repeats_preserve_guest_stall_and_requests_are_not_compiles(self):
         result = self.summary([
