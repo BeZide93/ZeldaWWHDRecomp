@@ -79,6 +79,42 @@ With `tools/bench/run_bench.py`, use `--origin-load-steps n` to align both input
 interpolation mode switch to that restored clock; an absolute startup mode switch can change
 random-seed evolution when a load completes one step later.
 
+## Repeatable picture comparisons
+
+Use a clean baseline build and the changed build with the same local state and
+input preset. The preset name selects the input sequence; verify the actual
+scene in your state. `tools/bench/run_picture_check.py` captures each build twice,
+using fresh save copies, settings and application caches. Inputs and captures
+are tied to post-load logic steps; interpolation is disabled (30 FPS). It checks
+that the selected full-pass checkpoint and scenario endpoint completed before
+accepting a capture. This is a correctness check, with no performance summary.
+
+The comparison scripts require Pillow (`python3 -m pip install Pillow`). For example:
+
+```sh
+python3 tools/bench/run_picture_check.py \
+  --baseline /absolute/path/to/baseline/wwhd --baseline-revision BASELINE_COMMIT \
+  --candidate build/cmake/wwhd --candidate-revision CHANGED_COMMIT \
+  --game game --save save --state-dir /absolute/path/to/local/states \
+  --scene outset --origin-load-steps 180 --capture-load-step 200 --seconds 2 \
+  --out build/bench/picture-check
+```
+
+Add `--validation` when Khronos layers are installed and discoverable. Each run
+retains its exact command/environment, executable/state hashes, logs and captures.
+`pictures.json` compares baseline repeats, candidate repeats and baseline/candidate
+pairs for TV, GamePad and composed-window pictures. Missing captures also fail
+the check. The default tolerance is zero RGB and alpha differences; nonzero variation
+is reported and exits unsuccessfully, rather than assumed harmless. Amplified
+RGB difference PNGs are for inspection. The separate `compare_pictures.py` accepts
+an explicit channel tolerance for investigations; justify any tolerance using
+baseline repeatability before treating it as a pass. This single checkpoint does
+not prove other scenes, transitions or pending-frame correctness.
+
+Keep all output under ignored `build/` or another local evidence directory.
+Captures and diffs contain game imagery and must not enter commits, releases or
+CI artifacts. No runtime frame-time claims should be made from these capture runs.
+
 ## Build
 
 Use Clang/clang++ with CMake, Vulkan 1.3 headers and loader, glslang and zlib (and SDL3 and, on
