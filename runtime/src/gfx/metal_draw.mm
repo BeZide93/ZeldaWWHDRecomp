@@ -9,6 +9,7 @@ extern "C" uint64_t g_shader_state_gen;  // gx2_core.cpp: bumped by shader-relev
 #include "Cafe/HW/Latte/Core/FetchShader.h"
 #include "gfx/area_sample.h"
 #include "gfx/shader_identity.h"
+#include "gfx/target_draw_history.h"
 #include "Cafe/HW/Latte/Core/LatteCachedFBO.h"
 #include "Cafe/HW/Latte/Core/LatteShader.h"
 #include "Cafe/HW/Latte/ISA/LatteReg.h"
@@ -622,7 +623,7 @@ void set_ao_mode(int m) { g_ao_mode = m % 3; LOG("[gfx] ambient occlusion mode %
 // wait for their compile without the budget, like the Vulkan renderer does for every draw.
 static bool g_building_ahead = false;
 static bool g_draw_must_run = false;  // the current draw writes a target that isn't redrawn every frame
-static std::unordered_map<uint32_t, uint64_t> g_target_drawn;  // render target address -> frame of its last draw
+static std::unordered_map<uint32_t, gfx::TargetDrawHistory> g_target_drawn;
 static uint64_t g_must_run_waits = 0;
 static double g_must_run_wait_ms = 0;
 static bool wait_compiled(const std::atomic<int>& st) {
@@ -1602,7 +1603,7 @@ void draw(const uint32_t* regs, uint32_t prim, uint32_t count, uint32_t indexTyp
     {
         auto notRedrawn = [](uint32_t addr) {
             auto it = g_target_drawn.find(addr);
-            return it == g_target_drawn.end() || it->second + 1 < R.frame;
+            return it == g_target_drawn.end() || it->second.must_wait(R.frame);
         };
         bool must = false;
         for (int i = 0; i < 8 && !must; i++)
@@ -1783,8 +1784,8 @@ void draw(const uint32_t* regs, uint32_t prim, uint32_t count, uint32_t indexTyp
                       baseInstance:0];
     }
     for (int i = 0; i < 8; i++)
-        if (colors[i] && regs[mmCB_COLOR0_BASE + i]) g_target_drawn[regs[mmCB_COLOR0_BASE + i]] = R.frame;
-    if (depth && regs[mmDB_DEPTH_BASE]) g_target_drawn[regs[mmDB_DEPTH_BASE]] = R.frame;
+        if (colors[i] && regs[mmCB_COLOR0_BASE + i]) g_target_drawn[regs[mmCB_COLOR0_BASE + i]].drawn(R.frame);
+    if (depth && regs[mmDB_DEPTH_BASE]) g_target_drawn[regs[mmDB_DEPTH_BASE]].drawn(R.frame);
     // debug: WWHD_DUMP_DRAWS=frame:i,j,k dumps color target 0 after those draws
     static uint64_t dumpFrame = ~0ull;
     static std::set<uint64_t> dumpDraws = [] {
