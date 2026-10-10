@@ -7,6 +7,10 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Audio: a master volume slider** (PR #137, thanks @mhbxyz, issue #124). Settings → Audio has a
+  Master volume slider with Mute and Default buttons. It applies immediately and is remembered for the
+  next start.
+
 - **Faster game code: about a quarter less CPU time in the game's own code** (PR #83, thanks
   @depende3000). The recompiler now keeps the game's registers in local variables, stores only the
   condition bits that are read later, and uses cheaper float compares. Measured per game step: −28 % on
