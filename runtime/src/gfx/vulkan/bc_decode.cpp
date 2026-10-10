@@ -5,6 +5,7 @@
 #include "shaders.h"
 #include "runtime.h"
 #include "render_prof.h"
+#include "worker_metrics.h"
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
@@ -34,7 +35,15 @@ void initialize() {
     VkShaderModule module=VK_NULL_HANDLE;vk_check(vkCreateShaderModule(R.device,&mi,nullptr,&module),"BC shader module");
     VkComputePipelineCreateInfo ci{VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};ci.layout=layout;
     ci.stage={VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,nullptr,0,VK_SHADER_STAGE_COMPUTE_BIT,module,"main",nullptr};
+    const bool tracing=stutter::trace().enabled();
+    const auto cpuStart=tracing?stutter::thread_cpu_now():0;
+    const auto started=tracing?stutter::now():0;
     VkResult result=vkCreateComputePipelines(R.device,R.pipelineCache,1,&ci,nullptr,&pipeline);
+    if(tracing) {
+        const auto ended=stutter::now();
+        stutter::trace().add("bc_decode_compute_pipeline",R.frame,0,started,ended,int(result),
+                             stutter::cpu_elapsed(cpuStart));
+    }
     vkDestroyShaderModule(R.device,module,nullptr);vk_check(result,"BC compute pipeline");
 }
 Buffer dispatch(const std::vector<uint8_t>& blocks,uint32_t w,uint32_t h,uint32_t slices,uint32_t mode,bool readback) {

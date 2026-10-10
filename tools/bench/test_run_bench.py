@@ -10,7 +10,7 @@ import run_bench as bench
 class BenchmarkTests(unittest.TestCase):
     def test_variant_cache_paths_are_distinct_stable_and_confined(self):
         args = types.SimpleNamespace(cache_dir=None, variant_caches=True)
-        root = pathlib.Path('/tmp/bench-check')
+        root = pathlib.Path('/tmp/bench-check').resolve()
         a = bench.variant_cache_dir(args, '../base', str(root))
         b = bench.variant_cache_dir(args, 'candidate', str(root))
         self.assertNotEqual(a, b)
@@ -49,7 +49,7 @@ class BenchmarkTests(unittest.TestCase):
                 self.assertEqual(stopped.exception.code, 1)
                 measured.assert_not_called()
             self.assertEqual([item[:4] for item in launches],
-                             [('base', {}, 0, '/unused/base'), ('candidate', {'FLAG': '1'}, 0, '/unused/new')])
+                             [('base', {}, 0, '/unused/base'), ('candidate', {'FLAG': '1'}, 0, bench.os.path.abspath('/unused/new'))])
             self.assertNotEqual(launches[0][4], launches[1][4])
 
     def test_invalid_warmup_stops_before_measured_runs(self):

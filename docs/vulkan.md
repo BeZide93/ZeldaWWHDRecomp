@@ -240,7 +240,9 @@ the head of the ordered command stream until ready; the renderer can repeat the
 last complete scan image while waiting. It never substitutes state or drops that
 draw. This still delays new guest frames and input response. Presentation/overlay
 pipeline misses currently wait without repeat pumping; this is a remaining
-limitation. `WWHD_VK_ASYNC_PIPELINES=0` selects diagnostic synchronous creation.
+limitation. BC texture decoding still creates its compute pipeline synchronously;
+its cost is recorded as `bc_decode_compute_pipeline` when tracing is enabled.
+`WWHD_VK_ASYNC_PIPELINES=0` selects diagnostic synchronous graphics creation.
 Recipe files contain game-derived shader code and must stay local.
 
 Vulkan also accepts the locally built `tools/shaderprep.py` shader head start in
@@ -859,3 +861,18 @@ Small register updates (at most 16 words) use the fused Vulkan path by default. 
 In Settings → Graphics → GPU (Vulkan), choose Automatic or a graphics card. The choice applies after restarting. Automatic keeps the driver's order, preferring cards with Vulkan 1.3. Unavailable cards show the reason; if a saved card is missing or unusable, the game uses Automatic and shows a notice.
 
 On hybrid laptops, choose the discrete NVIDIA or AMD GPU to use it instead of integrated graphics. For a single start, `WWHD_VK_DEVICE` overrides the saved choice: use a zero-based index from the startup GPU list, or a case-insensitive part of the GPU name (for example `WWHD_VK_DEVICE=NVIDIA`). The first matching name is used. This setting is available with Vulkan on desktop platforms.
+
+For a one-shot correctness check during a real demand-compilation repeat, set
+`WWHD_VK_PENDING_CAPTURE_DIR` to a fresh local directory. Both published TV and
+GamePad scans must exist. The first eligible pending presentation writes
+`tv-before.png`, `tv-after.png`, `gamepad-before.png`, `gamepad-after.png` and
+`proof.json`. Set `WWHD_VK_PENDING_CAPTURE_AFTER_LOAD=1` to wait until a full-state
+load has completed. Metadata records the renderer frame, load/logic steps,
+whether presentation succeeded, and exact scan equality. A proof requires
+`presented`, `guest_frame_and_scans_unchanged`, `tv_exact` and `gamepad_exact` all
+to be true. This captures published scan pixels only: it excludes composed-window
+layout and overlays, and does not replace baseline comparisons after resumption.
+Readbacks deliberately stall submissions and may allow the compiler to finish
+during capture, so this diagnostic must be disabled for performance measurements.
+No artificial compilation delay is introduced. The diagnostic attempts at most
+once per process and bounds each scan to 16 megapixels; keep its output local.

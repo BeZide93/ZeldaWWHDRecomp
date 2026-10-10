@@ -134,6 +134,10 @@ void completed_scan_retention_check() {
  const auto frame = R.frame;
  const auto original = read_image(*R.tv.scan, VK_IMAGE_ASPECT_COLOR_BIT, 4);
  const auto before = compose_offscreen(R.tv, 64, 64, false);
+ // The real-game diagnostic also captures GamePad. Exercise its published
+ // scan when this smoke configuration supplies one, without changing setup.
+ Surface* drcScan = R.drc.scan && R.drc.scan->image ? R.drc.scan.get() : nullptr;
+ const auto drcBefore = drcScan ? read_image(*drcScan, VK_IMAGE_ASPECT_COLOR_BIT, 4) : std::vector<uint8_t>{};
  Image next(64, 64, 0x1a);
  const float blue[4] = {0, 0, 1, 1};
  clear_image(next.s, blue);
@@ -147,6 +151,9 @@ void completed_scan_retention_check() {
  require(R.frame == frame, "repeated presentation advanced guest frame state");
  require(read_image(*R.tv.scan, VK_IMAGE_ASPECT_COLOR_BIT, 4) == original,
          "pending presentation exposed or modified the next scan image");
+ if (drcScan) require(R.drc.scan.get() == drcScan &&
+     read_image(*drcScan, VK_IMAGE_ASPECT_COLOR_BIT, 4) == drcBefore,
+     "pending presentation modified the published GamePad scan");
  const auto repeated = compose_offscreen(R.tv, 64, 64, false);
  require(repeated == before, "repeated completed composition differs pixel-for-pixel");
  swap();

@@ -2346,6 +2346,78 @@ gfx::PresentPlan completedPresentPlan;
 bool completedPresentPlanValid = false;
 uint64_t nextPipelineRepeatNs = 0, lastNewPresentNs = 0;
 uint64_t pendingPresentationFrame = ~uint64_t{0};
+// Deliberately one-shot and separate from the synthetic smoke proof. Readbacks
+// perturb timing; this opt-in diagnostic must never be enabled for benchmarks.
+struct PendingPictureProof {
+  std::string directory;
+  uint64_t frame = 0, loadFrame = 0, loadStep = 0, logicStep = 0;
+  Surface* scans[2]{};
+  VkExtent3D extents[2]{};
+  std::vector<uint8_t> before[2];
+};
+PendingPictureProof begin_pending_picture_proof() {
+  static bool attempted = false;
+  const char* directory = std::getenv("WWHD_VK_PENDING_CAPTURE_DIR");
+  if (attempted || !directory || !*directory) return {};
+  const char* afterLoad = std::getenv("WWHD_VK_PENDING_CAPTURE_AFTER_LOAD");
+  if (afterLoad && std::strcmp(afterLoad, "0") && !ss::last_load_frame()) return {};
+  // Both separately published scans are required. Never inspect buildingScan.
+  if (!R.tv.scan || !R.drc.scan || !R.tv.scan->image || !R.drc.scan->image) return {};
+  attempted = true;
+  PendingPictureProof proof;
+  try {
+    proof.directory = directory;
+    proof.frame = R.frame; proof.loadFrame = ss::last_load_frame();
+    proof.loadStep = ss::last_load_step(); proof.logicStep = interp::logic_steps();
+    if (!std::filesystem::create_directories(proof.directory))
+      throw std::runtime_error("pending proof directory must be fresh");
+    Screen* screens[] = {&R.tv, &R.drc};
+    for (unsigned i = 0; i != 2; ++i) {
+      proof.scans[i] = screens[i]->scan.get();
+      proof.extents[i] = proof.scans[i]->extent;
+      const auto extent = proof.extents[i];
+      if (!extent.width || !extent.height || uint64_t(extent.width) * extent.height > 16777216)
+        throw std::runtime_error("pending capture exceeds 16 megapixels per scan");
+      proof.before[i] = read_surface_rgba(*proof.scans[i], screens[i]->scanSrgb);
+    }
+  } catch (const std::exception& error) {
+    LOG("[vulkan pending proof] capture failed: %s", error.what());
+    return {};
+  }
+  return proof;
+}
+void finish_pending_picture_proof(const PendingPictureProof& proof, bool presented) {
+  if (proof.directory.empty()) return;
+  try {
+    const bool stateUnchanged = R.frame == proof.frame && R.tv.scan.get() == proof.scans[0] &&
+                               R.drc.scan.get() == proof.scans[1];
+    if (!stateUnchanged) throw std::runtime_error("published scan or guest frame changed during repeat");
+    const char* names[] = {"tv", "gamepad"};
+    Screen* screens[] = {&R.tv, &R.drc};
+    bool exact[2]{};
+    for (unsigned i = 0; i != 2; ++i) {
+      const auto after = read_surface_rgba(*proof.scans[i], screens[i]->scanSrgb);
+      exact[i] = after == proof.before[i];
+      const auto stem = proof.directory + "/" + names[i];
+      write_rgba_png(stem + "-before.png", proof.extents[i].width, proof.extents[i].height, proof.before[i]);
+      write_rgba_png(stem + "-after.png", proof.extents[i].width, proof.extents[i].height, after);
+    }
+    const auto path = proof.directory + "/proof.json";
+    FILE* file = std::fopen(path.c_str(), "wb");
+    if (!file) throw std::runtime_error("cannot open pending proof metadata");
+    std::fprintf(file, "{\"frame\":%llu,\"load_frame\":%llu,\"load_step\":%llu,\"logic_step_before\":%llu,\"logic_step_after\":%llu,\"presented\":%s,\"guest_frame_and_scans_unchanged\":true,\"tv_exact\":%s,\"gamepad_exact\":%s,\"scope\":\"published scans; excludes composed window and overlays; readbacks perturb timing\"}\n",
+        (unsigned long long)proof.frame, (unsigned long long)proof.loadFrame,
+        (unsigned long long)proof.loadStep, (unsigned long long)proof.logicStep,
+        (unsigned long long)interp::logic_steps(), presented ? "true" : "false",
+        exact[0] ? "true" : "false", exact[1] ? "true" : "false");
+    const bool written = std::fclose(file) == 0;
+    if (!written) throw std::runtime_error("cannot write pending proof metadata");
+    LOG("[vulkan pending proof] presented=%u frame=%llu TV exact=%u GamePad exact=%u -> %s",
+        unsigned(presented), (unsigned long long)proof.frame, unsigned(exact[0]), unsigned(exact[1]), proof.directory.c_str());
+  } catch (const std::exception& error) {
+    LOG("[vulkan pending proof] capture failed: %s", error.what());
+  }
+}
 }
 void begin_pipeline_pending_frame() {
   if (pendingPresentationFrame != R.frame) {
@@ -2363,6 +2435,7 @@ void present_completed_frame_while_pipeline_pending() {
   // its prefix is legal, but only the separately published completed scans are
   // sampled here; buildingScan and all guest attachments remain untouched.
   end_encoder();
+  const auto proof = begin_pending_picture_proof();
   set_present_plan(&completedPresentPlan);
   bool presented = false;
   try {
@@ -2371,6 +2444,7 @@ void present_completed_frame_while_pipeline_pending() {
     flush_async();
   } catch (...) { set_present_plan(nullptr); throw; }
   set_present_plan(nullptr);
+  finish_pending_picture_proof(proof, presented);
   const auto ended = stutter::now();
   nextPipelineRepeatNs = ended + 16666667; // At most 60 repeats/s, independent of guest progress.
   if (presented && stutter::trace().enabled()) {
