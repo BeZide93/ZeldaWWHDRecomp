@@ -114,6 +114,19 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: Fetch pinned optional shader template
+        env:
+          SHADER_TEMPLATE_DEPLOY_KEY: ${{ secrets.SHADER_TEMPLATE_DEPLOY_KEY }}
+        shell: bash
+        run: |
+          umask 077
+          python3 tools/release/fetch_shader_template.py
+
+      - name: Remove shader template deploy key
+        if: always()
+        shell: bash
+        run: rm -f "$RUNNER_TEMP/shader-template-deploy-key"
+
       - name: Install build tools
         run: brew install ninja
 
@@ -247,6 +260,19 @@ jobs:
       TOOLCHAIN: ${{ matrix.toolchain }}
     steps:
       - uses: actions/checkout@v5
+
+      - name: Fetch pinned optional shader template
+        env:
+          SHADER_TEMPLATE_DEPLOY_KEY: ${{ secrets.SHADER_TEMPLATE_DEPLOY_KEY }}
+        shell: bash
+        run: |
+          umask 077
+          python3 tools/release/fetch_shader_template.py
+
+      - name: Remove shader template deploy key
+        if: always()
+        shell: bash
+        run: rm -f "$RUNNER_TEMP/shader-template-deploy-key"
 
       - name: Install dependencies
         run: |
@@ -421,6 +447,19 @@ jobs:
       PY_PIN: ${{ matrix.python }}
     steps:
       - uses: actions/checkout@v5
+
+      - name: Fetch pinned optional shader template
+        env:
+          SHADER_TEMPLATE_DEPLOY_KEY: ${{ secrets.SHADER_TEMPLATE_DEPLOY_KEY }}
+        shell: bash
+        run: |
+          umask 077
+          python3 tools/release/fetch_shader_template.py
+
+      - name: Remove shader template deploy key
+        if: always()
+        shell: bash
+        run: rm -f "$RUNNER_TEMP/shader-template-deploy-key"
 
       - name: Pinned llvm-mingw toolchain (tools/installer/toolchains.json)
         run: |
@@ -608,6 +647,19 @@ jobs:
       APK: dist/WindWakerHD-${{ needs.version.outputs.version }}-android-${{ matrix.name }}.apk
     steps:
       - uses: actions/checkout@v5
+
+      - name: Fetch pinned optional shader template
+        env:
+          SHADER_TEMPLATE_DEPLOY_KEY: ${{ secrets.SHADER_TEMPLATE_DEPLOY_KEY }}
+        shell: bash
+        run: |
+          umask 077
+          python3 tools/release/fetch_shader_template.py
+
+      - name: Remove shader template deploy key
+        if: always()
+        shell: bash
+        run: rm -f "$RUNNER_TEMP/shader-template-deploy-key"
 
       - uses: actions/setup-java@v5
         with:

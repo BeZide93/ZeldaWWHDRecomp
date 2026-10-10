@@ -2318,13 +2318,14 @@ def install(ctx, source, keys=None, info=None, ui=None, check_keys=None):
     if kind != "gen":
         begin("shaders")
         import shader_prebuild
+        shader_template = Path(getattr(args, "shader_template", None) or os.environ.get("WWHD_SHADER_TEMPLATE") or Path(PKG) / "tools/shadercache/template.bin").expanduser().resolve()
         shader_root = shader_prebuild.default_cache_root(data_dir, PORTABLE)
         try:
             shader_root.mkdir(parents=True, exist_ok=True)
             shader_prebuild.atomic_json(shader_root / "launcher.json", {
                 "schema": 1, "python": sys.executable, "package": str(PKG),
                 "helper": str(Path(PKG) / "tools/installer/shader_prebuild.py"),
-                "template": str(Path(PKG) / "tools/shadercache/template.bin")})
+                "template": str(shader_template)})
         except OSError as error:
             say("Shader preparation launcher unavailable: %s" % error)
         shader_progress = Progress("Preparing shaders")
@@ -2332,7 +2333,7 @@ def install(ctx, source, keys=None, info=None, ui=None, check_keys=None):
             shader_progress.update(0, 0, text, force=True)
             LOG.write(text)
         state["shader_prebuild"] = shader_prebuild.prepare(
-            ctx.game_dir, Path(PKG) / "tools/shadercache/template.bin", state["exe"],
+            ctx.game_dir, shader_template, state["exe"],
             shader_root, PKG,
             renderer="metal" if IS_MAC else "vulkan", progress=shader_message,
             skip=bool(getattr(args, "skip_shader_prebuild", False)),
@@ -2382,6 +2383,7 @@ def main():
     ap.add_argument("--code-mods-status", help="atomic rebuild progress/result JSON")
     ap.add_argument("--code-mods-cancel", help="cancel rebuild when this file exists")
     ap.add_argument("--repair-guest-python", action="store_true", help="upgrade local mod setup Python without rebuilding game code")
+    ap.add_argument("--shader-template", help="local shader template (or WWHD_SHADER_TEMPLATE); optional")
     ap.add_argument("--skip-shader-prebuild", action="store_true", help="skip optional shader preparation; compile during play")
     ap.add_argument("--shader-prebuild-cancel", help="skip shader preparation when this file exists")
     ap.add_argument("--repair", action="store_true", help="rebuild the game code from the installed game files")

@@ -1,0 +1,58 @@
+# Shader template maintenance
+
+The release template lives in the private `ZeldaWWHDRecomp/shader-template` repository.
+`template.ref` pins its exact commit and the SHA-256 of `template.bin`. Update both after publishing a
+new private template. The public branch must never track `template.bin`, recordings or generated caches.
+
+Release packaging fetches the pinned commit using the read-only `SHADER_TEMPLATE_DEPLOY_KEY` secret,
+verifies the hash, and runs the independent release guard. Builds without the secret print a notice and
+package without a template. With the secret present, fetch or verification failure stops packaging.
+The workflow keeps its temporary SSH key private and removes it even when a step fails.
+
+## Local recording
+
+Use Python 3. The archive decoder builds a small local C helper with Clang/GCC (`CC` overrides it),
+or uses a Python fallback. Recordings carry game-derived programs; keep them and generated headstarts
+out of commits, uploads and reports. Only independently guarded code-free templates may be packaged.
+
+Windows (PowerShell, from the repository root):
+
+```powershell
+$env:WWHD_RENDERER_RUNTIME = "vulkan"
+$env:WWHD_VK_RECIPE_RECORD = "$PWD\game\shadercache\vulkan-recorded.bin"
+.\build\cmake\wwhd.exe --game game
+Remove-Item Env:WWHD_VK_RECIPE_RECORD
+py -3 tools/shaderprep.py template game/shadercache/vulkan-recorded.bin game/shadercache/template.bin
+py -3 tools/shaderprep.py build game/shadercache/headstart.bin --template game/shadercache/template.bin --max 0
+.\build\cmake\wwhd.exe --game game --warm-shaders
+```
+
+Linux:
+
+```sh
+WWHD_RENDERER_RUNTIME=vulkan \
+WWHD_VK_RECIPE_RECORD="$PWD/game/shadercache/vulkan-recorded.bin" \
+  ./build/cmake/wwhd --game game
+python3 tools/shaderprep.py template game/shadercache/vulkan-recorded.bin game/shadercache/template.bin
+python3 tools/shaderprep.py build game/shadercache/headstart.bin --template game/shadercache/template.bin --max 0
+WWHD_RENDERER_RUNTIME=vulkan ./build/cmake/wwhd --game game --warm-shaders
+```
+
+Play the scenes to cover and exit normally before conversion. Recording is opt-in and bounded to
+128 MiB; forced termination can lose the recording. Add `--merge game/shadercache/template.bin` to
+`template` to retain existing states. `--max 0` resolves known states only; `--no-pipelines` excludes
+pipeline recipes. Vulkan and Metal skip the other renderer's typed recipes.
+
+`WWHD_HEADSTART=<file>` selects a local built headstart (`0` disables it).
+`WWHD_VK_SHADER_CACHE=<directory>` selects SPIR-V storage; `WWHD_VK_PIPELINE_CACHE=<file>` selects the
+device cache. Never pass `spirv.bin` to `shaderprep.py template`: conversion requires the GX2 recording.
+
+The stripped template schema is documented at the top of `tools/shaderprep.py`. The independent
+`tools/release/guard.py` permits only that schema at the packaged template path. Packaging tests generate
+small synthetic fixtures; they do not depend on the private template.
+
+For a local template, run setup with `--shader-template /path/to/template.bin` or set
+`WWHD_SHADER_TEMPLATE` to that file. The command-line option takes precedence over
+the environment variable; otherwise setup uses the optional bundled template.
+The selected path is saved for later cache rebuilds. Without a template, setup
+skips preparation and shaders compile during play.

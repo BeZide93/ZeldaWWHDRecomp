@@ -135,6 +135,10 @@ def prepare(game, template, executable, cache_root, package, renderer='vulkan',
 
     Paths are private local output only. No caller-supplied source is removed.
     """
+    if not Path(template).is_file():
+        message = 'Shader template unavailable; shaders will compile during play'
+        progress(message)
+        return dict(status='skipped', message=message)
     root = Path(cache_root)
     staging = None
     wanted = None

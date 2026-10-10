@@ -334,6 +334,17 @@ def make_zip(src_dir, zip_path):
                     z.writestr(info, f.read(), compresslevel=9)
 
 
+def copy_shader_template(source, destination):
+    """Optional private payload: forks remain installable without it."""
+    relative = "tools/shadercache/template.bin"
+    path = os.path.join(source, relative)
+    if os.path.isfile(path):
+        copy(path, os.path.join(destination, relative))
+        return True
+    print("Shader template unavailable; shader preparation will be skipped")
+    return False
+
+
 def copy_sdk_headers(pkg):
     """Shared by every platform: public declarations use wwhd/, never a game/ tree."""
     shutil.copytree(os.path.join(ROOT, "runtime", "include"), os.path.join(pkg, "sdk", "include"))
@@ -392,6 +403,7 @@ def main():
 
     for rel in TOOL_FILES + INSTALLER_FILES:
         copy(os.path.join(ROOT, rel), os.path.join(pkg, rel))
+    copy_shader_template(ROOT, pkg)
     for hp in sorted(os.listdir(os.path.join(ROOT, "tools", "recomp"))):
         if re.match(r"hooks.*\.txt$", hp):
             copy(os.path.join(ROOT, "tools", "recomp", hp), os.path.join(pkg, "tools", "recomp", hp))

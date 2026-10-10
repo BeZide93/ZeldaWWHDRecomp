@@ -256,51 +256,26 @@ code was copied. Cemu can skip pending draws using renderer heuristics. This
 renderer always waits for demanded state and draws every object. Cemu shader and
 pipeline cache files are never inputs to this workflow.
 
-Setup's **Preparing shaders** step resolves the shipped code-free state template against the player's
-own archives and runs offline warming after the local executable is linked. **Graphics → Rebuild shader
-cache** requests a new private generation on the next start. Skipping preparation or a failed build keeps
-the game usable with Exact on-demand compilation. An explicit skip is remembered for the same input
-identity; a rebuild request or changed inputs overrides it. Preparation covers known states; it cannot guarantee
-that an unrecorded scene will compile nothing during play. Generated files never ship with releases.
+## Preparing shaders
 
-The active generation is selected by `shader-prebuild/active.json` under the host configuration directory
-(portable installations use their user directory). Game archive, template, translator and runtime identities
-invalidate it. Cache publication uses a short cross-process activation lock; an in-use generation remains
-intact. Explicit cache environment overrides take precedence, so isolated benchmark runs retain their
-selected paths. Android uses an isolated SDL preparation activity and a native completion handshake;
-native device validation remains outstanding. Windows/Linux GPU validation and final Metal coverage
-are also tracked separately from successful host tests.
+Setup's **Preparing shaders** step uses your own game archives and the release's state template to
+compile covered shaders and compatible pipelines before play. Allow roughly tens of seconds on a
+recent Mac; slower computers and different drivers can take longer. Generated shader and driver
+caches stay local.
 
-Vulkan also accepts the locally built `tools/shaderprep.py` shader head start in
-offline `--warm-shaders` mode. `WWHD_VK_RECIPE_RECORD=<file>` records the GX2 shader
-microcode, fetch programs, sparse register states and exact Vulkan pipeline recipes; it is not
-the SPIR-V disk cache. Recording is opt-in, bounded, and written at orderly shutdown
-or a scripted test endpoint. Build known shaders and pipelines with `--max 0`, then
-run `--warm-shaders` to populate the Vulkan SPIR-V/device caches before playing.
-`--no-pipelines` builds shaders alone. The startup worker also reads compatible
-pipeline records directly from the head start while the title screen runs.
-Metal pipeline records are skipped explicitly. Guest Latte-to-GLSL translation uses
-one worker with owned program bytes, registers, fetch attributes and vertex/pixel
-linkage. Its decompiler calls are serialized because the adapted decompiler has
-shared input-table state. The render thread still waits exactly for translation
-metadata: descriptor bindings and vertex inputs must be known
-before preparing a draw. Completed scans can repeat during that wait, so moving
-translation to a worker does not by itself remove a frozen picture.
+Uncheck **Prepare shaders now** in setup, use `--skip-shader-prebuild` in terminal setup, or press Back
+on Android's preparation screen to skip. A missing template or a preparation failure does not prevent
+playing: shaders compile on demand. Skipping is remembered for the same game/build.
 
-Once metadata is published, CPU-only GLSL-to-SPIR-V jobs own their source strings
-and use bounded input size/queue. Pipeline demand jobs retain those binary results
-and create native shader modules and pipelines on their worker. Owned command
-recording permits later CPU preparation while compilation runs. Ordered emission
-waits for every demanded pipeline and emits every draw with its exact state.
-Graphics-pack replacement interface validation can compile the original and
-replacement binaries inside translation before metadata is published, retaining
-that Exact wait. `WWHD_VK_ASYNC_TRANSLATION=0`, `WWHD_VK_ASYNC_SHADERS=0` and
-`WWHD_VK_ASYNC_PIPELINES=0` select diagnostic synchronous translation, SPIR-V
-compilation and graphics creation respectively. Speculative startup pipelines
-yield between jobs while demand shader/pipeline work is active. These changes do
-not establish a benchmark improvement or resolve issue #68.
-Head-start coverage depends on the locally recorded scene states. The README contains
-[Windows/Linux commands](../README.md#vulkan-shader-head-start-on-windows-and-linux).
+Choose **Settings → Graphics → Rebuild shader cache** and restart to prepare again. Setup repair/update
+also refreshes preparation when the game, template, translator or runtime changes. The active generation
+lives under the host configuration directory's `shader-prebuild` folder; portable installations use their
+user directory. Cache overrides take precedence over this selection.
+
+The template covers recorded states rather than every possible scene. Uncovered shaders and pipelines
+can still cause a first-use hitch. Draws always wait for their exact state; the renderer can repeat the
+last complete picture during that wait. For local template selection and recording commands, see the
+[maintainer guide](../tools/shadercache/README.md).
 
 Vulkan also persists compiled SPIR-V in the host configuration directory's
 `shadercache/vulkan-shaders/spirv.bin`. `WWHD_VK_SHADER_CACHE=/directory` selects

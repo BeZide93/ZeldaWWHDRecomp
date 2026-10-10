@@ -592,100 +592,29 @@ Tested with 167 GameCube saves across the whole story (100% and Any% routes).
 
 ## Preparing shaders (automatic)
 
-Setup now includes **Preparing shaders** after it builds the game executable. It uses your own
-game files and the release's code-free state template, then compiles the covered shaders and compatible
-pipelines for your computer before gameplay. The template contains hashes, register states and attribute
-descriptions; it contains no game shader instructions. Generated head starts and driver caches stay local.
-Coverage depends on the recorded states; an uncovered shader or pipeline can still cause a first-use hitch.
+After building the game, setup offers **Preparing shaders**. It uses your own game files and a
+small state template supplied with the release to compile covered shaders and pipelines for your
+computer before you play. Preparation usually takes tens of seconds on a recent Mac; the time varies
+with your computer and graphics driver. The generated caches stay on your computer.
 
-You can uncheck **Prepare shaders now** in setup, or pass `--skip-shader-prebuild` to terminal setup.
-Skipping is remembered for the same game/build until you request a rebuild or those inputs change.
-A preparation failure does not prevent playing: shaders compile on demand. **Graphics → Rebuild shader
-cache** schedules a fresh generation for the next start. Setup repair/update also checks preparation;
-game archives, template, translator or runtime changes invalidate the previous generation. Existing live
-resources are not deleted when you request a rebuild.
+You can uncheck **Prepare shaders now**, or use `--skip-shader-prebuild` with terminal setup.
+On Android, Back skips the preparation screen. If preparation fails or the build has no template,
+setup skips it with a short message and the game compiles shaders as needed during play.
+Skipping is remembered until you request a rebuild or the game/build changes.
 
-On Android, setup assembles the head start locally, then opens an isolated **Preparing shaders** screen
-with a real Vulkan surface. Back skips warming. Normal startup can also prepare and warm a pending
-cache before guest threads start. This lifecycle still needs native device validation; desktop Windows
-and Linux GPU validation is also pending. Metal coverage and compatible pipeline warming are being
-validated separately; this is not a claim that every game pipeline is already covered.
+Use **Settings → Graphics → Rebuild shader cache**, then restart, to prepare a fresh cache.
+Setup repair/update also checks whether preparation needs refreshing. Uncovered areas can still
+stutter the first time you visit them. When a shader is unavailable, the renderer waits for its exact
+state and may repeat the last finished picture; objects are never deliberately omitted.
 
-Private generations live under the host settings folder's `shader-prebuild` directory, or
-`data/user/shader-prebuild` in a portable installation. Do not upload generated head starts,
-recordings, SPIR-V or device caches. The manual development workflow below remains available.
+Caches live in the host settings folder's `shader-prebuild` directory, or
+`data/user/shader-prebuild` in a portable installation. Keep generated caches and recordings local.
 
 ### Vulkan shader head start on Windows and Linux
 
-Vulkan can record the shader states from your own sessions and use the same local
-`template` / `build` workflow. Use Python 3. The archive decoder builds a small local
-C helper with Clang/GCC (`CC` overrides the compiler command), or uses its Python
-fallback if no compatible compiler is available. Generated recordings,
-head starts, SPIR-V and device caches contain game-derived data: keep them local and
-exclude them from uploads and release packages. Only the strictly validated code-free
-state-template format is permitted in releases; arbitrary or legacy templates are not. Native Windows validation of the
-translation-worker path is still pending.
-
-Windows (PowerShell, from the repository root; adjust the executable path):
-
-```powershell
-$env:WWHD_RENDERER_RUNTIME = "vulkan"
-$env:WWHD_VK_RECIPE_RECORD = "$PWD\game\shadercache\vulkan-recorded.bin"
-.\build\cmake\wwhd.exe --game game
-# Play the scenes you want covered, then close the game normally.
-Remove-Item Env:WWHD_VK_RECIPE_RECORD
-py -3 tools/shaderprep.py template game/shadercache/vulkan-recorded.bin
-py -3 tools/shaderprep.py build --max 0
-.\build\cmake\wwhd.exe --game game --warm-shaders
-```
-
-Linux:
-
-```sh
-WWHD_RENDERER_RUNTIME=vulkan \
-WWHD_VK_RECIPE_RECORD="$PWD/game/shadercache/vulkan-recorded.bin" \
-  ./build/cmake/wwhd --game game
-# Play the scenes you want covered, then close the game normally.
-python3 tools/shaderprep.py template game/shadercache/vulkan-recorded.bin
-python3 tools/shaderprep.py build --max 0
-WWHD_RENDERER_RUNTIME=vulkan ./build/cmake/wwhd --game game --warm-shaders
-```
-
-The recording is opt-in and bounded to 128 MiB. It is written on orderly shutdown;
-forced termination can lose it. `template --merge game/shadercache/template.bin`
-retains states from an earlier local template. `--max 0` builds only known archive
-shaders; archive coverage can be smaller than the recording. `--warm-shaders`
-compiles the result in a separate process before gameplay. Vulkan uses
-this file for offline shader warming and background pipeline warming at startup.
-The recording includes exact local Vulkan pipeline recipes; `--no-pipelines`
-omits them if you want shaders alone. Compatible pipelines compile on a worker
-during the next startup/title screen. Missing pipelines also compile on a worker,
-but exact guest draws wait for them while the renderer may repeat the last complete
-picture. This preserves draw ordering and state; it still freezes visual response
-until the pipeline is ready. Presentation/overlay misses currently wait without
-repeat pumping. Guest Latte-to-GLSL translation now runs on a worker with owned
-program bytes, registers, fetch attributes and vertex/pixel linkage. A draw still
-waits exactly for its binding metadata, which cannot be guessed.
-After metadata is ready, SPIR-V and native shader modules/pipelines can finish in
-the background while owned commands are prepared ahead. Ordered emission waits
-for the exact state and draws every object. A frozen picture is still possible.
-Graphics-pack interface
-validation may also compile shader binaries before metadata becomes available.
-`WWHD_VK_ASYNC_TRANSLATION=0`, `WWHD_VK_ASYNC_SHADERS=0` and
-`WWHD_VK_ASYNC_PIPELINES=0` select diagnostic synchronous translation, SPIR-V
-compilation and graphics creation respectively. `--warm-shaders` also finishes compatible pipeline recipes
-and merges the worker's native cache before exiting. Metal pipeline records are
-skipped by Vulkan, and Vulkan pipeline records are skipped by Metal.
-
-`WWHD_HEADSTART=<file>` selects a different input (`0` disables it).
-`WWHD_VK_SHADER_CACHE=<directory>` selects the SPIR-V cache directory (`0` disables
-persistence), and `WWHD_VK_PIPELINE_CACHE=<file>` selects the device cache. Their
-defaults are under the host configuration directory's `shadercache` folder; see
-[Vulkan cache controls](docs/vulkan.md). Re-record/rebuild after incompatible
-translation changes; invalid SPIR-V/device caches are treated as misses. Do not
-pass Vulkan's `spirv.bin` to `shaderprep.py template`: it needs the GX2 recording.
-This workflow has been exercised on macOS/MoltenVK; Windows/Linux commands are
-provided for their respective shells but still require native-platform validation.
+Local recording and preparation are available for developers and players who want to cover additional
+scenes. See the [shader-template maintainer guide](tools/shadercache/README.md) for the Windows and
+Linux commands and local template selection.
 
 ## Optional: decompilation tools
 

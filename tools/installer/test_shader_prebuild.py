@@ -34,6 +34,16 @@ class ShaderPrebuildTests(unittest.TestCase):
         return prebuild.prepare(self.game, self.template, '/synthetic/exe', self.cache,
                                self.package, runner=self.runner, **kwargs)
 
+    def test_missing_template_skips_without_commands_or_cache_changes(self):
+        self.template.unlink()
+        messages = []
+        result = self.prepare(progress=messages.append)
+        self.assertEqual(result['status'], 'skipped')
+        self.assertIn('compile during play', result['message'])
+        self.assertEqual(self.calls, [])
+        self.assertFalse(self.cache.exists())
+        self.assertEqual(messages, [result['message']])
+
     def test_success_reuses_identity_and_private_outputs(self):
         result = self.prepare()
         self.assertEqual(result['status'], 'ready')
