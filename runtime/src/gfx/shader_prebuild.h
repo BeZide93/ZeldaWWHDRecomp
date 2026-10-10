@@ -110,7 +110,7 @@ inline bool identity_matches(const mods::json::Value& active, const fs::path& ga
         id.get("runtime").string() != mods::hash::sha256_file(runtime_path())) return false;
     const auto launcher = read(root() / "launcher.json");
     const fs::path package = launcher.get("package").string();
-    if (id.get("template").string() != mods::hash::sha256_file(package / "tools/shadercache/template.bin") ||
+    if (id.get("template").string() != mods::hash::sha256_file(fs::path(launcher.get("template").string())) ||
         id.get("translator").string() != mods::hash::sha256_file(package / "tools/shaderprep.py") ||
         id.get("format").string() != mods::hash::sha256_file(package / "tools/shaderprep_format.py")) return false;
     const auto& inventory = id.get("game");
@@ -202,10 +202,14 @@ inline bool activate(const fs::path& game, const std::string& renderer) {
             const auto launcher = read(root() / "launcher.json");
             const fs::path package = launcher.get("package").string();
             const fs::path helper = package / "tools/installer/shader_prebuild.py";
-            const fs::path templatePath = package / "tools/shadercache/template.bin";
+            const fs::path templatePath = launcher.get("template").string();
             if (launcher.get("schema").number != 1 || launcher.get("helper").string() != helper.string() ||
-                launcher.get("template").string() != templatePath.string() || !fs::is_regular_file(helper))
+                templatePath.empty() || !fs::is_regular_file(helper))
                 throw std::runtime_error("shader preparation launcher unavailable");
+            if (!fs::is_regular_file(templatePath)) {
+                std::fprintf(stderr, "[shaders] Shader template unavailable; shaders compile during play.\n");
+                return false;
+            }
             std::fprintf(stderr, "[shaders] Preparing shaders; please wait.\n");
             auto result = host::run_process({launcher.get("python").string(), helper.string(),
                 "--runtime-prepare", "--game", game.string(), "--template", templatePath.string(),
@@ -213,6 +217,14 @@ inline bool activate(const fs::path& game, const std::string& renderer) {
                 "--package", package.string(), "--renderer", renderer});
             std::fprintf(stderr, "%s", result.output.c_str());
             if (result.code) throw std::runtime_error("shader preparation failed; using on-demand compilation");
+            const auto last = result.output.find_last_not_of("\r\n");
+            if (last == std::string::npos) throw std::runtime_error("shader preparation returned no status");
+            const auto line = result.output.rfind('\n', last);
+            const auto status = mods::json::parse(result.output.substr(
+                line == std::string::npos ? 0 : line + 1,
+                last - (line == std::string::npos ? 0 : line + 1) + 1)).get("status").string();
+            if (status == "skipped" || skipped(game, renderer)) return false;
+            if (status != "ready") throw std::runtime_error("shader preparation returned invalid status");
             active = read(root() / "active.json");
             valid = active.get("status").string() == "ready" && identity_matches(active, game, renderer);
         }

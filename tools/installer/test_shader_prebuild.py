@@ -34,6 +34,24 @@ class ShaderPrebuildTests(unittest.TestCase):
         return prebuild.prepare(self.game, self.template, '/synthetic/exe', self.cache,
                                self.package, runner=self.runner, **kwargs)
 
+    def test_runtime_cli_missing_template_is_nonfatal_and_failure_stays_nonzero(self):
+        import contextlib
+        import io
+        from unittest.mock import patch
+        self.template.unlink()
+        arguments = ['--runtime-prepare', '--game', str(self.game),
+            '--template', str(self.template), '--executable', '/synthetic/exe',
+            '--cache-root', str(self.cache), '--package', str(self.package),
+            '--renderer', 'vulkan']
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(prebuild.main(arguments), 0)
+        self.assertEqual(json.loads(output.getvalue())['status'], 'skipped')
+        self.assertFalse(self.cache.exists())
+        with patch.object(prebuild, 'prepare', return_value=dict(status='failed')), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(prebuild.main(arguments), 1)
+
     def test_missing_template_skips_without_commands_or_cache_changes(self):
         self.template.unlink()
         messages = []

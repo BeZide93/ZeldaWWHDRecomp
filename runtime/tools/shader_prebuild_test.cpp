@@ -2,7 +2,16 @@
 #include "gfx/shader_prebuild.h"
 #include <cassert>
 #include <chrono>
-int main() {
+int main(int argc, char** argv) {
+    // If startup unexpectedly spawns this test as its helper, leave evidence.
+    if (argc > 1) {
+        for (int i = 1; i + 1 < argc; ++i)
+            if (std::string(argv[i]) == "--cache-root") {
+                std::ofstream(std::filesystem::path(argv[i + 1]) / "unexpected-spawn") << "spawned";
+                return 3;
+            }
+        return 3;
+    }
     namespace fs = std::filesystem;
     using mods::json::Value;
     const auto temporary = fs::temp_directory_path() / ("wwhd-prebuild-test-" +
@@ -42,6 +51,28 @@ int main() {
     assert(!shaderprebuild::identity_matches(active, game, "metal"));
     assert(shaderprebuild::activate(game, "vulkan"));
     assert(std::string(getenv("WWHD_HEADSTART")) == (shaderprebuild::root() / "generation-test/headstart.bin").string());
+    // Selected external templates participate in identity; bundled changes do not.
+    const auto externalTemplate = temporary / "external-template.bin";
+    write(externalTemplate, "synthetic state fixture");
+    launcher["template"] = externalTemplate.string();
+    launcher["python"] = host::executable_path();
+    json(shaderprebuild::root() / "launcher.json", launcher);
+    write(package / "tools/shadercache/template.bin", "different bundled fixture");
+    assert(shaderprebuild::identity_matches(active, game, "vulkan"));
+    write(externalTemplate, "changed external fixture");
+    assert(!shaderprebuild::identity_matches(active, game, "vulkan"));
+    write(package / "tools/installer/shader_prebuild.py", "synthetic helper fixture");
+    fs::remove(externalTemplate);
+#ifdef _WIN32
+    _putenv_s("WWHD_HEADSTART", "");
+#else
+    unsetenv("WWHD_HEADSTART");
+#endif
+    assert(!shaderprebuild::activate(game, "vulkan"));
+    assert(!fs::exists(shaderprebuild::root() / "unexpected-spawn"));
+    launcher["template"] = (package / "tools/shadercache/template.bin").string();
+    json(shaderprebuild::root() / "launcher.json", launcher);
+    write(package / "tools/shadercache/template.bin", "synthetic state fixture");
     // A new archive and changed code both invalidate; no old generation removed.
     write(game / "content/new.pack", "synthetic archive fixture");
     assert(!shaderprebuild::identity_matches(active, game, "vulkan"));

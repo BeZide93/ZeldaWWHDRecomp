@@ -245,7 +245,9 @@ def main(argv=None):
                      progress=lambda text: print(text, file=sys.stderr, flush=True),
                      cancel=lambda: bool(args.cancel_file and args.cancel_file.exists()))
     print(json.dumps(result), flush=True)
-    return 0 if result['status'] == 'ready' else 1
+    # Skipping is a successful optional operation; actual preparation failures
+    # retain a nonzero exit status for the runtime's fallback diagnostic.
+    return 0 if result['status'] in ('ready', 'skipped') else 1
 
 
 if __name__ == '__main__':
