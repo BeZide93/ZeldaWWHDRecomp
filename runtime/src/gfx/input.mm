@@ -585,8 +585,19 @@ static void apply_scenario(PadState& s) {
         LOG("[test] t=%.3f s: end", t);
         if (FILE* f = fopen("test_done", "w")) fclose(f);
     }
+    // Opt-in raw controller fixture: exercise bindings and the dead zone before guest delivery.
+    static const bool controller_stick = getenv("WWHD_TEST_CONTROLLER_STICK") != nullptr;
     for (auto& p : sc.sticks)
-        if (t >= p.from && t < p.to) { s.lx = p.x; s.ly = p.y; }
+        if (t >= p.from && t < p.to) {
+            s.lx = p.x; s.ly = p.y;
+            if (controller_stick) {
+                float values[input_map::kPadCount]{};
+                values[p.x < 0 ? input_map::kPadLSLeft : input_map::kPadLSRight] = std::fabs(p.x);
+                values[p.y < 0 ? input_map::kPadLSDown : input_map::kPadLSUp] = std::fabs(p.y);
+                auto mapped = input_map::controller_state(input_map::current(), values);
+                s.lx = mapped.lx; s.ly = mapped.ly;
+            }
+        }
     for (auto& p : sc.rsticks)
         if (t >= p.from && t < p.to) { s.rx = p.x; s.ry = p.y; }
     for (auto& p : sc.presses)

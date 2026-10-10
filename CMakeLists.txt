@@ -352,6 +352,11 @@ target_include_directories(capture_schedule_test PRIVATE runtime/src)
 target_compile_options(capture_schedule_test PRIVATE -UNDEBUG)
 add_test(NAME capture_schedule COMMAND capture_schedule_test)
 
+add_executable(depth_peek_test runtime/tools/depth_peek_test.cpp)
+target_include_directories(depth_peek_test PRIVATE runtime/src)
+target_compile_options(depth_peek_test PRIVATE -UNDEBUG)
+add_test(NAME depth_peek COMMAND depth_peek_test)
+
 add_executable(headless_compose_test runtime/tools/headless_compose_test.cpp)
 target_include_directories(headless_compose_test PRIVATE runtime/src)
 target_compile_options(headless_compose_test PRIVATE -UNDEBUG)

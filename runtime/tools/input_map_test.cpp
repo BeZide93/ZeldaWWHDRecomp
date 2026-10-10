@@ -69,6 +69,7 @@ static void test_defaults() {
     v[kPadLT] = 0.8f;
     CHECK(controller_state(m, v).buttons == input::kZL);
     v[kPadLT] = 0; v[kPadLSLeft] = 0.6f; v[kPadRSUp] = 0.3f;
+    m.deadzone = 0;  // check axis bindings independently of the default dead zone
     s = controller_state(m, v);
     CHECK(std::fabs(s.lx + 0.6f) < 1e-6 && std::fabs(s.ry - 0.3f) < 1e-6);
 }
@@ -358,7 +359,7 @@ static void test_json_partial_and_bad() {
     CHECK(r.keys[kB][0] == kVK_ANSI_K && r.keys[kB][1] == kVK_Space);
     CHECK(r.keys[kX] == Mapping::defaults().keys[kX]);
     CHECK(r.pad[kHome] == kPadNone && r.pad[kA] == kPadB);
-    CHECK(r.deadzone == 0 && !r.invert_camera_y);
+    CHECK(r.deadzone == 0.15f && !r.invert_camera_y);
     // unknown names and app shortcuts are dropped with a warning, the rest still loads
     CHECK(from_json(R"({"keyboard": {"A": ["R", "K"], "Jump": ["J"], "B": ["Bogus"]}, "options": {"stick_deadzone": 5}})", r, &err));
     CHECK(!err.empty());
@@ -377,6 +378,29 @@ static void test_json_partial_and_bad() {
 
 static void test_deadzone() {
     Mapping m = Mapping::defaults();
+    float drift[kPadCount] = {};
+    // A resting stick with 1% noise must deliver exact neutral, not a slow zoom that leaves
+    // the game's full zoom-blur preset selected. Cover both signs and both sticks.
+    for (int axis : {kPadLSUp, kPadLSDown, kPadLSLeft, kPadLSRight,
+                     kPadRSUp, kPadRSDown, kPadRSLeft, kPadRSRight}) {
+        drift[axis] = 0.01f;
+        auto p = controller_state(m, drift);
+        CHECK(p.lx == 0 && p.ly == 0 && p.rx == 0 && p.ry == 0);
+        drift[axis] = 0;
+    }
+    drift[kPadLSUp] = drift[kPadLSRight] = 0.1f;
+    CHECK(controller_state(m, drift).lx == 0 && controller_state(m, drift).ly == 0);
+    drift[kPadLSUp] = drift[kPadLSRight] = 0;
+    drift[kPadLSUp] = 1;
+    CHECK(controller_state(m, drift).ly == 1);
+    drift[kPadLSUp] = 0;
+    // Explicit raw-input preferences still survive loading a controls file.
+    std::string err;
+    Mapping raw;
+    CHECK(from_json(R"({"options":{"stick_deadzone":0}})", raw, &err));
+    drift[kPadLSUp] = 0.01f;
+    CHECK(controller_state(raw, drift).ly == 0.01f);
+    CHECK(controller_state(m, drift).ly == 0);
     m.deadzone = 0.2f;
     float v[kPadCount] = {};
     v[kPadLSRight] = 0.15f;
