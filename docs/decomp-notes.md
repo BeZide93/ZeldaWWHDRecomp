@@ -146,6 +146,16 @@ time. Pass durations are averaged per kind (a slow logic pass must not keep chea
 passes out), a single sample counts at most twice the average (one hitch kept them out for 10 s),
 and after 10 s without an in-between pass one probe re-measures them.
 
+One-shot hides (`runtime/src/interp_nodraw.h`, `runtime/tools/interp_nodraw_test.cpp`): logic can
+hide an actor for one frame with `fopAcStts_NODRAW_e` (actor status `+0x2E0`, bit `0x01000000`);
+`fopAc_Draw` (`025D4654`) skips the draw and clears the bit, so logic must ask again every step.
+The talk camera does (`dCamera_c::talktoCamera`: the over-the-shoulder shots hide the listener,
+usually Link). Hold passes have no logic to ask again: the hook on `fopAc_Draw` records which actors
+the logic pass drew with the bit set and sets it again for the same step's hold passes (issue #126:
+Link flickered in conversations at 60/120/240 fps and in true 60). Persistent hides (the `daPy`
+no-draw flag, `+0x3B8` bit `0x08000000`; the camera attention status) need nothing: they stay set
+across passes.
+
 Logic stays at 30 Hz. For each rendered tick, record per model (J3DModel pointer) the world
 matrices produced by `calc` and the camera inputs of `camera_draw`. For the in-between frame,
 replay the frame's GX2 command list with draw matrices recomputed from blended world matrices and
