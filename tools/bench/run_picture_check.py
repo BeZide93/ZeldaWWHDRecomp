@@ -19,8 +19,8 @@ from run_bench import SCENES
 def prepare_candidate_generation(source, cache):
     """Copy a prepared setup generation privately; never modify its cache seed.
 
-    Expected setup layout: headstart.bin, shaders.bin, vulkan-shaders/ and
-    vulkan-pipelines.bin (plus its .recipes companion when present).
+    Headstart belongs to the generation; current caches belong to its sibling
+    live/ directory. Legacy flat generation caches remain supported.
     A supplied generation does not itself prove that the route is fully warm.
     """
     if Path(source).is_symlink():
@@ -33,24 +33,37 @@ def prepare_candidate_generation(source, cache):
     entries = sorted(source.rglob('*'))
     if source.is_symlink() or any(path.is_symlink() for path in entries):
         raise ValueError('prepared generation must not contain symbolic links')
-    hashes = {path.relative_to(source).as_posix(): file_hash(path)
-              for path in entries if path.is_file()}
+    seeds = [source]
+    live = source.parent / 'live'
+    if live.exists():
+        if live.is_symlink() or not live.is_dir() or any(p.is_symlink() for p in live.rglob('*')):
+            raise ValueError('live cache seed must be a directory without symbolic links')
+        if cache == live or cache.is_relative_to(live) or live.is_relative_to(cache):
+            raise ValueError('live seed and run cache must not overlap')
+        seeds.append(live)
+    def inventory(seed):
+        return {p.relative_to(seed).as_posix(): file_hash(p)
+                for p in sorted(seed.rglob('*')) if p.is_file()}
+    inventories = [inventory(seed) for seed in seeds]
+    hashes = {}
+    for files in inventories:
+        hashes.update(files)  # Stable live entries supersede legacy seed entries.
     target = cache / 'prebuilt'
-    shutil.copytree(source, target)
+    for seed in seeds:
+        shutil.copytree(seed, target, dirs_exist_ok=seed != source)
     for path in [target, *target.rglob('*')]:
         path.chmod(0o755 if path.is_dir() else 0o644)
     copied = {path.relative_to(target).as_posix(): file_hash(path)
               for path in sorted(target.rglob('*')) if path.is_file()}
-    after = {path.relative_to(source).as_posix(): file_hash(path)
-             for path in sorted(source.rglob('*')) if path.is_file()}
-    if copied != hashes or after != hashes:
+    after = [inventory(seed) for seed in seeds]
+    if copied != hashes or after != inventories:
         raise RuntimeError('prepared cache seed changed while copying')
     environment = dict(WWHD_HEADSTART=str(target / 'headstart.bin'),
         WWHD_SHADER_CACHE=str(target / 'shaders.bin'),
         WWHD_VK_SHADER_CACHE=str(target / 'vulkan-shaders'),
         WWHD_VK_PIPELINE_CACHE=str(target / 'vulkan-pipelines.bin'),
         WWHD_VK_PIPELINE_WARMUP='1')
-    return environment, dict(source=str(source), files_sha256=hashes,
+    return environment, dict(source=str(source), live_source=str(live) if len(seeds) > 1 else None, files_sha256=hashes,
         copied_to=str(target), route_warmth='not established by this flag')
 
 

@@ -29,6 +29,16 @@
 #include <sys/syscall.h>
 #endif
 namespace host {
+#ifdef _WIN32
+inline std::string utf8(const std::wstring& value) {
+ int count=WideCharToMultiByte(CP_UTF8,0,value.data(),int(value.size()),nullptr,0,nullptr,nullptr);
+ std::string result(count,0);if(count)WideCharToMultiByte(CP_UTF8,0,value.data(),int(value.size()),result.data(),count,nullptr,nullptr);return result;
+}
+inline std::string environment_utf8(const wchar_t* name) {
+ DWORD count=GetEnvironmentVariableW(name,nullptr,0);if(!count)return {};
+ std::wstring value(count,0);DWORD used=GetEnvironmentVariableW(name,value.data(),count);value.resize(used);return utf8(value);
+}
+#endif
 #if defined(__APPLE__) && defined(WWHD_HAS_VULKAN)
 // Render command batches can create Objective-C temporaries inside MoltenVK.
 void with_autorelease_pool(void (*fn)());
@@ -101,7 +111,7 @@ inline uintptr_t executable_base() {
 }
 inline std::string executable_path() {
 #ifdef _WIN32
- char path[32768]; DWORD n=GetModuleFileNameA(nullptr,path,sizeof path);return std::string(path,n);
+ wchar_t path[32768]; DWORD n=GetModuleFileNameW(nullptr,path,32768);return utf8(std::wstring(path,n));
 #elif !defined(__APPLE__)
  char path[4096];ssize_t n=readlink("/proc/self/exe",path,sizeof path);return n>0?std::string(path,n):std::string();
 #else
@@ -156,7 +166,7 @@ inline std::string exe_dir() {
   char buf[4096]; uint32_t n=sizeof buf;
   if(_NSGetExecutablePath(buf,&n)==0){ char real[PATH_MAX]; p=realpath(buf,real)?real:buf; }
 #elif defined(_WIN32)
-  char buf[MAX_PATH*4]; DWORD n=GetModuleFileNameA(nullptr,buf,sizeof buf); if(n>0&&n<sizeof buf) p.assign(buf,n);
+  p=executable_path();
 #else
   char buf[4096]; ssize_t n=readlink("/proc/self/exe",buf,sizeof buf-1); if(n>0) p.assign(buf,(size_t)n);
 #endif
@@ -167,10 +177,18 @@ inline std::string exe_dir() {
 }
 inline const std::string& portable_user_dir() {
  static const std::string dir=[]{
+#ifdef _WIN32
+  const auto override=environment_utf8(L"WWHD_USER_DIR");if(!override.empty())return override;
+#else
   if(const char* override=std::getenv("WWHD_USER_DIR"))return std::string(override);
+#endif
   std::string e=exe_dir();
   if(e.empty()) return std::string();
+#ifdef _WIN32
+  FILE* f=_wfopen(std::filesystem::u8path(e+"/portable.txt").c_str(),L"rb");
+#else
   FILE* f=fopen((e+"/portable.txt").c_str(),"rb");
+#endif
   if(!f) return std::string();
   fclose(f);
   size_t s=e.find_last_of("/\\");
@@ -180,12 +198,16 @@ inline const std::string& portable_user_dir() {
 }
 inline bool portable() { return !portable_user_dir().empty(); }
 inline std::string config_dir() {
+#ifdef _WIN32
+ const auto override=environment_utf8(L"WWHD_USER_DIR");if(!override.empty())return override;
+#else
  if(const char* override=getenv("WWHD_USER_DIR"))return override;
+#endif
  if(portable()) return portable_user_dir();
 #ifdef __APPLE__
  const char* home=getenv("HOME");return std::string(home?home:".")+"/Library/Application Support/WWHD";
 #elif defined(_WIN32)
- const char* root=getenv("APPDATA");return std::string(root?root:".")+"/WWHD";
+ const auto root=environment_utf8(L"APPDATA");return (root.empty()?std::string("."):root)+"/WWHD";
 #else
  if(const char* xdg=getenv("XDG_CONFIG_HOME"))return std::string(xdg)+"/wwhd";
  const char* home=getenv("HOME");return std::string(home?home:".")+"/.config/wwhd";

@@ -3,6 +3,17 @@
 #include <cassert>
 #include <chrono>
 int main(int argc, char** argv) {
+    if (argc == 3 && std::string(argv[1]) == "--measure-launch") {
+        const auto active = shaderprebuild::read(shaderprebuild::root() / "active.json");
+        for (int i = 0; i < 3; ++i) {
+            const auto start = std::chrono::steady_clock::now();
+            const bool valid = shaderprebuild::identity_matches(active, std::filesystem::u8path(argv[2]), "vulkan");
+            const auto elapsed = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+            std::printf("metadata_check_ms=%.3f valid=%d\n", elapsed, valid);
+            if (!valid) return 2;
+        }
+        return 0;
+    }
     // If startup unexpectedly spawns this test as its helper, leave evidence.
     if (argc > 1) {
         for (int i = 1; i + 1 < argc; ++i)
@@ -45,6 +56,13 @@ int main(int argc, char** argv) {
     id["format"] = mods::hash::sha256_file(package / "tools/shaderprep_format.py");
     id["game"]["code/test.rpx"] = mods::hash::sha256_file(game / "code/test.rpx");
     active["identity"] = id;
+    Value launch;
+    launch["runtime"] = shaderprebuild::metadata(shaderprebuild::runtime_path());
+    launch["template"] = shaderprebuild::metadata(package / "tools/shadercache/template.bin");
+    launch["translator"] = shaderprebuild::metadata(package / "tools/shaderprep.py");
+    launch["format"] = shaderprebuild::metadata(package / "tools/shaderprep_format.py");
+    launch["game"]["code/test.rpx"] = shaderprebuild::metadata(game / "code/test.rpx");
+    active["launch"] = launch;
     write(shaderprebuild::root() / "generation-test/headstart.bin", "synthetic local cache");
     json(shaderprebuild::root() / "active.json", active);
     assert(shaderprebuild::identity_matches(active, game, "vulkan"));
@@ -54,6 +72,7 @@ int main(int argc, char** argv) {
     // Selected external templates participate in identity; bundled changes do not.
     const auto externalTemplate = temporary / "external-template.bin";
     write(externalTemplate, "synthetic state fixture");
+    active["launch"]["template"] = shaderprebuild::metadata(externalTemplate);
     launcher["template"] = externalTemplate.string();
     launcher["python"] = host::executable_path();
     json(shaderprebuild::root() / "launcher.json", launcher);
@@ -73,6 +92,7 @@ int main(int argc, char** argv) {
     launcher["template"] = (package / "tools/shadercache/template.bin").string();
     json(shaderprebuild::root() / "launcher.json", launcher);
     write(package / "tools/shadercache/template.bin", "synthetic state fixture");
+    active["launch"]["template"] = shaderprebuild::metadata(package / "tools/shadercache/template.bin");
     // A new archive and changed code both invalidate; no old generation removed.
     write(game / "content/new.pack", "synthetic archive fixture");
     assert(!shaderprebuild::identity_matches(active, game, "vulkan"));
@@ -86,6 +106,7 @@ int main(int argc, char** argv) {
     assert(shaderprebuild::request_rebuild() && shaderprebuild::requested());
     assert(fs::is_regular_file(shaderprebuild::root() / "generation-test/headstart.bin"));
     write(game / "code/test.rpx", "synthetic executable fixture");
+    active["launch"]["game"]["code/test.rpx"] = shaderprebuild::metadata(game / "code/test.rpx");
     active["generation"] = "generation-test"; active["status"] = "warm_pending";
     json(shaderprebuild::root() / "active.json", active);
 #ifdef _WIN32
@@ -96,12 +117,18 @@ int main(int argc, char** argv) {
     shaderprebuild::resultPath = (temporary / "job/result.json").string();
     // Deliberate cancellation survives a pending generation, but rebuild wins.
     fs::remove(shaderprebuild::root() / "rebuild.request");
-    Value skip; skip["schema"] = 1; skip["identity"] = id;
+    Value skip; skip["schema"] = 1; skip["identity"] = id; skip["launch"] = active.get("launch");
     json(shaderprebuild::root() / "skip.json", skip);
     assert(shaderprebuild::skipped(game, "vulkan"));
     assert(!shaderprebuild::activate_pending(game, "vulkan"));
     assert(!shaderprebuild::activate(game, "vulkan"));
-    assert(!shaderprebuild::skipped(game, "metal"));
+    assert(shaderprebuild::skipped(game, "metal"));
+    auto runtimeChangedSkip = skip;
+    runtimeChangedSkip["launch"]["runtime"]["size"] = 0;
+    runtimeChangedSkip["launch"]["translator"]["size"] = 0;
+    json(shaderprebuild::root() / "skip.json", runtimeChangedSkip);
+    assert(shaderprebuild::skipped(game, "vulkan"));
+    assert(!shaderprebuild::identity_matches(runtimeChangedSkip, game, "vulkan"));
     assert(shaderprebuild::request_rebuild());
     assert(!shaderprebuild::skipped(game, "vulkan"));
     fs::remove(shaderprebuild::root() / "skip.json");

@@ -2771,6 +2771,10 @@ def gui_main(args):
             ctx.args.code_mods = "1" if req["code_mods"] else "0"
         if "skip_shader_prebuild" in req:
             ctx.args.skip_shader_prebuild = bool(req["skip_shader_prebuild"])
+        if req.get("shader_prebuild_cancel"):
+            # GUI marker is confined to this installation, not an arbitrary path.
+            ctx.args.shader_prebuild_cancel = str(Path(ctx.data_dir) / "shader-prebuild-cancel")
+            Path(ctx.args.shader_prebuild_cancel).unlink(missing_ok=True)
         if req.get("jobs"):
             ctx.args.jobs = int(req["jobs"])
         if kind == "image":

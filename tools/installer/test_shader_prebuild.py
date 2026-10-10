@@ -62,6 +62,77 @@ class ShaderPrebuildTests(unittest.TestCase):
         self.assertFalse(self.cache.exists())
         self.assertEqual(messages, [result['message']])
 
+    def test_optout_survives_runtime_and_translator_update(self):
+        executable = self.root / 'runtime'
+        executable.write_text('first build')
+        def prepare(**kwargs):
+            return prebuild.prepare(self.game, self.template, executable, self.cache,
+                                    self.package, runner=self.runner, **kwargs)
+        self.assertEqual(prepare(skip=True)['status'], 'skipped')
+        executable.write_text('updated build')
+        (self.package / 'tools/shaderprep.py').write_text('updated translator')
+        self.assertEqual(prepare()['status'], 'skipped')
+        self.assertEqual(self.calls, [])
+
+    def test_corrupt_markers_and_failed_inputs_suppression(self):
+        self.cache.mkdir()
+        for name in ('active.json', 'skip.json', 'failed.json'):
+            (self.cache / name).write_text('{corrupt')
+        self.assertEqual(self.prepare()['status'], 'ready')
+        self.template.write_text('updated template')
+        calls = []
+        def failure(*args):
+            calls.append(1)
+            raise RuntimeError('synthetic failure')
+        def prepare():
+            return prebuild.prepare(self.game, self.template, '/synthetic/exe', self.cache,
+                                    self.package, runner=failure)
+        self.assertEqual(prepare()['status'], 'failed')
+        self.assertEqual(prepare()['status'], 'skipped')
+        self.assertEqual(len(calls), 1)
+        (self.cache / 'rebuild.request').touch()
+        self.assertEqual(prepare()['status'], 'failed')
+        self.assertEqual(len(calls), 2)
+
+    @unittest.skipIf(sys.platform == 'win32', 'POSIX flock reader lease; Windows native lease checked by crossbuild')
+    def test_cleanup_preserves_generation_with_active_reader(self):
+        import fcntl
+        first = self.prepare()
+        directory = Path(first['generation'])
+        with (directory / 'in-use.lock').open('a+b') as lease:
+            fcntl.flock(lease.fileno(), fcntl.LOCK_SH | fcntl.LOCK_NB)
+            (self.cache / 'rebuild.request').touch()
+            self.prepare()
+            self.assertTrue(directory.exists())
+        selected = prebuild.read_marker(self.cache / 'active.json')['generation']
+        prebuild.cleanup_generations(self.cache, selected)
+        self.assertFalse(directory.exists())
+
+    def test_legacy_cache_migration_never_overwrites_live_entries(self):
+        generation = self.cache / 'generation-legacy'
+        (generation / 'vulkan-shaders').mkdir(parents=True)
+        (generation / 'shaders.bin').write_text('legacy metal cache')
+        (generation / 'vulkan-shaders/old.bin').write_text('legacy shader')
+        (self.cache / 'active.json').write_text(json.dumps(dict(generation=generation.name)))
+        live = self.cache / 'live/vulkan-shaders'
+        live.mkdir(parents=True)
+        (live / 'old.bin').write_text('current live shader')
+        prebuild.migrate_legacy_caches(self.cache)
+        self.assertEqual((self.cache / 'live/shaders.bin').read_text(), 'legacy metal cache')
+        self.assertEqual((live / 'old.bin').read_text(), 'current live shader')
+
+    def test_live_caches_survive_successful_generation_replacement(self):
+        first = self.prepare()
+        live = self.cache / 'live/shaders.bin'
+        live.write_text('synthetic player cache')
+        (self.cache / 'rebuild.request').touch()
+        second = self.prepare()
+        self.assertEqual(live.read_text(), 'synthetic player cache')
+        self.assertNotEqual(first['generation'], second['generation'])
+        self.assertFalse(Path(first['generation']).exists())
+        self.assertTrue(Path(second['generation']).exists())
+        self.assertEqual(self.calls[1][1]['WWHD_SHADER_CACHE'], self.calls[3][1]['WWHD_SHADER_CACHE'])
+
     def test_success_reuses_identity_and_private_outputs(self):
         result = self.prepare()
         self.assertEqual(result['status'], 'ready')
@@ -109,7 +180,7 @@ class ShaderPrebuildTests(unittest.TestCase):
                                  self.package, runner=failure)
         self.assertEqual(result['status'], 'failed')
         self.assertEqual((self.cache / 'active.json').read_bytes(), active)
-        self.assertEqual(sorted(p.name for p in self.cache.iterdir()), dirs)
+        self.assertEqual(sorted(p.name for p in self.cache.iterdir() if p.name != "failed.json"), dirs)
 
     def test_skip_and_cancel_leave_sources_and_active_untouched(self):
         self.assertEqual(self.prepare(skip=True)['status'], 'skipped')

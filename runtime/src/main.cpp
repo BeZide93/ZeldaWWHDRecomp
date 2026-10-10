@@ -54,7 +54,7 @@ namespace interp { void set_mode(int); }
 #ifdef WWHD_HAS_VULKAN
 namespace gfxvk { int renderer_smoke_test(); int warm_headstart_shaders(); }
 #ifdef __ANDROID__
-namespace gfxvk { int android_display_smoke_test(); void save_renderer_caches(); }
+namespace gfxvk { int android_display_smoke_test(); void shutdown_renderer_caches(); }
 #endif
 #endif
 #ifdef WWHD_HAS_METAL
@@ -475,7 +475,7 @@ int main(int argc, char** argv) {
 #ifdef __ANDROID__
             if (display_smoke) {
                 result = gfxvk::android_display_smoke_test();
-                gfxvk::save_renderer_caches();
+                gfxvk::shutdown_renderer_caches();
             }
             else
 #endif
@@ -530,7 +530,7 @@ int main(int argc, char** argv) {
     const std::string shader_renderer = render::requested() == render::Api::Metal ? "metal" : "vulkan";
     bool pending_shader_warm = false;
 #ifdef __ANDROID__
-    if (shader_prebuild_root.empty() || std::filesystem::path(shader_prebuild_root).lexically_normal() == shaderprebuild::root().lexically_normal())
+    if (warm_shaders && (shader_prebuild_root.empty() || std::filesystem::path(shader_prebuild_root).lexically_normal() == shaderprebuild::root().lexically_normal()))
         pending_shader_warm = shaderprebuild::activate_pending(config::game_dir, shader_renderer);
     if (warm_shaders && !shader_prebuild_root.empty() && !pending_shader_warm) {
         shaderprebuild::finish_pending(false); return 1;

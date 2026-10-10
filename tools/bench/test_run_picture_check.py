@@ -74,6 +74,23 @@ class CaptureEvidenceTest(unittest.TestCase):
         self.assertTrue(candidate['WWHD_SHADER_CACHE'].endswith('cache/prebuilt/shaders.bin'))
         self.assertEqual(candidate['WWHD_VK_PIPELINE_WARMUP'], '1')
 
+    def test_generation_uses_stable_live_cache_without_mutating_it(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            generation = root / 'generation-test'
+            generation.mkdir()
+            (generation / 'headstart.bin').write_bytes(b'synthetic headstart')
+            (generation / 'shaders.bin').write_bytes(b'old seed')
+            live = root / 'live'
+            live.mkdir()
+            (live / 'shaders.bin').write_bytes(b'player accumulated cache')
+            env, evidence = pictures.prepare_candidate_generation(generation, root / 'output')
+            copied = Path(env['WWHD_SHADER_CACHE'])
+            self.assertEqual(copied.read_bytes(), b'player accumulated cache')
+            copied.write_bytes(b'synthetic new entries')
+            self.assertEqual((live / 'shaders.bin').read_bytes(), b'player accumulated cache')
+            self.assertEqual(evidence['live_source'], str(live.resolve()))
+
     def test_prepared_generation_rejects_overlapping_destination_and_symlinks(self):
         with tempfile.TemporaryDirectory() as directory:
             seed = Path(directory) / 'generation'

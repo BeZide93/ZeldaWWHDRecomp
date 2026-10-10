@@ -37,6 +37,35 @@ def identity(game, template, package, renderer):
                 game={str(p.relative_to(game)): file_hash(p) for p in archives})
 
 
+def metadata(path):
+    stat = Path(path).stat()
+    return {'size': stat.st_size, 'mtime': stat.st_mtime_ns // 1_000_000_000,
+            'mtime_ns': stat.st_mtime_ns % 1_000_000_000}
+
+
+def launch_identity(game, template, package, runtime):
+    game = Path(game)
+    return dict(game={p.relative_to(game).as_posix(): metadata(p) for p in sorted(game.rglob('*'))
+                      if p.is_file() and p.suffix.lower() in ('.sharcfb', '.rpx', '.szs', '.pack', '.sarc')},
+                template=metadata(template), translator=metadata(Path(package) / 'tools/shaderprep.py'),
+                format=metadata(Path(package) / 'tools/shaderprep_format.py') if (Path(package) / 'tools/shaderprep_format.py').is_file() else None,
+                runtime=metadata(runtime) if runtime and Path(runtime).is_file() else None)
+
+
+def read_marker(path):
+    try:
+        value = json.loads(Path(path).read_text())
+        return value if isinstance(value, dict) else {}
+    except (OSError, ValueError, TypeError):
+        return {}
+
+
+def opted_out(marker, wanted):
+    saved = marker.get('identity', {})
+    return (marker.get('schema') == SCHEMA and isinstance(saved, dict)
+            and saved.get('template') == wanted.get('template') and saved.get('game') == wanted.get('game'))
+
+
 def atomic_json(path, value):
     path = Path(path)
     # Different setup/startup processes must never share a temporary filename.
@@ -94,12 +123,70 @@ def activation_lock(root, timeout=5.0):
             release()
 
 
+def migrate_legacy_caches(root):
+    """Carry old generation caches forward without replacing any live entry."""
+    root = Path(root)
+    previous = read_marker(root / 'active.json')
+    name = previous.get('generation')
+    if not isinstance(name, str) or not name.startswith('generation-') or Path(name).name != name:
+        return
+    source = root / name
+    if source.is_symlink():
+        return
+    live = root / 'live'
+    for relative in ('shaders.bin', 'vulkan-shaders', 'vulkan-pipelines.bin', 'vulkan-pipelines.bin.recipes'):
+        old = source / relative
+        if old.is_symlink():
+            continue
+        paths = [old] if old.is_file() else list(old.rglob('*')) if old.is_dir() else []
+        for path in paths:
+            if not path.is_file() or path.is_symlink():
+                continue
+            target = live / relative / path.relative_to(old) if old.is_dir() else live / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                with path.open('rb') as incoming, target.open('xb') as outgoing:
+                    shutil.copyfileobj(incoming, outgoing)
+            except FileExistsError:
+                pass
+
+
+def cleanup_generations(root, selected):
+    """Delete only completed, superseded generations without active readers."""
+    root = Path(root)
+    for directory in root.glob('generation-*'):
+        if directory.name == selected or directory.is_symlink() or not directory.is_dir():
+            continue
+        # In-progress builders have no completed manifest yet.
+        if not (directory / 'manifest.json').is_file():
+            continue
+        try:
+            with (directory / 'in-use.lock').open('a+b') as stream:
+                if os.fstat(stream.fileno()).st_size == 0:
+                    stream.write(b'\0'); stream.flush()
+                if os.name == 'nt':
+                    import msvcrt
+                    stream.seek(0); msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                # Windows cannot unlink an open lock; close only after exclusive
+                # ownership is established. Publication lock excludes new selection.
+                if os.name == 'nt':
+                    stream.close()
+                shutil.rmtree(directory)
+        except OSError:
+            pass
+
+
 def cache_environment(generation, game, renderer):
     generation = Path(generation)
+    live = generation.parent / 'live'
+    live.mkdir(parents=True, exist_ok=True)
     return dict(WWHD_GAME=str(game), WWHD_HEADSTART=str(generation / 'headstart.bin'),
-                WWHD_SHADER_CACHE=str(generation / 'shaders.bin'),
-                WWHD_VK_SHADER_CACHE=str(generation / 'vulkan-shaders'),
-                WWHD_VK_PIPELINE_CACHE=str(generation / 'vulkan-pipelines.bin'),
+                WWHD_SHADER_CACHE=str(live / 'shaders.bin'),
+                WWHD_VK_SHADER_CACHE=str(live / 'vulkan-shaders'),
+                WWHD_VK_PIPELINE_CACHE=str(live / 'vulkan-pipelines.bin'),
                 WWHD_RENDERER_RUNTIME=renderer, WWHD_NO_AUDIO='1', WWHD_HIDDEN_WINDOWS='1')
 
 
@@ -147,25 +234,32 @@ def prepare(game, template, executable, cache_root, package, renderer='vulkan',
         runtime = runtime_identity or executable
         if runtime and Path(runtime).is_file():
             wanted['runtime'] = file_hash(runtime)
+        launch = launch_identity(game, template, package, runtime)
         if skip or cancel():
             with activation_lock(root):
-                atomic_json(root / 'skip.json', dict(schema=SCHEMA, identity=wanted))
+                atomic_json(root / 'skip.json', dict(schema=SCHEMA, identity=wanted, launch=launch))
                 (root / 'rebuild.request').unlink(missing_ok=True)
             return dict(status='skipped', message='Shaders will compile during play')
         if (root / 'skip.json').is_file() and not (root / 'rebuild.request').exists():
-            skipped = json.loads((root / 'skip.json').read_text())
-            if skipped.get('schema') == SCHEMA and skipped.get('identity') == wanted:
+            skipped = read_marker(root / 'skip.json')
+            if opted_out(skipped, wanted):
                 return dict(status='skipped', message='Shaders will compile during play')
         active = root / 'active.json'
         if active.is_file() and not (root / 'rebuild.request').exists():
-            previous = json.loads(active.read_text())
+            previous = read_marker(active)
             name = previous.get('generation', '')
+            if not isinstance(name, str):
+                name = ''
             generation = root / name
             if (previous.get('identity') == wanted and previous.get('status') == 'ready'
                     and name.startswith('generation-') and Path(name).name == name
                     and generation.parent == root and (generation / 'headstart.bin').is_file()):
                 return dict(status='ready', generation=str(generation), reused=True)
+        failed = read_marker(root / 'failed.json')
+        if not (root / 'rebuild.request').exists() and failed.get('identity') == wanted:
+            return dict(status='skipped', message='Previous preparation failed; request Rebuild shader cache to retry')
         root.mkdir(parents=True, exist_ok=True)
+        migrate_legacy_caches(root)
         staging = Path(tempfile.mkdtemp(prefix='generation-', dir=root))
         progress('Resolving shaders from your game files')
         import sys
@@ -190,13 +284,16 @@ def prepare(game, template, executable, cache_root, package, renderer='vulkan',
             env.update(cache_environment(staging, game, renderer))
             runner([str(executable), '--game', str(game), '--warm-shaders'], env, cancel, progress)
             status = 'ready'
-        result = dict(schema=SCHEMA, status=status, identity=wanted, generation=staging.name)
+        result = dict(schema=SCHEMA, status=status, identity=wanted, launch=launch, generation=staging.name)
         with activation_lock(root):
             atomic_json(staging / 'manifest.json', result)
             atomic_json(active, result)
             if status == 'ready':
                 (root / 'rebuild.request').unlink(missing_ok=True)
             (root / 'skip.json').unlink(missing_ok=True)
+            (root / 'failed.json').unlink(missing_ok=True)
+            if status == 'ready':
+                cleanup_generations(root, staging.name)
         return dict(status=status, generation=str(staging), reused=False)
     except Exception as error:
         if staging:
@@ -204,8 +301,14 @@ def prepare(game, template, executable, cache_root, package, renderer='vulkan',
         if isinstance(error, InterruptedError) and wanted is not None:
             try:
                 with activation_lock(root):
-                    atomic_json(root / 'skip.json', dict(schema=SCHEMA, identity=wanted))
+                    atomic_json(root / 'skip.json', dict(schema=SCHEMA, identity=wanted, launch=launch))
                     (root / 'rebuild.request').unlink(missing_ok=True)
+            except OSError:
+                pass
+        if not isinstance(error, InterruptedError) and wanted is not None:
+            try:
+                with activation_lock(root):
+                    atomic_json(root / 'failed.json', dict(schema=SCHEMA, identity=wanted, launch=launch))
             except OSError:
                 pass
         progress('Shader preparation unavailable: %s. The game can still run.' % error)

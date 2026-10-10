@@ -38,17 +38,24 @@ public final class ShaderPrepareActivity extends WwhdActivity {
         return args.toArray(new String[0]);
     }
 
+    private boolean explicitlySkipped;
+
+    @Override public void onBackPressed() {
+        explicitlySkipped = true;
+        finish();
+    }
+
     @Override protected void onDestroy() {
         try {
             String path = getIntent().getStringExtra("result");
-            if (path != null && !new File(path).isFile()) {
+            if (explicitlySkipped && path != null && !new File(path).isFile()) {
                 File root = new File(shaderUserDirectory(), "shader-prebuild");
                 // This identity-bound user request is an independent atomic file,
                 // not publication of an active generation. Do not use Java
                 // FileLock here: POSIX fcntl locks do not interoperate with flock.
                 JSONObject active = SetupStore.read(new File(root, "active.json"));
                 SetupStore.write(new File(root, "skip.json"), new JSONObject().put("schema", 1)
-                    .put("identity", active.getJSONObject("identity")));
+                    .put("identity", active.getJSONObject("identity")).put("launch", active.optJSONObject("launch")));
                 new File(root, "rebuild.request").delete();
                 SetupStore.write(new File(path), new JSONObject().put("schema", 1).put("status", "skipped")
                     .put("message", "Shader preparation closed; the game can compile during play"));

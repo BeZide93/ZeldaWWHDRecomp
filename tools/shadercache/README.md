@@ -57,3 +57,15 @@ For a local template, run setup with `--shader-template /path/to/template.bin` o
 the environment variable; otherwise setup uses the optional bundled template.
 The selected path is saved for later cache rebuilds. Without a template, setup
 skips preparation and shaders compile during play.
+
+Setup/repair is the only preparation entry point. Ordinary game startup checks the saved
+input metadata and selects an already-ready head start; it never runs Python, assembles
+a head start, or performs offline warming. Full input hashes are computed during setup.
+An opt-out is bound to the game and template, so a runtime update does not undo it.
+Failed preparations are remembered for those inputs until they change or a rebuild is requested.
+
+Prepared head starts belong to `shader-prebuild/generation-*`; player shader and driver
+caches belong to `shader-prebuild/live` and persist across generations. Successful publication
+removes superseded generations only when they have no active reader lease. Explicit cache
+environment overrides retain precedence. Local Vulkan recipes also carry a source-derived
+runtime fingerprint; a warm recipe must match the current serialized pipeline state before use.

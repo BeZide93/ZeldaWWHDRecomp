@@ -600,12 +600,12 @@ with your computer and graphics driver. The generated caches stay on your comput
 You can uncheck **Prepare shaders now**, or use `--skip-shader-prebuild` with terminal setup.
 On Android, Back skips the preparation screen. If preparation fails or the build has no template,
 setup skips it with a short message and the game compiles shaders as needed during play.
-Skipping is remembered until you request a rebuild or the game/build changes.
+Skipping is remembered for the same game and template, including after game runtime updates.
 
-Use **Settings → Graphics → Rebuild shader cache**, then restart, to prepare a fresh cache.
-Setup repair/update also checks whether preparation needs refreshing. Uncovered areas can still
+Use **Settings → Graphics → Rebuild shader cache**, then run setup and choose repair/update to
+prepare a fresh cache. Launching the game never starts preparation automatically. Uncovered areas can still
 stutter the first time you visit them. When a shader is unavailable, the renderer waits for its exact
-state and may repeat the last finished picture; objects are never deliberately omitted.
+state and may repeat the last finished picture.
 
 Caches live in the host settings folder's `shader-prebuild` directory, or
 `data/user/shader-prebuild` in a portable installation. Keep generated caches and recordings local.

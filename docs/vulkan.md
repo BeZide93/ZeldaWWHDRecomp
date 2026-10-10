@@ -267,15 +267,16 @@ caches stay local.
 
 Uncheck **Prepare shaders now** in setup, use `--skip-shader-prebuild` in terminal setup, or press Back
 on Android's preparation screen to skip. A missing template or a preparation failure does not prevent
-playing: shaders compile on demand. Skipping is remembered for the same game/build.
+playing: shaders compile on demand. Skipping is remembered for the same game and template, including across runtime updates.
 
-Choose **Settings → Graphics → Rebuild shader cache** and restart to prepare again. Setup repair/update
-also refreshes preparation when the game, template, translator or runtime changes. The active generation
+Choose **Settings → Graphics → Rebuild shader cache**, then run setup repair/update to prepare again.
+Ordinary game launches never start preparation. Setup repair/update checks whether preparation needs
+refreshing. Player caches persist in `shader-prebuild/live` across preparation generations. The active generation
 lives under the host configuration directory's `shader-prebuild` folder; portable installations use their
 user directory. Cache overrides take precedence over this selection.
 
 The template covers recorded states rather than every possible scene. Uncovered shaders and pipelines
-can still cause a first-use hitch. Draws always wait for their exact state; the renderer can repeat the
+can still cause a first-use hitch. Pending draws wait for their exact state; the renderer can repeat the
 last complete picture during that wait. For local template selection and recording commands, see the
 [maintainer guide](../tools/shadercache/README.md).
 

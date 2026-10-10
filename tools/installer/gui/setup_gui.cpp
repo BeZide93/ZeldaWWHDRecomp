@@ -458,6 +458,7 @@ struct App {
     bool opt_remove_toolchain = false, opt_shortcut = false;
     bool code_mods = false;
     bool prepare_shaders = true;
+    bool shader_skip_requested = false;
     std::deque<std::pair<std::string, std::string>> queue;  // requests to send one after another
     std::string after;                                       // then: play | quit | open
     std::string leaving;  // Done screen: Play or Quit was pressed (its options are queued and no longer shown)
@@ -804,11 +805,13 @@ static void apply_dialog(const std::string& target, const std::string& path) {
 static void start_install(const std::string& source) {
     A.install_source = source;
     A.steps.clear();
+    A.shader_skip_requested = false;
     A.current = -1;
     std::string f = "\"source\":" + jstr(source);
     f += std::string(",\"code_mods\":") + (A.code_mods ? "true" : "false");
     if (source != "installed") f += ",\"path\":" + jstr(A.source_path);
     f += std::string(",\"skip_shader_prebuild\":") + (A.prepare_shaders ? "false" : "true");
+    f += ",\"shader_prebuild_cancel\":" + jstr(A.data_dir + "/shader-prebuild-cancel");
     request("install", f);
     go(Screen::Installing);
 }
@@ -1282,6 +1285,17 @@ static void screen_installing() {
     }
     ImGui::EndChild();
     ImGui::Spacing();
+    const bool preparing = std::any_of(A.steps.begin(), A.steps.end(), [](const Step& step) {
+        return step.id == "shaders" && step.state == 1;
+    });
+    if (preparing) {
+        if (A.shader_skip_requested) muted("Skipping shader preparation; finishing setup...");
+        else if (ImGui::Button("Skip shader preparation")) {
+            if (auto* file = SDL_IOFromFile((A.data_dir + "/shader-prebuild-cancel").c_str(), "wb")) {
+                SDL_CloseIO(file); A.shader_skip_requested = true;
+            }
+        }
+    }
     if (details_header()) log_pane(std::max(60.0f, space_above_footer()));
 }
 

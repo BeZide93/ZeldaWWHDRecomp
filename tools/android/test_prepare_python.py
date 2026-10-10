@@ -11,6 +11,17 @@ from prepare_python import write_entry, verified_download, runtime_fixture_sourc
 
 
 class ResourceIdentityTests(unittest.TestCase):
+    def test_normal_launch_has_no_preparation_and_destroy_does_not_opt_out(self):
+        root = Path(__file__).resolve().parents[2]
+        activity = (root / 'android/app/src/main/java/org/wwhdrecomp/wwhd/WwhdActivity.java').read_text()
+        self.assertNotIn('EmbeddedPython.execute', activity)
+        self.assertNotIn('shader_prebuild_android', activity)
+        main = (root / 'runtime/src/main.cpp').read_text()
+        self.assertIn('warm_shaders &&', main)
+        prep = (root / 'android/app/src/main/java/org/wwhdrecomp/wwhd/ShaderPrepareActivity.java').read_text()
+        self.assertIn('explicitlySkipped && path != null', prep)
+        self.assertIn('onBackPressed()', prep)
+
     def test_optional_template_asset_missing_or_synthetic(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

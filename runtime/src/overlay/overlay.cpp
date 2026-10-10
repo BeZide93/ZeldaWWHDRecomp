@@ -633,8 +633,8 @@ void tab_graphics() {
     if (ImGui::Button("Rebuild shader cache"))
         rebuildFailed = !shaderprebuild::request_rebuild();
     if (rebuildFailed) note("Could not save the request. Check that the settings folder is writable.");
-    else if (shaderprebuild::requested()) note("Shaders and pipelines will be rebuilt on the next start.");
-    help("Prepares shaders from your game files. Rebuilding can take a few minutes; current play continues normally.");
+    else if (shaderprebuild::requested()) note("Run setup and choose repair/update to rebuild shaders and pipelines.");
+    help("Requests preparation during setup repair/update. Preparation can take a few minutes; launching the game never starts it automatically.");
 #ifdef __ANDROID__
     heading("GPU driver (Snapdragon / Adreno)");
     note("Active: %s", gfxvk::drivers::active_name().c_str());
