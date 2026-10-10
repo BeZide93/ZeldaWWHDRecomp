@@ -13,7 +13,13 @@
 #include <chrono>
 #include <sys/stat.h>
 #include <memory>
-#ifndef _WIN32
+#include <fcntl.h>
+#if defined(__linux__) || defined(__ANDROID__)
+#include <sys/syscall.h>
+#endif
+#ifdef _WIN32
+#include <io.h>
+#else
 #include <sys/file.h>
 #endif
 
@@ -194,32 +200,108 @@ public:
     }
 };
 inline std::unique_ptr<GenerationLease> generationLease;
-// Publish a complete staged file without ever replacing a player's live cache.
-inline bool publish_legacy_file(const fs::path& temporary, const fs::path& target) {
+// Normal uses atomic no-replace operations first. The mode is a deterministic
+// unit-test seam; runtime callers always use Normal.
+enum class LegacyPublishMode { Normal, ExclusiveCopy, Fail };
+inline bool publish_legacy_file(const fs::path& temporary, const fs::path& target,
+                                LegacyPublishMode mode = LegacyPublishMode::Normal,
+                                void (*beforeFailureCleanup)(const fs::path&) = nullptr) {
+    if (mode == LegacyPublishMode::Fail) return false;
+    if (mode == LegacyPublishMode::Normal) {
 #ifdef _WIN32
-    return MoveFileExW(temporary.c_str(), target.c_str(), MOVEFILE_WRITE_THROUGH) != 0;
+        if (MoveFileExW(temporary.c_str(), target.c_str(), MOVEFILE_WRITE_THROUGH)) return true;
 #else
-    std::error_code error;
-    fs::create_hard_link(temporary, target, error);
-    return !error;
+        std::error_code error;
+        fs::create_hard_link(temporary, target, error);
+        if (!error) return true;
+#ifdef __APPLE__
+        if (renamex_np(temporary.c_str(), target.c_str(), RENAME_EXCL) == 0) return true;
+#elif defined(SYS_renameat2)
+        if (syscall(SYS_renameat2, AT_FDCWD, temporary.c_str(), AT_FDCWD,
+                    target.c_str(), 1 /* RENAME_NOREPLACE */) == 0) return true;
 #endif
+#endif
+    }
+    // Last resort for filesystems lacking links and no-replace rename. Own the
+    // exclusive destination before copying, and remove only our failed output.
+    const auto targetBytes = target.u8string();
+    const std::string targetPath(targetBytes.begin(), targetBytes.end());
+    FILE* output = gfxvk::open_utf8_file(targetPath, "wbx");
+    if (!output) return false;
+#ifdef _WIN32
+    BY_HANDLE_FILE_INFORMATION owned{};
+    const bool identified=GetFileInformationByHandle(
+        reinterpret_cast<HANDLE>(_get_osfhandle(_fileno(output))),&owned)!=0;
+#else
+    struct stat owned{};
+    const bool identified=fstat(fileno(output),&owned)==0;
+#endif
+    const auto sourceBytes = temporary.u8string();
+    FILE* input = gfxvk::open_utf8_file(std::string(sourceBytes.begin(),sourceBytes.end()), "rb");
+    bool ok = input != nullptr;
+    if (input) {
+        char block[65536]; size_t size;
+        while ((size = std::fread(block,1,sizeof block,input)))
+            if (std::fwrite(block,1,size,output) != size) { ok=false; break; }
+        if (std::ferror(input)) ok=false;
+        if (std::fclose(input)) ok=false;
+    }
+    if (std::fclose(output)) ok=false;
+    if (!ok) {
+        if (beforeFailureCleanup) beforeFailureCleanup(target);
+        // Another renderer can atomically replace this pathname while copying.
+        // Never remove a replacement which is not the file we created.
+        bool same=false;
+#ifdef _WIN32
+        HANDLE current=CreateFileW(target.c_str(),FILE_READ_ATTRIBUTES,
+            FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,
+            FILE_FLAG_OPEN_REPARSE_POINT,nullptr);
+        if(current!=INVALID_HANDLE_VALUE) {
+            BY_HANDLE_FILE_INFORMATION info{};
+            same=identified && GetFileInformationByHandle(current,&info) &&
+                info.dwVolumeSerialNumber==owned.dwVolumeSerialNumber &&
+                info.nFileIndexHigh==owned.nFileIndexHigh && info.nFileIndexLow==owned.nFileIndexLow;
+            CloseHandle(current);
+        }
+#else
+        struct stat current{};
+        same=identified && lstat(target.c_str(),&current)==0 &&
+            current.st_dev==owned.st_dev && current.st_ino==owned.st_ino;
+#endif
+        if (same) { std::error_code error; fs::remove(target,error); }
+    }
+    return ok;
 }
-inline void copy_legacy_file(const fs::path& source, const fs::path& target) {
+inline bool copy_legacy_file(const fs::path& source, const fs::path& target,
+                             LegacyPublishMode mode = LegacyPublishMode::Normal) {
     std::error_code error;
-    if (fs::exists(target, error) || !fs::is_regular_file(fs::symlink_status(source, error))) return;
+    const auto targetStatus=fs::symlink_status(target,error);
+    if (error && error != std::errc::no_such_file_or_directory) return false;
+    if (fs::exists(targetStatus)) return !fs::is_directory(targetStatus);
+    error.clear();
+    const auto sourceStatus=fs::symlink_status(source,error);
+    if (error) return error == std::errc::no_such_file_or_directory;
+    if (!fs::is_regular_file(sourceStatus)) return true;
     fs::create_directories(target.parent_path());
     std::string temporary;
-    FILE* staged = gfxvk::open_atomic_temporary(target.string(), temporary);
-    std::fclose(staged);
+    const auto targetBytes=target.u8string();
+    FILE* staged = gfxvk::open_atomic_temporary(std::string(targetBytes.begin(),targetBytes.end()), temporary);
+    if (std::fclose(staged)) { fs::remove(fs::u8path(temporary),error); return false; }
+    bool copied=false;
     try {
         fs::copy_file(source, fs::u8path(temporary), fs::copy_options::overwrite_existing);
-        if (!publish_legacy_file(fs::u8path(temporary), target) && !fs::exists(target))
-            std::fprintf(stderr, "[shader prebuild] Could not migrate a legacy cache; continuing\n");
+        copied=publish_legacy_file(fs::u8path(temporary), target, mode);
+        if (!copied) {
+            error.clear();
+            const auto status=fs::symlink_status(target,error);
+            copied=!error && fs::exists(status) && !fs::is_directory(status);
+        }
     } catch (...) {
         fs::remove(fs::u8path(temporary), error);
         throw;
     }
     fs::remove(fs::u8path(temporary), error);
+    return copied;
 }
 inline bool legacy_pipeline_filename(const std::string& name) {
     // Only our old device-specific cache and its adjacent recipe file.
@@ -233,13 +315,17 @@ inline bool legacy_pipeline_filename(const std::string& name) {
     }
     return true;
 }
-inline void migrate_default_caches(const fs::path& configDirectory, const fs::path& metalCacheFile) noexcept {
+inline void migrate_default_caches(const fs::path& configDirectory, const fs::path& metalCacheFile,
+                                    LegacyPublishMode mode = LegacyPublishMode::Normal) noexcept {
     try {
         const auto live = root() / "live", marker = live / ".legacy-defaults-v1";
         if (fs::exists(marker)) return;
-        auto copy = [](const fs::path& source, const fs::path& target) {
-            try { copy_legacy_file(source, target); }
-            catch (...) { std::fprintf(stderr, "[shader prebuild] Could not migrate a legacy cache; continuing\n"); }
+        PublicationLock migrationLock;
+        if (fs::exists(marker)) return; // Another process completed while waiting.
+        bool complete=true;
+        auto copy = [&](const fs::path& source, const fs::path& target) {
+            try { if (!copy_legacy_file(source, target, mode)) complete=false; }
+            catch (...) { complete=false; }
         };
         const auto old = configDirectory / "shadercache";
         std::error_code error;
@@ -248,8 +334,7 @@ inline void migrate_default_caches(const fs::path& configDirectory, const fs::pa
             const auto name = entries->path().filename().string();
             if (legacy_pipeline_filename(name)) copy(entries->path(), live / name);
         }
-        if (error && error != std::errc::no_such_file_or_directory)
-            std::fprintf(stderr, "[shader prebuild] Could not scan legacy caches; continuing\n");
+        if (error && error != std::errc::no_such_file_or_directory) complete=false;
         // macOS portable builds previously selected shaders.bin automatically,
         // which placed Vulkan device caches beside it instead of in shadercache.
         error.clear();
@@ -260,15 +345,20 @@ inline void migrate_default_caches(const fs::path& configDirectory, const fs::pa
             if (name.starts_with(prefix) && legacy_pipeline_filename(name.substr(prefix.size())))
                 copy(portable->path(), live / name.substr(prefix.size()));
         }
+        if (error && error != std::errc::no_such_file_or_directory) complete=false;
         copy(configDirectory / "shaders.bin", live / "shaders.bin");
         copy(old / "vulkan-shaders/spirv.bin", live / "vulkan-shaders/spirv.bin");
         if (!metalCacheFile.empty()) copy(metalCacheFile, live / "shaders.bin");
+        if (!complete) {
+            std::fprintf(stderr,"[shader prebuild] Legacy cache migration incomplete; will retry\n");
+            return;
+        }
         fs::create_directories(live);
         std::string temporary;
         FILE* staged = gfxvk::open_atomic_temporary(marker.string(), temporary);
         const bool written = std::fputs("legacy-defaults-v1\n", staged) >= 0;
         const bool closed = std::fclose(staged) == 0;
-        if (written && closed) publish_legacy_file(fs::u8path(temporary), marker);
+        if (written && closed) publish_legacy_file(fs::u8path(temporary), marker, mode);
         fs::remove(fs::u8path(temporary), error);
     } catch (...) {
         std::fprintf(stderr, "[shader prebuild] Legacy cache migration unavailable; continuing\n");

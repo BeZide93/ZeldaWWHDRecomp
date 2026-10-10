@@ -163,7 +163,7 @@ public class SetupService extends Service {
                 if (!kind.equals("folder")) configuration.put("extractor", AndroidExtractor.prepare(this));
                 String revision = EmbeddedPython.checksum(this, "python-source.zip", () -> checkPause(active));
                 configuration.put("port_revision", revision).put("jobs", compileJobs())
-                    .put("shader_cache_root", new File(getFilesDir(), "user/shader-prebuild").getAbsolutePath());
+                    .put("shader_cache_root", AndroidUserDirectories.shaderPrebuild(getExternalFilesDir(null)).getAbsolutePath());
                 SetupStore.write(new File(active, "job.json"), configuration);
                 checkPause(active);
                 host("running", null, null);

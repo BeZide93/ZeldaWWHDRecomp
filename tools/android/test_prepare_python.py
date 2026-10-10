@@ -11,6 +11,20 @@ from prepare_python import write_entry, verified_download, runtime_fixture_sourc
 
 
 class ResourceIdentityTests(unittest.TestCase):
+    def test_android_user_directory_wiring_retains_external_devel_location(self):
+        root = Path(__file__).resolve().parents[2]
+        java = root / 'android/app/src/main/java/org/wwhdrecomp/wwhd'
+        activity = (java / 'WwhdActivity.java').read_text()
+        self.assertNotIn('args.add("--user-dir")', activity)
+        self.assertIn('AndroidUserDirectories.config(getExternalFilesDir(null))', activity)
+        service = (java / 'SetupService.java').read_text()
+        self.assertIn('AndroidUserDirectories.shaderPrebuild(getExternalFilesDir(null))', service)
+        prep = (java / 'ShaderPrepareActivity.java').read_text()
+        self.assertIn('new File(shaderUserDirectory(), "shader-prebuild")', prep)
+        native = (root / 'runtime/src/main.cpp').read_text()
+        self.assertIn('SDL_GetAndroidExternalStoragePath()', native)
+        self.assertIn('setenv("XDG_CONFIG_HOME", (std::string(dir) + "/config").c_str()', native)
+
     def test_normal_launch_has_no_preparation_and_destroy_does_not_opt_out(self):
         root = Path(__file__).resolve().parents[2]
         activity = (root / 'android/app/src/main/java/org/wwhdrecomp/wwhd/WwhdActivity.java').read_text()

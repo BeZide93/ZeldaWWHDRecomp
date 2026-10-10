@@ -267,6 +267,40 @@ int main(int argc, char** argv) {
     shaderprebuild::migrate_default_caches(alreadyLive,metal);
     assert(bytes(shaderprebuild::root()/"live/shaders.bin")=="current live Metal bytes");
     assert(bytes(shaderprebuild::root()/"live"/pipeline)=="current live pipeline bytes");
+    // Deterministically exercise the hard-link/no-replace-rename fallback.
+    const auto fallback=temporary/"fallback-migration";
+    env("WWHD_USER_DIR",fallback.string().c_str());
+    write(fallback/"shadercache"/pipeline,"fallback pipeline bytes");
+    shaderprebuild::migrate_default_caches(fallback,metal,shaderprebuild::LegacyPublishMode::ExclusiveCopy);
+    assert(bytes(shaderprebuild::root()/"live"/pipeline)=="fallback pipeline bytes");
+    assert(fs::is_regular_file(shaderprebuild::root()/"live/.legacy-defaults-v1"));
+    assert(bytes(fallback/"shadercache"/pipeline)=="fallback pipeline bytes");
+    const auto staged=temporary/"fallback-staged", existing=temporary/"fallback-existing";
+    write(staged,"replacement must not win"); write(existing,"existing wins");
+    assert(!shaderprebuild::publish_legacy_file(staged,existing,shaderprebuild::LegacyPublishMode::ExclusiveCopy));
+    assert(bytes(existing)=="existing wins" && bytes(staged)=="replacement must not win");
+    const auto failedTarget=temporary/"fallback-failed-output";
+    assert(!shaderprebuild::publish_legacy_file(temporary/"absent-staging",failedTarget,
+                                               shaderprebuild::LegacyPublishMode::ExclusiveCopy));
+    assert(!fs::exists(failedTarget)); // An owned partial target is cleaned up.
+    const auto replacedTarget=temporary/"fallback-replaced-output";
+    write(fs::path(replacedTarget.string()+".replacement"),"concurrent renderer cache");
+    auto replaceBeforeCleanup=[](const fs::path& target) {
+        assert(host::replace_file(target.string()+".replacement",target.string()));
+    };
+    assert(!shaderprebuild::publish_legacy_file(temporary/"absent-staging",replacedTarget,
+        shaderprebuild::LegacyPublishMode::ExclusiveCopy,replaceBeforeCleanup));
+    assert(bytes(replacedTarget)=="concurrent renderer cache");
+    // Publication failure must leave migration retryable, not marked complete.
+    const auto retry=temporary/"retry-migration";
+    env("WWHD_USER_DIR",retry.string().c_str());
+    write(retry/"shadercache"/pipeline,"retry pipeline bytes");
+    shaderprebuild::migrate_default_caches(retry,fs::path{},shaderprebuild::LegacyPublishMode::Fail);
+    assert(!fs::exists(shaderprebuild::root()/"live/.legacy-defaults-v1"));
+    assert(!fs::exists(shaderprebuild::root()/"live"/pipeline));
+    shaderprebuild::migrate_default_caches(retry,fs::path{},shaderprebuild::LegacyPublishMode::ExclusiveCopy);
+    assert(bytes(shaderprebuild::root()/"live"/pipeline)=="retry pipeline bytes");
+    assert(fs::is_regular_file(shaderprebuild::root()/"live/.legacy-defaults-v1"));
     // A regular file blocking the destination directory makes copying fail
     // deterministically even when tests run with elevated permissions.
     const auto failure = temporary/"failed-migration";
@@ -276,5 +310,6 @@ int main(int argc, char** argv) {
     shaderprebuild::migrate_default_caches(failure,fs::path{});
     assert(bytes(failure/"shadercache"/pipeline)=="source must survive copy failure");
     assert(bytes(shaderprebuild::root()/"live")=="existing destination must survive");
+    assert(!fs::exists(shaderprebuild::root()/"live/.legacy-defaults-v1"));
     fs::remove_all(temporary);
 }

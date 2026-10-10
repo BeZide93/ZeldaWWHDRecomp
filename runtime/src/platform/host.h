@@ -198,6 +198,11 @@ inline const std::string& portable_user_dir() {
  return dir;
 }
 inline bool portable() { return !portable_user_dir().empty(); }
+// Shared Linux/Android XDG resolution; Android supplies its external app config root.
+inline std::string xdg_config_dir(const char* xdg, const char* home) {
+ if(xdg)return std::string(xdg)+"/wwhd";
+ return std::string(home?home:".")+"/.config/wwhd";
+}
 inline std::string config_dir() {
 #ifdef _WIN32
  const auto override=environment_utf8(L"WWHD_USER_DIR");if(!override.empty())return override;
@@ -210,8 +215,7 @@ inline std::string config_dir() {
 #elif defined(_WIN32)
  const auto root=environment_utf8(L"APPDATA");return (root.empty()?std::string("."):root)+"/WWHD";
 #else
- if(const char* xdg=getenv("XDG_CONFIG_HOME"))return std::string(xdg)+"/wwhd";
- const char* home=getenv("HOME");return std::string(home?home:".")+"/.config/wwhd";
+ return xdg_config_dir(getenv("XDG_CONFIG_HOME"),getenv("HOME"));
 #endif
 }
 }
