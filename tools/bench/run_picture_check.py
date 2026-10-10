@@ -26,7 +26,7 @@ def capture(args, name, binary, revision):
     cache.mkdir()
     env = {key: value for key, value in os.environ.items() if not key.startswith('WWHD_')}
     slot, stick, rstick = SCENES[args.scene]
-    env.update(WWHD_NO_AUDIO='1', WWHD_NO_GAMEPAD='1', WWHD_NO_HOST_INPUT='1',
+    env.update(WWHD_NO_AUDIO='1', WWHD_NO_GAMEPAD='1', WWHD_NO_HOST_INPUT='1', WWHD_HIDDEN_WINDOWS='1',
         WWHD_RENDERER_RUNTIME='vulkan', WWHD_INTERP='0', WWHD_HEADSTART='0',
         WWHD_VK_PIPELINE_WARMUP='0', WWHD_SHADER_CACHE=str(cache / 'shaders.bin'),
         WWHD_VK_SHADER_CACHE=str(cache / 'vkshaders'), WWHD_VK_PIPELINE_CACHE=str(cache / 'pipelines.bin'),

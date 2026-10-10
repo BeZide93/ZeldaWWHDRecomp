@@ -559,7 +559,7 @@ static void record_present_image(const PresentApi& api,const PresentImageDraw& d
  barrier.image=draw.target;barrier.subresourceRange={VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1};
  barrier.srcAccessMask=VK_ACCESS_MEMORY_READ_BIT|VK_ACCESS_MEMORY_WRITE_BIT;
  barrier.dstAccessMask=VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
- api.record::vkCmdPipelineBarrier(cmd,VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+ api.vkCmdPipelineBarrier(cmd,VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
      0,0,nullptr,0,nullptr,1,&barrier);
  VkDescriptorSet set;
  VkDescriptorSetAllocateInfo allocation{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
@@ -577,17 +577,17 @@ static void record_present_image(const PresentApi& api,const PresentImageDraw& d
  VkRenderingInfo rendering{VK_STRUCTURE_TYPE_RENDERING_INFO};
  rendering.renderArea.extent=draw.extent;rendering.layerCount=1;
  rendering.colorAttachmentCount=1;rendering.pColorAttachments=&attachment;
- api.record::vkCmdBeginRendering(cmd,&rendering);
- VkRect2D scissor{{0,0},draw.extent};api.record::vkCmdSetScissor(cmd,0,1,&scissor);
- api.record::vkCmdSetViewport(cmd,0,1,&draw.viewport);
- api.record::vkCmdBindPipeline(cmd,VK_PIPELINE_BIND_POINT_GRAPHICS,draw.pipeline);
- api.record::vkCmdBindDescriptorSets(cmd,VK_PIPELINE_BIND_POINT_GRAPHICS,draw.layout,0,1,&set,0,nullptr);
- api.record::vkCmdPushConstants(cmd,draw.layout,VK_SHADER_STAGE_FRAGMENT_BIT,0,sizeof(draw.params),&draw.params);
- api.record::vkCmdDraw(cmd,3,1,0,0);
- api.record::vkCmdEndRendering(cmd);
+ api.vkCmdBeginRendering(cmd,&rendering);
+ VkRect2D scissor{{0,0},draw.extent};api.vkCmdSetScissor(cmd,0,1,&scissor);
+ api.vkCmdSetViewport(cmd,0,1,&draw.viewport);
+ api.vkCmdBindPipeline(cmd,VK_PIPELINE_BIND_POINT_GRAPHICS,draw.pipeline);
+ api.vkCmdBindDescriptorSets(cmd,VK_PIPELINE_BIND_POINT_GRAPHICS,draw.layout,0,1,&set,0,nullptr);
+ api.vkCmdPushConstants(cmd,draw.layout,VK_SHADER_STAGE_FRAGMENT_BIT,0,sizeof(draw.params),&draw.params);
+ api.vkCmdDraw(cmd,3,1,0,0);
+ api.vkCmdEndRendering(cmd);
  barrier.oldLayout=VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;barrier.newLayout=draw.finalLayout;
  barrier.srcAccessMask=VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;barrier.dstAccessMask=0;
- api.record::vkCmdPipelineBarrier(cmd,VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+ api.vkCmdPipelineBarrier(cmd,VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
      0,0,nullptr,0,nullptr,1,&barrier);
 }
 
