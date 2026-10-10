@@ -166,7 +166,8 @@ def prepare(game, template, executable, cache_root, package, renderer='vulkan',
         progress('Resolving shaders from your game files')
         import sys
         command = [python or sys.executable, str(Path(package) / 'tools/shaderprep.py'),
-                   'build', str(staging / 'headstart.bin'), '--game', str(game), '--template', str(template)]
+                   'build', str(staging / 'headstart.bin'), '--game', str(game), '--template', str(template),
+                   '--max', '0']
         env = os.environ.copy()
         for key in list(env):
             if key.startswith('WWHD_VK_TEST_') or key == 'WWHD_VK_GRAPH_DIAGNOSTICS':

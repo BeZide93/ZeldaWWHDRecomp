@@ -38,6 +38,9 @@ class ShaderPrebuildTests(unittest.TestCase):
         result = self.prepare()
         self.assertEqual(result['status'], 'ready')
         self.assertEqual(len(self.calls), 2)
+        # Setup compiles recorded states only, without speculative expansion.
+        command = self.calls[0][0]
+        self.assertEqual(command[command.index('--max') + 1], '0')
         env = self.calls[1][1]
         self.assertEqual(env['WWHD_HIDDEN_WINDOWS'], '1')
         self.assertEqual(env['WWHD_NO_AUDIO'], '1')
