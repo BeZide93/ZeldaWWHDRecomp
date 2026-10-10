@@ -41,7 +41,7 @@ computer (about two minutes); every later start launches the game directly.
    (a games folder, an external drive):
    - **macOS**: Apple Silicon, macOS 14 or newer (Metal renderer; Vulkan through MoltenVK, included, can
      be picked in Graphics > Renderer)
-   - **Windows**: x86-64 (`windows-x86_64`, Windows 10 or 11) or arm64 (`windows-arm64`, Windows 11 on
+   - **Windows**: x86-64 (`windows-x86_64`, Windows 10 version 1903 or newer, or Windows 11) or arm64 (`windows-arm64`, Windows 11 on
      ARM, e.g. Snapdragon X), a GPU with Vulkan 1.3 drivers (or Vulkan 1.1 / 1.2 drivers with
      `VK_KHR_dynamic_rendering`). The arm64 zip runs natively, and only on ARM64 (its setup says so
      on an x86-64 PC). On ARM, 60 fps keeps the game's speed by default (Graphics > "Keep game

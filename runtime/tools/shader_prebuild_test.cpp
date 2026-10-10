@@ -35,6 +35,38 @@ int main(int argc, char** argv) {
     unsetenv("WWHD_HEADSTART");
 #endif
     const auto package = temporary / "package", game = temporary / "game";
+    auto env = [](const char* name, const char* value = nullptr) {
+#ifdef _WIN32
+        _putenv_s(name, value ? value : "");
+#else
+        if(value) setenv(name,value,1); else unsetenv(name);
+#endif
+    };
+    auto clear_live = [&] {
+        for(auto name : {"WWHD_SHADER_CACHE","WWHD_VK_SHADER_CACHE","WWHD_VK_PIPELINE_CACHE"}) env(name);
+    };
+    auto assert_live = [&] {
+        assert(std::string(getenv("WWHD_SHADER_CACHE")) == (shaderprebuild::root()/"live/shaders.bin").string());
+        assert(std::string(getenv("WWHD_VK_SHADER_CACHE")) == (shaderprebuild::root()/"live/vulkan-shaders").string());
+        assert(std::string(getenv("WWHD_VK_PIPELINE_CACHE")) == (shaderprebuild::root()/"live/vulkan-pipelines.bin").string());
+        assert(!getenv("WWHD_HEADSTART"));
+    };
+    clear_live();
+    // No manifest/generation must still reuse the stable live caches.
+    assert(!shaderprebuild::activate(game,"vulkan")); assert_live();
+    clear_live();
+    assert(!shaderprebuild::activate_pending(game,"vulkan")); assert_live();
+    // Explicit cache and headstart overrides remain authoritative.
+    env("WWHD_SHADER_CACHE","explicit-shaders");
+    env("WWHD_VK_SHADER_CACHE","explicit-spirv");
+    env("WWHD_VK_PIPELINE_CACHE","0");
+    env("WWHD_HEADSTART","explicit-headstart");
+    assert(!shaderprebuild::activate(game,"vulkan"));
+    assert(std::string(getenv("WWHD_SHADER_CACHE"))=="explicit-shaders");
+    assert(std::string(getenv("WWHD_VK_SHADER_CACHE"))=="explicit-spirv");
+    assert(std::string(getenv("WWHD_VK_PIPELINE_CACHE"))=="0");
+    assert(std::string(getenv("WWHD_HEADSTART"))=="explicit-headstart");
+    env("WWHD_HEADSTART"); clear_live();
     auto write = [](const fs::path& path, const std::string& text) {
         fs::create_directories(path.parent_path()); std::ofstream(path) << text;
     };
@@ -87,7 +119,8 @@ int main(int argc, char** argv) {
 #else
     unsetenv("WWHD_HEADSTART");
 #endif
-    assert(!shaderprebuild::activate(game, "vulkan"));
+    clear_live();
+    assert(!shaderprebuild::activate(game, "vulkan")); assert_live();
     assert(!fs::exists(shaderprebuild::root() / "unexpected-spawn"));
     launcher["template"] = (package / "tools/shadercache/template.bin").string();
     json(shaderprebuild::root() / "launcher.json", launcher);
@@ -104,6 +137,8 @@ int main(int argc, char** argv) {
     try { shaderprebuild::generation(active); } catch (...) { rejected = true; }
     assert(rejected);
     assert(shaderprebuild::request_rebuild() && shaderprebuild::requested());
+    clear_live();
+    assert(!shaderprebuild::activate(game,"vulkan")); assert_live();
     assert(fs::is_regular_file(shaderprebuild::root() / "generation-test/headstart.bin"));
     write(game / "code/test.rpx", "synthetic executable fixture");
     active["launch"]["game"]["code/test.rpx"] = shaderprebuild::metadata(game / "code/test.rpx");

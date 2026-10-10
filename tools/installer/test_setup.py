@@ -73,6 +73,14 @@ class MacSdkFallback(unittest.TestCase):
             with self.assertRaises(setup.SetupError):
                 setup.link_with_sdk_fallback(["clang++"], {"SDKROOT": "/chosen.sdk"})  # the player chose the SDK
             self.assertEqual(run.call_count, 1)
+class ShaderPreparationBoundary(unittest.TestCase):
+    def test_unexpected_preparation_error_does_not_abort_setup(self):
+        import shader_prebuild
+        with mock.patch.object(shader_prebuild, "prepare", side_effect=RuntimeError("unexpected failure")), \
+                mock.patch.object(setup.LOG, "write") as log:
+            result = setup.prepare_shaders_nonfatal("game", "template", "exe", "cache", "package")
+        self.assertEqual(result, dict(status="failed", message="unexpected failure"))
+        self.assertIn("The game can still run", log.call_args.args[0])
 
 
 class GuestBuildConfig(unittest.TestCase):
@@ -906,6 +914,13 @@ class CodeModsBuild(unittest.TestCase):
                         import subprocess
                         subprocess.run([package_test,
                                         "--setup-code-mods", str(data)], check=True, env=host_env)
+
+                import shader_prebuild
+                with mock.patch.object(shader_prebuild, "prepare", side_effect=PermissionError("late scan failure")):
+                    state = setup.install(ctx, ("installed", str(game)))
+                self.assertEqual(state["shader_prebuild"]["status"], "failed")
+                self.assertTrue(Path(state["exe"]).is_file())
+                self.assertEqual(setup.read_state(str(data))["shader_prebuild"]["status"], "failed")
 
 
     def test_fingerprint_tracks_build_inputs_and_mode(self):

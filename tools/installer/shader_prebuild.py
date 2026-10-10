@@ -229,6 +229,7 @@ def prepare(game, template, executable, cache_root, package, renderer='vulkan',
     root = Path(cache_root)
     staging = None
     wanted = None
+    launch = None
     try:
         wanted = identity(game, template, package, renderer)
         runtime = runtime_identity or executable

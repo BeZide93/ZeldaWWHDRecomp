@@ -63,7 +63,7 @@ void DeferredCommands::reset() {
     if(active_deferred_commands==this)active_deferred_commands=nullptr;
     payloadBytes_=0;beforeExact_={};
 }
-DeferredCommands& deferred_commands() { static thread_local DeferredCommands value;return value; }
+DeferredCommands& deferred_commands() { static DeferredCommands value;return value; }
 void DeferredCommands::vkCmdBindPipeline(VkCommandBuffer cmd, VkPipelineBindPoint point, VkPipeline pipeline) {
     if(!pipeline)throw std::invalid_argument("cannot bind a null Vulkan pipeline");
     auto immediate=[=] { gfxvk::vkCmdBindPipeline(cmd, point, pipeline); };

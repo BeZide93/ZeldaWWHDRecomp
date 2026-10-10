@@ -33,3 +33,10 @@ Enable `WWHD_VK_STUTTER_TRACE` with a unique local CSV path per run and retain t
 For picture checks, use warmed caches and a checkpoint relative to the completed load, with matching game counters and inputs. Capture baseline twice and candidate twice; compare TV, GamePad and presented images. Repeat baseline variation before attributing waves or particles to a rendering change. Both executables must produce the same completed picture at matching checkpoints.
 
 Share a concise result table, reviewed logs/traces, overlay screenshots and comparison screenshots. Logs may contain local paths; review them first. **Do not share game files, generated game code, saves, shader recordings/templates/captures, or shader/pipeline cache files.** Keep those inputs and all cache seeds local.
+
+Windows requires Windows 10 version 1903 or newer (Windows 11 on ARM64). The game,
+setup/launcher and bundled tools select UTF-8 for Windows file paths and console
+logs, so names such as `Jürgen` work consistently with Python setup. Maintainers
+can run `windows_utf8_paths` and `windows_utf8_python_agreement` with CTest on a
+Windows host to check narrow controls/settings I/O and the shared shader cache root.
+Cross-compilation alone does not validate Windows filesystem or console behavior.

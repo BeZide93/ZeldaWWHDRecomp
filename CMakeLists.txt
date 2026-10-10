@@ -1110,3 +1110,15 @@ add_executable(headstart_shader_record_test runtime/tools/headstart_shader_recor
 target_include_directories(headstart_shader_record_test PRIVATE runtime/src)
 target_compile_options(headstart_shader_record_test PRIVATE -UNDEBUG)
 add_test(NAME headstart_shader_record_bounds COMMAND headstart_shader_record_test)
+
+if(WIN32)
+  add_executable(windows_utf8_test runtime/tools/windows_utf8_test.cpp)
+  target_include_directories(windows_utf8_test PRIVATE runtime/src)
+  target_compile_options(windows_utf8_test PRIVATE -UNDEBUG)
+  add_test(NAME windows_utf8_paths COMMAND windows_utf8_test)
+  if(Python3_Interpreter_FOUND)
+    add_test(NAME windows_utf8_python_agreement COMMAND ${CMAKE_COMMAND} -E env
+      WWHD_WINDOWS_UTF8_TEST=$<TARGET_FILE:windows_utf8_test>
+      ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/installer/test_windows_utf8.py)
+  endif()
+endif()

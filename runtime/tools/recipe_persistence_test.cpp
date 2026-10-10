@@ -44,5 +44,22 @@ int main() {
   assert(read(first)==old && read(second)==next);
   // Interleaved publication produces one complete generation, never mixed bytes.
   assert(replace(first,path)); assert(replace(second,path)); assert(read(path)==next);
+  // Cleanup is age- and destination-scoped, and accepts only the exact suffix.
+  auto staged=[&](const std::string& suffix,bool stale) {
+    auto name=std::filesystem::u8path(path+suffix);
+    { std::ofstream output(name); output<<"orphan"; }
+    if(stale) std::filesystem::last_write_time(name,
+        std::filesystem::file_time_type::clock::now()-std::chrono::hours(25));
+    return name;
+  };
+  const auto orphan=staged(".tmp-123-456-789",true);
+  const auto recent=staged(".tmp-123-456-790",false);
+  const auto foreign=staged("-other.tmp-123-456-789",true);
+  const auto malformed=staged(".tmp-123-456-789.extra",true);
+  const auto incomplete=staged(".tmp-123-456",true);
+  std::string fresh;FILE* opened=gfxvk::open_atomic_temporary(path,fresh);std::fclose(opened);
+  assert(!std::filesystem::exists(orphan));
+  for(const auto& kept:{recent,foreign,malformed,incomplete})assert(std::filesystem::exists(kept));
+  assert(read(path)==next); // Never remove the committed destination.
   std::filesystem::remove_all(dir);
 }

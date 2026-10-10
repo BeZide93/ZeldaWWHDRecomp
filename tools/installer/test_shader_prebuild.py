@@ -52,6 +52,16 @@ class ShaderPrebuildTests(unittest.TestCase):
                 contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(prebuild.main(arguments), 1)
 
+    def test_launch_identity_failure_is_nonfatal_and_records_failure(self):
+        from unittest.mock import patch
+        with patch.object(prebuild, 'launch_identity', side_effect=PermissionError('scan denied')):
+            result = self.prepare()
+        self.assertEqual(result['status'], 'failed')
+        self.assertEqual(result['message'], 'scan denied')
+        marker = json.loads((self.cache / 'failed.json').read_text())
+        self.assertIsNone(marker['launch'])
+        self.assertEqual(self.calls, [])
+
     def test_missing_template_skips_without_commands_or_cache_changes(self):
         self.template.unlink()
         messages = []

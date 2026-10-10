@@ -2158,6 +2158,20 @@ def write_code_mods_setting(data_dir, hooks):
     os.replace(tmp, path)
 
 
+def prepare_shaders_nonfatal(*args, **kwargs):
+    """Shader preparation is optional, including unexpected helper failures."""
+    try:
+        import shader_prebuild
+        return shader_prebuild.prepare(*args, **kwargs)
+    except Exception as error:
+        message = "Shader preparation unavailable: %s. The game can still run." % error
+        try:
+            LOG.write(message)
+        except Exception:
+            pass  # A broken log must not turn optional preparation into setup failure.
+        return dict(status="failed", message=str(error))
+
+
 def install(ctx, source, keys=None, info=None, ui=None, check_keys=None):
     """The whole build for one source: ("image", path) | ("archive", path) | ("folder", path) |
     ("installed", game_dir) | ("gen", generated C). check_keys(image) -> (keys, info) is called for an image without keys.
@@ -2332,7 +2346,7 @@ def install(ctx, source, keys=None, info=None, ui=None, check_keys=None):
         def shader_message(text):
             shader_progress.update(0, 0, text, force=True)
             LOG.write(text)
-        state["shader_prebuild"] = shader_prebuild.prepare(
+        state["shader_prebuild"] = prepare_shaders_nonfatal(
             ctx.game_dir, shader_template, state["exe"],
             shader_root, PKG,
             renderer="metal" if IS_MAC else "vulkan", progress=shader_message,

@@ -194,13 +194,17 @@ public:
     }
 };
 inline std::unique_ptr<GenerationLease> generationLease;
-inline void bind_generation(const fs::path& dir) {
-    set_default("WWHD_HEADSTART", dir / "headstart.bin");
+inline void bind_live_caches() {
     set_default("WWHD_SHADER_CACHE", root() / "live/shaders.bin");
     set_default("WWHD_VK_SHADER_CACHE", root() / "live/vulkan-shaders");
     set_default("WWHD_VK_PIPELINE_CACHE", root() / "live/vulkan-pipelines.bin");
 }
+inline void bind_generation(const fs::path& dir) {
+    set_default("WWHD_HEADSTART", dir / "headstart.bin");
+    bind_live_caches();
+}
 inline bool activate_pending(const fs::path& game, const std::string& renderer) {
+    bind_live_caches();
     if (std::getenv("WWHD_HEADSTART") || skipped(game, renderer)) return false;
     try {
         const auto active = read(root() / "active.json");
@@ -286,6 +290,9 @@ inline bool finish_pending(bool success) {
 // Call before renderer initialization. Explicit test/user cache paths win. A
 // rebuild publishes a fresh generation; live caches are never deleted by UI.
 inline bool activate(const fs::path& game, const std::string& renderer) {
+    // Live caches survive invalidation/rebuild and remain useful without a
+    // prepared generation. Explicit user/test overrides still win.
+    bind_live_caches();
     if (std::getenv("WWHD_HEADSTART") || skipped(game, renderer)) return false;
     try {
         const auto active = read(root() / "active.json");

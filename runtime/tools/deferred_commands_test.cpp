@@ -174,7 +174,13 @@ void callback_failure_preserves_tail() {
     bool failed=false;try { recorder.vkCmdBindPipeline(cmd,VK_PIPELINE_BIND_POINT_GRAPHICS,handle<VkPipeline>(2)); }catch(const std::runtime_error&){failed=true;}
     assert(failed&&calls.empty()&&recorder.command_count()==1&&gfxvk::active_deferred_commands==nullptr);
     recorder.emit_exact();assert((calls==std::vector<int>{1}));calls.clear();
-    auto* main=&gfxvk::deferred_commands();std::thread other([&] { assert(&gfxvk::deferred_commands()!=main); });other.join();
+    std::mutex execution;
+    gfxvk::DeferredCommands* main=nullptr;
+    { std::lock_guard lock(execution); main=&gfxvk::deferred_commands(); }
+    std::thread other([&] {
+      std::lock_guard lock(execution);
+      assert(&gfxvk::deferred_commands()==main);
+    });other.join();
 }
 void owned_submission_boundaries() {
     gfxvk::DeferredCommands recorder;
@@ -282,5 +288,21 @@ void cross_thread_checkpoint_and_isolated_dispatch() {
     recorder.finish_exact();assert(calls==std::vector<int>{1});calls.clear();
 }
 
+void guest_thread_exit_retains_global_recorder() {
+    std::mutex execution;
+    gfxvk::DeferredCommands* started=nullptr;
+    std::thread guest([&] {
+      std::lock_guard lock(execution);
+      auto& recorder=gfxvk::deferred_commands();started=&recorder;
+      recorder.start_capture();gfxvk::record::vkCmdDraw(cmd,3,1,0,0);
+    });
+    guest.join(); // A TLS recorder used to destroy and silently lose this tail.
+    std::lock_guard lock(execution);
+    assert(gfxvk::active_deferred_commands==started);
+    assert(&gfxvk::deferred_commands()==started&&calls.empty());
+    gfxvk::deferred_commands().finish_exact();
+    assert(calls==std::vector<int>{1});calls.clear();
 }
-int main() { initialize();inline_dispatch();ownership_and_order();fallback_and_bounds();allocation_failure_falls_back();callback_failure_preserves_tail();owned_submission_boundaries();owned_pending_emission();cross_thread_checkpoint_and_isolated_dispatch(); }
+
+}
+int main() { initialize();inline_dispatch();ownership_and_order();fallback_and_bounds();allocation_failure_falls_back();callback_failure_preserves_tail();owned_submission_boundaries();owned_pending_emission();cross_thread_checkpoint_and_isolated_dispatch();guest_thread_exit_retains_global_recorder(); }
