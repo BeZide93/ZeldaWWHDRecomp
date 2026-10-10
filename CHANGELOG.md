@@ -23,6 +23,15 @@ what is on `devel` and not released yet (also in the
   becomes 15 %, an explicitly chosen 0 stays). On Metal, the photo's subject outline could also miss
   pixels the first time; that's fixed too.
 
+- **Less stutter on first play: setup now prepares the shaders.** After building the game, setup runs
+  **Preparing shaders**: from your own game files and a small, code-free list of the game's GPU states
+  that comes with the release, it compiles the shaders and pipelines before you play (about 15–20 s on
+  a recent Mac). In our tests the cold first-play hitches over 50 ms went from 5–10 to 0. You can skip
+  it in setup, and Settings → Graphics → **Rebuild shader cache** prepares a fresh one. Areas that
+  aren't covered can still stutter once. On Vulkan, shaders and pipelines are also compiled in the
+  background while you play, and the pipelines you used are rebuilt at the title screen on the next
+  start. Your existing caches are kept when you update.
+
 - **macOS setup: works with mismatched Command Line Tools** (e.g. after a macOS beta update installed a
   newer SDK than the tools' linker understands: "unknown architecture arm64e.x1", "tapi error: malformed
   file"). Setup now links with an older installed SDK automatically, or explains how to update the
