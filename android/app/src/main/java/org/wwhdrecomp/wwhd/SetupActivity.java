@@ -31,6 +31,7 @@ public class SetupActivity extends Activity {
     private boolean phoneSetup;
     private String actionMessage;
     private String pickerJob;
+    private String shaderWarmJob;
     private static final int FOLDER = 10, ARCHIVE = 11, IMAGE = 12, DISC = 13, COMMON = 14, RESTORE = 15;
 
     @Override public void onCreate(Bundle state) {
@@ -206,6 +207,13 @@ public class SetupActivity extends Activity {
                     File host = new File(job, "host.json");
                     JSONObject value = host.isFile() ? SetupStore.read(host) : new JSONObject().put("state", "ready to start");
                     text = "Setup: " + value.getString("state");
+                    if (value.optString("state").equals("warming shaders")) play.setEnabled(false);
+                    if (value.optString("state").equals("warming shaders") &&
+                        !job.getAbsolutePath().equals(shaderWarmJob)) {
+                        shaderWarmJob = job.getAbsolutePath();
+                        startActivity(new Intent(SetupActivity.this, ShaderPrepareActivity.class)
+                            .putExtra("result", new File(job, "shader-warm-result.json").getAbsolutePath()));
+                    }
                     if (value.has("reason")) text += "\n" + SetupPolicy.description(value.getString("reason"));
                     if (value.has("error")) text += "\n" + value.getString("error");
                     if (importing && !grants.contains(source.optString("uri")))

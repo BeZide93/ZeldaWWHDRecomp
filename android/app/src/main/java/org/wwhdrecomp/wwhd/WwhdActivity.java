@@ -64,9 +64,33 @@ public class WwhdActivity extends SDLActivity {
         return onDeviceGame != null ? onDeviceGame.getAbsolutePath() : super.getMainSharedObject();
     }
 
+    protected File shaderUserDirectory() { return new File(getFilesDir(), "user"); }
+
+    /** SDL calls main on its own thread; shader archive work must not block the UI. */
+    @Override protected void main() {
+        if (!(this instanceof ShaderPrepareActivity) && selection != null && selection.game != null) {
+            try {
+                File configuration = new File(getFilesDir(), "shader-prebuild-startup.json");
+                SetupStore.write(configuration, new org.json.JSONObject().put("schema", 1)
+                    .put("game", selection.game.getAbsolutePath()).put("library", selection.library.getAbsolutePath())
+                    .put("cache_root", new File(shaderUserDirectory(), "shader-prebuild").getAbsolutePath()));
+                EmbeddedPython.execute(this, "shader_prebuild_android", new org.json.JSONArray()
+                    .put("--configuration").put(configuration.getAbsolutePath()).toString());
+            } catch (Exception failure) {
+                Log.w("wwhd-shaders", "Preparation unavailable; compiling during play", failure);
+            }
+        }
+        super.main();
+    }
+
     @Override protected String[] getArguments() {
-        return selection != null && selection.game != null ?
-            new String[] {"--game", selection.game.getAbsolutePath()} : super.getArguments();
+        java.util.ArrayList<String> args = new java.util.ArrayList<>();
+        if (selection != null && selection.game != null) {
+            args.add("--game"); args.add(selection.game.getAbsolutePath());
+            args.add("--shader-prebuild-library"); args.add(selection.library.getAbsolutePath());
+        }
+        args.add("--user-dir"); args.add(shaderUserDirectory().getAbsolutePath());
+        return args.toArray(new String[0]);
     }
 
     @Override protected void onResume() {

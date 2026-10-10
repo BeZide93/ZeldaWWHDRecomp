@@ -590,35 +590,40 @@ Tingle Bottle (HD's item in the same slot); Picto Box photos and HD-only statist
 over; Japanese player names become "Link". Details and options: [tools/savegame/README.md](tools/savegame/README.md).
 Tested with 167 GameCube saves across the whole story (100% and Any% routes).
 
-## Optional: shader head start
+## Preparing shaders (automatic)
 
-The first time a shader is needed it is translated and compiled, which can cause short hitches.
-A "head start" pre-translates shaders from the game's own shader archives so later sessions
-start with them. It is built locally from your files and is never distributed; without it the
-game simply translates shaders on first use.
+Setup now includes **Preparing shaders** after it builds the game executable. It uses your own
+game files and the release's code-free state template, then compiles the covered shaders and compatible
+pipelines for your computer before gameplay. The template contains hashes, register states and attribute
+descriptions; it contains no game shader instructions. Generated head starts and driver caches stay local.
+Coverage depends on the recorded states; an uncovered shader or pipeline can still cause a first-use hitch.
 
-Building it needs a state template (the GPU register states each shader was used with), which
-is recorded from your own play: play for a while (the further you get, the more it covers),
-then
+You can uncheck **Prepare shaders now** in setup, or pass `--skip-shader-prebuild` to terminal setup.
+Skipping is remembered for the same game/build until you request a rebuild or those inputs change.
+A preparation failure does not prevent playing: shaders compile on demand. **Graphics → Rebuild shader
+cache** schedules a fresh generation for the next start. Setup repair/update also checks preparation;
+game archives, template, translator or runtime changes invalidate the previous generation. Existing live
+resources are not deleted when you request a rebuild.
 
-```sh
-python3 tools/shaderprep.py template ~/Library/Caches/wwhd/shaders.bin   # -> game/shadercache/template.bin
-python3 tools/shaderprep.py build                                          # -> game/shadercache/headstart.bin
-./build/cmake/wwhd --warm-shaders    # optional: compile everything once to fill the macOS shader cache
-```
+On Android, setup assembles the head start locally, then opens an isolated **Preparing shaders** screen
+with a real Vulkan surface. Back skips warming. Normal startup can also prepare and warm a pending
+cache before guest threads start. This lifecycle still needs native device validation; desktop Windows
+and Linux GPU validation is also pending. Metal coverage and compatible pipeline warming are being
+validated separately; this is not a claim that every game pipeline is already covered.
 
-`--merge game/shadercache/template.bin` adds a later session to an existing template. The runtime
-picks up `game/shadercache/headstart.bin` automatically (`WWHD_HEADSTART=<file>|0` overrides it).
-See the comment at the top of `tools/shaderprep.py` for the file formats.
+Private generations live under the host settings folder's `shader-prebuild` directory, or
+`data/user/shader-prebuild` in a portable installation. Do not upload generated head starts,
+recordings, SPIR-V or device caches. The manual development workflow below remains available.
 
 ### Vulkan shader head start on Windows and Linux
 
 Vulkan can record the shader states from your own sessions and use the same local
 `template` / `build` workflow. Use Python 3. The archive decoder builds a small local
 C helper with Clang/GCC (`CC` overrides the compiler command), or uses its Python
-fallback if no compatible compiler is available. Generated recordings, templates,
+fallback if no compatible compiler is available. Generated recordings,
 head starts, SPIR-V and device caches contain game-derived data: keep them local and
-exclude them from uploads and release packages. Native Windows validation of the
+exclude them from uploads and release packages. Only the strictly validated code-free
+state-template format is permitted in releases; arbitrary or legacy templates are not. Native Windows validation of the
 translation-worker path is still pending.
 
 Windows (PowerShell, from the repository root; adjust the executable path):
@@ -650,7 +655,7 @@ The recording is opt-in and bounded to 128 MiB. It is written on orderly shutdow
 forced termination can lose it. `template --merge game/shadercache/template.bin`
 retains states from an earlier local template. `--max 0` builds only known archive
 shaders; archive coverage can be smaller than the recording. `--warm-shaders`
-compiles the result in a separate process before gameplay. Vulkan currently uses
+compiles the result in a separate process before gameplay. Vulkan uses
 this file for offline shader warming and background pipeline warming at startup.
 The recording includes exact local Vulkan pipeline recipes; `--no-pipelines`
 omits them if you want shaders alone. Compatible pipelines compile on a worker

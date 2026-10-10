@@ -14,6 +14,8 @@ struct PipelineRecipe {
   std::unique_ptr<GraphicsPipelineState> state;
   bool dynamicUniforms = false;
 };
+// Strict portable state only: shader words must both be empty. Resolve locally before Vulkan.
+std::shared_ptr<PipelineRecipe> decode_code_free_pipeline_recipe(const std::vector<uint8_t>& bytes);
 std::vector<uint8_t> encode_pipeline_recipe(PipelineRecipe& recipe);
 std::shared_ptr<PipelineRecipe> decode_pipeline_recipe(const std::vector<uint8_t>& bytes);
 std::vector<uint8_t> encode_pipeline_recipes(const PipelineRecipeFingerprint& fingerprint,

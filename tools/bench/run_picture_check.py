@@ -16,6 +16,44 @@ from compare_pictures import compare, file_hash
 from run_bench import SCENES
 
 
+def prepare_candidate_generation(source, cache):
+    """Copy a prepared setup generation privately; never modify its cache seed.
+
+    Expected setup layout: headstart.bin, shaders.bin, vulkan-shaders/ and
+    vulkan-pipelines.bin (plus its .recipes companion when present).
+    A supplied generation does not itself prove that the route is fully warm.
+    """
+    if Path(source).is_symlink():
+        raise ValueError('prepared generation must not be a symbolic link')
+    source, cache = Path(source).resolve(), Path(cache).resolve()
+    if source == cache or cache.is_relative_to(source) or source.is_relative_to(cache):
+        raise ValueError('prepared generation and run cache must not overlap')
+    if not source.is_dir() or not (source / 'headstart.bin').is_file():
+        raise ValueError('prepared generation needs headstart.bin')
+    entries = sorted(source.rglob('*'))
+    if source.is_symlink() or any(path.is_symlink() for path in entries):
+        raise ValueError('prepared generation must not contain symbolic links')
+    hashes = {path.relative_to(source).as_posix(): file_hash(path)
+              for path in entries if path.is_file()}
+    target = cache / 'prebuilt'
+    shutil.copytree(source, target)
+    for path in [target, *target.rglob('*')]:
+        path.chmod(0o755 if path.is_dir() else 0o644)
+    copied = {path.relative_to(target).as_posix(): file_hash(path)
+              for path in sorted(target.rglob('*')) if path.is_file()}
+    after = {path.relative_to(source).as_posix(): file_hash(path)
+             for path in sorted(source.rglob('*')) if path.is_file()}
+    if copied != hashes or after != hashes:
+        raise RuntimeError('prepared cache seed changed while copying')
+    environment = dict(WWHD_HEADSTART=str(target / 'headstart.bin'),
+        WWHD_SHADER_CACHE=str(target / 'shaders.bin'),
+        WWHD_VK_SHADER_CACHE=str(target / 'vulkan-shaders'),
+        WWHD_VK_PIPELINE_CACHE=str(target / 'vulkan-pipelines.bin'),
+        WWHD_VK_PIPELINE_WARMUP='1')
+    return environment, dict(source=str(source), files_sha256=hashes,
+        copied_to=str(target), route_warmth='not established by this flag')
+
+
 def capture(args, name, binary, revision):
     run = args.out / name
     run.mkdir()  # Never overwrite a prior run or its evidence.
@@ -36,6 +74,11 @@ def capture(args, name, binary, revision):
         WWHD_PRESS=','.join('%d-%d:8000' % (frame, frame + 8) for frame in range(120, args.load_frame, 30)),
         WWHD_TEST_ORIGIN_LOAD=str(args.origin_load_steps), WWHD_TEST_END=str(args.seconds),
         WWHD_TEST_CAPTURE_LOAD_STEP=str(args.capture_load_step))
+    preparation = None
+    generation = getattr(args, 'candidate_prebuild_generation', None)
+    if name.startswith('candidate') and generation:
+        prepared_env, preparation = prepare_candidate_generation(generation, cache)
+        env.update(prepared_env)
     if stick: env['WWHD_TEST_STICK'] = stick
     if rstick: env['WWHD_TEST_RSTICK'] = rstick
     if args.validation: env['WWHD_VK_VALIDATION'] = '1'
@@ -44,7 +87,9 @@ def capture(args, name, binary, revision):
     invocation = dict(command=command, cwd=str(run), revision=revision, binary_sha256=file_hash(binary),
         state_sha256=file_hash(args.state_dir / ('slot%d.bin' % (args.slot or slot))),
         scene=args.scene, capture_load_step=args.capture_load_step, origin_load_steps=args.origin_load_steps,
-        caches='isolated cold application caches; driver caches uncontrolled',
+        caches=('private copy of prepared candidate generation; driver caches uncontrolled' if preparation
+                else 'isolated cold application caches; driver caches uncontrolled'),
+        cache_preparation=preparation,
         env={key: value for key, value in env.items() if key.startswith(('WWHD_', 'VK_', 'MVK_', 'DYLD_'))
              or key == 'XDG_CONFIG_HOME'})
     (run / 'invocation.json').write_text(json.dumps(invocation, indent=2) + '\n')
@@ -95,6 +140,8 @@ def main():
     parser.add_argument('--seconds', type=float, default=2)
     parser.add_argument('--timeout', type=float, default=180)
     parser.add_argument('--validation', action='store_true')
+    parser.add_argument('--candidate-prebuild-generation', type=Path,
+        help='copy a local setup generation into each candidate run only; baseline remains headstart-disabled')
     args = parser.parse_args()
     if min(args.load_frame, args.origin_load_steps, args.capture_load_step) < 0 or args.seconds <= 0 or args.timeout <= 0:
         parser.error('frame/step offsets must be nonnegative; seconds and timeout must be positive')
@@ -102,6 +149,13 @@ def main():
         parser.error('capture checkpoint is beyond the scenario endpoint')
     for name in ('baseline', 'candidate', 'game', 'save', 'state_dir', 'out'):
         setattr(args, name, getattr(args, name).resolve())
+    if args.candidate_prebuild_generation:
+        args.candidate_prebuild_generation = args.candidate_prebuild_generation.resolve()
+        seed = args.candidate_prebuild_generation
+        if args.out == seed or args.out.is_relative_to(seed) or seed.is_relative_to(args.out):
+            parser.error('output and prepared generation directories must not overlap')
+        if not seed.is_dir() or not (seed / 'headstart.bin').is_file():
+            parser.error('prepared generation needs headstart.bin')
     args.out.mkdir(parents=True, exist_ok=True)
     captures = {}
     for name, binary, revision in [('baseline_1', args.baseline, args.baseline_revision),

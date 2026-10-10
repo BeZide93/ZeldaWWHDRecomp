@@ -457,6 +457,7 @@ struct App {
     double free_bytes = 0, source_bytes = 0, toolchain_bytes = 0;
     bool opt_remove_toolchain = false, opt_shortcut = false;
     bool code_mods = false;
+    bool prepare_shaders = true;
     std::deque<std::pair<std::string, std::string>> queue;  // requests to send one after another
     std::string after;                                       // then: play | quit | open
     std::string leaving;  // Done screen: Play or Quit was pressed (its options are queued and no longer shown)
@@ -807,6 +808,7 @@ static void start_install(const std::string& source) {
     std::string f = "\"source\":" + jstr(source);
     f += std::string(",\"code_mods\":") + (A.code_mods ? "true" : "false");
     if (source != "installed") f += ",\"path\":" + jstr(A.source_path);
+    f += std::string(",\"skip_shader_prebuild\":") + (A.prepare_shaders ? "false" : "true");
     request("install", f);
     go(Screen::Installing);
 }
@@ -1115,6 +1117,8 @@ static void screen_welcome() {
 }
 
 static void code_mods_choice() {
+    checkbox("Prepare shaders now (recommended)", &A.prepare_shaders);
+    muted("You can skip this and rebuild the shader cache later in Graphics settings.");
     checkbox("Build with code-mod support", &A.code_mods);
     muted("For mods in the catalogue or Mods tab marked as code mods. Built-in mods, graphics packs and "
           "content mods do not need this. The game code gets a small check in every function, which can "
@@ -1244,7 +1248,7 @@ static void screen_keys() {
 static double step_weight(const std::string& id) {
     static const std::map<std::string, double> w = {{"keys", 1},      {"archive", 1},   {"folder", 1},
                                                     {"compiler", 3},  {"extract", 15},  {"copy", 8},
-                                                    {"translate", 8}, {"compile", 60},  {"app", 4}};
+                                                    {"translate", 8}, {"compile", 60},  {"app", 4}, {"shaders", 20}};
     auto it = w.find(id);
     return it == w.end() ? 1 : it->second;
 }

@@ -194,7 +194,7 @@ struct Parts {
     return std::make_unique<GraphicsPipelineState>(ci);
   }
 };
-template<class A> void recipe_fields(A& a, PipelineRecipe& recipe, Parts& parts) {
+template<class A> void recipe_fields(A& a, PipelineRecipe& recipe, Parts& parts, bool codeFree = false) {
   vector(a, recipe.key, 208);
   if (recipe.key.size() != 208) throw std::runtime_error("incompatible pipeline key schema");
   uint32_t dynamic = recipe.dynamicUniforms;
@@ -203,7 +203,7 @@ template<class A> void recipe_fields(A& a, PipelineRecipe& recipe, Parts& parts)
   if constexpr (std::is_same_v<A, Reader>) recipe.dynamicUniforms = dynamic != 0;
   for (size_t stage = 0; stage < 2; ++stage) {
     vector(a, recipe.spirv[stage], 262144);
-    if (!valid_spirv(recipe.spirv[stage])) throw std::runtime_error("invalid recipe SPIR-V");
+    if (codeFree ? !recipe.spirv[stage].empty() : !valid_spirv(recipe.spirv[stage])) throw std::runtime_error("invalid recipe SPIR-V");
     auto& bindings = recipe.descriptors[stage];
     uint32_t count = bindings.size();
     if constexpr (std::is_same_v<A, Reader>) { count = a.count(128); bindings.resize(count); }
@@ -237,9 +237,18 @@ std::shared_ptr<PipelineRecipe> decode_pipeline_recipe(const std::vector<uint8_t
   if (in.at != bytes.size()) throw std::runtime_error("trailing pipeline recipe bytes");
   recipe->state = parts.snapshot(); return recipe;
 }
+std::shared_ptr<PipelineRecipe> decode_code_free_pipeline_recipe(const std::vector<uint8_t>& bytes) {
+  if (bytes.size() < 8 || bytes.size() > 4 * 1024 * 1024 ||
+      std::memcmp(bytes.data(), "WWVKST01", 8))
+    throw std::runtime_error("invalid code-free pipeline state envelope");
+  auto recipe = std::make_shared<PipelineRecipe>();
+  Reader in{bytes, 8}; Parts parts; recipe_fields(in, *recipe, parts, true);
+  if (in.at != bytes.size()) throw std::runtime_error("trailing code-free pipeline state");
+  recipe->state = parts.snapshot(); return recipe;
+}
 std::vector<uint8_t> encode_pipeline_recipes(const PipelineRecipeFingerprint& fingerprint,
     const std::vector<std::shared_ptr<PipelineRecipe>>& recipes) {
-  if (recipes.size() > 512) throw std::runtime_error("pipeline recipe database count limit");
+  if (recipes.size() > 16384) throw std::runtime_error("pipeline recipe database count limit");
   Writer body;
   for (auto& recipe : recipes) {
     auto bytes = encode_pipeline_recipe(*recipe);
@@ -257,7 +266,7 @@ std::vector<std::shared_ptr<PipelineRecipe>> decode_pipeline_recipes(
     const PipelineRecipeFingerprint& fingerprint, const std::vector<uint8_t>& bytes) {
   if (bytes.size() < 64 || bytes.size() > maxBytes || std::memcmp(bytes.data(), "WWVKPR01", 8) ||
       std::memcmp(bytes.data() + 8, fingerprint.data(), fingerprint.size())) throw std::runtime_error("incompatible pipeline recipe database");
-  Reader in{bytes, 56}; uint32_t count = in.count(512), checksum; in.scalar(checksum);
+  Reader in{bytes, 56}; uint32_t count = in.count(16384), checksum; in.scalar(checksum);
   if (checksum != crc32(0, bytes.data() + 64, bytes.size() - 64)) throw std::runtime_error("pipeline recipe checksum mismatch");
   std::vector<std::shared_ptr<PipelineRecipe>> recipes;
   std::unordered_set<std::string> keys;

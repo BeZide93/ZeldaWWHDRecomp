@@ -3,6 +3,7 @@
 // resulting ImDrawData (gfx/overlay_metal.mm, gfx/vulkan/overlay.cpp); the hosts feed input and apply
 // changes on their main thread (hostui.h).
 #include "overlay.h"
+#include "gfx/shader_prebuild.h"
 #include "../audio_out.h"
 #include "guest_hud.h"
 #include "setup_test.h"
@@ -627,6 +628,13 @@ std::string performance_report() {
 }
 
 void tab_graphics() {
+    heading("Shader cache");
+    static bool rebuildFailed = false;
+    if (ImGui::Button("Rebuild shader cache"))
+        rebuildFailed = !shaderprebuild::request_rebuild();
+    if (rebuildFailed) note("Could not save the request. Check that the settings folder is writable.");
+    else if (shaderprebuild::requested()) note("Shaders and pipelines will be rebuilt on the next start.");
+    help("Prepares shaders from your game files. Rebuilding can take a few minutes; current play continues normally.");
 #ifdef __ANDROID__
     heading("GPU driver (Snapdragon / Adreno)");
     note("Active: %s", gfxvk::drivers::active_name().c_str());

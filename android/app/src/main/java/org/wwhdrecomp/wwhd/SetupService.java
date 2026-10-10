@@ -162,7 +162,8 @@ public class SetupService extends Service {
                 String kind = configuration.getJSONObject("input").getString("kind");
                 if (!kind.equals("folder")) configuration.put("extractor", AndroidExtractor.prepare(this));
                 String revision = EmbeddedPython.checksum(this, "python-source.zip", () -> checkPause(active));
-                configuration.put("port_revision", revision).put("jobs", compileJobs());
+                configuration.put("port_revision", revision).put("jobs", compileJobs())
+                    .put("shader_cache_root", new File(getFilesDir(), "user/shader-prebuild").getAbsolutePath());
                 SetupStore.write(new File(active, "job.json"), configuration);
                 checkPause(active);
                 host("running", null, null);
@@ -179,7 +180,20 @@ public class SetupService extends Service {
                 host("activating", null, null);
                 checkPause(active);
                 AndroidGame.activate(this, new File(ready.getString("library")), new File(ready.getString("game")));
-                host("complete", null, null);
+                JSONObject shaders = ready.optJSONObject("shader_prebuild");
+                if (shaders != null && shaders.optString("status").equals("warm_pending")) {
+                    File result = new File(active, "shader-warm-result.json");
+                    if (result.isFile() && !result.delete()) throw new IOException("Cannot replace shader preparation result");
+                    host("warming shaders", null, null);
+                    long deadline = android.os.SystemClock.elapsedRealtime() + 300000;
+                    while (!result.isFile() && android.os.SystemClock.elapsedRealtime() < deadline) {
+                        checkPause(active);
+                        Thread.sleep(200);
+                    }
+                    if (!result.isFile() || !SetupStore.read(result).optString("status").equals("ready")) {
+                        host("complete", null, "Shader preparation skipped or failed; shaders will compile during play.");
+                    } else host("complete", null, null);
+                } else host("complete", null, null);
             } catch (Pause requested) { paused = true; }
             catch (Exception failure) {
                 error = failure;

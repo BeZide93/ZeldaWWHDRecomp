@@ -18,11 +18,13 @@
 
 #include "Cafe/HW/Latte/ISA/RegDefines.h"
 #include "metal.h"
+#include "vulkan/headstart_shader_record.h"
 #include "runtime.h"
 
 namespace gfx {
 
 bool headstart_translate(const uint32_t* regs, bool vertex, bool compileNow);  // metal_draw.mm
+size_t headstart_failures();
 size_t headstart_compiling();                                                   // metal_draw.mm
 bool headstart_queue_pipeline(const uint8_t* raw, size_t size);                 // metal_draw.mm
 size_t headstart_build_pipelines(int maxInFlight, size_t& built, size_t& dropped);  // metal_draw.mm
@@ -61,7 +63,7 @@ bool replay(bool speculative, bool compileNow, Stats& st) {
     uint32_t hdr[3];
     std::vector<uint8_t> comp, raw;
     while (fread(hdr, sizeof hdr, 1, f) == 1) {
-        bool want = hdr[0] == kRecShader || hdr[0] == kRecPipeline || (speculative && hdr[0] == kRecSpeculative);
+        bool want = hdr[0] == kRecShader || hdr[0] == 6 || hdr[0] == kRecPipeline || (speculative && hdr[0] == kRecSpeculative);
         if (!want) {
             fseek(f, hdr[2], SEEK_CUR);
             continue;
@@ -75,23 +77,27 @@ bool replay(bool speculative, bool compileNow, Stats& st) {
             st.pipelines += headstart_queue_pipeline(raw.data(), raw.size());
             continue;
         }
-        uint32_t vertex, size, fsSize, n;
-        memcpy(&vertex, &raw[0], 4);
-        memcpy(&size, &raw[4], 4);
-        memcpy(&fsSize, &raw[8], 4);
-        memcpy(&n, &raw[12], 4);
-        if (16 + size + fsSize + (size_t)n * 8 > raw.size()) break;
-        const uint8_t* p = raw.data() + 16;
+        gfxvk::HeadstartShaderRecord record;
+        try { record = gfxvk::decode_headstart_shader_record(raw, hdr[0]); }
+        catch (const std::exception& error) {
+            LOG("[warm] invalid shader record: %s", error.what());
+            fclose(f); return false;
+        }
+        const uint32_t vertex = record.vertex, size = record.program.size(), fsSize = record.fetch.size();
+        const uint32_t n = record.registers.size() / 8;
+        const uint8_t* p = record.program.data();
         std::fill(regs.begin(), regs.end(), 0);
-        const uint8_t* rp = p + size + fsSize;
+        const uint8_t* rp = record.registers.data();
         for (uint32_t i = 0; i < n; i++) {
             uint32_t r, v;
             memcpy(&r, rp + i * 8, 4);
             memcpy(&v, rp + i * 8 + 4, 4);
             if (r < regs.size()) regs[r] = v;
         }
-        regs[vertex ? mmSQ_PGM_START_VS : mmSQ_PGM_START_PS] = guest_copy(programs, p, size) >> 8;
-        if (fsSize) regs[mmSQ_PGM_START_FS] = guest_copy(fetch, p + size, fsSize) >> 8;
+        const uint32_t stage = vertex ? mmSQ_PGM_START_VS : mmSQ_PGM_START_PS;
+        regs[stage] = guest_copy(programs, p, size) >> 8;
+        regs[stage + 1] = size >> 3;
+        if (fsSize) regs[mmSQ_PGM_START_FS] = guest_copy(fetch, record.fetch.data(), fsSize) >> 8;
         st.records++;
         if (headstart_translate(regs.data(), vertex != 0, compileNow)) st.translated++;
         else st.failed++;
@@ -147,8 +153,9 @@ int headstart_warm() {
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
     LOG("[warm] %zu pipelines built (%zu unresolved) in %.1f s", built, dropped, (ms_since(t0) - tShaders) / 1000.0);
-    LOG("[warm] done in %.1f s", ms_since(t0) / 1000.0);
-    return 0;
+    const size_t compileFailures = headstart_failures();
+    LOG("[warm] done in %.1f s (%zu failed shader/pipeline compiles)", ms_since(t0) / 1000.0, compileFailures);
+    return st.failed || compileFailures ? 1 : 0;
 }
 
 }  // namespace gfx

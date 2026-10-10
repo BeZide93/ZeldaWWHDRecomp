@@ -6,7 +6,7 @@ Usage:
   shaderprep.py coverage RUNTIME_CACHE                           runtime programs found in the game files
   shaderprep.py template RUNTIME_CACHE [OUT] [--merge T]         distill your recorded runtime cache into the
                                                                  state template (default OUT:
-                                                                 game/shadercache/template.bin);
+                                                                 tools/shadercache/template.bin);
                                                                  --merge keeps what template T already has
   shaderprep.py build    [OUT] [--template T] [--max N]          head start from the game files + template
                          [--no-pipelines]                        (default OUT: game/shadercache/headstart.bin)
@@ -37,29 +37,18 @@ type 2 is the Metal PipelineRecipe struct (168 bytes). Type 4 is a checked,
 versioned Vulkan database containing exact keys, SPIR-V, descriptors and fixed
 state, plus the local device/driver/features fingerprint. Handles are never stored.
 
-Register state can't be derived from the archives alone (it depends on render targets, vertex layouts,
-textures...). The template (default: game/shadercache/template.bin) holds the states recorded in your
-own play sessions: for each program a hash of its microcode and the register states it was translated
-with, the vertex fetch shaders (tiny attribute-layout descriptors) and the pipeline recipes recorded in
-those sessions. It is derived from the game, so it is not part of this repository; make it from your
-own runtime cache after playing for a while (the further you get, the more it covers):
-  shaderprep.py template ~/Library/Caches/wwhd/shaders.bin
-  shaderprep.py build
-`build` then writes:
-  - type 1 records: programs from the template with their recorded states ("known"); the runtime
-    replays these at startup (runtime/src/gfx/shader_headstart.mm)
-  - type 2 records: the template's pipeline recipes. They name their shaders by the runtime's shader
-    keys (a hash of the microcode, the translation-relevant registers and the fetch shader), which the
-    known records reproduce exactly since they carry the recorded register state; the runtime builds
-    them in the background once those shaders are compiled and drops recipes whose shaders it lacks
-  - type 3 records: every other archive program with up to --max states recorded for programs of the
-    same family (identical shader register block). Speculative; only `wwhd --warm-shaders` uses them,
-    compiling everything once so the macOS Metal shader cache already has the code later.
-  - type 4 records: local Vulkan pipeline recipes; the Vulkan startup worker compiles compatible
-    records independently of shader translation. Metal skips these records.
-Templates written by this tool use WWHT0002 and explicit pipeline backend tags.
-Legacy WWHT templates remain readable as Metal pipeline records.
+The distributable template is WWHT0003 + bounded zlib canonical JSON. Strict
+fields contain only program hashes/stages, register pairs, semantic fetch
+attributes (buffer/location/format/numeric/signed/endian/component selectors,
+offset/fetch type/signed divisor), and explicitly typed pipeline state. No
+program bytes, fetch instructions, shader source, SPIR-V or native cache data
+are accepted. See shaderprep_format.py for the versioned schema. Legacy local
+templates can be converted using template --merge; unsupported fetch features
+fail closed. Build resolves program hashes from the player's own archives and
+writes a LOCAL code-carrying headstart. Never distribute that generated file.
 """
+import shaderprep_format as template_format
+import json
 import collections
 import ctypes
 import glob
@@ -73,7 +62,7 @@ import zlib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-TEMPLATE = os.path.join(ROOT, "game", "shadercache", "template.bin")  # made by `template`, not shipped
+TEMPLATE = os.path.join(HERE, "shadercache", "template.bin")  # guarded code-free release template
 
 REC_SHADER, REC_PIPELINE, REC_SPECULATIVE = 1, 2, 3
 REC_VULKAN_PIPELINE = 4
@@ -237,7 +226,7 @@ def read_records(path):
         o += 12
         count += 1
         total += raw
-        if t not in (1, 2, 3, 4) or not 0 < raw <= 16 * 1024 * 1024 or \
+        if t not in (1, 2, 3, 4, 5, 6) or not 0 < raw <= 16 * 1024 * 1024 or \
                 not 0 < comp <= 16 * 1024 * 1024 or comp > len(d) - o or \
                 count > 100000 or total > 256 * 1024 * 1024:
             raise ValueError("invalid recipe bounds")
@@ -246,14 +235,32 @@ def read_records(path):
 
 
 def parse_shader_record(r):
-    vertex, size, fs_size, n = struct.unpack_from("<IIII", r, 0)
-    o = 16
-    code = bytes(r[o:o + size])
-    o += size
-    fs = bytes(r[o:o + fs_size])
-    o += fs_size
-    regs = [struct.unpack_from("<II", r, o + 8 * i) for i in range(n)]
-    return vertex, code, fs, regs
+    if len(r)<16: raise ValueError('truncated shader record')
+    vertex, size, fs_size, n = struct.unpack_from('<IIII',r)
+    if vertex not in (0,1) or not 0<size<=16*1024*1024 or fs_size>4096 or n>16384 or 16+size+fs_size+n*8!=len(r):
+        raise ValueError('invalid shader record bounds')
+    o=16
+    code=bytes(r[o:o+size]);o+=size
+    fs=bytes(r[o:o+fs_size]);o+=fs_size
+    regs=[struct.unpack_from('<II',r,o+8*i) for i in range(n)]
+    return vertex,code,fs,regs
+
+
+def parse_linked_shader_record(raw):
+    if len(raw)<20: raise ValueError('truncated linked shader record')
+    vertex,ps,fs,n,vs=struct.unpack_from('<5I',raw)
+    if vertex!=0 or not 0<ps<=16*1024*1024 or not 0<vs<=16*1024*1024 or not 0<fs<=4096 or n>16384 or 20+ps+fs+vs+n*8!=len(raw):
+        raise ValueError('invalid linked shader bounds')
+    o=20
+    pixel=raw[o:o+ps];o+=ps
+    fetch=raw[o:o+fs];o+=fs
+    companion=raw[o:o+vs];o+=vs
+    regs=[struct.unpack_from('<II',raw,o+i*8) for i in range(n)]
+    return pixel,fetch,companion,regs
+
+
+def linked_shader_record(pixel,fetch,companion,regs):
+    return struct.pack('<5I',0,len(pixel),len(fetch),len(regs),len(companion))+pixel+fetch+companion+b''.join(struct.pack('<II',*r) for r in regs)
 
 
 def write_record(f, t, raw):
@@ -315,49 +322,63 @@ def own_block(vertex, w):
 
 
 # ---------------------------------------------------------------- template
+def _codefree_state(h, vertex, fs, regs, linked=None):
+    # ALU constant banks contain per-draw uniform values, not translation state.
+    # Vulkan records whole context banks; never publish these values. Pixel
+    # translation does not use fetch identity (translate seed is vertex-only).
+    fetch = (fs if isinstance(fs, dict) else template_format.parse_fetch(fs, regs, prog_hash)) if vertex else None
+    drop = (mmSQ_PGM_START_VS, mmSQ_PGM_START_PS, mmSQ_PGM_START_FS)
+    state = {'hash': h, 'vertex': vertex, 'fetch': fetch,
+             'registers': [[a, v] for a, v in regs if a not in drop and not 0xc000 <= a < 0xe000]}
+    if linked is not None: state['linked_vertex']=linked
+    return state
+
+
+def _codefree_pipeline(kind, payload):
+    if isinstance(payload, dict): return payload
+    if kind == REC_PIPELINE: return template_format.metal_pipeline(payload)
+    if kind == 5 and payload.startswith(b'WWVKST01'):
+        return template_format.vulkan_recipe(payload[8:], codefree=True)
+    raise ValueError('unsupported code-free pipeline type')
+
+
 def cmd_template(cache, out, merge=None):
-    """'WWHT0002' + zlib( u32 nfetch, {u32 len, bytes}*, u32 nstates,
-                      {u64 program hash, u32 vertex, i32 fetch index, u32 nregs, (u32 reg, u32 value)*}*,
-                      u32 npipelines, {u32 backend kind, u32 len, pipeline recipe}* )"""
-    fetch = {}
-    entries = collections.OrderedDict()
-    pipelines = collections.OrderedDict()
+    states, pipelines = [], []
     if merge:
-        old_states, old_pipelines = read_template(merge)
-        for h, vertex, fs, regs in old_states:
-            fi = fetch.setdefault(fs, len(fetch)) if fs else -1
-            entries.setdefault((h, vertex, fi, tuple(regs)), None)
-        pipelines.update((p, None) for p in old_pipelines)
-    drop = (mmSQ_PGM_START_VS, mmSQ_PGM_START_PS, mmSQ_PGM_START_FS)  # addresses in the recording's memory
-    for t, r in read_records(cache):
-        if t in (REC_PIPELINE, REC_VULKAN_PIPELINE):
-            pipelines.setdefault((t, bytes(r)), None)
-            continue
-        if t != REC_SHADER:
-            continue
-        vertex, code, fs, regs = parse_shader_record(r)
-        fi = fetch.setdefault(fs, len(fetch)) if fs else -1
-        regs = tuple((a, v) for a, v in regs if a not in drop)
-        entries.setdefault((prog_hash(code), vertex, fi, regs), None)
-    raw = bytearray(struct.pack("<I", len(fetch)))
-    for fs, _ in sorted(fetch.items(), key=lambda x: x[1]):
-        raw += struct.pack("<I", len(fs)) + fs
-    raw += struct.pack("<I", len(entries))
-    for (h, vertex, fi, regs) in entries:
-        raw += struct.pack("<QIiI", h, vertex, fi, len(regs))
-        raw += b"".join(struct.pack("<II", a, v) for a, v in regs)
-    raw += struct.pack("<I", len(pipelines))
-    for kind, p in pipelines:
-        raw += struct.pack("<II", kind, len(p)) + p
-    data = b"WWHT0002" + zlib.compress(bytes(raw), 9)
-    os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
-    with open(out, "wb") as output:
-        output.write(data)
-    print("template: %d states, %d fetch shaders, %d pipelines, %d bytes -> %s" %
-          (len(entries), len(fetch), len(pipelines), len(data), out))
+        old_states, old_pipelines = read_template(merge, allow_legacy=True)
+        states.extend(_codefree_state(*s) for s in old_states)
+        for kind,p in old_pipelines:
+            pipelines.extend(template_format.vulkan_database(p) if kind==REC_VULKAN_PIPELINE and not isinstance(p,dict) else [_codefree_pipeline(kind,p)])
+    for kind, raw in read_records(cache):
+        if kind in (REC_PIPELINE, REC_VULKAN_PIPELINE, 5):
+            pipelines.extend(template_format.vulkan_database(raw) if kind==REC_VULKAN_PIPELINE else [_codefree_pipeline(kind,raw)])
+        elif kind == 6:
+            code,fs,vs,regs=parse_linked_shader_record(raw)
+            states.append(_codefree_state(prog_hash(code),0,b'',regs,{'hash':prog_hash(vs),'fetch':template_format.parse_fetch(fs,regs,prog_hash)}))
+        elif kind == REC_SHADER:
+            vertex, code, fs, regs = parse_shader_record(raw)
+            states.append(_codefree_state(prog_hash(code), vertex, fs, regs))
+    def unique(values):
+        return list({json.dumps(v,sort_keys=True,separators=(',',':')):v for v in values}.values())
+    doc = {'version':3,'states':unique(states),'pipelines':unique(pipelines)}
+    data=template_format.encode(doc)
+    os.makedirs(os.path.dirname(out) or '.',exist_ok=True)
+    with open(out,'wb') as output: output.write(data)
+    print('code-free template: %d states, %d pipelines, %d bytes -> %s' %
+          (len(doc['states']),len(doc['pipelines']),len(data),out))
 
 
-def read_template(path):
+def read_template(path, allow_legacy=False):
+    with open(path,'rb') as source: data=source.read()
+    if data.startswith(template_format.MAGIC):
+        doc=template_format.decode(data)
+        return [(s['hash'],s['vertex'],s['fetch'],[tuple(r) for r in s['registers']],s.get('linked_vertex')) for s in doc['states']], [(5 if p['backend']=='vulkan' else REC_PIPELINE,p) for p in doc['pipelines']]
+    if not allow_legacy:
+        raise ValueError('legacy template carries fetch bytes; convert locally with template --merge')
+    return read_legacy_template(path)
+
+
+def read_legacy_template(path):
     if not os.path.isfile(path):
         sys.exit("no state template at %s\n"
                  "make one from your own runtime cache after playing for a while:\n"
@@ -382,7 +403,7 @@ def read_template(path):
         o += 20
         regs = [struct.unpack_from("<II", raw, o + 8 * i) for i in range(nr)]
         o += 8 * nr
-        states.append((h, vertex, fetch[fi] if fi >= 0 else b"", regs))
+        states.append((h, vertex, fetch[fi] if fi >= 0 else b"", regs, None))
     pipelines = []
     if o + 4 <= len(raw):  # older templates end here
         n = struct.unpack_from("<I", raw, o)[0]
@@ -418,7 +439,10 @@ def cmd_coverage(game, cache):
     shaders = game_shaders(game)
     progs = set()
     for t, r in read_records(cache):
-        if t in (REC_SHADER, REC_SPECULATIVE):
+        if t == 6:
+            code,fs,vs,regs=parse_linked_shader_record(r)
+            progs.add((PS,code));progs.add((VS,vs))
+        elif t in (REC_SHADER, REC_SPECULATIVE):
             vertex, code, fs, regs = parse_shader_record(r)
             progs.add((VS if vertex else PS, code))
     have = sum(1 for k in progs if k in shaders)
@@ -433,42 +457,57 @@ def cmd_build(game, out, template, limit, with_pipelines=True):
     if not with_pipelines:
         pipelines = []
     by_hash = collections.defaultdict(list)
-    for h, vertex, fs, regs in states:
-        by_hash[(h, bool(vertex))].append((fs, regs))
+    for h, vertex, fs, regs, linked in states:
+        by_hash[(h, bool(vertex))].append((fs, regs, linked))
     # speculative states: those recorded for programs with an identical shader register block
     blocks = {}
     for (typ, code), (w, path) in shaders.items():
         blocks.setdefault((typ == VS, tuple(sorted(own_block(typ == VS, w)))), None)
     by_family = collections.defaultdict(list)
-    for h, vertex, fs, regs in states:
+    for h, vertex, fs, regs, linked in states:
         regmap = dict(regs)
         for (tv, regset) in blocks:
             if tv == bool(vertex):
-                by_family[(tv, tuple((a, regmap.get(a, 0)) for a in regset))].append((fs, regs))
+                by_family[(tv, tuple((a, regmap.get(a, 0)) for a in regset))].append((fs, regs, linked))
     pgm = {True: mmSQ_PGM_START_VS, False: mmSQ_PGM_START_PS}
+    companion_programs=collections.defaultdict(set)
+    for (typ,code) in shaders:
+        if typ==VS: companion_programs[prog_hash(code)].add(code)
+    unresolved_linked=0
     known = spec = 0
     os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
     with open(out, "wb") as f:
         for (typ, code), (w, path) in shaders.items():
             vertex = typ == VS
-            for fs, regs in by_hash.get((prog_hash(code), vertex), []):
+            for fs, regs, linked in by_hash.get((prog_hash(code), vertex), []):
                 r = dict(regs)
                 r[pgm[vertex] + 1] = len(code) >> 3  # the loader supplies the program address
-                write_record(f, REC_SHADER, shader_record(1 if vertex else 0, code, fs, sorted(r.items())))
+                if linked is not None:
+                    matches=companion_programs.get(linked['hash'],set())
+                    if len(matches)!=1:
+                        unresolved_linked+=1
+                        continue
+                    companion=next(iter(matches))
+                    r[mmSQ_PGM_START_VS+1]=len(companion)>>3
+                    write_record(f,6,linked_shader_record(code,template_format.fetch_payload(linked['fetch']),companion,sorted(r.items())))
+                else:
+                    write_record(f, REC_SHADER, shader_record(1 if vertex else 0, code, template_format.fetch_payload(fs) if fs else b"", sorted(r.items())))
                 known += 1
         for kind, p in pipelines:
-            write_record(f, kind, p)
+            write_record(f, kind, template_format.vulkan_payload(p) if kind==5 else template_format.metal_payload(p))
         for (typ, code), (w, path) in shaders.items():
             vertex = typ == VS
             if (prog_hash(code), vertex) in by_hash:
                 continue
             blk = own_block(vertex, w)
-            for fs, regs in by_family.get((vertex, tuple(sorted(blk.items()))), [])[:limit]:
+            for fs, regs, linked in by_family.get((vertex, tuple(sorted(blk.items()))), [])[:limit]:
+                if linked is not None: continue # Never invent a linked VS for a speculative PS.
                 r = dict(regs)
                 r.update(blk)
                 r[pgm[vertex] + 1] = len(code) >> 3
-                write_record(f, REC_SPECULATIVE, shader_record(1 if vertex else 0, code, fs, sorted(r.items())))
+                write_record(f, REC_SPECULATIVE, shader_record(1 if vertex else 0, code, template_format.fetch_payload(fs) if fs else b"", sorted(r.items())))
                 spec += 1
+    print("unresolved linked shader states: %d" % unresolved_linked)
     print("archive shaders %d; known records %d; pipeline records %d; speculative records %d -> %s (%d bytes)" %
           (len(shaders), known, len(pipelines), spec, out, os.path.getsize(out)))
 

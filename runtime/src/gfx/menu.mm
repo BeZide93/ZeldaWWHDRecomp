@@ -1,4 +1,5 @@
 #include "../mods/manager.h"
+#include "shader_prebuild.h"
 // Menu bar: app menu (Quit, which asks first while a game is in progress: quit_prompt.mm), a Window
 // menu (Close Window on the TV window quits the same way) and a Graphics menu to switch fixes and
 // enhancements while playing. Each option also has a single-key shortcut in the game window.
@@ -260,6 +261,12 @@ static WWStateMenu* g_state_menu;
 @end
 
 @implementation WWGraphicsMenu
+- (void)rebuildShaders:(NSMenuItem*)item {
+    NSAlert* alert = [NSAlert new];
+    alert.messageText = shaderprebuild::request_rebuild() ? @"Shader cache rebuild requested" : @"Could not save the rebuild request";
+    alert.informativeText = @"Shaders and pipelines will be prepared from your game files on the next start. Current play continues normally.";
+    [alert runModal];
+}
 - (void)setBloom:(NSMenuItem*)item { render::set_bloom_strength(item.tag / 100.0f); update_title(); }
 - (void)setAO:(NSMenuItem*)item { render::set_ao_mode((int)item.tag); update_title(); }
 - (void)toggleAniso:(NSMenuItem*)item { render::set_aniso(!render::aniso()); update_title(); }
@@ -412,6 +419,7 @@ void install_menu(NSWindow* tv) {
 
     NSMenuItem* gfxItem = [bar addItemWithTitle:@"Graphics" action:nil keyEquivalent:@""];
     NSMenu* g = [[NSMenu alloc] initWithTitle:@"Graphics"];
+    add(g, @"Rebuild shader cache", @selector(rebuildShaders:), @"", 0);
     if (render::can_choose()) {
         // both renderers are built in: the choice is saved and used from the next start
         [g addItemWithTitle:@"Renderer (takes effect after a restart)" action:nil keyEquivalent:@""].enabled = NO;

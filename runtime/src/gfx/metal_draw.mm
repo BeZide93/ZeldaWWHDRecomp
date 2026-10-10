@@ -188,6 +188,24 @@ static std::unordered_map<uint64_t, LatteFetchShader*> g_fetch;
 static LatteFetchShader* get_fetch_shader(const uint32_t* regs, uint64_t* keyOut) {
     uint32_t prog = regs[mmSQ_PGM_START_FS] << 8;
     if (!prog) return nullptr;
+    if (uint64_t(prog) + 32 <= 0x100000000ull && !memcmp(mem::ptr(prog), "WWFA0001", 8)) {
+        const uint8_t* p = mem::ptr(prog);
+        auto word = [](const uint8_t* q) { return uint32_t(q[0]) | uint32_t(q[1]) << 8 |
+            uint32_t(q[2]) << 16 | uint32_t(q[3]) << 24; };
+        const uint32_t count = word(p + 16);
+        if (count > 64) return nullptr;
+        uint64_t h = uint64_t(word(p + 24)) | uint64_t(word(p + 28)) << 32;
+        for (uint32_t b = 0; b < 16; ++b)
+            h = (h ^ ((regs[mmSQ_VTX_ATTRIBUTE_BLOCK_START + b * 7 + 2] >> 11) & 0xFFFF)) * 1099511628211ull;
+        *keyOut = h;
+        if (auto it = g_fetch.find(h); it != g_fetch.end()) return it->second;
+        auto* fs = gx2::decode_fetch_attributes(prog, 32 + count * 52, nullptr);
+        if (fs) {
+            fs->CheckIfVerticesNeedManualFetchMtl(const_cast<uint32_t*>(regs));
+            g_fetch.emplace(h, fs);
+        }
+        return fs;
+    }
     // either our compact encoding (from GX2InitFetchShaderEx) or real fetch shader microcode shipped with the game
     bool ours = ld32(prog) == 0x57574653;
     uint32_t size = ours ? 16 + ld32(prog + 4) * 16 : regs[mmSQ_PGM_START_FS + 1] << 3;
@@ -383,12 +401,12 @@ static void compile_msl(Shader* sh, const char* rawSrc, uint64_t key) {
     std::string copy = src;
     g_compiles_in_flight++;
     [R.device newLibraryWithSource:source options:opt completionHandler:^(id<MTLLibrary> lib, NSError* err) {
-        g_compiles_in_flight--;
         if (injectFailure) lib = nil;
         id<MTLFunction> fn = lib ? [lib newFunctionWithName:entry] : nil;
-        if (!fn) { report_compile_error(copy.c_str(), key, err, attempt, lib != nil); compile_done(sh->state, CS_FAILED); return; }
+        if (!fn) { report_compile_error(copy.c_str(), key, err, attempt, lib != nil); compile_done(sh->state, CS_FAILED); g_compiles_in_flight--; return; }
         sh->fn = fn;
         compile_done(sh->state, CS_READY);
+        g_compiles_in_flight--;
     }];
 }
 
@@ -780,11 +798,11 @@ static id<MTLRenderPipelineState> get_pipeline(const uint32_t* regs, Shader* vs,
     }
     g_compiles_in_flight++;
     [R.device newRenderPipelineStateWithDescriptor:d completionHandler:^(id<MTLRenderPipelineState> p, NSError* err) {
-        g_compiles_in_flight--;
         if (injectFailure) p = nil;
         if (!p) pipelineFailed(err);
         pl->state = p;
         compile_done(pl->status, p ? CS_READY : CS_FAILED);
+        g_compiles_in_flight--;
     }];
     return wait_compiled(pl->status) ? pl->state : nil;
 }
@@ -1921,6 +1939,15 @@ bool headstart_translate(const uint32_t* regs, bool vertex, bool compileNow) {
 
 // Metal compiles (shaders and pipelines) that haven't finished yet
 size_t headstart_compiling() { return std::max(0, g_compiles_in_flight.load()); }
+// Called after the in-flight count reaches zero: callbacks have published every
+// final state before decrementing it, so setup can report actual compile failures.
+size_t headstart_failures() {
+    size_t failed = 0;
+    for (const auto& [key, shader] : g_shaders) failed += shader->state.load(std::memory_order_acquire) == CS_FAILED;
+    for (const auto& [key, pipeline] : g_pipelines) failed += pipeline->status.load(std::memory_order_acquire) == CS_FAILED;
+    return failed;
+}
+
 
 // queue a head-start pipeline recipe (a raw kRecPipeline record); built like the user cache's, once
 // its shaders are compiled

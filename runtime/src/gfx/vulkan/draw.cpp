@@ -560,8 +560,8 @@ PipelineKey pipeline_key(const uint32_t* r, const vk::Shader* vs, const vk::Shad
                          const LatteFetchShader* fs, VkPrimitiveTopology topology,
                          const std::array<Surface*, 8>& colors, const Surface* depth) {
   PipelineKey key;
-  key.vs = vs->pipelineId;
-  key.ps = ps->pipelineId;
+  key.vs = vs->key; // process-local canonical variant; portable identity is separate
+  key.ps = ps->key;
   key.fetch = fs->vkPipelineHashFragment;
   key.topology = uint32_t(topology);
   uint32_t ncolor = 0;
@@ -740,7 +740,9 @@ Pipeline &pipeline(const uint32_t *r, vk::Shader *vs, vk::Shader *ps,
     if (m.tfStorageBindingPoint >= 0)
       exception_report::raise("Vulkan transform feedback unsupported");
   }
-  const auto* keyBytes = reinterpret_cast<const uint8_t*>(&key);
+  auto portableKey = key;
+  portableKey.vs = vs->pipelineId; portableKey.ps = ps->pipelineId;
+  const auto* keyBytes = reinterpret_cast<const uint8_t*>(&portableKey);
   std::vector<uint8_t> recipeKey(keyBytes, keyBytes + sizeof key);
   // Own prerequisite identities independently of the mutable shader cache.
   const std::array<std::shared_ptr<vk::ShaderBinary>, 2> shaderBinaries{vs->binary, ps->binary};

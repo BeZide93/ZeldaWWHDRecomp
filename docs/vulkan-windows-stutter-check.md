@@ -7,13 +7,14 @@ Use this checklist for a test build supplied by the maintainer. Keep the previou
 - Record the source revision, any patch identifier, archive SHA-256 and executable SHA-256 supplied with the build. Check downloaded files with `Get-FileHash -Algorithm SHA256`. Keep baseline and candidate executable hashes separately.
 - Record Windows version/build, CPU, RAM, GPU and driver version, display refresh rate, resolution/render scale, graphics options, interpolation mode and enabled mods. Record game region/version without sharing game files.
 - Keep the laptop on AC with the same power profile. Note battery state, thermal throttling, fans and background activity. Pause downloads, builds and other heavy work for comparisons; record interruptions and repeat affected samples.
-- Install into a separate folder and let the installer compile your own game locally. The test archive must contain runtime/tools only: no generated game code, game files, saves, shader templates or shader/pipeline caches. Build any shader head start locally using the [Windows instructions](../README.md#vulkan-shader-head-start-on-windows-and-linux).
+- Install into a separate folder and let the installer compile your own game locally. The test archive must contain runtime/tools and the guard-validated code-free state template only: no generated game code, game files, saves, recorded shader payloads or shader/pipeline caches. Let **Preparing shaders** build private caches from your own game files; [manual Windows instructions](../README.md#vulkan-shader-head-start-on-windows-and-linux) are also available.
 
 ## Check startup and settings
 
 1. Start the supplied executable with `--renderer-smoke` and retain its output. A passing build or unit test alone does not establish GPU compatibility.
 2. Use separate test settings and cache directories. Confirm startup, the title screen and the tested scene render correctly.
 3. Remove old experimental shader-compilation and delay environment overrides. Compare the supplied baseline and Exact candidate with matching graphics settings.
+4. Check setup preparation, skipping, and **Graphics → Rebuild shader cache** followed by restart. Record whether preparation finishes or falls back with a message. After skipping, confirm the next start plays without repeating preparation; a rebuild request should enable preparation again. A Windows cross-build or passing unit tests do not establish native Windows GPU behavior.
 
 ## Compare the same route
 

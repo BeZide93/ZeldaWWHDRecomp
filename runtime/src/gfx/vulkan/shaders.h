@@ -29,7 +29,7 @@ std::vector<uint32_t> shader_binary_words_exact(const std::shared_ptr<ShaderBina
 struct Shader {
     uint64_t key = 0;
     gfx::ProgramKind kind = gfx::ProgramKind::Other;
-    uint64_t pipelineId = 0;  // equal for shaders with identical SPIR-V and resource mapping
+    uint64_t pipelineId = 0;  // portable canonical GLSL+metadata identity, stable before SPIR-V
     bool vertex = false;
     LatteDecompilerShader* dec = nullptr;
     LatteDecompilerShaderResourceMapping mapping;
@@ -42,6 +42,8 @@ struct Shader {
     std::string error;
     bool ready() const { return dec && (!spirv.empty() || binary) && error.empty(); }
 };
+// Render-thread-only lookup; recorded pipeline identity, never program hash.
+const Shader* find_pipeline_shader(uint64_t pipelineId, bool vertex);
 void select_renderer();
 // Pass the renderer frame to revalidate program bytes once per frame. Omitting
 // it keeps immediate revalidation for standalone callers and shader tools.

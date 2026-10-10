@@ -2099,15 +2099,17 @@ STEP_TITLES = {
     "translate": "Translating the game code to C",
     "compile": "Compiling the game code (the longest step: several minutes)",
     "app": "Building the game",
+    "shaders": "Preparing shaders",
 }
 
 
 def plan_steps(kind):
-    return {"image": ["keys", "compiler", "extract", "translate", "compile", "app"],
+    result = {"image": ["keys", "compiler", "extract", "translate", "compile", "app"],
             "archive": ["archive", "compiler", "extract", "translate", "compile", "app"],
             "folder": ["folder", "compiler"] + ([] if PORTABLE else ["copy"]) + ["translate", "compile", "app"],
             "installed": ["compiler", "translate", "compile", "app"],
             "gen": ["compiler", "compile", "app"]}[kind]
+    return result + ([] if kind == "gen" else ["shaders"])
 
 
 CODE_MODS_TEXT = (
@@ -2313,6 +2315,30 @@ def install(ctx, source, keys=None, info=None, ui=None, check_keys=None):
             # Never leave an older variant selected after a successful setup build.
             Path(data_dir, "code-mods-active.json").unlink(missing_ok=True)
         write_code_mods_setting(data_dir, state["code_mods"])
+    if kind != "gen":
+        begin("shaders")
+        import shader_prebuild
+        shader_root = shader_prebuild.default_cache_root(data_dir, PORTABLE)
+        try:
+            shader_root.mkdir(parents=True, exist_ok=True)
+            shader_prebuild.atomic_json(shader_root / "launcher.json", {
+                "schema": 1, "python": sys.executable, "package": str(PKG),
+                "helper": str(Path(PKG) / "tools/installer/shader_prebuild.py"),
+                "template": str(Path(PKG) / "tools/shadercache/template.bin")})
+        except OSError as error:
+            say("Shader preparation launcher unavailable: %s" % error)
+        shader_progress = Progress("Preparing shaders")
+        def shader_message(text):
+            shader_progress.update(0, 0, text, force=True)
+            LOG.write(text)
+        state["shader_prebuild"] = shader_prebuild.prepare(
+            ctx.game_dir, Path(PKG) / "tools/shadercache/template.bin", state["exe"],
+            shader_root, PKG,
+            renderer="metal" if IS_MAC else "vulkan", progress=shader_message,
+            skip=bool(getattr(args, "skip_shader_prebuild", False)),
+            cancel=lambda: bool(getattr(args, "shader_prebuild_cancel", None) and
+                                Path(args.shader_prebuild_cancel).exists()))
+        shader_progress.done(state["shader_prebuild"]["status"])
     if not args.keep_work:
         shutil.rmtree(work, ignore_errors=True)
     if kind != "gen":
@@ -2356,6 +2382,8 @@ def main():
     ap.add_argument("--code-mods-status", help="atomic rebuild progress/result JSON")
     ap.add_argument("--code-mods-cancel", help="cancel rebuild when this file exists")
     ap.add_argument("--repair-guest-python", action="store_true", help="upgrade local mod setup Python without rebuilding game code")
+    ap.add_argument("--skip-shader-prebuild", action="store_true", help="skip optional shader preparation; compile during play")
+    ap.add_argument("--shader-prebuild-cancel", help="skip shader preparation when this file exists")
     ap.add_argument("--repair", action="store_true", help="rebuild the game code from the installed game files")
     ap.add_argument("--jobs", type=int, help="parallel compiler processes")
     ap.add_argument("--yes", action="store_true", help="non-interactive (also WWHD_SETUP_NONINTERACTIVE=1)")
@@ -2739,6 +2767,8 @@ def gui_main(args):
             if not isinstance(req["code_mods"], bool):
                 return fail(req, "bad_request", "code_mods must be a boolean")
             ctx.args.code_mods = "1" if req["code_mods"] else "0"
+        if "skip_shader_prebuild" in req:
+            ctx.args.skip_shader_prebuild = bool(req["skip_shader_prebuild"])
         if req.get("jobs"):
             ctx.args.jobs = int(req["jobs"])
         if kind == "image":

@@ -1,4 +1,5 @@
 #include "pipeline_worker.h"
+#include "pipeline_identity.h"
 #include "headstart.h"
 #include "pipeline_demand.h"
 #include "shader_compiler.h"
@@ -60,7 +61,7 @@ bool insert_recipe(Worker& w, const std::shared_ptr<PipelineRecipe>& recipe) {
   auto found = w.recipes.find(key);
   const size_t old = found == w.recipes.end() ? 0 : footprint(*found->second);
   const size_t size = footprint(*recipe);
-  if ((found == w.recipes.end() && w.recipes.size() >= 512) ||
+  if ((found == w.recipes.end() && w.recipes.size() >= 16384) ||
       size > 128 * 1024 * 1024 - (w.recipeBytes - old)) return false;
   w.recipeBytes += size - old;
   w.recipes.insert_or_assign(std::move(key), recipe);
@@ -133,7 +134,7 @@ std::vector<std::shared_ptr<PipelineRecipe>> read_recipes(Worker& w, bool headst
       throw std::runtime_error("truncated head-start header");
     consumed += 12;
     auto type = word(header), rawSize = word(header + 4), compressed = word(header + 8);
-    if (++records > 100000 || type < 1 || type > 4 || !rawSize || rawSize > 16 * 1024 * 1024 ||
+    if (++records > 100000 || type < 1 || type > 6 || !rawSize || rawSize > 16 * 1024 * 1024 ||
         !compressed || compressed > 16 * 1024 * 1024 || compressed > size - consumed ||
         rawSize > 256 * 1024 * 1024 - rawBytes) throw std::runtime_error("head-start record bounds");
     rawBytes += rawSize; consumed += compressed;
@@ -153,7 +154,7 @@ std::vector<std::shared_ptr<PipelineRecipe>> read_recipes(Worker& w, bool headst
       throw std::runtime_error("invalid pipeline head-start database");
     if (std::memcmp(raw.data() + 8, w.fingerprint.data(), w.fingerprint.size())) continue;
     auto recipes = decode_pipeline_recipes(w.fingerprint, raw);
-    if (recipes.size() > 512 - result.size()) throw std::runtime_error("head-start pipeline count limit");
+    if (recipes.size() > 16384 - result.size()) throw std::runtime_error("head-start pipeline count limit");
     result.insert(result.end(), recipes.begin(), recipes.end());
   }
   return result;
@@ -177,7 +178,7 @@ void run(Worker& w, std::vector<uint8_t> seed) {
     for (bool headstart : {false, true}) {
       try {
         for (auto& recipe : read_recipes(w, headstart))
-          if (loaded.size() < 512 && seen.insert(identity(recipe->key)).second) loaded.push_back(recipe);
+          if (loaded.size() < 16384 && seen.insert(identity(recipe->key)).second) loaded.push_back(recipe);
       } catch (const std::exception& error) {
         if (headstart) ++failed;
         std::fprintf(stderr, "[vulkan warmup] %s ignored: %s\n", headstart ? "head start" : "local recipes", error.what());
@@ -229,15 +230,7 @@ void run(Worker& w, std::vector<uint8_t> seed) {
   w.cache = cache;
   w.result = {completed, failed};
 }
-bool same_descriptors(const std::vector<VkDescriptorSetLayoutBinding>& a,
-    const std::vector<VkDescriptorSetLayoutBinding>& b) {
-  if (a.size() != b.size()) return false;
-  for (size_t i = 0; i < a.size(); ++i)
-    if (a[i].binding != b[i].binding || a[i].descriptorType != b[i].descriptorType ||
-        a[i].descriptorCount != b[i].descriptorCount || a[i].stageFlags != b[i].stageFlags ||
-        a[i].pImmutableSamplers || b[i].pImmutableSamplers) return false;
-  return true;
-}
+
 }
 void start_pipeline_worker(VkDevice device, PipelineRecipeFingerprint fingerprint,
     std::string path, std::vector<uint8_t> cacheSeed, std::string headstartPath) {
@@ -268,9 +261,7 @@ bool take_warm_pipeline(const std::vector<uint8_t>& key,
     if (found == w.ready.end()) return false;
     entry = std::move(found->second); w.ready.erase(found);
   }
-  if (entry.recipe->spirv != spirv || entry.recipe->dynamicUniforms != dynamicUniforms ||
-      !same_descriptors(entry.recipe->descriptors[0], descriptors[0]) ||
-      !same_descriptors(entry.recipe->descriptors[1], descriptors[1])) {
+  if (!portable_recipe_matches(*entry.recipe, spirv, descriptors, dynamicUniforms)) {
     destroy(w.device, entry.handles);
     return false;
   }
@@ -326,6 +317,40 @@ bool merge_pipeline_worker_cache(VkPipelineCache target) {
   w.merged = true;
   std::fprintf(stderr, "[vulkan warmup] worker pipeline cache merged for persistence\n");
   return true;
+}
+PipelineWarmupResult warm_resolved_pipeline_recipes(std::vector<std::shared_ptr<PipelineRecipe>> recipes) {
+  auto& w = worker();
+  if (w.thread.joinable()) w.thread.join();
+  if (!w.device || recipes.size() > 16384) return {0, recipes.size()};
+  PipelineWarmupResult batch;
+  w.thread = std::thread([&w, &batch, recipes = std::move(recipes)] {
+    host::set_thread_name("Vulkan state warmup");
+    for (auto& recipe : recipes) {
+      const auto key = identity(recipe->key);
+      {
+        std::lock_guard lock(w.mutex);
+        if (w.stopped) { ++batch.failed; continue; }
+        if (w.ready.contains(key)) { ++batch.ready; continue; }
+      }
+      WarmPipeline handles;
+      try {
+        if (compile(w.device, w.cache, *recipe, handles) != VK_SUCCESS) { ++batch.failed; continue; }
+        std::lock_guard lock(w.mutex);
+        if (!insert_recipe(w, recipe)) { destroy(w.device, handles); ++batch.failed; continue; }
+        try { w.ready.emplace(key, Ready{handles, recipe}); handles = {}; }
+        catch (...) { destroy(w.device, handles); throw; }
+        w.dirty = true;
+        ++batch.ready;
+      } catch (const std::exception& error) {
+        destroy(w.device, handles);
+        ++batch.failed;
+        std::fprintf(stderr, "[vulkan state warmup] skipped: %s\n", error.what());
+      }
+    }
+  });
+  w.thread.join();
+  w.result.ready += batch.ready; w.result.failed += batch.failed;
+  return batch;
 }
 PipelineWarmupResult finish_pipeline_warmup() {
   auto& w = worker();

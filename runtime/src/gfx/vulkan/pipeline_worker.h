@@ -21,6 +21,9 @@ void remember_pipeline_recipe(std::shared_ptr<PipelineRecipe> recipe);
 // Explicit checkpoint/shutdown only: joins the worker and writes local recipes.
 void save_pipeline_recipes();
 struct PipelineWarmupResult { size_t ready = 0, failed = 0; };
+// Offline only, caller resolves all shader identities/layouts on render thread.
+// Joins startup, then a worker owns this immutable local-SPIR-V batch.
+PipelineWarmupResult warm_resolved_pipeline_recipes(std::vector<std::shared_ptr<PipelineRecipe>> recipes);
 // Offline warming only: finish the whole startup queue instead of cancelling it.
 PipelineWarmupResult finish_pipeline_warmup();
 // After save_pipeline_recipes has joined; caller serializes access to target.

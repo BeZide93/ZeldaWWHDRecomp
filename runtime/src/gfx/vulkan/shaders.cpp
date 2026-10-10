@@ -1,5 +1,6 @@
 // Real Latte microcode -> Cemu GLSL -> SPIR-V for the Vulkan backend.
 #include "shaders.h"
+#include "pipeline_identity.h"
 #include "shader_compiler.h"
 #include "shader_translation.h"
 #include "shader_binary.h"
@@ -523,6 +524,26 @@ uint64_t output_hash(const Shader& shader) {
     hash = hash_bytes(&shader.uniforms, sizeof shader.uniforms, hash);
     return hash_bytes(&shader.descriptorRanks, sizeof shader.descriptorRanks, hash);
 }
+uint64_t portable_output_identity(const Shader& shader) {
+    PortableShaderIdentity id(shader.vertex, uint32_t(shader.kind), shader.glsl);
+    const auto& m=shader.mapping;
+    id.words(m.textureUnitToBindingPoint); id.words(m.relBindingPointToRelTextureUnit);
+    id.word(uint32_t(m.textureUnitBaseBindingPoint)); id.word(uint32_t(m.textureUnitCount));
+    id.word(uint32_t(m.uniformVarsBufferBindingPoint)); id.words(m.uniformBuffersBindingPoint);
+    id.word(uint32_t(m.tfStorageBindingPoint)); id.words(m.attributeMapping);
+    id.word(uint32_t(m.setIndex)); id.word(uint32_t(m.verticesPerInstanceBinding));
+    id.word(uint32_t(m.indexBufferBinding)); id.word(uint32_t(m.indexTypeBinding));
+    const auto& u=shader.uniforms;
+    id.word(uint32_t(u.offset_remapped)); id.word(uint32_t(u.offset_uniformRegister));
+    id.word(uint32_t(u.count_uniformRegister)); id.word(uint32_t(u.offset_alphaTestRef));
+    id.word(uint32_t(u.offset_pointSize)); id.word(uint32_t(u.offset_fragCoordScale));
+    id.words(u.offset_framebufferFetchSize); id.word(uint32_t(u.offset_windowSpaceToClipSpaceTransform));
+    id.words(u.offset_texScale); id.word(uint32_t(u.offset_verticesPerInstance));
+    id.words(u.offset_streamoutBufferBase); id.word(uint32_t(u.offset_endOfBlock));
+    const auto& r=shader.descriptorRanks;
+    id.words(r.blocks); id.words(r.textures); id.word(r.support); id.word(r.count); id.word(r.valid ? 1 : 0);
+    return id.value();
+}
 bool same_output(const Shader& a, const Shader& b) {
     return a.vertex == b.vertex && a.glsl == b.glsl &&
            !std::memcmp(&a.mapping, &b.mapping, sizeof a.mapping) &&
@@ -824,6 +845,20 @@ LatteFetchShader* get_fetch_shader(const uint32_t* regs, uint64_t* keyOut, uint6
     if (!cacheLast) lastFetch = {};
     uint32_t address = regs[mmSQ_PGM_START_FS] << 8;
     if (!address) return nullptr;
+    if (uint64_t(address) + 32 <= 0x100000000ull &&
+        !std::memcmp(ppc_ptr(address), "WWFA0001", 8)) {
+        const auto* p = reinterpret_cast<const uint8_t*>(ppc_ptr(address));
+        auto word = [](const uint8_t* q) { return uint32_t(q[0]) | uint32_t(q[1]) << 8 |
+            uint32_t(q[2]) << 16 | uint32_t(q[3]) << 24; };
+        const uint32_t count = word(p + 16);
+        if (count > 64) return nullptr;
+        const uint64_t key = uint64_t(word(p + 8)) | uint64_t(word(p + 12)) << 32;
+        if (keyOut) *keyOut = key;
+        if (auto it = fetchShaders.find(key); it != fetchShaders.end()) return it->second;
+        auto* fetch = gx2::decode_fetch_attributes(address, 32 + count * 52, nullptr);
+        if (fetch) fetchShaders.emplace(key, fetch);
+        return fetch;
+    }
     bool compact = ld32(address) == 0x57574653;
     uint32_t count = compact ? ld32(address + 4) : 0;
     if (compact && count > 64) return nullptr;
@@ -849,6 +884,7 @@ LatteFetchShader* get_fetch_shader(const uint32_t* regs, uint64_t* keyOut, uint6
     auto* fetch = compact ? gx2::build_fetch_shader(address)
         : LatteShaderRecompiler_createFetchShader(key, const_cast<uint32_t*>(regs),
                                                   reinterpret_cast<uint32_t*>(ppc_ptr(address)), size);
+    if (!compact) gx2::normalize_fetch_shader(fetch);
     fetchShaders.emplace(key, fetch);
     return remember(fetch);
 }
@@ -968,7 +1004,7 @@ Shader* translate(const uint32_t* regs, bool vertex, LatteFetchShader* fetch, ui
         return remember(shader);
     }
     record_shader_variant(regs, vertex, base, fsKey, shader->dec);
-    record_headstart_shader(regs, vertex);
+    record_headstart_shader(regs, vertex, !vertex && linkedVs && linkedVs->dec);
     if (!use.known) {
         const auto& dec = *shader->dec;
         use.unitCount = uint8_t(std::clamp(int(dec.textureUnitListCount), 0, int(LATTE_NUM_MAX_TEX_UNITS)));
@@ -1048,9 +1084,14 @@ Shader* translate(const uint32_t* regs, bool vertex, LatteFetchShader* fetch, ui
     // Stable before SPIR-V publication, and identical on cold/warm runs. Never
     // mutate a pipeline key when a pending compiler result becomes available.
     // Exact GLSL+metadata aliases above still share the same Shader object.
-    shader->pipelineId = shader->key;
+    shader->pipelineId = portable_output_identity(*shader);
     if (!shader->error.empty()) fprintf(stderr, "[vulkan] shader %08X: %s\n", address, shader->error.c_str());
     return shader;
+}
+
+const Shader* find_pipeline_shader(uint64_t pipelineId, bool vertex) {
+    return resolve_pipeline_shader_identity(pipelineId, vertex, shaders, variants,
+        [](const Shader& a, const Shader& b) { return same_output(a, b); });
 }
 
 namespace {

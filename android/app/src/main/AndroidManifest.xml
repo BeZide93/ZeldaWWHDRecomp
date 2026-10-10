@@ -53,6 +53,10 @@
             </intent-filter>
         </receiver>
 
+        <activity android:name=".ShaderPrepareActivity" android:process=":shaderprep"
+            android:exported="false" android:label="Preparing shaders"
+            android:screenOrientation="sensorLandscape"
+            android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|uiMode|density" />
         <activity android:name=".WwhdActivity"
             android:label="@string/app_name"
             android:alwaysRetainTaskState="true"

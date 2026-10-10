@@ -1,0 +1,92 @@
+// Synthetic files only: activation/invalidation must never touch real caches.
+#include "gfx/shader_prebuild.h"
+#include <cassert>
+#include <chrono>
+int main() {
+    namespace fs = std::filesystem;
+    using mods::json::Value;
+    const auto temporary = fs::temp_directory_path() / ("wwhd-prebuild-test-" +
+        std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+#ifdef _WIN32
+    _putenv_s("WWHD_USER_DIR", temporary.string().c_str());
+    _putenv_s("WWHD_HEADSTART", "");
+#else
+    setenv("WWHD_USER_DIR", temporary.string().c_str(), 1);
+    unsetenv("WWHD_HEADSTART");
+#endif
+    const auto package = temporary / "package", game = temporary / "game";
+    auto write = [](const fs::path& path, const std::string& text) {
+        fs::create_directories(path.parent_path()); std::ofstream(path) << text;
+    };
+    auto json = [&](const fs::path& path, const Value& v) { write(path, mods::json::dump(v)); };
+    write(package / "tools/shadercache/template.bin", "synthetic state fixture");
+    write(package / "tools/shaderprep.py", "synthetic translator fixture");
+    write(package / "tools/shaderprep_format.py", "synthetic schema fixture");
+    write(game / "code/test.rpx", "synthetic executable fixture");
+    Value launcher; launcher["schema"] = 1; launcher["package"] = package.string();
+    launcher["helper"] = (package / "tools/installer/shader_prebuild.py").string();
+    launcher["template"] = (package / "tools/shadercache/template.bin").string();
+    json(shaderprebuild::root() / "launcher.json", launcher);
+    Value active; active["schema"] = 1; active["status"] = "ready";
+    active["generation"] = "generation-test";
+    Value id; id["schema"] = 1; id["renderer"] = "vulkan";
+    id["runtime"] = mods::hash::sha256_file(host::executable_path());
+    id["template"] = mods::hash::sha256_file(package / "tools/shadercache/template.bin");
+    id["translator"] = mods::hash::sha256_file(package / "tools/shaderprep.py");
+    id["format"] = mods::hash::sha256_file(package / "tools/shaderprep_format.py");
+    id["game"]["code/test.rpx"] = mods::hash::sha256_file(game / "code/test.rpx");
+    active["identity"] = id;
+    write(shaderprebuild::root() / "generation-test/headstart.bin", "synthetic local cache");
+    json(shaderprebuild::root() / "active.json", active);
+    assert(shaderprebuild::identity_matches(active, game, "vulkan"));
+    assert(!shaderprebuild::identity_matches(active, game, "metal"));
+    assert(shaderprebuild::activate(game, "vulkan"));
+    assert(std::string(getenv("WWHD_HEADSTART")) == (shaderprebuild::root() / "generation-test/headstart.bin").string());
+    // A new archive and changed code both invalidate; no old generation removed.
+    write(game / "content/new.pack", "synthetic archive fixture");
+    assert(!shaderprebuild::identity_matches(active, game, "vulkan"));
+    fs::remove(game / "content/new.pack");
+    write(game / "code/test.rpx", "changed synthetic executable fixture");
+    assert(!shaderprebuild::identity_matches(active, game, "vulkan"));
+    active["generation"] = "../outside";
+    bool rejected = false;
+    try { shaderprebuild::generation(active); } catch (...) { rejected = true; }
+    assert(rejected);
+    assert(shaderprebuild::request_rebuild() && shaderprebuild::requested());
+    assert(fs::is_regular_file(shaderprebuild::root() / "generation-test/headstart.bin"));
+    write(game / "code/test.rpx", "synthetic executable fixture");
+    active["generation"] = "generation-test"; active["status"] = "warm_pending";
+    json(shaderprebuild::root() / "active.json", active);
+#ifdef _WIN32
+    _putenv_s("WWHD_HEADSTART", "");
+#else
+    unsetenv("WWHD_HEADSTART");
+#endif
+    shaderprebuild::resultPath = (temporary / "job/result.json").string();
+    // Deliberate cancellation survives a pending generation, but rebuild wins.
+    fs::remove(shaderprebuild::root() / "rebuild.request");
+    Value skip; skip["schema"] = 1; skip["identity"] = id;
+    json(shaderprebuild::root() / "skip.json", skip);
+    assert(shaderprebuild::skipped(game, "vulkan"));
+    assert(!shaderprebuild::activate_pending(game, "vulkan"));
+    assert(!shaderprebuild::activate(game, "vulkan"));
+    assert(!shaderprebuild::skipped(game, "metal"));
+    assert(shaderprebuild::request_rebuild());
+    assert(!shaderprebuild::skipped(game, "vulkan"));
+    fs::remove(shaderprebuild::root() / "skip.json");
+    assert(shaderprebuild::activate_pending(game, "vulkan"));
+    assert(!shaderprebuild::finish_pending(false));
+    assert(shaderprebuild::read(shaderprebuild::resultPath).get("status").string() == "failed");
+    assert(shaderprebuild::read(shaderprebuild::root() / "active.json").get("status").string() == "warm_pending");
+    assert(shaderprebuild::requested());
+    auto newer = active; newer["generation"] = "generation-newer";
+    json(shaderprebuild::root() / "active.json", newer);
+    assert(!shaderprebuild::finish_pending(true));
+    assert(shaderprebuild::read(shaderprebuild::root() / "active.json").get("generation").string() == "generation-newer");
+    json(shaderprebuild::root() / "active.json", active);
+    assert(shaderprebuild::finish_pending(true));
+    assert(shaderprebuild::read(shaderprebuild::root() / "active.json").get("status").string() == "ready");
+    assert(shaderprebuild::read(shaderprebuild::resultPath).get("status").string() == "ready");
+    assert(!shaderprebuild::requested());
+    fs::remove_all(temporary);
+}

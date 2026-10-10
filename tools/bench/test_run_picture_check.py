@@ -8,7 +8,7 @@ import run_picture_check as pictures
 
 
 class CaptureEvidenceTest(unittest.TestCase):
-    def run_fake(self, complete=True, correct_step=True):
+    def run_fake(self, complete=True, correct_step=True, name='baseline_1', prepared=False):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / 'save').mkdir(); (root / 'states').mkdir(); (root / 'out').mkdir()
@@ -17,12 +17,26 @@ class CaptureEvidenceTest(unittest.TestCase):
             args = types.SimpleNamespace(out=root / 'out', save=root / 'save', state_dir=root / 'states',
                 game=root / 'game', scene='outset', slot=3, load_frame=450, origin_load_steps=180,
                 seconds=2, capture_load_step=200, validation=True, timeout=1)
+            if prepared:
+                seed = root / 'generation'
+                (seed / 'vulkan-shaders').mkdir(parents=True)
+                for relative in ('headstart.bin', 'shaders.bin', 'vulkan-pipelines.bin',
+                                 'vulkan-pipelines.bin.recipes', 'vulkan-shaders/spirv.bin'):
+                    (seed / relative).write_bytes(('synthetic ' + relative).encode())
+                args.candidate_prebuild_generation = seed
+                original = {str(p.relative_to(seed)): p.read_bytes() for p in seed.rglob('*') if p.is_file()}
             launched = []
 
             class Process:
                 def __init__(self, command, **kwargs):
                     launched.append(kwargs['env'])
                     run = Path(kwargs['cwd'])
+                    if name.startswith('candidate') and prepared:
+                        copy = run / 'cache/prebuilt'
+                        self_copy = {str(p.relative_to(copy)): p.read_bytes() for p in copy.rglob('*') if p.is_file()}
+                        if self_copy != original:
+                            raise AssertionError('Prepared files were not copied before launch')
+                        (copy / 'vulkan-pipelines.bin').write_bytes(b'synthetic runtime mutation')
                     target = run / 'captures/fixture'; target.mkdir(parents=True)
                     Image.new('RGB', (2, 1), 'black').save(target / 'tv.png')
                     offset = 200 if correct_step else 201
@@ -31,7 +45,9 @@ class CaptureEvidenceTest(unittest.TestCase):
                 def poll(self): return 0
 
             with patch.object(pictures.subprocess, 'Popen', Process):
-                result = pictures.capture(args, 'baseline_1', root / 'binary', 'fixture-revision')
+                result = pictures.capture(args, name, root / 'binary', 'fixture-revision')
+            if prepared:
+                self.assertEqual({str(p.relative_to(seed)): p.read_bytes() for p in seed.rglob('*') if p.is_file()}, original)
             return result, launched[0]
 
     def test_requires_completed_endpoint_and_exact_checkpoint(self):
@@ -46,6 +62,31 @@ class CaptureEvidenceTest(unittest.TestCase):
         self.assertEqual(env['WWHD_HEADSTART'], '0')
         self.assertEqual(env['WWHD_VK_PIPELINE_WARMUP'], '0')
         self.assertNotIn('WWHD_PROFILE', env)
+
+    def test_prepared_generation_only_affects_candidate_and_seed_is_immutable(self):
+        _, baseline = self.run_fake(prepared=True)
+        self.assertEqual(baseline['WWHD_HEADSTART'], '0')
+        self.assertEqual(baseline['WWHD_VK_PIPELINE_WARMUP'], '0')
+        _, candidate = self.run_fake(name='candidate_1', prepared=True)
+        self.assertTrue(candidate['WWHD_HEADSTART'].endswith('cache/prebuilt/headstart.bin'))
+        self.assertTrue(candidate['WWHD_VK_SHADER_CACHE'].endswith('cache/prebuilt/vulkan-shaders'))
+        self.assertTrue(candidate['WWHD_VK_PIPELINE_CACHE'].endswith('cache/prebuilt/vulkan-pipelines.bin'))
+        self.assertTrue(candidate['WWHD_SHADER_CACHE'].endswith('cache/prebuilt/shaders.bin'))
+        self.assertEqual(candidate['WWHD_VK_PIPELINE_WARMUP'], '1')
+
+    def test_prepared_generation_rejects_overlapping_destination_and_symlinks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            seed = Path(directory) / 'generation'
+            seed.mkdir()
+            (seed / 'headstart.bin').write_bytes(b'synthetic headstart')
+            with self.assertRaises(ValueError):
+                pictures.prepare_candidate_generation(seed, seed / 'output')
+            try:
+                (seed / 'outside-link').symlink_to(Path(directory) / 'outside')
+            except (OSError, NotImplementedError):
+                self.skipTest('symbolic links unavailable')
+            with self.assertRaises(ValueError):
+                pictures.prepare_candidate_generation(seed, Path(directory) / 'cache')
 
 
 if __name__ == '__main__':

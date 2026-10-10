@@ -105,7 +105,11 @@ inline std::string executable_path() {
 #elif !defined(__APPLE__)
  char path[4096];ssize_t n=readlink("/proc/self/exe",path,sizeof path);return n>0?std::string(path,n):std::string();
 #else
- return {};
+ uint32_t n=0;_NSGetExecutablePath(nullptr,&n);
+ std::vector<char> path(n);
+ if(!n||_NSGetExecutablePath(path.data(),&n))return {};
+ std::error_code ec;auto resolved=std::filesystem::canonical(path.data(),ec);
+ return ec?std::string(path.data()):resolved.string();
 #endif
 }
 inline size_t page_size() {
@@ -176,6 +180,7 @@ inline const std::string& portable_user_dir() {
 }
 inline bool portable() { return !portable_user_dir().empty(); }
 inline std::string config_dir() {
+ if(const char* override=getenv("WWHD_USER_DIR"))return override;
  if(portable()) return portable_user_dir();
 #ifdef __APPLE__
  const char* home=getenv("HOME");return std::string(home?home:".")+"/Library/Application Support/WWHD";

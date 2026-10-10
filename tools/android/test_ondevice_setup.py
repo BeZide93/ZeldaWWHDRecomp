@@ -32,7 +32,8 @@ class SetupJobTests(unittest.TestCase):
             destination = "sdk/include" if name == "runtime/include" else name
             shutil.copytree(ROOT / name, self.package / destination)
         (self.package / "tools/installer").mkdir()
-        shutil.copyfile(ROOT / "tools/installer/setup.py", self.package / "tools/installer/setup.py")
+        for sibling in ("setup.py", "code_mods.py", "shader_prebuild.py"):
+            shutil.copyfile(ROOT / "tools/installer" / sibling, self.package / "tools/installer" / sibling)
         shutil.copyfile(ROOT / "tools/rpx.py", self.package / "tools/rpx.py")
         link = (["-shared", "-Wl,-all_load", "{gamecode}", "-o", "{out}"] if sys.platform == "darwin" else
                 ["-shared", "-Wl,--whole-archive", "{gamecode}", "-Wl,--no-whole-archive", "-o", "{out}"])

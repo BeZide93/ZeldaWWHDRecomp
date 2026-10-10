@@ -38,6 +38,8 @@ LIB_EXT = (".a", ".lib", ".tbd", ".dylib", ".so")
 # files shipped from the source tree (relative to ROOT -> relative to the package)
 TOOL_FILES = [
     "tools/rpx.py",
+    "tools/shaderprep.py",
+    "tools/shaderprep_format.py",
     "tools/wudextract.py",
     "tools/recomp/recomp.py",
     "tools/recomp/analyze.py",
@@ -54,6 +56,7 @@ TOOL_FILES = [
 INSTALLER_FILES = [
     "tools/installer/setup.py",
     "tools/installer/code_mods.py",
+    "tools/installer/shader_prebuild.py",
     "tools/installer/toolchains.json",
     "tools/installer/README.md",
 ]

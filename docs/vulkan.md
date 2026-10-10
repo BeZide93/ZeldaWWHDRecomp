@@ -256,6 +256,21 @@ code was copied. Cemu can skip pending draws using renderer heuristics. This
 renderer always waits for demanded state and draws every object. Cemu shader and
 pipeline cache files are never inputs to this workflow.
 
+Setup's **Preparing shaders** step resolves the shipped code-free state template against the player's
+own archives and runs offline warming after the local executable is linked. **Graphics → Rebuild shader
+cache** requests a new private generation on the next start. Skipping preparation or a failed build keeps
+the game usable with Exact on-demand compilation. An explicit skip is remembered for the same input
+identity; a rebuild request or changed inputs overrides it. Preparation covers known states; it cannot guarantee
+that an unrecorded scene will compile nothing during play. Generated files never ship with releases.
+
+The active generation is selected by `shader-prebuild/active.json` under the host configuration directory
+(portable installations use their user directory). Game archive, template, translator and runtime identities
+invalidate it. Cache publication uses a short cross-process activation lock; an in-use generation remains
+intact. Explicit cache environment overrides take precedence, so isolated benchmark runs retain their
+selected paths. Android uses an isolated SDL preparation activity and a native completion handshake;
+native device validation remains outstanding. Windows/Linux GPU validation and final Metal coverage
+are also tracked separately from successful host tests.
+
 Vulkan also accepts the locally built `tools/shaderprep.py` shader head start in
 offline `--warm-shaders` mode. `WWHD_VK_RECIPE_RECORD=<file>` records the GX2 shader
 microcode, fetch programs, sparse register states and exact Vulkan pipeline recipes; it is not

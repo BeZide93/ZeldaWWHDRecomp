@@ -245,7 +245,7 @@ void init_pipeline_cache() try {
     uint64_t features = pipeline_cache_checksum(reinterpret_cast<const uint8_t*>(&R.enabledFeatures), sizeof R.enabledFeatures);
     for (int i = 0; i < 8; ++i) fingerprint[28 + i] = uint8_t(features >> (8 * i));
     put(36, R.properties.limits.maxDescriptorSetUniformBuffersDynamic);
-    put(40, 1); // Exact pipeline key / descriptor / fixed-state recipe schema.
+    put(40, 2); // Portable content IDs, exact descriptors and fixed-state recipe schema.
     put(44, (R.portabilitySubset ? 1u : 0u) | (R.separateStencilMaskRef ? 2u : 0u) |
         (R.constantAlphaColorBlendFactors ? 4u : 0u) | (R.vertexAttributeAccessBeyondStride ? 8u : 0u));
     const char* warmup = std::getenv("WWHD_VK_PIPELINE_WARMUP");

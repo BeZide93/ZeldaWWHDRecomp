@@ -392,7 +392,7 @@ class ArchiveTitles(unittest.TestCase):
         self.assertEqual(setup.title_desc("0005000E10143400"), "the update for The Wind Waker HD (Japan)")
 
     def test_plan(self):
-        self.assertEqual(setup.plan_steps("archive"), ["archive", "compiler", "extract", "translate", "compile", "app"])
+        self.assertEqual(setup.plan_steps("archive"), ["archive", "compiler", "extract", "translate", "compile", "app", "shaders"])
         self.assertEqual(setup.EXTRACT_ERRORS[10], "wrong_title")
 
 
