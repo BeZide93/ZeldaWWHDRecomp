@@ -33,6 +33,13 @@ def read_pin(path):
 def fetch():
     key = os.environ.get('SHADER_TEMPLATE_DEPLOY_KEY', '')
     destination = ROOT / 'tools/shadercache/template.bin'
+    repository = os.environ.get('GITHUB_REPOSITORY')
+    event = os.environ.get('GITHUB_EVENT_NAME', '')
+    if (repository and repository != 'ZeldaWWHDRecomp/ZeldaWWHDRecomp' or
+            event in ('pull_request', 'pull_request_target')):
+        destination.unlink(missing_ok=True)
+        print('::notice::Fork/PR build; packaging without optional shader preparation')
+        return
     if not key:
         # A reused checkout must not accidentally package an unverified local file.
         destination.unlink(missing_ok=True)

@@ -36,6 +36,23 @@ class FetchTemplateTests(unittest.TestCase):
                         fetcher.fetch()
                     run.assert_not_called()
 
+    def test_fork_or_pr_never_fetches_even_if_a_key_is_present(self):
+        for repository, event in [('someone/fork', 'schedule'),
+                                  ('ZeldaWWHDRecomp/ZeldaWWHDRecomp', 'pull_request'),
+                                  ('ZeldaWWHDRecomp/ZeldaWWHDRecomp', 'pull_request_target')]:
+            with self.subTest(repository=repository, event=event), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                target = root / 'tools/shadercache/template.bin'
+                target.parent.mkdir(parents=True)
+                target.write_bytes(b'synthetic stale payload')
+                env = dict(GITHUB_REPOSITORY=repository, GITHUB_EVENT_NAME=event,
+                           SHADER_TEMPLATE_DEPLOY_KEY='synthetic test key')
+                with patch.object(fetcher, 'ROOT', root), patch.dict(os.environ, env, clear=True), patch.object(subprocess, 'run') as run:
+                    fetcher.fetch()
+                    run.assert_not_called()
+                self.assertFalse(target.exists())
+                self.assertFalse((root / 'shader-template-deploy-key').exists())
+
     def test_no_secret_skips_network_and_removes_stale_payload(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
