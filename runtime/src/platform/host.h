@@ -150,7 +150,8 @@ inline bool memory_touched(void* p,size_t bytes) {
 }
 inline bool replace_file(const std::string& from,const std::string& to) {
 #ifdef _WIN32
- return MoveFileExA(from.c_str(),to.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH)!=0;
+ return MoveFileExW(std::filesystem::u8path(from).c_str(),std::filesystem::u8path(to).c_str(),
+                    MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH)!=0;
 #else
  return rename(from.c_str(),to.c_str())==0;
 #endif

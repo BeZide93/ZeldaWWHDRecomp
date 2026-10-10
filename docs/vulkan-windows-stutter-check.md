@@ -12,9 +12,9 @@ Use this checklist for a test build supplied by the maintainer. Keep the previou
 ## Check startup and settings
 
 1. Start the supplied executable with `--renderer-smoke` and retain its output. A passing build or unit test alone does not establish GPU compatibility.
-2. Use separate test settings and cache directories. Confirm startup, the title screen and the tested scene render correctly.
+2. Use separate test settings and cache directories. Confirm startup, the title screen and the tested scene render correctly. Include a cache directory with non-ASCII characters to check Unicode file publication.
 3. Remove old experimental shader-compilation and delay environment overrides. Compare the supplied baseline and Exact candidate with matching graphics settings.
-4. Check setup preparation, skipping, and **Graphics → Rebuild shader cache** followed by restart. Record whether preparation finishes or falls back with a message. After skipping, confirm the next start plays without repeating preparation; a rebuild request should enable preparation again. A Windows cross-build or passing unit tests do not establish native Windows GPU behavior.
+4. Check setup preparation, skipping, and **Graphics → Rebuild shader cache** followed by setup repair/update. Record whether preparation finishes or falls back with a message. After skipping, confirm the next start plays without repeating preparation; a rebuild request should enable preparation in setup again. Ordinary launches must never start preparation, including after an update or a previous preparation failure. Quit once while fresh caches are compiling and check that shutdown completes without device loss. A recoverable pipeline driver error should be logged and its draws omitted while the game continues; keep any shader capture files private. A Windows cross-build or passing unit tests do not establish native Windows GPU behavior.
 
 ## Compare the same route
 
@@ -32,4 +32,4 @@ Enable `WWHD_VK_STUTTER_TRACE` with a unique local CSV path per run and retain t
 
 For picture checks, use warmed caches and a checkpoint relative to the completed load, with matching game counters and inputs. Capture baseline twice and candidate twice; compare TV, GamePad and presented images. Repeat baseline variation before attributing waves or particles to a rendering change. Both executables must produce the same completed picture at matching checkpoints.
 
-Share a concise result table, reviewed logs/traces, overlay screenshots and comparison screenshots. Logs may contain local paths; review them first. **Do not share game files, generated game code, saves, shader recordings/templates, or shader/pipeline cache files.** Keep those inputs and all cache seeds local.
+Share a concise result table, reviewed logs/traces, overlay screenshots and comparison screenshots. Logs may contain local paths; review them first. **Do not share game files, generated game code, saves, shader recordings/templates/captures, or shader/pipeline cache files.** Keep those inputs and all cache seeds local.
