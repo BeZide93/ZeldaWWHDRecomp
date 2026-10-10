@@ -1,10 +1,13 @@
 // The application manifest selects UTF-8 for Win32's process ANSI code page.
 // UCRT also needs its multibyte locale selected before user static initializers.
 #include <clocale>
+#include <mbctype.h>
 #include <windows.h>
 namespace {
 void initialize_utf8() {
     std::setlocale(LC_ALL, ".UTF-8");
+    std::setlocale(LC_NUMERIC, "C"); // Shader/config numbers must keep a decimal point.
+    _setmbcp(CP_UTF8);
     // Redirected output remains UTF-8 bytes; only adjust an attached console.
     DWORD mode;
     if (GetConsoleMode(GetStdHandle(STD_OUTPUT_HANDLE), &mode)) SetConsoleOutputCP(CP_UTF8);
