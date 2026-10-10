@@ -1,5 +1,6 @@
 #include "pipeline_worker.h"
 #include "pipeline_identity.h"
+#include "recipe_persistence.h"
 #include "headstart.h"
 #include "pipeline_demand.h"
 #include "shader_compiler.h"
@@ -10,6 +11,8 @@
 #include <cstdio>
 #include <filesystem>
 #include <mutex>
+#include <condition_variable>
+#include <chrono>
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
@@ -34,8 +37,12 @@ struct Worker {
   std::string headstartPath;
   PipelineWarmupResult result;
   std::mutex mutex;
-  std::thread thread;
-  bool stopped = false, dirty = false;
+  std::thread thread, saver;
+  std::condition_variable saveWake;
+  bool saveStopped = false;
+  RecipeSaveRevision revision;
+  std::chrono::steady_clock::time_point lastSave = std::chrono::steady_clock::now();
+  bool stopped = false;
   VkPipelineCache cache = VK_NULL_HANDLE; // Worker writes; caller reads only after join.
   bool merged = false;
   std::unordered_map<std::string, Ready> ready;
@@ -43,8 +50,10 @@ struct Worker {
   std::unordered_set<std::string> consumed;
   size_t recipeBytes = 0;
   ~Worker() {
-    { std::lock_guard lock(mutex); stopped = true; }
+    { std::lock_guard lock(mutex); stopped = true; saveStopped = true; }
+    saveWake.notify_all();
     if (thread.joinable()) thread.join();
+    if (saver.joinable()) saver.join();
     for (auto& [key, entry] : ready) destroy(device, entry.handles);
     if (cache) vkDestroyPipelineCache(device, cache, nullptr);
   }
@@ -61,11 +70,56 @@ bool insert_recipe(Worker& w, const std::shared_ptr<PipelineRecipe>& recipe) {
   auto found = w.recipes.find(key);
   const size_t old = found == w.recipes.end() ? 0 : footprint(*found->second);
   const size_t size = footprint(*recipe);
-  if ((found == w.recipes.end() && w.recipes.size() >= 16384) ||
-      size > 128 * 1024 * 1024 - (w.recipeBytes - old)) return false;
+  if ((found == w.recipes.end() && w.recipes.size() >= kPipelineRecipeMaxCount) ||
+      size > kPipelineRecipeMaxBytes - (w.recipeBytes - old)) return false;
   w.recipeBytes += size - old;
   w.recipes.insert_or_assign(std::move(key), recipe);
   return true;
+}
+void changed(Worker& w) {
+  w.revision.changed(); w.saveWake.notify_one();
+}
+void persist_snapshot(Worker& w) {
+  std::vector<std::shared_ptr<PipelineRecipe>> snapshot;
+  uint64_t revision;
+  {
+    std::lock_guard lock(w.mutex);
+    if (!w.revision.dirty()) return;
+    revision = w.revision.current;
+    snapshot.reserve(w.recipes.size());
+    for (auto& [key, recipe] : w.recipes) snapshot.push_back(recipe);
+  }
+  try {
+    auto bytes = encode_pipeline_recipes(w.fingerprint, snapshot);
+    atomic_recipe_write(w.path, bytes, host::replace_file);
+    {
+      std::lock_guard lock(w.mutex);
+      w.revision.complete(revision);
+    }
+    std::fprintf(stderr, "[vulkan warmup] saved %zu recipes (%zu bytes)\n", snapshot.size(), bytes.size());
+  } catch (const std::exception& error) {
+    std::fprintf(stderr, "[vulkan warmup] save failed: %s\n", error.what());
+  }
+  std::lock_guard lock(w.mutex); w.lastSave = std::chrono::steady_clock::now();
+}
+void save_loop(Worker& w) {
+  host::set_thread_name("Vulkan recipe save");
+  std::unique_lock lock(w.mutex);
+  while (!w.saveStopped) {
+    w.saveWake.wait(lock, [&] { return w.saveStopped || w.revision.dirty(); });
+    if (w.saveStopped) break;
+    // Only one bounded snapshot at a time; failures also back off for two
+    // minutes, and an explicit checkpoint always saves the latest revision.
+    auto due = w.lastSave + std::chrono::seconds(120);
+    if (w.saveWake.wait_until(lock, due, [&] { return w.saveStopped; })) break;
+    lock.unlock();
+    try { persist_snapshot(w); }
+    catch (const std::exception& error) {
+      std::fprintf(stderr, "[vulkan warmup] snapshot failed: %s\n", error.what());
+      std::lock_guard retry(w.mutex); w.lastSave = std::chrono::steady_clock::now();
+    }
+    lock.lock();
+  }
 }
 VkResult compile(VkDevice device, VkPipelineCache cache, PipelineRecipe& recipe, WarmPipeline& out) {
   VkShaderModule modules[2]{};
@@ -89,7 +143,10 @@ VkResult compile(VkDevice device, VkPipelineCache cache, PipelineRecipe& recipe,
     result = vkCreatePipelineLayout(device, &layout, nullptr, &out.layout);
   }
   if (result == VK_SUCCESS) {
-    auto info = *recipe.state->get();
+    // Rebind pointers on a private copy: the persistence thread may serialize
+    // this immutable recipe concurrently.
+    auto state = *recipe.state;
+    auto info = *state.get();
     VkPipelineShaderStageCreateInfo stages[2]{};
     for (int i = 0; i < 2; ++i) {
       stages[i].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -114,7 +171,7 @@ std::vector<std::shared_ptr<PipelineRecipe>> read_recipes(Worker& w, bool headst
   std::error_code ec;
   const auto size = std::filesystem::file_size(path, ec);
   if (ec) return {};
-  if (size > (headstart ? 256u : 128u) * 1024 * 1024) throw std::runtime_error("recipe file size limit");
+  if (size > kPipelineRecipeMaxBytes) throw std::runtime_error("recipe file size limit");
   std::unique_ptr<FILE, decltype(&std::fclose)> file(std::fopen(path.c_str(), "rb"), &std::fclose);
   if (!file) return {};
   if (!headstart) {
@@ -154,7 +211,7 @@ std::vector<std::shared_ptr<PipelineRecipe>> read_recipes(Worker& w, bool headst
       throw std::runtime_error("invalid pipeline head-start database");
     if (std::memcmp(raw.data() + 8, w.fingerprint.data(), w.fingerprint.size())) continue;
     auto recipes = decode_pipeline_recipes(w.fingerprint, raw);
-    if (recipes.size() > 16384 - result.size()) throw std::runtime_error("head-start pipeline count limit");
+    if (recipes.size() > kPipelineRecipeMaxCount - result.size()) throw std::runtime_error("head-start pipeline count limit");
     result.insert(result.end(), recipes.begin(), recipes.end());
   }
   return result;
@@ -178,7 +235,7 @@ void run(Worker& w, std::vector<uint8_t> seed) {
     for (bool headstart : {false, true}) {
       try {
         for (auto& recipe : read_recipes(w, headstart))
-          if (loaded.size() < 16384 && seen.insert(identity(recipe->key)).second) loaded.push_back(recipe);
+          if (loaded.size() < kPipelineRecipeMaxCount && seen.insert(identity(recipe->key)).second) loaded.push_back(recipe);
       } catch (const std::exception& error) {
         if (headstart) ++failed;
         std::fprintf(stderr, "[vulkan warmup] %s ignored: %s\n", headstart ? "head start" : "local recipes", error.what());
@@ -187,8 +244,9 @@ void run(Worker& w, std::vector<uint8_t> seed) {
     if (loaded.empty()) { w.result = {0, failed}; return; }
     {
       std::lock_guard lock(w.mutex);
-      for (auto& recipe : loaded)
-        if (!w.consumed.contains(identity(recipe->key))) insert_recipe(w, recipe);
+      std::erase_if(loaded, [&](const auto& recipe) {
+        return w.consumed.contains(identity(recipe->key)) || !insert_recipe(w, recipe);
+      });
     }
     VkPipelineCacheCreateInfo ci{VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO};
     ci.initialDataSize = seed.size(); ci.pInitialData = seed.data();
@@ -242,6 +300,7 @@ void start_pipeline_worker(VkDevice device, PipelineRecipeFingerprint fingerprin
   if (w.device || path.empty()) return;
   w.device = device; w.fingerprint = fingerprint; w.path = std::move(path);
   w.headstartPath = std::move(headstartPath);
+  w.saver = std::thread(save_loop, std::ref(w));
   w.thread = std::thread(run, std::ref(w), std::move(cacheSeed));
 }
 bool take_warm_pipeline(const std::vector<uint8_t>& key,
@@ -256,7 +315,7 @@ bool take_warm_pipeline(const std::vector<uint8_t>& key,
     auto id = identity(key);
     // This also prevents an in-flight startup job from publishing a duplicate
     // after the render thread has already compiled this key.
-    if (w.consumed.size() < 4096) w.consumed.insert(id);
+    if (w.consumed.size() < kPipelineRecipeMaxCount) w.consumed.insert(id);
     auto found = w.ready.find(id);
     if (found == w.ready.end()) return false;
     entry = std::move(found->second); w.ready.erase(found);
@@ -274,7 +333,7 @@ void remember_pipeline_recipe(std::shared_ptr<PipelineRecipe> recipe) {
   if (!w.device) return;
   record_headstart_pipeline(w.fingerprint, recipe);
   std::lock_guard lock(w.mutex);
-  if (insert_recipe(w, recipe)) w.dirty = true;
+  if (insert_recipe(w, recipe)) changed(w);
 }
 void save_pipeline_recipes() {
   auto& w = worker();
@@ -283,27 +342,14 @@ void save_pipeline_recipes() {
     std::lock_guard lock(w.mutex); w.stopped = true;
   }
   if (w.thread.joinable()) w.thread.join();
-  std::vector<std::shared_ptr<PipelineRecipe>> snapshot;
   {
-    std::lock_guard lock(w.mutex);
-    if (!w.dirty) return;
-    for (auto& [key, recipe] : w.recipes) snapshot.push_back(recipe);
+    std::lock_guard lock(w.mutex); w.saveStopped = true;
   }
-  const auto temporary = w.path + ".tmp";
-  try {
-    auto bytes = encode_pipeline_recipes(w.fingerprint, snapshot);
-    auto parent = std::filesystem::path(w.path).parent_path();
-    if (!parent.empty()) std::filesystem::create_directories(parent);
-    FILE* file = std::fopen(temporary.c_str(), "wb");
-    if (!file) throw std::runtime_error("cannot open recipe output");
-    bool written = std::fwrite(bytes.data(), 1, bytes.size(), file) == bytes.size();
-    written = std::fclose(file) == 0 && written;
-    if (!written || !host::replace_file(temporary, w.path)) throw std::runtime_error("recipe write failed");
-    { std::lock_guard lock(w.mutex); w.dirty = false; }
-    std::fprintf(stderr, "[vulkan warmup] saved %zu recipes -> %s\n", snapshot.size(), w.path.c_str());
-  } catch (const std::exception& error) {
-    std::error_code ec; std::filesystem::remove(temporary, ec);
-    std::fprintf(stderr, "[vulkan warmup] save failed: %s\n", error.what());
+  w.saveWake.notify_all();
+  if (w.saver.joinable()) w.saver.join();
+  try { persist_snapshot(w); }
+  catch (const std::exception& error) {
+    std::fprintf(stderr, "[vulkan warmup] final snapshot failed: %s\n", error.what());
   }
 }
 bool merge_pipeline_worker_cache(VkPipelineCache target) {
@@ -321,7 +367,7 @@ bool merge_pipeline_worker_cache(VkPipelineCache target) {
 PipelineWarmupResult warm_resolved_pipeline_recipes(std::vector<std::shared_ptr<PipelineRecipe>> recipes) {
   auto& w = worker();
   if (w.thread.joinable()) w.thread.join();
-  if (!w.device || recipes.size() > 16384) return {0, recipes.size()};
+  if (!w.device || recipes.size() > kPipelineRecipeMaxCount) return {0, recipes.size()};
   PipelineWarmupResult batch;
   w.thread = std::thread([&w, &batch, recipes = std::move(recipes)] {
     host::set_thread_name("Vulkan state warmup");
@@ -339,7 +385,7 @@ PipelineWarmupResult warm_resolved_pipeline_recipes(std::vector<std::shared_ptr<
         if (!insert_recipe(w, recipe)) { destroy(w.device, handles); ++batch.failed; continue; }
         try { w.ready.emplace(key, Ready{handles, recipe}); handles = {}; }
         catch (...) { destroy(w.device, handles); throw; }
-        w.dirty = true;
+        changed(w);
         ++batch.ready;
       } catch (const std::exception& error) {
         destroy(w.device, handles);

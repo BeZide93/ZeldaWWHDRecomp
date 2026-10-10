@@ -2,6 +2,12 @@
 #include "pipeline_state_fixture.h"
 #include <cassert>
 #include <thread>
+#include <fstream>
+#include <chrono>
+#include <cstdio>
+#ifndef _WIN32
+#include <sys/resource.h>
+#endif
 
 using gfxvk::GraphicsPipelineState;
 using pipeline_test::state;
@@ -12,7 +18,49 @@ template<class F> static void rejects(F operation) {
   try { operation(); } catch (const std::runtime_error&) { rejected = true; }
   assert(rejected);
 }
-int main() {
+int main(int argc, char** argv) {
+  if ((argc == 3 || argc == 4 || argc == 5) &&
+      (std::string(argv[1]) == "--profile" || std::string(argv[1]) == "--profile-decode")) {
+    std::ifstream file(argv[2], std::ios::binary);
+    file.seekg(0,std::ios::end); const auto size=file.tellg();
+    assert(size>=64 && uint64_t(size)<=kPipelineRecipeMaxBytes);
+    file.seekg(0); std::vector<uint8_t> bytes(static_cast<size_t>(size));
+    file.read(reinterpret_cast<char*>(bytes.data()),bytes.size()); assert(file.good());
+    assert(bytes.size() >= 64);
+    PipelineRecipeFingerprint fingerprint;
+    std::copy_n(bytes.begin()+8, fingerprint.size(), fingerprint.begin());
+    if (argc >= 4) {
+      auto source=decode_pipeline_recipes(fingerprint,bytes);
+      const size_t count=std::stoul(argv[3]);
+      std::vector<std::shared_ptr<PipelineRecipe>> population;
+      for(size_t i=0;i<count;++i) {
+        auto copy=decode_pipeline_recipe(encode_pipeline_recipe(*source[i%source.size()]));
+        for(size_t b=0;b<8;++b) copy->key[b]=uint8_t(i>>(b*8));
+        population.push_back(std::move(copy));
+      }
+      bytes=encode_pipeline_recipes(fingerprint,population);
+      if (argc == 5) {
+        std::ofstream output(argv[4],std::ios::binary);
+        output.write(reinterpret_cast<const char*>(bytes.data()),bytes.size());
+        assert(output.good()); return 0;
+      }
+    }
+    const auto start=std::chrono::steady_clock::now();
+    auto recipes=decode_pipeline_recipes(fingerprint,bytes);
+    size_t words=0;
+    for(const auto& recipe:recipes) for(const auto& stage:recipe->spirv) words+=stage.size();
+    auto encoded=std::string(argv[1]) == "--profile-decode" ? std::vector<uint8_t>{} : encode_pipeline_recipes(fingerprint,recipes);
+    const auto elapsed=std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now()-start).count();
+    uint64_t rss=0;
+#ifndef _WIN32
+    rusage usage{}; getrusage(RUSAGE_SELF,&usage); rss=usage.ru_maxrss;
+#ifndef __APPLE__
+    rss*=1024;
+#endif
+#endif
+    std::printf("recipes=%zu bytes=%zu spirv_bytes=%zu decode_encode_us=%lld peak_rss_bytes=%llu\n",recipes.size(),bytes.size(),words*4,(long long)elapsed,(unsigned long long)rss);
+    return 0;
+  }
   auto recipe = std::make_shared<PipelineRecipe>();
   recipe->state = std::make_unique<GraphicsPipelineState>(state());
   recipe->key.resize(208);

@@ -10,7 +10,7 @@
 
 namespace gfxvk {
 namespace {
-constexpr size_t maxBytes = 128 * 1024 * 1024;
+constexpr size_t maxBytes = kPipelineRecipeMaxBytes;
 struct Writer {
   std::vector<uint8_t> bytes;
   template<class T> void scalar(T value) {
@@ -248,25 +248,37 @@ std::shared_ptr<PipelineRecipe> decode_code_free_pipeline_recipe(const std::vect
 }
 std::vector<uint8_t> encode_pipeline_recipes(const PipelineRecipeFingerprint& fingerprint,
     const std::vector<std::shared_ptr<PipelineRecipe>>& recipes) {
-  if (recipes.size() > 16384) throw std::runtime_error("pipeline recipe database count limit");
-  Writer body;
+  if (recipes.size() > kPipelineRecipeMaxCount) throw std::runtime_error("pipeline recipe database count limit");
+  Writer out;
+  // One output buffer: the previous body+header concatenation temporarily
+  // duplicated a whole-game database during periodic saves.
+  size_t estimate = 64;
+  for (const auto& recipe : recipes) {
+    size_t size = 8192 + recipe->key.size() * 4;
+    for (size_t stage=0;stage<2;++stage)
+      size += recipe->spirv[stage].size()*4 + recipe->descriptors[stage].size()*16;
+    estimate += std::min(size, maxBytes - std::min(estimate,maxBytes));
+  }
+  out.bytes.reserve(estimate); out.bytes.resize(64);
+  std::memcpy(out.bytes.data(), "WWVKPR01", 8);
+  std::memcpy(out.bytes.data()+8, fingerprint.data(), fingerprint.size());
   for (auto& recipe : recipes) {
     auto bytes = encode_pipeline_recipe(*recipe);
-    if (body.bytes.size() + bytes.size() + 4 > maxBytes - 64) throw std::runtime_error("pipeline database size limit");
-    body.scalar(uint32_t(bytes.size())); body.bytes.insert(body.bytes.end(), bytes.begin(), bytes.end());
+    if (out.bytes.size() + bytes.size() + 4 > maxBytes) throw std::runtime_error("pipeline database size limit");
+    out.scalar(uint32_t(bytes.size())); out.bytes.insert(out.bytes.end(), bytes.begin(), bytes.end());
   }
-  Writer header; header.bytes.insert(header.bytes.end(), {'W','W','V','K','P','R','0','1'});
-  header.bytes.insert(header.bytes.end(), fingerprint.begin(), fingerprint.end());
-  header.scalar(uint32_t(recipes.size()));
-  header.scalar(uint32_t(crc32(0, body.bytes.data(), body.bytes.size())));
-  header.bytes.insert(header.bytes.end(), body.bytes.begin(), body.bytes.end());
-  return std::move(header.bytes);
+  auto word = [&](size_t at, uint32_t value) {
+    for (int i=0;i<4;++i) out.bytes[at+i]=uint8_t(value>>(8*i));
+  };
+  word(56,uint32_t(recipes.size()));
+  word(60,uint32_t(crc32(0,out.bytes.data()+64,out.bytes.size()-64)));
+  return std::move(out.bytes);
 }
 std::vector<std::shared_ptr<PipelineRecipe>> decode_pipeline_recipes(
     const PipelineRecipeFingerprint& fingerprint, const std::vector<uint8_t>& bytes) {
   if (bytes.size() < 64 || bytes.size() > maxBytes || std::memcmp(bytes.data(), "WWVKPR01", 8) ||
       std::memcmp(bytes.data() + 8, fingerprint.data(), fingerprint.size())) throw std::runtime_error("incompatible pipeline recipe database");
-  Reader in{bytes, 56}; uint32_t count = in.count(16384), checksum; in.scalar(checksum);
+  Reader in{bytes, 56}; uint32_t count = in.count(kPipelineRecipeMaxCount), checksum; in.scalar(checksum);
   if (checksum != crc32(0, bytes.data() + 64, bytes.size() - 64)) throw std::runtime_error("pipeline recipe checksum mismatch");
   std::vector<std::shared_ptr<PipelineRecipe>> recipes;
   std::unordered_set<std::string> keys;

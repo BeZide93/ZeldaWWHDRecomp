@@ -228,8 +228,10 @@ atomically after 120 frames without new pipelines. First-time shader translation
 and pipeline creation can still cause stalls.
 
 Successful guest pipelines also retain local, pointer-free recipes in
-`<pipeline-cache-file>.recipes`, bounded to 512 entries / 128 MiB. Recipes are
-saved at orderly shutdown or the scripted test endpoint. On the next start, a
+`<pipeline-cache-file>.recipes`, bounded to 16,384 entries / 256 MiB. A background writer saves
+an atomic snapshot every two minutes while entries change, and a final checkpoint saves the latest
+entries at orderly shutdown or the scripted test endpoint. A crash can lose entries added since the
+last completed snapshot; the previous complete file remains usable. On the next start, a
 worker reads compatible recipes and compiles them while the title screen runs.
 It owns separate modules, descriptor layouts and a pipeline cache; the render
 thread takes a ready pipeline only after the exact key, both SPIR-V programs and

@@ -4,6 +4,8 @@
 #include <memory>
 
 namespace gfxvk {
+inline constexpr size_t kPipelineRecipeMaxBytes = 256 * 1024 * 1024;
+inline constexpr size_t kPipelineRecipeMaxCount = 16384;
 // Device/driver/features and schema compatibility are checked before a recipe
 // reaches Vulkan. Neither Vulkan handles nor host pointers are serialized.
 using PipelineRecipeFingerprint = std::array<uint8_t, 48>;
