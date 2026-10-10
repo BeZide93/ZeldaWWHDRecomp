@@ -535,6 +535,7 @@ int main(int argc, char** argv) {
         shaderprebuild::finish_pending(false); return 1;
     }
 #endif
+    if (warm_shaders) shaderprebuild::bind_setup_live_caches();
     if (!warm_shaders && !pending_shader_warm) shaderprebuild::activate(config::game_dir, shader_renderer);
     render::init();
     mods::cemu::set_vulkan(render::active()==render::Api::Vulkan);

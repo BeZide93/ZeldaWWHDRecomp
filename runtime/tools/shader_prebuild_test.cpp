@@ -77,6 +77,16 @@ int main(int argc, char** argv) {
     const auto metal = home/"Library/Caches/wwhd/shaders.bin";
     write(metal,"legacy Metal bytes");
     clear_live();
+    // A custom setup/test cache directory must not import normal user caches.
+    env("WWHD_VK_PIPELINE_CACHE_DIR", (temporary/"custom-warm").string().c_str());
+    shaderprebuild::bind_setup_live_caches();
+    assert(!fs::exists(shaderprebuild::root()/"live"/pipeline));
+    // Standard setup warming imports before its renderer creates live files.
+    env("WWHD_VK_PIPELINE_CACHE_DIR", (shaderprebuild::root()/"live").string().c_str());
+    shaderprebuild::bind_setup_live_caches();
+    assert(bytes(shaderprebuild::root()/"live"/pipeline)=="legacy pipeline bytes");
+    assert(bytes(shaderprebuild::root()/"live/vulkan-shaders/spirv.bin")=="legacy SPIR-V bytes");
+    clear_live();
     // No manifest/generation must still reuse the stable live caches.
     assert(!shaderprebuild::activate(game,"vulkan")); assert_live();
     const auto live=shaderprebuild::root()/"live";

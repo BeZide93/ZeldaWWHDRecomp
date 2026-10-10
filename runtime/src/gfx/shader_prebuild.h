@@ -286,6 +286,14 @@ inline void bind_live_caches() {
     set_default("WWHD_VK_SHADER_CACHE", root() / "live/vulkan-shaders");
     set_default("WWHD_VK_PIPELINE_CACHE_DIR", root() / "live");
 }
+// Setup supplies explicit paths, so it bypasses normal generation activation.
+// Import before warming can create files that would hide legacy player entries.
+// Custom test directories must not touch the normal user's cache namespace.
+inline void bind_setup_live_caches() {
+    const auto directory = gfxvk::path_environment_utf8("WWHD_VK_PIPELINE_CACHE_DIR");
+    if (directory && fs::u8path(*directory).lexically_normal() == (root() / "live").lexically_normal())
+        bind_live_caches();
+}
 inline void bind_generation(const fs::path& dir) {
     set_default("WWHD_HEADSTART", dir / "headstart.bin");
     bind_live_caches();
