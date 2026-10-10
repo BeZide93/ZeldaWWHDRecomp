@@ -5,8 +5,9 @@ The release template lives in the private `ZeldaWWHDRecomp/shader-template` repo
 new private template. The public branch must never track `template.bin`, recordings or generated caches.
 
 Release packaging fetches the pinned commit using the read-only `SHADER_TEMPLATE_DEPLOY_KEY` secret,
-verifies the hash, and runs the independent release guard. Builds without the secret print a notice and
-package without a template. With the secret present, fetch or verification failure stops packaging.
+verifies the hash, and runs the independent release guard. Fork and pull-request builds without the secret print a notice and package without a template.
+Upstream tag, development-dispatch and nightly builds require the secret. Fetch or verification failure
+stops packaging. GitHub's SSH host key is pinned rather than learned at fetch time.
 The workflow keeps its temporary SSH key private and removes it even when a step fails.
 
 ## Local recording

@@ -13,6 +13,29 @@ from test_guard_template import encode, fixture
 
 
 class FetchTemplateTests(unittest.TestCase):
+    def test_upstream_release_events_require_secret_but_forks_and_prs_skip(self):
+        upstream = 'ZeldaWWHDRecomp/ZeldaWWHDRecomp'
+        cases = [
+            (upstream, 'push', 'refs/tags/v1.0', '', True),
+            (upstream, 'schedule', 'refs/heads/devel', '', True),
+            (upstream, 'workflow_dispatch', 'refs/heads/devel', 'true', True),
+            (upstream, 'workflow_dispatch', 'refs/heads/devel', 'false', False),
+            (upstream, 'pull_request', 'refs/pull/1/merge', 'true', False),
+            ('someone/fork', 'push', 'refs/tags/v1.0', '', False),
+            ('someone/fork', 'schedule', 'refs/heads/devel', '', False),
+        ]
+        for repository, event, ref, devel, required in cases:
+            with self.subTest(repository=repository, event=event, devel=devel), tempfile.TemporaryDirectory() as tmp:
+                env = dict(GITHUB_REPOSITORY=repository, GITHUB_EVENT_NAME=event,
+                           GITHUB_REF=ref, SHADER_TEMPLATE_DEVEL_BUILD=devel)
+                with patch.object(fetcher, 'ROOT', Path(tmp)), patch.dict(os.environ, env, clear=True), patch.object(subprocess, 'run') as run:
+                    if required:
+                        with self.assertRaisesRegex(RuntimeError, 'required'):
+                            fetcher.fetch()
+                    else:
+                        fetcher.fetch()
+                    run.assert_not_called()
+
     def test_no_secret_skips_network_and_removes_stale_payload(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -46,6 +69,7 @@ class FetchTemplateTests(unittest.TestCase):
                         fetcher.fetch()
                 self.assertFalse((folder / 'template.bin').exists())
                 self.assertFalse((root / 'shader-template-deploy-key').exists())
+                self.assertFalse((root / 'shader-template-known-hosts').exists())
 
     def test_verified_payload_and_failed_hash_both_remove_key(self):
         for valid in (True, False):
@@ -60,6 +84,10 @@ class FetchTemplateTests(unittest.TestCase):
                 def git(command, **kwargs):
                     self.assertNotIn('SHADER_TEMPLATE_DEPLOY_KEY', kwargs['env'])
                     self.assertIn('IdentitiesOnly=yes', kwargs['env']['GIT_SSH_COMMAND'])
+                    self.assertIn('StrictHostKeyChecking=yes', kwargs['env']['GIT_SSH_COMMAND'])
+                    hosts = root / 'shader-template-known-hosts'
+                    self.assertEqual(hosts.read_text(), fetcher.GITHUB_HOST_KEY)
+                    self.assertIn('UserKnownHostsFile=' + hosts.as_posix(), kwargs['env']['GIT_SSH_COMMAND'])
                     key = root / 'shader-template-deploy-key'
                     self.assertTrue(key.is_file())
                     if os.name != 'nt':
@@ -76,6 +104,7 @@ class FetchTemplateTests(unittest.TestCase):
                             fetcher.fetch()
                         self.assertFalse((folder / 'template.bin').exists())
                 self.assertFalse((root / 'shader-template-deploy-key').exists())
+                self.assertFalse((root / 'shader-template-known-hosts').exists())
 
 
 if __name__ == '__main__':

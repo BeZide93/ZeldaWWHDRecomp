@@ -117,6 +117,7 @@ jobs:
       - name: Fetch pinned optional shader template
         env:
           SHADER_TEMPLATE_DEPLOY_KEY: ${{ secrets.SHADER_TEMPLATE_DEPLOY_KEY }}
+          SHADER_TEMPLATE_DEVEL_BUILD: ${{ inputs.devel_build }}
         shell: bash
         run: |
           umask 077
@@ -125,7 +126,7 @@ jobs:
       - name: Remove shader template deploy key
         if: always()
         shell: bash
-        run: rm -f "$RUNNER_TEMP/shader-template-deploy-key"
+        run: rm -f "$RUNNER_TEMP/shader-template-deploy-key" "$RUNNER_TEMP/shader-template-known-hosts"
 
       - name: Install build tools
         run: brew install ninja
@@ -264,6 +265,7 @@ jobs:
       - name: Fetch pinned optional shader template
         env:
           SHADER_TEMPLATE_DEPLOY_KEY: ${{ secrets.SHADER_TEMPLATE_DEPLOY_KEY }}
+          SHADER_TEMPLATE_DEVEL_BUILD: ${{ inputs.devel_build }}
         shell: bash
         run: |
           umask 077
@@ -272,7 +274,7 @@ jobs:
       - name: Remove shader template deploy key
         if: always()
         shell: bash
-        run: rm -f "$RUNNER_TEMP/shader-template-deploy-key"
+        run: rm -f "$RUNNER_TEMP/shader-template-deploy-key" "$RUNNER_TEMP/shader-template-known-hosts"
 
       - name: Install dependencies
         run: |
@@ -451,15 +453,16 @@ jobs:
       - name: Fetch pinned optional shader template
         env:
           SHADER_TEMPLATE_DEPLOY_KEY: ${{ secrets.SHADER_TEMPLATE_DEPLOY_KEY }}
+          SHADER_TEMPLATE_DEVEL_BUILD: ${{ inputs.devel_build }}
         shell: bash
         run: |
           umask 077
-          python3 tools/release/fetch_shader_template.py
+          python tools/release/fetch_shader_template.py
 
       - name: Remove shader template deploy key
         if: always()
         shell: bash
-        run: rm -f "$RUNNER_TEMP/shader-template-deploy-key"
+        run: rm -f "$RUNNER_TEMP/shader-template-deploy-key" "$RUNNER_TEMP/shader-template-known-hosts"
 
       - name: Pinned llvm-mingw toolchain (tools/installer/toolchains.json)
         run: |
@@ -651,6 +654,7 @@ jobs:
       - name: Fetch pinned optional shader template
         env:
           SHADER_TEMPLATE_DEPLOY_KEY: ${{ secrets.SHADER_TEMPLATE_DEPLOY_KEY }}
+          SHADER_TEMPLATE_DEVEL_BUILD: ${{ inputs.devel_build }}
         shell: bash
         run: |
           umask 077
@@ -659,7 +663,7 @@ jobs:
       - name: Remove shader template deploy key
         if: always()
         shell: bash
-        run: rm -f "$RUNNER_TEMP/shader-template-deploy-key"
+        run: rm -f "$RUNNER_TEMP/shader-template-deploy-key" "$RUNNER_TEMP/shader-template-known-hosts"
 
       - uses: actions/setup-java@v5
         with:

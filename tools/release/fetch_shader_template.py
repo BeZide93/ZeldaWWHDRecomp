@@ -10,6 +10,15 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
 REPOSITORY = 'git@github.com:ZeldaWWHDRecomp/shader-template.git'
+GITHUB_HOST_KEY = 'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl\n'
+
+def template_required(env):
+    if env.get('GITHUB_REPOSITORY') != 'ZeldaWWHDRecomp/ZeldaWWHDRecomp':
+        return False
+    event = env.get('GITHUB_EVENT_NAME')
+    return (event == 'schedule' or
+            event == 'push' and env.get('GITHUB_REF', '').startswith('refs/tags/') or
+            event == 'workflow_dispatch' and env.get('SHADER_TEMPLATE_DEVEL_BUILD', '').lower() == 'true')
 
 
 def read_pin(path):
@@ -27,11 +36,16 @@ def fetch():
     if not key:
         # A reused checkout must not accidentally package an unverified local file.
         destination.unlink(missing_ok=True)
+        if template_required(os.environ):
+            raise RuntimeError('SHADER_TEMPLATE_DEPLOY_KEY is required for upstream release/devel builds')
         print('::notice::No shader template deploy key; packaging without optional shader preparation')
         return
     pin = read_pin(ROOT / 'tools/shadercache/template.ref')
     key_path = Path(os.environ['RUNNER_TEMP']) / 'shader-template-deploy-key'
+    known_hosts = key_path.with_name('shader-template-known-hosts')
     try:
+        known_hosts.write_text(GITHUB_HOST_KEY)
+        os.chmod(known_hosts, 0o600)
         descriptor = os.open(key_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(descriptor, 'w') as stream:
             stream.write(key.rstrip() + '\n')
@@ -40,7 +54,9 @@ def fetch():
         env.pop('SHADER_TEMPLATE_DEPLOY_KEY', None)
         env['GIT_TERMINAL_PROMPT'] = '0'
         env['GIT_SSH_COMMAND'] = shlex.join(['ssh', '-i', key_path.as_posix(),
-            '-o', 'IdentitiesOnly=yes', '-o', 'BatchMode=yes'])
+            '-o', 'IdentitiesOnly=yes', '-o', 'BatchMode=yes',
+            '-o', 'UserKnownHostsFile=' + known_hosts.as_posix(),
+            '-o', 'StrictHostKeyChecking=yes'])
         with tempfile.TemporaryDirectory(dir=os.environ['RUNNER_TEMP']) as temporary:
             def git(*args):
                 return subprocess.run(['git', '-C', temporary, *args], env=env,
@@ -61,6 +77,7 @@ def fetch():
             destination.write_bytes(data)
     finally:
         key_path.unlink(missing_ok=True)
+        known_hosts.unlink(missing_ok=True)
 
 
 if __name__ == '__main__':
