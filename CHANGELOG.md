@@ -7,6 +7,11 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **macOS setup: works with mismatched Command Line Tools** (e.g. after a macOS beta update installed a
+  newer SDK than the tools' linker understands: "unknown architecture arm64e.x1", "tapi error: malformed
+  file"). Setup now links with an older installed SDK automatically, or explains how to update the
+  Command Line Tools.
+
 - **Audio: a master volume slider** (PR #137, thanks @mhbxyz, issue #124). Settings → Audio has a
   Master volume slider with Mute and Default buttons. It applies immediately and is remembered for the
   next start.

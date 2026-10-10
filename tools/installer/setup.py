@@ -1515,6 +1515,76 @@ def compile_gamecode(tc, manifest, gen_dir, obj_dir, jobs, cancel=None, progress
     return sorted(objs)
 
 
+# A macOS SDK newer than the Command Line Tools' linker (e.g. a beta SDK installed by a partial update):
+# its .tbd stubs name architectures the linker doesn't know ("unknown architecture arm64e.x1-macos",
+# "tapi error: malformed file"), so every system library fails to link.
+MAC_SDK_MISMATCH = re.compile(r"tapi error: malformed file|\.tbd:\d+:\d+: error: unknown architecture")
+
+
+def mac_sdk_version(path):
+    m = re.search(r"MacOSX(\d+)(?:\.(\d+))?\.sdk$", os.path.basename(os.path.normpath(path)))
+    return (int(m.group(1)), int(m.group(2) or 0)) if m else None
+
+
+def mac_sdks():
+    """The installed macOS SDKs (Command Line Tools and Xcode), newest first, as (version, real path)."""
+    found = {}
+    for pattern in ("/Library/Developer/CommandLineTools/SDKs/MacOSX*.sdk",
+                    "/Applications/Xcode*.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX*.sdk"):
+        for path in glob.glob(pattern):
+            real = os.path.realpath(path)
+            version = mac_sdk_version(real) or mac_sdk_version(path)
+            if version and os.path.isdir(real):
+                found.setdefault(real, version)
+    return sorted(((v, p) for p, v in found.items()), reverse=True)
+
+
+def mac_current_sdk():
+    try:
+        out = subprocess.run(["xcrun", "--sdk", "macosx", "--show-sdk-path"], stdout=subprocess.PIPE,
+                             stderr=subprocess.DEVNULL).stdout.decode("utf-8", "replace").strip()
+    except OSError:
+        return None
+    return os.path.realpath(out) if out else None
+
+
+def mac_fallback_sdks(current, sdks, minimum=(14, 0)):
+    """SDKs to retry the link with when `current` doesn't match the linker: older ones first by version
+    (newest of them first), never below the game's deployment target."""
+    # the current SDK's real path can be unversioned (Xcode's MacOSX.sdk): take its version from the list,
+    # where the versioned name pointing at it was found
+    cur = next((v for v, p in sdks if p == current), None) or (mac_sdk_version(current) if current else None)
+    return [p for v, p in sdks if p != current and v >= minimum and (cur is None or v < cur)]
+
+
+def link_with_sdk_fallback(cmd, env):
+    """Links; on macOS, a linker that rejects the SDK's library stubs is retried with an older installed SDK."""
+    try:
+        run_logged(cmd, env=env, what="linking the game")
+        return
+    except SetupError as e:
+        if not (IS_MAC and MAC_SDK_MISMATCH.search(str(e))) or (env or os.environ).get("SDKROOT"):
+            raise
+        failed = e
+    current = mac_current_sdk()
+    say("  The macOS SDK (%s) is newer than the linker of the Command Line Tools; trying an older installed SDK."
+        % os.path.basename(current or "?"))
+    for sdk in mac_fallback_sdks(current, mac_sdks()):
+        say("  Linking with %s" % os.path.basename(sdk))
+        try:
+            run_logged(cmd, env=dict(env or os.environ, SDKROOT=sdk), what="linking the game")
+            say("  Linked with %s. Updating the Command Line Tools (Software Update) fixes the mismatch for good."
+                % os.path.basename(sdk))
+            return
+        except SetupError as e:
+            if not MAC_SDK_MISMATCH.search(str(e)):
+                raise
+    raise SetupError("linking the game failed: the installed macOS SDK (%s) doesn't match the linker of the "
+                     "Command Line Tools, and no older SDK works. Update the Command Line Tools (System Settings "
+                     "> General > Software Update, or run: xcode-select --install), then run setup again.\n\n%s"
+                     % (os.path.basename(current or "?"), failed))
+
+
 def link_game(tc, manifest, objs, work, out_exe):
     lib = os.path.join(work, "libgamecode.a")
     if os.path.exists(lib):
@@ -1541,7 +1611,7 @@ def link_game(tc, manifest, objs, work, out_exe):
         cmd = tc.cxx + ["@" + fwd(rsp)]
     else:
         cmd = tc.cxx + args
-    run_logged(cmd, env=tc.env, what="linking the game")
+    link_with_sdk_fallback(cmd, tc.env)
     if not os.path.isfile(out_exe):
         raise SetupError("the linker produced no executable")
 

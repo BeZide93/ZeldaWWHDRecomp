@@ -14,6 +14,67 @@ import setup  # noqa: E402
 KEY_HEX = "0011223344556677" "8899aabbccddeeff"  # made-up test value
 
 
+class MacSdkFallback(unittest.TestCase):
+    # the linker output from a Mac whose beta SDK is newer than its Command Line Tools' linker
+    MISMATCH = ("linking the game failed (exit code 1):\n"
+                "/Library/Developer/CommandLineTools/SDKs/MacOSX27.0.sdk/usr/lib/libz.1.tbd:4:20: error: unknown architecture\n"
+                "arm64e.x1-macos, arm64e.x1-maccatalyst ]\n"
+                "in '/Library/Developer/CommandLineTools/SDKs/MacOSX27.0.sdk/usr/lib/libz.tbd'; tapi error: malformed file")
+    SDKS = [((27, 0), "/sdk/MacOSX27.0.sdk"), ((26, 1), "/sdk/MacOSX26.1.sdk"),
+            ((15, 5), "/sdk/MacOSX15.5.sdk"), ((13, 3), "/sdk/MacOSX13.3.sdk")]
+
+    def test_mismatch_pattern(self):
+        self.assertTrue(setup.MAC_SDK_MISMATCH.search(self.MISMATCH))
+        self.assertFalse(setup.MAC_SDK_MISMATCH.search("ld: symbol(s) not found for architecture arm64"))
+
+    def test_sdk_versions_and_order(self):
+        self.assertEqual(setup.mac_sdk_version("/x/MacOSX27.0.sdk"), (27, 0))
+        self.assertEqual(setup.mac_sdk_version("/x/MacOSX26.sdk/"), (26, 0))
+        self.assertIsNone(setup.mac_sdk_version("/x/MacOSX.sdk"))
+        # older SDKs only, newest first, never below the game's deployment target (14.0)
+        self.assertEqual(setup.mac_fallback_sdks("/sdk/MacOSX27.0.sdk", self.SDKS),
+                         ["/sdk/MacOSX26.1.sdk", "/sdk/MacOSX15.5.sdk"])
+        # an unversioned current path (Xcode's MacOSX.sdk) gets its version from the list
+        sdks = [((26, 1), "/clt/MacOSX26.1.sdk"), ((26, 0), "/xcode/MacOSX.sdk"), ((15, 4), "/clt/MacOSX15.4.sdk")]
+        self.assertEqual(setup.mac_fallback_sdks("/xcode/MacOSX.sdk", sdks), ["/clt/MacOSX15.4.sdk"])
+
+    def _link(self, works_with, env=None):
+        calls = []
+        def run_logged(cmd, env=None, what=""):
+            sdk = (env or {}).get("SDKROOT")
+            calls.append(sdk)
+            if sdk != works_with:
+                raise setup.SetupError(self.MISMATCH)
+            return ""
+        with mock.patch.object(setup, "IS_MAC", True), \
+             mock.patch.object(setup, "run_logged", side_effect=run_logged), \
+             mock.patch.object(setup, "mac_sdks", return_value=self.SDKS), \
+             mock.patch.object(setup, "mac_current_sdk", return_value="/sdk/MacOSX27.0.sdk"), \
+             mock.patch.object(setup, "say"):
+            setup.link_with_sdk_fallback(["clang++"], env)
+        return calls
+
+    def test_retries_with_an_older_sdk(self):
+        self.assertEqual(self._link("/sdk/MacOSX15.5.sdk", {}), [None, "/sdk/MacOSX26.1.sdk", "/sdk/MacOSX15.5.sdk"])
+
+    def test_clear_message_when_no_sdk_works(self):
+        with self.assertRaises(setup.SetupError) as e:
+            self._link("/none", {})
+        self.assertIn("Update the Command Line Tools", str(e.exception))
+
+    def test_other_errors_and_explicit_sdkroot_are_not_retried(self):
+        with mock.patch.object(setup, "IS_MAC", True), \
+             mock.patch.object(setup, "run_logged", side_effect=setup.SetupError("ld: symbol(s) not found")) as run:
+            with self.assertRaises(setup.SetupError):
+                setup.link_with_sdk_fallback(["clang++"], {})
+            self.assertEqual(run.call_count, 1)
+        with mock.patch.object(setup, "IS_MAC", True), \
+             mock.patch.object(setup, "run_logged", side_effect=setup.SetupError(self.MISMATCH)) as run:
+            with self.assertRaises(setup.SetupError):
+                setup.link_with_sdk_fallback(["clang++"], {"SDKROOT": "/chosen.sdk"})  # the player chose the SDK
+            self.assertEqual(run.call_count, 1)
+
+
 class GuestBuildConfig(unittest.TestCase):
     def test_toolchain_argument_vector(self):
         with tempfile.TemporaryDirectory() as d:
