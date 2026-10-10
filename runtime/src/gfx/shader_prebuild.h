@@ -194,10 +194,97 @@ public:
     }
 };
 inline std::unique_ptr<GenerationLease> generationLease;
+// Publish a complete staged file without ever replacing a player's live cache.
+inline bool publish_legacy_file(const fs::path& temporary, const fs::path& target) {
+#ifdef _WIN32
+    return MoveFileExW(temporary.c_str(), target.c_str(), MOVEFILE_WRITE_THROUGH) != 0;
+#else
+    std::error_code error;
+    fs::create_hard_link(temporary, target, error);
+    return !error;
+#endif
+}
+inline void copy_legacy_file(const fs::path& source, const fs::path& target) {
+    std::error_code error;
+    if (fs::exists(target, error) || !fs::is_regular_file(fs::symlink_status(source, error))) return;
+    fs::create_directories(target.parent_path());
+    std::string temporary;
+    FILE* staged = gfxvk::open_atomic_temporary(target.string(), temporary);
+    std::fclose(staged);
+    try {
+        fs::copy_file(source, fs::u8path(temporary), fs::copy_options::overwrite_existing);
+        if (!publish_legacy_file(fs::u8path(temporary), target) && !fs::exists(target))
+            std::fprintf(stderr, "[shader prebuild] Could not migrate a legacy cache; continuing\n");
+    } catch (...) {
+        fs::remove(fs::u8path(temporary), error);
+        throw;
+    }
+    fs::remove(fs::u8path(temporary), error);
+}
+inline bool legacy_pipeline_filename(const std::string& name) {
+    // Only our old device-specific cache and its adjacent recipe file.
+    constexpr size_t baseSize = 7 + 8 + 1 + 8 + 1 + 32 + 4;
+    if (name.size() != baseSize && name.size() != baseSize + 8) return false;
+    if (!name.starts_with("vulkan-") || name[15] != '-' || name[24] != '-' ||
+        name.substr(57, 4) != ".bin" || (name.size() > baseSize && name.substr(baseSize) != ".recipes")) return false;
+    for (size_t i = 7; i < 57; ++i) {
+        if (i == 15 || i == 24) continue;
+        if (!((name[i] >= '0' && name[i] <= '9') || (name[i] >= 'a' && name[i] <= 'f'))) return false;
+    }
+    return true;
+}
+inline void migrate_default_caches(const fs::path& configDirectory, const fs::path& metalCacheFile) noexcept {
+    try {
+        const auto live = root() / "live", marker = live / ".legacy-defaults-v1";
+        if (fs::exists(marker)) return;
+        auto copy = [](const fs::path& source, const fs::path& target) {
+            try { copy_legacy_file(source, target); }
+            catch (...) { std::fprintf(stderr, "[shader prebuild] Could not migrate a legacy cache; continuing\n"); }
+        };
+        const auto old = configDirectory / "shadercache";
+        std::error_code error;
+        fs::directory_iterator entries(old, error), end;
+        for (; !error && entries != end; entries.increment(error)) {
+            const auto name = entries->path().filename().string();
+            if (legacy_pipeline_filename(name)) copy(entries->path(), live / name);
+        }
+        if (error && error != std::errc::no_such_file_or_directory)
+            std::fprintf(stderr, "[shader prebuild] Could not scan legacy caches; continuing\n");
+        // macOS portable builds previously selected shaders.bin automatically,
+        // which placed Vulkan device caches beside it instead of in shadercache.
+        error.clear();
+        fs::directory_iterator portable(configDirectory, error);
+        for (; !error && portable != end; portable.increment(error)) {
+            const auto name = portable->path().filename().string();
+            constexpr std::string_view prefix = "shaders.bin.";
+            if (name.starts_with(prefix) && legacy_pipeline_filename(name.substr(prefix.size())))
+                copy(portable->path(), live / name.substr(prefix.size()));
+        }
+        copy(configDirectory / "shaders.bin", live / "shaders.bin");
+        copy(old / "vulkan-shaders/spirv.bin", live / "vulkan-shaders/spirv.bin");
+        if (!metalCacheFile.empty()) copy(metalCacheFile, live / "shaders.bin");
+        fs::create_directories(live);
+        std::string temporary;
+        FILE* staged = gfxvk::open_atomic_temporary(marker.string(), temporary);
+        const bool written = std::fputs("legacy-defaults-v1\n", staged) >= 0;
+        const bool closed = std::fclose(staged) == 0;
+        if (written && closed) publish_legacy_file(fs::u8path(temporary), marker);
+        fs::remove(fs::u8path(temporary), error);
+    } catch (...) {
+        std::fprintf(stderr, "[shader prebuild] Legacy cache migration unavailable; continuing\n");
+    }
+}
 inline void bind_live_caches() {
+    fs::path metal;
+#ifdef __APPLE__
+    const char* home = std::getenv("HOME");
+    metal = fs::u8path(home ? home : ".") / "Library/Caches/wwhd/shaders.bin";
+#endif
+    migrate_default_caches(fs::u8path(host::config_dir()), metal);
+
     set_default("WWHD_SHADER_CACHE", root() / "live/shaders.bin");
     set_default("WWHD_VK_SHADER_CACHE", root() / "live/vulkan-shaders");
-    set_default("WWHD_VK_PIPELINE_CACHE", root() / "live/vulkan-pipelines.bin");
+    set_default("WWHD_VK_PIPELINE_CACHE_DIR", root() / "live");
 }
 inline void bind_generation(const fs::path& dir) {
     set_default("WWHD_HEADSTART", dir / "headstart.bin");

@@ -186,7 +186,7 @@ def cache_environment(generation, game, renderer):
     return dict(WWHD_GAME=str(game), WWHD_HEADSTART=str(generation / 'headstart.bin'),
                 WWHD_SHADER_CACHE=str(live / 'shaders.bin'),
                 WWHD_VK_SHADER_CACHE=str(live / 'vulkan-shaders'),
-                WWHD_VK_PIPELINE_CACHE=str(live / 'vulkan-pipelines.bin'),
+                WWHD_VK_PIPELINE_CACHE_DIR=str(live),
                 WWHD_RENDERER_RUNTIME=renderer, WWHD_NO_AUDIO='1', WWHD_HIDDEN_WINDOWS='1')
 
 
@@ -282,6 +282,9 @@ def prepare(game, template, executable, cache_root, package, renderer='vulkan',
         status = 'warm_pending'
         if executable:
             progress('Compiling shaders and pipelines for this computer')
+            # Preparation owns its live directory; a caller's exact-file override
+            # must not redirect the warm subprocess away from that directory.
+            env.pop('WWHD_VK_PIPELINE_CACHE', None)
             env.update(cache_environment(staging, game, renderer))
             runner([str(executable), '--game', str(game), '--warm-shaders'], env, cancel, progress)
             status = 'ready'

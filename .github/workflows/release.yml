@@ -577,6 +577,9 @@ jobs:
             if ($text.IndexOf('.debug_info') -ge 0) { throw "$f still has debug sections" }
             if ($text.IndexOf('requestedExecutionLevel') -lt 0) { throw "$f has no application manifest" }
           }
+          # Inspect real RT_MANIFEST resources, not a matching string elsewhere in the PE.
+          python -c "import pathlib,sys; sys.path.insert(0,'tools/release'); import guard; problems=[]; [guard.check_windows_manifest(p, pathlib.Path(p).read_bytes(), problems) for p in sys.argv[1:]]; print('\n'.join(problems)); sys.exit(bool(problems))" build/rel/wwhd.exe (Join-Path $pkg 'Wind Waker HD.exe')
+          if ($LASTEXITCODE -ne 0) { throw "Windows UTF-8 application manifest validation failed" }
 
       - name: Installer self-test, setup in a console window (bundled Python, toolchain download)
         # the .bat as a player starts it (it runs "Wind Waker HD.exe --console-setup"); no input

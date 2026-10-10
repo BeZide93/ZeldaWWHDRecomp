@@ -43,19 +43,63 @@ int main(int argc, char** argv) {
 #endif
     };
     auto clear_live = [&] {
-        for(auto name : {"WWHD_SHADER_CACHE","WWHD_VK_SHADER_CACHE","WWHD_VK_PIPELINE_CACHE"}) env(name);
+        for(auto name : {"WWHD_SHADER_CACHE","WWHD_VK_SHADER_CACHE","WWHD_VK_PIPELINE_CACHE","WWHD_VK_PIPELINE_CACHE_DIR"}) env(name);
     };
     auto assert_live = [&] {
         assert(std::string(getenv("WWHD_SHADER_CACHE")) == (shaderprebuild::root()/"live/shaders.bin").string());
         assert(std::string(getenv("WWHD_VK_SHADER_CACHE")) == (shaderprebuild::root()/"live/vulkan-shaders").string());
-        assert(std::string(getenv("WWHD_VK_PIPELINE_CACHE")) == (shaderprebuild::root()/"live/vulkan-pipelines.bin").string());
+        assert(std::string(getenv("WWHD_VK_PIPELINE_CACHE_DIR")) == (shaderprebuild::root()/"live").string());
+        assert(!getenv("WWHD_VK_PIPELINE_CACHE"));
         assert(!getenv("WWHD_HEADSTART"));
     };
+    // Isolate the Metal default before any activation can inspect HOME.
+    const auto home = temporary / "synthetic-home";
+    env("HOME",home.string().c_str());
+    auto write = [](const fs::path& path, const std::string& text) {
+        fs::create_directories(path.parent_path()); std::ofstream(path) << text;
+    };
+    auto bytes = [](const fs::path& path) {
+        std::ifstream file(path,std::ios::binary);
+        return std::string(std::istreambuf_iterator<char>(file),{});
+    };
+    const auto config = fs::u8path(host::config_dir());
+    const auto legacy = config / "shadercache";
+    const std::string pipeline = "vulkan-12345678-abcdef01-0123456789abcdef0123456789abcdef.bin";
+    const std::string preserved = "vulkan-87654321-abcdef01-0123456789abcdef0123456789abcdef.bin";
+    const std::string later = "vulkan-99999999-abcdef01-0123456789abcdef0123456789abcdef.bin";
+    write(legacy/pipeline,"legacy pipeline bytes");
+    write(legacy/(pipeline+".recipes"),"legacy recipe bytes");
+    write(legacy/preserved,"older source bytes");
+    write(shaderprebuild::root()/"live"/preserved,"existing live bytes");
+    write(legacy/"vulkan-shaders/spirv.bin","legacy SPIR-V bytes");
+    write(legacy/"vulkan-invalid.bin","unrelated bytes");
+    write(legacy/(pipeline+".tmp"),"unfinished bytes");
+    const auto metal = home/"Library/Caches/wwhd/shaders.bin";
+    write(metal,"legacy Metal bytes");
     clear_live();
     // No manifest/generation must still reuse the stable live caches.
     assert(!shaderprebuild::activate(game,"vulkan")); assert_live();
+    const auto live=shaderprebuild::root()/"live";
+    assert(bytes(fs::u8path(getenv("WWHD_VK_PIPELINE_CACHE_DIR"))/pipeline)=="legacy pipeline bytes");
+    assert(bytes(live/(pipeline+".recipes"))=="legacy recipe bytes");
+    assert(bytes(fs::u8path(getenv("WWHD_VK_SHADER_CACHE"))/"spirv.bin")=="legacy SPIR-V bytes");
+    assert(bytes(live/preserved)=="existing live bytes");
+    assert(bytes(legacy/preserved)=="older source bytes");
+    assert(bytes(legacy/pipeline)=="legacy pipeline bytes");
+    assert(bytes(legacy/(pipeline+".recipes"))=="legacy recipe bytes");
+    assert(bytes(legacy/"vulkan-shaders/spirv.bin")=="legacy SPIR-V bytes");
+    assert(bytes(metal)=="legacy Metal bytes");
+#ifdef __APPLE__
+    assert(bytes(fs::u8path(getenv("WWHD_SHADER_CACHE")))=="legacy Metal bytes");
+#endif
+    assert(!fs::exists(live/"vulkan-invalid.bin"));
+    assert(!fs::exists(live/(pipeline+".tmp")));
+    assert(fs::is_regular_file(live/".legacy-defaults-v1"));
+    write(legacy/later,"new legacy cache after migration");
     clear_live();
     assert(!shaderprebuild::activate_pending(game,"vulkan")); assert_live();
+    assert(!fs::exists(live/later)); // The one-time marker prevents re-import.
+    assert(bytes(legacy/later)=="new legacy cache after migration");
     // Explicit cache and headstart overrides remain authoritative.
     env("WWHD_SHADER_CACHE","explicit-shaders");
     env("WWHD_VK_SHADER_CACHE","explicit-spirv");
@@ -67,9 +111,6 @@ int main(int argc, char** argv) {
     assert(std::string(getenv("WWHD_VK_PIPELINE_CACHE"))=="0");
     assert(std::string(getenv("WWHD_HEADSTART"))=="explicit-headstart");
     env("WWHD_HEADSTART"); clear_live();
-    auto write = [](const fs::path& path, const std::string& text) {
-        fs::create_directories(path.parent_path()); std::ofstream(path) << text;
-    };
     auto json = [&](const fs::path& path, const Value& v) { write(path, mods::json::dump(v)); };
     write(package / "tools/shadercache/template.bin", "synthetic state fixture");
     write(package / "tools/shaderprep.py", "synthetic translator fixture");
@@ -181,5 +222,49 @@ int main(int argc, char** argv) {
     assert(shaderprebuild::read(shaderprebuild::root() / "active.json").get("status").string() == "ready");
     assert(shaderprebuild::read(shaderprebuild::resultPath).get("status").string() == "ready");
     assert(!shaderprebuild::requested());
+    // Exercise the explicit Metal source on every host, not only macOS.
+    const auto isolated = temporary/"explicit-migration";
+    env("WWHD_USER_DIR",isolated.string().c_str());
+    shaderprebuild::migrate_default_caches(isolated,metal);
+    assert(bytes(shaderprebuild::root()/"live/shaders.bin")=="legacy Metal bytes");
+    assert(bytes(metal)=="legacy Metal bytes");
+    // The historical portable layout used a prefixed pipeline filename and
+    // config/shaders.bin. Its local Metal cache takes precedence over HOME.
+    const auto portable = temporary/"portable-migration";
+    env("WWHD_USER_DIR",portable.string().c_str());
+    write(portable/"shaders.bin","portable Metal bytes");
+    write(portable/("shaders.bin."+pipeline),"portable pipeline bytes");
+    write(portable/("shaders.bin."+pipeline+".recipes"),"portable recipe bytes");
+    write(portable/"shaders.bin.vulkan-invalid.bin","unrelated portable bytes");
+    shaderprebuild::migrate_default_caches(portable,metal);
+    const auto portableLive=shaderprebuild::root()/"live";
+    assert(bytes(portableLive/"shaders.bin")=="portable Metal bytes");
+    assert(bytes(portableLive/pipeline)=="portable pipeline bytes");
+    assert(bytes(portableLive/(pipeline+".recipes"))=="portable recipe bytes");
+    assert(!fs::exists(portableLive/"shaders.bin.vulkan-invalid.bin"));
+    assert(!fs::exists(portableLive/"vulkan-invalid.bin"));
+    assert(bytes(portable/"shaders.bin")=="portable Metal bytes");
+    assert(bytes(portable/("shaders.bin."+pipeline))=="portable pipeline bytes");
+    assert(bytes(portable/("shaders.bin."+pipeline+".recipes"))=="portable recipe bytes");
+    assert(bytes(metal)=="legacy Metal bytes");
+    // Existing live entries win over both historical portable and HOME sources.
+    const auto alreadyLive=temporary/"portable-existing-live";
+    env("WWHD_USER_DIR",alreadyLive.string().c_str());
+    write(alreadyLive/"shaders.bin","older portable bytes");
+    write(alreadyLive/("shaders.bin."+pipeline),"older portable pipeline bytes");
+    write(shaderprebuild::root()/"live/shaders.bin","current live Metal bytes");
+    write(shaderprebuild::root()/"live"/pipeline,"current live pipeline bytes");
+    shaderprebuild::migrate_default_caches(alreadyLive,metal);
+    assert(bytes(shaderprebuild::root()/"live/shaders.bin")=="current live Metal bytes");
+    assert(bytes(shaderprebuild::root()/"live"/pipeline)=="current live pipeline bytes");
+    // A regular file blocking the destination directory makes copying fail
+    // deterministically even when tests run with elevated permissions.
+    const auto failure = temporary/"failed-migration";
+    env("WWHD_USER_DIR",failure.string().c_str());
+    write(failure/"shadercache"/pipeline,"source must survive copy failure");
+    write(shaderprebuild::root()/"live","existing destination must survive");
+    shaderprebuild::migrate_default_caches(failure,fs::path{});
+    assert(bytes(failure/"shadercache"/pipeline)=="source must survive copy failure");
+    assert(bytes(shaderprebuild::root()/"live")=="existing destination must survive");
     fs::remove_all(temporary);
 }

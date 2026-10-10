@@ -21,6 +21,7 @@
 #include "../../build_info.h"
 #include "deferred_commands.h"
 #include "deferred_dispatch.h"
+#include "pipeline_cache_path.h"
 #include "bc_decode.h"
 #include "android_driver.h"
 #include "stutter_trace.h"
@@ -169,6 +170,7 @@ bool unpack_pipeline_cache(std::vector<uint8_t>& file) {
 void init_pipeline_cache() try {
   const auto explicitStorage=path_environment_utf8("WWHD_VK_PIPELINE_CACHE");
   const auto shaderStorage=path_environment_utf8("WWHD_SHADER_CACHE");
+  const auto directoryStorage=path_environment_utf8("WWHD_VK_PIPELINE_CACHE_DIR");
   if (const char* explicitPath=explicitStorage ? explicitStorage->c_str() : nullptr) {
     if (std::strcmp(explicitPath,"0")) {
       pipelineCachePath=explicitPath;
@@ -180,6 +182,11 @@ void init_pipeline_cache() try {
       pipelineCachePath = drivers::pipeline_directory()+"/"+key;
 #endif
     }
+  } else if (directoryStorage) {
+    std::array<uint8_t,16> uuid{};
+    std::copy(std::begin(R.properties.pipelineCacheUUID),std::end(R.properties.pipelineCacheUUID),uuid.begin());
+    pipelineCachePath=*pipeline_cache_override(std::nullopt,directoryStorage,
+        R.properties.vendorID,R.properties.deviceID,uuid);
   } else if (const char* shaderPath=shaderStorage ? shaderStorage->c_str() : nullptr;
              !shaderPath || std::strcmp(shaderPath,"0")) {
     char ids[32];

@@ -260,7 +260,6 @@ static void apply_portable_mode() {
     set("WWHD_STATE_DIR", u + "/states");
 #ifdef __APPLE__
     set("WWHD_DISPLAY_SETTINGS", u + "/display.plist");
-    set("WWHD_SHADER_CACHE", u + "/shaders.bin");
 #endif
 }
 

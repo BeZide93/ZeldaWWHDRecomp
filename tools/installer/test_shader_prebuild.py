@@ -62,6 +62,15 @@ class ShaderPrebuildTests(unittest.TestCase):
         self.assertIsNone(marker['launch'])
         self.assertEqual(self.calls, [])
 
+    def test_preparation_uses_device_cache_directory_not_inherited_file(self):
+        from unittest.mock import patch
+        import os
+        with patch.dict(os.environ, {'WWHD_VK_PIPELINE_CACHE': '/synthetic/old-override.bin'}):
+            self.assertEqual(self.prepare()['status'], 'ready')
+        env = self.calls[-1][1]
+        self.assertEqual(env['WWHD_VK_PIPELINE_CACHE_DIR'], str(self.cache / 'live'))
+        self.assertNotIn('WWHD_VK_PIPELINE_CACHE', env)
+
     def test_missing_template_skips_without_commands_or_cache_changes(self):
         self.template.unlink()
         messages = []

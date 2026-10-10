@@ -218,11 +218,16 @@ macOS menu; other Metal-specific menus remain unported. SDL mouse capture and ca
 input are supported. MoltenVK devices without sampler LOD bias use zero bias,
 matching the existing Metal backend; native Vulkan devices retain the bias. Shader warmup/cache behavior differs from Metal.
 
-Vulkan keeps a persistent device pipeline cache under the host configuration
-directory's `shadercache` folder. `WWHD_VK_PIPELINE_CACHE=/path/cache.bin` selects
-an isolated cache file; `WWHD_VK_PIPELINE_CACHE=0` disables persistence. Setting
-`WWHD_SHADER_CACHE=0` also disables persistence unless an explicit Vulkan cache
-path is supplied. Caches are matched to the device and pipeline-cache UUID;
+Vulkan keeps persistent device pipeline caches under the host configuration
+directory's `shader-prebuild/live` folder. Each GPU and driver cache UUID has its
+own filename. On the first launch after updating, existing default caches from
+`shadercache` are copied into this folder without overwriting current caches.
+`WWHD_VK_PIPELINE_CACHE=/path/cache.bin` selects
+an isolated cache file; `WWHD_VK_PIPELINE_CACHE_DIR=/path/caches` selects a folder
+with separate files per device. The explicit file override takes precedence.
+`WWHD_VK_PIPELINE_CACHE=0` disables persistence. Setting
+`WWHD_SHADER_CACHE=0` also disables persistence unless a Vulkan cache file or directory
+is selected. Caches are matched to the device and pipeline-cache UUID;
 incompatible, truncated, or checksum-invalid files fall back to an empty cache. New data is saved
 atomically after 120 frames without new pipelines. First-time shader translation
 and pipeline creation can still cause stalls.

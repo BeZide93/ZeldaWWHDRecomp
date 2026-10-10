@@ -28,6 +28,7 @@ import struct
 import sys
 import zipfile
 import zlib
+import xml.etree.ElementTree as ET
 
 BAD_NAME = [
     (re.compile(r"(^|/)code_\d+\.c$"), "generated game code"),
@@ -219,8 +220,85 @@ def validate_code_free_template(data):
         for value in array(pipeline["strides"], 16): number(value, 0, 65535)
 
 
+def windows_manifests(data):
+    """Read actual RT_MANIFEST resources, never accept XML merely appended to a PE."""
+    def unpack(fmt, offset):
+        if offset < 0 or offset + struct.calcsize(fmt) > len(data):
+            raise ValueError('truncated PE resource')
+        return struct.unpack_from(fmt, data, offset)[0]
+    u16 = lambda offset: unpack('<H', offset)
+    u32 = lambda offset: unpack('<I', offset)
+    if data[:2] != b'MZ': raise ValueError('not a Windows executable')
+    pe = u32(0x3c)
+    if data[pe:pe+4] != b'PE\0\0': raise ValueError('invalid PE signature')
+    optional = pe + 24
+    magic = u16(optional)
+    if magic not in (0x10b, 0x20b): raise ValueError('unknown PE optional header')
+    directory_offset = 112 if magic == 0x20b else 96
+    if u16(pe+20) < directory_offset+24 or u32(optional+directory_offset-4) < 3:
+        raise ValueError('truncated PE data directories')
+    directory = optional + directory_offset
+    resource_rva, resource_size = u32(directory+16), u32(directory+20)
+    sections = optional + u16(pe+20)
+    section_count = u16(pe+6)
+    if not 0 < section_count <= 96 or not resource_rva or resource_size < 16:
+        raise ValueError('missing PE resources')
+    def file_offset(rva, size=1):
+        for i in range(section_count):
+            section = sections + 40*i
+            va, raw_size, raw = u32(section+12), u32(section+16), u32(section+20)
+            if va <= rva and rva-va+size <= raw_size:
+                offset = raw+rva-va
+                if offset+size <= len(data): return offset
+        raise ValueError('unmapped PE resource')
+    root = file_offset(resource_rva, resource_size)
+    def entries(relative):
+        if relative+16 > resource_size: raise ValueError('invalid resource directory')
+        start = root+relative
+        count = u16(start+12)+u16(start+14)
+        if count > 4096 or relative+16+8*count > resource_size:
+            raise ValueError('invalid resource entries')
+        return [(u32(start+16+8*i), u32(start+20+8*i)) for i in range(count)]
+    manifests = []
+    for kind, type_child in entries(0):
+        if kind != 24: continue
+        if not type_child & 0x80000000: raise ValueError('invalid manifest type')
+        for identifier, id_child in entries(type_child & 0x7fffffff):
+            if identifier != 1 or not id_child & 0x80000000:
+                raise ValueError('application manifest must use resource ID 1')
+            for language, leaf in entries(id_child & 0x7fffffff):
+                if leaf & 0x80000000 or leaf+16 > resource_size:
+                    raise ValueError('invalid manifest data entry')
+                rva, size = u32(root+leaf), u32(root+leaf+4)
+                if not 0 < size <= 1024*1024: raise ValueError('invalid manifest size')
+                offset = file_offset(rva, size)
+                manifests.append(data[offset:offset+size].rstrip(b'\0'))
+    if not manifests: raise ValueError('missing application manifest')
+    return manifests
+
+
+def check_windows_manifest(name, data, problems):
+    try:
+        for manifest in windows_manifests(data):
+            if b'<!DOCTYPE' in manifest.upper(): raise ValueError('manifest DTD unsupported')
+            document = ET.fromstring(manifest)
+            if document.tag != '{urn:schemas-microsoft-com:asm.v1}assembly':
+                raise ValueError('invalid application manifest root')
+            nodes = document.findall('./{urn:schemas-microsoft-com:asm.v3}application/'
+                '{urn:schemas-microsoft-com:asm.v3}windowsSettings/'
+                '{http://schemas.microsoft.com/SMI/2019/WindowsSettings}activeCodePage')
+            active = [node.text.strip() if node.text else '' for node in nodes]
+            if active != ['UTF-8']: raise ValueError('application manifest must select activeCodePage UTF-8')
+            if not any(node.tag.endswith('}requestedExecutionLevel') for node in document.iter()):
+                raise ValueError('application manifest lacks requestedExecutionLevel')
+    except (ValueError, struct.error, ET.ParseError) as error:
+        problems.append('%s: invalid Windows application manifest: %s' % (name, error))
+
+
 def check_entry(name, data, problems):
     n = name.replace("\\", "/")
+    if n.rsplit("/", 1)[-1].lower() in ("wwhd.exe", "wind waker hd.exe"):
+        check_windows_manifest(name, data, problems)
     safe_template = False
     if data.startswith(SAFE_TEMPLATE_MAGIC):
         try:

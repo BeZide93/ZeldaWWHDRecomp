@@ -1,4 +1,5 @@
 #include "gfx/vulkan/pipeline_identity.h"
+#include "gfx/vulkan/pipeline_cache_path.h"
 #include <cassert>
 #include <memory>
 #include <unordered_map>
@@ -9,6 +10,18 @@ struct Shader {
   bool ready() const { return valid; }
 };
 int main() {
+  const std::array<uint8_t,16> uuid{};
+  auto secondUuid=uuid;secondUuid.back()=0xff;
+  const auto first=gfxvk::pipeline_cache_override({},"live",0x1002,0x1234,uuid);
+  const auto second=gfxvk::pipeline_cache_override({},"live",0x10de,0x5678,uuid);
+  assert(first&&second&&first!=second);
+  assert(*first=="live/vulkan-00001002-00001234-00000000000000000000000000000000.bin");
+  assert(gfxvk::pipeline_cache_override({},"live/",0x1002,0x1234,uuid)==first);
+  assert(gfxvk::pipeline_cache_override({},"live",0x1002,0x1234,secondUuid)!=first);
+  assert(gfxvk::pipeline_cache_override("exact.bin","live",1,2,uuid)=="exact.bin");
+  assert(gfxvk::pipeline_cache_override("0","live",1,2,uuid)=="");
+  assert(!gfxvk::pipeline_cache_override({},{},1,2,uuid));
+
   std::unordered_map<uint64_t, std::unique_ptr<Shader>> canonical;
   std::unordered_map<uint64_t, Shader*> variants;
   auto equal = [](const Shader& a, const Shader& b) { return a.output == b.output; };

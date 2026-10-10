@@ -46,7 +46,13 @@ pipeline recipes. Vulkan and Metal skip the other renderer's typed recipes.
 
 `WWHD_HEADSTART=<file>` selects a local built headstart (`0` disables it).
 `WWHD_VK_SHADER_CACHE=<directory>` selects SPIR-V storage; `WWHD_VK_PIPELINE_CACHE=<file>` selects the
-device cache. Never pass `spirv.bin` to `shaderprep.py template`: conversion requires the GX2 recording.
+device cache. `WWHD_VK_PIPELINE_CACHE_DIR=<directory>` selects device-specific
+`vulkan-<vendor>-<device>-<uuid>.bin` files and adjacent `.recipes` files; an
+explicit file override wins over the directory. Normal setup and runtime use
+`shader-prebuild/live/`. On first activation, old default Vulkan caches and the
+macOS Metal shader cache are copied there once without replacing existing files.
+Sources stay intact; copy errors are logged and do not prevent play.
+Never pass `spirv.bin` to `shaderprep.py template`: conversion requires the GX2 recording.
 
 The stripped template schema is documented at the top of `tools/shaderprep.py`. The independent
 `tools/release/guard.py` permits only that schema at the packaged template path. Packaging tests generate
