@@ -24,6 +24,29 @@ class FetchTemplateTests(unittest.TestCase):
                 run.assert_not_called()
             self.assertFalse(target.exists())
 
+    def test_git_failure_and_guard_rejection_never_publish_and_remove_key(self):
+        for failure in ('fetch', 'guard'):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                folder = root / 'tools/shadercache'
+                folder.mkdir(parents=True)
+                commit = 'a' * 40
+                # Correct hash alone must never bypass the code-free validator.
+                data = b'synthetic invalid template'
+                (folder / 'template.ref').write_text(json.dumps(dict(commit=commit,
+                    sha256=hashlib.sha256(data).hexdigest())))
+                def git(command, **kwargs):
+                    if failure == 'fetch' and 'fetch' in command:
+                        raise subprocess.CalledProcessError(128, command)
+                    output = (commit + '\n').encode() if 'rev-parse' in command else data if 'show' in command else b''
+                    return subprocess.CompletedProcess(command, 0, stdout=output)
+                with patch.object(fetcher, 'ROOT', root), patch.dict(os.environ,
+                    {'RUNNER_TEMP': tmp, 'SHADER_TEMPLATE_DEPLOY_KEY': 'synthetic test key'}, clear=True), patch.object(subprocess, 'run', side_effect=git):
+                    with self.assertRaises(subprocess.CalledProcessError if failure == 'fetch' else ValueError):
+                        fetcher.fetch()
+                self.assertFalse((folder / 'template.bin').exists())
+                self.assertFalse((root / 'shader-template-deploy-key').exists())
+
     def test_verified_payload_and_failed_hash_both_remove_key(self):
         for valid in (True, False):
             with self.subTest(valid=valid), tempfile.TemporaryDirectory() as tmp:

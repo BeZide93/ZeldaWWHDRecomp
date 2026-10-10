@@ -11,6 +11,16 @@ from prepare_python import write_entry, verified_download, runtime_fixture_sourc
 
 
 class ResourceIdentityTests(unittest.TestCase):
+    def test_optional_template_asset_missing_or_synthetic(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / 'tools/recomp').mkdir(parents=True)
+            template = root / 'tools/shadercache/template.bin'
+            self.assertNotIn(template, source_files(root))
+            template.parent.mkdir(parents=True)
+            template.write_bytes(b'synthetic asset selection only')
+            self.assertIn(template, source_files(root))
+
     def test_installer_sibling_is_bundled_when_present(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
