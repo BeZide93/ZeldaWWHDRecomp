@@ -45,6 +45,7 @@ function(wwhd_windows_resources target description original kind)
   endif()
   set(rc "${CMAKE_BINARY_DIR}/generated/${target}.rc")
   configure_file("${CMAKE_SOURCE_DIR}/cmake/windows/app.rc.in" "${rc}" @ONLY)
+  set_source_files_properties("${rc}" PROPERTIES OBJECT_DEPENDS "${manifest}")
   target_sources(${target} PRIVATE "${rc}")
 endfunction()
 
