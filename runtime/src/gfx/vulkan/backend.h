@@ -6,6 +6,7 @@
 #endif
 #include <atomic>
 #include <array>
+#include <deque>
 #include <cstdint>
 #include <memory>
 #include <functional>
@@ -16,6 +17,9 @@
 #include "api.h"
 #include "buffer_cache_core.h"
 namespace gfxvk {
+class DeferredCommands;
+bool begin_exact_preparation();
+void drain_pending_guest_pipelines();
 struct Buffer { ResourceUse use; VkBuffer buffer=VK_NULL_HANDLE; VkDeviceMemory memory=VK_NULL_HANDLE; void* mapped=nullptr; VkDeviceSize size=0;
                 VkMemoryPropertyFlags properties=0; /* of the memory type create_buffer chose */ };
 struct UploadSlice { VkBuffer buffer=VK_NULL_HANDLE; VkDeviceSize offset=0,size=0; void* mapped=nullptr; };
@@ -177,6 +181,8 @@ struct Renderer {
   std::array<GpuScope,maxGpuScopes> gpuScopes{};
   uint32_t gpuScopeCount=0,activeRenderScope=UINT32_MAX;
   bool pending=false;
+  bool retainedUnsubmitted=false;
+  DeferredCommands* deferredOwner=nullptr;
   uint64_t serial=0; // Submission order on the single graphics queue.
   std::vector<UploadBlock> uploadBlocks;
   std::vector<std::function<void()>> completions;
@@ -184,7 +190,7 @@ struct Renderer {
   std::vector<RetiredImage> garbageImages;
   std::vector<bufcache::Region> garbageCacheRegions;
  };
- std::array<Submission,4> submissions{};
+ std::deque<Submission> submissions=std::deque<Submission>(4);
  size_t activeSubmission=0;
  Screen tv,drc;
  std::unordered_multimap<uint32_t,std::unique_ptr<Surface>> surfaces;

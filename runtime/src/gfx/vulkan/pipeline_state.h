@@ -38,6 +38,12 @@ class GraphicsPipelineState {
     return {data, data + count};
   }
 public:
+  // Mutate only the owned stage array; module lifetime belongs to the job owner.
+  void set_stage_module(uint32_t index, VkShaderModule module) {
+    if(index >= stages.size()) throw std::out_of_range("pipeline shader stage index");
+    if(!module) throw std::invalid_argument("null pipeline shader module");
+    stages[index].module = module;
+  }
   explicit GraphicsPipelineState(const VkGraphicsPipelineCreateInfo& source)
       : info(source) {
     if (source.sType != VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO ||

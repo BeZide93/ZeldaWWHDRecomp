@@ -1,6 +1,9 @@
 // Real Latte microcode -> Cemu GLSL -> SPIR-V for the Vulkan backend.
 #include "shaders.h"
 #include "shader_compiler.h"
+#include "shader_translation.h"
+#include "shader_binary.h"
+#include "worker_metrics.h"
 #include "backend.h"
 #include "headstart.h"
 #include "stutter_trace.h"
@@ -28,6 +31,7 @@
 #include <chrono>
 #include <mutex>
 #include <future>
+#include <thread>
 #include <unordered_map>
 
 LatteDecompilerShader* FinishDecompiledShader(LatteDecompilerOutput_t& output);
@@ -37,6 +41,31 @@ LatteFetchShader* LatteShaderRecompiler_createFetchShader(LatteFetchShader::Cach
 void log_msg(const char* fmt, ...);  // runtime.h (not included here: the Cemu headers)
 namespace gfxvk::vk {
 using Latte::REGADDR;
+// Only this detached CPU result is shared with pipeline workers. Shader objects,
+// cache maps, counters and disk-cache publication stay on the render thread.
+bool shader_binary_ready(const std::shared_ptr<ShaderBinary>& binary) {
+    return !binary || binary->ready();
+}
+std::vector<uint32_t> shader_binary_words(const std::shared_ptr<ShaderBinary>& binary) {
+    if (!binary) throw std::runtime_error("missing shader binary prerequisite");
+    auto result = binary->get();
+    if (result.words.empty() || !result.error.empty())
+        throw std::runtime_error(result.error.empty() ? "shader compilation produced no SPIR-V" : result.error);
+    return std::move(result.words);
+}
+std::vector<uint32_t> shader_binary_words_exact(const std::shared_ptr<ShaderBinary>& binary, uint64_t frame) {
+    std::exception_ptr presentationError;
+    while (!shader_binary_ready(binary)) {
+        if (frame != ~uint64_t{0} && !presentationError) try {
+            begin_pipeline_pending_frame();
+            present_completed_frame_while_pipeline_pending();
+        } catch (...) { presentationError = std::current_exception(); }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    auto words = shader_binary_words(binary);
+    if (presentationError) std::rethrow_exception(presentationError);
+    return words;
+}
 namespace {
 std::unordered_map<uint64_t, std::unique_ptr<Shader>> shaders;
 std::unordered_map<uint64_t, LatteFetchShader*> fetchShaders;
@@ -500,10 +529,51 @@ bool same_output(const Shader& a, const Shader& b) {
            !std::memcmp(&a.uniforms, &b.uniforms, sizeof a.uniforms) &&
            !std::memcmp(&a.descriptorRanks, &b.descriptorRanks, sizeof a.descriptorRanks);
 }
+// A translation job owns every byte read by the legacy decompiler. Fetch
+// groups contain interior pointers, so a shallow fetch copy is insufficient.
+struct TranslationInput {
+    std::array<uint32_t, gx2::kNumRegs> regs;
+    std::vector<uint8_t> program;
+    LatteFetchShader fetch;
+    std::vector<std::vector<LatteParsedFetchShaderAttribute>> attributes;
+    bool hasFetch = false;
+    TranslationInput(const uint32_t* sourceRegs, uint32_t address, uint32_t size,
+                     const LatteFetchShader* sourceFetch) {
+        std::copy_n(sourceRegs, regs.size(), regs.begin());
+        const auto* bytes = static_cast<const uint8_t*>(ppc_ptr(address));
+        program.assign(bytes, bytes + size);
+        if (!sourceFetch) return;
+        hasFetch = true;
+        fetch.key = sourceFetch->key;
+        fetch.attributeBufferMask = sourceFetch->attributeBufferMask;
+        fetch.vkPipelineHashFragment = sourceFetch->vkPipelineHashFragment;
+        fetch.mtlFetchVertexManually = sourceFetch->mtlFetchVertexManually;
+        fetch.m_cacheHash = sourceFetch->m_cacheHash;
+        fetch.m_isRegistered = false;
+        attributes.reserve(sourceFetch->bufferGroups.size() + sourceFetch->bufferGroupsInvalid.size());
+        auto copyGroups = [&](const auto& source, auto& destination) {
+            destination.reserve(source.size());
+            for (const auto& group : source) {
+                if (group.attribCount < 0 || (group.attribCount && !group.attrib))
+                    throw std::runtime_error("invalid fetch translation snapshot");
+                attributes.emplace_back();
+                auto& owned = attributes.back();
+                if (group.attribCount) owned.assign(group.attrib, group.attrib + group.attribCount);
+                destination.push_back(group);
+                destination.back().attrib = owned.data();
+            }
+        };
+        copyGroups(sourceFetch->bufferGroups, fetch.bufferGroups);
+        copyGroups(sourceFetch->bufferGroupsInvalid, fetch.bufferGroupsInvalid);
+    }
+};
+std::mutex decompilerMutex;
 // Latte program -> GLSL and its binding metadata (no SPIR-V). Also used by the verify mode, which
 // translates again under the current registers and compares.
 bool decompile(Shader& shader, const uint32_t* regs, bool vertex, LatteFetchShader* fetch,
-               uint32_t address, uint32_t size, uint64_t base, bool packReplacement, const PsLink& link) {
+               uint32_t address, uint32_t size, uint64_t base, bool packReplacement, const PsLink& link,
+               uint8_t* program) {
+    std::lock_guard translationLock(decompilerMutex);
     if (!g_renderer || g_renderer->GetType() != RendererAPI::Vulkan) {
         shader.error = "Vulkan renderer was not selected before shader translation"; return false;
     }
@@ -523,16 +593,16 @@ bool decompile(Shader& shader, const uint32_t* regs, bool vertex, LatteFetchShad
     options.strictMul = strictMul;
     uint64_t packBase=0;
     if(mods::cemu::has_shaders()) {
-        packBase=cemu_pack_hash::base(ppc_ptr(address),size,regs,vertex,fetch);
+        packBase=cemu_pack_hash::base(program,size,regs,vertex,fetch);
         options.legacyGraphicPackUniforms=!vertex&&mods::cemu::legacy_pixel_uniforms(packBase);
     }
     const uint64_t decompilerBase=mods::cemu::has_shaders()?packBase:base;
-    if (!vertex) options.areaSampledTextures = ::gfx::area_sample::units_for_pixel_shader(ppc_ptr(address), size);
+    if (!vertex) options.areaSampledTextures = ::gfx::area_sample::units_for_pixel_shader(program, size);
     LatteDecompilerOutput_t output{};
     if (vertex) LatteDecompiler_DecompileVertexShader(decompilerBase, const_cast<uint32_t*>(regs),
-        ppc_ptr(address), size, fetch, options, &output);
+        program, size, fetch, options, &output);
     else LatteDecompiler_DecompilePixelShader(decompilerBase, const_cast<uint32_t*>(regs),
-        ppc_ptr(address), size, options, &output);
+        program, size, options, &output);
     if (!output.shader || output.shader->hasError || !output.shader->strBuf_shaderSource) {
         free_decompiler(output.shader); shader.error = "Latte GLSL translation failed"; return false;
     }
@@ -542,7 +612,7 @@ bool decompile(Shader& shader, const uint32_t* regs, bool vertex, LatteFetchShad
         free_decompiler(output.shader);
         options.areaSampledTextures = 0;
         output = LatteDecompilerOutput_t{};
-        LatteDecompiler_DecompilePixelShader(decompilerBase, const_cast<uint32_t*>(regs), ppc_ptr(address), size, options, &output);
+        LatteDecompiler_DecompilePixelShader(decompilerBase, const_cast<uint32_t*>(regs), program, size, options, &output);
         if (!output.shader || output.shader->hasError || !output.shader->strBuf_shaderSource) {
             free_decompiler(output.shader); shader.error = "Latte GLSL translation failed"; return false;
         }
@@ -589,6 +659,52 @@ bool decompile(Shader& shader, const uint32_t* regs, bool vertex, LatteFetchShad
     }
     return true;
 }
+bool translate_owned(Shader& shader, const uint32_t* regs, bool vertex,
+                     LatteFetchShader* fetch, uint32_t address, uint32_t size,
+                     uint64_t base, bool packReplacement, const PsLink& link,
+                     uint64_t frame, uint64_t key) {
+    auto input = std::make_shared<TranslationInput>(regs, address, size, fetch);
+    auto work = [&, input, vertex, address, size, base, packReplacement, link, frame, key] {
+        const auto cpu = stutter::trace().enabled() ? stutter::thread_cpu_now() : 0;
+        const auto start = stutter::now();
+        // Never let a borrowed fetch pointer escape the owned job, including
+        // a translation or diagnostic allocation exception.
+        struct FetchLease {
+            Shader& shader;
+            ~FetchLease() { if (shader.dec) shader.dec->compatibleFetchShader = nullptr; }
+        } lease{shader};
+        try {
+            const bool ok = decompile(shader, input->regs.data(), vertex,
+                input->hasFetch ? &input->fetch : nullptr, address, size, base,
+                packReplacement, link, input->program.data());
+            stutter::trace().add("shader_translation", frame, key, start, stutter::now(),
+                ok ? 0 : -1, stutter::cpu_elapsed(cpu));
+        } catch (...) {
+            free_decompiler(shader.dec);
+            shader.dec = nullptr;
+            throw;
+        }
+    };
+    const char* option = std::getenv("WWHD_VK_ASYNC_TRANSLATION");
+    if (option && !std::strcmp(option, "0")) work();
+    else {
+        auto done = submit_shader_translation(work);
+        std::exception_ptr presentationError;
+        const auto requested = stutter::now();
+        while (done.wait_for(std::chrono::milliseconds(1)) != std::future_status::ready) {
+            if (frame != ~uint64_t{0} && !presentationError) try {
+                begin_pipeline_pending_frame();
+                present_completed_frame_while_pipeline_pending();
+            } catch (...) { presentationError = std::current_exception(); }
+        }
+        done.get();
+        stutter::trace().add("translation_wait", frame, key, requested, stutter::now(),
+            shader.dec ? 0 : -1);
+        if (presentationError) std::rethrow_exception(presentationError);
+    }
+    if (shader.dec) shader.dec->compatibleFetchShader = fetch;
+    return shader.dec && shader.error.empty();
+}
 std::unordered_map<uint64_t, uint64_t> verifiedKeys;  // legacy key -> full narrow key
 void first_difference(const std::string& a, const std::string& b, std::string& left, std::string& right) {
     size_t at = 0;
@@ -618,7 +734,7 @@ void verify_key(const uint32_t* regs, bool vertex, LatteFetchShader* fetch, uint
     auto started = std::chrono::steady_clock::now();
     Shader reference;
     reference.vertex = vertex;
-    bool built = decompile(reference, regs, vertex, fetch, address, size, base, false, link);
+    bool built = translate_owned(reference, regs, vertex, fetch, address, size, base, false, link, ~uint64_t{0}, key);
     ++stats.verifyChecks;
     const std::string& translated = shader.translatedGlsl.empty() ? shader.glsl : shader.translatedGlsl;
     if (!built || reference.glsl != translated ||
@@ -639,7 +755,11 @@ void verify_key(const uint32_t* regs, bool vertex, LatteFetchShader* fetch, uint
 }
 }
 
-void select_renderer() { g_renderer = std::make_unique<VulkanRenderer>(); }
+void select_renderer() {
+    finish_shader_translation_worker();
+    std::lock_guard lock(decompilerMutex);
+    g_renderer = std::make_unique<VulkanRenderer>();
+}
 
 std::vector<uint32_t> compile_glsl(const std::string& source, bool vertex, std::string* error) {
     auto result = compile_shader(source, vertex ? ShaderStage::Vertex : ShaderStage::Fragment,
@@ -733,8 +853,48 @@ LatteFetchShader* get_fetch_shader(const uint32_t* regs, uint64_t* keyOut, uint6
     return remember(fetch);
 }
 
+namespace {
+std::vector<Shader*> pendingShaderRecords;
+std::unordered_map<uint64_t, std::pair<std::string, std::weak_ptr<ShaderBinary>>> pendingBinarySources;
+void publish_shader_binary(Shader& shader, uint64_t frame) {
+    if (!shader.binary) return;
+    auto binary = shader.binary;
+    auto result = binary->get();
+    shader.spirv = std::move(result.words);
+    shader.error = std::move(result.error);
+    if (!binary->accounted) {
+        binary->accounted = true;
+        ++stats.spirvCompiles;
+        stats.spirvCompileNs += result.compileNs;
+    }
+    const auto key = cache_checksum(reinterpret_cast<const uint8_t*>(shader.glsl.data()), shader.glsl.size()) ^
+        cache_fingerprint() ^ (shader.vertex ? 0x9E3779B97F4A7C15ull : 0xD1B54A32D192ED03ull);
+    auto cached = diskShaders.find(key);
+    if (shader.glsl.size() <= maxSourceBytes && cache_spirv_valid(shader.spirv) &&
+        diskShaders.size() < maxCacheEntries) {
+        const size_t oldBytes = cached == diskShaders.end() ? 0 :
+            20 + cached->second.source.size() + cached->second.words.size() * 4;
+        const size_t newBytes = 20 + shader.glsl.size() + shader.spirv.size() * 4;
+        if (newBytes <= maxCacheBytes - (diskBytes - oldBytes)) {
+            diskShaders.insert_or_assign(key, DiskShader{shader.glsl, shader.spirv, shader.vertex, false});
+            diskBytes = diskBytes - oldBytes + newBytes;
+            ++diskRevision; diskDirty = !diskPath.empty(); diskChangedFrame = frame;
+        }
+    }
+    shader.binary.reset();
+}
+void poll_shader_binaries(uint64_t frame, bool drain = false) {
+    size_t retained = 0;
+    for (auto* shader : pendingShaderRecords) {
+        if (drain || shader_binary_ready(shader->binary)) publish_shader_binary(*shader, frame);
+        else pendingShaderRecords[retained++] = shader;
+    }
+    pendingShaderRecords.resize(retained);
+}
+}
 Shader* translate(const uint32_t* regs, bool vertex, LatteFetchShader* fetch, uint64_t fsKey,
                   uint64_t frame, uint64_t stateGeneration, const Shader* linkedVs) {
+    poll_shader_binaries(frame);
     ++stats.lookups;
     auto& last = lastShaders[vertex ? 0 : 1];
     uint32_t primitive = regs[REGADDR::VGT_PRIMITIVE_TYPE] & 0x3F;
@@ -797,10 +957,8 @@ Shader* translate(const uint32_t* regs, bool vertex, LatteFetchShader* fetch, ui
     Shader* shader = owned.get();
     shader->vertex = vertex;
     shader->kind = gfx::program_kind(ppc_ptr(address), size, vertex);
-    const auto decompileStart = stutter::trace().enabled() ? stutter::now() : 0;
-    const bool decompiled = decompile(*shader, regs, vertex, fetch, address, size, base, true, link);
-    if (decompileStart) stutter::trace().add("shader_translation", frame, linkage,
-        decompileStart, stutter::now(), decompiled ? 0 : -1);
+    const bool decompiled = translate_owned(*shader, regs, vertex, fetch, address, size,
+        base, true, link, frame, linkage);
     if (!decompiled) {
         // Failures are per linkage: the variant words need the program's analysis.
         shader->key = shader->pipelineId = linkage ^ 0xFA17EDull;
@@ -863,50 +1021,34 @@ Shader* translate(const uint32_t* regs, bool vertex, LatteFetchShader* fetch, ui
         if(cached->second.fromDisk) ++stats.diskHits;
         else ++stats.spirvReuseHits;
     } else {
-        // The exact draw remains ordered while only owned GLSL enters the
-        // compiler. Offline warming has no published frame to service.
-        auto compiled = compile_shader(shader->glsl,
-            vertex ? ShaderStage::Vertex : ShaderStage::Fragment, frame, key,
-            frame == ~uint64_t{0} ? std::function<void()>{} : std::function<void()>{[] {
-                begin_pipeline_pending_frame();
-                present_completed_frame_while_pipeline_pending();
-            }}, async_shaders_enabled());
-        shader->spirv = std::move(compiled.words);
-        shader->error = std::move(compiled.error);
-        ++stats.spirvCompiles;
-        stats.spirvCompileNs += compiled.compileNs;
-        if(shader->glsl.size()<=maxSourceBytes &&
-           cache_spirv_valid(shader->spirv) && diskShaders.size()<maxCacheEntries) {
-            size_t oldBytes=cached==diskShaders.end() ? 0 :
-                20+cached->second.source.size()+cached->second.words.size()*4;
-            size_t newBytes=20+shader->glsl.size()+shader->spirv.size()*4;
-            if(newBytes<=maxCacheBytes-(diskBytes-oldBytes)) {
-                diskShaders.insert_or_assign(spirvKey,DiskShader{shader->glsl,shader->spirv,vertex,false});
-                diskBytes=diskBytes-oldBytes+newBytes;
-                ++diskRevision;
-                diskDirty=!diskPath.empty();
-                diskChangedFrame=frame;
+        auto pending = pendingBinarySources.find(spirvKey);
+        if (pending != pendingBinarySources.end() && pending->second.first == shader->glsl)
+            shader->binary = pending->second.second.lock();
+        if (shader->binary) ++stats.spirvReuseHits;
+        else {
+            std::optional<ShaderCompileTicket> ticket;
+            while (!(ticket = request_shader_compile(shader->glsl,
+                vertex ? ShaderStage::Vertex : ShaderStage::Fragment, frame, key,
+                async_shaders_enabled()))) {
+                if (frame != ~uint64_t{0}) {
+                    begin_pipeline_pending_frame();
+                    present_completed_frame_while_pipeline_pending();
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
             }
+            shader->binary = std::make_shared<ShaderBinary>(std::move(*ticket));
+            pendingBinarySources.insert_or_assign(spirvKey,
+                std::make_pair(shader->glsl, std::weak_ptr<ShaderBinary>(shader->binary)));
         }
+        if (frame == ~uint64_t{0} || !async_shaders_enabled()) {
+            (void)shader_binary_words_exact(shader->binary, frame);
+            publish_shader_binary(*shader, frame);
+        } else pendingShaderRecords.push_back(shader);
     }
-    // Pipelines need only the module and its resource mapping: shaders whose SPIR-V and mapping
-    // are identical (their GLSL can still differ, e.g. in comments) share pipelines; their
-    // draw-time metadata (uniform remapping, samplers) stays their own.
+    // Stable before SPIR-V publication, and identical on cold/warm runs. Never
+    // mutate a pipeline key when a pending compiler result becomes available.
+    // Exact GLSL+metadata aliases above still share the same Shader object.
     shader->pipelineId = shader->key;
-    if (!shader->spirv.empty()) {
-        uint64_t module = hash_bytes(shader->spirv.data(), shader->spirv.size() * 4, vertex ? 0x77 : 0x88);
-        module = hash_bytes(&shader->mapping, sizeof shader->mapping, module);
-        bool shared = false;
-        for (auto [it, end] = shadersByModule.equal_range(module); it != end; ++it)
-            if (it->second->spirv == shader->spirv &&
-                !std::memcmp(&it->second->mapping, &shader->mapping, sizeof shader->mapping)) {
-                shader->pipelineId = it->second->pipelineId;
-                ++stats.moduleAliases;
-                shared = true;
-                break;
-            }
-        if (!shared) shadersByModule.emplace(module, shader);
-    }
     if (!shader->error.empty()) fprintf(stderr, "[vulkan] shader %08X: %s\n", address, shader->error.c_str());
     return shader;
 }
@@ -987,7 +1129,9 @@ bool finish_disk_save(bool wait) {
 bool shader_cache_dirty() { return diskDirty; }
 uint64_t shader_cache_changed_frame() { return diskChangedFrame; }
 bool save_shader_cache() {
+    finish_shader_translation_worker();
     finish_shader_compiler();
+    poll_shader_binaries(~uint64_t{0}, true);
     save_headstart_recording();
     // Explicit tools/shutdown contract is synchronous: join the old immutable
     // snapshot, then save any revisions compiled while that job was running.
@@ -1004,6 +1148,7 @@ bool save_shader_cache() {
     } catch(...) { return false; }
 }
 void checkpoint_shader_cache(uint64_t frame) {
+    poll_shader_binaries(frame);
     finish_disk_save(false);
     if(diskSaveJob.valid() || !diskDirty || diskPath.empty() || diskChangedFrame==~uint64_t{0} ||
        frame<diskChangedFrame || frame-diskChangedFrame<120 ||
@@ -1086,8 +1231,11 @@ void reset_shader_memoization() {
 }
 
 void clear_shader_cache() {
+    finish_shader_translation_worker();
     finish_shader_compiler();
     for (auto& [key, shader] : shaders) free_decompiler(shader->dec);
+    pendingShaderRecords.clear();
+    pendingBinarySources.clear();
     shaders.clear();
     variants.clear();
     programUses.clear();

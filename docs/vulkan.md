@@ -245,6 +245,17 @@ its cost is recorded as `bc_decode_compute_pipeline` when tracing is enabled.
 `WWHD_VK_ASYNC_PIPELINES=0` selects diagnostic synchronous graphics creation.
 Recipe files contain game-derived shader code and must stay local.
 
+Every demanded draw remains Exact. While a pipeline is pending, owned native
+commands can be prepared ahead of it. Ordered emission waits for the exact
+pipeline and emits every command. Boundaries such as readback, presentation and
+resource retirement drain the retained commands first. This overlap can shorten
+some waits; it does not guarantee removal of cold shader stutter.
+
+Cemu informed the worker, cache and startup precompile design; no implementation
+code was copied. Cemu can skip pending draws using renderer heuristics. This
+renderer always waits for demanded state and draws every object. Cemu shader and
+pipeline cache files are never inputs to this workflow.
+
 Vulkan also accepts the locally built `tools/shaderprep.py` shader head start in
 offline `--warm-shaders` mode. `WWHD_VK_RECIPE_RECORD=<file>` records the GX2 shader
 microcode, fetch programs, sparse register states and exact Vulkan pipeline recipes; it is not
@@ -253,12 +264,26 @@ or a scripted test endpoint. Build known shaders and pipelines with `--max 0`, t
 run `--warm-shaders` to populate the Vulkan SPIR-V/device caches before playing.
 `--no-pipelines` builds shaders alone. The startup worker also reads compatible
 pipeline records directly from the head start while the title screen runs.
-Metal pipeline records are skipped explicitly. On-demand GLSL-to-SPIR-V compilation
-uses a CPU-only worker with owned source strings and bounded input size/queue.
-`WWHD_VK_ASYNC_SHADERS=0` selects diagnostic inline compilation. Guest shader
-misses retain their exact draw and can repeat completed scans while waiting;
-Latte decompilation and cache metadata still have render-thread costs. Speculative
-startup pipelines yield between jobs while demand shader/pipeline work is active.
+Metal pipeline records are skipped explicitly. Guest Latte-to-GLSL translation uses
+one worker with owned program bytes, registers, fetch attributes and vertex/pixel
+linkage. Its decompiler calls are serialized because the adapted decompiler has
+shared input-table state. The render thread still waits exactly for translation
+metadata: descriptor bindings and vertex inputs must be known
+before preparing a draw. Completed scans can repeat during that wait, so moving
+translation to a worker does not by itself remove a frozen picture.
+
+Once metadata is published, CPU-only GLSL-to-SPIR-V jobs own their source strings
+and use bounded input size/queue. Pipeline demand jobs retain those binary results
+and create native shader modules and pipelines on their worker. Owned command
+recording permits later CPU preparation while compilation runs. Ordered emission
+waits for every demanded pipeline and emits every draw with its exact state.
+Graphics-pack replacement interface validation can compile the original and
+replacement binaries inside translation before metadata is published, retaining
+that Exact wait. `WWHD_VK_ASYNC_TRANSLATION=0`, `WWHD_VK_ASYNC_SHADERS=0` and
+`WWHD_VK_ASYNC_PIPELINES=0` select diagnostic synchronous translation, SPIR-V
+compilation and graphics creation respectively. Speculative startup pipelines
+yield between jobs while demand shader/pipeline work is active. These changes do
+not establish a benchmark improvement or resolve issue #68.
 Head-start coverage depends on the locally recorded scene states. The README contains
 [Windows/Linux commands](../README.md#vulkan-shader-head-start-on-windows-and-linux).
 
@@ -286,7 +311,11 @@ the mask of those inputs and their default values (`ps_link`). A declared input 
 writes made the Adreno driver refuse the pipeline (PR #30, the boat ride after the sword and shield).
 Render-target formats, samplers, buffer addresses and units the program does not sample
 are not in the key. Keys that still translate to an identical shader (GLSL, resource
-mapping, uniform offsets, descriptor ranks) share one shader and its pipelines.
+mapping, uniform offsets, descriptor ranks) share one shader and its pipelines. Pipeline
+identity is fixed from that exact translation key before SPIR-V publication and
+stays the same on cold and warm cache paths. Distinct translations are no longer
+merged solely because their final SPIR-V and mappings happen to match; this can
+increase native pipeline creation calls.
 `WWHD_VK_SHADER_KEY_VERIFY=1` also computes the previous, wider key on every lookup and,
 once per distinct wider key, translates again under the current registers and compares
 the result with the shader the narrow key returned; any difference is logged as

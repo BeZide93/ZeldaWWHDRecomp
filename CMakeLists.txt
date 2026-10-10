@@ -203,7 +203,9 @@ endif()
 set_source_files_properties(${GX2_SOURCES} ${GFX_SOURCES} PROPERTIES COMPILE_OPTIONS "-include;${CEMU_DIR}/cemu_shim.h")
 set_source_files_properties(runtime/src/gfx/vulkan/pipeline_recipe.cpp PROPERTIES COMPILE_OPTIONS "")
 set_source_files_properties(runtime/src/gfx/vulkan/pipeline_demand.cpp PROPERTIES COMPILE_OPTIONS "")
-set_source_files_properties(runtime/src/gfx/vulkan/shader_compiler.cpp PROPERTIES COMPILE_OPTIONS "")
+set_source_files_properties(runtime/src/gfx/vulkan/shader_translation.cpp
+    runtime/src/gfx/vulkan/shader_compiler.cpp
+    runtime/src/gfx/vulkan/deferred_commands.cpp PROPERTIES COMPILE_OPTIONS "")
 if(ANDROID)
   # Android: SDLActivity loads the game as libmain.so and calls its SDL_main (android/)
   add_library(wwhd SHARED ${RUNTIME_SOURCES} ${GX2_SOURCES} ${GFX_SOURCES} ${MOD_GFX_SOURCES} ${IMGUI_METAL})
@@ -452,6 +454,27 @@ add_executable(snapshot_cache_test runtime/tools/snapshot_cache_test.cpp)
 target_include_directories(snapshot_cache_test PRIVATE runtime/src)
 target_compile_options(snapshot_cache_test PRIVATE -UNDEBUG)
 if(WWHD_HAS_VULKAN)
+  add_executable(deferred_commands_test runtime/tools/deferred_commands_test.cpp
+      runtime/src/gfx/vulkan/deferred_commands.cpp)
+  target_include_directories(deferred_commands_test PRIVATE runtime/src ${Vulkan_INCLUDE_DIRS})
+  target_compile_definitions(deferred_commands_test PRIVATE VK_NO_PROTOTYPES)
+  target_compile_options(deferred_commands_test PRIVATE -UNDEBUG)
+  target_link_libraries(deferred_commands_test PRIVATE Threads::Threads)
+  add_test(NAME deferred_commands_owned_emission COMMAND deferred_commands_test)
+  add_executable(shader_translation_test runtime/tools/shader_translation_test.cpp
+    runtime/src/gfx/vulkan/shader_translation.cpp)
+  target_include_directories(shader_translation_test PRIVATE runtime/src)
+  target_compile_options(shader_translation_test PRIVATE -UNDEBUG)
+  target_link_libraries(shader_translation_test PRIVATE Threads::Threads)
+  add_test(NAME shader_translation_worker COMMAND shader_translation_test)
+  add_executable(shader_binary_test runtime/tools/shader_binary_test.cpp
+      runtime/src/gfx/vulkan/shader_compiler.cpp)
+  target_include_directories(shader_binary_test PRIVATE runtime/src)
+  target_compile_options(shader_binary_test PRIVATE -UNDEBUG)
+  target_link_libraries(shader_binary_test PRIVATE Threads::Threads
+      glslang::glslang glslang::SPIRV glslang::glslang-default-resource-limits)
+  add_test(NAME shader_binary_shared_result COMMAND shader_binary_test)
+  set_tests_properties(shader_binary_shared_result shader_translation_worker PROPERTIES TIMEOUT 30)
   add_executable(shader_compiler_test runtime/tools/shader_compiler_test.cpp
       runtime/src/gfx/vulkan/shader_compiler.cpp)
   target_include_directories(shader_compiler_test PRIVATE runtime/src)

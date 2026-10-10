@@ -1,3 +1,4 @@
+#include <string>
 #include "pipeline_recipe.h"
 #include <bit>
 #include <cmath>

@@ -17,6 +17,8 @@
 #include <jni.h>
 #endif
 #include "backend.h"
+#include "deferred_commands.h"
+#include "deferred_dispatch.h"
 #include "bc_decode.h"
 #include "android_driver.h"
 #include "stutter_trace.h"
@@ -368,6 +370,7 @@ void checkpoint_pipeline_cache() try {
 void save_pipeline_cache() try {
   // Explicit shutdown/checkpoint waits before _Exit, then persists any newer
   // revision created while the periodic job was running.
+  drain_pending_guest_pipelines();
   save_pipeline_recipes();
   if (finish_pipeline_demand(R.pipelineCache)) R.pipelineCacheDirty = true;
   if (merge_pipeline_worker_cache(R.pipelineCache)) R.pipelineCacheDirty = true;
@@ -606,8 +609,8 @@ static void begin_overlay_gpu_queries(VkCommandBuffer cmd, Renderer::Submission&
     }
     q.frame = R.frame; q.token = token; q.pending = true;
     submission.perfQuery = i;
-    vkCmdResetQueryPool(cmd, q.pool, 0, 2);
-    vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, q.pool, 0);
+    record::vkCmdResetQueryPool(cmd, q.pool, 0, 2);
+    record::vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, q.pool, 0);
     perf::timestamp_write();
     return;
   }
@@ -759,9 +762,9 @@ VkCommandBuffer command_buffer() {
     begin_overlay_gpu_queries(R.cmd, R.submissions[R.activeSubmission]);
     if (R.gpuTimestampsEnabled) {
       auto& slot = R.submissions[R.activeSubmission];
-      vkCmdResetQueryPool(R.cmd, slot.timestampQueries, 0,
+      record::vkCmdResetQueryPool(R.cmd, slot.timestampQueries, 0,
           R.gpuPassTimestampsEnabled ? 2 + 2 * Renderer::Submission::maxGpuScopes : 2);
-      vkCmdWriteTimestamp(R.cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, slot.timestampQueries, 0);
+      record::vkCmdWriteTimestamp(R.cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, slot.timestampQueries, 0);
       slot.timestampRecorded = true;
       slot.timestampFrame = R.frame;
     }
@@ -776,7 +779,7 @@ static GpuScopeToken begin_gpu_scope(const GpuScopeMetadata& metadata) {
   if(slot.gpuScopeCount==Renderer::Submission::maxGpuScopes) { ++gpuScopeTotals.dropped;return {}; }
   const uint32_t index=slot.gpuScopeCount++;
   slot.gpuScopes[index]={metadata,0,R.submissionGeneration,false};
-  vkCmdWriteTimestamp(cmd,VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,slot.timestampQueries,2+2*index);
+  record::vkCmdWriteTimestamp(cmd,VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,slot.timestampQueries,2+2*index);
   return {R.submissionGeneration,index};
 }
 static void end_gpu_scope(GpuScopeToken token) {
@@ -785,7 +788,7 @@ static void end_gpu_scope(GpuScopeToken token) {
   if(token.index>=slot.gpuScopeCount || slot.gpuScopes[token.index].ended ||
       slot.gpuScopes[token.index].generation!=token.generation) return;
   if(R.rendering) { ++gpuScopeTotals.dropped;return; }
-  vkCmdWriteTimestamp(R.cmd,VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,slot.timestampQueries,3+2*token.index);
+  record::vkCmdWriteTimestamp(R.cmd,VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,slot.timestampQueries,3+2*token.index);
   slot.gpuScopes[token.index].ended=true;
 }
 void gpu_begin_render_scope(const std::array<Surface*,8>& colors,Surface* depth,
@@ -821,7 +824,7 @@ GpuScopeToken gpu_begin_feedback_scope(const Surface& source) {
 void gpu_end_feedback_scope(GpuScopeToken token) { end_gpu_scope(token); }
 void end_encoder() {
   if (R.rendering) {
-    vkCmdEndRendering(R.cmd);
+    record::vkCmdEndRendering(R.cmd);
     R.rendering = false;
     R.passTracked = false;
     if(R.gpuPassTimestampsEnabled) {
@@ -856,7 +859,7 @@ void transition_buffer(Buffer& buffer, VkPipelineStageFlags stage, VkAccessFlags
   b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
   b.buffer = buffer.buffer;
   b.size = VK_WHOLE_SIZE;
-  vkCmdPipelineBarrier(command_buffer(), d.source, d.destination, 0, 0, nullptr, 1, &b, 0, nullptr);
+  record::vkCmdPipelineBarrier(command_buffer(), d.source, d.destination, 0, 0, nullptr, 1, &b, 0, nullptr);
 }
 void transition_image(Surface *s, VkImageLayout layout,
                       VkPipelineStageFlags stage, VkAccessFlags access) {
@@ -888,10 +891,59 @@ void transition_image(Surface *s, VkImageLayout layout,
   b.srcAccessMask = narrow_barriers() ? dependency.sourceAccess :
       (s->layout == VK_IMAGE_LAYOUT_UNDEFINED ? 0 : VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT);
   b.dstAccessMask = access;
-  vkCmdPipelineBarrier(command_buffer(), narrow_barriers() ? dependency.source :
+  record::vkCmdPipelineBarrier(command_buffer(), narrow_barriers() ? dependency.source :
       (s->layout == VK_IMAGE_LAYOUT_UNDEFINED ? VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT : VK_PIPELINE_STAGE_ALL_COMMANDS_BIT),
       stage, 0, 0, nullptr, 0, nullptr, 1, &b);
   s->layout = layout;
+}
+static VkResult initialize_submission_queries(Renderer::Submission& slot,bool passes) {
+  VkQueryPoolCreateInfo info{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
+  info.queryType=VK_QUERY_TYPE_TIMESTAMP;
+  info.queryCount=passes ? 2+2*Renderer::Submission::maxGpuScopes : 2;
+  return vkCreateQueryPool(R.device,&info,nullptr,&slot.timestampQueries);
+}
+bool begin_exact_preparation() {
+  if(!active_deferred_commands)deferred_commands().start_capture();
+  return active_deferred_commands!=nullptr;
+}
+static void destroy_unsubmitted_slot(Renderer::Submission& slot) {
+  if(slot.timestampQueries) vkDestroyQueryPool(R.device,slot.timestampQueries,nullptr);
+  const auto destroyDescriptors=reinterpret_cast<PFN_vkDestroyDescriptorPool>(vkGetDeviceProcAddr(R.device,"vkDestroyDescriptorPool"));
+  const auto destroyFence=reinterpret_cast<PFN_vkDestroyFence>(vkGetDeviceProcAddr(R.device,"vkDestroyFence"));
+  const auto destroyCommands=reinterpret_cast<PFN_vkDestroyCommandPool>(vkGetDeviceProcAddr(R.device,"vkDestroyCommandPool"));
+  if(slot.descriptorPool && destroyDescriptors) destroyDescriptors(R.device,slot.descriptorPool,nullptr);
+  if(slot.fence && destroyFence) destroyFence(R.device,slot.fence,nullptr);
+  if(slot.commandPool && destroyCommands) destroyCommands(R.device,slot.commandPool,nullptr);
+}
+static VkResult try_initialize_submission(Renderer::Submission& slot) {
+  VkCommandPoolCreateInfo pool{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
+  pool.queueFamilyIndex=R.queueFamily;
+  pool.flags=VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+  VkResult result=vkCreateCommandPool(R.device,&pool,nullptr,&slot.commandPool);
+  if(result!=VK_SUCCESS)return result;
+  VkCommandBufferAllocateInfo ca{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+  ca.commandPool=slot.commandPool;ca.level=VK_COMMAND_BUFFER_LEVEL_PRIMARY;ca.commandBufferCount=1;
+  result=vkAllocateCommandBuffers(R.device,&ca,&slot.cmd);
+  if(result!=VK_SUCCESS)return result;
+  VkFenceCreateInfo fi{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};fi.flags=VK_FENCE_CREATE_SIGNALED_BIT;
+  result=vkCreateFence(R.device,&fi,nullptr,&slot.fence);
+  if(result!=VK_SUCCESS)return result;
+  VkDescriptorPoolSize sizes[]={{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,65536},
+    {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,32768},{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,32768},
+    {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,65536}};
+  VkDescriptorPoolCreateInfo dp{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+  dp.maxSets=32768;dp.poolSizeCount=std::size(sizes);dp.pPoolSizes=sizes;
+  return vkCreateDescriptorPool(R.device,&dp,nullptr,&slot.descriptorPool);
+}
+void initialize_submission(Renderer::Submission& slot) {
+  vk_check(try_initialize_submission(slot),"initialize submission slot");
+}
+static void resolve_retained_submission(Renderer::Submission& slot) {
+  if(slot.retainedUnsubmitted) {
+    if(!slot.deferredOwner)throw std::logic_error("retained submission has no command owner");
+    slot.deferredOwner->finish_exact();
+    if(slot.retainedUnsubmitted)throw std::logic_error("submission boundary was not emitted");
+  }
 }
 static void cleanup_submission(Renderer::Submission& slot) {
   for (auto& complete : slot.completions) complete();
@@ -924,6 +976,7 @@ static void cleanup_submission(Renderer::Submission& slot) {
   ++R.submissionGeneration;
 }
 static void retire_submission(Renderer::Submission& slot, WaitTiming& timing=submitWait) {
+  resolve_retained_submission(slot);
   if (!slot.pending) return;
   VkResult status=timed_call(fenceStatusTiming,[&] { return vkGetFenceStatus(R.device,slot.fence); });
   if (status==VK_NOT_READY) {
@@ -954,6 +1007,8 @@ static void activate_submission(size_t index) {
   R.recording=false;R.rendering=false;R.passTracked=false;
 }
 static void drain_submissions() {
+  if(active_deferred_commands)active_deferred_commands->finish_exact();
+  for(auto& slot:R.submissions)resolve_retained_submission(slot);
   // A fence signal covers earlier submissions on this same graphics queue.
   // Wait once at the newest pending fence rather than waking at each older
   // fence in ring-array order. Keep each slot's status check and fenced cleanup.
@@ -963,63 +1018,98 @@ static void drain_submissions() {
   if (newest) retire_submission(*newest);
   for (auto& slot:R.submissions) retire_submission(slot);
 }
+// Overflow is allocated only when a captured tail prevents ring reuse. Slot
+// addresses and screenshot indices stay stable; the total is strictly bounded.
+static size_t next_submission_slot() {
+  const size_t next=(R.activeSubmission+1)%R.submissions.size();
+  if(!R.submissions[next].retainedUnsubmitted)return next;
+  constexpr size_t maxRetainedSlots=16;
+  if(R.submissions.size()<maxRetainedSlots) {
+    bool appended=false;
+    try {
+      R.submissions.emplace_back();appended=true;
+      auto& slot=R.submissions.back();
+      VkResult result=try_initialize_submission(slot);
+      if(result==VK_SUCCESS && R.gpuTimestampsEnabled)
+        result=initialize_submission_queries(slot,R.gpuPassTimestampsEnabled);
+      if(result==VK_SUCCESS)return R.submissions.size()-1;
+      destroy_unsubmitted_slot(slot);R.submissions.pop_back();appended=false;
+      LOG("[vulkan deferred] overflow slot unavailable (%d); resolving Exact",int(result));
+    } catch(const std::bad_alloc&) {
+      if(appended) { destroy_unsubmitted_slot(R.submissions.back());R.submissions.pop_back(); }
+    }
+  }
+  resolve_retained_submission(R.submissions[next]);
+  return next;
+}
 static void submit(VkSemaphore wait = VK_NULL_HANDLE,
                    VkSemaphore signal = VK_NULL_HANDLE, bool asynchronous=false) {
-  if (!R.recording)
-    return;
+  if (!R.recording)return;
+  // Presentation owns externally synchronized semaphores: finish the entire
+  // ordered CPU tail before handing those semaphores to Vulkan.
+  bool externalSync=wait || signal;
+#ifdef __ANDROID__
+  externalSync=externalSync || secondarySnapshotWait || secondarySnapshotSignal;
+#endif
+  if(externalSync && active_deferred_commands)active_deferred_commands->finish_exact();
   end_encoder();
-  auto& recordingSlot = R.submissions[R.activeSubmission];
-  if (recordingSlot.perfQuery != UINT32_MAX) {
-    auto& q = overlayGpuQueries[recordingSlot.perfQuery];
-    vkCmdWriteTimestamp(R.cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, q.pool, 1);
-    perf::timestamp_write();
-    recordingSlot.perfQuery = UINT32_MAX;
-  }
-  if (recordingSlot.timestampRecorded)
-    vkCmdWriteTimestamp(R.cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-                        recordingSlot.timestampQueries, 1);
-  vk_check(timed_call(commandEndTiming,[&] { return vkEndCommandBuffer(R.cmd); }), "end command buffer");
-  vk_check(timed_call(fenceResetTiming,[&] { return vkResetFences(R.device, 1, &R.fence); }), "reset fence");
-  std::array<VkPipelineStageFlags,2> stages{VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,VK_PIPELINE_STAGE_ALL_COMMANDS_BIT};
-  std::array<VkSemaphore,2> waits{};
-  VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
-  si.commandBufferCount = 1;
-  si.pCommandBuffers = &R.cmd;
-  if(wait)waits[si.waitSemaphoreCount++]=wait;
-#ifdef __ANDROID__
-  if(secondarySnapshotWait)waits[si.waitSemaphoreCount++]=secondarySnapshotWait;
-#endif
-  si.pWaitSemaphores=waits.data();si.pWaitDstStageMask=stages.data();
-  std::array<VkSemaphore,2> signals{};
-  if(signal)signals[si.signalSemaphoreCount++]=signal;
-#ifdef __ANDROID__
-  if(secondarySnapshotSignal)signals[si.signalSemaphoreCount++]=secondarySnapshotSignal;
-#endif
-  si.pSignalSemaphores=signals.data();
-  vk_check(timed_call(queueSubmitTiming, [&] {
-    return vkQueueSubmit(R.queue, 1, &si, R.fence);
-  }), "submit graphics");
-#ifdef __ANDROID__
-  const bool isolatedSnapshotQueued=secondarySnapshotSignal && isolatedSecondary && isolatedSecondary->prepared();
-  if(isolatedSnapshotQueued)isolatedSecondary->primary_submitted();
-  secondarySnapshotSignal=secondarySnapshotWait=VK_NULL_HANDLE;
-#endif
-  R.recording=false;
   auto& slot=R.submissions[R.activeSubmission];
+  if (slot.perfQuery != UINT32_MAX) {
+    auto& q = overlayGpuQueries[slot.perfQuery];
+    record::vkCmdWriteTimestamp(R.cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, q.pool, 1);
+    perf::timestamp_write();slot.perfQuery=UINT32_MAX;
+  }
+  if (slot.timestampRecorded)
+    record::vkCmdWriteTimestamp(R.cmd,VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,slot.timestampQueries,1);
+  auto* owner=active_deferred_commands;
   static uint64_t nextSubmissionSerial=0;
-  slot.serial=++nextSubmissionSerial;
+  const auto seal=[&slot,owner]() noexcept {
+    slot.serial=++nextSubmissionSerial;
+    slot.uploadBlocks=std::move(R.uploadBlocks);
+    slot.completions=std::move(R.completions);
+    slot.garbageBuffers=std::move(R.garbageBuffers);
+    slot.garbageImages=std::move(R.garbageImages);
+    slot.garbageCacheRegions=std::move(R.garbageCacheRegions);
+    slot.retainedUnsubmitted=true;slot.deferredOwner=owner;
+    R.recording=false;
+  };
+  const size_t slotIndex=R.activeSubmission;
 #ifdef __ANDROID__
-  if(isolatedSnapshotQueued)isolatedSnapshotSubmission=std::pair{R.activeSubmission,slot.serial};
+  const auto snapshotWait=secondarySnapshotWait,snapshotSignal=secondarySnapshotSignal;
+  secondarySnapshotWait=secondarySnapshotSignal=VK_NULL_HANDLE;
 #endif
-  slot.uploadBlocks=std::move(R.uploadBlocks);
-  slot.completions=std::move(R.completions);
-  slot.garbageBuffers=std::move(R.garbageBuffers);
-  slot.garbageImages=std::move(R.garbageImages);
-  slot.garbageCacheRegions=std::move(R.garbageCacheRegions);
-  slot.pending=true;
-  if (asynchronous) {
-    activate_submission((R.activeSubmission+1)%R.submissions.size());
-  } else {
+  const auto execute=[&slot,wait,signal,slotIndex
+#ifdef __ANDROID__
+    ,snapshotWait,snapshotSignal
+#endif
+  ] {
+    // Use the sealed slot, never the aliases of a newer active recording.
+    vk_check(timed_call(commandEndTiming,[&]{return vkEndCommandBuffer(slot.cmd);}),"end command buffer");
+    vk_check(timed_call(fenceResetTiming,[&]{return vkResetFences(R.device,1,&slot.fence);}),"reset fence");
+    std::array<VkPipelineStageFlags,2> stages{VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,VK_PIPELINE_STAGE_ALL_COMMANDS_BIT};
+    std::array<VkSemaphore,2> waits{},signals{};
+    VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+    si.commandBufferCount=1;si.pCommandBuffers=&slot.cmd;
+    if(wait)waits[si.waitSemaphoreCount++]=wait;
+    if(signal)signals[si.signalSemaphoreCount++]=signal;
+#ifdef __ANDROID__
+    if(snapshotWait)waits[si.waitSemaphoreCount++]=snapshotWait;
+    if(snapshotSignal)signals[si.signalSemaphoreCount++]=snapshotSignal;
+#endif
+    si.pWaitSemaphores=waits.data();si.pWaitDstStageMask=stages.data();si.pSignalSemaphores=signals.data();
+    vk_check(timed_call(queueSubmitTiming,[&]{return vkQueueSubmit(R.queue,1,&si,slot.fence);}),"submit graphics");
+#ifdef __ANDROID__
+    if(snapshotSignal && isolatedSecondary && isolatedSecondary->prepared()) {
+      isolatedSecondary->primary_submitted();
+      isolatedSnapshotSubmission=std::pair{slotIndex,slot.serial};
+    }
+#endif
+    slot.pending=true;slot.retainedUnsubmitted=false;slot.deferredOwner=nullptr;
+  };
+  if(owner)owner->owned_boundary(seal,execute);
+  else { seal();execute(); }
+  if(asynchronous)activate_submission(next_submission_slot());
+  else {
     retire_submission(slot,wait ? presentSubmitWait : submitWait);
     activate_submission(R.activeSubmission);
   }
@@ -1032,6 +1122,7 @@ void flush_async() {
   submit(VK_NULL_HANDLE,VK_NULL_HANDLE,true);
 }
 void flush() {
+  if(active_deferred_commands)active_deferred_commands->finish_exact();
   if (!R.recording && (!R.garbageBuffers.empty() || !R.garbageImages.empty() ||
                        !R.garbageCacheRegions.empty())) command_buffer();
   submit();
@@ -1063,6 +1154,7 @@ static void retire_secondary_swapchain(bool surface);
 static bool secondary_retirement_available();
 #endif
 static void make_swapchain(Screen &s) {
+  if(active_deferred_commands)active_deferred_commands->finish_exact();
 #ifdef __ANDROID__
   if (&s == &R.tv) {
     // Primary views only reference graphics-queue work. Do not synchronize
@@ -1263,6 +1355,7 @@ static void recover_primary_surface() {
 }
 
 static void recreate_surface(Screen &s) {
+  if(active_deferred_commands)active_deferred_commands->finish_exact();
   if (!SDL_GetPointerProperty(SDL_GetWindowProperties(s.window),
                               SDL_PROP_WINDOW_ANDROID_WINDOW_POINTER, nullptr)) {
     surfaceRecreate = true;  // the new native surface is not there yet: next frame
@@ -1427,7 +1520,7 @@ static void prepare_secondary_snapshot() {
   transition_image(&snapshot,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_ACCESS_TRANSFER_WRITE_BIT);
   VkImageCopy copy{};copy.srcSubresource={VK_IMAGE_ASPECT_COLOR_BIT,0,0,1};
   copy.dstSubresource=copy.srcSubresource;copy.extent=scan->extent;
-  vkCmdCopyImage(command_buffer(),scan->image,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+  record::vkCmdCopyImage(command_buffer(),scan->image,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
       snapshot.image,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,1,&copy);
   transition_image(&snapshot,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,VK_ACCESS_SHADER_READ_BIT);
   secondaryPreparedDraw=*draw;
@@ -1763,6 +1856,7 @@ static bool screen_has_window(const Screen& s) {
   return s.window != nullptr;
 }
 static bool present(Screen &s) {
+  if(active_deferred_commands)active_deferred_commands->finish_exact();
 #ifdef __ANDROID__
   if(&s==&R.drc && isolatedSecondary) {
     if(isolatedSecondary->busy()) { ++R.secondaryPresentSkipped;return false; }
@@ -2043,17 +2137,17 @@ static bool present(Screen &s) {
     b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
     b.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
     auto cmd = command_buffer();
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+    record::vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
                          VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
                          nullptr, 1, &b);
     VkClearColorValue black{};
-    vkCmdClearColorImage(cmd, s.images[index],
+    record::vkCmdClearColorImage(cmd, s.images[index],
                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &black, 1,
                          &b.subresourceRange);
     // Clear and blit overlap the swap image. Order the two transfer writes.
     b.oldLayout = b.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
     b.srcAccessMask = b.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+    record::vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
                          VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
                          nullptr, 1, &b);
     const float ratio =
@@ -2069,14 +2163,14 @@ static bool present(Screen &s) {
     blit.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
     blit.dstOffsets[0] = {x, y, 0};
     blit.dstOffsets[1] = {x + w, y + h, 1};
-    vkCmdBlitImage(cmd, scan->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+    record::vkCmdBlitImage(cmd, scan->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                    s.images[index], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
                    &blit, filter);
     b.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
     b.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
     b.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
     b.dstAccessMask = 0;
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+    record::vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
                          VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0,
                          nullptr, 1, &b);
     s.layouts[index] = b.newLayout;
@@ -2326,6 +2420,7 @@ static void service_screenshots() {
       continue;
     }
     // a slot reused for a newer submission retired ours first
+    if(slot.retainedUnsubmitted && slot.serial==it->serial) { ++it;continue; }
     const bool done = !slot.pending || slot.serial != it->serial || vkGetFenceStatus(R.device, slot.fence) == VK_SUCCESS;
     if (!done) {
       ++it;
@@ -2429,6 +2524,7 @@ void begin_pipeline_pending_frame() {
   }
 }
 void present_completed_frame_while_pipeline_pending() {
+  if(active_deferred_commands)active_deferred_commands->finish_exact();
   const auto started = stutter::now();
   if (!completedPresentPlanValid || started < nextPipelineRepeatNs) return;
   // The current command stream stays paused at its exact draw. Submission of
@@ -2453,6 +2549,7 @@ void present_completed_frame_while_pipeline_pending() {
   }
 }
 void swap() {
+  if(active_deferred_commands)active_deferred_commands->finish_exact();
   for (Screen* s : {&R.tv, &R.drc}) if (s->buildingScanDirty) {
     s->scan.swap(s->buildingScan);
     s->scanSrgb = s->buildingScanSrgb;

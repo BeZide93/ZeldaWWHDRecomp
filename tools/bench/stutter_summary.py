@@ -37,6 +37,14 @@ def summarize(path, worst=20, frame_from=None, frame_to=None):
     requests = [e for e in events if e["kind"] == "pipeline_request"]
     pending = [e for e in events if e["kind"] == "pipeline_pending"]
     shader_pending = [e for e in events if e["kind"] == "shader_pending"]
+    translation_pending = [e for e in events if e["kind"] == "translation_wait"]
+    prerequisites = [e for e in events if e["kind"] == "pipeline_prerequisites"]
+    def execution_summary(selected):
+        sampled = [e for e in selected if e["cpu_ns"] >= 0]
+        return dict(count=len(selected), total_ms=sum(e["duration_ms"] for e in selected),
+                    max_ms=max((e["duration_ms"] for e in selected), default=0),
+                    sampled_calls=len(sampled), unavailable_calls=len(selected)-len(sampled),
+                    calling_thread_cpu_ms=sum(e["cpu_ns"] for e in sampled)/1e6)
     repeats = [e for e in events if e["kind"] == "repeated_frame"]
     repeat_ages = [e["duration_ms"] for e in events if e["kind"] == "repeated_frame_age"]
     render_threads = {e["thread"] for e in frames}
@@ -91,6 +99,10 @@ def summarize(path, worst=20, frame_from=None, frame_to=None):
                 shader_pending_execution=dict(count=len(shader_pending),
                     total_ms=sum(e["duration_ms"] for e in shader_pending),
                     max_ms=max((e["duration_ms"] for e in shader_pending), default=0)),
+                translation_pending_execution=execution_summary(translation_pending),
+                pipeline_prerequisites=execution_summary(prerequisites),
+                render_thread_shader_translations=sum(e["kind"] == "shader_translation" and e["thread"] in render_threads for e in shader_events),
+                other_thread_shader_translations=sum(e["kind"] == "shader_translation" and e["thread"] not in render_threads for e in shader_events),
                 render_thread_spirv_compiles=sum(e["kind"] == "spirv_compile" and e["thread"] in render_threads for e in shader_events),
                 other_thread_spirv_compiles=sum(e["kind"] == "spirv_compile" and e["thread"] not in render_threads for e in shader_events),
                 repeated_presentations=len(repeats),

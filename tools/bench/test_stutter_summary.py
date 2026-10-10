@@ -7,6 +7,38 @@ from stutter_summary import summarize
 
 
 class StutterSummaryTest(unittest.TestCase):
+    def test_translation_and_prerequisite_execution_are_separate(self):
+        rows = [
+            ('frame', 10, '0', 100000000, 200000000, 1, 0, -1),
+            ('frame', 11, '0', 200000000, 300000000, 1, 0, -1),
+            ('shader_translation', 0, 'a', 110000000, 120000000, 3, 0, 8000000),
+            ('shader_translation', 11, 'b', 210000000, 212000000, 1, 0, 1000000),
+            ('translation_wait', 0, 'a', 110000000, 121000000, 1, 0, -1),
+            ('shader_pending', 0, 'a', 122000000, 125000000, 1, 0, -1),
+            ('pipeline_prerequisites', 0, 'a', 120000000, 150000000, 2, 0, 2000000),
+            ('pipeline_prerequisites', 11, 'b', 220000000, 225000000, 2, 0, -1),
+            ('guest_pipeline', 0, 'a', 150000000, 160000000, 2, 0, 3000000),
+        ]
+        result = self.summary(rows, with_cpu=True)
+        self.assertEqual(result['render_thread_shader_translations'], 1)
+        self.assertEqual(result['other_thread_shader_translations'], 1)
+        self.assertEqual(result['translation_pending_execution']['total_ms'], 11)
+        self.assertEqual(result['shader_pending_execution']['total_ms'], 3)
+        self.assertEqual(result['pipeline_prerequisites'], dict(count=2, total_ms=35, max_ms=30,
+                         sampled_calls=1, unavailable_calls=1, calling_thread_cpu_ms=2))
+        self.assertEqual(result['pipeline_creation_calls'], 1)
+        self.assertEqual(result['pipeline_creation_ms'], 10)
+        self.assertNotIn('pipeline_prerequisites', result['compilation_cpu_by_kind'])
+        selected = self.summary(rows, with_cpu=True, frame_from=10, frame_to=11)
+        self.assertEqual(selected['other_thread_shader_translations'], 1) # Request frame 0, execution frame 10.
+        self.assertEqual(selected['render_thread_shader_translations'], 0)
+        self.assertEqual(selected['pipeline_prerequisites']['count'], 1)
+        self.assertEqual(selected['pipeline_prerequisites']['calling_thread_cpu_ms'], 2)
+        empty = self.summary(rows, with_cpu=True, frame_from=20)
+        self.assertEqual(empty['translation_pending_execution']['count'], 0)
+        self.assertEqual(empty['pipeline_prerequisites']['count'], 0)
+        self.assertEqual(empty['render_thread_shader_translations'], 0)
+
     def summary(self, rows, with_cpu=False, **kwargs):
         with tempfile.TemporaryDirectory() as directory:
             trace = Path(directory) / 'events.csv'

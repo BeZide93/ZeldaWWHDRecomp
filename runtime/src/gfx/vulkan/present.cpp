@@ -1,3 +1,4 @@
+#include "deferred_dispatch.h"
 // Shader presentation matches Metal's source-grid FXAA and scaling filters.
 #include "../../exception_report.h"
 #include "present.h"
@@ -359,43 +360,43 @@ void compose(VkImage image,VkImageView view,VkImageLayout& layout,VkExtent2D ext
  auto cmd=command_buffer();VkImageMemoryBarrier barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};barrier.oldLayout=layout;barrier.newLayout=VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
  barrier.srcQueueFamilyIndex=barrier.dstQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED;barrier.image=image;barrier.subresourceRange={VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1};
  barrier.srcAccessMask=narrow_barriers()?dependency.sourceAccess:VK_ACCESS_MEMORY_READ_BIT|VK_ACCESS_MEMORY_WRITE_BIT;barrier.dstAccessMask=VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
- vkCmdPipelineBarrier(cmd,narrow_barriers()?dependency.source:VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,0,0,nullptr,0,nullptr,1,&barrier);
+ record::vkCmdPipelineBarrier(cmd,narrow_barriers()?dependency.source:VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,0,0,nullptr,0,nullptr,1,&barrier);
  VkRenderingAttachmentInfo attachment{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};attachment.imageView=view;attachment.imageLayout=VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;attachment.loadOp=VK_ATTACHMENT_LOAD_OP_CLEAR;attachment.storeOp=VK_ATTACHMENT_STORE_OP_STORE;
  attachment.clearValue.color.float32[3]=1;
  VkRenderingInfo rendering{VK_STRUCTURE_TYPE_RENDERING_INFO};rendering.renderArea.extent=extent;rendering.layerCount=1;rendering.colorAttachmentCount=1;rendering.pColorAttachments=&attachment;
- vkCmdBeginRendering(cmd,&rendering);R.rendering=true;R.passTracked=false;
- VkRect2D scissor{{0,0},extent};vkCmdSetScissor(cmd,0,1,&scissor);
+ record::vkCmdBeginRendering(cmd,&rendering);R.rendering=true;R.passTracked=false;
+ VkRect2D scissor{{0,0},extent};record::vkCmdSetScissor(cmd,0,1,&scissor);
  const bool targetLinear=srgb_format(format);
  for(auto& q:quads) {
   if(q.box.w<=0||q.box.h<=0)continue;
-  VkViewport viewport{q.box.x,q.box.y,q.box.w,q.box.h,0,1};vkCmdSetViewport(cmd,0,1,&viewport);
+  VkViewport viewport{q.box.x,q.box.y,q.box.w,q.box.h,0,1};record::vkCmdSetViewport(cmd,0,1,&viewport);
   if(q.solid) {
-   vkCmdBindPipeline(cmd,VK_PIPELINE_BIND_POINT_GRAPHICS,pipeline(format,kSolid));
+   record::vkCmdBindPipeline(cmd,VK_PIPELINE_BIND_POINT_GRAPHICS,pipeline(format,kSolid));
    PresentParams params{};memcpy(&params,q.color,16);
-   vkCmdPushConstants(cmd,resources.layout,VK_SHADER_STAGE_FRAGMENT_BIT,0,sizeof(params),&params);vkCmdDraw(cmd,3,1,0,0);
+   record::vkCmdPushConstants(cmd,resources.layout,VK_SHADER_STAGE_FRAGMENT_BIT,0,sizeof(params),&params);record::vkCmdDraw(cmd,3,1,0,0);
    continue;
   }
   if(!q.image||!q.image->view)continue;
   const bool blend=q.alpha<0.999f;
-  vkCmdBindPipeline(cmd,VK_PIPELINE_BIND_POINT_GRAPHICS,pipeline(format,blend?kImageBlend:kImage));
+  record::vkCmdBindPipeline(cmd,VK_PIPELINE_BIND_POINT_GRAPHICS,pipeline(format,blend?kImageBlend:kImage));
   VkDescriptorSet set;VkDescriptorSetAllocateInfo allocation{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};allocation.descriptorPool=R.descriptorPool;allocation.descriptorSetCount=1;allocation.pSetLayouts=&resources.descriptors;
   vk_check(vkAllocateDescriptorSets(R.device,&allocation,&set),"presentation descriptor set");
   const bool linear=linear_filtering(q.image->fmt.pixel);
   VkDescriptorImageInfo info{linear?resources.linear:resources.nearest,q.image->view,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};write.dstSet=set;write.dstBinding=0;write.descriptorCount=1;write.descriptorType=VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;write.pImageInfo=&info;
-  vkUpdateDescriptorSets(R.device,1,&write,0,nullptr);vkCmdBindDescriptorSets(cmd,VK_PIPELINE_BIND_POINT_GRAPHICS,resources.layout,0,1,&set,0,nullptr);
+  vkUpdateDescriptorSets(R.device,1,&write,0,nullptr);record::vkCmdBindDescriptorSets(cmd,VK_PIPELINE_BIND_POINT_GRAPHICS,resources.layout,0,1,&set,0,nullptr);
   // target pixels per source texel, as the Metal composition (display.mm draw_image)
   const float scale=std::min(q.box.w/q.image->extent.width,q.box.h/q.image->extent.height);
   // sRGB texture views decode on sampling; the scan flag also identifies linear
   // scan values held in a UNORM image. sRGB targets encode shader linear output.
   const bool sourceLinear=q.sourceLinear||srgb_format(q.image->fmt.pixel);
   auto params=present_params(fxaa&&linear,filter,scale,sourceLinear,targetLinear);params.alpha=q.alpha;
-  vkCmdPushConstants(cmd,resources.layout,VK_SHADER_STAGE_FRAGMENT_BIT,0,sizeof(params),&params);vkCmdDraw(cmd,3,1,0,0);
+  record::vkCmdPushConstants(cmd,resources.layout,VK_SHADER_STAGE_FRAGMENT_BIT,0,sizeof(params),&params);record::vkCmdDraw(cmd,3,1,0,0);
  }
  if(gamepadOverlay)overlay_draw(gamepadOverlay,cmd,format,extent,targetLinear);
  if(overlay)overlay_draw(overlay,cmd,format,extent,targetLinear);  // settings overlay on top
- vkCmdEndRendering(cmd);
+ record::vkCmdEndRendering(cmd);
  barrier.oldLayout=VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;barrier.newLayout=finalLayout;barrier.srcAccessMask=VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;barrier.dstAccessMask=0;
- vkCmdPipelineBarrier(cmd,VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,0,0,nullptr,0,nullptr,1,&barrier);layout=finalLayout;
+ record::vkCmdPipelineBarrier(cmd,VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,0,0,nullptr,0,nullptr,1,&barrier);layout=finalLayout;
  R.rendering=false;R.passTracked=false;
 }
 }  // namespace
@@ -558,7 +559,7 @@ static void record_present_image(const PresentApi& api,const PresentImageDraw& d
  barrier.image=draw.target;barrier.subresourceRange={VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1};
  barrier.srcAccessMask=VK_ACCESS_MEMORY_READ_BIT|VK_ACCESS_MEMORY_WRITE_BIT;
  barrier.dstAccessMask=VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
- api.vkCmdPipelineBarrier(cmd,VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+ api.record::vkCmdPipelineBarrier(cmd,VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
      0,0,nullptr,0,nullptr,1,&barrier);
  VkDescriptorSet set;
  VkDescriptorSetAllocateInfo allocation{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
@@ -576,17 +577,17 @@ static void record_present_image(const PresentApi& api,const PresentImageDraw& d
  VkRenderingInfo rendering{VK_STRUCTURE_TYPE_RENDERING_INFO};
  rendering.renderArea.extent=draw.extent;rendering.layerCount=1;
  rendering.colorAttachmentCount=1;rendering.pColorAttachments=&attachment;
- api.vkCmdBeginRendering(cmd,&rendering);
- VkRect2D scissor{{0,0},draw.extent};api.vkCmdSetScissor(cmd,0,1,&scissor);
- api.vkCmdSetViewport(cmd,0,1,&draw.viewport);
- api.vkCmdBindPipeline(cmd,VK_PIPELINE_BIND_POINT_GRAPHICS,draw.pipeline);
- api.vkCmdBindDescriptorSets(cmd,VK_PIPELINE_BIND_POINT_GRAPHICS,draw.layout,0,1,&set,0,nullptr);
- api.vkCmdPushConstants(cmd,draw.layout,VK_SHADER_STAGE_FRAGMENT_BIT,0,sizeof(draw.params),&draw.params);
- api.vkCmdDraw(cmd,3,1,0,0);
- api.vkCmdEndRendering(cmd);
+ api.record::vkCmdBeginRendering(cmd,&rendering);
+ VkRect2D scissor{{0,0},draw.extent};api.record::vkCmdSetScissor(cmd,0,1,&scissor);
+ api.record::vkCmdSetViewport(cmd,0,1,&draw.viewport);
+ api.record::vkCmdBindPipeline(cmd,VK_PIPELINE_BIND_POINT_GRAPHICS,draw.pipeline);
+ api.record::vkCmdBindDescriptorSets(cmd,VK_PIPELINE_BIND_POINT_GRAPHICS,draw.layout,0,1,&set,0,nullptr);
+ api.record::vkCmdPushConstants(cmd,draw.layout,VK_SHADER_STAGE_FRAGMENT_BIT,0,sizeof(draw.params),&draw.params);
+ api.record::vkCmdDraw(cmd,3,1,0,0);
+ api.record::vkCmdEndRendering(cmd);
  barrier.oldLayout=VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;barrier.newLayout=draw.finalLayout;
  barrier.srcAccessMask=VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;barrier.dstAccessMask=0;
- api.vkCmdPipelineBarrier(cmd,VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+ api.record::vkCmdPipelineBarrier(cmd,VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
      0,0,nullptr,0,nullptr,1,&barrier);
 }
 
@@ -661,7 +662,7 @@ bool record_screenshot(Screen& screen,Buffer& buffer,uint32_t& width,uint32_t& h
   transition_image(&target,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_ACCESS_TRANSFER_READ_BIT);
   auto cmd=command_buffer();
   VkBufferImageCopy region{};region.imageSubresource={VK_IMAGE_ASPECT_COLOR_BIT,0,0,1};region.imageExtent={width,height,1};
-  vkCmdCopyImageToBuffer(cmd,target.image,target.layout,buffer.buffer,1,&region);
+  record::vkCmdCopyImageToBuffer(cmd,target.image,target.layout,buffer.buffer,1,&region);
   derive_dependency(buffer.use,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_ACCESS_TRANSFER_WRITE_BIT);
   transition_buffer(buffer,VK_PIPELINE_STAGE_HOST_BIT,VK_ACCESS_HOST_READ_BIT);
  }catch(...){destroy_surface_image(&target);if(buffer.buffer){defer_buffer(buffer);buffer={};}throw;}
@@ -684,28 +685,28 @@ void draw_mod_overlay(Surface& scan) {
  attachment.loadOp=VK_ATTACHMENT_LOAD_OP_LOAD;attachment.storeOp=VK_ATTACHMENT_STORE_OP_STORE;
  const VkExtent2D extent{scan.extent.width,scan.extent.height};
  VkRenderingInfo rendering{VK_STRUCTURE_TYPE_RENDERING_INFO};rendering.renderArea.extent=extent;rendering.layerCount=1;rendering.colorAttachmentCount=1;rendering.pColorAttachments=&attachment;
- vkCmdBeginRendering(cmd,&rendering);R.rendering=true;R.passTracked=false;
+ record::vkCmdBeginRendering(cmd,&rendering);R.rendering=true;R.passTracked=false;
  const float w=float(extent.width),h=float(extent.height);
  VkRect2D scissor{{0,0},extent};
  if(wheel) {
   // upper right of the screen centre, where the follow camera keeps Link (mod_hud.mm)
   const float cx=0.60f*w,cy=0.38f*h,rad=0.05f*h;
   VkViewport viewport{cx-rad,cy-rad,2*rad,2*rad,0,1};
-  vkCmdSetViewport(cmd,0,1,&viewport);vkCmdSetScissor(cmd,0,1,&scissor);
-  vkCmdBindPipeline(cmd,VK_PIPELINE_BIND_POINT_GRAPHICS,pipeline(scan.fmt.pixel,kHud));
+  record::vkCmdSetViewport(cmd,0,1,&viewport);record::vkCmdSetScissor(cmd,0,1,&scissor);
+  record::vkCmdBindPipeline(cmd,VK_PIPELINE_BIND_POINT_GRAPHICS,pipeline(scan.fmt.pixel,kHud));
   PresentParams params{};const float u[4]={climb.stamina,climb.alpha,climb.exhausted?1.0f:0.0f,0};memcpy(&params,u,16);
-  vkCmdPushConstants(cmd,resources.layout,VK_SHADER_STAGE_FRAGMENT_BIT,0,sizeof(params),&params);vkCmdDraw(cmd,3,1,0,0);
+  record::vkCmdPushConstants(cmd,resources.layout,VK_SHADER_STAGE_FRAGMENT_BIT,0,sizeof(params),&params);record::vkCmdDraw(cmd,3,1,0,0);
  }
  if(bar) {
   // a ring under the wheel's spot, same shape; 0 running, 1 swimming, 2 recharging
   const float cx=0.60f*w,cy=0.49f*h,rad=0.042f*h;
   VkViewport viewport{cx-rad,cy-rad,2*rad,2*rad,0,1};
-  vkCmdSetViewport(cmd,0,1,&viewport);vkCmdSetScissor(cmd,0,1,&scissor);
-  vkCmdBindPipeline(cmd,VK_PIPELINE_BIND_POINT_GRAPHICS,pipeline(scan.fmt.pixel,kMoveHud));
+  record::vkCmdSetViewport(cmd,0,1,&viewport);record::vkCmdSetScissor(cmd,0,1,&scissor);
+  record::vkCmdBindPipeline(cmd,VK_PIPELINE_BIND_POINT_GRAPHICS,pipeline(scan.fmt.pixel,kMoveHud));
   PresentParams params{};const float u[4]={move.stamina,move.alpha,move.exhausted?2.0f:move.swimming?1.0f:0.0f,0};memcpy(&params,u,16);
-  vkCmdPushConstants(cmd,resources.layout,VK_SHADER_STAGE_FRAGMENT_BIT,0,sizeof(params),&params);vkCmdDraw(cmd,3,1,0,0);
+  record::vkCmdPushConstants(cmd,resources.layout,VK_SHADER_STAGE_FRAGMENT_BIT,0,sizeof(params),&params);record::vkCmdDraw(cmd,3,1,0,0);
  }
- vkCmdEndRendering(cmd);R.rendering=false;R.passTracked=false;
+ record::vkCmdEndRendering(cmd);R.rendering=false;R.passTracked=false;
 }
 
 // ---------------------------------------------------------------- automatic overlay signatures
@@ -728,7 +729,7 @@ void make_image(VkImage& image,VkDeviceMemory& memory,uint32_t w,uint32_t h,uint
 void level_barrier(VkCommandBuffer cmd,VkImage image,uint32_t level,VkImageLayout from,VkImageLayout to,VkAccessFlags src,VkAccessFlags dst) {
  VkImageMemoryBarrier b{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};b.oldLayout=from;b.newLayout=to;b.srcQueueFamilyIndex=b.dstQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED;
  b.image=image;b.subresourceRange={VK_IMAGE_ASPECT_COLOR_BIT,level,1,0,1};b.srcAccessMask=src;b.dstAccessMask=dst;
- vkCmdPipelineBarrier(cmd,VK_PIPELINE_STAGE_TRANSFER_BIT|VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,VK_PIPELINE_STAGE_TRANSFER_BIT,0,0,nullptr,0,nullptr,1,&b);
+ record::vkCmdPipelineBarrier(cmd,VK_PIPELINE_STAGE_TRANSFER_BIT|VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,VK_PIPELINE_STAGE_TRANSFER_BIT,0,0,nullptr,0,nullptr,1,&b);
 }
 }  // namespace
 
@@ -752,23 +753,23 @@ bool record_signature(int slot,Surface& source,bool sourceLinear) {
  level_barrier(cmd,g.mip,0,VK_IMAGE_LAYOUT_UNDEFINED,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,0,W);
  VkImageBlit blit{};blit.srcSubresource={VK_IMAGE_ASPECT_COLOR_BIT,0,0,1};blit.dstSubresource={VK_IMAGE_ASPECT_COLOR_BIT,0,0,1};
  blit.srcOffsets[1]={int(w),int(h),1};blit.dstOffsets[1]={int(w),int(h),1};
- vkCmdBlitImage(cmd,source.image,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,g.mip,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,1,&blit,VK_FILTER_NEAREST);
+ record::vkCmdBlitImage(cmd,source.image,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,g.mip,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,1,&blit,VK_FILTER_NEAREST);
  for(uint32_t l=1;l<g.levels;l++) {
   level_barrier(cmd,g.mip,l-1,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,W,Rd);
   level_barrier(cmd,g.mip,l,VK_IMAGE_LAYOUT_UNDEFINED,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,0,W);
   VkImageBlit b{};b.srcSubresource={VK_IMAGE_ASPECT_COLOR_BIT,l-1,0,1};b.dstSubresource={VK_IMAGE_ASPECT_COLOR_BIT,l,0,1};
   b.srcOffsets[1]={int(std::max(w>>(l-1),1u)),int(std::max(h>>(l-1),1u)),1};b.dstOffsets[1]={int(std::max(w>>l,1u)),int(std::max(h>>l,1u)),1};
-  vkCmdBlitImage(cmd,g.mip,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,g.mip,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,1,&b,VK_FILTER_LINEAR);
+  record::vkCmdBlitImage(cmd,g.mip,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,g.mip,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,1,&b,VK_FILTER_LINEAR);
  }
  const uint32_t last=g.levels-1;
  level_barrier(cmd,g.mip,last,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,W,Rd);
  level_barrier(cmd,g.signatureImage,0,VK_IMAGE_LAYOUT_UNDEFINED,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,0,W);
  VkImageBlit b{};b.srcSubresource={VK_IMAGE_ASPECT_COLOR_BIT,last,0,1};b.dstSubresource={VK_IMAGE_ASPECT_COLOR_BIT,0,0,1};
  b.srcOffsets[1]={int(std::max(w>>last,1u)),int(std::max(h>>last,1u)),1};b.dstOffsets[1]={int(gfx::kSignatureW),int(gfx::kSignatureH),1};
- vkCmdBlitImage(cmd,g.mip,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,g.signatureImage,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,1,&b,VK_FILTER_LINEAR);
+ record::vkCmdBlitImage(cmd,g.mip,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,g.signatureImage,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,1,&b,VK_FILTER_LINEAR);
  level_barrier(cmd,g.signatureImage,0,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,W,Rd);
  VkBufferImageCopy copy{};copy.imageSubresource={VK_IMAGE_ASPECT_COLOR_BIT,0,0,1};copy.imageExtent={gfx::kSignatureW,gfx::kSignatureH,1};
- vkCmdCopyImageToBuffer(cmd,g.signatureImage,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,g.buffer.buffer,1,&copy);
+ record::vkCmdCopyImageToBuffer(cmd,g.signatureImage,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,g.buffer.buffer,1,&copy);
  derive_dependency(g.buffer.use,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_ACCESS_TRANSFER_WRITE_BIT);
  transition_buffer(g.buffer,VK_PIPELINE_STAGE_HOST_BIT,VK_ACCESS_HOST_READ_BIT);
  // the blits decode sRGB images to linear values: encode them like the Metal path does
@@ -824,14 +825,14 @@ void record_present_capture(Screen& screen,uint32_t imageIndex) {
   image.image=screen.images.at(imageIndex);image.subresourceRange={VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1};
   auto dependency=derive_dependency(screen.imageUses.at(imageIndex),VK_PIPELINE_STAGE_TRANSFER_BIT,VK_ACCESS_TRANSFER_READ_BIT,true);
   image.srcAccessMask=narrow_barriers()?dependency.sourceAccess:VK_ACCESS_MEMORY_WRITE_BIT;image.dstAccessMask=VK_ACCESS_TRANSFER_READ_BIT;
-  vkCmdPipelineBarrier(cmd,narrow_barriers()?dependency.source:VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,VK_PIPELINE_STAGE_TRANSFER_BIT,0,0,nullptr,0,nullptr,1,&image);
+  record::vkCmdPipelineBarrier(cmd,narrow_barriers()?dependency.source:VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,VK_PIPELINE_STAGE_TRANSFER_BIT,0,0,nullptr,0,nullptr,1,&image);
   VkBufferImageCopy copy{};copy.imageSubresource={VK_IMAGE_ASPECT_COLOR_BIT,0,0,1};copy.imageExtent={uint32_t(width),uint32_t(height),1};
-  vkCmdCopyImageToBuffer(cmd,image.image,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,capture.buffer.buffer,1,&copy);
+  record::vkCmdCopyImageToBuffer(cmd,image.image,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,capture.buffer.buffer,1,&copy);
   derive_dependency(capture.buffer.use,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_ACCESS_TRANSFER_WRITE_BIT);
   transition_buffer(capture.buffer,VK_PIPELINE_STAGE_HOST_BIT,VK_ACCESS_HOST_READ_BIT);
   image.oldLayout=VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;image.newLayout=VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
   image.srcAccessMask=VK_ACCESS_TRANSFER_READ_BIT;image.dstAccessMask=0;
-  vkCmdPipelineBarrier(cmd,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,0,0,nullptr,0,nullptr,1,&image);
+  record::vkCmdPipelineBarrier(cmd,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,0,0,nullptr,0,nullptr,1,&image);
   screen.layouts[imageIndex]=image.newLayout;
  }catch(const std::exception& error) {
   if(capture.buffer.buffer){defer_buffer(capture.buffer);capture.buffer={};}

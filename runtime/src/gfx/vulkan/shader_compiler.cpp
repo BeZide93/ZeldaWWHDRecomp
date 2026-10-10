@@ -1,3 +1,4 @@
+#include <exception>
 #include "shader_compiler.h"
 #include "stutter_trace.h"
 #include "worker_metrics.h"
@@ -9,12 +10,19 @@
 #include <atomic>
 #include <cstring>
 #include <deque>
-#include <future>
+#include <limits>
 #include <mutex>
 #include <stdexcept>
 #include <thread>
 
 namespace gfxvk::vk {
+struct ShaderCompileTicket::State {
+    mutable std::mutex mutex;
+    std::condition_variable wake;
+    bool ready = false, consumed = false;
+    ShaderCompileResult result;
+    std::exception_ptr error;
+};
 namespace {
 std::mutex glslangMutex; // Outlives the function-static worker.
 static std::vector<uint32_t> compile_stage(const std::string& source, EShLanguage stage, std::string* error) {
@@ -69,7 +77,7 @@ struct Job {
     std::string source;
     ShaderStage stage;
     uint64_t frame, key;
-    std::promise<ShaderCompileResult> done;
+    std::shared_ptr<ShaderCompileTicket::State> done;
 };
 struct Compiler {
     std::mutex mutex;
@@ -104,43 +112,101 @@ void run(Compiler& c) {
         std::exception_ptr error;
         try { result = execute(job->source, job->stage, job->frame, job->key); }
         catch (...) { error = std::current_exception(); }
+        {
+            std::lock_guard lock(job->done->mutex);
+            job->done->result = std::move(result);
+            job->done->error = error;
+            job->done->ready = true;
+        }
         c.active.fetch_sub(1, std::memory_order_release);
-        if (error) job->done.set_exception(error);
-        else job->done.set_value(std::move(result));
+        job->done->wake.notify_all();
+        c.wake.notify_all();
     }
 }
+}
+ShaderCompileTicket::ShaderCompileTicket(std::shared_ptr<State> state) : state_(std::move(state)) {}
+bool ShaderCompileTicket::ready() const {
+    if (!state_) throw std::logic_error("empty shader compile ticket");
+    std::lock_guard lock(state_->mutex);
+    return state_->ready;
+}
+std::optional<ShaderCompileResult> ShaderCompileTicket::wait_for(uint64_t budgetNs) {
+    if (!state_) throw std::logic_error("empty shader compile ticket");
+    std::unique_lock lock(state_->mutex);
+    if (state_->consumed) throw std::logic_error("shader result already consumed");
+    if (!state_->ready && budgetNs)
+        state_->wake.wait_for(lock, std::chrono::nanoseconds(std::min<uint64_t>(budgetNs,
+            uint64_t(std::numeric_limits<int64_t>::max()))), [&] { return state_->ready; });
+    if (!state_->ready) return std::nullopt;
+    if (state_->consumed) throw std::logic_error("shader result already consumed");
+    state_->consumed = true;
+    if (state_->error) std::rethrow_exception(state_->error);
+    return std::move(state_->result);
+}
+ShaderCompileResult ShaderCompileTicket::consume() {
+    if (!state_) throw std::logic_error("empty shader compile ticket");
+    std::unique_lock lock(state_->mutex);
+    state_->wake.wait(lock, [&] { return state_->ready; });
+    if (state_->consumed) throw std::logic_error("shader result already consumed");
+    state_->consumed = true;
+    if (state_->error) std::rethrow_exception(state_->error);
+    return std::move(state_->result);
+}
+std::optional<ShaderCompileTicket> request_shader_compile(const std::string& source,
+    ShaderStage stage, uint64_t frame, uint64_t key, bool background) {
+    if (source.size() > 4 * 1024 * 1024)
+        throw std::runtime_error("shader compiler source exceeds 4 MiB");
+    if (!background) {
+        auto state = std::make_shared<ShaderCompileTicket::State>();
+        try { state->result = execute(source, stage, frame, key); }
+        catch (...) { state->error = std::current_exception(); }
+        state->ready = true;
+        return ShaderCompileTicket(std::move(state));
+    }
+    auto& c = compiler();
+    std::lock_guard lock(c.mutex);
+    if (c.stopped && c.thread.joinable())
+        throw std::runtime_error("shader compiler shutdown in progress");
+    if (c.queue.size() >= 8) return std::nullopt;
+    auto state = std::make_shared<ShaderCompileTicket::State>();
+    auto job = std::make_shared<Job>(Job{source, stage, frame, key, state});
+    if (!c.thread.joinable()) { c.stopped = false; c.thread = std::thread(run, std::ref(c)); }
+    c.queue.push_back(std::move(job));
+    c.active.fetch_add(1, std::memory_order_release);
+    if (stutter::trace().enabled()) try {
+        const auto now = stutter::now();
+        stutter::trace().add("shader_request", frame, key, now, now, int(c.queue.size()));
+    } catch (...) {} // Trace allocation cannot strand an admitted job.
+    c.wake.notify_one();
+    return ShaderCompileTicket(std::move(state));
 }
 ShaderCompileResult compile_shader(const std::string& source, ShaderStage stage,
     uint64_t frame, uint64_t key, const std::function<void()>& whilePending, bool background) {
-    // Eight queued sources plus one active source bound compiler input storage
-    // to 36 MiB. Normal rendering has one ordered caller, one outstanding job.
-    if (source.size() > 4 * 1024 * 1024)
-        throw std::runtime_error("shader compiler source exceeds 4 MiB");
-    if (!background) return execute(source, stage, frame, key);
-    auto& c = compiler();
-    auto job = std::make_shared<Job>(Job{source, stage, frame, key, {}});
-    auto done = job->done.get_future();
     const auto requested = stutter::trace().enabled() ? stutter::now() : 0;
-    {
-        std::lock_guard lock(c.mutex);
-        if (c.stopped && c.thread.joinable())
-            throw std::runtime_error("shader compiler shutdown in progress");
-        if (!c.thread.joinable()) { c.stopped = false; c.thread = std::thread(run, std::ref(c)); }
-        if (c.queue.size() >= 8) throw std::runtime_error("shader compiler queue capacity exceeded");
-        c.queue.push_back(job);
-        c.active.fetch_add(1, std::memory_order_release);
-        if (requested) stutter::trace().add("shader_request", frame, key, requested, requested, int(c.queue.size()));
-    }
-    c.wake.notify_one();
     std::exception_ptr presentationError;
-    while (done.wait_for(std::chrono::milliseconds(1)) != std::future_status::ready) {
+    auto service = [&] {
         if (!presentationError && whilePending) try { whilePending(); }
         catch (...) { presentationError = std::current_exception(); }
+    };
+    std::optional<ShaderCompileTicket> ticket;
+    std::optional<std::string> admissionSource;
+    while (!(ticket = request_shader_compile(admissionSource ? *admissionSource : source,
+                                            stage, frame, key, background))) {
+        // A presentation callback may mutate the original caller string. Keep
+        // the requested bytes stable even while waiting for queue admission.
+        if (!admissionSource) admissionSource.emplace(source);
+        service();
+        auto& c = compiler();
+        std::unique_lock lock(c.mutex);
+        c.wake.wait_for(lock, std::chrono::milliseconds(1));
     }
-    auto result = done.get();
-    if (requested) stutter::trace().add("shader_pending", frame, key, requested, stutter::now(), result.words.empty() ? -1 : 0);
+    std::optional<ShaderCompileResult> result;
+    while (!(result = ticket->wait_for(1000000))) service();
+    if (requested && background) try {
+        stutter::trace().add("shader_pending", frame, key, requested, stutter::now(), result->words.empty() ? -1 : 0);
+    } catch (...) {}
     if (presentationError) std::rethrow_exception(presentationError);
-    return result;
+    return std::move(*result);
 }
 bool async_shaders_enabled() {
     static const bool enabled = [] {

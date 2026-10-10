@@ -1,3 +1,4 @@
+#include "deferred_dispatch.h"
 #include "../../exception_report.h"
 #include "bc_decode.h"
 #include "bc_reference.h"
@@ -69,10 +70,10 @@ Buffer dispatch(const std::vector<uint8_t>& blocks,uint32_t w,uint32_t h,uint32_
     for(uint32_t i=0;i<2;++i){writes[i]={VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};writes[i].dstSet=set;writes[i].dstBinding=i;writes[i].descriptorCount=1;writes[i].descriptorType=VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;writes[i].pBufferInfo=&buffers[i];}
     vkUpdateDescriptorSets(R.device,2,writes,0,nullptr);
     // Coherent host writes are made available by submission. The input is unique to this dispatch.
-    vkCmdBindPipeline(cmd,VK_PIPELINE_BIND_POINT_COMPUTE,pipeline);
-    vkCmdBindDescriptorSets(cmd,VK_PIPELINE_BIND_POINT_COMPUTE,layout,0,1,&set,0,nullptr);
-    uint32_t params[]={w,h,slices,mode};vkCmdPushConstants(cmd,layout,VK_SHADER_STAGE_COMPUTE_BIT,0,sizeof params,params);
-    vkCmdDispatch(cmd,gx,gy,1);
+    record::vkCmdBindPipeline(cmd,VK_PIPELINE_BIND_POINT_COMPUTE,pipeline);
+    record::vkCmdBindDescriptorSets(cmd,VK_PIPELINE_BIND_POINT_COMPUTE,layout,0,1,&set,0,nullptr);
+    uint32_t params[]={w,h,slices,mode};record::vkCmdPushConstants(cmd,layout,VK_SHADER_STAGE_COMPUTE_BIT,0,sizeof params,params);
+    record::vkCmdDispatch(cmd,gx,gy,1);
     derive_dependency(output.use,VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,VK_ACCESS_SHADER_WRITE_BIT);
     transition_buffer(output,VK_PIPELINE_STAGE_TRANSFER_BIT|(readback?VK_PIPELINE_STAGE_HOST_BIT:0),
                       VK_ACCESS_TRANSFER_READ_BIT|(readback?VK_ACCESS_HOST_READ_BIT:0));
@@ -105,7 +106,7 @@ void bc_decode_upload(Surface* s,uint32_t level,const std::vector<uint8_t>& bloc
     Buffer output=dispatch(blocks,w,h,slices,mode,check);
     VkBufferImageCopy copy{};bool volume=s->imageType==VK_IMAGE_TYPE_3D;
     copy.imageSubresource={VK_IMAGE_ASPECT_COLOR_BIT,level,0,volume?1:slices};copy.imageExtent={w,h,volume?slices:1};
-    vkCmdCopyBufferToImage(command_buffer(),output.buffer,s->image,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,1,&copy);
+    record::vkCmdCopyBufferToImage(command_buffer(),output.buffer,s->image,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,1,&copy);
     if(check)verify(output,blocks,w,h,slices,mode);
     defer_buffer(output);
     rprof::add_upload(rprof::kUpTexture,blocks.size());

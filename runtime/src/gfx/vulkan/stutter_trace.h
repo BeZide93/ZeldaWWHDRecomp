@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <functional>
 #include <mutex>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -12,7 +13,7 @@ namespace gfxvk::stutter {
 // Opt-in bounded in-memory recording: no filesystem writes in measured frames.
 // Written on orderly process exit. Forced termination loses the trace.
 struct Event {
-  const char* kind;
+  std::string kind;
   uint64_t frame, key, start, end, thread, cpu;
   int result;
 };
@@ -53,7 +54,7 @@ public:
     if (!f) { std::fprintf(stderr, "[vulkan trace] cannot write %s\n", path); return; }
     std::fprintf(f, "kind,frame,key,start_ns,end_ns,thread,result,cpu_ns\n");
     for (const auto& e : snapshot)
-      std::fprintf(f, "%s,%llu,%016llx,%llu,%llu,%llu,%d,%lld\n", e.kind,
+      std::fprintf(f, "%s,%llu,%016llx,%llu,%llu,%llu,%d,%lld\n", e.kind.c_str(),
           (unsigned long long)e.frame, (unsigned long long)e.key,
           (unsigned long long)e.start, (unsigned long long)e.end,
           (unsigned long long)e.thread, e.result, e.cpu == ~uint64_t{0} ? -1ll : (long long)e.cpu);
