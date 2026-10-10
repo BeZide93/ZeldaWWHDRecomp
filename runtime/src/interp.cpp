@@ -34,6 +34,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "interp_nodraw.h"
 #include "interp_pacing.h"
 #include "mods/fast_forward.h"
 #include "guest_addr.h"
@@ -634,6 +635,7 @@ namespace interp {
 void fx_pass_start();          // interp_fx.cpp: puts back the values drawn blended
 void fx_hold_blend(float t);   // interp_fx.cpp: blended hold pass: logic-time effect blends at t
 void fx_ss_reset();
+void nodraw_reset();          // fopAc_Draw hook: the step's one-shot no-draw requests
 // a save state was loaded: nothing may blend across the jump
 void ss_reset() {
     countdown::reset();
@@ -649,6 +651,7 @@ void ss_reset() {
     g_phase = 0;
     g_step_n = 1;
     fx_ss_reset();
+    nodraw_reset();
     true60::ss_reset();
 }
 // Paced interpolation (WWHD_INTERP_PACED=1, the default on Android, Windows on ARM64 and at 120/240
@@ -1148,7 +1151,33 @@ extern "C" void hook_02715310(Cpu* c) {
     else countdown::refresh(c);
 }
 
+// fopAc_Draw(fopAc_ac_c*): one-shot "not drawn this frame" requests (fopAcStts_NODRAW_e) made by
+// the step's logic hold for all passes of the step (interp_nodraw.h; issue #126: in conversations
+// the talk camera hides Link on logic frames only, so he flickered at 60/120/240 fps and true 60).
+// debug: WWHD_INTERP_NODRAW=0 turns this off; WWHD_INTERP_NODRAW_TRACE=n logs n kept requests
+extern "C" void f_025D4654_orig(Cpu* c);
+static interp::OneShotNoDraw g_nodraw;
+extern "C" void hook_025D4654(Cpu* c) {
+    static const bool off = getenv("WWHD_INTERP_NODRAW") && !atoi(getenv("WWHD_INTERP_NODRAW"));
+    if (interp::enabled() && !off) {
+        const uint32_t actor = c->r[3];
+        const uint32_t status = ld32(actor + interp::OneShotNoDraw::kStatus);
+        const uint32_t want = g_nodraw.on_draw(actor, status, interp::g_hold, interp::g_logic_steps);
+        if (want != status) {
+            st32(actor + interp::OneShotNoDraw::kStatus, want);
+            static int trace = getenv("WWHD_INTERP_NODRAW_TRACE") ? atoi(getenv("WWHD_INTERP_NODRAW_TRACE")) : 0;
+            if (trace > 0) {
+                trace--;
+                LOG("[interp] step %llu phase %d: actor %08X kept hidden (requested by the step's logic)",
+                    (unsigned long long)interp::g_logic_steps, interp::g_phase, actor);
+            }
+        }
+    }
+    f_025D4654_orig(c);
+}
+
 namespace interp {
+void nodraw_reset() { g_nodraw.reset(); }
 // The pads are read at the end of every frame. JUTGamePad derives "pressed this frame" from
 // consecutive reads, so a change first seen on the read after a logic pass would be spent on a pass
 // without logic. While interpolating, that read repeats the previous sample (see VPADRead /
