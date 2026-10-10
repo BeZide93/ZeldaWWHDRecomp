@@ -11,6 +11,10 @@ what is on `devel` and not released yet (also in the
   Master volume slider with Mute and Default buttons. It applies immediately and is remembered for the
   next start.
 
+- **Fixed: Link flickered during some conversations at 60, 120 and 240 fps** (issue #126). When the
+  camera looks over Link's shoulder, the game hides him for that shot, but the in-between frames drew
+  him again. He now stays hidden on every frame, also in true 60. 30 fps is unchanged.
+
 - **Faster game code: about a quarter less CPU time in the game's own code** (PR #83, thanks
   @depende3000). The recompiler now keeps the game's registers in local variables, stores only the
   condition bits that are read later, and uses cheaper float compares. Measured per game step: −28 % on
