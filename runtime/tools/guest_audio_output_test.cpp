@@ -45,7 +45,7 @@ int main(int argc,char** argv) {
  env("WWHD_NO_AUDIO","1");env("WWHD_AUDIO_DUMP",argv[1]);
  if (mode=="gain") env("WWHD_AUDIO_VOLUME","0.5");
  if (mode=="mute") env("WWHD_AUDIO_VOLUME","0");
- if (mode=="volume") env("WWHD_AUDIO_VOLUME","1");
+ if (mode=="volume") unenv("WWHD_AUDIO_VOLUME");  // nothing saved, no override: starts at full volume
  if (mode=="saved"||mode=="invalid") { unenv("WWHD_AUDIO_VOLUME"); g_has_saved=true; g_saved=mode=="saved"?"25":"not a number"; }
  audio::init();
 
@@ -76,6 +76,11 @@ int main(int argc,char** argv) {
   assert(g_sets.size()==3);
   for (size_t i=0;i<g_sets.size();i++) assert(g_sets[i].first=="audioVolume");
   assert(g_sets[0].second=="50"&&g_sets[1].second=="100"&&g_sets[2].second=="0");
+  // A live-only change (the slider while it is dragged) is not saved.
+  audio::set_master_volume(0.75f,false);assert(audio::master_volume()==0.75f&&g_sets.size()==3);
+  // A value chosen by WWHD_AUDIO_VOLUME is applied but not saved, like the graphics options.
+  env("WWHD_AUDIO_VOLUME","0.4");assert(audio::master_volume_from_env());
+  audio::set_master_volume(0.3f);assert(audio::master_volume()==0.3f&&g_sets.size()==3);
   std::remove(argv[1]);
   return 0;
  }

@@ -474,9 +474,14 @@ void set_requested_surround(bool enabled) {
 float master_volume() {
     return g_gain.load();
 }
-void set_master_volume(float gain) {
+bool master_volume_from_env() {
+    return getenv("WWHD_AUDIO_VOLUME") != nullptr;
+}
+void set_master_volume(float gain, bool save) {
     g_gain = std::isfinite(gain) ? std::clamp(gain, 0.0f, 1.0f) : 1.0f;
-    hostui::set("audioVolume", std::to_string(int(std::lround(g_gain.load() * 100.0f))));
+    // like the graphics options: a value WWHD_AUDIO_VOLUME chose for this start is not saved
+    if (save && !master_volume_from_env())
+        hostui::set("audioVolume", std::to_string(int(std::lround(g_gain.load() * 100.0f))));
 }
 bool surround_fallback() {
     return g_fallback;
