@@ -1,3 +1,4 @@
+#include "atomic_temporary.h"
 // Offline replay of backend-neutral GX2 shader records from shaderprep.py.
 // Metal pipeline recipes (type 2) are intentionally never interpreted here.
 #include "shaders.h"
@@ -24,7 +25,8 @@
 namespace gfxvk {
 namespace {
 struct Recording {
-  const char* path = std::getenv("WWHD_VK_RECIPE_RECORD");
+  const std::optional<std::string> pathStorage = path_environment_utf8("WWHD_VK_RECIPE_RECORD");
+  const char* path = pathStorage ? pathStorage->c_str() : nullptr;
   std::mutex mutex;
   std::vector<std::pair<uint32_t, std::vector<uint8_t>>> records;
   size_t bytes = 0, dropped = 0;
@@ -125,11 +127,11 @@ void save_headstart_recording() {
     records.swap(recorder.records);
     dropped = recorder.dropped;
   }
-  std::string temporary = std::string(recorder.path) + ".tmp";
+  std::string temporary;
   try {
-    auto parent = std::filesystem::path(recorder.path).parent_path();
+    auto parent = std::filesystem::u8path(recorder.path).parent_path();
     if (!parent.empty()) std::filesystem::create_directories(parent);
-    std::unique_ptr<FILE, decltype(&std::fclose)> file(std::fopen(temporary.c_str(), "wb"), &std::fclose);
+    std::unique_ptr<FILE, decltype(&std::fclose)> file(open_atomic_temporary(recorder.path, temporary), &std::fclose);
     if (!file) throw std::runtime_error("cannot open recording output");
     for (const auto& [type, raw] : records) {
       uLongf size = compressBound(raw.size());
@@ -146,22 +148,22 @@ void save_headstart_recording() {
     std::fprintf(stderr, "[vulkan headstart] recorded %zu shader/pipeline records, %zu dropped -> %s\n",
         records.size(), dropped, recorder.path);
   } catch (const std::exception& error) {
-    std::error_code ec; std::filesystem::remove(temporary, ec);
+    std::error_code ec; std::filesystem::remove(std::filesystem::u8path(temporary), ec);
     std::fprintf(stderr, "[vulkan headstart] recording failed: %s\n", error.what());
   }
 }
 
 int warm_headstart_shaders() {
-  const char* override = std::getenv("WWHD_HEADSTART");
-  const std::string path = override ? override : config::game_dir + "/shadercache/headstart.bin";
+  const auto override = path_environment_utf8("WWHD_HEADSTART");
+  const std::string path = override ? *override : config::game_dir + "/shadercache/headstart.bin";
   if (path == "0") {
     std::fprintf(stderr, "[vulkan headstart] disabled by WWHD_HEADSTART=0\n");
     return 1;
   }
   try {
-    if (std::filesystem::file_size(path) > 256 * 1024 * 1024)
+    if (std::filesystem::file_size(std::filesystem::u8path(path)) > 256 * 1024 * 1024)
       throw std::runtime_error("head-start file exceeds 256 MiB");
-    std::unique_ptr<FILE, decltype(&std::fclose)> file(std::fopen(path.c_str(), "rb"), &std::fclose);
+    std::unique_ptr<FILE, decltype(&std::fclose)> file(open_utf8_file(path, "rb"), &std::fclose);
     if (!file) throw std::runtime_error("cannot open head-start file");
     ProgramPool pool;
     std::array<uint32_t, 0x10000> regs{};
@@ -223,6 +225,7 @@ int warm_headstart_shaders() {
     }
     (void)finish_pipeline_warmup();
     std::vector<std::shared_ptr<PipelineRecipe>> resolved;
+    RecipeShaderPool resolvedShaderPool;
     size_t unresolved = 0, absentVs = 0, absentPs = 0, uniformMismatch = 0, descriptorMismatch = 0, missingWords = 0, remapped = 0;
     for (auto& recipe : portable) {
       const auto id = [&](size_t offset) {
@@ -272,6 +275,7 @@ int warm_headstart_shaders() {
           for (size_t i = 0; i < 8; ++i) recipe->key[stage*8+i] = uint8_t(shaders[stage]->pipelineId >> (8*i));
         }
         remapped += changed;
+        resolvedShaderPool.freeze(*recipe);
         resolved.push_back(std::move(recipe));
       } else ++unresolved;
     }

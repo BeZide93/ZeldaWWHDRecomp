@@ -239,6 +239,10 @@ if(WWHD_HAS_METAL)
   target_link_libraries(wwhd PRIVATE "-framework Metal" "-framework QuartzCore" "-framework AppKit" "-framework Foundation" "-framework ImageIO" "-framework UniformTypeIdentifiers" "-framework GameController" "-framework Carbon" "-framework AudioToolbox" "-framework CoreAudio" compression)
 endif()
 if(WWHD_HAS_VULKAN)
+  include(cmake/PipelineRuntimeIdentity.cmake)
+  wwhd_pipeline_runtime_identity("${CMAKE_SOURCE_DIR}" WWHD_PIPELINE_RUNTIME_ID)
+  set_property(SOURCE runtime/src/gfx/vulkan/backend.cpp APPEND PROPERTY
+    COMPILE_DEFINITIONS "WWHD_PIPELINE_RUNTIME_ID=\"${WWHD_PIPELINE_RUNTIME_ID}\"")
   # VK_NO_PROTOTYPES: the renderer loads every Vulkan function at run time (gfx/vulkan/loader.h), so the
   # executable starts without a Vulkan loader or with an older one, and can say what is missing
   target_compile_definitions(wwhd PRIVATE WWHD_HAS_VULKAN=1 VK_NO_PROTOTYPES)

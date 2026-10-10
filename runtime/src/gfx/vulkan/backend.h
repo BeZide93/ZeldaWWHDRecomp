@@ -198,7 +198,7 @@ struct Renderer {
 };
 extern Renderer R;
 // Render-thread checkpoint; failures leave the cache dirty for a later retry.
-void save_pipeline_cache();
+void save_pipeline_cache(bool shutdown = true);
 void present_completed_frame_while_pipeline_pending();
 void begin_pipeline_pending_frame();
 // Only guest GX2Flush uses this asynchronous path. flush() remains a drain for

@@ -16,10 +16,12 @@ void start_pipeline_worker(VkDevice device, PipelineRecipeFingerprint fingerprin
 bool take_warm_pipeline(const std::vector<uint8_t>& key,
     const std::array<std::vector<uint32_t>, 2>& spirv,
     const std::array<std::vector<VkDescriptorSetLayoutBinding>, 2>& descriptors,
-    bool dynamicUniforms, WarmPipeline& out);
+    bool dynamicUniforms, const GraphicsPipelineState& currentState, WarmPipeline& out);
 void remember_pipeline_recipe(std::shared_ptr<PipelineRecipe> recipe);
 // Explicit checkpoint/shutdown only: joins the worker and writes local recipes.
 void save_pipeline_recipes();
+// Save current dirty revision without stopping compiler or periodic persistence.
+void checkpoint_pipeline_recipes();
 struct PipelineWarmupResult { size_t ready = 0, failed = 0; };
 // Offline only, caller resolves all shader identities/layouts on render thread.
 // Joins startup, then a worker owns this immutable local-SPIR-V batch.

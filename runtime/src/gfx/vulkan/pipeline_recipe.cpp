@@ -202,8 +202,14 @@ template<class A> void recipe_fields(A& a, PipelineRecipe& recipe, Parts& parts,
   if (dynamic > 1) throw std::runtime_error("invalid uniform layout flag");
   if constexpr (std::is_same_v<A, Reader>) recipe.dynamicUniforms = dynamic != 0;
   for (size_t stage = 0; stage < 2; ++stage) {
-    vector(a, recipe.spirv[stage], 262144);
-    if (codeFree ? !recipe.spirv[stage].empty() : !valid_spirv(recipe.spirv[stage])) throw std::runtime_error("invalid recipe SPIR-V");
+    if constexpr (std::is_same_v<A, Reader>) vector(a, recipe.spirv[stage], 262144);
+    else {
+      const auto& words=recipe.words(stage);
+      if(words.size()>262144) throw std::runtime_error("shader word limit");
+      a.scalar(uint32_t(words.size()));
+      for(auto word:words) a.scalar(word);
+    }
+    if (codeFree ? !recipe.words(stage).empty() : !valid_spirv(recipe.words(stage))) throw std::runtime_error("invalid recipe SPIR-V");
     auto& bindings = recipe.descriptors[stage];
     uint32_t count = bindings.size();
     if constexpr (std::is_same_v<A, Reader>) { count = a.count(128); bindings.resize(count); }
@@ -221,6 +227,15 @@ template<class A> void recipe_fields(A& a, PipelineRecipe& recipe, Parts& parts,
   }
   parts.visit(a); parts.validate();
 }
+}
+std::vector<uint8_t> encode_pipeline_fixed_state(const GraphicsPipelineState& state) {
+  auto snapshot = state;
+  Parts parts(snapshot.get());
+  Writer out;
+  out.scalar(snapshot.get()->flags);
+  out.scalar(snapshot.get()->pVertexInputState->flags);
+  parts.visit(out); parts.validate();
+  return std::move(out.bytes);
 }
 std::vector<uint8_t> encode_pipeline_recipe(PipelineRecipe& recipe) {
   if (!recipe.state) throw std::runtime_error("missing pipeline recipe state");
@@ -256,7 +271,7 @@ std::vector<uint8_t> encode_pipeline_recipes(const PipelineRecipeFingerprint& fi
   for (const auto& recipe : recipes) {
     size_t size = 8192 + recipe->key.size() * 4;
     for (size_t stage=0;stage<2;++stage)
-      size += recipe->spirv[stage].size()*4 + recipe->descriptors[stage].size()*16;
+      size += recipe->words(stage).size()*4 + recipe->descriptors[stage].size()*16;
     estimate += std::min(size, maxBytes - std::min(estimate,maxBytes));
   }
   out.bytes.reserve(estimate); out.bytes.resize(64);
@@ -282,12 +297,14 @@ std::vector<std::shared_ptr<PipelineRecipe>> decode_pipeline_recipes(
   if (checksum != crc32(0, bytes.data() + 64, bytes.size() - 64)) throw std::runtime_error("pipeline recipe checksum mismatch");
   std::vector<std::shared_ptr<PipelineRecipe>> recipes;
   std::unordered_set<std::string> keys;
+  RecipeShaderPool shaderPool;
   for (uint32_t i = 0; i < count; ++i) {
     size_t size = in.count(4 * 1024 * 1024);
     if (size > bytes.size() - in.at) throw std::runtime_error("truncated pipeline database record");
     auto recipe = decode_pipeline_recipe({bytes.begin() + in.at, bytes.begin() + in.at + size});
     if (!keys.emplace(reinterpret_cast<const char*>(recipe->key.data()), recipe->key.size()).second)
       throw std::runtime_error("duplicate pipeline recipe key");
+    shaderPool.freeze(*recipe);
     recipes.push_back(std::move(recipe));
     in.at += size;
   }

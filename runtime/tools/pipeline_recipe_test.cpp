@@ -5,6 +5,7 @@
 #include <fstream>
 #include <chrono>
 #include <cstdio>
+#include <unordered_set>
 #ifndef _WIN32
 #include <sys/resource.h>
 #endif
@@ -47,8 +48,12 @@ int main(int argc, char** argv) {
     }
     const auto start=std::chrono::steady_clock::now();
     auto recipes=decode_pipeline_recipes(fingerprint,bytes);
-    size_t words=0;
-    for(const auto& recipe:recipes) for(const auto& stage:recipe->spirv) words+=stage.size();
+    size_t words=0,uniqueWords=0;
+    std::unordered_set<const void*> unique;
+    for(const auto& recipe:recipes) for(size_t stage=0;stage<2;++stage) {
+      const auto& code=recipe->words(stage); words+=code.size();
+      if(unique.insert(code.data()).second) uniqueWords+=code.size();
+    }
     auto encoded=std::string(argv[1]) == "--profile-decode" ? std::vector<uint8_t>{} : encode_pipeline_recipes(fingerprint,recipes);
     const auto elapsed=std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now()-start).count();
     uint64_t rss=0;
@@ -58,7 +63,7 @@ int main(int argc, char** argv) {
     rss*=1024;
 #endif
 #endif
-    std::printf("recipes=%zu bytes=%zu spirv_bytes=%zu decode_encode_us=%lld peak_rss_bytes=%llu\n",recipes.size(),bytes.size(),words*4,(long long)elapsed,(unsigned long long)rss);
+    std::printf("recipes=%zu bytes=%zu spirv_bytes=%zu unique_spirv_bytes=%zu decode_encode_us=%lld peak_rss_bytes=%llu\n",recipes.size(),bytes.size(),words*4,uniqueWords*4,(long long)elapsed,(unsigned long long)rss);
     return 0;
   }
   auto recipe = std::make_shared<PipelineRecipe>();
@@ -72,6 +77,22 @@ int main(int argc, char** argv) {
   for (int stage = 0; stage < 2; ++stage)
     recipe->descriptors[stage].push_back({7, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1,
       VkShaderStageFlags(stage ? VK_SHADER_STAGE_FRAGMENT_BIT : VK_SHADER_STAGE_VERTEX_BIT), nullptr});
+  const auto fixed = encode_pipeline_fixed_state(*recipe->state);
+  auto fixed_variant = [&](auto mutate) {
+    auto snapshot = *recipe->state;
+    auto ci = *snapshot.get();
+    mutate(ci);
+    GraphicsPipelineState changed(ci);
+    assert(encode_pipeline_fixed_state(changed) != fixed);
+  };
+  // Same shaders and descriptor layout cannot authorize stale fixed state.
+  fixed_variant([](auto& ci) { const_cast<VkPipelineDepthStencilStateCreateInfo*>(ci.pDepthStencilState)->depthWriteEnable = VK_FALSE; });
+  fixed_variant([](auto& ci) { const_cast<VkPipelineColorBlendAttachmentState*>(ci.pColorBlendState->pAttachments)->colorWriteMask = 15; });
+  fixed_variant([](auto& ci) { const_cast<VkVertexInputBindingDescription*>(ci.pVertexInputState->pVertexBindingDescriptions)->stride = 32; });
+  fixed_variant([](auto& ci) { auto* rc = const_cast<VkPipelineRenderingCreateInfo*>(static_cast<const VkPipelineRenderingCreateInfo*>(ci.pNext)); const_cast<VkFormat*>(rc->pColorAttachmentFormats)[0] = VK_FORMAT_B8G8R8A8_UNORM; });
+  auto identical = *recipe->state;
+  identical.set_stage_module(0, reinterpret_cast<VkShaderModule>(uintptr_t(17)));
+  assert(encode_pipeline_fixed_state(identical) == fixed); // handles never enter identity
   auto encoded = encode_pipeline_recipe(*recipe);
   // Portable state has the exact fixed-state wire fields, with no shader words.
   auto portable = encoded;
@@ -97,6 +118,16 @@ int main(int argc, char** argv) {
   rejects([&] { decode_pipeline_recipe(portable); });
   codeFree->spirv = recipe->spirv; // Only locally resolved words make a native recipe.
   assert(encode_pipeline_recipe(*codeFree) == encoded);
+  RecipeShaderPool pool;
+  auto sharedA=decode_pipeline_recipe(encoded), sharedB=decode_pipeline_recipe(encoded);
+  pool.freeze(*sharedA); pool.freeze(*sharedB);
+  assert(sharedA->sharedSpirv[0] == sharedB->sharedSpirv[0]);
+  assert(sharedA->spirv[0].empty() && sharedB->spirv[1].empty());
+  assert(encode_pipeline_recipe(*sharedA)==encoded);
+  auto distinct=decode_pipeline_recipe(encoded);
+  distinct->spirv[0][3]=2; pool.freeze(*distinct);
+  assert(distinct->sharedSpirv[0] != sharedA->sharedSpirv[0]);
+  assert(distinct->sharedSpirv[1] == sharedA->sharedSpirv[1]);
   auto restored = decode_pipeline_recipe(encoded);
   recipe.reset(); // No pointer in the decoded state may borrow from the original.
   assert(restored->key[207] == 207);

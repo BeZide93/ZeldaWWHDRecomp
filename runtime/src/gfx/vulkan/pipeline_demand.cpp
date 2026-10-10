@@ -80,7 +80,7 @@ void run(Compiler& c) {
       info.initialDataSize = 0; info.pInitialData = nullptr;
       cacheResult = vkCreatePipelineCache(c.device, &info, nullptr, &c.cache);
     }
-    c.seed.clear();
+    std::vector<uint8_t>().swap(c.seed);
   }
   for (;;) {
     std::shared_ptr<Job> job;

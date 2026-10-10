@@ -43,7 +43,11 @@ public:
 template<class Recipe, class Words, class Descriptors>
 bool portable_recipe_matches(const Recipe& recipe, const Words& words,
     const Descriptors& descriptors, bool dynamicUniforms) {
-  if (recipe.spirv != words || recipe.dynamicUniforms != dynamicUniforms) return false;
+  if (recipe.dynamicUniforms != dynamicUniforms) return false;
+  for(size_t stage=0;stage<2;++stage) {
+    if constexpr (requires { recipe.words(stage); }) { if(recipe.words(stage)!=words[stage]) return false; }
+    else if(recipe.spirv[stage]!=words[stage]) return false;
+  }
   for (size_t stage=0;stage<2;++stage) {
     const auto& a=recipe.descriptors[stage]; const auto& b=descriptors[stage];
     if (a.size()!=b.size()) return false;

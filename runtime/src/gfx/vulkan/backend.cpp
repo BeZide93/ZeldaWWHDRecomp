@@ -1,3 +1,4 @@
+#include "atomic_temporary.h"
 #include "../../audio_out.h"
 #ifndef VK_ENABLE_BETA_EXTENSIONS
 #define VK_ENABLE_BETA_EXTENSIONS
@@ -17,6 +18,7 @@
 #include <jni.h>
 #endif
 #include "backend.h"
+#include "../../build_info.h"
 #include "deferred_commands.h"
 #include "deferred_dispatch.h"
 #include "bc_decode.h"
@@ -81,7 +83,7 @@
 #endif
 #include <vulkan/vulkan_beta.h>
 
-namespace gx2 { uint64_t flips_presented(); void checkpoint_vulkan_caches(); }
+namespace gx2 { uint64_t flips_presented(); void checkpoint_vulkan_caches(); void shutdown_vulkan_caches(); }
 #include "../../interp.h"
 
 namespace gfxvk {
@@ -165,7 +167,9 @@ bool unpack_pipeline_cache(std::vector<uint8_t>& file) {
   return compatible_pipeline_cache(file);
 }
 void init_pipeline_cache() try {
-  if (const char* explicitPath=std::getenv("WWHD_VK_PIPELINE_CACHE")) {
+  const auto explicitStorage=path_environment_utf8("WWHD_VK_PIPELINE_CACHE");
+  const auto shaderStorage=path_environment_utf8("WWHD_SHADER_CACHE");
+  if (const char* explicitPath=explicitStorage ? explicitStorage->c_str() : nullptr) {
     if (std::strcmp(explicitPath,"0")) {
       pipelineCachePath=explicitPath;
 #ifdef __ANDROID__
@@ -176,7 +180,7 @@ void init_pipeline_cache() try {
       pipelineCachePath = drivers::pipeline_directory()+"/"+key;
 #endif
     }
-  } else if (const char* shaderPath=std::getenv("WWHD_SHADER_CACHE");
+  } else if (const char* shaderPath=shaderStorage ? shaderStorage->c_str() : nullptr;
              !shaderPath || std::strcmp(shaderPath,"0")) {
     char ids[32];
     std::snprintf(ids,sizeof ids,"vulkan-%08x-%08x-",R.properties.vendorID,R.properties.deviceID);
@@ -205,11 +209,11 @@ void init_pipeline_cache() try {
   std::vector<uint8_t> bytes;
   if (!pipelineCachePath.empty()) {
     std::error_code ec;
-    uintmax_t size=std::filesystem::file_size(pipelineCachePath,ec);
+    uintmax_t size=std::filesystem::file_size(std::filesystem::u8path(pipelineCachePath),ec);
     if (!ec && size>=pipelineCacheWrapperSize+16+VK_UUID_SIZE &&
         size<=maxPipelineCacheBytes+pipelineCacheWrapperSize) {
       bytes.resize(size);
-      FILE* file=std::fopen(pipelineCachePath.c_str(),"rb");
+      FILE* file=open_utf8_file(pipelineCachePath,"rb");
       if (file) {
         if (std::fread(bytes.data(),1,bytes.size(),file)!=bytes.size() ||
             std::fgetc(file)!=EOF || std::ferror(file)) bytes.clear();
@@ -243,15 +247,23 @@ void init_pipeline_cache() try {
     put(8, R.properties.driverVersion);
     std::memcpy(fingerprint.data() + 12, R.properties.pipelineCacheUUID, VK_UUID_SIZE);
     uint64_t features = pipeline_cache_checksum(reinterpret_cast<const uint8_t*>(&R.enabledFeatures), sizeof R.enabledFeatures);
+    // Local recipes are runtime-build-specific as well as device-specific.
+    // The full current fixed state is independently checked at handoff.
+    for (const char* tag : {build::commit(), build::version(), WWHD_PIPELINE_RUNTIME_ID}) {
+      for (const unsigned char* c = reinterpret_cast<const unsigned char*>(tag); *c; ++c)
+        features = (features ^ *c) * 1099511628211ull;
+      features = (features ^ 0xffu) * 1099511628211ull;
+    }
     for (int i = 0; i < 8; ++i) fingerprint[28 + i] = uint8_t(features >> (8 * i));
     put(36, R.properties.limits.maxDescriptorSetUniformBuffersDynamic);
-    put(40, 2); // Portable content IDs, exact descriptors and fixed-state recipe schema.
+    put(40, 3); // Runtime-build identity, portable content IDs, exact descriptors and fixed-state recipe schema.
     put(44, (R.portabilitySubset ? 1u : 0u) | (R.separateStencilMaskRef ? 2u : 0u) |
         (R.constantAlphaColorBlendFactors ? 4u : 0u) | (R.vertexAttributeAccessBeyondStride ? 8u : 0u));
     const char* warmup = std::getenv("WWHD_VK_PIPELINE_WARMUP");
     if (!warmup || std::strcmp(warmup, "0")) try {
+      const auto headstart=path_environment_utf8("WWHD_HEADSTART");
       start_pipeline_worker(R.device, fingerprint, pipelineCachePath + ".recipes", bytes,
-          std::getenv("WWHD_HEADSTART") ? std::getenv("WWHD_HEADSTART") : config::game_dir + "/shadercache/headstart.bin");
+          headstart ? *headstart : config::game_dir + "/shadercache/headstart.bin");
     } catch (const std::exception& error) {
       LOG("[vulkan warmup] could not start worker: %s", error.what());
     }
@@ -301,11 +313,10 @@ PipelineCacheWriteResult write_pipeline_cache(std::vector<uint8_t> bytes,
     result.checksumMs=std::chrono::duration<double,std::milli>(
         std::chrono::steady_clock::now()-start).count();
     std::error_code ec;
-    auto parent=std::filesystem::path(path).parent_path();
+    auto parent=std::filesystem::u8path(path).parent_path();
     if (!parent.empty()) std::filesystem::create_directories(parent,ec);
     if (ec) exception_report::raise(ec.message());
-    temporary=path+".tmp-"+std::to_string(start.time_since_epoch().count());
-    FILE* file=std::fopen(temporary.c_str(),"wb");
+    FILE* file=open_atomic_temporary(path,temporary);
     if (file) {
       bool written=std::fwrite(wrapper.data(),1,wrapper.size(),file)==wrapper.size();
       if (written) written=std::fwrite(bytes.data(),1,bytes.size(),file)==bytes.size();
@@ -313,13 +324,13 @@ PipelineCacheWriteResult write_pipeline_cache(std::vector<uint8_t> bytes,
       if (written) result.written=host::replace_file(temporary,path);
     }
     if (!result.written) {
-      std::filesystem::remove(temporary,ec);
+      std::filesystem::remove(std::filesystem::u8path(temporary),ec);
       result.error="file write or replacement failed";
     }
   } catch (const std::exception& error) {
     result.error=error.what();
     if (!temporary.empty()) {
-      std::error_code ec;std::filesystem::remove(temporary,ec);
+      std::error_code ec;std::filesystem::remove(std::filesystem::u8path(temporary),ec);
     }
   }
   result.elapsedMs=std::chrono::duration<double,std::milli>(
@@ -367,11 +378,12 @@ void checkpoint_pipeline_cache() try {
   LOG("[vulkan cache] checkpoint skipped after error: %s",error.what());
 }
 } // namespace
-void save_pipeline_cache() try {
+void save_pipeline_cache(bool shutdown) try {
   // Explicit shutdown/checkpoint waits before _Exit, then persists any newer
   // revision created while the periodic job was running.
   drain_pending_guest_pipelines();
-  save_pipeline_recipes();
+  if(shutdown) save_pipeline_recipes();
+  else checkpoint_pipeline_recipes();
   if (finish_pipeline_demand(R.pipelineCache)) R.pipelineCacheDirty = true;
   if (merge_pipeline_worker_cache(R.pipelineCache)) R.pipelineCacheDirty = true;
   poll_pipeline_cache_write(true);
@@ -2087,6 +2099,7 @@ static bool present(Screen &s) {
       s.layouts[index]=VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
       const VkQueue queue=R.secondaryQueue;
       secondaryPresentWorker->submit([draw=*draw,acquireSemaphore,finished,swapchain,presentCompletion,index,queue] {
+        IsolatedCommandDispatch isolated;
         auto& state=secondaryDrawing;
         vk_check(vkResetCommandPool(draw.device,state.pool,0),"reset secondary command pool");
         vk_check(vkResetDescriptorPool(draw.device,state.descriptors,0),"reset secondary descriptor pool");
@@ -3589,7 +3602,13 @@ void init() {
 }
 #endif
 void save_renderer_caches() {
-  // Called during orderly shutdown under the renderer execution lock.
+  // Save-only checkpoint: the guest continues after test-end checkpoints.
+  wait_idle();
+  vk::save_shader_cache();
+  save_pipeline_cache(false);
+}
+void shutdown_renderer_caches() {
+  // Destructive teardown is reserved for orderly shutdown under execution lock.
   reset_feedback_images();
   wait_idle();
   bc_decode_shutdown();
@@ -3870,7 +3889,7 @@ static void test_fullscreen_key() {
 static void quit_game() {
   audio::finish_dump();  // _Exit bypasses atexit handlers
   screenshot::finish();  // the screenshots taken are written first
-  gx2::checkpoint_vulkan_caches();
+  gx2::shutdown_vulkan_caches();
   std::_Exit(0);
 }
 static bool close_request(const SDL_Event& event) {

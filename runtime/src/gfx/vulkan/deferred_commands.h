@@ -10,10 +10,22 @@
 
 namespace gfxvk {
 class DeferredCommands;
-inline thread_local DeferredCommands* active_deferred_commands=nullptr;
+// Guest recording and cross-thread checkpoint/quit hold GX2's execution mutex.
+inline DeferredCommands* active_deferred_commands=nullptr;
+// Isolated presentation owns a separate command pool/queue outside that mutex.
+// Bypass before reading the global pointer, avoiding both capture and a data race.
+inline thread_local bool isolated_command_dispatch=false;
+struct IsolatedCommandDispatch {
+    bool previous=isolated_command_dispatch;
+    IsolatedCommandDispatch() { isolated_command_dispatch=true; }
+    ~IsolatedCommandDispatch() { isolated_command_dispatch=previous; }
+};
+inline DeferredCommands* dispatch_recorder() {
+    return isolated_command_dispatch ? nullptr : active_deferred_commands;
+}
 // Owns CPU command arguments, not Vulkan handles or pointed-to GPU resources.
 // Caller retains the active submission pools/uploads/retirement lists until emission.
-// One recorder per recording thread; no cross-thread synchronization is implied.
+// One renderer-global recorder; caller serializes access with the execution mutex.
 class DeferredCommands {
 public:
     struct Limits { size_t maxCommands=65536, maxPayloadBytes=4*1024*1024; };

@@ -1,3 +1,4 @@
+#include "atomic_temporary.h"
 // Real Latte microcode -> Cemu GLSL -> SPIR-V for the Vulkan backend.
 #include "shaders.h"
 #include "pipeline_identity.h"
@@ -181,18 +182,20 @@ void initialize_disk_cache() {
     diskInitialized=true;
     auto start=std::chrono::steady_clock::now();
     try {
-        const char* overridePath=getenv("WWHD_VK_SHADER_CACHE");
-        const char* general=getenv("WWHD_SHADER_CACHE");
+        const auto overrideStorage=path_environment_utf8("WWHD_VK_SHADER_CACHE");
+        const auto generalStorage=path_environment_utf8("WWHD_SHADER_CACHE");
+        const char* overridePath=overrideStorage ? overrideStorage->c_str() : nullptr;
+        const char* general=generalStorage ? generalStorage->c_str() : nullptr;
         if((overridePath && !strcmp(overridePath,"0")) ||
            (!overridePath && general && !strcmp(general,"0"))) return;
         std::string dir=overridePath ? overridePath : host::config_dir()+"/shadercache/vulkan-shaders";
         if(dir.empty()) return;
         diskPath=dir+"/spirv.bin";
         std::error_code ec;
-        auto length=std::filesystem::file_size(diskPath,ec);
+        auto length=std::filesystem::file_size(std::filesystem::u8path(diskPath),ec);
         if(ec || length<40 || length>maxCacheBytes) return;
         std::vector<uint8_t> bytes(static_cast<size_t>(length));
-        FILE* file=fopen(diskPath.c_str(),"rb");
+        FILE* file=open_utf8_file(diskPath,"rb");
         if(!file) return;
         bool read=fread(bytes.data(),1,bytes.size(),file)==bytes.size() && fgetc(file)==EOF && !ferror(file);
         fclose(file);
@@ -1138,11 +1141,10 @@ DiskSaveResult write_shader_snapshot(DiskSnapshot snapshot,std::string path,uint
         cache_put(header,cache_checksum(payload.data(),payload.size()),8);
         cache_put(header,snapshot.size(),8);
         std::error_code ec;
-        auto parent=std::filesystem::path(path).parent_path();
+        auto parent=std::filesystem::u8path(path).parent_path();
         if(!parent.empty()) std::filesystem::create_directories(parent,ec);
         if(ec) return finish();
-        temporary=path+".tmp-"+std::to_string(start.time_since_epoch().count());
-        FILE* file=fopen(temporary.c_str(),"wb");
+        FILE* file=open_atomic_temporary(path,temporary);
         if(!file) return finish();
         bool wrote=fwrite(header.data(),1,header.size(),file)==header.size() &&
                    fwrite(payload.data(),1,payload.size(),file)==payload.size();
@@ -1150,7 +1152,7 @@ DiskSaveResult write_shader_snapshot(DiskSnapshot snapshot,std::string path,uint
         result.saved=wrote && host::replace_file(temporary,path);
         if(result.saved) result.bytes=header.size()+payload.size();
     } catch(...) { result.saved=false; }
-    if(!result.saved && !temporary.empty()) { std::error_code ec; std::filesystem::remove(temporary,ec); }
+    if(!result.saved && !temporary.empty()) { std::error_code ec; std::filesystem::remove(std::filesystem::u8path(temporary),ec); }
     return finish();
 }
 bool finish_disk_save(bool wait) {

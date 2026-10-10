@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdio>
+#include "atomic_temporary.h"
 #include <cstdint>
 #include <string>
 #include <filesystem>
@@ -20,16 +21,16 @@ struct RecipeSaveRevision {
   bool dirty() const { return current != saved; }
   void complete(uint64_t snapshot) { saved = snapshot; }
 };
-// One writer per destination. The last complete database survives allocation,
+// Independent staged files per writer. The last complete database survives allocation,
 // write, sync or rename failure; never expose a partially written recipe file.
 template<class Replace>
 void atomic_recipe_write(const std::string& path, std::span<const uint8_t> bytes, Replace replace) {
-  const auto temporary = path + ".tmp";
+  std::string temporary;
   FILE* file = nullptr;
   try {
-    auto parent = std::filesystem::path(path).parent_path();
+    auto parent = std::filesystem::u8path(path).parent_path();
     if (!parent.empty()) std::filesystem::create_directories(parent);
-    file = std::fopen(temporary.c_str(), "wb");
+    file = open_atomic_temporary(path, temporary);
     if (!file) throw std::runtime_error("cannot open recipe output");
     if (std::fwrite(bytes.data(), 1, bytes.size(), file) != bytes.size() || std::fflush(file))
       throw std::runtime_error("recipe write failed");
@@ -42,7 +43,7 @@ void atomic_recipe_write(const std::string& path, std::span<const uint8_t> bytes
     if (closed || !replace(temporary, path)) throw std::runtime_error("recipe replace failed");
   } catch (...) {
     if (file) std::fclose(file);
-    std::error_code ignored; std::filesystem::remove(temporary, ignored);
+    std::error_code ignored; std::filesystem::remove(std::filesystem::u8path(temporary), ignored);
     throw;
   }
 }

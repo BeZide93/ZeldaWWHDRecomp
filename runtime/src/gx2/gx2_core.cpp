@@ -316,14 +316,14 @@ static void emit_host(Op op, std::initializer_list<uint32> payload) {
 
 #ifdef WWHD_HAS_VULKAN
 void checkpoint_vulkan_caches() {
-    // Wait for queued work, then exclude further renderer mutations while the
-    // SDL thread writes the final cache checkpoint during orderly shutdown.
     render_sync();
     std::lock_guard<std::recursive_mutex> lk(g_exec_mutex);
-    host::with_autorelease_pool([] {
-        gfxvk::wait_idle();
-        gfxvk::save_renderer_caches();
-    });
+    host::with_autorelease_pool([] { gfxvk::save_renderer_caches(); });
+}
+void shutdown_vulkan_caches() {
+    render_sync();
+    std::lock_guard<std::recursive_mutex> lk(g_exec_mutex);
+    host::with_autorelease_pool([] { gfxvk::shutdown_renderer_caches(); });
 }
 #endif
 

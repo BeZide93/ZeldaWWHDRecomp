@@ -1,6 +1,7 @@
 // Synthetic Vulkan handles and API callbacks only; never loads a driver or game.
 #include "gfx/vulkan/deferred_commands.h"
 #include "gfx/vulkan/deferred_dispatch.h"
+#include "gfx/vulkan/pipeline_failure.h"
 #include <cassert>
 #include <array>
 #include <cstdint>
@@ -11,6 +12,7 @@
 #include <cstdlib>
 #include <new>
 #include <memory>
+#include <mutex>
 
 static std::atomic<bool> failNextAllocation{false};
 void* operator new(std::size_t size) {
@@ -240,5 +242,45 @@ void owned_pending_emission() {
     recorder.emit_exact();assert(calls.empty());
 }
 
+void cross_thread_checkpoint_and_isolated_dispatch() {
+    std::mutex execution;
+    gfxvk::DeferredCommands recorder;
+    {
+      std::lock_guard lock(execution);
+      recorder.start_capture();
+      gfxvk::record::vkCmdDraw(cmd,3,1,0,0);
+    }
+    // Independent presentation pool must never capture into the guest tail.
+    std::thread presentation([&] {
+      gfxvk::IsolatedCommandDispatch isolated;
+      assert(gfxvk::dispatch_recorder()==nullptr);
+      gfxvk::record::vkCmdDraw(cmd,3,1,0,0);
+    });
+    presentation.join();assert(calls==std::vector<int>{1});calls.clear();
+    // Models SDL checkpoint/quit after acquiring the GX2 execution mutex.
+    std::thread checkpoint([&] {
+      std::lock_guard lock(execution);
+      assert(gfxvk::active_deferred_commands==&recorder);
+      gfxvk::active_deferred_commands->finish_exact();
+      assert(calls==std::vector<int>{1});
+      calls.push_back(99); // ending/submitting the native buffer follows its tail
+    });
+    checkpoint.join();assert((calls==std::vector<int>{1,99}));calls.clear();
+    assert(!recorder.capturing()&&gfxvk::active_deferred_commands==nullptr);
+    // A failed native pipeline is terminal: binding/draw are both suppressed,
+    // while subsequent successful prepared commands still emit once.
+    assert(gfxvk::recoverable_pipeline_failure(VK_ERROR_UNKNOWN));
+    assert(gfxvk::recoverable_pipeline_failure(VK_ERROR_INVALID_SHADER_NV));
+    assert(!gfxvk::recoverable_pipeline_failure(VK_SUCCESS));
+    assert(!gfxvk::recoverable_pipeline_failure(VK_ERROR_OUT_OF_HOST_MEMORY));
+    assert(!gfxvk::recoverable_pipeline_failure(VK_ERROR_OUT_OF_DEVICE_MEMORY));
+    assert(!gfxvk::recoverable_pipeline_failure(VK_ERROR_DEVICE_LOST));
+    recorder.start_capture();bool pipelineReady=false;
+    gfxvk::record::emit_owned([&] { pipelineReady=false; });
+    gfxvk::record::emit_owned([&] { if(pipelineReady)gfxvk::vkCmdDraw(cmd,3,1,0,0); });
+    gfxvk::record::vkCmdDraw(cmd,3,1,0,0);
+    recorder.finish_exact();assert(calls==std::vector<int>{1});calls.clear();
 }
-int main() { initialize();inline_dispatch();ownership_and_order();fallback_and_bounds();allocation_failure_falls_back();callback_failure_preserves_tail();owned_submission_boundaries();owned_pending_emission(); }
+
+}
+int main() { initialize();inline_dispatch();ownership_and_order();fallback_and_bounds();allocation_failure_falls_back();callback_failure_preserves_tail();owned_submission_boundaries();owned_pending_emission();cross_thread_checkpoint_and_isolated_dispatch(); }
