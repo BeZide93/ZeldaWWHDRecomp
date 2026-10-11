@@ -56,4 +56,7 @@
     <string name="setup_play">Jogar</string>
     <string name="setup_details_show">Detalhes</string>
     <string name="setup_details_hide">Esconder detalhes</string>
+    <string name="setup_continue_anyway">Continuar mesmo assim</string>
+    <string name="setup_shaders">Preparando os gráficos…</string>
+    <string name="setup_shaders_detail">Isso deixa os primeiros minutos de jogo mais suaves. Voltar pula esta etapa.</string>
 </resources>

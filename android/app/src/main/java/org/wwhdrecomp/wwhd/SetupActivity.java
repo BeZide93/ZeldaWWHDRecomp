@@ -28,6 +28,8 @@ public class SetupActivity extends Activity {
     private Button details;
     private Button resume;
     private Button pause;
+    private Button continueAnyway;
+    private String continueAction;
     private Button play;
     private Button disc;
     private Button common;
@@ -36,6 +38,7 @@ public class SetupActivity extends Activity {
     private boolean phoneSetup;
     private String actionMessage;
     private String pickerJob;
+    private String shaderWarmJob;
     private static final int FOLDER = 10, ARCHIVE = 11, IMAGE = 12, DISC = 13, COMMON = 14, RESTORE = 15;
     static final String EXTRA_SHOW_SETUP = "org.wwhdrecomp.wwhd.SHOW_SETUP";
 
@@ -133,6 +136,8 @@ public class SetupActivity extends Activity {
         common = button(layout, getString(R.string.setup_common_key), () -> pick(COMMON));
         resume = button(layout, getString(R.string.setup_start), () -> control(SetupService.RESUME));
         pause = button(layout, getString(R.string.setup_pause), () -> control(SetupService.PAUSE));
+        continueAnyway = button(layout, getString(R.string.setup_continue_anyway), () -> { if (continueAction != null) control(continueAction); });
+        continueAnyway.setVisibility(android.view.View.GONE);
         details = new Button(this, null, android.R.attr.borderlessButtonStyle);
         details.setText(R.string.setup_details_show);
         layout.addView(details);
@@ -327,10 +332,25 @@ public class SetupActivity extends Activity {
                     R.string.setup_paused_detail : R.string.setup_paused_auto_detail), -2);
                 return;
             }
+            case "warming shaders": phase(getString(R.string.setup_shaders), getString(R.string.setup_shaders_detail), -1); return;
             case "failed": phase(getString(R.string.setup_failed), getString(R.string.setup_failed_detail), -2); return;
             case "complete": phase(getString(R.string.setup_ready), getString(R.string.setup_ready_detail), 1000); return;
             default: phase(getString(R.string.setup_working), null, -1);
         }
+    }
+
+    /** Current {thermal status, battery temperature in tenths of °C}; -1 where unavailable. */
+    private int[] sensorReadings() {
+        int thermal = -1, temperature = -1;
+        try {
+            android.os.PowerManager power = getSystemService(android.os.PowerManager.class);
+            if (power != null) thermal = power.getCurrentThermalStatus();
+        } catch (RuntimeException ignored) { /* shown as n/a */ }
+        try {
+            Intent battery = registerReceiver(null, new android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED));
+            if (battery != null) temperature = battery.getIntExtra(android.os.BatteryManager.EXTRA_TEMPERATURE, -1);
+        } catch (RuntimeException ignored) { /* shown as n/a */ }
+        return new int[] {thermal, temperature};
     }
 
     private final Runnable refresh = new Runnable() {
@@ -366,7 +386,8 @@ public class SetupActivity extends Activity {
                 play.setEnabled(new File(AndroidGame.storage(SetupActivity.this), "active.json").isFile() ||
                     (external != null && new File(external, "game/code/cking.rpx").isFile()));
                 String hostName = hostState == null ? (job == null ? "" : "selected") : hostState.optString("state");
-                boolean working = hostName.equals("importing") || hostName.equals("preparing") || hostName.equals("running");
+                boolean working = hostName.equals("importing") || hostName.equals("preparing") || hostName.equals("running") ||
+                    hostName.equals("warming shaders");
                 show(play, play.isEnabled() && !working);
                 show(choose, phoneSetup && !working);
                 setTextIfChanged(choose, getString(job == null ? R.string.setup_choose : R.string.setup_choose_other));
@@ -385,7 +406,24 @@ public class SetupActivity extends Activity {
                     JSONObject value = host.isFile() ? SetupStore.read(host) : new JSONObject().put("state", "ready to start");
                     text = "Setup: " + value.getString("state");
                     if (value.optString("state").equals("complete")) offerShortcut();
-                    if (value.has("reason")) text += "\n" + SetupPolicy.description(value.getString("reason"));
+                    if (value.optString("state").equals("warming shaders")) play.setEnabled(false);
+                    if (value.optString("state").equals("warming shaders") &&
+                        !job.getAbsolutePath().equals(shaderWarmJob)) {
+                        shaderWarmJob = job.getAbsolutePath();
+                        startActivity(new Intent(SetupActivity.this, ShaderPrepareActivity.class)
+                            .putExtra("result", new File(job, "shader-warm-result.json").getAbsolutePath()));
+                    }
+                    String reason = value.optString("state").equals("paused") ? value.optString("reason", null) : null;
+                    if (value.has("reason")) {
+                        int[] sensors = sensorReadings();
+                        text += "\n" + SetupPolicy.description(value.getString("reason"), sensors[0], sensors[1]);
+                    }
+                    if ("heat".equals(reason))
+                        text += "\nIf the phone does not feel hot, tap Continue anyway. Setup then ignores heat until this run ends; Android's critical heat level still pauses it.";
+                    else if (SetupPolicy.overridable(reason))
+                        text += "\nTap Continue anyway to run on battery until this run ends.";
+                    continueAction = !SetupPolicy.overridable(reason) ? null :
+                        reason.equals("heat") ? SetupService.CONTINUE_HEAT : SetupService.CONTINUE_BATTERY;
                     if (value.has("error")) text += "\n" + value.getString("error");
                     if (importing && !grants.contains(source.optString("uri")))
                         text += "\nDump access is missing. Restore access to the same selected dump if another file copy is needed. Completed private copies are retained.";
@@ -406,9 +444,13 @@ public class SetupActivity extends Activity {
                             SetupPolicy.compileProgress(event.optString("state"), event.optInt("compiled"), event.optInt("reused"),
                                 event.optInt("total"), event.optLong("eta_seconds", -1));
                         if (compiling != null) text += "\n" + compiling;
+                        else if (event != null && event.optString("stage").equals("shaders") && event.has("fraction"))
+                            text += "\nPreparing shaders: " + Math.round(100 * event.optDouble("fraction")) + "%\n" + event.optString("detail");
                         else if (event != null) text += "\n" + event.optString("stage", "setup") + ": " + event.optString("state");
                     }
                 }
+                if (job == null || !phoneSetup) continueAction = null;
+                continueAnyway.setVisibility(continueAction != null ? android.view.View.VISIBLE : android.view.View.GONE);
                 if (actionMessage != null) text += "\n" + actionMessage;
                 setTextIfChanged(status, text + "\n\n" + CHECKPOINTS);
             } catch (Exception failure) { setTextIfChanged(status, "Cannot read setup progress: " + failure.getMessage()); }

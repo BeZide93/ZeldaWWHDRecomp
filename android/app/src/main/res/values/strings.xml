@@ -57,4 +57,7 @@
     <string name="setup_play">Play</string>
     <string name="setup_details_show">Details</string>
     <string name="setup_details_hide">Hide details</string>
+    <string name="setup_continue_anyway">Continue anyway</string>
+    <string name="setup_shaders">Preparing the graphics…</string>
+    <string name="setup_shaders_detail">This makes the first minutes of play smoother. Back skips it.</string>
 </resources>
