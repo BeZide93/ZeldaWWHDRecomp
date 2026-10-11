@@ -89,6 +89,8 @@ struct Backups {
     std::string message;        // last action's result
     std::string restore_choice; // backup name awaiting the restore confirmation
     bool open_restore = false;
+    std::string delete_choice;  // backup name awaiting the delete confirmation
+    bool open_delete = false;
 };
 inline Backups backups;
 
@@ -139,10 +141,11 @@ inline bool backups_section(bool back) {
         }
     }
     if (list.empty()) ImGui::TextDisabled("No save backups yet.");
-    else if (ImGui::BeginTable("save_backups", 4, ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_SizingStretchProp)) {
+    else if (ImGui::BeginTable("save_backups", 5, ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_SizingStretchProp)) {
         ImGui::TableSetupColumn("When");
         ImGui::TableSetupColumn("Reason");
         ImGui::TableSetupColumn("Size");
+        ImGui::TableSetupColumn("");
         ImGui::TableSetupColumn("");
         ImGui::TableHeadersRow();
         for (const auto& info : list) {
@@ -158,6 +161,12 @@ inline bool backups_section(bool back) {
             ImGui::BeginDisabled(info.name == staged);
             if (ImGui::SmallButton("Restore")) { backups.restore_choice = info.name; backups.open_restore = true; }
             ImGui::EndDisabled();
+            ImGui::TableNextColumn();
+            ImGui::BeginDisabled(info.name == staged);
+            if (ImGui::SmallButton("Delete")) { backups.delete_choice = info.name; backups.open_delete = true; }
+            ImGui::EndDisabled();
+            if (info.name == staged && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+                ImGui::SetTooltip("Staged for restore. Cancel the restore to delete it.");
             ImGui::PopID();
         }
         ImGui::EndTable();
@@ -188,6 +197,30 @@ inline bool backups_section(bool back) {
                                   : error;
         }
         if (accept || cancel) { backups.restore_choice.clear(); ImGui::CloseCurrentPopup(); }
+        ImGui::EndPopup();
+    }
+    // delete confirmation
+    const char* delete_title = "Delete save backup##delete_confirm";
+    if (backups.open_delete) { ImGui::OpenPopup(delete_title); backups.open_delete = false; }
+    ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    if (ImGui::BeginPopupModal(delete_title, nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings)) {
+        std::string what = backups.delete_choice;
+        for (const auto& info : s.list()) if (info.name == backups.delete_choice) what = info.when() + " (" + info.description() + ")";
+        ImGui::PushTextWrapPos(ImGui::GetFontSize() * 30);
+        ImGui::TextWrapped("Backup of %s", what.c_str());
+        ImGui::TextWrapped("Delete this backup? This can't be undone.");
+        ImGui::PopTextWrapPos();
+        ImGui::Spacing();
+        bool accept = ImGui::Button("Delete", ImVec2(120, 0));
+        ImGui::SameLine();
+        bool cancel = ImGui::Button("Cancel", ImVec2(120, 0));
+        ImGui::SetItemDefaultFocus();  // keyboard and controller start on Cancel
+        if (back || ImGui::IsKeyPressed(ImGuiKey_Escape)) { cancel = true; accept = false; b_used = b_used || back; }
+        if (accept) {
+            std::string error;
+            backups.message = s.remove(backups.delete_choice, error) ? "Backup deleted." : error;
+        }
+        if (accept || cancel) { backups.delete_choice.clear(); ImGui::CloseCurrentPopup(); }
         ImGui::EndPopup();
     }
     return b_used;

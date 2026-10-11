@@ -92,6 +92,9 @@ public:
         fs::copy_file(from, to, fs::copy_options::none);
     };
     std::function<void(const std::string&)> log = [](const std::string& line) { fprintf(stderr, "%s\n", line.c_str()); };
+    // Used by remove(): the rename that takes a backup out of the list, then the removal of its files.
+    std::function<void(const fs::path&, const fs::path&)> move = [](const fs::path& from, const fs::path& to) { fs::rename(from, to); };
+    std::function<void(const fs::path&)> remove_tree = [](const fs::path& path) { fs::remove_all(path); };
 
     Store() = default;
     explicit Store(const fs::path& save_dir, const fs::path& backup_root = {}) { configure(save_dir, backup_root); }
@@ -285,6 +288,35 @@ public:
         return r;
     }
 
+    // Deletes one backup (manual or automatic) at the player's request. Only a complete backup this
+    // store made (backup.json) directly inside save-backups, never a link, never the one staged for
+    // restore. It is first renamed to a hidden name, so it leaves the list at once and an interrupted
+    // removal never leaves a half-deleted backup that still lists; leftovers are cleared later.
+    bool remove(const std::string& name, std::string& error) {
+        try {
+            need(configured(), "Save backups are unavailable");
+            need(valid_name(name), "Not a save backup");
+            const auto folder = root_ / name;
+            need(!fs::is_symlink(root_) && !fs::is_symlink(folder), "Not a save backup");
+            need(read_info(folder).has_value(), "Not a save backup (no backup.json)");
+            need(fs::canonical(folder).parent_path() == fs::canonical(root_), "Not a save backup");
+            need(name != pending(), "This backup is staged for restore; cancel the restore first");
+            auto hidden = unique(root_ / (".deleted-" + std::to_string(now()) + "-" + std::to_string(serial()++)));
+            move(folder, hidden);
+            cache_valid_ = false;
+            log("[save-backup] deleted " + name);
+            try { remove_tree(hidden); }
+            catch (const std::exception& e) { log("[save-backup] " + name + ": files are removed later (" + e.what() + ")"); }
+            error.clear();
+            return true;
+        } catch (const std::exception& e) {
+            error = std::string("Could not delete the backup: ") + e.what();
+            log("[save-backup] " + error);
+            cache_valid_ = false;
+            return false;
+        }
+    }
+
     // Keeps the newest kKeepAutomatic automatic backups (and always the one staged for restore).
     void prune() {
         auto keep = pending();
@@ -356,7 +388,8 @@ private:
     void cleanup_temporary() {
         std::error_code ec;
         for (const auto& entry : fs::directory_iterator(root_, ec))
-            if (entry.path().filename().string().starts_with(".tmp-")) remove_quietly(entry.path());
+            if (entry.path().filename().string().starts_with(".tmp-") || entry.path().filename().string().starts_with(".deleted-"))
+                remove_quietly(entry.path());
     }
     static std::pair<size_t, uint64_t> count(const fs::path& dir) {
         size_t files = 0;

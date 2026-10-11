@@ -1109,7 +1109,7 @@ add_executable(mod_experimental_test runtime/tools/mod_experimental_test.cpp run
 target_include_directories(mod_experimental_test PRIVATE runtime/src runtime/include)
 target_compile_options(mod_experimental_test PRIVATE -UNDEBUG)
 target_link_libraries(mod_experimental_test PRIVATE ZLIB::ZLIB Threads::Threads ${CMAKE_DL_LIBS})
-foreach(mode schema store unicode manager)
+foreach(mode schema store unicode delete manager)
   add_test(NAME mod_experimental_${mode} COMMAND mod_experimental_test ${mode})
 endforeach()
 

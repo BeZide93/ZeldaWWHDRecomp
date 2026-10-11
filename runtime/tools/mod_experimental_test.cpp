@@ -171,6 +171,56 @@ void store_rules() {
     std::cout << "backup naming, no overwrite, retention, staged restore, undo and failure paths passed\n";
 }
 
+void deletion() {
+    auto root = temp_root("wwhd-save-delete");
+    auto save = root / "save";
+    write(save / "user/cking.sav", "progress");
+    saves::Store store(save);
+    store.log = [](const std::string&) {};
+    std::string error;
+    auto manual = store.create("manual");
+    auto automatic = store.create("before-mod", "dragon");
+    auto staged = store.create("before-restore");
+    assert(manual.ok && automatic.ok && staged.ok && store.list().size() == 3);
+    auto hidden_leftovers = [&] {
+        size_t n = 0;
+        for (const auto& e : fs::directory_iterator(store.root())) if (e.path().filename().string().starts_with(".")) n++;
+        return n;
+    };
+    // manual and automatic backups can be deleted; the folder is gone and the list follows
+    assert(store.remove(manual.name, error) && !fs::exists(store.root() / manual.name));
+    assert(store.remove(automatic.name, error) && !fs::exists(store.root() / automatic.name));
+    assert(store.list().size() == 1 && hidden_leftovers() == 0);
+    // the backup staged for restore cannot be deleted
+    assert(store.restore(staged.name, error));
+    assert(!store.remove(staged.name, error) && error.find("staged for restore") != std::string::npos);
+    assert(fs::exists(store.root() / staged.name / "backup.json"));
+    assert(store.cancel_restore(error) && store.list().size() == 1);
+    // folders the store did not make, names outside save-backups and links are refused
+    write(store.root() / "my-notes/readme.txt", "mine");
+    assert(!store.remove("my-notes", error) && read(store.root() / "my-notes/readme.txt") == "mine");
+    write(root / "outside/backup.json", R"({"format_version":1,"reason":"manual","created":1})");
+    assert(!store.remove("../outside", error) && fs::exists(root / "outside/backup.json"));
+    assert(!store.remove("", error) && !store.remove(".", error) && !store.remove("..", error));
+    fs::create_directory_symlink(root / "outside", store.root() / "2026-01-01_00-00-00-manual");
+    assert(!store.remove("2026-01-01_00-00-00-manual", error));
+    assert(fs::exists(root / "outside/backup.json") && fs::is_symlink(store.root() / "2026-01-01_00-00-00-manual"));
+    fs::remove(store.root() / "2026-01-01_00-00-00-manual");
+    // a failed rename leaves the backup complete and listed
+    auto again = store.create("manual");
+    store.move = [](const fs::path&, const fs::path&) { throw std::runtime_error("permission denied"); };
+    assert(!store.remove(again.name, error) && error.find("permission denied") != std::string::npos);
+    assert(fs::exists(store.root() / again.name / "backup.json") && store.list().size() == 2);
+    // a removal interrupted after the rename: no longer listed, leftovers cleared on the next backup
+    store.move = [](const fs::path& from, const fs::path& to) { fs::rename(from, to); };
+    store.remove_tree = [](const fs::path&) { throw std::runtime_error("interrupted"); };
+    assert(store.remove(again.name, error) && store.list().size() == 1 && hidden_leftovers() == 1);
+    store.remove_tree = [](const fs::path& path) { fs::remove_all(path); };
+    assert(store.create("manual").ok && hidden_leftovers() == 0 && store.list().size() == 2);
+    fs::remove_all(root);
+    std::cout << "delete manual/automatic, staged refused, foreign/escaping/link refused, failures consistent passed\n";
+}
+
 void unicode_paths() {
     auto root = temp_root("wwhd-save-unicode");
     auto save = root / fs::path(u8"Später ゼルダ") / "save";
@@ -282,6 +332,7 @@ int main(int argc, char** argv) {
     if (mode == "schema" || mode == "all") schema();
     if (mode == "store" || mode == "all") store_rules();
     if (mode == "unicode" || mode == "all") unicode_paths();
+    if (mode == "delete" || mode == "all") deletion();
     if (mode == "manager" || mode == "all") manager_flow();
     return 0;
 }

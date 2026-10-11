@@ -176,7 +176,9 @@ the details in `backup.json`. A backup is written to a temporary folder and
 renamed when complete, and an existing backup is never overwritten. The newest
 10 automatic backups (before a mod, before a restore) are kept; manual backups
 are never deleted automatically, and folders you put there yourself are left
-alone.
+alone. **Delete** removes one backup, manual or automatic, after a confirmation
+("This can't be undone"); the backup staged for a restore cannot be deleted until
+that restore is cancelled.
 
 **Restore** asks for confirmation and then stages the restore: the game keeps
 its save files open while it runs, so the files are replaced at the next start,
