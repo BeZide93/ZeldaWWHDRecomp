@@ -35,6 +35,7 @@
 #include <filesystem>
 #include <stdexcept>
 #include <string>
+#include <unordered_set>
 #include <unordered_map>
 extern "C" uint64_t g_shader_state_gen;
 using namespace Latte;
@@ -1980,6 +1981,33 @@ void drain_pending_guest_pipelines() {
 }
 void reset_pipeline_lookup_cache() { lastPipelineLookup = {}; pipelineLookaside = {}; samplerMemo = {}; drawBatchState = {}; }
 uint64_t draw_batch_submissions() { return drawBatchSubmissions; }
+// WWHD_VK_TRACE_PASSES=1 (issue #144): log each new render pass shape once, just before the driver
+// sees it, so a crash inside vkCmdBeginRendering names the last pass in the crash report's log lines
+static void trace_pass(const std::array<Surface *, 8> &colors, uint32_t ncolor, const Surface *depth,
+                       uint32_t depthSlice, uint32_t width, uint32_t height) {
+  static const bool on = [] { const char *e = getenv("WWHD_VK_TRACE_PASSES"); return e && *e == '1'; }();
+  if (!on) return;
+  static std::unordered_set<std::string> seen;
+  std::string key = std::to_string(ncolor) + ":";
+  for (uint32_t i = 0; i < ncolor; ++i)
+    key += colors[i] ? std::to_string(colors[i]->fmt.pixel) + "/" + std::to_string(colors[i]->usage) + "," : "-,";
+  if (depth)
+    key += " d" + std::to_string(depth->fmt.pixel) + "/" + std::to_string(depth->usage) + "/" +
+           std::to_string(depth->arrayLayers) + "/" + std::to_string(depth->mips) + "/" +
+           std::to_string(depth->createFlags);
+  if (!seen.insert(key).second) return;
+  std::string text;
+  for (uint32_t i = 0; i < ncolor; ++i)
+    text += colors[i] ? " c" + std::to_string(i) + "=fmt" + std::to_string(colors[i]->fmt.pixel) + "/usage" +
+                            std::to_string(colors[i]->usage)
+                      : " c" + std::to_string(i) + "=none";
+  if (depth)
+    text += " depth=fmt" + std::to_string(depth->fmt.pixel) + "/usage" + std::to_string(depth->usage) +
+            "/layers" + std::to_string(depth->arrayLayers) + "/slice" + std::to_string(depthSlice) + "/mips" +
+            std::to_string(depth->mips) + "/flags" + std::to_string(depth->createFlags) +
+            (depth->fmt.stencil ? "/stencil" : "");
+  LOG("[vulkan pass] %ux%u, %u colour attachment(s)%s", width, height, ncolor, text.c_str());
+}
 void draw(const uint32_t *r, uint32_t prim, uint32_t count, uint32_t indexType,
           uint32_t indexAddr, uint32_t baseVertex, uint32_t instances) {
   if (!count || !instances || ((prim == 0x13 || prim == 0x14) && count < 4))
@@ -2301,6 +2329,7 @@ void draw(const uint32_t *r, uint32_t prim, uint32_t count, uint32_t indexType,
     ri.pDepthAttachment = depth ? &da : nullptr;
     ri.pStencilAttachment = depth && depth->fmt.stencil ? &da : nullptr;
     if(R.gpuPassTimestampsEnabled) gpu_begin_render_scope(colors,depth,slices,depthSlice,width,height);
+    trace_pass(colors, ncolor, depth, depthSlice, width, height);
     record::vkCmdBeginRendering(cmd, &ri);
     ++R.renderPassCount;
     R.rendering = true;
