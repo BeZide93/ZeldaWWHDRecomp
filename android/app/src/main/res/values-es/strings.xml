@@ -29,8 +29,8 @@
     <string name="setup_translating">Traduciendo el código del juego…</string>
     <string name="setup_compiling">Preparando el juego para tu teléfono…</string>
     <string name="setup_compiling_detail">%1$d de %2$d</string>
-    <string name="setup_minute_left"> · falta alrededor de un minuto</string>
-    <string name="setup_minutes_left"> · faltan unos %1$d min</string>
+    <string name="setup_minute_left">\u0020· falta alrededor de un minuto</string>
+    <string name="setup_minutes_left">\u0020· faltan unos %1$d min</string>
     <string name="setup_finishing">Casi listo…</string>
     <string name="setup_leave_detail">Puedes salir de la app; la instalación sigue en segundo plano.</string>
     <string name="setup_paused">En pausa</string>

@@ -120,6 +120,11 @@ public class SetupActivity extends Activity {
         detail.setTextSize(16);
         detail.setPadding(0, gap / 2, 0, gap);
         layout.addView(detail);
+        // Play first: once a game is ready it is the main action
+        play = button(layout, getString(R.string.setup_play), () -> startActivity(new Intent(this, WwhdActivity.class)));
+        play.setTextSize(20);
+        play.setTextColor(0xFFFFFFFF);
+        play.setBackgroundTintList(android.content.res.ColorStateList.valueOf(0xFF0D5C8A));
         // one button for the three kinds of dump; the activity results are the same as before
         choose = button(layout, getString(R.string.setup_choose), this::chooseKind);
         pickers.add(choose);
@@ -128,10 +133,6 @@ public class SetupActivity extends Activity {
         common = button(layout, getString(R.string.setup_common_key), () -> pick(COMMON));
         resume = button(layout, getString(R.string.setup_start), () -> control(SetupService.RESUME));
         pause = button(layout, getString(R.string.setup_pause), () -> control(SetupService.PAUSE));
-        play = button(layout, getString(R.string.setup_play), () -> startActivity(new Intent(this, WwhdActivity.class)));
-        play.setTextSize(20);
-        play.setTextColor(0xFFFFFFFF);
-        play.setBackgroundTintList(android.content.res.ColorStateList.valueOf(0xFF0D5C8A));
         details = new Button(this, null, android.R.attr.borderlessButtonStyle);
         details.setText(R.string.setup_details_show);
         layout.addView(details);
@@ -348,8 +349,10 @@ public class SetupActivity extends Activity {
                     if (permission.isReadPermission()) grants.add(permission.getUri().toString());
                 boolean discReady = keyReady(job, source, "disc", correctingKeys, grants);
                 boolean commonReady = keyReady(job, source, "common", correctingKeys, grants);
-                restore.setVisibility(importing ? android.view.View.VISIBLE : android.view.View.GONE);
-                restore.setEnabled(importing && replaceable(job));
+                // only when the chosen dump can no longer be read (its access was revoked or lost)
+                boolean accessMissing = importing && !grants.contains(source.optString("uri"));
+                restore.setVisibility(accessMissing ? android.view.View.VISIBLE : android.view.View.GONE);
+                restore.setEnabled(accessMissing && replaceable(job));
                 disc.setVisibility(needsKeys ? android.view.View.VISIBLE : android.view.View.GONE);
                 common.setVisibility(needsKeys ? android.view.View.VISIBLE : android.view.View.GONE);
                 setTextIfChanged(disc, getString(discReady ? R.string.setup_disc_key_ready : source != null && source.has("disc_uri") ? R.string.setup_disc_key_again : R.string.setup_disc_key));
