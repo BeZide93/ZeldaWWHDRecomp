@@ -9,6 +9,7 @@
 #include "setup_test.h"
 #include "setup_flow.h"
 #include "graphics_switch.h"
+#include "restart_dialog.h"
 #include "game_source_widgets.h"
 #include "gamepad_nav.h"
 #include "perf_average.h"
@@ -1437,11 +1438,48 @@ void code_mod_dialog() {
     }
 }
 
+// ---- "Restart required": derived each frame from the mod manager's state (restart_notice.h)
+restart::Notice g_restart_notice;
+std::vector<restart::Item> g_restart_items;
+bool restart_possible(const mods::code::Status& code) {
+#ifdef __ANDROID__
+    return false;
+#else
+    // a finished code-mod rebuild relaunches through its own path, which also works on Windows
+    return render::can_restart() || code.ready;
+#endif
+}
+void restart_now(bool code_build) {
+    hostui::post([code_build] {
+        std::string error;
+        if (code_build) { if (!mods::code::restart(error)) LOG("[code mods] %s", error.c_str()); }
+        else if (!render::restart()) LOG("[mods] cannot relaunch the game; restart it to apply mod changes");
+    });
+}
+// Every frame the settings window is shown (any tab), and once at the first overlay frame so that
+// changes made before the menu is opened (a resumed one-click setup) still count as new.
+void restart_notice_frame(bool draw) {
+    auto code = mods::code::status();
+    g_restart_items = restart::pending(mods::packages::list(), code);
+    // the rebuild dialog has told the player already ("Restart now" / "Later")
+    if (code.requested) for (const auto& item : g_restart_items) if (item.key.starts_with("code:")) g_restart_notice.acknowledge(item.key);
+    const bool blocked = !draw || code.requested || code.building || (!setup_run.id.empty() && setup_run.error.empty()) ||
+                         ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId) || ImGui::IsAnyItemActive();
+    const bool open = g_restart_notice.update(g_restart_items, ImGui::GetTime(), blocked);
+    if (!draw) return;
+    const bool back = navigation_pressed(input_map::face_input(input_map::kB));
+    auto answer = restart::dialog(g_restart_notice, open, restart_possible(code), back);
+    if (answer == restart::Answer::Later && back) g_pad_b_used = true;
+    if (answer == restart::Answer::RestartNow) restart_now(code.ready);
+}
+
 void tab_mods() {
-    auto packages=mods::packages::list();
-    if(std::any_of(packages.begin(),packages.end(),[](const auto& pack){return pack.pending_restart;})){
-        note("Restart pending: saved pack choices will apply after restart. Active packs stay loaded until then.");
-        if(ImGui::Button("Restart now"))hostui::post([]{render::restart();});
+    if(!g_restart_items.empty()) {
+        warn("Restart to apply: %s.",restart::summary(g_restart_items).c_str());
+        auto code=mods::code::status();
+        if(restart_possible(code)) {
+            if(ImGui::Button("Restart now##mods"))restart_now(code.ready);
+        } else note("Restart the game to apply.");
     }
     bool code_mods=mods::code::enabled();
     if(ImGui::Checkbox("Enable code mods (PowerPC mods)",&code_mods))mods::code::request(code_mods);
@@ -1888,7 +1926,7 @@ void tab_controls() {
     } else {
         status = "Select a button on the controller or a chip to rebind it. Changes are saved to controls.json.";
     }
-    const float bottom = ImGui::GetFrameHeightWithSpacing() * 2 + 4;
+    const float bottom = ImGui::GetFrameHeightWithSpacing() * 3 + 4;  // status, options, stick range
     const ImVec2 avail = ImGui::GetContentRegionAvail();
     const float h = std::max(160.0f, avail.y - bottom);
     U.hover_action = -1;
@@ -1965,6 +2003,22 @@ void tab_controls() {
     gyro_window(gyro_open);
     ImGui::SameLine(0, 24);
     if (ImGui::Button("Reset to defaults")) input_map::set_current(input_map::Mapping::defaults());
+    // issue #40: per-stick range, applied after the dead zone (live, saved with the controls)
+    float* ranges[2] = {&m.left_range, &m.right_range};
+    const char* const labels[2] = {"Left stick range", "Right stick range"};
+    for (int k = 0; k < 2; k++) {
+        if (k) ImGui::SameLine(0, 24);
+        float r = *ranges[k] * 100.0f;
+        ImGui::SetNextItemWidth(200);
+        if (ImGui::SliderFloat(labels[k], &r, input_map::kMinStickRange * 100.0f, input_map::kMaxStickRange * 100.0f, "%.0f%%")) {
+            *ranges[k] = std::clamp(std::round(r) / 100.0f, input_map::kMinStickRange, input_map::kMaxStickRange);
+            input_map::set_current(m);
+        }
+        help("Default: 100% (no change). Scales the stick after the dead zone so a short stick reaches full deflection.");
+    }
+    ImGui::SameLine(0, 24);
+    ImGui::AlignTextToFramePadding();
+    note("Raise if your stick can't reach full deflection, e.g. the Wind Waker baton's directions don't register.");
 }
 
 int saved_language() {
@@ -2185,6 +2239,7 @@ void settings_window() {
             if (navigation_pressed(input_map::kPadRB)) U.select_tab = (U.tab + 1) % kTabs;
         }
         if(!setup_run.rebuilding)code_mod_dialog();
+        restart_notice_frame(true);
         if (ImGui::BeginTabBar("tabs", ImGuiTabBarFlags_FittingPolicyShrink)) {
             for (int i = 0; i < kTabs; i++) {
                 ImGuiTabItemFlags f = U.select_tab == i ? ImGuiTabItemFlags_SetSelected : 0;
@@ -2439,6 +2494,7 @@ ImDrawData* frame(float pw, float ph, void (*renderer_init)()) {
     U.gamepad_navigation.feed(io, U.values, U.prev, open && U.cap_action < 0, mouse_used, face);  // the text prompt reads the controller itself
     ImGui::NewFrame();
     setup_run_tick();
+    if (!open && !g_restart_notice.started()) restart_notice_frame(false);
     g_wants_text = open && io.WantTextInput;
     guesthud::frame();
     if (open) settings_window();
