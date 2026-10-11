@@ -235,19 +235,27 @@ constexpr uint32_t kPaneFlags = 0x44, kPaneMtxDirty = 0x10, kPaneGlobal = 0x48;
 constexpr uint32_t kPaneParent = 0x0C, kPaneChildren = 0x14, kPaneTrans = 0x1C, kPaneScale = 0x34, kPaneSize = 0x3C, kPaneName = 0x80;
 
 std::mutex g_root_mu;
-std::vector<std::pair<uint32_t, bool>> g_root_tv;  // layout root pane -> last drawn to the TV
+// layout root pane -> the swaps at which it was last drawn to the TV and to the GamePad. Some layouts
+// are drawn to both in the same frame with the same matrices (the Wind's Requiem compass, the
+// screen wipes, the title menus): they are TV layouts while the TV draws them. Following the last
+// report instead flipped them between anchored and not every few frames (the Wind's Requiem
+// backdrop letterboxed and full screen in turn). Their GamePad draws then see TV matrices, which
+// for these layouts only means full-screen backgrounds stretched past the GamePad's edges.
+struct RootSeen { uint32_t root; uint64_t tv, drc; };
+std::vector<RootSeen> g_root_tv;
 bool root_on_tv(uint32_t root) {
     std::lock_guard<std::mutex> lk(g_root_mu);
-    for (auto& [r, tv] : g_root_tv)
-        if (r == root) return tv;
+    for (auto& e : g_root_tv)
+        if (e.root == root) return e.tv && (e.tv >= e.drc || game_frame() + 1 <= e.tv + 3);
     return true;  // not reported (yet): layouts are TV layouts unless seen on the GamePad
 }
 void set_root_tv(uint32_t root, bool tv) {
     std::lock_guard<std::mutex> lk(g_root_mu);
+    uint64_t now = game_frame() + 1;  // +1: 0 means never
     for (auto& e : g_root_tv)
-        if (e.first == root) { e.second = tv; return; }
+        if (e.root == root) { (tv ? e.tv : e.drc) = now; return; }
     if (g_root_tv.size() > 256) g_root_tv.erase(g_root_tv.begin());
-    g_root_tv.push_back({root, tv});
+    g_root_tv.push_back({root, tv ? now : 0, tv ? 0 : now});
 }
 
 // the anchoring state each root's matrices were last computed with: a root whose state changes
