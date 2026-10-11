@@ -36,12 +36,10 @@ and a few GB of free storage.
 
 ### The setup app (no PC needed)
 
-The setup app is in the project now ([#98](https://github.com/ZeldaWWHDRecomp/ZeldaWWHDRecomp/pull/98)) and is
-still being tested before a release. It carries no game code: it builds the game on your phone from
-your own copy. Until a release has it, testers can take the arm64 test APK from the
-[Android toolchain builds](https://github.com/ZeldaWWHDRecomp/ZeldaWWHDRecomp/actions/workflows/android-toolchain.yml) (open the latest successful run and download the
-`android-hosted-clang-arm64-v8a` artifact; this needs a GitHub login). The APK is
-`build/tester-apk/wwhd-ondevice-debug-arm64-v8a.apk` inside the zip.
+The setup app comes with every release: download `WindWakerHD-<version>-android-arm64.apk` from the
+[Releases](https://github.com/ZeldaWWHDRecomp/ZeldaWWHDRecomp/releases) page (the `android-x86_64` APK is for emulators and Chromebooks). It carries no game
+code: it builds the game on your phone from your own copy. Later versions install over it and keep
+your saves and settings (the phone prepares the game again when an update needs it).
 
 1. Install the APK. If you already have a version you built on your PC, export your save first
    (long-press the app icon), then uninstall it: the two are signed differently.
@@ -76,11 +74,6 @@ buttons while it is connected.
 
 **Which version of the game?**
 The Wii U release of The Wind Waker HD, USA or Europe. Saves from a real Wii U work too.
-
-**Why is there no APK in the releases yet?**
-An APK built on a PC contains the recompiled game, which can't be shared. The setup app builds
-the game on your phone instead, so the app itself can be shared. It's in the project now and goes
-into a release once the remaining phone tests are done.
 
 **My phone gets hot. Is that normal?**
 The game is demanding. When the phone gets warm, the game drops from 60 to a steady 30 fps on its

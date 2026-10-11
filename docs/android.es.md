@@ -37,13 +37,11 @@ personalizado en Adreno), y unos pocos GB libres.
 
 ### La app de instalación (sin PC)
 
-La app de instalación ya está en el proyecto ([#98](https://github.com/ZeldaWWHDRecomp/ZeldaWWHDRecomp/pull/98))
-y todavía se está probando antes de una versión oficial. No lleva código del juego: prepara el juego
-en tu teléfono a partir de tu propia copia. Hasta que salga en una versión, quien quiera probarla
-puede descargar el APK de prueba (arm64) de las [compilaciones de Android](https://github.com/ZeldaWWHDRecomp/ZeldaWWHDRecomp/actions/workflows/android-toolchain.yml): abre
-la ejecución correcta más reciente y descarga el artefacto `android-hosted-clang-arm64-v8a` (hace
-falta iniciar sesión en GitHub). El APK está en
-`build/tester-apk/wwhd-ondevice-debug-arm64-v8a.apk` dentro del zip.
+La app de instalación viene en todas las versiones oficiales: descarga el `WindWakerHD-<versión>-android-arm64.apk`
+en la página de [Releases](https://github.com/ZeldaWWHDRecomp/ZeldaWWHDRecomp/releases) (el APK `android-x86_64` es para emuladores y Chromebooks). No lleva
+código del juego: prepara el juego en tu teléfono a partir de tu propia copia. Las versiones siguientes
+se instalan encima y conservan tus partidas y tus ajustes (el teléfono vuelve a preparar el juego
+cuando una actualización lo necesita).
 
 1. Instala el APK. Si ya tienes una versión preparada en tu PC, exporta antes tu partida (mantén
    pulsado el icono de la app) y desinstala esa versión: las dos están firmadas de forma distinta.
@@ -80,11 +78,6 @@ botones táctiles mientras está conectado.
 **¿Qué versión del juego?**
 La versión de Wii U de The Wind Waker HD, de EE. UU. o de Europa. Las partidas de una Wii U real
 también funcionan.
-
-**¿Por qué todavía no hay un APK en las versiones oficiales?**
-Un APK preparado en un PC contiene el juego recompilado, que no se puede compartir. La app de
-instalación prepara el juego en tu teléfono, así que la propia app sí se puede compartir. Ya está
-en el proyecto y entrará en una versión cuando terminen las pruebas que faltan en teléfonos.
 
 **Mi teléfono se calienta. ¿Es normal?**
 El juego es exigente. Cuando el teléfono se calienta, el juego baja solo de 60 a 30 fps estables

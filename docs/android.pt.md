@@ -37,12 +37,11 @@ personalizado na Adreno), e alguns GB livres.
 
 ### O app de instalação (sem PC)
 
-O app de instalação já está no projeto ([#98](https://github.com/ZeldaWWHDRecomp/ZeldaWWHDRecomp/pull/98)) e
-ainda está em teste antes de entrar numa versão oficial. Ele não leva nenhum código do jogo: monta o
-jogo no seu celular a partir da sua cópia. Até sair numa versão, quem quiser testar pode baixar o APK
-de teste (arm64) nas [compilações do Android](https://github.com/ZeldaWWHDRecomp/ZeldaWWHDRecomp/actions/workflows/android-toolchain.yml): abra a execução mais recente
-que deu certo e baixe o artefato `android-hosted-clang-arm64-v8a` (precisa de login no GitHub). O APK fica em
-`build/tester-apk/wwhd-ondevice-debug-arm64-v8a.apk` dentro do zip.
+O app de instalação vem em todas as versões oficiais: baixe o `WindWakerHD-<versão>-android-arm64.apk` na
+página de [Releases](https://github.com/ZeldaWWHDRecomp/ZeldaWWHDRecomp/releases) (o APK `android-x86_64` é para emuladores e Chromebooks). Ele não leva nenhum
+código do jogo: monta o jogo no seu celular a partir da sua cópia. As próximas versões instalam por
+cima e mantêm os saves e as configurações (o celular prepara o jogo de novo quando uma atualização
+precisar).
 
 1. Instale o APK. Se você já tem uma versão montada no PC, exporte o save antes (toque e segure o
    ícone do app) e desinstale essa versão: as duas são assinadas de jeitos diferentes.
@@ -78,11 +77,6 @@ botões de toque enquanto estiver conectado.
 **Qual versão do jogo?**
 A versão de Wii U do The Wind Waker HD, americana ou europeia. Saves de um Wii U de verdade também
 funcionam.
-
-**Por que ainda não tem APK nas versões oficiais?**
-Um APK montado no PC contém o jogo recompilado, que não pode ser compartilhado. O app de
-instalação monta o jogo no seu celular, por isso o próprio app pode ser compartilhado. Ele já está
-no projeto e entra numa versão oficial quando os testes que faltam nos celulares terminarem.
 
 **Meu celular esquenta. É normal?**
 O jogo é pesado. Quando o celular esquenta, o jogo cai sozinho de 60 para 30 fps estáveis e
