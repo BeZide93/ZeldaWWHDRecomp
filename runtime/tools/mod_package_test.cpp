@@ -249,7 +249,9 @@ int main(int argc, char** argv) {
         assert(remove("catalogue-content-pilot",error)&&remove("catalogue-setup-pilot",error));
         std::cout<<"Catalogue pilots install/trust/source/options/real Python tool/remove passed\n";return 0;
     }
-    if(argc==5&&std::string(argv[1])=="--setup-tool") {
+    // stands in for Python: the tool must be started with -B (no __pycache__ in the package)
+    if(argc==6&&std::string(argv[1])=="--setup-tool"&&std::string(argv[2])=="-B") {
+        ++argv;
         std::ifstream input(argv[2]);std::string script{std::istreambuf_iterator<char>(input),{}};
         std::cout<<"Source: "<<argv[4]<<"\n";
         if(script.find("fail")!=std::string::npos||std::getenv("WWHD_TEST_SETUP_FAILURE")){
