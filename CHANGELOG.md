@@ -12,6 +12,11 @@ what is on `devel` and not released yet (also in the
   window until the input reaches full tilt, for example the Wind Waker baton's directions. It's
   applied after the dead zone and keeps the stick's direction.
 
+- **Mods: a "Restart required" popup.** Changes that only take effect after a restart (turning
+  packages, graphics packs or code mods on or off, their settings, profiles, a finished one-click
+  setup, a code-mod rebuild) now show a popup with **Restart now** and **Later**, and the Mods tab keeps
+  a "Restart to apply" line until you restart.
+
 - **Vulkan: choose your graphics card** in Settings → Graphics (issue #135), e.g. on laptops with an
   Intel and an NVIDIA GPU. The choice is remembered and applies after a restart; if the chosen card is
   no longer available, the game picks a usable one and says so. `WWHD_VK_DEVICE` (an index or part of
