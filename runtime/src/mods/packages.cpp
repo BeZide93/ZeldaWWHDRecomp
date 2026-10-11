@@ -635,6 +635,10 @@ bool run_setup_tool(const std::string& id,const std::string& step_id,std::string
                 const char* config=std::getenv("WWHD_GUEST_BUILD_CONFIG");
                 auto bridge=guestmods::BuildBridge::read(config?config:"guest-sdk.json",(root/"GuestBuild").string());
                 command.insert(command.begin(),bridge.python.begin(),bridge.python.end());
+                // -B: Python must not write __pycache__ into the package; it is fingerprinted, and new
+                // .pyc files made every later step report "Package changed" (gc-minimap's prepare tool
+                // imports its own modules)
+                command.insert(command.begin()+std::ptrdiff_t(bridge.python.size()),"-B");
             }
             // A failed rerun must not reuse an earlier success and leftover outputs.
             auto previous=database;database["setup_receipts"][id].object.erase(step_id);

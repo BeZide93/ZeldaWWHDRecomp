@@ -17,6 +17,12 @@ what is on `devel` and not released yet (also in the
   setup, a code-mod rebuild) now show a popup with **Restart now** and **Later**, and the Mods tab keeps
   a "Restart to apply" line until you restart.
 
+- **Fixed: one-click mod setup stopped with "Package changed; refresh it and confirm its code again"**
+  after a preparation step, e.g. for the GameCube sea minimap. The mod's Python tool left cache files
+  in the package, which made the package look changed. Setup tools now run without writing them. If you
+  already hit this, refresh the mod in the catalogue (or delete its `tools/__pycache__` folder) and
+  press Try again.
+
 - **Vulkan: choose your graphics card** in Settings → Graphics (issue #135), e.g. on laptops with an
   Intel and an NVIDIA GPU. The choice is remembered and applies after a restart; if the chosen card is
   no longer available, the game picks a usable one and says so. `WWHD_VK_DEVICE` (an index or part of
