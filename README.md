@@ -648,6 +648,27 @@ call-graph stage additionally needs the decompilation built (`tww/build/GZLE01`)
 needs `ninja` and your own GameCube disc image of The Wind Waker (USA) as described in the tww
 README. `build/names.tsv` is derived from the game and stays on your machine.
 
+## Optional: decomp build (experimental)
+
+Instead of the recompiled game code, the port can also run the
+[verified decompilation](https://github.com/ZeldaWWHDDecomp/wwhd) of the game as compiled source
+(the git submodule `decomp/`): `-DWWHD_DECOMP=ON`. Functions that aren't decompiled, and the
+libraries, are still recompiled from your own copy of the game (USA, version 0), so the decomp build
+needs your game files like the normal one. macOS only so far; the normal build stays the default and
+recommended way to play.
+
+```sh
+git submodule update --init decomp
+cmake -S . -B build/decomp -G Ninja -DWWHD_DECOMP=ON -DWWHD_RENDERER=METAL -DGEN_DIR=$PWD/build/gen-decomp
+# the first configure stops and prints the recompiler command for the decomp build's function list:
+python3 tools/recomp/recomp.py game/code/cking.rpx build/gen-decomp --decomp-hooks build/decomp/decomp/decomp_hooks.txt
+cmake -S . -B build/decomp && cmake --build build/decomp --target wwhd -j 4
+./build/decomp/wwhd
+```
+
+What runs decompiled, the current status and how it is compared with the normal build:
+[docs/decomp-build.md](docs/decomp-build.md).
+
 ## Status
 
 The opening of the game (title, file select, intro, Outset Island) is tested and matches Cemu
