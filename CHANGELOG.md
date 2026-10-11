@@ -12,6 +12,12 @@ what is on `devel` and not released yet (also in the
   it's ready instead of waiting a whole extra refresh, so you get close to what Uncapped shows (e.g.
   56 instead of 30 fps). Frames that are on time are paced exactly as before.
 
+- **Fixed: the Picto Box picture stayed blurry** (issue #134). The left stick zooms the Picto Box, and
+  the game blurs the picture while zooming, so even a slightly drifting stick kept it blurry. Controller
+  sticks now have a 15 % dead zone by default (Settings → Controls; a saved 0 from older versions
+  becomes 15 %, an explicitly chosen 0 stays). On Metal, the photo's subject outline could also miss
+  pixels the first time; that's fixed too.
+
 - **macOS setup: works with mismatched Command Line Tools** (e.g. after a macOS beta update installed a
   newer SDK than the tools' linker understands: "unknown architecture arm64e.x1", "tapi error: malformed
   file"). Setup now links with an older installed SDK automatically, or explains how to update the
