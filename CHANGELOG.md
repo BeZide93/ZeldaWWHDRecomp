@@ -10,6 +10,12 @@ what is on `devel` and not released yet (also in the
 - **Fixed: setup stopped with "the recompiler wrote no code"** (issue #136) when the install folder's
   path contains square brackets, for example `...\LoZ - The Wind Waker [WiiU]\data`. Setup and the
   recompiler treated the brackets as a search pattern and then found none of their own files.
+
+- **Android setup: "Continue anyway" when it waits for the phone to cool down** (issue #142). The
+  pause now shows the battery temperature and Android's thermal status, waits only at 45 °C battery
+  temperature (42 °C if Android also reports the phone as warm) or when Android reports it as hot,
+  and a **Continue anyway** button (also on the low-battery pause) lets you go on for this run. Only
+  Android's critical heat level still stops setup.
 - **Mods: experimental mods and save backups.** Mods marked *Experimental* (untested, may break the
   game or a save made while they are active; Call of the Sky is one) are hidden unless you turn on
   **Show experimental mods** in the Mods tab. Turning one on asks first and backs up your saves before
