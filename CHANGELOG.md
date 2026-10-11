@@ -7,6 +7,11 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Controls: a "Stick range" setting per stick** (issue #40). For a worn stick that can't reach full
+  deflection: raise its range (100–150 %, default 100 %) in Settings → Controls or the macOS Controls
+  window until the input reaches full tilt, for example the Wind Waker baton's directions. It's
+  applied after the dead zone and keeps the stick's direction.
+
 - **Vulkan: choose your graphics card** in Settings → Graphics (issue #135), e.g. on laptops with an
   Intel and an NVIDIA GPU. The choice is remembered and applies after a restart; if the chosen card is
   no longer available, the game picks a usable one and says so. `WWHD_VK_DEVICE` (an index or part of
