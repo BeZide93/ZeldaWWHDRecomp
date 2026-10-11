@@ -113,6 +113,22 @@ class ShaderPreparationProgress(unittest.TestCase):
         self.assertIn("42% Resolving shaders from your game files: 400 of 818 game archives", out.getvalue())
 
 
+class BracketsInInstallFolder(unittest.TestCase):
+    # issue #136: an install folder such as "LoZ - The Wind Waker [WiiU]" made glob treat "[WiiU]" as a
+    # character class, so setup found none of the generated files ("the recompiler wrote no code").
+    def test_recompile_counts_generated_code_in_a_folder_with_brackets(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            gen_dir = os.path.join(temporary, "LoZ - The Wind Waker [WiiU]", "data", "work", "gen")
+
+            def run_logged(cmd, env=None, what=""):
+                os.makedirs(gen_dir, exist_ok=True)
+                for name in ("code_000.c", "code_001.c"):
+                    open(os.path.join(gen_dir, name), "w").close()
+
+            with mock.patch.object(setup, "run_logged", side_effect=run_logged):
+                self.assertEqual(setup.recompile(os.path.join(temporary, "game"), gen_dir), 2)
+
+
 class GuestBuildConfig(unittest.TestCase):
     def test_toolchain_argument_vector(self):
         with tempfile.TemporaryDirectory() as d:

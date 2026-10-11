@@ -1430,7 +1430,7 @@ def recompile(game_dir, gen_dir, hooks=False):
     rpx = os.path.join(game_dir, "code", "cking.rpx")
     out = run_logged([sys.executable, os.path.join(PKG, "tools", "recomp", "recomp.py"), rpx, gen_dir] + (["--mod-hooks"] if hooks else []),
                      env=dict(os.environ, WWHD_RECOMP_MOD_HOOKS="0"), what="translating the game code")
-    n = len(glob.glob(os.path.join(gen_dir, "code_*.c")))
+    n = len(glob.glob(os.path.join(glob.escape(gen_dir), "code_*.c")))
     if n == 0:
         raise SetupError("the recompiler wrote no code")
     return n
@@ -1474,7 +1474,7 @@ def fwd(p):
 
 def compile_gamecode(tc, manifest, gen_dir, obj_dir, jobs, cancel=None, progress=None):
     os.makedirs(obj_dir, exist_ok=True)
-    srcs = sorted(glob.glob(os.path.join(gen_dir, "code_*.c")))
+    srcs = sorted(glob.glob(os.path.join(glob.escape(gen_dir), "code_*.c")))
     srcs += [os.path.join(gen_dir, f) for f in ("table.c", "imports.c")]
     srcs.sort(key=lambda s: -os.path.getsize(s))  # big files first: better use of the cores
     m = {"sdk": fwd(os.path.join(PKG, "sdk")), "gen": fwd(gen_dir)}

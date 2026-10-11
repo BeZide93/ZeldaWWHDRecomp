@@ -246,7 +246,7 @@ def sharcfb_shaders(b):
 
 
 def archive_files(game):
-    return [f for f in sorted(glob.glob(os.path.join(game, "**", "*"), recursive=True))
+    return [f for f in sorted(glob.glob(os.path.join(glob.escape(game), "**", "*"), recursive=True))
             if os.path.isfile(f) and f.endswith((".szs", ".pack", ".sarc", ".sharcfb"))]
 
 
