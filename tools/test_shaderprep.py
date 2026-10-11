@@ -194,4 +194,154 @@ class CodefreeTemplate(unittest.TestCase):
                 path.write_bytes(bad)
                 with self.assertRaises(ValueError):list(prep.read_records(path))
 
+
+def sharcfb(programs):
+    """synthetic BAHS archive holding (type, microcode) vertex/pixel binaries"""
+    entries=b''
+    for typ,code in programs:
+        head=0xDC if typ==prep.VS else 0xAC
+        data=bytearray(head)+code
+        struct.pack_into('<II',data,0xD0 if typ==prep.VS else 0xA4,len(code),head)
+        entries+=struct.pack('<4I',16+len(data),typ,0,len(data))+bytes(data)
+    name=b'synthetic\0'
+    header=b'BAHS'+bytes(16)+struct.pack('<I',len(name))+name
+    return header+struct.pack('<II',8+len(entries),len(programs))+entries
+
+
+def yaz0_literal(raw):
+    """valid Yaz0 stream made of literal groups only"""
+    out=bytearray(b'Yaz0'+struct.pack('>I',len(raw))+bytes(8))
+    for i in range(0,len(raw),8):
+        out.append(0xFF);out+=raw[i:i+8]
+    return bytes(out)
+
+
+class ParallelBuild(unittest.TestCase):
+    def game(self, root):
+        programs=[(prep.VS if i%2 else prep.PS,('synthetic program %03d'%i).encode().ljust(24+i%5,b'.')) for i in range(40)]
+        game=root/'content';game.mkdir()
+        for n in range(6):
+            chunk=programs[n*5:n*5+12]  # overlapping: the same program in several archives
+            data=sharcfb(chunk)
+            (game/('a%d.szs'%n)).write_bytes(yaz0_literal(data) if n%2 else data)
+        (game/'ignored.txt').write_text('not an archive')
+        return game,programs
+
+    def test_parallel_scan_and_build_are_identical_with_monotonic_progress(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=pathlib.Path(tmp);game,programs=self.game(root)
+            serial=prep.game_shaders(str(game))
+            seen=[]
+            parallel=prep.game_shaders(str(game),lambda *a:seen.append(a),jobs=2)
+            self.assertEqual(list(serial.items()),list(parallel.items()))
+            self.assertEqual(len(serial),len({c for _,c in programs[:37]}))
+            self.assertEqual(seen[0][0],0);self.assertEqual(seen[-1][0],seen[-1][1])
+            self.assertEqual([s[2] for s in seen],list(range(len(seen))))
+            record=root/'record';template=root/'template'
+            with record.open('wb') as f:
+                for typ,code in programs[:20]:
+                    prep.write_record(f,1,prep.shader_record(1 if typ==prep.VS else 0,code,
+                        compact([(160,0,0,0)]) if typ==prep.VS else b'',[(0xa21a if typ==prep.VS else 0xa214,7)]))
+                prep.write_record(f,2,fmt.metal_payload(metal()))
+            prep.cmd_template(record,template)
+            outputs=[]
+            for jobs in (1,3):
+                out=root/('headstart%d'%jobs);steps=[]
+                prep.cmd_build(str(game),str(out),str(template),0,progress=lambda d,t,detail:steps.append((d,t,detail)),jobs=jobs)
+                outputs.append(out.read_bytes())
+                done=[d for d,_,_ in steps]
+                self.assertEqual(done,sorted(done));self.assertEqual(steps[-1][:2],(1000,1000))
+                self.assertTrue(all(t==1000 for _,t,_ in steps))
+                self.assertIn('game archives',steps[1][2])
+            self.assertEqual(outputs[0],outputs[1])
+            self.assertEqual([t for t,_ in prep.read_records(root/'headstart1')],[1]*20+[2])
+
+    def test_thread_scan_matches_serial(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=pathlib.Path(tmp);game,_=self.game(root)
+            serial=prep.game_shaders(str(game))
+            seen=[]
+            threaded=prep.game_shaders(str(game),lambda *a:seen.append(a),jobs=2,threads=True)
+            self.assertEqual(list(serial.items()),list(threaded.items()))
+            self.assertEqual(seen[-1][2],seen[-1][3])
+
+    def test_fast_hash_matches_reference(self):
+        def reference(code):
+            h=0xCBF29CE484222325
+            for i in range(0,len(code),8):
+                h=((h^int.from_bytes(code[i:i+8].ljust(8,b'\0'),'little'))*0x100000001B3)&0xFFFFFFFFFFFFFFFF
+            return h^len(code)
+        for n in range(0,40):
+            code=bytes((i*37+n)&255 for i in range(n))
+            self.assertEqual(prep.prog_hash(code),reference(code))
+
+    def test_cli_progress_lines(self):
+        import subprocess,sys
+        with tempfile.TemporaryDirectory() as tmp:
+            root=pathlib.Path(tmp);game,programs=self.game(root)
+            record=root/'record';template=root/'template'
+            with record.open('wb') as f:prep.write_record(f,2,fmt.metal_payload(metal()))
+            prep.cmd_template(record,template)
+            out=subprocess.run([sys.executable,str(pathlib.Path(prep.__file__)),'build',str(root/'hs'),'--game',str(game),
+                '--template',str(template),'--max','0','--progress','--jobs','2'],capture_output=True,text=True,check=True).stdout
+            lines=[l for l in out.splitlines() if l.startswith('WWHD-PROGRESS ')]
+            self.assertTrue(lines);self.assertTrue(lines[-1].startswith('WWHD-PROGRESS 1000 1000 '))
+
+
+class Yaz0Loader(unittest.TestCase):
+    def setUp(self):
+        temporary=tempfile.TemporaryDirectory();self.addCleanup(temporary.cleanup)
+        self.root=pathlib.Path(temporary.name)
+        self.explicit=self.root/'explicit/libyaz0.so';self.native=self.root/'native/libyaz0.so'
+        self.packaged=self.root/('package/tools/lib/libyaz0'+prep.YAZ0_SUFFIX)
+        for path in (self.explicit,self.native,self.packaged):
+            path.parent.mkdir(parents=True);path.write_bytes(b'synthetic library')
+
+    def candidates(self, environ, android_dir=''):
+        with patch.object(prep,'PACKAGED_YAZ0',str(self.packaged)):
+            return prep.yaz0_candidates(environ, android_dir)
+
+    def test_order_explicit_android_packaged(self):
+        self.assertEqual(self.candidates({'WWHD_YAZ0_LIB':str(self.explicit)},str(self.native.parent)),
+                         [str(self.explicit),str(self.native),str(self.packaged)])
+        self.assertEqual(self.candidates({}),[str(self.packaged)])
+        # missing files are skipped, duplicates collapse
+        self.assertEqual(self.candidates({'WWHD_YAZ0_LIB':str(self.root/'missing.so')},str(self.root/'none')),
+                         [str(self.packaged)])
+        self.assertEqual(self.candidates({'WWHD_YAZ0_LIB':str(self.native)},str(self.native.parent)),
+                         [str(self.native),str(self.packaged)])
+
+    def test_android_library_dir_from_process_maps(self):
+        maps=self.root/'maps'
+        maps.write_text('7000-8000 r-xp 00000000 fd:00 1 /system/lib64/libc.so\n'
+                        '7100-7200 r-xp 00000000 fd:00 2 /data/app/~~x==/org.wwhdrecomp.wwhd-y==/lib/arm64/libpython3.14.so\n'
+                        '7300-7400 rw-p 00000000 00:00 0\n')
+        with patch.object(prep.sys,'platform','android'):
+            self.assertEqual(prep.android_library_dir(str(maps)),'/data/app/~~x==/org.wwhdrecomp.wwhd-y==/lib/arm64')
+            self.assertIsNone(prep.android_library_dir(str(self.root/'no-maps')))
+        with patch.object(prep.sys,'platform','linux'):
+            if not hasattr(prep.sys,'getandroidapilevel'):
+                self.assertIsNone(prep.android_library_dir(str(maps)))
+
+    def test_prebuilt_preferred_then_next_then_source_build(self):
+        loaded=[]
+        def cdll(path):
+            loaded.append(path)
+            if path==str(self.explicit): raise OSError('wrong architecture')
+            return 'library:'+path
+        with patch.object(prep,'PACKAGED_YAZ0',str(self.packaged)), patch.object(prep.ctypes,'CDLL',side_effect=cdll), \
+                patch.dict(prep.os.environ,{'WWHD_YAZ0_LIB':str(self.explicit)}), \
+                patch.object(prep,'android_library_dir',return_value=str(self.native.parent)), \
+                patch('sys.stderr'):
+            self.assertEqual(prep._load_yaz0(),'library:'+str(self.native))
+        self.assertEqual(loaded,[str(self.explicit),str(self.native)])
+        # a source checkout with only the packaged copy builds its own decoder
+        with patch.object(prep,'PACKAGED_YAZ0',str(self.packaged)), \
+                patch.dict(prep.os.environ,{},clear=False), \
+                patch.object(prep,'android_library_dir',return_value=None), \
+                patch.object(prep,'yaz0_candidates',return_value=[str(self.packaged)]), \
+                patch.object(prep.os.path,'getmtime',return_value=0), \
+                patch.object(prep.ctypes,'CDLL',side_effect=lambda path:'library:'+path):
+            self.assertTrue(prep._load_yaz0().endswith('build/libyaz0'+prep.YAZ0_SUFFIX))
+
 if __name__=='__main__':unittest.main()

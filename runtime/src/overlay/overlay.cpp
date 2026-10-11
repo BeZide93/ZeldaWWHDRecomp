@@ -1171,19 +1171,28 @@ void catalogue_controls(std::string& focus) {
     if(!message.empty())note("%s",message.c_str());
     if(!loaded){note("Catalogue has not been loaded. Installed packages remain available offline.");return;}
     if(!error.empty())note("Showing the last successfully loaded catalogue.");
+    static bool show_experimental=[]{std::string v;return hostui::get("mod.showExperimental",v)&&v=="1";}();
+    if(ImGui::Checkbox("Show experimental mods",&show_experimental))
+        hostui::post([on=show_experimental]{hostui::set("mod.showExperimental",on?"1":"0");});
+    note("Experimental mods are untested and can break the game or your save. Enabling one backs up your saves first.");
     ImGui::InputText("Search mods",search,sizeof search);
     std::string query=search;
     auto lower=[](std::string text){for(char& c:text)if(c>='A'&&c<='Z')c+=32;return text;};
     query=lower(query);
     auto installed=mods::packages::list();
+    size_t hidden=0;
     for(const auto& entry:catalogue.index.entries) {
+        bool is_installed=std::any_of(installed.begin(),installed.end(),[&](const auto& mod){return mod.id==entry.id;});
+        if(!visible(entry,show_experimental,is_installed)){hidden++;continue;}
         if(!query.empty()&&lower(entry.name+" "+entry.id+" "+entry.description).find(query)==std::string::npos)continue;
         ImGui::PushID(entry.id.c_str());
         if(test_install&&entry.id==test_install)ImGui::SetNextItemOpen(true);
         bool expanded=ImGui::TreeNode("entry","%s · %s",entry.name.c_str(),entry.version.c_str());
+        if(entry.experimental)experimental::badge();
         game_source_warning_control(mods::packages::game_source_warning(entry,catalogue.index));
         if(expanded) {
             ImGui::TextWrapped("%s",entry.description.c_str());
+            if(entry.experimental)note("Experimental: untested; it can cause game-breaking problems, and saving while it is active can damage your save. Enabling it backs up your saves first.");
             for(const auto& author:entry.authors)note("By %s",author.c_str());
             for(const auto& licence:entry.licences)note("Licence: %s",licence.c_str());
             for(const auto& dep:entry.dependencies)note("Requires %s",dep.c_str());
@@ -1225,6 +1234,7 @@ void catalogue_controls(std::string& focus) {
                             std::filesystem::path(mods::packages::directory())/"Catalogue",fixtures,host::download_https);
                         std::string error,id;
                         require(mods::packages::install(package.path().string(),error,&id),error);
+                        mods::packages::mark_experimental(id,entry.experimental);
                         std::lock_guard guard(worker.mutex);worker.installed=id;LOG("[catalogue] installed %s disabled",id.c_str());worker.message="Installed (off). Next: Go to setup, then press Set up (or tick the mod): its setup runs by itself.";
                     });
                 }
@@ -1242,6 +1252,7 @@ void catalogue_controls(std::string& focus) {
         }
         ImGui::PopID();
     }
+    if(hidden)note("%zu experimental %s hidden. Turn on Show experimental mods to see %s.",hidden,hidden==1?"mod":"mods",hidden==1?"it":"them");
 }
 
 void package_controls() {
@@ -1324,7 +1335,9 @@ void package_controls() {
         if (test_enable && mod.id == test_enable && (setup_test_plan().id!=mod.id ||
             (setup_test_plan().error.empty()&&diagnostic::setup_ready(setup_steps(mod.id))))) { toggled = on = true; test_enable = nullptr; }
         if(test_disable&&mod.id==test_disable){toggled=true;on=false;test_disable=nullptr;}
-        if (toggled&&!setupflow::handle_setup_enable(mod,on)) {
+        // the normal enable flow; an experimental mod first warns and backs up the saves
+        auto proceed = [mod, on] {
+            if (setupflow::handle_setup_enable(mod, on)) return;
             if(on&&!mod.graphics_conflicts.empty())graphics_choice={mod.id,mod.name,mod.graphics_conflicts,true};
             else {
                 auto native = on ? unconfirmed_native(mod.id) : decltype(unconfirmed_native(mod.id)){};
@@ -1335,7 +1348,8 @@ void package_controls() {
                 }
                 else confirm = {mod.id, mod.name, std::move(native), true};
             }
-        }
+        };
+        if (toggled && !(on && experimental::gate(mod, proceed))) proceed();
         ImGui::SameLine();
         if(test_remove&&mod.id==test_remove)ImGui::SetNextItemOpen(true);
         if(setup_test_plan().id==mod.id||setup_run.id==mod.id)ImGui::SetNextItemOpen(true);
@@ -1343,6 +1357,7 @@ void package_controls() {
         if(mod.id==catalogue_focus){ImGui::SetNextItemOpen(true);catalogue_focus.clear();scroll_here=true;}
         else if (installed.size() == 1) ImGui::SetNextItemOpen(true, ImGuiCond_Once);
         bool expanded = ImGui::TreeNode("details", "%s · %s", mod.name.c_str(), mod.version.c_str());
+        if (mod.experimental) experimental::badge();
         if(scroll_here)ImGui::SetScrollHereY(0.1f);  // "Go to setup" in the catalogue jumps here
         game_source_warning_control(mod.game_source_warning);
         if(mod.kind=="cemu"){
@@ -1356,6 +1371,10 @@ void package_controls() {
             if ((mod.kind == "native" || mod.kind == "guest" || !mod.setup_tools.empty()) && mod.compatible)
                 note(mod.native_confirmed ? "Runs native code with the game's permissions (you confirmed this version)."
                                           : "Runs native code with the game's permissions. Enabling it asks you to confirm first.");
+            if (mod.experimental)
+                note(mod.enabled || mod.active
+                         ? "Experimental: untested. Saving while it is active can damage your save; restore a backup in Save backups below if needed."
+                         : "Experimental: untested; it can cause game-breaking problems. Enabling it asks first and backs up your saves.");
             if (!mod.author.empty()) note("By %s", mod.author.c_str());
             ImGui::TextWrapped("%s", mod.description.c_str());
             if (!mod.reason.empty() && mod.reason != mod.game_source_warning) ImGui::TextWrapped("%s", mod.reason.c_str());
@@ -1403,7 +1422,11 @@ void package_controls() {
     if(switch_action==GraphicsSwitchAction::Switch)enable(graphics_choice.id,true,error,true);
     if(switch_action==GraphicsSwitchAction::Cancel)g_pad_b_used=true;
     native_confirm_dialog(confirm, error);
+    const bool back = navigation_pressed(input_map::face_input(input_map::kB));
+    if (experimental::dialog(back, error) == experimental::Answer::Cancelled && back) g_pad_b_used = true;
     setup_confirmation_dialog(error);
+    heading("Save backups");
+    if (experimental::backups_section(back)) g_pad_b_used = true;
 }
 
 void code_mod_dialog() {
@@ -1461,7 +1484,7 @@ void restart_now(bool code_build) {
 // changes made before the menu is opened (a resumed one-click setup) still count as new.
 void restart_notice_frame(bool draw) {
     auto code = mods::code::status();
-    g_restart_items = restart::pending(mods::packages::list(), code);
+    g_restart_items = restart::pending(mods::packages::list(), code, experimental::staged_restore());
     // the rebuild dialog has told the player already ("Restart now" / "Later")
     if (code.requested) for (const auto& item : g_restart_items) if (item.key.starts_with("code:")) g_restart_notice.acknowledge(item.key);
     const bool blocked = !draw || code.requested || code.building || (!setup_run.id.empty() && setup_run.error.empty()) ||

@@ -9,7 +9,10 @@ Usage:
                                                                  tools/shadercache/template.bin);
                                                                  --merge keeps what template T already has
   shaderprep.py build    [OUT] [--template T] [--max N]          head start from the game files + template
-                         [--no-pipelines]                        (default OUT: game/shadercache/headstart.bin)
+                         [--no-pipelines] [--jobs N]             (default OUT: game/shadercache/headstart.bin);
+                         [--progress]                            --jobs: archive scan workers (default: a few);
+                                                                 --progress: "WWHD-PROGRESS done total detail"
+                                                                 lines on stdout
 
 Where the shaders are (Wind Waker HD, USA):
   - SHARCFB archives ("BAHS" = byte-swapped "SHAB", AGL binary shader archive, version 9, little-endian
@@ -58,6 +61,7 @@ import shutil
 import struct
 import subprocess
 import sys
+import time
 import zlib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -110,18 +114,69 @@ def yaz0_python(b):
     return bytes(out)
 
 
+YAZ0_SUFFIX = ".dll" if os.name == "nt" else ".dylib" if sys.platform == "darwin" else ".so"
+# Release packages ship the decoder prebuilt (CMake target yaz0, tools/release/package.py);
+# a source checkout builds it on demand into build/.
+PACKAGED_YAZ0 = os.path.join(HERE, "lib", "libyaz0" + YAZ0_SUFFIX)
+
+
+def android_library_dir(maps_path="/proc/self/maps"):
+    """Android: the app's nativeLibraryDir, where the APK's libyaz0.so is installed next to the
+    embedded libpython; None elsewhere or when it cannot be found."""
+    if not (sys.platform == "android" or hasattr(sys, "getandroidapilevel")):
+        return None
+    try:
+        with open(maps_path) as maps:
+            for line in maps:
+                path = line.split(None, 5)[-1].strip() if line.count(" ") >= 5 else ""
+                if os.path.basename(path).startswith("libpython") and path.endswith(".so"):
+                    return os.path.dirname(path)
+    except OSError:
+        pass
+    return None
+
+
+def yaz0_candidates(environ=None, android_dir=None):
+    """Prebuilt decoders to try, in order: WWHD_YAZ0_LIB (Android setup passes the APK's copy),
+    the app's nativeLibraryDir on Android, then a release package's tools/lib."""
+    environ = os.environ if environ is None else environ
+    found = []
+    if environ.get("WWHD_YAZ0_LIB"):
+        found.append(environ["WWHD_YAZ0_LIB"])
+    android_dir = android_library_dir() if android_dir is None else android_dir
+    if android_dir:
+        found.append(os.path.join(android_dir, "libyaz0.so"))
+    found.append(PACKAGED_YAZ0)
+    return [path for i, path in enumerate(found) if path not in found[:i] and os.path.isfile(path)]
+
+
+def _load_yaz0():
+    source = os.path.join(HERE, "yaz0.c")
+    prebuilt = yaz0_candidates()
+    if prebuilt and (not os.path.isfile(source) or prebuilt[0] != PACKAGED_YAZ0):
+        for path in prebuilt:
+            try:
+                return ctypes.CDLL(path)
+            except OSError as error:
+                print("shaderprep: cannot load %s (%s)" % (path, error), file=sys.stderr)
+    lib = os.path.join(ROOT, "build", "libyaz0" + YAZ0_SUFFIX)
+    try:
+        if not os.path.exists(lib) or os.path.getmtime(lib) < os.path.getmtime(source):
+            os.makedirs(os.path.dirname(lib), exist_ok=True)
+            compiler = shlex.split(os.environ["CC"]) if os.environ.get("CC") else [shutil.which("clang") or shutil.which("gcc") or "clang"]
+            subprocess.check_call(compiler + ["-O2", "-shared"] + ([] if os.name == "nt" else ["-fPIC"]) + ["-o", lib, source])
+        return ctypes.CDLL(lib)
+    except (OSError, subprocess.CalledProcessError):
+        if os.path.isfile(PACKAGED_YAZ0):
+            return ctypes.CDLL(PACKAGED_YAZ0)
+        raise
+
+
 def yaz0(b):
     global _yaz0
     if _yaz0 is None:
-        suffix = ".dll" if os.name == "nt" else ".dylib" if sys.platform == "darwin" else ".so"
-        lib = os.path.join(ROOT, "build", "libyaz0" + suffix)
-        source = os.path.join(HERE, "yaz0.c")
         try:
-            if not os.path.exists(lib) or os.path.getmtime(lib) < os.path.getmtime(source):
-                os.makedirs(os.path.dirname(lib), exist_ok=True)
-                compiler = shlex.split(os.environ["CC"]) if os.environ.get("CC") else [shutil.which("clang") or shutil.which("gcc") or "clang"]
-                subprocess.check_call(compiler + ["-O2", "-shared"] + ([] if os.name == "nt" else ["-fPIC"]) + ["-o", lib, source])
-            _yaz0 = ctypes.CDLL(lib)
+            _yaz0 = _load_yaz0()
             _yaz0.yaz0_decompress.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_void_p, ctypes.c_size_t]
             _yaz0.yaz0_decompress.restype = ctypes.c_long
         except (OSError, subprocess.CalledProcessError):
@@ -190,15 +245,86 @@ def sharcfb_shaders(b):
         yield typ, [w(4 * i) for i in range(nregs)], data[ptr:ptr + size_c]
 
 
-def game_shaders(game):
-    """all distinct (type, microcode) -> (register words, container path)"""
+def archive_files(game):
+    return [f for f in sorted(glob.glob(os.path.join(glob.escape(game), "**", "*"), recursive=True))
+            if os.path.isfile(f) and f.endswith((".szs", ".pack", ".sarc", ".sharcfb"))]
+
+
+def scan_archive(f, game):
+    """distinct (type, microcode) -> (register words, container path) of one file, in file order"""
+    found = {}
+    with open(f, "rb") as stream:
+        data = stream.read()
+    for path, b in walk(data, os.path.relpath(f, game)):
+        for typ, regs, code in sharcfb_shaders(b):
+            found.setdefault((typ, code), (regs, path))
+    return found
+
+
+def default_jobs():
+    """Archive scan workers: a few, leaving cores for the rest of the machine."""
+    return max(1, min(4, (os.cpu_count() or 2) - 2))
+
+
+def _scan_parallel(game, files, jobs, finished, threads=False):
+    import concurrent.futures
+    yaz0(b"")  # builds a source checkout's decoder once, before the workers load it
+    results = [None] * len(files)
+    # Threads overlap only the native Yaz0 decoding and file reads (ctypes releases the GIL);
+    # used where processes cannot be started (Android's embedded Python).
+    pool = (concurrent.futures.ThreadPoolExecutor if threads else concurrent.futures.ProcessPoolExecutor)(jobs)
+    try:
+        # Largest first: the long Yaz0 archives do not end up alone at the end.
+        order = sorted(range(len(files)), key=lambda i: -os.path.getsize(files[i]))
+        futures = {pool.submit(scan_archive, files[i], game): i for i in order}
+        for future in concurrent.futures.as_completed(futures):
+            i = futures[future]
+            results[i] = future.result()
+            finished(i)
+    finally:
+        try:
+            pool.shutdown(wait=True, cancel_futures=True)
+        except TypeError:  # Python < 3.9
+            pool.shutdown(wait=True)
+    return results
+
+
+def game_shaders(game, progress=None, jobs=1, threads=False):
+    """all distinct (type, microcode) -> (register words, container path)
+
+    progress(done_bytes, total_bytes, done_files, total_files) follows the archive scan.
+    jobs > 1 scans archives in worker processes (threads=True: threads); the result (and its
+    order) is the same.
+    """
+    files = archive_files(game)
+    sizes = [os.path.getsize(f) for f in files]
+    total = sum(sizes)
+    state = {"bytes": 0, "files": 0}
+    def finished(i):
+        state["bytes"] += sizes[i]
+        state["files"] += 1
+        if progress:
+            progress(state["bytes"], total, state["files"], len(files))
+    if progress:
+        progress(0, total, 0, len(files))
+    results = None
+    if jobs > 1 and len(files) > 1:
+        import concurrent.futures.process
+        try:
+            results = _scan_parallel(game, files, jobs, finished, threads)
+        except (OSError, ImportError, NotImplementedError, concurrent.futures.process.BrokenProcessPool) as error:
+            print("shaderprep: parallel scan unavailable (%s); scanning serially" % error, file=sys.stderr)
+            state["bytes"] = state["files"] = 0
+            results = None
+    if results is None:
+        results = []
+        for i, f in enumerate(files):
+            results.append(scan_archive(f, game))
+            finished(i)
     out = {}
-    for f in sorted(glob.glob(os.path.join(game, "**", "*"), recursive=True)):
-        if not (os.path.isfile(f) and f.endswith((".szs", ".pack", ".sarc", ".sharcfb"))):
-            continue
-        for path, b in walk(open(f, "rb").read(), os.path.relpath(f, game)):
-            for typ, regs, code in sharcfb_shaders(b):
-                out.setdefault((typ, code), (regs, path))
+    for found in results:
+        for key, value in found.items():
+            out.setdefault(key, value)
     return out
 
 
@@ -264,7 +390,10 @@ def linked_shader_record(pixel,fetch,companion,regs):
 
 
 def write_record(f, t, raw):
-    comp = zlib.compress(raw, 6)
+    write_compressed(f, t, raw, zlib.compress(raw, 6))
+
+
+def write_compressed(f, t, raw, comp):
     f.write(struct.pack("<III", t, len(raw), len(comp)))
     f.write(comp)
 
@@ -276,10 +405,15 @@ def shader_record(vertex, code, fs, regs):
 
 
 def prog_hash(code):
+    """FNV-1a style over little-endian 64-bit words (the last one zero-padded), xor length"""
+    n = len(code)
+    whole = n // 8
     h = 0xCBF29CE484222325
-    for i in range(0, len(code), 8):
-        h = ((h ^ int.from_bytes(code[i:i + 8].ljust(8, b"\0"), "little")) * 0x100000001B3) & 0xFFFFFFFFFFFFFFFF
-    return h ^ len(code)
+    for word in struct.unpack_from("<%dQ" % whole, code):
+        h = ((h ^ word) * 0x100000001B3) & 0xFFFFFFFFFFFFFFFF
+    if n % 8:
+        h = ((h ^ int.from_bytes(code[whole * 8:], "little")) * 0x100000001B3) & 0xFFFFFFFFFFFFFFFF
+    return h ^ n
 
 
 # ---------------------------------------------------------------- shader register blocks
@@ -372,7 +506,13 @@ def read_template(path, allow_legacy=False):
     with open(path,'rb') as source: data=source.read()
     if data.startswith(template_format.MAGIC):
         doc=template_format.decode(data)
-        return [(s['hash'],s['vertex'],s['fetch'],[tuple(r) for r in s['registers']],s.get('linked_vertex')) for s in doc['states']], [(5 if p['backend']=='vulkan' else REC_PIPELINE,p) for p in doc['pipelines']]
+        states=[]
+        for s in doc['states']:
+            # replace each state's JSON register lists as they are converted: the template holds
+            # millions of pairs, and two full copies at once cost ~1 GB (phones)
+            states.append((s['hash'],s['vertex'],s['fetch'],[tuple(r) for r in s['registers']],s.get('linked_vertex')))
+            s['registers']=None
+        return states, [(5 if p['backend']=='vulkan' else REC_PIPELINE,p) for p in doc['pipelines']]
     if not allow_legacy:
         raise ValueError('legacy template carries fetch bytes; convert locally with template --merge')
     return read_legacy_template(path)
@@ -451,53 +591,88 @@ def cmd_coverage(game, cache):
     print("missing by type:", dict(collections.Counter("VS" if t == VS else "PS" for t, _ in missing)))
 
 
-def cmd_build(game, out, template, limit, with_pipelines=True):
-    states, pipelines = read_template(template)
-    shaders = game_shaders(game)
+# Share of the build progress the archive scan takes; writing the records takes the rest.
+SCAN_SHARE = 0.85
+
+
+def cmd_build(game, out, template, limit, with_pipelines=True, progress=None, jobs=1, threads=False):
+    """progress(done, total, detail): done/total in thousandths, monotonic over the whole build.
+    jobs > 1 scans archives and compresses records in parallel; the output is byte-identical.
+    threads=True scans on threads instead of processes (embedded Python, e.g. Android)."""
+    import threading
+    def report(fraction, detail):
+        if progress:
+            progress(int(1000 * min(1.0, fraction)), 1000, detail)
+    loaded = {}
+    def load():
+        try:
+            loaded["value"] = read_template(template)
+        except BaseException as error:
+            loaded["error"] = error
+    # The template is validated while the archives are scanned.
+    reader = threading.Thread(target=load, name="template", daemon=True)
+    reader.start()
+    def scanned(done_bytes, total_bytes, done_files, total_files):
+        report(SCAN_SHARE * done_bytes / max(total_bytes, 1),
+               "%s of %s game archives" % (format(done_files, ","), format(total_files, ",")))
+    try:
+        shaders = (game_shaders(game, scanned, jobs, threads) if progress else
+                   game_shaders(game, jobs=jobs, threads=threads))
+    finally:
+        reader.join()
+    if "error" in loaded:
+        raise loaded["error"]
+    states, pipelines = loaded["value"]
     if not with_pipelines:
         pipelines = []
+    hashes = {}
+    def program_hash(code):
+        h = hashes.get(code)
+        if h is None:
+            h = hashes[code] = prog_hash(code)
+        return h
     by_hash = collections.defaultdict(list)
     for h, vertex, fs, regs, linked in states:
         by_hash[(h, bool(vertex))].append((fs, regs, linked))
     # speculative states: those recorded for programs with an identical shader register block
-    blocks = {}
-    for (typ, code), (w, path) in shaders.items():
-        blocks.setdefault((typ == VS, tuple(sorted(own_block(typ == VS, w)))), None)
+    # (none are written with --max 0, which setup uses: skip the states x blocks pass then)
     by_family = collections.defaultdict(list)
-    for h, vertex, fs, regs, linked in states:
-        regmap = dict(regs)
-        for (tv, regset) in blocks:
-            if tv == bool(vertex):
-                by_family[(tv, tuple((a, regmap.get(a, 0)) for a in regset))].append((fs, regs, linked))
+    if limit > 0:
+        blocks = {}
+        for (typ, code), (w, path) in shaders.items():
+            blocks.setdefault((typ == VS, tuple(sorted(own_block(typ == VS, w)))), None)
+        for h, vertex, fs, regs, linked in states:
+            regmap = dict(regs)
+            for (tv, regset) in blocks:
+                if tv == bool(vertex):
+                    by_family[(tv, tuple((a, regmap.get(a, 0)) for a in regset))].append((fs, regs, linked))
     pgm = {True: mmSQ_PGM_START_VS, False: mmSQ_PGM_START_PS}
     companion_programs=collections.defaultdict(set)
     for (typ,code) in shaders:
-        if typ==VS: companion_programs[prog_hash(code)].add(code)
-    unresolved_linked=0
-    known = spec = 0
-    os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
-    with open(out, "wb") as f:
+        if typ==VS: companion_programs[program_hash(code)].add(code)
+    counts = {"unresolved_linked": 0, "known": 0, "spec": 0}
+    def records():
         for (typ, code), (w, path) in shaders.items():
             vertex = typ == VS
-            for fs, regs, linked in by_hash.get((prog_hash(code), vertex), []):
+            for fs, regs, linked in by_hash.get((program_hash(code), vertex), []):
                 r = dict(regs)
                 r[pgm[vertex] + 1] = len(code) >> 3  # the loader supplies the program address
                 if linked is not None:
                     matches=companion_programs.get(linked['hash'],set())
                     if len(matches)!=1:
-                        unresolved_linked+=1
+                        counts["unresolved_linked"]+=1
                         continue
                     companion=next(iter(matches))
                     r[mmSQ_PGM_START_VS+1]=len(companion)>>3
-                    write_record(f,6,linked_shader_record(code,template_format.fetch_payload(linked['fetch']),companion,sorted(r.items())))
+                    yield 6, linked_shader_record(code,template_format.fetch_payload(linked['fetch']),companion,sorted(r.items()))
                 else:
-                    write_record(f, REC_SHADER, shader_record(1 if vertex else 0, code, template_format.fetch_payload(fs) if fs else b"", sorted(r.items())))
-                known += 1
+                    yield REC_SHADER, shader_record(1 if vertex else 0, code, template_format.fetch_payload(fs) if fs else b"", sorted(r.items()))
+                counts["known"] += 1
         for kind, p in pipelines:
-            write_record(f, kind, template_format.vulkan_payload(p) if kind==5 else template_format.metal_payload(p))
+            yield kind, template_format.vulkan_payload(p) if kind==5 else template_format.metal_payload(p)
         for (typ, code), (w, path) in shaders.items():
             vertex = typ == VS
-            if (prog_hash(code), vertex) in by_hash:
+            if (program_hash(code), vertex) in by_hash:
                 continue
             blk = own_block(vertex, w)
             for fs, regs, linked in by_family.get((vertex, tuple(sorted(blk.items()))), [])[:limit]:
@@ -505,19 +680,52 @@ def cmd_build(game, out, template, limit, with_pipelines=True):
                 r = dict(regs)
                 r.update(blk)
                 r[pgm[vertex] + 1] = len(code) >> 3
-                write_record(f, REC_SPECULATIVE, shader_record(1 if vertex else 0, code, template_format.fetch_payload(fs) if fs else b"", sorted(r.items())))
-                spec += 1
-    print("unresolved linked shader states: %d" % unresolved_linked)
+                yield REC_SPECULATIVE, shader_record(1 if vertex else 0, code, template_format.fetch_payload(fs) if fs else b"", sorted(r.items()))
+                counts["spec"] += 1
+    # Progress while writing: the known records are bounded by the matching template states.
+    expected = max(1, sum(len(by_hash.get((program_hash(code), typ == VS), ())) for (typ, code) in shaders) + len(pipelines))
+    os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
+    written = 0
+    def wrote(n):
+        report(SCAN_SHARE + (1 - SCAN_SHARE) * min(1.0, n / expected),
+               "%s of %s shader records" % (format(min(n, expected), ","), format(expected, ",")))
+    with open(out, "wb") as f:
+        if jobs > 1:
+            # zlib releases the GIL: compress batches on threads, write in the original order
+            import concurrent.futures
+            import itertools
+            with concurrent.futures.ThreadPoolExecutor(jobs) as pool:
+                stream = records()
+                while True:
+                    batch = list(itertools.islice(stream, 256))
+                    if not batch:
+                        break
+                    for (t, raw), comp in zip(batch, pool.map(lambda item: zlib.compress(item[1], 6), batch)):
+                        write_compressed(f, t, raw, comp)
+                    written += len(batch)
+                    wrote(written)
+        else:
+            for t, raw in records():
+                write_record(f, t, raw)
+                written += 1
+                if written % 256 == 0:
+                    wrote(written)
+    report(1.0, "%s shader records" % format(written, ","))
+    print("unresolved linked shader states: %d" % counts["unresolved_linked"])
     print("archive shaders %d; known records %d; pipeline records %d; speculative records %d -> %s (%d bytes)" %
-          (len(shaders), known, len(pipelines), spec, out, os.path.getsize(out)))
+          (len(shaders), counts["known"], len(pipelines), counts["spec"], out, os.path.getsize(out)))
 
 
 def main():
     args = sys.argv[1:]
-    opts = {"--game": os.path.join(ROOT, "game", "content"), "--max": "2", "--template": TEMPLATE, "--merge": None}
+    opts = {"--game": os.path.join(ROOT, "game", "content"), "--max": "2", "--template": TEMPLATE, "--merge": None,
+            "--jobs": str(default_jobs())}
     no_pipelines = "--no-pipelines" in args
     if no_pipelines:
         args.remove("--no-pipelines")
+    machine_progress = "--progress" in args
+    if machine_progress:
+        args.remove("--progress")
     for k in list(opts):
         if k in args:
             i = args.index(k)
@@ -535,7 +743,16 @@ def main():
         cmd_template(args[1], args[2] if len(args) > 2 else TEMPLATE, opts["--merge"])
     elif cmd == "build":
         out = args[1] if len(args) > 1 else os.path.join(ROOT, "game", "shadercache", "headstart.bin")
-        cmd_build(game, out, opts["--template"], int(opts["--max"]), not no_pipelines)
+        def progress(done, total, detail):
+            # setup (tools/installer/shader_prebuild.py) parses these lines; at most ~10 per second
+            now = time.monotonic()
+            if done < total and now - progress.last < 0.1:
+                return
+            progress.last = now
+            print("WWHD-PROGRESS %d %d %s" % (done, total, detail), flush=True)
+        progress.last = 0.0
+        cmd_build(game, out, opts["--template"], int(opts["--max"]), not no_pipelines,
+                  progress if machine_progress else None, max(1, int(opts["--jobs"])))
     else:
         print(__doc__)
 

@@ -1445,7 +1445,7 @@ def recompile(game_dir, gen_dir, hooks=False):
     out = run_logged([sys.executable, os.path.join(PKG, "tools", "recomp", "recomp.py"), rpx, gen_dir] +
                      (["--mod-hooks"] if hooks else []) + (["--decomp-hooks", decomp] if decomp else []),
                      env=dict(os.environ, WWHD_RECOMP_MOD_HOOKS="0"), what="translating the game code")
-    n = len(glob.glob(os.path.join(gen_dir, "code_*.c")))
+    n = len(glob.glob(os.path.join(glob.escape(gen_dir), "code_*.c")))
     if n == 0:
         raise SetupError("the recompiler wrote no code")
     return n
@@ -1489,7 +1489,7 @@ def fwd(p):
 
 def compile_gamecode(tc, manifest, gen_dir, obj_dir, jobs, cancel=None, progress=None):
     os.makedirs(obj_dir, exist_ok=True)
-    srcs = sorted(glob.glob(os.path.join(gen_dir, "code_*.c")))
+    srcs = sorted(glob.glob(os.path.join(glob.escape(gen_dir), "code_*.c")))
     srcs += [os.path.join(gen_dir, f) for f in ("table.c", "imports.c")]
     srcs.sort(key=lambda s: -os.path.getsize(s))  # big files first: better use of the cores
     m = {"sdk": fwd(os.path.join(PKG, "sdk")), "gen": fwd(gen_dir)}
@@ -2175,6 +2175,31 @@ def write_code_mods_setting(data_dir, hooks):
     os.replace(tmp, path)
 
 
+def shader_progress_callback(progress):
+    """progress(text[, fraction]) for shader_prebuild.prepare, shown on a Progress line.
+
+    fraction covers the whole preparation (0..1); None until the helpers report one, so the bar
+    is indeterminate until then. The log gets each phase once, not every update."""
+    last = {"phase": None}
+    def message(text, fraction=None):
+        if fraction is None:
+            progress.update(0, 0, text, force=True)
+        else:
+            done = int(round(1000 * fraction))
+            if GUI:
+                # the bar shows this text instead of its percentage; keep it short enough for
+                # the bar: "<phase>: 1,234 of 5,678 (42%)" (the terminal line keeps the units)
+                counted = re.match(r"(.*?: [\d,]+ of [\d,]+)( |$)", text)
+                progress.update(done, 1000, "%s (%d%%)" % (counted.group(1) if counted else text, done // 10))
+            else:
+                progress.update(done, 1000, text)
+        phase = text.split(":", 1)[0]
+        if phase != last["phase"]:
+            last["phase"] = phase
+            LOG.write(text)
+    return message
+
+
 def prepare_shaders_nonfatal(*args, **kwargs):
     """Shader preparation is optional, including unexpected helper failures."""
     try:
@@ -2362,17 +2387,20 @@ def install(ctx, source, keys=None, info=None, ui=None, check_keys=None):
         except OSError as error:
             say("Shader preparation launcher unavailable: %s" % error)
         shader_progress = Progress("Preparing shaders")
-        def shader_message(text):
-            shader_progress.update(0, 0, text, force=True)
-            LOG.write(text)
         state["shader_prebuild"] = prepare_shaders_nonfatal(
             ctx.game_dir, shader_template, state["exe"],
             shader_root, PKG,
-            renderer="metal" if IS_MAC else "vulkan", progress=shader_message,
+            renderer="metal" if IS_MAC else "vulkan", progress=shader_progress_callback(shader_progress), log=LOG.write,
+            # macOS: the player chooses Metal or Vulkan (MoltenVK) in Graphics > Renderer: prepare both
+            renderers=["metal", "vulkan"] if IS_MAC else ["vulkan"],
             skip=bool(getattr(args, "skip_shader_prebuild", False)),
             cancel=lambda: bool(getattr(args, "shader_prebuild_cancel", None) and
                                 Path(args.shader_prebuild_cancel).exists()))
-        shader_progress.done(state["shader_prebuild"]["status"])
+        prepared = state["shader_prebuild"]
+        states = prepared.get("renderers") or {}
+        ready = [name.capitalize() for name, value in sorted(states.items()) if value == "ready"]
+        # macOS: "ready (Metal, Vulkan)", or "ready (Metal)" when MoltenVK is unavailable
+        shader_progress.done(prepared["status"] + (" (%s)" % ", ".join(ready) if len(states) > 1 and ready else ""))
     if not args.keep_work:
         shutil.rmtree(work, ignore_errors=True)
     if kind != "gen":

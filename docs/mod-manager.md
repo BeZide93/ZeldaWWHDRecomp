@@ -150,6 +150,50 @@ on it report that a dependency failed to load, as for any failed load. The
 manager API enforces this as well (`enable()` refuses unconfirmed native code;
 `unconfirmed_native()` and `confirm_native()` serve the dialog).
 
+### Experimental mods and save backups
+
+Some mods are marked experimental: they are untested and can cause game-breaking
+problems, and saving the game while one is active can damage the save. The
+catalogue hides them unless **Show experimental mods** (Browse catalogue, off by
+default, saved with the catalogue URL) is on. An installed experimental mod is
+always listed, with an orange **Experimental** label, so it can be turned off or
+removed.
+
+Enabling an experimental mod (its checkbox, **Set up**, or a mod that requires
+one) first explains the risk. **Back up saves and enable** copies the whole save
+folder before anything is turned on; **Cancel** (the default, also B) leaves it
+off. If the backup fails, for example because the disk is full, the mod stays
+off and the reason is shown. Each enable asks again; the confirmation is not
+remembered. A profile switch to a profile that already has the mod enabled does
+not ask.
+
+**Mods > Save backups** lists every backup with its date, reason and size.
+**Back up now** makes a manual backup. Backups live in `save-backups` next to the
+save folder (on Android in the app's files folder, next to `save`), one folder
+per backup named after its date and reason (for example
+`2026-10-11_14-03-12-before-dragon`), with the copied files under `save/` and
+the details in `backup.json`. A backup is written to a temporary folder and
+renamed when complete, and an existing backup is never overwritten. The newest
+10 automatic backups (before a mod, before a restore) are kept; manual backups
+are never deleted automatically, and folders you put there yourself are left
+alone. **Delete** removes one backup, manual or automatic, after a confirmation
+("This can't be undone"); the backup staged for a restore cannot be deleted until
+that restore is cancelled.
+
+**Restore** asks for confirmation and then stages the restore: the game keeps
+its save files open while it runs, so the files are replaced at the next start,
+before the game loads any save. The Restart required notice offers a restart
+(on Android, restart the app yourself); **Cancel restore** undoes the choice.
+At that start the current save is backed up first ("Before a restore"), so a
+restore can itself be undone. If the restore fails, the save folder stays as it
+was and the Mods tab says why. Backups and restores are logged with the
+`[save-backup]` prefix.
+
+Package manifests and catalogue entries mark a mod with `"experimental": true`
+(optional, default `false`; older catalogues without the field keep working). A
+package installed from an experimental catalogue entry counts as experimental
+even if its own manifest predates the field.
+
 Profiles save package toggles/configuration and built-in choices. Clone current
 creates another profile; select it in Active profile. Switch away before deleting
 a profile. Disable all covers both built-ins and external packages. Explicit
@@ -201,6 +245,7 @@ Package manifest fields:
 | `game_id` | `wwhd-usa` (the runtime also verifies its exact RPX entry) |
 | `author`, `description` | Optional display metadata |
 | `minimum_manager_version` | Optional three-part minimum |
+| `experimental` | Optional `true` for untested mods: hidden by default, enabling backs up the saves first (manager 1.4) |
 | `kind` | `native`, `settings`, `content` or `cemu` |
 | `abi_version`, `binaries` | Native ABI `1`; platform-to-relative-library map |
 | `content_dir` | Content package: relative folder holding game-relative replacement files |

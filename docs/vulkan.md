@@ -270,11 +270,19 @@ compile covered shaders and compatible pipelines before play. Allow roughly tens
 recent Mac; slower computers and different drivers can take longer. Generated shader and driver
 caches stay local.
 
+On macOS, where **Graphics → Renderer** offers Metal and Vulkan (MoltenVK), setup prepares both from
+one shared head start: first for Metal, then for Vulkan, on one progress bar. The preparation manifest
+records each renderer's result, and the game uses the prepared caches only for a renderer that is ready.
+If Vulkan cannot start on the Mac, Metal is still prepared and Vulkan is skipped with a short message.
+A setup that finds an earlier preparation for one renderer prepares only the missing one. Windows,
+Linux and Android prepare Vulkan only.
+
 Uncheck **Prepare shaders now** in setup, use `--skip-shader-prebuild` in terminal setup, or press Back
 on Android's preparation screen to skip. A missing template or a preparation failure does not prevent
 playing: shaders compile on demand. Skipping is remembered for the same game and template, including across runtime updates.
 
-Choose **Settings → Graphics → Rebuild shader cache**, then run setup repair/update to prepare again.
+Choose **Settings → Graphics → Rebuild shader cache**, then run setup repair/update to prepare again
+(on macOS for both renderers; a renderer that failed or was unavailable is retried only then).
 Ordinary game launches never start preparation. Setup repair/update checks whether preparation needs
 refreshing. Player caches persist in `shader-prebuild/live` across preparation generations. The active generation
 lives under the host configuration directory's `shader-prebuild` folder; portable installations use their
@@ -803,9 +811,10 @@ CPU paths not set to `1` and lazy DrawDone / async present when turned off. The 
 
 ## Resource dependencies
 
-Precise barriers are **on by default on Android** and **opt-in on desktop**
-(`WWHD_VK_NARROW_BARRIERS=1`) until they have been checked on native Windows/Linux drivers; on MoltenVK
-they measured neutral (7 interleaved pairs). The precise path records each image's last write scope
+Precise barriers are **opt-in on every platform** (`WWHD_VK_NARROW_BARRIERS=1`). On MoltenVK they
+measured neutral (7 interleaved pairs); on an OnePlus 8 Pro (Adreno 650, Mesa Turnip) they gave no
+speed difference but caused device-lost in 4 of 10 runs (0 of 18 with them off or with Turnip's
+sysmem rendering), so Android no longer enables them by default (issue #104). The precise path records each image's last write scope
 and accumulated reader stages, including attachments, feedback copies, mip chains, composition
 and readbacks. Texture bindings name the shader stage that actually reads them. Barrier elision
 preserves the conservative dynamic-rendering pass boundaries. Source access masks contain writes only; a write waits for all pending readers.

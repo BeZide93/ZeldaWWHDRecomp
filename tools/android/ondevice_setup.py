@@ -6,6 +6,7 @@ worker builds a candidate; only AndroidGame may validate/load and activate it.
 import argparse
 import fcntl
 import json
+import os
 from pathlib import Path
 import resource
 import sys
@@ -124,12 +125,18 @@ def run(configuration, package=None, native_run=None, adapter_factory=Adapter):
                 spec = importlib.util.spec_from_file_location("wwhd_shader_prebuild", helper_path)
                 helper = importlib.util.module_from_spec(spec)
                 spec.loader.exec_module(helper)
-                def build_headstart(game_path, output, template):
+                def build_headstart(game_path, output, template, progress=None):
                     sys.path.insert(0, str(package / "tools"))
                     shader_spec = importlib.util.spec_from_file_location("wwhd_shaderprep", package / "tools/shaderprep.py")
                     shader = importlib.util.module_from_spec(shader_spec)
                     shader_spec.loader.exec_module(shader)
-                    shader.cmd_build(str(game_path), str(output), str(template), 0, True)
+                    # Embedded Python cannot start worker processes: at most two scan threads,
+                    # which overlap the native Yaz0 decoding (more add heat, little speed)
+                    shader.cmd_build(str(game_path), str(output), str(template), 0, True, progress,
+                                     jobs=min(2, jobs), threads=True)
+                if isinstance(job.get("yaz0"), str) and job["yaz0"]:
+                    # the APK's native decoder (nativeLibraryDir); shaderprep also finds it itself
+                    os.environ["WWHD_YAZ0_LIB"] = job["yaz0"]
                 cache_root = Path(job.get("shader_cache_root", root / "shader-prebuild"))
                 cache_root.mkdir(parents=True, exist_ok=True)
                 helper.atomic_json(cache_root / "launcher.json", dict(schema=1, package=str(package),
@@ -137,7 +144,11 @@ def run(configuration, package=None, native_run=None, adapter_factory=Adapter):
                 publish({"stage": "shaders", "state": "running"})
                 shader_status = helper.prepare(game, package / "tools/shadercache/template.bin", None,
                     cache_root, package,
-                    renderer="vulkan", progress=lambda text: publish({"stage": "shaders", "detail": text}),
+                    renderer="vulkan",
+                    progress=lambda text, fraction=None: publish(
+                        {"stage": "shaders", "detail": text} if fraction is None else
+                        {"stage": "shaders", "detail": text, "fraction": round(fraction, 3)}),
+                    log=lambda line: None,
                     cancel=paused, skip=bool(job.get("skip_shader_prebuild", False)), builder=build_headstart,
                     runtime_identity=library)
                 publish({"stage": "shaders", "state": shader_status["status"]})

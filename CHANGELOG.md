@@ -7,6 +7,61 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Profiling on Windows on ARM64: a sampling profiler for the frame threads** (PR #147, thanks
+  @rhemfur). Off unless `WWHD_SAMPLE_THREADS=<file prefix>` is set; `tools/bench/thread_profile.py`
+  turns the samples into a report by module and function, including time inside the Vulkan driver,
+  without administrator rights. See docs/performance.md.
+- **Android: a friendlier setup screen, and the app icon starts the game** (PRs #128 and #129, thanks
+  @rhemfur). Setup now guides you step by step in English, Portuguese or Spanish ("Choose your
+  game", "Preparing the game for your phone… 20 of 80 · about 3 min left", "Your game is ready").
+  Once a game is set up, the app icon starts it directly ("Game setup" stays available by
+  long-pressing the icon), and the phone offers a home-screen game icon with the game's own picture,
+  made from your game files.
+- **Fixed: crash with Quick doors when leaving a room with spores** (issue #145), for example at
+  the first door in the Forbidden Woods. Quick doors ran the spores' fade-out faster than the game
+  draws, so their effect was removed while still queued for drawing. Doors now wait for the
+  weather effect to finish fading (rain, stars, spores, fog and waves) and stay fast otherwise.
+
+- **Windows, Intel UHD graphics: a workaround for a crash in Intel's Vulkan driver** a few seconds
+  after start (issue #144). On Intel GPUs every render-target view now states its purpose explicitly;
+  `WWHD_VK_ATTACHMENT_VIEW_USAGE=0` turns it off, and `WWHD_VK_TRACE_PASSES=1` logs each render
+  pass once for crash reports.
+
+- **Fixed: shadows switching between sharp and blurry at high internal resolutions** (issue #135).
+  Above 1x, the sun-shadow pass rebuilt surface normals from rays one console pixel apart but depths
+  one screen pixel apart, so depending on the camera angle shadows smeared and Link could get a dark
+  outline. The pass now uses matching spacing, so shadows at 2x, 3x or 4K look like at 1x, only sharper.
+- **Fixed: Android GPU crashes ("device lost") on some Adreno phones** (issue #104). The precise
+  GPU barriers that v0.2.12 turned on for Android caused occasional crashes with Mesa Turnip on an
+  Adreno 650 and gave no measurable speed-up, so they are off by default again on every platform
+  (`WWHD_VK_NARROW_BARRIERS=1` still turns them on). Thanks to @rhemfur for the measurements.
+- **Fixed: setup stopped with "the recompiler wrote no code"** (issue #136) when the install folder's
+  path contains square brackets, for example `...\LoZ - The Wind Waker [WiiU]\data`. Setup and the
+  recompiler treated the brackets as a search pattern and then found none of their own files.
+
+- **Android setup: "Continue anyway" when it waits for the phone to cool down** (issue #142). The
+  pause now shows the battery temperature and Android's thermal status, waits only at 45 °C battery
+  temperature (42 °C if Android also reports the phone as warm) or when Android reports it as hot,
+  and a **Continue anyway** button (also on the low-battery pause) lets you go on for this run. Only
+  Android's critical heat level still stops setup.
+- **Mods: experimental mods and save backups.** Mods marked *Experimental* (untested, may break the
+  game or a save made while they are active; Call of the Sky is one) are hidden unless you turn on
+  **Show experimental mods** in the Mods tab. Turning one on asks first and backs up your saves before
+  it is enabled. **Mods → Save backups** lists the backups (the newest 10 automatic ones are kept;
+  *Back up now* backups are never removed), can restore one at the next start, before the game loads
+  any save (your current saves are backed up first, so a restore can be undone), or delete one.
+
+- **Setup: "Preparing shaders" is much faster and shows real progress.** The release now includes the
+  native decoder for the game's compressed archives (before, setup unpacked them in slow Python) and
+  scans them on several cores: about 10 seconds instead of about 4 minutes on an Apple Silicon Mac,
+  with an identical result. The bar now fills as it works ("400 of 818 game archives", then the
+  shaders and pipelines compiled), and Vulkan compiles pipelines on several threads. On Android the
+  app now ships the same native decoder, so preparation on the phone is much faster as well.
+
+  shaders and pipelines compiled), and Vulkan compiles pipelines on several threads.
+
+  On a Mac, setup now prepares both Metal and Vulkan, so either renderer starts without first-time
+  shader stutter.
 - **Controls: in-game button prompts follow your controller** (PR #110, thanks @mhbxyz). With Face
   buttons set to *by label* (or *Automatic* on an Xbox-style pad), dialog icons and HUD buttons use
   green A, red B, blue X and yellow Y, the HUD button cluster uses the Xbox positions, and shoulder

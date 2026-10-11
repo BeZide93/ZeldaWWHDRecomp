@@ -514,7 +514,8 @@ static Shader* get_shader_uncached(const uint32_t* regs, bool vertex, LatteFetch
     double t0 = now_ms();
     LatteShader_UpdatePSInputs((uint32*)regs);
     LatteDecompilerOptions opt;
-    if (!vertex) opt.areaSampledTextures = gfx::area_sample::units_for_pixel_shader(mem::ptr(addr), size);
+    const auto fixes = vertex ? gfx::area_sample::Program{} : gfx::area_sample::pixel_program(mem::ptr(addr), size);
+    opt.areaSampledTextures = fixes.units;
     // the GPU's MUL/MULADD give 0*anything=0 (rsqrt(0)*0 is NaN otherwise: black letter in the Rito
     // mail sorting game); Cemu's default too. WWHD_STRICT_MUL=0 turns it off for comparisons
     static const bool strictMul = !getenv("WWHD_STRICT_MUL") || strcmp(getenv("WWHD_STRICT_MUL"), "0");
@@ -532,11 +533,11 @@ static Shader* get_shader_uncached(const uint32_t* regs, bool vertex, LatteFetch
     s->dec = FinishDecompiledShader(out);
     if (opt.areaSampledTextures) {
         std::string src = s->dec->strBuf_shaderSource->c_str();
-        if (gfx::area_sample::rewrite(src, opt.areaSampledTextures, true) > 0) {
+        if (gfx::area_sample::rewrite(src, fixes, true) > 0) {
             s->dec->strBuf_shaderSource->reset();
             s->dec->strBuf_shaderSource->add(std::string_view(src));
         } else {
-            LOG("[gfx] pixel shader %08X: area-sampled taps not applied", addr);
+            LOG("[gfx] pixel shader %08X: upscaling fix not applied", addr);
         }
     }
     cache_record_shader(regs, vertex);

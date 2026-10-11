@@ -8,6 +8,7 @@
 #include "stutter_trace.h"
 #include "worker_metrics.h"
 #include <algorithm>
+#include <atomic>
 #include <cstdio>
 #include <filesystem>
 #include <mutex>
@@ -402,37 +403,57 @@ bool merge_pipeline_worker_cache(VkPipelineCache target) {
   std::fprintf(stderr, "[vulkan warmup] worker pipeline cache merged for persistence\n");
   return true;
 }
-PipelineWarmupResult warm_resolved_pipeline_recipes(std::vector<std::shared_ptr<PipelineRecipe>> recipes) {
+PipelineWarmupResult warm_resolved_pipeline_recipes(std::vector<std::shared_ptr<PipelineRecipe>> recipes,
+    const std::function<void(size_t)>& progress) {
   auto& w = worker();
   if (w.thread.joinable()) w.thread.join();
   if (!w.device || recipes.size() > kPipelineRecipeMaxCount) return {0, recipes.size()};
-  PipelineWarmupResult batch;
-  w.thread = std::thread([&w, &batch, recipes = std::move(recipes)] {
+  std::atomic<size_t> next{0}, ready{0}, failed{0}, finished{0};
+  std::mutex progressMutex;
+  auto compileAll = [&] {
     host::set_thread_name("Vulkan state warmup");
-    for (auto& recipe : recipes) {
+    for (size_t i; (i = next.fetch_add(1)) < recipes.size();) {
+      const auto& recipe = recipes[i];
       const auto key = identity(recipe->key);
+      bool skip = false;
       {
         std::lock_guard lock(w.mutex);
-        if (w.stopped) { ++batch.failed; continue; }
-        if (w.ready.contains(key)) { ++batch.ready; continue; }
+        if (w.stopped) { ++failed; skip = true; }
+        else if (w.ready.contains(key)) { ++ready; skip = true; }
       }
-      WarmPipeline handles;
-      try {
-        if (compile(w.device, w.cache, *recipe, handles) != VK_SUCCESS) { ++batch.failed; continue; }
-        std::lock_guard lock(w.mutex);
-        if (!insert_recipe(w, recipe)) { destroy(w.device, handles); ++batch.failed; continue; }
-        try { retain_ready(w,key,handles,recipe); handles = {}; }
-        catch (...) { destroy(w.device, handles); throw; }
-        changed(w);
-        ++batch.ready;
-      } catch (const std::exception& error) {
-        destroy(w.device, handles);
-        ++batch.failed;
-        std::fprintf(stderr, "[vulkan state warmup] skipped: %s\n", error.what());
+      if (!skip) {
+        WarmPipeline handles;
+        try {
+          if (compile(w.device, w.cache, *recipe, handles) != VK_SUCCESS) ++failed;
+          else {
+            std::lock_guard lock(w.mutex);
+            if (!insert_recipe(w, recipe)) { destroy(w.device, handles); ++failed; }
+            else {
+              try { retain_ready(w,key,handles,recipe); handles = {}; }
+              catch (...) { destroy(w.device, handles); throw; }
+              changed(w);
+              ++ready;
+            }
+          }
+        } catch (const std::exception& error) {
+          destroy(w.device, handles);
+          ++failed;
+          std::fprintf(stderr, "[vulkan state warmup] skipped: %s\n", error.what());
+        }
       }
+      const size_t done = ++finished;
+      if (progress) { std::lock_guard lock(progressMutex); progress(done); }
     }
-  });
+  };
+  // Offline warming only (nothing else runs): a few compiling threads, leaving cores free.
+  const unsigned cores = std::max(1u, std::thread::hardware_concurrency());
+  const size_t threads = std::min<size_t>({4, cores > 2 ? cores - 2 : 1, std::max<size_t>(1, recipes.size())});
+  std::vector<std::thread> pool;
+  for (size_t t = 1; t < threads; ++t) pool.emplace_back(compileAll);
+  w.thread = std::thread(compileAll);
   w.thread.join();
+  for (auto& thread : pool) thread.join();
+  PipelineWarmupResult batch{ready.load(), failed.load()};
   w.result.ready += batch.ready; w.result.failed += batch.failed;
   return batch;
 }

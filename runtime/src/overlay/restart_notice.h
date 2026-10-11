@@ -18,8 +18,13 @@ struct Item {
 
 // Everything a restart would change. Live changes (native and settings packages, built-in mods)
 // never appear: the manager marks only next-launch kinds (content, Cemu, guest) pending_restart.
-inline std::vector<Item> pending(const std::vector<mods::packages::View>& packages, const mods::code::Status& code) {
+// restore: the save backup staged for the next start (mods/save_backup.h), described for the player.
+inline std::vector<Item> pending(const std::vector<mods::packages::View>& packages, const mods::code::Status& code,
+                                 const std::string& restore = {}) {
     std::vector<Item> out;
+    if (!restore.empty())
+        out.push_back({"restore:" + restore, "Your saves will be restored from the backup of " + restore + " at the next start.",
+                       "save restore"});
     if (code.ready) {
         std::string name;
         for (const auto& p : packages) if (!code.mod.empty() && p.id == code.mod) name = p.name;

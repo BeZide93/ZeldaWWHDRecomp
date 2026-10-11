@@ -83,6 +83,52 @@ class ShaderPreparationBoundary(unittest.TestCase):
         self.assertIn("The game can still run", log.call_args.args[0])
 
 
+class ShaderPreparationProgress(unittest.TestCase):
+    def test_gui_bar_is_indeterminate_until_fractions_then_determinate(self):
+        class Gui:
+            def __init__(self): self.events = []
+            def emit(self, event): self.events.append(event)
+        gui = Gui()
+        with mock.patch.object(setup, "GUI", gui), mock.patch.object(setup.LOG, "write") as log:
+            message = setup.shader_progress_callback(setup.Progress("Preparing shaders"))
+            message("Resolving shaders from your game files")
+            message("Resolving shaders from your game files: 3 of 818 game archives", fraction=0.1)
+            message("Resolving shaders from your game files: 9 of 818 game archives", fraction=0.2)
+            message("Compiling shaders and pipelines for this computer", fraction=0.35)
+        bars = [(e["done"], e["total"], e["detail"]) for e in gui.events if e["event"] == "progress"]
+        self.assertEqual(bars[0], (0, 0, "Resolving shaders from your game files"))
+        self.assertEqual(bars[1], (100, 1000, "Resolving shaders from your game files: 3 of 818 (10%)"))
+        self.assertEqual(bars[-1][2], "Compiling shaders and pipelines for this computer (35%)")
+        self.assertEqual(bars[-1][:2], (350, 1000))
+        self.assertEqual([c.args[0] for c in log.call_args_list],
+                         ["Resolving shaders from your game files", "Compiling shaders and pipelines for this computer"])
+
+    def test_terminal_line_shows_percentage(self):
+        import io
+        out = io.StringIO()
+        with mock.patch.object(setup, "GUI", None), mock.patch.object(setup.LOG, "write"), \
+                mock.patch.object(setup.sys, "stdout", out):
+            message = setup.shader_progress_callback(setup.Progress("Preparing shaders"))
+            message("Resolving shaders from your game files: 400 of 818 game archives", fraction=0.42)
+        self.assertIn("42% Resolving shaders from your game files: 400 of 818 game archives", out.getvalue())
+
+
+class BracketsInInstallFolder(unittest.TestCase):
+    # issue #136: an install folder such as "LoZ - The Wind Waker [WiiU]" made glob treat "[WiiU]" as a
+    # character class, so setup found none of the generated files ("the recompiler wrote no code").
+    def test_recompile_counts_generated_code_in_a_folder_with_brackets(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            gen_dir = os.path.join(temporary, "LoZ - The Wind Waker [WiiU]", "data", "work", "gen")
+
+            def run_logged(cmd, env=None, what=""):
+                os.makedirs(gen_dir, exist_ok=True)
+                for name in ("code_000.c", "code_001.c"):
+                    open(os.path.join(gen_dir, name), "w").close()
+
+            with mock.patch.object(setup, "run_logged", side_effect=run_logged):
+                self.assertEqual(setup.recompile(os.path.join(temporary, "game"), gen_dir), 2)
+
+
 class GuestBuildConfig(unittest.TestCase):
     def test_toolchain_argument_vector(self):
         with tempfile.TemporaryDirectory() as d:

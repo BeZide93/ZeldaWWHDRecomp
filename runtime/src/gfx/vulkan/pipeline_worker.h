@@ -1,5 +1,6 @@
 #pragma once
 #include "pipeline_recipe.h"
+#include <functional>
 #include <string>
 
 namespace gfxvk {
@@ -25,7 +26,10 @@ void checkpoint_pipeline_recipes();
 struct PipelineWarmupResult { size_t ready = 0, failed = 0; };
 // Offline only, caller resolves all shader identities/layouts on render thread.
 // Joins startup, then a worker owns this immutable local-SPIR-V batch.
-PipelineWarmupResult warm_resolved_pipeline_recipes(std::vector<std::shared_ptr<PipelineRecipe>> recipes);
+// Compiles on a few threads (the pipeline cache is internally synchronized); progress(finished)
+// runs on a compiling thread, one call at a time.
+PipelineWarmupResult warm_resolved_pipeline_recipes(std::vector<std::shared_ptr<PipelineRecipe>> recipes,
+    const std::function<void(size_t)>& progress = {});
 // Offline warming only: finish the whole startup queue instead of cancelling it.
 PipelineWarmupResult finish_pipeline_warmup();
 // After save_pipeline_recipes has joined; caller serializes access to target.

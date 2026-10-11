@@ -23,6 +23,13 @@ int main() {
     const double s = Notice::kSettle + 0.01;  // just past the settle time
     mods::code::Status idle;
 
+    // A save restore staged in Save backups is applied at the next start: it asks for a restart too.
+    {
+        auto items = pending({}, idle, "2026-10-11 10:00:00 (Manual backup)");
+        assert(items.size() == 1 && items[0].key.starts_with("restore:") && summary(items) == "save restore");
+        assert(items[0].text.find("2026-10-11 10:00:00") != std::string::npos);
+        assert(pending({}, idle, "").empty());
+    }
     // Live changes never count: native and settings packages, built-in mods (not packages at all).
     {
         auto items = pending({pack("fps", "FPS counter", "native", true, false), pack("preset", "Preset", "settings", false, true)}, idle);

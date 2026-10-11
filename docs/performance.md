@@ -99,6 +99,41 @@ directory) to check that the run still renders correctly. The "Sort by top of st
 `sample.txt` shows where the CPU time goes. `run.log` prints the shader and pipeline counts every
 few seconds.
 
+### Windows on ARM64: sampling the frame threads
+
+macOS `sample` has no counterpart on Windows that works without administrator rights (ETW / WPR
+need them). `WWHD_SAMPLE_THREADS=<prefix>` turns on a sampling profiler inside the game
+(`runtime/src/platform/thread_sampler.cpp`, Windows on ARM64 only): about 1000 times a second the
+render thread and the game's main thread are suspended, their stacks are copied (unwound with
+`RtlVirtualUnwind`, then the frame-pointer chain) and they are resumed. `WWHD_SAMPLE_AFTER=<s>`
+delays the start (skip boot and loading), `WWHD_SAMPLE_SECONDS=<s>` limits it. It writes
+`<prefix>.samples` and `<prefix>.modules`; `tools/bench/thread_profile.py` reports the time by module
+and function, and for time spent in the Vulkan driver or the kernel the game executable's call site
+that led there:
+
+```sh
+tools/bench/run_bench.py --binary build/prof/wwhd.exe --state-dir my_states --scene outset --fps 60 \
+    --runs 1 --out build/bench/prof --variant "prof:WWHD_SAMPLE_THREADS=prof,WWHD_SAMPLE_AFTER=35,WWHD_SAMPLE_SECONDS=40"
+tools/bench/thread_profile.py build/bench/prof/prof_01/prof --exe build/prof/wwhd.exe --thread render
+```
+
+Build with debug information (`-DCMAKE_BUILD_TYPE=RelWithDebInfo`) so the executable's functions and
+lines can be named (`llvm-symbolizer`, e.g. from llvm-mingw); functions of system and driver DLLs are
+named after their nearest export, which names entry points but not internal functions. On a
+Snapdragon X, return addresses saved on the stack carry a pointer-authentication code in their upper
+bits; the sampler and the script strip it (user addresses fit in 48 bits).
+
+First results (Snapdragon X Elite, Adreno X1-85 driver 31.0.152.1, `devel` of 2026-10-11, 60 fps,
+llvm-mingw build): a hilltop view of Outset's village (about 3,970 draws/frame) ran 59.7 fps with
+29.86 logic steps/s (116 fps uncapped); the render thread was idle about 20% of the time and spent
+about 22% inside the Vulkan driver, spread over many calls: `vkCmdDrawIndexed` about 7-8%,
+`vkCmdBeginRendering` about 3-4% (about 49 passes/frame), descriptor set allocation and updates
+about 3%, the submission path about 4% (the driver destroys a kernel synchronization object in
+`vkResetFences` and creates one in `vkQueueSubmit`, about 0.5% of the thread together). On this
+scene, interleaved uncapped A/B runs (3 each) of `WWHD_VK_DRAW_BATCH=4096`, `WWHD_VK_DRAW_BATCH=0` and
+`WWHD_VK_NARROW_BARRIERS=1` stayed within the runs' spread (+2.2%, +2.7%, -3.4% in median fps), so the
+defaults are unchanged.
+
 ### Fixed-scene benchmark
 
 `tools/bench/run_bench.py` runs the game headless (or with `--visible` windows, which presentation
