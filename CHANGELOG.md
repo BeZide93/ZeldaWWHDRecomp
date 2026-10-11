@@ -18,7 +18,8 @@ what is on `devel` and not released yet (also in the
   native decoder for the game's compressed archives (before, setup unpacked them in slow Python) and
   scans them on several cores: about 10 seconds instead of about 4 minutes on an Apple Silicon Mac,
   with an identical result. The bar now fills as it works ("400 of 818 game archives", then the
-  shaders and pipelines compiled), and Vulkan compiles pipelines on several threads.
+  shaders and pipelines compiled), and Vulkan compiles pipelines on several threads. On Android the
+  app now ships the same native decoder, so preparation on the phone is much faster as well.
 - **Controls: in-game button prompts follow your controller** (PR #110, thanks @mhbxyz). With Face
   buttons set to *by label* (or *Automatic* on an Xbox-style pad), dialog icons and HUD buttons use
   green A, red B, blue X and yellow Y, the HUD button cluster uses the Xbox positions, and shoulder
