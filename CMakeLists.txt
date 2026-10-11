@@ -616,6 +616,18 @@ if(WIN32)
     target_link_options(wwhd-extract PRIVATE ${WWHD_STRIP_RELEASE})
   endif()
 endif()
+# Yaz0 decoder that tools/shaderprep.py loads with ctypes (setup's "Preparing shaders" reads
+# ~3.5 GB of Yaz0 archives; the pure-Python fallback takes minutes). Releases ship it prebuilt as
+# tools/lib/libyaz0.{dylib,so,dll} (tools/release/package.py).
+add_library(wwhd_yaz0 MODULE tools/yaz0.c)
+if(APPLE)
+  set(WWHD_YAZ0_SUFFIX .dylib)
+elseif(WIN32)
+  set(WWHD_YAZ0_SUFFIX .dll)
+else()
+  set(WWHD_YAZ0_SUFFIX .so)
+endif()
+set_target_properties(wwhd_yaz0 PROPERTIES PREFIX lib OUTPUT_NAME yaz0 SUFFIX ${WWHD_YAZ0_SUFFIX})
 add_executable(extract_crypto_test tools/wudextract/crypto_test.cpp)
 target_link_libraries(extract_crypto_test PRIVATE wudcrypto)
 add_executable(extract_test tools/wudextract/extract_test.cpp)

@@ -422,6 +422,12 @@ def main():
         sys.exit("wwhd-extract in %s uses a system zstd; configure release builds with -DWWHD_BUNDLED_ZSTD=ON "
                  "(on by default with -DWWHD_BUNDLED_DEPS=ON)" % build)
     copy(os.path.join(build, "wwhd-extract" + exe_suffix), os.path.join(pkg, "tools", "bin", "wwhd-extract" + exe_suffix))
+    # the native Yaz0 decoder for tools/shaderprep.py (CMake target wwhd_yaz0); without it, preparing
+    # shaders falls back to a pure-Python decoder that takes minutes
+    yaz0_name = "libyaz0" + (".dll" if a.platform.startswith("windows") else ".dylib" if a.platform.startswith("macos") else ".so")
+    if not os.path.isfile(os.path.join(build, yaz0_name)):
+        sys.exit("%s missing in %s (CMake target wwhd_yaz0)" % (yaz0_name, build))
+    copy(os.path.join(build, yaz0_name), os.path.join(pkg, "tools", "lib", yaz0_name))
 
     # the setup in a terminal (the fallback for the program above), in tools/
     inst = os.path.join(ROOT, "tools", "installer")
