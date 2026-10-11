@@ -7,6 +7,9 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Fixed: setup stopped with "the recompiler wrote no code"** (issue #136) when the install folder's
+  path contains square brackets, for example `...\LoZ - The Wind Waker [WiiU]\data`. Setup and the
+  recompiler treated the brackets as a search pattern and then found none of their own files.
 - **Mods: experimental mods and save backups.** Mods marked *Experimental* (untested, may break the
   game or a save made while they are active; Call of the Sky is one) are hidden unless you turn on
   **Show experimental mods** in the Mods tab. Turning one on asks first and backs up your saves before
