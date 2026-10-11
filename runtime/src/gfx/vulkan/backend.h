@@ -111,6 +111,7 @@ struct Renderer {
  std::atomic<uint64_t> secondaryIdleWaits{0},secondaryRetired{0},secondaryRetirementPending{0};
  bool dynamicRenderingKHR=false; // VK_KHR_dynamic_rendering (device older than Vulkan 1.3)
  bool portabilitySubset=false,imageViewSwizzle=true,imageViewReinterpretation=true;
+ bool attachmentViewUsage=false; // attachment views name their usage (issue #144: Intel; WWHD_VK_ATTACHMENT_VIEW_USAGE)
  bool imageView2DOn3DImage=true; // 2D views of volume slices (render targets); core Vulkan 1.1, optional in the portability subset
  bool samplerMipLodBias=true,separateStencilMaskRef=true,constantAlphaColorBlendFactors=true,vertexAttributeAccessBeyondStride=true,samplerMirrorClampToEdge=false;
  VkPhysicalDeviceProperties properties{}; VkQueue queue=VK_NULL_HANDLE; uint32_t queueFamily=0;
