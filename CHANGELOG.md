@@ -7,6 +7,11 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Fixed: the 60, 120 and 240 fps settings dropped to about 30–50 fps on PCs that can't quite draw
+  60 frames a second** (issue #125). A frame that misses its display refresh is now shown as soon as
+  it's ready instead of waiting a whole extra refresh, so you get close to what Uncapped shows (e.g.
+  56 instead of 30 fps). Frames that are on time are paced exactly as before.
+
 - **macOS setup: works with mismatched Command Line Tools** (e.g. after a macOS beta update installed a
   newer SDK than the tools' linker understands: "unknown architecture arm64e.x1", "tapi error: malformed
   file"). Setup now links with an older installed SDK automatically, or explains how to update the
