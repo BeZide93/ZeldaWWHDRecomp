@@ -3,10 +3,13 @@
 // resulting ImDrawData (gfx/overlay_metal.mm, gfx/vulkan/overlay.cpp); the hosts feed input and apply
 // changes on their main thread (hostui.h).
 #include "overlay.h"
+#include "gfx/shader_prebuild.h"
 #include "../audio_out.h"
 #include "guest_hud.h"
 #include "setup_test.h"
+#include "setup_flow.h"
 #include "graphics_switch.h"
+#include "restart_dialog.h"
 #include "game_source_widgets.h"
 #include "gamepad_nav.h"
 #include "perf_average.h"
@@ -626,6 +629,13 @@ std::string performance_report() {
 }
 
 void tab_graphics() {
+    heading("Shader cache");
+    static bool rebuildFailed = false;
+    if (ImGui::Button("Rebuild shader cache"))
+        rebuildFailed = !shaderprebuild::request_rebuild();
+    if (rebuildFailed) note("Could not save the request. Check that the settings folder is writable.");
+    else if (shaderprebuild::requested()) note("Run setup and choose repair/update to rebuild shaders and pipelines.");
+    help("Requests preparation during setup repair/update. Preparation can take a few minutes; launching the game never starts it automatically.");
 #ifdef __ANDROID__
     heading("GPU driver (Snapdragon / Adreno)");
     note("Active: %s", gfxvk::drivers::active_name().c_str());
@@ -695,7 +705,8 @@ void tab_graphics() {
              "whole game down. The performance overlay shows how many are drawn.\n"
              "Off: every logic step waits for all of its frames, so if the frame target is not reached\n"
              "(e.g. 120/240 fps at a high internal resolution) the whole game runs in slow motion.\n"
-             "Saved separately for 60 fps (off by default) and 120/240 fps (on by default).");
+             "Saved separately for 60 fps (off by default; on by default on Android and Windows on ARM)\n"
+             "and 120/240 fps (on by default).");
         if (!interp::paced_interpolation())
             note("Off: if this computer cannot reach %d fps, the whole game slows down (the performance\n"
                  "overlay then shows fewer than 30 logic steps/s). Turn it on to keep the game's speed.", interp::fps());
@@ -751,6 +762,31 @@ void tab_graphics() {
     ImGui::SameLine(0, 30);
     if (check("Edge smoothing (FXAA)", render::fxaa(), &v, render::feature_available(render::kFeatureFXAA)))
         post_changed([v] { render::set_fxaa(v); });
+#if defined(WWHD_HAS_VULKAN) && !defined(__ANDROID__)
+    if (render::vulkan()) {
+        heading("GPU (Vulkan)");
+        const bool env = gfxvk::device_from_env();
+        if (radio("Automatic", gfxvk::device_setting().empty(), !env))
+            post_changed([] { gfxvk::set_device_setting(""); });
+        for (size_t i = 0; i < gfxvk::device_inventory.size(); ++i) {
+            const auto& gpu = gfxvk::device_inventory[i];
+            ImGui::PushID(int(i));
+            const auto label = gpu.name + " (" + gpu.type + ")";
+            if (radio(label.c_str(), gfxvk::device_setting() == gpu.identity, !env && gpu.usable())) {
+                const auto identity = gpu.identity;
+                post_changed([identity] { gfxvk::set_device_setting(identity); });
+            }
+            if (!gpu.usable()) note("%s", gpu.unavailable.c_str());
+            ImGui::PopID();
+        }
+        note("GPU changes apply after a restart. Currently using %s.", gfxvk::active_device.c_str());
+#ifndef _WIN32
+        if (ImGui::Button("Restart now##gpu")) hostui::post([] { render::restart(); });
+#endif
+        if (env) note("WWHD_VK_DEVICE=%s takes precedence for this start.", getenv("WWHD_VK_DEVICE"));
+        if (!gfxvk::device_fallback.empty()) note("%s", gfxvk::device_fallback.c_str());
+    }
+#endif
     heading("Presentation (Vulkan)");
 #ifdef WWHD_HAS_VULKAN
     {
@@ -928,29 +964,15 @@ void native_confirm_dialog(NativeConfirm& c, std::string& error) {
     ImGui::EndPopup();
 }
 
-struct SetupWorker {
-    std::mutex mutex;
-    std::thread thread;
-    bool running=false;
-    std::string id,error,output;
-    ~SetupWorker(){if(thread.joinable())thread.join();}
-};
-SetupWorker& setup_work(){static SetupWorker worker;return worker;}
-void start_setup(const std::string& id,const mods::catalogue::Step& step) {
-    auto& setup_worker=setup_work();
-    std::lock_guard guard(setup_worker.mutex);if(setup_worker.running)return;
-    if(setup_worker.thread.joinable())setup_worker.thread.join();
-    setup_worker.running=true;setup_worker.id=id;setup_worker.error.clear();setup_worker.output.clear();
-    setup_worker.thread=std::thread([id,step] {
-        auto& setup_worker=setup_work();
-        std::string error,output;
-        if(step.type=="build_guest_mod")mods::packages::prepare_guest(id,error);
-        else mods::packages::run_setup_tool(id,step.id,error,output);
-        std::lock_guard guard(setup_worker.mutex);setup_worker.error=std::move(error);
-        setup_worker.output=std::move(output);setup_worker.running=false;
-        if(g_no_host&&getenv("WWHD_TEST_MOD_SETUP"))LOG("[setup test] worker %s %s %s",
-            id.c_str(),step.id.c_str(),setup_worker.error.empty()?"ready":"failed");
-    });
+using setupflow::setup_work;
+using setupflow::start_setup;
+using setupflow::setup_run;
+using setupflow::setup_open;
+using setupflow::request_setup;
+using setupflow::setup_run_tick;
+using setupflow::setup_run_controls;
+void setup_confirmation_dialog(std::string& error) {
+    if(setupflow::setup_confirmation_dialog(error,navigation_pressed(input_map::kPadB)))g_pad_b_used=true;
 }
 diagnostic::SetupPlan& setup_test_plan() {
     static auto plan=diagnostic::read_setup_plan(g_no_host,getenv("WWHD_MOD_MANAGER_DIR"),
@@ -960,35 +982,21 @@ diagnostic::SetupPlan& setup_test_plan() {
 void setup_test_actions(const mods::packages::View& mod,const std::vector<mods::packages::SetupView>& steps,
         NativeConfirm& confirm,std::string& error,bool busy,const std::string& failure) {
     auto& plan=setup_test_plan();if(plan.id!=mod.id)return;
-    static std::set<std::string> attempted;
-    static bool stopped=false,completed=false;
-    if(stopped||completed)return;
-    auto stop=[&](const char* reason){stopped=true;error=reason;LOG("[setup test] failed %s: %s",mod.id.c_str(),reason);};
-    if(!plan.error.empty()){stop(plan.error.c_str());return;}
-    if(busy)return;
-    if(!failure.empty()){stop("Setup worker failed");return;}
-    auto next=diagnostic::next_required_step(steps);
-    if(next==steps.size()){completed=true;LOG("[setup test] ready %s",mod.id.c_str());return;}
-    const auto& step=steps[next].step;
-    if(attempted.contains(step.id))return; // a pending trust/rebuild requires its normal response/restart
-    attempted.insert(step.id);
-    LOG("[setup test] action %s %s %s",mod.id.c_str(),step.id.c_str(),step.type.c_str());
+    static bool attempted=false,completed=false;
+    if(completed)return;
+    if(!plan.error.empty()){error=plan.error;return;}
+    if(mod.enabled){completed=true;LOG("[setup test] ready %s",mod.id.c_str());return;}
+    if(attempted||busy)return;
     using namespace mods::packages;
-    if(step.type=="game_path") {
-        auto source=plan.sources.get(step.game).string();
-        if(source.empty()||!set_game_source(step.game,source,error)){stop("Game source refused");return;}
-        LOG("[setup test] source ready %s %s",mod.id.c_str(),step.id.c_str());
-    }else if(step.type=="choice"||step.type=="confirm") {
-        auto value=step.type=="confirm"?mods::json::Value(true):mods::json::Value(step.choices.front());
-        if(!configure(mod.id,step.option,value,error))stop("Setup option refused");
-    }else {
-        auto proceed=[id=mod.id,step] {
-            if(step.type=="build_guest_mod"&&mods::packages::needs_code_mod_support(id))mods::code::request(true,id);
-            else start_setup(id,step);
-        };
-        auto native=unconfirmed_native(mod.id);
-        if(native.empty())proceed();else confirm={mod.id,mod.name,std::move(native),true,std::move(proceed)};
+    for(const auto& status:steps)if(status.step.type=="game_path"&&!status.satisfied) {
+        auto source=plan.sources.get(status.step.game).string();
+        if(source.empty()||!set_game_source(status.step.game,source,error))return;
     }
+    attempted=true;
+    auto fresh=mod;fresh.game_source_warning.clear();
+    request_setup(fresh);
+    LOG("[setup test] one click %s",mod.id.c_str());
+    (void)confirm;(void)failure;
 }
 bool game_source_focus=false;
 void game_source_warning_control(const std::string& warning) {
@@ -1022,7 +1030,10 @@ void setup_controls(const mods::packages::View& mod,NativeConfirm& confirm,std::
     bool busy;std::string failure,output;
     {std::lock_guard guard(setup_worker.mutex);busy=setup_worker.running;
      if(setup_worker.id==mod.id){failure=setup_worker.error;output=setup_worker.output;}}
+    setup_run_controls(mod);
     setup_test_actions(mod,steps,confirm,error,busy,failure);
+    if(!ImGui::TreeNode("Advanced"))return;
+    busy=busy||!setup_run.id.empty();
     for(const auto& status:steps) {
         const auto& step=status.step;ImGui::PushID(step.id.c_str());
         ImGui::TextWrapped("%s%s%s",status.satisfied?"Ready: ":"",step.title.c_str(),step.optional?" (optional)":"");
@@ -1067,6 +1078,7 @@ void setup_controls(const mods::packages::View& mod,NativeConfirm& confirm,std::
     }
     if(busy)note("Preparing mod files…");
     if(!failure.empty()){ImGui::TextWrapped("%s",failure.c_str());if(!output.empty())ImGui::TextWrapped("%s",output.c_str());}
+    ImGui::TreePop();
 }
 
 struct CatalogueWorker {
@@ -1118,9 +1130,8 @@ void catalogue_controls(std::string& focus) {
             focus=std::move(worker.installed);worker.installed.clear();fresh_install=true;
         }
     }
-    // Match local-folder installs: offer support immediately, while keeping the
-    // newly installed package disabled until its own trust/setup flow completes.
-    if(fresh_install&&mods::packages::needs_code_mod_support(focus))mods::code::request(true);
+    // Packages with open steps explain the rebuild in their single setup confirmation.
+    if(fresh_install&&!setup_open(focus)&&mods::packages::needs_code_mod_support(focus))mods::code::request(true);
     heading("Browse catalogue");
     note("Refresh to check available mods. Downloads happen only when you choose Install or Update.");
     ImGui::BeginDisabled(busy);
@@ -1159,19 +1170,28 @@ void catalogue_controls(std::string& focus) {
     if(!message.empty())note("%s",message.c_str());
     if(!loaded){note("Catalogue has not been loaded. Installed packages remain available offline.");return;}
     if(!error.empty())note("Showing the last successfully loaded catalogue.");
+    static bool show_experimental=[]{std::string v;return hostui::get("mod.showExperimental",v)&&v=="1";}();
+    if(ImGui::Checkbox("Show experimental mods",&show_experimental))
+        hostui::post([on=show_experimental]{hostui::set("mod.showExperimental",on?"1":"0");});
+    note("Experimental mods are untested and can break the game or your save. Enabling one backs up your saves first.");
     ImGui::InputText("Search mods",search,sizeof search);
     std::string query=search;
     auto lower=[](std::string text){for(char& c:text)if(c>='A'&&c<='Z')c+=32;return text;};
     query=lower(query);
     auto installed=mods::packages::list();
+    size_t hidden=0;
     for(const auto& entry:catalogue.index.entries) {
+        bool is_installed=std::any_of(installed.begin(),installed.end(),[&](const auto& mod){return mod.id==entry.id;});
+        if(!visible(entry,show_experimental,is_installed)){hidden++;continue;}
         if(!query.empty()&&lower(entry.name+" "+entry.id+" "+entry.description).find(query)==std::string::npos)continue;
         ImGui::PushID(entry.id.c_str());
         if(test_install&&entry.id==test_install)ImGui::SetNextItemOpen(true);
         bool expanded=ImGui::TreeNode("entry","%s · %s",entry.name.c_str(),entry.version.c_str());
+        if(entry.experimental)experimental::badge();
         game_source_warning_control(mods::packages::game_source_warning(entry,catalogue.index));
         if(expanded) {
             ImGui::TextWrapped("%s",entry.description.c_str());
+            if(entry.experimental)note("Experimental: untested; it can cause game-breaking problems, and saving while it is active can damage your save. Enabling it backs up your saves first.");
             for(const auto& author:entry.authors)note("By %s",author.c_str());
             for(const auto& licence:entry.licences)note("Licence: %s",licence.c_str());
             for(const auto& dep:entry.dependencies)note("Requires %s",dep.c_str());
@@ -1213,12 +1233,14 @@ void catalogue_controls(std::string& focus) {
                             std::filesystem::path(mods::packages::directory())/"Catalogue",fixtures,host::download_https);
                         std::string error,id;
                         require(mods::packages::install(package.path().string(),error,&id),error);
-                        std::lock_guard guard(worker.mutex);worker.installed=id;LOG("[catalogue] installed %s disabled",id.c_str());worker.message="Installed (off). Next: finish its setup under Installed packages (Go to setup), then enable it.";
+                        mods::packages::mark_experimental(id,entry.experimental);
+                        std::lock_guard guard(worker.mutex);worker.installed=id;LOG("[catalogue] installed %s disabled",id.c_str());worker.message="Installed (off). Next: Go to setup, then press Set up (or tick the mod): its setup runs by itself.";
                     });
                 }
                 ImGui::EndDisabled();
                 button_before=true;
             }
+            if(present&&!android_guest)setup_run_controls(*found);
             if(present) {
                 if(button_before)ImGui::SameLine();
                 ImGui::BeginDisabled(busy||found->enabled||found->active);
@@ -1229,6 +1251,7 @@ void catalogue_controls(std::string& focus) {
         }
         ImGui::PopID();
     }
+    if(hidden)note("%zu experimental %s hidden. Turn on Show experimental mods to see %s.",hidden,hidden==1?"mod":"mods",hidden==1?"it":"them");
 }
 
 void package_controls() {
@@ -1252,6 +1275,7 @@ void package_controls() {
     static std::string catalogue_focus;
     catalogue_controls(catalogue_focus);
     heading("Profiles");
+    ImGui::BeginDisabled(!setup_run.id.empty());
     auto current = current_profile();
     if (ImGui::BeginCombo("Active profile", current.c_str())) {
         for (const auto& name : profiles())
@@ -1274,6 +1298,7 @@ void package_controls() {
     if (ImGui::Button("Delete selected")) { if (delete_profile(delete_choice, error)) delete_choice.clear(); }
     ImGui::EndDisabled();
     note("Your active profile is protected from deletion.");
+    ImGui::EndDisabled();
     heading("Installed packages");
     note("Install a local package, a content/ mod folder or ZIP, or a replacement .pack file.");
     if (ImGui::Button("Choose package…")) hostui::choose_mod_source(false, [](std::string path) {
@@ -1290,7 +1315,7 @@ void package_controls() {
     if(test_install){snprintf(source,sizeof source,"%s",test_install);test_install=nullptr;install_now=true;}
     if(install_now) {
         std::string installed_id;
-        if(install(source,error,&installed_id)&&needs_code_mod_support(installed_id))mods::code::request(true);
+        if(install(source,error,&installed_id)&&!setup_open(installed_id)&&needs_code_mod_support(installed_id))mods::code::request(true);
     }
     ImGui::SameLine();
     if (ImGui::Button("Refresh packages")) refresh(error);
@@ -1305,13 +1330,13 @@ void package_controls() {
     for (const auto& mod : installed) {
         ImGui::PushID(mod.id.c_str());
         bool on = mod.enabled;
-        ImGui::BeginDisabled(!on&&!mod.game_source_warning.empty());
-        bool toggled = ImGui::Checkbox("##package_enabled", &on);
-        ImGui::EndDisabled();
+        bool toggled=setupflow::enable_checkbox(mod,on);
         if (test_enable && mod.id == test_enable && (setup_test_plan().id!=mod.id ||
             (setup_test_plan().error.empty()&&diagnostic::setup_ready(setup_steps(mod.id))))) { toggled = on = true; test_enable = nullptr; }
         if(test_disable&&mod.id==test_disable){toggled=true;on=false;test_disable=nullptr;}
-        if (toggled) {
+        // the normal enable flow; an experimental mod first warns and backs up the saves
+        auto proceed = [mod, on] {
+            if (setupflow::handle_setup_enable(mod, on)) return;
             if(on&&!mod.graphics_conflicts.empty())graphics_choice={mod.id,mod.name,mod.graphics_conflicts,true};
             else {
                 auto native = on ? unconfirmed_native(mod.id) : decltype(unconfirmed_native(mod.id)){};
@@ -1322,14 +1347,16 @@ void package_controls() {
                 }
                 else confirm = {mod.id, mod.name, std::move(native), true};
             }
-        }
+        };
+        if (toggled && !(on && experimental::gate(mod, proceed))) proceed();
         ImGui::SameLine();
         if(test_remove&&mod.id==test_remove)ImGui::SetNextItemOpen(true);
-        if(setup_test_plan().id==mod.id)ImGui::SetNextItemOpen(true);
+        if(setup_test_plan().id==mod.id||setup_run.id==mod.id)ImGui::SetNextItemOpen(true);
         bool scroll_here=false;
         if(mod.id==catalogue_focus){ImGui::SetNextItemOpen(true);catalogue_focus.clear();scroll_here=true;}
         else if (installed.size() == 1) ImGui::SetNextItemOpen(true, ImGuiCond_Once);
         bool expanded = ImGui::TreeNode("details", "%s · %s", mod.name.c_str(), mod.version.c_str());
+        if (mod.experimental) experimental::badge();
         if(scroll_here)ImGui::SetScrollHereY(0.1f);  // "Go to setup" in the catalogue jumps here
         game_source_warning_control(mod.game_source_warning);
         if(mod.kind=="cemu"){
@@ -1343,6 +1370,10 @@ void package_controls() {
             if ((mod.kind == "native" || mod.kind == "guest" || !mod.setup_tools.empty()) && mod.compatible)
                 note(mod.native_confirmed ? "Runs native code with the game's permissions (you confirmed this version)."
                                           : "Runs native code with the game's permissions. Enabling it asks you to confirm first.");
+            if (mod.experimental)
+                note(mod.enabled || mod.active
+                         ? "Experimental: untested. Saving while it is active can damage your save; restore a backup in Save backups below if needed."
+                         : "Experimental: untested; it can cause game-breaking problems. Enabling it asks first and backs up your saves.");
             if (!mod.author.empty()) note("By %s", mod.author.c_str());
             ImGui::TextWrapped("%s", mod.description.c_str());
             if (!mod.reason.empty() && mod.reason != mod.game_source_warning) ImGui::TextWrapped("%s", mod.reason.c_str());
@@ -1390,6 +1421,11 @@ void package_controls() {
     if(switch_action==GraphicsSwitchAction::Switch)enable(graphics_choice.id,true,error,true);
     if(switch_action==GraphicsSwitchAction::Cancel)g_pad_b_used=true;
     native_confirm_dialog(confirm, error);
+    const bool back = navigation_pressed(input_map::face_input(input_map::kB));
+    if (experimental::dialog(back, error) == experimental::Answer::Cancelled && back) g_pad_b_used = true;
+    setup_confirmation_dialog(error);
+    heading("Save backups");
+    if (experimental::backups_section(back)) g_pad_b_used = true;
 }
 
 void code_mod_dialog() {
@@ -1425,11 +1461,48 @@ void code_mod_dialog() {
     }
 }
 
+// ---- "Restart required": derived each frame from the mod manager's state (restart_notice.h)
+restart::Notice g_restart_notice;
+std::vector<restart::Item> g_restart_items;
+bool restart_possible(const mods::code::Status& code) {
+#ifdef __ANDROID__
+    return false;
+#else
+    // a finished code-mod rebuild relaunches through its own path, which also works on Windows
+    return render::can_restart() || code.ready;
+#endif
+}
+void restart_now(bool code_build) {
+    hostui::post([code_build] {
+        std::string error;
+        if (code_build) { if (!mods::code::restart(error)) LOG("[code mods] %s", error.c_str()); }
+        else if (!render::restart()) LOG("[mods] cannot relaunch the game; restart it to apply mod changes");
+    });
+}
+// Every frame the settings window is shown (any tab), and once at the first overlay frame so that
+// changes made before the menu is opened (a resumed one-click setup) still count as new.
+void restart_notice_frame(bool draw) {
+    auto code = mods::code::status();
+    g_restart_items = restart::pending(mods::packages::list(), code, experimental::staged_restore());
+    // the rebuild dialog has told the player already ("Restart now" / "Later")
+    if (code.requested) for (const auto& item : g_restart_items) if (item.key.starts_with("code:")) g_restart_notice.acknowledge(item.key);
+    const bool blocked = !draw || code.requested || code.building || (!setup_run.id.empty() && setup_run.error.empty()) ||
+                         ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId) || ImGui::IsAnyItemActive();
+    const bool open = g_restart_notice.update(g_restart_items, ImGui::GetTime(), blocked);
+    if (!draw) return;
+    const bool back = navigation_pressed(input_map::face_input(input_map::kB));
+    auto answer = restart::dialog(g_restart_notice, open, restart_possible(code), back);
+    if (answer == restart::Answer::Later && back) g_pad_b_used = true;
+    if (answer == restart::Answer::RestartNow) restart_now(code.ready);
+}
+
 void tab_mods() {
-    auto packages=mods::packages::list();
-    if(std::any_of(packages.begin(),packages.end(),[](const auto& pack){return pack.pending_restart;})){
-        note("Restart pending: saved pack choices will apply after restart. Active packs stay loaded until then.");
-        if(ImGui::Button("Restart now"))hostui::post([]{render::restart();});
+    if(!g_restart_items.empty()) {
+        warn("Restart to apply: %s.",restart::summary(g_restart_items).c_str());
+        auto code=mods::code::status();
+        if(restart_possible(code)) {
+            if(ImGui::Button("Restart now##mods"))restart_now(code.ready);
+        } else note("Restart the game to apply.");
     }
     bool code_mods=mods::code::enabled();
     if(ImGui::Checkbox("Enable code mods (PowerPC mods)",&code_mods))mods::code::request(code_mods);
@@ -1506,9 +1579,30 @@ void tab_mods() {
                     hostui::post([mute] { mods::set_fast_forward_mute(mute); hostui::set("mod.fast-forward.mute", mute ? "1" : "0"); mods::packages::remember_option("fast-forward.mute", mute); });
                 help("Hold during a cutscene or conversation. Prompts still wait for input. Rebind the selected game button in Controls. Unmuted audio plays at a higher pitch.");
             } else if (selected == "move-speed") {
-                float speed = mods::move_speed_factor();
-                if (ImGui::SliderFloat("Run/swim multiplier", &speed, 1.25f, 4.f, "%.2fx"))
-                    hostui::post([speed] { mods::set_move_speed_factor(speed); hostui::set("mod.move-speed.factor", std::to_string(speed)); mods::packages::remember_option("move-speed.factor", speed); });
+                if (radio("Hold the button", mods::move_speed_mode() == mods::MoveMode::kHold))
+                    hostui::post([] { mods::set_move_speed_mode(mods::MoveMode::kHold); hostui::set("mod.move-speed.mode", "0"); mods::packages::remember_option("move-speed.mode", 0); });
+                ImGui::SameLine();
+                if (radio("Press to toggle", mods::move_speed_mode() == mods::MoveMode::kToggle))
+                    hostui::post([] { mods::set_move_speed_mode(mods::MoveMode::kToggle); hostui::set("mod.move-speed.mode", "1"); mods::packages::remember_option("move-speed.mode", 1); });
+                if (radio("Native animation, played faster", mods::move_speed_anim() == mods::MoveAnim::kNative))
+                    hostui::post([] { mods::set_move_speed_anim(mods::MoveAnim::kNative); hostui::set("mod.move-speed.anim", "native"); mods::packages::remember_option("move-speed.anim", std::string("native")); });
+                ImGui::SameLine();
+                if (radio("Dash instead of walk while boosting", mods::move_speed_anim() == mods::MoveAnim::kDash))
+                    hostui::post([] { mods::set_move_speed_anim(mods::MoveAnim::kDash); hostui::set("mod.move-speed.anim", "dash"); mods::packages::remember_option("move-speed.anim", std::string("dash")); });
+                if (radio("Sprint pose (lean and arm drive)", mods::move_speed_anim() == mods::MoveAnim::kSprint))
+                    hostui::post([] { mods::set_move_speed_anim(mods::MoveAnim::kSprint); hostui::set("mod.move-speed.anim", "sprint"); mods::packages::remember_option("move-speed.anim", std::string("sprint")); });
+                float running = mods::move_speed_land_factor();
+                if (ImGui::SliderFloat("Running", &running, 1.f, 4.f, "%.2fx"))
+                    hostui::post([running] { mods::set_move_speed_land_factor(running); hostui::set("mod.move-speed.land", std::to_string(running)); mods::packages::remember_option("move-speed.land", running); });
+                float swimming = mods::move_speed_swim_factor();
+                if (ImGui::SliderFloat("Swimming", &swimming, 1.f, 4.f, "%.2fx"))
+                    hostui::post([swimming] { mods::set_move_speed_swim_factor(swimming); hostui::set("mod.move-speed.swim", std::to_string(swimming)); mods::packages::remember_option("move-speed.swim", swimming); });
+                float seconds = mods::move_speed_stamina_seconds();
+                if (ImGui::SliderFloat("Boost time", &seconds, 0.f, 20.f, seconds <= 0.f ? "no limit" : "%.1f s"))
+                    hostui::post([seconds] { mods::set_move_speed_stamina_seconds(seconds); hostui::set("mod.move-speed.stamina", std::to_string(seconds)); mods::packages::remember_option("move-speed.stamina", seconds); });
+                float cooldown = mods::move_speed_cooldown_seconds();
+                if (ImGui::SliderFloat("Cooldown", &cooldown, 0.f, 20.f, cooldown <= 0.f ? "none" : "%.1f s"))
+                    hostui::post([cooldown] { mods::set_move_speed_cooldown_seconds(cooldown); hostui::set("mod.move-speed.cooldown", std::to_string(cooldown)); mods::packages::remember_option("move-speed.cooldown", cooldown); });
                 const char* names[] = {"L3", "R3", "L", "R", "ZL", "ZR"};
                 const uint32_t buttons[] = {input::kStickL, input::kStickR, input::kL, input::kR, input::kZL, input::kZR};
                 for (int i = 0; i < 6; ++i) {
@@ -1518,7 +1612,12 @@ void tab_mods() {
                         hostui::post([button] { mods::set_move_speed_button(button); hostui::set("mod.move-speed.button", std::to_string(button)); mods::packages::remember_option("move-speed.button", button); });
                     }
                 }
-                help("Hold to boost horizontal movement while running or swimming. Rebind the chosen game button in Controls.");
+                help("A multiplier of 1 leaves that state alone. Boost time is how long a full bar lasts; "
+                     "0 has no limit, and the bar refills whenever you are not boosting. Cooldown is the "
+                     "bar's refill time (0 for immediate refill). The dash option replaces the walk clip "
+                     "while boosting; full-speed running already uses dash. Sprint pose adds a forward "
+                     "lean and arm drive while running freely, blended with the boost. Rebind the "
+                     "chosen game button in Controls.");
             } else if (selected == "mouse-camera") {
                 float sensitivity = mods::mouse_sensitivity();
                 if (ImGui::SliderFloat("Sensitivity", &sensitivity, .08f, .3f, "%.3f"))
@@ -1850,7 +1949,7 @@ void tab_controls() {
     } else {
         status = "Select a button on the controller or a chip to rebind it. Changes are saved to controls.json.";
     }
-    const float bottom = ImGui::GetFrameHeightWithSpacing() * 2 + 4;
+    const float bottom = ImGui::GetFrameHeightWithSpacing() * 3 + 4;  // status, options, stick range
     const ImVec2 avail = ImGui::GetContentRegionAvail();
     const float h = std::max(160.0f, avail.y - bottom);
     U.hover_action = -1;
@@ -1901,6 +2000,8 @@ void tab_controls() {
         m.deadzone = std::clamp(dz / 100.0f, 0.0f, 0.9f);
         input_map::set_current(m);
     }
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Default: 15%%. Filters resting-stick drift on both sticks.");
     ImGui::SameLine(0, 24);
     if (check("Invert camera up/down", m.invert_camera_y, &v)) {
         m.invert_camera_y = v;
@@ -1925,6 +2026,22 @@ void tab_controls() {
     gyro_window(gyro_open);
     ImGui::SameLine(0, 24);
     if (ImGui::Button("Reset to defaults")) input_map::set_current(input_map::Mapping::defaults());
+    // issue #40: per-stick range, applied after the dead zone (live, saved with the controls)
+    float* ranges[2] = {&m.left_range, &m.right_range};
+    const char* const labels[2] = {"Left stick range", "Right stick range"};
+    for (int k = 0; k < 2; k++) {
+        if (k) ImGui::SameLine(0, 24);
+        float r = *ranges[k] * 100.0f;
+        ImGui::SetNextItemWidth(200);
+        if (ImGui::SliderFloat(labels[k], &r, input_map::kMinStickRange * 100.0f, input_map::kMaxStickRange * 100.0f, "%.0f%%")) {
+            *ranges[k] = std::clamp(std::round(r) / 100.0f, input_map::kMinStickRange, input_map::kMaxStickRange);
+            input_map::set_current(m);
+        }
+        help("Default: 100% (no change). Scales the stick after the dead zone so a short stick reaches full deflection.");
+    }
+    ImGui::SameLine(0, 24);
+    ImGui::AlignTextToFramePadding();
+    note("Raise if your stick can't reach full deflection, e.g. the Wind Waker baton's directions don't register.");
 }
 
 int saved_language() {
@@ -2091,6 +2208,20 @@ void perf_window(bool menu_open) {
 }
 
 void tab_audio() {
+    float volume = audio::master_volume() * 100.0f;
+    ImGui::SetNextItemWidth(260);
+    if (ImGui::SliderFloat("Master volume", &volume, 0.0f, 100.0f, "%.0f%%", ImGuiSliderFlags_AlwaysClamp))
+        hostui::post([volume] { audio::set_master_volume(volume / 100.0f, false); });  // live while dragging
+    if (ImGui::IsItemDeactivatedAfterEdit())
+        hostui::post([volume] { audio::set_master_volume(volume / 100.0f); });  // saved once on release
+    ImGui::SameLine();
+    if (ImGui::Button("Mute##volume")) hostui::post([] { audio::set_master_volume(0.0f); });
+    ImGui::SameLine();
+    if (ImGui::Button("Default##volume")) hostui::post([] { audio::set_master_volume(1.0f); });
+    help("Master volume for the game's sound and mod audio. Applies immediately and is remembered for the next start.");
+    if (audio::master_volume_from_env())
+        note("WWHD_AUDIO_VOLUME=%s is set for this start and takes precedence; changes here are not saved.",
+             getenv("WWHD_AUDIO_VOLUME"));
     int speakers = audio::requested_surround() ? 1 : 0;
     if (ImGui::Combo("Speakers", &speakers, "Stereo\0Surround 5.1\0"))
         hostui::post([speakers] { audio::set_requested_surround(speakers == 1); });
@@ -2130,7 +2261,8 @@ void settings_window() {
             if (navigation_pressed(input_map::kPadLB)) U.select_tab = (U.tab + kTabs - 1) % kTabs;
             if (navigation_pressed(input_map::kPadRB)) U.select_tab = (U.tab + 1) % kTabs;
         }
-        code_mod_dialog();
+        if(!setup_run.rebuilding)code_mod_dialog();
+        restart_notice_frame(true);
         if (ImGui::BeginTabBar("tabs", ImGuiTabBarFlags_FittingPolicyShrink)) {
             for (int i = 0; i < kTabs; i++) {
                 ImGuiTabItemFlags f = U.select_tab == i ? ImGuiTabItemFlags_SetSelected : 0;
@@ -2384,9 +2516,21 @@ ImDrawData* frame(float pw, float ph, void (*renderer_init)()) {
                           input_map::face_input(input_map::kX), input_map::face_input(input_map::kY)};
     U.gamepad_navigation.feed(io, U.values, U.prev, open && U.cap_action < 0, mouse_used, face);  // the text prompt reads the controller itself
     ImGui::NewFrame();
+    setup_run_tick();
+    if (!open && !g_restart_notice.started()) restart_notice_frame(false);
     g_wants_text = open && io.WantTextInput;
     guesthud::frame();
     if (open) settings_window();
+    else if(!setup_run.id.empty()) {
+        ImGui::SetNextWindowPos(ImVec2(16,16),ImGuiCond_Always);
+        ImGui::SetNextWindowBgAlpha(.9f);
+        if(ImGui::Begin("Mod setup progress",nullptr,ImGuiWindowFlags_AlwaysAutoResize|ImGuiWindowFlags_NoSavedSettings|ImGuiWindowFlags_NoFocusOnAppearing)) {
+            ImGui::Text("%s %s",ImGui::GetTime()<setupflow::resume_notice_until?"Continuing setup of":"Setting up",setup_run.name.c_str());
+            ImGui::Text("%s · %.0f seconds",setup_run.step.c_str(),ImGui::GetTime()-setup_run.started);
+            if(!setup_run.error.empty())ImGui::TextWrapped("%s — open Settings → Mods to try again.",setup_run.error.c_str());
+        }
+        ImGui::End();
+    }
     if (text) {
         float pad[input_map::kPadCount];
         std::copy(std::begin(U.values), std::end(U.values), pad);

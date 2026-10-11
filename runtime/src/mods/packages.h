@@ -3,12 +3,13 @@
 #include "catalogue_schema.h"
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <string>
 #include <utility>
 #include <vector>
 namespace mods::packages {
 inline constexpr const char* kGameId="wwhd-usa";
-inline constexpr const char* kManagerVersion="1.3.0";
+inline constexpr const char* kManagerVersion="1.4.0"; // 1.4: "experimental" flag
 struct Option {
     std::string id,name,description,type;
     json::Value value,default_value;
@@ -21,6 +22,7 @@ struct View {
     bool enabled=false,active=false,compatible=false,restart_required=false,pending_restart=false;
     std::string game_source_warning;
     bool native_confirmed=true; // false: code the player has not confirmed (native library or guest ELF)
+    bool experimental=false;    // untested: enabling asks first and backs up the saves
     std::vector<Conflict> graphics_conflicts; // currently enabled packs, before enabling
     std::vector<Option> options;
     std::vector<std::string> dependencies,conflicts;
@@ -42,11 +44,28 @@ bool enable(const std::string& id,bool on,std::string& error,bool switch_conflic
 // code the player has not confirmed yet, as {id, name}. Empty: enable() needs no confirmation.
 std::vector<std::pair<std::string,std::string>> unconfirmed_native(const std::string& id);
 // One-time player acknowledgement that a native package may run: remembered in profiles.json for
-// this package ID and the SHA-256 of its current platform library or guest ELF (changed code asks again).
+// this package ID and the SHA-256 of its full inventory, including its version (changes ask again).
 bool confirm_native(const std::string& id,std::string& error);
+// Experimental packages (manifest "experimental": true, or installed from a catalogue entry marked so)
+// that enabling `id` would newly turn on and that the player has not confirmed for this enable, as
+// {id, name}. enable(), enable_after_code_rebuild() and begin_setup_run() refuse while this is not empty.
+std::vector<std::pair<std::string,std::string>> unacknowledged_experimental(const std::string& id);
+// The player confirmed the experimental warning: backs up the save folder now (mods/save_backup.h),
+// before anything is enabled, and records the confirmation for the next enable of these packages.
+// A failed backup (disk full, copy error) returns false with the reason; nothing is enabled.
+bool acknowledge_experimental(const std::string& id,std::string& error);
+// Catalogue installs record the catalogue's flag (a package built before its manifest had it).
+void mark_experimental(const std::string& id,bool on);
 bool configure(const std::string& id,const std::string& option,const json::Value& value,std::string& error);
 struct SetupView {catalogue::Step step;bool satisfied=false;};
 std::vector<SetupView> setup_steps(const std::string& id);
+// Snapshot shown by the setup dialog. Acceptance atomically saves trust, choices and run intent.
+std::string setup_identity(const std::string& id);
+bool begin_setup_run(const std::string& id,const std::string& identity,
+    const std::map<std::string,std::string>& choices,std::string& error);
+// Pending setup is scoped to the current profile and exact package trust fingerprint.
+bool save_setup_run(const std::string& id,bool pending,std::string& error);
+std::vector<std::string> pending_setup_runs();
 struct GameSourceView {std::string path,result;bool valid=false;};
 GameSourceView game_source();
 std::string game_source_warning(const std::vector<catalogue::Step>& steps);
@@ -64,6 +83,7 @@ bool select_profile(const std::string& name,std::string& error);
 bool delete_profile(const std::string& name,std::string& error);
 void remember_builtin(const std::string& id,bool on);
 void remember_option(const std::string& id,double value);
+void remember_option(const std::string& id,const std::string& value);
 using ReadMemory=int(*)(uint32_t,void*,size_t);
 using WriteMemory=int(*)(uint32_t,const void*,size_t);
 void set_memory_access(ReadMemory read,WriteMemory write);
