@@ -225,12 +225,29 @@ void positions_test() {
     calculate(true);
     for (uint32_t i = 0; i < 4; i++) same_point(position(face_panes[i]), animated[i]);
 
-    // The same layout reported on the GamePad is not TV-anchored; the production aspect
-    // hook still composes correctly with a live Xbox placement switch there.
+    // A layout reported on the TV and the GamePad in the same frame stays a TV layout (title
+    // menus, screen wipes: aspect.cpp RootSeen), so its placement is unchanged...
     std::strcpy((char*)mem::ptr(cluster + 0x80), "N_All_00");
+    aspect::layout_root_target(cluster, true);
     aspect::layout_root_target(cluster, false);
     layout(input_map::FaceLayout::kPosition);
     calculate(false);
+    for (uint32_t i = 0; i < 4; i++) same_point(position(face_panes[i]), animated[i]);
+    // ... while one that moved to the GamePad (drawn only there from the next frame on) loses
+    // the TV anchoring within 4 frames and keeps GamePad placement from then on. The game
+    // switches a root's screen only behind the Off-TV Play transition's black frames, so the
+    // grace frames are never seen. The production aspect hook still composes correctly with a
+    // live Xbox placement switch there.
+    int moved_at = 0;
+    for (int frame = 1; frame <= 8; frame++) {
+        aspect::on_swap();
+        aspect::layout_root_target(cluster, false);
+        calculate(false);
+        const bool moved = std::fabs(position(face_panes[0]).x - animated[0].x) > 1;
+        if (moved && !moved_at) moved_at = frame;
+        assert(moved == (moved_at != 0));  // no flip back to the TV placement
+    }
+    assert(moved_at >= 1 && moved_at <= 4);  // 4 with the 3-frame grace window
     std::array<Point, 4> gamepad;
     for (uint32_t i = 0; i < 4; i++) gamepad[i] = position(face_panes[i]);
     assert(std::fabs(gamepad[0].x - animated[0].x) > 1);
