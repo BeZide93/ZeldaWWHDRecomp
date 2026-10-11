@@ -21,8 +21,9 @@ constexpr uint32_t shoulder_background(int x, int y) {
 }
 
 // PlayStation-style face shapes for the Wii U A, B, X, Y (by label: Cross is A, Circle B,
-// Square X, Triangle Y). Colours follow the common PlayStation convention; without colours the
-// shape is drawn in the dark grey of the game's own button letters.
+// Square X, Triangle Y). Colours follow the common PlayStation convention. Without colours the
+// dialog icon's shape is dark grey on its disc, and the HUD's bare shape is white coverage: the
+// game draws it with its own letter colours (button_glyphs.cpp, coverage_sheet).
 constexpr uint32_t kShapeColours[4] = {0x3C7DD9FF, 0xD9413CFF, 0xD05FB0FF, 0x2AA67DFF};
 constexpr uint32_t kShapeInk = 0x3A3A3AFF;
 
@@ -51,9 +52,10 @@ inline float shape_distance(int face, float x, float y, float s) {
 // One 64x64 cell, RGBA (0xRRGGBBAA), top-down. `disc`: the dialog icon, a light disc with a rim
 // sized like the game's icon font glyphs (centre 32,29, radius 21); otherwise the bare shape for
 // the HUD letter panes, which sit on the game's own button pictures.
+constexpr float kDiscStroke = 4.2f, kBareStroke = 8.0f;  // stroke widths in cell pixels
 inline uint32_t face_shape(int face, bool colour, bool disc, int x, int y) {
-    const float cx = 32, cy = disc ? 29 : 32, s = disc ? 10.5f : 21.0f, width = disc ? 3.4f : 6.5f;
-    const uint32_t ink = colour ? kShapeColours[face & 3] : kShapeInk;
+    const float cx = 32, cy = disc ? 29 : 32, s = disc ? 10.5f : 21.0f, width = disc ? kDiscStroke : kBareStroke;
+    const uint32_t ink = colour ? kShapeColours[face & 3] : disc ? kShapeInk : 0xFFFFFFFFu;
     float r = 0, g = 0, b = 0, a = 0;
     constexpr int kSamples = 4;  // 4x4 supersampling for smooth edges
     for (int sy = 0; sy < kSamples; sy++) for (int sx = 0; sx < kSamples; sx++) {

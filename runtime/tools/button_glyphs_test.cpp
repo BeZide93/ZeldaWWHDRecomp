@@ -630,7 +630,7 @@ void options_test() {
         assert(button_glyphs::marked_face(ld8(first_quad + 0x2F)) == 1);
         for (uint32_t i = 0; i < 0x2C; i++) assert(ld8(first_quad + i) == letter[i]);  // authored quad restored
         // drawn as a 32x32 square (0.8 of the letter height) on the letter's centre, from the atlas
-        assert(drawn_sheet == atlas);
+        assert(drawn_sheet == (colours ? atlas : atlas + 0x100));
         assert(drawn_quad[0] == 32 && drawn_quad[1] == 32);
         assert(drawn_quad[2] + drawn_quad[0]*0.5f == 15 && drawn_quad[3] + drawn_quad[1]*0.5f == 0);
     }
@@ -679,12 +679,42 @@ void options_test() {
         }
         assert(ink > 150 && ink < 1500);
         assert(tinted == colour);
+        // without colours the bare (HUD) shape is white coverage: the game supplies the colour
+        if (!colour)
+            for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++) {
+                const uint32_t p = pixel(composed, button_glyphs::shape_row(face, false), 1, x, y);
+                assert((p & 255) == 0 || (p >> 8) == 0xFFFFFF);
+            }
         // the disc: light and opaque near its centre and edge, transparent in the cell's corner
         const uint32_t edge = pixel(composed, button_glyphs::shape_row(face, colour), 0, 32 - 17, 29);
         assert((edge & 255) == 255 && (edge >> 24) > 200);
         assert((pixel(composed, button_glyphs::shape_row(face, colour), 0, 1, 1) & 255) == 0);
     }
     for (int a = 0; a < 4; a++) for (int b = a + 1; b < 4; b++) assert(cells[a] != cells[b]);
+    // stroke widths: the circle's ring, measured across its left side on the centre row
+    auto ring = [&](int column, int y) {
+        // ink coverage from the green channel: red ink has little, the disc's light fill a lot
+        const float ink = (button_glyphs::kShapeColours[1] >> 16) & 255, fill = 0xF2;
+        float width = 0;
+        for (int x = column ? 0 : 14; x < 30; x++) {  // the dialog icon: inside its disc rim
+            const uint32_t p = pixel(composed, button_glyphs::shape_row(1, true), column, x, y);
+            const float a = (p & 255) / 255.0f, g = (p >> 16) & 255;
+            width += column ? a : std::clamp((fill - g) / (fill - ink), 0.0f, 1.0f);
+        }
+        return width;
+    };
+    assert(std::fabs(ring(1, 32) - button_glyphs::kBareStroke) < 1.0f);
+    assert(std::fabs(ring(0, 29) - button_glyphs::kDiscStroke) < 1.0f);
+    assert(button_glyphs::kBareStroke >= 8 && button_glyphs::kDiscStroke >= 4);
+    // every shape stays inside its button: the bare shape well within the cell, the dialog's
+    // within the disc (radius 19.2 for the light fill)
+    for (int face = 0; face < 4; face++) for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++) {
+        if ((pixel(composed, button_glyphs::shape_row(face, true), 1, x, y) & 255) > 0)
+            assert(x >= 4 && x < 60 && y >= 4 && y < 60);
+        const uint32_t p = pixel(composed, button_glyphs::shape_row(face, true), 0, x, y);
+        const float d = std::hypot(x + 0.5f - 32, y + 0.5f - 29);
+        if (d > 18.5f && (p & 255) > 0) assert((p >> 24) == ((p >> 16) & 255));  // only grey disc/rim out there
+    }
     const uint32_t mask = base + 0x5000 + 8192 + 23*256;
     const uint8_t saved_mask = ld8(mask);
     st8(mask, saved_mask ^ 0x55);
@@ -769,7 +799,8 @@ extern "C" void f_028F7C7C_orig(Cpu* c) {
         const int shoulder = button_glyphs::marked_shoulder(ld8(quad + 0x2F));
         for (uint32_t j = 0; j < 2; j++) {
             uint32_t want = expect_tint && face >= 0 && !hud_letter ? button_glyphs::tint(authored[j], face) : authored[j];
-            if (expect_shapes >= 0 && face >= 0 && hud_letter && font_available) want |= 0xFFFFFF00;  // white: the shape has its own ink
+            // coloured shapes carry their own colour (white vertices); plain ones keep the letter's
+            if (expect_shapes == 1 && face >= 0 && hud_letter && font_available) want |= 0xFFFFFF00;
             assert(ld32(quad + 0x10 + j * 4) == want);
             assert(ld8(quad + 0x13 + j * 4) == (authored[j] & 0xFF));  // fade alpha
         }
@@ -777,15 +808,21 @@ extern "C" void f_028F7C7C_orig(Cpu* c) {
         // (+0x2F bit 0) nor the sheet (+0x0E) may ask for the text-colour (coverage font) path.
         const bool shoulder_label = expect_names && font_available && shoulder >= 0;
         const bool shape = expect_shapes >= 0 && font_available && face >= 0;
-        assert((ld8(quad + 0x2F) & 1) == (shoulder_label || shape ? 0 : (i & 1)));
+        // a plain HUD shape stays a coverage glyph, drawn through the game's own letter colours
+        const bool coverage = shape && hud_letter && expect_shapes == 0;
+        assert((ld8(quad + 0x2F) & 1) == (coverage ? 1 : shoulder_label || shape ? 0 : (i & 1)));
         if (shoulder_label || shape) {
             // the composed atlas: an RGBA picture (#141), one layer, the style's cell
             const int row = shape ? button_glyphs::shape_row(face, expect_shapes == 1)
                           : expect_names == 2 ? button_glyphs::xbox_row(shoulder) : button_glyphs::numbered_row(shoulder);
             const auto cell = button_glyphs::atlas_cell(row, shape ? !hud_letter : expect_frame);
             assert(ld8(quad + 0x2E) == 0);
-            assert(ld32(quad + 0x28) == atlas);
+            assert(ld32(quad + 0x28) == (coverage ? atlas + 0x100 : atlas));
             assert(ld8(atlas + 0x0E) == 0);
+            if (coverage) {  // the twin: the same texture, marked as a coverage sheet
+                assert(ld8(atlas + 0x100 + 0x0E) == 1);
+                assert(!std::memcmp(mem::ptr(atlas + 0x110), mem::ptr(atlas + 0x10), 0x9C));
+            }
             assert(ldf32(quad + 0x18) == cell.u0 && ldf32(quad + 0x1C) == cell.v0);
             assert(ldf32(quad + 0x20) == cell.u1 && ldf32(quad + 0x24) == cell.v1);
             uses_atlas = true;

@@ -129,8 +129,10 @@ uint32_t shoulder_atlas(Cpu* cpu) {
     if (pixels.empty()) { atlases.push_back({font,resource,0}); return 0; }
     // Font-sheet info has a 16-byte header followed by GX2Texture (+0x10), as bound by
     // the game's text draw at 028F86C8. Host-only storage survives guest state restores.
+    // Two sheet objects on the same image: the RGBA one (info) and, 0x100 bytes on, a coverage
+    // twin (coverage_sheet) for shapes that take the text colours like the HUD's letters.
     const uint32_t info = [&] {
-        const uint32_t object = mem::host_alloc(0xAC, 256);
+        const uint32_t object = mem::host_alloc(0x200, 256);
         constexpr uint32_t width = button_glyphs::kAtlasWidth, height = button_glyphs::kAtlasHeight;
         const uint32_t image = mem::host_alloc(width * height * 4, 256);
         std::memset(mem::ptr(object), 0, 0xAC);
@@ -149,6 +151,8 @@ uint32_t shoulder_atlas(Cpu* cpu) {
         st32(texture + 0x78, 1); st32(texture + 0x80, 1); st32(texture + 0x84, 0x00010203);
         Cpu init{}; init.r[3] = texture;
         imp_gx2_GX2InitTextureRegs(&init);
+        std::memcpy(mem::ptr(object + 0x100), mem::ptr(object), 0xAC);
+        st8(object + 0x100 + 0x0E, 1);  // coverage sheet: the text-colour path, as the HUD font's own
         return object;
     }();
     atlases.push_back({font,resource,info});
@@ -165,21 +169,26 @@ void patch_float(std::vector<SavedWord>& saved, uint32_t address, float value) {
     stf32(address, value);
 }
 
+// The atlas sheet that draws through the text box's colours (coverage = the cell's alpha).
+constexpr uint32_t coverage_sheet(uint32_t atlas) { return atlas + 0x100; }
+
 // Point a glyph quad at a cell of the composed atlas (a shoulder label or a PlayStation shape).
-void atlas_quad(std::vector<SavedWord>& saved, uint32_t quad, int row, bool frame, Cpu* cpu) {
+// `coverage`: keep the quad a coverage glyph on the coverage sheet, so the game colours (and
+// dims) it exactly like the letter it replaces; otherwise an RGBA picture (#141).
+void atlas_quad(std::vector<SavedWord>& saved, uint32_t quad, int row, bool frame, Cpu* cpu, bool coverage = false) {
     const uint32_t atlas = shoulder_atlas(cpu);
     if (!atlas) return;
     const button_glyphs::Cell cell = button_glyphs::atlas_cell(row, frame);
-    patch(saved, quad + 0x28, atlas);
+    patch(saved, quad + 0x28, coverage ? coverage_sheet(atlas) : atlas);
     patch_float(saved, quad + 0x18, cell.u0);
     patch_float(saved, quad + 0x1C, cell.v0);
     patch_float(saved, quad + 0x20, cell.u1);
     patch_float(saved, quad + 0x24, cell.v1);
     // The composed array has one layer, regardless of the source glyph's page. Bit 0 of +0x2F
-    // marks a coverage glyph (alpha font, coloured by the text box's colours); the composed
-    // label is an RGBA picture like the original icons, so clear it (issue #141). The original
+    // marks a coverage glyph (alpha font, coloured by the text box's colours); a composed RGBA
+    // picture clears it like the original icons (issue #141), a coverage shape sets it. The original
     // page and flag are restored with the rest of the authored quad afterwards.
-    patch(saved, quad + 0x2C, ld32(quad + 0x2C) & ~0xFF01u);
+    patch(saved, quad + 0x2C, (ld32(quad + 0x2C) & ~0xFF01u) | (coverage ? 1u : 0u));
 }
 
 int shoulder_row(ShoulderStyle names, int shoulder) {
@@ -335,7 +344,7 @@ void button_glyphs::prepare_text_box(uint32_t text_box, Cpu* cpu) {
             const uint32_t atlas = shoulder_atlas(cpu);
             bool bound = false;
             for (uint32_t batch = 0, n = ld32(list + 0xA0); batch < n && batch < 8; batch++)
-                bound |= ld32(list + 0x20 + batch*0x10) == atlas;
+                bound |= ld32(list + 0x20 + batch*0x10) == atlas || ld32(list + 0x20 + batch*0x10) == coverage_sheet(atlas);
             if (atlas && !bound) { st8(list + 6, 0); return; }
             if (!atlas) {
                 // A clean stock fallback is reusable. A foreign cached atlas is not, even
@@ -427,7 +436,9 @@ extern "C" void hook_028F7C7C(Cpu* c) {
     }
     if (hud_face >= 0 && original_count && shape_ready) {
         // The HUD letter becomes the shape, square and centred on the letter, on the game's own
-        // button picture. White vertex colours: the shape carries its own colour or ink.
+        // button picture. Coloured: white vertex colours, the shape carries its own colour.
+        // Without colours the shape is a coverage glyph: the game's own letter colours and
+        // dimming apply to it unchanged.
         const uint32_t quad = list + 0xA4;
         if (mark) st8(quad + 0x2F, button_glyphs::mark(ld8(quad + 0x2F), hud_face));
         const float w = (float)ldf32(quad), h = (float)ldf32(quad + 4);
@@ -439,7 +450,8 @@ extern "C" void hook_028F7C7C(Cpu* c) {
             patch_float(saved, quad + 8, x + (w - side) * 0.5f);
             patch_float(saved, quad + 0x0C, y + (h - side) * 0.5f);
         }
-        for (uint32_t corner = 0x10; corner <= 0x14; corner += 4) patch(saved, quad + corner, ld32(quad + corner) | 0xFFFFFF00u);
+        if (look.colours)
+            for (uint32_t corner = 0x10; corner <= 0x14; corner += 4) patch(saved, quad + corner, ld32(quad + corner) | 0xFFFFFF00u);
         st16(list + 4, 1);
     }
     for (uint32_t i = 0, count = ld16(list + 4); i < count; i++) {
@@ -457,7 +469,7 @@ extern "C" void hook_028F7C7C(Cpu* c) {
             }
         }
         if (face >= 0 && hud_face >= 0 && shape_ready)
-            atlas_quad(saved, quad, button_glyphs::shape_row(face, look.colours), false, c);
+            atlas_quad(saved, quad, button_glyphs::shape_row(face, look.colours), false, c, !look.colours);
         if (shoulder_ready && shoulder >= 0)
             atlas_quad(saved, quad, shoulder_row(look.shoulders, shoulder), hud_shoulder < 0, c);
     }
