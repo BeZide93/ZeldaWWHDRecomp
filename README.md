@@ -129,7 +129,9 @@ code and saves go to `~/.local/share/wwhd` and the settings, controls, save stat
 `~/.config/wwhd` (or `$XDG_DATA_HOME` / `$XDG_CONFIG_HOME`; `--data-dir FOLDER` chooses another place
 for the first, for example an SD card on a Steam Deck). Nothing is written beside the `.AppImage`; the
 menu entry the setup adds starts the same game. To remove everything, delete the file and those two
-folders.
+folders. **Portable use:** create a folder named like the AppImage plus `.data` next to it (for example
+`WindWakerHD-v0.2.13-linux-x86_64.AppImage.data`); the AppImage then keeps the game, its code, saves,
+settings and caches in that folder instead (its `share`, `config` and `cache` subfolders).
 
 The setup also runs in a terminal (the fallback): `tools/Setup in Terminal.command` (macOS),
 `tools/Setup in a console window.bat` (Windows), `tools/setup-in-terminal.sh` (Linux). How it works
