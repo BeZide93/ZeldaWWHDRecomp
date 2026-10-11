@@ -39,6 +39,9 @@
 #include "report_header.h"
 #include "crash_addr.h"
 #include "build_info.h"
+#ifdef WWHD_DECOMP
+#include "decomp/decomp.h"
+#endif
 #include "crashrec.h"
 #include "crash_context.h"
 #include "input.h"
@@ -445,7 +448,8 @@ int main(int argc, char** argv) {
         });
     }
     // which build on which system: also in crash logs (their last log lines)
-    LOG("[boot] Wind Waker HD %s (%s), %s", build::version(), build::commit(), reporthdr::os_description().c_str());
+    LOG("[boot] Wind Waker HD %s (%s)%s%s, %s", build::version(), build::commit(), *build::variant() ? " " : "",
+        build::variant(), reporthdr::os_description().c_str());
     // test aid: WWHD_TEST_HOST_CRASH=1 crashes inside a system library (strlen of a bad pointer), so
     // the crash log's module names can be checked (CTest crash_log_module, runtime/tools/crash_log_test.cmake)
     if (getenv("WWHD_TEST_HOST_CRASH")) {
@@ -517,6 +521,9 @@ int main(int argc, char** argv) {
 
     dispatch::init();
     guestmods::init();  // trusted manager packages, before guest threads start
+#ifdef WWHD_DECOMP
+    decomp::init();  // decomp build: which functions run decompiled (runtime/src/decomp), after the mods
+#endif
     init_data_imports();
     mem_setup_heaps(m.data_end);
     threads::init(m);

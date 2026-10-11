@@ -611,6 +611,7 @@ std::string performance_report() {
     reporthdr::Info h;
     h.version = build::version();
     h.commit = build::commit();
+    h.variant = build::variant();
     h.os = reporthdr::os_description();
     h.gpu = performance_device();
     h.renderer = render::vulkan() ? "Vulkan" : "Metal";
@@ -2129,6 +2130,9 @@ void tab_about() {
     heading("About");
     ImGui::Text("The Legend of Zelda: The Wind Waker HD - native port (%s host, %s renderer)", hostui::name(),
                 render::api_name(render::active()));
+    if (*build::variant())  // the decomp build (docs/decomp-build.md)
+        ImGui::Text("%s (%s), %s build: the game code runs from the decompiled source (experimental)", build::version(),
+                    build::commit(), build::variant());
 #ifdef __APPLE__
     note("Settings overlay: F1 (Fn+F1 on most Mac keyboards), Cmd+, or Settings... in the app menu, or hold Select / "
          "press Home on a controller. Esc, F1 or B closes. "

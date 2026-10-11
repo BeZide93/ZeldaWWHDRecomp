@@ -62,6 +62,18 @@ if(NOT GEN_SOURCES)
   message(FATAL_ERROR "no generated code in ${GEN_DIR}; run tools/recomp/recomp.py first")
 endif()
 
+# Decomp build (docs/decomp-build.md): the game functions of the decompilation (git submodule decomp) run
+# as compiled source in place of the recompiled code; libraries and everything not decompiled stay
+# recompiled. GEN_DIR must then come from recomp.py --decomp-hooks (cmake/Decomp.cmake checks it).
+option(WWHD_DECOMP "decomp build: run the decompiled game functions (macOS; experimental)" OFF)
+include(cmake/Decomp.cmake)
+if(WWHD_DECOMP)
+  wwhd_decomp_configure()
+elseif(EXISTS "${GEN_DIR}/decomp_hooks.txt")
+  message(FATAL_ERROR "${GEN_DIR} holds decomp build code (recomp.py --decomp-hooks): configure with -DWWHD_DECOMP=ON, "
+                      "or point GEN_DIR at a normal recompile")
+endif()
+
 # WWHD_BUNDLED_DEPS: build glslang, zlib, LZ4 (and SDL3 if not found) from pinned sources with the
 # project's own compiler. Release builds use it so the prebuilt runtime and its dependencies all
 # come from the toolchain the installer later links with (llvm-mingw, zig).
@@ -125,6 +137,7 @@ set(WWHD_VERSION "" CACHE STRING "release version shown in reports and logs (def
 set(WWHD_BUILD_INFO ${CMAKE_BINARY_DIR}/generated/build_info.cpp)
 add_custom_target(wwhd_build_info
   COMMAND ${CMAKE_COMMAND} -DSRC=${CMAKE_SOURCE_DIR} -DOUT=${WWHD_BUILD_INFO} "-DVERSION=${WWHD_VERSION}"
+          "-DVARIANT=$<IF:$<BOOL:${WWHD_DECOMP}>,decomp,>"
           -P ${CMAKE_SOURCE_DIR}/cmake/BuildInfo.cmake
   BYPRODUCTS ${WWHD_BUILD_INFO}
   COMMENT "Build info (version, commit)" VERBATIM)
@@ -226,6 +239,9 @@ if(UNIX AND NOT APPLE AND NOT ANDROID)
   target_link_libraries(wwhd PRIVATE ${CMAKE_DL_LIBS})
 endif()
 target_link_libraries(wwhd PRIVATE gamecode cemu_latte imgui ZLIB::ZLIB Threads::Threads)
+if(WWHD_DECOMP)
+  wwhd_decomp_link(wwhd)
+endif()
 if(ANDROID)
   target_link_libraries(wwhd PRIVATE log android)
 endif()
@@ -843,6 +859,7 @@ target_link_libraries(guest_hooks_test PRIVATE ZLIB::ZLIB ${CMAKE_DL_LIBS})
 add_test(NAME guest_hooks COMMAND guest_hooks_test)
 if(Python3_Interpreter_FOUND)
   add_test(NAME release_sdk_package COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/release/test_sdk_package.py")
+  add_test(NAME decomp_build_gen COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/decomp_build/test_gen.py")
 endif()
 
 add_executable(process_test runtime/tools/process_test.cpp)
