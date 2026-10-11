@@ -22,6 +22,11 @@ what is on `devel` and not released yet (also in the
   after start (issue #144). On Intel GPUs every render-target view now states its purpose explicitly;
   `WWHD_VK_ATTACHMENT_VIEW_USAGE=0` turns it off, and `WWHD_VK_TRACE_PASSES=1` logs each render
   pass once for crash reports.
+
+- **Fixed: shadows switching between sharp and blurry at high internal resolutions** (issue #135).
+  Above 1x, the sun-shadow pass rebuilt surface normals from rays one console pixel apart but depths
+  one screen pixel apart, so depending on the camera angle shadows smeared and Link could get a dark
+  outline. The pass now uses matching spacing, so shadows at 2x, 3x or 4K look like at 1x, only sharper.
 - **Fixed: Android GPU crashes ("device lost") on some Adreno phones** (issue #104). The precise
   GPU barriers that v0.2.12 turned on for Android caused occasional crashes with Mesa Turnip on an
   Adreno 650 and gave no measurable speed-up, so they are off by default again on every platform
