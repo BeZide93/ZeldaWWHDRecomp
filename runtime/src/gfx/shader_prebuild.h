@@ -97,7 +97,9 @@ inline bool request_rebuild() {
 inline void set_default(const char* name, const fs::path& value) {
     if (std::getenv(name)) return;
 #ifdef _WIN32
-    _wputenv_s(host::process_wide(name).c_str(), value.c_str());
+    auto native = value;
+    native.make_preferred();
+    _wputenv_s(host::process_wide(name).c_str(), native.c_str());
 #else
     setenv(name, value.string().c_str(), 0);
 #endif

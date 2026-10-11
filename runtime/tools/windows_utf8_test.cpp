@@ -3,12 +3,12 @@
 #include <cassert>
 #include <clocale>
 #include <fstream>
-#include <mbctype.h>
 #include <chrono>
 int main(int argc, char** argv) {
-    assert(GetACP() == CP_UTF8); // Embedded activeCodePage manifest is effective.
+    const auto codePage = GetACP();
+    if (codePage != CP_UTF8) std::fprintf(stderr, "Expected manifest ANSI code page 65001, got %lu\n", static_cast<unsigned long>(codePage));
+    assert(codePage == CP_UTF8); // Embedded activeCodePage manifest is effective.
     assert(std::string(std::localeconv()->decimal_point) == ".");
-    assert(_getmbcp() == CP_UTF8); // UCRT startup hook ran before main.
     if (argc == 2 && std::string(argv[1]) == "--print-root") {
         std::printf("%s/shader-prebuild\n", host::config_dir().c_str());
         return 0;

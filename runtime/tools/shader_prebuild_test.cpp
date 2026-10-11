@@ -45,10 +45,19 @@ int main(int argc, char** argv) {
     auto clear_live = [&] {
         for(auto name : {"WWHD_SHADER_CACHE","WWHD_VK_SHADER_CACHE","WWHD_VK_PIPELINE_CACHE","WWHD_VK_PIPELINE_CACHE_DIR"}) env(name);
     };
+    auto assert_path_env = [](const char* name, const fs::path& expected) {
+        const auto value = gfxvk::path_environment_utf8(name);
+        const auto actual = value ? fs::u8path(*value).lexically_normal() : fs::path();
+        const auto normalized = expected.lexically_normal();
+        if (!value || actual != normalized)
+            std::fprintf(stderr, "%s path mismatch: actual=[%s] expected=[%s]\n",
+                name, value ? value->c_str() : "<unset>", expected.string().c_str());
+        assert(value && actual == normalized);
+    };
     auto assert_live = [&] {
-        assert(std::string(getenv("WWHD_SHADER_CACHE")) == (shaderprebuild::root()/"live/shaders.bin").string());
-        assert(std::string(getenv("WWHD_VK_SHADER_CACHE")) == (shaderprebuild::root()/"live/vulkan-shaders").string());
-        assert(std::string(getenv("WWHD_VK_PIPELINE_CACHE_DIR")) == (shaderprebuild::root()/"live").string());
+        assert_path_env("WWHD_SHADER_CACHE", shaderprebuild::root()/"live/shaders.bin");
+        assert_path_env("WWHD_VK_SHADER_CACHE", shaderprebuild::root()/"live/vulkan-shaders");
+        assert_path_env("WWHD_VK_PIPELINE_CACHE_DIR", shaderprebuild::root()/"live");
         assert(!getenv("WWHD_VK_PIPELINE_CACHE"));
         assert(!getenv("WWHD_HEADSTART"));
     };
@@ -151,7 +160,7 @@ int main(int argc, char** argv) {
     assert(shaderprebuild::identity_matches(active, game, "vulkan"));
     assert(!shaderprebuild::identity_matches(active, game, "metal"));
     assert(shaderprebuild::activate(game, "vulkan"));
-    assert(std::string(getenv("WWHD_HEADSTART")) == (shaderprebuild::root() / "generation-test/headstart.bin").string());
+    assert_path_env("WWHD_HEADSTART", shaderprebuild::root() / "generation-test/headstart.bin");
     // Selected external templates participate in identity; bundled changes do not.
     const auto externalTemplate = temporary / "external-template.bin";
     write(externalTemplate, "synthetic state fixture");
