@@ -602,6 +602,11 @@ small state template supplied with the release to compile covered shaders and pi
 computer before you play. Preparation usually takes tens of seconds on a recent Mac; the time varies
 with your computer and graphics driver. The generated caches stay on your computer.
 
+On a Mac, where **Graphics → Renderer** lets you choose Metal or Vulkan, setup prepares shaders for
+both, one after the other on the same progress bar, so the game starts prepared with either renderer.
+If Vulkan cannot start on your Mac, Metal is still prepared and Vulkan is skipped with a short
+message. Windows, Linux and Android prepare Vulkan.
+
 You can uncheck **Prepare shaders now**, or use `--skip-shader-prebuild` with terminal setup.
 On Android, Back skips the preparation screen. If preparation fails or the build has no template,
 setup skips it with a short message and the game compiles shaders as needed during play.

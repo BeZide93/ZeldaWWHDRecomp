@@ -22,6 +22,9 @@ what is on `devel` and not released yet (also in the
   app now ships the same native decoder, so preparation on the phone is much faster as well.
 
   shaders and pipelines compiled), and Vulkan compiles pipelines on several threads.
+
+  On a Mac, setup now prepares both Metal and Vulkan, so either renderer starts without first-time
+  shader stutter.
 - **Controls: in-game button prompts follow your controller** (PR #110, thanks @mhbxyz). With Face
   buttons set to *by label* (or *Automatic* on an Xbox-style pad), dialog icons and HUD buttons use
   green A, red B, blue X and yellow Y, the HUD button cluster uses the Xbox positions, and shoulder
