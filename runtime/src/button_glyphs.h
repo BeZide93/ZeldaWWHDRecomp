@@ -67,4 +67,7 @@ void draw_text_box(Cpu* c, PpcFunc draw);
 // by label puts A south, B east, X west and Y north, moving their complete groups together.
 void calculate_pane(Cpu* c, PpcFunc calculate);
 
+// a save state was loaded: forget which text boxes were rebuilt for by label (savestate.cpp)
+void ss_reset();
+
 }  // namespace button_glyphs

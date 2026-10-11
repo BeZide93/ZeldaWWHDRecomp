@@ -52,11 +52,11 @@ bool marking() { return xbox_style() || labels_used.load(std::memory_order_relax
 // hooks could recognise. Each text box is therefore rebuilt once: the game re-runs Print, which
 // marks the new quads. The registry is a one-shot switch (only consulted after activation) and
 // never identifies glyphs; it cannot go stale because it only ever forces a rebuild.
+std::mutex rebuilt_mutex;
+std::unordered_set<uint32_t> rebuilt;  // text boxes rebuilt since by label was first used (or the last state load)
 bool first_rebuild(uint32_t text_box) {
     if (!labels_used.load(std::memory_order_relaxed)) return false;
-    static std::mutex mutex;
-    static std::unordered_set<uint32_t> rebuilt;
-    std::lock_guard lock(mutex);
+    std::lock_guard lock(rebuilt_mutex);
     return rebuilt.insert(text_box).second;
 }
 
@@ -232,7 +232,8 @@ void button_glyphs::calculate_pane(Cpu* c, PpcFunc calculate) {
     // prompt or the item screen's linear row. Move the group root: labels, item art and effects
     // inherit the same transform. Force its tree's matrices in both modes so switching back or
     // restoring a state cannot leave the previous layout's cached global positions behind.
-    c->r[5] = 1;
+    // Only once by label has been used: until then the stock path stays untouched.
+    if (marking()) c->r[5] = 1;
     if (!xbox_style()) return calculate(c);
     const Point from = button_centre(groups[face], pictures[face]);
     const Point to = button_centre(groups[face ^ 1], pictures[face ^ 1]);
@@ -372,7 +373,7 @@ extern "C" void hook_028F7C7C(Cpu* c) {
     }
     f_028F7C7C_orig(c);
     restore(saved);
-    st16(list + 4, original_count);
+    if (ld16(list + 4) != original_count) st16(list + 4, original_count);  // only if the label merge changed it
 }
 
 // CommandGuide, the floating CommandA prompt and IconSlideArea use the same ABXY background
@@ -391,3 +392,12 @@ extern "C" void hook_02874D54(Cpu* c) {
     f_02874D54_orig(c);
     for (uint32_t i = 0; i < saved.size(); i++) st32(picture + 0xA8 + 4 * i, saved[i]);
 }
+
+namespace button_glyphs {
+// A loaded save state brings back text boxes cached at addresses that may already be in the
+// one-shot rebuild set: forget it, so each is rebuilt (and marked) again when first drawn.
+void ss_reset() {
+    std::lock_guard lock(rebuilt_mutex);
+    rebuilt.clear();
+}
+}  // namespace button_glyphs
