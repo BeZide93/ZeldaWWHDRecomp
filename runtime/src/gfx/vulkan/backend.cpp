@@ -2916,7 +2916,7 @@ static void init_device(std::vector<const char *> extensions,
   devices.resize(n);
   std::string unsuitable;
   std::vector<uint32_t> deviceQueues(devices.size(), UINT32_MAX);
-  std::vector<VkQueueFamilyProperties> queueProperties(devices.size());
+  std::vector<VkQueueFamilyProperties> deviceQueueProperties(devices.size());
   device_inventory.clear();
   for (size_t i = 0; i < devices.size(); ++i) {
     auto device = devices[i];
@@ -2962,7 +2962,7 @@ static void init_device(std::vector<const char *> extensions,
         vkGetPhysicalDeviceSurfaceSupportKHR(device, q, R.tv.surface, &tv);
         if (R.drc.surface) vkGetPhysicalDeviceSurfaceSupportKHR(device, q, R.drc.surface, &drc);
         if ((qs[q].queueFlags & VK_QUEUE_GRAPHICS_BIT) && tv && drc) {
-          deviceQueues[i] = q; queueProperties[i] = qs[q]; break;
+          deviceQueues[i] = q; deviceQueueProperties[i] = qs[q]; break;
         }
       }
       if (deviceQueues[i] == UINT32_MAX) info.unavailable = "cannot draw to the game window";
@@ -2980,8 +2980,8 @@ static void init_device(std::vector<const char *> extensions,
     R.physicalDevice = devices[i];
     R.formatProperties.clear();
     R.queueFamily = deviceQueues[i];
-    R.computeQueue = (queueProperties[i].queueFlags & VK_QUEUE_COMPUTE_BIT) != 0;
-    R.gpuTimestampValidBits = queueProperties[i].timestampValidBits;
+    R.computeQueue = (deviceQueueProperties[i].queueFlags & VK_QUEUE_COMPUTE_BIT) != 0;
+    R.gpuTimestampValidBits = deviceQueueProperties[i].timestampValidBits;
     R.dynamicRenderingKHR = !device_inventory[i].core;
     active_device = device_inventory[i].name;
     device_fallback = choice.fallback.empty() ? "" : choice.fallback + "; using " + active_device + ".";
