@@ -7,6 +7,12 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Android: a menu on the game widget and an "Add the game icon" button** (PR #150, thanks
+  @rhemfur). Long-press the home-screen widget, then Settings (Samsung) to export or import the save
+  or open the game setup. The setup screen has **Add the game icon to the home screen** under Play
+  for players who declined or removed it, and the automatic offer now waits until the setup screen
+  is in front, so Android no longer refuses it on some phones. Spanish texts for these and the save
+  export/import.
 - **Fixed: ZL/ZR (LT/RT, L2/R2) prompts in dialogs showed as a white box** with the face buttons set
   to *by label* (issue #141). The shoulder labels in dialogs are now drawn as pictures like the
   game's own icons, in every language.
