@@ -111,7 +111,11 @@ uint32_t shoulder_atlas(Cpu* cpu) {
         const uint32_t image = mem::host_alloc(128 * 256 * 4, 256);
         std::memset(mem::ptr(object), 0, 0xAC);
         std::memcpy(mem::ptr(object), mem::ptr(ld32(records[0] + 0x14)), 16);
-        st8(object + 0x0E, 1);  // colour sheet: preserve RGBA, rather than treating it as an alpha font
+        // +0x0E = 0: an RGBA sheet like the game's own icon font (issue #141). The header copied
+        // from the HUD font says 1 (a coverage sheet), which the batch at 028F7A4C turns into the
+        // text-colour path: it maps the texture through the text box's black/white colours, and
+        // a dialog's white text then turned the whole framed ZL/ZR label white.
+        st8(object + 0x0E, 0);
         std::memcpy(mem::ptr(image), pixels.data(), pixels.size());
         const uint32_t texture = object + 0x10;
         st32(texture, 5); st32(texture + 4, 128); st32(texture + 8, 256); st32(texture + 12, 1);  // one-layer font array
@@ -145,9 +149,11 @@ void shoulder_quad(std::vector<SavedWord>& saved, uint32_t quad, int shoulder, b
     patch_float(saved, quad + 0x1C, (3-shoulder) * 0.25f);
     patch_float(saved, quad + 0x20, frame ? 0.5f : 1.0f);
     patch_float(saved, quad + 0x24, (4-shoulder) * 0.25f);
-    // The composed array has one layer, regardless of the source glyph's page. Restore its
-    // original page and colour-font flag with the rest of the authored quad afterwards.
-    patch(saved, quad + 0x2C, (ld32(quad + 0x2C) & ~0xFF00u) | 1);
+    // The composed array has one layer, regardless of the source glyph's page. Bit 0 of +0x2F
+    // marks a coverage glyph (alpha font, coloured by the text box's colours); the composed
+    // label is an RGBA picture like the original icons, so clear it (issue #141). The original
+    // page and flag are restored with the rest of the authored quad afterwards.
+    patch(saved, quad + 0x2C, ld32(quad + 0x2C) & ~0xFF01u);
 }
 
 int shoulder_box(uint32_t box) {

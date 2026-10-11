@@ -587,10 +587,13 @@ extern "C" void f_028F7C7C_orig(Cpu* c) {
             assert(ld32(quad + 0x10 + j * 4) == want);
             assert(ld8(quad + 0x13 + j * 4) == (authored[j] & 0xFF));  // fade alpha
         }
-        assert((ld8(quad + 0x2F) & 1) == (expect_xbox && font_available && shoulder >= 0 ? 1 : (i & 1)));
+        // #141: the composed label is an RGBA picture, like the game's own icons: neither the quad
+        // (+0x2F bit 0) nor the sheet (+0x0E) may ask for the text-colour (coverage font) path.
+        assert((ld8(quad + 0x2F) & 1) == (expect_xbox && font_available && shoulder >= 0 ? 0 : (i & 1)));
         if (expect_xbox && font_available && shoulder >= 0) {
             assert(ld8(quad + 0x2E) == 0);
             assert(ld32(quad + 0x28) == atlas);
+            assert(ld8(atlas + 0x0E) == 0);
             assert(ldf32(quad + 0x18) == (expect_frame ? 0.0f : 0.5f));
             assert(ldf32(quad + 0x1C) == (3-shoulder)*0.25f);
             assert(ldf32(quad + 0x20) == (expect_frame ? 0.5f : 1.0f));
@@ -636,6 +639,7 @@ int main() {
     st32(base+0xE10C,base+0xF080); st32(base+0xE144,base+0x5000);
     st32(base+0xE200+0x8C,0x0286F7BC);
     const uint32_t texture = base+0xD010;
+    st8(base+0xD00E,1);  // the HUD font's sheet header marks a coverage sheet (copied into the atlas, #141)
     st32(texture,5); st32(texture+4,32); st32(texture+8,32); st32(texture+12,2);
     st32(texture+0x10,1); st32(texture+0x14,1);
     st32(texture+0x20,16384); st32(texture+0x24,base+0x5000);
