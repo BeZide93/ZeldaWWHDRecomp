@@ -7,6 +7,12 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Android: a friendlier setup screen, and the app icon starts the game** (PRs #128 and #129, thanks
+  @rhemfur). Setup now guides you step by step in English, Portuguese or Spanish ("Choose your
+  game", "Preparing the game for your phone… 20 of 80 · about 3 min left", "Your game is ready").
+  Once a game is set up, the app icon starts it directly ("Game setup" stays available by
+  long-pressing the icon), and the phone offers a home-screen game icon with the game's own picture,
+  made from your game files.
 - **Fixed: crash with Quick doors when leaving a room with spores** (issue #145), for example at
   the first door in the Forbidden Woods. Quick doors ran the spores' fade-out faster than the game
   draws, so their effect was removed while still queued for drawing. Doors now wait for the
