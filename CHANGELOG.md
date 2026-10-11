@@ -7,6 +7,11 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Controls: in-game button prompts follow your controller** (PR #110, thanks @mhbxyz). With Face
+  buttons set to *by label* (or *Automatic* on an Xbox-style pad), dialog icons and HUD buttons use
+  green A, red B, blue X and yellow Y, the HUD button cluster uses the Xbox positions, and shoulder
+  prompts read R1/R2 and L1/L2 in the game's own lettering. *By position* keeps the original look.
+
 - **Vulkan: choose your graphics card** in Settings → Graphics (issue #135), e.g. on laptops with an
   Intel and an NVIDIA GPU. The choice is remembered and applies after a restart; if the chosen card is
   no longer available, the game picks a usable one and says so. `WWHD_VK_DEVICE` (an index or part of
