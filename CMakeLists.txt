@@ -1104,6 +1104,15 @@ endif()
 
 add_test(NAME mod_setup_acceptance COMMAND mod_package_test --setup-acceptance)
 
+# Experimental mods: flag, list filter, save backup before enabling, retention, staged restore.
+add_executable(mod_experimental_test runtime/tools/mod_experimental_test.cpp runtime/src/mods/manager.cpp runtime/src/mods/packages.cpp runtime/src/mods/guest_png.cpp runtime/src/mods/mod_archive.cpp runtime/src/mods/content.cpp runtime/src/mods/cemu_pack.cpp runtime/src/guest_addr_identity.c)
+target_include_directories(mod_experimental_test PRIVATE runtime/src runtime/include)
+target_compile_options(mod_experimental_test PRIVATE -UNDEBUG)
+target_link_libraries(mod_experimental_test PRIVATE ZLIB::ZLIB Threads::Threads ${CMAKE_DL_LIBS})
+foreach(mode schema store unicode manager)
+  add_test(NAME mod_experimental_${mode} COMMAND mod_experimental_test ${mode})
+endforeach()
+
 if(WIN32 AND SDL3_FOUND)
   get_target_property(MOD_TEST_SDL_TYPE SDL3::SDL3 TYPE)
   if(MOD_TEST_SDL_TYPE STREQUAL "SHARED_LIBRARY")

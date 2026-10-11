@@ -44,6 +44,7 @@
 #include "input.h"
 #include "mods/manager.h"
 #include "mods/packages.h"
+#include "mods/save_backup.h"
 #include "runtime.h"
 #ifdef __ANDROID__
 #include <SDL3/SDL.h>
@@ -483,6 +484,9 @@ int main(int argc, char** argv) {
         return result;
     }
 #endif
+    // Save backups (Mods tab): a restore chosen there is applied now, before the game reads saves.
+    // A shader warm-up run (setup, Android's preparation activity) never touches saves.
+    mods::saves::startup(config::save_dir, [](const std::string& line) { LOG("%s", line.c_str()); }, !warm_shaders);
     mods::manager::load_saved();  // player choices, before the game starts
     mods::cemu::set_vulkan(render::requested()==render::Api::Vulkan);
     mods::content::set_game_root(config::game_dir);  // loose imports (fan translations) find their game path
