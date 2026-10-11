@@ -7,6 +7,8 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+## v0.2.13
+
 - **Linux AppImage: a portable mode** (issue #55, idea by @missionfloyd). Create a folder named like the
   AppImage plus `.data` next to it (e.g. `WindWakerHD-…-linux-x86_64.AppImage.data`), and the AppImage keeps
   the game, its code, saves, settings and caches there instead of in `~/.local/share`, `~/.config` and
