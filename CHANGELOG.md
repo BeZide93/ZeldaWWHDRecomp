@@ -7,6 +7,133 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Fixed: setup stopped with "the recompiler wrote no code"** (issue #136) when the install folder's
+  path contains square brackets, for example `...\LoZ - The Wind Waker [WiiU]\data`. Setup and the
+  recompiler treated the brackets as a search pattern and then found none of their own files.
+
+- **Android setup: "Continue anyway" when it waits for the phone to cool down** (issue #142). The
+  pause now shows the battery temperature and Android's thermal status, waits only at 45 °C battery
+  temperature (42 °C if Android also reports the phone as warm) or when Android reports it as hot,
+  and a **Continue anyway** button (also on the low-battery pause) lets you go on for this run. Only
+  Android's critical heat level still stops setup.
+- **Mods: experimental mods and save backups.** Mods marked *Experimental* (untested, may break the
+  game or a save made while they are active; Call of the Sky is one) are hidden unless you turn on
+  **Show experimental mods** in the Mods tab. Turning one on asks first and backs up your saves before
+  it is enabled. **Mods → Save backups** lists the backups (the newest 10 automatic ones are kept;
+  *Back up now* backups are never removed), can restore one at the next start, before the game loads
+  any save (your current saves are backed up first, so a restore can be undone), or delete one.
+
+- **Setup: "Preparing shaders" is much faster and shows real progress.** The release now includes the
+  native decoder for the game's compressed archives (before, setup unpacked them in slow Python) and
+  scans them on several cores: about 10 seconds instead of about 4 minutes on an Apple Silicon Mac,
+  with an identical result. The bar now fills as it works ("400 of 818 game archives", then the
+  shaders and pipelines compiled), and Vulkan compiles pipelines on several threads. On Android the
+  app now ships the same native decoder, so preparation on the phone is much faster as well.
+
+  shaders and pipelines compiled), and Vulkan compiles pipelines on several threads.
+
+  On a Mac, setup now prepares both Metal and Vulkan, so either renderer starts without first-time
+  shader stutter.
+- **Controls: in-game button prompts follow your controller** (PR #110, thanks @mhbxyz). With Face
+  buttons set to *by label* (or *Automatic* on an Xbox-style pad), dialog icons and HUD buttons use
+  green A, red B, blue X and yellow Y, the HUD button cluster uses the Xbox positions, and shoulder
+  prompts read R1/R2 and L1/L2 in the game's own lettering. *By position* keeps the original look.
+
+- **Controls: a "Stick range" setting per stick** (issue #40). For a worn stick that can't reach full
+  deflection: raise its range (100–150 %, default 100 %) in Settings → Controls or the macOS Controls
+  window until the input reaches full tilt, for example the Wind Waker baton's directions. It's
+  applied after the dead zone and keeps the stick's direction.
+
+- **Mods: a "Restart required" popup.** Changes that only take effect after a restart (turning
+  packages, graphics packs or code mods on or off, their settings, profiles, a finished one-click
+  setup, a code-mod rebuild) now show a popup with **Restart now** and **Later**, and the Mods tab keeps
+  a "Restart to apply" line until you restart.
+
+- **Fixed: one-click mod setup stopped with "Package changed; refresh it and confirm its code again"**
+  after a preparation step, e.g. for the GameCube sea minimap. The mod's Python tool left cache files
+  in the package, which made the package look changed. Setup tools now run without writing them. If you
+  already hit this, refresh the mod in the catalogue (or delete its `tools/__pycache__` folder) and
+  press Try again.
+
+- **Vulkan: choose your graphics card** in Settings → Graphics (issue #135), e.g. on laptops with an
+  Intel and an NVIDIA GPU. The choice is remembered and applies after a restart; if the chosen card is
+  no longer available, the game picks a usable one and says so. `WWHD_VK_DEVICE` (an index or part of
+  the name) overrides it for one start.
+
+- **Fixed: the 60, 120 and 240 fps settings dropped to about 30–50 fps on PCs that can't quite draw
+  60 frames a second** (issue #125). A frame that misses its display refresh is now shown as soon as
+  it's ready instead of waiting a whole extra refresh, so you get close to what Uncapped shows (e.g.
+  56 instead of 30 fps). Frames that are on time are paced exactly as before.
+
+- **Fixed: the Picto Box picture stayed blurry** (issue #134). The left stick zooms the Picto Box, and
+  the game blurs the picture while zooming, so even a slightly drifting stick kept it blurry. Controller
+  sticks now have a 15 % dead zone by default (Settings → Controls; a saved 0 from older versions
+  becomes 15 %, an explicitly chosen 0 stays). On Metal, the photo's subject outline could also miss
+  pixels the first time; that's fixed too.
+
+- **Less stutter on first play: setup now prepares the shaders.** After building the game, setup runs
+  **Preparing shaders**: from your own game files and a small, code-free list of the game's GPU states
+  that comes with the release, it compiles the shaders and pipelines before you play (about 15–20 s on
+  a recent Mac). In our tests the cold first-play hitches over 50 ms went from 5–10 to 0. You can skip
+  it in setup, and Settings → Graphics → **Rebuild shader cache** prepares a fresh one. Areas that
+  aren't covered can still stutter once. On Vulkan, shaders and pipelines are also compiled in the
+  background while you play, and the pipelines you used are rebuilt at the title screen on the next
+  start. Your existing caches are kept when you update.
+
+- **macOS setup: works with mismatched Command Line Tools** (e.g. after a macOS beta update installed a
+  newer SDK than the tools' linker understands: "unknown architecture arm64e.x1", "tapi error: malformed
+  file"). Setup now links with an older installed SDK automatically, or explains how to update the
+  Command Line Tools.
+
+- **Audio: a master volume slider** (PR #137, thanks @mhbxyz, issue #124). Settings → Audio has a
+  Master volume slider with Mute and Default buttons. It applies immediately and is remembered for the
+  next start.
+
+- **Fixed: Link flickered during some conversations at 60, 120 and 240 fps** (issue #126). When the
+  camera looks over Link's shoulder, the game hides him for that shot, but the in-between frames drew
+  him again. He now stays hidden on every frame, also in true 60. 30 fps is unchanged.
+
+- **Faster game code: about a quarter less CPU time in the game's own code** (PR #83, thanks
+  @depende3000). The recompiler now keeps the game's registers in local variables, stores only the
+  condition bits that are read later, and uses cheaper float compares. Measured per game step: −28 % on
+  an Apple Silicon Mac, −14.5 % on a Galaxy S25 Ultra. Setup takes about 20 seconds longer to
+  generate the game code. With code mods switched on, the game code stays as before for now.
+
+- **Fixed: Cemu graphics packs that write their title IDs without leading zeros were refused** (issue
+  #123), e.g. the "Playstation UI" pack (`titleIds = 5000010143600`). The IDs are now compared as
+  numbers, the way Cemu reads them.
+
+- **Run/swim speed: a reworked boost** (PR #133, thanks @mhbxyz). Separate multipliers for running
+  (1.5x by default) and swimming (1.25x), hold or toggle, and a stamina bar: a boost lasts 5 s by
+  default and refills over a 3 s cooldown (set stamina to 0 for the old unlimited boost). A ring under
+  the climb wheel shows it. The boost ramps in, and Link's legs keep up with the ground instead of
+  skating (true 60 included). Options in Mods > Run/swim speed: use the dash clip instead of walking,
+  or a sprint pose with a forward lean and wider arm swing. Boosted runs kick up dust, and a boosted
+  surface swim becomes a crawl with splashes and foam, all with the game's own effects. Saved settings
+  carry over.
+
+- **Fixed: setup's last screen briefly asked about the shortcut again after Play** (PR #130, thanks
+  @rhemfur). Once Play or Quit is pressed, the screen shows "Starting the game..." instead of the
+  options; what you had chosen is still done.
+
+- **Windows on ARM: a native `windows-arm64` release** (PR #131, thanks @rhemfur), for Snapdragon X
+  laptops and other ARM PCs. 60 fps keeps the game at full speed there by default ("Keep game speed",
+  as on Android). The x86-64 release still runs on these PCs too, emulated.
+
+## v0.2.12
+
+- **Android: the app is now part of every release and development build.** Download
+  `WindWakerHD-<version>-android-arm64.apk` (x86_64 for emulators and Chromebooks), install it, choose
+  your game, and setup builds the game on the phone. The APK contains no game code. It is signed with the
+  project's key (certificate SHA-256 `7F:F6:D3:5E:…:B2:13`, full value in the release notes), so later
+  versions install as updates.
+
+- **Mods: one-click setup.** Tick a mod (or press **Set up**), confirm once, and its setup runs by
+  itself: for example the GameCube sea minimap prepares its island maps and builds itself, then turns
+  on. If the game code first needs code-mod support, the game rebuilds and restarts and the setup
+  continues afterwards. If a step fails: **Show details** and **Try again**. Changed packages ask for
+  confirmation again.
+
 - **Menu and on-screen keyboard: confirm and cancel like in the game** (PR #118, thanks @rhemfur). With
   the default face-button preset (by position) the right button confirms and the bottom one goes back,
   as in the game; the on-screen keyboard types with the game's A and deletes with B. "By label" and

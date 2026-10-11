@@ -32,8 +32,32 @@ guide the design; any future reuse requires a separate license review.
 Open the in-game settings overlay (F1, Fn+F1 on many Macs, Cmd+, or Settings in
 the menu) and select **Mods**. The searchable built-in catalogue manages the
 mods that are part of this build: direct camera, mouse camera, first-person
-shortcut, wall climbing, quick doors and fast scenes. Descriptions and options
-appear beside the selected entry. All defaults are off.
+shortcut, wall climbing, run/swim speed, quick doors, fast forward and fast
+scene changes. Descriptions and options appear beside the selected entry. All
+defaults are off.
+
+Run/swim speed offers three animation choices. **Native** keeps the game's cycle with the boosted
+cadence. **Dash instead of walk** replaces the low-speed walk portion; the normal full-speed run
+already uses dash. **Sprint pose** adds a forward torso lean, compensating head tilt and stronger
+arm drive to the current run cycle, blended with the boost. It applies during ordinary forward
+running, leaving lock-on, item actions and special walks to their own poses. In water the same
+choice redraws the boosted surface swim as a crawl: a flatter torso with a much wider
+phase-locked arm sweep instead of the stock paddle. The choice
+is saved in the active mod profile. Older profiles without an animation key retain the saved
+settings choice at startup. `WWHD_MOD_MOVE_ANIM=native|dash|sprint` overrides saved choices
+at startup. For in-game verification, `WWHD_MODS_TRACE=<path>` records applied sprint and swim
+poses with their blend weight and cycle phase, plus `swim-swirl` and `swim-trail` splash lines.
+
+The sprint pose leans up to 30 degrees through the torso, with a compensating head tilt and wider
+arm swings. Starting a grounded run boost emits one short fan of three larger, more opaque puffs
+of the game's land dust behind Link's feet. While the run boost remains active on the ground, a
+small dim puff follows every few steps as a dust trail. A forward roll keeps the current boost cycle and
+continues using stamina, but plays at its native speed and
+pose. Running resumes automatically after the roll while the cycle still has stamina; cancelling,
+exhausting the bar or genuinely stopping ends it. Resuming the same cycle after a roll does not
+emit a second starting burst. While the swim boost is active, each arm pull splashes the game's
+own sea-coloured water element at that side, and a light foam trail follows behind every few
+steps. Both use the game's own water particles, so the native swim wake is untouched.
 
 The Installed packages section accepts a local folder or `.wwhdmod` ZIP. Choose
 it with the file/folder picker, then press Install package. Installed packages
@@ -56,22 +80,16 @@ enable native dependencies that are not confirmed yet, the one dialog names all
 of them. The dialog works with the mouse, the keyboard (Tab/arrows, Enter or
 Space) and a controller (D-pad, A, B), on the AppKit and the SDL host.
 
-The confirmation is asked once per package and native library: it is stored in
-`profiles.json` as `native_trust`, mapping the package ID to the SHA-256 of the
-package's library for this platform (the file named in `binaries`). It applies
-to every profile. Installing an update whose library differs asks again;
-removing a package forgets its confirmation. Only that one library is
-fingerprinted; anything the library itself loads from its folder is not.
-Built-in mods and settings presets, content mods and Cemu graphics packs without
-preparation tools need no confirmation. Guest packages confirm their ELF through
-the same dialog before their translated module can load.
-
-Manager 1.3 also recognizes declarative `setup` steps. A package of any kind which
-ships a `run_tool` preparation step uses this same confirmation, and the dialog
-names its package-relative tools. For those packages, the stored SHA-256 covers a
+The confirmation is asked once per package version and fingerprint. It is stored
+in `profiles.json` as `native_trust`, mapping the package ID to the SHA-256 of a
 sorted inventory of every package file, including the manifest and imported
-helpers. Changing any file requires confirmation again. Guest compilation keeps
-its separate ELF fingerprint for address allocation and module-cache validation.
+helpers. It applies to every profile. Changing any file asks again; removing a
+package forgets its confirmation. Built-in mods, settings presets, content mods
+and Cemu graphics packs without preparation tools need no confirmation.
+
+Manager 1.3 also recognizes declarative `setup` steps. Packages with a `run_tool`
+preparation step and guest packages use the same trust record. Guest compilation
+keeps its separate ELF fingerprint for address allocation and module-cache validation.
 Settings/content packages without tools still need no native-code confirmation.
 Preparation options must match the manifest's boolean or enum option schema.
 
@@ -95,8 +113,21 @@ different source or moving the required source makes the step unsatisfied.
 Starting a rerun clears its earlier receipt before launching the tool, so a
 failed rerun cannot appear ready because old output files remain on disk.
 
-Installed-package details show each declared setup step, including shared game
-source selection, choices, confirmations, tool execution and guest preparation.
+Tick a mod's checkbox or choose **Set up** in its installed or catalogue entry.
+One confirmation lists the remaining required steps and asks for any choices.
+Preparation tools run with the game's full permissions: continue only for a
+source you trust. This confirmation records trust for the exact package/version;
+a changed package asks again. Missing game sources show their warning and shortcut
+without opening a confirmation.
+
+After Continue, required steps run in order with progress and elapsed time, then
+the mod is enabled. If code-mod support is missing, the same confirmation explains
+the one-time rebuild and automatic restart. Setup resumes after that restart in
+the same profile for the same package fingerprint, before enabling the mod.
+A guest mod may need one final **Restart now** to become active. On failure,
+**Show details** shows the tool output and **Try again** retries the failed step.
+Cancel keeps completed preparation. Individual step controls remain under the
+collapsed **Advanced** section for troubleshooting.
 Tools and guest builds run in a background worker. Options and profiles cannot
 change during preparation. Guest preparation uses the same persisted address
 allocator and build bridge as startup, including the installed game's region
@@ -118,6 +149,50 @@ again to review." Ticking it again shows the confirmation. Packages that depend
 on it report that a dependency failed to load, as for any failed load. The
 manager API enforces this as well (`enable()` refuses unconfirmed native code;
 `unconfirmed_native()` and `confirm_native()` serve the dialog).
+
+### Experimental mods and save backups
+
+Some mods are marked experimental: they are untested and can cause game-breaking
+problems, and saving the game while one is active can damage the save. The
+catalogue hides them unless **Show experimental mods** (Browse catalogue, off by
+default, saved with the catalogue URL) is on. An installed experimental mod is
+always listed, with an orange **Experimental** label, so it can be turned off or
+removed.
+
+Enabling an experimental mod (its checkbox, **Set up**, or a mod that requires
+one) first explains the risk. **Back up saves and enable** copies the whole save
+folder before anything is turned on; **Cancel** (the default, also B) leaves it
+off. If the backup fails, for example because the disk is full, the mod stays
+off and the reason is shown. Each enable asks again; the confirmation is not
+remembered. A profile switch to a profile that already has the mod enabled does
+not ask.
+
+**Mods > Save backups** lists every backup with its date, reason and size.
+**Back up now** makes a manual backup. Backups live in `save-backups` next to the
+save folder (on Android in the app's files folder, next to `save`), one folder
+per backup named after its date and reason (for example
+`2026-10-11_14-03-12-before-dragon`), with the copied files under `save/` and
+the details in `backup.json`. A backup is written to a temporary folder and
+renamed when complete, and an existing backup is never overwritten. The newest
+10 automatic backups (before a mod, before a restore) are kept; manual backups
+are never deleted automatically, and folders you put there yourself are left
+alone. **Delete** removes one backup, manual or automatic, after a confirmation
+("This can't be undone"); the backup staged for a restore cannot be deleted until
+that restore is cancelled.
+
+**Restore** asks for confirmation and then stages the restore: the game keeps
+its save files open while it runs, so the files are replaced at the next start,
+before the game loads any save. The Restart required notice offers a restart
+(on Android, restart the app yourself); **Cancel restore** undoes the choice.
+At that start the current save is backed up first ("Before a restore"), so a
+restore can itself be undone. If the restore fails, the save folder stays as it
+was and the Mods tab says why. Backups and restores are logged with the
+`[save-backup]` prefix.
+
+Package manifests and catalogue entries mark a mod with `"experimental": true`
+(optional, default `false`; older catalogues without the field keep working). A
+package installed from an experimental catalogue entry counts as experimental
+even if its own manifest predates the field.
 
 Profiles save package toggles/configuration and built-in choices. Clone current
 creates another profile; select it in Active profile. Switch away before deleting
@@ -170,6 +245,7 @@ Package manifest fields:
 | `game_id` | `wwhd-usa` (the runtime also verifies its exact RPX entry) |
 | `author`, `description` | Optional display metadata |
 | `minimum_manager_version` | Optional three-part minimum |
+| `experimental` | Optional `true` for untested mods: hidden by default, enabling backs up the saves first (manager 1.4) |
 | `kind` | `native`, `settings`, `content` or `cemu` |
 | `abi_version`, `binaries` | Native ABI `1`; platform-to-relative-library map |
 | `content_dir` | Content package: relative folder holding game-relative replacement files |
@@ -403,7 +479,8 @@ Incompatible entries cannot be installed. Update is offered only for a newer
 three-part version, and an enabled or active package must be disabled first.
 Install verifies the downloaded size and SHA-256 plus package/index metadata,
 then uses the manager's atomic installer. Packages start disabled and their setup
-details open in Installed packages. Nothing is enabled or downloaded automatically.
+details open in Installed packages. Choose **Set up** to prepare and enable a mod;
+installation alone does not enable it.
 Successful refreshes save validated metadata in the manager’s Catalogue folder.
 Load offline catalogue reads this cache without a network request, including
 after a restart, and labels its versions as potentially out of date. Cache keys
