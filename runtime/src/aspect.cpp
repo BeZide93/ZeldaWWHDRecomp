@@ -87,22 +87,22 @@ void remember(float v) {
     g_stored[0] = v;
 }
 bool standard_aspect(float v) { return same(v, kBase) || same(v, g_game) || ours(v); }
+float vert_plus_fovy_rad(float fovy, float ky) { return ky == 1.0f ? fovy : 2.0f * std::atan(std::tan(fovy * 0.5f) * ky); }
 float vert_plus_fovy(float fovyDeg, float ky) {
-    if (ky == 1.0f) return fovyDeg;
-    float t = std::tan(fovyDeg * 0.5f * (float)M_PI / 180.0f) * ky;
-    return 2.0f * std::atan(t) * 180.0f / (float)M_PI;
+    return ky == 1.0f ? fovyDeg : vert_plus_fovy_rad(fovyDeg * (float)M_PI / 180.0f, ky) * 180.0f / (float)M_PI;
 }
-// f(fovy), f(aspect) of a projection / clipper call of the main camera
+// f(fovy), f(aspect) of a projection / clipper call of the main camera (fovy in degrees, or radians)
 // at 16:9 every hook leaves the game's values untouched (bit-identical original behaviour)
 bool original() { return g_game == kBase; }
-void adjust_projection_args(Cpu* c, int fovyReg, int aspectReg) {
+void adjust_projection_args(Cpu* c, int fovyReg, int aspectReg, bool radians = false) {
     if (original() && !ours((float)c->f[aspectReg].ps0)) return;
     if (!standard_aspect((float)c->f[aspectReg].ps0)) return;  // a special aspect (demo): leave it
     remember(g_game);
     float kx, ky;
     factors(g_game, kx, ky);
+    float fovy = (float)c->f[fovyReg].ps0;
     c->f[aspectReg].ps0 = c->f[aspectReg].ps1 = g_game;
-    c->f[fovyReg].ps0 = c->f[fovyReg].ps1 = vert_plus_fovy((float)c->f[fovyReg].ps0, ky);
+    c->f[fovyReg].ps0 = c->f[fovyReg].ps1 = radians ? vert_plus_fovy_rad(fovy, ky) : vert_plus_fovy(fovy, ky);
 }
 }  // namespace
 
@@ -192,6 +192,11 @@ extern "C" void site_024FFA98(Cpu* c) { store_aspect(c); }
 extern "C" void site_025020E0(Cpu* c) { store_aspect(c); }
 // camera_draw: C_MTXPerspective(view.mProjMtx, f1 fovy, f2 aspect, f3 near, f4 far)
 extern "C" void site_024FFD60(Cpu* c) { adjust_projection_args(c, 1, 2); }
+// camera_draw: sead::PerspectiveProjection::set(camera+0x66C, f1 near, f2 far, f3 mFovy * pi/180,
+// f4 mAspect), the projection the HD renderer draws the scene with (its matrices at camera+0x8B8,
+// +0x8F8). The aspect reaches it through view.mAspect, the fovy only through this hook: without it
+// a taller screen got the 16:9 picture cropped at the sides instead of Vert+.
+extern "C" void site_0250007C(Cpu* c) { adjust_projection_args(c, 3, 4, true); }
 // view_setup: mDoLib_clipper::setup(f1 fovy, f2 aspect, f3 near, f4 far)
 extern "C" void site_024F811C(Cpu* c) { adjust_projection_args(c, 1, 2); }
 extern "C" void site_024F8168(Cpu* c) { adjust_projection_args(c, 1, 2); }
