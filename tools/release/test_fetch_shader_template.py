@@ -107,12 +107,17 @@ class FetchTemplateTests(unittest.TestCase):
                     self.assertIn('UserKnownHostsFile=' + hosts.as_posix(), kwargs['env']['GIT_SSH_COMMAND'])
                     key = root / 'shader-template-deploy-key'
                     self.assertTrue(key.is_file())
+                    # OpenSSH rejects a key with CRLF line endings ("invalid format"), which text-mode
+                    # writes produced on Windows: both files must be LF only, even for a CRLF secret
+                    self.assertEqual(key.read_bytes(), b'-----BEGIN SYNTHETIC KEY-----\nline\n-----END SYNTHETIC KEY-----\n')
+                    self.assertNotIn(b'\r', hosts.read_bytes())
                     if os.name != 'nt':
                         self.assertEqual(key.stat().st_mode & 0o777, 0o600)
                     output = (commit + '\n').encode() if 'rev-parse' in command else data if 'show' in command else b''
                     return subprocess.CompletedProcess(command, 0, stdout=output)
                 with patch.object(fetcher, 'ROOT', root), patch.dict(os.environ,
-                    {'RUNNER_TEMP': tmp, 'SHADER_TEMPLATE_DEPLOY_KEY': 'synthetic test key'}, clear=True), patch.object(subprocess, 'run', side_effect=git):
+                    {'RUNNER_TEMP': tmp, 'SHADER_TEMPLATE_DEPLOY_KEY': '-----BEGIN SYNTHETIC KEY-----\r\nline\r\n-----END SYNTHETIC KEY-----\r\n'},
+                    clear=True), patch.object(subprocess, 'run', side_effect=git):
                     if valid:
                         fetcher.fetch()
                         self.assertEqual((folder / 'template.bin').read_bytes(), data)

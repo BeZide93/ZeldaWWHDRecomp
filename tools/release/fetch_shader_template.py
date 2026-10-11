@@ -51,11 +51,13 @@ def fetch():
     key_path = Path(os.environ['RUNNER_TEMP']) / 'shader-template-deploy-key'
     known_hosts = key_path.with_name('shader-template-known-hosts')
     try:
-        known_hosts.write_text(GITHUB_HOST_KEY)
+        known_hosts.write_bytes(GITHUB_HOST_KEY.encode('ascii'))  # binary: no CRLF on Windows
         os.chmod(known_hosts, 0o600)
         descriptor = os.open(key_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(descriptor, 'w') as stream:
-            stream.write(key.rstrip() + '\n')
+        # binary: text mode on Windows writes CRLF, and OpenSSH rejects such a key ("invalid format");
+        # a secret pasted with CRLF is normalised too
+        with os.fdopen(descriptor, 'wb') as stream:
+            stream.write((key.replace('\r\n', '\n').replace('\r', '\n').rstrip() + '\n').encode('ascii'))
         os.chmod(key_path, 0o600)
         env = os.environ.copy()
         env.pop('SHADER_TEMPLATE_DEPLOY_KEY', None)
