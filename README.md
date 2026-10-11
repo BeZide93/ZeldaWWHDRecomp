@@ -650,9 +650,10 @@ README. `build/names.tsv` is derived from the game and stays on your machine.
 
 ## Optional: decomp build (experimental)
 
-Instead of the recompiled game code, the port can also run the
-[verified decompilation](https://github.com/ZeldaWWHDDecomp/wwhd) of the game as compiled source
-(the git submodule `decomp/`): `-DWWHD_DECOMP=ON`. Functions that aren't decompiled, and the
+Instead of the recompiled game code, the port can also run the game's decompiled source. It is
+based on the public decompilation project **[ZeldaWWHDDecomp/wwhd](https://github.com/ZeldaWWHDDecomp/wwhd)**
+(a verified decompilation of The Wind Waker HD, included as the git submodule `decomp/`):
+`-DWWHD_DECOMP=ON`. Functions that aren't decompiled, and the
 libraries, are still recompiled from your own copy of the game (USA, version 0), so the decomp build
 needs your game files like the normal one. macOS only so far; the normal build stays the default and
 recommended way to play.
