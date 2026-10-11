@@ -191,8 +191,10 @@ def cache_environment(generation, game, renderer):
 
 
 PROGRESS_PREFIX = 'WWHD-PROGRESS '
-# Share of the bar the head-start assembly takes when a native warm follows it.
+# Share of the bar the head-start assembly takes when a native warm follows it
+# (several renderers: each warm takes an equal part of the rest).
 ASSEMBLY_SHARE = 0.35
+ASSEMBLY_SHARE_SEVERAL = 0.25
 
 
 def parse_progress(line):
@@ -208,6 +210,35 @@ def parse_progress(line):
     if done < 0 or total < 0:
         return None
     return done, total, parts[2] if len(parts) > 2 else ''
+
+
+# wwhd --warm-shaders exit status when the requested renderer cannot start on this computer
+# (no MoltenVK/Vulkan driver): the game fell back to another renderer and warmed nothing.
+RENDERER_UNAVAILABLE = 3
+RENDERER_NAMES = {'metal': 'Metal', 'vulkan': 'Vulkan'}
+
+
+class CommandFailed(RuntimeError):
+    def __init__(self, returncode):
+        super().__init__('Shader preparation command failed (%d)' % returncode)
+        self.returncode = returncode
+
+
+def default_renderers(platform=None):
+    """Renderers setup prepares: macOS lets the player choose Metal or Vulkan (MoltenVK), so both;
+    elsewhere Vulkan only."""
+    return ['metal', 'vulkan'] if (platform or os.sys.platform) == 'darwin' else ['vulkan']
+
+
+def renderer_states(manifest):
+    """{renderer: 'ready'|'failed'|'unavailable'} of a manifest; older manifests name one
+    renderer in their identity."""
+    states = manifest.get('renderers')
+    if isinstance(states, dict):
+        return {k: v for k, v in states.items() if isinstance(k, str) and isinstance(v, str)}
+    ident = manifest.get('identity')
+    renderer = ident.get('renderer') if isinstance(ident, dict) else None
+    return {renderer: 'ready'} if isinstance(renderer, str) and manifest.get('status') == 'ready' else {}
 
 
 def run_process(command, env, cancel, progress):
@@ -240,7 +271,7 @@ def run_process(command, env, cancel, progress):
                     time.sleep(.1)
                 forward(final=True)
                 if child.returncode:
-                    raise RuntimeError('Shader preparation command failed (%d)' % child.returncode)
+                    raise CommandFailed(child.returncode)
             finally:
                 if child.poll() is None:
                     child.terminate()
@@ -315,8 +346,17 @@ class _Reporter:
 
 def prepare(game, template, executable, cache_root, package, renderer='vulkan',
             progress=lambda text: None, cancel=lambda: False, skip=False,
-            runner=run_process, python=None, builder=None, runtime_identity=None, log=None):
+            runner=run_process, python=None, builder=None, runtime_identity=None, log=None,
+            renderers=None):
     """Return a nonfatal status. executable=None assembles Android's pending warm.
+
+    renderers: the renderers the native warm runs for, one after the other, on one shared head
+    start (default [renderer]; macOS setup passes ['metal', 'vulkan']). The manifest records each
+    result in "renderers"; the game uses the generation only for a renderer that is "ready". With
+    several renderers, one that cannot start (RENDERER_UNAVAILABLE) or fails is recorded and the
+    others go on; only when none succeeds is the preparation a failure. renderer stays the
+    identity's renderer, so a generation an older setup prepared for it is kept and only the
+    missing renderers are warmed (failed/unavailable ones wait for Rebuild shader cache).
 
     progress(text) gets the phase messages; a progress that takes a fraction keyword also gets
     progress(text, fraction=0..1) as the work advances (assembly, then the native warm).
@@ -325,6 +365,7 @@ def prepare(game, template, executable, cache_root, package, renderer='vulkan',
     Paths are private local output only. No caller-supplied source is removed.
     """
     reporter = _Reporter(progress, log or progress, cancel)
+    renderers = list(renderers or [renderer])
     if not Path(template).is_file():
         message = 'Shader template unavailable; shaders will compile during play'
         progress(message)
@@ -333,6 +374,39 @@ def prepare(game, template, executable, cache_root, package, renderer='vulkan',
     staging = None
     wanted = None
     launch = None
+
+    def warm(generation, names, low, high, keep_going):
+        """wwhd --warm-shaders for each renderer in turn over [low, high] of the bar ->
+        {renderer: state}. keep_going: a failed renderer is recorded instead of raised."""
+        states = {}
+        share = (high - low) / len(names)
+        for index, name in enumerate(names):
+            title = ('Compiling shaders and pipelines for this computer' if len(renderers) == 1 else
+                     'Compiling shaders and pipelines for %s' % RENDERER_NAMES.get(name, name))
+            reporter.begin(title, low + index * share, low + (index + 1) * share)
+            env = os.environ.copy()
+            for key in list(env):
+                if key.startswith('WWHD_VK_TEST_') or key == 'WWHD_VK_GRAPH_DIAGNOSTICS':
+                    env.pop(key)
+            # Preparation owns its live directory; a caller's exact-file override
+            # must not redirect the warm subprocess away from that directory.
+            env.pop('WWHD_VK_PIPELINE_CACHE', None)
+            env.update(cache_environment(generation, game, name))
+            try:
+                runner([str(executable), '--game', str(game), '--warm-shaders'], env, cancel, reporter.line)
+                states[name] = 'ready'
+            except InterruptedError:
+                raise
+            except Exception as error:
+                if not keep_going:
+                    raise
+                unavailable = getattr(error, 'returncode', None) == RENDERER_UNAVAILABLE
+                states[name] = 'unavailable' if unavailable else 'failed'
+                label = RENDERER_NAMES.get(name, name)
+                reporter.message('%s is not available on this computer; skipped' % label if unavailable else
+                                 'Preparing shaders for %s failed (%s); they compile during play' % (label, error))
+        return states
+
     try:
         wanted = identity(game, template, package, renderer)
         runtime = runtime_identity or executable
@@ -358,14 +432,28 @@ def prepare(game, template, executable, cache_root, package, renderer='vulkan',
             if (previous.get('identity') == wanted and previous.get('status') == 'ready'
                     and name.startswith('generation-') and Path(name).name == name
                     and generation.parent == root and (generation / 'headstart.bin').is_file()):
-                return dict(status='ready', generation=str(generation), reused=True)
+                states = renderer_states(previous)
+                missing = [r for r in renderers if r not in states] if executable else []
+                if missing:
+                    try:
+                        states.update(warm(generation, missing, 0.0, 1.0, keep_going=True))
+                    except InterruptedError:
+                        # skipping the added renderer keeps the prepared ones in use
+                        states.update({r: 'skipped' for r in missing if r not in states})
+                    updated = dict(previous, renderers=states)
+                    with activation_lock(root):
+                        if read_marker(active) == previous:
+                            atomic_json(generation / 'manifest.json', updated)
+                            atomic_json(active, updated)
+                return dict(status='ready', generation=str(generation), reused=True, renderers=states)
         failed = read_marker(root / 'failed.json')
         if not (root / 'rebuild.request').exists() and failed.get('identity') == wanted:
             return dict(status='skipped', message='Previous preparation failed; request Rebuild shader cache to retry')
         root.mkdir(parents=True, exist_ok=True)
         migrate_legacy_caches(root)
         staging = Path(tempfile.mkdtemp(prefix='generation-', dir=root))
-        reporter.begin('Resolving shaders from your game files', 0.0, ASSEMBLY_SHARE if executable else 1.0)
+        assembly = (ASSEMBLY_SHARE if len(renderers) == 1 else ASSEMBLY_SHARE_SEVERAL) if executable else 1.0
+        reporter.begin('Resolving shaders from your game files', 0.0, assembly)
         import sys
         command = [python or sys.executable, str(Path(package) / 'tools/shaderprep.py'),
                    'build', str(staging / 'headstart.bin'), '--game', str(game), '--template', str(template),
@@ -386,15 +474,15 @@ def prepare(game, template, executable, cache_root, package, renderer='vulkan',
         if not (staging / 'headstart.bin').is_file():
             raise RuntimeError('Shader preparation produced no head start')
         status = 'warm_pending'
+        states = None
         if executable:
-            reporter.begin('Compiling shaders and pipelines for this computer', ASSEMBLY_SHARE, 1.0)
-            # Preparation owns its live directory; a caller's exact-file override
-            # must not redirect the warm subprocess away from that directory.
-            env.pop('WWHD_VK_PIPELINE_CACHE', None)
-            env.update(cache_environment(staging, game, renderer))
-            runner([str(executable), '--game', str(game), '--warm-shaders'], env, cancel, reporter.line)
+            states = warm(staging, renderers, assembly, 1.0, keep_going=len(renderers) > 1)
+            if not any(state == 'ready' for state in states.values()):
+                raise RuntimeError('no renderer could be prepared')
             status = 'ready'
         result = dict(schema=SCHEMA, status=status, identity=wanted, launch=launch, generation=staging.name)
+        if states is not None:
+            result['renderers'] = states
         with activation_lock(root):
             atomic_json(staging / 'manifest.json', result)
             atomic_json(active, result)
@@ -404,7 +492,10 @@ def prepare(game, template, executable, cache_root, package, renderer='vulkan',
             (root / 'failed.json').unlink(missing_ok=True)
             if status == 'ready':
                 cleanup_generations(root, staging.name)
-        return dict(status=status, generation=str(staging), reused=False)
+        done = dict(status=status, generation=str(staging), reused=False)
+        if states is not None:
+            done['renderers'] = states
+        return done
     except Exception as error:
         if staging:
             shutil.rmtree(staging, ignore_errors=True)

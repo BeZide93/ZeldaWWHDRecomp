@@ -2372,10 +2372,16 @@ def install(ctx, source, keys=None, info=None, ui=None, check_keys=None):
             ctx.game_dir, shader_template, state["exe"],
             shader_root, PKG,
             renderer="metal" if IS_MAC else "vulkan", progress=shader_progress_callback(shader_progress), log=LOG.write,
+            # macOS: the player chooses Metal or Vulkan (MoltenVK) in Graphics > Renderer: prepare both
+            renderers=["metal", "vulkan"] if IS_MAC else ["vulkan"],
             skip=bool(getattr(args, "skip_shader_prebuild", False)),
             cancel=lambda: bool(getattr(args, "shader_prebuild_cancel", None) and
                                 Path(args.shader_prebuild_cancel).exists()))
-        shader_progress.done(state["shader_prebuild"]["status"])
+        prepared = state["shader_prebuild"]
+        states = prepared.get("renderers") or {}
+        ready = [name.capitalize() for name, value in sorted(states.items()) if value == "ready"]
+        # macOS: "ready (Metal, Vulkan)", or "ready (Metal)" when MoltenVK is unavailable
+        shader_progress.done(prepared["status"] + (" (%s)" % ", ".join(ready) if len(states) > 1 and ready else ""))
     if not args.keep_work:
         shutil.rmtree(work, ignore_errors=True)
     if kind != "gen":

@@ -270,11 +270,19 @@ compile covered shaders and compatible pipelines before play. Allow roughly tens
 recent Mac; slower computers and different drivers can take longer. Generated shader and driver
 caches stay local.
 
+On macOS, where **Graphics → Renderer** offers Metal and Vulkan (MoltenVK), setup prepares both from
+one shared head start: first for Metal, then for Vulkan, on one progress bar. The preparation manifest
+records each renderer's result, and the game uses the prepared caches only for a renderer that is ready.
+If Vulkan cannot start on the Mac, Metal is still prepared and Vulkan is skipped with a short message.
+A setup that finds an earlier preparation for one renderer prepares only the missing one. Windows,
+Linux and Android prepare Vulkan only.
+
 Uncheck **Prepare shaders now** in setup, use `--skip-shader-prebuild` in terminal setup, or press Back
 on Android's preparation screen to skip. A missing template or a preparation failure does not prevent
 playing: shaders compile on demand. Skipping is remembered for the same game and template, including across runtime updates.
 
-Choose **Settings → Graphics → Rebuild shader cache**, then run setup repair/update to prepare again.
+Choose **Settings → Graphics → Rebuild shader cache**, then run setup repair/update to prepare again
+(on macOS for both renderers; a renderer that failed or was unavailable is retried only then).
 Ordinary game launches never start preparation. Setup repair/update checks whether preparation needs
 refreshing. Player caches persist in `shader-prebuild/live` across preparation generations. The active generation
 lives under the host configuration directory's `shader-prebuild` folder; portable installations use their

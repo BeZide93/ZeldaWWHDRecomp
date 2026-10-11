@@ -421,5 +421,148 @@ class ShaderPrebuildProgressTests(unittest.TestCase):
         self.assertEqual(lines, ['started'])
 
 
+class TwoRendererTests(unittest.TestCase):
+    """macOS: one head start, warmed for Metal and for Vulkan (MoltenVK)."""
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.game = self.root / 'own-game'
+        self.game.mkdir()
+        (self.game / 'synthetic.sharcfb').write_text('synthetic archive identity only')
+        self.package = self.root / 'package'
+        (self.package / 'tools').mkdir(parents=True)
+        (self.package / 'tools/shaderprep.py').write_text('synthetic translator identity')
+        self.template = self.root / 'template'
+        self.template.write_text('synthetic template identity')
+        self.cache = self.root / 'private-cache'
+        self.calls = []
+        self.outcome = {}
+        self.cancelled = False
+
+    def runner(self, command, env, cancel, progress):
+        if command[1] == str(self.package / 'tools/shaderprep.py'):
+            self.calls.append('assemble')
+            Path(command[3]).write_text('synthetic assembled output')
+            progress('WWHD-PROGRESS 1000 1000 done')
+            return
+        renderer = env['WWHD_RENDERER_RUNTIME']
+        self.calls.append(renderer)
+        self.assertEqual(env['WWHD_VK_PIPELINE_CACHE_DIR'], str(self.cache / 'live'))
+        progress('WWHD-PROGRESS 5 10 5 of 10 shaders and pipelines')
+        outcome = self.outcome.get(renderer)
+        if outcome == 'cancel':
+            self.cancelled = True
+            if cancel():
+                raise InterruptedError('Shader preparation skipped')
+        elif outcome is not None:
+            raise outcome
+        progress('WWHD-PROGRESS 10 10 10 of 10 shaders and pipelines')
+
+    def prepare(self, renderers=('metal', 'vulkan'), events=None, **kwargs):
+        def progress(text, fraction=None):
+            if events is not None:
+                events.append((text, fraction))
+        return prebuild.prepare(self.game, self.template, '/synthetic/exe', self.cache, self.package,
+            renderer='metal', renderers=list(renderers), runner=self.runner, progress=progress,
+            cancel=lambda: self.cancelled, **kwargs)
+
+    def active(self):
+        return json.loads((self.cache / 'active.json').read_text())
+
+    def test_default_renderers(self):
+        self.assertEqual(prebuild.default_renderers('darwin'), ['metal', 'vulkan'])
+        self.assertEqual(prebuild.default_renderers('win32'), ['vulkan'])
+        self.assertEqual(prebuild.default_renderers('linux'), ['vulkan'])
+
+    def test_both_renderers_warm_one_head_start_on_one_bar(self):
+        events = []
+        result = self.prepare(events=events)
+        self.assertEqual(result['status'], 'ready')
+        self.assertEqual(self.calls, ['assemble', 'metal', 'vulkan'])
+        self.assertEqual(result['renderers'], {'metal': 'ready', 'vulkan': 'ready'})
+        self.assertEqual(self.active()['renderers'], {'metal': 'ready', 'vulkan': 'ready'})
+        self.assertEqual(self.active()['identity']['renderer'], 'metal')
+        fractions = [f for _, f in events if f is not None]
+        self.assertEqual(fractions, sorted(fractions))
+        self.assertAlmostEqual(fractions[-1], 1.0)
+        share = prebuild.ASSEMBLY_SHARE_SEVERAL
+        middle = share + (1 - share) / 2
+        self.assertIn(('Compiling shaders and pipelines for Metal', share), events)
+        self.assertIn(('Compiling shaders and pipelines for Vulkan', middle), events)
+        self.assertIn(('Compiling shaders and pipelines for Vulkan: 10 of 10 shaders and pipelines', 1.0), events)
+
+    def test_vulkan_unavailable_keeps_metal_ready(self):
+        self.outcome['vulkan'] = prebuild.CommandFailed(prebuild.RENDERER_UNAVAILABLE)
+        events = []
+        result = self.prepare(events=events)
+        self.assertEqual(result['status'], 'ready')
+        self.assertEqual(self.active()['renderers'], {'metal': 'ready', 'vulkan': 'unavailable'})
+        self.assertFalse((self.cache / 'failed.json').exists())
+        self.assertTrue(any('Vulkan is not available' in text for text, _ in events))
+        # unchanged identity: nothing runs again until Rebuild shader cache
+        self.calls.clear()
+        self.assertTrue(self.prepare()['reused'])
+        self.assertEqual(self.calls, [])
+        (self.cache / 'rebuild.request').write_text('rebuild')
+        self.outcome.clear()
+        result = self.prepare()
+        self.assertEqual(self.calls, ['assemble', 'metal', 'vulkan'])
+        self.assertEqual(result['renderers'], {'metal': 'ready', 'vulkan': 'ready'})
+        self.assertFalse((self.cache / 'rebuild.request').exists())
+
+    def test_vulkan_failure_is_recorded_and_no_renderer_is_a_failure(self):
+        self.outcome['vulkan'] = prebuild.CommandFailed(1)
+        self.assertEqual(self.prepare()['renderers'], {'metal': 'ready', 'vulkan': 'failed'})
+        self.outcome['metal'] = prebuild.CommandFailed(1)
+        (self.cache / 'rebuild.request').write_text('rebuild')
+        result = self.prepare()
+        self.assertEqual(result['status'], 'failed')
+        self.assertTrue((self.cache / 'failed.json').is_file())
+        # the previous generation stays active
+        self.assertEqual(self.active()['renderers'], {'metal': 'ready', 'vulkan': 'failed'})
+
+    def test_single_renderer_failure_still_fails(self):
+        self.outcome['vulkan'] = prebuild.CommandFailed(prebuild.RENDERER_UNAVAILABLE)
+        self.assertEqual(self.prepare(renderers=['vulkan'])['status'], 'failed')
+
+    def test_reuse_warms_only_the_missing_renderer(self):
+        self.assertEqual(self.prepare(renderers=['metal'])['renderers'], {'metal': 'ready'})
+        # a generation from an older setup names its renderer only in the identity
+        active = self.active()
+        del active['renderers']
+        (self.cache / 'active.json').write_text(json.dumps(active))
+        generation = self.cache / active['generation']
+        self.calls.clear()
+        events = []
+        result = self.prepare(events=events)
+        self.assertTrue(result['reused'])
+        self.assertEqual(self.calls, ['vulkan'])
+        self.assertEqual(self.active()['renderers'], {'metal': 'ready', 'vulkan': 'ready'})
+        self.assertEqual(json.loads((generation / 'manifest.json').read_text())['renderers'],
+                         {'metal': 'ready', 'vulkan': 'ready'})
+        fractions = [f for _, f in events if f is not None]
+        self.assertEqual(fractions, sorted(fractions))
+        self.calls.clear()
+        self.assertTrue(self.prepare()['reused'])
+        self.assertEqual(self.calls, [])
+
+    def test_cancel_during_vulkan_skips_the_whole_preparation(self):
+        self.outcome['vulkan'] = 'cancel'
+        result = self.prepare()
+        self.assertEqual(result['status'], 'skipped')
+        self.assertFalse((self.cache / 'active.json').exists())
+        self.assertEqual(list(self.cache.glob('generation-*')), [])
+        self.assertTrue((self.cache / 'skip.json').is_file())
+
+    def test_cancel_while_adding_vulkan_keeps_metal(self):
+        self.prepare(renderers=['metal'])
+        self.outcome['vulkan'] = 'cancel'
+        result = self.prepare()
+        self.assertEqual(result['status'], 'ready')
+        self.assertEqual(self.active()['renderers'], {'metal': 'ready', 'vulkan': 'skipped'})
+        self.assertFalse((self.cache / 'skip.json').exists())
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -542,6 +542,13 @@ int main(int argc, char** argv) {
     if (warm_shaders) shaderprebuild::bind_setup_live_caches();
     if (!warm_shaders && !pending_shader_warm) shaderprebuild::activate(config::game_dir, shader_renderer);
     render::init();
+    if (warm_shaders && render::active() != render::requested()) {
+        // the requested renderer could not start (e.g. no MoltenVK) and the game fell back:
+        // warming the fallback would claim the wrong renderer's caches as prepared
+        fprintf(stderr, "[shaders] %s renderer unavailable; nothing to prepare for it\n",
+                render::api_name(render::requested()));
+        return 3;  // tools/installer/shader_prebuild.py: RENDERER_UNAVAILABLE
+    }
     mods::cemu::set_vulkan(render::active()==render::Api::Vulkan);
     if (warm_shaders || pending_shader_warm) {
         int warm_result = 1;

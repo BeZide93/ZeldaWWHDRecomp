@@ -139,11 +139,19 @@ inline mods::json::Value metadata(const fs::path& path) {
 #endif
     return value;
 }
+// Which renderers a generation was warmed for. macOS setup warms Metal and Vulkan (MoltenVK) for
+// one shared head start and records each result in "renderers" ({"metal": "ready", "vulkan":
+// "unavailable"}); older manifests (and Windows/Linux/Android) name the one renderer in the identity.
+inline bool renderer_prepared(const mods::json::Value& active, const std::string& renderer) {
+    const auto& renderers = active.get("renderers");
+    if (renderers.type == mods::json::Value::Object) return renderers.get(renderer).string() == "ready";
+    return active.get("identity").get("renderer").string() == renderer;
+}
 inline bool identity_matches(const mods::json::Value& active, const fs::path& game,
                              const std::string& renderer, bool optOut = false) {
     const auto& id = active.get("identity");
     const auto& launch = active.get("launch");
-    if (id.get("schema").number != 1 || (!optOut && id.get("renderer").string() != renderer)) return false;
+    if (id.get("schema").number != 1 || (!optOut && !renderer_prepared(active, renderer))) return false;
     const auto launcher = read(root() / "launcher.json");
     const fs::path package = fs::u8path(launcher.get("package").string());
     if (!(launch.get("template") == metadata(fs::u8path(launcher.get("template").string())))) return false;

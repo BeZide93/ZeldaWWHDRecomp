@@ -177,6 +177,26 @@ int main(int argc, char** argv) {
     assert(!shaderprebuild::identity_matches(active, game, "metal"));
     assert(shaderprebuild::activate(game, "vulkan"));
     assert_path_env("WWHD_HEADSTART", shaderprebuild::root() / "generation-test/headstart.bin");
+    {
+        // macOS: one generation warmed per renderer; each start uses it only if its renderer is ready
+        auto both = active;
+        both["identity"]["renderer"] = "metal";
+        both["renderers"]["metal"] = "ready"; both["renderers"]["vulkan"] = "ready";
+        assert(shaderprebuild::identity_matches(both, game, "metal"));
+        assert(shaderprebuild::identity_matches(both, game, "vulkan"));
+        both["renderers"]["vulkan"] = "unavailable";
+        assert(shaderprebuild::identity_matches(both, game, "metal"));
+        assert(!shaderprebuild::identity_matches(both, game, "vulkan"));
+        json(shaderprebuild::root() / "active.json", both);
+        env("WWHD_HEADSTART");
+        assert(!shaderprebuild::activate(game, "vulkan"));
+        assert(shaderprebuild::activate(game, "metal"));
+        assert_path_env("WWHD_HEADSTART", shaderprebuild::root() / "generation-test/headstart.bin");
+        both["renderers"]["metal"] = "failed"; both["renderers"]["vulkan"] = "ready";
+        assert(!shaderprebuild::identity_matches(both, game, "metal"));
+        assert(shaderprebuild::identity_matches(both, game, "vulkan"));
+        json(shaderprebuild::root() / "active.json", active);
+    }
     // Selected external templates participate in identity; bundled changes do not.
     const auto externalTemplate = temporary / "external-template.bin";
     write(externalTemplate, "synthetic state fixture");
