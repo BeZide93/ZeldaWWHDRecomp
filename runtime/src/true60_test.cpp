@@ -362,6 +362,77 @@ bool dumping() {
     static const bool on = getenv("WWHD_ACTOR_DUMP") || getenv("WWHD_RNG_TRACE") || getenv("WWHD_MEM_DUMP") || getenv("WWHD_LINK_PRE") || getenv("WWHD_LINK_WARP");
     return on;
 }
+// WWHD_PROC_DIGEST=path (true 60 off; comparisons of two builds, e.g. tools/decomp_build/compare.py): after
+// every process execute one line: logic step, process id, profile name, size (process_profile_definition
+// +0x10), a 64-bit FNV-1a hash of the whole process, the execute function (actors), and for actors
+// (size >= fopAc_ac_c 0x3AC) the raw words of current.pos (+0x314).
+// WWHD_PROC_DIGEST_SKIP=NAME:OFF:LEN[:STRIDE:COUNT],... leaves bytes out of the hash (known run-to-run
+// noise, e.g. bytes the game never initialises), optionally repeated COUNT times STRIDE apart.
+static FILE* proc_digest_file() {
+    static FILE* f = getenv("WWHD_PROC_DIGEST") ? fopen(getenv("WWHD_PROC_DIGEST"), "w") : nullptr;
+    return f;
+}
+bool digesting() {
+    static const bool on = proc_digest_file() != nullptr;
+    return on;
+}
+void proc_digest(uint32_t proc) {
+    FILE* f = proc_digest_file();
+    if (!f) return;
+    static uint64_t last_step = 0;
+    uint64_t step = interp::logic_steps();
+    if (step != last_step) {
+        fflush(f);
+        last_step = step;
+    }
+    uint32_t prof = ld32(proc + 0x10), size = 0;
+    if (prof >= 0x10000000 && prof < 0x50000000) size = ld32(prof + 0x10);
+    if (size < 0x20 || size > 0x40000) size = 0x20;
+    struct Skip { int name; uint32_t off, len; };
+    static std::vector<Skip> skips = [] {
+        std::vector<Skip> v;
+        for (const char* e = getenv("WWHD_PROC_DIGEST_SKIP"); e && *e;) {
+            char* end;
+            int name = (int)strtol(e, &end, 16);
+            if (*end != ':') break;
+            uint32_t off = (uint32_t)strtoul(end + 1, &end, 16);
+            if (*end != ':') break;
+            uint32_t len = (uint32_t)strtoul(end + 1, &end, 16), stride = 0, count = 1;
+            if (*end == ':') {
+                stride = (uint32_t)strtoul(end + 1, &end, 16);
+                if (*end == ':') count = (uint32_t)strtoul(end + 1, &end, 16);
+            }
+            for (uint32_t j = 0; j < count; j++) v.push_back({name, off + j * stride, len});
+            if (*end != ',') break;
+            e = end + 1;
+        }
+        return v;
+    }();
+    int16_t pname = (int16_t)ld16(proc + 8);
+    uint64_t h = 0xcbf29ce484222325ull;
+    const uint8_t* p = mem::ptr(proc);
+    // mDoExt_3DlineMat0_c / 3DlineMat1_c inside the process (found by their vtable at +0x130): the byte
+    // at +0x142 / +0x182 is a draw-side double-buffer index, flipped by each draw (how many draws a logic
+    // step gets depends on real-time pacing): left out
+    std::vector<uint32_t> auto_skip;
+    for (uint32_t o = 0x130; o + 4 <= size; o += 4) {
+        uint32_t w = ld32(proc + o);
+        if (w == GD(0x10058DC0u)) auto_skip.push_back(o - 0x130 + 0x142);
+        else if (w == GD(0x10058DF0u)) auto_skip.push_back(o - 0x130 + 0x182);
+    }
+    for (uint32_t i = 0; i < size; i++) {
+        bool skip = false;
+        for (uint32_t a : auto_skip) skip |= i == a;
+        for (auto& k : skips) skip |= k.name == pname && i - k.off < k.len;
+        if (!skip) h = (h ^ p[i]) * 0x100000001b3ull;
+    }
+    uint32_t sub = size >= 0x3AC ? ld32(proc + 0xF0) : 0, exec = 0;
+    if (sub >= 0x10000000 && sub < 0x50000000) exec = ld32(sub + 8);
+    fprintf(f, "%llu %08X %04X %X %016llx %08X", (unsigned long long)step, ld32(proc + 4), ld16(proc + 8), size,
+            (unsigned long long)h, exec);
+    if (size >= 0x3AC) fprintf(f, " %08X %08X %08X", ld32(proc + 0x314), ld32(proc + 0x318), ld32(proc + 0x31C));
+    fputc('\n', f);
+}
 }  // namespace true60_test
 
 // WWHD_LIGHT_TRACE=path: point-light registrations (dKy_plight_set/priority_set/cut,

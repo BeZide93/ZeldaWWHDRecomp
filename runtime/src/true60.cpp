@@ -68,6 +68,8 @@ void after_execute(uint32_t proc, uint32_t fn, bool is_link, float dt);
 void before_execute_link(uint32_t proc);
 uint64_t origin_step();
 bool dumping();
+bool digesting();                  // WWHD_PROC_DIGEST (comparisons of two builds)
+void proc_digest(uint32_t proc);
 }
 namespace interp {
 bool hold_pass();          // interp.cpp: this is a half pass (no 30 Hz logic)
@@ -682,6 +684,7 @@ extern "C" void hook_025DF940(Cpu* c) {
         uint32_t fn = true60_test::dumping() ? actor_execute_fn(proc) : 0;
         if (fn == kDaPyExecute) true60_test::before_execute_link(proc);
         f_025DF940_orig(c);
+        if (true60_test::digesting()) true60_test::proc_digest(proc);
         if (fn) true60_test::after_execute(proc, fn, fn == kDaPyExecute, 1.0f);
         if (is_cam) trace_camera(proc, 1.0f);
         g_st.full++;
