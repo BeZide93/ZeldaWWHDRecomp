@@ -7,6 +7,11 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Vulkan: choose your graphics card** in Settings → Graphics (issue #135), e.g. on laptops with an
+  Intel and an NVIDIA GPU. The choice is remembered and applies after a restart; if the chosen card is
+  no longer available, the game picks a usable one and says so. `WWHD_VK_DEVICE` (an index or part of
+  the name) overrides it for one start.
+
 - **Fixed: the 60, 120 and 240 fps settings dropped to about 30–50 fps on PCs that can't quite draw
   60 frames a second** (issue #125). A frame that misses its display refresh is now shown as soon as
   it's ready instead of waiting a whole extra refresh, so you get close to what Uncapped shows (e.g.
