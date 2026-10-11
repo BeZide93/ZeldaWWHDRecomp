@@ -120,10 +120,45 @@ YAZ0_SUFFIX = ".dll" if os.name == "nt" else ".dylib" if sys.platform == "darwin
 PACKAGED_YAZ0 = os.path.join(HERE, "lib", "libyaz0" + YAZ0_SUFFIX)
 
 
+def android_library_dir(maps_path="/proc/self/maps"):
+    """Android: the app's nativeLibraryDir, where the APK's libyaz0.so is installed next to the
+    embedded libpython; None elsewhere or when it cannot be found."""
+    if not (sys.platform == "android" or hasattr(sys, "getandroidapilevel")):
+        return None
+    try:
+        with open(maps_path) as maps:
+            for line in maps:
+                path = line.split(None, 5)[-1].strip() if line.count(" ") >= 5 else ""
+                if os.path.basename(path).startswith("libpython") and path.endswith(".so"):
+                    return os.path.dirname(path)
+    except OSError:
+        pass
+    return None
+
+
+def yaz0_candidates(environ=None, android_dir=None):
+    """Prebuilt decoders to try, in order: WWHD_YAZ0_LIB (Android setup passes the APK's copy),
+    the app's nativeLibraryDir on Android, then a release package's tools/lib."""
+    environ = os.environ if environ is None else environ
+    found = []
+    if environ.get("WWHD_YAZ0_LIB"):
+        found.append(environ["WWHD_YAZ0_LIB"])
+    android_dir = android_library_dir() if android_dir is None else android_dir
+    if android_dir:
+        found.append(os.path.join(android_dir, "libyaz0.so"))
+    found.append(PACKAGED_YAZ0)
+    return [path for i, path in enumerate(found) if path not in found[:i] and os.path.isfile(path)]
+
+
 def _load_yaz0():
     source = os.path.join(HERE, "yaz0.c")
-    if os.path.isfile(PACKAGED_YAZ0) and not os.path.isfile(source):
-        return ctypes.CDLL(PACKAGED_YAZ0)
+    prebuilt = yaz0_candidates()
+    if prebuilt and (not os.path.isfile(source) or prebuilt[0] != PACKAGED_YAZ0):
+        for path in prebuilt:
+            try:
+                return ctypes.CDLL(path)
+            except OSError as error:
+                print("shaderprep: cannot load %s (%s)" % (path, error), file=sys.stderr)
     lib = os.path.join(ROOT, "build", "libyaz0" + YAZ0_SUFFIX)
     try:
         if not os.path.exists(lib) or os.path.getmtime(lib) < os.path.getmtime(source):
@@ -231,11 +266,13 @@ def default_jobs():
     return max(1, min(4, (os.cpu_count() or 2) - 2))
 
 
-def _scan_parallel(game, files, jobs, finished):
+def _scan_parallel(game, files, jobs, finished, threads=False):
     import concurrent.futures
     yaz0(b"")  # builds a source checkout's decoder once, before the workers load it
     results = [None] * len(files)
-    pool = concurrent.futures.ProcessPoolExecutor(jobs)
+    # Threads overlap only the native Yaz0 decoding and file reads (ctypes releases the GIL);
+    # used where processes cannot be started (Android's embedded Python).
+    pool = (concurrent.futures.ThreadPoolExecutor if threads else concurrent.futures.ProcessPoolExecutor)(jobs)
     try:
         # Largest first: the long Yaz0 archives do not end up alone at the end.
         order = sorted(range(len(files)), key=lambda i: -os.path.getsize(files[i]))
@@ -252,11 +289,12 @@ def _scan_parallel(game, files, jobs, finished):
     return results
 
 
-def game_shaders(game, progress=None, jobs=1):
+def game_shaders(game, progress=None, jobs=1, threads=False):
     """all distinct (type, microcode) -> (register words, container path)
 
     progress(done_bytes, total_bytes, done_files, total_files) follows the archive scan.
-    jobs > 1 scans archives in worker processes; the result (and its order) is the same.
+    jobs > 1 scans archives in worker processes (threads=True: threads); the result (and its
+    order) is the same.
     """
     files = archive_files(game)
     sizes = [os.path.getsize(f) for f in files]
@@ -273,7 +311,7 @@ def game_shaders(game, progress=None, jobs=1):
     if jobs > 1 and len(files) > 1:
         import concurrent.futures.process
         try:
-            results = _scan_parallel(game, files, jobs, finished)
+            results = _scan_parallel(game, files, jobs, finished, threads)
         except (OSError, ImportError, NotImplementedError, concurrent.futures.process.BrokenProcessPool) as error:
             print("shaderprep: parallel scan unavailable (%s); scanning serially" % error, file=sys.stderr)
             state["bytes"] = state["files"] = 0
@@ -468,7 +506,13 @@ def read_template(path, allow_legacy=False):
     with open(path,'rb') as source: data=source.read()
     if data.startswith(template_format.MAGIC):
         doc=template_format.decode(data)
-        return [(s['hash'],s['vertex'],s['fetch'],[tuple(r) for r in s['registers']],s.get('linked_vertex')) for s in doc['states']], [(5 if p['backend']=='vulkan' else REC_PIPELINE,p) for p in doc['pipelines']]
+        states=[]
+        for s in doc['states']:
+            # replace each state's JSON register lists as they are converted: the template holds
+            # millions of pairs, and two full copies at once cost ~1 GB (phones)
+            states.append((s['hash'],s['vertex'],s['fetch'],[tuple(r) for r in s['registers']],s.get('linked_vertex')))
+            s['registers']=None
+        return states, [(5 if p['backend']=='vulkan' else REC_PIPELINE,p) for p in doc['pipelines']]
     if not allow_legacy:
         raise ValueError('legacy template carries fetch bytes; convert locally with template --merge')
     return read_legacy_template(path)
@@ -551,9 +595,10 @@ def cmd_coverage(game, cache):
 SCAN_SHARE = 0.85
 
 
-def cmd_build(game, out, template, limit, with_pipelines=True, progress=None, jobs=1):
+def cmd_build(game, out, template, limit, with_pipelines=True, progress=None, jobs=1, threads=False):
     """progress(done, total, detail): done/total in thousandths, monotonic over the whole build.
-    jobs > 1 scans archives and compresses records in parallel; the output is byte-identical."""
+    jobs > 1 scans archives and compresses records in parallel; the output is byte-identical.
+    threads=True scans on threads instead of processes (embedded Python, e.g. Android)."""
     import threading
     def report(fraction, detail):
         if progress:
@@ -571,7 +616,8 @@ def cmd_build(game, out, template, limit, with_pipelines=True, progress=None, jo
         report(SCAN_SHARE * done_bytes / max(total_bytes, 1),
                "%s of %s game archives" % (format(done_files, ","), format(total_files, ",")))
     try:
-        shaders = game_shaders(game, scanned, jobs) if progress else game_shaders(game, jobs=jobs)
+        shaders = (game_shaders(game, scanned, jobs, threads) if progress else
+                   game_shaders(game, jobs=jobs, threads=threads))
     finally:
         reader.join()
     if "error" in loaded:

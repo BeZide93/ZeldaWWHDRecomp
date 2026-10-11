@@ -256,6 +256,15 @@ class ParallelBuild(unittest.TestCase):
             self.assertEqual(outputs[0],outputs[1])
             self.assertEqual([t for t,_ in prep.read_records(root/'headstart1')],[1]*20+[2])
 
+    def test_thread_scan_matches_serial(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=pathlib.Path(tmp);game,_=self.game(root)
+            serial=prep.game_shaders(str(game))
+            seen=[]
+            threaded=prep.game_shaders(str(game),lambda *a:seen.append(a),jobs=2,threads=True)
+            self.assertEqual(list(serial.items()),list(threaded.items()))
+            self.assertEqual(seen[-1][2],seen[-1][3])
+
     def test_fast_hash_matches_reference(self):
         def reference(code):
             h=0xCBF29CE484222325
@@ -277,5 +286,62 @@ class ParallelBuild(unittest.TestCase):
                 '--template',str(template),'--max','0','--progress','--jobs','2'],capture_output=True,text=True,check=True).stdout
             lines=[l for l in out.splitlines() if l.startswith('WWHD-PROGRESS ')]
             self.assertTrue(lines);self.assertTrue(lines[-1].startswith('WWHD-PROGRESS 1000 1000 '))
+
+
+class Yaz0Loader(unittest.TestCase):
+    def setUp(self):
+        temporary=tempfile.TemporaryDirectory();self.addCleanup(temporary.cleanup)
+        self.root=pathlib.Path(temporary.name)
+        self.explicit=self.root/'explicit/libyaz0.so';self.native=self.root/'native/libyaz0.so'
+        self.packaged=self.root/('package/tools/lib/libyaz0'+prep.YAZ0_SUFFIX)
+        for path in (self.explicit,self.native,self.packaged):
+            path.parent.mkdir(parents=True);path.write_bytes(b'synthetic library')
+
+    def candidates(self, environ, android_dir=''):
+        with patch.object(prep,'PACKAGED_YAZ0',str(self.packaged)):
+            return prep.yaz0_candidates(environ, android_dir)
+
+    def test_order_explicit_android_packaged(self):
+        self.assertEqual(self.candidates({'WWHD_YAZ0_LIB':str(self.explicit)},str(self.native.parent)),
+                         [str(self.explicit),str(self.native),str(self.packaged)])
+        self.assertEqual(self.candidates({}),[str(self.packaged)])
+        # missing files are skipped, duplicates collapse
+        self.assertEqual(self.candidates({'WWHD_YAZ0_LIB':str(self.root/'missing.so')},str(self.root/'none')),
+                         [str(self.packaged)])
+        self.assertEqual(self.candidates({'WWHD_YAZ0_LIB':str(self.native)},str(self.native.parent)),
+                         [str(self.native),str(self.packaged)])
+
+    def test_android_library_dir_from_process_maps(self):
+        maps=self.root/'maps'
+        maps.write_text('7000-8000 r-xp 00000000 fd:00 1 /system/lib64/libc.so\n'
+                        '7100-7200 r-xp 00000000 fd:00 2 /data/app/~~x==/org.wwhdrecomp.wwhd-y==/lib/arm64/libpython3.14.so\n'
+                        '7300-7400 rw-p 00000000 00:00 0\n')
+        with patch.object(prep.sys,'platform','android'):
+            self.assertEqual(prep.android_library_dir(str(maps)),'/data/app/~~x==/org.wwhdrecomp.wwhd-y==/lib/arm64')
+            self.assertIsNone(prep.android_library_dir(str(self.root/'no-maps')))
+        with patch.object(prep.sys,'platform','linux'):
+            if not hasattr(prep.sys,'getandroidapilevel'):
+                self.assertIsNone(prep.android_library_dir(str(maps)))
+
+    def test_prebuilt_preferred_then_next_then_source_build(self):
+        loaded=[]
+        def cdll(path):
+            loaded.append(path)
+            if path==str(self.explicit): raise OSError('wrong architecture')
+            return 'library:'+path
+        with patch.object(prep,'PACKAGED_YAZ0',str(self.packaged)), patch.object(prep.ctypes,'CDLL',side_effect=cdll), \
+                patch.dict(prep.os.environ,{'WWHD_YAZ0_LIB':str(self.explicit)}), \
+                patch.object(prep,'android_library_dir',return_value=str(self.native.parent)), \
+                patch('sys.stderr'):
+            self.assertEqual(prep._load_yaz0(),'library:'+str(self.native))
+        self.assertEqual(loaded,[str(self.explicit),str(self.native)])
+        # a source checkout with only the packaged copy builds its own decoder
+        with patch.object(prep,'PACKAGED_YAZ0',str(self.packaged)), \
+                patch.dict(prep.os.environ,{},clear=False), \
+                patch.object(prep,'android_library_dir',return_value=None), \
+                patch.object(prep,'yaz0_candidates',return_value=[str(self.packaged)]), \
+                patch.object(prep.os.path,'getmtime',return_value=0), \
+                patch.object(prep.ctypes,'CDLL',side_effect=lambda path:'library:'+path):
+            self.assertTrue(prep._load_yaz0().endswith('build/libyaz0'+prep.YAZ0_SUFFIX))
 
 if __name__=='__main__':unittest.main()

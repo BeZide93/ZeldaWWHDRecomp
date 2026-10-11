@@ -162,6 +162,9 @@ public class SetupService extends Service {
                 String kind = configuration.getJSONObject("input").getString("kind");
                 if (!kind.equals("folder")) configuration.put("extractor", AndroidExtractor.prepare(this));
                 String revision = EmbeddedPython.checksum(this, "python-source.zip", () -> checkPause(active));
+                // the APK's native Yaz0 decoder for shader preparation (shaderprep.py; android/build_native.sh)
+                File yaz0 = new File(getApplicationInfo().nativeLibraryDir, "libyaz0.so");
+                if (yaz0.isFile()) configuration.put("yaz0", yaz0.getAbsolutePath());
                 configuration.put("port_revision", revision).put("jobs", compileJobs())
                     .put("shader_cache_root", AndroidUserDirectories.shaderPrebuild(getExternalFilesDir(null)).getAbsolutePath());
                 SetupStore.write(new File(active, "job.json"), configuration);

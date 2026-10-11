@@ -20,7 +20,7 @@ def run(configuration):
         helper=str(package / 'tools/installer/shader_prebuild.py'),
         template=str(package / 'tools/shadercache/template.bin')))
     def build(game, output, template, progress=None):
-        shaderprep.cmd_build(str(game), str(output), str(template), 0, True, progress)
+        shaderprep.cmd_build(str(game), str(output), str(template), 0, True, progress, jobs=2, threads=True)
     result = helper.prepare(job['game'], package / 'tools/shadercache/template.bin', None,
         root, package, renderer='vulkan', builder=build, runtime_identity=job['library'],
         progress=lambda text, fraction=None: print('[shader preparation] ' + (
