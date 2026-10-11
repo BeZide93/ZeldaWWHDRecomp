@@ -131,7 +131,10 @@ input reaches the logic once per step.
 
 GX2's virtual vsync (gx2_core.cpp) ticks 2 or 4 times per 59.94 Hz vsync at 120/240 fps (quarter-
 vsync ticks rounded to the rate's granule; 30/60 fps keep the 59.94 Hz timing exactly), so the
-game's swap interval 2 becomes N+1 flips per step. The drawn rate is capped to what the display
+game's swap interval 2 becomes N+1 flips per step. A frame that is ready on time flips on its
+vsync; a late one flips as soon as it is ready instead of waiting for the next vsync, and a flip
+more than one 59.94 Hz vsync late moves the grid to it (`gx2/vsync_pacing.h`, issue #125: on the
+fixed grid a computer drawing 55 frames a second got 30 at 60 fps). The drawn rate is capped to what the display
 shows when presentation waits for its vsync (Metal, Vulkan FIFO): 240 fps on a 120 Hz display draws
 120, on a 60 Hz one 60 (`interp::output_fps`; the hosts report the refresh rate: NSScreen
 maximumFramesPerSecond, SDL's display mode, Android's Display, which the game asks for a faster
