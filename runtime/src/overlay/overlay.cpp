@@ -1888,7 +1888,7 @@ void tab_controls() {
     } else {
         status = "Select a button on the controller or a chip to rebind it. Changes are saved to controls.json.";
     }
-    const float bottom = ImGui::GetFrameHeightWithSpacing() * 2 + 4;
+    const float bottom = ImGui::GetFrameHeightWithSpacing() * 3 + 4;  // status, options, stick range
     const ImVec2 avail = ImGui::GetContentRegionAvail();
     const float h = std::max(160.0f, avail.y - bottom);
     U.hover_action = -1;
@@ -1965,6 +1965,22 @@ void tab_controls() {
     gyro_window(gyro_open);
     ImGui::SameLine(0, 24);
     if (ImGui::Button("Reset to defaults")) input_map::set_current(input_map::Mapping::defaults());
+    // issue #40: per-stick range, applied after the dead zone (live, saved with the controls)
+    float* ranges[2] = {&m.left_range, &m.right_range};
+    const char* const labels[2] = {"Left stick range", "Right stick range"};
+    for (int k = 0; k < 2; k++) {
+        if (k) ImGui::SameLine(0, 24);
+        float r = *ranges[k] * 100.0f;
+        ImGui::SetNextItemWidth(200);
+        if (ImGui::SliderFloat(labels[k], &r, input_map::kMinStickRange * 100.0f, input_map::kMaxStickRange * 100.0f, "%.0f%%")) {
+            *ranges[k] = std::clamp(std::round(r) / 100.0f, input_map::kMinStickRange, input_map::kMaxStickRange);
+            input_map::set_current(m);
+        }
+        help("Default: 100% (no change). Scales the stick after the dead zone so a short stick reaches full deflection.");
+    }
+    ImGui::SameLine(0, 24);
+    ImGui::AlignTextToFramePadding();
+    note("Raise if your stick can't reach full deflection, e.g. the Wind Waker baton's directions don't register.");
 }
 
 int saved_language() {

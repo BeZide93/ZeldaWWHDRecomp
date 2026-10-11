@@ -423,6 +423,80 @@ static void test_deadzone() {
     CHECK(std::fabs(controller_state(m, v).ry - 0.5f) < 1e-6);
 }
 
+// issue #40: per-stick range, applied radially after the dead zone
+static void test_stick_range() {
+    auto near = [](float a, float b) { return std::fabs(a - b) < 1e-5f; };
+    Mapping m = Mapping::defaults();
+    CHECK(m.left_range == 1.0f && m.right_range == 1.0f);
+    m.deadzone = 0;
+    float v[kPadCount] = {};
+    // default 1.0 is the identity
+    v[kPadRSDown] = 0.9f;
+    v[kPadLSRight] = 0.37f;
+    auto p = controller_state(m, v);
+    CHECK(p.ry == -0.9f && p.lx == 0.37f);
+    // a stick that stops at 0.9 reaches full deflection at 1.11, only on the stick that has it
+    m.right_range = 1.11f;  // 0.9 * 1.11 = 0.999: full deflection to the game's resolution
+    p = controller_state(m, v);
+    CHECK(std::fabs(p.ry + 1.0f) < 1.5e-3f && p.ry >= -1.0f);
+    CHECK(p.lx == 0.37f);
+    m.right_range = 1.12f;  // past 1/0.9 the result is exactly 1
+    CHECK(controller_state(m, v).ry == -1.0f);
+    // the magnitude is capped at 1
+    m.right_range = 1.5f;
+    v[kPadRSDown] = 1.0f;
+    CHECK(controller_state(m, v).ry == -1.0f);
+    v[kPadRSDown] = 0.5f;
+    CHECK(near(controller_state(m, v).ry, -0.75f));
+    // diagonal input keeps its angle and is capped radially, not per axis
+    v[kPadRSDown] = 0;
+    v[kPadLSUp] = 0.6f;
+    v[kPadLSRight] = 0.3f;
+    m.left_range = 1.5f;
+    p = controller_state(m, v);
+    CHECK(near(p.ly / p.lx, 2.0f));
+    CHECK(near(std::sqrt(p.lx * p.lx + p.ly * p.ly), 1.0f));
+    v[kPadLSUp] = 0.4f;  // length 0.5 -> 0.75, angle kept
+    p = controller_state(m, v);
+    CHECK(near(p.lx, 0.3f * 1.5f) && near(p.ly, 0.4f * 1.5f));
+    // dead zone first, then range: 0.6 with a 0.2 dead zone is 0.5, times 1.5 is 0.75
+    Mapping d = Mapping::defaults();
+    d.deadzone = 0.2f;
+    d.left_range = 1.5f;
+    float w[kPadCount] = {};
+    w[kPadLSRight] = 0.6f;
+    CHECK(near(controller_state(d, w).lx, 0.75f));
+    w[kPadLSRight] = 0.15f;  // inside the dead zone stays exactly neutral
+    CHECK(controller_state(d, w).lx == 0);
+    // out-of-range values in the struct are clamped when applied
+    d.deadzone = 0;
+    d.left_range = 3.0f;
+    w[kPadLSRight] = 0.5f;
+    CHECK(near(controller_state(d, w).lx, 0.75f));
+    d.left_range = 0.5f;
+    CHECK(controller_state(d, w).lx == 0.5f);
+    // save / load round trip, new keys next to the format marker
+    std::string err;
+    Mapping s = Mapping::defaults(), r;
+    s.left_range = 1.25f;
+    s.right_range = 1.11f;
+    std::string j = to_json(s);
+    CHECK(j.find("\"left_stick_range\": 1.25") != std::string::npos);
+    CHECK(j.find("\"right_stick_range\": 1.11") != std::string::npos);
+    CHECK(j.find("\"format\": 2") != std::string::npos);
+    CHECK(from_json(j, r, &err) && err.empty() && r == s);
+    // older files without the keys load at 1.0 (and the rest unchanged)
+    CHECK(from_json(R"({"options":{"format":2,"stick_deadzone":0.2,"invert_camera_y":true}})", r, &err));
+    CHECK(r.left_range == 1.0f && r.right_range == 1.0f && r.deadzone == 0.2f && r.invert_camera_y);
+    CHECK(from_json(R"({"options":{"stick_deadzone":0}})", r, &err));
+    CHECK(r.left_range == 1.0f && r.right_range == 1.0f && r.deadzone == 0.15f);
+    // out-of-range and wrongly typed values
+    CHECK(from_json(R"({"options":{"left_stick_range":7,"right_stick_range":0.2}})", r, &err));
+    CHECK(r.left_range == 1.5f && r.right_range == 1.0f);
+    CHECK(from_json(R"({"options":{"left_stick_range":-1,"right_stick_range":"big"}})", r, &err));
+    CHECK(r.left_range == 1.0f && r.right_range == 1.0f);
+}
+
 static void test_files() {
     std::string dir=(std::filesystem::temp_directory_path()/("input_map_test."+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()))).string();
     std::error_code ec;
@@ -495,6 +569,7 @@ int main() {
     test_json_roundtrip();
     test_json_partial_and_bad();
     test_deadzone();
+    test_stick_range();
     test_files();
     printf("input_map_test: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
