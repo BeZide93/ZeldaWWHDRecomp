@@ -2,6 +2,7 @@
 #include "gfx/shader_prebuild.h"
 #include <cassert>
 #include <chrono>
+#include <iostream>
 int main(int argc, char** argv) {
     if (argc == 3 && std::string(argv[1]) == "--measure-launch") {
         const auto active = shaderprebuild::read(shaderprebuild::root() / "active.json");
@@ -14,6 +15,15 @@ int main(int argc, char** argv) {
         }
         return 0;
     }
+    if (argc == 2 && std::string(argv[1]) == "--json-roundtrip") {
+        std::string input(std::istreambuf_iterator<char>(std::cin), {});
+        try {
+            const auto output = mods::json::dump(mods::json::parse(input));
+            return std::fwrite(output.data(), 1, output.size(), stdout) == output.size() ? 0 : 1;
+        } catch (const std::exception& error) {
+            std::fprintf(stderr, "JSON round-trip failed: %s\n", error.what()); return 1;
+        }
+    }
     // If startup unexpectedly spawns this test as its helper, leave evidence.
     if (argc > 1) {
         for (int i = 1; i + 1 < argc; ++i)
@@ -25,8 +35,14 @@ int main(int argc, char** argv) {
     }
     namespace fs = std::filesystem;
     using mods::json::Value;
-    const auto temporary = fs::temp_directory_path() / ("wwhd-prebuild-test-" +
+    const auto testRoot = fs::temp_directory_path() / ("wwhd-prebuild-test-" +
         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    auto temporary = testRoot;
+#ifndef _WIN32
+    // Literal backslashes on POSIX exercise Windows-style JSON paths in the
+    // entire activation/migration flow, rather than only a serializer fixture.
+    temporary /= R"(a\tmp\retry\vulkan\failed\100%shader)";
+#endif
 #ifdef _WIN32
     _putenv_s("WWHD_USER_DIR", temporary.string().c_str());
     _putenv_s("WWHD_HEADSTART", "");
@@ -332,13 +348,15 @@ int main(int argc, char** argv) {
     lease.release();
     lease.release(); // Deterministic and idempotent, before the destructor.
     shaderprebuild::cleanup_generations({});
+    if (fs::exists(leasedGeneration))
+        std::fprintf(stderr, "Released generation still exists: [%s]\n", leasedGeneration.string().c_str());
     assert(!fs::exists(leasedGeneration));
     std::error_code cleanupError;
-    fs::remove_all(temporary, cleanupError);
+    fs::remove_all(testRoot, cleanupError);
     if (cleanupError) {
-        std::fprintf(stderr, "Cleanup failed for [%s]: %s\n", temporary.string().c_str(), cleanupError.message().c_str());
+        std::fprintf(stderr, "Cleanup failed for [%s]: %s\n", testRoot.string().c_str(), cleanupError.message().c_str());
         std::error_code scanError;
-        for (fs::recursive_directory_iterator it(temporary, scanError), end; !scanError && it != end; it.increment(scanError)) {
+        for (fs::recursive_directory_iterator it(testRoot, scanError), end; !scanError && it != end; it.increment(scanError)) {
             std::error_code itemError;
             if (!it->is_regular_file(itemError)) continue;
             fs::remove(it->path(), itemError);

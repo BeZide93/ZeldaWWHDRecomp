@@ -346,11 +346,11 @@ inline void migrate_default_caches(const fs::path& configDirectory, const fs::pa
             try {
                 if (!copy_legacy_file(source, target, mode)) {
                     complete=false;
-                    std::fprintf(stderr,"[shader prebuild] Cannot migrate [%s] to [%s]\n", source.string().c_str(), target.string().c_str());
+                    std::fprintf(stderr,"[shader prebuild] Cannot migrate [%s] to [%s]\n", mods::json::quote(source.string()).c_str(), mods::json::quote(target.string()).c_str());
                 }
             } catch (const std::exception& e) {
                 complete=false;
-                std::fprintf(stderr,"[shader prebuild] Cannot migrate [%s] to [%s]: %s\n", source.string().c_str(), target.string().c_str(), e.what());
+                std::fprintf(stderr,"[shader prebuild] Cannot migrate [%s] to [%s]: %s\n", mods::json::quote(source.string()).c_str(), mods::json::quote(target.string()).c_str(), e.what());
             }
         };
         const auto old = configDirectory / "shadercache";
@@ -459,11 +459,14 @@ inline void cleanup_generations(const fs::path& selected) {
         if (file == INVALID_HANDLE_VALUE) continue;
         OVERLAPPED offset{};
         const bool available = LockFileEx(file, LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY, 0, 1, 0, &offset);
+        if (available) UnlockFileEx(file, 0, 1, 0, &offset);
+        // FILE_SHARE_DELETE allows marking a file for deletion, but Windows
+        // cannot remove its parent directory until the last handle closes.
+        CloseHandle(file);
         if (available) {
             fs::remove_all(dir, ec);
-            UnlockFileEx(file, 0, 1, 0, &offset);
+            if (ec) std::fprintf(stderr, "[shader prebuild] Cannot remove generation [%s]: %s\n", dir.string().c_str(), ec.message().c_str());
         }
-        CloseHandle(file);
 #else
         const int file = open((dir / "in-use.lock").c_str(), O_CREAT | O_RDWR, 0600);
         if (file < 0) continue;

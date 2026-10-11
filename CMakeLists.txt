@@ -652,6 +652,10 @@ add_test(NAME mod_cemu COMMAND mod_cemu_test)
 add_test(NAME portable_state COMMAND portable_state_test)
 # Verify the shipped EUR address tables without game code, plus the weak USA fallback.
 find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_Interpreter_FOUND AND NOT ANDROID)
+  add_test(NAME shader_json_interop COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_SOURCE_DIR}/tools/installer/test_shader_json_interop.py $<TARGET_FILE:shader_prebuild_test>)
+endif()
 if(Python3_Interpreter_FOUND)
   add_test(NAME build_coverage COMMAND "${Python3_EXECUTABLE}" -m unittest discover
     -s "${CMAKE_SOURCE_DIR}/tools/recomp" -p "test*.py")
