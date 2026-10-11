@@ -227,6 +227,9 @@ struct UIState {
 @property(strong) NSTextField* leftRangeValue;
 @property(strong) NSTextField* rightRangeValue;
 @property(strong) NSButton* invertY;
+@property(strong) NSPopUpButton* prompts;        // in-game button prompts (#143)
+@property(strong) NSPopUpButton* shoulderNames;
+@property(strong) NSButton* promptColours;
 @property(strong) NSTimer* timer;
 - (BOOL)handleKeyEvent:(NSEvent*)e;
 - (void)beginCapture:(int)a mode:(int)mode;
@@ -1003,7 +1006,7 @@ static NSTextField* label(NSString* s) {
     w.controls = self;
     w.delegate = self;
     w.releasedWhenClosed = NO;
-    w.contentMinSize = NSMakeSize(960, 570);
+    w.contentMinSize = NSMakeSize(960, 604);
     // remembered window frame (NSUserDefaults); not in portable mode, which keeps nothing outside its folder
     if (!getenv("WWHD_NO_HOST_INPUT") && !host::portable()) w.frameAutosaveName = @"WWHDControls2";  // test runs: always the default size
     self.window = w;
@@ -1090,12 +1093,46 @@ static NSTextField* label(NSString* s) {
     rh.textColor = NSColor.secondaryLabelColor;
     rh.lineBreakMode = NSLineBreakByTruncatingTail;
     [rh setContentCompressionResistancePriority:NSLayoutPriorityDefaultLow forOrientation:NSLayoutConstraintOrientationHorizontal];
-    for (NSView* v in @[which, fl, pi, pv, sep, st, reset, dzl, dz, dzv, inv, lrl, lr, lrv, rrl, rr, rrv, rh]) {
+    // in-game button prompts (#110, #143); the item tags are the Mapping enums
+    NSTextField* ppl = label(@"Button prompts:");
+    NSPopUpButton* pp = [[NSPopUpButton alloc] initWithFrame:NSZeroRect pullsDown:NO];
+    for (auto p : {Mapping::Prompts::kAuto, Mapping::Prompts::kOriginal, Mapping::Prompts::kXbox, Mapping::Prompts::kPlayStation}) {
+        NSString* t = [NSString stringWithUTF8String:prompts_label(p)];
+        [pp addItemWithTitle:[[t substringToIndex:1].uppercaseString stringByAppendingString:[t substringFromIndex:1]]];
+        pp.lastItem.tag = (NSInteger)p;
+    }
+    pp.target = self;
+    pp.action = @selector(promptsChanged:);
+    pp.toolTip = @"How the game's button icons look while the face buttons are by label. Automatic: PlayStation "
+                 @"shapes on a PlayStation controller, the Xbox colours and positions on any other. Original keeps "
+                 @"the game's look. By position always keeps the game's look: its prompts then already match the "
+                 @"buttons' positions.";
+    self.prompts = pp;
+    NSTextField* snl = label(@"Shoulder names:");
+    NSPopUpButton* sn = [[NSPopUpButton alloc] initWithFrame:NSZeroRect pullsDown:NO];
+    for (auto n : {Mapping::ShoulderNames::kAuto, Mapping::ShoulderNames::kNintendo, Mapping::ShoulderNames::kNumbered,
+                   Mapping::ShoulderNames::kXbox}) {
+        NSString* t = [NSString stringWithUTF8String:shoulder_names_label(n)];
+        [sn addItemWithTitle:n == Mapping::ShoulderNames::kAuto ? @"Automatic" : t];
+        sn.lastItem.tag = (NSInteger)n;
+    }
+    sn.target = self;
+    sn.action = @selector(promptsChanged:);
+    sn.toolTip = @"How prompts name the shoulder buttons and triggers. Automatic follows the button prompts: "
+                 @"LB / RB / LT / RT with the Xbox look, L1 / R1 / L2 / R2 with the PlayStation shapes, the game's "
+                 @"L / R / ZL / ZR otherwise. A fixed choice applies with any face buttons setting.";
+    self.shoulderNames = sn;
+    NSButton* pc = [NSButton checkboxWithTitle:@"Coloured face buttons" target:self action:@selector(promptsChanged:)];
+    pc.toolTip = @"Green A, red B, blue X and yellow Y in the Xbox look; coloured shapes in the PlayStation look. "
+                 @"Off: the game's white buttons (in the Xbox positions while the face buttons are by label).";
+    self.promptColours = pc;
+    for (NSView* v in @[which, fl, pi, pv, sep, st, reset, dzl, dz, dzv, inv, lrl, lr, lrv, rrl, rr, rrv, rh, ppl, pp, snl, sn, pc]) {
         v.translatesAutoresizingMaskIntoConstraints = NO;
         [root addSubview:v];
     }
 
-    NSDictionary* v = NSDictionaryOfVariableBindings(which, fl, pi, pv, sep, st, reset, dzl, dz, dzv, inv, lrl, lr, lrv, rrl, rr, rrv, rh);
+    NSDictionary* v = NSDictionaryOfVariableBindings(which, fl, pi, pv, sep, st, reset, dzl, dz, dzv, inv, lrl, lr, lrv, rrl, rr, rrv, rh,
+                                                     ppl, pp, snl, sn, pc);
     auto C = [&](NSString* f, NSLayoutFormatOptions o = 0) {
         [root addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:f options:o metrics:nil views:v]];
     };
@@ -1105,7 +1142,8 @@ static NSTextField* label(NSString* s) {
     C(@"H:|-16-[st]-16-|");
     C(@"H:|-16-[reset]-(>=24)-[dzl]-8-[dz(160)]-6-[dzv(40)]-24-[inv]-16-|", NSLayoutFormatAlignAllCenterY);
     C(@"H:|-16-[rh]-(>=24)-[lrl]-8-[lr(160)]-6-[lrv(40)]-24-[rrl]-8-[rr(160)]-6-[rrv(40)]-16-|", NSLayoutFormatAlignAllCenterY);
-    C(@"V:|-12-[which]-6-[pv(>=400)]-0-[sep]-8-[st]-8-[reset]-10-[lr]-14-|");
+    C(@"H:|-16-[ppl]-8-[pp]-24-[snl]-8-[sn]-24-[pc]-(>=16)-|", NSLayoutFormatAlignAllCenterY);
+    C(@"V:|-12-[which]-6-[pv(>=400)]-0-[sep]-8-[st]-8-[reset]-10-[lr]-10-[pp]-14-|");
     [w center];
     [self syncOptions];
     [self syncWhich];
@@ -1132,6 +1170,9 @@ static NSTextField* label(NSString* s) {
     self.rightRange.doubleValue = _st.m.right_range;
     self.leftRangeValue.stringValue = [NSString stringWithFormat:@"%.0f%%", _st.m.left_range * 100];
     self.rightRangeValue.stringValue = [NSString stringWithFormat:@"%.0f%%", _st.m.right_range * 100];
+    [self.prompts selectItemWithTag:(NSInteger)_st.m.prompts];
+    [self.shoulderNames selectItemWithTag:(NSInteger)_st.m.shoulder_names];
+    self.promptColours.state = _st.m.prompt_colours ? NSControlStateValueOn : NSControlStateValueOff;
     // kCustom: no segment chosen (as the overlay's "(custom)"); any segment then applies its preset.
     // Automatic is segment 2 whatever the bindings resolved to (as the overlay's "(-> ...)").
     if (_st.m.face_auto) self.faceLayout.selectedSegment = 2;
@@ -1482,6 +1523,14 @@ static bool modifier_down(uint16_t code, NSEventModifierFlags f, bool* known) {
     [self commit];
 }
 
+- (void)promptsChanged:(id)sender {
+    // the in-game button prompts; they follow on the next frame (button_glyphs.cpp)
+    _st.m.prompts = (Mapping::Prompts)self.prompts.selectedTag;
+    _st.m.shoulder_names = (Mapping::ShoulderNames)self.shoulderNames.selectedTag;
+    _st.m.prompt_colours = self.promptColours.state == NSControlStateValueOn;
+    [self commit];
+}
+
 - (void)whichChanged:(NSSegmentedControl*)c {
     bool pro = c.selectedSegment == 1;
     // the same as Input > Wii U GamePad / Pro Controller
@@ -1632,6 +1681,13 @@ static void self_test() {
     c.rightRange.doubleValue = 1.111;
     [c rangeChanged:c.rightRange];
     expect(current().right_range == 1.11f && current().left_range == 1.0f, "right stick range = 111%");
+    [c.prompts selectItemWithTag:(NSInteger)Mapping::Prompts::kPlayStation];
+    [c.shoulderNames selectItemWithTag:(NSInteger)Mapping::ShoulderNames::kXbox];
+    c.promptColours.state = NSControlStateValueOff;
+    [c promptsChanged:c.prompts];
+    expect(current().prompts == Mapping::Prompts::kPlayStation && current().shoulder_names == Mapping::ShoulderNames::kXbox &&
+               !current().prompt_colours,
+           "button prompts: PlayStation, LB/RB/LT/RT, no colours");
     // 9. the file on disk follows
     Mapping disk;
     expect(load_file(default_path(), disk) && disk == current(), "controls.json matches the live mapping");

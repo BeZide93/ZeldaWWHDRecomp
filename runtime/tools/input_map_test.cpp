@@ -249,6 +249,95 @@ static void test_face_auto() {
     std::filesystem::remove_all(dir, ec);
 }
 
+// In-game button prompts (#143): the resolved style and the controls.json round trip
+static void test_prompts() {
+    using FL = FaceLabel;
+    const FL xbox[4] = {FL::kA, FL::kB, FL::kX, FL::kY};
+    const FL ps[4] = {FL::kCross, FL::kCircle, FL::kSquare, FL::kTriangle};
+    const FL nintendo[4] = {FL::kB, FL::kA, FL::kY, FL::kX};
+    const FL none[4] = {FL::kUnknown, FL::kUnknown, FL::kUnknown, FL::kUnknown};
+    CHECK(pad_family_from_labels(xbox) == PadFamily::kXbox);
+    CHECK(pad_family_from_labels(ps) == PadFamily::kPlayStation);
+    CHECK(pad_family_from_labels(nintendo) == PadFamily::kNintendo);
+    CHECK(pad_family_from_labels(none) == PadFamily::kUnknown);
+
+    Mapping m = Mapping::defaults();
+    CHECK(m.prompts == Mapping::Prompts::kAuto && m.shoulder_names == Mapping::ShoulderNames::kAuto && m.prompt_colours);
+    // by position: the game's own prompts, whatever the pad
+    for (PadFamily f : {PadFamily::kUnknown, PadFamily::kXbox, PadFamily::kPlayStation, PadFamily::kNintendo}) {
+        const PromptStyle s = prompt_style(m, f);
+        CHECK(!s.active() && !s.positions && !s.colours);
+    }
+    // by label, automatic: Xbox look (LB/RB/LT/RT) unless the pad is a PlayStation one (L1/R1/L2/R2)
+    apply_face_layout(m, FaceLayout::kLabels);
+    PromptStyle s = prompt_style(m, PadFamily::kXbox);
+    CHECK(s.face == FaceStyle::kXbox && s.colours && s.positions && s.shoulders == ShoulderStyle::kXbox);
+    CHECK(prompt_style(m, PadFamily::kUnknown) == s);
+    CHECK(prompt_style(m, PadFamily::kNintendo) == s);
+    s = prompt_style(m, PadFamily::kPlayStation);
+    CHECK(s.face == FaceStyle::kPlayStation && s.colours && s.positions && s.shoulders == ShoulderStyle::kNumbered);
+    // white buttons at the Xbox positions (#143 a)
+    m.prompt_colours = false;
+    s = prompt_style(m, PadFamily::kXbox);
+    CHECK(s.face == FaceStyle::kXbox && !s.colours && s.positions);
+    m.prompt_colours = true;
+    // fixed choices
+    m.prompts = Mapping::Prompts::kPlayStation;
+    CHECK(prompt_style(m, PadFamily::kXbox).face == FaceStyle::kPlayStation);
+    m.prompts = Mapping::Prompts::kXbox;
+    CHECK(prompt_style(m, PadFamily::kPlayStation).face == FaceStyle::kXbox);
+    m.prompts = Mapping::Prompts::kOriginal;
+    s = prompt_style(m, PadFamily::kXbox);
+    CHECK(!s.active() && !s.positions && !s.colours);
+    m.shoulder_names = Mapping::ShoulderNames::kNumbered;  // today's R1/R2 names, kept on request
+    CHECK(prompt_style(m, PadFamily::kXbox).shoulders == ShoulderStyle::kNumbered);
+    m.shoulder_names = Mapping::ShoulderNames::kNintendo;
+    m.prompts = Mapping::Prompts::kAuto;
+    CHECK(prompt_style(m, PadFamily::kXbox).shoulders == ShoulderStyle::kOriginal);
+    // a fixed shoulder choice also applies by position (the shoulder bindings do not move)
+    apply_face_layout(m, FaceLayout::kPosition);
+    m.shoulder_names = Mapping::ShoulderNames::kXbox;
+    s = prompt_style(m, PadFamily::kXbox);
+    CHECK(s.face == FaceStyle::kOriginal && !s.positions && s.shoulders == ShoulderStyle::kXbox && s.active());
+    // custom face bindings: the game's face prompts
+    apply_face_layout(m, FaceLayout::kLabels);
+    m.pad[kX] = kPadLB;
+    CHECK(prompt_style(m, PadFamily::kXbox).face == FaceStyle::kOriginal);
+
+    // controls.json: defaults are not written; every choice comes back
+    const Mapping d = Mapping::defaults();
+    const std::string plain = to_json(d);
+    CHECK(plain.find("button_prompts") == std::string::npos && plain.find("shoulder_names") == std::string::npos &&
+          plain.find("button_colours") == std::string::npos);
+    for (auto p : {Mapping::Prompts::kAuto, Mapping::Prompts::kOriginal, Mapping::Prompts::kXbox, Mapping::Prompts::kPlayStation})
+        for (auto n : {Mapping::ShoulderNames::kAuto, Mapping::ShoulderNames::kNintendo, Mapping::ShoulderNames::kNumbered,
+                       Mapping::ShoulderNames::kXbox})
+            for (bool c : {true, false}) {
+                Mapping w = d, r;
+                w.prompts = p;
+                w.shoulder_names = n;
+                w.prompt_colours = c;
+                std::string err;
+                CHECK(from_json(to_json(w), r, &err) && err.empty() && r == w);
+            }
+    Mapping r;
+    std::string err;
+    CHECK(from_json("{\"options\": {\"button_prompts\": \"sega\", \"shoulder_names\": 3}}", r, &err));
+    CHECK(r.prompts == Mapping::Prompts::kAuto && r.shoulder_names == Mapping::ShoulderNames::kAuto);
+    CHECK(err.find("button_prompts") != std::string::npos);
+
+    // a new pad family is a new generation: the prompts follow the pad that was plugged in
+    note_face_labels(xbox);
+    const uint32_t g = generation();
+    note_face_labels(ps);
+    CHECK(pad_family() == PadFamily::kPlayStation && generation() != g);
+    const uint32_t g2 = generation();
+    note_face_labels(none);  // unplugged: the last family stands
+    CHECK(pad_family() == PadFamily::kPlayStation && generation() == g2);
+    note_face_labels(xbox);
+    CHECK(pad_family() == PadFamily::kXbox);
+}
+
 static void test_face_label_text() {
     using FL = FaceLabel;
     // the SF Symbol names GameController reports: the name first, the decoration after a dot.
@@ -561,6 +650,7 @@ int main() {
     test_defaults();
     test_face_layout();
     test_face_auto();
+    test_prompts();
     test_touch_face();
     test_face_label_text();
     test_names();

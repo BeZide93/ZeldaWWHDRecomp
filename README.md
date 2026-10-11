@@ -1,7 +1,8 @@
 # The Legend of Zelda: The Wind Waker HD — native port (macOS, Linux, Windows, Android)
 
 A static recompilation of the Wii U version (USA or European) that runs natively on **macOS** (Apple Silicon),
-**Linux**, **Windows** and **Android** (arm64; [build it yourself](#android-build-it-yourself)). The
+**Linux**, **Windows** and **Android** (arm64; the setup app builds the game on the phone, see
+[Android](#android-build-it-yourself)). The
 game's PowerPC code is translated to C ahead of time, the Cafe OS libraries the game uses are
 reimplemented natively, and GX2 graphics are implemented directly on Metal (macOS) or Vulkan (all
 platforms), with no Cemu runtime and no GPU command emulation.
@@ -138,7 +139,7 @@ The setup also runs in a terminal (the fallback): `tools/Setup in Terminal.comma
 and the interface between the window and `tools/installer/setup.py`:
 [tools/installer/README.md](tools/installer/README.md). Scripted use: `tools/installer/setup.py --help`.
 
-Source builds (below) and the Linux AppImage are not portable: they keep using the per-user folders
+Source builds (below) and the Linux AppImage (without a `.data` folder) are not portable: they keep using the per-user folders
 (`~/Library/Application Support/wwhd`, `%LOCALAPPDATA%\WWHD` for the game and saves,
 `~/.config/wwhd` for the settings on Linux), as before.
 
@@ -210,9 +211,6 @@ cmake -S . -B build/linux -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER
   -DCMAKE_EXE_LINKER_FLAGS="--unwindlib=libgcc"
 ```
 
-Closing the TV window ends the game; closing the GamePad window only hides it. F11 or Alt+Enter toggles
-full screen for the focused window.
-
 On Arch-based systems (Arch, CachyOS, Manjaro):
 
 ```sh
@@ -231,8 +229,10 @@ remembered in `settings.ini` and the next start begins the same way. Clicking/dr
 touch screen. The GamePad screen has the macOS modes (settings overlay, *Display*): a separate
 window, a picture-in-picture overlay in a corner of the TV window (corner, size and opacity
 selectable; click it to touch), the automatic overlay, off, or the GamePad picture alone in the TV
-window (click it to touch); **Ctrl+G** shows/hides it, and the choices are saved in `settings.ini`. The macOS menus (Graphics, Display, Input, Save States) don't exist in these builds
-yet; their settings are available as environment variables (below) and the number-key shortcuts.
+window (click it to touch); **Ctrl+G** shows/hides it, and the choices are saved in `settings.ini`. Closing the TV window ends the
+game; closing the GamePad window only hides it. These builds have no menu bar: the macOS menus'
+options (Graphics, Display, Input, Save States) are in the settings overlay (**F1**, see Playing),
+plus the number-key shortcuts and the environment variables below.
 
 Settings, controls and save states live under `~/.config/wwhd` (or `$XDG_CONFIG_HOME/wwhd`).
 To check the build without the game, `python3 tools/recomp/stubgen.py build/gen-stub` writes
@@ -500,7 +500,7 @@ B right, X left, Y top. In-game shoulder prompts use R1/R2 for R/ZR and L1/L2 fo
 The **Input** menu switches whether keyboard and controllers act as the Wii U GamePad (default)
 or as a Wii U Pro Controller (`WWHD_PRO_CONTROLLER=1` starts in that mode); with the Pro
 Controller, the GamePad window keeps its screen and touch input.
-When the game asks for text (e.g. your name), a macOS text field opens.
+When the game asks for text (e.g. your name), the text window described above opens.
 
 Rumble works too (SDL hosts): what the game asks its controller's motor to do is passed to the
 connected controllers that have one, which includes the Pro Controller's. A host controller has a
@@ -652,13 +652,13 @@ README. `build/names.tsv` is derived from the game and stays on your machine.
 
 ## Status
 
-The opening of the game (title, file select, intro, Outset Island) is tested and matches Cemu
-side by side, at a steady 30 fps (the console's frame rate) and at 60 fps with interpolation;
-true 60 is experimental. Known gaps: geometry shaders and rectangle
-primitives are not implemented yet (not encountered so far), shadow edges are harder than on
-the console, startup sometimes sits on a black screen for up to a minute before the logo
-(a timing-dependent wait during audio initialization, under investigation), and later parts of
-the game are untested.
+The game is playable from start to finish (players have completed it) on macOS, Windows, Linux
+and Android, and bugs are fixed as they are reported (see the [changelog](CHANGELOG.md) and the
+[issues](https://github.com/ZeldaWWHDRecomp/ZeldaWWHDRecomp/issues)). Rendering is compared with
+Cemu side by side. It runs at the console's 30 fps or, with frame interpolation, at 60, 120 or
+240 fps (up to the display's refresh rate); true 60 fps is experimental. Known gaps: geometry
+shaders and rectangle primitives are not implemented yet (not encountered in the game so far),
+and the macOS app does not drive controller rumble yet.
 
 ## License
 
