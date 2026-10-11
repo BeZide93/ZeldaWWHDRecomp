@@ -2210,13 +2210,19 @@ void draw(const uint32_t *r, uint32_t prim, uint32_t count, uint32_t indexType,
   }
   uint32_t tl = r[REGADDR::PA_SC_GENERIC_SCISSOR_TL],
            br = r[REGADDR::PA_SC_GENERIC_SCISSOR_BR];
-  auto clamp = [](uint32_t v, float k, uint32_t limit) {
-    return uint32_t(std::clamp(double(v) * k, 0.0, double(limit)));
+  // As the Metal renderer: the scaled edges are rounded with a tolerance, not truncated. 720 * (1200/720)
+  // is just below 1200 in float (16:10 at 1.5x and 3x), which left the bottom row of every full-screen
+  // pass undrawn, and its stale contents spread through the shadow mask's softening.
+  auto lo = [](uint32_t v, float k, uint32_t limit) {
+    return uint32_t(std::clamp(std::floor(double(v) * k + 0.01), 0.0, double(limit)));
   };
-  uint32_t x = clamp(tl & 0x7fff, sx, width),
-           y = clamp((tl >> 16) & 0x7fff, sy, height),
-           ex = clamp(br & 0x7fff, sx, width),
-           ey = clamp((br >> 16) & 0x7fff, sy, height);
+  auto hi = [](uint32_t v, float k, uint32_t limit) {
+    return uint32_t(std::clamp(std::ceil(double(v) * k - 0.01), 0.0, double(limit)));
+  };
+  uint32_t x = lo(tl & 0x7fff, sx, width),
+           y = lo((tl >> 16) & 0x7fff, sy, height),
+           ex = hi(br & 0x7fff, sx, width),
+           ey = hi((br >> 16) & 0x7fff, sy, height);
   float ax, ay;
   if (aspect::content_clip() && target_aspect_factors(r[mmCB_COLOR0_TILE] & 0xFFFF, r[mmCB_COLOR0_FRAG], ax, ay))
     aspect::panes::clip(width, height, ax, ay, x, y, ex, ey);
