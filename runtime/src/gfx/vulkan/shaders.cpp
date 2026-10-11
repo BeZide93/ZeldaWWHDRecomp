@@ -621,7 +621,8 @@ bool decompile(Shader& shader, const uint32_t* regs, bool vertex, LatteFetchShad
         options.legacyGraphicPackUniforms=!vertex&&mods::cemu::legacy_pixel_uniforms(packBase);
     }
     const uint64_t decompilerBase=mods::cemu::has_shaders()?packBase:base;
-    if (!vertex) options.areaSampledTextures = ::gfx::area_sample::units_for_pixel_shader(program, size);
+    const auto fixes = vertex ? ::gfx::area_sample::Program{} : ::gfx::area_sample::pixel_program(program, size);
+    options.areaSampledTextures = fixes.units;
     LatteDecompilerOutput_t output{};
     if (vertex) LatteDecompiler_DecompileVertexShader(decompilerBase, const_cast<uint32_t*>(regs),
         program, size, fetch, options, &output);
@@ -646,8 +647,8 @@ bool decompile(Shader& shader, const uint32_t* regs, bool vertex, LatteFetchShad
     shader.descriptorRanks = make_descriptor_rank_plan(shader.mapping, *shader.dec);
     shader.uniforms = output.uniformOffsetsVK;
     shader.glsl = shader.dec->strBuf_shaderSource->c_str();
-    if (options.areaSampledTextures && ::gfx::area_sample::rewrite(shader.glsl, options.areaSampledTextures, false) <= 0)
-        fprintf(stderr, "[vulkan] pixel shader %08X: area-sampled taps not applied\n", address);
+    if (options.areaSampledTextures && ::gfx::area_sample::rewrite(shader.glsl, fixes, false) <= 0)
+        fprintf(stderr, "[vulkan] pixel shader %08X: upscaling fix not applied\n", address);
     if (vertex) {
         // Depth-only and shaded variants must rasterize identical positions.
         // Match Metal's [[invariant]] position output for multipass depth tests.
