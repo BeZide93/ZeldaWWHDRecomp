@@ -106,11 +106,14 @@ static void family_letters(GCController* c, input_map::FaceLabel out[4]) {
     NSString* who = [NSString stringWithFormat:@"%@ %@", c.vendorName ?: @"", c.productCategory ?: @""].lowercaseString;
     BOOL nintendo = [who containsString:@"nintendo"] || [who containsString:@"switch"] || [who containsString:@"joy-con"] ||
                     [who containsString:@"joycon"] || [who containsString:@"wii"];
-    BOOL xboxish = [who containsString:@"xbox"] || [who containsString:@"microsoft"] || [who containsString:@"sony"] ||
-                   [who containsString:@"dualsense"] || [who containsString:@"dualshock"] || [who containsString:@"playstation"] ||
+    BOOL playstation = [who containsString:@"sony"] || [who containsString:@"dualsense"] ||
+                       [who containsString:@"dualshock"] || [who containsString:@"playstation"];
+    BOOL xboxish = [who containsString:@"xbox"] || [who containsString:@"microsoft"] ||
                    [who containsString:@"steam"] || [who containsString:@"stadia"] || [who containsString:@"luna"];
     if (nintendo) {
         out[0] = FL::kB; out[1] = FL::kA; out[2] = FL::kY; out[3] = FL::kX;  // south, east, west, north
+    } else if (playstation) {  // the Xbox letters' places; the in-game prompts show the shapes (#143)
+        out[0] = FL::kCross; out[1] = FL::kCircle; out[2] = FL::kSquare; out[3] = FL::kTriangle;
     } else if (xboxish) {
         out[0] = FL::kA; out[1] = FL::kB; out[2] = FL::kX; out[3] = FL::kY;
     }

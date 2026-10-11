@@ -38,17 +38,33 @@ extern "C" void f_028F8250_orig(Cpu*) {}
 namespace {
 constexpr uint32_t base = 0x15000000, writer = base, list = base + 0x100, picture = base + 0x1000, text_box = base + 0x2000;
 constexpr uint32_t first_quad = list + 0xA4;
+constexpr uint32_t kArena = 0x100000;  // synthetic guest memory, including the 512 KiB button atlas
 constexpr std::array<uint32_t, 2> authored = {0xFFFFFFFF, 0xB0804042};
 constexpr std::array<uint32_t, 4> corners = {0xFFFFFFFF, 0x80A0C042, 0x00000000, 0xFFFFFF80};
 uint32_t printed_character;
-bool expect_xbox;
+bool expect_xbox;      // Xbox positions (the HUD cluster moves)
+bool expect_tint;      // Xbox colours on face icons and pictures
+int expect_names = 0;  // shoulder labels: 0 stock, 1 L1/R1/L2/R2, 2 LB/RB/LT/RT
+int expect_shapes = -1;  // PlayStation shapes: -1 none, 0 without colours, 1 coloured
+bool hud_letter = false;  // the text box under test is a HUD face letter (T_A_00 on P_A_00)
+std::array<float, 4> drawn_quad{};  // the first quad's size and position as vertex generation saw it
+uint32_t drawn_sheet = 0;
+// Mirror the production style from the live mapping (input_map::prompt_style, tested on its own
+// in input_map_test); the hooks must draw exactly that.
+void expect_current() {
+    const auto look = input_map::prompt_style(input_map::current(), input_map::pad_family());
+    expect_xbox = look.positions;
+    expect_tint = look.face == input_map::FaceStyle::kXbox && look.colours;
+    expect_names = (int)look.shoulders;
+    expect_shapes = look.face == input_map::FaceStyle::kPlayStation ? (look.colours ? 1 : 0) : -1;
+}
 int picture_face;
 unsigned prints = 0, text_draws = 0, picture_draws = 0;
 uint32_t atlas = 0;
 bool expect_frame = true;
 bool font_available = true;
 float label_centre = 0;
-std::array<uint32_t,4> font_records{};
+std::array<uint32_t,6> font_records{};
 unsigned font_queries = 0;
 void layout(input_map::FaceLayout choice);
 
@@ -246,7 +262,8 @@ void layout(input_map::FaceLayout choice) {
     input_map::apply_face_layout(mapping, choice);
     if (choice == input_map::FaceLayout::kCustom) mapping.pad[input_map::kX] = input_map::kPadLB;
     input_map::set_current(mapping, false);
-    expect_xbox = choice == input_map::FaceLayout::kLabels;
+    expect_current();
+    assert(expect_xbox == (choice == input_map::FaceLayout::kLabels));
 }
 
 void print(uint32_t code) {
@@ -305,9 +322,9 @@ void shoulders_test() {
     const uint32_t image = ld32(atlas + 0x10 + 0x24);
     // Lettering comes from the queried font masks, including partial edge coverage. Changing
     // those masks changes the composed result: no hard-coded lettering or fallback bitmap.
-    assert(font_queries == 4);
-    const auto composed = button_glyphs::shoulder_font_atlas(font_records);
-    assert(composed.size() == 128*256*4);
+    assert(font_queries == 6);
+    const auto composed = button_glyphs::button_atlas(font_records);
+    assert(composed.size() == button_glyphs::kAtlasWidth*button_glyphs::kAtlasHeight*4);
     assert(!std::memcmp(composed.data(),mem::ptr(image),composed.size()));
     bool antialias = false;
     for (uint32_t y = 0; y < 256; y++) for (uint32_t x = 64; x < 128; x++) {
@@ -318,7 +335,7 @@ void shoulders_test() {
     const uint32_t pixel = base + 0x5000 + 8192 + 23*256;
     const uint8_t coverage = ld8(pixel);
     st8(pixel,coverage/2);
-    assert(button_glyphs::shoulder_font_atlas(font_records) != composed);
+    assert(button_glyphs::button_atlas(font_records) != composed);
     st8(pixel,coverage);
     auto image_data = std::vector<uint8_t>(16384);
     std::memcpy(image_data.data(),mem::ptr(base+0x5000),image_data.size());
@@ -327,7 +344,7 @@ void shoulders_test() {
     // with neither a horizontal mirror nor a reversal of the letter/digit order.
     for (uint32_t glyph = 0; glyph < 4; glyph++) for (uint32_t y = 0; y < 9; y++) for (uint32_t x = 0; x < 6; x++)
         st8(base+0x5000+8192+(23+y)*256+glyph*8+x,20+x*20+y*12);
-    const auto oriented = button_glyphs::shoulder_font_atlas(font_records);
+    const auto oriented = button_glyphs::button_atlas(font_records);
     assert(oriented.size() == composed.size());
     auto alpha_at = [&](uint32_t x, uint32_t y) { return oriented[((192+y)*128+64+x)*4+3]; };
     assert(alpha_at(8,10) > alpha_at(8,52));  // top samples high native Y
@@ -338,7 +355,7 @@ void shoulders_test() {
     st32(base+0xD010+4,16); st32(base+0xD010+0x14,2); st32(base+0xD010+0x84,0x00010203);
     for (uint32_t y = 0; y < 32; y++) for (uint32_t x = 0; x < 16; x++)
         st8(base+0x5000+8192+y*256+x,(image_data[8192+y*256+x*2]&0xF0)|(image_data[8192+y*256+x*2+1]>>4));
-    assert(!button_glyphs::shoulder_font_atlas(font_records).empty());
+    assert(!button_glyphs::button_atlas(font_records).empty());
     // The real CKingMain HUD font uses BC4, not an uncompressed alpha bitmap. Exercise
     // compressed blocks, interpolated alpha and a nonzero font page at the same seam.
     st32(base+0xD010+4,32); st32(base+0xD010+0x14,0x34);
@@ -350,7 +367,7 @@ void shoulders_test() {
         for (uint32_t pixel = 0; pixel < 16; pixel++) indices |= uint64_t((pixel+block)%8) << (pixel*3);
         for (uint32_t byte = 0; byte < 6; byte++) st8(address+2+byte,indices>>(byte*8));
     }
-    const auto bc4 = button_glyphs::shoulder_font_atlas(font_records);
+    const auto bc4 = button_glyphs::button_atlas(font_records);
     assert(bc4.size() == composed.size());
     bool bc4_edges = false;
     for (uint32_t y = 0; y < 256; y++) for (uint32_t x = 64; x < 128; x++)
@@ -396,7 +413,7 @@ void shoulders_test() {
             button_glyphs::draw_text_box(&c, textbox_draw);
             assert(c.r[3] == 0xC005);
             assert(ld16(list + 4) == count);
-            assert(ld32(list + 0x0C) == (expect_xbox ? 4 : count*4));
+            assert(ld32(list + 0x0C) == (expect_names ? 4 : count*4));
             assert(ld32(text_box + 0xA4) == base + 0xB000 && ld16(text_box + 0xCE) == count);
             for (uint32_t i = 0; i < count*0x30; i++)
                 if (i % 0x30 != 0x2F) assert(ld8(first_quad + i) == quads[i]);
@@ -478,7 +495,8 @@ void automatic_test() {
     assert(mapping.face_auto);
     assert(input_map::face_layout(mapping) == input_map::FaceLayout::kLabels);
     input_map::set_current(mapping, false);
-    expect_xbox = true;
+    expect_current();
+    assert(expect_xbox && expect_tint);
     st16(list + 4, 0); st8(list + 6, 0);
     print(0xE000);
     assert(button_glyphs::marked_face(ld8(first_quad + 0x2F)) == 0);
@@ -499,7 +517,8 @@ void automatic_test() {
     input_map::set_face_auto(stock, true);
     assert(input_map::face_layout(stock) == input_map::FaceLayout::kPosition);
     input_map::set_current(stock, false);
-    expect_xbox = false;
+    expect_current();
+    assert(!expect_xbox && !expect_tint);
     std::strcpy((char*)mem::ptr(picture + 0x80), "P_A_00");
     picture_face = 0;
     for (uint32_t i = 0; i < 4; i++) st32(picture + 0xA8 + i * 4, corners[i]);
@@ -513,6 +532,200 @@ void automatic_test() {
     layout(input_map::FaceLayout::kPosition);  // leave the manual default for later tests
 }
 
+// #143: the prompt options. Each applies to text that is already cached (no new Print calls),
+// a change between two restyled looks rebuilds each text once, and an unchanged look reuses it.
+void set_options(input_map::FaceLayout face, input_map::Mapping::Prompts prompts, input_map::Mapping::ShoulderNames names,
+                 bool colours) {
+    auto mapping = input_map::Mapping::defaults();
+    input_map::apply_face_layout(mapping, face);
+    mapping.prompts = prompts;
+    mapping.shoulder_names = names;
+    mapping.prompt_colours = colours;
+    input_map::set_current(mapping, false);
+    expect_current();
+}
+
+void dialog_draw_counts_once() {
+    const unsigned before = prints, draws = text_draws;
+    draw();
+    assert(prints == before && text_draws == draws + 1);
+    draw();  // the next frame reuses the vertices
+    assert(text_draws == draws + 1);
+}
+
+void options_test() {
+    using P = input_map::Mapping::Prompts;
+    using N = input_map::Mapping::ShoulderNames;
+    using F = input_map::FaceLayout;
+    // A dialog with the four face icons and the four shoulder icons, cached once.
+    st32(writer + 0x2C, list); st32(text_box + 0xFC, list); st32(list, 8);
+    std::memset(mem::ptr(text_box + 0x80), 0, 24);
+    st32(text_box + 0x0C, 0);
+    set_options(F::kLabels, P::kAuto, N::kAuto, true);
+    st16(list + 4, 0); st8(list + 6, 0);
+    for (uint32_t face = 0; face < 4; face++) print(0xE000 + face);
+    for (uint32_t shoulder = 0; shoulder < 4; shoulder++) print(0xE083 + shoulder);
+    draw();
+    assert(expect_tint && expect_names == 2 && expect_shapes < 0);
+
+    // a) white face buttons at the Xbox positions: no tint on icons or pictures, cluster still moves
+    calculate(true);
+    const Point moved = position(face_panes[0]);
+    set_options(F::kLabels, P::kAuto, N::kAuto, false);
+    assert(expect_xbox && !expect_tint && expect_names == 2);
+    dialog_draw_counts_once();
+    calculate(true);
+    same_point(position(face_panes[0]), moved);
+    std::memset(mem::ptr(picture), 0, 0xC0);
+    std::strcpy((char*)mem::ptr(picture + 0x80), "P_Y_00");
+    picture_face = 3;
+    for (uint32_t i = 0; i < 4; i++) st32(picture + 0xA8 + i * 4, corners[i]);
+    { Cpu c{}; c.r[3] = picture; hook_02874D54(&c); }
+
+    // b) shoulder names: today's L1/R1/L2/R2, the game's own, and a fixed choice by position
+    set_options(F::kLabels, P::kAuto, N::kNumbered, true);
+    assert(expect_names == 1);
+    dialog_draw_counts_once();
+    set_options(F::kLabels, P::kAuto, N::kNintendo, true);
+    assert(expect_names == 0 && expect_tint);
+    dialog_draw_counts_once();
+    set_options(F::kPosition, P::kAuto, N::kXbox, true);
+    assert(expect_names == 2 && !expect_tint && !expect_xbox);
+    dialog_draw_counts_once();
+    set_options(F::kLabels, P::kOriginal, N::kAuto, true);  // the game's look entirely
+    assert(!expect_xbox && !expect_tint && !expect_names && expect_shapes < 0);
+    dialog_draw_counts_once();
+
+    // c) PlayStation shapes, coloured and plain; the HUD pictures keep their own colours
+    set_options(F::kLabels, P::kPlayStation, N::kAuto, true);
+    assert(expect_shapes == 1 && expect_names == 1 && expect_xbox && !expect_tint);
+    dialog_draw_counts_once();
+    { Cpu c{}; c.r[3] = picture; hook_02874D54(&c); }
+    set_options(F::kLabels, P::kPlayStation, N::kAuto, false);
+    assert(expect_shapes == 0);
+    dialog_draw_counts_once();
+    // ... and by position the game's prompts stay (they already match the pad's positions)
+    set_options(F::kPosition, P::kPlayStation, N::kAuto, true);
+    assert(expect_shapes < 0 && !expect_names);
+    dialog_draw_counts_once();
+
+    // the HUD's face letter on its button picture becomes the bare shape, square and centred
+    std::strcpy((char*)mem::ptr(text_box + 0x80), "T_B_00");
+    std::strcpy((char*)mem::ptr(picture + 0x80), "P_B_00");
+    st32(text_box + 0x0C, picture);
+    st32(text_box + 0xB4, base + 0xE100);
+    st32(text_box + 0xA4, base + 0xB000);
+    st16(text_box + 0xCE, 1); st16(base + 0xB000, 'B'); st16(base + 0xB002, 0);
+    set_options(F::kLabels, P::kPlayStation, N::kAuto, true);
+    st16(list + 4, 0); st8(list + 6, 0);
+    print('B');
+    stf32(first_quad, 20); stf32(first_quad + 4, 40); stf32(first_quad + 8, 5); stf32(first_quad + 0x0C, -20);
+    std::array<uint8_t, 0x30> letter;
+    std::memcpy(letter.data(), mem::ptr(first_quad), letter.size());
+    hud_letter = true;
+    auto draw_letter = [] { Cpu c{}; c.r[3] = text_box; button_glyphs::draw_text_box(&c, [](Cpu*) { draw(); }); };
+    for (auto colours : {true, false, true}) {
+        set_options(F::kLabels, P::kPlayStation, N::kAuto, colours);
+        draw_letter();
+        assert(button_glyphs::marked_face(ld8(first_quad + 0x2F)) == 1);
+        for (uint32_t i = 0; i < 0x2C; i++) assert(ld8(first_quad + i) == letter[i]);  // authored quad restored
+        // drawn as a 32x32 square (0.8 of the letter height) on the letter's centre, from the atlas
+        assert(drawn_sheet == (colours ? atlas : atlas + 0x100));
+        assert(drawn_quad[0] == 32 && drawn_quad[1] == 32);
+        assert(drawn_quad[2] + drawn_quad[0]*0.5f == 15 && drawn_quad[3] + drawn_quad[1]*0.5f == 0);
+    }
+    // in the Xbox look the HUD letter keeps its ink: only the picture behind it is coloured
+    set_options(F::kLabels, P::kXbox, N::kAuto, true);
+    draw_letter();
+    assert(drawn_sheet == base + 0xD000 && drawn_quad[0] == 20 && drawn_quad[1] == 40);
+    hud_letter = false;
+    std::memset(mem::ptr(text_box + 0x80), 0, 24);
+    st32(text_box + 0x0C, 0);
+
+    // Automatic picks the shapes for a PlayStation pad, the Xbox look for any other
+    using FL = input_map::FaceLabel;
+    const FL ps[4] = {FL::kCross, FL::kCircle, FL::kSquare, FL::kTriangle};
+    const FL xbox[4] = {FL::kA, FL::kB, FL::kX, FL::kY};
+    input_map::note_face_labels(ps);
+    set_options(F::kLabels, P::kAuto, N::kAuto, true);
+    assert(expect_shapes == 1 && expect_names == 1);
+    st16(list + 4, 0); st8(list + 6, 0);
+    for (uint32_t face = 0; face < 4; face++) print(0xE000 + face);
+    draw();
+    input_map::note_face_labels(xbox);  // a new pad family is a new look, without a settings change
+    expect_current();
+    assert(expect_tint && expect_shapes < 0);
+    dialog_draw_counts_once();
+
+    // the shapes are drawn by the port: present in every cell, distinct per button, coloured or
+    // plain, a light disc for dialogs, and independent of the game's font data
+    const auto composed = button_glyphs::button_atlas(font_records);
+    auto pixel = [&](const std::vector<uint8_t>& a, int row, int column, int x, int y) {
+        const uint8_t* p = &a[((row*64+y)*button_glyphs::kAtlasWidth+column*64+x)*4];
+        return uint32_t(p[0]) << 24 | uint32_t(p[1]) << 16 | uint32_t(p[2]) << 8 | p[3];
+    };
+    std::array<std::vector<uint32_t>, 4> cells;
+    for (int face = 0; face < 4; face++) for (bool colour : {true, false}) {
+        int ink = 0;
+        bool tinted = false;
+        for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++) {
+            const uint32_t p = pixel(composed, button_glyphs::shape_row(face, colour), 1, x, y);
+            if ((p & 255) > 128) {
+                ink++;
+                const uint32_t r = p >> 24, g = (p >> 16) & 255, b = (p >> 8) & 255;
+                tinted |= std::max({r, g, b}) - std::min({r, g, b}) > 60;
+            }
+            if (colour) cells[face].push_back(p);
+        }
+        assert(ink > 150 && ink < 1500);
+        assert(tinted == colour);
+        // without colours the bare (HUD) shape is white coverage: the game supplies the colour
+        if (!colour)
+            for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++) {
+                const uint32_t p = pixel(composed, button_glyphs::shape_row(face, false), 1, x, y);
+                assert((p & 255) == 0 || (p >> 8) == 0xFFFFFF);
+            }
+        // the disc: light and opaque near its centre and edge, transparent in the cell's corner
+        const uint32_t edge = pixel(composed, button_glyphs::shape_row(face, colour), 0, 32 - 17, 29);
+        assert((edge & 255) == 255 && (edge >> 24) > 200);
+        assert((pixel(composed, button_glyphs::shape_row(face, colour), 0, 1, 1) & 255) == 0);
+    }
+    for (int a = 0; a < 4; a++) for (int b = a + 1; b < 4; b++) assert(cells[a] != cells[b]);
+    // stroke widths: the circle's ring, measured across its left side on the centre row
+    auto ring = [&](int column, int y) {
+        // ink coverage from the green channel: red ink has little, the disc's light fill a lot
+        const float ink = (button_glyphs::kShapeColours[1] >> 16) & 255, fill = 0xF2;
+        float width = 0;
+        for (int x = column ? 0 : 14; x < 30; x++) {  // the dialog icon: inside its disc rim
+            const uint32_t p = pixel(composed, button_glyphs::shape_row(1, true), column, x, y);
+            const float a = (p & 255) / 255.0f, g = (p >> 16) & 255;
+            width += column ? a : std::clamp((fill - g) / (fill - ink), 0.0f, 1.0f);
+        }
+        return width;
+    };
+    assert(std::fabs(ring(1, 32) - button_glyphs::kBareStroke) < 1.0f);
+    assert(std::fabs(ring(0, 29) - button_glyphs::kDiscStroke) < 1.0f);
+    assert(button_glyphs::kBareStroke >= 8 && button_glyphs::kDiscStroke >= 4);
+    // every shape stays inside its button: the bare shape well within the cell, the dialog's
+    // within the disc (radius 19.2 for the light fill)
+    for (int face = 0; face < 4; face++) for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++) {
+        if ((pixel(composed, button_glyphs::shape_row(face, true), 1, x, y) & 255) > 0)
+            assert(x >= 4 && x < 60 && y >= 4 && y < 60);
+        const uint32_t p = pixel(composed, button_glyphs::shape_row(face, true), 0, x, y);
+        const float d = std::hypot(x + 0.5f - 32, y + 0.5f - 29);
+        if (d > 18.5f && (p & 255) > 0) assert((p >> 24) == ((p >> 16) & 255));  // only grey disc/rim out there
+    }
+    const uint32_t mask = base + 0x5000 + 8192 + 23*256;
+    const uint8_t saved_mask = ld8(mask);
+    st8(mask, saved_mask ^ 0x55);
+    const auto other_font = button_glyphs::button_atlas(font_records);
+    st8(mask, saved_mask);
+    const size_t shapes = 8 * 64 * button_glyphs::kAtlasWidth * 4;
+    assert(!std::memcmp(other_font.data() + shapes, composed.data() + shapes, shapes));
+
+    layout(F::kPosition);  // leave the manual default for later tests
+}
+
 }  // namespace
 
 extern "C" void f_028766CC_orig(Cpu* c) { matrix(c); }
@@ -523,13 +736,13 @@ uint32_t host_alloc(uint32_t size, uint32_t align) {
     next = (next + align - 1) & ~(align - 1);
     const uint32_t result = next;
     next += size;
-    assert(next <= base + 0x40000);
+    assert(next <= base + kArena);
     return result;
 }
 }
 extern "C" void imp_gx2_GX2InitTextureRegs(Cpu* c) {
     assert(ld32(c->r[3]) == 5 && ld32(c->r[3] + 12) == 1);
-    assert(ld32(c->r[3] + 4) == 128 && ld32(c->r[3] + 8) == 256);
+    assert(ld32(c->r[3] + 4) == 128 && ld32(c->r[3] + 8) == 1024);
     assert(ld32(c->r[3] + 0x14) == 0x1A && ld32(c->r[3] + 0x30) == 1);
     assert(ld32(c->r[3] + 0x3C) == 128 && ld32(c->r[3] + 0x84) == 0x00010203);
     atlas = c->r[3] - 16;
@@ -537,17 +750,17 @@ extern "C" void imp_gx2_GX2InitTextureRegs(Cpu* c) {
 
 extern "C" void ppc_dispatch(Cpu* c) {
     assert(c->pc == 0x0286F7BC && c->r[3] == base + 0xE100);
-    constexpr uint32_t characters[] = {'L','R','1','2'};
+    constexpr uint32_t characters[] = {'L','R','1','2','B','T'};
     uint32_t index = 0;
-    while (index < 4 && characters[index] != c->r[5]) index++;
-    assert(index < 4);
+    while (index < 6 && characters[index] != c->r[5]) index++;
+    assert(index < 6);
     const uint32_t record = c->r[4];
     font_records[index] = record;
     font_queries++;
-    st8(record + 4,index == 1 ? 255 : 0);  // signed left bearing
+    st8(record + 4,index % 4 == 1 ? 255 : 0);  // signed left bearing
     st8(record + 5,6); st8(record + 6,8); st8(record + 7,9);
     st16(record + 8,32); st16(record + 10,32);
-    st16(record + 12,index*8); st16(record + 14,0);
+    st16(record + 12,(index % 4)*8); st16(record + 14,0);  // B and T reuse two of the four masks
     st8(record + 0x13,1); st32(record + 0x14,base + 0xD000);
     c->r[3] = 0xF001; c->r[4] = 0xDEAD;  // cloned CPU changes cannot corrupt the draw caller
 }
@@ -577,25 +790,44 @@ extern "C" void f_0286E9F0_orig(Cpu* c) {
 // Inspect the colours the actual draw hook supplies to vertex generation.
 extern "C" void f_028F7C7C_orig(Cpu* c) {
     text_draws++;
+    for (uint32_t i = 0; i < 4; i++) drawn_quad[i] = (float)ldf32(c->r[4] + 0xA4 + 4*i);
+    drawn_sheet = ld32(c->r[4] + 0xA4 + 0x28);
     bool uses_atlas = false;
     for (uint32_t i = 0; i < ld16(c->r[4] + 4); i++) {
         const uint32_t quad = c->r[4] + 0xA4 + 0x30 * i;
         const int face = button_glyphs::marked_face(ld8(quad + 0x2F));
         const int shoulder = button_glyphs::marked_shoulder(ld8(quad + 0x2F));
         for (uint32_t j = 0; j < 2; j++) {
-            const uint32_t want = expect_xbox && face >= 0 ? button_glyphs::tint(authored[j], face) : authored[j];
+            uint32_t want = expect_tint && face >= 0 && !hud_letter ? button_glyphs::tint(authored[j], face) : authored[j];
+            // coloured shapes carry their own colour (white vertices); plain ones keep the letter's
+            if (expect_shapes == 1 && face >= 0 && hud_letter && font_available) want |= 0xFFFFFF00;
             assert(ld32(quad + 0x10 + j * 4) == want);
             assert(ld8(quad + 0x13 + j * 4) == (authored[j] & 0xFF));  // fade alpha
         }
-        assert((ld8(quad + 0x2F) & 1) == (expect_xbox && font_available && shoulder >= 0 ? 1 : (i & 1)));
-        if (expect_xbox && font_available && shoulder >= 0) {
+        // #141: the composed label is an RGBA picture, like the game's own icons: neither the quad
+        // (+0x2F bit 0) nor the sheet (+0x0E) may ask for the text-colour (coverage font) path.
+        const bool shoulder_label = expect_names && font_available && shoulder >= 0;
+        const bool shape = expect_shapes >= 0 && font_available && face >= 0;
+        // a plain HUD shape stays a coverage glyph, drawn through the game's own letter colours
+        const bool coverage = shape && hud_letter && expect_shapes == 0;
+        assert((ld8(quad + 0x2F) & 1) == (coverage ? 1 : shoulder_label || shape ? 0 : (i & 1)));
+        if (shoulder_label || shape) {
+            // the composed atlas: an RGBA picture (#141), one layer, the style's cell
+            const int row = shape ? button_glyphs::shape_row(face, expect_shapes == 1)
+                          : expect_names == 2 ? button_glyphs::xbox_row(shoulder) : button_glyphs::numbered_row(shoulder);
+            const auto cell = button_glyphs::atlas_cell(row, shape ? !hud_letter : expect_frame);
             assert(ld8(quad + 0x2E) == 0);
-            assert(ld32(quad + 0x28) == atlas);
-            assert(ldf32(quad + 0x18) == (expect_frame ? 0.0f : 0.5f));
-            assert(ldf32(quad + 0x1C) == (3-shoulder)*0.25f);
-            assert(ldf32(quad + 0x20) == (expect_frame ? 0.5f : 1.0f));
-            assert(ldf32(quad + 0x24) == (4-shoulder)*0.25f);
+            assert(ld32(quad + 0x28) == (coverage ? atlas + 0x100 : atlas));
+            assert(ld8(atlas + 0x0E) == 0);
+            if (coverage) {  // the twin: the same texture, marked as a coverage sheet
+                assert(ld8(atlas + 0x100 + 0x0E) == 1);
+                assert(!std::memcmp(mem::ptr(atlas + 0x110), mem::ptr(atlas + 0x10), 0x9C));
+            }
+            assert(ldf32(quad + 0x18) == cell.u0 && ldf32(quad + 0x1C) == cell.v0);
+            assert(ldf32(quad + 0x20) == cell.u1 && ldf32(quad + 0x24) == cell.v1);
             uses_atlas = true;
+        }
+        if (shoulder_label) {
             if (!expect_frame) {
                 assert(ldf32(quad) <= 68);  // fits the existing shoulder background
                 assert(std::fabs(ldf32(quad + 8) + ldf32(quad)*0.5f - label_centre) < 0.001);
@@ -612,7 +844,7 @@ extern "C" void f_028F7C7C_orig(Cpu* c) {
 extern "C" void f_02874D54_orig(Cpu* c) {
     picture_draws++;
     for (uint32_t i = 0; i < 4; i++) {
-        const uint32_t want = expect_xbox && picture_face >= 0 ? button_glyphs::tint(corners[i], picture_face) : corners[i];
+        const uint32_t want = expect_tint && picture_face >= 0 ? button_glyphs::tint(corners[i], picture_face) : corners[i];
         assert(ld32(c->r[3] + 0xA8 + i * 4) == want);
     }
     c->r[3] = 0xC003;
@@ -620,9 +852,9 @@ extern "C" void f_02874D54_orig(Cpu* c) {
 
 int main() {
 #ifdef _WIN32
-    auto memory = VirtualAlloc(mem::ptr(base), 0x40000, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+    auto memory = VirtualAlloc(mem::ptr(base), kArena, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
 #else
-    auto memory = mmap(mem::ptr(base), 0x40000, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    auto memory = mmap(mem::ptr(base), kArena, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 #endif
     assert(memory == mem::ptr(base));
 #ifdef _WIN32
@@ -636,6 +868,7 @@ int main() {
     st32(base+0xE10C,base+0xF080); st32(base+0xE144,base+0x5000);
     st32(base+0xE200+0x8C,0x0286F7BC);
     const uint32_t texture = base+0xD010;
+    st8(base+0xD00E,1);  // the HUD font's sheet header marks a coverage sheet (copied into the atlas, #141)
     st32(texture,5); st32(texture+4,32); st32(texture+8,32); st32(texture+12,2);
     st32(texture+0x10,1); st32(texture+0x14,1);
     st32(texture+0x20,16384); st32(texture+0x24,base+0x5000);
@@ -777,12 +1010,13 @@ int main() {
     shoulders_test();
     font_fallback_test();
     automatic_test();
+    options_test();
 
 #ifdef _WIN32
     VirtualFree(memory, 0, MEM_RELEASE);
     VirtualFree(globals, 0, MEM_RELEASE);
 #else
-    munmap(memory, 0x40000);
+    munmap(memory, kArena);
     munmap(globals, 0x10000);
 #endif
     std::printf("button_glyphs_test: passed (%u prints, %u cached text draws, %u HUD draws)\n", prints, text_draws, picture_draws);
