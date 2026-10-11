@@ -7,6 +7,13 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Fixed: aspect ratios other than 16:9** (PR #146, thanks @fluxehub). At 16:10 (and 4:3) the
+  extra height now shows more of the view above and below instead of cropping a 16:9 picture, and
+  the HUD sits at the real screen edges. At 21:9 and 32:9 the button cluster and the Wind Waker's
+  "Back" prompt keep the same distance from the edge as at 16:9, and the Wind's Requiem screen
+  fills the whole screen instead of showing dark side bars. Layouts drawn to both the TV and the
+  GamePad no longer flicker between the two aspect ratios, and Vulkan no longer leaves the last
+  pixel row black at 16:10 with 1.5x. 16:9 is unchanged.
 - **Android: a menu on the game widget and an "Add the game icon" button** (PR #150, thanks
   @rhemfur). Long-press the home-screen widget, then Settings (Samsung) to export or import the save
   or open the game setup. The setup screen has **Add the game icon to the home screen** under Play
