@@ -7,6 +7,10 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Fixed: crash with Quick doors when leaving a room with spores** (issue #145), for example at
+  the first door in the Forbidden Woods. Quick doors ran the spores' fade-out faster than the game
+  draws, so their effect was removed while still queued for drawing. Doors now wait for the
+  weather effect to finish fading (rain, stars, spores, fog and waves) and stay fast otherwise.
 - **Fixed: Android GPU crashes ("device lost") on some Adreno phones** (issue #104). The precise
   GPU barriers that v0.2.12 turned on for Android caused occasional crashes with Mesa Turnip on an
   Adreno 650 and gave no measurable speed-up, so they are off by default again on every platform
