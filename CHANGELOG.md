@@ -13,6 +13,34 @@ what is on `devel` and not released yet (also in the
   recompiling it; the libraries stay recompiled from your game. It plays identically to the normal build
   but still uses more CPU, so releases stay recompiled. Off by default: normal builds are unchanged. See
   docs/decomp-build.md.
+- **Fixed: aspect ratios other than 16:9** (PR #146, thanks @fluxehub). At 16:10 (and 4:3) the
+  extra height now shows more of the view above and below instead of cropping a 16:9 picture, and
+  the HUD sits at the real screen edges. At 21:9 and 32:9 the button cluster and the Wind Waker's
+  "Back" prompt keep the same distance from the edge as at 16:9, and the Wind's Requiem screen
+  fills the whole screen instead of showing dark side bars. Layouts drawn to both the TV and the
+  GamePad no longer flicker between the two aspect ratios, and Vulkan no longer leaves the last
+  pixel row black at 16:10 with 1.5x. 16:9 is unchanged.
+- **Android: a menu on the game widget and an "Add the game icon" button** (PR #150, thanks
+  @rhemfur). Long-press the home-screen widget, then Settings (Samsung) to export or import the save
+  or open the game setup. The setup screen has **Add the game icon to the home screen** under Play
+  for players who declined or removed it, and the automatic offer now waits until the setup screen
+  is in front, so Android no longer refuses it on some phones. Spanish texts for these and the save
+  export/import.
+- **Fixed: ZL/ZR (LT/RT, L2/R2) prompts in dialogs showed as a white box** with the face buttons set
+  to *by label* (issue #141). The shoulder labels in dialogs are now drawn as pictures like the
+  game's own icons, in every language.
+- **Button prompt options** (issue #143, Controls tab of the settings overlay and the macOS Controls
+  window): *Button prompts* Automatic / Original / Xbox / PlayStation (Automatic shows PlayStation
+  shapes on a PlayStation pad), *Shoulder names* Automatic / L R ZL ZR / L1 R1 L2 R2 / LB RB LT RT,
+  and *Coloured face buttons* (on by default; off keeps the game's white buttons). The PlayStation
+  shapes are drawn by the port, no images are included. Unassigned (dimmed) HUD buttons now keep
+  their shape visible, and the prompt strokes are a little bolder.
+## v0.2.13
+
+- **Linux AppImage: a portable mode** (issue #55, idea by @missionfloyd). Create a folder named like the
+  AppImage plus `.data` next to it (e.g. `WindWakerHD-…-linux-x86_64.AppImage.data`), and the AppImage keeps
+  the game, its code, saves, settings and caches there instead of in `~/.local/share`, `~/.config` and
+  `~/.cache`. Without that folder nothing changes.
 - **Profiling on Windows on ARM64: a sampling profiler for the frame threads** (PR #147, thanks
   @rhemfur). Off unless `WWHD_SAMPLE_THREADS=<file prefix>` is set; `tools/bench/thread_profile.py`
   turns the samples into a report by module and function, including time inside the Vulkan driver,

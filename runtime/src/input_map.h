@@ -69,6 +69,12 @@ struct Mapping {
     float right_range = 1.0f;
     bool invert_camera_y = false;   // right stick Y, keyboard and controller
     bool face_auto = false;         // Automatic face preset: follow the dominant pad's labels
+    // In-game button prompts (issues #110, #141, #143; runtime/src/button_glyphs.cpp)
+    enum class Prompts : uint8_t { kAuto, kOriginal, kXbox, kPlayStation };
+    enum class ShoulderNames : uint8_t { kAuto, kNintendo, kNumbered, kXbox };
+    Prompts prompts = Prompts::kAuto;            // face-button look while the face buttons are by label
+    ShoulderNames shoulder_names = ShoulderNames::kAuto;
+    bool prompt_colours = true;                  // coloured face buttons (Xbox / PlayStation colours)
     static Mapping defaults();
     bool operator==(const Mapping&) const = default;
 };
@@ -120,6 +126,33 @@ void note_face_labels(const FaceLabel labels[4]);
 // note_face_labels last reported (a mapping is ready before the next pad connects); with none
 // reported the bindings stay as they are. apply_face_layout turns it off: a preset is a choice.
 void set_face_auto(Mapping& m, bool on);
+
+// The dominant pad's family, from the labels note_face_labels last reported: PlayStation when it
+// names Cross/Circle/Square/Triangle, Xbox when its bottom button is A, Nintendo when it is B.
+enum class PadFamily { kUnknown, kXbox, kPlayStation, kNintendo };
+PadFamily pad_family_from_labels(const FaceLabel labels[4]);
+PadFamily pad_family();
+
+// What the in-game button prompts look like (button_glyphs.cpp draws it). Resolved from the
+// mapping and the pad family; pure, so input_map_test and button_glyphs_test can cover it.
+//   face: the face buttons are restyled only while they are by label (the game's own prompts
+//     already match a by-position pad): Automatic picks PlayStation shapes on a PlayStation pad
+//     and the Xbox colours/positions on anything else; Original keeps the game's look.
+//   shoulders: Automatic follows the face style (Xbox: LB/RB/LT/RT, PlayStation: L1/R1/L2/R2,
+//     original: the game's L/R/ZL/ZR); a fixed choice applies with any face layout.
+enum class FaceStyle : uint8_t { kOriginal, kXbox, kPlayStation };
+enum class ShoulderStyle : uint8_t { kOriginal, kNumbered, kXbox };
+struct PromptStyle {
+    FaceStyle face = FaceStyle::kOriginal;
+    bool colours = false;         // face colours (only with a face style)
+    ShoulderStyle shoulders = ShoulderStyle::kOriginal;
+    bool positions = false;       // HUD face cluster in the Xbox/PlayStation positions
+    bool active() const { return face != FaceStyle::kOriginal || shoulders != ShoulderStyle::kOriginal; }
+    bool operator==(const PromptStyle&) const = default;
+};
+PromptStyle prompt_style(const Mapping& m, PadFamily family);
+const char* prompts_label(Mapping::Prompts p);              // for the UI
+const char* shoulder_names_label(Mapping::ShoulderNames n);  // for the UI
 
 // Rewrite one controller binding. A hand-edited face binding (kA..kY) drops the Automatic preset,
 // so a custom binding is not overwritten when the next pad connects.

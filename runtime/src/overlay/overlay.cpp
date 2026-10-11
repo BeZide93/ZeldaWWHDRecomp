@@ -1930,6 +1930,58 @@ void tab_controls() {
         ImGui::SameLine();
         ImGui::TextDisabled("(custom)");
     }
+    // in-game button prompts (#110, #143): what the game's own button icons look like
+    {
+        using P = input_map::Mapping::Prompts;
+        using N = input_map::Mapping::ShoulderNames;
+        const input_map::PromptStyle look = input_map::prompt_style(m, input_map::pad_family());
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted("Button prompts");
+        ImGui::PushID("prompts");  // "automatic" is also a face-buttons choice
+        for (P p : {P::kAuto, P::kOriginal, P::kXbox, P::kPlayStation}) {
+            ImGui::SameLine();
+            if (radio(input_map::prompts_label(p), m.prompts == p)) {
+                m.prompts = p;
+                input_map::set_current(m);
+            }
+        }
+        ImGui::PopID();
+        help("How the game's button icons look while the face buttons are by label. Automatic: "
+             "PlayStation shapes on a PlayStation controller, the Xbox colours and positions on any "
+             "other. Original keeps the game's look. By position always keeps the game's look: its "
+             "prompts then already match the buttons' positions.");
+        ImGui::SameLine();
+        ImGui::TextDisabled("(-> %s)", look.face == input_map::FaceStyle::kPlayStation ? "PlayStation"
+                                       : look.face == input_map::FaceStyle::kXbox      ? "Xbox"
+                                                                                       : "original");
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted("Shoulder names");
+        ImGui::PushID("shoulders");
+        for (N n : {N::kAuto, N::kNintendo, N::kNumbered, N::kXbox}) {
+            ImGui::SameLine();
+            if (radio(input_map::shoulder_names_label(n), m.shoulder_names == n)) {
+                m.shoulder_names = n;
+                input_map::set_current(m);
+            }
+        }
+        ImGui::PopID();
+        help("How prompts name the shoulder buttons and triggers. Automatic follows the button "
+             "prompts: LB / RB / LT / RT with the Xbox look, L1 / R1 / L2 / R2 with the PlayStation "
+             "shapes, the game's L / R / ZL / ZR otherwise. A fixed choice applies with any face "
+             "buttons setting.");
+        ImGui::SameLine();
+        ImGui::TextDisabled("(-> %s)", look.shoulders == input_map::ShoulderStyle::kXbox       ? "LB / RB / LT / RT"
+                                       : look.shoulders == input_map::ShoulderStyle::kNumbered ? "L1 / R1 / L2 / R2"
+                                                                                               : "L / R / ZL / ZR");
+        bool colours = m.prompt_colours;
+        if (ImGui::Checkbox("Coloured face buttons", &colours)) {
+            m.prompt_colours = colours;
+            input_map::set_current(m);
+        }
+        help("Green A, red B, blue X and yellow Y in the Xbox look; blue cross, red circle, pink "
+             "square and green triangle with the PlayStation shapes. Off: the game's white buttons "
+             "(in the Xbox positions while the face buttons are by label).");
+    }
     // status line: capture prompt > note > hovered input > duplicates > help
     std::string status;
     ImVec4 sc(0.70f, 0.78f, 0.84f, 1.0f);

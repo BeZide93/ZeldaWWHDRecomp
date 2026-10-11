@@ -88,22 +88,22 @@ void remember(float v) {
     g_stored[0] = v;
 }
 bool standard_aspect(float v) { return same(v, kBase) || same(v, g_game) || ours(v); }
+float vert_plus_fovy_rad(float fovy, float ky) { return ky == 1.0f ? fovy : 2.0f * std::atan(std::tan(fovy * 0.5f) * ky); }
 float vert_plus_fovy(float fovyDeg, float ky) {
-    if (ky == 1.0f) return fovyDeg;
-    float t = std::tan(fovyDeg * 0.5f * (float)M_PI / 180.0f) * ky;
-    return 2.0f * std::atan(t) * 180.0f / (float)M_PI;
+    return ky == 1.0f ? fovyDeg : vert_plus_fovy_rad(fovyDeg * (float)M_PI / 180.0f, ky) * 180.0f / (float)M_PI;
 }
-// f(fovy), f(aspect) of a projection / clipper call of the main camera
+// f(fovy), f(aspect) of a projection / clipper call of the main camera (fovy in degrees, or radians)
 // at 16:9 every hook leaves the game's values untouched (bit-identical original behaviour)
 bool original() { return g_game == kBase; }
-void adjust_projection_args(Cpu* c, int fovyReg, int aspectReg) {
+void adjust_projection_args(Cpu* c, int fovyReg, int aspectReg, bool radians = false) {
     if (original() && !ours((float)c->f[aspectReg].ps0)) return;
     if (!standard_aspect((float)c->f[aspectReg].ps0)) return;  // a special aspect (demo): leave it
     remember(g_game);
     float kx, ky;
     factors(g_game, kx, ky);
+    float fovy = (float)c->f[fovyReg].ps0;
     c->f[aspectReg].ps0 = c->f[aspectReg].ps1 = g_game;
-    c->f[fovyReg].ps0 = c->f[fovyReg].ps1 = vert_plus_fovy((float)c->f[fovyReg].ps0, ky);
+    c->f[fovyReg].ps0 = c->f[fovyReg].ps1 = radians ? vert_plus_fovy_rad(fovy, ky) : vert_plus_fovy(fovy, ky);
 }
 }  // namespace
 
@@ -193,6 +193,11 @@ extern "C" void site_024FFA98(Cpu* c) { store_aspect(c); }
 extern "C" void site_025020E0(Cpu* c) { store_aspect(c); }
 // camera_draw: C_MTXPerspective(view.mProjMtx, f1 fovy, f2 aspect, f3 near, f4 far)
 extern "C" void site_024FFD60(Cpu* c) { adjust_projection_args(c, 1, 2); }
+// camera_draw: sead::PerspectiveProjection::set(camera+0x66C, f1 near, f2 far, f3 mFovy * pi/180,
+// f4 mAspect), the projection the HD renderer draws the scene with (its matrices at camera+0x8B8,
+// +0x8F8). The aspect reaches it through view.mAspect, the fovy only through this hook: without it
+// a taller screen got the 16:9 picture cropped at the sides instead of Vert+.
+extern "C" void site_0250007C(Cpu* c) { adjust_projection_args(c, 3, 4, true); }
 // view_setup: mDoLib_clipper::setup(f1 fovy, f2 aspect, f3 near, f4 far)
 extern "C" void site_024F811C(Cpu* c) { adjust_projection_args(c, 1, 2); }
 extern "C" void site_024F8168(Cpu* c) { adjust_projection_args(c, 1, 2); }
@@ -212,14 +217,13 @@ extern "C" void site_025ADB38(Cpu* c) { adjust_projection_args(c, 1, 2); }
 //   Which screen a layout goes to is only known on the render thread (TV and GamePad layouts share
 //     DrawInfos; they are recorded on threads that don't bind the target): projection uploads and
 //     root draws are tagged in the command stream (OP_SET_PROJ_REGS, OP_LAYOUT_ROOT, gx2_core.cpp).
-//   Anchoring, while a TV layout's root computes its matrices: root children further than 300 units
-//     from the centre (hearts, magic, rupees, buttons, keys, place names...) are moved out by the
-//     extra half width (height); L_EnemyHP_00 / L_CommandA_00 and roots the game moved off 0,0
-//     (placed at an actor's projected position) are scaled by kx, ky instead; leaf panes covering the
-//     whole 1280x720 screen (backgrounds, fades) are stretched. The translation/scale is changed only
-//     for the call (dirty bit forced so the matrix is recomputed), so animations and game code keep
-//     their values. Menu draw calls are clipped to the native region; backgrounds and filters
-//     cover the expanded picture, while HUD panes retain their edge anchoring.
+//   Anchoring, while a TV layout's root computes its matrices: each pane with a rule in the pane
+//     table (aspect_panes.h kRules: HUD at the edges, full-screen backgrounds, frames, markers placed
+//     at an actor...) gets its translation/scale from it, and roots the game moved off 0,0 to an
+//     actor's projected position are scaled by kx, ky. The translation/scale is changed only for
+//     the call (dirty bit forced so the matrix is recomputed), so animations and game code keep
+//     their values. Draw calls of panes without a rule (menus, content) are clipped to the native
+//     region; panes with one cover the expanded picture.
 extern "C" {
 void f_02874038_orig(Cpu* c);
 void f_028766CC_orig(Cpu* c);
@@ -231,19 +235,27 @@ constexpr uint32_t kPaneFlags = 0x44, kPaneMtxDirty = 0x10, kPaneGlobal = 0x48;
 constexpr uint32_t kPaneParent = 0x0C, kPaneChildren = 0x14, kPaneTrans = 0x1C, kPaneScale = 0x34, kPaneSize = 0x3C, kPaneName = 0x80;
 
 std::mutex g_root_mu;
-std::vector<std::pair<uint32_t, bool>> g_root_tv;  // layout root pane -> last drawn to the TV
+// layout root pane -> the swaps at which it was last drawn to the TV and to the GamePad. Some layouts
+// are drawn to both in the same frame with the same matrices (the Wind's Requiem compass, the
+// screen wipes, the title menus): they are TV layouts while the TV draws them. Following the last
+// report instead flipped them between anchored and not every few frames (the Wind's Requiem
+// backdrop letterboxed and full screen in turn). Their GamePad draws then see TV matrices, which
+// for these layouts only means full-screen backgrounds stretched past the GamePad's edges.
+struct RootSeen { uint32_t root; uint64_t tv, drc; };
+std::vector<RootSeen> g_root_tv;
 bool root_on_tv(uint32_t root) {
     std::lock_guard<std::mutex> lk(g_root_mu);
-    for (auto& [r, tv] : g_root_tv)
-        if (r == root) return tv;
+    for (auto& e : g_root_tv)
+        if (e.root == root) return e.tv && (e.tv >= e.drc || game_frame() + 1 <= e.tv + 3);
     return true;  // not reported (yet): layouts are TV layouts unless seen on the GamePad
 }
 void set_root_tv(uint32_t root, bool tv) {
     std::lock_guard<std::mutex> lk(g_root_mu);
+    uint64_t now = game_frame() + 1;  // +1: 0 means never
     for (auto& e : g_root_tv)
-        if (e.first == root) { e.second = tv; return; }
+        if (e.root == root) { (tv ? e.tv : e.drc) = now; return; }
     if (g_root_tv.size() > 256) g_root_tv.erase(g_root_tv.begin());
-    g_root_tv.push_back({root, tv});
+    g_root_tv.push_back({root, tv ? now : 0, tv ? 0 : now});
 }
 
 // the anchoring state each root's matrices were last computed with: a root whose state changes
@@ -276,27 +288,35 @@ std::pair<float, float> offset_of(uint32_t pane) {
     return it == g_offsets.end() ? std::pair<float, float>{0, 0} : it->second;
 }
 
-bool name_is(uint32_t pane, const char* n) { return !strncmp((const char*)mem::ptr(pane + kPaneName), n, 24); }
-
-// HUD parts that belong at the screen edges (only these are moved out; anything else stays where the
-// game put it). Not N_All_00: a generic container name several layouts use (the button cluster, but
-// also the message window's choice box, whose cursor the game places from the drawn row positions:
-// moving it misplaced the Yes/No cursor at 16:10). The game reads the drawn
-// positions of message rows to place the choice cursor, so moving them misplaces the cursor)
-bool is_hud_edge_pane(uint32_t pane) {
-    static const char* const kEdge[] = {
-        "N_TV_00", "N_DRC_00", "N_Default_00", "N_HeartPos_01", "L_Rupy_00", "L_CompassClock_00",
-        "L_DungeonKey_00", "N_SwimTimePos_00", "L_BossHP_00", "L_Arrow_00", "L_BatteryVol1_00",
-        "L_RupySwordCounter_00", "N_Position_00", "N_Time_00"};
-    for (const char* n : kEdge)
-        if (name_is(pane, n)) return true;
+std::string_view name_of(uint32_t pane) {
+    const char* n = (const char*)mem::ptr(pane + kPaneName);
+    return std::string_view(n, strnlen(n, 24));
+}
+bool is_leaf(uint32_t pane) { return ld32(pane + kPaneChildren) == pane + kPaneChildren; }
+bool has_child(uint32_t pane, std::string_view n) {
+    uint32_t sentinel = pane + kPaneChildren;
+    for (uint32_t child = ld32(sentinel); child != sentinel; child = ld32(child))
+        if (name_of(child) == n) return true;
     return false;
+}
+// the pane's rule (aspect_panes.h kRules), nullptr for content
+const panes::PaneRule* rule_of(uint32_t pane) {
+    uint32_t parent = ld32(pane + kPaneParent);
+    float w = (float)ldf32(pane + kPaneSize) * std::fabs((float)ldf32(pane + kPaneScale));
+    float h = (float)ldf32(pane + kPaneSize + 4) * std::fabs((float)ldf32(pane + kPaneScale + 4));
+    return panes::rule_for(name_of(pane), parent && !ld32(parent + kPaneParent), is_leaf(pane),
+                           (float)ldf32(pane + kPaneTrans), (float)ldf32(pane + kPaneTrans + 4), w, h,
+                           [pane](std::string_view child) { return has_child(pane, child); });
+}
+// root children placed at the edges or at an actor: the draw hook tells panes the game parked off the
+// 16:9 screen from panes these offsets moved there
+bool moved_root_child(const panes::PaneRule* r) {
+    return r && (r->rule == panes::Rule::Hud || r->rule == panes::Rule::Projected);
 }
 
 bool has_world_anchor(uint32_t pane, int depth = 0) {
     if (depth > 32) return false;
-    const char* name = (const char*)mem::ptr(pane + kPaneName);
-    if (panes::projected_root_name(std::string_view(name, strnlen(name, 24)))) return true;
+    if (panes::is_marker(name_of(pane))) return true;
     uint32_t sentinel = pane + kPaneChildren;
     for (uint32_t child = ld32(sentinel); child != sentinel; child = ld32(child))
         if (has_world_anchor(child, depth + 1)) return true;
@@ -329,7 +349,7 @@ static void calculate_aspect_pane(Cpu* c) {
         if (log_roots && placed) {
             static std::mutex mu;
             static std::unordered_map<std::string, int> seen;
-            std::string nm((const char*)mem::ptr(pane + kPaneName), strnlen((const char*)mem::ptr(pane + kPaneName), 24));
+            std::string nm(name_of(pane));
             std::lock_guard<std::mutex> lk(mu);
             if (seen[nm]++ == 0) LOG("[aspect] placed root '%s' at %.1f, %.1f", nm.c_str(), tx, ty);
         }
@@ -351,42 +371,24 @@ static void calculate_aspect_pane(Cpu* c) {
     float tx = (float)ldf32(pane + kPaneTrans), ty = (float)ldf32(pane + kPaneTrans + 4);
     float sx = (float)ldf32(pane + kPaneScale), sy = (float)ldf32(pane + kPaneScale + 4);
     float nx = tx, ny = ty, nsx = sx, nsy = sy;
-    panes::Role role = panes::Role::Content;
-    if (parent == t_root) {
-        if (name_is(pane, "L_EnemyHP_00") || name_is(pane, "L_CommandA_00")) role = panes::Role::Projected;
-        else if (is_hud_edge_pane(pane)) role = panes::Role::Hud;
-    }
-    auto transformed = panes::transform(role, tx, ty, sx, sy, kx, ky);
-    nx = transformed.x; ny = transformed.y;
-    // a leaf covering the whole screen (background, fade): stretch it to the new shape
-    uint32_t sentinel = pane + kPaneChildren;
-    if (ld32(sentinel) == sentinel && std::fabs(tx) < 8.0f && std::fabs(ty) < 8.0f) {
+    const panes::PaneRule* rule = rule_of(pane);
+    if (rule) {
         float w = (float)ldf32(pane + kPaneSize) * std::fabs(sx), h = (float)ldf32(pane + kPaneSize + 4) * std::fabs(sy);
-        if (panes::fill(std::string_view((const char*)mem::ptr(pane+kPaneName), strnlen((const char*)mem::ptr(pane+kPaneName),24)), true, tx, ty, w, h)) {
-            auto stretched = panes::transform(panes::Role::Fill, tx, ty, sx, sy, kx, ky);
-            nsx = stretched.sx; nsy = stretched.sy;
-            static const bool log_st = getenv("WWHD_ASPECT_LOG") != nullptr;
-            if (log_st) {
-                static std::mutex mu;
-                static std::unordered_map<std::string, int> seen;
-                std::string key = std::string((const char*)mem::ptr(t_root + kPaneName), strnlen((const char*)mem::ptr(t_root + kPaneName), 24)) +
-                                  "/" + std::string((const char*)mem::ptr(pane + kPaneName), strnlen((const char*)mem::ptr(pane + kPaneName), 24));
-                std::lock_guard<std::mutex> lk(mu);
-                if (seen[key]++ == 0) LOG("[aspect] stretched '%s' (vtable %08X) %.0fx%.0f", key.c_str(), ld32(pane), w, h);
-            }
-        }
+        auto t = panes::apply(*rule, tx, ty, sx, sy, w, h, kx, ky);
+        nx = t.x; ny = t.y; nsx = t.sx; nsy = t.sy;
     }
     bool moved = nx != tx || ny != ty, scaled = nsx != sx || nsy != sy;
-    static const bool log_moves = getenv("WWHD_ASPECT_LOG") != nullptr;
-    if (log_moves && moved && parent == t_root) {
+    // debug: WWHD_ASPECT_LOG=1 logs each moved or stretched pane once per layout root and name
+    static const bool log_panes = getenv("WWHD_ASPECT_LOG") != nullptr;
+    if (log_panes && (moved || scaled)) {
         static std::mutex mu;
         static std::unordered_map<std::string, int> seen;
-        auto nm = [](uint32_t p) { return std::string((const char*)mem::ptr(p + kPaneName), strnlen((const char*)mem::ptr(p + kPaneName), 24)); };
-        std::string key = nm(t_root) + "/" + nm(pane);
+        std::string key = std::string(name_of(t_root)) + "/" + std::string(name_of(pane));
         std::lock_guard<std::mutex> lk(mu);
-        if (seen[key]++ == 0) LOG("[aspect] moved '%s' %.1f,%.1f -> %.1f,%.1f", key.c_str(), tx, ty, nx, ny);
+        if (seen[key]++ == 0) LOG("[aspect] %s '%s' %.1f,%.1f x%.3f,%.3f -> %.1f,%.1f x%.3f,%.3f", scaled ? "stretched" : "moved",
+                                  key.c_str(), tx, ty, sx, sy, nx, ny, nsx, nsy);
     }
-    if (parent == t_root) set_offset(pane, nx - tx, ny - ty);
+    if (parent == t_root || rule) set_offset(pane, nx - tx, ny - ty);
     if (moved || scaled) st8(pane + kPaneFlags, ld8(pane + kPaneFlags) | kPaneMtxDirty);  // recompute with the offsets
     if (moved) { stf32(pane + kPaneTrans, nx); stf32(pane + kPaneTrans + 4, ny); }
     if (scaled) { stf32(pane + kPaneScale, nsx); stf32(pane + kPaneScale + 4, nsy); }
@@ -426,11 +428,14 @@ extern "C" void hook_02877100(Cpu* c) {
         for (int i = 0; i < 16 && ld32(root + kPaneParent); i++) { child = root; root = ld32(root + kPaneParent); }
         bool world = !ld32(root + kPaneParent) &&
             (ldf32(root + kPaneTrans) != 0 || ldf32(root + kPaneTrans + 4) != 0) && has_world_anchor(root);
-        if (!ld32(root + kPaneParent) && root_on_tv(root) &&
-            (world || is_hud_edge_pane(child) || name_is(child, "L_EnemyHP_00") || name_is(child, "L_CommandA_00"))) {
-            auto a = offset_of(child), b = offset_of(root);
-            float gx = (float)ldf32(pane + kPaneGlobal + 12) - a.first - b.first;
-            float gy = (float)ldf32(pane + kPaneGlobal + 28) - a.second - b.second;
+        if (!ld32(root + kPaneParent) && root_on_tv(root) && (world || moved_root_child(rule_of(child)))) {
+            // where the game put it: the drawn position less every offset applied on the way down
+            float gx = (float)ldf32(pane + kPaneGlobal + 12), gy = (float)ldf32(pane + kPaneGlobal + 28);
+            for (uint32_t p = pane; p; p = ld32(p + kPaneParent)) {
+                auto o = offset_of(p);
+                gx -= o.first;
+                gy -= o.second;
+            }
             if (panes::parked_hud(gx, gy)) return;
         }
     }
@@ -472,19 +477,13 @@ extern "C" void site_0287714C(Cpu* c) {
     using namespace aspect;
     if (original()) return;
     uint32_t pane = c->r[3];
+    // content unless the pane or one of its parents has a rule (it may reach past the 16:9 region)
+    // or the layout is placed at an actor
     bool content = true;
-    const char* name = (const char*)mem::ptr(pane + kPaneName);
-    uint32_t sentinel = pane + kPaneChildren;
-    if (panes::fill(std::string_view(name, strnlen(name, 24)), ld32(sentinel) == sentinel,
-                    (float)ldf32(pane + kPaneTrans), (float)ldf32(pane + kPaneTrans + 4),
-                    (float)ldf32(pane + kPaneSize) * std::fabs((float)ldf32(pane + kPaneScale)),
-                    (float)ldf32(pane + kPaneSize + 4) * std::fabs((float)ldf32(pane + kPaneScale + 4)))) content = false;
-    for (uint32_t p = pane; p; p = ld32(p + kPaneParent)) {
-        uint32_t parent = ld32(p + kPaneParent);
-        if (parent && !ld32(parent + kPaneParent) &&
-            (is_hud_edge_pane(p) || name_is(p, "L_EnemyHP_00") || name_is(p, "L_CommandA_00"))) content = false;
-        if (!parent && (ldf32(p + kPaneTrans) != 0 || ldf32(p + kPaneTrans + 4) != 0) &&
-            has_world_anchor(p)) content = false;
+    for (uint32_t p = pane; p && content; p = ld32(p + kPaneParent)) {
+        if (ld32(p + kPaneParent) ? rule_of(p) != nullptr
+                                  : (ldf32(p + kPaneTrans) != 0 || ldf32(p + kPaneTrans + 4) != 0) && has_world_anchor(p))
+            content = false;
     }
     gx2::emit(gx2::OP_LAYOUT_CONTENT, {content ? 1u : 0u});
 }
