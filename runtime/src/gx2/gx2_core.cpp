@@ -32,6 +32,7 @@
 #include "../aspect.h"
 #include "gfx/renderer.h"
 #include "platform/perf_hint.h"
+#include "platform/thread_sampler.h"
 #include "render_prof.h"
 
 using namespace Latte;
@@ -203,6 +204,7 @@ static void render_thread_main() {
     host::set_thread_name("GX2 render");
     host::boost_thread_priority();
     perf_hint::add_current_thread();
+    thread_sampler::add_current_thread("render");
     for (;;) {
         {
             std::unique_lock<std::mutex> lk(g_q_mutex);
