@@ -320,5 +320,30 @@ int main(int argc, char** argv) {
     assert(bytes(failure/"shadercache"/pipeline)=="source must survive copy failure");
     assert(bytes(shaderprebuild::root()/"live")=="existing destination must survive");
     assert(!fs::exists(shaderprebuild::root()/"live/.legacy-defaults-v1"));
-    fs::remove_all(temporary);
+    // Activation intentionally keeps this process-wide lease alive during play.
+    // End that lifetime before deleting the synthetic installation on Windows.
+    shaderprebuild::generationLease.reset();
+    const auto leasedGeneration = shaderprebuild::root()/"generation-lease-test";
+    write(leasedGeneration/"manifest.json", "synthetic generation");
+    shaderprebuild::GenerationLease lease;
+    assert(lease.acquire(leasedGeneration));
+    shaderprebuild::cleanup_generations({});
+    assert(fs::exists(leasedGeneration)); // An active reader prevents deletion.
+    lease.release();
+    lease.release(); // Deterministic and idempotent, before the destructor.
+    shaderprebuild::cleanup_generations({});
+    assert(!fs::exists(leasedGeneration));
+    std::error_code cleanupError;
+    fs::remove_all(temporary, cleanupError);
+    if (cleanupError) {
+        std::fprintf(stderr, "Cleanup failed for [%s]: %s\n", temporary.string().c_str(), cleanupError.message().c_str());
+        std::error_code scanError;
+        for (fs::recursive_directory_iterator it(temporary, scanError), end; !scanError && it != end; it.increment(scanError)) {
+            std::error_code itemError;
+            if (!it->is_regular_file(itemError)) continue;
+            fs::remove(it->path(), itemError);
+            if (itemError) std::fprintf(stderr, "Cannot remove file [%s]: %s\n", it->path().string().c_str(), itemError.message().c_str());
+        }
+        return 1;
+    }
 }

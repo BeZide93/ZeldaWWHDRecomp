@@ -182,24 +182,39 @@ class GenerationLease {
 #else
     int file = -1;
 #endif
+    bool locked = false;
 public:
+    GenerationLease() = default;
+    GenerationLease(const GenerationLease&) = delete;
+    GenerationLease& operator=(const GenerationLease&) = delete;
     bool acquire(const fs::path& dir) {
+        release();
 #ifdef _WIN32
         file = CreateFileW((dir / "in-use.lock").c_str(), GENERIC_READ | GENERIC_WRITE,
-            FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-        return file != INVALID_HANDLE_VALUE && LockFileEx(file, LOCKFILE_FAIL_IMMEDIATELY, 0, 1, 0, &offset);
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        locked = file != INVALID_HANDLE_VALUE && LockFileEx(file, LOCKFILE_FAIL_IMMEDIATELY, 0, 1, 0, &offset);
 #else
         file = open((dir / "in-use.lock").c_str(), O_CREAT | O_RDWR, 0600);
-        return file >= 0 && flock(file, LOCK_SH | LOCK_NB) == 0;
+        locked = file >= 0 && flock(file, LOCK_SH | LOCK_NB) == 0;
 #endif
+        if (!locked) release();
+        return locked;
     }
-    ~GenerationLease() {
+    void release() noexcept {
 #ifdef _WIN32
-        if (file != INVALID_HANDLE_VALUE) CloseHandle(file);
+        if (file != INVALID_HANDLE_VALUE) {
+            if (locked) UnlockFileEx(file, 0, 1, 0, &offset);
+            CloseHandle(file); file = INVALID_HANDLE_VALUE;
+        }
 #else
-        if (file >= 0) close(file);
+        if (file >= 0) {
+            if (locked) flock(file, LOCK_UN);
+            close(file); file = -1;
+        }
 #endif
+        locked = false;
     }
+    ~GenerationLease() { release(); }
 };
 inline std::unique_ptr<GenerationLease> generationLease;
 // Normal uses atomic no-replace operations first. The mode is a deterministic
@@ -230,6 +245,7 @@ inline bool publish_legacy_file(const fs::path& temporary, const fs::path& targe
     const std::string targetPath(targetBytes.begin(), targetBytes.end());
     FILE* output = gfxvk::open_utf8_file(targetPath, "wbx");
     if (!output) return false;
+    std::unique_ptr<FILE, decltype(&std::fclose)> outputOwner(output, &std::fclose);
 #ifdef _WIN32
     BY_HANDLE_FILE_INFORMATION owned{};
     const bool identified=GetFileInformationByHandle(
@@ -240,15 +256,16 @@ inline bool publish_legacy_file(const fs::path& temporary, const fs::path& targe
 #endif
     const auto sourceBytes = temporary.u8string();
     FILE* input = gfxvk::open_utf8_file(std::string(sourceBytes.begin(),sourceBytes.end()), "rb");
+    std::unique_ptr<FILE, decltype(&std::fclose)> inputOwner(input, &std::fclose);
     bool ok = input != nullptr;
     if (input) {
         char block[65536]; size_t size;
         while ((size = std::fread(block,1,sizeof block,input)))
             if (std::fwrite(block,1,size,output) != size) { ok=false; break; }
         if (std::ferror(input)) ok=false;
-        if (std::fclose(input)) ok=false;
+        if (std::fclose(inputOwner.release())) ok=false;
     }
-    if (std::fclose(output)) ok=false;
+    if (std::fclose(outputOwner.release())) ok=false;
     if (!ok) {
         if (beforeFailureCleanup) beforeFailureCleanup(target);
         // Another renderer can atomically replace this pathname while copying.
@@ -326,8 +343,15 @@ inline void migrate_default_caches(const fs::path& configDirectory, const fs::pa
         if (fs::exists(marker)) return; // Another process completed while waiting.
         bool complete=true;
         auto copy = [&](const fs::path& source, const fs::path& target) {
-            try { if (!copy_legacy_file(source, target, mode)) complete=false; }
-            catch (...) { complete=false; }
+            try {
+                if (!copy_legacy_file(source, target, mode)) {
+                    complete=false;
+                    std::fprintf(stderr,"[shader prebuild] Cannot migrate [%s] to [%s]\n", source.string().c_str(), target.string().c_str());
+                }
+            } catch (const std::exception& e) {
+                complete=false;
+                std::fprintf(stderr,"[shader prebuild] Cannot migrate [%s] to [%s]: %s\n", source.string().c_str(), target.string().c_str(), e.what());
+            }
         };
         const auto old = configDirectory / "shadercache";
         std::error_code error;
@@ -411,11 +435,12 @@ inline bool atomic_json(const fs::path& path, const mods::json::Value& value) {
     const auto bytes = path.u8string();
     const std::string destination(bytes.begin(), bytes.end());
     std::string temporary;
-    FILE* file = gfxvk::open_atomic_temporary(destination, temporary);
-    if (!file) return false;
     const auto text = mods::json::dump(value) + '\n';
-    const bool written = std::fwrite(text.data(), 1, text.size(), file) == text.size();
-    const bool closed = std::fclose(file) == 0;
+    std::unique_ptr<FILE, decltype(&std::fclose)> file(
+        gfxvk::open_atomic_temporary(destination, temporary), &std::fclose);
+    if (!file) return false;
+    const bool written = std::fwrite(text.data(), 1, text.size(), file.get()) == text.size();
+    const bool closed = std::fclose(file.release()) == 0;
     const bool success = written && closed && host::replace_file(temporary, destination);
     if (!success) { std::error_code ec; fs::remove(fs::u8path(temporary), ec); }
     return success;
@@ -430,12 +455,15 @@ inline void cleanup_generations(const fs::path& selected) {
             !fs::is_regular_file(dir / "manifest.json")) continue;
 #ifdef _WIN32
         HANDLE file = CreateFileW((dir / "in-use.lock").c_str(), GENERIC_READ | GENERIC_WRITE,
-            FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
         if (file == INVALID_HANDLE_VALUE) continue;
         OVERLAPPED offset{};
         const bool available = LockFileEx(file, LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY, 0, 1, 0, &offset);
+        if (available) {
+            fs::remove_all(dir, ec);
+            UnlockFileEx(file, 0, 1, 0, &offset);
+        }
         CloseHandle(file);
-        if (available) fs::remove_all(dir, ec);
 #else
         const int file = open((dir / "in-use.lock").c_str(), O_CREAT | O_RDWR, 0600);
         if (file < 0) continue;
