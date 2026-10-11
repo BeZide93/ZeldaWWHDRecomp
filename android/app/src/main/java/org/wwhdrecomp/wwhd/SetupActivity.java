@@ -235,6 +235,8 @@ public class SetupActivity extends Activity {
                             SetupPolicy.compileProgress(event.optString("state"), event.optInt("compiled"), event.optInt("reused"),
                                 event.optInt("total"), event.optLong("eta_seconds", -1));
                         if (compiling != null) text += "\n" + compiling;
+                        else if (event != null && event.optString("stage").equals("shaders") && event.has("fraction"))
+                            text += "\nPreparing shaders: " + Math.round(100 * event.optDouble("fraction")) + "%\n" + event.optString("detail");
                         else if (event != null) text += "\n" + event.optString("stage", "setup") + ": " + event.optString("state");
                     }
                 }

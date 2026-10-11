@@ -19,11 +19,12 @@ def run(configuration):
     helper.atomic_json(root / 'launcher.json', dict(schema=1, package=str(package),
         helper=str(package / 'tools/installer/shader_prebuild.py'),
         template=str(package / 'tools/shadercache/template.bin')))
-    def build(game, output, template):
-        shaderprep.cmd_build(str(game), str(output), str(template), 0, True)
+    def build(game, output, template, progress=None):
+        shaderprep.cmd_build(str(game), str(output), str(template), 0, True, progress)
     result = helper.prepare(job['game'], package / 'tools/shadercache/template.bin', None,
         root, package, renderer='vulkan', builder=build, runtime_identity=job['library'],
-        progress=lambda text: print('[shader preparation] ' + text, flush=True))
+        progress=lambda text, fraction=None: print('[shader preparation] ' + (
+            text if fraction is None else '%d%% %s' % (100 * fraction, text)), flush=True))
     helper.atomic_json(Path(configuration).with_suffix('.result.json'), result)
     return result
 

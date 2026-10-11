@@ -300,5 +300,126 @@ print(r['status'], flush=True)
         self.assertEqual(json.loads((self.cache / 'active.json').read_text())['status'], 'warm_pending')
 
 
+class ShaderPrebuildProgressTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.game = self.root / 'own-game'
+        self.game.mkdir()
+        (self.game / 'synthetic.sharcfb').write_text('synthetic archive identity only')
+        self.package = self.root / 'package'
+        (self.package / 'tools').mkdir(parents=True)
+        (self.package / 'tools/shaderprep.py').write_text('synthetic translator identity')
+        self.template = self.root / 'template'
+        self.template.write_text('synthetic template identity')
+        self.cache = self.root / 'private-cache'
+
+    def test_parse_progress(self):
+        self.assertEqual(prebuild.parse_progress('WWHD-PROGRESS 5 10 5 of 10 archives'), (5, 10, '5 of 10 archives'))
+        self.assertEqual(prebuild.parse_progress('WWHD-PROGRESS 0 0'), (0, 0, ''))
+        for line in ('[warm] 5 of 10', 'WWHD-PROGRESS x 10', 'WWHD-PROGRESS 5', 'WWHD-PROGRESS -1 4', ''):
+            self.assertIsNone(prebuild.parse_progress(line))
+
+    def runner(self, lines_by_phase, cancel_after=None):
+        calls = []
+        def runner(command, env, cancel, progress):
+            calls.append(command)
+            phase = len(calls) - 1
+            if phase == 0:
+                Path(command[3]).write_text('synthetic assembled output')
+            for line in lines_by_phase[phase]:
+                progress(line)
+        return runner, calls
+
+    def test_fractions_cover_both_phases_and_never_move_backwards(self):
+        runner, calls = self.runner([
+            ['shaderprep: log line', 'WWHD-PROGRESS 0 1000 0 of 3 game archives',
+             'WWHD-PROGRESS 500 1000 2 of 3 game archives', 'WWHD-PROGRESS 1000 1000 30 shader records'],
+            ['[warm] translating', 'WWHD-PROGRESS 0 40 0 of 40 shaders and pipelines',
+             'WWHD-PROGRESS 10 40 10 of 40 shaders and pipelines', 'WWHD-PROGRESS 40 40 40 of 40 shaders and pipelines']])
+        events, logged = [], []
+        from unittest.mock import patch
+        with patch.object(prebuild.time, 'monotonic', side_effect=[float(i) for i in range(1000)]):
+            result = prebuild.prepare(self.game, self.template, '/synthetic/exe', self.cache, self.package,
+                runner=runner, progress=lambda text, fraction=None: events.append((text, fraction)), log=logged.append)
+        self.assertEqual(result['status'], 'ready')
+        self.assertIn('--progress', calls[0])
+        self.assertEqual(logged, ['shaderprep: log line', '[warm] translating'])
+        self.assertEqual(events[0], ('Resolving shaders from your game files', None))  # indeterminate at first
+        fractions = [f for _, f in events if f is not None]
+        self.assertEqual(fractions, sorted(fractions))
+        self.assertAlmostEqual(fractions[-1], 1.0)
+        share = prebuild.ASSEMBLY_SHARE
+        self.assertIn(('Resolving shaders from your game files: 2 of 3 game archives', share / 2), events)
+        self.assertIn(('Compiling shaders and pipelines for this computer', share), events)
+        self.assertIn(('Compiling shaders and pipelines for this computer: 10 of 40 shaders and pipelines',
+                       share + (1 - share) / 4), events)
+
+    def test_unknown_total_stays_indeterminate_and_text_only_callers_get_phases(self):
+        runner, _ = self.runner([['WWHD-PROGRESS 0 0 counting'], ['WWHD-PROGRESS 0 0']])
+        events = []
+        prebuild.prepare(self.game, self.template, '/synthetic/exe', self.cache, self.package,
+                         runner=runner, progress=lambda text, fraction=None: events.append(fraction))
+        self.assertEqual(events, [None, None])
+        messages = []
+        runner, _ = self.runner([['WWHD-PROGRESS 1 2 half', 'raw'], ['WWHD-PROGRESS 2 2 all']])
+        prebuild.prepare(self.game, self.template, '/synthetic/exe', self.root / 'other-cache', self.package,
+                         runner=runner, progress=messages.append)
+        self.assertEqual(messages, ['Resolving shaders from your game files', 'raw',
+                                    'Compiling shaders and pipelines for this computer'])
+
+    def test_cancel_while_progress_arrives_skips(self):
+        state = {'lines': 0}
+        def runner(command, env, cancel, progress):
+            for i in range(10):
+                progress('WWHD-PROGRESS %d 10 step' % i)
+                state['lines'] += 1
+            Path(command[3]).write_text('synthetic assembled output')
+        result = prebuild.prepare(self.game, self.template, '/synthetic/exe', self.cache, self.package,
+                                  runner=runner, cancel=lambda: state['lines'] >= 3)
+        self.assertEqual(result['status'], 'skipped')
+        self.assertEqual(state['lines'], 3)
+        self.assertTrue((self.cache / 'skip.json').is_file())
+
+    def test_in_process_builder_reports_whole_range(self):
+        events = []
+        def builder(game, output, template, progress=None):
+            for done in (0, 250, 1000):
+                progress(done, 1000, '%d of 1000' % done)
+            output.write_text('synthetic assembled output')
+        result = prebuild.prepare(self.game, self.template, None, self.cache, self.package, builder=builder,
+                                  progress=lambda text, fraction=None: events.append(fraction))
+        self.assertEqual(result['status'], 'warm_pending')
+        self.assertEqual(events[0], None)
+        self.assertAlmostEqual(events[-1], 1.0)
+
+    def test_run_process_streams_lines_while_child_runs(self):
+        flag = self.root / 'seen'
+        code = ("import sys, time, pathlib\n"
+                "print('WWHD-PROGRESS 1 2 first', flush=True)\n"
+                "deadline = time.time() + 20\n"
+                "while not pathlib.Path(sys.argv[1]).exists():\n"
+                "    if time.time() > deadline: sys.exit(3)\n"
+                "    time.sleep(.02)\n"
+                "sys.stdout.write('partial')\n"
+                "print(' line', flush=True)\n")
+        lines = []
+        def progress(line):
+            lines.append(line)
+            flag.write_text('seen')
+        prebuild.run_process([sys.executable, '-c', code, str(flag)], None, lambda: False, progress)
+        self.assertEqual(lines, ['WWHD-PROGRESS 1 2 first', 'partial line'])
+
+    def test_run_process_cancel_terminates_child(self):
+        code = "import time\nprint('started', flush=True)\ntime.sleep(60)\n"
+        lines = []
+        started = time.monotonic()
+        with self.assertRaises(InterruptedError):
+            prebuild.run_process([sys.executable, '-c', code], None, lambda: bool(lines), lines.append)
+        self.assertLess(time.monotonic() - started, 30)
+        self.assertEqual(lines, ['started'])
+
+
 if __name__ == '__main__':
     unittest.main()

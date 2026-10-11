@@ -190,38 +190,141 @@ def cache_environment(generation, game, renderer):
                 WWHD_RENDERER_RUNTIME=renderer, WWHD_NO_AUDIO='1', WWHD_HIDDEN_WINDOWS='1')
 
 
+PROGRESS_PREFIX = 'WWHD-PROGRESS '
+# Share of the bar the head-start assembly takes when a native warm follows it.
+ASSEMBLY_SHARE = 0.35
+
+
+def parse_progress(line):
+    """'WWHD-PROGRESS <done> <total> [detail]' (shaderprep.py build --progress, wwhd --warm-shaders)
+    -> (done, total, detail); None for any other line."""
+    if not line.startswith(PROGRESS_PREFIX):
+        return None
+    parts = line[len(PROGRESS_PREFIX):].strip().split(' ', 2)
+    try:
+        done, total = int(parts[0]), int(parts[1])
+    except (IndexError, ValueError):
+        return None
+    if done < 0 or total < 0:
+        return None
+    return done, total, parts[2] if len(parts) > 2 else ''
+
+
 def run_process(command, env, cancel, progress):
-    # Pipe-free log prevents a blocked child when verbose compilers fill stdout.
-    with tempfile.TemporaryFile(mode='w+b') as log:
-        child = subprocess.Popen(command, env=env, stdout=log, stderr=subprocess.STDOUT)
-        try:
-            while child.poll() is None:
-                if cancel():
-                    raise InterruptedError('Shader preparation skipped')
-                time.sleep(.1)
-            log.seek(0)
-            text = log.read().decode(errors='replace')
-            for line in text.splitlines():
-                progress(line)
-            if child.returncode:
-                raise RuntimeError('Shader preparation command failed (%d)' % child.returncode)
-        finally:
-            if child.poll() is None:
-                child.terminate()
-                try:
-                    child.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    child.kill()
-                    child.wait()
+    """Runs command; each output line reaches progress(line) while it runs."""
+    # Pipe-free log prevents a blocked child when verbose compilers fill stdout. The child
+    # writes through its own handle; a separate reader never moves the child's file offset.
+    try:  # Windows: a terminated helper's workers may briefly keep the output open
+        scratch = tempfile.TemporaryDirectory(prefix='wwhd-shader-output-', ignore_cleanup_errors=True)
+    except TypeError:  # Python < 3.10
+        scratch = tempfile.TemporaryDirectory(prefix='wwhd-shader-output-')
+    with scratch as directory:
+        path = Path(directory) / 'output.log'
+        with path.open('wb') as output, path.open('rb') as reader:
+            child = subprocess.Popen(command, env=env, stdout=output, stderr=subprocess.STDOUT)
+            pending = b''
+            def forward(final=False):
+                nonlocal pending
+                pending += reader.read()
+                lines = pending.split(b'\n')
+                pending = b'' if final else lines.pop()
+                for line in lines:
+                    text = line.decode(errors='replace').rstrip('\r')
+                    if text:
+                        progress(text)
+            try:
+                while child.poll() is None:
+                    if cancel():
+                        raise InterruptedError('Shader preparation skipped')
+                    forward()
+                    time.sleep(.1)
+                forward(final=True)
+                if child.returncode:
+                    raise RuntimeError('Shader preparation command failed (%d)' % child.returncode)
+            finally:
+                if child.poll() is None:
+                    child.terminate()
+                    try:
+                        child.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        child.kill()
+                        child.wait()
+
+
+def _accepts_keyword(function, name):
+    import inspect
+    try:
+        parameters = inspect.signature(function).parameters.values()
+    except (TypeError, ValueError):
+        return False
+    return any(p.name == name or p.kind == p.VAR_KEYWORD for p in parameters)
+
+
+class _Reporter:
+    """Turns phase messages and machine progress into progress(text[, fraction=...]) calls.
+
+    The fraction covers the whole preparation and never moves backwards; callers whose
+    progress takes only text get the phase messages. Raw subprocess output goes to log."""
+
+    def __init__(self, progress, log, cancel):
+        self.progress = progress
+        self.log = log
+        self.cancel = cancel
+        self.fractions = _accepts_keyword(progress, 'fraction')
+        self.fraction = None
+        self.phase = ''
+        self.range = (0.0, 1.0)
+        self.last = 0.0
+
+    def message(self, text):
+        if self.fractions and self.fraction is not None:
+            self.progress(text, fraction=self.fraction)
+        else:
+            self.progress(text)
+
+    def begin(self, text, low, high):
+        self.phase, self.range = text, (low, high)
+        if self.fraction is not None:
+            self.fraction = max(self.fraction, low)
+        self.message(text)
+
+    def update(self, done, total, detail=''):
+        if self.cancel():
+            raise InterruptedError('Shader preparation skipped')
+        if total <= 0:
+            return
+        low, high = self.range
+        fraction = max(self.fraction or 0.0, low + (high - low) * min(1.0, done / total))
+        now = time.monotonic()
+        # At most ~5 updates per second (Android publishes each one to a file).
+        if self.fraction is not None and done < total and now - self.last < 0.2:
+            self.fraction = fraction
+            return
+        self.last = now
+        self.fraction = fraction
+        if self.fractions:
+            self.progress('%s: %s' % (self.phase, detail) if detail else self.phase, fraction=fraction)
+
+    def line(self, text):
+        parsed = parse_progress(text)
+        if parsed:
+            self.update(*parsed)
+        else:
+            self.log(text)
 
 
 def prepare(game, template, executable, cache_root, package, renderer='vulkan',
             progress=lambda text: None, cancel=lambda: False, skip=False,
-            runner=run_process, python=None, builder=None, runtime_identity=None):
+            runner=run_process, python=None, builder=None, runtime_identity=None, log=None):
     """Return a nonfatal status. executable=None assembles Android's pending warm.
 
+    progress(text) gets the phase messages; a progress that takes a fraction keyword also gets
+    progress(text, fraction=0..1) as the work advances (assembly, then the native warm).
+    log(line) receives the helpers' raw output (default: progress).
+    builder(game, output, template[, progress=callback(done, total, detail)]) assembles in-process.
     Paths are private local output only. No caller-supplied source is removed.
     """
+    reporter = _Reporter(progress, log or progress, cancel)
     if not Path(template).is_file():
         message = 'Shader template unavailable; shaders will compile during play'
         progress(message)
@@ -262,31 +365,34 @@ def prepare(game, template, executable, cache_root, package, renderer='vulkan',
         root.mkdir(parents=True, exist_ok=True)
         migrate_legacy_caches(root)
         staging = Path(tempfile.mkdtemp(prefix='generation-', dir=root))
-        progress('Resolving shaders from your game files')
+        reporter.begin('Resolving shaders from your game files', 0.0, ASSEMBLY_SHARE if executable else 1.0)
         import sys
         command = [python or sys.executable, str(Path(package) / 'tools/shaderprep.py'),
                    'build', str(staging / 'headstart.bin'), '--game', str(game), '--template', str(template),
-                   '--max', '0']
+                   '--max', '0', '--progress']
         env = os.environ.copy()
         for key in list(env):
             if key.startswith('WWHD_VK_TEST_') or key == 'WWHD_VK_GRAPH_DIAGNOSTICS':
                 env.pop(key)
         if builder:
-            builder(game, staging / 'headstart.bin', template)
+            if _accepts_keyword(builder, 'progress'):
+                builder(game, staging / 'headstart.bin', template, progress=reporter.update)
+            else:
+                builder(game, staging / 'headstart.bin', template)
         else:
-            runner(command, env, cancel, progress)
+            runner(command, env, cancel, reporter.line)
         if cancel():
             raise InterruptedError('Shader preparation skipped')
         if not (staging / 'headstart.bin').is_file():
             raise RuntimeError('Shader preparation produced no head start')
         status = 'warm_pending'
         if executable:
-            progress('Compiling shaders and pipelines for this computer')
+            reporter.begin('Compiling shaders and pipelines for this computer', ASSEMBLY_SHARE, 1.0)
             # Preparation owns its live directory; a caller's exact-file override
             # must not redirect the warm subprocess away from that directory.
             env.pop('WWHD_VK_PIPELINE_CACHE', None)
             env.update(cache_environment(staging, game, renderer))
-            runner([str(executable), '--game', str(game), '--warm-shaders'], env, cancel, progress)
+            runner([str(executable), '--game', str(game), '--warm-shaders'], env, cancel, reporter.line)
             status = 'ready'
         result = dict(schema=SCHEMA, status=status, identity=wanted, launch=launch, generation=staging.name)
         with activation_lock(root):
@@ -349,7 +455,9 @@ def main(argv=None):
     args = parser.parse_args(argv)
     result = prepare(args.game, args.template, args.executable, args.cache_root, args.package,
                      renderer=args.renderer, skip=args.skip,
-                     progress=lambda text: print(text, file=sys.stderr, flush=True),
+                     progress=lambda text, fraction=None: print(
+                         text if fraction is None else '%3d%% %s' % (100 * fraction, text), file=sys.stderr, flush=True),
+                     log=lambda line: print(line, file=sys.stderr, flush=True),
                      cancel=lambda: bool(args.cancel_file and args.cancel_file.exists()))
     print(json.dumps(result), flush=True)
     # Skipping is a successful optional operation; actual preparation failures

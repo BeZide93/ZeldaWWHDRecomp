@@ -10,6 +10,7 @@
 #include "ppc.h"
 #include "platform/host.h"
 #include "Cafe/HW/Latte/ISA/RegDefines.h"
+#include "../warm_progress.h"
 #include <zlib.h>
 #include <array>
 #include <algorithm>
@@ -165,6 +166,20 @@ int warm_headstart_shaders() {
       throw std::runtime_error("head-start file exceeds 256 MiB");
     std::unique_ptr<FILE, decltype(&std::fclose)> file(open_utf8_file(path, "rb"), &std::fclose);
     if (!file) throw std::runtime_error("cannot open head-start file");
+    // progress: shader records (1, 3, 6) and portable pipeline records (5), counted from the headers
+    size_t progressShaders = 0, progressTotal = 0, progressDone = 0;
+    {
+      std::array<uint8_t, 12> peek;
+      while (std::fread(peek.data(), 1, peek.size(), file.get()) == peek.size()) {
+        const uint32_t type = word(peek.data());
+        progressShaders += type == 1 || type == 3 || type == 6;
+        progressTotal += type == 1 || type == 3 || type == 5 || type == 6;
+        if (std::fseek(file.get(), word(peek.data() + 8), SEEK_CUR)) break;
+      }
+      std::clearerr(file.get());
+      if (std::fseek(file.get(), 0, SEEK_SET)) throw std::runtime_error("cannot rewind head-start file");
+      warmprogress::report(0, progressTotal, "shaders and pipelines", true);
+    }
     ProgramPool pool;
     std::array<uint32_t, 0x10000> regs{};
     std::vector<std::shared_ptr<PipelineRecipe>> portable;
@@ -222,7 +237,9 @@ int warm_headstart_shaders() {
       if (!shader || !shader->ready()) ++failed;
       else if (type == 1 || type == 6) ++known;
       else ++speculative;
+      warmprogress::report(known + speculative + failed, progressTotal, "shaders and pipelines");
     }
+    progressDone = std::min(progressShaders, known + speculative + failed);
     (void)finish_pipeline_warmup();
     std::vector<std::shared_ptr<PipelineRecipe>> resolved;
     RecipeShaderPool resolvedShaderPool;
@@ -281,10 +298,16 @@ int warm_headstart_shaders() {
     }
     if (!portable.empty()) {
       std::fprintf(stderr, "[vulkan state warmup] identity resolution: absent VS %zu PS %zu; uniform mismatch %zu descriptor mismatch %zu missing SPIR-V %zu; canonical remaps %zu\n", absentVs, absentPs, uniformMismatch, descriptorMismatch, missingWords, remapped);
-      const auto batch = warm_resolved_pipeline_recipes(std::move(resolved));
+      // unresolved recipes are done; the compiled ones report as they finish
+      const size_t base = progressDone + unresolved;
+      warmprogress::report(base, progressTotal, "shaders and pipelines", true);
+      const auto batch = warm_resolved_pipeline_recipes(std::move(resolved), [&](size_t finished) {
+        warmprogress::report(base + finished, progressTotal, "shaders and pipelines");
+      });
       std::fprintf(stderr, "[vulkan state warmup] %zu ready, %zu failed, %zu unresolved identities/layouts (on-demand fallback)\n", batch.ready, batch.failed, unresolved);
     }
     const auto pipelines = finish_pipeline_warmup();
+    warmprogress::report(progressTotal, progressTotal, "shaders and pipelines", true);
     save_pipeline_cache();
     const bool dirty = vk::shader_cache_dirty();
     bool saved = vk::save_shader_cache();

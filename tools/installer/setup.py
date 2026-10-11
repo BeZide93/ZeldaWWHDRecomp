@@ -2158,6 +2158,31 @@ def write_code_mods_setting(data_dir, hooks):
     os.replace(tmp, path)
 
 
+def shader_progress_callback(progress):
+    """progress(text[, fraction]) for shader_prebuild.prepare, shown on a Progress line.
+
+    fraction covers the whole preparation (0..1); None until the helpers report one, so the bar
+    is indeterminate until then. The log gets each phase once, not every update."""
+    last = {"phase": None}
+    def message(text, fraction=None):
+        if fraction is None:
+            progress.update(0, 0, text, force=True)
+        else:
+            done = int(round(1000 * fraction))
+            if GUI:
+                # the bar shows this text instead of its percentage; keep it short enough for
+                # the bar: "<phase>: 1,234 of 5,678 (42%)" (the terminal line keeps the units)
+                counted = re.match(r"(.*?: [\d,]+ of [\d,]+)( |$)", text)
+                progress.update(done, 1000, "%s (%d%%)" % (counted.group(1) if counted else text, done // 10))
+            else:
+                progress.update(done, 1000, text)
+        phase = text.split(":", 1)[0]
+        if phase != last["phase"]:
+            last["phase"] = phase
+            LOG.write(text)
+    return message
+
+
 def prepare_shaders_nonfatal(*args, **kwargs):
     """Shader preparation is optional, including unexpected helper failures."""
     try:
@@ -2343,13 +2368,10 @@ def install(ctx, source, keys=None, info=None, ui=None, check_keys=None):
         except OSError as error:
             say("Shader preparation launcher unavailable: %s" % error)
         shader_progress = Progress("Preparing shaders")
-        def shader_message(text):
-            shader_progress.update(0, 0, text, force=True)
-            LOG.write(text)
         state["shader_prebuild"] = prepare_shaders_nonfatal(
             ctx.game_dir, shader_template, state["exe"],
             shader_root, PKG,
-            renderer="metal" if IS_MAC else "vulkan", progress=shader_message,
+            renderer="metal" if IS_MAC else "vulkan", progress=shader_progress_callback(shader_progress), log=LOG.write,
             skip=bool(getattr(args, "skip_shader_prebuild", False)),
             cancel=lambda: bool(getattr(args, "shader_prebuild_cancel", None) and
                                 Path(args.shader_prebuild_cancel).exists()))

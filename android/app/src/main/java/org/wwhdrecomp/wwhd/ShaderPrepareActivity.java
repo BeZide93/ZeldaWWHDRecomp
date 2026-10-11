@@ -7,16 +7,42 @@ import org.json.JSONObject;
 
 /** One isolated SDL/GPU lifetime. Never loads or starts the guest game threads. */
 public final class ShaderPrepareActivity extends WwhdActivity {
+    private static final String NOTE = "Preparing shaders for this phone. Back skips this step; shaders can compile during play.";
+    private final android.os.Handler handler = new android.os.Handler(android.os.Looper.getMainLooper());
+    private android.widget.TextView note;
+
+    /** The native warm (gfx/warm_progress.h) keeps its latest "done total detail" line here. */
+    private File progressFile() { return new File(getCacheDir(), "shader-warm-progress.txt"); }
+
     @Override public void loadLibraries() {
         super.loadLibraries();
         org.libsdl.app.SDLActivity.nativeSetenv("WWHD_NO_AUDIO", "1");
+        progressFile().delete();
+        org.libsdl.app.SDLActivity.nativeSetenv("WWHD_WARM_PROGRESS_FILE", progressFile().getAbsolutePath());
     }
+
+    private final Runnable showProgress = new Runnable() {
+        @Override public void run() {
+            try {
+                String[] line = new String(java.nio.file.Files.readAllBytes(progressFile().toPath()),
+                    java.nio.charset.StandardCharsets.UTF_8).trim().split(" ", 3);
+                long done = Long.parseLong(line[0]), total = Long.parseLong(line[1]);
+                if (total > 0 && note != null)
+                    note.setText("Preparing shaders for this phone: " + (100 * done / total) + "%" +
+                        (line.length > 2 ? " (" + line[2] + ")" : "") + ". Back skips this step; shaders can compile during play.");
+            } catch (Exception notYet) { /* no progress reported yet */ }
+            handler.postDelayed(this, 500);
+        }
+    };
+
+    @Override protected void onResume() { super.onResume(); handler.post(showProgress); }
+    @Override protected void onPause() { handler.removeCallbacks(showProgress); super.onPause(); }
 
     @Override protected void onCreate(android.os.Bundle state) {
         super.onCreate(state);
         if (mLayout != null) {
-            android.widget.TextView note = new android.widget.TextView(this);
-            note.setText("Preparing shaders for this phone. Back skips this step; shaders can compile during play.");
+            note = new android.widget.TextView(this);
+            note.setText(NOTE);
             note.setTextColor(android.graphics.Color.WHITE);
             note.setBackgroundColor(0xCC000000);
             note.setPadding(24, 24, 24, 24);
