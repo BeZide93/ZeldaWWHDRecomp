@@ -856,15 +856,12 @@ void end_encoder() {
 bool narrow_barriers() {
   static const bool enabled = [] {
     const char* e = std::getenv("WWHD_VK_NARROW_BARRIERS");
-    // Precise resource dependencies: on by default on Android (tile-based GPUs, where the gain is
-    // expected; device numbers pending), opt-in on desktop until native Windows/Linux drivers have
-    // been checked (neutral on MoltenVK). WWHD_VK_NARROW_BARRIERS=1|0 overrides it everywhere.
+    // Precise resource dependencies: opt-in everywhere (WWHD_VK_NARROW_BARRIERS=1). Measured on an
+    // OnePlus 8 Pro (Adreno 650, Mesa Turnip, issue #104): no speed difference, but device-lost in 4 of
+    // 10 runs with them on and 0 of 18 with them off or with Turnip's sysmem rendering; neutral on
+    // MoltenVK. WWHD_VK_NARROW_BARRIERS=1|0 overrides the default.
     if (e && *e) return std::strcmp(e, "0") != 0;
-#ifdef __ANDROID__
-    return true;
-#else
     return false;
-#endif
   }();
   return enabled;
 }

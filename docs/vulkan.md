@@ -811,9 +811,10 @@ CPU paths not set to `1` and lazy DrawDone / async present when turned off. The 
 
 ## Resource dependencies
 
-Precise barriers are **on by default on Android** and **opt-in on desktop**
-(`WWHD_VK_NARROW_BARRIERS=1`) until they have been checked on native Windows/Linux drivers; on MoltenVK
-they measured neutral (7 interleaved pairs). The precise path records each image's last write scope
+Precise barriers are **opt-in on every platform** (`WWHD_VK_NARROW_BARRIERS=1`). On MoltenVK they
+measured neutral (7 interleaved pairs); on an OnePlus 8 Pro (Adreno 650, Mesa Turnip) they gave no
+speed difference but caused device-lost in 4 of 10 runs (0 of 18 with them off or with Turnip's
+sysmem rendering), so Android no longer enables them by default (issue #104). The precise path records each image's last write scope
 and accumulated reader stages, including attachments, feedback copies, mip chains, composition
 and readbacks. Texture bindings name the shader stage that actually reads them. Barrier elision
 preserves the conservative dynamic-rendering pass boundaries. Source access masks contain writes only; a write waits for all pending readers.

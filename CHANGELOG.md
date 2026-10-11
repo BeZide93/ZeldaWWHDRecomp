@@ -7,6 +7,10 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Fixed: Android GPU crashes ("device lost") on some Adreno phones** (issue #104). The precise
+  GPU barriers that v0.2.12 turned on for Android caused occasional crashes with Mesa Turnip on an
+  Adreno 650 and gave no measurable speed-up, so they are off by default again on every platform
+  (`WWHD_VK_NARROW_BARRIERS=1` still turns them on). Thanks to @rhemfur for the measurements.
 - **Fixed: setup stopped with "the recompiler wrote no code"** (issue #136) when the install folder's
   path contains square brackets, for example `...\LoZ - The Wind Waker [WiiU]\data`. Setup and the
   recompiler treated the brackets as a search pattern and then found none of their own files.
