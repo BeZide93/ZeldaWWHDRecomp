@@ -7,6 +7,19 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Fixed: crash with Quick doors when leaving a room with spores** (issue #145), for example at
+  the first door in the Forbidden Woods. Quick doors ran the spores' fade-out faster than the game
+  draws, so their effect was removed while still queued for drawing. Doors now wait for the
+  weather effect to finish fading (rain, stars, spores, fog and waves) and stay fast otherwise.
+
+- **Windows, Intel UHD graphics: a workaround for a crash in Intel's Vulkan driver** a few seconds
+  after start (issue #144). On Intel GPUs every render-target view now states its purpose explicitly;
+  `WWHD_VK_ATTACHMENT_VIEW_USAGE=0` turns it off, and `WWHD_VK_TRACE_PASSES=1` logs each render
+  pass once for crash reports.
+- **Fixed: Android GPU crashes ("device lost") on some Adreno phones** (issue #104). The precise
+  GPU barriers that v0.2.12 turned on for Android caused occasional crashes with Mesa Turnip on an
+  Adreno 650 and gave no measurable speed-up, so they are off by default again on every platform
+  (`WWHD_VK_NARROW_BARRIERS=1` still turns them on). Thanks to @rhemfur for the measurements.
 - **Fixed: setup stopped with "the recompiler wrote no code"** (issue #136) when the install folder's
   path contains square brackets, for example `...\LoZ - The Wind Waker [WiiU]\data`. Setup and the
   recompiler treated the brackets as a search pattern and then found none of their own files.

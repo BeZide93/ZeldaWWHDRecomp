@@ -272,7 +272,7 @@ baseline limitation separate and do not report the full emulator smoke as passin
 
 1. In a private test APK, use SDL's manifest environment metadata under `<application>`:
    `<meta-data android:name="SDL_ENV.WWHD_VK_NARROW_BARRIERS" android:value="0" />` for the old
-   path, `1` for precise barriers (also the default). Reinstall/restart between variants; keep the native library identical.
+   path (the default), `1` for precise barriers. Reinstall/restart between variants; keep the native library identical.
    Also set `SDL_ENV.WWHD_PROFILE=1`, `SDL_ENV.WWHD_NO_AUDIO=1` and the existing `WWHD_TEST_*`
    scripted input/state-load switches. Use private shader caches, copied saves and a verified state
    load. Do not distribute an APK containing game code.
