@@ -17,7 +17,7 @@
 #define WWHD_VK_INSTANCE_FUNCTIONS(X) \
   X(vkCreateDevice) X(vkDestroySurfaceKHR) X(vkEnumerateDeviceExtensionProperties) X(vkEnumeratePhysicalDevices) \
   X(vkGetDeviceProcAddr) X(vkGetPhysicalDeviceFeatures) X(vkGetPhysicalDeviceFeatures2) \
-  X(vkGetPhysicalDeviceFormatProperties) X(vkGetPhysicalDeviceMemoryProperties) X(vkGetPhysicalDeviceProperties) \
+  X(vkGetPhysicalDeviceFormatProperties) X(vkGetPhysicalDeviceMemoryProperties) X(vkGetPhysicalDeviceProperties) X(vkGetPhysicalDeviceProperties2) \
   X(vkGetPhysicalDeviceQueueFamilyProperties) X(vkGetPhysicalDeviceSurfaceCapabilitiesKHR) \
   X(vkGetPhysicalDeviceSurfaceFormatsKHR) X(vkGetPhysicalDeviceSurfacePresentModesKHR) \
   X(vkGetPhysicalDeviceSurfaceSupportKHR)

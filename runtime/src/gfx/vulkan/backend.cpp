@@ -2826,6 +2826,7 @@ static void log_instance_layers() {
 // The host has loaded the Vulkan loader's global functions (load_global_functions).
 static void init_device(std::vector<const char *> extensions,
                         const std::function<void()> &create_surfaces) {
+  load_device_setting();
   reset_pipeline_lookup_cache();
 #ifdef __APPLE__
   // This draw-heavy workload is faster with direct Metal resource bindings.
@@ -2913,47 +2914,79 @@ static void init_device(std::vector<const char *> extensions,
   std::vector<VkPhysicalDevice> devices(n);
   vkEnumeratePhysicalDevices(R.instance, &n, devices.data());
   devices.resize(n);
-  // First the GPUs with Vulkan 1.3 (in the driver's order), then those with VK_KHR_dynamic_rendering
-  std::string unsuitable;  // the GPUs passed over, for the message when none is left
-  for (DynamicRendering want : {DynamicRendering::Core, DynamicRendering::KHR}) {
-    for (auto device : devices) {
-      VkPhysicalDeviceProperties properties;
-      vkGetPhysicalDeviceProperties(device, &properties);
-      const DynamicRendering have = dynamic_rendering(device, properties, device_extensions(device));
-      if (have != want) {
-        if (want == DynamicRendering::KHR && have == DynamicRendering::None)
-          unsuitable += std::string("\n") + properties.deviceName + ": Vulkan " +
-                        version_text(device_api_version(properties)) + ", driver " +
-                        driver_version_text(properties) +
-                        (device_api_version(properties) < VK_API_VERSION_1_1 ? "; older than Vulkan 1.1"
-                                                                             : "; VK_KHR_dynamic_rendering missing");
-        continue;
+  std::string unsuitable;
+  std::vector<uint32_t> deviceQueues(devices.size(), UINT32_MAX);
+  std::vector<VkQueueFamilyProperties> queueProperties(devices.size());
+  device_inventory.clear();
+  for (size_t i = 0; i < devices.size(); ++i) {
+    auto device = devices[i];
+    VkPhysicalDeviceProperties properties;
+    vkGetPhysicalDeviceProperties(device, &properties);
+    const auto have = dynamic_rendering(device, properties, device_extensions(device));
+    DeviceInfo info;
+    info.name = properties.deviceName;
+    info.vendor = properties.vendorID;
+    info.device = properties.deviceID;
+    info.type = properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU ? "discrete" :
+                properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU ? "integrated" :
+                properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU ? "virtual" :
+                properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU ? "CPU" : "other";
+    info.driver = driver_version_text(properties);
+    info.version = version_text(device_api_version(properties));
+    info.core = have == DynamicRendering::Core;
+    if (device_api_version(properties) >= VK_API_VERSION_1_1) {
+      VkPhysicalDeviceIDProperties id{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES};
+      VkPhysicalDeviceProperties2 props{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
+      props.pNext = &id;
+      vkGetPhysicalDeviceProperties2(device, &props);
+      bool nonzero = false;
+      for (auto byte : id.deviceUUID) nonzero |= byte != 0;
+      if (nonzero) {
+        info.identity = "uuid:";
+        constexpr char hex[] = "0123456789abcdef";
+        for (auto byte : id.deviceUUID) { info.identity += hex[byte >> 4]; info.identity += hex[byte & 15]; }
       }
+    }
+    if (info.identity.empty()) info.identity = "id:" + std::to_string(info.vendor) + ":" +
+        std::to_string(info.device) + ":" + info.name;
+    if (have == DynamicRendering::None)
+      info.unavailable = device_api_version(properties) < VK_API_VERSION_1_1 ?
+          "older than Vulkan 1.1" : "VK_KHR_dynamic_rendering missing";
+    else {
       uint32_t qn;
       vkGetPhysicalDeviceQueueFamilyProperties(device, &qn, nullptr);
       std::vector<VkQueueFamilyProperties> qs(qn);
       vkGetPhysicalDeviceQueueFamilyProperties(device, &qn, qs.data());
-      for (uint32_t q = 0; q < qn; q++) {
+      for (uint32_t q = 0; q < qn; ++q) {
         VkBool32 tv = 0, drc = VK_TRUE;
         vkGetPhysicalDeviceSurfaceSupportKHR(device, q, R.tv.surface, &tv);
-        if (R.drc.surface)
-          vkGetPhysicalDeviceSurfaceSupportKHR(device, q, R.drc.surface, &drc);
+        if (R.drc.surface) vkGetPhysicalDeviceSurfaceSupportKHR(device, q, R.drc.surface, &drc);
         if ((qs[q].queueFlags & VK_QUEUE_GRAPHICS_BIT) && tv && drc) {
-          R.physicalDevice = device;
-          R.formatProperties.clear();
-          R.queueFamily = q;
-          R.computeQueue = (qs[q].queueFlags & VK_QUEUE_COMPUTE_BIT) != 0;
-          R.gpuTimestampValidBits = qs[q].timestampValidBits;
-          R.dynamicRenderingKHR = have == DynamicRendering::KHR;
-          break;
+          deviceQueues[i] = q; queueProperties[i] = qs[q]; break;
         }
       }
-      if (R.physicalDevice)
-        break;
-      unsuitable += std::string("\n") + properties.deviceName + ": cannot draw to the game window";
+      if (deviceQueues[i] == UINT32_MAX) info.unavailable = "cannot draw to the game window";
     }
-    if (R.physicalDevice)
-      break;
+    LOG("[vulkan] GPU %zu: %s (%s, vendor %04x, device %04x, Vulkan %s, driver %s, %s): %s",
+        i, info.name.c_str(), info.type.c_str(), info.vendor, info.device, info.version.c_str(),
+        info.driver.c_str(), info.identity.c_str(), info.usable() ? "usable" : info.unavailable.c_str());
+    if (!info.usable()) unsuitable += "\n" + info.name + ": " + info.unavailable;
+    device_inventory.push_back(info);
+  }
+  const char* deviceEnv = getenv("WWHD_VK_DEVICE");
+  const auto choice = choose_device(device_inventory, device_setting(), deviceEnv ? deviceEnv : "");
+  if (choice.index >= 0) {
+    const auto i = size_t(choice.index);
+    R.physicalDevice = devices[i];
+    R.formatProperties.clear();
+    R.queueFamily = deviceQueues[i];
+    R.computeQueue = (queueProperties[i].queueFlags & VK_QUEUE_COMPUTE_BIT) != 0;
+    R.gpuTimestampValidBits = queueProperties[i].timestampValidBits;
+    R.dynamicRenderingKHR = !device_inventory[i].core;
+    active_device = device_inventory[i].name;
+    device_fallback = choice.fallback.empty() ? "" : choice.fallback + "; using " + active_device + ".";
+    if (!device_fallback.empty()) LOG("[vulkan] %s (%s)", device_fallback.c_str(), deviceEnv ? "env" : "setting");
+    LOG("[vulkan] chosen GPU: %s (%s)", active_device.c_str(), choice.reason.c_str());
   }
   if (!R.physicalDevice)
     exception_report::raise(

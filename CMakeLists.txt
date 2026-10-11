@@ -1020,3 +1020,8 @@ if(WIN32 AND SDL3_FOUND)
     endforeach()
   endif()
 endif()
+
+add_executable(device_choice_test runtime/tools/device_choice_test.cpp)
+target_include_directories(device_choice_test PRIVATE runtime/src)
+target_compile_options(device_choice_test PRIVATE -UNDEBUG)
+add_test(NAME device_choice COMMAND device_choice_test)

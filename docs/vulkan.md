@@ -759,3 +759,9 @@ The PARK experiment separately passed the native build, four CTest regressions, 
 The strict opt-in `WWHD_VK_VERTEX_COPY_WINDOW=1` instead fuses minimum and maximum index reduction, retains the original physical allocation and draw addressing, and copies/compares only the proven fetch window. Unsupported bounds/rates/layouts keep the original full-prefix path. A separate cache includes reservation, window offset/length, device and submission generation; fresh guest data is always compared. Device smoke tests passed full/window pixel equivalence with poisoned leading bytes, signed base vertex, restart, vertex-index checks, mutations and submission-ring retirement. Actual saved-scene validation and matched FPS acceptance are still required before adoption.
 
 Small register updates (at most 16 words) use the fused Vulkan path by default. Set `WWHD_VK_FUSE_SMALL_REGS=0` to disable it. Matched scene tests suggest roughly 2% less renderer CPU time; FPS benefit remains modest and subject to run drift.
+
+## Choosing the GPU
+
+In Settings → Graphics → GPU (Vulkan), choose Automatic or a graphics card. The choice applies after restarting. Automatic keeps the driver's order, preferring cards with Vulkan 1.3. Unavailable cards show the reason; if a saved card is missing or unusable, the game uses Automatic and shows a notice.
+
+On hybrid laptops, choose the discrete NVIDIA or AMD GPU to use it instead of integrated graphics. For a single start, `WWHD_VK_DEVICE` overrides the saved choice: use a zero-based index from the startup GPU list, or a case-insensitive part of the GPU name (for example `WWHD_VK_DEVICE=NVIDIA`). The first matching name is used. This setting is available with Vulkan on desktop platforms.

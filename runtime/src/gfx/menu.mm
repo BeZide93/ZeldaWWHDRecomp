@@ -88,6 +88,14 @@ static void set_pref(NSString* key, id value) {
         [NSUserDefaults.standardUserDefaults setObject:value forKey:key];
     }
 }
+#ifdef WWHD_HAS_VULKAN
+namespace gfxvk {
+void load_device_setting() {
+    if (g_prefs) if (id value = pref(@"vkDevice"))
+        if ([value isKindOfClass:[NSString class]]) set_device_setting([value UTF8String]);
+}
+}
+#endif
 static void load_prefs() {
     g_prefs_loaded = true;
     if (!g_prefs) return;
@@ -123,6 +131,7 @@ static void save_prefs() {
         set_pref(@"fpsHighPaced", @(interp::paced_interpolation_at(120)));
     }
 #ifdef WWHD_HAS_VULKAN
+    if (!env_set({"WWHD_VK_DEVICE"})) set_pref(@"vkDevice", [NSString stringWithUTF8String:gfxvk::device_setting().c_str()]);
     if (!env_set({"WWHD_VK_PRESENT_MODE"})) set_pref(@"vkPresentMode", @(gfxvk::present_mode()));
 #endif
     if (NSString* p = portable_prefs_path()) [g_portable_prefs writeToFile:p atomically:YES];

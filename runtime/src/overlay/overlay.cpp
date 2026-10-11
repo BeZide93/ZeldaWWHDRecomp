@@ -753,6 +753,31 @@ void tab_graphics() {
     ImGui::SameLine(0, 30);
     if (check("Edge smoothing (FXAA)", render::fxaa(), &v, render::feature_available(render::kFeatureFXAA)))
         post_changed([v] { render::set_fxaa(v); });
+#if defined(WWHD_HAS_VULKAN) && !defined(__ANDROID__)
+    if (render::vulkan()) {
+        heading("GPU (Vulkan)");
+        const bool env = gfxvk::device_from_env();
+        if (radio("Automatic", gfxvk::device_setting().empty(), !env))
+            post_changed([] { gfxvk::set_device_setting(""); });
+        for (size_t i = 0; i < gfxvk::device_inventory.size(); ++i) {
+            const auto& gpu = gfxvk::device_inventory[i];
+            ImGui::PushID(int(i));
+            const auto label = gpu.name + " (" + gpu.type + ")";
+            if (radio(label.c_str(), gfxvk::device_setting() == gpu.identity, !env && gpu.usable())) {
+                const auto identity = gpu.identity;
+                post_changed([identity] { gfxvk::set_device_setting(identity); });
+            }
+            if (!gpu.usable()) note("%s", gpu.unavailable.c_str());
+            ImGui::PopID();
+        }
+        note("GPU changes apply after a restart. Currently using %s.", gfxvk::active_device.c_str());
+#ifndef _WIN32
+        if (ImGui::Button("Restart now##gpu")) hostui::post([] { render::restart(); });
+#endif
+        if (env) note("WWHD_VK_DEVICE=%s takes precedence for this start.", getenv("WWHD_VK_DEVICE"));
+        if (!gfxvk::device_fallback.empty()) note("%s", gfxvk::device_fallback.c_str());
+    }
+#endif
     heading("Presentation (Vulkan)");
 #ifdef WWHD_HAS_VULKAN
     {
