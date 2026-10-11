@@ -89,6 +89,34 @@ class GenTest(unittest.TestCase):
         self.run_gen()
         self.assertEqual(os.path.getmtime(p), 1)
 
+    def test_unmarked_shared_source_does_not_join(self):
+        # c1/c2 share only c_pending.cpp (no VERIFY marks: support code): two game units, each with its copy
+        with open(os.path.join(self.src, "wwhd_src/c_pending.cpp"), "w") as f:
+            f.write("void stub() {}\n")
+        for u, fn in (("c1", "0x02000800"), ("c2", "0x02000900")):
+            with open(os.path.join(self.src, "wwhd_src/%s.cpp" % u), "w") as f:
+                f.write("VERIFY(%s, f_%s)\n" % (fn, u))
+            with open(os.path.join(self.src, "tools/verify/units/%s.txt" % u), "w") as f:
+                f.write("src wwhd_src/%s.cpp wwhd_src/c_pending.cpp\n" % u)
+        self.assertIn("4 game units", self.run_gen())
+        units = self.read("units.cmake")
+        self.assertIn('_NAME "c1")', units)
+        self.assertIn('_NAME "c2")', units)
+        self.assertEqual(units.count("wwhd_src/c_pending.cpp\""), 3)  # c1, c2 and the configure dependencies
+
+    def test_verify_named(self):
+        with open(os.path.join(self.src, "wwhd_src/b.cpp"), "a") as f:
+            f.write('VERIFY_NAMED(0x02000700, static_cast<void (C::*)(int)>(&C::set), "&C::set(int)");\n')
+        self.run_gen()
+        self.assertIn("02000700\tbunit\t&C::set(int)", self.read("functions.tsv"))
+
+    def test_glued_source_needs_the_game(self):
+        with open(os.path.join(self.src, "wwhd_src/b.cpp"), "a") as f:
+            f.write("/* WWHD glue (tools/verify/autoglue.py)\n*/\n")
+        r = subprocess.run([sys.executable, os.path.join(HERE, "gen.py"), self.src, self.out], capture_output=True, text=True)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("WWHD_DECOMP_GAME", r.stderr)
+
     def test_missing_tree(self):
         r = subprocess.run([sys.executable, os.path.join(HERE, "gen.py"), os.path.join(self.tmp.name, "nothing"), self.out],
                            capture_output=True, text=True)

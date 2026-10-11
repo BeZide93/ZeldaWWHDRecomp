@@ -15,7 +15,11 @@ Everything else is the same in both builds:
 
 The decompiled code does not contain any of the game's code or data, but it is written against the
 game's memory layout and calls the functions it uses by their address in the game. It therefore only
-works together with the recompiled game, which is still built from your own copy. The decomp build
+works together with the recompiled game, which is still built from your own copy. The few pieces of
+game data some decompiled units need (the model data of the ship's sail, the grid sail, the finish-line
+flag and the buoy flags), and the guest addresses of their string literals and tables, are read from
+your own copy of the game when the build is configured, as the decompilation's own tools do; they stay
+in the build directory. The decomp build
 needs the **USA** game (version 0), the build the decompilation was made from.
 
 The decomp build is **opt-in and experimental**: the normal (recompiled) build is the default and
@@ -24,8 +28,8 @@ decompiled source in the real game, and to make the game code readable and chang
 
 ## What runs decompiled
 
-Every function the decompilation has verified (about 22,700 functions in about 820 game units at the
-pinned version), except:
+Every function the decompilation has verified (22,705 functions in 862 game units at the pinned
+version), except:
 
 - functions the port's runtime replaces itself (its hooks for 60 fps, the camera, the controls and so
   on: `tools/recomp/hooks*.txt`) - the port's version stays in charge;
@@ -38,13 +42,15 @@ Settings (`F1`) > Language / About and in the performance report ends in `decomp
 
 ## Status
 
-- Tested on macOS (Apple M3 Max, Metal) with the decompilation at 47e1dbc: a scripted session from
-  the title screen through the file select into the game and 30 s of walking and jumping matched the
-  normal build step by step (Link, camera, random numbers, sound starts, every game object after every
-  update, the save data).
+- Tested on macOS (Apple M3 Max, Metal) with the decompilation at 2c1deae (and before at 47e1dbc): a
+  scripted session from the title screen through the file select into the game and 30 s of walking and
+  jumping matched the normal build step by step (Link, camera, random numbers, sound starts, every game
+  object after every update, the save data). That session itself does not always play out the same from
+  run to run (in either build, from about 18 s on); each decomp run matched a normal run.
 - Speed: the game runs at full speed, but the decompiled code needs more processor time than the
-  recompiled code: about 1.6 times the CPU time of the whole game process in that session (23.2 s
-  instead of 14.3 s for 30 s of play). Making it faster is future work.
+  recompiled code: about 1.3 times the CPU time of the whole game process in that session (21.6 s
+  instead of 16.8 s for 30 s of play, on a busy machine; 1.6 times at 47e1dbc). Making it faster is
+  future work.
 - Not yet available on Windows, Linux and Android.
 
 ## Building it from source
@@ -56,6 +62,9 @@ plus the submodule:
 git submodule update --init decomp
 cmake -S . -B build/decomp -G Ninja -DWWHD_DECOMP=ON -DWWHD_RENDERER=METAL -DGEN_DIR=$PWD/build/gen-decomp
 ```
+
+The configure step reads your game from `game/` (another folder: `-DWWHD_DECOMP_GAME=/path/to/game`, the
+folder that holds `code/cking.rpx`); it takes about two minutes, mostly for the source glue.
 
 The first configure writes the list of decompiled functions to `build/decomp/decomp/decomp_hooks.txt`
 and stops with the command that translates your game code with that list, into its own directory
@@ -71,10 +80,15 @@ cmake --build build/decomp --target wwhd -j 4
 for the decomp build, and the decomp build refuses one made for the normal build or with another
 function list (after a submodule update: translate again with the new list).
 
-How it works: `tools/decomp_build/gen.py` reads the decompilation's units and their `VERIFY(...)`
-marks and writes the function list and the glue. Each game unit is compiled with hidden visibility
-and merged into one object with `ld -r`, so units never see each other's classes or helpers (as in
-the decompilation's verification harness). The recompiler (`--decomp-hooks`) routes every listed
+How it works: `tools/decomp_build/gen.py` reads the decompilation's units, prepares their sources as
+the decompilation's verification harness does (its `tools/verify/autoglue.py` turns the GameCube-style
+sources into compilable glue: function entries, `VERIFY` marks, guest views of static tables, guest
+copies of string literals; its `tools/verify/assets.py` writes the model data headers `assets/*.h`),
+all into the build directory (`build/decomp/decomp/{glued,include,verify}`), and writes the function
+list and the glue. Each game unit (the decompilation's verification units
+that share decompiled sources) is compiled with hidden visibility and merged into one object with
+`ld -r`, so units never see each other's classes or helpers (as in the decompilation's verification
+harness, where each unit is its own program). The recompiler (`--decomp-hooks`) routes every listed
 function through the runtime (`runtime/src/decomp`), which runs the decompiled function in its place.
 The runtime also rebuilds, from the game's code in memory, the stack frame layout of each decompiled
 function's original, so the decompiled code leaves the game's stack as the original does.
@@ -84,6 +98,10 @@ function's original, so the decompiled code leaves the game's stack as the origi
 A decomp release (when there is one) is a separate download next to the regular one. Its setup works
 like the regular setup: it builds the game code from your own copy of the game, translating it with
 the release's function list (`sdk/decomp_hooks.txt`).
+
+Not yet possible with the decompilation at 2c1deae: its sources are now prepared with data read from
+your own game (see above), so a release cannot ship the compiled decomp units; its setup would have to
+compile them, which it does not do yet.
 
 ## Debug switches
 

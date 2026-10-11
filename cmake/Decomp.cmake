@@ -3,7 +3,9 @@
 #
 # wwhd_decomp_configure(): run at configure time, before the game code library is set up.
 #   tools/decomp_build/gen.py writes the function list, the runtime glue (hooks.cpp) and the unit list
-#   (units.cmake) into ${CMAKE_BINARY_DIR}/decomp, and GEN_DIR is checked: it must be recompiled with
+#   (units.cmake) into ${CMAKE_BINARY_DIR}/decomp, with the decompilation's GameCube-style sources
+#   rewritten by its autoglue.py (decomp/glued) and the model data headers made from your game by its
+#   assets.py (decomp/include/assets; game data, kept in the build directory), and GEN_DIR is checked: it must be recompiled with
 #   that list (recomp.py --decomp-hooks), which it records as GEN_DIR/decomp_hooks.txt.
 # wwhd_decomp_link(target): every game unit becomes one object file: its sources compiled with hidden
 #   visibility and merged with `ld -r`, which turns hidden symbols into local ones. Units then never see
@@ -11,6 +13,8 @@
 #   where each unit is its own program. These objects, the runtime part (runtime/src/decomp) and
 #   hooks.cpp go into the target.
 set(WWHD_DECOMP_DIR "${CMAKE_SOURCE_DIR}/decomp" CACHE PATH "decomp build: the decompilation (git submodule decomp)")
+set(WWHD_DECOMP_GAME "${CMAKE_SOURCE_DIR}/game" CACHE PATH
+    "decomp build: your own copy of the game (USA; the folder with code/cking.rpx), read for the model data and the source glue")
 set(WWHD_DECOMP_OUT "${CMAKE_BINARY_DIR}/decomp")
 
 function(wwhd_decomp_configure)
@@ -24,6 +28,7 @@ function(wwhd_decomp_configure)
   find_package(Python3 REQUIRED COMPONENTS Interpreter)
   execute_process(COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/decomp_build/gen.py"
                           "${WWHD_DECOMP_DIR}" "${WWHD_DECOMP_OUT}"
+                          --game "${WWHD_DECOMP_GAME}/code/cking.rpx"
                   RESULT_VARIABLE rc OUTPUT_VARIABLE out ERROR_VARIABLE err OUTPUT_STRIP_TRAILING_WHITESPACE)
   if(NOT rc EQUAL 0)
     message(FATAL_ERROR "WWHD_DECOMP: tools/decomp_build/gen.py failed:\n${out}\n${err}")
@@ -53,8 +58,9 @@ function(wwhd_decomp_configure)
 endfunction()
 
 function(wwhd_decomp_link target)
+  # as the decompilation's verify.py; decomp/include holds the generated assets/ headers
   set(inc "${CMAKE_SOURCE_DIR}/runtime/include" "${WWHD_DECOMP_DIR}/tools/verify/include"
-          "${WWHD_DECOMP_DIR}/tools/verify/src" "${WWHD_DECOMP_DIR}/wwhd_src/include")
+          "${WWHD_DECOMP_DIR}/tools/verify/src" "${WWHD_DECOMP_DIR}/wwhd_src/include" "${WWHD_DECOMP_OUT}/include")
   # as the decompilation's harness compiles them (exact floating point: no contraction, no fast math);
   # these options come after the configuration's, so they win
   set(opts -O2 -g0 -w -fvisibility=hidden -fvisibility-inlines-hidden -ffp-contract=off -fno-fast-math

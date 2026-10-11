@@ -22,7 +22,11 @@ thread_local Cpu* cpu;
  * the same unit through recompiled code, unlike in the harness. */
 static void decomp_run(Cpu* c, void (*fn)(Cpu*)) {
     uint32_t sp = c->r[1];
+    /* the unit's function under test (WWHD_GLUE_FUNC; which `in FUNC` string a literal means): a nested
+     * call of the same unit's decompiled code sets it, the harness never does, so it is restored here */
+    uint32_t current = gabi::Activation::current;
     fn(c);
+    gabi::Activation::current = current;
     if (c->r[1] != sp) c->r[1] = sp; /* cannot happen (gabi::Local/do_call restore r1); kept as a guard */
 }
 

@@ -1,7 +1,7 @@
-# Decomp build check (docs/decomp-build.md): builds the WWHD_DECOMP=ON variant (macOS, Metal) against
-# placeholder guest code (tools/recomp/stubgen.py --decomp-hooks; no game files involved) with the
-# decompilation from the `decomp` submodule. Informational: it never blocks the other workflows or a
-# release (continue-on-error).
+# Decomp build check (docs/decomp-build.md): the decomp build's tools (function list, setup and release
+# variant). The WWHD_DECOMP=ON build itself is not made here: since decomp 2c1deae its configure step
+# reads the user's own game (model data, source glue; tools/decomp_build/gen.py --game), which CI does
+# not have. Informational: it never blocks the other workflows or a release (continue-on-error).
 name: decomp
 
 on:
@@ -18,22 +18,6 @@ jobs:
       - uses: actions/checkout@v5
         with:
           submodules: true
-
-      - name: Install build tools
-        run: brew install ninja
-
-      - name: Decomp function list and placeholder guest code
-        run: |
-          python3 tools/decomp_build/gen.py decomp build/decomp-list
-          python3 tools/recomp/stubgen.py build/gen-stub --decomp-hooks build/decomp-list/decomp_hooks.txt
-
-      - name: Build the decomp variant (Release, Metal)
-        run: |
-          cmake -S . -B build/decomp -G Ninja -DCMAKE_BUILD_TYPE=Release -DWWHD_DECOMP=ON -DWWHD_RENDERER=METAL \
-            -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DGEN_DIR="$PWD/build/gen-stub" \
-            -DWWHD_BUNDLED_DEPS=ON -DWWHD_BUNDLED_ZSTD=ON
-          cmake --build build/decomp --target wwhd
-          ls -l build/decomp/wwhd
 
       - name: Decomp build tests
         run: |
