@@ -7,6 +7,10 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Profiling on Windows on ARM64: a sampling profiler for the frame threads** (PR #147, thanks
+  @rhemfur). Off unless `WWHD_SAMPLE_THREADS=<file prefix>` is set; `tools/bench/thread_profile.py`
+  turns the samples into a report by module and function, including time inside the Vulkan driver,
+  without administrator rights. See docs/performance.md.
 - **Android: a friendlier setup screen, and the app icon starts the game** (PRs #128 and #129, thanks
   @rhemfur). Setup now guides you step by step in English, Portuguese or Spanish ("Choose your
   game", "Preparing the game for your phone… 20 of 80 · about 3 min left", "Your game is ready").
