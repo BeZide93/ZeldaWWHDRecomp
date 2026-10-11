@@ -206,6 +206,7 @@ set_source_files_properties(runtime/src/gfx/vulkan/pipeline_demand.cpp PROPERTIE
 set_source_files_properties(runtime/src/gfx/vulkan/shader_translation.cpp
     runtime/src/gfx/vulkan/shader_compiler.cpp
     runtime/src/gfx/vulkan/deferred_commands.cpp PROPERTIES COMPILE_OPTIONS "")
+set_source_files_properties(runtime/src/button_glyph_font.cpp PROPERTIES COMPILE_OPTIONS "-include;${CEMU_DIR}/cemu_shim.h")
 if(ANDROID)
   # Android: SDLActivity loads the game as libmain.so and calls its SDL_main (android/)
   add_library(wwhd SHARED ${RUNTIME_SOURCES} ${GX2_SOURCES} ${GFX_SOURCES} ${MOD_GFX_SOURCES} ${IMGUI_METAL})
@@ -377,6 +378,11 @@ target_compile_options(headless_compose_test PRIVATE -UNDEBUG)
 
 add_executable(input_map_test runtime/tools/input_map_test.cpp runtime/src/input_map.cpp)
 target_include_directories(input_map_test PRIVATE runtime/src)
+# Live button-art styling: production hooks on synthetic guest objects, original functions stubbed.
+add_executable(button_glyphs_test runtime/tools/button_glyphs_test.cpp runtime/src/button_glyphs.cpp runtime/src/button_glyph_font.cpp runtime/src/aspect.cpp runtime/src/input_map.cpp runtime/src/guest_addr_identity.c)
+target_include_directories(button_glyphs_test PRIVATE runtime/src runtime/include)
+target_compile_options(button_glyphs_test PRIVATE -UNDEBUG)
+target_link_libraries(button_glyphs_test PRIVATE cemu_latte)
 # screenshots: PNG writer, file names, binding, requests and the encoding thread (runtime/src/screenshot.cpp)
 add_executable(screenshot_test runtime/tools/screenshot_test.cpp runtime/src/screenshot.cpp runtime/src/input_map.cpp)
 target_include_directories(screenshot_test PRIVATE runtime/src runtime/include)
@@ -714,6 +720,7 @@ add_test(NAME perf_metrics COMMAND perf_metrics_test)
 add_test(NAME report_header COMMAND report_header_test)
 add_test(NAME headless_compose COMMAND headless_compose_test)
 add_test(NAME input_mapping COMMAND input_map_test)
+add_test(NAME button_glyphs COMMAND button_glyphs_test)
 add_test(NAME screenshot COMMAND screenshot_test)
 add_test(NAME game_font COMMAND game_font_test)
 add_test(NAME rtl_text COMMAND rtl_text_test)
