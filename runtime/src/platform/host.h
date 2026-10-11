@@ -56,16 +56,24 @@ template<class Fn> void with_autorelease_pool(Fn&& fn) {
  }, &call);
 }
 inline thread_local std::string thread_label;
-inline void set_thread_name(const char* name) {
- thread_label=name;
+// Diagnostic only, and called first thing in thread entry functions where an
+// escaping exception would terminate the process: never throws, and the OS name
+// is set without heap allocation (an exhausted allocator only loses the label).
+inline void set_thread_name(const char* name) noexcept {
+ try { thread_label=name; } catch(...) { thread_label.clear(); }
 #ifdef __APPLE__
  pthread_setname_np(name);
 #elif defined(_WIN32)
  using SetDescription=HRESULT(WINAPI*)(HANDLE,PCWSTR);
  auto f=(SetDescription)GetProcAddress(GetModuleHandleW(L"Kernel32.dll"),"SetThreadDescription");
- if(f) { std::wstring text; for(unsigned char c:thread_label)text.push_back(c); f(GetCurrentThread(),text.c_str()); }
+ if(f) {
+  wchar_t text[256]; size_t n=0;
+  for(;name[n] && n+1<sizeof text/sizeof *text;++n) text[n]=(unsigned char)name[n];
+  text[n]=0; f(GetCurrentThread(),text);
+ }
 #else
- pthread_setname_np(pthread_self(),thread_label.substr(0,15).c_str());
+ char text[16]; snprintf(text,sizeof text,"%s",name); // Linux limit: 15 bytes + NUL.
+ pthread_setname_np(pthread_self(),text);
 #endif
 }
 // Game and render threads: keep them on fast cores and ahead of background work. macOS: QoS

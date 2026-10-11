@@ -231,9 +231,14 @@ int main() {
   // Trace allocation failure after compilation cannot change the returned
   // driver result or abandon its handle on either worker or consuming thread.
   reset(VK_SUCCESS);
+  const auto beforeDiagnosticWorker = compileCalls.load();
   auto diagnosticWorker = begin_pipeline_async(state(), 9, 2,
       "guest_pipeline_with_owned_diagnostic_label");
   assert(diagnosticWorker);
+  // The compiler thread was restarted by this request. Arm only once it is
+  // blocked inside the driver, so the injected failure deterministically hits
+  // the post-compile trace label rather than thread start-up.
+  while (compileCalls == beforeDiagnosticWorker) std::this_thread::yield();
   failNextWorkerAllocation = true;
   release();
   (void)finish_pipeline_demand(handle<VkPipelineCache>(11));
