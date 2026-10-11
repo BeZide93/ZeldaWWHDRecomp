@@ -417,10 +417,10 @@ public class SetupActivity extends Activity {
                 show(addIcon, play.isEnabled() && !working);
                 String text;
                 if (!phoneSetup) {
-                    text = "This APK supports the PC build route. Phone setup needs an APK containing Python and the compiler.";
+                    text = "This APK supports the PC build route. Android device setup needs an APK containing Python and the compiler.";
                     if (play.isEnabled()) offerShortcut();
                 }
-                else if (job == null) text = "Choose your game dump to set up on this phone.";
+                else if (job == null) text = "Choose your game dump to set up on this Android device.";
                 else {
                     File host = new File(job, "host.json");
                     JSONObject value = host.isFile() ? SetupStore.read(host) : new JSONObject().put("state", "ready to start");
@@ -439,7 +439,7 @@ public class SetupActivity extends Activity {
                         text += "\n" + SetupPolicy.description(value.getString("reason"), sensors[0], sensors[1]);
                     }
                     if ("heat".equals(reason))
-                        text += "\nIf the phone does not feel hot, tap Continue anyway. Setup then ignores heat until this run ends; Android's critical heat level still pauses it.";
+                        text += "\nIf the Android device does not feel hot, tap Continue anyway. Setup then ignores heat until this run ends; Android's critical heat level still pauses it.";
                     else if (SetupPolicy.overridable(reason))
                         text += "\nTap Continue anyway to run on battery until this run ends.";
                     continueAction = !SetupPolicy.overridable(reason) ? null :
