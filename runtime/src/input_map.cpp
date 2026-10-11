@@ -297,6 +297,62 @@ bool face_bindings_from_labels(const FaceLabel labels[4], int out[4]) {
     return true;
 }
 
+PadFamily pad_family_from_labels(const FaceLabel labels[4]) {
+    for (int i = 0; i < 4; i++)
+        if (labels[i] == FaceLabel::kCross || labels[i] == FaceLabel::kCircle || labels[i] == FaceLabel::kSquare ||
+            labels[i] == FaceLabel::kTriangle)
+            return PadFamily::kPlayStation;
+    if (labels[0] == FaceLabel::kA) return PadFamily::kXbox;      // south
+    if (labels[0] == FaceLabel::kB) return PadFamily::kNintendo;
+    return PadFamily::kUnknown;
+}
+
+PromptStyle prompt_style(const Mapping& m, PadFamily family) {
+    PromptStyle s;
+    if (face_layout(m) == FaceLayout::kLabels) {
+        switch (m.prompts) {
+        case Mapping::Prompts::kAuto:
+            s.face = family == PadFamily::kPlayStation ? FaceStyle::kPlayStation : FaceStyle::kXbox;
+            break;
+        case Mapping::Prompts::kXbox: s.face = FaceStyle::kXbox; break;
+        case Mapping::Prompts::kPlayStation: s.face = FaceStyle::kPlayStation; break;
+        case Mapping::Prompts::kOriginal: break;
+        }
+    }
+    s.positions = s.face != FaceStyle::kOriginal;
+    s.colours = s.positions && m.prompt_colours;
+    switch (m.shoulder_names) {
+    case Mapping::ShoulderNames::kAuto:
+        s.shoulders = s.face == FaceStyle::kXbox ? ShoulderStyle::kXbox
+                    : s.face == FaceStyle::kPlayStation ? ShoulderStyle::kNumbered : ShoulderStyle::kOriginal;
+        break;
+    case Mapping::ShoulderNames::kNintendo: break;
+    case Mapping::ShoulderNames::kNumbered: s.shoulders = ShoulderStyle::kNumbered; break;
+    case Mapping::ShoulderNames::kXbox: s.shoulders = ShoulderStyle::kXbox; break;
+    }
+    return s;
+}
+
+const char* prompts_label(Mapping::Prompts p) {
+    switch (p) {
+    case Mapping::Prompts::kAuto: return "automatic";
+    case Mapping::Prompts::kOriginal: return "original";
+    case Mapping::Prompts::kXbox: return "Xbox";
+    case Mapping::Prompts::kPlayStation: return "PlayStation";
+    }
+    return "?";
+}
+
+const char* shoulder_names_label(Mapping::ShoulderNames n) {
+    switch (n) {
+    case Mapping::ShoulderNames::kAuto: return "automatic";
+    case Mapping::ShoulderNames::kNintendo: return "L / R / ZL / ZR";
+    case Mapping::ShoulderNames::kNumbered: return "L1 / R1 / L2 / R2";
+    case Mapping::ShoulderNames::kXbox: return "LB / RB / LT / RT";
+    }
+    return "?";
+}
+
 void set_pad_binding(Mapping& m, int action, int pad) {
     if (action < 0 || action >= kActionCount) return;
     m.pad[action] = pad;
@@ -577,14 +633,23 @@ std::string to_json(const Mapping& m) {
         o += "    " + quote(action_id(a)) + ": " + (m.pad[a] == kPadNone ? std::string("null") : quote(pad_id(m.pad[a])));
         o += a + 1 < kActionCount ? ",\n" : "\n";
     }
+    // button prompts: written only when not the default, as face_layout
+    static const char* const kPromptIds[] = {"auto", "original", "xbox", "playstation"};
+    static const char* const kShoulderIds[] = {"auto", "nintendo", "numbered", "xbox"};
+    std::string prompts;
+    if (m.prompts != Mapping::Prompts::kAuto)
+        prompts += std::string(",\n    \"button_prompts\": \"") + kPromptIds[(int)m.prompts] + "\"";
+    if (m.shoulder_names != Mapping::ShoulderNames::kAuto)
+        prompts += std::string(",\n    \"shoulder_names\": \"") + kShoulderIds[(int)m.shoulder_names] + "\"";
+    if (!m.prompt_colours) prompts += ",\n    \"button_colours\": false";
     char opt[320];
     snprintf(opt, sizeof opt,
              "  },\n  \"options\": {\n    \"format\": 2,\n    \"stick_deadzone\": %.3g,\n"
              "    \"left_stick_range\": %.3g,\n    \"right_stick_range\": %.3g,\n"
-             "    \"invert_camera_y\": %s%s\n  }\n}\n",
+             "    \"invert_camera_y\": %s%s",
              m.deadzone, m.left_range, m.right_range, m.invert_camera_y ? "true" : "false",
              m.face_auto ? ",\n    \"face_layout\": \"auto\"" : "");
-    return o + opt;
+    return o + opt + prompts + "\n  }\n}\n";
 }
 
 bool from_json(const std::string& text, Mapping& out, std::string* error) {
@@ -643,6 +708,20 @@ bool from_json(const std::string& text, Mapping& out, std::string* error) {
         if (const Json* i = op->get("invert_camera_y"); i && i->type == Json::Bool) m.invert_camera_y = i->b;
         // only "automatic" is stored: the two manual presets are the shape of the face bindings
         if (const Json* f = op->get("face_layout"); f && f->type == Json::Str) m.face_auto = f->s == "auto";
+        // button prompts (#143); an unknown value keeps the default
+        if (const Json* p = op->get("button_prompts"); p && p->type == Json::Str) {
+            if (p->s == "original") m.prompts = Mapping::Prompts::kOriginal;
+            else if (p->s == "xbox") m.prompts = Mapping::Prompts::kXbox;
+            else if (p->s == "playstation") m.prompts = Mapping::Prompts::kPlayStation;
+            else if (p->s != "auto") warn += "unknown button_prompts \"" + p->s + "\"; ";
+        }
+        if (const Json* n = op->get("shoulder_names"); n && n->type == Json::Str) {
+            if (n->s == "nintendo") m.shoulder_names = Mapping::ShoulderNames::kNintendo;
+            else if (n->s == "numbered") m.shoulder_names = Mapping::ShoulderNames::kNumbered;
+            else if (n->s == "xbox") m.shoulder_names = Mapping::ShoulderNames::kXbox;
+            else if (n->s != "auto") warn += "unknown shoulder_names \"" + n->s + "\"; ";
+        }
+        if (const Json* c = op->get("button_colours"); c && c->type == Json::Bool) m.prompt_colours = c->b;
     }
     out = m;
     if (error) *error = warn;
@@ -699,11 +778,21 @@ static std::mutex g_labels_mu;
 static FaceLabel g_labels[4] = {FaceLabel::kUnknown, FaceLabel::kUnknown, FaceLabel::kUnknown,
                                 FaceLabel::kUnknown};
 
+static std::atomic<int> g_family{(int)PadFamily::kUnknown};
+
+PadFamily pad_family() { return (PadFamily)g_family.load(std::memory_order_relaxed); }
+
 void note_face_labels(const FaceLabel labels[4]) {
     Mapping m = current();
     {
         std::lock_guard<std::mutex> lk(g_labels_mu);
         for (int i = 0; i < 4; i++) g_labels[i] = labels[i];
+    }
+    // the prompts follow the family (button_glyphs re-reads the style on a new generation). An
+    // unplugged pad (all unknown) keeps the last family, as the Automatic face preset keeps its choice.
+    if (const PadFamily f = pad_family_from_labels(labels); f != PadFamily::kUnknown && f != pad_family()) {
+        g_family.store((int)f, std::memory_order_relaxed);
+        g_gen++;
     }
     if (!m.face_auto) return;
     int out[4];
