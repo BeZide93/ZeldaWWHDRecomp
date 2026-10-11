@@ -7,6 +7,12 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Mods: experimental mods and save backups.** Mods marked *Experimental* (untested, may break the
+  game or a save made while they are active; Call of the Sky is one) are hidden unless you turn on
+  **Show experimental mods** in the Mods tab. Turning one on asks first and backs up your saves before
+  it is enabled. **Mods → Save backups** lists the backups (the newest 10 automatic ones are kept;
+  *Back up now* backups are never removed), can restore one at the next start, before the game loads
+  any save (your current saves are backed up first, so a restore can be undone), or delete one.
 - **Controls: in-game button prompts follow your controller** (PR #110, thanks @mhbxyz). With Face
   buttons set to *by label* (or *Automatic* on an Xbox-style pad), dialog icons and HUD buttons use
   green A, red B, blue X and yellow Y, the HUD button cluster uses the Xbox positions, and shoulder
