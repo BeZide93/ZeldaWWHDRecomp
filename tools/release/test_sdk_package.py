@@ -93,5 +93,20 @@ class SDKPackage(unittest.TestCase):
         self.assertTrue(any("key-like" in problem for problem in problems))
 
 
+class DecompVariant(unittest.TestCase):
+    def test_variant_from_the_cmake_cache(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            build = Path(tmp)
+            self.assertIsNone(package.decomp_variant(str(build)))
+            (build / "CMakeCache.txt").write_text("WWHD_DECOMP:BOOL=OFF\n")
+            self.assertIsNone(package.decomp_variant(str(build)))
+            (build / "CMakeCache.txt").write_text("WWHD_DECOMP:BOOL=ON\n")
+            with self.assertRaises(SystemExit):
+                package.decomp_variant(str(build))  # the function list is missing
+            (build / "decomp").mkdir()
+            (build / "decomp" / "decomp_hooks.txt").write_text("02000020\n")
+            self.assertEqual(package.decomp_variant(str(build)), "decomp")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1425,10 +1425,25 @@ def language_source_kind(path):
 # build
 
 
+def decomp_hooks_file():
+    """The decomp release (docs/decomp-build.md; tools/release/package.py): its runtime runs the decompiled
+    game functions listed in sdk/decomp_hooks.txt, so the game code is translated with that list
+    (recomp.py --decomp-hooks). None for the regular release."""
+    p = os.path.join(PKG, "sdk", "decomp_hooks.txt")
+    return p if os.path.isfile(p) else None
+
+
 def recompile(game_dir, gen_dir, hooks=False):
     shutil.rmtree(gen_dir, ignore_errors=True)
     rpx = os.path.join(game_dir, "code", "cking.rpx")
-    out = run_logged([sys.executable, os.path.join(PKG, "tools", "recomp", "recomp.py"), rpx, gen_dir] + (["--mod-hooks"] if hooks else []),
+    decomp = decomp_hooks_file()
+    if decomp:
+        build = game_builds.identify(rpx)
+        if build is not None and not build.canonical:
+            raise SetupError("this is the decomp build of the port, which works with the USA game only (yours is the %s "
+                             "build); use the regular release" % build.name)
+    out = run_logged([sys.executable, os.path.join(PKG, "tools", "recomp", "recomp.py"), rpx, gen_dir] +
+                     (["--mod-hooks"] if hooks else []) + (["--decomp-hooks", decomp] if decomp else []),
                      env=dict(os.environ, WWHD_RECOMP_MOD_HOOKS="0"), what="translating the game code")
     n = len(glob.glob(os.path.join(gen_dir, "code_*.c")))
     if n == 0:
@@ -2009,6 +2024,8 @@ def load_manifest():
     if plat == "windows" and arch and normalize_arch(arch) == "aarch64" and host_arch() != "aarch64":
         raise SetupError("this release is for Windows on ARM64, but this computer is %s: download the "
                          "windows-x86_64 release instead" % host_arch())
+    if (m.get("variant") == "decomp") != bool(decomp_hooks_file()):
+        raise SetupError("sdk/manifest.json and sdk/decomp_hooks.txt do not match (decomp build): unpack the release again")
     return m
 
 
@@ -2290,6 +2307,8 @@ def install(ctx, source, keys=None, info=None, ui=None, check_keys=None):
              "installed": time.strftime("%Y-%m-%d %H:%M:%S"), "toolchain": manifest["toolchain"],
              "placeholder_code": kind == "gen",
              "code_mods": code_mods.hooks_option(getattr(args, "code_mods", None))}
+    if manifest.get("variant"):
+        state["variant"] = manifest["variant"]  # "decomp": the decomp build (docs/decomp-build.md)
     if os.environ.get("APPIMAGE"):
         # an AppImage (issue #55): its mount is read-only, so nothing is written beside it and
         # portable.txt is not created. Record which image this was installed from: install.json is

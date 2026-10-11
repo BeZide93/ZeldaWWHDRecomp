@@ -1181,5 +1181,55 @@ class Download(unittest.TestCase):
             self.assertEqual(setup.file_sha256(dst), self.SHA)
 
 
+
+class DecompRelease(unittest.TestCase):
+    """The decomp release (docs/decomp-build.md): sdk/decomp_hooks.txt reaches the recompiler."""
+
+    def run_recompile(self, pkg, build_name="USA"):
+        calls = []
+
+        def run_logged(cmd, cwd=None, env=None, what=""):
+            calls.append(cmd)
+            os.makedirs(cmd[3], exist_ok=True)
+            open(os.path.join(cmd[3], "code_000.c"), "w").close()
+
+        build = mock.Mock(canonical=build_name == "USA")
+        build.name = build_name
+        with mock.patch.object(setup, "PKG", pkg), mock.patch.object(setup, "run_logged", run_logged), \
+                mock.patch.object(setup.game_builds, "identify", return_value=build):
+            setup.recompile(os.path.join(pkg, "game"), os.path.join(pkg, "gen"))
+        return calls[0]
+
+    def test_regular_release_has_no_list(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.assertIsNone(setup.decomp_hooks_file())
+            self.assertNotIn("--decomp-hooks", self.run_recompile(d))
+
+    def test_decomp_release_passes_its_list(self):
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, "sdk"))
+            hooks = os.path.join(d, "sdk", "decomp_hooks.txt")
+            with open(hooks, "w") as f:
+                f.write("02000020\n")
+            cmd = self.run_recompile(d)
+            self.assertEqual(cmd[cmd.index("--decomp-hooks") + 1], hooks)
+            with self.assertRaises(setup.SetupError) as e:
+                self.run_recompile(d, "EUR")
+            self.assertIn("USA game only", str(e.exception))
+
+    def test_manifest_and_list_must_agree(self):
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, "sdk"))
+            plat = {"darwin": "macos", "win32": "windows"}.get(sys.platform, "linux")
+            m = {"platform": plat, "variant": "decomp"}
+            with open(os.path.join(d, "sdk", "manifest.json"), "w") as f:
+                json.dump(m, f)
+            with mock.patch.object(setup, "PKG", d), mock.patch.object(setup, "IS_LINUX", False):
+                with self.assertRaises(setup.SetupError):
+                    setup.load_manifest()
+                open(os.path.join(d, "sdk", "decomp_hooks.txt"), "w").close()
+                self.assertEqual(setup.load_manifest()["variant"], "decomp")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

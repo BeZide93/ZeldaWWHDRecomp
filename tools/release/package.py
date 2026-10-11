@@ -214,6 +214,18 @@ def is_system_path(p):
     return "/MacOSX.platform/" in p or "/CommandLineTools/SDKs/" in p or p.startswith("/usr/lib/") or p.startswith("/lib/")
 
 
+def decomp_variant(build):
+    """"decomp" for a WWHD_DECOMP=ON build directory, else None."""
+    try:
+        with open(os.path.join(build, "CMakeCache.txt"), encoding="utf-8", errors="replace") as f:
+            on = any(re.match(r"WWHD_DECOMP:BOOL=(ON|1|TRUE|YES)$", l.strip(), re.I) for l in f)
+    except OSError:
+        return None
+    if on and not os.path.isfile(os.path.join(build, "decomp", "decomp_hooks.txt")):
+        sys.exit("decomp build without decomp/decomp_hooks.txt in %s" % build)
+    return "decomp" if on else None
+
+
 def build_link_recipe(build, pkg, linkonly):
     args = link_command(build)
     recipe, objs, libs = [], 0, 0
@@ -369,7 +381,10 @@ def main():
     a = ap.parse_args()
 
     build = os.path.abspath(a.build)
-    name = "WindWakerHD-%s-%s" % (a.version, a.platform)
+    # the decomp build (CMake WWHD_DECOMP=ON, docs/decomp-build.md): its own package, with the function list
+    # setup translates the game code with (sdk/decomp_hooks.txt)
+    variant = decomp_variant(build)
+    name = "WindWakerHD-%s-%s%s" % (a.version, a.platform, "-" + variant if variant else "")
     pkg = os.path.join(os.path.abspath(a.out), name)
     if os.path.exists(pkg):
         shutil.rmtree(pkg)
@@ -398,6 +413,9 @@ def main():
         "link": link,
         "runtime_files": runtime_files,
     }
+    if variant:
+        manifest["variant"] = variant
+        copy(os.path.join(build, "decomp", "decomp_hooks.txt"), os.path.join(pkg, "sdk", "decomp_hooks.txt"))
     with open(os.path.join(pkg, "sdk", "manifest.json"), "w") as f:
         json.dump(manifest, f, indent=1)
 
