@@ -859,6 +859,7 @@ target_link_libraries(guest_hooks_test PRIVATE ZLIB::ZLIB ${CMAKE_DL_LIBS})
 add_test(NAME guest_hooks COMMAND guest_hooks_test)
 if(Python3_Interpreter_FOUND)
   add_test(NAME release_sdk_package COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/release/test_sdk_package.py")
+  add_test(NAME release_appimage_apprun COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/release/test_appimage_apprun.py")
 endif()
 
 add_executable(process_test runtime/tools/process_test.cpp)
