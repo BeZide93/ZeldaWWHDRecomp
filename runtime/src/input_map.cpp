@@ -565,7 +565,7 @@ std::string to_json(const Mapping& m) {
     }
     char opt[192];
     snprintf(opt, sizeof opt,
-             "  },\n  \"options\": {\n    \"stick_deadzone\": %.3g,\n    \"invert_camera_y\": %s%s\n  }\n}\n",
+             "  },\n  \"options\": {\n    \"format\": 2,\n    \"stick_deadzone\": %.3g,\n    \"invert_camera_y\": %s%s\n  }\n}\n",
              m.deadzone, m.invert_camera_y ? "true" : "false",
              m.face_auto ? ",\n    \"face_layout\": \"auto\"" : "");
     return o + opt;
@@ -611,8 +611,14 @@ bool from_json(const std::string& text, Mapping& out, std::string* error) {
         }
     }
     if (const Json* op = root.get("options"); op && op->type == Json::Obj) {
-        if (const Json* d = op->get("stick_deadzone"); d && d->type == Json::Num)
-            m.deadzone = std::clamp((float)d->n, 0.0f, 0.9f);
+        const Json* format = op->get("format");
+        const bool legacy = !format || format->type != Json::Num || format->n < 2;
+        if (const Json* d = op->get("stick_deadzone"); d && d->type == Json::Num) {
+            // Old saves always wrote zero, the former default. Format 2 distinguishes a
+            // deliberate zero from that default; saving writes the marker after migration.
+            if (!(legacy && d->n == 0))
+                m.deadzone = std::clamp((float)d->n, 0.0f, 0.9f);
+        }
         if (const Json* i = op->get("invert_camera_y"); i && i->type == Json::Bool) m.invert_camera_y = i->b;
         // only "automatic" is stored: the two manual presets are the shape of the face bindings
         if (const Json* f = op->get("face_layout"); f && f->type == Json::Str) m.face_auto = f->s == "auto";

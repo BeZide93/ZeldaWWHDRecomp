@@ -394,10 +394,19 @@ static void test_deadzone() {
     drift[kPadLSUp] = 1;
     CHECK(controller_state(m, drift).ly == 1);
     drift[kPadLSUp] = 0;
-    // Explicit raw-input preferences still survive loading a controls file.
+    // Unmarked zero was the old default; marked zero is an explicit raw-input preference.
     std::string err;
     Mapping raw;
     CHECK(from_json(R"({"options":{"stick_deadzone":0}})", raw, &err));
+    CHECK(raw.deadzone == 0.15f);
+    CHECK(to_json(raw).find("\"format\": 2") != std::string::npos);
+    Mapping migrated;
+    CHECK(from_json(to_json(raw), migrated, &err) && migrated == raw);
+    CHECK(from_json(R"({"options":{"stick_deadzone":0.23}})", raw, &err));
+    CHECK(raw.deadzone == 0.23f);
+    CHECK(from_json(R"({"options":{"format":2,"stick_deadzone":0}})", raw, &err));
+    CHECK(raw.deadzone == 0);
+    CHECK(from_json(to_json(raw), migrated, &err) && migrated == raw);
     drift[kPadLSUp] = 0.01f;
     CHECK(controller_state(raw, drift).ly == 0.01f);
     CHECK(controller_state(m, drift).ly == 0);

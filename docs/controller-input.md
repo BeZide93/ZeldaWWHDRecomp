@@ -5,6 +5,13 @@ choices. Controls selects whether your inputs act as a Wii U GamePad or Pro
 Controller. Select that controller in the game's Controller Selection screen too.
 The face-button preset changes A/B/X/Y; it does not change D-pad or stick directions.
 
+**Stick dead zone** defaults to **15%** for both controller sticks. This filters
+small resting-stick drift, which can otherwise keep the Picto Box zooming and its
+picture blurred. Older controls files with the former 0% default automatically
+load as 15%; other saved values are kept. Saving controls writes an
+`options.format` marker of `2`, so a deliberate 0% setting saved in the new format
+is preserved on subsequent loads.
+
 While conducting, the **right stick supplies the notes**, including down. The
 **left stick controls the meter**: hold left or right to change the beat count.
 The D-pad does not substitute for the note stick in the original game. For example,

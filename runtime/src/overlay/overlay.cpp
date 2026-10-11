@@ -1906,6 +1906,8 @@ void tab_controls() {
         m.deadzone = std::clamp(dz / 100.0f, 0.0f, 0.9f);
         input_map::set_current(m);
     }
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Default: 15%%. Filters resting-stick drift on both sticks.");
     ImGui::SameLine(0, 24);
     if (check("Invert camera up/down", m.invert_camera_y, &v)) {
         m.invert_camera_y = v;

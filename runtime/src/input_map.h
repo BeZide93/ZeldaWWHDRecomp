@@ -57,7 +57,8 @@ struct Mapping {
     std::array<std::array<int, kKeysPerAction>, kActionCount> keys;  // kNoKey = empty slot
     std::array<int, kActionCount> pad;                                // kPadNone = unbound
     // Real sticks do not reliably return exact zero. In particular, a tiny residual zoom input
-    // keeps the Picto Box's zoom-blur preset active. Saved settings (including zero) override this.
+    // keeps the Picto Box's zoom-blur preset active. Format 2 saves preserve an explicit zero;
+    // unmarked saves migrate the former zero default to this value.
     float deadzone = 0.15f;         // radial dead zone for controller sticks, 0..0.9
     bool invert_camera_y = false;   // right stick Y, keyboard and controller
     bool face_auto = false;         // Automatic face preset: follow the dominant pad's labels

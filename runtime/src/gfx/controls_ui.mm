@@ -1050,6 +1050,7 @@ static NSTextField* label(NSString* s) {
     NSTextField* dzl = label(@"Stick dead zone:");
     NSSlider* dz = [NSSlider sliderWithValue:0 minValue:0 maxValue:0.5 target:self action:@selector(deadzoneChanged:)];
     dz.continuous = YES;
+    dz.toolTip = @"Default: 15%. Filters resting-stick drift on both sticks.";
     dz.numberOfTickMarks = 11;
     self.deadzone = dz;
     NSTextField* dzv = label(@"0%");
