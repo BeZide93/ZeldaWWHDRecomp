@@ -366,6 +366,15 @@ static void open_controller(SDL_JoystickID id){
   const char* name=SDL_GetGamepadName(pad);
   LOG("[input] controller connected: %s (id %u, vendor %04X, product %04X, type %d)",name?name:"?",(unsigned)id,
       SDL_GetGamepadVendor(pad),SDL_GetGamepadProduct(pad),(int)SDL_GetGamepadType(pad));
+#ifdef __ANDROID__
+  char* mapping=SDL_GetGamepadMapping(pad);
+  LOG("[input] SDL controller face labels: id=%u south=%d east=%d west=%d north=%d mapping=%s",(unsigned)id,
+      (int)SDL_GetGamepadButtonLabel(pad,SDL_GAMEPAD_BUTTON_SOUTH),
+      (int)SDL_GetGamepadButtonLabel(pad,SDL_GAMEPAD_BUTTON_EAST),
+      (int)SDL_GetGamepadButtonLabel(pad,SDL_GAMEPAD_BUTTON_WEST),
+      (int)SDL_GetGamepadButtonLabel(pad,SDL_GAMEPAD_BUTTON_NORTH),mapping?mapping:"?");
+  SDL_free(mapping);
+#endif
   // asking for a rumble of zero intensity also tells us whether the controller has a motor
   if(SDL_RumbleGamepad(pad,0,0,0))g_rumble_controllers.insert(id);
   if(g_sensors_on)set_sensors_locked(pad,true);}
@@ -541,7 +550,14 @@ void handle_event(const SDL_Event& event){
  // phones: the controller is the GamePad. Keys only type text (above): controllers such as the
  // GameSir also show up as a keyboard and would press keyboard-mapped GamePad buttons twice.
  static const bool keyboardPad=getenv("WWHD_ANDROID_KEYBOARD")!=nullptr;
- if(!keyboardPad&&(event.type==SDL_EVENT_KEY_DOWN||event.type==SDL_EVENT_KEY_UP))return;
+ if(!keyboardPad&&(event.type==SDL_EVENT_KEY_DOWN||event.type==SDL_EVENT_KEY_UP)) {
+  static std::set<std::pair<SDL_KeyboardID, SDL_Scancode>> logged;
+  const auto key=std::make_pair(event.key.which,event.key.scancode);
+  if(event.type==SDL_EVENT_KEY_DOWN&&!event.key.repeat&&logged.size()<512&&logged.insert(key).second)
+   LOG("[input] Android key not delivered to game: keyboard=%u scancode=%d (%s) keycode=%u reason=keys-only-type-text WWHD_ANDROID_KEYBOARD=unset",
+       (unsigned)event.key.which,int(event.key.scancode),SDL_GetScancodeName(event.key.scancode),(unsigned)event.key.key);
+  return;
+ }
  #endif
  // a repeat never presses a key: one held down while the overlay or the text prompt had the keyboard (Enter
  // that confirmed a name) stays out of the game until pressed again
