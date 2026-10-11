@@ -1,0 +1,42 @@
+# Decomp build check (docs/decomp-build.md): builds the WWHD_DECOMP=ON variant (macOS, Metal) against
+# placeholder guest code (tools/recomp/stubgen.py --decomp-hooks; no game files involved) with the
+# decompilation from the `decomp` submodule. Informational: it never blocks the other workflows or a
+# release (continue-on-error).
+name: decomp
+
+on:
+  push:
+    branches: ["**"]   # not on tag pushes
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  macos:
+    runs-on: macos-15
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: true
+
+      - name: Install build tools
+        run: brew install ninja
+
+      - name: Decomp function list and placeholder guest code
+        run: |
+          python3 tools/decomp_build/gen.py decomp build/decomp-list
+          python3 tools/recomp/stubgen.py build/gen-stub --decomp-hooks build/decomp-list/decomp_hooks.txt
+
+      - name: Build the decomp variant (Release, Metal)
+        run: |
+          cmake -S . -B build/decomp -G Ninja -DCMAKE_BUILD_TYPE=Release -DWWHD_DECOMP=ON -DWWHD_RENDERER=METAL \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DGEN_DIR="$PWD/build/gen-stub" \
+            -DWWHD_BUNDLED_DEPS=ON -DWWHD_BUNDLED_ZSTD=ON
+          cmake --build build/decomp --target wwhd
+          ls -l build/decomp/wwhd
+
+      - name: Decomp build tests
+        run: |
+          python3 tools/decomp_build/test_gen.py
+          python3 tools/installer/test_setup.py DecompRelease
+          python3 tools/release/test_sdk_package.py DecompVariant
