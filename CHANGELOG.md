@@ -7,6 +7,12 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Experimental: build the game from the decompilation** (macOS, for developers). The CMake option
+  `WWHD_DECOMP=ON` compiles the game code from the public, verified decompilation
+  ([ZeldaWWHDDecomp/wwhd](https://github.com/ZeldaWWHDDecomp/wwhd), a submodule in `decomp/`) instead of
+  recompiling it; the libraries stay recompiled from your game. It plays identically to the normal build
+  but still uses more CPU, so releases stay recompiled. Off by default: normal builds are unchanged. See
+  docs/decomp-build.md.
 - **Profiling on Windows on ARM64: a sampling profiler for the frame threads** (PR #147, thanks
   @rhemfur). Off unless `WWHD_SAMPLE_THREADS=<file prefix>` is set; `tools/bench/thread_profile.py`
   turns the samples into a report by module and function, including time inside the Vulkan driver,
