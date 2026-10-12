@@ -673,7 +673,7 @@ void tab_graphics() {
         ImGui::EndDisabled();
         if (!exported.line.empty()) note("%s", exported.line.c_str());
         help("Saves my-template.bin in the screenshots folder: the shader states and pipelines this computer\n"
-             "recorded, as hashes and settings only (no shader code, no game data). Attach it to issue #162\n"
+             "recorded, as hashes and settings only (no shader code, no game data). Attach it to issue #177\n"
              "so the next release prepares them for everyone.");
     }
 #endif

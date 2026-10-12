@@ -9,7 +9,7 @@ Usage:
                                                                  tools/shadercache/template.bin);
                                                                  --merge keeps what template T already has
   shaderprep.py export   [OUT] [--from DIR]                    players: your own shader caches -> a code-free
-                                                                 template to attach to issue #162 (default OUT:
+                                                                 template to attach to issue #177 (default OUT:
                                                                  my-template.bin in the release folder); finds
                                                                  the caches itself, --from names their folder
   shaderprep.py merge    OUT T1 [T2 ...]                         maintainers: merge code-free templates
@@ -726,8 +726,8 @@ def cmd_template(cache, out, merge=None):
           (len(doc['states']), len(doc['pipelines']), len(data), out))
 
 
-# ---------------------------------------------------------------- export (issue #162)
-ISSUE_URL = "https://github.com/ZeldaWWHDRecomp/ZeldaWWHDRecomp/issues/162"
+# ---------------------------------------------------------------- export (issue #177)
+ISSUE_URL = "https://github.com/ZeldaWWHDRecomp/ZeldaWWHDRecomp/issues/177"
 EXPORT_NAME = "my-template.bin"
 
 
@@ -807,7 +807,7 @@ RENDERER_NAMES = {"metal": "Metal", "vulkan": "Vulkan"}
 
 
 def cmd_export(out=None, source=None):
-    """One step for players: their own caches -> a code-free template they can attach to issue #162."""
+    """One step for players: their own caches -> a code-free template they can attach to issue #177."""
     out = out or os.path.join(ROOT, EXPORT_NAME)
     if os.path.isdir(out):
         out = os.path.join(out, EXPORT_NAME)
@@ -838,7 +838,7 @@ def cmd_export(out=None, source=None):
     print("Wrote %s: %d shader states, %d pipelines (renderer: %s), %d bytes." %
           (out, len(doc["states"]), len(doc["pipelines"]), renderers, len(data)))
     print("It holds only hashes, register values and pipeline settings: no shader code, no game data.")
-    print("Attach it to issue #162: " + ISSUE_URL)
+    print("Attach it to issue #177: " + ISSUE_URL)
     print("WWHD-EXPORT %d %d %s %s" % (len(doc["states"]), len(doc["pipelines"]),
                                        "+".join(sorted(builder.report.renderers)) or "none", out), flush=True)
     return 0
