@@ -692,6 +692,7 @@ jobs:
           if ($LASTEXITCODE -ne 1) { throw "setup in a too deep folder exited with $LASTEXITCODE, not 1" }
           if ($out -notmatch "This folder's path is too long for Windows \(176 characters, at most 175 work\)") { throw "no path length message" }
           if ($out -match 'Getting the compiler') { throw "setup went on in a too deep folder" }
+          exit 0  # the refused setup above left $LASTEXITCODE at 1, which would fail this step
 
       - uses: actions/upload-artifact@v5
         with:
