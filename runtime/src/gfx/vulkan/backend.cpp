@@ -188,31 +188,35 @@ void init_pipeline_cache() try {
     std::copy(std::begin(R.properties.pipelineCacheUUID),std::end(R.properties.pipelineCacheUUID),uuid.begin());
     pipelineCachePath=*pipeline_cache_override(std::nullopt,directoryStorage,
         R.properties.vendorID,R.properties.deviceID,uuid);
+    adopt_legacy_pipeline_cache(pipelineCachePath,*pipeline_cache_override(std::nullopt,directoryStorage,
+        R.properties.vendorID,R.properties.deviceID,uuid,true));
   } else if (const char* shaderPath=shaderStorage ? shaderStorage->c_str() : nullptr;
              !shaderPath || std::strcmp(shaderPath,"0")) {
-    char ids[32];
-    std::snprintf(ids,sizeof ids,"vulkan-%08x-%08x-",R.properties.vendorID,R.properties.deviceID);
+    std::array<uint8_t,16> uuid{};
+    std::copy(std::begin(R.properties.pipelineCacheUUID),std::end(R.properties.pipelineCacheUUID),uuid.begin());
     // a WWHD_SHADER_CACHE file (test runs, separate setups) keeps the pipeline cache next to it,
     // so such runs never write the user's own cache in the config folder
-    pipelineCachePath=shaderPath ? std::string(shaderPath)+"."+ids
-                                 :
+    auto place=[&](const std::string& name) {
+      std::string path=shaderPath ? std::string(shaderPath)+"."+name
+                                  :
 #ifdef __ANDROID__
-                                   drivers::pipeline_directory()+"/"+ids;
+                                    drivers::pipeline_directory()+"/"+name;
 #else
-                                   host::config_dir()+"/shadercache/"+ids;
+                                    host::config_dir()+"/shadercache/"+name;
 #endif
-    for (uint8_t byte : R.properties.pipelineCacheUUID) {
-      char hex[3]; std::snprintf(hex,sizeof hex,"%02x",byte); pipelineCachePath+=hex;
-    }
-    pipelineCachePath+=".bin";
 #ifdef __ANDROID__
-    if (shaderPath) {
-      char key[32];
-      std::snprintf(key,sizeof key,"shaders-%016llx-",static_cast<unsigned long long>(
-          pipeline_cache_checksum(reinterpret_cast<const uint8_t*>(shaderPath),std::strlen(shaderPath))));
-      pipelineCachePath = drivers::pipeline_directory()+"/"+key+std::filesystem::path(pipelineCachePath).filename().string();
-    }
+      if (shaderPath) {
+        char key[32];
+        std::snprintf(key,sizeof key,"shaders-%016llx-",static_cast<unsigned long long>(
+            pipeline_cache_checksum(reinterpret_cast<const uint8_t*>(shaderPath),std::strlen(shaderPath))));
+        path = drivers::pipeline_directory()+"/"+key+std::filesystem::path(path).filename().string();
+      }
 #endif
+      return path;
+    };
+    const auto vendor=R.properties.vendorID, device=R.properties.deviceID;
+    pipelineCachePath=place(device_pipeline_cache_filename(vendor,device,uuid));
+    adopt_legacy_pipeline_cache(pipelineCachePath,place(legacy_device_pipeline_cache_filename(vendor,device,uuid)));
   }
   std::vector<uint8_t> bytes;
   if (!pipelineCachePath.empty()) {

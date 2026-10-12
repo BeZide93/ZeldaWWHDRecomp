@@ -57,6 +57,12 @@ def fingerprint(pkg, manifest, game_dir, compiler, hooks):
     return h.hexdigest()
 
 
+def cache_name(key):
+    """The folder of a cached build in code-builds: the first 16 hex digits of its fingerprint (issue #144:
+    short paths on Windows; ready.json holds the full fingerprint). Releases up to v0.2.12 used all 64."""
+    return key[:16]
+
+
 def make_build_space(setup, data):
     """Evict only inactive variants created by this builder, oldest first."""
     minimum = 2 << 30
@@ -71,14 +77,15 @@ def make_build_space(setup, data):
         raise setup.SetupError('Not enough space; cannot identify the active code build for cache cleanup')
     candidates = []
     for cache in (data / 'code-builds').glob('*'):
-        if cache.name == active or cache.is_symlink() or not cache.is_dir():
+        if cache.name in (active, cache_name(active or '')) or cache.is_symlink() or not cache.is_dir():
             continue
-        if len(cache.name) != 64 or any(c not in '0123456789abcdef' for c in cache.name):
+        if len(cache.name) not in (16, 64) or any(c not in '0123456789abcdef' for c in cache.name):
             continue
         try:
             ready = cache / 'ready.json'
             record = json.loads(ready.read_text())
-            if record.get('fingerprint') == cache.name:
+            key = record.get('fingerprint')
+            if isinstance(key, str) and cache.name in (key, cache_name(key)):
                 candidates.append((ready.stat().st_mtime, cache))
         except (OSError, ValueError, AttributeError):
             continue
@@ -148,7 +155,7 @@ def rebuild(setup, ctx, hooks, status_file=None, cancel_file=None):
         tc = setup.get_toolchain(ctx.manifest['toolchain'], ctx.data_dir, setup.UI(False))
         version = setup.run_logged(tc.cc + ['--version'], env=tc.env, what='checking the compiler')
         key = fingerprint(setup.PKG, ctx.manifest, ctx.game_dir, [tc.cc, version], hooks)
-        cache = data / 'code-builds' / key
+        cache = data / 'code-builds' / cache_name(key)
         exe = cache / 'bin' / ctx.manifest['exe']
         ready = cache / 'ready.json'
         cached = False
@@ -163,7 +170,7 @@ def rebuild(setup, ctx, hooks, status_file=None, cancel_file=None):
                 # to discard the previous working selection.
                 cached = False
         if not cached:
-            work = data / ('code-build-' + key + '.partial')
+            work = data / ('code-build-' + cache_name(key) + '.partial')
             shutil.rmtree(setup.longpath(work), ignore_errors=True)
             work.mkdir(parents=True)
             make_build_space(setup, data)
@@ -234,8 +241,8 @@ def remember_installed(setup, ctx, tc, hooks, exe, gen, objs):
     try:
         version = setup.run_logged(tc.cc + ['--version'], env=tc.env, what='checking the compiler')
         key = fingerprint(setup.PKG, ctx.manifest, ctx.game_dir, [tc.cc, version], hooks)
-        cache = data / 'code-builds' / key
-        stage = data / ('code-build-' + key + '.initial')
+        cache = data / 'code-builds' / cache_name(key)
+        stage = data / ('code-build-' + cache_name(key) + '.initial')
         shutil.rmtree(setup.longpath(stage), ignore_errors=True)
         (stage / 'bin').mkdir(parents=True)
         source = Path(exe)

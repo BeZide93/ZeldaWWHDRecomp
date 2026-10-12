@@ -189,7 +189,8 @@ not ask.
 **Back up now** makes a manual backup. Backups live in `save-backups` next to the
 save folder (on Android in the app's files folder, next to `save`), one folder
 per backup named after its date and reason (for example
-`2026-10-11_14-03-12-before-dragon`), with the copied files under `save/` and
+`2026-10-11_14-03-12-mod-dragon` before a mod, with its id cut to 7 characters,
+`…-restore` or `…-manual`), with the copied files under `save/` and
 the details in `backup.json`. A backup is written to a temporary folder and
 renamed when complete, and an existing backup is never overwritten. The newest
 10 automatic backups (before a mod, before a restore) are kept; manual backups

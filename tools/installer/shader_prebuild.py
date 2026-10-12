@@ -80,7 +80,8 @@ def opted_out(marker, wanted):
 def atomic_json(path, value):
     path = Path(path)
     # Different setup/startup processes must never share a temporary filename.
-    descriptor, name = tempfile.mkstemp(prefix=path.name + '.new-', dir=path.parent)
+    # short (issue #144: cache paths stay far below Windows' MAX_PATH): manifest.json.t<8 random>
+    descriptor, name = tempfile.mkstemp(prefix=path.name + '.t', dir=path.parent)
     temporary = Path(name)
     try:
         with os.fdopen(descriptor, 'w') as stream:

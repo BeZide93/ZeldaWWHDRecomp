@@ -47,8 +47,10 @@ pipeline recipes. Vulkan and Metal skip the other renderer's typed recipes.
 `WWHD_HEADSTART=<file>` selects a local built headstart (`0` disables it).
 `WWHD_VK_SHADER_CACHE=<directory>` selects SPIR-V storage; `WWHD_VK_PIPELINE_CACHE=<file>` selects the
 device cache. `WWHD_VK_PIPELINE_CACHE_DIR=<directory>` selects device-specific
-`vulkan-<vendor>-<device>-<uuid>.bin` files and adjacent `.recipes` files; an
-explicit file override wins over the directory. Normal setup and runtime use
+`vk-<12 hex digits>.bin` files (vendor, device and the driver's cache UUID hashed;
+short, so Windows paths stay short) and adjacent `.recipes` files; a cache under the earlier
+name `vulkan-<vendor>-<device>-<uuid>.bin` is renamed once. An explicit file override wins over
+the directory. Normal setup and runtime use
 `shader-prebuild/live/`. On first activation, old default Vulkan caches and the
 macOS Metal shader cache are copied there once without replacing existing files.
 Sources stay intact; copy errors are logged and do not prevent play.

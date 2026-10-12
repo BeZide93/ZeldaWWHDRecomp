@@ -1322,49 +1322,88 @@ class LongPaths(unittest.TestCase):
 
     def test_measured_depths(self):
         # the numbers the limit is made of (setup.py, "long paths on Windows")
-        self.assertEqual(setup.MAX_DATA_DIR_CHARS, 130)
-        cache = ("user\\shader-prebuild\\live\\vulkan-%08x-%08x-%s.bin.recipes.tmp-%d-%d-%d"
-                 % (0x10de, 0x2684, "0" * 32, 1234567, 10 ** 15, 999))
-        self.assertLessEqual(len(cache), setup.DEEPEST_DATA_PATH)
-        game = "game.partial\\content\\Common\\AudioRes\\stream\\Kugutu_Taraba_Intro_CK.w.32.dspadpcm.bfstm"
-        self.assertLess(len(game), setup.DEEPEST_DATA_PATH)
-        header = ("toolchain\\llvm-mingw-20260922-ucrt-aarch64\\include\\c++\\v1\\__cxx03\\__type_traits\\"
-                  "is_trivially_lexicographically_comparable.h")
-        self.assertLess(len(header), setup.DEEPEST_DATA_PATH)
+        self.assertEqual(setup.DEEPEST_DATA_PATH, 78)
+        self.assertEqual(setup.MAX_DATA_DIR_CHARS, 180)
+        # the deepest names nobody here chooses: a game file and the compiler the setup starts
+        game = "game\\content\\Common\\AudioRes\\stream\\Kugutu_Taraba_Intro_CK.w.32.dspadpcm.bfstm"
+        self.assertEqual(len(game), setup.DEEPEST_DATA_PATH)
+        for tc in setup.load_toolchains()["toolchains"].values():
+            if tc["kind"] == "llvm-mingw":
+                triple = tc.get("triple", "x86_64-w64-mingw32")
+                for program in ("-clang.exe", "-clang++.exe"):
+                    exe = "toolchain\\%s\\bin\\%s%s" % (tc["dir"], triple, program)
+                    self.assertLessEqual(len(exe), setup.DEEPEST_DATA_PATH, exe)
+        # every name the game and setup choose themselves: within 64 (the staging suffixes at their longest)
+        import shader_prebuild  # noqa: F401  (the Python side of the shader caches)
+        t8 = ".t" + "f" * 8
+        own = [
+            "user\\shader-prebuild\\live\\vk-%s.bin.recipes%s" % ("f" * 12, t8),       # pipeline cache recipes
+            "user\\shader-prebuild\\live\\vulkan-shaders\\spirv.bin" + t8,
+            "user\\shader-prebuild\\generation-abcdefgh\\manifest.json" + t8,           # also Python's mkstemp
+            "user\\shader-prebuild\\generation-abcdefgh\\headstart.bin" + t8,
+            "user\\shader-prebuild\\launcher.json" + t8,
+            "user\\shadercache\\vk-%s.bin.recipes%s" % ("f" * 12, t8),                # without prepared shaders
+            "user\\screenshots\\WindWakerHD_2026-10-11_02-33-07.png",
+            "code-build-%s.partial\\obj\\code_0123.c.o" % ("f" * 16),
+            "code-builds\\%s\\bin\\wwhd.exe" % ("f" * 16),
+            "game-lang\\EU.tmp\\content\\Common\\Pack\\permanent_2d_euitalian.pack",
+        ]
+        for path in own:
+            self.assertLessEqual(len(path), 64, path)
+        # save backups (the runtime's mod manager) keep the game's save folder below their own: at most as
+        # deep as the game files
+        backup = "save-backups\\2026-10-12_03-15-00-mod-abcdefg-99\\save\\user\\cking_pic_order0.sav"
+        self.assertLessEqual(len(backup), setup.DEEPEST_DATA_PATH)
+        self.assertEqual(len(setup.code_mods.cache_name("f" * 64)), 16)
+        self.assertEqual(os.path.basename(setup.game_staging_dir(tempfile.gettempdir())), "gnew")
+
+    def test_short_code_build_folders(self):
+        # code-builds/<16 hex digits>; the 64-digit folders of earlier releases are still recognised
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            active, inactive, old = "a" * 64, "b" * 64, "c" * 64
+            for key, name in ((active, active[:16]), (inactive, inactive[:16]), (old, old)):
+                (root / "code-builds" / name).mkdir(parents=True)
+                (root / "code-builds" / name / "ready.json").write_text(json.dumps({"fingerprint": key}))
+            (root / "code-mods-active.json").write_text(json.dumps({"fingerprint": active}))
+            with mock.patch.object(setup, "free_space", side_effect=[0, 0, 3 << 30]):
+                setup.code_mods.make_build_space(setup, root)
+            self.assertEqual(sorted(p.name for p in (root / "code-builds").iterdir()), [active[:16]])
 
     def test_reporter_folder(self):
         # the reporter's folder: the compiler's deepest file (118 characters below unpack.tmp) is beyond MAX_PATH
         self.assertEqual(len(self.DEVEL), 125)
         self.assertGreater(len(self.DEVEL + "\\data\\toolchain\\unpack.tmp\\") + 117, setup.WINDOWS_MAX_PATH)
         self.assertLessEqual(len(self.RELEASE + "\\data\\toolchain\\unpack.tmp\\") + 117, setup.WINDOWS_MAX_PATH)
-        # with longpath() setup unpacks it there, and the game and its tools stay within MAX_PATH: no stop
-        self.assertIsNone(setup.path_length_problem(self.DEVEL + "\\data", self.DEVEL, windows=True))
-        self.assertIsNone(setup.path_length_problem(self.RELEASE + "\\data", self.RELEASE, windows=True))
-        self.assertIsNone(setup.path_length_problem("C:\\Games\\WindWakerHD\\data", "C:\\Games\\WindWakerHD",
-                                                    windows=True))
-        # a longer account name: one level too deep for the game's own files
-        longer = self.DEVEL.replace("player", "player.name")
-        msg = setup.path_length_problem(longer + "\\data", longer, windows=True)
-        self.assertEqual(msg, "This folder's path is too long for Windows (130 characters, at most 125 work). Move "
-                              "the Wind Waker HD folder to a shorter place such as C:\\Games\\WindWakerHD and start "
-                              "it again.")
+        # with longpath() setup unpacks it there, and the game and its tools stay within MAX_PATH: no stop,
+        # also with a long account name
+        for folder in (self.DEVEL, self.RELEASE, self.DEVEL.replace("player", "a.much.longer.account.name"),
+                       "C:\\Games\\WindWakerHD"):
+            self.assertIsNone(setup.path_length_problem(folder + "\\data", folder, windows=True), folder)
+        # 51 characters more than the reporter's: one too many for the game's own files
+        deeper = self.DEVEL.replace("player", "player" + "x" * 51)
+        self.assertEqual(setup.path_length_problem(deeper + "\\data", deeper, windows=True),
+                         "This folder's path is too long for Windows (176 characters, at most 175 work). Move the Wind "
+                         "Waker HD folder to a shorter place such as C:\\Games\\WindWakerHD and start it again.")
         # only on Windows
         self.assertIsNone(setup.path_length_problem("/x" * 200, "/x" * 199, windows=False))
 
     def test_limit_boundary(self):
         pkg = "C:\\" + "p" * (setup.MAX_DATA_DIR_CHARS - len("\\data") - 3)
+        self.assertEqual(len(pkg), 175)
         self.assertEqual(len(pkg + "\\data"), setup.MAX_DATA_DIR_CHARS)
         self.assertIsNone(setup.path_length_problem(pkg + "\\data", pkg, windows=True))
         self.assertIsNotNone(setup.path_length_problem(pkg + "p\\data", pkg + "p", windows=True))
         # given as an extended-length path, or with another case of the drive letter: the same folder
-        self.assertIn("(126 characters, at most 125 work)",
+        self.assertIn("(176 characters, at most 175 work)",
                       setup.path_length_problem(setup.longpath(pkg + "p\\data", windows=True), "c" + pkg[1:] + "p",
                                                 windows=True))
 
     def test_install_folder_outside_the_release(self):
         data = "D:\\" + "\\".join(["games"] * 30)
         msg = setup.path_length_problem(data, self.RELEASE, windows=True)
-        self.assertIn("The install folder's path is too long for Windows (%d characters, at most 130 work)" % len(data), msg)
+        self.assertIn("The install folder's path is too long for Windows (%d characters, at most 180 work)" % len(data), msg)
 
     def test_setup_stops_before_anything_else(self):
         with tempfile.TemporaryDirectory() as d:

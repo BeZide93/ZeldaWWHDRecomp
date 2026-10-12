@@ -622,7 +622,7 @@ jobs:
 
       - name: Installer self-test in a deep folder (issue #144)
         # Windows' "Extract All" puts the release folder into a folder of the same name. The release here is
-        # as deep as setup accepts (125 characters): the compiler's deepest files are then beyond MAX_PATH while
+        # as deep as setup accepts (175 characters): the compiler's deepest files are then beyond MAX_PATH while
         # setup unpacks them (it uses \\?\ paths). One character deeper, setup stops before it downloads anything.
         # The compiler archive is the one fetched above, given to setup as a copy the player saved (#113).
         shell: pwsh
@@ -630,10 +630,10 @@ jobs:
           $zip = (Get-ChildItem dist\*.zip).FullName
           $name = [IO.Path]::GetFileNameWithoutExtension($zip)
           $root = Join-Path $env:RUNNER_TEMP 'deep'
-          $outer = Join-Path $root ('x' * (125 - $root.Length - 2 - $name.Length))
+          $outer = Join-Path $root ('x' * (175 - $root.Length - 2 - $name.Length))
           Expand-Archive -Path $zip -DestinationPath $outer
           $pkg = Join-Path $outer $name
-          if ($pkg.Length -ne 125) { throw "the release folder is $($pkg.Length) characters, not 125" }
+          if ($pkg.Length -ne 175) { throw "the release folder is $($pkg.Length) characters, not 175" }
           $arcname = python -c "import json, os; t=json.load(open('tools/installer/toolchains.json'))['toolchains'][os.environ['TOOLCHAIN']]; print(t['url'].rsplit('/', 1)[1])"
           $arcname = $arcname.Trim()
           Copy-Item (Join-Path $env:RUNNER_TEMP 'llvm-mingw.zip') (Join-Path $pkg $arcname)
@@ -672,7 +672,7 @@ jobs:
             --gen-dir (Join-Path $env:GITHUB_WORKSPACE 'build\gen-stub') 2>&1 | Out-String
           $out
           if ($LASTEXITCODE -ne 1) { throw "setup in a too deep folder exited with $LASTEXITCODE, not 1" }
-          if ($out -notmatch "This folder's path is too long for Windows \(126 characters, at most 125 work\)") { throw "no path length message" }
+          if ($out -notmatch "This folder's path is too long for Windows \(176 characters, at most 175 work\)") { throw "no path length message" }
           if ($out -match 'Getting the compiler') { throw "setup went on in a too deep folder" }
 
       - uses: actions/upload-artifact@v5

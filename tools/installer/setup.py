@@ -84,14 +84,19 @@ EXE_SUFFIX = ".exe" if IS_WIN else ""
 
 LONGPATH_PREFIX = "\\\\?\\"
 WINDOWS_MAX_PATH = 259  # characters of a full path without the extended-length prefix (MAX_PATH - NUL)
-# The deepest path the game, wwhd-extract and the compiler create or read below the data folder. These
-# programs use ordinary Windows paths (no \\?\), so the data folder + this must stay within MAX_PATH:
-#   user\shader-prebuild\live\vulkan-<vendor>-<device>-<32 hex>.bin.recipes.tmp-<pid>-<clock>-<n>
-#   (the game's atomic shader cache writes: 26 + 69 + 33 = 128)
-# Next deepest: toolchain\llvm-mingw-...-aarch64\include\c++\v1\__cxx03\...comparable.h (124; clang
-# also widens long paths itself), game.partial\content\...\Kugutu_Taraba_Intro_CK.w.32.dspadpcm.bfstm (86).
-DEEPEST_DATA_PATH = 128
-MAX_DATA_DIR_CHARS = WINDOWS_MAX_PATH - 1 - DEEPEST_DATA_PATH  # 130 (the 1: the separator after it)
+# The deepest path the game, wwhd-extract and the compiler create, read or start below the data folder.
+# These programs use ordinary Windows paths (no \\?\; the game declares longPathAware, which only helps
+# where Windows has long paths enabled), so the data folder + this must stay within MAX_PATH. The deepest
+# ones are names nobody here chooses:
+#   game\content\Common\AudioRes\stream\Kugutu_Taraba_Intro_CK.w.32.dspadpcm.bfstm         (78, a game file)
+#   toolchain\llvm-mingw-20260922-ucrt-aarch64\bin\aarch64-w64-mingw32-clang++.exe          (78, the compiler)
+# Every name the game and setup choose themselves stays within 64 (test_setup.LongPaths), e.g.
+#   user\shader-prebuild\live\vk-<12 hex>.bin.recipes.t<8 hex>                              (63)
+#   user\shader-prebuild\generation-<8>\manifest.json.t<8>                                  (64)
+# The compiler reads its headers through LLVM, which widens long paths itself; setup unpacks, moves and
+# deletes the compiler with \\?\ paths (its unused Python/lldb files are 128 deep, 139 while unpacking).
+DEEPEST_DATA_PATH = 78
+MAX_DATA_DIR_CHARS = WINDOWS_MAX_PATH - 1 - DEEPEST_DATA_PATH  # 180 (the 1: the separator after it)
 
 
 def longpath(p, windows=None):
@@ -1194,11 +1199,19 @@ def get_disc_keys(image, ui, args):
             raise SetupError("cannot read the disc image: %s" % err)
 
 
+def game_staging_dir(data_dir):
+    """The empty folder the game files are extracted or copied into before they replace data/game. As
+    short as "game" (issue #144): the game's deepest file names then stay as deep below the data folder
+    as in data/game (DEEPEST_DATA_PATH). Releases up to v0.2.12 used game.partial."""
+    for old in ("game.partial", "gnew"):
+        shutil.rmtree(longpath(os.path.join(data_dir, old)), ignore_errors=True)
+    return os.path.join(data_dir, "gnew")
+
+
 def extract_game(image, keys, info, data_dir, title=None):
     """Extracts a disc image (keys) or one title folder of a Cemu archive (title, no keys) into data_dir/game."""
     dst = os.path.join(data_dir, "game")
-    tmp = os.path.join(data_dir, "game.partial")
-    shutil.rmtree(longpath(tmp), ignore_errors=True)
+    tmp = game_staging_dir(data_dir)
     total = int(info.get("bytes", 0))
     need = total + (1 << 30)
     if free_space(data_dir) < need:
@@ -1261,8 +1274,7 @@ def copy_game_folder(src, data_dir):
     total = folder_size(src)
     if free_space(data_dir) < total + (1 << 30):
         raise SetupError("not enough free disk space in %s: %s needed" % (data_dir, human(total + (1 << 30))))
-    tmp = os.path.join(data_dir, "game.partial")
-    shutil.rmtree(longpath(tmp), ignore_errors=True)
+    tmp = game_staging_dir(data_dir)
     pr = Progress("copying")
     done = 0
     long_src, long_tmp = longpath(src), longpath(tmp)
@@ -1435,6 +1447,14 @@ def check_language_source_allowed(game_dir):
                      "(F1) > Language instead." % build.name)
 
 
+def language_staging_dir(root, region):
+    """The empty folder a language source is extracted into first: game-lang/<region>.tmp (short, issue
+    #144; releases up to v0.2.12 used <region>.partial)."""
+    for name in (region + ".partial", region + ".tmp"):
+        shutil.rmtree(longpath(os.path.join(root, name)), ignore_errors=True)
+    return os.path.join(root, region + ".tmp")
+
+
 def add_language_source(source, data_dir, keys=None, info=None, game_dir=None):
     """Takes the language packs of a European or Japanese game: source ("image", path) with keys and
     disc info (wwhd-extract info), ("archive", path) or ("folder", path). Returns [manifest] (an archive
@@ -1448,8 +1468,7 @@ def add_language_source(source, data_dir, keys=None, info=None, game_dir=None):
     name = os.path.basename(path.rstrip("/\\"))
     if kind == "image":
         region = language_source_region(info.get("title_id"))
-        tmp = os.path.join(root, region + ".partial")
-        shutil.rmtree(longpath(tmp), ignore_errors=True)
+        tmp = language_staging_dir(root, region)
         run_extract(path, keys, tmp, only=LANGUAGE_SOURCE_FILES)
         return [finish_language_source(tmp, region, info["title_id"].lower(), name, data_dir)]
     if kind == "archive":
@@ -1466,8 +1485,7 @@ def add_language_source(source, data_dir, keys=None, info=None, game_dir=None):
         out = []
         for t in titles:
             region = LANGUAGE_SOURCE_TITLES[t["id"]]
-            tmp = os.path.join(root, region + ".partial")
-            shutil.rmtree(longpath(tmp), ignore_errors=True)
+            tmp = language_staging_dir(root, region)
             run_extract(path, None, tmp, title=t["folder"], only=LANGUAGE_SOURCE_FILES)
             out.append(finish_language_source(tmp, region, t["id"], "%s (%s)" % (name, t["folder"]), data_dir))
         return out
@@ -1479,8 +1497,7 @@ def add_language_source(source, data_dir, keys=None, info=None, game_dir=None):
         tid = game_folder_title(folder) or code_title_version(folder)[0]
         region = language_source_region(tid)
         files = language_files_in(folder)
-        tmp = os.path.join(root, region + ".partial")
-        shutil.rmtree(longpath(tmp), ignore_errors=True)
+        tmp = language_staging_dir(root, region)
         dst = os.path.join(tmp, "content", "Common", "Pack")
         os.makedirs(dst)
         os.makedirs(os.path.join(tmp, "meta"))

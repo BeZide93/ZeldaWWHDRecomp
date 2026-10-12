@@ -56,7 +56,11 @@ fs::path selected(){
     if(const char* override=std::getenv("WWHD_CODE_MODS"))
         if((std::string(override)=="1")!=active.get("hooks").boolean)return {};
     auto exe=fs::path(active.get("exe").string());
-    auto cache=install_dir/"code-builds"/active.get("fingerprint").string();
+    // code-builds/<first 16 hex digits of the fingerprint> (setup's code_mods.cache_name); releases up to
+    // v0.2.12 used all 64 digits
+    const auto fingerprint=active.get("fingerprint").string();
+    auto cache=install_dir/"code-builds"/fingerprint.substr(0,16);
+    if(!fs::is_directory(cache))cache=install_dir/"code-builds"/fingerprint;
     if(!fs::is_regular_file(exe)||fs::weakly_canonical(exe.parent_path())!=fs::weakly_canonical(cache/"bin"))return {};
     auto record=read(cache/"ready.json");
     if(record.get("fingerprint")!=active.get("fingerprint")||record.get("hooks")!=active.get("hooks"))return {};

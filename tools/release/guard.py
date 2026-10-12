@@ -289,6 +289,11 @@ def check_windows_manifest(name, data, problems):
                 '{http://schemas.microsoft.com/SMI/2019/WindowsSettings}activeCodePage')
             active = [node.text.strip() if node.text else '' for node in nodes]
             if active != ['UTF-8']: raise ValueError('application manifest must select activeCodePage UTF-8')
+            long_paths = document.findall('./{urn:schemas-microsoft-com:asm.v3}application/'
+                '{urn:schemas-microsoft-com:asm.v3}windowsSettings/'
+                '{http://schemas.microsoft.com/SMI/2016/WindowsSettings}longPathAware')
+            if [node.text.strip() if node.text else '' for node in long_paths] != ['true']:
+                raise ValueError('application manifest must declare longPathAware true (issue #144)')
             if not any(node.tag.endswith('}requestedExecutionLevel') for node in document.iter()):
                 raise ValueError('application manifest lacks requestedExecutionLevel')
     except (ValueError, struct.error, ET.ParseError) as error:

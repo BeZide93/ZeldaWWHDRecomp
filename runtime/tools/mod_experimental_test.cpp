@@ -79,7 +79,7 @@ void store_rules() {
     write(save / "common/system.sav", "options");
     auto first = store.create("before-mod", "dragon", "Call of the Sky");
     assert(first.ok && first.created);
-    assert(first.name.ends_with("-before-dragon"));
+    assert(first.name.ends_with("-mod-dragon"));
     assert(read(store.root() / first.name / "save/user/cking.sav") == "progress-1");
     assert(read(store.root() / first.name / "save/common/system.sav") == "options");
     // same second again: a new folder, the first is untouched
@@ -169,6 +169,22 @@ void store_rules() {
     for (const auto& e : fs::directory_iterator(store.root())) assert(!e.path().filename().string().starts_with(".tmp-"));
     fs::remove_all(root);
     std::cout << "backup naming, no overwrite, retention, staged restore, undo and failure paths passed\n";
+}
+
+// Short folder names (issue #144): the mod id is cut to 7 characters, never ending with a dot.
+void short_names() {
+    auto root = temp_root("wwhd-save-names");
+    saves::Store store(root / "save");
+    store.log = [](const std::string&) {};
+    std::time_t clock = 1760000000;
+    store.now = [&] { return clock; };
+    write(root / "save/user/cking.sav", "progress");
+    auto mod = store.create("before-mod", "abcdef.ghij-long-mod-id");
+    assert(mod.ok && mod.name.ends_with("-mod-abcdef"));
+    clock += 60;
+    assert(store.create("before-restore").name.ends_with("-restore"));
+    assert(store.list().size() == 2 && store.list()[1].mod == "abcdef.ghij-long-mod-id");
+    fs::remove_all(root);
 }
 
 void deletion() {
@@ -330,7 +346,7 @@ void manager_flow() {
 int main(int argc, char** argv) {
     std::string mode = argc > 1 ? argv[1] : "all";
     if (mode == "schema" || mode == "all") schema();
-    if (mode == "store" || mode == "all") store_rules();
+    if (mode == "store" || mode == "all") { store_rules(); short_names(); }
     if (mode == "unicode" || mode == "all") unicode_paths();
     if (mode == "delete" || mode == "all") deletion();
     if (mode == "manager" || mode == "all") manager_flow();
