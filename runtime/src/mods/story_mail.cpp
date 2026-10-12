@@ -40,27 +40,27 @@
 namespace story_mail {
 namespace {
 
-// canonical USA addresses (guest_addr.h translates them for other builds)
-constexpr uint32_t kSavePtr = 0x101F84DC;          // save base pointer (d_com_inf_game)
-constexpr uint32_t kLetterTable = 0x10031504;      // daObjTpost_c letter table, 12-byte entries
-constexpr uint32_t kReceiveEventName = 0x10031464; // the receive event's name (end check)
-constexpr uint32_t kPlay = 0x025200D4;             // the play object
-constexpr uint32_t kCutEnd = 0x02543280;           // dEvent_manager_c::cutEnd(staff)
-constexpr uint32_t kPresentItem = 0x025D7DEC;      // fopAcM_createItemForPresentDemo(pos, item, ...)
-constexpr uint32_t kEndCheck = 0x0254457C;         // dEvent_manager_c::endCheck(name)
-constexpr uint32_t kModeProc = 0x023A40E0;         // daObjTpost_c::modeProc(proc, mode)
-constexpr uint32_t kReadable = 0x023A44A8;         // daObjTpost_c::getReadableLetterNum
-constexpr uint32_t kReceiveCount = 0x023A51CC;     // daObjTpost_c::getReceiveLetterNum
-constexpr uint32_t kDispLetterStart = 0x023A46E4;  // daObjTpost_c::cutDispLetterStart(staff)
-constexpr uint32_t kPresent = 0x023A4700;          // daObjTpost_c::cutPresentProc(staff)
-constexpr uint32_t kReceiveDemo = 0x023A50CC;      // daObjTpost_c::modeReceiveDemo
-constexpr uint32_t kNextMsg = 0x023A55BC;          // daObjTpost_c::nextMsg(u32* msg)
-constexpr uint32_t kGetMessage = 0x025F50E8;       // message manager: label -> set, index, entry
-constexpr uint32_t kGetText = 0x0273A2E8;          // MSBT: text of a label index
-constexpr uint32_t kTextLengthReturn = 0x0273A340; // its call in the MSBT text length (label check)
-constexpr uint32_t kIsSymbol = 0x025B7D90;         // dSv_player_collect_c::isSymbol(no)
-constexpr uint32_t kGateCheckReturn = 0x023A4A94;  // after daObjTpost_c::execute's isSymbol(1) call
-constexpr uint32_t kExecItemGet = 0x0254DA38;      // execItemGet(itemNo): the item's get function
+// game addresses: canonical USA ones, translated for this build (guest_addr.h)
+const uint32_t kSavePtr = GD(0x101F84DC);          // save base pointer (d_com_inf_game)
+const uint32_t kLetterTable = GD(0x10031504);      // daObjTpost_c letter table, 12-byte entries
+const uint32_t kReceiveEventName = GD(0x10031464); // the receive event's name (end check)
+const uint32_t kPlay = GC(0x025200D4);             // the play object
+const uint32_t kCutEnd = GC(0x02543280);           // dEvent_manager_c::cutEnd(staff)
+const uint32_t kPresentItem = GC(0x025D7DEC);      // fopAcM_createItemForPresentDemo(pos, item, ...)
+const uint32_t kEndCheck = GC(0x0254457C);         // dEvent_manager_c::endCheck(name)
+const uint32_t kModeProc = GC(0x023A40E0);         // daObjTpost_c::modeProc(proc, mode)
+const uint32_t kReadable = GC(0x023A44A8);         // daObjTpost_c::getReadableLetterNum
+const uint32_t kReceiveCount = GC(0x023A51CC);     // daObjTpost_c::getReceiveLetterNum
+const uint32_t kDispLetterStart = GC(0x023A46E4);  // daObjTpost_c::cutDispLetterStart(staff)
+const uint32_t kPresent = GC(0x023A4700);          // daObjTpost_c::cutPresentProc(staff)
+const uint32_t kReceiveDemo = GC(0x023A50CC);      // daObjTpost_c::modeReceiveDemo
+const uint32_t kNextMsg = GC(0x023A55BC);          // daObjTpost_c::nextMsg(u32* msg)
+const uint32_t kGetMessage = GC(0x025F50E8);       // message manager: label -> set, index, entry
+const uint32_t kGetText = GC(0x0273A2E8);          // MSBT: text of a label index
+const uint32_t kTextLengthReturn = GC(0x0273A340); // its call in the MSBT text length (label check)
+const uint32_t kIsSymbol = GC(0x025B7D90);         // dSv_player_collect_c::isSymbol(no)
+const uint32_t kGateCheckReturn = GC(0x023A4A94);  // after daObjTpost_c::execute's isSymbol(1) call
+const uint32_t kExecItemGet = GC(0x0254DA38);      // execItemGet(itemNo): the item's get function
 
 // daObjTpost_c fields (d_a_obj_toripost.h) and play fields used by the receive demo
 constexpr uint32_t kCurrMsgNo = 0x7C0, kReceivePending = 0xA01, kNextLetter = 0xA03, kNumReadable = 0xA04,
@@ -130,7 +130,7 @@ bool trace() {
     return on;
 }
 
-uint32_t save_base() { return ld32(GD(kSavePtr)); }
+uint32_t save_base() { return ld32(kSavePtr); }
 Book book() {
     uint32_t base = save_base();
     return Book(base ? mem::ptr(base + kBookOffset) : nullptr);
@@ -175,8 +175,8 @@ uint32_t leading_codes(uint32_t text) {
     }
 }
 
-uint32_t carrier_message() { return ld32(GD(kLetterTable) + 12 + 4); }  // the first letter's message
-uint32_t play(Cpu* c) { return g_call(c, GC(kPlay), {}); }
+uint32_t carrier_message() { return ld32(kLetterTable + 12 + 4); }  // the first letter's message
+uint32_t play(Cpu* c) { return g_call(c, kPlay, {}); }
 bool mod_letter(uint32_t self) { return int32_t(ld32(self + kNumReadable)) == kModIndex; }
 
 }  // namespace
@@ -269,18 +269,18 @@ void install(const std::function<std::string(uint32_t)>& replaced_by, const std:
     };
     // all or nothing: a postbox with only some of the hooks would read past the game's letter table
     for (const auto& [addr, fn] : hooks) {
-        std::string other = replaced_by(GC(addr));
+        std::string other = replaced_by(addr);
         if (!other.empty()) {
             LOG("[mail] %s replaces %08X: letters from mods are not delivered this session", other.c_str(), addr);
             return;
         }
     }
-    for (const auto& [addr, fn] : hooks) replace(GC(addr), fn);
+    for (const auto& [addr, fn] : hooks) replace(addr, fn);
     g_installed = true;
     LOG("[mail] postbox delivers letters from mods");
     if (trace())
         for (uint32_t i = 1; i <= 12; i++) {
-            const uint32_t e = GD(kLetterTable) + 12 * i;
+            const uint32_t e = kLetterTable + 12 * i;
             LOG("[mail] game letter %u: postage %u message %X item %02X register %04X", i, ld8(e), ld32(e + 4), ld8(e + 8), ld16(e + 10));
         }
 }
@@ -297,14 +297,14 @@ namespace hooks {
 // Before the first pearl the game's letters stay closed (the game's own check); only mod letters.
 void readable(Cpu* c) {
     if (g_gate_forced) c->r[3] = 0;
-    else g_original(c, GC(kReadable));
+    else g_original(c, kReadable);
     if (c->r[3] == 0 && next_waiting().key) c->r[3] = kModIndex;
 }
 
 // s16 getReceiveLetterNum(): the game's waiting letters plus the mod letters
 void receive_count(Cpu* c) {
     if (g_gate_forced) c->r[3] = 0;
-    else g_original(c, GC(kReceiveCount));
+    else g_original(c, kReceiveCount);
     c->r[3] = uint32_t(int32_t(int16_t(c->r[3] + waiting_count())));
 }
 
@@ -313,8 +313,8 @@ void receive_count(Cpu* c) {
 // receive_count() then leave out the game's letters.
 void symbol(Cpu* c) {
     const uint32_t lr = c->lr, no = c->r[4];
-    g_original(c, GC(kIsSymbol));
-    if (lr != GC(kGateCheckReturn)) return;
+    g_original(c, kIsSymbol);
+    if (lr != kGateCheckReturn) return;
     g_gate_forced = false;
     if (c->r[3] == 0 && no == 1 && next_waiting().key) {
         c->r[3] = 1;
@@ -331,14 +331,14 @@ void item_get(Cpu* c) {
         LOG("[mail] the story notebook is in this save file");
         return;
     }
-    g_original(c, GC(kExecItemGet));
+    g_original(c, kExecItemGet);
 }
 
 // cutDispLetterStart(staff): the letter window with the mod's text
 void disp_letter_start(Cpu* c) {
     const uint32_t self = c->r[3];
     if (!mod_letter(self)) {
-        g_original(c, GC(kDispLetterStart));
+        g_original(c, kDispLetterStart);
         return;
     }
     const Waiting l = next_waiting();
@@ -353,7 +353,7 @@ void disp_letter_start(Cpu* c) {
 void present(Cpu* c) {
     const uint32_t self = c->r[3], staff = c->r[4];
     if (!mod_letter(self)) {
-        g_original(c, GC(kPresent));
+        g_original(c, kPresent);
         return;
     }
     const bool notebook = have_save() && !book().get(kRecordItem, kItemNotebook);
@@ -361,36 +361,36 @@ void present(Cpu* c) {
     g_notebook_text = notebook && g_buffers ? Override{kMsgItemGet, g_buffers + kSlotBytes, &g_notebook_body} : Override{};
     const uint32_t item = notebook ? g_notebook_model : kEnclosedItem;
     if (trace()) LOG("[mail] enclosure: item %02X%s", item, notebook ? " (the story notebook)" : "");
-    const uint32_t id = g_call(c, GC(kPresentItem), {self + kActorPos, item, 0, 0xFFFFFFFFu, 0xFFFFFFFFu, 0, 0});
+    const uint32_t id = g_call(c, kPresentItem, {self + kActorPos, item, 0, 0xFFFFFFFFu, 0xFFFFFFFFu, 0, 0});
     const uint32_t p = play(c);
     if (id != 0xFFFFFFFFu) st32(p + kPlayItemPartner, id);
-    g_call(c, GC(kCutEnd), {p + kPlayEventManager, staff});
+    g_call(c, kCutEnd, {p + kPlayEventManager, staff});
 }
 
 // modeReceiveDemo(): after the receive event, mark the mod letter read and go on
 void receive_demo(Cpu* c) {
     const uint32_t self = c->r[3];
     if (!mod_letter(self)) {
-        g_original(c, GC(kReceiveDemo));
+        g_original(c, kReceiveDemo);
         return;
     }
-    if (!g_call(c, GC(kEndCheck), {play(c) + kPlayEventManager, GD(kReceiveEventName)})) return;
+    if (!g_call(c, kEndCheck, {play(c) + kPlayEventManager, kReceiveEventName})) return;
     uint16_t key = g_show.key;
     if (!key) key = next_waiting().key;  // a state was loaded while the letter was shown
     if (key && have_save()) book().set_state(key, kRead);
     if (trace()) LOG("[mail] letter %04X read", key);
     g_show = {};
-    const uint32_t next = g_call(c, GC(kReadable), {self});
+    const uint32_t next = g_call(c, kReadable, {self});
     st32(self + kNumReadable, next);
     const uint32_t p = play(c);
     st16(p + kPlayEventFlags, uint16_t(ld16(p + kPlayEventFlags) | 8));
     if (next) {
-        g_call(c, GC(kModeProc), {self, 0, 1});
+        g_call(c, kModeProc, {self, 0, 1});
         st8(self + kEventIdx, 1);
         st8(self + kNextLetter, 1);
         st32(self + kLetterOrdinal, ld32(self + kLetterOrdinal) + 1);
     } else {
-        g_call(c, GC(kModeProc), {self, 0, 0});
+        g_call(c, kModeProc, {self, 0, 0});
         st32(self + kLetterOrdinal, 1);
     }
 }
@@ -399,7 +399,7 @@ void receive_demo(Cpu* c) {
 void next_msg(Cpu* c) {
     const uint32_t self = c->r[3], msg = c->r[4];
     if (!mod_letter(self)) {
-        g_original(c, GC(kNextMsg));
+        g_original(c, kNextMsg);
         return;
     }
     if (ld32(msg) == kMsgLetterNumber) {
@@ -407,7 +407,7 @@ void next_msg(Cpu* c) {
         c->r[3] = 16;
         return;
     }
-    g_original(c, GC(kNextMsg));
+    g_original(c, kNextMsg);
     // the game compares the shown message with the (nonexistent) table entry 13
     const bool letter_shown = g_show.carrier && ld32(self + kCurrMsgNo) == g_show.carrier;
     const uint32_t status = c->r[3] & 0xFFFF;
@@ -418,7 +418,7 @@ void next_msg(Cpu* c) {
 // getMessage(manager, out, set name, label): note the MSBT entry of a message being replaced
 void get_message(Cpu* c) {
     const uint32_t out = c->r[4];
-    g_original(c, GC(kGetMessage));
+    g_original(c, kGetMessage);
     for (Override* o : {&g_show.letter, &g_notebook_text}) {
         if (!o->text || o->keyed || ld32(out + kMsgNumber) != o->number) continue;
         const uint32_t set = ld32(out + kMsgSet);
@@ -428,7 +428,7 @@ void get_message(Cpu* c) {
         o->keyed = true;
         Cpu probe = *c;  // the original text, for its leading codes
         probe.r[3] = o->msbt, probe.r[4] = o->index;
-        g_original(&probe, GC(kGetText));
+        g_original(&probe, kGetText);
         const uint32_t prefix = probe.r[3] ? leading_codes(probe.r[3]) : 0;
         for (uint32_t i = 0; i < prefix; i++) st8(o->buffer + i, ld8(probe.r[3] + i));
         const std::u16string& t = *o->text;
@@ -441,8 +441,8 @@ void get_message(Cpu* c) {
 // text(msbt, index): the replacement for a noted entry while it is shown. The message manager's
 // check that a label has text (setWithLabel -> 02757A80 -> text length) keeps the game's text.
 void get_text(Cpu* c) {
-    if (c->lr == GC(kTextLengthReturn)) {
-        g_original(c, GC(kGetText));
+    if (c->lr == kTextLengthReturn) {
+        g_original(c, kGetText);
         return;
     }
     for (const Override* o : {&g_show.letter, &g_notebook_text})
@@ -450,7 +450,7 @@ void get_text(Cpu* c) {
             c->r[3] = o->buffer;
             return;
         }
-    g_original(c, GC(kGetText));
+    g_original(c, kGetText);
 }
 
 }  // namespace hooks
