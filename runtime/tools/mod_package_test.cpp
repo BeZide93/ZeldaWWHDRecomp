@@ -84,6 +84,39 @@ int main(int argc, char** argv) {
         fs::rename(moved,source);
         assert(!inspected&&!loaded&&!view("gc-guest").active);return 0;
     }
+    // manifest game IDs: "wwhd" (any region, manager 1.5) and "wwhd-usa" (older manifests) are this game
+    if(argc==2&&std::string(argv[1])=="--game-id") {
+        namespace fs=std::filesystem;
+        auto root=fs::temp_directory_path()/("wwhd-game-id-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        env("WWHD_NO_HOST_INPUT","1");env("WWHD_MOD_MANAGER_DIR",(root/"manager").string().c_str());
+        initialize();std::string error;
+        assert(mods::packages::game_id_supported("wwhd")&&mods::packages::game_id_supported("wwhd-usa"));
+        assert(!mods::packages::game_id_supported("wwhd-eur")&&!mods::packages::game_id_supported("mkw")&&!mods::packages::game_id_supported(""));
+        auto preset=[&](const std::string& id,const std::string& game,const std::string& extra="",const std::string& builtin="wall-climb"){
+            auto dir=root/id;fs::create_directories(dir);
+            std::ofstream(dir/"manifest.json")<<R"({"format_version":1,"id":")"+id+R"(","name":")"+id+R"(","version":"1.0.0","game_id":")"+game+R"(","kind":"settings","settings":{")"+builtin+R"(":true})"+extra+"}";
+            return dir;
+        };
+        assert(install(preset("neutral","wwhd",R"(,"minimum_manager_version":"1.5.0")").string(),error));
+        assert(install(preset("legacy","wwhd-usa","","quick-doors").string(),error));
+        assert(!install(preset("other","wwhd-eur").string(),error)&&error.find("targets another game")!=std::string::npos);
+        assert(view("neutral").compatible&&view("legacy").compatible&&view("other").id.empty());
+        assert(enable("neutral",true,error)&&enable("legacy",true,error));
+        // a content import written by an older build ("wwhd-usa", manager 1.1.0) still loads
+        auto old=root/"old-import";fs::create_directories(old/"content"/"Common");
+        std::ofstream(old/"content"/"Common"/"fixture.bin")<<"synthetic replacement";
+        std::ofstream(old/"manifest.json")<<R"({"format_version":1,"id":"content.old-import","name":"old-import","version":"1.0.0","game_id":"wwhd-usa","kind":"content","minimum_manager_version":"1.1.0","content_dir":"content"})";
+        assert(install(old.string(),error)&&view("content.old-import").compatible);
+        // a new import is written with "wwhd" and requires 1.5.0 (older builds say "Requires mod manager 1.5.0")
+        auto fresh=root/"fresh-import";fs::create_directories(fresh/"content"/"Common");
+        std::ofstream(fresh/"content"/"Common"/"fixture.bin")<<"synthetic replacement";
+        std::string id;assert(install(fresh.string(),error,&id));
+        auto written=mods::json::parse(mods::catalogue::read_bounded(fs::path(directory())/id/"manifest.json",65536));
+        assert(written.get("game_id").string()=="wwhd"&&written.get("minimum_manager_version").string()=="1.5.0");
+        assert(view(id).compatible);
+        fs::remove_all(root);
+        std::cout<<"Game IDs: wwhd and wwhd-usa accepted, others refused, old and new imports load\n";return 0;
+    }
     if(argc==2&&std::string(argv[1])=="--game-source") {
         namespace fs=std::filesystem;
         auto root=fs::temp_directory_path()/("wwhd-gc-source-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));

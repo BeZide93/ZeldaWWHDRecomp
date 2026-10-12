@@ -10,6 +10,7 @@ what is on `devel` and not released yet (also in the
 - **Mods tab: Built-in and Community.** The Mods list is split into *Built-in* (the options that come
   with the game, such as the camera and speed options) and *Community* (mods from the mod catalogue,
   installed or ready to download, plus imported packages and graphics packs); *More* is unchanged.
+  Mods now use the game ID `wwhd` for both regions; older manifests with `wwhd-usa` keep working.
 - **Fixed: Call of the Sky could not be switched on from the catalogue.** After confirming the
   experimental warning, the install stopped with "confirm the warning first", because the save backup
   was skipped. The backup now always runs once before the mod is switched on, and a failed backup shows

@@ -105,7 +105,7 @@ Manifest manifest(const fs::path& path){
     m.kind=string_field(v,"kind",false,32);require(m.kind=="native"||m.kind=="guest"||m.kind=="settings"||m.kind=="content"||m.kind=="cemu","Unsupported mod kind");
     const auto& experimental=v.get("experimental");require(experimental.type==Value::Null||experimental.type==Value::Bool,"Invalid experimental flag");
     m.experimental=experimental.boolean;
-    if(string_field(v,"game_id",false,64)!=kGameId)m.problem="This package targets another game";
+    if(!game_id_supported(string_field(v,"game_id",false,64)))m.problem="This package targets another game";
     auto minimum=string_field(v,"minimum_manager_version",true,64);
     if(!minimum.empty()&&version(minimum)>version(kManagerVersion))m.problem="Requires mod manager "+minimum;
     if(m.kind=="native") {
@@ -430,7 +430,7 @@ void load(Live& item,const Record& record,const Value& configuration){
     item.library=dlopen(path.c_str(),RTLD_NOW|RTLD_LOCAL);if(!item.library){const char* reason=dlerror();exception_report::raise(reason?reason:"Cannot load native library");}auto init=reinterpret_cast<WWHDModInitV1>(dlsym(item.library,"wwhd_mod_init_v1"));
 #endif
     require(init,"Native library has no wwhd_mod_init_v1 entry point");
-    c.host={sizeof(WWHDModHostV1),1,&c,kGameId,c.path.c_str(),
+    c.host={sizeof(WWHDModHostV1),1,&c,kNativeHostGameId,c.path.c_str(),
         [](void*,uint32_t a,void* b,size_t n){return read_memory?read_memory(a,b,n):0;},
         [](void*,uint32_t a,const void* b,size_t n){return write_memory?write_memory(a,b,n):0;},
         [](void* p,const char* s){fprintf(stderr,"[mod:%s] %s\n",static_cast<Context*>(p)->id.c_str(),s?s:"");},

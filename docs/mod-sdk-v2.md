@@ -108,12 +108,14 @@ where MSYS2's lld defaults to PE. The same `mod.elf` works on every desktop plat
 
 ### Package and install
 
-Put a `manifest.json` next to `mod.elf`:
+Put a `manifest.json` next to `mod.elf` (`game_id` is `"wwhd"` for both regions, from mod manager 1.5;
+`"wwhd-usa"` from older manifests is still accepted; the game build is checked when the code mod is built):
 
 ```json
 {
   "format_version": 1,
-  "game_id": "wwhd-usa",
+  "game_id": "wwhd",
+  "minimum_manager_version": "1.5.0",
   "id": "hello-link",
   "name": "Hello Link",
   "version": "1.0.0",

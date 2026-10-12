@@ -319,13 +319,18 @@ of the PowerPC guest mod prototype, [mod-sdk-v2.md](mod-sdk-v2.md).) It does **n
 translated-function interception, PPC instruction patch execution, texture
 providers, or compatibility with Zelda64Recomp/BlueWake packages.
 
+Manager versions: 1.1 content mods, 1.2 Cemu graphics packs, 1.3 setup steps, 1.4 the
+`experimental` flag, 1.5 the region-neutral `game_id` `"wwhd"` (imports written by 1.5 use it and
+require 1.5.0, so an older build shows "Requires mod manager 1.5.0" instead of "targets another game").
+Manifests with `"wwhd-usa"` keep loading.
+
 Package manifest fields:
 
 | Field | Meaning |
 | --- | --- |
 | `format_version` | `1` |
 | `id`, `name`, `version` | Stable lowercase ASCII identifier, display name, three-part version |
-| `game_id` | `wwhd-usa` (the runtime also verifies its exact RPX entry) |
+| `game_id` | `wwhd`: this game, any region (manager 1.5; give `"minimum_manager_version": "1.5.0"` with it). `wwhd-usa` from older manifests is still accepted. Region checks stay where they apply: the title ID of Cemu and SDCafiine packs and the game build of code mods; the runtime also verifies its exact RPX entry |
 | `author`, `description` | Optional display metadata |
 | `minimum_manager_version` | Optional three-part minimum |
 | `experimental` | Optional `true` for untested mods: hidden by default, enabling backs up the saves first (manager 1.4) |
@@ -459,8 +464,8 @@ An explicit package uses, for example:
   "id": "my-model",
   "name": "My local model replacement",
   "version": "1.0.0",
-  "game_id": "wwhd-usa",
-  "minimum_manager_version": "1.1.0",
+  "game_id": "wwhd",
+  "minimum_manager_version": "1.5.0",
   "kind": "content",
   "content_dir": "content"
 }

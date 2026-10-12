@@ -8,8 +8,15 @@
 #include <utility>
 #include <vector>
 namespace mods::packages {
-inline constexpr const char* kGameId="wwhd-usa";
-inline constexpr const char* kManagerVersion="1.4.0"; // 1.4: "experimental" flag
+// The manifest's game: "wwhd", any region (the build is checked where it matters: the title ID of
+// Cemu/SDCafiine packs, the game build of code mods). Manifests written before 1.5 say "wwhd-usa" and keep
+// loading. New manifests that say "wwhd" also require 1.5.0, so older builds explain what they need.
+inline constexpr const char* kGameId="wwhd";
+inline constexpr const char* kLegacyGameId="wwhd-usa";
+inline bool game_id_supported(const std::string& id){return id==kGameId||id==kLegacyGameId;}
+// The game ID native mods (SDK v1) receive in their host table: unchanged, so libraries comparing it keep working.
+inline constexpr const char* kNativeHostGameId="wwhd-usa";
+inline constexpr const char* kManagerVersion="1.5.0"; // 1.4: "experimental" flag; 1.5: game_id "wwhd"
 struct Option {
     std::string id,name,description,type;
     json::Value value,default_value;
