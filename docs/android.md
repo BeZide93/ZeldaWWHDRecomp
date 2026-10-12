@@ -32,6 +32,17 @@ frame). *Game speed* is the game's logic steps per second: 30 is full speed.
 You need a 64-bit Android device with Android 13 or newer and Vulkan 1.3 (or a custom driver on Adreno),
 and a few GB of free storage.
 
+## Gyro aiming with your phone
+
+Open **Settings > Controls > Gyro**, then choose **Device gyro (phone/tablet)**.
+This is off by default and needs both a gyroscope and an accelerometer. Rest the
+phone for a second to calibrate. Enable **Options > Gyro** in the game and aim in
+first person, keeping the right stick at rest. The axes follow the displayed screen
+in either landscape direction. It works with touch controls or a controller.
+Sensors stop in the background and while settings block gameplay; rest the phone
+again after returning. Sensitivity, inversion and recalibration are explained in
+the [gyro guide](gyro.md). The status line says if sensors are unavailable.
+
 ## How to play
 
 ### The setup app (no PC needed)

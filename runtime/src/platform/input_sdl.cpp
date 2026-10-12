@@ -380,6 +380,82 @@ static void sensor_event(const SDL_GamepadSensorEvent& e){
  auto a=g_accel.find(e.which);if(a==g_accel.end())return;
  motion::controller_sample((uint64_t)e.which,e.sensor_timestamp,e.data,a->second.data());
 }
+#ifdef __ANDROID__
+// The device sensors are independent of gamepads. SDL reports natural-screen axes;
+// remap them to the shown screen, then to the existing flat-controller fusion frame.
+// No sensor subsystem/handles are opened on the default Off path.
+static SDL_Sensor* g_device_gyro=nullptr;
+static SDL_Sensor* g_device_accel=nullptr;
+static bool g_device_attempted=false,g_device_subsystem=false,g_device_foreground=true,g_device_accel_seen=false;
+static std::array<float,3> g_device_acceleration{};
+static int g_device_rotation=-1;
+static int orientation_quarters(SDL_DisplayOrientation orientation){
+ switch(orientation){
+ case SDL_ORIENTATION_PORTRAIT:return 0;
+ case SDL_ORIENTATION_LANDSCAPE:return 1;
+ case SDL_ORIENTATION_PORTRAIT_FLIPPED:return 2;
+ case SDL_ORIENTATION_LANDSCAPE_FLIPPED:return 3;
+ default:return -1;
+ }
+}
+static void close_device_sensors(){
+ if(g_device_gyro)SDL_CloseSensor(g_device_gyro);
+ if(g_device_accel)SDL_CloseSensor(g_device_accel);
+ g_device_gyro=g_device_accel=nullptr;
+ if(g_device_subsystem)SDL_QuitSubSystem(SDL_INIT_SENSOR);
+ g_device_subsystem=false;g_device_accel_seen=false;g_device_rotation=-1;
+ motion::device_reset();
+}
+static void update_device_sensors(){
+ SDL_Window* focused=motion::wants_device_sensors()?SDL_GetKeyboardFocus():nullptr;
+ const bool want=focused&&g_device_foreground&&
+                 !getenv("WWHD_NO_HOST_INPUT")&&!overlay::blocks_input();
+ if(!want){
+  if(g_device_attempted){close_device_sensors();g_device_attempted=false;}
+  return;
+ }
+ if(!g_device_attempted){
+  g_device_attempted=true;
+  g_device_subsystem=SDL_InitSubSystem(SDL_INIT_SENSOR);
+  if(g_device_subsystem){
+   int count=0;auto* ids=SDL_GetSensors(&count);
+   for(int i=0;i<count;i++){
+    const auto type=SDL_GetSensorTypeForID(ids[i]);
+    if(type==SDL_SENSOR_GYRO&&!g_device_gyro)g_device_gyro=SDL_OpenSensor(ids[i]);
+    if(type==SDL_SENSOR_ACCEL&&!g_device_accel)g_device_accel=SDL_OpenSensor(ids[i]);
+   }
+   SDL_free(ids);
+  }
+  const bool available=g_device_gyro&&g_device_accel;
+  motion::set_device_sensors_available(available);
+  if(!available){LOG("[gyro] this device has no usable gyro/accelerometer pair: %s",SDL_GetError());close_device_sensors();return;}
+  LOG("[gyro] this device's motion sensors on");
+ }
+ if(!g_device_gyro||!g_device_accel)return;
+ auto display=SDL_GetDisplayForWindow(focused);
+ if(!display)display=SDL_GetPrimaryDisplay();
+ const int natural=orientation_quarters(SDL_GetNaturalDisplayOrientation(display));
+ const int current=orientation_quarters(SDL_GetCurrentDisplayOrientation(display));
+ const int rotation=natural<0||current<0?-1:(current-natural+4)%4;
+ if(rotation!=g_device_rotation){
+  // A bias/gravity estimate in the old axes cannot be carried into the new ones.
+  // Leave the virtual GamePad pose alone, discard pending turns and await fresh acceleration.
+  motion::device_reset();g_device_accel_seen=false;g_device_rotation=rotation;
+ }
+}
+static void device_sensor_event(const SDL_SensorEvent& e){
+ if(!g_device_gyro||!g_device_accel||g_device_rotation<0||!g_device_foreground||
+    !SDL_GetKeyboardFocus()||overlay::blocks_input()||getenv("WWHD_NO_HOST_INPUT")||!motion::wants_device_sensors())return;
+ if(e.which==SDL_GetSensorID(g_device_accel)){
+  std::copy_n(e.data,3,g_device_acceleration.begin());g_device_accel_seen=true;return;
+ }
+ if(e.which!=SDL_GetSensorID(g_device_gyro)||!g_device_accel_seen)return;
+ const auto g=motion::device_to_sdl({e.data[0],e.data[1],e.data[2]},g_device_rotation);
+ const auto a=motion::device_to_sdl({g_device_acceleration[0],g_device_acceleration[1],g_device_acceleration[2]},g_device_rotation);
+ const float gyro[3]={g.x,g.y,g.z},accel[3]={a.x,a.y,a.z};
+ motion::device_sample(e.sensor_timestamp,gyro,accel);
+}
+#endif
 // What the dominant pad (first connected still present) has printed on its face buttons, in the
 // order kPadA, kPadB, kPadX, kPadY: south, east, west, north (issue #78's Automatic preset).
 static void dominant_labels(input_map::FaceLabel out[4]){
@@ -596,6 +672,14 @@ void handle_event(const SDL_Event& event){
  else if(event.type==SDL_EVENT_WINDOW_HIDDEN || event.type==SDL_EVENT_WINDOW_MINIMIZED ||
            event.type==SDL_EVENT_WINDOW_SHOWN || event.type==SDL_EVENT_WINDOW_RESTORED)
   update_overlay_window(SDL_GetKeyboardFocus());
+#ifdef __ANDROID__
+ if(event.type==SDL_EVENT_WILL_ENTER_BACKGROUND||event.type==SDL_EVENT_TERMINATING){
+  g_device_foreground=false;close_device_sensors();g_device_attempted=false;
+ }
+ if(event.type==SDL_EVENT_DID_ENTER_FOREGROUND)g_device_foreground=true;
+ if(event.type==SDL_EVENT_DISPLAY_ORIENTATION)update_device_sensors();
+ if(event.type==SDL_EVENT_SENSOR_UPDATE){device_sensor_event(event.sensor);return;}
+#endif
  if((event.type==SDL_EVENT_AUDIO_DEVICE_ADDED||event.type==SDL_EVENT_AUDIO_DEVICE_REMOVED||event.type==SDL_EVENT_AUDIO_DEVICE_FORMAT_CHANGED)&&!event.adevice.recording)audio::flush();
  if (event.type==SDL_EVENT_MOUSE_REMOVED) {
   std::lock_guard lk(g_mu);g_mouse_bindings.remove_device(event.mdevice.which);
@@ -694,6 +778,9 @@ void update(){
  mods::update_mouse();
  apply_rumble();
  update_sensors();
+#ifdef __ANDROID__
+ update_device_sensors();
+#endif
  std::function<void(bool,std::u16string)> cancelled;
  {std::lock_guard lk(g_mu);if(g_pending&&!g_done){g_done=std::exchange(g_pending,nullptr);g_text=std::move(g_initial);g_max_len=g_pending_max_len;g_mouse_bindings.consume();memset(g_keys,0,sizeof g_keys);if(!g_prompt_window)g_prompt_window=SDL_GetKeyboardFocus();if(g_prompt_window){g_previous_title=SDL_GetWindowTitle(g_prompt_window);if(SDL_StartTextInput(g_prompt_window)){other_windows_text_input(true);show_prompt();LOG("[input] the game asks for text: type it in a game window (shown in the window title), Enter confirms, Escape cancels; WWHD_SWKBD_TEXT=<text> answers automatically");}else{LOG("[input] text input unavailable (%s); set WWHD_SWKBD_TEXT=<text>",SDL_GetError());cancelled=std::exchange(g_done,nullptr);}}else{LOG("[input] text input: no window to type in; set WWHD_SWKBD_TEXT=<text>");cancelled=std::exchange(g_done,nullptr);}}}
  if(cancelled)cancelled(false,{});
