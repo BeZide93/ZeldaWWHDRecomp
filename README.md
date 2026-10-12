@@ -130,16 +130,20 @@ code and saves go to `~/.local/share/wwhd` and the settings, controls, save stat
 `~/.config/wwhd` (or `$XDG_DATA_HOME` / `$XDG_CONFIG_HOME`; `--data-dir FOLDER` chooses another place
 for the first, for example an SD card on a Steam Deck). Nothing is written beside the `.AppImage`; the
 menu entry the setup adds starts the same game. To remove everything, delete the file and those two
-folders. **Portable use:** create a folder named like the AppImage plus `.data` next to it (for example
-`WindWakerHD-v0.2.13-linux-x86_64.AppImage.data`); the AppImage then keeps the game, its code, saves,
-settings and caches in that folder instead (its `share`, `config` and `cache` subfolders).
+folders. **Portable use** (the AppImage runtime's own portable mode): start the AppImage once with
+`--appimage-portable-home`, or create a folder named like it plus `.home` next to it (for example
+`WindWakerHD-v0.2.13-linux-x86_64.AppImage.home`). The AppImage then uses that folder as your home
+folder, so the game, its code, saves, settings and caches stay in it (`.local/share/wwhd`,
+`.config/wwhd`, `.cache`); keep the file and the folder together, and start the AppImage itself (the
+setup's menu entry stays inside that folder too). If your session sets `XDG_DATA_HOME` or
+`XDG_CONFIG_HOME`, those still win over the portable folder.
 
 The setup also runs in a terminal (the fallback): `tools/Setup in Terminal.command` (macOS),
 `tools/Setup in a console window.bat` (Windows), `tools/setup-in-terminal.sh` (Linux). How it works
 and the interface between the window and `tools/installer/setup.py`:
 [tools/installer/README.md](tools/installer/README.md). Scripted use: `tools/installer/setup.py --help`.
 
-Source builds (below) and the Linux AppImage (without a `.data` folder) are not portable: they keep using the per-user folders
+Source builds (below) and the Linux AppImage (without a `.home` folder) are not portable: they keep using the per-user folders
 (`~/Library/Application Support/wwhd`, `%LOCALAPPDATA%\WWHD` for the game and saves,
 `~/.config/wwhd` for the settings on Linux), as before.
 

@@ -400,6 +400,17 @@ jobs:
           test ! -e "$RUNNER_TEMP/squashfs-root/data"
           test ! -e "$GITHUB_WORKSPACE/dist/data"
           test ! -e "$GITHUB_WORKSPACE/dist/portable.txt"
+          # portable use is the runtime's standard: --appimage-portable-home creates <image>.home, which
+          # then becomes $HOME (also with --appimage-extract-and-run); everything the setup writes must
+          # land in it and nothing in the player's real home (a fresh stand-in here)
+          "$APP" --appimage-portable-home
+          test -d "$APP.home"
+          mkdir "$RUNNER_TEMP/real-home"
+          env -u XDG_DATA_HOME -u XDG_CONFIG_HOME -u XDG_CACHE_HOME HOME="$RUNNER_TEMP/real-home" \
+            SDL_VIDEO_DRIVER=offscreen "$APP" --appimage-extract-and-run --self-test
+          test -f "$APP.home/.local/share/wwhd/setup.log"
+          test -z "$(ls -A "$RUNNER_TEMP/real-home")"
+          rm -rf "$APP.home" "$RUNNER_TEMP/real-home"
           chmod -R u+w "$RUNNER_TEMP"/squashfs-root && rm -rf "$RUNNER_TEMP"/squashfs-root
 
       - name: Installer self-test (unzipped release, placeholder code, toolchain download)

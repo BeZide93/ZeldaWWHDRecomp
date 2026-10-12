@@ -377,6 +377,44 @@ class DataDir(unittest.TestCase):
         self.assertEqual(os.path.basename(setup.legacy_data_dir()), "WWHD" if setup.IS_WIN else "wwhd")
 
 
+class AppImagePortableHome(unittest.TestCase):
+    """The AppImage's portable mode is the runtime's: "<image>.home" next to the file becomes $HOME
+    (issue #55). With the XDG variables unset, every folder setup derives on Linux (game and code,
+    compiler, settings, shader caches, launcher and menu entry) must then sit under that $HOME: nothing
+    may come from the password database or another fixed place. Runs on Linux and macOS (Linux rules forced)."""
+
+    @unittest.skipIf(sys.platform.startswith("win"), "~ is %USERPROFILE% there, not $HOME")
+    def test_every_folder_follows_home(self):
+        import shader_prebuild
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as t:
+            image = os.path.join(t, "Wind Waker [HD].AppImage")
+            home = image + ".home"
+            os.makedirs(home)
+            env = {k: v for k, v in os.environ.items() if not k.startswith("XDG_") and k != "WWHD_USER_DIR"}
+            env.update(HOME=home, APPIMAGE=image)
+            with mock.patch.dict(os.environ, env, clear=True), \
+                    mock.patch.object(setup, "IS_MAC", False), mock.patch.object(setup, "IS_WIN", False), \
+                    mock.patch.object(setup, "IS_LINUX", True), mock.patch.object(setup, "PORTABLE", False), \
+                    mock.patch.object(shader_prebuild.os.sys, "platform", "linux"):
+                data = setup.default_data_dir()
+                self.assertEqual(data, os.path.join(home, ".local", "share", "wwhd"))
+                self.assertEqual(setup.toolchain_dir(data), os.path.join(data, "toolchain"))
+                self.assertEqual(setup.legacy_config_dirs(), [os.path.join(home, ".config", "wwhd")])
+                self.assertEqual(shader_prebuild.default_cache_root(data),
+                                 Path(home, ".config", "wwhd", "shader-prebuild"))
+                os.makedirs(data)
+                self.assertEqual(setup.linux_launchers(data, os.path.join(data, "wwhd")), os.path.join(data, "play.sh"))
+                self.assertTrue(os.path.isfile(os.path.join(home, ".local", "share", "applications", "wwhd.desktop")))
+                # the runtime's "<image>.config" (--appimage-portable-config) moves only the settings
+                with mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": image + ".config"}):
+                    self.assertEqual(setup.legacy_config_dirs(), [os.path.join(image + ".config", "wwhd")])
+                    self.assertEqual(setup.default_data_dir(), data)
+            for root, _dirs, files in os.walk(t):
+                for name in files:  # nothing was written outside the portable home
+                    self.assertTrue(root.startswith(home), (root, name))
+
+
 class Titles(unittest.TestCase):
     def test_supported_ok(self):
         setup.check_title("0005000010143500")   # USA, the canonical build

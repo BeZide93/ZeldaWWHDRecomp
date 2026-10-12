@@ -7,8 +7,8 @@ PKG_DIR is the WindWakerHD-VERSION-linux-ARCH folder tools/release/package.py pr
 wind-waker-hd, tools/, sdk/, portable.txt, ...). An AppImage mount is read-only, so the result
 drops portable.txt: setup then keeps the game, its code, saves and settings in the per-user
 folders (~/.local/share/wwhd and ~/.config/wwhd, setup.py default_data_dir) instead of next to
-the program, and nothing is written beside the .AppImage unless the player creates a
-"<AppImage>.data" folder there for a portable setup (see APPRUN).
+the program, and nothing is written beside the .AppImage. Portable use is the AppImage runtime's
+own: a "<AppImage>.home" folder next to the file becomes $HOME (see APPRUN).
 
 Adds what appimagetool wants at the AppDir root (AppRun, a .desktop, the project's own icon) and
 squashes it with the AppImage project's appimagetool. Output: OUT_DIR/<basename of PKG_DIR>.AppImage.
@@ -42,14 +42,10 @@ APPIMAGETOOL_URL = "https://github.com/AppImage/appimagetool/releases/download/%
 APPRUN = """#!/bin/sh
 # Wind Waker HD (AppImage): start the release's launcher (next to tools/ and sdk/).
 # This image is read-only: the setup keeps the game, its code, saves and settings in the
-# per-user folders (issue #55), never beside this file. Portable use: if a folder
-# "<this file>.data" exists next to the AppImage ($APPIMAGE is set by the AppImage runtime),
-# the game, settings and caches go into it instead (its share/, config/ and cache/ take the
-# place of ~/.local/share, ~/.config and ~/.cache).
-if [ -n "$APPIMAGE" ] && [ -d "$APPIMAGE.data" ]; then
-  XDG_DATA_HOME="$APPIMAGE.data/share"; XDG_CONFIG_HOME="$APPIMAGE.data/config"; XDG_CACHE_HOME="$APPIMAGE.data/cache"
-  export XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
-fi
+# per-user folders (issue #55), never beside this file. Portable use is the AppImage runtime's
+# standard one: a folder "<this file>.home" next to the AppImage (--appimage-portable-home
+# creates it) becomes $HOME before this script runs, and setup and game derive every folder
+# from $HOME and the XDG variables. Nothing to do here.
 exec "$(dirname "$0")/wind-waker-hd" "$@"
 """
 
