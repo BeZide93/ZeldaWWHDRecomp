@@ -699,6 +699,13 @@ Cemu side by side. It runs at the console's 30 fps or, with frame interpolation,
 shaders and rectangle primitives are not implemented yet (not encountered in the game so far),
 and the macOS app does not drive controller rumble yet.
 
+## Other platforms
+
+**Nintendo Switch:** [SwitchWakerHD](https://github.com/centollOS/SwitchWakerHD) is a community port built on this
+project, by Pulpparty, depende3000, centollOS and contributors. Like this project, it needs your own copy of the game,
+and no builds containing game code are shared. It is a separate project, not tested or supported here: please report
+Switch issues on its tracker.
+
 ## License
 
 The code of this project is licensed under the Mozilla Public License 2.0 (see `LICENSE`).
