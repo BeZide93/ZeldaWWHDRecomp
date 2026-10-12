@@ -21,6 +21,10 @@ what is on `devel` and not released yet (also in the
   faster it sails, so the boosted speed hit its minimum turn rate. The rudder now responds like at normal speed for
   both sails, while the boat keeps its boosted speed; automatic wind and the jump height are unchanged.
 
+- **Game code built with `-fwrapv`** (PR #172, thanks @Pulpparty): PowerPC integer arithmetic wraps around, and the
+  compiler now guarantees the same for the recompiled game code, the decomp version and the verify tools, instead of
+  relying on the code never overflowing. No visible change.
+
 - **Fixed: "Invert camera up/down" also inverted the Wind Waker baton** (issue #167). The setting now applies
   only to the camera, including first-person views and item aiming (bow, hookshot, telescope, Picto Box) and the
   mouse camera (which now follows it too); the baton and other right-stick controls keep their normal direction.
