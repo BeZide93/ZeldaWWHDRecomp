@@ -1574,9 +1574,7 @@ void tab_controls() {
             if (int p = m.pad[a]; p != input_map::kPadNone) x = std::max(x, live[p]);
             cv.act[a] = x;
         }
-        input_map::Mapping mm = m;
-        mm.invert_camera_y = false;
-        input::PadState ks = input_map::keyboard_state(mm, keys), cs = input_map::controller_state(mm, live);
+        input::PadState ks = input_map::keyboard_state(m, keys), cs = input_map::controller_state(m, live);
         const bool kl = ks.lx || ks.ly, kr = ks.rx || ks.ry;
         cv.stick[0][0] = kl ? ks.lx : cs.lx;
         cv.stick[0][1] = kl ? ks.ly : cs.ly;
@@ -1603,6 +1601,8 @@ void tab_controls() {
         m.invert_camera_y = v;
         input_map::set_current(m);
     }
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Camera only, including first-person views and item aiming (bow, hookshot, telescope, Picto Box) and the mouse camera. The Wind Waker baton and other right-stick controls are not inverted.");
     ImGui::SameLine(0, 24);
     // issue #35: a way to keep the controller motors still (saved; WWHD_RUMBLE=0 starts with it off)
     if (check("Rumble", rumble::enabled(), &v, input::has_rumble())) {

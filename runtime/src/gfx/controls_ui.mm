@@ -1064,6 +1064,7 @@ static NSTextField* label(NSString* s) {
     dzv.alignment = NSTextAlignmentRight;
     self.deadzoneValue = dzv;
     NSButton* inv = [NSButton checkboxWithTitle:@"Invert camera up/down" target:self action:@selector(invertChanged:)];
+    inv.toolTip = @"Camera only, including first-person views and item aiming (bow, hookshot, telescope, Picto Box) and the mouse camera. The Wind Waker baton and other right-stick controls are not inverted.";
     self.invertY = inv;
     // issue #40: stick range, one slider per stick (worn sticks usually wear one at a time)
     NSString* rangeTip = @"Default: 100% (no change). Scales the stick after the dead zone so a short stick reaches full deflection.";
@@ -1293,7 +1294,7 @@ static NSTextField* label(NSString* s) {
             }
         }
     }
-    // pressed state per action, stick deflection (as the game sees it, without camera inversion)
+    // pressed state per action, stick deflection (as the game sees it; the camera applies the inversion)
     float act[kActionCount];
     for (int a = 0; a < kActionCount; a++) {
         act[a] = 0;
@@ -1302,9 +1303,7 @@ static NSTextField* label(NSString* s) {
         int p = _st.m.pad[a];
         if (p != kPadNone) act[a] = std::max(act[a], v[p]);
     }
-    Mapping m = _st.m;
-    m.invert_camera_y = false;
-    input::PadState ks = keyboard_state(m, keys), cs = controller_state(m, v);
+    input::PadState ks = keyboard_state(_st.m, keys), cs = controller_state(_st.m, v);
     float stick[2][2] = {{ks.lx || ks.ly ? ks.lx : cs.lx, ks.lx || ks.ly ? ks.ly : cs.ly},
                          {ks.rx || ks.ry ? ks.rx : cs.rx, ks.rx || ks.ry ? ks.ry : cs.ry}};
     if (memcmp(act, _st.act, sizeof act) || memcmp(stick, _st.stick, sizeof stick) || memcmp(keys, _st.keys, sizeof keys) ||

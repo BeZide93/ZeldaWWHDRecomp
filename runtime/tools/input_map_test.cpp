@@ -10,6 +10,7 @@
 #include <string>
 
 #include "input_map.h"
+#include "camera_invert.h"
 #include "platform/touch_face.h"
 #include "overlay/settings_shortcut.h"
 #include "overlay/binding_capture.h"
@@ -435,7 +436,7 @@ static void test_json_roundtrip() {
     CHECK(press(r, {kVK_ANSI_K}).buttons == input::kB);
     CHECK(press(r, {kVK_ANSI_J}).buttons == input::kA);
     CHECK(press(r, {kVK_ANSI_H}).buttons == 0);
-    CHECK(press(r, {kVK_UpArrow}).ry == -1);  // inverted camera
+    CHECK(press(r, {kVK_UpArrow}).ry == 1);   // issue #167: the stick stays as it is (the camera inverts)
     CHECK(press(r, {kVK_ANSI_W}).ly == 1);    // move stick not inverted
     // the Automatic preset is the one face state that is stored
     CHECK(to_json(Mapping::defaults()).find("face_layout") == std::string::npos);
@@ -518,7 +519,38 @@ static void test_deadzone() {
     CHECK(std::fabs(controller_state(m, v).lx - 0.5f) < 1e-6);  // (0.6 - 0.2) / 0.8
     v[kPadLSRight] = 0; v[kPadRSDown] = 0.6f;
     m.invert_camera_y = true;
-    CHECK(std::fabs(controller_state(m, v).ry - 0.5f) < 1e-6);
+    CHECK(std::fabs(controller_state(m, v).ry + 0.5f) < 1e-6);  // issue #167: not inverted here
+}
+
+// issue #167: Invert camera up/down is camera only (camera_invert.h): the mapping hands the game the
+// stick as it is, and only the camera's reads of it are inverted, so the Wind Waker baton is not
+static void test_camera_invert() {
+    using camera_invert::Use;
+    Mapping m = Mapping::defaults();
+    float v[kPadCount] = {};
+    v[kPadRSUp] = 1.0f;
+    for (bool inv : {false, true}) {
+        m.invert_camera_y = inv;
+        const float ry = controller_state(m, v).ry;
+        CHECK(ry == 1.0f);                                                  // controller: raw either way
+        CHECK(camera_invert::stick_y(ry, inv, Use::kBaton) == 1.0f);        // baton: conducts up
+        CHECK(camera_invert::stick_y(ry, inv, Use::kFigureZoom) == 1.0f);   // figure viewer zoom
+        CHECK(camera_invert::stick_y(ry, inv, Use::kCamera) == (inv ? -1.0f : 1.0f));  // camera inverted
+        CHECK(camera_invert::mouse_pitch_sign(inv) == (inv ? -1.0f : 1.0f));
+    }
+    bool keys[256] = {};
+    for (int k : m.keys[kRUp])
+        if (k >= 0 && k < 256) keys[k] = true;
+    m.invert_camera_y = true;
+    CHECK(keyboard_state(m, keys).ry == 1.0f);  // keyboard: raw too
+    // every reader of the right stick's Y is classified; only the camera's are hooked
+    int camera = 0, baton = 0;
+    for (const auto& site : camera_invert::kSites) {
+        camera += site.use == Use::kCamera;
+        baton += site.use == Use::kBaton;
+        CHECK(camera_invert::inverts(site.use) == (site.use == Use::kCamera));
+    }
+    CHECK(camera == 5 && baton == 1);
 }
 
 // issue #40: per-stick range, applied radially after the dead zone
@@ -749,6 +781,7 @@ int main() {
     test_json_partial_and_bad();
     test_deadzone();
     test_stick_range();
+    test_camera_invert();
     test_files();
     printf("input_map_test: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
