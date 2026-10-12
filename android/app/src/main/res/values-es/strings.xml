@@ -50,7 +50,8 @@
     <string name="setup_shaders">Preparando los gráficos…</string>
     <string name="setup_shaders_detail">Así los primeros minutos de juego van más fluidos. Atrás omite este paso.</string>
     <string name="game_icon_add">Añadir el icono del juego a la pantalla de inicio</string>
-    <string name="game_icon_present">El icono ya está en la pantalla de inicio. Mantenlo pulsado y toca Ajustes.</string>
+    <string name="game_icon_present">El icono ya está en la pantalla de inicio. Mantenlo pulsado y abre sus ajustes.</string>
+    <string name="game_icon_present_shortcut">El icono ya está en la pantalla de inicio. Mantenlo pulsado para las partidas y la instalación.</string>
     <string name="game_icon_none">Primero instala el juego</string>
     <string name="game_widget">El juego, con su propio icono</string>
     <string name="save_export">Exportar partida</string>

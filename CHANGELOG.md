@@ -7,6 +7,11 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Android: setup works again on the development build.** Since the decomp version arrived in setup, the app's
+  setup stopped right away ("No module named 'decomp_setup'"); the missing file is now packed with it. Also clearer
+  game-icon hints: "already on the home screen" for the plain icon too, and wording that fits every launcher
+  (PR #170, thanks @rhemfur).
+
 - **Android setup polish** (from the tester report on PR #98, thanks @rhemfur): the "Rebuild shader cache" hint
   names the right button on each platform (on Android: *Start / resume / retry setup*); tooltips no longer stay on
   touch screens; setup's own step reads "Reading shaders from your game files" so it doesn't look skippable, and its
@@ -15,6 +20,10 @@ what is on `devel` and not released yet (also in the
 - **Fixed: the boat barely turned with "Sailing speed" on** (issue #169). The game turns the boat more slowly the
   faster it sails, so the boosted speed hit its minimum turn rate. The rudder now responds like at normal speed for
   both sails, while the boat keeps its boosted speed; automatic wind and the jump height are unchanged.
+
+- **Game code built with `-fwrapv`** (PR #172, thanks @Pulpparty): PowerPC integer arithmetic wraps around, and the
+  compiler now guarantees the same for the recompiled game code, the decomp version and the verify tools, instead of
+  relying on the code never overflowing. No visible change.
 
 - **Fixed: "Invert camera up/down" also inverted the Wind Waker baton** (issue #167). The setting now applies
   only to the camera, including first-person views and item aiming (bow, hookshot, telescope, Picto Box) and the

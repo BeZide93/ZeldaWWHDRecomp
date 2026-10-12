@@ -92,11 +92,13 @@ public class SetupActivity extends Activity {
     private void addIcon() {
         new Thread(() -> {
             File game = GameWidget.activeGame(this);
-            boolean placed = android.appwidget.AppWidgetManager.getInstance(this)
+            boolean widget = android.appwidget.AppWidgetManager.getInstance(this)
                 .getAppWidgetIds(new android.content.ComponentName(this, GameWidget.class)).length > 0;
+            boolean shortcut = !widget && GameShortcut.pinned(this);  // launchers that can't pin widgets
             runOnUiThread(() -> {
                 if (game == null) android.widget.Toast.makeText(this, R.string.game_icon_none, android.widget.Toast.LENGTH_SHORT).show();
-                else if (placed) android.widget.Toast.makeText(this, R.string.game_icon_present, android.widget.Toast.LENGTH_LONG).show();
+                else if (widget) android.widget.Toast.makeText(this, R.string.game_icon_present, android.widget.Toast.LENGTH_LONG).show();
+                else if (shortcut) android.widget.Toast.makeText(this, R.string.game_icon_present_shortcut, android.widget.Toast.LENGTH_LONG).show();
                 else GameShortcut.offer(this, game);
             });
         }, "wwhd-game-icon").start();

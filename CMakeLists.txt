@@ -99,8 +99,8 @@ endif()
 
 add_library(gamecode STATIC ${GEN_SOURCES} ${GEN_DIR}/table.c ${GEN_DIR}/imports.c)
 target_include_directories(gamecode PUBLIC runtime/include ${GEN_DIR})
-# exact FP semantics: no contraction into FMA, no fast-math
-target_compile_options(gamecode PRIVATE -O3 -ffp-contract=off -fno-strict-aliasing -w)
+# exact FP semantics: no contraction into FMA, no fast-math; PowerPC integer arithmetic wraps
+target_compile_options(gamecode PRIVATE -O3 -ffp-contract=off -fno-strict-aliasing -fwrapv -w)
 if(APPLE AND CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
   target_compile_options(gamecode PRIVATE -mcpu=apple-m1)
 endif()
