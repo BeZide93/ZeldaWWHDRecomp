@@ -11,6 +11,15 @@ what is on `devel` and not released yet (also in the
   (issue #153). If a trigger or stick did not fully return to rest, the game ignored all input after
   closing the overlay or entering a name until the controller was reconnected. Now only the button that
   closed it waits for its release; everything else reaches the game at once.
+
+- **Linux AppImage: portable use now uses the AppImage's standard portable mode** (issue #55). Start
+  the AppImage once with `--appimage-portable-home`, or create a folder named like it plus `.home` next
+  to it (e.g. `WindWakerHD-…-linux-x86_64.AppImage.home`); the game, its code, saves, settings and caches
+  then stay in that folder. **If you used the `….AppImage.data` folder from v0.2.13**, it is no longer
+  used; to keep your saves and settings, move its contents before starting the new version:
+  `….AppImage.data/share` → `….AppImage.home/.local/share`, `….AppImage.data/config` →
+  `….AppImage.home/.config` and `….AppImage.data/cache` → `….AppImage.home/.cache`, then start the
+  AppImage once with `--setup`.
 - **Android handhelds and controllers** (issue #152, thanks @OTPR26):
   - **Settings with a controller:** holding Select/− now opens the settings after half a second as
     intended (it could take about 3 seconds on some devices), and a one-time hint says so.
