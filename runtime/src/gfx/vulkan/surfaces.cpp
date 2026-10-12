@@ -377,6 +377,13 @@ static Surface* with_mip_chain(Surface* s, const SurfaceDesc& d) {
     // also blit sources. Preserve these reads for the next whole-image write.
     derive_dependency(c->use, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT, true);
     c->layout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;  // every level is now a transfer source
+    // Another unit (or the vertex stage) may already have bound a source for
+    // sampling in this draw. Chain assembly must preserve those read layouts.
+    constexpr auto shaderStages = VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    transition_image(s, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, shaderStages, VK_ACCESS_SHADER_READ_BIT);
+    for (uint32_t l = 1; l < mips && l < 16; ++l)
+        if (levels[l]) transition_image(levels[l], VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                        shaderStages, VK_ACCESS_SHADER_READ_BIT);
     s->mipChainSeq = key;
     static int logged = 0;
     if (logged++ < 8) LOG("[gfx] mip chain for %08X %ux%u: %u levels, %u of them the game's own", s->addr, w, h, mips, fromGame);
