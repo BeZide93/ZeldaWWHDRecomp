@@ -95,8 +95,22 @@ it as the fix based on the unit test alone.
   handoff; no task-owned game or background launch is left running.
 - On goal continuation, the run gate was resumed for `before-boom30c`. The
   previously observed game PID 3017 was confirmed gone, but new pacing games
-  continued to occupy the machine. This is an ongoing run attempt, not valid
-  reproduction evidence; inspect the live launcher and output before restarting.
+  continued to occupy the machine. Across three goal turns the runtime
+  reproduction remained blocked. The queued launcher (PID 7080) was stopped
+  when the latest pacing process (PID 20809, `wwhd-v0213`) was confirmed live.
+  No task-owned game or queued launcher remains. Reserve an exclusive window
+  before resuming; do not treat the queued attempt as reproduction evidence.
+- `tools/true60/reticle_measure.py` now measures projection jumps separately
+  within a logic step and across step boundaries, retaining each draw fraction
+  and screen position. It also extracts 8-connected red components from a
+  chosen PNG ROI, with weighted pixel centres, bounding boxes and streak widths.
+  Captured pixel measurements are kept separate from generated draw-pass
+  coordinates: asynchronous logs do not establish frame alignment.
+  Four synthetic tests (two dots, a connected/diagonal streak, HUD exclusion,
+  stream isolation, gaps and nonfinite projections) pass with:
+  `python3 -m unittest discover -s tools/true60 -p test_reticle_measure.py -v`.
+  Pillow 12.2.0 is available locally. Colour components require visual
+  confirmation; this detector does not handle the yellow lock-on texture.
 
 **Before/after numbers: unavailable.** There is no valid 30/60/120 aiming capture
 and no evidence yet of two dots within one rendered frame. No claim of root
@@ -114,6 +128,11 @@ before accepting projection traces. Compare with `--fix 1`, and test
 `--paced 1`. Add true60 and acquired boomerang target fixtures. Measure both
 projected coordinate jumps and actual rendered dot positions; delete temporary
 frame dumps after extracting the evidence to remain under 1 GB.
+For a completed capture, write a new measurement artifact with:
+`python3 tools/true60/reticle_measure.py local-reticle/RUN --out local-reticle/RUN-measurements.json`.
+Set `--roi LEFT TOP RIGHT BOTTOM` (fractions of the image dimensions) to a
+visually verified aiming area. Preserve the JSON pixel measurements and hashes
+before deleting the PNGs. Zero projections/components are not reproduction.
 
 Lead reply while unfinished: “We traced the shared aiming marker and boomerang
 lock-on projection paths and are checking their timing against interpolated
