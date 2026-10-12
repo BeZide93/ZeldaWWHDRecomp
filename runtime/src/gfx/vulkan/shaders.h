@@ -69,6 +69,13 @@ struct ShaderStats {
     uint64_t verifyChecks = 0, verifyViolations = 0, verifySplitKeys = 0, verifyNs = 0;
 };
 ShaderStats shader_stats();
+// Render-thread-only diagnostic payload/capacity counters, not total allocator heap.
+struct ShaderMemoryStats {
+    uint64_t shaders = 0, decompilerText = 0, glslCapacity = 0, verifyCapacity = 0;
+    uint64_t spirvCapacity = 0, diskEntries = 0, diskSourceCapacity = 0, diskSpirvCapacity = 0;
+    uint64_t pendingSourceCapacity = 0;
+};
+ShaderMemoryStats shader_memory_stats();
 // Render-thread-only checkpoint schedules one immutable disk worker after quiet frames.
 // Explicit save joins that worker and synchronously saves the latest revision.
 // Disk cache retains SPIR-V only; decompiler metadata is always rebuilt safely.

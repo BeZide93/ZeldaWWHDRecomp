@@ -85,6 +85,7 @@
 #ifdef __APPLE__
 #include <dlfcn.h>
 #include <mach-o/dyld.h>
+#include <mach/mach.h>
 #endif
 #include <stdexcept>
 #include <string>
@@ -93,7 +94,44 @@
 #ifndef _WIN32
 #include <time.h>
 #endif
+#if defined(__linux__)
+#include <unistd.h>
+#endif
+#include <unordered_set>
 #include <vulkan/vulkan_beta.h>
+
+// Opt-in only: no process queries or cache traversal on the normal frame path.
+// The regular LOG ring includes these aggregate diagnostics in crash reports.
+namespace {
+uint64_t memory_log_interval() {
+  static const uint64_t interval=[] {
+    const char* value=std::getenv("WWHD_VK_MEMORY_LOG_FRAMES");
+    if (!value || !*value || *value=='-') return uint64_t{0};
+    char* end=nullptr;
+    const auto parsed=std::strtoull(value,&end,10);
+    return end!=value && !*end ? uint64_t(parsed) : uint64_t{0};
+  }();
+  return interval;
+}
+uint64_t resident_bytes() {
+#if defined(__APPLE__)
+  mach_task_basic_info_data_t info{};
+  mach_msg_type_number_t count=MACH_TASK_BASIC_INFO_COUNT;
+  if (task_info(mach_task_self(),MACH_TASK_BASIC_INFO,
+                reinterpret_cast<task_info_t>(&info),&count)==KERN_SUCCESS)
+    return info.resident_size;
+#elif defined(__linux__)
+  if (FILE* file=std::fopen("/proc/self/statm","r")) {
+    unsigned long long total=0,resident=0;
+    const bool ok=std::fscanf(file,"%llu %llu",&total,&resident)==2;
+    std::fclose(file);
+    const long page=sysconf(_SC_PAGESIZE);
+    if (ok && page>0) return resident*uint64_t(page);
+  }
+#endif
+  return 0; // unavailable, not a peak-RSS measurement
+}
+}
 
 namespace gx2 { uint64_t flips_presented(); void checkpoint_vulkan_caches(); void shutdown_vulkan_caches(); void request_background_vulkan_cache_checkpoint(); }
 #include "../../interp.h"
@@ -2867,6 +2905,37 @@ void swap() {
   perf_hint::frame_done();
   checkpoint_pipeline_cache();
   vk::checkpoint_shader_cache(R.frame);
+  const uint64_t memoryInterval=memory_log_interval();
+  if (memoryInterval && R.frame%memoryInterval==0) {
+    const auto memory=vk::shader_memory_stats();
+    uint64_t imageBytes=0,images=0,uploadBytes=0;
+    std::unordered_set<VkImage> seenImages;
+    auto countImage=[&](const Surface* surface) {
+      for (;surface;surface=surface->mipChain.get())
+        if (surface->image && seenImages.insert(surface->image).second) {
+          ++images; imageBytes+=surface->allocationBytes;
+        }
+    };
+    for (const auto& [address,surface]:R.surfaces) countImage(surface.get());
+    std::unordered_set<VkBuffer> seenUploads;
+    auto countUploads=[&](const auto& blocks) {
+      for (const auto& block:blocks)
+        if (seenUploads.insert(block.buffer.buffer).second) uploadBytes+=block.buffer.size;
+    };
+    countUploads(R.uploadBlocks);
+    for (const auto& submission:R.submissions) countUploads(submission.uploadBlocks);
+    constexpr double mib=1024.0*1024.0;
+    LOG("[gfx] memory frame %llu RSS %.2f MiB (0=unavailable); cached surfaces %llu images %llu allocated %.2f MiB (excludes retired/non-cache/driver images); upload blocks %llu %.2f MiB",
+        (unsigned long long)R.frame,resident_bytes()/mib,
+        (unsigned long long)R.surfaces.size(),(unsigned long long)images,imageBytes/mib,
+        (unsigned long long)seenUploads.size(),uploadBytes/mib);
+    LOG("[gfx] memory shader payload: %llu shaders decompiler-text %.2f MiB GLSL-capacity %.2f MiB verify-capacity %.2f MiB SPIRV-capacity %.2f MiB; disk %llu source-capacity %.2f MiB SPIRV-capacity %.2f MiB pending-source-capacity %.2f MiB (excludes compiler results, disk snapshots, metadata and allocator overhead)",
+        (unsigned long long)memory.shaders,memory.decompilerText/mib,memory.glslCapacity/mib,
+        memory.verifyCapacity/mib,memory.spirvCapacity/mib,(unsigned long long)memory.diskEntries,
+        memory.diskSourceCapacity/mib,memory.diskSpirvCapacity/mib,memory.pendingSourceCapacity/mib);
+    // Excludes map/metadata/allocator overhead, compiler tickets/results,
+    // async disk snapshots, non-cache/retired images and driver allocations.
+  }
   latch_res_scale();
   if(perf_enabled()) {
     ++swapPhaseTiming[4].count;

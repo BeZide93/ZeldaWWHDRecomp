@@ -1239,6 +1239,26 @@ ShaderStats shader_stats() {
     return result;
 }
 
+ShaderMemoryStats shader_memory_stats() {
+    ShaderMemoryStats result;
+    result.shaders = shaders.size();
+    for (const auto& [key, shader] : shaders) {
+        if (shader->dec && shader->dec->strBuf_shaderSource)
+            result.decompilerText += shader->dec->strBuf_shaderSource->getLen();
+        result.glslCapacity += shader->glsl.capacity();
+        result.verifyCapacity += shader->translatedGlsl.capacity();
+        result.spirvCapacity += shader->spirv.capacity() * sizeof(uint32_t);
+    }
+    result.diskEntries = diskShaders.size();
+    for (const auto& [key, shader] : diskShaders) {
+        result.diskSourceCapacity += shader.source.capacity();
+        result.diskSpirvCapacity += shader.words.capacity() * sizeof(uint32_t);
+    }
+    for (const auto& [key, pending] : pendingBinarySources)
+        result.pendingSourceCapacity += pending.first.capacity();
+    return result;
+}
+
 void pack_uniforms_into(const uint32_t* regs, const Shader& shader,
                         std::vector<uint8_t>& data, float scaleX, float scaleY,
                         float eyeOffset, float convergence) {

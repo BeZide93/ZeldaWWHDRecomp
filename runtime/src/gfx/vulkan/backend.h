@@ -30,6 +30,7 @@ struct Surface {
     std::shared_ptr<Surface> mipChain; // sampled companion assembled from GPU-rendered levels
     uint64_t mipChainSeq = ~0ull;
  VkImage image=VK_NULL_HANDLE; VkDeviceMemory memory=VK_NULL_HANDLE; VkImageView view=VK_NULL_HANDLE;
+ VkDeviceSize allocationBytes=0; // tracked image allocation, excludes retired/driver memory
  VkImageType imageType=VK_IMAGE_TYPE_2D; VkImageViewType viewType=VK_IMAGE_VIEW_TYPE_2D;
  VkExtent3D extent{}; VkImageLayout layout=VK_IMAGE_LAYOUT_UNDEFINED; VkImageAspectFlags aspect=VK_IMAGE_ASPECT_COLOR_BIT; VkImageUsageFlags usage=0; VkImageCreateFlags createFlags=0;
  uint32_t arrayLayers=1; std::vector<VkImageView> layerViews;
