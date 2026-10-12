@@ -65,6 +65,7 @@ import json
 import collections
 import ctypes
 import glob
+import hashlib
 import shlex
 import shutil
 import struct
@@ -355,9 +356,15 @@ CACHE_FILE_LIMIT = 4 * 1024 * 1024 * 1024
 VULKAN_DATABASE_MAGIC = b"WWVKPR01"
 
 
+# head-start bounds, as runtime/src/gfx/headstart_limits.h (the game's readers)
+HEADSTART_MAX_FILE_BYTES = 2 * 1024 * 1024 * 1024
+HEADSTART_MAX_RECORDS = 4000000
+HEADSTART_MAX_RAW_BYTES = 8 * 1024 * 1024 * 1024
+
+
 def read_records(path):
     """Strict reader for files this tool writes (head starts): any damage is an error."""
-    if os.path.getsize(path) > 256 * 1024 * 1024:
+    if os.path.getsize(path) > HEADSTART_MAX_FILE_BYTES:
         raise ValueError("recipe file size limit")
     with open(path, "rb") as source:
         d = source.read()
@@ -371,7 +378,7 @@ def read_records(path):
         total += raw
         if t not in RECORD_TYPES or not 0 < raw <= RECORD_LIMIT or \
                 not 0 < comp <= RECORD_LIMIT or comp > len(d) - o or \
-                count > 100000 or total > 256 * 1024 * 1024:
+                count > HEADSTART_MAX_RECORDS or total > HEADSTART_MAX_RAW_BYTES:
             raise ValueError("invalid recipe bounds")
         yield t, decompress_bounded(d[o:o + comp], raw, raw)
         o += comp
@@ -603,7 +610,8 @@ def vulkan_database_pipelines(data, report):
 
 
 def _canonical(value):
-    return json.dumps(value, sort_keys=True, separators=(",", ":"))
+    # a digest, not the JSON text: a full-game template has ~90,000 states of ~3 KB JSON each
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).digest()
 
 
 class TemplateBuilder:
@@ -668,7 +676,7 @@ class TemplateBuilder:
         return {"version": 3, "states": states, "pipelines": pipelines}  # encode() validates it
 
 
-TEMPLATE_MAX = 100000
+TEMPLATE_MAX = template_format.MAX_ENTRIES
 
 
 def write_template(doc, out, guarded=False):
@@ -867,13 +875,10 @@ def cmd_merge(out, inputs):
 def read_template(path, allow_legacy=False):
     with open(path,'rb') as source: data=source.read()
     if data.startswith(template_format.MAGIC):
-        doc=template_format.decode(data)
-        states=[]
-        for s in doc['states']:
-            # replace each state's JSON register lists as they are converted: the template holds
-            # millions of pairs, and two full copies at once cost ~1 GB (phones)
-            states.append((s['hash'],s['vertex'],s['fetch'],[tuple(r) for r in s['registers']],s.get('linked_vertex')))
-            s['registers']=None
+        # compact: states arrive as validated (hash, vertex, fetch, registers, linked) tuples with packed
+        # registers; a full-game template then needs about 1 GB less (phones prepare shaders too)
+        doc=template_format.decode(data, compact=True)
+        states=doc['states']
         return states, [(5 if p['backend']=='vulkan' else REC_PIPELINE,p) for p in doc['pipelines']]
     if not allow_legacy:
         raise ValueError('legacy template carries fetch bytes; convert locally with template --merge')

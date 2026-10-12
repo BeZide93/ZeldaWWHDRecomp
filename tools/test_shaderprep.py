@@ -278,7 +278,7 @@ class PlayerCaches(unittest.TestCase):
         path=self.root/'shaders.bin'
         comp=zlib.compress(fmt.metal_payload(metal()),6)
         path.write_bytes((struct.pack('<III',2,168,len(comp))+comp)*100001)
-        with self.assertRaises(ValueError):list(prep.read_records(path))  # strict head-start reader
+        self.assertEqual(len(list(prep.read_records(path))),100001)  # head starts: up to HEADSTART_MAX_RECORDS
         b=prep.TemplateBuilder();b.add_cache(str(path))
         self.assertEqual(b.report.records[2],100001)
         self.assertEqual(len(b.document()['pipelines']),1)
@@ -308,6 +308,46 @@ class PlayerCaches(unittest.TestCase):
         path.write_bytes(b'\xff'*100)
         b=prep.TemplateBuilder();b.add_cache(str(path))
         self.assertEqual(b.document(),{'version':3,'states':[],'pipelines':[]})
+
+    def test_full_game_sizes_and_consistent_limits(self):
+        # a full-game merge (89,242 states, 39,119 pipelines, 300 MB of JSON) passed the old 100,000-entry
+        # and 256 MiB limits nowhere consistently; every reader now shares the writers' limits
+        import re, sys
+        sys.path.insert(0,str(pathlib.Path(prep.HERE)/'release'))
+        import guard
+        self.assertEqual((guard.TEMPLATE_MAX_BYTES,guard.TEMPLATE_MAX_ENTRIES),(fmt.MAX_BYTES,fmt.MAX_ENTRIES))
+        self.assertEqual(prep.TEMPLATE_MAX,fmt.MAX_ENTRIES)
+        self.assertGreaterEqual(fmt.MAX_BYTES,1024*1024*1024)
+        header=(pathlib.Path(prep.ROOT)/'runtime/src/gfx/headstart_limits.h').read_text()
+        value=lambda name:eval(re.search(name+r' = ([^;]+);',header).group(1).replace('ull',''))
+        self.assertEqual(value('kHeadstartMaxFileBytes'),prep.HEADSTART_MAX_FILE_BYTES)
+        self.assertEqual(value('kHeadstartMaxRecords'),prep.HEADSTART_MAX_RECORDS)
+        self.assertEqual(value('kHeadstartMaxRawBytes'),prep.HEADSTART_MAX_RAW_BYTES)
+        self.assertGreaterEqual(prep.HEADSTART_MAX_RECORDS,2*fmt.MAX_ENTRIES)
+        # more entries than the old limit: written, guarded, read back (full and compact decode)
+        states=[{'hash':i,'vertex':0,'fetch':None,'registers':[[0xa214,i&0xffff]]} for i in range(100001)]
+        doc={'version':3,'states':states,'pipelines':[metal()]}
+        out=self.root/'big.bin'
+        data=prep.write_template(doc,out,guarded=True)
+        self.assertEqual(len(fmt.decode(data)['states']),100001)
+        compact,_=prep.read_template(str(out))
+        self.assertEqual(len(compact),100001)
+        self.assertEqual(dict(compact[7][3]),{0xa214:7})
+        self.assertEqual(prep._codefree_state(*compact[7]),states[7])
+
+    def test_compact_decode_is_as_strict(self):
+        doc={'version':3,'states':[{'hash':1,'vertex':1,'fetch':None,'registers':[[0xa214,2]]}],'pipelines':[metal()]}
+        data=fmt.encode(doc)
+        c=fmt.decode(data,compact=True)
+        self.assertEqual(prep._codefree_state(*c['states'][0]),doc['states'][0])
+        raw=lambda d:fmt.MAGIC+zlib.compress(__import__('json').dumps(d).encode())
+        for bad in ([[0xa210,1]],[[0xa214,1],[0xa214,2]],[[0x1000,1]],[[1]]):
+            d=copy.deepcopy(doc);d['states'][0]['registers']=bad
+            with self.assertRaises(ValueError):fmt.decode(raw(d),compact=True)
+        d=copy.deepcopy(doc);d['pipelines'].append(doc['states'][0])  # a state where a pipeline belongs
+        with self.assertRaises(ValueError):fmt.decode(raw(d),compact=True)
+        d=copy.deepcopy(doc);d['states'][0]['microcode']=[1]
+        with self.assertRaises(ValueError):fmt.decode(raw(d),compact=True)
 
     def test_template_command_on_both_cache_kinds(self):
         metal_cache=self.stream('shaders.bin',self.every_kind()[:4])

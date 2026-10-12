@@ -87,6 +87,10 @@ def check_python(name, data, seen, problems, files=PYTHON_FILES):
 # Independent implementation of the release exception; deliberately never import
 # shaderprep or its format reader. Any schema evolution requires guard review.
 SAFE_TEMPLATE_MAGIC = b"WWHT0003"
+# Same limits as tools/shaderprep_format.py (MAX_BYTES, MAX_ENTRIES): a full-game template decodes to
+# about 300 MiB of JSON with about 90,000 states.
+TEMPLATE_MAX_BYTES = 1024 * 1024 * 1024
+TEMPLATE_MAX_ENTRIES = 1000000
 SAFE_TEMPLATE_PATH = re.compile(r"^(?:[^./][^/]*/)?tools/shadercache/template\.bin$")
 
 # Independently reviewed typed Vulkan whitelist; no opaque binary fields.
@@ -136,11 +140,11 @@ def _validate_vulkan_template(p, fields, number, array):
 
 
 def validate_code_free_template(data):
-    if not data.startswith(SAFE_TEMPLATE_MAGIC) or len(data) > 256 * 1024 * 1024:
+    if not data.startswith(SAFE_TEMPLATE_MAGIC) or len(data) > TEMPLATE_MAX_BYTES:
         raise ValueError("invalid code-free template envelope")
     dec = zlib.decompressobj()
-    raw = dec.decompress(data[8:], 256 * 1024 * 1024 + 1)
-    if len(raw) > 256 * 1024 * 1024 or dec.unconsumed_tail or not dec.eof or dec.unused_data:
+    raw = dec.decompress(data[8:], TEMPLATE_MAX_BYTES + 1)
+    if len(raw) > TEMPLATE_MAX_BYTES or dec.unconsumed_tail or not dec.eof or dec.unused_data:
         raise ValueError("invalid or trailing template compression")
     def unique(items):
         result = {}
@@ -180,7 +184,7 @@ def validate_code_free_template(data):
                 attr["offset"] > 65535 or any(attr[n] > 7 for n in ("x", "y", "z", "w")) or
                 (attr["fetch_type"] == 1 and attr["divisor"] < 1)):
                 raise ValueError("unsupported fetch attribute")
-    for state in array(doc["states"]):
+    for state in array(doc["states"], maximum=TEMPLATE_MAX_ENTRIES):
         names = ("hash", "vertex", "fetch", "registers")
         fields(state, names + (("linked_vertex",) if type(state) is dict and "linked_vertex" in state else ()))
         number(state["hash"], high=0xffffffffffffffff)
@@ -206,7 +210,7 @@ def validate_code_free_template(data):
                 not (0x2000 <= address < 0x4000 or 0xa000 <= address < 0xc000 or 0xe000 <= address < 0x10000)):
                 raise ValueError("unapproved or duplicate register")
             seen.add(address)
-    for pipeline in array(doc["pipelines"]):
+    for pipeline in array(doc["pipelines"], maximum=TEMPLATE_MAX_ENTRIES):
         if type(pipeline) is dict and pipeline.get("backend") == "vulkan":
             _validate_vulkan_template(pipeline, fields, number, array)
             continue

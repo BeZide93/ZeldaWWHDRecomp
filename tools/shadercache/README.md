@@ -47,6 +47,13 @@ python3 tools/shaderprep.py merge merged.bin player1.bin player2.bin ...
 python3 tools/shaderprep.py merge merged.bin merged.bin tools/shadercache/template.bin   # with the current one
 ```
 
+Limits (the same in every writer and reader): a template holds up to 1,000,000 states and 1,000,000
+pipelines and 1 GiB of decoded JSON (`shaderprep_format.py` `MAX_ENTRIES`/`MAX_BYTES`, mirrored in
+`tools/release/guard.py`); a head start up to 4,000,000 records, 2 GiB on disk and 8 GiB decoded
+(`runtime/src/gfx/headstart_limits.h`, mirrored in `shaderprep.py` `HEADSTART_*`). A full-game template
+(about 90,000 states and 40,000 pipelines) is about 8 MB, 300 MB decoded, and builds a head start of
+about 120,000 records and 90 MB.
+
 `template CACHE [OUT] --merge T` still converts one cache (shaders.bin or a `.recipes` file) and keeps
 template `T`; `merge` combines any number of code-free templates without a cache.
 
