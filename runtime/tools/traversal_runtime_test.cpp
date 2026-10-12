@@ -7,6 +7,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstring>
+#include <cstdio>
 #include <vector>
 #ifdef _WIN32
 #include <windows.h>
@@ -88,6 +89,7 @@ extern "C" void f_0242A218_orig(Cpu* c) {
 }
 extern "C" void hook_02427CA8(Cpu*);
 extern "C" void hook_0242A218(Cpu*);
+extern "C" void site_0247D4E8(Cpu*);
 extern "C" void site_0247E988(Cpu*);
 extern "C" void site_0247EB88(Cpu*);
 extern "C" void site_0247ED24(Cpu*);
@@ -137,7 +139,7 @@ static void test_off_identical() {
     }
     // the ship's sites: registers and memory untouched, no guest calls
     st16(kShip + 0x32A, 0x1234);
-    for (auto site : {site_0247E988, site_0247EB88, site_0247ED24}) {
+    for (auto site : {site_0247D4E8, site_0247E988, site_0247EB88, site_0247ED24}) {
         Cpu c{}; c.r[31] = kShip; c.f[29].ps0 = c.f[29].ps1 = 33.f;
         const Cpu c0 = c;
         const auto ship = snapshot(kShip, 0x1000);
@@ -268,12 +270,105 @@ static void test_ship() {
     all_off();
 }
 
+// HD setMoveAngle (0247D4B0), m0388=0: both sails share this rudder path.
+// The optional guest runner uses the recompiler's actual function instead of this model.
+#ifdef TRAVERSAL_GUEST_STEERING
+extern "C" void f_0247D4B0(Cpu*);
+extern "C" void f_024752C4(Cpu* c) { c->r[3] = 0; }  // control-angle target: no effect on yaw
+extern "C" void f_024751E0(Cpu*) {}  // control-angle spring: no effect on yaw
+extern "C" void f_0247D65C(Cpu*) { assert(false); }
+#else
+static void f_0247D4B0(Cpu* c) {
+    const uint32_t ship = c->r[3];
+    if (ld32(ship + 0x704) || ld32(ship + 0x70C)) return;
+    c->r[31] = ship;
+    c->f[10].ps0 = f32(ship + 0x370);
+    site_0247D4E8(c);
+    float rate = std::clamp(4.f - std::fabs((float)c->f[10].ps0) / 100.f * 3.f, .1f, 3.6f);
+    const int timer = (int16_t)ld16(ship + 0x670);
+    rate = timer >= 15 ? 3.6f : rate + (3.6f - rate) * timer / 15.f;
+    const int delta = (int)(-rate * ((int16_t)c->r[4] >> 6));
+    st16(ship + 0x32A, ld16(ship + 0x32A) + delta);
+    st16(ship + 0x322, ld16(ship + 0x32A));
+}
+#endif
+
+static void test_ship_turning() {
+    // Steady full rudder, 30 ship steps. Fixed wind cases use a tailwind snapshot;
+    // auto wind cases invoke the normal-sail hook after steering, as procSteerMove does.
+    // Sweep both signs, wraparound, every slider endpoint and the default factor.
+    for (bool swift : {false, true})
+    for (bool wind : {false, true})
+    for (float factor : {1.f, 1.5f, 2.f, 3.f})
+    for (int turn_timer : {0, 7, 15, 20})
+    for (int rudder : {-8192, 8192}) {
+        int stock_yaw = 0;
+        for (bool speed : {false, true}) {
+            all_off();
+            mods::set_sail_speed(speed);
+            mods::set_auto_wind(wind);
+            mods::set_sail_speed_normal_factor(factor);
+            mods::set_sail_speed_swift_factor(factor);
+            st8(kPlay + 0x5D2C, swift);
+            st8(kShip + 0x635, 1);
+            st32(kShip + 0x644, 0x200);
+            st16(kShip + 0x670, turn_timer);
+            st16(kShip + 0x32A, 0x7FFF);
+            const float stock_speed = swift ? 100.f : 55.f;
+            Cpu target{}; target.f[29].ps0 = stock_speed;
+            site_0247EB88(&target);
+            setf(kShip + 0x370, (float)target.f[29].ps0);
+            site_0247ED24(&target);
+            assert(target.f[29].ps0 == stock_speed); // jump target remains stock
+            int yaw = 0;
+            for (int step = 0; step < 30; ++step) {
+                const int16_t before = (int16_t)ld16(kShip + 0x32A);
+                Cpu c{}; c.r[1] = kLink + 0xF000; c.r[3] = kShip; c.r[4] = (uint32_t)rudder;
+                f_0247D4B0(&c);
+                yaw += (int16_t)(ld16(kShip + 0x32A) - before);
+                if (!swift) { c.r[31] = kShip; site_0247E988(&c); }
+                assert(f32(kShip + 0x370) == stock_speed * (speed ? factor : 1.f));
+            }
+            if (!speed) {
+                stock_yaw = yaw;
+                if (turn_timer == 0) assert(std::abs(yaw) == 30 * (swift ? 128 : 300));
+            }
+            else {
+#ifndef TRAVERSAL_BEFORE
+                assert(yaw == stock_yaw);
+#else
+                assert(yaw != 0); // baseline measurement intentionally retains the regression
+#endif
+            }
+            if (turn_timer == 0 && rudder == -8192)
+                printf("sail=%s speed=%d wind=%d factor=%.1f yaw_units_per_step=%.1f\n", swift ? "swift" : "normal", speed, wind, factor, yaw / 30.f);
+        }
+    }
+    // This shared helper must leave other modes and a lowered sail untouched.
+    for (int mode : {0, 1, 2, 3, 7})
+    for (uint32_t flags : {0u, 0x200u}) {
+        st8(kShip + 0x635, mode); st32(kShip + 0x644, flags);
+        Cpu c{}; c.r[31] = kShip; c.f[10].ps0 = -165.f; c.f[10].ps1 = 123.f;
+        site_0247D4E8(&c);
+        assert(c.f[10].ps0 == (mode == 1 && flags ? -55.f : -165.f));
+        assert(c.f[10].ps1 == 123.f);
+    }
+    all_off();
+}
+
 int main() {
     map(kLink); map(kShip); map(0x10460000); map(0x10470000);
+#ifdef TRAVERSAL_GUEST_STEERING
+    map(0x10030000);
+    setf(0x1003A484, 100.f); setf(0x1003A344, 3.f); setf(0x1003A530, 4.f);
+    setf(0x1003A6F4, 3.6f); setf(0x1003A474, .1f); setf(0x1003A6F8, 15.f);
+    stf64(0x1003A338, 4503601774854144.0); // 0x4330000080000000
+#endif
     test_off_identical();
     test_ladder();
     test_sidle();
     test_ship();
+    test_ship_turning();
     test_off_identical();  // switching off again goes back to the stock path
     return 0;
 }
