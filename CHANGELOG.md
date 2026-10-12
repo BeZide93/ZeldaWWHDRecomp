@@ -26,6 +26,10 @@ what is on `devel` and not released yet (also in the
   game code) from your own shader caches, so it can be contributed to the template that setup uses to
   prepare shaders. `shaderprep.py template` no longer fails with "invalid recipe bounds" on long-played or
   Vulkan caches and skips damaged records instead of stopping.
+
+- **European GameCube saves can be converted to HD** (`tools/savegame/gc2hd.py`): PAL saves (`GZLP01`)
+  are accepted, names with accents (and Œ/œ) come through, and the save's language is kept. The
+  converted `cking.sav` works with both the USA and the European HD game.
 - **Android handhelds and controllers** (issue #152, thanks @OTPR26):
   - **Settings with a controller:** holding Select/− now opens the settings after half a second as
     intended (it could take about 3 seconds on some devices), and a one-time hint says so.
