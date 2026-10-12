@@ -1,19 +1,23 @@
-// Story-mod letters (docs/mod-sdk-v2.md, "Letters"): the record of the letters a save file has
-// received, and the text a letter shows. Pure code without game memory, unit-tested in
+// Story mods: the record a save file keeps of letters from mods and of the port's story items
+// (docs/mod-sdk-v2.md, "Letters"). Pure code without game memory, unit-tested in
 // runtime/tools/story_mail_test.cpp.
 //
 // Where the record lives: the game's save data has a reserved block (dSv_reserve_c, 0x50 bytes at
 // save base + 0x744, right after the event flags). dSv_info_c::memory_to_card / card_to_memory copy
 // it with the save and dSv_reserve_c::init zeroes it for a new file (and for the Second Quest); no
 // other decompiled code touches it, and it is zero in every save file checked (213 Quest Logs, up to
-// late-game progress). So letter states are saved and loaded with the save file and restored by full
-// and portable save states, exactly like the game's own mail flags.
+// late-game progress). So the record is saved and loaded with the save file and restored by full
+// and portable save states, exactly like the game's own flags.
 //
-// Layout (bytes, no alignment needs):
-//   [0] 'L' (0x4C) magic, [1] format version 1, [2..3] zero;
-//   then 19 records of 4 bytes: a 24-bit key (never 0) and a state byte.
-// An all-zero block is an empty book. A block that is not zero and has no valid header holds data
-// this port did not write: it is never changed.
+// Format version 2 (bytes, no alignment needs):
+//   [0] 'L' (0x4C) magic, [1] format version (2), [2..3] zero;
+//   then 19 records of 4 bytes: [0] kind, [1..2] key (big-endian, meaning per kind), [3] value.
+//   Kind 0 is a free record. Every user of the block owns one kind (kRecord*). A reader keeps
+//   records of kinds it doesn't know untouched, so new kinds need no new format version; the
+//   version changes only if this layout changes.
+// An all-zero block is an empty record. A block that is not zero and has no valid header holds
+// data this port did not write: it is never changed. (Version 1, an unreleased development format,
+// is treated the same way.)
 #pragma once
 #include <cstddef>
 #include <cstdint>
@@ -24,21 +28,29 @@ namespace story_mail {
 
 inline constexpr uint32_t kBookOffset = 0x744;  // from the save base (*0x101F84DC)
 inline constexpr uint32_t kBookSize = 0x50;
-inline constexpr uint8_t kMagic = 0x4C, kVersion = 1;
+inline constexpr uint8_t kMagic = 0x4C, kVersion = 2;
 inline constexpr unsigned kRecords = (kBookSize - 4) / 4;  // 19
+
+// Record kinds. Add new ones here; never reuse a number.
+inline constexpr uint8_t kRecordFree = 0;
+inline constexpr uint8_t kRecordLetter = 1;  // key: letter_key(mod, letter), value: State
+inline constexpr uint8_t kRecordItem = 2;    // key: kItem*, value: 1 owned
+inline constexpr uint8_t kRecordMarker = 3;  // reserved for the sea chart's story markers
+
+inline constexpr uint16_t kItemNotebook = 1;  // the story notebook
 
 // Letter states. The values follow the game's own letter registers (dLetter: 2 waiting in the
 // postbox, 3 read); 0 is "never sent".
 enum State : uint8_t { kNone = 0, kWaiting = 2, kRead = 3 };
 
-// FNV-1a over "mod id" NUL "letter id", folded to 24 bits; 0 is reserved for an empty record.
-inline uint32_t letter_key(const std::string& mod, const std::string& letter) {
+// FNV-1a over "mod id" NUL "letter id", folded to 16 bits; 0 is never used.
+inline uint16_t letter_key(const std::string& mod, const std::string& letter) {
     uint32_t h = 2166136261u;
     auto mix = [&h](unsigned char b) { h = (h ^ b) * 16777619u; };
     for (unsigned char b : mod) mix(b);
     mix(0);
     for (unsigned char b : letter) mix(b);
-    uint32_t k = (h >> 24) ^ (h & 0xFFFFFF);
+    uint16_t k = uint16_t((h >> 16) ^ (h & 0xFFFF));
     return k ? k : 1;
 }
 
@@ -53,36 +65,43 @@ public:
     }
     // ours: a valid header, or still all zero (a fresh save)
     bool usable() const { return empty() || (b_[0] == kMagic && b_[1] == kVersion && !b_[2] && !b_[3]); }
-    State state(uint32_t key) const {
-        if (!usable()) return kNone;
-        int i = find(key);
-        return i < 0 ? kNone : State(b_[4 + 4 * i + 3]);
+    // The value of a record, 0 when there is none.
+    uint8_t get(uint8_t kind, uint16_t key) const {
+        int i = usable() ? find(kind, key) : -1;
+        return i < 0 ? 0 : b_[4 + 4 * i + 3];
     }
-    // Sets a letter's state, adding its record if needed. False when the block is not ours or full.
-    bool set(uint32_t key, State s) {
-        if (!usable() || !key || key > 0xFFFFFF) return false;
-        int i = find(key);
-        if (i < 0) {
-            for (unsigned r = 0; r < kRecords && i < 0; r++)
-                if (!record_key(r)) i = int(r);
-            if (i < 0) return false;
-        }
+    bool has(uint8_t kind, uint16_t key) const { return usable() && find(kind, key) >= 0; }
+    // Sets a record's value, adding the record if needed. False when the block is not ours or full.
+    bool set(uint8_t kind, uint16_t key, uint8_t value) {
+        if (!usable() || kind == kRecordFree) return false;
+        int i = find(kind, key);
+        for (unsigned r = 0; r < kRecords && i < 0; r++)
+            if (record_kind(r) == kRecordFree) i = int(r);
+        if (i < 0) return false;
         b_[0] = kMagic, b_[1] = kVersion, b_[2] = 0, b_[3] = 0;
         uint8_t* p = b_ + 4 + 4 * i;
-        p[0] = uint8_t(key >> 16), p[1] = uint8_t(key >> 8), p[2] = uint8_t(key), p[3] = s;
+        p[0] = kind, p[1] = uint8_t(key >> 8), p[2] = uint8_t(key), p[3] = value;
         return true;
     }
-    uint32_t record_key(unsigned r) const {
-        const uint8_t* p = b_ + 4 + 4 * r;
-        return uint32_t(p[0]) << 16 | uint32_t(p[1]) << 8 | p[2];
+    unsigned free_records() const {
+        if (!usable()) return 0;
+        unsigned n = 0;
+        for (unsigned r = 0; r < kRecords; r++) n += record_kind(r) == kRecordFree;
+        return n;
     }
-    State record_state(unsigned r) const { return State(b_[4 + 4 * r + 3]); }
+    uint8_t record_kind(unsigned r) const { return b_[0] == kMagic ? b_[4 + 4 * r] : kRecordFree; }
+    uint16_t record_key(unsigned r) const { return uint16_t(b_[4 + 4 * r + 1] << 8 | b_[4 + 4 * r + 2]); }
+    uint8_t record_value(unsigned r) const { return b_[4 + 4 * r + 3]; }
+
+    // letters
+    State state(uint16_t key) const { return State(get(kRecordLetter, key)); }
+    bool set_state(uint16_t key, State s) { return set(kRecordLetter, key, s); }
 
 private:
-    int find(uint32_t key) const {
-        if (b_[0] != kMagic) return -1;
+    int find(uint8_t kind, uint16_t key) const {
+        if (b_[0] != kMagic || kind == kRecordFree) return -1;
         for (unsigned r = 0; r < kRecords; r++)
-            if (record_key(r) == key) return int(r);
+            if (record_kind(r) == kind && record_key(r) == key) return int(r);
         return -1;
     }
     uint8_t* b_;

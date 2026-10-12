@@ -183,6 +183,6 @@ unsigned long long wwhd_audio_epoch(void);
 #define WWHD_MAIL_WAITING 1  /* waiting in the postbox */
 #define WWHD_MAIL_READ 2     /* handed out and read */
 #define WWHD_MAIL_INVALID (-1)
-#define WWHD_MAIL_NO_ROOM (-2)  /* no save loaded, or its letter record is full (19 letters) */
+#define WWHD_MAIL_NO_ROOM (-2)  /* no save loaded, or its story record is full (19 entries) */
 s32 wwhd_mail_send(const char* letter_id, const char* sender, const char* text);
 s32 wwhd_mail_state(const char* letter_id);

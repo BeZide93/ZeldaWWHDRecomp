@@ -259,7 +259,7 @@ void svc_mail_send(Cpu* c) {
     auto& mod=owner(c);std::string id,sender,text;
     if(!mod_string(mod,c->r[3],story_mail::kMaxIdBytes,id)||!mod_string(mod,c->r[4],story_mail::kMaxSenderBytes,sender)||
        !mod_string(mod,c->r[5],story_mail::kMaxTextBytes,text)){c->r[3]=uint32_t(story_mail::kResultInvalid);return;}
-    c->r[3]=uint32_t(story_mail::send(mod.id,id,sender,text,[&mod](uint32_t bytes){return mod.heap->allocate(bytes);}));
+    c->r[3]=uint32_t(story_mail::send(mod.id,id,sender,text));
 }
 void svc_mail_state(Cpu* c) {
     auto& mod=owner(c);std::string id;
@@ -415,6 +415,7 @@ void init() {
     });
     // Letters from mods: host replacements of the postbox and message functions, only when a loaded
     // mod uses the letter services (story_mail.h).
+    if(story_mail::imported())story_mail::set_text_buffers(mem::host_alloc(4096,16),4096);
     story_mail::set_game_calls(call_original,[](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);});
     story_mail::install([](uint32_t addr) {
         auto it=g_chains.find(addr);return it==g_chains.end()?std::string():it->second.replace_mod;

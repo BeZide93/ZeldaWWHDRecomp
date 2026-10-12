@@ -70,7 +70,9 @@ void start_guests(const GuestInspect& inspect, const GuestLoad&) {
 }
 // the letter service has its own test (story_mail_test)
 namespace story_mail {
-int32_t send(const std::string&,const std::string&,const std::string&,const std::string&,const std::function<uint32_t(uint32_t)>&) {return kResultInvalid;}
+int32_t send(const std::string&,const std::string&,const std::string&,const std::string&) {return kResultInvalid;}
+bool imported() {return false;}
+void set_text_buffers(uint32_t,uint32_t) {}
 int32_t state(const std::string&,const std::string&) {return kResultNone;}
 void note_import() {}
 void set_game_calls(void (*)(Cpu*,uint32_t),uint32_t (*)(Cpu*,uint32_t,std::initializer_list<uint32_t>)) {}

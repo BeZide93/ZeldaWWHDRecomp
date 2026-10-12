@@ -20,9 +20,8 @@ inline constexpr int32_t kResultNone = 0, kResultWaiting = 1, kResultRead = 2;
 inline constexpr int32_t kResultInvalid = -1, kResultNoRoom = -2;
 
 // wwhd_mail_send: registers the letter's text for this session and, if this save file never got
-// the letter, puts it in the postbox. alloc reserves guest memory for the text in the mod's heap.
-int32_t send(const std::string& mod, const std::string& letter, const std::string& sender,
-             const std::string& text, const std::function<uint32_t(uint32_t)>& alloc);
+// the letter, puts it in the postbox.
+int32_t send(const std::string& mod, const std::string& letter, const std::string& sender, const std::string& text);
 // wwhd_mail_state: the letter's state in the current save file
 int32_t state(const std::string& mod, const std::string& letter);
 
@@ -33,6 +32,11 @@ struct LetterInfo {
 };
 std::vector<LetterInfo> letters();
 
+// The story notebook: owned once the first mod letter (which encloses it) was read in this save
+// file. Its page lists the letters read, one row each (a placeholder for the full notebook).
+bool notebook_owned();
+std::u16string notebook_page();
+
 void note_import();  // a module imports a mail service: hooks are needed
 bool imported();
 // After all guest modules are loaded. replaced_by(addr) names a mod that replaces that game function
@@ -41,6 +45,8 @@ void install(const std::function<std::string(uint32_t)>& replaced_by, const std:
 bool installed();
 void state_loaded();  // a full state was loaded: forget the letter being shown
 
+// guest memory for replaced message texts (host-only, at least 4 KiB), before install()
+void set_text_buffers(uint32_t guest, uint32_t bytes);
 // game code called from the hooks (guestmods::call_original / guest_call in the game)
 void set_game_calls(void (*original)(Cpu*, uint32_t), uint32_t (*call)(Cpu*, uint32_t, std::initializer_list<uint32_t>));
 
@@ -54,6 +60,8 @@ void receive_demo(Cpu* c);
 void next_msg(Cpu* c);
 void get_message(Cpu* c);
 void get_text(Cpu* c);
+void symbol(Cpu* c);
+void item_get(Cpu* c);
 }  // namespace hooks
 
 }  // namespace story_mail

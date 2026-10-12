@@ -325,7 +325,7 @@ step) never sends the letter twice. It returns the letter's state:
 | `WWHD_MAIL_WAITING` (1) | waiting in the postbox |
 | `WWHD_MAIL_READ` (2) | handed out and read |
 | `WWHD_MAIL_INVALID` (-1) | invalid ID, sender or text |
-| `WWHD_MAIL_NO_ROOM` (-2) | no save file loaded, or it already holds 19 letters from mods |
+| `WWHD_MAIL_NO_ROOM` (-2) | no save file loaded, or its story record is full (19 entries, shared with the notebook) |
 
 `wwhd_mail_state(letter_id)` returns the state without sending; use it, for example, to start
 your quest once the letter was read.
@@ -338,19 +338,25 @@ your quest once the letter was read.
 - The text of the first call in a session is used; the letter can only be shown while your mod is
   on.
 
-**Delivery.** Any Rito postbox hands out waiting letters, after the game's own and under the same
-conditions (the postbox only hands out mail once the game allows it). A letter from a mod
-needs no postage. Like the game's letters it comes with an enclosure, which Link takes after
-reading: one green rupee. Several waiting letters are handed out one after another.
+**Delivery.** Any Rito postbox hands out waiting letters, after the game's own. The game opens its
+postboxes only after the first pearl; letters from mods are handed out before that too (the game's
+own letters still wait for the pearl). A letter from a mod needs no postage. Like the game's
+letters it comes with an enclosure, which Link takes after reading: the first letter from a mod
+in a save file encloses the **story notebook**, every later one a green rupee. Several waiting
+letters are handed out one after another.
 
-**Saving.** Whether a letter was sent and read is stored in the save file, in a block of the save
-data that the game itself leaves unused (it stays zero in the game's own saves). It is saved and
-loaded with the game, kept by full and portable save states, and cleared by a new game or the
-Second Quest. A letter received but not saved arrives again after loading the older save. The
-text is not stored; turning your mod off leaves its letters waiting in the record, and nothing
-changes for the postbox.
+**The story notebook** is the port's journal for story mods. Receiving it doesn't change the
+inventory or the Delivery Bag; it is kept in the story record (below). It does not appear in the
+item menu yet.
 
-**Players without letter mods.** The postbox and message functions are only hooked while a loaded
+**Saving.** Whether a letter was sent and read, and whether the notebook was received, is stored
+in the save file, in a block of the save data that the game itself leaves unused (it stays zero
+in the game's own saves). It is saved and loaded with the game, kept by full and portable save
+states, and cleared by a new game or the Second Quest. A letter received but not saved arrives
+again after loading the older save. The text is not stored; turning your mod off leaves its
+letters waiting in the record, and nothing changes for the postbox.
+
+**Players without letter mods.** The postbox, message and item functions are only hooked while a loaded
 mod uses `wwhd_mail_*`. If another mod replaces one of them, letters from mods are not delivered
 in that session and the log says so.
 

@@ -16,13 +16,17 @@
 // game's loops (1..12) never reach. The hooks below handle exactly that index and pass every other
 // call to the game unchanged:
 //   - getReadableLetterNum / getReceiveLetterNum also count waiting mod letters;
-//   - for index 13 the table is not read: no postage, a green rupee as the enclosure, the letter
-//     window of the game's first letter (its message number is read from the table at run time),
-//     the read state goes to the mod letter record;
+//   - for index 13 the table is not read: no postage, the letter window of the game's first letter
+//     (its message number is read from the table at run time), the read state goes to the record;
+//   - the enclosure (the receive event waits for one): the story notebook with the first mod letter
+//     of a save file, shown with the Cabana Deed's get-item demo and the port's own text; its get
+//     function is not run, the notebook goes to the record. Later letters enclose a green rupee;
+//   - before the first pearl the postbox keeps its mail closed (execute: isSymbol(1)); that one
+//     check passes while a mod letter waits, and then the game's own letters are left out;
 //   - the letter window shows the mod's text: when the message system looks up that message for the
 //     letter (hd_msg_res_mgr getMessage 0x025F50E8), its MSBT set and label index are noted, and the
 //     text lookup (0x0273A2E8, text of a label index in an MSBT) returns the mod's text for exactly
-//     that entry while the letter is shown.
+//     that entry while the letter is shown (likewise the notebook's get-item message).
 #include "story_mail.h"
 #include "story_mail_book.h"
 
@@ -53,6 +57,10 @@ constexpr uint32_t kReceiveDemo = 0x023A50CC;      // daObjTpost_c::modeReceiveD
 constexpr uint32_t kNextMsg = 0x023A55BC;          // daObjTpost_c::nextMsg(u32* msg)
 constexpr uint32_t kGetMessage = 0x025F50E8;       // message manager: label -> set, index, entry
 constexpr uint32_t kGetText = 0x0273A2E8;          // MSBT: text of a label index
+constexpr uint32_t kTextLengthReturn = 0x0273A340; // its call in the MSBT text length (label check)
+constexpr uint32_t kIsSymbol = 0x025B7D90;         // dSv_player_collect_c::isSymbol(no)
+constexpr uint32_t kGateCheckReturn = 0x023A4A94;  // after daObjTpost_c::execute's isSymbol(1) call
+constexpr uint32_t kExecItemGet = 0x0254DA38;      // execItemGet(itemNo): the item's get function
 
 // daObjTpost_c fields (d_a_obj_toripost.h) and play fields used by the receive demo
 constexpr uint32_t kCurrMsgNo = 0x7C0, kReceivePending = 0xA01, kNextLetter = 0xA03, kNumReadable = 0xA04,
@@ -66,24 +74,53 @@ constexpr int32_t kModIndex = 13;
 // Every game letter encloses an item that Link takes after reading (rupees, a piece of heart...);
 // the receive event waits for it. A mod letter encloses the smallest one: a green rupee.
 constexpr uint32_t kEnclosedItem = 0x01;
+// The first mod letter of a save file encloses the story notebook instead. Link takes it with the
+// get-item demo of a game item that looks like it (kNotebookModel); its get function, which would
+// put that item in the Delivery Bag, is not run: the notebook is recorded in the story record.
+constexpr uint32_t g_notebook_model = 0x9C;  // Cabana Deed: a sheet of parchment
+constexpr uint32_t kMsgItemGet = 0x101;  // the get-item message the stand-in shows
+// what the get-item message says instead (the port's own text)
+constexpr char16_t kNotebookGetText[] =
+    u"You got the story notebook!\n"
+    u"It keeps the letters you receive\n"
+    u"and the stories they begin.";
 constexpr uint32_t kMsgLetterNumber = 0xCF7;  // "letter k" before a letter is handed out
 
 struct Letter {
     std::string mod, id, sender;
-    uint32_t key = 0;
-    uint32_t text = 0;  // UTF-16 in the mod's heap, NUL-terminated
+    uint16_t key = 0;
+    std::u16string text;  // as the letter window shows it (compose)
 };
 
 std::mutex g_mu;
 std::vector<Letter> g_letters;  // registered this session, in send order
 bool g_imported = false, g_installed = false;
 
-// the mod letter being handed out by a postbox (game thread only)
-struct Showing {
-    uint32_t key = 0, text = 0, carrier = 0;
+// A message whose text is replaced while it is shown: the letter (in the letter window) and the
+// notebook's get-item message. getMessage notes the MSBT entry of the number; the text lookup of
+// exactly that entry returns the replacement (game thread only).
+// The replacement is written into a host-only guest buffer (not part of save states, so a full
+// state load can't leave stale text) when the message is looked up, after the game's message codes
+// at the start of the original text (window and sound controls such as the get-item fanfare tag).
+struct Override {
+    uint32_t number = 0, buffer = 0;  // buffer: kSlotBytes of guest memory for this replacement
+    const std::u16string* text = nullptr;
     uint32_t msbt = 0, index = 0;
     bool keyed = false;
+};
+constexpr uint32_t kPrefixRoom = 64, kSlotBytes = 2048;  // 64 + 2 * (kMaxUnits + 1) fits
+uint32_t g_buffers = 0;  // two slots: the letter, the notebook's get message
+// the mod letter being handed out by a postbox
+struct Showing {
+    uint16_t key = 0;
+    uint32_t carrier = 0;
+    Override letter;
 } g_show;
+Override g_notebook_text;  // armed while the notebook is handed out
+const std::u16string g_notebook_body = kNotebookGetText;
+
+// the postbox's pearl check passed only for mod letters (this step), and a notebook being handed out
+bool g_gate_forced = false, g_notebook_pending = false;
 
 void (*g_original)(Cpu*, uint32_t) = nullptr;
 uint32_t (*g_call)(Cpu*, uint32_t, std::initializer_list<uint32_t>) = nullptr;
@@ -104,7 +141,8 @@ int32_t result_of(State s) { return s == kWaiting ? kResultWaiting : s == kRead 
 
 // the first waiting letter that a loaded mod registered this session (key 0: none)
 struct Waiting {
-    uint32_t key = 0, text = 0;
+    uint16_t key = 0;
+    const std::u16string* text = nullptr;  // g_letters only grows and keeps its strings
 };
 Waiting next_waiting() {
     if (!have_save()) return {};
@@ -112,7 +150,7 @@ Waiting next_waiting() {
     if (!b.usable()) return {};
     std::lock_guard lock(g_mu);
     for (const Letter& l : g_letters)
-        if (b.state(l.key) == kWaiting) return {l.key, l.text};
+        if (b.state(l.key) == kWaiting) return {l.key, &l.text};
     return {};
 }
 int waiting_count() {
@@ -125,32 +163,39 @@ int waiting_count() {
     return n;
 }
 
+// Bytes of message codes (0x0E tag: 0E, group, type, size, size bytes of parameters; 0x0F end tag:
+// 0F, group, type) at the start of a UTF-16 text, at most kPrefixRoom.
+uint32_t leading_codes(uint32_t text) {
+    uint32_t n = 0;
+    for (;;) {
+        const uint16_t unit = ld16(text + n);
+        const uint32_t len = unit == 0x0E ? 8u + ld16(text + n + 6) : unit == 0x0F ? 6u : 0u;
+        if (!len || n + len > kPrefixRoom) return n;
+        n += len;
+    }
+}
+
 uint32_t carrier_message() { return ld32(GD(kLetterTable) + 12 + 4); }  // the first letter's message
 uint32_t play(Cpu* c) { return g_call(c, GC(kPlay), {}); }
 bool mod_letter(uint32_t self) { return int32_t(ld32(self + kNumReadable)) == kModIndex; }
 
 }  // namespace
 
-int32_t send(const std::string& mod, const std::string& letter, const std::string& sender, const std::string& text,
-             const std::function<uint32_t(uint32_t)>& alloc) {
+int32_t send(const std::string& mod, const std::string& letter, const std::string& sender, const std::string& text) {
     if (!valid_id(letter)) return kResultInvalid;
-    const uint32_t key = letter_key(mod, letter);
+    const uint16_t key = letter_key(mod, letter);
     {
         std::lock_guard lock(g_mu);
         bool known = false;
         for (const Letter& l : g_letters) {
             if (l.key != key) continue;
-            if (l.mod != mod || l.id != letter) return kResultInvalid;  // a 24-bit key collision
+            if (l.mod != mod || l.id != letter) return kResultInvalid;  // a 16-bit key collision
             known = true;
         }
         if (!known) {
             std::u16string body = compose(sender, text);
             if (body.empty()) return kResultInvalid;
-            uint32_t at = alloc(uint32_t(2 * (body.size() + 1)));
-            if (!at) return kResultInvalid;
-            for (size_t i = 0; i < body.size(); i++) st16(at + uint32_t(2 * i), body[i]);
-            st16(at + uint32_t(2 * body.size()), 0);
-            g_letters.push_back({mod, letter, sender, key, at});
+            g_letters.push_back({mod, letter, sender, key, std::move(body)});
             LOG("[mail] %s: letter \"%s\" from \"%s\" registered", mod.c_str(), letter.c_str(), sender.c_str());
         }
     }
@@ -158,13 +203,13 @@ int32_t send(const std::string& mod, const std::string& letter, const std::strin
     Book b = book();
     State s = b.state(key);
     if (trace()) {  // each change of a letter's state, as the mod sees it
-        static std::map<uint32_t, int> seen;
+        static std::map<uint16_t, int> seen;
         auto [it, added] = seen.try_emplace(key, -1);
         if (it->second != int(s)) LOG("[mail] %s: letter \"%s\" state %d in this save file", mod.c_str(), letter.c_str(), result_of(s));
         it->second = int(s);
     }
     if (s != kNone) return result_of(s);
-    if (!b.set(key, kWaiting)) {
+    if (!b.set_state(key, kWaiting)) {
         LOG("[mail] %s: no room for letter \"%s\" in this save file", mod.c_str(), letter.c_str());
         return kResultNoRoom;
     }
@@ -187,9 +232,27 @@ std::vector<LetterInfo> letters() {
     return out;
 }
 
+bool notebook_owned() { return have_save() && book().get(kRecordItem, kItemNotebook) == 1; }
+
+std::u16string notebook_page() {
+    std::u16string page = u"Story notebook\n\n";
+    bool any = false;
+    for (const LetterInfo& l : letters()) {
+        if (l.state != kResultRead) continue;
+        std::u16string sender;
+        append_utf16(l.sender, false, sender);
+        page += u"Letter from " + sender + u"\n";
+        any = true;
+    }
+    if (!any) page += u"No letters yet.\n";
+    return page;
+}
+
 void note_import() { g_imported = true; }
 bool imported() { return g_imported; }
 bool installed() { return g_installed; }
+void set_text_buffers(uint32_t guest, uint32_t bytes) { g_buffers = bytes >= 2 * kSlotBytes ? guest : 0; }
+
 void set_game_calls(void (*original)(Cpu*, uint32_t), uint32_t (*call)(Cpu*, uint32_t, std::initializer_list<uint32_t>)) {
     g_original = original;
     g_call = call;
@@ -202,6 +265,7 @@ void install(const std::function<std::string(uint32_t)>& replaced_by, const std:
         {kDispLetterStart, hooks::disp_letter_start}, {kPresent, hooks::present},
         {kReceiveDemo, hooks::receive_demo}, {kNextMsg, hooks::next_msg},
         {kGetMessage, hooks::get_message}, {kGetText, hooks::get_text},
+        {kIsSymbol, hooks::symbol}, {kExecItemGet, hooks::item_get},
     };
     // all or nothing: a postbox with only some of the hooks would read past the game's letter table
     for (const auto& [addr, fn] : hooks) {
@@ -221,20 +285,53 @@ void install(const std::function<std::string(uint32_t)>& replaced_by, const std:
         }
 }
 
-void state_loaded() { g_show = {}; }
+void state_loaded() {
+    g_show = {};
+    g_notebook_pending = false;
+    g_notebook_text = {};
+}
 
 namespace hooks {
 
-// s32 getReadableLetterNum(): the game's first waiting letter, else 13 for a waiting mod letter
+// s32 getReadableLetterNum(): the game's first waiting letter, else 13 for a waiting mod letter.
+// Before the first pearl the game's letters stay closed (the game's own check); only mod letters.
 void readable(Cpu* c) {
-    g_original(c, GC(kReadable));
+    if (g_gate_forced) c->r[3] = 0;
+    else g_original(c, GC(kReadable));
     if (c->r[3] == 0 && next_waiting().key) c->r[3] = kModIndex;
 }
 
 // s16 getReceiveLetterNum(): the game's waiting letters plus the mod letters
 void receive_count(Cpu* c) {
-    g_original(c, GC(kReceiveCount));
+    if (g_gate_forced) c->r[3] = 0;
+    else g_original(c, GC(kReceiveCount));
     c->r[3] = uint32_t(int32_t(int16_t(c->r[3] + waiting_count())));
+}
+
+// isSymbol(no): the postbox opens its mail only after the first pearl (execute: isSymbol(1)). For
+// that one call, and only while a mod letter is waiting, the check passes; readable() and
+// receive_count() then leave out the game's letters.
+void symbol(Cpu* c) {
+    const uint32_t lr = c->lr, no = c->r[4];
+    g_original(c, GC(kIsSymbol));
+    if (lr != GC(kGateCheckReturn)) return;
+    g_gate_forced = false;
+    if (c->r[3] == 0 && no == 1 && next_waiting().key) {
+        c->r[3] = 1;
+        g_gate_forced = true;
+    }
+}
+
+// execItemGet(itemNo): the notebook's stand-in item goes to the story record, not the Delivery Bag
+void item_get(Cpu* c) {
+    if (g_notebook_pending && (c->r[3] & 0xFF) == g_notebook_model) {
+        g_notebook_pending = false;
+        g_notebook_text = {};
+        if (have_save()) book().set(kRecordItem, kItemNotebook, 1);
+        LOG("[mail] the story notebook is in this save file");
+        return;
+    }
+    g_original(c, GC(kExecItemGet));
 }
 
 // cutDispLetterStart(staff): the letter window with the mod's text
@@ -247,9 +344,9 @@ void disp_letter_start(Cpu* c) {
     const Waiting l = next_waiting();
     g_show = {};
     g_show.carrier = carrier_message();
-    if (l.key) g_show.key = l.key, g_show.text = l.text;  // (none: unreachable, the window stays the game's)
+    if (l.key && g_buffers) g_show.key = l.key, g_show.letter = {g_show.carrier, g_buffers, l.text};  // (none: unreachable)
     st32(self + kCurrMsgNo, g_show.carrier);
-    if (trace()) LOG("[mail] showing letter %06X as message %X", l.key, g_show.carrier);
+    if (trace()) LOG("[mail] showing letter %04X as message %X", l.key, g_show.carrier);
 }
 
 // cutPresentProc(staff): the game's code with the mod letter's enclosure instead of a table entry
@@ -259,7 +356,12 @@ void present(Cpu* c) {
         g_original(c, GC(kPresent));
         return;
     }
-    const uint32_t id = g_call(c, GC(kPresentItem), {self + kActorPos, kEnclosedItem, 0, 0xFFFFFFFFu, 0xFFFFFFFFu, 0, 0});
+    const bool notebook = have_save() && !book().get(kRecordItem, kItemNotebook);
+    g_notebook_pending = notebook;
+    g_notebook_text = notebook && g_buffers ? Override{kMsgItemGet, g_buffers + kSlotBytes, &g_notebook_body} : Override{};
+    const uint32_t item = notebook ? g_notebook_model : kEnclosedItem;
+    if (trace()) LOG("[mail] enclosure: item %02X%s", item, notebook ? " (the story notebook)" : "");
+    const uint32_t id = g_call(c, GC(kPresentItem), {self + kActorPos, item, 0, 0xFFFFFFFFu, 0xFFFFFFFFu, 0, 0});
     const uint32_t p = play(c);
     if (id != 0xFFFFFFFFu) st32(p + kPlayItemPartner, id);
     g_call(c, GC(kCutEnd), {p + kPlayEventManager, staff});
@@ -273,10 +375,10 @@ void receive_demo(Cpu* c) {
         return;
     }
     if (!g_call(c, GC(kEndCheck), {play(c) + kPlayEventManager, GD(kReceiveEventName)})) return;
-    uint32_t key = g_show.key;
+    uint16_t key = g_show.key;
     if (!key) key = next_waiting().key;  // a state was loaded while the letter was shown
-    if (key && have_save()) book().set(key, kRead);
-    if (trace()) LOG("[mail] letter %06X read", key);
+    if (key && have_save()) book().set_state(key, kRead);
+    if (trace()) LOG("[mail] letter %04X read", key);
     g_show = {};
     const uint32_t next = g_call(c, GC(kReadable), {self});
     st32(self + kNumReadable, next);
@@ -313,25 +415,41 @@ void next_msg(Cpu* c) {
     else if (status == 14 && !letter_shown) c->r[3] = 16;
 }
 
-// getMessage(manager, out, set name, label): note the MSBT entry of the letter being shown
+// getMessage(manager, out, set name, label): note the MSBT entry of a message being replaced
 void get_message(Cpu* c) {
     const uint32_t out = c->r[4];
     g_original(c, GC(kGetMessage));
-    if (!g_show.text || g_show.keyed || ld32(out + kMsgNumber) != g_show.carrier) return;
-    const uint32_t set = ld32(out + kMsgSet);
-    if (!set) return;
-    g_show.msbt = ld32(set);
-    g_show.index = ld32(out + kMsgLabelIndex);
-    g_show.keyed = true;
-    if (trace()) LOG("[mail] letter text replaces MSBT %08X entry %u", g_show.msbt, g_show.index);
+    for (Override* o : {&g_show.letter, &g_notebook_text}) {
+        if (!o->text || o->keyed || ld32(out + kMsgNumber) != o->number) continue;
+        const uint32_t set = ld32(out + kMsgSet);
+        if (!set) continue;
+        o->msbt = ld32(set);
+        o->index = ld32(out + kMsgLabelIndex);
+        o->keyed = true;
+        Cpu probe = *c;  // the original text, for its leading codes
+        probe.r[3] = o->msbt, probe.r[4] = o->index;
+        g_original(&probe, GC(kGetText));
+        const uint32_t prefix = probe.r[3] ? leading_codes(probe.r[3]) : 0;
+        for (uint32_t i = 0; i < prefix; i++) st8(o->buffer + i, ld8(probe.r[3] + i));
+        const std::u16string& t = *o->text;
+        for (size_t i = 0; i < t.size(); i++) st16(o->buffer + prefix + uint32_t(2 * i), t[i]);
+        st16(o->buffer + prefix + uint32_t(2 * t.size()), 0);
+        if (trace()) LOG("[mail] message %X: text replaced (MSBT %08X entry %u, %u bytes of codes kept)", o->number, o->msbt, o->index, prefix);
+    }
 }
 
-// text(msbt, index): the mod's text for the noted entry while the letter is shown
+// text(msbt, index): the replacement for a noted entry while it is shown. The message manager's
+// check that a label has text (setWithLabel -> 02757A80 -> text length) keeps the game's text.
 void get_text(Cpu* c) {
-    if (g_show.keyed && c->r[3] == g_show.msbt && c->r[4] == g_show.index) {
-        c->r[3] = g_show.text;
+    if (c->lr == GC(kTextLengthReturn)) {
+        g_original(c, GC(kGetText));
         return;
     }
+    for (const Override* o : {&g_show.letter, &g_notebook_text})
+        if (o->keyed && c->r[3] == o->msbt && c->r[4] == o->index) {
+            c->r[3] = o->buffer;
+            return;
+        }
     g_original(c, GC(kGetText));
 }
 
