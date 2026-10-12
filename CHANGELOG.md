@@ -7,6 +7,16 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Mods tab: Built-in and Community.** The Mods list is split into *Built-in* (the options that come
+  with the game, such as the camera and speed options) and *Community* (mods from the mod catalogue,
+  installed or ready to download, plus imported packages and graphics packs); *More* is unchanged.
+- **Fixed: Call of the Sky could not be switched on from the catalogue.** After confirming the
+  experimental warning, the install stopped with "confirm the warning first", because the save backup
+  was skipped. The backup now always runs once before the mod is switched on, and a failed backup shows
+  its reason.
+- **Fixed: a red "conflicting ID" box in Mods › More** (Code-mod support). Release builds also no longer
+  show this debug highlight.
+
 - **Fixed: controllers stopped responding in the game after the settings overlay or the name screen**
   (issue #153). If a trigger or stick did not fully return to rest, the game ignored all input after
   closing the overlay or entering a name until the controller was reconnected. Now only the button that
