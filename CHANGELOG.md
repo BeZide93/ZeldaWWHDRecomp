@@ -19,6 +19,13 @@ what is on `devel` and not released yet (also in the
     buttons, sized for the screen; Settings › Display › *UI size* (Automatic / Small / Medium / Large).
     The desktop look is unchanged.
   - Texts say "Android device" instead of "phone", and the log names how Android reports a controller.
+
+- **Fixed: Windows setup failed in deep folders** (issue #144), for example in Downloads after Windows'
+  "Extract All" puts the folder inside a folder of the same name. The compiler now unpacks with long
+  paths, and the game and setup use much shorter names for shader caches, temporary files, code-mod
+  builds and save backups (existing caches are reused or rebuilt automatically). Only a folder deeper
+  than 175 characters makes setup stop right away, before downloading anything, and ask you to move it
+  to a shorter place such as `C:\Games\WindWakerHD`.
 - **Experimental: build the game from the decompilation** (macOS, for developers). The CMake option
   `WWHD_DECOMP=ON` compiles the game code from the public, verified decompilation
   ([ZeldaWWHDDecomp/wwhd](https://github.com/ZeldaWWHDDecomp/wwhd), a submodule in `decomp/`) instead of
