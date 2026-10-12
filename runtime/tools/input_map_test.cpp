@@ -15,6 +15,7 @@
 #include "overlay/binding_capture.h"
 #include "platform/android_controller.h"
 #include "platform/touch_buttons.h"
+#include "overlay/mobile_ui.h"
 
 using namespace input_map;
 
@@ -723,6 +724,14 @@ int main() {
                   (mode == touch_buttons::AlwaysShow || (mode == touch_buttons::Automatic && !controller)));
             CHECK(touch_buttons::visible(mode, controller, true));
         }
+    for (float dpi : {160.f, 320.f, 367.f, 420.f, 640.f}) {
+        const float automatic = mobile_ui::scale(dpi, 1, 0);
+        CHECK(std::fabs(49 * automatic * 25.4f / dpi - 8.0f) < 0.001f);
+        CHECK(mobile_ui::scale(dpi, 1, 1) < automatic);
+        CHECK(mobile_ui::scale(dpi, 1, 2) == automatic);
+        CHECK(mobile_ui::scale(dpi, 1, 3) > automatic);
+    }
+    CHECK(std::isfinite(mobile_ui::scale(NAN, NAN, 0)));
     test_settings_shortcut();
     test_android_odin_mapping();
     test_binding_capture_faces();

@@ -79,6 +79,12 @@ extern "C" JNIEXPORT void JNICALL Java_org_wwhdrecomp_wwhd_TouchControls_nativeS
 #endif
 
 #ifdef __ANDROID__
+extern "C" JNIEXPORT void JNICALL Java_org_wwhdrecomp_wwhd_TouchControls_nativeScreenDpi(JNIEnv*, jclass, jfloat dpi) {
+    overlay::set_android_screen_dpi(dpi);
+}
+#endif
+
+#ifdef __ANDROID__
 extern "C" JNIEXPORT void JNICALL Java_org_wwhdrecomp_wwhd_TouchControls_nativeControllerConnected(JNIEnv*, jclass, jboolean connected) {
     gfx::g_touch_controller = connected;
 }

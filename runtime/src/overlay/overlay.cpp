@@ -72,6 +72,7 @@ namespace gfxvk { bool buffer_cache_enabled(); }  // gfx/vulkan/buffer_cache.h
 #include "../build_info.h"
 #include "settings_shortcut.h"
 #include "binding_capture.h"
+#include "mobile_ui.h"
 #include "../report_header.h"
 
 namespace gx2 { uint64_t flips_presented(); bool uncapped(); void set_uncapped(bool on); }
@@ -86,6 +87,8 @@ std::atomic<bool> g_open{false};
 std::atomic<bool> g_perf{false};
 PerfAverage g_average;
 std::atomic<float> g_density{1.0f};
+std::atomic<float> g_android_dpi{160.0f};
+std::atomic<int> g_ui_size{0};
 std::atomic<bool> g_wait_release{false};  // just closed: the game sees no buttons until all are released
 std::atomic<double> g_last_frame{0};      // frame() ran (alive(): the game's text prompt can show)
 const bool g_no_host = getenv("WWHD_NO_HOST_INPUT") != nullptr;  // test runs ignore the user's input
@@ -188,7 +191,11 @@ struct Ui {
     int language_region_at_start = 0;
     bool linearized = false;
     bool just_opened = false;
-    bool list_view = false;  // Controls: the table instead of the drawing
+#ifdef __ANDROID__
+    bool list_view = true;
+#else
+    bool list_view = false;
+#endif  // Controls: the table instead of the drawing
     int hover_action = -1;   // Controls: input under the cursor (status line)
 };
 Ui U;
@@ -216,6 +223,12 @@ void setup_style() {
     s.TabRounding = 6;
     s.WindowPadding = ImVec2(16, 14);
     s.FramePadding = ImVec2(9, 5);
+#ifdef __ANDROID__
+    s.FramePadding = ImVec2(10, 16);
+    s.ItemInnerSpacing = ImVec2(10, 8);
+    s.ScrollbarSize = 49;
+    s.GrabMinSize = 49;
+#endif
     s.ItemSpacing = ImVec2(10, 7);
     s.WindowBorderSize = 1;
     s.FrameBorderSize = 1;  // unchecked boxes and radio buttons stay visible on the dark background
@@ -432,6 +445,33 @@ bool check(const char* label, bool value, bool* out, bool enabled = true) {
     ImGui::EndDisabled();
     *out = v;
     return changed;
+}
+
+bool selectable(const char* label, bool selected = false, ImGuiSelectableFlags flags = 0, ImVec2 size = ImVec2(0, 0)) {
+#ifdef __ANDROID__
+    size.y = std::max(size.y, ImGui::GetFrameHeight());
+#endif
+    return ImGui::Selectable(label, selected, flags, size);
+}
+
+bool combo(const char* label, int* current, const char* items) {
+#ifndef __ANDROID__
+    return ImGui::Combo(label, current, items);
+#else
+    const char* preview = items;
+    for (int i = 0; i < *current && *preview; ++i) preview += strlen(preview) + 1;
+    bool changed = false;
+    if (ImGui::BeginCombo(label, preview)) {
+        int index = 0;
+        for (const char* item = items; *item; item += strlen(item) + 1, ++index) {
+            const bool selected = index == *current;
+            if (selectable(item, selected)) { *current = index; changed = true; }
+            if (selected) ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndCombo();
+    }
+    return changed;
+#endif
 }
 
 // ---------------------------------------------------------------- tabs
@@ -841,9 +881,14 @@ void tab_display() {
                                            : "The TV window (F11 or Alt+Enter); remembered for the next start");
 #endif
 #ifdef __ANDROID__
+    heading("Interface");
+    int uiSize = g_ui_size;
+    if (combo("UI size", &uiSize, "Automatic\0Small\0Medium\0Large\0"))
+        hostui::post([uiSize] { g_ui_size = uiSize; hostui::set("uiSize", std::to_string(uiSize)); });
+    help("Automatic adapts Settings to your Android device's screen. Choose Small, Medium or Large to adjust the controls.");
     heading("Touch controls");
     int touchMode = gfx::g_touch_buttons;
-    if (ImGui::Combo("Touch buttons", &touchMode, "Automatic\0Always show\0Hide\0"))
+    if (combo("Touch buttons", &touchMode, "Automatic\0Always show\0Hide\0"))
         hostui::post([touchMode] { gfx::g_touch_buttons = touchMode; hostui::set("touchButtons", std::to_string(touchMode)); });
     help("Automatic hides the floating buttons while a controller is connected. Tap near the top-left corner to reveal them for five seconds.");
     if (check("On-screen controls", gfx::g_touch_controls, &v))
@@ -870,7 +915,9 @@ void tab_display() {
         bool first = true;
         for (int i = 0; i < hostui::drc_modes() && i < 5; i++) {
             if (!hostui::drc_mode_offered(i)) continue;
+#ifndef __ANDROID__
             if (!first) ImGui::SameLine();
+#endif
             first = false;
             if (radio(modes[i], mode == i)) hostui::post([i] { hostui::set_drc_mode(i); });
         }
@@ -886,7 +933,9 @@ void tab_display() {
         ImGui::AlignTextToFramePadding();
         ImGui::TextUnformatted("Picture-in-picture corner:");
         for (int i = 0; i < 4; i++) {
+#ifndef __ANDROID__
             ImGui::SameLine();
+#endif
             if (radio(corners[i], hostui::pip_corner() == i)) hostui::post([i] { hostui::set_pip_corner(i); });
         }
         ImGui::AlignTextToFramePadding();
@@ -1054,7 +1103,7 @@ void setup_controls(const mods::packages::View& mod,NativeConfirm& confirm,std::
             if(step.type=="confirm") {
                 if(ImGui::Button("Confirm"))configure(mod.id,step.option,true,error);
             }else if(option!=mod.options.end()&&ImGui::BeginCombo("Choice",option->value.string().c_str())) {
-                for(const auto& value:step.choices)if(ImGui::Selectable(value.c_str()))configure(mod.id,step.option,value,error);
+                for(const auto& value:step.choices)if(selectable(value.c_str()))configure(mod.id,step.option,value,error);
                 ImGui::EndCombo();
             }
         }else {
@@ -1274,7 +1323,7 @@ void package_controls() {
     auto current = current_profile();
     if (ImGui::BeginCombo("Active profile", current.c_str())) {
         for (const auto& name : profiles())
-            if (ImGui::Selectable(name.c_str(), name == current)) select_profile(name, error);
+            if (selectable(name.c_str(), name == current)) select_profile(name, error);
         ImGui::EndCombo();
     }
     ImGui::InputText("New profile", new_profile, sizeof new_profile);
@@ -1285,7 +1334,7 @@ void package_controls() {
     if (delete_choice == current || std::find(saved_profiles.begin(), saved_profiles.end(), delete_choice) == saved_profiles.end()) delete_choice.clear();
     if (delete_choice.empty()) for (const auto& name : saved_profiles) if (name != current) { delete_choice = name; break; }
     if (ImGui::BeginCombo("Delete profile", delete_choice.empty() ? "No inactive profile" : delete_choice.c_str())) {
-        for (const auto& name : saved_profiles) if (name != current && ImGui::Selectable(name.c_str(), name == delete_choice)) delete_choice = name;
+        for (const auto& name : saved_profiles) if (name != current && selectable(name.c_str(), name == delete_choice)) delete_choice = name;
         ImGui::EndCombo();
     }
     ImGui::SameLine();
@@ -1389,7 +1438,7 @@ void package_controls() {
                 } else if (option.type == "enum") {
                     if (ImGui::BeginCombo(option.name.c_str(), option.value.text.c_str())) {
                         for (const auto& choice : option.choices)
-                            if (ImGui::Selectable(choice.c_str(), choice == option.value.text))
+                            if (selectable(choice.c_str(), choice == option.value.text))
                                 configure(mod.id, option.id, choice, error);
                         ImGui::EndCombo();
                     }
@@ -1538,7 +1587,7 @@ void tab_mods() {
                 hostui::post([id, on] { mods::manager::set_enabled(id, on); });
             }
             ImGui::SameLine();
-            if (ImGui::Selectable(entry.name, selected == entry.id)) selected = entry.id;
+            if (selectable(entry.name, selected == entry.id)) selected = entry.id;
             ImGui::PopID();
         }
         if (!shown) note("No mods match your filter.");
@@ -1841,17 +1890,17 @@ void gyro_window(bool& open) {
     ImGui::SetNextItemWidth(220);
     if (ImGui::BeginCombo("Recalibrate: controller", pad_name)) {
         for (int p = 0; p < input_map::kPadCount; p++)
-            if (ImGui::Selectable(p ? input_map::pad_label(p) : "None", g.recenter_pad == p)) g.recenter_pad = p;
+            if (selectable(p ? input_map::pad_label(p) : "None", g.recenter_pad == p)) g.recenter_pad = p;
         ImGui::EndCombo();
     }
     std::string key_name = g.recenter_key >= 0 ? input_map::key_label(g.recenter_key) : "None";
     ImGui::SetNextItemWidth(220);
     if (ImGui::BeginCombo("Recalibrate: key", key_name.c_str())) {
-        if (ImGui::Selectable("None", g.recenter_key < 0)) g.recenter_key = -1;
+        if (selectable("None", g.recenter_key < 0)) g.recenter_key = -1;
         for (int k = 0; k < 256; k++) {
             std::string id = input_map::key_id(k);
             if (id.rfind("Key", 0) == 0) continue;  // unnamed codes
-            if (ImGui::Selectable(input_map::key_label(k).c_str(), g.recenter_key == k)) g.recenter_key = k;
+            if (selectable(input_map::key_label(k).c_str(), g.recenter_key == k)) g.recenter_key = k;
         }
         ImGui::EndCombo();
     }
@@ -2267,7 +2316,7 @@ void tab_audio() {
         note("WWHD_AUDIO_VOLUME=%s is set for this start and takes precedence; changes here are not saved.",
              getenv("WWHD_AUDIO_VOLUME"));
     int speakers = audio::requested_surround() ? 1 : 0;
-    if (ImGui::Combo("Speakers", &speakers, "Stereo\0Surround 5.1\0"))
+    if (combo("Speakers", &speakers, "Stereo\0Surround 5.1\0"))
         hostui::post([speakers] { audio::set_requested_surround(speakers == 1); });
     note("Restart the game after changing Speakers.");
     if (audio::surround_fallback())
@@ -2288,8 +2337,12 @@ void settings_window() {
     ImGuiIO& io = ImGui::GetIO();
     const ImVec2 ds = io.DisplaySize;
     // the Controls drawing wants room: that tab gets (almost) the whole picture
+#ifdef __ANDROID__
+    const ImVec2 size(ds.x * 0.98f, ds.y * 0.97f);
+#else
     const ImVec2 size = U.tab == kControls ? ImVec2(std::min(1240.0f, ds.x * 0.98f), std::min(720.0f, ds.y * 0.97f))
                                            : ImVec2(std::min(860.0f, ds.x * 0.94f), std::min(620.0f, ds.y * 0.92f));
+#endif
     ImGui::SetNextWindowPos(ImVec2(ds.x * 0.5f, ds.y * 0.5f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
     ImGui::SetNextWindowSize(size, ImGuiCond_Always);
     ImGuiWindowFlags fl = ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
@@ -2313,7 +2366,11 @@ void settings_window() {
                 if (ImGui::BeginTabItem(kTabNames[i], nullptr, f)) {
                     if (U.tab != i) U.cap_action = -1, g_capturing_keys = false, U.cap_note.clear();
                     U.tab = i;
+#ifdef __ANDROID__
+                    ImGui::BeginChild("page", ImVec2(0, -ImGui::GetFrameHeightWithSpacing()), ImGuiChildFlags_NavFlattened);
+#else
                     ImGui::BeginChild("page", ImVec2(0, 0), ImGuiChildFlags_NavFlattened);
+#endif
                     switch (i) {
                     case kSaves: tab_saves(); break;
                     case kGraphics: tab_graphics(); break;
@@ -2330,6 +2387,9 @@ void settings_window() {
             U.select_tab = -1;
             ImGui::EndTabBar();
         }
+#ifdef __ANDROID__
+        if (ImGui::Button("Close Settings", ImVec2(-FLT_MIN, 0))) open = false;
+#endif
     }
     ImGui::End();
     // B (not while choosing an input or in a list) or the close button closes the menu
@@ -2436,6 +2496,7 @@ bool mouse_wheel(float dx, float dy) {
     push({Event::Wheel, 0, false, dx, dy, 0});
     return true;
 }
+void set_android_screen_dpi(float dpi) { g_android_dpi = dpi; }
 void set_density(float d) { g_density = d > 0.5f ? d : 1.0f; }
 
 ImDrawData* frame(float pw, float ph, void (*renderer_init)()) {
@@ -2530,7 +2591,17 @@ ImDrawData* frame(float pw, float ph, void (*renderer_init)()) {
     }
     ImGuiIO& io = ImGui::GetIO();
     // UI scale: HiDPI backing scale, and larger on large windows (a TV across the room)
+#ifdef __ANDROID__
+    static const bool loadedUiSize = [] {
+        std::string saved;
+        if (hostui::get("uiSize", saved)) g_ui_size = std::clamp(atoi(saved.c_str()), 0, 3);
+        return true;
+    }();
+    (void)loadedUiSize;
+    const float scale = mobile_ui::scale(g_android_dpi, g_density, g_ui_size);
+#else
     const float scale = std::max({1.0f, g_density.load(), ph / 820.0f});
+#endif
     io.DisplaySize = ImVec2(pw / scale, ph / scale);
     io.DisplayFramebufferScale = ImVec2(scale, scale);
     io.DeltaTime = U.last_time > 0 ? (float)std::clamp(t - U.last_time, 1e-4, 0.25) : 1.0f / 60.0f;

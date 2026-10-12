@@ -27,6 +27,7 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
     private static native void nativeDetachPad();
     private static native int nativeTouchState();
     private static native void nativeControllerConnected(boolean connected);
+    private static native void nativeScreenDpi(float dpi);
     private static native void nativeRevealButtons();
     private static native void nativeShowControls(boolean shown);
 
@@ -63,7 +64,7 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
     private boolean controller; // a game controller is connected and no touch came since
     private boolean buttonsVisible = true, revealGesture, settingsOpen;
     private boolean toggleTo;   // what the show/hide button sets when released (shown before the touch: hide)
-    private int lastButtons = -1;
+    private int lastButtons = -1, lastTouchDevice;
     private float lastLx, lastLy, lastRx, lastRy, lastLt, lastRt;
 
     public TouchControls(Context context) {
@@ -191,6 +192,7 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
     @Override
     public boolean onTouchEvent(MotionEvent event) {
         final int action = event.getActionMasked();
+        lastTouchDevice = event.getDeviceId();
         if (action == MotionEvent.ACTION_DOWN && event.getToolType(0) != MotionEvent.TOOL_TYPE_FINGER)
             return false;  // mouse and stylus: SDLSurface underneath as before
         syncTouchState();
@@ -292,13 +294,23 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
 
     private void syncTouchState() {
         try {
+            android.util.DisplayMetrics metrics = getResources().getDisplayMetrics();
+            float dpi = Math.min(metrics.xdpi, metrics.ydpi);
+            if (!Float.isFinite(dpi) || dpi < 72 || dpi > 1000) dpi = metrics.densityDpi;
+            nativeScreenDpi(dpi);
             nativeControllerConnected(controller);
             final int state = nativeTouchState();
             final boolean visible = (state & 1) != 0, controlsShown = (state & 2) != 0, open = (state & 4) != 0;
             if (buttonsVisible == visible && shown == controlsShown && settingsOpen == open) return;
             buttonsVisible = visible; shown = controlsShown; settingsOpen = open;
             for (Control c : controls) { c.pressed = false; c.sx = 0; c.sy = 0; }
-            for (int i = owner.size() - 1; i >= 0; --i) if (owner.valueAt(i) != null) owner.removeAt(i);
+            for (int i = owner.size() - 1; i >= 0; --i) {
+                if (owner.valueAt(i) != null) owner.removeAt(i);
+                else if (settingsOpen) {
+                    SDLActivity.onNativeTouch(lastTouchDevice, owner.keyAt(i), MotionEvent.ACTION_CANCEL, 0, 0, 0);
+                    owner.removeAt(i);
+                }
+            }
             nativeDetachPad(); lastButtons = -1;
             if (active()) update();
         } catch (UnsatisfiedLinkError ignored) { /* SDL has not loaded the native library yet. */ }
