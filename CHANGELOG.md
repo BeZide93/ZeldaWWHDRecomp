@@ -20,6 +20,12 @@ what is on `devel` and not released yet (also in the
   `….AppImage.data/share` → `….AppImage.home/.local/share`, `….AppImage.data/config` →
   `….AppImage.home/.config` and `….AppImage.data/cache` → `….AppImage.home/.cache`, then start the
   AppImage once with `--setup`.
+
+- **Share your shader coverage:** Settings › Graphics › **Export shader template** (desktop) or
+  `tools/shaderprep.py export` saves a code-free `my-template.bin` (shader hashes and GPU settings only, no
+  game code) from your own shader caches, so it can be contributed to the template that setup uses to
+  prepare shaders. `shaderprep.py template` no longer fails with "invalid recipe bounds" on long-played or
+  Vulkan caches and skips damaged records instead of stopping.
 - **Android handhelds and controllers** (issue #152, thanks @OTPR26):
   - **Settings with a controller:** holding Select/− now opens the settings after half a second as
     intended (it could take about 3 seconds on some devices), and a one-time hint says so.
