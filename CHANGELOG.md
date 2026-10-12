@@ -7,6 +7,11 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Android setup polish** (from the tester report on PR #98, thanks @rhemfur): the "Rebuild shader cache" hint
+  names the right button on each platform (on Android: *Start / resume / retry setup*); tooltips no longer stay on
+  touch screens; setup's own step reads "Reading shaders from your game files" so it doesn't look skippable, and its
+  notification brings setup back to the front; after an app update, setup shows "Updating the game for the new version".
+
 - **Fixed: "Invert camera up/down" also inverted the Wind Waker baton** (issue #167). The setting now applies
   only to the camera, including first-person views and item aiming (bow, hookshot, telescope, Picto Box) and the
   mouse camera (which now follows it too); the baton and other right-stick controls keep their normal direction.
