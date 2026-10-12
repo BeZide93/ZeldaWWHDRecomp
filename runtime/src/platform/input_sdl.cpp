@@ -28,6 +28,7 @@ namespace gx2 { void checkpoint_vulkan_caches(); }
 #include "../gfx/vulkan/settings.h"
 #include "../overlay/hostui.h"
 #include "../overlay/overlay.h"
+#include "../overlay/release_gate.h"
 #include "../overlay/text_entry.h"
 #include <algorithm>
 #include <array>
@@ -52,6 +53,7 @@ static PadState g_pad;
 static float g_values[input_map::kPadCount]={};
 static bool g_touch=false;static float g_tx=0,g_ty=0;
 static std::map<SDL_JoystickID,SDL_Gamepad*> g_controllers;
+static std::map<SDL_JoystickID,overlay::ReleaseGate> g_gates;  // update(): per device, see overlay/release_gate.h
 static std::vector<SDL_JoystickID> g_order;  // connect order: the oldest still present is dominant
 static std::set<SDL_JoystickID> g_rumble_controllers;  // the ones that have a rumble motor
 static SDL_Window* g_prompt_window=nullptr;
@@ -638,10 +640,17 @@ void update(){
   }
  }
  post_test_keys();
- float v[input_map::kPadCount]={};using namespace input_map;
- auto put=[&](int p,float x){v[p]=std::max(v[p],x);};
+ using namespace input_map;
+ // v: every device combined (strongest input wins), as the settings overlay reads it; game: the same with
+ // each device's inputs that the overlay or the text prompt had and that are still held left out
+ // (overlay/release_gate.h, issue #153)
+ float v[kPadCount]={},game[kPadCount]={};
+ const bool captured_before=overlay::captures();
+ std::vector<std::pair<SDL_JoystickID,std::array<float,kPadCount>>> devices;
  for(auto [id,pad]:g_controllers){
   if(!SDL_GamepadConnected(pad))continue;
+  std::array<float,kPadCount> d{};
+  auto put=[&](int p,float x){d[p]=std::max(d[p],x);};
   auto button=[&](SDL_GamepadButton b,int p){put(p,SDL_GetGamepadButton(pad,b)?1.f:0.f);};
   button(SDL_GAMEPAD_BUTTON_SOUTH,kPadA);button(SDL_GAMEPAD_BUTTON_EAST,kPadB);button(SDL_GAMEPAD_BUTTON_WEST,kPadX);button(SDL_GAMEPAD_BUTTON_NORTH,kPadY);
   button(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER,kPadLB);button(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER,kPadRB);
@@ -651,14 +660,24 @@ void update(){
   put(kPadLT,std::max(0.f,SDL_GetGamepadAxis(pad,SDL_GAMEPAD_AXIS_LEFT_TRIGGER)/32767.f));put(kPadRT,std::max(0.f,SDL_GetGamepadAxis(pad,SDL_GAMEPAD_AXIS_RIGHT_TRIGGER)/32767.f));
   auto stick=[&](SDL_GamepadAxis ax,SDL_GamepadAxis ay,int up,int down,int left,int right){float x=SDL_GetGamepadAxis(pad,ax)/32768.f,y=SDL_GetGamepadAxis(pad,ay)/32768.f;put(right,std::max(x,0.f));put(left,std::max(-x,0.f));put(up,std::max(-y,0.f));put(down,std::max(y,0.f));};
   stick(SDL_GAMEPAD_AXIS_LEFTX,SDL_GAMEPAD_AXIS_LEFTY,kPadLSUp,kPadLSDown,kPadLSLeft,kPadLSRight);stick(SDL_GAMEPAD_AXIS_RIGHTX,SDL_GAMEPAD_AXIS_RIGHTY,kPadRSUp,kPadRSDown,kPadRSLeft,kPadRSRight);
+  for(int p=0;p<kPadCount;p++)v[p]=std::max(v[p],d[p]);
+  devices.emplace_back(id,d);
  }
- auto state=input_map::controller_state(input_map::current(),v);
+ // Home / Select open and close the menu here (independent of the frame rate): the press that does is
+ // the overlay's, so the gates count this poll as captured when the menu was open before or is after
+ overlay::poll_controller_shortcuts(v);
+ const bool captured=captured_before||overlay::captures();
+ for(auto& [id,d]:devices){
+  g_gates[id].filter(d.data(),captured);
+  for(int p=0;p<kPadCount;p++)game[p]=std::max(game[p],d[p]);
+ }
+ std::erase_if(g_gates,[&](const auto& g){return !g_controllers.contains(g.first);});  // reconnected: a new gate
+ auto state=input_map::controller_state(input_map::current(),game);
  // + went down: the view may switch to the GamePad screen while the game is paused
  // (not while the settings overlay or the text prompt takes the buttons: Start acts there)
  {static bool plus=false;const bool now=(state.buttons&input::kPlus)!=0;if(now&&!plus&&!overlay::blocks_input())gfx::display_plus_pressed();plus=now;}
- overlay::poll_controller_shortcuts(v);  // independent of the file-select/render frame rate
  std::lock_guard lk(g_mu);std::copy(std::begin(v),std::end(v),g_values);g_pad=state;
- if(!overlay::blocks_input()&&!getenv("WWHD_NO_HOST_INPUT")){motion::poll_recalibrate(v,g_keys);screenshot::poll_controller(v);}
+ if(!overlay::blocks_input()&&!getenv("WWHD_NO_HOST_INPUT")){motion::poll_recalibrate(game,g_keys);screenshot::poll_controller(game);}
 }
 void prompt_text(const std::u16string& initial,int max_len,std::function<void(bool,std::u16string)> done){std::lock_guard lk(g_mu);g_initial=initial;g_pending_max_len=std::max(0,max_len);if(g_initial.size()>(size_t)g_pending_max_len)g_initial.resize(g_pending_max_len);g_pending=std::move(done);}
 // debug: WWHD_PRESS=1000-1010:8000,1500-1505:0008 holds VPAD buttons (hex) during TV frame ranges

@@ -9,7 +9,9 @@
 // overlay::frame (draw), which also finishes the prompt, so the answer (`done`) runs there.
 //
 // While the prompt shows, overlay::blocks_input() keeps every button from the game; after it closes the
-// game sees nothing until all controller buttons are released (no stray A press confirms something).
+// controller inputs still held (the A that confirmed) stay from the game until each is released
+// (release_gate.h), so no stray A press confirms something. Keys pressed in the prompt never reach the
+// game: the hosts let a key's repeats press nothing (Enter held after confirming stays out).
 //
 // Hosts: the SDL host turns SDL text input on while active() (platform/input_sdl.cpp); the AppKit host
 // hands key presses to an NSTextInputContext (gfx/text_input_appkit.mm). Where the overlay cannot show

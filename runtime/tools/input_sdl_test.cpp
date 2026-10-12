@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+#include <tuple>
 #include "input.h"
 #include "gfx/renderer.h"
 #include "input_map.h"
@@ -13,6 +14,7 @@
 #include "platform/input_sdl.h"
 #include "platform/android_controller.h"
 #include "overlay/binding_capture.h"
+#include "overlay/settings_shortcut.h"
 static int audioResets=0;
 namespace audio {void flush(){++audioResets;}}
 static int savedSlot=0, loadedSlot=0, saveRequests=0, loadRequests=0;
@@ -33,8 +35,12 @@ void log_msg(const char*,...){}
 // (overlay/text_entry.h) shows while promptShown: overlay::key takes every key then, as the real one does
 static bool promptShown=false;static int promptKeys=0;static std::string promptText;
 static bool overlayOpen=false;
-namespace overlay { void poll_controller_shortcuts(const float*){} bool key(int,bool,bool,int){if(promptShown)++promptKeys;return promptShown;} bool is_open(){return overlayOpen;} bool blocks_input(){return promptShown;}
- bool captures(){return promptShown;}
+// Home / Select toggle overlayOpen in the input pump through the real SettingsShortcut (settings_shortcut.h)
+static double shortcutClock=0;
+namespace overlay { void poll_controller_shortcuts(const float* v){static SettingsShortcut sc;
+  const auto a=sc.poll(shortcutClock,v[input_map::kPadOptions]>0.5f,v[input_map::kPadHome]>0.5f,overlayOpen);if(a!=SettingsShortcut::None)overlayOpen=a==SettingsShortcut::Open;}
+ bool key(int,bool,bool,int){if(promptShown)++promptKeys;return promptShown;} bool is_open(){return overlayOpen;} bool blocks_input(){return promptShown||overlayOpen;}
+ bool captures(){return promptShown||overlayOpen;}
  bool mouse_move(float,float){return false;} bool mouse_button(int,bool){return false;} bool mouse_wheel(float,float){return false;}
  bool text(const char*){return false;} void set_clipboard_text(const char*){} bool wants_text(){return false;} }
 namespace text_entry { bool active(){return promptShown;} void text(const char* s){promptText+=s;} void preedit(const char*){} }
@@ -224,7 +230,75 @@ int main(){
   SDL_CloseJoystick(joystick);assert(SDL_DetachVirtualJoystick(id));poll();
   input_map::set_current(input_map::Mapping::defaults(),false);
  }
+ // issue #153: after the settings overlay or the name prompt had the input, the game gets the controllers
+ // back; only an input still held from the overlay waits for its release, per device
+ {
+  auto attach=[](const char* name){SDL_VirtualJoystickDesc d;SDL_INIT_INTERFACE(&d);
+   d.type=SDL_JOYSTICK_TYPE_GAMEPAD;d.naxes=SDL_GAMEPAD_AXIS_COUNT;d.nbuttons=SDL_GAMEPAD_BUTTON_COUNT;
+   d.vendor_id=0x045e;d.product_id=0x02ea;d.name=name;auto id=SDL_AttachVirtualJoystick(&d);assert(id);
+   auto* j=SDL_OpenJoystick(id);assert(j);return std::make_pair(id,j);};
+  auto [id1,pad1]=attach("Xbox virtual #153 one");
+  auto [id2,pad2]=attach("Xbox virtual #153 two");
+  auto poll=[&](){SDL_UpdateJoysticks();for(SDL_Event e;SDL_PollEvent(&e);)input::handle_event(e);input::update();return input::read();};
+  auto btn=[&](SDL_Joystick* j,SDL_GamepadButton b,bool down){assert(SDL_SetJoystickVirtualButton(j,b,down));return poll();};
+  input_map::set_current(input_map::Mapping::defaults(),false);
+  // the default layout maps by position: south (Xbox A) is the Wii U's B, east its A, north its X
+  const uint32_t S=input::kB,E=input::kA,N=input::kX;
+  assert(btn(pad1,SDL_GAMEPAD_BUTTON_SOUTH,true).buttons==S);assert(btn(pad1,SDL_GAMEPAD_BUTTON_SOUTH,false).buttons==0);
+  // the reporter's pad: an input that rests above 0.3 (a trigger here; the game presses ZR above 0.5)
+  // (a virtual trigger's axis spans -32768..32767: -6500 reads 0.4)
+  assert(SDL_SetJoystickVirtualAxis(pad1,SDL_GAMEPAD_AXIS_RIGHT_TRIGGER,-6500));assert(poll().buttons==0);
+  {float vv[input_map::kPadCount];input::host_controller_values(vv);assert(vv[input_map::kPadRT]>0.35f&&vv[input_map::kPadRT]<0.45f);}
+  // F1 / Esc (keys, the overlay's own): open, close, then a press reaches the game at once
+  for(int i=0;i<2;i++){
+   overlayOpen=true;assert(btn(pad1,SDL_GAMEPAD_BUTTON_SOUTH,true).buttons==0);assert(btn(pad1,SDL_GAMEPAD_BUTTON_SOUTH,false).buttons==0);
+   overlayOpen=false;assert(poll().buttons==0);
+   assert(btn(pad1,SDL_GAMEPAD_BUTTON_SOUTH,true).buttons==S);assert(btn(pad1,SDL_GAMEPAD_BUTTON_SOUTH,false).buttons==0);
+   assert(btn(pad1,SDL_GAMEPAD_BUTTON_START,true).buttons==input::kPlus);assert(btn(pad1,SDL_GAMEPAD_BUTTON_START,false).buttons==0);
+  }
+  // B closes the menu (the overlay's navigation) and is still held: it stays out until released, the
+  // other inputs (and the other pad) reach the game meanwhile
+  overlayOpen=true;btn(pad1,SDL_GAMEPAD_BUTTON_EAST,true);overlayOpen=false;
+  assert(poll().buttons==0);assert(btn(pad1,SDL_GAMEPAD_BUTTON_SOUTH,true).buttons==S);
+  assert(btn(pad2,SDL_GAMEPAD_BUTTON_EAST,true).buttons==(S|E));  // pad two's own east button
+  btn(pad2,SDL_GAMEPAD_BUTTON_EAST,false);assert(poll().buttons==S);
+  btn(pad1,SDL_GAMEPAD_BUTTON_SOUTH,false);assert(btn(pad1,SDL_GAMEPAD_BUTTON_EAST,false).buttons==0);
+  assert(btn(pad1,SDL_GAMEPAD_BUTTON_EAST,true).buttons==E);btn(pad1,SDL_GAMEPAD_BUTTON_EAST,false);
+  // Home opens and closes in the input pump: the closing press is the overlay's, not the game's
+  assert(btn(pad1,SDL_GAMEPAD_BUTTON_GUIDE,true).buttons==0&&overlayOpen);btn(pad1,SDL_GAMEPAD_BUTTON_GUIDE,false);
+  assert(btn(pad1,SDL_GAMEPAD_BUTTON_GUIDE,true).buttons==0&&!overlayOpen);
+  assert(btn(pad1,SDL_GAMEPAD_BUTTON_SOUTH,true).buttons==S);btn(pad1,SDL_GAMEPAD_BUTTON_SOUTH,false);
+  assert(btn(pad1,SDL_GAMEPAD_BUTTON_GUIDE,false).buttons==0);
+  // Select: held half a second opens, a press closes; that press (Minus in the game) waits for its release
+  btn(pad2,SDL_GAMEPAD_BUTTON_BACK,true);shortcutClock+=0.6;poll();assert(overlayOpen);
+  btn(pad2,SDL_GAMEPAD_BUTTON_BACK,false);assert(btn(pad2,SDL_GAMEPAD_BUTTON_BACK,true).buttons==0&&!overlayOpen);
+  assert(btn(pad1,SDL_GAMEPAD_BUTTON_START,true).buttons==input::kPlus);btn(pad1,SDL_GAMEPAD_BUTTON_START,false);
+  assert(btn(pad2,SDL_GAMEPAD_BUTTON_BACK,false).buttons==0);assert(btn(pad2,SDL_GAMEPAD_BUTTON_BACK,true).buttons==input::kMinus);
+  btn(pad2,SDL_GAMEPAD_BUTTON_BACK,false);
+  // the name prompt: A / Start confirms (the prompt closes while it is held), with either pad
+  for(auto [j,b,bit]:{std::make_tuple(pad1,SDL_GAMEPAD_BUTTON_SOUTH,S),std::make_tuple(pad2,SDL_GAMEPAD_BUTTON_START,uint32_t(input::kPlus))}){
+   promptShown=true;poll();assert(btn(j,b,true).buttons==0);promptShown=false;
+   for(int i=0;i<3;i++)assert(poll().buttons==0);  // held: not a press in the game
+   assert(btn(j,b,false).buttons==0);assert(btn(j,b,true).buttons==bit);btn(j,b,false);
+  }
+  // Enter confirms on the keyboard: the controllers are the game's at once, Enter's repeats press nothing
+  promptShown=true;poll();graphicsEvent(SDL_SCANCODE_RETURN,game);promptShown=false;graphicsEvent(SDL_SCANCODE_RETURN,game,true);
+  assert(!(poll().buttons&input::kPlus));assert(btn(pad1,SDL_GAMEPAD_BUTTON_SOUTH,true).buttons==S);
+  btn(pad1,SDL_GAMEPAD_BUTTON_SOUTH,false);graphicsEvent(SDL_SCANCODE_RETURN,game,false,SDL_EVENT_KEY_UP);
+  graphicsEvent(SDL_SCANCODE_RETURN,game);assert(poll().buttons==input::kPlus);graphicsEvent(SDL_SCANCODE_RETURN,game,false,SDL_EVENT_KEY_UP);
+  // a held stick across the close: kept until it returns, then the game's again
+  overlayOpen=true;assert(SDL_SetJoystickVirtualAxis(pad2,SDL_GAMEPAD_AXIS_LEFTX,32767));assert(poll().lx==0);overlayOpen=false;
+  assert(poll().lx==0);assert(SDL_SetJoystickVirtualAxis(pad2,SDL_GAMEPAD_AXIS_LEFTX,0));poll();
+  assert(SDL_SetJoystickVirtualAxis(pad2,SDL_GAMEPAD_AXIS_LEFTX,32767));assert(poll().lx>0.9f);
+  assert(SDL_SetJoystickVirtualAxis(pad2,SDL_GAMEPAD_AXIS_LEFTX,0));poll();
+  // replug: a button held across the close on a pad that reconnects (new gate) is the game's again
+  overlayOpen=true;btn(pad1,SDL_GAMEPAD_BUTTON_NORTH,true);overlayOpen=false;assert(poll().buttons==0);
+  SDL_CloseJoystick(pad1);assert(SDL_DetachVirtualJoystick(id1));poll();
+  auto [id3,pad3]=attach("Xbox virtual #153 one again");poll();
+  assert(btn(pad3,SDL_GAMEPAD_BUTTON_NORTH,true).buttons==N);btn(pad3,SDL_GAMEPAD_BUTTON_NORTH,false);
+  SDL_CloseJoystick(pad3);assert(SDL_DetachVirtualJoystick(id3));SDL_CloseJoystick(pad2);assert(SDL_DetachVirtualJoystick(id2));poll();
+ }
  input::set_pro_controller(false);
  SDL_DestroyWindow(controls);SDL_DestroyWindow(game);input::set_prompt_window(nullptr);
- SDL_Quit();puts("input_sdl_test: keyboard mapping, focus, touch, Pro mode, guarded save-state shortcuts, screenshot binding, text prompt routing, rumble passed");
+ SDL_Quit();puts("input_sdl_test: keyboard mapping, focus, touch, Pro mode, guarded save-state shortcuts, screenshot binding, text prompt routing, rumble, overlay hand-back (#153) passed");
 }

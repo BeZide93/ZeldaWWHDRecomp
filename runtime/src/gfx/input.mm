@@ -28,6 +28,7 @@ namespace gx2 { void checkpoint_vulkan_caches(); }
 #include "../true60.h"
 #include "../motion/motion.h"
 #include "../overlay/overlay.h"
+#include "../overlay/release_gate.h"
 
 #include <memory>
 #include <string>
@@ -392,9 +393,14 @@ void init() {
     note_dominant_labels();
     // GameController values are polled on the main thread
     [NSTimer scheduledTimerWithTimeInterval:1.0 / 240 repeats:YES block:^(NSTimer*) {
-        float v[input_map::kPadCount];
+        float v[input_map::kPadCount], game[input_map::kPadCount];
         controller_values(v);
-        PadState s = input_map::controller_state(input_map::current(), v);
+        // inputs held while the overlay or the text prompt had them stay from the game until released
+        // (overlay/release_gate.h, issue #153); the overlay polls the Home / Select shortcut on its frame
+        static overlay::ReleaseGate gate;
+        std::copy(v, v + input_map::kPadCount, game);
+        gate.filter(game, overlay::captures());
+        PadState s = input_map::controller_state(input_map::current(), game);
         {
             std::lock_guard<std::mutex> lk(g_mu);
             g_pad = s;
@@ -409,8 +415,8 @@ void init() {
                 std::lock_guard<std::mutex> lk(g_mu);
                 std::copy(g_keys, g_keys + 256, keys);
             }
-            motion::poll_recalibrate(v, keys);
-            screenshot::poll_controller(v);  // a controller input bound to Screenshot
+            motion::poll_recalibrate(game, keys);
+            screenshot::poll_controller(game);  // a controller input bound to Screenshot
         }
         mods::update_gyro_mouse();
     }];

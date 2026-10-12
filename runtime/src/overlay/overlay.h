@@ -32,7 +32,8 @@ namespace overlay {
 void poll_controller_shortcuts(const float* values);  // host input thread, every input poll
 bool is_open();             // any thread
 void set_open(bool open);   // any thread
-// the game sees no input: the overlay is open, or was just closed and buttons are still held
+// the game sees no input: the overlay has it (captures()). Controller inputs held when it closes stay
+// from the game until each is released (the hosts' input pumps, release_gate.h).
 bool blocks_input();
 // the overlay has keyboard, mouse and controller: the menu is open or the game's text prompt shows
 // (text_entry.h); hosts route the pointer by this

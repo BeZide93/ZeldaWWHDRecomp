@@ -89,7 +89,6 @@ PerfAverage g_average;
 std::atomic<float> g_density{1.0f};
 std::atomic<float> g_android_dpi{160.0f};
 std::atomic<int> g_ui_size{0};
-std::atomic<bool> g_wait_release{false};  // just closed: the game sees no buttons until all are released
 std::atomic<double> g_last_frame{0};      // frame() ran (alive(): the game's text prompt can show)
 const bool g_no_host = getenv("WWHD_NO_HOST_INPUT") != nullptr;  // test runs ignore the user's input
 // ... except keys a test posts itself (WWHD_TEST_POST_KEYS, gfx/input.mm; the hidden test window never
@@ -387,7 +386,6 @@ void read_controller() {
     std::copy(std::begin(U.values), std::end(U.values), std::begin(U.prev));
     if (g_no_host) {
         std::fill(std::begin(U.values), std::end(U.values), 0.0f);
-        if (g_wait_release.load()) g_wait_release = false;
         return;
     }
     input::host_controller_values(U.values);
@@ -396,11 +394,6 @@ void read_controller() {
     // The AppKit host still supplies controller state on its render path.
     poll_controller_shortcuts(U.values);
 #endif
-    if (g_wait_release.load()) {
-        bool any = false;
-        for (int p = 1; p < kPadCount; p++) any |= U.values[p] > 0.3f;
-        if (!any) g_wait_release = false;
-    }
 }
 
 // ---------------------------------------------------------------- widgets
@@ -1245,7 +1238,6 @@ void apply_capture() {
     if (done) {
         U.cap_action = -1;
         g_capturing_keys = false;
-        g_wait_release = true;  // the controller input just assigned does not also act in the menu
     }
 }
 
@@ -1910,7 +1902,6 @@ void set_open(bool open) {
     if (g_open.exchange(open) == open) return;
     for (auto& k : g_held_keys) k = false;
     input::release_keys();  // keys held now belong to the menu (opening) or are not stuck in the game (closing)
-    if (!open) g_wait_release = true;
     if (open) {
         mods::fast_forward_reset();
         mods::mouse_release();
@@ -1919,7 +1910,8 @@ void set_open(bool open) {
     }
     LOG("[overlay] %s", open ? "opened" : "closed");
 }
-bool blocks_input() { return captures() || g_wait_release.load(std::memory_order_relaxed); }
+// inputs still held when the overlay closes stay from the game in the hosts' input pumps (release_gate.h)
+bool blocks_input() { return captures(); }
 bool captures() { return is_open() || text_entry::active(); }
 bool alive() { return now_s() - g_last_frame.load(std::memory_order_relaxed) < 1.0; }
 bool perf_shown() { return g_perf.load(std::memory_order_relaxed); }
@@ -2148,9 +2140,8 @@ ImDrawData* frame(float pw, float ph, void (*renderer_init)()) {
         std::copy(std::begin(U.values), std::end(U.values), pad);
         if (g_no_host) test_pad(pad);  // WWHD_TEST_PAD drives the on-screen keyboard in test runs
         if (text_entry::draw(pad)) {
-            // answered: the game sees no buttons until the one that confirmed is released
+            // answered: the button that confirmed stays from the game until released (release_gate.h)
             for (auto& k : g_held_keys) k = false;
-            g_wait_release = true;
         }
     }
     if (perf) perf_window(open);
