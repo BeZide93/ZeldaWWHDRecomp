@@ -61,14 +61,14 @@ static PadState keyboard_state(bool use_host) {
     return input_map::keyboard_state(input_map::current(), keys);
 }
 
-// every mappable controller input, 0..1, the strongest over all connected controllers
-void controller_values(float* v) {
+// every mappable controller input of one controller, 0..1; false: not a gamepad
+static bool device_values(GCController* c, float* v) {
     using namespace input_map;
     for (int i = 0; i < kPadCount; i++) v[i] = 0;
     auto put = [&](int p, float x) { if (x > v[p]) v[p] = x; };
-    for (GCController* c in [GCController controllers]) {
-        GCExtendedGamepad* g = c.extendedGamepad;
-        if (!g) continue;
+    GCExtendedGamepad* g = c.extendedGamepad;
+    if (!g) return false;
+    {
         auto b = [&](GCControllerButtonInput* in, int p) {
             if (in) put(p, in.isPressed ? std::max(in.value, 0.51f) : std::min(in.value, 0.5f));
         };
@@ -86,6 +86,25 @@ void controller_values(float* v) {
         stick(g.leftThumbstick, kPadLSUp, kPadLSDown, kPadLSLeft, kPadLSRight);
         stick(g.rightThumbstick, kPadRSUp, kPadRSDown, kPadRSLeft, kPadRSRight);
     }
+    return true;
+}
+
+// each connected controller's values, keyed by the controller: a reconnected one is a new object
+static std::vector<std::pair<uintptr_t, overlay::PadValues>> devices_values() {
+    std::vector<std::pair<uintptr_t, overlay::PadValues>> out;
+    for (GCController* c in [GCController controllers]) {
+        overlay::PadValues d;
+        if (device_values(c, d.data())) out.emplace_back((uintptr_t)(__bridge void*)c, d);
+    }
+    return out;
+}
+
+// every mappable controller input, 0..1, the strongest over all connected controllers
+void controller_values(float* v) {
+    using namespace input_map;
+    for (int i = 0; i < kPadCount; i++) v[i] = 0;
+    for (const auto& [id, d] : devices_values())
+        for (int p = 0; p < kPadCount; p++) v[p] = std::max(v[p], d[p]);
 }
 
 // ---- the labels printed on a pad's face buttons (issue #78's Automatic preset)
@@ -394,12 +413,11 @@ void init() {
     // GameController values are polled on the main thread
     [NSTimer scheduledTimerWithTimeInterval:1.0 / 240 repeats:YES block:^(NSTimer*) {
         float v[input_map::kPadCount], game[input_map::kPadCount];
-        controller_values(v);
-        // inputs held while the overlay or the text prompt had them stay from the game until released
-        // (overlay/release_gate.h, issue #153); the overlay polls the Home / Select shortcut on its frame
-        static overlay::ReleaseGate gate;
-        std::copy(v, v + input_map::kPadCount, game);
-        gate.filter(game, overlay::captures());
+        // inputs held while the overlay or the text prompt had them stay from the game until released,
+        // one gate per controller as on the SDL host (overlay/release_gate.h, issue #153); the overlay
+        // polls the Home / Select shortcut on its frame
+        static overlay::DeviceGates<uintptr_t> gates;
+        gates.combine(devices_values(), overlay::captures(), v, game);
         PadState s = input_map::controller_state(input_map::current(), game);
         {
             std::lock_guard<std::mutex> lk(g_mu);

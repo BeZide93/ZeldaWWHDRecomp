@@ -53,7 +53,7 @@ static PadState g_pad;
 static float g_values[input_map::kPadCount]={};
 static bool g_touch=false;static float g_tx=0,g_ty=0;
 static std::map<SDL_JoystickID,SDL_Gamepad*> g_controllers;
-static std::map<SDL_JoystickID,overlay::ReleaseGate> g_gates;  // update(): per device, see overlay/release_gate.h
+static overlay::DeviceGates<SDL_JoystickID> g_gates;  // update(): one per device, see overlay/release_gate.h
 static std::vector<SDL_JoystickID> g_order;  // connect order: the oldest still present is dominant
 static std::set<SDL_JoystickID> g_rumble_controllers;  // the ones that have a rumble motor
 static SDL_Window* g_prompt_window=nullptr;
@@ -646,7 +646,7 @@ void update(){
  // (overlay/release_gate.h, issue #153)
  float v[kPadCount]={},game[kPadCount]={};
  const bool captured_before=overlay::captures();
- std::vector<std::pair<SDL_JoystickID,std::array<float,kPadCount>>> devices;
+ std::vector<std::pair<SDL_JoystickID,overlay::PadValues>> devices;
  for(auto [id,pad]:g_controllers){
   if(!SDL_GamepadConnected(pad))continue;
   std::array<float,kPadCount> d{};
@@ -660,18 +660,14 @@ void update(){
   put(kPadLT,std::max(0.f,SDL_GetGamepadAxis(pad,SDL_GAMEPAD_AXIS_LEFT_TRIGGER)/32767.f));put(kPadRT,std::max(0.f,SDL_GetGamepadAxis(pad,SDL_GAMEPAD_AXIS_RIGHT_TRIGGER)/32767.f));
   auto stick=[&](SDL_GamepadAxis ax,SDL_GamepadAxis ay,int up,int down,int left,int right){float x=SDL_GetGamepadAxis(pad,ax)/32768.f,y=SDL_GetGamepadAxis(pad,ay)/32768.f;put(right,std::max(x,0.f));put(left,std::max(-x,0.f));put(up,std::max(-y,0.f));put(down,std::max(y,0.f));};
   stick(SDL_GAMEPAD_AXIS_LEFTX,SDL_GAMEPAD_AXIS_LEFTY,kPadLSUp,kPadLSDown,kPadLSLeft,kPadLSRight);stick(SDL_GAMEPAD_AXIS_RIGHTX,SDL_GAMEPAD_AXIS_RIGHTY,kPadRSUp,kPadRSDown,kPadRSLeft,kPadRSRight);
-  for(int p=0;p<kPadCount;p++)v[p]=std::max(v[p],d[p]);
+  for(int p=0;p<kPadCount;p++)v[p]=std::max(v[p],d[p]);  // the shortcut below reads them ungated
   devices.emplace_back(id,d);
  }
  // Home / Select open and close the menu here (independent of the frame rate): the press that does is
  // the overlay's, so the gates count this poll as captured when the menu was open before or is after
  overlay::poll_controller_shortcuts(v);
  const bool captured=captured_before||overlay::captures();
- for(auto& [id,d]:devices){
-  g_gates[id].filter(d.data(),captured);
-  for(int p=0;p<kPadCount;p++)game[p]=std::max(game[p],d[p]);
- }
- std::erase_if(g_gates,[&](const auto& g){return !g_controllers.contains(g.first);});  // reconnected: a new gate
+ g_gates.combine(devices,captured,v,game);  // a reconnected pad (new id) gets a new gate
  auto state=input_map::controller_state(input_map::current(),game);
  // + went down: the view may switch to the GamePad screen while the game is paused
  // (not while the settings overlay or the text prompt takes the buttons: Start acts there)
