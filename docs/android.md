@@ -82,7 +82,12 @@ own and keeps its full speed.
 **Something doesn't work.**
 Please open an [issue](https://github.com/ZeldaWWHDRecomp/ZeldaWWHDRecomp/issues) with your Android device
 model, Android version and what happened. After a crash, the next start offers the crash report
-to share.
+to share. This also covers Android-recorded foreground low-memory kills, signals and ANRs, when
+Android makes the exit history available. System summaries include the reason, timestamp,
+status/signal, process importance and last PSS/RSS memory sample. They omit system descriptions,
+traces, process-state bytes and logcat to avoid including names, save data or private paths.
+Normal quits, background memory reclamation and save-tool stops do not trigger a system report.
+A nearby native crash report is included in the same share file when available. Sharing is optional.
 
 ---
 

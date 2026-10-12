@@ -38,6 +38,7 @@ public class SetupActivity extends Activity {
     private Button restore;
     private final ArrayList<Button> pickers = new ArrayList<>();
     private boolean phoneSetup;
+    private boolean launchingGame;
     private String actionMessage;
     private TextView keysHint;
     private String pickerJob;
@@ -114,12 +115,17 @@ public class SetupActivity extends Activity {
         catch (Exception unavailable) { phoneSetup = false; }
         // the app icon starts the game once there is one to play; the launcher's "Game setup"
         // shortcut (and an update that needs a rebuild, or a setup still running) opens this screen
-        if (state == null && Intent.ACTION_MAIN.equals(getIntent().getAction()) &&
-                !getIntent().getBooleanExtra(EXTRA_SHOW_SETUP, false) && readyToPlay()) {
-            startActivity(new Intent(this, WwhdActivity.class));
-            finish();
+        if ((state != null && state.getBoolean("launching_game", false)) ||
+                (state == null && Intent.ACTION_MAIN.equals(getIntent().getAction()) &&
+                !getIntent().getBooleanExtra(EXTRA_SHOW_SETUP, false) && readyToPlay())) {
+            launchingGame = true;
+            CrashReports.offer(this, () -> {
+                startActivity(new Intent(this, WwhdActivity.class));
+                finish();
+            });
             return;
         }
+        CrashReports.offer(this);
         android.util.DisplayMetrics metrics = getResources().getDisplayMetrics();
         int padding = (int)(24 * metrics.density), gap = (int)(12 * metrics.density);
         LinearLayout layout = new LinearLayout(this);
@@ -278,6 +284,7 @@ public class SetupActivity extends Activity {
 
     @Override protected void onSaveInstanceState(Bundle state) {
         state.putString("picker_job", pickerJob);
+        state.putBoolean("launching_game", launchingGame);
         super.onSaveInstanceState(state);
     }
 
@@ -508,6 +515,7 @@ public class SetupActivity extends Activity {
 
     @Override protected void onResume() {
         super.onResume();
+        if (status == null) return; // launcher is waiting for the crash-share decision
         refresh.run();
         new Thread(() -> {
             try {
