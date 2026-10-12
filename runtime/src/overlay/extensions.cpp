@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdio>
+#include <mutex>
 #include <set>
 
 namespace overlay::ext {
@@ -99,6 +100,11 @@ void add_frame_layer(FrameLayer layer) {
 
 void seal() {
     if (g_sealed.load(std::memory_order_acquire)) return;
+    // The render thread's first frame and the input thread's first shortcut poll may both get here
+    // first: one of them finishes the registry under the lock, the other then sees it sealed.
+    static std::mutex mu;
+    std::lock_guard<std::mutex> lock(mu);
+    if (g_sealed.load(std::memory_order_relaxed)) return;
     make_tabs();
     g_tabs.erase(std::remove_if(g_tabs.begin(), g_tabs.end(), [](const ShownTab& t) { return g_hidden.count(t.id) != 0; }),
                  g_tabs.end());
