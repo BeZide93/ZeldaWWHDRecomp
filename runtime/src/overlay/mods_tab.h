@@ -628,13 +628,24 @@ inline void tick(const Host& h, bool menu_open) {
     // 2. back up saves (experimental), then hand the rest to the setup run
     if (!j.setup_started) {
         std::string error;
-        if (cur < f.steps.size() && f.steps[cur].kind == StepKind::Backup) {
-            if (!unacknowledged_experimental(f.id).empty() && !acknowledge_experimental(f.id, error)) {
-                f.fail(plain_failure(StepKind::Backup), error);
+        // The review's one confirmation covers the experimental warning: the saves are backed up now, before
+        // anything is switched on. (The step is looked up afresh: the download and check may have finished in
+        // this same tick, so the step found at its start is out of date.)
+        const bool backup_step = std::any_of(f.steps.begin(), f.steps.end(), [](const FlowStep& st) {
+            return st.kind == StepKind::Backup && st.state != StepState::Done;
+        });
+        if (!unacknowledged_experimental(f.id).empty()) {
+            if (!backup_step) {  // the package turned out experimental, but the review didn't say so
+                f.fail("This mod is experimental. Switch it on again to read the warning first.", "");
                 return;
             }
-            f.done(StepKind::Backup, now);
+            if (!acknowledge_experimental(f.id, error)) {
+                // the reason itself (disk full, ...), which also says the mod was not turned on
+                f.fail("Your saves couldn't be backed up: " + error, error);
+                return;
+            }
         }
+        if (backup_step) f.done(StepKind::Backup, now);
         // Trust: the player confirmed this exact catalogue version (its download is checked against the
         // catalogue's SHA-256) or this installed package in the review; begin_setup_run records it.
         auto identity = setup_identity(f.id);

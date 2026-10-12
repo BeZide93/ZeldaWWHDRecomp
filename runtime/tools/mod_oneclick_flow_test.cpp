@@ -51,8 +51,19 @@ int main(int argc,char** argv) {
     using namespace mods::packages;using namespace overlay::setupflow;namespace ui=overlay::modsui;
     fs::path root=fs::absolute(argv[1]);std::string mode=argv[2],id=getenv("WWHD_TEST_MOD_SETUP");
     bool resumed=fs::weakly_canonical(fs::absolute(argv[0])).parent_path()==fs::weakly_canonical(root/"code-builds/synthetic/bin");
-    bool missing=mode=="missing",broken=mode=="broken",catalogue=mode=="catalogue";
-    bool update_off=mode=="update-off",update_on=mode=="update-on",ids=mode=="ids",update=update_off||update_on||ids;
+    // exp-*: an experimental mod (the review warns; switching it on backs up the saves once, first)
+    bool experimental=mode.starts_with("exp-"),backup_fails=mode=="exp-backup-fails";
+    bool missing=mode=="missing",broken=mode=="broken",catalogue=mode=="catalogue"||mode=="exp-catalogue"||backup_fails;
+    bool update_off=mode=="update-off",update_on=mode=="update-on"||mode=="exp-update-on",ids=mode=="ids",update=update_off||update_on||ids;
+    if(experimental) {
+        // the saves the backup copies; an earlier enable (exp-update-on) backs up elsewhere, so only the
+        // backups of this flow are counted in <root>/save-backups
+        fs::create_directories(root/"save");std::ofstream(root/"save"/"slot.bin")<<"synthetic save";
+        std::lock_guard guard(mods::saves::mutex());
+        mods::saves::store().log=[](const std::string&){};
+        mods::saves::store().configure(root/"setup-save",root/"setup-backups");
+        fs::create_directories(root/"setup-save");std::ofstream(root/"setup-save"/"slot.bin")<<"synthetic save";
+    }
     bool cancel_mode=mode=="cancel"||mode=="cancel-rebuild",canceled=false;
     bool restart=mode=="restart"||mode=="cancel-rebuild";set_code_mod_support(!restart||resumed);initialize();
     auto plan=overlay::diagnostic::read_setup_plan(true,getenv("WWHD_MOD_MANAGER_DIR"),getenv("WWHD_TEST_MOD_SETUP"),getenv("WWHD_TEST_GAME_SOURCES"));
@@ -65,7 +76,10 @@ int main(int argc,char** argv) {
             assert(it!=index.index.entries.end());
             mods::catalogue::StagedPackage staged(*it,mods::catalogue::Version::parse("0.2.10"),"USA",platform_key(),root/"stage",index.fixture_root,{});
             std::string error;assert(install(staged.path().string(),error));
-            if(update_on)assert(enable(id,true,error));  // on before the update; it must be on after it
+            if(update_on) {  // on before the update; it must be on after it
+                if(experimental)assert(acknowledge_experimental(id,error));
+                assert(enable(id,true,error));
+            }
         }
         mods::code::startup(argc,argv); // real service launch arguments, fake game-code rebuild output
     } else {
@@ -116,6 +130,13 @@ int main(int argc,char** argv) {
         if(!missing)for(const auto& [game,value]:plan.sources.object)path=value.string();
         chosen(path);
     };
+    if(experimental) {
+        std::lock_guard guard(mods::saves::mutex());
+        // exp-backup-fails: the backups folder can't be created (a file is in its place)
+        if(backup_fails)std::ofstream(root/"blocked")<<"not a folder";
+        mods::saves::store().configure(root/"save",backup_fails?root/"blocked"/"save-backups":fs::path());
+        hostui::set("mod.showExperimental","1");  // the list shows experimental mods
+    }
     if(catalogue||update)set_env("WWHD_MOD_CATALOGUE",(root/"index.json").string());
     else set_env("WWHD_MOD_CATALOGUE",(root/"no-index.json").string());  // the list from the manager only
     int confirmations=0;bool accepted=resumed,saw_progress=false,saw_failure=false,retried=false,corrected=false,saw_done=false;
@@ -255,7 +276,14 @@ int main(int argc,char** argv) {
         }
         if(f.phase==ui::Phase::Working&&!accepted){accepted=true;assert(confirmations==1);std::ofstream(root/"consent-count")<<confirmations;}
         if(f.phase==ui::Phase::Working)saw_progress=true;
+        if(f.phase==ui::Phase::Failed&&backup_fails) {
+            // the reason (no "confirm the warning first"): the review was the confirmation
+            assert(f.error.starts_with("Your saves couldn't be backed up")&&f.error.find("confirm")==std::string::npos);
+            assert(!view(id).enabled&&pending_setup_runs().empty());
+            saw_failure=true;break;
+        }
         if(f.phase==ui::Phase::Failed) {
+            fprintf(stderr,"flow failed: %s | %s\n",f.error.c_str(),f.details.c_str());
             saw_failure=true;assert(broken);assert(!view(id).enabled&&pending_setup_runs().empty());
             assert(f.details.find("synthetic deliberate failure")!=std::string::npos);
             assert(f.error=="Preparing the mod's files failed.");  // one plain sentence; the output is behind Show details
@@ -277,7 +305,9 @@ int main(int argc,char** argv) {
         if(canceled&&f.phase==ui::Phase::Idle){cancel_released=true;auto& worker=setup_work();std::lock_guard guard(worker.mutex);if(!worker.running)break;}
         std::this_thread::sleep_for(std::chrono::milliseconds(2));
     }
+    if(experimental)assert(ui::state().job.accepted.experimental);  // the review showed the warning
     if(missing)assert(!view(id).enabled&&!accepted&&pending_setup_runs().empty()&&picks==1&&confirmations==2);
+    else if(backup_fails)assert(saw_failure&&!view(id).enabled&&confirmations==1);
     else if(update) {
         // an update ends in the state before it: off stays off (prepared), on stays on
         assert(view(id).version=="1.1.0"&&view(id).enabled==update_on&&saw_done&&confirmations==1);

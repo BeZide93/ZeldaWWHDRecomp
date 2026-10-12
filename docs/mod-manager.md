@@ -369,7 +369,9 @@ estimates, and the catalogue list: cache shown at once, background check, offlin
 fallback and the once-per-session and hourly limits. `mod_oneclick_flow` drives the
 real tab offscreen with mouse clicks on synthetic packages: switch on, the one
 review (GameCube game picker, choices), progress, failure and Try again, Cancel,
-the code-mod rebuild with its restart and resume, and a catalogue download. Its `ids` scenario opens every view of the tab (the list, More with every section
+the code-mod rebuild with its restart and resume, a catalogue download, and experimental mods (installed
+from the catalogue, switched on, updated while on: exactly one save backup before it is switched on;
+a backup that can't be made stops with its reason). Its `ids` scenario opens every view of the tab (the list, More with every section
 open, every mod page, the reviews and the progress states), hovers it all over and fails when
 Dear ImGui reports two items with one ID. Release builds turn Dear ImGui's red "conflicting ID" box
 off (`io.ConfigDebugHighlightIdConflicts`); debug builds and the tests keep it.

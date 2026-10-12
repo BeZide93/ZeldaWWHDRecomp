@@ -33,9 +33,12 @@ def run(root, ident, mode):
                                dict(id='colour', name='Colour', type='enum', default='green', choices=['green', 'blue'])]
         manifest['setup'][:0] = [dict(id='consent', type='confirm', title='Prepare the heart ticker', option='consent'),
                                 dict(id='colour', type='choice', title='Choose a colour', option='colour', choices=['green', 'blue'])]
-    if mode == 'update-on':  # a mod that applies live (a settings preset): updated while it is on
+    if mode in ('update-on', 'exp-update-on'):  # a mod that applies live (a settings preset): updated while it is on
         manifest = dict(format_version=1, id=ident, name='Quick doors preset', version='1.0.0', game_id='wwhd-usa',
                         kind='settings', settings={'quick-doors': True})
+    experimental = mode.startswith('exp-')  # an experimental mod: switching it on backs up the saves first
+    if experimental:
+        manifest['experimental'] = True
     (source / 'mod.elf').write_bytes(b'\x7fELF\x01\x02')
 
     def package(version, name):
@@ -49,8 +52,9 @@ def run(root, ident, mode):
         return dict(id=ident, name=manifest['name'], description='Authored synthetic setup fixture', version=version,
                     kind=manifest['kind'], authors=['Fixture'], licences=['MPL-2.0'], port_versions=dict(minimum='0.2.10'),
                     setup=manifest.get('setup', []),
+                    experimental=experimental,
                     downloads=dict(all=dict(url=name, size=archive.stat().st_size, sha256=hashlib.sha256(archive.read_bytes()).hexdigest())))
-    if mode.startswith('update') or mode == 'ids':
+    if mode.startswith('update') or mode in ('ids', 'exp-update-on'):
         # the installed version; the catalogue offers 1.1.0
         (root / 'installed-index.json').write_text(json.dumps(dict(format_version=1, mods=[package('1.0.0', 'package-1.0.0.zip')])))
         entry = package('1.1.0', 'package.zip')
@@ -112,7 +116,7 @@ path=pathlib.Path(a.code_mods_status);temporary=path.with_suffix('.tmp');tempora
     while not (root / 'flow-result.json').exists() and time.monotonic() < deadline:
         time.sleep(.02)
     final = json.loads((root / 'flow-result.json').read_text())
-    switched_on = mode not in ('missing', 'cancel', 'cancel-rebuild', 'update-off')
+    switched_on = mode not in ('missing', 'cancel', 'cancel-rebuild', 'update-off', 'exp-backup-fails')
     assert final['enabled'] is switched_on
     if mode == 'restart':
         assert final['resumed'] and final['confirmations'] == 0
@@ -123,7 +127,11 @@ path=pathlib.Path(a.code_mods_status);temporary=path.with_suffix('.tmp');tempora
     assert not profile.get('setup_pending', {})
     if mode == 'choice':
         assert profile['config'][ident] == dict(consent=True, colour='blue')
-    if mode not in ('missing', 'update-on'):  # a settings preset runs no code: nothing to trust
+    if experimental:  # exactly one backup before it was switched on (none when the backup could not be made)
+        backups = [p for p in (root / 'save-backups').glob('*') if (p / 'backup.json').is_file()] if (root / 'save-backups').is_dir() else []
+        assert len(backups) == (0 if mode == 'exp-backup-fails' else 1), backups
+    # a settings preset runs no code: nothing to trust; a failed backup stops before trust is recorded
+    if mode not in ('missing', 'update-on', 'exp-update-on', 'exp-backup-fails'):
         assert database['native_trust'][ident]
         if ident == 'gc-sea-minimap':
             assert database['setup_receipts'][ident]['prepare']
@@ -132,7 +140,9 @@ scenarios = [('gc-sea-minimap', 'normal'), ('heart-ticker', 'normal'), ('gc-sea-
              ('heart-ticker', 'restart'), ('gc-sea-minimap', 'broken'), ('gc-sea-minimap', 'missing'),
              ('gc-sea-minimap', 'checkbox'), ('heart-ticker', 'checkbox'), ('gc-sea-minimap', 'cancel'), ('heart-ticker', 'choice'),
              ('gc-sea-minimap', 'catalogue'), ('heart-ticker', 'catalogue'), ('gc-sea-minimap', 'cancel-rebuild'),
-             ('gc-sea-minimap', 'update-off'), ('quick-preset', 'update-on'), ('gc-sea-minimap', 'ids')]
+             ('gc-sea-minimap', 'update-off'), ('quick-preset', 'update-on'), ('gc-sea-minimap', 'ids'),
+             ('gc-sea-minimap', 'exp-catalogue'), ('heart-ticker', 'exp-switch-on'), ('quick-preset', 'exp-update-on'),
+             ('gc-sea-minimap', 'exp-backup-fails')]
 if retained:
     for ident, mode in scenarios:
         run(retained / (ident + '-' + mode), ident, mode)
