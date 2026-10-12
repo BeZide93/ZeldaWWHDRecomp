@@ -10,13 +10,13 @@ Upstream tag, development-dispatch and nightly builds require the secret. Fetch 
 stops packaging. GitHub's SSH host key is pinned rather than learned at fetch time.
 The workflow keeps its temporary SSH key private and removes it even when a step fails.
 
-## Contributing your shader template (players, issue #162)
+## Contributing your shader template (players, issue #177)
 
 The game records every shader state and pipeline it builds in your own caches
 (`shader-prebuild/live/`: `shaders.bin` with Metal, `*.bin.recipes` with Vulkan). Those caches contain
 game-derived shader code and stay on your computer. **Export** turns them into a code-free template
 (`my-template.bin`: program hashes, register values and typed pipeline settings only) that you can attach
-to [issue #162](https://github.com/ZeldaWWHDRecomp/ZeldaWWHDRecomp/issues/162); merged templates
+to [issue #177](https://github.com/ZeldaWWHDRecomp/ZeldaWWHDRecomp/issues/177); merged templates
 let the next release prepare those shaders for everyone.
 
 The easiest way: **Settings → Graphics → Export shader template**. It writes `my-template.bin` to the

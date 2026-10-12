@@ -627,11 +627,11 @@ state and may repeat the last finished picture.
 Caches live in the host settings folder's `shader-prebuild` directory, or
 `data/user/shader-prebuild` in a portable installation. Keep generated caches and recordings local.
 
-**Help cover more scenes (issue #162):** **Settings → Graphics → Export shader template** saves a
+**Help cover more scenes (issue #177):** **Settings → Graphics → Export shader template** saves a
 code-free `my-template.bin` (hashes and settings only, no shader code) from the shaders your game has
-recorded. Attach it to [issue #162](https://github.com/ZeldaWWHDRecomp/ZeldaWWHDRecomp/issues/162).
+recorded. Attach it to [issue #177](https://github.com/ZeldaWWHDRecomp/ZeldaWWHDRecomp/issues/177).
 Terminal commands for Windows, macOS, Linux and the AppImage are in the
-[shader template guide](tools/shadercache/README.md#contributing-your-shader-template-players-issue-162).
+[shader template guide](tools/shadercache/README.md#contributing-your-shader-template-players-issue-177).
 
 ### Vulkan shader head start on Windows and Linux
 
