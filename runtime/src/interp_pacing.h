@@ -124,7 +124,7 @@ inline int fit_in_between(int n, int64_t elapsed, int64_t pass, int64_t budget) 
 // after a record pass, so its frame makes the slot: it waits for that time if it is early and `wait`
 // (the step's passes are done), keeps it if less than a step late (the elapsed time counted from it
 // makes the step plan fewer in-between frames, and the game catches up), and starts its own schedule
-// when later than that. `start`: the step's start, which its elapsed time counts from.
+// when later than that (the caller then drops the slot). `start`: the step's start, which its elapsed time counts from.
 enum class StepStart { kWait, kKeep, kLate };
 struct StepPlan {
     int64_t start;

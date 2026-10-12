@@ -58,10 +58,14 @@ inline uint64_t flip_executed(const Clock& c, int64_t& shift, uint64_t due, int6
 //   a vsync late and the step's in-between frames bunched up to catch up (an uneven step every
 //   step), and every few seconds an in-between frame was skipped where the drift used up the
 //   planning slack.
-// - A logic frame that flips late (a slow computer) keeps the schedule if it is less than a step
-//   late: the next slot is still two vsyncs after this one, and the next step plans fewer
-//   in-between frames to catch up (the game keeps its speed). Later than that starts a new schedule
-//   one frame after the flip.
+// - A logic frame that flips late (a slow computer) keeps the schedule: the next slot is still two
+//   vsyncs after this one, and the next step plans fewer in-between frames to catch up (the game
+//   keeps its speed). The logic pass decides when it is too late for that (interp.cpp: it starts
+//   more than a step after its time) and drops the slot; the flip itself only counts as too late
+//   at two steps. (Its flip lags the pass by the frames queued for the GPU: with a 15 ms render
+//   load at 240 fps, logic frames flipped 18-36 ms after their slots while the passes kept time,
+//   and a one-step limit at the flip restarted the schedule every ~20 steps: 29.74 steps/s.) A new
+//   schedule starts one frame after the flip.
 // Slots are times on the vsync's clock, not ticks, so a move of the grid does not move them.
 //
 // The first granule boundary (vsync at the drawn rate) that starts at or after `slot`.
@@ -75,12 +79,12 @@ inline uint64_t step_due(const Clock& c, uint64_t due, int64_t slot, int64_t shi
     return slot < 0 ? due : std::max(due, slot_tick(c, slot, shift, granule));
 }
 // A step's logic frame flipped at t; `slot`: its slot (or, without one, the time it was due). The
-// next step's slot (`step`: two vsyncs; `frame`: one frame at the drawn rate). A step later than a
-// whole step starts a new schedule: the next step may follow one frame after it (a computer that
-// takes longer than a step for a logic pass runs the game at its own pace, without waiting for a
-// slot on top).
+// next step's slot (`step`: two vsyncs; `frame`: one frame at the drawn rate). Two steps late or
+// more starts a new schedule: the next step may follow one frame after it (a computer that takes
+// longer than that for a logic pass runs the game at its own pace, without waiting for a slot on
+// top).
 inline int64_t next_slot(int64_t slot, int64_t t, int64_t step, int64_t frame) {
-    return t - slot < step ? slot + step : t + frame;
+    return t - slot < 2 * step ? slot + step : t + frame;
 }
 
 }  // namespace vsync_pacing

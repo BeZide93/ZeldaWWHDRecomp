@@ -313,8 +313,10 @@ struct StepSim {
         return m;
     }
 };
+// render: GPU time per frame after the game's swap (the flip waits for it; the pacing decisions are
+// taken at the swap, as in interp.cpp, and so do not see it)
 static StepSim simulate_steps(int fps, const std::function<int64_t(int)>& logicCost, const std::function<int64_t(int)>& holdCost,
-                              double seconds, bool slots = true) {
+                              double seconds, bool slots = true, int64_t render = 0) {
     using namespace vsync_pacing;
     constexpr Clock kClock{16'683'333, 4};
     const uint64_t g = fps >= 240 ? 1 : 2;  // granule: ticks per drawn frame
@@ -328,8 +330,10 @@ static StepSim simulate_steps(int fps, const std::function<int64_t(int)>& logicC
     bool wait = false, haveLogic = false, prevRecord = false;
     int logicN = 0, holdN = 0;
     // a pass that started at `start`: its frame flips (and the next pass starts) at the returned time
+    int64_t swap = 0;
     auto pass = [&](int64_t start, int64_t cost, bool isStep) {
-        const int64_t ready = start + cost;
+        swap = start + cost;
+        const int64_t ready = swap + render;
         uint64_t due = last + g;
         if (slots && isStep) due = step_due(kClock, due, slot, shift, g);
         const int64_t dueTime = kClock.time(due, shift);
@@ -346,6 +350,7 @@ static StepSim simulate_steps(int fps, const std::function<int64_t(int)>& logicC
             const StepPlan p = slot_step_start(t, kClock.time(slot_tick(kClock, slot, shift, g), shift), tick, step, wait);
             lastLogic = p.start;
             if (p.how == StepStart::kWait) start = p.start + wakeDist(rng);
+            if (p.how == StepStart::kLate) slot = -1;  // (gx2::drop_step_slot)
         } else if (wait && haveLogic && t < lastLogic + step) {
             lastLogic += step;
             start = lastLogic + wakeDist(rng);
@@ -361,9 +366,10 @@ static StepSim simulate_steps(int fps, const std::function<int64_t(int)>& logicC
         prevRecord = false;
         t = pass(start, logicCost(logicN++), true);
         logicAvg = update_average(logicAvg, t - start);
-        for (int phase = 0;;) {  // after_pass
-            if (phase == 0 && n > 1 && slots) n = fit_in_between(n, t - lastLogic, holdAvg, budget);
-            const Next next = next_pass(phase, n, t - lastLogic, holdAvg, budget);
+        for (int phase = 0;;) {  // after_pass (at the swap)
+            const int64_t decided = render ? swap : t;
+            if (phase == 0 && n > 1 && slots) n = fit_in_between(n, decided - lastLogic, holdAvg, budget);
+            const Next next = next_pass(phase, n, decided - lastLogic, holdAvg, budget);
             if (next == Next::kStepDone) {
                 prevRecord = true;
                 wait = true;
@@ -443,6 +449,17 @@ static void test_steps_on_vsync() {
             CHECK(a.flips_per_s(from) > old.flips_per_s(from) - 1);
             CHECK(a.max_steps_per_second(from) <= 31);
         }
+    }
+    // the render thread's time on top (15 ms a frame after a 2.5 ms pass, the docs/performance.md #125
+    // rows; the pacing decisions do not see it): full speed, the frames of the old schedule. (The game
+    // queues more than this model: there the logic frames flipped up to 36 ms after their slots.)
+    for (int fps : {240, 120}) {
+        a = simulate_steps(fps, ms(2.5), ms(2.5), 60, true, 15 * kMs);
+        old = simulate_steps(fps, ms(2.5), ms(2.5), 60, false, 15 * kMs);
+        std::printf("%d fps, render +15 ms: %.3f steps/s, %.1f flips/s (v0.2.13 schedule: %.3f, %.1f)\n", fps, a.steps_per_s(from),
+                    a.flips_per_s(from), old.steps_per_s(from), old.flips_per_s(from));
+        CHECK(a.steps_per_s(from) > 29.9);
+        CHECK(a.flips_per_s(from) > old.flips_per_s(from) - 1);
     }
     // slower than a step (40 ms logic passes): the game runs at the computer's pace (25 steps a
     // second), without waiting for a slot on top of it

@@ -158,8 +158,8 @@ static void test_flip_executed() {
 
 
 // Step slots (issue #164): a slot rounds up to the next vsync at the drawn rate, a step's logic frame
-// waits for its slot, and the next slot is two vsyncs after this one unless the frame was a whole
-// step late.
+// waits for its slot, and the next slot is two vsyncs after this one unless the frame was two steps
+// late.
 static void test_step_slots() {
     const int64_t step = 2 * kClock.period, tick = kClock.granule_ns(1);
     // a slot on a tick is that tick; between ticks the next one (at 240 fps: quarter vsyncs; at 120
@@ -181,7 +181,8 @@ static void test_step_slots() {
     const int64_t slot = kClock.time(40, 0);
     CHECK(next_slot(slot, slot + 100'000, step, tick) == kClock.time(48, 0));
     CHECK(next_slot(slot, slot + step - 1, step, tick) == slot + step);  // late, but less than a step
-    CHECK(next_slot(slot, slot + step, step, tick) == slot + step + tick);  // a step late: a new schedule
+    CHECK(next_slot(slot, slot + 2 * step - 1, step, tick) == slot + step);  // (the GPU queue's lag at the flip)
+    CHECK(next_slot(slot, slot + 2 * step, step, tick) == slot + 2 * step + tick);  // two steps late: a new schedule
 }
 
 int main() {

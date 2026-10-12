@@ -777,6 +777,8 @@ static void paced_pass_start() {
         if (plan.how == pacing::StepStart::kWait) {
             threads::park_sleep_until(g_last_logic);
             g_slept = pace_clock::now() - now;
+        } else if (plan.how == pacing::StepStart::kLate) {
+            gx2::drop_step_slot();
         }
         g_wait_step = false;
         trace_step(now, before, plan.how == pacing::StepStart::kWait ? 'W' : plan.how == pacing::StepStart::kKeep ? 'K' : 'N');

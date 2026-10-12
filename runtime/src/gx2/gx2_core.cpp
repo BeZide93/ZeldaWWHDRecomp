@@ -641,6 +641,12 @@ static uint64_t flip_due(const PendingFlip& f) {
     if (!f.step || !step_slots()) return due;
     return vsync_pacing::step_due(kVsyncClock, due, g_step_slot, g_vsync_shift.load(std::memory_order_relaxed), g);
 }
+// paced interpolation (interp.cpp): a logic pass more than a step late drops the schedule (the next
+// logic frame starts a new one)
+void gx2::drop_step_slot() {
+    std::lock_guard<std::mutex> lk(g_flip_mutex);
+    g_step_slot = -1;
+}
 // paced interpolation (interp.cpp): when the next logic step's frame is due, if there is a slot
 bool gx2::next_step_time(std::chrono::steady_clock::time_point& at) {
     std::lock_guard<std::mutex> lk(g_flip_mutex);
