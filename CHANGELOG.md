@@ -7,6 +7,18 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Android handhelds and controllers** (issue #152, thanks @OTPR26):
+  - **Settings with a controller:** holding Select/− now opens the settings after half a second as
+    intended (it could take about 3 seconds on some devices), and a one-time hint says so.
+  - **Touch buttons hide with a controller:** the view and 🎮 buttons hide while a controller is
+    connected (built-in or external) and come back for a few seconds with a tap in their corner.
+    Settings › Display › *Touch buttons*: Automatic / Always show / Hide.
+  - **AYN Thor / Odin built-in controls:** A, B, X and Y now sit in their Nintendo positions, all four
+    can be bound in Controls, and empty bindings in `controls.json` are repaired.
+  - **Larger settings on phones and handhelds:** the settings fill most of the screen with bigger
+    buttons, sized for the screen; Settings › Display › *UI size* (Automatic / Small / Medium / Large).
+    The desktop look is unchanged.
+  - Texts say "Android device" instead of "phone", and the log names how Android reports a controller.
 - **Experimental: build the game from the decompilation** (macOS, for developers). The CMake option
   `WWHD_DECOMP=ON` compiles the game code from the public, verified decompilation
   ([ZeldaWWHDDecomp/wwhd](https://github.com/ZeldaWWHDDecomp/wwhd), a submodule in `decomp/`) instead of
