@@ -73,7 +73,11 @@ shapes (`button_glyph_art.h`). If the font isn't available, the original labels 
 The atlas is an RGBA sheet like the game's icon font: its sheet byte `+0x0E` and the quads' bit 0
 stay clear. With them set, the batch (`0x028F7A4C`) takes the text-colour path, which maps the
 texture through the text box's colours: a dialog's white text then drew the framed label as a white
-box (#141).
+box (#141). Two kinds of HUD quad use a coverage twin of the same sheet (`+0x100`, sheet byte set)
+and keep bit 0 set instead: the plain PlayStation shapes and the bare L1/R1/L2/R2 (LB/RB/LT/RT)
+captions on the HUD's shoulder plates. The game then draws them in the colours of the letter they
+replace, including the dimming of an unassigned button; as RGBA pictures the white captions were
+unreadable on the white shoulder plates (#143).
 
 The hook behaviour is covered by `runtime/tools/button_glyphs_test.cpp` (synthetic guest memory: face
 and shoulder marking, colour restoration, live switches, the untouched-until-used gate, *Automatic*,

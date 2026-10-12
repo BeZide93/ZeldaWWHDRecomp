@@ -49,6 +49,7 @@ int expect_shapes = -1;  // PlayStation shapes: -1 none, 0 without colours, 1 co
 bool hud_letter = false;  // the text box under test is a HUD face letter (T_A_00 on P_A_00)
 std::array<float, 4> drawn_quad{};  // the first quad's size and position as vertex generation saw it
 uint32_t drawn_sheet = 0;
+uint8_t drawn_flags = 0;  // the first quad's +0x2F as vertex generation saw it (bit 0: coverage glyph)
 // Mirror the production style from the live mapping (input_map::prompt_style, tested on its own
 // in input_map_test); the hooks must draw exactly that.
 void expect_current() {
@@ -743,6 +744,71 @@ void options_test() {
     layout(F::kPosition);  // leave the manual default for later tests
 }
 
+// #143: the colour source of a composed shoulder caption, for every shoulder name choice across
+// the prompt options. On a HUD shoulder plate (T_ZR_00 on P_ZR_00) the caption is a coverage glyph
+// on the coverage twin with the letter's own vertex colours, so the game draws it like its "ZR"
+// (dark on the white plate, dimmed when unassigned). In a dialog it is the framed RGBA picture
+// (#141). The game's own names keep the stock glyphs in both.
+void shoulder_colour_source_test() {
+    using P = input_map::Mapping::Prompts;
+    using N = input_map::Mapping::ShoulderNames;
+    using F = input_map::FaceLayout;
+    st32(writer + 0x2C, list); st32(text_box + 0xFC, list); st32(list, 8);
+    auto hud_caption = [] {
+        std::strcpy((char*)mem::ptr(text_box + 0x80), "T_ZR_00");
+        std::memset(mem::ptr(picture), 0, 0xC0);
+        std::strcpy((char*)mem::ptr(picture + 0x80), "P_ZR_00");
+        st32(text_box + 0x0C, picture); stf32(picture + 0x3C, 68);
+        st32(text_box + 0xB4, base + 0xE100); st32(text_box + 0xA4, base + 0xB000);
+        st16(text_box + 0xCE, 2); st16(base + 0xB000, 'Z'); st16(base + 0xB002, 'R'); st16(base + 0xB004, 0);
+        st16(list + 4, 0); st8(list + 6, 0);
+        print('Z'); print('R');
+        stf32(first_quad, 20); stf32(first_quad + 4, 40); stf32(first_quad + 8, 0);
+        stf32(first_quad + 0x30, 24); stf32(first_quad + 0x34, 40); stf32(first_quad + 0x38, 22);
+        // the mock writer leaves bit 0 clear on the first quad: a coverage caption must set it itself
+        Cpu c{}; c.r[3] = text_box;
+        button_glyphs::draw_text_box(&c, [](Cpu*) { draw(); });
+        std::memset(mem::ptr(text_box + 0x80), 0, 24);
+        st32(text_box + 0x0C, 0);
+    };
+    expect_frame = false; label_centre = 23;
+    unsigned checked[3] = {};
+    for (auto names : {N::kAuto, N::kNintendo, N::kNumbered, N::kXbox})
+        for (auto prompts : {P::kOriginal, P::kXbox, P::kPlayStation, P::kAuto})
+            for (bool colours : {true, false})
+                for (auto face : {F::kPosition, F::kLabels}) {
+                    set_options(face, prompts, names, colours);
+                    if (names == N::kNintendo) assert(expect_names == 0);
+                    if (names == N::kNumbered) assert(expect_names == 1);
+                    if (names == N::kXbox) assert(expect_names == 2);
+                    // HUD shoulder plate
+                    expect_frame = false;
+                    hud_caption();
+                    if (expect_names) {
+                        assert(drawn_sheet == atlas + 0x100 && ld8(atlas + 0x100 + 0x0E) == 1);
+                        assert((drawn_flags & 1) == 1);
+                        assert(drawn_quad[0] <= 68);  // still fits the plate (cell and centre: checked per quad)
+                    } else {
+                        assert(drawn_sheet == base + 0xD000);  // the game's own "ZR"
+                    }
+                    // dialog: the framed picture
+                    expect_frame = true;
+                    st16(list + 4, 0); st8(list + 6, 0);
+                    print(0xE086);  // ZR icon
+                    draw();
+                    if (expect_names) {
+                        assert(drawn_sheet == atlas && ld8(atlas + 0x0E) == 0);
+                        assert((drawn_flags & 1) == 0);
+                    } else {
+                        assert(drawn_sheet == base + 0xD000);
+                    }
+                    checked[expect_names]++;
+                }
+    assert(checked[0] && checked[1] && checked[2]);
+    expect_frame = true;
+    layout(F::kPosition);  // leave the manual default for later tests
+}
+
 }  // namespace
 
 extern "C" void f_028766CC_orig(Cpu* c) { matrix(c); }
@@ -809,6 +875,7 @@ extern "C" void f_028F7C7C_orig(Cpu* c) {
     text_draws++;
     for (uint32_t i = 0; i < 4; i++) drawn_quad[i] = (float)ldf32(c->r[4] + 0xA4 + 4*i);
     drawn_sheet = ld32(c->r[4] + 0xA4 + 0x28);
+    drawn_flags = ld8(c->r[4] + 0xA4 + 0x2F);
     bool uses_atlas = false;
     for (uint32_t i = 0; i < ld16(c->r[4] + 4); i++) {
         const uint32_t quad = c->r[4] + 0xA4 + 0x30 * i;
@@ -821,12 +888,13 @@ extern "C" void f_028F7C7C_orig(Cpu* c) {
             assert(ld32(quad + 0x10 + j * 4) == want);
             assert(ld8(quad + 0x13 + j * 4) == (authored[j] & 0xFF));  // fade alpha
         }
-        // #141: the composed label is an RGBA picture, like the game's own icons: neither the quad
-        // (+0x2F bit 0) nor the sheet (+0x0E) may ask for the text-colour (coverage font) path.
+        // #141: the composed dialog label is an RGBA picture, like the game's own icons: neither the
+        // quad (+0x2F bit 0) nor the sheet (+0x0E) may ask for the text-colour (coverage font) path.
         const bool shoulder_label = expect_names && font_available && shoulder >= 0;
         const bool shape = expect_shapes >= 0 && font_available && face >= 0;
-        // a plain HUD shape stays a coverage glyph, drawn through the game's own letter colours
-        const bool coverage = shape && hud_letter && expect_shapes == 0;
+        // A plain HUD shape and a HUD shoulder caption (#143) stay coverage glyphs, drawn through
+        // the game's own letter colours (dark on the white shoulder plates) and its dimming.
+        const bool coverage = (shape && hud_letter && expect_shapes == 0) || (shoulder_label && !expect_frame);
         assert((ld8(quad + 0x2F) & 1) == (coverage ? 1 : shoulder_label || shape ? 0 : (i & 1)));
         if (shoulder_label || shape) {
             // the composed atlas: an RGBA picture (#141), one layer, the style's cell
@@ -1028,6 +1096,7 @@ int main() {
     font_fallback_test();
     automatic_test();
     options_test();
+    shoulder_colour_source_test();
 
 #ifdef _WIN32
     VirtualFree(memory, 0, MEM_RELEASE);

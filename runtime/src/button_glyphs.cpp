@@ -470,8 +470,12 @@ extern "C" void hook_028F7C7C(Cpu* c) {
         }
         if (face >= 0 && hud_face >= 0 && shape_ready)
             atlas_quad(saved, quad, button_glyphs::shape_row(face, look.colours), false, c, !look.colours);
+        // Dialogs: the framed label is an RGBA picture (#141). HUD shoulder plates: the bare
+        // caption is a coverage glyph like the plate's own "R"/"ZR", so the game draws it in the
+        // plate's dark letter colour and dims it with the button (#143); as a picture it was
+        // white on the white plate.
         if (shoulder_ready && shoulder >= 0)
-            atlas_quad(saved, quad, shoulder_row(look.shoulders, shoulder), hud_shoulder < 0, c);
+            atlas_quad(saved, quad, shoulder_row(look.shoulders, shoulder), hud_shoulder < 0, c, hud_shoulder >= 0);
     }
     f_028F7C7C_orig(c);
     restore(saved);
