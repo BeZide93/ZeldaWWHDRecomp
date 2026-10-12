@@ -723,9 +723,10 @@ def curl_download(curl, url, tmp):
 def download(url, dst, sha256, size_hint, label, attempts=DOWNLOAD_ATTEMPTS, wait=2.0):
     """Downloads url to dst with a progress bar and checks the SHA-256 before keeping it. Interrupted
     downloads are retried and resume where they stopped (HTTP range requests); a copy the player
-    downloaded themselves is used instead when present (local_copy)."""
+    downloaded themselves is used instead when present (local_copy). sha256 None: the caller checks the
+    content itself (the decomp source: its unpacked tree, decomp_setup.py)."""
     name = os.path.basename(url.split("?")[0])
-    own = local_copy(name, sha256)
+    own = local_copy(name, sha256) if sha256 else None
     if own:
         say("  Using %s" % own)
         shutil.copyfile(own, dst + ".part")
@@ -773,7 +774,7 @@ def download(url, dst, sha256, size_hint, label, attempts=DOWNLOAD_ATTEMPTS, wai
             say("  Download interrupted (%s); retrying..." % e)
             time.sleep(wait * (2 ** attempt))
     pr.done(human(os.path.getsize(tmp)))
-    if file_sha256(tmp) != sha256:
+    if sha256 and file_sha256(tmp) != sha256:
         os.remove(tmp)
         raise SetupError("the download of %s is corrupt or was changed (SHA-256 mismatch); nothing was installed. "
                          "Run setup again; if this repeats, report it." % url)

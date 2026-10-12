@@ -1524,28 +1524,108 @@ class DecompOption(unittest.TestCase):
         self.assertNotIn("decomp", setup.plan_steps("installed"))
         self.assertIn("decomp", setup.STEP_TITLES)
 
-    def test_source_sha_check(self):
+    # the decomp source: downloaded (a GitHub archive of the pinned commit), unpacked, checked
+    FILES = {"wwhd_src/a.cpp": "/* 02000020 */\nvoid f() {}\n", "tools/verify/units/a.txt": "src wwhd_src/a.cpp\n",
+             "LICENSE": "CC0\n", "docs/not-needed.md": "x\n"}
+
+    def archive(self, d, name, files, prefix="wwhd-2c1deae/"):
+        import io
+        import tarfile
+        path = os.path.join(d, name)
+        with tarfile.open(path, "w:gz") as t:
+            for rel, text in files.items():
+                data = text.encode()
+                info = tarfile.TarInfo(prefix + rel)
+                info.size = len(data)
+                t.addfile(info, io.BytesIO(data))
+        return path
+
+    def expected_digest(self, d, files):
+        tree = os.path.join(d, "expected")
+        for rel, text in files.items():
+            if setup.decomp_setup.in_source(rel):
+                os.makedirs(os.path.dirname(os.path.join(tree, rel)), exist_ok=True)
+                with open(os.path.join(tree, rel), "w") as f:
+                    f.write(text)
+        return setup.decomp_setup.tree_digest(tree)
+
+    def fetch(self, data, d, source, fail=None):
+        """decomp_setup.fetch_source with download() copying `source` (or raising `fail`); returns (root, urls)"""
+        urls = []
+
+        def download(url, dst, sha256, size, label):
+            urls.append((url, sha256, label))
+            if fail:
+                raise fail
+            import shutil as sh
+            sh.copyfile(source, dst)
+        s = mock.Mock(download=download, say=lambda *a: None, LOG=mock.Mock(), SetupError=setup.SetupError)
+        return setup.decomp_setup.fetch_source(s, data, d), urls
+
+    def test_source_download_and_check(self):
         ds = setup.decomp_setup
         with tempfile.TemporaryDirectory() as d:
-            os.makedirs(os.path.join(d, "decomp", "wwhd_src"))
-            with open(os.path.join(d, "decomp", "wwhd_src", "a.cpp"), "w") as f:
-                f.write("/* 02000020 */\nvoid f() {}\n")
-            with open(os.path.join(d, "decomp", "LICENSE"), "w") as f:
-                f.write("CC0\n")
-            digest = ds.tree_digest(os.path.join(d, "decomp"))
-            m = {"decomp": {"tree_sha256": digest, "revision": "2c1deae"}}
-            self.assertEqual(ds.check_source(d, m, setup.SetupError), "2c1deae")
-            for junk in (".DS_Store", "._a.cpp"):  # Finder's files do not count
-                open(os.path.join(d, "decomp", "wwhd_src", junk), "w").close()
-            self.assertEqual(ds.check_source(d, m, setup.SetupError), "2c1deae")
-            with open(os.path.join(d, "decomp", "wwhd_src", "a.cpp"), "a") as f:
-                f.write("// changed\n")
+            src = self.archive(d, "a.tar.gz", self.FILES)
+            pin = {"revision": "2c1deae" + "0" * 33, "tree_sha256": self.expected_digest(d, self.FILES),
+                   "download_bytes": 8100000}
+            data = os.path.join(d, "data")
+            root, urls = self.fetch(data, pin, src)
+            self.assertEqual(root, os.path.join(data, "decomp-src", pin["revision"]))
+            self.assertTrue(os.path.isfile(os.path.join(root, "wwhd_src", "a.cpp")))
+            self.assertFalse(os.path.exists(os.path.join(root, "docs")))  # only what the build needs
+            self.assertEqual(urls[0][0], ds.ARCHIVE_URL % pin["revision"])
+            self.assertIsNone(urls[0][1])  # the unpacked tree is checked, not GitHub's archive
+            self.assertEqual(urls[0][2], "Downloading the decomp source (about 8 MB)")
+            self.assertEqual(os.listdir(os.path.join(data, "decomp-src")), [pin["revision"]])  # no archive left
+            # an update with the same pin: nothing downloaded
+            root2, urls2 = self.fetch(data, pin, src)
+            self.assertEqual((root2, urls2), (root, []))
+            # another pin: downloaded again, the old copy removed
+            pin2 = dict(pin, revision="1" * 40)
+            root3, urls3 = self.fetch(data, pin2, src)
+            self.assertEqual(len(urls3), 1)
+            self.assertEqual(os.listdir(os.path.join(data, "decomp-src")), [pin2["revision"]])
+            # a damaged cached copy is downloaded again
+            with open(os.path.join(root3, "LICENSE"), "a") as f:
+                f.write("changed\n")
+            _, urls4 = self.fetch(data, pin2, src)
+            self.assertEqual(len(urls4), 1)
+
+    def test_source_tamper_detected(self):
+        with tempfile.TemporaryDirectory() as d:
+            pin = {"revision": "2" * 40, "tree_sha256": self.expected_digest(d, self.FILES)}
+            bad = self.archive(d, "bad.tar.gz", dict(self.FILES, **{"wwhd_src/a.cpp": "void f() { evil(); }\n"}))
+            data = os.path.join(d, "data")
             with self.assertRaises(setup.SetupError) as e:
-                ds.check_source(d, m, setup.SetupError)
+                self.fetch(data, pin, bad)
+            self.assertIn("Couldn't download the decomp source", str(e.exception))
             self.assertIn("SHA-256", str(e.exception))
-            os.rename(os.path.join(d, "decomp"), os.path.join(d, "gone"))
+            self.assertFalse(os.path.exists(os.path.join(data, "decomp-src")))  # nothing kept
+            unsafe = self.archive(d, "unsafe.tar.gz", {"wwhd_src/../../x": "x"})
             with self.assertRaises(setup.SetupError):
-                ds.check_source(d, m, setup.SetupError)
+                self.fetch(data, pin, unsafe)
+            self.assertFalse(os.path.exists(os.path.join(d, "x")))
+
+    def test_source_offline(self):
+        with tempfile.TemporaryDirectory() as d:
+            pin = {"revision": "3" * 40, "tree_sha256": "0" * 64}
+            offline = setup.SetupError("could not download https://github.com/...: [Errno 8] nodename nor servname provided")
+            with self.assertRaises(setup.SetupError) as e:
+                self.fetch(os.path.join(d, "data"), pin, None, fail=offline)
+            msg = str(e.exception)
+            self.assertTrue(msg.startswith("Couldn't download the decomp source \u2014 check your internet connection "
+                                           "and try again"), msg)
+            self.assertFalse(os.path.exists(os.path.join(d, "data", "decomp-src")))
+
+    def test_digest_ignores_finder_files(self):
+        ds = setup.decomp_setup
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "a.cpp"), "w") as f:
+                f.write("x")
+            before = ds.tree_digest(d)
+            for junk in (".DS_Store", "._a.cpp"):
+                open(os.path.join(d, junk), "w").close()
+            self.assertEqual(ds.tree_digest(d), before)
 
     def test_digest_independent_of_walk_order(self):
         ds = setup.decomp_setup

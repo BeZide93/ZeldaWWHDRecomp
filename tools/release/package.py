@@ -228,11 +228,8 @@ def decomp_variant(build):
 
 
 # The decomp version setup can build (development builds, macOS; tools/installer/decomp_setup.py,
-# docs/decomp-build.md): the decompilation's source as it is pinned (no game code or data; the parts its
-# tools and the game units need) and the tools that prepare it.
-DECOMP_SOURCE = ["wwhd_src", "tools/verify/units", "tools/verify/include", "tools/verify/src",
-                 "tools/verify/autoglue.py", "tools/verify/assets.py", "tools/verify/assets.txt",
-                 "tools/verify/mkimage.py", "LICENSE", "README.md"]
+# docs/decomp-build.md): the tools that prepare the decompilation's source. The source is not in the
+# release: setup downloads the pinned commit and checks it against the SHA-256 written here.
 DECOMP_TOOLS = ["tools/decomp_build/gen.py", "tools/decomp_build/glue.cpp", "tools/decomp_build/frames_vis.h"]
 DECOMP_HOOKS_NONE = "tools_decomp_build_hooks_none.cpp.o"  # flattened like the other runtime objects
 
@@ -343,23 +340,32 @@ def add_decomp(pkg, dbuild, linkonly):
                ddir: "{decomp}"}
     unit_flags = portable_flags(*compile_entry(dbuild, "tools/decomp_build/flags_probe.cpp"), mapping)
     hooks_flags = portable_flags(*compile_entry(dbuild, "tools/decomp_build/hooks_none.cpp"), mapping)
-    # the decompilation and its tools; decomp.h for hooks.cpp
-    # the files git tracks at the pinned commit (nothing a local checkout picked up, such as .DS_Store)
-    tracked = subprocess.run(["git", "-C", ddir, "ls-files", "-z", "--"] + DECOMP_SOURCE, capture_output=True,
+    # the decompilation's source: its commit and the SHA-256 of the files setup downloads (decomp_setup.py
+    # SOURCE_PATHS as git tracks them), from a temporary copy; not shipped
+    sys.path.insert(0, os.path.join(ROOT, "tools", "installer"))
+    import decomp_setup
+    paths = decomp_setup.SOURCE_PATHS
+    tracked = subprocess.run(["git", "-C", ddir, "ls-files", "-z", "--"] + paths, capture_output=True,
                              check=True).stdout.decode("utf-8").split("\0")
     tracked = [t for t in tracked if t]
-    if not tracked or subprocess.run(["git", "-C", ddir, "diff", "--quiet", "HEAD", "--"] + DECOMP_SOURCE).returncode:
+    if not tracked or subprocess.run(["git", "-C", ddir, "diff", "--quiet", "HEAD", "--"] + paths).returncode:
         sys.exit("--decomp-build: %s is not a clean checkout of the decompilation" % ddir)
+    tree = pkg + ".decomp-tree"
+    shutil.rmtree(tree, ignore_errors=True)
     for rel in tracked:
-        copy(os.path.join(ddir, rel), os.path.join(pkg, "decomp", rel))
+        copy(os.path.join(ddir, rel), os.path.join(tree, rel))
+    digest = decomp_setup.tree_digest(tree)
+    shutil.rmtree(tree)
+    rev = subprocess.run(["git", "-C", ddir, "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
+    # about the size of GitHub's archive of the commit (shown before setup downloads it)
+    size = len(subprocess.run(["git", "-C", ddir, "archive", "--format=tar.gz", "HEAD"], capture_output=True,
+                              check=True).stdout)
     for rel in DECOMP_TOOLS:
         copy(os.path.join(ROOT, rel), os.path.join(pkg, rel))
     copy(os.path.join(ROOT, "runtime", "src", "decomp", "decomp.h"), os.path.join(pkg, "sdk", "decomp", "include", "decomp", "decomp.h"))
-    sys.path.insert(0, os.path.join(ROOT, "tools", "installer"))
-    import decomp_setup
-    rev = subprocess.run(["git", "-C", ddir, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
-    print("decomp version: decompilation %s, %d own runtime objects/libraries" % (rev[:7] or "?", own))
-    return {"revision": rev, "tree_sha256": decomp_setup.tree_digest(os.path.join(pkg, "decomp")),
+    print("decomp version: decompilation %s (%d files, setup downloads about %d MB), %d own runtime objects"
+          % (rev[:7], len(tracked), size // 1000000, own))
+    return {"revision": rev, "tree_sha256": digest, "url": decomp_setup.ARCHIVE_URL % rev, "download_bytes": size,
             "link": recipe, "unit_flags": unit_flags, "hooks_flags": hooks_flags}
 
 
@@ -631,8 +637,6 @@ def main():
     entries = dict(VENDORED_LICENSES)
     # zstd: compiled into tools/bin/wwhd-extract on every platform (pinned source, cmake/Zstd.cmake)
     entries["Zstandard (BSD-3-Clause)"] = zstd_license
-    if a.decomp_build:  # the bundled decompilation (decomp/LICENSE)
-        entries["Wind Waker HD decompilation (CC0-1.0)"] = os.path.join(pkg, "decomp", "LICENSE")
     if a.platform.startswith("windows"):
         entries["Python (PSF-2.0)"] = os.path.join(pkg, "tools", "python", "LICENSE.txt")
     for spec in a.license:

@@ -159,8 +159,9 @@ jobs:
 
       - name: Decomp version parts (development builds; setup's experimental option, docs/decomp-build.md)
         # the same runtime built for the decomp build, without game units and without the game
-        # (WWHD_DECOMP_RUNTIME_ONLY); package.py --decomp-build takes the objects that differ, the decompilation's
-        # source (submodule decomp) and how setup compiles the units
+        # (WWHD_DECOMP_RUNTIME_ONLY); package.py --decomp-build takes the objects that differ, how setup compiles
+        # the units, and the commit and SHA-256 of the decompilation's source (submodule decomp), which setup
+        # downloads; the source itself is not in the release
         if: needs.version.outputs.devel == 'true'
         run: |
           git submodule update --init decomp

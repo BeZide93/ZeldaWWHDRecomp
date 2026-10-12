@@ -5,8 +5,12 @@ builds only, off by default; the normal game is always built first and stays pla
 
 What the release brings (tools/release/package.py --decomp-build), described in sdk/manifest.json
 "decomp":
-  decomp/                 the decompilation's source at the pinned commit (no game code or data),
-                          checked against tree_sha256 before it is used
+  "revision", "tree_sha256"  the decompilation's commit CI built against and the SHA-256 of its source
+                          (SOURCE_PATHS, tree_digest). The source itself is not in the release: setup
+                          downloads that commit from github.com/ZeldaWWHDDecomp/wwhd when the option is on
+                          ("url", about "download_bytes"), unpacks SOURCE_PATHS into DATA/decomp-src/REVISION
+                          and checks the unpacked tree against tree_sha256 (independent of how GitHub packs
+                          the archive). Kept there: an update with the same pin downloads nothing.
   tools/decomp_build/     gen.py (function list, glue, unit list), glue.cpp, frames_vis.h
   sdk/decomp/obj/         the runtime objects that differ in the decomp build (main, build info, the
                           decomp runtime); everything else is the normal release's sdk/obj and sdk/lib
@@ -27,6 +31,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tarfile
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -35,8 +40,14 @@ DECOMP_TEXT = (
     "Builds a second version of the game in which the game functions of the public decompilation "
     "(ZeldaWWHDDecomp/wwhd) run as compiled source instead of translated code. Experimental, for testing "
     "the decompilation; the normal version stays the default and is built first. Adds 10 to 30 minutes "
-    "to setup and about 100 MB on disk.")
+    "to setup and about 100 MB on disk, and downloads the decompilation's source (about 8 MB) from GitHub.")
 DOCS_URL = "https://github.com/ZeldaWWHDRecomp/ZeldaWWHDRecomp/blob/devel/docs/decomp-build.md"
+ARCHIVE_URL = "https://github.com/ZeldaWWHDDecomp/wwhd/archive/%s.tar.gz"  # % the full commit
+# the parts of the decompilation the decomp version is built from (tools/release/package.py hashes the same)
+SOURCE_PATHS = ["wwhd_src", "tools/verify/units", "tools/verify/include", "tools/verify/src",
+                "tools/verify/autoglue.py", "tools/verify/assets.py", "tools/verify/assets.txt",
+                "tools/verify/mkimage.py", "LICENSE", "README.md"]
+FETCH_FAILED = "Couldn't download the decomp source \u2014 check your internet connection and try again"
 DEV_VERSION = re.compile(r"-devel\.[0-9a-f]+$|^development build$")
 
 
@@ -72,16 +83,58 @@ def tree_digest(root):
     return hashlib.sha256("".join(sorted(entries, key=lambda e: e[65:])).encode("utf-8")).hexdigest()
 
 
-def check_source(pkg, manifest, error):
-    """The bundled decompilation is the one the release names (revision, tree_sha256)."""
-    d = manifest["decomp"]
-    root = os.path.join(pkg, "decomp")
-    if not os.path.isdir(root):
-        raise error("the decompilation (decomp/) is missing from this release: unpack it again")
-    if tree_digest(root) != d.get("tree_sha256"):
-        raise error("the decompilation in %s does not match this release (SHA-256 check failed): unpack it again"
-                    % root)
-    return d.get("revision", "")
+def in_source(rel):
+    return any(rel == p or rel.startswith(p + "/") for p in SOURCE_PATHS)
+
+
+def unpack_source(archive, dest):
+    """SOURCE_PATHS of a GitHub archive (one top folder, wwhd-COMMIT/) into dest; regular files only,
+    nothing outside dest"""
+    with tarfile.open(archive, "r:*") as t:
+        for m in t.getmembers():
+            parts = m.name.split("/", 1)
+            if len(parts) != 2 or not m.isfile() or not in_source(parts[1]):
+                continue
+            rel = parts[1]
+            if rel.startswith("/") or ".." in rel.split("/"):
+                raise ValueError("unsafe path in the archive: %s" % m.name)
+            out = os.path.join(dest, *rel.split("/"))
+            os.makedirs(os.path.dirname(out), exist_ok=True)
+            with t.extractfile(m) as src, open(out, "wb") as f:
+                shutil.copyfileobj(src, f)
+
+
+def fetch_source(s, data_dir, d):
+    """The decompilation's source at the pinned commit (manifest "decomp": revision, tree_sha256, url,
+    download_bytes) in DATA/decomp-src/REVISION: reused when it is there and checks out, else downloaded
+    and checked. Older pins' copies are removed. Returns its folder; SetupError (FETCH_FAILED) otherwise."""
+    rev, want = d["revision"], d["tree_sha256"]
+    cache = os.path.join(data_dir, "decomp-src")
+    root = os.path.join(cache, rev)
+    if os.path.isdir(root) and tree_digest(root) == want:
+        s.say("  Using the decomp source downloaded earlier (%s)." % rev[:7])
+        return root
+    shutil.rmtree(cache, ignore_errors=True)  # another pin, or a damaged copy
+    os.makedirs(cache)
+    mb = max(1, int(round(d.get("download_bytes", 0) / 1e6)))
+    archive, tmp = os.path.join(cache, rev + ".tar.gz"), root + ".tmp"
+    try:
+        s.download(d.get("url") or ARCHIVE_URL % rev, archive, None, d.get("download_bytes", 0),
+                   "Downloading the decomp source (about %d MB)" % mb)
+        unpack_source(archive, tmp)
+        got = tree_digest(tmp)
+        if got != want:
+            raise ValueError("the downloaded source does not match this release (SHA-256 %s, expected %s)" % (got, want))
+        os.replace(tmp, root)
+    except (s.SetupError, OSError, ValueError, tarfile.TarError) as e:
+        s.LOG.write("decomp source: %s" % e)
+        shutil.rmtree(cache, ignore_errors=True)
+        raise s.SetupError("%s (%s)" % (FETCH_FAILED, str(e).splitlines()[0][:200]))
+    finally:
+        if os.path.exists(archive):
+            os.remove(archive)
+    s.say("  Decomp source %s downloaded and checked." % rev[:7])
+    return root
 
 
 def subst(arg, m):
@@ -108,7 +161,7 @@ def build(s, ctx, tc, jobs, step=None):
     manifest, data_dir = ctx.manifest, ctx.data_dir
     d = manifest["decomp"]
     t_all = time.time()
-    rev = check_source(s.PKG, manifest, s.SetupError)
+    rev = d.get("revision", "")
     rpx = os.path.join(ctx.game_dir, "code", "cking.rpx")
     build_id = s.game_builds.identify(rpx)
     if build_id is not None and not build_id.canonical:
@@ -119,10 +172,15 @@ def build(s, ctx, tc, jobs, step=None):
     out = os.path.join(work, "gen")
     times = {}
 
+    # 0. the decompilation's source (downloaded once per pin, checked against the release's SHA-256)
+    t0 = time.time()
+    src = fetch_source(s, data_dir, d)
+    times["source"] = time.time() - t0
+
     # 1. function list, glue and units: gen.py, reading the game for the model data and the source glue
     t0 = time.time()
     s.say("  Preparing the decompiled source (decomp %s) with your game..." % (rev[:7] or "?"))
-    s.run_logged([sys.executable, os.path.join(s.PKG, "tools", "decomp_build", "gen.py"), os.path.join(s.PKG, "decomp"),
+    s.run_logged([sys.executable, os.path.join(s.PKG, "tools", "decomp_build", "gen.py"), src,
                   out, "--game", rpx, "--jobs", str(jobs)], what="preparing the decompiled source (gen.py)")
     with open(os.path.join(out, "units.json")) as f:
         units = json.load(f)["units"]
@@ -142,7 +200,7 @@ def build(s, ctx, tc, jobs, step=None):
     objs = s.compile_gamecode(tc, manifest, gen_dir, os.path.join(work, "obj"), jobs)
     times["gamecode"] = time.time() - t0
     t0 = time.time()
-    m = {"sdk": fwd(os.path.join(s.PKG, "sdk")), "decomp": fwd(os.path.join(s.PKG, "decomp")),
+    m = {"sdk": fwd(os.path.join(s.PKG, "sdk")), "decomp": fwd(src),
          "tools": fwd(os.path.join(s.PKG, "tools")), "out": fwd(out)}
     unit_flags = [subst(a, m) for a in d["unit_flags"]]
     hooks_flags = [subst(a, m) for a in d["hooks_flags"]]

@@ -114,8 +114,13 @@ decomp version shares the saves, settings and shader caches of the normal game.
 
 What setup uses and makes:
 
-- the decompilation's source at the pinned version, which the development build brings along
-  (`decomp/`, checked against its SHA-256 before it is used; it contains no game code or data);
+- the decompilation's source at the version the development build was made with: setup downloads it
+  from [github.com/ZeldaWWHDDecomp/wwhd](https://github.com/ZeldaWWHDDecomp/wwhd) (about 8 MB, only
+  when the option is on) and checks the unpacked files against the SHA-256 the release names before it
+  uses them. It contains no game code or data. It is kept in `data/decomp-src`, so a repair or an
+  update with the same version downloads nothing. Without an internet connection setup says so
+  ("Couldn't download the decomp source"); the normal game is ready as usual, and the next repair
+  tries again;
 - your own `cking.rpx`: setup prepares the decompiled source with it as described above (the model
   data headers, the source glue), translates the game code with the decomp build's function list and
   compiles the 862 game units with the same compiler as the normal game;
