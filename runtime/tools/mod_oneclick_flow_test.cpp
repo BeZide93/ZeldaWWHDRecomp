@@ -203,11 +203,20 @@ int main(int argc,char** argv) {
             ImGui::EndFrame();
             set();
             for(int i=0;i<4;i++)frame_once(-100,-100);  // let the view (and a popup) appear
-            float bottom=0;  // the lowest item drawn: sweep down to it
-            for(auto* w:GImGui->Windows)if(w->Active)bottom=std::max(bottom,w->DC.CursorMaxPos.y);
+            // Sweep down to the lowest item drawn, not the whole tall window: the tab's own area (a child that
+            // fills the window, so its content end is where the items end) and any popup. Sweeping the whole
+            // 2400-pixel window took ~220,000 frames: 20 s here, over 30 s on Windows CI.
+            // With a modal popup open only the popup can be hovered: sweep just its rectangle.
+            float top=2,bottom=0;
+            for(auto* w:GImGui->Windows) {
+                if(!w->Active)continue;
+                if(w->Flags&ImGuiWindowFlags_Modal){top=w->Pos.y;bottom=w->Pos.y+w->Size.y;break;}
+                if(strstr(w->Name,"mods_area"))bottom=std::max(bottom,w->DC.CursorMaxPos.y);
+            }
             bottom=std::min(bottom+8.f,float(height));
             int before=conflicts;
-            for(float y=2;y<bottom;y+=6)for(float x=4;x<width;x+=40)
+            // rows and buttons are at least one text line (17 px) tall and 30 px wide: 8 x 24 px steps hit each
+            for(float y=top;y<bottom;y+=8)for(float x=4;x<width;x+=24)
                 if(!frame_once(x,y)){
                     fprintf(stderr,"ID conflict in %s at %.0f,%.0f (ID %08X)\n",view.c_str(),x,y,GImGui->DebugDrawIdConflictsId);
                     ImGui::EndFrame();
