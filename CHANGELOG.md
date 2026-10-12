@@ -7,6 +7,10 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Fixed: controllers stopped responding in the game after the settings overlay or the name screen**
+  (issue #153). If a trigger or stick did not fully return to rest, the game ignored all input after
+  closing the overlay or entering a name until the controller was reconnected. Now only the button that
+  closed it waits for its release; everything else reaches the game at once.
 - **Android handhelds and controllers** (issue #152, thanks @OTPR26):
   - **Settings with a controller:** holding Select/− now opens the settings after half a second as
     intended (it could take about 3 seconds on some devices), and a one-time hint says so.
