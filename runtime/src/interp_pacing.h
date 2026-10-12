@@ -108,15 +108,25 @@ inline Next next_pass(int phase, int n, int64_t elapsed, int64_t pass, int64_t b
     return Next::kDrop;
 }
 
-// After the logic pass of a step planned for n in-between frames (n > 1): the in-between frames
-// that still fit (elapsed: time since the step's start, pass: recent in-between pass duration), at
-// least 1 (the record pass), at most n. A logic pass that ran late then costs the step only the
-// frames that do not fit; next_pass would skip all blended frames up to the record pass (at 240 fps
-// with ~5 ms passes, a step of 2 frames instead of 6 or 7, a few times a second).
-inline int fit_in_between(int n, int64_t elapsed, int64_t pass, int64_t budget) {
+// A probe of the in-between pass cost (after a long time without in-between passes, and the first
+// in-between pass of all) replaces the estimate: the scene may be lighter now. One that hit a hitch
+// (more than twice the estimate) counts twice the estimate and asks for another probe soon
+// (retry): at the start the first in-between pass met one (90-200 ms, measured here and in the
+// #164 report) and kept in-between frames out until the next probe 10 s later.
+inline int64_t probe_estimate(int64_t avg, int64_t pass, bool& retry) {
+    retry = avg > 0 && pass > 2 * avg;
+    return retry ? 2 * avg : pass;
+}
+
+// Next::kRecord (not all passes left fit): the phase the step goes on from, so that the next hold
+// pass is the one after it. As few blended passes are skipped as make the rest fit (elapsed, pass,
+// budget as for next_pass), at least the record pass is left. (Skipping every blended pass up to
+// the record pass left gaps of 15-25 ms at 240 fps where in-between passes take a little longer than
+// a frame, a few times a second: issue #164.)
+inline int skip_to(int phase, int n, int64_t elapsed, int64_t pass, int64_t budget) {
     pass = std::max<int64_t>(pass, 1);
-    const int64_t fit = (budget - elapsed) / pass;
-    return int(std::clamp<int64_t>(fit, 1, std::max(1, n)));
+    const int64_t fit = std::clamp<int64_t>((budget - elapsed) / pass, 1, std::max(1, n - phase));
+    return n - int(fit);
 }
 
 // Paced logic pass at 120/240 fps with a step slot (gx2/vsync_pacing.h: when the step's logic frame

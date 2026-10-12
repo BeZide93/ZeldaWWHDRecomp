@@ -135,11 +135,10 @@ static void test_plan_and_next() {
     CHECK(next_pass(1, 3, 30'000'000, 8'000'000, budget) == Next::kDrop);
     CHECK(next_pass(2, 3, 26'000'000, 8'000'000, budget) == Next::kHold);  // 26 + 2 x 8 > 35.3: wait, 2 remain
     CHECK(next_pass(3, 3, 99'000'000, 8'000'000, budget) == Next::kStepDone);
-    // a late logic pass (240 fps): the in-between frames that still fit, at least the record pass
-    CHECK(fit_in_between(6, 6'000'000, 5'000'000, budget) == 5);   // (35.3 - 6) / 5
-    CHECK(fit_in_between(7, 4'200'000, vs / 4, budget) == 7);      // on time: all of them
-    CHECK(fit_in_between(7, 40'000'000, vs / 4, budget) == 1);     // nothing fits: the record pass (next_pass decides)
-    CHECK(fit_in_between(3, 0, 0, budget) == 3);
+    // kRecord: skip as few blended passes as make the rest fit, at least the record pass is left
+    CHECK(skip_to(1, 7, 10'000'000, 4'400'000, budget) == 2);  // (35.3 - 10) / 4.4 = 5 of 6 left fit: one skipped
+    CHECK(skip_to(0, 7, 34'000'000, 4'400'000, budget) == 6);  // only the record pass
+    CHECK(skip_to(3, 3, 0, 1, budget) == 2);                   // (nothing left to skip)
 }
 
 // The pass loop of interp.cpp on the virtual vsync of gx2_core.cpp, paced: every pass costs `cost`
@@ -194,7 +193,7 @@ static SimResult simulate(int fps, double logic_ms, double hold_ms, double secon
                 wait_step = true;
                 break;
             }
-            phase = next == Next::kRecord ? n : phase + 1;
+            phase = next == Next::kRecord ? skip_to(phase, n, int64_t((t - last_logic) * 1e6), int64_t(hold_est * 1e6), int64_t(kBudget * 1e6)) + 1 : phase + 1;
             holds++;
             probe = try_probe;
             last_hold = t;
@@ -275,10 +274,12 @@ static void test_simulation() {
 // a pass starts when the previous frame has flipped, its frame is ready `cost` later and flips on its
 // tick (sleep timers wake up to 0.3 ms late) or, if late, when ready. Step slots (the schedule since
 // issue #164): a step's logic frame is due on its slot, and the logic pass starts one drawn frame
-// before it (slot_step_start). The v0.2.13 schedule, for reference: a 30.000 Hz wall clock of its own
-// (a step that waited starts at its due time, a step less than a step late keeps the schedule).
+// before it (slot_step_start), a pass that does not fit skips as few blended passes as needed
+// (skip_to), and a probe that met a hitch is repeated (probe_estimate). v0.2.13, for reference
+// (slots = false): a 30.000 Hz wall clock of its own (a step that waited starts at its due time, a
+// step less than a step late keeps the schedule), skips to the record pass, probes replace.
 struct StepSim {
-    std::vector<int64_t> flips, steps;  // flip times; logic pass starts (ns)
+    std::vector<int64_t> flips, steps, holds;  // flip times; logic pass starts; in-between flips (ns)
     int skips = 0;                       // steps that skipped or dropped in-between frames
     double steps_per_s(int64_t from) const {
         const auto a = std::lower_bound(steps.begin(), steps.end(), from);
@@ -301,6 +302,12 @@ struct StepSim {
             if (flips[i] >= from) m = std::max(m, flips[i] - flips[i - 1]);
         return m;
     }
+    // in-between frames drawn between from and to, of the 7 (240 fps) or 3 (120 fps) a step could have
+    double drawn_share(int64_t from, int64_t to, int nMax) const {
+        const auto c = [from, to](const std::vector<int64_t>& v) { return std::count_if(v.begin(), v.end(), [&](int64_t x) { return x >= from && x < to; }); };
+        const auto s = c(steps);
+        return s ? double(c(holds)) / double(s * nMax) : 0;
+    }
     // the most logic steps in any second after `from` (a game running faster than 30 steps/s)
     int max_steps_per_second(int64_t from) const {
         int m = 0;
@@ -316,7 +323,7 @@ struct StepSim {
 // render: GPU time per frame after the game's swap (the flip waits for it; the pacing decisions are
 // taken at the swap, as in interp.cpp, and so do not see it)
 static StepSim simulate_steps(int fps, const std::function<int64_t(int)>& logicCost, const std::function<int64_t(int)>& holdCost,
-                              double seconds, bool slots = true, int64_t render = 0) {
+                              double seconds, bool slots = true, int64_t render = 0, bool probeRetry = true) {
     using namespace vsync_pacing;
     constexpr Clock kClock{16'683'333, 4};
     const uint64_t g = fps >= 240 ? 1 : 2;  // granule: ticks per drawn frame
@@ -329,6 +336,10 @@ static StepSim simulate_steps(int fps, const std::function<int64_t(int)>& logicC
     uint64_t last = 64;
     bool wait = false, haveLogic = false, prevRecord = false;
     int logicN = 0, holdN = 0;
+    // the probe of the in-between pass cost (interp.cpp): after 10 s without in-between passes (the
+    // first one of all is a probe), or a second after a probe that met a hitch
+    constexpr int64_t kProbeAfter = 10'000'000'000, kProbeRetry = 1'000'000'000;
+    int64_t lastHold = -kProbeAfter, retryAt = -1;
     // a pass that started at `start`: its frame flips (and the next pass starts) at the returned time
     int64_t swap = 0;
     auto pass = [&](int64_t start, int64_t cost, bool isStep) {
@@ -366,10 +377,12 @@ static StepSim simulate_steps(int fps, const std::function<int64_t(int)>& logicC
         prevRecord = false;
         t = pass(start, logicCost(logicN++), true);
         logicAvg = update_average(logicAvg, t - start);
+        bool probe = false;
         for (int phase = 0;;) {  // after_pass (at the swap)
             const int64_t decided = render ? swap : t;
-            if (phase == 0 && n > 1 && slots) n = fit_in_between(n, decided - lastLogic, holdAvg, budget);
-            const Next next = next_pass(phase, n, decided - lastLogic, holdAvg, budget);
+            const bool tryProbe = phase == 0 && (decided - lastHold >= kProbeAfter || (retryAt >= 0 && decided >= retryAt));
+            const int64_t holdEst = tryProbe ? tick : holdAvg;
+            const Next next = next_pass(phase, n, decided - lastLogic, holdEst, budget);
             if (next == Next::kStepDone) {
                 prevRecord = true;
                 wait = true;
@@ -380,10 +393,22 @@ static StepSim simulate_steps(int fps, const std::function<int64_t(int)>& logicC
                 wait = true;
                 break;
             }
-            phase = next == Next::kRecord ? n : phase + 1;
+            // (v0.2.13 skipped every blended pass up to the record pass)
+            phase = next != Next::kRecord ? phase + 1 : slots ? skip_to(phase, n, decided - lastLogic, holdEst, budget) + 1 : n;
+            probe = tryProbe;
+            if (probe) retryAt = -1;
             const int64_t holdStart = t;
             t = pass(holdStart, holdCost(holdN++), false);
-            holdAvg = update_average(holdAvg, t - holdStart);
+            r.holds.push_back(t);
+            lastHold = t;
+            if (probe) {
+                bool retry = false;
+                holdAvg = probeRetry && slots ? probe_estimate(holdAvg, t - holdStart, retry) : t - holdStart;
+                if (retry) retryAt = t + kProbeRetry;
+                probe = false;
+            } else {
+                holdAvg = update_average(holdAvg, t - holdStart);
+            }
         }
     }
     return r;
@@ -460,6 +485,37 @@ static void test_steps_on_vsync() {
                     a.flips_per_s(from), old.steps_per_s(from), old.flips_per_s(from));
         CHECK(a.steps_per_s(from) > 29.9);
         CHECK(a.flips_per_s(from) > old.flips_per_s(from) - 1);
+    }
+    // the #164 report (v0.2.13, RTX 5080, 240 Hz): in-between passes of ~4.3 ms (a 4.17 ms frame), the
+    // GPU ~1.5 ms behind the swap. Skipping every blended pass up to the record pass when the rest did
+    // not fit left gaps of 15-25 ms a few times a second (his log: p99 20-24 ms in most windows).
+    {
+        const auto gaps = [&](const StepSim& x) {
+            int n = 0;
+            for (size_t i = 1; i < x.flips.size(); i++) n += x.flips[i] >= from && x.flips[i] - x.flips[i - 1] > 15 * kMs;
+            return n / ((x.flips.back() - from) / 1e9);
+        };
+        for (double hold : {4.1, 4.2, 4.3}) {
+            a = simulate_steps(240, ms(4.3 - 1.5), ms(hold - 1.5), 60, true, 1'500'000);
+            old = simulate_steps(240, ms(4.3 - 1.5), ms(hold - 1.5), 60, false, 1'500'000);
+            std::printf("240 fps, #164 report (%.1f ms in-between passes): %.3f steps/s, %.1f flips/s, %.2f gaps over 15 ms a second "
+                        "(v0.2.13: %.1f flips/s, %.2f gaps a second)\n", hold, a.steps_per_s(from), a.flips_per_s(from), gaps(a),
+                        old.flips_per_s(from), gaps(old));
+            CHECK(a.steps_per_s(from) > 29.9);
+            CHECK(a.flips_per_s(from) > 210);
+            CHECK(gaps(a) < 0.2);
+            CHECK(gaps(old) > 1);  // (the report)
+        }
+        // the report's start: a first in-between pass (a probe) of 201 ms. In-between frames within two
+        // seconds, not after the next probe 10 s later.
+        const auto firstHitch = [](int i) { return int64_t(i == 0 ? 201'000'000 : 2'800'000); };
+        a = simulate_steps(240, ms(2.8), firstHitch, 20, true, 1'500'000);
+        old = simulate_steps(240, ms(2.8), firstHitch, 20, true, 1'500'000, false);
+        const int64_t t0 = a.steps.front(), o0 = old.steps.front();
+        std::printf("240 fps, #164 start (201 ms probe): in-between frames drawn in seconds 2-9: %.0f%% (without the retry: %.0f%%)\n",
+                    100 * a.drawn_share(t0 + 2000 * kMs, t0 + 9000 * kMs, 7), 100 * old.drawn_share(o0 + 2000 * kMs, o0 + 9000 * kMs, 7));
+        CHECK(a.drawn_share(t0 + 2000 * kMs, t0 + 9000 * kMs, 7) > 0.9);
+        CHECK(old.drawn_share(o0 + 2000 * kMs, o0 + 9000 * kMs, 7) < 0.05);  // (the report: 0 % until the frame rate was changed)
     }
     // slower than a step (40 ms logic passes): the game runs at the computer's pace (25 steps a
     // second), without waiting for a slot on top of it

@@ -743,17 +743,18 @@ static void paced_pass_start() {
     if (g_last_entry != pace_clock::time_point{}) {
         const auto pass = now - g_last_entry - g_slept;
         pace_clock::duration& avg = g_pass_was_hold ? g_hold_avg : g_logic_avg;
-        // a probe after a long pause replaces the old value: the scene may have changed since. A
-        // probe that hit a hitch (more than twice the old value) counts twice the old value, and the
-        // next probe follows a second later: the first in-between pass is such a probe, and one that
-        // met a hitch of the start (a 90-110 ms pass, measured) kept in-between frames out for 10 s
-        if (g_pass_was_hold && g_probe && pass > 2 * avg) {
-            LOG("[interp] paced: the in-between pass probe took %.1f ms (a hitch?): another probe in a second",
-                std::chrono::duration<double, std::milli>(pass).count());
-            avg *= 2;
-            g_probe_retry = now + kProbeRetry;
+        // a probe after a long pause replaces the old value (pacing::probe_estimate; one that hit a
+        // hitch is repeated a second later)
+        if (g_pass_was_hold && g_probe) {
+            bool retry;
+            avg = pace_clock::duration(pacing::probe_estimate(avg.count(), pass.count(), retry));
+            if (retry) {
+                LOG("[interp] paced: the in-between pass probe took %.1f ms (a hitch?): another probe in a second",
+                    std::chrono::duration<double, std::milli>(pass).count());
+                g_probe_retry = now + kProbeRetry;
+            }
         } else {
-            avg = g_pass_was_hold && g_probe ? pass : pace_clock::duration(pacing::update_average(avg.count(), pass.count()));
+            avg = pace_clock::duration(pacing::update_average(avg.count(), pass.count()));
         }
         if (g_pass_was_hold) g_probe = false;
     }
@@ -869,10 +870,6 @@ static void after_pass(int phase) {
     // now): one probe, if one vsync tick fits; its duration replaces the estimate.
     const bool probe = phase == 0 && (now - g_last_hold >= kProbeAfter || (g_probe_retry != pace_clock::time_point{} && now >= g_probe_retry));
     const auto pass = std::chrono::duration_cast<std::chrono::nanoseconds>(probe ? vsync_tick() : g_hold_avg).count();
-    // 120/240 fps: a late logic pass drops only the in-between frames that no longer fit (the blend
-    // fractions of the step follow its new count)
-    if (phase == 0 && g_step_n > 1 && in_between() > 1)
-        g_step_n = pacing::fit_in_between(g_step_n, elapsed, pass, kPacedBudget.count());
     switch (pacing::next_pass(phase, g_step_n, elapsed, pass, kPacedBudget.count())) {
     case pacing::Next::kHold:
         g_hold_next = true;
@@ -880,10 +877,10 @@ static void after_pass(int phase) {
         if (probe) g_probe_retry = {};
         g_last_hold = now;
         break;
-    case pacing::Next::kRecord:  // the blended hold passes left are skipped, the record pass is drawn
+    case pacing::Next::kRecord:  // blended hold passes that do not fit are skipped (the next hold pass increments g_phase)
         trace_step(now, g_last_logic, char('0' + std::min(phase, 9)));
         g_hold_next = true;
-        g_phase = g_step_n - 1;  // (the next hold pass increments it to the record pass)
+        g_phase = pacing::skip_to(phase, g_step_n, elapsed, pass, kPacedBudget.count());
         g_last_hold = now;
         break;
     default:  // the rest of the step's in-between passes (and its record pass) are dropped
