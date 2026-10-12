@@ -1277,5 +1277,146 @@ class DecompRelease(unittest.TestCase):
                 self.assertEqual(setup.load_manifest()["variant"], "decomp")
 
 
+class LongPaths(unittest.TestCase):
+    """Issue #144: a release unpacked twice into Downloads by Windows' "Extract All" (the dev build's longer
+    name) put the deepest files of llvm-mingw beyond MAX_PATH. Setup's file operations use extended-length
+    paths (longpath); a data folder too deep for the game and its tools stops setup before any download."""
+
+    # the reporter's folder (a 6-letter account name) and the matching release folder of v0.2.10
+    DEVEL = "C:\\Users\\player\\Downloads\\" + "\\".join(["WindWakerHD-v0.2.12-devel.a84118c0-windows-x86_64"] * 2)
+    RELEASE = "C:\\Users\\player\\Downloads\\" + "\\".join(["WindWakerHD-v0.2.10-windows-x86_64"] * 2)
+
+    def test_longpath_windows(self):
+        lp = lambda p: setup.longpath(p, windows=True)
+        self.assertEqual(lp("C:\\Games\\WindWakerHD\\data"), "\\\\?\\C:\\Games\\WindWakerHD\\data")
+        self.assertEqual(lp("C:/Games/WindWakerHD/./x/../data/"), "\\\\?\\C:\\Games\\WindWakerHD\\data")
+        self.assertEqual(lp("\\\\server\\share\\WWHD"), "\\\\?\\UNC\\server\\share\\WWHD")
+        self.assertEqual(lp("\\\\?\\C:\\already"), "\\\\?\\C:\\already")  # never twice
+        self.assertEqual(lp("\\\\.\\pipe\\x"), "\\\\.\\pipe\\x")  # device paths unchanged
+        from pathlib import PureWindowsPath
+        self.assertEqual(lp(PureWindowsPath("C:\\a\\b")), "\\\\?\\C:\\a\\b")
+
+    def test_longpath_other_platforms_unchanged(self):
+        for p in ("/home/player/wwhd", "relative/dir", "C:\\x"):
+            self.assertIs(setup.longpath(p, windows=False), p)
+        if not setup.IS_WIN:
+            p = "/Users/player/wwhd"
+            self.assertIs(setup.longpath(p), p)
+
+    def test_shader_prebuild_agrees(self):
+        import shader_prebuild
+        p = os.path.abspath(os.path.join("some", "cache"))
+        self.assertEqual(shader_prebuild.longpath(p), setup.longpath(p))
+
+    def test_messages_show_normal_paths(self):
+        for p in ("C:\\Games\\WWHD", "\\\\server\\share\\WWHD"):
+            self.assertEqual(setup.plain_path(setup.longpath(p, windows=True)), p)
+        err = FileNotFoundError(2, "No such file or directory")
+        err.filename = setup.longpath("C:\\Users\\player\\Downloads\\x\\data\\toolchain", windows=True)
+        text = setup.plain_text(err)
+        self.assertNotIn("\\\\?\\", text)
+        self.assertIn("'C:\\\\Users\\\\player\\\\Downloads", text)  # repr doubles the backslashes
+        with mock.patch.object(setup, "GUI", None), mock.patch("builtins.print") as out:
+            setup.say("Removed \\\\?\\C:\\Users\\player\\x and \\\\?\\UNC\\srv\\s\\y")
+        out.assert_called_once_with("Removed C:\\Users\\player\\x and \\\\srv\\s\\y", flush=True)
+
+    def test_measured_depths(self):
+        # the numbers the limit is made of (setup.py, "long paths on Windows")
+        self.assertEqual(setup.MAX_DATA_DIR_CHARS, 130)
+        cache = ("user\\shader-prebuild\\live\\vulkan-%08x-%08x-%s.bin.recipes.tmp-%d-%d-%d"
+                 % (0x10de, 0x2684, "0" * 32, 1234567, 10 ** 15, 999))
+        self.assertLessEqual(len(cache), setup.DEEPEST_DATA_PATH)
+        game = "game.partial\\content\\Common\\AudioRes\\stream\\Kugutu_Taraba_Intro_CK.w.32.dspadpcm.bfstm"
+        self.assertLess(len(game), setup.DEEPEST_DATA_PATH)
+        header = ("toolchain\\llvm-mingw-20260922-ucrt-aarch64\\include\\c++\\v1\\__cxx03\\__type_traits\\"
+                  "is_trivially_lexicographically_comparable.h")
+        self.assertLess(len(header), setup.DEEPEST_DATA_PATH)
+
+    def test_reporter_folder(self):
+        # the reporter's folder: the compiler's deepest file (118 characters below unpack.tmp) is beyond MAX_PATH
+        self.assertEqual(len(self.DEVEL), 125)
+        self.assertGreater(len(self.DEVEL + "\\data\\toolchain\\unpack.tmp\\") + 117, setup.WINDOWS_MAX_PATH)
+        self.assertLessEqual(len(self.RELEASE + "\\data\\toolchain\\unpack.tmp\\") + 117, setup.WINDOWS_MAX_PATH)
+        # with longpath() setup unpacks it there, and the game and its tools stay within MAX_PATH: no stop
+        self.assertIsNone(setup.path_length_problem(self.DEVEL + "\\data", self.DEVEL, windows=True))
+        self.assertIsNone(setup.path_length_problem(self.RELEASE + "\\data", self.RELEASE, windows=True))
+        self.assertIsNone(setup.path_length_problem("C:\\Games\\WindWakerHD\\data", "C:\\Games\\WindWakerHD",
+                                                    windows=True))
+        # a longer account name: one level too deep for the game's own files
+        longer = self.DEVEL.replace("player", "player.name")
+        msg = setup.path_length_problem(longer + "\\data", longer, windows=True)
+        self.assertEqual(msg, "This folder's path is too long for Windows (130 characters, at most 125 work). Move "
+                              "the Wind Waker HD folder to a shorter place such as C:\\Games\\WindWakerHD and start "
+                              "it again.")
+        # only on Windows
+        self.assertIsNone(setup.path_length_problem("/x" * 200, "/x" * 199, windows=False))
+
+    def test_limit_boundary(self):
+        pkg = "C:\\" + "p" * (setup.MAX_DATA_DIR_CHARS - len("\\data") - 3)
+        self.assertEqual(len(pkg + "\\data"), setup.MAX_DATA_DIR_CHARS)
+        self.assertIsNone(setup.path_length_problem(pkg + "\\data", pkg, windows=True))
+        self.assertIsNotNone(setup.path_length_problem(pkg + "p\\data", pkg + "p", windows=True))
+        # given as an extended-length path, or with another case of the drive letter: the same folder
+        self.assertIn("(126 characters, at most 125 work)",
+                      setup.path_length_problem(setup.longpath(pkg + "p\\data", windows=True), "c" + pkg[1:] + "p",
+                                                windows=True))
+
+    def test_install_folder_outside_the_release(self):
+        data = "D:\\" + "\\".join(["games"] * 30)
+        msg = setup.path_length_problem(data, self.RELEASE, windows=True)
+        self.assertIn("The install folder's path is too long for Windows (%d characters, at most 130 work)" % len(data), msg)
+
+    def test_setup_stops_before_anything_else(self):
+        with tempfile.TemporaryDirectory() as d:
+            data = os.path.join(d, "x" * (setup.MAX_DATA_DIR_CHARS - len(d)), "data")
+            args = mock.Mock(data_dir=data, app_dir=None)
+            saved = setup.LOG.f
+            try:
+                with mock.patch.object(setup, "IS_WIN", True), mock.patch.object(setup, "PKG", os.path.dirname(data)), \
+                        mock.patch.object(setup, "load_manifest", return_value={"version": "v0", "exe": "wwhd"}):
+                    with self.assertRaises(setup.SetupError) as e:
+                        setup.Ctx(args)
+                self.assertTrue(str(e.exception).startswith("This folder's path is too long for Windows"))
+                with open(os.path.join(data, "setup.log"), encoding="utf-8") as f:
+                    self.assertIn("too long for Windows", f.read())
+            finally:
+                if setup.LOG.f is not saved:
+                    setup.LOG.f.close()
+                setup.LOG.f = saved
+
+    def test_unpacks_a_deep_compiler_archive_into_a_deep_folder(self):
+        # On Windows the member ends up far beyond MAX_PATH (about 300 characters); elsewhere the same code path runs.
+        import zipfile
+        top = tempfile.mkdtemp()
+        self.addCleanup(lambda: __import__("shutil").rmtree(setup.longpath(top), ignore_errors=True))
+        data = os.path.join(top, "d" * max(1, 120 - len(top) - 1))
+        os.makedirs(data)
+        member = "llvm-mingw-test/" + "/".join(["python-lib-site-packages-%02d" % i for i in range(5)]) + "/deep_module.pyd"
+        arc = os.path.join(top, "src.zip")
+        with zipfile.ZipFile(arc, "w") as z:
+            z.writestr(member, b"deep")
+            z.writestr("llvm-mingw-test/bin/x86_64-w64-mingw32-clang.exe", b"")
+        sha = setup.file_sha256(arc)
+        pins = {"toolchains": {"test-mingw": {"kind": "llvm-mingw", "url": "https://example.invalid/llvm-mingw-test.zip",
+                                              "sha256": sha, "size": os.path.getsize(arc), "dir": "llvm-mingw-test"}}}
+        env = {k: v for k, v in os.environ.items() if k != "WWHD_TOOLCHAIN_DIR"}
+        fetch = lambda url, dst, *a, **k: __import__("shutil").copyfile(arc, dst)
+        with mock.patch.object(setup, "load_toolchains", return_value=pins), mock.patch.object(setup, "download", fetch), \
+                mock.patch.dict(os.environ, env, clear=True), mock.patch.object(setup, "say"):
+            tc = setup.get_toolchain("test-mingw", data, setup.UI(False))
+        root = os.path.join(data, "toolchain")
+        deep = os.path.join(root, *member.split("/"))
+        if setup.IS_WIN:
+            self.assertGreater(len(os.path.join(root, "unpack.tmp", *member.split("/"))), 260)
+        with open(setup.longpath(deep), "rb") as f:
+            self.assertEqual(f.read(), b"deep")
+        self.assertEqual(tc.cc, [os.path.join(root, "llvm-mingw-test", "bin", "x86_64-w64-mingw32-clang.exe")])
+        self.assertEqual(sorted(os.listdir(root)), ["llvm-mingw-test"])  # no unpack.tmp, no archive left
+        self.assertEqual(setup.folder_size(root), 4 + len(sha) + 1)  # the deep file and the marker
+        with mock.patch.object(setup, "say"):
+            setup.remove_toolchain(data)
+        self.assertFalse(os.path.exists(root))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

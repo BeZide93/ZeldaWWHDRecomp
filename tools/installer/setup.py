@@ -69,6 +69,88 @@ IS_MAC = sys.platform == "darwin"
 IS_WIN = sys.platform.startswith("win")
 IS_LINUX = not IS_MAC and not IS_WIN
 EXE_SUFFIX = ".exe" if IS_WIN else ""
+
+
+# ---------------------------------------------------------------------------------------------
+# long paths on Windows (issue #144)
+#
+# Windows limits ordinary paths to MAX_PATH (260 UTF-16 units with the terminating NUL), unless a path
+# carries the extended-length prefix \\?\ (an absolute, normalised path; up to about 32767 units).
+# Windows' "Extract All" puts the release folder inside a folder of the same name, and the longest
+# files of the pinned llvm-mingw archive are 117-118 characters deep, so unpacking the compiler from
+# a release in Downloads can exceed MAX_PATH. Setup's own file operations (unpacking, moving and
+# deleting the compiler, game files, generated code, caches) therefore use longpath(); messages and
+# the log keep showing the normal path (plain_path / plain_text).
+
+LONGPATH_PREFIX = "\\\\?\\"
+WINDOWS_MAX_PATH = 259  # characters of a full path without the extended-length prefix (MAX_PATH - NUL)
+# The deepest path the game, wwhd-extract and the compiler create or read below the data folder. These
+# programs use ordinary Windows paths (no \\?\), so the data folder + this must stay within MAX_PATH:
+#   user\shader-prebuild\live\vulkan-<vendor>-<device>-<32 hex>.bin.recipes.tmp-<pid>-<clock>-<n>
+#   (the game's atomic shader cache writes: 26 + 69 + 33 = 128)
+# Next deepest: toolchain\llvm-mingw-...-aarch64\include\c++\v1\__cxx03\...comparable.h (124; clang
+# also widens long paths itself), game.partial\content\...\Kugutu_Taraba_Intro_CK.w.32.dspadpcm.bfstm (86).
+DEEPEST_DATA_PATH = 128
+MAX_DATA_DIR_CHARS = WINDOWS_MAX_PATH - 1 - DEEPEST_DATA_PATH  # 130 (the 1: the separator after it)
+
+
+def longpath(p, windows=None):
+    """p for Windows file APIs without the MAX_PATH limit: the absolute, normalised path with the
+    extended-length prefix (\\\\?\\C:\\..., \\\\?\\UNC\\server\\share\\... for a network share).
+    Unchanged on other platforms. Use it only for the file operation itself, never in messages."""
+    if not (IS_WIN if windows is None else windows):
+        return p
+    import ntpath
+    p = os.fspath(p)
+    if p.startswith(LONGPATH_PREFIX) or p.startswith("\\\\.\\"):
+        return p
+    p = ntpath.abspath(p) if IS_WIN else ntpath.normpath(p)  # tests simulate Windows on other systems
+    if p.startswith("\\\\"):  # \\server\share\...
+        return LONGPATH_PREFIX + "UNC\\" + p[2:]
+    return LONGPATH_PREFIX + p
+
+
+def plain_path(p):
+    """The normal form of a path longpath() made (for messages and the log)."""
+    p = os.fspath(p)
+    if p.startswith(LONGPATH_PREFIX + "UNC\\"):
+        return "\\\\" + p[len(LONGPATH_PREFIX) + 4:]
+    if p.startswith(LONGPATH_PREFIX):
+        return p[len(LONGPATH_PREFIX):]
+    return p
+
+
+def plain_text(text):
+    """text (an error message) with every extended-length path shown in its normal form."""
+    text = str(text)
+    # as repr() writes it (an OSError's message quotes its file name with doubled backslashes), then as it is
+    for bs in ("\\\\", "\\"):
+        prefix = bs * 2 + "?" + bs
+        text = text.replace(prefix + "UNC" + bs, bs * 2).replace(prefix, "")
+    return text
+
+
+def path_length_problem(data_dir, package=None, windows=None):
+    """None, or the message that stops setup before it downloads anything when the data folder is too
+    deep for Windows: the game, wwhd-extract and the compiler would fail on their deepest files
+    (DEEPEST_DATA_PATH). package: the release folder; when the data folder is inside it (a portable
+    release), that is the folder the player moves."""
+    if not (IS_WIN if windows is None else windows):
+        return None
+    import ntpath
+    data_dir = ntpath.normpath(plain_path(data_dir))
+    if len(data_dir) <= MAX_DATA_DIR_CHARS:
+        return None
+    if package and ntpath.normcase(ntpath.dirname(data_dir)) == ntpath.normcase(ntpath.normpath(package)):
+        package = ntpath.normpath(package)
+        limit = MAX_DATA_DIR_CHARS - (len(data_dir) - len(package))
+        return ("This folder's path is too long for Windows (%d characters, at most %d work). Move the Wind "
+                "Waker HD folder to a shorter place such as C:\\Games\\WindWakerHD and start it again."
+                % (len(package), limit))
+    return ("The install folder's path is too long for Windows (%d characters, at most %d work). Choose a "
+            "shorter place such as C:\\Games\\WindWakerHD and start it again." % (len(data_dir), MAX_DATA_DIR_CHARS))
+
+
 APP_NAME = "Wind Waker HD"
 TITLE_IDS = {
     "0005000010143500": "USA",
@@ -128,7 +210,7 @@ class Log:
 
     def write(self, text):
         if self.f:
-            self.f.write(text.rstrip("\n") + "\n")
+            self.f.write(plain_text(text).rstrip("\n") + "\n")
             self.f.flush()
 
 
@@ -154,6 +236,7 @@ GUI = None  # Protocol when running under the graphical installer
 
 
 def say(text=""):
+    text = plain_text(text)  # never a \\?\ path in what the player reads (longpath)
     if GUI:
         GUI.emit({"event": "log", "text": text})
     else:
@@ -713,7 +796,7 @@ def ensure_setup_python(data_dir, prefer_system=True):
     stage = os.path.join(root, "unpack.tmp")
     say("  Installing private Python 3.14 for local mod setup (system Python is unchanged).")
     download(pin["url"], archive, pin["sha256"], pin.get("size"), "setup Python")
-    shutil.rmtree(stage, ignore_errors=True)
+    shutil.rmtree(longpath(stage), ignore_errors=True)
     os.makedirs(stage)
     try:
         # Only the SHA-verified, maintainer-pinned standalone archive reaches extraction.
@@ -724,13 +807,13 @@ def ensure_setup_python(data_dir, prefer_system=True):
         staged = os.path.join(stage, "python", "bin", "python3")
         if not python_setup_capable(staged):
             raise SetupError("The pinned Python cannot run compression.zstd on this computer")
-        shutil.rmtree(os.path.join(root, "python"), ignore_errors=True)
+        shutil.rmtree(longpath(os.path.join(root, "python")), ignore_errors=True)
         os.replace(os.path.join(stage, "python"), os.path.join(root, "python"))
         with open(marker + ".tmp", "w") as f:
             f.write(pin["sha256"] + "\n")
         os.replace(marker + ".tmp", marker)
     finally:
-        shutil.rmtree(stage, ignore_errors=True)
+        shutil.rmtree(longpath(stage), ignore_errors=True)
         if os.path.exists(archive):
             os.remove(archive)
     return executable
@@ -812,23 +895,24 @@ def get_toolchain(name, data_dir, ui):
         arc = os.path.join(root, os.path.basename(tc["url"].split("?")[0]))
         download(tc["url"], arc, tc["sha256"], tc.get("size"), "compiler")
         tmp = os.path.join(root, "unpack.tmp")
-        shutil.rmtree(tmp, ignore_errors=True)
-        os.makedirs(tmp)
+        shutil.rmtree(longpath(tmp), ignore_errors=True)
+        os.makedirs(longpath(tmp))
         say("  Unpacking...")
         if arc.endswith(".zip"):
+            # \\?\ paths: the deepest files of llvm-mingw exceed MAX_PATH below a deep release folder (#144)
             with zipfile.ZipFile(arc) as z:
-                z.extractall(tmp)
+                z.extractall(longpath(tmp))
         elif shutil.which("tar"):
             run_logged(["tar", "-xf", arc, "-C", tmp], what="unpacking the compiler")
         else:
             with tarfile.open(arc) as t:
-                t.extractall(tmp)
+                t.extractall(longpath(tmp))
         src = os.path.join(tmp, tc["dir"])
-        if not os.path.isdir(src):
+        if not os.path.isdir(longpath(src)):
             raise SetupError("unexpected compiler archive layout")
-        shutil.rmtree(tdir, ignore_errors=True)
-        os.replace(src, tdir)
-        shutil.rmtree(tmp, ignore_errors=True)
+        shutil.rmtree(longpath(tdir), ignore_errors=True)
+        os.replace(longpath(src), longpath(tdir))
+        shutil.rmtree(longpath(tmp), ignore_errors=True)
         os.remove(arc)
         with open(marker, "w") as f:
             f.write(tc["sha256"] + "\n")
@@ -1051,7 +1135,7 @@ def valid_game_folder(path):
 
 def folder_size(path):
     total = 0
-    for dp, _, fns in os.walk(path):
+    for dp, _, fns in os.walk(longpath(path)):
         for fn in fns:
             try:
                 total += os.path.getsize(os.path.join(dp, fn))
@@ -1114,7 +1198,7 @@ def extract_game(image, keys, info, data_dir, title=None):
     """Extracts a disc image (keys) or one title folder of a Cemu archive (title, no keys) into data_dir/game."""
     dst = os.path.join(data_dir, "game")
     tmp = os.path.join(data_dir, "game.partial")
-    shutil.rmtree(tmp, ignore_errors=True)
+    shutil.rmtree(longpath(tmp), ignore_errors=True)
     total = int(info.get("bytes", 0))
     need = total + (1 << 30)
     if free_space(data_dir) < need:
@@ -1125,7 +1209,7 @@ def extract_game(image, keys, info, data_dir, title=None):
     try:
         check_game_version(tmp)
     except SetupError:
-        shutil.rmtree(tmp, ignore_errors=True)  # keeps the game files of an earlier setup
+        shutil.rmtree(longpath(tmp), ignore_errors=True)  # keeps the game files of an earlier setup
         raise
     replace_dir(tmp, dst)
 
@@ -1165,7 +1249,7 @@ def run_extract(image, keys, out, title=None, only=None):
     err = b"".join(errbuf).decode("utf-8", "replace").strip()
     LOG.write(err)
     if rc != 0:
-        shutil.rmtree(out, ignore_errors=True)
+        shutil.rmtree(longpath(out), ignore_errors=True)
         raise SetupError("extracting the game failed: %s" % err)
     pr.done()
 
@@ -1178,15 +1262,16 @@ def copy_game_folder(src, data_dir):
     if free_space(data_dir) < total + (1 << 30):
         raise SetupError("not enough free disk space in %s: %s needed" % (data_dir, human(total + (1 << 30))))
     tmp = os.path.join(data_dir, "game.partial")
-    shutil.rmtree(tmp, ignore_errors=True)
+    shutil.rmtree(longpath(tmp), ignore_errors=True)
     pr = Progress("copying")
     done = 0
-    for dp, dns, fns in os.walk(src):
-        rel = os.path.relpath(dp, src)
-        os.makedirs(os.path.join(tmp, rel), exist_ok=True)
+    long_src, long_tmp = longpath(src), longpath(tmp)
+    for dp, dns, fns in os.walk(long_src):
+        rel = os.path.relpath(dp, long_src)
+        os.makedirs(os.path.join(long_tmp, rel), exist_ok=True)
         for fn in fns:
             s = os.path.join(dp, fn)
-            shutil.copyfile(s, os.path.join(tmp, rel, fn))
+            shutil.copyfile(s, os.path.join(long_tmp, rel, fn))
             done += os.path.getsize(s)
             pr.update(done, total or 1, "%s of %s" % (human(done), human(total)))
     pr.done()
@@ -1195,11 +1280,11 @@ def copy_game_folder(src, data_dir):
 
 def replace_dir(new, dst):
     old = dst + ".old"
-    shutil.rmtree(old, ignore_errors=True)
+    shutil.rmtree(longpath(old), ignore_errors=True)
     if os.path.exists(dst):
-        os.replace(dst, old)
-    os.replace(new, dst)
-    shutil.rmtree(old, ignore_errors=True)
+        os.replace(longpath(dst), longpath(old))
+    os.replace(longpath(new), longpath(dst))
+    shutil.rmtree(longpath(old), ignore_errors=True)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -1281,12 +1366,12 @@ def finish_language_source(tmp, region, title_id, source_name, data_dir):
         with open(path, "rb") as f:
             head = f.read(4)
         if head != b"SARC":
-            shutil.rmtree(tmp, ignore_errors=True)
+            shutil.rmtree(longpath(tmp), ignore_errors=True)
             raise SetupError("%s is not a language pack (damaged or not from the game)" % name)
         packs.append({"file": name, "language": known[name.lower()], "bytes": os.path.getsize(path),
                       "sha256": file_sha256(path)})
     if not packs:
-        shutil.rmtree(tmp, ignore_errors=True)
+        shutil.rmtree(longpath(tmp), ignore_errors=True)
         raise SetupError("no language packs (content/Common/Pack/permanent_2d_%s*.pack) were found in this %s game"
                          % ("Eu" if region == "EU" else "Jp", LANGUAGE_REGION_NAMES[region]))
     for name in ignored:
@@ -1326,7 +1411,7 @@ def remove_language_source(data_dir, region):
     d = os.path.join(language_root(data_dir), region)
     if not os.path.isdir(d):
         raise SetupError("there is no %s language source" % LANGUAGE_REGION_NAMES[region])
-    shutil.rmtree(d)
+    shutil.rmtree(longpath(d))
     return d
 
 
@@ -1364,7 +1449,7 @@ def add_language_source(source, data_dir, keys=None, info=None, game_dir=None):
     if kind == "image":
         region = language_source_region(info.get("title_id"))
         tmp = os.path.join(root, region + ".partial")
-        shutil.rmtree(tmp, ignore_errors=True)
+        shutil.rmtree(longpath(tmp), ignore_errors=True)
         run_extract(path, keys, tmp, only=LANGUAGE_SOURCE_FILES)
         return [finish_language_source(tmp, region, info["title_id"].lower(), name, data_dir)]
     if kind == "archive":
@@ -1382,7 +1467,7 @@ def add_language_source(source, data_dir, keys=None, info=None, game_dir=None):
         for t in titles:
             region = LANGUAGE_SOURCE_TITLES[t["id"]]
             tmp = os.path.join(root, region + ".partial")
-            shutil.rmtree(tmp, ignore_errors=True)
+            shutil.rmtree(longpath(tmp), ignore_errors=True)
             run_extract(path, None, tmp, title=t["folder"], only=LANGUAGE_SOURCE_FILES)
             out.append(finish_language_source(tmp, region, t["id"], "%s (%s)" % (name, t["folder"]), data_dir))
         return out
@@ -1395,7 +1480,7 @@ def add_language_source(source, data_dir, keys=None, info=None, game_dir=None):
         region = language_source_region(tid)
         files = language_files_in(folder)
         tmp = os.path.join(root, region + ".partial")
-        shutil.rmtree(tmp, ignore_errors=True)
+        shutil.rmtree(longpath(tmp), ignore_errors=True)
         dst = os.path.join(tmp, "content", "Common", "Pack")
         os.makedirs(dst)
         os.makedirs(os.path.join(tmp, "meta"))
@@ -1434,7 +1519,7 @@ def decomp_hooks_file():
 
 
 def recompile(game_dir, gen_dir, hooks=False):
-    shutil.rmtree(gen_dir, ignore_errors=True)
+    shutil.rmtree(longpath(gen_dir), ignore_errors=True)
     rpx = os.path.join(game_dir, "code", "cking.rpx")
     decomp = decomp_hooks_file()
     if decomp:
@@ -1645,7 +1730,7 @@ def mac_app(app_path, exe_src, data_dir, version, runtime_files=()):
     """~/Applications/Wind Waker HD.app: the game binary plus a launcher that points it at the data folder.
     runtime_files (next to exe_src) go next to the binary as well: its rpath is @executable_path."""
     tmp = app_path + ".tmp"
-    shutil.rmtree(tmp, ignore_errors=True)
+    shutil.rmtree(longpath(tmp), ignore_errors=True)
     macos = os.path.join(tmp, "Contents", "MacOS")
     os.makedirs(macos)
     shutil.copy2(exe_src, os.path.join(macos, "wwhd"))
@@ -1845,7 +1930,7 @@ def remove_toolchain(data_dir):
     """Deletes the downloaded compiler (repair and guest mod builds need setup to restore it)."""
     d = toolchain_dir(data_dir)
     n = folder_size(d) if os.path.isdir(d) else 0
-    shutil.rmtree(d, ignore_errors=True)
+    shutil.rmtree(longpath(d), ignore_errors=True)
     say("  Removed the downloaded compiler (%s)" % human(n))
     return n
 
@@ -1871,7 +1956,7 @@ def import_save(kind, path, data_dir, replace=False):
     if have_save(data_dir) and not replace:
         raise SetupError("a save already exists in %s" % user)
     tmp = os.path.join(data_dir, "save-import.tmp")
-    shutil.rmtree(tmp, ignore_errors=True)
+    shutil.rmtree(longpath(tmp), ignore_errors=True)
     os.makedirs(tmp)
     try:
         if kind == "gc":
@@ -1891,11 +1976,11 @@ def import_save(kind, path, data_dir, replace=False):
         backup = None
         if os.path.isdir(user) and os.listdir(user):
             backup = user + ".backup-" + time.strftime("%Y%m%d-%H%M%S")
-            os.replace(user, backup)
+            os.replace(longpath(user), longpath(backup))
         os.makedirs(os.path.dirname(user), exist_ok=True)
-        os.replace(tmp, user)
+        os.replace(longpath(tmp), longpath(user))
     finally:
-        shutil.rmtree(tmp, ignore_errors=True)
+        shutil.rmtree(longpath(tmp), ignore_errors=True)
     n = len([f for f in os.listdir(user) if f.endswith(".sav")])
     msg = "Copied %d save file%s to %s" % (n, "" if n == 1 else "s", user)
     if kind == "gc":
@@ -2096,6 +2181,10 @@ class Ctx:
         self.exe = os.path.join(self.exe_dir, self.manifest["exe"])
         os.makedirs(self.data_dir, exist_ok=True)
         LOG.open(os.path.join(self.data_dir, "setup.log"))
+        problem = path_length_problem(self.data_dir, PKG)
+        if problem:  # before anything is downloaded or built (issue #144)
+            LOG.write("data folder %s: %s" % (self.data_dir, problem))
+            raise SetupError(problem)
         self.game_dir = self.state().get("game_dir") or os.path.join(self.data_dir, "game")
 
     def state(self):
@@ -2295,7 +2384,7 @@ def install(ctx, source, keys=None, info=None, ui=None, check_keys=None):
     keys = None
 
     work = os.path.join(data_dir, "work")
-    shutil.rmtree(work, ignore_errors=True)
+    shutil.rmtree(longpath(work), ignore_errors=True)
     os.makedirs(work)
     if free_space(data_dir) < (2 << 30):
         raise SetupError("not enough free disk space in %s for building (2 GB needed)" % data_dir)
@@ -2402,7 +2491,7 @@ def install(ctx, source, keys=None, info=None, ui=None, check_keys=None):
         # macOS: "ready (Metal, Vulkan)", or "ready (Metal)" when MoltenVK is unavailable
         shader_progress.done(prepared["status"] + (" (%s)" % ", ".join(ready) if len(states) > 1 and ready else ""))
     if not args.keep_work:
-        shutil.rmtree(work, ignore_errors=True)
+        shutil.rmtree(longpath(work), ignore_errors=True)
     if kind != "gen":
         os.makedirs(os.path.join(data_dir, "save"), exist_ok=True)
     write_guest_build_config(data_dir, tc)
@@ -2674,7 +2763,7 @@ def gui_main(args):
     try:
         ctx = Ctx(args)
     except SetupError as e:
-        GUI.emit({"event": "fatal", "message": str(e)})
+        GUI.emit({"event": "fatal", "message": plain_text(e)})
         return 1
     session = {"keys": None, "info": None, "image": None}
 
@@ -2696,7 +2785,7 @@ def gui_main(args):
         GUI.emit(kw)
 
     def fail(req, problem, message):
-        reply(req, False, problem=problem, message=message)
+        reply(req, False, problem=problem, message=plain_text(message))
 
     def probe(req):
         p = req.get("path") or ""

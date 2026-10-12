@@ -620,6 +620,61 @@ jobs:
           if ($g.ExitCode -ne 0) { throw "setup program self-test on a fresh data folder failed ($($g.ExitCode))" }
           if (Test-Path (Join-Path $env:WWHD_DATA_DIR 'python')) { throw "the window downloaded a Python" }
 
+      - name: Installer self-test in a deep folder (issue #144)
+        # Windows' "Extract All" puts the release folder into a folder of the same name. The release here is
+        # as deep as setup accepts (125 characters): the compiler's deepest files are then beyond MAX_PATH while
+        # setup unpacks them (it uses \\?\ paths). One character deeper, setup stops before it downloads anything.
+        # The compiler archive is the one fetched above, given to setup as a copy the player saved (#113).
+        shell: pwsh
+        run: |
+          $zip = (Get-ChildItem dist\*.zip).FullName
+          $name = [IO.Path]::GetFileNameWithoutExtension($zip)
+          $root = Join-Path $env:RUNNER_TEMP 'deep'
+          $outer = Join-Path $root ('x' * (125 - $root.Length - 2 - $name.Length))
+          Expand-Archive -Path $zip -DestinationPath $outer
+          $pkg = Join-Path $outer $name
+          if ($pkg.Length -ne 125) { throw "the release folder is $($pkg.Length) characters, not 125" }
+          $arcname = python -c "import json, os; t=json.load(open('tools/installer/toolchains.json'))['toolchains'][os.environ['TOOLCHAIN']]; print(t['url'].rsplit('/', 1)[1])"
+          $arcname = $arcname.Trim()
+          Copy-Item (Join-Path $env:RUNNER_TEMP 'llvm-mingw.zip') (Join-Path $pkg $arcname)
+          "WWHD_DEEP_PKG=$pkg" >> $env:GITHUB_ENV
+
+      - name: Installer self-test in a deep folder, setup in a console window
+        shell: cmd
+        run: |
+          call "%WWHD_DEEP_PKG%\tools\Setup in a console window.bat" --yes --no-launch --gen-dir "%GITHUB_WORKSPACE%\build\gen-stub" < NUL
+          if errorlevel 1 exit /b 1
+
+      - name: Installer self-test in a deep folder, results
+        shell: pwsh
+        run: |
+          $zip = (Get-ChildItem dist\*.zip).FullName
+          $name = [IO.Path]::GetFileNameWithoutExtension($zip)
+          $pkg = $env:WWHD_DEEP_PKG
+          $outer = Split-Path $pkg -Parent
+          $data = Join-Path $pkg 'data'
+          if (-not (Test-Path (Join-Path $data 'install.json'))) { throw "the setup in a deep folder did not finish" }
+          $deepest = python -c "import sys, zipfile; print(max(zipfile.ZipFile(sys.argv[1]).namelist(), key=len))" (Join-Path $env:RUNNER_TEMP 'llvm-mingw.zip')
+          $deepest = $deepest.Trim().Replace('/', '\')
+          $unpacked = Join-Path $data "toolchain\unpack.tmp\$deepest"
+          "deepest compiler file while unpacking: $($unpacked.Length) characters"
+          if ($unpacked.Length -le 259) { throw "the test folder is not deep enough to cross MAX_PATH" }
+          if (-not (Test-Path -LiteralPath ('\\?\' + (Join-Path $data "toolchain\$deepest")))) { throw "the deepest compiler file is missing" }
+          if (Test-Path (Join-Path $data 'toolchain\unpack.tmp')) { throw "unpack.tmp was left behind" }
+          $p = Start-Process -FilePath (Join-Path $data 'bin\wwhd.exe') -ArgumentList '--game', (Join-Path $env:RUNNER_TEMP 'nogame') `
+            -RedirectStandardError deep-run.log -RedirectStandardOutput deep-out.log -NoNewWindow -PassThru
+          if (-not $p.WaitForExit(120000)) { $p.Kill() }
+          if (-not (Select-String -Path deep-run.log, deep-out.log -Pattern 'cannot load' -Quiet)) { throw "the game built in a deep folder did not start" }
+          # one character deeper: setup stops at once with the plain message
+          Expand-Archive -Path $zip -DestinationPath ($outer + 'x')
+          $pkg = Join-Path ($outer + 'x') $name
+          $out = & (Join-Path $pkg 'tools\python\python.exe') (Join-Path $pkg 'tools\installer\setup.py') --yes --no-launch `
+            --gen-dir (Join-Path $env:GITHUB_WORKSPACE 'build\gen-stub') 2>&1 | Out-String
+          $out
+          if ($LASTEXITCODE -ne 1) { throw "setup in a too deep folder exited with $LASTEXITCODE, not 1" }
+          if ($out -notmatch "This folder's path is too long for Windows \(126 characters, at most 125 work\)") { throw "no path length message" }
+          if ($out -match 'Getting the compiler') { throw "setup went on in a too deep folder" }
+
       - uses: actions/upload-artifact@v5
         with:
           name: release-windows-${{ matrix.arch }}
