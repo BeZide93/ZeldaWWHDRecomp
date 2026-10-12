@@ -733,3 +733,9 @@ vendored); [zstd](https://github.com/facebook/zstd) by Meta Platforms (BSD-3-Cla
 it: release builds compile its pinned 1.5.7 release (URL + SHA-256 in `cmake/Zstd.cmake`) statically
 into `wwhd-extract` and include its license in `third-party-licenses/`; source builds use a system
 zstd when there is one.
+The Linux AppImage starts with the AppImage project's
+[type2-runtime](https://github.com/AppImage/type2-runtime/tree/8f39b89e2ac31e1640b3d3f7e9a5108e6ce805fa)
+(commit 8f39b89, MIT), which links libfuse 3.15.0 (LGPL-2.1), squashfuse 0.5.2 (BSD-2-Clause),
+zstd 1.5.6 (BSD-3-Clause), zlib 1.3.2 (Zlib), mimalloc 2.1.7 (MIT) and musl 1.2.5 (MIT) statically;
+their licenses and where to get the source are in the AppImage's `third-party-licenses/`
+(`AppImage-runtime-README.txt`).

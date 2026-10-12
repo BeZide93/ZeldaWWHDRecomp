@@ -15,6 +15,9 @@ licenses). This check rejects, by name and by content:
     and git hashes 40, which do not match).
 The Windows release's tools/python/ (the official embeddable Python) must hold exactly the files listed
 in tools/release/python-windows-files.json, each with its listed SHA-256.
+An AppImage tree (a folder with AppRun at its root, e.g. the extracted squashfs-root) must carry the
+AppImage runtime's license texts (tools/release/appimage-runtime-licenses, copied by appimage.py)
+unchanged in third-party-licenses/.
 Android Python source archives must not contain debug fixture registration or smoke
 entry points. Only debug CI artifacts may opt in with --allow-android-test-fixtures.
 Exit status 1 lists every problem.
@@ -346,6 +349,24 @@ ANDROID_TEST_FILES = {
 }
 
 
+RUNTIME_LICENSES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "appimage-runtime-licenses")
+
+
+def check_appimage_licenses(path, problems):
+    """An AppImage tree has the runtime's license texts, byte for byte (appimage.py add_runtime_licenses)."""
+    names = sorted(f for f in os.listdir(RUNTIME_LICENSES) if f.startswith("AppImage-runtime-") and f.endswith(".txt"))
+    if not names:
+        problems.append("no AppImage runtime license texts in " + RUNTIME_LICENSES)
+    for name in names:
+        shipped = os.path.join(path, "third-party-licenses", name)
+        if not os.path.isfile(shipped):
+            problems.append("third-party-licenses/%s: the AppImage runtime's license text is missing" % name)
+            continue
+        with open(shipped, "rb") as a, open(os.path.join(RUNTIME_LICENSES, name), "rb") as b:
+            if a.read() != b.read():
+                problems.append("third-party-licenses/%s: differs from tools/release/appimage-runtime-licenses" % name)
+
+
 def scan(path, allow_android_test_fixtures=False):
     problems, count, python = [], 0, set()
     files = python_files(path)
@@ -362,6 +383,8 @@ def scan(path, allow_android_test_fixtures=False):
             except zipfile.BadZipFile:
                 problems.append("%s: invalid Android Python source archive" % name)
 
+    if os.path.isdir(path) and os.path.isfile(os.path.join(path, "AppRun")):
+        check_appimage_licenses(path, problems)
     if os.path.isdir(path):
         for dp, _, fns in os.walk(path):
             for fn in fns:

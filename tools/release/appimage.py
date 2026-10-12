@@ -53,7 +53,9 @@ APPIMAGETOOL_URL = "https://github.com/AppImage/appimagetool/releases/download/%
 #   2. check them (`strings runtime-x86_64 | grep commit/` names the commit; upstream signs them, the
 #      .sig files next to the assets, key: signing-pubkey.asc in the type2-runtime repository);
 #   3. put their SHA-256 below, RUNTIME_COMMIT to the commit, and host them where RUNTIME_URLS looks;
-#   4. build, then check `<AppImage> --appimage-version` on the result and run the release workflow's
+#   4. update the license texts in RUNTIME_LICENSES (the components and versions the new build links,
+#      from its scripts/ and the binary's version strings) and their AppImage-runtime-README.txt;
+#   5. build, then check `<AppImage> --appimage-version` on the result and run the release workflow's
 #      AppImage step (portable home, extract-and-run).
 # To get back the exact runtime of a released AppImage: appimage.py --extract-runtime FILE OUT
 # (the ELF before the squashfs, with the per-image MD5 digest that appimagetool writes zeroed).
@@ -68,6 +70,33 @@ RUNTIME_URLS = [
     # upstream's "continuous" release is replaced over time and would stop matching the pin
     "https://github.com/ZeldaWWHDRecomp/ZeldaWWHDRecomp/releases/download/appimage-runtime-8f39b89/",
 ]
+
+# The runtime's own license and those of what it links statically (libfuse, squashfuse, zstd, zlib,
+# mimalloc, musl; AppImage-runtime-README.txt lists versions and the corresponding source). They go
+# into the AppImage's third-party-licenses/ next to the package's own; guard.py checks they are there.
+# The zip releases contain no AppImage runtime and do not get them.
+RUNTIME_LICENSES = os.path.join(ROOT, "tools", "release", "appimage-runtime-licenses")
+
+
+def runtime_license_files():
+    return sorted(f for f in os.listdir(RUNTIME_LICENSES) if f.startswith("AppImage-runtime-") and f.endswith(".txt"))
+
+
+def add_runtime_licenses(appdir):
+    licdir = os.path.join(appdir, "third-party-licenses")
+    os.makedirs(licdir, exist_ok=True)
+    names = runtime_license_files()
+    if "AppImage-runtime-README.txt" not in names or len(names) < 2:
+        sys.exit("the AppImage runtime's license texts are missing in " + RUNTIME_LICENSES)
+    for name in names:
+        shutil.copyfile(os.path.join(RUNTIME_LICENSES, name), os.path.join(licdir, name))
+    with open(os.path.join(licdir, "README.txt"), "a") as f:
+        f.write("\nThe AppImage runtime (the first part of the .AppImage file, type2-runtime %s) and what it\n"
+                "links statically: AppImage-runtime-README.txt (components, versions, source), and\n" % RUNTIME_COMMIT)
+        for name in names:
+            if name != "AppImage-runtime-README.txt":
+                f.write("  %s\n" % name)
+
 
 APPRUN = """#!/bin/sh
 # Wind Waker HD (AppImage): start the release's launcher (next to tools/ and sdk/).
@@ -232,6 +261,7 @@ def make_appdir(pkg, appdir):
     with open(os.path.join(appdir, "AppRun"), "w") as f:
         f.write(APPRUN)
     os.chmod(os.path.join(appdir, "AppRun"), 0o755)
+    add_runtime_licenses(appdir)
     with open(os.path.join(appdir, "wwhd.desktop"), "w") as f:
         f.write(DESKTOP)
     if not os.path.isfile(ICON):
