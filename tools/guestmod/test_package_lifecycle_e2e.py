@@ -61,6 +61,13 @@ def required_setup_receipts(database, ident, setup):
     return missing
 
 
+def code_build_folder(data, fingerprint):
+    """code-builds/<first 16 hex digits> (setup's code_mods.cache_name, issue #144), or all 64 digits as
+    releases up to v0.2.12 named it."""
+    short = data / 'code-builds' / fingerprint[:16]
+    return short if short.is_dir() else data / 'code-builds' / fingerprint
+
+
 def selected_build(data, hooks):
     """Verify the launcher's actual selection and its completed cache provenance."""
     active = json.loads((data / 'code-mods-active.json').read_text())
@@ -69,7 +76,7 @@ def selected_build(data, hooks):
     if type(active.get('cached')) is not bool or not isinstance(active.get('seconds'), (int, float)):
         raise ValueError('Selected rebuild lacks cache/timing provenance')
     fingerprint = active['fingerprint']
-    cache = data / 'code-builds' / fingerprint
+    cache = code_build_folder(data, fingerprint)
     executable = Path(active['exe']).resolve()
     if executable.parent != (cache / 'bin').resolve() or not executable.is_file():
         raise ValueError('Selected executable is outside its completed cache')
@@ -255,7 +262,7 @@ def main():
     assert on['selection']['hooks'] is True
     rebuilds['ui-support-on'] = on
     # The UI support rebuild must not replace or rewrite the established off cache.
-    off_cache = data / 'code-builds' / off['selection']['fingerprint']
+    off_cache = code_build_folder(data, off['selection']['fingerprint'])
     assert json.loads((off_cache / 'ready.json').read_text()) == off['ready']
     assert hashlib.sha256(Path(off['executable']).read_bytes()).hexdigest() == off['executable_sha256']
     setup = run('setup-enable-support-on', 1, {'WWHD_TEST_MOD_SETUP': ident,

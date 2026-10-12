@@ -1295,6 +1295,29 @@ class LongPaths(unittest.TestCase):
         self.assertEqual(lp("\\\\.\\pipe\\x"), "\\\\.\\pipe\\x")  # device paths unchanged
         from pathlib import PureWindowsPath
         self.assertEqual(lp(PureWindowsPath("C:\\a\\b")), "\\\\?\\C:\\a\\b")
+        # forward slashes (MSYS2's Python writes them), mixed separators, doubled ones: always backslashes
+        self.assertEqual(lp("D:/a/_temp/msys64/tmp/x/code-builds/bbbb"), "\\\\?\\D:\\a\\_temp\\msys64\\tmp\\x\\code-builds\\bbbb")
+        self.assertEqual(lp("D:\\a/b\\\\c//d"), "\\\\?\\D:\\a\\b\\c\\d")
+        self.assertEqual(lp("//server/share/WWHD/../x"), "\\\\?\\UNC\\server\\share\\x")
+        # a drive root keeps its backslash; ".." never climbs above it
+        for root in ("D:/", "D:\\", "D:", "D:/a/.."):
+            self.assertEqual(lp(root), "\\\\?\\D:\\")
+        self.assertEqual(lp("C:/../.."), "\\\\?\\C:\\")
+        for p in ("C:/x/y", "\\\\server\\share\\y"):
+            self.assertNotIn("/", lp(p))
+            self.assertEqual(setup.plain_path(lp(p)), setup.windows_path(p))
+
+    def test_windows_path(self):
+        self.assertEqual(setup.windows_path("C:/Games//WWHD/./data/"), "C:\\Games\\WWHD\\data")
+        self.assertEqual(setup.windows_path("relative/./dir/../x"), "relative\\x")
+        self.assertEqual(setup.windows_path("//srv/share"), "\\\\srv\\share\\")
+
+    def test_msys2_python_keeps_ordinary_paths(self):
+        # a Python that joins paths with "/" cannot use \\?\ paths (shutil and os.walk append with it)
+        with mock.patch.object(setup, "NATIVE_WINDOWS_PATHS", False):
+            p = "D:/a/_temp/msys64/tmp/x"
+            self.assertIs(setup.longpath(p), p)
+        self.assertEqual(setup.NATIVE_WINDOWS_PATHS, setup.IS_WIN and os.path.join("a", "b") == "a\\b")
 
     def test_longpath_other_platforms_unchanged(self):
         for p in ("/home/player/wwhd", "relative/dir", "C:\\x"):
@@ -1428,9 +1451,11 @@ class LongPaths(unittest.TestCase):
         import zipfile
         top = tempfile.mkdtemp()
         self.addCleanup(lambda: __import__("shutil").rmtree(setup.longpath(top), ignore_errors=True))
-        data = os.path.join(top, "d" * max(1, 120 - len(top) - 1))
+        # deep only where setup uses \\?\ paths (not with MSYS2's Python, see NATIVE_WINDOWS_PATHS)
+        deep = setup.NATIVE_WINDOWS_PATHS or not setup.IS_WIN
+        data = os.path.join(top, "d" * max(1, (120 if deep else 20) - len(top) - 1))
         os.makedirs(data)
-        member = "llvm-mingw-test/" + "/".join(["python-lib-site-packages-%02d" % i for i in range(5)]) + "/deep_module.pyd"
+        member = "llvm-mingw-test/" + "/".join(["python-lib-site-packages-%02d" % i for i in range(5 if deep else 2)]) + "/deep_module.pyd"
         arc = os.path.join(top, "src.zip")
         with zipfile.ZipFile(arc, "w") as z:
             z.writestr(member, b"deep")
@@ -1445,7 +1470,7 @@ class LongPaths(unittest.TestCase):
             tc = setup.get_toolchain("test-mingw", data, setup.UI(False))
         root = os.path.join(data, "toolchain")
         deep = os.path.join(root, *member.split("/"))
-        if setup.IS_WIN:
+        if setup.NATIVE_WINDOWS_PATHS:
             self.assertGreater(len(os.path.join(root, "unpack.tmp", *member.split("/"))), 260)
         with open(setup.longpath(deep), "rb") as f:
             self.assertEqual(f.read(), b"deep")

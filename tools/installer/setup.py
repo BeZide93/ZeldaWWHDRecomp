@@ -99,17 +99,48 @@ DEEPEST_DATA_PATH = 78
 MAX_DATA_DIR_CHARS = WINDOWS_MAX_PATH - 1 - DEEPEST_DATA_PATH  # 180 (the 1: the separator after it)
 
 
+# Extended-length paths need a Python whose own path functions join with backslashes: shutil, os.walk
+# and zipfile append names with os.path.join, and Windows takes a \\?\ path literally ("/" is no
+# separator there). The release's Python is such a one; MSYS2's Python (used by some CI jobs) joins with
+# "/", so there setup keeps ordinary paths.
+NATIVE_WINDOWS_PATHS = IS_WIN and os.path.join("a", "b") == "a\\b"
+
+
+def windows_path(p):
+    """p as a normalised Windows path with backslashes, whatever separator the Python flavour uses (MSYS2's
+    Python writes "/"): no "." or ".." components, no doubled separators; a drive root keeps its backslash."""
+    p = os.fspath(p).replace("/", "\\")
+    if p.startswith("\\\\"):  # \\server\share\...
+        parts = p[2:].split("\\")
+        root, rest = "\\\\" + "\\".join(parts[:2]) + "\\", parts[2:]
+    elif len(p) >= 2 and p[1] == ":":
+        root, rest = p[:2] + "\\", p[2:].split("\\")
+    else:
+        root, rest = "", p.split("\\")
+    out = []
+    for part in rest:
+        if part in ("", "."):
+            continue
+        if part == "..":
+            if out:
+                out.pop()
+            continue
+        out.append(part)
+    return (root + "\\".join(out)) if (root or out) else "."
+
+
 def longpath(p, windows=None):
-    """p for Windows file APIs without the MAX_PATH limit: the absolute, normalised path with the
-    extended-length prefix (\\\\?\\C:\\..., \\\\?\\UNC\\server\\share\\... for a network share).
-    Unchanged on other platforms. Use it only for the file operation itself, never in messages."""
-    if not (IS_WIN if windows is None else windows):
+    """p for Windows file APIs without the MAX_PATH limit: the absolute, normalised path with backslashes
+    and the extended-length prefix (\\\\?\\C:\\..., \\\\?\\UNC\\server\\share\\... for a network share).
+    Unchanged on other platforms and with a Python that joins paths with "/" (NATIVE_WINDOWS_PATHS).
+    windows=True: the string form only (tests simulate Windows anywhere). Use it only for the file operation
+    itself, never in messages."""
+    if not (NATIVE_WINDOWS_PATHS if windows is None else windows):
         return p
-    import ntpath
     p = os.fspath(p)
     if p.startswith(LONGPATH_PREFIX) or p.startswith("\\\\.\\"):
         return p
-    p = ntpath.abspath(p) if IS_WIN else ntpath.normpath(p)  # tests simulate Windows on other systems
+    p = windows_path(os.path.abspath(p) if windows is None else p)
     if p.startswith("\\\\"):  # \\server\share\...
         return LONGPATH_PREFIX + "UNC\\" + p[2:]
     return LONGPATH_PREFIX + p
@@ -142,12 +173,11 @@ def path_length_problem(data_dir, package=None, windows=None):
     release), that is the folder the player moves."""
     if not (IS_WIN if windows is None else windows):
         return None
-    import ntpath
-    data_dir = ntpath.normpath(plain_path(data_dir))
+    data_dir = windows_path(plain_path(data_dir))
     if len(data_dir) <= MAX_DATA_DIR_CHARS:
         return None
-    if package and ntpath.normcase(ntpath.dirname(data_dir)) == ntpath.normcase(ntpath.normpath(package)):
-        package = ntpath.normpath(package)
+    if package and data_dir.rsplit("\\", 1)[0].lower() == windows_path(package).lower():
+        package = windows_path(package)
         limit = MAX_DATA_DIR_CHARS - (len(data_dir) - len(package))
         return ("This folder's path is too long for Windows (%d characters, at most %d work). Move the Wind "
                 "Waker HD folder to a shorter place such as C:\\Games\\WindWakerHD and start it again."

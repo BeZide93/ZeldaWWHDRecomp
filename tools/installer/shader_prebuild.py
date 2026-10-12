@@ -18,13 +18,15 @@ SCHEMA = 1
 
 
 def longpath(path):
-    """setup.longpath (issue #144): an extended-length \\\\?\\ path, so a cache folder is deleted on
-    Windows whatever its depth; unchanged elsewhere. This module also runs on its own (no setup import)."""
-    if os.name != 'nt':
+    """setup.longpath (issue #144): an extended-length \\\\?\\ path with backslashes, so a cache folder is
+    deleted on Windows whatever its depth; unchanged elsewhere and with a Python that joins paths with "/"
+    (MSYS2's). This module also runs on its own (no setup import)."""
+    if os.name != 'nt' or os.path.join('a', 'b') != 'a\\b':
         return path
-    path = os.path.abspath(os.fspath(path))
+    path = os.fspath(path)
     if path.startswith('\\\\?\\') or path.startswith('\\\\.\\'):
         return path
+    path = os.path.abspath(path).replace('/', '\\')
     return '\\\\?\\UNC\\' + path[2:] if path.startswith('\\\\') else '\\\\?\\' + path
 
 
