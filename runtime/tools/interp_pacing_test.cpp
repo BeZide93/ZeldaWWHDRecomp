@@ -329,8 +329,12 @@ static StepSim simulate_steps(int fps, const std::function<int64_t(int)>& logicC
     const uint64_t g = fps >= 240 ? 1 : 2;  // granule: ticks per drawn frame
     const int nMax = fps / 30 - 1;
     const int64_t tick = kClock.granule_ns(g), step = slots ? 2 * kClock.period : 33'333'333, budget = step + 2'000'000;
+    // (std::uniform_int_distribution is implementation-defined: libstdc++ and libc++ draw different
+    // numbers from the same engine, so the simulation would differ between platforms)
     std::mt19937 rng(11);
-    std::uniform_int_distribution<int64_t> wakeDist(0, 300'000), pollDist(0, 250'000);
+    const auto uniform = [&rng](int64_t hi) { return int64_t(rng() % uint32_t(hi + 1)); };  // 0..hi
+    const auto wakeDist = [&uniform](std::mt19937&) { return uniform(300'000); };
+    const auto pollDist = [&uniform](std::mt19937&) { return uniform(250'000); };
     StepSim r;
     int64_t shift = 0, slot = -1, t = kClock.time(64, 0), lastLogic = 0, logicAvg = 16'000'000, holdAvg = 16'000'000;
     uint64_t last = 64;
@@ -507,14 +511,17 @@ static void test_steps_on_vsync() {
             CHECK(gaps(old) > 1);  // (the report)
         }
         // the report's start: a first in-between pass (a probe) of 201 ms. In-between frames within two
-        // seconds, not after the next probe 10 s later.
+        // seconds, as many as later on (seconds 12-19, after the next 10 s probe; these passes are
+        // a little over a frame, so ~90 % of 7 a step), not only after that probe.
         const auto firstHitch = [](int i) { return int64_t(i == 0 ? 201'000'000 : 2'800'000); };
         a = simulate_steps(240, ms(2.8), firstHitch, 20, true, 1'500'000);
         old = simulate_steps(240, ms(2.8), firstHitch, 20, true, 1'500'000, false);
         const int64_t t0 = a.steps.front(), o0 = old.steps.front();
-        std::printf("240 fps, #164 start (201 ms probe): in-between frames drawn in seconds 2-9: %.0f%% (without the retry: %.0f%%)\n",
-                    100 * a.drawn_share(t0 + 2000 * kMs, t0 + 9000 * kMs, 7), 100 * old.drawn_share(o0 + 2000 * kMs, o0 + 9000 * kMs, 7));
-        CHECK(a.drawn_share(t0 + 2000 * kMs, t0 + 9000 * kMs, 7) > 0.9);
+        const double early = a.drawn_share(t0 + 2000 * kMs, t0 + 9000 * kMs, 7), later = a.drawn_share(t0 + 12000 * kMs, t0 + 19000 * kMs, 7);
+        std::printf("240 fps, #164 start (201 ms probe): in-between frames drawn in seconds 2-9: %.1f%%, 12-19: %.1f%% (without the retry: "
+                    "%.0f%%)\n", 100 * early, 100 * later, 100 * old.drawn_share(o0 + 2000 * kMs, o0 + 9000 * kMs, 7));
+        CHECK(later > 0.8);
+        CHECK(early > later - 0.03);
         CHECK(old.drawn_share(o0 + 2000 * kMs, o0 + 9000 * kMs, 7) < 0.05);  // (the report: 0 % until the frame rate was changed)
     }
     // slower than a step (40 ms logic passes): the game runs at the computer's pace (25 steps a
