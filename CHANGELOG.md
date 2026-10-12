@@ -37,6 +37,12 @@ what is on `devel` and not released yet (also in the
   only to the camera, including first-person views and item aiming (bow, hookshot, telescope, Picto Box) and the
   mouse camera (which now follows it too); the baton and other right-stick controls keep their normal direction.
 
+- **Fixed: stutter at 240 fps and a slow start with "Keep game speed"** (issue #164). Since v0.2.13 the game's
+  30 logic steps drifted against the display (59.94 Hz), so every few seconds the in-between frames bunched up and
+  the picture hitched; the steps now follow the display's refresh. A hitch right after starting could also keep
+  all in-between frames off (30 fps) until the frame rate was changed; that measurement is now retried. Slower PCs
+  keep v0.2.13's smoother pacing (#125).
+
 - **Mods tab: Built-in and Community.** The Mods list is split into *Built-in* (the options that come
   with the game, such as the camera and speed options) and *Community* (mods from the mod catalogue,
   installed or ready to download, plus imported packages and graphics packs); *More* is unchanged.
