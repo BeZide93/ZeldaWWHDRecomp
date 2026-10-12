@@ -7,6 +7,10 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Fixed: "Invert camera up/down" also inverted the Wind Waker baton** (issue #167). The setting now applies
+  only to the camera, including first-person views and item aiming (bow, hookshot, telescope, Picto Box) and the
+  mouse camera (which now follows it too); the baton and other right-stick controls keep their normal direction.
+
 - **Mods tab: Built-in and Community.** The Mods list is split into *Built-in* (the options that come
   with the game, such as the camera and speed options) and *Community* (mods from the mod catalogue,
   installed or ready to download, plus imported packages and graphics packs); *More* is unchanged.
