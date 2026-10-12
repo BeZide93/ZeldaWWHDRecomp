@@ -67,4 +67,7 @@ void load_instance_functions(VkInstance instance);
 // khrDynamicRendering: VK_KHR_dynamic_rendering is enabled (the device is older than Vulkan 1.3)
 // renderPasses: do not request dynamic-rendering entry points from the device.
 void load_device_functions(VkDevice device, bool khrDynamicRendering, bool renderPasses=false);
+// Call after loading device functions, before starting any renderer workers.
+// Unaffected devices keep the driver's entry points directly (no per-call check).
+void serialize_pipeline_creation(bool enabled);
 }  // namespace gfxvk

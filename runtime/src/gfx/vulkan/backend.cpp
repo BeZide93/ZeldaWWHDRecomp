@@ -22,6 +22,7 @@
 #include "rendering_path.h"
 #include "stereo.h"
 #include "../hdr.h"
+#include "serial_pipelines.h"
 #include "attachment_view_usage.h"
 #include "../../build_info.h"
 #include "deferred_commands.h"
@@ -3513,6 +3514,17 @@ static void init_device(std::vector<const char *> extensions,
   vk_check(vkCreateDevice(R.physicalDevice, &di, nullptr, &R.device),
            "create Vulkan device");
   load_device_functions(R.device, R.dynamicRenderingKHR, R.renderPasses);
+  VkPhysicalDeviceDriverProperties driver{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES};
+  if (deviceApi >= VK_API_VERSION_1_2 || has_extension(des, VK_KHR_DRIVER_PROPERTIES_EXTENSION_NAME)) {
+    VkPhysicalDeviceProperties2 props{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
+    props.pNext = &driver;
+    vkGetPhysicalDeviceProperties2(R.physicalDevice, &props);
+  }
+  const bool serialPipelines = serial_pipelines_wanted(driver.driverID, R.properties.driverVersion,
+                                                     getenv("WWHD_SERIAL_PIPELINES"));
+  serialize_pipeline_creation(serialPipelines);
+  if (serialPipelines)
+    LOG("[vulkan] serial pipeline creation enabled (WWHD_SERIAL_PIPELINES=0 disables it)");
   init_pass_caches();
   vkGetDeviceQueue(R.device, R.queueFamily, 0, &R.queue);
 #ifdef __ANDROID__
