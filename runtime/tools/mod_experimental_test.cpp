@@ -6,9 +6,14 @@
 #include "mods/packages.h"
 #include "mods/save_backup.h"
 #include <chrono>
+#include <cstddef>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#ifdef _WIN32
+#include <winioctl.h>
+#endif
 
 namespace fs = std::filesystem;
 using namespace mods;
@@ -27,6 +32,53 @@ std::string read(const fs::path& file) {
 void write(const fs::path& file, const std::string& text) {
     fs::create_directories(file.parent_path());
     std::ofstream(file, std::ios::binary) << text;
+}
+// Prefer a symbolic link. On Windows without the symlink privilege, a junction still
+// exercises refusal to delete a directory that redirects outside the backup store.
+bool directory_link(const fs::path& target, const fs::path& link) {
+    std::error_code ec;
+    fs::create_directory_symlink(target, link, ec);
+    if (!ec) return true;
+#ifdef _WIN32
+    if (ec.value() == ERROR_PRIVILEGE_NOT_HELD) {
+        auto print = fs::absolute(target).make_preferred().wstring();
+        auto substitute = print.starts_with(L"\\\\") ? L"\\??\\UNC\\" + print.substr(2) : L"\\??\\" + print;
+        struct {
+            DWORD tag;
+            WORD length, reserved;
+            WORD substitute_offset, substitute_length, print_offset, print_length;
+            wchar_t paths[8192];
+        } data{};
+        static_assert(offsetof(decltype(data), paths) == 16);
+        auto path_bytes = (substitute.size() + print.size() + 2) * sizeof(wchar_t);
+        assert(offsetof(decltype(data), paths) + path_bytes <= MAXIMUM_REPARSE_DATA_BUFFER_SIZE);
+        data.tag = IO_REPARSE_TAG_MOUNT_POINT;
+        data.length = WORD(8 + path_bytes);
+        data.substitute_length = WORD(substitute.size() * sizeof(wchar_t));
+        data.print_offset = WORD((substitute.size() + 1) * sizeof(wchar_t));
+        data.print_length = WORD(print.size() * sizeof(wchar_t));
+        std::memcpy(data.paths, substitute.c_str(), data.substitute_length + sizeof(wchar_t));
+        std::memcpy(data.paths + substitute.size() + 1, print.c_str(), data.print_length + sizeof(wchar_t));
+        assert(fs::create_directory(link));
+        HANDLE handle = CreateFileW(link.c_str(), GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
+                                    FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+        DWORD failure = ERROR_SUCCESS, returned = 0;
+        if (handle == INVALID_HANDLE_VALUE) failure = GetLastError();
+        else {
+            if (!DeviceIoControl(handle, FSCTL_SET_REPARSE_POINT, &data, 8 + data.length,
+                                 nullptr, 0, &returned, nullptr)) failure = GetLastError();
+            CloseHandle(handle);
+        }
+        if (failure) {
+            RemoveDirectoryW(link.c_str());
+            throw fs::filesystem_error("create test junction", target, link,
+                                       std::error_code(failure, std::system_category()));
+        }
+        std::cout << "symlink privilege unavailable; testing an NTFS junction\n";
+        return false;
+    }
+#endif
+    throw fs::filesystem_error("create test directory symlink", target, link, ec);
 }
 packages::View view(const std::string& id) {
     for (auto v : packages::list()) if (v.id == id) return v;
@@ -218,10 +270,16 @@ void deletion() {
     write(root / "outside/backup.json", R"({"format_version":1,"reason":"manual","created":1})");
     assert(!store.remove("../outside", error) && fs::exists(root / "outside/backup.json"));
     assert(!store.remove("", error) && !store.remove(".", error) && !store.remove("..", error));
-    fs::create_directory_symlink(root / "outside", store.root() / "2026-01-01_00-00-00-manual");
+    auto link = store.root() / "2026-01-01_00-00-00-manual";
+    auto metadata = read(root / "outside/backup.json");
+    bool symbolic = directory_link(root / "outside", link);
+    assert(fs::equivalent(link, root / "outside"));
     assert(!store.remove("2026-01-01_00-00-00-manual", error));
-    assert(fs::exists(root / "outside/backup.json") && fs::is_symlink(store.root() / "2026-01-01_00-00-00-manual"));
-    fs::remove(store.root() / "2026-01-01_00-00-00-manual");
+    assert(error == "Could not delete the backup: Not a save backup");
+    assert(read(root / "outside/backup.json") == metadata && fs::equivalent(link, root / "outside"));
+    if (symbolic) assert(fs::is_symlink(link));
+    assert(fs::remove(link));
+    assert(read(root / "outside/backup.json") == metadata);
     // a failed rename leaves the backup complete and listed
     auto again = store.create("manual");
     store.move = [](const fs::path&, const fs::path&) { throw std::runtime_error("permission denied"); };
