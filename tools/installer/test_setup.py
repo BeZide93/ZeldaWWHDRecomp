@@ -1476,7 +1476,8 @@ class LongPaths(unittest.TestCase):
             self.assertEqual(f.read(), b"deep")
         self.assertEqual(tc.cc, [os.path.join(root, "llvm-mingw-test", "bin", "x86_64-w64-mingw32-clang.exe")])
         self.assertEqual(sorted(os.listdir(root)), ["llvm-mingw-test"])  # no unpack.tmp, no archive left
-        self.assertEqual(setup.folder_size(root), 4 + len(sha) + 1)  # the deep file and the marker
+        marker = os.path.join(root, "llvm-mingw-test", ".wwhd-toolchain")  # text mode: "\r\n" on Windows
+        self.assertEqual(setup.folder_size(root), 4 + os.path.getsize(setup.longpath(marker)))  # the deep file and the marker
         with mock.patch.object(setup, "say"):
             setup.remove_toolchain(data)
         self.assertFalse(os.path.exists(root))
