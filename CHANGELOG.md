@@ -34,6 +34,10 @@ what is on `devel` and not released yet (also in the
   8 MB, only when the option is on) from its GitHub repository and checks it before use; the release
   itself does not contain it. The decomp build now uses the readable decompilation; its model data is
   generated from your game at build time. Regular releases are unchanged.
+
+- **Fixed: unreadable shoulder labels on the HUD** (issue #143). With *L1 R1 L2 R2* or *LB RB LT RT* as
+  shoulder names, the labels on the HUD's shoulder buttons were white on the white plates; they are now dark
+  like the game's own letters again (and dim the same way). Dialog labels are unchanged.
 - **Experimental: build the game from the decompilation** (macOS, for developers). The CMake option
   `WWHD_DECOMP=ON` compiles the game code from the public, verified decompilation
   ([ZeldaWWHDDecomp/wwhd](https://github.com/ZeldaWWHDDecomp/wwhd), a submodule in `decomp/`) instead of
