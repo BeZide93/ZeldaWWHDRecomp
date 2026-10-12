@@ -32,6 +32,11 @@ struct Clicker {
     void click(const std::string& name){if(target.empty()){target=name;phase=0;}}
     bool busy()const{return !target.empty();}
 };
+// the review is open (whatever ID stack the tab opened it from)
+bool review_open() {
+    for(const auto& popup:GImGui->OpenPopupStack)if(popup.Window&&strstr(popup.Window->Name,"###mods_review"))return true;
+    return false;
+}
 void set_env(const char* key,const std::string& value) {
 #ifdef _WIN32
     _putenv_s(key,value.c_str());
@@ -83,6 +88,21 @@ int main(int argc,char** argv) {
     io.ConfigFlags=ImGuiConfigFlags_NavEnableKeyboard|ImGuiConfigFlags_NavEnableGamepad;io.BackendFlags|=ImGuiBackendFlags_HasGamepad;
     // the overlay's font where the test machine has it (WWHD_TEST_FONT=<ttf>), for captures that look like the game
     if(const char* font=getenv("WWHD_TEST_FONT"))if(fs::is_regular_file(font)){io.Fonts->AddFontFromFileTTF(font,17.0f);ImGui::GetStyle().FontSizeBase=17.0f;}
+    // WWHD_TEST_ANDROID_STYLE=1: the overlay's Android touch style and near-full-screen Settings window (with
+    // WWHD_TEST_DISPLAY at the logical size a phone gets from mobile_ui::scale, e.g. UI size Large)
+    const bool android_style=getenv("WWHD_TEST_ANDROID_STYLE")!=nullptr;
+    if(android_style){auto& st=ImGui::GetStyle();st.FramePadding=ImVec2(10,16);st.ItemInnerSpacing=ImVec2(10,8);st.ScrollbarSize=49;st.GrabMinSize=49;}
+    // the rest of the Settings window around the tab: the settings tabs above; on Android the page ends
+    // above the full-width "Close Settings" button
+    auto draw_tab=[&](ui::Host& h) {
+        if(ImGui::BeginTabBar("settings_tabs")){for(const char* t:{"Saves","Graphics","Display","Audio","Mods","Controls"})
+            if(ImGui::BeginTabItem(t,nullptr,std::string(t)=="Mods"?ImGuiTabItemFlags_SetSelected:0))ImGui::EndTabItem();ImGui::EndTabBar();}
+        ImGui::BeginChild("page",ImVec2(0,android_style?-ImGui::GetFrameHeightWithSpacing():0),ImGuiChildFlags_NavFlattened);
+        ui::draw(h,"");
+        ImGui::EndChild();
+        if(android_style)ImGui::Button("Close Settings",ImVec2(-FLT_MIN,0));
+    };
+    auto window_size=[&]{return android_style?ImVec2(width*0.98f,height*0.97f):ImVec2(std::min(860.f,width*0.94f),std::min(620.f,height*0.92f));};
     assert(ImGui_ImplSDLRenderer3_Init(renderer));
     ui::Host host;
     host.port_version=mods::catalogue::Version::parse("0.2.10");
@@ -115,13 +135,13 @@ int main(int argc,char** argv) {
         ImGui_ImplSDLRenderer3_NewFrame();ImGui::NewFrame();setup_run_tick();ui::tick(host,true);
         // the settings window as the overlay sizes it
         ImGui::SetNextWindowPos(ImVec2(width*0.5f,height*0.5f),ImGuiCond_Always,ImVec2(0.5f,0.5f));
-        ImGui::SetNextWindowSize(ImVec2(std::min(860.f,width*0.94f),std::min(620.f,height*0.92f)));
+        ImGui::SetNextWindowSize(window_size());
         ImGui::Begin("Settings",nullptr,ImGuiWindowFlags_NoResize|ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoCollapse);
         {auto& rects=ui::state().rects;blue_seen=rects.count("choice_colour_blue");if(blue_seen)blue_last=rects["choice_colour_blue"];rects.erase("choice_colour_blue");}
-        bool had_review=ImGui::IsPopupOpen("###mods_review",ImGuiPopupFlags_AnyPopupLevel);
+        bool had_review=review_open();
         host.back=false;
-        ui::draw(host,"");
-        bool has_review=ImGui::IsPopupOpen("###mods_review",ImGuiPopupFlags_AnyPopupLevel);
+        draw_tab(host);
+        bool has_review=review_open();
         ImGui::End();
         if(has_review&&!had_review){++confirmations;review_since=frame;}
         auto& s=ui::state();auto& f=s.job.flow;
@@ -224,9 +244,9 @@ int main(int argc,char** argv) {
             for(int i=0;i<count;i++) {
                 ImGui_ImplSDLRenderer3_NewFrame();ImGui::NewFrame();setup_run_tick();ui::tick(host,true);
                 ImGui::SetNextWindowPos(ImVec2(width*0.5f,height*0.5f),ImGuiCond_Always,ImVec2(0.5f,0.5f));
-                ImGui::SetNextWindowSize(ImVec2(std::min(860.f,width*0.94f),std::min(620.f,height*0.92f)));
+                ImGui::SetNextWindowSize(window_size());
                 ImGui::Begin("Settings",nullptr,ImGuiWindowFlags_NoResize|ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoCollapse);
-                ui::draw(host,"");ImGui::End();
+                draw_tab(host);ImGui::End();
                 if(clicker.busy())clicker.step(io);
                 ImGui::Render();SDL_SetRenderDrawColor(renderer,20,23,29,255);SDL_RenderClear(renderer);
                 ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(),renderer);SDL_RenderPresent(renderer);
