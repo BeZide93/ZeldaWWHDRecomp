@@ -4,6 +4,7 @@
 #pragma once
 #include <cstdint>
 #include <string>
+#include <functional>
 
 namespace gfxvk {
 void peek_z(const uint32_t*, uint32_t);
@@ -33,6 +34,7 @@ void request_tv_dump(const std::string& path, int frames_ahead);
 void request_capture();
 void ss_reset_surfaces();
 void save_renderer_caches();
+std::function<void()> background_renderer_caches(); // completion wait, outside the execution lock
 void shutdown_renderer_caches();
 int renderer_smoke_test();
 std::string device_description();  // "<GPU>, driver <version>, Vulkan <version>" ("" before init)

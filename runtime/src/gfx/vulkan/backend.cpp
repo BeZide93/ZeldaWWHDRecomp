@@ -90,7 +90,7 @@
 #endif
 #include <vulkan/vulkan_beta.h>
 
-namespace gx2 { uint64_t flips_presented(); void checkpoint_vulkan_caches(); void shutdown_vulkan_caches(); }
+namespace gx2 { uint64_t flips_presented(); void checkpoint_vulkan_caches(); void shutdown_vulkan_caches(); void request_background_vulkan_cache_checkpoint(); }
 #include "../../interp.h"
 
 namespace gfxvk {
@@ -315,7 +315,15 @@ struct PipelineCacheWriteResult {
   double elapsedMs = 0, checksumMs = 0;
   std::string error;
 };
-std::future<PipelineCacheWriteResult> pipelineCacheWrite;
+std::shared_future<PipelineCacheWriteResult> pipelineCacheWrite;
+uint64_t pipelineCacheMergeRevision = 0;
+uint64_t cache_revision() { return R.pipelineCreates + pipelineCacheMergeRevision; }
+void merge_live_pipeline_caches(bool wait) {
+  if (!R.pipelineCache || pipelineCachePath.empty()) return;
+  const bool demand = merge_pipeline_demand_cache(R.pipelineCache, wait);
+  const bool warm = merge_pipeline_worker_cache(R.pipelineCache, wait);
+  if (demand || warm) { ++pipelineCacheMergeRevision; R.pipelineCacheDirty = true; }
+}
 // File work owns immutable bytes and a copied path. It never accesses Vulkan
 // objects, renderer state, or render-thread logging.
 PipelineCacheWriteResult write_pipeline_cache(std::vector<uint8_t> bytes,
@@ -359,9 +367,11 @@ void poll_pipeline_cache_write(bool wait) {
   if (!pipelineCacheWrite.valid()) return;
   if (!wait && pipelineCacheWrite.wait_for(std::chrono::seconds(0)) !=
                    std::future_status::ready) return;
-  auto result=pipelineCacheWrite.get();
+  auto completed = std::move(pipelineCacheWrite);
+  pipelineCacheWrite = {};
+  auto result=completed.get();
   // A newer pipeline, even in the same guest frame, must remain dirty.
-  if (result.written && result.revision==R.pipelineCreates &&
+  if (result.written && result.revision==cache_revision() &&
       result.changedFrame==R.pipelineCacheChangedFrame)
     R.pipelineCacheDirty=false;
   if (result.written && perf_enabled())
@@ -383,14 +393,21 @@ void start_pipeline_cache_write() {
   bytes.resize(size);
   if (!compatible_pipeline_cache(bytes)) return;
   pipelineCacheWrite=std::async(std::launch::async,write_pipeline_cache,
-      std::move(bytes),pipelineCachePath,R.pipelineCreates,R.pipelineCacheChangedFrame);
+      std::move(bytes),pipelineCachePath,cache_revision(),R.pipelineCacheChangedFrame).share();
 }
 void checkpoint_pipeline_cache() try {
+  if (!R.pipelineCache || pipelineCachePath.empty()) return;
   poll_pipeline_cache_write(false);
-  if (R.pipelineCacheDirty && R.frame-R.pipelineCacheChangedFrame>=120 &&
-      R.frame-pipelineCacheAttemptFrame>=120 && !pipelineCacheWrite.valid()) {
-    pipelineCacheAttemptFrame=R.frame;
-    start_pipeline_cache_write();
+  if (R.frame-pipelineCacheAttemptFrame>=120 && !pipelineCacheWrite.valid()) {
+    const bool quiet = R.frame-R.pipelineCacheChangedFrame>=120;
+    const bool overdue = R.frame-pipelineCacheAttemptFrame>=1800;
+    // Probe worker caches even if utility pipelines never dirtied R's cache.
+    // Do not stall rendering on an in-flight native pipeline compile.
+    if (quiet || overdue) {
+      pipelineCacheAttemptFrame=R.frame;
+      merge_live_pipeline_caches(false);
+      start_pipeline_cache_write();
+    }
   }
 } catch (const std::exception& error) {
   LOG("[vulkan cache] checkpoint skipped after error: %s",error.what());
@@ -402,8 +419,10 @@ void save_pipeline_cache(bool shutdown) try {
   drain_pending_guest_pipelines();
   if(shutdown) save_pipeline_recipes();
   else checkpoint_pipeline_recipes();
-  if (finish_pipeline_demand(R.pipelineCache)) R.pipelineCacheDirty = true;
-  if (merge_pipeline_worker_cache(R.pipelineCache)) R.pipelineCacheDirty = true;
+  if (shutdown && finish_pipeline_demand(R.pipelineCache)) {
+    ++pipelineCacheMergeRevision; R.pipelineCacheDirty = true;
+  }
+  merge_live_pipeline_caches(true);
   poll_pipeline_cache_write(true);
   start_pipeline_cache_write();
   poll_pipeline_cache_write(true);
@@ -1435,6 +1454,10 @@ static void recreate_surface(Screen &s) {
 // App lifecycle: called by SDL as the events happen, on the thread that sends them; SDL's
 // documentation asks for an event watch here (the queue is not read while the app is paused).
 static bool SDLCALL lifecycle_watch(void *, SDL_Event *event) {
+  if (event->type == SDL_EVENT_WILL_ENTER_BACKGROUND) {
+    try { gx2::request_background_vulkan_cache_checkpoint(); }
+    catch (const std::exception& error) { LOG("[vulkan cache] background request skipped: %s", error.what()); }
+  }
   if (event->type == SDL_EVENT_WILL_ENTER_BACKGROUND || event->type == SDL_EVENT_DID_ENTER_BACKGROUND) {
     if (!surfaceLost.exchange(true))
       LOG("[vulkan] app in the background: presentation paused");
@@ -3703,6 +3726,16 @@ void save_renderer_caches() {
   wait_idle();
   vk::save_shader_cache();
   save_pipeline_cache(false);
+}
+std::function<void()> background_renderer_caches() {
+  // Capture host cache bytes under the GX2 lock. File work and the returned
+  // completion wait own immutable state and run after releasing that lock.
+  // No surface, command-buffer or GPU-idle wait during Android suspension.
+  if (!R.device) return {};
+  merge_live_pipeline_caches(true);
+  poll_pipeline_cache_write(false);
+  start_pipeline_cache_write();
+  return [write = pipelineCacheWrite] { if (write.valid()) write.wait(); };
 }
 void shutdown_renderer_caches() {
   // Destructive teardown is reserved for orderly shutdown under execution lock.
