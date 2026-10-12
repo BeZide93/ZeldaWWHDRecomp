@@ -83,4 +83,9 @@ def main():
 
 
 if __name__ == "__main__":
+    if os.name == "nt" or sys.platform in ("cygwin", "msys"):
+        # AppRun is a Linux shell script; MSYS2's sh rewrites HOME and paths into Windows form,
+        # so the comparisons below don't apply there (the AppImage only runs on Linux)
+        print("AppRun test skipped on Windows")
+        sys.exit(0)
     main()
