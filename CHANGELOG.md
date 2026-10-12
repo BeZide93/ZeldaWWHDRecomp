@@ -12,6 +12,10 @@ what is on `devel` and not released yet (also in the
   touch screens; setup's own step reads "Reading shaders from your game files" so it doesn't look skippable, and its
   notification brings setup back to the front; after an app update, setup shows "Updating the game for the new version".
 
+- **Fixed: the boat barely turned with "Sailing speed" on** (issue #169). The game turns the boat more slowly the
+  faster it sails, so the boosted speed hit its minimum turn rate. The rudder now responds like at normal speed for
+  both sails, while the boat keeps its boosted speed; automatic wind and the jump height are unchanged.
+
 - **Fixed: "Invert camera up/down" also inverted the Wind Waker baton** (issue #167). The setting now applies
   only to the camera, including first-person views and item aiming (bow, hookshot, telescope, Picto Box) and the
   mouse camera (which now follows it too); the baton and other right-stick controls keep their normal direction.
