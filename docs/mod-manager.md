@@ -34,8 +34,8 @@ the menu) and select **Mods**. It has two areas (L / R on a controller move betw
 them, then on to the neighbouring settings tabs):
 
 - **Mods**: one list of every mod, each with an on/off switch and a one-word
-  status (*On*, *Off*, *Needs setup*, *Installing… 45%*, *Restart to apply*,
-  *Update available*, *Error*). First the mods you can use now: the built-in ones
+  status (*On*, *Off*, *Needs setup*, *Installing… 45%* while it is downloaded,
+  *Setting up… 45%* after that, *Restart to apply*, *Update available*, *Error*). First the mods you can use now: the built-in ones
   (direct camera, mouse camera, first-person shortcut, wall climbing, run/swim
   speed, faster ladders, faster sidling, sailing speed, automatic wind, quick
   doors, fast forward and fast scene changes; all off by default) and
@@ -580,8 +580,15 @@ A mod that isn't downloaded yet shows *Not downloaded* with its download size
 (and "code mod" where that applies); its page has the description and, under
 Details, version, authors, licences and the kind of mod. Incompatible entries say
 "Not available for this version of the game." next to a switch that can't be
-used. Update is offered on the mod's page for a newer three-part version while
-the mod is off and not loaded, and uses the same review and progress view.
+used. Update is offered on the mod's page for a newer three-part version and uses the
+same review and progress view. An update ends in the mod's state before it: a mod
+that is off is downloaded, checked and prepared (its tools run; its code mod is
+built when code-mod support is there, otherwise when it is switched on) and stays
+off ("… is updated. It stays off."); a mod that is on is offered the update only
+where it can be switched off and on while the game runs (native and settings
+mods): it is switched off for the update and on again at the end. A mod loaded at
+the next start (code mods, content and graphics packs) is switched off first, and
+updated after the restart that unloads it.
 Install verifies the downloaded size and SHA-256 plus package/index metadata,
 then uses the manager's atomic installer, then continues with the setup and
 switches the mod on.

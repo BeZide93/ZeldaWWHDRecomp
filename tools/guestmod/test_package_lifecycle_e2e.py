@@ -250,13 +250,16 @@ def main():
                         'observed_executable': observed_executable}
         return text
 
-    installed = run('install-support-off', 0, {'WWHD_MOD_CATALOGUE': str(args.out / 'catalogue/index.json'),
-                    'WWHD_TEST_CATALOGUE_INSTALL': ident, 'WWHD_TEST_CODE_MOD_REBUILD': '1'},
-                    done_marker='[code mods] rebuild ready; restart required')
-    assert '[catalogue] refreshed ' in installed and '[catalogue] installed ' + ident in installed
-    assert '[code mods] rebuild ready; restart required' in installed
-    assert not profile(allow_default=True).get('enabled', {}).get(ident, False)
-    assert not phases['install-support-off']['guest_loaded']
+    # One run, as a player does it: the catalogue mod is switched on (the test aid accepts the review), it is
+    # downloaded, its setup adds code-mod support (the game relaunches itself into the hook-enabled build),
+    # resumes there, prepares, builds and switches the mod on; it is active from the next start.
+    setup = run('install-setup-enable', 0, {'WWHD_MOD_CATALOGUE': str(args.out / 'catalogue/index.json'),
+                'WWHD_TEST_CATALOGUE_INSTALL': ident, 'WWHD_TEST_MOD_SETUP': ident,
+                'WWHD_TEST_GAME_SOURCES': str(sources)},
+                done_marker='[setup run] enabled ' + ident, want_enabled=True)
+    assert '[catalogue] refreshed ' in setup and '[catalogue] installed ' + ident in setup
+    assert '[code mods] rebuild ready; restart required' in setup and 'Continuing setup of ' in setup
+    assert '[setup test] failed ' not in setup
     on = selected_build(data, True)
     assert on['selection']['fingerprint'] != off['selection']['fingerprint']
     assert on['selection']['hooks'] is True
@@ -265,12 +268,9 @@ def main():
     off_cache = code_build_folder(data, off['selection']['fingerprint'])
     assert json.loads((off_cache / 'ready.json').read_text()) == off['ready']
     assert hashlib.sha256(Path(off['executable']).read_bytes()).hexdigest() == off['executable_sha256']
-    setup = run('setup-enable-support-on', 1, {'WWHD_TEST_MOD_SETUP': ident,
-                'WWHD_TEST_GAME_SOURCES': str(sources), 'WWHD_TEST_MOD_ENABLE': ident},
-                done_marker='[setup test] ready ' + ident, want_enabled=True)
-    assert '[setup test] ready ' + ident in setup and '[setup test] failed ' not in setup
     assert not required_setup_receipts(database(), ident, entry.get('setup', []))
-    assert profile()['enabled'][ident] and not phases['setup-enable-support-on']['guest_loaded']
+    assert profile()['enabled'][ident] and not phases['install-setup-enable']['guest_loaded']
+    assert not profile().get('setup_pending', {})
     prepared = database()['guest_prepared'][ident]
     assert prepared['build'] == args.region and Path(prepared['module']).is_file()
     region = database()['guest_regions'][ident]

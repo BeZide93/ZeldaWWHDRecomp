@@ -38,8 +38,11 @@ static void rows() {
     f = {};
     f.working = true;
     f.percent = 45.4;
-    assert(row(f).status == Status::Installing && row(f).text == "Installing… 45%" && !row(f).switch_enabled &&
+    // "Installing" only while downloading; "Setting up" once it is downloaded
+    assert(row(f).status == Status::Installing && row(f).text == "Setting up… 45%" && !row(f).switch_enabled &&
            !row(f).switch_reason.empty());  // never a disabled control without the reason
+    f.downloading = true;
+    assert(row(f).text == "Installing… 45%");
     f = {};
     f.update_available = true;
     assert(row(f).status == Status::UpdateAvailable && row(f).text == "Update available");
@@ -97,12 +100,18 @@ static void pages() {
     f.update_available = true;
     p = page(f);
     assert(p.setup_summary == "Setting up…" && !p.offer_run_again && !p.offer_update && !p.update_line.empty() && !p.remove_line.empty());
-    // update offered only while off and unloaded
+    // update: offered while off and unloaded, or while on for a mod that can be switched off and on live
     f = {};
     f.update_available = true;
     assert(page(f).offer_update);
     f.enabled = true;
     assert(!page(f).offer_update && page(f).update_line == "Switch the mod off first to update it.");
+    f.live = true;
+    assert(page(f).offer_update && page(f).update_line.empty());
+    f.enabled = false;
+    f.active = true;  // off, still loaded until a restart (a mod loaded at start)
+    f.live = false;
+    assert(!page(f).offer_update && page(f).update_line == kOffAfterRestart);
     // built-in mods: no setup, no update, no remove
     f = {};
     f.builtin = true;
@@ -175,6 +184,25 @@ static void flow() {
     f.retry(5200);
     f.fail("x", "y");
     assert(f.phase == Phase::Done);
+    // an update ends in the mod's state before it: off stays off (no Switch on), on is switched off first and
+    // on again at the end
+    Plan off_update;
+    off_update.download = true;
+    off_update.prepare = {"Prepare"};
+    off_update.keep_off = true;
+    off_update.restart = true;
+    Flow u = Flow::make("m", "M", off_update);
+    assert(u.steps.size() == 3 && u.steps.back().kind == StepKind::Prepare && u.keep_off && !u.restart_needed);
+    u.accept(0);
+    u.finish(false, 1);
+    assert(u.phase == Phase::Done && u.keep_off);
+    Plan on_update;
+    on_update.download = true;
+    on_update.switch_off = true;
+    Flow o = Flow::make("m", "M", on_update);
+    assert(o.steps.size() == 4 && o.steps.front().kind == StepKind::SwitchOff && o.steps.back().kind == StepKind::SwitchOn && !o.keep_off);
+    o.accept(0);
+    assert(o.current() == 0 && o.steps[0].title == "Switch off for the update");
     // a mod that needs nothing: just Switch on
     Flow s = Flow::make("plain", "Plain", Plan{});
     assert(s.steps.size() == 1 && s.steps[0].kind == StepKind::SwitchOn && s.steps[0].title == "Switch on");

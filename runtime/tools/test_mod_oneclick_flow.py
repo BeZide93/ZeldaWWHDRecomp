@@ -33,16 +33,29 @@ def run(root, ident, mode):
                                dict(id='colour', name='Colour', type='enum', default='green', choices=['green', 'blue'])]
         manifest['setup'][:0] = [dict(id='consent', type='confirm', title='Prepare the heart ticker', option='consent'),
                                 dict(id='colour', type='choice', title='Choose a colour', option='colour', choices=['green', 'blue'])]
-    (source / 'manifest.json').write_text(json.dumps(manifest))
+    if mode == 'update-on':  # a mod that applies live (a settings preset): updated while it is on
+        manifest = dict(format_version=1, id=ident, name='Quick doors preset', version='1.0.0', game_id='wwhd-usa',
+                        kind='settings', settings={'quick-doors': True})
     (source / 'mod.elf').write_bytes(b'\x7fELF\x01\x02')
-    archive = root / 'package.zip'
-    with zipfile.ZipFile(archive, 'w') as package:
-        for item in source.rglob('*'):
-            if item.is_file():
-                package.write(item, item.relative_to(source))
-    entry = dict(id=ident, name=manifest['name'], description='Authored synthetic setup fixture', version='1.0.0', kind='guest',
-                 authors=['Fixture'], licences=['MPL-2.0'], port_versions=dict(minimum='0.2.10'), setup=manifest['setup'],
-                 downloads=dict(all=dict(url='package.zip', size=archive.stat().st_size, sha256=hashlib.sha256(archive.read_bytes()).hexdigest())))
+
+    def package(version, name):
+        manifest['version'] = version
+        (source / 'manifest.json').write_text(json.dumps(manifest))
+        archive = root / name
+        with zipfile.ZipFile(archive, 'w') as package:
+            for item in source.rglob('*'):
+                if item.is_file() and (manifest['kind'] == 'guest' or item.name == 'manifest.json'):
+                    package.write(item, item.relative_to(source))
+        return dict(id=ident, name=manifest['name'], description='Authored synthetic setup fixture', version=version,
+                    kind=manifest['kind'], authors=['Fixture'], licences=['MPL-2.0'], port_versions=dict(minimum='0.2.10'),
+                    setup=manifest.get('setup', []),
+                    downloads=dict(all=dict(url=name, size=archive.stat().st_size, sha256=hashlib.sha256(archive.read_bytes()).hexdigest())))
+    if mode.startswith('update'):
+        # the installed version; the catalogue offers 1.1.0
+        (root / 'installed-index.json').write_text(json.dumps(dict(format_version=1, mods=[package('1.0.0', 'package-1.0.0.zip')])))
+        entry = package('1.1.0', 'package.zip')
+    else:
+        entry = package('1.0.0', 'package.zip')
     (root / 'index.json').write_text(json.dumps(dict(format_version=1, mods=[entry])))
     header = bytearray(32); header[:6] = b'GZLE01'; header[28:32] = b'\xc2\x33\x9f\x3d'
     (root / 'synthetic.iso').write_bytes(header)
@@ -94,17 +107,18 @@ path=pathlib.Path(a.code_mods_status);temporary=path.with_suffix('.tmp');tempora
     while not (root / 'flow-result.json').exists() and time.monotonic() < deadline:
         time.sleep(.02)
     final = json.loads((root / 'flow-result.json').read_text())
-    assert final['enabled'] is (mode not in ('missing', 'cancel', 'cancel-rebuild'))
+    switched_on = mode not in ('missing', 'cancel', 'cancel-rebuild', 'update-off')
+    assert final['enabled'] is switched_on
     if mode == 'restart':
         assert final['resumed'] and final['confirmations'] == 0
     assert (root / 'consent-count').read_text() == '1'
     database = json.loads((root / 'manager/profiles.json').read_text())
     profile = database['profiles']['Default']
-    assert profile.get('enabled', {}).get(ident, False) is (mode not in ('missing', 'cancel', 'cancel-rebuild'))
+    assert profile.get('enabled', {}).get(ident, False) is switched_on
     assert not profile.get('setup_pending', {})
     if mode == 'choice':
         assert profile['config'][ident] == dict(consent=True, colour='blue')
-    if mode != 'missing':
+    if mode not in ('missing', 'update-on'):  # a settings preset runs no code: nothing to trust
         assert database['native_trust'][ident]
         if ident == 'gc-sea-minimap':
             assert database['setup_receipts'][ident]['prepare']
@@ -112,7 +126,8 @@ path=pathlib.Path(a.code_mods_status);temporary=path.with_suffix('.tmp');tempora
 scenarios = [('gc-sea-minimap', 'normal'), ('heart-ticker', 'normal'), ('gc-sea-minimap', 'restart'),
              ('heart-ticker', 'restart'), ('gc-sea-minimap', 'broken'), ('gc-sea-minimap', 'missing'),
              ('gc-sea-minimap', 'checkbox'), ('heart-ticker', 'checkbox'), ('gc-sea-minimap', 'cancel'), ('heart-ticker', 'choice'),
-             ('gc-sea-minimap', 'catalogue'), ('heart-ticker', 'catalogue'), ('gc-sea-minimap', 'cancel-rebuild')]
+             ('gc-sea-minimap', 'catalogue'), ('heart-ticker', 'catalogue'), ('gc-sea-minimap', 'cancel-rebuild'),
+             ('gc-sea-minimap', 'update-off'), ('quick-preset', 'update-on')]
 if retained:
     for ident, mode in scenarios:
         run(retained / (ident + '-' + mode), ident, mode)

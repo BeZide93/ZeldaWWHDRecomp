@@ -28,6 +28,7 @@ struct Facts {
     bool compatible = true;
     bool needs_setup = false;       // a required setup step is not done, or the GameCube game is missing
     bool working = false;           // install / setup of this mod is running
+    bool downloading = false;       // ... and it is being downloaded (Installing), not set up (Setting up)
     double percent = 0;             // 0..100 while working
     bool failed = false;            // its install / setup stopped with an error
     std::string error;              // load / package problem (empty: none)
@@ -36,7 +37,7 @@ struct Facts {
 
 struct Row {
     Status status = Status::Off;
-    std::string text;       // "On", "Needs setup", "Installing… 45%", ...
+    std::string text;       // "On", "Needs setup", "Installing… 45%", "Setting up… 45%", ...
     bool switch_on = false;
     bool switch_enabled = true;
     std::string switch_reason;  // why the switch can't be used (shown next to it), empty when it can
@@ -53,7 +54,7 @@ inline Row row(const Facts& f) {
     r.switch_on = f.enabled;
     if (f.working) {
         r.status = Status::Installing;
-        r.text = "Installing… " + percent_text(f.percent);
+        r.text = (f.downloading ? "Installing… " : "Setting up… ") + percent_text(f.percent);
         r.switch_enabled = false;
         r.switch_reason = "Wait until it is installed.";
     } else if (f.failed || !f.error.empty() || !f.compatible) {
@@ -97,6 +98,8 @@ struct PageFacts {
     bool working = false;        // its install / setup is running
     bool can_restart = true;     // the game can relaunch itself (not on Android)
     bool update_available = false;
+    bool live = false;           // the mod applies without a restart (native code, settings): an update can
+                                 // switch it off, update it and switch it on again in one go
 };
 
 struct Page {
@@ -135,8 +138,11 @@ inline Page page(const PageFacts& f) {
     }
     if (!f.builtin) {
         if (f.update_available) {
-            p.offer_update = !p.setup_locked && !f.working;
-            if (f.enabled) p.update_line = "Switch the mod off first to update it.";
+            // an update ends in the mod's state before it: off stays off; on stays on where the mod can be
+            // switched off and on again while the game runs
+            p.offer_update = !f.working && (!p.setup_locked || (f.enabled && f.live));
+            if (p.offer_update) p.update_line.clear();
+            else if (f.enabled) p.update_line = "Switch the mod off first to update it.";
             else if (f.active) p.update_line = kOffAfterRestart;
             else if (f.working) p.update_line = "Wait until the current setup has finished.";
         }
@@ -159,7 +165,7 @@ inline OptionState option_state(bool setup_option, bool locked, bool applies_aft
 }
 
 // ---------------------------------------------------------------- install flow
-enum class StepKind { Download, Check, Backup, Prepare, Support, Build, SwitchOn };
+enum class StepKind { SwitchOff, Download, Check, Backup, Prepare, Support, Build, SwitchOn };
 enum class Phase { Idle, Review, Working, Done, Failed };
 
 struct FlowStep {
@@ -175,6 +181,7 @@ struct FlowStep {
 // Nominal durations: the estimate before a step reports its own progress.
 inline double expected_seconds(StepKind k, uint64_t download_bytes = 0) {
     switch (k) {
+    case StepKind::SwitchOff: return 2;
     case StepKind::Download: return 2 + double(download_bytes) / (2.0 * 1024 * 1024);
     case StepKind::Check: return 1;
     case StepKind::Backup: return 3;
@@ -186,6 +193,7 @@ inline double expected_seconds(StepKind k, uint64_t download_bytes = 0) {
 }
 inline const char* default_title(StepKind k) {
     switch (k) {
+    case StepKind::SwitchOff: return "Switch off for the update";
     case StepKind::Download: return "Download";
     case StepKind::Check: return "Check";
     case StepKind::Backup: return "Back up saves";
@@ -205,6 +213,8 @@ struct Plan {
     bool support = false;              // code-mod support must be added (one rebuild, restart)
     bool build = false;                // a code mod is built for this installation
     bool restart = false;              // the mod applies at the next start
+    bool switch_off = false;           // update of a mod that is on: switch it off first (it is switched on again)
+    bool keep_off = false;             // update of a mod that is off: it stays off (no Switch on step)
 };
 
 class Flow {
@@ -214,6 +224,7 @@ public:
     std::vector<FlowStep> steps;
     std::string error, details;   // one plain sentence; the tool output behind "Show details"
     bool restart_needed = false;  // Done: the mod becomes active after a restart
+    bool keep_off = false;        // Done: the mod was updated (and prepared) and stays off
     double started = -1;
 
     static Flow make(std::string id, std::string name, const Plan& plan) {
@@ -227,13 +238,15 @@ public:
             s.expected = expected_seconds(k, plan.download_bytes);
             f.steps.push_back(std::move(s));
         };
+        if (plan.switch_off) add(StepKind::SwitchOff);
         if (plan.download) { add(StepKind::Download); add(StepKind::Check); }
         if (plan.backup) add(StepKind::Backup);
         for (const auto& title : plan.prepare) add(StepKind::Prepare, title);
         if (plan.support) add(StepKind::Support);
         if (plan.build) add(StepKind::Build);
-        add(StepKind::SwitchOn);
-        f.restart_needed = plan.restart;
+        if (!plan.keep_off) add(StepKind::SwitchOn);
+        f.keep_off = plan.keep_off;
+        f.restart_needed = plan.restart && !plan.keep_off;
         f.phase = Phase::Review;
         return f;
     }

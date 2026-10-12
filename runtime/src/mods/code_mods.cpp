@@ -90,6 +90,9 @@ void startup(int argc,char** argv,bool fixed_build){
 bool restart(std::string& error){
     auto failed=[&]{std::lock_guard guard(mutex);state.error=error;return false;};
     if(g_fixed_build){error="The decomp version has no code-mod support; start the normal game for code mods";return failed();}
+    // The relaunched game uses the support the player just built: an explicit WWHD_CODE_MODS from the
+    // launch (automated runs) would otherwise select the other build and stop a setup that resumes there.
+    {std::lock_guard guard(mutex);if(state.ready&&std::getenv("WWHD_CODE_MODS"))environment("WWHD_CODE_MODS",state.target?"1":"0");}
     try {auto exe=selected();if(exe.empty()){error="No completed code-mod build is available";return failed();}if(!replace(exe.string(),error))return failed();return true;}
     catch(const std::exception& e){error=e.what();return failed();}
 }

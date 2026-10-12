@@ -84,6 +84,7 @@ struct Job {
     std::string download_error, installed_id;
     fs::path download_path;
     bool setup_started = false;
+    bool keep_started = false, step_running = false;  // an update that stays off runs its steps itself
     double finished_at = -1;
     ~Job() { if (worker.joinable()) worker.join(); }
 };
@@ -252,6 +253,14 @@ inline bool flow_working(const std::string& id) {
     auto& j = state().job;
     return j.flow.id == id && j.flow.phase == Phase::Working;
 }
+// "Installing" only while the mod is being downloaded; "Setting up" for everything after that
+inline bool flow_downloading() {
+    const auto& f = state().job.flow;
+    size_t c = f.current();
+    return f.phase == Phase::Working && c < f.steps.size() &&
+           (f.steps[c].kind == StepKind::Download || f.steps[c].kind == StepKind::Check);
+}
+inline const char* flow_verb() { return flow_downloading() ? "Installing" : "Setting up"; }
 inline Facts facts(const mods::packages::View& v, bool update) {
     Facts f;
     f.enabled = v.enabled;
@@ -260,6 +269,7 @@ inline Facts facts(const mods::packages::View& v, bool update) {
     f.compatible = v.compatible;
     f.needs_setup = needs_setup(v);
     f.working = flow_working(v.id);
+    f.downloading = f.working && flow_downloading();
     f.percent = f.working ? state().job.flow.overall() * 100 : 0;
     f.failed = state().job.flow.id == v.id && state().job.flow.phase == Phase::Failed;
     // the GameCube warning means "needs setup", not a broken mod
@@ -298,7 +308,25 @@ inline Plan plan_for_installed(const mods::packages::View& v, bool all_steps = f
     p.restart = v.restart_required;
     return p;
 }
-inline void open_review_for_entry(const mods::catalogue::Entry& e, const fs::path& fixtures, bool update) {
+// An update ends in the mod's state before it: an off mod is updated and prepared and stays off (its code-mod
+// build waits for switching it on when code-mod support is missing: no rebuild for a mod that stays off); a
+// mod that is on (only offered where it can be switched off and on while the game runs) is switched off,
+// updated and switched on again.
+inline Plan plan_for_update(const mods::catalogue::Entry& e, const mods::packages::View& v) {
+    Plan p = plan_for_entry(e);
+    if (v.enabled) {
+        p.switch_off = true;
+    } else {
+        p.keep_off = true;
+        p.backup = false;
+        p.support = false;
+        p.build = p.build && mods::packages::has_code_mod_support();
+        p.restart = false;
+    }
+    return p;
+}
+inline void open_review_for_entry(const mods::catalogue::Entry& e, const fs::path& fixtures, bool update,
+                                  const mods::packages::View* installed = nullptr) {
     auto& r = state().review;
     r = {};
     r.mode = update ? Review::Update : Review::Install;
@@ -309,8 +337,8 @@ inline void open_review_for_entry(const mods::catalogue::Entry& e, const fs::pat
     r.from_catalogue = true;
     r.entry = e;
     r.fixtures = fixtures;
-    r.plan = plan_for_entry(e);
-    r.experimental = e.experimental;
+    r.plan = update && installed ? plan_for_update(e, *installed) : plan_for_entry(e);
+    r.experimental = e.experimental && !r.plan.keep_off;  // the warning is for switching it on
     for (const auto& s : e.setup) {
         if (s.optional) continue;
         if (s.type == "game_path") r.source_game = s.game;
@@ -420,11 +448,11 @@ inline void begin(const Host& h, double now) {
     if (j.worker.joinable()) j.worker.join();
     j.accepted = s.review;
     j.flow = Flow::make(s.review.id, s.review.name, s.review.plan);
-    j.setup_started = false;
+    j.setup_started = j.keep_started = j.step_running = false;
     j.finished_at = -1;
     j.installed_id.clear();
     j.flow.accept(now);
-    if (s.review.from_catalogue) start_download(h);
+    if (s.review.from_catalogue && !s.review.plan.switch_off) start_download(h);  // else after switching it off
     go_area(kMods);
     s.page = s.review.id;
     s.page_builtin = false;
@@ -448,7 +476,7 @@ inline void sync_steps(Flow& f, const mods::packages::View& v, double now) {
         const auto& step = f.steps[i];
         bool done = false;
         switch (step.kind) {
-        case StepKind::Download: case StepKind::Check: done = true; break;  // installed
+        case StepKind::SwitchOff: case StepKind::Download: case StepKind::Check: done = true; break;  // installed
         case StepKind::Backup: done = unacknowledged_experimental(v.id).empty() || v.enabled; break;
         case StepKind::Prepare: done = std::find(prepared.begin(), prepared.end(), step.title) != prepared.end(); break;
         case StepKind::Support: done = !needs_code_mod_support(v.id); break;
@@ -476,6 +504,58 @@ inline void adopt_resumed_run(double now) {
         go_area(kMods);
     }
 }
+// An update of a mod that is off: prepare what its setup needs (trust from the review, choices, tools, the
+// code-mod build when support is there) without switching it on.
+inline void keep_off_steps(Flow& f, const mods::packages::View& v, double now) {
+    using namespace mods::packages;
+    auto& j = state().job;
+    std::string error;
+    if (!j.keep_started) {
+        if (!unconfirmed_native(f.id).empty() && !confirm_native(f.id, error)) { f.fail(plain_failure(StepKind::Prepare), error); return; }
+        for (const auto& st : setup_steps(f.id)) {
+            if (st.satisfied || st.step.optional) continue;
+            bool ok = true;
+            if (st.step.type == "confirm") ok = configure(f.id, st.step.option, true, error);
+            else if (st.step.type == "choice") {
+                auto chosen = j.accepted.chosen.find(st.step.option);
+                ok = chosen != j.accepted.chosen.end() && configure(f.id, st.step.option, chosen->second, error);
+            }
+            if (!ok) { f.fail(plain_failure(StepKind::Prepare), error); return; }
+        }
+        j.keep_started = true;
+    }
+    auto& worker = setupflow::setup_work();
+    if (j.step_running) {
+        std::string output;
+        {
+            std::lock_guard g(worker.mutex);
+            if (worker.running) return;
+            error = worker.error;
+            output = worker.output;
+        }
+        j.step_running = false;
+        sync_steps(f, v, now);
+        if (!error.empty()) {
+            size_t c = f.current();
+            f.fail(plain_failure(c < f.steps.size() ? f.steps[c].kind : StepKind::Prepare), output.empty() ? error : error + "\n\n" + output);
+            return;
+        }
+    }
+    sync_steps(f, v, now);
+    for (const auto& st : setup_steps(f.id)) {
+        if (st.satisfied || st.step.optional) continue;
+        if (st.step.type == "game_path") { f.fail("Choose your GameCube game first.", ""); return; }
+        bool build = st.step.type == "build_guest_mod";
+        if (build && needs_code_mod_support(f.id)) continue;  // built when it is switched on
+        if (st.step.type == "run_tool" || build) {
+            j.step_running = setupflow::start_setup(f.id, st.step);
+            return;
+        }
+    }
+    f.finish(false, now);
+    j.finished_at = now;
+    fprintf(stderr, "[mods] %s updated; it stays off\n", f.id.c_str());
+}
 inline void tick(const Host& h, bool menu_open) {
     using namespace mods::packages;
     auto& s = state();
@@ -487,6 +567,16 @@ inline void tick(const Host& h, bool menu_open) {
     f.tick(now);
     size_t cur = f.current();
     StepKind kind = cur < f.steps.size() ? f.steps[cur].kind : StepKind::SwitchOn;
+    // 0. an update of a mod that is on: switch it off and wait until it is unloaded
+    if (kind == StepKind::SwitchOff) {
+        for (const auto& v : mods::packages::list()) {
+            if (v.id != f.id) continue;
+            std::string error;
+            if (v.enabled && !enable(f.id, false, error)) { f.fail("The mod couldn't be switched off for the update.", error); return; }
+            if (!v.enabled && !v.active) { f.done(StepKind::SwitchOff, now); start_download(h); }
+        }
+        return;
+    }
     // 1. download and check (catalogue installs and updates)
     if (j.accepted.from_catalogue && (kind == StepKind::Download || kind == StepKind::Check)) {
         bool downloading, downloaded;
@@ -520,6 +610,7 @@ inline void tick(const Host& h, bool menu_open) {
         if (!j.accepted.from_catalogue) { f.fail("The mod is no longer installed.", ""); }
         return;
     }
+    if (f.keep_off) { keep_off_steps(f, *view, now); return; }
     // 2. back up saves (experimental), then hand the rest to the setup run
     if (!j.setup_started) {
         std::string error;
@@ -582,6 +673,7 @@ inline void retry(const Host& h) {
         start_download(h);
         return;
     }
+    if (kind == StepKind::SwitchOff || f.keep_off) { j.step_running = false; f.retry(now); return; }
     auto& run = setupflow::setup_run;
     if (!j.setup_started || run.id != f.id) {  // failed before the setup run started (backup, trust)
         j.setup_started = false;
@@ -620,7 +712,8 @@ inline void progress_view(const Host& h, bool android) {
     const double now = ImGui::GetTime();
     ImGui::PushID("progress");
     if (f.phase == Phase::Done) {
-        colored(kGood, std::string(check_mark()) + " " + f.name + (f.restart_needed ? " is ready." : " is on."));
+        colored(kGood, std::string(check_mark()) + " " + f.name +
+                           (f.keep_off ? " is updated. It stays off." : f.restart_needed ? " is ready." : " is on."));
         if (f.restart_needed) {
             if (android) text("Close and reopen the app to switch it on.");
             else if (h.can_restart && h.can_restart()) {
@@ -740,7 +833,8 @@ inline void review_popup(Host& h) {
         if (!step.explanation.empty()) muted(step.explanation);
     }
     bool code = !r.code_names.empty();
-    if (code || r.plan.support || r.plan.restart || !r.confirms.empty()) ImGui::SeparatorText("Good to know");
+    if (code || r.plan.support || r.plan.restart || r.plan.keep_off || r.plan.switch_off || !r.confirms.empty())
+        ImGui::SeparatorText("Good to know");
     for (const auto& step : r.confirms) {
         text(step.title);
         if (!step.explanation.empty()) muted(step.explanation);
@@ -750,6 +844,8 @@ inline void review_popup(Host& h) {
         text("This mod needs code-mod support. It is added once: the game code is rebuilt (about 5 minutes, it can cost "
              "a little performance) and the game restarts by itself.");
     else if (r.plan.restart) text("It starts working after a restart.");
+    if (r.plan.keep_off) text("It stays off. Switch it on when you want to use it.");
+    if (r.plan.switch_off) text("It is switched off for the update and on again afterwards.");
     ImGui::Spacing();
     Flow preview = Flow::make(r.id, r.name, r.plan);
     std::string summary;
@@ -850,6 +946,7 @@ inline void mods_list(Host& h) {
         if (f.active() && !find_view(list, f.id)) {
             Facts fx;
             fx.working = f.phase == Phase::Working;
+            fx.downloading = fx.working && flow_downloading();
             fx.failed = f.phase == Phase::Failed;
             fx.percent = f.overall() * 100;
             Row r = row(fx);
@@ -1058,6 +1155,7 @@ inline void package_page(Host& h, const mods::packages::View& v) {
     pf.working = flow_working(v.id);
     pf.can_restart = !h.android && h.can_restart && h.can_restart();
     pf.update_available = update;
+    pf.live = v.kind == "native" || v.kind == "settings";
     Page p = page(pf);
     Row r = row(facts(v, update));
     // name, switch and status
@@ -1076,7 +1174,7 @@ inline void package_page(Host& h, const mods::packages::View& v) {
     const bool flow_shown = flow_for(v.id);
     if (flow_shown) {
         const auto& f = s.job.flow;
-        if (f.phase != Phase::Done) ImGui::SeparatorText(f.phase == Phase::Failed ? "Stopped" : s.job.accepted.from_catalogue ? "Installing" : "Setting up");
+        if (f.phase != Phase::Done) ImGui::SeparatorText(f.phase == Phase::Failed ? "Stopped" : flow_verb());
         else ImGui::Separator();
         progress_view(h, h.android);
         ImGui::Separator();
@@ -1099,7 +1197,7 @@ inline void package_page(Host& h, const mods::packages::View& v) {
     if (update) {
         colored(kWarn, "Version " + entry->version + " is available.");
         if (p.offer_update) {
-            if (button("Update##page")) open_review_for_entry(*entry, snap.catalogue.fixture_root, true);
+            if (button("Update##page")) open_review_for_entry(*entry, snap.catalogue.fixture_root, true, &v);
         } else if (!p.update_line.empty() && p.update_line != p.lock_line) muted(p.update_line);
     }
     if (p.offer_remove && !flow_shown) {
@@ -1143,7 +1241,7 @@ inline void installing_page(Host& h) {
     ImGui::TextUnformatted(f.name.c_str());
     if (state().job.accepted.experimental) badge("Experimental", experimental::kBadgeColour);
     if (!state().job.accepted.description.empty()) text(first_sentence(state().job.accepted.description, 240));
-    ImGui::SeparatorText(f.phase == Phase::Failed ? "Stopped" : "Installing");
+    ImGui::SeparatorText(f.phase == Phase::Failed ? "Stopped" : flow_verb());
     progress_view(h, h.android);
 }
 inline void available_page(Host& h, const mods::catalogue::Entry& e, const fs::path& fixtures);
@@ -1199,6 +1297,31 @@ inline void available_page(Host& h, const mods::catalogue::Entry& e, const fs::p
     }
 }
 
+// More > Install from a file or folder (the picker answers later, from the host): install it, open its page
+// and, when switching it on needs anything, its review. Runs whatever area is shown.
+inline void install_picked(Host& h) {
+    using namespace mods::packages;
+    auto& s = state();
+    std::string picked;
+    { std::lock_guard g(s.picker_mutex); picked = std::move(s.picked_package); s.picked_package.clear(); }
+    static const char* test_local = h.test ? getenv("WWHD_TEST_MOD_INSTALL") : nullptr;
+    if (test_local) { picked = test_local; test_local = nullptr; }
+    if (!picked.empty()) {
+        std::string id, error;
+        if (install(picked, error, &id)) {
+            s.error.clear();
+            for (const auto& v : list()) if (v.id == id) {
+                s.message = v.name + " was installed.";
+                go_area(kMods);
+                open_page(id, false);
+                if (v.compatible) {  // straight on to switching it on: the review asks what it needs
+                    if (needs_review(v)) open_review_for_installed(v);
+                }
+            }
+        } else s.error = error;
+    }
+}
+
 // ---------------------------------------------------------------- More
 inline void more(Host& h) {
     using namespace mods::packages;
@@ -1250,24 +1373,6 @@ inline void more(Host& h) {
         same_line_if_fits("Choose folder…");
         if (button("Choose folder…##package")) pick(true);
         ImGui::Unindent();
-    }
-    std::string picked;
-    { std::lock_guard g(s.picker_mutex); picked = std::move(s.picked_package); s.picked_package.clear(); }
-    static const char* test_local = h.test ? getenv("WWHD_TEST_MOD_INSTALL") : nullptr;
-    if (test_local) { picked = test_local; test_local = nullptr; }
-    if (!picked.empty()) {
-        std::string id, error;
-        if (install(picked, error, &id)) {
-            s.error.clear();
-            for (const auto& v : list()) if (v.id == id) {
-                s.message = v.name + " was installed.";
-                go_area(kMods);
-                open_page(id, false);
-                if (v.compatible) {  // straight on to switching it on: the review asks what it needs
-                    if (needs_review(v)) open_review_for_installed(v);
-                }
-            }
-        } else s.error = error;
     }
     if (ImGui::CollapsingHeader("GameCube game for mods")) {
         ImGui::Indent();
@@ -1401,6 +1506,7 @@ inline void draw(Host& h, const std::string& restart_summary) {
     auto& s = state();
     apply_test_view(h);
     test_switches(h);
+    install_picked(h);
     open_catalogue(h);  // shows the cached list at once; checks for new mods once per session
     // one Restart now at a time: the end of an install and the page of a mod that is off but still loaded
     // offer their own
@@ -1456,7 +1562,7 @@ inline void background(const Host& h) {
     auto& f = s.job.flow;
     const double now = ImGui::GetTime();
     std::string line;
-    if (f.phase == Phase::Working) line = "Installing " + f.name + "… " + percent_text(f.overall() * 100);
+    if (f.phase == Phase::Working) line = std::string(flow_verb()) + " " + f.name + "… " + percent_text(f.overall() * 100);
     else if (now < s.toast_until) line = s.toast;
     else return;
     (void)h;

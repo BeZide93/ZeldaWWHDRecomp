@@ -388,10 +388,13 @@ off baseline remains unchanged, and observes each running process's executable
 path against the verified selection. Setting an environment flag alone is not
 accepted as evidence of compiled hooks being disabled or enabled.
 
-The driver refreshes and installs through the catalogue worker, rebuilds code-mod
-support while the package remains disabled, restarts, selects/validates sources,
-runs preparation and builds the guest module through normal setup workers, then
-enables it for the following restart. It checks setup receipts, declared output
+In one game run, as a player does it, the driver switches the catalogue mod on
+(the test aid accepts its review, with the GameCube game from the private JSON): it
+is downloaded, its setup adds code-mod support, the game relaunches itself into
+the hook-enabled build (the relaunch keeps the support just built, also when the
+run started with `WWHD_CODE_MODS=0`), the setup resumes there, runs preparation,
+builds the guest module through the normal setup workers and switches it on for
+the following restart. It checks setup receipts, declared output
 files, regional build allocation and module existence, activation after restart,
 disable-until-restart and removal. Normal saves are copied for each process; full
 states are never transferred between versions. Only owned game processes are

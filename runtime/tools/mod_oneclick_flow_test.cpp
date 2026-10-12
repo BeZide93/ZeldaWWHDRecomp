@@ -47,17 +47,20 @@ int main(int argc,char** argv) {
     fs::path root=fs::absolute(argv[1]);std::string mode=argv[2],id=getenv("WWHD_TEST_MOD_SETUP");
     bool resumed=fs::weakly_canonical(fs::absolute(argv[0])).parent_path()==fs::weakly_canonical(root/"code-builds/synthetic/bin");
     bool missing=mode=="missing",broken=mode=="broken",catalogue=mode=="catalogue";
+    bool update_off=mode=="update-off",update_on=mode=="update-on",update=update_off||update_on;
     bool cancel_mode=mode=="cancel"||mode=="cancel-rebuild",canceled=false;
     bool restart=mode=="restart"||mode=="cancel-rebuild";set_code_mod_support(!restart||resumed);initialize();
     auto plan=overlay::diagnostic::read_setup_plan(true,getenv("WWHD_MOD_MANAGER_DIR"),getenv("WWHD_TEST_MOD_SETUP"),getenv("WWHD_TEST_GAME_SOURCES"));
     assert(plan.id==id&&plan.error.empty());
     if(!resumed) {
         if(!catalogue) {  // already downloaded (switched on from the list); the catalogue mode downloads it
-            auto index=mods::catalogue::load((root/"index.json").string(),{},root/"unused");
+            // update modes: the older version is installed; the catalogue offers the newer one
+            auto index=mods::catalogue::load((root/(update?"installed-index.json":"index.json")).string(),{},root/"unused");
             auto it=std::find_if(index.index.entries.begin(),index.index.entries.end(),[&](const auto& e){return e.id==id;});
             assert(it!=index.index.entries.end());
             mods::catalogue::StagedPackage staged(*it,mods::catalogue::Version::parse("0.2.10"),"USA",platform_key(),root/"stage",index.fixture_root,{});
             std::string error;assert(install(staged.path().string(),error));
+            if(update_on)assert(enable(id,true,error));  // on before the update; it must be on after it
         }
         mods::code::startup(argc,argv); // real service launch arguments, fake game-code rebuild output
     } else {
@@ -92,7 +95,7 @@ int main(int argc,char** argv) {
         if(!missing)for(const auto& [game,value]:plan.sources.object)path=value.string();
         chosen(path);
     };
-    if(catalogue)set_env("WWHD_MOD_CATALOGUE",(root/"index.json").string());
+    if(catalogue||update)set_env("WWHD_MOD_CATALOGUE",(root/"index.json").string());
     else set_env("WWHD_MOD_CATALOGUE",(root/"no-index.json").string());  // the list from the manager only
     int confirmations=0;bool accepted=resumed,saw_progress=false,saw_failure=false,retried=false,corrected=false,saw_done=false;
     int pad_pressed=0,review_since=0;bool switched=resumed,blue_seen=false;ImRect blue_last;int failure_frames=0;
@@ -126,7 +129,9 @@ int main(int argc,char** argv) {
         if(!clicker.busy()&&frame>3) {
             if(!switched) {
                 // the list shows the mod (catalogue mode: once the list is loaded); "checkbox" uses the page's switch
-                if(mode=="checkbox") {
+                if(update) {  // the mod's page offers Update once the catalogue is loaded
+                    if(s.page.empty())clicker.click("open_"+id);else if(s.rects.count("Update##page")){clicker.click("Update##page");switched=true;}
+                } else if(mode=="checkbox") {
                     if(s.page.empty())clicker.click("open_"+id);else if(s.rects.count("##on_page")){clicker.click("##on_page");switched=true;}
                 } else if(s.rects.count(switch_label)){clicker.click(switch_label);switched=true;}
             } else if(has_review&&!accepted&&frame>8) {
@@ -147,7 +152,7 @@ int main(int argc,char** argv) {
                     if(list_open)clicker.click("choice_colour_blue");
                     else if(!s.rects.count("choice_colour_blue"))clicker.click("##choice_colour");
                 } else {
-                    std::string go=r.mode==ui::Review::SwitchOn?"Switch on##review":"Install##review";
+                    std::string go=r.mode==ui::Review::SwitchOn?"Switch on##review":r.mode==ui::Review::Update?"Update##review":"Install##review";
                     // missing: the button is unavailable (the reason is next to it); the player cancels
                     clicker.click(missing&&frame>60?"Cancel##review":go);
                 }
@@ -186,10 +191,20 @@ int main(int argc,char** argv) {
         if(f.phase==ui::Phase::Done)capture("done");
         if(missing&&frame>80) {assert(f.phase==ui::Phase::Idle&&setup_run.id.empty()&&!has_review);break;}
         if(view(id).enabled&&setup_run.id.empty()&&saw_done&&captured.count("done"))break;
+        if(update_off&&saw_done&&captured.count("done"))break;
         if(canceled&&f.phase==ui::Phase::Idle){cancel_released=true;auto& worker=setup_work();std::lock_guard guard(worker.mutex);if(!worker.running)break;}
         std::this_thread::sleep_for(std::chrono::milliseconds(2));
     }
     if(missing)assert(!view(id).enabled&&!accepted&&pending_setup_runs().empty()&&picks==1&&confirmations==2);
+    else if(update) {
+        // an update ends in the state before it: off stays off (prepared), on stays on
+        assert(view(id).version=="1.1.0"&&view(id).enabled==update_on&&saw_done&&confirmations==1);
+        assert(pending_setup_runs().empty()&&setup_run.id.empty());
+        if(update_off) {
+            assert(ui::state().job.flow.keep_off&&builds==1&&!ui::state().job.flow.restart_needed);
+            for(const auto& step:setup_steps(id))assert(step.satisfied);
+        } else assert(builds==0&&!ui::state().job.flow.keep_off);
+    }
     else if(cancel_mode) {
         assert(canceled&&!view(id).enabled&&pending_setup_runs().empty());
         assert(setup_steps(id)[1].satisfied);assert(confirmations==1);  // the preparation stays done
