@@ -16,6 +16,8 @@ própria cópia do jogo de Wii U; este projeto nunca fornece arquivos do jogo.
 | **Dispositivos Android antigos** | Se o driver da sua GPU Adreno for antigo demais, a tela de erro oferece instalar um driver como o Mesa Turnip. |
 | **Saves** | Exporte e importe seus saves e guarde no backup do Android. Saves de um Wii U de verdade (americano ou europeu) também funcionam. |
 
+O Android solicita 60 Hz para 30 fps, 60 fps interpolados e 60 fps reais, ou a cadência selecionada de 120/240 Hz para interpolação mais rápida. O Android pode escolher outra frequência compatível. A solicitação é reaplicada ao voltar ao jogo. Para deixar a escolha da frequência inteiramente com o Android, defina `WWHD_NO_60HZ=1` em uma compilação de desenvolvimento (`0` mantém a solicitação ativada).
+
 ## Celulares testados
 
 Medido com o medidor do próprio jogo na parte mais pesada da Ilha de Outset (cerca de 3.900

@@ -16,6 +16,8 @@ game; this project never provides game files.
 | **Older Android devices** | If your Adreno GPU's driver is too old, the error screen offers to install a custom driver such as Mesa Turnip. |
 | **Saves** | Export and import your save files and keep them in Android's backup. Saves from a real Wii U (USA or Europe) work too. |
 
+Android requests a 60 Hz display mode for 30 fps, interpolated 60 fps and true 60 fps, or the selected 120/240 Hz cadence for faster interpolation. Android may choose another supported rate. The request is reapplied after returning to the game. To leave refresh-rate selection entirely to Android, set `WWHD_NO_60HZ=1` in a developer build (`0` keeps the request enabled).
+
 ## Tested phones
 
 Measured with the game's own profiler in the busiest part of Outset Island (about 3,900 draws per
