@@ -587,7 +587,7 @@ In Gaming Mode the Steam button belongs to Steam and there is no keyboard, so ke
 
 ## Optional: bring your GameCube save to HD
 
-`tools/savegame/gc2hd.py` converts a GameCube Wind Waker save (`.gci`, USA GZLE01 or Japanese GZLJ01,
+`tools/savegame/gc2hd.py` converts a GameCube Wind Waker save (`.gci`, USA GZLE01, Japanese GZLJ01 or European GZLP01,
 e.g. from a memory-card dump or Dolphin) into a Wind Waker HD save (`cking.sav`), all three files
 with their progress, items, songs, charts and story state. It works for this port and for Cemu.
 
