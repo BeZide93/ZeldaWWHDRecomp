@@ -17,6 +17,7 @@
 #include "guest_png.h"
 #include "story_mail.h"
 #include "story_mail_book.h"
+#include "story_chart.h"
 #include "input.h"
 #include "true60.h"
 #include "guest_addr.h"
@@ -265,6 +266,33 @@ void svc_mail_state(Cpu* c) {
     auto& mod=owner(c);std::string id;
     c->r[3]=uint32_t(mod_string(mod,c->r[3],story_mail::kMaxIdBytes,id)?story_mail::state(mod.id,id):story_mail::kResultInvalid);
 }
+// Mod charts (story_chart.h). IDs and labels must lie in the calling mod's memory.
+void svc_chart_give(Cpu* c) {
+    auto& mod=owner(c);std::string id;
+    c->r[3]=uint32_t(mod_string(mod,c->r[3],story_chart::kMaxIdBytes,id)?story_chart::give(mod.id,id):story_chart::kResultInvalid);
+}
+void svc_chart_finish(Cpu* c) {
+    auto& mod=owner(c);std::string id;
+    c->r[3]=uint32_t(mod_string(mod,c->r[3],story_chart::kMaxIdBytes,id)?story_chart::finish(mod.id,id):story_chart::kResultInvalid);
+}
+void svc_chart_state(Cpu* c) {
+    auto& mod=owner(c);std::string id;
+    c->r[3]=uint32_t(mod_string(mod,c->r[3],story_chart::kMaxIdBytes,id)?story_chart::state(mod.id,id):story_chart::kResultInvalid);
+}
+// wwhd_chart_mark(chart, marker, x, z, icon, label): r3, r4, f1, f2, r5, r6; a null label is empty
+void svc_chart_mark(Cpu* c) {
+    auto& mod=owner(c);std::string chart,marker,label;
+    if(!mod_string(mod,c->r[3],story_chart::kMaxIdBytes,chart)||!mod_string(mod,c->r[4],story_chart::kMaxIdBytes,marker)||
+       (c->r[6]&&!mod_string(mod,c->r[6],story_chart::kMaxLabelBytes,label))){c->r[3]=uint32_t(story_chart::kResultInvalid);return;}
+    c->r[3]=uint32_t(story_chart::mark(mod.id,chart,marker,float(c->f[1].ps0),float(c->f[2].ps0),c->r[5],label));
+}
+// wwhd_chart_unmark(chart, marker): a null marker removes all markers of the chart
+void svc_chart_unmark(Cpu* c) {
+    auto& mod=owner(c);std::string chart,marker;
+    if(!mod_string(mod,c->r[3],story_chart::kMaxIdBytes,chart)||(c->r[4]&&!mod_string(mod,c->r[4],story_chart::kMaxIdBytes,marker))){
+        c->r[3]=uint32_t(story_chart::kResultInvalid);return;}
+    c->r[3]=uint32_t(story_chart::unmark(mod.id,chart,marker));
+}
 const std::unordered_map<std::string, PpcFunc> kServices = {
     {"wwhd_audio_epoch",svc_audio_epoch},{"wwhd_audio_open",svc_audio_open},
     {"wwhd_audio_available",svc_audio_available},{"wwhd_audio_submit",svc_audio_submit},{"wwhd_audio_close",svc_audio_close},
@@ -278,12 +306,15 @@ const std::unordered_map<std::string, PpcFunc> kServices = {
     {"wwhd_setting_get",svc_setting_get},{"wwhd_setting_changed",svc_setting_changed},
     {"wwhd_logic_dt",svc_logic_dt},{"wwhd_logic_step",svc_logic_step},
     {"wwhd_mail_send",svc_mail_send},{"wwhd_mail_state",svc_mail_state},
+    {"wwhd_chart_give",svc_chart_give},{"wwhd_chart_finish",svc_chart_finish},{"wwhd_chart_state",svc_chart_state},
+    {"wwhd_chart_mark",svc_chart_mark},{"wwhd_chart_unmark",svc_chart_unmark},
     {"memcpy", svc_memcpy},      {"memmove", svc_memcpy},       {"memset", svc_memset},
 };
 PpcFunc service(const char* name) {
     auto it = kServices.find(name);
     if (it == kServices.end()) return nullptr;
     if (!strncmp(name, "wwhd_mail_", 10)) story_mail::note_import();  // the postbox hooks are needed
+    if (!strncmp(name, "wwhd_chart_", 11)) story_chart::note_import();  // the sea chart hooks are needed
     return it->second;
 }
 
@@ -426,6 +457,18 @@ void init() {
         ch.addr=addr;ch.ordinal=uint32_t(ordinal);ch.replace=fn;ch.replace_mod="the port's letter service";
         g_mod_hook_flags[ordinal]=1;
     });
+    // Mod charts: host replacements of the sea chart menu's story marks, only when a loaded mod uses
+    // the chart services (story_chart.h).
+    story_chart::set_game_calls(call_original);
+    story_chart::install([](uint32_t addr) {
+        auto it=g_chains.find(addr);return it==g_chains.end()?std::string():it->second.replace_mod;
+    },[](uint32_t addr,PpcFunc fn) {
+        int ordinal=ordinal_of(addr);
+        if(ordinal<0)fatal("[guestmods] charts: %08X is not a game function",addr);
+        Chain& ch=g_chains[addr];
+        ch.addr=addr;ch.ordinal=uint32_t(ordinal);ch.replace=fn;ch.replace_mod="the port's chart service";
+        g_mod_hook_flags[ordinal]=1;
+    });
     if(getenv("WWHD_GUEST_MODS"))LOG("[guestmods] WWHD_GUEST_MODS is retired; install and trust guest packages in the mod manager");
 }
 
@@ -458,6 +501,7 @@ void state_loaded() {
     hud::store().reset();
     pcm::store().reset();
     story_mail::state_loaded();
+    story_chart::state_loaded();
     for(auto& mod:g_loaded)mod.hud_called=false;
 }
 

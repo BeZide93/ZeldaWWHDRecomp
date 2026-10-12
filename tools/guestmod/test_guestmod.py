@@ -121,7 +121,7 @@ WWHD_HOOK(0x0240EBB0, mapped, (void* actor)) {
         return os.path.join(d, "mod.elf")
 
     def test_examples_build(self):
-        for mod in ("heart-ticker", "addcalc-replace", "hud-demo", "button-icons", "hud-cost", "rito-letter"):
+        for mod in ("heart-ticker", "addcalc-replace", "hud-demo", "button-icons", "hud-cost", "rito-letter", "story-chart"):
             with tempfile.TemporaryDirectory() as d:
                 pkg = os.path.join(d, "pkg")
                 os.makedirs(pkg)
@@ -202,6 +202,11 @@ WWHD_HOOK(0x02000000, all_services, (void)) {
     wwhd_file_read("progress.bin", p, 64);
     if (wwhd_mail_send("hello", "A friend", "Text") == WWHD_MAIL_WAITING) wwhd_log("sent");
     wwhd_log_int("letter", wwhd_mail_state("hello"));
+    if (wwhd_chart_give("tale") == WWHD_CHART_OWNED) wwhd_log("given");
+    wwhd_chart_mark("tale", "start", WWHD_CHART_COLUMN_X('D'), WWHD_CHART_ROW_Z(2), WWHD_CHART_ICON_STORY, "Windfall");
+    wwhd_log_int("chart", wwhd_chart_state("tale"));
+    wwhd_chart_unmark("tale", 0);
+    wwhd_chart_finish("tale");
     wwhd_free(p);
 }
 '''
@@ -213,7 +218,8 @@ WWHD_HOOK(0x02000000, all_services, (void)) {
                     self.assertIn("c->pc = 0x%08Xu;" % address, translated, name)
             for name in ("wwhd_audio_open","wwhd_audio_submit","wwhd_audio_available","wwhd_audio_close","wwhd_audio_epoch","wwhd_file_write","wwhd_hud_register","wwhd_hud_emit","wwhd_hud_texture",
                          "wwhd_hud_release","wwhd_hud_epoch","wwhd_hud_clip","wwhd_setting_get","wwhd_setting_changed",
-                         "wwhd_mail_send","wwhd_mail_state"):
+                         "wwhd_mail_send","wwhd_mail_state","wwhd_chart_give","wwhd_chart_finish","wwhd_chart_state",
+                         "wwhd_chart_mark","wwhd_chart_unmark"):
                 self.assertIn(name,t.services)
             Path(d, "manifest.json").write_text(json.dumps({"kind": "guest", "id": "services", "guest": {"api_version": 1}}))
             result = builder.build(d, str(Path(d, "cache")), 0x7F000000, builder.default_cc(), str(Path(REPO, "runtime/include")))

@@ -79,6 +79,18 @@ void set_game_calls(void (*)(Cpu*,uint32_t),uint32_t (*)(Cpu*,uint32_t,std::init
 void install(const std::function<std::string(uint32_t)>&,const std::function<void(uint32_t,void (*)(Cpu*))>&) {}
 void state_loaded() {}
 }
+// and so has the chart service (story_chart_test)
+namespace story_chart {
+int32_t give(const std::string&,const std::string&) {return kResultInvalid;}
+int32_t finish(const std::string&,const std::string&) {return kResultInvalid;}
+int32_t state(const std::string&,const std::string&) {return kResultNone;}
+int32_t mark(const std::string&,const std::string&,const std::string&,float,float,uint32_t,const std::string&) {return kResultInvalid;}
+int32_t unmark(const std::string&,const std::string&,const std::string&) {return kResultInvalid;}
+void note_import() {}
+void set_game_calls(void (*)(Cpu*,uint32_t)) {}
+void install(const std::function<std::string(uint32_t)>&,const std::function<void(uint32_t,void (*)(Cpu*))>&) {}
+void state_loaded() {}
+}
 static unsigned hud_calls=0;
 uint32_t guest_call(Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args) {
     assert(fn==0x7F000080&&args.size()==1);++hud_calls;

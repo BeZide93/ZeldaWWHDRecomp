@@ -889,6 +889,11 @@ add_executable(story_mail_test runtime/tools/story_mail_test.cpp runtime/src/mod
 target_include_directories(story_mail_test PRIVATE runtime/include runtime/src)
 target_compile_options(story_mail_test PRIVATE -UNDEBUG)
 add_test(NAME story_mail COMMAND story_mail_test)
+# mod charts: shared save record, services and sea chart menu hooks on synthetic guest objects
+add_executable(story_chart_test runtime/tools/story_chart_test.cpp runtime/src/mods/story_chart.cpp runtime/src/guest_addr_identity.c)
+target_include_directories(story_chart_test PRIVATE runtime/include runtime/src)
+target_compile_options(story_chart_test PRIVATE -UNDEBUG)
+add_test(NAME story_chart COMMAND story_chart_test)
 if(Python3_Interpreter_FOUND)
   add_test(NAME release_sdk_package COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/release/test_sdk_package.py")
   add_test(NAME decomp_build_gen COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/decomp_build/test_gen.py")

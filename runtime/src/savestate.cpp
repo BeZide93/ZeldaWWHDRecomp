@@ -62,6 +62,7 @@
 #include "state_memory.h"
 #include "mods/guest_mods.h"
 #include "mods/guest_state_section.h"
+#include "mods/story_chart.h"
 #include "quit_prompt.h"
 #include "rumble.h"
 
@@ -508,7 +509,9 @@ bool do_save(int slot) {
     payload->u32(kSecMemory);
     size_t len_at = payload->b.size();
     payload->u64(0);
+    story_chart::capture_begin();  // the sea chart's story marks as the game left them (mod markers off)
     capture_memory(*payload);
+    story_chart::capture_end();
     uint64_t mlen = payload->b.size() - len_at - 8;
     memcpy(&payload->b[len_at], &mlen, 8);
     Header h{};

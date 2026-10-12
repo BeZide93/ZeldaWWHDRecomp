@@ -1,0 +1,78 @@
+// Mod charts: a story mod gives Link a chart, and the chart's markers appear on Link's sea chart in
+// the game's own style (docs/mod-sdk-v2.md, "Charts and markers").
+//
+// - Whether Link owns a mod chart is kept in the save data, in the story-mod record shared with the
+//   letters (story_mail_book.h): one record of kind kRecordMarker (3) per chart, key chart_key(),
+//   value kChartOwned (1) or kChartDone (2). Marker places are not saved (the mod places them).
+// - Markers are session state of the mods: a mod places them (wwhd_chart_mark) and they show while
+//   the current save file owns their chart (not after it is finished).
+// - The sea chart shows them with the game's own story-mark panes (the white ring the game puts on
+//   the next story island): panes the game is not showing at the moment are moved to the mod
+//   markers. See story_chart.cpp.
+//
+// Nothing of this runs unless a loaded guest mod imports a wwhd_chart_* service: only then are the
+// sea chart hooks installed (install()).
+#pragma once
+#include <cstdint>
+#include <functional>
+#include <string>
+#include <vector>
+
+struct Cpu;
+
+namespace story_chart {
+
+// Results of the guest services (wwhd_guest.h: WWHD_CHART_*)
+inline constexpr int32_t kResultNone = 0, kResultOwned = 1, kResultDone = 2;
+inline constexpr int32_t kResultInvalid = -1, kResultNoRoom = -2;
+inline constexpr uint32_t kIconStory = 0;
+// the chart's record in the story-mod book: kind story_mail::kRecordMarker, this key, these values
+inline constexpr uint8_t kChartOwned = 1, kChartDone = 2;
+uint16_t chart_key(const std::string& mod, const std::string& chart);
+inline constexpr size_t kMaxIdBytes = 32, kMaxLabelBytes = 64;
+inline constexpr unsigned kMaxMarkersPerMod = 8, kMaxMarkers = 32;
+// The Great Sea: 7 x 7 squares of 100000 units, square D4's center at (0, 0), x east, z south.
+inline constexpr float kSquare = 100000.0f, kSeaHalf = 3.5f * kSquare;
+
+// wwhd_chart_give / wwhd_chart_finish / wwhd_chart_state: the chart's state in the current save file
+int32_t give(const std::string& mod, const std::string& chart);
+int32_t finish(const std::string& mod, const std::string& chart);
+int32_t state(const std::string& mod, const std::string& chart);
+// wwhd_chart_mark: adds the marker or moves it (and changes its label); wwhd_chart_unmark removes
+// one marker, or all markers of the chart when marker is empty. Results: the chart's state, or < 0.
+int32_t mark(const std::string& mod, const std::string& chart, const std::string& marker, float x, float z,
+             uint32_t icon, const std::string& label);
+int32_t unmark(const std::string& mod, const std::string& chart, const std::string& marker);
+
+// The markers the sea chart shows now (their chart is owned in the current save file), in the order
+// they were placed. For other mods that draw a map of their own (a minimap, a quest notebook).
+struct MarkerView {
+    std::string mod, chart, marker, label;
+    float x, z;
+    uint32_t icon;
+};
+std::vector<MarkerView> shown_markers();
+
+void note_import();  // a module imports a chart service: the sea chart hooks are needed
+bool imported();
+// After all guest modules are loaded. replaced_by(addr) names a mod that replaces that game function
+// (empty: none); replace(addr, fn) installs a host replacement. Nothing is installed on a conflict.
+void install(const std::function<std::string(uint32_t)>& replaced_by, const std::function<void(uint32_t, void (*)(Cpu*))>& replace);
+bool installed();
+void set_game_calls(void (*original)(Cpu*, uint32_t));
+
+// Full save states: the game's own pane state is what a state holds. capture_begin() puts the panes
+// the markers use back as the game left them (all guest threads are stopped), capture_end() shows the
+// markers again. state_loaded(): guest memory was replaced, nothing of ours is in it.
+void capture_begin();
+void capture_end();
+void state_loaded();
+
+// The hooks, exposed for runtime/tools/story_chart_test.cpp
+namespace hooks {
+void progress_icons(Cpu* c);  // hdSeaChartMenu_c::updateProgressIcons
+void hide_panes(Cpu* c);      // hdSeaChartMenu_c::hideMenuPanes
+void destroy(Cpu* c);         // hdSeaChartMenu_c::destroy
+}  // namespace hooks
+
+}  // namespace story_chart

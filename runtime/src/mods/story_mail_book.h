@@ -35,7 +35,7 @@ inline constexpr unsigned kRecords = (kBookSize - 4) / 4;  // 19
 inline constexpr uint8_t kRecordFree = 0;
 inline constexpr uint8_t kRecordLetter = 1;  // key: letter_key(mod, letter), value: State
 inline constexpr uint8_t kRecordItem = 2;    // key: kItem*, value: 1 owned
-inline constexpr uint8_t kRecordMarker = 3;  // reserved for the sea chart's story markers
+inline constexpr uint8_t kRecordMarker = 3;  // mod charts (story_chart.h): key chart_key(mod, chart), value 1 owned, 2 finished
 
 inline constexpr uint16_t kItemNotebook = 1;  // the story notebook
 

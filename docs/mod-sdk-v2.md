@@ -20,6 +20,7 @@ supported.
 - [Port settings](#port-settings)
 - [Drawing on screen (HUD API v1)](#drawing-on-screen-hud-api-v1)
 - [Letters](#letters)
+- [Charts and markers](#charts-and-markers)
 - [Packages with content and images](#packages-with-content-and-images)
 - [Trust](#trust)
 - [Save states](#save-states)
@@ -145,6 +146,7 @@ The examples in [`examples/guest-mods`](../examples/guest-mods) are complete mod
 | `hud-demo` | HUD drawing with package artwork and text, texture reload after a state load |
 | `button-icons` | reading port settings, following the game's button panes |
 | `rito-letter` | a story mod's letter, delivered once per save file by the Rito postbox |
+| `story-chart` | a story mod's chart that marks Windfall Island on Link's sea chart |
 
 ## Hooks and replacements
 
@@ -204,6 +206,7 @@ use object fields that are the same in both versions.
 | `wwhd_hud_*` | Drawing on screen, below |
 | `wwhd_audio_*` | Bounded PCM streams, below |
 | `wwhd_mail_send`, `wwhd_mail_state` | A letter from your mod, delivered by the Rito postbox, below |
+| `wwhd_chart_*` | A chart from your mod that marks places on Link's sea chart, below |
 | `memcpy`, `memmove`, `memset` | As usual |
 
 Your mod can also call any game function. Original synthesized audio can use the PCM stream service below.
@@ -359,6 +362,85 @@ letters waiting in the record, and nothing changes for the postbox.
 **Players without letter mods.** The postbox, message and item functions are only hooked while a loaded
 mod uses `wwhd_mail_*`. If another mod replaces one of them, letters from mods are not delivered
 in that session and the log says so.
+
+## Charts and markers
+
+A story mod can show the player where to go the way Wind Waker does: on the sea chart. The
+game marks the next story island with a white ring (Dragon Roost Island, Forest Haven, the
+triangle islands...). Your mod gives Link a chart, and the chart's markers appear on his sea
+chart with that same ring.
+
+```c
+#include "wwhd_guest.h"
+#include "wwhd/functions.h"
+#include "wwhd/save.h"
+
+WWHD_HOOK(WWHD_ADDR_daPy_Execute, quest_step, (void* link)) {
+    (void)link;
+    u16 max_life = dComIfGs_player_status_a.max_life;
+    if (max_life < 12 || max_life > 80) return;  /* no save file loaded */
+    if (wwhd_mail_state("hello") == WWHD_MAIL_READ) wwhd_chart_give("tale");
+    wwhd_chart_mark("tale", "start", WWHD_CHART_COLUMN_X('D'), WWHD_CHART_ROW_Z(2),
+                    WWHD_CHART_ICON_STORY, "Windfall Island: the storyteller");
+}
+```
+
+| Service | What it does |
+| --- | --- |
+| `wwhd_chart_give(chart)` | Link gets the chart in the loaded save file (once; later calls change nothing) |
+| `wwhd_chart_finish(chart)` | the chart is done: its markers are no longer shown |
+| `wwhd_chart_state(chart)` | the chart's state, without changing it |
+| `wwhd_chart_mark(chart, marker, x, z, icon, label)` | adds the marker, or moves it if it exists |
+| `wwhd_chart_unmark(chart, marker)` | removes the marker; `NULL` removes all markers of the chart |
+
+All of them return the chart's state in the loaded save file, or an error:
+
+| Result | Meaning |
+| --- | --- |
+| `WWHD_CHART_NONE` (0) | not given to this save file |
+| `WWHD_CHART_OWNED` (1) | Link has it: its markers are on the sea chart |
+| `WWHD_CHART_DONE` (2) | finished |
+| `WWHD_CHART_INVALID` (-1) | invalid ID, place, icon or label |
+| `WWHD_CHART_NO_ROOM` (-2) | no save file loaded, or its record is full; or too many markers |
+
+- **IDs:** chart and marker IDs are 1 to 32 characters `a`-`z`, `0`-`9`, `-`, `_`, `.`; chart IDs
+  are unique within your mod, marker IDs within the chart.
+- **Place:** `x` and `z` in the Great Sea's world coordinates, the ones Link's position uses. The
+  sea is 7 × 7 squares of 100000 units; the center of square D4 is (0, 0), `x` grows to the east
+  and `z` to the south. `WWHD_CHART_COLUMN_X('A'..'G')` and `WWHD_CHART_ROW_Z(1..7)` give the
+  center of a square, so Windfall Island (D2) is `WWHD_CHART_COLUMN_X('D'), WWHD_CHART_ROW_Z(2)`.
+  The game's own marks sit on the island squares too.
+- **Icon:** `WWHD_CHART_ICON_STORY`, the game's story ring, is the only one for now.
+- **Label:** one line of UTF-8, up to 64 bytes, or `NULL`. The sea chart shows the ring only,
+  like the game's own marks; the label names the marker for other screens (a quest notebook, a
+  minimap).
+- **Markers** are placed by your mod in every session, like the letter text: call
+  `wwhd_chart_mark` from a gameplay hook (every logic step is fine) with the place for the
+  current step of your quest, and move or remove it as the quest goes on. Up to 8 markers per
+  mod, 32 in all.
+
+**What the player sees.** The markers of every chart Link owns appear on the sea chart of the
+MAP screen, on the GamePad and on the TV (Pro Controller), with the ring and its blinking as the
+game draws it. Like the game's marks, they stay on the chart squares; the zoomed square view does
+not show them. The sea chart has eight rings; the game's own marks always come first, and the
+markers use the rings the game is not showing, in the order they were placed (a marker that
+finds none free waits for one).
+
+**Saving.** Whether Link owns a chart, and whether it is finished, is stored in the save file in
+the same record as the letters (it stays unused by the game itself; letters and charts of all mods
+share its 19 places per save file). It is saved and loaded with
+the game and kept by full and portable save states. Full save states hold the sea chart as the
+game left it, without the markers; they appear again on the next frame. The places of the
+markers are not saved: your mod places them every session. Turning your mod off leaves its charts
+in the record, and the sea chart shows only the game's own marks.
+
+**Players without chart mods.** The sea chart functions are only hooked while a loaded mod uses
+`wwhd_chart_*`. If another mod replaces one of them, markers are not shown in that session and the
+log says so.
+
+**For map mods (native).** `story_chart::shown_markers()` (`runtime/src/mods/story_chart.h`) lists
+the markers the sea chart shows now, with their world place, icon and label, so a minimap can draw
+them in its own style.
 
 ## Packages with content and images
 
