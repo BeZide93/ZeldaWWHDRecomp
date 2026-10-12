@@ -1,3 +1,4 @@
+#include "tooltip.h"
 // The Mods tab: one list of every mod with an on/off switch (built-in, downloaded, and the catalogue's
 // mods that aren't downloaded yet) and More (profiles, files, the mod list's source, code-mod support,
 // save backups, cheats). Switching on a mod that needs anything (a download, the GameCube game, a
@@ -143,7 +144,7 @@ inline void colored(const ImVec4& c, const std::string& s) {
 }
 inline void muted(const std::string& s) { colored(kMuted, s); }
 inline void tooltip(const std::string& s) {
-    if (!s.empty() && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort | ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("%s", s.c_str());
+    if (!s.empty() && overlay::tooltip_hovered(ImGuiHoveredFlags_DelayShort | ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("%s", s.c_str());
 }
 // Put the next item on this line when it fits, else on the next one (narrow windows, phones).
 inline void same_line_if_fits(const char* next_label) {

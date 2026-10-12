@@ -43,6 +43,7 @@ public class SetupService extends Service {
     private PowerManager.WakeLock wake;
     private File job;
     private boolean running;
+    private boolean updating;
     private volatile boolean destroyed;
     private int thermal;
     private int temperature = -1;
@@ -96,11 +97,19 @@ public class SetupService extends Service {
         Notification initial = notification("Preparing setup", false);
         if (Build.VERSION.SDK_INT >= 34) startForeground(NOTIFICATION, initial, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
         else startForeground(NOTIFICATION, initial);
+        lastNotification = null; // Replace the initial text even when resuming the same phase.
         try {
             File selected = SetupStore.current(this);
             if (selected == null) throw new IOException("Choose a game dump before starting setup");
             if (running && !selected.equals(job)) throw new IOException("Another setup job is still running");
             job = selected;
+            File previousHost = new File(job, "host.json");
+            if (!running) updating = false;
+            if (!running && previousHost.isFile()) {
+                JSONObject previous = SetupStore.read(previousHost);
+                updating = previous.optString("state").equals("complete") ? AndroidGame.needsRebuild(this) :
+                    previous.optBoolean("updating");
+            }
             String action = intent == null ? null : intent.getAction();
             if (PAUSE.equals(action)) SetupStore.write(new File(job, "manual-pause.json"), new JSONObject().put("schema", 1));
             if (RESUME.equals(action)) SetupStore.remove(new File(job, "manual-pause.json"));
@@ -293,6 +302,7 @@ public class SetupService extends Service {
     private void host(String state, String pause, String error) throws Exception {
         JSONObject value = new JSONObject().put("schema", 1).put("state", state)
             .put("updated", System.currentTimeMillis());
+        value.put("updating", updating);
         if (pause != null) value.put("reason", pause);
         if (error != null) value.put("error", error.substring(0, Math.min(error.length(), 2048)));
         SetupStore.write(new File(job, "host.json"), value);
@@ -307,20 +317,29 @@ public class SetupService extends Service {
             File progress = new File(job, "state.json");
             if (progress.isFile()) {
                 JSONObject event = SetupStore.read(progress).optJSONObject("last_event");
-                if (event != null) text = event.optString("stage", "setup");
+                if (event != null) text = SetupPresentation.stageLabel(event.optString("stage", "setup"));
             }
-        } else if (state.equals("complete")) text = "Setup complete — ready to play";
+        } else if (state.equals("warming shaders")) text = "Tap to prepare shaders for this device";
+        else if (state.equals("complete")) text = "Setup complete — ready to play";
         else if (state.equals("failed")) text = "Setup failed — open setup to retry";
+        if (SetupPresentation.showUpdate(updating, state))
+            text = SetupPresentation.UPDATING + " · " + text;
         if (!text.equals(lastNotification)) {
             getSystemService(NotificationManager.class).notify(NOTIFICATION, notification(text, state.equals("complete") || state.equals("failed")));
             lastNotification = text;
         }
     }
 
+    static Intent notificationIntent(Context context) {
+        // Always show setup; onResume routes a warming job to ShaderPrepareActivity.
+        return new Intent(context, SetupActivity.class).putExtra(SetupActivity.EXTRA_SHOW_SETUP, true);
+    }
+
     private Notification notification(String text, boolean finished) {
-        PendingIntent open = PendingIntent.getActivity(this, 0, new Intent(this, SetupActivity.class), PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+        PendingIntent open = PendingIntent.getActivity(this, 0, notificationIntent(this), PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
         Notification.Builder result = new Notification.Builder(this, CHANNEL).setSmallIcon(android.R.drawable.stat_sys_download)
-            .setContentTitle("Wind Waker HD setup").setContentText(text).setContentIntent(open)
+            .setContentTitle("Wind Waker HD setup").setContentText(text)
+            .setStyle(new Notification.BigTextStyle().bigText(text)).setContentIntent(open)
             .setOnlyAlertOnce(true).setOngoing(!finished);
         if (!finished) {
             String action = reason != null && reason.equals("manual") ? RESUME : PAUSE;

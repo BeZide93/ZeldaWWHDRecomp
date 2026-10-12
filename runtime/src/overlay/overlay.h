@@ -56,8 +56,8 @@ bool text(const char* utf8);
 void set_clipboard_text(const char* utf8);
 // a text field of the overlay has the keyboard (hosts turn on text input / the on-screen keyboard)
 bool wants_text();
-bool mouse_move(float nx, float ny);
-bool mouse_button(int button, bool down);  // 0 left, 1 right, 2 middle
+bool mouse_move(float nx, float ny, bool touch = false);
+bool mouse_button(int button, bool down, bool touch = false);  // 0 left, 1 right, 2 middle
 bool mouse_wheel(float dx, float dy);      // in lines, +y = away from the user
 void set_android_screen_dpi(float dpi);  // physical Android display DPI
 void set_density(float pixels_per_point);  // TV window backing scale (HiDPI)

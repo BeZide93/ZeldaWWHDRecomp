@@ -1,6 +1,7 @@
 // Private setup-generated cache generations. The release template contains no
 // code; these files are resolved from the player's game and stay on this device.
 #pragma once
+#include "shader_setup_hint.h"
 #include "platform/host.h"
 #include "platform/process.h"
 #include "mods/mod_json.h"

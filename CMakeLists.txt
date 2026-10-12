@@ -1216,3 +1216,15 @@ if(WIN32)
       ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/installer/test_windows_utf8.py)
   endif()
 endif()
+
+add_executable(setup_polish_test runtime/tools/setup_polish_test.cpp)
+target_include_directories(setup_polish_test PRIVATE runtime/src)
+target_link_libraries(setup_polish_test PRIVATE imgui)
+target_compile_options(setup_polish_test PRIVATE -UNDEBUG)
+add_test(NAME setup_polish COMMAND setup_polish_test)
+if(Java_JAVA_EXECUTABLE AND Java_JAVAC_EXECUTABLE)
+  add_test(NAME android_setup_presentation COMMAND ${CMAKE_COMMAND}
+    "-DJAVA=${Java_JAVA_EXECUTABLE}" "-DJAVAC=${Java_JAVAC_EXECUTABLE}"
+    "-DWORK=${CMAKE_BINARY_DIR}/setup_presentation_test" "-DSOURCE=${CMAKE_SOURCE_DIR}"
+    -P ${CMAKE_SOURCE_DIR}/runtime/tools/setup_presentation_test.cmake)
+endif()

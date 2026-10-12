@@ -23,6 +23,8 @@
 //   Swift Sail is in use (dComIfGp + 0x5D2C != 0, the HD check at 0247E97C) and K = 55 otherwise;
 //   site 0247EB88 multiplies it by that sail's factor, site 0247ED24 puts the stock value back
 //   before the jump code (jump height and the 20-unit jump threshold stay stock).
+//   setMoveAngle's speed-dependent rudder response uses speedF / sail factor while sailing;
+//   otherwise the boosted speed reaches its 0.1 turn-rate floor (at speed 130).
 //   Automatic wind: on the Swift Sail branch the game calls dKyw_tact_wind_set(0, angle of the
 //   boat's heading) every steering step (0247E9FC); site 0247E988 (the normal-sail branch) makes the
 //   same call when the toggle is on. The Swift Sail's sound, sail swap and speed stay its own.
@@ -55,6 +57,8 @@ constexpr uint32_t kLadderSide = 0x69C0;       // mProcVar6.m3570 (GameCube 0x35
 const uint32_t kChangeLadderMoveProc = GC(0x0242757C);  // daPy_lk_c::changeLadderMoveProc(int)
 // daShip_c
 constexpr uint32_t kShapeAngleY = 0x32A;       // shape_angle.y
+constexpr uint32_t kShipMode = 0x635;          // mCurMode; MODE_STEER_MOVE = 1
+constexpr uint32_t kShipState = 0x644;         // mStateFlag; SAIL_ON = 0x200
 const uint32_t kPlay = GD(0x1046F0B0);          // dComIfGp (the play info; what 025200D4 returns)
 constexpr uint32_t kSwiftSail = 0x5D2C;        // dComIfGp: the Swift Sail is in use (HD)
 const uint32_t kTactWindSet = GC(0x0257E490);  // dKyw_tact_wind_set(s16 ang_x, s16 ang_y)
@@ -122,6 +126,18 @@ extern "C" void hook_0242A218(Cpu* c) {
 }
 
 // ---- daShip_c::procSteerMove (0247E854) ----
+// setMoveAngle, immediately before fabs(f10 = speedF). Normalize only this register:
+// movement, acceleration, control-angle smoothing, forced movement and jumps keep real speed.
+extern "C" void site_0247D4E8(Cpu* c) {
+    if (!mods::sail_speed()) return;
+    const uint32_t ship = c->r[31];
+    if (ld8(ship + kShipMode) != 1 || !(ld32(ship + kShipState) & 0x200)) return;
+    const bool swift = ld8(kPlay + kSwiftSail) != 0;
+    const float factor = active_factor(true, swift ? mods::sail_speed_swift_factor() : mods::sail_speed_normal_factor());
+    if (factor == 1.f) return;
+    c->f[10].ps0 = (float)c->f[10].ps0 / factor;
+}
+
 // 0247E988: the normal-sail branch (`lbz r9, 0x63D(r31)`), right after the HD Swift Sail check.
 // Automatic wind: the Swift Sail branch's dKyw_tact_wind_set call (0247E9EC..0247E9FC).
 extern "C" void site_0247E988(Cpu* c) {

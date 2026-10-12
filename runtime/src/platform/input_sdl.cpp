@@ -201,15 +201,15 @@ static bool overlay_event(const SDL_Event& event){
  case SDL_EVENT_MOUSE_MOTION:{
   if(event.motion.windowID!=tv)return false;
   int w=1,h=1;SDL_GetWindowSize(g_prompt_window,&w,&h);
-  return overlay::mouse_move(event.motion.x/std::max(1,w),event.motion.y/std::max(1,h));
+  return overlay::mouse_move(event.motion.x/std::max(1,w),event.motion.y/std::max(1,h), event.motion.which == SDL_TOUCH_MOUSEID);
  }
  case SDL_EVENT_MOUSE_BUTTON_DOWN: case SDL_EVENT_MOUSE_BUTTON_UP:{
   if(event.button.windowID!=tv)return false;
   int b=event.button.button==SDL_BUTTON_LEFT?0:event.button.button==SDL_BUTTON_RIGHT?1:event.button.button==SDL_BUTTON_MIDDLE?2:-1;
   if(b<0)return overlay::captures();
   int w=1,h=1;SDL_GetWindowSize(g_prompt_window,&w,&h);
-  overlay::mouse_move(event.button.x/std::max(1,w),event.button.y/std::max(1,h));
-  return overlay::mouse_button(b,event.type==SDL_EVENT_MOUSE_BUTTON_DOWN);
+  overlay::mouse_move(event.button.x/std::max(1,w),event.button.y/std::max(1,h), event.button.which == SDL_TOUCH_MOUSEID);
+  return overlay::mouse_button(b,event.type==SDL_EVENT_MOUSE_BUTTON_DOWN, event.button.which == SDL_TOUCH_MOUSEID);
  }
  case SDL_EVENT_MOUSE_WHEEL:{
   if(event.wheel.windowID!=tv)return false;
