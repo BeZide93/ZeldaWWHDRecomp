@@ -8,7 +8,7 @@ What the release brings (tools/release/package.py --decomp-build), described in 
   "revision", "tree_sha256"  the decompilation's commit CI built against and the SHA-256 of its source
                           (SOURCE_PATHS, tree_digest). The source itself is not in the release: setup
                           downloads that commit from github.com/ZeldaWWHDDecomp/wwhd when the option is on
-                          ("url", about "download_bytes"), unpacks SOURCE_PATHS into DATA/decomp-src/REVISION
+                          ("url", about "download_bytes"), unpacks SOURCE_PATHS into DATA/decomp-src/<12 hex>
                           and checks the unpacked tree against tree_sha256 (independent of how GitHub packs
                           the archive). Kept there: an update with the same pin downloads nothing.
   tools/decomp_build/     gen.py (function list, glue, unit list), glue.cpp, frames_vis.h
@@ -104,32 +104,43 @@ def unpack_source(archive, dest):
                 shutil.copyfileobj(src, f)
 
 
+def cache_dir(data_dir, rev):
+    """DATA/decomp-src/<first 12 hex digits of the commit> (short names, as setup's other caches: issue #144)"""
+    return os.path.join(data_dir, "decomp-src", rev[:12])
+
+
 def fetch_source(s, data_dir, d):
     """The decompilation's source at the pinned commit (manifest "decomp": revision, tree_sha256, url,
-    download_bytes) in DATA/decomp-src/REVISION: reused when it is there and checks out, else downloaded
-    and checked. Older pins' copies are removed. Returns its folder; SetupError (FETCH_FAILED) otherwise."""
+    download_bytes) in cache_dir(): reused when it is there and checks out, else downloaded and checked.
+    Older pins' copies are removed. Returns its folder; SetupError (FETCH_FAILED) otherwise.
+    Setup's own file operations here use s.longpath (Windows extended-length paths; unchanged elsewhere).
+    The decomp version is macOS-only: on Windows its deepest files (data\\decomp-src\\<12>\\ plus the
+    decompilation's own 70-character paths, and decomp-work\\gen\\glued\\...) would exceed
+    setup.DEEPEST_DATA_PATH, which a Windows decomp version has to take into account."""
+    lp = getattr(s, "longpath", lambda p: p)
     rev, want = d["revision"], d["tree_sha256"]
-    cache = os.path.join(data_dir, "decomp-src")
-    root = os.path.join(cache, rev)
-    if os.path.isdir(root) and tree_digest(root) == want:
+    root = cache_dir(data_dir, rev)
+    cache = os.path.dirname(root)
+    if os.path.isdir(lp(root)) and tree_digest(lp(root)) == want:
         s.say("  Using the decomp source downloaded earlier (%s)." % rev[:7])
         return root
-    shutil.rmtree(cache, ignore_errors=True)  # another pin, or a damaged copy
-    os.makedirs(cache)
+    shutil.rmtree(lp(cache), ignore_errors=True)  # another pin, or a damaged copy
+    os.makedirs(lp(cache))
     mb = max(1, int(round(d.get("download_bytes", 0) / 1e6)))
-    archive, tmp = os.path.join(cache, rev + ".tar.gz"), root + ".tmp"
+    archive, tmp = os.path.join(cache, "src.tar.gz"), root + ".tmp"
     try:
         s.download(d.get("url") or ARCHIVE_URL % rev, archive, None, d.get("download_bytes", 0),
                    "Downloading the decomp source (about %d MB)" % mb)
-        unpack_source(archive, tmp)
-        got = tree_digest(tmp)
+        unpack_source(archive, lp(tmp))
+        got = tree_digest(lp(tmp))
         if got != want:
             raise ValueError("the downloaded source does not match this release (SHA-256 %s, expected %s)" % (got, want))
-        os.replace(tmp, root)
+        os.replace(lp(tmp), lp(root))
     except (s.SetupError, OSError, ValueError, tarfile.TarError) as e:
         s.LOG.write("decomp source: %s" % e)
-        shutil.rmtree(cache, ignore_errors=True)
-        raise s.SetupError("%s (%s)" % (FETCH_FAILED, str(e).splitlines()[0][:200]))
+        shutil.rmtree(lp(cache), ignore_errors=True)
+        detail = getattr(s, "plain_text", str)(str(e)).splitlines()[0][:200]
+        raise s.SetupError("%s (%s)" % (FETCH_FAILED, detail))
     finally:
         if os.path.exists(archive):
             os.remove(archive)
@@ -166,9 +177,10 @@ def build(s, ctx, tc, jobs, step=None):
     build_id = s.game_builds.identify(rpx)
     if build_id is not None and not build_id.canonical:
         raise s.SetupError("the decomp version works with the USA game only (yours is the %s build)" % build_id.name)
+    lp = getattr(s, "longpath", lambda p: p)
     work = os.path.join(data_dir, "decomp-work")
-    shutil.rmtree(work, ignore_errors=True)
-    os.makedirs(work)
+    shutil.rmtree(lp(work), ignore_errors=True)
+    os.makedirs(lp(work))
     out = os.path.join(work, "gen")
     times = {}
 
@@ -266,5 +278,5 @@ def build(s, ctx, tc, jobs, step=None):
         "%s %d s" % (k, v) for k, v in times.items() if k != "total")))
     s.LOG.write("decomp version times: " + json.dumps({k: round(v, 1) for k, v in times.items()}))
     if not getattr(ctx.args, "keep_work", False):
-        shutil.rmtree(work, ignore_errors=True)
+        shutil.rmtree(lp(work), ignore_errors=True)
     return exe, rev, len(units)

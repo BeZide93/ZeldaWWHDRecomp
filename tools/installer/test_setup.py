@@ -1559,7 +1559,8 @@ class DecompOption(unittest.TestCase):
                 raise fail
             import shutil as sh
             sh.copyfile(source, dst)
-        s = mock.Mock(download=download, say=lambda *a: None, LOG=mock.Mock(), SetupError=setup.SetupError)
+        s = mock.Mock(download=download, say=lambda *a: None, LOG=mock.Mock(), SetupError=setup.SetupError,
+                      longpath=setup.longpath, plain_text=setup.plain_text)
         return setup.decomp_setup.fetch_source(s, data, d), urls
 
     def test_source_download_and_check(self):
@@ -1570,13 +1571,13 @@ class DecompOption(unittest.TestCase):
                    "download_bytes": 8100000}
             data = os.path.join(d, "data")
             root, urls = self.fetch(data, pin, src)
-            self.assertEqual(root, os.path.join(data, "decomp-src", pin["revision"]))
+            self.assertEqual(root, os.path.join(data, "decomp-src", pin["revision"][:12]))  # short name (#144)
             self.assertTrue(os.path.isfile(os.path.join(root, "wwhd_src", "a.cpp")))
             self.assertFalse(os.path.exists(os.path.join(root, "docs")))  # only what the build needs
             self.assertEqual(urls[0][0], ds.ARCHIVE_URL % pin["revision"])
             self.assertIsNone(urls[0][1])  # the unpacked tree is checked, not GitHub's archive
             self.assertEqual(urls[0][2], "Downloading the decomp source (about 8 MB)")
-            self.assertEqual(os.listdir(os.path.join(data, "decomp-src")), [pin["revision"]])  # no archive left
+            self.assertEqual(os.listdir(os.path.join(data, "decomp-src")), [pin["revision"][:12]])  # no archive left
             # an update with the same pin: nothing downloaded
             root2, urls2 = self.fetch(data, pin, src)
             self.assertEqual((root2, urls2), (root, []))
@@ -1584,7 +1585,7 @@ class DecompOption(unittest.TestCase):
             pin2 = dict(pin, revision="1" * 40)
             root3, urls3 = self.fetch(data, pin2, src)
             self.assertEqual(len(urls3), 1)
-            self.assertEqual(os.listdir(os.path.join(data, "decomp-src")), [pin2["revision"]])
+            self.assertEqual(os.listdir(os.path.join(data, "decomp-src")), [pin2["revision"][:12]])
             # a damaged cached copy is downloaded again
             with open(os.path.join(root3, "LICENSE"), "a") as f:
                 f.write("changed\n")
@@ -1605,6 +1606,22 @@ class DecompOption(unittest.TestCase):
             with self.assertRaises(setup.SetupError):
                 self.fetch(data, pin, unsafe)
             self.assertFalse(os.path.exists(os.path.join(d, "x")))
+
+    def test_source_file_operations_use_longpath(self):
+        # Windows extended-length paths for setup's own unpacking, checking and moving (issue #144)
+        with tempfile.TemporaryDirectory() as d:
+            src = self.archive(d, "a.tar.gz", self.FILES)
+            pin = {"revision": "4" * 40, "tree_sha256": self.expected_digest(d, self.FILES)}
+            seen = []
+
+            def lp(p):
+                seen.append(os.path.relpath(p, d))
+                return p
+            with mock.patch.object(setup, "longpath", lp):
+                self.fetch(os.path.join(d, "data"), pin, src)
+            root = os.path.join("data", "decomp-src", "4" * 12)
+            for p in (os.path.dirname(root), root + ".tmp", root):
+                self.assertIn(p, seen)
 
     def test_source_offline(self):
         with tempfile.TemporaryDirectory() as d:
