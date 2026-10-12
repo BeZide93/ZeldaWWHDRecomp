@@ -52,7 +52,7 @@ int main(int argc,char** argv) {
     fs::path root=fs::absolute(argv[1]);std::string mode=argv[2],id=getenv("WWHD_TEST_MOD_SETUP");
     bool resumed=fs::weakly_canonical(fs::absolute(argv[0])).parent_path()==fs::weakly_canonical(root/"code-builds/synthetic/bin");
     bool missing=mode=="missing",broken=mode=="broken",catalogue=mode=="catalogue";
-    bool update_off=mode=="update-off",update_on=mode=="update-on",update=update_off||update_on;
+    bool update_off=mode=="update-off",update_on=mode=="update-on",ids=mode=="ids",update=update_off||update_on||ids;
     bool cancel_mode=mode=="cancel"||mode=="cancel-rebuild",canceled=false;
     bool restart=mode=="restart"||mode=="cancel-rebuild";set_code_mod_support(!restart||resumed);initialize();
     auto plan=overlay::diagnostic::read_setup_plan(true,getenv("WWHD_MOD_MANAGER_DIR"),getenv("WWHD_TEST_MOD_SETUP"),getenv("WWHD_TEST_GAME_SOURCES"));
@@ -82,6 +82,7 @@ int main(int argc,char** argv) {
     // the display: a desktop window, or a phone (WWHD_TEST_DISPLAY=WxH) for the captures
     int width=960,height=640;
     if(const char* d=getenv("WWHD_TEST_DISPLAY"))sscanf(d,"%dx%d",&width,&height);
+    else if(ids)height=2400;  // tall enough that nothing in a view scrolls out of the sweep
     SDL_Surface* surface=SDL_CreateSurface(width,height,SDL_PIXELFORMAT_RGBA32);assert(surface);
     SDL_Renderer* renderer=SDL_CreateSoftwareRenderer(surface);assert(renderer);
     ImGui::CreateContext();auto& io=ImGui::GetIO();io.IniFilename=nullptr;io.DisplaySize=ImVec2(float(width),float(height));io.DeltaTime=1.f/60;
@@ -127,6 +128,67 @@ int main(int argc,char** argv) {
         auto name=std::string(getenv("WWHD_TEST_CAPTURE_PREFIX")?getenv("WWHD_TEST_CAPTURE_PREFIX"):"")+label+".bmp";
         assert(SDL_SaveBMP(surface,(dir/name).string().c_str()));
     };
+    // ids: every view of the tab, with every section open, hovered all over: Dear ImGui reports two items with
+    // one ID (it would show its red "conflicting ID" box in a debug build) when the hovered ID was submitted twice
+    if(ids) {
+        assert(io.ConfigDebugHighlightIdConflicts);
+        host.expand_all=true;
+        int conflicts=0;
+        auto frame_once=[&](float mx,float my) {
+            io.AddMousePosEvent(mx,my);
+            ImGui_ImplSDLRenderer3_NewFrame();ImGui::NewFrame();
+            if(GImGui->DebugDrawIdConflictsId){++conflicts;return false;}
+            ImGui::SetNextWindowPos(ImVec2(0,0),ImGuiCond_Always);ImGui::SetNextWindowSize(ImVec2(float(width),float(height)));
+            ImGui::Begin("Settings",nullptr,ImGuiWindowFlags_NoResize|ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoCollapse);
+            draw_tab(host);ImGui::End();ImGui::Render();
+            return true;
+        };
+        auto sweep=[&](const std::string& view,const std::function<void()>& set) {
+            // close what the previous view left open (the review)
+            ImGui_ImplSDLRenderer3_NewFrame();ImGui::NewFrame();
+            if(!GImGui->OpenPopupStack.empty())ImGui::ClosePopupToLevel(0,true);
+            ImGui::EndFrame();
+            set();
+            for(int i=0;i<4;i++)frame_once(-100,-100);  // let the view (and a popup) appear
+            float bottom=0;  // the lowest item drawn: sweep down to it
+            for(auto* w:GImGui->Windows)if(w->Active)bottom=std::max(bottom,w->DC.CursorMaxPos.y);
+            bottom=std::min(bottom+8.f,float(height));
+            int before=conflicts;
+            for(float y=2;y<bottom;y+=6)for(float x=4;x<width;x+=40)
+                if(!frame_once(x,y)){
+                    fprintf(stderr,"ID conflict in %s at %.0f,%.0f (ID %08X)\n",view.c_str(),x,y,GImGui->DebugDrawIdConflictsId);
+                    ImGui::EndFrame();
+                }
+            fprintf(stderr,"[ids] %s: %d conflicts (swept to y=%.0f)\n",view.c_str(),conflicts-before,bottom);
+        };
+        auto& s=ui::state();
+        auto page=[&](const std::string& pid,bool builtin){return [&s,pid,builtin]{s.review={};s.job.flow={};ui::go_area(ui::kMods);s.page=pid;s.page_builtin=builtin;};};
+        // wait for the catalogue list (local fixture) so the update and the downloadable mod show
+        for(int i=0;i<400&&!s.loader.snapshot().have_list;i++){frame_once(-100,-100);std::this_thread::sleep_for(std::chrono::milliseconds(5));}
+        assert(s.loader.snapshot().have_list);
+        sweep("list",page("",false));
+        sweep("more",[&]{s.page.clear();ui::go_area(ui::kMore);});
+        for(const auto& e:mods::manager::entries())sweep(std::string("page ")+e.id,page(e.id,true));
+        sweep("page "+id,page(id,false));
+        sweep("page available-fixture",page("available-fixture",false));
+        sweep("review switch on",[&]{page(id,false)();ui::open_review_for_installed(view(id));});
+        sweep("review update",[&]{page(id,false)();auto snap=s.loader.snapshot();auto v=view(id);
+            ui::open_review_for_entry(*ui::catalogue_entry(snap,id),snap.catalogue.fixture_root,true,&v);});
+        sweep("review install",[&]{page("available-fixture",false)();auto snap=s.loader.snapshot();
+            ui::open_review_for_entry(*ui::catalogue_entry(snap,"available-fixture"),snap.catalogue.fixture_root,false);});
+        // the progress view's states: working, failed (with its details open), done with a restart
+        auto progress=[&](ui::Phase phase){return [&,phase]{page(id,false)();ui::Plan plan;plan.download=true;plan.prepare={"Prepare"};plan.build=true;plan.restart=true;
+            s.job.flow=ui::Flow::make(id,"Sea minimap",plan);s.job.flow.accept(0);
+            if(phase==ui::Phase::Failed)s.job.flow.fail("Preparing the mod's files failed.","synthetic details");
+            if(phase==ui::Phase::Done)s.job.flow.finish(true,1);};};
+        sweep("progress working",progress(ui::Phase::Working));
+        sweep("progress failed",progress(ui::Phase::Failed));
+        sweep("progress done",progress(ui::Phase::Done));
+        s.job.flow={};
+        ImGui_ImplSDLRenderer3_Shutdown();ImGui::DestroyContext();SDL_DestroyRenderer(renderer);SDL_DestroySurface(surface);
+        fprintf(stderr,"[ids] %d conflicts in all views\n",conflicts);
+        return conflicts?1:0;
+    }
     Clicker clicker;
     const std::string switch_label="##on_"+id;
     auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(25);

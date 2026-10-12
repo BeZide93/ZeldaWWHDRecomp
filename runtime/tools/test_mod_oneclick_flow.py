@@ -50,13 +50,16 @@ def run(root, ident, mode):
                     kind=manifest['kind'], authors=['Fixture'], licences=['MPL-2.0'], port_versions=dict(minimum='0.2.10'),
                     setup=manifest.get('setup', []),
                     downloads=dict(all=dict(url=name, size=archive.stat().st_size, sha256=hashlib.sha256(archive.read_bytes()).hexdigest())))
-    if mode.startswith('update'):
+    if mode.startswith('update') or mode == 'ids':
         # the installed version; the catalogue offers 1.1.0
         (root / 'installed-index.json').write_text(json.dumps(dict(format_version=1, mods=[package('1.0.0', 'package-1.0.0.zip')])))
         entry = package('1.1.0', 'package.zip')
     else:
         entry = package('1.0.0', 'package.zip')
-    (root / 'index.json').write_text(json.dumps(dict(format_version=1, mods=[entry])))
+    listed = [entry]
+    if mode == 'ids':  # one more catalogue mod that is not downloaded (its page and review are checked too)
+        listed.append(dict(entry, id='available-fixture', name='Available fixture'))
+    (root / 'index.json').write_text(json.dumps(dict(format_version=1, mods=listed)))
     header = bytearray(32); header[:6] = b'GZLE01'; header[28:32] = b'\xc2\x33\x9f\x3d'
     (root / 'synthetic.iso').write_bytes(header)
     (root / 'sources.json').write_text(json.dumps(dict(gc_usa=str(root / 'synthetic.iso'))))
@@ -100,6 +103,8 @@ path=pathlib.Path(a.code_mods_status);temporary=path.with_suffix('.tmp');tempora
     print(result.stdout, end='')
     if result.returncode:
         raise RuntimeError(f'{ident}/{mode} failed: {result.returncode}')
+    if mode == 'ids':  # the ID check reports by its exit code
+        return
     if mode == 'missing':
         assert not (root / 'manager/profiles.json').exists(), 'Blocked setup must not record trust or a run'
         return
@@ -127,7 +132,7 @@ scenarios = [('gc-sea-minimap', 'normal'), ('heart-ticker', 'normal'), ('gc-sea-
              ('heart-ticker', 'restart'), ('gc-sea-minimap', 'broken'), ('gc-sea-minimap', 'missing'),
              ('gc-sea-minimap', 'checkbox'), ('heart-ticker', 'checkbox'), ('gc-sea-minimap', 'cancel'), ('heart-ticker', 'choice'),
              ('gc-sea-minimap', 'catalogue'), ('heart-ticker', 'catalogue'), ('gc-sea-minimap', 'cancel-rebuild'),
-             ('gc-sea-minimap', 'update-off'), ('quick-preset', 'update-on')]
+             ('gc-sea-minimap', 'update-off'), ('quick-preset', 'update-on'), ('gc-sea-minimap', 'ids')]
 if retained:
     for ident, mode in scenarios:
         run(retained / (ident + '-' + mode), ident, mode)

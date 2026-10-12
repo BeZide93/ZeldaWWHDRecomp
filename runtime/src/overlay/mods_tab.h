@@ -51,6 +51,7 @@ struct Host {
     bool back = false;       // controller B this frame
     bool b_used = false;     // out: B answered something here (it must not also close the menu)
     bool test = false;       // isolated headless run: WWHD_TEST_* aids apply
+    bool expand_all = false; // tests: every collapsed section is drawn open (the ID conflict check)
 };
 
 inline constexpr const char* kDefaultCatalogue = "https://raw.githubusercontent.com/ZeldaWWHDRecomp/ZeldaWWHDMods/main/index.json";
@@ -152,6 +153,16 @@ inline bool selectable(const char* label, bool selected = false, ImGuiSelectable
     size.y = std::max(size.y, ImGui::GetFrameHeight());
 #endif
     return ImGui::Selectable(label, selected, flags, size);
+}
+// A collapsed section (tests can open them all: Host::expand_all)
+inline bool g_expand_all = false;
+inline bool section(const char* label) {
+    if (g_expand_all) ImGui::SetNextItemOpen(true, ImGuiCond_Always);
+    return ImGui::CollapsingHeader(label);
+}
+inline bool tree(const char* label) {
+    if (g_expand_all) ImGui::SetNextItemOpen(true, ImGuiCond_Always);
+    return ImGui::TreeNode(label);
 }
 inline bool button(const char* label, const ImVec2& size = ImVec2(0, 0)) {
     bool pressed = ImGui::Button(label, size);
@@ -753,7 +764,7 @@ inline void progress_view(const Host& h, bool android) {
         if (button("Cancel##flow")) cancel_flow();
     } else if (f.phase == Phase::Failed) {
         colored(kBad, f.error);
-        if (!f.details.empty() && ImGui::TreeNode("Show details")) {
+        if (!f.details.empty() && tree("Show details")) {
             ImGui::PushTextWrapPos(0);
             ImGui::TextUnformatted(f.details.c_str());
             ImGui::PopTextWrapPos();
@@ -1064,7 +1075,7 @@ inline void lock_line(const Host& h, const Page& p) {
 }
 inline void troubleshooting(const Host& h, const mods::packages::View& v, const Page& p) {
     using namespace mods::packages;
-    if (!ImGui::CollapsingHeader("Troubleshooting")) return;
+    if (!section("Troubleshooting")) return;
     ImGui::Indent();
     auto steps = setup_steps(v.id);
     bool busy = false;
@@ -1210,7 +1221,7 @@ inline void package_page(Host& h, const mods::packages::View& v) {
         s.remove_id = v.id; s.remove_bytes = disk_use(v.id); s.remove_request = true;
     }
     // details
-    if (ImGui::CollapsingHeader("Details")) {
+    if (section("Details")) {
         ImGui::Indent();
         muted("Version " + v.version);
         if (!v.author.empty()) muted("By " + v.author);
@@ -1284,7 +1295,7 @@ inline void available_page(Host& h, const mods::catalogue::Entry& e, const fs::p
     else muted("Switch it on to download it, set it up and use it.");
     text(e.description);
     if (e.experimental) colored(kWarn, kExperimentalShort);
-    if (ImGui::CollapsingHeader("Details")) {
+    if (section("Details")) {
         ImGui::Indent();
         muted("Version " + e.version);
         for (const auto& a : e.authors) muted("By " + a);
@@ -1332,7 +1343,7 @@ inline void more(Host& h) {
     if (button("Switch all mods off")) hostui::post([] { mods::packages::disable_all(); });
     muted("Switches off every mod, built-in ones included, in the current profile.");
     bool busy = !setupflow::setup_run.id.empty() || s.job.flow.phase == Phase::Working;
-    if (ImGui::CollapsingHeader("Profiles")) {
+    if (section("Profiles")) {
         ImGui::Indent();
         muted("A profile remembers which mods are on and their options.");
         if (busy) muted("Profiles can be changed when the current setup has finished.");
@@ -1362,7 +1373,7 @@ inline void more(Host& h) {
         ImGui::EndDisabled();
         ImGui::Unindent();
     }
-    if (ImGui::CollapsingHeader("Install from a file or folder")) {
+    if (section("Install from a file or folder")) {
         ImGui::Indent();
         muted("A mod package (.wwhdmod or ZIP), a mod folder, or a replacement .pack file.");
         auto pick = [&h](bool folder) {
@@ -1377,7 +1388,7 @@ inline void more(Host& h) {
         if (button("Choose folder…##package")) pick(true);
         ImGui::Unindent();
     }
-    if (ImGui::CollapsingHeader("GameCube game for mods")) {
+    if (section("GameCube game for mods")) {
         ImGui::Indent();
         muted("Some mods use files from the GameCube version of the game. They stay on your computer.");
         game_source_picker(h, "gc_wind_waker");
@@ -1385,20 +1396,21 @@ inline void more(Host& h) {
         if (!src.path.empty() && small_button("Forget it")) { std::string e; set_game_source("gc_wind_waker", "", e); }
         ImGui::Unindent();
     }
-    if (ImGui::CollapsingHeader("Code-mod support")) {
+    if (section("Code-mod support")) {
         ImGui::Indent();
         bool code = mods::code::enabled();
-        if (ImGui::Checkbox("Code-mod support", &code)) mods::code::request(code);
+        // not the section's own label: two items with one ID
+        if (ImGui::Checkbox("Use code mods##code_mods_switch", &code)) mods::code::request(code);
         muted("Code mods need the game code rebuilt with mod support (about 5 minutes) and a restart. Installing a "
               "code mod turns this on by itself.");
         ImGui::Unindent();
     }
-    if (ImGui::CollapsingHeader("Save backups")) {
+    if (section("Save backups")) {
         ImGui::Indent();
         if (experimental::backups_section(h.back)) h.b_used = true;
         ImGui::Unindent();
     }
-    if (ImGui::CollapsingHeader("Mod list")) {
+    if (section("Mod list")) {
         ImGui::Indent();
         if (ImGui::Checkbox("Check for new mods automatically", &s.auto_check))
             hostui::post([on = s.auto_check] { hostui::set("mod.catalogue.auto", on ? "1" : "0"); });
@@ -1427,12 +1439,12 @@ inline void more(Host& h) {
         if (snap.failed && !snap.error.empty()) muted("Last check: " + snap.error);
         ImGui::Unindent();
     }
-    if (h.cheats && ImGui::CollapsingHeader("Cheats")) {
+    if (h.cheats && section("Cheats")) {
         ImGui::Indent();
         h.cheats();
         ImGui::Unindent();
     }
-    if (ImGui::CollapsingHeader("Mods folder")) {
+    if (section("Mods folder")) {
         ImGui::Indent();
         auto dir = directory();
         if (!dir.empty()) { muted(dir); tooltip(dir); }
@@ -1507,6 +1519,7 @@ inline void restart_bar(const Host& h, const std::string& summary) {
 // The whole tab. restart_summary: what a restart would apply (restart_notice.h summary), "" for nothing.
 inline void draw(Host& h, const std::string& restart_summary) {
     auto& s = state();
+    g_expand_all = h.expand_all;
     apply_test_view(h);
     test_switches(h);
     install_picked(h);

@@ -37,7 +37,7 @@ code-mod support is added; after **Install** (or **Switch on**) the game code is
 continues until the mod is on. A failed step shows one sentence, **Show details** and **Try
 again**; Cancel keeps the current build.
 
-To switch support on or off by hand: **Mods → More → Code-mod support** (on macOS the
+To switch support on or off by hand: **Mods → More → Code-mod support → Use code mods** (on macOS the
 Gameplay menu has the same option), confirm the rebuild, then **Restart now** (or later).
 Support is active from the next start. Both variants are cached, so switching back to one
 you built before is quick. Keep the complete release folder and the compiler setup

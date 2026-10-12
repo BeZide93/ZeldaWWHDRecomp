@@ -306,6 +306,11 @@ void init_context() {
     io.BackendFlags |= ImGuiBackendFlags_HasGamepad;
     io.BackendPlatformName = "wwhd";
     io.ConfigNavCaptureKeyboard = true;
+#ifdef NDEBUG
+    // Dear ImGui's red "conflicting ID" box is for developers: release builds never show it to players (debug
+    // builds and the offscreen tests keep it, and mods_tab_ids checks the Mods tab for conflicts)
+    io.ConfigDebugHighlightIdConflicts = false;
+#endif
     ImGuiPlatformIO& pio = ImGui::GetPlatformIO();
     pio.Platform_GetClipboardTextFn = [](ImGuiContext*) -> const char* {
         static std::string copy;
