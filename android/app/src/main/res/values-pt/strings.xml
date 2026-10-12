@@ -60,7 +60,8 @@
     <string name="setup_shaders">Preparando os gráficos…</string>
     <string name="setup_shaders_detail">Isso deixa os primeiros minutos de jogo mais suaves. Voltar pula esta etapa.</string>
     <string name="game_icon_add">Adicionar o ícone do jogo à tela inicial</string>
-    <string name="game_icon_present">O ícone já está na tela inicial. Segure-o e toque em Configurações.</string>
+    <string name="game_icon_present">O ícone já está na tela inicial. Segure-o e abra as configurações dele.</string>
+    <string name="game_icon_present_shortcut">O ícone já está na tela inicial. Segure-o para ver os saves e a instalação.</string>
     <string name="game_icon_none">Instale o jogo primeiro</string>
     <string name="controller_settings_hint">Segure Select/− para abrir Configurações</string>
     <string name="controller_settings_hint_home">Segure Select/− ou pressione Home para abrir Configurações</string>
