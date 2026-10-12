@@ -345,6 +345,24 @@ float pass_t() {
 // the step's exact state is drawn and recorded (the "before" of the next step's blended frames)
 bool record_pass() { return g_hold && g_phase >= g_step_n; }
 
+// A sight point follows the camera's draw fraction, including camera cuts. A
+// blend can also snap internally (a >45 degree turn or abrupt collision zoom).
+float reticle_t() {
+    if (!g_blend_draw) return 1.0f;
+    for (const auto& p : g_prev) {
+        if (!p.cam || p.drawn_pass != g_passes) continue;
+        if (p.snap_step == g_logic_steps && p.snap) return 1.0f;
+        CamState cur = read_cam(p.cam);
+        bool moved = false, exact = true;
+        for (int i = 0; i < 3; ++i) {
+            moved |= p.s.eye[i] != cur.eye[i] || p.s.center[i] != cur.center[i];
+            exact &= p.drawn.eye[i] == cur.eye[i] && p.drawn.center[i] == cur.center[i];
+        }
+        if (moved && exact) return 1.0f;
+    }
+    return pass_t();
+}
+
 }  // namespace interp
 
 // debug: WWHD_INTERP_CAM_TRACE=n logs n camera draws: logic step, pass fraction, eye and center as drawn
@@ -636,6 +654,7 @@ void fx_pass_start();          // interp_fx.cpp: puts back the values drawn blen
 void fx_hold_blend(float t);   // interp_fx.cpp: blended hold pass: logic-time effect blends at t
 void fx_ss_reset();
 void nodraw_reset();          // fopAc_Draw hook: the step's one-shot no-draw requests
+void reticle_reset();
 // a save state was loaded: nothing may blend across the jump
 void ss_reset() {
     countdown::reset();
@@ -652,6 +671,7 @@ void ss_reset() {
     g_step_n = 1;
     fx_ss_reset();
     nodraw_reset();
+    reticle_reset();
     true60::ss_reset();
 }
 // Paced interpolation (WWHD_INTERP_PACED=1, the default on Android, Windows on ARM64 and at 120/240
@@ -994,6 +1014,7 @@ extern "C" void hook_0203593C(Cpu* c) {
         g_phase = 0;
         g_step_n = 1;
         fx_ss_reset();
+        reticle_reset();
     }
     if (!enabled() || !g_hold_next) {
         g_logic_steps++;
