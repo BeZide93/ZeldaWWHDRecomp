@@ -35,13 +35,16 @@ void log_msg(const char*,...){}
 // (overlay/text_entry.h) shows while promptShown: overlay::key takes every key then, as the real one does
 static bool promptShown=false;static int promptKeys=0;static std::string promptText;
 static bool overlayOpen=false;
+static bool lastPointerTouch=false;
+static int pointerEvents=0;
 // Home / Select toggle overlayOpen in the input pump through the real SettingsShortcut (settings_shortcut.h)
 static double shortcutClock=0;
 namespace overlay { void poll_controller_shortcuts(const float* v){static SettingsShortcut sc;
   const auto a=sc.poll(shortcutClock,v[input_map::kPadOptions]>0.5f,v[input_map::kPadHome]>0.5f,overlayOpen);if(a!=SettingsShortcut::None)overlayOpen=a==SettingsShortcut::Open;}
  bool key(int,bool,bool,int){if(promptShown)++promptKeys;return promptShown;} bool is_open(){return overlayOpen;} bool blocks_input(){return promptShown||overlayOpen;}
  bool captures(){return promptShown||overlayOpen;}
- bool mouse_move(float,float){return false;} bool mouse_button(int,bool){return false;} bool mouse_wheel(float,float){return false;}
+ bool mouse_move(float,float,bool touch){lastPointerTouch=touch;++pointerEvents;return overlayOpen;}
+ bool mouse_button(int,bool,bool touch){lastPointerTouch=touch;++pointerEvents;return overlayOpen;} bool mouse_wheel(float,float){return false;}
  bool text(const char*){return false;} void set_clipboard_text(const char*){} bool wants_text(){return false;} }
 namespace text_entry { bool active(){return promptShown;} void text(const char* s){promptText+=s;} void preedit(const char*){} }
 namespace hostui { void graphics_changed(){} }
@@ -83,6 +86,18 @@ int main(){
  auto* game=SDL_CreateWindow("Game",32,32,SDL_WINDOW_HIDDEN);
  auto* controls=SDL_CreateWindow("Controls",32,32,SDL_WINDOW_HIDDEN);
  assert(game&&controls);input::set_prompt_window(game);
+ // Touch-emulated pointers keep their source through the overlay boundary; a real mouse restores hover.
+ overlayOpen=true;
+ for(SDL_MouseID id : {SDL_TOUCH_MOUSEID, SDL_MouseID(1)}) {
+  SDL_Event e{};e.type=SDL_EVENT_MOUSE_MOTION;e.motion.windowID=SDL_GetWindowID(game);e.motion.which=id;
+  int before=pointerEvents;input::handle_event(e);
+  assert(pointerEvents==before+1 && lastPointerTouch==(id==SDL_TOUCH_MOUSEID));
+  e={};e.type=SDL_EVENT_MOUSE_BUTTON_DOWN;e.button.windowID=SDL_GetWindowID(game);
+  e.button.which=id;e.button.button=SDL_BUTTON_LEFT;
+  before=pointerEvents;input::handle_event(e);
+  assert(pointerEvents==before+2 && lastPointerTouch==(id==SDL_TOUCH_MOUSEID));
+ }
+ overlayOpen=false;
  auto stateKey=[&](int slot,SDL_Keymod mod,bool repeat=false,SDL_Window* window=nullptr,Uint32 type=SDL_EVENT_KEY_DOWN){
   SDL_Event e{};e.type=type;e.key.scancode=SDL_Scancode(SDL_SCANCODE_F1+slot-1);
   e.key.windowID=SDL_GetWindowID(window?window:game);e.key.mod=mod;e.key.repeat=repeat;input::handle_event(e);

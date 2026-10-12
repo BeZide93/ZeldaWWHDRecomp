@@ -23,6 +23,7 @@ public class SetupActivity extends Activity {
     private TextView status;      // the technical record, under "Details"
     private TextView stage;       // what is happening, in plain words
     private TextView detail;
+    private TextView updateStatus;
     private android.widget.ProgressBar bar;
     private Button choose;
     private Button details;
@@ -127,6 +128,11 @@ public class SetupActivity extends Activity {
         title.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
         title.setTextColor(0xFFFFFFFF);
         layout.addView(title);
+        updateStatus = new TextView(this);
+        updateStatus.setText(SetupPresentation.UPDATING);
+        updateStatus.setTextSize(16);
+        updateStatus.setVisibility(android.view.View.GONE);
+        layout.addView(updateStatus);
         stage = new TextView(this);
         stage.setTextSize(20);
         stage.setTextColor(0xFFE8EEF2);
@@ -338,7 +344,9 @@ public class SetupActivity extends Activity {
                         getString(R.string.setup_minutes_left, (eta + 59) / 60);
                     phase(getString(R.string.setup_compiling), getString(R.string.setup_compiling_detail, done, total) + left,
                         (int)(1000L * done / total));
-                } else if (step.equals("translate")) phase(getString(R.string.setup_translating), getString(R.string.setup_leave_detail), -1);
+                } else if (step.equals("shaders")) phase(SetupPresentation.READING_SHADERS, getString(R.string.setup_leave_detail),
+                    event.has("fraction") ? (int)(1000 * event.optDouble("fraction")) : -1);
+                else if (step.equals("translate")) phase(getString(R.string.setup_translating), getString(R.string.setup_leave_detail), -1);
                 else if (step.equals("link") || step.equals("activate")) phase(getString(R.string.setup_finishing), null, -1);
                 else phase(getString(R.string.setup_extracting), getString(R.string.setup_leave_detail), -1);
                 return;
@@ -405,7 +413,8 @@ public class SetupActivity extends Activity {
                 play.setEnabled(new File(AndroidGame.storage(SetupActivity.this), "active.json").isFile() ||
                     (external != null && new File(external, "game/code/cking.rpx").isFile()));
                 String hostName = hostState == null ? (job == null ? "" : "selected") : hostState.optString("state");
-                boolean working = hostName.equals("importing") || hostName.equals("preparing") || hostName.equals("running") ||
+                if (!hostName.equals("warming shaders")) shaderWarmJob = null;
+                boolean working = hostName.equals("activating") || hostName.equals("importing") || hostName.equals("preparing") || hostName.equals("running") ||
                     hostName.equals("warming shaders");
                 show(play, play.isEnabled() && !working);
                 show(choose, phoneSetup && !working);
@@ -413,6 +422,7 @@ public class SetupActivity extends Activity {
                 show(pause, phoneSetup && working);
                 show(resume, phoneSetup && job != null && !working && !hostName.equals("complete"));
                 setTextIfChanged(resume, getString(hostName.equals("selected") ? R.string.setup_start : R.string.setup_continue));
+                show(updateStatus, hostState != null && SetupPresentation.showUpdate(hostState.optBoolean("updating"), hostName));
                 plainPhase(job, hostState, hostName, needsKeys, resume.isEnabled());
                 show(addIcon, play.isEnabled() && !working);
                 String text;
@@ -425,6 +435,8 @@ public class SetupActivity extends Activity {
                     File host = new File(job, "host.json");
                     JSONObject value = host.isFile() ? SetupStore.read(host) : new JSONObject().put("state", "ready to start");
                     text = "Setup: " + value.getString("state");
+                    if (SetupPresentation.showUpdate(value.optBoolean("updating"), value.optString("state")))
+                        text = SetupPresentation.UPDATING + "\n" + text;
                     if (value.optString("state").equals("complete")) offerShortcut();
                     if (value.optString("state").equals("warming shaders")) { play.setEnabled(false); addIcon.setEnabled(false); }
                     if (value.optString("state").equals("warming shaders") &&
@@ -465,7 +477,7 @@ public class SetupActivity extends Activity {
                                 event.optInt("total"), event.optLong("eta_seconds", -1));
                         if (compiling != null) text += "\n" + compiling;
                         else if (event != null && event.optString("stage").equals("shaders") && event.has("fraction"))
-                            text += "\nPreparing shaders: " + Math.round(100 * event.optDouble("fraction")) + "%\n" + event.optString("detail");
+                            text += "\nReading shaders from your game files: " + Math.round(100 * event.optDouble("fraction")) + "%\n" + event.optString("detail");
                         else if (event != null) text += "\n" + event.optString("stage", "setup") + ": " + event.optString("state");
                     }
                 }

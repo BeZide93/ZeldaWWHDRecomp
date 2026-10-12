@@ -1,3 +1,4 @@
+#include "tooltip.h"
 #include "gfx/display_modes.h"
 #include <mutex>
 // In-game settings overlay: the Dear ImGui user interface (see overlay.h). The renderers draw the
@@ -106,6 +107,7 @@ struct Event {
     bool down = false;
     float x = 0, y = 0;
     int mods = 0;
+    bool touch = false;
     std::string text = {};  // Text: typed characters (UTF-8)
 };
 std::mutex g_mu;
@@ -406,7 +408,7 @@ void read_controller() {
 
 // ---------------------------------------------------------------- widgets
 void help(const char* text) {
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort | ImGuiHoveredFlags_ForTooltip)) ImGui::SetTooltip("%s", text);
+    if (overlay::tooltip_hovered(ImGuiHoveredFlags_DelayShort | ImGuiHoveredFlags_ForTooltip)) ImGui::SetTooltip("%s", text);
 }
 void heading(const char* text) {
     ImGui::Spacing();
@@ -518,7 +520,7 @@ void tab_saves() {
                 if (s.older_other && s.portable) {
                     // decision: an older full state stays on disk; say so (it is large and must not be shared)
                     ImGui::TextDisabled("also holds an older full state (slot%d.bin, %.0f MB)", i, s.older_bytes / 1048576.0);
-                    if (ImGui::IsItemHovered())
+                    if (overlay::tooltip_hovered())
                         ImGui::SetTooltip("Kept on disk, not loaded: the newer portable state is. It contains game data: "
                                           "don't share it. Delete it in the states folder if you no longer need it.");
                 } else if (s.older_other) {
@@ -661,8 +663,8 @@ void tab_graphics() {
     if (ImGui::Button("Rebuild shader cache"))
         rebuildFailed = !shaderprebuild::request_rebuild();
     if (rebuildFailed) note("Could not save the request. Check that the settings folder is writable.");
-    else if (shaderprebuild::requested()) note("Run setup and choose repair/update to rebuild shaders and pipelines.");
-    help("Requests preparation during setup repair/update. Preparation can take a few minutes; launching the game never starts it automatically.");
+    else if (shaderprebuild::requested()) note(shaderprebuild::setup_hint());
+    help(shaderprebuild::setup_hint());
 #ifndef __ANDROID__
     {
         const auto exported = template_export::status();
@@ -1594,14 +1596,14 @@ void tab_controls() {
         m.deadzone = std::clamp(dz / 100.0f, 0.0f, 0.9f);
         input_map::set_current(m);
     }
-    if (ImGui::IsItemHovered())
+    if (overlay::tooltip_hovered())
         ImGui::SetTooltip("Default: 15%%. Filters resting-stick drift on both sticks.");
     ImGui::SameLine(0, 24);
     if (check("Invert camera up/down", m.invert_camera_y, &v)) {
         m.invert_camera_y = v;
         input_map::set_current(m);
     }
-    if (ImGui::IsItemHovered())
+    if (overlay::tooltip_hovered())
         ImGui::SetTooltip("Camera only, including first-person views and item aiming (bow, hookshot, telescope, Picto Box) and the mouse camera. The Wind Waker baton and other right-stick controls are not inverted.");
     ImGui::SameLine(0, 24);
     // issue #35: a way to keep the controller motors still (saved; WWHD_RUMBLE=0 starts with it off)
@@ -1988,14 +1990,14 @@ void set_clipboard_text(const char* utf8) {
     g_clipboard = utf8 ? utf8 : "";
 }
 bool wants_text() { return is_open() && g_wants_text.load(); }
-bool mouse_move(float nx, float ny) {
+bool mouse_move(float nx, float ny, bool touch) {
     if (!captures() || g_no_host) return false;
-    push({Event::MousePos, 0, false, nx, ny, 0});
+    push({Event::MousePos, 0, false, nx, ny, 0, touch});
     return true;
 }
-bool mouse_button(int button, bool down) {
+bool mouse_button(int button, bool down, bool touch) {
     if (!captures() || g_no_host) return false;
-    push({Event::MouseButton, button, down, 0, 0, 0});
+    push({Event::MouseButton, button, down, 0, 0, 0, touch});
     return true;
 }
 bool mouse_wheel(float dx, float dy) {
@@ -2133,11 +2135,12 @@ ImDrawData* frame(float pw, float ph, void (*renderer_init)()) {
             if (ImGuiKey k = imgui_key(e.code); k != ImGuiKey_None) io.AddKeyEvent(k, e.down);
             break;
         case Event::MousePos:
+            io.AddMouseSourceEvent(e.touch ? ImGuiMouseSource_TouchScreen : ImGuiMouseSource_Mouse);
             mouse_used |= e.x != U.mouse_position.x || e.y != U.mouse_position.y;
             U.mouse_position = ImVec2(e.x, e.y);
             overlay_trace::mouse_pos(io, e.x * io.DisplaySize.x, e.y * io.DisplaySize.y);
             break;
-        case Event::MouseButton: mouse_used = true; overlay_trace::mouse_button(io, e.code, e.down); break;
+        case Event::MouseButton: io.AddMouseSourceEvent(e.touch ? ImGuiMouseSource_TouchScreen : ImGuiMouseSource_Mouse); mouse_used = true; overlay_trace::mouse_button(io, e.code, e.down); break;
         case Event::Wheel: mouse_used |= e.x != 0 || e.y != 0; overlay_trace::wheel(io, e.x, e.y); break;
         case Event::Text: io.AddInputCharactersUTF8(e.text.c_str()); break;
         default: break;
