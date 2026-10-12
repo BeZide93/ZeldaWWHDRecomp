@@ -70,6 +70,14 @@ it as the fix based on the unit test alone.
   conflicting hold-pass projections, first visibility, missing history,
   target-slot reuse, and reset. This is a synthetic regression, not game evidence.
 - `git diff --check`: passed.
+- Follow-up `interp_reticle_hooks_test` links the actual runtime hooks to a
+  projection spy and a guest-memory fixture. It verifies original-call count
+  and CPU effects, unchanged source/HUD bytes, unrelated projection isolation,
+  all five target slots, changed target identity, 60-Hz process bypass, reset,
+  and bit-preserved 30-fps projection results (including signed zero).
+  `ctest --test-dir build/reticle -R '^interp_reticle' --output-on-failure`:
+  **2/2 passed**. This broadens synthetic hook coverage; game evidence remains
+  mandatory. Test build starting load: 38.31, `-j2`.
 - Local harness: `local-reticle/run.py`; private copied state:
   `local-reticle/states/slot3.bin`; shader cache and logs also remain private.
   It copies saves per run, disables host input/audio/windows, checks fresh load
@@ -85,6 +93,10 @@ it as the fix based on the unit test alone.
 - Further launches waited while the pacing task repeatedly ran `wwhd-v0212`,
   `wwhd-v0213`, and `wwhd-final`. The pending launcher was stopped before this
   handoff; no task-owned game or background launch is left running.
+- On goal continuation, the run gate was resumed for `before-boom30c`. The
+  previously observed game PID 3017 was confirmed gone, but new pacing games
+  continued to occupy the machine. This is an ongoing run attempt, not valid
+  reproduction evidence; inspect the live launcher and output before restarting.
 
 **Before/after numbers: unavailable.** There is no valid 30/60/120 aiming capture
 and no evidence yet of two dots within one rendered frame. No claim of root
