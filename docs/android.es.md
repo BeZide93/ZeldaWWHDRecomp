@@ -87,6 +87,13 @@ y sigue a velocidad completa.
 Abre una [issue](https://github.com/ZeldaWWHDRecomp/ZeldaWWHDRecomp/issues) con el modelo del
 dispositivo Android, la versión de Android y lo que pasó (en inglés si puedes). Después de un cierre
 inesperado, la siguiente vez que abras el juego te ofrecerá el informe para compartirlo.
+También cubre los cierres por falta de memoria en primer plano, señales y ANR registrados por Android,
+si el sistema facilita el historial. El resumen incluye motivo, fecha, estado/señal, importancia del
+proceso y la última muestra de memoria PSS/RSS. Omite descripciones, trazas, bytes del estado del
+proceso y logcat para no incluir nombres, partidas ni rutas privadas. Los cierres normales, la
+liberación de memoria en segundo plano y las paradas de las herramientas de partidas no generan un
+informe del sistema. Si hay un informe nativo cercano en el tiempo, se incluye en el mismo archivo.
+Compartir es opcional.
 
 ---
 
