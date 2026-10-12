@@ -1,6 +1,6 @@
-// Traversal mods (issue #95): faster ladders and faster sidling. The pure maths, so traversal_test
-// can check it without the game; traversal.cpp owns the hooks, traversal_settings.cpp the live
-// switches and factors.
+// Traversal mods (issues #95, #96): faster ladders, faster sidling, sailing speed per sail and
+// automatic wind with the normal sail. The pure maths, so traversal_test can check it without the
+// game; traversal.cpp owns the hooks, traversal_settings.cpp the live switches and factors.
 #pragma once
 #include <algorithm>
 #include <cmath>
@@ -57,6 +57,22 @@ inline int ladder_steps_per_rung(float rate, bool merge_rest) {
     int steps = 1;
     for (float frame = 0.f; frame < 9.999f; frame = std::min(frame + rate, 9.999f)) ++steps;
     return merge_rest ? steps - 1 : steps;
+}
+
+// ---- the ship (daShip_c::procSteerMove 0247E854) ----
+// The game's target speed is windPower = min(2 * wind power, 1) * windFactor(angle) * K, with K = 55
+// for the normal sail and 100 for the Swift Sail. The mod multiplies that target by the factor of
+// the sail in use; the initial push (1.2x target) and the slow approach follow. The jump height
+// (speed.y = clamp(windPower, 15, 40)) keeps the stock value.
+inline float sail_target(float stock_target, bool swift, float normal, float swift_factor) {
+    return stock_target * (swift ? swift_factor : normal);
+}
+
+// The Swift Sail's wind: every steering step it calls dKyw_tact_wind_set(0, angle) with the
+// boat's heading turned into the wind system's angle and rounded down to one of 8 directions:
+// `subfic r12, y, 0x5000; rlwinm r0, r12, 0, 0, 18; extsh r4, r0` (0247E9EC..0247E9F8).
+inline int16_t follow_wind_angle(int16_t shape_angle_y) {
+    return (int16_t)(uint16_t)((uint32_t)(0x5000 - (int32_t)shape_angle_y) & 0xFFFFE000u);
 }
 
 }  // namespace mods::traversal

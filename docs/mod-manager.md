@@ -32,8 +32,8 @@ guide the design; any future reuse requires a separate license review.
 Open the in-game settings overlay (F1, Fn+F1 on many Macs, Cmd+, or Settings in
 the menu) and select **Mods**. The searchable built-in catalogue manages the
 mods that are part of this build: direct camera, mouse camera, first-person
-shortcut, wall climbing, run/swim speed, faster ladders, faster sidling, quick
-doors, fast forward and fast scene changes.
+shortcut, wall climbing, run/swim speed, faster ladders, faster sidling, sailing
+speed, automatic wind, quick doors, fast forward and fast scene changes.
 Descriptions and options appear beside the selected entry. All defaults are off.
 
 Run/swim speed offers three animation choices. **Native** keeps the game's cycle with the boosted
@@ -64,12 +64,18 @@ switched on). Both speed up the game's own animation, so hands and feet stay in 
 movement: a ladder clip moves Link by its own motion, and sidling scales the animation and the
 sidling speed together. Climbing on and off a ladder speeds up the same way, and the next rung
 starts right after the footstep instead of after a short pause, so the climb speeds up by about
-the chosen factor; the footstep sounds stay on their frames. On the macOS menu bar the same
-switches and a few speed presets are under Gameplay. `WWHD_MOD_LADDER_SPEED=1` and
-`WWHD_MOD_SIDLE_SPEED=1` switch them on at startup, with the factors `WWHD_MOD_LADDER_FACTOR` and
-`WWHD_MOD_SIDLE_FACTOR`. With a mod off, the game runs its original code. These mods work the
-same at 30 fps, with 60/120/240 fps interpolation and with true 60: they change animation rates
-and speed targets inside the game's own steps, never amounts added per frame.
+the chosen factor; the footstep sounds stay on their frames. Sailing speed multiplies the speed
+the wind gives the boat, with separate sliders for the normal sail and the Swift Sail; the
+boat's jump keeps its normal height. Automatic wind makes the normal sail behave like the Swift
+Sail: while you sail, the wind turns to blow the way the boat is heading (in eight directions,
+as with the Swift Sail). It changes only the wind; the normal sail keeps its own speed, look and
+sounds. On the macOS menu bar the same switches and a few speed presets are under Gameplay.
+`WWHD_MOD_LADDER_SPEED`, `WWHD_MOD_SIDLE_SPEED`, `WWHD_MOD_SAIL_SPEED` and `WWHD_MOD_AUTO_WIND`
+(`=1`) switch them on at startup, with the factors `WWHD_MOD_LADDER_FACTOR`,
+`WWHD_MOD_SIDLE_FACTOR`, `WWHD_MOD_SAIL_FACTOR` and `WWHD_MOD_SWIFT_SAIL_FACTOR`. With a mod off,
+the game runs its original code. These mods work the same at 30 fps, with 60/120/240 fps
+interpolation and with true 60: they change animation rates and speed targets inside the game's
+own steps, never amounts added per frame.
 
 The Installed packages section accepts a local folder or `.wwhdmod` ZIP. Choose
 it with the file/folder picker, then press Install package. Installed packages

@@ -15,9 +15,9 @@
 #endif
 
 namespace {
-constexpr uint32_t kLink = 0x11000000;
+constexpr uint32_t kLink = 0x11000000, kShip = 0x11010000, kPlay = 0x1046F0B0;  // dComIfGp (GD identity)
 constexpr uint32_t kProc = 0x65F0, kRate = 0x5898, kMax = 0x3C4, kTimer = 0x6916, kSide = 0x69C0;
-constexpr uint32_t kChangeLadderFn = 0x0242757C;
+constexpr uint32_t kTactWindFn = 0x0257E490, kChangeLadderFn = 0x0242757C;
 void map(uint32_t address) {
 #ifdef _WIN32
     auto p = VirtualAlloc(mem::ptr(address), 65536, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
@@ -30,7 +30,8 @@ float f32(uint32_t a) { return u32_as_f32(ld32(a)); }
 void setf(uint32_t a, float v) { st32(a, f32_as_u32(v)); }
 
 // guest calls the hooks make
-unsigned ladder_calls = 0;
+unsigned wind_calls = 0, ladder_calls = 0;
+int16_t wind_angle = 0;
 
 // ---- modelled original code ----
 // procLadderMove: rate stopped -> start the next rung (procLadderMove_init: setFrameCtrl with the
@@ -52,10 +53,18 @@ void next_rung(uint32_t link) {  // changeLadderMoveProc -> procLadderMove_init
 void log_msg(const char*, ...) {}
 uint32_t guest_call(Cpu* c, uint32_t fn, std::initializer_list<uint32_t> args) {
     const std::vector<uint32_t> v(args);
-    assert(fn == kChangeLadderFn && v.size() == 2 && v[0] == kLink && v[1] == ld32(kLink + kSide));
-    ++ladder_calls;
-    next_rung(kLink);
+    if (fn == kChangeLadderFn) {
+        assert(v.size() == 2 && v[0] == kLink && v[1] == ld32(kLink + kSide));
+        ++ladder_calls;
+        next_rung(kLink);
+        c->r[31] = 0xDEADBEEF;
+        return 0;
+    }
+    assert(fn == kTactWindFn && v.size() == 2 && v[0] == 0);
+    ++wind_calls;
+    wind_angle = (int16_t)v[1];
     c->r[31] = 0xDEADBEEF;
+    c->f[29].ps0 = -1.f;
     return 0;
 }
 extern "C" void f_02427CA8_orig(Cpu* c) {
@@ -79,16 +88,21 @@ extern "C" void f_0242A218_orig(Cpu* c) {
 }
 extern "C" void hook_02427CA8(Cpu*);
 extern "C" void hook_0242A218(Cpu*);
+extern "C" void site_0247E988(Cpu*);
+extern "C" void site_0247EB88(Cpu*);
+extern "C" void site_0247ED24(Cpu*);
 
 static void all_off() {
     mods::set_ladder_speed(false);
     mods::set_sidle_speed(false);
+    mods::set_sail_speed(false);
+    mods::set_auto_wind(false);
 }
 
 // with the mod off, hook == original alone (memory and registers), and no guest calls
 static void test_off_identical() {
     all_off();
-    const unsigned ladder0 = ladder_calls;
+    const unsigned wind0 = wind_calls, ladder0 = ladder_calls;
     for (int timer : {0, 1})
     for (float rate : {0.f, 1.5f, -1.5f}) {
         st32(kLink + kProc, 0x3C);
@@ -121,7 +135,16 @@ static void test_off_identical() {
         mods::sidle_scope_end(scope);
         assert(f32(kLink + kMax) == 17.f);
     }
-    assert(ladder_calls == ladder0);
+    // the ship's sites: registers and memory untouched, no guest calls
+    st16(kShip + 0x32A, 0x1234);
+    for (auto site : {site_0247E988, site_0247EB88, site_0247ED24}) {
+        Cpu c{}; c.r[31] = kShip; c.f[29].ps0 = c.f[29].ps1 = 33.f;
+        const Cpu c0 = c;
+        const auto ship = snapshot(kShip, 0x1000);
+        site(&c);
+        assert(memcmp(&c, &c0, sizeof c) == 0 && snapshot(kShip, 0x1000) == ship);
+    }
+    assert(wind_calls == wind0 && ladder_calls == ladder0);
     // the setFrameCtrl hook (mods.cpp) asks traversal_anim(): off for every procedure
     assert(!mods::traversal_anim());
     for (uint32_t proc = 0; proc < 256; ++proc) assert(mods::traversal_anim_factor(proc) == 1.f);
@@ -215,11 +238,42 @@ static void test_sidle() {
     assert(max_seen == 18.f && f32(kLink + kMax) == 18.f);
 }
 
+static void test_ship() {
+    all_off();
+    mods::set_sail_speed(true);
+    mods::set_sail_speed_normal_factor(2.f);
+    mods::set_sail_speed_swift_factor(1.25f);
+    for (bool swift : {false, true}) {
+        st8(kPlay + 0x5D2C, swift ? 1 : 0);
+        Cpu c{}; c.r[31] = kShip; c.r[3] = 0x55; c.f[29].ps0 = c.f[29].ps1 = 40.f;
+        site_0247EB88(&c);
+        const float want = swift ? 50.f : 80.f;
+        assert(c.f[29].ps0 == want && c.f[29].ps1 == want && c.r[3] == 0x55);
+        site_0247ED24(&c);  // before the jump code: the stock target again
+        assert(c.f[29].ps0 == 40.f);
+        // a target the game replaced meanwhile (forced movement) is left alone
+        c.f[29].ps0 = 40.f;
+        site_0247EB88(&c);
+        c.f[29].ps0 = 30.f;
+        site_0247ED24(&c);
+        assert(c.f[29].ps0 == 30.f);
+    }
+    // automatic wind: the Swift Sail's call, with the same angle, registers kept
+    mods::set_auto_wind(true);
+    st16(kShip + 0x32A, 0x0FFF);
+    Cpu c{}; c.r[31] = kShip; c.f[29].ps0 = 5.f;
+    const unsigned calls = wind_calls;
+    site_0247E988(&c);
+    assert(wind_calls == calls + 1 && wind_angle == 0x4000 && c.r[31] == kShip && c.f[29].ps0 == 5.f);
+    all_off();
+}
+
 int main() {
-    map(kLink);
+    map(kLink); map(kShip); map(0x10460000); map(0x10470000);
     test_off_identical();
     test_ladder();
     test_sidle();
+    test_ship();
     test_off_identical();  // switching off again goes back to the stock path
     return 0;
 }

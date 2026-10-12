@@ -4,6 +4,9 @@
 // Start-up / test switches (all off by default, also switchable from the Gameplay menu):
 //   WWHD_MOD_LADDER_SPEED=1    faster ladders   (WWHD_MOD_LADDER_FACTOR=1.5)
 //   WWHD_MOD_SIDLE_SPEED=1     faster sidling   (WWHD_MOD_SIDLE_FACTOR=1.5)
+//   WWHD_MOD_SAIL_SPEED=1      sailing speed    (WWHD_MOD_SAIL_FACTOR=1.5 normal sail,
+//                                                WWHD_MOD_SWIFT_SAIL_FACTOR=1.5 Swift Sail)
+//   WWHD_MOD_AUTO_WIND=1       the wind follows the boat with the normal sail
 #include "mods.h"
 #include "traversal.h"
 
@@ -24,6 +27,10 @@ std::atomic<bool> g_ladder{env_on("WWHD_MOD_LADDER_SPEED")};
 std::atomic<float> g_ladder_factor{env_factor("WWHD_MOD_LADDER_FACTOR")};
 std::atomic<bool> g_sidle{env_on("WWHD_MOD_SIDLE_SPEED")};
 std::atomic<float> g_sidle_factor{env_factor("WWHD_MOD_SIDLE_FACTOR")};
+std::atomic<bool> g_sail{env_on("WWHD_MOD_SAIL_SPEED")};
+std::atomic<float> g_sail_normal{env_factor("WWHD_MOD_SAIL_FACTOR")};
+std::atomic<float> g_sail_swift{env_factor("WWHD_MOD_SWIFT_SAIL_FACTOR")};
+std::atomic<bool> g_auto_wind{env_on("WWHD_MOD_AUTO_WIND")};
 constexpr auto kRelaxed = std::memory_order_relaxed;
 }  // namespace
 
@@ -35,6 +42,14 @@ bool sidle_speed() { return g_sidle.load(kRelaxed); }
 void set_sidle_speed(bool on) { g_sidle = on; }
 float sidle_speed_factor() { return g_sidle_factor.load(kRelaxed); }
 void set_sidle_speed_factor(float f) { g_sidle_factor = traversal::clamp_factor(f); }
+bool sail_speed() { return g_sail.load(kRelaxed); }
+void set_sail_speed(bool on) { g_sail = on; }
+float sail_speed_normal_factor() { return g_sail_normal.load(kRelaxed); }
+void set_sail_speed_normal_factor(float f) { g_sail_normal = traversal::clamp_factor(f); }
+float sail_speed_swift_factor() { return g_sail_swift.load(kRelaxed); }
+void set_sail_speed_swift_factor(float f) { g_sail_swift = traversal::clamp_factor(f); }
+bool auto_wind() { return g_auto_wind.load(kRelaxed); }
+void set_auto_wind(bool on) { g_auto_wind = on; }
 
 bool traversal_anim() { return ladder_speed() || sidle_speed(); }
 float traversal_anim_factor(uint32_t proc) {

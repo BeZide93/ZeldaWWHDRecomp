@@ -1,6 +1,7 @@
-// Traversal mods (Gameplay menu, all off by default): faster ladders and sidling (#95). Settings:
-// traversal_settings.cpp; the maths: traversal.h (traversal_test). GameCube source:
-// tww/src/d/actor/d_a_player_ladder.inc, d_a_player_whide.inc.
+// Traversal mods (Gameplay menu, all off by default): faster ladders and sidling (#95), sailing
+// speed per sail and automatic wind with the normal sail (#96). Settings: traversal_settings.cpp;
+// the maths: traversal.h (traversal_test). GameCube source: tww/src/d/actor/d_a_player_ladder.inc,
+// d_a_player_whide.inc, d_a_ship.cpp; the Swift Sail is HD-only and read from the WWHD code.
 //
 // Ladders: the rung, mount and dismount clips move Link through their root motion (posMove with
 //   m34C2 = 5), so playing them faster climbs faster with hands and feet in step. setFrameCtrl
@@ -18,13 +19,20 @@
 //   setBlendWHideMoveAnime (whose blend reads mNormalSpeed / mMaxNormalSpeed, so it keeps the stock
 //   blend). The field goes back right after each call, so leaving the wall (0.7 * mMaxNormalSpeed in
 //   changeWHideEndProc) and every other procedure see the stock value.
+// Ship: daShip_c::procSteerMove (0247E854) computes the target speed windPower with K = 100 when the
+//   Swift Sail is in use (dComIfGp + 0x5D2C != 0, the HD check at 0247E97C) and K = 55 otherwise;
+//   site 0247EB88 multiplies it by that sail's factor, site 0247ED24 puts the stock value back
+//   before the jump code (jump height and the 20-unit jump threshold stay stock).
+//   Automatic wind: on the Swift Sail branch the game calls dKyw_tact_wind_set(0, angle of the
+//   boat's heading) every steering step (0247E9FC); site 0247E988 (the normal-sail branch) makes the
+//   same call when the toggle is on. The Swift Sail's sound, sail swap and speed stay its own.
 // Off means identical: every hook checks its switch first and then runs only the original code.
-// 60 fps: all of this runs inside the game's own procedures, once per execute of Link,
+// 60 fps: all of this runs inside the game's own procedures, once per execute of Link or the ship,
 //   and writes only rates and targets (never per-step amounts), so interpolation (60/120/240) and
 //   true 60 (J3DFrameCtrl::update and cLib_addCalc scale the advance by dt) compose with it. In true
-//   60 the ladder and sidle procedures run at 30 Hz (not in true60.cpp's kLinkGroups). The test
-//   setting WWHD_TRUE60_LINK=audited runs the ladder procedures on every pass; that set is not
-//   checked with these mods.
+//   60 the ladder, sidle and ship procedures run at 30 Hz (not in true60.cpp's kLinkGroups; the
+//   ship is not converted). The test setting WWHD_TRUE60_LINK=audited runs the ladder procedures on
+//   every pass; that set is not checked with these mods.
 #include "mods/mods.h"
 #include "mods/traversal.h"
 
@@ -45,10 +53,18 @@ constexpr uint32_t kMaxNormalSpeed = 0x3C4;    // daPy_py_c::mMaxNormalSpeed (Ga
 constexpr uint32_t kProcTimer = 0x6916;        // mProcVar0.m34D0 (s16; GameCube 0x34D0)
 constexpr uint32_t kLadderSide = 0x69C0;       // mProcVar6.m3570 (GameCube 0x3570): which hand is up
 const uint32_t kChangeLadderMoveProc = GC(0x0242757C);  // daPy_lk_c::changeLadderMoveProc(int)
+// daShip_c
+constexpr uint32_t kShapeAngleY = 0x32A;       // shape_angle.y
+const uint32_t kPlay = GD(0x1046F0B0);          // dComIfGp (the play info; what 025200D4 returns)
+constexpr uint32_t kSwiftSail = 0x5D2C;        // dComIfGp: the Swift Sail is in use (HD)
+const uint32_t kTactWindSet = GC(0x0257E490);  // dKyw_tact_wind_set(s16 ang_x, s16 ang_y)
 
 float ladder_factor() { return active_factor(mods::ladder_speed(), mods::ladder_speed_factor()); }
 float sidle_factor() { return active_factor(mods::sidle_speed(), mods::sidle_speed_factor()); }
 
+// procSteerMove: the stock target while it is scaled (game thread only)
+bool g_sail_scaled = false;
+uint32_t g_sail_stock = 0, g_sail_written = 0;
 }  // namespace
 
 namespace mods {
@@ -103,4 +119,34 @@ extern "C" void hook_0242A218(Cpu* c) {
     const mods::SidleScope scope = mods::sidle_scope_begin(c, false);
     f_0242A218_orig(c);
     mods::sidle_scope_end(scope);
+}
+
+// ---- daShip_c::procSteerMove (0247E854) ----
+// 0247E988: the normal-sail branch (`lbz r9, 0x63D(r31)`), right after the HD Swift Sail check.
+// Automatic wind: the Swift Sail branch's dKyw_tact_wind_set call (0247E9EC..0247E9FC).
+extern "C" void site_0247E988(Cpu* c) {
+    if (!mods::auto_wind()) return;
+    const uint32_t ship = c->r[31];
+    const Cpu saved = *c;
+    guest_call(c, kTactWindSet, {0, (uint32_t)(int32_t)follow_wind_angle((int16_t)ld16(ship + kShapeAngleY))});
+    *c = saved;
+}
+// 0247EB88: f29 = windPower, the target speed (`fmuls f29, f9, f29` just before)
+extern "C" void site_0247EB88(Cpu* c) {
+    g_sail_scaled = false;
+    if (!mods::sail_speed()) return;
+    const bool swift = ld8(kPlay + kSwiftSail) != 0;
+    const float stock = (float)c->f[29].ps0;
+    const float target = sail_target(stock, swift, mods::sail_speed_normal_factor(), mods::sail_speed_swift_factor());
+    if (target == stock) return;
+    c->f[29].ps0 = c->f[29].ps1 = target;
+    g_sail_stock = f32_as_u32(stock);
+    g_sail_written = f32_as_u32(target);
+    g_sail_scaled = true;
+}
+// 0247ED24: the jump code (windPower >= 20 and speed.y = clamp(windPower, 15, 40)) reads f29
+extern "C" void site_0247ED24(Cpu* c) {
+    if (!g_sail_scaled) return;
+    g_sail_scaled = false;
+    if (f32_as_u32((float)c->f[29].ps0) == g_sail_written) c->f[29].ps0 = c->f[29].ps1 = u32_as_f32(g_sail_stock);
 }

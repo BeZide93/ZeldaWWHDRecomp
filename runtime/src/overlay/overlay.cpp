@@ -1668,6 +1668,14 @@ void tab_mods() {
                 float factor = ladder ? mods::ladder_speed_factor() : mods::sidle_speed_factor();
                 if (ImGui::SliderFloat("Speed", &factor, 1.f, 3.f, "%.2fx"))
                     hostui::post([key, factor] { mods::manager::set_traversal_option(key, factor); });
+            } else if (selected == "sail-speed") {
+                float normal = mods::sail_speed_normal_factor();
+                if (ImGui::SliderFloat("Normal sail", &normal, 1.f, 3.f, "%.2fx"))
+                    hostui::post([normal] { mods::manager::set_traversal_option("sail-speed.normal", normal); });
+                float swift = mods::sail_speed_swift_factor();
+                if (ImGui::SliderFloat("Swift Sail", &swift, 1.f, 3.f, "%.2fx"))
+                    hostui::post([swift] { mods::manager::set_traversal_option("sail-speed.swift", swift); });
+                help("Multiplies the speed the wind gives the boat. The jump (R) keeps its normal height.");
             } else if (selected == "mouse-camera") {
                 float sensitivity = mods::mouse_sensitivity();
                 if (ImGui::SliderFloat("Sensitivity", &sensitivity, .08f, .3f, "%.3f"))

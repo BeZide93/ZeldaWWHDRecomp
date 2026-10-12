@@ -35,6 +35,12 @@ const Entry catalogue[] = {
     {"sidle-speed", "Faster sidling", "Gameplay",
      "Sidle along walls faster. The animation speeds up with the movement.",
      "WWHD_MOD_SIDLE_SPEED", sidle_speed, set_sidle_speed},
+    {"sail-speed", "Sailing speed", "Gameplay",
+     "Sail faster, with separate multipliers for the normal sail and the Swift Sail.",
+     "WWHD_MOD_SAIL_SPEED", sail_speed, set_sail_speed},
+    {"auto-wind", "Automatic wind", "Gameplay",
+     "Makes the normal sail behave like the Swift Sail: the wind always blows the way the boat is heading.",
+     "WWHD_MOD_AUTO_WIND", auto_wind, set_auto_wind},
     {"fast-forward", "Fast forward cutscenes and dialogue", "Gameplay",
      "Hold the selected button during events to play faster. Choices still wait for input.",
      "WWHD_MOD_FAST_FORWARD", fast_forward, set_fast_forward},
@@ -47,6 +53,8 @@ bool player_preferences() { return !std::getenv("WWHD_NO_HOST_INPUT"); }
 const NumberOption traversal_catalogue[] = {
     {"mod.ladder-speed.factor", "ladder-speed.factor", "WWHD_MOD_LADDER_FACTOR", ladder_speed_factor, set_ladder_speed_factor},
     {"mod.sidle-speed.factor", "sidle-speed.factor", "WWHD_MOD_SIDLE_FACTOR", sidle_speed_factor, set_sidle_speed_factor},
+    {"mod.sail-speed.normal", "sail-speed.normal", "WWHD_MOD_SAIL_FACTOR", sail_speed_normal_factor, set_sail_speed_normal_factor},
+    {"mod.sail-speed.swift", "sail-speed.swift", "WWHD_MOD_SWIFT_SAIL_FACTOR", sail_speed_swift_factor, set_sail_speed_swift_factor},
 };
 }  // namespace
 

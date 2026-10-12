@@ -1,5 +1,5 @@
 // Unit tests for the traversal mods' maths (runtime/src/mods/traversal.h): faster ladders and
-// sidling (#95). Pure functions only; the hooks are checked
+// sidling (#95), sailing speed and automatic wind (#96). Pure functions only; the hooks are checked
 // against a modelled guest in traversal_runtime_test.
 //   make -C build/cmake traversal_test && ./build/cmake/traversal_test
 #include "mods/traversal.h"
@@ -25,6 +25,7 @@ static void test_off_is_stock() {
     assert(active_factor(true, 9.f) == 3.f);
     // with both dials at 1 (mods off) no procedure's clip changes
     for (uint32_t proc = 0; proc < 256; ++proc) assert(anim_rate_factor(proc, 1.f, 1.f) == 1.f);
+    assert(sail_target(37.5f, false, 1.f, 1.f) == 37.5f && sail_target(37.5f, true, 1.f, 1.f) == 37.5f);
 }
 
 static void test_procedures() {
@@ -89,6 +90,29 @@ static void test_ladder_timing() {
             }
 }
 
+static void test_sail() {
+    // the factor of the sail in use multiplies the wind's target speed (55 or 100 times the wind)
+    assert(sail_target(55.f, false, 2.f, 1.25f) == 110.f);
+    assert(sail_target(100.f, true, 2.f, 1.25f) == 125.f);
+    assert(sail_target(0.f, true, 3.f, 3.f) == 0.f);  // no wind: still no push
+}
+
+static void test_wind_angle() {
+    // dKyw_tact_wind_set's angle as the Swift Sail computes it: (0x5000 - heading) & ~0x1FFF
+    auto reference = [](int16_t y) {
+        int32_t r12 = 0x5000 - (int32_t)y;                // subfic r12, r0, 0x5000
+        uint32_t r0 = (uint32_t)r12 & 0xFFFFE000u;        // rlwinm r0, r12, 0, 0, 18
+        return (int16_t)(r0 & 0xFFFF);                    // extsh r4, r0
+    };
+    for (int y = -32768; y <= 32767; ++y) assert(follow_wind_angle((int16_t)y) == reference((int16_t)y));
+    // 8 directions: heading north (0) and a little either way share a direction
+    assert(follow_wind_angle(0) == 0x4000);
+    assert(follow_wind_angle(0x0FFF) == 0x4000);
+    assert(follow_wind_angle(0x1001) == 0x2000);
+    assert(follow_wind_angle(-0x1000) == 0x6000);
+    for (int y = -32768; y <= 32767; y += 97) assert((follow_wind_angle((int16_t)y) & 0x1FFF) == 0);
+}
+
 int main() {
     test_clamp();
     test_off_is_stock();
@@ -96,5 +120,7 @@ int main() {
     test_ladder_rewrite();
     test_ladder_rest();
     test_ladder_timing();
+    test_sail();
+    test_wind_angle();
     return 0;
 }

@@ -54,7 +54,7 @@ void move_start_effect(Cpu* c, uint32_t link); // consume a new grounded sprint'
 void move_trail_effect(Cpu* c, uint32_t link); // small puffs behind the feet while running under boost
 void move_swim_effect(Cpu* c, uint32_t link);  // splash per arm pull and a foam trail while swimming under boost
 
-// ---- traversal mods (traversal.cpp; issue #95). Factors are clamped to 1x..3x. ----
+// ---- traversal mods (traversal.cpp; issues #95, #96). Factors are clamped to 1x..3x. ----
 bool ladder_speed();                      // faster ladder climbing (the clips play faster)
 void set_ladder_speed(bool on);
 float ladder_speed_factor();
@@ -63,6 +63,14 @@ bool sidle_speed();                       // faster sidling along walls
 void set_sidle_speed(bool on);
 float sidle_speed_factor();
 void set_sidle_speed_factor(float factor);
+bool sail_speed();                        // sailing speed, one factor per sail
+void set_sail_speed(bool on);
+float sail_speed_normal_factor();         // the normal sail
+void set_sail_speed_normal_factor(float factor);
+float sail_speed_swift_factor();          // the HD Swift Sail
+void set_sail_speed_swift_factor(float factor);
+bool auto_wind();                         // the wind follows the boat with the normal sail too
+void set_auto_wind(bool on);
 
 // hooks' helpers (traversal_settings.cpp, traversal.cpp)
 bool traversal_anim();                          // a mod that scales Link's clips is on (ladders, sidling)
