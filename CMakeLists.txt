@@ -1196,6 +1196,13 @@ target_include_directories(fetch_attributes_test PRIVATE runtime/src ${CEMU_DIR}
   runtime/third_party/metal-cpp runtime/third_party/fmt/include)
 target_compile_options(fetch_attributes_test PRIVATE -UNDEBUG "SHELL:-include ${CEMU_DIR}/cemu_shim.h")
 add_test(NAME fetch_attributes_semantic_parity COMMAND fetch_attributes_test)
+# Cemu's StringBuf when allocations fail: every write stays in bounds.
+add_executable(stringbuf_test runtime/tools/stringbuf_test.cpp)
+target_include_directories(stringbuf_test PRIVATE runtime/src ${CEMU_DIR}
+  runtime/third_party/metal-cpp runtime/third_party/fmt/include)
+target_compile_options(stringbuf_test PRIVATE -UNDEBUG "SHELL:-include ${CEMU_DIR}/cemu_shim.h")
+target_link_libraries(stringbuf_test PRIVATE Threads::Threads)
+add_test(NAME stringbuf_out_of_memory COMMAND stringbuf_test)
 add_executable(pipeline_identity_test runtime/tools/pipeline_identity_test.cpp)
 target_include_directories(pipeline_identity_test PRIVATE runtime/src)
 target_compile_options(pipeline_identity_test PRIVATE -UNDEBUG)
