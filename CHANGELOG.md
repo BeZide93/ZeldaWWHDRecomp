@@ -38,6 +38,12 @@ what is on `devel` and not released yet (also in the
   for players who declined or removed it, and the automatic offer now waits until the setup screen
   is in front, so Android no longer refuses it on some phones. Spanish texts for these and the save
   export/import.
+
+- **New gameplay mods: faster ladders, faster sidling, sailing speed and automatic wind** (issues #95,
+  #96; all off by default, Mods tab and the macOS Gameplay menu). Ladders and sidling play faster with
+  the animation in step (1–3×); sailing speed has separate settings for the normal sail and the Swift
+  Sail; *Automatic wind* makes the normal sail behave like the Swift Sail (the wind follows the boat).
+  With the mods off the game is unchanged.
 - **Fixed: ZL/ZR (LT/RT, L2/R2) prompts in dialogs showed as a white box** with the face buttons set
   to *by label* (issue #141). The shoulder labels in dialogs are now drawn as pictures like the
   game's own icons, in every language.
