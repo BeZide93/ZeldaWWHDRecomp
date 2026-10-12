@@ -38,6 +38,15 @@ what is on `devel` and not released yet (also in the
 - **Fixed: unreadable shoulder labels on the HUD** (issue #143). With *L1 R1 L2 R2* or *LB RB LT RT* as
   shoulder names, the labels on the HUD's shoulder buttons were white on the white plates; they are now dark
   like the game's own letters again (and dim the same way). Dialog labels are unchanged.
+- **Mods tab redesign.** Every mod has an on/off switch in one list, including mods you haven't
+  downloaded yet: switching one on downloads it, sets it up and turns it on. When something is needed,
+  one review asks it all at once (your GameCube game, choices, code-mod support, the experimental
+  warning), then one progress view follows and keeps running while you play. Mod pages explain in one
+  line why something can't change right now instead of showing greyed buttons; updating keeps a mod on
+  or off as it was; Remove also deletes a mod's prepared files and says how much space that frees. The
+  mod list loads by itself (cached, checked in the background; only the public list is fetched). Rarely
+  used things (profiles, install from a file, GameCube game, code-mod support, save backups, mod list
+  source, cheats) are under Mods › More.
 - **Experimental: build the game from the decompilation** (macOS, for developers). The CMake option
   `WWHD_DECOMP=ON` compiles the game code from the public, verified decompilation
   ([ZeldaWWHDDecomp/wwhd](https://github.com/ZeldaWWHDDecomp/wwhd), a submodule in `decomp/`) instead of
