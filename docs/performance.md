@@ -271,7 +271,23 @@ intervals (over 1.4 or under 0.6 frames) per second 13.5 / 21.0 / 8.3; at 120 fp
 extra render work per frame (the #125 case) 44 / 51 / 51 fps; with 2.5 ms of extra game work 99 / 147 / 155 fps;
 "Keep game speed" off unchanged. At boot, v0.2.13 measured its first in-between pass at ~85 ms and drew no in-between
 frames; the fix retries that probe and draws ~90 % of them a second later. The late-step rule is `skip_to` (it
-skips as few blended passes as make the rest of the step fit). A full table with frame-time percentiles follows.
+skips as few blended passes as make the rest of the step fit). Full table (three runs per build, interleaved, median; Windfall, Vulkan unless noted, hidden windows,
+`WWHD_DISPLAY_HZ=240`, 36 s per run; 1-minute load 30-46 for every row, so absolute rates are depressed, the
+comparison between builds is fair). Cells: fps, frame-time p50 / p99, uneven intervals per second, logic steps/s.
+
+| Case | v0.2.12 | v0.2.13 | fix |
+|---|---|---|---|
+| 240 fps | 229.1, 4.17 / 8.34 ms, 7.99/s, 29.61 | 239.2, 4.17 / 10.61 ms, 19.05/s, 30.00 | 238.8, 4.17 / 5.24 ms, 1.85/s, 29.97 |
+| 120 fps | 119.9, 8.34 / 8.34 ms, 0.08/s, 29.96 | 119.7, 8.34 / 14.30 ms, 6.56/s, 29.97 | 119.8, 8.34 / 8.34 ms, 0.08/s, 29.97 |
+| 240, render +15 ms (#125 case) | 47.9, 20.85 / 20.86 ms, 23.95 | 56.6, 17.60 / 19.36 ms, 30.00 | 56.6, 17.62 / 18.99 ms, 29.97 |
+| 240, game +2.5 ms | 119.6, 8.34 / 8.34 ms, 29.93 | 180.7, 5.01 / 23.50 ms, 10.7/s, 30.00 | 191.4, 5.08 / 8.15 ms, 11.8/s, 29.97 |
+| Metal 240 | 109.3, 8.35 / 16.70 ms, 29.09 | 127.0, 7.66 / 13.36 ms, 30.00 | 126.3, 7.76 / 11.77 ms, 29.97 |
+| 60 paced, render +15 ms | 29.8, 33.37 / 33.37 ms, 15.27 | 51.3, 17.44 / 33.37 ms, 28.65 | 51.4, 17.40 / 33.37 ms, 28.72 |
+| 240, "Keep game speed" off | 235.2, 4.17 / 8.34 ms, 4.68/s, 29.41 | 239.4, 4.17 / 5.07 ms, 1.37/s, 29.93 | 239.5, 4.17 / 5.37 ms, 1.79/s, 29.94 |
+| Boot at 240: in-between frames in the first 10 s | 2 / 1 / 1 % | 0 / 0 / 0 % | 91 / 85 / 81 % |
+
+Uneven/s is left out where every interval exceeds 1.4 frames. v0.2.12 is tag 5c39d489 and v0.2.13 devel d7d96991,
+each with only the trace and load aids added.
 
 
 ## Desktop CPU/GPU overlap and CPU path defaults (2026-10-07)
