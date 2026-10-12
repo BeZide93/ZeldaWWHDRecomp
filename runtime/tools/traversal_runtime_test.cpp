@@ -260,6 +260,19 @@ static void test_ship() {
         site_0247ED24(&c);
         assert(c.f[29].ps0 == 30.f);
     }
+    // The jump path reads f29 after ED24: check its eligibility threshold and height
+    // clamp boundaries, including a sub-threshold target that the boost takes above 20.
+    mods::set_sail_speed_normal_factor(3.f);
+    mods::set_sail_speed_swift_factor(3.f);
+    for (bool swift : {false, true})
+    for (float stock : {0.f, 15.f, 19.f, 20.f, 30.f, 40.f, 55.f, 100.f}) {
+        st8(kPlay + 0x5D2C, swift);
+        Cpu c{}; c.f[29].ps0 = c.f[29].ps1 = stock;
+        site_0247EB88(&c);
+        assert(c.f[29].ps0 == stock * 3.f);
+        site_0247ED24(&c);
+        assert(c.f[29].ps0 == stock && c.f[29].ps1 == stock);
+    }
     // automatic wind: the Swift Sail's call, with the same angle, registers kept
     mods::set_auto_wind(true);
     st16(kShip + 0x32A, 0x0FFF);
