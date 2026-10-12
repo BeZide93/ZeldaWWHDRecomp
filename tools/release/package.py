@@ -40,6 +40,7 @@ TOOL_FILES = [
     "tools/rpx.py",
     "tools/shaderprep.py",
     "tools/shaderprep_format.py",
+    "tools/release/guard.py",  # shaderprep.py export/merge check templates with it (issue #162)
     "tools/wudextract.py",
     "tools/recomp/recomp.py",
     "tools/recomp/analyze.py",

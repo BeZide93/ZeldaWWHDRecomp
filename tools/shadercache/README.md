@@ -10,6 +10,46 @@ Upstream tag, development-dispatch and nightly builds require the secret. Fetch 
 stops packaging. GitHub's SSH host key is pinned rather than learned at fetch time.
 The workflow keeps its temporary SSH key private and removes it even when a step fails.
 
+## Contributing your shader template (players, issue #162)
+
+The game records every shader state and pipeline it builds in your own caches
+(`shader-prebuild/live/`: `shaders.bin` with Metal, `*.bin.recipes` with Vulkan). Those caches contain
+game-derived shader code and stay on your computer. **Export** turns them into a code-free template
+(`my-template.bin`: program hashes, register values and typed pipeline settings only) that you can attach
+to [issue #162](https://github.com/ZeldaWWHDRecomp/ZeldaWWHDRecomp/issues/162); merged templates
+let the next release prepare those shaders for everyone.
+
+The easiest way: **Settings → Graphics → Export shader template**. It writes `my-template.bin` to the
+screenshots folder and shows the path. (Not on Android yet.)
+
+From a terminal, in the release folder (the folder with `tools/`):
+
+| System | Command |
+| --- | --- |
+| Windows (PowerShell or Command Prompt) | `tools\python\python.exe tools\shaderprep.py export` |
+| macOS | `python3 tools/shaderprep.py export` |
+| Linux (release folder) | `python3 tools/shaderprep.py export` |
+| Linux AppImage | `./WindWakerHD-*.AppImage --appimage-extract 'tools/*'` then `python3 squashfs-root/tools/shaderprep.py export ~/my-template.bin` (then delete `squashfs-root`) |
+
+`export` finds your caches by itself: a portable release's `data/user/shader-prebuild/live`, otherwise
+the per-user folder (`~/Library/Application Support/WWHD`, `%APPDATA%\WWHD`, `~/.config/wwhd` or
+`$XDG_CONFIG_HOME/wwhd`, `WWHD_USER_DIR`), and the older locations (`~/Library/Caches/wwhd/shaders.bin`,
+`<settings>/shadercache/`). Point it elsewhere with `--from FOLDER` (for example an AppImage
+`<AppImage>.data/config/wwhd`). It writes `my-template.bin` in the release folder unless you name the
+output file. It prints how many states and pipelines it found and for which renderer, skips (and counts)
+any damaged records, and refuses to write anything that fails the release guard's code-free check. It
+never copies the raw caches, the driver caches or SPIR-V.
+
+Maintainers merge contributions (each input and the result must pass the guard; duplicates are dropped):
+
+```sh
+python3 tools/shaderprep.py merge merged.bin player1.bin player2.bin ...
+python3 tools/shaderprep.py merge merged.bin merged.bin tools/shadercache/template.bin   # with the current one
+```
+
+`template CACHE [OUT] --merge T` still converts one cache (shaders.bin or a `.recipes` file) and keeps
+template `T`; `merge` combines any number of code-free templates without a cache.
+
 ## Local recording
 
 Use Python 3. The archive decoder builds a small local C helper with Clang/GCC (`CC` overrides it),
@@ -55,6 +95,8 @@ the directory. Normal setup and runtime use
 macOS Metal shader cache are copied there once without replacing existing files.
 Sources stay intact; copy errors are logged and do not prevent play.
 Never pass `spirv.bin` to `shaderprep.py template`: conversion requires the GX2 recording.
+`template`, `export` and `coverage` read player caches tolerantly: a damaged, truncated or
+unknown record is skipped (counted in a warning), and reading resumes at the next intact record.
 
 The stripped template schema is documented at the top of `tools/shaderprep.py`. The independent
 `tools/release/guard.py` permits only that schema at the packaged template path. Packaging tests generate

@@ -267,10 +267,13 @@ def vulkan_recipe(data, codefree=False):
     if w.at!=len(w.words): raise ValueError('trailing recipe')
     return validate_vulkan(p)
 
+VK_DATABASE_MAX = 16384
+
 def vulkan_database(data):
     if len(data)<64 or data[:8]!=b'WWVKPR01': raise ValueError('unsupported Vulkan database')
     n,crc=struct.unpack_from('<II',data,56)
-    if n>512 or zlib.crc32(data[64:])!=crc: raise ValueError('invalid Vulkan database')
+    # runtime kPipelineRecipeMaxCount (the first recipe databases allowed 512)
+    if n>VK_DATABASE_MAX or zlib.crc32(data[64:])!=crc: raise ValueError('invalid Vulkan database')
     out=[];at=64
     for _ in range(n):
         if at+4>len(data): raise ValueError('truncated database')

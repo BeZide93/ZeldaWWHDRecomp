@@ -67,6 +67,9 @@ namespace gfxvk { bool buffer_cache_enabled(); }  // gfx/vulkan/buffer_cache.h
 #include "../runtime.h"
 #include "../savestate.h"
 #include "../screenshot.h"
+#ifndef __ANDROID__
+#include "template_export.h"
+#endif
 #include "../render_prof.h"
 #include "../perf_metrics.h"
 #include "../build_info.h"
@@ -655,6 +658,18 @@ void tab_graphics() {
     if (rebuildFailed) note("Could not save the request. Check that the settings folder is writable.");
     else if (shaderprebuild::requested()) note("Run setup and choose repair/update to rebuild shaders and pipelines.");
     help("Requests preparation during setup repair/update. Preparation can take a few minutes; launching the game never starts it automatically.");
+#ifndef __ANDROID__
+    {
+        const auto exported = template_export::status();
+        ImGui::BeginDisabled(exported.running);
+        if (ImGui::Button("Export shader template")) template_export::start();
+        ImGui::EndDisabled();
+        if (!exported.line.empty()) note("%s", exported.line.c_str());
+        help("Saves my-template.bin in the screenshots folder: the shader states and pipelines this computer\n"
+             "recorded, as hashes and settings only (no shader code, no game data). Attach it to issue #162\n"
+             "so the next release prepares them for everyone.");
+    }
+#endif
 #ifdef __ANDROID__
     heading("GPU driver (Snapdragon / Adreno)");
     note("Active: %s", gfxvk::drivers::active_name().c_str());
