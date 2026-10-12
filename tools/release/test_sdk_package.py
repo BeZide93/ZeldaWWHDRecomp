@@ -108,5 +108,31 @@ class DecompVariant(unittest.TestCase):
             self.assertEqual(package.decomp_variant(str(build)), "decomp")
 
 
+
+class DecompBuildPackaging(unittest.TestCase):
+    """--decomp-build: the compile commands setup replays for the decomp version (portable_flags)."""
+
+    def test_portable_flags(self):
+        root, ddir, build = "/r", "/r/decomp", "/b"
+        mapping = {root + "/runtime/include": "{sdk}/include", root + "/runtime/src": "{sdk}/decomp/include",
+                   root + "/tools/decomp_build": "{tools}/decomp_build", build + "/decomp": "{out}", ddir: "{decomp}"}
+        args = ["/usr/bin/c++", "-DWWHD_DECOMP=1", "-I/r/runtime/include", "-I/r/runtime/src",
+                "-isystem", "/r/runtime/third_party/imgui", "-I/b/_deps/sdl3/include", "-O3", "-std=c++20",
+                "-arch", "arm64", "-I/r/decomp/tools/verify/include", "-I/b/decomp/include", "-O2", "-w",
+                "-include", "/r/tools/decomp_build/frames_vis.h", "-MD", "-MT", "x.o", "-MF", "x.o.d",
+                "-o", "x.o", "-c", "/r/tools/decomp_build/flags_probe.cpp"]
+        out = package.portable_flags(args, "/r/tools/decomp_build/flags_probe.cpp", mapping)
+        self.assertEqual(out, ["-DWWHD_DECOMP=1", "-I{sdk}/include", "-I{sdk}/decomp/include", "-O3", "-std=c++20",
+                               "-arch", "arm64", "-I{decomp}/tools/verify/include", "-I{out}/include", "-O2", "-w",
+                               "-include", "{tools}/decomp_build/frames_vis.h"])
+        with self.assertRaises(SystemExit):
+            package.portable_flags(["c++", "-include", "/elsewhere/x.h", "-c", "a.cpp"], "a.cpp", mapping)
+
+    def test_decomp_parts_listed(self):
+        self.assertIn("tools/installer/decomp_setup.py", package.INSTALLER_FILES)
+        self.assertEqual(package.DECOMP_HOOKS_NONE, "tools_decomp_build_hooks_none.cpp.o")
+        for rel in package.DECOMP_TOOLS:
+            self.assertTrue((Path(package.ROOT) / rel).is_file(), rel)
+
 if __name__ == "__main__":
     unittest.main()

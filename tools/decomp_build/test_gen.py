@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """tools/decomp_build/gen.py on a small synthetic decompilation (no game files, no submodule needed)."""
+import json
 import os
 import subprocess
 import sys
@@ -81,6 +82,11 @@ class GenTest(unittest.TestCase):
         self.assertIn('set(WWHD_DECOMP_UNIT_COUNT 2)', units)
         self.assertIn('set(WWHD_DECOMP_UNIT_1_NAME "bunit")', units)
         self.assertIn('#define DECOMP_UNIT "a"', self.read("glue/0.cpp"))
+        units = json.loads(self.read("units.json"))
+        self.assertEqual(units["functions"], 4)
+        self.assertEqual([u["name"] for u in units["units"]], ["a", "bunit"])
+        self.assertEqual(sorted(os.path.basename(x["path"]) for x in units["units"][0]["sources"]), ["a.cpp", "a2.cpp"])
+        self.assertTrue(units["units"][0]["glue"].endswith(os.path.join("glue", "0.cpp")))
 
     def test_unchanged_outputs_keep_their_time(self):
         self.run_gen()

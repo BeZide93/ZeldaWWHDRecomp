@@ -51,7 +51,7 @@ Settings (`F1`) > Language / About and in the performance report ends in `decomp
   recompiled code: about 1.3 times the CPU time of the whole game process in that session (21.6 s
   instead of 16.8 s for 30 s of play, on a busy machine; 1.6 times at 47e1dbc). Making it faster is
   future work.
-- Not yet available on Windows, Linux and Android.
+- Not yet available on Windows, Linux and Android. In setup: macOS development builds (below).
 
 ## Building it from source
 
@@ -93,15 +93,41 @@ function through the runtime (`runtime/src/decomp`), which runs the decompiled f
 The runtime also rebuilds, from the game's code in memory, the stack frame layout of each decompiled
 function's original, so the decompiled code leaves the game's stack as the original does.
 
+## In setup (development builds, macOS)
+
+The development builds for macOS (the rolling "Development build" pre-release) can build the decomp
+version during setup, next to the normal game. It is off by default:
+
+- in the setup window: tick **Also build the decomp version (experimental)** (shown with the other
+  build options; not shown in regular releases or on Windows, Linux and Android), then install,
+  repair or update;
+- in a terminal: `tools/Setup in Terminal.command --decomp` (`--no-decomp` removes it again).
+
+Setup always builds the normal game first; the decomp version is an extra step at the end (10 to
+30 minutes more, depending on the Mac; about 100 MB on disk, and about 500 MB more while it builds). If it fails, setup says why and the normal game is ready as
+usual. The choice is remembered: a repair or an update builds the decomp version again.
+
+To play it, tick **Start the decomp version instead of the normal game** in the setup window (hold
+Shift while starting Wind Waker HD), or `--start-decomp 1` in a terminal; or start Wind Waker HD with
+`--decomp` once. The version shown in Settings (`F1`) > Language / About ends in `decomp`. The
+decomp version shares the saves, settings and shader caches of the normal game.
+
+What setup uses and makes:
+
+- the decompilation's source at the pinned version, which the development build brings along
+  (`decomp/`, checked against its SHA-256 before it is used; it contains no game code or data);
+- your own `cking.rpx`: setup prepares the decompiled source with it as described above (the model
+  data headers, the source glue), translates the game code with the decomp build's function list and
+  compiles the 862 game units with the same compiler as the normal game;
+- everything it generates stays in the install's data folder (`data/decomp-work`, removed after the
+  build); the result is `data/bin/wwhd-decomp`.
+
 ## Releases
 
-A decomp release (when there is one) is a separate download next to the regular one. Its setup works
-like the regular setup: it builds the game code from your own copy of the game, translating it with
-the release's function list (`sdk/decomp_hooks.txt`).
-
-Not yet possible with the decompilation at 2c1deae: its sources are now prepared with data read from
-your own game (see above), so a release cannot ship the compiled decomp units; its setup would have to
-compile them, which it does not do yet.
+Regular releases do not offer the decomp version. The decomp release variant (a separate download
+whose setup translates the game with `sdk/decomp_hooks.txt`) is not possible with the decompilation
+at 2c1deae: its sources are prepared with data read from your own game, so a release cannot ship the
+compiled decomp units. Setup builds them instead (above).
 
 ## Debug switches
 

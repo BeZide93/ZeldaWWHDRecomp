@@ -58,6 +58,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 # directory to sys.path. Resolve shipped sibling modules explicitly.
 sys.path.insert(0, HERE)
 import code_mods  # noqa: E402
+import decomp_setup  # noqa: E402
 PKG = os.path.normpath(os.path.join(HERE, "..", ".."))
 # Portable release (portable.txt in the release folder): everything setup and the game create stays
 # in <release folder>/data. Without the marker: the per-user locations of earlier releases.
@@ -1732,7 +1733,9 @@ def link_with_sdk_fallback(cmd, env):
                      % (os.path.basename(current or "?"), failed))
 
 
-def link_game(tc, manifest, objs, work, out_exe):
+def link_game(tc, manifest, objs, work, out_exe, recipe=None, glue=()):
+    """recipe: another link line than manifest["link"] (the decomp version: decomp_setup.py), whose
+    {decomp_glue} stands for the objects `glue`"""
     lib = os.path.join(work, "libgamecode.a")
     if os.path.exists(lib):
         os.remove(lib)
@@ -1744,7 +1747,9 @@ def link_game(tc, manifest, objs, work, out_exe):
     else:
         run_logged(tc.ar + ["rcs", lib] + objs, env=tc.env, what="archiving the game code")
     m = {"sdk": fwd(os.path.join(PKG, "sdk")), "gamecode": fwd(lib), "out": fwd(out_exe)}
-    args = [sub(a, m) for a in manifest["link"]]
+    args = []
+    for a in (recipe or manifest["link"]):
+        args += [fwd(g) for g in glue] if a == "{decomp_glue}" else [sub(a, m)]
     if IS_LINUX:
         args += ["-Wl,-rpath,$ORIGIN"]
     elif IS_MAC:
@@ -1918,13 +1923,20 @@ def windows_shortcuts(data_dir, exe):
             LOG.write("shortcut not created (folder 0x%x): %s" % (csidl, e))
 
 
-def launch(state, data_dir):
+def launch(state, data_dir, decomp=None):
+    """decomp: start the decomp version (docs/decomp-build.md); None: as chosen in setup (start_decomp)"""
     say("")
-    say("Starting the game...")
-    if IS_MAC and state.get("app") and os.path.isdir(state["app"]):
-        subprocess.Popen(["open", state["app"]])
-        return
+    if decomp is None:
+        decomp = bool(state.get("start_decomp"))
     exe = state["exe"]
+    if decomp and state.get("decomp_exe") and os.path.isfile(state["decomp_exe"]):
+        exe = state["decomp_exe"]
+        say("Starting the decomp version of the game...")
+    else:
+        say("Starting the game...")
+        if IS_MAC and state.get("app") and os.path.isdir(state["app"]):
+            subprocess.Popen(["open", state["app"]])
+            return
     args = [exe, "--game", state.get("game_dir") or os.path.join(data_dir, "game"), "--save", os.path.join(data_dir, "save")]
     if IS_WIN:
         subprocess.Popen(args, cwd=data_dir, creationflags=0x00000008 | 0x00000200)  # DETACHED_PROCESS | NEW_GROUP
@@ -2198,7 +2210,7 @@ def abs_from_data(path, data_dir):
 
 def resolved_state(state, data_dir):
     st = dict(state)
-    for k in ("exe", "game_dir"):
+    for k in ("exe", "game_dir", "decomp_exe"):
         if st.get(k):
             st[k] = abs_from_data(st[k], data_dir)
     return st
@@ -2206,7 +2218,7 @@ def resolved_state(state, data_dir):
 
 def write_state(data_dir, state):
     st = dict(state)
-    for k in ("exe", "game_dir", "data_dir"):
+    for k in ("exe", "game_dir", "data_dir", "decomp_exe"):
         if st.get(k):
             st[k] = rel_to_data(st[k], data_dir)
     if PORTABLE:
@@ -2253,16 +2265,30 @@ STEP_TITLES = {
     "compile": "Compiling the game code (the longest step: several minutes)",
     "app": "Building the game",
     "shaders": "Preparing shaders",
+    "decomp": "Building the decomp version (experimental)",
 }
 
 
-def plan_steps(kind):
+def plan_steps(kind, decomp=False):
     result = {"image": ["keys", "compiler", "extract", "translate", "compile", "app"],
             "archive": ["archive", "compiler", "extract", "translate", "compile", "app"],
             "folder": ["folder", "compiler"] + ([] if PORTABLE else ["copy"]) + ["translate", "compile", "app"],
             "installed": ["compiler", "translate", "compile", "app"],
             "gen": ["compiler", "compile", "app"]}[kind]
-    return result + ([] if kind == "gen" else ["shaders"])
+    return result + ([] if kind == "gen" else ["shaders"]) + (["decomp"] if decomp else [])
+
+
+def decomp_offered(manifest):
+    return decomp_setup.offered(manifest, IS_MAC)
+
+
+def decomp_wanted(ctx):
+    """The decomp version (decomp_setup.py): --decomp / --no-decomp (or the setup window's choice), else
+    what the last setup did. Never where it is not offered."""
+    if not decomp_offered(ctx.manifest):
+        return False
+    choice = getattr(ctx.args, "decomp", None)
+    return bool(ctx.state().get("decomp", False) if choice is None else choice)
 
 
 CODE_MODS_TEXT = (
@@ -2358,7 +2384,9 @@ def install(ctx, source, keys=None, info=None, ui=None, check_keys=None):
     args, manifest, data_dir = ctx.args, ctx.manifest, ctx.data_dir
     args.code_mods = "1" if setup_code_mods(ctx, ui) else "0"
     kind = source[0]
-    steps = plan_steps(kind)
+    want_decomp = kind != "gen" and decomp_wanted(ctx)
+    old_state = ctx.state()
+    steps = plan_steps(kind, want_decomp)
     total = len(steps)
     counter = iter(range(1, total + 1))
 
@@ -2542,7 +2570,33 @@ def install(ctx, source, keys=None, info=None, ui=None, check_keys=None):
     if kind != "gen":
         os.makedirs(os.path.join(data_dir, "save"), exist_ok=True)
     write_guest_build_config(data_dir, tc)
-    write_state(data_dir, state)
+    if decomp_offered(manifest) and kind != "gen":
+        state["decomp"] = want_decomp  # remembered: a repair or update builds it again
+        state["start_decomp"] = bool(old_state.get("start_decomp")) and want_decomp
+    write_state(data_dir, state)  # the normal game is ready, whatever happens to the decomp version
+    if want_decomp:
+        begin("decomp")
+        try:
+            exe, rev, nunits = decomp_setup.build(sys.modules[__name__], ctx, tc, jobs)
+            state.update(decomp_exe=exe, decomp_revision=rev)
+            state.pop("decomp_error", None)
+        except SetupError as e:
+            # the normal game stays as it is: the decomp version is optional
+            say("")
+            say("  The decomp version could not be built (the normal game is ready and unaffected): %s" % e)
+            LOG.write("decomp version failed: %s" % e)
+            state["decomp_error"] = str(e).splitlines()[0][:300]
+            state.pop("decomp_exe", None)
+            stale = decomp_setup.exe_path(data_dir, PORTABLE)  # an earlier release's decomp version
+            if os.path.isfile(stale):
+                os.remove(stale)
+            state["start_decomp"] = False
+        write_state(data_dir, state)
+    elif decomp_offered(manifest) and old_state.get("decomp_exe"):
+        # switched off: the decomp version this setup built earlier goes
+        old = old_state["decomp_exe"]
+        if os.path.isfile(old) and old != state.get("exe"):
+            os.remove(old)
     return state
 
 
@@ -2579,6 +2633,13 @@ def main():
     ap.add_argument("--rebuild-code-mods", action="store_true", help="stage a cached game-code variant for the next restart")
     ap.add_argument("--code-mods-status", help="atomic rebuild progress/result JSON")
     ap.add_argument("--code-mods-cancel", help="cancel rebuild when this file exists")
+    ap.add_argument("--decomp", dest="decomp", action="store_const", const=True, default=None,
+                    help="development builds, macOS: also build the decomp version of the game (experimental; "
+                         "docs/decomp-build.md); remembered for repairs and updates")
+    ap.add_argument("--no-decomp", dest="decomp", action="store_const", const=False,
+                    help="do not build the decomp version (any more)")
+    ap.add_argument("--start-decomp", choices=("0", "1"),
+                    help="start the decomp version instead of the normal game from now on (1) or not (0)")
     ap.add_argument("--repair-guest-python", action="store_true", help="upgrade local mod setup Python without rebuilding game code")
     ap.add_argument("--shader-template", help="local shader template (or WWHD_SHADER_TEMPLATE); optional")
     ap.add_argument("--skip-shader-prebuild", action="store_true", help="skip optional shader preparation; compile during play")
@@ -2645,6 +2706,20 @@ def run(args, ui):
     say("Install folder: %s" % data_dir)
     state = ctx.state()
     installed = ctx.installed()
+    if getattr(args, "decomp", None) and not decomp_offered(ctx.manifest):
+        raise SetupError("the decomp version is offered on macOS in development builds only (docs/decomp-build.md)")
+    if getattr(args, "start_decomp", None) is not None:
+        on = args.start_decomp == "1"
+        if on and not (state.get("decomp_exe") and os.path.isfile(state["decomp_exe"])):
+            raise SetupError("the decomp version is not built: run setup with --decomp first")
+        state["start_decomp"] = on
+        write_state(ctx.data_dir, state)
+        say("From now on the game starts %s." % ("the decomp version" if on else "the normal version"))
+        if args.decomp is None:
+            return 0
+    # --decomp / --no-decomp on an installed game: a repair that builds (or drops) the decomp version
+    decomp_change = (installed and getattr(args, "decomp", None) is not None
+                     and bool(args.decomp) != bool(state.get("decomp_exe")))
     if args.remove_language_source:
         say("Removed %s" % remove_language_source(data_dir, args.remove_language_source))
         return 0
@@ -2661,7 +2736,7 @@ def run(args, ui):
         source = ("image", os.path.abspath(args.image))
     elif args.game_dir:
         source = ("folder", os.path.abspath(args.game_dir))
-    elif args.repair:
+    elif args.repair or decomp_change:
         if not valid_game_folder(game_dir):
             raise SetupError("no installed game files to repair from; run setup with your disc image")
         source = ("installed", game_dir)
@@ -2772,7 +2847,9 @@ def run(args, ui):
 #   add_language_source {path, disc_key_file?, common_key_file?, common_key_hex?}
 #                                        -> sources (the added ones); experimental (docs/language-packs.md)
 #   remove_language_source {region}      -> removed (the folder)
-#   launch       {}                      -> starts the installed game
+#   launch       {}                      -> starts the installed game (the decomp version when start_decomp)
+#   start_decomp {on}                    -> start the decomp version from now on (development builds, macOS;
+#                                           install {decomp: true} builds it; hello: decomp_offered, decomp)
 #   quit         {}
 # Keys never leave this process: they are not logged, not echoed, not written to disk.
 
@@ -2825,6 +2902,9 @@ def gui_main(args):
                   "legacy": bool(legacy_save or legacy_items), "free_bytes": free_space(ctx.data_dir),
                   "language_sources": sources_reply(),
                   "code_mods": setup_code_mods(ctx),
+                  # the decomp version (decomp_setup.py): offered on macOS in development builds only
+                  "decomp_offered": decomp_offered(ctx.manifest), "decomp": decomp_wanted(ctx),
+                  "decomp_text": decomp_setup.DECOMP_TEXT, "decomp_docs": decomp_setup.DOCS_URL,
                   "toolchain": ctx.manifest["toolchain"]})
 
     def reply(req, ok=True, **kw):
@@ -2966,6 +3046,10 @@ def gui_main(args):
             if not isinstance(req["code_mods"], bool):
                 return fail(req, "bad_request", "code_mods must be a boolean")
             ctx.args.code_mods = "1" if req["code_mods"] else "0"
+        if "decomp" in req:
+            if not isinstance(req["decomp"], bool):
+                return fail(req, "bad_request", "decomp must be a boolean")
+            ctx.args.decomp = req["decomp"]
         if "skip_shader_prebuild" in req:
             ctx.args.skip_shader_prebuild = bool(req["skip_shader_prebuild"])
         if req.get("shader_prebuild_cancel"):
@@ -2986,7 +3070,8 @@ def gui_main(args):
             source = ("installed", ctx.game_dir)
         else:
             return fail(req, "bad_request", "unknown source")
-        GUI.emit({"event": "plan", "id": req.get("id"), "steps": [{"id": s, "title": STEP_TITLES[s]} for s in plan_steps(kind)]})
+        steps = plan_steps(kind, decomp_wanted(ctx))
+        GUI.emit({"event": "plan", "id": req.get("id"), "steps": [{"id": s, "title": STEP_TITLES[s]} for s in steps]})
         try:
             state = install(ctx, source, session["keys"], session["info"])
         except SetupError as e:
@@ -2996,6 +3081,7 @@ def gui_main(args):
             session.update(keys=None, info=None)
         tdir = toolchain_dir(ctx.data_dir)
         reply(req, app=state.get("app", ""), exe=state.get("exe", ""), data_dir=ctx.data_dir,
+              decomp_exe=state.get("decomp_exe", ""), decomp_error=state.get("decomp_error", ""),
               game_dir=state.get("game_dir", ""), save_exists=have_save(ctx.data_dir),
               toolchain_bytes=folder_size(tdir) if os.path.isdir(tdir) else 0)
 
@@ -3034,9 +3120,22 @@ def gui_main(args):
         launch(st, ctx.data_dir)
         reply(req)
 
+    def do_start_decomp(req):
+        """{on: bool}: start the decomp version instead of the normal game from now on"""
+        st = ctx.state()
+        on = req.get("on")
+        if not isinstance(on, bool):
+            return fail(req, "bad_request", "on must be a boolean")
+        if on and not (st.get("decomp_exe") and os.path.isfile(st["decomp_exe"])):
+            return fail(req, "not_built", "The decomp version is not built.")
+        st["start_decomp"] = on
+        write_state(ctx.data_dir, st)
+        reply(req, start_decomp=on)
+
     handlers = {"probe": probe, "check_keys": check, "install": do_install, "import_save": save,
                 "import_existing": do_import_existing, "remove_toolchain": do_remove_toolchain,
                 "shortcut": do_shortcut, "launch": do_launch, "hello": lambda req: hello(),
+                "start_decomp": do_start_decomp,
                 "language_sources": do_language_sources, "add_language_source": do_add_language_source,
                 "remove_language_source": do_remove_language_source}
     hello()

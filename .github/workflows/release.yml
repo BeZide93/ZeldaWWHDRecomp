@@ -157,6 +157,21 @@ jobs:
             -DVulkan_LIBRARY="$RUNNER_TEMP/vk/prefix/lib/libvulkan.1.dylib"
           cmake --build build/rel
 
+      - name: Decomp version parts (development builds; setup's experimental option, docs/decomp-build.md)
+        # the same runtime built for the decomp build, without game units and without the game
+        # (WWHD_DECOMP_RUNTIME_ONLY); package.py --decomp-build takes the objects that differ, the decompilation's
+        # source (submodule decomp) and how setup compiles the units
+        if: needs.version.outputs.devel == 'true'
+        run: |
+          git submodule update --init decomp
+          cmake -S . -B build/rel-decomp -G Ninja -DCMAKE_BUILD_TYPE=Release -DWWHD_VERSION="$VERSION" -DWWHD_RENDERER=BOTH \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DGEN_DIR="$PWD/build/gen-stub" \
+            -DWWHD_BUNDLED_DEPS=ON -DWWHD_BUNDLED_ZSTD=ON \
+            -DVulkan_INCLUDE_DIR="$RUNNER_TEMP/vk/prefix/include" \
+            -DVulkan_LIBRARY="$RUNNER_TEMP/vk/prefix/lib/libvulkan.1.dylib" \
+            -DWWHD_DECOMP=ON -DWWHD_DECOMP_RUNTIME_ONLY=ON
+          cmake --build build/rel-decomp --target wwhd
+
       - name: Unit tests
         run: |
           ctest --test-dir build/rel --output-on-failure
@@ -167,8 +182,10 @@ jobs:
       - name: Package
         run: |
           VK="$RUNNER_TEMP/vk"
+          DECOMP=()
+          if [ -d build/rel-decomp ]; then DECOMP=(--decomp-build build/rel-decomp); fi
           python3 tools/release/package.py --build build/rel --platform macos-arm64 --version "$VERSION" \
-            --out dist --toolchain xcode-clt --setup-gui build/rel/wwhd-setup \
+            --out dist --toolchain xcode-clt --setup-gui build/rel/wwhd-setup "${DECOMP[@]}" \
             --runtime-file "$VK/runtime/libvulkan.1.dylib" \
             --runtime-file "$VK/runtime/libMoltenVK.dylib" \
             --runtime-file "$VK/runtime/MoltenVK_icd.json" \

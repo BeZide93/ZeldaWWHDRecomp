@@ -347,6 +347,8 @@ static bool run_quick(const std::vector<std::string>& args) {
 // starting the built game
 
 static std::string g_exe, g_game_dir, g_data_dir;  // set when the game is ready to start
+static std::string g_exe_normal_path;                // the normal game (g_exe may be the decomp version)
+static std::string g_exe_normal() { return g_exe_normal_path; }
 
 // Replaces this process with the game (macOS, Linux; the Dock keeps showing "Wind Waker HD") or starts
 // it and returns (Windows). The game runs in the data folder (its crash logs go to data/captures).
@@ -457,6 +459,9 @@ struct App {
     double free_bytes = 0, source_bytes = 0, toolchain_bytes = 0;
     bool opt_remove_toolchain = false, opt_shortcut = false;
     bool code_mods = false;
+    // the decomp version (tools/installer/decomp_setup.py): offered on macOS in development builds only
+    bool decomp_offered = false, decomp = false, start_decomp = false;
+    std::string decomp_text, decomp_docs, decomp_exe, decomp_error;
     bool prepare_shaders = true;
     bool shader_skip_requested = false;
     std::deque<std::pair<std::string, std::string>> queue;  // requests to send one after another
@@ -809,6 +814,7 @@ static void start_install(const std::string& source) {
     A.current = -1;
     std::string f = "\"source\":" + jstr(source);
     f += std::string(",\"code_mods\":") + (A.code_mods ? "true" : "false");
+    if (A.decomp_offered) f += std::string(",\"decomp\":") + (A.decomp ? "true" : "false");
     if (source != "installed") f += ",\"path\":" + jstr(A.source_path);
     f += std::string(",\"skip_shader_prebuild\":") + (A.prepare_shaders ? "false" : "true");
     f += ",\"shader_prebuild_cancel\":" + jstr(A.data_dir + "/shader-prebuild-cancel");
@@ -875,6 +881,11 @@ static void handle_reply(const J& ev) {
             A.toolchain_bytes = ev.num("toolchain_bytes");
             A.game_dir = ev.str("game_dir", A.game_dir);
             g_exe = ev.str("exe"), g_game_dir = A.game_dir, g_data_dir = ev.str("data_dir", A.data_dir);
+            g_exe_normal_path = g_exe;
+            A.decomp_exe = ev.str("decomp_exe");
+            A.decomp_error = ev.str("decomp_error");
+            if (A.decomp_exe.empty()) A.start_decomp = false;
+            if (A.start_decomp) g_exe = A.decomp_exe;
             A.installed = true;
             addlog("Setup finished.");
             go(A.save_exists ? Screen::Done : Screen::Save);
@@ -911,6 +922,10 @@ static void handle_event(const J& ev) {
         A.log_path = ev.str("log");
         A.platform = ev.str("platform");
         A.code_mods = ev.boolean("code_mods");
+        A.decomp_offered = ev.boolean("decomp_offered");
+        A.decomp = ev.boolean("decomp");
+        A.decomp_text = ev.str("decomp_text");
+        A.decomp_docs = ev.str("decomp_docs");
         A.game_files = ev.boolean("game_files");
         A.save_exists = ev.boolean("save_exists");
         A.portable = ev.boolean("portable");
@@ -923,7 +938,11 @@ static void handle_event(const J& ev) {
         A.installed_version = A.installed ? inst->str("version") : "";
         if (A.installed) {
             A.result_app = inst->str("app");
+            A.decomp_exe = inst->str("decomp_exe");
+            A.start_decomp = inst->boolean("start_decomp") && !A.decomp_exe.empty();
             g_exe = inst->str("exe"), g_game_dir = inst->str("game_dir"), g_data_dir = A.data_dir;
+            g_exe_normal_path = g_exe;
+            if (A.start_decomp) g_exe = A.decomp_exe;
         }
         go(A.installed ? Screen::Menu : Screen::Welcome);
     } else if (e == "log") {
@@ -1127,7 +1146,25 @@ static void code_mods_choice() {
           "content mods do not need this. The game code gets a small check in every function, which can "
           "cost some performance, and the build takes a bit longer. You can switch this later in "
           "Settings > Mods; that requires another rebuild.");
+    if (A.decomp_offered) {
+        checkbox("Also build the decomp version (experimental)", &A.decomp);
+        muted(A.decomp_text);
+        if (button("About the decomp version (docs/decomp-build.md)")) SDL_OpenURL(A.decomp_docs.c_str());
+    }
     ImGui::Spacing();
+}
+
+// Menu and Done: which version Play starts (only when the decomp version is built)
+static void start_choice() {
+    if (A.decomp_exe.empty()) return;
+    bool v = A.start_decomp;
+    if (checkbox("Start the decomp version instead of the normal game", &v)) {
+        A.start_decomp = v;
+        request("start_decomp", std::string("\"on\":") + (v ? "true" : "false"));
+        g_exe = v ? A.decomp_exe : g_exe_normal();
+    }
+    muted("The decomp version runs the decompiled game functions as compiled source (experimental). Starting "
+          "Wind Waker HD with --decomp starts it once.");
 }
 
 static void screen_menu() {
@@ -1141,6 +1178,7 @@ static void screen_menu() {
         if (button("Update to this release", ImVec2(w, 0), true)) start_install("installed");
         muted("Rebuilds the game with this release. Your game files and saves are kept; no keys needed.");
     }
+    start_choice();
     if (button("Play", ImVec2(w, 0), !update)) A.after = "play";
     if (button("Repair", ImVec2(w, 0))) start_install("installed");
     muted("Rebuilds the game code from the installed game files.");
@@ -1422,6 +1460,9 @@ static void screen_done() {
         muted("Game files and saves: " + A.data_dir);
     }
     if (!A.save_msg.empty()) muted(A.save_msg);
+    if (!A.decomp_error.empty()) muted("The decomp version could not be built: " + A.decomp_error +
+                                       " (the normal game is ready; details in the setup log)");
+    else if (A.leaving.empty()) start_choice();
     if (!A.leaving.empty()) {
         // the chosen options run now, then the window closes: showing them again (reset, so they look
         // like a new question) would ask after the answer was given
@@ -1782,7 +1823,7 @@ static void start_child() {
 // automation (tests): a JSON array of steps, each run when its screen is showing:
 //   {"screen": "keys", "set": {"common_mode": "file", "common_key_file": "..."}, "when_step": "compile",
 //    "idle": true, "shot": "03-keys.png", "click": "Check keys and install"}
-// "set" fields: code_mods (boolean), source (as if chosen in the dialog), disc_key_file, common_key_file, common_mode
+// "set" fields: code_mods (boolean), decomp (boolean), source (as if chosen in the dialog), disc_key_file, common_key_file, common_mode
 // (file|paste), save_kind (none|hd|gc|legacy|other), save_path, open_details (true). Screenshots are PNG files
 // of the window. The run ends (exit 0) after the last step, or with exit 2 on a 45-minute timeout.
 
@@ -1819,6 +1860,7 @@ static void automation_frame() {
                 set_save_kind(v == "hd" ? 1 : v == "gc" ? 2 : v == "legacy" ? 3 : v == "other" ? 4 : 0);
             else if (k == "save_path") set_save_path(v);
             else if (k == "code_mods") A.code_mods = kv.second.t == J::Bool && kv.second.b;
+            else if (k == "decomp") A.decomp = kv.second.t == J::Bool && kv.second.b;
             else if (k == "open_details") details_open = true;
         }
     }
@@ -1852,7 +1894,8 @@ static void save_shot(SDL_Renderer* r, const std::string& name) {
 }
 
 // The game in this folder is built for this release and its game files are there: start it directly.
-static bool game_ready(const std::string& pkg, const std::vector<std::string>& passthru) {
+// The decomp version (setup's option, development builds) when chosen in setup or asked for with --decomp.
+static bool game_ready(const std::string& pkg, const std::vector<std::string>& passthru, bool want_decomp) {
     SDL_PathInfo info;
     std::string data = data_dir_of(pkg, passthru);
     J st, man;
@@ -1865,6 +1908,9 @@ static bool game_ready(const std::string& pkg, const std::vector<std::string>& p
         return p.empty() || abs ? p : data + "/" + p;
     };
     std::string exe = resolve(st.str("exe")), game = resolve(st.str("game_dir"));
+    std::string dexe = resolve(st.str("decomp_exe"));
+    if ((want_decomp || st.boolean("start_decomp")) && !dexe.empty() && SDL_GetPathInfo(dexe.c_str(), &info)) exe = dexe;
+    else if (want_decomp) SDL_Log("--decomp: the decomp version is not built (setup option, development builds)");
     if (exe.empty() || game.empty() || !SDL_GetPathInfo(exe.c_str(), &info) ||
         !SDL_GetPathInfo((game + "/code/cking.rpx").c_str(), &info))
         return false;
@@ -1879,13 +1925,14 @@ int main(int argc, char** argv) {
     }
 #endif
     std::string automate;
-    bool want_setup = false;
+    bool want_setup = false, want_decomp = false;
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
         if (a == "--automate" && i + 1 < argc) automate = argv[++i];
         else if (a == "--screenshots" && i + 1 < argc) A.shots_dir = argv[++i];
         else if (a == "--self-test") A.self_test = true;
         else if (a == "--setup") want_setup = true;
+        else if (a == "--decomp") want_decomp = true;  // start the decomp version (setup.py's --decomp builds it)
         else if (a.rfind("-psn_", 0) == 0) continue;  // macOS Finder's process serial number
         else A.passthru.push_back(a);
     }
@@ -1902,7 +1949,7 @@ int main(int argc, char** argv) {
     // prepared already: start the game right away, no window of our own (Shift / --setup: the setup)
     if (!want_setup && automate.empty() && !A.self_test && !shift_held()) {
         std::string pkg = find_package().pkg;
-        if (!pkg.empty() && game_ready(pkg, A.passthru) && launch_game()) return 0;
+        if (!pkg.empty() && game_ready(pkg, A.passthru, want_decomp) && launch_game()) return 0;
     }
 
     SDL_SetHint(SDL_HINT_APP_NAME, "Wind Waker HD");

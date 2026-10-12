@@ -1483,5 +1483,118 @@ class LongPaths(unittest.TestCase):
         self.assertFalse(os.path.exists(root))
 
 
+class DecompOption(unittest.TestCase):
+    """Setup's optional decomp version (decomp_setup.py): gates, the bundled source check, the remembered
+    option, the link line."""
+    DEV = {"version": "v0.2.13-devel.0123abcd", "platform": "macos-arm64", "decomp": {"tree_sha256": ""}}
+
+    def test_dev_build_gate(self):
+        ds = setup.decomp_setup
+        self.assertTrue(ds.is_dev_version("v0.2.13-devel.0123abcd"))
+        self.assertTrue(ds.is_dev_version("development build"))
+        for v in ("v0.2.13", "v0.2.13-rc1", "", None, "v0.2.13-devel.", "devel-0123abcd"):
+            self.assertFalse(ds.is_dev_version(v), v)
+        self.assertTrue(ds.offered(self.DEV, True))
+        self.assertFalse(ds.offered(dict(self.DEV, version="v0.2.13"), True))   # a release
+        self.assertFalse(ds.offered({k: v for k, v in self.DEV.items() if k != "decomp"}, True))  # no parts
+
+    def test_platform_gate(self):
+        self.assertFalse(setup.decomp_setup.offered(self.DEV, False))
+        with mock.patch.object(setup, "IS_MAC", False):
+            self.assertFalse(setup.decomp_offered(self.DEV))
+        with mock.patch.object(setup, "IS_MAC", True):
+            self.assertTrue(setup.decomp_offered(self.DEV))
+
+    def wanted(self, manifest, arg, state, mac=True):
+        ctx = mock.Mock(manifest=manifest, args=mock.Mock(decomp=arg))
+        ctx.state.return_value = state
+        with mock.patch.object(setup, "IS_MAC", mac):
+            return setup.decomp_wanted(ctx)
+
+    def test_option_default_off_and_remembered(self):
+        self.assertFalse(self.wanted(self.DEV, None, {}))                 # off by default
+        self.assertTrue(self.wanted(self.DEV, True, {}))                  # --decomp / the checkbox
+        self.assertTrue(self.wanted(self.DEV, None, {"decomp": True}))    # a repair or update remembers it
+        self.assertFalse(self.wanted(self.DEV, False, {"decomp": True}))  # --no-decomp
+        self.assertFalse(self.wanted(self.DEV, True, {}, mac=False))      # never where it is not offered
+        self.assertFalse(self.wanted(dict(self.DEV, version="v0.2.13"), True, {"decomp": True}))
+
+    def test_steps(self):
+        self.assertEqual(setup.plan_steps("installed", True)[-2:], ["shaders", "decomp"])
+        self.assertNotIn("decomp", setup.plan_steps("installed"))
+        self.assertIn("decomp", setup.STEP_TITLES)
+
+    def test_source_sha_check(self):
+        ds = setup.decomp_setup
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, "decomp", "wwhd_src"))
+            with open(os.path.join(d, "decomp", "wwhd_src", "a.cpp"), "w") as f:
+                f.write("/* 02000020 */\nvoid f() {}\n")
+            with open(os.path.join(d, "decomp", "LICENSE"), "w") as f:
+                f.write("CC0\n")
+            digest = ds.tree_digest(os.path.join(d, "decomp"))
+            m = {"decomp": {"tree_sha256": digest, "revision": "2c1deae"}}
+            self.assertEqual(ds.check_source(d, m, setup.SetupError), "2c1deae")
+            for junk in (".DS_Store", "._a.cpp"):  # Finder's files do not count
+                open(os.path.join(d, "decomp", "wwhd_src", junk), "w").close()
+            self.assertEqual(ds.check_source(d, m, setup.SetupError), "2c1deae")
+            with open(os.path.join(d, "decomp", "wwhd_src", "a.cpp"), "a") as f:
+                f.write("// changed\n")
+            with self.assertRaises(setup.SetupError) as e:
+                ds.check_source(d, m, setup.SetupError)
+            self.assertIn("SHA-256", str(e.exception))
+            os.rename(os.path.join(d, "decomp"), os.path.join(d, "gone"))
+            with self.assertRaises(setup.SetupError):
+                ds.check_source(d, m, setup.SetupError)
+
+    def test_digest_independent_of_walk_order(self):
+        ds = setup.decomp_setup
+        with tempfile.TemporaryDirectory() as d:
+            for rel in ("b/x", "a/y", "a/z", "c"):
+                os.makedirs(os.path.dirname(os.path.join(d, "t1", rel)) or d, exist_ok=True)
+                os.makedirs(os.path.dirname(os.path.join(d, "t2", rel)) or d, exist_ok=True)
+            for rel in ("c", "a/z", "b/x", "a/y"):
+                for t in ("t1", "t2"):
+                    with open(os.path.join(d, t, rel), "w") as f:
+                        f.write(rel)
+            self.assertEqual(ds.tree_digest(os.path.join(d, "t1")), ds.tree_digest(os.path.join(d, "t2")))
+
+    def test_link_line_glue(self):
+        calls = []
+        tc = setup.Toolchain(["cc"], ["c++"], ["ar"])
+        with tempfile.TemporaryDirectory() as d, \
+                mock.patch.object(setup, "run_logged", lambda cmd, **kw: calls.append(cmd)), \
+                mock.patch.object(setup, "link_with_sdk_fallback", lambda cmd, env: calls.append(cmd) or
+                                  open(os.path.join(d, "out"), "w").close()):
+            setup.link_game(tc, {"link": ["{gamecode}", "-o", "{out}"]}, ["g.o"], d, os.path.join(d, "out"),
+                            recipe=["{sdk}/decomp/obj/main.o", "{decomp_glue}", "{gamecode}", "-o", "{out}"],
+                            glue=["hooks.o", "u1.o"])
+        link = calls[-1]
+        self.assertEqual(link[1:4], [setup.fwd(os.path.join(setup.PKG, "sdk")) + "/decomp/obj/main.o", "hooks.o", "u1.o"])
+
+    def test_state_keeps_decomp_exe_relative(self):
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(setup, "PORTABLE", True):
+            exe = os.path.join(d, "bin", "wwhd-decomp")
+            setup.write_state(d, {"exe": os.path.join(d, "bin", "wwhd"), "decomp_exe": exe, "start_decomp": True})
+            with open(os.path.join(d, "install.json")) as f:
+                self.assertEqual(json.load(f)["decomp_exe"], "bin/wwhd-decomp")
+            self.assertEqual(setup.read_state(d)["decomp_exe"], exe)
+
+    def test_launch_chooses_version(self):
+        with tempfile.TemporaryDirectory() as d:
+            exe, dexe = os.path.join(d, "wwhd"), os.path.join(d, "wwhd-decomp")
+            open(dexe, "w").close()
+            started = []
+            with mock.patch.object(setup.subprocess, "Popen", lambda args, **kw: started.append(args[0])), \
+                    mock.patch.object(setup, "say", lambda *a: None), mock.patch.object(setup, "IS_MAC", False):
+                st = {"exe": exe, "decomp_exe": dexe}
+                setup.launch(st, d)
+                setup.launch(dict(st, start_decomp=True), d)
+                setup.launch(st, d, decomp=True)
+                os.remove(dexe)
+                setup.launch(dict(st, start_decomp=True), d)  # not built (any more): the normal game
+            self.assertEqual(started, [exe, dexe, dexe, exe])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -16,6 +16,12 @@ set(WWHD_DECOMP_DIR "${CMAKE_SOURCE_DIR}/decomp" CACHE PATH "decomp build: the d
 set(WWHD_DECOMP_GAME "${CMAKE_SOURCE_DIR}/game" CACHE PATH
     "decomp build: your own copy of the game (USA; the folder with code/cking.rpx), read for the model data and the source glue")
 set(WWHD_DECOMP_OUT "${CMAKE_BINARY_DIR}/decomp")
+# The release's part of the decomp build (tools/release/package.py --decomp-build; setup builds the decomp
+# version on the player's machine, docs/decomp-build.md): the runtime compiled for the decomp build, without
+# the game units and without reading the game. The generated hooks.cpp is replaced by an empty table
+# (tools/decomp_build/hooks_none.cpp, which setup replaces with its own hooks and units); the object library
+# wwhd_decomp_flags (never built) records in compile_commands.json how setup compiles a game unit.
+option(WWHD_DECOMP_RUNTIME_ONLY "decomp build: the runtime only, for packaging (no units, no game)" OFF)
 
 function(wwhd_decomp_configure)
   if(NOT APPLE)
@@ -24,6 +30,10 @@ function(wwhd_decomp_configure)
   endif()
   if(NOT EXISTS "${WWHD_DECOMP_DIR}/tools/verify/include/gabi.h")
     message(FATAL_ERROR "WWHD_DECOMP: no decompilation in ${WWHD_DECOMP_DIR}; run: git submodule update --init decomp")
+  endif()
+  if(WWHD_DECOMP_RUNTIME_ONLY)
+    set(WWHD_DECOMP_UNIT_COUNT 0 PARENT_SCOPE)
+    return()
   endif()
   find_package(Python3 REQUIRED COMPONENTS Interpreter)
   execute_process(COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/decomp_build/gen.py"
@@ -65,6 +75,18 @@ function(wwhd_decomp_link target)
   # these options come after the configuration's, so they win
   set(opts -O2 -g0 -w -fvisibility=hidden -fvisibility-inlines-hidden -ffp-contract=off -fno-fast-math
            -fno-strict-aliasing -include "${CMAKE_SOURCE_DIR}/tools/decomp_build/frames_vis.h")
+  if(WWHD_DECOMP_RUNTIME_ONLY)
+    add_library(wwhd_decomp_flags OBJECT "${CMAKE_SOURCE_DIR}/tools/decomp_build/flags_probe.cpp")
+    target_include_directories(wwhd_decomp_flags PRIVATE ${inc})
+    target_compile_options(wwhd_decomp_flags PRIVATE ${opts})
+    set_target_properties(wwhd_decomp_flags PROPERTIES CXX_EXTENSIONS OFF EXCLUDE_FROM_ALL ON)
+    set_source_files_properties("${CMAKE_SOURCE_DIR}/runtime/src/decomp/frames.cpp"
+      PROPERTIES INCLUDE_DIRECTORIES "${WWHD_DECOMP_DIR}/tools/verify/include")
+    target_sources(${target} PRIVATE "${CMAKE_SOURCE_DIR}/runtime/src/decomp/decomp.cpp"
+      "${CMAKE_SOURCE_DIR}/runtime/src/decomp/frames.cpp" "${CMAKE_SOURCE_DIR}/tools/decomp_build/hooks_none.cpp")
+    target_compile_definitions(${target} PRIVATE WWHD_DECOMP=1)
+    return()
+  endif()
   set(objs)
   file(MAKE_DIRECTORY "${WWHD_DECOMP_OUT}/units")
   foreach(i RANGE 1 ${WWHD_DECOMP_UNIT_COUNT})
