@@ -70,6 +70,7 @@ namespace gfxvk { bool buffer_cache_enabled(); }  // gfx/vulkan/buffer_cache.h
 #include "../perf_metrics.h"
 #include "../build_info.h"
 #include "settings_shortcut.h"
+#include "binding_capture.h"
 #include "../report_header.h"
 
 namespace gx2 { uint64_t flips_presented(); bool uncapped(); void set_uncapped(bool on); }
@@ -166,7 +167,7 @@ struct Ui {
     ImVec2 mouse_position = {-FLT_MAX, -FLT_MAX};
     // remap capture: action, column (0, 1 keys; 2 controller)
     int cap_action = -1, cap_col = 0;
-    bool cap_pad_released = false;
+    BindingCapture binding_capture;
     double cap_started = 0;
     std::string cap_note;
     // save state slots, refreshed twice a second while the Saves tab is shown
@@ -1639,7 +1640,7 @@ void tab_mods() {
 void start_capture(int a, int col) {
     U.cap_action = a;
     U.cap_col = col;
-    U.cap_pad_released = false;
+    U.binding_capture.reset();
     U.cap_started = now_s();
     U.cap_note.clear();
     g_capture_key = -2;
@@ -1677,14 +1678,8 @@ void apply_capture() {
     if (!done) {
         // controller: wait for all inputs to be released, then take the first one pressed (controller
         // slots); for a key slot, B cancels
-        int pressed = -1;
-        bool any = false;
-        for (int p = 1; p < kPadCount; p++) {
-            any |= U.values[p] > 0.3f;
-            if (U.values[p] > 0.6f && pressed < 0) pressed = p;
-        }
-        if (!U.cap_pad_released) U.cap_pad_released = !any;
-        else if (pressed > 0) {
+        const int pressed = U.binding_capture.poll(U.values);
+        if (pressed > 0) {
             if (colm == kColPad || colm == kColAny) {
                 set_pad_binding(m, a, pressed);
                 input_map::set_current(m);

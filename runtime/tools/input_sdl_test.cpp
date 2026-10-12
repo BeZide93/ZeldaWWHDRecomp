@@ -11,6 +11,8 @@
 #include "input_map.h"
 #include "rumble.h"
 #include "platform/input_sdl.h"
+#include "platform/android_controller.h"
+#include "overlay/binding_capture.h"
 static int audioResets=0;
 namespace audio {void flush(){++audioResets;}}
 static int savedSlot=0, loadedSlot=0, saveRequests=0, loadRequests=0;
@@ -189,6 +191,38 @@ int main(){
   assert(SDL_SetJoystickVirtualButton(joystick,SDL_GAMEPAD_BUTTON_DPAD_DOWN,false));poll();
   input_map::set_current(input_map::Mapping::defaults(),false);
   SDL_CloseJoystick(joystick);assert(SDL_DetachVirtualJoystick(id));poll();
+ }
+ // Thor/Odin's Android raw letter order, through the same narrow SDL mapping correction.
+ {
+  SDL_VirtualJoystickDesc d;SDL_INIT_INTERFACE(&d);
+  d.type=SDL_JOYSTICK_TYPE_GAMEPAD;d.naxes=SDL_GAMEPAD_AXIS_COUNT;d.nbuttons=SDL_GAMEPAD_BUTTON_COUNT;
+  d.vendor_id=0x2020;d.product_id=0x0111;d.name="Odin Controller fixture";
+  auto id=SDL_AttachVirtualJoystick(&d);assert(id);
+  char* original=SDL_GetGamepadMappingForID(id);assert(original);
+  const auto corrected=android_controller::mapping(0x2020,0x0111,original);SDL_free(original);
+  assert(SDL_AddGamepadMapping(corrected.c_str())>=0);
+  for(SDL_Event e;SDL_PollEvent(&e);)input::handle_event(e);
+  auto* joystick=SDL_OpenJoystick(id);assert(joystick);
+  auto* pad=SDL_GetGamepadFromID(id);assert(pad);
+  const SDL_GamepadButton positions[]={SDL_GAMEPAD_BUTTON_SOUTH,SDL_GAMEPAD_BUTTON_EAST,SDL_GAMEPAD_BUTTON_WEST,SDL_GAMEPAD_BUTTON_NORTH};
+  const SDL_GamepadButtonLabel printed[]={SDL_GAMEPAD_BUTTON_LABEL_B,SDL_GAMEPAD_BUTTON_LABEL_A,SDL_GAMEPAD_BUTTON_LABEL_Y,SDL_GAMEPAD_BUTTON_LABEL_X};
+  for(int i=0;i<4;++i)assert(SDL_GetGamepadButtonLabel(pad,positions[i])==printed[i]);
+  auto poll=[&](){SDL_UpdateJoysticks();for(SDL_Event e;SDL_PollEvent(&e);)input::handle_event(e);input::update();};
+  // Android BUTTON_A/B/X/Y raw indices; Nintendo labels match each game's action.
+  const uint32_t bits[]={input::kA,input::kB,input::kX,input::kY};
+  for(int raw=0;raw<4;++raw){
+   auto m=input_map::Mapping::defaults();input_map::apply_face_layout(m,input_map::FaceLayout::kPosition);input_map::set_current(m,false);
+   poll();float values[input_map::kPadCount]={};input::host_controller_values(values);
+   overlay::BindingCapture capture;assert(capture.poll(values)==-1);
+   assert(SDL_SetJoystickVirtualButton(joystick,raw,true));poll();
+   assert(input::read().buttons==bits[raw]);
+   input::host_controller_values(values);const int captured=capture.poll(values);assert(captured>0);
+   input_map::set_pad_binding(m,input_map::kX,captured);input_map::set_current(m,false);poll();
+   assert(input::read().buttons&input::kX);
+   assert(SDL_SetJoystickVirtualButton(joystick,raw,false));poll();
+  }
+  SDL_CloseJoystick(joystick);assert(SDL_DetachVirtualJoystick(id));poll();
+  input_map::set_current(input_map::Mapping::defaults(),false);
  }
  input::set_pro_controller(false);
  SDL_DestroyWindow(controls);SDL_DestroyWindow(game);input::set_prompt_window(nullptr);

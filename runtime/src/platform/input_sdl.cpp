@@ -2,6 +2,7 @@
 #include <jni.h>
 #include "overlay/hostui.h"
 #endif
+#include "android_controller.h"
 #include "../mods/fast_forward.h"
 #ifdef WWHD_HAS_VULKAN
 #include "gfx/vulkan/stutter_trace.h"
@@ -341,6 +342,12 @@ static void dominant_labels(input_map::FaceLabel out[4]){
   if(SDL_IsJoystickVirtual(id))continue;  // #88's on-screen pad is not a pad to follow for labels
   auto i=g_controllers.find(id);if(i==g_controllers.end())continue;
   SDL_Gamepad* pad=i->second;
+#ifdef __ANDROID__
+  // Android keyboards with D-pad keys can be exposed by SDL as gamepads (qwerty2).
+  // They have no complete face cluster and must not decide another pad's labels.
+  if(!SDL_GamepadHasButton(pad,SDL_GAMEPAD_BUTTON_SOUTH) || !SDL_GamepadHasButton(pad,SDL_GAMEPAD_BUTTON_EAST) ||
+     !SDL_GamepadHasButton(pad,SDL_GAMEPAD_BUTTON_WEST) || !SDL_GamepadHasButton(pad,SDL_GAMEPAD_BUTTON_NORTH))continue;
+#endif
   auto label=[&](SDL_GamepadButton b)->input_map::FaceLabel{
    switch(SDL_GetGamepadButtonLabel(pad,b)){
    case SDL_GAMEPAD_BUTTON_LABEL_A:return FL::kA;
@@ -364,6 +371,17 @@ static void note_dominant_labels(){
 static void open_controller(SDL_JoystickID id){
  std::lock_guard lk(g_pads_mu);
  if(g_controllers.contains(id))return;
+#ifdef __ANDROID__
+ if(android_controller::odin(SDL_GetGamepadVendorForID(id),SDL_GetGamepadProductForID(id))) {
+  if(char* original=SDL_GetGamepadMappingForID(id)) {
+   LOG("[input] Odin SDL mapping before correction: %s",original);
+   const auto corrected=android_controller::mapping(SDL_GetGamepadVendorForID(id),SDL_GetGamepadProductForID(id),original);
+   if(SDL_AddGamepadMapping(corrected.c_str())>=0)LOG("[input] applied Odin 2020:0111 Nintendo face-position mapping");
+   else LOG("[input] Odin mapping correction failed: %s",SDL_GetError());
+   SDL_free(original);
+  }
+ }
+#endif
  if(auto* pad=SDL_OpenGamepad(id)){g_controllers[id]=pad;g_order.push_back(id);
   // every connected device is listed: the host combines all of them (strongest input wins), so a
   // second device (e.g. Steam Input's virtual pad next to the physical one) shows up in bug reports

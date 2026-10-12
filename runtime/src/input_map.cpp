@@ -110,7 +110,11 @@ int action_from_id(const std::string& id) {
 }
 
 const char* pad_id(int p) { return p >= 0 && p < kPadCount ? kPads[p].id : ""; }
-const char* pad_label(int p) { return p > 0 && p < kPadCount ? kPads[p].label : ""; }
+const char* pad_label(int p) {
+    static const char* const nintendo[] = {"B (bottom)", "A (right)", "Y (left)", "X (top)"};
+    if (p >= kPadA && p <= kPadY && pad_family() == PadFamily::kNintendo) return nintendo[p - kPadA];
+    return p > 0 && p < kPadCount ? kPads[p].label : "";
+}
 int pad_from_id(const std::string& id) {
     if (id.empty()) return kPadNone;
     for (int p = 1; p < kPadCount; p++)
@@ -414,6 +418,8 @@ std::string key_short_label(int code) {
 }
 
 const char* pad_short_label(int p) {
+    static const char* const nintendo[] = {"B", "A", "Y", "X"};
+    if (p >= kPadA && p <= kPadY && pad_family() == PadFamily::kNintendo) return nintendo[p - kPadA];
     static const char* const kShort[kPadCount] = {
         "", "A", "B", "X", "Y", "LB", "RB", "LT", "RT", "Menu", "View", "Home", "L3", "R3",
         "D-pad ↑", "D-pad ↓", "D-pad ←", "D-pad →", "LS ↑", "LS ↓", "LS ←", "LS →", "RS ↑", "RS ↓", "RS ←", "RS →",
@@ -684,7 +690,12 @@ bool from_json(const std::string& text, Mapping& out, std::string* error) {
         for (auto& [id, v] : pc->obj) {
             int a = action_from_id(id);
             if (a < 0) { warn += "unknown input \"" + id + "\"; "; continue; }
-            if (v.type == Json::Null) { m.pad[a] = kPadNone; continue; }
+            if (v.type == Json::Null) {
+                if (a >= kA && a <= kY) {
+                    warn += "null face binding " + id + " repaired to default; ";
+                } else m.pad[a] = kPadNone;
+                continue;
+            }
             if (v.type != Json::Str) continue;
             int p = pad_from_id(v.s);
             if (p < 0) { warn += "unknown controller input \"" + v.s + "\"; "; continue; }

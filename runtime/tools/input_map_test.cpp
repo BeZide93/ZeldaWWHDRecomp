@@ -12,6 +12,8 @@
 #include "input_map.h"
 #include "platform/touch_face.h"
 #include "overlay/settings_shortcut.h"
+#include "overlay/binding_capture.h"
+#include "platform/android_controller.h"
 
 using namespace input_map;
 
@@ -186,6 +188,10 @@ static void test_face_auto() {
     Mapping m = Mapping::defaults();
     CHECK(!m.face_auto && face_layout(m) == FaceLayout::kPosition);
     note_face_labels(nintendo);
+    CHECK(std::string(pad_label(kPadA)) == "B (bottom)");
+    CHECK(std::string(pad_label(kPadB)) == "A (right)");
+    CHECK(std::string(pad_short_label(kPadX)) == "Y");
+    CHECK(std::string(pad_short_label(kPadY)) == "X");
     set_face_auto(m, true);
     CHECK(m.face_auto && face_layout(m) == FaceLayout::kPosition);
     note_face_labels(xbox);
@@ -646,6 +652,45 @@ static void test_conflict_helpers() {
     for (int p = 1; p < kPadCount; p++) CHECK(*pad_short_label(p));
 }
 
+static void test_binding_capture_faces() {
+    for (int face : {kPadA, kPadB, kPadX, kPadY}) {
+        overlay::BindingCapture capture;
+        float values[kPadCount] = {};
+        values[kPadB] = 1;
+        CHECK(capture.poll(values) == -1);  // the confirm that opened capture
+        values[kPadB] = 0;
+        CHECK(capture.poll(values) == -1);
+        values[face] = 1;
+        CHECK(capture.poll(values) == face);
+        Mapping m = Mapping::defaults();
+        for (int action = kA; action <= kY; ++action) {
+            set_pad_binding(m, action, face);
+            CHECK(controller_state(m, values).buttons & action_bit(action));
+        }
+        capture.reset();
+        CHECK(capture.poll(values) == -1);
+    }
+}
+
+static void test_android_odin_mapping() {
+    const std::string old = "03000000,name,a:b0,b:b1,back:b4,start:b6,leftx:a0,lefty:a1,face:abxy,";
+    CHECK(android_controller::mapping(0x045e, 0x111, old) == old);
+    CHECK(android_controller::mapping(0x2020, 0x112, old) == old);
+    const auto fixed = android_controller::mapping(0x2020, 0x111, old);
+    CHECK(fixed.find("a:b1,b:b0,x:b3,y:b2,face:bayx,") != std::string::npos);
+    CHECK(fixed.find("back:b4,start:b6,leftx:a0,lefty:a1,") != std::string::npos);
+    CHECK(fixed.find("a:b0,") == std::string::npos);
+    CHECK(android_controller::mapping(0x2020, 0x111, fixed) == fixed);
+    Mapping repaired;
+    std::string warning;
+    CHECK(from_json(R"({"controller":{"A":null,"B":null,"X":null,"Y":null,"Home":null}})", repaired, &warning));
+    for (int a = kA; a <= kY; ++a) {
+        CHECK(repaired.pad[a] == Mapping::defaults().pad[a]);
+        CHECK(warning.find(std::string("null face binding ") + action_id(a) + " repaired") != std::string::npos);
+    }
+    CHECK(repaired.pad[kHome] == kPadNone);
+}
+
 static void test_settings_shortcut() {
     using S = overlay::SettingsShortcut;
     S s;
@@ -672,6 +717,8 @@ static void test_settings_shortcut() {
 
 int main() {
     test_settings_shortcut();
+    test_android_odin_mapping();
+    test_binding_capture_faces();
     test_conflict_helpers();
     test_defaults();
     test_face_layout();
