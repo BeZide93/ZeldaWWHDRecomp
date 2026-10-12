@@ -30,17 +30,23 @@ guide the design; any future reuse requires a separate license review.
 ## Player workflow
 
 Open the in-game settings overlay (F1, Fn+F1 on many Macs, Cmd+, or Settings in
-the menu) and select **Mods**. It has two areas (L / R on a controller move between
-them, then on to the neighbouring settings tabs):
+the menu) and select **Mods**. It has three sub-tabs (L / R on a controller move between
+them, then on to the neighbouring settings tabs). The sub-tab last chosen stays selected until
+the game is closed. Both mod lists use the same rows: an on/off switch, the name (it opens the
+mod's page), the *Experimental* tag where it applies and a one-word status (*On*, *Off*,
+*Needs setup*, *Installing… 45%* while it is downloaded, *Setting up… 45%* after that,
+*Restart to apply*, *Update available*, *Error*).
 
-- **Mods**: one list of every mod, each with an on/off switch and a one-word
-  status (*On*, *Off*, *Needs setup*, *Installing… 45%* while it is downloaded,
-  *Setting up… 45%* after that, *Restart to apply*, *Update available*, *Error*). First the mods you can use now: the built-in ones
-  (direct camera, mouse camera, first-person shortcut, wall climbing, run/swim
-  speed, faster ladders, faster sidling, sailing speed, automatic wind, quick
-  doors, fast forward and fast scene changes; all off by default) and
-  the downloaded ones. Below, **Available to download**: the online mod list
-  (see Catalogue). Selecting a mod's name opens its page.
+- **Built-in** ("Included with the game. Switch on or off any time."): the mods compiled
+  into the game: direct camera, mouse camera, first-person shortcut, wall climbing,
+  run/swim speed, faster ladders, faster sidling, sailing speed, automatic wind, quick
+  doors, fast forward and fast scene changes; all off by default.
+- **Community** ("Made by players. Downloaded from the mod catalogue."): every installed
+  package (from the catalogue, from a file or folder, graphics packs and content packs),
+  then **Available to download**: the catalogue's mods that aren't downloaded yet (see
+  Catalogue). Code mods such as Call of the Sky and the GameCube sea minimap are catalogue
+  mods and are listed here. With nothing installed and the list not loaded yet, it shows
+  "Loading the mod list…" (or why it couldn't be loaded, with Retry).
 - **More**: what a player rarely needs, in collapsed sections: Switch all mods
   off, Profiles, Install from a file or folder, GameCube game for mods, Code-mod
   support, Save backups, Mod list (its source and the automatic check), Cheats
@@ -371,7 +377,9 @@ real tab offscreen with mouse clicks on synthetic packages: switch on, the one
 review (GameCube game picker, choices), progress, failure and Try again, Cancel,
 the code-mod rebuild with its restart and resume, a catalogue download, and experimental mods (installed
 from the catalogue, switched on, updated while on: exactly one save backup before it is switched on;
-a backup that can't be made stops with its reason). Its `ids` scenario opens every view of the tab (the list, More with every section
+a backup that can't be made stops with its reason). Its `tabs` scenario checks that every built-in mod is listed under Built-in only, and the installed and
+the downloadable catalogue mod under Community only, and that the chosen sub-tab is kept. Its `ids`
+scenario opens every view of the tab (both lists, More with every section
 open, every mod page, the reviews and the progress states), hovers it all over and fails when
 Dear ImGui reports two items with one ID. Release builds turn Dear ImGui's red "conflicting ID" box
 off (`io.ConfigDebugHighlightIdConflicts`); debug builds and the tests keep it.

@@ -55,8 +55,12 @@ struct Host {
 };
 
 inline constexpr const char* kDefaultCatalogue = "https://raw.githubusercontent.com/ZeldaWWHDRecomp/ZeldaWWHDMods/main/index.json";
-enum Area { kMods, kMore, kAreas };
-inline const char* const kAreaNames[kAreas] = {"Mods", "More"};
+// Built-in: the mods compiled into the game; Community: mods made by players (the catalogue, installed or
+// not, and packages installed from a file); More: everything else.
+enum Area { kBuiltin, kCommunity, kMore, kAreas };
+inline const char* const kAreaNames[kAreas] = {"Built-in", "Community", "More"};
+inline const char* const kAreaCaptions[kAreas] = {"Included with the game. Switch on or off any time.",
+                                                  "Made by players. Downloaded from the mod catalogue.", ""};
 
 // ---------------------------------------------------------------- state
 struct Review {
@@ -91,7 +95,7 @@ struct Job {
 };
 
 struct State {
-    int area = kMods;
+    int area = kBuiltin;     // remembered for the session (State lives as long as the game runs)
     int select_area = -1;        // switch the area tab next frame (L / R, a finished install)
     std::string page;            // the mod whose Settings page is open ("" the list)
     bool page_builtin = false;
@@ -467,7 +471,7 @@ inline void begin(const Host& h, double now) {
     j.installed_id.clear();
     j.flow.accept(now);
     if (s.review.from_catalogue && !s.review.plan.switch_off) start_download(h);  // else after switching it off
-    go_area(kMods);
+    go_area(kCommunity);
     s.page = s.review.id;
     s.page_builtin = false;
     s.page_scroll = true;
@@ -515,7 +519,7 @@ inline void adopt_resumed_run(double now) {
         j.accepted.id = v.id;
         j.accepted.name = v.name;
         state().page = v.id;
-        go_area(kMods);
+        go_area(kCommunity);
     }
 }
 // An update of a mod that is off: prepare what its setup needs (trust from the review, choices, tools, the
@@ -956,19 +960,36 @@ inline std::string unavailable_reason(const Host& h, const mods::catalogue::Entr
     try { compatible = e.compatible(h.port_version, h.build_name, mods::packages::platform_key()); } catch (...) {}
     return compatible ? "" : "Not available for this version of the game.";
 }
-// The list: every mod you can use now (built in and downloaded), then the ones you can download. Every
-// row has the same switch: switching on a mod that isn't downloaded yet downloads, sets up and switches
-// it on (after the review, when there is anything to decide or know).
-inline void mods_list(Host& h) {
+// Built-in: the mods compiled into the game, each with its switch.
+inline void builtin_list(Host&) {
+    muted(kAreaCaptions[kBuiltin]);
+    if (!begin_list("builtin")) return;
+    for (const auto& e : mods::manager::entries()) {
+        Facts fx;
+        fx.builtin = true;
+        fx.enabled = e.enabled();
+        Row r = row(fx);
+        std::string id = e.id;
+        row_line(id, e.name, r, e.restart_required ? "applies after a restart" : "", false, true,
+                 [id](bool on) { hostui::post([id, on] { mods::manager::set_enabled(id, on); }); });
+    }
+    ImGui::EndTable();
+}
+// Community: the installed packages (catalogue, file, graphics packs), then the catalogue's mods that aren't
+// downloaded yet. Every row has the same switch: switching on a mod that isn't downloaded yet downloads,
+// sets up and switches it on (after the review, when there is anything to decide or know).
+inline void community_list(Host& h) {
     using namespace mods::packages;
     auto& s = state();
+    muted(kAreaCaptions[kCommunity]);
     auto list = mods::packages::list();
     auto snap = s.loader.snapshot();
     static const char* test_install = h.test ? getenv("WWHD_TEST_CATALOGUE_INSTALL") : nullptr;
-    if (begin_list("mods")) {
+    auto& f = s.job.flow;
+    const bool downloading_row = f.active() && !find_view(list, f.id);
+    if ((downloading_row || !list.empty()) && begin_list("mods")) {
         // a download in progress that is not a package yet
-        auto& f = s.job.flow;
-        if (f.active() && !find_view(list, f.id)) {
+        if (downloading_row) {
             Facts fx;
             fx.working = f.phase == Phase::Working;
             fx.downloading = fx.working && flow_downloading();
@@ -986,15 +1007,6 @@ inline void mods_list(Host& h) {
             Row r = row(facts(v, update));
             auto view = v;
             row_line(v.id, v.name, r, "", v.experimental, false, [view](bool on) { switch_package(view, on); });
-        }
-        for (const auto& e : mods::manager::entries()) {
-            Facts fx;
-            fx.builtin = true;
-            fx.enabled = e.enabled();
-            Row r = row(fx);
-            std::string id = e.id;
-            row_line(id, e.name, r, e.restart_required ? "applies after a restart" : "", false, true,
-                     [id](bool on) { hostui::post([id, on] { mods::manager::set_enabled(id, on); }); });
         }
         ImGui::EndTable();
     }
@@ -1272,7 +1284,7 @@ inline void installing_page(Host& h) {
 inline void available_page(Host& h, const mods::catalogue::Entry& e, const fs::path& fixtures);
 inline void mod_page(Host& h) {
     auto& s = state();
-    if (button((std::string(glyph(0x2039, "\xE2\x80\xB9", "<")) + " Mods##back").c_str()) || (h.back && !ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel))) {
+    if (button((std::string(glyph(0x2039, "\xE2\x80\xB9", "<")) + " " + kAreaNames[s.area] + "##back").c_str()) || (h.back && !ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel))) {
         if (h.back) h.b_used = true;
         s.page.clear();
         return;
@@ -1337,7 +1349,7 @@ inline void install_picked(Host& h) {
             s.error.clear();
             for (const auto& v : list()) if (v.id == id) {
                 s.message = v.name + " was installed.";
-                go_area(kMods);
+                go_area(kCommunity);
                 open_page(id, false);
                 if (v.compatible) {  // straight on to switching it on: the review asks what it needs
                     if (needs_review(v)) open_review_for_installed(v);
@@ -1483,7 +1495,12 @@ inline void apply_test_view(Host& h) {
     if (!v) return;
     std::string view = v;
     if (view == "more") go_area(kMore);
-    else if (view.starts_with("page:")) { go_area(kMods); open_page(view.substr(5), mods::manager::find(view.substr(5)) != nullptr); }
+    else if (view == "community") go_area(kCommunity);
+    else if (view.starts_with("page:")) {
+        bool builtin = mods::manager::find(view.substr(5)) != nullptr;
+        go_area(builtin ? kBuiltin : kCommunity);
+        open_page(view.substr(5), builtin);
+    }
 }
 inline void test_switches(Host& h) {
     if (!h.test) return;
@@ -1572,7 +1589,8 @@ inline void draw(Host& h, const std::string& restart_summary) {
     ImGui::BeginChild("mods_area", ImVec2(0, 0), ImGuiChildFlags_NavFlattened);
     ImGui::PushTextWrapPos(0);
     switch (s.area) {
-    case kMods: if (s.page.empty()) mods_list(h); else mod_page(h); break;
+    case kBuiltin: if (s.page.empty()) builtin_list(h); else mod_page(h); break;
+    case kCommunity: if (s.page.empty()) community_list(h); else mod_page(h); break;
     default: more(h); break;
     }
     ImGui::PopTextWrapPos();

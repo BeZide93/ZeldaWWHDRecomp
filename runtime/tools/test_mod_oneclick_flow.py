@@ -54,14 +54,14 @@ def run(root, ident, mode):
                     setup=manifest.get('setup', []),
                     experimental=experimental,
                     downloads=dict(all=dict(url=name, size=archive.stat().st_size, sha256=hashlib.sha256(archive.read_bytes()).hexdigest())))
-    if mode.startswith('update') or mode in ('ids', 'exp-update-on'):
+    if mode.startswith('update') or mode in ('ids', 'tabs', 'exp-update-on'):
         # the installed version; the catalogue offers 1.1.0
         (root / 'installed-index.json').write_text(json.dumps(dict(format_version=1, mods=[package('1.0.0', 'package-1.0.0.zip')])))
         entry = package('1.1.0', 'package.zip')
     else:
         entry = package('1.0.0', 'package.zip')
     listed = [entry]
-    if mode == 'ids':  # one more catalogue mod that is not downloaded (its page and review are checked too)
+    if mode in ('ids', 'tabs'):  # one more catalogue mod that is not downloaded (its page and review are checked too)
         listed.append(dict(entry, id='available-fixture', name='Available fixture'))
     (root / 'index.json').write_text(json.dumps(dict(format_version=1, mods=listed)))
     header = bytearray(32); header[:6] = b'GZLE01'; header[28:32] = b'\xc2\x33\x9f\x3d'
@@ -107,7 +107,7 @@ path=pathlib.Path(a.code_mods_status);temporary=path.with_suffix('.tmp');tempora
     print(result.stdout, end='')
     if result.returncode:
         raise RuntimeError(f'{ident}/{mode} failed: {result.returncode}')
-    if mode == 'ids':  # the ID check reports by its exit code
+    if mode in ('ids', 'tabs'):  # these checks report by their exit code
         return
     if mode == 'missing':
         assert not (root / 'manager/profiles.json').exists(), 'Blocked setup must not record trust or a run'
@@ -142,7 +142,7 @@ scenarios = [('gc-sea-minimap', 'normal'), ('heart-ticker', 'normal'), ('gc-sea-
              ('gc-sea-minimap', 'catalogue'), ('heart-ticker', 'catalogue'), ('gc-sea-minimap', 'cancel-rebuild'),
              ('gc-sea-minimap', 'update-off'), ('quick-preset', 'update-on'), ('gc-sea-minimap', 'ids'),
              ('gc-sea-minimap', 'exp-catalogue'), ('heart-ticker', 'exp-switch-on'), ('quick-preset', 'exp-update-on'),
-             ('gc-sea-minimap', 'exp-backup-fails')]
+             ('gc-sea-minimap', 'exp-backup-fails'), ('gc-sea-minimap', 'tabs')]
 if retained:
     for ident, mode in scenarios:
         run(retained / (ident + '-' + mode), ident, mode)

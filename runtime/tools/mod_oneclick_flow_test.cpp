@@ -54,7 +54,8 @@ int main(int argc,char** argv) {
     // exp-*: an experimental mod (the review warns; switching it on backs up the saves once, first)
     bool experimental=mode.starts_with("exp-"),backup_fails=mode=="exp-backup-fails";
     bool missing=mode=="missing",broken=mode=="broken",catalogue=mode=="catalogue"||mode=="exp-catalogue"||backup_fails;
-    bool update_off=mode=="update-off",update_on=mode=="update-on"||mode=="exp-update-on",ids=mode=="ids",update=update_off||update_on||ids;
+    bool tabs=mode=="tabs";  // each mod is listed in its own sub-tab
+    bool update_off=mode=="update-off",update_on=mode=="update-on"||mode=="exp-update-on",ids=mode=="ids"||tabs,update=update_off||update_on||ids;
     if(experimental) {
         // the saves the backup copies; an earlier enable (exp-update-on) backs up elsewhere, so only the
         // backups of this flow are counted in <root>/save-backups
@@ -151,6 +152,37 @@ int main(int argc,char** argv) {
     };
     // ids: every view of the tab, with every section open, hovered all over: Dear ImGui reports two items with
     // one ID (it would show its red "conflicting ID" box in a debug build) when the hovered ID was submitted twice
+    if(tabs) {
+        auto& s=ui::state();
+        // which mods a sub-tab lists: the rows it drew ("open_<id>") in one frame
+        auto listed=[&](int area) {
+            s.page.clear();ui::go_area(area);
+            std::set<std::string> ids_seen;
+            for(int i=0;i<3;i++) {
+                s.rects.clear();
+                ImGui_ImplSDLRenderer3_NewFrame();ImGui::NewFrame();
+                ImGui::SetNextWindowPos(ImVec2(0,0),ImGuiCond_Always);ImGui::SetNextWindowSize(ImVec2(float(width),float(height)));
+                ImGui::Begin("Settings");draw_tab(host);ImGui::End();ImGui::Render();
+            }
+            for(const auto& [key,rect]:s.rects)if(key.starts_with("open_"))ids_seen.insert(key.substr(5));
+            assert(s.area==area);
+            return ids_seen;
+        };
+        for(int i=0;i<400&&!s.loader.snapshot().have_list;i++){listed(ui::kCommunity);std::this_thread::sleep_for(std::chrono::milliseconds(5));}
+        auto builtin=listed(ui::kBuiltin),community=listed(ui::kCommunity);
+        std::set<std::string> expected_builtin;
+        for(const auto& e:mods::manager::entries())expected_builtin.insert(e.id);
+        assert(builtin==expected_builtin);                                  // every built-in mod, nothing else
+        assert(community==(std::set<std::string>{id,"available-fixture"}));  // the installed one and the downloadable one
+        for(const auto& b:builtin)fprintf(stderr,"[tabs] Built-in: %s\n",b.c_str());
+        for(const auto& c:community)fprintf(stderr,"[tabs] Community: %s\n",c.c_str());
+        // the sub-tab is remembered for the session: More stays selected across frames and menu openings
+        listed(ui::kMore);
+        for(int i=0;i<3;i++){ImGui_ImplSDLRenderer3_NewFrame();ImGui::NewFrame();ImGui::Begin("Settings");draw_tab(host);ImGui::End();ImGui::Render();}
+        assert(s.area==ui::kMore);
+        ImGui_ImplSDLRenderer3_Shutdown();ImGui::DestroyContext();SDL_DestroyRenderer(renderer);SDL_DestroySurface(surface);
+        return 0;
+    }
     if(ids) {
         assert(io.ConfigDebugHighlightIdConflicts);
         host.expand_all=true;
@@ -183,11 +215,12 @@ int main(int argc,char** argv) {
             fprintf(stderr,"[ids] %s: %d conflicts (swept to y=%.0f)\n",view.c_str(),conflicts-before,bottom);
         };
         auto& s=ui::state();
-        auto page=[&](const std::string& pid,bool builtin){return [&s,pid,builtin]{s.review={};s.job.flow={};ui::go_area(ui::kMods);s.page=pid;s.page_builtin=builtin;};};
+        auto page=[&](const std::string& pid,bool builtin){return [&s,pid,builtin]{s.review={};s.job.flow={};ui::go_area(builtin?ui::kBuiltin:ui::kCommunity);s.page=pid;s.page_builtin=builtin;};};
         // wait for the catalogue list (local fixture) so the update and the downloadable mod show
         for(int i=0;i<400&&!s.loader.snapshot().have_list;i++){frame_once(-100,-100);std::this_thread::sleep_for(std::chrono::milliseconds(5));}
         assert(s.loader.snapshot().have_list);
-        sweep("list",page("",false));
+        sweep("built-in list",page("",true));
+        sweep("community list",page("",false));
         sweep("more",[&]{s.page.clear();ui::go_area(ui::kMore);});
         for(const auto& e:mods::manager::entries())sweep(std::string("page ")+e.id,page(e.id,true));
         sweep("page "+id,page(id,false));
@@ -210,6 +243,7 @@ int main(int argc,char** argv) {
         fprintf(stderr,"[ids] %d conflicts in all views\n",conflicts);
         return conflicts?1:0;
     }
+    ui::go_area(ui::kCommunity);  // packages and catalogue mods are listed under Community
     Clicker clicker;
     const std::string switch_label="##on_"+id;
     auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(25);
@@ -345,7 +379,7 @@ int main(int argc,char** argv) {
             }
         };
         draw_frames(6,"Later##flow");capture("page-on");
-        draw_frames(6,ui::state().rects.count("< Mods##back")?"< Mods##back":"\xE2\x80\xB9 Mods##back");capture("list-on");
+        draw_frames(6,ui::state().rects.count("< Community##back")?"< Community##back":"\xE2\x80\xB9 Community##back");capture("list-on");
         ui::shoulder(+1);draw_frames(4,"");capture("more");
     }
     std::cout<<"FLOW "<<id<<" "<<mode<<" enabled="<<view(id).enabled<<" confirmations="<<confirmations<<" resumed="<<resumed<<" failed="<<saw_failure<<"\n";
