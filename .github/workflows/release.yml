@@ -382,7 +382,10 @@ jobs:
         # one file, no unzipping: drops portable.txt, so setup keeps everything in the per-user folders.
         # The trailing slash in the glob picks the packaged folder, not its .zip.
         run: |
+          # the runtime is pinned (appimage.py RUNTIME, SHA-256 checked; a mismatch fails here)
           python3 tools/release/appimage.py dist/WindWakerHD-*/ --out dist
+          PIN=$(cd tools/release && python3 -c 'import appimage; print(appimage.RUNTIME_COMMIT)')
+          dist/*.AppImage --appimage-version 2>&1 | grep -F "type2-runtime/commit/$PIN"
           (cd "$RUNNER_TEMP" && "$GITHUB_WORKSPACE"/dist/*.AppImage --appimage-extract)
           python3 tools/release/guard.py "$RUNNER_TEMP"/squashfs-root
           # the real mount is read-only: make the extracted tree that too, so a write into <image>/data

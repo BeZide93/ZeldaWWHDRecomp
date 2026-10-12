@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Pack an already-packaged Linux release folder as one AppImage (issue #55).
 
-usage: appimage.py PKG_DIR --out OUT_DIR [--appimagetool PATH]
+usage: appimage.py PKG_DIR --out OUT_DIR [--appimagetool PATH] [--runtime-file PATH]
+       appimage.py --extract-runtime APPIMAGE OUT_FILE
 
 PKG_DIR is the WindWakerHD-VERSION-linux-ARCH folder tools/release/package.py produced (with
 wind-waker-hd, tools/, sdk/, portable.txt, ...). An AppImage mount is read-only, so the result
@@ -18,6 +19,7 @@ import hashlib
 import json
 import os
 import platform
+import struct
 import shutil
 import subprocess
 import sys
@@ -38,6 +40,32 @@ APPIMAGETOOL = {
                 "f0837e7448a0c1e4e650a93bb3e85802546e60654ef287576f46c71c126a9158"),
 }
 APPIMAGETOOL_URL = "https://github.com/AppImage/appimagetool/releases/download/%s/" % APPIMAGETOOL_VERSION
+
+# The AppImage runtime (the ELF in front of the squashfs: mounts the image, sets $APPIMAGE, the
+# portable .home/.config folders, --appimage-extract-and-run), pinned to exactly the one v0.2.13
+# shipped: type2-runtime commit 8f39b89 (its "continuous" build of 2026-09-28; MIT, links libfuse3,
+# squashfuse, zstd, zlib, mimalloc statically). Without --runtime-file appimagetool would fetch
+# whatever "continuous" is today. The SHA-256 decides, not the URL: any download that does not match
+# fails the build.
+#
+# Updating the pin, deliberately and together with a release:
+#   1. take the new runtime-<arch> files (a type2-runtime build: release asset or your own build);
+#   2. check them (`strings runtime-x86_64 | grep commit/` names the commit; upstream signs them, the
+#      .sig files next to the assets, key: signing-pubkey.asc in the type2-runtime repository);
+#   3. put their SHA-256 below, RUNTIME_COMMIT to the commit, and host them where RUNTIME_URLS looks;
+#   4. build, then check `<AppImage> --appimage-version` on the result and run the release workflow's
+#      AppImage step (portable home, extract-and-run).
+# To get back the exact runtime of a released AppImage: appimage.py --extract-runtime FILE OUT
+# (the ELF before the squashfs, with the per-image MD5 digest that appimagetool writes zeroed).
+RUNTIME_COMMIT = "8f39b89"
+RUNTIME = {
+    "x86_64": ("runtime-x86_64", "156f4bdbde9c52d01814600013e0a273f0118dc2de98975f3c8c63427ec79074"),
+    "aarch64": ("runtime-aarch64", "b4ff0030242d0c3bb12ce40541828303cf167493f4793456f0436edd6255c39d"),
+}
+# tried in order; "continuous" serves the pinned bytes only until upstream publishes a newer build
+RUNTIME_URLS = [
+    "https://github.com/AppImage/type2-runtime/releases/download/continuous/",
+]
 
 APPRUN = """#!/bin/sh
 # Wind Waker HD (AppImage): start the release's launcher (next to tools/ and sdk/).
@@ -115,6 +143,73 @@ def ensure_appimagetool(given, arch):
     return dst
 
 
+def ensure_runtime(given, arch, urls=None):
+    """The pinned AppImage runtime for `arch` (RUNTIME): the file given, else a download. A file
+    whose SHA-256 is not the pinned one is refused (the build fails). Returns its path."""
+    if arch not in RUNTIME:
+        sys.exit("no pinned AppImage runtime for %s" % arch)
+    name, want = RUNTIME[arch]
+    if given:
+        if not os.path.isfile(given):
+            sys.exit("AppImage runtime not found: " + given)
+        got = file_sha256(given)
+        if got != want:
+            sys.exit("AppImage runtime %s has SHA-256 %s, the pinned %s (type2-runtime %s) has %s; "
+                     "see RUNTIME in tools/release/appimage.py to update the pin deliberately"
+                     % (given, got, name, RUNTIME_COMMIT, want))
+        return given
+    dst = os.path.join(tempfile.gettempdir(), "wwhd-appimage-%s-%s" % (name, RUNTIME_COMMIT))
+    if os.path.isfile(dst) and file_sha256(dst) == want:
+        return dst
+    tmp = dst + ".part"
+    tried = []
+    for base in (RUNTIME_URLS if urls is None else urls):
+        url = base + name
+        print("downloading the AppImage runtime (%s, type2-runtime %s) from %s" % (arch, RUNTIME_COMMIT, url))
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "wwhd-package"})
+            with urllib.request.urlopen(req, timeout=120) as r, open(tmp, "wb") as f:
+                shutil.copyfileobj(r, f)
+        except OSError as e:
+            tried.append("%s: %s" % (url, e))
+            continue
+        got = file_sha256(tmp)
+        if got == want:
+            os.replace(tmp, dst)
+            return dst
+        os.remove(tmp)
+        tried.append("%s: SHA-256 %s, not the pinned %s" % (url, got, want))
+    sys.exit("no source has the pinned AppImage runtime %s (type2-runtime %s):\n  %s\n"
+             "Pass --runtime-file, or see RUNTIME in tools/release/appimage.py"
+             % (name, RUNTIME_COMMIT, "\n  ".join(tried)))
+
+
+def extract_runtime(appimage, out):
+    """The runtime part of a built AppImage (the ELF before the squashfs) as appimagetool got it:
+    the .digest_md5 section, which appimagetool fills for each image, zeroed again."""
+    with open(appimage, "rb") as f:
+        head = f.read(1 << 24)
+    if head[:4] != b"\x7fELF" or head[4] != 2:
+        sys.exit("%s does not start with a 64-bit ELF runtime" % appimage)
+    little = head[5] == 1
+    e = "<" if little else ">"
+    shoff, = struct.unpack_from(e + "Q", head, 0x28)
+    shentsize, shnum, shstrndx = struct.unpack_from(e + "HHH", head, 0x3A)
+    end = shoff + shentsize * shnum  # the runtime's own rule for where the squashfs starts
+    if head[end:end + 4] not in (b"hsqs", b"sqsh"):
+        sys.exit("%s: no squashfs after the runtime (offset %d)" % (appimage, end))
+    runtime = bytearray(head[:end])
+    headers = [struct.unpack_from(e + "IIQQQQIIQQ", head, shoff + i * shentsize) for i in range(shnum)]
+    names = headers[shstrndx][4]
+    for h in headers:
+        start = names + h[0]
+        if head[start:head.index(b"\0", start)] == b".digest_md5":
+            runtime[h[4]:h[4] + h[5]] = bytes(h[5])
+    with open(out, "wb") as f:
+        f.write(runtime)
+    print("wrote %s (%d bytes, SHA-256 %s)" % (out, len(runtime), hashlib.sha256(runtime).hexdigest()))
+
+
 def package_version(pkg):
     try:
         with open(os.path.join(pkg, "sdk", "manifest.json")) as f:
@@ -144,10 +239,16 @@ def make_appdir(pkg, appdir):
 
 
 def main():
+    if sys.argv[1:2] == ["--extract-runtime"]:
+        if len(sys.argv) != 4:
+            sys.exit("usage: appimage.py --extract-runtime APPIMAGE OUT_FILE")
+        return extract_runtime(sys.argv[2], sys.argv[3])
     ap = argparse.ArgumentParser()
     ap.add_argument("pkg", help="the WindWakerHD-VERSION-linux-ARCH folder package.py produced")
     ap.add_argument("--out", required=True, help="where to write the .AppImage")
     ap.add_argument("--appimagetool", help="appimagetool to use (default: one on PATH, else the pinned download)")
+    ap.add_argument("--runtime-file", help="the pinned AppImage runtime (RUNTIME; default: download it); "
+                    "a file with another SHA-256 is refused")
     a = ap.parse_args()
 
     pkg = os.path.normpath(os.path.abspath(a.pkg))
@@ -166,6 +267,7 @@ def main():
     name = os.path.basename(pkg)
     target = os.path.join(out, name + ".AppImage")
     tool = ensure_appimagetool(a.appimagetool, arch)
+    runtime = ensure_runtime(a.runtime_file, arch)
 
     work = tempfile.mkdtemp(prefix="wwhd-appimage-")
     try:
@@ -176,7 +278,7 @@ def main():
         version = package_version(pkg)
         if version:
             env["VERSION"] = version
-        subprocess.run([tool, appdir, target], env=env, check=True)
+        subprocess.run([tool, "--runtime-file", runtime, appdir, target], env=env, check=True)
         if not os.path.isfile(target):
             sys.exit("appimagetool did not write " + target)
         os.chmod(target, 0o755)
