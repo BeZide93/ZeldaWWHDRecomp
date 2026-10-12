@@ -18,6 +18,7 @@
 //   WWHD_FULLSCREEN=0|1                  the TV window starts in full screen (1) or windowed (0), instead of as it
 //                                        was left (that session's full screen is not saved; 1 takes over the screen!)
 #include "display_modes.h"
+#include "../platform/touch_buttons.h"
 
 #include <algorithm>
 #include <chrono>
@@ -304,6 +305,16 @@ bool main_picture(float* x, float* y, float* w, float* h) {
 }
 
 // ---------------------------------------------------------------- view button (touch screens)
+std::atomic<int> g_touch_buttons{touch_buttons::Automatic};
+std::atomic<bool> g_touch_controller{false}, g_touch_controls{true};
+static std::atomic<int64_t> g_touch_reveal_until{0};
+static int64_t touch_time_ms() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+bool touch_buttons_visible() {
+    return touch_buttons::visible(g_touch_buttons, g_touch_controller, touch_time_ms() < g_touch_reveal_until);
+}
+void reveal_touch_buttons() { g_touch_reveal_until = touch_time_ms() + 5000; }
 bool view_button_enabled() {
     static const bool on = [] {
         const char* e = getenv("WWHD_VIEW_BUTTON");
@@ -313,7 +324,7 @@ bool view_button_enabled() {
         return e && atoi(e) != 0;
 #endif
     }();
-    return on;
+    return on && touch_buttons_visible();
 }
 // a square of 9% of the window's shorter side in the top left corner (rhemfur's Android layout)
 static Box view_button(float dw, float dh) {
@@ -321,6 +332,7 @@ static Box view_button(float dw, float dh) {
     return {m, m, s, s};
 }
 bool view_button_hit(float nx, float ny) {
+    if (!view_button_enabled()) return false;
     std::lock_guard<std::mutex> lk(g_layout_mu);
     const float x = nx * g_tv_dw, y = ny * g_tv_dh;
     return g_button.w > 0 && x >= g_button.x && y >= g_button.y && x < g_button.x + g_button.w && y < g_button.y + g_button.h;

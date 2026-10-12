@@ -1,3 +1,4 @@
+#include "gfx/display_modes.h"
 #include <mutex>
 // In-game settings overlay: the Dear ImGui user interface (see overlay.h). The renderers draw the
 // resulting ImDrawData (gfx/overlay_metal.mm, gfx/vulkan/overlay.cpp); the hosts feed input and apply
@@ -838,6 +839,15 @@ void tab_display() {
 #ifndef __ANDROID__  // always full screen there
     help(!strcmp(hostui::name(), "AppKit") ? "The TV window (Cmd+F); remembered for the next start"
                                            : "The TV window (F11 or Alt+Enter); remembered for the next start");
+#endif
+#ifdef __ANDROID__
+    heading("Touch controls");
+    int touchMode = gfx::g_touch_buttons;
+    if (ImGui::Combo("Touch buttons", &touchMode, "Automatic\0Always show\0Hide\0"))
+        hostui::post([touchMode] { gfx::g_touch_buttons = touchMode; hostui::set("touchButtons", std::to_string(touchMode)); });
+    help("Automatic hides the floating buttons while a controller is connected. Tap near the top-left corner to reveal them for five seconds.");
+    if (check("On-screen controls", gfx::g_touch_controls, &v))
+        hostui::post([v] { gfx::g_touch_controls = v; hostui::set("touchControls", v ? "1" : "0"); });
 #endif
     heading("Picture scaling");
     static const char* const f[] = {"Smooth", "Sharp", "Integer scale (pixel exact)"};

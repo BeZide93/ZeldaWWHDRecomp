@@ -14,6 +14,7 @@
 #include "overlay/settings_shortcut.h"
 #include "overlay/binding_capture.h"
 #include "platform/android_controller.h"
+#include "platform/touch_buttons.h"
 
 using namespace input_map;
 
@@ -716,6 +717,12 @@ static void test_settings_shortcut() {
 }
 
 int main() {
+    for (int mode : {touch_buttons::Automatic, touch_buttons::AlwaysShow, touch_buttons::Hide})
+        for (bool controller : {false, true}) {
+            CHECK(touch_buttons::visible(mode, controller, false) ==
+                  (mode == touch_buttons::AlwaysShow || (mode == touch_buttons::Automatic && !controller)));
+            CHECK(touch_buttons::visible(mode, controller, true));
+        }
     test_settings_shortcut();
     test_android_odin_mapping();
     test_binding_capture_faces();

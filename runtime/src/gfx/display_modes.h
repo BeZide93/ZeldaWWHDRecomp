@@ -86,6 +86,10 @@ bool main_picture(float* x, float* y, float* w, float* h);
 // Touch screens (Android; WWHD_VIEW_BUTTON=1 elsewhere for tests): a button in the TV window's top
 // left corner. A tap cycles the views offered there (picture-in-picture, GamePad only, TV only);
 // what a long press does is the host's (Android: 60 fps on / off).
+extern std::atomic<int> g_touch_buttons;
+extern std::atomic<bool> g_touch_controller, g_touch_controls;
+bool touch_buttons_visible();
+void reveal_touch_buttons();
 bool view_button_enabled();
 bool view_button_hit(float nx, float ny);  // a point in the TV window (0..1) on the button
 int next_view();                           // the mode a tap switches to (the host sets and saves it)

@@ -208,6 +208,10 @@ void load_saved_options() {
     }
     auto saved = [&](const char* key, std::initializer_list<const char*> env) { return !env_set(env) && v.count(key); };
     auto num = [&](const char* key) { return atof(v[key].c_str()); };
+#ifdef __ANDROID__
+    if (saved("touchButtons", {})) gfx::g_touch_buttons = std::clamp((int)num("touchButtons"), 0, 2);
+    if (saved("touchControls", {})) gfx::g_touch_controls = num("touchControls") != 0;
+#endif
     if (saved("resScale", {"WWHD_RES_SCALE"})) gfxvk::set_res_scale((float)num("resScale"));
     if (saved("aoMode", {"WWHD_AO_MODE", "WWHD_NO_AO_QUIRK"})) gfxvk::set_ao_mode((int)num("aoMode"));
     if (saved("aoHires", {"WWHD_AO_HIRES"})) gfxvk::set_ao_hires(num("aoHires") != 0);

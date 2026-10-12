@@ -1,3 +1,7 @@
+#ifdef __ANDROID__
+#include "overlay/overlay.h"
+#include "platform/input_sdl.h"
+#endif
 #include "deferred_dispatch.h"
 #include "../../exception_report.h"
 #include "bc_decode.h"
@@ -17,6 +21,7 @@
 #include "runtime.h"
 #include "Cafe/HW/Latte/LatteAddrLib/LatteAddrLib.h"
 #include "input.h"
+#include "input_map.h"
 #include "gfx/display_modes.h"
 #include "platform/dual_display.h"
 #include "overlay/hostui.h"
@@ -690,6 +695,7 @@ int android_display_smoke_test() {
          SDL_GetWindowID(R.tv.window), event.tfinger.x, event.tfinger.y, int(touchHandled),
          int(gfx::g_has_drc_window), int(dual_display::active_swap.load()));
     }
+    if (!touchHandled) input::handle_event(event);
     if (event.type == SDL_EVENT_WINDOW_FOCUS_GAINED || event.type == SDL_EVENT_WINDOW_FOCUS_LOST)
      LOG("[display smoke input] focus type=%u window=%u", unsigned(event.type), event.window.windowID);
     if (event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED &&
@@ -701,10 +707,23 @@ int android_display_smoke_test() {
      R.tv.visible = true;
     if (event.type == SDL_EVENT_WINDOW_MINIMIZED) R.tv.visible = false;
    }
+   hostui::run_posted();
+   input::update();
    const auto commandPath = std::filesystem::path(internal) / "display-smoke-command";
    if (std::ifstream command{commandPath}; command) {
     std::string value;
     command >> value;
+    if (value == "overlay1") overlay::set_open(true);
+    if (value == "overlay0") overlay::set_open(false);
+    if (value == "faceauto" || value == "faceposition") {
+      auto mapping=input_map::current();
+      if(value=="faceauto") input_map::set_face_auto(mapping,true);
+      else input_map::apply_face_layout(mapping,input_map::FaceLayout::kPosition);
+      input_map::set_current(mapping,false);
+    }
+    if (value == "touchauto") { gfx::g_touch_buttons = 0; hostui::set("touchButtons", "0"); }
+    if (value == "touchshow") { gfx::g_touch_buttons = 1; hostui::set("touchButtons", "1"); }
+    if (value == "touchhide") { gfx::g_touch_buttons = 2; hostui::set("touchButtons", "2"); }
     if (value == "swap1") hostui::set_displays_swapped(true);
     if (value == "swap0") hostui::set_displays_swapped(false);
     if (value == "filter0") hostui::set_scale_filter(0);
@@ -769,7 +788,11 @@ int android_display_smoke_test() {
       out << "{\"stage\":\"" << secondaryStageNames[i] << "\",\"ns\":" << R.secondaryStageNs[i].load() << ",\"calls\":" << R.secondaryStageCalls[i].load() << '}';
     }
     out << "]";
-    out << ",\"primary_presented\":" << R.tv.presented.load()
+    out << ",\"pad_family\":" << int(input_map::pad_family())
+        << ",\"settings_open\":" << (overlay::is_open() ? "true" : "false")
+        << ",\"touch_buttons\":" << (gfx::touch_buttons_visible() ? "true" : "false")
+        << ",\"pad_buttons\":" << pad.buttons
+        << ",\"primary_presented\":" << R.tv.presented.load()
         << ",\"primary_surface_losses\":" << R.primarySurfaceLosses.load()
         << ",\"primary_swapchains\":" << R.tv.swapchainGeneration
         << ",\"secondary_presented\":" << R.drc.presented.load()

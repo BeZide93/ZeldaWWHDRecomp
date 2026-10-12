@@ -2,6 +2,7 @@
 #include <jni.h>
 #include "overlay/hostui.h"
 #endif
+#include "gfx/display_modes.h"
 #include "android_controller.h"
 #include "../mods/fast_forward.h"
 #ifdef WWHD_HAS_VULKAN
