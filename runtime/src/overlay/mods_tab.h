@@ -376,10 +376,13 @@ inline bool source_ready(const Review& r) {
         for (const auto& s : r.entry.setup) if (s.type == "game_path" && !s.optional) needed.push_back(s);
         return mods::packages::game_source_warning(needed).empty();
     }
-    for (const auto& v : mods::packages::list())
-        if (v.id == r.id) return v.game_source_warning.empty() &&
-            std::none_of(mods::packages::setup_steps(v.id).begin(), mods::packages::setup_steps(v.id).end(),
-                         [](const auto& s) { return s.step.type == "game_path" && !s.satisfied && !s.step.optional; });
+    for (const auto& v : mods::packages::list()) {
+        if (v.id != r.id) continue;
+        const auto steps = mods::packages::setup_steps(v.id);  // one vector: begin and end must belong together
+        return v.game_source_warning.empty() &&
+               std::none_of(steps.begin(), steps.end(),
+                            [](const auto& s) { return s.step.type == "game_path" && !s.satisfied && !s.step.optional; });
+    }
     return false;
 }
 
