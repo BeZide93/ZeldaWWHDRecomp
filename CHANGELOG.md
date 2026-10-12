@@ -7,6 +7,10 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **No crash when memory for a shader's source runs out** (PR #171, thanks @Pulpparty): the shader translator's text
+  buffer now handles failed allocations (the shader just fails to compile and is retried) instead of writing through
+  a null pointer. Mostly matters on devices with little memory.
+
 - **Android: setup works again on the development build.** Since the decomp version arrived in setup, the app's
   setup stopped right away ("No module named 'decomp_setup'"); the missing file is now packed with it. Also clearer
   game-icon hints: "already on the home screen" for the plain icon too, and wording that fits every launcher
