@@ -27,6 +27,11 @@ public:
 		}
 	}
 
+	// Not copyable: a copy would share (and free twice) the heap buffer, or point at the other
+	// object's fallback byte. Every user passes StringBuf by pointer.
+	StringBuf(const StringBuf&) = delete;
+	StringBuf& operator=(const StringBuf&) = delete;
+
 	~StringBuf()
 	{
 		if (this->allocated)
