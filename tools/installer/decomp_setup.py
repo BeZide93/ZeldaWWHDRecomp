@@ -64,23 +64,32 @@ def offered(manifest, is_mac):
 OS_FILES = re.compile(r"^(\.DS_Store|\._.*|Thumbs\.db|desktop\.ini)$", re.I)  # what file browsers add
 
 
+def digest_entries(entries):
+    """The tree hash of (relative path, SHA-256 of the file's bytes) pairs, the same on every platform:
+    paths with '/' (a Windows '\\' becomes '/'), sorted bytewise (UTF-8), one "SHA-256 PATH\n" line each."""
+    lines = sorted(((rel.replace("\\", "/").lstrip("/"), h) for rel, h in entries), key=lambda e: e[0].encode("utf-8"))
+    return hashlib.sha256("".join("%s %s\n" % (h, rel) for rel, h in lines).encode("utf-8")).hexdigest()
+
+
 def tree_digest(root):
-    """SHA-256 over the relative path and SHA-256 of every file under root (sorted; '/' separators; files a
-    file browser adds, such as Finder's .DS_Store, left out). tools/release/package.py writes it into the
-    manifest for the bundled decompilation."""
+    """SHA-256 over the relative path and SHA-256 of every file under root (digest_entries; files a file
+    browser adds, such as Finder's .DS_Store, left out). The relative paths are made from the folder names
+    os.walk gives below root, never from root itself, so a Windows extended-length root (\\\\?\\...) or
+    either separator gives the same hash. tools/release/package.py writes it into the manifest."""
     entries = []
     for dp, dns, fns in os.walk(root):
         dns.sort()
+        below = dp[len(root):] if dp.startswith(root) else os.path.relpath(dp, root)
+        parts = [x for x in below.replace("\\", "/").split("/") if x and x != "."]
         for fn in fns:
             if OS_FILES.match(fn):
                 continue
-            p = os.path.join(dp, fn)
             h = hashlib.sha256()
-            with open(p, "rb") as f:
+            with open(os.path.join(dp, fn), "rb") as f:
                 for chunk in iter(lambda: f.read(1 << 20), b""):
                     h.update(chunk)
-            entries.append("%s %s\n" % (h.hexdigest(), os.path.relpath(p, root).replace(os.sep, "/")))
-    return hashlib.sha256("".join(sorted(entries, key=lambda e: e[65:])).encode("utf-8")).hexdigest()
+            entries.append(("/".join(parts + [fn]), h.hexdigest()))
+    return digest_entries(entries)
 
 
 def in_source(rel):

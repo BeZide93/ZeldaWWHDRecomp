@@ -1545,9 +1545,36 @@ class DecompOption(unittest.TestCase):
         for rel, text in files.items():
             if setup.decomp_setup.in_source(rel):
                 os.makedirs(os.path.dirname(os.path.join(tree, rel)), exist_ok=True)
-                with open(os.path.join(tree, rel), "w") as f:
-                    f.write(text)
+                with open(os.path.join(tree, rel), "wb") as f:  # the archive's bytes ("w" writes CRLF on Windows)
+                    f.write(text.encode())
         return setup.decomp_setup.tree_digest(tree)
+
+    def test_digest_platform_independent(self):
+        # the same files listed as on Windows (ntpath: '\\', another walk order) or from a \\?\ root hash the same
+        import ntpath
+        import posixpath
+        ds = setup.decomp_setup
+        h = {rel: hashlib.sha256(text.encode()).hexdigest() for rel, text in self.FILES.items()}
+        posix = [(posixpath.join(*rel.split("/")), v) for rel, v in h.items()]
+        windows = [(ntpath.join(*rel.split("/")), v) for rel, v in reversed(list(h.items()))]
+        self.assertIn("\\", windows[0][0])
+        self.assertEqual(ds.digest_entries(windows), ds.digest_entries(posix))
+        # the line format the release's hash was made with: "SHA-256 PATH\n", sorted bytewise by path
+        lines = "".join("%s %s\n" % (h[rel], rel) for rel in sorted(h, key=lambda r: r.encode()))
+        self.assertEqual(ds.digest_entries(posix), hashlib.sha256(lines.encode()).hexdigest())
+        with tempfile.TemporaryDirectory() as d:
+            for rel, text in self.FILES.items():
+                os.makedirs(os.path.dirname(os.path.join(d, "t", rel)), exist_ok=True)
+                with open(os.path.join(d, "t", rel), "wb") as f:
+                    f.write(text.encode())
+            self.assertEqual(ds.tree_digest(os.path.join(d, "t")), ds.digest_entries(posix))
+            self.assertEqual(ds.tree_digest(os.path.join(d, "t") + os.sep), ds.digest_entries(posix))
+            # a root written another way (as longpath() writes one on Windows): only the names below count
+            walk = [(r.replace(os.path.join(d, "t"), "\\\\?\\C:\\x"), dn, fn) for r, dn, fn in os.walk(os.path.join(d, "t"))]
+            real_open = open
+            with mock.patch.object(ds.os, "walk", lambda root: iter(walk)), \
+                    mock.patch("builtins.open", lambda p, m="r": real_open(p.replace("\\\\?\\C:\\x", os.path.join(d, "t")), m)):
+                self.assertEqual(ds.tree_digest("\\\\?\\C:\\x"), ds.digest_entries(posix))
 
     def fetch(self, data, d, source, fail=None):
         """decomp_setup.fetch_source with download() copying `source` (or raising `fail`); returns (root, urls)"""
@@ -1652,8 +1679,8 @@ class DecompOption(unittest.TestCase):
                 os.makedirs(os.path.dirname(os.path.join(d, "t2", rel)) or d, exist_ok=True)
             for rel in ("c", "a/z", "b/x", "a/y"):
                 for t in ("t1", "t2"):
-                    with open(os.path.join(d, t, rel), "w") as f:
-                        f.write(rel)
+                    with open(os.path.join(d, t, rel), "wb") as f:
+                        f.write(rel.encode())
             self.assertEqual(ds.tree_digest(os.path.join(d, "t1")), ds.tree_digest(os.path.join(d, "t2")))
 
     def test_link_line_glue(self):
