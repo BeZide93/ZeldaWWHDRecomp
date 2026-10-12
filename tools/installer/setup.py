@@ -2051,6 +2051,18 @@ def import_save(kind, path, data_dir, replace=False):
     return msg
 
 
+def legacy_appimage_data_notice(image=None):
+    """v0.2.13's AppImage kept a portable setup in "<image>.data"; later ones use the runtime's standard
+    "<image>.home" and never read ".data" (issue #55). The hint when one is still there, else "".
+    Same text as AppRun and runtime/src/platform/appimage_notice.h."""
+    image = os.environ.get("APPIMAGE") if image is None else image
+    if not image or not os.path.isdir(image + ".data"):
+        return ""
+    name = os.path.basename(image)
+    return ("Found %s.data: this folder is no longer used. Move its contents to %s.home (see the changelog) "
+            "to keep your saves and settings." % (name, name))
+
+
 def legacy_config_dirs():
     """Settings folders the game used before portable releases (and still uses in source builds)."""
     if IS_MAC:
@@ -2703,6 +2715,11 @@ def run(args, ui):
         return 0
     version, data_dir, game_dir = ctx.version, ctx.data_dir, ctx.game_dir
     say("The Legend of Zelda: The Wind Waker HD - native PC port, setup %s" % version)
+    hint = "" if GUI else legacy_appimage_data_notice()  # the setup window shows it itself
+    if hint:
+        say("")
+        say(hint)
+        say("")
     say("This release contains no game files. Setup builds the game from your own dump of the game.")
     say("Install folder: %s" % data_dir)
     state = ctx.state()

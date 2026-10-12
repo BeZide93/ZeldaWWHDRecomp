@@ -52,6 +52,7 @@
 #include <CoreGraphics/CoreGraphics.h>
 #endif
 
+#include "../../../runtime/src/platform/appimage_notice.h"  // the v0.2.13 .data hint (issue #55)
 #include "imgui.h"
 #include "imgui_impl_sdl3.h"
 #include "imgui_impl_sdlrenderer3.h"
@@ -479,6 +480,10 @@ struct App {
     bool log_scroll = false;
     std::string toast;
     double toast_until = 0;
+    // a v0.2.13 "<AppImage>.data" folder next to the AppImage (no longer used, issue #55): shown first,
+    // setup starts when it is acknowledged
+    std::string legacy_notice;
+    bool legacy_notice_open = false;
 
     // file dialogs answer on any thread
     std::mutex dlg_mu;
@@ -1918,6 +1923,16 @@ static bool game_ready(const std::string& pkg, const std::vector<std::string>& p
     return true;
 }
 
+// after the hello checks (and the .data notice, when there is one): start setup.py
+static void begin_setup() {
+#ifdef __APPLE__
+    if (!clt_ok()) go(Screen::NeedCLT);
+    else start_child();
+#else
+    start_child();
+#endif
+}
+
 int main(int argc, char** argv) {
 #ifdef _WIN32
     if (argc > 1 && !strcmp(argv[1], "--console-setup")) {
@@ -2010,12 +2025,14 @@ int main(int argc, char** argv) {
     } else if (!check_writable(data_dir_of(A.pkg, A.passthru))) {
         // fail() has shown why
     } else {
-#ifdef __APPLE__
-        if (!clt_ok()) go(Screen::NeedCLT);
-        else start_child();
-#else
-        start_child();
-#endif
+        A.legacy_notice = appimage::legacy_data_notice(SDL_getenv("APPIMAGE"));
+        if (!A.legacy_notice.empty()) {
+            addlog(A.legacy_notice);
+            // tests and scripted runs do not wait for a click (the line is in their output)
+            if (A.self_test || A.script.t == J::Arr) SDL_Log("notice: %s", A.legacy_notice.c_str());
+            else A.legacy_notice_open = true;
+        }
+        if (!A.legacy_notice_open) begin_setup();
     }
 
     double self_test_deadline = SDL_GetTicks() / 1000.0 + 600;
@@ -2068,6 +2085,21 @@ int main(int argc, char** argv) {
             ImGui::SetCursorPos(ImVec2(ImGui::GetStyle().WindowPadding.x,
                                        ImGui::GetWindowHeight() - ImGui::GetStyle().WindowPadding.y - ImGui::GetFrameHeight()));
             colored(GOOD, A.toast);
+        }
+        if (A.legacy_notice_open) {
+            ImGui::OpenPopup("Old portable folder");
+            ImGui::SetNextWindowSize(ImVec2(ImGui::GetIO().DisplaySize.x * 0.7f, 0));
+        }
+        if (ImGui::BeginPopupModal("Old portable folder", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+            ImGui::TextWrapped("%s", A.legacy_notice.c_str());
+            muted("Setup continues without it: the game, saves and settings go to the usual folders, or into "
+                  "the .home folder once it exists.");
+            if (button("OK", ImVec2(160, 0), true)) {
+                A.legacy_notice_open = false;
+                ImGui::CloseCurrentPopup();
+                begin_setup();
+            }
+            ImGui::EndPopup();
         }
         if (quit_requested) {
             if (A.screen == Screen::Installing) ImGui::OpenPopup("Stop setup?");

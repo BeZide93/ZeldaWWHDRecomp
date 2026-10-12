@@ -45,7 +45,12 @@ APPRUN = """#!/bin/sh
 # per-user folders (issue #55), never beside this file. Portable use is the AppImage runtime's
 # standard one: a folder "<this file>.home" next to the AppImage (--appimage-portable-home
 # creates it) becomes $HOME before this script runs, and setup and game derive every folder
-# from $HOME and the XDG variables. Nothing to do here.
+# from $HOME and the XDG variables. Nothing to do here, except a hint: v0.2.13 had a portable
+# folder "<this file>.data" of its own, which is no longer read (no paths come from it).
+if [ -n "$APPIMAGE" ] && [ -d "$APPIMAGE.data" ]; then
+  n=$(basename "$APPIMAGE")
+  echo "Found $n.data: this folder is no longer used. Move its contents to $n.home (see the changelog) to keep your saves and settings." >&2
+fi
 exec "$(dirname "$0")/wind-waker-hd" "$@"
 """
 

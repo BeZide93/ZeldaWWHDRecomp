@@ -411,6 +411,15 @@ jobs:
           test -f "$APP.home/.local/share/wwhd/setup.log"
           test -z "$(ls -A "$RUNNER_TEMP/real-home")"
           rm -rf "$APP.home" "$RUNNER_TEMP/real-home"
+          # a v0.2.13 "<image>.data" folder is no longer used: AppRun and the setup window name it, and
+          # nothing is written into it
+          mkdir "$APP.data"
+          SDL_VIDEO_DRIVER=offscreen "$APP" --appimage-extract-and-run --self-test --data-dir "$RUNNER_TEMP/data-hint" \
+            2> "$RUNNER_TEMP/hint.txt"
+          grep -F "Found $(basename "$APP").data: this folder is no longer used" "$RUNNER_TEMP/hint.txt"
+          grep -F "notice: Found $(basename "$APP").data" "$RUNNER_TEMP/hint.txt"
+          test -z "$(ls -A "$APP.data")"
+          rm -rf "$APP.data" "$RUNNER_TEMP/data-hint" "$RUNNER_TEMP/hint.txt"
           chmod -R u+w "$RUNNER_TEMP"/squashfs-root && rm -rf "$RUNNER_TEMP"/squashfs-root
 
       - name: Installer self-test (unzipped release, placeholder code, toolchain download)

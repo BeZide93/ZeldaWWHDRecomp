@@ -3,8 +3,8 @@
 
 Portable use is the AppImage runtime's standard one (a "<AppImage>.home" folder becomes $HOME,
 "<AppImage>.config" becomes $XDG_CONFIG_HOME); the runtime sets those before AppRun runs. AppRun
-must not add a mode of its own (the "<AppImage>.data" folder of v0.2.13 is gone) and must not
-touch HOME or the XDG variables.
+must not add a mode of its own and must not touch HOME or the XDG variables. A "<AppImage>.data"
+folder (v0.2.13's own portable mode) only gets a hint on stderr: no paths come from it.
 """
 import os
 import re
@@ -40,31 +40,46 @@ def run(env_extra, make=()):
             os.makedirs(image + suffix)
         env = {k: v for k, v in os.environ.items() if not k.startswith("XDG_") and k not in ("APPIMAGE", "HOME")}
         env.update({k: v.replace("@IMAGE@", image) for k, v in env_extra.items()})
-        out = subprocess.run(["sh", apprun, "--setup"], env=env, capture_output=True, text=True,
-                             check=True).stdout.strip()
-        return out, image
+        r = subprocess.run(["sh", apprun, "--setup"], env=env, capture_output=True, text=True, check=True)
+        return r.stdout.strip(), r.stderr.strip(), image
+
+
+def hint(image):
+    name = os.path.basename(image)
+    return ("Found %s.data: this folder is no longer used. Move its contents to %s.home (see the changelog) "
+            "to keep your saves and settings." % (name, name))
 
 
 def main():
     code = "\n".join(code_lines(appimage.APPRUN))
-    assert ".data" not in code, code  # no AppRun-specific portable folder any more
     for key in KEYS:
         assert not re.search(r"\b%s=" % key, code), (key, code)  # leaves HOME and XDG_* to the runtime
-    assert "APPIMAGE" not in code, code
+    # .data is only tested for and named in the hint, never assigned or exported
+    for line in code_lines(appimage.APPRUN):
+        if ".data" in line:
+            assert line.strip().startswith(("if ", "echo ")), line
+    assert "export" not in code, code
 
-    # outside an AppImage, and inside one without portable folders: nothing changes
-    out, _ = run({"HOME": "/home/player"})
+    # outside an AppImage, and inside one without portable folders: nothing changes, nothing is said
+    out, err, _ = run({"HOME": "/home/player"})
+    assert (out, err) == ("home=/home/player data= config= cache= args=--setup", ""), (out, err)
+    out, err, _ = run({"HOME": "/home/player", "APPIMAGE": "@IMAGE@"})
+    assert (out, err) == ("home=/home/player data= config= cache= args=--setup", ""), (out, err)
+
+    # a leftover v0.2.13 .data folder: the hint on stderr, the folders unchanged
+    out, err, image = run({"HOME": "/home/player", "APPIMAGE": "@IMAGE@"}, make=(".data",))
     assert out == "home=/home/player data= config= cache= args=--setup", out
-    out, _ = run({"HOME": "/home/player", "APPIMAGE": "@IMAGE@"}, make=(".data",))
-    assert out == "home=/home/player data= config= cache= args=--setup", out  # a leftover .data folder is ignored
+    assert err == hint(image), (err, hint(image))
+    assert hint(image) == "Found Wind Waker [HD].AppImage.data: this folder is no longer used. Move its contents " \
+                          "to Wind Waker [HD].AppImage.home (see the changelog) to keep your saves and settings."
 
     # what the runtime does for "<image>.home" / "<image>.config": AppRun hands it on as it is
     # (spaces and brackets in the path)
-    out, image = run({"APPIMAGE": "@IMAGE@", "HOME": "@IMAGE@.home", "XDG_CONFIG_HOME": "@IMAGE@.config"},
-                     make=(".home", ".config"))
+    out, err, image = run({"APPIMAGE": "@IMAGE@", "HOME": "@IMAGE@.home", "XDG_CONFIG_HOME": "@IMAGE@.config"},
+                          make=(".home", ".config"))
     want = "home=%s.home data= config=%s.config cache= args=--setup" % (image, image)
-    assert out == want, (out, want)
-    print("AppRun: environment passed through, no .data mode")
+    assert (out, err) == (want, ""), (out, err, want)
+    print("AppRun: environment passed through, only a hint for a .data folder")
 
 
 if __name__ == "__main__":

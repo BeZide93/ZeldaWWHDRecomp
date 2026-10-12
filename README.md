@@ -136,7 +136,8 @@ folders. **Portable use** (the AppImage runtime's own portable mode): start the 
 folder, so the game, its code, saves, settings and caches stay in it (`.local/share/wwhd`,
 `.config/wwhd`, `.cache`); keep the file and the folder together, and start the AppImage itself (the
 setup's menu entry stays inside that folder too). If your session sets `XDG_DATA_HOME` or
-`XDG_CONFIG_HOME`, those still win over the portable folder.
+`XDG_CONFIG_HOME`, those still win over the portable folder. The `.data` folder of v0.2.13 is no
+longer used (the AppImage says so when it finds one); the changelog has how to move it to `.home`.
 
 The setup also runs in a terminal (the fallback): `tools/Setup in Terminal.command` (macOS),
 `tools/Setup in a console window.bat` (Windows), `tools/setup-in-terminal.sh` (Linux). How it works

@@ -889,6 +889,11 @@ if(Python3_Interpreter_FOUND)
   add_test(NAME release_appimage_apprun COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/release/test_appimage_apprun.py")
 endif()
 
+add_executable(appimage_notice_test runtime/tools/appimage_notice_test.cpp)
+target_include_directories(appimage_notice_test PRIVATE runtime/src)
+target_compile_options(appimage_notice_test PRIVATE -UNDEBUG)
+add_test(NAME appimage_notice COMMAND appimage_notice_test)
+
 add_executable(process_test runtime/tools/process_test.cpp)
 target_include_directories(process_test PRIVATE runtime/src)
 target_compile_options(process_test PRIVATE -UNDEBUG)

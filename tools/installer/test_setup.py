@@ -414,6 +414,26 @@ class AppImagePortableHome(unittest.TestCase):
                 for name in files:  # nothing was written outside the portable home
                     self.assertTrue(root.startswith(home), (root, name))
 
+    def test_v0213_data_folder_only_gets_a_hint(self):
+        # v0.2.13's "<image>.data" is no longer read: a hint (same text as AppRun and the game), no paths
+        with tempfile.TemporaryDirectory() as t:
+            image = os.path.join(t, "Wind Waker [HD].AppImage")
+            self.assertEqual(setup.legacy_appimage_data_notice(image), "")
+            self.assertEqual(setup.legacy_appimage_data_notice(""), "")
+            os.makedirs(image + ".data")
+            self.assertEqual(setup.legacy_appimage_data_notice(image),
+                             "Found Wind Waker [HD].AppImage.data: this folder is no longer used. Move its contents to "
+                             "Wind Waker [HD].AppImage.home (see the changelog) to keep your saves and settings.")
+            env = {k: v for k, v in os.environ.items() if not k.startswith("XDG_")}
+            env["APPIMAGE"] = image
+            with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(setup, "PORTABLE", False):
+                self.assertTrue(setup.legacy_appimage_data_notice().startswith("Found "))
+                self.assertNotIn(".data", setup.default_data_dir())  # the folders do not come from it
+                self.assertNotIn(".data", setup.legacy_config_dirs()[0])
+            env.pop("APPIMAGE")
+            with mock.patch.dict(os.environ, env, clear=True):
+                self.assertEqual(setup.legacy_appimage_data_notice(), "")  # not an AppImage
+
 
 class Titles(unittest.TestCase):
     def test_supported_ok(self):

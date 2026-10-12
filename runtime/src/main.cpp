@@ -18,6 +18,8 @@
 #include "mods/guest_mods.h"
 #include "mods/code_mods.h"
 #include "platform/host.h"
+#include "platform/appimage_notice.h"
+#include "savestate.h"
 #ifdef _WIN32
 #include <timeapi.h>
 #endif
@@ -455,6 +457,14 @@ int main(int argc, char** argv) {
     // which build on which system: also in crash logs (their last log lines)
     LOG("[boot] Wind Waker HD %s (%s)%s%s, %s", build::version(), build::commit(), *build::variant() ? " " : "",
         build::variant(), reporthdr::os_description().c_str());
+#if defined(__linux__) && !defined(__ANDROID__)
+    // a v0.2.13 "<AppImage>.data" folder is no longer used (issue #55): once per start, in the log and
+    // as the overlay's short notice
+    if (const std::string hint = appimage::legacy_data_notice(getenv("APPIMAGE")); !hint.empty()) {
+        LOG("[appimage] %s", hint.c_str());
+        ss::notice(hint);
+    }
+#endif
     // test aid: WWHD_TEST_HOST_CRASH=1 crashes inside a system library (strlen of a bad pointer), so
     // the crash log's module names can be checked (CTest crash_log_module, runtime/tools/crash_log_test.cmake)
     if (getenv("WWHD_TEST_HOST_CRASH")) {
