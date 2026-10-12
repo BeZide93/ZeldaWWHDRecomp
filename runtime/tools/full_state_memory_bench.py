@@ -20,6 +20,24 @@ import time
 GAME_NAMES = ("wwhd", "wwhd-vulkan", "wwhd-metal", "ZeldaWWHD", "full_state_memory_bench")
 
 
+def benchmark_processes(processes, own_pid):
+    """Recognize benchmark drivers from ps output, including macOS Python."""
+    benchmarks = []
+    for line in processes.splitlines():
+        fields = line.strip().split(None, 1)
+        if len(fields) != 2 or int(fields[0]) == own_pid:
+            continue
+        try:
+            argv = shlex.split(fields[1])
+        except ValueError:
+            continue
+        if argv and (Path(argv[0]).name == "full_state_memory_bench" or
+                (Path(argv[0]).name.casefold().startswith("python") and any(
+                    Path(arg).name in ("run_bench.py", "full_state_memory_bench.py") for arg in argv[1:]))):
+            benchmarks.append(int(fields[0]))
+    return benchmarks
+
+
 def idle_snapshot():
     uptime = subprocess.check_output(["uptime"], text=True).strip()
     load = os.getloadavg()[0]
@@ -30,20 +48,7 @@ def idle_snapshot():
             raise RuntimeError(f"pgrep -x {name} failed")
         checks[name] = result.stdout.split()
     processes = subprocess.check_output(["ps", "-axo", "pid=,args="], text=True)
-    benchmarks = []
-    for line in processes.splitlines():
-        fields = line.strip().split(None, 1)
-        if len(fields) != 2 or int(fields[0]) == os.getpid():
-            continue
-        # Other Python benchmark drivers may be named python, not their script.
-        try:
-            argv = shlex.split(fields[1])
-        except ValueError:
-            continue
-        if argv and (Path(argv[0]).name == "full_state_memory_bench" or
-                (Path(argv[0]).name.startswith("python") and any(
-                    Path(arg).name in ("run_bench.py", "full_state_memory_bench.py") for arg in argv[1:]))):
-            benchmarks.append(int(fields[0]))
+    benchmarks = benchmark_processes(processes, os.getpid())
     snapshot = {"uptime": uptime, "load_1m": load, "pgrep_x": checks,
                 "other_benchmark_pids": benchmarks, "time_unix": time.time()}
     if load > 10 or any(checks.values()) or benchmarks:
@@ -62,7 +67,12 @@ def main():
     binary = args.binary.resolve(strict=True)
     revision = subprocess.check_output(["git", "-C", str(Path(__file__).resolve().parents[2]), "rev-parse", "HEAD"], text=True).strip()
     evidence = {"source_revision": revision, "binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(), "profile": "320MiB resident:192MiB patterned,64MiB pseudorandom,64MiB zero",
-                "binary": str(binary), "measurements": [], "valid": False}
+                "binary": str(binary),
+                "measurement_scope": "Synthetic serializer overhead, not total live-game memory. Load elapsed time includes restoration checksum.",
+                "rss_semantics": {"baseline_rss_bytes": "Process high-water RSS before serialization, not instantaneous RSS",
+                                  "peak_rss_bytes": "Process high-water RSS after serialization",
+                                  "extra_rss_bytes": "Difference between high-water marks, not instantaneous allocation"},
+                "measurements": [], "valid": False}
     try:
         with tempfile.TemporaryDirectory(prefix="wwhd-synthetic-state-bench-") as directory:
             (Path(directory) / ".synthetic-full-state-bench").touch()
