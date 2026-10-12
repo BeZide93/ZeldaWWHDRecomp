@@ -7,6 +7,10 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Settings overlay: extension points for other platforms** (PR #175, thanks @Pulpparty): ports such as the
+  community Switch port can add their own settings tabs, hide built-in ones, plug in a system keyboard, controller
+  shortcuts and on-screen layers, without changing the overlay's code. Nothing changes on our platforms.
+
 - **No crash when memory for a shader's source runs out** (PR #171, thanks @Pulpparty): the shader translator's text
   buffer now handles failed allocations (the shader just fails to compile and is retried) instead of writing through
   a null pointer. Mostly matters on devices with little memory.
