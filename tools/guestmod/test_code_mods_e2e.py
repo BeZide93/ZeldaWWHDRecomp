@@ -128,7 +128,7 @@ def main():
         install['WWHD_TEST_MOD_INSTALL'] = str(package)
     log = run('install', 0, install)
     if args.catalogue:
-        assert '[catalogue] refreshed ' in log and '[catalogue] installed heart-ticker disabled' in log
+        assert '[catalogue] refreshed ' in log and '[catalogue] installed heart-ticker' in log
     assert '[code mods] rebuild offer: support on for heart-ticker' in log
     assert '[code mods] rebuild ready; restart required' in log
     profiles = json.loads((manager / 'profiles.json').read_text())

@@ -31,31 +31,29 @@ supported.
 Code-mod support is **off** by default. Content replacements, settings presets, Cemu
 graphics packs and Native SDK v1 mods don't need it.
 
-1. Open **Settings (F1) → Mods** and choose **Enable code mods (PowerPC mods)**. On macOS the
-   Gameplay menu has the same option.
-2. Confirm the rebuild of the game code. It usually takes a few minutes; the dialog shows
-   progress and errors. Cancel keeps the current build.
-3. Choose **Restart now** (or restart later). Support is active from the next start.
+The simplest way: switch the code mod on in **Settings (F1) → Mods**. Its review says that
+code-mod support is added; after **Install** (or **Switch on**) the game code is rebuilt once
+(a few minutes; the progress view shows it), the game restarts by itself and the setup
+continues until the mod is on. A failed step shows one sentence, **Show details** and **Try
+again**; Cancel keeps the current build.
 
-Turning support off works the same way. Both variants are cached, so switching back to one
+To switch support on or off by hand: **Mods → More → Code-mod support** (on macOS the
+Gameplay menu has the same option), confirm the rebuild, then **Restart now** (or later).
+Support is active from the next start. Both variants are cached, so switching back to one
 you built before is quick. Keep the complete release folder and the compiler setup
 downloaded: building code mods uses those local tools. If they are missing, the Mods tab asks
 you to run setup again.
 
-You can install a code mod while support is off. For a mod with setup steps,
-tick its checkbox or choose **Set up** in the installed or catalogue entry.
-One confirmation explains the open steps, asks for choices, and records your trust
-in this package version (see [Trust](#trust)). After Continue, setup runs on its
-own and enables the mod. If needed, it rebuilds code-mod support and restarts,
-then continues setup automatically. A changed package asks for trust again.
-Errors stop at the failed step: choose **Show details** or **Try again**.
-Individual step buttons are available under **Advanced**.
-Enabling, disabling and changing options of code mods take effect after a restart.
+Accepting the review records your trust in this package version (see [Trust](#trust)); a
+changed package asks again. Individual steps can be run again under **Troubleshooting** on
+the mod's page while it is off. Switching code mods on or off and changing their options take
+effect after a restart.
 
 ### GameCube files used by mods
 
-In **Settings → Mods → GameCube game for mods**, choose your GameCube Wind Waker disc
-image (`.iso` / `.gcm`) or extracted game folder once. The setting shows the recognised
+The review of a mod that needs it asks for your GameCube Wind Waker disc image (`.iso`,
+`.gcm` or `.rvz`) or extracted game folder; **Mods → More → GameCube game for mods**
+changes it later. The setting shows the recognised
 region; some mods require a specific region. These files stay on your computer.
 
 Mods use this shared copy automatically. A mod with a missing or incompatible copy shows

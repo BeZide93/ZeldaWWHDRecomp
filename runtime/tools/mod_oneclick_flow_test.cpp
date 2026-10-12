@@ -1,8 +1,10 @@
-// Exercise the production overlay setup loop and real workers without a game or window.
+// The Mods tab as a player uses it (overlay/mods_tab.h), with the production setup loop and real workers,
+// without a game or window: switch a mod on, answer the one review, watch the progress, end with the mod
+// on. Driven by runtime/tools/test_mod_oneclick_flow.py with synthetic packages; clicks land on the
+// rectangles the tab's own buttons reported in the previous frame.
 #include <atomic>
 #include "mod_test_host.h"
-#include "overlay/setup_flow.h"
-#include "overlay/setup_test.h"
+#include "overlay/mods_tab.h"
 #include "mods/catalogue_client.h"
 #include "imgui_internal.h"
 #include "backends/imgui_impl_sdlrenderer3.h"
@@ -10,31 +12,53 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <set>
 namespace fs=std::filesystem;
 namespace hostui {void post(std::function<void()> fn){fn();}}
 namespace {
 mods::packages::View view(const std::string& id) {
     for(const auto& mod:mods::packages::list())if(mod.id==id)return mod;return {};
 }
+// One click on a labelled button: move there and press, then release (ImGui trickles the queued input).
+struct Clicker {
+    std::string target;int phase=0;
+    bool step(ImGuiIO& io) {  // true when the click is complete
+        auto& rects=overlay::modsui::state().rects;auto it=rects.find(target);
+        if(target.empty()||it==rects.end())return false;
+        auto c=it->second.GetCenter();
+        if(phase==0){io.AddMousePosEvent(c.x,c.y);io.AddMouseButtonEvent(0,true);phase=1;return false;}
+        io.AddMouseButtonEvent(0,false);phase=0;target.clear();return true;
+    }
+    void click(const std::string& name){if(target.empty()){target=name;phase=0;}}
+    bool busy()const{return !target.empty();}
+};
+void set_env(const char* key,const std::string& value) {
+#ifdef _WIN32
+    _putenv_s(key,value.c_str());
+#else
+    setenv(key,value.c_str(),1);
+#endif
+}
 }
 int main(int argc,char** argv) {
     assert(argc==3);assert(getenv("WWHD_NO_AUDIO")&&getenv("WWHD_NO_HOST_INPUT"));
-    assert(getenv("WWHD_MOD_MANAGER_DIR")&&getenv("WWHD_TEST_CATALOGUE_INSTALL")&&getenv("WWHD_TEST_MOD_SETUP")&&getenv("WWHD_TEST_GAME_SOURCES"));
-    using namespace mods::packages;using namespace overlay::setupflow;
+    assert(getenv("WWHD_MOD_MANAGER_DIR")&&getenv("WWHD_TEST_MOD_SETUP")&&getenv("WWHD_TEST_GAME_SOURCES"));
+    using namespace mods::packages;using namespace overlay::setupflow;namespace ui=overlay::modsui;
     fs::path root=fs::absolute(argv[1]);std::string mode=argv[2],id=getenv("WWHD_TEST_MOD_SETUP");
     bool resumed=fs::weakly_canonical(fs::absolute(argv[0])).parent_path()==fs::weakly_canonical(root/"code-builds/synthetic/bin");
-    bool missing=mode=="missing",broken=mode=="broken";
-    bool cancel_mode=mode=="cancel"||mode=="cancel-rebuild",cancel_clicked=false,canceled=false;int cancel_frames=0;
+    bool missing=mode=="missing",broken=mode=="broken",catalogue=mode=="catalogue";
+    bool cancel_mode=mode=="cancel"||mode=="cancel-rebuild",canceled=false;
     bool restart=mode=="restart"||mode=="cancel-rebuild";set_code_mod_support(!restart||resumed);initialize();
+    auto plan=overlay::diagnostic::read_setup_plan(true,getenv("WWHD_MOD_MANAGER_DIR"),getenv("WWHD_TEST_MOD_SETUP"),getenv("WWHD_TEST_GAME_SOURCES"));
+    assert(plan.id==id&&plan.error.empty());
     if(!resumed) {
-        auto catalogue=mods::catalogue::load((root/"index.json").string(),{},root/"unused");
-        auto it=std::find_if(catalogue.index.entries.begin(),catalogue.index.entries.end(),[&](const auto& e){return e.id==getenv("WWHD_TEST_CATALOGUE_INSTALL");});
-        assert(it!=catalogue.index.entries.end());
-        mods::catalogue::StagedPackage staged(*it,mods::catalogue::Version::parse("0.2.10"),"USA",platform_key(),root/"stage",catalogue.fixture_root,{});
-        std::string error;assert(install(staged.path().string(),error));
-        auto plan=overlay::diagnostic::read_setup_plan(true,getenv("WWHD_MOD_MANAGER_DIR"),getenv("WWHD_TEST_MOD_SETUP"),getenv("WWHD_TEST_GAME_SOURCES"));
-        assert(plan.id==id&&plan.error.empty());
-        if(!missing)for(const auto& [game,path]:plan.sources.object)assert(set_game_source(game,path.string(),error));
+        if(!catalogue) {  // already downloaded (switched on from the list); the catalogue mode downloads it
+            auto index=mods::catalogue::load((root/"index.json").string(),{},root/"unused");
+            auto it=std::find_if(index.index.entries.begin(),index.index.entries.end(),[&](const auto& e){return e.id==id;});
+            assert(it!=index.index.entries.end());
+            mods::catalogue::StagedPackage staged(*it,mods::catalogue::Version::parse("0.2.10"),"USA",platform_key(),root/"stage",index.fixture_root,{});
+            std::string error;assert(install(staged.path().string(),error));
+        }
         mods::code::startup(argc,argv); // real service launch arguments, fake game-code rebuild output
     } else {
         assert(pending_setup_runs()==std::vector<std::string>{id});assert(!view(id).enabled);
@@ -43,119 +67,159 @@ int main(int argc,char** argv) {
     int builds=0;std::atomic<bool> cancel_released{false};
     set_guest_builder([](const GuestPackage&){return uint32_t(65536);},[&](const GuestPackage&,uint32_t){
         ++builds;std::this_thread::sleep_for(std::chrono::milliseconds(35));
-        // cancel: the build lasts until the cancel has taken effect. ImGui trickles the mouse events
-        // (move, press, release: one per frame), so a fixed frame count let the build finish before
-        // the click landed on slow runners (Windows CI)
+        // cancel: the build lasts until the cancel has taken effect (ImGui trickles one input per frame)
         for(int i=0;mode=="cancel"&&!cancel_released&&i<5000;++i)std::this_thread::sleep_for(std::chrono::milliseconds(2));
         auto module=root/"synthetic.module";std::ofstream(module)<<"synthetic guest cache";return GuestBuilt{module.string(),65536};
     });
-    SDL_Surface* surface=SDL_CreateSurface(960,640,SDL_PIXELFORMAT_RGBA32);assert(surface);
+    // the display: a desktop window, or a phone (WWHD_TEST_DISPLAY=WxH) for the captures
+    int width=960,height=640;
+    if(const char* d=getenv("WWHD_TEST_DISPLAY"))sscanf(d,"%dx%d",&width,&height);
+    SDL_Surface* surface=SDL_CreateSurface(width,height,SDL_PIXELFORMAT_RGBA32);assert(surface);
     SDL_Renderer* renderer=SDL_CreateSoftwareRenderer(surface);assert(renderer);
-    ImGui::CreateContext();auto& io=ImGui::GetIO();io.IniFilename=nullptr;io.DisplaySize=ImVec2(960,640);io.DeltaTime=1.f/60;
+    ImGui::CreateContext();auto& io=ImGui::GetIO();io.IniFilename=nullptr;io.DisplaySize=ImVec2(float(width),float(height));io.DeltaTime=1.f/60;
     io.ConfigFlags=ImGuiConfigFlags_NavEnableKeyboard|ImGuiConfigFlags_NavEnableGamepad;io.BackendFlags|=ImGuiBackendFlags_HasGamepad;
-    assert(ImGui_ImplSDLRenderer3_Init(renderer));std::string error;
-    const char* window_name=mode=="catalogue"?"Catalogue entry":"Installed package";
-    int confirmations=0;bool clicked=resumed,accepted=resumed,saw_progress=false,saw_failure=false,retried=false;
-    bool error_capture=false,dialog_capture=false,progress_capture=false,details_capture=false,corrected=false;
-    bool accept_mouse_down=false,setup_mouse_down=false,choice_mouse_down=false;int error_frames=0,choice_frames=0;
-    auto capture=[&](const std::string& label) {
-        auto dir=root/"captures";fs::create_directories(dir);
-        assert(SDL_SaveBMP(surface,(dir/(label+".bmp")).string().c_str()));
+    // the overlay's font where the test machine has it (WWHD_TEST_FONT=<ttf>), for captures that look like the game
+    if(const char* font=getenv("WWHD_TEST_FONT"))if(fs::is_regular_file(font)){io.Fonts->AddFontFromFileTTF(font,17.0f);ImGui::GetStyle().FontSizeBase=17.0f;}
+    assert(ImGui_ImplSDLRenderer3_Init(renderer));
+    ui::Host host;
+    host.port_version=mods::catalogue::Version::parse("0.2.10");
+    host.can_restart=[]{return true;};
+    host.restart=[](bool){};
+    int picks=0;
+    // the file picker: the player picks the synthetic disc (or closes the picker: "missing")
+    host.choose_game_source=[&](bool,std::function<void(std::string)> chosen){
+        ++picks;std::string path;
+        if(!missing)for(const auto& [game,value]:plan.sources.object)path=value.string();
+        chosen(path);
     };
-    auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(20);
-    for(int frame=0;frame<4000&&std::chrono::steady_clock::now()<deadline;++frame) {
+    if(catalogue)set_env("WWHD_MOD_CATALOGUE",(root/"index.json").string());
+    else set_env("WWHD_MOD_CATALOGUE",(root/"no-index.json").string());  // the list from the manager only
+    int confirmations=0;bool accepted=resumed,saw_progress=false,saw_failure=false,retried=false,corrected=false,saw_done=false;
+    int pad_pressed=0,review_since=0;bool switched=resumed,blue_seen=false;ImRect blue_last;int failure_frames=0;
+    std::set<std::string> captured;
+    auto capture=[&](const std::string& label) {
+        if(!captured.insert(label).second)return;
+        fs::path dir=getenv("WWHD_TEST_CAPTURE_DIR")?fs::path(getenv("WWHD_TEST_CAPTURE_DIR")):root/"captures";
+        fs::create_directories(dir);
+        auto name=std::string(getenv("WWHD_TEST_CAPTURE_PREFIX")?getenv("WWHD_TEST_CAPTURE_PREFIX"):"")+label+".bmp";
+        assert(SDL_SaveBMP(surface,(dir/name).string().c_str()));
+    };
+    Clicker clicker;
+    const std::string switch_label="##on_"+id;
+    auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(25);
+    for(int frame=0;frame<6000&&std::chrono::steady_clock::now()<deadline;++frame) {
         assert(fs::space(root).available>10ull*1024*1024*1024);
-        ImGui_ImplSDLRenderer3_NewFrame();ImGui::NewFrame();setup_run_tick();
-        ImGui::SetNextWindowPos(ImVec2(100,80),ImGuiCond_Always);ImGui::SetNextWindowSize(ImVec2(760,480));
-        ImGui::Begin(window_name);ImGui::Text("%s",view(id).name.c_str());
-        auto trigger_position=ImGui::GetCursorScreenPos();
-        if(mode=="checkbox") {
-            bool on=view(id).enabled;
-            if(enable_checkbox(view(id),on)&&!handle_setup_enable(view(id),on))enable(id,on,error);
-        } else setup_run_controls(view(id));
-        bool had_dialog=ImGui::IsPopupOpen("Set up mod");
-        auto last_id=setup_confirm.id;
-        setup_confirmation_dialog(error,false);
-        bool has_dialog=ImGui::IsPopupOpen("Set up mod");
-        if(has_dialog&&!had_dialog)++confirmations;
-        auto* popup=ImGui::FindWindowByName("Set up mod");
-        // Drive the actual shared Set up button and modal Continue via pointer events.
-        if(!clicked&&frame>2) {
-            auto* window=ImGui::FindWindowByName(window_name);
-            io.AddMousePosEvent(trigger_position.x+(mode=="checkbox"?9:25),trigger_position.y+ImGui::GetFrameHeight()/2);
-            io.AddMouseButtonEvent(0,!setup_mouse_down);setup_mouse_down=!setup_mouse_down;
-            if(!setup_confirm.id.empty()){clicked=true;io.AddMouseButtonEvent(0,false);}
-        }
-        bool choice_ready=mode!="choice"||setup_confirm.choices["colour"]=="blue";
-        if(has_dialog&&popup&&frame>8&&!accepted&&!choice_ready) {
-            auto* combo=ImGui::FindWindowByName("##Combo_00");
-            if(combo&&combo->Active&&combo->Hidden){io.AddMouseButtonEvent(0,false);choice_mouse_down=false;}
-            else {
-                if(combo&&combo->Active)io.AddMousePosEvent(combo->Pos.x+30,combo->Pos.y+ImGui::GetStyle().WindowPadding.y+ImGui::GetTextLineHeightWithSpacing()+ImGui::GetTextLineHeight()/2);
-                else io.AddMousePosEvent(popup->Pos.x+80,popup->Pos.y+ImGui::GetFrameHeight()+ImGui::GetStyle().WindowPadding.y+3*ImGui::GetTextLineHeightWithSpacing()+ImGui::GetFrameHeight()/2);
-                io.AddMouseButtonEvent(0,!choice_mouse_down);choice_mouse_down=!choice_mouse_down;
+        ImGui_ImplSDLRenderer3_NewFrame();ImGui::NewFrame();setup_run_tick();ui::tick(host,true);
+        // the settings window as the overlay sizes it
+        ImGui::SetNextWindowPos(ImVec2(width*0.5f,height*0.5f),ImGuiCond_Always,ImVec2(0.5f,0.5f));
+        ImGui::SetNextWindowSize(ImVec2(std::min(860.f,width*0.94f),std::min(620.f,height*0.92f)));
+        ImGui::Begin("Settings",nullptr,ImGuiWindowFlags_NoResize|ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoCollapse);
+        {auto& rects=ui::state().rects;blue_seen=rects.count("choice_colour_blue");if(blue_seen)blue_last=rects["choice_colour_blue"];rects.erase("choice_colour_blue");}
+        bool had_review=ImGui::IsPopupOpen("###mods_review",ImGuiPopupFlags_AnyPopupLevel);
+        host.back=false;
+        ui::draw(host,"");
+        bool has_review=ImGui::IsPopupOpen("###mods_review",ImGuiPopupFlags_AnyPopupLevel);
+        ImGui::End();
+        if(has_review&&!had_review){++confirmations;review_since=frame;}
+        auto& s=ui::state();auto& f=s.job.flow;
+        // the player's actions, one at a time
+        if(!clicker.busy()&&frame>3) {
+            if(!switched) {
+                // the list shows the mod (catalogue mode: once the list is loaded); "checkbox" uses the page's switch
+                if(mode=="checkbox") {
+                    if(s.page.empty())clicker.click("open_"+id);else if(s.rects.count("##on_page")){clicker.click("##on_page");switched=true;}
+                } else if(s.rects.count(switch_label)){clicker.click(switch_label);switched=true;}
+            } else if(has_review&&!accepted&&frame>8) {
+                auto& r=s.review;
+                bool need_source=!r.source_game.empty()&&!ui::source_ready(r);
+                // missing: first the controller's A on the review's default button, which is Cancel
+                if(missing&&!pad_pressed){if(frame-review_since>=5){
+                    // a controller player: the cursor is visible (any D-pad press shows it), A presses the focused button
+                    io.AddKeyEvent(ImGuiKey_GamepadFaceDown,true);pad_pressed=frame;}
+                    else if(frame-review_since>=2){io.AddMousePosEvent(-100,-100);io.ConfigNavCursorVisibleAlways=true;}}
+                else if(missing&&confirmations<2){}
+                else if(need_source&&picks==0)clicker.click("Choose disc image…##source");
+                else if(mode=="choice"&&r.chosen["colour"]!="blue") {
+                    // open the list, then pick blue in it
+                    // the list is open when its item was drawn this frame at the same place as the last one
+                    bool list_open=s.rects.count("choice_colour_blue")&&blue_seen&&blue_last.Min.x==s.rects["choice_colour_blue"].Min.x&&
+                                   blue_last.Min.y==s.rects["choice_colour_blue"].Min.y;
+                    if(list_open)clicker.click("choice_colour_blue");
+                    else if(!s.rects.count("choice_colour_blue"))clicker.click("##choice_colour");
+                } else {
+                    std::string go=r.mode==ui::Review::SwitchOn?"Switch on##review":"Install##review";
+                    // missing: the button is unavailable (the reason is next to it); the player cancels
+                    clicker.click(missing&&frame>60?"Cancel##review":go);
+                }
+            } else if(f.phase==ui::Phase::Failed&&broken&&!corrected) {
+                if(++failure_frames==4){fs::remove(root/"fail-tool");corrected=true;clicker.click("Try again##flow");}
+            } else if(cancel_mode&&f.phase==ui::Phase::Working&&!canceled) {
+                size_t c=f.current();
+                bool at=c<f.steps.size()&&(mode=="cancel-rebuild"?setup_run.rebuilding:f.steps[c].kind==ui::StepKind::Build);
+                if(at)clicker.click("Cancel##flow");
             }
         }
-        if(has_dialog&&popup&&frame>8&&!accepted&&choice_ready) {
-            io.AddMousePosEvent(popup->Pos.x+40,popup->Pos.y+popup->Size.y-ImGui::GetStyle().WindowPadding.y-ImGui::GetFrameHeight()/2);
-            io.AddMouseButtonEvent(0,!accept_mouse_down);accept_mouse_down=!accept_mouse_down;
+        if(pad_pressed&&frame==pad_pressed+1)io.AddKeyEvent(ImGuiKey_GamepadFaceDown,false);
+        // ... it closed: switch the mod on again for the second review
+        if(missing&&pad_pressed&&frame==pad_pressed+6){assert(!has_review&&confirmations==1);switched=false;io.ConfigNavCursorVisibleAlways=false;}
+        if(clicker.busy()) {
+            bool cancel_click=clicker.target=="Cancel##flow";
+            if(clicker.step(io)&&cancel_click)canceled=true;
         }
-        if(!last_id.empty()&&setup_confirm.id.empty()&&!setup_run.id.empty()) {
-            accepted=true;io.AddMouseButtonEvent(0,false);
-            assert(unconfirmed_native(id).empty());
-            std::ofstream(root/"consent-count")<<confirmations;
-        }
-        if(!setup_run.id.empty())saw_progress=true;
-        if(!setup_run.error.empty()) {
+        if(f.phase==ui::Phase::Working&&!accepted){accepted=true;assert(confirmations==1);std::ofstream(root/"consent-count")<<confirmations;}
+        if(f.phase==ui::Phase::Working)saw_progress=true;
+        if(f.phase==ui::Phase::Failed) {
             saw_failure=true;assert(broken);assert(!view(id).enabled&&pending_setup_runs().empty());
-            assert(setup_run.output.find("synthetic deliberate failure")!=std::string::npos);
-            ++error_frames;
-            auto* window=ImGui::FindWindowByName(window_name);
-            auto row=ImGui::GetTextLineHeightWithSpacing();
-            auto top=window->Pos.y+ImGui::GetFrameHeight()+ImGui::GetStyle().WindowPadding.y;
-            if(error_frames==3||error_frames==4) {
-                io.AddMousePosEvent(window->Pos.x+50,top+3*row+5);
-                io.AddMouseButtonEvent(0,error_frames==3);
-            }
-            if(error_frames==7||error_frames==8) {
-                assert(window->StateStorage.GetInt(window->GetID("Show details"),0));
-                fs::remove(root/"fail-tool");corrected=true;
-                io.AddMousePosEvent(window->Pos.x+35,top+5*row+ImGui::GetFrameHeight()/2);
-                io.AddMouseButtonEvent(0,error_frames==7);
-            }
+            assert(f.details.find("synthetic deliberate failure")!=std::string::npos);
+            assert(f.error=="Preparing the mod's files failed.");  // one plain sentence; the output is behind Show details
         }
-        if(saw_failure&&corrected&&setup_run.error.empty())retried=true;
-        if(cancel_mode&&(mode=="cancel-rebuild"?setup_run.rebuilding:setup_run.step=="Build the minimap")) {
-            ++cancel_frames;auto* window=ImGui::FindWindowByName(window_name);
-            auto top=window->Pos.y+ImGui::GetFrameHeight()+ImGui::GetStyle().WindowPadding.y;
-            io.AddMousePosEvent(window->Pos.x+40,top+2*ImGui::GetTextLineHeightWithSpacing()+ImGui::GetFrameHeight()/2);
-            io.AddMouseButtonEvent(0,cancel_frames==1);cancel_clicked=true;
-        }
-        if(cancel_clicked&&setup_run.id.empty())canceled=true;
-        if(canceled)cancel_released=true;
-        ImGui::End();ImGui::Render();SDL_SetRenderDrawColor(renderer,20,23,29,255);SDL_RenderClear(renderer);
+        if(saw_failure&&corrected&&f.phase==ui::Phase::Working)retried=true;
+        if(f.phase==ui::Phase::Done)saw_done=true;
+        ImGui::Render();SDL_SetRenderDrawColor(renderer,20,23,29,255);SDL_RenderClear(renderer);
         ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(),renderer);SDL_RenderPresent(renderer);
-        if(has_dialog&&popup&&!popup->Hidden&&frame>=7&&!dialog_capture){capture("dialog");dialog_capture=true;}
-        if((setup_run.waiting||setup_run.rebuilding)&&setup_run.error.empty()&&!progress_capture){capture(resumed?"resume-progress":"progress");progress_capture=true;}
-        if(!setup_run.error.empty()&&!error_capture){capture("error");error_capture=true;}
-        if(error_frames==6&&!details_capture){capture("error-details");details_capture=true;}
-        if(mode=="choice"&&has_dialog&&choice_ready&&++choice_frames==2)capture("dialog-choice");
-        if(missing&&frame>8) {assert(setup_confirm.id.empty()&&setup_run.id.empty()&&confirmations==0);break;}
-        if(view(id).enabled&&setup_run.id.empty())break;
-        if(canceled){auto& worker=setup_work();std::lock_guard guard(worker.mutex);if(!worker.running)break;}
+        if(frame==10&&!resumed&&!catalogue)capture("list");
+        if(frame==30&&catalogue)capture("list");
+        if(has_review&&frame>12)capture(mode=="choice"?"review-choice":"review");
+        if(f.phase==ui::Phase::Working&&f.current()<f.steps.size()&&f.steps[f.current()].kind!=ui::StepKind::Download&&f.overall()>0.05)
+            capture(resumed?"resume-progress":"progress");
+        if(f.phase==ui::Phase::Failed&&failure_frames==2)capture("error");
+        if(f.phase==ui::Phase::Done)capture("done");
+        if(missing&&frame>80) {assert(f.phase==ui::Phase::Idle&&setup_run.id.empty()&&!has_review);break;}
+        if(view(id).enabled&&setup_run.id.empty()&&saw_done&&captured.count("done"))break;
+        if(canceled&&f.phase==ui::Phase::Idle){cancel_released=true;auto& worker=setup_work();std::lock_guard guard(worker.mutex);if(!worker.running)break;}
         std::this_thread::sleep_for(std::chrono::milliseconds(2));
     }
-    if(missing)assert(!view(id).enabled&&!accepted&&pending_setup_runs().empty());
+    if(missing)assert(!view(id).enabled&&!accepted&&pending_setup_runs().empty()&&picks==1&&confirmations==2);
     else if(cancel_mode) {
         assert(canceled&&!view(id).enabled&&pending_setup_runs().empty());
-        assert(setup_steps(id)[1].satisfied);assert(confirmations==1);
+        assert(setup_steps(id)[1].satisfied);assert(confirmations==1);  // the preparation stays done
         if(mode=="cancel-rebuild")assert(!mods::code::status().requested&&builds==0);
     }
     else {
-        assert(view(id).enabled&&view(id).pending_restart&&setup_run.id.empty()&&error.empty());assert(builds==1&&saw_progress);
+        assert(view(id).enabled&&view(id).pending_restart&&setup_run.id.empty());assert(builds==1&&saw_progress&&saw_done);
         assert(confirmations==(resumed?0:1));assert(pending_setup_runs().empty());
-        if(broken)assert(saw_failure&&retried&&details_capture);
+        assert(ui::state().job.flow.restart_needed);  // "Restart now / Later" at the end
+        if(broken)assert(saw_failure&&retried);
         if(restart)assert(resumed);
+    }
+    // the screens after the end, for the report (only with WWHD_TEST_CAPTURE_DIR)
+    if(getenv("WWHD_TEST_CAPTURE_DIR")&&(mode=="normal"||mode=="catalogue")) {
+        auto draw_frames=[&](int count,const std::string& target) {
+            if(!target.empty())clicker.click(target);
+            for(int i=0;i<count;i++) {
+                ImGui_ImplSDLRenderer3_NewFrame();ImGui::NewFrame();setup_run_tick();ui::tick(host,true);
+                ImGui::SetNextWindowPos(ImVec2(width*0.5f,height*0.5f),ImGuiCond_Always,ImVec2(0.5f,0.5f));
+                ImGui::SetNextWindowSize(ImVec2(std::min(860.f,width*0.94f),std::min(620.f,height*0.92f)));
+                ImGui::Begin("Settings",nullptr,ImGuiWindowFlags_NoResize|ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoCollapse);
+                ui::draw(host,"");ImGui::End();
+                if(clicker.busy())clicker.step(io);
+                ImGui::Render();SDL_SetRenderDrawColor(renderer,20,23,29,255);SDL_RenderClear(renderer);
+                ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(),renderer);SDL_RenderPresent(renderer);
+            }
+        };
+        draw_frames(6,"Later##flow");capture("page-on");
+        draw_frames(6,ui::state().rects.count("< Mods##back")?"< Mods##back":"\xE2\x80\xB9 Mods##back");capture("list-on");
+        ui::shoulder(+1);draw_frames(4,"");capture("more");
     }
     std::cout<<"FLOW "<<id<<" "<<mode<<" enabled="<<view(id).enabled<<" confirmations="<<confirmations<<" resumed="<<resumed<<" failed="<<saw_failure<<"\n";
     ImGui_ImplSDLRenderer3_Shutdown();ImGui::DestroyContext();SDL_DestroyRenderer(renderer);SDL_DestroySurface(surface);

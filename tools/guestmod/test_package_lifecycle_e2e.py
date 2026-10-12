@@ -253,7 +253,7 @@ def main():
     installed = run('install-support-off', 0, {'WWHD_MOD_CATALOGUE': str(args.out / 'catalogue/index.json'),
                     'WWHD_TEST_CATALOGUE_INSTALL': ident, 'WWHD_TEST_CODE_MOD_REBUILD': '1'},
                     done_marker='[code mods] rebuild ready; restart required')
-    assert '[catalogue] refreshed ' in installed and '[catalogue] installed ' + ident + ' disabled' in installed
+    assert '[catalogue] refreshed ' in installed and '[catalogue] installed ' + ident in installed
     assert '[code mods] rebuild ready; restart required' in installed
     assert not profile(allow_default=True).get('enabled', {}).get(ident, False)
     assert not phases['install-support-off']['guest_loaded']

@@ -64,6 +64,11 @@ p=argparse.ArgumentParser()
 p.add_argument('--data-dir');p.add_argument('--rebuild-code-mods',action='store_true');p.add_argument('--code-mods')
 p.add_argument('--code-mods-status');p.add_argument('--code-mods-cancel');p.add_argument('--jobs')
 a=p.parse_args();assert a.jobs=='4' and a.code_mods=='1';time.sleep(.05)
+# cancel-rebuild: the rebuild lasts until the player's Cancel arrives (no race with a slow test machine)
+if os.environ.get('WWHD_TEST_SLOW_REBUILD'):
+    deadline=time.time()+20
+    while not pathlib.Path(a.code_mods_cancel).exists() and time.time()<deadline:time.sleep(.01)
+    raise SystemExit(1)
 root=pathlib.Path(a.data_dir)
 (root/'code-mods-active.json').write_text(json.dumps(dict(state='ready',hooks=True,fingerprint='synthetic',exe=str(root/'code-builds/synthetic/bin'/{binary_name}))))
 path=pathlib.Path(a.code_mods_status);temporary=path.with_suffix('.tmp');temporary.write_text(json.dumps(dict(state='ready',exe=str(root/'code-builds/synthetic/bin'/{binary_name}))));os.replace(temporary,path)
@@ -74,6 +79,8 @@ path=pathlib.Path(a.code_mods_status);temporary=path.with_suffix('.tmp');tempora
     environment = {**os.environ, 'WWHD_NO_AUDIO': '1', 'WWHD_NO_HOST_INPUT': '1', 'WWHD_MOD_MANAGER_DIR': str(root / 'manager'),
                    'WWHD_TEST_CATALOGUE_INSTALL': ident, 'WWHD_TEST_MOD_SETUP': ident, 'WWHD_TEST_GAME_SOURCES': str(root / 'sources.json'),
                    'WWHD_GUEST_BUILD_CONFIG': str(root / 'guest-sdk.json'), 'WWHD_INSTALL_DIR': str(root)}
+    if mode == 'cancel-rebuild':
+        environment['WWHD_TEST_SLOW_REBUILD'] = '1'
     for key in ('WWHD_CODE_MODS', 'WWHD_TEST_TRUST_NATIVE_MODS'):
         environment.pop(key, None)
     result = subprocess.run([str(binary), str(root), mode], env=environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=30)
