@@ -442,7 +442,7 @@ input::PadState keyboard_state(const Mapping& m, const bool keys[256]) {
     s.rx = v[kRRight] - v[kRLeft];
     s.ry = v[kRUp] - v[kRDown];
     if (s.lx && s.ly) { s.lx *= 0.7071f; s.ly *= 0.7071f; }  // keep diagonal walking at full-stick length
-    if (m.invert_camera_y) s.ry = -s.ry;
+    // invert_camera_y is not applied here: the camera applies it (camera_invert.h, issue #167)
     return s;
 }
 
@@ -485,7 +485,6 @@ input::PadState controller_state(const Mapping& m, const float values[kPadCount]
     apply_deadzone(s.rx, s.ry, dz);
     apply_range(s.lx, s.ly, m.left_range);
     apply_range(s.rx, s.ry, m.right_range);
-    if (m.invert_camera_y) s.ry = -s.ry;
     return s;
 }
 
@@ -782,6 +781,7 @@ std::string default_path() {
 static std::mutex g_mu;
 static Mapping g_map = Mapping::defaults();
 static std::atomic<uint32_t> g_gen{1};
+static std::atomic<bool> g_invert_camera_y{false};
 
 // the dominant pad's labels as note_face_labels last reported them (its own lock: set_current
 // takes g_mu)
@@ -851,11 +851,13 @@ void set_current(const Mapping& m, bool save) {
         std::lock_guard<std::mutex> lk(g_mu);
         g_map = m;
     }
+    g_invert_camera_y = m.invert_camera_y;
     g_gen++;
     if (save && !save_file(default_path(), m))
         fprintf(stderr, "[input] could not save controls to %s\n", default_path().c_str());
 }
 
 uint32_t generation() { return g_gen.load(); }
+bool invert_camera_y() { return g_invert_camera_y.load(std::memory_order_relaxed); }
 
 }  // namespace input_map

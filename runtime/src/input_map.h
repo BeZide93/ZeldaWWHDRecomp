@@ -67,7 +67,9 @@ struct Mapping {
     // so a worn stick that only reaches 0.9 delivers full deflection at about 1.11.
     float left_range = 1.0f;
     float right_range = 1.0f;
-    bool invert_camera_y = false;   // right stick Y, keyboard and controller
+    // Camera only (issue #167): applied where the game's camera reads the right stick
+    // (camera_invert.h, mods/camera.cpp), never to the stick itself, so the baton is not inverted
+    bool invert_camera_y = false;
     bool face_auto = false;         // Automatic face preset: follow the dominant pad's labels
     // In-game button prompts (issues #110, #141, #143; runtime/src/button_glyphs.cpp)
     enum class Prompts : uint8_t { kAuto, kOriginal, kXbox, kPlayStation };
@@ -185,5 +187,6 @@ void load_startup();
 Mapping current();
 void set_current(const Mapping& m, bool save = true);  // applies immediately; saves to default_path()
 uint32_t generation();  // bumps on every set_current
+bool invert_camera_y();  // current().invert_camera_y without copying the mapping (camera hooks)
 
 }  // namespace input_map

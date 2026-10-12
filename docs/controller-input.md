@@ -24,6 +24,15 @@ effect immediately and are saved as `left_stick_range` and `right_stick_range`
 in the controls file's `options` (stored as factors, 1.0 to 1.5). Files without
 these keys load at 100%; values outside the range are clamped.
 
+**Invert camera up/down** inverts the camera only: the follow camera, first-person
+views and item aiming (bow, hookshot, boomerang, grappling hook, telescope, Picto
+Box) and the mouse camera. It is applied where the game's camera reads the right
+stick, so the stick itself is not changed: the Wind Waker baton, the Nintendo
+Gallery figure viewer's zoom and any other right-stick control keep their normal
+directions. The game also has its own setting for the vertical direction of
+first-person aiming; it still works, and with both inverted they cancel out in
+first person.
+
 While conducting, the **right stick supplies the notes**, including down. The
 **left stick controls the meter**: hold left or right to change the beat count.
 The D-pad does not substitute for the note stick in the original game. For example,
