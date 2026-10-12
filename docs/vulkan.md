@@ -923,6 +923,20 @@ The strict opt-in `WWHD_VK_VERTEX_COPY_WINDOW=1` instead fuses minimum and maxim
 
 Small register updates (at most 16 words) use the fused Vulkan path by default. Set `WWHD_VK_FUSE_SMALL_REGS=0` to disable it. Matched scene tests suggest roughly 2% less renderer CPU time; FPS benefit remains modest and subject to run drift.
 
+`WWHD_VK_MEMORY_LOG_FRAMES=N` (a positive integer, for example `300`) adds aggregate
+`[gfx] memory` reports every N renderer frames. Unset, zero or invalid values disable
+process queries and cache traversal. Reports include current process RSS (zero means
+unavailable), cached surfaces and their image allocations, unique upload blocks, and
+retained shader/decompiler/cache text and SPIR-V payload or capacity counters. The
+regular log and crash log ring retain these short lines; they contain no shader source,
+guest memory or save data.
+
+These counters are not a heap total or peak RSS. Shader counters exclude compiler
+results, asynchronous disk snapshots, metadata and allocator overhead; image counters
+exclude retired, non-cache and driver allocations. Use an aggregate heap summary with
+a repeatable scene when investigating retention, and disable diagnostics for performance
+comparisons.
+
 ## Choosing the GPU
 
 In Settings → Graphics → GPU (Vulkan), choose Automatic or a graphics card. The choice applies after restarting. Automatic keeps the driver's order, preferring cards with Vulkan 1.3. Unavailable cards show the reason; if a saved card is missing or unusable, the game uses Automatic and shows a notice.

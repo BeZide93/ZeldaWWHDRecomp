@@ -2925,14 +2925,20 @@ void swap() {
     countUploads(R.uploadBlocks);
     for (const auto& submission:R.submissions) countUploads(submission.uploadBlocks);
     constexpr double mib=1024.0*1024.0;
-    LOG("[gfx] memory frame %llu RSS %.2f MiB (0=unavailable); cached surfaces %llu images %llu allocated %.2f MiB (excludes retired/non-cache/driver images); upload blocks %llu %.2f MiB",
-        (unsigned long long)R.frame,resident_bytes()/mib,
-        (unsigned long long)R.surfaces.size(),(unsigned long long)images,imageBytes/mib,
+    LOG("[gfx] memory frame %llu RSS %.2f MiB (0=unavailable)",
+        (unsigned long long)R.frame,resident_bytes()/mib);
+    LOG("[gfx] memory cached surfaces %llu images %llu allocated %.2f MiB",
+        (unsigned long long)R.surfaces.size(),(unsigned long long)images,imageBytes/mib);
+    LOG("[gfx] memory upload blocks %llu %.2f MiB",
         (unsigned long long)seenUploads.size(),uploadBytes/mib);
-    LOG("[gfx] memory shader payload: %llu shaders decompiler-text %.2f MiB GLSL-capacity %.2f MiB verify-capacity %.2f MiB SPIRV-capacity %.2f MiB; disk %llu source-capacity %.2f MiB SPIRV-capacity %.2f MiB pending-source-capacity %.2f MiB (excludes compiler results, disk snapshots, metadata and allocator overhead)",
+    LOG("[gfx] memory shader payload: %llu shaders decompiler-text %.2f MiB GLSL-capacity %.2f MiB verify-capacity %.2f MiB SPIRV-capacity %.2f MiB",
         (unsigned long long)memory.shaders,memory.decompilerText/mib,memory.glslCapacity/mib,
-        memory.verifyCapacity/mib,memory.spirvCapacity/mib,(unsigned long long)memory.diskEntries,
-        memory.diskSourceCapacity/mib,memory.diskSpirvCapacity/mib,memory.pendingSourceCapacity/mib);
+        memory.verifyCapacity/mib,memory.spirvCapacity/mib);
+    LOG("[gfx] memory disk %llu source-capacity %.2f MiB SPIRV-capacity %.2f MiB pending-source-capacity %.2f MiB",
+        (unsigned long long)memory.diskEntries,memory.diskSourceCapacity/mib,
+        memory.diskSpirvCapacity/mib,memory.pendingSourceCapacity/mib);
+    LOG("[gfx] memory scope: payload/capacity excludes compiler results, disk snapshots, metadata and allocator overhead");
+    LOG("[gfx] memory scope: cached image allocations exclude retired, non-cache and driver images");
     // Excludes map/metadata/allocator overhead, compiler tickets/results,
     // async disk snapshots, non-cache/retired images and driver allocations.
   }
