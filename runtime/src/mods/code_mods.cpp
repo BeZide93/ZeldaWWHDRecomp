@@ -28,6 +28,7 @@ json::Value read(const fs::path& path) {
 }
 }
 namespace {
+bool g_fixed_build=false;  // startup(..., true): the decomp version
 void environment(const char* name,const std::string& value){
 #ifdef _WIN32
     _putenv_s(name,value.c_str());
@@ -68,13 +69,17 @@ fs::path selected(){
     return exe;
 }
 }
-void startup(int argc,char** argv){
+void startup(int argc,char** argv,bool fixed_build){
     launch_args.assign(argv,argv+argc);
+    g_fixed_build=fixed_build;
     if(const char* dir=std::getenv("WWHD_INSTALL_DIR"))install_dir=dir;
     else install_dir=fs::path(host::exe_dir()).parent_path();
     environment("WWHD_INSTALL_DIR",install_dir.string());
     auto config=install_dir/"guest-sdk.json";
     if(!std::getenv("WWHD_GUEST_BUILD_CONFIG")&&fs::is_regular_file(config))environment("WWHD_GUEST_BUILD_CONFIG",config.string());
+    // the decomp version (setup's option, docs/decomp-build.md) is a build of its own, without code-mod
+    // support: it is never replaced by the cached code-mod build of the normal game
+    if(fixed_build)return;
     try {
         auto exe=selected();if(exe.empty())return;
         auto current=fs::path(host::exe_dir())/fs::path(argv[0]).filename();
@@ -84,6 +89,7 @@ void startup(int argc,char** argv){
 }
 bool restart(std::string& error){
     auto failed=[&]{std::lock_guard guard(mutex);state.error=error;return false;};
+    if(g_fixed_build){error="The decomp version has no code-mod support; start the normal game for code mods";return failed();}
     try {auto exe=selected();if(exe.empty()){error="No completed code-mod build is available";return failed();}if(!replace(exe.string(),error))return failed();return true;}
     catch(const std::exception& e){error=e.what();return failed();}
 }

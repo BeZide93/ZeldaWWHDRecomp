@@ -368,7 +368,11 @@ int main(int argc, char** argv) {
         else if (!strcmp(argv[i], "--shader-prebuild-result")) shaderprebuild::resultPath = argv[++i];
         else if (!strcmp(argv[i], "--shader-prebuild-library")) shaderprebuild::runtimeLibrary = argv[++i];
     }
+#ifdef WWHD_DECOMP
+    mods::code::startup(argc, argv, true);  // the decomp version: never swapped for the normal game's code-mod build
+#else
     mods::code::startup(argc, argv);
+#endif
     apply_portable_mode();
     default_vulkan_cpu_paths();
 #ifdef _WIN32
