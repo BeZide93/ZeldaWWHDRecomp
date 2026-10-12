@@ -23,6 +23,7 @@
 #include "stereo.h"
 #include "../hdr.h"
 #include "attachment_view_usage.h"
+#include "background_cache_readiness.h"
 #include "../../build_info.h"
 #include "deferred_commands.h"
 #include "deferred_dispatch.h"
@@ -95,6 +96,7 @@ namespace gx2 { uint64_t flips_presented(); void checkpoint_vulkan_caches(); voi
 
 namespace gfxvk {
 Renderer R;
+namespace { BackgroundCacheReadiness backgroundCacheReadiness; }
 const VkFormatProperties& format_properties(VkFormat format) {
   auto [entry, inserted] = R.formatProperties.try_emplace(format);
   if (inserted) vkGetPhysicalDeviceFormatProperties(R.physicalDevice,format,&entry->second);
@@ -3606,6 +3608,11 @@ static void init_device(std::vector<const char *> extensions,
     const char* frame = getenv("WWHD_CAPTURE");
     request_tv_dump(path, frame ? std::max(0, atoi(frame)) : 120);
   }
+  // Instantiate both static worker states before the saver can be constructed, even when
+  // async compilation/warmup is disabled. They must outlive the saver's static destructor.
+  merge_pipeline_demand_cache(VK_NULL_HANDLE);
+  merge_pipeline_worker_cache(VK_NULL_HANDLE);
+  backgroundCacheReadiness.publish();
 }
 
 #ifdef WWHD_SDL_HOST
@@ -3727,17 +3734,21 @@ void save_renderer_caches() {
   vk::save_shader_cache();
   save_pipeline_cache(false);
 }
+bool background_renderer_caches_ready() { return backgroundCacheReadiness.available(); }
+void disable_background_renderer_caches() { backgroundCacheReadiness.withdraw(); }
 std::function<void()> background_renderer_caches() {
   // Capture host cache bytes under the GX2 lock. File work and the returned
   // completion wait own immutable state and run after releasing that lock.
   // No surface, command-buffer or GPU-idle wait during Android suspension.
-  if (!R.device) return {};
+  // Recheck under execution lock: a request may have raced shutdown withdrawal.
+  if (!backgroundCacheReadiness.available()) return {};
   merge_live_pipeline_caches(true);
   poll_pipeline_cache_write(false);
   start_pipeline_cache_write();
   return [write = pipelineCacheWrite] { if (write.valid()) write.wait(); };
 }
 void shutdown_renderer_caches() {
+  backgroundCacheReadiness.withdraw();
   // Destructive teardown is reserved for orderly shutdown under execution lock.
   reset_feedback_images();
   wait_idle();
