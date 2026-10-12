@@ -31,12 +31,15 @@ struct View {
 };
 // Supplied from the running executable marker, never from a saved preference.
 void set_code_mod_support(bool built);
+bool has_code_mod_support(); // this executable was built with code-mod support
 bool needs_code_mod_support(const std::string& id); // includes package dependencies
 void initialize(); // metadata only; before the game starts
 std::string directory();
 std::vector<View> list();
 bool install(const std::string& source,std::string& error,std::string* installed_id=nullptr); // directory or ZIP/.wwhdmod
-bool remove(const std::string& id,std::string& error);
+bool remove(const std::string& id,std::string& error); // also deletes the files its setup prepared
+// Bytes on disk: the package and the files its setup prepared (what Remove frees).
+uint64_t disk_use(const std::string& id);
 bool enable_after_code_rebuild(const std::string& id,std::string& error); // requires the same trust confirmation
 // switch_conflicts is the confirmed Switch action: disable conflicting Cemu packs atomically.
 bool enable(const std::string& id,bool on,std::string& error,bool switch_conflicts=false); // refuses unconfirmed native code

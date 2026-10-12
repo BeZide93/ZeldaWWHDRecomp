@@ -640,17 +640,24 @@ bool set_game_source(const std::string& game,const std::string& path,std::string
         if(sources.local_settings()==database.get("game_sources"))return;
         for(const auto& [id,r]:records)require(!r.loading,"Wait for mod preparation to finish before changing the game source");
         database["game_sources"]=sources.local_settings();
-        std::set<std::string> affected;
+        std::set<std::string> affected;bool undone=false;
         auto shared=game.starts_with("gc_")?std::string("gc_wind_waker"):game;
         for(const auto& [id,r]:records)if(std::any_of(r.manifest.setup.begin(),r.manifest.setup.end(),[&](const auto& step){return catalogue::uses_game_source(step,shared);})) {
-            affected.insert(id);database["setup_receipts"].object.erase(id);database["guest_prepared"].object.erase(id);
+            affected.insert(id);
+            // something the player had (a finished preparation, a built code mod) is undone: worth a notice
+            if(database.get("setup_receipts").object.contains(id)||database.get("guest_prepared").object.contains(id))undone=true;
+            database["setup_receipts"].object.erase(id);database["guest_prepared"].object.erase(id);
         }
         // A preset or another mod may enable one of these as a dependency.
         bool added=true;while(added){added=false;for(const auto& [id,r]:records)
             for(const auto& dep:r.manifest.dependencies)if(affected.contains(dep.id)&&affected.insert(id).second)added=true;}
-        for(auto& [name,p]:database["profiles"].object)for(const auto& id:affected){p["enabled"][id]=false;p["code_mod_pending"].object.erase(id);p["setup_pending"].object.erase(id);}
+        for(auto& [name,p]:database["profiles"].object)for(const auto& id:affected){
+            const auto& on=p.get("enabled").get(id);if(on.type==Value::Bool&&on.boolean)undone=true;
+            p["enabled"][id]=false;p["code_mod_pending"].object.erase(id);p["setup_pending"].object.erase(id);}
         try{save();}catch(...){database=previous;throw;}
-        dirty=true;notices.push_back("Game source changed. Dependent mods were turned off and need setup again; their files were kept. Restart to unload active mods.");
+        dirty=true;
+        // choosing the game for the first time (in a mod's review) switches nothing off: no notice then
+        if(undone)notices.push_back("Your GameCube game changed. Mods that use it were switched off and need to be set up again (switch them on). A restart unloads them.");
     });
 }
 bool run_setup_tool(const std::string& id,const std::string& step_id,std::string& error,std::string& last_output) {
@@ -724,7 +731,17 @@ bool install(const std::string& source,std::string& error,std::string* installed
     }auto m=manifest(stage);require(m.problem.empty()||m.problem.starts_with("No binary for")||m.problem.starts_with("GLSL shader packs require Vulkan"),m.problem);target=root/"Mods"/m.id;auto it=records.find(m.id);require(it==records.end()||(!wanted(m.id)&&!it->second.active&&!it->second.loading),it!=records.end()&&(it->second.manifest.kind=="content"||it->second.manifest.kind=="cemu"||it->second.manifest.kind=="guest")?"Disable this content mod and restart before updating":"Disable this mod and wait for it to unload before updating");fs::create_directories(target.parent_path());if(fs::exists(target)){fs::rename(target,backup);backed=true;}fs::rename(stage,target);moved=true;m=manifest(target);Record r;r.path=target;r.manifest=std::move(m);auto installed_id=r.manifest.id;records[installed_id]=std::move(r);if(installed_id_out)*installed_id_out=installed_id;if(backed){std::error_code cleanup;fs::remove_all(backup,cleanup);}dirty=true;
     }catch(...){if(moved)fs::remove_all(target);if(backed)fs::rename(backup,target);if(fs::exists(stage))fs::remove_all(stage);throw;}
 });}
-bool remove(const std::string& id,std::string& error){return operation(error,[&]{auto it=records.find(id);require(it!=records.end(),"Mod not found");require(!wanted(id)&&!it->second.active&&!it->second.loading,(it->second.manifest.kind=="content"||it->second.manifest.kind=="cemu"||it->second.manifest.kind=="guest")?"Disable this content mod and restart before removing":"Disable this mod and wait for it to unload before removing");for(const auto& [other,r]:records)if(wanted(other))for(const auto& d:r.manifest.dependencies)require(d.id!=id,r.manifest.name+" depends on this mod");auto previous=database;for(auto& [name,p]:database["profiles"].object){p["enabled"].object.erase(id);p["config"].object.erase(id);p["setup_pending"].object.erase(id);}database["native_trust"].object.erase(id);database["experimental_ack"].object.erase(id);database["catalogue_experimental"].object.erase(id);database["guest_regions"].object.erase(id);database["guest_prepared"].object.erase(id);database["setup_receipts"].object.erase(id);try{save();}catch(...){database=previous;throw;}fs::remove_all(it->second.path);records.erase(it);dirty=true;});}
+bool remove(const std::string& id,std::string& error){return operation(error,[&]{auto it=records.find(id);require(it!=records.end(),"Mod not found");require(!wanted(id)&&!it->second.active&&!it->second.loading,(it->second.manifest.kind=="content"||it->second.manifest.kind=="cemu"||it->second.manifest.kind=="guest")?"Disable this content mod and restart before removing":"Disable this mod and wait for it to unload before removing");for(const auto& [other,r]:records)if(wanted(other))for(const auto& d:r.manifest.dependencies)require(d.id!=id,r.manifest.name+" depends on this mod");auto previous=database;for(auto& [name,p]:database["profiles"].object){p["enabled"].object.erase(id);p["config"].object.erase(id);p["setup_pending"].object.erase(id);}database["native_trust"].object.erase(id);database["experimental_ack"].object.erase(id);database["catalogue_experimental"].object.erase(id);database["guest_regions"].object.erase(id);database["guest_prepared"].object.erase(id);database["setup_receipts"].object.erase(id);try{save();}catch(...){database=previous;throw;}fs::remove_all(it->second.path);std::error_code ignored;fs::remove_all(root/"Data"/id,ignored);records.erase(it);dirty=true;});}
+uint64_t disk_use(const std::string& id){
+    // the package files and the files its setup prepared (Data/<id>); Remove deletes both
+    fs::path package,data;{std::lock_guard guard(mutex);auto it=records.find(id);if(!ready||it==records.end())return 0;package=it->second.path;data=root/"Data"/id;}
+    uint64_t total=0;
+    for(const auto& folder:{package,data}){std::error_code error;if(!fs::is_directory(folder,error)||fs::is_symlink(folder,error))continue;
+        for(fs::recursive_directory_iterator it(folder,fs::directory_options::skip_permission_denied,error),end;!error&&it!=end;it.increment(error))
+            if(!it->is_symlink(error)&&it->is_regular_file(error))total+=it->file_size(error);}
+    return total;
+}
+bool has_code_mod_support(){std::lock_guard guard(mutex);return code_mod_support;}
 void set_code_mod_support(bool built){std::lock_guard guard(mutex);code_mod_support=built;}
 bool needs_code_mod_support(const std::string& id){
     std::lock_guard guard(mutex);std::set<std::string> seen;

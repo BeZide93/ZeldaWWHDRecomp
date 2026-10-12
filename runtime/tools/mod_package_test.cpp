@@ -697,7 +697,11 @@ int main(int argc, char** argv) {
     assert(install(toolpkg.string(),error)&&confirm_native("setup-fixture",error));
     assert(!run_setup_tool("setup-fixture","prepare",error,output)&&output.find("synthetic final failure")!=std::string::npos);
     assert(!setup_steps("setup-fixture")[0].satisfied);env("WWHD_GUEST_BUILD_CONFIG",nullptr);
+    // Remove also deletes what its setup prepared, and says how much that is beforehand
+    auto prepared=fs::path(directory()).parent_path()/"Data/setup-fixture";
+    assert(fs::is_regular_file(prepared/"result.bin")&&disk_use("setup-fixture")>fs::file_size(prepared/"result.bin"));
     assert(remove("setup-fixture",error));
+    assert(!fs::exists(prepared)&&disk_use("setup-fixture")==0);
     if(argc == 4) {
         assert(install(argv[3],error));
         auto id=list().at(0).id;
