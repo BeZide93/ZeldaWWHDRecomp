@@ -64,7 +64,9 @@ RUNTIME = {
 }
 # tried in order; "continuous" serves the pinned bytes only until upstream publishes a newer build
 RUNTIME_URLS = [
-    "https://github.com/AppImage/type2-runtime/releases/download/continuous/",
+    # our own copy (release asset "appimage-runtime-8f39b89": the runtimes plus type2-runtime's LICENSE);
+    # upstream's "continuous" release is replaced over time and would stop matching the pin
+    "https://github.com/ZeldaWWHDRecomp/ZeldaWWHDRecomp/releases/download/appimage-runtime-8f39b89/",
 ]
 
 APPRUN = """#!/bin/sh
