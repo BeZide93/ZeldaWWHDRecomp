@@ -10,6 +10,7 @@ game functions and variables are referenced by address only.
 | `hud-demo` | rectangle, original PNG and heart-count text on TV and GamePad, with anchors and state-load handle renewal. |
 | `button-icons` | combined code/art package and face-layout setting reads; currently an overdraw candidate awaiting game-frame calibration. |
 | `hud-cost` | performance fixture: exactly 200 rectangles versus no HUD callback, selected by a restart-only option. |
+| `rito-letter` | a story mod's letter (`wwhd_mail_send`): it waits in the Rito postbox of the loaded save file and arrives once per file. Original text. |
 | `addcalc-replace` | a full replacement of a small game function (`cLib_addCalc2`, `0200ED84`) with an equivalent implementation; every other call goes to the game's own code (`WWHD_GAME_ORIGINAL`). No visible change; the log counts the calls. |
 
 Build (needs clang with the PowerPC target and ld.lld; on macOS `brew install llvm lld`):

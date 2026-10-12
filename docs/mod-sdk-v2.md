@@ -19,6 +19,7 @@ supported.
 - [Host services](#host-services)
 - [Port settings](#port-settings)
 - [Drawing on screen (HUD API v1)](#drawing-on-screen-hud-api-v1)
+- [Letters](#letters)
 - [Packages with content and images](#packages-with-content-and-images)
 - [Trust](#trust)
 - [Save states](#save-states)
@@ -143,6 +144,7 @@ The examples in [`examples/guest-mods`](../examples/guest-mods) are complete mod
 | `addcalc-replace` | replacing a game function (`cLib_addCalc2`) and calling the original |
 | `hud-demo` | HUD drawing with package artwork and text, texture reload after a state load |
 | `button-icons` | reading port settings, following the game's button panes |
+| `rito-letter` | a story mod's letter, delivered once per save file by the Rito postbox |
 
 ## Hooks and replacements
 
@@ -201,6 +203,7 @@ use object fields that are the same in both versions.
 | `wwhd_setting_get`, `wwhd_setting_changed` | Read-only port settings, below |
 | `wwhd_hud_*` | Drawing on screen, below |
 | `wwhd_audio_*` | Bounded PCM streams, below |
+| `wwhd_mail_send`, `wwhd_mail_state` | A letter from your mod, delivered by the Rito postbox, below |
 | `memcpy`, `memmove`, `memset` | As usual |
 
 Your mod can also call any game function. Original synthesized audio can use the PCM stream service below.
@@ -291,6 +294,65 @@ image, since that changes registration at a map boundary.
 It draws on Metal and Vulkan, in the TV picture and the GamePad screen (window or
 picture-in-picture); the settings overlay stays on top. Positions are not interpolated
 between logic steps.
+
+## Letters
+
+A story mod (a mod that adds a quest) can announce itself the way Wind Waker does: with a
+letter. The Rito postbox hands it out like the game's own mail, and the game shows it in its
+letter window.
+
+```c
+#include "wwhd_guest.h"
+#include "wwhd/functions.h"
+#include "wwhd/save.h"
+
+WWHD_HOOK(WWHD_ADDR_daPy_Execute, send_letter, (void* link)) {
+    (void)link;
+    u16 max_life = dComIfGs_player_status_a.max_life;
+    if (max_life < 12 || max_life > 80) return;  /* no save file loaded */
+    wwhd_mail_send("hello", "A wandering storyteller",
+                   "Dear Link,\na new tale has reached the Great Sea.\nFair winds!");
+}
+```
+
+`wwhd_mail_send(letter_id, sender, text)` puts the letter in the postbox of the loaded save file,
+unless that file already got it. Call it from a gameplay hook; calling it again (even every logic
+step) never sends the letter twice. It returns the letter's state:
+
+| Result | Meaning |
+| --- | --- |
+| `WWHD_MAIL_NONE` (0) | never sent to this save file (only from `wwhd_mail_state`) |
+| `WWHD_MAIL_WAITING` (1) | waiting in the postbox |
+| `WWHD_MAIL_READ` (2) | handed out and read |
+| `WWHD_MAIL_INVALID` (-1) | invalid ID, sender or text |
+| `WWHD_MAIL_NO_ROOM` (-2) | no save file loaded, or it already holds 19 letters from mods |
+
+`wwhd_mail_state(letter_id)` returns the state without sending; use it, for example, to start
+your quest once the letter was read.
+
+- **ID:** 1 to 32 characters `a`-`z`, `0`-`9`, `-`, `_`, `.`; unique within your mod.
+- **Sender:** one line, up to 48 bytes. It is shown below the text as the signature.
+- **Text:** plain UTF-8, up to 1200 bytes; `\n` breaks a line. Other control characters are
+  refused (the game uses them for its own text codes). Keep lines short (about 40 characters)
+  and the letter to about ten lines. Characters the game's font lacks are not shown.
+- The text of the first call in a session is used; the letter can only be shown while your mod is
+  on.
+
+**Delivery.** Any Rito postbox hands out waiting letters, after the game's own and under the same
+conditions (the postbox only hands out mail once the game allows it). A letter from a mod
+needs no postage. Like the game's letters it comes with an enclosure, which Link takes after
+reading: one green rupee. Several waiting letters are handed out one after another.
+
+**Saving.** Whether a letter was sent and read is stored in the save file, in a block of the save
+data that the game itself leaves unused (it stays zero in the game's own saves). It is saved and
+loaded with the game, kept by full and portable save states, and cleared by a new game or the
+Second Quest. A letter received but not saved arrives again after loading the older save. The
+text is not stored; turning your mod off leaves its letters waiting in the record, and nothing
+changes for the postbox.
+
+**Players without letter mods.** The postbox and message functions are only hooked while a loaded
+mod uses `wwhd_mail_*`. If another mod replaces one of them, letters from mods are not delivered
+in that session and the log says so.
 
 ## Packages with content and images
 

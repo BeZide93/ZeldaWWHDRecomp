@@ -171,3 +171,18 @@ s32 wwhd_audio_submit(u32 handle,const short* samples,u32 frames,u32 channels);
 s32 wwhd_audio_available(u32 handle);
 s32 wwhd_audio_close(u32 handle);
 unsigned long long wwhd_audio_epoch(void);
+
+/* Letters v1: a letter from the mod, delivered by the Rito postbox like the game's own mail.
+ * letter_id: 1..32 of a-z 0-9 - _ . (unique within the mod). sender: up to 48 bytes, one line.
+ * text: up to 1200 bytes of UTF-8 plain text, '\n' for line breaks, no other control codes.
+ * The first call in a session keeps the text; the save file records whether the letter was
+ * delivered and read, so calling again (every logic step is fine) never sends it twice.
+ * Returns the letter's state in the current save file, or a negative error. */
+#define WWHD_MAIL_API_VERSION 1
+#define WWHD_MAIL_NONE 0     /* never sent to this save file */
+#define WWHD_MAIL_WAITING 1  /* waiting in the postbox */
+#define WWHD_MAIL_READ 2     /* handed out and read */
+#define WWHD_MAIL_INVALID (-1)
+#define WWHD_MAIL_NO_ROOM (-2)  /* no save loaded, or its letter record is full (19 letters) */
+s32 wwhd_mail_send(const char* letter_id, const char* sender, const char* text);
+s32 wwhd_mail_state(const char* letter_id);

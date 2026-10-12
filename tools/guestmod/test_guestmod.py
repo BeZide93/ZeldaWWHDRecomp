@@ -121,7 +121,7 @@ WWHD_HOOK(0x0240EBB0, mapped, (void* actor)) {
         return os.path.join(d, "mod.elf")
 
     def test_examples_build(self):
-        for mod in ("heart-ticker", "addcalc-replace", "hud-demo", "button-icons", "hud-cost"):
+        for mod in ("heart-ticker", "addcalc-replace", "hud-demo", "button-icons", "hud-cost", "rito-letter"):
             with tempfile.TemporaryDirectory() as d:
                 pkg = os.path.join(d, "pkg")
                 os.makedirs(pkg)
@@ -200,6 +200,8 @@ WWHD_HOOK(0x02000000, all_services, (void)) {
     wwhd_log_int("step", (int)wwhd_logic_step());
     wwhd_file_write("progress.bin", p, 64);
     wwhd_file_read("progress.bin", p, 64);
+    if (wwhd_mail_send("hello", "A friend", "Text") == WWHD_MAIL_WAITING) wwhd_log("sent");
+    wwhd_log_int("letter", wwhd_mail_state("hello"));
     wwhd_free(p);
 }
 '''
@@ -210,7 +212,8 @@ WWHD_HOOK(0x02000000, all_services, (void)) {
                 if kind == "svc":
                     self.assertIn("c->pc = 0x%08Xu;" % address, translated, name)
             for name in ("wwhd_audio_open","wwhd_audio_submit","wwhd_audio_available","wwhd_audio_close","wwhd_audio_epoch","wwhd_file_write","wwhd_hud_register","wwhd_hud_emit","wwhd_hud_texture",
-                         "wwhd_hud_release","wwhd_hud_epoch","wwhd_hud_clip","wwhd_setting_get","wwhd_setting_changed"):
+                         "wwhd_hud_release","wwhd_hud_epoch","wwhd_hud_clip","wwhd_setting_get","wwhd_setting_changed",
+                         "wwhd_mail_send","wwhd_mail_state"):
                 self.assertIn(name,t.services)
             Path(d, "manifest.json").write_text(json.dumps({"kind": "guest", "id": "services", "guest": {"api_version": 1}}))
             result = builder.build(d, str(Path(d, "cache")), 0x7F000000, builder.default_cc(), str(Path(REPO, "runtime/include")))

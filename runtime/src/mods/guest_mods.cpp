@@ -15,6 +15,8 @@
 #include "guest_hud.h"
 #include "guest_audio.h"
 #include "guest_png.h"
+#include "story_mail.h"
+#include "story_mail_book.h"
 #include "input.h"
 #include "true60.h"
 #include "guest_addr.h"
@@ -243,6 +245,26 @@ void svc_hud_record(Cpu* c,bool clip_only) {
 }
 void svc_hud_emit(Cpu* c) {svc_hud_record(c,false);}
 void svc_hud_clip(Cpu* c) {svc_hud_record(c,true);}
+// Letters (story_mail.h). Strings must lie in the calling mod's memory; too long or unterminated
+// strings make the call fail with WWHD_MAIL_INVALID.
+bool mod_string(const Loaded& mod,uint32_t address,uint32_t limit,std::string& out) {
+    out.clear();
+    for(uint32_t i=0;i<=limit;++i){
+        if(!setting_buffer(mod,address+i,1))return false;
+        char ch=char(ld8(address+i));if(!ch)return true;out+=ch;
+    }
+    return false;
+}
+void svc_mail_send(Cpu* c) {
+    auto& mod=owner(c);std::string id,sender,text;
+    if(!mod_string(mod,c->r[3],story_mail::kMaxIdBytes,id)||!mod_string(mod,c->r[4],story_mail::kMaxSenderBytes,sender)||
+       !mod_string(mod,c->r[5],story_mail::kMaxTextBytes,text)){c->r[3]=uint32_t(story_mail::kResultInvalid);return;}
+    c->r[3]=uint32_t(story_mail::send(mod.id,id,sender,text,[&mod](uint32_t bytes){return mod.heap->allocate(bytes);}));
+}
+void svc_mail_state(Cpu* c) {
+    auto& mod=owner(c);std::string id;
+    c->r[3]=uint32_t(mod_string(mod,c->r[3],story_mail::kMaxIdBytes,id)?story_mail::state(mod.id,id):story_mail::kResultInvalid);
+}
 const std::unordered_map<std::string, PpcFunc> kServices = {
     {"wwhd_audio_epoch",svc_audio_epoch},{"wwhd_audio_open",svc_audio_open},
     {"wwhd_audio_available",svc_audio_available},{"wwhd_audio_submit",svc_audio_submit},{"wwhd_audio_close",svc_audio_close},
@@ -255,11 +277,14 @@ const std::unordered_map<std::string, PpcFunc> kServices = {
     {"wwhd_hud_clip",svc_hud_clip},{"wwhd_hud_release",svc_hud_release},{"wwhd_hud_epoch",svc_hud_epoch},{"wwhd_hud_emit",svc_hud_emit},
     {"wwhd_setting_get",svc_setting_get},{"wwhd_setting_changed",svc_setting_changed},
     {"wwhd_logic_dt",svc_logic_dt},{"wwhd_logic_step",svc_logic_step},
+    {"wwhd_mail_send",svc_mail_send},{"wwhd_mail_state",svc_mail_state},
     {"memcpy", svc_memcpy},      {"memmove", svc_memcpy},       {"memset", svc_memset},
 };
 PpcFunc service(const char* name) {
     auto it = kServices.find(name);
-    return it == kServices.end() ? nullptr : it->second;
+    if (it == kServices.end()) return nullptr;
+    if (!strncmp(name, "wwhd_mail_", 10)) story_mail::note_import();  // the postbox hooks are needed
+    return it->second;
 }
 
 const WWHDGuestHostV1 kHost = {
@@ -388,6 +413,18 @@ void init() {
         if(result.module.empty()||!load_one(result.module,error,pkg,base,result.allocation_size))
             exception_report::raise(error.empty()?"Guest builder returned no module":error);
     });
+    // Letters from mods: host replacements of the postbox and message functions, only when a loaded
+    // mod uses the letter services (story_mail.h).
+    story_mail::set_game_calls(call_original,[](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);});
+    story_mail::install([](uint32_t addr) {
+        auto it=g_chains.find(addr);return it==g_chains.end()?std::string():it->second.replace_mod;
+    },[](uint32_t addr,PpcFunc fn) {
+        int ordinal=ordinal_of(addr);
+        if(ordinal<0)fatal("[guestmods] letters: %08X is not a game function",addr);
+        Chain& ch=g_chains[addr];
+        ch.addr=addr;ch.ordinal=uint32_t(ordinal);ch.replace=fn;ch.replace_mod="the port's letter service";
+        g_mod_hook_flags[ordinal]=1;
+    });
     if(getenv("WWHD_GUEST_MODS"))LOG("[guestmods] WWHD_GUEST_MODS is retired; install and trust guest packages in the mod manager");
 }
 
@@ -419,6 +456,7 @@ void state_loaded() {
     std::lock_guard lock(g_hud_mutex);
     hud::store().reset();
     pcm::store().reset();
+    story_mail::state_loaded();
     for(auto& mod:g_loaded)mod.hud_called=false;
 }
 
