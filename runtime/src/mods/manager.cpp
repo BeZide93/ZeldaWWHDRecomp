@@ -29,6 +29,12 @@ const Entry catalogue[] = {
      "Boost Link's running and swimming speed, separate multipliers, held or toggled, with a stamina "
      "bar and a cooldown. Default: hold L3 (rebind it in Controls).",
      "WWHD_MOD_MOVE_SPEED", move_speed, set_move_speed},
+    {"ladder-speed", "Faster ladders", "Gameplay",
+     "Climb ladders faster. The climbing animation plays faster, so hands and feet stay in step.",
+     "WWHD_MOD_LADDER_SPEED", ladder_speed, set_ladder_speed},
+    {"sidle-speed", "Faster sidling", "Gameplay",
+     "Sidle along walls faster. The animation speeds up with the movement.",
+     "WWHD_MOD_SIDLE_SPEED", sidle_speed, set_sidle_speed},
     {"fast-forward", "Fast forward cutscenes and dialogue", "Gameplay",
      "Hold the selected button during events to play faster. Choices still wait for input.",
      "WWHD_MOD_FAST_FORWARD", fast_forward, set_fast_forward},
@@ -38,6 +44,22 @@ const Entry catalogue[] = {
 };
 std::string key(const Entry& entry) { return std::string("mod.")+entry.id+".enabled"; }
 bool player_preferences() { return !std::getenv("WWHD_NO_HOST_INPUT"); }
+const NumberOption traversal_catalogue[] = {
+    {"mod.ladder-speed.factor", "ladder-speed.factor", "WWHD_MOD_LADDER_FACTOR", ladder_speed_factor, set_ladder_speed_factor},
+    {"mod.sidle-speed.factor", "sidle-speed.factor", "WWHD_MOD_SIDLE_FACTOR", sidle_speed_factor, set_sidle_speed_factor},
+};
+}  // namespace
+
+std::span<const NumberOption> traversal_options() { return traversal_catalogue; }
+void set_traversal_option(std::string_view profile_key, float value) {
+    for (const auto& option : traversal_catalogue) {
+        if (profile_key != option.profile_key) continue;
+        option.apply(value);
+        const float applied = option.value();
+        if (player_preferences()) hostui::set(option.key, std::to_string(applied));
+        packages::remember_option(option.profile_key, applied);
+        return;
+    }
 }
 
 std::span<const Entry> entries() { return catalogue; }
@@ -103,6 +125,7 @@ void load_saved() {
     std::string anim;
     if (!std::getenv("WWHD_MOD_MOVE_ANIM") && hostui::get("mod.move-speed.anim", anim) && valid_move_anim_id(anim))
         set_move_speed_anim(move_anim_from_id(anim));
+    for (const auto& option : traversal_options()) number(option.key, option.startup_env, 1.f, 3.f, option.apply);
     number("mod.direct-camera.speed", "WWHD_MOD_CAMERA_SPEED", .5f, 2.f, set_camera_speed);
     std::string button;
     if (hostui::get("mod.move-speed.button", button)) {

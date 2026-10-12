@@ -1662,6 +1662,12 @@ void tab_mods() {
                      "while boosting; full-speed running already uses dash. Sprint pose adds a forward "
                      "lean and arm drive while running freely, blended with the boost. Rebind the "
                      "chosen game button in Controls.");
+            } else if (selected == "ladder-speed" || selected == "sidle-speed") {
+                const bool ladder = selected == "ladder-speed";
+                const char* key = ladder ? "ladder-speed.factor" : "sidle-speed.factor";
+                float factor = ladder ? mods::ladder_speed_factor() : mods::sidle_speed_factor();
+                if (ImGui::SliderFloat("Speed", &factor, 1.f, 3.f, "%.2fx"))
+                    hostui::post([key, factor] { mods::manager::set_traversal_option(key, factor); });
             } else if (selected == "mouse-camera") {
                 float sensitivity = mods::mouse_sensitivity();
                 if (ImGui::SliderFloat("Sensitivity", &sensitivity, .08f, .3f, "%.3f"))

@@ -54,6 +54,25 @@ void move_start_effect(Cpu* c, uint32_t link); // consume a new grounded sprint'
 void move_trail_effect(Cpu* c, uint32_t link); // small puffs behind the feet while running under boost
 void move_swim_effect(Cpu* c, uint32_t link);  // splash per arm pull and a foam trail while swimming under boost
 
+// ---- traversal mods (traversal.cpp; issue #95). Factors are clamped to 1x..3x. ----
+bool ladder_speed();                      // faster ladder climbing (the clips play faster)
+void set_ladder_speed(bool on);
+float ladder_speed_factor();
+void set_ladder_speed_factor(float factor);
+bool sidle_speed();                       // faster sidling along walls
+void set_sidle_speed(bool on);
+float sidle_speed_factor();
+void set_sidle_speed_factor(float factor);
+
+// hooks' helpers (traversal_settings.cpp, traversal.cpp)
+bool traversal_anim();                          // a mod that scales Link's clips is on (ladders, sidling)
+float traversal_anim_factor(uint32_t proc);    // setFrameCtrl: rate factor in Link's procedure `proc` (1 = stock)
+// mMaxNormalSpeed x the sidle factor for the length of one call (setNormalSpeedF with its steps,
+// setBlendWHideMoveAnime), while Link sidles with the mod on; a no-op otherwise
+struct SidleScope { uint32_t link = 0, stock = 0, scaled = 0; };
+SidleScope sidle_scope_begin(Cpu* c, bool speed_steps);
+void sidle_scope_end(const SidleScope& scope);
+
 // The boost's on-screen bar (Vulkan present.cpp, Metal mod_hud.mm), read from the render thread.
 struct MoveHud {
     float stamina;    // 0..1

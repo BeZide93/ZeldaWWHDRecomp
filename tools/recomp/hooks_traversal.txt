@@ -1,0 +1,4 @@
+# Traversal mods (runtime/src/mods/traversal.cpp): faster ladders and sidling (#95). With each mod
+# off, every hook runs only the original code.
+02427CA8  # daPy_lk_c::procLadderMove: the rung clip's rate from the stick, times the ladder factor
+0242A218  # daPy_lk_c::setBlendWHideMoveAnime: the sidle blend sees the scaled mMaxNormalSpeed

@@ -32,9 +32,9 @@ guide the design; any future reuse requires a separate license review.
 Open the in-game settings overlay (F1, Fn+F1 on many Macs, Cmd+, or Settings in
 the menu) and select **Mods**. The searchable built-in catalogue manages the
 mods that are part of this build: direct camera, mouse camera, first-person
-shortcut, wall climbing, run/swim speed, quick doors, fast forward and fast
-scene changes. Descriptions and options appear beside the selected entry. All
-defaults are off.
+shortcut, wall climbing, run/swim speed, faster ladders, faster sidling, quick
+doors, fast forward and fast scene changes.
+Descriptions and options appear beside the selected entry. All defaults are off.
 
 Run/swim speed offers three animation choices. **Native** keeps the game's cycle with the boosted
 cadence. **Dash instead of walk** replaces the low-speed walk portion; the normal full-speed run
@@ -58,6 +58,18 @@ exhausting the bar or genuinely stopping ends it. Resuming the same cycle after 
 emit a second starting burst. While the swim boost is active, each arm pull splashes the game's
 own sea-coloured water element at that side, and a light foam trail follows behind every few
 steps. Both use the game's own water particles, so the native swim wake is untouched.
+
+Faster ladders and faster sidling each have one speed slider (1x to 3x, 1.5x when first
+switched on). Both speed up the game's own animation, so hands and feet stay in step with the
+movement: a ladder clip moves Link by its own motion, and sidling scales the animation and the
+sidling speed together. Climbing on and off a ladder speeds up the same way, and the next rung
+starts right after the footstep instead of after a short pause, so the climb speeds up by about
+the chosen factor; the footstep sounds stay on their frames. On the macOS menu bar the same
+switches and a few speed presets are under Gameplay. `WWHD_MOD_LADDER_SPEED=1` and
+`WWHD_MOD_SIDLE_SPEED=1` switch them on at startup, with the factors `WWHD_MOD_LADDER_FACTOR` and
+`WWHD_MOD_SIDLE_FACTOR`. With a mod off, the game runs its original code. These mods work the
+same at 30 fps, with 60/120/240 fps interpolation and with true 60: they change animation rates
+and speed targets inside the game's own steps, never amounts added per frame.
 
 The Installed packages section accepts a local folder or `.wwhdmod` ZIP. Choose
 it with the file/folder picker, then press Install package. Installed packages

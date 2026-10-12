@@ -9,6 +9,7 @@
 #include "../platform/host.h"
 #include <sys/stat.h>
 #include <ctime>
+#include <string>
 
 #include "../interp.h"
 #include "../savestate.h"
@@ -518,6 +519,19 @@ void install_menu(NSWindow* tv) {
     [gp addItem:[NSMenuItem separatorItem]];
     toggle(gp, @"Climb any wall", ^BOOL { return mods::climb_enabled(); }, ^(BOOL on) { mods::set_climb_enabled(on); },
            @"Grab and climb any wall (stamina wheel; B or A lets go)");
+    // traversal mods (mods/traversal.cpp): the switch, then the factor presets (the overlay has sliders)
+    auto factors = [gp](NSString* title, const char* id, BOOL (^on)(void), NSString* tip, const char* key, float (*value)()) {
+        std::string mod = id;
+        toggle(gp, title, on, ^(BOOL v) { mods::manager::set_enabled(mod, v); }, tip);
+        std::string option = key;
+        for (float f : {1.25f, 1.5f, 2.f, 3.f})
+            toggle(gp, [NSString stringWithFormat:@"        Speed %gx", f], ^BOOL { return value() == f; },
+                   ^(BOOL) { mods::manager::set_traversal_option(option, f); });
+    };
+    factors(@"Faster ladders", "ladder-speed", ^BOOL { return mods::ladder_speed(); },
+            @"The climbing animation plays faster, so hands and feet stay in step", "ladder-speed.factor", mods::ladder_speed_factor);
+    factors(@"Faster sidling", "sidle-speed", ^BOOL { return mods::sidle_speed(); },
+            @"Sidling along walls is faster; the animation speeds up with the movement", "sidle-speed.factor", mods::sidle_speed_factor);
     toggle(gp, @"Quick doors", ^BOOL { return mods::quick_doors(); }, ^(BOOL on) { mods::set_quick_doors(on); },
            @"Door events (walk-in, opening, closing) run at 4x speed");
     toggle(gp, @"Fast forward cutscenes and dialogue (hold ZR by default)", ^BOOL { return mods::fast_forward(); },
