@@ -26,6 +26,12 @@ what is on `devel` and not released yet (also in the
   builds and save backups (existing caches are reused or rebuilt automatically). Only a folder deeper
   than 175 characters makes setup stop right away, before downloading anything, and ask you to move it
   to a shorter place such as `C:\Games\WindWakerHD`.
+- **Development builds (macOS): setup can also build the decomp version** (experimental, off by
+  default). A checkbox in setup (or `--decomp`) builds, next to the normal game, a version in which the
+  game functions of the public decompilation run as compiled source; it is built from your own game
+  on your Mac, and the normal game is always built first and stays the default. Choose which one starts
+  in setup, or start Wind Waker HD with `--decomp`. The decomp build now uses the readable
+  decompilation; its model data is generated from your game at build time. Regular releases are unchanged.
 - **Experimental: build the game from the decompilation** (macOS, for developers). The CMake option
   `WWHD_DECOMP=ON` compiles the game code from the public, verified decompilation
   ([ZeldaWWHDDecomp/wwhd](https://github.com/ZeldaWWHDDecomp/wwhd), a submodule in `decomp/`) instead of
