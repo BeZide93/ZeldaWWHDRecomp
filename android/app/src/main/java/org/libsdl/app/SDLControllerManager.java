@@ -102,6 +102,16 @@ public class SDLControllerManager
     /**
      * This method is called by SDL using JNI.
      */
+    private static native void nativeRequestDeviceRefresh();
+
+    // The SDL Android backend otherwise discovers device changes on a 3 s poll.
+    // Schedule its enumeration on the native input thread, preserving SDL's
+    // joystick-lock -> Java-handler-lock order (never enumerate directly here).
+    public static void requestDeviceRefresh() {
+        try { nativeRequestDeviceRefresh(); }
+        catch (UnsatisfiedLinkError ignored) { /* Native game library not loaded yet. */ }
+    }
+
     static void pollInputDevices() {
         mJoystickHandler.pollInputDevices();
     }

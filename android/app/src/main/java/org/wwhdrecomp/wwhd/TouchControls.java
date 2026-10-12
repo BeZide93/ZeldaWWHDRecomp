@@ -11,6 +11,7 @@ import android.view.MotionEvent;
 import android.view.View;
 
 import org.libsdl.app.SDLActivity;
+import org.libsdl.app.SDLControllerManager;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -66,6 +67,7 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
         if (inputs != null) {
             inputs.registerInputDeviceListener(this, null);
             for (int id : inputs.getInputDeviceIds()) controller |= isController(InputDevice.getDevice(id));
+            SDLControllerManager.requestDeviceRefresh();
         }
         // the top left corner has the game's view button and the show/hide button: nothing else there
         controls.add(new Control(KIND_STICK, 0, "", 0.14f, 0.70f, 0.13f));
@@ -252,6 +254,7 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
     }
 
     @Override public void onInputDeviceAdded(int id) {
+        SDLControllerManager.requestDeviceRefresh();
         if (controller || !isController(InputDevice.getDevice(id))) return;
         controller = true;
         for (Control c : controls) { c.pressed = false; c.sx = 0; c.sy = 0; }
@@ -260,12 +263,15 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
         invalidate();
     }
     @Override public void onInputDeviceRemoved(int id) {
+        SDLControllerManager.requestDeviceRefresh();
         if (!controller || inputs == null) return;
         boolean any = false;
         for (int other : inputs.getInputDeviceIds()) any |= other != id && isController(InputDevice.getDevice(other));
         if (!any) { controller = false; invalidate(); }
     }
-    @Override public void onInputDeviceChanged(int id) {}
+    @Override public void onInputDeviceChanged(int id) {
+        SDLControllerManager.requestDeviceRefresh();
+    }
 
     private void update() {
         if (!active()) return;

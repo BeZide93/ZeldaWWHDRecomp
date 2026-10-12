@@ -1,3 +1,7 @@
+#ifdef __ANDROID__
+#include <jni.h>
+#include "overlay/hostui.h"
+#endif
 #include "../mods/fast_forward.h"
 #ifdef WWHD_HAS_VULKAN
 #include "gfx/vulkan/stutter_trace.h"
@@ -388,6 +392,31 @@ static void close_controller(SDL_JoystickID id){
  motion::controller_gone(id);
  note_dominant_labels();  // the dominant pad may have changed
 }
+#ifdef __ANDROID__
+extern "C" JNIEXPORT void JNICALL Java_org_libsdl_app_SDLControllerManager_nativeRequestDeviceRefresh(JNIEnv* env, jclass type) {
+ static std::atomic<bool> queued{false};
+ if(queued.exchange(true))return;
+ auto global=(jclass)env->NewGlobalRef(type);
+ if(!global){queued=false;return;}
+ hostui::post([global] {
+  queued=false;
+  auto* env=(JNIEnv*)SDL_GetAndroidJNIEnv();
+  // Match SDL's existing lock order. Calling Java's synchronized enumeration
+  // from the UI listener directly could deadlock against SDL's input pump.
+  SDL_LockJoysticks();
+  const auto method=env->GetStaticMethodID(global,"pollInputDevices","()V");
+  if(method)env->CallStaticVoidMethod(global,method);
+  const bool failed=env->ExceptionCheck();
+  if(failed)env->ExceptionClear();
+  SDL_UnlockJoysticks();
+  env->DeleteGlobalRef(global);
+  if(failed){LOG("[input] Android controller refresh failed");return;}
+  int count=0;auto* ids=SDL_GetGamepads(&count);
+  for(int i=0;i<count;++i)open_controller(ids[i]);
+  SDL_free(ids);note_dominant_labels();
+ });
+}
+#endif
 void init(){
  wwhd_trace::sink = [](const char* line) { LOG("[overlay-trace] %s",line); };
  if(!wwhd_trace::handoff()) LOG("[overlay] diagnostic mouse handoff disabled (WWHD_OVERLAY_MOUSE_HANDOFF=0)");
@@ -608,6 +637,7 @@ void update(){
  // + went down: the view may switch to the GamePad screen while the game is paused
  // (not while the settings overlay or the text prompt takes the buttons: Start acts there)
  {static bool plus=false;const bool now=(state.buttons&input::kPlus)!=0;if(now&&!plus&&!overlay::blocks_input())gfx::display_plus_pressed();plus=now;}
+ overlay::poll_controller_shortcuts(v);  // independent of the file-select/render frame rate
  std::lock_guard lk(g_mu);std::copy(std::begin(v),std::end(v),g_values);g_pad=state;
  if(!overlay::blocks_input()&&!getenv("WWHD_NO_HOST_INPUT")){motion::poll_recalibrate(v,g_keys);screenshot::poll_controller(v);}
 }

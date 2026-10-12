@@ -29,6 +29,7 @@ struct ImDrawData;
 
 namespace overlay {
 
+void poll_controller_shortcuts(const float* values);  // host input thread, every input poll
 bool is_open();             // any thread
 void set_open(bool open);   // any thread
 // the game sees no input: the overlay is open, or was just closed and buttons are still held

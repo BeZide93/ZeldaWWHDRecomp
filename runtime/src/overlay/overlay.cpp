@@ -69,6 +69,7 @@ namespace gfxvk { bool buffer_cache_enabled(); }  // gfx/vulkan/buffer_cache.h
 #include "../render_prof.h"
 #include "../perf_metrics.h"
 #include "../build_info.h"
+#include "settings_shortcut.h"
 #include "../report_header.h"
 
 namespace gx2 { uint64_t flips_presented(); bool uncapped(); void set_uncapped(bool on); }
@@ -163,8 +164,6 @@ struct Ui {
     float prev[input_map::kPadCount] = {};
     GamepadNavigation gamepad_navigation;
     ImVec2 mouse_position = {-FLT_MAX, -FLT_MAX};
-    double options_since = -1;
-    bool options_latched = false;
     // remap capture: action, column (0, 1 keys; 2 controller)
     int cap_action = -1, cap_col = 0;
     bool cap_pad_released = false;
@@ -378,26 +377,10 @@ void read_controller() {
     }
     input::host_controller_values(U.values);
     using namespace input_map;
-    const double t = now_s();
-    // Home: toggles; Select / Minus (View / Share): held half a second opens, a press closes
-    if (controller_pressed(kPadHome)) set_open(!is_open());
-    if (controller_down(kPadOptions)) {
-        if (!U.options_latched) {
-            if (is_open()) {
-                set_open(false);
-                U.options_latched = true;
-            } else {
-                if (U.options_since < 0) U.options_since = t;
-                if (t - U.options_since >= 0.5) {
-                    set_open(true);
-                    U.options_latched = true;
-                }
-            }
-        }
-    } else {
-        U.options_since = -1;
-        U.options_latched = false;
-    }
+#ifndef WWHD_SDL_HOST
+    // The AppKit host still supplies controller state on its render path.
+    poll_controller_shortcuts(U.values);
+#endif
     if (g_wait_release.load()) {
         bool any = false;
         for (int p = 1; p < kPadCount; p++) any |= U.values[p] > 0.3f;
@@ -2355,6 +2338,14 @@ void settings_window() {
 
 // ---------------------------------------------------------------- API
 bool is_open() { return g_open.load(std::memory_order_relaxed); }
+void poll_controller_shortcuts(const float* values) {
+    if (g_no_host) return;
+    static SettingsShortcut shortcut;
+    const auto action = shortcut.poll(now_s(), values[input_map::kPadOptions] > 0.5f,
+                                     values[input_map::kPadHome] > 0.5f, is_open());
+    if (action != SettingsShortcut::None) set_open(action == SettingsShortcut::Open);
+}
+
 void set_open(bool open) {
     if (g_open.exchange(open) == open) return;
     for (auto& k : g_held_keys) k = false;

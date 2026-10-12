@@ -11,6 +11,7 @@
 
 #include "input_map.h"
 #include "platform/touch_face.h"
+#include "overlay/settings_shortcut.h"
 
 using namespace input_map;
 
@@ -645,7 +646,32 @@ static void test_conflict_helpers() {
     for (int p = 1; p < kPadCount; p++) CHECK(*pad_short_label(p));
 }
 
+static void test_settings_shortcut() {
+    using S = overlay::SettingsShortcut;
+    S s;
+    CHECK(s.poll(10, true, false, false) == S::None);
+    CHECK(s.poll(10.499, true, false, false) == S::None);
+    CHECK(s.poll(10.5, true, false, false) == S::Open);
+    CHECK(s.poll(13, true, false, true) == S::None);  // held: never toggle again
+    CHECK(s.poll(14, false, false, true) == S::None);
+    CHECK(s.poll(15, true, false, true) == S::Close);
+    CHECK(s.poll(16, false, false, false) == S::None);
+    CHECK(s.poll(17, true, false, false) == S::None);
+    CHECK(s.poll(17.2, false, false, false) == S::None);  // short Minus stays in the game
+    CHECK(s.poll(18, false, true, false) == S::Open);
+    CHECK(s.poll(19, false, true, true) == S::None);
+    CHECK(s.poll(20, false, false, true) == S::None);
+    CHECK(s.poll(21, false, true, true) == S::Close);
+    // Input polls continue while the renderer is stalled for three seconds.
+    S stalled;
+    double opened = -1;
+    for (int i = 0; i <= 3000; ++i)
+        if (stalled.poll(i / 1000.0, true, false, false) == S::Open) opened = i / 1000.0;
+    CHECK(opened == 0.5);
+}
+
 int main() {
+    test_settings_shortcut();
     test_conflict_helpers();
     test_defaults();
     test_face_layout();
