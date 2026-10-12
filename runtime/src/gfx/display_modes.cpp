@@ -284,6 +284,13 @@ static bool sim_screen(float* w, float* h) {
     return true;
 }
 
+void display_input_plan(const PresentPlan& p) {
+    std::lock_guard<std::mutex> lk(g_layout_mu);
+    g_tv_layout={p.tv,p.pip,p.pip_on,p.drc_only,p.scale};
+    g_button=p.button;
+    g_tv_dw=p.dw;
+    g_tv_dh=p.dh;
+}
 bool overlay_hit(float nx, float ny, float* tx, float* ty, bool clamp_outside) {
     std::lock_guard<std::mutex> lk(g_layout_mu);
     const Layout& L = g_tv_layout;
@@ -500,7 +507,7 @@ static PresentPlan plan_from(const Layout& L, float dw, float dh) {
 
 // start of a present (render thread): everything both renderers share
 PresentPlan display_plan(bool have_tv, float tw, float th, bool have_drc, float pw, float ph, float layer_w, float layer_h,
-                         uint64_t frame) {
+                         uint64_t frame, bool publish_input) {
     test_touch(frame);
     if (have_drc) g_drc_aspect = pw / ph;
     // Preserve a requested separate-window mode across display removal. Until
@@ -515,13 +522,7 @@ PresentPlan display_plan(bool have_tv, float tw, float th, bool have_drc, float 
     Layout L;
     if (have_tv || drc_only) L = layout(dw, dh, have_tv ? tw : 0, have_tv ? th : 0, have_drc ? pw : 0, have_drc ? ph : 0, pip, drc_only);
     PresentPlan p = plan_from(L, dw, dh);
-    {
-        std::lock_guard<std::mutex> lk(g_layout_mu);
-        g_tv_layout = L;
-        g_button = p.button;
-        g_tv_dw = dw;
-        g_tv_dh = dh;
-    }
+    if(publish_input) display_input_plan(p);
     p.sim = sim;
     p.pip_wanted = pip;
     // Sampling waits for the GPU on those frames (the signatures are read back at once): the

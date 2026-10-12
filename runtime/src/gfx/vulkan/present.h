@@ -49,7 +49,8 @@ void prepare_present_screen(Screen& screen, bool colorAttachmentSupported, bool 
 bool draw_present_screen(Screen& screen, uint32_t imageIndex);
 struct PresentImageParams {
  int32_t aa=0,conv=0;
- float sharp=1,foot=1,alpha=1,pad[3]{};
+ float sharp=1,foot=1,alpha=1;
+ float hdrWhite=0,hdrPeak=0,hdrExposure=0,hdrHighlights=0,pad[3]{};
 };
 // Prepared on the renderer thread. Recording reads only these copied handles
 // and values; the caller retains all referenced objects through GPU completion.
@@ -106,7 +107,8 @@ void write_rgba_png(const std::string& path, uint32_t width, uint32_t height,
 void set_overlay_draw(ImDrawData* draw);
 void overlay_renderer_init();
 void overlay_prepare(ImDrawData* draw);  // texture uploads (outside rendering)
-void overlay_draw(ImDrawData* draw,VkCommandBuffer cmd,VkFormat format,VkExtent2D extent,bool linear);
+void overlay_draw(ImDrawData* draw,VkCommandBuffer cmd,VkFormat format,VkExtent2D extent,bool linear,int stereoEye=-1,float whiteScale=1);
+void test_hdr_presentation();
 void reset_overlay_resources();
 // Device shutdown/recreation only: drain submissions before destroying these.
 void reset_present_resources();

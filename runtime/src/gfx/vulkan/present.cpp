@@ -2,6 +2,8 @@
 // Shader presentation matches Metal's source-grid FXAA and scaling filters.
 #include "../../exception_report.h"
 #include "present.h"
+#include "stereo.h"
+#include "../hdr.h"
 #include "../headless_compose.h"
 #include "imgui.h"
 #include "backend.h"
@@ -24,6 +26,7 @@
 #include <unordered_map>
 namespace gfxvk {
 namespace {
+ImDrawData* overlayDraw=nullptr;
 const char* vertexSource = R"glsl(#version 450
 layout(location=0) out vec2 uv;
 void main() {
@@ -36,7 +39,7 @@ const char* fragmentSource = R"glsl(#version 450
 layout(set=0,binding=0) uniform sampler2D image;
 layout(location=0) in vec2 uv;
 layout(location=0) out vec4 result;
-layout(push_constant) uniform Params { int aa; int conv; float sharp; float foot; float alpha; } params;
+layout(push_constant) uniform Params { int aa; int conv; float sharp; float foot; float alpha; float hdrWhite; float hdrPeak; float hdrExposure; float hdrHighlights; } params;
 float luma(vec3 c) { return dot(c,vec3(0.299,0.587,0.114)); }
 vec3 fxaa(vec2 at) {
  vec2 rcp=1.0/vec2(textureSize(image,0));
@@ -74,6 +77,17 @@ void main() {
  }else c=texture(image,at).rgb;
  if(params.conv==1)c=toLinear(clamp(c,0.0,1.0));
  else if(params.conv==2)c=toSrgb(clamp(c,0.0,1.0));
+ if(params.hdrWhite>0.0) {
+  c=max(c,vec3(0.0))*exp2(params.hdrExposure);
+  float m=max(c.r,max(c.g,c.b));
+  if(m>0.0) {
+   float t=clamp((m-0.5)*2.0,0.0,1.0);
+   float n=m*params.hdrWhite+(params.hdrPeak-params.hdrWhite)*params.hdrHighlights*t*t*(3.0-2.0*t);
+   float knee=min(params.hdrWhite,params.hdrPeak*0.75);
+   if(n>knee)n=knee+(params.hdrPeak-knee)*(1.0-exp(-(n-knee)/(params.hdrPeak-knee)));
+   c*=n/(m*80.0);
+  }
+ }
  result=vec4(c,params.alpha);
 }
 )glsl";
@@ -136,7 +150,7 @@ void main() {
 )glsl";
 struct PresentRect { float x,y,width,height,scale; };
 using PresentParams=PresentImageParams;
-static_assert(sizeof(PresentParams)==32);
+static_assert(sizeof(PresentParams)==48);
 PresentRect present_rect(VkExtent3D source,VkExtent2D target,int filter) {
  float scale=std::min(float(target.width)/source.width,float(target.height)/source.height);
  if(filter==2&&scale>=1)scale=std::floor(scale+1e-3f);
@@ -340,7 +354,7 @@ bool sampleable(const Surface& source) {
 }
 // draw the quads into `view` (cleared to black first); `layout` is the target image's current layout
 void compose(VkImage image,VkImageView view,VkImageLayout& layout,VkExtent2D extent,VkFormat format,
-             const std::vector<ComposeQuad>& quads,VkImageLayout finalLayout,int filter,bool fxaa,ImDrawData* overlay=nullptr,ResourceUse* use=nullptr) {
+             const std::vector<ComposeQuad>& quads,VkImageLayout finalLayout,int filter,bool fxaa,ImDrawData* overlay=nullptr,ResourceUse* use=nullptr,bool hdrOutput=false) {
  end_encoder();
  ImDrawData* gamepadOverlay=nullptr;
  // The GamePad scan may also be shown inside the TV composition (PIP or Off-TV).
@@ -366,13 +380,16 @@ void compose(VkImage image,VkImageView view,VkImageLayout& layout,VkExtent2D ext
  VkRenderingInfo rendering{VK_STRUCTURE_TYPE_RENDERING_INFO};rendering.renderArea.extent=extent;rendering.layerCount=1;rendering.colorAttachmentCount=1;rendering.pColorAttachments=&attachment;
  record::vkCmdBeginRendering(cmd,&rendering);R.rendering=true;R.passTracked=false;
  VkRect2D scissor{{0,0},extent};record::vkCmdSetScissor(cmd,0,1,&scissor);
- const bool targetLinear=srgb_format(format);
+ const bool targetLinear=srgb_format(format)||hdrOutput;
+ const float whiteScale=hdrOutput?std::min(hdr::menuWhite.load(),hdr::parameters().peak)/80.0f:1.0f;
  for(auto& q:quads) {
   if(q.box.w<=0||q.box.h<=0)continue;
   VkViewport viewport{q.box.x,q.box.y,q.box.w,q.box.h,0,1};record::vkCmdSetViewport(cmd,0,1,&viewport);
   if(q.solid) {
    record::vkCmdBindPipeline(cmd,VK_PIPELINE_BIND_POINT_GRAPHICS,pipeline(format,kSolid));
-   PresentParams params{};memcpy(&params,q.color,16);
+   PresentParams params{};float color[4];memcpy(color,q.color,16);
+   if(hdrOutput)for(int i=0;i<3;++i)color[i]*=whiteScale;
+   memcpy(&params,color,16);
    record::vkCmdPushConstants(cmd,resources.layout,VK_SHADER_STAGE_FRAGMENT_BIT,0,sizeof(params),&params);record::vkCmdDraw(cmd,3,1,0,0);
    continue;
   }
@@ -390,10 +407,19 @@ void compose(VkImage image,VkImageView view,VkImageLayout& layout,VkExtent2D ext
   // scan values held in a UNORM image. sRGB targets encode shader linear output.
   const bool sourceLinear=q.sourceLinear||srgb_format(q.image->fmt.pixel);
   auto params=present_params(fxaa&&linear,filter,scale,sourceLinear,targetLinear);params.alpha=q.alpha;
+  if(hdrOutput) {
+   const auto h=hdr::parameters();params.hdrWhite=h.paper;params.hdrPeak=h.peak;
+   params.hdrExposure=h.exposure;params.hdrHighlights=h.highlights;
+  }
   record::vkCmdPushConstants(cmd,resources.layout,VK_SHADER_STAGE_FRAGMENT_BIT,0,sizeof(params),&params);record::vkCmdDraw(cmd,3,1,0,0);
  }
- if(gamepadOverlay)overlay_draw(gamepadOverlay,cmd,format,extent,targetLinear);
- if(overlay)overlay_draw(overlay,cmd,format,extent,targetLinear);  // settings overlay on top
+ if(gamepadOverlay)overlay_draw(gamepadOverlay,cmd,format,extent,targetLinear,-1,whiteScale);
+ if(overlay) {
+  if (overlay == overlayDraw && stereo::frame.mode != stereo::Off && stereoRight.scan) {
+   overlay_draw(overlay,cmd,format,extent,targetLinear,0,whiteScale);
+   overlay_draw(overlay,cmd,format,extent,targetLinear,1,whiteScale);
+  } else overlay_draw(overlay,cmd,format,extent,targetLinear,-1,whiteScale);
+ }
  record::vkCmdEndRendering(cmd);
  barrier.oldLayout=VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;barrier.newLayout=finalLayout;barrier.srcAccessMask=VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;barrier.dstAccessMask=0;
  record::vkCmdPipelineBarrier(cmd,VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,0,0,nullptr,0,nullptr,1,&barrier);layout=finalLayout;
@@ -402,8 +428,43 @@ void compose(VkImage image,VkImageView view,VkImageLayout& layout,VkExtent2D ext
 }  // namespace
 
 void set_present_plan(const gfx::PresentPlan* plan) { currentPlan=plan; }
-namespace { ImDrawData* overlayDraw=nullptr; }
 void set_overlay_draw(ImDrawData* draw) { overlayDraw=draw; }
+
+// Exercise the actual presentation shader and read FP32 values so SDR clipping
+// or a missing HDR push constant cannot pass a CPU-only colour test.
+void test_hdr_presentation() {
+ Surface source,target;Buffer readback;
+ auto init=[](Surface& s,uint32_t f) {
+  s.width=s.height=s.pitch=4;s.slices=s.mips=1;s.dim=1;s.format=f;s.fmt=format_info(f,false);
+  create_surface_image(&s,true,VkExtent3D{4,4,1});
+ };
+ try {
+  init(source,0x823);init(target,0x823);readback=create_readback_buffer(4*4*16);
+  const auto hp=hdr::parameters();
+  for(auto c:{std::array<float,3>{0,0,0},{0.18f,0.18f,0.18f},{1,1,1},{0.05f,0.4f,1}}) {
+   transition_image(&source,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_ACCESS_TRANSFER_WRITE_BIT);
+   VkClearColorValue value{{c[0],c[1],c[2],1}};VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1};
+   record::vkCmdClearColorImage(command_buffer(),source.image,source.layout,&value,1,&range);
+   mark_gpu_written(&source);
+   ComposeQuad q;q.image=&source;q.sourceLinear=true;q.box={0,0,4,4};
+   compose(target.image,target.view,target.layout,{4,4},target.fmt.pixel,{q},VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,0,false,nullptr,&target.use,true);
+   transition_image(&target,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_ACCESS_TRANSFER_READ_BIT);
+   transition_buffer(readback,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_ACCESS_TRANSFER_WRITE_BIT);
+   VkBufferImageCopy copy{};copy.imageSubresource={VK_IMAGE_ASPECT_COLOR_BIT,0,0,1};copy.imageExtent={4,4,1};
+   record::vkCmdCopyImageToBuffer(command_buffer(),target.image,target.layout,readback.buffer,1,&copy);
+   transition_buffer(readback,VK_PIPELINE_STAGE_HOST_BIT,VK_ACCESS_HOST_READ_BIT);flush();
+   auto expected=hdr::map(c,hp);auto* pixels=static_cast<const float*>(readback.mapped);
+   for(int i=0;i<16;++i)for(int k=0;k<3;++k)
+    if(!std::isfinite(pixels[i*4+k]) || std::abs(pixels[i*4+k]-expected[k])>0.002f)
+     exception_report::raise("HDR shader readback differs from calibrated scRGB mapping");
+  }
+  fprintf(stderr,"[renderer smoke] HDR scRGB black/grey/highlight/hue readback passed\n");
+ } catch(...) {
+  if(readback.buffer)defer_buffer(readback);
+  if(source.image)destroy_surface_image(&source);if(target.image)destroy_surface_image(&target);throw;
+ }
+ defer_buffer(readback);destroy_surface_image(&source);destroy_surface_image(&target);
+}
 
 Screen& presentation_source_screen(Screen& physical) {
 #ifdef __ANDROID__
@@ -415,7 +476,7 @@ Screen& presentation_source_screen(Screen& physical) {
 #endif
 }
 
-std::vector<ComposeQuad> screen_quads(Screen& screen,VkExtent2D target,int& filter) {
+std::vector<ComposeQuad> screen_quads_mono(Screen& screen,VkExtent2D target,int& filter) {
  std::vector<ComposeQuad> quads;
  filter=scale_filter();
  Screen& source=presentation_source_screen(screen);
@@ -470,9 +531,32 @@ std::vector<ComposeQuad> screen_quads(Screen& screen,VkExtent2D target,int& filt
  return quads;
 }
 
+std::vector<ComposeQuad> screen_quads(Screen& screen,VkExtent2D target,int& filter) {
+ if (&screen != &R.tv || stereo::frame.mode == stereo::Off)
+  return screen_quads_mono(screen,target,filter);
+ // A selected stereo mode must never silently present a mono frame.
+ // Wait for both eye scan buffers to be available.
+ if (!stereoRight.scan) return {};
+ auto logical = target;
+ if (stereo::frame.mode == stereo::FullSBS) logical.width = std::max(1u,target.width/2);
+ auto mono = screen_quads_mono(screen,logical,filter);
+ std::vector<ComposeQuad> result;
+ for (int eye=0;eye<2;++eye) for (auto q:mono) {
+  if (q.image == screen.scan.get() && (eye != int(stereo::frame.swap))) q.image = stereoRight.scan.get();
+  if (stereo::frame.mode == stereo::FullSBS) q.box.x += eye * logical.width;
+  else {
+   auto r=stereo::pack({q.box.x,q.box.y,q.box.w,q.box.h},float(target.width),float(target.height),stereo::frame.mode,eye);
+   q.box={r.x,r.y,r.w,r.h};
+  }
+  result.push_back(q);
+ }
+ return result;
+}
+
 bool draw_present_screen(Screen& screen,uint32_t imageIndex) {
  auto found=resources.screens.find(&screen);
  if(found==resources.screens.end()||!found->second.drawable) {
+  if(screen.hdrOutput)exception_report::raise("HDR requires shader presentation support");
   if(&screen==&R.tv) {
    set_graphics_feature_available(GraphicsFeature::FXAA,false);
    set_graphics_feature_available(GraphicsFeature::ScaleFilter,false);
@@ -497,7 +581,7 @@ bool draw_present_screen(Screen& screen,uint32_t imageIndex) {
  if(fxaa_enabled()&&!linear)exception_report::raise("FXAA requires linear scan-buffer filtering");
  int filter=0;auto quads=screen_quads(screen,screen.swapExtent,filter);
  compose(screen.images.at(imageIndex),found->second.views.at(imageIndex),screen.layouts.at(imageIndex),screen.swapExtent,screen.swapFormat,
-         quads,VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,filter,fxaa_enabled(),&screen==&R.tv?overlayDraw:overlay::guesthud::gamepad_frame(screen.swapExtent.width,screen.swapExtent.height),&screen.imageUses.at(imageIndex));
+         quads,VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,filter,fxaa_enabled(),&screen==&R.tv?overlayDraw:overlay::guesthud::gamepad_frame(screen.swapExtent.width,screen.swapExtent.height),&screen.imageUses.at(imageIndex),screen.hdrOutput);
  return true;
 }
 
