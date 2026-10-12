@@ -1,9 +1,14 @@
 // Frame interpolation math (runtime/src/interp_pacing.h): blend fractions at 60/120/240 fps, the
 // blends at arbitrary fractions, the display cap, and paced scheduling (in-between frames per step,
-// dropped and skipped passes) in a simulation of the pass loop on the virtual vsync.
+// dropped and skipped passes) in a simulation of the pass loop on the virtual vsync, and the paced
+// steps at 120/240 fps on the virtual vsync that flips late frames when ready (step slots, issue #164).
 #include "../src/interp_pacing.h"
+#include "../src/gx2/vsync_pacing.h"
 
+#include <algorithm>
 #include <cmath>
+#include <functional>
+#include <vector>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -130,6 +135,11 @@ static void test_plan_and_next() {
     CHECK(next_pass(1, 3, 30'000'000, 8'000'000, budget) == Next::kDrop);
     CHECK(next_pass(2, 3, 26'000'000, 8'000'000, budget) == Next::kHold);  // 26 + 2 x 8 > 35.3: wait, 2 remain
     CHECK(next_pass(3, 3, 99'000'000, 8'000'000, budget) == Next::kStepDone);
+    // a late logic pass (240 fps): the in-between frames that still fit, at least the record pass
+    CHECK(fit_in_between(6, 6'000'000, 5'000'000, budget) == 5);   // (35.3 - 6) / 5
+    CHECK(fit_in_between(7, 4'200'000, vs / 4, budget) == 7);      // on time: all of them
+    CHECK(fit_in_between(7, 40'000'000, vs / 4, budget) == 1);     // nothing fits: the record pass (next_pass decides)
+    CHECK(fit_in_between(3, 0, 0, budget) == 3);
 }
 
 // The pass loop of interp.cpp on the virtual vsync of gx2_core.cpp, paced: every pass costs `cost`
@@ -259,6 +269,221 @@ static void test_simulation() {
     CHECK(r.steps_per_s < 10);
 }
 
+
+// Paced steps at 120/240 fps on the virtual vsync of gx2_core.cpp (gx2/vsync_pacing.h: a frame that
+// is late flips when ready, less than a vsync late keeps the grid), with the pass loop of interp.cpp:
+// a pass starts when the previous frame has flipped, its frame is ready `cost` later and flips on its
+// tick (sleep timers wake up to 0.3 ms late) or, if late, when ready. Step slots (the schedule since
+// issue #164): a step's logic frame is due on its slot, and the logic pass starts one drawn frame
+// before it (slot_step_start). The v0.2.13 schedule, for reference: a 30.000 Hz wall clock of its own
+// (a step that waited starts at its due time, a step less than a step late keeps the schedule).
+struct StepSim {
+    std::vector<int64_t> flips, steps;  // flip times; logic pass starts (ns)
+    int skips = 0;                       // steps that skipped or dropped in-between frames
+    double steps_per_s(int64_t from) const {
+        const auto a = std::lower_bound(steps.begin(), steps.end(), from);
+        return double(steps.end() - a - 1) * 1e9 / double(steps.back() - *a);
+    }
+    double flips_per_s(int64_t from) const {
+        const auto a = std::lower_bound(flips.begin(), flips.end(), from);
+        return double(flips.end() - a - 1) * 1e9 / double(flips.back() - *a);
+    }
+    // flip intervals off the drawn rate after `from`: more than 1.4 or less than 0.6 of a tick
+    int uneven(int64_t from, int64_t tick) const {
+        int n = 0;
+        for (size_t i = 1; i < flips.size(); i++)
+            if (flips[i] >= from) n += flips[i] - flips[i - 1] > tick * 14 / 10 || flips[i] - flips[i - 1] < tick * 6 / 10;
+        return n;
+    }
+    int64_t max_interval(int64_t from) const {
+        int64_t m = 0;
+        for (size_t i = 1; i < flips.size(); i++)
+            if (flips[i] >= from) m = std::max(m, flips[i] - flips[i - 1]);
+        return m;
+    }
+    // the most logic steps in any second after `from` (a game running faster than 30 steps/s)
+    int max_steps_per_second(int64_t from) const {
+        int m = 0;
+        for (size_t i = 0, j = 0; i < steps.size(); i++) {
+            if (steps[i] < from) continue;
+            j = std::max(j, i);
+            while (j < steps.size() && steps[j] < steps[i] + 1'000'000'000) j++;
+            m = std::max(m, int(j - i));
+        }
+        return m;
+    }
+};
+static StepSim simulate_steps(int fps, const std::function<int64_t(int)>& logicCost, const std::function<int64_t(int)>& holdCost,
+                              double seconds, bool slots = true) {
+    using namespace vsync_pacing;
+    constexpr Clock kClock{16'683'333, 4};
+    const uint64_t g = fps >= 240 ? 1 : 2;  // granule: ticks per drawn frame
+    const int nMax = fps / 30 - 1;
+    const int64_t tick = kClock.granule_ns(g), step = slots ? 2 * kClock.period : 33'333'333, budget = step + 2'000'000;
+    std::mt19937 rng(11);
+    std::uniform_int_distribution<int64_t> wakeDist(0, 300'000), pollDist(0, 250'000);
+    StepSim r;
+    int64_t shift = 0, slot = -1, t = kClock.time(64, 0), lastLogic = 0, logicAvg = 16'000'000, holdAvg = 16'000'000;
+    uint64_t last = 64;
+    bool wait = false, haveLogic = false, prevRecord = false;
+    int logicN = 0, holdN = 0;
+    // a pass that started at `start`: its frame flips (and the next pass starts) at the returned time
+    auto pass = [&](int64_t start, int64_t cost, bool isStep) {
+        const int64_t ready = start + cost;
+        uint64_t due = last + g;
+        if (slots && isStep) due = step_due(kClock, due, slot, shift, g);
+        const int64_t dueTime = kClock.time(due, shift);
+        const int64_t flip = ready <= dueTime ? dueTime + wakeDist(rng) : ready + pollDist(rng);
+        last = flip_executed(kClock, shift, due, flip, g);
+        if (slots && isStep) slot = next_slot(slot >= 0 ? slot : dueTime, flip, step, tick);
+        r.flips.push_back(flip);
+        return flip;
+    };
+    while (t < int64_t(seconds * 1e9)) {
+        // logic pass (paced_pass_start)
+        int64_t start = t;
+        if (slots && slot >= 0) {
+            const StepPlan p = slot_step_start(t, kClock.time(slot_tick(kClock, slot, shift, g), shift), tick, step, wait);
+            lastLogic = p.start;
+            if (p.how == StepStart::kWait) start = p.start + wakeDist(rng);
+        } else if (wait && haveLogic && t < lastLogic + step) {
+            lastLogic += step;
+            start = lastLogic + wakeDist(rng);
+        } else {
+            const bool keep = !slots && wait && haveLogic && t - (lastLogic + step) < step;
+            lastLogic = keep ? lastLogic + step : t;
+        }
+        wait = false;
+        haveLogic = true;
+        r.steps.push_back(start);
+        int n = plan_in_between(nMax, budget, logicAvg, holdAvg);
+        if (!prevRecord) n = 1;  // an exact step (interp.cpp: blends only after a record pass)
+        prevRecord = false;
+        t = pass(start, logicCost(logicN++), true);
+        logicAvg = update_average(logicAvg, t - start);
+        for (int phase = 0;;) {  // after_pass
+            if (phase == 0 && n > 1 && slots) n = fit_in_between(n, t - lastLogic, holdAvg, budget);
+            const Next next = next_pass(phase, n, t - lastLogic, holdAvg, budget);
+            if (next == Next::kStepDone) {
+                prevRecord = true;
+                wait = true;
+                break;
+            }
+            if (next != Next::kHold) r.skips++;
+            if (next == Next::kDrop) {
+                wait = true;
+                break;
+            }
+            phase = next == Next::kRecord ? n : phase + 1;
+            const int64_t holdStart = t;
+            t = pass(holdStart, holdCost(holdN++), false);
+            holdAvg = update_average(holdAvg, t - holdStart);
+        }
+    }
+    return r;
+}
+
+static void test_steps_on_vsync() {
+    constexpr int64_t kMs = 1'000'000, kTick240 = 16'683'333 / 4, kTick120 = 16'683'333 / 2;
+    const auto ms = [](double v) { return [v](int) { return int64_t(v * 1e6); }; };
+    const int64_t from = 3'000 * kMs;  // after the averages settle
+    // issue #164, 240 fps on a fast computer (2 ms logic, 1.5 ms in-between passes): every frame on
+    // its vsync, 8 a step, 29.97 steps a second. The v0.2.13 wall clock (30.000 Hz) drifted against the
+    // grid: frames bunched up after logic passes that slept past their vsync, and in-between frames
+    // were skipped every few seconds.
+    StepSim a = simulate_steps(240, ms(2), ms(1.5), 60);
+    std::printf("240 fps, fast, step slots: %.3f steps/s, %.2f flips/s, %d uneven intervals, %d skips, max %.2f ms\n", a.steps_per_s(from),
+                a.flips_per_s(from), a.uneven(from, kTick240), a.skips, a.max_interval(from) / 1e6);
+    CHECK_NEAR(a.steps_per_s(from), 29.97, 0.01);
+    CHECK_NEAR(a.flips_per_s(from), 239.76, 0.1);
+    CHECK(a.uneven(from, kTick240) == 0);
+    CHECK(a.skips <= 2);  // (the first steps, while the averages settle)
+    StepSim old = simulate_steps(240, ms(2), ms(1.5), 60, false);
+    std::printf("240 fps, fast, v0.2.13 schedule: %.3f steps/s, %.2f flips/s, %d uneven intervals, %d skips, max %.2f ms\n",
+                old.steps_per_s(from), old.flips_per_s(from), old.uneven(from, kTick240), old.skips, old.max_interval(from) / 1e6);
+    CHECK(old.uneven(from, kTick240) > 500);  // (the reported micro-stutter, for reference)
+    // in-between passes close to a tick (3.5 ms logic, 3.5 ms in-between): still every frame on time
+    a = simulate_steps(240, ms(3.5), ms(3.5), 60);
+    std::printf("240 fps, 3.5 ms passes: %.3f steps/s, %.2f flips/s, %d uneven, %d skips\n", a.steps_per_s(from), a.flips_per_s(from),
+                a.uneven(from, kTick240), a.skips);
+    CHECK_NEAR(a.steps_per_s(from), 29.97, 0.01);
+    CHECK(a.uneven(from, kTick240) == 0);
+    // a logic pass longer than a tick (6 ms, in-between 2 ms): it flips late, which the in-between
+    // frames make up for; full speed, all 8 frames
+    a = simulate_steps(240, ms(6), ms(2), 60);
+    std::printf("240 fps, 6 ms logic: %.3f steps/s, %.2f flips/s, %d skips\n", a.steps_per_s(from), a.flips_per_s(from), a.skips);
+    CHECK_NEAR(a.steps_per_s(from), 29.97, 0.01);
+    CHECK(a.flips_per_s(from) > 239);
+    // passes a little over a tick (5 ms: a loaded computer at 240 fps): a late logic pass drops only
+    // the in-between frames that no longer fit, not all blended frames of the step
+    a = simulate_steps(240, ms(5), ms(5), 60);
+    old = simulate_steps(240, ms(5), ms(5), 60, false);
+    std::printf("240 fps, 5 ms passes: %.3f steps/s, %.1f flips/s, %d skips (v0.2.13 schedule: %.1f flips/s, %d skips)\n",
+                a.steps_per_s(from), a.flips_per_s(from), a.skips, old.flips_per_s(from), old.skips);
+    CHECK(a.steps_per_s(from) > 29.9);
+    CHECK(a.flips_per_s(from) >= old.flips_per_s(from) - 1);
+    // 120 fps, fast: 4 frames a step on their vsyncs
+    a = simulate_steps(120, ms(2), ms(1.5), 60);
+    old = simulate_steps(120, ms(2), ms(1.5), 60, false);
+    std::printf("120 fps, fast: %.3f steps/s, %.2f flips/s, %d uneven (v0.2.13 schedule: %d)\n", a.steps_per_s(from), a.flips_per_s(from),
+                a.uneven(from, kTick120), old.uneven(from, kTick120));
+    CHECK_NEAR(a.steps_per_s(from), 29.97, 0.01);
+    CHECK_NEAR(a.flips_per_s(from), 119.88, 0.05);
+    CHECK(a.uneven(from, kTick120) == 0);
+    // slower computers (issue #125): the game keeps its speed and draws what fits, as with the v0.2.13
+    // schedule (6.7 ms a frame: a computer that draws ~150 frames a second; 16 ms: a little over 60;
+    // 30 ms: too slow for any in-between frame)
+    for (int fps : {240, 120}) {
+        for (double cost : {6.7, 10.0, 16.0, 30.0}) {
+            a = simulate_steps(fps, ms(cost), ms(cost), 60);
+            old = simulate_steps(fps, ms(cost), ms(cost), 60, false);
+            std::printf("%d fps, %.1f ms passes: %.3f steps/s, %.1f flips/s (v0.2.13 schedule: %.3f, %.1f)\n", fps, cost,
+                        a.steps_per_s(from), a.flips_per_s(from), old.steps_per_s(from), old.flips_per_s(from));
+            CHECK(a.steps_per_s(from) > 29.9);
+            CHECK(a.flips_per_s(from) > old.flips_per_s(from) - 1);
+            CHECK(a.max_steps_per_second(from) <= 31);
+        }
+    }
+    // slower than a step (40 ms logic passes): the game runs at the computer's pace (25 steps a
+    // second), without waiting for a slot on top of it
+    a = simulate_steps(240, ms(40), ms(40), 30);
+    std::printf("240 fps, 40 ms passes: %.3f steps/s\n", a.steps_per_s(from));
+    CHECK(a.steps_per_s(from) > 24.5);
+    // the start (issue #164): slow logic passes while the game loads (20 of 100 ms), then fast. The
+    // game neither stalls nor runs faster than 30 steps a second to catch up, and within a second
+    // every frame is on its vsync. (The simulation has no probe of the in-between pass cost after 10 s
+    // without any, so the in-between passes are cheap from the start.)
+    for (int fps : {240, 120}) {
+        a = simulate_steps(fps, [](int i) { return i < 20 ? 100'000'000 : 2'000'000; }, ms(1.5), 30);
+        const int64_t loaded = a.steps[20], tick = fps == 240 ? kTick240 : kTick120;  // the first fast logic pass
+        std::printf("%d fps, start: %d steps at most in a second, %.3f steps/s and %d uneven intervals after a second\n", fps,
+                    a.max_steps_per_second(a.steps.front()), a.steps_per_s(loaded + 1000 * kMs), a.uneven(loaded + 1000 * kMs, tick));
+        CHECK(a.steps[19] - a.steps[0] < 19 * 105 * kMs);  // the slow steps at their own pace
+        CHECK(a.max_steps_per_second(a.steps.front()) <= 31);
+        CHECK_NEAR(a.steps_per_s(loaded + 1000 * kMs), 29.97, 0.01);
+        CHECK(a.uneven(loaded + 1000 * kMs, tick) == 0);
+    }
+    // one 100 ms hitch in an in-between pass at 240 fps: no catch-up faster than 30 steps a second, and
+    // every frame back on its vsync within a second
+    a = simulate_steps(240, ms(2), [](int i) { return int64_t(i == 3000 ? 100'000'000 : 1'500'000); }, 40);
+    {
+        int64_t hitch = 0;
+        for (size_t i = 1; i < a.flips.size(); i++)
+            if (a.flips[i] - a.flips[i - 1] > 50 * kMs) hitch = a.flips[i];
+        std::printf("240 fps, one 100 ms hitch: %d steps at most in a second, %d uneven intervals after a second\n",
+                    a.max_steps_per_second(from), a.uneven(hitch + 1000 * kMs, kTick240));
+        CHECK(hitch > 0);
+        CHECK(a.max_steps_per_second(from) <= 31);
+        CHECK(a.uneven(hitch + 1000 * kMs, kTick240) == 0);
+    }
+    // slot_step_start: early and waiting: wait for one frame before the slot; less than a step late:
+    // keep; later: a new schedule
+    CHECK(slot_step_start(10, 100, 20, 1000, true).how == StepStart::kWait && slot_step_start(10, 100, 20, 1000, true).start == 80);
+    CHECK(slot_step_start(10, 100, 20, 1000, false).how == StepStart::kKeep);
+    CHECK(slot_step_start(500, 100, 20, 1000, true).how == StepStart::kKeep && slot_step_start(500, 100, 20, 1000, true).start == 80);
+    CHECK(slot_step_start(1080, 100, 20, 1000, true).how == StepStart::kLate && slot_step_start(1080, 100, 20, 1000, true).start == 1080);
+}
+
 int main() {
     test_fractions();
     test_blends();
@@ -266,6 +491,7 @@ int main() {
     test_cap();
     test_plan_and_next();
     test_simulation();
+    test_steps_on_vsync();
     if (g_failed) {
         std::fprintf(stderr, "interp_pacing_test: %d check(s) failed\n", g_failed);
         return 1;

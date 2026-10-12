@@ -108,5 +108,34 @@ inline Next next_pass(int phase, int n, int64_t elapsed, int64_t pass, int64_t b
     return Next::kDrop;
 }
 
+// After the logic pass of a step planned for n in-between frames (n > 1): the in-between frames
+// that still fit (elapsed: time since the step's start, pass: recent in-between pass duration), at
+// least 1 (the record pass), at most n. A logic pass that ran late then costs the step only the
+// frames that do not fit; next_pass would skip all blended frames up to the record pass (at 240 fps
+// with ~5 ms passes, a step of 2 frames instead of 6 or 7, a few times a second).
+inline int fit_in_between(int n, int64_t elapsed, int64_t pass, int64_t budget) {
+    pass = std::max<int64_t>(pass, 1);
+    const int64_t fit = (budget - elapsed) / pass;
+    return int(std::clamp<int64_t>(fit, 1, std::max(1, n)));
+}
+
+// Paced logic pass at 120/240 fps with a step slot (gx2/vsync_pacing.h: when the step's logic frame
+// is due on the virtual vsync). The pass starts one drawn frame (`frame`) before the slot, as it does
+// after a record pass, so its frame makes the slot: it waits for that time if it is early and `wait`
+// (the step's passes are done), keeps it if less than a step late (the elapsed time counted from it
+// makes the step plan fewer in-between frames, and the game catches up), and starts its own schedule
+// when later than that. `start`: the step's start, which its elapsed time counts from.
+enum class StepStart { kWait, kKeep, kLate };
+struct StepPlan {
+    int64_t start;
+    StepStart how;
+};
+inline StepPlan slot_step_start(int64_t now, int64_t slot, int64_t frame, int64_t step, bool wait) {
+    const int64_t start = slot - frame;
+    if (wait && now < start) return {start, StepStart::kWait};
+    if (now - start < step) return {start, StepStart::kKeep};
+    return {now, StepStart::kLate};
+}
+
 }  // namespace pacing
 }  // namespace interp

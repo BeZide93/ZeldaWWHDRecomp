@@ -240,6 +240,53 @@ worst flip interval at 60 fps fell from 33.4 to 17.7 ms. Metal at 240 fps withou
 (this computer draws ~150) now draws 149 instead of 119 frames a second at 30.0 instead of 29.8
 logic steps/s.
 
+## 240 fps micro-stutter: step slots (issue #164, 2026-10-12)
+
+At 240 fps with "Keep game speed" on, v0.2.13 hitched every step for seconds at a time and skipped
+an in-between frame every few seconds. Two clocks disagreed: paced interpolation scheduled logic
+steps on a wall clock of its own (33.333 ms, 30.000 steps a second, a late step keeping the
+schedule since #125), while the virtual vsync draws 8 frames a step on the 59.94 Hz grid (33.367
+ms). The schedule drifted 0.034 ms a step against the grid. Where it ran ahead, a logic pass slept
+past its frame's vsync, that frame flipped late ("flips when ready", #125, keeping the grid) and the
+step's in-between frames bunched up behind it at ~3 ms to catch up: one 10-12 ms interval and
+several short ones every step, until the drift had crossed a whole vsync (~8 s on and ~8 s off in a
+cycle of ~16 s). Where it ran behind, the 2 ms planning slack ran out every few seconds and the rest
+of a step's blended frames were skipped. 120 fps has the same cycle at a smaller scale.
+
+Now the schedule is the grid (`gx2/vsync_pacing.h`, step slots): a step's logic frame is due two
+vsyncs after the previous step's (the game's swap interval, 29.97 steps a second as on the
+console), and the logic pass starts one drawn frame before that slot (`interp_pacing.h`
+`slot_step_start`). A logic frame less than a step late keeps the schedule and the next step plans
+fewer in-between frames (the #125 behaviour); later than a step starts a new schedule. Two smaller
+changes go with it: a logic pass that ran late keeps the in-between frames that still fit instead
+of skipping all blended frames of the step (`fit_in_between`), and an in-between pass probe that
+hits a hitch (at the start the first in-between pass is a probe, and it measured 75-112 ms in four
+of six boots at 240 fps here) counts twice the old estimate and is retried after a second instead of
+keeping in-between frames out for 10 s. `WWHD_TRACE_FLIPS=file` and `WWHD_TRACE_STEPS=file` write
+per-flip and per-step traces.
+
+Apple M3 Max, Windfall (slot 2, walking), Vulkan, hidden windows, `WWHD_DISPLAY_HZ=240`, 36 s per run
+after the load; 1-minute load 20-30 (other agents' work) during every run, so single runs, and
+the per-second rates are noisy. Uneven = flip intervals over 1.4 or under 0.6 frames at the rate:
+
+| Case | v0.2.13 (devel d7d96991) | step slots |
+|---|---|---|
+| 240 fps | 238.9 flips/s, p95 7.26 / p99 10.78 ms, 16.6 uneven/s | 239.2, p95 4.17 / p99 4.20 ms, 0.5 uneven/s |
+| 240 fps, rerun | 238.8, p99 10.15 ms, 6.7 uneven/s | 237.6, p99 5.97 ms, 2.5 uneven/s |
+| 120 fps | 119.9, p95 13.04 / p99 18.61 ms, 7.0 uneven/s | 119.7, p95 / p99 8.34 ms, 0.1-0.2 uneven/s |
+| 240, render +15 ms (#125 row) | 56.8 flips/s, 30.0 steps/s | 57.4 / 55.8, 29.95 steps/s |
+| 240, game +2.5 ms per frame | 182.8, 16.7 uneven/s, 61 skips | 204.5, 1.4 uneven/s, 11 skips |
+| 240, game +2.5 ms, interleaved at load 30 | 149.5 / 153.2, 10 / 14 skips | 152.3 / 156.9, 1 / 5 skips |
+| 240 fps Metal (draws ~150 here) | 149.9, max 25.2 ms, 25 skips | 149.1, max 13.1 ms, 1 skip |
+| 60, paced, render +15 ms | 49.8 | 50.0 |
+| 240, "Keep game speed" off | 182.6 | 184.2 |
+| start at 240 fps, first 10 s | 0 % of in-between frames drawn (#125 reverted: 1-2 %) | 90-92 % |
+
+`interp_pacing_test` simulates the pass loop on the virtual vsync with both schedules: at 240 fps
+on a fast computer the v0.2.13 schedule gives 2774 uneven intervals in a minute and the step slots
+none, at 29.97 steps/s; the loaded cases (5-30 ms passes) keep 29.97 steps/s with at least the
+frames of the old schedule. Not measured here: a real 240 Hz display (the runs present nothing).
+
 ## Desktop CPU/GPU overlap and CPU path defaults (2026-10-07)
 
 Apple M3 Max, MoltenVK, Vulkan renderer, `tools/bench/run_bench.py`, Outset (slot 3) and Windfall
