@@ -7,6 +7,11 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Android: setup works again on the development build.** Since the decomp version arrived in setup, the app's
+  setup stopped right away ("No module named 'decomp_setup'"); the missing file is now packed with it. Also clearer
+  game-icon hints: "already on the home screen" for the plain icon too, and wording that fits every launcher
+  (PR #170, thanks @rhemfur).
+
 - **Fixed: "Invert camera up/down" also inverted the Wind Waker baton** (issue #167). The setting now applies
   only to the camera, including first-person views and item aiming (bow, hookshot, telescope, Picto Box) and the
   mouse camera (which now follows it too); the baton and other right-stick controls keep their normal direction.
