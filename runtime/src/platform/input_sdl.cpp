@@ -664,9 +664,10 @@ void update(){
   devices.emplace_back(id,d);
  }
  // Home / Select open and close the menu here (independent of the frame rate): the press that does is
- // the overlay's, so the gates count this poll as captured when the menu was open before or is after
+ // the overlay's, so the gates count this poll as captured when the menu was open before or is after;
+ // so does a poll whose input a platform shortcut took (overlay/extensions.h)
  overlay::poll_controller_shortcuts(v);
- const bool captured=captured_before||overlay::captures();
+ const bool captured=captured_before||overlay::captures()||overlay::shortcut_took_input();
  g_gates.combine(devices,captured,v,game);  // a reconnected pad (new id) gets a new gate
  auto state=input_map::controller_state(input_map::current(),game);
  // + went down: the view may switch to the GamePad screen while the game is paused

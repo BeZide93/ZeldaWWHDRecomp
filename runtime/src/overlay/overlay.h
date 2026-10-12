@@ -6,13 +6,16 @@
 // mouse and controller. Tabs: Saves, Graphics, Display, Audio, Mods, Controls, Language / About. Every option
 // calls the same functions as the macOS menu bar (which stays in sync) or the SDL host's shortcuts.
 // When the game asks for text, the overlay shows its text prompt (text_entry.h) with the same input rules.
+// Ports add or hide tabs, and plug in fonts, shortcuts, a system keyboard and layers over the game,
+// through extensions.h (registered at start-up).
 //
 // Threads: hosts feed input on their main thread; the renderer builds and draws the UI on its render
 // thread once per TV present (frame()); option changes go back to the main thread (hostui::post).
 //
 // Test switches:
 //   WWHD_TEST_OVERLAY=open[:<tab>][@<frame>]   open the overlay (tab: saves, graphics, display, audio, mods,
-//                                              controls, about) at TV frame <frame> (default 1)
+//                                              controls, about, or an added tab's id) at TV frame <frame>
+//                                              (default 1)
 //   WWHD_TEST_MOD_DISABLE/WWHD_TEST_MOD_REMOVE=<id>  normal package actions in headless runs
 //   WWHD_TEST_CATALOGUE_INSTALL=<id>         refresh and install through the normal catalogue UI worker
 //                                              (headless tests only; open the Mods tab separately)
@@ -29,7 +32,13 @@ struct ImDrawData;
 
 namespace overlay {
 
-void poll_controller_shortcuts(const float* values);  // host input thread, every input poll
+// Host input thread, every input poll (the AppKit host: the overlay's frame): the settings shortcut
+// (Home, Select held) and the platform's shortcuts (extensions.h).
+void poll_controller_shortcuts(const float* values);
+// A platform shortcut took the input since the last call (and clears that). Hosts count such a poll as
+// captured, as the press that opens or closes the menu: the inputs held stay from the game until each one
+// is released (release_gate.h). Always false without platform shortcuts.
+bool shortcut_took_input();
 bool is_open();             // any thread
 void set_open(bool open);   // any thread
 // the game sees no input: the overlay has it (captures()). Controller inputs held when it closes stay

@@ -39,8 +39,15 @@ static bool lastPointerTouch=false;
 static int pointerEvents=0;
 // Home / Select toggle overlayOpen in the input pump through the real SettingsShortcut (settings_shortcut.h)
 static double shortcutClock=0;
-namespace overlay { void poll_controller_shortcuts(const float* v){static SettingsShortcut sc;
-  const auto a=sc.poll(shortcutClock,v[input_map::kPadOptions]>0.5f,v[input_map::kPadHome]>0.5f,overlayOpen);if(a!=SettingsShortcut::None)overlayOpen=a==SettingsShortcut::Open;}
+// a port's controller shortcut (overlay/extensions.h) when platformShortcut: LB + RB + Select, once per
+// press; the overlay keeps the inputs it took from the settings shortcut and reports the poll as taken
+static bool platformShortcut=false,shortcutTook=false;static int platformShortcuts=0;
+namespace overlay { void poll_controller_shortcuts(const float* v){static SettingsShortcut sc;static bool latched=false;
+  using namespace input_map;bool select=v[kPadOptions]>0.5f;
+  if(platformShortcut&&v[kPadLB]>0.5f&&v[kPadRB]>0.5f&&select){if(!latched){latched=true;shortcutTook=true;++platformShortcuts;}}
+  if(!select)latched=false;if(latched)select=false;
+  const auto a=sc.poll(shortcutClock,select,v[input_map::kPadHome]>0.5f,overlayOpen);if(a!=SettingsShortcut::None)overlayOpen=a==SettingsShortcut::Open;}
+ bool shortcut_took_input(){const bool took=shortcutTook;shortcutTook=false;return took;}
  bool key(int,bool,bool,int){if(promptShown)++promptKeys;return promptShown;} bool is_open(){return overlayOpen;} bool blocks_input(){return promptShown||overlayOpen;}
  bool captures(){return promptShown||overlayOpen;}
  bool mouse_move(float,float,bool touch){lastPointerTouch=touch;++pointerEvents;return overlayOpen;}
@@ -290,6 +297,19 @@ int main(){
   assert(btn(pad1,SDL_GAMEPAD_BUTTON_START,true).buttons==input::kPlus);btn(pad1,SDL_GAMEPAD_BUTTON_START,false);
   assert(btn(pad2,SDL_GAMEPAD_BUTTON_BACK,false).buttons==0);assert(btn(pad2,SDL_GAMEPAD_BUTTON_BACK,true).buttons==input::kMinus);
   btn(pad2,SDL_GAMEPAD_BUTTON_BACK,false);
+  // a port's shortcut (overlay/extensions.h, issue #173) took LB + RB + Select: like the overlay's input, the
+  // three stay from the game until each is released (and Select held does not open the menu)
+  platformShortcut=true;
+  assert(btn(pad1,SDL_GAMEPAD_BUTTON_LEFT_SHOULDER,true).buttons==input::kL);
+  assert(btn(pad1,SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER,true).buttons==(input::kL|input::kR));
+  assert(btn(pad1,SDL_GAMEPAD_BUTTON_BACK,true).buttons==0&&platformShortcuts==1);
+  shortcutClock+=0.6;assert(poll().buttons==0&&!overlayOpen&&platformShortcuts==1);
+  assert(btn(pad2,SDL_GAMEPAD_BUTTON_SOUTH,true).buttons==S);btn(pad2,SDL_GAMEPAD_BUTTON_SOUTH,false);  // the other pad meanwhile
+  assert(btn(pad1,SDL_GAMEPAD_BUTTON_BACK,false).buttons==0);  // L and R still held: still kept
+  btn(pad1,SDL_GAMEPAD_BUTTON_LEFT_SHOULDER,false);assert(btn(pad1,SDL_GAMEPAD_BUTTON_LEFT_SHOULDER,true).buttons==input::kL);
+  btn(pad1,SDL_GAMEPAD_BUTTON_LEFT_SHOULDER,false);btn(pad1,SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER,false);
+  assert(btn(pad1,SDL_GAMEPAD_BUTTON_BACK,true).buttons==input::kMinus);btn(pad1,SDL_GAMEPAD_BUTTON_BACK,false);
+  platformShortcut=false;
   // the name prompt: A / Start confirms (the prompt closes while it is held), with either pad
   for(auto [j,b,bit]:{std::make_tuple(pad1,SDL_GAMEPAD_BUTTON_SOUTH,S),std::make_tuple(pad2,SDL_GAMEPAD_BUTTON_START,uint32_t(input::kPlus))}){
    promptShown=true;poll();assert(btn(j,b,true).buttons==0);promptShown=false;
@@ -315,5 +335,5 @@ int main(){
  }
  input::set_pro_controller(false);
  SDL_DestroyWindow(controls);SDL_DestroyWindow(game);input::set_prompt_window(nullptr);
- SDL_Quit();puts("input_sdl_test: keyboard mapping, focus, touch, Pro mode, guarded save-state shortcuts, screenshot binding, text prompt routing, rumble, overlay hand-back (#153) passed");
+ SDL_Quit();puts("input_sdl_test: keyboard mapping, focus, touch, Pro mode, guarded save-state shortcuts, screenshot binding, text prompt routing, rumble, overlay hand-back (#153), platform shortcut hand-back (#173) passed");
 }

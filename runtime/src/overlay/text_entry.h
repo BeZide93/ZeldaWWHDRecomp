@@ -49,7 +49,9 @@ using Done = std::function<void(bool ok, std::u16string text)>;
 bool start(const Request& r, Done done);
 // Any thread. The game took its keyboard away: close without an answer.
 void dismiss();
-bool active();  // any thread
+// any thread: the prompt shows, or a platform keyboard that field() started (the overlay and the game
+// get no input meanwhile: overlay::captures())
+bool active();
 
 // ---- host input (main thread)
 // Keys (macOS virtual key codes, as overlay::key): editing and navigation only (Backspace, Delete,
@@ -62,5 +64,17 @@ void preedit(const char* utf8);  // input method composition, shown at the caret
 // Builds the window. `pad` are the host controller inputs (input_map::kPadCount values, 0..1).
 // Returns true when the prompt closed in this frame (the overlay then waits for released buttons).
 bool draw(const float* pad);
+
+// ---- the settings overlay's own text fields (render thread, inside an ImGui frame)
+// A text field: ImGui::InputText, or InputTextWithHint when `hint` is set, with `flags`
+// (ImGuiInputTextFlags). Where the platform has its own keyboard instead of a physical one
+// (overlay/extensions.h, set_text_input) the field is read-only and choosing it shows that keyboard
+// through this prompt's routing: active() is true while it shows, and the inputs held when it closes
+// stay from the game (release_gate.h) and from the menu until released. The typed text arrives in a
+// later frame: that call writes it into `buf` (cut at a character boundary to fit `size`) and returns
+// true, as Enter does with ImGuiInputTextFlags_EnterReturnsTrue. Without a platform keyboard this is
+// exactly the ImGui call.
+bool field(const char* label, char* buf, size_t size, int flags = 0, const char* hint = nullptr);
+bool field_active();  // any thread: a platform keyboard that field() started shows
 
 }  // namespace text_entry

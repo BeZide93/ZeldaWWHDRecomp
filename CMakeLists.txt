@@ -735,6 +735,14 @@ add_test(NAME mod_game_id COMMAND mod_package_test --game-id)
 add_test(NAME mod_guest_startup COMMAND mod_package_test --guest-startup)
 add_test(NAME mod_guest_metadata COMMAND mod_package_test --guest-metadata)
 add_test(NAME mod_guest_prepare COMMAND mod_package_test --guest-prepare)
+# issue #173: platform extensions of the settings overlay (overlay/extensions.h) and the overlay's text
+# fields through a platform keyboard (text_entry::field)
+add_executable(overlay_extensions_test runtime/tools/overlay_extensions_test.cpp runtime/src/overlay/extensions.cpp
+  runtime/src/overlay/text_field.cpp)
+target_include_directories(overlay_extensions_test PRIVATE runtime/src)
+target_compile_options(overlay_extensions_test PRIVATE -UNDEBUG)
+target_link_libraries(overlay_extensions_test PRIVATE imgui)
+add_test(NAME overlay_extensions COMMAND overlay_extensions_test)
 add_executable(mod_cemu_dialog_test runtime/tools/mod_cemu_dialog_test.cpp)
 target_include_directories(mod_cemu_dialog_test PRIVATE runtime/src)
 target_compile_options(mod_cemu_dialog_test PRIVATE -UNDEBUG)
@@ -1154,7 +1162,8 @@ if(NOT ANDROID AND SDL3_FOUND AND Python3_Interpreter_FOUND)
   add_executable(mod_oneclick_flow_test runtime/tools/mod_oneclick_flow_test.cpp
     runtime/third_party/imgui/backends/imgui_impl_sdlrenderer3.cpp runtime/src/mods/code_mods.cpp
     runtime/src/mods/manager.cpp runtime/src/mods/traversal_settings.cpp runtime/src/mods/packages.cpp runtime/src/mods/guest_png.cpp
-    runtime/src/mods/mod_archive.cpp runtime/src/mods/content.cpp runtime/src/mods/cemu_pack.cpp runtime/src/guest_addr_identity.c)
+    runtime/src/mods/mod_archive.cpp runtime/src/mods/content.cpp runtime/src/mods/cemu_pack.cpp runtime/src/guest_addr_identity.c
+    runtime/src/overlay/extensions.cpp runtime/src/overlay/text_field.cpp)
   target_include_directories(mod_oneclick_flow_test PRIVATE runtime/src runtime/include)
   target_compile_options(mod_oneclick_flow_test PRIVATE -UNDEBUG)
   target_link_libraries(mod_oneclick_flow_test PRIVATE imgui SDL3::SDL3 ZLIB::ZLIB Threads::Threads ${CMAKE_DL_LIBS})
