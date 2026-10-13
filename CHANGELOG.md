@@ -7,6 +7,12 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Mouse buttons and the wheel can be bound in Controls** (issue #165, thanks @PNOAGAMER): left, right, middle, side
+  buttons 4/5 and wheel up/down are now bindable like keys, so the game can be played fully with mouse and keyboard
+  together with the mouse camera (Mods > Built-in). Bound mouse buttons drive the game while the mouse camera has
+  captured the pointer in the TV window; the settings menu, GamePad-window touch and text prompts keep the mouse as
+  before, and "first person on the mouse wheel" keeps priority over wheel bindings. Nothing is bound by default.
+
 - **Setup: disc images and Cemu's keys.txt** (from a player support case): a `.wux`/`.wud` needs two keys, the disc key
   of your dump and the Wii U common key. Setup now accepts Cemu's `keys.txt` directly and finds both keys in it
   (choose it once for either key), the disc key can also be pasted, and the keys screen explains this, including
