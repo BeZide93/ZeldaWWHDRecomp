@@ -108,7 +108,7 @@ HLE(vpad, VPADRead) {
         p.lx = f.lx; p.ly = f.ly; p.rx = f.rx; p.ry = f.ry;
     }
     last_p = p;
-    story_notebook::pad(p);  // the story notebook's page takes the controller while it is open
+    story_notebook::pad(p, c);  // the story notebook's page takes the controller while it is open
     if (!input::pro_controller()) mods::move_speed_input(p.buttons);
     if (!input::pro_controller()) mods::fast_forward_input(p.buttons);
     if (input::pro_controller()) {  // GamePad on the table: screen and touch only

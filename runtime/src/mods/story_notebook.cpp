@@ -8,10 +8,15 @@
 #include "story_manifest.h"
 #include "story_chart.h"
 #include "story_mail.h"
+#include "story_notebook_game.h"
+#include "story_notebook_font.h"
+#include "story_notebook_style.h"
 #include "guest_hud.h"
 #include "guest_png.h"
 
+#include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <map>
@@ -93,6 +98,7 @@ std::atomic<bool> g_open{false};
 Page g_page;  // game thread
 void (*g_original)(Cpu*, uint32_t) = nullptr;
 uint32_t (*g_call)(Cpu*, uint32_t, std::initializer_list<uint32_t>) = nullptr;
+const GameUi* g_ui = nullptr;  // the game's font, sounds and window art (the game binary only)
 
 // ---- resident takeovers (story_takeover.h) ----
 const uint32_t kPeopleGetMsg = GC(0x022C6C68);    // daNpcPeople_c::getMsg(): which line a Windfall/Outset resident says
@@ -346,6 +352,11 @@ IconPlace place_over(uint32_t item, uint32_t number) {
         }
     }
     if (number == kNotebookItem) g_icon_reason = at.shown ? "shown over the notebook's bag place" : "the window is hidden or fading";
+    if (trace() && number == kLetterItem && at.shown) {
+        static float lx = -1, ly = -1;
+        if (std::fabs(at.x - lx) > 1 || std::fabs(at.y - ly) > 1) LOG("[notebook] letter icon at %.1f %.1f (GamePad pixels)", at.x, at.y);
+        lx = at.x, ly = at.y;
+    }
     return at;
 }
 
@@ -432,6 +443,154 @@ void bag_icon() {
     published = true;
 }
 
+// ---- the page in the game's look (story_notebook_font.h, story_notebook_style.h) ----
+// The game's fonts, read glyph by glyph as the page needs them; the line atlas; the menu art and the
+// boxes composed from it. All host-side; a state load keeps them (the game's resources don't change),
+// only the HUD images are created again.
+struct Look {
+    font::Face main, fallback, icons;  // CKingMain, CKingMsg (characters CKingMain lacks), the button icons
+    bool font_failed = false, icons_probed = false;
+    font::Atlas atlas;
+    guestmods::hud::Handle atlas_image = 0;
+    uint64_t atlas_generation = 0, store_generation = 0;
+    style::Art art;
+    bool art_tried = false, art_ok = false;
+    struct Box {
+        guestmods::hud::Handle handle = 0;
+        uint64_t store_generation = 0;
+        std::shared_ptr<guestmods::hud::Image> image;
+    };
+    std::map<std::string, Box> boxes;  // "name:WxH" in page units
+    font::Prompts prompts;
+    uint64_t fonts_key = 0;  // changes when glyphs are added
+} g_look;
+constexpr float kBoxResolution = 0.75f;  // composed boxes: pixels per page unit (the GamePad shows 0.67)
+constexpr float kFontScale = 1.05f;      // the game font's cell height per page text size (its cell has room above and below)
+float g_close_time = 1.0f;  // the closing animation: 0..1 after the page closed
+std::vector<Command> g_closing;  // the last page drawn (resolved), faded out while closing
+std::vector<guestmods::hud::Handle> g_closing_images;
+uint32_t g_closing_screen = 1;
+Sound g_pending_sound = Sound::None;  // the page opened from a hook: its sound with the next controller read
+
+float game_measure(const std::string& text, float size) {
+    const int h = g_look.main.cell_height;
+    return h ? float(font::Atlas::line_width(text, g_look.main, &g_look.fallback, h)) * size * kFontScale / float(h) : 0.0f;
+}
+
+// the glyphs the page's lines need, from the game's fonts (game thread, with a CPU for the game's calls)
+void load_glyphs(Cpu* c, const std::vector<std::string>& lines) {
+    if (!g_ui || !g_ui->glyphs || !c || g_look.font_failed) return;
+    std::vector<uint32_t> want;
+    for (const std::string& l : lines)
+        for (uint32_t cp : font::codes(l))
+            if (!font::Atlas::button(cp) && !g_look.main.glyphs.count(cp) && !g_look.main.missing.count(cp) &&
+                std::find(want.begin(), want.end(), cp) == want.end())
+                want.push_back(cp);
+    if (!g_look.main.cell_height) want.push_back('?');  // the stand-in for characters no font has
+    if (!want.empty()) {
+        const size_t before = g_look.main.glyphs.size();
+        if (!g_ui->glyphs(c, 0, want, g_look.main) || !g_look.main.ready()) {
+            g_look.font_failed = true;
+            LOG("[notebook] the game's menu font can't be read: the page uses the overlay font");
+            return;
+        }
+        std::vector<uint32_t> lacking;
+        for (uint32_t cp : want)
+            if (g_look.main.missing.count(cp) && !g_look.fallback.glyphs.count(cp) && !g_look.fallback.missing.count(cp)) lacking.push_back(cp);
+        if (!lacking.empty()) g_ui->glyphs(c, 1, lacking, g_look.fallback);
+        if (g_look.main.glyphs.size() != before || !lacking.empty()) g_look.fonts_key++;
+        if (before == 0) {
+            g_text_measure = game_measure;
+            LOG("[notebook] the page uses the game's menu font (cell height %d)", g_look.main.cell_height);
+        }
+    }
+    if (!g_look.icons_probed) {  // the button pictures: the font that has the game's A/B icons
+        g_look.icons_probed = true;
+        for (int slot : {1, 4, 0}) {
+            font::Face f;
+            if (g_ui->glyphs(c, slot, {font::kButtonA, font::kButtonB}, f) && f.glyphs.count(font::kButtonA) && f.glyphs.count(font::kButtonB)) {
+                g_look.icons = std::move(f);
+                g_look.fonts_key++;
+                LOG("[notebook] the button pictures come from font slot %d (%s)", slot,
+                    g_look.icons.glyphs[font::kButtonA].colour ? "colour icons" : "coverage");
+                break;
+            }
+        }
+        if (!g_look.icons.ready()) LOG("[notebook] no game font has the A/B icons: the page draws its own");
+    }
+}
+
+// the menu art, once (it is read from the item menu's layout, open under the page)
+void load_art() {
+    if (g_look.art_tried || !g_ui || !g_ui->art || !g_menu) return;
+    g_look.art_tried = true;
+    std::string why;
+    g_look.art_ok = g_ui->art(g_menu, g_look.art, why);
+    if (g_look.art_ok) style::trim_plates(g_look.art);
+    if (!g_look.art_ok) LOG("[notebook] the menu's window art can't be read (%s): the page draws plain boxes", why.c_str());
+    else LOG("[notebook] the page uses the menu's window art%s%s", why.empty() ? "" : "; ", why.c_str());
+}
+
+// The page's commands as HUD commands: boxes and text become pictures of their images (handles
+// alongside; 0 for the commands that aren't pictures)
+std::vector<Command> render(std::vector<Command> cmds, std::vector<guestmods::hud::Handle>& images) {
+    auto& store = guestmods::hud::store();
+    const uint64_t generation = store.state_generation();
+    cmds = style::resolve(cmds, g_look.art_ok ? &g_look.art : nullptr);
+    // text: the line atlas, rebuilt when a line is new, the fonts grew or the prompts changed
+    const bool font = g_look.main.ready();
+    if (font) {
+        const std::vector<std::string> lines = font::lines_of(cmds);
+        if (!g_look.atlas.holds(lines, g_look.prompts, g_look.fonts_key)) {
+            g_look.atlas.build(lines, g_look.main, &g_look.fallback, g_look.icons.ready() ? &g_look.icons : nullptr, g_look.prompts, g_look.fonts_key);
+            if (g_look.atlas_image) store.release(kOwner, g_look.atlas_image);
+            g_look.atlas_image = 0;
+        }
+        if (!g_look.atlas_image || g_look.store_generation != generation) {
+            const auto img = g_look.atlas.image();
+            g_look.atlas_image = img ? store.create_image(kOwner, img->width, img->height, img->width * 4, img->rgba.data(), img->rgba.size()) : 0;
+            g_look.store_generation = generation;
+        }
+    }
+    cmds = font::to_pictures(cmds, font && g_look.atlas_image ? &g_look.atlas : nullptr, kFontScale);
+    images.assign(cmds.size(), 0);
+    for (size_t i = 0; i < cmds.size(); i++) {
+        Command& c = cmds[i];
+        if (c.kind != Command::Picture) continue;
+        if (c.text.rfind("art:", 0) != 0) {  // a line of text
+            images[i] = g_look.atlas_image;
+            c.text.clear();
+            continue;
+        }
+        int bw, bh;  // the size the box was laid out at (the animations scale only the picture)
+        style::box_size(c.text, bw, bh);
+        const int w = int(std::lround(bw * kBoxResolution)), h = int(std::lround(bh * kBoxResolution));
+        const std::string name = "nb:" + style::box_name(c.text).substr(4);
+        const std::string key = name + ":" + std::to_string(w) + "x" + std::to_string(h);
+        Look::Box& box = g_look.boxes[key];
+        if (!box.image) box.image = style::compose(g_look.art, name, w, h);
+        if (box.image && (!box.handle || box.store_generation != generation)) {
+            box.handle = store.create_image(kOwner, box.image->width, box.image->height, box.image->width * 4, box.image->rgba.data(),
+                                            box.image->rgba.size());
+            box.store_generation = generation;
+        }
+        images[i] = box.handle;
+        c.text.clear();
+    }
+    return cmds;
+}
+
+void append_all(guestmods::hud::Handle list, std::vector<Command>& cmds, const std::vector<guestmods::hud::Handle>& images) {
+    auto& store = guestmods::hud::store();
+    for (size_t i = 0; i < cmds.size(); i++) {
+        if (cmds[i].kind == Command::Picture) {
+            if (images[i]) store.picture(kOwner, list, images[i], std::move(cmds[i]));
+            continue;
+        }
+        store.append(kOwner, list, std::move(cmds[i]));
+    }
+}
+
 void publish(const std::vector<Row>& all) {
     auto& store = guestmods::hud::store();
     if (!g_page.open()) {
@@ -443,9 +602,11 @@ void publish(const std::vector<Row>& all) {
     const float k = screen == 1 ? 854.0f / 1280.0f : 1.0f;
     const guestmods::hud::Handle list = store.begin(kOwner, screen);
     if (!list) return;
-    std::vector<Command> cmds = g_page.draw(all);
+    std::vector<guestmods::hud::Handle> images;
+    std::vector<Command> cmds = render(g_page.draw(all), images);
+    g_closing = cmds, g_closing_images = images, g_closing_screen = screen;  // for the closing animation
     fit_to_screen(cmds, screen);
-    for (Command& c : cmds) store.append(kOwner, list, std::move(c));
+    append_all(list, cmds, images);
     const std::vector<Row> rows = g_page.shown(all);
     if (g_page.mode() == Page::Mode::List) {  // portraits in the rows that show them
         const uint64_t generation = store.state_generation();
@@ -460,14 +621,67 @@ void publish(const std::vector<Row>& all) {
                 p.generation = generation;
             }
             if (!p.handle) continue;
-            float cx, cy, r;
+            float cx, cy, r, alpha = 1;
             Page::emblem_place(i, cx, cy, r);
+            float size = 2 * r;
+            g_page.place_portrait(cx, cy, size, alpha);
             Command c;
-            c.x = (cx - r) * k, c.y = (cy - r) * k, c.w = c.h = 2 * r * k;
+            c.x = (cx - size / 2) * k, c.y = (cy - size / 2) * k, c.w = c.h = size * k;
+            c.rgba = 0xFFFFFF00u | uint32_t(std::lround(255.0f * alpha));
             store.picture(kOwner, list, p.handle, c);
         }
     }
     store.commit(kOwner, list);
+}
+
+// After the page closed: the last page shrinks a little and fades out (0.15 s), then it is gone.
+void publish_closing(float dt) {
+    auto& store = guestmods::hud::store();
+    if (g_close_time >= 1.0f) return;
+    g_close_time = std::min(1.0f, g_close_time + dt / 0.15f);
+    if (g_close_time >= 1.0f || g_closing.empty()) {
+        store.drop(kOwner);
+        g_closing.clear();
+        return;
+    }
+    const guestmods::hud::Handle list = store.begin(kOwner, g_closing_screen);
+    if (!list) return;
+    std::vector<Command> cmds = g_closing;
+    const float t = g_close_time;
+    transform(cmds, 0, kPageX + kPageW / 2, kPageY + kPageH / 2, 1.0f - 0.05f * t, 0, 0, 1.0f - t);
+    fit_to_screen(cmds, g_closing_screen);
+    append_all(list, cmds, g_closing_images);
+    store.commit(kOwner, list);
+}
+
+// The game's menu sound for what the page did. Only while the page has the controller and no game
+// event runs (a talk, a cutscene): the game's own sounds are never played over or replaced.
+const char* sound_label(Sound s) {
+    switch (s) {
+    case Sound::Cursor: return "SE_MENU_CURSOR";
+    case Sound::Decide: return "SE_MENU_DECIDE";
+    case Sound::Cancel: return "SE_MENU_CANCEL";
+    case Sound::Tab: return "SE_MENU_TAB_SWITCH";
+    case Sound::Open: return "SE_MENU_MINI_WINDOW_OPEN";
+    case Sound::Close: return "SE_MENU_MINI_WINDOW_CLOSE";
+    case Sound::TrackOn: return "SE_MENU_ITEM_EQUIP_ON";
+    case Sound::TrackOff: return "SE_MENU_ITEM_EQUIP_OFF";
+    case Sound::None: break;
+    }
+    return nullptr;
+}
+constexpr uint32_t kPlayEventRun = 0x5292;  // dComIfGp_event_runCheck(): the event control's run flag
+void play(Cpu* c, Sound s) {
+    const char* label = sound_label(s);
+    if (!label || !c || !g_ui || !g_ui->sound || !g_call || !have_save()) return;
+    Cpu probe = *c;
+    const uint32_t play_object = g_call(&probe, kPlay, {});
+    if (!play_object || ld8(play_object + kPlayEventRun)) {
+        if (trace()) LOG("[notebook] sound %s not played: a game event runs", label);
+        return;
+    }
+    if (trace()) LOG("[notebook] sound %s", label);
+    g_ui->sound(c, label);
 }
 
 }  // namespace
@@ -773,6 +987,8 @@ bool open_page(const char* how) {
     }
     g_page.show();
     g_open = true;
+    g_close_time = 1.0f, g_closing.clear();
+    g_pending_sound = Sound::Open;  // with the page's first controller read (the game's menu sound)
     LOG("[notebook] page opened (%s)", how);
     return true;
 }
@@ -780,6 +996,8 @@ void close_page() {
     if (g_open) LOG("[notebook] page closed (state load or shutdown)");
     g_page.hide();
     g_open = false;
+    g_close_time = 1.0f, g_closing.clear(), g_closing_images.clear();
+    g_pending_sound = Sound::None;
     guestmods::hud::store().drop(kOwner);
 }
 bool page_open() { return g_open.load(std::memory_order_relaxed); }
@@ -795,30 +1013,48 @@ void mute(input::PadState& p) {
     if (const uint32_t s = g_swallow.load(std::memory_order_relaxed)) p.buttons &= ~s;
 }
 
-void pad(input::PadState& p) {
+// seconds since the last controller read (the animations), at most a tenth of a second
+float frame_seconds() {
+    using clock = std::chrono::steady_clock;
+    static clock::time_point last{};
+    const clock::time_point now = clock::now();
+    const float dt = last == clock::time_point{} ? 0.0f : std::chrono::duration<float>(now - last).count();
+    last = now;
+    return std::min(dt, 0.1f);
+}
+
+void pad(input::PadState& p, Cpu* c) {
     if (!g_installed) return;  // no quest mod: nothing of the notebook runs
     static uint32_t ticks = 0;
     if (++ticks % 15 == 0) declared_tick();
     bag_icon();
+    const float dt = frame_seconds();
     if (!g_open.load(std::memory_order_relaxed)) {
+        publish_closing(dt);
         if (const uint32_t s = g_swallow.load(std::memory_order_relaxed)) {
             g_swallow.store(s & p.buttons, std::memory_order_relaxed);
             p.buttons &= ~s;
         }
         return;
     }
+    if (g_ui && g_ui->prompts) g_look.prompts = g_ui->prompts();
+    load_art();
     std::vector<Quest> storage;
     std::vector<Row> rows = rows_now(storage);
     PadInput in;
     in.buttons = p.buttons, in.ly = p.ly, in.touch = p.touch;
     in.x = p.tx * 1280.0f, in.y = p.ty * 720.0f;  // the GamePad picture (854 x 480) as the page's 1280 x 720
     const Page::Action act = g_page.input(in, rows);
+    g_page.tick(dt);
     if (act.kind == Page::Action::Toggle && have_save()) {
         story_mail::Book b = book();
         const bool on = toggle_tracked(b, act.key);
         LOG("[notebook] quest %04X %s", act.key, on ? "tracked: shown on the sea chart" : "no longer tracked");
         rows = rows_now(storage);
     }
+    // the game's menu sounds (the page's own input only; the game sees an idle controller)
+    if (g_pending_sound != Sound::None) play(c, g_pending_sound), g_pending_sound = Sound::None;
+    play(c, act.sound);
     if (trace()) {
         static int last_mode = -1;
         static uint16_t last_key = 0;
@@ -826,15 +1062,19 @@ void pad(input::PadState& p) {
             LOG("[notebook] page mode %d, quest %04X selected", int(g_page.mode()), g_page.selected_key());
         last_mode = int(g_page.mode()), last_key = g_page.selected_key();
     }
+    if (g_page.open()) load_glyphs(c, font::lines_of(g_page.draw(rows)));
     publish(rows);
     if (!g_page.open()) {
         g_open = false;
+        g_close_time = 0.0f;  // the page fades out over the next frames (publish_closing)
         g_swallow.store(p.buttons, std::memory_order_relaxed);  // the B that closed it doesn't reach the game
         LOG("[notebook] page closed (B or the close mark)");
+        publish_closing(0.0f);
     }
     p = input::PadState{};  // the game sees an idle controller while the page is open
 }
 
+void set_game_ui(const GameUi* ui) { g_ui = ui; }
 void note_import() { g_imported = true; }
 bool imported() { return g_imported; }
 bool installed() { return g_installed; }
@@ -850,6 +1090,12 @@ void inventory_item(Cpu* c) {
     const uint32_t key = c->r[3], lr = c->lr;
     g_original(c, kInventoryItem);
     if ((lr != kWindowBuild && lr != kWindowInit) || key < kFirstDeliveryKey || key >= kFirstDeliveryKey + kDeliveryPlaces) return;
+    // research aid (local runs): a game delivery item in the third place, to compare the game's own caption
+    static const char* test_item = getenv("WWHD_NOTEBOOK_TEST_BAGITEM");
+    if (test_item && key == kFirstDeliveryKey + 2) {
+        c->r[3] = uint32_t(strtoul(test_item, nullptr, 0));
+        return;
+    }
     if ((c->r[3] & 0xFF) != kEmpty) return;
     const PortPlaces places = port_places(c);
     if (key != places.notebook && key != places.letter) return;
@@ -876,7 +1122,7 @@ void open_child(Cpu* c) {
     const uint32_t count = ld32(menu + kMenuChildren), data = ld32(menu + kMenuChildren + 4);
     const uint32_t child = data ? ld32(data + 4 * (index < count ? index : 0)) : 0;
     if (trace()) LOG("[notebook] item menu: A on place %u (item %02X)", index, child ? ld32(child + kItemNumber) : 0xFFu);
-    if (child && port_item(ld32(child + kItemNumber)) && open_page("A on its bag place")) return;
+    if (child && ld32(child + kItemNumber) == kNotebookItem && open_page("A on its bag place")) return;
     g_original(c, kOpenChild);
 }
 
@@ -898,6 +1144,13 @@ void execute_window(Cpu* c) {
     g_window_step = g_step.load(std::memory_order_relaxed);
     g_bag_item = g_letter_item = 0;
     if (ld32(menu + kMenuWindowMode) != kDeliveryWindow) return;
+    static const char* panes = getenv("WWHD_NOTEBOOK_PANES");  // research aid: the menu layout's panes, once
+    static bool dumped = false;
+    static unsigned frames = 0;
+    if (panes && *panes && g_ui && g_ui->dump && !dumped && ++frames > 40) {
+        dumped = true;
+        g_ui->dump(c, menu, panes);
+    }
     const uint32_t count = ld32(menu + kMenuChildren), data = ld32(menu + kMenuChildren + 4);
     for (uint32_t i = kFirstWindowChild; i < kFirstWindowChild + kWindowChildren && i < count && data; i++) {
         const uint32_t child = ld32(data + 4 * i);
@@ -922,7 +1175,7 @@ void touch_select(Cpu* c) {
     const uint32_t item = c->r[3];
     g_original(c, kTouchSelect);
     if (trace()) LOG("[notebook] item menu: touch on item %02X", ld32(item + kItemNumber));
-    if (port_item(ld32(item + kItemNumber))) open_page("a touch on its bag place");
+    if (ld32(item + kItemNumber) == kNotebookItem) open_page("a touch on its bag place");
 }
 
 // getSelectedItemValue(this, receiver): the notebook can't go on X, Y or R

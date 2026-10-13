@@ -239,7 +239,7 @@ set_source_files_properties(runtime/src/gfx/vulkan/pipeline_demand.cpp PROPERTIE
 set_source_files_properties(runtime/src/gfx/vulkan/shader_translation.cpp
     runtime/src/gfx/vulkan/shader_compiler.cpp
     runtime/src/gfx/vulkan/deferred_commands.cpp PROPERTIES COMPILE_OPTIONS "")
-set_source_files_properties(runtime/src/button_glyph_font.cpp PROPERTIES COMPILE_OPTIONS "-include;${CEMU_DIR}/cemu_shim.h")
+set_source_files_properties(runtime/src/button_glyph_font.cpp runtime/src/game_glyph.cpp PROPERTIES COMPILE_OPTIONS "-include;${CEMU_DIR}/cemu_shim.h")
 if(ANDROID)
   # Android: SDLActivity loads the game as libmain.so and calls its SDL_main (android/)
   add_library(wwhd SHARED ${RUNTIME_SOURCES} ${GX2_SOURCES} ${GFX_SOURCES} ${MOD_GFX_SOURCES} ${IMGUI_METAL})

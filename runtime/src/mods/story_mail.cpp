@@ -483,6 +483,8 @@ void next_msg(Cpu* c) {
 void get_message(Cpu* c) {
     const uint32_t out = c->r[4];
     g_original(c, kGetMessage);
+    static const bool numbers = [] { const char* e = getenv("WWHD_MAIL_MSGLOG"); return e && *e == '1'; }();
+    if (numbers) LOG("[mail] message %X looked up (lr %08X)", ld32(out + kMsgNumber), c->lr);
     for (Override* o : {&g_show.letter, &g_notebook_text, &g_npc_text}) {
         if (!o->text || o->keyed || ld32(out + kMsgNumber) != o->number) continue;
         const uint32_t set = ld32(out + kMsgSet);

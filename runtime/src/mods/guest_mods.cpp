@@ -16,6 +16,7 @@
 #include <fstream>
 #include <filesystem>
 #include "guest_audio.h"
+#include "story_notebook_game.h"
 #include "guest_png.h"
 #include "story_mail.h"
 #include "story_mail_book.h"
@@ -571,6 +572,7 @@ void init() {
     });
     // The story notebook: the item menu's Delivery Bag shows it and opens its page, only when a loaded
     // mod uses the quest services (story_notebook.h).
+    story_notebook::set_game_ui(&story_notebook::game_ui());
     story_notebook::set_game_calls(call_original,[](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);});
     story_notebook::install([](uint32_t addr) {
         auto it=g_chains.find(addr);return it==g_chains.end()?std::string():it->second.replace_mod;

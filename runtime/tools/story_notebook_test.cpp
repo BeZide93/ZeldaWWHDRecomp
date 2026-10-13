@@ -5,6 +5,8 @@
 #include "mods/story_notebook.h"
 #include "mods/story_notebook_list.h"
 #include "mods/story_notebook_page.h"
+#include "mods/story_notebook_font.h"
+#include "mods/story_notebook_style.h"
 #include "mods/story_notebook_bag.h"
 #include "mods/story_takeover.h"
 #include "mods/story_sail.h"
@@ -656,6 +658,213 @@ void test_page_screen() {
     for (size_t i = 0; i < tv.size(); i++) {
         assert(std::fabs(pad[i].x - tv[i].x * 854 / 1280) < 0.01f && std::fabs(pad[i].size - tv[i].size * 854 / 1280) < 0.01f);
         if (tv[i].kind == Command::Rect) assert(std::fabs(pad[i].w - tv[i].w * 854 / 1280) < 0.01f);
+    }
+}
+
+
+// ---- the page in the game's look (story_notebook_font.h, story_notebook_style.h) ----
+
+// a synthetic font: every character a w x 20 block of coverage, advance w + 2
+font::Face block_font(const std::string& chars, int w, int h = 20) {
+    font::Face f;
+    f.cell_height = h;
+    for (uint32_t cp : font::codes(chars)) {
+        game_glyph::Glyph g;
+        g.advance = w + 2, g.bitmap.width = cp == ' ' ? 0 : w, g.bitmap.height = h;
+        g.bitmap.rgba.assign(size_t(g.bitmap.width) * h * 4, 255);
+        f.glyphs[cp] = g;
+    }
+    return f;
+}
+
+void test_game_font() {
+    // UTF-8 decoding and the private-use button characters
+    assert((font::codes("Aé\xEE\x80\x80") == std::vector<uint32_t>{'A', 0xE9, 0xE000}));
+    font::Face main = block_font("abc ?", 8), fallback = block_font("\xC3\xA9", 10);  // é only in the fallback
+    assert(font::line_pixels(main, "ab c") == 40 && font::measure(main, "ab", 40) == 40.0f);
+    std::vector<uint32_t> want;
+    main.wanted("abz", want);
+    assert((want == std::vector<uint32_t>{'z'}));
+    // the atlas: each distinct line once, at the font's height; a button as wide as the line is tall
+    font::Atlas atlas;
+    const std::vector<std::string> lines = {"abc", "a\xC3\xA9", "abc", font::kGlyphA};
+    atlas.build(lines, main, &fallback, nullptr, {}, 1);
+    assert(atlas.holds(lines, {}, 1) && !atlas.holds(lines, {}, 2) && !atlas.holds({"new"}, {}, 1));
+    const font::Atlas::Cell* abc = atlas.cell("abc");
+    assert(abc && abc->width == 30 && abc->height == 20 && !abc->picture);
+    assert(atlas.cell("a\xC3\xA9")->width == 22);  // é from the fallback font
+    const font::Atlas::Cell* button = atlas.cell(font::kGlyphA);
+    assert(button && button->width == 20 && button->picture);  // no icon font: the port's own disc
+    auto img = atlas.image();
+    assert(img && img->width == font::Atlas::kWidth && img->height >= 20);
+    // a pixel of 'a' in the atlas is white coverage
+    const size_t at = (size_t(abc->v0 * img->height + 5) * img->width + size_t(abc->u0 * img->width) + 2) * 4;
+    assert(img->rgba[at + 3] == 255);
+    // Text commands become pictures of their lines, scaled to the text size and tinted
+    Command t;
+    t.kind = Command::Text, t.x = 100, t.y = 50, t.size = 40, t.rgba = 0x003800FF, t.text = "abc";
+    Command r;
+    r.kind = Command::Rect;
+    Command b = t;
+    b.text = font::kGlyphB;  // not in the atlas: drawn as a disc with its letter
+    auto out = font::to_pictures({r, t, b}, &atlas, 1.0f);
+    assert(out.size() == 4 && out[0].kind == Command::Rect && out[1].kind == Command::Picture);
+    assert(out[1].h == 40 && out[1].w == 60 && out[1].rgba == 0x003800FF && out[1].u0 == abc->u0);
+    assert(out[2].kind == Command::Circle && out[3].kind == Command::Text && out[3].text == "B");
+    // without the atlas, text stays text (the overlay font)
+    out = font::to_pictures({t}, nullptr);
+    assert(out.size() == 1 && out[0].kind == Command::Text);
+    // the button pictures follow the prompt setting: the PlayStation look is the port's shapes
+    game_glyph::Glyph icon;
+    icon.colour = true, icon.bitmap.width = icon.bitmap.height = 4, icon.bitmap.rgba.assign(64, 255);
+    font::Prompts ps;
+    ps.face = font::Prompts::PlayStation;
+    assert(font::button_picture(&icon, 0, ps, 20).width == 64);
+    font::Prompts xbox;
+    xbox.face = font::Prompts::Xbox, xbox.colours = true;
+    const game_glyph::Bitmap green = font::button_picture(&icon, 0, xbox, 20);
+    assert(green.width == 4 && green.rgba[0] == 0x58 && green.rgba[1] == 0xBE && green.rgba[3] == 255);  // Xbox A green
+    assert(font::button_picture(&icon, 0, {}, 20).rgba[1] == 255);  // the game's own icon
+    // the page's text measure follows the game font when set
+    g_text_measure = [](const std::string& s, float size) { return float(s.size()) * size; };
+    assert(text_width("abcd", 10) == 40 && fit("abcdefgh", 10, 60) == "abc...");
+    g_text_measure = nullptr;
+}
+
+style::Art synthetic_art() {
+    style::Art a;
+    auto solid = [](int w, int h, uint8_t l, uint8_t alpha) {
+        game_glyph::Bitmap b;
+        b.width = w, b.height = h;
+        b.rgba.resize(size_t(w) * h * 4);
+        for (size_t i = 0; i < b.rgba.size(); i += 4) b.rgba[i] = b.rgba[i + 1] = b.rgba[i + 2] = l, b.rgba[i + 3] = alpha;
+        return b;
+    };
+    // the frame pieces: a white line 12..16 texels in from the outside, nothing elsewhere
+    for (int k = 0; k < 8; k++) {
+        const bool corner = k < 4, side = k == 4 || k == 5;
+        a.edge[k] = solid(corner || side ? 48 : 256, corner || !side ? 48 : 256, 255, 0);
+        for (int y = 0; y < a.edge[k].height; y++)
+            for (int x = 0; x < a.edge[k].width; x++) {
+                const int ox = (k == 1 || k == 3 || k == 5) ? 47 - x : x, oy = (k == 2 || k == 3 || k == 7) ? 47 - y : y;
+                const bool on = (corner && ((ox >= 12 && ox < 16 && oy >= 12) || (oy >= 12 && oy < 16 && ox >= 12))) ||
+                                (side && ox >= 12 && ox < 16) || (!corner && !side && oy >= 12 && oy < 16);
+                if (on) a.edge[k].rgba[(size_t(y) * a.edge[k].width + x) * 4 + 3] = 255;
+            }
+    }
+    a.fibre = solid(64, 64, 230, 255);
+    a.plate_rim = solid(320, 100, 255, 255);
+    a.plate = solid(320, 100, 200, 255);
+    return a;
+}
+
+void test_style() {
+    Page page;
+    page.show();
+    std::vector<Row> none;
+    page.input(press(0), none);
+    const std::vector<Command> cmds = page.draw(none);
+    size_t markers = 0;
+    for (const Command& c : cmds) markers += style::marker(c);
+    assert(markers >= 3);  // the window, the panel, the tabs
+    int w, h;
+    style::box_size("nb:window@980x632", w, h);
+    assert(w == 980 && h == 632 && style::box_name("nb:window@980x632") == "nb:window");
+    // without the game's art: plain shapes, no marker left
+    for (const Command& c : style::resolve(cmds, nullptr)) assert(!style::marker(c) && c.text.rfind("art:", 0) != 0);
+    // with it: the boxes become pictures of composed art; the cursor stays the port's brackets
+    const style::Art art = synthetic_art();
+    assert(art.window() && art.plates());
+    size_t pictures = 0;
+    for (const Command& c : style::resolve(cmds, &art)) {
+        assert(!style::marker(c));
+        pictures += c.text.rfind("art:", 0) == 0;
+    }
+    assert(pictures >= 3);
+    // the torn paper: the paper inside the line, nothing outside it, the line on top
+    auto paper = style::compose(art, "nb:window", 200, 120);
+    assert(paper && paper->width == 200 && paper->height == 120);
+    auto px = [&](int x, int y, int c) { return paper->rgba[(size_t(y) * paper->width + x) * 4 + c]; };
+    assert(px(100, 60, 3) == 255 && px(2, 2, 3) == 0);
+    assert(px(100, 60, 0) < 255 && px(100, 60, 1) > px(100, 60, 2));  // green paper
+    auto plate = style::compose(art, "nb:plate-on", 160, 40);
+    assert(plate && plate->width == 160 && plate->height == 40 && plate->rgba[(20 * 160 + 80) * 4 + 3] == 255);
+    assert(!style::compose(style::Art{}, "nb:window", 100, 100));  // no art: no picture
+    // a cursor marker becomes four brackets (eight rects each with its outline: 16)
+    Command cur;
+    cur.kind = Command::Picture, cur.text = "nb:cursor@100x50", cur.x = 10, cur.y = 10, cur.w = 100, cur.h = 50, cur.rgba = 0xFFFFFFFF;
+    std::vector<Command> shapes;
+    style::shapes(cur, shapes);
+    assert(shapes.size() == 16);
+}
+
+void test_page_feel() {
+    uint8_t raw[story_mail::kBookSize] = {};
+    Book b(raw);
+    std::vector<Quest> qs;
+    for (int i = 0; i < 3; i++) qs.push_back(quest("m", "q" + std::to_string(i)));
+    qs[1].has_place = true;
+    auto rs = rows(qs, b);
+    Page page;
+    page.show();
+    page.tick(0);
+    // the window opens: scaled down and faded at first, at rest after its 0.22 s
+    auto window = [&](const std::vector<Command>& cmds) {
+        for (const Command& c : cmds)
+            if (c.text.rfind("nb:window", 0) == 0) return c;
+        return Command{};
+    };
+    Command w0 = window(page.draw(rs));
+    assert(w0.w < kPageW && (w0.rgba & 0xFF) < 255);
+    page.tick(0.1f), page.tick(0.1f), page.tick(0.1f);
+    Command w1 = window(page.draw(rs));
+    assert(std::fabs(w1.w - kPageW) < 0.5f && (w1.rgba & 0xFF) == 255);
+    // the menu sounds of the inputs
+    assert(page.input(press(0), rs).sound == Sound::None);
+    assert(page.input(press(kPadDown), rs).sound == Sound::Cursor);
+    page.input(press(0), rs);
+    assert(page.input(press(kPadDown), rs).sound == Sound::Cursor);
+    page.input(press(0), rs);
+    assert(page.input(press(kPadDown), rs).sound == Sound::None);  // the last row: no move, no sound
+    page.input(press(0), rs);
+    assert(page.input(press(kPadRight), rs).sound == Sound::Tab);
+    page.input(press(0), rs);
+    assert(page.input(press(kPadLeft), rs).sound == Sound::Tab);
+    page.input(press(0), rs);
+    assert(page.input(press(kPadA), rs).sound == Sound::Decide && page.mode() == Page::Mode::Detail);
+    page.input(press(0), rs);
+    Page::Action a = page.input(press(kPadA), rs);
+    assert(a.kind == Page::Action::Toggle && a.sound == Sound::TrackOn);
+    page.input(press(0), rs);
+    assert(toggle_tracked(b, a.key));
+    rs = rows(qs, b);
+    assert(page.input(press(kPadA), rs).sound == Sound::TrackOff);
+    page.input(press(0), rs);
+    assert(page.input(press(kPadB), rs).sound == Sound::Cancel && page.mode() == Page::Mode::List);
+    // the page turned back: the content slides in from the left and fades in
+    page.tick(0.02f);
+    bool sliding = false;
+    for (const Command& c : page.draw(rs)) sliding |= c.kind == Command::Text && c.text == qs[0].title && (c.rgba & 0xFF) < 255;
+    assert(sliding);
+    page.tick(0.5f);
+    // the cursor is around the selected row; it breathes
+    auto cursor = [&] {
+        for (const Command& c : page.draw(rs))
+            if (c.text.rfind("nb:cursor", 0) == 0) return c;
+        return Command{};
+    };
+    const Command c0 = cursor();
+    page.tick(0.25f);
+    const Command c1 = cursor();
+    assert(c0.w > 0 && c1.w > 0 && std::fabs(c0.w - c1.w) > 0.5f);
+    page.input(press(0), rs);
+    assert(page.input(press(kPadB), rs).sound == Sound::Close && !page.open());
+    // every command stays finite through the animations
+    page.show();
+    for (int i = 0; i < 30; i++) {
+        page.tick(0.016f);
+        page.input(press(i % 4 == 1 ? kPadDown : 0), rs);
+        for (const Command& c : page.draw(rs)) assert(std::isfinite(c.x) && std::isfinite(c.y) && std::isfinite(c.w) && std::isfinite(c.h) && c.size >= 0);
     }
 }
 
@@ -1456,6 +1665,9 @@ int main() {
     test_services();
     test_hooks();
     test_page_screen();
+    test_game_font();
+    test_style();
+    test_page_feel();
     test_npc_catalogue();
     test_takeover_rules();
     test_takeover_hooks();

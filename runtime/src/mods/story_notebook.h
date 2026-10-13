@@ -66,7 +66,7 @@ bool notebook_owned();
 bool open_page(const char* how = "by the port");  // how: for the log
 void close_page();
 bool page_open();
-void pad(input::PadState& p);
+void pad(input::PadState& p, Cpu* c = nullptr);  // c: the reading thread (the game's fonts and sounds)
 void mute(input::PadState& p);  // other controller reads (the Pro Controller): idle while open, held buttons after
 
 void note_import();  // a module imports a quest service

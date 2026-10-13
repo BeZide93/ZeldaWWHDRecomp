@@ -115,6 +115,8 @@ int32_t talk(const std::string&,const std::string&,uint32_t,const std::string&,c
 int32_t set_flag(const std::string&,const std::string&,uint32_t,bool) {return kResultInvalid;}
 int32_t flag(const std::string&,const std::string&,uint32_t) {return kResultInvalid;}
 bool imported() {return false;}
+void set_game_ui(const GameUi*) {}
+const GameUi& game_ui() {static GameUi none;return none;}
 }
 // and so has the story progress store (story_notebook_test)
 namespace story_store {
