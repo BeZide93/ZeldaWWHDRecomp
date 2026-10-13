@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "story_notebook_list.h"
+#include "story_notebook_bag.h"
 
 struct Cpu;
 namespace input { struct PadState; }
@@ -46,7 +47,7 @@ std::vector<Row> rows_now(std::vector<Quest>& storage);
 // is open it moves through the page, draws it and leaves the game an idle controller; buttons held
 // when it closes reach the game only after they are released.
 bool notebook_owned();
-bool open_page();
+bool open_page(const char* how = "by the port");  // how: for the log
 void close_page();
 bool page_open();
 void pad(input::PadState& p);
@@ -67,6 +68,14 @@ void icon_frame(Cpu* c);      // hdMenuItem itemForSlot(this, item)
 void open_child(Cpu* c);      // hdMenuMain_c::openSelectedChild(index)
 void touch_select(Cpu* c);    // hdMenuItem_c::selectTouchEnter()
 void set_visible(Cpu* c);     // hdMenuItem_c::setVisible(visible)
+void execute_window(Cpu* c);  // hdMenuMain_c::executeWindow()
+void cursor_float(Cpu* c);    // hdMenuItem_c::beginCursorSelection(point)
+}  // namespace hooks
+// The notebook's icon in the bag window this frame (story_notebook_bag.h), and why; for tests
+IconPlace icon_place();
+const char* icon_reason();
+void next_frame();  // what pad() does each frame before drawing (tests)
+namespace hooks {
 void selected_value(Cpu* c);  // hdMenuMain_c::getSelectedItemValue(receiver)
 void assign_button(Cpu* c);   // game system: X/Y/R assignment(button, key)
 }  // namespace hooks

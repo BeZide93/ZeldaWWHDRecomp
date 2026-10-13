@@ -345,6 +345,8 @@ void original(Cpu* c, uint32_t fn) {
     case 0x0262F880: c->r[3] = c->r[4] == 0x99 ? 0x26 : c->r[4] == 0x9C ? 0x24 : 0x37; break;
     case 0x0268F060: calls.push_back("caption"); break;
     case 0x02630A64: calls.push_back("pick up"); break;
+    case 0x0268FF50: calls.push_back("window"); break;
+    case 0x026302B8: calls.push_back("float"); break;
     case 0x026333F0: {  // setVisible: the icon pane follows the item's visibility
         const uint32_t icon = ld32(ld32(c->r[3] + 0x8C + 4));
         st8(icon + 0x44, uint8_t((ld8(icon + 0x44) & ~1u) | (c->r[4] & 1)));
@@ -375,7 +377,7 @@ void test_hooks() {
             [](uint32_t, void (*)(Cpu*)) { assert(!"installed despite a conflict"); });
     assert(!installed());
     install([](uint32_t) { return std::string(); }, [](uint32_t a, void (*fn)(Cpu*)) { hooked[a] = fn; });
-    assert(installed() && hooked.size() == 7);
+    assert(installed() && hooked.size() == 9);
     Book b(mem::ptr(kSave + story_mail::kBookOffset));
     // no notebook yet: the bag window shows the save as it is
     b.erase(story_mail::kRecordItem, story_mail::kItemNotebook);
@@ -464,6 +466,93 @@ void test_hooks() {
     assert(no_place("c", "chart") == 1 && story_chart::shown_markers().empty());               // a step without a place
     assert(place("c", "chart", 0, 0) == 1 && story_chart::shown_markers().size() == 1);
     assert(done("c", "chart") == kResultDone && story_chart::shown_markers().empty());        // gone when done
+    // ---- the notebook's icon over its bag place: only while the Delivery Bag window runs ----
+    {
+        // panes: the place's icon pane under its root pane, under the window, under the screen root
+        const uint32_t kLayout = kArena + 0x6000, kLyt = kArena + 0x6100, kRoot = kArena + 0x6200, kWin = kArena + 0x6300,
+                       kScreen = kArena + 0x6400;
+        auto pane = [](uint32_t p, uint32_t parent, float x, float y) {
+            st32(p + 0xC, parent);
+            st32(p + 0x1C, f32_as_u32(x)), st32(p + 0x20, f32_as_u32(y));
+            st32(p + 0x34, f32_as_u32(1)), st32(p + 0x38, f32_as_u32(1));
+            st8(p + 0x44, 0x01), st8(p + 0x46, 255);
+        };
+        pane(kIconA, kRoot, 0, 0);
+        pane(kRoot, kWin, -131, 130);
+        pane(kWin, kScreen, 347, -92);
+        pane(kScreen, 0, -73, -3);
+        st32(kChild + 0x44, kLayout), st32(kLayout + 4, kLyt), st32(kLyt + 0xC, kRoot);
+        st8(kChild + 0xFC, 1), st8(kChild + 0x200 + 0xFC, 1);
+        st32(kMenu + 0x54, 2);  // the Delivery Bag window
+        // a floating icon (the menu's sMenuIcon) showing the notebook is not its place
+        const uint32_t kFloat = kArena + 0x7000;
+        st32(kFloat + 0xEC, 0xA0), st8(kFloat + 0xFC, 1), st32(kFloat + 0x8C + 4, kGroups + 0x20), st32(kGroups + 0x20, kArena + 0x7100);
+        call(0x026333F0, kFloat, 1);
+        next_frame();
+        assert(!icon_place().shown && std::string(icon_reason()) == "no bag window yet");
+        // the window runs: the icon is over the place, the sentinel icon hidden
+        st8(kIconA + 0x44, 1);
+        calls.clear();
+        call(0x0268FF50, kMenu);
+        assert(calls == std::vector<std::string>{"window"});
+        next_frame();
+        IconPlace at = icon_place();
+        assert(at.shown && at.x == 570 && at.y == 205 && !(ld8(kIconA + 0x44) & 1));
+        call(0x0268FF50, kMenu);
+        next_frame();
+        assert(icon_place().shown);
+        // the window closes (Back, B, the menu closes, a tab switch): its state no longer runs, the icon goes
+        next_frame();
+        assert(!icon_place().shown && std::string(icon_reason()) == "the bag window is closed");
+        // another bag's window: no icon
+        st32(kMenu + 0x54, 0);
+        call(0x0268FF50, kMenu);
+        next_frame();
+        assert(!icon_place().shown);
+        st32(kMenu + 0x54, 2);
+        // the window fading out (global alpha 0) or hidden
+        call(0x0268FF50, kMenu);
+        next_frame();
+        st8(kRoot + 0x46, 0);
+        assert(!icon_place().shown);
+        st8(kRoot + 0x46, 255);
+        st8(kWin + 0x44, 0);
+        assert(!icon_place().shown);
+        st8(kWin + 0x44, 1);
+        assert(icon_place().shown);
+        // X/Y/R on the notebook doesn't lift it; on a game item it does
+        calls.clear();
+        call(0x026302B8, kChild);
+        call(0x026302B8, kChild + 0x200);
+        assert(calls == std::vector<std::string>{"float"});
+        // a state load: nothing until the window runs again
+        state_loaded();
+        next_frame();
+        assert(!icon_place().shown);
+        call(0x0268FF50, kMenu);
+        next_frame();
+        assert(icon_place().shown);
+        // repeated opening by A and by touch, closing with B each time
+        for (int i = 0; i < 3; i++) {
+            call(0x0268F060, kMenu, 0x15);
+            assert(page_open());
+            input::PadState p2;
+            pad(p2);  // the A that opened it was released
+            p2.buttons = input::kB;
+            pad(p2);
+            assert(!page_open());
+            p2 = {};
+            pad(p2);
+            call(0x02630A64, kChild);
+            assert(page_open());
+            pad(p2);  // the touch ended
+            p2.buttons = input::kB;
+            pad(p2);
+            p2 = {};
+            pad(p2);
+            assert(!page_open());
+        }
+    }
     // a state load closes the page
     call(0x0268F060, kMenu, 0x15);
     assert(page_open());
