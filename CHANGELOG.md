@@ -7,6 +7,15 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Mod SDK: story mods can guide the player** (letters, chart marks and a notebook, in the game's own style):
+  - **Letters by Rito mail:** a story mod announces its quest with a letter from the Rito postbox, once Link has
+    the Delivery Bag. The first one brings the **story notebook**.
+  - **Mod charts:** mods can mark places on Link's sea chart with the game's story rings.
+  - **Story notebook:** in the Delivery Bag (with its own icon); its page lists every mod quest with the next step,
+    where to go and its status, and "Show on chart" marks the tracked quest's next step on the sea chart.
+  - Without story mods nothing changes, and saves stay compatible: removing the mods leaves a normal save.
+  Details for mod authors in docs/mod-sdk-v2.md, with three example mods (rito-letter, story-chart, story-notebook).
+
 - **Mods tab: Built-in and Community.** The Mods list is split into *Built-in* (the options that come
   with the game, such as the camera and speed options) and *Community* (mods from the mod catalogue,
   installed or ready to download, plus imported packages and graphics packs); *More* is unchanged.
