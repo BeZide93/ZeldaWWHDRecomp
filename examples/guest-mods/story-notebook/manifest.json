@@ -2,40 +2,66 @@
   "format_version": 1,
   "id": "story-notebook",
   "name": "The storyteller's lantern",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "game_id": "wwhd",
   "minimum_manager_version": "1.5.0",
   "kind": "guest",
-  "guest": {"api_version": 1, "elf": "mod.elf"},
+  "guest": {
+    "api_version": 1,
+    "elf": "mod.elf"
+  },
   "quests_format": 1,
   "quests": [
     {
       "id": "lantern",
       "title": "The storyteller's lantern",
       "journal": "on_enable",
-      "start": {"text": "Check a Rito postbox for a letter."},
+      "start": {
+        "text": "Check a Rito postbox for a letter."
+      },
       "letter": {
         "id": "lantern",
         "sender": "The storyteller",
-        "text": "Dear Link,\na storm took my lantern and my mast,\nso I can't tell my tales on Windfall\nthis year. I enclose a notebook to keep\nthis tale in, and a sealed letter: please\nbring it to my old friend at the harbour.",
-        "encloses": ["notebook", "letter:friend"]
+        "text": "Dear Link,\na storm took my lantern and my mast,\nso I can't tell my tales on Windfall\nthis year. I enclose a notebook to keep\nthis tale in, and a sealed letter for my\nold friend who keeps Windfall's light.",
+        "encloses": [
+          "notebook",
+          "letter:friend"
+        ]
       },
-      "reward": {"text": "100 rupees", "item": "rupee_orange"},
+      "reward": {
+        "text": "100 rupees",
+        "item": "rupee_orange"
+      },
       "steps": [
         {
           "n": 1,
-          "text": "Bring the storyteller's letter to his old friend at Windfall's harbour (by day).",
-          "where": "Windfall Island, the harbour",
-          "place": {"cell": "D2", "x": 3827, "z": -202189},
+          "text": "Bring the storyteller's letter to his old friend who keeps Windfall's light.",
+          "where": "Windfall Island, up by the light",
+          "place": {
+            "cell": "D2",
+            "x": 1670,
+            "z": -202585
+          },
           "npc": {
-            "who": {"class": "people", "code": "UB3", "stage": "sea", "room": 11},
-            "when": {"carries": "letter:friend", "time": "day"},
+            "who": {
+              "class": "people",
+              "code": "UM1",
+              "stage": "sea",
+              "room": 11
+            },
+            "when": {
+              "carries": "letter:friend"
+            },
             "lines": [
               "A letter from my old friend? Thank you!",
-              "This year I'll tell the tales in his place.",
+              "I'll keep a light burning for his tales.",
               "He paid in stories; let me pay you in rupees."
             ],
-            "then": {"give": "rupee_orange", "take": "letter:friend", "complete": true}
+            "then": {
+              "give": "rupee_orange",
+              "take": "letter:friend",
+              "complete": true
+            }
           }
         }
       ]

@@ -100,10 +100,15 @@ const uint32_t kPeopleExecute = GC(0x022C36D0);   // daNpcPeople_Execute(actor):
 const uint32_t kPlay = GC(0x025200D4);            // the play object
 const uint32_t kPresentItem = GC(0x025D7DEC);     // fopAcM_createItemForPresentDemo(pos, item, ...)
 const uint32_t kOrderItemEvent = GC(0x025D7B98);  // fopAcM_orderItemEvent(actor): the game's default get-item event
+const uint32_t kSearchById = GC(0x025D54C4);      // fopAcM_SearchByID(id, actor**)
+const uint32_t kEndCheck = GC(0x0254457C);        // dEvent_manager_c::endCheck(name)
+const uint32_t kDefaultGetItem = GD(0x10011EB8);  // "DEFAULT_GETITEM", the game's own string
+constexpr uint32_t kPlayEventManager = 0x52C4, kPlayEventFlags = 0x52B8;  // dComIfG_play_c: event manager, mEventFlag
 constexpr uint32_t kPeopleMsgList = 0x8A8, kPeopleUbList = 0x8AC, kPeopleNumber = 0x905;  // daNpcPeople_c m734, m738, mNpcNo
 constexpr uint32_t kActorPos = 0x314, kEventCommand = 0xF8, kEventCondition = 0xFA;       // fopAc_ac_c current.pos, eventInfo
 constexpr uint16_t kCommandNone = 0, kCommandGetItem = 4, kConditionCanGetItem = 0x0008;
 constexpr uint32_t kPlayItemPartner = 0x52A0;     // dComIfGp_event_setItemPartnerId
+constexpr uint32_t kPlayPlayer = 0x5B2C;          // dComIfGp_getPlayer(0): Link
 // The message our line is shown as: the harbour man's own one-box line (l_msg_ub3_ship_near5), with
 // its text replaced for exactly that talk (story_mail::say). Ending after one box (no list).
 constexpr uint32_t kCarrierMessage = 0x2CF3;
@@ -118,7 +123,7 @@ struct Declared {
 std::vector<Declared> g_declared;
 // the talk in progress: talking -> (reward: ordering the get-item event) -> done
 struct Talk {
-    enum Phase : uint8_t { None, Talking, Reward } phase = None;
+    enum Phase : uint8_t { None, Talking, Reward, After } phase = None;
     uint32_t npc = 0, item = 0xFFFFFFFFu;
     Takeover takeover;
     std::u16string text;
@@ -131,6 +136,9 @@ bool trace() {
 }
 
 uint32_t save_base() { return ld32(kSavePtr); }
+constexpr uint32_t kSaveEventFlags = 0x644, kSaveTime = 0x44;  // dSv_info_c: the event flags; the time of day (degrees)
+const uint8_t* event_flags() { return mem::ptr(save_base() + kSaveEventFlags); }
+int hour_now() { return int(u32_as_f32(ld32(save_base() + kSaveTime)) / 15.0f); }
 bool have_save() { return save_base() != 0; }
 story_mail::Book book() { return story_mail::Book(mem::ptr(save_base() + story_mail::kBookOffset)); }
 
@@ -530,12 +538,18 @@ std::vector<Row> rows_now(std::vector<Quest>& storage) {
                 const uint8_t n = saved_step(b, q.key);
                 if (n == 0) q.next = d.quest.start_text, q.where.clear(), q.has_place = false;
                 for (const ManifestStep& st : d.quest.steps)
-                    if (st.n == n) q.next = st.text, q.where = st.where, q.has_place = st.has_place, q.x = st.x, q.z = st.z;
+                    if (st.n == n) {
+                        q.next = st.text, q.where = st.where, q.has_place = st.has_place, q.x = st.x, q.z = st.z;
+                        if (st.when.any() && !available(st.when, event_flags(), hour_now())) {
+                            q.hint = "Not yet possible: " + st.when.text;  // no ring, no talk until it holds
+                            q.has_place = false;
+                        }
+                    }
             }
         }
         for (Quest& q : storage)  // a step that needs the quest tracked says so
             for (const Takeover& t : g_takeovers)
-                if (t.quest == q.key && t.step == saved_step(b, q.key) && tracked != q.key)
+                if (t.quest == q.key && t.step == saved_step(b, q.key) && tracked != q.key && q.hint.empty())
                     q.hint = t.needs_letter ? kTrackHintLetter : kTrackHintTalk;
     }
     return rows(storage, b);
@@ -559,7 +573,7 @@ bool declare(const std::string& mod, const std::string& mod_name, const mods::js
         reg->hidden = q.journal != "on_enable";
         g_declared.push_back({mod, reg->key, q});
         for (const ManifestStep& st : q.steps)
-            if (st.has_talk) g_takeovers.push_back({reg->key, uint8_t(st.n), st.resident, st.needs_letter, st.lines, st.reward});
+            if (st.has_talk) g_takeovers.push_back({reg->key, uint8_t(st.n), st.resident, st.needs_letter, st.lines, st.reward, st.when});
     }
     // the notebook, its marker on the sea chart and the letters are needed
     note_import();
@@ -829,9 +843,9 @@ void people_message(Cpu* c) {
         // (test aid: WWHD_NOTEBOOK_TEST_RESIDENT=n stands resident number n in for the harbour man, to test
         // the talk with a save whose story phase has him indoors)
         static const int stand_in = [] { const char* e = getenv("WWHD_NOTEBOOK_TEST_RESIDENT"); return e ? atoi(e) : -1; }();
-        for (Resident r : {kResidentWindfallHarbour})
+        for (Resident r : kAllResidents)
             if ((resident_info(r)->people_number == ld8(npc + kPeopleNumber) || int(ld8(npc + kPeopleNumber)) == stand_in) &&
-                (live = live_takeover(g_takeovers, b, r))) {
+                (live = live_takeover(g_takeovers, b, r, event_flags(), hour_now()))) {
                 copy = *live;
                 break;
             }
@@ -857,7 +871,7 @@ void people_execute(Cpu* c) {
     const uint32_t npc = c->r[3];
     g_original(c, kPeopleExecute);
     if (g_talk.phase == Talk::None || npc != g_talk.npc) return;
-    const uint16_t command = ld16(npc + kEventCommand);
+    const uint16_t command = ld16(npc + kEventCommand);  // the resident's: its talk
     if (g_talk.phase == Talk::Talking) {
         if (command != kCommandNone) return;  // the talk is still on
         story_mail::unsay();
@@ -873,10 +887,13 @@ void people_execute(Cpu* c) {
         g_talk.phase = Talk::Reward;
     }
     if (g_talk.phase == Talk::Reward) {
+        // the game's default get-item event, ordered by the resident who hands the reward over (as the
+        // game's items do: fopAcM_orderItemEvent + CANGETITEM until the event's command arrives)
         if (command == kCommandGetItem) {  // the get-item event started: its item is ours
             if (g_talk.item != 0xFFFFFFFFu) st32(g_call(c, kPlay, {}) + kPlayItemPartner, g_talk.item);
             LOG("[notebook] quest %04X: reward %02X handed over", g_talk.takeover.quest, g_talk.takeover.reward);
-            g_talk = {};
+            g_talk.phase = Talk::After;
+            g_talk.since = g_step.load();
             return;
         }
         if (g_talk.item == 0xFFFFFFFFu) {
@@ -886,6 +903,21 @@ void people_execute(Cpu* c) {
         Cpu probe = *c;
         g_call(&probe, kOrderItemEvent, {npc});
         st16(npc + kEventCondition, uint16_t(ld16(npc + kEventCondition) | kConditionCanGetItem));
+        return;
+    }
+    if (g_talk.phase == Talk::After) {
+        // The actor that ordered the get-item event ends it (as the game's items do, d_a_item): once
+        // the event manager says DEFAULT_GETITEM is over, reset the event (dComIfGp_event_reset);
+        // otherwise the resident keeps the event's command and nobody can talk to him.
+        const uint32_t p = g_call(c, kPlay, {});
+        if (g_call(c, kEndCheck, {p + kPlayEventManager, kDefaultGetItem})) {
+            st16(p + kPlayEventFlags, uint16_t(ld16(p + kPlayEventFlags) | 8));
+            if (trace()) LOG("[notebook] quest %04X: the get-item event ended", g_talk.takeover.quest);
+            g_talk = {};
+        } else if (g_step.load() - g_talk.since > 1800) {
+            LOG("[notebook] quest %04X: the get-item event did not end in a minute", g_talk.takeover.quest);
+            g_talk = {};
+        }
     }
 }
 

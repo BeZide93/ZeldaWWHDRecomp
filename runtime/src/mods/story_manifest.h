@@ -5,6 +5,7 @@
 // progress the port can't see. Pure code, unit-tested in runtime/tools/story_notebook_test.cpp.
 #pragma once
 #include <cmath>
+#include <cstdlib>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -26,6 +27,7 @@ struct ManifestStep {
     bool needs_letter = false;
     std::string lines;   // joined with '\n'
     uint8_t reward = 0;  // a rupee item
+    Availability when;   // "available": the step's prerequisites
 };
 struct ManifestQuest {
     std::string id, title, reward_text, start_text, journal = "on_enable";
@@ -45,7 +47,41 @@ inline uint8_t rupee_item(const std::string& name) {
 // a resident by its game identity: actor class and resident code
 inline Resident resident_of(const std::string& actor_class, const std::string& code) {
     if (actor_class == "people" && code == "UB3") return kResidentWindfallHarbour;
+    if (actor_class == "people" && code == "UM1") return kResidentWindfallLightKeeper;
     return kResidentNone;
+}
+// an event flag written as "0x2D01" (the game's flag number); false if not one
+inline bool event_number(const mods::json::Value& v, uint16_t& out) {
+    if (v.type != mods::json::Value::String || v.text.size() < 3 || v.text.size() > 6 || v.text.rfind("0x", 0) != 0) return false;
+    char* end = nullptr;
+    const unsigned long n = strtoul(v.text.c_str() + 2, &end, 16);
+    if (*end || n > 0xFFFF || !(n & 0xFF)) return false;
+    out = uint16_t(n);
+    return true;
+}
+inline bool parse_available(const mods::json::Value& v, Availability& a, std::string& why) {
+    using mods::json::Value;
+    if (v.type == Value::Null) return true;
+    if (v.type != Value::Object) return why = "available must be an object", false;
+    for (const char* key : {"event", "not_event"})
+        for (const Value& e : v.get(key).type == Value::Array ? v.get(key).array : std::vector<Value>{v.get(key)}) {
+            if (e.type == Value::Null) continue;
+            uint16_t n;
+            if (!event_number(e, n)) return why = std::string("invalid ") + key + " flag", false;
+            (std::string(key) == "event" ? a.events : a.not_events).push_back(n);
+        }
+    if (v.get("time").type == Value::String) {
+        const std::string& t = v.get("time").text;
+        if (t == "day") a.time = 1;
+        else if (t == "night") a.time = 2;
+        else if (t != "any") return why = "time must be day, night or any", false;
+    }
+    std::u16string ignored;
+    if (v.get("text").type != Value::String || v.get("text").text.empty() || v.get("text").text.size() > kMaxConditionBytes ||
+        !story_mail::append_utf16(v.get("text").text, false, ignored))
+        return why = "available needs a text for the player (up to 96 bytes)", false;
+    a.text = v.get("text").text;
+    return true;
 }
 
 // Parses the manifest's quests. Returns false with a reason for anything it doesn't accept (the mod's
@@ -105,6 +141,7 @@ inline bool parse_quests(const mods::json::Value& manifest, std::vector<Manifest
                 if (!(std::fabs(s.x) <= 350000 && std::fabs(s.z) <= 350000)) return why = "quest " + m.id + ": place off the sea", false;
                 s.has_place = true;
             }
+            if (!parse_available(st.get("available"), s.when, why)) return why = "quest " + m.id + ": " + why, false;
             const Value& npc = st.get("npc");
             if (npc.type == Value::Object) {
                 s.has_talk = true;

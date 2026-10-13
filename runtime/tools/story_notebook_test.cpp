@@ -376,18 +376,22 @@ void original(Cpu* c, uint32_t fn) {
     default: assert(!"unexpected original");
     }
 }
-constexpr uint32_t kPlayObj = 0x20030000;
+constexpr uint32_t kPlayObj = 0x20030000, kItemActor = 0x2000A000;
+uint32_t get_item_over = 0;
 uint32_t game_call(Cpu*, uint32_t fn, std::initializer_list<uint32_t> args) {
     std::vector<uint32_t> a(args);
     switch (fn) {
     case 0x025200D4: return kPlayObj;
     case 0x025D7DEC: calls.push_back("present item " + std::to_string(a.at(1))); return 77;
-    case 0x025D7B98: calls.push_back("order item event"); return 1;
+    case 0x025D7B98: calls.push_back("order item event " + std::to_string(a.at(0) == kItemActor)); return 1;
+    case 0x025D54C4: st32(a.at(1), a.at(0) == 77 ? kItemActor : 0); return 1;  // fopAcM_SearchByID
+    case 0x0254457C: assert(a.at(0) == kPlayObj + 0x52C4 && a.at(1) == 0x10011EB8); return get_item_over;  // endCheck
     default: assert(!"unexpected game call"); return 0;
     }
 }
 uint32_t call(uint32_t fn, uint32_t r3, uint32_t r4 = 0, uint32_t lr = 0, uint32_t r5 = 0) {
     Cpu c{};
+    c.r[1] = 0x2003F000;  // a stack in the synthetic arena
     c.r[3] = r3, c.r[4] = r4, c.r[5] = r5, c.lr = lr;
     hooked.at(fn)(&c);
     return c.r[3];
@@ -643,7 +647,8 @@ void test_takeover_rules() {
 }
 
 void test_takeover_hooks() {
-    constexpr uint32_t kNpc = kArena + 0x8000;
+    constexpr uint32_t kNpc = kArena + 0x8000, kLink = kArena + 0x9000;
+    st32(kPlayObj + 0x5B2C, kLink);
     Book b(mem::ptr(kSave + story_mail::kBookOffset));
     // the lantern quest of one mod, the same resident in another mod's quest
     assert(define("lantern", "Lantern", "tale", "The storyteller's lantern", "100 rupees", "") == kResultNew);
@@ -698,13 +703,22 @@ void test_takeover_hooks() {
     calls.clear();
     call(0x022C36D0, kNpc);
     assert(state("lantern", "tale") == kResultDone && !carries(b, quest_key("lantern", "tale")));
-    assert((calls == std::vector<std::string>{"resident", "present item 6", "order item event"}) && (ld16(kNpc + 0xFA) & 8));
+    // the get-item event is ordered by the resident who hands the reward over, as the game's items do
+    assert((calls == std::vector<std::string>{"resident", "present item 6", "order item event 0"}) && (ld16(kNpc + 0xFA) & 8));
     calls.clear();
     call(0x022C36D0, kNpc);  // not started yet: ordered again, the item created once
-    assert((calls == std::vector<std::string>{"resident", "order item event"}));
+    assert((calls == std::vector<std::string>{"resident", "order item event 0"}));
     st16(kNpc + 0xF8, 4);  // the get-item event runs: its item is ours
     call(0x022C36D0, kNpc);
     assert(ld32(kPlayObj + 0x52A0) == 77);
+    // the one who ordered the event ends it once the event manager says it is over
+    st16(kPlayObj + 0x52B8, 0);
+    call(0x022C36D0, kNpc);
+    assert(!(ld16(kPlayObj + 0x52B8) & 8));
+    get_item_over = 1;
+    call(0x022C36D0, kNpc);
+    assert(ld16(kPlayObj + 0x52B8) & 8);
+    get_item_over = 0;
     st16(kNpc + 0xF8, 0);
     calls.clear();
     call(0x022C36D0, kNpc);
@@ -789,6 +803,66 @@ void test_manifest() {
                    r.quest->hint.find("track it") != std::string::npos);
 }
 
+void test_available() {
+    // the evaluator: event flags (byte, mask) and the time of day
+    uint8_t flags[0x100] = {};
+    Availability a;
+    a.events = {0x2D01}, a.not_events = {0x0A02}, a.time = 1, a.text = "after the pearl, by day";
+    assert(!available(a, flags, 12));
+    flags[0x2D] |= 0x01;
+    assert(available(a, flags, 12) && !available(a, flags, 20) && !available(a, flags, 5));
+    flags[0x0A] |= 0x02;  // the Endless Night
+    assert(!available(a, flags, 12));
+    Availability none;
+    assert(!none.any() && available(none, flags, 3));
+    // the manifest form, and what it refuses
+    const char* m = R"({"quests_format": 1, "quests": [{"id": "q", "title": "Q", "steps": [{"n": 1, "text": "Go.",
+        "available": {"event": "0x2D01", "not_event": ["0x0A02"], "time": "day", "text": "after Nayru's pearl, by day"},
+        "npc": {"who": {"class": "people", "code": "UM1"}, "lines": ["Hi."]}}]}]})";
+    std::vector<ManifestQuest> qs;
+    std::string why;
+    assert(parse_quests(mods::json::parse(m), qs, why));
+    const ManifestStep& st = qs[0].steps[0];
+    assert(st.when.events == std::vector<uint16_t>{0x2D01} && st.when.not_events == std::vector<uint16_t>{0x0A02} && st.when.time == 1 &&
+           st.when.text == "after Nayru's pearl, by day" && st.resident == kResidentWindfallLightKeeper && !st.needs_letter);
+    auto refused = [](std::string text, const std::string& from, const std::string& to) {
+        text.replace(text.find(from), from.size(), to);
+        std::vector<ManifestQuest> out;
+        std::string reason;
+        return !parse_quests(mods::json::parse(text), out, reason);
+    };
+    assert(refused(m, "\"0x2D01\"", "\"2D01\""));
+    assert(refused(m, "\"day\"", "\"noon\""));
+    assert(refused(m, ", \"text\": \"after Nayru's pearl, by day\"", ""));
+    // a talk whose step isn't available yet is not live
+    uint8_t raw[story_mail::kBookSize] = {};
+    Book b(raw);
+    const uint16_t k = quest_key("m", "q");
+    assert(reach_step(b, k, 1) == 1 && toggle_tracked(b, k));
+    std::vector<Takeover> all = {{k, 1, kResidentWindfallLightKeeper, false, "Hi.", 0, st.when}};
+    uint8_t game[0x100] = {};
+    assert(!live_takeover(all, b, kResidentWindfallLightKeeper, game, 12));
+    game[0x2D] = 0x01;
+    assert(live_takeover(all, b, kResidentWindfallLightKeeper, game, 12) && !live_takeover(all, b, kResidentWindfallLightKeeper, game, 22));
+    // in the notebook: "Not yet possible: ..." and no place until it holds (the save's flags and time)
+    assert(declare("avail-mod", "Avail", mods::json::parse(m)));
+    Book save(mem::ptr(kSave + story_mail::kBookOffset));
+    assert(reach_step(save, quest_key("avail-mod", "q"), 1) == 1);
+    st32(kSave + 0x44, f32_as_u32(180.0f));  // noon
+    std::vector<Quest> storage;
+    auto row = [&]() -> const Quest* {
+        static std::vector<Quest> keep;
+        for (const Row& r : rows_now(keep))
+            if (r.quest->mod == "avail-mod") return r.quest;
+        return nullptr;
+    };
+    assert(row() && row()->hint == "Not yet possible: after Nayru's pearl, by day" && !row()->has_place);
+    st8(kSave + 0x644 + 0x2D, 0x01);  // the game set the flag
+    assert(row() && row()->hint.find("Not yet possible") == std::string::npos);
+    st8(kSave + 0x644 + 0x2D, 0);
+    (void)storage;
+}
+
 }  // namespace
 
 int main() {
@@ -804,6 +878,7 @@ int main() {
     test_takeover_rules();
     test_takeover_hooks();
     test_manifest();
+    test_available();
     std::puts("story_notebook_test: ok");
     return 0;
 }
