@@ -61,6 +61,15 @@ int main() {
     Writer emptyThreads;for(int i=0;i<9;++i)emptyThreads.u32(0);emptyThreads.u64(0);emptyThreads.u64(0);
     checked(emptyThreads,vt);
     Writer emptyHeaps;for(int i=0;i<5;++i)emptyHeaps.u32(0);checked(emptyHeaps,vh);
+    // Real allocator edges: an empty managed range retains a zero-size free
+    // entry, and a zero-size frame allocation may leave head/tail at end.
+    Writer endHeaps;endHeaps.u32(1);endHeaps.u32(2);endHeaps.u32(3);
+    endHeaps.u32(1);endHeaps.u32(0x400);endHeaps.u32(0x440);endHeaps.u32(0x440);
+    endHeaps.u32(1);endHeaps.u32(0x440);endHeaps.u32(0);endHeaps.u32(0);
+    endHeaps.u32(1);endHeaps.u32(0x500);endHeaps.u32(0x540);endHeaps.u32(0x600);
+    endHeaps.u32(0x600);endHeaps.u32(0x600);checked(endHeaps,vh);
+    // OP_SETUP_CONTEXT accepts key zero; the saved active sentinel remains zero.
+    auto zeroContext=g;patch32(zeroContext,24,0);patch32(zeroContext,48,0);checked(zeroContext,vg);
     // Invalid host core or retained host pointer must never reach thread restore.
     malformed=t;patch32(malformed,4+offsetof(ThreadFixture,core),3);
     assert(!vt(Reader(malformed.b.data(),malformed.b.size())));
