@@ -1,5 +1,10 @@
 #include "stereo.h"
 #include "api.h"
+#include "../hdr.h"
+#include "overlay/hostui.h"
+#include <cstdlib>
+#include <optional>
+#include <string>
 namespace gfxvk {
 int stereoEye = 0;
 Screen stereoRight;
@@ -88,5 +93,22 @@ void stereo_latch() {
         }
     } catch (...) { stereo_select_eye(0);throw; }
     stereo_select_eye(0);
+}
+void load_saved_stereo_hdr() {
+    std::string v;
+    auto num=[&](const char* key) { return ::hostui::get(key,v) ? std::optional<float>(float(atof(v.c_str()))) : std::nullopt; };
+    if(auto x=num("stereoMode"))stereo::set_mode(int(*x));
+    if(auto x=num("stereoDepth"))stereo::set_depth(*x);
+    if(auto x=num("stereoConvergence"))stereo::set_convergence(*x);
+    if(auto x=num("stereoSwap"))stereo::requestedSwap=*x!=0;
+#ifdef _WIN32
+    if(auto x=num("hdrEnabled"))hdr::enabled=*x!=0;
+#endif
+    if(auto x=num("hdrPaperWhite"))hdr::set(hdr::paperWhite,*x,80,500);
+    if(auto x=num("hdrPeak"))hdr::set(hdr::peak,*x,200,4000);
+    if(auto x=num("hdrExposure"))hdr::set(hdr::exposure,*x,-3,3);
+    if(auto x=num("hdrHighlights"))hdr::set(hdr::highlights,*x,0,1);
+    if(auto x=num("hdrMenuWhite"))hdr::set(hdr::menuWhite,*x,80,500);
+    stereo::latch();
 }
 }

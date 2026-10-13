@@ -8,8 +8,7 @@
 #include "backend.h"
 #include "gfx/display_modes.h"
 #include "settings.h"
-#include "../stereo.h"
-#include "../hdr.h"
+#include "stereo.h"
 #include "input.h"
 #include "interp.h"
 #include "overlay/hostui.h"
@@ -214,19 +213,7 @@ void load_saved_options() {
     if (saved("touchButtons", {})) gfx::g_touch_buttons = std::clamp((int)num("touchButtons"), 0, 2);
     if (saved("touchControls", {})) gfx::g_touch_controls = num("touchControls") != 0;
 #endif
-    if (v.count("stereoMode")) stereo::set_mode(atoi(v["stereoMode"].c_str()));
-    if (v.count("stereoDepth")) stereo::set_depth(float(num("stereoDepth")));
-    if (v.count("stereoConvergence")) stereo::set_convergence(float(num("stereoConvergence")));
-    if (v.count("stereoSwap")) stereo::requestedSwap = num("stereoSwap") != 0;
-#ifdef _WIN32
-    if(v.count("hdrEnabled"))hdr::enabled=num("hdrEnabled")!=0;
-#endif
-    if(v.count("hdrPaperWhite"))hdr::set(hdr::paperWhite,float(num("hdrPaperWhite")),80,500);
-    if(v.count("hdrPeak"))hdr::set(hdr::peak,float(num("hdrPeak")),200,4000);
-    if(v.count("hdrExposure"))hdr::set(hdr::exposure,float(num("hdrExposure")),-3,3);
-    if(v.count("hdrHighlights"))hdr::set(hdr::highlights,float(num("hdrHighlights")),0,1);
-    if(v.count("hdrMenuWhite"))hdr::set(hdr::menuWhite,float(num("hdrMenuWhite")),80,500);
-    stereo::latch();
+    gfxvk::load_saved_stereo_hdr();  // shared with the AppKit host (init_appkit)
     if (saved("resScale", {"WWHD_RES_SCALE"})) gfxvk::set_res_scale((float)num("resScale"));
     if (saved("aoMode", {"WWHD_AO_MODE", "WWHD_NO_AO_QUIRK"})) gfxvk::set_ao_mode((int)num("aoMode"));
     if (saved("aoHires", {"WWHD_AO_HIRES"})) gfxvk::set_ao_hires(num("aoHires") != 0);

@@ -4125,6 +4125,7 @@ void init_appkit(void *tvLayer, void *drcLayer) {
     }
   });
   LOG("[vulkan] presenting to the AppKit windows through VK_EXT_metal_surface");
+  load_saved_stereo_hdr();  // as the SDL host's hostui::load_saved_options
 }
 void screen_changed(int screen, bool visible) {
   Screen &s = screen ? R.drc : R.tv;

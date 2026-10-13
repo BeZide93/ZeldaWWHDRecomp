@@ -30,4 +30,5 @@ void stereo_swap_ao();
 void stereo_release_ao(); // eye 0 must be selected; retire only eye 1's scratch images
 bool stereo_screen_target(uint32_t width, uint32_t height);
 void stereo_latch();
+void load_saved_stereo_hdr(); // start-up, both hosts: 3D and HDR settings saved by the overlay
 }
