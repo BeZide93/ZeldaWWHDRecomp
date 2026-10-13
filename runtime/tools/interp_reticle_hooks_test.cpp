@@ -182,6 +182,34 @@ int main() {
     st32(boom + 0x100, 0);
     interp::reticle_keep_draw(boom - 0x3B0);
     assert(ld32(boom + 0x100) == 0); // previous-pass render state is never replayed
+
+    // Differential 30 Hz check: compare each actual setter hook with its
+    // original over the complete guest fixture and CPU, even with true60's
+    // render-preservation machinery available. No marker state may be replayed.
+    active = false;
+    for (int slot = -1; slot < 5; ++slot) {
+        interp::reticle_reset();
+        std::vector<unsigned char> entry(static_cast<unsigned char*>(mapped),
+                                         static_cast<unsigned char*>(mapped) + bytes);
+        Cpu original{}, hooked{};
+        original.r[3] = slot < 0 ? sight : boom;
+        original.r[4] = target + 0x37C;
+        original.r[5] = slot;
+        hooked = original;
+        if (slot < 0) f_023D813C_orig(&original);
+        else f_020CBB70_orig(&original);
+        std::vector<unsigned char> expected(static_cast<unsigned char*>(mapped),
+                                            static_cast<unsigned char*>(mapped) + bytes);
+        std::memcpy(mapped, entry.data(), bytes);
+        if (slot < 0) hook_023D813C(&hooked);
+        else hook_020CBB70(&hooked);
+        assert(std::memcmp(&original, &hooked, sizeof(Cpu)) == 0);
+        assert(std::memcmp(mapped, expected.data(), bytes) == 0);
+        uint32_t matrix = slot < 0 ? sight + 0x14 : boom + 4 + 48 * slot;
+        std::memset(ppc_ptr(matrix), 0, 48);
+        interp::reticle_keep_draw(slot < 0 ? sight - 0x58E8 : boom - 0x3B0);
+        for (int i = 0; i < 12; ++i) assert(ld32(matrix + 4 * i) == 0);
+    }
     munmap(mapped, bytes);
     std::puts("interp_reticle_hooks: PASS");
 }

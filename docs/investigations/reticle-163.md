@@ -186,3 +186,43 @@ camera and preserves the marker render data through true60 rollback. Headless
 Metal/Vulkan tests greatly reduce the per-frame dot jumps at 60/120 FPS, with
 30 FPS using the original path. Please retest on Windows, especially the
 reported two-dot appearance on a 180 Hz display.”
+
+## Final requirement audit
+
+Implementation/evidence commit:
+`reticle-163@769dd077446965e28bca041d53d0e76b47f4d198`.
+A subsequent audit/test commit adds the differential check described below.
+
+| Task requirement | Evidence and disposition |
+| --- | --- |
+| Own local clone/branch, correct author, no push | Local `reticle-163`; commit author `Lukas S <lukasschaupp@gmail.com>`; no push commands issued. |
+| Reproduce boomerang/grapple at 30/60/120, scripted camera | Completed captures, per-pass trace coordinates and TV component centres in results JSON. Temporal alternation reproduced; two dots in one image not reproduced. |
+| Bow/hookshot first-person controls | Actual aiming captured at 30/60/120; bow has no shared red-packet projections, hookshot does. |
+| Trace class and lock-on path | Named HD/TWW code paths above; all five live-actor slots traced using the disclosed acquisition fixture. |
+| Consistency with interpolated camera | Actual projection traces and pixel measurements; perspective and adaptive-fraction unit regressions. |
+| 30 FPS bit identity | Direct-original path plus whole-fixture differential test proves hook-local CPU/guest equivalence. Some 16/16 image matches; other 15/16 pairs and baseline variability prevent claiming exhaustive rendered-image identity. **Remaining validation gap.** |
+| Other HUD unchanged | Scoped projection/guest-memory isolation tests, retained DRC hashes and examined image difference region; exhaustive nondeterministic whole-image equality is not claimed. |
+| Keep game speed on/off and true60 | Completed Metal and Vulkan cases above; true60 matrix/rollback hook tests. |
+| Unit test and numeric before/after report | Four CTests and four Python tests pass; results JSON and tables above. |
+| Full SHA/clone and lead reply | Implementation SHA and clone above; suggested lead reply above. |
+| Delete own frame dumps, output below 1 GB | 87 remaining PNGs deleted after measurement/hash extraction; clone measured 808636 KiB immediately after implementation commit. |
+
+The final hook test additionally runs each shared/lock-on setter through both
+its original and actual hook with interpolation disabled, comparing the entire
+128 KiB guest fixture and `Cpu` byte-for-byte. It enables the true60 projection
+and render-preservation test machinery to detect accidental use on the bypass
+path, then verifies no marker matrix is replayed after a simulated rollback.
+All six setter cases pass. This establishes local hook equivalence, not a claim
+that every GPU frame in independent runs is deterministic.
+
+Revalidated 30 FPS canonical RGBA hash pairs: boomerang repeat 15/16 (TV frame
+99 differs); boomerang snapshot 16/16; grapple repeat and snapshot 16/16;
+no-trace boomerang snapshot 15/16 (TV frame 99 differs). Two fix-disabled
+boomerang baselines match 15/16 (TV frame 102 differs). All use the existing
+captured hashes; no new game assets or temporary frames are needed.
+
+The local host reports Darwin; neither `wine` nor `wine64` is installed. Native
+Windows/physical-display confirmation requires an external runner or reporter
+results. Full completion remains unproven pending the image-identity gap and
+confirmation of the reported within-frame symptom. The implementation is ready
+for lead review, but this audit does not mark those gaps satisfied.
