@@ -1254,3 +1254,23 @@ add_test(NAME overlay_toggle COMMAND overlay_toggle_test)
 if(WWHD_SDL_HOST)
   add_test(NAME overlay_focus_matrix COMMAND input_sdl_test --menu-matrix)
 endif()
+
+# Link only the overlay input API and SDL boundary. Dead code elimination drops renderer/game
+# dependencies, allowing real transition and focus regressions to run without game data.
+if(WWHD_SDL_HOST AND UNIX AND NOT ANDROID)
+  add_executable(overlay_input_integration_test runtime/tools/overlay_input_integration_test.cpp
+    runtime/src/overlay/overlay.cpp runtime/src/overlay/extensions.cpp runtime/src/input_map.cpp
+    runtime/src/rumble.cpp runtime/src/platform/input_sdl.cpp runtime/src/platform/mouse_sdl.cpp ${MOTION_SOURCES})
+  target_include_directories(overlay_input_integration_test PRIVATE ${IMGUI_DIR} runtime/src runtime/include
+    ${CEMU_DIR} ${CEMU_DIR}/Cafe ${CMAKE_SOURCE_DIR}/runtime/third_party/fmt/include)
+  target_compile_definitions(overlay_input_integration_test PRIVATE WWHD_HAS_VULKAN=1 WWHD_SDL_HOST=1)
+  target_compile_options(overlay_input_integration_test PRIVATE -UNDEBUG -ffunction-sections -fdata-sections)
+  if(APPLE)
+    target_link_options(overlay_input_integration_test PRIVATE -Wl,-dead_strip)
+  else()
+    target_link_options(overlay_input_integration_test PRIVATE -Wl,--gc-sections)
+  endif()
+  target_link_libraries(overlay_input_integration_test PRIVATE imgui SDL3::SDL3 Threads::Threads)
+  add_test(NAME overlay_input_integration COMMAND overlay_input_integration_test)
+  set_tests_properties(overlay_input_integration PROPERTIES ENVIRONMENT "WWHD_OVERLAY_TRACE=1;WWHD_NO_AUDIO=1" TIMEOUT 30)
+endif()
