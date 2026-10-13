@@ -180,7 +180,7 @@ unsigned long long wwhd_audio_epoch(void);
  * Returns the letter's state in the current save file, or a negative error. */
 #define WWHD_MAIL_API_VERSION 1
 #define WWHD_MAIL_NONE 0     /* never sent to this save file */
-#define WWHD_MAIL_WAITING 1  /* waiting in the postbox */
+#define WWHD_MAIL_WAITING 1  /* waiting in the postbox (handed out once Link has the Delivery Bag) */
 #define WWHD_MAIL_READ 2     /* handed out and read */
 #define WWHD_MAIL_INVALID (-1)
 #define WWHD_MAIL_NO_ROOM (-2)  /* no save loaded, or its story record is full (19 entries) */

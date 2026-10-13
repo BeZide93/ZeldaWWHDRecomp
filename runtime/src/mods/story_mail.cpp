@@ -21,8 +21,11 @@
 //   - the enclosure (the receive event waits for one): the story notebook with the first mod letter
 //     of a save file, shown with the Cabana Deed's get-item demo and the port's own text; its get
 //     function is not run, the notebook goes to the record. Later letters enclose a green rupee;
+//   - mod letters are handed out once Link has the Delivery Bag (bag_owned: the game's own
+//     dComIfGs_checkGetItem); before that they wait in the record, nothing is lost;
 //   - before the first pearl the postbox keeps its mail closed (execute: isSymbol(1)); that one
-//     check passes while a mod letter waits, and then the game's own letters are left out;
+//     check passes while a mod letter can be handed out (the bag comes before the first pearl), and
+//     then the game's own letters are left out;
 //   - the letter window shows the mod's text: when the message system looks up that message for the
 //     letter (hd_msg_res_mgr getMessage 0x025F50E8), its MSBT set and label index are noted, and the
 //     text lookup (0x0273A2E8, text of a label index in an MSBT) returns the mod's text for exactly
@@ -61,6 +64,8 @@ const uint32_t kTextLengthReturn = GC(0x0273A340); // its call in the MSBT text 
 const uint32_t kIsSymbol = GC(0x025B7D90);         // dSv_player_collect_c::isSymbol(no)
 const uint32_t kGateCheckReturn = GC(0x023A4A94);  // after daObjTpost_c::execute's isSymbol(1) call
 const uint32_t kExecItemGet = GC(0x0254DA38);      // execItemGet(itemNo): the item's get function
+const uint32_t kCheckGetItem = GC(0x02520C0C);     // dComIfGs_checkGetItem(itemNo): Link has the item
+constexpr uint32_t kDeliveryBag = 0x30;            // dItemNo_DELIVERY_BAG_e
 
 // daObjTpost_c fields (d_a_obj_toripost.h) and play fields used by the receive demo
 constexpr uint32_t kCurrMsgNo = 0x7C0, kReceivePending = 0xA01, kNextLetter = 0xA03, kNumReadable = 0xA04,
@@ -153,6 +158,19 @@ Waiting next_waiting() {
         if (b.state(l.key) == kWaiting) return {l.key, &l.text};
     return {};
 }
+// Mod letters are handed out only once Link has the Delivery Bag (the game's own check, as the
+// NPCs that hand out bag items use it: dComIfGs_checkGetItem(dItemNo_DELIVERY_BAG_e), the bag in its
+// inventory slot). Before that they stay waiting in the record and come with the first postbox visit
+// after the bag. Asked with a copy of the CPU, so the hook's own registers stay as they are.
+bool bag_owned(Cpu* c) {
+    Cpu probe = *c;
+    return (g_call(&probe, kCheckGetItem, {kDeliveryBag}) & 0xFF) != 0;
+}
+Waiting next_deliverable(Cpu* c) {
+    const Waiting w = next_waiting();
+    return w.key && bag_owned(c) ? w : Waiting{};
+}
+
 int waiting_count() {
     if (!have_save()) return 0;
     Book b = book();
@@ -293,8 +311,9 @@ void state_loaded() {
 
 namespace hooks {
 
-// s32 getReadableLetterNum(): the game's first waiting letter, else 13 for a waiting mod letter.
-// Before the first pearl the game's letters stay closed (the game's own check); only mod letters.
+// s32 getReadableLetterNum(): the game's first waiting letter, else 13 for a mod letter that can be
+// handed out (Link has the Delivery Bag). Before the first pearl the game's letters stay closed (the
+// game's own check); only mod letters.
 void readable(Cpu* c) {
     if (trace()) {  // where the postboxes are (scripted test runs walk Link there)
         static std::map<uint32_t, int> seen;
@@ -306,25 +325,27 @@ void readable(Cpu* c) {
     }
     if (g_gate_forced) c->r[3] = 0;
     else g_original(c, kReadable);
-    if (c->r[3] == 0 && next_waiting().key) c->r[3] = kModIndex;
+    if (c->r[3] == 0 && next_deliverable(c).key) c->r[3] = kModIndex;
 }
 
 // s16 getReceiveLetterNum(): the game's waiting letters plus the mod letters
 void receive_count(Cpu* c) {
     if (g_gate_forced) c->r[3] = 0;
     else g_original(c, kReceiveCount);
-    c->r[3] = uint32_t(int32_t(int16_t(c->r[3] + waiting_count())));
+    const int game = int(c->r[3]);
+    const int mod = waiting_count() && bag_owned(c) ? waiting_count() : 0;
+    c->r[3] = uint32_t(int32_t(int16_t(game + mod)));
 }
 
 // isSymbol(no): the postbox opens its mail only after the first pearl (execute: isSymbol(1)). For
-// that one call, and only while a mod letter is waiting, the check passes; readable() and
+// that one call, and only while a mod letter can be handed out, the check passes; readable() and
 // receive_count() then leave out the game's letters.
 void symbol(Cpu* c) {
     const uint32_t lr = c->lr, no = c->r[4];
     g_original(c, kIsSymbol);
     if (lr != kGateCheckReturn) return;
     g_gate_forced = false;
-    if (c->r[3] == 0 && no == 1 && next_waiting().key) {
+    if (c->r[3] == 0 && no == 1 && next_deliverable(c).key) {
         c->r[3] = 1;
         g_gate_forced = true;
     }

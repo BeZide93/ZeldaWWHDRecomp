@@ -68,6 +68,8 @@ void original(Cpu* c, uint32_t fn) {
     default: assert(!"unexpected original");
     }
 }
+uint32_t have_bag = 1;  // Link has the Delivery Bag (the game's checkGetItem)
+unsigned bag_asks = 0;
 uint32_t game_call(Cpu* c, uint32_t fn, std::initializer_list<uint32_t> args) {
     std::vector<uint32_t> a(args);
     if (hooked.count(fn)) {
@@ -77,6 +79,7 @@ uint32_t game_call(Cpu* c, uint32_t fn, std::initializer_list<uint32_t> args) {
     }
     switch (fn) {
     case 0x025200D4: return kPlay;
+    case 0x02520C0C: assert(a.size() == 1 && a[0] == 0x30); bag_asks++; return have_bag;  // checkGetItem(Delivery Bag)
     case 0x025D7DEC:  // the enclosure at the postbox
         assert(a.size() == 7 && a[0] == kActor + 0x314 && a[3] == 0xFFFFFFFFu);
         calls.push_back("item" + std::to_string(a[1]));
@@ -321,6 +324,60 @@ void test_hooks() {
     assert(c.r[3] == 3);
 }
 
+// Mod letters only once Link has the Delivery Bag: before it they wait in the record (and survive a
+// save and load), the postbox shows only the game's mail; after it the next visit hands them out, once.
+void test_bag_gate() {
+    Cpu c{};
+    // a fresh save: no bag, no pearl
+    memset(mem::ptr(kSave + kBookOffset), 0, kBookSize);
+    have_bag = 0, pearl = 0, game_readable = 0, game_waiting = 0;
+    assert(send("mod", "held", "Me", "Held") == kResultWaiting && state("mod", "held") == kResultWaiting);
+    const uint32_t gate = 0x023A4A94;
+    c.lr = gate, c.r[3] = kSave + 0xD4, c.r[4] = 1;
+    hooks::symbol(&c);
+    assert(c.r[3] == 0);  // the postbox stays closed: nothing for Link yet
+    c = Cpu{};
+    c.r[3] = kActor, c.r[5] = 0x1234;
+    hooks::readable(&c);
+    assert(c.r[3] == 0 && c.r[5] == 0x1234);  // no mod letter; the hook's other registers kept
+    c.r[3] = kActor;
+    hooks::receive_count(&c);
+    assert(c.r[3] == 0);
+    // the held letter's record: saved and loaded with the save file, still waiting
+    uint8_t saved[kBookSize];
+    memcpy(saved, mem::ptr(kSave + kBookOffset), kBookSize);
+    memset(mem::ptr(kSave + kBookOffset), 0, kBookSize);
+    memcpy(mem::ptr(kSave + kBookOffset), saved, kBookSize);
+    assert(state("mod", "held") == kResultWaiting && Book(saved).state(letter_key("mod", "held")) == kWaiting);
+    assert(send("mod", "held", "Me", "Held") == kResultWaiting);  // sent again: no second copy
+    unsigned held = 0;
+    for (unsigned r = 0; r < kRecords; r++) held += Book(saved).record_kind(r) == kRecordLetter;
+    assert(held == 1);
+    // Link gets the bag: the next postbox visit hands the letter out (before the first pearl too), once
+    have_bag = 1;
+    c.lr = gate, c.r[3] = kSave + 0xD4, c.r[4] = 1;
+    hooks::symbol(&c);
+    assert(c.r[3] == 1);
+    c.r[3] = kActor;
+    hooks::readable(&c);
+    assert(c.r[3] == 13);
+    c.r[3] = kActor;
+    hooks::receive_count(&c);
+    assert(c.r[3] == 1);
+    st32(kActor + 0xA04, 13);  // the postbox took the mod letter (its execute stores readable's answer)
+    c.r[3] = kActor;
+    hooks::disp_letter_start(&c);
+    calls.clear();
+    event_ended = 1;
+    c.r[3] = kActor;
+    hooks::receive_demo(&c);
+    assert(state("mod", "held") == kResultRead);
+    c.r[3] = kActor;
+    hooks::readable(&c);
+    assert(c.r[3] == 0);  // read: not handed out again
+    assert(send("mod", "held", "Me", "Held") == kResultRead);
+}
+
 }  // namespace
 
 int main() {
@@ -330,6 +387,7 @@ int main() {
     test_text();
     test_services();
     test_hooks();
+    test_bag_gate();
     std::puts("story_mail_test: ok");
     return 0;
 }

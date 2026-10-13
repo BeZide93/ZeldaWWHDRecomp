@@ -328,7 +328,7 @@ step) never sends the letter twice. It returns the letter's state:
 | Result | Meaning |
 | --- | --- |
 | `WWHD_MAIL_NONE` (0) | never sent to this save file (only from `wwhd_mail_state`) |
-| `WWHD_MAIL_WAITING` (1) | waiting in the postbox |
+| `WWHD_MAIL_WAITING` (1) | waiting in the postbox (handed out once Link has the Delivery Bag) |
 | `WWHD_MAIL_READ` (2) | handed out and read |
 | `WWHD_MAIL_INVALID` (-1) | invalid ID, sender or text |
 | `WWHD_MAIL_NO_ROOM` (-2) | no save file loaded, or its story record is full (19 entries, shared with the notebook) |
@@ -344,8 +344,11 @@ your quest once the letter was read.
 - The text of the first call in a session is used; the letter can only be shown while your mod is
   on.
 
-**Delivery.** Any Rito postbox hands out waiting letters, after the game's own. The game opens its
-postboxes only after the first pearl; letters from mods are handed out before that too (the game's
+**Delivery.** Any Rito postbox hands out waiting letters, after the game's own, once Link has the
+**Delivery Bag** (from Quill on Dragon Roost Island; the port asks the game, as its own characters
+do). Until then a letter stays waiting in the save file: nothing is lost, and it comes with the
+first postbox visit after Link gets the bag. The game opens its postboxes only after the first
+pearl; letters from mods are handed out before that too, as soon as Link has the bag (the game's
 own letters still wait for the pearl). A letter from a mod needs no postage. Like the game's
 letters it comes with an enclosure, which Link takes after reading: the first letter from a mod
 in a save file encloses the **story notebook**, every later one a green rupee. Several waiting
@@ -498,7 +501,9 @@ All of them return the quest's state in the loaded save file, or an error:
   Gods rises"); the notebook shows "Not yet available: ..." until your mod reaches step 1 or
   defines the quest again without a condition.
 
-**What the player sees.** The notebook is in the Delivery Bag (the first empty place of the bag;
+**What the player sees.** The notebook comes with the first letter from a mod, so only once Link has
+the Delivery Bag (see [Letters](#letters)); a story mod's quests are in it from then on. It is kept in
+the Delivery Bag (the first empty place of the bag;
 if all eight places hold the game's items, it waits for one to be free), with its own icon: the port
 draws it over the bag place and it follows the menu's animations. It can't be put on X, Y
 or R. Touching it on the GamePad (or clicking it on the GamePad picture), or choosing it with A in
