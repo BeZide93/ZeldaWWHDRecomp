@@ -7,6 +7,10 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Less memory per shader translation** (PR #184, thanks @Pulpparty): the shader translator reserves 1 MB of text
+  per shader instead of 12 MB and grows only if needed (the largest game shader is far smaller), which helps devices
+  with little memory. One of its text functions also no longer cuts long text short.
+
 - **Steam Deck Gaming Mode: the settings menu stays open** (issue #112, thanks @chaberl-art): with the TV and GamePad
   screens in two windows, the menu could close again right after opening. F1 now toggles once per press (a release
   is needed before it toggles again), keys and the save-state hotkeys (Shift+F1..F5 save, F2..F5 load) work from
