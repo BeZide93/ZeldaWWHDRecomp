@@ -11,6 +11,9 @@ what is on `devel` and not released yet (also in the
   per shader instead of 12 MB and grows only if needed (the largest game shader is far smaller), which helps devices
   with little memory. One of its text functions also no longer cuts long text short.
 
+- **Building from a folder with spaces in its path** (PR #183, thanks @Pulpparty): the shader translator and two tests no
+  longer fail to compile when the checkout path contains a space (for example a Windows user name like `C:/Users/Jane Doe`).
+
 - **Steam Deck Gaming Mode: the settings menu stays open** (issue #112, thanks @chaberl-art): with the TV and GamePad
   screens in two windows, the menu could close again right after opening. F1 now toggles once per press (a release
   is needed before it toggles again), keys and the save-state hotkeys (Shift+F1..F5 save, F2..F5 load) work from

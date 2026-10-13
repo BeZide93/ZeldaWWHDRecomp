@@ -116,7 +116,7 @@ endif()
 add_library(cemu_latte STATIC ${CEMU_SOURCES})
 target_include_directories(cemu_latte PUBLIC ${CEMU_DIR} ${CEMU_DIR}/Cafe ${CMAKE_SOURCE_DIR}/runtime/third_party/metal-cpp
                                              ${CMAKE_SOURCE_DIR}/runtime/third_party/fmt/include)
-target_compile_options(cemu_latte PRIVATE "SHELL:-include ${CEMU_DIR}/cemu_shim.h")
+target_compile_options(cemu_latte PRIVATE "SHELL:-include \"${CEMU_DIR}/cemu_shim.h\"")
 if(WWHD_HAS_METAL)
   target_compile_definitions(cemu_latte PUBLIC ENABLE_METAL=1)
 endif()
@@ -315,7 +315,7 @@ if(WWHD_HAS_METAL)
 add_executable(shadertest runtime/tools/shadertest.cpp runtime/src/gx2/gx2_shader_regs.cpp)
 target_include_directories(shadertest PRIVATE runtime/include runtime/src runtime/src/gx2)
 target_link_libraries(shadertest PRIVATE cemu_latte)
-target_compile_options(shadertest PRIVATE "SHELL:-include ${CEMU_DIR}/cemu_shim.h")
+target_compile_options(shadertest PRIVATE "SHELL:-include \"${CEMU_DIR}/cemu_shim.h\"")
 
 endif()
 
@@ -1203,13 +1203,13 @@ add_executable(fetch_attributes_test runtime/tools/fetch_attributes_test.cpp
   runtime/src/gx2/fetch_attributes.cpp runtime/third_party/cemu/fetch_shader_parse.cpp)
 target_include_directories(fetch_attributes_test PRIVATE runtime/src ${CEMU_DIR}
   runtime/third_party/metal-cpp runtime/third_party/fmt/include)
-target_compile_options(fetch_attributes_test PRIVATE -UNDEBUG "SHELL:-include ${CEMU_DIR}/cemu_shim.h")
+target_compile_options(fetch_attributes_test PRIVATE -UNDEBUG "SHELL:-include \"${CEMU_DIR}/cemu_shim.h\"")
 add_test(NAME fetch_attributes_semantic_parity COMMAND fetch_attributes_test)
 # Cemu's StringBuf when allocations fail: every write stays in bounds.
 add_executable(stringbuf_test runtime/tools/stringbuf_test.cpp)
 target_include_directories(stringbuf_test PRIVATE runtime/src ${CEMU_DIR}
   runtime/third_party/metal-cpp runtime/third_party/fmt/include)
-target_compile_options(stringbuf_test PRIVATE -UNDEBUG "SHELL:-include ${CEMU_DIR}/cemu_shim.h")
+target_compile_options(stringbuf_test PRIVATE -UNDEBUG "SHELL:-include \"${CEMU_DIR}/cemu_shim.h\"")
 target_link_libraries(stringbuf_test PRIVATE Threads::Threads)
 add_test(NAME stringbuf_out_of_memory COMMAND stringbuf_test)
 add_executable(pipeline_identity_test runtime/tools/pipeline_identity_test.cpp)
