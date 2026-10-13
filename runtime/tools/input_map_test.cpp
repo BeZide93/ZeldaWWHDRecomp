@@ -80,6 +80,110 @@ static void test_defaults() {
     CHECK(std::fabs(s.lx + 0.6f) < 1e-6 && std::fabs(s.ry - 0.3f) < 1e-6);
 }
 
+static void test_apple_face_normalization() {
+    using AL = AppleFaceLayout;
+    using FL = FaceLabel;
+    for (const char* name : {"Switch Pro Controller", "Nintendo Switch Pro Controller",
+                            "Nintendo Switch Joy-Con (L/R)", "JoyCon Pair", "Nintendo SNES Controller",
+                            "SNES Controller", "Super Famicom Controller", "Nintendo Switch Online SNES"}) {
+        CHECK(apple_face_layout(name, nullptr) == AL::kNintendo);
+        CHECK(apple_face_layout(nullptr, name) == AL::kNintendo);
+    }
+    CHECK(apple_face_layout("sWiTcH pRo CoNtRoLlEr", "") == AL::kNintendo);
+    CHECK(apple_face_layout("Wireless Controller", "Nintendo") == AL::kNintendo);
+    for (const char* name : {"Nintendo Switch Joy-Con (L)", "Nintendo Switch Joy-Con (R)", "JoyCon (L)"})
+        CHECK(apple_face_layout(name, nullptr) == AL::kJoyConSingle);
+    for (const char* name : {"Xbox One", "DualSense", "DualShock 4", "Wireless Controller", "Switcheroo",
+                            "Nintendo N64 Controller", "Nintendo NES Controller", "Nintendo Genesis Controller", ""})
+        CHECK(apple_face_layout(name, nullptr) == AL::kStandard);
+    CHECK(apple_face_layout(nullptr, nullptr) == AL::kStandard);
+    CHECK(apple_face_layout("Xbox One", "Nintendo SNES-style pad") == AL::kStandard);
+    CHECK(apple_face_layout("Nintendo GameCube Controller", nullptr) == AL::kStandard);
+    CHECK(apple_face_layout("Nintendo Switch Joy-Con  (L / R)", nullptr) == AL::kNintendo);
+    const FL raw[] = {FL::kA, FL::kB, FL::kX, FL::kY};
+    const FL expected[] = {FL::kB, FL::kA, FL::kY, FL::kX};
+    for (AL layout : {AL::kStandard, AL::kNintendo, AL::kJoyConSingle}) {
+        FL labels[] = {raw[0], raw[1], raw[2], raw[3]};
+        apple_face_labels(layout, labels);
+        const int destinations[3][4] = {{kPadA, kPadB, kPadX, kPadY},
+                                       {kPadB, kPadA, kPadY, kPadX},
+                                       {kPadA, kPadX, kPadB, kPadY}};
+        for (int i = 0; i < 4; ++i) {
+            const int dest = destinations[int(layout)][i];
+            CHECK(apple_face_input(layout, kPadA + i) == dest);
+            CHECK(labels[dest - kPadA] == raw[i]);
+            float values[kPadCount]{};
+            values[apple_face_input(layout, kPadA + i)] = 0.73f;
+            CHECK(values[dest] == 0.73f);
+            Mapping m = Mapping::defaults();
+            CHECK(controller_state(m, values).buttons == action_bit(
+                dest == kPadB ? kA : dest == kPadA ? kB : dest == kPadY ? kX : kY));
+        }
+        for (int p = kPadLB; p < kPadCount; ++p) CHECK(apple_face_input(layout, p) == p);
+        CHECK(apple_face_input(layout, kPadNone) == kPadNone);
+        if (layout == AL::kNintendo) {
+            for (int i = 0; i < 4; ++i) CHECK(labels[i] == expected[i]);
+            CHECK(pad_family_from_labels(labels) == PadFamily::kNintendo);
+            note_face_labels(labels);
+            Mapping automatic = Mapping::defaults();
+            set_face_auto(automatic, true);
+            CHECK(automatic.face_auto && face_layout(automatic) == FaceLayout::kPosition);
+            const auto style = prompt_style(automatic, pad_family_from_labels(labels));
+            CHECK(style.face == FaceStyle::kOriginal && !style.positions && !style.active());
+        }
+    }
+    // Parse representative framework SF Symbols and localized names before routing them.
+    for (bool symbols : {false, true}) {
+        const char* names[4] = {symbols ? "a.circle" : "Button A", symbols ? "b.circle.fill" : "Button B",
+                                symbols ? "x.circle" : "Button X", symbols ? "y.circle.fill" : "Button Y"};
+        FL labels[4];
+        for (int i = 0; i < 4; ++i) labels[i] = face_label_from_text(names[i]);
+        apple_face_labels(AL::kNintendo, labels);
+        for (int i = 0; i < 4; ++i) CHECK(labels[i] == expected[i]);
+        Mapping m = Mapping::defaults();
+        note_face_labels(labels);
+        set_face_auto(m, true);
+        CHECK(face_layout(m) == FaceLayout::kPosition);
+        CHECK(prompt_style(m, pad_family()).face == FaceStyle::kOriginal);
+        for (int i = 0; i < 4; ++i) {
+            float values[kPadCount]{};
+            values[apple_face_input(AL::kNintendo, kPadA + i)] = 1;
+            CHECK(controller_state(m, values).buttons == action_bit(kA + i));
+            Mapping by_label = m;
+            apply_face_layout(by_label, FaceLayout::kLabels);
+            CHECK(controller_state(by_label, values).buttons == action_bit(
+                i == 0 ? kB : i == 1 ? kA : i == 2 ? kY : kX));
+        }
+    }
+    FL partial[] = {FL::kA, FL::kUnknown, FL::kX, FL::kUnknown};
+    apple_face_labels(AL::kNintendo, partial);
+    CHECK(partial[0] == FL::kUnknown && partial[1] == FL::kA &&
+          partial[2] == FL::kUnknown && partial[3] == FL::kX);
+    FL missing[4]{};
+    apple_face_labels(AL::kNintendo, missing);
+    for (FL label : missing) CHECK(label == FL::kUnknown);
+    Mapping m = Mapping::defaults(), saved;
+    CHECK(!apple_face_workaround(m, AL::kNintendo));
+    apply_face_layout(m, FaceLayout::kLabels);
+    CHECK(from_json(to_json(m), saved) && saved == m);
+    CHECK(apple_face_workaround(saved, AL::kNintendo));
+    CHECK(!apple_face_workaround(saved, AL::kStandard));
+    CHECK(!apple_face_workaround(saved, AL::kJoyConSingle));
+    // Detection never mutates a deliberate mapping, including non-face customizations.
+    saved.pad[kL] = kPadRT;
+    const Mapping before = saved;
+    CHECK(apple_face_workaround(saved, AL::kNintendo) && saved == before);
+    saved.face_auto = true;
+    CHECK(!apple_face_workaround(saved, AL::kNintendo));
+    saved.face_auto = false;
+    for (int a = kA; a <= kY; ++a) {
+        Mapping custom = saved;
+        custom.pad[a] = kPadLB;
+        CHECK(face_layout(custom) == FaceLayout::kCustom);
+        CHECK(!apple_face_workaround(custom, AL::kNintendo));
+    }
+}
+
 static void test_face_layout() {
     Mapping m = Mapping::defaults();
     // the default is the by-position (Nintendo) preset
@@ -769,6 +873,7 @@ int main() {
     test_binding_capture_faces();
     test_conflict_helpers();
     test_defaults();
+    test_apple_face_normalization();
     test_face_layout();
     test_face_auto();
     test_prompts();

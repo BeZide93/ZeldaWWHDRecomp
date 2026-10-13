@@ -45,6 +45,20 @@ screens have their own controls; follow the game's stick/button prompts. The por
 If down fails, check its binding in Controls and test D-pad down, Left Stick Down
 and Right Stick Down separately.
 
+## Nintendo controllers on macOS
+
+Switch Pro, paired Joy-Cons and SNES-style Nintendo controllers use physical
+button positions for **By position (Nintendo)**. **Automatic** follows their
+printed letters and keeps the original Nintendo prompts. Single Joy-Cons use
+their sideways face-button positions.
+
+If you previously swapped A/B and X/Y by hand to work around the macOS issue
+(#181), select **Input > Face buttons > By position (Nintendo)** or **Automatic**
+once after updating. The old workaround appears as **By label (Xbox)**; saved
+manual bindings are preserved because that preset may be intentional or shared
+with another controller. A connected Nintendo pad with that exact manual pattern
+logs a reminder. Other custom bindings are kept.
+
 ## Input diagnostics
 
 For a reproducible controller report, these optional environment variables log

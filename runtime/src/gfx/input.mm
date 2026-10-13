@@ -61,6 +61,10 @@ static PadState keyboard_state(bool use_host) {
     return input_map::keyboard_state(input_map::current(), keys);
 }
 
+static input_map::AppleFaceLayout controller_face_layout(GCController* c) {
+    return input_map::apple_face_layout(c.productCategory.UTF8String, c.vendorName.UTF8String);
+}
+
 // every mappable controller input of one controller, 0..1; false: not a gamepad
 static bool device_values(GCController* c, float* v) {
     using namespace input_map;
@@ -69,8 +73,9 @@ static bool device_values(GCController* c, float* v) {
     GCExtendedGamepad* g = c.extendedGamepad;
     if (!g) return false;
     {
+        const auto layout = controller_face_layout(c);
         auto b = [&](GCControllerButtonInput* in, int p) {
-            if (in) put(p, in.isPressed ? std::max(in.value, 0.51f) : std::min(in.value, 0.5f));
+            if (in) put(apple_face_input(layout, p), in.isPressed ? std::max(in.value, 0.51f) : std::min(in.value, 0.5f));
         };
         b(g.buttonA, kPadA); b(g.buttonB, kPadB); b(g.buttonX, kPadX); b(g.buttonY, kPadY);
         b(g.leftShoulder, kPadLB); b(g.rightShoulder, kPadRB);
@@ -124,8 +129,7 @@ static input_map::FaceLabel button_letter(GCControllerButtonInput* in) {
 static void family_letters(GCController* c, input_map::FaceLabel out[4]) {
     using FL = input_map::FaceLabel;
     NSString* who = [NSString stringWithFormat:@"%@ %@", c.vendorName ?: @"", c.productCategory ?: @""].lowercaseString;
-    BOOL nintendo = [who containsString:@"nintendo"] || [who containsString:@"switch"] || [who containsString:@"joy-con"] ||
-                    [who containsString:@"joycon"] || [who containsString:@"wii"];
+    const bool nintendo = controller_face_layout(c) == input_map::AppleFaceLayout::kNintendo;
     BOOL playstation = [who containsString:@"sony"] || [who containsString:@"dualsense"] ||
                        [who containsString:@"dualshock"] || [who containsString:@"playstation"];
     BOOL xboxish = [who containsString:@"xbox"] || [who containsString:@"microsoft"] ||
@@ -152,15 +156,19 @@ static void note_dominant_labels() {
     }
     if (dominant) {
         GCExtendedGamepad* g = dominant.extendedGamepad;
-        GCControllerButtonInput* face[4] = {g.buttonA, g.buttonB, g.buttonX, g.buttonY};  // south, east, west, north
+        GCControllerButtonInput* face[4] = {g.buttonA, g.buttonB, g.buttonX, g.buttonY};  // framework element order
         bool any = false;
         for (int i = 0; i < 4; i++) {
             labels[i] = button_letter(face[i]);
             any |= labels[i] != FL::kUnknown;
         }
+        input_map::apple_face_labels(controller_face_layout(dominant), labels);
         if (!any) family_letters(dominant, labels);  // nothing printed we can read: guess the family
     }
     input_map::note_face_labels(labels);
+    if (dominant && input_map::apple_face_workaround(input_map::current(), controller_face_layout(dominant)))
+        LOG("[input] Nintendo pad with by-label bindings: if these were the old macOS workaround, "
+            "select Input > Face buttons > By position (Nintendo) or Automatic (#181). Saved bindings kept.");
 }
 
 // the latest controller_values (the timer below), for the settings overlay's navigation
