@@ -556,7 +556,9 @@ std::vector<ComposeQuad> screen_quads(Screen& screen,VkExtent2D target,int& filt
 bool draw_present_screen(Screen& screen,uint32_t imageIndex) {
  auto found=resources.screens.find(&screen);
  if(found==resources.screens.end()||!found->second.drawable) {
-  if(screen.hdrOutput)exception_report::raise("HDR requires shader presentation support");
+  // HDR needs the shader path: present this frame by blit (BLIT_DST is part of
+  // hdr::formatSupported) and make the next swapchain SDR, as resolve_output does.
+  if(screen.hdrOutput){hdr::fall_back_to_sdr();screen.resize=true;}
   if(&screen==&R.tv) {
    set_graphics_feature_available(GraphicsFeature::FXAA,false);
    set_graphics_feature_available(GraphicsFeature::ScaleFilter,false);

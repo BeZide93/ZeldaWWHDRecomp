@@ -14,6 +14,12 @@ int main() {
  }
  hdr::enabled=false;hdr::displayEnabled=true;hdr::formatSupported=true;
  assert(!hdr::resolve_output()); // SDR remains explicit even on a capable display
+ // The presentation path could not draw HDR on a capable display: SDR from the next swapchain on,
+ // reported, and not re-requested by resolve_output until the user picks HDR again.
+ hdr::enabled=true;assert(hdr::resolve_output());
+ hdr::fall_back_to_sdr();
+ assert(!hdr::enabled.load()&&hdr::fellBackToSdr.load());
+ assert(!hdr::resolve_output()&&hdr::fellBackToSdr.load());
  for(float paper:{80.f,200.f,500.f})for(float peak:{500.f,1000.f,4000.f})
   for(float ev:{-3.f,0.f,3.f})for(float boost:{0.f,.5f,1.f}) {
    hdr::Parameters p{paper,peak,ev,boost};

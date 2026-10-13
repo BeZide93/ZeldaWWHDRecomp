@@ -9,14 +9,18 @@
 namespace hdr {
 inline std::atomic<bool> enabled{false}, displayEnabled{false}, formatSupported{false};
 inline std::atomic<bool> fellBackToSdr{false};
+// The saved choice stays HDR; this session presents SDR and the overlay says so.
+inline void fall_back_to_sdr() {
+    enabled = false;
+    fellBackToSdr = true;
+}
 inline bool resolve_output() {
     if (!enabled.load()) return false;
     if (displayEnabled.load() && formatSupported.load()) {
         fellBackToSdr = false;
         return true;
     }
-    enabled = false;
-    fellBackToSdr = true;
+    fall_back_to_sdr();
     return false;
 }
 inline std::atomic<float> paperWhite{240}, peak{1025}, exposure{-0.32f}, highlights{0.32f}, menuWhite{160};
