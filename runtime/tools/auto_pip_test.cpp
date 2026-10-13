@@ -31,18 +31,18 @@ int main() {
     decision.update(menu, 203);
     decision.update({}, 203.1);
     assert(!decision.shown({}, false, 203.1)); // scene destroyed/state load
-    for (uint32_t state : {0x1049EC84u, 0x1049ECB0u, 0x1049ECDCu, 0x1049ED34u,
-                            0x1049EE3Cu, 0x1049EF18u, 0x1049F204u, 0x1049F338u}) {
+    for (uint32_t state : {GD(0x1049EC84), GD(0x1049ECB0), GD(0x1049ECDC), GD(0x1049ED34),
+                            GD(0x1049EE3C), GD(0x1049EF18), GD(0x1049F204), GD(0x1049F338)}) {
         assert(gamepad_menu_state(state, 0, 1));
         assert(!gamepad_menu_state(state, 0, 0)); // menu is on TV in Pro mode
         assert(!gamepad_menu_state(state, 0, 2)); // Off-TV
     }
-    assert(gamepad_menu_state(0x1049EC00, 2, 1));
-    assert(gamepad_menu_state(0x1049EC00, 0, 1, true)); // bag may open within Play
-    assert(!gamepad_menu_state(0x1049EC00, 0, 0, true));
-    for (uint32_t state : {0x1049EC00u, 0x1049EC2Cu, 0x1049EC58u, 0x1049F364u, 0x1049F3BCu})
+    assert(gamepad_menu_state(GD(0x1049EC00), 2, 1));
+    assert(gamepad_menu_state(GD(0x1049EC00), 0, 1, true)); // bag may open within Play
+    assert(!gamepad_menu_state(GD(0x1049EC00), 0, 0, true));
+    for (uint32_t state : {GD(0x1049EC00), GD(0x1049EC2C), GD(0x1049EC58), GD(0x1049F364), GD(0x1049F3BC)})
         assert(!gamepad_menu_state(state, 4, 1)); // ordinary gameplay/cutscenes
-    for (uint32_t state : {0x1049F498u, 0x1049F4C4u, 0x1049F4F0u}) assert(gamepad_switch_state(state));
+    for (uint32_t state : {GD(0x1049F498), GD(0x1049F4C4), GD(0x1049F4F0)}) assert(gamepad_switch_state(state));
     display_set_mode(kDrcAuto);
     display_gamepad_ui(play);
     assert(!frame().pip_on);

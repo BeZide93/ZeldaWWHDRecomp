@@ -1,6 +1,8 @@
 // Host-only policy. The input describes the game's screen routing, never requests a game change.
 #pragma once
 #include <cstdint>
+#include <array>
+#include "guest_addr.h"
 namespace gfx {
 struct GamePadUiState {
     bool available = false;
@@ -8,32 +10,77 @@ struct GamePadUiState {
     bool off_tv = false;
     bool switching = false;
 };
-// Canonical USA state descriptors (translated with GD by the reader).
-inline bool gamepad_menu_state(uint32_t state, uint32_t routing, uint32_t controller, bool bag_open = false) {
-    // 2 routes the pause/menu overlay to DRC; 4 also occurs during ordinary cutscenes.
-    if (controller != 1) return false;
-    if (routing == 2 || bag_open) return true;
-    switch (state) {
-    case 0x1049EC84: case 0x1049ECB0: case 0x1049ECDC: // menu, including map/bags/collection
-    case 0x1049ED08: case 0x1049ED34: // save prompt
-    case 0x1049ED60: case 0x1049ED8C: // options
-    case 0x1049EE10: case 0x1049EE3C: // song list
-    case 0x1049EEEC: case 0x1049EF18: // warp map
-    case 0x1049EF44: case 0x1049EF70: // photo/social prompts
-    case 0x1049EF9C: case 0x1049EFC8:
-    case 0x1049EFF4: case 0x1049F020:
-    case 0x1049F04C: case 0x1049F078: case 0x1049F0A4:
-    case 0x1049F0D0: case 0x1049F0FC:
-    case 0x1049F1D8: case 0x1049F204: // photo lists
-    case 0x1049F288: case 0x1049F2B4:
-    case 0x1049F2E0: case 0x1049F30C: // Fishman hint
-    case 0x1049F338: // password keyboard
-        return true;
-    default: return false;
-    }
+// Descriptors are data pointers in the running regional build, never canonical IDs.
+// Map every entry separately: a regional map may split the descriptor range.
+enum class GamePadSceneKind { Unknown, Other, Menu, Switch };
+inline GamePadSceneKind gamepad_scene_kind(uint32_t descriptor) {
+    struct Entry { uint32_t descriptor; GamePadSceneKind kind; };
+    static const std::array<Entry, 54> states = {{
+        {GD(0x1049EBD4), GamePadSceneKind::Other},
+        {GD(0x1049EC00), GamePadSceneKind::Other},
+        {GD(0x1049EC2C), GamePadSceneKind::Other},
+        {GD(0x1049EC58), GamePadSceneKind::Other},
+        {GD(0x1049EC84), GamePadSceneKind::Menu},
+        {GD(0x1049ECB0), GamePadSceneKind::Menu},
+        {GD(0x1049ECDC), GamePadSceneKind::Menu},
+        {GD(0x1049ED08), GamePadSceneKind::Menu},
+        {GD(0x1049ED34), GamePadSceneKind::Menu},
+        {GD(0x1049ED60), GamePadSceneKind::Menu},
+        {GD(0x1049ED8C), GamePadSceneKind::Menu},
+        {GD(0x1049EDB8), GamePadSceneKind::Other},
+        {GD(0x1049EDE4), GamePadSceneKind::Other},
+        {GD(0x1049EE10), GamePadSceneKind::Menu},
+        {GD(0x1049EE3C), GamePadSceneKind::Menu},
+        {GD(0x1049EE68), GamePadSceneKind::Other},
+        {GD(0x1049EE94), GamePadSceneKind::Other},
+        {GD(0x1049EEC0), GamePadSceneKind::Other},
+        {GD(0x1049EEEC), GamePadSceneKind::Menu},
+        {GD(0x1049EF18), GamePadSceneKind::Menu},
+        {GD(0x1049EF44), GamePadSceneKind::Menu},
+        {GD(0x1049EF70), GamePadSceneKind::Menu},
+        {GD(0x1049EF9C), GamePadSceneKind::Menu},
+        {GD(0x1049EFC8), GamePadSceneKind::Menu},
+        {GD(0x1049EFF4), GamePadSceneKind::Menu},
+        {GD(0x1049F020), GamePadSceneKind::Menu},
+        {GD(0x1049F04C), GamePadSceneKind::Menu},
+        {GD(0x1049F078), GamePadSceneKind::Menu},
+        {GD(0x1049F0A4), GamePadSceneKind::Menu},
+        {GD(0x1049F0D0), GamePadSceneKind::Menu},
+        {GD(0x1049F0FC), GamePadSceneKind::Menu},
+        {GD(0x1049F128), GamePadSceneKind::Other},
+        {GD(0x1049F154), GamePadSceneKind::Other},
+        {GD(0x1049F180), GamePadSceneKind::Other},
+        {GD(0x1049F1AC), GamePadSceneKind::Other},
+        {GD(0x1049F1D8), GamePadSceneKind::Menu},
+        {GD(0x1049F204), GamePadSceneKind::Menu},
+        {GD(0x1049F230), GamePadSceneKind::Other},
+        {GD(0x1049F25C), GamePadSceneKind::Other},
+        {GD(0x1049F288), GamePadSceneKind::Menu},
+        {GD(0x1049F2B4), GamePadSceneKind::Menu},
+        {GD(0x1049F2E0), GamePadSceneKind::Menu},
+        {GD(0x1049F30C), GamePadSceneKind::Menu},
+        {GD(0x1049F338), GamePadSceneKind::Menu},
+        {GD(0x1049F364), GamePadSceneKind::Other},
+        {GD(0x1049F390), GamePadSceneKind::Other},
+        {GD(0x1049F3BC), GamePadSceneKind::Other},
+        {GD(0x1049F3E8), GamePadSceneKind::Other},
+        {GD(0x1049F414), GamePadSceneKind::Other},
+        {GD(0x1049F440), GamePadSceneKind::Other},
+        {GD(0x1049F46C), GamePadSceneKind::Other},
+        {GD(0x1049F498), GamePadSceneKind::Switch},
+        {GD(0x1049F4C4), GamePadSceneKind::Switch},
+        {GD(0x1049F4F0), GamePadSceneKind::Switch},
+    }};
+    for (const auto& entry : states)
+        if (entry.descriptor == descriptor) return entry.kind;
+    return GamePadSceneKind::Unknown;
 }
-inline bool gamepad_switch_state(uint32_t state) {
-    return state == 0x1049F498 || state == 0x1049F4C4 || state == 0x1049F4F0;
+inline bool gamepad_menu_state(uint32_t descriptor, uint32_t routing, uint32_t controller, bool bag_open = false) {
+    // 2 routes the pause/menu overlay to DRC; 4 also occurs during ordinary cutscenes.
+    return controller == 1 && (routing == 2 || bag_open || gamepad_scene_kind(descriptor) == GamePadSceneKind::Menu);
+}
+inline bool gamepad_switch_state(uint32_t descriptor) {
+    return gamepad_scene_kind(descriptor) == GamePadSceneKind::Switch;
 }
 struct AutoPipDecision {
     double until = 0;

@@ -53,8 +53,10 @@ are no guest writes or injected inputs. Outside auto, the reader exits before gu
 the existing optional Plus pause view is pending or active. The former GPU sampling and waits are
 gone from both Metal and Vulkan. The luma functions used by FXAA remain part of antialiasing.
 
-Unit tests: `auto_pip`, `auto_pip_pause`, `gamepad_ui_state`, `display_fallback`, and `stereo_pointer`.
-The reader test maps a synthetic regional guest heap read-only and exercises menu, cutscene,
+Unit tests: `auto_pip`, `auto_pip_pause`, `auto_pip_eu`, `gamepad_ui_state`, `display_fallback`, and `stereo_pointer`.
+The policy tests use both the identity map and the shipped EU map. The reader test maps a synthetic
+regional guest heap read-only, with shifts changing inside the descriptor table, and exercises every
+menu and switch descriptor with routing shortcuts disabled, as well as cutscene,
 Off-TV, transitions, scene destruction and inactive modes; a guest write would fault.
 
 For scripted capture diagnostics, `WWHD_TEST_GAMEPAD_UI_TRACE=1` logs changes to the scene descriptor,

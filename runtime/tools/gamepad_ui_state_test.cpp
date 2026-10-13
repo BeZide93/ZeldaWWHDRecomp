@@ -10,8 +10,10 @@ void log_msg(const char*, ...) {}
 
 extern "C" {
 // Deliberately shift canonical data, as a regional build does.
-const GuestStep g_guest_data_steps[] = {{0x10000000, 0x1000}};
-const unsigned g_guest_data_step_count = 1;
+const GuestStep g_guest_data_steps[] = {
+    {0x10000000, 0x1000}, {0x1049EE10, 0x2000}, {0x1049F338, 0x3000}
+};
+const unsigned g_guest_data_step_count = 3;
 const uint32_t g_guest_data_lo = 0x10000000, g_guest_data_hi = 0x11000000;
 const char g_guest_build_name[] = "test regional map";
 }
@@ -45,6 +47,28 @@ int main() {
         protect(globals, region, PROT_READ); protect(heap, region, PROT_READ);
         display_read_gamepad_ui(); // writes would fault
     };
+    // Exercise every menu-table entry with routing=0 and no bag; neither shortcut may hide
+    // an untranslated table comparison. The map changes shift twice inside the descriptor range.
+    for (uint32_t canonical : {
+        0x1049EC84u, 0x1049ECB0u, 0x1049ECDCu, 0x1049ED08u, 0x1049ED34u,
+        0x1049ED60u, 0x1049ED8Cu, 0x1049EE10u, 0x1049EE3Cu, 0x1049EEECu,
+        0x1049EF18u, 0x1049EF44u, 0x1049EF70u, 0x1049EF9Cu, 0x1049EFC8u,
+        0x1049EFF4u, 0x1049F020u, 0x1049F04Cu, 0x1049F078u, 0x1049F0A4u,
+        0x1049F0D0u, 0x1049F0FCu, 0x1049F1D8u, 0x1049F204u, 0x1049F288u,
+        0x1049F2B4u, 0x1049F2E0u, 0x1049F30Cu, 0x1049F338u}) {
+        assert(gamepad_scene_kind(GD(canonical)) == GamePadSceneKind::Menu);
+        assert(gamepad_menu_state(GD(canonical), 0, 1));
+        assert(gamepad_scene_kind(canonical) == GamePadSceneKind::Unknown);
+        assert(!gamepad_menu_state(canonical, 0, 1)); // raw USA pointers must not match
+        set(canonical, 0, 1);
+        assert(observed.available && observed.menu && !observed.switching);
+    }
+    for (uint32_t canonical : {0x1049F498u, 0x1049F4C4u, 0x1049F4F0u}) {
+        assert(gamepad_switch_state(GD(canonical)));
+        assert(!gamepad_switch_state(canonical));
+        set(canonical, 0, 1);
+        assert(observed.available && observed.switching && !observed.menu);
+    }
     set(0x1049EC00, 0, 1);
     assert(observed.available && !observed.menu && !observed.off_tv);
     set(0x1049ECB0, 2, 1);
