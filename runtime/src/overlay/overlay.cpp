@@ -2007,7 +2007,6 @@ bool key(int code, bool down, bool repeat, int mods, KeyOrigin origin) {
     if (g_no_host_keys) return false;
     static ToggleGuard f1;
     const bool f1_press = code == kVK_F1 && f1.press(down, repeat, now_s());
-    if (!is_open() && text_entry::active()) { text_entry::key(code, down, repeat); return true; }
 #ifdef __APPLE__
     // Cmd+, (the macOS settings shortcut; the AppKit host gets it as the app menu's Settings... item)
     if (code == kVK_ANSI_Comma && (mods & kSuper) && !g_capturing_keys.load()) {
@@ -2020,7 +2019,12 @@ bool key(int code, bool down, bool repeat, int mods, KeyOrigin origin) {
         if (f1_press && !g_capturing_keys.load()) set_open(!is_open(), OpenReason::F1, origin);
         if (!g_capturing_keys.load()) return true;
     }
-    if (!is_open()) return false;
+    if (!is_open()) {
+        // the game's text prompt (text_entry.h) has the keyboard while it shows; F1 above still opens the menu
+        if (!text_entry::active()) return false;
+        text_entry::key(code, down, repeat);
+        return true;
+    }
     if (code >= 0 && code < 256 && !repeat) g_held_keys[code] = down;
     if (g_capturing_keys.load()) {
         if (down && !repeat) {
