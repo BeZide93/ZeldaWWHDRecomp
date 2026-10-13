@@ -500,7 +500,8 @@ All of them return the quest's state in the loaded save file, or an error:
 
 **What the player sees.** The notebook is in the Delivery Bag (the first empty place of the bag;
 if all eight places hold the game's items, it waits for one to be free). It can't be put on X, Y
-or R. Choosing it with A (Pro Controller or the GamePad's buttons) opens its page over the game:
+or R. Touching it on the GamePad (or clicking it on the GamePad picture), or choosing it with A in
+the item menu, opens its page over the game:
 
 - one row per quest: your portrait, or an emblem with the initial of your mod's name; the title and
   your mod's name; the next step; where; and the status: **New**, **In progress**, **Not yet
@@ -522,6 +523,9 @@ on the chart, in the story record shared with letters and charts (one place per 
 one for the shown quest). Quests that were never started take no room. Nothing is written to the
 inventory or the Delivery Bag: with all mods off, the save is a plain game save, and the notebook,
 its records and the chart ring are simply not shown.
+
+**Testing.** `tools/story_mods/notebook_e2e.sh` runs the `story-notebook` example headless from a
+save on Windfall: letter, notebook, page, tracking and the sea chart, and checks the log.
 
 **Players without story mods.** The item menu functions are only hooked while a loaded mod uses
 `wwhd_quest_*`. If another mod replaces one of them, the notebook is not in the item menu that
