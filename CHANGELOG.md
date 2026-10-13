@@ -14,6 +14,12 @@ what is on `devel` and not released yet (also in the
 - **Building from a folder with spaces in its path** (PR #183, thanks @Pulpparty): the shader translator and two tests no
   longer fail to compile when the checkout path contains a space (for example a Windows user name like `C:/Users/Jane Doe`).
 
+- **macOS: Nintendo controllers have the right buttons** (issue #181, thanks @Nickinfinity): with a Switch Pro Controller,
+  Joy-Cons or an SNES-style pad, **By position (Nintendo)** had A/B and X/Y swapped, because macOS reports these pads by
+  their printed letters. They now drive the right buttons and show Nintendo icons; a single sideways Joy-Con is handled
+  too. If you swapped A/B and X/Y by hand as a workaround, choose **Input > Face buttons > By position (Nintendo)** or
+  **Automatic** once after updating; your saved bindings are otherwise kept.
+
 - **Steam Deck Gaming Mode: the settings menu stays open** (issue #112, thanks @chaberl-art): with the TV and GamePad
   screens in two windows, the menu could close again right after opening. F1 now toggles once per press (a release
   is needed before it toggles again), keys and the save-state hotkeys (Shift+F1..F5 save, F2..F5 load) work from
