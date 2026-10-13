@@ -122,3 +122,7 @@ SDL polling and the configured bindings. `pad_delivery` checks the actual VPAD
 and KPAD writers, including direction bits, press/release edges, both sticks,
 interpolation repeats and fresh analog samples. Neither test reads game data or a save, or uses a physical controller. These
 checks do not replace testing a particular physical device and its driver.
+
+Controls → **Skip controller selection** is on by default. At the title screen it chooses the
+configured Wii U GamePad or Pro Controller through the game's normal selection path; turn it off
+to choose manually. Unavailable options and controller-disconnect prompts remain interactive.

@@ -1553,6 +1553,11 @@ void tab_controls() {
                     ImGui::GetFrameHeight() - ImGui::GetStyle().ItemInnerSpacing.x);
     ImGui::Checkbox("List view", &U.list_view);
     help("A plain table of all inputs instead of the controller drawing");
+    if (check("Skip controller selection", m.skip_controller_selection, &v)) {
+        m.skip_controller_selection = v;
+        input_map::set_current(m);
+    }
+    help("At the title screen, automatically choose the configured Wii U controller.");
     // face-button preset (issue #78): which host face buttons drive A/B/X/Y
     const input_map::FaceLayout fl = input_map::face_layout(m);
     ImGui::AlignTextToFramePadding();

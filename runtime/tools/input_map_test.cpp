@@ -12,6 +12,7 @@
 #include "input_map.h"
 #include "mouse_bindings.h"
 #include "camera_invert.h"
+#include "controller_selection.h"
 #include "platform/touch_face.h"
 #include "overlay/settings_shortcut.h"
 #include "overlay/binding_capture.h"
@@ -939,6 +940,26 @@ int main() {
     test_deadzone();
     test_stick_range();
     test_camera_invert();
+    using controller_selection::decision;
+    CHECK(decision(true, true, 0, true, true) == 0);
+    CHECK(decision(true, true, 1, true, true) == 1);
+    CHECK(decision(false, true, 0, true, true) == -1);
+    CHECK(decision(true, false, 1, true, true) == -1);
+    CHECK(decision(true, true, -1, true, true) == -1);
+    CHECK(decision(true, true, 2, true, true) == -1);
+    CHECK(decision(true, true, 0, false, true) == -1);
+    CHECK(decision(true, true, 1, true, false) == -1);
+    Mapping skip = Mapping::defaults(), parsed;
+    CHECK(skip.skip_controller_selection);
+    CHECK(from_json("{\"options\":{}}", parsed));
+    CHECK(parsed.skip_controller_selection);
+    skip.skip_controller_selection = false;
+    CHECK(from_json(to_json(skip), parsed));
+    CHECK(parsed == skip);
+    set_current(skip, false);
+    CHECK(!skip_controller_selection());
+    set_current(Mapping::defaults(), false);
+    CHECK(skip_controller_selection());
     test_files();
     printf("input_map_test: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;

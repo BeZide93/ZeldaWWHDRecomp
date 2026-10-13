@@ -701,8 +701,8 @@ std::string to_json(const Mapping& m) {
     snprintf(opt, sizeof opt,
              "  },\n  \"options\": {\n    \"format\": 2,\n    \"stick_deadzone\": %.3g,\n"
              "    \"left_stick_range\": %.3g,\n    \"right_stick_range\": %.3g,\n"
-             "    \"invert_camera_y\": %s%s",
-             m.deadzone, m.left_range, m.right_range, m.invert_camera_y ? "true" : "false",
+             "    \"skip_controller_selection\": %s,\n    \"invert_camera_y\": %s%s",
+             m.deadzone, m.left_range, m.right_range, m.skip_controller_selection ? "true" : "false", m.invert_camera_y ? "true" : "false",
              m.face_auto ? ",\n    \"face_layout\": \"auto\"" : "");
     return o + opt + prompts + "\n  }\n}\n";
 }
@@ -765,6 +765,7 @@ bool from_json(const std::string& text, Mapping& out, std::string* error) {
             m.left_range = std::clamp((float)r->n, kMinStickRange, kMaxStickRange);
         if (const Json* r = op->get("right_stick_range"); r && r->type == Json::Num)
             m.right_range = std::clamp((float)r->n, kMinStickRange, kMaxStickRange);
+        if (const Json* i = op->get("skip_controller_selection"); i && i->type == Json::Bool) m.skip_controller_selection = i->b;
         if (const Json* i = op->get("invert_camera_y"); i && i->type == Json::Bool) m.invert_camera_y = i->b;
         // only "automatic" is stored: the two manual presets are the shape of the face bindings
         if (const Json* f = op->get("face_layout"); f && f->type == Json::Str) m.face_auto = f->s == "auto";
@@ -831,6 +832,7 @@ std::string default_path() {
 static std::mutex g_mu;
 static Mapping g_map = Mapping::defaults();
 static std::atomic<uint32_t> g_gen{1};
+static std::atomic<bool> g_skip_controller_selection{true};
 static std::atomic<bool> g_invert_camera_y{false};
 
 // the dominant pad's labels as note_face_labels last reported them (its own lock: set_current
@@ -901,6 +903,7 @@ void set_current(const Mapping& m, bool save) {
         std::lock_guard<std::mutex> lk(g_mu);
         g_map = m;
     }
+    g_skip_controller_selection = m.skip_controller_selection;
     g_invert_camera_y = m.invert_camera_y;
     g_gen++;
     if (save && !save_file(default_path(), m))
@@ -908,6 +911,7 @@ void set_current(const Mapping& m, bool save) {
 }
 
 uint32_t generation() { return g_gen.load(); }
+bool skip_controller_selection() { return g_skip_controller_selection.load(std::memory_order_relaxed); }
 bool invert_camera_y() { return g_invert_camera_y.load(std::memory_order_relaxed); }
 
 }  // namespace input_map

@@ -70,6 +70,7 @@ struct Mapping {
     // so a worn stick that only reaches 0.9 delivers full deflection at about 1.11.
     float left_range = 1.0f;
     float right_range = 1.0f;
+    bool skip_controller_selection = true; // title: choose the configured Wii U controller
     // Camera only (issue #167): applied where the game's camera reads the right stick
     // (camera_invert.h, mods/camera.cpp), never to the stick itself, so the baton is not inverted
     bool invert_camera_y = false;
@@ -202,6 +203,7 @@ void load_startup();
 Mapping current();
 void set_current(const Mapping& m, bool save = true);  // applies immediately; saves to default_path()
 uint32_t generation();  // bumps on every set_current
+bool skip_controller_selection();
 bool invert_camera_y();  // current().invert_camera_y without copying the mapping (camera hooks)
 
 }  // namespace input_map

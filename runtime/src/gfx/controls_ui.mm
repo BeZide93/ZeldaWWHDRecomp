@@ -227,6 +227,7 @@ struct UIState {
 @property(strong) NSTextField* leftRangeValue;
 @property(strong) NSTextField* rightRangeValue;
 @property(strong) NSButton* invertY;
+@property(strong) NSButton* skipController;
 @property(strong) NSPopUpButton* prompts;        // in-game button prompts (#143)
 @property(strong) NSPopUpButton* shoulderNames;
 @property(strong) NSButton* promptColours;
@@ -999,7 +1000,7 @@ static NSTextField* label(NSString* s) {
 }
 
 - (void)build {
-    WWControlsWindow* w = [[WWControlsWindow alloc] initWithContentRect:NSMakeRect(0, 0, 1060, 610)
+    WWControlsWindow* w = [[WWControlsWindow alloc] initWithContentRect:NSMakeRect(0, 0, 1060, 638)
                                                               styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
                                                                         NSWindowStyleMaskResizable | NSWindowStyleMaskMiniaturizable
                                                                 backing:NSBackingStoreBuffered
@@ -1008,7 +1009,7 @@ static NSTextField* label(NSString* s) {
     w.controls = self;
     w.delegate = self;
     w.releasedWhenClosed = NO;
-    w.contentMinSize = NSMakeSize(960, 604);
+    w.contentMinSize = NSMakeSize(960, 632);
     // remembered window frame (NSUserDefaults); not in portable mode, which keeps nothing outside its folder
     if (!getenv("WWHD_NO_HOST_INPUT") && !host::portable()) w.frameAutosaveName = @"WWHDControls2";  // test runs: always the default size
     self.window = w;
@@ -1022,6 +1023,9 @@ static NSTextField* label(NSString* s) {
     which.toolTip = @"Which Wii U controller the keyboard and your controllers act as (same as the Input menu). "
                     @"Both use the same mapping.";
     self.which = which;
+    NSButton* skip = [NSButton checkboxWithTitle:@"Skip controller selection" target:self action:@selector(skipControllerChanged:)];
+    skip.toolTip = @"At the title screen, automatically choose the configured Wii U controller.";
+    self.skipController = skip;
     NSSegmentedControl* fl = [NSSegmentedControl segmentedControlWithLabels:@[@"Face by position", @"Face by label (Xbox)", @"Face automatic"]
                                                                 trackingMode:NSSegmentSwitchTrackingSelectOne
                                                                       target:self
@@ -1129,24 +1133,25 @@ static NSTextField* label(NSString* s) {
     pc.toolTip = @"Green A, red B, blue X and yellow Y in the Xbox look; coloured shapes in the PlayStation look. "
                  @"Off: the game's white buttons (in the Xbox positions while the face buttons are by label).";
     self.promptColours = pc;
-    for (NSView* v in @[which, fl, pi, pv, sep, st, reset, dzl, dz, dzv, inv, lrl, lr, lrv, rrl, rr, rrv, rh, ppl, pp, snl, sn, pc]) {
+    for (NSView* v in @[which, skip, fl, pi, pv, sep, st, reset, dzl, dz, dzv, inv, lrl, lr, lrv, rrl, rr, rrv, rh, ppl, pp, snl, sn, pc]) {
         v.translatesAutoresizingMaskIntoConstraints = NO;
         [root addSubview:v];
     }
 
-    NSDictionary* v = NSDictionaryOfVariableBindings(which, fl, pi, pv, sep, st, reset, dzl, dz, dzv, inv, lrl, lr, lrv, rrl, rr, rrv, rh,
+    NSDictionary* v = NSDictionaryOfVariableBindings(which, skip, fl, pi, pv, sep, st, reset, dzl, dz, dzv, inv, lrl, lr, lrv, rrl, rr, rrv, rh,
                                                      ppl, pp, snl, sn, pc);
     auto C = [&](NSString* f, NSLayoutFormatOptions o = 0) {
         [root addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:f options:o metrics:nil views:v]];
     };
     C(@"H:|-14-[which]-(>=12)-[fl]-12-[pi]-14-|", NSLayoutFormatAlignAllCenterY);
+    C(@"H:|-14-[skip]-(>=14)-|");
     C(@"H:|-0-[pv]-0-|");
     C(@"H:|-0-[sep]-0-|");
     C(@"H:|-16-[st]-16-|");
     C(@"H:|-16-[reset]-(>=24)-[dzl]-8-[dz(160)]-6-[dzv(40)]-24-[inv]-16-|", NSLayoutFormatAlignAllCenterY);
     C(@"H:|-16-[rh]-(>=24)-[lrl]-8-[lr(160)]-6-[lrv(40)]-24-[rrl]-8-[rr(160)]-6-[rrv(40)]-16-|", NSLayoutFormatAlignAllCenterY);
     C(@"H:|-16-[ppl]-8-[pp]-24-[snl]-8-[sn]-24-[pc]-(>=16)-|", NSLayoutFormatAlignAllCenterY);
-    C(@"V:|-12-[which]-6-[pv(>=400)]-0-[sep]-8-[st]-8-[reset]-10-[lr]-10-[pp]-14-|");
+    C(@"V:|-12-[which]-6-[skip]-6-[pv(>=400)]-0-[sep]-8-[st]-8-[reset]-10-[lr]-10-[pp]-14-|");
     [w center];
     [self syncOptions];
     [self syncWhich];
@@ -1168,6 +1173,7 @@ static NSTextField* label(NSString* s) {
 - (void)syncOptions {
     self.deadzone.doubleValue = _st.m.deadzone;
     self.deadzoneValue.stringValue = [NSString stringWithFormat:@"%.0f%%", _st.m.deadzone * 100];
+    self.skipController.state = _st.m.skip_controller_selection ? NSControlStateValueOn : NSControlStateValueOff;
     self.invertY.state = _st.m.invert_camera_y ? NSControlStateValueOn : NSControlStateValueOff;
     self.leftRange.doubleValue = _st.m.left_range;
     self.rightRange.doubleValue = _st.m.right_range;
@@ -1532,6 +1538,11 @@ static bool modifier_down(uint16_t code, NSEventModifierFlags f, bool* known) {
     _gen = generation();
 }
 
+- (void)skipControllerChanged:(NSButton*)b {
+    _st.m.skip_controller_selection = b.state == NSControlStateValueOn;
+    [self commit];
+}
+
 - (void)invertChanged:(NSButton*)b {
     _st.m.invert_camera_y = b.state == NSControlStateValueOn;
     [self commit];
@@ -1689,6 +1700,10 @@ static int self_test() {
     [c clearAction:kZR slot:kSlotPad];
     expect(current().pad[kZR] == kPadNone, "clear ZR's controller input");
     // 8. options
+    expect(c.skipController.state == NSControlStateValueOn, "skip controller selection defaults on");
+    c.skipController.state = NSControlStateValueOff;
+    [c skipControllerChanged:c.skipController];
+    expect(!current().skip_controller_selection, "skip controller selection can be disabled");
     c.invertY.state = NSControlStateValueOn;
     [c invertChanged:c.invertY];
     expect(current().invert_camera_y, "invert camera Y");

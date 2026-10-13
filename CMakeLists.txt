@@ -397,6 +397,11 @@ add_executable(headless_compose_test runtime/tools/headless_compose_test.cpp)
 target_include_directories(headless_compose_test PRIVATE runtime/src)
 target_compile_options(headless_compose_test PRIVATE -UNDEBUG)
 
+add_executable(controller_selection_test runtime/tools/controller_selection_test.cpp runtime/src/controller_selection.cpp runtime/src/guest_addr_identity.c)
+target_include_directories(controller_selection_test PRIVATE runtime/src runtime/include)
+target_compile_options(controller_selection_test PRIVATE -UNDEBUG)
+add_test(NAME controller_selection COMMAND controller_selection_test)
+
 add_executable(input_map_test runtime/tools/input_map_test.cpp runtime/src/input_map.cpp)
 target_include_directories(input_map_test PRIVATE runtime/src)
 # issue #153: what the game gets back after the settings overlay or the text prompt (overlay/release_gate.h)
