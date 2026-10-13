@@ -587,14 +587,15 @@ using namespace gx2;
 static uint64_t g_swap_count = 0, g_flip_count = 0;
 namespace gx2 { uint64_t flips_presented() { return __atomic_load_n(&g_flip_count, __ATOMIC_RELAXED); } }  // live fps in the title
 static uint32 g_swap_interval = 1;  // as set by the game (frame interpolation halves it)
-namespace interp { uint32_t effective_swap_interval(uint32_t game); uint64_t logic_steps(); int vsync_rate(); }
+namespace interp { uint32_t effective_swap_interval(uint32_t game); uint64_t logic_steps(); int vsync_rate(); int frames_per_step(); bool paced_interpolation(); }
 static std::mutex g_flip_mutex;
 static const auto g_vsync_epoch = std::chrono::steady_clock::now();
 static constexpr std::chrono::nanoseconds kVsyncPeriod(16683333);  // 59.94 Hz
 static constexpr uint64_t kTicksPerVsync = 4;
 // a flip also waits for the GPU to finish that frame, as on hardware: the game reuses a frame's
 // buffers once its flip has executed
-struct PendingFlip { uint64_t swap; std::chrono::steady_clock::time_point at; };  // (at: when it was swapped)
+// (at: when it was swapped; step: the first frame of a logic step, not an interpolation hold pass)
+struct PendingFlip { uint64_t swap; std::chrono::steady_clock::time_point at; bool step; };
 static std::deque<PendingFlip> g_pending_flips;
 static uint64_t g_last_flip_vsync = 0;  // tick (a granule boundary)
 static uint64_t g_last_flip_time = 0;  // timebase
@@ -624,12 +625,36 @@ static std::chrono::steady_clock::time_point tick_time(uint64_t tick) {
     const auto left = std::chrono::duration_cast<std::chrono::nanoseconds>(target.time_since_epoch()).count() - sample.guest;
     return std::chrono::steady_clock::time_point(std::chrono::nanoseconds(sample.host + std::max<int64_t>(0, (left + sample.rate - 1) / sample.rate)));
 }
-// the first tick at which this flip may execute: `swap interval` vsyncs after the previous flip.
-// (On hardware also the vsync after its swap, which is the same for a swap made before that tick; a
-// later swap, a frame that missed its vsync, flips as soon as it is ready: vsync_pacing.h.)
-static uint64_t flip_due(const PendingFlip&) {
+// Step slots (vsync_pacing.h): with paced frame interpolation at 120/240 fps a logic step's first
+// frame is due on its step's slot (ns on the vsync's clock, -1: none), two vsyncs after the previous
+// step's
+static int64_t g_step_slot = -1;  // g_flip_mutex held
+static bool step_slots() { return interp::frames_per_step() > 2 && interp::paced_interpolation(); }
+static int64_t step_ns() {  // the frames of a step, one (virtual) vsync each: the game's swap interval, two vsyncs
+    return kVsyncClock.granule_ns(uint64_t(interp::frames_per_step()) * interp::effective_swap_interval(g_swap_interval) * vsync_granule());
+}
+// the first tick at which this flip may execute: `swap interval` vsyncs after the previous flip, and
+// a step's first frame not before its step's slot. (On hardware also the vsync after its swap, which
+// is the same for a swap made before that tick; a later swap, a frame that missed its vsync, flips
+// as soon as it is ready: vsync_pacing.h.)
+static uint64_t flip_due(const PendingFlip& f) {
     const uint64_t g = vsync_granule();
-    return g_last_flip_vsync + interp::effective_swap_interval(g_swap_interval) * g;
+    const uint64_t due = g_last_flip_vsync + interp::effective_swap_interval(g_swap_interval) * g;
+    if (!f.step || !step_slots()) return due;
+    return vsync_pacing::step_due(kVsyncClock, due, g_step_slot, g_vsync_shift.load(std::memory_order_relaxed), g);
+}
+// paced interpolation (interp.cpp): a logic pass more than a step late drops the schedule (the next
+// logic frame starts a new one)
+void gx2::drop_step_slot() {
+    std::lock_guard<std::mutex> lk(g_flip_mutex);
+    g_step_slot = -1;
+}
+// paced interpolation (interp.cpp): when the next logic step's frame is due, if there is a slot
+bool gx2::next_step_time(std::chrono::steady_clock::time_point& at) {
+    std::lock_guard<std::mutex> lk(g_flip_mutex);
+    if (g_step_slot < 0 || !step_slots()) return false;
+    at = tick_time(vsync_pacing::slot_tick(kVsyncClock, g_step_slot, g_vsync_shift.load(std::memory_order_relaxed), vsync_granule()));
+    return true;
 }
 // Uncapped (gx2.h): debug, to see how fast the renderer can go; GPU completion ordering is kept
 static std::atomic<int> g_uncapped{-1};  // -1: not read from the environment yet
@@ -677,19 +702,45 @@ static void log_flip_pacing(const PendingFlip& f) {
     intervals.clear();
     waitSum = 0;
 }
+// debug: WWHD_TRACE_FLIPS=file writes a line per flip: when it executed, when its frame was
+// swapped, when it was due (steady clock, ms), the tick it was due on and the tick it counts as
+// (they differ when it moved the grid), whether it was an in-between frame, and the granule. With
+// WWHD_TRACE_STEPS (interp.cpp) for the frame pacing at 120/240 fps.
+static FILE* trace_flips_file() {
+    static FILE* out = getenv("WWHD_TRACE_FLIPS") ? fopen(getenv("WWHD_TRACE_FLIPS"), "w") : nullptr;
+    return out;
+}
+static void trace_flip(const PendingFlip& f, std::chrono::steady_clock::time_point dueAt, uint64_t due, uint64_t at) {
+    FILE* out = trace_flips_file();
+    if (!out) return;
+    const auto ms = [](std::chrono::steady_clock::time_point t) { return std::chrono::duration<double, std::milli>(t.time_since_epoch()).count(); };
+    fprintf(out, "%.3f %.3f %.3f %llu %llu %d %d\n", ms(std::chrono::steady_clock::now()), ms(f.at), ms(dueAt), (unsigned long long)due,
+            (unsigned long long)at, int(!f.step), int(vsync_granule()));
+}
 static void update_flips() {  // g_flip_mutex held
     uint64_t now = vsync_index();
     while (!g_pending_flips.empty()) {
         const uint64_t due = flip_due(g_pending_flips.front());
         if ((!uncapped_benchmark() && due > now) || render::frames_completed() < g_pending_flips.front().swap) break;
         uint64_t at = now / vsync_granule() * vsync_granule();
+        const auto dueAt = trace_flips_file() ? tick_time(due) : std::chrono::steady_clock::time_point{};
         if (!uncapped_benchmark()) {  // on its vsync, or late: then the grid may move (vsync_pacing.h)
             int64_t shift = g_vsync_shift.load(std::memory_order_relaxed);
-            at = vsync_pacing::flip_executed(kVsyncClock, shift, due, vsync_clock_now(), vsync_granule());
+            const int64_t t = vsync_clock_now();
+            const int64_t dueTime = kVsyncClock.time(due, shift);
+            at = vsync_pacing::flip_executed(kVsyncClock, shift, due, t, vsync_granule());
             g_vsync_shift.store(shift, std::memory_order_relaxed);
             now = std::max(now, at);
+            if (g_pending_flips.front().step) {  // the next step's slot
+                const bool slotted = g_step_slot >= 0 && step_slots();
+                g_step_slot = step_slots() ? vsync_pacing::next_slot(slotted ? g_step_slot : dueTime, t, step_ns(),
+                                                                       kVsyncClock.granule_ns(vsync_granule())) : -1;
+            }
+        } else {
+            g_step_slot = -1;
         }
         log_flip_pacing(g_pending_flips.front());
+        trace_flip(g_pending_flips.front(), dueAt, due, at);
         g_pending_flips.pop_front();
         g_last_flip_vsync = at;
         g_last_flip_time = timebase::simulation_now();
@@ -913,7 +964,7 @@ HLE(gx2, GX2SwapScanBuffers) {
         std::lock_guard<std::mutex> lk(g_flip_mutex);
         update_flips();
         g_swap_count++;
-        g_pending_flips.push_back({g_swap_count, std::chrono::steady_clock::now()});
+        g_pending_flips.push_back({g_swap_count, std::chrono::steady_clock::now(), !hold});
     }
     // debug: WWHD_LOG_SLOW_SWAP=ms logs swaps that came more than ms after the previous one
     static const double slow_ms = getenv("WWHD_LOG_SLOW_SWAP") ? atof(getenv("WWHD_LOG_SLOW_SWAP")) : 0;

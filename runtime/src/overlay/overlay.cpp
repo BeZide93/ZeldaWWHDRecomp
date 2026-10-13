@@ -41,6 +41,8 @@
 #include "hostui.h"
 #include "../mods/code_mods.h"
 #include "controls_view.h"
+#include "extensions.h"
+#include "release_gate.h"
 #include "text_entry.h"
 #include "../aspect.h"
 #include "gfx/stereo.h"
@@ -164,13 +166,16 @@ ImGuiKey imgui_key(int code) {
 }
 
 // ---------------------------------------------------------------- UI state (render thread)
+// the built-in tabs (extensions.h kBuiltinTabs: ids and names); the tab bar is ext::tabs(), which a
+// platform may extend (added tabs, hidden ones)
 enum Tab { kSaves, kGraphics, kDisplay, kAudio, kMods, kControls, kAbout, kTabs };
-const char* const kTabNames[kTabs] = {"Saves", "Graphics", "Display", "Audio", "Mods", "Controls", "Language / About"};
-const char* const kTabIds[kTabs] = {"saves", "graphics", "display", "audio", "mods", "controls", "about"};
+static_assert(kTabs == ext::kBuiltinCount, "a built-in tab per kBuiltinTabs entry");
 
 struct Ui {
     bool init = false;
-    int tab = kSaves, select_tab = -1;  // select_tab: switch to this tab next frame (shoulder buttons, tests)
+    // tab: the open tab, an index in ext::tabs() (remembered while the game runs); select_tab: switch to
+    // this one next frame (shoulder buttons, tests)
+    int tab = 0, select_tab = -1;
     double last_time = 0;
     // controller
     float values[input_map::kPadCount] = {};
@@ -211,6 +216,7 @@ Ui U;
 bool controller_down(int p) { return U.values[p] > 0.5f; }
 bool controller_pressed(int p) { return U.values[p] > 0.5f && U.prev[p] <= 0.5f; }
 bool navigation_pressed(int p) { return U.gamepad_navigation.pressed(U.values, U.prev, p); }
+int shown_builtin() { return ext::builtin_tab(U.tab); }  // the open tab's Tab, -1 for an added one
 
 void post_changed(std::function<void()> fn) {
     hostui::post([fn] {
@@ -273,6 +279,7 @@ void setup_style() {
 // a font with arrows and accents if the system has one; Dear ImGui's own scalable font otherwise
 void setup_fonts() {
     ImGuiIO& io = ImGui::GetIO();
+    if (const ext::FontLoader& load = ext::font_loader(); load && load(io)) return;  // the platform's (extensions.h)
     static const char* const candidates[] = {
 #if defined(__APPLE__)
         "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
@@ -355,8 +362,7 @@ TestSwitch parse_test() {
     if (size_t c = s.find(':'); c != std::string::npos) { what = s.substr(0, c); tab = s.substr(c + 1); }
     t.open = what == "open";
     t.perf = what == "perf";
-    for (int i = 0; i < kTabs; i++)
-        if (tab == kTabIds[i]) t.tab = i;
+    if (!tab.empty()) t.tab = ext::tab_index(tab);  // built-in or added (extensions.h)
     return t;
 }
 
@@ -403,6 +409,12 @@ void read_controller() {
         return;
     }
     input::host_controller_values(U.values);
+    if (ext::text_input()) {
+        // a platform keyboard of a text field (text_entry::field) has the controller: the inputs held
+        // there stay from the menu until each one is released, as from the game (release_gate.h)
+        static ReleaseGate keyboard_gate;
+        keyboard_gate.filter(U.values, text_entry::field_active());
+    }
     using namespace input_map;
 #ifndef WWHD_SDL_HOST
     // The AppKit host still supplies controller state on its render path.
@@ -490,6 +502,8 @@ void refresh_slots(bool force) {
     for (int i = 1; i <= crashrec::kAutoSlots; i++) U.autos[i] = crashrec::auto_info(i);
 }
 
+void tab_saves_screenshots();
+void tab_saves_crash_recovery();
 void tab_saves() {
     refresh_slots(false);
     std::string msg = ss::last_message();
@@ -548,25 +562,46 @@ void tab_saves() {
         ImGui::EndTable();
     }
     // bug reports: the portable state and the save file, never a full state
-    static double copiedAt = -10;
-    if (ImGui::Button("Copy save for bug report")) {
-        std::string text = ss::bug_report_text();
-        hostui::post([text] { hostui::set_clipboard(text); });
-        copiedAt = ImGui::GetTime();
+    const ext::Features& features = ext::features();
+    if (features.clipboard) {
+        static double copiedAt = -10;
+        if (ImGui::Button("Copy save for bug report")) {
+            std::string text = ss::bug_report_text();
+            hostui::post([text] { hostui::set_clipboard(text); });
+            copiedAt = ImGui::GetTime();
+        }
+        if (ImGui::GetTime() - copiedAt < 2.0) {
+            ImGui::SameLine();
+            ImGui::TextDisabled("Copied");
+        }
+        help("Copies the paths of your newest save state and of your save file (cking.sav): attach both files to the bug "
+             "report. Save a state at the place of the problem first.");
+    } else {
+        // no clipboard on this host: the paths are shown (looked up at most once a second)
+        static std::string paths;
+        static double pathsAt = -10;
+        if (ImGui::GetTime() - pathsAt > 1.0) {
+            paths = ss::bug_report_text();
+            pathsAt = ImGui::GetTime();
+        }
+        note("For a bug report, attach your newest save state and your save file (cking.sav). Save a state at the "
+             "place of the problem first.");
+        note("%s", paths.c_str());
     }
-    if (ImGui::GetTime() - copiedAt < 2.0) {
-        ImGui::SameLine();
-        ImGui::TextDisabled("Copied");
-    }
-    help("Copies the paths of your newest save state and of your save file (cking.sav): attach both files to the bug "
-         "report. Save a state at the place of the problem first.");
     note("States folder: %s", ss::states_dir().c_str());
-    bool fs;
-    if (check("Full save states (large, contain game data, don't share) - for debugging", full, &fs, !ss::full_states_forced()))
-        ss::set_full_states(fs);
-    help(ss::full_states_forced() ? "Set by WWHD_FULL_SAVE_STATES or a test variable for this start."
-                                  : "Saves the whole running game instead (about 300 MB per slot), exactly as it is. "
-                                    "These files contain game code and data: never attach them to a bug report.");
+    if (features.full_states) {
+        bool fs;
+        if (check("Full save states (large, contain game data, don't share) - for debugging", full, &fs, !ss::full_states_forced()))
+            ss::set_full_states(fs);
+        help(ss::full_states_forced() ? "Set by WWHD_FULL_SAVE_STATES or a test variable for this start."
+                                      : "Saves the whole running game instead (about 300 MB per slot), exactly as it is. "
+                                        "These files contain game code and data: never attach them to a bug report.");
+    }
+    if (features.screenshots) tab_saves_screenshots();
+    if (features.full_states) tab_saves_crash_recovery();  // its automatic states are full states
+}
+
+void tab_saves_screenshots() {
     heading("Screenshots");
     {
         // the Screenshot binding (Controls tab): its keys and controller input
@@ -592,6 +627,9 @@ void tab_saves() {
     }
     ImGui::AlignTextToFramePadding();
     ImGui::TextDisabled("%s", screenshot::dir().c_str());
+}
+
+void tab_saves_crash_recovery() {
     heading("Crash Recovery");
     bool on;
     if (check("Crash Recovery (automatic state every few minutes)", crashrec::enabled(), &on)) crashrec::set_enabled(on);
@@ -677,7 +715,7 @@ void tab_graphics() {
         ImGui::EndDisabled();
         if (!exported.line.empty()) note("%s", exported.line.c_str());
         help("Saves my-template.bin in the screenshots folder: the shader states and pipelines this computer\n"
-             "recorded, as hashes and settings only (no shader code, no game data). Attach it to issue #162\n"
+             "recorded, as hashes and settings only (no shader code, no game data). Attach it to issue #177\n"
              "so the next release prepares them for everyone.");
     }
 #endif
@@ -921,17 +959,19 @@ void tab_graphics() {
     if (check("Performance overlay (FPS, frame time)", perf_shown(), &v)) set_perf_shown(v);
     if (ImGui::Button("Reset performance averages")) { g_average.reset(); perf::reset(); }
     // the render-thread profiler's latest report (render_prof.h), for performance bug reports
-    static double copiedAt = -10;
-    if (ImGui::Button("Copy performance report")) {
-        std::string report = performance_report();
-        hostui::post([report] { hostui::set_clipboard(report); });
-        copiedAt = ImGui::GetTime();
+    if (ext::features().clipboard) {
+        static double copiedAt = -10;
+        if (ImGui::Button("Copy performance report")) {
+            std::string report = performance_report();
+            hostui::post([report] { hostui::set_clipboard(report); });
+            copiedAt = ImGui::GetTime();
+        }
+        if (ImGui::GetTime() - copiedAt < 2.0) {
+            ImGui::SameLine();
+            ImGui::TextDisabled("Copied");
+        }
+        help("Where the renderer spends its time over the last few seconds, as text for a bug report");
     }
-    if (ImGui::GetTime() - copiedAt < 2.0) {
-        ImGui::SameLine();
-        ImGui::TextDisabled("Copied");
-    }
-    help("Where the renderer spends its time over the last few seconds, as text for a bug report");
     heading("Bug reports");
     // read once at start-up (main.cpp start_log_file); WWHD_LOG_FILE decides when set
     static bool logFile = [] { std::string v; return hostui::get("logFile", v) && v == "1"; }();
@@ -1248,6 +1288,7 @@ modsui::Host& mods_host() {
         h.android = true;
 #endif
         h.test = g_no_host && getenv("WWHD_MOD_MANAGER_DIR");
+        h.file_picker = ext::features().file_picker;
         return h;
     }();
     h.back = false;
@@ -1440,7 +1481,7 @@ void gyro_window(bool& open) {
         static bool init = false;
         if (!init || ImGui::IsWindowAppearing()) { snprintf(host, sizeof host, "%s", g.dsu_host.c_str()); port = g.dsu_port; init = true; }
         ImGui::SetNextItemWidth(220);
-        if (ImGui::InputText("Server", host, sizeof host, ImGuiInputTextFlags_EnterReturnsTrue) || ImGui::IsItemDeactivatedAfterEdit())
+        if (text_entry::field("Server", host, sizeof host, ImGuiInputTextFlags_EnterReturnsTrue) || ImGui::IsItemDeactivatedAfterEdit())
             g.dsu_host = host[0] ? host : "127.0.0.1";
         ImGui::SetNextItemWidth(120);
         if (ImGui::InputInt("Port", &port, 0, 0, ImGuiInputTextFlags_EnterReturnsTrue) || ImGui::IsItemDeactivatedAfterEdit())
@@ -1905,7 +1946,7 @@ void settings_window() {
 #ifdef __ANDROID__
     const ImVec2 size(ds.x * 0.98f, ds.y * 0.97f);
 #else
-    const ImVec2 size = U.tab == kControls ? ImVec2(std::min(1240.0f, ds.x * 0.98f), std::min(720.0f, ds.y * 0.97f))
+    const ImVec2 size = shown_builtin() == kControls ? ImVec2(std::min(1240.0f, ds.x * 0.98f), std::min(720.0f, ds.y * 0.97f))
                                            : ImVec2(std::min(860.0f, ds.x * 0.94f), std::min(620.0f, ds.y * 0.92f));
 #endif
     ImGui::SetNextWindowPos(ImVec2(ds.x * 0.5f, ds.y * 0.5f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
@@ -1918,18 +1959,21 @@ void settings_window() {
         U.just_opened = false;
     }
     if (ImGui::Begin("Wind Waker HD  -  Settings", &open, fl)) {
+        const std::vector<ext::ShownTab>& tabs = ext::tabs();  // built-in and added (extensions.h)
         // L / R on a controller switch tabs
         if (U.cap_action < 0 && !ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId)) {
-            // in Mods, L / R move between its areas first
-            if (navigation_pressed(input_map::kPadLB) && !(U.tab == kMods && modsui::shoulder(-1))) U.select_tab = (U.tab + kTabs - 1) % kTabs;
-            if (navigation_pressed(input_map::kPadRB) && !(U.tab == kMods && modsui::shoulder(+1))) U.select_tab = (U.tab + 1) % kTabs;
+            // in Mods (or an added tab with sub-tabs), L / R move between its areas first
+            auto areas = [](int builtin, int direction) { return builtin == kMods && modsui::shoulder(direction); };
+            for (int direction : {-1, +1})
+                if (navigation_pressed(direction < 0 ? input_map::kPadLB : input_map::kPadRB))
+                    if (const int t = ext::shoulder(U.tab, direction, areas); t >= 0) U.select_tab = t;
         }
         if(!setup_run.rebuilding)code_mod_dialog();
         restart_notice_frame(true);
         if (ImGui::BeginTabBar("tabs", ImGuiTabBarFlags_FittingPolicyShrink)) {
-            for (int i = 0; i < kTabs; i++) {
+            for (int i = 0; i < int(tabs.size()); i++) {
                 ImGuiTabItemFlags f = U.select_tab == i ? ImGuiTabItemFlags_SetSelected : 0;
-                if (ImGui::BeginTabItem(kTabNames[i], nullptr, f)) {
+                if (ImGui::BeginTabItem(tabs[i].name.c_str(), nullptr, f)) {
                     if (U.tab != i) U.cap_action = -1, g_capturing_keys = false, U.cap_note.clear();
                     U.tab = i;
 #ifdef __ANDROID__
@@ -1937,14 +1981,15 @@ void settings_window() {
 #else
                     ImGui::BeginChild("page", ImVec2(0, 0), ImGuiChildFlags_NavFlattened);
 #endif
-                    switch (i) {
+                    switch (tabs[i].builtin) {
                     case kSaves: tab_saves(); break;
                     case kGraphics: tab_graphics(); break;
                     case kDisplay: tab_display(); break;
                     case kAudio: tab_audio(); break;
                     case kMods: tab_mods(); break;
                     case kControls: tab_controls(); break;
-                    default: tab_about(); break;
+                    case kAbout: tab_about(); break;
+                    default: if (tabs[i].draw) tabs[i].draw(); break;  // an added tab
                     }
                     ImGui::EndChild();
                     ImGui::EndTabItem();
@@ -1969,13 +2014,20 @@ void settings_window() {
 
 // ---------------------------------------------------------------- API
 bool is_open() { return g_open.load(std::memory_order_relaxed); }
+static std::atomic<bool> g_shortcut_took{false};  // a platform shortcut took a poll's input (shortcut_took_input)
 void poll_controller_shortcuts(const float* values) {
     if (g_no_host) return;
+    PadValues pad;
+    std::copy(values, values + input_map::kPadCount, pad.begin());
+    // the platform's shortcuts (extensions.h) first: the inputs one takes stay from the settings shortcut
+    // until released, and from the game (shortcut_took_input)
+    if (!ext::shortcuts().empty() && ext::poll_shortcuts(pad, is_open())) g_shortcut_took = true;
     static SettingsShortcut shortcut;
-    const auto action = shortcut.poll(now_s(), values[input_map::kPadOptions] > 0.5f,
-                                     values[input_map::kPadHome] > 0.5f, is_open());
+    const auto action = shortcut.poll(now_s(), pad[input_map::kPadOptions] > 0.5f,
+                                     pad[input_map::kPadHome] > 0.5f, is_open());
     if (action != SettingsShortcut::None) set_open(action == SettingsShortcut::Open);
 }
+bool shortcut_took_input() { return g_shortcut_took.exchange(false); }
 
 void set_open(bool open) {
     if (g_open.exchange(open) == open) return;
@@ -2128,7 +2180,7 @@ ImDrawData* frame(float pw, float ph, void (*renderer_init)()) {
         if (open && !was_open) { U.gamepad_navigation.reset_trace(); wwhd_trace::emit("open frame=%d", U.init ? ImGui::GetFrameCount() : 0); }
         was_open = open;
     }
-    perf::set_demand(perf, open && U.tab == kGraphics);
+    perf::set_demand(perf, open && shown_builtin() == kGraphics);
     // Headless report QA uses the same formatter as the clipboard button; no clipboard mutation.
     static const char* testReport = getenv("WWHD_TEST_PERF_REPORT");
     static const uint64_t reportAt = getenv("WWHD_TEST_PERF_REPORT_AT")
@@ -2143,12 +2195,23 @@ ImDrawData* frame(float pw, float ph, void (*renderer_init)()) {
     }
     // save state notices (saved, refused during a cutscene, loaded into another Quest Log) show over the
     // game for a few seconds while the menu is closed (the window title is not visible everywhere)
-    const std::string toast = open ? std::string() : ss::last_message();
+    std::string toast = open ? std::string() : ss::last_message();
+    // the platform's layers over the game (extensions.h): which draw this frame; their notice replaces
+    // the save state notice
+    const std::vector<ext::FrameLayer>& layers = ext::frame_layers();
+    static std::vector<const ext::FrameLayer*> drawn_layers;
+    drawn_layers.clear();
+    if (!open)
+        for (const ext::FrameLayer& layer : layers) {
+            std::string line;
+            if (layer.wanted(line)) drawn_layers.push_back(&layer);
+            if (!line.empty()) toast = std::move(line);
+        }
     const bool stereoPointer=stereo::frame.mode!=stereo::Off && g_stereo_pointer_visible.load();
     U.linearized = false;
     // a mod install keeps running (and shows its progress) while the menu is closed
     const bool mods_busy = !setup_run.id.empty() || (U.init && modsui::wants_background());
-    if (!open && !perf && !text && toast.empty() && !guesthud::active() && !mods_busy && !stereoPointer) {
+    if (!open && !perf && !text && toast.empty() && !guesthud::active() && !mods_busy && !stereoPointer && drawn_layers.empty()) {
         if (U.init) {  // forget events and pressed keys while nothing is shown
             std::lock_guard<std::mutex> lk(g_mu);
             g_events.clear();
@@ -2234,8 +2297,10 @@ ImDrawData* frame(float pw, float ph, void (*renderer_init)()) {
             for (auto& k : g_held_keys) k = false;
         }
     }
+    bool covered = false;  // a platform layer drew over the whole picture: no notice
+    for (const ext::FrameLayer* layer : drawn_layers) covered |= layer->draw(io.DisplaySize.x, io.DisplaySize.y);
     if (perf) perf_window(open);
-    if (!toast.empty()) {
+    if (!toast.empty() && !covered) {
         ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y - 24), ImGuiCond_Always, ImVec2(0.5f, 1.0f));
         ImGui::SetNextWindowBgAlpha(0.7f);
         ImGui::SetNextWindowSizeConstraints(ImVec2(0, 0), ImVec2(io.DisplaySize.x * 0.8f, FLT_MAX));

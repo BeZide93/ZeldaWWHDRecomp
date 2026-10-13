@@ -415,9 +415,10 @@ void init() {
         float v[input_map::kPadCount], game[input_map::kPadCount];
         // inputs held while the overlay or the text prompt had them stay from the game until released,
         // one gate per controller as on the SDL host (overlay/release_gate.h, issue #153); the overlay
-        // polls the Home / Select shortcut on its frame
+        // polls the Home / Select shortcut on its frame (and the platform shortcuts: an input one took
+        // counts as captured, overlay/extensions.h)
         static overlay::DeviceGates<uintptr_t> gates;
-        gates.combine(devices_values(), overlay::captures(), v, game);
+        gates.combine(devices_values(), overlay::captures() || overlay::shortcut_took_input(), v, game);
         PadState s = input_map::controller_state(input_map::current(), game);
         {
             std::lock_guard<std::mutex> lk(g_mu);
