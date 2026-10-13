@@ -1399,12 +1399,13 @@ void copy_surface(uint32_t src,uint32_t srcMip,uint32_t srcSlice,uint32_t dst,ui
     copy_surface_impl(src,srcMip,srcSlice,dst,dstMip,dstSlice);
 }
 void invalidate(uint32_t flags,uint32_t addr,uint32_t size) {
+    ++g_stat_invalidates; // once per guest invalidate; the stereo eye cache is a second pass of the same one
     buffer_cache_guest_invalidate(flags,addr,size);
     invalidate_surface_cache(R.surfaces,flags,addr,size);
 }
 void invalidate_surface_cache(decltype(Renderer::surfaces)& surfaces,
                               uint32_t flags,uint32_t addr,uint32_t size) {
-    ++g_stat_invalidates;if(!(flags&2)||size>=0x10000000)return;
+    if(!(flags&2)||size>=0x10000000)return;
     uint64_t end=uint64_t(addr)+size;
     for(auto& [base,s]:surfaces) {
         if(s->gpuWritten||(base>=0xF4000000&&base<0xF6000000))continue;
