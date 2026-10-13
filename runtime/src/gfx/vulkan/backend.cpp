@@ -3963,7 +3963,7 @@ void run_main_loop() {
   // Issue #109: the mouse pointer hides after 2 s without mouse use while the game window has focus
   // (not while the settings overlay is open, which needs it; the mouse camera captures it itself).
   auto mouseUsed = std::chrono::steady_clock::now();
-  bool pointerHidden = false;
+  bool pointerHidden = false, pointerKept = false;
   for (;;) {
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
@@ -4019,6 +4019,9 @@ void run_main_loop() {
     {
       const bool focused = R.tv.window && (SDL_GetWindowFlags(R.tv.window) & SDL_WINDOW_INPUT_FOCUS);
       const bool keep = !focused || overlay::is_open() || mods::mouse_captured();
+      // A hidden pointer shown again for the overlay (or focus loss) gets a fresh 2 s once that ends.
+      if (keep && !pointerKept && pointerHidden) mouseUsed = std::chrono::steady_clock::now();
+      pointerKept = keep;
       const bool idle=std::chrono::steady_clock::now()-mouseUsed>std::chrono::seconds(2);
       const bool stereoPointer=stereo::requestedMode!=stereo::Off && SDL_GetMouseFocus()==R.tv.window &&
           !mods::mouse_captured() && (overlay::captures() || !idle);
