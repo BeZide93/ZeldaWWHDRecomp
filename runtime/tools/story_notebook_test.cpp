@@ -9,6 +9,7 @@
 #include "mods/story_takeover.h"
 #include "mods/story_manifest.h"
 #include "mods/story_chart.h"
+#include "mods/story_store.h"
 #include "mods/story_mail.h"
 #include "mods/story_mail_book.h"
 #include "input.h"
@@ -17,7 +18,10 @@
 #include <cassert>
 #include <cmath>
 #include <cstdio>
+#include <chrono>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <map>
 #include <string>
 #include <vector>
@@ -327,7 +331,7 @@ void test_services() {
     assert(portrait("m", "tale", "../x.png", "/nonexistent") == kResultInvalid);
     assert(portrait("m", "tale", "assets/missing.png", "/nonexistent") == kResultInvalid);
     // a quest's life: new, steps, done; the save keeps only the step
-    Book b(mem::ptr(kSave + story_mail::kBookOffset));
+    Book b = story_store::book();
     assert(state("m", "tale") == kResultNew && b.empty());
     assert(step("m", "tale", 0, "Read the letter.", "") == kResultNew && b.empty());  // texts only
     assert(step("m", "tale", 1, "Talk to the storyteller.", "Windfall Island") == 1);
@@ -410,7 +414,7 @@ void test_hooks() {
     assert(!installed());
     install([](uint32_t) { return std::string(); }, [](uint32_t a, void (*fn)(Cpu*)) { hooked[a] = fn; });
     assert(installed() && hooked.size() == 11);
-    Book b(mem::ptr(kSave + story_mail::kBookOffset));
+    Book b = story_store::book();
     // no notebook yet: the bag window shows the save as it is
     b.erase(story_mail::kRecordItem, story_mail::kItemNotebook);
     for (uint32_t k = 0x30; k < 0x38; k++) assert(call(0x02632D94, k, 0, kBuild) == g_reserve[k - 0x30]);
@@ -619,6 +623,154 @@ void test_page_screen() {
 Resident harbour() { return npc_catalogue().find("windfall-harbour-lady"); }
 Resident keeper() { return npc_catalogue().find("windfall-light-keeper"); }
 
+// The story block in cking.sav (story_block.h) and the store around it (story_store.h): the format, the
+// one-time move from the game's reserved bytes, the game's save copy functions, the file kept with
+// the game's writes, a damaged block ignored, a vanilla save left alone; and the quest flags.
+std::vector<uint8_t> file_bytes(const std::filesystem::path& p) {
+    std::ifstream f(p, std::ios::binary);
+    return {std::istreambuf_iterator<char>(f), {}};
+}
+void put_file(const std::filesystem::path& p, const std::vector<uint8_t>& b) {
+    std::ofstream f(p, std::ios::binary | std::ios::trunc);
+    f.write(reinterpret_cast<const char*>(b.data()), std::streamsize(b.size()));
+}
+std::map<uint32_t, void (*)(Cpu*)> store_hooks;
+std::vector<uint32_t> store_calls;
+void store_original(Cpu* c, uint32_t fn) {
+    store_calls.push_back(fn);
+    assert(fn == 0x025BA7B0 || fn == 0x025BA9FC || fn == 0x025BAC50);
+    (void)c;
+}
+void store_hook(uint32_t fn, uint32_t data_num) {
+    Cpu c{};
+    c.r[3] = kSave + 0x20, c.r[4] = kArena + 0x30000, c.r[5] = data_num;
+    store_hooks.at(fn)(&c);
+}
+
+void test_story_store() {
+    using namespace story_block;
+    namespace fs = std::filesystem;
+    // the format
+    std::vector<uint8_t> areas(kPayloadSize, 0);
+    areas[5] = 0x42, areas[kAreaSize * 2 + 9] = 0x17;
+    std::vector<uint8_t> game(8966);
+    for (size_t i = 0; i < game.size(); i++) game[i] = uint8_t(i * 7);
+    std::vector<uint8_t> file = game;
+    const std::vector<uint8_t> block = build(areas.data());
+    assert(block.size() == kPayloadSize + kFooterSize);
+    file.insert(file.end(), block.begin(), block.end());
+    Split sp = split(file.data(), file.size());
+    assert(sp.found == Found::Valid && sp.game_size == game.size() && !memcmp(sp.payload, areas.data(), kPayloadSize));
+    sp = split(game.data(), game.size());
+    assert(sp.found == Found::None && sp.game_size == game.size());
+    std::vector<uint8_t> bad = file;
+    bad[game.size() + 100] ^= 1;  // a payload byte: the checksum fails
+    sp = split(bad.data(), bad.size());
+    assert(sp.found == Found::Damaged && sp.game_size == game.size() && !sp.payload);
+    bad = file;
+    put32(bad.data() + bad.size() - 12, uint32_t(bad.size()));  // a length that doesn't fit: no footer
+    sp = split(bad.data(), bad.size());
+    assert(sp.found == Found::None && sp.game_size == bad.size());
+    assert(split(file.data(), 3).found == Found::None);
+    // the one-time move: our 19-record form leaves the game's bytes zero; foreign bytes stay
+    uint8_t old[story_mail::kBookSize] = {}, area[kAreaSize] = {};
+    story_mail::Book ob(old);
+    assert(ob.set(story_mail::kRecordQuest, 0x1234, 3) && ob.set(story_mail::kRecordItem, story_mail::kItemNotebook, 1));
+    assert(migrate(old, area) && all_zero(old, sizeof old));
+    story_mail::Book ab(area, kAreaRecords);
+    assert(ab.get(story_mail::kRecordQuest, 0x1234) == 3 && ab.get(story_mail::kRecordItem, story_mail::kItemNotebook) == 1);
+    uint8_t foreign[story_mail::kBookSize] = {};
+    foreign[7] = 9;
+    assert(!migrate(foreign, area) && foreign[7] == 9);
+    // the game's save copy functions
+    story_store::set_game_calls(store_original);
+    story_store::install([](uint32_t) { return std::string(); }, [](uint32_t a, void (*fn)(Cpu*)) { store_hooks[a] = fn; });
+    assert(story_store::installed() && store_hooks.size() == 3);
+    st32(0x101F84DC, kSave);
+    uint8_t* mem_area = story_store::area();
+    memset(mem_area, 0, kAreaSize);
+    assert(story_store::book().set(story_mail::kRecordQuest, 0x0BAD, 2));
+    store_hook(0x025BA9FC, 1);  // saved as Quest Log 2
+    const fs::path dir = fs::temp_directory_path() / ("wwhd-story-store-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    const fs::path sav = dir / "cking.sav";
+    const std::string guest = "/vol/save/user/cking.sav";
+    assert(story_store::is_save_file(guest) && story_store::is_save_file("/vol/save/user/cking.sav.backup"));
+    assert(!story_store::is_save_file("/vol/save/user/cking_pic0_0.sav") && !story_store::is_save_file("/vol/content/cking.sav"));
+    // the game writes its file: the block goes after it; the game's part is unchanged and hidden
+    put_file(sav, game);
+    story_store::written(guest, sav.string());
+    file = file_bytes(sav);
+    assert(file.size() == game.size() + kPayloadSize + kFooterSize && std::equal(game.begin(), game.end(), file.begin()));
+    assert(story_store::game_size(sav.string(), file.size()) == game.size());
+    assert(story_store::opened_for_read(guest, sav.string()) == game.size());
+    // a new session: the block read back, Quest Log 2 loaded
+    memset(mem_area, 0, story_block::kAreaSize * 4);
+    assert(story_store::opened_for_read(guest, sav.string()) == game.size());
+    store_hook(0x025BA7B0, 1);
+    assert(story_store::book().get(story_mail::kRecordQuest, 0x0BAD) == 2);
+    store_hook(0x025BA7B0, 0);  // Quest Log 1 has nothing
+    assert(story_store::book().get(story_mail::kRecordQuest, 0x0BAD) == 0);
+    // the game rewrites the file in place (its part changed, the old block still there): replaced, not doubled
+    std::vector<uint8_t> game2 = game;
+    game2[10] ^= 0xFF;
+    std::vector<uint8_t> inplace = game2;
+    inplace.insert(inplace.end(), file.begin() + long(game.size()), file.end());
+    put_file(sav, inplace);
+    story_store::written(guest, sav.string());
+    file = file_bytes(sav);
+    assert(file.size() == game2.size() + kPayloadSize + kFooterSize && std::equal(game2.begin(), game2.end(), file.begin()));
+    // a damaged block: not used, the file copied aside once, replaced at the next game save
+    bad = file;
+    bad[game2.size() + 3] ^= 0x55;
+    put_file(sav, bad);
+    memset(mem_area + kAreaSize, 0, kPayloadSize);
+    assert(story_store::opened_for_read(guest, sav.string()) == game2.size());
+    assert(all_zero(mem_area + kAreaSize, kPayloadSize));  // nothing taken from it
+    assert(fs::exists(dir / "cking.sav.story-damaged") && file_bytes(dir / "cking.sav.story-damaged") == bad);
+    assert(story_store::book().set(story_mail::kRecordQuest, 0x0BAD, 4));
+    store_hook(0x025BA9FC, 1);
+    story_store::written(guest, sav.string());
+    file = file_bytes(sav);
+    sp = split(file.data(), file.size());
+    assert(sp.found == Found::Valid && sp.game_size == game2.size());
+    // a portable state's scratch copies don't move story areas; a new Quest Log's are empty
+    {
+        story_store::Quiet quiet;
+        assert(story_store::book().set(story_mail::kRecordQuest, 0x0BAD, 9));
+        store_hook(0x025BA9FC, 1);
+    }
+    store_hook(0x025BA7B0, 1);
+    assert(story_store::book().get(story_mail::kRecordQuest, 0x0BAD) == 4);
+    store_hook(0x025BAC50, 1);
+    store_hook(0x025BA7B0, 1);
+    assert(story_store::book().empty());
+    // loading a Quest Log moves the old record out of the game's reserved bytes
+    memset(mem::ptr(kSave + story_mail::kBookOffset), 0, story_mail::kBookSize);
+    story_mail::Book reserved(mem::ptr(kSave + story_mail::kBookOffset));
+    assert(reserved.set(story_mail::kRecordTracked, 0x0777, 1));
+    store_hook(0x025BA7B0, 2);
+    assert(all_zero(mem::ptr(kSave + story_mail::kBookOffset), story_mail::kBookSize) &&
+           story_store::book().get(story_mail::kRecordTracked, 0x0777) == 1);
+    // nothing of ours anywhere: the game's file stays exactly as the game wrote it
+    memset(mem_area, 0, kAreaSize * 4);
+    put_file(sav, game);
+    story_store::written(guest, sav.string());
+    assert(file_bytes(sav) == game);
+    fs::remove_all(dir);
+
+    // the quest flags, saved with the story progress
+    memset(mem_area, 0, kAreaSize);
+    assert(define("flags-mod", "Flags", "q", "Q", "", "") == kResultNew);
+    assert(flag("flags-mod", "q", 3) == 0 && set_flag("flags-mod", "q", 3, true) == 1 && flag("flags-mod", "q", 3) == 1);
+    assert(set_flag("flags-mod", "q", 8, true) == 1 && story_store::book().get(story_mail::kRecordQuestFlags, quest_key("flags-mod", "q")) == 0x84);
+    assert(set_flag("flags-mod", "q", 3, false) == 0 && set_flag("flags-mod", "q", 8, false) == 0 &&
+           !story_store::book().has(story_mail::kRecordQuestFlags, quest_key("flags-mod", "q")));
+    assert(set_flag("flags-mod", "q", 0, true) == kResultInvalid && set_flag("flags-mod", "q", 9, true) == kResultInvalid &&
+           set_flag("flags-mod", "nope", 1, true) == kResultInvalid);
+}
+
 // The NPC catalogue: the compiled-in tables, a stub second place added without any format change, the
 // manifest's "npc_catalogue" version and unknown names refused, the step's place and where from the entry.
 void test_npc_catalogue() {
@@ -712,7 +864,7 @@ void test_takeover_rules() {
 void test_takeover_hooks() {
     constexpr uint32_t kNpc = kArena + 0x8000, kLink = kArena + 0x9000;
     st32(kPlayObj + 0x5B2C, kLink);
-    Book b(mem::ptr(kSave + story_mail::kBookOffset));
+    Book b = story_store::book();
     // the lantern quest of one mod, the same resident in another mod's quest
     assert(define("lantern", "Lantern", "tale", "The storyteller's lantern", "100 rupees", "") == kResultNew);
     assert(define("other", "Other", "tale", "Another tale", "", "") == kResultNew);
@@ -848,7 +1000,7 @@ void test_manifest() {
     assert(parse_quests(mods::json::parse(R"({"format_version": 1})"), none, why) && none.empty());
 
     // declared: in the notebook at once (the secret one not), its letter sent, started when read
-    Book b(mem::ptr(kSave + story_mail::kBookOffset));
+    Book b = story_store::book();
     assert(declare("lantern-mod", "Lantern", mods::json::parse(kLanternManifest)));
     std::vector<Quest> storage;
     bool found = false;
@@ -919,7 +1071,7 @@ void test_available() {
     assert(live_takeover(all, b, keeper(), game, 12) && !live_takeover(all, b, keeper(), game, 22));
     // in the notebook: "Not yet possible: ..." and no place until it holds (the save's flags and time)
     assert(declare("avail-mod", "Avail", mods::json::parse(m)));
-    Book save(mem::ptr(kSave + story_mail::kBookOffset));
+    Book save = story_store::book();
     assert(reach_step(save, quest_key("avail-mod", "q"), 1) == 1);
     st32(kSave + 0x44, f32_as_u32(180.0f));  // noon
     std::vector<Quest> storage;
@@ -940,6 +1092,7 @@ void test_available() {
 
 int main() {
     assert(map(kGlobals, 0x10000) && map(kArena, 0x40000));
+    story_store::set_memory(kArena + 0x20000);
     test_list();
     test_record();
     test_text();
@@ -953,6 +1106,7 @@ int main() {
     test_takeover_hooks();
     test_manifest();
     test_available();
+    test_story_store();
     std::puts("story_notebook_test: ok");
     return 0;
 }

@@ -362,13 +362,13 @@ target_link_libraries(guest_png_test PRIVATE ZLIB::ZLIB)
 add_test(NAME guest_png COMMAND guest_png_test "${CMAKE_SOURCE_DIR}/examples/guest-mods")
 
 # Synthetic integration tests call the real guest filesystem HLE handlers.
-add_executable(mod_content_fs_test runtime/tools/mod_content_fs_test.cpp runtime/src/hle/fs.cpp runtime/src/mods/content.cpp runtime/src/mods/mod_archive.cpp runtime/src/game_languages.cpp runtime/src/guest_addr_identity.c)
+add_executable(mod_content_fs_test runtime/tools/mod_content_fs_test.cpp runtime/src/hle/fs.cpp runtime/src/mods/story_mail.cpp runtime/src/mods/story_store.cpp runtime/src/mods/content.cpp runtime/src/mods/mod_archive.cpp runtime/src/game_languages.cpp runtime/src/guest_addr_identity.c)
 target_include_directories(mod_content_fs_test PRIVATE runtime/src runtime/include)
 target_compile_options(mod_content_fs_test PRIVATE -UNDEBUG)
 target_link_libraries(mod_content_fs_test PRIVATE ZLIB::ZLIB Threads::Threads)
 
 # language sources: synthetic European/Japanese packs read through the guest file system (game_languages.h)
-add_executable(language_source_test runtime/tools/language_source_test.cpp runtime/src/hle/fs.cpp runtime/src/mods/content.cpp runtime/src/mods/mod_archive.cpp runtime/src/game_languages.cpp runtime/src/guest_addr_identity.c)
+add_executable(language_source_test runtime/tools/language_source_test.cpp runtime/src/hle/fs.cpp runtime/src/mods/story_mail.cpp runtime/src/mods/story_store.cpp runtime/src/mods/content.cpp runtime/src/mods/mod_archive.cpp runtime/src/game_languages.cpp runtime/src/guest_addr_identity.c)
 target_include_directories(language_source_test PRIVATE runtime/src runtime/include)
 target_compile_options(language_source_test PRIVATE -UNDEBUG)
 target_link_libraries(language_source_test PRIVATE ZLIB::ZLIB Threads::Threads)
@@ -904,17 +904,17 @@ target_compile_options(guest_hooks_test PRIVATE -UNDEBUG)
 target_link_libraries(guest_hooks_test PRIVATE ZLIB::ZLIB ${CMAKE_DL_LIBS})
 add_test(NAME guest_hooks COMMAND guest_hooks_test)
 # letters from story mods: save record, text, services and postbox hooks on synthetic guest objects
-add_executable(story_mail_test runtime/tools/story_mail_test.cpp runtime/src/mods/story_mail.cpp runtime/src/guest_addr_identity.c)
+add_executable(story_mail_test runtime/tools/story_mail_test.cpp runtime/src/mods/story_mail.cpp runtime/src/mods/story_store.cpp runtime/src/guest_addr_identity.c)
 target_include_directories(story_mail_test PRIVATE runtime/include runtime/src)
 target_compile_options(story_mail_test PRIVATE -UNDEBUG)
 add_test(NAME story_mail COMMAND story_mail_test)
 # mod charts: shared save record, services and sea chart menu hooks on synthetic guest objects
-add_executable(story_chart_test runtime/tools/story_chart_test.cpp runtime/src/mods/story_chart.cpp runtime/src/guest_addr_identity.c)
+add_executable(story_chart_test runtime/tools/story_chart_test.cpp runtime/src/mods/story_chart.cpp runtime/src/mods/story_store.cpp runtime/src/guest_addr_identity.c)
 target_include_directories(story_chart_test PRIVATE runtime/include runtime/src)
 target_compile_options(story_chart_test PRIVATE -UNDEBUG)
 add_test(NAME story_chart COMMAND story_chart_test)
 # the story notebook: quest list, save record, page navigation, services and item menu hooks
-add_executable(story_notebook_test runtime/tools/story_notebook_test.cpp runtime/src/mods/story_notebook.cpp runtime/src/mods/story_mail.cpp
+add_executable(story_notebook_test runtime/tools/story_notebook_test.cpp runtime/src/mods/story_notebook.cpp runtime/src/mods/story_mail.cpp runtime/src/mods/story_store.cpp
                runtime/src/mods/story_chart.cpp runtime/src/mods/guest_png.cpp runtime/src/mods/mod_archive.cpp runtime/src/guest_addr_identity.c
                ${WWHD_NOTEBOOK_ICON} ${WWHD_NPC_CATALOGUE})
 target_include_directories(story_notebook_test PRIVATE runtime/include runtime/src runtime/src/mods)

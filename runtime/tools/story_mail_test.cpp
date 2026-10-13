@@ -3,6 +3,7 @@
 // functions are stubbed; no game files are needed.
 #include "mods/story_mail.h"
 #include "mods/story_mail_book.h"
+#include "mods/story_store.h"
 #include "runtime.h"
 
 #include <cassert>
@@ -158,7 +159,7 @@ void test_services() {
     auto list = letters();
     assert(list.size() == 1 && list[0].mod == "mod" && list[0].id == "hello" && list[0].sender == "Me" &&
            list[0].state == kResultWaiting);
-    Book b(mem::ptr(kSave + kBookOffset));
+    Book b = story_store::book();
     assert(b.state(letter_key("mod", "hello")) == kWaiting);
     assert(!notebook_owned() && notebook_page() == u"Story notebook\n\nNo letters yet.\n");
 }
@@ -336,7 +337,7 @@ void test_hooks() {
 void test_bag_gate() {
     Cpu c{};
     // a fresh save: no bag, no pearl
-    memset(mem::ptr(kSave + kBookOffset), 0, kBookSize);
+    memset(story_store::area(), 0, story_block::kAreaSize);
     have_bag = 0, pearl = 0, game_readable = 0, game_waiting = 0;
     assert(send("mod", "held", "Me", "Held") == kResultWaiting && state("mod", "held") == kResultWaiting);
     const uint32_t gate = 0x023A4A94;
@@ -351,14 +352,14 @@ void test_bag_gate() {
     hooks::receive_count(&c);
     assert(c.r[3] == 0);
     // the held letter's record: saved and loaded with the save file, still waiting
-    uint8_t saved[kBookSize];
-    memcpy(saved, mem::ptr(kSave + kBookOffset), kBookSize);
-    memset(mem::ptr(kSave + kBookOffset), 0, kBookSize);
-    memcpy(mem::ptr(kSave + kBookOffset), saved, kBookSize);
-    assert(state("mod", "held") == kResultWaiting && Book(saved).state(letter_key("mod", "held")) == kWaiting);
+    uint8_t saved[story_block::kAreaSize];
+    memcpy(saved, story_store::area(), sizeof saved);
+    memset(story_store::area(), 0, sizeof saved);
+    memcpy(story_store::area(), saved, sizeof saved);
+    assert(state("mod", "held") == kResultWaiting && Book(saved, story_block::kAreaRecords).state(letter_key("mod", "held")) == kWaiting);
     assert(send("mod", "held", "Me", "Held") == kResultWaiting);  // sent again: no second copy
     unsigned held = 0;
-    for (unsigned r = 0; r < kRecords; r++) held += Book(saved).record_kind(r) == kRecordLetter;
+    for (unsigned r = 0; r < story_block::kAreaRecords; r++) held += Book(saved, story_block::kAreaRecords).record_kind(r) == kRecordLetter;
     assert(held == 1);
     // Link gets the bag: the next postbox visit hands the letter out (before the first pearl too), once
     have_bag = 1;
@@ -389,6 +390,7 @@ void test_bag_gate() {
 
 int main() {
     assert(map(kData, 0x10000) && map(kGlobals, 0x10000) && map(kArena, 0x20000));
+    story_store::set_memory(kArena + 0x1C000);
     st16(kGameText, 0x0E), st16(kGameText + 2, 1), st16(kGameText + 8, 'H'), st16(kGameText + 10, 'i');
     test_book();
     test_text();

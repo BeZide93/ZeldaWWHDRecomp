@@ -2,12 +2,10 @@
 // (docs/mod-sdk-v2.md, "Letters"). Pure code without game memory, unit-tested in
 // runtime/tools/story_mail_test.cpp.
 //
-// Where the record lives: the game's save data has a reserved block (dSv_reserve_c, 0x50 bytes at
-// save base + 0x744, right after the event flags). dSv_info_c::memory_to_card / card_to_memory copy
-// it with the save and dSv_reserve_c::init zeroes it for a new file (and for the Second Quest); no
-// other decompiled code touches it, and it is zero in every save file checked (213 Quest Logs, up to
-// late-game progress). So the record is saved and loaded with the save file and restored by full
-// and portable save states, exactly like the game's own flags.
+// Where the record lives: in the story block appended to cking.sav, one area per Quest Log
+// (story_block.h, story_store.h), with up to 255 records. Earlier builds kept a 19-record form in the
+// game's reserved save bytes (dSv_reserve_c, 0x50 bytes at save base + 0x744, zero in every vanilla
+// save): that form is only read once, to move it into the block (story_block::migrate).
 //
 // Format version 2 (bytes, no alignment needs):
 //   [0] 'L' (0x4C) magic, [1] format version (2), [2..3] zero;
@@ -39,6 +37,7 @@ inline constexpr uint8_t kRecordMarker = 3;  // mod charts (story_chart.h): key 
 inline constexpr uint8_t kRecordQuest = 4;   // notebook quests (story_notebook.h): key quest_key(mod, quest), value 1..254 step, 255 done
 inline constexpr uint8_t kRecordTracked = 5; // the notebook's tracked quest: at most one record, key quest_key, value 1
 inline constexpr uint8_t kRecordCarried = 6; // Link carries a quest's letter (story_takeover.h): key quest_key, value 1
+inline constexpr uint8_t kRecordQuestFlags = 7; // a quest's 8 flags (wwhd_quest_set_flag): key quest_key, value bit n-1 = flag n
 
 inline constexpr uint16_t kItemNotebook = 1;  // the story notebook
 
@@ -57,12 +56,14 @@ inline uint16_t letter_key(const std::string& mod, const std::string& letter) {
     return k ? k : 1;
 }
 
-// A view of the 0x50-byte block (host bytes; guest memory is byte-addressed the same way).
+// A view of a record block (host bytes; guest memory is byte-addressed the same way): the 0x50-byte
+// form above (19 records), or a larger area with the same layout and more records (story_block.h).
 class Book {
 public:
-    explicit Book(uint8_t* bytes) : b_(bytes) {}
+    explicit Book(uint8_t* bytes, unsigned records = kRecords) : b_(bytes), n_(records) {}
+    unsigned records() const { return n_; }
     bool empty() const {
-        for (uint32_t i = 0; i < kBookSize; i++)
+        for (uint32_t i = 0; i < 4 + 4 * n_; i++)
             if (b_[i]) return false;
         return true;
     }
@@ -78,7 +79,7 @@ public:
     bool set(uint8_t kind, uint16_t key, uint8_t value) {
         if (!usable() || kind == kRecordFree) return false;
         int i = find(kind, key);
-        for (unsigned r = 0; r < kRecords && i < 0; r++)
+        for (unsigned r = 0; r < n_ && i < 0; r++)
             if (record_kind(r) == kRecordFree) i = int(r);
         if (i < 0) return false;
         b_[0] = kMagic, b_[1] = kVersion, b_[2] = 0, b_[3] = 0;
@@ -97,7 +98,7 @@ public:
     unsigned free_records() const {
         if (!usable()) return 0;
         unsigned n = 0;
-        for (unsigned r = 0; r < kRecords; r++) n += record_kind(r) == kRecordFree;
+        for (unsigned r = 0; r < n_; r++) n += record_kind(r) == kRecordFree;
         return n;
     }
     uint8_t record_kind(unsigned r) const { return b_[0] == kMagic ? b_[4 + 4 * r] : kRecordFree; }
@@ -111,11 +112,12 @@ public:
 private:
     int find(uint8_t kind, uint16_t key) const {
         if (b_[0] != kMagic || kind == kRecordFree) return -1;
-        for (unsigned r = 0; r < kRecords; r++)
+        for (unsigned r = 0; r < n_; r++)
             if (record_kind(r) == kind && record_key(r) == key) return int(r);
         return -1;
     }
     uint8_t* b_;
+    unsigned n_;
 };
 
 inline constexpr size_t kMaxIdBytes = 32, kMaxSenderBytes = 48, kMaxTextBytes = 1200;

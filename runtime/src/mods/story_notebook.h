@@ -49,6 +49,10 @@ int32_t carry(const std::string& mod, const std::string& quest, bool carried);
 int32_t talk(const std::string& mod, const std::string& quest, uint32_t step, const std::string& resident, const std::string& lines,
              uint32_t reward);
 int32_t state(const std::string& mod, const std::string& quest);
+// wwhd_quest_set_flag / wwhd_quest_flag: the quest's 8 flags (n 1..8), saved with the story progress.
+// set_flag returns the flag's new value (0/1); flag its value; kResultInvalid / kResultNoRoom as above.
+int32_t set_flag(const std::string& mod, const std::string& quest, uint32_t n, bool on);
+int32_t flag(const std::string& mod, const std::string& quest, uint32_t n);
 
 // The quests of this session (registration order) and the rows of the current save file.
 std::vector<Quest> quests();

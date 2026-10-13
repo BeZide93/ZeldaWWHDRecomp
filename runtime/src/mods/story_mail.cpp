@@ -39,6 +39,7 @@
 #include <mutex>
 
 #include "guest_addr.h"
+#include "story_store.h"
 #include "runtime.h"
 
 namespace story_mail {
@@ -142,7 +143,7 @@ bool trace() {
 uint32_t save_base() { return ld32(kSavePtr); }
 Book book() {
     uint32_t base = save_base();
-    return Book(base ? mem::ptr(base + kBookOffset) : nullptr);
+    return base ? story_store::book() : Book(nullptr);
 }
 bool have_save() { return save_base() != 0; }
 

@@ -30,6 +30,7 @@
 #include <mutex>
 
 #include "guest_addr.h"
+#include "story_store.h"
 #include "runtime.h"
 
 namespace story_chart {
@@ -77,7 +78,7 @@ bool trace() {
 
 uint32_t save_base() { return ld32(kSavePtr); }
 bool have_save() { return save_base() != 0; }
-story_mail::Book book() { return story_mail::Book(mem::ptr(save_base() + story_mail::kBookOffset)); }
+story_mail::Book book() { return story_store::book(); }
 // the chart's record (kind kRecordMarker): 1 owned, 2 finished, 0 none (story_chart.h)
 uint8_t chart_value(const story_mail::Book& b, uint16_t key) { return b.get(story_mail::kRecordMarker, key); }
 int32_t result_of(uint8_t v) { return v == kChartOwned ? kResultOwned : v == kChartDone ? kResultDone : kResultNone; }

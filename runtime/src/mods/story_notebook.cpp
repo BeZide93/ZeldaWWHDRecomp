@@ -18,6 +18,7 @@
 #include <mutex>
 
 #include "guest_addr.h"
+#include "story_store.h"
 #include "input.h"
 #include "runtime.h"
 
@@ -152,7 +153,7 @@ bool stage_is(uint32_t addr, const std::string& name) {
     }
     return name.size() == 8;
 }
-story_mail::Book book() { return story_mail::Book(mem::ptr(save_base() + story_mail::kBookOffset)); }
+story_mail::Book book() { return story_store::book(); }
 
 bool one_line(const std::string& s, size_t max) {
     std::u16string ignored;
@@ -529,6 +530,30 @@ int32_t done(const std::string& mod, const std::string& quest) {
 int32_t state(const std::string& mod, const std::string& quest) {
     if (!story_mail::valid_id(quest)) return kResultInvalid;
     return saved(quest_key(mod, quest));
+}
+
+int32_t set_flag(const std::string& mod, const std::string& quest, uint32_t n, bool on) {
+    if (!story_mail::valid_id(quest) || n < 1 || n > 8) return kResultInvalid;
+    {
+        std::lock_guard lock(g_mu);
+        if (!find(mod, quest)) return kResultInvalid;
+    }
+    if (!have_save()) return kResultNoRoom;
+    story_mail::Book b = book();
+    const uint16_t key = quest_key(mod, quest);
+    const uint8_t was = b.get(story_mail::kRecordQuestFlags, key);
+    const uint8_t now = on ? uint8_t(was | 1u << (n - 1)) : uint8_t(was & ~(1u << (n - 1)));
+    if (now != was) {
+        if (now ? !b.set(story_mail::kRecordQuestFlags, key, now) : !b.erase(story_mail::kRecordQuestFlags, key)) return kResultNoRoom;
+        LOG("[notebook] %s: quest \"%s\" flag %u %s", mod.c_str(), quest.c_str(), n, on ? "on" : "off");
+    }
+    return on ? 1 : 0;
+}
+
+int32_t flag(const std::string& mod, const std::string& quest, uint32_t n) {
+    if (!story_mail::valid_id(quest) || n < 1 || n > 8) return kResultInvalid;
+    if (!have_save()) return kResultNoRoom;
+    return (book().get(story_mail::kRecordQuestFlags, quest_key(mod, quest)) >> (n - 1)) & 1;
 }
 
 std::vector<Quest> quests() {

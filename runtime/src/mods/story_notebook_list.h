@@ -54,7 +54,7 @@ inline uint8_t saved_step(const story_mail::Book& b, uint16_t key) { return b.ge
 // The tracked quest's key in this save file, 0 when none.
 inline uint16_t tracked_key(const story_mail::Book& b) {
     if (!b.usable()) return 0;
-    for (unsigned r = 0; r < story_mail::kRecords; r++)
+    for (unsigned r = 0; r < b.records(); r++)
         if (b.record_kind(r) == story_mail::kRecordTracked) return b.record_key(r);
     return 0;
 }

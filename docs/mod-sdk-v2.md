@@ -331,7 +331,7 @@ step) never sends the letter twice. It returns the letter's state:
 | `WWHD_MAIL_WAITING` (1) | waiting in the postbox (handed out once Link has the Delivery Bag) |
 | `WWHD_MAIL_READ` (2) | handed out and read |
 | `WWHD_MAIL_INVALID` (-1) | invalid ID, sender or text |
-| `WWHD_MAIL_NO_ROOM` (-2) | no save file loaded, or its story record is full (19 entries, shared with the notebook) |
+| `WWHD_MAIL_NO_ROOM` (-2) | no save file loaded, or its story record is full (255 entries per Quest Log, shared with charts and the notebook) |
 
 `wwhd_mail_state(letter_id)` returns the state without sending; use it, for example, to start
 your quest once the letter was read.
@@ -358,12 +358,10 @@ letters are handed out one after another.
 Link keeps it in the Delivery Bag. Receiving it writes nothing to the inventory: it is kept in the
 story record (below).
 
-**Saving.** Whether a letter was sent and read, and whether the notebook was received, is stored
-in the save file, in a block of the save data that the game itself leaves unused (it stays zero
-in the game's own saves). It is saved and loaded with the game, kept by full and portable save
-states, and cleared by a new game or the Second Quest. A letter received but not saved arrives
-again after loading the older save. The text is not stored; turning your mod off leaves its
-letters waiting in the record, and nothing changes for the postbox.
+**Saving.** Whether a letter was sent and read, and whether the notebook was received, is kept with
+the save file (see [Where story progress is saved](#where-story-progress-is-saved)). A letter
+received but not saved arrives again after loading the older save. The text is not stored; turning
+your mod off leaves its letters waiting in the record, and nothing changes for the postbox.
 
 **Players without letter mods.** The postbox, message and item functions are only hooked while a loaded
 mod uses `wwhd_mail_*`. If another mod replaces one of them, letters from mods are not delivered
@@ -480,6 +478,7 @@ WWHD_HOOK(WWHD_ADDR_daPy_Execute, quest_step, (void* link)) {
 | `wwhd_quest_portrait(quest, png)` | the quest's portrait, a PNG of your package (`assets/` or `textures/`, up to 256 × 256) |
 | `wwhd_quest_done(quest)` | the quest is done |
 | `wwhd_quest_state(quest)` | the quest's state, without changing it |
+| `wwhd_quest_set_flag(quest, n, on)` / `wwhd_quest_flag(quest, n)` | the quest's flags 1..8, your own markers for progress inside a step (returns the flag, 0 or 1) |
 
 All of them return the quest's state in the loaded save file, or an error:
 
@@ -526,11 +525,31 @@ the item menu, opens its page over the game:
   the mouse on the GamePad picture) work on the rows and buttons. The game gets no input while the
   page is open.
 
-**Saving.** The save file keeps the step reached, whether a quest is done, which quest is shown
-on the chart and the letters Link carries, in the story record shared with letters and charts (one
-place per started quest, one for the shown quest, one per carried letter). Quests that were never started take no room. Nothing is written to the
-inventory or the Delivery Bag: with all mods off, the save is a plain game save, and the notebook,
-its records and the chart ring are simply not shown.
+**Saving.** The save file keeps the step reached, whether a quest is done, its flags, which quest is
+shown on the chart and the letters Link carries (see [Where story progress is saved](#where-story-progress-is-saved)).
+Quests that were never started take no room. Nothing is written to the inventory or the Delivery
+Bag: with all mods off, the game's save is a plain game save, and the notebook, its records and the
+chart ring are simply not shown.
+
+### Where story progress is saved
+
+Everything the port keeps for story mods (letters, charts, the notebook, quests, their flags, the
+tracked quest, carried letters) is stored per Quest Log in a **story block appended to `cking.sav`**,
+after the game's own bytes:
+
+- the game never sees it: its reads end at its own part and the file size it gets is its own. A
+  `cking.sav` with the block loads in the game (and on Cemu or a Wii U, where a save there drops the
+  block: the game save stays intact, the story progress is lost);
+- it is written with every game save (the block follows the game's write, through a temporary file
+  that replaces the save in one step), so story progress always matches the game save: progress not
+  saved is undone by loading, like the game's own. Full save states carry it; portable save states
+  don't;
+- without any story progress nothing is appended: a save stays byte for byte the game's;
+- the block ends with a footer (magic, length, format version, checksum). A block whose checksum
+  doesn't match is not used: the log says so and the file is copied once to
+  `cking.sav.story-damaged`; the next game save writes a new block;
+- up to 255 records per Quest Log. Saves from earlier test builds, which kept a smaller record in
+  the game's own save data, are moved into the block the first time that Quest Log is loaded.
 
 ### Quests in the manifest
 

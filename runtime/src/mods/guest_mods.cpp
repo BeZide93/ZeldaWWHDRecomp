@@ -21,6 +21,7 @@
 #include "story_mail_book.h"
 #include "story_chart.h"
 #include "story_notebook.h"
+#include "story_store.h"
 #include "story_takeover.h"
 #include "mod_json.h"
 #include "input.h"
@@ -352,13 +353,22 @@ void svc_quest_carry(Cpu* c) {
 // wwhd_quest_talk(quest, step, resident, lines, reward)
 void svc_quest_talk(Cpu* c) {
     auto& mod=owner(c);std::string id,resident,lines;
-    if(!mod_string(mod,c->r[3],story_mail::kMaxIdBytes,id)||!mod_string(mod,c->r[5],32,resident)||!mod_string(mod,c->r[6],story_notebook::kMaxLinesBytes,lines))
+    if(!mod_string(mod,c->r[3],story_mail::kMaxIdBytes,id)||!mod_string(mod,c->r[5],48,resident)||!mod_string(mod,c->r[6],story_notebook::kMaxLinesBytes,lines))
         return quest_result(c,story_notebook::kResultInvalid);
     quest_result(c,story_notebook::talk(mod.id,id,c->r[4],resident,lines,c->r[7]));
 }
 void svc_quest_state(Cpu* c) {
     auto& mod=owner(c);std::string id;
     quest_result(c,mod_string(mod,c->r[3],story_mail::kMaxIdBytes,id)?story_notebook::state(mod.id,id):story_notebook::kResultInvalid);
+}
+// wwhd_quest_set_flag(quest, n, on), wwhd_quest_flag(quest, n)
+void svc_quest_set_flag(Cpu* c) {
+    auto& mod=owner(c);std::string id;
+    quest_result(c,mod_string(mod,c->r[3],story_mail::kMaxIdBytes,id)?story_notebook::set_flag(mod.id,id,c->r[4],c->r[5]!=0):story_notebook::kResultInvalid);
+}
+void svc_quest_flag(Cpu* c) {
+    auto& mod=owner(c);std::string id;
+    quest_result(c,mod_string(mod,c->r[3],story_mail::kMaxIdBytes,id)?story_notebook::flag(mod.id,id,c->r[4]):story_notebook::kResultInvalid);
 }
 const std::unordered_map<std::string, PpcFunc> kServices = {
     {"wwhd_audio_epoch",svc_audio_epoch},{"wwhd_audio_open",svc_audio_open},
@@ -379,6 +389,7 @@ const std::unordered_map<std::string, PpcFunc> kServices = {
     {"wwhd_quest_no_place",svc_quest_no_place},{"wwhd_quest_known",svc_quest_known},{"wwhd_quest_portrait",svc_quest_portrait},
     {"wwhd_quest_done",svc_quest_done},{"wwhd_quest_state",svc_quest_state},
     {"wwhd_quest_carry",svc_quest_carry},{"wwhd_quest_talk",svc_quest_talk},
+    {"wwhd_quest_set_flag",svc_quest_set_flag},{"wwhd_quest_flag",svc_quest_flag},
     {"memcpy", svc_memcpy},      {"memmove", svc_memcpy},       {"memset", svc_memset},
 };
 PpcFunc service(const char* name) {
@@ -529,6 +540,11 @@ void init() {
     // Letters from mods: host replacements of the postbox and message functions, only when a loaded
     // mod uses the letter services (story_mail.h).
     if(story_mail::imported())story_mail::set_text_buffers(mem::host_alloc(6144,16),6144);
+    // Story progress (story_store.h): its areas in guest memory, so full save states carry them; saved
+    // with the game's saves in the story block of cking.sav. Without a story mod the file's block is
+    // still kept as it is.
+    const bool story=story_mail::imported()||story_chart::imported()||story_notebook::imported();
+    if(story){uint32_t areas=mem::host_alloc(story_store::kMemoryBytes,16);memset(mem::ptr(areas),0,story_store::kMemoryBytes);story_store::set_memory(areas);}
     // feasibility test: the notebook's model archive (tools/story_mods/notebook_model.py)
     if(const char* model=getenv("WWHD_NOTEBOOK_MODEL");model&&*model)story_mail::set_notebook_model(model);
     story_mail::set_game_calls(call_original,[](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);});
@@ -563,6 +579,16 @@ void init() {
         if(ordinal<0)fatal("[guestmods] notebook: %08X is not a game function",addr);
         Chain& ch=g_chains[addr];
         ch.addr=addr;ch.ordinal=uint32_t(ordinal);ch.replace=fn;ch.replace_mod="the port's story notebook";
+        g_mod_hook_flags[ordinal]=1;
+    });
+    story_store::set_game_calls(call_original);
+    story_store::install([](uint32_t addr) {
+        auto it=g_chains.find(addr);return it==g_chains.end()?std::string():it->second.replace_mod;
+    },[](uint32_t addr,PpcFunc fn) {
+        int ordinal=ordinal_of(addr);
+        if(ordinal<0)fatal("[guestmods] story store: %08X is not a game function",addr);
+        Chain& ch=g_chains[addr];
+        ch.addr=addr;ch.ordinal=uint32_t(ordinal);ch.replace=fn;ch.replace_mod="the port's story progress";
         g_mod_hook_flags[ordinal]=1;
     });
     if(getenv("WWHD_GUEST_MODS"))LOG("[guestmods] WWHD_GUEST_MODS is retired; install and trust guest packages in the mod manager");

@@ -215,7 +215,9 @@ WWHD_HOOK(0x02000000, all_services, (void)) {
     wwhd_quest_portrait("tale", "assets/p.png");
     wwhd_log_int("quest", wwhd_quest_state("tale"));
     wwhd_quest_carry("tale", 1);
-    wwhd_quest_talk("tale", 1, "windfall-harbour", "Hello", 6);
+    wwhd_quest_talk("tale", 1, "windfall-light-keeper", "Hello", 6);
+    wwhd_quest_set_flag("tale", 1, 1);
+    wwhd_log_int("flag", wwhd_quest_flag("tale", 1));
     wwhd_quest_done("tale");
     wwhd_free(p);
 }
@@ -230,7 +232,8 @@ WWHD_HOOK(0x02000000, all_services, (void)) {
                          "wwhd_hud_release","wwhd_hud_epoch","wwhd_hud_clip","wwhd_setting_get","wwhd_setting_changed",
                          "wwhd_mail_send","wwhd_mail_state","wwhd_chart_give","wwhd_chart_finish","wwhd_chart_state",
                          "wwhd_chart_mark","wwhd_chart_unmark","wwhd_quest_define","wwhd_quest_step","wwhd_quest_place",
-                         "wwhd_quest_no_place","wwhd_quest_known","wwhd_quest_portrait","wwhd_quest_done","wwhd_quest_state","wwhd_quest_carry","wwhd_quest_talk"):
+                         "wwhd_quest_no_place","wwhd_quest_known","wwhd_quest_portrait","wwhd_quest_done","wwhd_quest_state","wwhd_quest_carry","wwhd_quest_talk",
+                         "wwhd_quest_set_flag","wwhd_quest_flag"):
                 self.assertIn(name,t.services)
             Path(d, "manifest.json").write_text(json.dumps({"kind": "guest", "id": "services", "guest": {"api_version": 1}}))
             result = builder.build(d, str(Path(d, "cache")), 0x7F000000, builder.default_cc(), str(Path(REPO, "runtime/include")))

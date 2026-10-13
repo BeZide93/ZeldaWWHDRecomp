@@ -235,6 +235,10 @@ s32 wwhd_quest_known(const char* quest_id, const char* known);
 s32 wwhd_quest_portrait(const char* quest_id, const char* png_path); /* assets/ or textures/, up to 256 x 256 */
 s32 wwhd_quest_done(const char* quest_id);
 s32 wwhd_quest_state(const char* quest_id);
+/* The quest's 8 flags (n 1..8), saved with the story progress: set_flag returns the new value (0/1),
+ * flag the current one; WWHD_QUEST_INVALID / WWHD_QUEST_NO_ROOM as above. */
+s32 wwhd_quest_set_flag(const char* quest_id, u32 n, s32 on);
+s32 wwhd_quest_flag(const char* quest_id, u32 n);
 /* A letter Link carries for the quest (shown in the Delivery Bag, never in the game's inventory):
  * carried 1 gives it, 0 takes it away. */
 s32 wwhd_quest_carry(const char* quest_id, s32 carried);

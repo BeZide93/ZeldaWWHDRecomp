@@ -3,6 +3,7 @@
 // own functions are stubbed; no game files are needed.
 #include "mods/story_chart.h"
 #include "mods/story_mail_book.h"
+#include "mods/story_store.h"
 #include "runtime.h"
 
 #include <cassert>
@@ -128,7 +129,7 @@ void test_services() {
     assert(give("mod", "Tale") == kResultInvalid && give("mod", "") == kResultInvalid);
     assert(give("mod", "tale") == kResultOwned && give("mod", "tale") == kResultOwned);  // idempotent
     assert(state("mod", "tale") == kResultOwned && state("other", "tale") == kResultNone);
-    story_mail::Book b(mem::ptr(kSave + story_mail::kBookOffset));
+    story_mail::Book b = story_store::book();
     assert(b.get(story_mail::kRecordMarker, chart_key("mod", "tale")) == kChartOwned);
     // markers: checked arguments, add or move, per-mod limit
     assert(mark("mod", "tale", "start", 0, -200000, kIconStory, "Windfall") == kResultOwned);
@@ -239,6 +240,7 @@ void test_hooks() {
 
 int main() {
     assert(map(kGlobals, 0x10000) && map(kArena, 0x10000));
+    story_store::set_memory(kArena + 0xE000);
     test_record();
     test_services();
     test_hooks();
