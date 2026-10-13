@@ -53,7 +53,9 @@ what is on `devel` and not released yet (also in the
   screens in two windows, the menu could close again right after opening. F1 now toggles once per press (a release
   is needed before it toggles again), keys and the save-state hotkeys (Shift+F1..F5 save, F2..F5 load) work from
   either game window, and switching focus between them clears held keys without closing the menu. The log now says
-  why the menu opened or closed (`[overlay] closed (F1 key, window TV, ...)`).
+  why the menu opened or closed (`[overlay] closed (F1 key, window TV, ...)`). In Gaming Mode the menu, the save-state
+  messages and touch now follow the window that has focus, so they also show when the GamePad window is the one on
+  screen (before, the menu could open there invisibly and hold Link in place).
 
 - **Settings overlay: extension points for other platforms** (PR #175, thanks @Pulpparty): ports such as the
   community Switch port can add their own settings tabs, hide built-in ones, plug in a system keyboard, controller
