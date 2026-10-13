@@ -41,7 +41,8 @@ def main():
     value = probe("SetupImportSmokeActivity", "files/setup-import-smoke.json")
     value["key_recovery"] = []
     for phase in ("prepare", "restart", "revoked", "lost-restart", "reselect", "replacement-restart",
-                  "moved", "lost-restart", "reselect", "legacy", "legacy-restart", "legacy-preconfiguration", "legacy-complete"):
+                  "moved", "lost-restart", "reselect", "legacy", "legacy-restart", "legacy-preconfiguration", "legacy-complete",
+                  "missing-source", "missing-source-restart", "missing-source-reselect"):
         # Actual process death: no in-memory key or selection can survive this boundary.
         adb("shell", "am", "force-stop", package)
         result = probe("SetupKeyRecoverySmokeActivity", "files/setup-key-recovery-" + phase + ".json", phase)

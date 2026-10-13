@@ -34,6 +34,15 @@ public final class SetupImport {
         return new File(job, "replace-" + key + "-key.json");
     }
 
+    /** Imported images can recover key selections even if their original source record is absent. */
+    static JSONObject keySource(File job) throws Exception {
+        File source = new File(job, "source.json");
+        if (source.isFile()) return SetupStore.read(source);
+        JSONObject input = SetupStore.read(new File(job, "job.json")).getJSONObject("input");
+        if (!input.getString("kind").equals("image")) throw new IOException("Keys are only needed for disc images");
+        return new JSONObject().put("schema", 1).put("kind", "image");
+    }
+
     private static String selectedKeyUri(File job, JSONObject source, String key) throws Exception {
         File pending = keyReplacement(job, key);
         return pending.isFile() ? SetupStore.read(pending).getString("uri") : source.optString(key + "_uri");
@@ -48,7 +57,7 @@ public final class SetupImport {
 
     /** A multi-key selection repairs linked or lost roles together, using only URI metadata on disk. */
     public static void selectKey(Context context, File job, String key, Uri uri) throws Exception {
-        JSONObject source = SetupStore.read(new File(job, "source.json"));
+        JSONObject source = keySource(job);
         String other = SetupKeyRecoveryPolicy.other(key);
         String oldUri = selectedKeyUri(job, source, key), otherUri = selectedKeyUri(job, source, other);
         boolean multiKey;
@@ -67,7 +76,7 @@ public final class SetupImport {
     }
 
     private static void selectKeys(File job, String[] keys, Uri uri) throws Exception {
-        JSONObject source = SetupStore.read(new File(job, "source.json"));
+        JSONObject source = keySource(job);
         if (!source.getString("kind").equals("image")) throw new IOException("Keys are only needed for disc images");
         if (new File(job, "job.json").isFile()) {
             String state = SetupStore.read(new File(job, "host.json")).optString("state");
@@ -83,10 +92,11 @@ public final class SetupImport {
     }
 
     private static void replaceKeys(Context context, File job, JSONObject configuration, Control control) throws Exception {
-        JSONObject source = SetupStore.read(new File(job, "source.json"));
         for (String key : new String[] {"disc", "common"}) {
             File pending = keyReplacement(job, key);
             if (pending.isFile()) {
+                // Private snapshots need source metadata only when a new key was selected.
+                JSONObject source = keySource(job);
                 JSONObject selection = SetupStore.read(pending);
                 if (selection.getInt("schema") != 1) throw new IOException("Unsupported key selection version");
                 control.checkpoint();

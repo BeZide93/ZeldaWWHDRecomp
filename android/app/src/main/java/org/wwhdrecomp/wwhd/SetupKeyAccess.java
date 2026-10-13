@@ -30,7 +30,8 @@ public final class SetupKeyAccess {
             // Interrupted old releases must not depend on a grant that may since have expired.
             return ParcelFileDescriptor.open(legacy, ParcelFileDescriptor.MODE_READ_ONLY);
         }
-        JSONObject source = SetupStore.read(new File(job, "source.json"));
+        File sourceFile = new File(job, "source.json");
+        JSONObject source = sourceFile.isFile() ? SetupStore.read(sourceFile) : new JSONObject();
         String uri = source.optString(key + "_uri");
         try {
             if (uri.isEmpty()) throw new IOException("No key selection");
