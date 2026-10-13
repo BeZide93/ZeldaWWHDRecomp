@@ -1,4 +1,5 @@
 #pragma once
+#include "overlay/window_target.h"
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -102,9 +103,9 @@ void record_present_capture(Screen& screen, uint32_t imageIndex);
 void finish_present_capture(Screen& screen);
 void write_rgba_png(const std::string& path, uint32_t width, uint32_t height,
                     const std::vector<uint8_t>& rgba);
-// settings overlay (overlay.cpp): this frame's Dear ImGui draw data, drawn on top of the TV window's
-// composition (swap image and present dumps); null when the overlay shows nothing
-void set_overlay_draw(ImDrawData* draw);
+// This frame's menu and host messages, on the selected window's composition and present dumps.
+// Default target is TV; null draw data when the overlay shows nothing.
+void set_overlay_draw(overlay::window_target::DrawFrame frame);
 void overlay_renderer_init();
 void overlay_prepare(ImDrawData* draw);  // texture uploads (outside rendering)
 void overlay_draw(ImDrawData* draw,VkCommandBuffer cmd,VkFormat format,VkExtent2D extent,bool linear,int stereoEye=-1,float whiteScale=1);

@@ -48,6 +48,7 @@
 #include "overlay/guest_hud.h"
 #ifdef WWHD_SDL_HOST
 #include "platform/input_sdl.h"
+#include "overlay/window_target.h"
 #include <SDL3/SDL_vulkan.h>
 #endif
 #include "platform/display_rate.h"
@@ -2670,11 +2671,40 @@ void swap() {
         drcScan?float(drcScan->extent.width):0,drcScan?float(drcScan->extent.height):0);
     gfx::display_input_plan(inputPlan);
   }
-  // settings overlay: built once, drawn into the TV window and its present dumps
+  // Menu and host toasts: built once at the selected window size, including present dumps
   if(overlay::guesthud::active())overlay::guesthud::set_tv_region(inputPlan.tv.x,inputPlan.tv.y,inputPlan.tv.w,inputPlan.tv.h,!inputPlan.drc_only);
   const float overlayWidth = (plan.dw > 0 ? plan.dw : layerW) /
       (stereo::frame.mode == stereo::FullSBS ? 2.0f : 1.0f);
-  set_overlay_draw(overlay::frame(overlayWidth, plan.dh > 0 ? plan.dh : layerH, overlay_renderer_init));
+  using overlay::window_target::Window;
+  Window requested = Window::TV;
+  bool requireDrawable = false;
+  float drcW = 0, drcH = 0;
+#ifdef WWHD_SDL_HOST
+  static const bool gamescopeOverlay = overlay::window_target::gamescope_session();
+  requested = overlay::window_target::selected.load();
+  requireDrawable = gamescopeOverlay && plan.drc_window;
+  drcW = float(R.drc.width.load()); drcH = float(R.drc.height.load());
+#endif
+  const auto drawable = [](const Screen& screen) {
+    return screen.visible && screen.scan && screen.scan->image;
+  };
+  const auto overlayFrame = overlay::window_target::build_frame(
+      requested, plan.drc_window, requireDrawable,
+      {overlayWidth, plan.dh > 0 ? plan.dh : layerH, drawable(R.tv)},
+      {drcW, drcH, drawable(R.drc)},
+      [](float width, float height) { return overlay::frame(width, height, overlay_renderer_init); },
+      [] { overlay::set_open(false); });
+#ifdef WWHD_SDL_HOST
+  static const bool traceOverlay = getenv("WWHD_OVERLAY_TRACE") && std::string(getenv("WWHD_OVERLAY_TRACE")) == "1";
+  static Window previousTarget = Window::None;
+  static bool previousOpen = false;
+  const bool menuOpen = overlay::is_open();
+  if (traceOverlay && (overlayFrame.target != previousTarget || (menuOpen && !previousOpen)))
+    LOG("[overlay] draw window %s, menu %s, frame %llu", overlayFrame.target == Window::TV ? "TV" : overlayFrame.target == Window::GamePad ? "GamePad" : "none",
+        menuOpen ? "open" : "closed", (unsigned long long)(R.frame + 1));
+  previousTarget = overlayFrame.target; previousOpen = menuOpen;
+#endif
+  set_overlay_draw(overlayFrame);
   compose_headless_diagnostic(R.tv);
   take_screenshots(plan);
   bool sampled[2] = {};
@@ -3790,6 +3820,12 @@ bool android_display_touch_event(const SDL_Event& event) {
 }
 #endif
 static bool gamepad_touch(const SDL_Event& event) {
+  // In gamescope the GamePad may host the menu. Let SDL overlay input receive its clicks,
+  // including touch-emulated mouse events, before the guest GamePad touch router consumes them.
+  if (overlay::window_target::selected.load() == overlay::window_target::Window::GamePad && overlay::captures()) {
+    if (touchHeld != TouchIn::None) { touchHeld = TouchIn::None; input::set_touch(false, 0, 0); }
+    return false;
+  }
   const SDL_WindowID drcId = R.drc.window ? SDL_GetWindowID(R.drc.window) : 0;
   const SDL_WindowID tvId = SDL_GetWindowID(R.tv.window);
   float tx = 0, ty = 0;
@@ -3989,7 +4025,8 @@ void run_main_loop() {
         // Consumed GamePad drags still move the visible stereo pointer.
         const bool motion=event.type==SDL_EVENT_MOUSE_MOTION;
         const bool button=event.type==SDL_EVENT_MOUSE_BUTTON_DOWN || event.type==SDL_EVENT_MOUSE_BUTTON_UP;
-        if((motion||button) && (motion?event.motion.windowID:event.button.windowID)==SDL_GetWindowID(R.tv.window)) {
+        if((motion||button) && overlay::window_target::selected.load()==overlay::window_target::Window::TV &&
+           (motion?event.motion.windowID:event.button.windowID)==SDL_GetWindowID(R.tv.window)) {
           float nx,ny;
           tv_window_point(motion?event.motion.x:event.button.x,motion?event.motion.y:event.button.y,nx,ny);
           overlay::mouse_move(nx,ny);
@@ -4023,7 +4060,8 @@ void run_main_loop() {
       if (keep && !pointerKept && pointerHidden) mouseUsed = std::chrono::steady_clock::now();
       pointerKept = keep;
       const bool idle=std::chrono::steady_clock::now()-mouseUsed>std::chrono::seconds(2);
-      const bool stereoPointer=stereo::requestedMode!=stereo::Off && SDL_GetMouseFocus()==R.tv.window &&
+      const bool stereoPointer=overlay::window_target::selected.load()==overlay::window_target::Window::TV &&
+          stereo::requestedMode!=stereo::Off && SDL_GetMouseFocus()==R.tv.window &&
           !mods::mouse_captured() && (overlay::captures() || !idle);
       overlay::set_stereo_pointer_visible(stereoPointer);
       const bool hide=stereoPointer || (!keep && idle);

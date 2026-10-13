@@ -13,6 +13,8 @@ namespace gx2 { void checkpoint_vulkan_caches(); }
 // SDL3 keyboard/gamepad input. Stable key IDs preserve existing controls.json mappings.
 #include "input_sdl.h"
 #include "overlay_trace_sdl.h"
+#include "overlay/window_target.h"
+#include "gfx/display_modes.h"
 #include "keycodes.h"
 #include "mouse_sdl.h"
 #include "../input.h"
@@ -69,14 +71,29 @@ static std::vector<SDL_JoystickID> g_order;  // connect order: the oldest still 
 static std::set<SDL_JoystickID> g_rumble_controllers;  // the ones that have a rumble motor
 static SDL_Window* g_prompt_window=nullptr;
 static SDL_Window* g_gamepad_window=nullptr;
-void set_gamepad_window(SDL_Window* window){g_gamepad_window=window;}
+static void update_overlay_window(SDL_Window* focus);
+void set_gamepad_window(SDL_Window* window){g_gamepad_window=window;update_overlay_window(SDL_GetKeyboardFocus());}
 static bool game_window(SDL_WindowID id){return (g_prompt_window&&id==SDL_GetWindowID(g_prompt_window))||(g_gamepad_window&&id==SDL_GetWindowID(g_gamepad_window));}
 static const char* window_name(SDL_WindowID id){return g_prompt_window&&id==SDL_GetWindowID(g_prompt_window)?"TV":g_gamepad_window&&id==SDL_GetWindowID(g_gamepad_window)?"GamePad":"other";}
 static std::function<void(bool,std::u16string)> g_pending,g_done;
 static std::u16string g_initial,g_text;
 static int g_max_len=0,g_pending_max_len=0;
 static std::string g_previous_title;
-void set_prompt_window(SDL_Window* window){g_prompt_window=window;}
+void set_prompt_window(SDL_Window* window){g_prompt_window=window;update_overlay_window(SDL_GetKeyboardFocus());}
+static void update_overlay_window(SDL_Window* focus) {
+ using namespace overlay::window_target;
+ static const bool follow = gamescope_session();
+ if(!follow)return; // desktop/macOS keep the original TV destination and avoid window queries
+ auto visible=[](SDL_Window* w){
+  if(!w || (SDL_GetWindowFlags(w)&(SDL_WINDOW_HIDDEN|SDL_WINDOW_MINIMIZED)))return false;
+  int width=0,height=0;SDL_GetWindowSizeInPixels(w,&width,&height);
+  return width>=16 && height>=16; // overlay::frame cannot draw below this size
+ };
+ const Window focused=focus==g_prompt_window&&focus?Window::TV:focus==g_gamepad_window&&focus?Window::GamePad:Window::None;
+ const Window target=choose(follow,g_gamepad_window&&gfx::drc_window_wanted(),focused,visible(g_prompt_window),visible(g_gamepad_window));
+ selected.store(target);
+ if(target==Window::None && overlay::is_open())overlay::set_open(false);
+}
 bool text_prompt_active(){return (bool)g_done;}
 static int keycode(SDL_Scancode code) {
  switch(code) {
@@ -194,14 +211,17 @@ void release_keys(){mods::fast_forward_reset();std::lock_guard lk(g_mu);g_mouse_
 void held_keys(bool* keys){std::lock_guard lk(g_mu);for(int i=0;i<256;i++)keys[i]=g_keys[i]||g_script_keys[i];}
 void controller_values(float* out){std::lock_guard lk(g_mu);std::copy(std::begin(g_values),std::end(g_values),out);}
 void host_controller_values(float* out){controller_values(out);}
-// settings overlay (overlay/overlay.h): keys from both game windows; pointer from the TV. True = the overlay took
+// settings overlay (overlay/overlay.h): keys from both game windows; pointer from the selected overlay window. True = the overlay took
 // the event (F1, or anything while it is open).
 static int overlay_mods(SDL_Keymod m){
  return (m&SDL_KMOD_SHIFT?overlay::kShift:0)|(m&SDL_KMOD_CTRL?overlay::kCtrl:0)|(m&SDL_KMOD_ALT?overlay::kAlt:0)|(m&SDL_KMOD_GUI?overlay::kSuper:0);
 }
 static bool overlay_event(const SDL_Event& event){
  if(!g_prompt_window)return false;
- const SDL_WindowID tv=SDL_GetWindowID(g_prompt_window);
+ const auto target=overlay::window_target::selected.load();
+ SDL_Window* pointer=target==overlay::window_target::Window::GamePad?g_gamepad_window:
+                     target==overlay::window_target::Window::TV?g_prompt_window:nullptr;
+ const SDL_WindowID pointerId=pointer?SDL_GetWindowID(pointer):0;
  switch(event.type){
  case SDL_EVENT_KEY_DOWN: case SDL_EVENT_KEY_UP:{
   if(!game_window(event.key.windowID))return false;
@@ -214,30 +234,30 @@ static bool overlay_event(const SDL_Event& event){
  }
  case SDL_EVENT_TEXT_INPUT: return overlay::text(event.text.text);  // typed into an overlay text field
  case SDL_EVENT_MOUSE_MOTION:{
-  if(event.motion.windowID!=tv)return false;
-  int w=1,h=1;SDL_GetWindowSize(g_prompt_window,&w,&h);
+  if(!pointer || event.motion.windowID!=pointerId)return false;
+  int w=1,h=1;SDL_GetWindowSize(pointer,&w,&h);
   return overlay::mouse_move(event.motion.x/std::max(1,w),event.motion.y/std::max(1,h), event.motion.which == SDL_TOUCH_MOUSEID);
  }
  case SDL_EVENT_MOUSE_BUTTON_DOWN: case SDL_EVENT_MOUSE_BUTTON_UP:{
-  if(event.button.windowID!=tv)return false;
+  if(!pointer || event.button.windowID!=pointerId)return false;
   int b=event.button.button==SDL_BUTTON_LEFT?0:event.button.button==SDL_BUTTON_RIGHT?1:event.button.button==SDL_BUTTON_MIDDLE?2:event.button.button==SDL_BUTTON_X1?3:event.button.button==SDL_BUTTON_X2?4:-1;
   if(b<0)return overlay::captures();
-  int w=1,h=1;SDL_GetWindowSize(g_prompt_window,&w,&h);
+  int w=1,h=1;SDL_GetWindowSize(pointer,&w,&h);
   overlay::mouse_move(event.button.x/std::max(1,w),event.button.y/std::max(1,h), event.button.which == SDL_TOUCH_MOUSEID);
   return overlay::mouse_button(b,event.type==SDL_EVENT_MOUSE_BUTTON_DOWN, event.button.which == SDL_TOUCH_MOUSEID);
  }
  case SDL_EVENT_MOUSE_WHEEL:{
-  if(event.wheel.windowID!=tv)return false;
+  if(!pointer || event.wheel.windowID!=pointerId)return false;
   float y=event.wheel.y,x=event.wheel.x;if(event.wheel.direction==SDL_MOUSEWHEEL_FLIPPED){x=-x;y=-y;}
   return overlay::mouse_wheel(x,y);
  }
  case SDL_EVENT_WINDOW_MOUSE_LEAVE:
-  if(event.window.windowID==tv)overlay::mouse_move(-FLT_MAX,-FLT_MAX);
+  if(pointer && event.window.windowID==pointerId)overlay::mouse_move(-FLT_MAX,-FLT_MAX);
   return false;
  case SDL_EVENT_WINDOW_MOUSE_ENTER:{
-  if(event.window.windowID!=tv)return false;
+  if(!pointer || event.window.windowID!=pointerId)return false;
   float x,y;SDL_GetMouseState(&x,&y);
-  int w=1,h=1;SDL_GetWindowSize(g_prompt_window,&w,&h);
+  int w=1,h=1;SDL_GetWindowSize(pointer,&w,&h);
   overlay::mouse_move(x/std::max(1,w),y/std::max(1,h));
   return false;
  }
@@ -569,6 +589,13 @@ static bool text_entry_event(const SDL_Event& event){
  }
 }
 void handle_event(const SDL_Event& event){
+ // Defer focus loss until update(), after the event queue drains: a TV -> GamePad
+ // handoff must move the menu rather than close it between the loss and gain events.
+ if(event.type==SDL_EVENT_WINDOW_FOCUS_GAINED)
+  update_overlay_window(SDL_GetWindowFromID(event.window.windowID));
+ else if(event.type==SDL_EVENT_WINDOW_HIDDEN || event.type==SDL_EVENT_WINDOW_MINIMIZED ||
+           event.type==SDL_EVENT_WINDOW_SHOWN || event.type==SDL_EVENT_WINDOW_RESTORED)
+  update_overlay_window(SDL_GetKeyboardFocus());
  if((event.type==SDL_EVENT_AUDIO_DEVICE_ADDED||event.type==SDL_EVENT_AUDIO_DEVICE_REMOVED||event.type==SDL_EVENT_AUDIO_DEVICE_FORMAT_CHANGED)&&!event.adevice.recording)audio::flush();
  if (event.type==SDL_EVENT_MOUSE_REMOVED) {
   std::lock_guard lk(g_mu);g_mouse_bindings.remove_device(event.mdevice.which);
@@ -659,6 +686,7 @@ void handle_event(const SDL_Event& event){
  if(event.type==SDL_EVENT_KEY_DOWN||event.type==SDL_EVENT_KEY_UP){int code=keycode(event.key.scancode);if(code>=0){std::lock_guard lk(g_mu);g_keys[code]=event.type==SDL_EVENT_KEY_DOWN&&(g_keys[code]||!event.key.repeat);}}
 }
 void update(){
+ update_overlay_window(SDL_GetKeyboardFocus());
  if(wwhd_trace::enabled()) {
   overlay_trace_sdl::begin(overlay::is_open());
   for(auto [id,pad]:g_controllers) overlay_trace_sdl::pad(id,pad);

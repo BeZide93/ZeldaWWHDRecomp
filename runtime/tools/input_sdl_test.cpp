@@ -27,7 +27,7 @@ static int graphicsRequests=0; static char graphicsKey=0;
 namespace render { uint64_t frame_count(){return 0;} Api active(){return Api::Vulkan;} }
 namespace gx2 { void checkpoint_vulkan_caches(){} }
 namespace gfxvk { bool graphics_hotkey(char key,bool activate){if(activate){++graphicsRequests;graphicsKey=key;}return true;} }
-namespace gfx { int plusPresses=0; void display_plus_pressed(){++plusPresses;} }  // display_modes.cpp: GamePad screen while paused
+namespace gfx { bool drc_window_wanted(){return true;} int plusPresses=0; void display_plus_pressed(){++plusPresses;} }  // display_modes.cpp: GamePad screen while paused
 static bool mouseCamera=false, wheelOption=false;
 namespace mods { double game_time(){return 0;} void filter_pad(input::PadState&){} bool mouse_camera(){return mouseCamera;} bool first_person_wheel(){return wheelOption;} void mouse_button(int,bool){} void mouse_add(float,float){} void mouse_wheel(float){} }
 namespace interp { void set_mode(int){} uint64_t logic_steps(){return 0;} }
@@ -50,7 +50,7 @@ static double shortcutClock=0;
 // a port's controller shortcut (overlay/extensions.h) when platformShortcut: LB + RB + Select, once per
 // press; the overlay keeps the inputs it took from the settings shortcut and reports the poll as taken
 static bool platformShortcut=false,shortcutTook=false;static int platformShortcuts=0;
-namespace overlay { void focus_lost(){}
+namespace overlay { void set_open(bool open,OpenReason,KeyOrigin){overlayOpen=open;} void focus_lost(){}
  void poll_controller_shortcuts(const float* v){static SettingsShortcut sc;static bool latched=false;
   using namespace input_map;bool select=v[kPadOptions]>0.5f;
   if(platformShortcut&&v[kPadLB]>0.5f&&v[kPadRB]>0.5f&&select){if(!latched){latched=true;shortcutTook=true;++platformShortcuts;}}

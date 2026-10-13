@@ -6,6 +6,9 @@
 // changes on their main thread (hostui.h).
 #include "overlay.h"
 #include "pointer.h"
+#ifdef WWHD_SDL_HOST
+#include "window_target.h"
+#endif
 #include "gfx/shader_prebuild.h"
 #include "../audio_out.h"
 #include "guest_hud.h"
@@ -2040,6 +2043,9 @@ void poll_controller_shortcuts(const float* values) {
 bool shortcut_took_input() { return g_shortcut_took.exchange(false); }
 
 void set_open(bool open, OpenReason reason, KeyOrigin origin) {
+#ifdef WWHD_SDL_HOST
+    if (open && window_target::selected.load() == window_target::Window::None) return;
+#endif
     if (g_open.exchange(open) == open) return;
     for (auto& k : g_held_keys) k = false;
     input::release_keys();  // keys held now belong to the menu (opening) or are not stuck in the game (closing)
@@ -2234,7 +2240,11 @@ ImDrawData* frame(float pw, float ph, void (*renderer_init)()) {
             if (layer.wanted(line)) drawn_layers.push_back(&layer);
             if (!line.empty()) toast = std::move(line);
         }
-    const bool stereoPointer=stereo::frame.mode!=stereo::Off && g_stereo_pointer_visible.load();
+    const bool stereoPointer=stereo::frame.mode!=stereo::Off && g_stereo_pointer_visible.load()
+#ifdef WWHD_SDL_HOST
+        && window_target::selected.load()==window_target::Window::TV
+#endif
+        ;
     U.linearized = false;
     // a mod install keeps running (and shows its progress) while the menu is closed
     const bool mods_busy = !setup_run.id.empty() || (U.init && modsui::wants_background());

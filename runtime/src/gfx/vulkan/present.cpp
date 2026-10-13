@@ -1,3 +1,4 @@
+#include "overlay/window_target.h"
 #include "deferred_dispatch.h"
 // Shader presentation matches Metal's source-grid FXAA and scaling filters.
 #include "../../exception_report.h"
@@ -27,6 +28,7 @@
 namespace gfxvk {
 namespace {
 ImDrawData* overlayDraw=nullptr;
+overlay::window_target::DrawFrame overlayFrame;
 const char* vertexSource = R"glsl(#version 450
 layout(location=0) out vec2 uv;
 void main() {
@@ -415,7 +417,7 @@ void compose(VkImage image,VkImageView view,VkImageLayout& layout,VkExtent2D ext
  }
  if(gamepadOverlay)overlay_draw(gamepadOverlay,cmd,format,extent,targetLinear,-1,whiteScale);
  if(overlay) {
-  if (overlay == overlayDraw && stereo::frame.mode != stereo::Off && stereoRight.scan) {
+  if (overlay == overlayDraw && overlayFrame.stereo_packed(stereo::frame.mode != stereo::Off, bool(stereoRight.scan))) {
    overlay_draw(overlay,cmd,format,extent,targetLinear,0,whiteScale);
    overlay_draw(overlay,cmd,format,extent,targetLinear,1,whiteScale);
   } else overlay_draw(overlay,cmd,format,extent,targetLinear,-1,whiteScale);
@@ -428,7 +430,11 @@ void compose(VkImage image,VkImageView view,VkImageLayout& layout,VkExtent2D ext
 }  // namespace
 
 void set_present_plan(const gfx::PresentPlan* plan) { currentPlan=plan; }
-void set_overlay_draw(ImDrawData* draw) { overlayDraw=draw; }
+void set_overlay_draw(overlay::window_target::DrawFrame frame) { overlayDraw=frame.draw; overlayFrame=frame; }
+static ImDrawData* screen_overlay(Screen& screen, uint32_t width, uint32_t height) {
+ if(auto* draw=overlayFrame.for_window(&screen==&R.drc))return draw;
+ return &screen==&R.tv?nullptr:overlay::guesthud::gamepad_frame(width,height);
+}
 
 // Exercise the actual presentation shader and read FP32 values so SDR clipping
 // or a missing HDR push constant cannot pass a CPU-only colour test.
@@ -583,7 +589,7 @@ bool draw_present_screen(Screen& screen,uint32_t imageIndex) {
  if(fxaa_enabled()&&!linear)exception_report::raise("FXAA requires linear scan-buffer filtering");
  int filter=0;auto quads=screen_quads(screen,screen.swapExtent,filter);
  compose(screen.images.at(imageIndex),found->second.views.at(imageIndex),screen.layouts.at(imageIndex),screen.swapExtent,screen.swapFormat,
-         quads,VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,filter,fxaa_enabled(),&screen==&R.tv?overlayDraw:overlay::guesthud::gamepad_frame(screen.swapExtent.width,screen.swapExtent.height),&screen.imageUses.at(imageIndex),screen.hdrOutput);
+         quads,VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,filter,fxaa_enabled(),screen_overlay(screen,screen.swapExtent.width,screen.swapExtent.height),&screen.imageUses.at(imageIndex),screen.hdrOutput);
  return true;
 }
 
@@ -721,7 +727,7 @@ std::vector<uint8_t> compose_offscreen(Screen& screen,uint32_t width,uint32_t he
  try {
   int filter=0;auto quads=screen_quads(screen,VkExtent2D{width,height},filter);
   compose(target.image,target.view,target.layout,VkExtent2D{width,height},target.fmt.pixel,quads,
-          VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,filter,fxaa_enabled(),&screen==&R.tv?overlayDraw:overlay::guesthud::gamepad_frame(width,height),&target.use);
+          VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,filter,fxaa_enabled(),screen_overlay(screen,width,height),&target.use);
   rgba=read_surface_rgba(target,false);  // display-encoded already (sRGB target, or encoded values)
  }catch(...){destroy_surface_image(&target);throw;}
  destroy_surface_image(&target);

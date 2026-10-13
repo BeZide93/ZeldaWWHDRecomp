@@ -27,7 +27,7 @@ namespace ss { void request_save(int){++saves;} void request_load(int){++loads;}
 namespace render { uint64_t frame_count(){return 42;} Api active(){return Api::Vulkan;} }
 namespace gx2 { void checkpoint_vulkan_caches(){} }
 namespace gfxvk { bool graphics_hotkey(char,bool){return false;} }
-namespace gfx { void display_plus_pressed(){} }
+namespace aspect { void set_window_aspect(float){} }
 namespace mods { double game_time(){return 0;} void filter_pad(input::PadState&){} bool mouse_camera(){return false;} bool first_person_wheel(){return false;} void mouse_button(int,bool){} void mouse_add(float,float){} void mouse_wheel(float){} void fast_forward_reset(){} }
 namespace interp { void set_mode(int){} uint64_t logic_steps(){return 0;} }
 namespace timebase { uint64_t now(){return 0;} }
@@ -42,7 +42,133 @@ static void event_key(SDL_Window* window,SDL_Scancode key,bool down,SDL_Keymod m
  e.key.timestamp=123456789;e.key.scancode=key;e.key.mod=mods;e.key.repeat=repeat;
  input::handle_event(e);
 }
-int main(){
+static int window_target_test() {
+ using namespace overlay::window_target;
+ unsetenv("GAMESCOPE_WAYLAND_DISPLAY");unsetenv("WAYLAND_DISPLAY");
+ setenv("XDG_CURRENT_DESKTOP","gamescope",1);
+ assert(gamescope_session());
+ SDL_SetHint(SDL_HINT_VIDEO_DRIVER,"dummy");assert(SDL_Init(SDL_INIT_VIDEO|SDL_INIT_EVENTS));
+ auto* tv=SDL_CreateWindow("TV",1280,720,0);
+ auto* drc=SDL_CreateWindow("GamePad",854,480,0);
+ assert(tv&&drc);gfx::g_has_drc_window=true;input::set_prompt_window(tv);input::set_gamepad_window(drc);
+ SDL_WindowID previousFocus=SDL_GetWindowID(tv);
+ auto focus=[&](SDL_Window* w) {
+  const bool wasOpen=overlay::is_open();
+  SDL_Event e{};e.type=SDL_EVENT_WINDOW_FOCUS_LOST;e.window.windowID=previousFocus;input::handle_event(e);
+  assert(overlay::is_open()==wasOpen); // do not close during a TV/GamePad focus handoff
+  e.type=SDL_EVENT_WINDOW_FOCUS_GAINED;e.window.windowID=SDL_GetWindowID(w);input::handle_event(e);
+  previousFocus=e.window.windowID;
+ };
+ auto release=[&](){overlay::set_open(false);event_key(drc,SDL_SCANCODE_F1,false);SDL_Delay(160);};
+ focus(drc);assert(selected.load()==Window::GamePad);
+ event_key(drc,SDL_SCANCODE_F1,true);assert(overlay::is_open());
+ // Exercise the actual Vulkan swap frame builder, including dimensions and refusal paths.
+ ImDrawData menu,toast;
+ int built=0;
+ auto build=[&](ImDrawData* draw) {
+  const auto window=selected.load();
+  const int before=built;
+  const auto plan=gfx::display_plan(true,1280,720,true,854,480,1280,720,42);
+  auto result=build_frame(window,plan.drc_window,true,{plan.dw,plan.dh,true},{854,480,true},
+   [&](float width,float height) {
+    ++built;assert(width==(window==Window::GamePad?854:1280));
+    assert(height==(window==Window::GamePad?480:720));return draw;
+   },[]{overlay::set_open(false);});
+  assert(built==before+1);return result;
+ };
+ DrawFrame present=build(&menu);
+ assert(present.for_window(true)==&menu && present.for_window(false)==nullptr);
+ for(int i=0;i<5;++i) { // rendering itself never reclaims TV focus
+  present=build(&menu);assert(selected.load()==Window::GamePad&&present.for_window(true)==&menu);
+ }
+ // Stereo packing remains TV-only in every mode, including Full SBS's half-width TV canvas.
+ for(int mode:{stereo::Off,stereo::HalfSBS,stereo::FullSBS,stereo::TAB}) {
+  stereo::set_mode(mode);stereo::latch();
+  const float tvWidth=mode==stereo::FullSBS?640:1280;
+  auto drcFrame=build_frame(selected.load(),true,true,{tvWidth,720,true},{854,480,true},
+   [&](float width,float height) {assert(width==854&&height==480);return &menu;},[]{assert(false);});
+  assert(drcFrame.for_window(true)==&menu&&!drcFrame.for_window(false));
+  assert(!drcFrame.stereo_packed(mode!=stereo::Off,true));
+  auto tvFrame=build_frame(Window::TV,true,true,{tvWidth,720,true},{854,480,true},
+   [&](float width,float height) {assert(width==tvWidth&&height==720);return &menu;},[]{assert(false);});
+  assert(tvFrame.stereo_packed(mode!=stereo::Off,true)==(mode!=stereo::Off));
+  assert(!tvFrame.stereo_packed(mode!=stereo::Off,false));
+ }
+ stereo::set_mode(stereo::Off);stereo::latch();
+ release();event_key(drc,SDL_SCANCODE_F2,true);assert(loads==1);
+ present=build(&toast); // host messages use the same overlay frame, even with menu closed
+ assert(present.for_window(true)==&toast && present.for_window(false)==nullptr);
+ event_key(drc,SDL_SCANCODE_F1,true);assert(overlay::is_open());
+ SDL_Event move{};move.type=SDL_EVENT_MOUSE_MOTION;move.motion.windowID=SDL_GetWindowID(drc);
+ move.motion.x=427;move.motion.y=240;move.motion.which=SDL_TOUCH_MOUSEID;
+ overlay::g_events.clear();input::handle_event(move);
+ assert(overlay::g_events.size()==1);const auto pointer=overlay::g_events.back();
+ assert(pointer.kind==overlay::Event::MousePos&&pointer.x==.5f&&pointer.y==.5f&&pointer.touch);
+ move.motion.windowID=SDL_GetWindowID(tv);input::handle_event(move);assert(overlay::g_events.size()==1);
+ move.motion.windowID=SDL_GetWindowID(drc);move.motion.which=1;input::handle_event(move);assert(!overlay::g_events.back().touch);
+ SDL_Event click{};click.type=SDL_EVENT_MOUSE_BUTTON_DOWN;click.button.windowID=SDL_GetWindowID(drc);
+ click.button.which=SDL_TOUCH_MOUSEID;click.button.button=SDL_BUTTON_LEFT;click.button.x=427;click.button.y=240;
+ input::handle_event(click);assert(overlay::g_events.back().kind==overlay::Event::MouseButton&&overlay::g_events.back().touch);
+ click.type=SDL_EVENT_MOUSE_BUTTON_UP;input::handle_event(click);assert(!overlay::g_events.back().down);
+ SDL_Event wheel{};wheel.type=SDL_EVENT_MOUSE_WHEEL;wheel.wheel.windowID=SDL_GetWindowID(drc);wheel.wheel.y=1;
+ input::handle_event(wheel);assert(overlay::g_events.back().kind==overlay::Event::Wheel&&overlay::g_events.back().y==1);
+ SDL_Event leave{};leave.type=SDL_EVENT_WINDOW_MOUSE_LEAVE;leave.window.windowID=SDL_GetWindowID(drc);
+ input::handle_event(leave);assert(overlay::g_events.back().kind==overlay::Event::MousePos&&overlay::g_events.back().x==-FLT_MAX);
+ const auto pointerCount=overlay::g_events.size();leave.window.windowID=SDL_GetWindowID(tv);
+ input::handle_event(leave);assert(overlay::g_events.size()==pointerCount);
+ SDL_Event enter{};enter.type=SDL_EVENT_WINDOW_MOUSE_ENTER;enter.window.windowID=SDL_GetWindowID(drc);
+ input::handle_event(enter);assert(overlay::g_events.size()==pointerCount+1&&overlay::g_events.back().kind==overlay::Event::MousePos);
+ // Focus changes while open move the menu without another toggle or a blind input hold.
+ focus(tv);assert(overlay::is_open()&&selected.load()==Window::TV);
+ present=build(&menu);assert(present.for_window(false)==&menu&&present.for_window(true)==nullptr);
+ focus(drc);assert(overlay::is_open()&&selected.load()==Window::GamePad);
+ // A render destination can disappear after SDL focus selection. Never build an invisible frame.
+ auto unavailable=[&](Window window,bool separate,Destination destination) {
+  overlay::set_open(true);assert(overlay::is_open());
+  auto result=build_frame(window,separate,true,{1280,720,true},destination,
+   [](float,float)->ImDrawData* {assert(false);return nullptr;},[]{overlay::set_open(false);});
+  assert(result.target==Window::None&&!result.draw&&!overlay::is_open());
+ };
+ unavailable(Window::GamePad,true,{854,480,false}); // no scan buffer / drawable
+ unavailable(Window::GamePad,true,{15,480,true}); // too small for overlay::frame
+ unavailable(Window::GamePad,false,{854,480,true}); // no GamePad present this frame
+ unavailable(Window::None,true,{854,480,true}); // no focused destination
+ overlay::set_open(true);auto failed=build(nullptr);
+ assert(failed.target==Window::None&&!overlay::is_open()); // renderer produced no overlay
+ overlay::set_open(true);
+ // An auxiliary/compositor window taking focus also makes the menu unavailable.
+ auto* auxiliary=SDL_CreateWindow("Controls",32,32,SDL_WINDOW_HIDDEN);assert(auxiliary);
+ focus(auxiliary);assert(selected.load()==Window::None&&!overlay::is_open());
+ overlay::set_open(true);assert(!overlay::is_open());SDL_DestroyWindow(auxiliary);
+ focus(drc);overlay::set_open(true);assert(overlay::is_open());
+ // Losing both destinations refuses all menu-opening paths and releases game input.
+ SDL_HideWindow(tv);SDL_HideWindow(drc);
+ SDL_Event hidden{};hidden.type=SDL_EVENT_WINDOW_HIDDEN;hidden.window.windowID=SDL_GetWindowID(drc);input::handle_event(hidden);
+ assert(selected.load()==Window::None&&!overlay::is_open()&&!overlay::blocks_input());
+ release();event_key(drc,SDL_SCANCODE_F1,true);assert(!overlay::is_open());
+ overlay::set_open(true);assert(!overlay::is_open());
+ float pad[input_map::kPadCount]={};pad[input_map::kPadHome]=1;overlay::poll_controller_shortcuts(pad);assert(!overlay::is_open());
+ // PIP/one-window policy and normal desktops retain the TV destination.
+ setenv("WWHD_DRC_MODE","pip",1);gfx::display_env_overrides();
+ assert(!gfx::drc_window_wanted());
+ const auto pip=gfx::display_plan(true,1280,720,true,854,480,1280,720,42);
+ assert(pip.pip_on&&!pip.drc_window);
+ input::handle_event(hidden);assert(selected.load()==Window::TV);
+ overlay::set_open(true);assert(overlay::is_open());overlay::set_open(false);
+ assert(choose(false,true,Window::GamePad,true,true)==Window::TV);
+ assert(choose(true,false,Window::GamePad,true,false)==Window::TV);
+ SDL_ShowWindow(tv);setenv("WWHD_DRC_MODE","window",1);gfx::display_env_overrides();
+ focus(tv);assert(selected.load()==Window::TV);
+ prompt=true;event_key(tv,SDL_SCANCODE_F1,false);SDL_Delay(160);event_key(tv,SDL_SCANCODE_F1,true);
+ assert(overlay::is_open());prompt=false;overlay::set_open(false);
+ setenv("XDG_CURRENT_DESKTOP","KDE",1);setenv("SteamDeck","1",1);
+ assert(!gamescope_session()); // Steam Deck desktop mode must keep the desktop policy
+ SDL_DestroyWindow(drc);SDL_DestroyWindow(tv);SDL_Quit();
+ puts("gamescope two-window menu/toast present routing, pointer/touch, focus migration, invisible-menu guard, PIP and prompt F1 passed");
+ return 0;
+}
+int main(int argc,char** argv){
+ if(argc>1&&std::string(argv[1])=="--window-target")return window_target_test();
  const auto controlsFile=std::filesystem::temp_directory_path()/("wwhd-overlay-mouse-165-"+std::to_string(getpid())+".json");
  setenv("WWHD_CONTROLS",controlsFile.c_str(),1);
  SDL_SetHint(SDL_HINT_VIDEO_DRIVER,"dummy");assert(SDL_Init(SDL_INIT_VIDEO|SDL_INIT_EVENTS));
