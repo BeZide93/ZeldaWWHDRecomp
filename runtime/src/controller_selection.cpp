@@ -84,14 +84,16 @@ extern "C" void hook_026D50C4(Cpu* c) {
 // leaves its heading visible. Suppress only this owner's background draw until
 // the normal caption transition has replaced it with File Selection.
 extern "C" void f_026F8B54_orig(Cpu*);
+// Parts::draw runs for every HUD part each frame: only the title background pays for a Cpu copy.
 extern "C" void hook_026F8B54(Cpu* c) {
-    Cpu saved = *c;
-    bool automatic = false;
     if (input_map::skip_controller_selection()) {
         uint32_t owner = ld32(GD(0x101F82EC));
-        if (object(owner) && ld32(owner + 0x12C) == c->r[3])
-            automatic = option(c, ld32(owner + 0x130), true) >= 0;
+        if (object(owner) && ld32(owner + 0x12C) == c->r[3]) {
+            Cpu saved = *c;
+            bool automatic = option(c, ld32(owner + 0x130), true) >= 0;
+            *c = saved;
+            if (automatic) return;
+        }
     }
-    *c = saved;
-    if (!automatic) f_026F8B54_orig(c);
+    f_026F8B54_orig(c);
 }
