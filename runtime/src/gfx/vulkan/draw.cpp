@@ -2241,7 +2241,8 @@ bool verify_continued(const uint32_t* r, uint32_t prim) {
   uint64_t fsKey = 0;
   auto* fs = vk::get_fetch_shader(r, &fsKey, R.frame);
   vk::Shader* vs = fs ? vk::translate(r, true, fs, fsKey, R.frame, g_shader_state_gen) : nullptr;
-  vk::Shader* ps = fs ? vk::translate(r, false, fs, fsKey, R.frame, g_shader_state_gen) : nullptr;
+  vk::Shader* ps = fs ? vk::translate(r, false, fs, fsKey, R.frame, g_shader_state_gen,
+                                     vs && vs->ready() ? vs : nullptr) : nullptr;
   DrawTargets t;
   if (fs != c.fs || fsKey != c.fsKey) kind = 0;
   else if (vs != c.vs || !vs || !vs->ready()) kind = 1;
