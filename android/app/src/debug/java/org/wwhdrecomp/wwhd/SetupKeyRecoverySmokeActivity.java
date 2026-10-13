@@ -112,6 +112,8 @@ public final class SetupKeyRecoverySmokeActivity extends Activity {
                 } else if (phase.equals("missing-source-reselect")) {
                     provider.edit().clear().commit();
                     SetupImport.selectKey(this, job, "disc", document("replacementkey"));
+                    require(!SetupImport.keyReplacement(job, "common").exists(), "Single key selected both roles");
+                    SetupImport.selectKey(this, job, "common", document("replacementkey"));
                     config = SetupImport.prepare(this, job, control);
                     readKey(job, config, "disc", 43);
                     readKey(job, config, "common", 43);

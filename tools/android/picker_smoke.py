@@ -222,6 +222,8 @@ def main():
                 (root / path).write_bytes(b"authored unsupported synthetic picker input\n")
             for path in ("disc.key", "common.key"): (root / path).write_bytes(b"*" * 16)
             (root / "replacement.key").write_bytes(b"+" * 16)
+            # Authored Cemu-style list, deliberately distinct from the raw single-key files.
+            (root / "keys.txt").write_text("01" * 16 + "\n" + "02" * 16 + "\n")
             shell("mkdir", "-p", "/sdcard/Documents")
             adb("push", str(root), "/sdcard/Documents/" + fixture)
         shell("am", "force-stop", package)
@@ -249,11 +251,33 @@ def main():
             observations.append(probe("verify"))
             home()
         choose(KINDS["image"], "dump.wux")
+        choose(DISC, "keys.txt")
+        multi_identity, multi_source = selected(key="common_uri")
+        if multi_source.get("disc_uri") != multi_source["common_uri"]:
+            raise AssertionError("Multi-key document did not supply both roles")
+        if start_control().get("enabled") != "true":
+            raise AssertionError("Multi-key document did not enable start")
+        observations.append({"multikey_document_supplied_both_roles": True, **probe("verify")})
+        home()
+        choose(KINDS["image"], "dump.wux")
         identity, source = selected(kind="image")
+        if identity == multi_identity: raise AssertionError("Single-key case reused the multi-key job")
         if source["kind"] != "image": raise AssertionError("Wrong image kind")
         if start_control().get("enabled") != "false": raise AssertionError("Missing keys did not block start")
         choose(DISC, "disc.key")
-        selected(key="disc_uri")
+        _, disc_source = selected(key="disc_uri")
+        if "common_uri" in disc_source:
+            raise AssertionError("Disc-only file also selected the common key")
+        if start_control().get("enabled") != "false":
+            raise AssertionError("Disc-only file enabled start without a common key")
+        if find(COMMON) is None:
+            raise AssertionError("Disc-only file hid the common-key prompt")
+        shell("am", "force-stop", package)
+        home()
+        _, restarted_source = selected(key="disc_uri")
+        if "common_uri" in restarted_source or start_control().get("enabled") != "false" or find(COMMON) is None:
+            raise AssertionError("Restart lost the separate common-key requirement")
+        observations.append({"disc_only_requires_common_before_and_after_restart": True})
         choose(COMMON, "common.key")
         selected(key="common_uri")
         if start_control().get("enabled") != "true": raise AssertionError("Complete input cannot start")

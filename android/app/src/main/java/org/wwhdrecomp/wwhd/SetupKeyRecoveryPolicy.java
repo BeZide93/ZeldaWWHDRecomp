@@ -25,7 +25,7 @@ public final class SetupKeyRecoveryPolicy {
     public static String[] replacementKeys(String key, boolean multiKey, String oldUri, String otherUri,
                                            boolean selectedLost, boolean otherLost) {
         boolean sameLost = selectedLost && oldUri != null && !oldUri.isEmpty() && oldUri.equals(otherUri);
-        return otherUri == null || otherUri.isEmpty() || (multiKey && (sameLost || otherLost)) ?
+        return multiKey && (otherUri == null || otherUri.isEmpty() || sameLost || otherLost) ?
             new String[] {key, other(key)} : new String[] {key};
     }
 

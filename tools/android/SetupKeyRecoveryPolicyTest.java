@@ -37,7 +37,12 @@ public final class SetupKeyRecoveryPolicyTest {
             keys(SetupKeyRecoveryPolicy.replacementKeys(key, true, "lost", "healthy", true, false), key);
             keys(SetupKeyRecoveryPolicy.replacementKeys(key, true, "healthy", "healthy", false, false), key);
             keys(SetupKeyRecoveryPolicy.replacementKeys(key, false, "lost", "lost", true, true), key);
-            keys(SetupKeyRecoveryPolicy.replacementKeys(key, false, "first-selection", "", false, true), key, other);
+            // An absent other role is not evidence that a single-key file supplies it.
+            for (String absent : new String[] {null, ""}) {
+                keys(SetupKeyRecoveryPolicy.replacementKeys(key, false, "", absent, true, true), key);
+                keys(SetupKeyRecoveryPolicy.replacementKeys(key, false, "first-selection", absent, false, true), key);
+                keys(SetupKeyRecoveryPolicy.replacementKeys(key, true, "", absent, true, true), key, other);
+            }
         }
         List<String> attempts = new ArrayList<>();
         IOException discFailure = new IOException("authored inaccessible disc document");
@@ -74,6 +79,14 @@ public final class SetupKeyRecoveryPolicyTest {
         check(multi("\uFEFF# Cemu\r\njunk\r\n" + one + "# comment\r\n" + two + " trailing comment\r\n"), "Cemu list not recognized");
         check(multi(one + " // comment\n" + two + "; comment"), "Inline comments not recognized");
         check(!multi(one + " # single key"), "Single-key file replaced both roles");
+        for (String key : new String[] {"disc", "common"}) {
+            keys(SetupKeyRecoveryPolicy.replacementKeys(key, multi(one), "", "", true, true), key);
+            keys(SetupKeyRecoveryPolicy.replacementKeys(key, multi(one + "\n" + two), "", "", true, true),
+                key, SetupKeyRecoveryPolicy.other(key));
+            keys(SetupKeyRecoveryPolicy.replacementKeys(key,
+                SetupKeyRecoveryPolicy.isMultiKeyDocument(new ByteArrayInputStream(new byte[16])),
+                "", "", true, true), key);
+        }
         check(!multi("junk\n" + one + "0\n" + two), "Malformed entry counted as a key");
         check(!multi(""), "Empty file counted as multi-key");
         check(!SetupKeyRecoveryPolicy.isMultiKeyDocument(new ByteArrayInputStream(new byte[16])), "Raw key counted as multi-key");
