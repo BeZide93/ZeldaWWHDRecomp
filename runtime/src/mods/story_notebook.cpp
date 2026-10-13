@@ -32,8 +32,6 @@ namespace {
 const uint32_t kSavePtr = GD(0x101F84DC);  // save base pointer (d_com_inf_game)
 const std::string kOwner = "port:story-notebook";  // the HUD list's owner (no mod ID has a colon)
 // the notebook's "to continue" line for a step that only works while the quest is tracked
-const char* const kTrackHintLetter = "Show this quest on the chart (track it) to deliver the letter.";
-const char* const kTrackHintTalk = "Show this quest on the chart (track it) to continue.";
 
 // The item menu (HD decomp MENU-menu_main, hd_screen_menu_main.cpp / hd_screen_menu_item.cpp at
 // decomp-readable 02a56a87). The notebook is kept in the Delivery Bag window: its eight places show
@@ -175,14 +173,38 @@ int32_t saved(uint16_t key) {
     return b.usable() ? saved_step(b, key) : kResultNew;
 }
 
+// Where the tracked step's resident stands right now (read from the actor while it is loaded, never
+// written): the chart's marks follow it. Stale after kLiveSteps logic steps without an update (the
+// room was unloaded): the step's catalogue place again.
+struct LivePlace {
+    uint16_t quest = 0;
+    uint8_t step = 0;
+    float x = 0, z = 0;
+    uint64_t at = 0;  // logic step of the last update
+};
+LivePlace g_live;
+constexpr uint64_t kLiveSteps = 30;
+
 // story_chart's source of the tracked quest's marker (game thread)
 bool tracked_marker(float& x, float& z, std::string& label) {
     if (!have_save()) return false;
     std::vector<Quest> storage;
-    rows_now(storage);  // with the manifest's place for the current step
+    const std::vector<Row> rows = rows_now(storage);  // with the manifest's place for the current step
     const Quest* q = tracked_place(storage, book());
-    if (!q) return false;
+    static uint16_t no_place_logged = 0;
+    if (!q) {
+        for (const Row& r : rows)
+            if (r.tracked && no_place_logged != r.quest->key) {
+                no_place_logged = r.quest->key;
+                LOG("[notebook] quest %04X is tracked but its step has no place on the chart%s", r.quest->key,
+                    r.quest->hint.empty() ? "" : (" (" + r.quest->hint + ")").c_str());
+            }
+        return false;
+    }
+    no_place_logged = 0;
     x = q->x, z = q->z, label = q->title;
+    if (g_live.quest == q->key && g_live.step == saved_step(book(), q->key) && g_step.load() - g_live.at <= kLiveSteps)
+        x = g_live.x, z = g_live.z;
     return true;
 }
 
@@ -565,7 +587,6 @@ std::vector<Row> rows_now(std::vector<Quest>& storage) {
     storage = quests();
     if (!have_save()) return {};
     story_mail::Book b = book();
-    const uint16_t tracked = tracked_key(b);
     {
         std::lock_guard lock(g_mu);
         for (Quest& q : storage) {  // the manifest's texts and place for the current step
@@ -584,10 +605,6 @@ std::vector<Row> rows_now(std::vector<Quest>& storage) {
                     }
             }
         }
-        for (Quest& q : storage)  // a step that needs the quest tracked says so
-            for (const Takeover& t : g_takeovers)
-                if (t.quest == q.key && t.step == saved_step(b, q.key) && tracked != q.key && q.hint.empty())
-                    q.hint = t.needs_letter ? kTrackHintLetter : kTrackHintTalk;
     }
     return rows(storage, b);
 }
@@ -611,8 +628,13 @@ bool declare(const std::string& mod, const std::string& mod_name, const mods::js
         Quest* reg = find(mod, q.id);
         reg->hidden = q.journal != "on_enable";
         g_declared.push_back({mod, reg->key, q});
-        for (const ManifestStep& st : q.steps)
-            if (st.has_talk) g_takeovers.push_back({reg->key, uint8_t(st.n), st.resident, st.needs_letter, st.lines, st.reward, st.when});
+        for (const ManifestStep& st : q.steps) {
+            if (st.has_talk && !st.needs_letter && !st.when.any())
+                LOG("[notebook] %s: warning: quest \"%s\" step %u takes over %s with no condition (no letter, no \"available\"): it "
+                    "speaks for the quest whenever the step is current", mod.c_str(), q.id.c_str(), st.n,
+                    npc_catalogue().entry(st.resident)->name.c_str());
+            if (st.has_talk) g_takeovers.push_back({reg->key, uint8_t(st.n), st.resident, st.needs_letter, st.lines, st.reward, st.when, st.follow});
+        }
     }
     // the notebook, its marker on the sea chart and the letters are needed
     note_import();
@@ -868,6 +890,32 @@ void assign_button(Cpu* c) {
     g_original(c, kAssignButton);
 }
 
+// the tracked step's resident (a following one): note where it stands (read-only)
+void note_live_place(Cpu* c, uint32_t npc) {
+    if (!have_save()) return;
+    story_mail::Book b = book();
+    const uint16_t tracked = tracked_key(b);
+    if (!tracked) return;
+    const uint8_t step = saved_step(b, tracked);
+    Resident who = kResidentNone;
+    {
+        std::lock_guard lock(g_mu);
+        for (const Takeover& t : g_takeovers)
+            if (t.quest == tracked && t.step == step && t.follow) who = t.resident;
+    }
+    const NpcEntry* e = npc_catalogue().entry(who);
+    if (!e) return;
+    Cpu probe = *c;
+    const uint32_t stage = g_call(&probe, kPlay, {}) + kPlayStartStage;
+    const uint8_t number = ld8(npc + kPeopleNumber);
+    const int room = int8_t(ld8(npc + kActorRoom));
+    bool here = false;
+    for (const NpcActor& a : e->actors)
+        here |= a.actor_class == "people" && a.people_number == number && (a.room < 0 || a.room == room) && stage_is(stage, a.stage);
+    if (!here || !stage_is(stage, "sea")) return;  // the chart's coordinates are the sea's
+    g_live = {tracked, step, u32_as_f32(ld32(npc + kActorPos)), u32_as_f32(ld32(npc + kActorPos + 8)), g_step.load()};
+}
+
 // getMsg(this): a resident's line. While the tracked quest's step hands this resident a takeover
 // (story_takeover.h), the resident says the quest's line instead: the game's own selection does not
 // run for this talk (it would set its first-talk flag; nothing is set), the list is cleared so the
@@ -890,7 +938,12 @@ void people_message(Cpu* c) {
             for (const NpcActor& a : catalogue.entries[i].actors)
                 here |= a.actor_class == "people" && a.people_number == number && (a.room < 0 || a.room == room) && stage_is(stage, a.stage);
             if (!here) continue;
-            if ((live = live_takeover(g_takeovers, b, Resident(i + 1), event_flags(), hour_now()))) copy = *live;
+            if ((live = live_takeover(g_takeovers, b, Resident(i + 1), event_flags(), hour_now()))) {
+                copy = *live;
+                if (const size_t n = wanting(g_takeovers, b, Resident(i + 1), event_flags(), hour_now()); n > 1)
+                    LOG("[notebook] %zu quests want %s; quest %04X first, the others with later talks", n,
+                        catalogue.entries[i].name.c_str(), copy.quest);
+            }
         }
     }
     if (!live) {
@@ -913,6 +966,7 @@ void people_message(Cpu* c) {
 void people_execute(Cpu* c) {
     const uint32_t npc = c->r[3];
     g_original(c, kPeopleExecute);
+    note_live_place(c, npc);
     if (g_talk.phase == Talk::None || npc != g_talk.npc) return;
     const uint16_t command = ld16(npc + kEventCommand);  // the resident's: its talk
     if (g_talk.phase == Talk::Talking) {

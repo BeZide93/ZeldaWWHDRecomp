@@ -28,6 +28,7 @@ struct ManifestStep {
     bool needs_letter = false;
     std::string lines;   // joined with '\n'
     uint8_t reward = 0;  // a rupee item
+    bool follow = true;  // npc "follow": false keeps the step's place fixed
     Availability when;   // "available": the step's prerequisites
 };
 struct ManifestQuest {
@@ -180,6 +181,8 @@ inline bool parse_quests(const mods::json::Value& manifest, std::vector<Manifest
                 if (s.lines.empty() || s.lines.size() > kMaxLinesBytes || npc.get("lines").array.size() > 3 ||
                     !story_mail::append_utf16(s.lines, true, ignored))
                     return why = "quest " + m.id + ": the lines must be up to three, 240 bytes", false;
+                if (npc.get("follow").type == Value::Bool) s.follow = npc.get("follow").boolean;
+                else if (npc.get("follow").type != Value::Null) return why = "quest " + m.id + ": follow must be true or false", false;
                 const Value& give = npc.get("then").get("give");
                 if (give.type == Value::String && !(s.reward = rupee_item(give.text))) return why = "quest " + m.id + ": unsupported item to give", false;
             }

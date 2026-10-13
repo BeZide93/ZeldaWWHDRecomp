@@ -518,9 +518,9 @@ the item menu, opens its page over the game:
   [Charts and markers](#charts-and-markers), before your chart markers). One quest at a time;
   choosing it again stops showing it. The ring moves when you place the next step elsewhere and
   disappears when the quest is done or the step has no place (the page then says the step has no
-  place on the chart);
-- a step that only works while the quest is shown on the chart (a talk to a resident, below) says
-  so on its page: "Show this quest on the chart (track it) to deliver the letter.";
+  place on the chart). In the zoomed view of that square, the game's red hand-drawn circle (the one
+  it uses for the Fishman's spot) marks the step's exact place; where the game shows its own circle
+  in that square, the game's wins;
 - Up/Down (or the stick) choose, A opens or shows on the chart, B goes back and closes. Taps (and
   the mouse on the GamePad picture) work on the rows and buttons. The game gets no input while the
   page is open.
@@ -588,8 +588,10 @@ code then only reports progress the port can't see (`wwhd_quest_step`, `wwhd_que
   inventory) until it is handed over.
 - `steps`: the notebook shows each step's `text`, `where` and `place` (world `x`/`z`, the
   coordinates of `wwhd_chart_mark`; the tracked quest's ring goes there). A step with an `npc`
-  takes `where` and `place` from the NPC catalogue unless it gives its own. Before step 1 it shows
-  `start.text`.
+  takes `where` and `place` from the NPC catalogue unless it gives its own. While that character is
+  loaded (Link is in its room), the tracked step's marks on the sea chart follow where it actually
+  stands, read from the game without changing anything; otherwise they are at the place. A step's
+  `"npc": {"follow": false, ...}` keeps them at the place. Before step 1 it shows `start.text`.
 - `available` (optional, per step): the step's prerequisites, checked read-only from the save:
   `"event"` / `"not_event"`: the game's event flag numbers (`"0x2D01"`, or a list) that must be set
   / not set; `"time"`: `"day"` (6:00–18:00), `"night"` or `"any"`; and `"text"` for the player.
@@ -607,9 +609,13 @@ A step can have a game resident speak your lines instead of their own, once: the
 the letter, thanks Link, gives the reward through the game's own get-item scene, and the quest is
 done. The port arbitrates, not your mod:
 
-- the talk only takes over while **your quest is the one shown on the chart** (tracked), at that
-  step, and while Link carries its letter (`when.carries`). Untracked, the resident talks exactly
-  as in the game; two mods may use the same resident, and only the tracked quest's talk is live;
+- the talk takes over while your quest is at that step and its conditions hold: Link carries its
+  letter (`when.carries`) and the step's `available` holds. Tracking is not needed; it only decides
+  the sea chart's ring and circle. Otherwise the resident talks exactly as in the game;
+- several quests (from any mods) may want the same resident at once. Then one quest per talk: the
+  quest shown on the chart first, else the one started first; the others come with later talks;
+- a step that takes over a resident with no condition at all (no letter, no `available`) speaks for
+  your quest whenever the step is current; the log warns about it, so give such steps a condition;
 - the port never sets or clears a game flag. For that one talk the resident's own choice of line
   does not run, so a first-meeting line the game would have shown (and the flag it would have
   set) is not lost: it comes with a later talk;

@@ -93,8 +93,17 @@ void original(Cpu* c, uint32_t fn) {
         for (unsigned i = 0; i < 8; i++) st8(pane(i) + 0x44, ld8(pane(i) + 0x44) & ~1);
         break;
     case 0x02677B90: calls.push_back("destroy"); break;
+    case 0x026396FC: calls.push_back("balloon"); break;  // hdBtnMapIcon_c::update: the game placed its circle
     default: assert(!"unexpected original");
     }
+}
+uint32_t game_call(Cpu*, uint32_t fn, std::initializer_list<uint32_t> args) {
+    std::vector<uint32_t> a(args);
+    assert(a.size() == 3 && a[1] == 13 && a[2] == 7);
+    if (fn == 0x02005708) calls.push_back("circle shown");
+    else if (fn == 0x02005674) calls.push_back("circle hidden");
+    else assert(!"unexpected game call");
+    return 0;
 }
 void update() {
     Cpu c{};
@@ -153,7 +162,7 @@ void test_services() {
 
 void test_hooks() {
     // install: all or nothing
-    set_game_calls(original);
+    set_game_calls(original, game_call);
     install([](uint32_t) { return std::string(); }, [](uint32_t, void (*)(Cpu*)) { assert(!"not imported"); });
     assert(!installed());
     note_import();
@@ -161,7 +170,7 @@ void test_hooks() {
             [](uint32_t, void (*)(Cpu*)) { assert(!"installed despite a conflict"); });
     assert(!installed());
     install([](uint32_t) { return std::string(); }, [](uint32_t a, void (*fn)(Cpu*)) { hooked[a] = fn; });
-    assert(installed() && hooked.size() == 3);
+    assert(installed() && hooked.size() == 4);
 
     build_menu();
     // the game shows its own mark on pane 6; the marker takes the first pane the game left hidden
@@ -238,12 +247,68 @@ void test_hooks() {
 
 }  // namespace
 
+// the zoomed square balloon: the tracked step borrows the game's red circle (the Fishman's) while the
+// game doesn't show it, at the spot, with the game's mapping; it gives it back afterwards
+bool tracked_on = true;
+float tracked_x = 1547.0f, tracked_z = -202539.0f;
+bool tracked_source(float& x, float& z, std::string& label) {
+    if (!tracked_on) return false;
+    x = tracked_x, z = tracked_z, label = "Quest";
+    return true;
+}
+void test_balloon() {
+    constexpr uint32_t kIcon = kArena + 0x6000, kOwner = kArena + 0x6400, kInfo = kArena + 0x6800, kCircle = kArena + 0x6C00,
+                       kParent = kArena + 0x7000, kLayout = kArena + 0x7400, kAnims = kArena + 0x7800;
+    st32(kIcon + 0x164, kOwner), st32(kOwner + 0x118, kInfo);
+    st8(kInfo + 4, 0), st8(kInfo + 5, uint8_t(-2));         // Windfall's square: cell 0,-2
+    st16(kInfo + 6, uint16_t(int16_t(-500))), st16(kInfo + 8, 1000);  // the island's point in it
+    st32(kIcon + 0xA8, kCircle), st32(kIcon + 0x94, kParent), st32(kIcon + 0x44, kLayout), st32(kLayout + 0xD4, kAnims);
+    st32(kParent + 0x34, f32_as_u32(2.0f)), st32(kParent + 0x38, f32_as_u32(2.0f));
+    st32(kIcon + 0x150, f32_as_u32(0.01f)), st32(kIcon + 0x154, f32_as_u32(0.01f));
+    st32(kIcon + 0x144, 1);  // zoomed in (detail)
+    set_tracked_source(tracked_source);
+    auto run = [&] {
+        Cpu c{};
+        c.r[3] = kIcon;
+        hooked.at(0x026396FC)(&c);
+    };
+    calls.clear();
+    run();
+    // (1547 - 0 + 500) * 0.01 * 2 = 40.94; -((-202539 + 200000 - 1000) * 0.01 * 2) = 70.78
+    assert((calls == std::vector<std::string>{"balloon", "circle shown"}));
+    assert(near(u32_as_f32(ld32(kCircle + 0x1C)), 40.94f) && near(u32_as_f32(ld32(kCircle + 0x20)), 70.78f));
+    calls.clear();
+    run();
+    assert((calls == std::vector<std::string>{"balloon"}));  // shown once, placed every update
+    // another square: the circle is the game's again
+    st8(kInfo + 4, 1);
+    calls.clear();
+    run();
+    assert((calls == std::vector<std::string>{"balloon", "circle hidden"}));
+    st8(kInfo + 4, 0);
+    run();
+    // the game shows its own circle (Link knows the Fishman's spot): never touched
+    st8(kIcon + 0x158, 1);
+    st32(kCircle + 0x1C, f32_as_u32(5.0f));
+    calls.clear();
+    run();
+    assert((calls == std::vector<std::string>{"balloon"}) && near(u32_as_f32(ld32(kCircle + 0x1C)), 5.0f));
+    st8(kIcon + 0x158, 0);
+    // untracked: nothing
+    tracked_on = false;
+    calls.clear();
+    run();
+    assert((calls == std::vector<std::string>{"balloon"}));
+    set_tracked_source(nullptr);
+}
+
 int main() {
     assert(map(kGlobals, 0x10000) && map(kArena, 0x10000));
     story_store::set_memory(kArena + 0xE000);
     test_record();
     test_services();
     test_hooks();
+    test_balloon();
     std::puts("story_chart_test: ok");
     return 0;
 }

@@ -27,6 +27,7 @@
 
 #include <cstdlib>
 #include <map>
+#include <cmath>
 #include <mutex>
 
 #include "guest_addr.h"
@@ -41,6 +42,22 @@ const uint32_t kSavePtr = GD(0x101F84DC);     // save base pointer (d_com_inf_ga
 const uint32_t kProgress = GC(0x02678B74);    // hdSeaChartMenu_c::updateProgressIcons
 const uint32_t kHidePanes = GC(0x02678B00);   // hdSeaChartMenu_c::hideMenuPanes
 const uint32_t kDestroy = GC(0x02677B90);     // hdSeaChartMenu_c::destroy(flags)
+// The zoomed square balloon (hdBtnMapIcon_c, layout BtnMapBalloon_00): its P_TreasureGet_00 pane is the
+// game's red hand-drawn circle, which marks the Fishman's spot in that square once Link knows it
+// (hd_btn_map_icon_extra.cpp: refreshFish / updateFish / positionFishOnMap / positionFishInDetail;
+// shown by stopping animation 13 slot 7 at its end, hidden by resetting it). While the game doesn't show
+// it, the tracked quest's step borrows it for its exact spot in that square.
+const uint32_t kIconUpdate = GC(0x026396FC);  // hdBtnMapIcon_c::update()
+const uint32_t kAnimStop = GC(0x02005708);    // mapIconStop(animSet, anim, slot)
+const uint32_t kAnimReset = GC(0x02005674);   // mapIconReset(animSet, anim, slot)
+constexpr uint32_t kIconParent = 0x94, kIconTreasure = 0xA8, kIconPosition = 0xE4, kIconMapMode = 0x144,
+                   kIconTranslateScale = 0x148, kIconPointScale = 0x150, kIconFishVisible = 0x158, kIconOwner = 0x164;
+constexpr uint32_t kOwnerInfo = 0x118;              // HdMapIconOwner::mpInfo (HdMapInfo: +4 cell s8 x,y; +6 offset s16 x,y)
+constexpr uint32_t kPartsLayout = 0x44, kLayoutAnimSet = 0xD4;
+constexpr uint32_t kFishAnim = 13, kFishSlot = 7;
+constexpr uint32_t kPaneScale = 0x34;
+constexpr uint32_t kIconPrimary = 0xB8;               // L_LinkPos_00: Link's icon in the balloon (trace: checks the mapping)
+const uint32_t kLinkPtr = GD(0x1046F0B0) + 0x5B34;  // g_dComIfG_gameInfo.play mpPlayerPtr[0]
 
 // hdSeaChartMenu_c (hd_screen_sea_chart_menu.h) and library pane fields (hdPartsPaneSRT_c)
 constexpr uint32_t kMenuPanes = 0x50, kMainPane = 0x70;
@@ -70,6 +87,8 @@ bool g_imported = false, g_installed = false;
 bool g_hidden = false;  // hideMenuPanes ran during the game's update
 TrackedSource g_tracked = nullptr;
 void (*g_original)(Cpu*, uint32_t) = nullptr;
+uint32_t (*g_call)(Cpu*, uint32_t, std::initializer_list<uint32_t>) = nullptr;
+std::map<uint32_t, uint32_t> g_borrowed;  // balloon -> its animation set, while the tracked step uses its circle
 
 bool trace() {
     static const bool on = [] { const char* e = getenv("WWHD_CHART_TRACE"); return e && *e == '1'; }();
@@ -114,9 +133,10 @@ void apply(uint32_t menu) {
         float x, z;
     };
     std::vector<Place> shown;
+    bool tracked = false;
     if (Place t{}; g_tracked) {  // the notebook's tracked quest comes first
         std::string label;
-        if (g_tracked(t.x, t.z, label)) shown.push_back(t);
+        if (g_tracked(t.x, t.z, label)) shown.push_back(t), tracked = true;
     }
     std::lock_guard lock(g_mu);
     for (const Marker& m : g_markers)
@@ -133,6 +153,20 @@ void apply(uint32_t menu) {
                   f32_as_u32(cx + m.x / kSquare * sx), f32_as_u32(cy - m.z / kSquare * sy)};
         show(a);
         applied.push_back(a);
+    }
+    // the tracked quest's ring, logged when it changes (not only with the trace): what the player sees
+    {
+        static std::string last_tracked;
+        char now[128] = "";
+        if (tracked && !applied.empty() && applied[0].index < kStoryPanes)
+            snprintf(now, sizeof now, "the tracked quest's ring is on story pane %u at %.1f,%.1f", applied[0].index, u32_as_f32(applied[0].mx),
+                     u32_as_f32(applied[0].my));
+        else if (tracked)
+            snprintf(now, sizeof now, "the tracked quest's ring waits: every story pane shows a mark of the game");
+        if (last_tracked != now) {
+            if (*now) LOG("[chart] %s", now);
+            last_tracked = now;
+        }
     }
     if (trace()) {
         static std::map<uint32_t, std::string> last;
@@ -241,12 +275,16 @@ std::vector<MarkerView> shown_markers() {
 void note_import() { g_imported = true; }
 bool imported() { return g_imported; }
 bool installed() { return g_installed; }
-void set_game_calls(void (*original)(Cpu*, uint32_t)) { g_original = original; }
+void set_game_calls(void (*original)(Cpu*, uint32_t), uint32_t (*call)(Cpu*, uint32_t, std::initializer_list<uint32_t>)) {
+    g_original = original;
+    g_call = call;
+}
 
 void install(const std::function<std::string(uint32_t)>& replaced_by, const std::function<void(uint32_t, void (*)(Cpu*))>& replace) {
     if (!g_imported || g_installed || !g_original) return;
     const std::pair<uint32_t, void (*)(Cpu*)> hooks[] = {
-        {kProgress, hooks::progress_icons}, {kHidePanes, hooks::hide_panes}, {kDestroy, hooks::destroy}};
+        {kProgress, hooks::progress_icons}, {kHidePanes, hooks::hide_panes}, {kDestroy, hooks::destroy},
+        {kIconUpdate, hooks::icon_update}};
     // all or nothing: a pane moved without the hook that puts it back would stay moved
     for (const auto& [addr, fn] : hooks) {
         std::string other = replaced_by(addr);
@@ -270,9 +308,80 @@ void capture_end() {
         for (const Applied& a : applied)
             if (ld32(menu + kMenuPanes + 4 * a.index) == a.pane) show(a);
 }
-void state_loaded() { g_applied.clear(); }
+void state_loaded() {
+    g_applied.clear();
+    g_borrowed.clear();
+}
 
 namespace hooks {
+
+// hdBtnMapIcon_c::update(): the game places its circle (the Fishman's) first; while the game doesn't show
+// it and the tracked step's spot is in this balloon's square, the circle goes to the spot instead, placed
+// with the same mapping the game uses for its own circle
+void icon_update(Cpu* c) {
+    const uint32_t icon = c->r[3];
+    Cpu keep = *c;
+    g_original(c, kIconUpdate);
+    const uint32_t owner = ld32(icon + kIconOwner), pane = ld32(icon + kIconTreasure), layout = ld32(icon + kPartsLayout);
+    const uint32_t info = owner ? ld32(owner + kOwnerInfo) : 0;
+    const uint32_t anims = layout ? ld32(layout + kLayoutAnimSet) : 0;
+    auto give_back = [&] {
+        auto it = g_borrowed.find(icon);
+        if (it == g_borrowed.end()) return;
+        if (!ld8(icon + kIconFishVisible)) {
+            Cpu call = keep;
+            g_call(&call, kAnimReset, {it->second, kFishAnim, kFishSlot});
+        }
+        g_borrowed.erase(it);
+        if (trace()) LOG("[chart] balloon %08X: the circle is the game's again", icon);
+    };
+    // a world position in this balloon: relative to the island's point in its square, then the game's
+    // own scales (positionFishInDetail / positionFishOnMap). The square of a position, as the game counts
+    // squares: position / 100000, rounded (the sea's centre square is 0,0)
+    const uint32_t parent = ld32(icon + kIconParent);
+    const uint32_t mode = ld32(icon + kIconMapMode);
+    auto place = [&](float x, float z, float& px, float& py) {
+        const int cell_x = int(std::lround(x / kSquare)), cell_y = int(std::lround(z / kSquare));
+        if (!info || cell_x != int8_t(ld8(info + 4)) || cell_y != int8_t(ld8(info + 5))) return false;
+        const float rx = x - float(cell_x) * kSquare - float(int16_t(ld16(info + 6)));
+        const float ry = z - float(cell_y) * kSquare - float(int16_t(ld16(info + 8)));
+        const float psx = parent ? u32_as_f32(ld32(parent + kPaneScale)) : 1.0f, psy = parent ? u32_as_f32(ld32(parent + kPaneScale + 4)) : 1.0f;
+        px = rx * u32_as_f32(ld32(icon + kIconPointScale)) * psx;
+        py = -(ry * u32_as_f32(ld32(icon + kIconPointScale + 4))) * psy;
+        if (mode == 0 || mode == 4) {  // on the map: plus the balloon's own offset
+            px += u32_as_f32(ld32(icon + kIconPosition)) * u32_as_f32(ld32(icon + kIconTranslateScale));
+            py -= u32_as_f32(ld32(icon + kIconPosition + 4)) * u32_as_f32(ld32(icon + kIconTranslateScale + 4));
+        }
+        return true;
+    };
+    if (trace() && info) {  // the mapping checked against the game's own placement of Link's icon
+        static std::map<uint32_t, std::string> last;
+        const uint32_t link = ld32(kLinkPtr), primary = ld32(icon + kIconPrimary);
+        float lx = 0, ly = 0;
+        char line[200] = "";
+        if (link && primary && (ld8(primary + kPaneFlags) & kVisible) &&
+            place(u32_as_f32(ld32(link + 0x314)), u32_as_f32(ld32(link + 0x31C)), lx, ly))
+            snprintf(line, sizeof line, "balloon %08X cell %d,%d mode %u: Link's icon at %.1f,%.1f, the mapping says %.1f,%.1f", icon,
+                     int8_t(ld8(info + 4)), int8_t(ld8(info + 5)), mode, u32_as_f32(ld32(primary + kPaneTranslate)),
+                     u32_as_f32(ld32(primary + kPaneTranslate + 4)), lx, ly);
+        if (*line && last[icon] != line) LOG("[chart] %s", line), last[icon] = line;
+    }
+    float x, z, px = 0, py = 0;
+    std::string label;
+    if (!pane || !info || !anims || ld8(icon + kIconFishVisible) || !g_tracked || !g_tracked(x, z, label)) return give_back();
+    if (!place(x, z, px, py)) return give_back();
+    const int cell_x = int(std::lround(x / kSquare)), cell_y = int(std::lround(z / kSquare));
+    st32(pane + kPaneTranslate, f32_as_u32(px));
+    st32(pane + kPaneTranslate + 4, f32_as_u32(py));
+    st32(pane + kPaneTranslate + 8, 0);
+    st8(pane + kPaneFlags, uint8_t(ld8(pane + kPaneFlags) | kMatrixDirty));
+    if (!g_borrowed.count(icon)) {
+        Cpu call = keep;
+        g_call(&call, kAnimStop, {anims, kFishAnim, kFishSlot});
+        g_borrowed[icon] = anims;
+        LOG("[chart] the tracked quest's circle is in the zoomed square %d,%d at %.1f,%.1f (mode %u)", cell_x, cell_y, px, py, mode);
+    }
+}
 
 // updateProgressIcons(): the game's story marks, then the mod markers on the panes left free
 void progress_icons(Cpu* c) {
@@ -293,9 +402,10 @@ void hide_panes(Cpu* c) {
     g_original(c, kHidePanes);
 }
 
-// destroy(flags): forget the menu's panes
+// destroy(flags): forget the menu's panes (and its balloons)
 void destroy(Cpu* c) {
     g_applied.erase(c->r[3]);
+    g_borrowed.clear();
     g_original(c, kDestroy);
 }
 

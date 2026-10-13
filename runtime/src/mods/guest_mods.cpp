@@ -559,7 +559,7 @@ void init() {
     });
     // Mod charts: host replacements of the sea chart menu's story marks, only when a loaded mod uses
     // the chart services (story_chart.h).
-    story_chart::set_game_calls(call_original);
+    story_chart::set_game_calls(call_original,[](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);});
     story_chart::install([](uint32_t addr) {
         auto it=g_chains.find(addr);return it==g_chains.end()?std::string():it->second.replace_mod;
     },[](uint32_t addr,PpcFunc fn) {

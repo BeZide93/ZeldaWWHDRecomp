@@ -13,6 +13,7 @@
 // Nothing of this runs unless a loaded guest mod imports a wwhd_chart_* service: only then are the
 // sea chart hooks installed (install()).
 #pragma once
+#include <initializer_list>
 #include <cstdint>
 #include <functional>
 #include <string>
@@ -65,7 +66,7 @@ bool imported();
 // (empty: none); replace(addr, fn) installs a host replacement. Nothing is installed on a conflict.
 void install(const std::function<std::string(uint32_t)>& replaced_by, const std::function<void(uint32_t, void (*)(Cpu*))>& replace);
 bool installed();
-void set_game_calls(void (*original)(Cpu*, uint32_t));
+void set_game_calls(void (*original)(Cpu*, uint32_t), uint32_t (*call)(Cpu*, uint32_t, std::initializer_list<uint32_t>));
 
 // Full save states: the game's own pane state is what a state holds. capture_begin() puts the panes
 // the markers use back as the game left them (all guest threads are stopped), capture_end() shows the
@@ -77,6 +78,7 @@ void state_loaded();
 // The hooks, exposed for runtime/tools/story_chart_test.cpp
 namespace hooks {
 void progress_icons(Cpu* c);  // hdSeaChartMenu_c::updateProgressIcons
+void icon_update(Cpu* c);     // hdBtnMapIcon_c::update (the zoomed square balloon)
 void hide_panes(Cpu* c);      // hdSeaChartMenu_c::hideMenuPanes
 void destroy(Cpu* c);         // hdSeaChartMenu_c::destroy
 }  // namespace hooks

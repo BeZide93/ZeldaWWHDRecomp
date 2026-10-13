@@ -74,7 +74,19 @@ inline int reach_step(story_mail::Book& b, uint16_t key, unsigned step) {
     const uint8_t now = saved_step(b, key);
     if (now == kStepDone || step == 0 || step <= now) return now;
     if (step > kMaxStep) return -1;
-    return b.set(story_mail::kRecordQuest, key, uint8_t(step)) ? int(step) : -1;
+    if (!b.set(story_mail::kRecordQuest, key, uint8_t(step))) return -1;
+    if (now == 0 && !b.has(story_mail::kRecordQuestOrder, key)) {  // started: note its place in the start order
+        unsigned last = 0;
+        for (unsigned r = 0; r < b.records(); r++)
+            if (b.record_kind(r) == story_mail::kRecordQuestOrder && b.record_value(r) > last) last = b.record_value(r);
+        b.set(story_mail::kRecordQuestOrder, key, uint8_t(last < 255 ? last + 1 : 255));
+    }
+    return int(step);
+}
+// the quest's place in the start order (1 first; 255 later or unknown)
+inline unsigned start_order(const story_mail::Book& b, uint16_t key) {
+    const uint8_t v = b.get(story_mail::kRecordQuestOrder, key);
+    return v ? v : 255;
 }
 
 // Marks the quest done; it is no longer tracked. Returns kStepDone, or -1 when there is no room.

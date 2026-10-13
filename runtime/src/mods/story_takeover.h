@@ -2,10 +2,11 @@
 // out a reward) instead of the resident's own line, for one talk (docs/mod-sdk-v2.md, "Talking to
 // residents"). Pure code, unit-tested in runtime/tools/story_notebook_test.cpp.
 //
-// The rules (user decisions 2026-10-13), enforced here and not by the mods:
-// - a takeover is only live for the TRACKED quest, at its current step, while Link carries the quest's
-//   letter (if the step needs one); untracked, the resident is the game's;
-// - at most one takeover is live for a resident: the tracked quest is one quest;
+// The rules (user decisions 2026-10-13/14), enforced here and not by the mods:
+// - a takeover is live for every ACTIVE quest at its current step while its conditions hold (the
+//   letter carried, the step's prerequisites); tracking is not needed;
+// - one quest per talk: when several want the resident, the tracked quest's comes first, else the one
+//   started first; the others come with later talks;
 // - the port never sets or clears a game flag for it. The resident's own line selection does not run
 //   for that talk, so a first-talk introduction it would have given is not lost but comes later.
 // Mods can't hook a resident's dialogue themselves; they declare the step (wwhd_quest_talk).
@@ -54,24 +55,39 @@ struct Takeover {
     std::string lines;   // UTF-8, '\n' between lines
     uint8_t reward = 0;  // a rupee item (0x01..0x06) or 0
     Availability when;   // the step's prerequisites (checked by the caller with the save's state)
+    bool follow = true;  // the chart's marks follow the resident while it is loaded (manifest "follow")
 };
 
 inline bool carries(const story_mail::Book& b, uint16_t quest) { return b.get(kRecordCarried, quest) == 1; }
 
-// The live takeover for this resident, or null: the tracked quest's, at its current step, with its
-// letter carried. Several mods may declare the same resident; only the tracked quest's can be live.
+// Does this quest want the resident right now: the step it belongs to is the quest's current one, and
+// its conditions hold (the letter carried, the step's prerequisites)?
+inline bool wants(const Takeover& t, const story_mail::Book& b, const uint8_t* event_flags, int hour) {
+    const uint8_t step = saved_step(b, t.quest);
+    return step && step != kStepDone && t.step == step && (!t.needs_letter || carries(b, t.quest)) &&
+           (!event_flags || available(t.when, event_flags, hour));
+}
+// The live takeover for this resident, or null. Every active quest may want it (tracking is not
+// needed): none, the game's line; one, that quest's line; several, the tracked quest's first, else the
+// one started first. One quest per talk.
 inline const Takeover* live_takeover(const std::vector<Takeover>& all, const story_mail::Book& b, Resident who,
                                      const uint8_t* event_flags = nullptr, int hour = 12) {
     if (!b.usable()) return nullptr;
     const uint16_t tracked = tracked_key(b);
-    if (!tracked) return nullptr;
-    const uint8_t step = saved_step(b, tracked);
-    if (!step || step == kStepDone) return nullptr;
-    for (const Takeover& t : all)
-        if (t.quest == tracked && t.resident == who && t.step == step && (!t.needs_letter || carries(b, tracked)) &&
-            (!event_flags || available(t.when, event_flags, hour)))
-            return &t;
-    return nullptr;
+    const Takeover* best = nullptr;
+    for (const Takeover& t : all) {
+        if (t.resident != who || !wants(t, b, event_flags, hour)) continue;
+        if (t.quest == tracked) return &t;
+        if (!best || start_order(b, t.quest) < start_order(b, best->quest)) best = &t;
+    }
+    return best;
+}
+// How many quests want this resident right now (more than one: the others wait for a later talk)
+inline size_t wanting(const std::vector<Takeover>& all, const story_mail::Book& b, Resident who, const uint8_t* event_flags = nullptr,
+                      int hour = 12) {
+    size_t n = 0;
+    for (const Takeover& t : all) n += t.resident == who && wants(t, b, event_flags, hour);
+    return n;
 }
 
 // After the talk: the letter is handed over and the quest is done (it moves to the notebook's archive).

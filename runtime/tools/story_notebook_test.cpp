@@ -130,13 +130,15 @@ void test_record() {
     assert(reach_step(b, k, 3) == 3 && toggle_tracked(b, k));
     assert(raw[0] == story_mail::kMagic && raw[1] == 2 && raw[2] == 0 && raw[3] == 0);
     assert(raw[8] == 4 && raw[9] == uint8_t(k >> 8) && raw[10] == uint8_t(k) && raw[11] == 3);
-    assert(raw[12] == 5 && raw[13] == uint8_t(k >> 8) && raw[14] == uint8_t(k) && raw[15] == 1);
+    assert(raw[12] == 9 && raw[13] == uint8_t(k >> 8) && raw[14] == uint8_t(k) && raw[15] == 1);  // started first
+    assert(raw[16] == 5 && raw[17] == uint8_t(k >> 8) && raw[18] == uint8_t(k) && raw[19] == 1);
+    assert(start_order(b, k) == 1 && start_order(b, quest_key("mod", "other")) == 255);
     uint8_t saved_copy[story_mail::kBookSize];
     memcpy(saved_copy, raw, sizeof raw);  // saved and loaded with the save file
     Book loaded(saved_copy);
     assert(saved_step(loaded, k) == 3 && tracked_key(loaded) == k && loaded.get(story_mail::kRecordItem, story_mail::kItemNotebook) == 1);
     // untracking frees the record; other records stay where they are
-    assert(!toggle_tracked(loaded, k) && saved_copy[12] == 0 && saved_copy[15] == 0 && saved_copy[11] == 3);
+    assert(!toggle_tracked(loaded, k) && saved_copy[16] == 0 && saved_copy[19] == 0 && saved_copy[11] == 3);
     // a full record: a new step can't be saved, existing ones still change
     uint8_t full[story_mail::kBookSize] = {};
     Book fb(full);
@@ -860,23 +862,29 @@ void test_takeover_rules() {
     Book b(raw);
     const uint16_t a = quest_key("mod-a", "q"), bq = quest_key("mod-b", "q");
     std::vector<Takeover> all = {{a, 1, harbour(), true, "A", 6}, {bq, 1, harbour(), true, "B", 0}};
-    // nothing tracked: nobody speaks for the mods
+    // nothing started: nobody speaks for the mods
+    assert(!live_takeover(all, b, harbour()));
+    // started (a first, then b), letters carried, nothing tracked: the quest started first speaks
     assert(reach_step(b, a, 1) == 1 && reach_step(b, bq, 1) == 1);
     assert(b.set(kRecordCarried, a, 1) && b.set(kRecordCarried, bq, 1));
-    assert(!live_takeover(all, b, harbour()));
-    // two mods declare the same resident: only the tracked quest's takeover is live
-    assert(toggle_tracked(b, bq));
     const Takeover* t = live_takeover(all, b, harbour());
+    assert(t && t->quest == a && wanting(all, b, harbour()) == 2);
+    // the tracked quest comes first
+    assert(toggle_tracked(b, bq));
+    t = live_takeover(all, b, harbour());
     assert(t && t->quest == bq && t->lines == "B");
     assert(toggle_tracked(b, a));
     t = live_takeover(all, b, harbour());
     assert(t && t->quest == a);
-    // another step, no letter, another resident: not live
-    assert(!live_takeover(all, b, kResidentNone));
+    // only one wants it: that one, tracked or not
+    while (tracked_key(b)) toggle_tracked(b, tracked_key(b));
     b.erase(kRecordCarried, a);
-    assert(!live_takeover(all, b, harbour()));
+    t = live_takeover(all, b, harbour());
+    assert(t && t->quest == bq && wanting(all, b, harbour()) == 1);
+    // another resident; a step that isn't current: not live
+    assert(!live_takeover(all, b, kResidentNone));
     assert(b.set(kRecordCarried, a, 1));
-    assert(reach_step(b, a, 2) == 2 && !live_takeover(all, b, harbour()));
+    assert(reach_step(b, a, 2) == 2 && reach_step(b, bq, 2) == 2 && !live_takeover(all, b, harbour()));
     // completing hands the letter over and finishes the quest (it leaves the tracked list)
     uint8_t raw2[story_mail::kBookSize] = {};
     Book c(raw2);
@@ -912,14 +920,15 @@ void test_takeover_hooks() {
     st32(kNpc + 0x8A8, 0x1234), st32(kNpc + 0x8AC, 0);
     // the event flags of the save, to prove nothing is set
     std::vector<uint8_t> flags(mem::ptr(kSave + 0x644), mem::ptr(kSave + 0x644) + 0x100);
-    // untracked: the resident's own line
+    // no quest wants her (no letter carried): the resident's own line
     while (tracked_key(b)) toggle_tracked(b, tracked_key(b));
+    assert(carry("lantern", "tale", false) == 1 && carry("other", "tale", false) == 1);
     calls.clear();
     assert(call(0x022C6C68, kNpc) == 0x2CF1 && calls == std::vector<std::string>{"getMsg"});
-    // the hint in the notebook says to track it
+    // tracking is not needed any more: the notebook doesn't ask for it
     std::vector<Quest> storage;
-    for (const Row& r : rows_now(storage))
-        if (r.quest->mod == "lantern") assert(r.quest->hint.find("track it") != std::string::npos);
+    for (const Row& r : rows_now(storage)) assert(r.quest->hint.find("track it") == std::string::npos);
+    assert(carry("lantern", "tale", true) == 1 && carry("other", "tale", true) == 1);
     // the OTHER mod's quest tracked: its line, never the lantern's
     assert(toggle_tracked(b, quest_key("other", "tale")));
     // the same resident indoors (another stage) or in another room is not the catalogue's: the game's line
@@ -1049,7 +1058,7 @@ void test_manifest() {
     for (const Row& r : rows_now(storage))
         if (r.quest->id == "lantern")
             assert(r.quest->next == "Bring the letter to his friend." && r.quest->has_place && r.quest->x == 3827 &&
-                   r.quest->hint.find("track it") != std::string::npos);
+                   r.quest->hint.empty());
 }
 
 void test_available() {

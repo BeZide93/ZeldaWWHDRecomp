@@ -242,10 +242,11 @@ s32 wwhd_quest_flag(const char* quest_id, u32 n);
 /* A letter Link carries for the quest (shown in the Delivery Bag, never in the game's inventory):
  * carried 1 gives it, 0 takes it away. */
 s32 wwhd_quest_carry(const char* quest_id, s32 carried);
-/* Talking to a game resident: at `step`, while this quest is the TRACKED quest and Link carries its
+/* Talking to a game resident: at `step`, while this quest is at that step and Link carries its
  * letter, talking to `resident` shows `lines` (UTF-8, up to three lines, 240 bytes) instead of the
  * resident's own line, takes the letter, gives `reward` (a rupee item 0x01..0x06, 0 none, through the
- * game's get-item scene) and the quest is done. Untracked, the resident is the game's. `resident` is a
+ * game's get-item scene) and the quest is done. When several quests want the resident, the one shown on the
+ * chart talks first, else the one started first. `resident` is a
  * name from the NPC catalogue (docs/mod-sdk-v2.md), e.g. "windfall-kreeb"; an unknown name is
  * refused (WWHD_QUEST_INVALID). */
 s32 wwhd_quest_talk(const char* quest_id, u32 step, const char* resident, const char* lines, u32 reward);
