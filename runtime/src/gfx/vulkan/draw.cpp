@@ -1857,16 +1857,6 @@ void report_continued_stats() {
   st.totalVerified = totalVerified;
   st.mismatchKinds = kinds;
 }
-VkPrimitiveTopology primitive_topology(uint32_t prim) {
-  switch (prim) {
-  case 1: return VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
-  case 2: return VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
-  case 3: case 0x12: return VK_PRIMITIVE_TOPOLOGY_LINE_STRIP;
-  case 4: case 5: case 0x13: case 0x14: return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-  case 6: return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
-  default: return VK_PRIMITIVE_TOPOLOGY_MAX_ENUM;
-  }
-}
 // Render targets of a draw (both paths); false: the draw has no target.
 bool resolve_targets(const uint32_t* r, vk::Shader* ps, DrawTargets& t) {
   t = {};
