@@ -802,6 +802,11 @@ if(Python3_Interpreter_FOUND)
 endif()
 
 add_test(NAME register_blocks COMMAND register_blocks_test)
+add_executable(state_metadata_validation_test runtime/tools/state_metadata_validation_test.cpp)
+target_include_directories(state_metadata_validation_test PRIVATE runtime/src runtime/include)
+target_compile_options(state_metadata_validation_test PRIVATE -UNDEBUG)
+add_test(NAME state_metadata_validation COMMAND state_metadata_validation_test)
+
 add_test(NAME scheduler_tick COMMAND scheduler_tick_test)
 add_test(NAME full_state_header COMMAND full_state_header_test)
 add_test(NAME mod_manager COMMAND mod_manager_test)
