@@ -323,8 +323,16 @@ struct Prev {
     uint32_t cam = 0; CamState s{}; bool valid = false; bool snap = true; uint64_t snap_step = ~0ull;
     CamState drawn{};          // the camera as camera_draw drew it on pass drawn_pass (blended or exact)
     uint64_t drawn_pass = ~0ull;
+    uint32_t projection[16]{}; // raw projection-view words before true60's actor rollback
+    uint64_t projection_pass = ~0ull;
 };
 Prev g_prev[4];
+
+void capture_projection(Prev& p) {
+    if (!enabled()) return;
+    memcpy(p.projection, ppc_ptr(p.cam + 0x1A4), sizeof p.projection);
+    p.projection_pass = g_passes;
+}
 
 Prev* prev_for(uint32_t cam) {
     for (auto& p : g_prev)
@@ -349,8 +357,9 @@ bool record_pass() { return g_hold && g_phase >= g_step_n; }
 // blend can also snap internally (a >45 degree turn or abrupt collision zoom).
 float reticle_t() {
     if (!g_blend_draw) return 1.0f;
+    const uint32_t view = ld32(GD(0x1046F0B0) + 0x5FA4); // mDoLib_project's active view
     for (const auto& p : g_prev) {
-        if (!p.cam || p.drawn_pass != g_passes) continue;
+        if (!p.cam || p.cam != view || p.drawn_pass != g_passes) continue;
         if (p.snap_step == g_logic_steps && p.snap) return 1.0f;
         CamState cur = read_cam(p.cam);
         bool moved = false, exact = true;
@@ -361,6 +370,17 @@ float reticle_t() {
         if (moved && exact) return 1.0f;
     }
     return pass_t();
+}
+
+bool reticle_projection(uint32_t& address, uint32_t* words) {
+    const uint32_t view = ld32(GD(0x1046F0B0) + 0x5FA4);
+    for (const auto& p : g_prev) {
+        if (p.cam != view || p.projection_pass != g_passes) continue;
+        address = view + 0x1A4;
+        memcpy(words, p.projection, sizeof p.projection);
+        return true;
+    }
+    return false;
 }
 
 }  // namespace interp
@@ -395,6 +415,7 @@ extern "C" void hook_024FFC40(Cpu* c) {
         g_cam_blended = p->valid;
         cam_trace(cam, "blended");
         f_024FFC40_orig(c);
+        capture_projection(*p);
         g_cam_blended = false;
         write_cam(cam, cur);
         return;
@@ -408,6 +429,7 @@ extern "C" void hook_024FFC40(Cpu* c) {
         p->drawn_pass = ~0ull;  // (drawn with the preview: the stars keep the camera as it is)
         true60::camera_draw_preview(true);
         f_024FFC40_orig(c);
+        capture_projection(*p);
         true60::camera_draw_preview(false);
         return;
     }
@@ -419,6 +441,7 @@ extern "C" void hook_024FFC40(Cpu* c) {
         const uint32_t lo = GD(0x10100000), hi = 0x10500000;
         before.assign((uint32_t*)ppc_ptr(lo), (uint32_t*)ppc_ptr(hi));
         f_024FFC40_orig(c);
+        capture_projection(*p);
         const uint32_t* cur = (const uint32_t*)ppc_ptr(lo);
         for (size_t i = 0; i < before.size(); i++)
             if (cur[i] != before[i]) cnt[lo + 4 * (uint32_t)i]++;
@@ -438,6 +461,7 @@ extern "C" void hook_024FFC40(Cpu* c) {
         return;
     }
     f_024FFC40_orig(c);
+    capture_projection(*p);
 }
 
 // Models. J3DModel::calc (027F4D5C, actor Execute or Draw) writes the world (joint) matrices:

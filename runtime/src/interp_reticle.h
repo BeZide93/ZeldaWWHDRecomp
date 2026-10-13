@@ -6,15 +6,16 @@
 namespace interp::reticle {
 using Point = std::array<float, 3>;
 
-// Screen endpoints belong to logic steps, not draw passes. Hold projections
-// may use the preceding render pass's camera and must not replace the endpoint.
+// World endpoints belong to logic steps, not draw passes. Project their blend
+// through the drawn camera, then restore the original gameplay point. Repeated
+// hold draws must not feed a blended position into the endpoint history.
 struct History {
     Point previous{}, current{};
     uint64_t step = ~uint64_t(0);
-    uint32_t source = 0;
+    uint64_t source = 0;
     bool valid = false;
 
-    Point sample(Point exact, uint64_t now, uint32_t identity, float t) {
+    Point sample(Point exact, uint64_t now, uint64_t identity, float t) {
         if (now != step || identity != source) {
             valid = source == identity && step != ~uint64_t(0) && step + 1 == now;
             previous = current;

@@ -241,4 +241,4 @@
 
 023D813C # daPy_sightPacket_c::setSight: aiming marker projection scope
 020CBB70 # daBoomerang_sightPacket_c::setSight: target marker projection scope
-025F1018 # mDoLib_projectViewport: scoped aiming-marker diagnostics
+025F1018 # mDoLib_projectViewport: project scoped interpolated marker points through the drawn camera

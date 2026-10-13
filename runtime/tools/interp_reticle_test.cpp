@@ -5,21 +5,22 @@
 
 using namespace interp::reticle;
 
-// A stationary world target traverses the screen as the camera turns. Logic
-// projections provide the endpoints; hold projections see the preceding draw
-// camera and deliberately supply a conflicting position here.
+// A camera-relative aim point must track the translating draw camera, rather
+// than jumping towards the next logic endpoint on the first draw of each step.
 int main() {
     for (int frames : {1, 2, 4, 8}) {
         History h;
-        h.sample({640, 360, 0}, 10, 1, 1);
+        h.sample({0, 0, -100}, 10, 1, 1);
         for (int step = 11; step < 20; ++step) {
-            float before = 640 - float(step - 11) * 16;
-            float exact = before - 16;
+            float oldEye = float(step - 11) * 4;
+            float eye = oldEye + 4;
             for (int pass = 1; pass <= frames; ++pass) {
                 float t = float(pass) / frames;
-                Point p = h.sample({pass == 1 ? exact : exact + 32, 360, 0}, step, 1, t);
-                assert(std::abs(p[0] - (before - t * 16)) < 0.0001f);
-                assert(p[1] == 360 && p[2] == 0);
+                Point p = h.sample({eye, 0, -100}, step, 1, t);
+                float drawnEye = oldEye + t * 4;
+                float x = 640 + 640 * (p[0] - drawnEye) / -p[2];
+                assert(std::abs(x - 640) < .0001f);
+                if (pass < frames) assert(640 * (eye - drawnEye) / 100 > 0);
             }
         }
     }
@@ -33,5 +34,21 @@ int main() {
     assert(h.sample(b, 5, 2, .5f) == b); // target slot reused by another actor
     h = {};
     assert(h.sample(a, 5, 2, .5f) == a); // state load
+    // Keep game speed can change the number of drawn passes between steps,
+    // including an exact-only step when there is no time for an in-between.
+    h = {};
+    h.sample({0, 0, -100}, 20, 1, 1);
+    uint64_t step = 20;
+    float eye = 0;
+    for (int frames : {4, 2, 1, 8, 2, 4}) {
+        ++step;
+        float before = eye;
+        eye += 4;
+        for (int pass = 1; pass <= frames; ++pass) {
+            float t = float(pass) / frames;
+            Point p = h.sample({eye, 0, -100}, step, 1, t);
+            assert(std::abs(p[0] - (before + t * 4)) < .0001f);
+        }
+    }
     std::puts("interp_reticle: PASS");
 }
