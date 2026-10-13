@@ -259,9 +259,7 @@ public class SetupActivity extends Activity {
                 JSONObject source = SetupStore.read(new File(current, "source.json"));
                 if (!source.getString("kind").equals("image")) throw new Exception("Keys are only needed for disc images");
                 getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                SetupImport.selectKey(current, request == DISC ? "disc" : "common", uri);
-                String other = request == DISC ? "common" : "disc";
-                if (!source.has(other + "_uri")) SetupImport.selectKey(current, other, uri);
+                SetupImport.selectKey(this, current, request == DISC ? "disc" : "common", uri);
                 if (new File(current, "job.json").isFile())
                     actionMessage = "Replacement key file selected. Tap Start / resume to read it and retry. Your dump copy is retained.";
             } else if (request == FOLDER || request == ARCHIVE || request == IMAGE) {

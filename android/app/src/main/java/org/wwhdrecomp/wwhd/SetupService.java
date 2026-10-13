@@ -258,11 +258,11 @@ public class SetupService extends Service {
             File active = configuration.getParentFile();
             JSONObject value = SetupStore.read(configuration);
             if (value.getJSONObject("input").optString("kind").equals("image")) {
-                for (String key : new String[] {"disc", "common"}) {
-                    android.os.ParcelFileDescriptor descriptor = SetupKeyAccess.open(this, active, value, key);
-                    descriptors.add(descriptor);
-                    arguments.put("--" + key + "-key-fd").put(Integer.toString(descriptor.getFd()));
-                }
+                java.util.Map<String, android.os.ParcelFileDescriptor> opened = SetupKeyRecoveryPolicy.openBoth(
+                    key -> SetupKeyAccess.open(this, active, value, key));
+                descriptors.addAll(opened.values());
+                for (java.util.Map.Entry<String, android.os.ParcelFileDescriptor> entry : opened.entrySet())
+                    arguments.put("--" + entry.getKey() + "-key-fd").put(Integer.toString(entry.getValue().getFd()));
             }
             EmbeddedPython.execute(this, module, arguments.toString(), () -> checkPause(configuration.getParentFile()));
         } finally {

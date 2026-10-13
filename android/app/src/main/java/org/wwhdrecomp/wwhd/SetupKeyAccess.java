@@ -41,7 +41,10 @@ public final class SetupKeyAccess {
         } catch (SecurityException | IOException | IllegalArgumentException lost) {
             File record = new File(job, "key-access.json");
             JSONObject value = record.isFile() ? SetupStore.read(record) : new JSONObject().put("schema", 1);
-            value.put(key, true);
+            for (String lostKey : SetupKeyRecoveryPolicy.lostKeys(key, uri,
+                    source.optString(SetupKeyRecoveryPolicy.other(key) + "_uri"))) {
+                if (legacyFile(job, input, lostKey) == null) value.put(lostKey, true);
+            }
             SetupStore.write(record, value);
             // Provider diagnostics may include private URIs; expose only the role and recovery action.
             throw new Missing(key);
@@ -52,10 +55,13 @@ public final class SetupKeyAccess {
         return record.isFile() && SetupStore.read(record).optBoolean(key);
     }
     public static void clearFailure(File job, String key) throws Exception {
+        clearFailures(job, new String[] {key});
+    }
+    public static void clearFailures(File job, String[] keys) throws Exception {
         File record = new File(job, "key-access.json");
         if (record.isFile()) {
             JSONObject value = SetupStore.read(record);
-            value.remove(key);
+            for (String key : keys) value.remove(key);
             SetupStore.write(record, value);
         }
     }

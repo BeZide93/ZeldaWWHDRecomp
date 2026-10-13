@@ -34,21 +34,52 @@ public final class SetupImport {
         return new File(job, "replace-" + key + "-key.json");
     }
 
-    /** Queue only the key URI; the worker reads it at its next safe start; key bytes are never copied. */
-    public static void selectKey(File job, String key, Uri uri) throws Exception {
+    private static String selectedKeyUri(File job, JSONObject source, String key) throws Exception {
         File pending = keyReplacement(job, key);
+        return pending.isFile() ? SetupStore.read(pending).getString("uri") : source.optString(key + "_uri");
+    }
+
+    private static boolean lostKey(Context context, File job, String key, String uri) throws Exception {
+        if (SetupKeyAccess.failed(job, key) || uri.isEmpty()) return true;
+        for (android.content.UriPermission permission : context.getContentResolver().getPersistedUriPermissions())
+            if (permission.isReadPermission() && permission.getUri().toString().equals(uri)) return false;
+        return true;
+    }
+
+    /** A multi-key selection repairs linked or lost roles together, using only URI metadata on disk. */
+    public static void selectKey(Context context, File job, String key, Uri uri) throws Exception {
+        JSONObject source = SetupStore.read(new File(job, "source.json"));
+        String other = SetupKeyRecoveryPolicy.other(key);
+        String oldUri = selectedKeyUri(job, source, key), otherUri = selectedKeyUri(job, source, other);
+        boolean multiKey;
+        try (InputStream input = context.getContentResolver().openInputStream(uri)) {
+            if (input == null) throw new IOException("Cannot read selected key file; choose the key again");
+            multiKey = SetupKeyRecoveryPolicy.isMultiKeyDocument(input);
+        }
+        String[] keys = SetupKeyRecoveryPolicy.replacementKeys(key, multiKey, oldUri, otherUri,
+            lostKey(context, job, key, oldUri), lostKey(context, job, other, otherUri));
+        selectKeys(job, keys, uri);
+    }
+
+    /** Queue only the key URI; single-role callers retain their existing behaviour. */
+    public static void selectKey(File job, String key, Uri uri) throws Exception {
+        selectKeys(job, new String[] {key}, uri);
+    }
+
+    private static void selectKeys(File job, String[] keys, Uri uri) throws Exception {
         JSONObject source = SetupStore.read(new File(job, "source.json"));
         if (!source.getString("kind").equals("image")) throw new IOException("Keys are only needed for disc images");
         if (new File(job, "job.json").isFile()) {
             String state = SetupStore.read(new File(job, "host.json")).optString("state");
             if (!state.equals("failed") && !(state.equals("paused") && new File(job, "manual-pause.json").isFile()))
                 throw new IOException("Pause setup and wait for its checkpoint before changing keys");
-            SetupStore.write(pending, new JSONObject().put("schema", 1).put("uri", uri.toString()));
+            for (String key : keys)
+                SetupStore.write(keyReplacement(job, key), new JSONObject().put("schema", 1).put("uri", uri.toString()));
         } else {
-            source.put(key + "_uri", uri.toString());
+            for (String key : keys) source.put(key + "_uri", uri.toString());
             SetupStore.write(new File(job, "source.json"), source);
         }
-        SetupKeyAccess.clearFailure(job, key);
+        SetupKeyAccess.clearFailures(job, keys);
     }
 
     private static void replaceKeys(Context context, File job, JSONObject configuration, Control control) throws Exception {

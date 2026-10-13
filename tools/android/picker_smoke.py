@@ -272,9 +272,9 @@ def main():
             if selected()[0] != identity or preservation(identity) != preserved: raise AssertionError("Image access repair discarded private state")
             observations.append({"image_access_repaired": probe("verify"), "wrong_document_rejected": True, "private_state_preserved": True})
             probe("revoke_common")
-            wait_text("Common key: choose it again")
+            wait_text("Common key: choose the key again")
             if start_control().get("enabled") != "false": raise AssertionError("Lost key access did not block start")
-            choose("Common key: choose it again", "common.key")
+            choose("Common key: choose the key again", "common.key")
             wait_text("Common key chosen (change)")
             if selected()[0] != identity: raise AssertionError("Key access repair replaced the job")
             observations.append({"key_access_repaired": probe("verify")})
@@ -317,29 +317,54 @@ def main():
         wait_text("Private dump retained")
         job_root = "no_backup/ondevice/jobs/" + identity
         before_key_retry = {name: private(job_root + "/" + name) for name in
-                            ("source.json", "job.json", "input/dump", "input/common.key", "import-checkpoints/0.json")}
-        old_disc = private(job_root + "/input/disc.key")
-        if any(value is None for value in before_key_retry.values()) or old_disc != b"*" * 16:
-            raise AssertionError("Private image/key correction fixture is incomplete")
+                            ("source.json", "job.json", "input/dump", "import-checkpoints/0.json")}
+        def no_private_keys():
+            if any(private(job_root + "/input/" + key + ".key") is not None for key in ("disc", "common")):
+                raise AssertionError("New job saved private key copies")
+            configured = json.loads(private(job_root + "/job.json"))["input"]
+            if any(key + "_key" in configured for key in ("disc", "common")):
+                raise AssertionError("New job retained private key destinations")
+        if any(value is None for value in before_key_retry.values()):
+            raise AssertionError("Private image correction fixture is incomplete")
+        no_private_keys()
+        before_source = json.loads(before_key_retry["source.json"])
         choose("Disc key chosen (change)", "replacement.key")
-        wait_text("Replacement key selected")
+        wait_text("Replacement key file selected")
         pending = private(job_root + "/replace-disc-key.json")
         if not pending or "replacement.key" not in json.loads(pending)["uri"]:
             raise AssertionError("Picker did not queue correction for the imported job")
-        if private(job_root + "/input/disc.key") != old_disc:
-            raise AssertionError("UI replaced a private key before the worker checkpoint")
+        no_private_keys()
+        if private(job_root + "/source.json") != before_key_retry["source.json"]:
+            raise AssertionError("UI applied replacement before the worker checkpoint")
         shell("am", "force-stop", package)
         home()
         if private(job_root + "/replace-disc-key.json") != pending:
             raise AssertionError("App restart lost the pending key correction")
         observations.append({"key_replacement_after_restart": probe("apply_key_replacement")})
-        if private(job_root + "/input/disc.key") != b"+" * 16 or private(job_root + "/replace-disc-key.json") is not None:
-            raise AssertionError("Worker did not consume the corrected private key")
-        if any(private(job_root + "/" + name) != value for name, value in before_key_retry.items()):
-            raise AssertionError("Key correction changed private dump, manifest or other key")
+        no_private_keys()
+        if private(job_root + "/replace-disc-key.json") is not None:
+            raise AssertionError("Worker did not consume the corrected key URI")
+        after_source = json.loads(private(job_root + "/source.json"))
+        expected_source = {**before_source, "disc_uri": json.loads(pending)["uri"]}
+        if after_source != expected_source:
+            raise AssertionError("Key correction changed more than the selected key URI")
+        if any(private(job_root + "/" + name) != value for name, value in before_key_retry.items() if name != "source.json"):
+            raise AssertionError("Key correction changed private dump or manifest")
         if selected()[0] != identity: raise AssertionError("Key correction selected another job")
         observations.append({"imported_key_corrected_same_job": True,
-                             "dump_manifest_and_other_key_unchanged": True})
+                             "dump_manifest_and_other_key_unchanged": True, "no_private_key_copies": True})
+        observations.append({"legacy_keys_seeded": probe("seed_legacy_keys")})
+        for key in ("disc", "common"):
+            if private(job_root + "/input/" + key + ".key") != b"*" * 16:
+                raise AssertionError("Legacy key fixture is incomplete")
+        shell("am", "force-stop", package)
+        home()
+        observations.append({"legacy_keys_resumed": probe("apply_key_replacement")})
+        for key in ("disc", "common"):
+            if private(job_root + "/input/" + key + ".key") != b"*" * 16:
+                raise AssertionError("Interrupted legacy job lost a key")
+        observations.append({"legacy_keys_completed": probe("complete_legacy_keys")})
+        no_private_keys()
         home()
         open_picker(KINDS["archive"])
         for attempt in range(6):
