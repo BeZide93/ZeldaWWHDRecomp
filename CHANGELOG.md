@@ -7,6 +7,11 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Ports can bring their own renderer** (PR #187, issue #185, thanks @Pulpparty): a platform port (for example a
+  Switch build with deko3d) can now register its own renderer at start-up (`gfx/renderer_ext.h`) without editing the
+  renderer or GX2 code. Nothing changes for Metal and Vulkan: the renderer choice, menus, shader caches and
+  performance stay as they were.
+
 - **Mouse buttons and the wheel can be bound in Controls** (issue #165, thanks @PNOAGAMER): left, right, middle, side
   buttons 4/5 and wheel up/down are now bindable like keys, so the game can be played fully with mouse and keyboard
   together with the mouse camera (Mods > Built-in). Bound mouse buttons drive the game while the mouse camera has
