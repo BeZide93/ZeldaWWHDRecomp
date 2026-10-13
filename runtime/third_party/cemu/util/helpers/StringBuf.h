@@ -54,22 +54,7 @@ public:
 
 	void add(const char* appendedStr)
 	{
-		if (this->limit == 0)
-			return;  // out of memory (constructor): no room, not even for the '\0'
-		const char* outputStart = (char*)(this->str + this->length);
-		char* output = (char*)outputStart;
-		const char* outputEnd = (char*)(this->str + this->limit - 1);
-		while (output < outputEnd)
-		{
-			char c = *appendedStr;
-			if (c == '\0')
-				break;
-			*output = c;
-			appendedStr++;
-			output++;
-		}
-		this->length += (uint32)(output - outputStart);
-		*output = '\0';
+		add(std::string_view(appendedStr));  // grows like the others instead of cutting the text at the reservation
 	}
 
 	void add(std::string_view appendedStr)
