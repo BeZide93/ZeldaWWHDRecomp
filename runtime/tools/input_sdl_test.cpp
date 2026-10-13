@@ -15,6 +15,8 @@
 #include "platform/android_controller.h"
 #include "overlay/binding_capture.h"
 #include "overlay/settings_shortcut.h"
+#include "overlay/toggle_guard.h"
+#include "platform/keycodes.h"
 static int audioResets=0;
 namespace audio {void flush(){++audioResets;}}
 static int savedSlot=0, loadedSlot=0, saveRequests=0, loadRequests=0;
@@ -35,6 +37,9 @@ void log_msg(const char*,...){}
 // (overlay/text_entry.h) shows while promptShown: overlay::key takes every key then, as the real one does
 static bool promptShown=false;static int promptKeys=0;static std::string promptText;
 static bool overlayOpen=false;
+// Matrix: real SDL routing and shared production guard; the overlay API is a lightweight model
+// (no renderer/game). MENU112_BASELINE pairs the pre-fix router with its original F1 semantics.
+static bool menuMatrix=false; static double keyClock=0; static overlay::ToggleGuard keyGuard;
 static bool lastPointerTouch=false;
 static int pointerEvents=0;
 // Home / Select toggle overlayOpen in the input pump through the real SettingsShortcut (settings_shortcut.h)
@@ -42,13 +47,24 @@ static double shortcutClock=0;
 // a port's controller shortcut (overlay/extensions.h) when platformShortcut: LB + RB + Select, once per
 // press; the overlay keeps the inputs it took from the settings shortcut and reports the poll as taken
 static bool platformShortcut=false,shortcutTook=false;static int platformShortcuts=0;
-namespace overlay { void poll_controller_shortcuts(const float* v){static SettingsShortcut sc;static bool latched=false;
+namespace overlay { void focus_lost(){}
+ void poll_controller_shortcuts(const float* v){static SettingsShortcut sc;static bool latched=false;
   using namespace input_map;bool select=v[kPadOptions]>0.5f;
   if(platformShortcut&&v[kPadLB]>0.5f&&v[kPadRB]>0.5f&&select){if(!latched){latched=true;shortcutTook=true;++platformShortcuts;}}
   if(!select)latched=false;if(latched)select=false;
   const auto a=sc.poll(shortcutClock,select,v[input_map::kPadHome]>0.5f,overlayOpen);if(a!=SettingsShortcut::None)overlayOpen=a==SettingsShortcut::Open;}
  bool shortcut_took_input(){const bool took=shortcutTook;shortcutTook=false;return took;}
- bool key(int,bool,bool,int){if(promptShown)++promptKeys;return promptShown;} bool is_open(){return overlayOpen;} bool blocks_input(){return promptShown||overlayOpen;}
+ bool key(int code,bool down,bool repeat,int mods,KeyOrigin){
+  if(promptShown){++promptKeys;return true;}
+  if(!menuMatrix)return false;
+#ifdef MENU112_BASELINE
+  const bool press=down&&!repeat;
+#else
+  const bool press=code==kVK_F1&&keyGuard.press(down,repeat,keyClock);
+#endif
+  if(code==kVK_F1&&!mods){if(press)overlayOpen=!overlayOpen;return true;}
+  return overlayOpen;
+ } bool is_open(){return overlayOpen;} bool blocks_input(){return promptShown||overlayOpen;}
  bool captures(){return promptShown||overlayOpen;}
  bool mouse_move(float,float,bool touch){lastPointerTouch=touch;++pointerEvents;return overlayOpen;}
  bool mouse_button(int,bool,bool touch){lastPointerTouch=touch;++pointerEvents;return overlayOpen;} bool mouse_wheel(float,float){return false;}
@@ -67,7 +83,60 @@ static void set_env(const char* name,const char* value){
  if(value)setenv(name,value,1);else unsetenv(name);
 #endif
 }
-int main(){
+static int menu_matrix(){
+ menuMatrix=true;
+ SDL_SetHint(SDL_HINT_VIDEO_DRIVER,"dummy");assert(SDL_Init(SDL_INIT_VIDEO|SDL_INIT_EVENTS));
+ auto* tv=SDL_CreateWindow("TV",32,32,SDL_WINDOW_HIDDEN);
+ auto* drc=SDL_CreateWindow("GamePad",32,32,SDL_WINDOW_HIDDEN);
+ assert(tv&&drc);input::set_prompt_window(tv);
+#ifndef MENU112_BASELINE
+ input::set_gamepad_window(drc);
+#endif
+ auto reset=[](){overlayOpen=false;keyGuard=overlay::ToggleGuard{};keyClock+=1;};
+ auto key=[&](SDL_Window* w,bool down,int slot=1,SDL_Keymod mods=SDL_KMOD_NONE){
+  SDL_Event e{};e.type=down?SDL_EVENT_KEY_DOWN:SDL_EVENT_KEY_UP;e.key.windowID=SDL_GetWindowID(w);
+  e.key.scancode=SDL_Scancode(SDL_SCANCODE_F1+slot-1);e.key.mod=mods;input::handle_event(e);
+ };
+ auto focus=[&](){SDL_Event e{};e.type=SDL_EVENT_WINDOW_FOCUS_LOST;e.window.windowID=SDL_GetWindowID(tv);input::handle_event(e);
+  e.type=SDL_EVENT_WINDOW_FOCUS_GAINED;e.window.windowID=SDL_GetWindowID(drc);input::handle_event(e);};
+ auto result=[](const char* name){printf("%s: %s\n",name,overlayOpen?"open":"closed");};
+ reset();key(tv,true);focus();result("focus after F1");assert(overlayOpen);
+ reset();key(tv,true);keyClock+=.016;key(tv,true);result("duplicate F1 down on TV");
+#ifdef MENU112_BASELINE
+ assert(!overlayOpen);
+#else
+ assert(overlayOpen);
+#endif
+ reset();key(tv,true);keyClock+=.016;key(tv,false);focus();key(tv,true);result("F1 down/up/down on TV across focus");
+#ifdef MENU112_BASELINE
+ assert(!overlayOpen);
+#else
+ assert(overlayOpen);
+#endif
+ reset();key(tv,true);keyClock+=.016;focus();key(drc,true);result("duplicate F1 down on GamePad");assert(overlayOpen);
+ reset();key(tv,true);key(tv,false);keyClock+=.016;focus();key(drc,true);result("F1 down/up/down with second down on GamePad");assert(overlayOpen);
+#ifndef MENU112_BASELINE
+ reset();key(tv,true);focus();key(drc,false);keyClock+=.2;key(tv,true);
+ result("release on GamePad then deliberate F1 on TV");assert(!overlayOpen);
+#endif
+ reset();overlay::SettingsShortcut view;
+ assert(view.poll(0,true,false,false)==overlay::SettingsShortcut::None);
+ assert(view.poll(.5,true,false,false)==overlay::SettingsShortcut::Open);overlayOpen=true;focus();
+ assert(view.poll(.6,false,false,true)==overlay::SettingsShortcut::None);result("View hold/release across focus");assert(overlayOpen);
+ reset();for(int slot=1;slot<=5;++slot)key(drc,true,slot,SDL_KMOD_SHIFT);
+ for(int slot=2;slot<=5;++slot)key(drc,true,slot);
+ printf("GamePad save/load requests: %d/%d\n",saveRequests,loadRequests);
+#ifdef MENU112_BASELINE
+ assert(saveRequests==0&&loadRequests==0);
+#else
+ assert(saveRequests==5&&loadRequests==4);
+#endif
+ promptShown=true;int saved=saveRequests,loaded=loadRequests;
+ key(drc,true,1,SDL_KMOD_SHIFT);key(drc,true,2);assert(saveRequests==saved&&loadRequests==loaded);promptShown=false;
+ SDL_DestroyWindow(drc);SDL_DestroyWindow(tv);SDL_Quit();return 0;
+}
+int main(int argc,char** argv){
+ if(argc>1&&std::string(argv[1])=="--menu-matrix")return menu_matrix();
  SDL_SetHint(SDL_HINT_VIDEO_DRIVER,"dummy");
  assert(SDL_Init(SDL_INIT_EVENTS|SDL_INIT_VIDEO));
  SDL_Event device{};device.type=SDL_EVENT_AUDIO_DEVICE_REMOVED;device.adevice.recording=false;

@@ -57,6 +57,10 @@ static overlay::DeviceGates<SDL_JoystickID> g_gates;  // update(): one per devic
 static std::vector<SDL_JoystickID> g_order;  // connect order: the oldest still present is dominant
 static std::set<SDL_JoystickID> g_rumble_controllers;  // the ones that have a rumble motor
 static SDL_Window* g_prompt_window=nullptr;
+static SDL_Window* g_gamepad_window=nullptr;
+void set_gamepad_window(SDL_Window* window){g_gamepad_window=window;}
+static bool game_window(SDL_WindowID id){return (g_prompt_window&&id==SDL_GetWindowID(g_prompt_window))||(g_gamepad_window&&id==SDL_GetWindowID(g_gamepad_window));}
+static const char* window_name(SDL_WindowID id){return g_prompt_window&&id==SDL_GetWindowID(g_prompt_window)?"TV":g_gamepad_window&&id==SDL_GetWindowID(g_gamepad_window)?"GamePad":"other";}
 static std::function<void(bool,std::u16string)> g_pending,g_done;
 static std::u16string g_initial,g_text;
 static int g_max_len=0,g_pending_max_len=0;
@@ -179,7 +183,7 @@ void release_keys(){mods::fast_forward_reset();std::lock_guard lk(g_mu);memset(g
 void held_keys(bool* keys){std::lock_guard lk(g_mu);for(int i=0;i<256;i++)keys[i]=g_keys[i]||g_script_keys[i];}
 void controller_values(float* out){std::lock_guard lk(g_mu);std::copy(std::begin(g_values),std::end(g_values),out);}
 void host_controller_values(float* out){controller_values(out);}
-// settings overlay (overlay/overlay.h): keys, mouse and wheel of the TV window. True = the overlay took
+// settings overlay (overlay/overlay.h): keys from both game windows; pointer from the TV. True = the overlay took
 // the event (F1, or anything while it is open).
 static int overlay_mods(SDL_Keymod m){
  return (m&SDL_KMOD_SHIFT?overlay::kShift:0)|(m&SDL_KMOD_CTRL?overlay::kCtrl:0)|(m&SDL_KMOD_ALT?overlay::kAlt:0)|(m&SDL_KMOD_GUI?overlay::kSuper:0);
@@ -189,13 +193,13 @@ static bool overlay_event(const SDL_Event& event){
  const SDL_WindowID tv=SDL_GetWindowID(g_prompt_window);
  switch(event.type){
  case SDL_EVENT_KEY_DOWN: case SDL_EVENT_KEY_UP:{
-  if(event.key.windowID!=tv)return false;
+  if(!game_window(event.key.windowID))return false;
   int code=keycode(event.key.scancode);
   // paste in an overlay text field: Dear ImGui reads the clipboard text the host passes here
   if(event.type==SDL_EVENT_KEY_DOWN&&event.key.scancode==SDL_SCANCODE_V&&(event.key.mod&(SDL_KMOD_CTRL|SDL_KMOD_GUI))&&overlay::wants_text()){
    char* clip=SDL_GetClipboardText();overlay::set_clipboard_text(clip?clip:"");SDL_free(clip);
   }
-  return code>=0&&overlay::key(code,event.type==SDL_EVENT_KEY_DOWN,event.key.repeat,overlay_mods(event.key.mod));
+  return code>=0&&overlay::key(code,event.type==SDL_EVENT_KEY_DOWN,event.key.repeat,overlay_mods(event.key.mod), {event.key.windowID,event.key.timestamp,window_name(event.key.windowID)});
  }
  case SDL_EVENT_TEXT_INPUT: return overlay::text(event.text.text);  // typed into an overlay text field
  case SDL_EVENT_MOUSE_MOTION:{
@@ -538,7 +542,7 @@ static bool text_entry_event(const SDL_Event& event){
  case SDL_EVENT_TEXT_EDITING:text_entry::preedit(event.edit.text);return true;
  case SDL_EVENT_KEY_DOWN:case SDL_EVENT_KEY_UP:{
   int code=keycode(event.key.scancode);
-  return code>=0&&overlay::key(code,event.type==SDL_EVENT_KEY_DOWN,event.key.repeat,overlay_mods(event.key.mod));
+  return code>=0&&overlay::key(code,event.type==SDL_EVENT_KEY_DOWN,event.key.repeat,overlay_mods(event.key.mod), {event.key.windowID,event.key.timestamp,window_name(event.key.windowID)});
  }
  default:return false;
  }
@@ -550,7 +554,12 @@ void handle_event(const SDL_Event& event){
  if(event.type==SDL_EVENT_GAMEPAD_ADDED&&!getenv("WWHD_NO_CONTROLLERS")){open_controller(event.gdevice.which);note_dominant_labels();}
  if(event.type==SDL_EVENT_GAMEPAD_REMOVED)close_controller(event.gdevice.which);
  if(event.type==SDL_EVENT_GAMEPAD_SENSOR_UPDATE){g_sensor_seen[event.gsensor.which]=SDL_GetTicks();if(!getenv("WWHD_NO_HOST_INPUT")&&!overlay::blocks_input())sensor_event(event.gsensor);return;}
- if(event.type==SDL_EVENT_WINDOW_FOCUS_LOST)release_keys();
+ static const bool trace=getenv("WWHD_OVERLAY_TRACE")&&std::string(getenv("WWHD_OVERLAY_TRACE"))=="1";
+ if(trace&&(event.type==SDL_EVENT_WINDOW_FOCUS_LOST||event.type==SDL_EVENT_WINDOW_FOCUS_GAINED))
+  LOG("[overlay] focus %s window %s id %u timestamp %llu",event.type==SDL_EVENT_WINDOW_FOCUS_LOST?"lost":"gained",window_name(event.window.windowID),event.window.windowID,(unsigned long long)event.window.timestamp);
+ if(trace&&(event.type==SDL_EVENT_KEY_DOWN||event.type==SDL_EVENT_KEY_UP)&&(event.key.scancode==SDL_SCANCODE_F1||event.key.scancode==SDL_SCANCODE_ESCAPE))
+  LOG("[overlay] key %s %s window %s id %u timestamp %llu repeat %d",SDL_GetScancodeName(event.key.scancode),event.type==SDL_EVENT_KEY_DOWN?"down":"up",window_name(event.key.windowID),event.key.windowID,(unsigned long long)event.key.timestamp,event.key.repeat);
+ if(event.type==SDL_EVENT_WINDOW_FOCUS_LOST){release_keys();overlay::focus_lost();}
  if(text_entry_event(event))return;
  if(g_done){
   if(event.type==SDL_EVENT_KEY_DOWN){
@@ -571,9 +580,9 @@ void handle_event(const SDL_Event& event){
  // the Screenshot binding (F10 by default), in any game window; posted test keys take this path too
  if(event.type==SDL_EVENT_KEY_DOWN&&!event.key.repeat){int code=keycode(event.key.scancode);if(code>=0&&screenshot::key_down(code))return;}
  if(test_event(event))return;  // posted test keys reach only the overlay (and the Screenshot binding)
- // Save states belong to the game window, not auxiliary controls/text windows.
+ // Save states belong to either game window, not auxiliary controls/text windows.
  if((event.type==SDL_EVENT_KEY_DOWN||event.type==SDL_EVENT_KEY_UP) &&
-    g_prompt_window && event.key.windowID==SDL_GetWindowID(g_prompt_window) &&
+    game_window(event.key.windowID) &&
     event.key.scancode>=SDL_SCANCODE_F1 && event.key.scancode<=SDL_SCANCODE_F5){
   if(event.type==SDL_EVENT_KEY_DOWN && !event.key.repeat){
    const int slot=int(event.key.scancode-SDL_SCANCODE_F1)+1;

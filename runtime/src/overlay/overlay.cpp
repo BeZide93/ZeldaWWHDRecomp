@@ -77,6 +77,9 @@ namespace gfxvk { bool buffer_cache_enabled(); }  // gfx/vulkan/buffer_cache.h
 #include "../perf_metrics.h"
 #include "../build_info.h"
 #include "settings_shortcut.h"
+#include "toggle_guard.h"
+#include "open_reason.h"
+#include "host_focus.h"
 #include "binding_capture.h"
 #include "mobile_ui.h"
 #include "../report_header.h"
@@ -550,7 +553,7 @@ void tab_saves() {
             ImGui::BeginDisabled(!s.used || !s.compatible);
             if (ImGui::Button("Load")) {
                 ss::request_load(i);
-                set_open(false);
+                set_open(false, OpenReason::LoadSlot);
             }
             ImGui::EndDisabled();
             ImGui::PopID();
@@ -637,7 +640,7 @@ void tab_saves_crash_recovery() {
         ImGui::BeginDisabled(!a.used);
         if (ImGui::Button("Load")) {
             crashrec::request_load(i);
-            set_open(false);
+            set_open(false, OpenReason::LoadSlot);
         }
         ImGui::EndDisabled();
         ImGui::SameLine();
@@ -1947,9 +1950,9 @@ void settings_window() {
     }
     ImGui::End();
     // B (not while choosing an input or in a list) or the close button closes the menu
-    if (!open) set_open(false);
+    if (!open) set_open(false, OpenReason::CloseButton);
     if (U.cap_action < 0 && navigation_pressed(input_map::face_input(input_map::kB)) && !g_pad_b_used && !ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId))
-        set_open(false);
+        set_open(false, OpenReason::B);
     g_pad_b_used = false;
 }
 
@@ -1968,11 +1971,11 @@ void poll_controller_shortcuts(const float* values) {
     static SettingsShortcut shortcut;
     const auto action = shortcut.poll(now_s(), pad[input_map::kPadOptions] > 0.5f,
                                      pad[input_map::kPadHome] > 0.5f, is_open());
-    if (action != SettingsShortcut::None) set_open(action == SettingsShortcut::Open);
+    if (action != SettingsShortcut::None) set_open(action == SettingsShortcut::Open, shortcut.reason());
 }
 bool shortcut_took_input() { return g_shortcut_took.exchange(false); }
 
-void set_open(bool open) {
+void set_open(bool open, OpenReason reason, KeyOrigin origin) {
     if (g_open.exchange(open) == open) return;
     for (auto& k : g_held_keys) k = false;
     input::release_keys();  // keys held now belong to the menu (opening) or are not stuck in the game (closing)
@@ -1982,7 +1985,8 @@ void set_open(bool open) {
         U.just_opened = true;
         U.slots_time = -1;
     }
-    LOG("[overlay] %s", open ? "opened" : "closed");
+    const auto message = open_message(open, reason, origin, render::frame_count());
+    LOG("%s", message.c_str());
 }
 // inputs still held when the overlay closes stay from the game in the hosts' input pumps (release_gate.h)
 bool blocks_input() { return captures(); }
@@ -1994,26 +1998,29 @@ void set_perf_shown(bool on) {
     hostui::post([on] { hostui::set("perfOverlay", on ? "1" : "0"); });
 }
 
-bool key(int code, bool down, bool repeat, int mods) {
+void focus_lost() {
+    for (auto& k : g_held_keys) k = false;
+    if (captures()) push({Event::Focus});
+}
+
+bool key(int code, bool down, bool repeat, int mods, KeyOrigin origin) {
     if (g_no_host_keys) return false;
+    static ToggleGuard f1;
+    const bool f1_press = code == kVK_F1 && f1.press(down, repeat, now_s());
+    if (!is_open() && text_entry::active()) { text_entry::key(code, down, repeat); return true; }
 #ifdef __APPLE__
     // Cmd+, (the macOS settings shortcut; the AppKit host gets it as the app menu's Settings... item)
     if (code == kVK_ANSI_Comma && (mods & kSuper) && !g_capturing_keys.load()) {
-        if (down && !repeat) set_open(!is_open());
+        if (down && !repeat) set_open(!is_open(), OpenReason::API, origin);
         return true;
     }
 #endif
     // F1 (no modifiers; Shift+F1 saves slot 1) toggles; Esc closes
     if (code == kVK_F1 && !(mods & (kShift | kCtrl | kAlt | kSuper))) {
-        if (down && !repeat && !g_capturing_keys.load()) set_open(!is_open());
+        if (f1_press && !g_capturing_keys.load()) set_open(!is_open(), OpenReason::F1, origin);
         if (!g_capturing_keys.load()) return true;
     }
-    if (!is_open()) {
-        // the game's text prompt (text_entry.h) has the keyboard while it shows
-        if (!text_entry::active()) return false;
-        text_entry::key(code, down, repeat);
-        return true;
-    }
+    if (!is_open()) return false;
     if (code >= 0 && code < 256 && !repeat) g_held_keys[code] = down;
     if (g_capturing_keys.load()) {
         if (down && !repeat) {
@@ -2024,7 +2031,7 @@ bool key(int code, bool down, bool repeat, int mods) {
         return true;
     }
     if (code == kVK_Escape && down && !repeat) {
-        set_open(false);
+        set_open(false, OpenReason::Esc, origin);
         return true;
     }
     push({Event::Key, code, down, 0, 0, mods});
@@ -2206,6 +2213,10 @@ ImDrawData* frame(float pw, float ph, void (*renderer_init)()) {
         case Event::MouseButton: io.AddMouseSourceEvent(e.touch ? ImGuiMouseSource_TouchScreen : ImGuiMouseSource_Mouse); mouse_used = true; overlay_trace::mouse_button(io, e.code, e.down); break;
         case Event::Wheel: mouse_used |= e.x != 0 || e.y != 0; overlay_trace::wheel(io, e.x, e.y); break;
         case Event::Text: io.AddInputCharactersUTF8(e.text.c_str()); break;
+        case Event::Focus:
+            // Clear ImGui keys/buttons in event order; the overlay stays active on the other window.
+            release_focus_inputs(io);
+            break;
         default: break;
         }
     }

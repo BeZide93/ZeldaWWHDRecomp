@@ -1244,3 +1244,13 @@ if(Java_JAVA_EXECUTABLE AND Java_JAVAC_EXECUTABLE)
     "-DWORK=${CMAKE_BINARY_DIR}/setup_presentation_test" "-DSOURCE=${CMAKE_SOURCE_DIR}"
     -P ${CMAKE_SOURCE_DIR}/runtime/tools/setup_presentation_test.cmake)
 endif()
+
+# issue #112: menu toggle debounce and transition diagnostics, without game data.
+add_executable(overlay_toggle_test runtime/tools/overlay_toggle_test.cpp)
+target_include_directories(overlay_toggle_test PRIVATE runtime/src)
+target_compile_options(overlay_toggle_test PRIVATE -UNDEBUG)
+target_link_libraries(overlay_toggle_test PRIVATE imgui)
+add_test(NAME overlay_toggle COMMAND overlay_toggle_test)
+if(WWHD_SDL_HOST)
+  add_test(NAME overlay_focus_matrix COMMAND input_sdl_test --menu-matrix)
+endif()

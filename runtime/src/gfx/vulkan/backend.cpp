@@ -3609,6 +3609,7 @@ void init() {
   });
   mods::mouse_init(R.tv.window);
   input::set_prompt_window(R.tv.window);
+  input::set_gamepad_window(R.drc.window);
   input::init();
   install_graphics_menu(R.tv.window);
   ::hostui::load_saved_options();  // graphics and GamePad screen options saved by the settings overlay (settings.ini)

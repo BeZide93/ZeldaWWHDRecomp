@@ -40,7 +40,9 @@ void poll_controller_shortcuts(const float* values);
 // is released (release_gate.h). Always false without platform shortcuts.
 bool shortcut_took_input();
 bool is_open();             // any thread
-void set_open(bool open);   // any thread
+enum class OpenReason { API, F1, Esc, Home, View, B, CloseButton, LoadSlot, Focus };
+struct KeyOrigin { uint32_t window = 0; uint64_t timestamp = 0; const char* name = "host"; };
+void set_open(bool open, OpenReason reason = OpenReason::API, KeyOrigin origin = {});   // any thread
 // the game sees no input: the overlay has it (captures()). Controller inputs held when it closes stay
 // from the game until each is released (the hosts' input pumps, release_gate.h).
 bool blocks_input();
@@ -55,8 +57,10 @@ void set_perf_shown(bool on);
 // ---- host input (main thread)
 // Key codes are macOS virtual key codes (kVK_*); the SDL host maps to them (platform/keycodes.h).
 enum Mods : int { kShift = 1, kCtrl = 2, kAlt = 4, kSuper = 8 };
-// returns true when the overlay used the key: F1 toggles, and every key while it is open
-bool key(int code, bool down, bool repeat, int mods);
+// Release UI keys on host focus loss without changing the menu or shortcut latch.
+void focus_lost();
+// Returns true when the overlay used the key: F1 toggles, and every key while it is open.
+bool key(int code, bool down, bool repeat, int mods, KeyOrigin origin = {});
 // pointer in the TV window, normalised to its content area (0..1 from the top left); return true while
 // the overlay is open (the event is the overlay's, not the game's or the mouse camera's)
 // typed characters (UTF-8, after the key event that produced them); true while the overlay is open
