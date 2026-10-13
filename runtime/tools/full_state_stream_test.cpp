@@ -5,6 +5,8 @@
 #include <fstream>
 namespace config {std::string game_dir="/nonexistent-synthetic-state-test";}
 void log_msg(const char*,...) {}
+namespace mem {std::vector<AllocRec> runtime_alloc_log(){return {{kRuntimeStart,32,0}};}}
+namespace dispatch {std::vector<std::pair<uint32_t,std::string>> host_functions(){return {{0xc2000000,"synthetic"}};}}
 namespace {
 std::vector<uint8_t> file_bytes(const std::string& path) {
     std::ifstream in(path,std::ios::binary);return {std::istreambuf_iterator<char>(in),{}};
@@ -109,5 +111,17 @@ int main() {
     for(uint32_t i=1;i<=3;++i){shortFiles.u32(i);shortFiles.str("a");shortFiles.str("r");shortFiles.u64(0);}shortFiles.u32(0);
     assert(ss::check_file_section(ss::Reader(shortFiles.b.data(),shortFiles.b.size()),why));
     shortFiles.b.push_back(0);assert(!ss::check_file_section(ss::Reader(shortFiles.b.data(),shortFiles.b.size()),why));
+    ss::Writer allocations;allocations.u32(mem::kRuntimeStart+128);allocations.u32(2);
+    allocations.pod(mem::AllocRec{mem::kRuntimeStart,32,0});allocations.pod(mem::AllocRec{mem::kRuntimeStart+32,16,0});
+    assert(ss::check_allocs(ss::Reader(allocations.b.data(),allocations.b.size()),why));
+    for(size_t n=0;n<allocations.b.size();++n)assert(!ss::check_allocs(ss::Reader(allocations.b.data(),n),why));
+    auto invalidLate=allocations;uint32_t badAddress=mem::kHostStart;
+    memcpy(invalidLate.b.data()+8+sizeof(mem::AllocRec),&badAddress,4);
+    assert(!ss::check_allocs(ss::Reader(invalidLate.b.data(),invalidLate.b.size()),why));
+    allocations.b.push_back(0);assert(!ss::check_allocs(ss::Reader(allocations.b.data(),allocations.b.size()),why));
+    ss::Writer dispatch;dispatch.u32(1);dispatch.u32(0xc2000000);dispatch.str("synthetic");
+    assert(ss::check_dispatch(ss::Reader(dispatch.b.data(),dispatch.b.size()),why));
+    for(size_t n=0;n<dispatch.b.size();++n)assert(!ss::check_dispatch(ss::Reader(dispatch.b.data(),n),why));
+    dispatch.b.push_back(0);assert(!ss::check_dispatch(ss::Reader(dispatch.b.data(),dispatch.b.size()),why));
     puts("production streaming, v1/v2 compatibility, checksum/size/truncation, file preflight and slot preservation pass");
 }

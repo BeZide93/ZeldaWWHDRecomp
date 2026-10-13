@@ -355,12 +355,18 @@ void save_allocs(Writer& w) {
 
 bool check_allocs(Reader r, std::string& why) {
     uint32_t top = r.u32();
-    (void)top;
     uint32_t n = r.u32();
+    if(!r.ok || top<mem::kRuntimeStart || top>mem::kHostStart ||
+       n!=size_t(r.e-r.p)/sizeof(mem::AllocRec) || size_t(r.e-r.p)%sizeof(mem::AllocRec)) {
+        why="corrupt runtime allocation section";return false;
+    }
     auto cur = mem::runtime_alloc_log();
     for (uint32_t i = 0; i < n && r.ok; i++) {
         mem::AllocRec a = r.pod<mem::AllocRec>();
-        if (i >= cur.size()) break;  // allocated later in the saved session: beyond our top
+        if(a.addr<mem::kRuntimeStart || uint64_t(a.addr)+a.size>top) {
+            why="invalid runtime allocation range";return false;
+        }
+        if (i >= cur.size()) continue; // still validate later saved allocations
         const mem::AllocRec& b = cur[i];
         // (the allocating code address, a.tag, changes with every rebuild: only logged)
         if (a.tag != b.tag && i < 4) LOG("[savestate] runtime object #%u allocated by different code (rebuilt?)", i);
@@ -388,6 +394,7 @@ bool check_dispatch(Reader r, std::string& why) {
     std::unordered_map<uint32_t, std::string> cur;
     for (auto& [a, n] : dispatch::host_functions()) cur[a] = n;
     uint32_t n = r.u32();
+    if(!r.ok || n>size_t(r.e-r.p)/8){why="corrupt dispatch section";return false;}
     for (uint32_t i = 0; i < n && r.ok; i++) {
         uint32_t a = r.u32();
         std::string name = r.str();
@@ -397,7 +404,8 @@ bool check_dispatch(Reader r, std::string& why) {
             return false;
         }
     }
-    return r.ok;
+    if(!r.ok || !r.at_end()){why="corrupt dispatch section";return false;}
+    return true;
 }
 
 std::string area_label(const char* stage) {
@@ -517,12 +525,18 @@ bool do_load(const std::shared_ptr<Snapshot>& s) {
     struct ThawGuard {bool active=true;~ThawGuard(){if(active)threads::thaw();}} thaw;
     gx2_ss_drain();
     g_check = s.get();
-    bool ok = fs_ss_check(s->section(kSecFiles),why) && check_allocs(s->section(kSecAllocs), why) && check_dispatch(s->section(kSecDispatch), why) &&
-              mem_ss_check(s->section(kSecHeaps), why) && ax_ss_check(s->section(kSecAudio), why) &&
-              gx2_ss_check(s->section(kSecGx2), why);
-    bool layout_ok = ok;
-    ok = ok && threads_ss_check(s->section(kSecThreads), why);
-    g_check = nullptr;
+    struct CheckGuard {~CheckGuard(){g_check=nullptr;}} checkGuard;
+    bool ok=false,layout_ok=false;
+    try {
+        ok=fs_ss_check(s->section(kSecFiles),why) && check_allocs(s->section(kSecAllocs),why) &&
+           check_dispatch(s->section(kSecDispatch),why) && mem_ss_check(s->section(kSecHeaps),why) &&
+           ax_ss_check(s->section(kSecAudio),why) && gx2_ss_check(s->section(kSecGx2),why);
+        layout_ok=ok;
+        ok=ok && threads_ss_check(s->section(kSecThreads),why);
+    } catch(const std::exception&) {
+        why="insufficient memory to validate state";ok=false;layout_ok=false;
+    }
+    g_check=nullptr;
     if (!ok) {
         threads::thaw();thaw.active=false;
         // threads at other waits right now may be where they were saved on a later frame
