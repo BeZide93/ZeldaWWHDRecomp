@@ -683,7 +683,7 @@ std::string performance_report() {
     h.variant = build::variant();
     h.os = reporthdr::os_description();
     h.gpu = performance_device();
-    h.renderer = render::vulkan() ? "Vulkan" : "Metal";
+    h.renderer = render::api_name(render::active());
     h.host = hostui::name();
     h.fps = interp::mode() == 2 ? "true 60 fps" : interp::mode() == 1 ? "60 fps interpolation" : "30 fps";
     h.scale = hostui::res_scale();
@@ -698,7 +698,9 @@ std::string performance_report() {
     return report;
 }
 
-void tab_graphics() {
+// Graphics > Shader cache. Left out with a platform backend (gfx/renderer_ext.h), which keeps its own
+// shader caches: the rebuild request and the template export work on Metal's and Vulkan's.
+static void shader_cache_section() {
     heading("Shader cache");
     static bool rebuildFailed = false;
     if (ImGui::Button("Rebuild shader cache"))
@@ -718,6 +720,10 @@ void tab_graphics() {
              "so the next release prepares them for everyone.");
     }
 #endif
+}
+
+void tab_graphics() {
+    if (!render::platform()) shader_cache_section();
 #ifdef __ANDROID__
     heading("GPU driver (Snapdragon / Adreno)");
     note("Active: %s", gfxvk::drivers::active_name().c_str());

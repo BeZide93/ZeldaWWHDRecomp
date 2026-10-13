@@ -22,8 +22,8 @@
 #include "gx2_regs.h"
 #include "register_blocks.h"
 #include "gx2_texture_regs.h"
+#include "backend_hooks.h"
 #ifdef WWHD_HAS_VULKAN
-#include "shader_key_dirty.h"
 #include "gfx/vulkan/api.h"
 #endif
 #include "runtime.h"
@@ -81,6 +81,12 @@ static bool shader_irrelevant(uint32 reg) {
 }
 static ShaderKeyDirtyStats shaderKeyDirtyStats;
 ShaderKeyDirtyStats shader_key_dirty_stats() { return shaderKeyDirtyStats; }
+
+// which register changes count for the shader key (backend_hooks.h), picked once the renderer runs
+static ShaderKeyMask shader_key_mask() {
+    static const ShaderKeyMask keyMask = pick_shader_key_mask(render::g_backend);
+    return keyMask;
+}
 
 #ifdef WWHD_HAS_VULKAN
 static void apply_small_regs(uint32 first, const uint32* v, uint32 n) {
@@ -146,21 +152,16 @@ static void apply_regs(uint32 first, const uint32* v, uint32 n) {
                     if (rprof::fast_class_reg(first + i)) rprof::g_reg_dirty |= 1;
                     else rprof::note_other_reg(first + i);
                 }
-#ifdef WWHD_HAS_VULKAN
-        static const bool keyDirty = [] {
-            const char* value = getenv("WWHD_VK_SHADER_KEY_DIRTY");
-            return render::vulkan() && value && !strcmp(value, "1");
-        }();
+        const ShaderKeyMask keyMask = shader_key_mask();
         static const bool collectStats = render::vulkan() && getenv("WWHD_VK_STATS") != nullptr;
-        if(keyDirty || collectStats) {
+        if(keyMask || collectStats) {
             bool baselineBump = false, actualBump = false;
             uint64_t maskedWords = 0;
             for(uint32 i = 0; i < n; ++i) {
                 uint32 reg = first + i;
                 if(g_regs[reg] == v[i] || shader_irrelevant(reg)) continue;
                 baselineBump = true;
-                uint32 mask;
-                if(keyDirty && vulkan_shader_key_mask(reg, mask) && !((g_regs[reg] ^ v[i]) & mask)) {
+                if(!shader_key_changed(keyMask, reg, g_regs[reg], v[i])) {
                     if(collectStats) ++maskedWords;
                 } else actualBump = true;
                 if(actualBump && !collectStats) break;
@@ -174,7 +175,6 @@ static void apply_regs(uint32 first, const uint32* v, uint32 n) {
                 shaderKeyDirtyStats.maskedWords += maskedWords;
             }
         } else
-#endif
         for (uint32 i = 0; i < n; i++)
             if (g_regs[first + i] != v[i] && !shader_irrelevant(first + i)) { g_shader_state_gen++; break; }
         memcpy(&g_regs[first], v, n * 4);
@@ -368,16 +368,7 @@ static void set_context(uint32 ctx) {
     // Draw writes primitive type without updating the context shadow.
     g_register_blocks.touch(uint32(REGADDR::VGT_PRIMITIVE_TYPE), 1);
     if (g_register_blocks.restore(g_regs, g_shadow, [](uint32 reg, uint32 old, uint32 value) {
-        if (shader_irrelevant(reg)) return false;
-#ifdef WWHD_HAS_VULKAN
-        static const bool keyDirty = [] {
-            const char* e = getenv("WWHD_VK_SHADER_KEY_DIRTY");
-            return render::vulkan() && e && !strcmp(e, "1");
-        }();
-        uint32 mask;
-        if (keyDirty && vulkan_shader_key_mask(reg, mask)) return ((old ^ value) & mask) != 0;
-#endif
-        return true;
+        return !shader_irrelevant(reg) && shader_key_changed(shader_key_mask(), reg, old, value);
     })) ++g_shader_state_gen;
     rprof::g_reg_dirty |= 2;  // draw classifier: a context load counts as a full state change
 }
@@ -489,11 +480,9 @@ static void execute_op(Op op, const uint32* p, uint32 n) {
         // into fenced upload slices when work is recorded), so GX2DrawDone needs this op executed
         // (render_sync in the HLE), not an idle GPU. Lazy DrawDone (lazy_draw_done(), the default)
         // queues the work instead of waiting for the whole device every frame. A payload word of 1
-        // (save states) always waits for the idle GPU.
-        if (lazy_draw_done() && !(n && p[0])) render::guest_flush();
-        else render::wait_idle();
-        // except what the CPU reads back: linear render targets (the Picto Box picture, issue #53)
-        render::write_back();
+        // (save states) always waits for the idle GPU (a platform backend's gpu_idle, else wait_idle),
+        // then the CPU reads back linear render targets (backend_hooks.h).
+        draw_done(lazy_draw_done(), n && p[0]);
         break;
     case OP_SWAP: {
         static const bool load = getenv("WWHD_TEST_RENDER_LOAD_MS") != nullptr;
