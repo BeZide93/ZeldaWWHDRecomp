@@ -38,7 +38,8 @@ inline constexpr uint8_t kRecordQuest = 4;   // notebook quests (story_notebook.
 inline constexpr uint8_t kRecordTracked = 5; // the notebook's tracked quest: at most one record, key quest_key, value 1
 inline constexpr uint8_t kRecordCarried = 6; // Link carries a quest's letter (story_takeover.h): key quest_key, value 1
 inline constexpr uint8_t kRecordQuestFlags = 7; // a quest's 8 flags (wwhd_quest_set_flag): key quest_key, value bit n-1 = flag n
-inline constexpr uint8_t kRecordQuestOrder = 9; // (8: the King of Red Lions line, story-korl) when a quest was started: key quest_key, value 1.. in start order (255: later)
+inline constexpr uint8_t kRecordSailLine = 8;   // the King of Red Lions said a step's sail_line (story_sail.h): key quest_key, value the step
+inline constexpr uint8_t kRecordQuestOrder = 9; // when a quest was started: key quest_key, value 1.. in start order (255: later)
 
 inline constexpr uint16_t kItemNotebook = 1;  // the story notebook
 

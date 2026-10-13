@@ -74,6 +74,10 @@ bool imported();
 // After all guest modules are loaded (and after story_mail::install): the item menu hooks.
 void install(const std::function<std::string(uint32_t)>& replaced_by, const std::function<void(uint32_t, void (*)(Cpu*))>& replace);
 bool installed();
+// After install(): the King of Red Lions' one-time line for the tracked quest (story_sail.h), only when
+// a declared quest step has a sail_line; nothing of the boat is hooked otherwise or on a conflict.
+void install_sail(const std::function<std::string(uint32_t)>& replaced_by, const std::function<void(uint32_t, void (*)(Cpu*))>& replace);
+bool sail_installed();
 void set_game_calls(void (*original)(Cpu*, uint32_t), uint32_t (*call)(Cpu*, uint32_t, std::initializer_list<uint32_t>));
 void state_loaded();
 
@@ -97,6 +101,9 @@ void logic_step(uint64_t step);  // the game's logic step (guestmods::frame)
 namespace hooks {
 void selected_value(Cpu* c);  // hdMenuMain_c::getSelectedItemValue(receiver)
 void assign_button(Cpu* c);   // game system: X/Y/R assignment(button, key)
+void ship_execute(Cpu* c);        // daShip_c::execute()
+void ship_force_message(Cpu* c);  // daShip_c::checkForceMessage()
+void ship_talk_init(Cpu* c);      // daShip_c::procTalk_init()
 }  // namespace hooks
 
 }  // namespace story_notebook

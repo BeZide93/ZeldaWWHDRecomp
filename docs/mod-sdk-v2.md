@@ -597,6 +597,9 @@ code then only reports progress the port can't see (`wwhd_quest_step`, `wwhd_que
   / not set; `"time"`: `"day"` (6:00–18:00), `"night"` or `"any"`; and `"text"` for the player.
   While they don't hold, the notebook says "Not yet possible: <text>", the step has no ring on the
   chart and its resident talk is not live. The port never changes any of them.
+- `sail_line` (optional, per step): what the King of Red Lions says once about this step, the next
+  time Link boards him or walks up to him: a string or a list of up to three lines (one message box,
+  240 bytes). Below.
 - `npc`: a talk to a game resident, below. Up to 8 quests per mod; texts have the limits of
   `wwhd_quest_*`.
 - A declaration the port doesn't accept (an invalid field, an NPC its catalogue doesn't know, or
@@ -625,6 +628,33 @@ done. The port arbitrates, not your mod:
 
 From code, the same is `wwhd_quest_talk(id, step, "windfall-kreeb", lines, reward_item)` and
 `wwhd_quest_carry(id, 1)` gives the sealed letter.
+
+### The King of Red Lions
+
+A step's `sail_line` is said once by the King of Red Lions, the way he gives his own news: the next
+time Link boards him or walks up to him in front, he turns to Link and says it in one message box.
+
+```json
+{"n": 1, "text": "Bring the storyteller's letter to his old friend who keeps Windfall's light.",
+ "sail_line": ["That sealed letter you carry is for the man",
+               "who keeps the light up on Windfall's windmill.",
+               "Let us not keep an old friend waiting, Link!"]}
+```
+
+The port arbitrates, not your mod:
+
+- only for the quest **shown on the chart** (tracked), at its current step. Untracked (or with your
+  mod off) the boat talks exactly as in the game;
+- **the game comes first.** His own lines that he says unasked (news after a pearl, a story
+  moment) always go first; the quest's line waits while one of them is pending, while any event or
+  cutscene runs, and for a short moment after the boat's last talk. Talking to him yourself always
+  gives his own hint: the quest's line never replaces it;
+- said once per step: the save's story record remembers it (see
+  [Where story progress is saved](#where-story-progress-is-saved)), never a flag of the game. A
+  later step with its own `sail_line` is said once again. A line that was cut short before its box
+  showed (a save state loaded during the talk) comes again;
+- the port never sets or clears a game flag for it, and the boat's state after the talk is the
+  state before it.
 
 ### The NPC catalogue
 

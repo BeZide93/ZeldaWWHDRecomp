@@ -4,6 +4,7 @@
 #include "story_notebook_page.h"
 #include "story_notebook_bag.h"
 #include "story_takeover.h"
+#include "story_sail.h"
 #include "story_manifest.h"
 #include "story_chart.h"
 #include "story_mail.h"
@@ -130,6 +131,45 @@ struct Talk {
     std::u16string text;
     uint64_t since = 0;
 } g_talk;
+
+// ---- the King of Red Lions' one-time line for the tracked quest (story_sail.h) ----
+// HD decomp (wwhd-actors decomp-readable, wwhd_src/d/actor/d_a_ship*.cpp); tww d_a_ship.cpp has the
+// same functions. The boat's execute asks checkForceMessage (in every mode but its talk) and orders a
+// talk for a forced line while Link rides it (no event running) or stands close in front of it; a
+// second chain of forced lines (late game) orders one while Link rides it. A talk command starts
+// procTalk_init (riding: after procTalkReady turned the head), whose setInitMessage picks the talk
+// hint (riding: keeps mNextMessageNo); procTalk shows mNextMessageNo, and setNextMessage ends the talk
+// after the box for the numbers of its end list (no flag set) or chains the next one.
+const uint32_t kShipExecute = GC(0x02477A24);       // daShip_c::execute()
+const uint32_t kShipForceMessage = GC(0x024731BC);  // daShip_c::checkForceMessage(): one of his forced lines is pending
+const uint32_t kShipTalkInit = GC(0x024749DC);      // daShip_c::procTalk_init(): a talk starts (setInitMessage)
+const uint32_t kOrderSpeak = GC(0x025D76A8);        // fopAcM_orderSpeakEvent(actor): the game's order for the boat's forced lines
+const uint32_t kSeenAngle = GC(0x025D68A0);         // fopAcM_seenActorAngleY(actor, other)
+constexpr uint32_t kShipMode = 0x635, kShipState = 0x644, kShipNextMessage = 0x648;  // mCurMode, mStateFlag, mNextMessageNo
+constexpr uint32_t kShipTurnAfterTalk = 0x00400000;  // daSFLG_UNK400000_e: the last talk was "too far out": turn back after it
+constexpr uint32_t kAttentionPos = 0x390, kAttentionFlags = 0x39C;  // fopAc_ac_c attention_info.position, .flags
+constexpr uint32_t kAttnLockonTalk = 0x2, kAttnSpeak = 0x8, kAttnShip = 0x80;
+constexpr uint32_t kPlayOrderCount = 0x5290, kPlayEventMode = 0x5292;  // dEvt_control_c (play + 0x51D0) mOrderCount, mMode
+constexpr uint32_t kPlayPlayerStatus = 0x5CD8, kPlayMiniGame = 0x5CEA, kRideShip = 0x10000;  // daPyStts0_SHIP_RIDE_e
+constexpr uint16_t kCommandTalk = 1, kConditionCanTalk = 1;
+// The message the line is shown as: the boat's own one-box line 0x5DF, which setNextMessage ends the
+// talk after without setting anything; its text is replaced for exactly that talk (story_mail::say).
+constexpr uint32_t kSailCarrier = 0x5DF;
+constexpr uint64_t kSailAcceptSteps = 300;  // the talk command came, but no talk started (10 s): given up
+
+std::vector<SailLine> g_sail_lines;  // declared in manifests (g_mu)
+bool g_sail_installed = false;
+struct Sail {
+    enum Phase : uint8_t { Idle, Ordered, Accepted, Talking } phase = Idle;
+    uint32_t ship = 0;
+    SailLine line;
+    std::u16string text;
+    uint32_t saved_message = 0;
+    bool saved_turn = false;
+    uint64_t since = 0, busy = 0;  // busy: the last step the boat talked or an event ran
+    bool force_checked = false, force_pending = false;  // this execute
+    const char* refusal = nullptr;  // for the trace
+} g_sail;
 
 bool trace() {
     static const bool on = [] { const char* e = getenv("WWHD_NOTEBOOK_TRACE"); return e && *e == '1'; }();
@@ -634,6 +674,7 @@ bool declare(const std::string& mod, const std::string& mod_name, const mods::js
                     "speaks for the quest whenever the step is current", mod.c_str(), q.id.c_str(), st.n,
                     npc_catalogue().entry(st.resident)->name.c_str());
             if (st.has_talk) g_takeovers.push_back({reg->key, uint8_t(st.n), st.resident, st.needs_letter, st.lines, st.reward, st.when, st.follow});
+            if (!st.sail_line.empty()) g_sail_lines.push_back({reg->key, uint8_t(st.n), st.sail_line});
         }
     }
     // the notebook, its marker on the sea chart and the letters are needed
@@ -1018,7 +1059,157 @@ void people_execute(Cpu* c) {
     }
 }
 
+// checkForceMessage(this): the game's answer, noted for this execute of the boat (never changed)
+void ship_force_message(Cpu* c) {
+    g_original(c, kShipForceMessage);
+    g_sail.force_checked = true;
+    g_sail.force_pending = g_sail.force_pending || c->r[3] != 0;
+}
+
+namespace {
+void sail_finish(uint32_t ship, uint64_t now, const char* how) {
+    const bool shown = story_mail::said();
+    story_mail::unsay();
+    if (ship) {  // the boat as it was: its next message and its turn-back flag
+        if (ld32(ship + kShipNextMessage) == kSailCarrier) st32(ship + kShipNextMessage, g_sail.saved_message);
+        if (g_sail.saved_turn) st32(ship + kShipState, ld32(ship + kShipState) | kShipTurnAfterTalk);
+    }
+    bool marked = false;
+    if (shown && have_save()) {
+        story_mail::Book b = book();
+        marked = mark_sail_line_said(b, g_sail.line);
+    }
+    LOG("[notebook] quest %04X: the King of Red Lions' line for step %u %s (%s)", g_sail.line.quest, g_sail.line.step,
+        marked ? "was said: remembered in the story record" : shown ? "was said, but the record is full" : "was not shown", how);
+    const uint64_t busy = now;
+    g_sail = {};
+    g_sail.busy = busy;
+}
+
+// After the boat's execute: the talk we started ends, or the due line is ordered in a free moment.
+void sail_after(Cpu* c, uint32_t ship, uint64_t now) {
+    const uint8_t mode = ld8(ship + kShipMode);
+    Cpu probe = *c;
+    const uint32_t play = g_call(&probe, kPlay, {});
+    const bool event = ld8(play + kPlayEventMode) != 0;
+    if (g_sail.phase == Sail::Talking) {
+        if (ship != g_sail.ship) return sail_finish(0, now, "another boat");
+        if (mode == kShipModeTalk) return;
+        sail_finish(ship, now, "the talk ended");
+    }
+    if (event || mode == kShipModeTalk) g_sail.busy = now;
+    if (g_sail.phase == Sail::Accepted) {
+        if (ship == g_sail.ship && now - g_sail.since < kSailAcceptSteps) return;
+        LOG("[notebook] quest %04X: the King of Red Lions' talk did not start", g_sail.line.quest);
+        g_sail.phase = Sail::Idle;
+    }
+    if (g_sail.phase != Sail::Idle || !have_save() || g_talk.phase != Talk::None) return;
+    SailLine line;
+    {
+        story_mail::Book b = book();
+        std::lock_guard lock(g_mu);
+        const SailLine* due = due_sail_line(g_sail_lines, b);
+        if (!due) return;
+        line = *due;
+    }
+    ShipMoment m;
+    m.can_say = story_mail::can_say();
+    m.force_checked = g_sail.force_checked, m.force_pending = g_sail.force_pending;
+    const int8_t orders = int8_t(ld8(play + kPlayOrderCount));
+    m.mode = mode, m.event_running = event, m.orders = orders > 0 ? unsigned(orders) : 0;
+    m.mini_game = ld8(play + kPlayMiniGame) != 0;
+    m.riding = (ld32(play + kPlayPlayerStatus) & kRideShip) != 0;
+    m.steps_since_busy = now - g_sail.busy;
+    const uint32_t link = ld32(play + kPlayPlayer);
+    if (!m.riding && link) {  // the game's walk-up test for its forced lines (daShip_c::execute)
+        const float dy = u32_as_f32(ld32(ship + kActorPos + 4)) - u32_as_f32(ld32(link + kActorPos + 4));
+        const float dx = u32_as_f32(ld32(ship + kAttentionPos)) - u32_as_f32(ld32(link + kActorPos));
+        const float dz = u32_as_f32(ld32(ship + kAttentionPos + 8)) - u32_as_f32(ld32(link + kActorPos + 8));
+        if (std::fabs(dy) < 50.0f && dx * dx + dz * dz < 62500.0f) {
+            Cpu angle = *c;
+            m.close_in_front = int32_t(g_call(&angle, kSeenAngle, {ship, link})) < 0x6000;
+        }
+    }
+    const char* refusal = sail_refusal(m);
+    if (refusal) {
+        if (trace() && refusal != g_sail.refusal) LOG("[notebook] quest %04X: the King of Red Lions' line waits: %s", line.quest, refusal);
+        g_sail.refusal = refusal;
+        return;
+    }
+    // the game's own order for the boat's forced lines, and what its execute sets with it (attention
+    // flags and the talk condition are set anew by every execute)
+    g_call(&probe, kOrderSpeak, {ship});
+    st32(ship + kAttentionFlags, (ld32(ship + kAttentionFlags) & ~kAttnShip) | kAttnLockonTalk | kAttnSpeak);
+    st16(ship + kEventCondition, uint16_t(ld16(ship + kEventCondition) | kConditionCanTalk));
+    if (g_sail.refusal || trace())
+        LOG("[notebook] quest %04X: the King of Red Lions' line for step %u is ordered (%s)", line.quest, line.step,
+            m.riding ? "Link rides the boat" : "Link stands in front of the boat");
+    g_sail.refusal = nullptr;
+    g_sail.phase = Sail::Ordered, g_sail.ship = ship, g_sail.line = line, g_sail.since = now;
+}
+}  // namespace
+
+// execute(this): the boat's step. Our talk is the one whose command answers our order at the next
+// execute; afterwards, our line is ordered in a free moment or our talk ends.
+void ship_execute(Cpu* c) {
+    const uint32_t ship = c->r[3];
+    const uint64_t now = g_step.load(std::memory_order_relaxed);
+    g_sail.force_checked = g_sail.force_pending = false;
+    if (g_sail.phase == Sail::Ordered) {
+        const bool ours = ship == g_sail.ship && ld16(ship + kEventCommand) == kCommandTalk && ld8(ship + kShipMode) != kShipModeTalk;
+        g_sail.phase = ours ? Sail::Accepted : Sail::Idle;  // not taken: ordered again in a free moment
+        if (ours) g_sail.since = now;
+        if (trace()) LOG("[notebook] quest %04X: the King of Red Lions' talk %s", g_sail.line.quest, ours ? "starts" : "was not taken");
+    }
+    g_original(c, kShipExecute);
+    const uint32_t result = c->r[3];
+    sail_after(c, ship, now);
+    c->r[3] = result;
+}
+
+// procTalk_init(this): a talk of the boat starts; the game picks its message first. For our talk the
+// message is the carrier with the quest's text, and the boat doesn't turn back after it; both are put
+// back when the talk ends.
+void ship_talk_init(Cpu* c) {
+    const uint32_t ship = c->r[3];
+    const uint32_t before = ld32(ship + kShipNextMessage);
+    g_original(c, kShipTalkInit);
+    if (g_sail.phase != Sail::Accepted || ship != g_sail.ship) return;
+    g_sail.saved_message = before;  // the boat's message before this talk (riding, setInitMessage keeps it)
+    const uint32_t state = ld32(ship + kShipState);
+    g_sail.saved_turn = (state & kShipTurnAfterTalk) != 0;
+    st32(ship + kShipState, state & ~kShipTurnAfterTalk);
+    st32(ship + kShipNextMessage, kSailCarrier);
+    g_sail.text.clear();
+    story_mail::append_utf16(g_sail.line.text, true, g_sail.text);
+    story_mail::say(kSailCarrier, &g_sail.text);
+    g_sail.phase = Sail::Talking;
+    LOG("[notebook] quest %04X: the King of Red Lions says the quest's line (step %u; his message was %X)", g_sail.line.quest,
+        g_sail.line.step, g_sail.saved_message);
+}
+
 }  // namespace hooks
+
+void install_sail(const std::function<std::string(uint32_t)>& replaced_by, const std::function<void(uint32_t, void (*)(Cpu*))>& replace) {
+    if (!g_installed || g_sail_installed) return;
+    {
+        std::lock_guard lock(g_mu);
+        if (g_sail_lines.empty()) return;  // no quest has a line: the boat stays untouched
+    }
+    const std::pair<uint32_t, void (*)(Cpu*)> list[] = {
+        {kShipExecute, hooks::ship_execute}, {kShipForceMessage, hooks::ship_force_message}, {kShipTalkInit, hooks::ship_talk_init}};
+    for (const auto& [addr, fn] : list) {
+        std::string other = replaced_by(addr);
+        if (!other.empty()) {
+            LOG("[notebook] %s replaces %08X: the King of Red Lions says no quest lines this session", other.c_str(), addr);
+            return;
+        }
+    }
+    for (const auto& [addr, fn] : list) replace(addr, fn);
+    g_sail_installed = true;
+    LOG("[notebook] the King of Red Lions can say the tracked quest's line");
+}
+bool sail_installed() { return g_sail_installed; }
 
 void install(const std::function<std::string(uint32_t)>& replaced_by, const std::function<void(uint32_t, void (*)(Cpu*))>& replace) {
     if (!g_imported || g_installed || !g_original || !g_call) return;
@@ -1045,6 +1236,8 @@ void state_loaded() {
     close_page();
     g_bag_item = 0, g_letter_item = 0, g_menu = 0, g_window_step = 0;
     g_talk = {};
+    if (g_sail.phase == Sail::Talking) story_mail::unsay();
+    g_sail = {};  // the state has its own boat
     std::lock_guard lock(g_mu);
     for (auto& [key, p] : g_portraits) p.handle = 0;
 }

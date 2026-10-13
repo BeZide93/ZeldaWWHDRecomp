@@ -302,6 +302,8 @@ void say(uint32_t number, const std::u16string* text) {
     g_npc_text = text && g_buffers ? Override{number, g_buffers + 2 * kSlotBytes, text} : Override{};
 }
 void unsay() { g_npc_text = {}; }
+bool said() { return g_npc_text.text && g_npc_text.keyed; }
+bool can_say() { return g_installed && g_buffers != 0; }
 
 void set_game_calls(void (*original)(Cpu*, uint32_t), uint32_t (*call)(Cpu*, uint32_t, std::initializer_list<uint32_t>)) {
     g_original = original;

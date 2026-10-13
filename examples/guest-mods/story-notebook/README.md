@@ -9,6 +9,8 @@ Windfall, up on the windmill by the light; he is there at any time and in every 
 orange rupee (100), and the quest moves to the notebook's archive. He says the quest's lines while Link
 carries the letter; otherwise he talks as in the game. "Show on chart" marks his place: a ring on the
 sea chart and a red circle at the windmill in the zoomed square.
+While the quest is shown on the chart, the King of Red Lions also reminds Link once where the letter
+goes (`sail_line`), the next time Link boards him or walks up to him.
 
 The mod's code only logs the quest's state: the port does the rest from the manifest
 ([docs/mod-sdk-v2.md](../../../docs/mod-sdk-v2.md#quests-in-the-manifest)). The texts are original to

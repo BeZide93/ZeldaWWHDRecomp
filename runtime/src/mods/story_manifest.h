@@ -14,6 +14,7 @@
 #include "story_mail_book.h"
 #include "story_npc_catalogue.h"
 #include "story_notebook_list.h"
+#include "story_sail.h"
 #include "story_takeover.h"
 
 namespace story_notebook {
@@ -30,6 +31,7 @@ struct ManifestStep {
     uint8_t reward = 0;  // a rupee item
     bool follow = true;  // npc "follow": false keeps the step's place fixed
     Availability when;   // "available": the step's prerequisites
+    std::string sail_line;  // "sail_line": the King of Red Lions says it once (story_sail.h); '\n' between lines
 };
 struct ManifestQuest {
     std::string id, title, reward_text, start_text, journal = "on_enable";
@@ -151,6 +153,22 @@ inline bool parse_quests(const mods::json::Value& manifest, std::vector<Manifest
                 s.has_place = true;
             }
             if (!parse_available(st.get("available"), s.when, why)) return why = "quest " + m.id + ": " + why, false;
+            // "sail_line": a string, or up to three strings (one message box)
+            const Value& sail = st.get("sail_line");
+            if (sail.type != Value::Null) {
+                const std::vector<Value> parts = sail.type == Value::Array ? sail.array : std::vector<Value>{sail};
+                for (const Value& l : parts) {
+                    if (l.type != Value::String) return why = "quest " + m.id + ": invalid sail_line", false;
+                    if (!s.sail_line.empty()) s.sail_line += '\n';
+                    s.sail_line += l.text;
+                }
+                size_t breaks = 0;
+                for (char ch : s.sail_line) breaks += ch == '\n';
+                std::u16string ignored;
+                if (s.sail_line.empty() || s.sail_line.size() > kMaxSailLineBytes || breaks > 2 ||
+                    !story_mail::append_utf16(s.sail_line, true, ignored))
+                    return why = "quest " + m.id + ": the sail_line must be up to three lines, 240 bytes", false;
+            }
             const Value& npc = st.get("npc");
             if (npc.type == Value::Object) {
                 s.has_talk = true;

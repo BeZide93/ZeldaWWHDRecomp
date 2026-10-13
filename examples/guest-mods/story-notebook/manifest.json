@@ -37,6 +37,11 @@
         {
           "n": 1,
           "text": "Bring the storyteller's letter to his old friend who keeps Windfall's light.",
+          "sail_line": [
+            "That sealed letter you carry is for the man",
+            "who keeps the light up on Windfall's windmill.",
+            "Let us not keep an old friend waiting, Link!"
+          ],
           "npc": {
             "who": "windfall-kreeb",
             "when": {

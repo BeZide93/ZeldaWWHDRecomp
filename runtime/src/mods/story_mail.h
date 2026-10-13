@@ -55,6 +55,8 @@ void state_loaded();  // a full state was loaded: forget the letter being shown
 // talk that looks it up; unsay() ends it. Used by story_notebook's resident takeovers.
 void say(uint32_t number, const std::u16string* text);
 void unsay();
+bool said();     // the armed line was looked up for display (its text replaced)
+bool can_say();  // the hooks are installed and have text buffers: say() can work
 
 // guest memory for replaced message texts (host-only, at least 6 KiB), before install()
 void set_text_buffers(uint32_t guest, uint32_t bytes);

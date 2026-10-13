@@ -7,6 +7,7 @@
 #include "mods/story_notebook_page.h"
 #include "mods/story_notebook_bag.h"
 #include "mods/story_takeover.h"
+#include "mods/story_sail.h"
 #include "mods/story_manifest.h"
 #include "mods/story_chart.h"
 #include "mods/story_store.h"
@@ -359,10 +360,43 @@ void test_services() {
 
 // the game's code for the item menu hooks
 uint8_t g_reserve[8] = {0x99, 0xFF, 0xFF, 0x9C, 0xFF, 0xFF, 0xFF, 0xFF};  // Note to Mom, -, -, Cabana Deed, ...
-std::map<uint32_t, void (*)(Cpu*)> hooked;
+std::map<uint32_t, void (*)(Cpu*)> hooked, mail_hooked;
 std::vector<std::string> calls;
+// the King of Red Lions (daShip_c) stubs: his forced line pending, the seen angle, the game's own orders
+uint32_t g_ship_force = 0, g_seen_angle = 0, g_game_order = 0;
+constexpr uint32_t kShipHint = 0xD5C;  // the talk hint the stub's setInitMessage picks
 void original(Cpu* c, uint32_t fn) {
     switch (fn) {
+    case 0x02477A24: {  // daShip_c::execute: a talk command starts the talk, else checkForceMessage and the forced order
+        const uint32_t ship = c->r[3];
+        calls.push_back("ship execute");
+        if (ld16(ship + 0xF8) == 1 && ld8(ship + 0x635) != 8) {
+            Cpu t = *c;
+            hooked.at(0x024749DC)(&t);
+        } else if (ld8(ship + 0x635) != 8) {
+            Cpu f = *c;
+            hooked.at(0x024731BC)(&f);
+            if (f.r[3] || g_game_order) st8(0x20030000 + 0x5290, 1);  // the game orders its own talk
+        }
+        st32(ship + 0x39C, 0x80);  // attention flags are set anew each execute (here: "board")
+        st16(ship + 0xFA, 0);
+        c->r[3] = 1;
+        break;
+    }
+    case 0x024731BC:  // checkForceMessage
+        if (g_ship_force) st32(c->r[3] + 0x648, g_ship_force);
+        c->r[3] = g_ship_force != 0;
+        break;
+    case 0x024749DC: {  // procTalk_init: the talk mode; setInitMessage picks the hint unless Link rides
+        const uint32_t ship = c->r[3];
+        calls.push_back("talk init");
+        st8(ship + 0x635, 8);
+        if (!(ld32(0x20030000 + 0x5CD8) & 0x10000)) st32(ship + 0x648, kShipHint);
+        c->r[3] = 1;
+        break;
+    }
+    case 0x025F50E8: break;  // the message manager's getMessage: the stub leaves the out struct as given
+    case 0x0273A2E8: c->r[3] = 0; break;  // the MSBT text: none (no leading codes)
     case 0x02632D94: c->r[3] = c->r[3] >= 0x30 && c->r[3] < 0x38 ? g_reserve[c->r[3] - 0x30] : 0x01; break;
     case 0x0262F880: c->r[3] = c->r[4] == 0x99 ? 0x26 : c->r[4] == 0x9C ? 0x24 : 0x37; break;
     case 0x0268F060: calls.push_back("caption"); break;
@@ -392,6 +426,8 @@ uint32_t game_call(Cpu*, uint32_t fn, std::initializer_list<uint32_t> args) {
     case 0x025D7B98: calls.push_back("order item event " + std::to_string(a.at(0) == kItemActor)); return 1;
     case 0x025D54C4: st32(a.at(1), a.at(0) == 77 ? kItemActor : 0); return 1;  // fopAcM_SearchByID
     case 0x0254457C: assert(a.at(0) == kPlayObj + 0x52C4 && a.at(1) == 0x10011EB8); return get_item_over;  // endCheck
+    case 0x025D76A8: calls.push_back("order speak"); return 1;  // fopAcM_orderSpeakEvent
+    case 0x025D68A0: return g_seen_angle;                         // fopAcM_seenActorAngleY
     default: assert(!"unexpected game call"); return 0;
     }
 }
@@ -1121,6 +1157,221 @@ void test_available() {
     (void)storage;
 }
 
+
+const char* const kSailManifest = R"({
+  "format_version": 1, "id": "sail-mod", "name": "Sail", "version": "1.0.0", "kind": "guest",
+  "quests_format": 1,
+  "quests": [{
+    "id": "q", "title": "A tale at sea",
+    "steps": [{"n": 1, "text": "Sail to Windfall.", "sail_line": ["Windfall lies north of here.", "Let us go, Link!"]},
+              {"n": 2, "text": "Talk to the keeper.", "sail_line": "The keeper is up on the windmill."},
+              {"n": 3, "text": "Rest."}]
+  }]
+})";
+
+void test_sail_manifest() {
+    std::vector<ManifestQuest> qs;
+    std::string why;
+    assert(parse_quests(mods::json::parse(kSailManifest), qs, why) && qs.size() == 1 && qs[0].steps.size() == 3);
+    assert(qs[0].steps[0].sail_line == "Windfall lies north of here.\nLet us go, Link!");
+    assert(qs[0].steps[1].sail_line == "The keeper is up on the windmill." && qs[0].steps[2].sail_line.empty());
+    auto refused = [](const std::string& from, const std::string& to) {
+        std::string text = kSailManifest;
+        const size_t at = text.find(from);
+        assert(at != std::string::npos);
+        text.replace(at, from.size(), to);
+        std::vector<ManifestQuest> out;
+        std::string reason;
+        return !parse_quests(mods::json::parse(text), out, reason) && reason.find("sail_line") != std::string::npos;
+    };
+    assert(refused(R"(["Windfall lies north of here.", "Let us go, Link!"])", R"(["1", "2", "3", "4"])"));  // one box
+    assert(refused(R"("The keeper is up on the windmill.")", R"("1\n2\n3\n4")"));
+    assert(refused(R"("The keeper is up on the windmill.")", R"([])"));
+    assert(refused(R"("The keeper is up on the windmill.")", R"(7)"));
+    assert(refused(R"("The keeper is up on the windmill.")", "\"" + std::string(241, 'x') + "\""));
+    assert(refused(R"("The keeper is up on the windmill.")", R"("a\tb")"));  // control characters
+}
+
+void test_sail_rules() {
+    uint8_t raw[story_mail::kBookSize] = {};
+    Book b(raw);
+    const uint16_t a = quest_key("mod-a", "q"), o = quest_key("mod-b", "q");
+    const std::vector<SailLine> all = {{a, 1, "A1"}, {a, 2, "A2"}, {o, 1, "B1"}};
+    // untracked: nothing is due
+    assert(reach_step(b, a, 1) == 1 && reach_step(b, o, 1) == 1);
+    assert(!due_sail_line(all, b));
+    // the tracked quest's step: its own line, once
+    assert(toggle_tracked(b, a));
+    const SailLine* s = due_sail_line(all, b);
+    assert(s && s->text == "A1");
+    assert(mark_sail_line_said(b, *s) && b.get(story_mail::kRecordSailLine, a) == 1 && !due_sail_line(all, b));
+    // the next step has its own line: due once more
+    assert(reach_step(b, a, 2) == 2);
+    s = due_sail_line(all, b);
+    assert(s && s->text == "A2" && mark_sail_line_said(b, *s) && !due_sail_line(all, b));
+    // a step without a line, a finished quest: nothing
+    assert(reach_step(b, a, 3) == 3 && !due_sail_line(all, b));
+    // the other mod's quest tracked: only its line (one record per quest)
+    assert(toggle_tracked(b, o));
+    s = due_sail_line(all, b);
+    assert(s && s->text == "B1" && s->quest == o);
+    assert(toggle_tracked(b, o) == false && !due_sail_line(all, b));  // untracked again
+    // the arbitration: the game first
+    ShipMoment m;
+    m.can_say = m.force_checked = m.riding = true, m.steps_since_busy = kSailQuietSteps;
+    assert(may_order_sail_line(m));
+    auto refused = [&](auto change) {
+        ShipMoment x = m;
+        change(x);
+        return !may_order_sail_line(x) && sail_refusal(x);
+    };
+    assert(refused([](ShipMoment& x) { x.force_pending = true; }));        // a forced line of the game is pending
+    assert(refused([](ShipMoment& x) { x.force_checked = false; }));       // the boat did not run its forced-line check
+    assert(refused([](ShipMoment& x) { x.mode = kShipModeTalk; }));        // the boat talks
+    assert(refused([](ShipMoment& x) { x.mode = 7; }));                    // a cutscene mode
+    assert(refused([](ShipMoment& x) { x.mode = 9; }));                    // the cannon
+    assert(refused([](ShipMoment& x) { x.event_running = true; }));        // an event runs
+    assert(refused([](ShipMoment& x) { x.orders = 1; }));                  // the game ordered an event this step
+    assert(refused([](ShipMoment& x) { x.mini_game = true; }));
+    assert(refused([](ShipMoment& x) { x.steps_since_busy = kSailQuietSteps - 1; }));
+    assert(refused([](ShipMoment& x) { x.riding = false; }));              // not at the boat
+    assert(refused([](ShipMoment& x) { x.can_say = false; }));
+    ShipMoment walk = m;
+    walk.riding = false, walk.close_in_front = true;
+    assert(may_order_sail_line(walk));
+    walk.mode = kShipModeSteer;
+    assert(may_order_sail_line(walk));
+}
+
+void test_sail_hooks() {
+    constexpr uint32_t kShip = kArena + 0xA000, kLink = kArena + 0x9000, kOut = kArena + 0xB000;
+    st32(kPlayObj + 0x5B2C, kLink);
+    // the letters' message hooks with text buffers: the line is shown through them
+    story_mail::set_game_calls(original, game_call);
+    story_mail::set_text_buffers(kArena + 0x30000, 6144);
+    story_mail::note_import();
+    story_mail::install([](uint32_t) { return std::string(); }, [](uint32_t a, void (*fn)(Cpu*)) { mail_hooked[a] = fn; });
+    assert(story_mail::can_say());
+    std::vector<uint8_t> flags(mem::ptr(kSave + 0x644), mem::ptr(kSave + 0x644) + 0x100);
+    assert(declare("sail-mod", "Sail", mods::json::parse(kSailManifest)));
+    // not hooked on a conflict; then the three functions of the boat
+    install_sail([](uint32_t a) { return a == 0x02477A24 ? std::string("other") : std::string(); },
+                 [](uint32_t, void (*)(Cpu*)) { assert(!"installed despite a conflict"); });
+    assert(!sail_installed());
+    install_sail([](uint32_t) { return std::string(); }, [](uint32_t a, void (*fn)(Cpu*)) { hooked[a] = fn; });
+    assert(sail_installed() && hooked.count(0x02477A24) && hooked.count(0x024731BC) && hooked.count(0x024749DC));
+    Book b = story_store::book();
+    const uint16_t key = quest_key("sail-mod", "q");
+    while (tracked_key(b)) toggle_tracked(b, tracked_key(b));
+    assert(reach_step(b, key, 1) == 1);
+    // the boat waits, Link rides it, no event
+    st8(kShip + 0x635, 0), st32(kShip + 0x644, 0x00400000), st32(kShip + 0x648, 0x5E0), st16(kShip + 0xF8, 0);
+    st32(kPlayObj + 0x5CD8, 0x10000), st8(kPlayObj + 0x5292, 0), st8(kPlayObj + 0x5290, 0), st8(kPlayObj + 0x5CEA, 0);
+    uint64_t step = 1000;
+    auto execute = [&]() {
+        logic_step(++step);
+        st8(kPlayObj + 0x5290, 0);  // the event control takes the orders every step
+        calls.clear();
+        call(0x02477A24, kShip);
+        return std::find(calls.begin(), calls.end(), "order speak") != calls.end();
+    };
+    // untracked: the boat is the game's
+    for (int i = 0; i < 100; i++) assert(!execute());
+    assert(!b.has(story_mail::kRecordSailLine, key));
+    assert(toggle_tracked(b, key));
+    // the game's forced line pending, or ordered by the game: ours waits
+    g_ship_force = 0x5EC;
+    for (int i = 0; i < 5; i++) assert(!execute());
+    g_ship_force = 0;
+    st32(kShip + 0x648, 0x5E0);
+    g_game_order = 1;
+    assert(!execute());
+    g_game_order = 0;
+    // an event runs: ours waits, and a quiet moment after it
+    st8(kPlayObj + 0x5292, 1);
+    assert(!execute());
+    st8(kPlayObj + 0x5292, 0);
+    for (uint64_t i = 1; i < kSailQuietSteps; i++) assert(!execute());
+    assert(execute());  // ordered the game's way: talk attention, the talk condition, no boarding offered
+    assert((ld32(kShip + 0x39C) & 0x8A) == 0x0A && (ld16(kShip + 0xFA) & 1));
+    // not taken (no talk command at the next execute): ordered again
+    assert(execute());
+    // taken: the talk starts with the carrier message; the boat doesn't turn back after it
+    st16(kShip + 0xF8, 1);
+    assert(!execute() && std::find(calls.begin(), calls.end(), "talk init") != calls.end());
+    assert(ld32(kShip + 0x648) == 0x5DF && !(ld32(kShip + 0x644) & 0x00400000));
+    st16(kShip + 0xF8, 0);
+    // the message system looks the carrier up: its text is the quest's
+    st32(kOut + 0x11C, 0x5DF), st32(kOut + 0x8, kArena + 0xB800), st32(kArena + 0xB800, kArena + 0xBC00), st32(kOut + 0x118, 3);
+    {
+        Cpu c{};
+        c.r[3] = 0, c.r[4] = kOut;
+        mail_hooked.at(0x025F50E8)(&c);
+        Cpu t{};
+        t.r[3] = kArena + 0xBC00, t.r[4] = 3, t.lr = 0;
+        mail_hooked.at(0x0273A2E8)(&t);
+        std::u16string shown;
+        for (uint32_t p = t.r[3]; ld16(p); p += 2) shown.push_back(char16_t(ld16(p)));
+        assert(shown == u"Windfall lies north of here.\nLet us go, Link!");
+    }
+    for (int i = 0; i < 10; i++) assert(!execute());  // the talk runs
+    // the talk ends: the boat's message and its turn-back flag as they were, the line remembered
+    st8(kShip + 0x635, 0);
+    assert(!execute());
+    assert(ld32(kShip + 0x648) == 0x5E0 && (ld32(kShip + 0x644) & 0x00400000));
+    assert(b.get(story_mail::kRecordSailLine, key) == 1);
+    {  // the carrier is the game's again
+        Cpu t{};
+        t.r[3] = kArena + 0xBC00, t.r[4] = 3;
+        mail_hooked.at(0x0273A2E8)(&t);
+        assert(t.r[3] == 0);
+    }
+    // said once: never again for this step
+    for (int i = 0; i < 200; i++) assert(!execute());
+    // Link's own talk to the boat: the game's hint, untouched
+    st32(kPlayObj + 0x5CD8, 0);
+    st16(kShip + 0xF8, 1);
+    execute();
+    assert(ld32(kShip + 0x648) == kShipHint);
+    st16(kShip + 0xF8, 0), st8(kShip + 0x635, 0);
+    execute();
+    assert(ld32(kShip + 0x648) == kShipHint);
+    // step 2 has its own line: Link walks up to the boat (the game's walk-up test)
+    assert(reach_step(b, key, 2) == 2);
+    for (uint64_t i = 0; i < kSailQuietSteps; i++) execute();
+    stf32(kShip + 0x318, 10.0f), stf32(kShip + 0x390, 100.0f), stf32(kShip + 0x398, 100.0f);
+    stf32(kLink + 0x314, 100.0f), stf32(kLink + 0x318, 0.0f), stf32(kLink + 0x31C, 400.0f);  // 300 away
+    g_seen_angle = 0x1000;
+    assert(!execute());
+    stf32(kLink + 0x31C, 300.0f);  // 200 away, in front
+    g_seen_angle = 0x7000;         // but behind the boat
+    assert(!execute());
+    g_seen_angle = 0x1000;
+    stf32(kLink + 0x318, 80.0f);   // on another level
+    assert(!execute());
+    stf32(kLink + 0x318, 0.0f);
+    assert(execute());
+    // taken, but the line is never shown (the talk ends before its message): not remembered, due again
+    st16(kShip + 0xF8, 1);
+    execute();
+    st16(kShip + 0xF8, 0), st8(kShip + 0x635, 0);
+    execute();
+    assert(b.get(story_mail::kRecordSailLine, key) == 1);
+    for (uint64_t i = 0; i < kSailQuietSteps; i++) execute();
+    assert(execute());
+    // a state load during the talk: the carrier is the game's again
+    st16(kShip + 0xF8, 1);
+    execute();
+    st16(kShip + 0xF8, 0);
+    state_loaded();
+    assert(!story_mail::said());
+    st8(kShip + 0x635, 0);
+    // the mod's quest not tracked: nothing, whatever is due
+    while (tracked_key(b)) toggle_tracked(b, tracked_key(b));
+    for (uint64_t i = 0; i < 3 * kSailQuietSteps; i++) assert(!execute());
+    // no game flag was touched by any of it
+    assert(std::equal(flags.begin(), flags.end(), mem::ptr(kSave + 0x644)));
+}
 }  // namespace
 
 int main() {
@@ -1140,6 +1391,9 @@ int main() {
     test_manifest();
     test_available();
     test_story_store();
+    test_sail_manifest();
+    test_sail_rules();
+    test_sail_hooks();
     std::puts("story_notebook_test: ok");
     return 0;
 }

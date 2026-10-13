@@ -581,6 +581,17 @@ void init() {
         ch.addr=addr;ch.ordinal=uint32_t(ordinal);ch.replace=fn;ch.replace_mod="the port's story notebook";
         g_mod_hook_flags[ordinal]=1;
     });
+    // The King of Red Lions' one-time line for the tracked quest (story_sail.h): the boat's execute,
+    // checkForceMessage and procTalk_init, only when a declared quest step has a sail_line.
+    story_notebook::install_sail([](uint32_t addr) {
+        auto it=g_chains.find(addr);return it==g_chains.end()?std::string():it->second.replace_mod;
+    },[](uint32_t addr,PpcFunc fn) {
+        int ordinal=ordinal_of(addr);
+        if(ordinal<0)fatal("[guestmods] notebook: %08X is not a game function",addr);
+        Chain& ch=g_chains[addr];
+        ch.addr=addr;ch.ordinal=uint32_t(ordinal);ch.replace=fn;ch.replace_mod="the port's story notebook (King of Red Lions)";
+        g_mod_hook_flags[ordinal]=1;
+    });
     story_store::set_game_calls(call_original);
     story_store::install([](uint32_t addr) {
         auto it=g_chains.find(addr);return it==g_chains.end()?std::string():it->second.replace_mod;
