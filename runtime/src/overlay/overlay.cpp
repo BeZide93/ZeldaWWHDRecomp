@@ -1046,10 +1046,10 @@ void tab_display() {
             first = false;
             if (radio(modes[i], mode == i)) hostui::post([i] { hostui::set_drc_mode(i); });
         }
-        if (mode == 2) note("The overlay appears for a few seconds when the GamePad picture changes a lot (a menu opens).");
+        if (mode == 2) note("Shows GamePad menus while open and follows Off-TV Play.");
         if (mode == 4) note("Only the GamePad picture. In the game, Minus switches to Off-TV Play (the game on the GamePad).");
     }
-    if (check("Show GamePad screen", hostui::drc_shown(), &v,
+    if (check(mode == 2 ? "Pin GamePad picture-in-picture" : "Show GamePad screen", hostui::drc_shown(), &v,
               hostui::drc_available() && !(hostui::drc_modes() >= 4 && (mode == 3 || mode == 4))))
         hostui::post([v] { hostui::show_drc(v); });
     if (hostui::drc_modes() >= 4 && (mode == 1 || mode == 2)) {

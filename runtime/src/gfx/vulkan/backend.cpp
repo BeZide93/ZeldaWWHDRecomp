@@ -466,7 +466,7 @@ Buffer create_buffer(VkDeviceSize size, VkBufferUsageFlags usage,
              "map buffer");
   return b;
 }
-// GPU -> CPU copies (captures, overlay signatures): the CPU reads these, so host-cached memory where
+// GPU -> CPU copies (captures): the CPU reads these, so host-cached memory where
 // the device has it (uncached reads of the plain host-visible type are very slow on discrete GPUs).
 Buffer create_readback_buffer(VkDeviceSize size) {
   return create_buffer(size, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
@@ -2641,7 +2641,6 @@ void swap() {
     plan.pip_on = false;
     plan.pip_wanted = false;
     plan.drc_only = false;
-    plan.sample_auto = false;
     plan.tv = gfx::display_layout(layerW, layerH,
         tvScan ? float(tvScan->extent.width) : 1280,
         tvScan ? float(tvScan->extent.height) : 720);
@@ -2707,11 +2706,6 @@ void swap() {
   set_overlay_draw(overlayFrame);
   compose_headless_diagnostic(R.tv);
   take_screenshots(plan);
-  bool sampled[2] = {};
-  if (plan.sample_auto && drcScan) {
-    sampled[0] = record_signature(0, *drcScan, R.drc.scanSrgb);
-    sampled[1] = sampled[0] && tvScan && record_signature(1, *tvScan, R.tv.scanSrgb);
-  }
 #ifdef __ANDROID__
   prepare_secondary_snapshot();
 #endif
@@ -2723,12 +2717,11 @@ void swap() {
   timed_call(swapPhaseTiming[1],[&] { present(R.tv);return VK_SUCCESS; });
   if (plan.drc_window)
     timed_call(swapPhaseTiming[2],[&] { present(R.drc);return VK_SUCCESS; });
-  // asynchronous presentation: queued like GX2Flush work, the ring's fences retire it (the automatic
-  // overlay's signatures are read back right away, so those frames wait; present dumps and captures
-  // read back through flush()). Both window hosts: the AppKit host presents to its CAMetalLayers
+  // Asynchronous presentation is retired by the ring's fences. Present dumps and captures
+  // read back through flush(). Both window hosts: the AppKit host presents to its CAMetalLayers
   // through the same swapchain path.
   timed_call(swapPhaseTiming[3],[&] {
-    if (async_present() && !sampled[0]) flush_async();
+    if (async_present()) flush_async();
     else flush();
     return VK_SUCCESS;
   });
@@ -2753,10 +2746,6 @@ void swap() {
   completedPresentPlanValid = tvScan != nullptr;
   lastNewPresentNs = stutter::now();
   nextPipelineRepeatNs = lastNewPresentNs + 16666667;
-  if (sampled[0]) {
-    std::vector<float> d = read_signature(0), t = sampled[1] ? read_signature(1) : std::vector<float>{};
-    gfx::display_auto_signature(d, sampled[1] ? &t : nullptr, R.frame + 1);
-  }
   for (auto &path : gfx::display_take_present_dumps()) {
     if (!tvScan || plan.dw < 1 || plan.dh < 1)
       continue;
@@ -3792,7 +3781,6 @@ bool android_display_touch_event(const SDL_Event& event) {
     }
     if (touchFinger || !hit()) return false;
     touchFinger = f.fingerID;
-    gfx::display_touched();
     input::set_touch(true, tx, ty);
     return true;
   case SDL_EVENT_FINGER_MOTION:
@@ -3812,7 +3800,6 @@ bool android_display_touch_event(const SDL_Event& event) {
     touchFinger = 0;
     if (!hit(true)) tx = ty = 0;
     input::set_touch(false, tx, ty);
-    gfx::display_touched();
     return true;
   default:
     return false;
@@ -3863,7 +3850,6 @@ static bool gamepad_touch(const SDL_Event& event) {
       tv_window_point(event.button.x, event.button.y, nx, ny);
       if (!gfx::overlay_hit(nx, ny, &tx, &ty)) return false;  // the game's window: mouse camera etc.
       touchHeld = TouchIn::TvWindow;
-      gfx::display_touched();
     } else {
       return false;
     }
@@ -3886,7 +3872,6 @@ static bool gamepad_touch(const SDL_Event& event) {
       float nx, ny;
       tv_window_point(x, y, nx, ny);
       if (!gfx::overlay_hit(nx, ny, &tx, &ty, true)) tx = ty = 0;
-      gfx::display_touched();
     }
     if (up) touchHeld = TouchIn::None;
     input::set_touch(!up, tx, ty);

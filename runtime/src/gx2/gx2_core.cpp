@@ -1,3 +1,4 @@
+#include "gfx/display_modes.h"
 #include "../game_clock.h"
 #include "vsync_pacing.h"
 #include "../mods/fast_forward.h"
@@ -920,6 +921,7 @@ HLE(gx2, GX2SwapScanBuffers) {
         static const bool load = getenv("WWHD_TEST_GAME_LOAD_MS") != nullptr;
         if (load) test_frame_load("WWHD_TEST_GAME_LOAD_MS");
     }
+    gfx::display_read_gamepad_ui(); // read-only; no guest reads outside auto or a pending pause view
     float a = aspect::on_swap();  // aspect ratio of the next frame (game projections, render targets)
     uint32 ab;
     memcpy(&ab, &a, 4);
