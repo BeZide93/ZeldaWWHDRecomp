@@ -37,6 +37,12 @@ std::vector<LetterInfo> letters();
 bool notebook_owned();
 std::u16string notebook_page();
 
+// The notebook's 3D model for the get-item scene (an archive built on the player's machine; empty: the
+// stand-in's own model). model_override(path) is the file to read instead of the game's for a content
+// path the game opens (empty: none); any thread.
+void set_notebook_model(const std::string& file);
+std::string model_override(const std::string& guest);
+
 void note_import();  // a module imports a mail service: hooks are needed
 bool imported();
 // After all guest modules are loaded. replaced_by(addr) names a mod that replaces that game function

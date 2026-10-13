@@ -505,6 +505,8 @@ void init() {
     // Letters from mods: host replacements of the postbox and message functions, only when a loaded
     // mod uses the letter services (story_mail.h).
     if(story_mail::imported())story_mail::set_text_buffers(mem::host_alloc(4096,16),4096);
+    // feasibility test: the notebook's model archive (tools/story_mods/notebook_model.py)
+    if(const char* model=getenv("WWHD_NOTEBOOK_MODEL");model&&*model)story_mail::set_notebook_model(model);
     story_mail::set_game_calls(call_original,[](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);});
     story_mail::install([](uint32_t addr) {
         auto it=g_chains.find(addr);return it==g_chains.end()?std::string():it->second.replace_mod;

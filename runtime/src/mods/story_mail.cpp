@@ -33,6 +33,7 @@
 #include "story_mail.h"
 #include "story_mail_book.h"
 
+#include <atomic>
 #include <cstdlib>
 #include <map>
 #include <mutex>
@@ -125,7 +126,9 @@ Override g_notebook_text;  // armed while the notebook is handed out
 const std::u16string g_notebook_body = kNotebookGetText;
 
 // the postbox's pearl check passed only for mod letters (this step), and a notebook being handed out
-bool g_gate_forced = false, g_notebook_pending = false;
+bool g_gate_forced = false;
+std::atomic<bool> g_notebook_pending{false};  // also read by the file system (model_override)
+std::string g_notebook_model_file;            // the notebook's model archive (set_notebook_model)
 
 void (*g_original)(Cpu*, uint32_t) = nullptr;
 uint32_t (*g_call)(Cpu*, uint32_t, std::initializer_list<uint32_t>) = nullptr;
@@ -264,6 +267,27 @@ std::u16string notebook_page() {
     }
     if (!any) page += u"No letters yet.\n";
     return page;
+}
+
+void set_notebook_model(const std::string& file) { g_notebook_model_file = file; }
+
+// While the notebook is being handed out, the stand-in's model archive is the notebook's (a
+// replacement built on the player's machine, tools/story_mods/notebook_model.py). The game loads the
+// archive when the get-item demo starts and frees it when the demo item goes; outside that window
+// (and if the stand-in's archive is already loaded) the game's own file is used.
+std::string model_override(const std::string& guest) {
+    if (!g_notebook_pending.load(std::memory_order_acquire) || g_notebook_model_file.empty()) return {};
+    static const std::string kArchive = "common/object/vbeso.szs";
+    if (guest.size() < kArchive.size()) return {};
+    for (size_t i = 0; i < kArchive.size(); i++) {
+        char ch = guest[guest.size() - kArchive.size() + i];
+        if (ch >= 'A' && ch <= 'Z') ch = char(ch - 'A' + 'a');
+        if (ch != kArchive[i]) return {};
+    }
+    static bool logged = false;
+    if (!logged) LOG("[mail] the notebook's model is read from %s", g_notebook_model_file.c_str());
+    logged = true;
+    return g_notebook_model_file;
 }
 
 void note_import() { g_imported = true; }

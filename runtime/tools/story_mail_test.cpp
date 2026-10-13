@@ -206,9 +206,15 @@ void test_hooks() {
     c.r[3] = kActor, c.r[4] = kMsg;
     hooks::next_msg(&c);
     assert(c.r[3] == 16 && ld8(kActor + 0xA01) == 1 && calls.empty());
+    set_notebook_model("/data/notebook/Vbeso.szs");
+    assert(model_override("/vol/content/Common/Object/Vbeso.szs").empty());  // nothing being handed out
     c.r[3] = kActor, c.r[4] = kStaff;
     hooks::present(&c);  // the first mod letter encloses the notebook (the Cabana Deed's get demo)
     assert((calls == std::vector<std::string>{"item156", "cutEnd"}) && ld32(kPlay + 0x52A0) == 77);
+    // while it is handed out, the stand-in's model archive is the notebook's (any case); nothing else
+    assert(model_override("/vol/content/Common/Object/Vbeso.szs") == "/data/notebook/Vbeso.szs");
+    assert(model_override("/vol/content/common/object/VBESO.SZS") == "/data/notebook/Vbeso.szs");
+    assert(model_override("/vol/content/Common/Object/Vbesox.szs").empty() && model_override("Vbeso.szs").empty());
     c.r[3] = kActor;
     hooks::disp_letter_start(&c);
     assert(ld32(kActor + 0x7C0) == kCarrier);
@@ -237,6 +243,7 @@ void test_hooks() {
     c.r[3] = 0x9C;
     hooks::item_get(&c);
     assert(calls.empty() && notebook_owned());
+    assert(model_override("/vol/content/Common/Object/Vbeso.szs").empty());  // the real deed's model again
     c.r[3] = 0x9C;  // a real Cabana Deed later is the game's again
     hooks::item_get(&c);
     assert((calls == std::vector<std::string>{"itemGet156"}));
