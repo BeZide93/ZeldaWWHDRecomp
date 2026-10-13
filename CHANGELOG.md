@@ -7,6 +7,11 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **The controller selection after the title screen is skipped** (issue #189, thanks @floysh): the game no longer asks
+  whether you play with the Wii U GamePad or a Pro Controller, because the port already knows it from Controls. It picks
+  the matching option through the game's own selection, so everything that depends on it stays the same. To choose by
+  hand again, turn off **Controls > Skip controller selection**.
+
 - **PlayStation and Xbox button looks in the action hint near Link** (issue #188, thanks @floysh): the floating hint that
   appears next to Link (for example "Speak" in front of a character) still showed the A button with PlayStation or
   Xbox button labels. It now uses the same shapes and colours as the button cluster in the corner. With the original
