@@ -2,6 +2,7 @@
 // page driver and the item menu entry.
 #include "story_notebook.h"
 #include "story_notebook_page.h"
+#include "story_notebook_bag.h"
 #include "story_chart.h"
 #include "story_mail.h"
 #include "guest_hud.h"
@@ -17,6 +18,10 @@
 #include "guest_addr.h"
 #include "input.h"
 #include "runtime.h"
+
+// the icon's PNG, compiled in (runtime/assets/story_notebook/notebook_icon_192.png, cmake/EmbedBytes.cmake)
+extern const unsigned char story_notebook_icon_png[];
+extern const unsigned long story_notebook_icon_png_size;
 
 namespace story_notebook {
 namespace {
@@ -36,12 +41,21 @@ const uint32_t kWindowInit = GC(0x02693C24);      // its call in initializeSaveC
 const uint32_t kIconFrame = GC(0x0262F880);       // u32 itemForSlot(item, r4 = item number): the icon frame
 const uint32_t kOpenChild = GC(0x0268F060);       // hdMenuMain_c::openSelectedChild(index): A on a place: the item's caption
 const uint32_t kTouchSelect = GC(0x02630A64);     // hdMenuItem_c::selectTouchEnter(): a place is touched (an icon is picked up)
+const uint32_t kSetVisible = GC(0x026333F0);      // hdMenuItem_c::setVisible(visible): shows the item's icon pane
 const uint32_t kSelectedValue = GC(0x0268F420);   // hdMenuMain_c::getSelectedItemValue(receiver): the key X/Y/R would take
 const uint32_t kAssignButton = GC(0x02714B0C);    // game system: put a menu key on X/Y/R (controller, button, key)
 constexpr uint32_t kFirstDeliveryKey = 0x30, kDeliveryPlaces = 8, kEmpty = 0xFF;
 constexpr uint32_t kNotebookItem = 0xA0;          // dItemNo SALVAGE_ITEM_2: unused by the game, no menu mapping
 constexpr uint32_t kNotebookIcon = 0x24;          // the icon frame of the Cabana Deed (a sheet of parchment, the get-item stand-in)
 constexpr uint32_t kMenuChildren = 0x48, kItemNumber = 0xEC;  // hdParts_c::mChildren {count, data}; hdMenuItem_c::mSlot
+// The notebook's own icon (story_notebook_bag.h): drawn by the port over the bag place, the game's
+// sentinel icon pane (hdMenuItem_c::mPaneGroups[0][0], N_ItemIcon_00) kept hidden underneath.
+constexpr uint32_t kItemVisible = 0xFC, kItemPaneGroups = 0x8C, kItemLayout = 0x44;  // hdMenuItem_c / hdParts_c
+constexpr uint32_t kLayoutLyt = 0x4, kLytRootPane = 0xC;                            // hdPartsLayout_c / hdPartsLyt_c
+constexpr uint32_t kPaneParent = 0xC, kPaneTranslate = 0x1C, kPaneScale = 0x34, kPaneFlags = 0x44, kPaneGlobalAlpha = 0x46;
+constexpr float kIconSize = 84.0f;  // GamePad pixels at scale 1: the size of the game's item icons in the bag
+const std::string kIconOwner = "port:story-notebook-icon";
+uint32_t g_bag_item = 0;  // the bag place showing the notebook (game thread)
 
 std::mutex g_mu;
 std::vector<Quest> g_quests;  // registered this session, in registration order
@@ -110,6 +124,63 @@ uint32_t notebook_key(Cpu* c) {
     for (uint32_t k = kFirstDeliveryKey; k < kFirstDeliveryKey + kDeliveryPlaces; k++)
         if (reserve(c, k) == kEmpty) return k;
     return 0;  // all eight hold game items: the notebook waits for a free place
+}
+
+// The sentinel's icon pane of a bag place, or 0
+uint32_t icon_pane(uint32_t item) {
+    const uint32_t data = ld32(item + kItemPaneGroups + 4);
+    return data ? ld32(data) : 0;
+}
+
+// Every frame (game thread): the notebook's icon over its bag place, or nothing.
+void bag_icon() {
+    auto& store = guestmods::hud::store();
+    static bool published = false;
+    static guestmods::hud::Handle image = 0;
+    static uint64_t generation = 0;
+    const uint32_t item = g_bag_item;
+    IconPlace at;
+    if (item && ld32(item + kItemNumber) == kNotebookItem && ld8(item + kItemVisible) && notebook_owned()) {
+        const uint32_t icon = icon_pane(item);
+        const uint32_t layout = ld32(item + kItemLayout), lyt = layout ? ld32(layout + kLayoutLyt) : 0;
+        const uint32_t root = lyt ? ld32(lyt + kLytRootPane) : 0;
+        if (icon && root) {
+            st8(icon + kPaneFlags, uint8_t(ld8(icon + kPaneFlags) & ~1u));  // the game's sentinel icon stays hidden
+            std::vector<PaneNode> chain;
+            for (uint32_t pane = icon; pane && chain.size() < 32; pane = ld32(pane + kPaneParent))
+                chain.push_back({u32_as_f32(ld32(pane + kPaneTranslate)), u32_as_f32(ld32(pane + kPaneTranslate + 4)),
+                                 u32_as_f32(ld32(pane + kPaneScale)), u32_as_f32(ld32(pane + kPaneScale + 4)),
+                                 (ld8(pane + kPaneFlags) & 1) != 0});
+            at = place_icon(chain, kIconSize, ld8(root + kPaneGlobalAlpha), 854.0f, 480.0f);
+        }
+    }
+    if (!at.shown) {
+        if (published) store.drop(kIconOwner);
+        published = false;
+        return;
+    }
+    if (!image || generation != store.state_generation()) {  // the icon image, again after a state load
+        generation = store.state_generation();
+        try {
+            const auto png = guestmods::hud::decode_png({story_notebook_icon_png, size_t(story_notebook_icon_png_size)});
+            image = store.create_image(kIconOwner, png.width, png.height, png.width * 4, png.rgba.data(), png.rgba.size());
+        } catch (const std::exception&) {
+            image = 0;
+        }
+        if (!image) return;
+    }
+    // The menu is on the GamePad; with the Pro Controller the game shows it on the TV (the same
+    // 854 x 480 layout, scaled to the TV's 1280 x 720).
+    const bool tv = input::pro_controller();
+    const float k = tv ? 1280.0f / 854.0f : 1.0f;
+    const guestmods::hud::Handle list = store.begin(kIconOwner, tv ? 0 : 1);
+    if (!list) return;
+    Command c;
+    c.x = (at.x - at.size * 0.5f) * k, c.y = (at.y - at.size * 0.5f) * k, c.w = c.h = at.size * k;
+    c.rgba = 0xFFFFFF00u | uint32_t(at.alpha * 255.0f + 0.5f);
+    store.picture(kIconOwner, list, image, c);
+    store.commit(kIconOwner, list);
+    published = true;
 }
 
 void publish(const std::vector<Row>& rows) {
@@ -309,6 +380,8 @@ void mute(input::PadState& p) {
 }
 
 void pad(input::PadState& p) {
+    if (!g_installed) return;  // no quest mod: nothing of the notebook runs
+    bag_icon();
     if (!g_open.load(std::memory_order_relaxed)) {
         if (const uint32_t s = g_swallow.load(std::memory_order_relaxed)) {
             g_swallow.store(s & p.buttons, std::memory_order_relaxed);
@@ -366,6 +439,7 @@ void inventory_item(Cpu* c) {
 // itemForSlot(this, item): the notebook's icon
 void icon_frame(Cpu* c) {
     if (c->r[4] == kNotebookItem) {
+        g_bag_item = c->r[3];
         c->r[3] = kNotebookIcon;
         return;
     }
@@ -380,6 +454,15 @@ void open_child(Cpu* c) {
     if (trace()) LOG("[notebook] item menu: A on place %u (item %02X)", index, child ? ld32(child + kItemNumber) : 0xFFu);
     if (child && ld32(child + kItemNumber) == kNotebookItem && open_page()) return;
     g_original(c, kOpenChild);
+}
+
+// setVisible(this, visible): the game shows a place's icon pane; the notebook's own icon replaces it
+void set_visible(Cpu* c) {
+    const uint32_t item = c->r[3];
+    g_original(c, kSetVisible);
+    if (ld32(item + kItemNumber) != kNotebookItem) return;
+    g_bag_item = item;
+    if (const uint32_t icon = icon_pane(item)) st8(icon + kPaneFlags, uint8_t(ld8(icon + kPaneFlags) & ~1u));
 }
 
 // selectTouchEnter(this): touching the notebook opens its page (the GamePad has no A on its items);
@@ -411,7 +494,8 @@ void install(const std::function<std::string(uint32_t)>& replaced_by, const std:
     if (!g_imported || g_installed || !g_original) return;
     const std::pair<uint32_t, void (*)(Cpu*)> list[] = {
         {kInventoryItem, hooks::inventory_item}, {kIconFrame, hooks::icon_frame},     {kOpenChild, hooks::open_child},
-        {kTouchSelect, hooks::touch_select},     {kSelectedValue, hooks::selected_value}, {kAssignButton, hooks::assign_button}};
+        {kTouchSelect, hooks::touch_select},     {kSelectedValue, hooks::selected_value}, {kAssignButton, hooks::assign_button},
+        {kSetVisible, hooks::set_visible}};
     // all or nothing: a notebook that shows but can't be opened, or can be put on a button, is worse than none
     for (const auto& [addr, fn] : list) {
         std::string other = replaced_by(addr);
@@ -428,6 +512,7 @@ void install(const std::function<std::string(uint32_t)>& replaced_by, const std:
 
 void state_loaded() {
     close_page();
+    g_bag_item = 0;
     std::lock_guard lock(g_mu);
     for (auto& [key, p] : g_portraits) p.handle = 0;
 }

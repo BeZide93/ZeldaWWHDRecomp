@@ -5,6 +5,7 @@
 #include "mods/story_notebook.h"
 #include "mods/story_notebook_list.h"
 #include "mods/story_notebook_page.h"
+#include "mods/story_notebook_bag.h"
 #include "mods/story_chart.h"
 #include "mods/story_mail.h"
 #include "mods/story_mail_book.h"
@@ -29,6 +30,9 @@ using story_mail::Book;
 
 void log_msg(const char* fmt, ...) {
     (void)fmt;
+}
+namespace input {
+bool pro_controller() { return false; }  // the menu on the GamePad
 }
 
 namespace {
@@ -255,6 +259,41 @@ void test_page() {
     assert(hint);
 }
 
+void test_bag_place() {
+    // the icon pane at the item's root, the item in the bag window, the window on the screen root
+    std::vector<PaneNode> chain = {{0, 0, 1, 1, false},       // the sentinel icon pane (hidden by the port)
+                                   {-131, 130, 1, 1, true},   // the item's root pane
+                                   {347, -92, 1, 1, true},    // the bag window
+                                   {-73, -3, 1, 1, true}};    // the screen layout's root
+    IconPlace at = place_icon(chain, 84, 255, 854, 480);
+    assert(at.shown && at.x == 427 + 143 && at.y == 240 - 35 && at.size == 84 && at.alpha == 1);
+    // the cursor's highlight scales the item: the icon grows around the same center
+    chain[1].sx = chain[1].sy = 1.2f;
+    at = place_icon(chain, 84, 255, 854, 480);
+    assert(at.shown && at.x == 570 && at.y == 205 && std::fabs(at.size - 100.8f) < 0.01f);
+    // a scaled parent scales the child's offset too (the window opening)
+    chain[1].sx = chain[1].sy = 1;
+    chain[2].sx = chain[2].sy = 0.5f;
+    at = place_icon(chain, 84, 255, 854, 480);
+    assert(at.x == 427 + 347 - 73 - 65.5f && at.y == 240 - (130 * 0.5f - 92 - 3) && at.size == 42);
+    // the window slides
+    chain[2].sx = chain[2].sy = 1;
+    chain[2].tx += 100;
+    assert(place_icon(chain, 84, 255, 854, 480).x == 670);
+    // fades with the window, hides with it; NaN or zero scale while panes are built: not shown
+    at = place_icon(chain, 84, 51, 854, 480);
+    assert(at.shown && std::fabs(at.alpha - 0.2f) < 1e-6f);
+    assert(!place_icon(chain, 84, 0, 854, 480).shown);
+    chain[2].visible = false;
+    assert(!place_icon(chain, 84, 255, 854, 480).shown);
+    chain[2].visible = true;
+    chain[3].sx = NAN;
+    assert(!place_icon(chain, 84, 255, 854, 480).shown);
+    chain[3].sx = 0;
+    assert(!place_icon(chain, 84, 255, 854, 480).shown);
+    assert(!place_icon({}, 84, 255, 854, 480).shown);
+}
+
 void test_services() {
     // no save loaded
     assert(define("m", "My mod", "tale", "The tale", "A heart piece", "") == kResultNew);
@@ -306,6 +345,12 @@ void original(Cpu* c, uint32_t fn) {
     case 0x0262F880: c->r[3] = c->r[4] == 0x99 ? 0x26 : c->r[4] == 0x9C ? 0x24 : 0x37; break;
     case 0x0268F060: calls.push_back("caption"); break;
     case 0x02630A64: calls.push_back("pick up"); break;
+    case 0x026333F0: {  // setVisible: the icon pane follows the item's visibility
+        const uint32_t icon = ld32(ld32(c->r[3] + 0x8C + 4));
+        st8(icon + 0x44, uint8_t((ld8(icon + 0x44) & ~1u) | (c->r[4] & 1)));
+        calls.push_back("visible");
+        break;
+    }
     case 0x0268F420: c->r[3] = c->r[4]; break;  // the stub's receivers are the keys themselves
     case 0x02714B0C: calls.push_back("assign " + std::to_string(c->r[5])); break;
     default: assert(!"unexpected original");
@@ -330,7 +375,7 @@ void test_hooks() {
             [](uint32_t, void (*)(Cpu*)) { assert(!"installed despite a conflict"); });
     assert(!installed());
     install([](uint32_t) { return std::string(); }, [](uint32_t a, void (*fn)(Cpu*)) { hooked[a] = fn; });
-    assert(installed() && hooked.size() == 6);
+    assert(installed() && hooked.size() == 7);
     Book b(mem::ptr(kSave + story_mail::kBookOffset));
     // no notebook yet: the bag window shows the save as it is
     b.erase(story_mail::kRecordItem, story_mail::kItemNotebook);
@@ -386,6 +431,16 @@ void test_hooks() {
     close_page();
     p = {};
     pad(p);
+    // setVisible: a game item's icon pane shows, the notebook's stays hidden (the port draws its own)
+    const uint32_t kGroups = kArena + 0x5000, kIconA = kArena + 0x5100, kIconB = kArena + 0x5200;
+    st32(kChild + 0x8C + 4, kGroups);
+    st32(kGroups, kIconA);
+    st32(kChild + 0x200 + 0x8C + 4, kGroups + 0x10);
+    st32(kGroups + 0x10, kIconB);
+    calls.clear();
+    call(0x026333F0, kChild, 1);
+    call(0x026333F0, kChild + 0x200, 1);
+    assert(calls.size() == 2 && !(ld8(kIconA + 0x44) & 1) && (ld8(kIconB + 0x44) & 1));
     // the notebook can't go on X/Y/R
     calls.clear();
     assert(call(0x0268F420, kMenu, 0x31) == 0xFF && call(0x0268F420, kMenu, 0x30) == 0x30);
@@ -424,6 +479,7 @@ int main() {
     test_record();
     test_text();
     test_page();
+    test_bag_place();
     test_services();
     test_hooks();
     std::puts("story_notebook_test: ok");

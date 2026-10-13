@@ -66,6 +66,7 @@ void inventory_item(Cpu* c);  // hdMenuItem_inventoryItem(key)
 void icon_frame(Cpu* c);      // hdMenuItem itemForSlot(this, item)
 void open_child(Cpu* c);      // hdMenuMain_c::openSelectedChild(index)
 void touch_select(Cpu* c);    // hdMenuItem_c::selectTouchEnter()
+void set_visible(Cpu* c);     // hdMenuItem_c::setVisible(visible)
 void selected_value(Cpu* c);  // hdMenuMain_c::getSelectedItemValue(receiver)
 void assign_button(Cpu* c);   // game system: X/Y/R assignment(button, key)
 }  // namespace hooks

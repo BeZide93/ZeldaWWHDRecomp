@@ -499,7 +499,8 @@ All of them return the quest's state in the loaded save file, or an error:
   defines the quest again without a condition.
 
 **What the player sees.** The notebook is in the Delivery Bag (the first empty place of the bag;
-if all eight places hold the game's items, it waits for one to be free). It can't be put on X, Y
+if all eight places hold the game's items, it waits for one to be free), with its own icon: the port
+draws it over the bag place and it follows the menu's animations. It can't be put on X, Y
 or R. Touching it on the GamePad (or clicking it on the GamePad picture), or choosing it with A in
 the item menu, opens its page over the game:
 
