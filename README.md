@@ -464,7 +464,8 @@ throughout the game or across all Vulkan platforms.
 **Gameplay FOV** in the same tab adjusts the camera from 75% to 250%, with a 110-degree
 vertical cap. It defaults to 100% (the original view). Gameplay and combat use matching camera
 and culling projections, including both stereo eyes; cutscenes, dialogue, menus and transitions
-retain their authored FOV. The setting is saved between launches.
+retain their authored FOV. First-person view, item aiming and the Telescope are widened by the
+same factor, so their zoom is weaker above 100%. The setting is saved between launches.
 
 **HDR output** (Windows/Vulkan-only) offers scRGB presentation when Windows HDR is enabled
 and the display supports it. Paper white, peak brightness, exposure, highlight expansion and

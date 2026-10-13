@@ -7,6 +7,13 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Experimental stereo 3D, HDR output and a gameplay FOV setting** (PR #168, thanks @pancreations): the Graphics tab
+  gains **Stereoscopic 3D** (Vulkan only: Half SBS, Full SBS and top-and-bottom, with depth, convergence and eye swap;
+  each eye renders its own view; 30 fps recommended for now), **HDR output** (Windows with Vulkan, when Windows HDR is
+  on; falls back to SDR with a note if the display can't do it) and **Gameplay FOV** (75% to 250%; cutscenes, dialogue
+  and menus keep their original view). All three are off / 100% by default, and the game looks and runs exactly as
+  before until you turn them on. Settings are kept between launches, on macOS too.
+
 - **Ports can bring their own renderer** (PR #187, issue #185, thanks @Pulpparty): a platform port (for example a
   Switch build with deko3d) can now register its own renderer at start-up (`gfx/renderer_ext.h`) without editing the
   renderer or GX2 code. Nothing changes for Metal and Vulkan: the renderer choice, menus, shader caches and
