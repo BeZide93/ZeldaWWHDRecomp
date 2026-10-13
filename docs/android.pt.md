@@ -82,6 +82,12 @@ funcionam.
 O jogo é pesado. Quando o dispositivo Android esquenta, o jogo cai sozinho de 60 para 30 fps estáveis e
 continua na velocidade total.
 
+**O que acontece ao salvar um estado completo?**
+O jogo pausa enquanto sua memória é comprimida em pequenos blocos e gravada no slot. Isso evita criar
+outra imagem completa da memória, mas salvar pode pausar por mais tempo em um armazenamento lento.
+Estados completos anteriores compatíveis continuam funcionando; versões antigas do programa não
+conseguem carregar os novos estados completos.
+
 **Alguma coisa não funciona.**
 Abra uma [issue](https://github.com/ZeldaWWHDRecomp/ZeldaWWHDRecomp/issues) com o modelo do dispositivo Android,
 a versão do Android e o que aconteceu (pode escrever em inglês ou português). Depois de um

@@ -79,6 +79,11 @@ The Wii U release of The Wind Waker HD, USA or Europe. Saves from a real Wii U w
 The game is demanding. When the Android device gets warm, the game drops from 60 to a steady 30 fps on its
 own and keeps its full speed.
 
+**What happens when I save a full state?**
+The game pauses while its memory is compressed in small chunks and written to the slot. This avoids
+building a second full memory image, but saving can pause longer on slow storage. Compatible existing
+full states still load; older builds cannot load newly written full states.
+
 **Something doesn't work.**
 Please open an [issue](https://github.com/ZeldaWWHDRecomp/ZeldaWWHDRecomp/issues) with your Android device
 model, Android version and what happened. After a crash, the next start offers the crash report

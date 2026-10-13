@@ -62,6 +62,7 @@
 #include "crashrec.h"
 #include "portable_state.h"
 #include "state_memory.h"
+#include "state_file_section.h"
 #include "mods/guest_mods.h"
 #include "mods/guest_state_section.h"
 #include "mods/story_chart.h"
@@ -149,7 +150,9 @@ struct Snapshot {
             if (!r.bytes(nullptr, n)) return false;
             if (!sections.emplace(tag,std::make_pair(off,size_t(n))).second) return false;
         }
-        if (!r.ok || !sections.count(kSecMemory)) return false;
+        if (!r.ok || !sections.count(kSecMemory) || !sections.count(kSecFiles)) return false;
+        std::string fileWhy;
+        if(!check_file_section(section(kSecFiles),fileWhy))return false;
         if(!guestmods::read_mod_set(section(kSecGuestMods),guest_mods))return false;
         Reader m=section(kSecMemory);
         if(!read_regions(m,regs,chunks))return false;

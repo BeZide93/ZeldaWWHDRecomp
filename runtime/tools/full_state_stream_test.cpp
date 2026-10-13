@@ -85,6 +85,21 @@ int main() {
     auto noChecksum=good;noChecksum[sizeof(ss::FullStateHeader)+8+4]&=~4;reject(std::move(noChecksum));
     // Malformed block counts/sizes fail before a large advertised payload allocation.
     auto huge=good;auto h=header();h.raw_size=ss::kMaxStateBytes;h.blocks=h.raw_size/ss::kStreamBlock;memcpy(huge.data(),&h,sizeof h);reject(std::move(huge));
+    // Re-encode structurally invalid logical sections with a valid codec checksum;
+    // rejection must come from production Snapshot parsing, before guest restore.
+    auto rejectPayload=[&](const std::vector<uint8_t>& payload) {
+        FILE* file=fopen(ss::slot_path(1).c_str(),"wb");assert(file);
+        ss::FullStateStreamWriter writer(file,header());assert(writer.bytes(payload.data(),payload.size())&&writer.finish());fclose(file);
+        assert(!ss::read_slot(1,why));
+    };
+    auto duplicate=state->payload;duplicate.insert(duplicate.end(),metadata.b.begin(),metadata.b.end());rejectPayload(duplicate);
+    auto duplicatePage=state->payload;
+    const size_t memAt=state->sections.at(ss::kSecMemory).first;
+    uint32_t zero=0;memcpy(duplicatePage.data()+memAt+4+12+4+ss::kMemoryChunk,&zero,4);rejectPayload(duplicatePage);
+    auto outside=state->payload;const uint32_t unmapped=0x90000000;memcpy(outside.data()+memAt+4,&unmapped,4);rejectPayload(outside);
+    auto missingFile=state->payload;missingFile.erase(missingFile.begin(),missingFile.begin()+metadata.b.size());rejectPayload(missingFile);
+    ss::Writer emptyFileMetadata;ss::put_section(emptyFileMetadata,ss::kSecFiles,ss::Writer{});
+    auto emptyFile=emptyFileMetadata.b;emptyFile.insert(emptyFile.end(),missingFile.begin(),missingFile.end());rejectPayload(emptyFile);
     replace_bytes(ss::slot_path(1),good);
     std::filesystem::create_directory(ss::slot_path(1,"tmp"));
     assert(!ss::write_memory_slot(1,header(),metadata,regions,pointer,touched,rawSize));assert(file_bytes(ss::slot_path(1))==good);
