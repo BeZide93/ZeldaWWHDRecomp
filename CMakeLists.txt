@@ -628,7 +628,7 @@ if(WWHD_SDL_HOST)
 endif()
 
 if(WWHD_SDL_HOST)
-  add_executable(mouse_sdl_test runtime/tools/mouse_sdl_test.cpp runtime/src/platform/mouse_sdl.cpp)  # motion.h stubbed
+  add_executable(mouse_sdl_test runtime/tools/mouse_sdl_test.cpp runtime/src/platform/mouse_sdl.cpp runtime/src/input_map.cpp)  # motion.h stubbed
   target_include_directories(mouse_sdl_test PRIVATE runtime/src runtime/include ${CEMU_DIR} ${CEMU_DIR}/Cafe ${CMAKE_SOURCE_DIR}/runtime/third_party/fmt/include)
   target_compile_options(mouse_sdl_test PRIVATE -UNDEBUG)
   target_link_libraries(mouse_sdl_test PRIVATE SDL3::Headers)
@@ -1274,7 +1274,7 @@ endif()
 # dependencies, allowing real transition and focus regressions to run without game data.
 if(WWHD_SDL_HOST AND UNIX AND NOT ANDROID)
   add_executable(overlay_input_integration_test runtime/tools/overlay_input_integration_test.cpp
-    runtime/src/overlay/overlay.cpp runtime/src/overlay/extensions.cpp runtime/src/input_map.cpp
+    runtime/src/overlay/extensions.cpp runtime/src/input_map.cpp
     runtime/src/rumble.cpp runtime/src/platform/input_sdl.cpp runtime/src/platform/mouse_sdl.cpp ${MOTION_SOURCES})
   target_include_directories(overlay_input_integration_test PRIVATE ${IMGUI_DIR} runtime/src runtime/include
     ${CEMU_DIR} ${CEMU_DIR}/Cafe ${CMAKE_SOURCE_DIR}/runtime/third_party/fmt/include)
@@ -1288,4 +1288,12 @@ if(WWHD_SDL_HOST AND UNIX AND NOT ANDROID)
   target_link_libraries(overlay_input_integration_test PRIVATE imgui SDL3::SDL3 Threads::Threads)
   add_test(NAME overlay_input_integration COMMAND overlay_input_integration_test)
   set_tests_properties(overlay_input_integration PROPERTIES ENVIRONMENT "WWHD_OVERLAY_TRACE=1;WWHD_NO_AUDIO=1" TIMEOUT 30)
+endif()
+
+if(APPLE)
+  add_executable(controls_ui_test runtime/tools/controls_ui_test.mm runtime/src/input_map.cpp)
+  target_include_directories(controls_ui_test PRIVATE runtime/src runtime/include)
+  target_compile_options(controls_ui_test PRIVATE -UNDEBUG $<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>)
+  target_link_libraries(controls_ui_test PRIVATE "-framework Cocoa" "-framework GameController" "-framework QuartzCore" "-framework Carbon")
+  add_test(NAME controls_ui COMMAND controls_ui_test)
 endif()

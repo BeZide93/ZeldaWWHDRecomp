@@ -1,4 +1,4 @@
-// Controls mapping: which keyboard keys and host-controller inputs drive each Wii U GamePad input.
+// Controls mapping: which keyboard/mouse and host-controller inputs drive each Wii U GamePad input.
 //
 // Plain C++ (no AppKit) so it can be unit-tested (runtime/tools/input_map_test.cpp). input.mm
 // evaluates the current mapping on every read; the Controls window (gfx/controls_ui.mm) edits it.
@@ -42,7 +42,10 @@ const char* pad_id(int p);     // JSON value, e.g. "LeftTrigger"
 const char* pad_label(int p);  // for the UI
 int pad_from_id(const std::string& id);  // -1 if unknown
 
-// Keyboard: macOS virtual key codes (kVK_*), 0..255
+// Keyboard: macOS virtual key codes (kVK_*), 0..255; mouse inputs use 256..262.
+// Mouse IDs share the two keyboard binding slots, above the legacy 0..255 key range.
+constexpr int kMouse1 = 256, kMouse2 = 257, kMouse3 = 258, kMouse4 = 259, kMouse5 = 260;
+constexpr int kWheelUp = 261, kWheelDown = 262, kInputCount = 263;
 constexpr int kNoKey = -1;
 constexpr int kKeysPerAction = 2;
 std::string key_id(int code);     // JSON value, e.g. "K", "Space", "LeftShift"; "Key93" for unnamed codes
@@ -182,8 +185,9 @@ int conflict_count(const Mapping& m);
 std::string key_short_label(int code);
 const char* pad_short_label(int p);
 
-// Evaluate a mapping. keys[code] = held; values[p] = 0..1 for each Pad input (max over controllers)
-input::PadState keyboard_state(const Mapping& m, const bool keys[256]);
+// Evaluate a mapping. keys[code] = held (count entries, 256 for legacy keyboard callers).
+// values[p] = 0..1 for each Pad input (max over controllers).
+input::PadState keyboard_state(const Mapping& m, const bool* keys, int count = 256);
 input::PadState controller_state(const Mapping& m, const float values[kPadCount]);
 
 // JSON. from_json starts from defaults: inputs missing from the file keep their default binding.

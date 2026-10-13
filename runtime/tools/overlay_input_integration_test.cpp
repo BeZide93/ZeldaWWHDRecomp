@@ -11,6 +11,9 @@
 #include <cstdio>
 #include <string>
 #include <vector>
+#include <filesystem>
+#include <unistd.h>
+#include "../src/overlay/overlay.cpp"
 
 static std::vector<std::string> logs;
 static int saves=0,loads=0,promptKeys=0;
@@ -40,6 +43,8 @@ static void event_key(SDL_Window* window,SDL_Scancode key,bool down,SDL_Keymod m
  input::handle_event(e);
 }
 int main(){
+ const auto controlsFile=std::filesystem::temp_directory_path()/("wwhd-overlay-mouse-165-"+std::to_string(getpid())+".json");
+ setenv("WWHD_CONTROLS",controlsFile.c_str(),1);
  SDL_SetHint(SDL_HINT_VIDEO_DRIVER,"dummy");assert(SDL_Init(SDL_INIT_VIDEO|SDL_INIT_EVENTS));
  auto* tv=SDL_CreateWindow("TV",32,32,SDL_WINDOW_HIDDEN);
  auto* drc=SDL_CreateWindow("GamePad",32,32,SDL_WINDOW_HIDDEN);
@@ -127,7 +132,32 @@ int main(){
  overlay::poll_controller_shortcuts(pad);assert(overlay::is_open());pad[input_map::kPadHome]=0;overlay::poll_controller_shortcuts(pad);
  pad[input_map::kPadHome]=1;overlay::poll_controller_shortcuts(pad);assert(!overlay::is_open());
  assert(logs.back().find("closed (Home")!=std::string::npos);
+ // A click that starts capture has already been routed before start_capture; its up must still
+ // reach ImGui, and only the next down is the binding. No game or rendering is involved.
+ overlay::set_open(true);
+ for (int b=0;b<5;++b) {
+  overlay::start_capture(input_map::kA,0);
+  assert(overlay::mouse_button(0,false));overlay::apply_capture();
+  assert(overlay::U.cap_action==input_map::kA);
+  SDL_Event e{};e.type=SDL_EVENT_MOUSE_BUTTON_DOWN;e.button.windowID=SDL_GetWindowID(tv);
+  e.button.which=1;e.button.button=b==0?SDL_BUTTON_LEFT:b==1?SDL_BUTTON_RIGHT:b==2?SDL_BUTTON_MIDDLE:b==3?SDL_BUTTON_X1:SDL_BUTTON_X2;
+  input::handle_event(e);overlay::apply_capture();
+  assert(input_map::current().keys[input_map::kA][0]==input_map::kMouse1+b);
+  assert(input::read().buttons==0);
+  e.type=SDL_EVENT_MOUSE_BUTTON_UP;input::handle_event(e);
+ }
+ for (int dy : {1,-1}) {
+  overlay::start_capture(input_map::kB,1);
+  SDL_Event e{};e.type=SDL_EVENT_MOUSE_WHEEL;e.wheel.windowID=SDL_GetWindowID(tv);e.wheel.y=dy;
+  input::handle_event(e);overlay::apply_capture();
+  assert(input_map::current().keys[input_map::kB][1]==(dy>0?input_map::kWheelUp:input_map::kWheelDown));
+ }
+ overlay::start_capture(input_map::kR,2); // controller field does not take a mouse binding
+ overlay::mouse_button(0,true);overlay::apply_capture();assert(overlay::U.cap_action==input_map::kR);
+ overlay::g_capture_key=-1;overlay::apply_capture();
+ overlay::set_open(false);
  puts("real overlay transitions, key/focus trace, Home, text prompt and auxiliary-window checks passed");
 #endif
  SDL_DestroyWindow(auxiliary);SDL_DestroyWindow(drc);SDL_DestroyWindow(tv);SDL_Quit();
+ std::filesystem::remove(controlsFile);
 }

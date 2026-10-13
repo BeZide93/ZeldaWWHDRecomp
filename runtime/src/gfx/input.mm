@@ -21,6 +21,8 @@ namespace gx2 { void checkpoint_vulkan_caches(); }
 
 #include "input.h"
 #include "input_map.h"
+#include "mouse_bindings.h"
+#include "mods/mods.h"
 #include "renderer.h"
 #include "../runtime.h"
 #include "../savestate.h"
@@ -40,6 +42,14 @@ namespace mods { void filter_pad(input::PadState& s); bool host_key_down(uint16_
 namespace input {
 
 static std::mutex g_mu;
+static MouseBindings g_mouse_bindings;
+void release_mouse_bindings() { std::lock_guard lk(g_mu); g_mouse_bindings.consume(); }
+void mouse_binding_button(uint64_t device, int button, bool down, bool eligible) {
+    std::lock_guard lk(g_mu); g_mouse_bindings.button(device, button, down, eligible);
+}
+void mouse_binding_wheel(float delta, bool eligible) {
+    std::lock_guard lk(g_mu); g_mouse_bindings.wheel(delta, eligible);
+}
 static bool g_keys[256];
 static PadState g_pad;  // controller part, refreshed on the main thread
 static bool g_touch;
@@ -58,7 +68,7 @@ static bool g_script_keys[256];
 static PadState keyboard_state(bool use_host) {
     bool keys[256];
     for (int i = 0; i < 256; i++) keys[i] = (use_host && g_keys[i]) || g_script_keys[i];
-    return input_map::keyboard_state(input_map::current(), keys);
+    return g_mouse_bindings.read(input_map::current(), use_host && mods::mouse_captured() && !overlay::captures(), keys, screenshot::key_down, !mods::first_person_wheel());
 }
 
 static input_map::AppleFaceLayout controller_face_layout(GCController* c) {
@@ -186,6 +196,7 @@ void held_keys(bool* keys) {
 void release_keys() {
     mods::fast_forward_reset();
     std::lock_guard<std::mutex> lk(g_mu);
+    g_mouse_bindings.consume();
     memset(g_keys, 0, sizeof(g_keys));
 }
 
@@ -401,6 +412,7 @@ void init() {
     [[NSNotificationCenter defaultCenter] addObserverForName:NSApplicationDidResignActiveNotification
                                                       object:nil queue:nil usingBlock:^(NSNotification*) {
         std::lock_guard<std::mutex> lk(g_mu);
+        g_mouse_bindings.consume();
         memset(g_keys, 0, sizeof(g_keys));
     }];
     [GCController startWirelessControllerDiscoveryWithCompletionHandler:nil];
@@ -680,7 +692,7 @@ PadState read() {
         memset(g_script_keys, 0, sizeof g_script_keys);
         for (auto& p : keys)
             if (render::frame_count() >= p.from && render::frame_count() <= p.to)
-                for (int c : p.codes) g_script_keys[c] = true;
+                for (int c : p.codes) if (c < 256) g_script_keys[c] = true;
     }
     PadState k = keyboard_state(!no_host), s = g_pad;
     if (no_host) s = PadState{};
@@ -716,6 +728,7 @@ void prompt_text(const std::u16string& initial, int max_len,
     dispatch_async(dispatch_get_main_queue(), ^{
         {
             std::lock_guard<std::mutex> lk(g_mu);
+            g_mouse_bindings.consume();
             memset(g_keys, 0, sizeof(g_keys));  // keys pressed now belong to the prompt
         }
         NSAlert* alert = [[NSAlert alloc] init];

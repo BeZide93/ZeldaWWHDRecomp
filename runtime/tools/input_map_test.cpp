@@ -10,6 +10,7 @@
 #include <string>
 
 #include "input_map.h"
+#include "mouse_bindings.h"
 #include "camera_invert.h"
 #include "platform/touch_face.h"
 #include "overlay/settings_shortcut.h"
@@ -31,6 +32,56 @@ static input::PadState press(const Mapping& m, std::initializer_list<int> codes)
     bool keys[256] = {};
     for (int c : codes) keys[c] = true;
     return keyboard_state(m, keys);
+}
+
+static void test_mouse() {
+    auto m = Mapping::defaults();
+    const auto old = to_json(m);
+    for (const auto& slots : m.keys) for (int code : slots) CHECK(code < kMouse1);
+    const char* ids[] = {"Mouse1", "Mouse2", "Mouse3", "Mouse4", "Mouse5", "WheelUp", "WheelDown"};
+    for (int i=0;i<7;++i) {
+        CHECK(key_id(kMouse1+i) == ids[i]); CHECK(key_from_id(ids[i]) == kMouse1+i);
+        CHECK(!key_label(kMouse1+i).empty()); CHECK(!key_short_label(kMouse1+i).empty());
+        m.keys[kA][0] = kMouse1+i;
+        Mapping out; CHECK(from_json(to_json(m),out)); CHECK(out == m);
+        bool raw[kInputCount]{}; raw[kMouse1+i] = true;
+        CHECK(keyboard_state(m,raw,kInputCount).buttons == input::kA);
+        CHECK(keyboard_state(m,raw).buttons == 0); // legacy keyboard callers never read mouse slots
+    }
+    Mapping legacy; CHECK(from_json(old,legacy)); CHECK(legacy == Mapping::defaults());
+    m.keys[kA] = {kMouse1,kNoKey}; m.keys[kB] = {kMouse1,kNoKey};
+    CHECK(has_conflict(m,kA)); CHECK(conflict_count(m) == 1);
+    m.keys[kB] = {kMouse2,kNoKey}; m.keys[kX] = {kWheelUp,kNoKey}; m.keys[kY] = {kWheelDown,kNoKey};
+    input::MouseBindings mouse;
+    mouse.button(1,0,true,false); CHECK(mouse.read(m,true).buttons == 0); // capture-only click
+    mouse.button(1,0,false,true); mouse.button(1,0,true,true);
+    CHECK(mouse.read(m,true).buttons == input::kA);
+    mouse.consume(); CHECK(mouse.read(m,true).buttons == 0); // overlay transition without a read
+    mouse.button(2,1,true,true); CHECK(mouse.read(m,true).buttons == input::kB); // other device works
+    mouse.button(1,0,false,true); mouse.button(1,0,true,true);
+    CHECK(mouse.read(m,true).buttons == (input::kA|input::kB));
+    CHECK(mouse.read(m,false).buttons == 0); CHECK(mouse.read(m,true).buttons == 0); // text prompt
+    mouse.button(1,0,false,true); mouse.button(2,1,false,true);
+    mouse.wheel(2,true); CHECK(mouse.read(m,true).buttons == input::kX);
+    CHECK(mouse.read(m,true).buttons == 0); CHECK(mouse.read(m,true).buttons == input::kX);
+    CHECK(mouse.read(m,true).buttons == 0); CHECK(mouse.read(m,true).buttons == 0);
+    mouse.wheel(-1,false); CHECK(mouse.read(m,true).buttons == 0);
+    mouse.wheel(-0.5f,true); CHECK(mouse.read(m,true).buttons == 0);
+    mouse.wheel(-0.5f,true); CHECK(mouse.read(m,true).buttons == input::kY);
+    mouse.consume(); CHECK(mouse.read(m,true).buttons == 0);
+    mouse.wheel(1,true); mouse.wheel(-1,true); mouse.wheel(1,true);
+    CHECK(mouse.read(m,true).buttons == input::kX); CHECK(mouse.read(m,true).buttons == 0);
+    CHECK(mouse.read(m,true).buttons == input::kY); CHECK(mouse.read(m,true).buttons == 0);
+    CHECK(mouse.read(m,true).buttons == input::kX); CHECK(mouse.read(m,true).buttons == 0);
+    mouse.wheel(2,true); CHECK(mouse.read(m,true,nullptr,nullptr,false).buttons == 0);
+    CHECK(mouse.read(m,true).buttons == 0); // wheel option drops queued bindings
+    m.keys[kLUp]={kMouse1,kNoKey}; m.keys[kA].fill(kNoKey);
+    bool keyboard[256]{}; keyboard[kVK_ANSI_D]=true;
+    mouse.button(1,0,true,true);
+    auto combined=mouse.read(m,true,keyboard);
+    CHECK(std::fabs(combined.lx-0.70710678f)<0.0001f && std::fabs(combined.ly-0.70710678f)<0.0001f);
+    mouse.remove_device(1); CHECK(mouse.read(m,true,keyboard).lx == 1 && mouse.read(m,true,keyboard).ly == 0);
+    CHECK(mouse.read(m,false,keyboard).lx == 1); // consuming the mouse preserves keyboard input
 }
 
 static void test_defaults() {
@@ -872,6 +923,7 @@ int main() {
     test_android_odin_mapping();
     test_binding_capture_faces();
     test_conflict_helpers();
+    test_mouse();
     test_defaults();
     test_apple_face_normalization();
     test_face_layout();

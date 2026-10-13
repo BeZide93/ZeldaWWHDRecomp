@@ -246,7 +246,7 @@ void filter_pad(input::PadState& s) {
         g_synth = false;
     }
     // left click while aiming an item: that item's button
-    if (active && g_left) {
+    if (active && g_left && input_map::key_users(input_map::current(), input_map::kMouse1).empty()) {
         uint32_t p = link_proc();
         uint32_t l = g_link.load(std::memory_order_relaxed);
         if (l && aiming_item(p)) {

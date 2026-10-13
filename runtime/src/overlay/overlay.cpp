@@ -1578,8 +1578,8 @@ void tab_controls() {
         sc = ImVec4(1.0f, 0.85f, 0.35f, 1.0f);
         status = std::string(input_map::action_label(U.cap_action)) + ": " +
                  (U.cap_col == kColPad   ? "press a controller button or stick direction (Esc cancels)"
-                  : U.cap_col == kColAny ? "press a key or a controller button (Esc cancels, Backspace clears)"
-                                         : "press a key (Esc cancels, Backspace clears)");
+                  : U.cap_col == kColAny ? "press a key, mouse button or controller button (Esc cancels, Backspace clears)"
+                                         : "press a key or mouse button (Esc cancels, Backspace clears)");
     } else if (!U.cap_note.empty()) {
         status = U.cap_note;
     } else if (U.hover_action >= 0) {
@@ -2060,11 +2060,20 @@ bool mouse_move(float nx, float ny, bool touch) {
 }
 bool mouse_button(int button, bool down, bool touch) {
     if (!captures() || g_no_host) return false;
+    if (button < 0 || button >= 5) return true;
+    if (!touch && g_capturing_keys.load() && down) {
+        g_capture_key = input_map::kMouse1 + button;
+        return true;
+    }
     push({Event::MouseButton, button, down, 0, 0, 0, touch});
     return true;
 }
 bool mouse_wheel(float dx, float dy) {
     if (!captures() || g_no_host) return false;
+    if (g_capturing_keys.load() && dy != 0) {
+        g_capture_key = dy > 0 ? input_map::kWheelUp : input_map::kWheelDown;
+        return true;
+    }
     push({Event::Wheel, 0, false, dx, dy, 0});
     return true;
 }

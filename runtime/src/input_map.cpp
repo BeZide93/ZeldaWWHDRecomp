@@ -122,17 +122,22 @@ int pad_from_id(const std::string& id) {
     return -1;
 }
 
+static const char* mouse_ids[] = {"Mouse1", "Mouse2", "Mouse3", "Mouse4", "Mouse5", "WheelUp", "WheelDown"};
+static const char* mouse_labels[] = {"Left mouse button", "Right mouse button", "Middle mouse button", "Mouse 4", "Mouse 5", "Wheel up", "Wheel down"};
 std::string key_id(int code) {
+    if (code >= kMouse1 && code < kInputCount) return mouse_ids[code-kMouse1];
     if (code < 0 || code > 255) return "";
     if (auto* k = find_key(code)) return k->id;
     return "Key" + std::to_string(code);
 }
 std::string key_label(int code) {
+    if (code >= kMouse1 && code < kInputCount) return mouse_labels[code-kMouse1];
     if (code < 0 || code > 255) return "";
     if (auto* k = find_key(code)) return k->label;
     return "Key " + std::to_string(code);
 }
 int key_from_id(const std::string& id) {
+    for (int i = kMouse1; i < kInputCount; ++i) if (id == mouse_ids[i-kMouse1]) return i;
     for (auto& k : kKeys)
         if (id == k.id) return k.code;
     if (id.size() > 3 && id.compare(0, 3, "Key") == 0) {
@@ -433,7 +438,7 @@ bool has_conflict(const Mapping& m, int a) {
 
 int conflict_count(const Mapping& m) {
     int n = 0;
-    for (int code = 0; code < 256; code++)
+    for (int code = 0; code < kInputCount; code++)
         if (key_users(m, code).size() > 1) n++;
     for (int p = 1; p < kPadCount; p++)
         if (pad_users(m, p).size() > 1) n++;
@@ -441,6 +446,7 @@ int conflict_count(const Mapping& m) {
 }
 
 std::string key_short_label(int code) {
+    if (code >= kMouse1 && code <= kMouse5) return "Mouse " + std::to_string(code-kMouse1+1);
     switch (code) {
     case kVK_Shift: return "L ⇧";
     case kVK_RightShift: return "R ⇧";
@@ -471,12 +477,12 @@ const char* pad_short_label(int p) {
     return p > 0 && p < kPadCount ? kShort[p] : "";
 }
 
-input::PadState keyboard_state(const Mapping& m, const bool keys[256]) {
+input::PadState keyboard_state(const Mapping& m, const bool* keys, int count) {
     float v[kActionCount];
     for (int a = 0; a < kActionCount; a++) {
         v[a] = 0;
         for (int k : m.keys[a])
-            if (k >= 0 && k < 256 && keys[k]) v[a] = 1;
+            if (k >= 0 && k < count && keys[k]) v[a] = 1;
     }
     input::PadState s;
     for (int a = 0; a < kActionCount; a++)

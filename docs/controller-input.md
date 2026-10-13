@@ -45,6 +45,46 @@ screens have their own controls; follow the game's stick/button prompts. The por
 If down fails, check its binding in Controls and test D-pad down, Left Stick Down
 and Right Stick Down separately.
 
+## Mouse and keyboard
+
+On Windows, Linux and macOS, click a key or alternate-key field in **Controls**,
+then press a mouse button or scroll the wheel. The same slots accept keyboard
+keys, so you can keep a keyboard alternative. Mouse inputs are unbound by default.
+Their stable IDs in the `keyboard` section of `controls.json` are:
+
+| Input | ID |
+| --- | --- |
+| Left mouse button | `Mouse1` |
+| Right mouse button | `Mouse2` |
+| Middle mouse button | `Mouse3` |
+| Side buttons 4 and 5 | `Mouse4`, `Mouse5` |
+| Wheel up and down | `WheelUp`, `WheelDown` |
+
+For example, `"B": ["J", "Mouse1"]` keeps J and also binds left click to B.
+Existing keyboard/controller files load unchanged. Each wheel notch supplies one
+short press, with a release between successive notches; fractional trackpad
+scrolls accumulate to a notch.
+
+Enable **Mouse camera** and click the TV picture to capture the pointer. That
+first click only captures; release it and click again to use its binding. Bound
+buttons work only in the TV window while the mouse camera has captured the
+pointer. Escape releases it. A left click in the GamePad window remains a touch;
+settings and text prompts take priority over game bindings. A button held during
+these transitions stays blocked until released, without blocking other buttons
+or other SDL mice.
+
+**First person on the mouse wheel** takes priority over `WheelUp` and `WheelDown`.
+Turn that option off to use wheel bindings. When left click is bound, it replaces
+the mouse camera's automatic “fire the aimed item” action. Middle click releases
+the pointer only when `Mouse3` is unbound; with it bound, use Escape to release.
+On macOS, unbound side buttons also retain their pointer-release behavior.
+The mouse gyro still receives movement independently of button bindings.
+
+A useful manual setup is left click = B, right click = R, and middle click =
+right-stick click (first person, with that mod enabled), with WASD and the remaining keyboard bindings.
+No preset is applied automatically. A mouse input assigned to Screenshot keeps
+the existing screenshot-shortcut priority over game actions sharing that input.
+
 ## Nintendo controllers on macOS
 
 Switch Pro, paired Joy-Cons and SNES-style Nintendo controllers use physical

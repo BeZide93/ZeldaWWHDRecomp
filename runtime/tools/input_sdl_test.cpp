@@ -12,6 +12,8 @@
 #include "input_map.h"
 #include "rumble.h"
 #include "platform/input_sdl.h"
+#include "platform/mouse_sdl.h"
+#include "mods/mods.h"
 #include "platform/android_controller.h"
 #include "overlay/binding_capture.h"
 #include "overlay/settings_shortcut.h"
@@ -26,7 +28,8 @@ namespace render { uint64_t frame_count(){return 0;} Api active(){return Api::Vu
 namespace gx2 { void checkpoint_vulkan_caches(){} }
 namespace gfxvk { bool graphics_hotkey(char key,bool activate){if(activate){++graphicsRequests;graphicsKey=key;}return true;} }
 namespace gfx { int plusPresses=0; void display_plus_pressed(){++plusPresses;} }  // display_modes.cpp: GamePad screen while paused
-namespace mods { double game_time(){return 0;} void filter_pad(input::PadState&){} bool mouse_camera(){return false;} bool first_person_wheel(){return false;} void mouse_button(int,bool){} void mouse_add(float,float){} void mouse_wheel(float){} }
+static bool mouseCamera=false, wheelOption=false;
+namespace mods { double game_time(){return 0;} void filter_pad(input::PadState&){} bool mouse_camera(){return mouseCamera;} bool first_person_wheel(){return wheelOption;} void mouse_button(int,bool){} void mouse_add(float,float){} void mouse_wheel(float){} }
 namespace interp { void set_mode(int){} uint64_t logic_steps(){return 0;} }
 namespace timebase { uint64_t now(){return 0;} }
 namespace true60 { uint64_t link_steps(){return 0;} bool state_loaded(){return false;} }  // test scenario clock (input_sdl.cpp)
@@ -162,6 +165,35 @@ int main(int argc,char** argv){
  auto* game=SDL_CreateWindow("Game",32,32,SDL_WINDOW_HIDDEN);
  auto* controls=SDL_CreateWindow("Controls",32,32,SDL_WINDOW_HIDDEN);
  assert(game&&controls);input::set_prompt_window(game);
+ auto* drc=SDL_CreateWindow("GamePad",32,32,SDL_WINDOW_HIDDEN);assert(drc);input::set_gamepad_window(drc);
+ // Mouse binding routing, using the real camera capture boundary without a game/GPU.
+ mods::mouse_init(game); mouseCamera=true;
+ auto mouseMap=input_map::Mapping::defaults();
+ mouseMap.keys[input_map::kB]={input_map::kMouse1,input_map::kNoKey};
+ mouseMap.keys[input_map::kR]={input_map::kMouse3,input_map::kNoKey};
+ mouseMap.keys[input_map::kX]={input_map::kWheelUp,input_map::kNoKey};
+ mouseMap.keys[input_map::kY]={input_map::kMouse4,input_map::kNoKey};
+ input_map::set_current(mouseMap,false);
+ auto click=[&](SDL_Window* w,Uint8 b,bool down,SDL_MouseID device=1){SDL_Event e{};e.type=down?SDL_EVENT_MOUSE_BUTTON_DOWN:SDL_EVENT_MOUSE_BUTTON_UP;e.button.windowID=SDL_GetWindowID(w);e.button.which=device;e.button.button=b;input::handle_event(e);};
+ auto wheel=[&](){SDL_Event e{};e.type=SDL_EVENT_MOUSE_WHEEL;e.wheel.windowID=SDL_GetWindowID(game);e.wheel.y=1;input::handle_event(e);};
+ click(game,SDL_BUTTON_LEFT,true);assert(mods::mouse_captured());assert(!(input::read().buttons&input::kB));
+ click(game,SDL_BUTTON_LEFT,false);click(game,SDL_BUTTON_LEFT,true);assert(input::read().buttons&input::kB);
+ overlayOpen=true;input::release_keys();assert(input::read().buttons==0);
+ overlayOpen=false;assert(input::read().buttons==0); // held press remains gated
+ click(game,SDL_BUTTON_X1,true,2);assert(input::read().buttons==input::kY);
+ click(game,SDL_BUTTON_X1,false,2);click(game,SDL_BUTTON_LEFT,false);
+ click(controls,SDL_BUTTON_LEFT,true);assert(input::read().buttons==0);click(controls,SDL_BUTTON_LEFT,false);
+ input::set_touch(true,0.25f,0.75f);click(drc,SDL_BUTTON_LEFT,true);
+ auto touched=input::read();assert(touched.buttons==0 && touched.touch && touched.tx==0.25f);
+ click(drc,SDL_BUTTON_LEFT,false);input::set_touch(false,0,0);
+ click(game,SDL_BUTTON_MIDDLE,true);assert(mods::mouse_captured());assert(input::read().buttons==input::kR);click(game,SDL_BUTTON_MIDDLE,false);
+ wheelOption=true;wheel();assert(input::read().buttons==0);
+ wheelOption=false;wheel();assert(input::read().buttons==input::kX);assert(input::read().buttons==0);
+ promptShown=true;click(game,SDL_BUTTON_LEFT,true);assert(input::read().buttons==0);
+ promptShown=false;assert(input::read().buttons==0);click(game,SDL_BUTTON_LEFT,false);
+ mods::mouse_release();mods::update_mouse();assert(!mods::mouse_captured());
+ click(game,SDL_BUTTON_X1,true);assert(input::read().buttons==0);click(game,SDL_BUTTON_X1,false);
+ mouseCamera=false;input_map::set_current(map,false);SDL_DestroyWindow(drc);input::set_gamepad_window(nullptr);
  // Touch-emulated pointers keep their source through the overlay boundary; a real mouse restores hover.
  overlayOpen=true;
  for(SDL_MouseID id : {SDL_TOUCH_MOUSEID, SDL_MouseID(1)}) {

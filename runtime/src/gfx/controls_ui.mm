@@ -1,4 +1,4 @@
-// Input > Controls…: remap keyboard keys and controller inputs (input_map.h) on a drawing of the
+// Input > Controls…: remap keyboard/mouse and controller inputs (input_map.h) on a drawing of the
 // selected Wii U controller (GamePad or Pro Controller, as chosen in the Input menu).
 //
 // The drawing is an original, simplified schematic made in code (no artwork). Each button, d-pad
@@ -232,6 +232,7 @@ struct UIState {
 @property(strong) NSButton* promptColours;
 @property(strong) NSTimer* timer;
 - (BOOL)handleKeyEvent:(NSEvent*)e;
+- (BOOL)handleMouseEvent:(NSEvent*)e;
 - (void)beginCapture:(int)a mode:(int)mode;
 - (void)cancelCapture;
 - (void)clearAction:(int)a slot:(int)slot;
@@ -249,6 +250,7 @@ struct UIState {
     if ((e.type == NSEventTypeKeyDown || e.type == NSEventTypeKeyUp || e.type == NSEventTypeFlagsChanged) &&
         [self.controls handleKeyEvent:e])
         return;
+    if ([self.controls handleMouseEvent:e]) return;
     [super sendEvent:e];
 }
 @end
@@ -915,7 +917,7 @@ static NSRect x_rect(NSRect chip) { return NSMakeRect(NSMaxX(chip) - 7, chip.ori
     int code = isPad ? m.pad[a] : m.keys[a][sl];
     bool bound = isPad ? code != kPadNone : code != kNoKey;
     bool capturing = st.capAction == a && (st.capMode == kCapAny ? sl != kSlotKey1 : st.capMode == sl + 1);
-    bool held = bound && (isPad ? st.pad[code] > 0.5f : st.keys[code]);
+    bool held = bound && (isPad ? st.pad[code] > 0.5f : code < 256 && st.keys[code]);
     bool conflict = bound && !(isPad ? pad_users(m, code, a) : key_users(m, code, a)).empty();
     bool hovered = a == self.hoverAction && sl == self.hoverSlot;
     // the same key / controller input as the hovered chip: show where else it is used
@@ -1210,8 +1212,8 @@ static NSTextField* label(NSString* s) {
     bool recent = _message && now - _messageTime < (_messageLevel ? 8 : 4);
     if (_st.capAction >= 0 && !(recent && _messageLevel == 2)) {
         NSString* what = _st.capMode == kCapPad   ? @"press a controller button or move a stick"
-                         : _st.capMode == kCapAny ? @"press a key or a controller button"
-                                                  : (_st.capMode == kCapKey1 ? @"press the alternate key" : @"press a key");
+                         : _st.capMode == kCapAny ? @"press a key, mouse button or controller button"
+                                                  : (_st.capMode == kCapKey1 ? @"press an alternate key or mouse button" : @"press a key or mouse button");
         s = [NSString stringWithFormat:@"%@: %@ (Esc cancels).", ns(action_label(_st.capAction)), what];
         if (_st.capMode != kCapKey0 && _st.capMode != kCapKey1 && !_st.padConnected)
             s = [s stringByAppendingString:@" No game controller connected."];
@@ -1299,7 +1301,7 @@ static NSTextField* label(NSString* s) {
     for (int a = 0; a < kActionCount; a++) {
         act[a] = 0;
         for (int k : _st.m.keys[a])
-            if (k != kNoKey && keys[k]) act[a] = 1;
+            if (k >= 0 && k < 256 && keys[k]) act[a] = 1;
         int p = _st.m.pad[a];
         if (p != kPadNone) act[a] = std::max(act[a], v[p]);
     }
@@ -1361,6 +1363,19 @@ static bool modifier_down(uint16_t code, NSEventModifierFlags f, bool* known) {
         }
     *known = code == kVK_CapsLock;
     return code == kVK_CapsLock && (f & NSEventModifierFlagCapsLock);
+}
+
+- (BOOL)handleMouseEvent:(NSEvent*)e {
+    if (_st.capAction < 0 || _st.capMode == kCapPad) return NO;
+    int code = kNoKey;
+    if (e.type == NSEventTypeLeftMouseDown || e.type == NSEventTypeRightMouseDown || e.type == NSEventTypeOtherMouseDown) {
+        if (e.buttonNumber >= 0 && e.buttonNumber < 5) code = kMouse1 + (int)e.buttonNumber;
+    } else if (e.type == NSEventTypeScrollWheel && e.scrollingDeltaY != 0) {
+        code = e.scrollingDeltaY > 0 ? kWheelUp : kWheelDown;
+    }
+    if (code == kNoKey) return NO;
+    [self assignKey:code];
+    return YES;
 }
 
 - (BOOL)handleKeyEvent:(NSEvent*)e {
@@ -1628,10 +1643,10 @@ static NSEvent* key_event(NSWindow* w, uint16_t code, NSString* chars) {
                            isARepeat:NO keyCode:code];
 }
 
-static void self_test() {
+static int self_test() {
     if (!getenv("WWHD_CONTROLS")) {  // it rewrites the controls file: never the user's own
         LOG("[controls-test] needs WWHD_CONTROLS=<scratch file>");
-        return;
+        return 1;
     }
     WWControls* c = g_controls;
     NSWindow* w = c.window;
@@ -1704,6 +1719,7 @@ static void self_test() {
     [c beginCapture:kX mode:kCapAny];
     [c releaseLocalKeys];  // the synthetic key-downs never get key-ups
     LOG("[controls-test] done, %d failed; window id %ld", fails, (long)w.windowNumber);
+    return fails;
 }
 
 namespace gfx {
