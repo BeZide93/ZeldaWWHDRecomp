@@ -826,7 +826,8 @@ void tab_graphics() {
         post_changed([fovPercent] { aspect::set_fov_scale(fovPercent/100.0f); hostui::set("gameplayFovScale",std::to_string(fovPercent/100.0f)); });
     help("100% keeps the original field of view. Higher values show more of the world and make Link\n"
          "appear smaller. Applies to gameplay and combat in 2D and 3D. Cutscenes, dialogue,\n"
-         "scene transitions and menus keep their authored FOV. Camera zooms are preserved.\n"
+         "scene transitions and menus keep their authored FOV. First-person view, item aiming and\n"
+         "the Telescope are widened by the same factor, so their zoom is weaker above 100%.\n"
          "Maximum vertical FOV: 110 degrees. Wider settings also widen visibility/culling checks.");
 
     heading("Aspect ratio");
