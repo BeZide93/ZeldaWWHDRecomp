@@ -14,6 +14,7 @@ on:
       - tools/android/setup_import_smoke.py
       - tools/android/picker_smoke.py
       - tools/android/SetupPolicyTest.java
+      - tools/android/SetupKeyRecoveryPolicyTest.java
       - tools/android/TgaImageTest.java
       - tools/android/ResourceVerifierTest.java
       - tools/android/ResourceCacheCleanupTest.java
@@ -60,6 +61,7 @@ on:
       - tools/android/setup_import_smoke.py
       - tools/android/picker_smoke.py
       - tools/android/SetupPolicyTest.java
+      - tools/android/SetupKeyRecoveryPolicyTest.java
       - tools/android/TgaImageTest.java
       - tools/android/ResourceVerifierTest.java
       - tools/android/ResourceCacheCleanupTest.java
