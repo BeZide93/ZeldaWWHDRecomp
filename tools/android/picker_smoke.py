@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 import time
 import uuid
+from urllib.parse import unquote
 import xml.etree.ElementTree as ET
 
 
@@ -158,7 +159,7 @@ def main():
                 if find("ALLOW", nodes=nodes) is not None: tap("ALLOW")
             else: raise AssertionError("Folder access confirmation did not close")
 
-    def selected(kind=None, key=None):
+    def selected(kind=None, key=None, document=None):
         deadline = time.monotonic() + 10
         while time.monotonic() < deadline:
             raw = private(pointer)
@@ -169,7 +170,11 @@ def main():
                     if source and fixture in source.decode():
                         jobs.add(identity)
                         value = json.loads(source)
-                        if (kind is None or value["kind"] == kind) and (key is None or key in value):
+                        # Picker results arrive asynchronously. An earlier image job from
+                        # this fixture must not satisfy a wait for a different document.
+                        matches_document = document is None or unquote(value.get("uri", "")).endswith(
+                            "/" + fixture + "/" + document)
+                        if matches_document and (kind is None or value["kind"] == kind) and (key is None or key in value):
                             return identity, value
             time.sleep(0.1)
         raise AssertionError("Picker did not publish the selected input")
@@ -218,7 +223,7 @@ def main():
         with tempfile.TemporaryDirectory(prefix="wwhd-picker-") as temporary:
             root = Path(temporary) / fixture
             for directory in ("game/code", "game/content", "game/meta"): (root / directory).mkdir(parents=True)
-            for path in ("game/code/cking.rpx", "game/content/asset", "game/meta/meta.xml", "dump.wua", "dump.wux"):
+            for path in ("game/code/cking.rpx", "game/content/asset", "game/meta/meta.xml", "dump.wua", "dump.wux", "dump-multikey.wux"):
                 (root / path).write_bytes(b"authored unsupported synthetic picker input\n")
             for path in ("disc.key", "common.key"): (root / path).write_bytes(b"*" * 16)
             (root / "replacement.key").write_bytes(b"+" * 16)
@@ -250,9 +255,10 @@ def main():
             selected(kind="archive")
             observations.append(probe("verify"))
             home()
-        choose(KINDS["image"], "dump.wux")
+        choose(KINDS["image"], "dump-multikey.wux")
+        selected(kind="image", document="dump-multikey.wux")
         choose(DISC, "keys.txt")
-        multi_identity, multi_source = selected(key="common_uri")
+        _, multi_source = selected(key="common_uri", document="dump-multikey.wux")
         if multi_source.get("disc_uri") != multi_source["common_uri"]:
             raise AssertionError("Multi-key document did not supply both roles")
         if start_control().get("enabled") != "true":
@@ -260,8 +266,9 @@ def main():
         observations.append({"multikey_document_supplied_both_roles": True, **probe("verify")})
         home()
         choose(KINDS["image"], "dump.wux")
-        identity, source = selected(kind="image")
-        if identity == multi_identity: raise AssertionError("Single-key case reused the multi-key job")
+        identity, source = selected(kind="image", document="dump.wux")
+        if any(key + "_uri" in source for key in ("disc", "common")):
+            raise AssertionError("Independent single-key image inherited a key selection")
         if source["kind"] != "image": raise AssertionError("Wrong image kind")
         if start_control().get("enabled") != "false": raise AssertionError("Missing keys did not block start")
         choose(DISC, "disc.key")
@@ -277,7 +284,8 @@ def main():
         _, restarted_source = selected(key="disc_uri")
         if "common_uri" in restarted_source or start_control().get("enabled") != "false" or find(COMMON) is None:
             raise AssertionError("Restart lost the separate common-key requirement")
-        observations.append({"disc_only_requires_common_before_and_after_restart": True})
+        observations.append({"disc_only_requires_common_before_and_after_restart": True,
+                             "single_key_image": "dump.wux", "multi_key_image": "dump-multikey.wux"})
         choose(COMMON, "common.key")
         selected(key="common_uri")
         if start_control().get("enabled") != "true": raise AssertionError("Complete input cannot start")
