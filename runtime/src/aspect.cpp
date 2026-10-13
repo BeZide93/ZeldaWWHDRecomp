@@ -22,6 +22,7 @@
 // switches its render-target factors at the matching swap (the value travels with the swap
 // command), so a change never lands in the middle of a frame.
 #include "aspect.h"
+#include "gfx/stereo.h"
 #include "button_glyphs.h"
 #include "aspect_panes.h"
 #include "mods/cemu_pack.h"
@@ -37,6 +38,7 @@
 
 #include "gx2/gx2_cmd.h"
 #include "runtime.h"
+#include "guest_addr.h"
 
 namespace aspect {
 namespace {
@@ -63,6 +65,23 @@ std::atomic<float> g_window{kBase};
 // aspect of the frame being built: written by the main thread at the swap, read by the threads
 // that compute and record the frame
 std::atomic<float> g_game{kBase};
+std::atomic<float> g_fov_requested{1.0f}, g_fov_game{1.0f};
+
+float gameplay_fov_scale() {
+    const float scale=g_fov_game.load();
+    if(scale==1.0f)return scale;
+    // Use the same HD event/control fields as portable saves and fast-forward.
+    // Check at the camera/clipper call so an event beginning this tick is already
+    // excluded. Never write the camera's authored FOV back into guest memory.
+    const uint32_t play=GD(0x1046F0B0);
+    const char* stage=reinterpret_cast<const char*>(mem::ptr(play+0x5134));
+    const uint32_t link=ld32(play+0x5B34);
+    if(!*stage || !std::strncmp(stage,"sea_T",8) || !std::strncmp(stage,"Name",8) ||
+       !std::strncmp(stage,"ENDumi",8) || !link || ld32(play+0x5B2C)!=link ||
+       ld8(play+0x5292) || ld8(play+0x5BB2) || ld8(play+0x5BB3) ||
+       ld8(play+0x5140+12) || ld32(GD(0x101F36CC)) || ld8(GD(0x101EA069)))return 1.0f;
+    return scale;
+}
 
 float clamp_aspect(float a) { return std::fmin(std::fmax(a, 1.0f), 4.0f); }
 
@@ -93,17 +112,20 @@ float vert_plus_fovy(float fovyDeg, float ky) {
     return ky == 1.0f ? fovyDeg : vert_plus_fovy_rad(fovyDeg * (float)M_PI / 180.0f, ky) * 180.0f / (float)M_PI;
 }
 // f(fovy), f(aspect) of a projection / clipper call of the main camera (fovy in degrees, or radians)
-// at 16:9 every hook leaves the game's values untouched (bit-identical original behaviour)
+// With original FOV at 16:9 every hook leaves the game's values untouched.
 bool original() { return g_game == kBase; }
-void adjust_projection_args(Cpu* c, int fovyReg, int aspectReg, bool radians = false) {
-    if (original() && !ours((float)c->f[aspectReg].ps0)) return;
+void adjust_projection_args(Cpu* c, int fovyReg, int aspectReg, bool radians = false, bool gameplayCamera = true) {
+    const float fov = gameplayCamera ? gameplay_fov_scale() : 1.0f;
+    if (original() && fov == 1.0f && !ours((float)c->f[aspectReg].ps0)) return;
     if (!standard_aspect((float)c->f[aspectReg].ps0)) return;  // a special aspect (demo): leave it
     remember(g_game);
     float kx, ky;
     factors(g_game, kx, ky);
     float fovy = (float)c->f[fovyReg].ps0;
     c->f[aspectReg].ps0 = c->f[aspectReg].ps1 = g_game;
-    c->f[fovyReg].ps0 = c->f[fovyReg].ps1 = radians ? vert_plus_fovy_rad(fovy, ky) : vert_plus_fovy(fovy, ky);
+    float angle = radians ? vert_plus_fovy_rad(fovy, ky * fov) : vert_plus_fovy(fovy, ky * fov);
+    if (fov != 1.0f) angle = std::min(angle, radians ? 110.0f * (float)M_PI / 180.0f : 110.0f);
+    c->f[fovyReg].ps0 = c->f[fovyReg].ps1 = angle;
 }
 }  // namespace
 
@@ -137,9 +159,16 @@ void set_window_aspect(float a) {
 float requested() {
     if(float pack=mods::cemu::aspect_ratio())return pack;
     int m = mode();
-    return clamp_aspect(m == kWindow ? g_window.load(std::memory_order_relaxed) : mode_value(m));
+    return clamp_aspect(m == kWindow ? g_window.load(std::memory_order_relaxed) /
+        (stereo::requestedMode == stereo::FullSBS ? 2.0f : 1.0f) : mode_value(m));
 }
 float game() { return g_game; }
+float fov_scale() { return g_fov_requested.load(); }
+void set_fov_scale(float scale) {
+    if(!std::isfinite(scale))return;
+    g_fov_requested=std::clamp(scale,0.75f,2.5f);
+    LOG("[camera] gameplay FOV scale %.2f (cutscenes excluded)",g_fov_requested.load());
+}
 static uint64_t g_swaps = 0, g_changed_swap = 0;
 uint64_t game_frame() { return g_swaps; }
 
@@ -159,6 +188,7 @@ float on_swap() {
     }();
     swaps++;
     g_swaps = swaps;
+    g_fov_game=g_fov_requested.load();
     for (auto& [f, v] : at)
         if (f == swaps) {
             if (v == 0) set_mode(kWindow);
@@ -199,10 +229,22 @@ extern "C" void site_024FFD60(Cpu* c) { adjust_projection_args(c, 1, 2); }
 // a taller screen got the 16:9 picture cropped at the sides instead of Vert+.
 extern "C" void site_0250007C(Cpu* c) { adjust_projection_args(c, 3, 4, true); }
 // view_setup: mDoLib_clipper::setup(f1 fovy, f2 aspect, f3 near, f4 far)
-extern "C" void site_024F811C(Cpu* c) { adjust_projection_args(c, 1, 2); }
-extern "C" void site_024F8168(Cpu* c) { adjust_projection_args(c, 1, 2); }
+static void stereo_clipper(Cpu* c) {
+    adjust_projection_args(c, 1, 2);
+    if (stereo::requestedMode == stereo::Off) return;
+    // A conservative union of both off-axis views. Widen culling only, never
+    // the visible camera. Include the largest shift at the near plane.
+    const float nearPlane=std::max(1.0f,float(c->f[3].ps0));
+    const float projectionX = 1.0f / (std::tan(float(c->f[1].ps0)*float(M_PI)/360.0f)*float(c->f[2].ps0));
+    const float margin=stereo::requestedDepth.load()*stereo::eyeDistanceAtUnitDepth * projectionX *
+        (1.0f/nearPlane + 1.0f/stereo::requestedConvergence.load());
+    c->f[2].ps0 *= 1.0f+margin;
+    c->f[2].ps1 = c->f[2].ps0;
+}
+extern "C" void site_024F811C(Cpu* c) { stereo_clipper(c); }
+extern "C" void site_024F8168(Cpu* c) { stereo_clipper(c); }
 // dScnName_c::setView: C_MTXPerspective (file select)
-extern "C" void site_025ADB38(Cpu* c) { adjust_projection_args(c, 1, 2); }
+extern "C" void site_025ADB38(Cpu* c) { adjust_projection_args(c, 1, 2, false, false); }
 
 // ---- HD layouts (nw::lyt, WWHD's nw4f): TV draws see the 16:9 layout space centred in the wider
 // screen, panes near the left/right edges move out to the new edges.

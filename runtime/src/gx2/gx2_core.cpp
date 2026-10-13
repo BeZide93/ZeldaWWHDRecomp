@@ -30,6 +30,7 @@
 #include "savestate.h"
 #include "guest_addr.h"
 #include "../aspect.h"
+#include "gfx/stereo.h"
 #include "gfx/renderer.h"
 #include "platform/perf_hint.h"
 #include "platform/thread_sampler.h"
@@ -502,6 +503,7 @@ static void execute_op(Op op, const uint32* p, uint32 n) {
                 v[4 + i] = fbits(bitsf(v[4 + i]) / ky);
             }
         apply_regs(p[0], v, std::min<uint32>(n - 1, 16));
+        if (n == 17) stereo::tag_layout(p[0], v);
         break;
     }
     case OP_LAYOUT_CONTENT:

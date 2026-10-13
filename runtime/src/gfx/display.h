@@ -31,7 +31,7 @@ constexpr uint32_t kSignatureW = 32, kSignatureH = 18;
 
 // start of a present: GamePad aspect for touch, "Match window" aspect, scripted touches, layout
 PresentPlan display_plan(bool haveTv, float tvW, float tvH, bool haveDrc, float drcW, float drcH, float layerW, float layerH,
-                         uint64_t frame);
+                         uint64_t frame, bool publish_input = true);
 // the same layout for another target size (sim screen: the window's real drawable)
 PresentPlan display_plan_for(const PresentPlan& p, float dw, float dh, float tvW, float tvH, float drcW, float drcH);
 // GamePad window: its picture scaled to fit

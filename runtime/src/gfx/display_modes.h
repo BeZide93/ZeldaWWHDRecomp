@@ -78,6 +78,7 @@ Layout layout(float dw, float dh, float tw, float th, float pw, float ph, bool p
 // a point in the TV window (0..1 from top left) on the GamePad picture -> touch position (0..1),
 // from the last display_plan; clamp_outside: a drag that left the picture keeps touching its edge
 bool overlay_hit(float nx, float ny, float* tx, float* ty, bool clamp_outside = false);
+void display_input_plan(const PresentPlan& plan); // publish the logical canvas used by the compositor
 // the main picture of the last TV layout (the TV picture, or the GamePad picture in GamePad-only
 // mode), 0..1 of the TV window from the top left; false before the first layout (the settings
 // overlay's text prompt places itself on it)

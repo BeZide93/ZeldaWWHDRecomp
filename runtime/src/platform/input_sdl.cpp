@@ -36,6 +36,7 @@ namespace gx2 { void checkpoint_vulkan_caches(); }
 #include <array>
 #include <atomic>
 #include <cmath>
+#include <cfloat>
 #include <cstring>
 #include <deque>
 #include <map>
@@ -229,6 +230,16 @@ static bool overlay_event(const SDL_Event& event){
   if(event.wheel.windowID!=tv)return false;
   float y=event.wheel.y,x=event.wheel.x;if(event.wheel.direction==SDL_MOUSEWHEEL_FLIPPED){x=-x;y=-y;}
   return overlay::mouse_wheel(x,y);
+ }
+ case SDL_EVENT_WINDOW_MOUSE_LEAVE:
+  if(event.window.windowID==tv)overlay::mouse_move(-FLT_MAX,-FLT_MAX);
+  return false;
+ case SDL_EVENT_WINDOW_MOUSE_ENTER:{
+  if(event.window.windowID!=tv)return false;
+  float x,y;SDL_GetMouseState(&x,&y);
+  int w=1,h=1;SDL_GetWindowSize(g_prompt_window,&w,&h);
+  overlay::mouse_move(x/std::max(1,w),y/std::max(1,h));
+  return false;
  }
  default:return false;
  }

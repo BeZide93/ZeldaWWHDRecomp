@@ -5,6 +5,7 @@
 // resulting ImDrawData (gfx/overlay_metal.mm, gfx/vulkan/overlay.cpp); the hosts feed input and apply
 // changes on their main thread (hostui.h).
 #include "overlay.h"
+#include "pointer.h"
 #include "gfx/shader_prebuild.h"
 #include "../audio_out.h"
 #include "guest_hud.h"
@@ -44,6 +45,8 @@
 #include "release_gate.h"
 #include "text_entry.h"
 #include "../aspect.h"
+#include "gfx/stereo.h"
+#include "gfx/hdr.h"
 #include "../crashrec.h"
 #include "../game_languages.h"
 #include "../gfx/renderer.h"
@@ -94,6 +97,7 @@ double now_s() { return std::chrono::duration<double>(clock::now().time_since_ep
 
 std::atomic<bool> g_open{false};
 std::atomic<bool> g_perf{false};
+std::atomic<bool> g_stereo_pointer_visible{false};
 PerfAverage g_average;
 std::atomic<float> g_density{1.0f};
 std::atomic<float> g_android_dpi{160.0f};
@@ -817,6 +821,14 @@ void tab_graphics() {
         if (radio(names[i], std::fabs(cur - s) < 0.01f)) post_changed([s] { hostui::set_res_scale(s); });
     }
 
+    float fovPercent=aspect::fov_scale()*100.0f;
+    if(ImGui::SliderFloat("Gameplay FOV", &fovPercent,75.0f,250.0f,"%.0f%%",ImGuiSliderFlags_AlwaysClamp))
+        post_changed([fovPercent] { aspect::set_fov_scale(fovPercent/100.0f); hostui::set("gameplayFovScale",std::to_string(fovPercent/100.0f)); });
+    help("100% keeps the original field of view. Higher values show more of the world and make Link\n"
+         "appear smaller. Applies to gameplay and combat in 2D and 3D. Cutscenes, dialogue,\n"
+         "scene transitions and menus keep their authored FOV. Camera zooms are preserved.\n"
+         "Maximum vertical FOV: 110 degrees. Wider settings also widen visibility/culling checks.");
+
     heading("Aspect ratio");
     int am = aspect::mode();
     for (int i = aspect::kOriginal; i <= aspect::k32x9; i++) {
@@ -825,6 +837,51 @@ void tab_graphics() {
             post_changed([i] { aspect::set_mode(i); hostui::set("aspectMode", std::to_string(i)); });
     }
 
+#ifdef WWHD_HAS_VULKAN
+    if (render::g_backend->api == render::Api::Vulkan) {
+        heading("Stereoscopic 3D (experimental)");
+        const char* modes[] = {"Off", "Half SBS", "Full SBS", "Top and bottom (TAB)"};
+        int mode = stereo::requestedMode.load();
+        if (ImGui::Combo("3D output", &mode, modes, stereo::Count))
+            post_changed([mode] { stereo::set_mode(mode); hostui::set("stereoMode", std::to_string(mode)); });
+        float depth = stereo::requestedDepth.load(), convergence = stereo::requestedConvergence.load();
+        if (ImGui::SliderFloat("3D depth", &depth, 0.0f, 5.0f, "%.2fx", ImGuiSliderFlags_AlwaysClamp))
+            post_changed([depth] { stereo::set_depth(depth); hostui::set("stereoDepth", std::to_string(depth)); });
+        if (ImGui::SliderFloat("Convergence", &convergence, 10.0f, 10000.0f, "%.0f", ImGuiSliderFlags_Logarithmic | ImGuiSliderFlags_AlwaysClamp))
+            post_changed([convergence] { stereo::set_convergence(convergence); hostui::set("stereoConvergence", std::to_string(convergence)); });
+        bool swap = stereo::requestedSwap.load();
+        if (ImGui::Checkbox("Swap eyes", &swap))
+            post_changed([swap] { stereo::requestedSwap = swap; hostui::set("stereoSwap", swap ? "1" : "0"); });
+        help("Separate geometry rendering for each eye. Half SBS and TAB are anamorphic; Full SBS preserves each eye's pixels. Experimental: scene and effect validation is in progress.");
+    }
+#endif
+#if defined(WWHD_HAS_VULKAN) && defined(_WIN32)
+    if(render::vulkan()) {
+        heading("HDR output");
+        if(radio("SDR",!hdr::enabled.load()))post_changed([] {hdr::enabled=false;hdr::fellBackToSdr=false;hostui::set("hdrEnabled","0");});
+        ImGui::SameLine();
+        if(radio("HDR (scRGB)",hdr::enabled.load(),hdr::displayEnabled.load()&&hdr::formatSupported.load()))
+            post_changed([] {hdr::enabled=true;hdr::fellBackToSdr=false;hostui::set("hdrEnabled","1");});
+        if(hdr::fellBackToSdr.load())note("HDR is unavailable on this display. Using SDR output.");
+        if(!hdr::displayEnabled.load())note("Enable HDR in Windows for the display containing this window.");
+        else if(!hdr::formatSupported.load())note("This Vulkan surface does not support scRGB HDR output.");
+        auto slider=[](const char* label,const char* key,std::atomic<float>& setting,float lo,float hi,const char* fmt) {
+            float v=setting.load();ImGui::SetNextItemWidth(260);
+            if(ImGui::SliderFloat(label,&v,lo,hi,fmt,ImGuiSliderFlags_AlwaysClamp)) {
+                auto* dst=&setting;
+                post_changed([dst,v,lo,hi,key] {hdr::set(*dst,v,lo,hi);hostui::set(key,std::to_string(v));});
+            }
+        };
+        ImGui::BeginDisabled(!hdr::enabled.load());
+        slider("Paper white","hdrPaperWhite",hdr::paperWhite,80,500,"%.0f nits");
+        slider("Peak brightness","hdrPeak",hdr::peak,200,4000,"%.0f nits");
+        slider("Exposure","hdrExposure",hdr::exposure,-3,3,"%+.2f EV");
+        slider("Highlight expansion","hdrHighlights",hdr::highlights,0,1,"%.2f");
+        slider("Settings menu brightness","hdrMenuWhite",hdr::menuWhite,80,500,"%.0f nits");
+        ImGui::EndDisabled();
+        help("HDR output expands the game's SDR picture; it cannot recover already clipped lighting. Paper white also affects the in-game HUD. Settings-menu brightness is independent. Set peak brightness to your display's capability. SDR screenshots remain SDR.");
+    }
+#endif
     heading("Effects");
     bool v;
     float bloom = render::bloom_strength() * 100.0f;
@@ -2059,10 +2116,11 @@ void set_clipboard_text(const char* utf8) {
     g_clipboard = utf8 ? utf8 : "";
 }
 bool wants_text() { return is_open() && g_wants_text.load(); }
+void set_stereo_pointer_visible(bool visible) { g_stereo_pointer_visible=visible; }
 bool mouse_move(float nx, float ny, bool touch) {
-    if (!captures() || g_no_host) return false;
+    if (g_no_host || (!captures() && stereo::requestedMode==stereo::Off)) return false;
     push({Event::MousePos, 0, false, nx, ny, 0, touch});
-    return true;
+    return captures();
 }
 bool mouse_button(int button, bool down, bool touch) {
     if (!captures() || g_no_host) return false;
@@ -2099,6 +2157,7 @@ ImDrawData* frame(float pw, float ph, void (*renderer_init)()) {
         // the saved rumble choice (WWHD_RUMBLE wins)
         if (!rumble::env_override() && hostui::get("rumble", v)) rumble::set_enabled(v != "0");
         // the saved aspect ratio (WWHD_ASPECT wins; issue #108: it was not remembered)
+        if(hostui::get("gameplayFovScale",v))aspect::set_fov_scale(strtof(v.c_str(),nullptr));
         if (!getenv("WWHD_ASPECT") && hostui::get("aspectMode", v)) {
             const int m = atoi(v.c_str());
             if (m >= aspect::kOriginal && m <= aspect::k32x9) aspect::set_mode(m);
@@ -2174,10 +2233,11 @@ ImDrawData* frame(float pw, float ph, void (*renderer_init)()) {
             if (layer.wanted(line)) drawn_layers.push_back(&layer);
             if (!line.empty()) toast = std::move(line);
         }
+    const bool stereoPointer=stereo::frame.mode!=stereo::Off && g_stereo_pointer_visible.load();
     U.linearized = false;
     // a mod install keeps running (and shows its progress) while the menu is closed
     const bool mods_busy = !setup_run.id.empty() || (U.init && modsui::wants_background());
-    if (!open && !perf && !text && toast.empty() && !guesthud::active() && !mods_busy && drawn_layers.empty()) {
+    if (!open && !perf && !text && toast.empty() && !guesthud::active() && !mods_busy && !stereoPointer && drawn_layers.empty()) {
         if (U.init) {  // forget events and pressed keys while nothing is shown
             std::lock_guard<std::mutex> lk(g_mu);
             g_events.clear();
@@ -2204,6 +2264,10 @@ ImDrawData* frame(float pw, float ph, void (*renderer_init)()) {
 #endif
     io.DisplaySize = ImVec2(pw / scale, ph / scale);
     io.DisplayFramebufferScale = ImVec2(scale, scale);
+    io.MouseDrawCursor=stereoPointer;
+    // Refresh a stationary pointer too: resizing/HiDPI can change DisplaySize.
+    const ImVec2 pointer=pointer_position(U.mouse_position.x,U.mouse_position.y,io.DisplaySize);
+    overlay_trace::mouse_pos(io,pointer.x,pointer.y);
     io.DeltaTime = U.last_time > 0 ? (float)std::clamp(t - U.last_time, 1e-4, 0.25) : 1.0f / 60.0f;
     U.last_time = t;
     std::vector<Event> events;
@@ -2227,7 +2291,10 @@ ImDrawData* frame(float pw, float ph, void (*renderer_init)()) {
             io.AddMouseSourceEvent(e.touch ? ImGuiMouseSource_TouchScreen : ImGuiMouseSource_Mouse);
             mouse_used |= e.x != U.mouse_position.x || e.y != U.mouse_position.y;
             U.mouse_position = ImVec2(e.x, e.y);
-            overlay_trace::mouse_pos(io, e.x * io.DisplaySize.x, e.y * io.DisplaySize.y);
+            {
+                const ImVec2 p=pointer_position(e.x,e.y,io.DisplaySize);
+                overlay_trace::mouse_pos(io,p.x,p.y);
+            }
             break;
         case Event::MouseButton: io.AddMouseSourceEvent(e.touch ? ImGuiMouseSource_TouchScreen : ImGuiMouseSource_Mouse); mouse_used = true; overlay_trace::mouse_button(io, e.code, e.down); break;
         case Event::Wheel: mouse_used |= e.x != 0 || e.y != 0; overlay_trace::wheel(io, e.x, e.y); break;

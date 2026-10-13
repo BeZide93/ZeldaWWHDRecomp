@@ -18,6 +18,8 @@
 #include <jni.h>
 #endif
 #include "backend.h"
+#include "stereo.h"
+#include "../hdr.h"
 #include "attachment_view_usage.h"
 #include "../../build_info.h"
 #include "deferred_commands.h"
@@ -1207,6 +1209,22 @@ static void make_swapchain(Screen &s) {
   fs.resize(n);
   if (fs.empty())
     exception_report::raise("No presentation formats");
+  bool wantHdr=false;
+  if(&s==&R.tv) {
+    bool supported=false;
+    for(const auto& f:fs)if(f.format==VK_FORMAT_R16G16B16A16_SFLOAT &&
+        f.colorSpace==VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT) {
+      VkFormatProperties props;vkGetPhysicalDeviceFormatProperties(R.physicalDevice,f.format,&props);
+      supported=(caps.supportedUsageFlags&VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) &&
+        (props.optimalTilingFeatures&VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT) &&
+        (props.optimalTilingFeatures&VK_FORMAT_FEATURE_BLIT_DST_BIT);
+    }
+    hdr::formatSupported=supported;
+#if defined(_WIN32) && defined(WWHD_SDL_HOST)
+    hdr::displayEnabled=SDL_GetBooleanProperty(SDL_GetWindowProperties(s.window),SDL_PROP_WINDOW_HDR_ENABLED_BOOLEAN,false);
+#endif
+    wantHdr=hdr::resolve_output();
+  }
   // Presentation uses image blits, so both advertised surface support and
   // optimal-tiling BLIT_DST format support must hold.
   if (fs.size() == 1 && fs[0].format == VK_FORMAT_UNDEFINED)
@@ -1221,6 +1239,9 @@ static void make_swapchain(Screen &s) {
   const VkFormat preferred = s.scanSrgb ? VK_FORMAT_B8G8R8A8_SRGB : VK_FORMAT_B8G8R8A8_UNORM;
 #endif
   for (auto f : fs) {
+    if(wantHdr) {
+      if(f.format!=VK_FORMAT_R16G16B16A16_SFLOAT || f.colorSpace!=VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT)continue;
+    } else if(f.colorSpace!=VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)continue;
     VkFormatProperties props;
     vkGetPhysicalDeviceFormatProperties(R.physicalDevice, f.format, &props);
     if (!(props.optimalTilingFeatures & VK_FORMAT_FEATURE_BLIT_DST_BIT))
@@ -1355,6 +1376,8 @@ static void make_swapchain(Screen &s) {
   s.swapchain = sc;
   ++s.swapchainGeneration;
   s.swapFormat = format.format;
+  s.hdrOutput = wantHdr;
+  if(&s==&R.tv)LOG("[HDR] output %s; scRGB format %s; Windows HDR %s",wantHdr?"scRGB FP16":"SDR",hdr::formatSupported.load()?"supported":"unavailable",hdr::displayEnabled.load()?"enabled":"disabled");
   s.swapExtent = extent;
   vkGetSwapchainImagesKHR(R.device, sc, &n, nullptr);
   s.images.resize(n);
@@ -1907,7 +1930,8 @@ static bool present(Screen &s) {
 #endif
   // Presentation changed (settings overlay): a new swapchain, as for a resize (also for a window that
   // is not shown right now, so the next frame it shows uses the new mode)
-  if (!workerAcquired && screen_has_window(s) && s.swapchain && s.presentWanted != effective_present_mode())
+  if (!workerAcquired && screen_has_window(s) && s.swapchain &&
+      (s.presentWanted != effective_present_mode() || (&s==&R.tv && s.hdrOutput!=hdr::enabled.load())))
     make_swapchain(s);
   Surface* scan = presentation_source_screen(s).scan.get();
   if (!screen_has_window(s) || !s.visible || s.width <= 0 || s.height <= 0 || !scan ||
@@ -2298,7 +2322,8 @@ void copy_to_scan(uint32_t cb, uint32_t target) {
   Surface *src = surface_from_color_buffer(cb);
   if (!src)
     return;
-  Screen &s = target == 4 ? R.drc : R.tv;
+  if (stereoEye && target == 4) return; // GamePad is a shared 2D device.
+  Screen &s = stereoEye ? stereoRight : (target == 4 ? R.drc : R.tv);
   if (!s.buildingScan || s.buildingScan->extent.width != src->extent.width ||
       s.buildingScan->extent.height != src->extent.height ||
       s.buildingScan->fmt.pixel != src->fmt.pixel) {
@@ -2572,7 +2597,7 @@ void present_completed_frame_while_pipeline_pending() {
 }
 void swap() {
   if(active_deferred_commands)active_deferred_commands->finish_exact();
-  for (Screen* s : {&R.tv, &R.drc}) if (s->buildingScanDirty) {
+  for (Screen* s : {&R.tv, &R.drc, &stereoRight}) if (s->buildingScanDirty) {
     s->scan.swap(s->buildingScan);
     s->scanSrgb = s->buildingScanSrgb;
     s->buildingScanDirty = false;
@@ -2606,7 +2631,7 @@ void swap() {
   gfx::PresentPlan plan = gfx::display_plan(
       tvScan, tvScan ? float(tvScan->extent.width) : 0, tvScan ? float(tvScan->extent.height) : 0,
       drcScan, drcScan ? float(drcScan->extent.width) : 0, drcScan ? float(drcScan->extent.height) : 0,
-      layerW, layerH, R.frame + 1);
+      layerW, layerH, R.frame + 1, stereo::frame.mode!=stereo::FullSBS);
 #ifdef __ANDROID__
   // A physical second display owns the GamePad picture. Keep the requested
   // single-screen mode intact so disconnecting restores its normal fallback.
@@ -2636,9 +2661,20 @@ void swap() {
     plan.button_dot = interp::mode() != 0 ? 1 : 2;
 #endif
   set_present_plan(&plan);
+  // Full SBS uses a half-width logical canvas before placing the two eyes.
+  // Publish that same layout for GamePad hit testing and the software pointer.
+  gfx::PresentPlan inputPlan=plan;
+  if(stereo::frame.mode==stereo::FullSBS) {
+    inputPlan=gfx::display_plan_for(plan,layerW*.5f,layerH,
+        tvScan?float(tvScan->extent.width):0,tvScan?float(tvScan->extent.height):0,
+        drcScan?float(drcScan->extent.width):0,drcScan?float(drcScan->extent.height):0);
+    gfx::display_input_plan(inputPlan);
+  }
   // settings overlay: built once, drawn into the TV window and its present dumps
-  if(overlay::guesthud::active())overlay::guesthud::set_tv_region(plan.tv.x,plan.tv.y,plan.tv.w,plan.tv.h,!plan.drc_only);
-  set_overlay_draw(overlay::frame(plan.dw > 0 ? plan.dw : layerW, plan.dh > 0 ? plan.dh : layerH, overlay_renderer_init));
+  if(overlay::guesthud::active())overlay::guesthud::set_tv_region(inputPlan.tv.x,inputPlan.tv.y,inputPlan.tv.w,inputPlan.tv.h,!inputPlan.drc_only);
+  const float overlayWidth = (plan.dw > 0 ? plan.dw : layerW) /
+      (stereo::frame.mode == stereo::FullSBS ? 2.0f : 1.0f);
+  set_overlay_draw(overlay::frame(overlayWidth, plan.dh > 0 ? plan.dh : layerH, overlay_renderer_init));
   compose_headless_diagnostic(R.tv);
   take_screenshots(plan);
   bool sampled[2] = {};
@@ -3131,6 +3167,8 @@ static void init_device(std::vector<const char *> extensions,
     if (!has_extension(ies, e))
       exception_report::raise(std::string("the Vulkan driver lacks instance extension ") + e);
   VkInstanceCreateInfo ci{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
+  if(has_extension(ies,VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME))
+    extensions.push_back(VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME);
   if (has_extension(ies, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME)) {
     extensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
     ci.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
@@ -3929,18 +3967,35 @@ void run_main_loop() {
   for (;;) {
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
+#ifdef _WIN32
+      if(event.type==SDL_EVENT_WINDOW_HDR_STATE_CHANGED && event.window.windowID==SDL_GetWindowID(R.tv.window)) {
+        const bool enabled=SDL_GetBooleanProperty(SDL_GetWindowProperties(R.tv.window),SDL_PROP_WINDOW_HDR_ENABLED_BOOLEAN,false);
+        // SDL also reports white-level/headroom changes after presentation.
+        // Our explicit nits controls do not require a new swapchain for those.
+        if(hdr::displayEnabled.exchange(enabled)!=enabled)R.tv.resize=true;
+      }
+#endif
       if ((event.type == SDL_EVENT_MOUSE_MOTION && event.motion.which != SDL_TOUCH_MOUSEID) ||
           ((event.type == SDL_EVENT_MOUSE_BUTTON_DOWN || event.type == SDL_EVENT_MOUSE_BUTTON_UP) &&
            event.button.which != SDL_TOUCH_MOUSEID) ||
           event.type == SDL_EVENT_MOUSE_WHEEL) {
         mouseUsed = std::chrono::steady_clock::now();
-        if (pointerHidden) { SDL_ShowCursor(); pointerHidden = false; }
       }
       if (event.type == SDL_EVENT_QUIT) quit_game();
       if (close_request(event)) continue;
       if (fullscreen_key(event)) continue;
       if (drc_key(event)) continue;
-      if (gamepad_touch(event)) continue;
+      if (gamepad_touch(event)) {
+        // Consumed GamePad drags still move the visible stereo pointer.
+        const bool motion=event.type==SDL_EVENT_MOUSE_MOTION;
+        const bool button=event.type==SDL_EVENT_MOUSE_BUTTON_DOWN || event.type==SDL_EVENT_MOUSE_BUTTON_UP;
+        if((motion||button) && (motion?event.motion.windowID:event.button.windowID)==SDL_GetWindowID(R.tv.window)) {
+          float nx,ny;
+          tv_window_point(motion?event.motion.x:event.button.x,motion?event.motion.y:event.button.y,nx,ny);
+          overlay::mouse_move(nx,ny);
+        }
+        continue;
+      }
       input::handle_event(event);
       for (Screen *s : {&R.tv, &R.drc})
         if (s->window && event.window.windowID == SDL_GetWindowID(s->window)) {
@@ -3964,10 +4019,14 @@ void run_main_loop() {
     {
       const bool focused = R.tv.window && (SDL_GetWindowFlags(R.tv.window) & SDL_WINDOW_INPUT_FOCUS);
       const bool keep = !focused || overlay::is_open() || mods::mouse_captured();
-      if (pointerHidden && keep) { SDL_ShowCursor(); pointerHidden = false; mouseUsed = std::chrono::steady_clock::now(); }
-      else if (!pointerHidden && !keep && std::chrono::steady_clock::now() - mouseUsed > std::chrono::seconds(2)) {
-        SDL_HideCursor();
-        pointerHidden = true;
+      const bool idle=std::chrono::steady_clock::now()-mouseUsed>std::chrono::seconds(2);
+      const bool stereoPointer=stereo::requestedMode!=stereo::Off && SDL_GetMouseFocus()==R.tv.window &&
+          !mods::mouse_captured() && (overlay::captures() || !idle);
+      overlay::set_stereo_pointer_visible(stereoPointer);
+      const bool hide=stereoPointer || (!keep && idle);
+      if(hide!=pointerHidden) {
+        if(hide)SDL_HideCursor();else SDL_ShowCursor();
+        pointerHidden=hide;
       }
     }
 #endif
