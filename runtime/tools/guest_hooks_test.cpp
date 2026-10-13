@@ -94,6 +94,7 @@ void state_loaded() {}
 }
 // and so has the story notebook (story_notebook_test)
 namespace story_notebook {
+void logic_step(uint64_t) {}
 int32_t define(const std::string&,const std::string&,const std::string&,const std::string&,const std::string&,const std::string&) {return kResultInvalid;}
 int32_t step(const std::string&,const std::string&,uint32_t,const std::string&,const std::string&) {return kResultInvalid;}
 int32_t place(const std::string&,const std::string&,float,float) {return kResultInvalid;}

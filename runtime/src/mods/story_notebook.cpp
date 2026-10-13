@@ -55,7 +55,11 @@ constexpr uint32_t kMenuChildren = 0x48, kItemNumber = 0xEC;  // hdParts_c::mChi
 constexpr uint32_t kItemVisible = 0xFC, kItemPaneGroups = 0x8C, kItemLayout = 0x44;  // hdMenuItem_c / hdParts_c
 constexpr uint32_t kLayoutLyt = 0x4, kLytRootPane = 0xC;                            // hdPartsLayout_c / hdPartsLyt_c
 constexpr uint32_t kPaneParent = 0xC, kPaneTranslate = 0x1C, kPaneScale = 0x34, kPaneFlags = 0x44, kPaneGlobalAlpha = 0x46;
-constexpr float kIconSize = 84.0f;  // GamePad pixels at scale 1: the size of the game's item icons in the bag
+constexpr float kIconSize = 90.0f;  // layout units at scale 1: a little larger than the game's item icons in the bag (about 75)
+constexpr float kLayoutWidth = 1280.0f, kLayoutHeight = 720.0f, kLayoutToPicture = 854.0f / 1280.0f;
+// the artwork's visual centre (the book, without the float on its left and the bookmark below), as a
+// share of the image: drawn on the place's centre
+constexpr float kIconAnchorX = 100.4f / 192.0f, kIconAnchorY = 91.9f / 192.0f;
 const std::string kIconOwner = "port:story-notebook-icon";
 constexpr uint32_t kMenuWindowMode = 0x54, kDeliveryWindow = 2;           // hdMenuMain_c::mWindowMode: 2 the Delivery Bag
 constexpr uint32_t kFirstWindowChild = 0x14, kWindowChildren = 8;          // the bag window's eight places (mChildren 0x14..0x1B)
@@ -63,7 +67,8 @@ constexpr uint32_t kFirstWindowChild = 0x14, kWindowChildren = 8;          // th
 // window runs (executeWindow). Only that place carries the icon: the menu's floating icon (the item
 // the cursor or a touch lifts, sMenuIcon) is another item that may show the notebook's number too.
 uint32_t g_menu = 0, g_bag_item = 0;  // game thread
-uint64_t g_frame = 0, g_window_frame = 0;  // pad() counts frames; the frame the bag window last ran
+std::atomic<uint64_t> g_step{0};  // the game's logic steps (logic_step)
+uint64_t g_window_step = 0;     // the step the bag window last ran
 const char* g_icon_reason = "";       // why the icon is (not) shown, for the trace
 
 std::mutex g_mu;
@@ -148,7 +153,8 @@ IconPlace compute_icon_place() {
     IconPlace at;
     const uint32_t item = g_bag_item;
     if (!item || !g_menu) return g_icon_reason = "no bag window yet", at;
-    if (g_window_frame + 1 < g_frame) return g_icon_reason = "the bag window is closed", at;
+    // the window runs once per logic step; frames drawn in between (interpolation, 120 Hz) keep the icon
+    if (g_window_step + 1 < g_step.load(std::memory_order_relaxed)) return g_icon_reason = "the bag window is closed", at;
     if (ld32(g_menu + kMenuWindowMode) != kDeliveryWindow) return g_icon_reason = "another bag is open", at;
     if (ld32(item + kItemNumber) != kNotebookItem || !ld8(item + kItemVisible)) return g_icon_reason = "the place shows a game item", at;
     if (!notebook_owned()) return g_icon_reason = "no notebook in this save file", at;
@@ -156,13 +162,32 @@ IconPlace compute_icon_place() {
     const uint32_t layout = ld32(item + kItemLayout), lyt = layout ? ld32(layout + kLayoutLyt) : 0;
     const uint32_t root = lyt ? ld32(lyt + kLytRootPane) : 0;
     if (!icon || !root) return g_icon_reason = "the place has no panes", at;
-    st8(icon + kPaneFlags, uint8_t(ld8(icon + kPaneFlags) & ~1u));  // the game's sentinel icon stays hidden
+    static const bool show_sentinel = [] { const char* e = getenv("WWHD_NOTEBOOK_SHOW_SENTINEL"); return e && *e == '1'; }();
+    if (!show_sentinel)  // (test aid: WWHD_NOTEBOOK_SHOW_SENTINEL=1 leaves the stand-in's icon under ours, to check the alignment)
+        st8(icon + kPaneFlags, uint8_t(ld8(icon + kPaneFlags) & ~1u));  // the game's sentinel icon stays hidden
     std::vector<PaneNode> chain;
     for (uint32_t pane = icon; pane && chain.size() < 32; pane = ld32(pane + kPaneParent))
         chain.push_back({u32_as_f32(ld32(pane + kPaneTranslate)), u32_as_f32(ld32(pane + kPaneTranslate + 4)),
                          u32_as_f32(ld32(pane + kPaneScale)), u32_as_f32(ld32(pane + kPaneScale + 4)),
                          (ld8(pane + kPaneFlags) & 1) != 0});
-    at = place_icon(chain, kIconSize, ld8(root + kPaneGlobalAlpha), 854.0f, 480.0f);
+    // the GamePad's layout is authored for 1280 x 720 (its screen root pane), shown on the 854 x 480 picture
+    at = place_icon(chain, kIconSize, ld8(root + kPaneGlobalAlpha), kLayoutWidth, kLayoutHeight);
+    at.x *= kLayoutToPicture, at.y *= kLayoutToPicture, at.size *= kLayoutToPicture;
+    if (trace()) {  // the panes from the place's icon up to the screen, once per place
+        static uint32_t logged = 0;
+        if (logged != item) {
+            logged = item;
+            for (uint32_t pane = icon, n = 0; pane && n < 32; pane = ld32(pane + kPaneParent), n++) {
+                char words[400];
+                int k = 0;
+                for (uint32_t o = 0x48; o < 0xA8; o += 4) k += snprintf(words + k, sizeof words - k, " %.1f", u32_as_f32(ld32(pane + o)));
+                LOG("[notebook] bag pane %u %08X: t %.1f %.1f s %.2f %.2f size %.0f %.0f flags %02X alpha %u/%u |%s", n, pane,
+                    u32_as_f32(ld32(pane + kPaneTranslate)), u32_as_f32(ld32(pane + kPaneTranslate + 4)), u32_as_f32(ld32(pane + kPaneScale)),
+                    u32_as_f32(ld32(pane + kPaneScale + 4)), u32_as_f32(ld32(pane + 0x3C)), u32_as_f32(ld32(pane + 0x40)),
+                    ld8(pane + kPaneFlags), ld8(pane + 0x45), ld8(pane + kPaneGlobalAlpha), words);
+            }
+        }
+    }
     g_icon_reason = at.shown ? "shown over the notebook's bag place" : "the window is hidden or fading";
     return at;
 }
@@ -174,10 +199,15 @@ void bag_icon() {
     static guestmods::hud::Handle image = 0;
     static uint64_t generation = 0;
     const IconPlace at = compute_icon_place();
-    if (trace()) {
+    if (trace()) {  // only when the decision or the place changes
         static const char* last = nullptr;
-        if (g_icon_reason != last) LOG("[notebook] bag icon: %s", g_icon_reason);
+        static float lx = -1e9f, ly = -1e9f;
+        if (g_icon_reason != last || (at.shown && (std::fabs(at.x - lx) > 1 || std::fabs(at.y - ly) > 1))) {
+            if (at.shown) LOG("[notebook] bag icon: %s, at %.1f %.1f size %.1f (GamePad pixels)", g_icon_reason, at.x, at.y, at.size);
+            else LOG("[notebook] bag icon: %s", g_icon_reason);
+        }
         last = g_icon_reason;
+        if (at.shown) lx = at.x, ly = at.y;
     }
     if (!at.shown) {
         if (published) store.drop(kIconOwner);
@@ -201,7 +231,7 @@ void bag_icon() {
     const guestmods::hud::Handle list = store.begin(kIconOwner, tv ? 0 : 1);
     if (!list) return;
     Command c;
-    c.x = (at.x - at.size * 0.5f) * k, c.y = (at.y - at.size * 0.5f) * k, c.w = c.h = at.size * k;
+    c.x = (at.x - at.size * kIconAnchorX) * k, c.y = (at.y - at.size * kIconAnchorY) * k, c.w = c.h = at.size * k;
     c.rgba = 0xFFFFFF00u | uint32_t(at.alpha * 255.0f + 0.5f);
     store.picture(kIconOwner, list, image, c);
     store.commit(kIconOwner, list);
@@ -244,7 +274,8 @@ void publish(const std::vector<Row>& rows) {
 
 IconPlace icon_place() { return compute_icon_place(); }
 const char* icon_reason() { return g_icon_reason; }
-void next_frame() { g_frame++; }
+void next_frame() { g_step.fetch_add(1, std::memory_order_relaxed); }
+void logic_step(uint64_t step) { g_step.store(step, std::memory_order_relaxed); }
 
 int32_t define(const std::string& mod, const std::string& mod_name, const std::string& quest, const std::string& title,
                const std::string& reward, const std::string& condition) {
@@ -416,7 +447,6 @@ void mute(input::PadState& p) {
 
 void pad(input::PadState& p) {
     if (!g_installed) return;  // no quest mod: nothing of the notebook runs
-    next_frame();
     bag_icon();
     if (!g_open.load(std::memory_order_relaxed)) {
         if (const uint32_t s = g_swallow.load(std::memory_order_relaxed)) {
@@ -496,6 +526,8 @@ void set_visible(Cpu* c) {
     const uint32_t item = c->r[3];
     g_original(c, kSetVisible);
     if (ld32(item + kItemNumber) != kNotebookItem) return;
+    static const bool show_sentinel = [] { const char* e = getenv("WWHD_NOTEBOOK_SHOW_SENTINEL"); return e && *e == '1'; }();
+    if (show_sentinel) return;
     if (const uint32_t icon = icon_pane(item)) st8(icon + kPaneFlags, uint8_t(ld8(icon + kPaneFlags) & ~1u));
 }
 
@@ -504,7 +536,7 @@ void execute_window(Cpu* c) {
     const uint32_t menu = c->r[3];
     g_original(c, kExecuteWindow);
     g_menu = menu;
-    g_window_frame = g_frame;
+    g_window_step = g_step.load(std::memory_order_relaxed);
     g_bag_item = 0;
     if (ld32(menu + kMenuWindowMode) != kDeliveryWindow) return;
     const uint32_t count = ld32(menu + kMenuChildren), data = ld32(menu + kMenuChildren + 4);
@@ -571,7 +603,7 @@ void install(const std::function<std::string(uint32_t)>& replaced_by, const std:
 
 void state_loaded() {
     close_page();
-    g_bag_item = 0, g_menu = 0, g_window_frame = 0;
+    g_bag_item = 0, g_menu = 0, g_window_step = 0;
     std::lock_guard lock(g_mu);
     for (auto& [key, p] : g_portraits) p.handle = 0;
 }

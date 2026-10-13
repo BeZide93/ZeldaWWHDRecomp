@@ -74,7 +74,8 @@ void cursor_float(Cpu* c);    // hdMenuItem_c::beginCursorSelection(point)
 // The notebook's icon in the bag window this frame (story_notebook_bag.h), and why; for tests
 IconPlace icon_place();
 const char* icon_reason();
-void next_frame();  // what pad() does each frame before drawing (tests)
+void next_frame();  // one logic step on (tests)
+void logic_step(uint64_t step);  // the game's logic step (guestmods::frame)
 namespace hooks {
 void selected_value(Cpu* c);  // hdMenuMain_c::getSelectedItemValue(receiver)
 void assign_button(Cpu* c);   // game system: X/Y/R assignment(button, key)

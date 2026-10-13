@@ -480,7 +480,7 @@ void test_hooks() {
         pane(kIconA, kRoot, 0, 0);
         pane(kRoot, kWin, -131, 130);
         pane(kWin, kScreen, 347, -92);
-        pane(kScreen, 0, -73, -3);
+        pane(kScreen, 0, 0, 0);  // the screen root (1280 x 720 layout)
         st32(kChild + 0x44, kLayout), st32(kLayout + 4, kLyt), st32(kLyt + 0xC, kRoot);
         st8(kChild + 0xFC, 1), st8(kChild + 0x200 + 0xFC, 1);
         st32(kMenu + 0x54, 2);  // the Delivery Bag window
@@ -497,7 +497,10 @@ void test_hooks() {
         assert(calls == std::vector<std::string>{"window"});
         next_frame();
         IconPlace at = icon_place();
-        assert(at.shown && at.x == 570 && at.y == 205 && !(ld8(kIconA + 0x44) & 1));
+        // (640 + 216, 360 - 38) in the 1280 x 720 layout, on the 854 x 480 GamePad picture
+        assert(at.shown && std::fabs(at.x - 856.0f * 854 / 1280) < 0.01f && std::fabs(at.y - 322.0f * 854 / 1280) < 0.01f &&
+               std::fabs(at.size - 90.0f * 854 / 1280) < 0.01f && !(ld8(kIconA + 0x44) & 1));
+        for (int i = 0; i < 4; i++) assert(icon_place().shown);  // frames drawn within the step (60/120 fps) keep it
         call(0x0268FF50, kMenu);
         next_frame();
         assert(icon_place().shown);
