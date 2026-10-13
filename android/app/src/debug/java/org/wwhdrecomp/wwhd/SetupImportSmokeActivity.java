@@ -56,6 +56,11 @@ public final class SetupImportSmokeActivity extends Activity {
                 SetupStore.remove(new File(job, "job.json"));
                 SetupImport.prepare(this, job, control);
                 require(Files.readAllBytes(new File(job, "input/game/content/asset").toPath())[0] == 42, "Corrupt checkpoint output was reused");
+                // A completed private snapshot does not require the original SAF selection.
+                SetupStore.remove(new File(job, "source.json"));
+                SetupImport.prepare(this, job, control);
+                require(new File(job, "input/game/content/asset").length() == 127,
+                    "Source-less snapshot could not resume");
                 File shortJob = create("short", "archive", document("short"));
                 try { SetupImport.prepare(this, shortJob, control); throw new IOException("Accepted short provider output"); }
                 catch (IOException expected) { require(expected.getMessage().contains("changed size"), "Wrong short-read error"); }

@@ -43,7 +43,8 @@ public final class SetupKeyRecoverySmokeActivity extends Activity {
                         .put("common_uri", document("key").toString()));
                     SetupImport.prepare(this, job, control);
                 }
-                JSONObject config = SetupStore.read(configuration);
+                // Exercise the actual import/resume path after process death, not just key opens.
+                JSONObject config = phase.equals("restart") ? SetupImport.prepare(this, job, control) : SetupStore.read(configuration);
                 if (phase.equals("prepare") || phase.equals("restart")) {
                     readKey(job, config, "disc", 42);
                     readKey(job, config, "common", 42);
@@ -97,6 +98,26 @@ public final class SetupKeyRecoverySmokeActivity extends Activity {
                     SetupKeyAccess.cleanupCompleted(job);
                     require(!new File(job, "input/disc.key").exists() && !new File(job, "input/common.key").exists(),
                         "Completed legacy job retained copies");
+                } else if (phase.equals("missing-source")) {
+                    SetupStore.remove(new File(job, "source.json"));
+                    config = SetupImport.prepare(this, job, control);
+                    try { readKey(job, config, "disc", 42); throw new IOException("Missing source was ignored"); }
+                    catch (SetupKeyAccess.Missing expected) {
+                        require(SetupKeyAccess.failed(job, "disc"), "Missing source lost recovery state");
+                    }
+                    SetupStore.write(new File(job, "host.json"), new JSONObject().put("state", "failed"));
+                } else if (phase.equals("missing-source-restart")) {
+                    config = SetupImport.prepare(this, job, control);
+                    require(SetupKeyAccess.failed(job, "disc"), "Restart lost missing-source recovery state");
+                } else if (phase.equals("missing-source-reselect")) {
+                    provider.edit().clear().commit();
+                    SetupImport.selectKey(this, job, "disc", document("replacementkey"));
+                    require(!SetupImport.keyReplacement(job, "common").exists(), "Single key selected both roles");
+                    SetupImport.selectKey(this, job, "common", document("replacementkey"));
+                    config = SetupImport.prepare(this, job, control);
+                    readKey(job, config, "disc", 43);
+                    readKey(job, config, "common", 43);
+                    require(!new File(job, "input/disc.key").exists(), "Recovery copied key bytes");
                 } else throw new IOException("Unknown recovery phase");
                 result.put("passed", true).put("phase", phase);
             } catch (Exception failure) {

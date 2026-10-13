@@ -256,7 +256,7 @@ public class SetupActivity extends Activity {
                 actionMessage = "Access restored. Tap Start / resume to retry using completed private copies.";
             } else if (request == DISC || request == COMMON) {
                 if (current == null) throw new Exception("Choose a disc image first");
-                JSONObject source = SetupStore.read(new File(current, "source.json"));
+                JSONObject source = SetupImport.keySource(current);
                 if (!source.getString("kind").equals("image")) throw new Exception("Keys are only needed for disc images");
                 getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
                 SetupImport.selectKey(this, current, request == DISC ? "disc" : "common", uri);
@@ -394,6 +394,9 @@ public class SetupActivity extends Activity {
             try {
                 File job = SetupStore.current(SetupActivity.this);
                 JSONObject source = job != null && new File(job, "source.json").isFile() ? SetupStore.read(new File(job, "source.json")) : null;
+                if (source == null && job != null && new File(job, "job.json").isFile() &&
+                    SetupStore.read(new File(job, "job.json")).getJSONObject("input").optString("kind").equals("image"))
+                    source = SetupImport.keySource(job);
                 boolean importing = phoneSetup && source != null && !new File(job, "job.json").isFile();
                 JSONObject hostState = job != null && new File(job, "host.json").isFile() ? SetupStore.read(new File(job, "host.json")) : null;
                 boolean correctingKeys = !importing && phoneSetup && source != null && source.optString("kind").equals("image") &&
