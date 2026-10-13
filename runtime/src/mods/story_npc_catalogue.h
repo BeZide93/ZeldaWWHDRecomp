@@ -1,12 +1,16 @@
-// The NPC catalogue: the game's residents a story mod may name in its manifest ("who":
-// "windfall-light-keeper"), one table per place, kept as data in runtime/assets/npc_catalogue/<place>.json
-// and compiled in (cmake/EmbedNpcCatalogue.cmake). Adding a place adds a table, never a manifest change
+// The NPC catalogue: the game's characters a story mod may name in its manifest ("who": "windfall-kreeb"),
+// one table per place, kept as data in runtime/assets/npc_catalogue/<place>.json and compiled in
+// (cmake/EmbedNpcCatalogue.cmake). Adding a place adds a table, never a manifest change
 // (docs/mod-sdk-v2.md, "The NPC catalogue"). Pure code, unit-tested in runtime/tools/story_notebook_test.cpp.
 //
-// Names are "<place>-<role>". An entry identifies the actor generically: its class plus the fields that
-// class needs (for "people", daNpcPeople_c, the resident code: "Um1" ...), and where it stands (stage,
-// room). A manifest naming an NPC this port doesn't know is refused when the mod is enabled; so is one
-// whose "npc_catalogue" (the catalogue version it needs) is newer than this port's.
+// Names are "<place>-<name>": the character's name as the game itself gives it (with the evidence in the
+// entry), or a plain role marked "named": false where the game data doesn't tie a name to the actor. An
+// entry lists the actors that are this character, generically: the actor class plus what identifies
+// the actor in that class (for "people", daNpcPeople_c, its resident code "Um1"; for other classes the
+// stage actor name), and where each stands (stage, room, the room layers it is in). A manifest naming a
+// character this port doesn't know is refused when the mod is enabled; so is one whose "npc_catalogue"
+// (the catalogue version it needs) is newer than this port's, and one naming a character the port
+// can't give a quest's lines yet (only "people" actors can talk for a quest so far).
 #pragma once
 #include <cmath>
 #include <cstdint>
@@ -22,16 +26,25 @@ namespace story_notebook {
 using Resident = uint16_t;
 inline constexpr Resident kResidentNone = 0;
 
-struct NpcEntry {
-    std::string name, place;
-    unsigned since = 1;                 // the catalogue version that added it
-    std::string actor_class, code, stage;
+struct NpcActor {
+    std::string actor_class, code, stage;  // code: the people resident code, or the stage actor name
     int room = -1;
-    uint8_t people_number = 0xFF;       // class "people": daNpcPeople_c::mNpcNo
+    uint8_t people_number = 0xFF;          // class "people": daNpcPeople_c::mNpcNo
+};
+struct NpcEntry {
+    std::string name, place, evidence, gate, unconfirmed;  // unconfirmed: what the static evidence leaves open
+    bool named = false;
+    unsigned since = 1;                 // the catalogue version that added it
+    std::vector<NpcActor> actors;
     std::string where;                  // for the notebook
     bool has_spot = false;
-    float x = 0, z = 0;                 // where it stands (by day if it is out by day): the chart's ring
-    bool day = false, night = false;    // when it is out there
+    float x = 0, z = 0;                 // where it stands outside (by day if it is out by day): the chart's ring
+    bool day = false, night = false;    // when it is out
+    bool talks() const {                // the port can give it a quest's lines
+        for (const NpcActor& a : actors)
+            if (a.actor_class == "people") return true;
+        return false;
+    }
 };
 
 struct NpcCatalogue {
@@ -58,27 +71,28 @@ inline int people_number_of(const std::string& code) {
     return -1;
 }
 
-inline bool NpcCatalogue::add_table(const std::string& text, std::string& why) {
+inline bool NpcCatalogue::add_table(const std::string& table, std::string& why) {
     using mods::json::Value;
     Value t;
     try {
-        t = mods::json::parse(text);
+        t = mods::json::parse(table);
     } catch (const std::exception& e) {
         return why = std::string("not JSON: ") + e.what(), false;
     }
-    if (t.get("catalogue_format").type != Value::Number || t.get("catalogue_format").number != 1) return why = "unsupported catalogue_format", false;
+    if (t.get("catalogue_format").type != Value::Number || t.get("catalogue_format").number != 2) return why = "unsupported catalogue_format", false;
     const std::string place = t.get("place").type == Value::String ? t.get("place").text : "";
     if (place.empty() || place.find_first_not_of("abcdefghijklmnopqrstuvwxyz-") != std::string::npos) return why = "invalid place", false;
     if (t.get("npcs").type != Value::Array) return why = place + ": no npcs", false;
     std::vector<NpcEntry> added;  // all or nothing
     unsigned newest = version;
+    auto text = [](const Value& v) { return v.type == Value::String ? v.text : std::string(); };
     for (const Value& n : t.get("npcs").array) {
         NpcEntry e;
         e.place = place;
-        e.name = n.get("name").type == Value::String ? n.get("name").text : "";
+        e.name = text(n.get("name"));
         if (e.name.rfind(place + "-", 0) != 0 || e.name.size() == place.size() + 1 || e.name.size() > 48 ||
             e.name.find_first_not_of("abcdefghijklmnopqrstuvwxyz0123456789-") != std::string::npos)
-            return why = place + ": the name \"" + e.name + "\" is not <place>-<role>", false;
+            return why = place + ": the name \"" + e.name + "\" is not <place>-<name>", false;
         bool taken = find(e.name) != kResidentNone;
         for (const NpcEntry& a : added) taken |= a.name == e.name;
         if (taken) return why = "duplicate name " + e.name, false;
@@ -86,20 +100,32 @@ inline bool NpcCatalogue::add_table(const std::string& text, std::string& why) {
         if (since.type != Value::Number || since.number < 1 || since.number > 1000 || std::floor(since.number) != since.number)
             return why = e.name + ": invalid since", false;
         e.since = unsigned(since.number);
-        const Value& actor = n.get("actor");
-        e.actor_class = actor.get("class").type == Value::String ? actor.get("class").text : "";
-        e.stage = actor.get("stage").type == Value::String ? actor.get("stage").text : "";
-        if (e.stage.empty() || e.stage.size() > 7) return why = e.name + ": invalid stage", false;
-        if (actor.get("room").type == Value::Number) e.room = int(actor.get("room").number);
-        if (e.actor_class == "people") {
-            e.code = actor.get("code").type == Value::String ? actor.get("code").text : "";
-            const int number = people_number_of(e.code);
-            if (number < 0) return why = e.name + ": unknown people code", false;
-            e.people_number = uint8_t(number);
-        } else {
-            return why = e.name + ": unsupported actor class \"" + e.actor_class + "\"", false;
+        if (n.get("named").type != Value::Bool) return why = e.name + ": named must be true or false", false;
+        e.named = n.get("named").boolean;
+        e.evidence = text(n.get("evidence"));
+        if (e.evidence.empty()) return why = e.name + ": no evidence", false;
+        e.gate = text(n.get("gate"));
+        e.unconfirmed = text(n.get("unconfirmed"));
+        for (const Value& a : n.get("actors").array) {
+            NpcActor x;
+            x.actor_class = text(a.get("class"));
+            x.stage = text(a.get("stage"));
+            if (x.actor_class.empty()) return why = e.name + ": an actor without a class", false;
+            if (x.stage.empty() || x.stage.size() > 7) return why = e.name + ": invalid stage", false;
+            if (a.get("room").type == Value::Number) x.room = int(a.get("room").number);
+            if (x.actor_class == "people") {
+                x.code = text(a.get("code"));
+                const int number = people_number_of(x.code);
+                if (number < 0) return why = e.name + ": unknown people code", false;
+                x.people_number = uint8_t(number);
+            } else {
+                x.code = text(a.get("actor"));
+                if (x.code.empty() || x.code.size() > 8) return why = e.name + ": an actor of class " + x.actor_class + " needs its stage actor name", false;
+            }
+            e.actors.push_back(x);
         }
-        e.where = n.get("where").type == Value::String ? n.get("where").text : "";
+        if (e.actors.empty()) return why = e.name + ": no actors", false;
+        e.where = text(n.get("where"));
         if (e.where.empty() || e.where.size() > 64) return why = e.name + ": invalid where", false;
         const Value& spot = n.get("spot");
         if (spot.type == Value::Object) {

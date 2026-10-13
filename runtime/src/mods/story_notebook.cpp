@@ -670,7 +670,7 @@ int32_t carry(const std::string& mod, const std::string& quest, bool carried) {
 int32_t talk(const std::string& mod, const std::string& quest, uint32_t step, const std::string& resident, const std::string& lines,
              uint32_t reward) {
     const Resident who = npc_catalogue().find(resident);
-    if (!story_mail::valid_id(quest) || !step || step > kMaxStep || who == kResidentNone || lines.empty() || lines.size() > kMaxLinesBytes ||
+    if (!story_mail::valid_id(quest) || !step || step > kMaxStep || who == kResidentNone || !npc_catalogue().entry(who)->talks() || lines.empty() || lines.size() > kMaxLinesBytes ||
         reward > 0x06)
         return kResultInvalid;
     std::u16string probe;
@@ -879,16 +879,17 @@ void people_message(Cpu* c) {
     if (have_save() && g_talk.phase == Talk::None) {
         story_mail::Book b = book();
         std::lock_guard lock(g_mu);
-        // the catalogue's people entry for this resident where it stands (stage and room)
+        // the catalogue's character for this resident where it stands (stage and room)
         Cpu probe = *c;  // r3 stays the resident for the game's getMsg
         const uint32_t stage = g_call(&probe, kPlay, {}) + kPlayStartStage;
         const uint8_t number = ld8(npc + kPeopleNumber);
         const int room = int8_t(ld8(npc + kActorRoom));
         const NpcCatalogue& catalogue = npc_catalogue();
         for (size_t i = 0; i < catalogue.entries.size() && !live; i++) {
-            const NpcEntry& e = catalogue.entries[i];
-            if (e.actor_class != "people" || e.people_number != number || (e.room >= 0 && e.room != room) || !stage_is(stage, e.stage))
-                continue;
+            bool here = false;  // one of this character's people actors, where the table says it stands
+            for (const NpcActor& a : catalogue.entries[i].actors)
+                here |= a.actor_class == "people" && a.people_number == number && (a.room < 0 || a.room == room) && stage_is(stage, a.stage);
+            if (!here) continue;
             if ((live = live_takeover(g_takeovers, b, Resident(i + 1), event_flags(), hour_now()))) copy = *live;
         }
     }

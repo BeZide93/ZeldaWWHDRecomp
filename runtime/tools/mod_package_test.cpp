@@ -401,7 +401,7 @@ int main(int argc, char** argv) {
             };
             quests("windfall-nobody");
             assert(!install((root/"quests").string(),error)&&error.find("no NPC named \"windfall-nobody\"")!=std::string::npos);
-            quests("windfall-light-keeper");
+            quests("windfall-kreeb");
             assert(install((root/"quests").string(),error)&&view("quest-fixture").compatible);
         }
         assert(unconfirmed_native("guest-fixture").size()==1);

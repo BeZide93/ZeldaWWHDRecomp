@@ -2,7 +2,7 @@
   "format_version": 1,
   "id": "story-notebook",
   "name": "The storyteller's lantern",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "game_id": "wwhd",
   "minimum_manager_version": "1.5.0",
   "kind": "guest",
@@ -10,7 +10,7 @@
     "api_version": 1,
     "elf": "mod.elf"
   },
-  "npc_catalogue": 1,
+  "npc_catalogue": 2,
   "quests_format": 1,
   "quests": [
     {
@@ -38,7 +38,7 @@
           "n": 1,
           "text": "Bring the storyteller's letter to his old friend who keeps Windfall's light.",
           "npc": {
-            "who": "windfall-light-keeper",
+            "who": "windfall-kreeb",
             "when": {
               "carries": "letter:friend"
             },

@@ -215,7 +215,7 @@ WWHD_HOOK(0x02000000, all_services, (void)) {
     wwhd_quest_portrait("tale", "assets/p.png");
     wwhd_log_int("quest", wwhd_quest_state("tale"));
     wwhd_quest_carry("tale", 1);
-    wwhd_quest_talk("tale", 1, "windfall-light-keeper", "Hello", 6);
+    wwhd_quest_talk("tale", 1, "windfall-kreeb", "Hello", 6);
     wwhd_quest_set_flag("tale", 1, 1);
     wwhd_log_int("flag", wwhd_quest_flag("tale", 1));
     wwhd_quest_done("tale");

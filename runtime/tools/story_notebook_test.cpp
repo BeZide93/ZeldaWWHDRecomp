@@ -620,8 +620,8 @@ void test_page_screen() {
     }
 }
 
-Resident harbour() { return npc_catalogue().find("windfall-harbour-lady"); }
-Resident keeper() { return npc_catalogue().find("windfall-light-keeper"); }
+Resident harbour() { return npc_catalogue().find("windfall-missy"); }
+Resident keeper() { return npc_catalogue().find("windfall-kreeb"); }
 
 // The story block in cking.sav (story_block.h) and the store around it (story_store.h): the format, the
 // one-time move from the game's reserved bytes, the game's save copy functions, the file kept with
@@ -775,24 +775,43 @@ void test_story_store() {
 // manifest's "npc_catalogue" version and unknown names refused, the step's place and where from the entry.
 void test_npc_catalogue() {
     const NpcCatalogue& port = npc_catalogue();
-    assert(port.version >= 1 && port.entries.size() >= 14);
+    assert(port.version == 2 && port.entries.size() >= 40);
+    size_t named = 0, talking = 0;
     for (const NpcEntry& e : port.entries) {
-        assert(e.name.rfind(e.place + "-", 0) == 0 && !e.where.empty() && (e.day || e.night));
-        assert(e.actor_class == "people" && e.people_number < 19 && e.stage == "sea" && e.room == 11 && e.has_spot);
+        assert(e.name.rfind(e.place + "-", 0) == 0 && !e.where.empty() && (e.day || e.night) && !e.evidence.empty() && !e.actors.empty());
+        for (const NpcActor& a : e.actors) assert(!a.stage.empty() && !a.code.empty() && (a.actor_class != "people" || a.people_number < 19));
+        named += e.named, talking += e.talks();
+    }
+    assert(named >= 30 && talking == 19);  // the 19 townspeople (daNpcPeople_c) can talk for quests
+    // each townsperson is in the table once
+    for (int n = 0; n < 19; n++) {
+        int found = 0;
+        for (const NpcEntry& e : port.entries)
+            for (const NpcActor& a : e.actors) found += a.actor_class == "people" && a.people_number == n;
+        assert(found >= 1);
     }
     const NpcEntry* k = port.entry(keeper());
-    assert(k && k->code == "Um1" && k->people_number == 9 && k->day && k->night);
+    assert(k && k->named && k->actors.size() == 1 && k->actors[0].code == "Um1" && k->actors[0].people_number == 9 && k->day && k->night &&
+           k->has_spot && k->evidence.find("0x37F8") != std::string::npos);
     const NpcEntry* h = port.entry(harbour());
-    assert(h && h->people_number == 5 && h->day && !h->night);
+    assert(h && h->actors[0].people_number == 5 && h->day && !h->night);
+    // Linda: outside by day, and in the Café Bar
+    const NpcEntry* linda = port.entry(port.find("windfall-linda"));
+    assert(linda && linda->actors.size() == 2 && linda->actors[1].stage == "Opub");
+    // a pair the game names together but doesn't tie one by one: role names, unnamed
+    assert(!port.entry(port.find("windfall-gossip-a"))->named && !port.entry(port.find("windfall-tipster-b"))->named);
+    // characters of other classes are in the table but can't talk for a quest yet
+    const NpcEntry* zunari = port.entry(port.find("windfall-zunari"));
+    assert(zunari && zunari->named && !zunari->talks() && zunari->actors[0].code == "Rsh1");
     // a second place is just another table
-    const char* stub = R"({"catalogue_format": 1, "place": "testisle", "npcs": [
-        {"name": "testisle-keeper", "since": 2, "actor": {"class": "people", "code": "Ub1", "stage": "Tstisl", "room": 0},
-         "where": "Test Isle", "present": ["night"]}]})";
+    const char* stub = R"({"catalogue_format": 2, "place": "testisle", "npcs": [
+        {"name": "testisle-keeper", "since": 3, "named": false, "evidence": "a stub", "where": "Test Isle", "present": ["night"],
+         "actors": [{"class": "people", "code": "Ub1", "stage": "Tstisl", "room": 0, "layers": ["1"]}]}]})";
     NpcCatalogue two = port;
     std::string why;
-    assert(two.add_table(stub, why) && two.version == 2 && two.entries.size() == port.entries.size() + 1);
+    assert(two.add_table(stub, why) && two.version == 3 && two.entries.size() == port.entries.size() + 1);
     const Resident tk = two.find("testisle-keeper");
-    assert(tk && two.entry(tk)->people_number == 3 && !two.entry(tk)->has_spot && two.entry(keeper())->name == "windfall-light-keeper");
+    assert(tk && two.entry(tk)->actors[0].people_number == 3 && !two.entry(tk)->has_spot && two.entry(keeper())->name == "windfall-kreeb");
     // tables are checked: all or nothing
     NpcCatalogue bad = port;
     auto rejected = [&](std::string text, const std::string& from, const std::string& to) {
@@ -805,18 +824,19 @@ void test_npc_catalogue() {
     };
     assert(rejected(stub, "\"testisle-keeper\"", "\"keeper\""));         // not <place>-<role>
     assert(rejected(stub, "\"code\": \"Ub1\"", "\"code\": \"Zz9\""));  // a resident code the game doesn't have
-    assert(rejected(stub, "\"people\"", "\"tornado\""));                   // a class the port can't take over
+    assert(rejected(stub, "\"class\": \"people\", \"code\": \"Ub1\"", "\"class\": \"npc_rsh1\""));  // another class needs its actor name
+    assert(rejected(stub, "\"evidence\": \"a stub\", ", ""));                 // every entry says where its name comes from
     assert(rejected(stub, "[\"night\"]", "[]"));                             // never out
-    assert(!bad.add_table(R"({"catalogue_format": 1, "place": "windfall", "npcs": [{"name": "windfall-light-keeper", "since": 1,
-        "actor": {"class": "people", "code": "Um1", "stage": "sea"}, "where": "x", "present": ["day"]}]})", why));  // a name twice
+    assert(!bad.add_table(R"({"catalogue_format": 2, "place": "windfall", "npcs": [{"name": "windfall-kreeb", "since": 2, "named": true,
+        "evidence": "x", "actors": [{"class": "people", "code": "Um1", "stage": "sea"}], "where": "x", "present": ["day"]}]})", why));  // a name twice
     // a manifest naming the stub NPC: refused by the port's catalogue, accepted with the second table, the format unchanged
-    const char* m = R"({"npc_catalogue": 2, "quests_format": 1, "quests": [{"id": "q", "title": "Q", "steps": [{"n": 1, "text": "Go.",
+    const char* m = R"({"npc_catalogue": 3, "quests_format": 1, "quests": [{"id": "q", "title": "Q", "steps": [{"n": 1, "text": "Go.",
         "available": {"time": "day", "text": "by day"}, "npc": {"who": "testisle-keeper", "lines": ["Hi."]}}]}]})";
     std::vector<ManifestQuest> qs;
     std::vector<std::string> warnings;
-    assert(!parse_quests(mods::json::parse(m), qs, why, port) && why.find("needs NPC catalogue version 2") != std::string::npos);
+    assert(!parse_quests(mods::json::parse(m), qs, why, port) && why.find("needs NPC catalogue version 3") != std::string::npos);
     std::string unversioned = m;
-    unversioned.replace(0, std::string(R"({"npc_catalogue": 2, )").size(), "{");
+    unversioned.replace(0, std::string(R"({"npc_catalogue": 3, )").size(), "{");
     assert(!parse_quests(mods::json::parse(unversioned), qs, why, port) && why.find("no NPC named \"testisle-keeper\"") != std::string::npos);
     assert(parse_quests(mods::json::parse(m), qs, why, two, &warnings));
     assert(qs[0].steps[0].resident == tk && qs[0].steps[0].where == "Test Isle" && !qs[0].steps[0].has_place);
@@ -824,10 +844,14 @@ void test_npc_catalogue() {
     assert(warnings.size() == 1 && warnings[0].find("only out at night") != std::string::npos);
     // a windfall resident: the step's place and where come from the catalogue unless the manifest gives them
     const char* w = R"({"quests_format": 1, "quests": [{"id": "q", "title": "Q", "steps": [{"n": 1, "text": "Go.",
-        "npc": {"who": "windfall-light-keeper", "lines": ["Hi."]}}]}]})";
+        "npc": {"who": "windfall-kreeb", "lines": ["Hi."]}}]}]})";
     assert(parse_quests(mods::json::parse(w), qs, why) && qs[0].steps[0].has_place && qs[0].steps[0].x == k->x &&
            qs[0].steps[0].z == k->z && qs[0].steps[0].where == k->where);
     assert(!parse_quests(mods::json::parse(R"({"npc_catalogue": "1"})"), qs, why));
+    // a character that can't talk for a quest: refused with the reason
+    const char* z = R"({"quests_format": 1, "quests": [{"id": "q", "title": "Q", "steps": [{"n": 1, "text": "Go.",
+        "npc": {"who": "windfall-zunari", "lines": ["Hi."]}}]}]})";
+    assert(!parse_quests(mods::json::parse(z), qs, why) && why.find("can't speak") != std::string::npos);
     assert(parse_quests(mods::json::parse(R"({"npc_catalogue": 1})"), qs, why) && qs.empty());
 }
 
@@ -868,11 +892,11 @@ void test_takeover_hooks() {
     // the lantern quest of one mod, the same resident in another mod's quest
     assert(define("lantern", "Lantern", "tale", "The storyteller's lantern", "100 rupees", "") == kResultNew);
     assert(define("other", "Other", "tale", "Another tale", "", "") == kResultNew);
-    assert(talk("lantern", "tale", 1, "windfall-harbour-lady", "A letter from him?\nThank you!", 6) == kResultNew);
-    assert(talk("other", "tale", 1, "windfall-harbour-lady", "Not me.", 0) == kResultNew);
+    assert(talk("lantern", "tale", 1, "windfall-missy", "A letter from him?\nThank you!", 6) == kResultNew);
+    assert(talk("other", "tale", 1, "windfall-missy", "Not me.", 0) == kResultNew);
     assert(talk("lantern", "tale", 1, "nobody", "x", 0) == kResultInvalid);
-    assert(talk("lantern", "tale", 1, "windfall-harbour-lady", "1\n2\n3\n4", 0) == kResultInvalid);  // one box: three lines
-    assert(talk("lantern", "tale", 1, "windfall-harbour-lady", "x", 0x0F) == kResultInvalid);        // rupees only
+    assert(talk("lantern", "tale", 1, "windfall-missy", "1\n2\n3\n4", 0) == kResultInvalid);  // one box: three lines
+    assert(talk("lantern", "tale", 1, "windfall-missy", "x", 0x0F) == kResultInvalid);        // rupees only
     assert(step("lantern", "tale", 1, "Bring the letter to his old friend.", "Windfall Island") == 1);
     assert(step("other", "tale", 1, "", "") == 1);
     assert(carry("lantern", "tale", true) == 1 && carry("other", "tale", true) == 1);
@@ -965,7 +989,7 @@ const char* const kLanternManifest = R"({
     "letter": {"id": "lantern", "sender": "The storyteller", "text": "Dear Link,\nplease help.", "encloses": ["notebook", "letter:friend"]},
     "reward": {"text": "100 rupees", "item": "rupee_orange"},
     "steps": [{"n": 1, "text": "Bring the letter to his friend.", "where": "Windfall Island", "place": {"cell": "D2", "x": 3827, "z": -202189},
-      "npc": {"who": "windfall-harbour-lady", "when": {"carries": "letter:friend"},
+      "npc": {"who": "windfall-missy", "when": {"carries": "letter:friend"},
               "lines": ["One.", "Two."], "then": {"give": "rupee_orange", "take": "letter:friend", "complete": true}}}]
   }, {"id": "secret", "title": "A secret", "journal": "on_trigger"}]
 })";
@@ -989,8 +1013,8 @@ void test_manifest() {
         std::string reason;
         return !parse_quests(mods::json::parse(text), out, reason) && !reason.empty();
     };
-    assert(refused(R"("who": "windfall-harbour-lady")", R"("who": "windfall-nobody")"));  // an NPC the catalogue doesn't know
-    assert(refused(R"("who": "windfall-harbour-lady")", R"("who": {"class": "people", "code": "Ub3"})"));  // names only
+    assert(refused(R"("who": "windfall-missy")", R"("who": "windfall-nobody")"));  // an NPC the catalogue doesn't know
+    assert(refused(R"("who": "windfall-missy")", R"("who": {"class": "people", "code": "Ub3"})"));  // names only
     assert(refused(R"(["One.", "Two."])", R"(["1", "2", "3", "4"])"));              // more than one box
     assert(refused(R"("give": "rupee_orange")", R"("give": "master_sword")"));      // only rupees
     assert(refused(R"("quests_format": 1)", R"("quests_format": 2)"));
@@ -1043,7 +1067,7 @@ void test_available() {
     // the manifest form, and what it refuses
     const char* m = R"({"quests_format": 1, "quests": [{"id": "q", "title": "Q", "steps": [{"n": 1, "text": "Go.",
         "available": {"event": "0x2D01", "not_event": ["0x0A02"], "time": "day", "text": "after Nayru's pearl, by day"},
-        "npc": {"who": "windfall-light-keeper", "lines": ["Hi."]}}]}]})";
+        "npc": {"who": "windfall-kreeb", "lines": ["Hi."]}}]}]})";
     std::vector<ManifestQuest> qs;
     std::string why;
     assert(parse_quests(mods::json::parse(m), qs, why));

@@ -81,7 +81,7 @@ inline bool parse_available(const mods::json::Value& v, Availability& a, std::st
 
 // Parses the manifest's quests. Returns false with a reason for anything it doesn't accept (the mod's
 // quests are then not in the notebook; the mod itself still loads).
-// NPCs are named from the catalogue ("who": "windfall-light-keeper"); a name it doesn't know, or an
+// NPCs are named from the catalogue ("who": "windfall-kreeb"); a name it doesn't know, or an
 // "npc_catalogue" version newer than it, refuses the quests (and the mod, packages.cpp). Steps whose
 // time of day never meets their resident's are allowed, with a warning.
 inline bool parse_quests(const mods::json::Value& manifest, std::vector<ManifestQuest>& out, std::string& why,
@@ -161,6 +161,9 @@ inline bool parse_quests(const mods::json::Value& manifest, std::vector<Manifest
                                  ") has no NPC named \"" + who.text + "\"",
                            false;
                 const NpcEntry& e = *catalogue.entry(s.resident);
+                if (!e.talks())
+                    return why = "quest " + m.id + ": " + e.name + " can't speak a quest's lines in this port yet (only townspeople of class people can)",
+                           false;
                 if (s.where.empty()) s.where = e.where;
                 if (!s.has_place && e.has_spot) s.has_place = true, s.x = e.x, s.z = e.z;
                 if (warnings && ((s.when.time == 1 && !e.day) || (s.when.time == 2 && !e.night)))

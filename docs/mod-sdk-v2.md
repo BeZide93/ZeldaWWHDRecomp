@@ -559,7 +559,7 @@ code then only reports progress the port can't see (`wwhd_quest_step`, `wwhd_que
 `story-notebook` example's quest needs no code at all.
 
 ```json
-"npc_catalogue": 1,
+"npc_catalogue": 2,
 "quests_format": 1,
 "quests": [{
   "id": "lantern",
@@ -572,7 +572,7 @@ code then only reports progress the port can't see (`wwhd_quest_step`, `wwhd_que
   "steps": [{
     "n": 1,
     "text": "Bring the storyteller's letter to his old friend who keeps Windfall's light.",
-    "npc": {"who": "windfall-light-keeper",
+    "npc": {"who": "windfall-kreeb",
             "when": {"carries": "letter:friend"},
             "lines": ["A letter from my old friend? Thank you!", "...", "..."],
             "then": {"give": "rupee_orange", "take": "letter:friend", "complete": true}}
@@ -617,41 +617,85 @@ done. The port arbitrates, not your mod:
   (`rupee_green` ... `rupee_orange`, 100);
 - `"who"` names a resident from the NPC catalogue, below.
 
-From code, the same is `wwhd_quest_talk(id, step, "windfall-light-keeper", lines, reward_item)` and
+From code, the same is `wwhd_quest_talk(id, step, "windfall-kreeb", lines, reward_item)` and
 `wwhd_quest_carry(id, 1)` gives the sealed letter.
 
 ### The NPC catalogue
 
-The residents a quest can name, `<place>-<role>`. The port keeps one table per place; a new place
-or a new resident adds rows, never a change to the manifest format. A mod that names a resident
-added in a later catalogue version declares the version it needs, `"npc_catalogue": 2`, so an older
-port refuses it with a clear message instead of ignoring the talk. Each resident is matched where
-the table says it stands (stage and room); the same resident indoors is the game's.
+The characters a quest can name, `<place>-<name>`: the character's name as the game itself gives it,
+or, where the game data doesn't tie a name to the actor, a plain role marked unnamed. The port keeps
+one table per place (`runtime/assets/npc_catalogue/<place>.json`); a new place or a new character
+adds rows, never a change to the manifest format. A mod that names a character added in a later
+catalogue version declares the version it needs, `"npc_catalogue": 2`, so an older port refuses it
+with a clear message instead of ignoring the talk.
 
-When the residents are out: "by day" is 6:00–18:00. During the Endless Night (between the Wind Waker
-and Nayru's pearl) it is always night. A step whose `available` time never meets its resident's is
-accepted with a warning in the log; give a by-day resident's step `"available": {"time": "day", ...}`
-so the notebook can say when.
+Each entry lists the actors that are this character (actor class plus what identifies it: the
+townsperson code for the `people` class, the stage actor name for others), the rooms and room
+layers they stand in, and the evidence for the name. Names come from the game's Nintendo Gallery
+figurines: the decompilation ties each actor's pictograph type to its figurine
+(`dSnap_RegistFig`, figure = type − 0x49, name message 0x37DD + figure), so the name is the one the
+game shows for exactly that actor. A figurine that shows a pair or a group (Pompie & Vera, Potova &
+Joanna, the Killer Bees) doesn't say which actor is which, so those entries keep role names.
 
-Catalogue version 1, Windfall Island (outside):
+A talk is matched where the table says the actor stands (stage and room). Only the townspeople
+(class `people`) can speak a quest's lines so far; naming another character is refused with the
+reason. When the characters are out: "by day" is 6:00–18:00, and during the Endless Night (between
+the Wind Waker and Nayru's pearl) it is always night. A step whose `available` time never meets its
+character's is accepted with a warning in the log. Some characters move with the story (noted in
+the table's `gate` field): Linda and Anton follow their romance, Mila's and Maggie's families swap
+houses, Tetra's crew is in the bomb shop only for that scene.
 
-| Name | Who | Out |
-|---|---|---|
-| `windfall-light-keeper` | the man up on the windmill who keeps the light | day and night |
-| `windfall-lovelorn-man` | the man sulking on the steps by the red door (up high at night) | day and night |
-| `windfall-harbour-lady` | the lady on the harbour pier asking about Skull Necklaces | by day |
-| `windfall-pedestal-man` | the man on the bench at the cliff edge, the Joy Pedestals | by day |
-| `windfall-gossip-a`, `windfall-gossip-b` | the two gossips up the steps by the brick house | by day |
-| `windfall-posing-lady` | the lady by the town gate asking how she looks | by day |
-| `windfall-outfit-lady` | the lady in the town square in a brand-new outfit | by day |
-| `windfall-wind-sailor` | the sailor on the high lookout watching the wind | by day |
-| `windfall-dock-sailor` | the sailor on the stone dock, glad to be back in town | by day |
-| `windfall-pier-sailor` | the know-it-all sailor at the end of the wooden pier | by day |
-| `windfall-money-adviser` | the man on the grass by the stone wall offering financial advice | by day |
-| `windfall-flower-girl-a`, `windfall-flower-girl-b` | the two girls by the flowers at the cliff | by day |
+Catalogue version 2, Windfall Island. The table is built statically: who stands where from the
+stage and room actor lists, when they are out from the room layers and the decompiled actor code,
+names from the figurine messages. "Unconfirmed" marks what that evidence leaves open: for the
+characters other than the townspeople, the actor's own conditions for appearing are not decoded yet.
 
-Windfall's other residents (inside the café and the shops, and those out only at certain points in
-the story) and other places such as Dragon Roost follow in later versions.
+| Name | Named | Name source | Actor | Where | Out | Quest lines |
+|---|---|---|---|---|---|---|
+| `windfall-sam` | yes | figurine 0x37FC (Sam) | people Uo1 | outside | day | yes |
+| `windfall-gossack` | yes | figurine 0x37FD (Gossack) | people Uo2 | Café Bar | day | yes |
+| `windfall-garrickson` | yes | figurine 0x37FE (Garrickson) | people Uo3 | outside | day | yes |
+| `windfall-gossip-a` | no (role name) | figurine 0x37FF (Pompie & Vera) | people Ub1 | outside | day | yes |
+| `windfall-gossip-b` | no (role name) | figurine 0x37FF (Pompie & Vera) | people Ub2 | outside | day | yes |
+| `windfall-missy` | yes | figurine 0x3800 (Missy) | people Ub3 | outside | day | yes |
+| `windfall-minenco` | yes | figurine 0x3801 (Minenco) | people Ub4 | outside, Lenzo's studio | day and night | yes |
+| `windfall-gillian` | yes | figurine 0x37FA (Gillian) | people Uw1 | Café Bar | day and night | yes |
+| `windfall-linda` | yes | figurine 0x37FB (Linda) | people Uw2 | outside, Café Bar | day | yes |
+| `windfall-kreeb` | yes | figurine 0x37F8 (Kreeb) | people Um1 | outside | day and night | yes |
+| `windfall-anton` | yes | figurine 0x37F7 (Anton) | people Um2 | outside, Café Bar | day | yes |
+| `windfall-kamo` | yes | figurine 0x37F9 (Kamo) | people Um3 | outside | day and night | yes |
+| `windfall-loot` | yes | figurine 0x3816 (Loot the Sailor) | people Sa1 | Café Bar | night | yes |
+| `windfall-gummy` | yes | figurine 0x3802 (Gummy the Sailor) | people Sa2 | outside | day | yes |
+| `windfall-kane` | yes | figurine 0x3803 (Kane the Sailor) | people Sa3 | outside, Café Bar | day and night | yes |
+| `windfall-candy` | yes | figurine 0x3805 (Candy the Sailor) | people Sa4 | outside, Café Bar | day and night | yes |
+| `windfall-dampa` | yes | figurine 0x3804 (Dampa the Sailor) | people Sa5 | outside, Café Bar | day and night | yes |
+| `windfall-tipster-a` | no (role name) | figurine 0x37F6 (Potova & Joanna) | people Ug1 | outside, Mrs. Marie's school | day and night | yes |
+| `windfall-tipster-b` | no (role name) | figurine 0x37F6 (Potova & Joanna) | people Ug2 | outside, Mrs. Marie's school | day and night | yes |
+| `windfall-zunari` | yes | figurine 0x37F3 (The Shop Guru, Zunari) | npc_rsh1 Rsh1 | outside | day (unconfirmed) | not yet |
+| `windfall-tott` | yes | figurine 0x37EB (Tott) | npc_tt Tt | outside | day and night (unconfirmed) | not yet |
+| `windfall-mila` | yes | figurine 0x37EC (Mila) | npc_kk1 Kk1 | outside | day and night (unconfirmed) | not yet |
+| `windfall-milas-father` | yes | figurine 0x37ED (Mila's Father) | npc_gk1 Gk1, npc_gk1 Kf1 | outside, Café Bar, rich house | day and night (unconfirmed) | not yet |
+| `windfall-maggie` | yes | figurine 0x37EE (Maggie) | npc_kp1 Kp1 | rich house | day and night (unconfirmed) | not yet |
+| `windfall-maggies-father` | yes | figurine 0x37EF (Maggie's Father) | npc_pf1 Gp1, npc_pf1 Pf1 | outside, rich house | day and night (unconfirmed) | not yet |
+| `windfall-cannon` | yes | figurine 0x37F0 (Bomb-Master Cannon) | npc_bms1 Bms1, npc_bms1 Bms2 | bomb shop | day and night (unconfirmed) | not yet |
+| `windfall-doc-bandam` | yes | figurine 0x37F1 (The Potion Master, Doc Bandam) | npc_ds1 Ds1 | Doc Bandam's shop | day and night (unconfirmed) | not yet |
+| `windfall-lenzo` | yes | figurine 0x37F2 (The Pictographer, Lenzo) | npc_photo Po | Lenzo's studio | day and night (unconfirmed) | not yet |
+| `windfall-mrs-marie` | yes | figurine 0x37F4 (The Joyful Teacher, Mrs. Marie) | npc_ho Ho | Mrs. Marie's school | day and night (unconfirmed) | not yet |
+| `windfall-salvatore` | yes | figurine 0x3815 (Salvatore) | npc_kg1 Kg1 | battleship game | day and night (unconfirmed) | not yet |
+| `windfall-fishman` | yes | figurine 0x3811 (Fishman) | npc_so NpcSo | outside | day and night (unconfirmed) | not yet |
+| `windfall-tingle` | yes | figurine 0x380D (Tingle) | npc_tc Tc | jail | day and night (unconfirmed) | not yet |
+| `windfall-ilari` | yes | figurine 0x3824 (Ilari) | npc_bm4 Bm4 | Café Bar, rich house | day and night (unconfirmed) | not yet |
+| `windfall-tetra` | yes | figurine 0x3806 (Tetra) | npc_zl1 Zl1 | bomb shop | day and night (unconfirmed) | not yet |
+| `windfall-gonzo` | yes | figurine 0x3807 (Gonzo) | npc_p1 P1a | bomb shop | day and night (unconfirmed) | not yet |
+| `windfall-senza` | yes | figurine 0x3808 (Senza) | npc_p1 P1b | bomb shop | day and night (unconfirmed) | not yet |
+| `windfall-nudge` | yes | figurine 0x3809 (Nudge) | npc_p1 P1c | bomb shop | day and night (unconfirmed) | not yet |
+| `windfall-killer-bee-a` | no (role name) | figurine 0x37F5 (Windfall's Gang of Boys, the Killer Bees) | npc_mk Mk | outside | day (unconfirmed) | not yet |
+| `windfall-killer-bee-b` | no (role name) | figurine 0x37F5 (Windfall's Gang of Boys, the Killer Bees) | npc_uk UkB | outside | day (unconfirmed) | not yet |
+| `windfall-killer-bee-c` | no (role name) | figurine 0x37F5 (Windfall's Gang of Boys, the Killer Bees) | npc_uk UkC | outside | day (unconfirmed) | not yet |
+| `windfall-killer-bee-d` | no (role name) | figurine 0x37F5 (Windfall's Gang of Boys, the Killer Bees) | npc_uk UkD | outside | day (unconfirmed) | not yet |
+
+Not in the table: the auction's bidders (their faces are chosen at random each auction), animals and
+objects, and characters who only appear in cutscenes.
 
 **Testing.** `tools/story_mods/notebook_e2e.sh` runs the `story-notebook` example headless from a
 save on Windfall: letter, notebook, page, tracking and the sea chart, and checks the log.

@@ -1,105 +1,1194 @@
 {
-  "catalogue_format": 1,
+  "catalogue_format": 2,
   "place": "windfall",
   "title": "Windfall Island",
+  "layers": {
+    "sea room 11": "0 day, 1 night, 3 the Endless Night, 4 day and 5 night once event flag 0x2D01 is set (dComIfG_play_c::getLayerNo); R every layer",
+    "interiors": "0 day, 1 night (also the Endless Night); R every layer"
+  },
   "npcs": [
     {
-      "name": "windfall-light-keeper", "since": 1,
-      "actor": { "class": "people", "code": "Um1", "stage": "sea", "room": 11 },
+      "name": "windfall-sam",
+      "since": 2,
+      "named": true,
+      "evidence": "Nintendo Gallery figurine name \"Sam\" (msg 0x37FC): stage actor Uo1 = daNpcPeople_c resident 0 (d_stage OBJNAME), l_photo_no[0] = 0x68 (d_a_npc_people), figure 31 = 0x68 - 0x49 (dSnap_PhotoIndex2TableIndex), daObjFigure_c::getMsg = 0x37DD + figure",
+      "where": "Windfall Island, on the sea-view bench at the cliff",
+      "spot": {
+        "x": -504,
+        "z": -204154
+      },
+      "present": [
+        "day"
+      ],
+      "actors": [
+        {
+          "class": "people",
+          "code": "Uo1",
+          "stage": "sea",
+          "room": 11,
+          "layers": [
+            "0",
+            "4"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "windfall-gossack",
+      "since": 2,
+      "named": true,
+      "evidence": "Nintendo Gallery figurine name \"Gossack\" (msg 0x37FD): stage actor Uo2 = daNpcPeople_c resident 1 (d_stage OBJNAME), l_photo_no[1] = 0x69 (d_a_npc_people), figure 32 = 0x69 - 0x49 (dSnap_PhotoIndex2TableIndex), daObjFigure_c::getMsg = 0x37DD + figure",
+      "where": "Windfall Island, in the Café Bar",
+      "present": [
+        "day"
+      ],
+      "actors": [
+        {
+          "class": "people",
+          "code": "Uo2",
+          "stage": "Opub",
+          "room": 0,
+          "layers": [
+            "0"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "windfall-garrickson",
+      "since": 2,
+      "named": true,
+      "evidence": "Nintendo Gallery figurine name \"Garrickson\" (msg 0x37FE): stage actor Uo3 = daNpcPeople_c resident 2 (d_stage OBJNAME), l_photo_no[2] = 0x6A (d_a_npc_people), figure 33 = 0x6A - 0x49 (dSnap_PhotoIndex2TableIndex), daObjFigure_c::getMsg = 0x37DD + figure",
+      "where": "Windfall Island, walking through town",
+      "spot": {
+        "x": -769,
+        "z": -201909
+      },
+      "present": [
+        "day"
+      ],
+      "actors": [
+        {
+          "class": "people",
+          "code": "Uo3",
+          "stage": "sea",
+          "room": 11,
+          "layers": [
+            "0",
+            "4"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "windfall-gossip-a",
+      "since": 2,
+      "named": false,
+      "evidence": "Nintendo Gallery figurine name \"Pompie & Vera\" (msg 0x37FF): stage actor Ub1 = daNpcPeople_c resident 3 (d_stage OBJNAME), l_photo_no[3] = 0x6B (d_a_npc_people), figure 34 = 0x6B - 0x49 (dSnap_PhotoIndex2TableIndex), daObjFigure_c::getMsg = 0x37DD + figure; the figurine shows a pair, which of the two this actor is isn't tied, so it is unnamed",
+      "where": "Windfall Island, up the steps by the brick house",
+      "spot": {
+        "x": 1481,
+        "z": -203084
+      },
+      "present": [
+        "day"
+      ],
+      "actors": [
+        {
+          "class": "people",
+          "code": "Ub1",
+          "stage": "sea",
+          "room": 11,
+          "layers": [
+            "0",
+            "4"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "windfall-gossip-b",
+      "since": 2,
+      "named": false,
+      "evidence": "Nintendo Gallery figurine name \"Pompie & Vera\" (msg 0x37FF): stage actor Ub2 = daNpcPeople_c resident 4 (d_stage OBJNAME), l_photo_no[4] = 0x6B (d_a_npc_people), figure 34 = 0x6B - 0x49 (dSnap_PhotoIndex2TableIndex), daObjFigure_c::getMsg = 0x37DD + figure; the figurine shows a pair, which of the two this actor is isn't tied, so it is unnamed",
+      "where": "Windfall Island, up the steps by the brick house",
+      "spot": {
+        "x": 1606,
+        "z": -202988
+      },
+      "present": [
+        "day"
+      ],
+      "actors": [
+        {
+          "class": "people",
+          "code": "Ub2",
+          "stage": "sea",
+          "room": 11,
+          "layers": [
+            "0",
+            "4"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "windfall-missy",
+      "since": 2,
+      "named": true,
+      "evidence": "Nintendo Gallery figurine name \"Missy\" (msg 0x3800): stage actor Ub3 = daNpcPeople_c resident 5 (d_stage OBJNAME), l_photo_no[5] = 0x6C (d_a_npc_people), figure 35 = 0x6C - 0x49 (dSnap_PhotoIndex2TableIndex), daObjFigure_c::getMsg = 0x37DD + figure",
+      "where": "Windfall Island, on the harbour pier",
+      "spot": {
+        "x": 3827,
+        "z": -202189
+      },
+      "present": [
+        "day"
+      ],
+      "actors": [
+        {
+          "class": "people",
+          "code": "Ub3",
+          "stage": "sea",
+          "room": 11,
+          "layers": [
+            "0",
+            "4"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "windfall-minenco",
+      "since": 2,
+      "named": true,
+      "evidence": "Nintendo Gallery figurine name \"Minenco\" (msg 0x3801): stage actor Ub4 = daNpcPeople_c resident 6 (d_stage OBJNAME), l_photo_no[6] = 0x6D (d_a_npc_people), figure 36 = 0x6D - 0x49 (dSnap_PhotoIndex2TableIndex), daObjFigure_c::getMsg = 0x37DD + figure",
+      "where": "Windfall Island, by the town gate",
+      "spot": {
+        "x": 2456,
+        "z": -200188
+      },
+      "present": [
+        "day",
+        "night"
+      ],
+      "gate": "in Lenzo's studio only until Link has Treasure Chart 20 and only at the entrance he came through (d_a_npc_people phase_1)",
+      "actors": [
+        {
+          "class": "people",
+          "code": "Ub4",
+          "stage": "sea",
+          "room": 11,
+          "layers": [
+            "0",
+            "4"
+          ]
+        },
+        {
+          "class": "people",
+          "code": "Ub4",
+          "stage": "Ocmera",
+          "room": 0,
+          "layers": [
+            "R"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "windfall-gillian",
+      "since": 2,
+      "named": true,
+      "evidence": "Nintendo Gallery figurine name \"Gillian\" (msg 0x37FA): stage actor Uw1 = daNpcPeople_c resident 7 (d_stage OBJNAME), l_photo_no[7] = 0x66 (d_a_npc_people), figure 29 = 0x66 - 0x49 (dSnap_PhotoIndex2TableIndex), daObjFigure_c::getMsg = 0x37DD + figure",
+      "where": "Windfall Island, in the Café Bar",
+      "present": [
+        "day",
+        "night"
+      ],
+      "actors": [
+        {
+          "class": "people",
+          "code": "Uw1",
+          "stage": "Opub",
+          "room": 0,
+          "layers": [
+            "R"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "windfall-linda",
+      "since": 2,
+      "named": true,
+      "evidence": "Nintendo Gallery figurine name \"Linda\" (msg 0x37FB): stage actor Uw2 = daNpcPeople_c resident 8 (d_stage OBJNAME), l_photo_no[8] = 0x67 (d_a_npc_people), figure 30 = 0x67 - 0x49 (dSnap_PhotoIndex2TableIndex), daObjFigure_c::getMsg = 0x37DD + figure",
+      "where": "Windfall Island, the town square or the Café Bar",
+      "spot": {
+        "x": 782,
+        "z": -201463
+      },
+      "present": [
+        "day"
+      ],
+      "gate": "where she stands follows her story with Anton: event register 0xB907 (d_a_npc_people phase_1, arg0)",
+      "actors": [
+        {
+          "class": "people",
+          "code": "Uw2",
+          "stage": "sea",
+          "room": 11,
+          "layers": [
+            "0",
+            "4"
+          ]
+        },
+        {
+          "class": "people",
+          "code": "Uw2",
+          "stage": "Opub",
+          "room": 0,
+          "layers": [
+            "0"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "windfall-kreeb",
+      "since": 2,
+      "named": true,
+      "evidence": "Nintendo Gallery figurine name \"Kreeb\" (msg 0x37F8): stage actor Um1 = daNpcPeople_c resident 9 (d_stage OBJNAME), l_photo_no[9] = 0x64 (d_a_npc_people), figure 27 = 0x64 - 0x49 (dSnap_PhotoIndex2TableIndex), daObjFigure_c::getMsg = 0x37DD + figure",
       "where": "Windfall Island, up on the windmill by the light",
-      "spot": { "x": 1547, "z": -202539 },
-      "present": ["day", "night"]
+      "spot": {
+        "x": 1547,
+        "z": -202539
+      },
+      "present": [
+        "day",
+        "night"
+      ],
+      "actors": [
+        {
+          "class": "people",
+          "code": "Um1",
+          "stage": "sea",
+          "room": 11,
+          "layers": [
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5"
+          ]
+        }
+      ]
     },
     {
-      "name": "windfall-harbour-lady", "since": 1,
-      "actor": { "class": "people", "code": "Ub3", "stage": "sea", "room": 11 },
-      "where": "Windfall Island, on the harbour pier (by day)",
-      "spot": { "x": 3827, "z": -202189 },
-      "present": ["day"]
+      "name": "windfall-anton",
+      "since": 2,
+      "named": true,
+      "evidence": "Nintendo Gallery figurine name \"Anton\" (msg 0x37F7): stage actor Um2 = daNpcPeople_c resident 10 (d_stage OBJNAME), l_photo_no[10] = 0x63 (d_a_npc_people), figure 26 = 0x63 - 0x49 (dSnap_PhotoIndex2TableIndex), daObjFigure_c::getMsg = 0x37DD + figure",
+      "where": "Windfall Island, the town square or the Café Bar",
+      "spot": {
+        "x": -1277,
+        "z": -200975
+      },
+      "present": [
+        "day"
+      ],
+      "gate": "where he stands follows his story with Linda: event register 0xB907 (d_a_npc_people phase_1, arg0)",
+      "actors": [
+        {
+          "class": "people",
+          "code": "Um2",
+          "stage": "sea",
+          "room": 11,
+          "layers": [
+            "0",
+            "4"
+          ]
+        },
+        {
+          "class": "people",
+          "code": "Um2",
+          "stage": "Opub",
+          "room": 0,
+          "layers": [
+            "0"
+          ]
+        }
+      ]
     },
     {
-      "name": "windfall-pedestal-man", "since": 1,
-      "actor": { "class": "people", "code": "Uo1", "stage": "sea", "room": 11 },
-      "where": "Windfall Island, on the bench at the cliff edge (by day)",
-      "spot": { "x": -504, "z": -204154 },
-      "present": ["day"]
-    },
-    {
-      "name": "windfall-gossip-a", "since": 1,
-      "actor": { "class": "people", "code": "Ub1", "stage": "sea", "room": 11 },
-      "where": "Windfall Island, up the steps by the brick house (by day)",
-      "spot": { "x": 1481, "z": -203084 },
-      "present": ["day"]
-    },
-    {
-      "name": "windfall-gossip-b", "since": 1,
-      "actor": { "class": "people", "code": "Ub2", "stage": "sea", "room": 11 },
-      "where": "Windfall Island, up the steps by the brick house (by day)",
-      "spot": { "x": 1606, "z": -202988 },
-      "present": ["day"]
-    },
-    {
-      "name": "windfall-posing-lady", "since": 1,
-      "actor": { "class": "people", "code": "Ub4", "stage": "sea", "room": 11 },
-      "where": "Windfall Island, by the town gate (by day)",
-      "spot": { "x": 2456, "z": -200188 },
-      "present": ["day"]
-    },
-    {
-      "name": "windfall-outfit-lady", "since": 1,
-      "actor": { "class": "people", "code": "Uw2", "stage": "sea", "room": 11 },
-      "where": "Windfall Island, in the town square (by day)",
-      "spot": { "x": 263, "z": -200818 },
-      "present": ["day"]
-    },
-    {
-      "name": "windfall-lovelorn-man", "since": 1,
-      "actor": { "class": "people", "code": "Um3", "stage": "sea", "room": 11 },
+      "name": "windfall-kamo",
+      "since": 2,
+      "named": true,
+      "evidence": "Nintendo Gallery figurine name \"Kamo\" (msg 0x37F9): stage actor Um3 = daNpcPeople_c resident 11 (d_stage OBJNAME), l_photo_no[11] = 0x65 (d_a_npc_people), figure 28 = 0x65 - 0x49 (dSnap_PhotoIndex2TableIndex), daObjFigure_c::getMsg = 0x37DD + figure",
       "where": "Windfall Island, on the steps by the red door (up high at night)",
-      "spot": { "x": 2175, "z": -202003 },
-      "present": ["day", "night"]
+      "spot": {
+        "x": 2175,
+        "z": -202003
+      },
+      "present": [
+        "day",
+        "night"
+      ],
+      "actors": [
+        {
+          "class": "people",
+          "code": "Um3",
+          "stage": "sea",
+          "room": 11,
+          "layers": [
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5"
+          ]
+        }
+      ]
     },
     {
-      "name": "windfall-wind-sailor", "since": 1,
-      "actor": { "class": "people", "code": "Sa2", "stage": "sea", "room": 11 },
-      "where": "Windfall Island, on the high lookout (by day)",
-      "spot": { "x": 670, "z": -200363 },
-      "present": ["day"]
+      "name": "windfall-loot",
+      "since": 2,
+      "named": true,
+      "evidence": "Nintendo Gallery figurine name \"Loot the Sailor\" (msg 0x3816): stage actor Sa1 = daNpcPeople_c resident 12 (d_stage OBJNAME), l_photo_no[12] = 0x82 (d_a_npc_people), figure 57 = 0x82 - 0x49 (dSnap_PhotoIndex2TableIndex), daObjFigure_c::getMsg = 0x37DD + figure",
+      "where": "Windfall Island, in the Café Bar at night",
+      "present": [
+        "night"
+      ],
+      "actors": [
+        {
+          "class": "people",
+          "code": "Sa1",
+          "stage": "Opub",
+          "room": 0,
+          "layers": [
+            "1"
+          ]
+        }
+      ]
     },
     {
-      "name": "windfall-dock-sailor", "since": 1,
-      "actor": { "class": "people", "code": "Sa3", "stage": "sea", "room": 11 },
-      "where": "Windfall Island, on the stone dock (by day)",
-      "spot": { "x": 471, "z": -198395 },
-      "present": ["day"]
+      "name": "windfall-gummy",
+      "since": 2,
+      "named": true,
+      "evidence": "Nintendo Gallery figurine name \"Gummy the Sailor\" (msg 0x3802): stage actor Sa2 = daNpcPeople_c resident 13 (d_stage OBJNAME), l_photo_no[13] = 0x6E (d_a_npc_people), figure 37 = 0x6E - 0x49 (dSnap_PhotoIndex2TableIndex), daObjFigure_c::getMsg = 0x37DD + figure",
+      "where": "Windfall Island, on the high lookout",
+      "spot": {
+        "x": 670,
+        "z": -200363
+      },
+      "present": [
+        "day"
+      ],
+      "actors": [
+        {
+          "class": "people",
+          "code": "Sa2",
+          "stage": "sea",
+          "room": 11,
+          "layers": [
+            "0",
+            "4"
+          ]
+        }
+      ]
     },
     {
-      "name": "windfall-pier-sailor", "since": 1,
-      "actor": { "class": "people", "code": "Sa4", "stage": "sea", "room": 11 },
-      "where": "Windfall Island, at the end of the wooden pier (by day)",
-      "spot": { "x": 958, "z": -196792 },
-      "present": ["day"]
+      "name": "windfall-kane",
+      "since": 2,
+      "named": true,
+      "evidence": "Nintendo Gallery figurine name \"Kane the Sailor\" (msg 0x3803): stage actor Sa3 = daNpcPeople_c resident 14 (d_stage OBJNAME), l_photo_no[14] = 0x6F (d_a_npc_people), figure 38 = 0x6F - 0x49 (dSnap_PhotoIndex2TableIndex), daObjFigure_c::getMsg = 0x37DD + figure",
+      "where": "Windfall Island, on the stone dock",
+      "spot": {
+        "x": 471,
+        "z": -198395
+      },
+      "present": [
+        "day",
+        "night"
+      ],
+      "actors": [
+        {
+          "class": "people",
+          "code": "Sa3",
+          "stage": "sea",
+          "room": 11,
+          "layers": [
+            "0",
+            "4"
+          ]
+        },
+        {
+          "class": "people",
+          "code": "Sa3",
+          "stage": "Opub",
+          "room": 0,
+          "layers": [
+            "1"
+          ]
+        }
+      ]
     },
     {
-      "name": "windfall-money-adviser", "since": 1,
-      "actor": { "class": "people", "code": "Sa5", "stage": "sea", "room": 11 },
-      "where": "Windfall Island, on the grass by the stone wall (by day)",
-      "spot": { "x": -1938, "z": -197940 },
-      "present": ["day"]
+      "name": "windfall-candy",
+      "since": 2,
+      "named": true,
+      "evidence": "Nintendo Gallery figurine name \"Candy the Sailor\" (msg 0x3805): stage actor Sa4 = daNpcPeople_c resident 15 (d_stage OBJNAME), l_photo_no[15] = 0x71 (d_a_npc_people), figure 40 = 0x71 - 0x49 (dSnap_PhotoIndex2TableIndex), daObjFigure_c::getMsg = 0x37DD + figure",
+      "where": "Windfall Island, at the end of the wooden pier",
+      "spot": {
+        "x": 958,
+        "z": -196792
+      },
+      "present": [
+        "day",
+        "night"
+      ],
+      "actors": [
+        {
+          "class": "people",
+          "code": "Sa4",
+          "stage": "sea",
+          "room": 11,
+          "layers": [
+            "0",
+            "4"
+          ]
+        },
+        {
+          "class": "people",
+          "code": "Sa4",
+          "stage": "Opub",
+          "room": 0,
+          "layers": [
+            "1"
+          ]
+        }
+      ]
     },
     {
-      "name": "windfall-flower-girl-a", "since": 1,
-      "actor": { "class": "people", "code": "Ug1", "stage": "sea", "room": 11 },
-      "where": "Windfall Island, by the flowers at the cliff (by day)",
-      "spot": { "x": -1984, "z": -200460 },
-      "present": ["day"]
+      "name": "windfall-dampa",
+      "since": 2,
+      "named": true,
+      "evidence": "Nintendo Gallery figurine name \"Dampa the Sailor\" (msg 0x3804): stage actor Sa5 = daNpcPeople_c resident 16 (d_stage OBJNAME), l_photo_no[16] = 0x70 (d_a_npc_people), figure 39 = 0x70 - 0x49 (dSnap_PhotoIndex2TableIndex), daObjFigure_c::getMsg = 0x37DD + figure",
+      "where": "Windfall Island, on the grass by the stone wall",
+      "spot": {
+        "x": -1938,
+        "z": -197940
+      },
+      "present": [
+        "day",
+        "night"
+      ],
+      "actors": [
+        {
+          "class": "people",
+          "code": "Sa5",
+          "stage": "sea",
+          "room": 11,
+          "layers": [
+            "0",
+            "4"
+          ]
+        },
+        {
+          "class": "people",
+          "code": "Sa5",
+          "stage": "Opub",
+          "room": 0,
+          "layers": [
+            "1"
+          ]
+        }
+      ]
     },
     {
-      "name": "windfall-flower-girl-b", "since": 1,
-      "actor": { "class": "people", "code": "Ug2", "stage": "sea", "room": 11 },
-      "where": "Windfall Island, by the flowers at the cliff (by day)",
-      "spot": { "x": -1985, "z": -200460 },
-      "present": ["day"]
+      "name": "windfall-tipster-a",
+      "since": 2,
+      "named": false,
+      "evidence": "Nintendo Gallery figurine name \"Potova & Joanna\" (msg 0x37F6): stage actor Ug1 = daNpcPeople_c resident 17 (d_stage OBJNAME), l_photo_no[17] = 0x62 (d_a_npc_people), figure 25 = 0x62 - 0x49 (dSnap_PhotoIndex2TableIndex), daObjFigure_c::getMsg = 0x37DD + figure; the figurine shows a pair, which of the two this actor is isn't tied, so it is unnamed",
+      "where": "Windfall Island, by the flowers at the cliff",
+      "spot": {
+        "x": -1984,
+        "z": -200460
+      },
+      "present": [
+        "day",
+        "night"
+      ],
+      "gate": "by the flowers except on days 5 and 6 of the game's week, in Mrs. Marie's school on those days (d_a_npc_people phase_1, dKy_get_dayofweek)",
+      "actors": [
+        {
+          "class": "people",
+          "code": "Ug1",
+          "stage": "sea",
+          "room": 11,
+          "layers": [
+            "0",
+            "4"
+          ]
+        },
+        {
+          "class": "people",
+          "code": "Ug1",
+          "stage": "Nitiyou",
+          "room": 0,
+          "layers": [
+            "R"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "windfall-tipster-b",
+      "since": 2,
+      "named": false,
+      "evidence": "Nintendo Gallery figurine name \"Potova & Joanna\" (msg 0x37F6): stage actor Ug2 = daNpcPeople_c resident 18 (d_stage OBJNAME), l_photo_no[18] = 0x62 (d_a_npc_people), figure 25 = 0x62 - 0x49 (dSnap_PhotoIndex2TableIndex), daObjFigure_c::getMsg = 0x37DD + figure; the figurine shows a pair, which of the two this actor is isn't tied, so it is unnamed",
+      "where": "Windfall Island, by the flowers at the cliff",
+      "spot": {
+        "x": -1985,
+        "z": -200460
+      },
+      "present": [
+        "day",
+        "night"
+      ],
+      "gate": "by the flowers except on days 5 and 6 of the game's week, in Mrs. Marie's school on those days (d_a_npc_people phase_1, dKy_get_dayofweek)",
+      "actors": [
+        {
+          "class": "people",
+          "code": "Ug2",
+          "stage": "sea",
+          "room": 11,
+          "layers": [
+            "0",
+            "4"
+          ]
+        },
+        {
+          "class": "people",
+          "code": "Ug2",
+          "stage": "Nitiyou",
+          "room": 0,
+          "layers": [
+            "R"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "windfall-zunari",
+      "since": 2,
+      "named": true,
+      "evidence": "Nintendo Gallery figurine name \"The Shop Guru, Zunari\" (msg 0x37F3): Rsh1 registers pictograph type 0x5F (dSnap_RegistFig in d_a_npc_rsh1), figure 22 = 0x5F - 0x49, daObjFigure_c::getMsg = 0x37DD + figure",
+      "where": "Windfall Island, Zunari's stall",
+      "spot": {
+        "x": 1409,
+        "z": -204372
+      },
+      "present": [
+        "day"
+      ],
+      "unconfirmed": "when it is out: only from the room layers; the actor's own create conditions (d_a_npc_rsh1) are not decoded",
+      "actors": [
+        {
+          "class": "npc_rsh1",
+          "actor": "Rsh1",
+          "stage": "sea",
+          "room": 11,
+          "layers": [
+            "0",
+            "4"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "windfall-tott",
+      "since": 2,
+      "named": true,
+      "evidence": "Nintendo Gallery figurine name \"Tott\" (msg 0x37EB): Tt registers pictograph type 0x57 (dSnap_RegistFig in d_a_npc_tt), figure 14 = 0x57 - 0x49, daObjFigure_c::getMsg = 0x37DD + figure",
+      "where": "Windfall Island, dancing on the hill",
+      "spot": {
+        "x": -2672,
+        "z": -203370
+      },
+      "present": [
+        "day",
+        "night"
+      ],
+      "unconfirmed": "when it is out: only from the room layers; the actor's own create conditions (d_a_npc_tt) are not decoded",
+      "actors": [
+        {
+          "class": "npc_tt",
+          "actor": "Tt",
+          "stage": "sea",
+          "room": 11,
+          "layers": [
+            "0",
+            "1",
+            "4",
+            "5"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "windfall-mila",
+      "since": 2,
+      "named": true,
+      "evidence": "Nintendo Gallery figurine name \"Mila\" (msg 0x37EC): Kk1 registers pictograph type 0x58 (dSnap_RegistFig in d_a_npc_kk1), figure 15 = 0x58 - 0x49, daObjFigure_c::getMsg = 0x37DD + figure",
+      "where": "Windfall Island",
+      "spot": {
+        "x": 1290,
+        "z": -203980
+      },
+      "present": [
+        "day",
+        "night"
+      ],
+      "gate": "story-gated (her own create conditions are not decoded here)",
+      "unconfirmed": "when it is out: only from the room layers; the actor's own create conditions (d_a_npc_kk1) are not decoded",
+      "actors": [
+        {
+          "class": "npc_kk1",
+          "actor": "Kk1",
+          "stage": "sea",
+          "room": 11,
+          "layers": [
+            "4",
+            "5"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "windfall-milas-father",
+      "since": 2,
+      "named": true,
+      "evidence": "Nintendo Gallery figurine name \"Mila's Father\" (msg 0x37ED): Gk1/Kf1 registers pictograph type 0x59 (dSnap_RegistFig in d_a_npc_gk1 and d_a_npc_kf1), figure 16 = 0x59 - 0x49, daObjFigure_c::getMsg = 0x37DD + figure",
+      "where": "Windfall Island",
+      "spot": {
+        "x": -306,
+        "z": -198801
+      },
+      "present": [
+        "day",
+        "night"
+      ],
+      "gate": "story-gated: the rich house before his fall, the town and the Café Bar after it",
+      "unconfirmed": "when it is out: only from the room layers; the actor's own create conditions (d_a_npc_gk1) are not decoded",
+      "actors": [
+        {
+          "class": "npc_gk1",
+          "actor": "Gk1",
+          "stage": "sea",
+          "room": 11,
+          "layers": [
+            "4"
+          ]
+        },
+        {
+          "class": "npc_gk1",
+          "actor": "Gk1",
+          "stage": "Opub",
+          "room": 0,
+          "layers": [
+            "1"
+          ]
+        },
+        {
+          "class": "npc_gk1",
+          "actor": "Kf1",
+          "stage": "Orichh",
+          "room": 0,
+          "layers": [
+            "R"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "windfall-maggie",
+      "since": 2,
+      "named": true,
+      "evidence": "Nintendo Gallery figurine name \"Maggie\" (msg 0x37EE): Kp1 registers pictograph type 0x5A (dSnap_RegistFig in d_a_npc_kp1), figure 17 = 0x5A - 0x49, daObjFigure_c::getMsg = 0x37DD + figure",
+      "where": "Windfall Island, the rich house",
+      "present": [
+        "day",
+        "night"
+      ],
+      "gate": "story-gated",
+      "unconfirmed": "when it is out: only from the room layers; the actor's own create conditions (d_a_npc_kp1) are not decoded",
+      "actors": [
+        {
+          "class": "npc_kp1",
+          "actor": "Kp1",
+          "stage": "Orichh",
+          "room": 0,
+          "layers": [
+            "R"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "windfall-maggies-father",
+      "since": 2,
+      "named": true,
+      "evidence": "Nintendo Gallery figurine name \"Maggie's Father\" (msg 0x37EF): Pf1/Gp1 registers pictograph type 0x5B (dSnap_RegistFig in d_a_npc_pf1 and d_a_npc_gp1), figure 18 = 0x5B - 0x49, daObjFigure_c::getMsg = 0x37DD + figure",
+      "where": "Windfall Island",
+      "spot": {
+        "x": -100,
+        "z": -199200
+      },
+      "present": [
+        "day",
+        "night"
+      ],
+      "gate": "story-gated: the town before his fortune, the rich house after it",
+      "unconfirmed": "when it is out: only from the room layers; the actor's own create conditions (d_a_npc_pf1) are not decoded",
+      "actors": [
+        {
+          "class": "npc_pf1",
+          "actor": "Pf1",
+          "stage": "sea",
+          "room": 11,
+          "layers": [
+            "0"
+          ]
+        },
+        {
+          "class": "npc_pf1",
+          "actor": "Gp1",
+          "stage": "Orichh",
+          "room": 0,
+          "layers": [
+            "R"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "windfall-cannon",
+      "since": 2,
+      "named": true,
+      "evidence": "Nintendo Gallery figurine name \"Bomb-Master Cannon\" (msg 0x37F0): Bms1/Bms2 registers pictograph type 0x5C (dSnap_RegistFig_l in d_a_npc_bms1), figure 19 = 0x5C - 0x49, daObjFigure_c::getMsg = 0x37DD + figure",
+      "where": "Windfall Island, the bomb shop",
+      "present": [
+        "day",
+        "night"
+      ],
+      "unconfirmed": "when it is out: only from the room layers; the actor's own create conditions (d_a_npc_bms1) are not decoded",
+      "actors": [
+        {
+          "class": "npc_bms1",
+          "actor": "Bms1",
+          "stage": "Obombh",
+          "room": 0,
+          "layers": [
+            "0",
+            "1"
+          ]
+        },
+        {
+          "class": "npc_bms1",
+          "actor": "Bms2",
+          "stage": "Obombh",
+          "room": 0,
+          "layers": [
+            "0",
+            "1",
+            "8"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "windfall-doc-bandam",
+      "since": 2,
+      "named": true,
+      "evidence": "Nintendo Gallery figurine name \"The Potion Master, Doc Bandam\" (msg 0x37F1): Ds1 registers pictograph type 0x5D (dSnap_RegistFig in d_a_npc_ds1), figure 20 = 0x5D - 0x49, daObjFigure_c::getMsg = 0x37DD + figure",
+      "where": "Windfall Island, Doc Bandam's shop",
+      "present": [
+        "day",
+        "night"
+      ],
+      "unconfirmed": "when it is out: only from the room layers; the actor's own create conditions (d_a_npc_ds1) are not decoded",
+      "actors": [
+        {
+          "class": "npc_ds1",
+          "actor": "Ds1",
+          "stage": "Pdrgsh",
+          "room": 0,
+          "layers": [
+            "R"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "windfall-lenzo",
+      "since": 2,
+      "named": true,
+      "evidence": "Nintendo Gallery figurine name \"The Pictographer, Lenzo\" (msg 0x37F2): Po registers pictograph type 0x5E (dSnap_RegistFig in d_a_npc_photo), figure 21 = 0x5E - 0x49, daObjFigure_c::getMsg = 0x37DD + figure",
+      "where": "Windfall Island, Lenzo's studio",
+      "present": [
+        "day",
+        "night"
+      ],
+      "unconfirmed": "when it is out: only from the room layers; the actor's own create conditions (d_a_npc_photo) are not decoded",
+      "actors": [
+        {
+          "class": "npc_photo",
+          "actor": "Po",
+          "stage": "Ocmera",
+          "room": 0,
+          "layers": [
+            "R"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "windfall-mrs-marie",
+      "since": 2,
+      "named": true,
+      "evidence": "Nintendo Gallery figurine name \"The Joyful Teacher, Mrs. Marie\" (msg 0x37F4): Ho registers pictograph type 0x60 (dSnap_RegistFig in d_a_npc_ho), figure 23 = 0x60 - 0x49, daObjFigure_c::getMsg = 0x37DD + figure",
+      "where": "Windfall Island, Mrs. Marie's school",
+      "present": [
+        "day",
+        "night"
+      ],
+      "unconfirmed": "when it is out: only from the room layers; the actor's own create conditions (d_a_npc_ho) are not decoded",
+      "actors": [
+        {
+          "class": "npc_ho",
+          "actor": "Ho",
+          "stage": "Nitiyou",
+          "room": 0,
+          "layers": [
+            "R"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "windfall-salvatore",
+      "since": 2,
+      "named": true,
+      "evidence": "Nintendo Gallery figurine name \"Salvatore\" (msg 0x3815): Kg1 registers pictograph type 0x81 (dSnap_RegistFig in d_a_npc_kg1), figure 56 = 0x81 - 0x49, daObjFigure_c::getMsg = 0x37DD + figure",
+      "where": "Windfall Island, the battleship game",
+      "present": [
+        "day",
+        "night"
+      ],
+      "unconfirmed": "when it is out: only from the room layers; the actor's own create conditions (d_a_npc_kg1) are not decoded",
+      "actors": [
+        {
+          "class": "npc_kg1",
+          "actor": "Kg1",
+          "stage": "Kaisen",
+          "room": 0,
+          "layers": [
+            "R"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "windfall-fishman",
+      "since": 2,
+      "named": true,
+      "evidence": "Nintendo Gallery figurine name \"Fishman\" (msg 0x3811): NpcSo registers pictograph type 0x7D (dSnap_RegistFig in d_a_npc_so), figure 52 = 0x7D - 0x49, daObjFigure_c::getMsg = 0x37DD + figure",
+      "where": "the sea by Windfall Island",
+      "spot": {
+        "x": -643,
+        "z": -200736
+      },
+      "present": [
+        "day",
+        "night"
+      ],
+      "unconfirmed": "when it is out: only from the room layers; the actor's own create conditions (d_a_npc_so) are not decoded",
+      "actors": [
+        {
+          "class": "npc_so",
+          "actor": "NpcSo",
+          "stage": "sea",
+          "room": 11,
+          "layers": [
+            "R"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "windfall-tingle",
+      "since": 2,
+      "named": true,
+      "evidence": "Nintendo Gallery figurine name \"Tingle\" (msg 0x380D): Tc registers pictograph type 0x79 (dSnap_RegistFig in d_a_npc_tc, type from param & 0xF = 0xF -> normal), figure 48 = 0x79 - 0x49, daObjFigure_c::getMsg = 0x37DD + figure",
+      "where": "Windfall Island, the jail",
+      "present": [
+        "day",
+        "night"
+      ],
+      "unconfirmed": "when it is out: only from the room layers; the actor's own create conditions (d_a_npc_tc) are not decoded",
+      "actors": [
+        {
+          "class": "npc_tc",
+          "actor": "Tc",
+          "stage": "Pnezumi",
+          "room": 0,
+          "layers": [
+            "R"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "windfall-ilari",
+      "since": 2,
+      "named": true,
+      "evidence": "Nintendo Gallery figurine name \"Ilari\" (msg 0x3824): Bm4 registers pictograph type 0x90 (dSnap_RegistFig in d_a_npc_bm1_b, type param & 0xFF = 1/2 -> Ilari (decideType)), figure 71 = 0x90 - 0x49, daObjFigure_c::getMsg = 0x37DD + figure",
+      "where": "Windfall Island, the Café Bar and the auction house",
+      "present": [
+        "day",
+        "night"
+      ],
+      "unconfirmed": "when it is out: only from the room layers; the actor's own create conditions (d_a_npc_bm4) are not decoded",
+      "actors": [
+        {
+          "class": "npc_bm4",
+          "actor": "Bm4",
+          "stage": "Opub",
+          "room": 0,
+          "layers": [
+            "R"
+          ]
+        },
+        {
+          "class": "npc_bm4",
+          "actor": "Bm4",
+          "stage": "Orichh",
+          "room": 0,
+          "layers": [
+            "R"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "windfall-tetra",
+      "since": 2,
+      "named": true,
+      "evidence": "Nintendo Gallery figurine name \"Tetra\" (msg 0x3806): Zl1 registers pictograph type 0x72 (dSnap_RegistFig in d_a_npc_zl1), figure 41 = 0x72 - 0x49, daObjFigure_c::getMsg = 0x37DD + figure",
+      "where": "Windfall Island, the bomb shop",
+      "present": [
+        "day",
+        "night"
+      ],
+      "gate": "story-gated: the bomb shop break-in (conditions not decoded here)",
+      "unconfirmed": "when it is out: only from the room layers; the actor's own create conditions (d_a_npc_zl1) are not decoded",
+      "actors": [
+        {
+          "class": "npc_zl1",
+          "actor": "Zl1",
+          "stage": "Obombh",
+          "room": 0,
+          "layers": [
+            "0",
+            "1"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "windfall-gonzo",
+      "since": 2,
+      "named": true,
+      "evidence": "Nintendo Gallery figurine name \"Gonzo\" (msg 0x3807): P1a registers pictograph type 0x73 (l_snap_idx_tbl[type] in d_a_npc_p1, P1a = type 0), figure 42 = 0x73 - 0x49, daObjFigure_c::getMsg = 0x37DD + figure",
+      "where": "Windfall Island, the bomb shop",
+      "present": [
+        "day",
+        "night"
+      ],
+      "gate": "story-gated: the bomb shop break-in",
+      "unconfirmed": "when it is out: only from the room layers; the actor's own create conditions (d_a_npc_p1) are not decoded",
+      "actors": [
+        {
+          "class": "npc_p1",
+          "actor": "P1a",
+          "stage": "Obombh",
+          "room": 0,
+          "layers": [
+            "0",
+            "1"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "windfall-senza",
+      "since": 2,
+      "named": true,
+      "evidence": "Nintendo Gallery figurine name \"Senza\" (msg 0x3808): P1b registers pictograph type 0x74 (l_snap_idx_tbl[type] in d_a_npc_p1, P1b = type 1), figure 43 = 0x74 - 0x49, daObjFigure_c::getMsg = 0x37DD + figure",
+      "where": "Windfall Island, the bomb shop",
+      "present": [
+        "day",
+        "night"
+      ],
+      "gate": "story-gated: the bomb shop break-in",
+      "unconfirmed": "when it is out: only from the room layers; the actor's own create conditions (d_a_npc_p1) are not decoded",
+      "actors": [
+        {
+          "class": "npc_p1",
+          "actor": "P1b",
+          "stage": "Obombh",
+          "room": 0,
+          "layers": [
+            "0",
+            "1"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "windfall-nudge",
+      "since": 2,
+      "named": true,
+      "evidence": "Nintendo Gallery figurine name \"Nudge\" (msg 0x3809): P1c registers pictograph type 0x75 (l_snap_idx_tbl[type] in d_a_npc_p1, P1c = type 2), figure 44 = 0x75 - 0x49, daObjFigure_c::getMsg = 0x37DD + figure",
+      "where": "Windfall Island, the bomb shop",
+      "present": [
+        "day",
+        "night"
+      ],
+      "gate": "story-gated: the bomb shop break-in",
+      "unconfirmed": "when it is out: only from the room layers; the actor's own create conditions (d_a_npc_p1) are not decoded",
+      "actors": [
+        {
+          "class": "npc_p1",
+          "actor": "P1c",
+          "stage": "Obombh",
+          "room": 0,
+          "layers": [
+            "0",
+            "1"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "windfall-killer-bee-a",
+      "since": 2,
+      "named": false,
+      "evidence": "Nintendo Gallery figurine name \"Windfall's Gang of Boys, the Killer Bees\" (msg 0x37F5): Mk registers pictograph type 0x61 (dSnap_RegistFig in d_a_npc_mk), figure 24 = 0x61 - 0x49, daObjFigure_c::getMsg = 0x37DD + figure; the figurine shows the whole group, the members aren't tied one by one, so they are unnamed",
+      "where": "Windfall Island, around town",
+      "spot": {
+        "x": 84,
+        "z": -201563
+      },
+      "present": [
+        "day"
+      ],
+      "unconfirmed": "when it is out: only from the room layers; the actor's own create conditions (d_a_npc_mk) are not decoded",
+      "actors": [
+        {
+          "class": "npc_mk",
+          "actor": "Mk",
+          "stage": "sea",
+          "room": 11,
+          "layers": [
+            "0",
+            "4"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "windfall-killer-bee-b",
+      "since": 2,
+      "named": false,
+      "evidence": "Nintendo Gallery figurine name \"Windfall's Gang of Boys, the Killer Bees\" (msg 0x37F5): UkB registers pictograph type 0x61 (dSnap_RegistFig in d_a_npc_uk), figure 24 = 0x61 - 0x49, daObjFigure_c::getMsg = 0x37DD + figure; the figurine shows the whole group, the members aren't tied one by one, so they are unnamed",
+      "where": "Windfall Island, around town",
+      "spot": {
+        "x": 12,
+        "z": -201636
+      },
+      "present": [
+        "day"
+      ],
+      "unconfirmed": "when it is out: only from the room layers; the actor's own create conditions (d_a_npc_uk) are not decoded",
+      "actors": [
+        {
+          "class": "npc_uk",
+          "actor": "UkB",
+          "stage": "sea",
+          "room": 11,
+          "layers": [
+            "0",
+            "4"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "windfall-killer-bee-c",
+      "since": 2,
+      "named": false,
+      "evidence": "Nintendo Gallery figurine name \"Windfall's Gang of Boys, the Killer Bees\" (msg 0x37F5): UkC registers pictograph type 0x61 (dSnap_RegistFig in d_a_npc_uk), figure 24 = 0x61 - 0x49, daObjFigure_c::getMsg = 0x37DD + figure; the figurine shows the whole group, the members aren't tied one by one, so they are unnamed",
+      "where": "Windfall Island, around town",
+      "spot": {
+        "x": 189,
+        "z": -201517
+      },
+      "present": [
+        "day"
+      ],
+      "unconfirmed": "when it is out: only from the room layers; the actor's own create conditions (d_a_npc_uk) are not decoded",
+      "actors": [
+        {
+          "class": "npc_uk",
+          "actor": "UkC",
+          "stage": "sea",
+          "room": 11,
+          "layers": [
+            "0",
+            "4"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "windfall-killer-bee-d",
+      "since": 2,
+      "named": false,
+      "evidence": "Nintendo Gallery figurine name \"Windfall's Gang of Boys, the Killer Bees\" (msg 0x37F5): UkD registers pictograph type 0x61 (dSnap_RegistFig in d_a_npc_uk), figure 24 = 0x61 - 0x49, daObjFigure_c::getMsg = 0x37DD + figure; the figurine shows the whole group, the members aren't tied one by one, so they are unnamed",
+      "where": "Windfall Island, around town",
+      "spot": {
+        "x": 189,
+        "z": -201404
+      },
+      "present": [
+        "day"
+      ],
+      "unconfirmed": "when it is out: only from the room layers; the actor's own create conditions (d_a_npc_uk) are not decoded",
+      "actors": [
+        {
+          "class": "npc_uk",
+          "actor": "UkD",
+          "stage": "sea",
+          "room": 11,
+          "layers": [
+            "0",
+            "4"
+          ]
+        }
+      ]
     }
   ]
 }
