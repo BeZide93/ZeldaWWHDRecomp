@@ -7,6 +7,11 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **PlayStation and Xbox button looks in the action hint near Link** (issue #188, thanks @floysh): the floating hint that
+  appears next to Link (for example "Speak" in front of a character) still showed the A button with PlayStation or
+  Xbox button labels. It now uses the same shapes and colours as the button cluster in the corner. With the original
+  look nothing changes.
+
 - **Experimental stereo 3D, HDR output and a gameplay FOV setting** (PR #168, thanks @pancreations): the Graphics tab
   gains **Stereoscopic 3D** (Vulkan only: Half SBS, Full SBS and top-and-bottom, with depth, convergence and eye swap;
   each eye renders its own view; 30 fps recommended for now), **HDR output** (Windows with Vulkan, when Windows HDR is
