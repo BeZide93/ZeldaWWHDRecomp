@@ -20,13 +20,14 @@
 // main thread always is. Worker threads normally idle at the same wait. If not, the load is retried
 // on the following frames and finally refused with a message; nothing is changed then.
 //
-// Slot file: header (uncompressed) + LZ4 blocks of the payload: tagged sections from each module
+// Slot file: header (uncompressed) + checksummed zstd chunks of the payload: tagged sections from each module
 // (threads + HLE sync objects + alarms + guest clock, heaps, open files, AX voices, GX2 registers,
 // runtime allocations) and guest memory (MEM2, runtime objects, fixed slots, foreground bucket,
 // MEM1; all-zero 64 KiB chunks are left out).
 #include "savestate.h"
 #include "guest_addr.h"
 #include "full_state_header.h"
+#include "full_state_stream.h"
 #include "input.h"
 
 #ifdef __APPLE__
@@ -76,6 +77,7 @@ void mem_ss_save(ss::Writer& w);
 bool mem_ss_check(ss::Reader r, std::string& why);
 void mem_ss_load(ss::Reader& r);
 void fs_ss_save(ss::Writer& w);
+bool fs_ss_check(ss::Reader r,std::string& why);
 void fs_ss_load(ss::Reader& r);
 void ax_ss_save(ss::Writer& w);
 bool ax_ss_check(ss::Reader r, std::string& why);
@@ -94,13 +96,8 @@ namespace ss {
 namespace {
 
 constexpr char kMagic[8] = {'W', 'W', 'H', 'D', 'S', 'T', 'A', 'T'};
-#ifdef __APPLE__
-constexpr uint32_t kVersion = 1;
-#else
-constexpr uint32_t kVersion = 2; // liblz4 raw blocks, not Apple COMPRESSION_LZ4 framing
-#endif
+constexpr uint32_t kVersion = kStreamVersion;
 constexpr uint32_t kChunk = 0x10000;
-constexpr uint32_t kBlock = 8 << 20;  // compression block (raw bytes)
 
 using Header = FullStateHeader;
 
@@ -150,12 +147,23 @@ struct Snapshot {
             uint64_t n = r.u64();
             size_t off = r.p - payload.data();
             if (!r.bytes(nullptr, n)) return false;
-            sections[tag] = {off, (size_t)n};
+            if (!sections.emplace(tag,std::make_pair(off,size_t(n))).second) return false;
         }
         if (!r.ok || !sections.count(kSecMemory)) return false;
         if(!guestmods::read_mod_set(section(kSecGuestMods),guest_mods))return false;
         Reader m=section(kSecMemory);
-        return read_regions(m,regs,chunks);
+        if(!read_regions(m,regs,chunks))return false;
+        // Never allow file-provided regions to select host-only/unmapped memory.
+        const std::vector<Region> allowed={{mem::kMem2Start,mem::kMem2End-mem::kMem2Start},
+            {mem::kRuntimeStart,mem::kHostStart-mem::kRuntimeStart},{mem::kFixedStart,mem::kFixedSize},
+            {mem::kFgBucket,mem::kFgBucketSize},{mem::kMem1,mem::kMem1Size},
+            {guestmods::kRegionStart,guestmods::kRegionSize}};
+        for(const auto& region:regs) {
+            bool valid=false;
+            for(const auto& range:allowed)if(region.base>=range.base && uint64_t(region.base)+region.size<=uint64_t(range.base)+range.size)valid=true;
+            if(!valid)return false;
+        }
+        return true;
     }
 };
 
@@ -280,116 +288,49 @@ std::string stage_name() {
 }
 
 // ---------------------------------------------------------------- memory
-void capture_memory(Writer& w) {
-    capture_regions(w,regions(),[](uint32_t a){return mem::ptr(a);},
-                    [](const uint8_t* p,size_t n){return host::memory_touched(const_cast<uint8_t*>(p),n);});
-}
-
 void restore_memory(const Snapshot& s) {
     restore_regions(s.regs,s.chunks,[](uint32_t a){return mem::ptr(a);},
                     [](const uint8_t* p,size_t n){return host::memory_touched(const_cast<uint8_t*>(p),n);});
 }
 
 // ---------------------------------------------------------------- slot files
-bool write_slot(int slot, const Header& h0, const std::vector<uint8_t>& payload) {
-    Header h = h0;
-    size_t nblocks = (payload.size() + kBlock - 1) / kBlock;
-    h.blocks = (uint32_t)nblocks;
-    h.raw_size = payload.size();
-    std::vector<std::vector<uint8_t>> out(nblocks);
-    std::vector<std::thread> pool;
-    std::atomic<size_t> next{0};
-    unsigned nt = std::max(1u, std::min(8u, std::thread::hardware_concurrency()));
-    for (unsigned t = 0; t < nt; t++)
-        pool.emplace_back([&] {
-#ifdef __APPLE__
-            std::vector<uint8_t> scratch(compression_encode_scratch_buffer_size(COMPRESSION_LZ4));
-#endif
-            for (size_t i; (i = next++) < nblocks;) {
-                size_t raw = std::min<size_t>(kBlock, payload.size() - i * kBlock);
-                std::vector<uint8_t>& o = out[i];
-                o.resize(8 + raw + raw / 8 + 1024);
-#ifdef __APPLE__
-                size_t n = compression_encode_buffer(o.data() + 8, o.size() - 8, payload.data() + i * kBlock, raw, scratch.data(), COMPRESSION_LZ4);
-#else
-                size_t n = (size_t)LZ4_compress_default((const char*)payload.data()+i*kBlock,(char*)o.data()+8,(int)raw,(int)o.size()-8);
-#endif
-                uint32_t hdr[2] = {(uint32_t)raw, (uint32_t)n};
-                if (!n || n >= raw) {  // incompressible: stored
-                    memcpy(o.data() + 8, payload.data() + i * kBlock, raw);
-                    hdr[1] = 0;
-                    n = raw;
-                }
-                memcpy(o.data(), hdr, 8);
-                o.resize(8 + n);
-            }
-        });
-    for (auto& t : pool) t.join();
-    std::string tmp = slot_path(slot, "tmp");
-    FILE* f = fopen(tmp.c_str(), "wb");
-    if (!f) return false;
-    bool ok = fwrite(&h, sizeof h, 1, f) == 1;
-    for (auto& o : out) ok = ok && fwrite(o.data(), 1, o.size(), f) == o.size();
-    ok = fclose(f) == 0 && ok;
-    if (ok) ok = host::replace_file(tmp,slot_path(slot));
-    else remove(tmp.c_str());
-    return ok;
+template<class Pointer,class Touched>
+bool write_memory_slot(int slot,const Header& h,const Writer& metadata,const std::vector<Region>& regs,
+                       Pointer pointer,Touched touched,uint64_t& rawSize) {
+    const auto plan=plan_regions(regs,pointer,touched);
+    const std::string tmp=slot_path(slot,"tmp");
+    struct Temporary {
+        std::string path;FILE* file=nullptr;
+        ~Temporary(){if(file)fclose(file);remove(path.c_str());}
+    } temp{tmp,fopen(tmp.c_str(),"wb")};
+    if(!temp.file)return false;
+    FullStateStreamWriter stream(temp.file,h);
+    const uint32_t tag=kSecMemory;
+    if(!stream.bytes(metadata.b.data(),metadata.b.size()) || !stream.bytes(&tag,sizeof tag) ||
+       !stream.bytes(&plan.size,sizeof plan.size) || !stream_regions(stream,plan,pointer))return false;
+    rawSize=stream.raw_size();
+    if(!stream.finish())return false;
+    const bool closed=fclose(temp.file)==0;temp.file=nullptr;
+    return closed && host::replace_file(tmp,slot_path(slot));
 }
 
 bool read_header(FILE* f, Header& h, std::string& why) {
     if (!read_full_state_header(f, h, why)) return false;
-    if (h.version != kVersion) { why = "saved by another version"; return false; }
+    if (!full_state_version_supported(h.version)) { why = "saved by another version"; return false; }
+    if (!memchr(h.area,0,sizeof h.area)) {why="invalid state area";return false;}
     if (h.cpu_size != sizeof(Cpu)) { why = "saved by an incompatible build"; return false; }
     if (h.game_id != game_id()) { why = "saved with a different game executable"; return false; }
     return true;
 }
-
 std::shared_ptr<Snapshot> read_slot(int slot, std::string& why) {
-    FILE* f = fopen(slot_path(slot).c_str(), "rb");
-    if (!f) { why = "empty"; return nullptr; }
-    auto s = std::make_shared<Snapshot>();
-    s->slot = slot;
-    if (!read_header(f, s->h, why)) { fclose(f); return nullptr; }
-    std::vector<std::vector<uint8_t>> blocks(s->h.blocks);
-    std::vector<uint32_t> raws(s->h.blocks), comps(s->h.blocks);
-    bool ok = true;
-    for (uint32_t i = 0; i < s->h.blocks && ok; i++) {
-        uint32_t hdr[2];
-        ok = fread(hdr, 8, 1, f) == 1 && hdr[0] <= kBlock;
-        if (!ok) break;
-        raws[i] = hdr[0];
-        comps[i] = hdr[1];
-        blocks[i].resize(hdr[1] ? hdr[1] : hdr[0]);
-        ok = fread(blocks[i].data(), 1, blocks[i].size(), f) == blocks[i].size();
-    }
-    fclose(f);
-    if (!ok) { why = "file is truncated"; return nullptr; }
-    s->payload.resize(s->h.raw_size);
-    std::atomic<size_t> next{0};
-    std::atomic<bool> bad{false};
-    std::vector<std::thread> pool;
-    unsigned nt = std::max(1u, std::min(8u, std::thread::hardware_concurrency()));
-    for (unsigned t = 0; t < nt; t++)
-        pool.emplace_back([&] {
-#ifdef __APPLE__
-            std::vector<uint8_t> scratch(compression_decode_scratch_buffer_size(COMPRESSION_LZ4));
-#endif
-            for (size_t i; (i = next++) < blocks.size();) {
-                uint8_t* dst = s->payload.data() + i * (size_t)kBlock;
-                if ((size_t)i * kBlock + raws[i] > s->payload.size()) { bad = true; continue; }
-                if (!comps[i]) { memcpy(dst, blocks[i].data(), raws[i]); continue; }
-#ifdef __APPLE__
-                size_t n = compression_decode_buffer(dst, raws[i], blocks[i].data(), comps[i], scratch.data(), COMPRESSION_LZ4);
-#else
-                int decoded = LZ4_decompress_safe((const char*)blocks[i].data(),(char*)dst,(int)comps[i],(int)raws[i]);
-                size_t n = decoded<0?0:(size_t)decoded;
-#endif
-                if (n != raws[i]) bad = true;
-            }
-        });
-    for (auto& t : pool) t.join();
-    if (bad || !s->parse()) { why = "file is corrupt"; return nullptr; }
-    return s;
+    try {
+    std::unique_ptr<FILE,decltype(&fclose)> file(fopen(slot_path(slot).c_str(),"rb"),fclose);
+    if(!file){why="empty";return nullptr;}
+    auto state=std::make_shared<Snapshot>();state->slot=slot;
+    if(!read_header(file.get(),state->h,why) || !read_full_state_payload(file.get(),state->h,state->payload,why))return nullptr;
+    if(!state->parse()){why="file is corrupt";return nullptr;}
+    return state;
+    } catch(const std::exception&) {why="state is corrupt or exceeds available memory";return nullptr;}
 }
 
 // ---------------------------------------------------------------- save / load at the frame boundary
@@ -466,6 +407,9 @@ std::string area_label(const char* stage) {
 bool do_save(int slot) {
     mods::fast_forward_reset();
     std::string busy, why;
+    // Defer before freezing if a previous slot read is still in progress.
+    std::unique_lock<std::mutex> io(g_io,std::try_to_lock);
+    if(!io.owns_lock())return false;
     auto t0 = std::chrono::steady_clock::now();
     if (!threads::quiesce(250, busy, 1, 30)) {
         threads::thaw();
@@ -474,17 +418,18 @@ bool do_save(int slot) {
         report_done(slot, false, "game busy:" + busy);
         return true;
     }
+    struct ThawGuard {bool active=true;~ThawGuard(){if(active)threads::thaw();}} thaw;
     gx2_ss_drain();
     Writer threads_w;
     if (!threads_ss_save(threads_w, why)) {
-        threads::thaw();
+        threads::thaw();thaw.active=false;
         if (++g_attempts < 30) return false;
         if (!is_auto(slot)) message("Slot %d: not saved (%s)", slot, why.c_str());
         report_done(slot, false, why);
         return true;
     }
-    auto payload = std::make_shared<Writer>();
-    payload->b.reserve(512u << 20);
+    Writer metadata;
+    auto* payload=&metadata;
     put_section(*payload, kSecThreads, threads_w);
     Writer w;
     mem_ss_save(w);
@@ -506,15 +451,6 @@ bool do_save(int slot) {
     put_section(*payload, kSecDispatch, w);
     w=Writer();guestmods::save_mod_set(w,guestmods::enabled_mods());
     put_section(*payload,kSecGuestMods,w);
-    // memory last, written straight into the payload
-    payload->u32(kSecMemory);
-    size_t len_at = payload->b.size();
-    payload->u64(0);
-    story_chart::capture_begin();  // the sea chart's story marks as the game left them (mod markers off)
-    capture_memory(*payload);
-    story_chart::capture_end();
-    uint64_t mlen = payload->b.size() - len_at - 8;
-    memcpy(&payload->b[len_at], &mlen, 8);
     Header h{};
     memcpy(h.magic, kMagic, 8);
     h.version = kVersion;
@@ -526,34 +462,33 @@ bool do_save(int slot) {
     h.game_id = game_id();
     h.cpu_size = sizeof(Cpu);
     h.controller = input::pro_controller() ? 2 : 1;
-    threads::thaw();
-    double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
-    LOG("[savestate] slot %d: captured %.1f MB in %.1f ms (stage %s)", slot, payload->b.size() / 1048576.0, ms, stage.c_str());
-    if (!is_auto(slot)) render::request_tv_dump(slot_path(slot, "png"), 0);
-    else crashrec::on_auto_saved(slot - crashrec::kAutoBase);
-    // compress and write in the background; the game continues
-    std::thread([slot, h, payload, stage, done = take_done(slot)] {
-        auto t1 = std::chrono::steady_clock::now();
-        bool ok;
-        {
-            std::lock_guard<std::mutex> io(g_io);
-            ok = write_slot(slot, h, payload->b);
-        }
-        double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t1).count();
-        struct stat st{};
-        stat(slot_path(slot).c_str(), &st);
-        LOG("[savestate] slot %d: %s (%.1f MB on disk, %.0f ms)", slot, ok ? "written" : "WRITE FAILED", st.st_size / 1048576.0, ms);
-        if (done) done(ok, ok ? "" : "write failed");
-        if (is_auto(slot)) return;  // automatic states stay quiet
-        std::lock_guard<std::mutex> lk(g_mu);
-        g_message = ok ? "Saved to slot " + std::to_string(slot) + (stage.empty() ? "" : " (" + area_label(stage.c_str()) + ")")
-                       : "Slot " + std::to_string(slot) + ": write failed";
-        g_message_time = std::chrono::steady_clock::now();
-    }).detach();
+    uint64_t rawSize=0;
+    bool ok=false;
+    try {
+        struct ChartCaptureGuard { ChartCaptureGuard(){story_chart::capture_begin();} ~ChartCaptureGuard(){story_chart::capture_end();} } chartCapture;
+        ok=write_memory_slot(slot,h,metadata,regions(),[](uint32_t a){return mem::ptr(a);},
+             [](const uint8_t* p,size_t n){return host::memory_touched(const_cast<uint8_t*>(p),n);},rawSize);
+    } catch(const std::exception&) {ok=false;}
+    threads::thaw();thaw.active=false;io.unlock();
+    const double ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-t0).count();
+    LOG("[savestate] slot %d: %s %.1f MB streamed in %.1f ms (guest paused)",slot,ok?"written":"WRITE FAILED",rawSize/1048576.0,ms);
+    if(ok) {
+        if(!is_auto(slot))render::request_tv_dump(slot_path(slot,"png"),0);
+        else crashrec::on_auto_saved(slot-crashrec::kAutoBase);
+    }
+    if(auto done=take_done(slot))done(ok,ok?"":"write failed");
+    if(!is_auto(slot)) {
+        std::lock_guard<std::mutex> lock(g_mu);
+        g_message=ok?"Saved to slot "+std::to_string(slot)+(stage.empty()?"":" ("+area_label(stage.c_str())+")")
+                    :"Slot "+std::to_string(slot)+": write failed";
+        g_message_time=std::chrono::steady_clock::now();
+    }
     return true;
 }
 
 bool do_load(const std::shared_ptr<Snapshot>& s) {
+    for(uint32_t tag:{kSecThreads,kSecHeaps,kSecFiles,kSecAudio,kSecGx2,kSecAllocs,kSecDispatch})
+        if(!s->sections.count(tag)){message("%s: incomplete state",slot_label(s->slot).c_str());return true;}
     mods::fast_forward_reset();
     std::string busy, why;
     auto t0 = std::chrono::steady_clock::now();
@@ -564,16 +499,17 @@ bool do_load(const std::shared_ptr<Snapshot>& s) {
         message("%s: not loaded (game busy:%s)", slot_label(s->slot).c_str(), busy.c_str());
         return true;
     }
+    struct ThawGuard {bool active=true;~ThawGuard(){if(active)threads::thaw();}} thaw;
     gx2_ss_drain();
     g_check = s.get();
-    bool ok = check_allocs(s->section(kSecAllocs), why) && check_dispatch(s->section(kSecDispatch), why) &&
+    bool ok = fs_ss_check(s->section(kSecFiles),why) && check_allocs(s->section(kSecAllocs), why) && check_dispatch(s->section(kSecDispatch), why) &&
               mem_ss_check(s->section(kSecHeaps), why) && ax_ss_check(s->section(kSecAudio), why) &&
               gx2_ss_check(s->section(kSecGx2), why);
     bool layout_ok = ok;
     ok = ok && threads_ss_check(s->section(kSecThreads), why);
     g_check = nullptr;
     if (!ok) {
-        threads::thaw();
+        threads::thaw();thaw.active=false;
         // threads at other waits right now may be where they were saved on a later frame
         if (layout_ok && ++g_attempts < 30) {
             if (g_attempts == 1) LOG("[savestate] slot %d: waiting for the game threads (%s)", s->slot, why.c_str());
@@ -601,7 +537,7 @@ bool do_load(const std::shared_ptr<Snapshot>& s) {
     rumble::reset();     // an effect running before the load is not the restored game's
     r = s->section(kSecThreads);
     threads_ss_load(r);  // last: wakes the parked threads (they continue after the thaw)
-    threads::thaw();
+    threads::thaw();thaw.active=false;
     double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
     std::string area = s->h.area[0] ? " (" + area_label(s->h.area) + ")" : "";
     const bool mods_differ=guestmods::different_mods(s->guest_mods,guestmods::enabled_mods());
@@ -1277,6 +1213,7 @@ void request_load(int slot) {
     }
     if (g_loading.exchange(true)) return;
     std::thread([slot] {
+        try {
         auto t0 = std::chrono::steady_clock::now();
         std::string why;
         std::shared_ptr<Snapshot> s;
@@ -1294,6 +1231,10 @@ void request_load(int slot) {
             std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count());
         std::lock_guard<std::mutex> lk(g_mu);
         g_load_ready = s;
+        } catch(const std::exception&) {
+            g_loading=false;
+            try {message("State could not be loaded (invalid data or insufficient memory)");}catch(...) {}
+        }
     }).detach();
 }
 

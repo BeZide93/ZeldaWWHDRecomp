@@ -374,6 +374,7 @@ HLE(nn_save, SAVEOpenDir) {
 #include <vector>
 
 #include "../savestate.h"
+#include "../state_file_section.h"
 void fs_ss_save(ss::Writer& w) {
     std::lock_guard<std::mutex> lk(g_fs_mutex);
     w.u32(g_next_handle);
@@ -398,6 +399,8 @@ void fs_ss_save(ss::Writer& w) {
         w.u32(g_dirs[h].read);
     }
 }
+
+bool fs_ss_check(ss::Reader r,std::string& why) {return ss::check_file_section(r,why);}
 
 void fs_ss_load(ss::Reader& r) {
     std::lock_guard<std::mutex> lk(g_fs_mutex);

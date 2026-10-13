@@ -55,23 +55,17 @@ int main(int argc, char** argv) {
         const auto begin = std::chrono::steady_clock::now();
         uint64_t raw_bytes = 0;
         if (save) {
-            ss::Writer payload;
-            // Match do_save's current reserve and memory section, without inventing
-            // HLE objects or running the game. Other sections are small metadata.
-            payload.b.reserve(512u << 20);
-            payload.u32(ss::kSecMemory);
-            const size_t length_at = payload.b.size(); payload.u64(0);
-            ss::capture_regions(payload, {{kSyntheticBase, uint32_t(kLiveBytes)}},
-                [&](uint32_t a) { return memory.data() + (a - kSyntheticBase); },
-                [](const uint8_t*, size_t) { return true; });
-            const uint64_t length = payload.b.size() - length_at - sizeof(uint64_t);
-            memcpy(payload.b.data() + length_at, &length, sizeof length);
+            ss::Writer metadata, files;
+            files.u32(1);files.u32(0);files.u32(0);
+            ss::put_section(metadata,ss::kSecFiles,files);
             ss::FullStateHeader header{};
             memcpy(header.magic, "WWHDSTAT", 8);
             header.version = ss::kVersion; header.header_size = sizeof header;
             header.cpu_size = sizeof(Cpu); header.game_id = ss::game_id();
-            raw_bytes = payload.b.size();
-            if (!ss::write_slot(1, header, payload.b)) throw std::runtime_error("production write_slot failed");
+            if (!ss::write_memory_slot(1,header,metadata,{{kSyntheticBase,uint32_t(kLiveBytes)}},
+                 [&](uint32_t a){return memory.data()+(a-kSyntheticBase);},
+                 [](const uint8_t*,size_t){return true;},raw_bytes))
+                throw std::runtime_error("production streaming write failed");
         } else {
             std::string why;
             auto state = ss::read_slot(1, why);
