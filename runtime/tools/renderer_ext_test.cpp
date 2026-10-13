@@ -52,6 +52,22 @@ void select_decompiler_api(render::Api api) { g_decompiler.push_back(api); }  //
 // ---------------------------------------------------------------- stub backends
 namespace {
 
+// the environment, also on Windows (no setenv there; an empty value removes the variable)
+void set_env(const char* name, const char* value) {
+#ifdef _WIN32
+    _putenv_s(name, value);
+#else
+    setenv(name, value, 1);
+#endif
+}
+void unset_env(const char* name) {
+#ifdef _WIN32
+    _putenv_s(name, "");
+#else
+    unsetenv(name);
+#endif
+}
+
 int g_inits[3], g_waits, g_flushes, g_idles, g_writebacks;
 bool g_platform_fails = false;
 
@@ -135,7 +151,7 @@ void reset() {
     g_saved.clear();
     g_log.clear();
     g_decompiler.clear();
-    unsetenv("WWHD_RENDERER_RUNTIME");
+    unset_env("WWHD_RENDERER_RUNTIME");
     g_platform_fails = false;
     for (int& n : g_inits) n = 0;
 }
@@ -163,10 +179,10 @@ void unchanged() {
     g_log.clear();
     choose({"--renderer=deko3d"});  // not a renderer without a registration
     assert(render::requested() == Api::Metal && logged("unknown renderer 'deko3d' (metal or vulkan)"));
-    setenv("WWHD_RENDERER_RUNTIME", "vulkan", 1);
+    set_env("WWHD_RENDERER_RUNTIME", "vulkan");
     choose({});
     assert(render::requested() == Api::Vulkan);
-    unsetenv("WWHD_RENDERER_RUNTIME");
+    unset_env("WWHD_RENDERER_RUNTIME");
     g_saved = "vulkan";
     assert(render::preferred() == Api::Vulkan);
     choose({});
@@ -203,10 +219,10 @@ void registered() {
     g_log.clear();
     choose({"--renderer=gl"});
     assert(render::requested() == Api::Platform && logged("unknown renderer 'gl' (metal, vulkan or deko3d)"));
-    setenv("WWHD_RENDERER_RUNTIME", "metal", 1);
+    set_env("WWHD_RENDERER_RUNTIME", "metal");
     choose({});
     assert(render::requested() == Api::Metal);
-    unsetenv("WWHD_RENDERER_RUNTIME");
+    unset_env("WWHD_RENDERER_RUNTIME");
     // a saved Graphics > Renderer choice wins over make_default, as over Metal today
     g_saved = "vulkan";
     choose({});
@@ -290,7 +306,7 @@ void gx2_hooks() {
     assert(counts(1, 0, 0, 1));
 
     // the platform's mask decides, without WWHD_VK_SHADER_KEY_DIRTY
-    unsetenv("WWHD_VK_SHADER_KEY_DIRTY");
+    unset_env("WWHD_VK_SHADER_KEY_DIRTY");
     const gx2::ShaderKeyMask platform = gx2::pick_shader_key_mask(&platform_table());
     assert(platform == stub_key_mask);
     assert(!gx2::shader_key_changed(platform, 0x100, 0x10, 0x11));  // bit 0 only: same key
@@ -302,11 +318,11 @@ void gx2_hooks() {
     assert(!gx2::pick_shader_key_mask(&render::metal_backend()));
     assert(!gx2::pick_shader_key_mask(&render::vulkan_backend()));
     assert(gx2::shader_key_changed(nullptr, 0x101, 1, 2));
-    setenv("WWHD_VK_SHADER_KEY_DIRTY", "1", 1);
+    set_env("WWHD_VK_SHADER_KEY_DIRTY", "1");
     assert(gx2::pick_shader_key_mask(&render::vulkan_backend()) == gx2::vulkan_shader_key_mask);
     assert(!gx2::pick_shader_key_mask(&render::metal_backend()));
     assert(gx2::pick_shader_key_mask(&platform_table()) == stub_key_mask);
-    unsetenv("WWHD_VK_SHADER_KEY_DIRTY");
+    unset_env("WWHD_VK_SHADER_KEY_DIRTY");
     const uint32_t prim = uint32_t(Latte::REGADDR::VGT_PRIMITIVE_TYPE);  // Vulkan's mask: bits 0-5
     assert(!gx2::shader_key_changed(gx2::vulkan_shader_key_mask, prim, 0x04, 0x44));
     assert(gx2::shader_key_changed(gx2::vulkan_shader_key_mask, prim, 0x04, 0x05));
