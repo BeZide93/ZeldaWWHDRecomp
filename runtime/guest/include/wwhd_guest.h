@@ -241,7 +241,7 @@ s32 wwhd_quest_carry(const char* quest_id, s32 carried);
 /* Talking to a game resident: at `step`, while this quest is the TRACKED quest and Link carries its
  * letter, talking to `resident` shows `lines` (UTF-8, up to three lines, 240 bytes) instead of the
  * resident's own line, takes the letter, gives `reward` (a rupee item 0x01..0x06, 0 none, through the
- * game's get-item scene) and the quest is done. Untracked, the resident is the game's. Residents:
- * "windfall-light-keeper" (Windfall's light keeper, always out), "windfall-harbour" (the man on
- * Windfall's east dock; by day, not during the Endless Night). */
+ * game's get-item scene) and the quest is done. Untracked, the resident is the game's. `resident` is a
+ * name from the NPC catalogue (docs/mod-sdk-v2.md), e.g. "windfall-light-keeper"; an unknown name is
+ * refused (WWHD_QUEST_INVALID). */
 s32 wwhd_quest_talk(const char* quest_id, u32 step, const char* resident, const char* lines, u32 reward);

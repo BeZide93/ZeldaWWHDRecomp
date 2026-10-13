@@ -1,0 +1,105 @@
+{
+  "catalogue_format": 1,
+  "place": "windfall",
+  "title": "Windfall Island",
+  "npcs": [
+    {
+      "name": "windfall-light-keeper", "since": 1,
+      "actor": { "class": "people", "code": "Um1", "stage": "sea", "room": 11 },
+      "where": "Windfall Island, up on the windmill by the light",
+      "spot": { "x": 1547, "z": -202539 },
+      "present": ["day", "night"]
+    },
+    {
+      "name": "windfall-harbour-lady", "since": 1,
+      "actor": { "class": "people", "code": "Ub3", "stage": "sea", "room": 11 },
+      "where": "Windfall Island, on the harbour pier (by day)",
+      "spot": { "x": 3827, "z": -202189 },
+      "present": ["day"]
+    },
+    {
+      "name": "windfall-pedestal-man", "since": 1,
+      "actor": { "class": "people", "code": "Uo1", "stage": "sea", "room": 11 },
+      "where": "Windfall Island, on the bench at the cliff edge (by day)",
+      "spot": { "x": -504, "z": -204154 },
+      "present": ["day"]
+    },
+    {
+      "name": "windfall-gossip-a", "since": 1,
+      "actor": { "class": "people", "code": "Ub1", "stage": "sea", "room": 11 },
+      "where": "Windfall Island, up the steps by the brick house (by day)",
+      "spot": { "x": 1481, "z": -203084 },
+      "present": ["day"]
+    },
+    {
+      "name": "windfall-gossip-b", "since": 1,
+      "actor": { "class": "people", "code": "Ub2", "stage": "sea", "room": 11 },
+      "where": "Windfall Island, up the steps by the brick house (by day)",
+      "spot": { "x": 1606, "z": -202988 },
+      "present": ["day"]
+    },
+    {
+      "name": "windfall-posing-lady", "since": 1,
+      "actor": { "class": "people", "code": "Ub4", "stage": "sea", "room": 11 },
+      "where": "Windfall Island, by the town gate (by day)",
+      "spot": { "x": 2456, "z": -200188 },
+      "present": ["day"]
+    },
+    {
+      "name": "windfall-outfit-lady", "since": 1,
+      "actor": { "class": "people", "code": "Uw2", "stage": "sea", "room": 11 },
+      "where": "Windfall Island, in the town square (by day)",
+      "spot": { "x": 263, "z": -200818 },
+      "present": ["day"]
+    },
+    {
+      "name": "windfall-lovelorn-man", "since": 1,
+      "actor": { "class": "people", "code": "Um3", "stage": "sea", "room": 11 },
+      "where": "Windfall Island, on the steps by the red door (up high at night)",
+      "spot": { "x": 2175, "z": -202003 },
+      "present": ["day", "night"]
+    },
+    {
+      "name": "windfall-wind-sailor", "since": 1,
+      "actor": { "class": "people", "code": "Sa2", "stage": "sea", "room": 11 },
+      "where": "Windfall Island, on the high lookout (by day)",
+      "spot": { "x": 670, "z": -200363 },
+      "present": ["day"]
+    },
+    {
+      "name": "windfall-dock-sailor", "since": 1,
+      "actor": { "class": "people", "code": "Sa3", "stage": "sea", "room": 11 },
+      "where": "Windfall Island, on the stone dock (by day)",
+      "spot": { "x": 471, "z": -198395 },
+      "present": ["day"]
+    },
+    {
+      "name": "windfall-pier-sailor", "since": 1,
+      "actor": { "class": "people", "code": "Sa4", "stage": "sea", "room": 11 },
+      "where": "Windfall Island, at the end of the wooden pier (by day)",
+      "spot": { "x": 958, "z": -196792 },
+      "present": ["day"]
+    },
+    {
+      "name": "windfall-money-adviser", "since": 1,
+      "actor": { "class": "people", "code": "Sa5", "stage": "sea", "room": 11 },
+      "where": "Windfall Island, on the grass by the stone wall (by day)",
+      "spot": { "x": -1938, "z": -197940 },
+      "present": ["day"]
+    },
+    {
+      "name": "windfall-flower-girl-a", "since": 1,
+      "actor": { "class": "people", "code": "Ug1", "stage": "sea", "room": 11 },
+      "where": "Windfall Island, by the flowers at the cliff (by day)",
+      "spot": { "x": -1984, "z": -200460 },
+      "present": ["day"]
+    },
+    {
+      "name": "windfall-flower-girl-b", "since": 1,
+      "actor": { "class": "people", "code": "Ug2", "stage": "sea", "room": 11 },
+      "where": "Windfall Island, by the flowers at the cliff (by day)",
+      "spot": { "x": -1985, "z": -200460 },
+      "present": ["day"]
+    }
+  ]
+}

@@ -15,31 +15,11 @@
 #include <vector>
 
 #include "story_notebook_list.h"
+#include "story_npc_catalogue.h"
 
 namespace story_notebook {
 
-// Residents the port can hand to a quest. Each is identified in the game by its actor class and its
-// resident number, and only exists where the game places it.
-enum Resident : uint8_t {
-    kResidentNone = 0,
-    kResidentWindfallHarbour = 1,     // Windfall's harbour (daNpcPeople_c resident 5, "Ub3"): by day, not in the Endless Night
-    kResidentWindfallLightKeeper = 2, // Windfall's light keeper (daNpcPeople_c resident 9, "Um1"): always out
-};
-struct ResidentInfo {
-    const char* id;        // the SDK name
-    const char* where;     // for the notebook
-    uint8_t people_number; // daNpcPeople_c::mNpcNo
-    float x, z;            // where the game places it (Windfall room 11 layer 0, user's files)
-};
-inline const ResidentInfo* resident_info(Resident r) {
-    static const ResidentInfo kWindfallHarbour{"windfall-harbour", "Windfall Island, the harbour (by day)", 5, 3827.0f, -202189.0f};
-    static const ResidentInfo kWindfallLightKeeper{"windfall-light-keeper", "Windfall Island, up by the light", 9, 1670.0f, -202585.0f};
-    return r == kResidentWindfallHarbour ? &kWindfallHarbour : r == kResidentWindfallLightKeeper ? &kWindfallLightKeeper : nullptr;
-}
-inline Resident resident_by_id(const std::string& id) {
-    return id == "windfall-harbour" ? kResidentWindfallHarbour : id == "windfall-light-keeper" ? kResidentWindfallLightKeeper : kResidentNone;
-}
-inline constexpr Resident kAllResidents[] = {kResidentWindfallHarbour, kResidentWindfallLightKeeper};
+// Residents the port can hand to a quest: the NPC catalogue's entries (story_npc_catalogue.h).
 
 // A step's prerequisites (manifest "available"), checked read-only from the save: event flags the game
 // set (or didn't) and the time of day. While they don't hold, the notebook says "Not yet possible:

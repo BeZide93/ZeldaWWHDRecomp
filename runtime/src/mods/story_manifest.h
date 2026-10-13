@@ -12,6 +12,7 @@
 
 #include "mod_json.h"
 #include "story_mail_book.h"
+#include "story_npc_catalogue.h"
 #include "story_notebook_list.h"
 #include "story_takeover.h"
 
@@ -43,12 +44,6 @@ inline uint8_t rupee_item(const std::string& name) {
     for (uint8_t i = 0; i < 6; i++)
         if (name == kNames[i]) return uint8_t(i + 1);
     return 0;
-}
-// a resident by its game identity: actor class and resident code
-inline Resident resident_of(const std::string& actor_class, const std::string& code) {
-    if (actor_class == "people" && code == "UB3") return kResidentWindfallHarbour;
-    if (actor_class == "people" && code == "UM1") return kResidentWindfallLightKeeper;
-    return kResidentNone;
 }
 // an event flag written as "0x2D01" (the game's flag number); false if not one
 inline bool event_number(const mods::json::Value& v, uint16_t& out) {
@@ -86,9 +81,22 @@ inline bool parse_available(const mods::json::Value& v, Availability& a, std::st
 
 // Parses the manifest's quests. Returns false with a reason for anything it doesn't accept (the mod's
 // quests are then not in the notebook; the mod itself still loads).
-inline bool parse_quests(const mods::json::Value& manifest, std::vector<ManifestQuest>& out, std::string& why) {
+// NPCs are named from the catalogue ("who": "windfall-light-keeper"); a name it doesn't know, or an
+// "npc_catalogue" version newer than it, refuses the quests (and the mod, packages.cpp). Steps whose
+// time of day never meets their resident's are allowed, with a warning.
+inline bool parse_quests(const mods::json::Value& manifest, std::vector<ManifestQuest>& out, std::string& why,
+                         const NpcCatalogue& catalogue = npc_catalogue(), std::vector<std::string>* warnings = nullptr) {
     using mods::json::Value;
     out.clear();
+    const Value& needs = manifest.get("npc_catalogue");
+    if (needs.type != Value::Null) {
+        if (needs.type != Value::Number || needs.number < 1 || std::floor(needs.number) != needs.number)
+            return why = "npc_catalogue must be a version number", false;
+        if (needs.number > catalogue.version)
+            return why = "needs NPC catalogue version " + std::to_string(unsigned(needs.number)) + "; this port has version " +
+                         std::to_string(catalogue.version) + " (update the port)",
+                   false;
+    }
     const Value& quests = manifest.get("quests");
     if (quests.type == Value::Null) return true;
     const Value& format = manifest.get("quests_format");
@@ -145,8 +153,20 @@ inline bool parse_quests(const mods::json::Value& manifest, std::vector<Manifest
             const Value& npc = st.get("npc");
             if (npc.type == Value::Object) {
                 s.has_talk = true;
-                s.resident = resident_of(npc.get("who").get("class").text, npc.get("who").get("code").text);
-                if (s.resident == kResidentNone) return why = "quest " + m.id + ": unsupported resident", false;
+                const Value& who = npc.get("who");
+                if (who.type != Value::String) return why = "quest " + m.id + ": \"who\" must name an NPC from the catalogue", false;
+                s.resident = catalogue.find(who.text);
+                if (s.resident == kResidentNone)
+                    return why = "quest " + m.id + ": this port's NPC catalogue (version " + std::to_string(catalogue.version) +
+                                 ") has no NPC named \"" + who.text + "\"",
+                           false;
+                const NpcEntry& e = *catalogue.entry(s.resident);
+                if (s.where.empty()) s.where = e.where;
+                if (!s.has_place && e.has_spot) s.has_place = true, s.x = e.x, s.z = e.z;
+                if (warnings && ((s.when.time == 1 && !e.day) || (s.when.time == 2 && !e.night)))
+                    warnings->push_back("quest " + m.id + " step " + std::to_string(s.n) + ": " + e.name + " is only out " +
+                                        (e.day ? "by day" : "at night") + ", but the step is available only " +
+                                        (s.when.time == 1 ? "by day" : "at night"));
                 s.needs_letter = npc.get("when").get("carries").type == Value::String;
                 for (const Value& l : npc.get("lines").array) {
                     if (l.type != Value::String) return why = "invalid line", false;

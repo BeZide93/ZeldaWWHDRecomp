@@ -151,6 +151,15 @@ add_custom_command(OUTPUT ${WWHD_NOTEBOOK_ICON}
           -P ${CMAKE_SOURCE_DIR}/cmake/EmbedBytes.cmake
   DEPENDS ${WWHD_NOTEBOOK_ICON_PNG} ${CMAKE_SOURCE_DIR}/cmake/EmbedBytes.cmake
   COMMENT "Story notebook icon" VERBATIM)
+# ---- the NPC catalogue story mods name residents from (story_npc_catalogue.h): one JSON table per place in
+# runtime/assets/npc_catalogue, compiled in
+file(GLOB WWHD_NPC_CATALOGUE_TABLES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/runtime/assets/npc_catalogue/*.json)
+set(WWHD_NPC_CATALOGUE ${CMAKE_BINARY_DIR}/generated/npc_catalogue.cpp)
+add_custom_command(OUTPUT ${WWHD_NPC_CATALOGUE}
+  COMMAND ${CMAKE_COMMAND} -DDIR=${CMAKE_SOURCE_DIR}/runtime/assets/npc_catalogue -DOUT=${WWHD_NPC_CATALOGUE}
+          -P ${CMAKE_SOURCE_DIR}/cmake/EmbedNpcCatalogue.cmake
+  DEPENDS ${WWHD_NPC_CATALOGUE_TABLES} ${CMAKE_SOURCE_DIR}/cmake/EmbedNpcCatalogue.cmake
+  COMMENT "NPC catalogue" VERBATIM)
 # Windows: VERSIONINFO + application manifest (wwhd_windows_resources); release builds strip the shipped
 # programs' debug information (WWHD_STRIP_RELEASE: -s for GNU-style linkers in Release/MinSizeRel)
 include(cmake/WindowsResources.cmake)
@@ -167,7 +176,7 @@ file(GLOB RUNTIME_SOURCES CONFIGURE_DEPENDS runtime/src/*.cpp runtime/src/*.c ru
                                             runtime/src/overlay/*.cpp)
 list(APPEND RUNTIME_SOURCES runtime/src/platform/perf_hint.cpp runtime/src/platform/thread_sampler.cpp)  # Android performance hints (no-op elsewhere)
 list(APPEND RUNTIME_SOURCES ${WWHD_BUILD_INFO})
-list(APPEND RUNTIME_SOURCES ${WWHD_NOTEBOOK_ICON})
+list(APPEND RUNTIME_SOURCES ${WWHD_NOTEBOOK_ICON} ${WWHD_NPC_CATALOGUE})
 list(APPEND RUNTIME_SOURCES runtime/src/platform/touch_pad.cpp)  # Android on-screen controls (no-op elsewhere)
 if(APPLE)
   list(APPEND RUNTIME_SOURCES runtime/src/platform/https.mm)
@@ -342,7 +351,7 @@ target_compile_options(mod_manager_test PRIVATE -UNDEBUG)
 # External native package fixture and isolated lifecycle/integration tests.
 add_library(mod_fixture MODULE runtime/tools/mod_fixture.cpp)
 target_include_directories(mod_fixture PRIVATE runtime/include)
-add_executable(mod_package_test runtime/tools/mod_package_test.cpp runtime/src/mods/manager.cpp runtime/src/mods/traversal_settings.cpp runtime/src/mods/packages.cpp runtime/src/mods/guest_png.cpp runtime/src/mods/mod_archive.cpp runtime/src/mods/content.cpp runtime/src/mods/cemu_pack.cpp runtime/src/guest_addr_identity.c)
+add_executable(mod_package_test runtime/tools/mod_package_test.cpp runtime/src/mods/manager.cpp runtime/src/mods/traversal_settings.cpp runtime/src/mods/packages.cpp ${WWHD_NPC_CATALOGUE} runtime/src/mods/guest_png.cpp runtime/src/mods/mod_archive.cpp runtime/src/mods/content.cpp runtime/src/mods/cemu_pack.cpp runtime/src/guest_addr_identity.c)
 target_include_directories(mod_package_test PRIVATE runtime/src runtime/include)
 target_compile_options(mod_package_test PRIVATE -UNDEBUG)
 target_link_libraries(mod_package_test PRIVATE ZLIB::ZLIB Threads::Threads ${CMAKE_DL_LIBS})
@@ -907,7 +916,7 @@ add_test(NAME story_chart COMMAND story_chart_test)
 # the story notebook: quest list, save record, page navigation, services and item menu hooks
 add_executable(story_notebook_test runtime/tools/story_notebook_test.cpp runtime/src/mods/story_notebook.cpp runtime/src/mods/story_mail.cpp
                runtime/src/mods/story_chart.cpp runtime/src/mods/guest_png.cpp runtime/src/mods/mod_archive.cpp runtime/src/guest_addr_identity.c
-               ${WWHD_NOTEBOOK_ICON})
+               ${WWHD_NOTEBOOK_ICON} ${WWHD_NPC_CATALOGUE})
 target_include_directories(story_notebook_test PRIVATE runtime/include runtime/src runtime/src/mods)
 target_compile_options(story_notebook_test PRIVATE -UNDEBUG)
 target_link_libraries(story_notebook_test PRIVATE ZLIB::ZLIB)
@@ -1182,7 +1191,7 @@ endif()
 if(NOT ANDROID AND SDL3_FOUND AND Python3_Interpreter_FOUND)
   add_executable(mod_oneclick_flow_test runtime/tools/mod_oneclick_flow_test.cpp
     runtime/third_party/imgui/backends/imgui_impl_sdlrenderer3.cpp runtime/src/mods/code_mods.cpp
-    runtime/src/mods/manager.cpp runtime/src/mods/traversal_settings.cpp runtime/src/mods/packages.cpp runtime/src/mods/guest_png.cpp
+    runtime/src/mods/manager.cpp runtime/src/mods/traversal_settings.cpp runtime/src/mods/packages.cpp ${WWHD_NPC_CATALOGUE} runtime/src/mods/guest_png.cpp
     runtime/src/mods/mod_archive.cpp runtime/src/mods/content.cpp runtime/src/mods/cemu_pack.cpp runtime/src/guest_addr_identity.c)
   target_include_directories(mod_oneclick_flow_test PRIVATE runtime/src runtime/include)
   target_compile_options(mod_oneclick_flow_test PRIVATE -UNDEBUG)
@@ -1193,7 +1202,7 @@ endif()
 add_test(NAME mod_setup_acceptance COMMAND mod_package_test --setup-acceptance)
 
 # Experimental mods: flag, list filter, save backup before enabling, retention, staged restore.
-add_executable(mod_experimental_test runtime/tools/mod_experimental_test.cpp runtime/src/mods/manager.cpp runtime/src/mods/traversal_settings.cpp runtime/src/mods/packages.cpp runtime/src/mods/guest_png.cpp runtime/src/mods/mod_archive.cpp runtime/src/mods/content.cpp runtime/src/mods/cemu_pack.cpp runtime/src/guest_addr_identity.c)
+add_executable(mod_experimental_test runtime/tools/mod_experimental_test.cpp runtime/src/mods/manager.cpp runtime/src/mods/traversal_settings.cpp runtime/src/mods/packages.cpp ${WWHD_NPC_CATALOGUE} runtime/src/mods/guest_png.cpp runtime/src/mods/mod_archive.cpp runtime/src/mods/content.cpp runtime/src/mods/cemu_pack.cpp runtime/src/guest_addr_identity.c)
 target_include_directories(mod_experimental_test PRIVATE runtime/src runtime/include)
 target_compile_options(mod_experimental_test PRIVATE -UNDEBUG)
 target_link_libraries(mod_experimental_test PRIVATE ZLIB::ZLIB Threads::Threads ${CMAKE_DL_LIBS})

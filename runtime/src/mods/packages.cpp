@@ -15,6 +15,7 @@
 #include "save_backup.h"
 #include "../platform/host.h"
 #include "wwhd_mod.h"
+#include "story_manifest.h"
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -108,6 +109,12 @@ Manifest manifest(const fs::path& path){
     if(!game_id_supported(string_field(v,"game_id",false,64)))m.problem="This package targets another game";
     auto minimum=string_field(v,"minimum_manager_version",true,64);
     if(!minimum.empty()&&version(minimum)>version(kManagerVersion))m.problem="Requires mod manager "+minimum;
+    // story quests (story_manifest.h): an NPC this port's catalogue doesn't know, or a newer catalogue
+    // version, keeps the mod from being enabled with the reason, never a silent no-op
+    if(m.problem.empty()&&(v.get("quests").type!=Value::Null||v.get("npc_catalogue").type!=Value::Null)){
+        std::vector<story_notebook::ManifestQuest> quests;std::string why;
+        if(!story_notebook::parse_quests(v,quests,why))m.problem="Story quests: "+why;
+    }
     if(m.kind=="native") {
         require(v.get("abi_version").type==Value::Number&&v.get("abi_version").number==1,"Unsupported native mod ABI");
         const auto& binaries=v.get("binaries");require(binaries.type==Value::Object&&!binaries.object.empty(),"Native mod has no binaries");

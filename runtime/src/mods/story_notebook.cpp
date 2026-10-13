@@ -106,6 +106,8 @@ const uint32_t kDefaultGetItem = GD(0x10011EB8);  // "DEFAULT_GETITEM", the game
 constexpr uint32_t kPlayEventManager = 0x52C4, kPlayEventFlags = 0x52B8;  // dComIfG_play_c: event manager, mEventFlag
 constexpr uint32_t kPeopleMsgList = 0x8A8, kPeopleUbList = 0x8AC, kPeopleNumber = 0x905;  // daNpcPeople_c m734, m738, mNpcNo
 constexpr uint32_t kActorPos = 0x314, kEventCommand = 0xF8, kEventCondition = 0xFA;       // fopAc_ac_c current.pos, eventInfo
+constexpr uint32_t kActorRoom = 0x326;        // fopAc_ac_c current.roomNo
+constexpr uint32_t kPlayStartStage = 0x5134;  // the game info's start stage name (char[8])
 constexpr uint16_t kCommandNone = 0, kCommandGetItem = 4, kConditionCanGetItem = 0x0008;
 constexpr uint32_t kPlayItemPartner = 0x52A0;     // dComIfGp_event_setItemPartnerId
 constexpr uint32_t kPlayPlayer = 0x5B2C;          // dComIfGp_getPlayer(0): Link
@@ -140,6 +142,16 @@ constexpr uint32_t kSaveEventFlags = 0x644, kSaveTime = 0x44;  // dSv_info_c: th
 const uint8_t* event_flags() { return mem::ptr(save_base() + kSaveEventFlags); }
 int hour_now() { return int(u32_as_f32(ld32(save_base() + kSaveTime)) / 15.0f); }
 bool have_save() { return save_base() != 0; }
+
+// the guest string at addr (up to 8 bytes) is name
+bool stage_is(uint32_t addr, const std::string& name) {
+    for (size_t i = 0; i < 8; i++) {
+        const char ch = char(ld8(addr + uint32_t(i)));
+        if (ch != (i < name.size() ? name[i] : '\0')) return false;
+        if (!ch) return true;
+    }
+    return name.size() == 8;
+}
 story_mail::Book book() { return story_mail::Book(mem::ptr(save_base() + story_mail::kBookOffset)); }
 
 bool one_line(const std::string& s, size_t max) {
@@ -558,10 +570,12 @@ std::vector<Row> rows_now(std::vector<Quest>& storage) {
 bool declare(const std::string& mod, const std::string& mod_name, const mods::json::Value& manifest) {
     std::vector<ManifestQuest> quests;
     std::string why;
-    if (!parse_quests(manifest, quests, why)) {
+    std::vector<std::string> warnings;
+    if (!parse_quests(manifest, quests, why, npc_catalogue(), &warnings)) {
         LOG("[notebook] %s: the manifest's quests are not used: %s", mod.c_str(), why.c_str());
         return false;
     }
+    for (const std::string& w : warnings) LOG("[notebook] %s: warning: %s", mod.c_str(), w.c_str());
     if (quests.empty()) return true;
     for (const ManifestQuest& q : quests) {
         if (define(mod, mod_name, q.id, q.title, q.reward_text, "") < 0) {
@@ -630,7 +644,7 @@ int32_t carry(const std::string& mod, const std::string& quest, bool carried) {
 
 int32_t talk(const std::string& mod, const std::string& quest, uint32_t step, const std::string& resident, const std::string& lines,
              uint32_t reward) {
-    const Resident who = resident_by_id(resident);
+    const Resident who = npc_catalogue().find(resident);
     if (!story_mail::valid_id(quest) || !step || step > kMaxStep || who == kResidentNone || lines.empty() || lines.size() > kMaxLinesBytes ||
         reward > 0x06)
         return kResultInvalid;
@@ -648,7 +662,7 @@ int32_t talk(const std::string& mod, const std::string& quest, uint32_t step, co
             return saved(q->key);
         }
     g_takeovers.push_back({q->key, uint8_t(step), who, true, lines, uint8_t(reward)});
-    LOG("[notebook] %s: quest \"%s\" step %u talks to %s", mod.c_str(), quest.c_str(), step, resident_info(who)->id);
+    LOG("[notebook] %s: quest \"%s\" step %u talks to %s", mod.c_str(), quest.c_str(), step, npc_catalogue().entry(who)->name.c_str());
     return saved(q->key);
 }
 
@@ -840,15 +854,18 @@ void people_message(Cpu* c) {
     if (have_save() && g_talk.phase == Talk::None) {
         story_mail::Book b = book();
         std::lock_guard lock(g_mu);
-        // (test aid: WWHD_NOTEBOOK_TEST_RESIDENT=n stands resident number n in for the harbour man, to test
-        // the talk with a save whose story phase has him indoors)
-        static const int stand_in = [] { const char* e = getenv("WWHD_NOTEBOOK_TEST_RESIDENT"); return e ? atoi(e) : -1; }();
-        for (Resident r : kAllResidents)
-            if ((resident_info(r)->people_number == ld8(npc + kPeopleNumber) || int(ld8(npc + kPeopleNumber)) == stand_in) &&
-                (live = live_takeover(g_takeovers, b, r, event_flags(), hour_now()))) {
-                copy = *live;
-                break;
-            }
+        // the catalogue's people entry for this resident where it stands (stage and room)
+        Cpu probe = *c;  // r3 stays the resident for the game's getMsg
+        const uint32_t stage = g_call(&probe, kPlay, {}) + kPlayStartStage;
+        const uint8_t number = ld8(npc + kPeopleNumber);
+        const int room = int8_t(ld8(npc + kActorRoom));
+        const NpcCatalogue& catalogue = npc_catalogue();
+        for (size_t i = 0; i < catalogue.entries.size() && !live; i++) {
+            const NpcEntry& e = catalogue.entries[i];
+            if (e.actor_class != "people" || e.people_number != number || (e.room >= 0 && e.room != room) || !stage_is(stage, e.stage))
+                continue;
+            if ((live = live_takeover(g_takeovers, b, Resident(i + 1), event_flags(), hour_now()))) copy = *live;
+        }
     }
     if (!live) {
         g_original(c, kPeopleGetMsg);

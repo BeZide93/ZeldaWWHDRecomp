@@ -540,6 +540,7 @@ code then only reports progress the port can't see (`wwhd_quest_step`, `wwhd_que
 `story-notebook` example's quest needs no code at all.
 
 ```json
+"npc_catalogue": 1,
 "quests_format": 1,
 "quests": [{
   "id": "lantern",
@@ -552,9 +553,7 @@ code then only reports progress the port can't see (`wwhd_quest_step`, `wwhd_que
   "steps": [{
     "n": 1,
     "text": "Bring the storyteller's letter to his old friend who keeps Windfall's light.",
-    "where": "Windfall Island, up by the light",
-    "place": {"cell": "D2", "x": 1670, "z": -202585},
-    "npc": {"who": {"class": "people", "code": "UM1", "stage": "sea", "room": 11},
+    "npc": {"who": "windfall-light-keeper",
             "when": {"carries": "letter:friend"},
             "lines": ["A letter from my old friend? Thank you!", "...", "..."],
             "then": {"give": "rupee_orange", "take": "letter:friend", "complete": true}}
@@ -569,7 +568,8 @@ code then only reports progress the port can't see (`wwhd_quest_step`, `wwhd_que
   letter for the quest: it shows in the Delivery Bag next to the notebook (never in the game's
   inventory) until it is handed over.
 - `steps`: the notebook shows each step's `text`, `where` and `place` (world `x`/`z`, the
-  coordinates of `wwhd_chart_mark`; the tracked quest's ring goes there). Before step 1 it shows
+  coordinates of `wwhd_chart_mark`; the tracked quest's ring goes there). A step with an `npc`
+  takes `where` and `place` from the NPC catalogue unless it gives its own. Before step 1 it shows
   `start.text`.
 - `available` (optional, per step): the step's prerequisites, checked read-only from the save:
   `"event"` / `"not_event"`: the game's event flag numbers (`"0x2D01"`, or a list) that must be set
@@ -577,8 +577,10 @@ code then only reports progress the port can't see (`wwhd_quest_step`, `wwhd_que
   While they don't hold, the notebook says "Not yet possible: <text>", the step has no ring on the
   chart and its resident talk is not live. The port never changes any of them.
 - `npc`: a talk to a game resident, below. Up to 8 quests per mod; texts have the limits of
-  `wwhd_quest_*`. A declaration the port doesn't accept is logged and its quests are left out
-  (your mod still loads).
+  `wwhd_quest_*`.
+- A declaration the port doesn't accept (an invalid field, an NPC its catalogue doesn't know, or
+  an `npc_catalogue` version newer than the port's) keeps the mod from being enabled; the Mods tab
+  shows the reason ("Story quests: ...").
 
 ### Talking to residents
 
@@ -594,16 +596,43 @@ done. The port arbitrates, not your mod:
   set) is not lost: it comes with a later talk;
 - the lines are one message box: up to three lines, 240 bytes. `then.give` is a rupee item
   (`rupee_green` ... `rupee_orange`, 100);
-- residents the port knows (`"who"`; the SDK name in brackets):
-  - `{"class": "people", "code": "UM1"}` (`windfall-light-keeper`): Windfall's light keeper, up by
-    the light; out at any time and in every part of the story;
-  - `{"class": "people", "code": "UB3"}` (`windfall-harbour`): the man on Windfall's east dock; only
-    by day, and not during the Endless Night (between the Wind Waker and Nayru's pearl): give such a
-    step an `available` prerequisite so the notebook can say when.
-  More will follow.
+- `"who"` names a resident from the NPC catalogue, below.
 
 From code, the same is `wwhd_quest_talk(id, step, "windfall-light-keeper", lines, reward_item)` and
 `wwhd_quest_carry(id, 1)` gives the sealed letter.
+
+### The NPC catalogue
+
+The residents a quest can name, `<place>-<role>`. The port keeps one table per place; a new place
+or a new resident adds rows, never a change to the manifest format. A mod that names a resident
+added in a later catalogue version declares the version it needs, `"npc_catalogue": 2`, so an older
+port refuses it with a clear message instead of ignoring the talk. Each resident is matched where
+the table says it stands (stage and room); the same resident indoors is the game's.
+
+When the residents are out: "by day" is 6:00–18:00. During the Endless Night (between the Wind Waker
+and Nayru's pearl) it is always night. A step whose `available` time never meets its resident's is
+accepted with a warning in the log; give a by-day resident's step `"available": {"time": "day", ...}`
+so the notebook can say when.
+
+Catalogue version 1, Windfall Island (outside):
+
+| Name | Who | Out |
+|---|---|---|
+| `windfall-light-keeper` | the man up on the windmill who keeps the light | day and night |
+| `windfall-lovelorn-man` | the man sulking on the steps by the red door (up high at night) | day and night |
+| `windfall-harbour-lady` | the lady on the harbour pier asking about Skull Necklaces | by day |
+| `windfall-pedestal-man` | the man on the bench at the cliff edge, the Joy Pedestals | by day |
+| `windfall-gossip-a`, `windfall-gossip-b` | the two gossips up the steps by the brick house | by day |
+| `windfall-posing-lady` | the lady by the town gate asking how she looks | by day |
+| `windfall-outfit-lady` | the lady in the town square in a brand-new outfit | by day |
+| `windfall-wind-sailor` | the sailor on the high lookout watching the wind | by day |
+| `windfall-dock-sailor` | the sailor on the stone dock, glad to be back in town | by day |
+| `windfall-pier-sailor` | the know-it-all sailor at the end of the wooden pier | by day |
+| `windfall-money-adviser` | the man on the grass by the stone wall offering financial advice | by day |
+| `windfall-flower-girl-a`, `windfall-flower-girl-b` | the two girls by the flowers at the cliff | by day |
+
+Windfall's other residents (inside the café and the shops, and those out only at certain points in
+the story) and other places such as Dragon Roost follow in later versions.
 
 **Testing.** `tools/story_mods/notebook_e2e.sh` runs the `story-notebook` example headless from a
 save on Windfall: letter, notebook, page, tracking and the sea chart, and checks the log.

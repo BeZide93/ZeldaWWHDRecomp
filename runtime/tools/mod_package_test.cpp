@@ -393,6 +393,17 @@ int main(int argc, char** argv) {
         assert(install((root/"source").string(),error));
         assert(view("guest-fixture").compatible&&view("guest-fixture").restart_required);
         assert(!view("guest-fixture").native_confirmed);
+        {   // story quests naming an NPC the port's catalogue doesn't know: refused with the reason, never ignored
+            auto quests=[&](const char* who){
+                fs::remove_all(root/"quests");fs::create_directories(root/"quests");
+                std::ofstream(root/"quests/manifest.json")<<R"({"format_version":1,"id":"quest-fixture","name":"Quest fixture","version":"1.0.0","game_id":"wwhd-usa","kind":"guest","guest":{"api_version":1,"elf":"mod.elf"},"quests_format":1,"quests":[{"id":"q","title":"Q","steps":[{"n":1,"text":"Go.","npc":{"who":")"<<who<<R"(","lines":["Hi."]}}]}]})";
+                std::ofstream elf(root/"quests/mod.elf",std::ios::binary);elf.write("\x7f" "ELF\x01\x02",6);
+            };
+            quests("windfall-nobody");
+            assert(!install((root/"quests").string(),error)&&error.find("no NPC named \"windfall-nobody\"")!=std::string::npos);
+            quests("windfall-light-keeper");
+            assert(install((root/"quests").string(),error)&&view("quest-fixture").compatible);
+        }
         assert(unconfirmed_native("guest-fixture").size()==1);
         assert(!enable("guest-fixture",true,error));
         assert(confirm_native("guest-fixture",error));

@@ -616,34 +616,97 @@ void test_page_screen() {
     }
 }
 
+Resident harbour() { return npc_catalogue().find("windfall-harbour-lady"); }
+Resident keeper() { return npc_catalogue().find("windfall-light-keeper"); }
+
+// The NPC catalogue: the compiled-in tables, a stub second place added without any format change, the
+// manifest's "npc_catalogue" version and unknown names refused, the step's place and where from the entry.
+void test_npc_catalogue() {
+    const NpcCatalogue& port = npc_catalogue();
+    assert(port.version >= 1 && port.entries.size() >= 14);
+    for (const NpcEntry& e : port.entries) {
+        assert(e.name.rfind(e.place + "-", 0) == 0 && !e.where.empty() && (e.day || e.night));
+        assert(e.actor_class == "people" && e.people_number < 19 && e.stage == "sea" && e.room == 11 && e.has_spot);
+    }
+    const NpcEntry* k = port.entry(keeper());
+    assert(k && k->code == "Um1" && k->people_number == 9 && k->day && k->night);
+    const NpcEntry* h = port.entry(harbour());
+    assert(h && h->people_number == 5 && h->day && !h->night);
+    // a second place is just another table
+    const char* stub = R"({"catalogue_format": 1, "place": "testisle", "npcs": [
+        {"name": "testisle-keeper", "since": 2, "actor": {"class": "people", "code": "Ub1", "stage": "Tstisl", "room": 0},
+         "where": "Test Isle", "present": ["night"]}]})";
+    NpcCatalogue two = port;
+    std::string why;
+    assert(two.add_table(stub, why) && two.version == 2 && two.entries.size() == port.entries.size() + 1);
+    const Resident tk = two.find("testisle-keeper");
+    assert(tk && two.entry(tk)->people_number == 3 && !two.entry(tk)->has_spot && two.entry(keeper())->name == "windfall-light-keeper");
+    // tables are checked: all or nothing
+    NpcCatalogue bad = port;
+    auto rejected = [&](std::string text, const std::string& from, const std::string& to) {
+        text.replace(text.find(from), from.size(), to);
+        NpcCatalogue c = port;
+        std::string reason;
+        const bool ok = c.add_table(text, reason);
+        assert(c.entries.size() == port.entries.size());
+        return !ok && !reason.empty();
+    };
+    assert(rejected(stub, "\"testisle-keeper\"", "\"keeper\""));         // not <place>-<role>
+    assert(rejected(stub, "\"code\": \"Ub1\"", "\"code\": \"Zz9\""));  // a resident code the game doesn't have
+    assert(rejected(stub, "\"people\"", "\"tornado\""));                   // a class the port can't take over
+    assert(rejected(stub, "[\"night\"]", "[]"));                             // never out
+    assert(!bad.add_table(R"({"catalogue_format": 1, "place": "windfall", "npcs": [{"name": "windfall-light-keeper", "since": 1,
+        "actor": {"class": "people", "code": "Um1", "stage": "sea"}, "where": "x", "present": ["day"]}]})", why));  // a name twice
+    // a manifest naming the stub NPC: refused by the port's catalogue, accepted with the second table, the format unchanged
+    const char* m = R"({"npc_catalogue": 2, "quests_format": 1, "quests": [{"id": "q", "title": "Q", "steps": [{"n": 1, "text": "Go.",
+        "available": {"time": "day", "text": "by day"}, "npc": {"who": "testisle-keeper", "lines": ["Hi."]}}]}]})";
+    std::vector<ManifestQuest> qs;
+    std::vector<std::string> warnings;
+    assert(!parse_quests(mods::json::parse(m), qs, why, port) && why.find("needs NPC catalogue version 2") != std::string::npos);
+    std::string unversioned = m;
+    unversioned.replace(0, std::string(R"({"npc_catalogue": 2, )").size(), "{");
+    assert(!parse_quests(mods::json::parse(unversioned), qs, why, port) && why.find("no NPC named \"testisle-keeper\"") != std::string::npos);
+    assert(parse_quests(mods::json::parse(m), qs, why, two, &warnings));
+    assert(qs[0].steps[0].resident == tk && qs[0].steps[0].where == "Test Isle" && !qs[0].steps[0].has_place);
+    // the step is available only by day, the stub keeper is only out at night: a warning, not a refusal
+    assert(warnings.size() == 1 && warnings[0].find("only out at night") != std::string::npos);
+    // a windfall resident: the step's place and where come from the catalogue unless the manifest gives them
+    const char* w = R"({"quests_format": 1, "quests": [{"id": "q", "title": "Q", "steps": [{"n": 1, "text": "Go.",
+        "npc": {"who": "windfall-light-keeper", "lines": ["Hi."]}}]}]})";
+    assert(parse_quests(mods::json::parse(w), qs, why) && qs[0].steps[0].has_place && qs[0].steps[0].x == k->x &&
+           qs[0].steps[0].z == k->z && qs[0].steps[0].where == k->where);
+    assert(!parse_quests(mods::json::parse(R"({"npc_catalogue": "1"})"), qs, why));
+    assert(parse_quests(mods::json::parse(R"({"npc_catalogue": 1})"), qs, why) && qs.empty());
+}
+
 void test_takeover_rules() {
     uint8_t raw[story_mail::kBookSize] = {};
     Book b(raw);
     const uint16_t a = quest_key("mod-a", "q"), bq = quest_key("mod-b", "q");
-    std::vector<Takeover> all = {{a, 1, kResidentWindfallHarbour, true, "A", 6}, {bq, 1, kResidentWindfallHarbour, true, "B", 0}};
+    std::vector<Takeover> all = {{a, 1, harbour(), true, "A", 6}, {bq, 1, harbour(), true, "B", 0}};
     // nothing tracked: nobody speaks for the mods
     assert(reach_step(b, a, 1) == 1 && reach_step(b, bq, 1) == 1);
     assert(b.set(kRecordCarried, a, 1) && b.set(kRecordCarried, bq, 1));
-    assert(!live_takeover(all, b, kResidentWindfallHarbour));
+    assert(!live_takeover(all, b, harbour()));
     // two mods declare the same resident: only the tracked quest's takeover is live
     assert(toggle_tracked(b, bq));
-    const Takeover* t = live_takeover(all, b, kResidentWindfallHarbour);
+    const Takeover* t = live_takeover(all, b, harbour());
     assert(t && t->quest == bq && t->lines == "B");
     assert(toggle_tracked(b, a));
-    t = live_takeover(all, b, kResidentWindfallHarbour);
+    t = live_takeover(all, b, harbour());
     assert(t && t->quest == a);
     // another step, no letter, another resident: not live
     assert(!live_takeover(all, b, kResidentNone));
     b.erase(kRecordCarried, a);
-    assert(!live_takeover(all, b, kResidentWindfallHarbour));
+    assert(!live_takeover(all, b, harbour()));
     assert(b.set(kRecordCarried, a, 1));
-    assert(reach_step(b, a, 2) == 2 && !live_takeover(all, b, kResidentWindfallHarbour));
+    assert(reach_step(b, a, 2) == 2 && !live_takeover(all, b, harbour()));
     // completing hands the letter over and finishes the quest (it leaves the tracked list)
     uint8_t raw2[story_mail::kBookSize] = {};
     Book c(raw2);
     assert(reach_step(c, a, 1) == 1 && c.set(kRecordCarried, a, 1) && toggle_tracked(c, a));
     assert(complete(c, all[0]) && saved_step(c, a) == kStepDone && !carries(c, a) && tracked_key(c) == 0);
-    assert(resident_by_id("windfall-harbour") == kResidentWindfallHarbour && resident_by_id("nobody") == kResidentNone);
+    assert(harbour() && npc_catalogue().find("nobody") == kResidentNone);
 }
 
 void test_takeover_hooks() {
@@ -653,11 +716,11 @@ void test_takeover_hooks() {
     // the lantern quest of one mod, the same resident in another mod's quest
     assert(define("lantern", "Lantern", "tale", "The storyteller's lantern", "100 rupees", "") == kResultNew);
     assert(define("other", "Other", "tale", "Another tale", "", "") == kResultNew);
-    assert(talk("lantern", "tale", 1, "windfall-harbour", "A letter from him?\nThank you!", 6) == kResultNew);
-    assert(talk("other", "tale", 1, "windfall-harbour", "Not me.", 0) == kResultNew);
+    assert(talk("lantern", "tale", 1, "windfall-harbour-lady", "A letter from him?\nThank you!", 6) == kResultNew);
+    assert(talk("other", "tale", 1, "windfall-harbour-lady", "Not me.", 0) == kResultNew);
     assert(talk("lantern", "tale", 1, "nobody", "x", 0) == kResultInvalid);
-    assert(talk("lantern", "tale", 1, "windfall-harbour", "1\n2\n3\n4", 0) == kResultInvalid);  // one box: three lines
-    assert(talk("lantern", "tale", 1, "windfall-harbour", "x", 0x0F) == kResultInvalid);        // rupees only
+    assert(talk("lantern", "tale", 1, "windfall-harbour-lady", "1\n2\n3\n4", 0) == kResultInvalid);  // one box: three lines
+    assert(talk("lantern", "tale", 1, "windfall-harbour-lady", "x", 0x0F) == kResultInvalid);        // rupees only
     assert(step("lantern", "tale", 1, "Bring the letter to his old friend.", "Windfall Island") == 1);
     assert(step("other", "tale", 1, "", "") == 1);
     assert(carry("lantern", "tale", true) == 1 && carry("other", "tale", true) == 1);
@@ -667,7 +730,9 @@ void test_takeover_hooks() {
     assert(call(0x02632D94, 0x34, 0, 0x02692548) == 0xFF);
     assert(call(0x0262F880, 0, 0xA1) == 0x25);
     assert(call(0x0268F420, 0, 0x32) == 0xFF);  // it can't go on X/Y/R
-    st8(kNpc + 0x905, 5);  // the harbour man
+    st8(kNpc + 0x905, 5);  // the harbour lady, at the harbour (stage "sea", room 11)
+    st8(kNpc + 0x326, 11);
+    memcpy(mem::ptr(kPlayObj + 0x5134), "sea", 4);
     st32(kNpc + 0x8A8, 0x1234), st32(kNpc + 0x8AC, 0);
     // the event flags of the save, to prove nothing is set
     std::vector<uint8_t> flags(mem::ptr(kSave + 0x644), mem::ptr(kSave + 0x644) + 0x100);
@@ -681,6 +746,13 @@ void test_takeover_hooks() {
         if (r.quest->mod == "lantern") assert(r.quest->hint.find("track it") != std::string::npos);
     // the OTHER mod's quest tracked: its line, never the lantern's
     assert(toggle_tracked(b, quest_key("other", "tale")));
+    // the same resident indoors (another stage) or in another room is not the catalogue's: the game's line
+    memcpy(mem::ptr(kPlayObj + 0x5134), "Opub", 5);
+    assert(call(0x022C6C68, kNpc) == 0x2CF1);
+    memcpy(mem::ptr(kPlayObj + 0x5134), "sea", 4);
+    st8(kNpc + 0x326, 12);
+    assert(call(0x022C6C68, kNpc) == 0x2CF1);
+    st8(kNpc + 0x326, 11);
     calls.clear();
     assert(call(0x022C6C68, kNpc) == 0x2CF3 && calls.empty());
     assert(ld32(kNpc + 0x8A8) == 0);  // the talk ends after one box
@@ -741,7 +813,7 @@ const char* const kLanternManifest = R"({
     "letter": {"id": "lantern", "sender": "The storyteller", "text": "Dear Link,\nplease help.", "encloses": ["notebook", "letter:friend"]},
     "reward": {"text": "100 rupees", "item": "rupee_orange"},
     "steps": [{"n": 1, "text": "Bring the letter to his friend.", "where": "Windfall Island", "place": {"cell": "D2", "x": 3827, "z": -202189},
-      "npc": {"who": {"class": "people", "code": "UB3"}, "when": {"carries": "letter:friend"},
+      "npc": {"who": "windfall-harbour-lady", "when": {"carries": "letter:friend"},
               "lines": ["One.", "Two."], "then": {"give": "rupee_orange", "take": "letter:friend", "complete": true}}}]
   }, {"id": "secret", "title": "A secret", "journal": "on_trigger"}]
 })";
@@ -753,7 +825,7 @@ void test_manifest() {
     const ManifestQuest& q = qs[0];
     assert(q.id == "lantern" && q.start_text == "Check a Rito postbox for a letter." && q.reward_item == 6 && q.has_letter &&
            q.letter_encloses_letter && q.steps.size() == 1);
-    assert(q.steps[0].has_place && q.steps[0].x == 3827 && q.steps[0].has_talk && q.steps[0].resident == kResidentWindfallHarbour &&
+    assert(q.steps[0].has_place && q.steps[0].x == 3827 && q.steps[0].has_talk && q.steps[0].resident == harbour() &&
            q.steps[0].needs_letter && q.steps[0].lines == "One.\nTwo." && q.steps[0].reward == 6);
     // what is refused
     auto refused = [&](const std::string& from, const std::string& to) {
@@ -765,7 +837,8 @@ void test_manifest() {
         std::string reason;
         return !parse_quests(mods::json::parse(text), out, reason) && !reason.empty();
     };
-    assert(refused(R"("code": "UB3")", R"("code": "XX9")"));                         // a resident the port doesn't know
+    assert(refused(R"("who": "windfall-harbour-lady")", R"("who": "windfall-nobody")"));  // an NPC the catalogue doesn't know
+    assert(refused(R"("who": "windfall-harbour-lady")", R"("who": {"class": "people", "code": "Ub3"})"));  // names only
     assert(refused(R"(["One.", "Two."])", R"(["1", "2", "3", "4"])"));              // more than one box
     assert(refused(R"("give": "rupee_orange")", R"("give": "master_sword")"));      // only rupees
     assert(refused(R"("quests_format": 1)", R"("quests_format": 2)"));
@@ -818,13 +891,13 @@ void test_available() {
     // the manifest form, and what it refuses
     const char* m = R"({"quests_format": 1, "quests": [{"id": "q", "title": "Q", "steps": [{"n": 1, "text": "Go.",
         "available": {"event": "0x2D01", "not_event": ["0x0A02"], "time": "day", "text": "after Nayru's pearl, by day"},
-        "npc": {"who": {"class": "people", "code": "UM1"}, "lines": ["Hi."]}}]}]})";
+        "npc": {"who": "windfall-light-keeper", "lines": ["Hi."]}}]}]})";
     std::vector<ManifestQuest> qs;
     std::string why;
     assert(parse_quests(mods::json::parse(m), qs, why));
     const ManifestStep& st = qs[0].steps[0];
     assert(st.when.events == std::vector<uint16_t>{0x2D01} && st.when.not_events == std::vector<uint16_t>{0x0A02} && st.when.time == 1 &&
-           st.when.text == "after Nayru's pearl, by day" && st.resident == kResidentWindfallLightKeeper && !st.needs_letter);
+           st.when.text == "after Nayru's pearl, by day" && st.resident == keeper() && !st.needs_letter);
     auto refused = [](std::string text, const std::string& from, const std::string& to) {
         text.replace(text.find(from), from.size(), to);
         std::vector<ManifestQuest> out;
@@ -839,11 +912,11 @@ void test_available() {
     Book b(raw);
     const uint16_t k = quest_key("m", "q");
     assert(reach_step(b, k, 1) == 1 && toggle_tracked(b, k));
-    std::vector<Takeover> all = {{k, 1, kResidentWindfallLightKeeper, false, "Hi.", 0, st.when}};
+    std::vector<Takeover> all = {{k, 1, keeper(), false, "Hi.", 0, st.when}};
     uint8_t game[0x100] = {};
-    assert(!live_takeover(all, b, kResidentWindfallLightKeeper, game, 12));
+    assert(!live_takeover(all, b, keeper(), game, 12));
     game[0x2D] = 0x01;
-    assert(live_takeover(all, b, kResidentWindfallLightKeeper, game, 12) && !live_takeover(all, b, kResidentWindfallLightKeeper, game, 22));
+    assert(live_takeover(all, b, keeper(), game, 12) && !live_takeover(all, b, keeper(), game, 22));
     // in the notebook: "Not yet possible: ..." and no place until it holds (the save's flags and time)
     assert(declare("avail-mod", "Avail", mods::json::parse(m)));
     Book save(mem::ptr(kSave + story_mail::kBookOffset));
@@ -875,6 +948,7 @@ int main() {
     test_services();
     test_hooks();
     test_page_screen();
+    test_npc_catalogue();
     test_takeover_rules();
     test_takeover_hooks();
     test_manifest();
