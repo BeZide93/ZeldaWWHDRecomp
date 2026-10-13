@@ -12,6 +12,12 @@ what is on `devel` and not released yet (also in the
   the matching option through the game's own selection, so everything that depends on it stays the same. To choose by
   hand again, turn off **Controls > Skip controller selection**.
 
+- **GamePad screen "Automatic": follows the game's menus** (from a play test): in the automatic GamePad screen mode,
+  the GamePad picture now appears in the corner of the TV whenever the game opens something on the GamePad (items,
+  maps, the collection, the Delivery Bag, save and options, song and warp lists) and goes away shortly after it closes.
+  Before, it guessed from how much the GamePad picture changed and often missed the pause menu. Cmd+G still keeps
+  it up, and Off-TV Play shows the GamePad picture full size as before. The other GamePad screen modes are unchanged.
+
 - **PlayStation and Xbox button looks in the action hint near Link** (issue #188, thanks @floysh): the floating hint that
   appears next to Link (for example "Speak" in front of a character) still showed the A button with PlayStation or
   Xbox button labels. It now uses the same shapes and colours as the button cluster in the corner. With the original
