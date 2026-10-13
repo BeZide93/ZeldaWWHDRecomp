@@ -3,6 +3,8 @@
 #include "story_notebook.h"
 #include "story_notebook_page.h"
 #include "story_notebook_bag.h"
+#include "story_takeover.h"
+#include "story_manifest.h"
 #include "story_chart.h"
 #include "story_mail.h"
 #include "guest_hud.h"
@@ -28,6 +30,9 @@ namespace {
 
 const uint32_t kSavePtr = GD(0x101F84DC);  // save base pointer (d_com_inf_game)
 const std::string kOwner = "port:story-notebook";  // the HUD list's owner (no mod ID has a colon)
+// the notebook's "to continue" line for a step that only works while the quest is tracked
+const char* const kTrackHintLetter = "Show this quest on the chart (track it) to deliver the letter.";
+const char* const kTrackHintTalk = "Show this quest on the chart (track it) to continue.";
 
 // The item menu (HD decomp MENU-menu_main, hd_screen_menu_main.cpp / hd_screen_menu_item.cpp at
 // decomp-readable 02a56a87). The notebook is kept in the Delivery Bag window: its eight places show
@@ -48,6 +53,9 @@ const uint32_t kSelectedValue = GC(0x0268F420);   // hdMenuMain_c::getSelectedIt
 const uint32_t kAssignButton = GC(0x02714B0C);    // game system: put a menu key on X/Y/R (controller, button, key)
 constexpr uint32_t kFirstDeliveryKey = 0x30, kDeliveryPlaces = 8, kEmpty = 0xFF;
 constexpr uint32_t kNotebookItem = 0xA0;          // dItemNo SALVAGE_ITEM_2: unused by the game, no menu mapping
+constexpr uint32_t kLetterItem = 0xA1;            // dItemNo SALVAGE_ITEM_3: a quest's letter Link carries (story_takeover.h)
+constexpr uint32_t kLetterIcon = 0x25;            // the icon frame of a letter (hidden under the port's envelope)
+bool port_item(uint32_t number) { return number == kNotebookItem || number == kLetterItem; }
 constexpr uint32_t kNotebookIcon = 0x24;          // the icon frame of the Cabana Deed (a sheet of parchment, the get-item stand-in)
 constexpr uint32_t kMenuChildren = 0x48, kItemNumber = 0xEC;  // hdParts_c::mChildren {count, data}; hdMenuItem_c::mSlot
 // The notebook's own icon (story_notebook_bag.h): drawn by the port over the bag place, the game's
@@ -66,7 +74,7 @@ constexpr uint32_t kFirstWindowChild = 0x14, kWindowChildren = 8;          // th
 // The notebook's bag place: a child of the menu's open Delivery Bag window, found every frame the
 // window runs (executeWindow). Only that place carries the icon: the menu's floating icon (the item
 // the cursor or a touch lifts, sMenuIcon) is another item that may show the notebook's number too.
-uint32_t g_menu = 0, g_bag_item = 0;  // game thread
+uint32_t g_menu = 0, g_bag_item = 0, g_letter_item = 0;  // game thread
 std::atomic<uint64_t> g_step{0};  // the game's logic steps (logic_step)
 uint64_t g_window_step = 0;     // the step the bag window last ran
 const char* g_icon_reason = "";       // why the icon is (not) shown, for the trace
@@ -84,6 +92,38 @@ bool g_imported = false, g_installed = false;
 std::atomic<bool> g_open{false};
 Page g_page;  // game thread
 void (*g_original)(Cpu*, uint32_t) = nullptr;
+uint32_t (*g_call)(Cpu*, uint32_t, std::initializer_list<uint32_t>) = nullptr;
+
+// ---- resident takeovers (story_takeover.h) ----
+const uint32_t kPeopleGetMsg = GC(0x022C6C68);    // daNpcPeople_c::getMsg(): which line a Windfall/Outset resident says
+const uint32_t kPeopleExecute = GC(0x022C36D0);   // daNpcPeople_Execute(actor): the resident's process step
+const uint32_t kPlay = GC(0x025200D4);            // the play object
+const uint32_t kPresentItem = GC(0x025D7DEC);     // fopAcM_createItemForPresentDemo(pos, item, ...)
+const uint32_t kOrderItemEvent = GC(0x025D7B98);  // fopAcM_orderItemEvent(actor): the game's default get-item event
+constexpr uint32_t kPeopleMsgList = 0x8A8, kPeopleUbList = 0x8AC, kPeopleNumber = 0x905;  // daNpcPeople_c m734, m738, mNpcNo
+constexpr uint32_t kActorPos = 0x314, kEventCommand = 0xF8, kEventCondition = 0xFA;       // fopAc_ac_c current.pos, eventInfo
+constexpr uint16_t kCommandNone = 0, kCommandGetItem = 4, kConditionCanGetItem = 0x0008;
+constexpr uint32_t kPlayItemPartner = 0x52A0;     // dComIfGp_event_setItemPartnerId
+// The message our line is shown as: the harbour man's own one-box line (l_msg_ub3_ship_near5), with
+// its text replaced for exactly that talk (story_mail::say). Ending after one box (no list).
+constexpr uint32_t kCarrierMessage = 0x2CF3;
+
+std::vector<Takeover> g_takeovers;  // registered this session (g_mu)
+// quests declared in manifests: the mod and its quest declaration (g_mu)
+struct Declared {
+    std::string mod;
+    uint16_t key;
+    ManifestQuest quest;
+};
+std::vector<Declared> g_declared;
+// the talk in progress: talking -> (reward: ordering the get-item event) -> done
+struct Talk {
+    enum Phase : uint8_t { None, Talking, Reward } phase = None;
+    uint32_t npc = 0, item = 0xFFFFFFFFu;
+    Takeover takeover;
+    std::u16string text;
+    uint64_t since = 0;
+} g_talk;
 
 bool trace() {
     static const bool on = [] { const char* e = getenv("WWHD_NOTEBOOK_TRACE"); return e && *e == '1'; }();
@@ -117,9 +157,9 @@ int32_t saved(uint16_t key) {
 // story_chart's source of the tracked quest's marker (game thread)
 bool tracked_marker(float& x, float& z, std::string& label) {
     if (!have_save()) return false;
-    story_mail::Book b = book();
-    std::lock_guard lock(g_mu);
-    const Quest* q = tracked_place(g_quests, b);
+    std::vector<Quest> storage;
+    rows_now(storage);  // with the manifest's place for the current step
+    const Quest* q = tracked_place(storage, book());
     if (!q) return false;
     x = q->x, z = q->z, label = q->title;
     return true;
@@ -132,12 +172,36 @@ uint32_t reserve(Cpu* c, uint32_t key) {
     g_original(&probe, kInventoryItem);
     return probe.r[3] & 0xFF;
 }
-// The key whose place shows the notebook now: the first empty delivery place (0: none)
-uint32_t notebook_key(Cpu* c) {
-    if (!have_save() || !notebook_owned()) return 0;
-    for (uint32_t k = kFirstDeliveryKey; k < kFirstDeliveryKey + kDeliveryPlaces; k++)
-        if (reserve(c, k) == kEmpty) return k;
-    return 0;  // all eight hold game items: the notebook waits for a free place
+// The quest whose letter Link carries (registered this session), 0: none
+uint16_t carried_letter() {
+    if (!have_save()) return 0;
+    story_mail::Book b = book();
+    std::lock_guard lock(g_mu);
+    for (const Quest& q : g_quests)
+        if (carries(b, q.key)) return q.key;
+    return 0;
+}
+// The places the port's items show in now: the first empty delivery places, the notebook first, then
+// the carried letter (0: none; if all eight hold game items, they wait for a free place)
+struct PortPlaces {
+    uint32_t notebook = 0, letter = 0;
+};
+PortPlaces port_places(Cpu* c) {
+    PortPlaces out;
+    if (!have_save()) return out;
+    const bool notebook = notebook_owned(), letter = carried_letter() != 0;
+    for (uint32_t k = kFirstDeliveryKey; k < kFirstDeliveryKey + kDeliveryPlaces && ((notebook && !out.notebook) || (letter && !out.letter)); k++) {
+        if (reserve(c, k) != kEmpty) continue;
+        if (notebook && !out.notebook) out.notebook = k;
+        else if (letter && !out.letter) out.letter = k;
+    }
+    return out;
+}
+uint32_t notebook_key(Cpu* c) { return port_places(c).notebook; }
+bool port_key(Cpu* c, uint32_t key) {
+    if (key < kFirstDeliveryKey || key >= kFirstDeliveryKey + kDeliveryPlaces) return false;
+    const PortPlaces p = port_places(c);
+    return key == p.notebook || key == p.letter;
 }
 
 // The sentinel's icon pane of a bag place, or 0
@@ -149,15 +213,17 @@ uint32_t icon_pane(uint32_t item) {
 // The notebook's icon this frame: only while the Delivery Bag window runs (this frame or the one
 // before: the window's state runs after the controller read), over the notebook's own bag place.
 // Keeps the game's sentinel icon of that place hidden.
-IconPlace compute_icon_place() {
+IconPlace place_over(uint32_t item, uint32_t number);
+IconPlace compute_icon_place() { return place_over(g_bag_item, kNotebookItem); }
+IconPlace place_over(uint32_t item, uint32_t number) {
     IconPlace at;
-    const uint32_t item = g_bag_item;
+    if (g_open.load(std::memory_order_relaxed)) return g_icon_reason = "the notebook page is open", at;  // the page covers the menu
     if (!item || !g_menu) return g_icon_reason = "no bag window yet", at;
     // the window runs once per logic step; frames drawn in between (interpolation, 120 Hz) keep the icon
     if (g_window_step + 1 < g_step.load(std::memory_order_relaxed)) return g_icon_reason = "the bag window is closed", at;
     if (ld32(g_menu + kMenuWindowMode) != kDeliveryWindow) return g_icon_reason = "another bag is open", at;
-    if (ld32(item + kItemNumber) != kNotebookItem || !ld8(item + kItemVisible)) return g_icon_reason = "the place shows a game item", at;
-    if (!notebook_owned()) return g_icon_reason = "no notebook in this save file", at;
+    if (ld32(item + kItemNumber) != number || !ld8(item + kItemVisible)) return g_icon_reason = "the place shows a game item", at;
+    if (number == kNotebookItem && !notebook_owned()) return g_icon_reason = "no notebook in this save file", at;
     const uint32_t icon = icon_pane(item);
     const uint32_t layout = ld32(item + kItemLayout), lyt = layout ? ld32(layout + kLayoutLyt) : 0;
     const uint32_t root = lyt ? ld32(lyt + kLytRootPane) : 0;
@@ -175,7 +241,7 @@ IconPlace compute_icon_place() {
     at.x *= kLayoutToPicture, at.y *= kLayoutToPicture, at.size *= kLayoutToPicture;
     if (trace()) {  // the panes from the place's icon up to the screen, once per place
         static uint32_t logged = 0;
-        if (logged != item) {
+        if (logged != item && number == kNotebookItem) {
             logged = item;
             for (uint32_t pane = icon, n = 0; pane && n < 32; pane = ld32(pane + kPaneParent), n++) {
                 char words[400];
@@ -188,8 +254,40 @@ IconPlace compute_icon_place() {
             }
         }
     }
-    g_icon_reason = at.shown ? "shown over the notebook's bag place" : "the window is hidden or fading";
+    if (number == kNotebookItem) g_icon_reason = at.shown ? "shown over the notebook's bag place" : "the window is hidden or fading";
     return at;
+}
+
+// the carried letter's place this frame (an envelope drawn by the port)
+IconPlace letter_place() {
+    const char* keep = g_icon_reason;
+    IconPlace at = place_over(g_letter_item, kLetterItem);
+    g_icon_reason = keep;
+    return at;
+}
+
+// The carried letter's placeholder icon: a cream envelope with its flap and a red wax seal.
+std::vector<Command> envelope(float cx, float cy, float size, float alpha) {
+    std::vector<Command> out;
+    const uint32_t a = uint32_t(alpha * 255.0f + 0.5f);
+    const float w = size * 0.80f, h = size * 0.54f, x = cx - w / 2, y = cy - h / 2;
+    Command c;
+    c.kind = Command::Rect, c.x = x + 2, c.y = y + 3, c.w = w, c.h = h, c.rgba = 0x00000000u | (a * 2 / 5);
+    out.push_back(c);
+    c.x = x, c.y = y, c.rgba = 0xF4E6C4FFu & (0xFFFFFF00u | a);
+    out.push_back(c);
+    c.kind = Command::RectOutline, c.rgba = 0x8B6A3E00u | a, c.thickness = std::max(1.0f, size / 40);
+    out.push_back(c);
+    Command l;
+    l.kind = Command::Line, l.rgba = 0x8B6A3E00u | a, l.thickness = std::max(1.0f, size / 45);
+    l.x = x, l.y = y, l.w = w / 2, l.h = h * 0.55f;
+    out.push_back(l);
+    l.x = x + w, l.y = y, l.w = -w / 2, l.h = h * 0.55f;
+    out.push_back(l);
+    Command seal;
+    seal.kind = Command::Circle, seal.x = cx, seal.y = y + h * 0.55f, seal.size = size * 0.09f, seal.rgba = 0xB2392B00u | a;
+    out.push_back(seal);
+    return out;
 }
 
 // Every frame (game thread): the notebook's icon over its bag place, or nothing.
@@ -199,6 +297,7 @@ void bag_icon() {
     static guestmods::hud::Handle image = 0;
     static uint64_t generation = 0;
     const IconPlace at = compute_icon_place();
+    const IconPlace letter = letter_place();
     if (trace()) {  // only when the decision or the place changes
         static const char* last = nullptr;
         static float lx = -1e9f, ly = -1e9f;
@@ -209,7 +308,7 @@ void bag_icon() {
         last = g_icon_reason;
         if (at.shown) lx = at.x, ly = at.y;
     }
-    if (!at.shown) {
+    if (!at.shown && !letter.shown) {
         if (published) store.drop(kIconOwner);
         published = false;
         return;
@@ -230,23 +329,33 @@ void bag_icon() {
     const float k = tv ? 1280.0f / 854.0f : 1.0f;
     const guestmods::hud::Handle list = store.begin(kIconOwner, tv ? 0 : 1);
     if (!list) return;
-    Command c;
-    c.x = (at.x - at.size * kIconAnchorX) * k, c.y = (at.y - at.size * kIconAnchorY) * k, c.w = c.h = at.size * k;
-    c.rgba = 0xFFFFFF00u | uint32_t(at.alpha * 255.0f + 0.5f);
-    store.picture(kIconOwner, list, image, c);
+    if (at.shown) {
+        Command c;
+        c.x = (at.x - at.size * kIconAnchorX) * k, c.y = (at.y - at.size * kIconAnchorY) * k, c.w = c.h = at.size * k;
+        c.rgba = 0xFFFFFF00u | uint32_t(at.alpha * 255.0f + 0.5f);
+        store.picture(kIconOwner, list, image, c);
+    }
+    if (letter.shown)  // placeholder art: a sealed envelope
+        for (Command& c : envelope(letter.x * k, letter.y * k, letter.size * k, letter.alpha)) store.append(kIconOwner, list, std::move(c));
     store.commit(kIconOwner, list);
     published = true;
 }
 
-void publish(const std::vector<Row>& rows) {
+void publish(const std::vector<Row>& all) {
     auto& store = guestmods::hud::store();
     if (!g_page.open()) {
         store.drop(kOwner);
         return;
     }
-    const guestmods::hud::Handle list = store.begin(kOwner, 2);  // TV and GamePad
+    // only on the screen with the game's item menu (the GamePad, or the TV with the Pro Controller)
+    const uint32_t screen = menu_screen(input::pro_controller());
+    const float k = screen == 1 ? 854.0f / 1280.0f : 1.0f;
+    const guestmods::hud::Handle list = store.begin(kOwner, screen);
     if (!list) return;
-    for (Command& c : g_page.draw(rows)) store.append(kOwner, list, std::move(c));
+    std::vector<Command> cmds = g_page.draw(all);
+    fit_to_screen(cmds, screen);
+    for (Command& c : cmds) store.append(kOwner, list, std::move(c));
+    const std::vector<Row> rows = g_page.shown(all);
     if (g_page.mode() == Page::Mode::List) {  // portraits in the rows that show them
         const uint64_t generation = store.state_generation();
         for (unsigned i = 0; i < kRowsShown && g_page.top() + i < rows.size(); i++) {
@@ -263,7 +372,7 @@ void publish(const std::vector<Row>& rows) {
             float cx, cy, r;
             Page::emblem_place(i, cx, cy, r);
             Command c;
-            c.x = cx - r, c.y = cy - r, c.w = 2 * r, c.h = 2 * r;
+            c.x = (cx - r) * k, c.y = (cy - r) * k, c.w = c.h = 2 * r * k;
             store.picture(kOwner, list, p.handle, c);
         }
     }
@@ -313,6 +422,7 @@ int32_t step(const std::string& mod, const std::string& quest, uint32_t n, const
         Quest* q = find(mod, quest);
         if (!q) return kResultInvalid;  // wwhd_quest_define first
         q->next = next, q->where = where;
+        q->texts_from_mod = true;
         key = q->key;
     }
     if (!n) return saved(key);
@@ -409,7 +519,123 @@ std::vector<Quest> quests() {
 std::vector<Row> rows_now(std::vector<Quest>& storage) {
     storage = quests();
     if (!have_save()) return {};
-    return rows(storage, book());
+    story_mail::Book b = book();
+    const uint16_t tracked = tracked_key(b);
+    {
+        std::lock_guard lock(g_mu);
+        for (Quest& q : storage) {  // the manifest's texts and place for the current step
+            if (q.texts_from_mod) continue;
+            for (const Declared& d : g_declared) {
+                if (d.key != q.key) continue;
+                const uint8_t n = saved_step(b, q.key);
+                if (n == 0) q.next = d.quest.start_text, q.where.clear(), q.has_place = false;
+                for (const ManifestStep& st : d.quest.steps)
+                    if (st.n == n) q.next = st.text, q.where = st.where, q.has_place = st.has_place, q.x = st.x, q.z = st.z;
+            }
+        }
+        for (Quest& q : storage)  // a step that needs the quest tracked says so
+            for (const Takeover& t : g_takeovers)
+                if (t.quest == q.key && t.step == saved_step(b, q.key) && tracked != q.key)
+                    q.hint = t.needs_letter ? kTrackHintLetter : kTrackHintTalk;
+    }
+    return rows(storage, b);
+}
+
+bool declare(const std::string& mod, const std::string& mod_name, const mods::json::Value& manifest) {
+    std::vector<ManifestQuest> quests;
+    std::string why;
+    if (!parse_quests(manifest, quests, why)) {
+        LOG("[notebook] %s: the manifest's quests are not used: %s", mod.c_str(), why.c_str());
+        return false;
+    }
+    if (quests.empty()) return true;
+    for (const ManifestQuest& q : quests) {
+        if (define(mod, mod_name, q.id, q.title, q.reward_text, "") < 0) {
+            LOG("[notebook] %s: quest \"%s\" not registered", mod.c_str(), q.id.c_str());
+            continue;
+        }
+        std::lock_guard lock(g_mu);
+        Quest* reg = find(mod, q.id);
+        reg->hidden = q.journal != "on_enable";
+        g_declared.push_back({mod, reg->key, q});
+        for (const ManifestStep& st : q.steps)
+            if (st.has_talk) g_takeovers.push_back({reg->key, uint8_t(st.n), st.resident, st.needs_letter, st.lines, st.reward});
+    }
+    // the notebook, its marker on the sea chart and the letters are needed
+    note_import();
+    story_chart::note_import();
+    story_mail::note_import();
+    LOG("[notebook] %s: %zu quest(s) from the manifest", mod.c_str(), quests.size());
+    return true;
+}
+
+// Manifest quests that need the port to act (game thread, a few times a second): the quest's letter
+// is sent (the postbox hands it out once Link has the Delivery Bag); once it is read the quest reaches
+// step 1 and Link carries the letter it encloses.
+void declared_tick() {
+    if (!have_save()) return;
+    std::vector<Declared> declared;
+    {
+        std::lock_guard lock(g_mu);
+        declared = g_declared;
+    }
+    for (const Declared& d : declared) {
+        if (!d.quest.has_letter) continue;
+        const int32_t letter = story_mail::send(d.mod, d.quest.letter_id, d.quest.letter_sender, d.quest.letter_text);
+        if (letter != story_mail::kResultRead) continue;
+        story_mail::Book b = book();
+        if (saved_step(b, d.key) != 0) continue;
+        if (reach_step(b, d.key, 1) == 1) {
+            if (d.quest.letter_encloses_letter) b.set(kRecordCarried, d.key, 1);
+            LOG("[notebook] %s: quest \"%s\" started by its letter%s", d.mod.c_str(), d.quest.id.c_str(),
+                d.quest.letter_encloses_letter ? "; Link carries the enclosed letter" : "");
+        }
+    }
+}
+
+int32_t carry(const std::string& mod, const std::string& quest, bool carried) {
+    if (!story_mail::valid_id(quest)) return kResultInvalid;
+    uint16_t key;
+    {
+        std::lock_guard lock(g_mu);
+        Quest* q = find(mod, quest);
+        if (!q) return kResultInvalid;
+        key = q->key;
+    }
+    if (!have_save()) return kResultNoRoom;
+    story_mail::Book b = book();
+    const uint8_t now = saved_step(b, key);
+    if (carried && now != kStepDone && !carries(b, key)) {
+        if (!b.set(kRecordCarried, key, 1)) return kResultNoRoom;
+        LOG("[notebook] %s: Link carries the letter of quest \"%s\"", mod.c_str(), quest.c_str());
+    } else if (!carried && carries(b, key)) {
+        b.erase(kRecordCarried, key);
+    }
+    return now;
+}
+
+int32_t talk(const std::string& mod, const std::string& quest, uint32_t step, const std::string& resident, const std::string& lines,
+             uint32_t reward) {
+    const Resident who = resident_by_id(resident);
+    if (!story_mail::valid_id(quest) || !step || step > kMaxStep || who == kResidentNone || lines.empty() || lines.size() > kMaxLinesBytes ||
+        reward > 0x06)
+        return kResultInvalid;
+    std::u16string probe;
+    if (!story_mail::append_utf16(lines, true, probe)) return kResultInvalid;
+    size_t breaks = 0;
+    for (char ch : lines) breaks += ch == '\n';
+    if (breaks > 2) return kResultInvalid;  // one message box: three lines
+    std::lock_guard lock(g_mu);
+    Quest* q = find(mod, quest);
+    if (!q) return kResultInvalid;
+    for (Takeover& t : g_takeovers)
+        if (t.quest == q->key && t.step == step) {
+            t.resident = who, t.lines = lines, t.reward = uint8_t(reward);
+            return saved(q->key);
+        }
+    g_takeovers.push_back({q->key, uint8_t(step), who, true, lines, uint8_t(reward)});
+    LOG("[notebook] %s: quest \"%s\" step %u talks to %s", mod.c_str(), quest.c_str(), step, resident_info(who)->id);
+    return saved(q->key);
 }
 
 bool notebook_owned() { return story_mail::notebook_owned(); }
@@ -447,6 +673,8 @@ void mute(input::PadState& p) {
 
 void pad(input::PadState& p) {
     if (!g_installed) return;  // no quest mod: nothing of the notebook runs
+    static uint32_t ticks = 0;
+    if (++ticks % 15 == 0) declared_tick();
     bag_icon();
     if (!g_open.load(std::memory_order_relaxed)) {
         if (const uint32_t s = g_swallow.load(std::memory_order_relaxed)) {
@@ -486,7 +714,10 @@ void pad(input::PadState& p) {
 void note_import() { g_imported = true; }
 bool imported() { return g_imported; }
 bool installed() { return g_installed; }
-void set_game_calls(void (*original)(Cpu*, uint32_t)) { g_original = original; }
+void set_game_calls(void (*original)(Cpu*, uint32_t), uint32_t (*call)(Cpu*, uint32_t, std::initializer_list<uint32_t>)) {
+    g_original = original;
+    g_call = call;
+}
 
 namespace hooks {
 
@@ -495,17 +726,21 @@ void inventory_item(Cpu* c) {
     const uint32_t key = c->r[3], lr = c->lr;
     g_original(c, kInventoryItem);
     if ((lr != kWindowBuild && lr != kWindowInit) || key < kFirstDeliveryKey || key >= kFirstDeliveryKey + kDeliveryPlaces) return;
-    if ((c->r[3] & 0xFF) != kEmpty || notebook_key(c) != key) return;
-    c->r[3] = kNotebookItem;
-    static uint32_t last = 0;
-    if (trace() && key != last) LOG("[notebook] the delivery bag shows the notebook in place %u", key - kFirstDeliveryKey);
-    last = key;
+    if ((c->r[3] & 0xFF) != kEmpty) return;
+    const PortPlaces places = port_places(c);
+    if (key != places.notebook && key != places.letter) return;
+    c->r[3] = key == places.notebook ? kNotebookItem : kLetterItem;
+    static uint32_t last[2] = {0, 0};
+    const int which = key == places.notebook ? 0 : 1;
+    if (trace() && key != last[which])
+        LOG("[notebook] the delivery bag shows the %s in place %u", which ? "carried letter" : "notebook", key - kFirstDeliveryKey);
+    last[which] = key;
 }
 
 // itemForSlot(this, item): the notebook's icon
 void icon_frame(Cpu* c) {
-    if (c->r[4] == kNotebookItem) {
-        c->r[3] = kNotebookIcon;
+    if (port_item(c->r[4])) {
+        c->r[3] = c->r[4] == kNotebookItem ? kNotebookIcon : kLetterIcon;
         return;
     }
     g_original(c, kIconFrame);
@@ -517,7 +752,7 @@ void open_child(Cpu* c) {
     const uint32_t count = ld32(menu + kMenuChildren), data = ld32(menu + kMenuChildren + 4);
     const uint32_t child = data ? ld32(data + 4 * (index < count ? index : 0)) : 0;
     if (trace()) LOG("[notebook] item menu: A on place %u (item %02X)", index, child ? ld32(child + kItemNumber) : 0xFFu);
-    if (child && ld32(child + kItemNumber) == kNotebookItem && open_page("A on its bag place")) return;
+    if (child && port_item(ld32(child + kItemNumber)) && open_page("A on its bag place")) return;
     g_original(c, kOpenChild);
 }
 
@@ -525,7 +760,7 @@ void open_child(Cpu* c) {
 void set_visible(Cpu* c) {
     const uint32_t item = c->r[3];
     g_original(c, kSetVisible);
-    if (ld32(item + kItemNumber) != kNotebookItem) return;
+    if (!port_item(ld32(item + kItemNumber))) return;
     static const bool show_sentinel = [] { const char* e = getenv("WWHD_NOTEBOOK_SHOW_SENTINEL"); return e && *e == '1'; }();
     if (show_sentinel) return;
     if (const uint32_t icon = icon_pane(item)) st8(icon + kPaneFlags, uint8_t(ld8(icon + kPaneFlags) & ~1u));
@@ -537,20 +772,21 @@ void execute_window(Cpu* c) {
     g_original(c, kExecuteWindow);
     g_menu = menu;
     g_window_step = g_step.load(std::memory_order_relaxed);
-    g_bag_item = 0;
+    g_bag_item = g_letter_item = 0;
     if (ld32(menu + kMenuWindowMode) != kDeliveryWindow) return;
     const uint32_t count = ld32(menu + kMenuChildren), data = ld32(menu + kMenuChildren + 4);
     for (uint32_t i = kFirstWindowChild; i < kFirstWindowChild + kWindowChildren && i < count && data; i++) {
         const uint32_t child = ld32(data + 4 * i);
         if (child && ld32(child + kItemNumber) == kNotebookItem) g_bag_item = child;
+        if (child && ld32(child + kItemNumber) == kLetterItem) g_letter_item = child;
     }
 }
 
 // beginCursorSelection(this, point): X/Y/R on the notebook would lift it off its place towards the
 // button, which it can't go on: it stays where it is
 void cursor_float(Cpu* c) {
-    if (ld32(c->r[3] + kItemNumber) == kNotebookItem) {
-        if (trace()) LOG("[notebook] item menu: the notebook can't go on X, Y or R");
+    if (port_item(ld32(c->r[3] + kItemNumber))) {
+        if (trace()) LOG("[notebook] item menu: the notebook and the letter can't go on X, Y or R");
         return;
     }
     g_original(c, kCursorFloat);
@@ -562,31 +798,106 @@ void touch_select(Cpu* c) {
     const uint32_t item = c->r[3];
     g_original(c, kTouchSelect);
     if (trace()) LOG("[notebook] item menu: touch on item %02X", ld32(item + kItemNumber));
-    if (ld32(item + kItemNumber) == kNotebookItem) open_page("a touch on its bag place");
+    if (port_item(ld32(item + kItemNumber))) open_page("a touch on its bag place");
 }
 
 // getSelectedItemValue(this, receiver): the notebook can't go on X, Y or R
 void selected_value(Cpu* c) {
     g_original(c, kSelectedValue);
     const uint32_t key = c->r[3];
-    if (key >= kFirstDeliveryKey && key < kFirstDeliveryKey + kDeliveryPlaces && notebook_key(c) == key) c->r[3] = kEmpty;
+    if (port_key(c, key)) c->r[3] = kEmpty;
 }
 
 // the game system's X/Y/R assignment (controller, button, key): never the notebook's place
 void assign_button(Cpu* c) {
     const uint32_t key = c->r[5];
-    if (key >= kFirstDeliveryKey && key < kFirstDeliveryKey + kDeliveryPlaces && notebook_key(c) == key) return;
+    if (port_key(c, key)) return;
     g_original(c, kAssignButton);
+}
+
+// getMsg(this): a resident's line. While the tracked quest's step hands this resident a takeover
+// (story_takeover.h), the resident says the quest's line instead: the game's own selection does not
+// run for this talk (it would set its first-talk flag; nothing is set), the list is cleared so the
+// talk ends after the one box, and our text shows in the carrier message for exactly this talk.
+void people_message(Cpu* c) {
+    const uint32_t npc = c->r[3];
+    const Takeover* live = nullptr;
+    Takeover copy;
+    if (have_save() && g_talk.phase == Talk::None) {
+        story_mail::Book b = book();
+        std::lock_guard lock(g_mu);
+        // (test aid: WWHD_NOTEBOOK_TEST_RESIDENT=n stands resident number n in for the harbour man, to test
+        // the talk with a save whose story phase has him indoors)
+        static const int stand_in = [] { const char* e = getenv("WWHD_NOTEBOOK_TEST_RESIDENT"); return e ? atoi(e) : -1; }();
+        for (Resident r : {kResidentWindfallHarbour})
+            if ((resident_info(r)->people_number == ld8(npc + kPeopleNumber) || int(ld8(npc + kPeopleNumber)) == stand_in) &&
+                (live = live_takeover(g_takeovers, b, r))) {
+                copy = *live;
+                break;
+            }
+    }
+    if (!live) {
+        g_original(c, kPeopleGetMsg);
+        if (trace()) LOG("[notebook] resident %u says the game's line %X", ld8(npc + kPeopleNumber), c->r[3]);
+        return;
+    }
+    g_talk = {};
+    g_talk.phase = Talk::Talking, g_talk.npc = npc, g_talk.takeover = copy, g_talk.since = g_step.load();
+    story_mail::append_utf16(copy.lines, true, g_talk.text);
+    story_mail::say(kCarrierMessage, &g_talk.text);
+    st32(npc + kPeopleMsgList, 0);
+    st32(npc + kPeopleUbList, 0);
+    c->r[3] = kCarrierMessage;
+    LOG("[notebook] quest %04X: the resident says the quest's line (step %u)", copy.quest, copy.step);
+}
+
+// the resident's process step: after our talk, hand over the letter, the reward through the game's
+// own get-item event (the way the game's items order it), and finish the quest
+void people_execute(Cpu* c) {
+    const uint32_t npc = c->r[3];
+    g_original(c, kPeopleExecute);
+    if (g_talk.phase == Talk::None || npc != g_talk.npc) return;
+    const uint16_t command = ld16(npc + kEventCommand);
+    if (g_talk.phase == Talk::Talking) {
+        if (command != kCommandNone) return;  // the talk is still on
+        story_mail::unsay();
+        if (have_save()) {
+            story_mail::Book b = book();
+            complete(b, g_talk.takeover);
+        }
+        LOG("[notebook] quest %04X: delivered, the quest is done", g_talk.takeover.quest);
+        if (!g_talk.takeover.reward) {
+            g_talk = {};
+            return;
+        }
+        g_talk.phase = Talk::Reward;
+    }
+    if (g_talk.phase == Talk::Reward) {
+        if (command == kCommandGetItem) {  // the get-item event started: its item is ours
+            if (g_talk.item != 0xFFFFFFFFu) st32(g_call(c, kPlay, {}) + kPlayItemPartner, g_talk.item);
+            LOG("[notebook] quest %04X: reward %02X handed over", g_talk.takeover.quest, g_talk.takeover.reward);
+            g_talk = {};
+            return;
+        }
+        if (g_talk.item == 0xFFFFFFFFu) {
+            Cpu probe = *c;
+            g_talk.item = g_call(&probe, kPresentItem, {npc + kActorPos, g_talk.takeover.reward, 0, 0xFFFFFFFFu, 0xFFFFFFFFu, 0, 0});
+        }
+        Cpu probe = *c;
+        g_call(&probe, kOrderItemEvent, {npc});
+        st16(npc + kEventCondition, uint16_t(ld16(npc + kEventCondition) | kConditionCanGetItem));
+    }
 }
 
 }  // namespace hooks
 
 void install(const std::function<std::string(uint32_t)>& replaced_by, const std::function<void(uint32_t, void (*)(Cpu*))>& replace) {
-    if (!g_imported || g_installed || !g_original) return;
+    if (!g_imported || g_installed || !g_original || !g_call) return;
     const std::pair<uint32_t, void (*)(Cpu*)> list[] = {
         {kInventoryItem, hooks::inventory_item}, {kIconFrame, hooks::icon_frame},     {kOpenChild, hooks::open_child},
         {kTouchSelect, hooks::touch_select},     {kSelectedValue, hooks::selected_value}, {kAssignButton, hooks::assign_button},
-        {kSetVisible, hooks::set_visible},       {kExecuteWindow, hooks::execute_window}, {kCursorFloat, hooks::cursor_float}};
+        {kSetVisible, hooks::set_visible},       {kExecuteWindow, hooks::execute_window}, {kCursorFloat, hooks::cursor_float},
+        {kPeopleGetMsg, hooks::people_message},  {kPeopleExecute, hooks::people_execute}};
     // all or nothing: a notebook that shows but can't be opened, or can be put on a button, is worse than none
     for (const auto& [addr, fn] : list) {
         std::string other = replaced_by(addr);
@@ -603,7 +914,8 @@ void install(const std::function<std::string(uint32_t)>& replaced_by, const std:
 
 void state_loaded() {
     close_page();
-    g_bag_item = 0, g_menu = 0, g_window_step = 0;
+    g_bag_item = 0, g_letter_item = 0, g_menu = 0, g_window_step = 0;
+    g_talk = {};
     std::lock_guard lock(g_mu);
     for (auto& [key, p] : g_portraits) p.handle = 0;
 }

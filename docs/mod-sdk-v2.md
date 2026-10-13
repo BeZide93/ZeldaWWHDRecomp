@@ -512,23 +512,88 @@ the item menu, opens its page over the game:
 - one row per quest: your portrait, or an emblem with the initial of your mod's name; the title and
   your mod's name; the next step; where; and the status: **New**, **In progress**, **Not yet
   available**: the condition, or **Done** with a stamp;
-- the order: the quest shown on the chart, quests in progress, new ones, ones not yet available,
-  done ones;
+- the order: the quest shown on the chart, quests in progress, new ones, ones not yet available.
+  Done quests move to the **Archive** tab (Left/Right or a tap on the tab switches);
 - choosing a row shows what is known so far and the reward, and **Show on chart**: that quest's
   next step gets the game's story ring on the sea chart (the marker layer of
   [Charts and markers](#charts-and-markers), before your chart markers). One quest at a time;
   choosing it again stops showing it. The ring moves when you place the next step elsewhere and
   disappears when the quest is done or the step has no place (the page then says the step has no
   place on the chart);
+- a step that only works while the quest is shown on the chart (a talk to a resident, below) says
+  so on its page: "Show this quest on the chart (track it) to deliver the letter.";
 - Up/Down (or the stick) choose, A opens or shows on the chart, B goes back and closes. Taps (and
   the mouse on the GamePad picture) work on the rows and buttons. The game gets no input while the
   page is open.
 
-**Saving.** The save file keeps the step reached, whether a quest is done and which quest is shown
-on the chart, in the story record shared with letters and charts (one place per started quest,
-one for the shown quest). Quests that were never started take no room. Nothing is written to the
+**Saving.** The save file keeps the step reached, whether a quest is done, which quest is shown
+on the chart and the letters Link carries, in the story record shared with letters and charts (one
+place per started quest, one for the shown quest, one per carried letter). Quests that were never started take no room. Nothing is written to the
 inventory or the Delivery Bag: with all mods off, the save is a plain game save, and the notebook,
 its records and the chart ring are simply not shown.
+
+### Quests in the manifest
+
+The preferred way: describe the quest as data in your `manifest.json`. The port reads it when the
+player enables your mod, without running your code, so the quest is in the notebook at once. Your
+code then only reports progress the port can't see (`wwhd_quest_step`, `wwhd_quest_done`); the
+`story-notebook` example's quest needs no code at all.
+
+```json
+"quests_format": 1,
+"quests": [{
+  "id": "lantern",
+  "title": "The storyteller's lantern",
+  "journal": "on_enable",
+  "start": {"text": "Check a Rito postbox for a letter."},
+  "letter": {"id": "lantern", "sender": "The storyteller", "text": "Dear Link, ...",
+             "encloses": ["notebook", "letter:friend"]},
+  "reward": {"text": "100 rupees", "item": "rupee_orange"},
+  "steps": [{
+    "n": 1,
+    "text": "Bring the storyteller's letter to his old friend at Windfall's harbour (by day).",
+    "where": "Windfall Island, the harbour",
+    "place": {"cell": "D2", "x": 3827, "z": -202189},
+    "npc": {"who": {"class": "people", "code": "UB3", "stage": "sea", "room": 11},
+            "when": {"carries": "letter:friend", "time": "day"},
+            "lines": ["A letter from my old friend? Thank you!", "...", "..."],
+            "then": {"give": "rupee_orange", "take": "letter:friend", "complete": true}}
+  }]
+}]
+```
+
+- `journal`: `on_enable` (in the notebook as soon as the mod is on, the default), `on_trigger` or
+  `hidden` (not in the notebook; revealing comes later).
+- `letter`: the port sends it (the postbox hands it out once Link has the Delivery Bag). When it
+  is read the quest reaches step 1, and with `"letter:..."` in `encloses` Link carries a sealed
+  letter for the quest: it shows in the Delivery Bag next to the notebook (never in the game's
+  inventory) until it is handed over.
+- `steps`: the notebook shows each step's `text`, `where` and `place` (world `x`/`z`, the
+  coordinates of `wwhd_chart_mark`; the tracked quest's ring goes there). Before step 1 it shows
+  `start.text`.
+- `npc`: a talk to a game resident, below. Up to 8 quests per mod; texts have the limits of
+  `wwhd_quest_*`. A declaration the port doesn't accept is logged and its quests are left out
+  (your mod still loads).
+
+### Talking to residents
+
+A step can have a game resident speak your lines instead of their own, once: the friend reads
+the letter, thanks Link, gives the reward through the game's own get-item scene, and the quest is
+done. The port arbitrates, not your mod:
+
+- the talk only takes over while **your quest is the one shown on the chart** (tracked), at that
+  step, and while Link carries its letter (`when.carries`). Untracked, the resident talks exactly
+  as in the game; two mods may use the same resident, and only the tracked quest's talk is live;
+- the port never sets or clears a game flag. For that one talk the resident's own choice of line
+  does not run, so a first-meeting line the game would have shown (and the flag it would have
+  set) is not lost: it comes with a later talk;
+- the lines are one message box: up to three lines, 240 bytes. `then.give` is a rupee item
+  (`rupee_green` ... `rupee_orange`, 100);
+- residents the port knows: `{"class": "people", "code": "UB3"}`, the man on Windfall's east dock,
+  by day (at night he is not out). More will follow.
+
+From code, the same is `wwhd_quest_talk(id, step, "windfall-harbour", lines, reward_item)` and
+`wwhd_quest_carry(id, 1)` gives the sealed letter.
 
 **Testing.** `tools/story_mods/notebook_e2e.sh` runs the `story-notebook` example headless from a
 save on Windfall: letter, notebook, page, tracking and the sea chart, and checks the log.

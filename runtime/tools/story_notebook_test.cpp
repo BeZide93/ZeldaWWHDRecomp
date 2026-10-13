@@ -6,6 +6,8 @@
 #include "mods/story_notebook_list.h"
 #include "mods/story_notebook_page.h"
 #include "mods/story_notebook_bag.h"
+#include "mods/story_takeover.h"
+#include "mods/story_manifest.h"
 #include "mods/story_chart.h"
 #include "mods/story_mail.h"
 #include "mods/story_mail_book.h"
@@ -237,17 +239,31 @@ void test_page() {
         assert(std::isfinite(c.x) && std::isfinite(c.y));
     }
     assert(title);
-    for (size_t i = 0; i < rs.size(); i++) {
-        if (rs[i].status != Status::Done) continue;
-        for (size_t k = 0; k < i; k++) {
-            page.input(press(kPadDown), rs);
-            page.input(press(0), rs);
-        }
-    }
+    // the done quest is in the archive, not in the quests' list
+    assert(page.tab() == 0 && page.shown(rs).size() == rs.size() - 1);
+    for (const Row& r : page.shown(rs)) assert(r.status != Status::Done);
+    page.input(press(kPadRight), rs);  // the archive
+    page.input(press(0), rs);
+    assert(page.tab() == 1 && page.shown(rs).size() == 1 && page.shown(rs)[0].quest == &qs[0]);
+    assert(page.selected_key() == qs[0].key);
+    bool archive = false;
+    for (const Command& c : page.draw(rs)) archive |= c.text == "Archive (1)";
+    assert(archive);
     page.input(press(kPadA), rs);
     page.input(press(0), rs);
     assert(page.mode() == Page::Mode::Detail);
-    assert(page.input(press(kPadA), rs).kind == Page::Action::None);
+    assert(page.input(press(kPadA), rs).kind == Page::Action::None);  // no Show on chart for a done quest
+    page.input(press(kPadB), rs);
+    page.input(press(0), rs);
+    page.input(press(kPadLeft), rs);  // back to the quests
+    page.input(press(0), rs);
+    assert(page.tab() == 0 && page.mode() == Page::Mode::List);
+    // a tap on a tab
+    PadInput tab;
+    tab.touch = true, tab.x = kTab1X + 10, tab.y = kTabY + 10;
+    page.input(tab, rs);
+    assert(page.tab() == 1);
+    page.input(press(0), rs);
     // an empty notebook
     Page empty;
     empty.show();
@@ -355,7 +371,19 @@ void original(Cpu* c, uint32_t fn) {
     }
     case 0x0268F420: c->r[3] = c->r[4]; break;  // the stub's receivers are the keys themselves
     case 0x02714B0C: calls.push_back("assign " + std::to_string(c->r[5])); break;
+    case 0x022C6C68: calls.push_back("getMsg"); c->r[3] = 0x2CF1; break;  // the resident's own line
+    case 0x022C36D0: calls.push_back("resident"); break;
     default: assert(!"unexpected original");
+    }
+}
+constexpr uint32_t kPlayObj = 0x20030000;
+uint32_t game_call(Cpu*, uint32_t fn, std::initializer_list<uint32_t> args) {
+    std::vector<uint32_t> a(args);
+    switch (fn) {
+    case 0x025200D4: return kPlayObj;
+    case 0x025D7DEC: calls.push_back("present item " + std::to_string(a.at(1))); return 77;
+    case 0x025D7B98: calls.push_back("order item event"); return 1;
+    default: assert(!"unexpected game call"); return 0;
     }
 }
 uint32_t call(uint32_t fn, uint32_t r3, uint32_t r4 = 0, uint32_t lr = 0, uint32_t r5 = 0) {
@@ -369,7 +397,7 @@ void test_hooks() {
     constexpr uint32_t kMenu = kArena + 0x2000, kChildData = kArena + 0x3000, kChild = kArena + 0x4000;
     constexpr uint32_t kBuild = 0x02692548;  // the bag window's build
     // not installed without a quest service; all or nothing on a conflict
-    set_game_calls(original);
+    set_game_calls(original, game_call);
     install([](uint32_t) { return std::string(); }, [](uint32_t, void (*)(Cpu*)) { assert(!"not imported"); });
     assert(!installed());
     note_import();
@@ -377,7 +405,7 @@ void test_hooks() {
             [](uint32_t, void (*)(Cpu*)) { assert(!"installed despite a conflict"); });
     assert(!installed());
     install([](uint32_t) { return std::string(); }, [](uint32_t a, void (*fn)(Cpu*)) { hooked[a] = fn; });
-    assert(installed() && hooked.size() == 9);
+    assert(installed() && hooked.size() == 11);
     Book b(mem::ptr(kSave + story_mail::kBookOffset));
     // no notebook yet: the bag window shows the save as it is
     b.erase(story_mail::kRecordItem, story_mail::kItemNotebook);
@@ -501,6 +529,11 @@ void test_hooks() {
         assert(at.shown && std::fabs(at.x - 856.0f * 854 / 1280) < 0.01f && std::fabs(at.y - 322.0f * 854 / 1280) < 0.01f &&
                std::fabs(at.size - 90.0f * 854 / 1280) < 0.01f && !(ld8(kIconA + 0x44) & 1));
         for (int i = 0; i < 4; i++) assert(icon_place().shown);  // frames drawn within the step (60/120 fps) keep it
+        // the notebook page open over the menu: no bag icon over it
+        call(0x0268F060, kMenu, 0x15);
+        assert(page_open() && !icon_place().shown && std::string(icon_reason()) == "the notebook page is open");
+        close_page();
+        assert(icon_place().shown);
         call(0x0268FF50, kMenu);
         next_frame();
         assert(icon_place().shown);
@@ -563,10 +596,203 @@ void test_hooks() {
     assert(!page_open());
 }
 
+void test_page_screen() {
+    // the page goes where the game's item menu is: the GamePad, or the TV with the Pro Controller
+    assert(menu_screen(false) == 1 && menu_screen(true) == 0);
+    Page page;
+    page.show();
+    std::vector<Row> none;
+    std::vector<Command> tv = page.draw(none), pad = page.draw(none);
+    fit_to_screen(tv, 0);
+    fit_to_screen(pad, 1);
+    assert(tv.size() == pad.size());
+    for (size_t i = 0; i < tv.size(); i++) {
+        assert(std::fabs(pad[i].x - tv[i].x * 854 / 1280) < 0.01f && std::fabs(pad[i].size - tv[i].size * 854 / 1280) < 0.01f);
+        if (tv[i].kind == Command::Rect) assert(std::fabs(pad[i].w - tv[i].w * 854 / 1280) < 0.01f);
+    }
+}
+
+void test_takeover_rules() {
+    uint8_t raw[story_mail::kBookSize] = {};
+    Book b(raw);
+    const uint16_t a = quest_key("mod-a", "q"), bq = quest_key("mod-b", "q");
+    std::vector<Takeover> all = {{a, 1, kResidentWindfallHarbour, true, "A", 6}, {bq, 1, kResidentWindfallHarbour, true, "B", 0}};
+    // nothing tracked: nobody speaks for the mods
+    assert(reach_step(b, a, 1) == 1 && reach_step(b, bq, 1) == 1);
+    assert(b.set(kRecordCarried, a, 1) && b.set(kRecordCarried, bq, 1));
+    assert(!live_takeover(all, b, kResidentWindfallHarbour));
+    // two mods declare the same resident: only the tracked quest's takeover is live
+    assert(toggle_tracked(b, bq));
+    const Takeover* t = live_takeover(all, b, kResidentWindfallHarbour);
+    assert(t && t->quest == bq && t->lines == "B");
+    assert(toggle_tracked(b, a));
+    t = live_takeover(all, b, kResidentWindfallHarbour);
+    assert(t && t->quest == a);
+    // another step, no letter, another resident: not live
+    assert(!live_takeover(all, b, kResidentNone));
+    b.erase(kRecordCarried, a);
+    assert(!live_takeover(all, b, kResidentWindfallHarbour));
+    assert(b.set(kRecordCarried, a, 1));
+    assert(reach_step(b, a, 2) == 2 && !live_takeover(all, b, kResidentWindfallHarbour));
+    // completing hands the letter over and finishes the quest (it leaves the tracked list)
+    uint8_t raw2[story_mail::kBookSize] = {};
+    Book c(raw2);
+    assert(reach_step(c, a, 1) == 1 && c.set(kRecordCarried, a, 1) && toggle_tracked(c, a));
+    assert(complete(c, all[0]) && saved_step(c, a) == kStepDone && !carries(c, a) && tracked_key(c) == 0);
+    assert(resident_by_id("windfall-harbour") == kResidentWindfallHarbour && resident_by_id("nobody") == kResidentNone);
+}
+
+void test_takeover_hooks() {
+    constexpr uint32_t kNpc = kArena + 0x8000;
+    Book b(mem::ptr(kSave + story_mail::kBookOffset));
+    // the lantern quest of one mod, the same resident in another mod's quest
+    assert(define("lantern", "Lantern", "tale", "The storyteller's lantern", "100 rupees", "") == kResultNew);
+    assert(define("other", "Other", "tale", "Another tale", "", "") == kResultNew);
+    assert(talk("lantern", "tale", 1, "windfall-harbour", "A letter from him?\nThank you!", 6) == kResultNew);
+    assert(talk("other", "tale", 1, "windfall-harbour", "Not me.", 0) == kResultNew);
+    assert(talk("lantern", "tale", 1, "nobody", "x", 0) == kResultInvalid);
+    assert(talk("lantern", "tale", 1, "windfall-harbour", "1\n2\n3\n4", 0) == kResultInvalid);  // one box: three lines
+    assert(talk("lantern", "tale", 1, "windfall-harbour", "x", 0x0F) == kResultInvalid);        // rupees only
+    assert(step("lantern", "tale", 1, "Bring the letter to his old friend.", "Windfall Island") == 1);
+    assert(step("other", "tale", 1, "", "") == 1);
+    assert(carry("lantern", "tale", true) == 1 && carry("other", "tale", true) == 1);
+    // the carried letter shows in the next empty bag place after the notebook, with a letter's icon underneath
+    assert(b.get(story_mail::kRecordItem, story_mail::kItemNotebook) == 1);
+    assert(call(0x02632D94, 0x31, 0, 0x02692548) == 0xA0 && call(0x02632D94, 0x32, 0, 0x02692548) == 0xA1);
+    assert(call(0x02632D94, 0x34, 0, 0x02692548) == 0xFF);
+    assert(call(0x0262F880, 0, 0xA1) == 0x25);
+    assert(call(0x0268F420, 0, 0x32) == 0xFF);  // it can't go on X/Y/R
+    st8(kNpc + 0x905, 5);  // the harbour man
+    st32(kNpc + 0x8A8, 0x1234), st32(kNpc + 0x8AC, 0);
+    // the event flags of the save, to prove nothing is set
+    std::vector<uint8_t> flags(mem::ptr(kSave + 0x644), mem::ptr(kSave + 0x644) + 0x100);
+    // untracked: the resident's own line
+    while (tracked_key(b)) toggle_tracked(b, tracked_key(b));
+    calls.clear();
+    assert(call(0x022C6C68, kNpc) == 0x2CF1 && calls == std::vector<std::string>{"getMsg"});
+    // the hint in the notebook says to track it
+    std::vector<Quest> storage;
+    for (const Row& r : rows_now(storage))
+        if (r.quest->mod == "lantern") assert(r.quest->hint.find("track it") != std::string::npos);
+    // the OTHER mod's quest tracked: its line, never the lantern's
+    assert(toggle_tracked(b, quest_key("other", "tale")));
+    calls.clear();
+    assert(call(0x022C6C68, kNpc) == 0x2CF3 && calls.empty());
+    assert(ld32(kNpc + 0x8A8) == 0);  // the talk ends after one box
+    // the talk runs, then ends: the other quest is done, no reward
+    st16(kNpc + 0xF8, 1);
+    calls.clear();
+    call(0x022C36D0, kNpc);
+    assert(calls == std::vector<std::string>{"resident"} && state("other", "tale") == 1);
+    st16(kNpc + 0xF8, 0);
+    call(0x022C36D0, kNpc);
+    assert(state("other", "tale") == kResultDone && !carries(b, quest_key("other", "tale")));
+    // now the lantern quest tracked: its line, then the reward through the get-item event
+    assert(toggle_tracked(b, quest_key("lantern", "tale")));
+    calls.clear();
+    assert(call(0x022C6C68, kNpc) == 0x2CF3 && calls.empty());
+    assert(call(0x022C6C68, kNpc) == 0x2CF1);  // a second talk while ours runs: the game's
+    st16(kNpc + 0xF8, 1);
+    call(0x022C36D0, kNpc);
+    st16(kNpc + 0xF8, 0);
+    calls.clear();
+    call(0x022C36D0, kNpc);
+    assert(state("lantern", "tale") == kResultDone && !carries(b, quest_key("lantern", "tale")));
+    assert((calls == std::vector<std::string>{"resident", "present item 6", "order item event"}) && (ld16(kNpc + 0xFA) & 8));
+    calls.clear();
+    call(0x022C36D0, kNpc);  // not started yet: ordered again, the item created once
+    assert((calls == std::vector<std::string>{"resident", "order item event"}));
+    st16(kNpc + 0xF8, 4);  // the get-item event runs: its item is ours
+    call(0x022C36D0, kNpc);
+    assert(ld32(kPlayObj + 0x52A0) == 77);
+    st16(kNpc + 0xF8, 0);
+    calls.clear();
+    call(0x022C36D0, kNpc);
+    assert(calls == std::vector<std::string>{"resident"});
+    // delivered: the letter has left the bag
+    assert(call(0x02632D94, 0x32, 0, 0x02692548) == 0xFF);
+    // done: the resident is the game's again
+    calls.clear();
+    assert(call(0x022C6C68, kNpc) == 0x2CF1);
+    // no game flag was set by any of it
+    assert(std::equal(flags.begin(), flags.end(), mem::ptr(kSave + 0x644)));
+}
+
+const char* const kLanternManifest = R"({
+  "format_version": 1, "id": "lantern-mod", "name": "Lantern", "version": "1.0.0", "kind": "guest",
+  "quests_format": 1,
+  "quests": [{
+    "id": "lantern", "title": "The storyteller's lantern", "journal": "on_enable",
+    "start": {"text": "Check a Rito postbox for a letter."},
+    "letter": {"id": "lantern", "sender": "The storyteller", "text": "Dear Link,\nplease help.", "encloses": ["notebook", "letter:friend"]},
+    "reward": {"text": "100 rupees", "item": "rupee_orange"},
+    "steps": [{"n": 1, "text": "Bring the letter to his friend.", "where": "Windfall Island", "place": {"cell": "D2", "x": 3827, "z": -202189},
+      "npc": {"who": {"class": "people", "code": "UB3"}, "when": {"carries": "letter:friend"},
+              "lines": ["One.", "Two."], "then": {"give": "rupee_orange", "take": "letter:friend", "complete": true}}}]
+  }, {"id": "secret", "title": "A secret", "journal": "on_trigger"}]
+})";
+
+void test_manifest() {
+    std::vector<ManifestQuest> qs;
+    std::string why;
+    assert(parse_quests(mods::json::parse(kLanternManifest), qs, why) && qs.size() == 2);
+    const ManifestQuest& q = qs[0];
+    assert(q.id == "lantern" && q.start_text == "Check a Rito postbox for a letter." && q.reward_item == 6 && q.has_letter &&
+           q.letter_encloses_letter && q.steps.size() == 1);
+    assert(q.steps[0].has_place && q.steps[0].x == 3827 && q.steps[0].has_talk && q.steps[0].resident == kResidentWindfallHarbour &&
+           q.steps[0].needs_letter && q.steps[0].lines == "One.\nTwo." && q.steps[0].reward == 6);
+    // what is refused
+    auto refused = [&](const std::string& from, const std::string& to) {
+        std::string text = kLanternManifest;
+        const size_t at = text.find(from);
+        assert(at != std::string::npos);
+        text.replace(at, from.size(), to);
+        std::vector<ManifestQuest> out;
+        std::string reason;
+        return !parse_quests(mods::json::parse(text), out, reason) && !reason.empty();
+    };
+    assert(refused(R"("code": "UB3")", R"("code": "XX9")"));                         // a resident the port doesn't know
+    assert(refused(R"(["One.", "Two."])", R"(["1", "2", "3", "4"])"));              // more than one box
+    assert(refused(R"("give": "rupee_orange")", R"("give": "master_sword")"));      // only rupees
+    assert(refused(R"("quests_format": 1)", R"("quests_format": 2)"));
+    assert(refused(R"("id": "lantern", "title")", R"("id": "Lantern!", "title")"));
+    assert(refused(R"("journal": "on_enable")", R"("journal": "sometimes")"));
+    std::vector<ManifestQuest> none;
+    assert(parse_quests(mods::json::parse(R"({"format_version": 1})"), none, why) && none.empty());
+
+    // declared: in the notebook at once (the secret one not), its letter sent, started when read
+    Book b(mem::ptr(kSave + story_mail::kBookOffset));
+    assert(declare("lantern-mod", "Lantern", mods::json::parse(kLanternManifest)));
+    std::vector<Quest> storage;
+    bool found = false;
+    for (const Row& r : rows_now(storage)) {
+        assert(r.quest->id != "secret");
+        if (r.quest->id == "lantern") {
+            found = true;
+            assert(r.status == Status::New && r.quest->next == "Check a Rito postbox for a letter.");
+        }
+    }
+    assert(found);
+    declared_tick();
+    const uint16_t letter = story_mail::letter_key("lantern-mod", "lantern"), key = quest_key("lantern-mod", "lantern");
+    assert(b.state(letter) == story_mail::kWaiting && saved_step(b, key) == 0);
+    declared_tick();
+    assert(saved_step(b, key) == 0);  // waiting: nothing yet
+    assert(b.set_state(letter, story_mail::kRead));  // read at a postbox
+    declared_tick();
+    assert(saved_step(b, key) == 1 && carries(b, key));
+    declared_tick();
+    assert(saved_step(b, key) == 1);
+    for (const Row& r : rows_now(storage))
+        if (r.quest->id == "lantern")
+            assert(r.quest->next == "Bring the letter to his friend." && r.quest->has_place && r.quest->x == 3827 &&
+                   r.quest->hint.find("track it") != std::string::npos);
+}
+
 }  // namespace
 
 int main() {
-    assert(map(kGlobals, 0x10000) && map(kArena, 0x10000));
+    assert(map(kGlobals, 0x10000) && map(kArena, 0x40000));
     test_list();
     test_record();
     test_text();
@@ -574,6 +800,10 @@ int main() {
     test_bag_place();
     test_services();
     test_hooks();
+    test_page_screen();
+    test_takeover_rules();
+    test_takeover_hooks();
+    test_manifest();
     std::puts("story_notebook_test: ok");
     return 0;
 }

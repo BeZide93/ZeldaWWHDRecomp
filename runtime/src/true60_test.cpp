@@ -13,7 +13,7 @@
 //   WWHD_TEST_POKE=t:ADDR:HEX,...   at scenario time t (s, game time; see input.mm) writes the bytes
 //                                   HEX to guest memory at ADDR. ADDR is hex, or *PTR+OFF (the word
 //                                   at PTR plus OFF), e.g. *101F84DC+2E:38 equips the Hero's Sword.
-//   WWHD_LINK_WARP=step:x:y:z:angle  once, before Link's full-pass execute at origin step + step;
+//   WWHD_LINK_WARP=step:x:y:z:angle[,...]  each once, in order, before Link's full-pass execute at origin step + step;
 //                                   updates the actor and the HD executable's retained position.
 //   WWHD_SAVEINFO_DUMP=path         at the end of the scenario (WWHD_TEST_END) writes the save-info
 //                                   block (dSv_info_c, *101F84DC, 0x12A0 bytes: what the game saves,
@@ -459,18 +459,20 @@ namespace true60_test {
 uint64_t origin_step();
 void before_execute_link(uint32_t proc) {
     // Visual comparison fixture: apply at an actor boundary, outside controller-read call stacks.
-    static bool warped = false;
-    if (!warped && !interp::hold_pass() && origin_step()) {
+    // WWHD_LINK_WARP=step:x:y:z:angle[,step:x:y:z:angle...]: each warp once, in order
+    static size_t warps_done = 0;
+    if (!interp::hold_pass() && origin_step()) {
         if (const char* e = getenv("WWHD_LINK_WARP")) {
+            for (size_t i = 0; i < warps_done && e; i++) { e = strchr(e, ','); if (e) e++; }
             unsigned long long step; float x,y,z; int angle;
-            if (sscanf(e,"%llu:%f:%f:%f:%d",&step,&x,&y,&z,&angle)==5 && interp::logic_steps() >= origin_step()+step) {
+            if (e && sscanf(e,"%llu:%f:%f:%f:%d",&step,&x,&y,&z,&angle)==5 && interp::logic_steps() >= origin_step()+step) {
                 LOG("[test] warp Link %08X from %.1f %.1f %.1f to %.1f %.1f %.1f",proc,(float)ldf32(proc+0x314),(float)ldf32(proc+0x318),(float)ldf32(proc+0x31C),x,y,z);
                 for (uint32_t off : {0x2ECu,0x300u,0x314u}) { stf32(proc+off,x); stf32(proc+off+4,y); stf32(proc+off+8,z); }
                 st16(proc+0x322,(uint16_t)angle);st16(proc+0x32A,(uint16_t)angle);
                 // The HD executable restores these retained debug values at 0240D130 each update.
                 stf32(GD(0x1046CD48),x);stf32(GD(0x1046CD4C),y);stf32(GD(0x1046CD50),z);
                 st16(GD(0x1046CD12),(uint16_t)angle);st16(GD(0x1046CD0A),(uint16_t)angle);
-                warped=true;
+                warps_done++;
             }
         }
     }

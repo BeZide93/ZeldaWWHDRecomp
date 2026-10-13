@@ -115,7 +115,7 @@ struct Override {
     bool keyed = false;
 };
 constexpr uint32_t kPrefixRoom = 64, kSlotBytes = 2048;  // 64 + 2 * (kMaxUnits + 1) fits
-uint32_t g_buffers = 0;  // two slots: the letter, the notebook's get message
+uint32_t g_buffers = 0;  // three slots: the letter, the notebook's get message, a resident's line (say)
 // the mod letter being handed out by a postbox
 struct Showing {
     uint16_t key = 0;
@@ -123,6 +123,7 @@ struct Showing {
     Override letter;
 } g_show;
 Override g_notebook_text;  // armed while the notebook is handed out
+Override g_npc_text;       // armed while a resident says a quest's line (say)
 const std::u16string g_notebook_body = kNotebookGetText;
 
 // the postbox's pearl check passed only for mod letters (this step), and a notebook being handed out
@@ -293,7 +294,13 @@ std::string model_override(const std::string& guest) {
 void note_import() { g_imported = true; }
 bool imported() { return g_imported; }
 bool installed() { return g_installed; }
-void set_text_buffers(uint32_t guest, uint32_t bytes) { g_buffers = bytes >= 2 * kSlotBytes ? guest : 0; }
+void set_text_buffers(uint32_t guest, uint32_t bytes) { g_buffers = bytes >= 3 * kSlotBytes ? guest : 0; }
+
+// A resident's line replaced while one talk shows it (story_notebook's takeovers)
+void say(uint32_t number, const std::u16string* text) {
+    g_npc_text = text && g_buffers ? Override{number, g_buffers + 2 * kSlotBytes, text} : Override{};
+}
+void unsay() { g_npc_text = {}; }
 
 void set_game_calls(void (*original)(Cpu*, uint32_t), uint32_t (*call)(Cpu*, uint32_t, std::initializer_list<uint32_t>)) {
     g_original = original;
@@ -329,6 +336,7 @@ void install(const std::function<std::string(uint32_t)>& replaced_by, const std:
 
 void state_loaded() {
     g_show = {};
+    g_npc_text = {};
     g_notebook_pending = false;
     g_notebook_text = {};
 }
@@ -472,7 +480,7 @@ void next_msg(Cpu* c) {
 void get_message(Cpu* c) {
     const uint32_t out = c->r[4];
     g_original(c, kGetMessage);
-    for (Override* o : {&g_show.letter, &g_notebook_text}) {
+    for (Override* o : {&g_show.letter, &g_notebook_text, &g_npc_text}) {
         if (!o->text || o->keyed || ld32(out + kMsgNumber) != o->number) continue;
         const uint32_t set = ld32(out + kMsgSet);
         if (!set) continue;
@@ -498,7 +506,7 @@ void get_text(Cpu* c) {
         g_original(c, kGetText);
         return;
     }
-    for (const Override* o : {&g_show.letter, &g_notebook_text})
+    for (const Override* o : {&g_show.letter, &g_notebook_text, &g_npc_text})
         if (o->keyed && c->r[3] == o->msbt && c->r[4] == o->index) {
             c->r[3] = o->buffer;
             return;

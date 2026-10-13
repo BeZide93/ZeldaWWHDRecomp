@@ -13,12 +13,16 @@
 #include "guest_files.h"
 #include "guest_settings.h"
 #include "guest_hud.h"
+#include <fstream>
+#include <filesystem>
 #include "guest_audio.h"
 #include "guest_png.h"
 #include "story_mail.h"
 #include "story_mail_book.h"
 #include "story_chart.h"
 #include "story_notebook.h"
+#include "story_takeover.h"
+#include "mod_json.h"
 #include "input.h"
 #include "true60.h"
 #include "guest_addr.h"
@@ -340,6 +344,18 @@ void svc_quest_done(Cpu* c) {
     auto& mod=owner(c);std::string id;
     quest_result(c,mod_string(mod,c->r[3],story_mail::kMaxIdBytes,id)?story_notebook::done(mod.id,id):story_notebook::kResultInvalid);
 }
+// wwhd_quest_carry(quest, carried)
+void svc_quest_carry(Cpu* c) {
+    auto& mod=owner(c);std::string id;
+    quest_result(c,mod_string(mod,c->r[3],story_mail::kMaxIdBytes,id)?story_notebook::carry(mod.id,id,c->r[4]!=0):story_notebook::kResultInvalid);
+}
+// wwhd_quest_talk(quest, step, resident, lines, reward)
+void svc_quest_talk(Cpu* c) {
+    auto& mod=owner(c);std::string id,resident,lines;
+    if(!mod_string(mod,c->r[3],story_mail::kMaxIdBytes,id)||!mod_string(mod,c->r[5],32,resident)||!mod_string(mod,c->r[6],story_notebook::kMaxLinesBytes,lines))
+        return quest_result(c,story_notebook::kResultInvalid);
+    quest_result(c,story_notebook::talk(mod.id,id,c->r[4],resident,lines,c->r[7]));
+}
 void svc_quest_state(Cpu* c) {
     auto& mod=owner(c);std::string id;
     quest_result(c,mod_string(mod,c->r[3],story_mail::kMaxIdBytes,id)?story_notebook::state(mod.id,id):story_notebook::kResultInvalid);
@@ -362,6 +378,7 @@ const std::unordered_map<std::string, PpcFunc> kServices = {
     {"wwhd_quest_define",svc_quest_define},{"wwhd_quest_step",svc_quest_step},{"wwhd_quest_place",svc_quest_place},
     {"wwhd_quest_no_place",svc_quest_no_place},{"wwhd_quest_known",svc_quest_known},{"wwhd_quest_portrait",svc_quest_portrait},
     {"wwhd_quest_done",svc_quest_done},{"wwhd_quest_state",svc_quest_state},
+    {"wwhd_quest_carry",svc_quest_carry},{"wwhd_quest_talk",svc_quest_talk},
     {"memcpy", svc_memcpy},      {"memmove", svc_memcpy},       {"memset", svc_memset},
 };
 PpcFunc service(const char* name) {
@@ -372,6 +389,7 @@ PpcFunc service(const char* name) {
     if (!strncmp(name, "wwhd_quest_", 11)) {  // the notebook's item menu entry, and its marker on the sea chart
         story_notebook::note_import();
         story_chart::note_import();
+        story_mail::note_import();  // residents' lines go through the message hooks
     }
     return it->second;
 }
@@ -441,6 +459,12 @@ bool load_one(const std::string& path, std::string& err,const mods::packages::Gu
         LOG("[guestmods] %s %08X", h.kind == WWHD_GUEST_REPLACE ? "replace" : h.kind == WWHD_GUEST_HOOK_ENTRY ? "entry hook" : "return hook",
             h.target);
     }
+    // story quests declared in the manifest (story_notebook.h): known without running the mod's code
+    try {
+        std::ifstream manifest_file(std::filesystem::path(pkg.path)/"manifest.json",std::ios::binary);
+        std::string manifest_text{std::istreambuf_iterator<char>(manifest_file),{}};
+        if(manifest_text.find("\"quests\"")!=std::string::npos)story_notebook::declare(loaded.id,loaded.name,mods::json::parse(manifest_text));
+    } catch(const std::exception& e) {LOG("[guestmods] %s: manifest quests not read: %s",loaded.id.c_str(),e.what());}
     g_loaded.push_back(std::move(loaded));
     guard.handle = nullptr; // module functions remain resident for the process lifetime
     LOG("[guestmods] loaded %s (translator %s): %u functions, %u hooks, guest memory %08X-%08X", path.c_str(),
@@ -504,7 +528,7 @@ void init() {
     });
     // Letters from mods: host replacements of the postbox and message functions, only when a loaded
     // mod uses the letter services (story_mail.h).
-    if(story_mail::imported())story_mail::set_text_buffers(mem::host_alloc(4096,16),4096);
+    if(story_mail::imported())story_mail::set_text_buffers(mem::host_alloc(6144,16),6144);
     // feasibility test: the notebook's model archive (tools/story_mods/notebook_model.py)
     if(const char* model=getenv("WWHD_NOTEBOOK_MODEL");model&&*model)story_mail::set_notebook_model(model);
     story_mail::set_game_calls(call_original,[](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);});
@@ -531,7 +555,7 @@ void init() {
     });
     // The story notebook: the item menu's Delivery Bag shows it and opens its page, only when a loaded
     // mod uses the quest services (story_notebook.h).
-    story_notebook::set_game_calls(call_original);
+    story_notebook::set_game_calls(call_original,[](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);});
     story_notebook::install([](uint32_t addr) {
         auto it=g_chains.find(addr);return it==g_chains.end()?std::string():it->second.replace_mod;
     },[](uint32_t addr,PpcFunc fn) {

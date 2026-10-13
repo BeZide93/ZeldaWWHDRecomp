@@ -35,7 +35,7 @@ struct PadInput {
     bool touch = false;
     float x = 0, y = 0;
 };
-inline constexpr uint32_t kPadA = 0x8000, kPadB = 0x4000, kPadUp = 0x0200, kPadDown = 0x0100;
+inline constexpr uint32_t kPadA = 0x8000, kPadB = 0x4000, kPadUp = 0x0200, kPadDown = 0x0100, kPadLeft = 0x0800, kPadRight = 0x0400;
 
 // page geometry (1280 x 720)
 inline constexpr float kPageX = 150, kPageY = 44, kPageW = 980, kPageH = 632;
@@ -45,6 +45,8 @@ inline constexpr unsigned kRowsShown = 5;
 inline constexpr float kTrackX = kPageX + kPageW - 330, kTrackY = kPageY + kPageH - 92, kTrackW = 270, kTrackH = 52;
 inline constexpr float kBackX = kPageX + 70, kBackY = kTrackY, kBackW = 150, kBackH = 52;
 inline constexpr float kCloseX = kPageX + kPageW - 64, kCloseY = kPageY + 22, kCloseR = 20;
+// the two tabs: the quests (active, new, not yet available) and the archive (done)
+inline constexpr float kTabY = kPageY + 30, kTabH = 34, kTabW = 150, kTab0X = kPageX + kPageW - 430, kTab1X = kTab0X + kTabW + 10;
 
 // colours (RGBA): parchment and ink
 inline constexpr uint32_t kShade = 0x0A0C1499, kPaper = 0xF2E4C2FF, kPaperDark = 0xE3CF9EFF, kPaperEdge = 0x8B6A3EFF,
@@ -126,6 +128,19 @@ inline uint32_t emblem_colour(const std::string& mod) {
     return kInks[story_mail::letter_key(mod, "") % (sizeof kInks / sizeof kInks[0])];
 }
 
+// The screen that shows the game's item menu, where the page (and the bag icon) belong: the GamePad,
+// or the TV when the Pro Controller has the game show its menus there. HUD screens: 0 TV, 1 GamePad.
+inline uint32_t menu_screen(bool pro_controller) { return pro_controller ? 0u : 1u; }
+// The page is laid out for 1280 x 720; the GamePad's HUD lists are 854 x 480.
+inline void fit_to_screen(std::vector<Command>& cmds, uint32_t screen) {
+    if (screen != 1) return;
+    const float k = 854.0f / 1280.0f;
+    for (Command& c : cmds) {
+        c.x *= k, c.y *= k, c.size *= k, c.thickness *= k;
+        if (c.kind != Command::Circle && c.kind != Command::CircleOutline) c.w *= k, c.h *= k;
+    }
+}
+
 class Page {
 public:
     enum class Mode : uint8_t { Closed, List, Detail };
@@ -135,10 +150,19 @@ public:
     };
 
     Mode mode() const { return mode_; }
+    int tab() const { return tab_; }
+    // the rows of the open tab: the quests (tracked first) or the archive (done quests)
+    std::vector<Row> shown(const std::vector<Row>& rows) const {
+        std::vector<Row> out;
+        for (const Row& r : rows)
+            if ((r.status == Status::Done) == (tab_ == 1)) out.push_back(r);
+        return out;
+    }
     bool open() const { return mode_ != Mode::Closed; }
     uint16_t selected_key() const { return selected_; }
     void show() {
         mode_ = Mode::List;
+        tab_ = 0;
         selected_ = 0;
         top_ = 0;
         last_ = ~0u;  // buttons held when the page opens (the A that opened it) do nothing
@@ -147,9 +171,10 @@ public:
     void hide() { mode_ = Mode::Closed; }
 
     // One game frame of input. Returns what the notebook has to do (Close: the page closed itself).
-    Action input(const PadInput& pad, const std::vector<Row>& rows) {
+    Action input(const PadInput& pad, const std::vector<Row>& all) {
         Action act;
         if (mode_ == Mode::Closed) return act;
+        const std::vector<Row> rows = shown(all);
         uint32_t held = pad.buttons;
         if (pad.ly > 0.5f) held |= kPadUp;
         if (pad.ly < -0.5f) held |= kPadDown;
@@ -167,6 +192,19 @@ public:
         touched_ = pad.touch;
         int index = index_of(rows);
         if (mode_ == Mode::List) {
+            // Left/Right or a tap on a tab: the quests or the archive
+            int want = tab_;
+            if (pressed & kPadLeft) want = 0;
+            if (pressed & kPadRight) want = 1;
+            if (tap && inside(pad.x, pad.y, kTab0X, kTabY, kTabW, kTabH)) want = 0;
+            if (tap && inside(pad.x, pad.y, kTab1X, kTabY, kTabW, kTabH)) want = 1;
+            if (want != tab_) {
+                tab_ = want;
+                top_ = 0;
+                const std::vector<Row> now = shown(all);
+                selected_ = now.empty() ? 0 : now[0].quest->key;
+                return act;
+            }
             if (rows.empty()) index = -1;
             else if (index < 0) index = 0;
             if (index >= 0 && (moved & kPadUp) && index > 0) index--;
@@ -211,10 +249,12 @@ public:
 
     // The page as draw commands (empty when closed). `portrait(quest)`: the quest's portrait image
     // is drawn by the caller's picture commands; here only its place is kept free when has_portrait.
-    std::vector<Command> draw(const std::vector<Row>& rows) const {
+    std::vector<Command> draw(const std::vector<Row>& all) const {
         std::vector<Command> out;
         if (mode_ == Mode::Closed) return out;
+        const std::vector<Row> rows = shown(all);
         sheet(out);
+        if (mode_ == Mode::List) tabs(out, all);
         const int index = index_of(rows);
         if (mode_ == Mode::Detail && index >= 0) detail(out, rows[size_t(index)]);
         else list(out, rows, index);
@@ -304,9 +344,11 @@ private:
     }
 
     void list(std::vector<Command>& out, const std::vector<Row>& rows, int index) const {
-        if (rows.empty()) {
+        if (rows.empty() && tab_ == 0) {
             out.push_back(text(kListX + 20, kListY + 60, 24, kInkSoft, "No stories yet."));
             out.push_back(text(kListX + 20, kListY + 96, 20, kInkSoft, "When a story mod writes to you, its quests are kept here."));
+        } else if (rows.empty()) {
+            out.push_back(text(kListX + 20, kListY + 60, 24, kInkSoft, "No finished stories yet."));
         }
         for (unsigned i = 0; i < kRowsShown && top_ + i < rows.size(); i++) {
             const Row& r = rows[top_ + i];
@@ -343,8 +385,21 @@ private:
         if (top_ > 0) out.push_back(text(kListX + kListW / 2, kListY - 22, 18, kInkSoft, "^"));
         if (top_ + kRowsShown < rows.size()) out.push_back(text(kListX + kListW / 2, kListY + kRowH * kRowsShown - 6, 18, kInkSoft, "v"));
         const float hy = kPageY + kPageH - 56;
+        out.push_back(text(kPageX + 80, hy + 2, 18, kInkSoft, tab_ == 0 ? "Right: archive" : "Left: quests"));
         if (!rows.empty()) hint(out, kPageX + kPageW - 430, hy, "A", "Open");
         hint(out, kPageX + kPageW - 250, hy, "B", "Close");
+    }
+
+    void tabs(std::vector<Command>& out, const std::vector<Row>& all) const {
+        size_t done = 0;
+        for (const Row& r : all) done += r.status == Status::Done;
+        const std::string labels[2] = {"Quests", "Archive" + (done ? " (" + std::to_string(done) + ")" : std::string())};
+        const float xs[2] = {kTab0X, kTab1X};
+        for (int i = 0; i < 2; i++) {
+            out.push_back(rect(xs[i], kTabY, kTabW, kTabH, i == tab_ ? kSelect : kPaperDark));
+            out.push_back(outline(xs[i], kTabY, kTabW, kTabH, i == tab_ ? kSelectEdge : kPaperEdge, i == tab_ ? 2.5f : 1.5f));
+            out.push_back(text(xs[i] + 14, kTabY + 6, 20, i == tab_ ? kInk : kInkSoft, labels[i]));
+        }
     }
 
     static void status(std::vector<Command>& out, const Row& r, float x, float y) {
@@ -397,6 +452,7 @@ private:
                                                             : q.where + " (this step has no place on the chart)"),
                     1);
         }
+        if (!q.hint.empty() && r.status != Status::Done) section("To continue", q.hint, 1);
         if (!q.known.empty()) section("What is known so far", q.known, 5);
         if (!q.reward.empty()) section("Reward", q.reward, 1);
         // buttons: Back (B) and Show on chart (A)
@@ -412,6 +468,7 @@ private:
     }
 
     Mode mode_ = Mode::Closed;
+    int tab_ = 0;
     uint16_t selected_ = 0;
     unsigned top_ = 0, repeat_ = 0;
     uint32_t last_ = 0;

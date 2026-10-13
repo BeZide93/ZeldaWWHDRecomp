@@ -9,10 +9,12 @@
 #pragma once
 #include <cstdint>
 #include <functional>
+#include <initializer_list>
 #include <string>
 #include <vector>
 
 #include "story_notebook_list.h"
+#include "mod_json.h"
 #include "story_notebook_bag.h"
 
 struct Cpu;
@@ -36,6 +38,16 @@ int32_t no_place(const std::string& mod, const std::string& quest);
 int32_t known(const std::string& mod, const std::string& quest, const std::string& text);
 int32_t portrait(const std::string& mod, const std::string& quest, const std::string& path, const std::string& package_dir);
 int32_t done(const std::string& mod, const std::string& quest);
+// The quests a mod declares in its manifest.json ("quests"), when the mod is loaded: false (logged)
+// if the declaration is not accepted.
+bool declare(const std::string& mod, const std::string& mod_name, const mods::json::Value& manifest);
+void declared_tick();  // what pad() runs a few times a second (tests)
+// wwhd_quest_carry: Link carries (or no longer carries) the quest's letter, shown in the Delivery Bag
+int32_t carry(const std::string& mod, const std::string& quest, bool carried);
+// wwhd_quest_talk: at that step, while the quest is tracked and its letter carried, the resident says
+// the lines (one box), takes the letter, gives the reward (a rupee item or 0) and the quest is done
+int32_t talk(const std::string& mod, const std::string& quest, uint32_t step, const std::string& resident, const std::string& lines,
+             uint32_t reward);
 int32_t state(const std::string& mod, const std::string& quest);
 
 // The quests of this session (registration order) and the rows of the current save file.
@@ -58,7 +70,7 @@ bool imported();
 // After all guest modules are loaded (and after story_mail::install): the item menu hooks.
 void install(const std::function<std::string(uint32_t)>& replaced_by, const std::function<void(uint32_t, void (*)(Cpu*))>& replace);
 bool installed();
-void set_game_calls(void (*original)(Cpu*, uint32_t));
+void set_game_calls(void (*original)(Cpu*, uint32_t), uint32_t (*call)(Cpu*, uint32_t, std::initializer_list<uint32_t>));
 void state_loaded();
 
 // The item menu hooks, exposed for runtime/tools/story_notebook_test.cpp
@@ -70,6 +82,8 @@ void touch_select(Cpu* c);    // hdMenuItem_c::selectTouchEnter()
 void set_visible(Cpu* c);     // hdMenuItem_c::setVisible(visible)
 void execute_window(Cpu* c);  // hdMenuMain_c::executeWindow()
 void cursor_float(Cpu* c);    // hdMenuItem_c::beginCursorSelection(point)
+void people_message(Cpu* c);  // daNpcPeople_c::getMsg()
+void people_execute(Cpu* c);  // daNpcPeople_Execute(actor)
 }  // namespace hooks
 // The notebook's icon in the bag window this frame (story_notebook_bag.h), and why; for tests
 IconPlace icon_place();

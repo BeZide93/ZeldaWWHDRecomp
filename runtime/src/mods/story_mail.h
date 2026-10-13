@@ -51,7 +51,12 @@ void install(const std::function<std::string(uint32_t)>& replaced_by, const std:
 bool installed();
 void state_loaded();  // a full state was loaded: forget the letter being shown
 
-// guest memory for replaced message texts (host-only, at least 4 KiB), before install()
+// A resident's line: while armed, the message `number` shows `text` (kept alive by the caller) for the
+// talk that looks it up; unsay() ends it. Used by story_notebook's resident takeovers.
+void say(uint32_t number, const std::u16string* text);
+void unsay();
+
+// guest memory for replaced message texts (host-only, at least 6 KiB), before install()
 void set_text_buffers(uint32_t guest, uint32_t bytes);
 // game code called from the hooks (guestmods::call_original / guest_call in the game)
 void set_game_calls(void (*original)(Cpu*, uint32_t), uint32_t (*call)(Cpu*, uint32_t, std::initializer_list<uint32_t>));

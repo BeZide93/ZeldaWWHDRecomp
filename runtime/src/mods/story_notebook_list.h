@@ -33,6 +33,9 @@ struct Quest {
     std::string title, reward, condition;  // condition: empty when the quest can be started now
     std::string next, where, known;        // the current step: what to do next, the island, what is known so far
     std::string portrait;                  // package image (assets/... or textures/...), empty: the mod's emblem
+    std::string hint;                      // set by the port: what the player has to do in the notebook (e.g. track it)
+    bool hidden = false;                   // journal "hidden" / "on_trigger" (not yet revealed): not in the notebook
+    bool texts_from_mod = false;           // the mod's code set the step texts this session (they win over the manifest's)
     bool has_place = false;                // the next step has a place on the sea chart
     float x = 0, z = 0;
 };
@@ -95,6 +98,7 @@ inline std::vector<Row> rows(const std::vector<Quest>& quests, const story_mail:
     const bool ok = b.usable();
     const uint16_t tracked = ok ? tracked_key(b) : 0;
     for (const Quest& q : quests) {
+        if (q.hidden) continue;
         const uint8_t step = ok ? saved_step(b, q.key) : 0;
         const Status s = status_of(q, step);
         all.push_back({&q, s, step, tracked && q.key == tracked && s != Status::Done});

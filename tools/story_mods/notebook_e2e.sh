@@ -39,7 +39,7 @@ pid=$!
 for i in {1..900}; do kill -0 $pid 2>/dev/null || break; [ -f frame_4900_drc.png ] && break; sleep 1; done
 sleep 3; kill $pid 2>/dev/null || true; sleep 1; kill -9 $pid 2>/dev/null || true
 fail=0
-for want in 'letter "lantern" state 2' 'the story notebook is in this save file' 'quest "lantern" step 1 reached' \
+for want in 'letter "lantern" state 2' 'the story notebook is in this save file' 'quest "lantern" started by its letter' \
             'the delivery bag shows the notebook' 'page opened' 'tracked: shown on the sea chart' 'page closed' \
             '\[chart\] menu [0-9A-F]*: pane [0-9] at'; do
   if grep -q "$want" log; then echo "ok   $want"; else echo "FAIL $want"; fail=1; fi

@@ -235,3 +235,12 @@ s32 wwhd_quest_known(const char* quest_id, const char* known);
 s32 wwhd_quest_portrait(const char* quest_id, const char* png_path); /* assets/ or textures/, up to 256 x 256 */
 s32 wwhd_quest_done(const char* quest_id);
 s32 wwhd_quest_state(const char* quest_id);
+/* A letter Link carries for the quest (shown in the Delivery Bag, never in the game's inventory):
+ * carried 1 gives it, 0 takes it away. */
+s32 wwhd_quest_carry(const char* quest_id, s32 carried);
+/* Talking to a game resident: at `step`, while this quest is the TRACKED quest and Link carries its
+ * letter, talking to `resident` shows `lines` (UTF-8, up to three lines, 240 bytes) instead of the
+ * resident's own line, takes the letter, gives `reward` (a rupee item 0x01..0x06, 0 none, through the
+ * game's get-item scene) and the quest is done. Untracked, the resident is the game's. Residents:
+ * "windfall-harbour" (the man on Windfall's east dock, by day). */
+s32 wwhd_quest_talk(const char* quest_id, u32 step, const char* resident, const char* lines, u32 reward);
