@@ -211,6 +211,56 @@ class SetupJobTests(unittest.TestCase):
             self.assertTrue(Path(result["library"]).is_file())
             self.assertEqual((self.job / "input/disc.key").read_bytes(), payload)
 
+    def test_empty_or_garbage_memory_key_identifies_its_role(self):
+        self.value["input"] = {"kind": "image", "path": "input/dump"}
+        (self.job / "input/dump").write_bytes(b"authored synthetic disc input")
+        self.value["extractor"] = {"path": "authored-extractor", "identity": "authored-fixture"}
+        self.configuration.write_text(json.dumps(self.value))
+        for name in ("disc", "common"):
+            for value in (b"", b"garbage"):
+                with self.assertRaisesRegex(ValueError, "Invalid " + name + " key file"):
+                    run(self.configuration, self.package, self.native, self.adapter, key_files={name: value})
+                self.assertEqual(self.state()["state"], "failed")
+                self.assertFalse((self.job / "input/disc.key").exists())
+                self.assertFalse((self.job / "input/common.key").exists())
+
+    def test_cemu_list_from_read_only_memory_supplies_both_keys_without_persistence(self):
+        self.value["input"] = {"kind": "image", "path": "input/dump"}
+        (self.job / "input/dump").write_bytes(b"authored synthetic disc input")
+        self.value["extractor"] = {"path": "authored-extractor", "identity": "authored-fixture"}
+        self.configuration.write_text(json.dumps(self.value))
+        disc, common = bytes(range(16)), bytes(range(16, 32))
+        payload = b"# synthetic Cemu list\njunk\n" + ("00" * 16 + " # wrong\n" + common.hex() +
+                  " # common\n" + disc.hex() + " # disc\n").encode()
+
+        def adapter_factory(*args):
+            adapter = self.adapter(*args)
+            def info(image, keys):
+                if keys.disc != disc: return "disc_key_wrong", "", None
+                if keys.common != common: return "common_key_wrong", "", None
+                return None, "", {"title_id": "0005000010143500"}
+            def extract(path, kind, extractor, identity, native, request):
+                keys, _, why, notices = adapter.setup.resolve_disc_keys(str(path), request,
+                    info_reader=info, file_reader=request["_entries"].get)
+                self.assertIsNone(why)
+                self.assertEqual((keys.disc, keys.common), (disc, common))
+                for notice in notices:
+                    adapter.emit({"stage": "extract", "state": "keys_found", "detail": notice})
+                return self.game  # authored extraction boundary, not a cryptographic disc fixture
+            adapter.extract = extract
+            return adapter
+
+        for field in ("disc", "common"):
+            result = run(self.configuration, self.package, self.native, adapter_factory, key_files={field: payload})
+            self.assertTrue(Path(result["library"]).is_file())
+            self.assertEqual(len(self.state()["key_sources"]), 2)
+            for path in self.job.rglob("*"):
+                if path.suffix == ".json":
+                    self.assertNotIn(disc.hex(), path.read_text())
+                    self.assertNotIn(common.hex(), path.read_text())
+            self.assertFalse((self.job / "input/disc.key").exists())
+            self.assertFalse((self.job / "input/common.key").exists())
+
     def test_invalid_private_key_can_be_corrected_in_same_job(self):
         first = self.execute()
         ready = (self.job / "ready.json").read_bytes()

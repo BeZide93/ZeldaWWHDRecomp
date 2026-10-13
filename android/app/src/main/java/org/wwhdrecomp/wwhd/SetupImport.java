@@ -34,7 +34,7 @@ public final class SetupImport {
         return new File(job, "replace-" + key + "-key.json");
     }
 
-    /** Queue only the key URI; the worker atomically copies it at its next safe start. */
+    /** Queue only the key URI; the worker reads it at its next safe start; key bytes are never copied. */
     public static void selectKey(File job, String key, Uri uri) throws Exception {
         File pending = keyReplacement(job, key);
         JSONObject source = SetupStore.read(new File(job, "source.json"));
@@ -48,23 +48,27 @@ public final class SetupImport {
             source.put(key + "_uri", uri.toString());
             SetupStore.write(new File(job, "source.json"), source);
         }
+        SetupKeyAccess.clearFailure(job, key);
     }
 
     private static void replaceKeys(Context context, File job, JSONObject configuration, Control control) throws Exception {
-        JSONObject input = configuration.getJSONObject("input");
+        JSONObject source = SetupStore.read(new File(job, "source.json"));
         for (String key : new String[] {"disc", "common"}) {
             File pending = keyReplacement(job, key);
-            if (!pending.isFile()) continue;
-            if (!input.getString("kind").equals("image") || !input.getString(key + "_key").equals("input/" + key + ".key"))
-                throw new IOException("Invalid private key destination");
-            JSONObject selection = SetupStore.read(pending);
-            if (selection.getInt("schema") != 1) throw new IOException("Unsupported key selection version");
-            control.checkpoint();
-            copy(context, Uri.parse(selection.getString("uri")), inside(job, input.getString(key + "_key")),
-                new File(job, "import-partial/" + key), -1, -1, true, control, count -> {});
-            // A crash before removal safely repeats the bounded atomic copy.
-            SetupStore.remove(pending);
+            if (pending.isFile()) {
+                JSONObject selection = SetupStore.read(pending);
+                if (selection.getInt("schema") != 1) throw new IOException("Unsupported key selection version");
+                control.checkpoint();
+                source.put(key + "_uri", selection.getString("uri"));
+                configuration.getJSONObject("input").remove(key + "_key");
+                SetupStore.write(new File(job, "source.json"), source);
+                SetupStore.write(new File(job, "job.json"), configuration);
+                SetupStore.remove(pending);
+            }
+            // Keep legacy copies and references through pause, failure and process death.
+            // A deliberate replacement changes only its role; old bytes remain until completion.
         }
+        SetupStore.write(new File(job, "job.json"), configuration);
     }
 
     public static JSONObject prepare(Context context, File job, Control control) throws Exception {
@@ -73,7 +77,8 @@ public final class SetupImport {
         if (configuration.isFile()) {
             JSONObject existing = SetupStore.read(configuration);
             replaceKeys(context, job, existing, control);
-            return existing;
+            SetupKeyAccess.cleanupCompleted(job);
+            return SetupStore.read(configuration);
         }
         JSONObject source = SetupStore.read(new File(job, "source.json"));
         if (source.getInt("schema") != 1) throw new IOException("Unsupported input selection version");
@@ -128,15 +133,9 @@ public final class SetupImport {
             control.progress(copied, total, index + 1, files.length());
         }
         JSONObject input = new JSONObject().put("kind", kind).put("path", kind.equals("folder") ? "input/game" : "input/dump");
-        if (kind.equals("image")) {
-            for (String key : new String[] {"disc", "common"}) {
-                control.checkpoint();
-                String relative = "input/" + key + ".key";
-                // Never put key bytes or key digests into progress/checkpoint records.
-                copy(context, Uri.parse(source.getString(key + "_uri")), inside(job, relative), new File(job, "import-partial/" + key), -1, -1,
-                    true, control, count -> {});
-                input.put(key + "_key", relative);
-            }
+        // An older release may have been killed after copying keys, before publishing job.json.
+        if (kind.equals("image")) for (String key : new String[] {"disc", "common"}) {
+            if (new File(job, "input/" + key + ".key").isFile()) input.put(key + "_key", "input/" + key + ".key");
         }
         control.checkpoint();
         JSONObject result = new JSONObject().put("schema", 1).put("input", input);

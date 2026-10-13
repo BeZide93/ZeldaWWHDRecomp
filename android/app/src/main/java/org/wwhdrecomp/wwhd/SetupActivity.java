@@ -39,6 +39,7 @@ public class SetupActivity extends Activity {
     private final ArrayList<Button> pickers = new ArrayList<>();
     private boolean phoneSetup;
     private String actionMessage;
+    private TextView keysHint;
     private String pickerJob;
     private String shaderWarmJob;
     private static final int FOLDER = 10, ARCHIVE = 11, IMAGE = 12, DISC = 13, COMMON = 14, RESTORE = 15;
@@ -159,6 +160,9 @@ public class SetupActivity extends Activity {
         choose = button(layout, getString(R.string.setup_choose), this::chooseKind);
         pickers.add(choose);
         restore = button(layout, getString(R.string.setup_restore), () -> pick(RESTORE));
+        keysHint = new TextView(this);
+        keysHint.setText(R.string.setup_keys_detail);
+        layout.addView(keysHint);
         disc = button(layout, getString(R.string.setup_disc_key), () -> pick(DISC));
         common = button(layout, getString(R.string.setup_common_key), () -> pick(COMMON));
         resume = button(layout, getString(R.string.setup_start), () -> control(SetupService.RESUME));
@@ -256,8 +260,10 @@ public class SetupActivity extends Activity {
                 if (!source.getString("kind").equals("image")) throw new Exception("Keys are only needed for disc images");
                 getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
                 SetupImport.selectKey(current, request == DISC ? "disc" : "common", uri);
+                String other = request == DISC ? "common" : "disc";
+                if (!source.has(other + "_uri")) SetupImport.selectKey(current, other, uri);
                 if (new File(current, "job.json").isFile())
-                    actionMessage = "Replacement key selected. Tap Start / resume to copy it privately and retry. Your dump copy is retained.";
+                    actionMessage = "Replacement key file selected. Tap Start / resume to read it and retry. Your dump copy is retained.";
             } else if (request == FOLDER || request == ARCHIVE || request == IMAGE) {
                 getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
                 String id = UUID.randomUUID().toString().replace("-", "");
@@ -302,15 +308,18 @@ public class SetupActivity extends Activity {
 
     private boolean keyReady(File job, JSONObject source, String key, boolean correcting, java.util.Set<String> grants) throws Exception {
         if (source == null) return false;
+        if (SetupKeyAccess.failed(job, key)) return false;
         if (correcting) {
             File pending = SetupImport.keyReplacement(job, key);
             if (pending.isFile()) return grants.contains(SetupStore.read(pending).getString("uri"));
-            return new File(job, "input/" + key + ".key").isFile();
+            File configuration = new File(job, "job.json");
+            if (configuration.isFile() && SetupKeyAccess.legacyFile(job, SetupStore.read(configuration).getJSONObject("input"), key) != null) return true;
+            return grants.contains(source.optString(key + "_uri"));
         }
         return grants.contains(source.optString(key + "_uri"));
     }
 
-    private static final String CHECKPOINTS = "Setup keeps a private copy of your input. Leave room for that copy, extracted files, compiled output and at least 1 GiB working reserve. Keys are selected as files and kept private.\n\nYou can close this screen while setup runs. Import resumes from verified complete files; an interrupted file copy or extraction restarts. Python and compiler resource preparation pause during unpacking and restart the incomplete stage. Checksum validation and translation respond to pause requests; an interrupted translation restarts. Compilation and linking also respond to pause requests. An interrupted command restarts; verified objects are kept. Saves stay in their current folder.\n\nThe optional PC route still uses the game folder copied over USB.";
+    private static final String CHECKPOINTS = "Setup keeps a private copy of your input. Leave room for that copy, extracted files, compiled output and at least 1 GiB working reserve. Selected key files are read only. Earlier private key copies are retained until setup completes.\n\nYou can close this screen while setup runs. Import resumes from verified complete files; an interrupted file copy or extraction restarts. Python and compiler resource preparation pause during unpacking and restart the incomplete stage. Checksum validation and translation respond to pause requests; an interrupted translation restarts. Compilation and linking also respond to pause requests. An interrupted command restarts; verified objects are kept. Saves stay in their current folder.\n\nThe optional PC route still uses the game folder copied over USB.";
 
     /** The top of the screen: one plain sentence, a detail line and the bar. */
     private void plainPhase(File job, JSONObject host, String state, boolean needsKeys, boolean canStart) throws Exception {
@@ -402,6 +411,7 @@ public class SetupActivity extends Activity {
                 boolean accessMissing = importing && !grants.contains(source.optString("uri"));
                 restore.setVisibility(accessMissing ? android.view.View.VISIBLE : android.view.View.GONE);
                 restore.setEnabled(accessMissing && replaceable(job));
+                keysHint.setVisibility(needsKeys ? android.view.View.VISIBLE : android.view.View.GONE);
                 disc.setVisibility(needsKeys ? android.view.View.VISIBLE : android.view.View.GONE);
                 common.setVisibility(needsKeys ? android.view.View.VISIBLE : android.view.View.GONE);
                 setTextIfChanged(disc, getString(discReady ? R.string.setup_disc_key_ready : source != null && source.has("disc_uri") ? R.string.setup_disc_key_again : R.string.setup_disc_key));
@@ -463,7 +473,7 @@ public class SetupActivity extends Activity {
                         text += "\nDump access is missing. Restore access to the same selected dump if another file copy is needed. Completed private copies are retained.";
                     if (needsKeys) text += "\n" + (resume.isEnabled() ? correctingKeys ?
                         "Private dump retained. Change either key if needed, then tap Start / resume to retry." :
-                        "Both key files selected. Tap Start." : "Select both key files before starting.");
+                        getString(R.string.setup_keys_ready) : getString(R.string.setup_keys_detail));
                     if (value.optString("state").equals("importing")) {
                         File imported = new File(job, "import-progress.json");
                         if (imported.isFile()) {
@@ -473,7 +483,10 @@ public class SetupActivity extends Activity {
                     }
                     File progress = new File(job, "state.json");
                     if (value.optString("state").equals("running") && progress.isFile()) {
-                        JSONObject event = SetupStore.read(progress).optJSONObject("last_event");
+                        JSONObject worker = SetupStore.read(progress);
+                        org.json.JSONArray keySources = worker.optJSONArray("key_sources");
+                        if (keySources != null) for (int i = 0; i < keySources.length(); i++) text += "\n" + keySources.getString(i);
+                        JSONObject event = worker.optJSONObject("last_event");
                         String compiling = event == null || !event.optString("stage").equals("compile") ? null :
                             SetupPolicy.compileProgress(event.optString("state"), event.optInt("compiled"), event.optInt("reused"),
                                 event.optInt("total"), event.optLong("eta_seconds", -1));

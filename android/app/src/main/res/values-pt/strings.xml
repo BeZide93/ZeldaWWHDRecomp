@@ -26,7 +26,8 @@
     <string name="setup_common_key_ready">Chave comum escolhida (trocar)</string>
     <string name="setup_common_key_again">Chave comum: escolha de novo</string>
     <string name="setup_keys">Escolha os dois arquivos de chave</string>
-    <string name="setup_keys_detail">Uma imagem de disco precisa da chave do disco e da chave comum do Wii U.</string>
+    <string name="setup_keys_ready">Chaves selecionadas. Toque em Iniciar.</string>
+    <string name="setup_keys_detail">Imagens de disco precisam de duas chaves; escolha keys.txt do Cemu uma vez para ambas. Ou use «Converter para arquivo comprimido do Wii U (.wua)» no Cemu: não precisa de chaves.</string>
     <string name="setup_selected">Seu jogo foi escolhido</string>
     <string name="setup_selected_detail">Toque em Começar para preparar o jogo para este dispositivo Android.</string>
     <string name="setup_start">Começar</string>

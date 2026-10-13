@@ -229,6 +229,7 @@ public class SetupService extends Service {
                         host("complete", null, "Shader preparation skipped or failed; shaders will compile during play.");
                     } else host("complete", null, null);
                 } else host("complete", null, null);
+                SetupKeyAccess.cleanupCompleted(active);
             } catch (Pause requested) { paused = true; }
             catch (Exception failure) {
                 error = failure;
@@ -251,9 +252,22 @@ public class SetupService extends Service {
     }
 
     protected final void executePythonBuild(String module, File configuration) throws Exception {
-        EmbeddedPython.execute(this, module,
-                new JSONArray().put("--job").put(configuration.getPath()).toString(),
-                () -> checkPause(configuration.getParentFile()));
+        JSONArray arguments = new JSONArray().put("--job").put(configuration.getPath());
+        java.util.ArrayList<android.os.ParcelFileDescriptor> descriptors = new java.util.ArrayList<>();
+        try {
+            File active = configuration.getParentFile();
+            JSONObject value = SetupStore.read(configuration);
+            if (value.getJSONObject("input").optString("kind").equals("image")) {
+                for (String key : new String[] {"disc", "common"}) {
+                    android.os.ParcelFileDescriptor descriptor = SetupKeyAccess.open(this, active, value, key);
+                    descriptors.add(descriptor);
+                    arguments.put("--" + key + "-key-fd").put(Integer.toString(descriptor.getFd()));
+                }
+            }
+            EmbeddedPython.execute(this, module, arguments.toString(), () -> checkPause(configuration.getParentFile()));
+        } finally {
+            for (android.os.ParcelFileDescriptor descriptor : descriptors) descriptor.close();
+        }
     }
 
     /** Parallel compiler processes for this phone (SetupPolicy.compileJobs). */
@@ -284,7 +298,7 @@ public class SetupService extends Service {
                 updateNotification();
                 return; // Sensor changes or a notification action can resume.
             }
-            if (failure != null) host("failed", null, failure.toString());
+            if (failure != null) host("failed", null, failure instanceof SetupKeyAccess.Missing ? failure.getMessage() : failure.toString());
             // The run ended: a later run asks again before skipping heat or battery pauses.
             SetupStore.remove(new File(job, HEAT_OVERRIDE));
             SetupStore.remove(new File(job, BATTERY_OVERRIDE));

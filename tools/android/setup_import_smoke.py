@@ -21,22 +21,34 @@ def main():
     if adb("shell", "getprop", "ro.kernel.qemu").stdout.strip() != "1":
         raise RuntimeError("This synthetic probe runs only on an emulator")
     package = "org.wwhdrecomp.wwhd"
-    result_path = "files/setup-import-smoke.json"
-    adb("shell", "run-as", package, "rm", "-f", result_path)
-    adb("shell", "am", "start", "--activity-clear-top", "-n", package + "/.SetupImportSmokeActivity")
-    deadline = time.monotonic() + 60
-    while time.monotonic() < deadline:
-        result = adb("shell", "run-as", package, "cat", result_path, check=False)
-        if result.returncode == 0:
-            value = json.loads(result.stdout)
-            args.output.parent.mkdir(parents=True, exist_ok=True)
-            args.output.write_text(json.dumps(value, indent=2) + "\n")
-            if not value.get("passed"):
-                raise RuntimeError(value.get("error", "Import checks failed"))
-            print("SAF import checks passed")
-            return
-        time.sleep(0.2)
-    raise RuntimeError("Timed out waiting for SAF import checks")
+    def probe(activity, result_path, phase=None):
+        adb("shell", "run-as", package, "rm", "-f", result_path)
+        command = ["shell", "am", "start", "--activity-clear-top", "-n", package + "/." + activity]
+        if phase is not None:
+            command += ["--es", "phase", phase]
+        adb(*command)
+        deadline = time.monotonic() + 60
+        while time.monotonic() < deadline:
+            result = adb("shell", "run-as", package, "cat", result_path, check=False)
+            if result.returncode == 0:
+                value = json.loads(result.stdout)
+                if not value.get("passed"):
+                    raise RuntimeError(value.get("error", "Import checks failed"))
+                return value
+            time.sleep(0.2)
+        raise RuntimeError("Timed out waiting for SAF import checks")
+
+    value = probe("SetupImportSmokeActivity", "files/setup-import-smoke.json")
+    value["key_recovery"] = []
+    for phase in ("prepare", "restart", "revoked", "lost-restart", "reselect", "replacement-restart",
+                  "moved", "lost-restart", "reselect", "legacy", "legacy-restart", "legacy-preconfiguration", "legacy-complete"):
+        # Actual process death: no in-memory key or selection can survive this boundary.
+        adb("shell", "am", "force-stop", package)
+        result = probe("SetupKeyRecoverySmokeActivity", "files/setup-key-recovery-" + phase + ".json", phase)
+        value["key_recovery"].append(result)
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(json.dumps(value, indent=2) + "\n")
+    print("SAF import and key recovery checks passed")
 
 
 if __name__ == "__main__":
