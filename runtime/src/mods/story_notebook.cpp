@@ -1132,7 +1132,8 @@ void sail_after(Cpu* c, uint32_t ship, uint64_t now) {
     }
     const char* refusal = sail_refusal(m);
     if (refusal) {
-        if (trace() && refusal != g_sail.refusal) LOG("[notebook] quest %04X: the King of Red Lions' line waits: %s", line.quest, refusal);
+        if (trace() && refusal != g_sail.refusal)
+            LOG("[notebook] quest %04X: the King of Red Lions' line waits: %s (step %llu)", line.quest, refusal, (unsigned long long)now);
         g_sail.refusal = refusal;
         return;
     }
@@ -1142,8 +1143,8 @@ void sail_after(Cpu* c, uint32_t ship, uint64_t now) {
     st32(ship + kAttentionFlags, (ld32(ship + kAttentionFlags) & ~kAttnShip) | kAttnLockonTalk | kAttnSpeak);
     st16(ship + kEventCondition, uint16_t(ld16(ship + kEventCondition) | kConditionCanTalk));
     if (g_sail.refusal || trace())
-        LOG("[notebook] quest %04X: the King of Red Lions' line for step %u is ordered (%s)", line.quest, line.step,
-            m.riding ? "Link rides the boat" : "Link stands in front of the boat");
+        LOG("[notebook] quest %04X: the King of Red Lions' line for step %u is ordered (%s, step %llu)", line.quest, line.step,
+            m.riding ? "Link rides the boat" : "Link is close in front of the boat", (unsigned long long)now);
     g_sail.refusal = nullptr;
     g_sail.phase = Sail::Ordered, g_sail.ship = ship, g_sail.line = line, g_sail.since = now;
 }
@@ -1184,8 +1185,8 @@ void ship_talk_init(Cpu* c) {
     story_mail::append_utf16(g_sail.line.text, true, g_sail.text);
     story_mail::say(kSailCarrier, &g_sail.text);
     g_sail.phase = Sail::Talking;
-    LOG("[notebook] quest %04X: the King of Red Lions says the quest's line (step %u; his message was %X)", g_sail.line.quest,
-        g_sail.line.step, g_sail.saved_message);
+    LOG("[notebook] quest %04X: the King of Red Lions says the quest's line (step %u; his message was %X; logic step %llu)", g_sail.line.quest,
+        g_sail.line.step, g_sail.saved_message, (unsigned long long)g_step.load(std::memory_order_relaxed));
 }
 
 }  // namespace hooks

@@ -107,6 +107,7 @@ int32_t state(const std::string&,const std::string&) {return kResultInvalid;}
 void note_import() {}
 void set_game_calls(void (*)(Cpu*,uint32_t),uint32_t (*)(Cpu*,uint32_t,std::initializer_list<uint32_t>)) {}
 void install(const std::function<std::string(uint32_t)>&,const std::function<void(uint32_t,void (*)(Cpu*))>&) {}
+void install_sail(const std::function<std::string(uint32_t)>&,const std::function<void(uint32_t,void (*)(Cpu*))>&) {}
 void state_loaded() {}
 int32_t carry(const std::string&,const std::string&,bool) {return kResultInvalid;}
 bool declare(const std::string&,const std::string&,const mods::json::Value&) {return true;}
