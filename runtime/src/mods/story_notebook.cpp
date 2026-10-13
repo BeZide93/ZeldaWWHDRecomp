@@ -1,0 +1,435 @@
+// The story notebook (story_notebook.h, docs/mod-sdk-v2.md "The story notebook"): the services, the
+// page driver and the item menu entry.
+#include "story_notebook.h"
+#include "story_notebook_page.h"
+#include "story_chart.h"
+#include "story_mail.h"
+#include "guest_hud.h"
+#include "guest_png.h"
+
+#include <atomic>
+#include <cmath>
+#include <cstdlib>
+#include <map>
+#include <memory>
+#include <mutex>
+
+#include "guest_addr.h"
+#include "input.h"
+#include "runtime.h"
+
+namespace story_notebook {
+namespace {
+
+const uint32_t kSavePtr = GD(0x101F84DC);  // save base pointer (d_com_inf_game)
+const std::string kOwner = "port:story-notebook";  // the HUD list's owner (no mod ID has a colon)
+
+// The item menu (HD decomp MENU-menu_main, hd_screen_menu_main.cpp / hd_screen_menu_item.cpp at
+// decomp-readable 02a56a87). The notebook is kept in the Delivery Bag window: its eight places show
+// the save's eight delivery-bag entries (keys 0x30..0x37 = dSv_player_bag_item_c::mReserve[0..7], 0xFF
+// empty). When the window is built, the first empty place shows the notebook: the save read for that
+// key returns kNotebookItem (an item number no game item uses, so no game code knows it), whose icon
+// is a letter's. Nothing is written to the save: removing the mods leaves the place empty again.
+const uint32_t kInventoryItem = GC(0x02632D94);   // u32 hdMenuItem_inventoryItem(key): the save's item for a menu key
+const uint32_t kWindowBuild = GC(0x02692548);     // its call in executeSaveChildren (the bag window opens)
+const uint32_t kWindowInit = GC(0x02693C24);      // its call in initializeSaveChildren (the menu opens on a window)
+const uint32_t kIconFrame = GC(0x0262F880);       // u32 itemForSlot(item, r4 = item number): the icon frame
+const uint32_t kOpenChild = GC(0x0268F060);       // hdMenuMain_c::openSelectedChild(index): A on a place: the item's caption
+const uint32_t kTouchSelect = GC(0x02630A64);     // hdMenuItem_c::selectTouchEnter(): a place is touched (an icon is picked up)
+const uint32_t kSelectedValue = GC(0x0268F420);   // hdMenuMain_c::getSelectedItemValue(receiver): the key X/Y/R would take
+const uint32_t kAssignButton = GC(0x02714B0C);    // game system: put a menu key on X/Y/R (controller, button, key)
+constexpr uint32_t kFirstDeliveryKey = 0x30, kDeliveryPlaces = 8, kEmpty = 0xFF;
+constexpr uint32_t kNotebookItem = 0xA0;          // dItemNo SALVAGE_ITEM_2: unused by the game, no menu mapping
+constexpr uint32_t kNotebookIcon = 0x24;          // the icon frame of the Cabana Deed (a sheet of parchment, the get-item stand-in)
+constexpr uint32_t kMenuChildren = 0x48, kItemNumber = 0xEC;  // hdParts_c::mChildren {count, data}; hdMenuItem_c::mSlot
+
+std::mutex g_mu;
+std::vector<Quest> g_quests;  // registered this session, in registration order
+// portraits: package images per quest key, created in the HUD store on demand
+struct Portrait {
+    guestmods::hud::Image pixels;
+    guestmods::hud::Handle handle = 0;
+    uint64_t generation = 0;
+};
+std::map<uint16_t, Portrait> g_portraits;
+bool g_imported = false, g_installed = false;
+std::atomic<bool> g_open{false};
+Page g_page;  // game thread
+void (*g_original)(Cpu*, uint32_t) = nullptr;
+
+bool trace() {
+    static const bool on = [] { const char* e = getenv("WWHD_NOTEBOOK_TRACE"); return e && *e == '1'; }();
+    return on;
+}
+
+uint32_t save_base() { return ld32(kSavePtr); }
+bool have_save() { return save_base() != 0; }
+story_mail::Book book() { return story_mail::Book(mem::ptr(save_base() + story_mail::kBookOffset)); }
+
+bool one_line(const std::string& s, size_t max) {
+    std::u16string ignored;
+    return s.size() <= max && story_mail::append_utf16(s, false, ignored);
+}
+bool lines(const std::string& s, size_t max) {
+    std::u16string ignored;
+    return s.size() <= max && story_mail::append_utf16(s, true, ignored);
+}
+
+Quest* find(const std::string& mod, const std::string& quest) {
+    for (Quest& q : g_quests)
+        if (q.mod == mod && q.id == quest) return &q;
+    return nullptr;
+}
+int32_t saved(uint16_t key) {
+    if (!have_save()) return kResultNew;
+    story_mail::Book b = book();
+    return b.usable() ? saved_step(b, key) : kResultNew;
+}
+
+// story_chart's source of the tracked quest's marker (game thread)
+bool tracked_marker(float& x, float& z, std::string& label) {
+    if (!have_save()) return false;
+    story_mail::Book b = book();
+    std::lock_guard lock(g_mu);
+    const Quest* q = tracked_place(g_quests, b);
+    if (!q) return false;
+    x = q->x, z = q->z, label = q->title;
+    return true;
+}
+
+// the save's delivery-bag entry of a key (the game's own read)
+uint32_t reserve(Cpu* c, uint32_t key) {
+    Cpu probe = *c;
+    probe.r[3] = key;
+    g_original(&probe, kInventoryItem);
+    return probe.r[3] & 0xFF;
+}
+// The key whose place shows the notebook now: the first empty delivery place (0: none)
+uint32_t notebook_key(Cpu* c) {
+    if (!have_save() || !notebook_owned()) return 0;
+    for (uint32_t k = kFirstDeliveryKey; k < kFirstDeliveryKey + kDeliveryPlaces; k++)
+        if (reserve(c, k) == kEmpty) return k;
+    return 0;  // all eight hold game items: the notebook waits for a free place
+}
+
+void publish(const std::vector<Row>& rows) {
+    auto& store = guestmods::hud::store();
+    if (!g_page.open()) {
+        store.drop(kOwner);
+        return;
+    }
+    const guestmods::hud::Handle list = store.begin(kOwner, 2);  // TV and GamePad
+    if (!list) return;
+    for (Command& c : g_page.draw(rows)) store.append(kOwner, list, std::move(c));
+    if (g_page.mode() == Page::Mode::List) {  // portraits in the rows that show them
+        const uint64_t generation = store.state_generation();
+        for (unsigned i = 0; i < kRowsShown && g_page.top() + i < rows.size(); i++) {
+            const Quest& q = *rows[g_page.top() + i].quest;
+            auto it = g_portraits.find(q.key);
+            if (q.portrait.empty() || it == g_portraits.end()) continue;
+            Portrait& p = it->second;
+            if (!p.handle || p.generation != generation) {
+                p.handle = store.create_image(kOwner, p.pixels.width, p.pixels.height, p.pixels.width * 4, p.pixels.rgba.data(),
+                                              p.pixels.rgba.size());
+                p.generation = generation;
+            }
+            if (!p.handle) continue;
+            float cx, cy, r;
+            Page::emblem_place(i, cx, cy, r);
+            Command c;
+            c.x = cx - r, c.y = cy - r, c.w = 2 * r, c.h = 2 * r;
+            store.picture(kOwner, list, p.handle, c);
+        }
+    }
+    store.commit(kOwner, list);
+}
+
+}  // namespace
+
+int32_t define(const std::string& mod, const std::string& mod_name, const std::string& quest, const std::string& title,
+               const std::string& reward, const std::string& condition) {
+    if (!story_mail::valid_id(quest) || title.empty() || !one_line(title, kMaxTitleBytes) || !one_line(reward, kMaxRewardBytes) ||
+        !one_line(condition, kMaxConditionBytes))
+        return kResultInvalid;
+    const uint16_t key = quest_key(mod, quest);
+    {
+        std::lock_guard lock(g_mu);
+        if (Quest* known_quest = find(mod, quest)) {
+            known_quest->title = title, known_quest->reward = reward, known_quest->condition = condition;
+        } else {
+            unsigned mine = 0;
+            for (const Quest& q : g_quests) {
+                if (q.key == key) return kResultInvalid;  // a 16-bit key collision with another quest
+                mine += q.mod == mod;
+            }
+            if (mine >= kMaxQuestsPerMod || g_quests.size() >= kMaxQuests) return kResultNoRoom;
+            Quest q;
+            q.mod = mod, q.mod_name = mod_name.empty() ? mod : mod_name, q.id = quest, q.key = key;
+            q.title = title, q.reward = reward, q.condition = condition;
+            g_quests.push_back(std::move(q));
+            LOG("[notebook] %s: quest \"%s\" registered", mod.c_str(), quest.c_str());
+        }
+    }
+    return saved(key);
+}
+
+int32_t step(const std::string& mod, const std::string& quest, uint32_t n, const std::string& next, const std::string& where) {
+    if (!story_mail::valid_id(quest) || n > kMaxStep || !one_line(next, kMaxNextBytes) || !one_line(where, kMaxWhereBytes))
+        return kResultInvalid;
+    uint16_t key;
+    {
+        std::lock_guard lock(g_mu);
+        Quest* q = find(mod, quest);
+        if (!q) return kResultInvalid;  // wwhd_quest_define first
+        q->next = next, q->where = where;
+        key = q->key;
+    }
+    if (!n) return saved(key);
+    if (!have_save()) return kResultNoRoom;
+    story_mail::Book b = book();
+    const int before = saved_step(b, key);
+    const int now = reach_step(b, key, n);
+    if (now < 0) {
+        LOG("[notebook] %s: no room for quest \"%s\" in this save file", mod.c_str(), quest.c_str());
+        return kResultNoRoom;
+    }
+    if (now != before) LOG("[notebook] %s: quest \"%s\" step %d reached", mod.c_str(), quest.c_str(), now);
+    return now;
+}
+
+int32_t place(const std::string& mod, const std::string& quest, float x, float z) {
+    if (!story_mail::valid_id(quest)) return kResultInvalid;
+    if (!(x >= -story_chart::kSeaHalf && x <= story_chart::kSeaHalf && z >= -story_chart::kSeaHalf && z <= story_chart::kSeaHalf))
+        return kResultInvalid;  // NaN too
+    std::lock_guard lock(g_mu);
+    Quest* q = find(mod, quest);
+    if (!q) return kResultInvalid;
+    q->has_place = true, q->x = x, q->z = z;
+    return saved(q->key);
+}
+
+int32_t no_place(const std::string& mod, const std::string& quest) {
+    if (!story_mail::valid_id(quest)) return kResultInvalid;
+    std::lock_guard lock(g_mu);
+    Quest* q = find(mod, quest);
+    if (!q) return kResultInvalid;
+    q->has_place = false;
+    return saved(q->key);
+}
+
+int32_t known(const std::string& mod, const std::string& quest, const std::string& text) {
+    if (!story_mail::valid_id(quest) || !lines(text, kMaxKnownBytes)) return kResultInvalid;
+    std::lock_guard lock(g_mu);
+    Quest* q = find(mod, quest);
+    if (!q) return kResultInvalid;
+    q->known = text;
+    return saved(q->key);
+}
+
+int32_t portrait(const std::string& mod, const std::string& quest, const std::string& path, const std::string& package_dir) {
+    if (!story_mail::valid_id(quest) || path.size() > kMaxPortraitBytes || (!path.starts_with("assets/") && !path.starts_with("textures/")) ||
+        path.find("..") != std::string::npos)
+        return kResultInvalid;
+    guestmods::hud::Image pixels;
+    try {
+        auto png = guestmods::hud::load_png(package_dir, path);
+        if (png.width > 256 || png.height > 256) return kResultInvalid;
+        pixels.width = png.width, pixels.height = png.height, pixels.rgba = std::move(png.rgba);
+    } catch (const std::exception&) {
+        return kResultInvalid;
+    }
+    std::lock_guard lock(g_mu);
+    Quest* q = find(mod, quest);
+    if (!q) return kResultInvalid;
+    if (q->portrait != path) {
+        q->portrait = path;
+        g_portraits[q->key] = {std::move(pixels), 0, 0};
+    }
+    return saved(q->key);
+}
+
+int32_t done(const std::string& mod, const std::string& quest) {
+    if (!story_mail::valid_id(quest)) return kResultInvalid;
+    uint16_t key;
+    {
+        std::lock_guard lock(g_mu);
+        Quest* q = find(mod, quest);
+        if (!q) return kResultInvalid;
+        key = q->key;
+    }
+    if (!have_save()) return kResultNoRoom;
+    story_mail::Book b = book();
+    if (saved_step(b, key) == kStepDone) return kResultDone;
+    if (finish(b, key) < 0) return kResultNoRoom;
+    LOG("[notebook] %s: quest \"%s\" done", mod.c_str(), quest.c_str());
+    return kResultDone;
+}
+
+int32_t state(const std::string& mod, const std::string& quest) {
+    if (!story_mail::valid_id(quest)) return kResultInvalid;
+    return saved(quest_key(mod, quest));
+}
+
+std::vector<Quest> quests() {
+    std::lock_guard lock(g_mu);
+    return g_quests;
+}
+
+std::vector<Row> rows_now(std::vector<Quest>& storage) {
+    storage = quests();
+    if (!have_save()) return {};
+    return rows(storage, book());
+}
+
+bool notebook_owned() { return story_mail::notebook_owned(); }
+
+bool open_page() {
+    if (!g_installed || !have_save() || !notebook_owned()) return false;
+    g_page.show();
+    g_open = true;
+    LOG("[notebook] page opened");
+    return true;
+}
+void close_page() {
+    g_page.hide();
+    g_open = false;
+    guestmods::hud::store().drop(kOwner);
+}
+bool page_open() { return g_open.load(std::memory_order_relaxed); }
+
+// buttons held when the page closed: the game gets them only once they are released
+std::atomic<uint32_t> g_swallow{0};
+
+void mute(input::PadState& p) {
+    if (g_open.load(std::memory_order_relaxed)) {
+        p = input::PadState{};
+        return;
+    }
+    if (const uint32_t s = g_swallow.load(std::memory_order_relaxed)) p.buttons &= ~s;
+}
+
+void pad(input::PadState& p) {
+    if (!g_open.load(std::memory_order_relaxed)) {
+        if (const uint32_t s = g_swallow.load(std::memory_order_relaxed)) {
+            g_swallow.store(s & p.buttons, std::memory_order_relaxed);
+            p.buttons &= ~s;
+        }
+        return;
+    }
+    std::vector<Quest> storage;
+    std::vector<Row> rows = rows_now(storage);
+    PadInput in;
+    in.buttons = p.buttons, in.ly = p.ly, in.touch = p.touch;
+    in.x = p.tx * 1280.0f, in.y = p.ty * 720.0f;  // the GamePad picture (854 x 480) as the page's 1280 x 720
+    const Page::Action act = g_page.input(in, rows);
+    if (act.kind == Page::Action::Toggle && have_save()) {
+        story_mail::Book b = book();
+        const bool on = toggle_tracked(b, act.key);
+        LOG("[notebook] quest %04X %s", act.key, on ? "tracked: shown on the sea chart" : "no longer tracked");
+        rows = rows_now(storage);
+    }
+    if (trace()) {
+        static int last_mode = -1;
+        static uint16_t last_key = 0;
+        if (int(g_page.mode()) != last_mode || g_page.selected_key() != last_key)
+            LOG("[notebook] page mode %d, quest %04X selected", int(g_page.mode()), g_page.selected_key());
+        last_mode = int(g_page.mode()), last_key = g_page.selected_key();
+    }
+    publish(rows);
+    if (!g_page.open()) {
+        g_open = false;
+        g_swallow.store(p.buttons, std::memory_order_relaxed);  // the B that closed it doesn't reach the game
+        LOG("[notebook] page closed");
+    }
+    p = input::PadState{};  // the game sees an idle controller while the page is open
+}
+
+void note_import() { g_imported = true; }
+bool imported() { return g_imported; }
+bool installed() { return g_installed; }
+void set_game_calls(void (*original)(Cpu*, uint32_t)) { g_original = original; }
+
+namespace hooks {
+
+// inventoryItem(key): the notebook in the first empty delivery place, for the bag window only
+void inventory_item(Cpu* c) {
+    const uint32_t key = c->r[3], lr = c->lr;
+    g_original(c, kInventoryItem);
+    if ((lr != kWindowBuild && lr != kWindowInit) || key < kFirstDeliveryKey || key >= kFirstDeliveryKey + kDeliveryPlaces) return;
+    if ((c->r[3] & 0xFF) != kEmpty || notebook_key(c) != key) return;
+    c->r[3] = kNotebookItem;
+    static uint32_t last = 0;
+    if (trace() && key != last) LOG("[notebook] the delivery bag shows the notebook in place %u", key - kFirstDeliveryKey);
+    last = key;
+}
+
+// itemForSlot(this, item): the notebook's icon
+void icon_frame(Cpu* c) {
+    if (c->r[4] == kNotebookItem) {
+        c->r[3] = kNotebookIcon;
+        return;
+    }
+    g_original(c, kIconFrame);
+}
+
+// openSelectedChild(this, index): A on the notebook opens its page instead of an item caption
+void open_child(Cpu* c) {
+    const uint32_t menu = c->r[3], index = c->r[4];
+    const uint32_t count = ld32(menu + kMenuChildren), data = ld32(menu + kMenuChildren + 4);
+    const uint32_t child = data ? ld32(data + 4 * (index < count ? index : 0)) : 0;
+    if (trace()) LOG("[notebook] item menu: A on place %u (item %02X)", index, child ? ld32(child + kItemNumber) : 0xFFu);
+    if (child && ld32(child + kItemNumber) == kNotebookItem && open_page()) return;
+    g_original(c, kOpenChild);
+}
+
+// selectTouchEnter(this): touching the notebook opens its page (the GamePad has no A on its items);
+// the game's own pick-up runs first and is put back as the touch ends (the page keeps the touch)
+void touch_select(Cpu* c) {
+    const uint32_t item = c->r[3];
+    g_original(c, kTouchSelect);
+    if (trace()) LOG("[notebook] item menu: touch on item %02X", ld32(item + kItemNumber));
+    if (ld32(item + kItemNumber) == kNotebookItem) open_page();
+}
+
+// getSelectedItemValue(this, receiver): the notebook can't go on X, Y or R
+void selected_value(Cpu* c) {
+    g_original(c, kSelectedValue);
+    const uint32_t key = c->r[3];
+    if (key >= kFirstDeliveryKey && key < kFirstDeliveryKey + kDeliveryPlaces && notebook_key(c) == key) c->r[3] = kEmpty;
+}
+
+// the game system's X/Y/R assignment (controller, button, key): never the notebook's place
+void assign_button(Cpu* c) {
+    const uint32_t key = c->r[5];
+    if (key >= kFirstDeliveryKey && key < kFirstDeliveryKey + kDeliveryPlaces && notebook_key(c) == key) return;
+    g_original(c, kAssignButton);
+}
+
+}  // namespace hooks
+
+void install(const std::function<std::string(uint32_t)>& replaced_by, const std::function<void(uint32_t, void (*)(Cpu*))>& replace) {
+    if (!g_imported || g_installed || !g_original) return;
+    const std::pair<uint32_t, void (*)(Cpu*)> list[] = {
+        {kInventoryItem, hooks::inventory_item}, {kIconFrame, hooks::icon_frame},     {kOpenChild, hooks::open_child},
+        {kTouchSelect, hooks::touch_select},     {kSelectedValue, hooks::selected_value}, {kAssignButton, hooks::assign_button}};
+    // all or nothing: a notebook that shows but can't be opened, or can be put on a button, is worse than none
+    for (const auto& [addr, fn] : list) {
+        std::string other = replaced_by(addr);
+        if (!other.empty()) {
+            LOG("[notebook] %s replaces %08X: the story notebook is not in the item menu this session", other.c_str(), addr);
+            return;
+        }
+    }
+    for (const auto& [addr, fn] : list) replace(addr, fn);
+    story_chart::set_tracked_source(tracked_marker);
+    g_installed = true;
+    LOG("[notebook] the story notebook is in the Delivery Bag");
+}
+
+void state_loaded() {
+    close_page();
+    std::lock_guard lock(g_mu);
+    for (auto& [key, p] : g_portraits) p.handle = 0;
+}
+
+}  // namespace story_notebook

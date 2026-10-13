@@ -21,6 +21,7 @@ supported.
 - [Drawing on screen (HUD API v1)](#drawing-on-screen-hud-api-v1)
 - [Letters](#letters)
 - [Charts and markers](#charts-and-markers)
+- [The story notebook](#the-story-notebook)
 - [Packages with content and images](#packages-with-content-and-images)
 - [Trust](#trust)
 - [Save states](#save-states)
@@ -147,6 +148,7 @@ The examples in [`examples/guest-mods`](../examples/guest-mods) are complete mod
 | `button-icons` | reading port settings, following the game's button panes |
 | `rito-letter` | a story mod's letter, delivered once per save file by the Rito postbox |
 | `story-chart` | a story mod's chart that marks Windfall Island on Link's sea chart |
+| `story-notebook` | a story mod that fills the story notebook: a letter, quests and the tracked quest on the sea chart |
 
 ## Hooks and replacements
 
@@ -207,6 +209,7 @@ use object fields that are the same in both versions.
 | `wwhd_audio_*` | Bounded PCM streams, below |
 | `wwhd_mail_send`, `wwhd_mail_state` | A letter from your mod, delivered by the Rito postbox, below |
 | `wwhd_chart_*` | A chart from your mod that marks places on Link's sea chart, below |
+| `wwhd_quest_*` | Your mod's quests in the story notebook, below |
 | `memcpy`, `memmove`, `memset` | As usual |
 
 Your mod can also call any game function. Original synthesized audio can use the PCM stream service below.
@@ -348,9 +351,9 @@ letters it comes with an enclosure, which Link takes after reading: the first le
 in a save file encloses the **story notebook**, every later one a green rupee. Several waiting
 letters are handed out one after another.
 
-**The story notebook** is the port's journal for story mods. Receiving it doesn't change the
-inventory or the Delivery Bag; it is kept in the story record (below). It does not appear in the
-item menu yet.
+**The story notebook** is the port's journal for story mods (see [The story notebook](#the-story-notebook)).
+Link keeps it in the Delivery Bag. Receiving it writes nothing to the inventory: it is kept in the
+story record (below).
 
 **Saving.** Whether a letter was sent and read, and whether the notebook was received, is stored
 in the save file, in a block of the save data that the game itself leaves unused (it stays zero
@@ -441,6 +444,88 @@ log says so.
 **For map mods (native).** `story_chart::shown_markers()` (`runtime/src/mods/story_chart.h`) lists
 the markers the sea chart shows now, with their world place, icon and label, so a minimap can draw
 them in its own style.
+
+## The story notebook
+
+With several story mods on, the player needs to know what each of them asks for. Wind Waker has
+no quest log; the port adds one in the game's own way: a notebook that arrives by Rito mail with
+the first letter from a mod. Your mod fills it with its quests: what to do next, where, and how far
+the player got. The player can show one quest on the sea chart.
+
+```c
+WWHD_HOOK(WWHD_ADDR_daPy_Execute, quest_step, (void* link)) {
+    (void)link;
+    u16 max_life = dComIfGs_player_status_a.max_life;
+    if (max_life < 12 || max_life > 80) return;  /* no save file loaded */
+    s32 letter = wwhd_mail_send("hello", "A wandering storyteller", "Dear Link, ...");
+    s32 quest = wwhd_quest_define("tale", "The storyteller's tale", "A piece of heart", 0);
+    if (letter == WWHD_MAIL_READ && quest == WWHD_QUEST_NEW) quest = wwhd_quest_step("tale", 1, 0, 0);
+    if (quest == 1) {
+        wwhd_quest_step("tale", 1, "Ask the storyteller about his lantern.", "Windfall Island");
+        wwhd_quest_place("tale", WWHD_CHART_COLUMN_X('D'), WWHD_CHART_ROW_Z(2));
+    }
+}
+```
+
+| Service | What it does |
+| --- | --- |
+| `wwhd_quest_define(quest, title, reward, condition)` | registers the quest for this session (call it first, in every session) |
+| `wwhd_quest_step(quest, step, next, where)` | step N reached (1..254), with what to do next and where; step 0 sets the texts only |
+| `wwhd_quest_place(quest, x, z)` | the next step's place on the sea chart (the coordinates of `wwhd_chart_mark`) |
+| `wwhd_quest_no_place(quest)` | the next step has no place on the chart; the notebook says so |
+| `wwhd_quest_known(quest, text)` | what the player knows so far (several lines) |
+| `wwhd_quest_portrait(quest, png)` | the quest's portrait, a PNG of your package (`assets/` or `textures/`, up to 256 × 256) |
+| `wwhd_quest_done(quest)` | the quest is done |
+| `wwhd_quest_state(quest)` | the quest's state, without changing it |
+
+All of them return the quest's state in the loaded save file, or an error:
+
+| Result | Meaning |
+| --- | --- |
+| `WWHD_QUEST_NEW` (0) | not started in this save file |
+| 1 to 254 | the step reached ("in progress") |
+| `WWHD_QUEST_DONE` (255) | done |
+| `WWHD_QUEST_INVALID` (-1) | invalid ID or text, or the quest was not defined in this session |
+| `WWHD_QUEST_NO_ROOM` (-2) | no save file loaded, or its story record is full; or too many quests (8 per mod, 32 in all) |
+
+- **IDs:** 1 to 32 characters `a`-`z`, `0`-`9`, `-`, `_`, `.`; unique within your mod.
+- **Texts** are plain UTF-8, one line each, `NULL` for none: title (1 to 48 bytes), reward (96),
+  condition (96), next step (120: one sentence), where (48: the island or place). What is known may
+  have line breaks (600 bytes). Like letters, texts are registered in every session and not saved.
+- **Steps** only go forward: a lower step than the saved one changes nothing, and a done quest stays
+  done. Call the services from a gameplay hook; calling them every logic step is fine.
+- **Condition:** a quest that can't be started yet names its condition ("after the Tower of the
+  Gods rises"); the notebook shows "Not yet available: ..." until your mod reaches step 1 or
+  defines the quest again without a condition.
+
+**What the player sees.** The notebook is in the Delivery Bag (the first empty place of the bag;
+if all eight places hold the game's items, it waits for one to be free). It can't be put on X, Y
+or R. Choosing it with A (Pro Controller or the GamePad's buttons) opens its page over the game:
+
+- one row per quest: your portrait, or an emblem with the initial of your mod's name; the title and
+  your mod's name; the next step; where; and the status: **New**, **In progress**, **Not yet
+  available**: the condition, or **Done** with a stamp;
+- the order: the quest shown on the chart, quests in progress, new ones, ones not yet available,
+  done ones;
+- choosing a row shows what is known so far and the reward, and **Show on chart**: that quest's
+  next step gets the game's story ring on the sea chart (the marker layer of
+  [Charts and markers](#charts-and-markers), before your chart markers). One quest at a time;
+  choosing it again stops showing it. The ring moves when you place the next step elsewhere and
+  disappears when the quest is done or the step has no place (the page then says the step has no
+  place on the chart);
+- Up/Down (or the stick) choose, A opens or shows on the chart, B goes back and closes. Taps (and
+  the mouse on the GamePad picture) work on the rows and buttons. The game gets no input while the
+  page is open.
+
+**Saving.** The save file keeps the step reached, whether a quest is done and which quest is shown
+on the chart, in the story record shared with letters and charts (one place per started quest,
+one for the shown quest). Quests that were never started take no room. Nothing is written to the
+inventory or the Delivery Bag: with all mods off, the save is a plain game save, and the notebook,
+its records and the chart ring are simply not shown.
+
+**Players without story mods.** The item menu functions are only hooked while a loaded mod uses
+`wwhd_quest_*`. If another mod replaces one of them, the notebook is not in the item menu that
+session and the log says so.
 
 ## Packages with content and images
 

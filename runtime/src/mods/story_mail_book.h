@@ -36,6 +36,8 @@ inline constexpr uint8_t kRecordFree = 0;
 inline constexpr uint8_t kRecordLetter = 1;  // key: letter_key(mod, letter), value: State
 inline constexpr uint8_t kRecordItem = 2;    // key: kItem*, value: 1 owned
 inline constexpr uint8_t kRecordMarker = 3;  // mod charts (story_chart.h): key chart_key(mod, chart), value 1 owned, 2 finished
+inline constexpr uint8_t kRecordQuest = 4;   // notebook quests (story_notebook.h): key quest_key(mod, quest), value 1..254 step, 255 done
+inline constexpr uint8_t kRecordTracked = 5; // the notebook's tracked quest: at most one record, key quest_key, value 1
 
 inline constexpr uint16_t kItemNotebook = 1;  // the story notebook
 
@@ -81,6 +83,14 @@ public:
         b_[0] = kMagic, b_[1] = kVersion, b_[2] = 0, b_[3] = 0;
         uint8_t* p = b_ + 4 + 4 * i;
         p[0] = kind, p[1] = uint8_t(key >> 8), p[2] = uint8_t(key), p[3] = value;
+        return true;
+    }
+    // Frees a record. False when the block is not ours or has no such record.
+    bool erase(uint8_t kind, uint16_t key) {
+        int i = usable() ? find(kind, key) : -1;
+        if (i < 0) return false;
+        uint8_t* p = b_ + 4 + 4 * i;
+        p[0] = p[1] = p[2] = p[3] = 0;
         return true;
     }
     unsigned free_records() const {

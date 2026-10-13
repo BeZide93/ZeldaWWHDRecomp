@@ -91,6 +91,21 @@ void set_game_calls(void (*)(Cpu*,uint32_t)) {}
 void install(const std::function<std::string(uint32_t)>&,const std::function<void(uint32_t,void (*)(Cpu*))>&) {}
 void state_loaded() {}
 }
+// and so has the story notebook (story_notebook_test)
+namespace story_notebook {
+int32_t define(const std::string&,const std::string&,const std::string&,const std::string&,const std::string&,const std::string&) {return kResultInvalid;}
+int32_t step(const std::string&,const std::string&,uint32_t,const std::string&,const std::string&) {return kResultInvalid;}
+int32_t place(const std::string&,const std::string&,float,float) {return kResultInvalid;}
+int32_t no_place(const std::string&,const std::string&) {return kResultInvalid;}
+int32_t known(const std::string&,const std::string&,const std::string&) {return kResultInvalid;}
+int32_t portrait(const std::string&,const std::string&,const std::string&,const std::string&) {return kResultInvalid;}
+int32_t done(const std::string&,const std::string&) {return kResultInvalid;}
+int32_t state(const std::string&,const std::string&) {return kResultInvalid;}
+void note_import() {}
+void set_game_calls(void (*)(Cpu*,uint32_t)) {}
+void install(const std::function<std::string(uint32_t)>&,const std::function<void(uint32_t,void (*)(Cpu*))>&) {}
+void state_loaded() {}
+}
 static unsigned hud_calls=0;
 uint32_t guest_call(Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args) {
     assert(fn==0x7F000080&&args.size()==1);++hud_calls;

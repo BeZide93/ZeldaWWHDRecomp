@@ -894,6 +894,13 @@ add_executable(story_chart_test runtime/tools/story_chart_test.cpp runtime/src/m
 target_include_directories(story_chart_test PRIVATE runtime/include runtime/src)
 target_compile_options(story_chart_test PRIVATE -UNDEBUG)
 add_test(NAME story_chart COMMAND story_chart_test)
+# the story notebook: quest list, save record, page navigation, services and item menu hooks
+add_executable(story_notebook_test runtime/tools/story_notebook_test.cpp runtime/src/mods/story_notebook.cpp runtime/src/mods/story_mail.cpp
+               runtime/src/mods/story_chart.cpp runtime/src/mods/guest_png.cpp runtime/src/mods/mod_archive.cpp runtime/src/guest_addr_identity.c)
+target_include_directories(story_notebook_test PRIVATE runtime/include runtime/src runtime/src/mods)
+target_compile_options(story_notebook_test PRIVATE -UNDEBUG)
+target_link_libraries(story_notebook_test PRIVATE ZLIB::ZLIB)
+add_test(NAME story_notebook COMMAND story_notebook_test)
 if(Python3_Interpreter_FOUND)
   add_test(NAME release_sdk_package COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/release/test_sdk_package.py")
   add_test(NAME decomp_build_gen COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/decomp_build/test_gen.py")

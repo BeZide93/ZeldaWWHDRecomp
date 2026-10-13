@@ -296,6 +296,14 @@ namespace hooks {
 // s32 getReadableLetterNum(): the game's first waiting letter, else 13 for a waiting mod letter.
 // Before the first pearl the game's letters stay closed (the game's own check); only mod letters.
 void readable(Cpu* c) {
+    if (trace()) {  // where the postboxes are (scripted test runs walk Link there)
+        static std::map<uint32_t, int> seen;
+        if (!seen[c->r[3]]++) {
+            const uint32_t pos = c->r[3] + kActorPos;
+            LOG("[mail] postbox %08X at %.1f %.1f %.1f facing %d", c->r[3], u32_as_f32(ld32(pos)), u32_as_f32(ld32(pos + 4)),
+                u32_as_f32(ld32(pos + 8)), int(int16_t(ld16(pos + 0xE))));
+        }
+    }
     if (g_gate_forced) c->r[3] = 0;
     else g_original(c, kReadable);
     if (c->r[3] == 0 && next_waiting().key) c->r[3] = kModIndex;

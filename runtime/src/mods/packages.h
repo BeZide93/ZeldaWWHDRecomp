@@ -102,6 +102,7 @@ struct GuestPackage {
     std::string id, version, path, data_path, fingerprint;
     json::Value options;
     uint32_t heap_size=256*1024;
+    std::string name;  // the manifest's display name (the story notebook names the quest's mod)
 };
 using GuestInspect = std::function<uint32_t(const GuestPackage&)>; // reserved bytes, 64 KiB aligned
 using GuestLoad = std::function<void(const GuestPackage&, uint32_t base)>;

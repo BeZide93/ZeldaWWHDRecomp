@@ -1,0 +1,10 @@
+{
+  "format_version": 1,
+  "id": "story-notebook",
+  "name": "The storyteller's lantern",
+  "version": "0.1.0",
+  "game_id": "wwhd",
+  "minimum_manager_version": "1.5.0",
+  "kind": "guest",
+  "guest": {"api_version": 1, "elf": "mod.elf"}
+}

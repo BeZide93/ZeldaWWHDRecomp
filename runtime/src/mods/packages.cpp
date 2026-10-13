@@ -894,7 +894,7 @@ void start_guests(const GuestInspect& inspect,const GuestLoad& load) {
                 require(dependency.active||dependency.manifest.kind=="settings",
                         "Startup dependency is unavailable: "+dep.id);
             }
-            GuestPackage pkg{id,r.manifest.version,r.path.string(),(root/"Data"/id).string(),r.manifest.fingerprint,r.startup_config,r.manifest.heap_size};
+            GuestPackage pkg{id,r.manifest.version,r.path.string(),(root/"Data"/id).string(),r.manifest.fingerprint,r.startup_config,r.manifest.heap_size};pkg.name=r.manifest.name;
             uint32_t bytes=inspect(pkg);
             uint32_t base=assign_guest_region(id,bytes);
             load(pkg,base);

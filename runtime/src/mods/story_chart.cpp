@@ -67,6 +67,7 @@ std::vector<Marker> g_markers;  // placement order
 std::map<uint32_t, std::vector<Applied>> g_applied;  // per menu (game thread)
 bool g_imported = false, g_installed = false;
 bool g_hidden = false;  // hideMenuPanes ran during the game's update
+TrackedSource g_tracked = nullptr;
 void (*g_original)(Cpu*, uint32_t) = nullptr;
 
 bool trace() {
@@ -108,10 +109,17 @@ void apply(uint32_t menu) {
     if (!main || !have_save()) return;
     story_mail::Book b = book();
     if (!b.usable()) return;
-    std::vector<const Marker*> shown;
+    struct Place {
+        float x, z;
+    };
+    std::vector<Place> shown;
+    if (Place t{}; g_tracked) {  // the notebook's tracked quest comes first
+        std::string label;
+        if (g_tracked(t.x, t.z, label)) shown.push_back(t);
+    }
     std::lock_guard lock(g_mu);
     for (const Marker& m : g_markers)
-        if (chart_value(b, m.key) == kChartOwned) shown.push_back(&m);
+        if (chart_value(b, m.key) == kChartOwned) shown.push_back({m.x, m.z});
     if (shown.empty()) return;
     const float cx = float(ldf32(main + kPaneTranslate)), cy = float(ldf32(main + kPaneTranslate + 4));
     const float sx = float(ldf32(main + kPaneSize)) / kSquaresPerSide, sy = float(ldf32(main + kPaneSize + 4)) / kSquaresPerSide;
@@ -119,7 +127,7 @@ void apply(uint32_t menu) {
     for (unsigned i = 0; i < kStoryPanes && next < shown.size(); i++) {
         const uint32_t pane = ld32(menu + kMenuPanes + 4 * i);
         if (!pane || (ld8(pane + kPaneFlags) & kVisible)) continue;  // the game's own mark
-        const Marker& m = *shown[next++];
+        const Place& m = shown[next++];
         Applied a{pane, i, ld32(pane + kPaneTranslate), ld32(pane + kPaneTranslate + 4),
                   f32_as_u32(cx + m.x / kSquare * sx), f32_as_u32(cy - m.z / kSquare * sy)};
         show(a);
@@ -213,9 +221,15 @@ int32_t unmark(const std::string& mod, const std::string& chart, const std::stri
     return state(mod, chart);
 }
 
+void set_tracked_source(TrackedSource source) { g_tracked = source; }
+
 std::vector<MarkerView> shown_markers() {
     std::vector<MarkerView> out;
     if (!have_save()) return out;
+    if (float x, z; g_tracked) {
+        std::string label;
+        if (g_tracked(x, z, label)) out.push_back({"", "notebook", "tracked", label, x, z, kIconStory});
+    }
     story_mail::Book b = book();
     std::lock_guard lock(g_mu);
     for (const Marker& m : g_markers)

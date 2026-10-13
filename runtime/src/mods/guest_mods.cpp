@@ -18,6 +18,7 @@
 #include "story_mail.h"
 #include "story_mail_book.h"
 #include "story_chart.h"
+#include "story_notebook.h"
 #include "input.h"
 #include "true60.h"
 #include "guest_addr.h"
@@ -69,7 +70,7 @@ struct Chain {
 };
 std::unordered_map<uint32_t, Chain> g_chains;  // built before the game starts, read-only afterwards
 struct Loaded {
-    std::string path,id,version,package_path,data_path;
+    std::string path,id,version,package_path,data_path,name;
     uint32_t hud_callback=0,hud_screen=0;
     uint64_t hud_step=0;
     bool hud_called=false;
@@ -293,6 +294,56 @@ void svc_chart_unmark(Cpu* c) {
         c->r[3]=uint32_t(story_chart::kResultInvalid);return;}
     c->r[3]=uint32_t(story_chart::unmark(mod.id,chart,marker));
 }
+// The story notebook (story_notebook.h). Texts must lie in the calling mod's memory; null texts are empty.
+bool quest_text(const Loaded& mod,uint32_t address,uint32_t limit,std::string& out) {
+    out.clear();return !address||mod_string(mod,address,limit,out);
+}
+void quest_result(Cpu* c,int32_t r) {c->r[3]=uint32_t(r);}
+// wwhd_quest_define(quest, title, reward, condition)
+void svc_quest_define(Cpu* c) {
+    auto& mod=owner(c);std::string id,title,reward,condition;
+    if(!mod_string(mod,c->r[3],story_mail::kMaxIdBytes,id)||!mod_string(mod,c->r[4],story_notebook::kMaxTitleBytes,title)||
+       !quest_text(mod,c->r[5],story_notebook::kMaxRewardBytes,reward)||!quest_text(mod,c->r[6],story_notebook::kMaxConditionBytes,condition))
+        return quest_result(c,story_notebook::kResultInvalid);
+    quest_result(c,story_notebook::define(mod.id,mod.name,id,title,reward,condition));
+}
+// wwhd_quest_step(quest, step, next, where)
+void svc_quest_step(Cpu* c) {
+    auto& mod=owner(c);std::string id,next,where;
+    if(!mod_string(mod,c->r[3],story_mail::kMaxIdBytes,id)||!quest_text(mod,c->r[5],story_notebook::kMaxNextBytes,next)||
+       !quest_text(mod,c->r[6],story_notebook::kMaxWhereBytes,where))
+        return quest_result(c,story_notebook::kResultInvalid);
+    quest_result(c,story_notebook::step(mod.id,id,c->r[4],next,where));
+}
+// wwhd_quest_place(quest, x, z): r3, f1, f2
+void svc_quest_place(Cpu* c) {
+    auto& mod=owner(c);std::string id;
+    quest_result(c,mod_string(mod,c->r[3],story_mail::kMaxIdBytes,id)?story_notebook::place(mod.id,id,float(c->f[1].ps0),float(c->f[2].ps0))
+                                                                     :story_notebook::kResultInvalid);
+}
+void svc_quest_no_place(Cpu* c) {
+    auto& mod=owner(c);std::string id;
+    quest_result(c,mod_string(mod,c->r[3],story_mail::kMaxIdBytes,id)?story_notebook::no_place(mod.id,id):story_notebook::kResultInvalid);
+}
+void svc_quest_known(Cpu* c) {
+    auto& mod=owner(c);std::string id,text;
+    quest_result(c,mod_string(mod,c->r[3],story_mail::kMaxIdBytes,id)&&quest_text(mod,c->r[4],story_notebook::kMaxKnownBytes,text)
+                       ?story_notebook::known(mod.id,id,text):story_notebook::kResultInvalid);
+}
+// wwhd_quest_portrait(quest, path): a PNG of the package (assets/ or textures/)
+void svc_quest_portrait(Cpu* c) {
+    auto& mod=owner(c);std::string id,path;
+    quest_result(c,mod_string(mod,c->r[3],story_mail::kMaxIdBytes,id)&&mod_string(mod,c->r[4],story_notebook::kMaxPortraitBytes,path)
+                       ?story_notebook::portrait(mod.id,id,path,mod.package_path):story_notebook::kResultInvalid);
+}
+void svc_quest_done(Cpu* c) {
+    auto& mod=owner(c);std::string id;
+    quest_result(c,mod_string(mod,c->r[3],story_mail::kMaxIdBytes,id)?story_notebook::done(mod.id,id):story_notebook::kResultInvalid);
+}
+void svc_quest_state(Cpu* c) {
+    auto& mod=owner(c);std::string id;
+    quest_result(c,mod_string(mod,c->r[3],story_mail::kMaxIdBytes,id)?story_notebook::state(mod.id,id):story_notebook::kResultInvalid);
+}
 const std::unordered_map<std::string, PpcFunc> kServices = {
     {"wwhd_audio_epoch",svc_audio_epoch},{"wwhd_audio_open",svc_audio_open},
     {"wwhd_audio_available",svc_audio_available},{"wwhd_audio_submit",svc_audio_submit},{"wwhd_audio_close",svc_audio_close},
@@ -308,6 +359,9 @@ const std::unordered_map<std::string, PpcFunc> kServices = {
     {"wwhd_mail_send",svc_mail_send},{"wwhd_mail_state",svc_mail_state},
     {"wwhd_chart_give",svc_chart_give},{"wwhd_chart_finish",svc_chart_finish},{"wwhd_chart_state",svc_chart_state},
     {"wwhd_chart_mark",svc_chart_mark},{"wwhd_chart_unmark",svc_chart_unmark},
+    {"wwhd_quest_define",svc_quest_define},{"wwhd_quest_step",svc_quest_step},{"wwhd_quest_place",svc_quest_place},
+    {"wwhd_quest_no_place",svc_quest_no_place},{"wwhd_quest_known",svc_quest_known},{"wwhd_quest_portrait",svc_quest_portrait},
+    {"wwhd_quest_done",svc_quest_done},{"wwhd_quest_state",svc_quest_state},
     {"memcpy", svc_memcpy},      {"memmove", svc_memcpy},       {"memset", svc_memset},
 };
 PpcFunc service(const char* name) {
@@ -315,6 +369,10 @@ PpcFunc service(const char* name) {
     if (it == kServices.end()) return nullptr;
     if (!strncmp(name, "wwhd_mail_", 10)) story_mail::note_import();  // the postbox hooks are needed
     if (!strncmp(name, "wwhd_chart_", 11)) story_chart::note_import();  // the sea chart hooks are needed
+    if (!strncmp(name, "wwhd_quest_", 11)) {  // the notebook's item menu entry, and its marker on the sea chart
+        story_notebook::note_import();
+        story_chart::note_import();
+    }
     return it->second;
 }
 
@@ -363,7 +421,7 @@ bool load_one(const std::string& path, std::string& err,const mods::packages::Gu
             return false;
         }
     Loaded loaded;
-    loaded.path=path;loaded.package_path=pkg.path;loaded.data_path=pkg.data_path;loaded.id=pkg.id;loaded.version=pkg.version;loaded.m=m;loaded.region_size=reserved;loaded.options=pkg.options;
+    loaded.path=path;loaded.package_path=pkg.path;loaded.data_path=pkg.data_path;loaded.id=pkg.id;loaded.name=pkg.name;loaded.version=pkg.version;loaded.m=m;loaded.region_size=reserved;loaded.options=pkg.options;
     loaded.files=std::make_unique<Files>(pkg.data_path);
     uint32_t heap_base=(m->mem_base+m->mem_size+15)&~15u;
     loaded.heap=std::make_unique<Heap>(mem::ptr(heap_base),heap_base,pkg.heap_size);
@@ -469,6 +527,18 @@ void init() {
         ch.addr=addr;ch.ordinal=uint32_t(ordinal);ch.replace=fn;ch.replace_mod="the port's chart service";
         g_mod_hook_flags[ordinal]=1;
     });
+    // The story notebook: the item menu's Delivery Bag shows it and opens its page, only when a loaded
+    // mod uses the quest services (story_notebook.h).
+    story_notebook::set_game_calls(call_original);
+    story_notebook::install([](uint32_t addr) {
+        auto it=g_chains.find(addr);return it==g_chains.end()?std::string():it->second.replace_mod;
+    },[](uint32_t addr,PpcFunc fn) {
+        int ordinal=ordinal_of(addr);
+        if(ordinal<0)fatal("[guestmods] notebook: %08X is not a game function",addr);
+        Chain& ch=g_chains[addr];
+        ch.addr=addr;ch.ordinal=uint32_t(ordinal);ch.replace=fn;ch.replace_mod="the port's story notebook";
+        g_mod_hook_flags[ordinal]=1;
+    });
     if(getenv("WWHD_GUEST_MODS"))LOG("[guestmods] WWHD_GUEST_MODS is retired; install and trust guest packages in the mod manager");
 }
 
@@ -502,6 +572,7 @@ void state_loaded() {
     pcm::store().reset();
     story_mail::state_loaded();
     story_chart::state_loaded();
+    story_notebook::state_loaded();
     for(auto& mod:g_loaded)mod.hud_called=false;
 }
 

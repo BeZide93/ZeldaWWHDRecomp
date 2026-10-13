@@ -53,6 +53,12 @@ struct MarkerView {
 };
 std::vector<MarkerView> shown_markers();
 
+// The story notebook's tracked quest (story_notebook.h): its next step is shown first, before the
+// markers of mod charts, whether or not a chart is owned. The source returns false when there is
+// nothing to show (no tracked quest, its step has no place, it is done). Game thread.
+using TrackedSource = bool (*)(float& x, float& z, std::string& label);
+void set_tracked_source(TrackedSource source);
+
 void note_import();  // a module imports a chart service: the sea chart hooks are needed
 bool imported();
 // After all guest modules are loaded. replaced_by(addr) names a mod that replaces that game function

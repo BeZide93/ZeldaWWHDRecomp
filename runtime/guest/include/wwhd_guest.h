@@ -210,3 +210,28 @@ s32 wwhd_chart_finish(const char* chart_id);
 s32 wwhd_chart_state(const char* chart_id);
 s32 wwhd_chart_mark(const char* chart_id, const char* marker_id, f32 x, f32 z, u32 icon, const char* label);
 s32 wwhd_chart_unmark(const char* chart_id, const char* marker_id); /* NULL marker_id: all of the chart */
+
+/* The story notebook v1: the port's quest journal. Link gets it with the first letter from a mod
+ * (wwhd_mail_send); it is kept in the Delivery Bag, and selecting it opens its page: one row per
+ * quest with its next step, where, and status, and one quest the player may show on the sea chart.
+ * Register the quest in every session (wwhd_quest_define, then the texts of its current step); the
+ * save file records only the step reached, whether it is done and which quest is shown on the chart.
+ * quest_id: 1..32 of a-z 0-9 - _ . (unique within the mod). Texts are UTF-8, one line unless noted;
+ * NULL is empty. title: 1..48 bytes. reward: up to 96. condition: up to 96, NULL when the quest can
+ * be started now (else the notebook says "Not yet available: <condition>"). next: up to 120 bytes,
+ * one sentence. where: up to 48, the island or place. known: up to 600 bytes, '\n' allowed.
+ * Results: the quest's state in the current save file, or a negative error. */
+#define WWHD_QUEST_API_VERSION 1
+#define WWHD_QUEST_NEW 0       /* not started in this save file (new, or not yet available) */
+                               /* 1..254: the step reached ("in progress") */
+#define WWHD_QUEST_DONE 255
+#define WWHD_QUEST_INVALID (-1)
+#define WWHD_QUEST_NO_ROOM (-2)   /* no save loaded or its story record is full; or too many quests */
+s32 wwhd_quest_define(const char* quest_id, const char* title, const char* reward, const char* condition);
+s32 wwhd_quest_step(const char* quest_id, u32 step, const char* next, const char* where); /* step 0: texts only */
+s32 wwhd_quest_place(const char* quest_id, f32 x, f32 z);  /* the next step's place (wwhd_chart_* coordinates) */
+s32 wwhd_quest_no_place(const char* quest_id);             /* the next step has no place on the chart */
+s32 wwhd_quest_known(const char* quest_id, const char* known);
+s32 wwhd_quest_portrait(const char* quest_id, const char* png_path); /* assets/ or textures/, up to 256 x 256 */
+s32 wwhd_quest_done(const char* quest_id);
+s32 wwhd_quest_state(const char* quest_id);
