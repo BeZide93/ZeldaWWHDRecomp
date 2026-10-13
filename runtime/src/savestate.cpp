@@ -72,10 +72,12 @@
 // module sections
 bool threads_ss_save(ss::Writer& w, std::string& why);
 bool threads_ss_check(ss::Reader r, std::string& why);
+bool threads_ss_validate(ss::Reader r,std::string& why);
 void threads_ss_load(ss::Reader& r);
 void threads_ss_targets(ss::Reader r);
 void mem_ss_save(ss::Writer& w);
 bool mem_ss_check(ss::Reader r, std::string& why);
+bool mem_ss_validate(ss::Reader r,std::string& why);
 void mem_ss_load(ss::Reader& r);
 void fs_ss_save(ss::Writer& w);
 bool fs_ss_check(ss::Reader r,std::string& why);
@@ -86,6 +88,7 @@ void ax_ss_load(ss::Reader& r);
 void gx2_ss_drain();
 void gx2_ss_save(ss::Writer& w);
 bool gx2_ss_check(ss::Reader r, std::string& why);
+bool gx2_ss_validate(ss::Reader r,std::string& why);
 void gx2_ss_load(ss::Reader& r);
 namespace interp { void ss_reset(); }
 namespace aspect { void ss_reset(); }
@@ -494,6 +497,15 @@ bool do_load(const std::shared_ptr<Snapshot>& s) {
         if(!s->sections.count(tag)){message("%s: incomplete state",slot_label(s->slot).c_str());return true;}
     mods::fast_forward_reset();
     std::string busy, why;
+    // Structural checks precede targets: that helper changes thread wait state.
+    try {
+        if(!gx2_ss_validate(s->section(kSecGx2),why) || !mem_ss_validate(s->section(kSecHeaps),why) ||
+           !threads_ss_validate(s->section(kSecThreads),why)) {
+            message("%s: invalid state metadata",slot_label(s->slot).c_str());return true;
+        }
+    } catch(const std::exception&) {
+        message("%s: insufficient memory to validate state",slot_label(s->slot).c_str());return true;
+    }
     auto t0 = std::chrono::steady_clock::now();
     threads_ss_targets(s->section(kSecThreads));
     if (!threads::quiesce(250, busy, 2, 0)) {
