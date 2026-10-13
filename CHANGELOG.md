@@ -7,6 +7,12 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Setup: disc images and Cemu's keys.txt** (from a player support case): a `.wux`/`.wud` needs two keys, the disc key
+  of your dump and the Wii U common key. Setup now accepts Cemu's `keys.txt` directly and finds both keys in it
+  (choose it once for either key), the disc key can also be pasted, and the keys screen explains this, including
+  the no-key alternative (Cemu's "Convert to compressed Wii U archive (.wua)"). Clearer errors, e.g. when the
+  common key was entered as the disc key. Key values are never shown, logged or saved. (Desktop setup; Android follows.)
+
 - **Less memory per shader translation** (PR #184, thanks @Pulpparty): the shader translator reserves 1 MB of text
   per shader instead of 12 MB and grows only if needed (the largest game shader is far smaller), which helps devices
   with little memory. One of its text functions also no longer cuts long text short.
