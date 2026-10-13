@@ -6,4 +6,5 @@ project by its maintainer; no game asset. Downscaled (premultiplied alpha) from 
 transparent master, which is kept outside the repository. Compiled into the executable
 (`cmake/EmbedBytes.cmake`).
 
-Licence: to be confirmed by the project lead before publication.
+Licence: original artwork by the project lead (made with ChatGPT image generation), published under the
+repository's licence (confirmed 2026-10-13).
