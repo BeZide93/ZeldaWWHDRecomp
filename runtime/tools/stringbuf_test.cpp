@@ -53,7 +53,7 @@ static void growthFails()
 	check(buf, "01234567");
 }
 
-// When it can grow, addFmt grows like add(std::string_view) instead of cutting the text.
+// When it can grow, addFmt and add(const char*) grow like add(std::string_view) instead of cutting the text.
 static void growthWorks()
 {
 	StringBuf buf(8);
@@ -65,6 +65,10 @@ static void growthWorks()
 	assert(memcmp(buf.c_str() + 19, big.data(), big.size()) == 0);
 	buf.shrink_to_fit();
 	assert(buf.getLen() == 19 + big.size());
+
+	StringBuf small(4);
+	small.add("const char beyond the reservation");
+	check(small, "const char beyond the reservation");
 }
 
 // Shader translation runs on several threads: buffers that could not allocate share no memory (TSan).
