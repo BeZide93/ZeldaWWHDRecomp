@@ -30,6 +30,11 @@ what is on `devel` and not released yet (also in the
   community Switch port can add their own settings tabs, hide built-in ones, plug in a system keyboard, controller
   shortcuts and on-screen layers, without changing the overlay's code. Nothing changes on our platforms.
 
+- **The aiming reticle no longer doubles at 60+ fps** (issue #163, thanks @Julancho): with the boomerang, grappling
+  hook and hookshot, the red aiming dot (and the boomerang's target markers) stayed at the game's 30 Hz position
+  while the camera moved smoothly between frames, so it jumped back and forth during camera turns. It now moves
+  with the camera; 30 fps is unchanged. `WWHD_RETICLE_FIX=0` turns the fix off.
+
 - **No crash when memory for a shader's source runs out** (PR #171, thanks @Pulpparty): the shader translator's text
   buffer now handles failed allocations (the shader just fails to compile and is retried) instead of writing through
   a null pointer. Mostly matters on devices with little memory.
