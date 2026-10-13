@@ -750,6 +750,14 @@ target_include_directories(overlay_extensions_test PRIVATE runtime/src)
 target_compile_options(overlay_extensions_test PRIVATE -UNDEBUG)
 target_link_libraries(overlay_extensions_test PRIVATE imgui)
 add_test(NAME overlay_extensions COMMAND overlay_extensions_test)
+# issue #185: a platform port's own renderer (gfx/renderer_ext.h) and the GX2 decisions it can take over
+# (gx2/backend_hooks.h); renderer.cpp built as on macOS (Metal and Vulkan) with stub backend tables
+add_executable(renderer_ext_test runtime/tools/renderer_ext_test.cpp runtime/src/gfx/renderer.cpp)
+target_include_directories(renderer_ext_test PRIVATE runtime/include runtime/src runtime/src/gx2 ${CEMU_DIR}
+  runtime/third_party/metal-cpp runtime/third_party/fmt/include)
+target_compile_definitions(renderer_ext_test PRIVATE WWHD_HAS_METAL WWHD_HAS_VULKAN)
+target_compile_options(renderer_ext_test PRIVATE -UNDEBUG "SHELL:-include \"${CEMU_DIR}/cemu_shim.h\"")
+add_test(NAME renderer_ext COMMAND renderer_ext_test)
 add_executable(mod_cemu_dialog_test runtime/tools/mod_cemu_dialog_test.cpp)
 target_include_directories(mod_cemu_dialog_test PRIVATE runtime/src)
 target_compile_options(mod_cemu_dialog_test PRIVATE -UNDEBUG)
