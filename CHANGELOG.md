@@ -13,6 +13,11 @@ what is on `devel` and not released yet (also in the
   the no-key alternative (Cemu's "Convert to compressed Wii U archive (.wua)"). Clearer errors, e.g. when the
   common key was entered as the disc key. Key values are never shown, logged or saved. (Desktop setup; Android follows.)
 
+- **Android setup: keys.txt and safer key handling:** the same `keys.txt` support as on desktop (choose Cemu's
+  `keys.txt` once, setup finds both keys). Key files are now only read when needed and no longer copied into the app;
+  if a key file was moved or its access was lost, setup asks you to choose it again instead of failing. Setups
+  started with an older version keep working.
+
 - **Less memory per shader translation** (PR #184, thanks @Pulpparty): the shader translator reserves 1 MB of text
   per shader instead of 12 MB and grows only if needed (the largest game shader is far smaller), which helps devices
   with little memory. One of its text functions also no longer cuts long text short.
