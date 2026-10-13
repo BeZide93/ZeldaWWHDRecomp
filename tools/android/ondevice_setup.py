@@ -56,6 +56,8 @@ def run(configuration, package=None, native_run=None, adapter_factory=Adapter):
         def publish(event):
             with state_lock:
                 state["last_event"] = event
+                if event.get("state") == "keys_found":
+                    state.setdefault("key_sources", []).append(event["detail"])
                 state["resources_latest"] = process_resources()
                 if event.get("stage") and event.get("state") in ("complete", "reused") and "source" not in event:
                     state.setdefault("stages", {})[event["stage"]] = {
@@ -87,20 +89,28 @@ def run(configuration, package=None, native_run=None, adapter_factory=Adapter):
                 extractor = job["extractor"]
                 keys = None
                 if source["kind"] == "image":
-                    keys = adapter.setup.Keys()
+                    request = {}
+                    entries = {}
                     for name in ("disc", "common"):
-                        key_path = private_input(root, source[name + "_key"])
-                        with key_path.open("rb") as stream:
-                            data = stream.read(4097)
-                        value = adapter.setup.parse_key(data) if len(data) <= 4096 else None
-                        if value is None:
-                            raise ValueError("Invalid " + name + " key file")
-                        setattr(keys, name, value)
+                        key_path = str(private_input(root, source[name + "_key"]))
+                        values = adapter.setup.read_key_entries(key_path)
+                        if key_path is not None:
+                            if not values:
+                                raise ValueError("Invalid " + name + " key file: no valid keys (16 raw bytes or 32 hex digits / Cemu keys.txt)")
+                            request[name + "_key_file"] = key_path
+                            entries[name] = values
+                    if entries and all(len(entries.get(name, [])) == 1 for name in ("disc", "common")):
+                        keys = adapter.setup.Keys()
+                        keys.disc, keys.common = entries["disc"][0], entries["common"][0]
+                    else:
+                        keys = request
                 if native_run is None:
                     import wwhd_native
                     native_run = wwhd_native.run
                 game = adapter.extract(path, source["kind"], extractor["path"],
                                        extractor["identity"], native_run, keys)
+                if source["kind"] == "image":
+                    keys = request = entries = key_path = values = None
             else:
                 raise ValueError("Unsupported imported input kind")
             generated = adapter.translate(game)

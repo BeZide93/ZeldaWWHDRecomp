@@ -1081,6 +1081,14 @@ add_test(NAME guest_audio_output_volume COMMAND guest_audio_output_test ${CMAKE_
 add_test(NAME guest_audio_output_saved COMMAND guest_audio_output_test ${CMAKE_CURRENT_BINARY_DIR}/synthetic-audio-saved.wav saved)
 add_test(NAME guest_audio_output_invalid_volume COMMAND guest_audio_output_test ${CMAKE_CURRENT_BINARY_DIR}/synthetic-audio-invalid.wav invalid)
 
+# Key selection uses only extract_test's authored encrypted disc and made-up keys.
+if(Python3_Interpreter_FOUND AND NOT ANDROID)
+  add_test(NAME setup_keys COMMAND ${CMAKE_COMMAND} -E env
+    WWHD_KEY_TEST_EXTRACTOR=$<TARGET_FILE:wwhd-extract>
+    WWHD_KEY_TEST_FIXTURE_BUILDER=$<TARGET_FILE:extract_test>
+    "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/installer/test_setup_keys.py")
+endif()
+
 # Synthetic setup build -> persisted host preference -> guest package enable gate.
 if(Python3_Interpreter_FOUND AND NOT ANDROID)
   add_test(NAME setup_code_mods COMMAND ${CMAKE_COMMAND} -E env

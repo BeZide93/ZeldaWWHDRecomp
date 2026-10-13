@@ -443,6 +443,8 @@ struct App {
     std::string probe_msg;
     bool probe_ok = false;
     std::string disc_key_found, disc_key_file, common_key_found, common_key_file;
+    int disc_mode = 0;
+    char disc_paste[128] = {};
     int common_mode = 0;  // 0 key file, 1 paste
     char paste[128] = {};
     std::string keys_msg;
@@ -784,6 +786,10 @@ static void set_source(const std::string& path) {
     A.disc_key_found.clear();
     A.common_key_found.clear();
     A.disc_key_file.clear();
+    A.common_key_file.clear();
+    A.disc_mode = A.common_mode = 0;
+    SDL_memset(A.disc_paste, 0, sizeof A.disc_paste);
+    SDL_memset(A.paste, 0, sizeof A.paste);
     A.keys_msg.clear();
     request("probe", "\"path\":" + jstr(path));
 }
@@ -829,13 +835,15 @@ static void start_install(const std::string& source) {
 
 static void check_keys() {
     std::string f = "\"image\":" + jstr(A.source_path);
-    if (!A.disc_key_file.empty()) f += ",\"disc_key_file\":" + jstr(A.disc_key_file);
+    if (A.disc_mode == 1 && A.disc_paste[0]) f += ",\"disc_key_hex\":" + jstr(A.disc_paste);
+    else if (A.disc_mode == 0 && !A.disc_key_file.empty()) f += ",\"disc_key_file\":" + jstr(A.disc_key_file);
     if (A.common_mode == 1 && A.paste[0]) f += ",\"common_key_hex\":" + jstr(A.paste);
     else if (A.common_mode == 0 && !A.common_key_file.empty()) f += ",\"common_key_file\":" + jstr(A.common_key_file);
     A.keys_msg = "Checking the keys...";
     request("check_keys", f);
     f.assign(f.size(), '\0');                              // the request held the pasted key
     SDL_memset(A.paste, 0, sizeof A.paste);                // sent once; never kept
+    SDL_memset(A.disc_paste, 0, sizeof A.disc_paste);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -872,7 +880,7 @@ static void handle_reply(const J& ev) {
             A.probe_msg = "Wii U disc image. The game files are extracted from it into this folder (about 1.7 GB).";
     } else if (cmd == "check_keys") {
         if (ok) {
-            A.keys_msg.clear();
+            A.keys_msg = ev.str("message");
             start_install("image");
         } else {
             A.keys_msg = ev.str("message");
@@ -1229,22 +1237,32 @@ static std::string base_name(const std::string& p) {
 
 static void screen_keys() {
     page_header("Keys", base_name(A.source_path));
+    muted("Disc images need two keys; Cemu keeps them in keys.txt. Choose it once for both.");
+    muted("Or use Cemu: Convert to compressed Wii U archive (.wua), which needs no keys.");
     static const SDL_DialogFileFilter keyf[] = {{"Key files (.key, .bin, .txt)", "key;bin;txt"}, {"All files", "*"}};
 
     ImGui::BeginChild("disc", ImVec2(0, 0), ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY);
     heading("Disc key", 20);
-    if (!A.disc_key_file.empty()) {
-        mark(2);
-        ImGui::TextWrapped("Key file: %s", base_name(A.disc_key_file).c_str());
-    } else if (!A.disc_key_found.empty()) {
-        mark(2);
-        ImGui::TextWrapped("Found next to the image: %s", base_name(A.disc_key_found).c_str());
-    } else {
-        mark(3);
-        ImGui::TextWrapped("Not found next to the image. Choose the .key file that was dumped with this disc.");
+    int disc_mode = A.disc_mode;
+    radio("Key file##disc", &disc_mode, 0);
+    ImGui::SameLine(0, 30);
+    radio("Paste the key##disc", &disc_mode, 1);
+    if (disc_mode != A.disc_mode) {
+        A.disc_mode = disc_mode;
+        SDL_memset(A.disc_paste, 0, sizeof A.disc_paste);
+        keys_changed();
     }
-    if (button(A.disc_key_found.empty() && A.disc_key_file.empty() ? "Choose key file...##disc" : "Choose a different key file...##disc"))
-        choose_file("disc_key", keyf, 2);
+    if (A.disc_mode == 0) {
+        if (!A.disc_key_file.empty()) ImGui::TextWrapped("Key file: %s", base_name(A.disc_key_file).c_str());
+        else if (!A.disc_key_found.empty()) ImGui::TextWrapped("Found next to the image: %s", base_name(A.disc_key_found).c_str());
+        else muted("Choose the key dumped with this disc, or Cemu's keys.txt.");
+        if (button("Choose key file / keys.txt...##disc")) choose_file("disc_key", keyf, 2);
+    } else {
+        ImGui::SetNextItemWidth(460);
+        if (ImGui::InputTextWithHint("##disc_paste", "32 hex digits", A.disc_paste, sizeof A.disc_paste,
+                                    ImGuiInputTextFlags_Password | ImGuiInputTextFlags_CharsNoBlank)) keys_changed();
+        muted("The key is hidden, used once to check and decrypt, and never saved.");
+    }
     ImGui::EndChild();
     ImGui::Spacing();
 
@@ -1261,7 +1279,7 @@ static void screen_keys() {
     radio("Paste the key", &mode, 1);
     set_common_mode(mode);
     if (A.common_mode == 0) {
-        if (button("Choose key file...##common")) choose_file("common_key", keyf, 2);
+        if (button("Choose key file / keys.txt...##common")) choose_file("common_key", keyf, 2);
         if (!A.common_key_file.empty()) {
             ImGui::SameLine();
             ImGui::TextUnformatted(base_name(A.common_key_file).c_str());
@@ -1284,9 +1302,9 @@ static void screen_keys() {
             colored(BAD, A.keys_msg);
         }
     }
-    bool have_disc = !A.disc_key_found.empty() || !A.disc_key_file.empty();
+    bool have_disc = A.disc_mode == 1 ? A.disc_paste[0] != 0 : (!A.disc_key_found.empty() || !A.disc_key_file.empty());
     bool have_common = A.common_mode == 1 ? strlen(A.paste) > 0 : (!A.common_key_file.empty() || !A.common_key_found.empty());
-    int b = footer({"Back", "Check keys and install"}, 1, (have_disc && have_common && !busy()) ? 0 : 2);
+    int b = footer({"Back", "Check keys and install"}, 1, ((have_disc || have_common) && !busy()) ? 0 : 2);
     if (b == 0) go(Screen::Source);
     if (b == 1) check_keys();
 }
@@ -1302,6 +1320,7 @@ static double step_weight(const std::string& id) {
 static void screen_installing() {
     if (A.portable) page_header("Preparing the game", "One time, about two minutes. You can keep using your computer.");
     else page_header("Installing", "This takes a few minutes. You can keep using your computer.");
+    if (!A.keys_msg.empty()) ImGui::TextWrapped("%s", A.keys_msg.c_str());
     double tw = 0, dw = 0;
     for (auto& s : A.steps) {
         double w = step_weight(s.id);
@@ -1859,6 +1878,7 @@ static void automation_frame() {
             const std::string v = kv.second.t == J::Str ? kv.second.s : "";
             if (k == "source") set_source(v);
             else if (k == "disc_key_file") set_disc_key_file(v);
+            else if (k == "disc_mode") { A.disc_mode = v == "paste" ? 1 : 0; keys_changed(); }
             else if (k == "common_key_file") set_common_key_file(v);
             else if (k == "common_mode") set_common_mode(v == "paste" ? 1 : 0);
             else if (k == "save_kind")

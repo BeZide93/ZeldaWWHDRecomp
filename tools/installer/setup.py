@@ -588,14 +588,36 @@ def parse_key(data):
     return bytes.fromhex(h)
 
 
-def read_key_file(path):
+KEY_FILE_LIMIT = 1024 * 1024  # bounded, but large enough for a Cemu library
+
+
+def parse_key_entries(data):
+    """Keys in file order (entry numbers count valid keys, not comments/junk)."""
+    single = parse_key(data)
+    if single:
+        return [single]
+    if isinstance(data, bytes):
+        data = data.decode("utf-8-sig", "replace")
+    entries = []
+    for line in data.splitlines():
+        match = re.match(r"^\s*([0-9a-fA-F]{32})(?=$|\s|#|;|//)", line)
+        if match:
+            entries.append(bytes.fromhex(match[1]))
+    return entries
+
+
+def read_key_entries(path):
     try:
-        if os.path.getsize(path) > 4096:
-            return None
         with open(path, "rb") as f:
-            return parse_key(f.read())
+            data = f.read(KEY_FILE_LIMIT + 1)
+        return parse_key_entries(data) if len(data) <= KEY_FILE_LIMIT else []
     except OSError:
-        return None
+        return []
+
+
+def read_key_file(path):
+    entries = read_key_entries(path)
+    return entries[0] if len(entries) == 1 else None
 
 
 class Keys:
@@ -1182,53 +1204,26 @@ def folder_size(path):
 
 
 def get_disc_keys(image, ui, args):
-    keys = Keys()
-    if args.disc_key:
-        keys.disc = read_key_file(args.disc_key)
-        if not keys.disc:
-            raise SetupError("%s does not contain a disc key (16 raw bytes or 32 hex digits)" % args.disc_key)
-    else:
-        side = os.path.splitext(image)[0] + ".key"
-        if os.path.isfile(side):
-            keys.disc = read_key_file(side)
-            if keys.disc:
-                say("  Disc key: found %s" % os.path.basename(side))
-    if args.common_key:
-        keys.common = read_key_file(args.common_key)
-        if not keys.common:
-            raise SetupError("%s does not contain the Wii U common key (16 raw bytes or 32 hex digits)" % args.common_key)
-    elif os.environ.get("WIIU_COMMON_KEY"):
-        keys.common = parse_key(os.environ["WIIU_COMMON_KEY"])
-        if not keys.common:
-            raise SetupError("WIIU_COMMON_KEY is not 32 hex digits")
-        say("  Common key: from WIIU_COMMON_KEY")
-    else:
-        for d in (os.path.dirname(image), PKG):
-            p = os.path.join(d, "common.key")
-            if os.path.isfile(p) and read_key_file(p):
-                keys.common = read_key_file(p)
-                say("  Common key: found %s" % p)
-                break
-    if not keys.disc:
-        keys.disc = ask_key(ui, "disc key", "16 bytes, dumped together with this disc, usually a .key file next to the image")
-    if not keys.common:
-        keys.common = ask_key(ui, "Wii U common key", "16 bytes, the same for every Wii U, dumped from your console")
+    req = {"disc_key_file": args.disc_key, "common_key_file": args.common_key}
     while True:
-        problem, err, info = disc_info(image, keys)
-        if not problem:
+        keys, info, why, notices = resolve_disc_keys(image, req)
+        if not why:
+            for notice in notices:
+                say("  " + notice)
             return keys, info
-        if problem in ("disc_key_bad", "disc_key_wrong"):
-            say("  The disc key does not match this disc image.")
-            if not ui.interactive or args.disc_key:
-                raise SetupError(err)
-            keys.disc = ask_key(ui, "disc key", "it must be the key dumped together with this disc")
-        elif problem in ("common_key_bad", "common_key_wrong"):
-            say("  The Wii U common key is not correct.")
-            if not ui.interactive or args.common_key:
-                raise SetupError(err)
-            keys.common = ask_key(ui, "Wii U common key", "the same 16 bytes for every Wii U console")
+        problem, message = why
+        if not ui.interactive or not problem.startswith(("disc_key", "common_key")):
+            raise SetupError(message)
+        say("  " + message)
+        name = "disc" if problem.startswith("disc_key") else "common"
+        choice = ui.choose("Provide the %s key (Cemu keeps both keys in keys.txt)." % name,
+                           ["choose a key file / keys.txt", "paste it (32 hex digits; the input is hidden)"])
+        req.pop(name + "_key_file", None)
+        req.pop(name + "_key_hex", None)
+        if choice == 0:
+            req[name + "_key_file"] = ui.pick_path("Choose the key file / keys.txt")
         else:
-            raise SetupError("cannot read the disc image: %s" % err)
+            req[name + "_key_hex"] = ui.secret("Paste the %s key and press Enter:" % name)
 
 
 def game_staging_dir(data_dir):
@@ -2636,8 +2631,8 @@ def main():
                                  epilog=__doc__)
     ap.add_argument("--image", help="disc image (.wux or .wud; a .wua is taken as --archive)")
     ap.add_argument("--archive", help="Cemu Wii U archive (.wua): no keys needed")
-    ap.add_argument("--disc-key", help="disc key file (default: IMAGE.key)")
-    ap.add_argument("--common-key", help="Wii U common key file (or WIIU_COMMON_KEY)")
+    ap.add_argument("--disc-key", help="disc key file or Cemu keys.txt (default: IMAGE.key)")
+    ap.add_argument("--common-key", help="Wii U common key file or Cemu keys.txt (or WIIU_COMMON_KEY)")
     ap.add_argument("--game-dir", help="an already extracted game folder (code/, content/, meta/) instead of an image")
     ap.add_argument("--gen-dir", help="use this generated code instead of recompiling (build checks)")
     ap.add_argument("--data-dir", help="where the game is installed (default: %s)" % default_data_dir())
@@ -2856,13 +2851,13 @@ def run(args, ui):
 # Requests (stdin):
 #   probe        {path}                  -> kind image|archive|folder|invalid, disc_key, common_key, title;
 #                                           archive: title, folder, bytes, message (which title, why)
-#   check_keys   {image, disc_key_file?, common_key_file?, common_key_hex?}
+#   check_keys   {image, disc_key_file?, disc_key_hex?, common_key_file?, common_key_hex?}
 #                                        -> title_id, files, bytes  (keys stay in memory for install)
 #   install      {source: image|archive|folder|installed, path?, jobs?}  -> streams step/progress/log, then
 #                                           reply {app, exe, data_dir}
 #   import_save  {kind: hd|gc, path, replace?}  -> message; problem "exists" if a save is there
 #   language_sources {}                  -> sources: [{region, title_id, source, packs: [{file, language, bytes}]}]
-#   add_language_source {path, disc_key_file?, common_key_file?, common_key_hex?}
+#   add_language_source {path, disc_key_file?, disc_key_hex?, common_key_file?, common_key_hex?}
 #                                        -> sources (the added ones); experimental (docs/language-packs.md)
 #   remove_language_source {region}      -> removed (the folder)
 #   launch       {}                      -> starts the installed game (the decomp version when start_decomp)
@@ -2889,7 +2884,8 @@ def find_common_key(image):
 
 
 KEY_MESSAGES = {
-    "disc_key_bad": "The disc key file does not contain a key (16 raw bytes or 32 hex digits).",
+    "disc_key_bad": "No valid disc key was supplied. Paste 32 hex digits or choose a key file / Cemu keys.txt.",
+    "disc_key_is_common": "You entered the Wii U common key as the disc key. The disc key is a different key that belongs to your disc dump (Cemu keeps it in keys.txt).",
     "disc_key_wrong": "The disc key does not match this disc image. It must be the key dumped together with this disc.",
     "common_key_bad": "That is not a Wii U common key: it must be 16 raw bytes or 32 hex digits.",
     "common_key_wrong": "The Wii U common key is not correct (it is the same 16 bytes on every Wii U).",
@@ -2897,6 +2893,80 @@ KEY_MESSAGES = {
     "archive_bad": "This file is not a readable Cemu Wii U archive (.wua).",
     "image_damaged": "The disc image is damaged.",
 }
+
+
+def resolve_disc_keys(image, req, info_reader=None, file_reader=None):
+    """Shared CLI/GUI/Android resolver. Returns keys, info, error, value-free notices.
+
+    A common-key error proves the disc partition check passed. Find that disc
+    candidate once, then scan common candidates: O(disc + common), not O(n²).
+    Explicit paste/single-key inputs take priority; multi-entry files can supply
+    either missing key. Never return candidate values in diagnostics.
+    """
+    info_reader = info_reader or disc_info
+    file_reader = file_reader or read_key_entries
+    candidates = {"disc": [], "common": []}
+    shared = []
+    for name in candidates:
+        text = req.get(name + "_key_hex")
+        path = req.get(name + "_key_file")
+        if text is not None:
+            key = parse_key(text)
+            if not key:
+                return None, None, (name + "_key_bad", KEY_MESSAGES[name + "_key_bad"]), []
+            candidates[name] = [(key, None)]
+        elif path:
+            entries = file_reader(path)
+            if not entries:
+                return None, None, (name + "_key_bad", KEY_MESSAGES[name + "_key_bad"]), []
+            label = req.get(name + "_key_label") or os.path.basename(path)
+            values = [(key, "%s key: found in %s (entry %d)" %
+                       ("Disc" if name == "disc" else "Common", label, i))
+                      for i, key in enumerate(entries, 1)]
+            candidates[name] = values
+            if len(entries) > 1:
+                shared.extend((key, label, i) for i, key in enumerate(entries, 1))
+    for name in candidates:
+        if not candidates[name]:
+            candidates[name] = [(key, "%s key: found in %s (entry %d)" %
+                                 ("Disc" if name == "disc" else "Common", path, i)) for key, path, i in shared]
+        if not candidates[name]:
+            if name == "disc":
+                side = find_sidecar_disc_key(image)
+                key = read_key_file(side) if side else None
+            else:
+                _, key = find_common_key(image)
+            if key:
+                candidates[name] = [(key, None)]
+    disc = candidates["disc"]
+    common = candidates["common"]
+    if not disc:
+        return None, None, ("disc_key_missing", "The disc key is needed: paste it or choose a key file / Cemu keys.txt."), []
+    keys = Keys()
+    keys.common = common[0][0] if common else bytes(16)
+    disc_notice = None
+    for key, notice in disc:
+        keys.disc = key
+        problem, error, info = info_reader(image, keys)
+        if problem not in ("disc_key_bad", "disc_key_wrong"):
+            if problem not in (None, "common_key_bad", "common_key_wrong"):
+                return None, None, (problem, KEY_MESSAGES.get(problem, error)), []
+            disc_notice = notice
+            break
+    else:
+        same = len(disc) == 1 and any(disc[0][0] == key for key, _ in common)
+        problem = "disc_key_is_common" if same else "disc_key_wrong"
+        return None, None, (problem, KEY_MESSAGES[problem]), []
+    if not common:
+        return None, None, ("common_key_missing", "The Wii U common key is needed: paste it or choose a key file / Cemu keys.txt."), []
+    for key, notice in common:
+        keys.common = key
+        problem, error, info = info_reader(image, keys)
+        if not problem:
+            return keys, info, None, [n for n in (disc_notice, notice) if n]
+        if problem not in ("common_key_bad", "common_key_wrong"):
+            return None, None, (problem, KEY_MESSAGES.get(problem, error)), []
+    return None, None, ("common_key_wrong", KEY_MESSAGES["common_key_wrong"]), []
 
 
 def gui_main(args):
@@ -2973,27 +3043,8 @@ def gui_main(args):
 
     def request_keys(req, image):
         """(keys, None) or (None, (problem, message)) from a request's key fields (check_keys, add_language_source)."""
-        keys = Keys()
-        if req.get("disc_key_file"):
-            keys.disc = read_key_file(req["disc_key_file"])
-            if not keys.disc:
-                return None, ("disc_key_bad", KEY_MESSAGES["disc_key_bad"])
-        else:
-            side = find_sidecar_disc_key(image)
-            keys.disc = read_key_file(side) if side else None
-            if not keys.disc:
-                return None, ("disc_key_missing", "No disc key was found next to the image: choose the key file.")
-        given = req.get("common_key_hex") or req.get("common_key_file")
-        if req.get("common_key_hex"):
-            keys.common = parse_key(req["common_key_hex"])
-        elif req.get("common_key_file"):
-            keys.common = read_key_file(req["common_key_file"])
-        else:
-            keys.common = find_common_key(image)[1]
-        if not keys.common:
-            return None, (("common_key_bad", KEY_MESSAGES["common_key_bad"]) if given
-                          else ("common_key_missing", "The Wii U common key is needed."))
-        return keys, None
+        keys, _, why, _ = resolve_disc_keys(image, req)
+        return keys, why
 
     def sources_reply():
         return [{k: m.get(k) for k in ("region", "title_id", "source", "packs")} for m in language_sources(ctx.data_dir)]
@@ -3027,36 +3078,17 @@ def gui_main(args):
 
     def check(req):
         image = req.get("image") or ""
-        keys = Keys()
-        if req.get("disc_key_file"):
-            keys.disc = read_key_file(req["disc_key_file"])
-            if not keys.disc:
-                return fail(req, "disc_key_bad", KEY_MESSAGES["disc_key_bad"])
-        else:
-            side = find_sidecar_disc_key(image)
-            keys.disc = read_key_file(side) if side else None
-            if not keys.disc:
-                return fail(req, "disc_key_missing", "No disc key was found next to the image: choose the key file.")
-        if req.get("common_key_hex"):
-            keys.common = parse_key(req["common_key_hex"])
-        elif req.get("common_key_file"):
-            keys.common = read_key_file(req["common_key_file"])
-        else:
-            keys.common = find_common_key(image)[1]
-        if not keys.common:
-            return fail(req, "common_key_bad" if (req.get("common_key_hex") or req.get("common_key_file"))
-                        else "common_key_missing",
-                        KEY_MESSAGES["common_key_bad"] if (req.get("common_key_hex") or req.get("common_key_file"))
-                        else "The Wii U common key is needed.")
-        problem, err, info = disc_info(image, keys)
-        if problem:
-            return fail(req, problem, KEY_MESSAGES.get(problem, err))
+        session.update(keys=None, info=None, image=None)
+        keys, info, why, notices = resolve_disc_keys(image, req)
+        if why:
+            return fail(req, *why)
         try:
             check_title(info.get("title_id", ""))
         except SetupError as e:
             return fail(req, "wrong_title", str(e))
         session.update(keys=keys, info=info, image=image)
-        reply(req, title_id=info.get("title_id"), files=int(info.get("files", 0)), bytes=int(info.get("bytes", 0)))
+        reply(req, title_id=info.get("title_id"), files=int(info.get("files", 0)), bytes=int(info.get("bytes", 0)),
+              message="\n".join(notices))
 
     def do_install(req):
         kind = req.get("source")
