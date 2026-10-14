@@ -528,6 +528,11 @@ int32_t define(const std::string& mod, const std::string& chart, const std::stri
     return kResultNone;
 }
 
+size_t declared() {
+    std::lock_guard lock(g_mu);
+    return g_defs.size();
+}
+
 std::vector<ChartView> charts() {
     std::vector<ChartView> out;
     story_mail::Book b = have_save() ? book() : story_mail::Book(nullptr);

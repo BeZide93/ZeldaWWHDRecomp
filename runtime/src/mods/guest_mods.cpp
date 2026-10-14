@@ -24,6 +24,7 @@
 #include "story_notebook_layout.h"
 #include "story_mail_book.h"
 #include "story_chart.h"
+#include "story_treasure.h"
 #include "story_notebook.h"
 #include "story_items.h"
 #include "story_item_buttons.h"
@@ -31,6 +32,7 @@
 #include "story_manifest.h"
 #include "story_store.h"
 #include "story_takeover.h"
+#include "story_treasure_chest.h"
 #include "mod_json.h"
 #include "input.h"
 #include "true60.h"
@@ -718,6 +720,21 @@ void init() {
         ch.addr=addr;ch.ordinal=uint32_t(ordinal);ch.replace=fn;ch.replace_mod="the port's chart service";
         g_mod_hook_flags[ordinal]=1;
     });
+    // Mod treasure charts (story_treasure.h): the game's salvage point, light ring, crane and chest for a
+    // declared mod chart, only when a loaded mod declares charts.
+    if(story_chart::declared()){
+        story_treasure::set_game_calls(call_original,[](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);});
+        story_treasure::set_scratch_memory(mem::host_alloc(story_treasure::kScratchBytes,16));
+        story_treasure::install([](uint32_t addr) {
+            auto it=g_chains.find(addr);return it==g_chains.end()?std::string():it->second.replace_mod;
+        },[](uint32_t addr,PpcFunc fn) {
+            int ordinal=ordinal_of(addr);
+            if(ordinal<0)fatal("[guestmods] treasure charts: %08X is not a game function",addr);
+            Chain& ch=g_chains[addr];
+            ch.addr=addr;ch.ordinal=uint32_t(ordinal);ch.replace=fn;ch.replace_mod="the port's treasure charts";
+            g_mod_hook_flags[ordinal]=1;
+        });
+    }
     // The story notebook: the item menu's Delivery Bag shows it and opens its page, only when a loaded
     // mod uses the quest services (story_notebook.h).
     story_notebook::set_game_ui(&story_notebook::game_ui());
@@ -766,6 +783,10 @@ void init() {
     story_items::set_game_calls(call_original,[](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);});
     story_items::set_presenter(story_notebook::show_info);
     if(story_items::imported())story_mail::set_item_get_next(story_items::hooks::exec_item_get);
+    // a mod treasure chart's chest (story_treasure_chest.h): its stand-in's execItemGet, before the mod items'
+    // pool numbers; inert unless a chest of a mod item is pending
+    story_treasure_chest::set_item_get_next(story_items::imported()?story_items::hooks::exec_item_get:nullptr,call_original);
+    if(!story_treasure::chest_hooks().empty())story_mail::set_item_get_next(story_treasure_chest::hooks::exec_item_get);
     story_items::set_use_calls([](const char* how){return story_notebook::open_page(how);},story_notebook::reach);
     story_items::install([](uint32_t addr) {
         auto it=g_chains.find(addr);return it==g_chains.end()?std::string():it->second.replace_mod;
@@ -830,6 +851,7 @@ void state_loaded() {
     hud::store().reset();
     pcm::store().reset();
     story_mail::state_loaded();
+    story_treasure_chest::state_loaded();
     story_chart::state_loaded();
     story_notebook::state_loaded();
     story_bag::state_loaded();

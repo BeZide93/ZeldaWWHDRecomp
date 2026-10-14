@@ -63,6 +63,7 @@ struct ChartView {
     uint8_t item_game = 0;  // ... a game item ("game:<name>", story_manifest.h chart_game_item); both empty: an orange rupee
 };
 std::vector<ChartView> charts();  // the declared charts, in declaration order
+size_t declared();                // how many charts are declared (no save data read: safe at startup)
 // The in-game menu switches to the MAP screen with that chart selected in its chart list (game thread;
 // false when Link doesn't own it or there is no in-game menu).
 bool open_in_list(const std::string& mod, const std::string& chart);

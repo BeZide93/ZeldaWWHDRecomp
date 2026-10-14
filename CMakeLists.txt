@@ -1008,6 +1008,18 @@ add_executable(story_chart_test runtime/tools/story_chart_test.cpp runtime/src/m
 target_include_directories(story_chart_test PRIVATE runtime/include runtime/src)
 target_compile_options(story_chart_test PRIVATE -UNDEBUG)
 add_test(NAME story_chart COMMAND story_chart_test)
+# mod treasure charts (a): reserved save numbers, salvage points, spawn and registration on a synthetic registry
+add_executable(story_treasure_salvage_test runtime/tools/story_treasure_salvage_test.cpp runtime/src/mods/story_treasure_salvage.cpp
+               runtime/src/mods/story_chart.cpp runtime/src/mods/story_store.cpp runtime/src/guest_addr_identity.c)
+target_include_directories(story_treasure_salvage_test PRIVATE runtime/include runtime/src)
+target_compile_options(story_treasure_salvage_test PRIVATE -UNDEBUG)
+add_test(NAME story_treasure_salvage COMMAND story_treasure_salvage_test)
+# mod treasure charts, chart state: the salvage code's collect-map questions for reserved save numbers
+add_executable(story_treasure_state_test runtime/tools/story_treasure_state_test.cpp runtime/src/mods/story_treasure_state.cpp
+               runtime/src/mods/story_chart.cpp runtime/src/mods/story_store.cpp runtime/src/guest_addr_identity.c)
+target_include_directories(story_treasure_state_test PRIVATE runtime/include runtime/src)
+target_compile_options(story_treasure_state_test PRIVATE -UNDEBUG)
+add_test(NAME story_treasure_state COMMAND story_treasure_state_test)
 # the story notebook: quest list, save record, page navigation, services and item menu hooks
 add_executable(story_notebook_test runtime/tools/story_notebook_test.cpp runtime/src/mods/story_notebook.cpp
                runtime/tools/story_notebook_layout_stub.cpp runtime/src/mods/story_mail.cpp runtime/src/mods/story_store.cpp
@@ -1030,6 +1042,13 @@ target_include_directories(story_item_buttons_test PRIVATE runtime/include runti
 target_compile_options(story_item_buttons_test PRIVATE -UNDEBUG)
 target_link_libraries(story_item_buttons_test PRIVATE ZLIB::ZLIB)
 add_test(NAME story_item_buttons COMMAND story_item_buttons_test)
+# mod treasure charts, the chest's item: game items, the mod item's stand-in and its get, on a synthetic save
+add_executable(story_treasure_chest_test runtime/tools/story_treasure_chest_test.cpp runtime/src/mods/story_treasure_chest.cpp
+               runtime/src/mods/story_items.cpp runtime/src/mods/story_chart.cpp runtime/src/mods/story_mail.cpp runtime/src/mods/story_store.cpp
+               runtime/src/guest_addr_identity.c ${WWHD_NPC_CATALOGUE})
+target_include_directories(story_treasure_chest_test PRIVATE runtime/include runtime/src runtime/src/mods)
+target_compile_options(story_treasure_chest_test PRIVATE -UNDEBUG)
+add_test(NAME story_treasure_chest COMMAND story_treasure_chest_test)
 if(Python3_Interpreter_FOUND)
   add_test(NAME release_sdk_package COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/release/test_sdk_package.py")
   add_test(NAME story_notebook_model COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/story_mods/test_notebook_model.py")

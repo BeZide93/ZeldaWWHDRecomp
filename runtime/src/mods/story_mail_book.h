@@ -67,12 +67,13 @@ public:
     explicit Book(uint8_t* bytes, unsigned records = kRecords) : b_(bytes), n_(records) {}
     unsigned records() const { return n_; }
     bool empty() const {
+        if (!b_) return true;
         for (uint32_t i = 0; i < 4 + 4 * n_; i++)
             if (b_[i]) return false;
         return true;
     }
     // ours: a valid header, or still all zero (a fresh save)
-    bool usable() const { return empty() || (b_[0] == kMagic && b_[1] == kVersion && !b_[2] && !b_[3]); }
+    bool usable() const { return b_ && (empty() || (b_[0] == kMagic && b_[1] == kVersion && !b_[2] && !b_[3])); }  // none: no save
     // The value of a record, 0 when there is none.
     uint8_t get(uint8_t kind, uint16_t key) const {
         int i = usable() ? find(kind, key) : -1;
