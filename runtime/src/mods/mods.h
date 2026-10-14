@@ -70,6 +70,8 @@ void set_sail_speed_normal_factor(float factor);
 float sail_speed_swift_factor();          // the HD Swift Sail
 void set_sail_speed_swift_factor(float factor);
 bool auto_wind();                         // the wind follows the boat with the normal sail too
+bool story_system();                      // letters, quests, the story notebook, mod charts (mods/required.h)
+void set_story_system(bool on);
 void set_auto_wind(bool on);
 
 // hooks' helpers (traversal_settings.cpp, traversal.cpp)

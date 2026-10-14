@@ -9,6 +9,15 @@ platforms), with no Cemu runtime and no GPU command emulation.
 
 How it works and how it differs from running the game in Cemu: [docs/how-it-works.md](docs/how-it-works.md).
 
+The project has three parts:
+- **The port** (this repository): the recompiled game on macOS, Linux, Windows and Android, described below.
+- **The decompilation** ([ZeldaWWHDDecomp/wwhd](https://github.com/ZeldaWWHDDecomp/wwhd)): readable C++ source
+  for the game's code, each function tested against the original. The port can already run it in an
+  experimental **decomp build**, the path towards a fully native source port; see
+  [decomp build](#optional-decomp-build-experimental).
+- **Mods** ([ZeldaWWHDRecomp/ZeldaWWHDMods](https://github.com/ZeldaWWHDRecomp/ZeldaWWHDMods)): built-in options
+  and a catalogue of community mods, installed from inside the game; see [Mods](#mods).
+
 ## What's new
 
 The changes in each update are in [CHANGELOG.md](CHANGELOG.md) and in the release notes on the
@@ -577,6 +586,33 @@ In Gaming Mode the Steam button belongs to Steam and there is no keyboard, so ke
 - **Save-state shortcuts:** in Steam, open the game's controller settings and map the back buttons
   (L4/R4/L5/R5) to keyboard keys: **Shift+F1** saves slot 1, **F2–F5** load slots 2–5,
   **Shift+F2–F5** save them. Steam sends those keys to the game.
+
+## Mods
+
+Mods are managed in the game: **Settings (F1) → Mods**.
+- **Built-in:** options that come with the port, all off by default, for example the direct right-stick camera,
+  the mouse camera, run/swim and sailing speed, quick doors, climbing any wall, and fast forward for cutscenes
+  and dialogue.
+- **Community:** mods from the [mod catalogue](https://github.com/ZeldaWWHDRecomp/ZeldaWWHDMods), installed from
+  the menu, plus imported packages and Cemu graphics packs. Experimental mods are hidden unless you turn on
+  **Show experimental mods**, and your saves are backed up before one is switched on.
+
+**Writing mods (Mod SDK v2):**
+- Code mods are written in C (or C++) and compiled for the game's own CPU (32-bit PowerPC). One package works on
+  macOS, Windows and Linux.
+- When a player installs one, the port translates it and compiles it with the compiler it already has. The game
+  code itself is not translated again.
+- Mods hook or replace game functions at runtime, use the game's own data and objects, can draw on screen (HUD
+  API) and use host services. Content mods (file replacements) and settings presets need no code.
+- Code-mod support is off until a code mod is switched on; the first time, the game is rebuilt once (a few
+  minutes).
+- Mods contain no game code or game files; anything they need from the game is read from your own copy, on your
+  machine.
+
+How to write and submit a mod, the package format and the review rules:
+[ZeldaWWHDMods: creating a mod](https://github.com/ZeldaWWHDRecomp/ZeldaWWHDMods/blob/main/docs/creating-a-mod.md).
+The SDK reference is [docs/mod-sdk-v2.md](docs/mod-sdk-v2.md), the mod manager is described in
+[docs/mod-manager.md](docs/mod-manager.md).
 
 ## Notes
 

@@ -15,6 +15,7 @@
 #include "save_backup.h"
 #include "../platform/host.h"
 #include "wwhd_mod.h"
+#include "story_manifest.h"
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -50,6 +51,10 @@ struct Manifest {
     std::vector<catalogue::Step> setup;
     std::vector<std::string> setup_tools;
     bool experimental=false;
+    // the Story Notebook package's "notebook" block (the notebook's look): its files and its layout
+    // folder, exempt from the HUD texture budget with limits of their own (notebook_look)
+    std::set<std::string> notebook_files;
+    std::string notebook_folder;
 };
 struct Record {Manifest manifest;fs::path path;bool active=false,loading=false;std::string status,error;Value startup_config;};
 std::mutex mutex;
@@ -67,6 +72,8 @@ std::vector<std::string> notices;
 std::atomic<bool> dirty{false},running{false},profile_changed{false};
 ReadMemory read_memory=nullptr;WriteMemory write_memory=nullptr;
 void require(bool ok,const std::string& message){if(!ok)exception_report::raise(message);}
+// a dependency that isn't installed: the story system's required package is downloaded by the manager
+std::string missing(const std::string& id){return id==story_notebook::kNotebookPackage?"Needs the Story Notebook quest (downloading\xE2\x80\xA6)":"Missing dependency: "+id;}
 bool id_ok(const std::string& s){return !s.empty()&&s.size()<=64&&s[0]!='.'&&std::all_of(s.begin(),s.end(),[](unsigned char c){return (c>='a'&&c<='z')||(c>='0'&&c<='9')||c=='_'||c=='-'||c=='.';});}
 std::array<unsigned,3> version(const std::string& s) {
     std::array<unsigned,3> result{};size_t p=0;
@@ -75,6 +82,42 @@ std::array<unsigned,3> version(const std::string& s) {
 }
 std::string string_field(const Value& v,const char* key,bool optional=false,size_t limit=8192){const auto& f=v.get(key);if(optional&&f.type==Value::Null)return {};require(f.type==Value::String&&f.text.size()<=limit&&f.text.find('\0')==std::string::npos,"Invalid field: "+std::string(key));return f.text;}
 using hash::sha256_file;
+// The Story Notebook package's "notebook" block: {"icon": png, "model": glb, "layout": json}. Only that
+// package has one. Its files are its own: a PNG icon (up to 1024 x 1024), a binary glTF model (up to
+// 8 MiB) and a layout description whose folder holds the page's art (up to 64 PNGs, 64 MiB decoded);
+// none of them counts against the HUD texture budget.
+void notebook_look(Manifest& m,const Value& look,const fs::path& path) {
+    if(look.type==Value::Null)return;
+    require(look.type==Value::Object,"Invalid notebook block");
+    require(m.id==story_notebook::kNotebookPackage,"Only the Story Notebook package has a notebook block");
+    auto file=[&](const char* key,const char* extension,uint64_t limit) {
+        const auto name=string_field(look,key,true,256);
+        if(name.empty())return name;
+        require(archive::relative_path(name)&&fs::path(name).extension()==extension,std::string("Invalid notebook ")+key);
+        fs::path checked=path;for(const auto& part:fs::path(name)){checked/=part;require(!fs::is_symlink(checked),"Notebook files may not use symlinks");}
+        require(fs::is_regular_file(checked)&&fs::file_size(checked)<=limit,std::string("The notebook ")+key+" is missing or too large");
+        m.notebook_files.insert(fs::path(name).generic_string());
+        return name;
+    };
+    if(auto icon=file("icon",".png",4u<<20);!icon.empty()) {
+        auto image=guestmods::hud::load_png(path,icon);
+        require(image.width<=1024&&image.height<=1024,"The notebook icon is larger than 1024 x 1024");
+    }
+    if(auto model=file("model",".glb",8u<<20);!model.empty()) {
+        std::ifstream in(path/model,std::ios::binary);char magic[4]{};in.read(magic,4);
+        require(in&&std::string(magic,4)=="glTF","The notebook model is not a binary glTF file");
+    }
+    if(auto layout=file("layout",".json",1u<<20);!layout.empty()) {
+        m.notebook_folder=fs::path(layout).parent_path().generic_string();
+        require(!m.notebook_folder.empty(),"The notebook layout must sit in a folder of its own");
+        size_t count=0,pixels=0;
+        for(const auto& entry:fs::recursive_directory_iterator(path/m.notebook_folder))if(entry.is_regular_file()&&entry.path().extension()==".png") {
+            require(++count<=64,"The notebook layout has more than 64 images");
+            auto image=guestmods::hud::load_png(path,entry.path().lexically_relative(path).generic_string());
+            pixels+=image.rgba.size();require(pixels<=64u<<20,"The notebook layout's images exceed 64 MiB decoded");
+        }
+    }
+}
 std::string package_fingerprint(const fs::path& path) {
     std::map<std::string,std::string> inventory;uint64_t bytes=0;
     for(const auto& entry:fs::recursive_directory_iterator(path)) {
@@ -108,6 +151,12 @@ Manifest manifest(const fs::path& path){
     if(!game_id_supported(string_field(v,"game_id",false,64)))m.problem="This package targets another game";
     auto minimum=string_field(v,"minimum_manager_version",true,64);
     if(!minimum.empty()&&version(minimum)>version(kManagerVersion))m.problem="Requires mod manager "+minimum;
+    // story quests (story_manifest.h): an NPC this port's catalogue doesn't know, or a newer catalogue
+    // version, keeps the mod from being enabled with the reason, never a silent no-op
+    if(m.problem.empty()&&(v.get("quests").type!=Value::Null||v.get("npc_catalogue").type!=Value::Null||v.get("charts").type!=Value::Null)){
+        std::vector<story_notebook::ManifestQuest> quests;std::vector<story_notebook::ManifestChart> charts;std::string why;
+        if(!story_notebook::parse_quests(v,quests,why)||!story_notebook::parse_charts(v,charts,why))m.problem="Story quests: "+why;
+    }
     if(m.kind=="native") {
         require(v.get("abi_version").type==Value::Number&&v.get("abi_version").number==1,"Unsupported native mod ABI");
         const auto& binaries=v.get("binaries");require(binaries.type==Value::Object&&!binaries.object.empty(),"Native mod has no binaries");
@@ -151,6 +200,10 @@ Manifest manifest(const fs::path& path){
     }
     const auto& deps=v.get("dependencies");require(deps.type==Value::Null||deps.type==Value::Array,"Dependencies must be an array");
     for(const auto& dep:deps.array){Requirement r;r.id=string_field(dep,"id",false,80);r.version=string_field(dep,"minimum_version",true,64);if(r.version.empty())r.version="0.0.0";version(r.version);require(id_ok(r.id)||(r.id.starts_with("builtin:")&&manager::find(r.id.substr(8))),"Invalid dependency ID");m.dependencies.push_back(r);}
+    // every quest mod depends on the story system's required package (required.h), declared or not
+    if(m.id!=story_notebook::kNotebookPackage&&(v.get("quests").type!=Value::Null||v.get("charts").type!=Value::Null)&&
+       std::none_of(m.dependencies.begin(),m.dependencies.end(),[](const Requirement& r){return r.id==story_notebook::kNotebookPackage;}))
+        m.dependencies.push_back({story_notebook::kNotebookPackage,"0.0.0"});
     const auto& conflicts=v.get("conflicts");require(conflicts.type==Value::Null||conflicts.type==Value::Array,"Conflicts must be an array");
     for(const auto& c:conflicts.array){require(c.type==Value::String&&(id_ok(c.text)||(c.text.starts_with("builtin:")&&manager::find(c.text.substr(8)))),"Invalid conflict ID");m.conflicts.push_back(c.text);}
     const auto& options=v.get("options");require(options.type==Value::Null||(options.type==Value::Array&&options.array.size()<=32),"Invalid options");std::set<std::string> option_ids;
@@ -180,6 +233,7 @@ Manifest manifest(const fs::path& path){
             m.files=content::index(checked);
             for(const auto& [name,file]:m.files)m.content_hashes.emplace_back(name,sha256_file(file));
         }
+        notebook_look(m,v.get("notebook"),path);
         if(!m.files.empty()||fs::exists(path/"textures")||fs::exists(path/"assets")) {
             m.trust_fingerprint=package_fingerprint(path);
             for(const auto* folder:{"textures","assets"})if(fs::exists(path/folder)) {
@@ -189,6 +243,8 @@ Manifest manifest(const fs::path& path){
                     auto extension=entry.path().extension().string();
                     for(char& c:extension)if(c>='A'&&c<='Z')c+='a'-'A';
                     if(extension!=".png")continue;
+                    const auto relative=entry.path().lexically_relative(path).generic_string();
+                    if(m.notebook_files.contains(relative)||(!m.notebook_folder.empty()&&relative.starts_with(m.notebook_folder+"/")))continue;  // the notebook's look
                     require(++count<=32,"Guest package exceeds 32 HUD textures");
                     auto image=guestmods::hud::load_png(path,entry.path().lexically_relative(path).generic_string());
                     pixels+=image.rgba.size();require(pixels<=guestmods::hud::kMaxTextureBytes,"Guest package HUD textures exceed 16 MiB decoded");
@@ -338,7 +394,7 @@ std::string source_warning(const Manifest& manifest){std::set<std::string> seen;
 void require_source(const Manifest& m){auto warning=source_warning(m);require(warning.empty(),warning);}
 std::vector<std::string> order(const std::set<std::string>& enabled,bool check_sources=true){
     std::map<std::string,int> mark;std::vector<std::string> result;
-    std::function<void(const std::string&)> visit=[&](const std::string& id){require(mark[id]!=1,"Dependency cycle at "+id);if(mark[id]==2)return;mark[id]=1;auto it=records.find(id);require(it!=records.end(),"Missing dependency: "+id);const auto& m=it->second.manifest;require(m.problem.empty(),m.name+": "+m.problem);if(check_sources)require_source(m);for(const auto& dep:m.dependencies){if(dep.id.starts_with("builtin:")){auto* e=manager::find(dep.id.substr(8));require(e&&version("1.0.0")>=version(dep.version),"Built-in dependency version is unavailable");continue;}auto d=records.find(dep.id);require(d!=records.end(),"Missing dependency: "+dep.id);require(version(d->second.manifest.version)>=version(dep.version),"Dependency "+dep.id+" needs version "+dep.version);require(enabled.contains(dep.id),"Dependency is disabled: "+dep.id);visit(dep.id);}mark[id]=2;result.push_back(id);};
+    std::function<void(const std::string&)> visit=[&](const std::string& id){require(mark[id]!=1,"Dependency cycle at "+id);if(mark[id]==2)return;mark[id]=1;auto it=records.find(id);require(it!=records.end(),missing(id));const auto& m=it->second.manifest;require(m.problem.empty(),m.name+": "+m.problem);if(check_sources)require_source(m);for(const auto& dep:m.dependencies){if(dep.id.starts_with("builtin:")){auto* e=manager::find(dep.id.substr(8));require(e&&version("1.0.0")>=version(dep.version),"Built-in dependency version is unavailable");continue;}auto d=records.find(dep.id);require(d!=records.end(),missing(dep.id));require(version(d->second.manifest.version)>=version(dep.version),"Dependency "+dep.id+" needs version "+dep.version);require(enabled.contains(dep.id),"Dependency is disabled: "+dep.id);visit(dep.id);}mark[id]=2;result.push_back(id);};
     for(const auto& id:enabled)visit(id);return result;
 }
 std::set<std::string> enabled_set(){std::set<std::string> result;for(const auto& [id,r]:records)if(wanted(id))result.insert(id);return result;}
@@ -559,7 +615,7 @@ bool begin_setup_run(const std::string& id,const std::string& identity,
         require(!identity.empty()&&identity==setup_identity_unlocked(id),"Package changed; review setup and confirm again");
         std::set<std::string> seen;
         std::function<void(const std::string&)> check=[&](const auto& current) {
-            require(records.contains(current),"Missing dependency: "+current);if(!seen.insert(current).second)return;
+            require(records.contains(current),missing(current));if(!seen.insert(current).second)return;
             const auto& r=records.at(current);const auto& m=r.manifest;
             require(m.problem.empty(),m.problem);require(!r.loading,"Wait for mod preparation to finish");require_source(m);
             require(sha256_file(r.path/"manifest.json")==m.manifest_fingerprint,"Package changed; refresh it and confirm again");
@@ -731,7 +787,7 @@ bool install(const std::string& source,std::string& error,std::string* installed
     }auto m=manifest(stage);require(m.problem.empty()||m.problem.starts_with("No binary for")||m.problem.starts_with("GLSL shader packs require Vulkan"),m.problem);target=root/"Mods"/m.id;auto it=records.find(m.id);require(it==records.end()||(!wanted(m.id)&&!it->second.active&&!it->second.loading),it!=records.end()&&(it->second.manifest.kind=="content"||it->second.manifest.kind=="cemu"||it->second.manifest.kind=="guest")?"Disable this content mod and restart before updating":"Disable this mod and wait for it to unload before updating");fs::create_directories(target.parent_path());if(fs::exists(target)){fs::rename(target,backup);backed=true;}fs::rename(stage,target);moved=true;m=manifest(target);Record r;r.path=target;r.manifest=std::move(m);auto installed_id=r.manifest.id;records[installed_id]=std::move(r);if(installed_id_out)*installed_id_out=installed_id;if(backed){std::error_code cleanup;fs::remove_all(backup,cleanup);}dirty=true;
     }catch(...){if(moved)fs::remove_all(target);if(backed)fs::rename(backup,target);if(fs::exists(stage))fs::remove_all(stage);throw;}
 });}
-bool remove(const std::string& id,std::string& error){return operation(error,[&]{auto it=records.find(id);require(it!=records.end(),"Mod not found");require(!wanted(id)&&!it->second.active&&!it->second.loading,(it->second.manifest.kind=="content"||it->second.manifest.kind=="cemu"||it->second.manifest.kind=="guest")?"Disable this content mod and restart before removing":"Disable this mod and wait for it to unload before removing");for(const auto& [other,r]:records)if(wanted(other))for(const auto& d:r.manifest.dependencies)require(d.id!=id,r.manifest.name+" depends on this mod");auto previous=database;for(auto& [name,p]:database["profiles"].object){p["enabled"].object.erase(id);p["config"].object.erase(id);p["setup_pending"].object.erase(id);}database["native_trust"].object.erase(id);database["experimental_ack"].object.erase(id);database["catalogue_experimental"].object.erase(id);database["guest_regions"].object.erase(id);database["guest_prepared"].object.erase(id);database["setup_receipts"].object.erase(id);try{save();}catch(...){database=previous;throw;}fs::remove_all(it->second.path);std::error_code ignored;fs::remove_all(root/"Data"/id,ignored);records.erase(it);dirty=true;});}
+bool remove(const std::string& id,std::string& error){return operation(error,[&]{auto it=records.find(id);require(it!=records.end(),"Mod not found");require(!(id==story_notebook::kNotebookPackage&&story_system()),"The Story Notebook is part of the story system: turn off the story system to remove it");require(!wanted(id)&&!it->second.active&&!it->second.loading,(it->second.manifest.kind=="content"||it->second.manifest.kind=="cemu"||it->second.manifest.kind=="guest")?"Disable this content mod and restart before removing":"Disable this mod and wait for it to unload before removing");for(const auto& [other,r]:records)if(wanted(other))for(const auto& d:r.manifest.dependencies)require(d.id!=id,r.manifest.name+" depends on this mod");auto previous=database;for(auto& [name,p]:database["profiles"].object){p["enabled"].object.erase(id);p["config"].object.erase(id);p["setup_pending"].object.erase(id);}database["native_trust"].object.erase(id);database["experimental_ack"].object.erase(id);database["catalogue_experimental"].object.erase(id);database["guest_regions"].object.erase(id);database["guest_prepared"].object.erase(id);database["setup_receipts"].object.erase(id);try{save();}catch(...){database=previous;throw;}fs::remove_all(it->second.path);std::error_code ignored;fs::remove_all(root/"Data"/id,ignored);records.erase(it);dirty=true;});}
 uint64_t disk_use(const std::string& id){
     // the package files and the files its setup prepared (Data/<id>); Remove deletes both
     fs::path package,data;{std::lock_guard guard(mutex);auto it=records.find(id);if(!ready||it==records.end())return 0;package=it->second.path;data=root/"Data"/id;}
@@ -755,7 +811,7 @@ bool needs_code_mod_support(const std::string& id){
 bool enable_after_code_rebuild(const std::string& id,std::string& error){return operation(error,[&]{
     require(records.contains(id),"Mod not found");std::set<std::string> seen;
     std::function<void(const std::string&)> check=[&](const std::string& current){
-        require(records.contains(current),"Missing dependency: "+current);if(!seen.insert(current).second)return;
+        require(records.contains(current),missing(current));if(!seen.insert(current).second)return;
         const auto& r=records.at(current);require_source(r.manifest);require(confirmed(r),r.manifest.name+" contains native code that has not been confirmed");
         for(const auto& dep:r.manifest.dependencies)if(!dep.id.starts_with("builtin:"))check(dep.id);
     };check(id);require_experimental_ack(id);
@@ -764,14 +820,17 @@ bool enable_after_code_rebuild(const std::string& id,std::string& error){return 
 });}
 bool enable(const std::string& id,bool on,std::string& error,bool switch_conflicts){std::vector<std::string> builtin_dependencies,experimental_ids;bool ok=operation(error,[&]{require(records.contains(id),"Mod not found");require(!records.at(id).loading,"Wait for this mod's current operation to finish");auto enabled=enabled_set();if(on){
     std::set<std::string> visiting;
-    std::function<void(const std::string&)> add=[&](const std::string& current){require(!visiting.contains(current),"Dependency cycle at "+current);require(records.contains(current),"Missing dependency: "+current);require(!records.at(current).loading,"Wait for mod preparation to finish: "+current);require(records.at(current).manifest.kind!="guest"||code_mod_support,"This mod needs code-mod support. Enable code mods in Settings > Mods, rebuild and restart first");const auto& graphics=records.at(current).manifest.graphics;if(graphics&&!graphics->shaders.empty())require(cemu::vulkan(),"GLSL shader packs require Vulkan; choose it in Graphics and restart");if(enabled.contains(current))return;visiting.insert(current);for(const auto& d:records.at(current).manifest.dependencies){if(d.id.starts_with("builtin:"))builtin_dependencies.push_back(d.id.substr(8));else add(d.id);}visiting.erase(current);require(confirmed(records.at(current)),records.at(current).manifest.name+" contains native code that has not been confirmed");enabled.insert(current);};add(id);
+    std::function<void(const std::string&)> add=[&](const std::string& current){require(!visiting.contains(current),"Dependency cycle at "+current);require(records.contains(current),missing(current));require(!records.at(current).loading,"Wait for mod preparation to finish: "+current);require(records.at(current).manifest.kind!="guest"||code_mod_support,"This mod needs code-mod support. Enable code mods in Settings > Mods, rebuild and restart first");const auto& graphics=records.at(current).manifest.graphics;if(graphics&&!graphics->shaders.empty())require(cemu::vulkan(),"GLSL shader packs require Vulkan; choose it in Graphics and restart");if(enabled.contains(current))return;visiting.insert(current);for(const auto& d:records.at(current).manifest.dependencies){if(d.id.starts_with("builtin:"))builtin_dependencies.push_back(d.id.substr(8));else add(d.id);}visiting.erase(current);require(confirmed(records.at(current)),records.at(current).manifest.name+" contains native code that has not been confirmed");enabled.insert(current);};add(id);
     require_experimental_ack(id);experimental_ids=newly_experimental(id);
     if(switch_conflicts)for(auto it=enabled.begin();it!=enabled.end();){if(*it!=id&&!graphics_conflict(id,*it).empty())it=enabled.erase(it);else ++it;}
-    }else enabled.erase(id);order(enabled,on);auto planned=profile().get("builtins");for(const auto& entry:manager::entries())planned[entry.id]=entry.enabled();for(const auto& dependency:builtin_dependencies)planned[dependency]=true;validate_conflicts(enabled,&planned);auto previous=database;profile()["builtins"]=planned;
+    }else{require(!(id==story_notebook::kNotebookPackage&&story_system()),"The Story Notebook is part of the story system: turn off the story system to turn it off");enabled.erase(id);}order(enabled,on);auto planned=profile().get("builtins");for(const auto& entry:manager::entries())planned[entry.id]=entry.enabled();for(const auto& dependency:builtin_dependencies)planned[dependency]=true;validate_conflicts(enabled,&planned);auto previous=database;profile()["builtins"]=planned;
     double serial=profile().get("enable_serial").number;
     for(const auto& [key,r]:records){if(enabled.contains(key)&&!wanted(key))profile()["enabled_since"][key]=++serial;profile()["enabled"][key]=enabled.contains(key);}profile()["enable_serial"]=serial;
     for(const auto& key:experimental_ids)database["experimental_ack"].object.erase(key); // the confirmation is used up
     try{save();}catch(...){database=previous;throw;}for(const auto& key:enabled)records.at(key).error.clear();dirty=true;});if(ok)for(const auto& key:builtin_dependencies)manager::set_enabled(key,true);return ok;}
+// The guest packages of this start again (required.h installed or enabled one after initialize()),
+// while the guest mods haven't started yet
+void refresh_guest_startup(){std::lock_guard guard(mutex);if(!ready||guests_started)return;try{auto enabled=enabled_set();auto sequence=order(enabled);validate_conflicts(enabled);guest_startup_ids.clear();for(const auto& id:sequence)if(records.at(id).manifest.kind=="guest"){guest_startup_ids.push_back(id);records.at(id).startup_config=config(records.at(id).manifest);}}catch(const std::exception& e){last_problem=e.what();}}
 std::vector<std::pair<std::string,std::string>> unacknowledged_experimental(const std::string& id){
     std::lock_guard guard(mutex);std::vector<std::pair<std::string,std::string>> result;if(!ready)return result;
     for(const auto& current:newly_experimental(id))if(!experimental_acknowledged(current))result.emplace_back(current,records.at(current).manifest.name);
@@ -894,7 +953,7 @@ void start_guests(const GuestInspect& inspect,const GuestLoad& load) {
                 require(dependency.active||dependency.manifest.kind=="settings",
                         "Startup dependency is unavailable: "+dep.id);
             }
-            GuestPackage pkg{id,r.manifest.version,r.path.string(),(root/"Data"/id).string(),r.manifest.fingerprint,r.startup_config,r.manifest.heap_size};
+            GuestPackage pkg{id,r.manifest.version,r.path.string(),(root/"Data"/id).string(),r.manifest.fingerprint,r.startup_config,r.manifest.heap_size};pkg.name=r.manifest.name;
             uint32_t bytes=inspect(pkg);
             uint32_t base=assign_guest_region(id,bytes);
             load(pkg,base);

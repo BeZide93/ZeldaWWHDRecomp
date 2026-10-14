@@ -61,6 +61,13 @@ set(GEN_DIR ${CMAKE_SOURCE_DIR}/build/gen CACHE PATH "recompiler output")
 # Decomp build (docs/decomp-build.md): the game functions of the decompilation (git submodule decomp) run
 # as compiled source in place of the recompiled code; libraries and everything not decompiled stay
 # recompiled. GEN_DIR must then come from recomp.py --decomp-hooks (cmake/Decomp.cmake checks it).
+# Local diagnostic (not for releases): count signalling-NaN float loads/stores of the game code that the
+# host conversion would quiet (runtime/src/snan_count.cpp); logs to captures/snan.log with WWHD_SNAN_COUNT=1.
+option(WWHD_SNAN_COUNT "count signalling-NaN float loads/stores (diagnostic; log with WWHD_SNAN_COUNT=1)" OFF)
+if(WWHD_SNAN_COUNT)
+  add_compile_definitions(WWHD_SNAN_COUNT=1)
+endif()
+
 option(WWHD_DECOMP "decomp build: run the decompiled game functions (macOS; experimental)" OFF)
 include(cmake/Decomp.cmake)
 if(WWHD_DECOMP)
@@ -142,6 +149,15 @@ add_custom_target(wwhd_build_info
           -P ${CMAKE_SOURCE_DIR}/cmake/BuildInfo.cmake
   BYPRODUCTS ${WWHD_BUILD_INFO}
   COMMENT "Build info (version, commit)" VERBATIM)
+# ---- the NPC catalogue's recipes (story_npc_catalogue.h): one per place in runtime/assets/npc_catalogue, compiled
+# in; our own words and references into the game only (names and spots come from the player's game files)
+file(GLOB WWHD_NPC_RECIPE_FILES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/runtime/assets/npc_catalogue/*.recipe.json)
+set(WWHD_NPC_CATALOGUE ${CMAKE_BINARY_DIR}/generated/npc_recipes.cpp)
+add_custom_command(OUTPUT ${WWHD_NPC_CATALOGUE}
+  COMMAND ${CMAKE_COMMAND} -DDIR=${CMAKE_SOURCE_DIR}/runtime/assets/npc_catalogue -DOUT=${WWHD_NPC_CATALOGUE}
+          -P ${CMAKE_SOURCE_DIR}/cmake/EmbedNpcRecipes.cmake
+  DEPENDS ${WWHD_NPC_RECIPE_FILES} ${CMAKE_SOURCE_DIR}/cmake/EmbedNpcRecipes.cmake
+  COMMENT "NPC catalogue recipes" VERBATIM)
 # Windows: VERSIONINFO + application manifest (wwhd_windows_resources); release builds strip the shipped
 # programs' debug information (WWHD_STRIP_RELEASE: -s for GNU-style linkers in Release/MinSizeRel)
 include(cmake/WindowsResources.cmake)
@@ -158,6 +174,7 @@ file(GLOB RUNTIME_SOURCES CONFIGURE_DEPENDS runtime/src/*.cpp runtime/src/*.c ru
                                             runtime/src/overlay/*.cpp)
 list(APPEND RUNTIME_SOURCES runtime/src/platform/perf_hint.cpp runtime/src/platform/thread_sampler.cpp)  # Android performance hints (no-op elsewhere)
 list(APPEND RUNTIME_SOURCES ${WWHD_BUILD_INFO})
+list(APPEND RUNTIME_SOURCES ${WWHD_NPC_CATALOGUE})
 list(APPEND RUNTIME_SOURCES runtime/src/platform/touch_pad.cpp)  # Android on-screen controls (no-op elsewhere)
 if(APPLE)
   list(APPEND RUNTIME_SOURCES runtime/src/platform/https.mm)
@@ -221,7 +238,7 @@ set_source_files_properties(runtime/src/gfx/vulkan/pipeline_demand.cpp PROPERTIE
 set_source_files_properties(runtime/src/gfx/vulkan/shader_translation.cpp
     runtime/src/gfx/vulkan/shader_compiler.cpp
     runtime/src/gfx/vulkan/deferred_commands.cpp PROPERTIES COMPILE_OPTIONS "")
-set_source_files_properties(runtime/src/button_glyph_font.cpp PROPERTIES COMPILE_OPTIONS "-include;${CEMU_DIR}/cemu_shim.h")
+set_source_files_properties(runtime/src/button_glyph_font.cpp runtime/src/game_glyph.cpp PROPERTIES COMPILE_OPTIONS "-include;${CEMU_DIR}/cemu_shim.h")
 if(ANDROID)
   # Android: SDLActivity loads the game as libmain.so and calls its SDL_main (android/)
   add_library(wwhd SHARED ${RUNTIME_SOURCES} ${GX2_SOURCES} ${GFX_SOURCES} ${MOD_GFX_SOURCES} ${IMGUI_METAL})
@@ -333,7 +350,7 @@ target_compile_options(mod_manager_test PRIVATE -UNDEBUG)
 # External native package fixture and isolated lifecycle/integration tests.
 add_library(mod_fixture MODULE runtime/tools/mod_fixture.cpp)
 target_include_directories(mod_fixture PRIVATE runtime/include)
-add_executable(mod_package_test runtime/tools/mod_package_test.cpp runtime/src/mods/manager.cpp runtime/src/mods/traversal_settings.cpp runtime/src/mods/packages.cpp runtime/src/mods/guest_png.cpp runtime/src/mods/mod_archive.cpp runtime/src/mods/content.cpp runtime/src/mods/cemu_pack.cpp runtime/src/guest_addr_identity.c)
+add_executable(mod_package_test runtime/tools/mod_package_test.cpp runtime/src/mods/required.cpp runtime/src/mods/manager.cpp runtime/src/mods/traversal_settings.cpp runtime/src/mods/packages.cpp ${WWHD_NPC_CATALOGUE} runtime/src/mods/guest_png.cpp runtime/src/mods/mod_archive.cpp runtime/src/mods/content.cpp runtime/src/mods/cemu_pack.cpp runtime/src/guest_addr_identity.c)
 target_include_directories(mod_package_test PRIVATE runtime/src runtime/include)
 target_compile_options(mod_package_test PRIVATE -UNDEBUG)
 target_link_libraries(mod_package_test PRIVATE ZLIB::ZLIB Threads::Threads ${CMAKE_DL_LIBS})
@@ -344,13 +361,13 @@ target_link_libraries(guest_png_test PRIVATE ZLIB::ZLIB)
 add_test(NAME guest_png COMMAND guest_png_test "${CMAKE_SOURCE_DIR}/examples/guest-mods")
 
 # Synthetic integration tests call the real guest filesystem HLE handlers.
-add_executable(mod_content_fs_test runtime/tools/mod_content_fs_test.cpp runtime/src/hle/fs.cpp runtime/src/mods/content.cpp runtime/src/mods/mod_archive.cpp runtime/src/game_languages.cpp runtime/src/guest_addr_identity.c)
+add_executable(mod_content_fs_test runtime/tools/mod_content_fs_test.cpp runtime/src/hle/fs.cpp runtime/src/mods/story_mail.cpp runtime/src/mods/story_store.cpp runtime/src/mods/content.cpp runtime/src/mods/mod_archive.cpp runtime/src/game_languages.cpp runtime/src/guest_addr_identity.c)
 target_include_directories(mod_content_fs_test PRIVATE runtime/src runtime/include)
 target_compile_options(mod_content_fs_test PRIVATE -UNDEBUG)
 target_link_libraries(mod_content_fs_test PRIVATE ZLIB::ZLIB Threads::Threads)
 
 # language sources: synthetic European/Japanese packs read through the guest file system (game_languages.h)
-add_executable(language_source_test runtime/tools/language_source_test.cpp runtime/src/hle/fs.cpp runtime/src/mods/content.cpp runtime/src/mods/mod_archive.cpp runtime/src/game_languages.cpp runtime/src/guest_addr_identity.c)
+add_executable(language_source_test runtime/tools/language_source_test.cpp runtime/src/hle/fs.cpp runtime/src/mods/story_mail.cpp runtime/src/mods/story_store.cpp runtime/src/mods/content.cpp runtime/src/mods/mod_archive.cpp runtime/src/game_languages.cpp runtime/src/guest_addr_identity.c)
 target_include_directories(language_source_test PRIVATE runtime/src runtime/include)
 target_compile_options(language_source_test PRIVATE -UNDEBUG)
 target_link_libraries(language_source_test PRIVATE ZLIB::ZLIB Threads::Threads)
@@ -942,8 +959,27 @@ target_include_directories(guest_hooks_test PRIVATE runtime/include runtime/src)
 target_compile_options(guest_hooks_test PRIVATE -UNDEBUG)
 target_link_libraries(guest_hooks_test PRIVATE ZLIB::ZLIB ${CMAKE_DL_LIBS})
 add_test(NAME guest_hooks COMMAND guest_hooks_test)
+# letters from story mods: save record, text, services and postbox hooks on synthetic guest objects
+add_executable(story_mail_test runtime/tools/story_mail_test.cpp runtime/src/mods/story_mail.cpp runtime/src/mods/story_store.cpp runtime/src/guest_addr_identity.c)
+target_include_directories(story_mail_test PRIVATE runtime/include runtime/src)
+target_compile_options(story_mail_test PRIVATE -UNDEBUG)
+add_test(NAME story_mail COMMAND story_mail_test)
+# mod charts: shared save record, services and sea chart menu hooks on synthetic guest objects
+add_executable(story_chart_test runtime/tools/story_chart_test.cpp runtime/src/mods/story_chart.cpp runtime/src/mods/story_store.cpp runtime/src/guest_addr_identity.c)
+target_include_directories(story_chart_test PRIVATE runtime/include runtime/src)
+target_compile_options(story_chart_test PRIVATE -UNDEBUG)
+add_test(NAME story_chart COMMAND story_chart_test)
+# the story notebook: quest list, save record, page navigation, services and item menu hooks
+add_executable(story_notebook_test runtime/tools/story_notebook_test.cpp runtime/src/mods/story_notebook.cpp runtime/src/mods/story_mail.cpp runtime/src/mods/story_store.cpp
+               runtime/src/mods/story_chart.cpp runtime/src/mods/guest_png.cpp runtime/src/mods/mod_archive.cpp runtime/src/guest_addr_identity.c
+               ${WWHD_NPC_CATALOGUE})
+target_include_directories(story_notebook_test PRIVATE runtime/include runtime/src runtime/src/mods)
+target_compile_options(story_notebook_test PRIVATE -UNDEBUG)
+target_link_libraries(story_notebook_test PRIVATE ZLIB::ZLIB)
+add_test(NAME story_notebook COMMAND story_notebook_test)
 if(Python3_Interpreter_FOUND)
   add_test(NAME release_sdk_package COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/release/test_sdk_package.py")
+  add_test(NAME story_notebook_model COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/story_mods/test_notebook_model.py")
   add_test(NAME decomp_build_gen COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/decomp_build/test_gen.py")
   add_test(NAME release_appimage_apprun COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/release/test_appimage_apprun.py")
   add_test(NAME release_appimage_runtime COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/release/test_appimage_runtime.py")
@@ -1081,6 +1117,8 @@ endif()
 if(Python3_Interpreter_FOUND AND NOT ANDROID)
   add_test(NAME catalogue_pilots COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_SOURCE_DIR}/tools/catalogue/test_pilots.py $<TARGET_FILE:mod_package_test>)
+  add_test(NAME story_notebook_required COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_SOURCE_DIR}/tools/catalogue/test_story_notebook.py $<TARGET_FILE:mod_package_test>)
 endif()
 
 add_executable(guest_settings_test runtime/tools/guest_settings_test.cpp)
@@ -1236,9 +1274,9 @@ endif()
 if(NOT ANDROID AND SDL3_FOUND AND Python3_Interpreter_FOUND)
   add_executable(mod_oneclick_flow_test runtime/tools/mod_oneclick_flow_test.cpp
     runtime/third_party/imgui/backends/imgui_impl_sdlrenderer3.cpp runtime/src/mods/code_mods.cpp
-    runtime/src/mods/manager.cpp runtime/src/mods/traversal_settings.cpp runtime/src/mods/packages.cpp runtime/src/mods/guest_png.cpp
+    runtime/src/mods/manager.cpp runtime/src/mods/traversal_settings.cpp runtime/src/mods/packages.cpp ${WWHD_NPC_CATALOGUE} runtime/src/mods/guest_png.cpp
     runtime/src/mods/mod_archive.cpp runtime/src/mods/content.cpp runtime/src/mods/cemu_pack.cpp runtime/src/guest_addr_identity.c
-    runtime/src/overlay/extensions.cpp runtime/src/overlay/text_field.cpp)
+    runtime/src/overlay/extensions.cpp runtime/src/overlay/text_field.cpp runtime/src/mods/required.cpp ${WWHD_BUILD_INFO})
   target_include_directories(mod_oneclick_flow_test PRIVATE runtime/src runtime/include)
   target_compile_options(mod_oneclick_flow_test PRIVATE -UNDEBUG)
   target_link_libraries(mod_oneclick_flow_test PRIVATE imgui SDL3::SDL3 ZLIB::ZLIB Threads::Threads ${CMAKE_DL_LIBS})
@@ -1248,7 +1286,7 @@ endif()
 add_test(NAME mod_setup_acceptance COMMAND mod_package_test --setup-acceptance)
 
 # Experimental mods: flag, list filter, save backup before enabling, retention, staged restore.
-add_executable(mod_experimental_test runtime/tools/mod_experimental_test.cpp runtime/src/mods/manager.cpp runtime/src/mods/traversal_settings.cpp runtime/src/mods/packages.cpp runtime/src/mods/guest_png.cpp runtime/src/mods/mod_archive.cpp runtime/src/mods/content.cpp runtime/src/mods/cemu_pack.cpp runtime/src/guest_addr_identity.c)
+add_executable(mod_experimental_test runtime/tools/mod_experimental_test.cpp runtime/src/mods/manager.cpp runtime/src/mods/traversal_settings.cpp runtime/src/mods/packages.cpp ${WWHD_NPC_CATALOGUE} runtime/src/mods/guest_png.cpp runtime/src/mods/mod_archive.cpp runtime/src/mods/content.cpp runtime/src/mods/cemu_pack.cpp runtime/src/guest_addr_identity.c)
 target_include_directories(mod_experimental_test PRIVATE runtime/src runtime/include)
 target_compile_options(mod_experimental_test PRIVATE -UNDEBUG)
 target_link_libraries(mod_experimental_test PRIVATE ZLIB::ZLIB Threads::Threads ${CMAKE_DL_LIBS})
