@@ -1880,9 +1880,9 @@ void test_detail_texts() {
     Row r{&q, Status::New, 0, false};
     assert(where_text(r) == "This step has no place on the chart." && !trackable(r));
     q.where = "Outset Island", q.has_place = true;
-    assert(where_text(r) == "Not started yet: Outset Island" && !trackable(r));  // not started: can't be tracked
+    assert(where_text(r) == "Not started yet: Outset Island" && trackable(r));  // not started: step 1's place
     r.tracked = true;
-    assert(trackable(r));  // tracked in an older save: it can be untracked
+    assert(trackable(r));
     r.tracked = false;
     r.status = Status::InProgress, r.step = 1;
     assert(where_text(r) == "Outset Island" && trackable(r));
