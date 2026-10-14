@@ -27,7 +27,6 @@
 #include "story_manifest.h"
 #include "story_store.h"
 #include "story_takeover.h"
-#include "story_treasure.h"
 #include "story_treasure_chest.h"
 #include "mod_json.h"
 #include "input.h"
