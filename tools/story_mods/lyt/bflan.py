@@ -9,6 +9,9 @@ Description:
               {"pane": "T_Text", "tag": "FLFS", "target": 3, "keys": [[0, 0]]}   # raw form
             ]}
 Texture pattern keys name textures of the description; they are collected into pai1's texture list.
+The game binds an animation to the panes of its groups: a track only plays when its pane (or, for a
+material track, the pane that uses the material) is a member of one of the animation's groups (game
+run: tracks for panes outside the group had no effect).
 """
 from collections import OrderedDict
 

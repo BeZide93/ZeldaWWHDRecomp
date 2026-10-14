@@ -6,14 +6,17 @@ key count u16, pad u16, key offset u32 (0xC), then the keys:
   hermite: frame f32, value f32, slope f32      step: frame f32, value u16, pad u16
 
 Tags and targets seen in the game's own .bflan files (content type 0 = pane, 1 = material):
-  FLPA pane SRT     targets 0,1,5,6,7 used (translate x y, rotate z, scale x y); order = pan1 field order
-  FLVC pane colour  targets 0-15 vertex colours (4 corners x rgba), 16 = pane alpha (verified in game)
+  FLPA pane SRT     targets 0-9 in pan1 field order (translate xyz, rotate xyz, scale xy, size wh)
+  FLVC pane colour  targets 0-15 vertex colours (4 corners x rgba), 16 = pane alpha
   FLVI pane visibility (step)
-  FLMC material colours targets 0-7      FLTS texture SRT (index = texture map) targets 0-4
+  FLMC material colours targets 0-3 black rgba, 4-7 white rgba
+  FLTS texture SRT (index = texture map) targets 0-4: translate x y, rotate, scale x y
   FLTP texture pattern (step; index = texture map, value = pai1 texture list index)
   FLFS (font shadow, text panes; lyt-text)
-Targets marked "inferred" below follow the field order of the section they animate and still need a
-game-run check before they are relied on.
+The last field of TARGETS says whether the target was checked in a game run (end state of an animation
+on the item screen, 2026-10-14): translate, rotate z, scale, size w / h, all 16 vertex colours (corner
+order top-left, top-right, bottom-left, bottom-right; r g b a each), pane alpha, material white.r and
+black.g, texture scale x. The unchecked rest follows the same field order as its checked neighbours.
 """
 import struct
 
@@ -29,18 +32,18 @@ TARGETS = {
     "tz": (b"FLPA", PANE, 2, HERMITE, False), "rx": (b"FLPA", PANE, 3, HERMITE, False),
     "ry": (b"FLPA", PANE, 4, HERMITE, False), "rz": (b"FLPA", PANE, 5, HERMITE, True),
     "sx": (b"FLPA", PANE, 6, HERMITE, True), "sy": (b"FLPA", PANE, 7, HERMITE, True),
-    "w": (b"FLPA", PANE, 8, HERMITE, False), "h": (b"FLPA", PANE, 9, HERMITE, False),
+    "w": (b"FLPA", PANE, 8, HERMITE, True), "h": (b"FLPA", PANE, 9, HERMITE, True),
     "alpha": (b"FLVC", PANE, 16, HERMITE, True),
     "visible": (b"FLVI", PANE, 0, STEP, True),
 }
 for i, c in enumerate(_CORNERS):
     for j, ch in enumerate(_CH):
-        TARGETS["vc.%s.%s" % (c, ch)] = (b"FLVC", PANE, 4 * i + j, HERMITE, False)
+        TARGETS["vc.%s.%s" % (c, ch)] = (b"FLVC", PANE, 4 * i + j, HERMITE, True)
 for j, ch in enumerate(_CH):
-    TARGETS["black.%s" % ch] = (b"FLMC", MATERIAL, j, HERMITE, False)
-    TARGETS["white.%s" % ch] = (b"FLMC", MATERIAL, 4 + j, HERMITE, False)
+    TARGETS["black.%s" % ch] = (b"FLMC", MATERIAL, j, HERMITE, ch == "g")
+    TARGETS["white.%s" % ch] = (b"FLMC", MATERIAL, 4 + j, HERMITE, ch == "r")
 for j, k in enumerate(("tx", "ty", "rotate", "sx", "sy")):
-    TARGETS["tex.%s" % k] = (b"FLTS", MATERIAL, j, HERMITE, False)
+    TARGETS["tex.%s" % k] = (b"FLTS", MATERIAL, j, HERMITE, k == "sx")
 TARGETS["tex.pattern"] = (b"FLTP", MATERIAL, 0, STEP, True)
 
 

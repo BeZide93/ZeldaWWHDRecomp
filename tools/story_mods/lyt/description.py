@@ -86,11 +86,21 @@ class Description:
             for g in spec.get("groups", []):
                 if g not in self.groups:
                     raise ValueError("animation %r: unknown group %r" % (a, g))
+            bound = {p for g in spec.get("groups", []) for p in self.groups.get(g, [])}
+            users = {}
+            for p in self.iter_panes():
+                if p.get("material"):
+                    users.setdefault(p["material"], set()).add(p["name"])
             for t in spec.get("tracks", []):
                 if "pane" in t and t["pane"] not in names:
                     raise ValueError("animation %r: unknown pane %r" % (a, t["pane"]))
                 if "material" in t and t["material"] not in self.materials:
                     raise ValueError("animation %r: unknown material %r" % (a, t["material"]))
+                # the game animates only the panes of the animation's groups (not their children)
+                targets = {t["pane"]} if "pane" in t else users.get(t["material"], set())
+                if not spec.get("child_binding") and not targets & bound:
+                    raise ValueError("animation %r: %r is not in the animation's groups, the track would not "
+                                     "play" % (a, t.get("pane") or t.get("material")))
         for t, spec in self.textures.items():
             if spec.get("format", "rgba8") not in bflim.FORMATS:
                 raise ValueError("texture %r: unknown format %r" % (t, spec.get("format")))

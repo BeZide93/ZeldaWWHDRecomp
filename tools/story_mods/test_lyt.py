@@ -92,6 +92,10 @@ class Structure(unittest.TestCase):
                     animations={})
         with self.assertRaises(ValueError):
             binio.name("x" * 24, 24)
+        with self.assertRaises(ValueError):  # a track for a pane outside the animation's groups
+            d = load_json(EXAMPLE)
+            d["animations"]["InAll"]["tracks"].append({"pane": "P_Plate_00", "target": "sx", "keys": [[0, 1]]})
+            lyt.Description(d)
 
     def test_schema(self):
         try:
@@ -112,6 +116,7 @@ class Animation(unittest.TestCase):
     def test_pattern_and_tags(self):
         d = load_json(EXAMPLE)
         d["textures"]["Alt_00"] = {"png": "alt.png"}
+        d["groups"]["G_All_00"].append("P_Plate_00")
         d["animations"]["Select"] = {"frames": 4, "loop": True, "groups": ["G_All_00"], "tracks": [
             {"material": "StoryPlate_00", "target": "tex.pattern", "keys": [[0, "StoryPlate_00"], [2, "Alt_00"]]},
             {"pane": "P_Plate_00", "target": "sx", "keys": [[0, 1], [4, 1.2]]},
