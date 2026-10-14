@@ -17,6 +17,7 @@ namespace {
 const uint32_t kLoadItemScreen = GC(0x02693650);   // hdIngameLoadItemScreen(screen, projection, matrix, flags)
 const uint32_t kPartsDraw = GC(0x026F8B54);        // hdParts_c::draw(this, viewport)
 const uint32_t kFinalizeScreens = GC(0x02715374);  // hdIngameUi_c::finalizeScreens(this)
+const uint32_t kDrawPrimary = GC(0x02716AD0);      // hdIngameUi_c::drawPrimaryScreens(this, info): the item menu's screens
 const uint32_t kResMgrCache = GC(0x026FB694);      // hdLayoutResMgr_c::cache(this, name, heap)
 const uint32_t kNoControlConstruct = GC(0x02700ADC);  // NoControlPart_l::construct(0)
 const uint32_t kAttachArchives = GC(0x026F90D8);   // hdParts_c::attachArchives(this, names, count)
@@ -45,8 +46,9 @@ bool g_has_client = false;
 uint32_t g_part = 0, g_layout = 0, g_set = 0;
 bool g_failed = false;  // this item screen's build failed: not again until the next one
 uint32_t g_part_vt = 0, g_layout_vt = 0;
-bool g_check = false;  // a state was loaded: check still_there() before the next use  // the vtables our objects had when built (state load check)
+bool g_check = false;  // a state was loaded: check still_there() before the next use
 std::map<std::string, uint32_t> g_panes;
+uint32_t g_viewport = 0;  // the item screen's viewport, while drawPrimaryScreens runs (0: it didn't draw)
 
 void drop() { g_part = g_layout = g_set = 0, g_panes.clear(); }
 
@@ -128,18 +130,28 @@ void load_item_screen(Cpu* c) {
     build(c, projection, matrix);
 }
 
+// the item screen draws: remember its viewport; ours is drawn after all of the item menu's screens
 void parts_draw(Cpu* c) {
     const uint32_t self = c->r[3], viewport = c->r[4];
     g_original(c, kPartsDraw);
     if (!g_part) return;
+    const uint32_t scene = ld32(kIngameUi);
+    if (scene && self == ld32(scene + kItemScreen)) g_viewport = viewport;
+}
+
+// the item menu's screens (item screen, sub window, menu buttons, cursor, messages): ours on top of them
+void draw_primary(Cpu* c) {
+    g_viewport = 0;
+    g_original(c, kDrawPrimary);
+    const uint32_t viewport = g_viewport;
+    g_viewport = 0;
+    if (!g_part || !viewport) return;
     if (g_check) {
         g_check = false;
         if (!still_there()) return;
     }
-    const uint32_t scene = ld32(kIngameUi);
-    if (!scene || self != ld32(scene + kItemScreen)) return;
     if (g_client.frame && !g_client.frame(c, ld32(g_layout + kLayoutLyt))) return;
-    if (!g_part) return;  // the client may not free it, but be safe
+    if (!g_part) return;
     g_call(c, kCalcLayout, {g_part});
     g_call(c, kPartsDraw, {g_part, viewport});
 }
@@ -176,7 +188,7 @@ void set_game_calls(void (*original)(Cpu*, uint32_t), uint32_t (*call)(Cpu*, uin
 void install(const std::function<std::string(uint32_t)>& replaced_by, const std::function<void(uint32_t, void (*)(Cpu*))>& replace) {
     if (!g_has_client || !g_original || !g_call) return;
     // all three or nothing: a layout that is built but never freed (or never drawn) must not happen
-    for (uint32_t fn : {kLoadItemScreen, kPartsDraw, kFinalizeScreens})
+    for (uint32_t fn : {kLoadItemScreen, kPartsDraw, kFinalizeScreens, kDrawPrimary})
         if (const std::string by = replaced_by(fn); !by.empty()) {
             LOG("[lyt] %s: %08X is replaced by %s: no layout", g_client.layout.c_str(), fn, by.c_str());
             g_has_client = false;
@@ -185,6 +197,7 @@ void install(const std::function<std::string(uint32_t)>& replaced_by, const std:
     replace(kLoadItemScreen, hooks::load_item_screen);
     replace(kPartsDraw, hooks::parts_draw);
     replace(kFinalizeScreens, hooks::finalize_screens);
+    replace(kDrawPrimary, hooks::draw_primary);
     LOG("[lyt] %s (%s): from %s", g_client.layout.c_str(), g_client.owner, g_client.archive.c_str());
 }
 

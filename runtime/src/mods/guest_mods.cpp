@@ -20,6 +20,7 @@
 #include "guest_png.h"
 #include "story_mail.h"
 #include "story_lyt_screen.h"
+#include "story_notebook_layout.h"
 #include "story_mail_book.h"
 #include "story_chart.h"
 #include "story_notebook.h"
@@ -547,6 +548,9 @@ bool load_one(const std::string& path, std::string& err,const mods::packages::Gu
             const std::string icon=look.get("icon").string(),model=look.get("model").string();
             story_notebook::set_look(icon.empty()?std::string():(std::filesystem::path(pkg.path)/icon).string(),
                                      model.empty()?std::string():notebook_model(std::filesystem::path(pkg.path)/model,pkg.data_path));
+            // the page as a game layout (story_notebook_layout.h): its description in the package
+            const std::string layout=look.get("layout").string();
+            story_notebook::set_layout_description(layout.empty()?std::string():(std::filesystem::path(pkg.path)/layout).string(),pkg.data_path);
         }
         if(manifest_text.find("\"quests\"")!=std::string::npos||manifest_text.find("\"charts\"")!=std::string::npos) {
             prepare_npc_catalogue();
@@ -678,6 +682,7 @@ void init() {
     });
     // Story layouts (story_lyt_screen.h): a layout of our own with the item screen. Its client: the layout
     // test harness (WWHD_STORY_LYT, story_lyt_proto.cpp); nothing is hooked without one.
+    if(story_notebook::imported()||g_story_package)story_notebook_layout::configure();  // the notebook's page layout (first client)
     story_lyt::set_game_calls(call_original,[](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);});
     story_lyt::install([](uint32_t,PpcFunc){});
     story_lyt_screen::set_game_calls(call_original,[](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);});

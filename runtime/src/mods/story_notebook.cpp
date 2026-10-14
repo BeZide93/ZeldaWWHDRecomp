@@ -1,6 +1,7 @@
 // The story notebook (story_notebook.h, docs/mod-sdk-v2.md "The story notebook"): the services, the
 // page driver and the item menu entry.
 #include "story_notebook.h"
+#include "story_notebook_layout.h"
 #include "story_notebook_page.h"
 #include "story_notebook_caption.h"
 #include "story_notebook_bag.h"
@@ -689,6 +690,8 @@ void append_all(guestmods::hud::Handle list, std::vector<Command>& cmds, const s
 
 void publish(const std::vector<Row>& all, const std::vector<Command>* caption = nullptr) {
     auto& store = guestmods::hud::store();
+    // the page as a game layout (story_notebook_layout.h): then the HUD draws only its portraits
+    const bool by_layout = !caption && story_notebook_layout::update(g_page, all);
     if (!g_page.open() && !caption) {
         store.drop(kOwner);
         return;
@@ -699,7 +702,7 @@ void publish(const std::vector<Row>& all, const std::vector<Command>* caption = 
     const guestmods::hud::Handle list = store.begin(kOwner, screen);
     if (!list) return;
     std::vector<guestmods::hud::Handle> images;
-    std::vector<Command> cmds = render(caption ? *caption : g_page.draw(all), images);
+    std::vector<Command> cmds = by_layout ? std::vector<Command>{} : render(caption ? *caption : g_page.draw(all), images);
     g_closing = cmds, g_closing_images = images, g_closing_screen = screen;  // for the closing animation
     fit_to_screen(cmds, screen);
     append_all(list, cmds, images);
@@ -741,6 +744,7 @@ void publish(const std::vector<Row>& all, const std::vector<Command>* caption = 
 // After the page closed: the last page shrinks a little and fades out (0.15 s), then it is gone.
 void publish_closing(float dt) {
     auto& store = guestmods::hud::store();
+    story_notebook_layout::update_closed();  // the layout's own closing animation (its page commands aren't kept)
     if (g_close_time >= 1.0f) return;
     g_close_time = std::min(1.0f, g_close_time + dt / 0.15f);
     if (g_close_time >= 1.0f || g_closing.empty()) {
