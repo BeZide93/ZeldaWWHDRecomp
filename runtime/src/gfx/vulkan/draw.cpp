@@ -11,6 +11,7 @@
 #include "backend.h"
 #include "stereo.h"
 #include "../stereo_projection.h"
+#include "sampler_filtering.h"
 #include "deferred_dispatch.h"
 #include "buffer_cache.h"
 #include "render_prof.h"
@@ -1167,24 +1168,25 @@ Pipeline &pipeline(const uint32_t *r, vk::Shader *vs, vk::Shader *ps,
 struct SamplerMemo {
   VkDevice device = VK_NULL_HANDLE;
   std::array<uint32_t, 3> words{};
-  bool compare = false, integer = false, forceAniso = false;
+  bool compare = false, integer = false, forceAniso = false, nearestOnly = false;
   VkSampler value = VK_NULL_HANDLE;
   bool matches(VkDevice nextDevice, const uint32_t* nextWords,
-               bool nextCompare, bool nextInteger, bool nextForceAniso) const {
+               bool nextCompare, bool nextInteger, bool nextForceAniso, bool nextNearestOnly) const {
     return value && device == nextDevice && compare == nextCompare &&
-        integer == nextInteger && forceAniso == nextForceAniso &&
+        integer == nextInteger && forceAniso == nextForceAniso && nearestOnly == nextNearestOnly &&
         words[0] == nextWords[0] && words[1] == nextWords[1] && words[2] == nextWords[2];
   }
   void remember(VkDevice nextDevice, const uint32_t* nextWords,
-                bool nextCompare, bool nextInteger, bool nextForceAniso, VkSampler nextValue) {
+                bool nextCompare, bool nextInteger, bool nextForceAniso, bool nextNearestOnly, VkSampler nextValue) {
     device = nextDevice;
     std::memcpy(words.data(), nextWords, sizeof(words));
-    compare = nextCompare; integer = nextInteger; forceAniso = nextForceAniso;
+    compare = nextCompare; integer = nextInteger; forceAniso = nextForceAniso; nearestOnly = nextNearestOnly;
     value = nextValue;
   }
 };
 SamplerMemo samplerMemo;
-VkSampler sampler(const uint32_t *words, bool compare, bool integer, bool allowAniso) {
+VkSampler sampler(const uint32_t *words, bool compare, bool integer, bool allowAniso, bool linearSupported) {
+  const bool nearestOnly = sampler_nearest_only(integer, compare, linearSupported);
   static const bool memo = [] {
     const char* e = std::getenv("WWHD_VK_SAMPLER_MEMO");
     return e && !std::strcmp(e, "1");
@@ -1192,19 +1194,20 @@ VkSampler sampler(const uint32_t *words, bool compare, bool integer, bool allowA
   const bool forceAniso = allowAniso && aniso_enabled();
   const bool stats = preparation_stats_enabled();
   if (stats) ++R.cpuPreparation.samplerRequests;
-  if (memo && samplerMemo.matches(R.device, words, compare, integer, forceAniso)) {
+  if (memo && samplerMemo.matches(R.device, words, compare, integer, forceAniso, nearestOnly)) {
     if (stats) ++R.cpuPreparation.samplerMemoHits;
     return samplerMemo.value;
   }
   if (stats) ++R.cpuPreparation.samplerMapLookups;
   auto remember = [&](VkSampler value) {
-    if (memo) samplerMemo.remember(R.device, words, compare, integer, forceAniso, value);
+    if (memo) samplerMemo.remember(R.device, words, compare, integer, forceAniso, nearestOnly, value);
     return value;
   };
   std::string key(reinterpret_cast<const char *>(words), 12);
   key.push_back(compare);
   key.push_back(integer);
   key.push_back(forceAniso);
+  key.push_back(nearestOnly);
   static std::unordered_map<std::string, VkSampler> cache;
   if (auto it = cache.find(key); it != cache.end())
     return remember(it->second);
@@ -1238,7 +1241,7 @@ VkSampler sampler(const uint32_t *words, bool compare, bool integer, bool allowA
   VkSamplerCreateInfo ci{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
   ci.magFilter = filter(static_cast<uint32_t>(w.get_XY_MAG_FILTER()));
   ci.minFilter = filter(static_cast<uint32_t>(w.get_XY_MIN_FILTER()));
-  if (integer)
+  if (nearestOnly)
     ci.minFilter = ci.magFilter = VK_FILTER_NEAREST;
   ci.mipmapMode = static_cast<uint32_t>(w.get_MIP_FILTER()) == 2
                       ? VK_SAMPLER_MIPMAP_MODE_LINEAR
@@ -1269,7 +1272,7 @@ VkSampler sampler(const uint32_t *words, bool compare, bool integer, bool allowA
   if (forceAniso && uint32_t(w.get_MIP_FILTER()) != 0 && ci.minFilter == VK_FILTER_LINEAR &&
       uint32_t(w.get_DEPTH_COMPARE_FUNCTION()) == 0)
     anisotropy = 16;
-  if (R.enabledFeatures.samplerAnisotropy && !integer && anisotropy > 1) {
+  if (R.enabledFeatures.samplerAnisotropy && !nearestOnly && anisotropy > 1) {
     ci.anisotropyEnable = VK_TRUE;
     ci.maxAnisotropy = std::min(float(anisotropy), R.properties.limits.maxSamplerAnisotropy);
   }
@@ -1283,6 +1286,7 @@ VkSampler sampler(const uint32_t *words, bool compare, bool integer, bool allowA
     ci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
     ci.borderColor = VkBorderColor(uint32_t(ci.borderColor) + 1);
   }
+  restrict_sampler_filtering(ci, nearestOnly);
   VkSampler s;
   vk_check(vkCreateSampler(R.device, &ci, nullptr, &s), "sampler");
   cache.emplace(std::move(key), s);
@@ -1911,7 +1915,7 @@ StageResources bind_stage(const uint32_t *r, vk::Shader *sh,
     }
     info = {sampler(samplerWords, sh->dec->textureUsesDepthCompare[unit],
                    s->fmt.kind != FormatInfo::FLOAT,
-                   !s->gpuWritten && s->mips > 1),
+                   !s->gpuWritten && s->mips > 1, s->linearFiltering),
                              sampledView,
                              VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
     auto &write = appendWrite(rankPlan.textures[unit]);
