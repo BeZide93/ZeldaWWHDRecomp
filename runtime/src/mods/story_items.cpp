@@ -190,7 +190,7 @@ int32_t give(const std::string& mod, const std::string& id, uint32_t n, const ch
             placed ? "" : "; the bag's pages are full, it waits for a free place");
         std::string text = it->description;
         if (!placed) text += "\n\nThe Delivery Bag is full: it is kept until a place is free.";
-        if (caption) {
+        if (caption || !placed) {  // a quiet get still says when the bag is full
             std::lock_guard lock(g_mu);
             g_pending.push_back({it->name + (now > 1 && it->stack > 1 ? " (" + std::to_string(now) + ")" : ""), text});
         }
