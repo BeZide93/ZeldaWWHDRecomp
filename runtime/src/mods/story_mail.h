@@ -32,9 +32,12 @@ struct LetterInfo {
 };
 std::vector<LetterInfo> letters();
 
-// The story notebook: owned once the first mod letter (which encloses it) was read in this save
+// The story notebook: owned once the Story Notebook package's letter (which encloses it) was read in this save
 // file. Its page lists the letters read, one row each (a placeholder for the full notebook).
 bool notebook_owned();
+// the letter that brings the notebook: the Story Notebook package's ("encloses": ["notebook"]); other
+// mod letters enclose a green rupee
+void set_notebook_letter(const std::string& mod, const std::string& letter);
 std::u16string notebook_page();
 
 // The notebook's 3D model for the get-item scene (an archive built on the player's machine; empty: the

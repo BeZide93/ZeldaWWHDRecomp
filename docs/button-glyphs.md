@@ -47,6 +47,18 @@ Three function hooks (`tools/recomp/hooks_glyphs.txt`), plus wrappers around the
   PlayStation shapes to the composed atlas for the vertex build, then restores everything it changed.
 - `0x02874D54` (`Picture::DrawSelf`) tints the HUD button backgrounds (`P_A_00`, `P_B_00`, `P_X_00`,
   `P_Y_00`, `P_ASpecial_00`) and restores their authored vertex colours afterwards.
+- `0x028785C8` (`lyt::TextBox::DrawSelf`, the existing RTL wrapper) also recognises
+  `CommandA_00`'s floating action hint: `T_A_00` and `P_A_00` are **siblings** under
+  `N_Center_01`, unlike the cluster's parent/child pair. The same check supports B/X/Y
+  with matching sibling pictures and a single matching letter. `T_A_01` on
+  `P_ASpecial_00` covers the special-A prompt in both command layouts. These are plain
+  `CKingMain` letters, so `CharWriter::Print` does not mark them as U+E000 icons.
+  The scoped face identity feeds the existing `0x028F7C7C` vertex hook (bare PS shape,
+  coloured RGBA or plain coverage); Xbox colours still use `Picture::DrawSelf`.
+  The HD screen uses `hdParts_c::draw` (`0x026F8B54`) → `drawLayout`
+  (`0x026F8D08`) → the NW4F layout traversal → `TextBox::DrawSelf`.
+  No new recompiler hook is needed. The wrapper returns directly to the original draw
+  before pane recognition while the session gate is closed.
 - The text-box draw wrapper recognises the HUD's shoulder captions (`T_L_00` … `T_ZR_00`) and face
   letters (`T_A_00` … `T_Y_00` on their `P_?_00` pictures), which the game prints as plain text.
 - The pane-matrix hook moves the complete CommandGuide cluster (`N_All_00`) for the Xbox positions;
@@ -81,7 +93,8 @@ unreadable on the white shoulder plates (#143).
 
 The hook behaviour is covered by `runtime/tools/button_glyphs_test.cpp` (synthetic guest memory: face
 and shoulder marking, colour restoration, live switches, the untouched-until-used gate, *Automatic*,
-HUD positions including 21:9, font fallback, every option and the PlayStation shapes);
+HUD positions including 21:9, font fallback, every option, the PlayStation shapes, CommandA sibling letters for all
+four faces in coloured/plain PS and Xbox/Original looks, and special A);
 `runtime/tools/input_map_test.cpp` covers the option resolution and the `controls.json` keys
 (`button_prompts`, `shoulder_names`, `button_colours`). The EU build maps all three hooks. After a change to the
 hook list, regenerate the game code (setup does this on update).

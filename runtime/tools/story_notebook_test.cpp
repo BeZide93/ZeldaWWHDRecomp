@@ -8,6 +8,7 @@
 #include "mods/story_notebook_font.h"
 #include "mods/story_notebook_style.h"
 #include "mods/story_notebook_caption.h"
+#include "mods/story_notebook_art.h"
 #include "mods/story_notebook_bag.h"
 #include "mods/story_takeover.h"
 #include "mods/story_sail.h"
@@ -849,6 +850,124 @@ void test_caption() {
     assert(box && box->width == 370 && box->rgba[(69 * 370 + 185) * 4 + 3] == 255);
 }
 
+// the painted frame and pieces (story_notebook_art.h) and the page laid out on them
+void test_framed() {
+    auto solid = [](int w, int h, uint8_t alpha) {
+        game_glyph::Bitmap b;
+        b.width = w, b.height = h, b.rgba.assign(size_t(w) * h * 4, 200);
+        for (size_t i = 3; i < b.rgba.size(); i += 4) b.rgba[i] = alpha;
+        return b;
+    };
+    // the soft fringe goes, the picture is cropped to what is left (or keeps its size)
+    game_glyph::Bitmap fringe = solid(40, 20, 40);
+    for (int y = 5; y < 15; y++)
+        for (int x = 10; x < 30; x++) fringe.rgba[(size_t(y) * 40 + x) * 4 + 3] = 255;
+    const game_glyph::Bitmap cleaned = art::clean_edges(fringe);
+    assert(cleaned.width == 20 && cleaned.height == 10 && cleaned.rgba[3] == 255);
+    const game_glyph::Bitmap kept = art::clean_edges(fringe, 96, false);
+    assert(kept.width == 40 && kept.height == 20 && kept.rgba[3] == 0);
+    // stretching: the ends keep their shape
+    assert(art::stretch3(solid(100, 20, 255), 400, 20, 0.1f, 0.1f).width == 400);
+    assert(art::row(solid(676, 100, 255), 600, 40).width == 600);
+    assert(art::detail_frame(solid(1448, 1086, 255)).width == 1448);
+    assert(art::fit_into(solid(100, 50, 255), 300, 50).rgba[3] == 0);  // pushed to the right
+    // the chart's mapping: the sea's middle is the chart's middle, its north-west corner the top left
+    float u, v;
+    chart_share(0, 0, u, v);
+    assert(std::fabs(u - 0.5f) < 1e-6f && std::fabs(v - 0.5f) < 1e-6f);
+    chart_share(-350000, -350000, u, v);
+    assert(u == 0 && v == 0);
+    chart_share(100000, 300000, u, v);
+    assert(std::fabs(u - 4.5f / 7) < 1e-4f && std::fabs(v - 6.5f / 7) < 1e-4f);
+    // the page on the frame
+    uint8_t raw[story_mail::kBookSize] = {};
+    Book b(raw);
+    std::vector<Quest> qs = {quest("m", "a"), quest("m", "b")};
+    qs[0].steps = {"Read the letter.", "Bring it to the keeper.", "Come back."}, qs[0].next = "Bring it to the keeper.", qs[0].reward = "A tale";
+    qs[0].has_place = true, qs[0].x = 0, qs[0].z = 0;
+    assert(reach_step(b, qs[0].key, 2) == 2);
+    auto rs = rows(qs, b);
+    Page page;
+    Scene scene;
+    scene.framed = scene.pieces = scene.header = true, scene.link_known = true, scene.link_x = -200000, scene.link_z = 100000;
+    page.set_scene(scene);
+    page.show();
+    page.input(press(0), rs);
+    auto has = [](const std::vector<Command>& cmds, const char* name) {
+        for (const Command& c : cmds)
+            if (c.text.rfind(name, 0) == 0) return true;
+        return false;
+    };
+    auto says = [](const std::vector<Command>& cmds, const std::string& t) {
+        for (const Command& c : cmds)
+            if (c.kind == Command::Text && font::plain_text(c.text).find(t) != std::string::npos) return true;
+        return false;
+    };
+    std::vector<Command> list = page.draw(rs);
+    assert(has(list, "nb:frame") && has(list, "nb:row") && !has(list, "nb:dframe"));
+    // taps: the frame's tab plates, its bottom plates (B Close, A Open)
+    const Page::Geo g = page.geo();
+    PadInput tap;
+    tap.touch = true, tap.x = g.tab[1].x + 10, tap.y = g.tab[1].y + 10;
+    assert(page.input(tap, rs).sound == Sound::Tab && page.tab() == 1);
+    page.input(press(0), rs);
+    tap.x = g.tab[0].x + 10, tap.y = g.tab[0].y + 10;
+    page.input(tap, rs);
+    page.input(press(0), rs);
+    assert(page.tab() == 0);
+    tap.x = g.track.x + 10, tap.y = g.track.y + 10;  // A Open
+    assert(page.input(tap, rs).sound == Sound::Decide && page.mode() == Page::Mode::Detail);
+    page.input(press(0), rs);
+    // the detail page: the pieces, the progress, the step done before, the mini chart with Link and the route
+    std::vector<Command> detail = page.draw(rs);
+    for (const char* n : {"nb:dframe", "nb:sheet", "nb:uline", "nb:band0", "nb:band1", "nb:band2", "nb:card", "nb:uplate", "nb:header", "nb:linkface"})
+        assert(has(detail, n));
+    assert(says(detail, "Step 2 of 3") && says(detail, "Done: Read the letter.") && says(detail, "Bring it to the keeper."));
+    size_t dots = 0;
+    for (const Command& c : detail) dots += c.kind == Command::Circle && c.rgba == 0xD12E1EFF && c.size > 2.0f && c.size < 2.5f;
+    assert(dots > 3);
+    scene.header = false;  // the header band can be left out
+    page.set_scene(scene);
+    assert(!has(page.draw(rs), "nb:header"));
+    // no close in the slot under the header band; the plates: A tracks, B goes back
+    assert(page.input(PadInput{0, 0, true, g.close_x, g.close_y}, rs).kind == Page::Action::None && page.open());
+    page.input(press(0), rs);
+    tap.x = g.track.x + 10, tap.y = g.track.y + 10;
+    assert(page.input(tap, rs).kind == Page::Action::Toggle);
+    page.input(press(0), rs);
+    tap.x = g.back.x + 10, tap.y = g.back.y + 10;
+    assert(page.input(tap, rs).sound == Sound::Cancel && page.mode() == Page::Mode::List);
+    page.input(press(0), rs);
+    // a done quest: all steps done, the reward received
+    assert(finish(b, qs[0].key) == kStepDone);
+    rs = rows(qs, b);
+    page.input(press(kPadRight), rs);
+    page.input(press(0), rs);
+    page.input(press(kPadA), rs);
+    page.input(press(0), rs);
+    detail = page.draw(rs);
+    assert(says(detail, "All 3 steps done") && says(detail, "A tale (received)") && says(detail, "Done"));
+    // a step that isn't possible yet says so in the Next step band
+    Book b2(raw);
+    std::vector<Quest> q2 = {quest("m", "c")};
+    q2[0].next = "Talk to him.", q2[0].hint = "Not yet possible: by day";
+    assert(reach_step(b2, q2[0].key, 1) == 1);
+    auto r2 = rows(q2, b2);
+    Page p2;
+    p2.set_scene(scene);
+    p2.show();
+    p2.input(press(0), r2);
+    p2.input(press(kPadA), r2);
+    assert(says(p2.draw(r2), "Not yet possible: by day"));
+    // the list's close plate
+    Page p3;
+    p3.set_scene(scene);
+    p3.show();
+    p3.input(press(0), rs);
+    tap.x = g.back.x + 10, tap.y = g.back.y + 10;
+    assert(p3.input(tap, rs).kind == Page::Action::Close);
+}
+
 void test_page_feel() {
     uint8_t raw[story_mail::kBookSize] = {};
     Book b(raw);
@@ -919,8 +1038,8 @@ void test_page_feel() {
     }
 }
 
-Resident harbour() { return npc_catalogue().find("windfall-missy"); }
-Resident keeper() { return npc_catalogue().find("windfall-kreeb"); }
+Resident harbour() { return npc_catalogue().find("windfall-ub3"); }
+Resident keeper() { return npc_catalogue().find("windfall-um1"); }
 
 // The story block in cking.sav (story_block.h) and the store around it (story_store.h): the format, the
 // one-time move from the game's reserved bytes, the game's save copy functions, the file kept with
@@ -1070,14 +1189,16 @@ void test_story_store() {
            set_flag("flags-mod", "nope", 1, true) == kResultInvalid);
 }
 
-// The NPC catalogue: the compiled-in tables, a stub second place added without any format change, the
-// manifest's "npc_catalogue" version and unknown names refused, the step's place and where from the entry.
+// The NPC catalogue: the compiled-in recipes (our words and references only), the player's names and
+// spots merged in, a stub second place added without any format change, the manifest's "npc_catalogue"
+// version and unknown ids refused, the step's place and where from the entry.
 void test_npc_catalogue() {
-    const NpcCatalogue& port = npc_catalogue();
-    assert(port.version == 2 && port.entries.size() >= 40);
+    NpcCatalogue& port = npc_catalogue_mutable();
+    assert(port.version == 3 && port.entries.size() >= 40);
     size_t named = 0, talking = 0;
     for (const NpcEntry& e : port.entries) {
-        assert(e.name.rfind(e.place + "-", 0) == 0 && !e.where.empty() && (e.day || e.night) && !e.evidence.empty() && !e.actors.empty());
+        assert(e.name.rfind(e.place + "-", 0) == 0 && !e.where.empty() && (e.day || e.night) && !e.description.empty() && e.figure_message &&
+               !e.actors.empty() && !e.has_spot && e.game_name.empty());  // nothing of the game in the recipe
         for (const NpcActor& a : e.actors) assert(!a.stage.empty() && !a.code.empty() && (a.actor_class != "people" || a.people_number < 19));
         named += e.named, talking += e.talks();
     }
@@ -1091,26 +1212,33 @@ void test_npc_catalogue() {
     }
     const NpcEntry* k = port.entry(keeper());
     assert(k && k->named && k->actors.size() == 1 && k->actors[0].code == "Um1" && k->actors[0].people_number == 9 && k->day && k->night &&
-           k->has_spot && k->evidence.find("0x37F8") != std::string::npos);
+           k->figure_message == 0x37F8 && k->display() == k->description);
+    // the player's game: names (only for entries that are one character) and spots, by id
+    assert(port.add_local(R"({"catalogue_local": 1, "npcs": {"windfall-um1": {"name": "The Keeper", "figurine": "The Keeper",
+        "spot": {"x": 1547, "z": -202539}}, "windfall-ub1": {"name": "Two Friends", "spot": {"x": 1, "z": 2}},
+        "windfall-nobody": {"name": "x"}}})") == 2);
+    assert(k->game_name == "The Keeper" && k->display() == "The Keeper" && k->has_spot && k->x == 1547 && k->z == -202539);
+    assert(port.entry(port.find("windfall-ub1"))->game_name.empty() && port.entry(port.find("windfall-ub1"))->has_spot);  // a pair: no name
+    assert(!port.add_local("{\"npcs\": {}}") && port.add_local("not json") == 0);
     const NpcEntry* h = port.entry(harbour());
     assert(h && h->actors[0].people_number == 5 && h->day && !h->night);
     // Linda: outside by day, and in the Café Bar
-    const NpcEntry* linda = port.entry(port.find("windfall-linda"));
+    const NpcEntry* linda = port.entry(port.find("windfall-uw2"));
     assert(linda && linda->actors.size() == 2 && linda->actors[1].stage == "Opub");
-    // a pair the game names together but doesn't tie one by one: role names, unnamed
-    assert(!port.entry(port.find("windfall-gossip-a"))->named && !port.entry(port.find("windfall-tipster-b"))->named);
+    // a pair the game names together but doesn't tie one by one: no own name
+    assert(!port.entry(port.find("windfall-ub1"))->named && !port.entry(port.find("windfall-ug2"))->named);
     // characters of other classes are in the table but can't talk for a quest yet
-    const NpcEntry* zunari = port.entry(port.find("windfall-zunari"));
-    assert(zunari && zunari->named && !zunari->talks() && zunari->actors[0].code == "Rsh1");
+    const NpcEntry* merchant = port.entry(port.find("windfall-rsh1"));
+    assert(merchant && merchant->named && !merchant->talks() && merchant->actors[0].code == "Rsh1");
     // a second place is just another table
-    const char* stub = R"({"catalogue_format": 2, "place": "testisle", "npcs": [
-        {"name": "testisle-keeper", "since": 3, "named": false, "evidence": "a stub", "where": "Test Isle", "present": ["night"],
-         "actors": [{"class": "people", "code": "Ub1", "stage": "Tstisl", "room": 0, "layers": ["1"]}]}]})";
+    const char* stub = R"({"catalogue_format": 3, "place": "testisle", "npcs": [
+        {"id": "testisle-keeper", "since": 4, "own_name": false, "description": "a stub", "figure_message": "0x3800", "where": "Test Isle",
+         "present": ["night"], "actors": [{"class": "people", "code": "Ub1", "stage": "Tstisl", "room": 0, "layers": ["1"]}]}]})";
     NpcCatalogue two = port;
     std::string why;
-    assert(two.add_table(stub, why) && two.version == 3 && two.entries.size() == port.entries.size() + 1);
+    assert(two.add_table(stub, why) && two.version == 4 && two.entries.size() == port.entries.size() + 1);
     const Resident tk = two.find("testisle-keeper");
-    assert(tk && two.entry(tk)->actors[0].people_number == 3 && !two.entry(tk)->has_spot && two.entry(keeper())->name == "windfall-kreeb");
+    assert(tk && two.entry(tk)->actors[0].people_number == 3 && !two.entry(tk)->has_spot && two.entry(keeper())->name == "windfall-um1");
     // tables are checked: all or nothing
     NpcCatalogue bad = port;
     auto rejected = [&](std::string text, const std::string& from, const std::string& to) {
@@ -1124,18 +1252,21 @@ void test_npc_catalogue() {
     assert(rejected(stub, "\"testisle-keeper\"", "\"keeper\""));         // not <place>-<role>
     assert(rejected(stub, "\"code\": \"Ub1\"", "\"code\": \"Zz9\""));  // a resident code the game doesn't have
     assert(rejected(stub, "\"class\": \"people\", \"code\": \"Ub1\"", "\"class\": \"npc_rsh1\""));  // another class needs its actor name
-    assert(rejected(stub, "\"evidence\": \"a stub\", ", ""));                 // every entry says where its name comes from
+    assert(rejected(stub, "\"description\": \"a stub\", ", ""));            // every entry says who it is, in our words
+    assert(rejected(stub, "\"figure_message\": \"0x3800\"", "\"figure_message\": \"x\""));  // and which figurine names it
+    assert(rejected(stub, "\"present\"", "\"spot\": {\"x\": 1, \"z\": 2}, \"present\""));  // no coordinates in a recipe
     assert(rejected(stub, "[\"night\"]", "[]"));                             // never out
-    assert(!bad.add_table(R"({"catalogue_format": 2, "place": "windfall", "npcs": [{"name": "windfall-kreeb", "since": 2, "named": true,
-        "evidence": "x", "actors": [{"class": "people", "code": "Um1", "stage": "sea"}], "where": "x", "present": ["day"]}]})", why));  // a name twice
+    assert(!bad.add_table(R"({"catalogue_format": 3, "place": "windfall", "npcs": [{"id": "windfall-um1", "since": 3, "own_name": true,
+        "description": "x", "figure_message": "0x37F8", "actors": [{"class": "people", "code": "Um1", "stage": "sea"}], "where": "x",
+        "present": ["day"]}]})", why));  // an id twice
     // a manifest naming the stub NPC: refused by the port's catalogue, accepted with the second table, the format unchanged
-    const char* m = R"({"npc_catalogue": 3, "quests_format": 1, "quests": [{"id": "q", "title": "Q", "steps": [{"n": 1, "text": "Go.",
+    const char* m = R"({"npc_catalogue": 4, "quests_format": 1, "quests": [{"id": "q", "title": "Q", "steps": [{"n": 1, "text": "Go.",
         "available": {"time": "day", "text": "by day"}, "npc": {"who": "testisle-keeper", "lines": ["Hi."]}}]}]})";
     std::vector<ManifestQuest> qs;
     std::vector<std::string> warnings;
-    assert(!parse_quests(mods::json::parse(m), qs, why, port) && why.find("needs NPC catalogue version 3") != std::string::npos);
+    assert(!parse_quests(mods::json::parse(m), qs, why, port) && why.find("needs NPC catalogue version 4") != std::string::npos);
     std::string unversioned = m;
-    unversioned.replace(0, std::string(R"({"npc_catalogue": 3, )").size(), "{");
+    unversioned.replace(0, std::string(R"({"npc_catalogue": 4, )").size(), "{");
     assert(!parse_quests(mods::json::parse(unversioned), qs, why, port) && why.find("no NPC named \"testisle-keeper\"") != std::string::npos);
     assert(parse_quests(mods::json::parse(m), qs, why, two, &warnings));
     assert(qs[0].steps[0].resident == tk && qs[0].steps[0].where == "Test Isle" && !qs[0].steps[0].has_place);
@@ -1143,13 +1274,13 @@ void test_npc_catalogue() {
     assert(warnings.size() == 1 && warnings[0].find("only out at night") != std::string::npos);
     // a windfall resident: the step's place and where come from the catalogue unless the manifest gives them
     const char* w = R"({"quests_format": 1, "quests": [{"id": "q", "title": "Q", "steps": [{"n": 1, "text": "Go.",
-        "npc": {"who": "windfall-kreeb", "lines": ["Hi."]}}]}]})";
+        "npc": {"who": "windfall-um1", "lines": ["Hi."]}}]}]})";
     assert(parse_quests(mods::json::parse(w), qs, why) && qs[0].steps[0].has_place && qs[0].steps[0].x == k->x &&
            qs[0].steps[0].z == k->z && qs[0].steps[0].where == k->where);
     assert(!parse_quests(mods::json::parse(R"({"npc_catalogue": "1"})"), qs, why));
     // a character that can't talk for a quest: refused with the reason
     const char* z = R"({"quests_format": 1, "quests": [{"id": "q", "title": "Q", "steps": [{"n": 1, "text": "Go.",
-        "npc": {"who": "windfall-zunari", "lines": ["Hi."]}}]}]})";
+        "npc": {"who": "windfall-rsh1", "lines": ["Hi."]}}]}]})";
     assert(!parse_quests(mods::json::parse(z), qs, why) && why.find("can't speak") != std::string::npos);
     assert(parse_quests(mods::json::parse(R"({"npc_catalogue": 1})"), qs, why) && qs.empty());
 }
@@ -1197,11 +1328,11 @@ void test_takeover_hooks() {
     // the lantern quest of one mod, the same resident in another mod's quest
     assert(define("lantern", "Lantern", "tale", "The storyteller's lantern", "100 rupees", "") == kResultNew);
     assert(define("other", "Other", "tale", "Another tale", "", "") == kResultNew);
-    assert(talk("lantern", "tale", 1, "windfall-missy", "A letter from him?\nThank you!", 6) == kResultNew);
-    assert(talk("other", "tale", 1, "windfall-missy", "Not me.", 0) == kResultNew);
+    assert(talk("lantern", "tale", 1, "windfall-ub3", "A letter from him?\nThank you!", 6) == kResultNew);
+    assert(talk("other", "tale", 1, "windfall-ub3", "Not me.", 0) == kResultNew);
     assert(talk("lantern", "tale", 1, "nobody", "x", 0) == kResultInvalid);
-    assert(talk("lantern", "tale", 1, "windfall-missy", "1\n2\n3\n4", 0) == kResultInvalid);  // one box: three lines
-    assert(talk("lantern", "tale", 1, "windfall-missy", "x", 0x0F) == kResultInvalid);        // rupees only
+    assert(talk("lantern", "tale", 1, "windfall-ub3", "1\n2\n3\n4", 0) == kResultInvalid);  // one box: three lines
+    assert(talk("lantern", "tale", 1, "windfall-ub3", "x", 0x0F) == kResultInvalid);        // rupees only
     assert(step("lantern", "tale", 1, "Bring the letter to his old friend.", "Windfall Island") == 1);
     assert(step("other", "tale", 1, "", "") == 1);
     assert(carry("lantern", "tale", true) == 1 && carry("other", "tale", true) == 1);
@@ -1315,7 +1446,7 @@ const char* const kLanternManifest = R"({
     "letter": {"id": "lantern", "sender": "The storyteller", "text": "Dear Link,\nplease help.", "encloses": ["notebook", "letter:friend"]},
     "reward": {"text": "100 rupees", "item": "rupee_orange"},
     "steps": [{"n": 1, "text": "Bring the letter to his friend.", "where": "Windfall Island", "place": {"cell": "D2", "x": 3827, "z": -202189},
-      "npc": {"who": "windfall-missy", "when": {"carries": "letter:friend"},
+      "npc": {"who": "windfall-ub3", "when": {"carries": "letter:friend"},
               "lines": ["One.", "Two."], "then": {"give": "rupee_orange", "take": "letter:friend", "complete": true}}}]
   }, {"id": "secret", "title": "A secret", "journal": "on_trigger"}]
 })";
@@ -1342,7 +1473,7 @@ void test_choice() {
         assert(choice_label("Ünïcödé ünïcödé ünïcödé ünïcödé").size() <= 24);
     }
     assert(define("c1", "C1", "q", "First tale", "", "") == kResultNew && define("c2", "C2", "q", "Second tale", "", "") == kResultNew);
-    assert(talk("c1", "q", 1, "windfall-missy", "One.", 0) == kResultNew && talk("c2", "q", 1, "windfall-missy", "Two.", 0) == kResultNew);
+    assert(talk("c1", "q", 1, "windfall-ub3", "One.", 0) == kResultNew && talk("c2", "q", 1, "windfall-ub3", "Two.", 0) == kResultNew);
     assert(step("c1", "q", 1, "", "") == 1 && step("c2", "q", 1, "", "") == 1);
     assert(carry("c1", "q", true) == 1 && carry("c2", "q", true) == 1);
     while (tracked_key(b)) toggle_tracked(b, tracked_key(b));
@@ -1407,8 +1538,8 @@ void test_manifest() {
         std::string reason;
         return !parse_quests(mods::json::parse(text), out, reason) && !reason.empty();
     };
-    assert(refused(R"("who": "windfall-missy")", R"("who": "windfall-nobody")"));  // an NPC the catalogue doesn't know
-    assert(refused(R"("who": "windfall-missy")", R"("who": {"class": "people", "code": "Ub3"})"));  // names only
+    assert(refused(R"("who": "windfall-ub3")", R"("who": "windfall-nobody")"));  // an NPC the catalogue doesn't know
+    assert(refused(R"("who": "windfall-ub3")", R"("who": {"class": "people", "code": "Ub3"})"));  // names only
     assert(refused(R"(["One.", "Two."])", R"(["1", "2", "3", "4"])"));              // more than one box
     assert(refused(R"("give": "rupee_orange")", R"("give": "master_sword")"));      // only rupees
     assert(refused(R"("quests_format": 1)", R"("quests_format": 2)"));
@@ -1475,7 +1606,7 @@ void test_available() {
     // the manifest form, and what it refuses
     const char* m = R"({"quests_format": 1, "quests": [{"id": "q", "title": "Q", "steps": [{"n": 1, "text": "Go.",
         "available": {"event": "0x2D01", "not_event": ["0x0A02"], "time": "day", "text": "after Nayru's pearl, by day"},
-        "npc": {"who": "windfall-kreeb", "lines": ["Hi."]}}]}]})";
+        "npc": {"who": "windfall-um1", "lines": ["Hi."]}}]}]})";
     std::vector<ManifestQuest> qs;
     std::string why;
     assert(parse_quests(mods::json::parse(m), qs, why));
@@ -1752,6 +1883,7 @@ int main() {
     test_style();
     test_page_feel();
     test_caption();
+    test_framed();
     test_npc_catalogue();
     test_takeover_rules();
     test_takeover_hooks();

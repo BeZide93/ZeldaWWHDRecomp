@@ -1,3 +1,4 @@
+#include "tooltip.h"
 // The Mods tab: one list of every mod with an on/off switch (built-in, downloaded, and the catalogue's
 // mods that aren't downloaded yet) and More (profiles, files, the mod list's source, code-mod support,
 // save backups, cheats). Switching on a mod that needs anything (a download, the GameCube game, a
@@ -16,6 +17,7 @@
 #include "mods_model.h"
 #include "setup_flow.h"
 #include "setup_test.h"
+#include "text_entry.h"
 #include "../mods/code_mods.h"
 #include "../mods/manager.h"
 #include "../mods/packages.h"
@@ -48,6 +50,7 @@ struct Host {
     mods::catalogue::Version port_version;
     std::string build_name = "USA";
     bool android = false;
+    bool file_picker = true; // the host has file and folder choosers (overlay/extensions.h Features)
     bool back = false;       // controller B this frame
     bool b_used = false;     // out: B answered something here (it must not also close the menu)
     bool test = false;       // isolated headless run: WWHD_TEST_* aids apply
@@ -143,7 +146,7 @@ inline void colored(const ImVec4& c, const std::string& s) {
 }
 inline void muted(const std::string& s) { colored(kMuted, s); }
 inline void tooltip(const std::string& s) {
-    if (!s.empty() && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort | ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("%s", s.c_str());
+    if (!s.empty() && overlay::tooltip_hovered(ImGuiHoveredFlags_DelayShort | ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("%s", s.c_str());
 }
 // Put the next item on this line when it fits, else on the next one (narrow windows, phones).
 inline void same_line_if_fits(const char* next_label) {
@@ -814,14 +817,19 @@ inline void game_source_picker(const Host& h, const std::string& game) {
         colored(src.valid ? kGood : kBad, std::string(src.valid ? check_mark() : cross_mark()) + "  " + file_name(src.path));
         tooltip(src.path);
         if (!src.valid) muted(src.result.empty() ? "This isn't a supported GameCube Wind Waker disc or folder." : src.result);
-        if (button("Change##source")) choose(false);
-        same_line_if_fits("Choose folder…");
-        if (button("Choose folder…##source")) choose(true);
-    } else {
+        if (h.file_picker) {
+            if (button("Change##source")) choose(false);
+            same_line_if_fits("Choose folder…");
+            if (button("Choose folder…##source")) choose(true);
+        }
+    } else if (h.file_picker) {
         text("Choose your GameCube Wind Waker: a disc image (ISO or RVZ) or an extracted folder. It stays on your computer.");
         if (button("Choose disc image…##source")) choose(false);
         same_line_if_fits("Choose folder…");
         if (button("Choose folder…##source")) choose(true);
+    } else {
+        text("Some mods need your GameCube Wind Waker (a disc image or an extracted folder); it can't be chosen here: "
+             "this system has no file chooser.");
     }
     std::lock_guard g(s.picker_mutex);
     if (!s.source_error.empty()) colored(kBad, s.source_error);
@@ -1081,7 +1089,7 @@ inline void option_controls(const mods::packages::View& v, bool locked) {
         } else {
             char value[1025];
             snprintf(value, sizeof value, "%s", o.value.text.c_str());
-            if (ImGui::InputText(o.name.c_str(), value, sizeof value, ImGuiInputTextFlags_EnterReturnsTrue))
+            if (text_entry::field(o.name.c_str(), value, sizeof value, ImGuiInputTextFlags_EnterReturnsTrue))
                 mods::packages::configure(v.id, o.id, std::string(value), error);
         }
         tooltip(o.description);
@@ -1379,7 +1387,7 @@ inline void more(Host& h) {
             ImGui::EndCombo();
         }
         ImGui::SetNextItemWidth(std::min(ImGui::GetFontSize() * 14, ImGui::GetContentRegionAvail().x));
-        ImGui::InputTextWithHint("##new_profile", "New profile name", s.profile_name, sizeof s.profile_name);
+        text_entry::field("##new_profile", s.profile_name, sizeof s.profile_name, 0, "New profile name");
         same_line_if_fits("Copy current");
         ImGui::BeginDisabled(!s.profile_name[0]);
         if (button("Copy current") && create_profile(s.profile_name, s.error)) s.profile_name[0] = 0;
@@ -1396,7 +1404,7 @@ inline void more(Host& h) {
         ImGui::EndDisabled();
         ImGui::Unindent();
     }
-    if (section("Install from a file or folder")) {
+    if (h.file_picker && section("Install from a file or folder")) {
         ImGui::Indent();
         muted("A mod package (.wwhdmod or ZIP), a mod folder, or a replacement .pack file.");
         auto pick = [&h](bool folder) {
@@ -1440,7 +1448,7 @@ inline void more(Host& h) {
         muted("Checking only downloads the public list of mods (no personal data, no game data). Mods are downloaded "
               "only when you press Install or Update.");
         ImGui::SetNextItemWidth(-FLT_MIN);
-        ImGui::InputText("##catalogue_url", s.url_edit, sizeof s.url_edit);
+        text_entry::field("##catalogue_url", s.url_edit, sizeof s.url_edit);
         bool changed = std::string(s.url_edit) != s.catalogue_url;
         ImGui::BeginDisabled(!changed);
         if (button("Use this list")) {

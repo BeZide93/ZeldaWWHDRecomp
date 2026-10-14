@@ -26,6 +26,9 @@ struct GameUi {
     // The menu art (story_notebook_style.h) from the item menu's layout that is open now (`menu`:
     // hdMenuMain_c); false (with the reason) if a piece can't be read
     bool (*art)(uint32_t menu, style::Art& out, std::string& why) = nullptr;
+    // The sea chart's own Link icon (and its ship) from the chart menu's layout (`chart`:
+    // hdSeaChartMenu_c, story_chart::sea_chart_menu()) into `out`; false if they can't be read
+    bool (*chart_icons)(uint32_t chart, style::Art& out) = nullptr;
     // How the game's button prompts look now (input_map::prompt_style, as button_glyphs.cpp)
     font::Prompts (*prompts)() = nullptr;
     // research aid (WWHD_NOTEBOOK_PANES=1): the menu layout's panes and their textures, in the log

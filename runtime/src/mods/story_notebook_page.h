@@ -38,6 +38,7 @@
 
 #include "guest_hud.h"
 #include "story_notebook_list.h"
+#include "story_notebook_art.h"
 
 namespace story_notebook {
 
@@ -175,6 +176,21 @@ inline void transform(std::vector<Command>& cmds, size_t from, float cx, float c
 // The menu sound of an input (story_notebook.cpp plays the game's own: SE_MENU_CURSOR, ...)
 enum class Sound : uint8_t { None, Cursor, Decide, Cancel, Tab, Open, Close, TrackOn, TrackOff };
 
+// What the page knows of the world besides the quests (story_notebook.cpp sets it every frame)
+struct Scene {
+    bool framed = false;      // the painted frame and row banners are loaded (story_notebook_art.h)
+    bool pieces = false;      // the detail page's painted pieces (sheet, bands, chart card, plates)
+    bool header = false;      // the header band (optional)
+    bool link_known = false;  // Link's place on the sea chart
+    float link_x = 0, link_z = 0;
+};
+
+// The mini sea chart: a world place (the chart ring's x/z) as a share of the 7 x 7 squares
+inline void chart_share(float x, float z, float& u, float& v) {
+    constexpr float kHalf = 350000.0f;
+    u = std::clamp((x + kHalf) / (2 * kHalf), 0.0f, 1.0f), v = std::clamp((z + kHalf) / (2 * kHalf), 0.0f, 1.0f);
+}
+
 class Page {
 public:
     enum class Mode : uint8_t { Closed, List, Detail };
@@ -186,6 +202,46 @@ public:
 
     Mode mode() const { return mode_; }
     int tab() const { return tab_; }
+    void set_scene(const Scene& scene) { scene_ = scene; }
+    const Scene& scene() const { return scene_; }
+
+    // Where things are: the classic page (the constants above) or the painted frame
+    struct Box {
+        float x = 0, y = 0, w = 0, h = 0;
+        bool in(float px, float py) const { return px >= x && px < x + w && py >= y && py < y + h; }
+    };
+    struct Geo {
+        Box tab[2], back, track, content;
+        float close_x = 0, close_y = 0, close_r = 0;
+        float list_x = 0, list_y = 0, list_w = 0, row_h = 0;
+    };
+    // the frame picture's place: 4:3, the page's height less a margin, centred
+    static Box frame_box() {
+        const float h = 696, w = h * art::frame::kAspect;
+        return {640 - w / 2, 12, w, h};
+    }
+    static Box frame_part(const art::Rect& r) {
+        const Box f = frame_box();
+        return {f.x + r.x0 * f.w, f.y + r.y0 * f.h, (r.x1 - r.x0) * f.w, (r.y1 - r.y0) * f.h};
+    }
+    Geo geo() const {
+        Geo g;
+        if (!scene_.framed) {
+            g.tab[0] = {kTab0X, kTabY, kTabW, kTabH}, g.tab[1] = {kTab1X, kTabY, kTabW, kTabH};
+            g.back = {kBackX, kBackY, kBackW, kBackH}, g.track = {kTrackX, kTrackY, kTrackW, kTrackH};
+            g.close_x = kCloseX, g.close_y = kCloseY, g.close_r = kCloseR;
+            g.list_x = kListX, g.list_y = kListY, g.list_w = kListW, g.row_h = kRowH;
+            g.content = {kPageX + 40, kPageY + 90, kPageW - 80, kPageH - 190};
+            return g;
+        }
+        g.tab[0] = frame_part(art::frame::kTab0), g.tab[1] = frame_part(art::frame::kTab1);
+        g.back = frame_part(art::frame::kPlateLeft), g.track = frame_part(art::frame::kPlateRight);
+        const Box slot = frame_part(art::frame::kSlot);
+        g.close_x = slot.x + slot.w / 2, g.close_y = slot.y + slot.h / 2, g.close_r = slot.w / 2;
+        g.content = frame_part(art::frame::kContent);
+        g.list_x = g.content.x + 8, g.list_y = g.content.y + 8, g.list_w = g.content.w - 16, g.row_h = (g.content.h - 16) / float(kRowsShown);
+        return g;
+    }
     // the rows of the open tab: the quests (tracked first) or the archive (done quests)
     std::vector<Row> shown(const std::vector<Row>& rows) const {
         std::vector<Row> out;
@@ -251,8 +307,9 @@ public:
             int want = tab_;
             if (pressed & kPadLeft) want = 0;
             if (pressed & kPadRight) want = 1;
-            if (tap && inside(pad.x, pad.y, kTab0X, kTabY, kTabW, kTabH)) want = 0;
-            if (tap && inside(pad.x, pad.y, kTab1X, kTabY, kTabW, kTabH)) want = 1;
+            const Geo g = geo();
+            if (tap && g.tab[0].in(pad.x, pad.y)) want = 0;
+            if (tap && g.tab[1].in(pad.x, pad.y)) want = 1;
             if (want != tab_) {
                 turn(want > tab_ ? 1 : -1);
                 tab_ = want;
@@ -268,13 +325,17 @@ public:
             const float before_y = row_y(before);
             if (index >= 0 && (moved & kPadUp) && index > 0) index--;
             if (index >= 0 && (moved & kPadDown) && index + 1 < int(rows.size())) index++;
-            if (tap && hit_close(pad.x, pad.y)) {
+            // the painted frame's bottom plates: B Close on the left, A Open on the right
+            const bool close_plate = scene_.framed && tap && g.back.in(pad.x, pad.y), open_plate = scene_.framed && tap && g.track.in(pad.x, pad.y);
+            if ((tap && hit_close(pad.x, pad.y)) || close_plate) {
+                if (close_plate) press_b_ = 0;
                 hide();
                 act.kind = Action::Close;
                 act.sound = Sound::Close;
                 return act;
             }
             int tapped = tap ? row_at(pad.x, pad.y, rows.size()) : -1;
+            if (open_plate && index >= 0) tapped = index;
             if (tapped >= 0) index = tapped;
             if (index >= 0) {
                 selected_ = rows[size_t(index)].quest->key;
@@ -302,8 +363,9 @@ public:
             }
             const Row& r = rows[size_t(index)];
             const bool trackable = r.status != Status::Done;
-            const bool back_tap = tap && inside(pad.x, pad.y, kBackX, kBackY, kBackW, kBackH);
-            const bool track_tap = tap && inside(pad.x, pad.y, kTrackX, kTrackY, kTrackW, kTrackH);
+            const Geo g = geo();
+            const bool back_tap = tap && g.back.in(pad.x, pad.y);
+            const bool track_tap = tap && g.track.in(pad.x, pad.y);
             if (tap && hit_close(pad.x, pad.y)) {
                 hide();
                 act.kind = Action::Close;
@@ -332,13 +394,20 @@ public:
         out.push_back(rect(-400, -200, 2080, 1120, (kShade & 0xFFFFFF00u) | uint32_t(float(kShade & 0xFF) * fade)));  // the game behind, dimmed
         const size_t window_from = out.size();
         const std::vector<Row> rows = shown(all);
-        sheet(out);
+        if (scene_.framed) framed_sheet(out);
+        else sheet(out);
         if (mode_ == Mode::List) tabs(out, all);
         // the content turns like a page: it slides in from the side it comes from
         const size_t content_from = out.size();
         const int index = index_of(rows);
-        if (mode_ == Mode::Detail && index >= 0) detail(out, rows[size_t(index)]);
-        else list(out, rows, index);
+        if (mode_ == Mode::Detail && index >= 0) {
+            if (scene_.framed) framed_detail(out, rows[size_t(index)]);
+            else detail(out, rows[size_t(index)]);
+        } else if (scene_.framed) {
+            framed_list(out, rows, index);
+        } else {
+            list(out, rows, index);
+        }
         const float t = turned();
         if (t < 1.0f) transform(out, content_from, 0, 0, 1.0f, float(turn_dir_) * (1.0f - t) * kTurnSlide, 0, t);
         // the window opens: scales up from 92 % with a little overshoot, fading in
@@ -347,10 +416,27 @@ public:
     }
 
     // where a row's emblem goes (for the caller's portrait pictures): center and radius
-    static void emblem_place(unsigned shown_index, float& cx, float& cy, float& r) {
+    void emblem_place(unsigned shown_index, float& cx, float& cy, float& r) const {
+        const Geo g = geo();
+        if (scene_.framed) {  // the banner's medallion
+            const float y = g.list_y + g.row_h * float(shown_index) + 2, h = g.row_h - 4;
+            cx = art::row_x(art::banner::kMedallionX, g.list_x, g.list_w, h), cy = y + art::banner::kMedallionY * h;
+            r = art::banner::kMedallionR * h * 0.86f;
+            return;
+        }
         cx = kListX + 50;
         cy = kListY + kRowH * float(shown_index) + kRowH * 0.5f;
         r = 32;
+    }
+    // where the detail page's portrait goes (the quest giver, next to "From"): centre and radius
+    void portrait_place(float& cx, float& cy, float& r) const {
+        const Geo g = geo();
+        if (scene_.framed && scene_.pieces) {  // under the title's wave line
+            const Box u = frame_part(art::detail::kUnderline);
+            cx = u.x + 22, cy = u.y + u.h + 26, r = 20;
+            return;
+        }
+        cx = g.content.x + 18 + 24, cy = g.content.y + 92, r = 24;
     }
     unsigned top() const { return top_; }
     // a portrait at (x, y, size) follows the page's animation: the content's slide and the window's scale
@@ -382,10 +468,15 @@ private:
         return -1;
     }
     static bool inside(float x, float y, float rx, float ry, float rw, float rh) { return x >= rx && x < rx + rw && y >= ry && y < ry + rh; }
-    static bool hit_close(float x, float y) { return (x - kCloseX) * (x - kCloseX) + (y - kCloseY) * (y - kCloseY) <= (kCloseR + 8) * (kCloseR + 8); }
+    bool hit_close(float x, float y) const {
+        if (mode_ == Mode::Detail && scene_.framed && scene_.pieces) return false;  // the slot is under the header band there
+        const Geo g = geo();
+        return (x - g.close_x) * (x - g.close_x) + (y - g.close_y) * (y - g.close_y) <= (g.close_r + 8) * (g.close_r + 8);
+    }
     int row_at(float x, float y, size_t count) const {
-        if (!inside(x, y, kListX, kListY, kListW, kRowH * kRowsShown)) return -1;
-        const unsigned i = top_ + unsigned((y - kListY) / kRowH);
+        const Geo g = geo();
+        if (!inside(x, y, g.list_x, g.list_y, g.list_w, g.row_h * kRowsShown)) return -1;
+        const unsigned i = top_ + unsigned((y - g.list_y) / g.row_h);
         return i < count ? int(i) : -1;
     }
 
@@ -529,13 +620,18 @@ private:
         size_t done = 0;
         for (const Row& r : all) done += r.status == Status::Done;
         const std::string labels[2] = {"Quests", "Archive" + (done ? " (" + std::to_string(done) + ")" : std::string())};
-        const float xs[2] = {kTab0X, kTab1X};
+        const Geo g = geo();
         for (int i = 0; i < 2; i++) {
             const bool on = i == tab_;
-            const float lift = on ? -3 : 0;
-            out.push_back(box(on ? "nb:tab-on" : "nb:tab", xs[i], kTabY + lift, kTabW, kTabH));
-            const float size = 26, w = text_width(labels[i], size);
-            out.push_back(text(xs[i] + (kTabW - w) / 2, kTabY + lift + (kTabH - size) / 2, size, on ? kPlateInk : kInkSoft, bold(labels[i])));
+            const Box& t = g.tab[i];
+            const float lift = on && !scene_.framed ? -3 : 0;
+            if (scene_.framed) {  // the frame's own plates: the open tab lit, the other one shaded
+                out.push_back(rect(t.x + 6, t.y + 6, t.w - 12, t.h - 12, on ? 0xFFFFFF50 : 0x1E3C1430));
+            } else {
+                out.push_back(box(on ? "nb:tab-on" : "nb:tab", t.x, t.y + lift, t.w, t.h));
+            }
+            const float size = scene_.framed ? 25 : 26, w = text_width(bold(labels[i]), size);
+            out.push_back(text(t.x + (t.w - w) / 2, t.y + lift + (t.h - size) / 2, size, on ? kPlateInk : kInkSoft, bold(labels[i])));
         }
     }
 
@@ -605,7 +701,405 @@ private:
         }
     }
 
+    // ---- the painted frame (story_notebook_art.h) ----
+    void framed_sheet(std::vector<Command>& out) const {
+        const Box f = frame_box();
+        const bool cleared = mode_ == Mode::Detail && scene_.pieces;  // the detail page: the header band's place
+        out.push_back(box(cleared ? "nb:dframe" : "nb:frame", f.x, f.y, f.w, f.h));
+        const Box t = frame_part(art::frame::kTitle);
+        out.push_back(text(t.x, t.y, 44, kInk, bold("Story Notebook")));
+        if (cleared) return;
+        // the close mark in the round slot (a tap closes the page, as B does)
+        const Geo g = geo();
+        const float k = g.close_r * 0.42f;
+        out.push_back(line(g.close_x - k, g.close_y - k, g.close_x + k, g.close_y + k, kInkSoft, 3.5f));
+        out.push_back(line(g.close_x + k, g.close_y - k, g.close_x - k, g.close_y + k, kInkSoft, 3.5f));
+    }
+    // a prompt centred on one of the frame's painted plates
+    void plate_label(std::vector<Command>& out, const Box& b, bool a, const char* what, bool scroll = false) const {
+        const size_t from = out.size();
+        const float size = 34, w = prompt_width(what, size) + (scroll ? 44 : 0);
+        prompt(out, b.x + (b.w - w) / 2, b.y + (b.h - size) / 2 - 2, a, what, 1.0f, size);
+        if (scroll) chart_scroll(out, b.x + (b.w + w) / 2 - 34, b.y + b.h / 2 - 15, 34, 30);
+        press(out, from, b.x + b.w / 2, b.y + b.h / 2, press_scale(a ? press_a_ : press_b_));
+    }
+    // a small chart scroll with a red cross (the A plate's "Show on chart")
+    static void chart_scroll(std::vector<Command>& out, float x, float y, float w, float h) {
+        out.push_back(rect(x, y, w, h, 0xE9D9A8FF));
+        Command o = rect(x, y, w, h, 0x8A6A3AFF);
+        o.kind = Command::RectOutline, o.thickness = 2;
+        out.push_back(o);
+        out.push_back(rect(x - 3, y - 2, 5, h + 4, 0xC9A66BFF));
+        out.push_back(rect(x + w - 2, y - 2, 5, h + 4, 0xC9A66BFF));
+        for (int i = 0; i < 3; i++) out.push_back(line(x + 5 + i * 6, y + h * 0.7f - i * 3, x + 8 + i * 6, y + h * 0.7f - i * 3 - 2, 0xB2392BFF, 2));
+        out.push_back(line(x + w - 13, y + 7, x + w - 5, y + 15, 0xD12E1EFF, 3));
+        out.push_back(line(x + w - 5, y + 7, x + w - 13, y + 15, 0xD12E1EFF, 3));
+    }
+
+    void framed_list(std::vector<Command>& out, const std::vector<Row>& rows, int index) const {
+        const Geo g = geo();
+        if (rows.empty()) {
+            out.push_back(text(g.content.x + 40, g.content.y + 60, 30, kInkSoft, tab_ == 0 ? "No stories yet." : "No finished stories yet."));
+            if (tab_ == 0) out.push_back(text(g.content.x + 40, g.content.y + 104, 24, kInkSoft, "When a story mod writes to you, its quests are kept here."));
+        }
+        for (unsigned i = 0; i < kRowsShown && top_ + i < rows.size(); i++) {
+            const Row& r = rows[top_ + i];
+            const Quest& q = *r.quest;
+            const float y = g.list_y + g.row_h * float(i) + 2, h = g.row_h - 4, x = g.list_x, w = g.list_w;
+            const size_t from = out.size();
+            const bool selected = int(top_ + i) == index;
+            out.push_back(box("nb:row", x, y, w, h));
+            if (selected) {  // a light wash over the body (not the medallion)
+                const float bx = art::row_x(art::banner::kText.x0 - 0.02f, x, w, h);
+                out.push_back(rect(bx, y + h * 0.12f, x + w - h * 0.25f - bx, h * 0.76f, 0xFFFFFF30));
+            }
+            // the medallion: the quest's portrait (drawn by the caller) or the mod's initial
+            float cx, cy, rad;
+            emblem_place(i, cx, cy, rad);
+            if (q.portrait.empty()) {
+                const std::string initial = q.mod_name.empty() ? "?" : q.mod_name.substr(0, 1);
+                out.push_back(text(cx - text_width(bold(initial), rad * 1.3f) / 2, cy - rad * 0.68f, rad * 1.3f, kSeal, bold(initial)));
+            }
+            // title and next step on the banner's body, the status in its pill
+            const float tx = art::row_x(art::banner::kText.x0, x, w, h), pill_x = art::row_x(art::banner::kPill.x0, x, w, h);
+            const float pill_x1 = art::row_x(art::banner::kPill.x1, x, w, h), tw = pill_x - tx - 20;
+            const bool dim = r.status == Status::Done || r.status == Status::NotAvailable;
+            const std::string title = fit(q.title, 25, tw, kBold);
+            out.push_back(text(tx, y + h * 0.13f, 25, dim ? kInkSoft : kInk, bold(title)));
+            std::string next = r.status == Status::Done ? "The story is told." : r.status == Status::NotAvailable ? "Not yet available: " + q.condition : q.next;
+            out.push_back(text(tx, y + h * 0.47f, 19, dim ? kInkSoft : kInk, fit(next, 19, tw)));
+            const float py = y + art::banner::kPill.y0 * h, ph = (art::banner::kPill.y1 - art::banner::kPill.y0) * h;
+            const uint32_t tint = r.status == Status::New ? 0x2E8A2EC8 : r.status == Status::NotAvailable ? 0x7C8A6CD8 : r.status == Status::Done ? 0x9C3A2AD0 : 0;
+            if (tint) out.push_back(rect(pill_x + 2, py + 2, pill_x1 - pill_x - 4, ph - 4, tint));
+            const char* word = r.status == Status::NotAvailable ? "Not yet" : status_text(r.status);
+            const float ws = 17;
+            out.push_back(text(pill_x + (pill_x1 - pill_x - text_width(bold(word), ws)) / 2, py + (ph - ws) / 2, ws, kWhite, bold(word)));
+            if (r.tracked) ring(out, pill_x - 18, py + ph / 2, 12);
+            if (selected && ticked_ && bump_ < 1.0f) press(out, from, x + w / 2, y + h / 2, 1.0f + 0.02f * std::sin(bump_ * 3.14159265f));
+        }
+        if (index >= int(top_) && index < int(top_ + kRowsShown)) {
+            float y = g.list_y + g.row_h * float(index - int(top_)) + 2;
+            if (ticked_ && glide_ < 1.0f) y = glide_from_ + (y - glide_from_) * ease_out(glide_);
+            cursor(out, g.list_x + 4, y + 2, g.list_w - 8, g.row_h - 8);
+        }
+        if (top_ > 0) out.push_back(text(g.list_x + g.list_w / 2, g.list_y - 26, 22, kInkSoft, "^"));
+        if (top_ + kRowsShown < rows.size()) out.push_back(text(g.list_x + g.list_w / 2, g.list_y + g.row_h * kRowsShown - 6, 22, kInkSoft, "v"));
+        plate_label(out, g.back, false, "Close");
+        if (!rows.empty()) plate_label(out, g.track, true, "Open");
+    }
+
+    // the section icons: plain shapes (a swirl, a map pin, a small chest, a lantern-ish note mark)
+    static void icon(std::vector<Command>& out, int kind, float x, float y, float s, uint32_t colour) {
+        const float cx = x + s / 2, cy = y + s / 2;
+        switch (kind) {
+        case 0: {  // swirl: a disc with a spiral cut
+            out.push_back(circle(cx, cy, s * 0.48f, colour, true));
+            float px = cx, py = cy;
+            for (int i = 1; i <= 14; i++) {
+                const float a = i * 0.55f, rr = s * 0.03f * i;
+                const float nx = cx + std::cos(a) * rr, ny = cy + std::sin(a) * rr;
+                out.push_back(line(px, py, nx, ny, kWhite, s * 0.09f));
+                px = nx, py = ny;
+            }
+            break;
+        }
+        case 1:  // map pin
+            out.push_back(circle(cx, y + s * 0.36f, s * 0.34f, colour, true));
+            out.push_back(line(cx - s * 0.28f, y + s * 0.5f, cx, y + s, colour, s * 0.16f));
+            out.push_back(line(cx + s * 0.28f, y + s * 0.5f, cx, y + s, colour, s * 0.16f));
+            out.push_back(line(cx - s * 0.14f, y + s * 0.66f, cx + s * 0.14f, y + s * 0.66f, colour, s * 0.3f));
+            out.push_back(circle(cx, y + s * 0.36f, s * 0.13f, kWhite, true));
+            break;
+        case 2:  // chest
+            out.push_back(rect(x + s * 0.06f, y + s * 0.3f, s * 0.88f, s * 0.62f, 0x8A5A1EFF));
+            out.push_back(rect(x + s * 0.06f, y + s * 0.18f, s * 0.88f, s * 0.24f, 0xA8742CFF));
+            out.push_back(rect(x + s * 0.06f, y + s * 0.4f, s * 0.88f, s * 0.07f, colour));
+            out.push_back(rect(x + s * 0.42f, y + s * 0.36f, s * 0.16f, s * 0.2f, 0xE8C34AFF));
+            break;
+        default:  // a note: a small page with lines
+            out.push_back(rect(x + s * 0.15f, y + s * 0.05f, s * 0.7f, s * 0.9f, 0xFFF8E8FF));
+            for (int i = 0; i < 3; i++) out.push_back(line(x + s * 0.25f, y + s * (0.3f + 0.2f * i), x + s * 0.75f, y + s * (0.3f + 0.2f * i), colour, 2));
+            break;
+        }
+    }
+
+    // the progress: one marker per step (done, current, upcoming) and "Step n of m"; with the
+    // manifest's steps unknown only "Step n"
+    void progress(std::vector<Command>& out, const Row& r, float x, float y) const {
+        const Quest& q = *r.quest;
+        const unsigned total = unsigned(q.steps.size()), now = r.status == Status::Done ? total : r.step;
+        float px = x;
+        for (unsigned i = 1; i <= total && i <= 12; i++) {
+            const bool done = r.status == Status::Done || i < now, current = !done && i == now;
+            out.push_back(circle(px + 9, y + 11, 8, done ? 0x3A8A2AFF : current ? 0xC0392BFF : 0xFFFFFFFF, true));
+            out.push_back(circle(px + 9, y + 11, 8, done ? 0x2A6A1EFF : current ? 0x8A2A1EFF : 0xA89A7AFF, false, 2));
+            if (done) {
+                out.push_back(line(px + 5, y + 11, px + 8, y + 15, kWhite, 2.5f));
+                out.push_back(line(px + 8, y + 15, px + 14, y + 7, kWhite, 2.5f));
+            }
+            if (i < total) out.push_back(line(px + 18, y + 11, px + 24, y + 11, 0xA89A7AFF, 2));
+            px += 26;
+        }
+        std::string label;
+        if (r.status == Status::Done) label = total ? "All " + std::to_string(total) + " steps done" : "Done";
+        else if (r.status == Status::New || r.status == Status::NotAvailable || !now) label = "Not started";
+        else label = "Step " + std::to_string(now) + (total ? " of " + std::to_string(total) : std::string());
+        out.push_back(text(px + (total ? 6 : 0), y, 20, kInkSoft, bold(label)));
+    }
+
+    void framed_detail(std::vector<Command>& out, const Row& r) const {
+        const Quest& q = *r.quest;
+        if (!scene_.pieces) {  // the frame alone: the content on its parchment
+            framed_detail_plain(out, r);
+            return;
+        }
+        namespace d = art::detail;
+        out.push_back(box("nb:sheet", frame_part(d::kSheet).x, frame_part(d::kSheet).y, frame_part(d::kSheet).w, frame_part(d::kSheet).h));
+        const Box title = frame_part(d::kTitle), uline = frame_part(d::kUnderline);
+        const std::string t = fit(q.title, 34, title.w, kBold);
+        out.push_back(text(title.x, title.y + (title.h - 34) / 2, 34, kInk, bold(t)));
+        out.push_back(box("nb:uline", uline.x, uline.y, uline.w, uline.h));
+        // the sender, the progress and the step done before
+        float pcx, pcy, pr;
+        portrait_place(pcx, pcy, pr);
+        if (q.portrait.empty()) {
+            out.push_back(circle(pcx, pcy, pr, emblem_colour(q.mod), true));
+            out.push_back(circle(pcx, pcy, pr - 4, kSeal, false, 1.5f));
+            const std::string initial = q.mod_name.empty() ? "?" : q.mod_name.substr(0, 1);
+            out.push_back(text(pcx - text_width(bold(initial), 22) / 2, pcy - 11, 22, kSeal, bold(initial)));
+        }
+        out.push_back(text(pcx + pr + 10, pcy - 11, 18, 0x2C6CA8FF, bold("From")));
+        out.push_back(text(pcx + pr + 10 + text_width(bold("From"), 18) + 8, pcy - 12, 20, kInk, fit(q.mod_name, 20, uline.w - 2 * pr - 70)));
+        // the progress at the right of the sender's line; the step done before under it
+        {
+            const unsigned total = unsigned(std::min<size_t>(q.steps.size(), 12));
+            const float width = 26.0f * float(total) + 6 + text_width(bold("Step 99 of 99"), 20);
+            progress(out, r, uline.x + uline.w - width, pcy - 11);
+        }
+        const unsigned now = r.step;
+        if (r.status == Status::InProgress && now >= 2 && now - 2 < q.steps.size() && !q.steps[now - 2].empty())
+            out.push_back(text(pcx - pr, pcy + pr + 4, 17, kInkLight, fit("Done: " + q.steps[now - 2], 17, uline.w)));
+        // the three bands: what to do next, where, the reward
+        const char* heads[3] = {"Next step", "Where", "Reward"};
+        const uint32_t colours[3] = {0xC0392BFF, 0x1F6FB2FF, 0x3A8A2AFF};
+        std::string bodies[3];
+        if (r.status == Status::Done) bodies[0] = "Done. The story is told.";
+        else if (r.status == Status::NotAvailable) bodies[0] = "Not yet available: " + q.condition;
+        else if (!q.hint.empty()) bodies[0] = q.hint + (q.next.empty() ? std::string() : " " + q.next);
+        else bodies[0] = q.next.empty() ? std::string("(not written down yet)") : q.next;
+        if (q.hint.rfind("Not yet possible", 0) == 0 && !q.next.empty()) bodies[0] = q.next + "\n" + q.hint;
+        bodies[1] = q.where.empty() ? std::string(q.has_place ? "Marked on the sea chart." : "This step has no place on the chart.") : q.where;
+        bodies[2] = q.reward.empty() ? std::string("(none named)") : r.status == Status::Done ? q.reward + " (received)" : q.reward;
+        for (int i = 0; i < 3; i++) {
+            const Box b = frame_part(d::kBands[i]);
+            icon(out, i == 0 ? 0 : i == 1 ? 1 : 2, b.x - 4, b.y - 28, 22, colours[i]);
+            out.push_back(text(b.x + 24, b.y - 28, 21, colours[i], bold(heads[i])));
+            out.push_back(box(i == 0 ? "nb:band0" : i == 1 ? "nb:band1" : "nb:band2", b.x, b.y, b.w, b.h));
+            const unsigned lines = b.h > 50 ? 2 : 1;
+            const std::vector<std::string> ls = wrap(bodies[i], 19, b.w - 36, lines);
+            float ty = b.y + (b.h - 23 * float(ls.size())) / 2;
+            for (const std::string& l : ls) {
+                out.push_back(text(b.x + 18, ty, 19, kInk, l));
+                ty += 23;
+            }
+        }
+        // the header band (optional), the status pill, the chart card
+        if (scene_.header) {
+            const Box h = frame_part(d::kHeader);
+            out.push_back(box("nb:header", h.x, h.y, h.w, h.h));
+        }
+        const Box card = frame_part(d::kCard);
+        const float pw = 168, ph = 50, px = card.x + card.w - pw - 10, py = card.y - ph - 8;
+        out.push_back(box("nb:pill", px, py, pw, ph));
+        const char* word = r.status == Status::NotAvailable ? "Not yet" : status_text(r.status);
+        const uint32_t tint = r.status == Status::New ? 0x2E8A2EC8 : r.status == Status::NotAvailable ? 0x7C8A6CD8 : r.status == Status::Done ? 0x9C3A2AD0 : 0;
+        if (tint) out.push_back(rect(px + 3, py + 3, pw - 6, ph - 6, tint));
+        out.push_back(text(px + (pw - text_width(bold(word), 20)) / 2, py + (ph - 20) / 2, 20, kWhite, bold(word)));
+        if (r.tracked) {
+            ring(out, px - 16, py + ph / 2, 11);
+            out.push_back(text(px - 16 - 12 - text_width("On the chart", 17) - 6, py + ph / 2 - 9, 17, kInk, "On the chart"));
+        }
+        out.push_back(box("nb:card", card.x, card.y, card.w, card.h));
+        card_chart(out, q, card);
+        // the plates: Back (B) and Show on chart (A), the cursor on what A does
+        const Geo g = geo();  // over the frame's own painted plates
+        const Box bl = g.back, br = g.track;
+        plate_piece(out, bl, false, "Back");
+        if (r.status != Status::Done) {
+            plate_piece(out, br, true, r.tracked ? "Stop showing" : "Show on chart", true);
+            cursor(out, br.x + 2, br.y + 2, br.w - 4, br.h - 4);
+        }
+    }
+    // a painted plate (its own picture over the frame's, so it can be pressed) with its prompt
+    void plate_piece(std::vector<Command>& out, const Box& b, bool a, const char* what, bool scroll = false) const {
+        const size_t from = out.size();
+        out.push_back(box("nb:uplate", b.x, b.y, b.w, b.h));
+        const float size = 34, w = prompt_width(what, size) + (scroll ? 44 : 0);
+        prompt(out, b.x + (b.w - w) / 2, b.y + (b.h - size) / 2 - 3, a, what, 1.0f, size);
+        if (scroll) chart_scroll(out, b.x + (b.w + w) / 2 - 34, b.y + b.h / 2 - 17, 34, 30);
+        press(out, from, b.x + b.w / 2, b.y + b.h / 2, press_scale(a ? press_a_ : press_b_));
+    }
+    // the mini chart inside the tilted card's blue sea
+    void card_chart(std::vector<Command>& out, const Quest& q, const Box& card) const {
+        auto at = [&](float u, float v, float& x, float& y) {  // a share of the sea (inset) to the page
+            u = 0.08f + 0.84f * u, v = 0.08f + 0.84f * v;
+            const float tx = art::card::kTL[0] + (art::card::kTR[0] - art::card::kTL[0]) * u, ty = art::card::kTL[1] + (art::card::kTR[1] - art::card::kTL[1]) * u;
+            const float bx = art::card::kBL[0] + (art::card::kBR[0] - art::card::kBL[0]) * u, by = art::card::kBL[1] + (art::card::kBR[1] - art::card::kBL[1]) * u;
+            x = card.x + (tx + (bx - tx) * v) * card.w, y = card.y + (ty + (by - ty) * v) * card.h;
+        };
+        for (int i = 0; i <= 7; i++) {  // the squares
+            float x0, y0, x1, y1;
+            at(i / 7.0f, 0, x0, y0), at(i / 7.0f, 1, x1, y1);
+            out.push_back(line(x0, y0, x1, y1, 0xFFFFFF70, 1.2f));
+            at(0, i / 7.0f, x0, y0), at(1, i / 7.0f, x1, y1);
+            out.push_back(line(x0, y0, x1, y1, 0xFFFFFF70, 1.2f));
+        }
+        const float pulse = ticked_ ? 0.5f + 0.5f * std::sin(time_ * 6.2831853f * 0.8f) : 0.5f;
+        float tu = 0, tv = 0, txp = 0, typ = 0;
+        if (q.has_place) {
+            chart_share(q.x, q.z, tu, tv);
+            at(tu, tv, txp, typ);
+            out.push_back(circle(txp, typ, 15 + 4 * pulse, 0xFFF4B0A0, true));  // the glow
+            out.push_back(circle(txp, typ, 9, 0xFFFFFFFF, false, 3));
+            out.push_back(circle(txp, typ, 4, 0xD12E1EFF, true));
+        }
+        if (scene_.link_known) {
+            float lu, lv, lx, ly;
+            chart_share(scene_.link_x, scene_.link_z, lu, lv);
+            at(lu, lv, lx, ly);
+            if (q.has_place) {  // the route: dots from Link to the place
+                const float dx = txp - lx, dy = typ - ly, len = std::sqrt(dx * dx + dy * dy);
+                const int dots = int(len / 9);
+                for (int i = 1; i < dots; i++) out.push_back(circle(lx + dx * i / dots, ly + dy * i / dots, 2.2f, 0xD12E1EFF, true));
+            }
+            out.push_back(box("nb:linkface", lx - 16, ly - 16, 32, 32));
+        }
+        // the compass, near the card's lower right corner
+        float cx, cy;
+        at(0.86f, 0.84f, cx, cy);
+        const float cr = 17;
+        out.push_back(circle(cx, cy, cr, 0xF4E9C8D0, true));
+        out.push_back(circle(cx, cy, cr, 0x5A7F9AFF, false, 1.5f));
+        out.push_back(line(cx, cy - cr + 3, cx, cy + cr - 3, 0x5A7F9AFF, 2));
+        out.push_back(line(cx - cr + 3, cy, cx + cr - 3, cy, 0x5A7F9AFF, 2));
+        out.push_back(line(cx, cy - cr + 3, cx, cy - 2, 0xD12E1EFF, 3));
+        out.push_back(text(cx - 5, cy - cr - 17, 15, 0x2C5C7CFF, bold("N")));
+    }
+
+    void framed_detail_plain(std::vector<Command>& out, const Row& r) const {
+        const Quest& q = *r.quest;
+        const Geo g = geo();
+        const Box& c = g.content;
+        const float lx = c.x + 18, lw = c.w - 18 - 330 - 24, rx = c.x + c.w - 18 - 312;
+        float y = c.y + 8;
+        out.push_back(text(lx, y, 34, kInk, bold(fit(q.title, 34, lw, kBold))));
+        out.push_back(box("nb:underline", lx - 4, y + 40, std::min(lw, text_width(bold(fit(q.title, 34, lw, kBold)), 34) + 40), 16));
+        // the sender: the quest's portrait (drawn by the caller) or the mod's seal
+        float pcx, pcy, pr;
+        portrait_place(pcx, pcy, pr);
+        if (q.portrait.empty()) {
+            out.push_back(circle(pcx, pcy, pr, emblem_colour(q.mod), true));
+            out.push_back(circle(pcx, pcy, pr - 4, kSeal, false, 1.5f));
+            const std::string initial = q.mod_name.empty() ? "?" : q.mod_name.substr(0, 1);
+            out.push_back(text(pcx - text_width(bold(initial), 26) / 2, pcy - 13, 26, kSeal, bold(initial)));
+        }
+        out.push_back(text(pcx + pr + 12, pcy - 12, 19, 0x2C6CA8FF, bold("From")));
+        out.push_back(text(pcx + pr + 12 + text_width(bold("From "), 19) + 6, pcy - 13, 21, kInk, fit(q.mod_name, 21, lw - 2 * pr - 80)));
+        y = pcy + pr + 10;
+        // the sections: a coloured header with its icon, the text on a soft band
+        const float bottom = c.y + c.h - 8;
+        auto section = [&](int icon_kind, uint32_t colour, uint32_t band, const char* head, const std::string& body, unsigned lines) {
+            const std::vector<std::string> ls = wrap(body, 20, lw - 30, lines);
+            const float need = 26 + 24 * float(ls.size()) + 14;
+            if (y + need > bottom) return;
+            icon(out, icon_kind, lx, y, 22, colour);
+            out.push_back(text(lx + 30, y, 21, colour, bold(head)));
+            y += 26;
+            out.push_back(rect(lx + 10, y - 2, lw - 10, 24 * float(ls.size()) + 8, band));
+            for (const std::string& l : ls) {
+                out.push_back(text(lx + 22, y + 1, 20, kInk, l));
+                y += 24;
+            }
+            y += 14;
+        };
+        if (r.status == Status::Done) {
+            section(3, 0x7A5E3AFF, 0xEDE2C455, "The story", "Done. The story is told.", 1);
+        } else if (r.status == Status::NotAvailable) {
+            section(0, 0xC0661EFF, 0xF7D9A855, "Not yet available", q.condition, 2);
+        } else {
+            section(0, 0xC0392BFF, 0xF7E3B580, "Next step", q.next.empty() ? std::string("(not written down yet)") : q.next, 2);
+            section(1, 0x1F6FB2FF, 0xD8E8EE90, "Where", q.where.empty() ? std::string(q.has_place ? "Marked on the sea chart." : "This step has no place on the chart.") : q.where, 1);
+        }
+        if (!q.hint.empty() && r.status != Status::Done) section(0, 0xC0661EFF, 0xF7D9A870, "To continue", q.hint, 1);
+        if (!q.reward.empty()) section(2, 0x3A8A2AFF, 0xDCEFCB90, "Reward", q.reward, 1);
+        if (!q.known.empty()) section(3, 0x7A5E3AFF, 0xEDE2C470, "What is known so far", q.known, 3);
+        // the status pill (the banner's own) and the chart ring
+        const float pw = 176, ph = 54, px = c.x + c.w - 18 - pw, py = c.y + 6;
+        out.push_back(box("nb:pill", px, py, pw, ph));
+        const char* word = r.status == Status::NotAvailable ? "Not yet" : status_text(r.status);
+        const uint32_t tint = r.status == Status::New ? 0x2E8A2EC8 : r.status == Status::NotAvailable ? 0x7C8A6CD8 : r.status == Status::Done ? 0x9C3A2AD0 : 0;
+        if (tint) out.push_back(rect(px + 3, py + 3, pw - 6, ph - 6, tint));
+        out.push_back(text(px + (pw - text_width(bold(word), 21)) / 2, py + (ph - 21) / 2, 21, kWhite, bold(word)));
+        if (r.tracked) {
+            ring(out, rx + 10, py + ph / 2, 11);
+            out.push_back(text(rx + 26, py + ph / 2 - 10, 18, kInk, "On the chart"));
+        }
+        mini_chart(out, q, rx, py + ph + 10, 312, 300);
+        // plates: Back (B) and Show on chart (A); the cursor is on what A does
+        plate_label(out, g.back, false, "Back");
+        if (r.status != Status::Done) {
+            plate_label(out, g.track, true, r.tracked ? "Stop showing" : "Show on chart", true);
+            cursor(out, g.track.x + 4, g.track.y + 4, g.track.w - 8, g.track.h - 8);
+        }
+    }
+
+    // The mini sea chart: the chart's 7 x 7 squares on a torn chart paper, the step's place glowing,
+    // Link (the chart's own Link icon when the sea chart has been shown) and a dotted route between
+    // them, a compass. Same mapping as the chart ring (story_chart.h).
+    void mini_chart(std::vector<Command>& out, const Quest& q, float x, float y, float w, float h) const {
+        out.push_back(box("nb:chart", x, y, w, h));
+        const float side = std::min(w, h) - 44, gx = x + (w - side) / 2, gy = y + (h - side) / 2;
+        out.push_back(rect(gx, gy, side, side, 0x3C8CC8E0));  // the sea
+        for (int i = 0; i <= 7; i++) {
+            const float t = side * float(i) / 7;
+            out.push_back(line(gx + t, gy, gx + t, gy + side, 0xFFFFFF60, 1.2f));
+            out.push_back(line(gx, gy + t, gx + side, gy + t, 0xFFFFFF60, 1.2f));
+        }
+        const float pulse = ticked_ ? 0.5f + 0.5f * std::sin(time_ * 6.2831853f * 0.8f) : 0.5f;
+        float tu = 0, tv = 0;
+        if (q.has_place) {
+            chart_share(q.x, q.z, tu, tv);
+            const float px = gx + tu * side, py = gy + tv * side;
+            const int col = std::min(6, int(tu * 7)), row = std::min(6, int(tv * 7));
+            out.push_back(rect(gx + side * col / 7 + 1, gy + side * row / 7 + 1, side / 7 - 2, side / 7 - 2, 0xFFF2B060));
+            out.push_back(circle(px, py, 14 + 4 * pulse, 0xFFE8A0A0, true));  // the glow
+            out.push_back(circle(px, py, 9, 0xFFFFFFFF, false, 3));
+            out.push_back(circle(px, py, 4, 0xD12E1EFF, true));
+        }
+        if (scene_.link_known) {
+            float lu, lv;
+            chart_share(scene_.link_x, scene_.link_z, lu, lv);
+            const float lx = gx + lu * side, ly = gy + lv * side;
+            if (q.has_place) {  // the route: dots from Link to the place
+                const float dx = gx + tu * side - lx, dy = gy + tv * side - ly, len = std::sqrt(dx * dx + dy * dy);
+                const int dots = int(len / 9);
+                for (int i = 1; i < dots; i++) out.push_back(circle(lx + dx * i / dots, ly + dy * i / dots, 2.2f, 0xD12E1EFF, true));
+            }
+            out.push_back(box("nb:linkface", lx - 15, ly - 15, 30, 30));
+        }
+        // the compass, at the corner
+        const float cx = x + w - 34, cy = y + h - 34, cr = 18;
+        out.push_back(circle(cx, cy, cr, 0xF4E9C8E0, true));
+        out.push_back(circle(cx, cy, cr, 0x8A6A3AFF, false, 1.5f));
+        out.push_back(line(cx, cy - cr + 3, cx, cy + cr - 3, 0x8A6A3AFF, 2));
+        out.push_back(line(cx - cr + 3, cy, cx + cr - 3, cy, 0x8A6A3AFF, 2));
+        out.push_back(line(cx, cy - cr + 3, cx, cy - 2, 0xD12E1EFF, 3));
+        out.push_back(text(cx - 5, cy - cr - 18, 15, 0x8A6A3AFF, bold("N")));
+        if (!q.where.empty()) out.push_back(text(x + 8, y + h + 2, 17, kInkSoft, fit(q.where, 17, w - 16)));
+    }
+
     Mode mode_ = Mode::Closed;
+    Scene scene_;
     int tab_ = 0;
     uint16_t selected_ = 0;
     unsigned top_ = 0, repeat_ = 0;

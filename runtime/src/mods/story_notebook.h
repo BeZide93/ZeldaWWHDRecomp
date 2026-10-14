@@ -1,5 +1,5 @@
 // The story notebook: the port's quest journal for story mods (docs/mod-sdk-v2.md, "The story
-// notebook"). Link gets it with the first letter from a mod (story_mail.h). Mods fill it through the
+// notebook"). Link gets it with the Story Notebook package's letter (story_mail.h). Mods fill it through the
 // wwhd_quest_* services; the player opens it from the item menu and may track one quest, whose next
 // step then shows on the sea chart (story_chart.h).
 //
@@ -41,6 +41,14 @@ int32_t done(const std::string& mod, const std::string& quest);
 // The quests a mod declares in its manifest.json ("quests"), when the mod is loaded: false (logged)
 // if the declaration is not accepted.
 bool declare(const std::string& mod, const std::string& mod_name, const mods::json::Value& manifest);
+// The notebook's look from the Story Notebook package: its icon (PNG file) and the model archive its
+// setup step built on the player's machine (empty: the game's stand-in model). Before install().
+void set_look(const std::string& icon_png, const std::string& model_archive);
+// The player's NPC catalogue (tools/story_mods/npc_catalogue.py output): names and spots merged into
+// the compiled-in recipes; false if the file isn't there or isn't one
+bool load_local_npc_catalogue(const std::string& file);
+// the compiled-in recipes, for the generator (place -> recipe text)
+std::vector<std::pair<std::string, std::string>> npc_recipes();
 void declared_tick();  // what pad() runs a few times a second (tests)
 // wwhd_quest_carry: Link carries (or no longer carries) the quest's letter, shown in the Delivery Bag
 int32_t carry(const std::string& mod, const std::string& quest, bool carried);

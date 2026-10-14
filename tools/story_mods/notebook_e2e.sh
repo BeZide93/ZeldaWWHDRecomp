@@ -1,10 +1,11 @@
 #!/bin/zsh
 # Headless end-to-end run of the story notebook (docs/mod-sdk-v2.md, "The story notebook"):
-# the story-notebook example mod on -> its letter waits in the Rito postbox -> Link (warped in front of
+# the story-notebook package (from the mod repository) on -> its letter waits in the Rito postbox -> Link (warped in front of
 # Windfall's postbox) takes it and the notebook -> the Delivery Bag shows the notebook -> a touch opens
 # its page -> A opens the quest, A shows it on the chart, B, B close -> the MAP screen's sea chart.
 #
-# usage: notebook_e2e.sh BUILD_DIR SAVE_DIR OUT_DIR
+# usage: STORY_NOTEBOOK_PKG=<mod repo>/story-notebook notebook_e2e.sh BUILD_DIR SAVE_DIR OUT_DIR
+#   STORY_NOTEBOOK_PKG  the package's folder with its manifest.json and a built mod.elf
 #   BUILD_DIR  a configured build (BUILD_DIR/wwhd), SAVE_DIR a COPY-able save with file 1 on Windfall's
 #   pier (the A presses at TV frames 1200..3200 load file 1), OUT_DIR is created (log, frame dumps).
 # SHADERS=file: a shader cache to use (default: a new one in OUT_DIR). Checks the log; frame dumps of the page (present) and the GamePad map are left in OUT_DIR.
@@ -12,8 +13,8 @@
 set -eu
 B=$1 SAVE=$2 OUT=$3
 REPO=${0:A:h:h:h}
-MOD=$REPO/examples/guest-mods/story-notebook
-[ -f $MOD/mod.elf ] || { echo "build $MOD/mod.elf first (examples/guest-mods/Makefile)"; exit 2; }
+MOD=${STORY_NOTEBOOK_PKG:?the story-notebook package folder from the mod repository}
+[ -f $MOD/mod.elf ] || { echo "build $MOD/mod.elf first"; exit 2; }
 rm -rf $OUT; mkdir -p $OUT/save $OUT/states $OUT/manager/Mods/story-notebook
 cp -R $SAVE $OUT/save/user
 cp $MOD/manifest.json $MOD/mod.elf $OUT/manager/Mods/story-notebook/

@@ -38,6 +38,9 @@ struct Quest {
     bool texts_from_mod = false;           // the mod's code set the step texts this session (they win over the manifest's)
     bool has_place = false;                // the next step has a place on the sea chart
     float x = 0, z = 0;
+    // the quest's steps as its manifest declares them (the notebook's progress line); empty when the
+    // mod's code keeps its own steps
+    std::vector<std::string> steps;        // step 1, 2, ...: what each asks for
 };
 
 enum class Status : uint8_t { InProgress, New, NotAvailable, Done };

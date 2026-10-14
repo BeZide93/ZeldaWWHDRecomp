@@ -1,6 +1,7 @@
 #include "mods/setup_run.h"
 #include "mod_test_host.h"
 #include "mods/packages.h"
+#include "mods/mods.h"
 #include "mods/content.h"
 #include "mods/cemu_pack.h"
 #include <filesystem>
@@ -401,8 +402,41 @@ int main(int argc, char** argv) {
             };
             quests("windfall-nobody");
             assert(!install((root/"quests").string(),error)&&error.find("no NPC named \"windfall-nobody\"")!=std::string::npos);
-            quests("windfall-kreeb");
+            quests("windfall-um1");
             assert(install((root/"quests").string(),error)&&view("quest-fixture").compatible);
+            // every quest mod depends on the story system's required package, declared or not
+            set_code_mod_support(true);
+            const auto deps=view("quest-fixture").dependencies;
+            assert(std::find(deps.begin(),deps.end(),"story-notebook>=0.0.0")!=deps.end());
+            assert(!enable("quest-fixture",true,error)&&error.find("Needs the Story Notebook quest")!=std::string::npos);
+        }
+        {   // the Story Notebook's "notebook" block: its look is exempt from the HUD texture budget, with limits of its own
+            static const char kPng[]="\x89\x50\x4e\x47\x0d\x0a\x1a\x0a\x00\x00\x00\x0d\x49\x48\x44\x52\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\x0d\x49\x44\x41\x54\x78\xda\x63\x64\x60\xf8\x5f\x0f\x00\x02\x87\x01\x80\xeb\x47\xba\x92\x00\x00\x00\x00\x49\x45\x4e\x44\xae\x42\x60\x82";
+            auto png=[&](const fs::path& at){std::ofstream(at,std::ios::binary).write(kPng,sizeof kPng-1);};
+            auto package=[&](const std::string& id,bool look){
+                const auto dir=root/("look-"+id);fs::remove_all(dir);fs::create_directories(dir/"assets/layout");
+                std::ofstream(dir/"manifest.json")<<R"({"format_version":1,"id":")"<<id<<R"(","name":"Look fixture","version":"1.0.0","game_id":"wwhd-usa","kind":"guest","guest":{"api_version":1,"elf":"mod.elf"})"
+                    <<(look?R"(,"notebook":{"icon":"assets/icon.png","model":"assets/model.glb","layout":"assets/layout/page.json"})":"")<<"}";
+                std::ofstream elf(dir/"mod.elf",std::ios::binary);elf.write("\x7f" "ELF\x01\x02",6);
+                png(dir/"assets/icon.png");std::ofstream(dir/"assets/model.glb",std::ios::binary)<<"glTF synthetic";
+                std::ofstream(dir/"assets/layout/page.json")<<"{}";
+                for(int i=0;i<40;i++)png(dir/("assets/layout/art"+std::to_string(i)+".png"));  // more than the HUD budget's 32
+                return dir;
+            };
+            assert(install(package("story-notebook",true).string(),error));
+            assert(!install(package("hud-only",false).string(),error)&&error.find("32 HUD textures")!=std::string::npos);  // the HUD budget is unchanged
+            assert(!install(package("look-elsewhere",true).string(),error)&&error.find("Only the Story Notebook package")!=std::string::npos);
+            auto dir=package("story-notebook",true);std::ofstream(dir/"assets/model.glb",std::ios::binary)<<"not a model";
+            assert(!install(dir.string(),error)&&error.find("binary glTF")!=std::string::npos);
+            // part of the story system: it can't be switched off or removed while the story system is on
+            assert(install(package("story-notebook",true).string(),error)&&confirm_native("story-notebook",error)&&enable("story-notebook",true,error));
+            assert(!enable("story-notebook",false,error)&&error.find("part of the story system")!=std::string::npos);
+            assert(!remove("story-notebook",error)&&error.find("part of the story system")!=std::string::npos);
+            mods::set_story_system(false);
+            assert(enable("story-notebook",false,error)&&remove("story-notebook",error));
+            mods::set_story_system(true);
+            assert(remove("quest-fixture",error));
+            set_code_mod_support(false);
         }
         assert(unconfirmed_native("guest-fixture").size()==1);
         assert(!enable("guest-fixture",true,error));

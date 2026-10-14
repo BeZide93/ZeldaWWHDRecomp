@@ -23,6 +23,7 @@
 
 #include "../game_glyph.h"
 #include "guest_hud.h"
+#include "story_notebook_art.h"
 
 namespace story_notebook::style {
 
@@ -39,6 +40,12 @@ struct Art {
     Bitmap gloss;          // the plate's gloss (RGBA)
     Bitmap info_top, info_bottom;  // the item menu's Info box (W_TextBase_00): its torn top and bottom edges
     Bitmap swirl;          // its wind swirls (P_Deco_00)
+    // the sea chart's own icons (the MAP screen's layout, once it was shown this session)
+    Bitmap link_face, ship;
+    // the page's painted frame and quest-row banner (user artwork, story_notebook_art.h), cleaned
+    Bitmap frame, banner;
+    Bitmap detail_frame;                       // the frame with the header band's place cleared
+    Bitmap sheet, card, header, underline, uplate, bands[3];  // the detail page's pieces (story_notebook_art.h)
     bool window() const {
         for (const Bitmap& b : edge)
             if (b.width <= 0) return false;
@@ -46,6 +53,7 @@ struct Art {
     }
     bool plates() const { return plate_rim.width > 0 && plate.width > 0; }
     bool info() const { return info_top.width > 0 && info_bottom.width > 0 && swirl.width > 0; }
+    bool framed() const { return frame.width > 0 && banner.width > 0; }
 };
 
 // The part of a bitmap inside (x0, y0)-(x1, y1)
@@ -75,6 +83,7 @@ inline void trim_plates(Art& art) {
 // colours of the notebook's window (the mini window's greens)
 inline constexpr uint32_t kWindowPaper = 0xB4DC8CFF, kPanelPaper = 0xE8F6C6FF, kPlateDark = 0x2F7A16FF, kPlateLight = 0xB8EC8EFF,
                           kPlateOnDark = 0x6DB443FF, kPlateOnLight = 0xEAFFCCFF, kTabDark = 0x5E8F45FF, kTabLight = 0xCBE6AEFF,
+                          kChartPaper = 0xE9D9A8FF, kUnderline = 0x2C7FB8FF,
                           kInfoPaper = 0xEDEBBCFF, kInfoEdge = 0xA3B2A3FF, kInfoSwirl = 0xE0DDA6FF,
                           kRimTop = 0xF4FFE4FF, kRimBottom = 0xCFE6B4FF, kCursorInk = 0x5A3A1CFF, kCursorFill = 0xFFFFFFFF;
 
@@ -256,8 +265,38 @@ inline std::shared_ptr<guestmods::hud::Image> info_box(const Art& art, int w, in
     return out.image();
 }
 
+// The wind swirls as a wavy line w x h (the quest title's underline), in a colour
+inline std::shared_ptr<guestmods::hud::Image> swirl_line(const Art& art, int w, int h, uint32_t colour) {
+    w = std::clamp(w, 8, 2048), h = std::clamp(h, 4, 512);
+    Canvas out(w, h);
+    for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++) {
+            float s[4];  // the upper row of the swirls, repeated along the line
+            sample(art.swirl, std::fmod(x * float(art.swirl.height) * 0.5f / h, float(art.swirl.width)), (y + 0.5f) * art.swirl.height * 0.5f / h, s);
+            const float edge = std::min({1.0f, x / 24.0f, (w - x) / 24.0f});  // fading at both ends
+            const float c[4] = {float(ch(colour, 0)), float(ch(colour, 1)), float(ch(colour, 2)), s[3] * edge};
+            out.over(x, y, c);
+        }
+    return out.image();
+}
+
 // The box a marker names, as the game's art (null when there is no art for it)
 inline std::shared_ptr<guestmods::hud::Image> compose(const Art& art, const std::string& name, int w, int h) {
+    if (name == "nb:frame" && art.framed()) return art::image(art::resized(art.frame, w, h));
+    if (name == "nb:dframe" && art.detail_frame.width > 0) return art::image(art::resized(art.detail_frame, w, h));
+    if (name == "nb:sheet" && art.sheet.width > 0) return art::image(art::stretch3(art.sheet, w, h, 0.15f, 0.15f));
+    if (name == "nb:card" && art.card.width > 0) return art::image(art::resized(art.card, w, h));
+    if (name == "nb:header" && art.header.width > 0) return art::image(art::fit_into(art.header, w, h));
+    if (name == "nb:uline" && art.underline.width > 0) return art::image(art::stretch3(art.underline, w, h, 0.05f, 0.05f));
+    if (name == "nb:uplate" && art.uplate.width > 0) return art::image(art::stretch3(art.uplate, w, h, 0.12f, 0.12f));
+    for (int i = 0; i < 3; i++)
+        if (name == "nb:band" + std::to_string(i) && art.bands[i].width > 0) return art::image(art::stretch3(art.bands[i], w, h, 0.04f, 0.04f));
+    if (name == "nb:row" && art.framed()) return art::image(art::row(art.banner, w, h));
+    if (name == "nb:pill" && art.framed()) return art::image(art::resized(art::part(art.banner, art::banner::kPill), w, h));
+    if (name == "nb:chart" && art.window()) return torn_paper(art, w, h, kChartPaper, 26);
+    if (name == "nb:underline" && art.info()) return swirl_line(art, w, h, kUnderline);
+    if (name == "nb:linkface" && art.link_face.width > 0) return art::image(art::resized(art.link_face, w, h));
+    if (name == "nb:ship" && art.ship.width > 0) return art::image(art::resized(art.ship, w, h));
     if (name == "nb:window" && art.window()) return torn_paper(art, w, h, kWindowPaper, 46);
     if (name == "nb:panel" && art.window()) return torn_paper(art, w, h, kPanelPaper, 34);
     if (name == "nb:info" && art.info()) return info_box(art, w, h);
@@ -266,6 +305,23 @@ inline std::shared_ptr<guestmods::hud::Image> compose(const Art& art, const std:
     if (name == "nb:tab" && art.plates()) return plate(art, w, h, kTabDark, kTabLight);
     if (name == "nb:tab-on" && art.plates()) return plate(art, w, h, kPlateOnDark, kPlateOnLight);
     return nullptr;
+}
+// whether compose() has art for a box name
+inline bool has_art(const Art& art, const std::string& n) {
+    if (n == "nb:frame" || n == "nb:row" || n == "nb:pill") return art.framed();
+    if (n == "nb:dframe") return art.detail_frame.width > 0;
+    if (n == "nb:sheet") return art.sheet.width > 0;
+    if (n == "nb:card") return art.card.width > 0;
+    if (n == "nb:header") return art.header.width > 0;
+    if (n == "nb:uline") return art.underline.width > 0;
+    if (n == "nb:uplate") return art.uplate.width > 0;
+    if (n.rfind("nb:band", 0) == 0 && n.size() == 8 && n[7] >= '0' && n[7] <= '2') return art.bands[n[7] - '0'].width > 0;
+    if (n == "nb:window" || n == "nb:panel" || n == "nb:chart") return art.window();
+    if (n == "nb:info" || n == "nb:underline") return art.info();
+    if (n == "nb:linkface") return art.link_face.width > 0;
+    if (n == "nb:ship") return art.ship.width > 0;
+    if (n.rfind("nb:plate", 0) == 0 || n.rfind("nb:tab", 0) == 0) return art.plates();
+    return false;
 }
 
 inline bool marker(const Command& c) { return c.kind == Command::Picture && !c.image && c.text.rfind("nb:", 0) == 0; }
@@ -294,6 +350,22 @@ inline void shapes(const Command& m, std::vector<Command>& out) {
         rect(x, y, w, h, 0xF4FFE4FF);
         rect(x + 5, y + 5, w - 10, h - 10, kWindowPaper);
         rect(x + 5, y + 5, w - 10, h - 10, 0x7FB55AFF, true, 2);
+    } else if (n == "nb:frame") {
+        rect(x + 8, y + 10, w, h, 0x00000060);
+        rect(x, y, w, h, 0xF4E9C8FF);
+        rect(x + 10, y + 10, w - 20, h - 20, 0x6DB443FF, true, 6);
+    } else if (n == "nb:row") {
+        rect(x, y + h * 0.1f, w, h * 0.8f, 0xF2EBC9FF);
+        rect(x + 4, y + h * 0.1f + 4, w - 8, h * 0.8f - 8, 0x3E9420FF, true, 3);
+    } else if (n == "nb:pill") {
+        rect(x + w * 0.1f, y + h * 0.18f, w * 0.8f, h * 0.64f, 0x2C7FD0FF);
+    } else if (n == "nb:chart") {
+        rect(x, y, w, h, kChartPaper);
+        rect(x, y, w, h, 0xA88B55FF, true, 2);
+    } else if (n == "nb:linkface") {
+        Command c;
+        c.kind = Command::Circle, c.x = x + w / 2, c.y = y + h / 2, c.size = std::min(w, h) * 0.32f, c.rgba = 0x2E8A2EFF & (0xFFFFFF00u | a), c.anchor = m.anchor;
+        out.push_back(c);
     } else if (n == "nb:info") {
         rect(x, y, w, h, kInfoEdge);
         rect(x + 5, y + 5, w - 10, h - 10, kInfoPaper);
@@ -335,8 +407,7 @@ inline std::vector<Command> resolve(const std::vector<Command>& in, const Art* a
             continue;
         }
         const std::string n = box_name(c.text);
-        const bool has = art && n != "nb:cursor" && (((n == "nb:window" || n == "nb:panel") && art->window()) || (n == "nb:info" && art->info()) ||
-                                                     ((n.rfind("nb:plate", 0) == 0 || n.rfind("nb:tab", 0) == 0) && art->plates()));
+        const bool has = art && has_art(*art, n);
         if (has) {
             Command p = c;
             p.text = "art:" + c.text.substr(3);

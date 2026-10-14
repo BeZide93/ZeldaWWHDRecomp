@@ -210,7 +210,8 @@ void test_hooks() {
     set_notebook_model("/data/notebook/Vbeso.szs");
     assert(model_override("/vol/content/Common/Object/Vbeso.szs").empty());  // nothing being handed out
     c.r[3] = kActor, c.r[4] = kStaff;
-    hooks::present(&c);  // the first mod letter encloses the notebook (the Cabana Deed's get demo)
+    set_notebook_letter("mod", "hello");  // the Story Notebook package's letter (here: this one)
+    hooks::present(&c);  // it encloses the notebook (the Cabana Deed's get demo)
     assert((calls == std::vector<std::string>{"item156", "cutEnd"}) && ld32(kPlay + 0x52A0) == 77);
     // while it is handed out, the stand-in's model archive is the notebook's (any case); nothing else
     assert(model_override("/vol/content/Common/Object/Vbeso.szs") == "/data/notebook/Vbeso.szs");

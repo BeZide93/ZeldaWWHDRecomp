@@ -1,20 +1,26 @@
-// The NPC catalogue: the game's characters a story mod may name in its manifest ("who": "windfall-kreeb"),
-// one table per place, kept as data in runtime/assets/npc_catalogue/<place>.json and compiled in
-// (cmake/EmbedNpcCatalogue.cmake). Adding a place adds a table, never a manifest change
-// (docs/mod-sdk-v2.md, "The NPC catalogue"). Pure code, unit-tested in runtime/tools/story_notebook_test.cpp.
+// The NPC catalogue: the game's characters a story mod may name in its manifest ("who": "windfall-um1").
+// The port keeps only a recipe per place (runtime/assets/npc_catalogue/<place>.recipe.json, compiled in by
+// cmake/EmbedNpcRecipes.cmake): neutral ids made of the place and the actor's code, our own description
+// and place words, and references into the game (actor class and code, stage, room, layers, the
+// figurine message number). Nothing of the game's text and no coordinates are in the repository.
+// What the game itself says (the character's name: its Nintendo Gallery figurine name) and where it
+// stands outside (its spot, the chart ring's place) come from the player's own game files: the port
+// runs tools/story_mods/npc_catalogue.py once and keeps the result in its data folder (add_local).
+// Without it the catalogue still knows every id (so manifests are checked the same way); names show as
+// the description and residents have no spot.
 //
-// Names are "<place>-<name>": the character's name as the game itself gives it (with the evidence in the
-// entry), or a plain role marked "named": false where the game data doesn't tie a name to the actor. An
-// entry lists the actors that are this character, generically: the actor class plus what identifies
+// An entry lists the actors that are this character, generically: the actor class plus what identifies
 // the actor in that class (for "people", daNpcPeople_c, its resident code "Um1"; for other classes the
 // stage actor name), and where each stands (stage, room, the room layers it is in). A manifest naming a
 // character this port doesn't know is refused when the mod is enabled; so is one whose "npc_catalogue"
 // (the catalogue version it needs) is newer than this port's, and one naming a character the port
-// can't give a quest's lines yet (only "people" actors can talk for a quest so far).
+// can't give a quest's lines yet (only "people" actors can talk for a quest so far). Pure code,
+// unit-tested in runtime/tools/story_notebook_test.cpp.
 #pragma once
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <vector>
 
@@ -32,8 +38,13 @@ struct NpcActor {
     uint8_t people_number = 0xFF;          // class "people": daNpcPeople_c::mNpcNo
 };
 struct NpcEntry {
-    std::string name, place, evidence, gate, unconfirmed;  // unconfirmed: what the static evidence leaves open
-    bool named = false;
+    std::string name, place, gate, unconfirmed;  // name: the catalogue id; unconfirmed: what the static evidence leaves open
+    std::string description;            // our own words: who this is
+    std::string game_name;              // the player's game: the figurine name (add_local), empty until then
+    uint16_t figure_message = 0;        // the figurine's message number (0x37DD + figure)
+    bool named = false;                 // the figurine is this one character (not a pair or a group)
+    // what logs and warnings call it: the game's name when known, else our description
+    std::string display() const { return game_name.empty() ? description : game_name; }
     unsigned since = 1;                 // the catalogue version that added it
     std::vector<NpcActor> actors;
     std::string where;                  // for the notebook
@@ -58,8 +69,12 @@ struct NpcCatalogue {
     }
     const NpcEntry* entry(Resident r) const { return r && r <= entries.size() ? &entries[r - 1] : nullptr; }
 
-    // adds one place's table; false with a reason for anything it doesn't accept
+    // adds one place's recipe; false with a reason for anything it doesn't accept
     bool add_table(const std::string& text, std::string& why);
+    // the player's own game: names and spots by id (tools/story_mods/npc_catalogue.py output); returns
+    // how many entries it filled
+    unsigned add_local(const std::string& text);
+    bool local = false;  // add_local filled it
 };
 
 // "people" (daNpcPeople_c): the resident codes in the game's order (l_npc_staff_id), mNpcNo is the index
@@ -79,7 +94,7 @@ inline bool NpcCatalogue::add_table(const std::string& table, std::string& why) 
     } catch (const std::exception& e) {
         return why = std::string("not JSON: ") + e.what(), false;
     }
-    if (t.get("catalogue_format").type != Value::Number || t.get("catalogue_format").number != 2) return why = "unsupported catalogue_format", false;
+    if (t.get("catalogue_format").type != Value::Number || t.get("catalogue_format").number != 3) return why = "unsupported catalogue_format", false;
     const std::string place = t.get("place").type == Value::String ? t.get("place").text : "";
     if (place.empty() || place.find_first_not_of("abcdefghijklmnopqrstuvwxyz-") != std::string::npos) return why = "invalid place", false;
     if (t.get("npcs").type != Value::Array) return why = place + ": no npcs", false;
@@ -89,10 +104,10 @@ inline bool NpcCatalogue::add_table(const std::string& table, std::string& why) 
     for (const Value& n : t.get("npcs").array) {
         NpcEntry e;
         e.place = place;
-        e.name = text(n.get("name"));
+        e.name = text(n.get("id"));
         if (e.name.rfind(place + "-", 0) != 0 || e.name.size() == place.size() + 1 || e.name.size() > 48 ||
             e.name.find_first_not_of("abcdefghijklmnopqrstuvwxyz0123456789-") != std::string::npos)
-            return why = place + ": the name \"" + e.name + "\" is not <place>-<name>", false;
+            return why = place + ": the id \"" + e.name + "\" is not <place>-<code>", false;
         bool taken = find(e.name) != kResidentNone;
         for (const NpcEntry& a : added) taken |= a.name == e.name;
         if (taken) return why = "duplicate name " + e.name, false;
@@ -100,10 +115,15 @@ inline bool NpcCatalogue::add_table(const std::string& table, std::string& why) 
         if (since.type != Value::Number || since.number < 1 || since.number > 1000 || std::floor(since.number) != since.number)
             return why = e.name + ": invalid since", false;
         e.since = unsigned(since.number);
-        if (n.get("named").type != Value::Bool) return why = e.name + ": named must be true or false", false;
-        e.named = n.get("named").boolean;
-        e.evidence = text(n.get("evidence"));
-        if (e.evidence.empty()) return why = e.name + ": no evidence", false;
+        if (n.get("own_name").type != Value::Bool) return why = e.name + ": own_name must be true or false", false;
+        e.named = n.get("own_name").boolean;
+        e.description = text(n.get("description"));
+        if (e.description.empty() || e.description.size() > 96) return why = e.name + ": invalid description", false;
+        const std::string figure = text(n.get("figure_message"));
+        char* end = nullptr;
+        const unsigned long number = figure.rfind("0x", 0) == 0 ? strtoul(figure.c_str() + 2, &end, 16) : 0;
+        if (!number || number > 0xFFFF || (end && *end)) return why = e.name + ": invalid figure_message", false;
+        e.figure_message = uint16_t(number);
         e.gate = text(n.get("gate"));
         e.unconfirmed = text(n.get("unconfirmed"));
         for (const Value& a : n.get("actors").array) {
@@ -127,11 +147,7 @@ inline bool NpcCatalogue::add_table(const std::string& table, std::string& why) 
         if (e.actors.empty()) return why = e.name + ": no actors", false;
         e.where = text(n.get("where"));
         if (e.where.empty() || e.where.size() > 64) return why = e.name + ": invalid where", false;
-        const Value& spot = n.get("spot");
-        if (spot.type == Value::Object) {
-            if (spot.get("x").type != Value::Number || spot.get("z").type != Value::Number) return why = e.name + ": invalid spot", false;
-            e.has_spot = true, e.x = float(spot.get("x").number), e.z = float(spot.get("z").number);
-        }
+        if (n.get("spot").type != Value::Null) return why = e.name + ": a recipe has no spots (they come from the player's game)", false;
         for (const Value& p : n.get("present").array) {
             if (p.type == Value::String && p.text == "day") e.day = true;
             else if (p.type == Value::String && p.text == "night") e.night = true;
@@ -146,21 +162,47 @@ inline bool NpcCatalogue::add_table(const std::string& table, std::string& why) 
     return true;
 }
 
-// the port's catalogue, built once from the compiled-in tables (generated; see cmake/EmbedNpcCatalogue.cmake)
-extern "C" const char* const wwhd_npc_catalogue_tables[];
-extern "C" const unsigned wwhd_npc_catalogue_table_count;
-inline const NpcCatalogue& npc_catalogue() {
-    static const NpcCatalogue c = [] {
+inline unsigned NpcCatalogue::add_local(const std::string& text) {
+    using mods::json::Value;
+    Value t;
+    try {
+        t = mods::json::parse(text);
+    } catch (const std::exception&) {
+        return 0;
+    }
+    if (t.get("catalogue_local").type != Value::Number || t.get("catalogue_local").number != 1) return 0;
+    unsigned filled = 0;
+    for (NpcEntry& e : entries) {
+        const Value& n = t.get("npcs").get(e.name);
+        if (n.type != Value::Object) continue;
+        if (e.named && n.get("name").type == Value::String && !n.get("name").text.empty() && n.get("name").text.size() <= 64)
+            e.game_name = n.get("name").text;
+        const Value& spot = n.get("spot");
+        if (spot.type == Value::Object && spot.get("x").type == Value::Number && spot.get("z").type == Value::Number &&
+            std::fabs(spot.get("x").number) <= 350000 && std::fabs(spot.get("z").number) <= 350000)
+            e.has_spot = true, e.x = float(spot.get("x").number), e.z = float(spot.get("z").number);
+        filled++;
+    }
+    local = filled > 0;
+    return filled;
+}
+
+// the port's recipes (generated; see cmake/EmbedNpcRecipes.cmake)
+extern "C" const char* const wwhd_npc_recipes[];
+extern "C" const unsigned wwhd_npc_recipe_count;
+// The port's catalogue, built once from the compiled-in recipes; story_notebook.cpp fills in the
+// player's game (load_local_npc_catalogue) before quests are declared.
+inline NpcCatalogue& npc_catalogue_mutable() {
+    static NpcCatalogue c = [] {
         NpcCatalogue built;
-        for (unsigned i = 0; i < wwhd_npc_catalogue_table_count; i++) {
+        for (unsigned i = 0; i < wwhd_npc_recipe_count; i++) {
             std::string why;
-            if (!built.add_table(wwhd_npc_catalogue_tables[i], why)) {
-                fprintf(stderr, "[notebook] NPC catalogue table %u not used: %s\n", i, why.c_str());
-            }
+            if (!built.add_table(wwhd_npc_recipes[i], why)) fprintf(stderr, "[notebook] NPC recipe %u not used: %s\n", i, why.c_str());
         }
         return built;
     }();
     return c;
 }
+inline const NpcCatalogue& npc_catalogue() { return npc_catalogue_mutable(); }
 
 }  // namespace story_notebook

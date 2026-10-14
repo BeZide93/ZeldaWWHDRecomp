@@ -48,6 +48,8 @@
 #include "crash_context.h"
 #include "input.h"
 #include "mods/manager.h"
+#include "mods/required.h"
+#include "platform/https.h"
 #include "mods/packages.h"
 #include "mods/save_backup.h"
 #include "runtime.h"
@@ -476,7 +478,8 @@ int main(int argc, char** argv) {
 #endif
         LOG("%zu", len((const char*)(uintptr_t)16));
     }
-    // Metal or Vulkan: --renderer=, WWHD_RENDERER_RUNTIME, Graphics > Renderer (gfx/renderer.h)
+    // Metal, Vulkan or a registered platform backend: --renderer=, WWHD_RENDERER_RUNTIME, Graphics > Renderer
+    // (gfx/renderer.h, gfx/renderer_ext.h)
     render::choose(argc, argv);
 #ifdef WWHD_HAS_VULKAN
     if(renderer_smoke) {
@@ -538,6 +541,20 @@ int main(int argc, char** argv) {
         g_guest_build_name, g_guest_build_title_id, m.entry, m.sda_base, m.sda2_base, m.data_end);
 
     dispatch::init();
+    {  // the story system's required package (mods/required.h), before the guest mods load
+        mods::required::Context rc;
+        std::string version = build::version();
+        const bool development = version == "dev" || version.find_first_of("+-") != std::string::npos;
+        if (version.starts_with("v")) version.erase(0, 1);
+        version = version.substr(0, version.find_first_of("+-"));
+        try { rc.port = mods::catalogue::Version::parse(version); } catch (...) {}
+        rc.catalogue = mods::required::catalogue_url(development);
+        rc.fetch = host::download_https;
+        rc.build = g_guest_build_name;
+        const std::string dir = mods::packages::directory();
+        if (!dir.empty()) rc.work = std::filesystem::path(dir).parent_path() / "Catalogue";
+        if (!dir.empty() && mods::packages::has_code_mod_support()) mods::required::ensure(rc);
+    }
     guestmods::init();  // trusted manager packages, before guest threads start
 #ifdef WWHD_DECOMP
     decomp::init();  // decomp build: which functions run decompiled (runtime/src/decomp), after the mods
@@ -552,6 +569,14 @@ int main(int argc, char** argv) {
     st32(argv_arr, arg0);
     // the game runs on its own threads; the process main thread belongs to the window system
     const std::string shader_renderer = render::requested() == render::Api::Metal ? "metal" : "vulkan";
+    // a platform backend (gfx/renderer_ext.h) keeps its own shader caches: Metal's and Vulkan's prepared
+    // shaders are not activated for it, and a warm-up run has nothing to prepare
+    const bool own_shader_caches = render::requested() == render::Api::Platform;
+    if (own_shader_caches) {
+        LOG("[shaders] %s renderer: prepared Metal / Vulkan shaders not used (it keeps its own caches)",
+            render::api_name(render::requested()));
+        if (warm_shaders) return 3;  // tools/installer/shader_prebuild.py: RENDERER_UNAVAILABLE
+    }
     bool pending_shader_warm = false;
 #ifdef __ANDROID__
     if (warm_shaders && (shader_prebuild_root.empty() || std::filesystem::path(shader_prebuild_root).lexically_normal() == shaderprebuild::root().lexically_normal()))
@@ -561,7 +586,7 @@ int main(int argc, char** argv) {
     }
 #endif
     if (warm_shaders) shaderprebuild::bind_setup_live_caches();
-    if (!warm_shaders && !pending_shader_warm) shaderprebuild::activate(config::game_dir, shader_renderer);
+    if (!warm_shaders && !pending_shader_warm && !own_shader_caches) shaderprebuild::activate(config::game_dir, shader_renderer);
     render::init();
     if (warm_shaders && render::active() != render::requested()) {
         // the requested renderer could not start (e.g. no MoltenVK) and the game fell back:

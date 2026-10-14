@@ -19,6 +19,11 @@
 
 namespace story_notebook {
 
+// The story system's required package (the mod repository's "story-notebook"): its letter brings the
+// story notebook, its manifest's "notebook" block gives the notebook's look, and every quest mod
+// depends on it (packages.cpp).
+inline const std::string kNotebookPackage = "story-notebook";
+
 struct ManifestStep {
     unsigned n = 0;
     std::string text, where;
@@ -37,6 +42,7 @@ struct ManifestQuest {
     std::string id, title, reward_text, start_text, journal = "on_enable";
     uint8_t reward_item = 0;
     bool has_letter = false, letter_encloses_letter = false;
+    bool letter_encloses_notebook = false;  // "encloses": ["notebook"]: the letter brings the story notebook (the Story Notebook package's)
     std::string letter_id, letter_sender, letter_text;
     // the enclosed letter as the Delivery Bag describes it (A or a touch on it): its name and its
     // description ("encloses": [{"id": "letter:friend", "name": ..., "description": ...}]); empty:
@@ -95,7 +101,7 @@ inline bool parse_available(const mods::json::Value& v, Availability& a, std::st
 
 // Parses the manifest's quests. Returns false with a reason for anything it doesn't accept (the mod's
 // quests are then not in the notebook; the mod itself still loads).
-// NPCs are named from the catalogue ("who": "windfall-kreeb"); a name it doesn't know, or an
+// NPCs are named from the catalogue ("who": "windfall-um1"); a name it doesn't know, or an
 // "npc_catalogue" version newer than it, refuses the quests (and the mod, packages.cpp). Steps whose
 // time of day never meets their resident's are allowed, with a warning.
 inline bool parse_quests(const mods::json::Value& manifest, std::vector<ManifestQuest>& out, std::string& why,
@@ -149,6 +155,7 @@ inline bool parse_quests(const mods::json::Value& manifest, std::vector<Manifest
                 return why = "quest " + m.id + ": invalid letter", false;
             for (const Value& e : letter.get("encloses").array) {
                 if (e.type == Value::String && e.text.rfind("letter:", 0) == 0) m.letter_encloses_letter = true;
+                if (e.type == Value::String && e.text == "notebook") m.letter_encloses_notebook = true;
                 // the object form: the enclosure with what the Delivery Bag says about it
                 if (e.type == Value::Object && e.get("id").type == Value::String && e.get("id").text.rfind("letter:", 0) == 0) {
                     m.letter_encloses_letter = true;

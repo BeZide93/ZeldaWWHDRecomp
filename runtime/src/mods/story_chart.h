@@ -4,11 +4,12 @@
 // - Whether Link owns a mod chart is kept in the save data, in the story-mod record shared with the
 //   letters (story_mail_book.h): one record of kind kRecordMarker (3) per chart, key chart_key(),
 //   value kChartOwned (1) or kChartDone (2). Marker places are not saved (the mod places them).
-// - Markers are session state of the mods: a mod places them (wwhd_chart_mark) and they show while
-//   the current save file owns their chart (not after it is finished).
-// - The sea chart shows them with the game's own story-mark panes (the white ring the game puts on
-//   the next story island): panes the game is not showing at the moment are moved to the mod
-//   markers. See story_chart.cpp.
+// - Markers are session state of the mods: a mod places them (wwhd_chart_mark). Like the game's
+//   treasure charts, the sea chart shows nothing for them while the chart is only owned; once the
+//   chart is finished, the game's red hand-drawn circle (the mark of a salvaged treasure) marks each
+//   marker's spot, on the chart and in the zoomed square. See story_chart.cpp.
+// - The notebook's tracked quest has the game's white story ring (the mark of the next story island)
+//   on its step's place.
 //
 // Nothing of this runs unless a loaded guest mod imports a wwhd_chart_* service: only then are the
 // sea chart hooks installed (install()).
@@ -45,17 +46,19 @@ int32_t mark(const std::string& mod, const std::string& chart, const std::string
              uint32_t icon, const std::string& label);
 int32_t unmark(const std::string& mod, const std::string& chart, const std::string& marker);
 
-// The markers the sea chart shows now (their chart is owned in the current save file), in the order
-// they were placed. For other mods that draw a map of their own (a minimap, a quest notebook).
+// What the sea chart shows now: the tracked quest's step (done false), then the markers of finished
+// charts (done true: the red circle), in the order they were placed. For other mods that draw a map
+// of their own (a minimap, a quest notebook).
 struct MarkerView {
     std::string mod, chart, marker, label;
     float x, z;
     uint32_t icon;
+    bool done = false;
 };
 std::vector<MarkerView> shown_markers();
 
-// The story notebook's tracked quest (story_notebook.h): its next step is shown first, before the
-// markers of mod charts, whether or not a chart is owned. The source returns false when there is
+// The story notebook's tracked quest (story_notebook.h): its next step has the white ring, whether
+// or not a chart is owned (and in the zoomed square the red circle, before finished charts' markers). The source returns false when there is
 // nothing to show (no tracked quest, its step has no place, it is done). Game thread.
 using TrackedSource = bool (*)(float& x, float& z, std::string& label);
 void set_tracked_source(TrackedSource source);
@@ -81,6 +84,13 @@ void progress_icons(Cpu* c);  // hdSeaChartMenu_c::updateProgressIcons
 void icon_update(Cpu* c);     // hdBtnMapIcon_c::update (the zoomed square balloon)
 void hide_panes(Cpu* c);      // hdSeaChartMenu_c::hideMenuPanes
 void destroy(Cpu* c);         // hdSeaChartMenu_c::destroy
+void mark_layout(Cpu* c);     // hdSeaChartGrid_c::updateChartMarkLayout
+void mark_refresh(Cpu* c);    // hdSeaChartGrid_c::refreshChartMarks
 }  // namespace hooks
+
+// The game's sea chart menu (hdSeaChartMenu_c) once it has been shown this session (it stays alive
+// with the pause menus), 0 before that or after it was destroyed. Read-only users: the story
+// notebook's mini chart takes the chart's own icons from its layout.
+uint32_t sea_chart_menu();
 
 }  // namespace story_chart

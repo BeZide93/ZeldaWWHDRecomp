@@ -94,8 +94,12 @@ void install(const std::function<std::string(uint32_t)>&,const std::function<voi
 void state_loaded() {}
 }
 // and so has the story notebook (story_notebook_test)
+namespace config { std::string game_dir; }
 namespace story_notebook {
 void logic_step(uint64_t) {}
+void set_look(const std::string&,const std::string&) {}
+bool load_local_npc_catalogue(const std::string&) {return false;}
+std::vector<std::pair<std::string,std::string>> npc_recipes() {return {};}
 int32_t define(const std::string&,const std::string&,const std::string&,const std::string&,const std::string&,const std::string&) {return kResultInvalid;}
 int32_t step(const std::string&,const std::string&,uint32_t,const std::string&,const std::string&) {return kResultInvalid;}
 int32_t place(const std::string&,const std::string&,float,float) {return kResultInvalid;}

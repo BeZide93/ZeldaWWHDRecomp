@@ -187,22 +187,23 @@ unsigned long long wwhd_audio_epoch(void);
 s32 wwhd_mail_send(const char* letter_id, const char* sender, const char* text);
 s32 wwhd_mail_state(const char* letter_id);
 
-/* Charts and markers v1: a chart from the mod that marks places on Link's sea chart, in the style of
- * the game's own story marks. The save file records whether Link owns the chart (give) and whether
- * it is finished; markers are placed by the mod every session (mark is idempotent: it adds the marker
- * or moves it) and show while the current save file owns their chart.
+/* Charts and markers v1: a chart from the mod with marked places, treated like the game's treasure
+ * charts. The save file records whether Link owns the chart (give) and whether it is finished
+ * (finish). The markers are session state: the mod places them (mark adds or moves). While the chart
+ * is only owned, the sea chart shows nothing for it (like an owned treasure chart); once it is
+ * finished, the game's red circle (the mark of a salvaged treasure) marks each marker's spot.
  * chart_id, marker_id: 1..32 of a-z 0-9 - _ . (chart IDs unique within the mod, marker IDs within the
  * chart). x, z: Great Sea world units (one square = 100000, square D4's center = 0, 0; x east, z
- * south); the macros below give a square's center. label: up to 64 bytes of UTF-8, one line, or NULL;
- * it names the marker for lists (a notebook, a minimap); the sea chart shows the icon only.
+ * south). label: one line of UTF-8, up to 64 bytes, or NULL;
+ * it names the marker for lists (a notebook, a minimap); the sea chart shows the circle only.
  * Results: the chart's state in the current save file, or a negative error. */
 #define WWHD_CHART_API_VERSION 1
 #define WWHD_CHART_NONE 0     /* not given to this save file */
-#define WWHD_CHART_OWNED 1    /* Link has it: its markers show on the sea chart */
-#define WWHD_CHART_DONE 2     /* finished: its markers are no longer shown */
+#define WWHD_CHART_OWNED 1    /* Link has it: nothing on the sea chart yet */
+#define WWHD_CHART_DONE 2     /* finished: the red circle marks its markers' spots */
 #define WWHD_CHART_INVALID (-1)
 #define WWHD_CHART_NO_ROOM (-2)  /* no save loaded or its record is full; or too many markers */
-#define WWHD_CHART_ICON_STORY 0  /* the white ring the game puts on the next story island */
+#define WWHD_CHART_ICON_STORY 0  /* the only icon for now */
 #define WWHD_CHART_COLUMN_X(letter) ((f32)((letter) - 'D') * 100000.0f) /* column 'A'..'G' */
 #define WWHD_CHART_ROW_Z(row) ((f32)((row) - 4) * 100000.0f)            /* row 1..7 */
 s32 wwhd_chart_give(const char* chart_id);
@@ -211,7 +212,7 @@ s32 wwhd_chart_state(const char* chart_id);
 s32 wwhd_chart_mark(const char* chart_id, const char* marker_id, f32 x, f32 z, u32 icon, const char* label);
 s32 wwhd_chart_unmark(const char* chart_id, const char* marker_id); /* NULL marker_id: all of the chart */
 
-/* The story notebook v1: the port's quest journal. Link gets it with the first letter from a mod
+/* The story notebook v1: the port's quest journal. Link gets it with the Story Notebook package's letter
  * (wwhd_mail_send); it is kept in the Delivery Bag, and selecting it opens its page: one row per
  * quest with its next step, where, and status, and one quest the player may show on the sea chart.
  * Register the quest in every session (wwhd_quest_define, then the texts of its current step); the
@@ -247,6 +248,6 @@ s32 wwhd_quest_carry(const char* quest_id, s32 carried);
  * resident's own line, takes the letter, gives `reward` (a rupee item 0x01..0x06, 0 none, through the
  * game's get-item scene) and the quest is done. When several quests want the resident, the one shown on the
  * chart talks first, else the one started first. `resident` is a
- * name from the NPC catalogue (docs/mod-sdk-v2.md), e.g. "windfall-kreeb"; an unknown name is
+ * name from the NPC catalogue (docs/mod-sdk-v2.md), e.g. "windfall-um1"; an unknown name is
  * refused (WWHD_QUEST_INVALID). */
 s32 wwhd_quest_talk(const char* quest_id, u32 step, const char* resident, const char* lines, u32 reward);

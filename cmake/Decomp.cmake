@@ -73,7 +73,7 @@ function(wwhd_decomp_link target)
           "${WWHD_DECOMP_DIR}/tools/verify/src" "${WWHD_DECOMP_DIR}/wwhd_src/include" "${WWHD_DECOMP_OUT}/include")
   # as the decompilation's harness compiles them (exact floating point: no contraction, no fast math);
   # these options come after the configuration's, so they win
-  set(opts -O2 -g0 -w -fvisibility=hidden -fvisibility-inlines-hidden -ffp-contract=off -fno-fast-math
+  set(opts -O2 -g0 -w -fvisibility=hidden -fvisibility-inlines-hidden -ffp-contract=off -fno-fast-math -fwrapv
            -fno-strict-aliasing -include "${CMAKE_SOURCE_DIR}/tools/decomp_build/frames_vis.h")
   if(WWHD_DECOMP_RUNTIME_ONLY)
     add_library(wwhd_decomp_flags OBJECT "${CMAKE_SOURCE_DIR}/tools/decomp_build/flags_probe.cpp")

@@ -4,8 +4,9 @@
 The notebook is handed out with the get-item demo of a stand-in game item (the Cabana Deed, item 0x9C,
 archive Object/Vbeso.szs). This tool builds a replacement for that archive that shows the notebook:
 
-  - the mesh and texture come from the repository (runtime/assets/story_notebook/notebook_game.glb,
-    the project's own artwork);
+  - the mesh and texture come from the Story Notebook package (its manifest's "notebook" block names the
+    .glb; the port runs this tool when the package is loaded and keeps the result in the package's data
+    folder);
   - everything that defines how the game draws an item model (the model's material and its shader
     assignment, parameters and samplers, the skeleton, the shader archive vbeso.sharcfb) comes from the
     player's own copy of the game, read at build time. The output is written next to the player's other
@@ -19,7 +20,7 @@ one mip level (the game initialises the texture registers itself when it sets th
 is written as a Yaz0 SARC with the same file names, so the game's resource table for "Vbeso" finds the
 model ("vbeso") and the shader archive as before.
 
-usage: notebook_model.py --game GAME_DIR --out FILE.szs [--glb notebook_game.glb] [--scale S]
+usage: notebook_model.py --game GAME_DIR --glb notebook_game.glb --out FILE.szs [--scale S]
 """
 import argparse
 import json
@@ -33,7 +34,6 @@ REPO = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, os.path.join(REPO, "tools"))
 import shaderprep  # noqa: E402  (Yaz0 and SARC readers)
 
-DEFAULT_GLB = os.path.join(REPO, "runtime", "assets", "story_notebook", "notebook_game.glb")
 ARCHIVE = "content/Common/Object/Vbeso.szs"
 TEXTURE = "koni_BessoKenrosyo_128x128"  # the template's colour texture (its toon ramp ZAtoon is kept)
 FMT_RGBA8_SRGB, TILE_LINEAR_ALIGNED = 0x41A, 1
@@ -278,7 +278,7 @@ def yaz0_stored(data):
     return bytes(out)
 
 
-def build(game, out, glb_path=DEFAULT_GLB, scale=None):
+def build(game, out, glb_path, scale=None):
     src = os.path.join(game, ARCHIVE)
     if not os.path.isfile(src):
         raise BuildError("game archive not found: " + src)
@@ -300,7 +300,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--game", required=True, help="the game folder (with content/)")
     ap.add_argument("--out", required=True, help="the archive to write (Vbeso.szs for the notebook)")
-    ap.add_argument("--glb", default=DEFAULT_GLB)
+    ap.add_argument("--glb", required=True, help="the notebook's model (the Story Notebook package's)")
     ap.add_argument("--scale", type=float, help="model units per GLB unit (default: the deed's height)")
     a = ap.parse_args()
     try:
