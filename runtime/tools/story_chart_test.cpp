@@ -179,7 +179,7 @@ void test_hooks() {
             [](uint32_t, void (*)(Cpu*)) { assert(!"installed despite a conflict"); });
     assert(!installed());
     install([](uint32_t) { return std::string(); }, [](uint32_t a, void (*fn)(Cpu*)) { hooked[a] = fn; });
-    assert(installed() && hooked.size() == 6);
+    assert(installed() && hooked.size() == 19);
 
     build_menu();
     set_tracked_source(tracked_source);
@@ -461,6 +461,158 @@ void test_balloon() {
     set_tracked_source(nullptr);
 }
 
+// ---- the MAP screen's chart list: mod charts after the game's (chart numbers 61 and up) ----
+constexpr uint32_t kList = kArena + 0x10000;
+constexpr uint32_t kCoord = kList, kTable = kList + 0x400, kEntries0 = kList + 0x800, kUi = kList + 0x2000, kMapScreen = kList + 0x2800,
+                   kView = kList + 0x2C00, kEntryMem = kList + 0x3000;
+uint32_t game_entry(unsigned n) { return kEntries0 + n * 0x28; }
+bool owned_bit(int save_no) { const int b = save_no - 1; return (ld32(kSave + 0xF4 + 4 * uint32_t(b >> 5)) >> (b & 31)) & 1; }
+void own(int save_no) { const int b = save_no - 1; st32(kSave + 0xF4 + 4 * uint32_t(b >> 5), ld32(kSave + 0xF4 + 4 * uint32_t(b >> 5)) | (1u << (b & 31))); }
+std::vector<std::string> list_calls;
+uint32_t armed_number = 0;
+uint32_t list_hook(uint32_t fn, std::initializer_list<uint32_t> args);
+void list_original(Cpu* c, uint32_t fn) {
+    switch (fn) {
+    case 0x02687A64: c->r[3] = c->r[4] < 61 ? game_entry(c->r[4]) : 0; break;  // findChart: the game stops at 61
+    case 0x0268A570: c->r[3] = c->r[4] < 61 && owned_bit(int8_t(ld8(game_entry(c->r[4]) + 1))); break;
+    case 0x0268A5DC: case 0x0268A648: c->r[3] = 0; break;
+    case 0x0268A52C: list_calls.push_back("game obtainChart " + std::to_string(c->r[4])); break;
+    case 0x0268A3A0: {
+        unsigned n = 0;
+        for (unsigned i = 0; i < 61; i++) n += owned_bit(int8_t(ld8(game_entry(i) + 1)));
+        c->r[3] = n;
+        break;
+    }
+    case 0x02698998: c->r[3] = 0xDEAD; break;
+    case 0x02698A94: c->r[3] = c->r[4] >= 61 ? 5 : 1; break;  // the game's kind: 5 (none) past its last chart
+    case 0x02699094:  // setChartCaption: the game's message of its chart number (stops at 61)
+        if (c->r[4] < 61) list_calls.push_back("caption " + std::to_string(c->r[4]) + (armed_number ? " armed " + std::to_string(armed_number) : ""));
+        break;
+    case 0x02698B44: case 0x0269B414:  // the icon and the details: the coordinator's answers for that number
+        if (c->r[5] < 61) {
+            const uint32_t entry = list_hook(0x02687A64, {kCoord, c->r[5]});
+            list_calls.push_back(std::string(fn == 0x02698B44 ? "icon " : "details ") + std::to_string(c->r[5]) + " sea " +
+                                 std::to_string(entry ? ld8(entry) : 0) + " owned " + std::to_string(list_hook(0x0268A570, {kCoord, c->r[5]})) +
+                                 " kind " + std::to_string(list_hook(0x02698A94, {c->r[3], c->r[5]})));
+        }
+        break;
+    case 0x02698D74:  // the chart view: selectChart keeps the number it was given
+        if (c->r[5] < 61) st32(kView + 0x8C, c->r[5]), list_calls.push_back("view " + std::to_string(c->r[5]));
+        break;
+    case 0x02699118: list_calls.push_back("reset"); break;
+    default: original(c, fn);
+    }
+}
+uint32_t list_call(Cpu* c, uint32_t fn, std::initializer_list<uint32_t> args) {
+    if (hooked.count(fn)) {  // a game call that is hooked runs the hook, as in the game
+        Cpu call = *c;
+        auto it = args.begin();
+        for (unsigned r = 3; it != args.end(); ++it, ++r) call.r[r] = *it;
+        hooked.at(fn)(&call);
+        return call.r[3];
+    }
+    return game_call(c, fn, args);
+}
+uint32_t list_hook(uint32_t fn, std::initializer_list<uint32_t> args) {
+    Cpu c{};
+    auto it = args.begin();
+    for (unsigned r = 3; it != args.end(); ++it, ++r) c.r[r] = *it;
+    hooked.at(fn)(&c);
+    return c.r[3];
+}
+void test_chart_list() {
+    assert(map(kList, 0x10000));
+    for (unsigned n = 0; n < 61; n++) {  // 61 charts; chart n is on square n % 49, its save number n + 1
+        const uint32_t e = game_entry(n);
+        const unsigned sea = n % 49;
+        st8(e + 0, uint8_t(sea + 1)), st8(e + 1, uint8_t(n + 1)), st8(e + 2, uint8_t(n + 1)), st8(e + 3, 7);
+        st8(e + 4, uint8_t(int8_t(int(sea % 7) - 3))), st8(e + 5, uint8_t(int8_t(int(sea / 7) - 3)));
+        for (unsigned k = 0; k < 4; k++)
+            st16(e + 6 + 8 * k, 100), st16(e + 8 + 8 * k, 200), st16(e + 10 + 8 * k, 300), st16(e + 12 + 8 * k, 400);
+        st32(kTable + 4 * n, e);
+    }
+    st32(kCoord + 0x174, 61), st32(kCoord + 0x17C, kTable);
+    st32(kMapScreen + 0x84, kView);
+    own(15), own(41);  // the save owns charts 14 and 40
+    std::vector<uint32_t> bits_before;
+    for (uint32_t o = 0xE4; o < 0x124; o += 4) bits_before.push_back(ld32(kSave + o));
+    set_entry_memory(kEntryMem, kMaxCharts * 0x28);
+    set_caption_text([](uint32_t number, const std::u16string* text) { armed_number = text ? number : 0; });
+    set_game_calls(list_original, list_call);
+    // a declared chart Link doesn't own: nothing changes
+    assert(define("cq", "old-map", "Old map", "An X marks the lighthouse.", 1759, -202572) == kResultNone);
+    assert(define("cq", "Bad", "x", "", 0, 0) == kResultInvalid && define("cq", "x", "", "", 0, 0) == kResultInvalid);
+    assert(list_hook(0x0268A3A0, {kCoord}) == 2 && list_hook(0x0268A570, {kCoord, 61}) == 0 && list_hook(0x02687A64, {kCoord, 61}) == 0);
+    // owned: chart 61, its own number after the game's last chart
+    assert(give("cq", "old-map") == kResultOwned);
+    assert(list_hook(0x0268A3A0, {kCoord}) == 3 && list_hook(0x0268A570, {kCoord, 61}) == 1 && list_hook(0x0268A570, {kCoord, 62}) == 0);
+    const uint32_t e = list_hook(0x02687A64, {kCoord, 61});
+    assert(e == kEntryMem);
+    // its square's art and origin (square 0,-2: sea 11), its own number, a treasure chart's type, no save number, the spot
+    assert(ld8(e) == 11 && ld8(e + 2) == 62 && ld8(e + 1) == 0 && ld8(e + 3) == 7 && int8_t(ld8(e + 4)) == 0 && int8_t(ld8(e + 5)) == -2);
+    for (unsigned k = 0; k < 4; k++)
+        assert(int16_t(ld16(e + 6 + 8 * k)) == 100 && int16_t(ld16(e + 8 + 8 * k)) == 200 && int16_t(ld16(e + 10 + 8 * k)) == 1759 &&
+               int16_t(ld16(e + 12 + 8 * k)) == -2572);
+    assert(list_hook(0x02687A64, {kCoord, 35}) == game_entry(35) && list_hook(0x02687A64, {kCoord, 70}) == 0);
+    // opened in the list: the record, never the game's bit
+    assert(list_hook(0x0268A5DC, {kCoord, 61}) == 0);
+    list_calls.clear();
+    list_hook(0x0268A52C, {kCoord, 61});
+    assert(list_calls.empty() && list_hook(0x0268A5DC, {kCoord, 61}) == 1 && state("cq", "old-map") == kResultOwned);
+    list_hook(0x0268A52C, {kCoord, 14});
+    assert((list_calls == std::vector<std::string>{"game obtainChart 14"}));
+    assert(list_hook(0x0268A648, {kCoord, 61}) == 0);
+    assert(finish("cq", "old-map") == kResultDone && list_hook(0x0268A648, {kCoord, 61}) == 1 && list_hook(0x0268A5DC, {kCoord, 61}) == 1);
+    // the list's order: the game's charts, then the mod charts
+    auto next = [](uint32_t chart, int32_t step) { return list_hook(0x02698998, {kMapScreen, chart, uint32_t(step)}); };
+    list_hook(0x0268A3A0, {kCoord});
+    assert(next(14, 1) == 40 && next(40, 1) == 61 && next(61, 1) == 14 && next(14, -1) == 61 && next(61, 0) == 61 && next(62, 0) == 0xFFFFFFFFu &&
+           next(20, 0) == 0xDEAD);  // a game chart's own question: the game's code
+    // the functions that stop at the game's last chart run for the mod chart, the coordinator answering for it
+    list_calls.clear();
+    assert(list_hook(0x02698A94, {kMapScreen, 61}) == 1);  // a treasure chart
+    list_hook(0x02698B44, {kMapScreen, 0, 61});
+    list_hook(0x0269B414, {kMapScreen, 0, 61});
+    list_hook(0x02698D74, {kMapScreen, 0, 61});
+    list_hook(0x02699094, {kMapScreen, 61});
+    list_hook(0x02699094, {kMapScreen, 14});
+    assert((list_calls == std::vector<std::string>{"icon 3 sea 11 owned 1 kind 1", "details 3 sea 11 owned 1 kind 1", "view 3",
+                                                   "caption 3 armed " + std::to_string(0x31DD + 3), "caption 14"}));
+    assert(ld32(kView + 0x8C) == 61 && armed_number == 0);  // the chart view keeps the mod chart's own number
+    // outside those calls chart 3 is the game's own
+    assert(list_hook(0x02687A64, {kCoord, 3}) == game_entry(3) && list_hook(0x0268A570, {kCoord, 3}) == 0);
+    // resetChartSelection(): the game shows a selected chart only below 61; a mod chart too
+    st32(kMapScreen + 0xAC, 61);
+    list_calls.clear();
+    list_hook(0x02699118, {kMapScreen});
+    assert(list_calls.size() == 4 && list_calls[0] == "reset" && list_calls[2] == "view 3");
+    // "Open chart": the menu switches to the MAP screen with it selected
+    st32(0x101F8344, kUi), st32(kUi + 0x218, kCoord), st32(kCoord + 0x28, kMapScreen), st32(kMapScreen + 0xAC, 0);
+    assert(open_in_list("cq", "old-map") && ld32(kMapScreen + 0xAC) == 61 && ld32(kUi + 0x228) == 1);
+    assert(!open_in_list("cq", "nothing"));
+    // a real treasure chart obtained meanwhile changes nothing for either
+    own(4);  // chart 3
+    assert(list_hook(0x02687A64, {kCoord, 3}) == game_entry(3) && list_hook(0x0268A570, {kCoord, 3}) == 1);
+    assert(list_hook(0x02687A64, {kCoord, 61}) == kEntryMem && ld8(kEntryMem + 2) == 62 && list_hook(0x0268A570, {kCoord, 61}) == 1);
+    assert(next(40, 1) == 61 && next(61, 1) == 3 && list_hook(0x0268A3A0, {kCoord}) == 4);
+    // a 100% save (every game chart) and 8 mod charts at once: 69 in the list, all mod charts in order after the game's
+    for (int n = 1; n <= 61; n++) own(n);
+    for (int i = 1; i < 8; i++) {
+        const std::string id = "map-" + std::to_string(i);
+        assert(define("cq", id, "Map " + std::to_string(i), "", float(i) * 1000, 0) == kResultNone && give("cq", id) == kResultOwned);
+    }
+    assert(list_hook(0x0268A3A0, {kCoord}) == 61 + 8);
+    for (uint32_t m = 61; m < 69; m++) assert(list_hook(0x0268A570, {kCoord, m}) == 1 && ld8(list_hook(0x02687A64, {kCoord, m}) + 2) == m + 1);
+    assert(next(60, 1) == 61 && next(68, 1) == 0 && next(0, -1) == 68);
+    // the game's chart bits: only what the game itself set (own() above)
+    unsigned changed = 0;
+    for (uint32_t o = 0xE4, i = 0; o < 0x124; o += 4, i++) changed += ld32(kSave + o) != bits_before[i] && (o < 0xF4 || o >= 0x104);
+    assert(changed == 0);  // the opened and complete bits are untouched
+    auto shown = charts();
+    assert(shown.size() == 8 && shown[0].name == "Old map" && shown[0].state == kResultDone);
+    set_game_calls(original, game_call);
+}
+
 int main() {
     assert(map(kGlobals, 0x10000) && map(kArena, 0x10000));
     story_store::set_memory(kArena + 0xE000);
@@ -469,6 +621,7 @@ int main() {
     test_hooks();
     test_circles();
     test_balloon();
+    test_chart_list();
     std::puts("story_chart_test: ok");
     return 0;
 }

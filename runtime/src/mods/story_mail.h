@@ -60,6 +60,11 @@ void say(uint32_t number, const std::u16string* text);
 void unsay();
 bool said();     // the armed line was looked up for display (its text replaced)
 bool can_say();  // the hooks are installed and have text buffers: say() can work
+// A caption the game sets from a message (the MAP screen's chart name): while armed, the message
+// `number` shows `text` (kept alive by the caller); uncaption() ends it. Armed only around the game
+// call that sets the caption.
+void caption(uint32_t number, const std::u16string* text);
+void uncaption();
 
 // guest memory for replaced message texts (host-only, at least 6 KiB), before install()
 void set_text_buffers(uint32_t guest, uint32_t bytes);

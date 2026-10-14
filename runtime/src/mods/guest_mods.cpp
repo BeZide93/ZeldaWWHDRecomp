@@ -399,7 +399,10 @@ PpcFunc service(const char* name) {
     auto it = kServices.find(name);
     if (it == kServices.end()) return nullptr;
     if (!strncmp(name, "wwhd_mail_", 10)) story_mail::note_import();  // the postbox hooks are needed
-    if (!strncmp(name, "wwhd_chart_", 11)) story_chart::note_import();  // the sea chart hooks are needed
+    if (!strncmp(name, "wwhd_chart_", 11)) {  // the sea chart hooks are needed, and the chart list's captions
+        story_chart::note_import();
+        story_mail::note_import();
+    }
     if (!strncmp(name, "wwhd_quest_", 11)) {  // the notebook's item menu entry, and its marker on the sea chart
         story_notebook::note_import();
         story_chart::note_import();
@@ -617,7 +620,7 @@ void init() {
     }
     // Letters from mods: host replacements of the postbox and message functions, only when a loaded
     // mod uses the letter services (story_mail.h).
-    if(story_mail::imported())story_mail::set_text_buffers(mem::host_alloc(6144,16),6144);
+    if(story_mail::imported())story_mail::set_text_buffers(mem::host_alloc(8192,16),8192);
     // Story progress (story_store.h): its areas in guest memory, so full save states carry them; saved
     // with the game's saves in the story block of cking.sav. Without a story mod the file's block is
     // still kept as it is.
@@ -638,6 +641,10 @@ void init() {
     // Mod charts: host replacements of the sea chart menu's story marks, only when a loaded mod uses
     // the chart services (story_chart.h).
     story_chart::set_game_calls(call_original,[](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);});
+    if(story_chart::imported()){
+        story_chart::set_entry_memory(mem::host_alloc(story_chart::kMaxCharts*0x28,16),story_chart::kMaxCharts*0x28);
+        story_chart::set_caption_text([](uint32_t number,const std::u16string* text){if(text)story_mail::caption(number,text);else story_mail::uncaption();});
+    }
     story_chart::install([](uint32_t addr) {
         auto it=g_chains.find(addr);return it==g_chains.end()?std::string():it->second.replace_mod;
     },[](uint32_t addr,PpcFunc fn) {

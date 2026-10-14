@@ -1742,7 +1742,7 @@ void test_sail_hooks() {
     st32(kPlayObj + 0x5B2C, kLink);
     // the letters' message hooks with text buffers: the line is shown through them
     story_mail::set_game_calls(original, game_call);
-    story_mail::set_text_buffers(kArena + 0x30000, 6144);
+    story_mail::set_text_buffers(kArena + 0x30000, 8192);
     story_mail::note_import();
     story_mail::install([](uint32_t) { return std::string(); }, [](uint32_t a, void (*fn)(Cpu*)) { mail_hooked[a] = fn; });
     assert(story_mail::can_say());
@@ -1868,6 +1868,53 @@ void test_sail_hooks() {
 }
 }  // namespace
 
+// Mod charts in the manifest: the declarations, how quests give and finish them, the page's "Open chart".
+void test_manifest_charts() {
+    const char* text = R"j({"charts": [{"id": "old-map", "name": "Old map", "description": "An X marks the lighthouse.",
+        "place": {"x": 1759, "z": -202572}}],
+      "quests_format": 1, "quests": [{"id": "hunt", "title": "The old map",
+        "letter": {"id": "hunt", "sender": "A sailor", "text": "Here.", "encloses": ["chart:old-map"]},
+        "reward": {"text": "A chart", "chart": "chart:old-map"},
+        "steps": [{"n": 1, "text": "Find the treasure marked on the Old map.", "where": "On your Old map (chart list)", "find": "chart:old-map"},
+                  {"n": 2, "text": "Talk to him.", "npc": {"who": "windfall-um1", "lines": ["Hi."], "then": {"give": "chart:old-map"}}}]}]})j";
+    std::vector<ManifestQuest> qs;
+    std::vector<ManifestChart> cs;
+    std::string why;
+    const auto m = mods::json::parse(text);
+    assert(parse_charts(m, cs, why) && cs.size() == 1 && cs[0].id == "old-map" && cs[0].name == "Old map" && cs[0].x == 1759);
+    assert(parse_quests(m, qs, why) && qs[0].letter_charts == std::vector<std::string>{"old-map"} && qs[0].reward_chart == "old-map");
+    assert(qs[0].steps[0].find_chart == "old-map" && qs[0].steps[1].give_chart == "old-map" && !qs[0].steps[1].reward);
+    // a chart the quests name must be declared; declarations are checked
+    std::string undeclared = text;
+    undeclared.replace(undeclared.find("\"id\": \"old-map\""), 15, "\"id\": \"new-map\"");
+    assert(!parse_quests(mods::json::parse(undeclared), qs, why) && why.find("not declared") != std::string::npos);
+    for (const char* bad : {R"({"charts": [{"id": "x", "name": "", "place": {"x": 0, "z": 0}}]})",
+                            R"({"charts": [{"id": "x", "name": "X"}]})", R"({"charts": [{"id": "x", "name": "X", "place": {"x": 900000, "z": 0}}]})",
+                            R"({"charts": [{"id": "x", "name": "X", "place": {"x": 0, "z": 0}}, {"id": "x", "name": "Y", "place": {"x": 0, "z": 0}}]})"})
+        assert(!parse_charts(mods::json::parse(bad), cs, why));
+    // the page: "Open chart" (X or its plate) while the step's chart is owned
+    uint8_t raw[story_mail::kBookSize] = {};
+    Book b(raw);
+    std::vector<Quest> quests{quest("m", "a")};
+    quests[0].chart_mod = "m", quests[0].chart = "old-map";
+    auto rs = rows(quests, b);
+    Page page;
+    page.show();
+    page.input(press(0), rs);
+    page.input(press(kPadA), rs);
+    page.input(press(0), rs);
+    assert(page.mode() == Page::Mode::Detail);
+    const auto act = page.input(press(kPadX), rs);
+    assert(act.kind == Page::Action::OpenChart && act.key == quests[0].key && !page.open());
+    quests[0].chart.clear();  // no chart: X does nothing
+    rs = rows(quests, b);
+    page.show();
+    page.input(press(0), rs);
+    page.input(press(kPadA), rs);
+    page.input(press(0), rs);
+    assert(page.input(press(kPadX), rs).kind == Page::Action::None && page.open());
+}
+
 int main() {
     assert(map(kGlobals, 0x10000) && map(kArena, 0x40000));
     story_store::set_memory(kArena + 0x20000);
@@ -1889,6 +1936,7 @@ int main() {
     test_takeover_hooks();
     test_choice();
     test_manifest();
+    test_manifest_charts();
     test_available();
     test_story_store();
     test_sail_manifest();

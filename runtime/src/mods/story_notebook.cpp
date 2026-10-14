@@ -969,6 +969,8 @@ std::vector<Row> rows_now(std::vector<Quest>& storage) {
                 for (const ManifestStep& st : d.quest.steps)
                     if (st.n == n) {
                         q.next = st.text, q.where = st.where, q.has_place = st.has_place, q.x = st.x, q.z = st.z;
+                        if (!st.find_chart.empty() && story_chart::state(d.mod, st.find_chart) == story_chart::kResultOwned)
+                            q.chart_mod = d.mod, q.chart = st.find_chart;
                         if (st.when.any() && !available(st.when, event_flags(), hour_now())) {
                             q.hint = "Not yet possible: " + st.when.text;  // no ring, no talk until it holds
                             q.has_place = false;
@@ -1011,11 +1013,21 @@ std::vector<std::pair<std::string, std::string>> npc_recipes() {
 
 bool declare(const std::string& mod, const std::string& mod_name, const mods::json::Value& manifest) {
     std::vector<ManifestQuest> quests;
+    std::vector<ManifestChart> charts;
     std::string why;
     std::vector<std::string> warnings;
-    if (!parse_quests(manifest, quests, why, npc_catalogue(), &warnings)) {
+    if (!parse_quests(manifest, quests, why, npc_catalogue(), &warnings) || !parse_charts(manifest, charts, why)) {
         LOG("[notebook] %s: the manifest's quests are not used: %s", mod.c_str(), why.c_str());
         return false;
+    }
+    // the mod's charts: the MAP screen's chart list shows them while Link owns them
+    for (const ManifestChart& ch : charts)
+        if (story_chart::define(mod, ch.id, ch.name, ch.description, ch.x, ch.z) < 0)
+            LOG("[notebook] %s: chart \"%s\" not registered", mod.c_str(), ch.id.c_str());
+    if (!charts.empty()) {
+        story_chart::note_import();
+        story_mail::note_import();
+        LOG("[notebook] %s: %zu chart(s) from the manifest", mod.c_str(), charts.size());
     }
     for (const std::string& w : warnings) LOG("[notebook] %s: warning: %s", mod.c_str(), w.c_str());
     if (quests.empty()) return true;
@@ -1037,7 +1049,9 @@ bool declare(const std::string& mod, const std::string& mod_name, const mods::js
                 LOG("[notebook] %s: warning: quest \"%s\" step %u takes over %s with no condition (no letter, no \"available\"): it "
                     "speaks for the quest whenever the step is current", mod.c_str(), q.id.c_str(), st.n,
                     npc_catalogue().entry(st.resident)->name.c_str());
-            if (st.has_talk) g_takeovers.push_back({reg->key, uint8_t(st.n), st.resident, st.needs_letter, st.lines, st.reward, st.when, st.follow});
+            if (st.has_talk)
+                g_takeovers.push_back({reg->key, uint8_t(st.n), st.resident, st.needs_letter, st.lines, st.reward, st.when, st.follow,
+                                       st.give_chart.empty() ? std::string() : mod, st.give_chart});
             if (!st.sail_line.empty()) g_sail_lines.push_back({reg->key, uint8_t(st.n), st.sail_line});
         }
     }
@@ -1069,7 +1083,26 @@ void declared_tick() {
             if (d.quest.letter_encloses_letter) b.set(kRecordCarried, d.key, 1);
             LOG("[notebook] %s: quest \"%s\" started by its letter%s", d.mod.c_str(), d.quest.id.c_str(),
                 d.quest.letter_encloses_letter ? "; Link carries the enclosed letter" : "");
+            for (const std::string& chart : d.quest.letter_charts)  // the charts in the letter
+                if (story_chart::give(d.mod, chart) == story_chart::kResultOwned)
+                    LOG("[notebook] %s: the letter of quest \"%s\" gives Link chart \"%s\"", d.mod.c_str(), d.quest.id.c_str(), chart.c_str());
         }
+    }
+    // charts: a step's treasure found (the quest is past the step) finishes its chart; a done quest
+    // gives its reward chart
+    for (const Declared& d : declared) {
+        story_mail::Book b = book();
+        const uint8_t now = saved_step(b, d.key);
+        if (!now) continue;
+        for (const ManifestStep& st : d.quest.steps)
+            if (!st.find_chart.empty() && now > st.n && story_chart::state(d.mod, st.find_chart) == story_chart::kResultOwned) {
+                story_chart::finish(d.mod, st.find_chart);
+                LOG("[notebook] %s: quest \"%s\" is past step %u: chart \"%s\" is finished", d.mod.c_str(), d.quest.id.c_str(), st.n,
+                    st.find_chart.c_str());
+            }
+        if (now == kStepDone && !d.quest.reward_chart.empty() && story_chart::state(d.mod, d.quest.reward_chart) == story_chart::kResultNone &&
+            story_chart::give(d.mod, d.quest.reward_chart) == story_chart::kResultOwned)
+            LOG("[notebook] %s: quest \"%s\" is done: Link gets chart \"%s\"", d.mod.c_str(), d.quest.id.c_str(), d.quest.reward_chart.c_str());
     }
 }
 
@@ -1245,6 +1278,13 @@ void pad(input::PadState& p, Cpu* c) {
     in.x = p.tx * 1280.0f, in.y = p.ty * 720.0f;  // the GamePad picture (854 x 480) as the page's 1280 x 720
     const Page::Action act = g_page.input(in, rows);
     g_page.tick(dt);
+    if (act.kind == Page::Action::OpenChart) {  // the MAP screen's chart list, the step's chart selected
+        for (const Quest& q : storage)
+            if (q.key == act.key && !q.chart.empty()) {
+                const bool ok = story_chart::open_in_list(q.chart_mod, q.chart);
+                LOG("[notebook] quest %04X: open chart \"%s\" %s", act.key, q.chart.c_str(), ok ? "in the MAP screen's chart list" : "failed (no map screen)");
+            }
+    }
     if (act.kind == Page::Action::Toggle && have_save()) {
         story_mail::Book b = book();
         const bool on = toggle_tracked(b, act.key);
@@ -1528,6 +1568,8 @@ void people_execute(Cpu* c) {
         if (have_save()) {
             story_mail::Book b = book();
             complete(b, g_talk.takeover);
+            if (!g_talk.takeover.chart.empty() && story_chart::give(g_talk.takeover.chart_mod, g_talk.takeover.chart) == story_chart::kResultOwned)
+                LOG("[notebook] quest %04X: Link gets chart \"%s\"", g_talk.takeover.quest, g_talk.takeover.chart.c_str());
         }
         LOG("[notebook] quest %04X: delivered, the quest is done", g_talk.takeover.quest);
         if (!g_talk.takeover.reward) {
