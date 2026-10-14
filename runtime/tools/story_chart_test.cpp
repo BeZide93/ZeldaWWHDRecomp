@@ -116,7 +116,7 @@ void game_hides(unsigned i) {
     std::erase(game_shows, i);
     st8(pane(i) + 0x44, ld8(pane(i) + 0x44) & ~1);
 }
-bool near(float a, float b) { return std::fabs(a - b) < 0.01f; }
+bool close_to(float a, float b) { return std::fabs(a - b) < 0.01f; }
 
 void test_record() {
     uint8_t raw[story_mail::kBookSize] = {};
@@ -190,41 +190,41 @@ void test_hooks() {
     // the tracked quest's ring: the first pane the game left hidden
     tracked_on = true;
     update();
-    assert(visible(6) && near(tx(6), home_x(6)));
-    assert(visible(0) && dirty(0) && near(tx(0), 71.0f) && near(ty(0), -44.0f + 2 * 73.0f));  // square D2
+    assert(visible(6) && close_to(tx(6), home_x(6)));
+    assert(visible(0) && dirty(0) && close_to(tx(0), 71.0f) && close_to(ty(0), -44.0f + 2 * 73.0f));  // square D2
     for (unsigned i = 1; i < 8; i++) assert(i == 6 || !visible(i));
     // every update puts the pane back first (checked in the stub), then shows the ring again
     clear_dirty();
     update();
-    assert(visible(0) && dirty(0) && near(ty(0), 102.0f));
+    assert(visible(0) && dirty(0) && close_to(ty(0), 102.0f));
     // the game's own mark wins: the story now asks for pane 0
     game_shows = {0, 6};
     update();
-    assert(visible(0) && near(tx(0), home_x(0)) && visible(1) && near(tx(1), 71.0f) && near(ty(1), 102.0f));
+    assert(visible(0) && close_to(tx(0), home_x(0)) && visible(1) && close_to(tx(1), 71.0f) && close_to(ty(1), 102.0f));
     game_hides(0);
     game_hides(6);
     // the ring moves with the step
     tracked_x = 100000, tracked_z = 0;
     update();
-    assert(near(tx(0), 71.0f + 73.0f) && near(ty(0), -44.0f) && visible(0) && !visible(1));
+    assert(close_to(tx(0), 71.0f + 73.0f) && close_to(ty(0), -44.0f) && visible(0) && !visible(1));
     // busy screen: the game hides its marks and so does the ring
     game_busy = true;
     update();
-    for (unsigned i = 0; i < 8; i++) assert(!visible(i) && near(tx(i), home_x(i)));
+    for (unsigned i = 0; i < 8; i++) assert(!visible(i) && close_to(tx(i), home_x(i)));
     game_busy = false;
     update();
     assert(visible(0));
     // every pane the game's: the ring waits
     game_shows = {0, 1, 2, 3, 4, 5, 6, 7};
     update();
-    for (unsigned i = 0; i < 8; i++) assert(near(tx(i), home_x(i)));
+    for (unsigned i = 0; i < 8; i++) assert(close_to(tx(i), home_x(i)));
     for (unsigned i = 0; i < 8; i++) game_hides(i);
     // a full state is captured with the panes as the game left them
     update();
     capture_begin();
-    for (unsigned i = 0; i < 8; i++) assert(!visible(i) && near(tx(i), home_x(i)));
+    for (unsigned i = 0; i < 8; i++) assert(!visible(i) && close_to(tx(i), home_x(i)));
     capture_end();
-    assert(visible(0) && near(tx(0), 71.0f + 73.0f));
+    assert(visible(0) && close_to(tx(0), 71.0f + 73.0f));
     // a state load replaces guest memory: nothing is put back into it
     const uint32_t moved = ld32(pane(0) + 0x1C);
     state_loaded();
@@ -232,7 +232,7 @@ void test_hooks() {
     assert(ld32(pane(0) + 0x1C) == moved);  // untouched: not ours any more
     reset_pane(0);  // (the loaded state's own pane)
     update();
-    assert(visible(0) && near(tx(0), 71.0f + 73.0f));
+    assert(visible(0) && close_to(tx(0), 71.0f + 73.0f));
     // a destroyed menu: its panes are forgotten
     Cpu c{};
     c.r[3] = kMenu;
@@ -341,33 +341,33 @@ void test_circles() {
     const unsigned own = 1 * 7 + 3;
     assert((circle_calls == std::vector<std::string>{"show " + std::to_string(own)}));
     // x: 10 + 1547 / 100000 * 100 = 11.547; y: 20 - (-202539 / 100000) * 50 = 121.2695
-    assert(near(cx(own), 11.547f) && near(cy(own), 121.2695f) && shown_circles() == 2);
+    assert(close_to(cx(own), 11.547f) && close_to(cy(own), 121.2695f) && shown_circles() == 2);
     // every update: placed, shown once
     circle_calls.clear();
     grid_hook(0x026834A4);
-    assert(circle_calls.empty() && near(cx(own), 11.547f));
+    assert(circle_calls.empty() && close_to(cx(own), 11.547f));
     // the game's layout pass resets every circle; the next refresh shows the marker's again
     grid_hook(0x026815A8);
-    assert(near(cx(own), game_x(own)) && shown_circles() == 1);
+    assert(close_to(cx(own), game_x(own)) && shown_circles() == 1);
     grid_hook(0x026834A4);
-    assert(near(cx(own), 11.547f) && shown_circles() == 2);
+    assert(close_to(cx(own), 11.547f) && shown_circles() == 2);
     // the game wants that square's circle (its treasure salvaged): the game's, at its place; the marker
     // takes another square's circle
     complete[own] = true;
     circle_calls.clear();
     grid_hook(0x026834A4);
-    assert(near(cx(own), game_x(own)) && near(cy(own), game_y(own)) && ld8(circle(own) + 0x44));
+    assert(close_to(cx(own), game_x(own)) && close_to(cy(own), game_y(own)) && ld8(circle(own) + 0x44));
     assert((circle_calls == std::vector<std::string>{"game shows " + std::to_string(own), "show 0"}));
-    assert(near(cx(0), 11.547f) && shown_circles() == 3);
+    assert(close_to(cx(0), 11.547f) && shown_circles() == 3);
     complete[own] = false;
     grid_hook(0x026815A8);
     grid_hook(0x026834A4);
-    assert(near(cx(own), 11.547f) && near(cx(0), game_x(0)));
+    assert(close_to(cx(own), 11.547f) && close_to(cx(0), game_x(0)));
     // a full state: the circles at the game's places (their visibility is healed after a load)
     capture_begin();
-    assert(near(cx(own), game_x(own)) && near(cy(own), game_y(own)));
+    assert(close_to(cx(own), game_x(own)) && close_to(cy(own), game_y(own)));
     capture_end();
-    assert(near(cx(own), 11.547f));
+    assert(close_to(cx(own), 11.547f));
     state_loaded();
     st32(circle(own) + 0x1C, f32_as_u32(game_x(own)));  // the state as captured: the circle shown at the game's place
     circle_calls.clear();
@@ -383,7 +383,7 @@ void test_circles() {
     circle_calls.clear();
     unmark("map", "old", "");
     grid_hook(0x026834A4);
-    assert((circle_calls == std::vector<std::string>{"hide " + std::to_string(own)}) && near(cx(own), game_x(own)) && shown_circles() == 1);
+    assert((circle_calls == std::vector<std::string>{"hide " + std::to_string(own)}) && close_to(cx(own), game_x(own)) && shown_circles() == 1);
     set_game_calls(original, game_call);
 }
 
@@ -413,7 +413,7 @@ void test_balloon() {
     // (1547 - 0 + 500) * 0.01 * 2 = 40.94; -((-202539 + 200000 - 1000) * 0.01 * 2) = 70.78
     // (the first update of a balloon after a state load (test_hooks) hides the circle the state may hold)
     assert((calls == std::vector<std::string>{"balloon", "circle hidden", "circle shown"}));
-    assert(near(u32_as_f32(ld32(kCircle + 0x1C)), 40.94f) && near(u32_as_f32(ld32(kCircle + 0x20)), 70.78f));
+    assert(close_to(u32_as_f32(ld32(kCircle + 0x1C)), 40.94f) && close_to(u32_as_f32(ld32(kCircle + 0x20)), 70.78f));
     calls.clear();
     run();
     assert((calls == std::vector<std::string>{"balloon"}));  // shown once, placed every update
@@ -429,7 +429,7 @@ void test_balloon() {
     st32(kCircle + 0x1C, f32_as_u32(5.0f));
     calls.clear();
     run();
-    assert((calls == std::vector<std::string>{"balloon"}) && near(u32_as_f32(ld32(kCircle + 0x1C)), 5.0f));
+    assert((calls == std::vector<std::string>{"balloon"}) && close_to(u32_as_f32(ld32(kCircle + 0x1C)), 5.0f));
     st8(kIcon + 0x158, 0);
     // untracked: a finished chart's marker in this square has the circle; an owned one has not
     tracked_on = false;
@@ -442,11 +442,11 @@ void test_balloon() {
     run();
     // (2047 + 500) * 0.02 = 50.94; -((-201539 + 200000 - 1000) * 0.02) = 50.78
     assert((calls == std::vector<std::string>{"balloon", "circle shown"}));
-    assert(near(u32_as_f32(ld32(kCircle + 0x1C)), 50.94f) && near(u32_as_f32(ld32(kCircle + 0x20)), 50.78f));
+    assert(close_to(u32_as_f32(ld32(kCircle + 0x1C)), 50.94f) && close_to(u32_as_f32(ld32(kCircle + 0x20)), 50.78f));
     // the tracked step comes first
     tracked_on = true;
     run();
-    assert(near(u32_as_f32(ld32(kCircle + 0x1C)), 40.94f));
+    assert(close_to(u32_as_f32(ld32(kCircle + 0x1C)), 40.94f));
     tracked_on = false;
     unmark("bal", "c", "");
     calls.clear();
