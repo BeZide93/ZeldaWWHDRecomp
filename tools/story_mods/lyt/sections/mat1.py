@@ -10,6 +10,10 @@ Blocks: texture maps (u16 txl1 index, u8 wrap/filter S, u8 wrap/filter T; 4/4 is
 value in the game), texture SRTs (translate x y, rotate, scale x y: 5 f32), texture coordinate generators
 (8 bytes: type 0x01 matrix 0x1E... written as zeros like the prototype, which the game accepts).
 
+Colours: the game applies material colours as linear values while the ^l images are sRGB (lyt-window's
+game run); with the description's "color_space": "srgb" (default) black / white are given in sRGB and
+converted here, so a colour matches the same colour in an image.
+
 Description:
   {"textures": [{"texture": "StoryPlate_00", "wrap": [4, 4],
                  "srt": {"translate": [0, 0], "rotate": 0, "scale": [1, 1]}}],
@@ -26,8 +30,9 @@ def encode(mat_name, spec, ctx):
         raise ValueError("material %r: at most 3 textures" % mat_name)
     n = len(texs)
     flags = n | (n << 2) | (n << 4) | int(spec.get("flags_extra", 0))
-    out = (binio.name(mat_name, 28) + binio.rgba(spec.get("black", [0, 0, 0, 0])) +
-           binio.rgba(spec.get("white", [255, 255, 255, 255])) + struct.pack(">I", flags))
+    colour = binio.rgba_linear if ctx.desc.color_space == "srgb" else binio.rgba
+    out = (binio.name(mat_name, 28) + colour(spec.get("black", [0, 0, 0, 0])) +
+           colour(spec.get("white", [255, 255, 255, 255])) + struct.pack(">I", flags))
     for t in texs:
         ws, wt = t.get("wrap", [4, 4])
         out += struct.pack(">HBB", ctx.texture(t["texture"]), ws, wt)

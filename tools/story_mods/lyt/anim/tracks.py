@@ -15,8 +15,8 @@ Tags and targets seen in the game's own .bflan files (content type 0 = pane, 1 =
   FLFS (font shadow, text panes; lyt-text)
 The last field of TARGETS says whether the target was checked in a game run (end state of an animation
 on the item screen, 2026-10-14): translate, rotate z, scale, size w / h, all 16 vertex colours (corner
-order top-left, top-right, bottom-left, bottom-right; r g b a each), pane alpha, material white.r and
-black.g, texture scale x. The unchecked rest follows the same field order as its checked neighbours.
+order top-left, top-right, bottom-left, bottom-right; r g b a each), pane alpha, material white r g b
+(also lyt-window's run) and black.g, texture scale x. The unchecked rest follows the same field order as its checked neighbours.
 """
 import struct
 
@@ -41,7 +41,7 @@ for i, c in enumerate(_CORNERS):
         TARGETS["vc.%s.%s" % (c, ch)] = (b"FLVC", PANE, 4 * i + j, HERMITE, True)
 for j, ch in enumerate(_CH):
     TARGETS["black.%s" % ch] = (b"FLMC", MATERIAL, j, HERMITE, ch == "g")
-    TARGETS["white.%s" % ch] = (b"FLMC", MATERIAL, 4 + j, HERMITE, ch == "r")
+    TARGETS["white.%s" % ch] = (b"FLMC", MATERIAL, 4 + j, HERMITE, ch in "rgb")
 for j, k in enumerate(("tx", "ty", "rotate", "sx", "sy")):
     TARGETS["tex.%s" % k] = (b"FLTS", MATERIAL, j, HERMITE, k == "sx")
 TARGETS["tex.pattern"] = (b"FLTP", MATERIAL, 0, STEP, True)

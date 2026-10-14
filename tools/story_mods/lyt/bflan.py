@@ -8,7 +8,8 @@ Description:
               {"material": "M_Btn", "target": "tex.pattern", "index": 0, "keys": [[0, "BtnA"], [5, "BtnB"]]},
               {"pane": "T_Text", "tag": "FLFS", "target": 3, "keys": [[0, 0]]}   # raw form
             ]}
-Texture pattern keys name textures of the description; they are collected into pai1's texture list.
+Material colour keys (black.* / white.* r g b) are converted from sRGB like the materials (explicit
+slopes are kept as given). Texture pattern keys name textures of the description; they are collected into pai1's texture list.
 The game binds an animation to the panes of its groups: a track only plays when its pane (or, for a
 material track, the pane that uses the material) is a member of one of the animation's groups (game
 run: tracks for panes outside the group had no effect).
@@ -17,6 +18,9 @@ from collections import OrderedDict
 
 from . import binio
 from .anim import pai1, pat1, tracks
+
+
+_SRGB_TARGETS = {"%s.%s" % (w, ch) for w in ("black", "white") for ch in "rgb"}
 
 
 def build(anim_name, spec, desc):
@@ -35,6 +39,8 @@ def build(anim_name, spec, desc):
                     textures.append(fname)
                 vals.append([f, textures.index(fname)])
             keys = vals
+        if desc.color_space == "srgb" and t.get("target") in _SRGB_TARGETS:  # material colours: sRGB -> linear
+            keys = [[k[0], binio.srgb_to_linear(k[1])] + list(k[2:]) for k in keys]
         owner = t.get("pane") or t.get("material")
         tags = by_target.setdefault((owner, ctype), OrderedDict())
         tags.setdefault(tag, []).append(tracks.entry(index, target, curve, (keys, t.get("interp", "linear"))))

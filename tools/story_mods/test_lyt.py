@@ -106,6 +106,30 @@ class Structure(unittest.TestCase):
         jsonschema.validate(load_json(EXAMPLE), schema)
 
 
+class Colours(unittest.TestCase):
+    def test_part_size(self):
+        data, _ = bflyt.build(example(part_size=[240, 140]))
+        lyt1 = binio.read_sections(data)[0][1]
+        self.assertEqual(struct.unpack(">ff", lyt1[12:20]), (240, 140))
+
+    def test_srgb_materials(self):
+        d = load_json(EXAMPLE)
+        d["materials"]["StoryPlate_00"]["white"] = [128, 255, 0, 200]
+        d["animations"]["InAll"]["tracks"].append(
+            {"material": "StoryPlate_00", "target": "white.r", "keys": [[0, 128], [10, 255]]})
+        d["groups"]["G_All_00"].append("P_Plate_00")
+        for space, white, key in (("srgb", bytes([55, 255, 0, 200]), 55.0), ("linear", bytes([128, 255, 0, 200]), 128.0)):
+            d["color_space"] = space
+            desc = lyt.Description(d)
+            _, ctx = bflyt.build(desc)
+            self.assertEqual(ctx.materials[0][1][32:36], white, space)
+            anim = bflan.build("InAll", desc.animations["InAll"], desc)
+            self.assertIn(b"FLMC", anim)
+            i = anim.index(b"FLMC")
+            e = i + struct.unpack(">I", anim[i + 8:i + 12])[0]
+            self.assertAlmostEqual(struct.unpack(">f", anim[e + 16:e + 20])[0], key, 0)
+
+
 class Animation(unittest.TestCase):
     def test_hermite_slopes(self):
         keys = tracks.hermite_keys([[0, 0], [10, 100], [20, 100]])

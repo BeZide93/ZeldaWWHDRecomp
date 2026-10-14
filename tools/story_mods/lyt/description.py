@@ -5,6 +5,10 @@ The format is documented in schema.json (JSON Schema) and README-style in this d
 {
   "name": "StoryLyt_00",                 # archive / layout name: Layout/<name>.szs, blyt/<name>.bflyt
   "size": [1280, 720],                   # layout size (RootPane size)
+  "part_size": [0, 0],                   # part layouts (buttons, cnt1): the part's size; screens: 0
+  "color_space": "srgb",                 # material colours (and their animation keys) are given in sRGB
+                                         # like the images and converted to the linear values the game
+                                         # applies; "linear" writes them as given
   "textures": {                          # our own art only, never game files
     "StoryPlate_00": {"png": "plate.png", "format": "rgba8", "width": 512}
   },                                     # format: rgba8 bc1 bc3 bc4a bc4l bc5la (bflim.py); tile: linear
@@ -41,6 +45,8 @@ class Description:
         self.base_dir = base_dir
         self.name = data["name"]
         self.size = data.get("size", [1280, 720])
+        self.part_size = data.get("part_size", [0, 0])  # a part layout's own size (lyt1), 0 for screens
+        self.color_space = data.get("color_space", "srgb")  # material colours: "srgb" (converted) or "linear"
         self.textures = data.get("textures", {})
         self.fonts = list(data.get("fonts", []))
         self.materials = data.get("materials", {})
@@ -101,6 +107,8 @@ class Description:
                 if not spec.get("child_binding") and not targets & bound:
                     raise ValueError("animation %r: %r is not in the animation's groups, the track would not "
                                      "play" % (a, t.get("pane") or t.get("material")))
+        if self.color_space not in ("srgb", "linear"):
+            raise ValueError("color_space must be srgb or linear")
         for t, spec in self.textures.items():
             if spec.get("format", "rgba8") not in bflim.FORMATS:
                 raise ValueError("texture %r: unknown format %r" % (t, spec.get("format")))

@@ -52,6 +52,8 @@
   "properties": {
     "name": {"type": "string", "maxLength": 23},
     "size": {"$ref": "#/definitions/vec2"},
+    "part_size": {"$ref": "#/definitions/vec2"},
+    "color_space": {"enum": ["srgb", "linear"], "default": "srgb"},
     "textures": {
       "type": "object",
       "additionalProperties": {

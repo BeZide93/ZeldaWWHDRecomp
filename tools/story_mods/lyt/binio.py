@@ -50,6 +50,19 @@ def string_table(names):
     return pad4(b"".join(struct.pack(">I", o) for o in offs) + blob)
 
 
+def srgb_to_linear(v):
+    """An sRGB channel value 0-255 as the linear value 0-255 (alpha is never converted)."""
+    x = v / 255.0
+    x = x / 12.92 if x <= 0.04045 else ((x + 0.055) / 1.055) ** 2.4
+    return 255.0 * x
+
+
+def rgba_linear(c):
+    """rgba() of an sRGB colour, its r g b converted to linear (rounded)."""
+    c = list(c) + [255] * (4 - len(c))
+    return rgba([round(srgb_to_linear(x)) for x in c[:3]] + [c[3]])
+
+
 def rgba(c):
     """A colour from [r, g, b, a] (or [r, g, b]; alpha 255) as 4 bytes."""
     c = list(c) + [255] * (4 - len(c))
