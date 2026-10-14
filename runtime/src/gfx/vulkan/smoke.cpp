@@ -1,3 +1,4 @@
+#include "pass.h"
 #ifdef __ANDROID__
 #include "overlay/overlay.h"
 #include "platform/input_sdl.h"
@@ -282,9 +283,43 @@ void asynchronous_submission_check() {
    require(bytes[offset+payloadSize*2]==uint8_t(submission*19+byte),"async deferred temporary copy differs");
   }
  for(const auto& slot:R.submissions)
-  require(!slot.pending&&slot.garbageBuffers.empty()&&slot.garbageImages.empty(),"async drain left pending resources");
+  require(!slot.pending&&slot.garbageBuffers.empty()&&slot.garbageImages.empty()&&slot.garbageFramebuffers.empty(),"async drain left pending resources");
  defer_buffer(out);flush();
  fprintf(stderr,"[renderer smoke] ten async submissions, immutable snapshots, slot wrap and deferred retirement passed\n");
+}
+// The fallback must resolve framebuffer handles before capture, then invalidate
+// them at view deferral even though their native begin commands are not emitted.
+void renderpass_retirement_check() {
+ if(!R.renderPasses)return;
+ end_encoder();
+ for(uint32_t i=0;i<10;++i) {
+  Surface surface;surface.width=surface.height=8;surface.format=0x1a;surface.fmt=format_info(surface.format,false);
+  create_surface_image(&surface,true,VkExtent3D{8,8,1});
+  transition_image(&surface,VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+      VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
+  auto cmd=command_buffer();
+  const auto cached=pass_caches().framebuffer_count();
+  const auto retired=R.garbageFramebuffers.size();
+  VkRenderingAttachmentInfo attachment{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
+  attachment.imageView=surface.view;attachment.imageLayout=surface.layout;
+  attachment.loadOp=VK_ATTACHMENT_LOAD_OP_CLEAR;attachment.storeOp=VK_ATTACHMENT_STORE_OP_STORE;
+  VkRenderingInfo rendering{VK_STRUCTURE_TYPE_RENDERING_INFO};
+  rendering.renderArea.extent={8,8};rendering.layerCount=1;
+  rendering.colorAttachmentCount=1;rendering.pColorAttachments=&attachment;
+  DeferredCommands captured;captured.start_capture();
+  begin_pass(cmd,rendering,[&] { return color_pass(surface.fmt.pixel,surface.layout); });
+  end_pass(cmd);
+  require(captured.command_count()==2,"classic begin/end did not enter the deferred command stream");
+  require(pass_caches().framebuffer_count()==cached+1,"captured framebuffer was not resolved at recording time");
+  destroy_surface_image(&surface);
+  require(pass_caches().framebuffer_count()==cached,"view deferral retained a framebuffer cache entry");
+  require(R.garbageFramebuffers.size()==retired+1,"framebuffer did not share its view's submission retirement");
+  captured.finish_exact();flush_async();
+ }
+ wait_idle();
+ for(const auto& slot:R.submissions)
+  require(slot.garbageFramebuffers.empty()&&slot.garbageImages.empty(),"framebuffer/view retirement survived the submission drain");
+ fprintf(stderr,"[renderer smoke] captured render passes, immediate invalidation and ten fenced framebuffer retirements passed\n");
 }
 // Scaled depth copies without blits (surfaces.cpp draw_depth_copy). Vulkan makes blits of depth/stencil
 // formats optional and Adreno drivers report none for some, so resizing a depth target (a resolution or
@@ -413,7 +448,7 @@ void volume_target_check() {
  VkRenderingAttachmentInfo target{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};target.imageView=layer_view(s,selected);target.imageLayout=s->layout;
  target.loadOp=VK_ATTACHMENT_LOAD_OP_CLEAR;target.storeOp=VK_ATTACHMENT_STORE_OP_STORE;target.clearValue.color.float32[1]=1;target.clearValue.color.float32[3]=1;
  VkRenderingInfo ri{VK_STRUCTURE_TYPE_RENDERING_INFO};ri.renderArea.extent={w,h};ri.layerCount=1;ri.colorAttachmentCount=1;ri.pColorAttachments=&target;
- auto cmd=command_buffer();record::vkCmdBeginRendering(cmd,&ri);R.rendering=true;end_encoder();mark_gpu_written(s);
+ auto cmd=command_buffer();begin_pass(cmd,ri,[&] { return color_pass(s->fmt.pixel,s->layout); });R.rendering=true;end_encoder();mark_gpu_written(s);
  auto read_slice=[&](uint32_t z) {
   Buffer b=create_readback_buffer(w*h*4);
   transition_image(s,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_ACCESS_TRANSFER_READ_BIT);
@@ -466,14 +501,14 @@ float triangle(Surface& s, float eyeOffset=0, float clipW=1) {
  VkPipelineColorBlendAttachmentState attachment{};attachment.colorWriteMask=0xf;
  VkPipelineColorBlendStateCreateInfo blend{VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};blend.attachmentCount=1;blend.pAttachments=&attachment;
  VkPipelineRenderingCreateInfo rendering{VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};rendering.colorAttachmentCount=1;rendering.pColorAttachmentFormats=&s.fmt.pixel;
- VkGraphicsPipelineCreateInfo info{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};info.pNext=&rendering;info.stageCount=2;info.pStages=stages;info.pVertexInputState=&vertex;info.pInputAssemblyState=&assembly;info.pViewportState=&vp;info.pRasterizationState=&raster;info.pMultisampleState=&ms;info.pColorBlendState=&blend;info.layout=objects.layout;
+ VkGraphicsPipelineCreateInfo info{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};pipeline_targets(info,rendering);info.stageCount=2;info.pStages=stages;info.pVertexInputState=&vertex;info.pInputAssemblyState=&assembly;info.pViewportState=&vp;info.pRasterizationState=&raster;info.pMultisampleState=&ms;info.pColorBlendState=&blend;info.layout=objects.layout;
  vk_check(stutter::create_graphics(R.frame, "smoke_pipeline", R.device,R.pipelineCache,1,&info,nullptr,&objects.pipeline),"smoke triangle pipeline");
  R.pipelineCacheDirty=true;
  R.pipelineCacheChangedFrame=R.frame;
  transition_image(&s,VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
  VkRenderingAttachmentInfo target{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};target.imageView=layer_view(&s,0);target.imageLayout=s.layout;target.loadOp=VK_ATTACHMENT_LOAD_OP_CLEAR;target.storeOp=VK_ATTACHMENT_STORE_OP_STORE;target.clearValue.color.float32[3]=1;
  VkRenderingInfo ri{VK_STRUCTURE_TYPE_RENDERING_INFO};ri.renderArea=scissor;ri.layerCount=1;ri.colorAttachmentCount=1;ri.pColorAttachments=&target;
- auto cmd=command_buffer();record::vkCmdBeginRendering(cmd,&ri);R.rendering=true;record::vkCmdBindPipeline(cmd,VK_PIPELINE_BIND_POINT_GRAPHICS,objects.pipeline);record::vkCmdPushConstants(cmd,objects.layout,VK_SHADER_STAGE_VERTEX_BIT,0,16,projection);record::vkCmdDraw(cmd,3,1,0,0);end_encoder();mark_gpu_written(&s);flush();
+ auto cmd=command_buffer();begin_pass(cmd,ri,[&] { return color_pass(s.fmt.pixel,s.layout); });R.rendering=true;record::vkCmdBindPipeline(cmd,VK_PIPELINE_BIND_POINT_GRAPHICS,objects.pipeline);record::vkCmdPushConstants(cmd,objects.layout,VK_SHADER_STAGE_VERTEX_BIT,0,16,projection);record::vkCmdDraw(cmd,3,1,0,0);end_encoder();mark_gpu_written(&s);flush();
  auto pixels=read_image(s,VK_IMAGE_ASPECT_COLOR_BIT,4);
  size_t center=(size_t(s.extent.height/2)*s.extent.width+s.extent.width/2)*4;
  require(pixels[center]==255&&pixels[center+1]==0&&pixels[center+2]==0&&pixels[center+3]==255,"triangle center pixel differs");
@@ -611,7 +646,7 @@ void vertex_window_check(Surface& s) {
  VkPipelineColorBlendAttachmentState attachment{};attachment.colorWriteMask=0xf;
  VkPipelineColorBlendStateCreateInfo blend{VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};blend.attachmentCount=1;blend.pAttachments=&attachment;
  VkPipelineRenderingCreateInfo rendering{VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};rendering.colorAttachmentCount=1;rendering.pColorAttachmentFormats=&s.fmt.pixel;
- VkGraphicsPipelineCreateInfo info{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};info.pNext=&rendering;info.stageCount=2;info.pStages=stages;info.pVertexInputState=&vertex;info.pInputAssemblyState=&assembly;info.pViewportState=&vp;info.pRasterizationState=&raster;info.pMultisampleState=&ms;info.pColorBlendState=&blend;info.layout=objects.layout;
+ VkGraphicsPipelineCreateInfo info{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};pipeline_targets(info,rendering);info.stageCount=2;info.pStages=stages;info.pVertexInputState=&vertex;info.pInputAssemblyState=&assembly;info.pViewportState=&vp;info.pRasterizationState=&raster;info.pMultisampleState=&ms;info.pColorBlendState=&blend;info.layout=objects.layout;
  vk_check(stutter::create_graphics(R.frame, "smoke_pipeline", R.device,R.pipelineCache,1,&info,nullptr,&objects.pipeline),"smoke triangle pipeline");
  R.pipelineCacheDirty=true;
  R.pipelineCacheChangedFrame=R.frame;
@@ -654,7 +689,7 @@ void vertex_window_check(Surface& s) {
   transition_image(&s,VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
   VkRenderingAttachmentInfo target{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};target.imageView=layer_view(&s,0);target.imageLayout=s.layout;target.loadOp=VK_ATTACHMENT_LOAD_OP_CLEAR;target.storeOp=VK_ATTACHMENT_STORE_OP_STORE;target.clearValue.color.float32[3]=1;
   VkRenderingInfo ri{VK_STRUCTURE_TYPE_RENDERING_INFO};ri.renderArea=scissor;ri.layerCount=1;ri.colorAttachmentCount=1;ri.pColorAttachments=&target;
-  auto cmd=command_buffer();record::vkCmdBeginRendering(cmd,&ri);R.rendering=true;record::vkCmdBindPipeline(cmd,VK_PIPELINE_BIND_POINT_GRAPHICS,objects.pipeline);
+  auto cmd=command_buffer();begin_pass(cmd,ri,[&] { return color_pass(s.fmt.pixel,s.layout); });R.rendering=true;record::vkCmdBindPipeline(cmd,VK_PIPELINE_BIND_POINT_GRAPHICS,objects.pipeline);
   record::vkCmdBindVertexBuffers(cmd,0,1,&vertices.buffer,&vertices.offset);record::vkCmdBindIndexBuffer(cmd,indices.buffer,indices.offset,narrow?VK_INDEX_TYPE_UINT16:VK_INDEX_TYPE_UINT32);
   record::vkCmdDrawIndexed(cmd,wide.size(),1,0,base,0);end_encoder();mark_gpu_written(&s);flush_async();
  };
@@ -711,7 +746,7 @@ void dynamic_uniform_check(Surface& s) {
  VkPipelineRenderingCreateInfo rendering{VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};rendering.colorAttachmentCount=1;rendering.pColorAttachmentFormats=&s.fmt.pixel;
  VkDynamicState dynamicState=VK_DYNAMIC_STATE_SCISSOR;
  VkPipelineDynamicStateCreateInfo dynamic{VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};dynamic.dynamicStateCount=1;dynamic.pDynamicStates=&dynamicState;
- VkGraphicsPipelineCreateInfo info{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};info.pNext=&rendering;info.stageCount=2;info.pStages=stages;info.pVertexInputState=&vertex;info.pInputAssemblyState=&assembly;info.pViewportState=&vp;info.pRasterizationState=&raster;info.pMultisampleState=&ms;info.pColorBlendState=&blend;info.layout=objects.layout;info.pDynamicState=&dynamic;
+ VkGraphicsPipelineCreateInfo info{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};pipeline_targets(info,rendering);info.stageCount=2;info.pStages=stages;info.pVertexInputState=&vertex;info.pInputAssemblyState=&assembly;info.pViewportState=&vp;info.pRasterizationState=&raster;info.pMultisampleState=&ms;info.pColorBlendState=&blend;info.layout=objects.layout;info.pDynamicState=&dynamic;
  vk_check(stutter::create_graphics(R.frame, "smoke_pipeline", R.device,R.pipelineCache,1,&info,nullptr,&objects.pipeline),"smoke triangle pipeline");
  R.pipelineCacheDirty=true;
  R.pipelineCacheChangedFrame=R.frame;
@@ -738,7 +773,7 @@ void dynamic_uniform_check(Surface& s) {
   transition_image(&s,VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
   VkRenderingAttachmentInfo target{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};target.imageView=layer_view(&s,0);target.imageLayout=s.layout;target.loadOp=VK_ATTACHMENT_LOAD_OP_CLEAR;target.storeOp=VK_ATTACHMENT_STORE_OP_STORE;
   VkRenderingInfo ri{VK_STRUCTURE_TYPE_RENDERING_INFO};ri.renderArea=scissor;ri.layerCount=1;ri.colorAttachmentCount=1;ri.pColorAttachments=&target;
-  auto cmd=command_buffer();record::vkCmdBeginRendering(cmd,&ri);R.rendering=true;record::vkCmdBindPipeline(cmd,VK_PIPELINE_BIND_POINT_GRAPHICS,objects.pipeline);
+  auto cmd=command_buffer();begin_pass(cmd,ri,[&] { return color_pass(s.fmt.pixel,s.layout); });R.rendering=true;record::vkCmdBindPipeline(cmd,VK_PIPELINE_BIND_POINT_GRAPHICS,objects.pipeline);
   for(uint32_t draw=0;draw<2;++draw) {
    // Dynamic offsets are ordered by binding within VS set0, then PS set1.
    uint32_t offsets[3]={uint32_t(tintSlices[draw].offset),uint32_t(transforms[draw].offset),uint32_t(factors[draw].offset)};
@@ -981,7 +1016,7 @@ int renderer_smoke_test() {
    LOG("[renderer smoke] sync negative control submitted two unordered writes");
    command_buffer();flush();return 0;
   }
-  mem::init();bc_decode_smoke();bc_surface_check();upload_arena_check();asynchronous_submission_check();buffer_cache_check();set_res_scale(1);latch_res_scale();
+  mem::init();bc_decode_smoke();bc_surface_check();upload_arena_check();asynchronous_submission_check();renderpass_retirement_check();buffer_cache_check();set_res_scale(1);latch_res_scale();
   {
    Image upload(16,16,0x1a,false,2,2);
    upload.s.addr=mem::host_alloc(65536,256);upload.s.mipAddr=mem::host_alloc(65536,256);
@@ -1175,6 +1210,8 @@ int renderer_smoke_test() {
   }
   test_hdr_presentation();
   save_pipeline_cache();
+  wait_idle();
+  reset_pass_caches();
   LOG("[renderer smoke] PASS: actual device upload/clear/blit/depth/triangle/present");return 0;
  }catch(const std::exception& e){LOG("[renderer smoke] FAIL: %s",e.what());try {command_buffer();flush();}catch(...){}return 1;}
 }
