@@ -7,7 +7,8 @@ The format is documented in schema.json (JSON Schema) and README-style in this d
   "size": [1280, 720],                   # layout size (RootPane size)
   "textures": {                          # our own art only, never game files
     "StoryPlate_00": {"png": "plate.png", "format": "rgba8", "width": 512}
-  },
+  },                                     # format: rgba8 bc1 bc3 bc4a bc4l bc5la (bflim.py); tile: linear
+                                         # (default) 1d tiled; swizzle 0-7 (tiled); height optional
   "fonts": [],                           # font file names for text panes (fnl1), e.g. the game's own font
   "materials": {
     "StoryPlate_00": {"textures": [{"texture": "StoryPlate_00"}]}

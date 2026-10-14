@@ -152,9 +152,165 @@ class Archive(unittest.TestCase):
         self.assertEqual(sorted(files), ["anim/StoryLyt_00_InAll.bflan", "blyt/StoryLyt_00.bflyt",
                                          "timg/StoryPlate_00^l.bflim"])
 
-    def test_linear_width(self):
+    def test_rgba_size_checked(self):
         with self.assertRaises(ValueError):
-            bflim.encode(bytes(4 * 10), 10, 1)
+            bflim.encode(bytes(4 * 10), 10, 2)
+
+
+def gradient(w, h, alpha=True):
+    """A synthetic test picture: colour gradients, a hard edge and (optionally) an alpha ramp."""
+    import numpy as np
+    y, x = np.mgrid[0:h, 0:w]
+    a = np.zeros((h, w, 4), np.uint8)
+    a[..., 0] = x * 255 // max(w - 1, 1)
+    a[..., 1] = y * 255 // max(h - 1, 1)
+    a[..., 2] = np.where(x > w // 2, 200, 40)
+    a[..., 3] = (x * 255 // max(w - 1, 1)) if alpha else 255
+    return a.tobytes()
+
+
+def rmse(a, b, channels=(0, 1, 2, 3)):
+    import numpy as np
+    x = np.frombuffer(a, np.uint8).reshape(-1, 4)[:, channels].astype(float)
+    y = np.frombuffer(b, np.uint8).reshape(-1, 4)[:, channels].astype(float)
+    return float(np.sqrt(((x - y) ** 2).mean()))
+
+
+class Channels(unittest.TestCase):
+    def test_game_drawing(self):
+        """bc4a is drawn white with alpha, bc4l grey and opaque, bc5la grey with alpha (game run)."""
+        img = bytes([200, 100, 50, 77] * 16)
+        lum = round(200 * 0.299 + 100 * 0.587 + 50 * 0.114)
+        for fmt, texel in (("bc4a", (255, 255, 255, 77)), ("bc4l", (lum, lum, lum, 255)),
+                           ("bc5la", (lum, lum, lum, 77))):
+            back, _, _ = bflim.decode(bflim.encode(img, 4, 4, fmt, "tiled"))
+            self.assertEqual(tuple(back[:4]), texel, fmt)
+
+
+class Tiling(unittest.TestCase):
+    # (texels w, h, FLIM format code, image size, alignment) of game layout textures (tile mode 4); all
+    # 308 2D-tiled game textures match, these rows cover every format and alignment case
+    GAME = [(300, 300, 0x14, 389120, 2048), (72, 72, 0x14, 30720, 2048), (300, 300, 0x15, 61440, 4096),
+            (160, 90, 0x15, 16384, 4096), (160, 8, 0x10, 8192, 4096), (300, 300, 0x0F, 61440, 4096),
+            (1010, 150, 0x11, 196608, 8192), (505, 75, 0x11, 65536, 8192), (80, 80, 0x17, 16384, 8192),
+            (2300, 500, 0x15, 589824, 4096)]
+
+    def test_game_sizes(self):
+        from lyt import gx2tile
+        bpp = {0x14: 32, 0x15: 64, 0x10: 64, 0x0F: 64, 0x11: 128, 0x17: 128}
+        for w, h, code, size, align in self.GAME:
+            ew, eh = (w, h) if code == 0x14 else (-(-w // 4), -(-h // 4))
+            self.assertEqual(gx2tile.surface_size(ew, eh, bpp[code], 4)[2:], (size, align), (w, h, code))
+        self.assertEqual(gx2tile.surface_size(2, 2, 64, 2)[2:], (512, 256))  # 8 x 8 texels, 1D tiled
+
+    def test_round_trip(self):
+        from lyt import gx2tile
+        for bpp in (32, 64, 128):
+            for mode in (1, 2, 4):
+                for swz in ((0, 3, 7) if mode == 4 else (0,)):
+                    w, h = 37, 21
+                    data = bytes((i * 7 + 3) & 0xFF for i in range(w * h * bpp // 8))
+                    t = gx2tile.tile(data, w, h, bpp, mode, swz << 8)
+                    self.assertEqual(gx2tile.untile(t, w, h, bpp, mode, swz << 8), data, (bpp, mode, swz))
+                    addr = gx2tile.addresses(w, h, bpp, mode, swz << 8).reshape(-1)
+                    self.assertEqual(len(set(addr.tolist())), w * h)  # no two elements share an address
+
+
+class Textures(unittest.TestCase):
+    def test_bc_quality(self):
+        from lyt import bc
+        w, h = 64, 32
+        img = gradient(w, h)
+        limits = {"bc1": (12, (0, 1, 2)), "bc3": (12, (0, 1, 2, 3)), "bc4": (4, (0,)), "bc5": (4, (0, 1))}
+        for fmt, (limit, ch) in limits.items():
+            src = gradient(w, h, alpha=False) if fmt == "bc1" else img
+            back = bc.decode(fmt, bc.encode(fmt, src, w, h), w, h)
+            img_ = src
+            self.assertLess(rmse(img_, back, ch), limit, fmt)
+
+    def test_bc1_punch_through(self):
+        import numpy as np
+        from lyt import bc
+        img = np.frombuffer(gradient(8, 8, alpha=False), np.uint8).reshape(8, 8, 4).copy()
+        img[:4, :4, 3] = 0
+        back = np.frombuffer(bc.decode("bc1", bc.encode("bc1", img.tobytes(), 8, 8), 8, 8), np.uint8)
+        back = back.reshape(8, 8, 4)
+        self.assertTrue((back[:4, :4, 3] == 0).all() and (back[4:, :, 3] == 255).all())
+
+    def test_bflim_formats(self):
+        w, h = 100, 50
+        img = gradient(w, h)
+        for fmt in bflim.FORMATS:
+            for tile, swz in (("tiled", 0), ("tiled", 5), ("1d", 0), ("linear", 0)):
+                data = bflim.encode(img, w, h, fmt, tile, swz)
+                fw, fh, align, code, tile_byte, size = bflim.parse_footer(data)
+                self.assertEqual((fw, fh, code, tile_byte), (w, h, bflim.FORMATS[fmt].code,
+                                                            bflim.TILE_MODES[tile] | swz << 5))
+                self.assertEqual(len(data), size + 0x28)
+                back, _, _ = bflim.decode(data)
+                if fmt == "rgba8":
+                    self.assertEqual(back, img)
+                else:
+                    from lyt import bc
+                    f = bflim.FORMATS[fmt]
+                    lin = bflim.elements(img, w, h, fmt)[0]
+                    self.assertEqual(back, bflim._from_channels(bc.decode(f.bc, lin, w, h), f.channels))
+                    if fmt in ("bc3", "bc4a", "bc5la"):  # smooth alpha survives
+                        self.assertLess(rmse(img, back, (3,)), 10, fmt)
+
+
+def cemu_latte_lib():
+    """The port's libcemu_latte.a (address library) from WWHD_CEMU_LATTE_LIB or a build next to the repo."""
+    root = os.path.dirname(os.path.dirname(HERE))
+    for p in (os.environ.get("WWHD_CEMU_LATTE_LIB", ""), os.path.join(root, "build", "cmake", "libcemu_latte.a"),
+              os.path.join(root, "build", "libcemu_latte.a")):
+        if p and os.path.exists(p):
+            return p, root
+    return None, root
+
+
+class PortAddrLib(unittest.TestCase):
+    """Our tiled textures read back through the port's own address library (LatteAddrLib)."""
+
+    @classmethod
+    def setUpClass(cls):
+        import shutil
+        import subprocess
+        import tempfile
+        lib, root = cemu_latte_lib()
+        cxx = shutil.which("clang++") or shutil.which("c++")
+        if not lib or not cxx:
+            raise unittest.SkipTest("no libcemu_latte.a (set WWHD_CEMU_LATTE_LIB) or no C++ compiler")
+        cls.tmp = tempfile.mkdtemp()
+        cemu = os.path.join(root, "runtime", "third_party", "cemu")
+        cls.exe = os.path.join(cls.tmp, "gx2_detile")
+        subprocess.run([cxx, "-std=c++20", "-w", "-O1", "-include", os.path.join(cemu, "cemu_shim.h"),
+                        "-I" + cemu, "-I" + os.path.join(cemu, "Cafe"),
+                        "-I" + os.path.join(root, "runtime", "third_party", "fmt", "include"),
+                        os.path.join(HERE, "lyt", "tests", "gx2_detile.cpp"), lib, "-o", cls.exe], check=True)
+
+    @classmethod
+    def tearDownClass(cls):
+        import shutil
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def test_detile(self):
+        import subprocess
+        for (w, h) in ((100, 50), (300, 300), (512, 171), (8, 8)):
+            img = gradient(w, h)
+            for fmt, f in bflim.FORMATS.items():
+                for tile, swz in (("tiled", 0), ("tiled", 3), ("tiled", 6), ("1d", 0), ("linear", 0)):
+                    data = bflim.encode(img, w, h, fmt, tile, swz)
+                    _, _, align, _, _, size = bflim.parse_footer(data)
+                    src, dst = os.path.join(self.tmp, "in"), os.path.join(self.tmp, "out")
+                    with open(src, "wb") as fh:
+                        fh.write(data[:size])
+                    out = subprocess.run([self.exe, hex(f.gx2), str(w), str(h), str(bflim.TILE_MODES[tile]),
+                                          hex(swz << 8), src, dst], check=True, capture_output=True, text=True)
+                    pitch, height, psize, palign = map(int, out.stdout.split())
+                    self.assertEqual((psize, palign), (size, align), (w, h, fmt, tile))
+                    with open(dst, "rb") as fh:
+                        self.assertEqual(fh.read(), bflim.elements(img, w, h, fmt)[0], (w, h, fmt, tile, swz))
 
 
 if __name__ == "__main__":

@@ -28,7 +28,7 @@ def build_files(desc, texture_loader=load_texture):
     for tex, spec in desc.textures.items():
         rgba, w, h = texture_loader(spec, desc)
         files["timg/%s" % desc.texture_file(tex)] = bflim.encode(
-            rgba, w, h, spec.get("format", "rgba8"), spec.get("tile", "linear"))
+            rgba, w, h, spec.get("format", "rgba8"), spec.get("tile", "linear"), int(spec.get("swizzle", 0)))
     for anim_name, spec in desc.animations.items():
         files["anim/%s_%s.bflan" % (desc.name, anim_name)] = bflan.build(anim_name, spec, desc)
     return files
