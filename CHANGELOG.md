@@ -7,6 +7,10 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Android: system game modes** (idea from the GreenNaugahyde Android fork): the game declares Android's
+  performance and battery-saving game modes, and the system no longer downscales the picture or overrides the
+  frame rate, so the port's own resolution and frame pacing stay in charge.
+
 - **Fixed: Windows setup stopped while linking when the folder name had an emoji or other special characters**
   ("'charmap' codec can't encode character"). Setup now writes its linker file lists as UTF-8, so the game can be
   set up in any folder.
