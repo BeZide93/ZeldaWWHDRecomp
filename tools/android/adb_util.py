@@ -28,6 +28,10 @@ class AdbError(subprocess.CalledProcessError):
                 f'rc={self.returncode}; stderr={stderr.strip()}')
 
 
+class AdbTransportError(AdbError):
+    """All attempts ended in a transient transport failure or timeout."""
+
+
 def _binary_command(command, has_input):
     """Frame raw cat output because exec-out itself drops remote exit status."""
     command = list(command)
@@ -112,7 +116,7 @@ def run(command, *, attempts=4, backoff=.5, check=False, **kwargs):
                 destination.write(result.stdout)
             return result
         if attempt == attempts:
-            failure = AdbError(original_command, result, attempt)
+            failure = AdbTransportError(original_command, result, attempt)
             print(str(failure), file=sys.stderr, flush=True)
             raise failure
         print(f'adb transport retry {attempt}/{attempts}: {shlex.join(original_command)}; '
@@ -176,6 +180,24 @@ def wait_until_ready(prefix, *, timeout=180, interval=1, previous_boot_id=None):
         remaining = deadline - time.monotonic()
         if remaining > 0: time.sleep(min(interval, remaining))
     raise TimeoutError(f'Emulator readiness timed out after {timeout}s; last probe={last}')
+
+
+def reboot_and_wait(prefix, *, previous_boot_id, timeout=180):
+    """Request one framework reboot, then verify its effect and storage readiness.
+
+    A successful reboot may disconnect adb before the request returns. Never
+    replay that request: a changed, nonempty kernel boot ID is still mandatory,
+    so a transport failure that prevented the reboot cannot turn into success.
+    """
+    started = time.monotonic()
+    try:
+        run(list(prefix) + ['shell', 'svc power reboot'], attempts=1, check=True,
+            timeout=min(30, timeout))
+    except AdbTransportError as error:
+        print('Reboot request disconnected adb; verifying changed kernel boot: ' + str(error),
+              file=sys.stderr, flush=True)
+    wait_until_ready(prefix, previous_boot_id=previous_boot_id,
+                     timeout=max(0, timeout - (time.monotonic() - started)))
 
 
 def open_stream(command, **kwargs):

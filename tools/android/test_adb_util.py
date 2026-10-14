@@ -136,6 +136,37 @@ os.execvp('sh', ['sh', '-c', sys.argv[-1]])
 
 
 class ReadinessTests(unittest.TestCase):
+    def test_reboot_disconnect_is_not_replayed_and_requires_changed_boot(self):
+        prefix = ['adb', '-s', 'emulator-test']
+        failure = adb_util.AdbTransportError(prefix, subprocess.CompletedProcess(prefix, 255, b'', b'error: closed'), 1)
+        with patch('adb_util.run', side_effect=failure) as run, patch('adb_util.wait_until_ready') as ready, patch('adb_util.time.monotonic', side_effect=[10, 12]), redirect_stderr(io.StringIO()):
+            adb_util.reboot_and_wait(prefix, previous_boot_id=b'old-boot')
+        run.assert_called_once_with(prefix + ['shell', 'svc power reboot'], attempts=1, check=True, timeout=30)
+        ready.assert_called_once_with(prefix, previous_boot_id=b'old-boot', timeout=178)
+
+    def test_reboot_does_not_hide_an_ordinary_command_error(self):
+        failure = adb_util.AdbError(['adb'], subprocess.CompletedProcess(['adb'], 1, b'', b'Permission denied'), 1)
+        with patch('adb_util.run', side_effect=failure), patch('adb_util.wait_until_ready') as ready:
+            with self.assertRaises(adb_util.AdbError) as caught:
+                adb_util.reboot_and_wait(['adb'], previous_boot_id=b'old-boot')
+        self.assertIs(caught.exception, failure)
+        ready.assert_not_called()
+
+    def test_transport_loss_without_reboot_still_fails(self):
+        clock = [0]
+        commands = []
+        def probe(command, **kwargs):
+            commands.append(command[-1])
+            if command[-1] == 'svc power reboot':
+                raise adb_util.AdbTransportError(command, subprocess.CompletedProcess(command, 255, b'', b'error: closed'), 1)
+            out = b'1' if command[-1] == 'getprop sys.boot_completed' else b'old-boot'
+            return subprocess.CompletedProcess(command, 0, out, b'')
+        def sleep(seconds): clock[0] += seconds
+        with patch('adb_util.run', side_effect=probe), patch('adb_util.time.monotonic', side_effect=lambda: clock[0]), patch('adb_util.time.sleep', side_effect=sleep), redirect_stderr(io.StringIO()):
+            with self.assertRaisesRegex(TimeoutError, 'new_boot:.*old-boot'):
+                adb_util.reboot_and_wait(['adb'], previous_boot_id=b'old-boot', timeout=2)
+        self.assertEqual(commands.count('svc power reboot'), 1)
+
     def test_reboot_requires_a_nonempty_changed_kernel_boot_id(self):
         clock = [0]
         offline = adb_util.AdbError(['adb'], subprocess.CompletedProcess(['adb'], 255, b'', b'device offline'), 1)

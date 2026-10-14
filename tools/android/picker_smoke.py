@@ -322,10 +322,7 @@ def main():
             print("Rebooting the emulator to verify persisted grants", flush=True)
             before_boot = shell("cat", "/proc/sys/kernel/random/boot_id").stdout.strip()
             # Exercise Android's framework shutdown/reboot path.
-            shell("svc", "power", "reboot", check=False)
-            # Preserve the changed-kernel-boot assertion while tolerating adb
-            # disconnects and waiting for external_primary after framework boot.
-            adb_util.wait_until_ready(prefix, timeout=120, previous_boot_id=before_boot)
+            adb_util.reboot_and_wait(prefix, previous_boot_id=before_boot)
             shell("wm", "dismiss-keyguard")
             home()
             if selected(kind="image")[0] != identity: raise AssertionError("Reboot lost input selection")
