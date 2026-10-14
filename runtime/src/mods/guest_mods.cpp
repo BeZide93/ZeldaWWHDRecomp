@@ -19,6 +19,7 @@
 #include "story_notebook_game.h"
 #include "guest_png.h"
 #include "story_mail.h"
+#include "item_icons.h"
 #include "story_lyt_screen.h"
 #include "story_notebook_layout.h"
 #include "story_mail_book.h"
@@ -575,6 +576,16 @@ bool load_one(const std::string& path, std::string& err,const mods::packages::Gu
             story_notebook::set_icon_open(icon_open.empty()?std::string():(std::filesystem::path(pkg.path)/icon_open).string());
             const std::string layout=look.get("layout").string();
             story_notebook::set_layout_description(layout.empty()?std::string():(std::filesystem::path(pkg.path)/layout).string(),pkg.data_path);
+            // the item icons (item_icons.h): the notebook's own frame (key 0), built into the game's 2D pack
+            // (test aid WWHD_TEST_ITEM_ICONS=a.png,b.png adds pictures as more items)
+            std::vector<item_icons::Item> icons;
+            if(!icon.empty())icons.push_back({0,(std::filesystem::path(pkg.path)/icon).string()});
+            if(const char* extra=std::getenv("WWHD_TEST_ITEM_ICONS")) {
+                std::string list=extra;uint16_t key=0xF000;
+                for(size_t a=0;a<list.size();){size_t b=list.find(',',a);if(b==std::string::npos)b=list.size();
+                    if(b>a)icons.push_back({key++,list.substr(a,b-a)});a=b+1;}
+            }
+            item_icons::set_items(icons,pkg.data_path);
         }
         if(manifest_text.find("\"quests\"")!=std::string::npos||manifest_text.find("\"charts\"")!=std::string::npos) {
             prepare_npc_catalogue();

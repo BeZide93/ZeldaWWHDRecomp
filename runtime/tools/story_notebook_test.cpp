@@ -176,6 +176,7 @@ void test_page() {
     std::vector<Quest> qs;
     for (int i = 0; i < 7; i++) qs.push_back(quest("m", "q" + std::to_string(i)));
     qs[2].has_place = true;
+    for (const Quest& q : qs) reach_step(b, q.key, 1);  // started: only a quest in progress can be tracked
     auto rs = rows(qs, b);
     Page page;
     assert(!page.open() && page.draw(rs).empty());
@@ -234,6 +235,10 @@ void test_page() {
     assert(page.mode() == Page::Mode::Detail && page.selected_key() == rs[1].quest->key);
     page.input(press(0), rs);
     tap.x = kTrackX + 20, tap.y = kTrackY + 20;
+    assert(!rs[1].quest->has_place && page.input(tap, rs).kind == Page::Action::None);  // no place: no Show on chart
+    for (Quest& q : qs)
+        if (&q == rs[1].quest) q.has_place = true;
+    page.input(press(0), rs);
     a = page.input(tap, rs);
     assert(a.kind == Page::Action::Toggle && a.key == rs[1].quest->key);
     page.input(press(0), rs);
@@ -1039,7 +1044,7 @@ void test_page_feel() {
     Book b(raw);
     std::vector<Quest> qs;
     for (int i = 0; i < 3; i++) qs.push_back(quest("m", "q" + std::to_string(i)));
-    qs[1].has_place = true;
+    for (Quest& q : qs) q.has_place = true, reach_step(b, q.key, 1);  // trackable: in progress, with a place
     auto rs = rows(qs, b);
     Page page;
     page.show();
@@ -1981,6 +1986,26 @@ void test_manifest_charts() {
     assert(page.input(press(kPadX), rs).kind == Page::Action::None && page.open());
 }
 
+// review5 fixes: Where for a quest not started yet, no Show on chart without a place
+void test_detail_texts() {
+    Quest q = quest("m", "w");
+    Row r{&q, Status::New, 0, false};
+    assert(where_text(r) == "This step has no place on the chart." && !trackable(r));
+    q.where = "Outset Island", q.has_place = true;
+    assert(where_text(r) == "Not started yet: Outset Island" && trackable(r));  // not started: step 1's place
+    r.tracked = true;
+    assert(trackable(r));
+    r.tracked = false;
+    r.status = Status::InProgress, r.step = 1;
+    assert(where_text(r) == "Outset Island" && trackable(r));
+    q.has_place = false;
+    assert(!trackable(r));
+    r.tracked = true;
+    assert(trackable(r));  // a tracked quest can always be untracked
+    r.status = Status::Done, r.tracked = false;
+    assert(!trackable(r));
+}
+
 int main() {
     assert(map(kGlobals, 0x10000) && map(kArena, 0x40000));
     story_store::set_memory(kArena + 0x20000);
@@ -1988,6 +2013,7 @@ int main() {
     test_record();
     test_text();
     test_page();
+    test_detail_texts();
     test_bag_place();
     test_services();
     test_hooks();

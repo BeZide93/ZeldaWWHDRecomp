@@ -449,6 +449,14 @@ target_include_directories(lyt_build_test PRIVATE runtime/include runtime/src ru
 target_compile_options(lyt_build_test PRIVATE -UNDEBUG)
 target_link_libraries(lyt_build_test PRIVATE ZLIB::ZLIB)
 add_test(NAME lyt_build COMMAND lyt_build_test)
+# the extended item icon archive (runtime/src/mods/item_icons.cpp); test_lyt.py compares it with
+# tools/story_mods/lyt/item_icons.py
+add_executable(item_icons_test runtime/tools/item_icons_test.cpp runtime/src/mods/item_icons.cpp runtime/src/mods/lyt_build.cpp
+               runtime/src/mods/guest_png.cpp runtime/src/mods/mod_archive.cpp)
+target_include_directories(item_icons_test PRIVATE runtime/include runtime/src runtime/src/mods)
+target_compile_options(item_icons_test PRIVATE -UNDEBUG)
+target_link_libraries(item_icons_test PRIVATE ZLIB::ZLIB)
+add_test(NAME item_icons COMMAND item_icons_test)
 # the text prompt's reader of the game's name font (runtime/src/overlay/game_font.cpp)
 add_executable(rtl_text_test runtime/tools/rtl_text_test.cpp runtime/src/rtl_text.cpp)
 target_include_directories(rtl_text_test PRIVATE runtime/src)
