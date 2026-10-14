@@ -1,4 +1,5 @@
 #include "../mods/fast_forward.h"
+#include "../mods/mods.h"
 #ifdef WWHD_HAS_VULKAN
 #include "gfx/vulkan/stutter_trace.h"
 #include "gfx/vulkan/headstart.h"
@@ -195,6 +196,7 @@ void held_keys(bool* keys) {
 
 void release_keys() {
     mods::fast_forward_reset();
+    mods::lock_on_reset();
     std::lock_guard<std::mutex> lk(g_mu);
     g_mouse_bindings.consume();
     memset(g_keys, 0, sizeof(g_keys));

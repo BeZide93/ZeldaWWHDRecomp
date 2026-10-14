@@ -1,5 +1,6 @@
 // Optional gameplay mods (Gameplay menu). All off by default; each can be switched live.
 //   camera.cpp  direct right-stick camera, mouse camera, first person on R3 / mouse wheel
+//   lock_on.cpp optional enemy range and R3 cycling through the native eligible list
 //   mouse.mm    mouse capture in the game window (macOS events)
 //   turbo.cpp   quick doors and fast scene changes (extra logic steps while they run)
 //   cheats.cpp  items, sword/shield, stats, infinite health/magic/ammo, songs, Triforce, dungeon items
@@ -30,6 +31,16 @@ bool quick_doors();
 void set_quick_doors(bool on);
 bool fast_scenes();
 void set_fast_scenes(bool on);
+
+// Optional enemy targeting assistance. Off preserves the game's targeting unchanged.
+bool extended_lock_on();
+void set_extended_lock_on(bool on);
+float lock_on_range(); // multiplier of native enemy acquisition/release distances, 1..3
+void set_lock_on_range(float factor);
+bool lock_on_cycling();
+void set_lock_on_cycling(bool on);
+void lock_on_filter_pad(input::PadState& s); // reserve R3 only while enemy-locked
+void lock_on_reset(); // focus loss, overlays and save/load require a fresh press
 
 bool move_speed();
 void set_move_speed(bool on);
