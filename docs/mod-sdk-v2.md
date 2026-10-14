@@ -576,8 +576,11 @@ When Link gets an item, its name and description show with the game's small get 
 bag's pages are full (4 pages of 8 by default), the item is kept and gets a place as soon as one is
 free; the caption says so.
 
-**In the bag.** The player can move an item from the extra pages into a free place of the game's
-own eight, and back. Selecting an item shows its Info box. Items with a use can go on X, Y or R.
+**In the bag.** In the Delivery Bag window, R (or a tap on the page dots above the window) turns to
+the extra pages and L back; B returns to the game's eight places. A on an item offers Info, Use and
+a move into an empty place of the game's eight; A on an empty place there brings a mod item back.
+X or Y puts an item with a use on that button. New items fill 4 pages by default (`WWHD_BAG_PAGES=1..16`);
+when they are full, new items wait and the page says how many.
 
 **Saving.** How many of each item Link has, where it sits in the bag and which button it is on are
 stored in the save file's story area (see [Where story progress is saved](#where-story-progress-is-saved)),
