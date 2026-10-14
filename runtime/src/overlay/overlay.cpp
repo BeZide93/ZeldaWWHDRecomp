@@ -1546,6 +1546,19 @@ void builtin_options(const std::string& id) {
         if (ImGui::Checkbox("No automatic jumps off ledges", &no_auto))
             hostui::post([no_auto] { mods::set_no_auto_jump(no_auto); hostui::set("mod.jump-anywhere.no-auto", no_auto ? "1" : "0"); mods::packages::remember_option("jump-anywhere.no-auto", no_auto); });
         help("The button also keeps its normal use. Link drops off ledges instead of jumping when automatic ledge jumps are off; press the button just after leaving the edge to jump. The moon jump cheat takes L while it is on.");
+    } else if (id == "quick-use") {
+        ImGui::TextUnformatted("Quick-use animation speed");
+        for (float speed : {1.f, 1.25f, 1.5f}) {
+            const char* label = speed == 1.f ? "1x (vanilla)" : speed == 1.25f ? "1.25x" : "1.5x";
+            if (speed != 1.f) flow::next(flow::check(label));
+            if (radio(label, mods::quick_use_speed() == speed))
+                hostui::post([speed] { mods::set_quick_use_speed(speed); hostui::set("mod.quick-use.speed", std::to_string(speed)); mods::packages::remember_option("quick-use.speed", speed); });
+        }
+        help("Only accelerates supported upper-body equip and boomerang wind-up for enemy-locked quick use. "
+             "Does not bypass native readiness or ammo, or change projectile speed or flight/return. "
+             "Default: vanilla 1x, with quick use off.");
+        if (const char* override = std::getenv("WWHD_MOD_QUICK_USE_SPEED"))
+            note("WWHD_MOD_QUICK_USE_SPEED=%s overrides the saved speed at startup.", override);
     } else if (id == "fast-forward") {
         for (unsigned rate : {2u, 3u, 4u}) {
             if (rate != 2) flow::next(flow::check(rate == 2 ? "2x" : rate == 3 ? "3x" : "4x"));
@@ -2589,6 +2602,7 @@ void set_open(bool open, OpenReason reason, KeyOrigin origin) {
     if (open) {
         mods::fast_forward_reset();
         mods::lock_on_reset();
+        mods::quick_use_reset();
         mods::mouse_release();
         U.just_opened = true;
         U.slots_time = -1;

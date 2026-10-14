@@ -521,6 +521,7 @@ bool do_save_fast(int slot, const std::string& destination, std::function<void(b
     auto report=[&](bool ok,const std::string& why){if(done)done(ok,why);else report_done(slot,ok,why);};
     mods::fast_forward_reset();
     mods::lock_on_reset();
+    mods::quick_use_reset();
     std::string busy, why;
     auto t0 = std::chrono::steady_clock::now();
     if (!threads::quiesce(250, busy, 1, 30)) {
@@ -636,6 +637,7 @@ bool do_save_streaming(int slot, const std::string& destination, std::function<v
     auto report=[&](bool ok,const std::string& why){if(done)done(ok,why);else report_done(slot,ok,why);};
     mods::fast_forward_reset();
     mods::lock_on_reset();
+    mods::quick_use_reset();
     std::string busy, why;
     // Defer before freezing if a previous slot read is still in progress.
     std::unique_lock<std::mutex> io(g_io,std::try_to_lock);
@@ -751,6 +753,7 @@ bool do_load(const std::shared_ptr<Snapshot>& s) {
     for(uint32_t tag:{kSecThreads,kSecHeaps,kSecFiles,kSecAudio,kSecGx2,kSecAllocs,kSecDispatch})
         if(!s->sections.count(tag)){message("%s: incomplete state",slot_label(s->slot).c_str());return refused("incomplete state");}
     mods::fast_forward_reset();
+    mods::quick_use_reset();
     std::string busy, why;
     // Structural checks precede targets: that helper changes thread wait state.
     try {
@@ -1026,6 +1029,7 @@ float be_f32(const uint8_t* p) { return u32_as_f32((uint32_t)p[0] << 24 | (uint3
 
 // the current game as a portable state (main thread, frame boundary)
 bool capture_portable(Cpu* c, pstate::State& s, std::string& why) {
+    mods::quick_use_reset();
     bool retry;
     if (!gameplay_ready(why, retry)) return false;
     CallScope scope(c);
@@ -1104,6 +1108,7 @@ void apply_hd_sections(Cpu* c, const pstate::State& s) {
 
 // puts a portable state into the running game; false + retry when the game is not ready yet
 bool apply_portable(Cpu* c, const pstate::State& s, std::string& why, bool& retry) {
+    mods::quick_use_reset();
     if (!gameplay_ready(why, retry)) return false;
     // Portable states do not overwrite the runtime arena. Prove clean owned
     // unpublished lineage while workers are parked, or revoke/quarantine the
