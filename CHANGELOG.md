@@ -116,10 +116,11 @@ what is on `devel` and not released yet (also in the
 
 - **Story system for quest mods** (letters, a quest notebook and sea-chart marks, in the game's own style). The
   port brings the system; all quest content comes from the mod catalogue:
-  - **Story system** (Mods > Built-in, on): when it's on, the port installs the **Story Notebook** package from the
-    mod catalogue by itself and keeps it enabled. It's required for every quest mod. Without it (for example
-    offline) the story system stays inactive and quest mods show "Needs the Story Notebook quest"; the port tries
-    again on the next start. The normal game is unchanged either way.
+  - **Story system** (Mods > Built-in, on): it needs the **Story Notebook** package from the mod catalogue, which
+    setup installs (it needs the internet once). If setup was offline, install it later in Mods: switch the
+    Story system on, or press Install on its line. It's required for every quest mod and stays enabled. The game's
+    start never goes online; without the package the story system stays inactive and the normal game is
+    unchanged.
   - **Letters by Rito mail:** a quest mod announces its quest with a letter from the Rito postbox, once Link has
     the Delivery Bag. The Story Notebook package's letter brings the **story notebook**.
   - **Story notebook:** in the Delivery Bag. Its page lists every mod quest with the next step, where to go and its

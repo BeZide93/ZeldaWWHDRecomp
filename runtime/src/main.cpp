@@ -559,8 +559,13 @@ int main(int argc, char** argv) {
         if (!dir.empty()) rc.work = std::filesystem::path(dir).parent_path() / "Catalogue";
         const bool ok = !dir.empty() && mods::story_system() && mods::required::install(rc);
         const auto st = mods::required::status();
-        printf("{\"ok\": %s, \"message\": \"%s\"}\n", ok ? "true" : "false",
-               ok ? "The story notebook is installed." : !mods::story_system() ? "The story system is off." : st.text.c_str());
+        std::string message = ok ? "The story notebook is installed." : !mods::story_system() ? "The story system is off." : st.text, quoted;
+        for (unsigned char ch : message) {  // one JSON line for setup: escape quotes, backslashes and control bytes
+            if (ch == '"' || ch == '\\') quoted += '\\', quoted += char(ch);
+            else if (ch < 0x20) quoted += ' ';
+            else quoted += char(ch);
+        }
+        printf("{\"ok\": %s, \"message\": \"%s\"}\n", ok ? "true" : "false", quoted.c_str());
         fflush(stdout);
         _exit(ok ? 0 : 1);
     }
