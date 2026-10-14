@@ -181,7 +181,7 @@ void set_scratch_memory(uint32_t guest) { g_scratch = guest; }
 bool installed() { return g_installed; }
 
 void install(const std::function<std::string(uint32_t)>& replaced_by, const std::function<void(uint32_t, void (*)(Cpu*))>& replace) {
-    if (g_installed || !g_original || !g_call || !g_scratch || story_chart::charts().empty()) return;
+    if (g_installed || !g_original || !g_call || !g_scratch || !story_chart::declared()) return;
     std::vector<Hook> all = salvage_hooks();
     for (const std::vector<Hook>& part : {state_hooks(), chest_hooks()}) all.insert(all.end(), part.begin(), part.end());
     // all or nothing: a point registered without the checks that answer its save number would reach the

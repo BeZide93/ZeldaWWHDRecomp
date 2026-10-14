@@ -685,7 +685,7 @@ void init() {
     });
     // Mod treasure charts (story_treasure.h): the game's salvage point, light ring, crane and chest for a
     // declared mod chart, only when a loaded mod declares charts.
-    if(!story_chart::charts().empty()){
+    if(story_chart::declared()){
         story_treasure::set_game_calls(call_original,[](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);});
         story_treasure::set_scratch_memory(mem::host_alloc(story_treasure::kScratchBytes,16));
         story_treasure::install([](uint32_t addr) {
