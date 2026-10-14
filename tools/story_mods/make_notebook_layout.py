@@ -132,7 +132,9 @@ def text(name, x, y, size, colour, value="", bold=False, width=None, align="left
          square=False, **kw):
     """A text pane whose text starts at the page's (x, y) (top left of the text) in the given font size."""
     # k: the game font's glyphs are smaller in their cell than the HUD's at the same size (measured
-    # against the HUD page: x-height 1.2 - 1.3 times, hudref); square: the icon font's round buttons
+    # against the HUD page: x-height 1.2 - 1.3 times, hudref); the HUD's letters are narrower, so the
+    # width grows only to 1.04 (lines as long as the HUD's: detail helper's measurement); square: the
+    # icon font's round buttons
     h = size * 1.35 * k
     w = width if width is not None else 600
     pos = {"left": ["left", "top"], "center": ["center", "top"], "right": ["right", "top"]}[align]
@@ -145,10 +147,12 @@ def text(name, x, y, size, colour, value="", bold=False, width=None, align="left
     # white, the font's border (about half value) a mix of both. Plain text: black = transparent white, as
     # the game's own plain panes (ffffff00): the border fades out on the paper (black = the ink at alpha 0
     # gives the border the ink at half alpha: heavy letters). Bold: the HUD's menu-label border.
-    border = ([44, 58, 46, 255] if light else [255, 255, 255, 255]) if bold else [255, 255, 255, 0]
+    # plain letters: the border a light ink (half way to white, alpha 0): as heavy as the HUD page's letters
+    # (white makes them too light, the ink itself far too heavy; measured against the HUD detail page)
+    border = ([44, 58, 46, 255] if light else [255, 255, 255, 255]) if bold else [round(c + (255 - c) * 0.5) for c in fill[:3]] + [0]
     p = {"type": "text", "name": name, "size": [round(w, 3), round(h, 3)], "translate": place(x, y, w, h, parent),
          # the HUD page draws all its text in the game's menu font (story_notebook_font.h)
-         "font": "CKingMain.bffnt", "font_size": [round(size * k * (1.0 if square else 0.92), 2), round(size * k, 2)],
+         "font": "CKingMain.bffnt", "font_size": [round(size * min(k, 1.04) * (1.0 if square else 0.92), 2), round(size * k, 2)],
          "text": value, "capacity": capacity, "text_position": pos, "line_alignment": align,
          "text_material": {"black": linear(border), "white": linear(fill)}}
     p.update(kw)

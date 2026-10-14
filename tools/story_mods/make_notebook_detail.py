@@ -61,16 +61,7 @@ def text(nb, *args, **kw):
     (cap height, x-height); the HUD's letters are narrower (measured in game against the HUD detail page:
     the lines were 1.14 - 1.16 times as long at k = 1.2, 1.05 at k = 1.1, the same at 1.0), so the font's
     width is scaled by 1.04 / k. Plain letters get a light-ink border (PLAIN_BORDER)."""
-    p = nb.text(*args, **kw)
-    ink = p["text_material"]["white"]
-    if not kw.get("bold") and p["text_material"]["black"][3] == 0:
-        # plain letters: the font's border (half the glyph's value) a light ink, not white: the HUD page's
-        # plain letters are heavier than white borders give (the ink itself makes them far too heavy)
-        p["text_material"]["black"] = [round(c + (255 - c) * PLAIN_BORDER) for c in ink[:3]] + [0]
-    k = kw.get("k", 1.2)
-    if k > HUD_WIDTH_K:
-        p["font_size"][0] = round(p["font_size"][0] * HUD_WIDTH_K / k, 2)
-    return p
+    return nb.text(*args, **kw)  # nb.text has the HUD's letter widths and the plain letters' border now
 
 
 def box(nb, r):
