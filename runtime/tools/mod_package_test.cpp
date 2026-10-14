@@ -1,6 +1,9 @@
 #include "mods/setup_run.h"
 #include "mod_test_host.h"
 #include "mods/packages.h"
+#include "mods/mods.h"
+#include "mods/required.h"
+#include <algorithm>
 #include "mods/content.h"
 #include "mods/cemu_pack.h"
 #include <filesystem>
@@ -255,6 +258,31 @@ int main(int argc, char** argv) {
         std::cout<<"Animation startup override "<<override<<" survives saved mode "<<saved<<"\n";
         return 0;
     }
+    if(argc==3&&std::string(argv[1])=="--story-notebook") {  // tools/catalogue/test_story_notebook.py
+        auto fixtures=fs::absolute(argv[2]);
+        env("WWHD_MOD_MANAGER_DIR",(fixtures/"manager").string().c_str());env("WWHD_TEST_TRUST_NATIVE_MODS",nullptr);
+        set_code_mod_support(true);initialize();
+        // the start: what is installed only (no catalogue is given, nothing is fetched)
+        assert(!mods::required::check_local());
+        assert(mods::required::status().text.find("Install it from the Mods menu")!=std::string::npos);
+        mods::required::Context c;
+        c.port=mods::catalogue::Version::parse("0.2.13");c.work=fixtures/"work";
+        c.fetch=[](const std::string&,const fs::path&,uint64_t){assert(!"a local catalogue needs no transport");};
+        // offline: a clear message, nothing installed
+        c.catalogue=(fixtures/"missing/index.json").string();
+        assert(!mods::required::install(c));
+        assert(mods::required::status().text.find("Try again from the Mods menu")!=std::string::npos&&!mods::required::status().installed);
+        assert(std::none_of(list().begin(),list().end(),[](const View& v){return v.id=="story-notebook";}));
+        // setup or the Mods menu: installed, confirmed and enabled; locked while the story system is on
+        c.catalogue=(fixtures/"index.json").string();
+        assert(mods::required::install(c)&&mods::required::status().installed&&mods::required::status().restart);
+        assert(view("story-notebook").enabled&&view("story-notebook").native_confirmed);
+        std::string error;
+        assert(!enable("story-notebook",false,error)&&error.find("part of the story system")!=std::string::npos);
+        assert(mods::required::check_local());  // the next start
+        std::cout<<"Story notebook: offline message, install, confirm, enable, lock\n";
+        return 0;
+    }
     if(argc==4&&std::string(argv[1])=="--catalogue-pilots") {
         auto fixtures=fs::absolute(argv[2]),storage=fixtures/"manager";
         env("WWHD_MOD_MANAGER_DIR",storage.string().c_str());env("WWHD_TEST_TRUST_NATIVE_MODS",nullptr);
@@ -393,6 +421,50 @@ int main(int argc, char** argv) {
         assert(install((root/"source").string(),error));
         assert(view("guest-fixture").compatible&&view("guest-fixture").restart_required);
         assert(!view("guest-fixture").native_confirmed);
+        {   // story quests naming an NPC the port's catalogue doesn't know: refused with the reason, never ignored
+            auto quests=[&](const char* who){
+                fs::remove_all(root/"quests");fs::create_directories(root/"quests");
+                std::ofstream(root/"quests/manifest.json")<<R"({"format_version":1,"id":"quest-fixture","name":"Quest fixture","version":"1.0.0","game_id":"wwhd-usa","kind":"guest","guest":{"api_version":1,"elf":"mod.elf"},"quests_format":1,"quests":[{"id":"q","title":"Q","steps":[{"n":1,"text":"Go.","npc":{"who":")"<<who<<R"(","lines":["Hi."]}}]}]})";
+                std::ofstream elf(root/"quests/mod.elf",std::ios::binary);elf.write("\x7f" "ELF\x01\x02",6);
+            };
+            quests("windfall-nobody");
+            assert(!install((root/"quests").string(),error)&&error.find("no NPC named \"windfall-nobody\"")!=std::string::npos);
+            quests("windfall-um1");
+            assert(install((root/"quests").string(),error)&&view("quest-fixture").compatible);
+            // every quest mod depends on the story system's required package, declared or not
+            set_code_mod_support(true);
+            const auto deps=view("quest-fixture").dependencies;
+            assert(std::find(deps.begin(),deps.end(),"story-notebook>=0.0.0")!=deps.end());
+            assert(!enable("quest-fixture",true,error)&&error.find("Needs the Story Notebook quest")!=std::string::npos);
+        }
+        {   // the Story Notebook's "notebook" block: its look is exempt from the HUD texture budget, with limits of its own
+            static const char kPng[]="\x89\x50\x4e\x47\x0d\x0a\x1a\x0a\x00\x00\x00\x0d\x49\x48\x44\x52\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\x0d\x49\x44\x41\x54\x78\xda\x63\x64\x60\xf8\x5f\x0f\x00\x02\x87\x01\x80\xeb\x47\xba\x92\x00\x00\x00\x00\x49\x45\x4e\x44\xae\x42\x60\x82";
+            auto png=[&](const fs::path& at){std::ofstream(at,std::ios::binary).write(kPng,sizeof kPng-1);};
+            auto package=[&](const std::string& id,bool look){
+                const auto dir=root/("look-"+id);fs::remove_all(dir);fs::create_directories(dir/"assets/layout");
+                std::ofstream(dir/"manifest.json")<<R"({"format_version":1,"id":")"<<id<<R"(","name":"Look fixture","version":"1.0.0","game_id":"wwhd-usa","kind":"guest","guest":{"api_version":1,"elf":"mod.elf"})"
+                    <<(look?R"(,"notebook":{"icon":"assets/icon.png","model":"assets/model.glb","layout":"assets/layout/page.json"})":"")<<"}";
+                std::ofstream elf(dir/"mod.elf",std::ios::binary);elf.write("\x7f" "ELF\x01\x02",6);
+                png(dir/"assets/icon.png");std::ofstream(dir/"assets/model.glb",std::ios::binary)<<"glTF synthetic";
+                std::ofstream(dir/"assets/layout/page.json")<<"{}";
+                for(int i=0;i<40;i++)png(dir/("assets/layout/art"+std::to_string(i)+".png"));  // more than the HUD budget's 32
+                return dir;
+            };
+            assert(install(package("story-notebook",true).string(),error));
+            assert(!install(package("hud-only",false).string(),error)&&error.find("32 HUD textures")!=std::string::npos);  // the HUD budget is unchanged
+            assert(!install(package("look-elsewhere",true).string(),error)&&error.find("Only the Story Notebook package")!=std::string::npos);
+            auto dir=package("story-notebook",true);std::ofstream(dir/"assets/model.glb",std::ios::binary)<<"not a model";
+            assert(!install(dir.string(),error)&&error.find("binary glTF")!=std::string::npos);
+            // part of the story system: it can't be switched off or removed while the story system is on
+            assert(install(package("story-notebook",true).string(),error)&&confirm_native("story-notebook",error)&&enable("story-notebook",true,error));
+            assert(!enable("story-notebook",false,error)&&error.find("part of the story system")!=std::string::npos);
+            assert(!remove("story-notebook",error)&&error.find("part of the story system")!=std::string::npos);
+            mods::set_story_system(false);
+            assert(enable("story-notebook",false,error)&&remove("story-notebook",error));
+            mods::set_story_system(true);
+            assert(remove("quest-fixture",error));
+            set_code_mod_support(false);
+        }
         assert(unconfirmed_native("guest-fixture").size()==1);
         assert(!enable("guest-fixture",true,error));
         assert(confirm_native("guest-fixture",error));

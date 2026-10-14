@@ -7,6 +7,149 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Fixed: Windows setup stopped while linking when the folder name had an emoji or other special characters**
+  ("'charmap' codec can't encode character"). Setup now writes its linker file lists as UTF-8, so the game can be
+  set up in any folder.
+
+- **A new app icon** (issue #199, thanks @thorazine111-coder): a sailing boat on the sea, original artwork, on
+  Android (adaptive icon on Android 8+) and in the Linux AppImage. The game's own icon from your copy is still
+  available as a home-screen shortcut (Android setup: **Add the game icon to the home screen**).
+
+- **Story system for quest mods** (letters, a quest notebook and sea-chart marks, in the game's own style). The
+  port brings the system; all quest content comes from the mod catalogue:
+  - **Story system** (Mods > Built-in, on): it needs the **Story Notebook** package from the mod catalogue, which
+    setup installs (it needs the internet once). If setup was offline, install it later in Mods: switch the
+    Story system on, or press Install on its line. It's required for every quest mod and stays enabled. The game's
+    start never goes online; without the package the story system stays inactive and the normal game is
+    unchanged.
+  - **Letters by Rito mail:** a quest mod announces its quest with a letter from the Rito postbox, once Link has
+    the Delivery Bag. The Story Notebook package's letter brings the **story notebook**.
+  - **Story notebook:** in the Delivery Bag. Its page lists every mod quest with the next step, where to go and its
+    status, with an Archive tab for finished quests. "Show on chart" puts the game's red circle on the tracked
+    step, also in the zoomed chart square, and it follows characters who walk around.
+  - **Quests described as data:** a mod's `manifest.json` lists its quests, steps, places, characters and rewards.
+    Steps can wait for story or item conditions ("Not yet possible: ...").
+  - **Characters take part:** a quest can give a resident new lines. When several quests want the same character,
+    the game's own choice box asks which one. The King of Red Lions says a one-time line for the tracked quest.
+    Residents are named by neutral ids; their names and places are read from your own game files.
+  - **Mod charts:** a quest can hand Link its own chart (by letter, in a conversation or as a reward). It appears
+    in the MAP menu's chart list after the game's charts, opens in the game's own chart view with an X at its
+    place, and gets the check mark when its treasure is found. "Open chart" in the notebook jumps there. Mod
+    charts have their own numbers after the game's 61 charts and never touch the game's charts or save data.
+  - **Progress is kept in the save file** in a small block the game itself ignores. Removing the mods leaves a normal
+    save.
+  Details for mod authors in docs/mod-sdk-v2.md; the Story Notebook package and the example quest mods are in the
+  mod repository.
+
+## v0.2.14
+
+- **The controller selection after the title screen is skipped** (issue #189, thanks @floysh): the game no longer asks
+  whether you play with the Wii U GamePad or a Pro Controller, because the port already knows it from Controls. It picks
+  the matching option through the game's own selection, so everything that depends on it stays the same. To choose by
+  hand again, turn off **Controls > Skip controller selection**.
+
+- **GamePad screen "Automatic": follows the game's menus** (from a play test): in the automatic GamePad screen mode,
+  the GamePad picture now appears in the corner of the TV whenever the game opens something on the GamePad (items,
+  maps, the collection, the Delivery Bag, save and options, song and warp lists) and goes away shortly after it closes.
+  Before, it guessed from how much the GamePad picture changed and often missed the pause menu. Cmd+G still keeps
+  it up, and Off-TV Play shows the GamePad picture full size as before. The other GamePad screen modes are unchanged.
+
+- **PlayStation and Xbox button looks in the action hint near Link** (issue #188, thanks @floysh): the floating hint that
+  appears next to Link (for example "Speak" in front of a character) still showed the A button with PlayStation or
+  Xbox button labels. It now uses the same shapes and colours as the button cluster in the corner. With the original
+  look nothing changes.
+
+- **Experimental stereo 3D, HDR output and a gameplay FOV setting** (PR #168, thanks @pancreations): the Graphics tab
+  gains **Stereoscopic 3D** (Vulkan only: Half SBS, Full SBS and top-and-bottom, with depth, convergence and eye swap;
+  each eye renders its own view; 30 fps recommended for now), **HDR output** (Windows with Vulkan, when Windows HDR is
+  on; falls back to SDR with a note if the display can't do it) and **Gameplay FOV** (75% to 250%; cutscenes, dialogue
+  and menus keep their original view). All three are off / 100% by default, and the game looks and runs exactly as
+  before until you turn them on. Settings are kept between launches, on macOS too.
+
+- **Ports can bring their own renderer** (PR #187, issue #185, thanks @Pulpparty): a platform port (for example a
+  Switch build with deko3d) can now register its own renderer at start-up (`gfx/renderer_ext.h`) without editing the
+  renderer or GX2 code. Nothing changes for Metal and Vulkan: the renderer choice, menus, shader caches and
+  performance stay as they were.
+
+- **Mouse buttons and the wheel can be bound in Controls** (issue #165, thanks @PNOAGAMER): left, right, middle, side
+  buttons 4/5 and wheel up/down are now bindable like keys, so the game can be played fully with mouse and keyboard
+  together with the mouse camera (Mods > Built-in). Bound mouse buttons drive the game while the mouse camera has
+  captured the pointer in the TV window; the settings menu, GamePad-window touch and text prompts keep the mouse as
+  before, and "first person on the mouse wheel" keeps priority over wheel bindings. Nothing is bound by default.
+
+- **Setup: disc images and Cemu's keys.txt** (from a player support case): a `.wux`/`.wud` needs two keys, the disc key
+  of your dump and the Wii U common key. Setup now accepts Cemu's `keys.txt` directly and finds both keys in it
+  (choose it once for either key), the disc key can also be pasted, and the keys screen explains this, including
+  the no-key alternative (Cemu's "Convert to compressed Wii U archive (.wua)"). Clearer errors, e.g. when the
+  common key was entered as the disc key. Key values are never shown, logged or saved. (Desktop setup; Android follows.)
+
+- **Android setup: keys.txt and safer key handling:** the same `keys.txt` support as on desktop (choose Cemu's
+  `keys.txt` once, setup finds both keys). Key files are now only read when needed and no longer copied into the app;
+  if a key file was moved or its access was lost, setup asks you to choose it again instead of failing. Setups
+  started with an older version keep working.
+
+- **Less memory per shader translation** (PR #184, thanks @Pulpparty): the shader translator reserves 1 MB of text
+  per shader instead of 12 MB and grows only if needed (the largest game shader is far smaller), which helps devices
+  with little memory. One of its text functions also no longer cuts long text short.
+
+- **Building from a folder with spaces in its path** (PR #183, thanks @Pulpparty): the shader translator and two tests no
+  longer fail to compile when the checkout path contains a space (for example a Windows user name like `C:/Users/Jane Doe`).
+
+- **macOS: Nintendo controllers have the right buttons** (issue #181, thanks @Nickinfinity): with a Switch Pro Controller,
+  Joy-Cons or an SNES-style pad, **By position (Nintendo)** had A/B and X/Y swapped, because macOS reports these pads by
+  their printed letters. They now drive the right buttons and show Nintendo icons; a single sideways Joy-Con is handled
+  too. If you swapped A/B and X/Y by hand as a workaround, choose **Input > Face buttons > By position (Nintendo)** or
+  **Automatic** once after updating; your saved bindings are otherwise kept.
+
+- **Steam Deck Gaming Mode: the settings menu stays open** (issue #112, thanks @chaberl-art): with the TV and GamePad
+  screens in two windows, the menu could close again right after opening. F1 now toggles once per press (a release
+  is needed before it toggles again), keys and the save-state hotkeys (Shift+F1..F5 save, F2..F5 load) work from
+  either game window, and switching focus between them clears held keys without closing the menu. The log now says
+  why the menu opened or closed (`[overlay] closed (F1 key, window TV, ...)`). In Gaming Mode the menu, the save-state
+  messages and touch now follow the window that has focus, so they also show when the GamePad window is the one on
+  screen (before, the menu could open there invisibly and hold Link in place).
+
+- **Settings overlay: extension points for other platforms** (PR #175, thanks @Pulpparty): ports such as the
+  community Switch port can add their own settings tabs, hide built-in ones, plug in a system keyboard, controller
+  shortcuts and on-screen layers, without changing the overlay's code. Nothing changes on our platforms.
+
+- **The aiming reticle no longer doubles at 60+ fps** (issue #163, thanks @Julancho): with the boomerang, grappling
+  hook and hookshot, the red aiming dot (and the boomerang's target markers) stayed at the game's 30 Hz position
+  while the camera moved smoothly between frames, so it jumped back and forth during camera turns. It now moves
+  with the camera; 30 fps is unchanged. `WWHD_RETICLE_FIX=0` turns the fix off.
+
+- **No crash when memory for a shader's source runs out** (PR #171, thanks @Pulpparty): the shader translator's text
+  buffer now handles failed allocations (the shader just fails to compile and is retried) instead of writing through
+  a null pointer. Mostly matters on devices with little memory.
+
+- **Android: setup works again on the development build.** Since the decomp version arrived in setup, the app's
+  setup stopped right away ("No module named 'decomp_setup'"); the missing file is now packed with it. Also clearer
+  game-icon hints: "already on the home screen" for the plain icon too, and wording that fits every launcher
+  (PR #170, thanks @rhemfur).
+
+- **Android setup polish** (from the tester report on PR #98, thanks @rhemfur): the "Rebuild shader cache" hint
+  names the right button on each platform (on Android: *Start / resume / retry setup*); tooltips no longer stay on
+  touch screens; setup's own step reads "Reading shaders from your game files" so it doesn't look skippable, and its
+  notification brings setup back to the front; after an app update, setup shows "Updating the game for the new version".
+
+- **Fixed: the boat barely turned with "Sailing speed" on** (issue #169). The game turns the boat more slowly the
+  faster it sails, so the boosted speed hit its minimum turn rate. The rudder now responds like at normal speed for
+  both sails, while the boat keeps its boosted speed; automatic wind and the jump height are unchanged.
+
+- **Game code built with `-fwrapv`** (PR #172, thanks @Pulpparty): PowerPC integer arithmetic wraps around, and the
+  compiler now guarantees the same for the recompiled game code, the decomp version and the verify tools, instead of
+  relying on the code never overflowing. No visible change.
+
+- **Fixed: "Invert camera up/down" also inverted the Wind Waker baton** (issue #167). The setting now applies
+  only to the camera, including first-person views and item aiming (bow, hookshot, telescope, Picto Box) and the
+  mouse camera (which now follows it too); the baton and other right-stick controls keep their normal direction.
+
+- **Fixed: stutter at 240 fps and a slow start with "Keep game speed"** (issue #164). Since v0.2.13 the game's
+  30 logic steps drifted against the display (59.94 Hz), so every few seconds the in-between frames bunched up and
+  the picture hitched; the steps now follow the display's refresh. A hitch right after starting could also keep
+  all in-between frames off (30 fps) until the frame rate was changed; that measurement is now retried. Slower PCs
+  keep v0.2.13's smoother pacing (#125).
+
 - **Mods tab: Built-in and Community.** The Mods list is split into *Built-in* (the options that come
   with the game, such as the camera and speed options) and *Community* (mods from the mod catalogue,
   installed or ready to download, plus imported packages and graphics packs); *More* is unchanged.

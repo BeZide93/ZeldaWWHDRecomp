@@ -9,6 +9,15 @@ platforms), with no Cemu runtime and no GPU command emulation.
 
 How it works and how it differs from running the game in Cemu: [docs/how-it-works.md](docs/how-it-works.md).
 
+The project has three parts:
+- **The port** (this repository): the recompiled game on macOS, Linux, Windows and Android, described below.
+- **The decompilation** ([ZeldaWWHDDecomp/wwhd](https://github.com/ZeldaWWHDDecomp/wwhd)): readable C++ source
+  for the game's code, each function tested against the original. The port can already run it in an
+  experimental **decomp build**, the path towards a fully native source port; see
+  [decomp build](#optional-decomp-build-experimental).
+- **Mods** ([ZeldaWWHDRecomp/ZeldaWWHDMods](https://github.com/ZeldaWWHDRecomp/ZeldaWWHDMods)): built-in options
+  and a catalogue of community mods, installed from inside the game; see [Mods](#mods).
+
 ## What's new
 
 The changes in each update are in [CHANGELOG.md](CHANGELOG.md) and in the release notes on the
@@ -452,6 +461,31 @@ overlay, in `~/Library/Application Support/wwhd/screenshots`; also *Open Screens
 option to save the GamePad screen too), and a frame capture for debugging (**P** or fn+F12, written to `captures/`;
 captures contain game imagery, so keep them to yourself). The Graphics choices are remembered
 between launches (macOS preferences; `defaults delete wwhd` resets them).
+
+The settings overlay's **Graphics** tab also provides experimental **Stereoscopic 3D**
+(Vulkan-only): Half SBS, Full SBS and top-and-bottom (TAB), with depth, convergence and eye-swap
+controls. Each eye renders its own geometry and camera-dependent effects; this does not use
+depth-map reprojection. The HUD, settings cursor and GamePad touch mapping follow the packed
+output. Stereo starts off. **30 FPS is recommended for stereo for now: frame pacing is
+inconsistent at higher targets**, and performance and effect correctness have not been verified
+throughout the game or across all Vulkan platforms.
+
+**Gameplay FOV** in the same tab adjusts the camera from 75% to 250%, with a 110-degree
+vertical cap. It defaults to 100% (the original view). Gameplay and combat use matching camera
+and culling projections, including both stereo eyes; cutscenes, dialogue, menus and transitions
+retain their authored FOV. First-person view, item aiming and the Telescope are widened by the
+same factor, so their zoom is weaker above 100%. The setting is saved between launches.
+
+**HDR output** (Windows/Vulkan-only) offers scRGB presentation when Windows HDR is enabled
+and the display supports it. Paper white, peak brightness, exposure, highlight expansion and
+settings-menu brightness are adjustable. This expands the game's SDR output into HDR; it does
+not recover already-clipped lighting or provide native pre-tonemap HDR rendering. The in-game
+HUD follows paper white, while the settings menu has a separate brightness control. HDR starts
+off and must be enabled explicitly. If HDR is unavailable, output falls back to SDR with a
+note in the Graphics overlay. Default calibration is 240-nit paper white, 1025-nit peak,
+-0.32 EV exposure, 0.32 highlight expansion and 160-nit settings menus. Calibrate for the display
+in use. PNG screenshots remain SDR.
+
 True 60 (**7**) computes Link and the camera at 60 Hz while the game state after every 30 Hz step
 stays bit-identical to the 30 fps game, except the random-number sequence, which drifts because
 drawing code draws random numbers too (later drops and ambient behaviour differ like in any other
@@ -553,6 +587,33 @@ In Gaming Mode the Steam button belongs to Steam and there is no keyboard, so ke
   (L4/R4/L5/R5) to keyboard keys: **Shift+F1** saves slot 1, **F2–F5** load slots 2–5,
   **Shift+F2–F5** save them. Steam sends those keys to the game.
 
+## Mods
+
+Mods are managed in the game: **Settings (F1) → Mods**.
+- **Built-in:** options that come with the port, all off by default, for example the direct right-stick camera,
+  the mouse camera, run/swim and sailing speed, quick doors, climbing any wall, and fast forward for cutscenes
+  and dialogue.
+- **Community:** mods from the [mod catalogue](https://github.com/ZeldaWWHDRecomp/ZeldaWWHDMods), installed from
+  the menu, plus imported packages and Cemu graphics packs. Experimental mods are hidden unless you turn on
+  **Show experimental mods**, and your saves are backed up before one is switched on.
+
+**Writing mods (Mod SDK v2):**
+- Code mods are written in C (or C++) and compiled for the game's own CPU (32-bit PowerPC). One package works on
+  macOS, Windows and Linux.
+- When a player installs one, the port translates it and compiles it with the compiler it already has. The game
+  code itself is not translated again.
+- Mods hook or replace game functions at runtime, use the game's own data and objects, can draw on screen (HUD
+  API) and use host services. Content mods (file replacements) and settings presets need no code.
+- Code-mod support is off until a code mod is switched on; the first time, the game is rebuilt once (a few
+  minutes).
+- Mods contain no game code or game files; anything they need from the game is read from your own copy, on your
+  machine.
+
+How to write and submit a mod, the package format and the review rules:
+[ZeldaWWHDMods: creating a mod](https://github.com/ZeldaWWHDRecomp/ZeldaWWHDMods/blob/main/docs/creating-a-mod.md).
+The SDK reference is [docs/mod-sdk-v2.md](docs/mod-sdk-v2.md), the mod manager is described in
+[docs/mod-manager.md](docs/mod-manager.md).
+
 ## Notes
 
 - Shaders are translated on first use and cached in `~/Library/Caches/wwhd/shaders.bin`; later
@@ -627,11 +688,11 @@ state and may repeat the last finished picture.
 Caches live in the host settings folder's `shader-prebuild` directory, or
 `data/user/shader-prebuild` in a portable installation. Keep generated caches and recordings local.
 
-**Help cover more scenes (issue #162):** **Settings → Graphics → Export shader template** saves a
+**Help cover more scenes (issue #177):** **Settings → Graphics → Export shader template** saves a
 code-free `my-template.bin` (hashes and settings only, no shader code) from the shaders your game has
-recorded. Attach it to [issue #162](https://github.com/ZeldaWWHDRecomp/ZeldaWWHDRecomp/issues/162).
+recorded. Attach it to [issue #177](https://github.com/ZeldaWWHDRecomp/ZeldaWWHDRecomp/issues/177).
 Terminal commands for Windows, macOS, Linux and the AppImage are in the
-[shader template guide](tools/shadercache/README.md#contributing-your-shader-template-players-issue-162).
+[shader template guide](tools/shadercache/README.md#contributing-your-shader-template-players-issue-177).
 
 ### Vulkan shader head start on Windows and Linux
 
@@ -698,6 +759,13 @@ Cemu side by side. It runs at the console's 30 fps or, with frame interpolation,
 240 fps (up to the display's refresh rate); true 60 fps is experimental. Known gaps: geometry
 shaders and rectangle primitives are not implemented yet (not encountered in the game so far),
 and the macOS app does not drive controller rumble yet.
+
+## Other platforms
+
+**Nintendo Switch:** [SwitchWakerHD](https://github.com/centollOS/SwitchWakerHD) is a community port built on this
+project, by Pulpparty, depende3000, centollOS and contributors. Like this project, it needs your own copy of the game,
+and no builds containing game code are shared. It is a separate project, not tested or supported here: please report
+Switch issues on its tracker.
 
 ## License
 

@@ -11,6 +11,7 @@ android {
     ndkVersion "30.0.16248370"  // android/build_native.sh's default (the native libraries come from there)
     defaultConfig {
         applicationId "org.wwhdrecomp.wwhd"
+        testInstrumentationRunner "org.wwhdrecomp.wwhd.SetupPolishInstrumentation"
         minSdk 33
         targetSdk 36
         // release.yml passes the release version and a growing build number; local builds keep these
@@ -62,7 +63,7 @@ android {
         sourceSets.main.jniLibs.srcDirs += [file(extractorPackage + '/jniLibs')]
         sourceSets.main.assets.srcDirs += [file(extractorPackage + '/assets')]
     }
-    // the game's own icon (android/make_icon.py, from your game files; git-ignored), else SDL's
+    // the game's own icon (android/make_icon.py, from your game files; git-ignored), else the app icon (android/icon)
     def gameIcon = file('local-res').exists()
     if (gameIcon) sourceSets.main.res.srcDirs += ['local-res']
     defaultConfig.manifestPlaceholders = [appIcon: gameIcon ? '@mipmap/ic_game' : '@mipmap/ic_launcher']

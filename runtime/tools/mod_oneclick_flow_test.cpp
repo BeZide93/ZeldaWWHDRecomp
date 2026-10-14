@@ -5,6 +5,7 @@
 #include <atomic>
 #include "mod_test_host.h"
 #include "overlay/mods_tab.h"
+#include "overlay/extensions.h"
 #include "mods/catalogue_client.h"
 #include "imgui_internal.h"
 #include "backends/imgui_impl_sdlrenderer3.h"
@@ -36,6 +37,35 @@ struct Clicker {
 bool review_open() {
     for(const auto& popup:GImGui->OpenPopupStack)if(popup.Window&&strstr(popup.Window->Name,"###mods_review"))return true;
     return false;
+}
+// Two tabs as a port would add them (overlay/extensions.h): "test-platform" before Mods, with two sub-tabs
+// (L / R move between them first) and the widgets a platform page has, and "test-extra" right after Mods.
+void ext_tabs_for_test(int& area) {
+    namespace ext=overlay::ext;
+    ext::Tab platform;
+    platform.id="test-platform";platform.name="Platform";
+    platform.draw=[&area] {
+        if(ImGui::BeginTabBar("platform_areas")) {
+            for(int i=0;i<2;i++)if(ImGui::BeginTabItem(i?"Debug":"Picture",nullptr,area==i?ImGuiTabItemFlags_SetSelected:0))ImGui::EndTabItem();
+            ImGui::EndTabBar();
+        }
+        static float exposure=1,gamma=1;static bool on=true;static char name[64]="profile";
+        ImGui::PushID(area);  // the same labels on both sub-tabs: one ID per sub-tab
+        ImGui::SeparatorText(area?"Debug":"Picture");
+        ImGui::SliderFloat("Exposure",&exposure,.5f,1.5f);
+        ImGui::SliderFloat("Gamma",&gamma,.5f,2.f);
+        ImGui::Checkbox("Enabled",&on);
+        text_entry::field("Name",name,sizeof name);
+        for(int i=0;i<3;i++){ImGui::PushID(i);if(i)ImGui::SameLine();ImGui::Button("Apply");ImGui::PopID();}
+        ImGui::PopID();
+    };
+    platform.shoulder=[&area](int direction) {
+        const int next=area+direction;
+        if(next<0||next>1)return false;
+        area=next;return true;
+    };
+    ext::add_tab(platform,"mods");
+    ext::add_tab({"test-extra","Extra",[]{ImGui::TextUnformatted("Extra");ImGui::Button("Go");},nullptr},"controls");
 }
 void set_env(const char* key,const std::string& value) {
 #ifdef _WIN32
@@ -108,13 +138,20 @@ int main(int argc,char** argv) {
     // WWHD_TEST_DISPLAY at the logical size a phone gets from mobile_ui::scale, e.g. UI size Large)
     const bool android_style=getenv("WWHD_TEST_ANDROID_STYLE")!=nullptr;
     if(android_style){auto& st=ImGui::GetStyle();st.FramePadding=ImVec2(10,16);st.ItemInnerSpacing=ImVec2(10,8);st.ScrollbarSize=49;st.GrabMinSize=49;}
-    // the rest of the Settings window around the tab: the settings tabs above; on Android the page ends
-    // above the full-width "Close Settings" button
+    // ids, tabs: tabs a port adds (overlay/extensions.h) behave as built-in ones; these two stand for them
+    // (sub-tabs with L / R as Mods has, a text field, widgets with one label in two places)
+    int platform_area=0;
+    if(ids||tabs)ext_tabs_for_test(platform_area);
+    // the rest of the Settings window around the tab: the settings tabs above (every tab of the overlay,
+    // built-in and added); on Android the page ends above the full-width "Close Settings" button.
+    // shown_tab: the tab drawn, "mods" or an added one
+    std::string shown_tab="mods";
     auto draw_tab=[&](ui::Host& h) {
-        if(ImGui::BeginTabBar("settings_tabs")){for(const char* t:{"Saves","Graphics","Display","Audio","Mods","Controls"})
-            if(ImGui::BeginTabItem(t,nullptr,std::string(t)=="Mods"?ImGuiTabItemFlags_SetSelected:0))ImGui::EndTabItem();ImGui::EndTabBar();}
+        if(ImGui::BeginTabBar("settings_tabs")){for(const auto& t:overlay::ext::tabs())
+            if(ImGui::BeginTabItem(t.name.c_str(),nullptr,t.id==shown_tab?ImGuiTabItemFlags_SetSelected:0))ImGui::EndTabItem();ImGui::EndTabBar();}
         ImGui::BeginChild("page",ImVec2(0,android_style?-ImGui::GetFrameHeightWithSpacing():0),ImGuiChildFlags_NavFlattened);
-        ui::draw(h,"");
+        if(shown_tab=="mods")ui::draw(h,"");
+        else for(const auto& t:overlay::ext::tabs())if(t.id==shown_tab&&t.draw)t.draw();
         ImGui::EndChild();
         if(android_style)ImGui::Button("Close Settings",ImVec2(-FLT_MIN,0));
     };
@@ -180,6 +217,25 @@ int main(int argc,char** argv) {
         listed(ui::kMore);
         for(int i=0;i<3;i++){ImGui_ImplSDLRenderer3_NewFrame();ImGui::NewFrame();ImGui::Begin("Settings");draw_tab(host);ImGui::End();ImGui::Render();}
         assert(s.area==ui::kMore);
+        // controller L / R over the tab bar as the overlay does it (ext::shoulder with the Mods areas): through
+        // an added tab's own sub-tabs, into Mods and its areas, on to the next added tab, and back
+        namespace ext=overlay::ext;
+        const int platform=ext::tab_index("test-platform"),mods_tab=ext::tab_index("mods"),extra=ext::tab_index("test-extra");
+        const int mods_builtin=ext::builtin_tab(mods_tab);  // overlay.cpp kMods
+        auto areas=[mods_builtin](int builtin,int direction){return builtin==mods_builtin&&ui::shoulder(direction);};
+        assert(platform>=0&&mods_tab==platform+1&&extra==mods_tab+1);
+        ui::go_area(ui::kBuiltin);platform_area=0;
+        assert(ext::shoulder(platform,+1,areas)==-1&&platform_area==1);  // inside the added tab
+        assert(ext::shoulder(platform,+1,areas)==mods_tab);              // its end: Mods
+        assert(ext::shoulder(mods_tab,+1,areas)==-1&&s.area==ui::kCommunity);
+        assert(ext::shoulder(mods_tab,+1,areas)==-1&&s.area==ui::kMore);
+        assert(ext::shoulder(mods_tab,+1,areas)==extra);                 // Mods' end: the next tab
+        assert(ext::shoulder(extra,-1,areas)==mods_tab&&s.area==ui::kMore);  // back: Mods remembers More
+        assert(ext::shoulder(mods_tab,-1,areas)==-1&&ext::shoulder(mods_tab,-1,areas)==-1&&s.area==ui::kBuiltin);
+        assert(ext::shoulder(mods_tab,-1,areas)==platform&&platform_area==1);
+        assert(ext::shoulder(platform,-1,areas)==-1&&platform_area==0);
+        assert(ext::shoulder(platform,-1,areas)==ext::next_tab(platform,-1));
+        fprintf(stderr,"[tabs] L / R: added tabs and Mods areas in order\n");
         ImGui_ImplSDLRenderer3_Shutdown();ImGui::DestroyContext();SDL_DestroyRenderer(renderer);SDL_DestroySurface(surface);
         return 0;
     }
@@ -211,7 +267,7 @@ int main(int argc,char** argv) {
             for(auto* w:GImGui->Windows) {
                 if(!w->Active)continue;
                 if(w->Flags&ImGuiWindowFlags_Modal){top=w->Pos.y;bottom=w->Pos.y+w->Size.y;break;}
-                if(strstr(w->Name,"mods_area"))bottom=std::max(bottom,w->DC.CursorMaxPos.y);
+                if(strstr(w->Name,shown_tab=="mods"?"mods_area":"/page_"))bottom=std::max(bottom,w->DC.CursorMaxPos.y);
             }
             bottom=std::min(bottom+8.f,float(height));
             int before=conflicts;
@@ -248,6 +304,15 @@ int main(int argc,char** argv) {
         sweep("progress failed",progress(ui::Phase::Failed));
         sweep("progress done",progress(ui::Phase::Done));
         s.job.flow={};
+        // the tabs a port adds (overlay/extensions.h), each sub-tab of theirs
+        int added=0;
+        for(const auto& t:overlay::ext::tabs()) {
+            if(t.builtin>=0)continue;
+            ++added;
+            for(int area=0;area<(t.shoulder?2:1);area++)sweep("tab "+t.id+" area "+std::to_string(area),[&,id=t.id,area]{shown_tab=id;platform_area=area;});
+        }
+        assert(added==2);
+        shown_tab="mods";
         ImGui_ImplSDLRenderer3_Shutdown();ImGui::DestroyContext();SDL_DestroyRenderer(renderer);SDL_DestroySurface(surface);
         fprintf(stderr,"[ids] %d conflicts in all views\n",conflicts);
         return conflicts?1:0;

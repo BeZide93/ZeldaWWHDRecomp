@@ -75,7 +75,7 @@ int main() {
     for(const auto& entry:entries()) env(entry.startup_env,nullptr);
     env("WWHD_MOD_CAMERA_SPEED",nullptr);env("WWHD_MOD_MOUSE_SENS",nullptr);
     env("WWHD_MOD_MOVE_FACTOR",nullptr);env("WWHD_MOD_MOVE_SWIM",nullptr);env("WWHD_MOD_MOVE_STAMINA",nullptr);
-    assert(entries().size()==12);
+    assert(entries().size()==13);
     for(const auto& option:traversal_options()) env(option.startup_env,nullptr);
     load_saved(); for(bool on:state) assert(!on); // stock defaults stay off
     assert(!mods::ladder_speed() && !mods::sidle_speed() && !mods::sail_speed() && !mods::auto_wind());

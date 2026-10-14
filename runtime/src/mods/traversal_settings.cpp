@@ -31,6 +31,8 @@ std::atomic<bool> g_sail{env_on("WWHD_MOD_SAIL_SPEED")};
 std::atomic<float> g_sail_normal{env_factor("WWHD_MOD_SAIL_FACTOR")};
 std::atomic<float> g_sail_swift{env_factor("WWHD_MOD_SWIFT_SAIL_FACTOR")};
 std::atomic<bool> g_auto_wind{env_on("WWHD_MOD_AUTO_WIND")};
+// the story system: on unless WWHD_STORY_SYSTEM=0 (or the player turns it off)
+std::atomic<bool> g_story_system{[] { const char* e = std::getenv("WWHD_STORY_SYSTEM"); return !(e && *e == '0'); }()};
 constexpr auto kRelaxed = std::memory_order_relaxed;
 }  // namespace
 
@@ -49,6 +51,8 @@ void set_sail_speed_normal_factor(float f) { g_sail_normal = traversal::clamp_fa
 float sail_speed_swift_factor() { return g_sail_swift.load(kRelaxed); }
 void set_sail_speed_swift_factor(float f) { g_sail_swift = traversal::clamp_factor(f); }
 bool auto_wind() { return g_auto_wind.load(kRelaxed); }
+bool story_system() { return g_story_system.load(kRelaxed); }
+void set_story_system(bool on) { g_story_system = on; }
 void set_auto_wind(bool on) { g_auto_wind = on; }
 
 bool traversal_anim() { return ladder_speed() || sidle_speed(); }

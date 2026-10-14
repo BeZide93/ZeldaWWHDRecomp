@@ -13,7 +13,7 @@
 //   WWHD_TEST_POKE=t:ADDR:HEX,...   at scenario time t (s, game time; see input.mm) writes the bytes
 //                                   HEX to guest memory at ADDR. ADDR is hex, or *PTR+OFF (the word
 //                                   at PTR plus OFF), e.g. *101F84DC+2E:38 equips the Hero's Sword.
-//   WWHD_LINK_WARP=step:x:y:z:angle  once, before Link's full-pass execute at origin step + step;
+//   WWHD_LINK_WARP=step:x:y:z:angle[,...]  each once, in order, before Link's full-pass execute at origin step + step;
 //                                   updates the actor and the HD executable's retained position.
 //   WWHD_SAVEINFO_DUMP=path         at the end of the scenario (WWHD_TEST_END) writes the save-info
 //                                   block (dSv_info_c, *101F84DC, 0x12A0 bytes: what the game saves,
@@ -31,6 +31,7 @@
 #include <cmath>
 #include <string>
 #include <vector>
+#include <algorithm>
 
 #include "guest_addr.h"
 #include "runtime.h"
@@ -459,18 +460,20 @@ namespace true60_test {
 uint64_t origin_step();
 void before_execute_link(uint32_t proc) {
     // Visual comparison fixture: apply at an actor boundary, outside controller-read call stacks.
-    static bool warped = false;
-    if (!warped && !interp::hold_pass() && origin_step()) {
+    // WWHD_LINK_WARP=step:x:y:z:angle[,step:x:y:z:angle...]: each warp once, in order
+    static size_t warps_done = 0;
+    if (!interp::hold_pass() && origin_step()) {
         if (const char* e = getenv("WWHD_LINK_WARP")) {
+            for (size_t i = 0; i < warps_done && e; i++) { e = strchr(e, ','); if (e) e++; }
             unsigned long long step; float x,y,z; int angle;
-            if (sscanf(e,"%llu:%f:%f:%f:%d",&step,&x,&y,&z,&angle)==5 && interp::logic_steps() >= origin_step()+step) {
+            if (e && sscanf(e,"%llu:%f:%f:%f:%d",&step,&x,&y,&z,&angle)==5 && interp::logic_steps() >= origin_step()+step) {
                 LOG("[test] warp Link %08X from %.1f %.1f %.1f to %.1f %.1f %.1f",proc,(float)ldf32(proc+0x314),(float)ldf32(proc+0x318),(float)ldf32(proc+0x31C),x,y,z);
                 for (uint32_t off : {0x2ECu,0x300u,0x314u}) { stf32(proc+off,x); stf32(proc+off+4,y); stf32(proc+off+8,z); }
                 st16(proc+0x322,(uint16_t)angle);st16(proc+0x32A,(uint16_t)angle);
                 // The HD executable restores these retained debug values at 0240D130 each update.
                 stf32(GD(0x1046CD48),x);stf32(GD(0x1046CD4C),y);stf32(GD(0x1046CD50),z);
                 st16(GD(0x1046CD12),(uint16_t)angle);st16(GD(0x1046CD0A),(uint16_t)angle);
-                warped=true;
+                warps_done++;
             }
         }
     }
@@ -720,4 +723,53 @@ extern "C" void hook_02753D6C(Cpu* c) {
         }
     }
     f_02753D6C_orig(c);
+}
+
+// A draw-path fixture for issue #163, using copied saves/states only. It bypasses
+// target acquisition, not marker drawing: five real nearby actors are submitted
+// through daBoomerang_c::setLockActor, with no sounds. No effect unless opted in.
+extern "C" void f_020CC020(Cpu*);
+namespace true60_test {
+void reticle_targets(Cpu* cpu, uint32_t link) {
+    const uint32_t boom = ld32(link + 0x6594);
+    if (boom < mem::kMem2Start || boom >= mem::kMem2End) return;
+    const uint32_t methods = ld32(boom + 0xF0);
+    if (methods < mem::kMem2Start || methods >= mem::kMem2End || ld32(methods + 8) != GC(0x020CC454)) return;
+    static uint32_t filled = 0;
+    if (filled == boom) return;
+    struct Target { uint32_t actor; float distance; };
+    std::vector<Target> candidates;
+    const uint32_t view = ld32(GD(0x1046F0B0) + 0x5FA4);
+    if (!view) return;
+    float eye[3], forward[3];
+    for (int i = 0; i < 3; ++i) {
+        eye[i] = ldf32(view + 0xDC + 4 * i);
+        forward[i] = float(ldf32(view + 0xE8 + 4 * i)) - eye[i];
+    }
+    uint32_t node = ld32(GD(0x101F3328));
+    for (int count = 0; node && count < 2048; ++count) {
+        if (node < mem::kMem2Start || node >= mem::kMem2End) break;
+        const uint32_t actor = ld32(node + 0xC);
+        node = ld32(node + 8);
+        if (actor < mem::kMem2Start || actor >= mem::kMem2End || actor == link || actor == boom) continue;
+        float distance = 0, ahead = 0;
+        for (int i = 0; i < 3; ++i) {
+            const float delta = float(ldf32(actor + 0x37C + 4 * i)) - eye[i];
+            distance += delta * delta;
+            ahead += delta * forward[i];
+        }
+        if (std::isfinite(distance) && distance > 10000 && distance < 8000.f * 8000.f && ahead > 0)
+            candidates.push_back({actor, distance});
+    }
+    std::sort(candidates.begin(), candidates.end(), [](const auto& a, const auto& b) { return a.distance < b.distance; });
+    for (const auto& target : candidates) {
+        if (ld8(boom + 0x26271) >= 5) break;
+        Cpu call = *cpu;
+        call.r[3] = boom; call.r[4] = target.actor; call.r[5] = 0;
+        f_020CC020(&call);
+        LOG("[reticle-fixture] boom %08X target %08X id %u eye %.3f %.3f %.3f", boom, target.actor,
+            ld32(target.actor + 4), ldf32(target.actor + 0x37C), ldf32(target.actor + 0x380), ldf32(target.actor + 0x384));
+    }
+    if (ld8(boom + 0x26271)) filled = boom;
+}
 }

@@ -1,3 +1,4 @@
+#include "tooltip.h"
 // The Mods tab: one list of every mod with an on/off switch (built-in, downloaded, and the catalogue's
 // mods that aren't downloaded yet) and More (profiles, files, the mod list's source, code-mod support,
 // save backups, cheats). Switching on a mod that needs anything (a download, the GameCube game, a
@@ -10,12 +11,17 @@
 // overlay (overlay.cpp) and by the offscreen tests (runtime/tools/mods_tab_test.cpp).
 #pragma once
 #include "catalogue_loader.h"
+#include "../mods/required.h"
+#include "../mods/mods.h"
+#include "../build_info.h"
+#include <thread>
 #include "experimental_ui.h"
 #include "graphics_switch.h"
 #include "hostui.h"
 #include "mods_model.h"
 #include "setup_flow.h"
 #include "setup_test.h"
+#include "text_entry.h"
 #include "../mods/code_mods.h"
 #include "../mods/manager.h"
 #include "../mods/packages.h"
@@ -48,6 +54,7 @@ struct Host {
     mods::catalogue::Version port_version;
     std::string build_name = "USA";
     bool android = false;
+    bool file_picker = true; // the host has file and folder choosers (overlay/extensions.h Features)
     bool back = false;       // controller B this frame
     bool b_used = false;     // out: B answered something here (it must not also close the menu)
     bool test = false;       // isolated headless run: WWHD_TEST_* aids apply
@@ -143,7 +150,7 @@ inline void colored(const ImVec4& c, const std::string& s) {
 }
 inline void muted(const std::string& s) { colored(kMuted, s); }
 inline void tooltip(const std::string& s) {
-    if (!s.empty() && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort | ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("%s", s.c_str());
+    if (!s.empty() && overlay::tooltip_hovered(ImGuiHoveredFlags_DelayShort | ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("%s", s.c_str());
 }
 // Put the next item on this line when it fits, else on the next one (narrow windows, phones).
 inline void same_line_if_fits(const char* next_label) {
@@ -814,14 +821,19 @@ inline void game_source_picker(const Host& h, const std::string& game) {
         colored(src.valid ? kGood : kBad, std::string(src.valid ? check_mark() : cross_mark()) + "  " + file_name(src.path));
         tooltip(src.path);
         if (!src.valid) muted(src.result.empty() ? "This isn't a supported GameCube Wind Waker disc or folder." : src.result);
-        if (button("Change##source")) choose(false);
-        same_line_if_fits("Choose folder…");
-        if (button("Choose folder…##source")) choose(true);
-    } else {
+        if (h.file_picker) {
+            if (button("Change##source")) choose(false);
+            same_line_if_fits("Choose folder…");
+            if (button("Choose folder…##source")) choose(true);
+        }
+    } else if (h.file_picker) {
         text("Choose your GameCube Wind Waker: a disc image (ISO or RVZ) or an extracted folder. It stays on your computer.");
         if (button("Choose disc image…##source")) choose(false);
         same_line_if_fits("Choose folder…");
         if (button("Choose folder…##source")) choose(true);
+    } else {
+        text("Some mods need your GameCube Wind Waker (a disc image or an extracted folder); it can't be chosen here: "
+             "this system has no file chooser.");
     }
     std::lock_guard g(s.picker_mutex);
     if (!s.source_error.empty()) colored(kBad, s.source_error);
@@ -906,9 +918,25 @@ inline void review_popup(Host& h) {
     ImGui::EndPopup();
 }
 
+// ---------------------------------------------------------------- the story system's required package
+inline void install_story_notebook(const Host& h) {
+    mods::required::Context c;
+    c.catalogue = mods::required::catalogue_url(build::version());
+    c.fetch = h.fetch, c.port = h.port_version, c.build = h.build_name, c.work = catalogue_work();
+    mods::required::install_in_background(c);
+}
+
 // ---------------------------------------------------------------- switching
-inline void switch_package(const mods::packages::View& v, bool on) {
+inline void switch_package(const mods::packages::View& v, bool on, const Host* h = nullptr) {
     auto& s = state();
+    // a quest mod while the story system's required package is missing: that one first
+    if (on && h && mods::story_system() && v.id != mods::required::kStoryNotebook &&
+        std::any_of(v.dependencies.begin(), v.dependencies.end(), [](const std::string& d) { return d.rfind(mods::required::kStoryNotebook + ">=", 0) == 0; }) &&
+        !find_view(mods::packages::list(), mods::required::kStoryNotebook)) {
+        install_story_notebook(*h);
+        s.error = "This mod needs the Story Notebook: it is being installed; switch this mod on again afterwards.";
+        return;
+    }
     if (!on) {
         if (!mods::packages::enable(v.id, false, s.error)) return;
         s.error.clear();
@@ -961,7 +989,7 @@ inline std::string unavailable_reason(const Host& h, const mods::catalogue::Entr
     return compatible ? "" : "Not available for this version of the game.";
 }
 // Built-in: the mods compiled into the game, each with its switch.
-inline void builtin_list(Host&) {
+inline void builtin_list(Host& h) {
     muted(kAreaCaptions[kBuiltin]);
     if (!begin_list("builtin")) return;
     for (const auto& e : mods::manager::entries()) {
@@ -971,7 +999,11 @@ inline void builtin_list(Host&) {
         Row r = row(fx);
         std::string id = e.id;
         row_line(id, e.name, r, e.restart_required ? "applies after a restart" : "", false, true,
-                 [id](bool on) { hostui::post([id, on] { mods::manager::set_enabled(id, on); }); });
+                 [id, &h](bool on) {
+                     hostui::post([id, on] { mods::manager::set_enabled(id, on); });
+                     // the story system comes with its required package: switching it on installs that
+                     if (id == "story-system" && on && !find_view(mods::packages::list(), mods::required::kStoryNotebook)) install_story_notebook(h);
+                 });
     }
     ImGui::EndTable();
 }
@@ -1006,9 +1038,24 @@ inline void community_list(Host& h) {
             bool update = e && newer(e->version, v.version);
             Row r = row(facts(v, update));
             auto view = v;
-            row_line(v.id, v.name, r, "", v.experimental, false, [view](bool on) { switch_package(view, on); });
+            std::string note;
+            if (v.id == mods::required::kStoryNotebook && mods::story_system()) {  // part of the story system: locked
+                r.switch_enabled = false;
+                r.switch_reason = "Part of the story system: turn off the story system (Built-in) to turn it off.";
+                note = "Part of the story system";
+            }
+            const Host* host = &h;
+            row_line(v.id, v.name, r, note, v.experimental, false, [view, host](bool on) { switch_package(view, on, host); });
         }
         ImGui::EndTable();
+    }
+    // the story system's required package (mods/required.h): its status, Install while it is missing
+    if (const auto required = mods::required::status(); !required.text.empty()) {
+        colored(required.working || required.restart ? kMuted : kWarn, required.text);
+        if (!required.working && !find_view(list, mods::required::kStoryNotebook) && mods::story_system()) {
+            ImGui::SameLine();
+            if (small_button("Install##story_notebook")) install_story_notebook(h);
+        }
     }
     // available to download
     ImGui::SeparatorText("Available to download");
@@ -1081,7 +1128,7 @@ inline void option_controls(const mods::packages::View& v, bool locked) {
         } else {
             char value[1025];
             snprintf(value, sizeof value, "%s", o.value.text.c_str());
-            if (ImGui::InputText(o.name.c_str(), value, sizeof value, ImGuiInputTextFlags_EnterReturnsTrue))
+            if (text_entry::field(o.name.c_str(), value, sizeof value, ImGuiInputTextFlags_EnterReturnsTrue))
                 mods::packages::configure(v.id, o.id, std::string(value), error);
         }
         tooltip(o.description);
@@ -1264,7 +1311,10 @@ inline void builtin_page(Host& h, const mods::manager::Entry& e) {
     ImGui::TextUnformatted(e.name);
     bool on = e.enabled();
     std::string id = e.id;
-    if (on_switch("##on_builtin", &on)) hostui::post([id, on] { mods::manager::set_enabled(id, on); });
+    if (on_switch("##on_builtin", &on)) {
+        hostui::post([id, on] { mods::manager::set_enabled(id, on); });
+        if (id == "story-system" && on && !find_view(mods::packages::list(), mods::required::kStoryNotebook)) install_story_notebook(h);
+    }
     ImGui::SameLine();
     colored(on ? kGood : kMuted, on ? "On" : "Off");
     text(e.description);
@@ -1379,7 +1429,7 @@ inline void more(Host& h) {
             ImGui::EndCombo();
         }
         ImGui::SetNextItemWidth(std::min(ImGui::GetFontSize() * 14, ImGui::GetContentRegionAvail().x));
-        ImGui::InputTextWithHint("##new_profile", "New profile name", s.profile_name, sizeof s.profile_name);
+        text_entry::field("##new_profile", s.profile_name, sizeof s.profile_name, 0, "New profile name");
         same_line_if_fits("Copy current");
         ImGui::BeginDisabled(!s.profile_name[0]);
         if (button("Copy current") && create_profile(s.profile_name, s.error)) s.profile_name[0] = 0;
@@ -1396,7 +1446,7 @@ inline void more(Host& h) {
         ImGui::EndDisabled();
         ImGui::Unindent();
     }
-    if (section("Install from a file or folder")) {
+    if (h.file_picker && section("Install from a file or folder")) {
         ImGui::Indent();
         muted("A mod package (.wwhdmod or ZIP), a mod folder, or a replacement .pack file.");
         auto pick = [&h](bool folder) {
@@ -1440,7 +1490,7 @@ inline void more(Host& h) {
         muted("Checking only downloads the public list of mods (no personal data, no game data). Mods are downloaded "
               "only when you press Install or Update.");
         ImGui::SetNextItemWidth(-FLT_MIN);
-        ImGui::InputText("##catalogue_url", s.url_edit, sizeof s.url_edit);
+        text_entry::field("##catalogue_url", s.url_edit, sizeof s.url_edit);
         bool changed = std::string(s.url_edit) != s.catalogue_url;
         ImGui::BeginDisabled(!changed);
         if (button("Use this list")) {

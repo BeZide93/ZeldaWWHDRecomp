@@ -1,4 +1,4 @@
-// Controls mapping: which keyboard keys and host-controller inputs drive each Wii U GamePad input.
+// Controls mapping: which keyboard/mouse and host-controller inputs drive each Wii U GamePad input.
 //
 // Plain C++ (no AppKit) so it can be unit-tested (runtime/tools/input_map_test.cpp). input.mm
 // evaluates the current mapping on every read; the Controls window (gfx/controls_ui.mm) edits it.
@@ -42,7 +42,10 @@ const char* pad_id(int p);     // JSON value, e.g. "LeftTrigger"
 const char* pad_label(int p);  // for the UI
 int pad_from_id(const std::string& id);  // -1 if unknown
 
-// Keyboard: macOS virtual key codes (kVK_*), 0..255
+// Keyboard: macOS virtual key codes (kVK_*), 0..255; mouse inputs use 256..262.
+// Mouse IDs share the two keyboard binding slots, above the legacy 0..255 key range.
+constexpr int kMouse1 = 256, kMouse2 = 257, kMouse3 = 258, kMouse4 = 259, kMouse5 = 260;
+constexpr int kWheelUp = 261, kWheelDown = 262, kInputCount = 263;
 constexpr int kNoKey = -1;
 constexpr int kKeysPerAction = 2;
 std::string key_id(int code);     // JSON value, e.g. "K", "Space", "LeftShift"; "Key93" for unnamed codes
@@ -67,7 +70,10 @@ struct Mapping {
     // so a worn stick that only reaches 0.9 delivers full deflection at about 1.11.
     float left_range = 1.0f;
     float right_range = 1.0f;
-    bool invert_camera_y = false;   // right stick Y, keyboard and controller
+    bool skip_controller_selection = true; // title: choose the configured Wii U controller
+    // Camera only (issue #167): applied where the game's camera reads the right stick
+    // (camera_invert.h, mods/camera.cpp), never to the stick itself, so the baton is not inverted
+    bool invert_camera_y = false;
     bool face_auto = false;         // Automatic face preset: follow the dominant pad's labels
     // In-game button prompts (issues #110, #141, #143; runtime/src/button_glyphs.cpp)
     enum class Prompts : uint8_t { kAuto, kOriginal, kXbox, kPlayStation };
@@ -110,6 +116,17 @@ enum class FaceLabel { kUnknown, kA, kB, kX, kY, kCross, kCircle, kSquare, kTria
 // what follows is decoration — so "square.circle" is Square (X) and not Circle (B) — and words
 // like "button" are ignored in a free-form name. kUnknown when the name says nothing.
 FaceLabel face_label_from_text(const char* text);
+
+// GameController's Nintendo face elements use printed letters, unlike our positional Pad
+// inputs. A single sideways Joy-Con has a different permutation from a Pro / paired pad.
+// Name parsing and routing are pure so macOS hardware is not needed for regression tests.
+enum class AppleFaceLayout { kStandard, kNintendo, kJoyConSingle };
+AppleFaceLayout apple_face_layout(const char* product_category, const char* vendor_name);
+int apple_face_input(AppleFaceLayout layout, int pad);  // non-face inputs pass through
+void apple_face_labels(AppleFaceLayout layout, FaceLabel labels[4]);  // raw A/B/X/Y -> positions
+// A possible pre-#181 manual workaround; report it, never silently overwrite an intentional
+// by-label choice (or a shared mapping used with another controller).
+bool apple_face_workaround(const Mapping& m, AppleFaceLayout layout);
 
 // The face bindings a pad with these labels asks for: each printed letter drives the Wii U button
 // of that letter (Cross is A, Circle is B, and so on). A letter no button carries falls back to the
@@ -169,8 +186,9 @@ int conflict_count(const Mapping& m);
 std::string key_short_label(int code);
 const char* pad_short_label(int p);
 
-// Evaluate a mapping. keys[code] = held; values[p] = 0..1 for each Pad input (max over controllers)
-input::PadState keyboard_state(const Mapping& m, const bool keys[256]);
+// Evaluate a mapping. keys[code] = held (count entries, 256 for legacy keyboard callers).
+// values[p] = 0..1 for each Pad input (max over controllers).
+input::PadState keyboard_state(const Mapping& m, const bool* keys, int count = 256);
 input::PadState controller_state(const Mapping& m, const float values[kPadCount]);
 
 // JSON. from_json starts from defaults: inputs missing from the file keep their default binding.
@@ -185,5 +203,7 @@ void load_startup();
 Mapping current();
 void set_current(const Mapping& m, bool save = true);  // applies immediately; saves to default_path()
 uint32_t generation();  // bumps on every set_current
+bool skip_controller_selection();
+bool invert_camera_y();  // current().invert_camera_y without copying the mapping (camera hooks)
 
 }  // namespace input_map

@@ -1,3 +1,4 @@
+#include "tooltip.h"
 // Experimental mods in the Mods tab: their label and the "Save backups" section (list, Back up now,
 // Restore at next start). The warning before switching one on is part of the mod's review (mods_tab.h),
 // whose first step backs up the saves. Same ImGui navigation as the other overlay dialogs; the host
@@ -100,7 +101,7 @@ inline bool backups_section(bool back) {
             ImGui::BeginDisabled(info.name == staged);
             if (ImGui::SmallButton("Delete")) { backups.delete_choice = info.name; backups.open_delete = true; }
             ImGui::EndDisabled();
-            if (info.name == staged && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            if (info.name == staged && overlay::tooltip_hovered(ImGuiHoveredFlags_AllowWhenDisabled))
                 ImGui::SetTooltip("Staged for restore. Cancel the restore to delete it.");
             ImGui::PopID();
         }
