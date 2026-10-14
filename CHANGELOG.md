@@ -7,6 +7,10 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Cheats: moon jump** (idea from the GreenNaugahyde Android fork): in Gameplay → Cheats, off by default. Hold L
+  to rise; the left stick steers relative to the camera. **No fall damage after moon jump** is a separate option.
+  Works at 30 fps, with frame interpolation and in true 60; loading a state ends a flight.
+
 - **Vulkan: textures a graphics driver cannot filter smoothly** (some Android GPUs) are now sampled sharply
   instead of breaking Vulkan's rules. Every other device keeps the same filtering as before.
 
