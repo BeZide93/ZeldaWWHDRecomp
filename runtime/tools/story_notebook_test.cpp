@@ -731,6 +731,50 @@ void test_game_font() {
     font::Atlas half;
     half.build({font::line_key("abc", ink)}, main, nullptr, nullptr, {}, 1, 0.5f);
     assert(half.cell(font::line_key("abc", ink))->height == 10 && half.cell(font::line_key("abc", ink))->width == 15);
+    // sized lines: composed at the screen's pixel height (whole pixels, then 8 % steps never below it)
+    assert(font::pixel_height(12.3f) == 13 && font::pixel_height(16.0f) == 16 && font::pixel_height(0) == 1);
+    for (float px : {17.0f, 23.5f, 31.0f, 46.2f, 97.0f}) {
+        const int h = font::pixel_height(px);
+        assert(h >= px && h <= px * 1.09f + 1);
+    }
+    assert(font::pixel_height(46.2f) == font::pixel_height(45.0f));  // a resize by a pixel reuses the lines
+    {
+        // a bold glyph with the game's look: letters at full coverage inside a 2-texel border at half,
+        // 40 texels tall; shrunk 4 x its border is half a pixel, and the line still gets a border
+        font::Face big;
+        big.cell_height = 40;
+        game_glyph::Glyph g;
+        g.advance = 24, g.bitmap.width = 20, g.bitmap.height = 40;
+        g.bitmap.rgba.assign(20 * 40 * 4, 255);
+        for (int y = 0; y < 40; y++)
+            for (int x = 0; x < 20; x++)
+                if (x < 2 || x >= 18 || y < 2 || y >= 38) g.bitmap.rgba[(size_t(y) * 20 + x) * 4 + 3] = 128;
+        big.glyphs['a'] = g;
+        const std::string key = font::sized_key(font::kBold + "a", ink, 10);
+        font::Atlas sized;
+        sized.build({key, font::line_key("a", ink)}, big, nullptr, nullptr, {}, 1, 1.0f);
+        const font::Atlas::Cell* c = sized.cell(key);
+        assert(c && c->height == 10 && c->width == 8 && c->margin == 1 && sized.cell(font::line_key("a", ink))->height == 40);
+        auto im = sized.image();
+        const size_t x0 = size_t(c->u0 * im->width + 0.5f), y0 = size_t(c->v0 * im->height + 0.5f);
+        auto px = [&](int x, int y) { return &im->rgba[((y0 + y) * im->width + x0 + x) * 4]; };
+        // the middle: the ink; left of the letter (the cell's border room): the light border, opaque enough to be seen
+        assert(px(3, 5)[1] < 0x50 && px(3, 5)[3] == 255);
+        assert(px(0, 5)[0] > 200 && px(0, 5)[3] > 100);
+        // the same glyph not shrunk keeps its own 2-pixel border
+        const std::string full = font::sized_key(font::kBold + "a", ink, font::pixel_height(40.0f));  // 41
+        sized.build({full}, big, nullptr, nullptr, {}, 1);
+        c = sized.cell(full), im = sized.image();
+        const size_t fx = size_t(c->u0 * im->width + 0.5f), fy = size_t(c->v0 * im->height + 0.5f);
+        const uint8_t* edge = &im->rgba[((fy + 20) * im->width + fx + 1) * 4];
+        assert(edge[0] > 200 && edge[3] > 100);
+        // to_pictures finds the sized line of a Text command at that screen's pixels
+        Command st;
+        st.kind = Command::Text, st.x = 0, st.y = 0, st.size = 40, st.rgba = ink, st.text = font::kBold + "a";
+        auto pics = font::to_pictures({st}, &sized, 1.0f, 1.0f);
+        assert(pics.size() == 1 && pics[0].kind == Command::Picture && pics[0].h == 40 && pics[0].x < 0 && pics[0].x > -1);  // the border room left of the line
+        assert((font::lines_of({st}, 1.0f, 0.25f) == std::vector<std::string>{key}));
+    }
     // Text commands become pictures of their lines, scaled to the text size, faded by their alpha
     Command t;
     t.kind = Command::Text, t.x = 100, t.y = 50, t.size = 40, t.rgba = 0x00380080, t.text = "abc";

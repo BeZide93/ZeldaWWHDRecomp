@@ -496,7 +496,7 @@ struct Look {
 } g_look;
 constexpr float kBoxResolution = 0.75f;  // composed boxes: pixels per page unit (the GamePad shows 0.67)
 constexpr float kFontScale = 1.05f;
-constexpr float kAtlasScale = 0.62f;     // the text atlas: the font's lines at 62 % (46 of its 74 pixels; the TV shows up to 44)      // the game font's cell height per page text size (its cell has room above and below)
+constexpr float kAtlasScale = 0.62f;     // before the screen's pixels are known: the font's lines at 62 % (46 of its 74 pixels)
 float g_close_time = 1.0f;  // the closing animation: 0..1 after the page closed
 std::vector<Command> g_closing;  // the last page drawn (resolved), faded out while closing
 std::vector<guestmods::hud::Handle> g_closing_images;
@@ -645,14 +645,19 @@ void load_art() {
 
 // The page's commands as HUD commands: boxes and text become pictures of their images (handles
 // alongside; 0 for the commands that aren't pictures)
-std::vector<Command> render(std::vector<Command> cmds, std::vector<guestmods::hud::Handle>& images) {
+// `screen`: where the page is drawn; its text is composed at that screen's real pixel size.
+std::vector<Command> render(std::vector<Command> cmds, std::vector<guestmods::hud::Handle>& images, uint32_t screen) {
     auto& store = guestmods::hud::store();
     const uint64_t generation = store.state_generation();
     cmds = style::resolve(cmds, &g_look.art);  // each box uses its art when that piece was read
     // text: the line atlas, rebuilt when a line is new, the fonts grew or the prompts changed
     const bool font = g_look.main.ready();
+    // screen pixels per page unit (the page is laid out in TV units; the GamePad shows 854 / 1280 of them)
+    const float pixels = store.pixels(screen) * (screen == 1 ? 854.0f / 1280.0f : 1.0f);
+    static float traced = -1;
+    if (trace() && std::fabs(pixels - traced) > 0.01f) LOG("[notebook] text composed at %.2f screen pixels per page unit (screen %u)", traced = pixels, screen);
     if (font) {
-        const std::vector<std::string> lines = font::lines_of(cmds);
+        const std::vector<std::string> lines = font::lines_of(cmds, kFontScale, pixels);
         if (!g_look.atlas.holds(lines, g_look.prompts, g_look.fonts_key)) {
             g_look.atlas.build(lines, g_look.main, &g_look.fallback, g_look.icons.ready() ? &g_look.icons : nullptr, g_look.prompts, g_look.fonts_key,
                                kAtlasScale);
@@ -665,7 +670,7 @@ std::vector<Command> render(std::vector<Command> cmds, std::vector<guestmods::hu
             g_look.store_generation = generation;
         }
     }
-    cmds = font::to_pictures(cmds, font && g_look.atlas_image ? &g_look.atlas : nullptr, kFontScale);
+    cmds = font::to_pictures(cmds, font && g_look.atlas_image ? &g_look.atlas : nullptr, kFontScale, pixels);
     images.assign(cmds.size(), 0);
     for (size_t i = 0; i < cmds.size(); i++) {
         Command& c = cmds[i];
@@ -718,7 +723,7 @@ void publish(const std::vector<Row>& all, const std::vector<Command>* caption = 
     const guestmods::hud::Handle list = store.begin(kOwner, screen);
     if (!list) return;
     std::vector<guestmods::hud::Handle> images;
-    std::vector<Command> cmds = render(caption ? *caption : g_page.draw(all), images);
+    std::vector<Command> cmds = render(caption ? *caption : g_page.draw(all), images, screen);
     g_closing = cmds, g_closing_images = images, g_closing_screen = screen;  // for the closing animation
     fit_to_screen(cmds, screen);
     append_all(list, cmds, images);
