@@ -13,6 +13,14 @@ what is on `devel` and not released yet (also in the
   `WWHD_VK_FORCE_RENDERPASS=1` forces it for testing; `=0` turns it off. Everyone else keeps the current
   renderer path, with the same pictures and performance.
 
+- **Fixed: Windows setup stopped while linking when the folder name had an emoji or other special characters**
+  ("'charmap' codec can't encode character"). Setup now writes its linker file lists as UTF-8, so the game can be
+  set up in any folder.
+
+- **A new app icon** (issue #199, thanks @thorazine111-coder): a sailing boat on the sea, original artwork, on
+  Android (adaptive icon on Android 8+) and in the Linux AppImage. The game's own icon from your copy is still
+  available as a home-screen shortcut (Android setup: **Add the game icon to the home screen**).
+
 - **Story system for quest mods** (letters, a quest notebook and sea-chart marks, in the game's own style). The
   port brings the system; all quest content comes from the mod catalogue:
   - **Story system** (Mods > Built-in, on): it needs the **Story Notebook** package from the mod catalogue, which
