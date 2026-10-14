@@ -26,6 +26,7 @@
 #include "backend_hooks.h"
 #ifdef WWHD_HAS_VULKAN
 #include "gfx/vulkan/api.h"
+#include "gfx/vulkan/background_checkpoint.h"
 #endif
 #include "runtime.h"
 #include "savestate.h"
@@ -319,12 +320,37 @@ static void emit_host(Op op, std::initializer_list<uint32> payload) {
 }
 
 #ifdef WWHD_HAS_VULKAN
+static gfxvk::BackgroundCheckpoint& background_cache_checkpoint() {
+    static gfxvk::BackgroundCheckpoint worker([] {
+        host::set_thread_name("Vulkan cache save");
+        // If a periodic write was already in flight, wait outside execution
+        // and take a second snapshot for any newer revision before returning.
+        for (int pass = 0; pass < 2; ++pass) {
+            std::function<void()> wait;
+            {
+                std::lock_guard<std::recursive_mutex> lk(g_exec_mutex);
+                host::with_autorelease_pool([&] { wait = gfxvk::background_renderer_caches(); });
+            }
+            if (wait) wait();
+        }
+    });
+    return worker;
+}
+void request_background_vulkan_cache_checkpoint() {
+    // SDL can send lifecycle events while main-thread Vulkan initialization is still running.
+    // Do not create the saver or inspect renderer/cache objects until publication completes.
+    if (!gfxvk::background_renderer_caches_ready()) return;
+    background_cache_checkpoint().request();
+}
 void checkpoint_vulkan_caches() {
     render_sync();
     std::lock_guard<std::recursive_mutex> lk(g_exec_mutex);
     host::with_autorelease_pool([] { gfxvk::save_renderer_caches(); });
 }
 void shutdown_vulkan_caches() {
+    // The background saver may be waiting for g_exec_mutex. Join before locking.
+    gfxvk::disable_background_renderer_caches();
+    background_cache_checkpoint().stop();
     render_sync();
     std::lock_guard<std::recursive_mutex> lk(g_exec_mutex);
     host::with_autorelease_pool([] { gfxvk::shutdown_renderer_caches(); });

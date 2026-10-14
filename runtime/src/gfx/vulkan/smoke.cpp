@@ -45,6 +45,7 @@
 #include <string>
 #include <thread>
 
+namespace gx2 { void request_background_vulkan_cache_checkpoint(); }
 namespace gfxvk {
 extern uint64_t g_stat_full_checks, g_stat_uploads;
 void request_tv_dump(const std::string&,int);
@@ -1209,6 +1210,13 @@ int renderer_smoke_test() {
         (unsigned long long)(measured.timestamp_writes - before.timestamp_writes));
   }
   test_hdr_presentation();
+  if (std::getenv("WWHD_TEST_CACHE_BACKGROUND")) {
+    // Synthetic durability test: let the caller kill this process after the
+    // background checkpoint reaches disk, bypassing orderly shutdown entirely.
+    gx2::request_background_vulkan_cache_checkpoint();
+    LOG("[renderer smoke] waiting for kill after background cache request");
+    for (;;) std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  }
   save_pipeline_cache();
   wait_idle();
   reset_pass_caches();
