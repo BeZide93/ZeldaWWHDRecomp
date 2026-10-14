@@ -2,6 +2,7 @@
 #include "story_lyt_screen.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cctype>
 #include <cstdio>
 #include <cstring>
@@ -19,6 +20,7 @@ const uint32_t kLoadItemScreen = GC(0x02693650);   // hdIngameLoadItemScreen(scr
 const uint32_t kPartsDraw = GC(0x026F8B54);        // hdParts_c::draw(this, viewport)
 const uint32_t kFinalizeScreens = GC(0x02715374);  // hdIngameUi_c::finalizeScreens(this)
 const uint32_t kDrawPrimary = GC(0x02716AD0);      // hdIngameUi_c::drawPrimaryScreens(this, info): the item menu on the GamePad
+const uint32_t kCursorDraw = GC(0x026538A0);       // hdCursorMgr_c::draw(this, info): the menus' selection cursor
 const uint32_t kDrawHud = GC(0x02715CA0);          // hdIngameUi_c::drawHudScreens(this, info): the TV (the item menu there with the Pro Controller)
 const uint32_t kResMgrCache = GC(0x026FB694);      // hdLayoutResMgr_c::cache(this, name, heap)
 const uint32_t kNoControlConstruct = GC(0x02700ADC);  // NoControlPart_l::construct(0)
@@ -50,6 +52,7 @@ bool g_failed = false;  // this item screen's build failed: not again until the 
 uint32_t g_part_vt = 0, g_layout_vt = 0;
 bool g_check = false;  // a state was loaded: check still_there() before the next use
 std::map<std::string, uint32_t> g_panes;
+std::chrono::steady_clock::time_point g_covered{};  // when our layout last covered the item menu
 uint32_t g_viewport = 0;  // the item screen's viewport, while drawPrimaryScreens runs (0: it didn't draw)
 
 void drop() { g_part = g_layout = g_set = 0, g_panes.clear(); }
@@ -165,6 +168,15 @@ void draw_after(Cpu* c) {
     if (!g_part) return;
     g_call(c, kCalcLayout, {g_part});
     g_call(c, kPartsDraw, {g_part, viewport});
+    g_covered = std::chrono::steady_clock::now();
+}
+
+// The menus' selection cursor (four corner brackets) is drawn by a pass after ours on the TV: while our
+// layout covers the item menu (drawn within the last 0.1 s) the cursor is not drawn; nothing of its state
+// changes, it is drawn again as soon as our layout is gone.
+void cursor_draw(Cpu* c) {
+    if (g_part && std::chrono::steady_clock::now() - g_covered < std::chrono::milliseconds(100)) return;
+    g_original(c, kCursorDraw);
 }
 
 // The item menu on the GamePad: its screens (item screen, sub window, menu buttons, cursor, messages) are
@@ -221,7 +233,7 @@ void set_game_calls(void (*original)(Cpu*, uint32_t), uint32_t (*call)(Cpu*, uin
 void install(const std::function<std::string(uint32_t)>& replaced_by, const std::function<void(uint32_t, void (*)(Cpu*))>& replace) {
     if (!g_has_client || !g_original || !g_call) return;
     // all three or nothing: a layout that is built but never freed (or never drawn) must not happen
-    for (uint32_t fn : {kLoadItemScreen, kPartsDraw, kFinalizeScreens, kDrawPrimary, kDrawHud})
+    for (uint32_t fn : {kLoadItemScreen, kPartsDraw, kFinalizeScreens, kDrawPrimary, kDrawHud, kCursorDraw})
         if (const std::string by = replaced_by(fn); !by.empty()) {
             LOG("[lyt] %s: %08X is replaced by %s: no layout", g_client.layout.c_str(), fn, by.c_str());
             g_has_client = false;
@@ -232,6 +244,7 @@ void install(const std::function<std::string(uint32_t)>& replaced_by, const std:
     replace(kFinalizeScreens, hooks::finalize_screens);
     replace(kDrawPrimary, hooks::draw_primary);
     replace(kDrawHud, hooks::draw_hud);
+    replace(kCursorDraw, hooks::cursor_draw);
     LOG("[lyt] %s (%s): from %s", g_client.layout.c_str(), g_client.owner, g_client.archive.c_str());
 }
 
