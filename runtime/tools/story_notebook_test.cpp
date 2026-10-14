@@ -1141,14 +1141,18 @@ void put_file(const std::filesystem::path& p, const std::vector<uint8_t>& b) {
 }
 std::map<uint32_t, void (*)(Cpu*)> store_hooks;
 std::vector<uint32_t> store_calls;
+// the guest stack of the store hooks' calls (the top of the arena): initdata_to_card's frame lies below it
+constexpr uint32_t kStoreStack = kArena + 0x3F000, kInitdataFrame = 0x420;
+bool g_initdata_frame_clear = false;  // what the last initdata_to_card call found in its frame
 void store_original(Cpu* c, uint32_t fn) {
     store_calls.push_back(fn);
     assert(fn == 0x025BA7B0 || fn == 0x025BA9FC || fn == 0x025BAC50);
-    (void)c;
+    assert(c->r[1] == kStoreStack);
+    if (fn == 0x025BAC50) g_initdata_frame_clear = story_block::all_zero(mem::ptr(c->r[1] - kInitdataFrame), kInitdataFrame);
 }
 void store_hook(uint32_t fn, uint32_t data_num) {
     Cpu c{};
-    c.r[3] = kSave + 0x20, c.r[4] = kArena + 0x30000, c.r[5] = data_num;
+    c.r[1] = kStoreStack, c.r[3] = kSave + 0x20, c.r[4] = kArena + 0x30000, c.r[5] = data_num;
     store_hooks.at(fn)(&c);
 }
 
@@ -1248,7 +1252,15 @@ void test_story_store() {
     }
     store_hook(0x025BA7B0, 1);
     assert(story_store::book().get(story_mail::kRecordQuest, 0x0BAD) == 4);
+    // a new Quest Log's data comes from initdata_to_card's stack frame, padding included: the hook clears
+    // the frame first, so stale bytes of earlier calls (0x14 -> 0xD4 in each status C's status A byte 0x17
+    // after the item menu) never reach the save; the caller's frame above it is left alone
+    memset(mem::ptr(kStoreStack - kInitdataFrame - 0x40), 0xC0, kInitdataFrame + 0x80);
+    g_initdata_frame_clear = false;
     store_hook(0x025BAC50, 1);
+    assert(g_initdata_frame_clear);
+    for (uint32_t o = 0; o < 0x40; o++)
+        assert(ld8(kStoreStack + o) == 0xC0 && ld8(kStoreStack - kInitdataFrame - 0x40 + o) == 0xC0);
     store_hook(0x025BA7B0, 1);
     assert(story_store::book().empty());
     // loading a Quest Log moves the old record out of the game's reserved bytes
