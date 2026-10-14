@@ -67,4 +67,10 @@
     <string name="game_icon_none">Set up the game first</string>
     <string name="controller_settings_hint">Hold Select/− to open Settings</string>
     <string name="controller_settings_hint_home">Hold Select/− or press Home to open Settings</string>
+    <string name="touch_layout_access">Touch controls. Hold the controller button to edit the layout.</string>
+    <string name="touch_layout_hint">Drag a control to move it. Select one, then change its size.</string>
+    <string name="touch_layout_smaller">Size −</string>
+    <string name="touch_layout_larger">Size +</string>
+    <string name="touch_layout_reset">Reset</string>
+    <string name="touch_layout_done">Done</string>
 </resources>

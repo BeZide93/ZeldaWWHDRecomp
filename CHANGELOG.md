@@ -7,6 +7,10 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Android: system game modes** (idea from the GreenNaugahyde Android fork): the game declares Android's
+  performance and battery-saving game modes, and the system no longer downscales the picture or overrides the
+  frame rate, so the port's own resolution and frame pacing stay in charge.
+
 - **Vulkan: a classic render-pass mode for older graphics drivers** (issues #144 and #51): the game now also runs
   on Vulkan 1.1 / 1.2 drivers without dynamic rendering (for example older AMD drivers), and older Intel
   Windows drivers (before 101.2121), which crashed on dynamic rendering, use the classic mode automatically.
