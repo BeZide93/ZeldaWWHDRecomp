@@ -396,6 +396,13 @@ def build_detail(nb, art, out, track_box=None):
     slot = nb.null("D_ChartSlot", scx - sw / 2, scy - sh / 2, sw, sh, [], root)
     slot["rotate"] = [0, 0, round(tilt, 3)]
     panes.append(slot)
+    # the mini chart on the card's sea (make_notebook_chart.py): it places itself exactly (the HUD's bilinear
+    # sea) and undoes the slot's tilt
+    import make_notebook_chart
+    chart = make_notebook_chart.build_chart(nb, art, out, (cx, cy, cw, ch),
+                                            parent=nb.centre(scx - sw / 2, scy - sh / 2, sw, sh) + (tilt,))
+    slot["children"] = chart["panes"]
+    textures.update(chart["textures"]), materials.update(chart["materials"])
 
     # ---- for N_PlateTrack: the chart scroll right of its label, the cursor brackets around it ----
     track = []
@@ -412,7 +419,7 @@ def build_detail(nb, art, out, track_box=None):
                                 visible=False))
 
     # ---- animations (N_Detail's own page turn, DetailIn / DetailOut, is the notebook generator's) ----
-    groups, anims = {}, {}
+    groups, anims = dict(chart["groups"]), dict(chart["animations"])
     if track:  # the cursor around the A plate breathes as the list's does
         groups["G_TrackCursor"] = [p["name"] for p in track if p["name"].startswith("D_TrackCursor")]
         bn = max(1, round(FPS / 0.9))

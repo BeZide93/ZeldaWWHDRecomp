@@ -15,6 +15,7 @@
 #include "story_notebook_layout_detail.h"
 #include "story_lyt_text.h"
 #include "story_notebook_page.h"
+#include "story_notebook_layout_chart.h"
 #include "story_notebook_art.h"
 
 namespace story_notebook_layout {
@@ -30,6 +31,7 @@ std::mutex g_mu;
 View g_view;            // the latest (g_mu)
 detail::DetailView g_detail;  // the quest the detail view shows (g_mu; with g_view.mode 2)
 uint64_t g_detail_serial = 0;
+chart::ChartView g_chart;  // the detail view's mini chart (g_mu; with g_view.mode 2)
 bool g_drawing = false;  // the layout draws the page (or its closing) now (g_mu)
 
 // ---- the layout's draw (game thread, item screen draw) ----
@@ -176,12 +178,14 @@ bool frame(Cpu* c, uint32_t) {
     bool drawing;
     detail::DetailView dv;
     uint64_t dserial;
+    chart::ChartView cv;
     {
         std::lock_guard lock(g_mu);
         v = g_view;
         drawing = g_drawing;
         dv = g_detail;
         dserial = g_detail_serial;
+        cv = g_chart;
     }
     if (!drawing && !g_shown.closing) return false;
     // the detail view: N_Detail instead of the list's content and tabs, the plates' prompts for it
@@ -206,6 +210,7 @@ bool frame(Cpu* c, uint32_t) {
             show(c, "N_PlateTrack", dv.track_plate);
             g_shown.detail_serial = dserial;
         }
+        chart::apply(c, cv);  // Link and the place move every frame (only changes are written)
         g_shown.mode = 2;
         return true;
     }
@@ -263,6 +268,7 @@ void built(Cpu* c, uint32_t) {
     g_shown = Shown{};
     for (uint16_t& k : g_slot_key) k = 0;  // a new archive in memory: its slots are empty
     detail::built(c);
+    chart::built(c);
     show(c, "N_Detail", false);
     g_cursor_y0 = pane_f(story_lyt_screen::pane(c, "N_Cursor"), 0x20);
     g_row_step = pane_f(story_lyt_screen::pane(c, "N_Row0"), 0x20) - pane_f(story_lyt_screen::pane(c, "N_Row1"), 0x20);
@@ -354,8 +360,10 @@ bool configure() {
         {"Breathe", "G_Cursor"},  {"Bump0", "G_Row0"},       {"Bump1", "G_Row1"},       {"Bump2", "G_Row2"},
         {"Bump3", "G_Row3"},      {"Bump4", "G_Row4"},       {"PressBack", "G_Back"},   {"PressTrack", "G_Track"},
         {"DetailIn", "G_Detail"}, {"DetailOut", "G_Detail"},   {"TrackBreathe", "G_TrackCursor"}};
+    std::vector<std::pair<std::string, std::string>> all = anims;
+    for (const auto& a : chart::anims()) all.push_back(a);  // the mini chart's glow
     std::map<std::string, uint32_t> slots;
-    for (const auto& [name, group] : anims) {
+    for (const auto& [name, group] : all) {
         const uint32_t slot = slots.emplace(group, uint32_t(slots.size())).first->second;
         client.anims.push_back({name, group, slot});
     }
@@ -363,6 +371,7 @@ bool configure() {
     client.before = [] {  // the menu's floating icon is drawn with the menu's screens, before our layout
         if (drawing()) nb::hide_floating_notebook_icon();
     };
+    client.game_archives = {chart::kGameArchive};  // the sea chart's Link icon (story_notebook_layout_chart.h)
     client.built = built;
     client.frame = frame;
     story_lyt_screen::set_client(std::move(client));
@@ -379,6 +388,7 @@ bool update(const nb::Page& page, const std::vector<nb::Row>& all) {
             if (r.quest->key == page.selected_key()) {
                 detail::DetailView d = detail::view_of(page, r);
                 if (!detail::same(d, g_detail)) g_detail = std::move(d), g_detail_serial++;
+                g_chart = chart::view_of(page, *r.quest);
             }
     }
     if (!same(v, g_view)) v.serial = g_view.serial + 1, g_view = std::move(v);

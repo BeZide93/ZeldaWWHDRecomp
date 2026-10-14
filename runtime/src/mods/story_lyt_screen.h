@@ -41,6 +41,11 @@ struct Client {
     std::string layout;        // the layout's name (Layout/<layout>.szs, blyt/<layout>.bflyt)
     std::string archive;       // the archive file on the host
     std::vector<Anim> anims;   // the animation set's entries, in this order
+    // further archives the layout's resource accessor gets after its own (hdParts_c::attachArchives): the
+    // game's layout archives the layout names textures of (txl1 "<name>^<suffix>.bflim", e.g. the sea
+    // chart's Link icon); only archives the game keeps resident (the layout resource manager's cache);
+    // one that isn't there is skipped by the game
+    std::vector<std::string> game_archives;
     std::function<void(Cpu*, uint32_t lyt)> built;   // right after the build (lyt: the layout object)
     std::function<bool(Cpu*, uint32_t lyt)> frame;   // every item screen draw: true draws the layout
     std::function<void()> before;                    // before the item menu's screens are drawn (each pass)
