@@ -13,6 +13,12 @@ public final class TouchLayoutTest {
         check(layout.put("1:0",-.8f,3f,20f),"finite edits accepted and bounded");
         TouchLayout.Placement p=layout.get("1:0");check(p.x==0 && p.y==1 && p.radius==TouchLayout.MAX_RADIUS,"bounds");
         for (int[] size:new int[][]{{1920,1080},{1080,1920},{320,240},{240,320},{3000,200}}) inside(TouchLayout.fit(p,size[0],size[1]),size[0],size[1]);
+        // A toolbar can grow after rotation or font wrapping. All previews,
+        // including large controls in a short landscape pane, remain below it.
+        for (int[] view:new int[][]{{1920,1080,160},{1080,1920,240},{320,240,160},{240,320,180}}) {
+            TouchLayout.Placement preview=TouchLayout.fit(p,view[0],view[1],view[2]);inside(preview,view[0],view[1]);
+            check(preview.y*view[1]-preview.radius*Math.min(view[0],view[1])>=view[2]-.001f,"toolbar hides control");
+        }
         TouchLayout copy=new TouchLayout(Set.of("1:0","4:0","0:6"));copy.decode(layout.encode());
         check(copy.encode().equals(layout.encode()),"persistent round trip");
         for (float bad:new float[]{Float.NaN,Float.POSITIVE_INFINITY,Float.NEGATIVE_INFINITY}) {

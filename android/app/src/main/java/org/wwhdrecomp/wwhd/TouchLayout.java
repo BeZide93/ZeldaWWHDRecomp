@@ -42,11 +42,18 @@ final class TouchLayout {
         }
     }
     static Placement fit(Placement p, int width, int height) {
+        return fit(p,width,height,0);
+    }
+    static Placement fit(Placement p, int width, int height, int topInset) {
         if (width<=0 || height<=0) return p;
-        float normalized=clamp(p.radius,MIN_RADIUS,MAX_RADIUS);
-        float radius=normalized*Math.min(width,height);
+        int top=Math.max(0,Math.min(height-1,topInset));
+        float shortSide=Math.min(width,height);
+        // The editor toolbar may leave less room than a control's saved size.
+        // Fit its preview below the toolbar; persistent radii still use put's bounds.
+        float normalized=Math.min(clamp(p.radius,MIN_RADIUS,MAX_RADIUS),(height-top)/(2f*shortSide));
+        float radius=normalized*shortSide;
         return new Placement(clamp(p.x,radius/width,1-radius/width),
-                clamp(p.y,radius/height,1-radius/height),normalized);
+                clamp(p.y,(top+radius)/height,1-radius/height),normalized);
     }
     private static float clamp(float value,float low,float high) { return Math.max(low,Math.min(high,value)); }
 

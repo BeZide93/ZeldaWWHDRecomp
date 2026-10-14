@@ -176,10 +176,8 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
             c.cx=c.fx*w; c.cy=c.fy*h; c.r=c.fr*s; // unchanged default path
         } else {
             if (p==null) p=new TouchLayout.Placement(c.fx,c.fy,c.fr);
-            p=TouchLayout.fit(p,w,h);
+            p=TouchLayout.fit(p,w,h,editor.editing() && editorBar!=null ? editorBar.getBottom():0);
             c.cx=p.x*w; c.cy=p.y*h; c.r=p.radius*s;
-            if (editor.editing() && editorBar!=null)
-                c.cy=Math.max(c.cy,Math.min(h-c.r,editorBar.getBottom()+c.r));
         }
     }
     private void placeControls() {
@@ -239,10 +237,12 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
         lastTouchDevice = event.getDeviceId();
         if (editor.editing()) return editTouch(event);
         if (editor.discarding()) {
-            editor.pointers(action==MotionEvent.ACTION_UP || action==MotionEvent.ACTION_CANCEL ? 0:event.getPointerCount());
+            editor.pointers(action==MotionEvent.ACTION_UP || action==MotionEvent.ACTION_CANCEL ? 0:
+                    event.getPointerCount()-(action==MotionEvent.ACTION_POINTER_UP ? 1:0));
             return true;
         }
-        editor.pointers(action==MotionEvent.ACTION_UP || action==MotionEvent.ACTION_CANCEL ? 0:event.getPointerCount());
+        editor.pointers(action==MotionEvent.ACTION_UP || action==MotionEvent.ACTION_CANCEL ? 0:
+                    event.getPointerCount()-(action==MotionEvent.ACTION_POINTER_UP ? 1:0));
         if (action == MotionEvent.ACTION_DOWN && event.getToolType(0) != MotionEvent.TOOL_TYPE_FINGER) {
             editor.pointers(0);
             return false;
@@ -350,6 +350,9 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
         editorBar=new LinearLayout(getContext());
         editorBar.setOrientation(LinearLayout.VERTICAL);
         editorBar.setBackgroundColor(0xEE123340);
+        editorBar.addOnLayoutChangeListener((v,left,top,right,bottom,oldLeft,oldTop,oldRight,oldBottom)->{
+            if (bottom!=oldBottom || right!=oldRight) placeControls();
+        });
         TextView hint=new TextView(getContext());hint.setText(R.string.touch_layout_hint);
         hint.setTextColor(0xFFFFFFFF);hint.setGravity(android.view.Gravity.CENTER);
         editorBar.addView(hint);
@@ -380,8 +383,8 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
     private void saveLayout() { prefs.edit().putString("touch_layout_v1",layout.encode()).apply(); }
     private void moveSelected(float x,float y,float radius) {
         int w=getWidth(),h=getHeight();if (selected==null || w<=0 || h<=0) return;
-        TouchLayout.Placement p=TouchLayout.fit(new TouchLayout.Placement(x/w,y/h,radius/Math.min(w,h)),w,h);
-        if (editorBar!=null) p=new TouchLayout.Placement(p.x,Math.max(p.y,Math.min(1-p.radius*Math.min(w,h)/h,(editorBar.getBottom()+p.radius*Math.min(w,h))/h)),p.radius);
+        TouchLayout.Placement p=TouchLayout.fit(new TouchLayout.Placement(x/w,y/h,radius/Math.min(w,h)),
+                w,h,editorBar!=null ? editorBar.getBottom():0);
         if (layout.put(key(selected),p.x,p.y,p.radius)) placeControls();
     }
     private void resizeSelected(float scale) {
@@ -389,7 +392,8 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
     }
     private boolean editTouch(MotionEvent e) {
         int action=e.getActionMasked();
-        editor.pointers(action==MotionEvent.ACTION_UP || action==MotionEvent.ACTION_CANCEL ? 0:e.getPointerCount());
+        editor.pointers(action==MotionEvent.ACTION_UP || action==MotionEvent.ACTION_CANCEL ? 0:
+                e.getPointerCount()-(action==MotionEvent.ACTION_POINTER_UP ? 1:0));
         if (action==MotionEvent.ACTION_DOWN) {
             selected=null;float best=Float.MAX_VALUE;
             for (Control c:controls) {
