@@ -29,10 +29,12 @@ inline constexpr int32_t kResultNone = 0, kResultOwned = 1, kResultDone = 2;
 inline constexpr int32_t kResultInvalid = -1, kResultNoRoom = -2;
 inline constexpr uint32_t kIconStory = 0;
 // the chart's record in the story-mod book: kind story_mail::kRecordMarker, this key, these values
-inline constexpr uint8_t kChartOwned = 1, kChartDone = 2;
+inline constexpr uint8_t kChartOwned = 1, kChartDone = 2, kChartOpened = 3;  // 3: owned, opened in the chart list
 uint16_t chart_key(const std::string& mod, const std::string& chart);
 inline constexpr size_t kMaxIdBytes = 32, kMaxLabelBytes = 64;
 inline constexpr unsigned kMaxMarkersPerMod = 8, kMaxMarkers = 32;
+inline constexpr size_t kMaxNameBytes = 40, kMaxDescriptionBytes = 200;
+inline constexpr unsigned kMaxCharts = 32;
 // The Great Sea: 7 x 7 squares of 100000 units, square D4's center at (0, 0), x east, z south.
 inline constexpr float kSquare = 100000.0f, kSeaHalf = 3.5f * kSquare;
 
@@ -45,6 +47,21 @@ int32_t state(const std::string& mod, const std::string& chart);
 int32_t mark(const std::string& mod, const std::string& chart, const std::string& marker, float x, float z,
              uint32_t icon, const std::string& label);
 int32_t unmark(const std::string& mod, const std::string& chart, const std::string& marker);
+// A declared chart (manifest "charts"): its name and description and the place its X marks. While Link
+// owns it, the MAP screen's chart list shows it after the game's charts (its own chart number, 61 and
+// up), with the square's art and the X at the place (story_chart.cpp).
+// Declaring again replaces it. Results: kResultNone, kResultInvalid, kResultNoRoom.
+int32_t define(const std::string& mod, const std::string& chart, const std::string& name, const std::string& description, float x, float z);
+struct ChartView {
+    std::string mod, chart, name, description;
+    float x, z;
+    int32_t state;  // kResultNone / kResultOwned / kResultDone in the loaded save file
+    bool opened;    // owned and opened in the chart list
+};
+std::vector<ChartView> charts();  // the declared charts, in declaration order
+// The in-game menu switches to the MAP screen with that chart selected in its chart list (game thread;
+// false when Link doesn't own it or there is no in-game menu).
+bool open_in_list(const std::string& mod, const std::string& chart);
 
 // What the sea chart shows now: the tracked quest's step (done false), then the markers of finished
 // charts (done true: the red circle), in the order they were placed. For other mods that draw a map
@@ -70,6 +87,11 @@ bool imported();
 void install(const std::function<std::string(uint32_t)>& replaced_by, const std::function<void(uint32_t, void (*)(Cpu*))>& replace);
 bool installed();
 void set_game_calls(void (*original)(Cpu*, uint32_t), uint32_t (*call)(Cpu*, uint32_t, std::initializer_list<uint32_t>));
+// guest memory for the mod charts' entries (kMaxCharts x 0x28 bytes), and the chart list's captions: fn(number,
+// text) arms a message's replacement text, fn(0, nullptr) ends it (story_mail::caption)
+void set_entry_memory(uint32_t guest, uint32_t bytes);
+using CaptionFn = void (*)(uint32_t number, const std::u16string* text);
+void set_caption_text(CaptionFn fn);
 
 // Full save states: the game's own pane state is what a state holds. capture_begin() puts the panes
 // the markers use back as the game left them (all guest threads are stopped), capture_end() shows the
@@ -86,6 +108,19 @@ void hide_panes(Cpu* c);      // hdSeaChartMenu_c::hideMenuPanes
 void destroy(Cpu* c);         // hdSeaChartMenu_c::destroy
 void mark_layout(Cpu* c);     // hdSeaChartGrid_c::updateChartMarkLayout
 void mark_refresh(Cpu* c);    // hdSeaChartGrid_c::refreshChartMarks
+void find_chart(Cpu* c);      // hdMapDisplayCoordinator_c::findChart
+void chart_obtained(Cpu* c);  // ::isChartObtained
+void chart_opened(Cpu* c);    // ::isChartOpened
+void chart_complete(Cpu* c);  // ::isChartComplete
+void obtain_chart(Cpu* c);    // ::obtainChart
+void count_obtained(Cpu* c);  // ::countAllObtainedCharts
+void menu_find_chart(Cpu* c); // hdMenuMap_c::findChart
+void chart_caption(Cpu* c);   // hdMenuMap_c::setChartCaption
+void chart_kind(Cpu* c);      // hdMenuMapChartKind
+void chart_icon(Cpu* c);      // hdMenuMapUpdateChartIcon
+void chart_frame(Cpu* c);     // hdMenuMapUpdateChartFrame
+void chart_details(Cpu* c);   // hdMenuMapUpdateChartDetails
+void reset_selection(Cpu* c); // hdMenuMap_c::resetChartSelection
 }  // namespace hooks
 
 // The game's sea chart menu (hdSeaChartMenu_c) once it has been shown this session (it stays alive

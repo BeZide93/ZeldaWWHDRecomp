@@ -37,6 +37,8 @@ struct ManifestStep {
     bool follow = true;  // npc "follow": false keeps the step's place fixed
     Availability when;   // "available": the step's prerequisites
     std::string sail_line;  // "sail_line": the King of Red Lions says it once (story_sail.h); '\n' between lines
+    std::string give_chart;  // npc "then": {"give": "chart:<id>"}: the talk gives Link the mod's chart
+    std::string find_chart;  // "find": "chart:<id>": the chart's treasure; the chart is finished when the step is
 };
 struct ManifestQuest {
     std::string id, title, reward_text, start_text, journal = "on_enable";
@@ -48,8 +50,54 @@ struct ManifestQuest {
     // description ("encloses": [{"id": "letter:friend", "name": ..., "description": ...}]); empty:
     // the defaults (enclosure_name / enclosure_description)
     std::string enclosure_name, enclosure_description;
+    std::vector<std::string> letter_charts;  // "encloses": ["chart:<id>"]: the letter gives Link these charts
+    std::string reward_chart;                // "reward": {"chart": "chart:<id>"}: given when the quest is done
     std::vector<ManifestStep> steps;
 };
+// A chart declared in the manifest ("charts": [...]): what the MAP screen's chart list shows for it
+struct ManifestChart {
+    std::string id, name, description;
+    float x = 0, z = 0;
+};
+// "chart:<id>": the id, or empty
+inline std::string chart_ref(const mods::json::Value& v) {
+    if (v.type != mods::json::Value::String || v.text.rfind("chart:", 0) != 0) return {};
+    return v.text.substr(6);
+}
+// Parses the manifest's charts ("charts": [{"id", "name", "description", "place": {"x", "z"}}]).
+inline bool parse_charts(const mods::json::Value& manifest, std::vector<ManifestChart>& out, std::string& why) {
+    using mods::json::Value;
+    out.clear();
+    const Value& charts = manifest.get("charts");
+    if (charts.type == Value::Null) return true;
+    if (charts.type != Value::Array || charts.array.size() > 8) return why = "charts must be a list of up to 8", false;
+    for (const Value& c : charts.array) {
+        ManifestChart m;
+        std::u16string ignored;
+        if (c.type != Value::Object || c.get("id").type != Value::String || !story_mail::valid_id(c.get("id").text))
+            return why = "invalid chart id", false;
+        m.id = c.get("id").text;
+        if (c.get("name").type != Value::String || c.get("name").text.empty() || c.get("name").text.size() > 40 ||
+            !story_mail::append_utf16(c.get("name").text, false, ignored))
+            return why = "chart " + m.id + ": a name of up to 40 bytes is needed", false;
+        m.name = c.get("name").text;
+        if (c.get("description").type != Value::Null) {
+            if (c.get("description").type != Value::String || c.get("description").text.size() > 200 ||
+                !story_mail::append_utf16(c.get("description").text, true, ignored))
+                return why = "chart " + m.id + ": invalid description", false;
+            m.description = c.get("description").text;
+        }
+        const Value& place = c.get("place");
+        if (place.type != Value::Object || place.get("x").type != Value::Number || place.get("z").type != Value::Number)
+            return why = "chart " + m.id + ": the place of its mark is needed", false;
+        m.x = float(place.get("x").number), m.z = float(place.get("z").number);
+        if (!(std::fabs(m.x) <= 350000 && std::fabs(m.z) <= 350000)) return why = "chart " + m.id + ": place off the sea", false;
+        for (const ManifestChart& o : out)
+            if (o.id == m.id) return why = "chart " + m.id + " is declared twice", false;
+        out.push_back(m);
+    }
+    return true;
+}
 inline constexpr size_t kMaxEnclosureNameBytes = 40, kMaxEnclosureDescriptionBytes = 200;
 // What the Delivery Bag says about a quest's sealed letter
 inline std::string enclosure_name(const ManifestQuest& q) { return q.enclosure_name.empty() ? "Sealed Letter" : q.enclosure_name; }
@@ -144,6 +192,8 @@ inline bool parse_quests(const mods::json::Value& manifest, std::vector<Manifest
         if (!text(q.get("reward").get("text"), kMaxRewardBytes, false, m.reward_text, "reward text")) return false;
         if (q.get("reward").get("item").type == Value::String && !(m.reward_item = rupee_item(q.get("reward").get("item").text)))
             return why = "quest " + m.id + ": unsupported reward item", false;
+        if (q.get("reward").get("chart").type != Value::Null && (m.reward_chart = chart_ref(q.get("reward").get("chart"))).empty())
+            return why = "quest " + m.id + ": the reward chart must be \"chart:<id>\"", false;
         const Value& letter = q.get("letter");
         if (letter.type == Value::Object) {
             m.has_letter = true;
@@ -156,6 +206,7 @@ inline bool parse_quests(const mods::json::Value& manifest, std::vector<Manifest
             for (const Value& e : letter.get("encloses").array) {
                 if (e.type == Value::String && e.text.rfind("letter:", 0) == 0) m.letter_encloses_letter = true;
                 if (e.type == Value::String && e.text == "notebook") m.letter_encloses_notebook = true;
+                if (const std::string chart = chart_ref(e); !chart.empty()) m.letter_charts.push_back(chart);
                 // the object form: the enclosure with what the Delivery Bag says about it
                 if (e.type == Value::Object && e.get("id").type == Value::String && e.get("id").text.rfind("letter:", 0) == 0) {
                     m.letter_encloses_letter = true;
@@ -179,6 +230,8 @@ inline bool parse_quests(const mods::json::Value& manifest, std::vector<Manifest
                 s.has_place = true;
             }
             if (!parse_available(st.get("available"), s.when, why)) return why = "quest " + m.id + ": " + why, false;
+            if (st.get("find").type != Value::Null && (s.find_chart = chart_ref(st.get("find"))).empty())
+                return why = "quest " + m.id + ": \"find\" must be \"chart:<id>\"", false;
             // "sail_line": a string, or up to three strings (one message box)
             const Value& sail = st.get("sail_line");
             if (sail.type != Value::Null) {
@@ -228,11 +281,31 @@ inline bool parse_quests(const mods::json::Value& manifest, std::vector<Manifest
                 if (npc.get("follow").type == Value::Bool) s.follow = npc.get("follow").boolean;
                 else if (npc.get("follow").type != Value::Null) return why = "quest " + m.id + ": follow must be true or false", false;
                 const Value& give = npc.get("then").get("give");
-                if (give.type == Value::String && !(s.reward = rupee_item(give.text))) return why = "quest " + m.id + ": unsupported item to give", false;
+                if (give.type == Value::String && !(s.give_chart = chart_ref(give)).empty()) {
+                } else if (give.type == Value::String && !(s.reward = rupee_item(give.text)))
+                    return why = "quest " + m.id + ": unsupported item to give", false;
             }
             m.steps.push_back(s);
         }
         out.push_back(std::move(m));
+    }
+    // the charts the quests name must be declared
+    std::vector<ManifestChart> charts;
+    if (!parse_charts(manifest, charts, why)) return false;
+    auto declared = [&](const std::string& id) {
+        for (const ManifestChart& c : charts)
+            if (c.id == id) return true;
+        return false;
+    };
+    for (const ManifestQuest& q : out) {
+        std::vector<std::string> refs = q.letter_charts;
+        if (!q.reward_chart.empty()) refs.push_back(q.reward_chart);
+        for (const ManifestStep& st : q.steps) {
+            if (!st.give_chart.empty()) refs.push_back(st.give_chart);
+            if (!st.find_chart.empty()) refs.push_back(st.find_chart);
+        }
+        for (const std::string& r : refs)
+            if (!declared(r)) return why = "quest " + q.id + ": chart \"" + r + "\" is not declared in \"charts\"", false;
     }
     return true;
 }
