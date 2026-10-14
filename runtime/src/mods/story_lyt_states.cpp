@@ -103,6 +103,11 @@ int entry_of(const char* anim) {
     return -1;
 }
 
+story_lyt_screen::Anim entry(uint32_t i) {
+    parse();
+    return {g_entries[i].anim, g_entries[i].group, g_entries[i].slot};
+}
+
 void bind(Cpu* c, Call call, uint32_t set, uint32_t (*safe_string)(const char*)) {
     for (uint32_t i = 0; i < g_entries.size(); i++) {
         call(c, kBindGroup, {set, i, safe_string(g_entries[i].anim.c_str()), safe_string(g_entries[i].group.c_str())});

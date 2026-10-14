@@ -4,6 +4,7 @@
 //   /vol/meta/...     -> <game>/meta/...
 //   /vol/save/...     -> <save dir>/...
 #include "../mods/story_mail.h"
+#include "../mods/story_lyt_screen.h"
 #include "../mods/story_store.h"
 #include "../platform/filesystem.h"
 
@@ -130,7 +131,7 @@ std::string host_path(const std::string& guest) {
 // chose, read under the name the game asks for), then the installed game.
 std::string read_path(const std::string& guest,const std::string& mode="rb") {
     if(mode=="r"||mode=="rb")if(auto model=story_mail::model_override(guest);!model.empty())return model;  // the story notebook's model
-    if(mode=="r"||mode=="rb")if(auto lyt=story_mail::layout_override(guest);!lyt.empty())return lyt;  // prototype: the story layout
+    if(mode=="r"||mode=="rb")if(auto lyt=story_lyt_screen::archive_for(guest);!lyt.empty())return lyt;  // a story layout (story_lyt_screen.h)
     auto override=mods::content::replacement(guest,mode);
     if(!override.empty())if(const char* trace=std::getenv("WWHD_TEST_CONTENT_TRACE");trace&&std::string(trace)=="1")LOG("[content-mod] read %s -> %s",guest.c_str(),override.c_str());
     if(override.empty()&&(mode=="r"||mode=="rb"))override=game_lang::redirect(guest);

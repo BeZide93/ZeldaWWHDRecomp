@@ -19,6 +19,7 @@
 #include "story_notebook_game.h"
 #include "guest_png.h"
 #include "story_mail.h"
+#include "story_lyt_screen.h"
 #include "story_mail_book.h"
 #include "story_chart.h"
 #include "story_notebook.h"
@@ -598,14 +599,18 @@ void init() {
         ch.addr=addr;ch.ordinal=uint32_t(ordinal);ch.replace=fn;ch.replace_mod="the port's story notebook (King of Red Lions)";
         g_mod_hook_flags[ordinal]=1;
     });
-    // Feasibility prototype (local only): our own layout drawn by the game's UI framework (story_lyt_proto.cpp).
+    // Story layouts (story_lyt_screen.h): a layout of our own with the item screen. Its client: the layout
+    // test harness (WWHD_STORY_LYT, story_lyt_proto.cpp); nothing is hooked without one.
     story_lyt::set_game_calls(call_original,[](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);});
-    story_lyt::install([](uint32_t addr,PpcFunc fn) {
+    story_lyt::install([](uint32_t,PpcFunc){});
+    story_lyt_screen::set_game_calls(call_original,[](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);});
+    story_lyt_screen::install([](uint32_t addr) {
+        auto it=g_chains.find(addr);return it==g_chains.end()?std::string():it->second.replace_mod;
+    },[](uint32_t addr,PpcFunc fn) {
         int ordinal=ordinal_of(addr);
-        if(ordinal<0)fatal("[guestmods] story-lyt: %08X is not a game function",addr);
+        if(ordinal<0)fatal("[guestmods] story layout: %08X is not a game function",addr);
         Chain& ch=g_chains[addr];
-        if(ch.replace){LOG("[story-lyt] %08X is already replaced by %s: no prototype layout",addr,ch.replace_mod.c_str());return;}
-        ch.addr=addr;ch.ordinal=uint32_t(ordinal);ch.replace=fn;ch.replace_mod="the story layout prototype";
+        ch.addr=addr;ch.ordinal=uint32_t(ordinal);ch.replace=fn;ch.replace_mod="the port's story layout";
         g_mod_hook_flags[ordinal]=1;
     });
     story_store::set_game_calls(call_original);
@@ -652,6 +657,7 @@ void state_loaded() {
     story_mail::state_loaded();
     story_chart::state_loaded();
     story_notebook::state_loaded();
+    story_lyt_screen::state_loaded();
     for(auto& mod:g_loaded)mod.hud_called=false;
 }
 
