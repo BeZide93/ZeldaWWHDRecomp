@@ -25,6 +25,19 @@ public class WwhdActivity extends SDLActivity {
     public static String performanceThermals() { return PerformanceThermals.read(mSingleton); }
 
 
+    @Override protected void onDestroy() {
+        if (phoneRumble != null) phoneRumble.setActive(false);
+        super.onDestroy();
+    }
+
+    private volatile PhoneRumble phoneRumble;
+    public static void phoneRumble(int level) {
+        if (mSingleton instanceof WwhdActivity) {
+            PhoneRumble output = ((WwhdActivity)mSingleton).phoneRumble;
+            if (output != null) output.update(level);
+        }
+    }
+
     protected GamePadDisplay gamePadDisplay;
     private File onDeviceGame;
     private AndroidGame.Selection selection;
@@ -72,6 +85,7 @@ public class WwhdActivity extends SDLActivity {
 
     @Override protected void onResume() {
         super.onResume();
+        if (phoneRumble != null) phoneRumble.setActive(true);
         // Only start after SDL successfully loaded the native game library.
         if (!mBrokenLibraries) {
             if (gamePadDisplay == null) gamePadDisplay = new GamePadDisplay(this, mLayout, mSurface);
@@ -87,6 +101,7 @@ public class WwhdActivity extends SDLActivity {
     }
 
     @Override protected void onPause() {
+        if (phoneRumble != null) phoneRumble.setActive(false);
         if (gamePadDisplay != null) gamePadDisplay.stop();
         super.onPause();
     }
@@ -106,6 +121,7 @@ public class WwhdActivity extends SDLActivity {
             Log.i("wwhd", "game folder: " + new File(files, "game"));
         }
         super.onCreate(savedInstanceState);
+        phoneRumble = new PhoneRumble(this);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         // on-screen controls over the game (the button under the view button shows or hides them)
         if (mLayout != null)

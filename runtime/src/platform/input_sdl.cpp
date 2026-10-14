@@ -1,5 +1,6 @@
 #ifdef __ANDROID__
 #include <jni.h>
+#include "phone_rumble.h"
 #include "overlay/hostui.h"
 #endif
 #include "gfx/display_modes.h"
@@ -293,12 +294,42 @@ static void rumble_all_locked(Uint16 level,Uint32 ms){
   sent=level;
  }
 }
+#ifdef __ANDROID__
+static void phone_rumble_level(Uint16 level) {
+ static phone_rumble::Refresh refresh;
+ if(!refresh.send(level,SDL_GetTicks()))return;
+ auto* env=static_cast<JNIEnv*>(SDL_GetAndroidJNIEnv());
+ if(!env)return;
+ jobject activity=static_cast<jobject>(SDL_GetAndroidActivity());
+ if(!activity)return;
+ jclass cls=env->GetObjectClass(activity);
+ if(cls){
+  if(jmethodID method=env->GetStaticMethodID(cls,"phoneRumble","(I)V"))env->CallStaticVoidMethod(cls,method,(jint)level);
+  env->DeleteLocalRef(cls);
+ }
+ if(env->ExceptionCheck())env->ExceptionClear();
+ env->DeleteLocalRef(activity);
+}
+#endif
 static void apply_rumble(){
  g_rumble_update_ms=SDL_GetTicks();
+#ifdef __ANDROID__
+ const auto mode=phone_rumble::choice.load();
+ // Avoid the touch-visibility clock query for phone-off/controller-only play.
+ const bool touch=phone_rumble::touch_selected(mode!=phone_rumble::kOff && gfx::g_touch_controls,
+                  phone_rumble::last_input_touch.load()) && gfx::touch_buttons_visible();
+ const bool phone=phone_rumble::allowed(mode,touch,!g_rumble_controllers.empty());
+ if(!phone)phone_rumble_level(0);
+ if((g_rumble_controllers.empty()&&!phone)||g_rumble_quit)return;
+#else
  if(g_rumble_controllers.empty()||g_rumble_quit)return;  // no controller with a motor: nothing to do
+#endif
  // the share of "on" over the next host frame (the motor spins up and down slower than that)
  float level=rumble::host_level(1000000/60);
  if(overlay::is_open()||!SDL_GetKeyboardFocus())level=0;  // the game cannot stop it from here
+#ifdef __ANDROID__
+ if(phone)phone_rumble_level((Uint16)(std::clamp(level,0.f,1.f)*0xFFFFu));
+#endif
  std::lock_guard lk(g_pads_mu);
  rumble_all_locked((Uint16)(std::clamp(level,0.f,1.f)*0xFFFFu),kRumbleRefreshMs);
 }
@@ -493,6 +524,9 @@ static void note_dominant_labels(){
  input_map::FaceLabel labels[4];dominant_labels(labels);input_map::note_face_labels(labels);
 }
 static void open_controller(SDL_JoystickID id){
+#ifdef __ANDROID__
+ if(!SDL_IsJoystickVirtual(id))phone_rumble::last_input_touch=false;
+#endif
  std::lock_guard lk(g_pads_mu);
  if(g_controllers.contains(id))return;
 #ifdef __ANDROID__
@@ -681,6 +715,14 @@ void handle_event(const SDL_Event& event){
  if(event.type==SDL_EVENT_SENSOR_UPDATE){device_sensor_event(event.sensor);return;}
 #endif
  if((event.type==SDL_EVENT_AUDIO_DEVICE_ADDED||event.type==SDL_EVENT_AUDIO_DEVICE_REMOVED||event.type==SDL_EVENT_AUDIO_DEVICE_FORMAT_CHANGED)&&!event.adevice.recording)audio::flush();
+#ifdef __ANDROID__
+ // Showing touch buttons alone does not select phone feedback. Actual touch-pad input
+ // selects it; physical-controller or keyboard input deselects the phone again.
+ if(event.type==SDL_EVENT_KEY_DOWN ||
+    (event.type==SDL_EVENT_GAMEPAD_BUTTON_DOWN && !SDL_IsJoystickVirtual(event.gbutton.which)) ||
+    (event.type==SDL_EVENT_GAMEPAD_AXIS_MOTION && std::abs(int(event.gaxis.value))>8192 && !SDL_IsJoystickVirtual(event.gaxis.which)))
+  phone_rumble::last_input_touch=false;
+#endif
  if (event.type==SDL_EVENT_MOUSE_REMOVED) {
   std::lock_guard lk(g_mu);g_mouse_bindings.remove_device(event.mdevice.which);
  }

@@ -854,6 +854,10 @@ add_test(NAME write_watch COMMAND write_watch_test)
 add_test(NAME buffer_cache COMMAND buffer_cache_test)
 add_test(NAME snapshot_caches COMMAND snapshot_cache_test)
 add_test(NAME pad_delivery COMMAND pad_delivery_test)
+add_executable(phone_rumble_test runtime/tools/phone_rumble_test.cpp)
+target_include_directories(phone_rumble_test PRIVATE runtime/src)
+target_compile_options(phone_rumble_test PRIVATE -UNDEBUG)
+add_test(NAME phone_rumble_policy COMMAND phone_rumble_test)
 add_test(NAME rumble COMMAND rumble_test)
 add_test(NAME motion COMMAND motion_test)
 add_test(NAME audio_output COMMAND audio_output_test)
@@ -1138,6 +1142,10 @@ if(NOT ANDROID)
       "-DJAVAC=${Java_JAVAC_EXECUTABLE}" "-DJAVA=${Java_JAVA_EXECUTABLE}"
       "-DWORK=${CMAKE_BINARY_DIR}/https_java_test" "-DSOURCE=${CMAKE_SOURCE_DIR}"
       -P ${CMAKE_SOURCE_DIR}/runtime/tools/https_java_test.cmake)
+    add_test(NAME android_phone_rumble COMMAND ${CMAKE_COMMAND}
+      "-DJAVAC=${Java_JAVAC_EXECUTABLE}" "-DJAVA=${Java_JAVA_EXECUTABLE}"
+      "-DWORK=${CMAKE_BINARY_DIR}/phone_rumble_java_test" "-DSOURCE=${CMAKE_SOURCE_DIR}"
+      -P ${CMAKE_SOURCE_DIR}/runtime/tools/phone_rumble_java_test.cmake)
   endif()
 endif()
 

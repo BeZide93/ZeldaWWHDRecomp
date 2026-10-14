@@ -72,6 +72,9 @@ namespace gfxvk { bool buffer_cache_enabled(); }  // gfx/vulkan/buffer_cache.h
 #include "../motion/motion.h"
 #include "../platform/keycodes.h"
 #include "../rumble.h"
+#ifdef __ANDROID__
+#include "../platform/phone_rumble.h"
+#endif
 #include "../interp.h"
 #include "../runtime.h"
 #include "../savestate.h"
@@ -1729,6 +1732,17 @@ void tab_controls() {
     }
     help(input::has_rumble() ? "Controller vibration when the game asks for it. Off keeps the motors still."
                              : "Controller vibration: this host does not drive controller motors yet.");
+#ifdef __ANDROID__
+    ImGui::SameLine(0, 24);
+    int phone = phone_rumble::choice.load();
+    ImGui::SetNextItemWidth(210);
+    if (ImGui::Combo("Phone vibration", &phone, "Off\0Touch only\0Touch or no rumble controller\0")) {
+        phone_rumble::choice = static_cast<phone_rumble::Mode>(phone);
+        hostui::post([phone] { hostui::set("phoneRumble", std::to_string(phone)); });
+    }
+    help("Touch only is the default. Phone vibration follows game rumble while using touch controls. "
+         "The fallback also works with controllers without rumble. Rumble above and Android's vibration settings apply.");
+#endif
     ImGui::SameLine(0, 24);
     static bool gyro_open = false;
     {
@@ -2168,6 +2182,9 @@ ImDrawData* frame(float pw, float ph, void (*renderer_init)()) {
             hostui::post([pro = v == "1"] { hostui::set_pro_controller(pro); });
         // the saved rumble choice (WWHD_RUMBLE wins)
         if (!rumble::env_override() && hostui::get("rumble", v)) rumble::set_enabled(v != "0");
+#ifdef __ANDROID__
+        if (!phone_rumble::env_override() && hostui::get("phoneRumble", v)) phone_rumble::choice = phone_rumble::parse(v.c_str());
+#endif
         // the saved aspect ratio (WWHD_ASPECT wins; issue #108: it was not remembered)
         if(hostui::get("gameplayFovScale",v))aspect::set_fov_scale(strtof(v.c_str(),nullptr));
         if (!getenv("WWHD_ASPECT") && hostui::get("aspectMode", v)) {
