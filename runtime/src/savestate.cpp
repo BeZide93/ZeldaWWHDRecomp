@@ -62,6 +62,7 @@
 #include "portable_state.h"
 #include "state_memory.h"
 #include "mods/guest_mods.h"
+#include "mods/mods.h"
 #include "mods/guest_state_section.h"
 #include "mods/story_chart.h"
 #include "quit_prompt.h"

@@ -21,7 +21,7 @@ bool g_trace_hle=false;
 namespace input { PadState read(){return sample;} bool pro_controller(){return pro;} }
 namespace crashrec { input::PadState read(int){return sample;} }
 namespace interp { bool repeat_input(){return repeat;} bool fresh_sticks(){return fresh;} void trace_read(const char*){} uint64_t logic_steps(){return 0;} }
-namespace mods { void move_speed_input(uint32_t){} void fast_forward_input(uint32_t&){} }
+namespace mods { void move_speed_input(uint32_t){} void fast_forward_input(uint32_t&){} void moon_jump_input(const input::PadState&){} }
 namespace motion { void right_stick(float,float){} VpadMotion vpad(bool){return {};} }
 namespace threads { void park_sleep_until(std::chrono::steady_clock::time_point,bool,void (*)()){} }
 namespace story_notebook { void pad(input::PadState&, Cpu*){} void mute(input::PadState&){} }  // the notebook page (not under test)

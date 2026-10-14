@@ -1,6 +1,7 @@
 #include "interp.h"
 #include "countdown.h"
 #include "mods/guest_mods.h"
+#include "mods/mods.h"
 #include "mods/packages.h"
 // Frame interpolation (60, 120 or 240 fps output, game logic unchanged at 30 steps per second).
 //
