@@ -10,7 +10,7 @@ própria cópia do jogo de Wii U; este projeto nunca fornece arquivos do jogo.
 
 | | |
 |---|---|
-| **Controles na tela** | Os dois analógicos, o direcional, A B X Y, L R ZL ZR e + −. O botão 🎮 embaixo do botão de visão (canto superior esquerdo) mostra ou esconde os controles. Eles somem enquanto um controle está conectado e voltam no próximo toque. Um controle Bluetooth ou USB também funciona. |
+| **Controles na tela** | Os dois analógicos, o direcional, A B X Y, L R ZL ZR e + −. O botão 🎮 embaixo do botão de visão (canto superior esquerdo) mostra ou esconde os controles. Eles somem enquanto um controle está conectado e voltam no próximo toque. Um controle Bluetooth ou USB também funciona. Segure 🎮 para editar o layout: arraste um controle, selecione-o e use Tamanho −/+ para redimensioná-lo; depois toque em Concluir. Redefinir restaura o layout original. As posições e os tamanhos são salvos neste dispositivo e se ajustam à tela após a rotação. A edição solta os controles pressionados e não envia toques ao jogo. |
 | **A tela do GamePad ao pausar** | Aperte + e a imagem troca para a tela do GamePad (mapa e itens), como o menu de pausa da versão de GameCube. Aperte + de novo para voltar. |
 | **60 fps sem deixar o jogo lento** | Nos dispositivos Android rápidos o jogo mostra 60 quadros por segundo. Quando o dispositivo Android esquenta, ele passa sozinho para 30 estáveis, e o jogo nunca fica lento. |
 | **Dispositivos Android antigos** | Se o driver da sua GPU Adreno for antigo demais, a tela de erro oferece instalar um driver como o Mesa Turnip. |
