@@ -175,6 +175,14 @@ file(GLOB RUNTIME_SOURCES CONFIGURE_DEPENDS runtime/src/*.cpp runtime/src/*.c ru
 list(APPEND RUNTIME_SOURCES runtime/src/platform/perf_hint.cpp runtime/src/platform/thread_sampler.cpp)  # Android performance hints (no-op elsewhere)
 list(APPEND RUNTIME_SOURCES ${WWHD_BUILD_INFO})
 list(APPEND RUNTIME_SOURCES ${WWHD_NPC_CATALOGUE})
+# the Delivery Bag's extra pages: their layout description (tools/story_mods/make_bag_page_layout.py), compiled in
+set(WWHD_STORY_BAG_LAYOUT ${CMAKE_BINARY_DIR}/generated/story_bag_layout.cpp)
+add_custom_command(OUTPUT ${WWHD_STORY_BAG_LAYOUT}
+  COMMAND ${CMAKE_COMMAND} -DIN=${CMAKE_SOURCE_DIR}/runtime/assets/story_bag/StoryBag_00.json -DOUT=${WWHD_STORY_BAG_LAYOUT}
+          -DSYMBOL=wwhd_story_bag_layout -P ${CMAKE_SOURCE_DIR}/cmake/EmbedBytes.cmake
+  DEPENDS ${CMAKE_SOURCE_DIR}/runtime/assets/story_bag/StoryBag_00.json ${CMAKE_SOURCE_DIR}/cmake/EmbedBytes.cmake
+  COMMENT "Delivery Bag page layout" VERBATIM)
+list(APPEND RUNTIME_SOURCES ${WWHD_STORY_BAG_LAYOUT})
 list(APPEND RUNTIME_SOURCES runtime/src/platform/touch_pad.cpp)  # Android on-screen controls (no-op elsewhere)
 if(APPLE)
   list(APPEND RUNTIME_SOURCES runtime/src/platform/https.mm)
@@ -441,6 +449,16 @@ add_executable(story_lyt_text_test runtime/tools/story_lyt_text_test.cpp runtime
 target_include_directories(story_lyt_text_test PRIVATE runtime/src)
 target_compile_options(story_lyt_text_test PRIVATE -UNDEBUG)
 add_test(NAME story_lyt_text COMMAND story_lyt_text_test)
+# the story layouts' clients (runtime/src/mods/story_lyt_clients.h: several layouts with the item screen)
+add_executable(story_lyt_clients_test runtime/tools/story_lyt_clients_test.cpp)
+target_include_directories(story_lyt_clients_test PRIVATE runtime/src)
+target_compile_options(story_lyt_clients_test PRIVATE -UNDEBUG)
+add_test(NAME story_lyt_clients COMMAND story_lyt_clients_test)
+# the Delivery Bag's extra pages for mod items (runtime/src/mods/story_bag_page.h)
+add_executable(story_bag_page_test runtime/tools/story_bag_page_test.cpp)
+target_include_directories(story_bag_page_test PRIVATE runtime/src)
+target_compile_options(story_bag_page_test PRIVATE -UNDEBUG)
+add_test(NAME story_bag_page COMMAND story_bag_page_test)
 # the port's layout writer (runtime/src/mods/lyt_build.cpp); tools/story_mods/test_lyt.py compares its
 # output with the reference generator's
 add_executable(lyt_build_test runtime/tools/lyt_build_test.cpp runtime/src/mods/lyt_build.cpp runtime/src/mods/guest_png.cpp

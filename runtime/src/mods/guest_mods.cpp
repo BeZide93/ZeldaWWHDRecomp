@@ -27,6 +27,7 @@
 #include "story_notebook.h"
 #include "story_items.h"
 #include "story_item_buttons.h"
+#include "story_bag.h"
 #include "story_manifest.h"
 #include "story_store.h"
 #include "story_takeover.h"
@@ -449,6 +450,7 @@ const WWHDGuestHostV1 kHost = {
 // compiled-in recipes (story_npc_catalogue.h); generated again when the recipes change.
 bool g_story_package=false;
 std::string g_notebook_icon,g_icon_cache;  // the notebook's icon and the built archives' cache (item_icons)
+std::string g_story_data;  // the Story Notebook package's data folder
 void prepare_npc_catalogue() {
     static bool done=false;
     if(done)return;
@@ -582,6 +584,7 @@ bool load_one(const std::string& path, std::string& err,const mods::packages::Gu
             // every package is loaded (the notebook is their dependency, so it loads before them)
             g_notebook_icon=icon.empty()?std::string():(std::filesystem::path(pkg.path)/icon).string();
             g_icon_cache=pkg.data_path;
+            g_story_data=pkg.data_path;  // the Delivery Bag's extra pages build their layout there (story_bag.h)
         }
         if(manifest_text.find("\"quests\"")!=std::string::npos||manifest_text.find("\"charts\"")!=std::string::npos||manifest_text.find("\"letters\"")!=std::string::npos) {
             prepare_npc_catalogue();
@@ -742,6 +745,9 @@ void init() {
     // Story layouts (story_lyt_screen.h): a layout of our own with the item screen. Its client: the layout
     // test harness (WWHD_STORY_LYT, story_lyt_proto.cpp); nothing is hooked without one.
     if(story_notebook::imported()||g_story_package)story_notebook_layout::configure();  // the notebook's page layout (first client)
+    // the Delivery Bag's extra pages for mod items (story_bag.h): a second layout with the item screen
+    story_bag::set_game_calls(call_original,[](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);});
+    if(g_story_package&&!g_story_data.empty())story_bag::configure(std::filesystem::path(g_story_data)/"bag_page");
     story_lyt::set_game_calls(call_original,[](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);});
     story_lyt::install([](uint32_t,PpcFunc){});
     story_lyt_screen::set_game_calls(call_original,[](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);});
@@ -825,6 +831,7 @@ void state_loaded() {
     story_mail::state_loaded();
     story_chart::state_loaded();
     story_notebook::state_loaded();
+    story_bag::state_loaded();
     story_lyt_screen::state_loaded();
     for(auto& mod:g_loaded)mod.hud_called=false;
 }
