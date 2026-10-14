@@ -516,12 +516,12 @@ void tab_saves() {
     if (!msg.empty()) note("%s", msg.c_str());
     heading("Save states");
     const bool full = ss::full_states();
+    const char* keys = ext::features().keyboard ? " Shift+F1..F5 save in game, F2..F5 load (F1 opens this menu)." : "";
     if (full)
-        note("Full save states: the whole running game (large, contain game data: never share them). Shift+F1..F5 save in "
-             "game, F2..F5 load (F1 opens this menu).");
+        note("Full save states: the whole running game (large, contain game data: never share them).%s", keys);
     else
         note("A save state keeps your progress and where Link stands (a few KB, no game data). Loading enters that place "
-             "with that progress; enemies and cutscenes start fresh. Shift+F1..F5 save in game, F2..F5 load (F1 opens this menu).");
+             "with that progress; enemies and cutscenes start fresh.%s", keys);
     if (ImGui::BeginTable("slots", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_SizingStretchProp)) {
         ImGui::TableSetupColumn("Slot", ImGuiTableColumnFlags_WidthFixed);
         ImGui::TableSetupColumn("Saved");
@@ -1313,6 +1313,8 @@ modsui::Host& mods_host() {
 #endif
         h.test = g_no_host && getenv("WWHD_MOD_MANAGER_DIR");
         h.file_picker = ext::features().file_picker;
+        h.code_mods = ext::features().code_mods;
+        h.mod_downloads = ext::features().mod_downloads;
         return h;
     }();
     h.back = false;
@@ -1880,17 +1882,25 @@ void tab_about() {
     if (*build::variant())  // the decomp build (docs/decomp-build.md)
         ImGui::Text("%s (%s), %s build: the game code runs from the decompiled source (experimental)", build::version(),
                     build::commit(), build::variant());
+    if (!ext::features().keyboard) {  // a controller only
+        note("Settings overlay: hold Select / press Home on a controller. B closes. L / R switch tabs. The game keeps "
+             "running and sees no input while this menu is open.");
+        note("When the game asks for text (your name), a text window appears over the game: D-pad / left stick choose a "
+             "key, A types it, B deletes, X adds a space, Y is Shift, L / R switch between letters, accents and symbols, "
+             "Start confirms.");
+    } else {
 #ifdef __APPLE__
-    note("Settings overlay: F1 (Fn+F1 on most Mac keyboards), Cmd+, or Settings... in the app menu, or hold Select / "
-         "press Home on a controller. Esc, F1 or B closes. "
+        note("Settings overlay: F1 (Fn+F1 on most Mac keyboards), Cmd+, or Settings... in the app menu, or hold Select / "
+             "press Home on a controller. Esc, F1 or B closes. "
 #else
-    note("Settings overlay: F1, or hold Select / press Home on a controller. Esc, F1 or B closes. "
+        note("Settings overlay: F1, or hold Select / press Home on a controller. Esc, F1 or B closes. "
 #endif
-         "L / R switch tabs on a controller. The game keeps running and sees no input while this menu is open.");
-    note("When the game asks for text (your name), a text window appears over the game: type on the keyboard "
-         "(Enter = OK, Esc = Cancel), click the on-screen keys, or use a controller: D-pad / left stick choose a key, "
-         "A types it, B deletes, X adds a space, Y is Shift, L / R switch between letters, accents and symbols, "
-         "Start confirms.");
+             "L / R switch tabs on a controller. The game keeps running and sees no input while this menu is open.");
+        note("When the game asks for text (your name), a text window appears over the game: type on the keyboard "
+             "(Enter = OK, Esc = Cancel), click the on-screen keys, or use a controller: D-pad / left stick choose a key, "
+             "A types it, B deletes, X adds a space, Y is Shift, L / R switch between letters, accents and symbols, "
+             "Start confirms.");
+    }
     note("Built with Dear ImGui %s (MIT License, Omar Cornut and contributors).", IMGUI_VERSION);
 }
 
@@ -1950,10 +1960,12 @@ void tab_audio() {
     if (audio::master_volume_from_env())
         note("WWHD_AUDIO_VOLUME=%s is set for this start and takes precedence; changes here are not saved.",
              getenv("WWHD_AUDIO_VOLUME"));
-    int speakers = audio::requested_surround() ? 1 : 0;
-    if (combo("Speakers", &speakers, "Stereo\0Surround 5.1\0"))
-        hostui::post([speakers] { audio::set_requested_surround(speakers == 1); });
-    note("Restart the game after changing Speakers.");
+    if (ext::features().speaker_choice) {
+        int speakers = audio::requested_surround() ? 1 : 0;
+        if (combo("Speakers", &speakers, "Stereo\0Surround 5.1\0"))
+            hostui::post([speakers] { audio::set_requested_surround(speakers == 1); });
+        note("Restart the game after changing Speakers.");
+    }
     if (audio::surround_fallback())
         note("Surround 5.1 unavailable on this output. Using stereo; restart after connecting a 5.1 device.");
     if (audio::output_device_changed())
