@@ -76,7 +76,7 @@ class Structure(unittest.TestCase):
         self.assertEqual(struct.unpack(">IHBB", second[36:44]), (0x15, 1, 4, 4))
 
     def test_hooks_not_written_yet(self):
-        for kind in ("window", "text"):
+        for kind in ("window",):
             d = load_json(EXAMPLE)
             d["panes"].append({"type": kind, "name": "X_00", "size": [1, 1]})
             with self.assertRaises(NotImplementedError):
@@ -100,6 +100,79 @@ class Structure(unittest.TestCase):
             self.skipTest("jsonschema not installed")
         schema = load_json(os.path.join(HERE, "lyt", "schema.json"))
         jsonschema.validate(load_json(EXAMPLE), schema)
+
+
+class TextPane(unittest.TestCase):
+    """txt1 / fnl1 / usd1 writers (layout checked against the game's own sections locally; no game data here)."""
+
+    def build(self, *panes, **top):
+        d = load_json(EXAMPLE)
+        d["panes"][0]["children"] += list(panes)
+        d.update(top)
+        return bflyt.build(lyt.Description(d))
+
+    def test_fields(self):
+        from lyt.sections import txt1
+        data, ctx = self.build({"type": "text", "name": "T_Line_00", "size": [600, 60], "text": "Hi\nyou",
+                                "capacity": 40, "font_size": [30, 36], "line_space": 4, "text_position": ["left", "top"],
+                                "line_alignment": "center", "colors": [[1, 2, 3, 4], [5, 6, 7, 8]], "text_id": "L_00",
+                                "shadow": {"offset": [2, -2], "colors": [[0, 0, 0, 255], [9, 9, 9, 255]],
+                                           "white": [255, 255, 255, 100]}})
+        secs = binio.read_sections(data)
+        body = [b for m, b in secs if m == b"txt1"][0]
+        sec = b"txt1" + struct.pack(">I", 8 + len(body)) + body
+        self.assertEqual(sec[0xC:0x16], b"T_Line_00\0")
+        buf, tlen, mat, font, pos, la, fl, pad = struct.unpack(">HHHHBBBB", sec[0x54:0x60])
+        self.assertEqual((buf, tlen, mat, font, pos, la, fl, pad), (82, 14, 1, 0, 5, 2, 1, 0))
+        self.assertEqual(struct.unpack(">I", sec[0x64:0x68])[0], 0xA0)
+        self.assertEqual(sec[0x68:0x70], bytes(range(1, 9)))
+        self.assertEqual(struct.unpack(">4f", sec[0x70:0x80]), (30, 36, 0, 4))
+        self.assertEqual(sec[0xA0:0xAE].decode("utf-16-be"), "Hi\nyou\0")
+        tid = struct.unpack(">I", sec[0x80:0x84])[0]
+        self.assertEqual(sec[tid:tid + 5], b"L_00\0")
+        self.assertEqual(struct.unpack(">4f", sec[0x84:0x94]), (2, -2, 1, 1))
+        self.assertEqual(sec[0x94:0x9C], bytes([0, 0, 0, 255, 9, 9, 9, 255]))
+        self.assertEqual(len(sec) % 4, 0)
+        self.assertEqual(ctx.fonts, [txt1.DEFAULT_FONT])
+        self.assertEqual(ctx.materials[1][0], "T_Line_00")
+        # the text pane's own material: black alpha 0, white, the shadow-colour block
+        self.assertEqual(ctx.materials[1][1][28:], bytes([0, 0, 0, 0, 255, 255, 255, 255]) +
+                         struct.pack(">I", 0x20000) + bytes([0, 0, 0, 255, 255, 255, 100, 0]))
+
+    def test_defaults_and_utf16(self):
+        data, ctx = self.build({"type": "text", "name": "T_A", "size": [10, 10], "text": "\u00e9\U0001F600"})
+        body = [b for m, b in binio.read_sections(data) if m == b"txt1"][0]
+        buf, tlen = struct.unpack(">HH", body[0x4C:0x50])
+        self.assertEqual((buf, tlen), (66, 8))  # capacity 32 characters; 3 UTF-16 units + NUL
+        self.assertEqual(body[0x98:0xA0], bytes([0, 0xE9, 0xD8, 0x3D, 0xDE, 0x00, 0, 0]))
+        self.assertEqual(body[0x56], 0)  # no shadow
+        self.assertEqual(ctx.materials[1][1][28:], bytes([0, 0, 0, 0, 255, 255, 255, 255, 0, 0, 0, 0]))
+
+    def test_fnl1_two_fonts(self):
+        data, ctx = self.build({"type": "text", "name": "T_A", "size": [10, 10], "font": "CKingMain.bffnt"},
+                               {"type": "text", "name": "T_B", "size": [10, 10]})
+        fnl = [b for m, b in binio.read_sections(data) if m == b"fnl1"][0]
+        self.assertEqual(fnl, struct.pack(">HHII", 2, 0, 8, 0x18) + b"CKingMain.bffnt\0CKingMsg.bffnt\0\0")
+        order = [m for m, _ in binio.read_sections(data)]
+        self.assertEqual(order[:4], [b"lyt1", b"txl1", b"fnl1", b"mat1"])
+
+    def test_usd1_scalable(self):
+        data, _ = self.build({"type": "text", "name": "T_A", "size": [10, 10], "scalable": 80,
+                              "user_data": [{"name": "Fix", "type": "int", "value": 0}]})
+        secs = binio.read_sections(data)
+        i = [m for m, _ in secs].index(b"txt1")
+        self.assertEqual(secs[i + 1][0], b"usd1")
+        self.assertEqual(secs[i + 1][1], bytes.fromhex("000200000000002000000018000101000000001800000010000102000000000042a00000"
+                                                       "466978005363616c61626c6500000000"))
+
+    def test_usd1_string(self):
+        from lyt.sections import usd1
+        self.assertEqual(usd1.write([{"name": "Copy", "type": "string", "value": "T_XXX_00"}])[8:],
+                         struct.pack(">HHIIHBB", 1, 0, 0x15, 0xC, 8, 0, 0) + b"T_XXX_00\0Copy\0\0\0")
+
+    def test_capacity_limits(self):
+        with self.assertRaises(ValueError):
+            self.build({"type": "text", "name": "T_A", "size": [10, 10], "capacity": 40000})
 
 
 class Animation(unittest.TestCase):
