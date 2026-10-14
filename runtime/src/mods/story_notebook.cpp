@@ -12,6 +12,7 @@
 #include "story_notebook_game.h"
 #include "story_notebook_font.h"
 #include "story_notebook_style.h"
+#include "story_notebook_art.h"
 #include "guest_hud.h"
 #include "guest_png.h"
 
@@ -20,6 +21,8 @@
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <fstream>
+#include <iterator>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -123,6 +126,11 @@ constexpr uint32_t kPlayStartStage = 0x5134;  // the game info's start stage nam
 constexpr uint16_t kCommandNone = 0, kCommandGetItem = 4, kConditionCanGetItem = 0x0008;
 constexpr uint32_t kPlayItemPartner = 0x52A0;     // dComIfGp_event_setItemPartnerId
 constexpr uint32_t kPlayPlayer = 0x5B2C;          // dComIfGp_getPlayer(0): Link
+const uint32_t kLinkActor = GD(0x1046F0B0) + 0x5B34;  // g_dComIfG_gameInfo.play mpPlayerPtr[0] (as story_chart.cpp)
+const Cpu* c_or_zero(const Cpu* c) {
+    static const Cpu zero{};
+    return c ? c : &zero;
+}
 // The message our line is shown as: the harbour man's own one-box line (l_msg_ub3_ship_near5), with
 // its text replaced for exactly that talk (story_mail::say). Ending after one box (no list).
 constexpr uint32_t kCarrierMessage = 0x2CF3;
@@ -536,11 +544,80 @@ void load_glyphs(Cpu* c, const std::vector<std::string>& lines) {
 }
 
 // the menu art, once (it is read from the item menu's layout, open under the page)
+bool pieces_ready() {
+    const style::Art& a = g_look.art;
+    return a.sheet.width && a.card.width && a.underline.width && a.uplate.width && a.bands[0].width && a.bands[1].width && a.bands[2].width;
+}
+// The page's painted art (user artwork, story_notebook_art.h): read once from the folder
+// WWHD_NOTEBOOK_ART names (outside the repository): frame.png, banner.png (the list) and sheet.png,
+// card.png, header.png, underline.png, band_cream.png, band_blue.png, band_green.png, plate.png
+// (the detail page). WWHD_NOTEBOOK_HEADER=0 leaves the header band out.
+bool g_header = true;
+void load_user_art() {
+    static bool tried = false;
+    if (tried) return;
+    tried = true;
+    const char* dir = getenv("WWHD_NOTEBOOK_ART");
+    if (!dir || !*dir) return;
+    const char* header = getenv("WWHD_NOTEBOOK_HEADER");
+    g_header = !(header && *header == '0');
+    auto read = [&](const char* file, game_glyph::Bitmap& out, int height, bool crop = true) {
+        const std::string path = std::string(dir) + "/" + file;
+        try {
+            std::ifstream f(path, std::ios::binary);
+            if (!f) return;
+            const std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+            const auto png = guestmods::hud::decode_png({bytes.data(), bytes.size()});
+            game_glyph::Bitmap b;
+            b.width = int(png.width), b.height = int(png.height), b.rgba = png.rgba;
+            b = art::clean_edges(b, 96, crop);
+            if (b.height > height) b = art::resized(b, int(std::lround(b.width * float(height) / b.height)), height);
+            out = std::move(b);
+        } catch (const std::exception& e) {
+            LOG("[notebook] %s not read: %s", path.c_str(), e.what());
+        }
+    };
+    style::Art& a = g_look.art;
+    read("frame.png", a.frame, 1044, false);
+    read("banner.png", a.banner, 160);
+    read("sheet.png", a.sheet, 800);
+    read("card.png", a.card, 640);
+    read("header.png", a.header, 240);
+    read("underline.png", a.underline, 48);
+    read("band_cream.png", a.bands[0], 120);
+    read("band_blue.png", a.bands[1], 120);
+    read("band_green.png", a.bands[2], 120);
+    read("plate.png", a.uplate, 140);
+    a.detail_frame = art::detail_frame(a.frame);
+    LOG("[notebook] painted art from %s: frame %s, banner %s, detail pieces %s, header band %s", dir, a.frame.width ? "yes" : "no",
+        a.banner.width ? "yes" : "no", pieces_ready() ? "yes" : "no", a.header.width && g_header ? "on" : "off");
+}
+
+// The sea chart's own Link icon, once the chart menu has been shown this session
+void load_chart_icons() {
+    static uint32_t read_from = 0;
+    const uint32_t chart = story_chart::sea_chart_menu();
+    if (!chart || chart == read_from || !g_ui || !g_ui->chart_icons) return;
+    read_from = chart;
+    if (g_ui->chart_icons(chart, g_look.art)) LOG("[notebook] the mini chart uses the sea chart's Link icon");
+}
+
 void load_art() {
+    load_user_art();
+    load_chart_icons();
     if (g_look.art_tried || !g_ui || !g_ui->art || !g_menu) return;
     g_look.art_tried = true;
     std::string why;
+    style::Art keep = g_look.art;  // the painted art and the chart icons stay
     g_look.art_ok = g_ui->art(g_menu, g_look.art, why);
+    {  // the painted pieces stay
+        style::Art& n = g_look.art;
+        n.frame = std::move(keep.frame), n.banner = std::move(keep.banner), n.detail_frame = std::move(keep.detail_frame);
+        n.sheet = std::move(keep.sheet), n.card = std::move(keep.card), n.header = std::move(keep.header);
+        n.underline = std::move(keep.underline), n.uplate = std::move(keep.uplate);
+        for (int i = 0; i < 3; i++) n.bands[i] = std::move(keep.bands[i]);
+    }
+    g_look.art.link_face = std::move(keep.link_face), g_look.art.ship = std::move(keep.ship);
     if (g_look.art_ok) style::trim_plates(g_look.art);
     if (!g_look.art_ok) LOG("[notebook] the menu's window art can't be read (%s): the page draws plain boxes", why.c_str());
     else LOG("[notebook] the page uses the menu's window art%s%s", why.empty() ? "" : "; ", why.c_str());
@@ -551,7 +628,7 @@ void load_art() {
 std::vector<Command> render(std::vector<Command> cmds, std::vector<guestmods::hud::Handle>& images) {
     auto& store = guestmods::hud::store();
     const uint64_t generation = store.state_generation();
-    cmds = style::resolve(cmds, g_look.art_ok ? &g_look.art : nullptr);
+    cmds = style::resolve(cmds, &g_look.art);  // each box uses its art when that piece was read
     // text: the line atlas, rebuilt when a line is new, the fonts grew or the prompts changed
     const bool font = g_look.main.ready();
     if (font) {
@@ -580,8 +657,10 @@ std::vector<Command> render(std::vector<Command> cmds, std::vector<guestmods::hu
         }
         int bw, bh;  // the size the box was laid out at (the animations scale only the picture)
         style::box_size(c.text, bw, bh);
-        const int w = int(std::lround(bw * kBoxResolution)), h = int(std::lround(bh * kBoxResolution));
         const std::string name = "nb:" + style::box_name(c.text).substr(4);
+        const float res = name == "nb:window" || name == "nb:panel" || name == "nb:info" || name.rfind("nb:plate", 0) == 0 || name.rfind("nb:tab", 0) == 0
+                              ? kBoxResolution : 1.0f;  // the game's art at 75 %, the painted pieces at full size
+        const int w = int(std::lround(bw * res)), h = int(std::lround(bh * res));
         const std::string key = name + ":" + std::to_string(w) + "x" + std::to_string(h);
         Look::Box& box = g_look.boxes[key];
         if (!box.image) box.image = style::compose(g_look.art, name, w, h);
@@ -624,10 +703,17 @@ void publish(const std::vector<Row>& all, const std::vector<Command>* caption = 
     fit_to_screen(cmds, screen);
     append_all(list, cmds, images);
     const std::vector<Row> rows = g_page.shown(all);
-    if (!caption && g_page.mode() == Page::Mode::List) {  // portraits in the rows that show them
+    // portraits: in the rows that show them, and the sender's on the detail page (the painted frame)
+    std::vector<std::pair<unsigned, const Quest*>> portraits;
+    if (!caption && g_page.mode() == Page::Mode::List)
+        for (unsigned i = 0; i < kRowsShown && g_page.top() + i < rows.size(); i++) portraits.push_back({i, rows[g_page.top() + i].quest});
+    if (!caption && g_page.mode() == Page::Mode::Detail && g_page.scene().framed)
+        for (const Row& r : rows)
+            if (r.quest->key == g_page.selected_key()) portraits.push_back({~0u, r.quest});
+    {
         const uint64_t generation = store.state_generation();
-        for (unsigned i = 0; i < kRowsShown && g_page.top() + i < rows.size(); i++) {
-            const Quest& q = *rows[g_page.top() + i].quest;
+        for (const auto& [i, quest] : portraits) {
+            const Quest& q = *quest;
             auto it = g_portraits.find(q.key);
             if (q.portrait.empty() || it == g_portraits.end()) continue;
             Portrait& p = it->second;
@@ -638,7 +724,8 @@ void publish(const std::vector<Row>& all, const std::vector<Command>* caption = 
             }
             if (!p.handle) continue;
             float cx, cy, r, alpha = 1;
-            Page::emblem_place(i, cx, cy, r);
+            if (i == ~0u) g_page.portrait_place(cx, cy, r);
+            else g_page.emblem_place(i, cx, cy, r);
             float size = 2 * r;
             g_page.place_portrait(cx, cy, size, alpha);
             Command c;
@@ -871,6 +958,11 @@ std::vector<Row> rows_now(std::vector<Quest>& storage) {
             if (q.texts_from_mod) continue;
             for (const Declared& d : g_declared) {
                 if (d.key != q.key) continue;
+                q.steps.clear();
+                for (const ManifestStep& st : d.quest.steps) {  // by step number
+                    if (q.steps.size() < st.n) q.steps.resize(st.n);
+                    q.steps[st.n - 1] = st.text;
+                }
                 const uint8_t n = saved_step(b, q.key);
                 if (n == 0) q.next = d.quest.start_text, q.where.clear(), q.has_place = false;
                 for (const ManifestStep& st : d.quest.steps)
@@ -1100,6 +1192,20 @@ void pad(input::PadState& p, Cpu* c) {
         return;
     }
     std::vector<Row> rows = rows_now(storage);
+    {  // what the page shows besides the quests: its frame, Link's place on the sea (the mini chart)
+        Scene scene;
+        scene.framed = g_look.art.framed();
+        scene.pieces = scene.framed && pieces_ready();
+        scene.header = g_look.art.header.width > 0 && g_header;
+        Cpu probe = *c_or_zero(c);
+        const uint32_t play_object = c && g_call ? g_call(&probe, kPlay, {}) : 0;  // the game only (not in tests)
+        const uint32_t link = play_object ? ld32(kLinkActor) : 0;
+        if (link && stage_is(play_object + kPlayStartStage, "sea")) {
+            scene.link_known = true;
+            scene.link_x = u32_as_f32(ld32(link + kActorPos)), scene.link_z = u32_as_f32(ld32(link + kActorPos + 8));
+        }
+        g_page.set_scene(scene);
+    }
     PadInput in;
     in.buttons = p.buttons, in.ly = p.ly, in.touch = p.touch;
     in.x = p.tx * 1280.0f, in.y = p.ty * 720.0f;  // the GamePad picture (854 x 480) as the page's 1280 x 720

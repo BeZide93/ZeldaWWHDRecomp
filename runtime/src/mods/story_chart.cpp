@@ -450,6 +450,9 @@ void state_loaded() {
     g_heal_grids = g_heal_balloons = true;
 }
 
+uint32_t g_chart_menu = 0;  // the sea chart menu (hdSeaChartMenu_c) since it last ran, until destroyed
+uint32_t sea_chart_menu() { return g_chart_menu; }
+
 namespace hooks {
 
 // hdBtnMapIcon_c::update(): the game places its circle (salvaged treasure) first; while the game doesn't show
@@ -548,6 +551,7 @@ void icon_update(Cpu* c) {
 // updateProgressIcons(): the game's story marks, then the mod markers on the panes left free
 void progress_icons(Cpu* c) {
     const uint32_t menu = c->r[3];
+    g_chart_menu = menu;
     auto it = g_applied.find(menu);
     if (it != g_applied.end()) {
         revert(menu, it->second);
@@ -566,6 +570,7 @@ void hide_panes(Cpu* c) {
 
 // destroy(flags): forget the menu's panes (and its balloons and grids)
 void destroy(Cpu* c) {
+    if (c->r[3] == g_chart_menu) g_chart_menu = 0;
     g_applied.erase(c->r[3]);
     g_borrowed.clear();
     g_circles.clear();

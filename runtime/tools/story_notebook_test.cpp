@@ -8,6 +8,7 @@
 #include "mods/story_notebook_font.h"
 #include "mods/story_notebook_style.h"
 #include "mods/story_notebook_caption.h"
+#include "mods/story_notebook_art.h"
 #include "mods/story_notebook_bag.h"
 #include "mods/story_takeover.h"
 #include "mods/story_sail.h"
@@ -847,6 +848,124 @@ void test_caption() {
     assert(style::resolve({m}, &art)[0].text == "art:info@740x276");
     auto box = style::compose(art, "nb:info", 370, 138);
     assert(box && box->width == 370 && box->rgba[(69 * 370 + 185) * 4 + 3] == 255);
+}
+
+// the painted frame and pieces (story_notebook_art.h) and the page laid out on them
+void test_framed() {
+    auto solid = [](int w, int h, uint8_t alpha) {
+        game_glyph::Bitmap b;
+        b.width = w, b.height = h, b.rgba.assign(size_t(w) * h * 4, 200);
+        for (size_t i = 3; i < b.rgba.size(); i += 4) b.rgba[i] = alpha;
+        return b;
+    };
+    // the soft fringe goes, the picture is cropped to what is left (or keeps its size)
+    game_glyph::Bitmap fringe = solid(40, 20, 40);
+    for (int y = 5; y < 15; y++)
+        for (int x = 10; x < 30; x++) fringe.rgba[(size_t(y) * 40 + x) * 4 + 3] = 255;
+    const game_glyph::Bitmap cleaned = art::clean_edges(fringe);
+    assert(cleaned.width == 20 && cleaned.height == 10 && cleaned.rgba[3] == 255);
+    const game_glyph::Bitmap kept = art::clean_edges(fringe, 96, false);
+    assert(kept.width == 40 && kept.height == 20 && kept.rgba[3] == 0);
+    // stretching: the ends keep their shape
+    assert(art::stretch3(solid(100, 20, 255), 400, 20, 0.1f, 0.1f).width == 400);
+    assert(art::row(solid(676, 100, 255), 600, 40).width == 600);
+    assert(art::detail_frame(solid(1448, 1086, 255)).width == 1448);
+    assert(art::fit_into(solid(100, 50, 255), 300, 50).rgba[3] == 0);  // pushed to the right
+    // the chart's mapping: the sea's middle is the chart's middle, its north-west corner the top left
+    float u, v;
+    chart_share(0, 0, u, v);
+    assert(std::fabs(u - 0.5f) < 1e-6f && std::fabs(v - 0.5f) < 1e-6f);
+    chart_share(-350000, -350000, u, v);
+    assert(u == 0 && v == 0);
+    chart_share(100000, 300000, u, v);
+    assert(std::fabs(u - 4.5f / 7) < 1e-4f && std::fabs(v - 6.5f / 7) < 1e-4f);
+    // the page on the frame
+    uint8_t raw[story_mail::kBookSize] = {};
+    Book b(raw);
+    std::vector<Quest> qs = {quest("m", "a"), quest("m", "b")};
+    qs[0].steps = {"Read the letter.", "Bring it to the keeper.", "Come back."}, qs[0].next = "Bring it to the keeper.", qs[0].reward = "A tale";
+    qs[0].has_place = true, qs[0].x = 0, qs[0].z = 0;
+    assert(reach_step(b, qs[0].key, 2) == 2);
+    auto rs = rows(qs, b);
+    Page page;
+    Scene scene;
+    scene.framed = scene.pieces = scene.header = true, scene.link_known = true, scene.link_x = -200000, scene.link_z = 100000;
+    page.set_scene(scene);
+    page.show();
+    page.input(press(0), rs);
+    auto has = [](const std::vector<Command>& cmds, const char* name) {
+        for (const Command& c : cmds)
+            if (c.text.rfind(name, 0) == 0) return true;
+        return false;
+    };
+    auto says = [](const std::vector<Command>& cmds, const std::string& t) {
+        for (const Command& c : cmds)
+            if (c.kind == Command::Text && font::plain_text(c.text).find(t) != std::string::npos) return true;
+        return false;
+    };
+    std::vector<Command> list = page.draw(rs);
+    assert(has(list, "nb:frame") && has(list, "nb:row") && !has(list, "nb:dframe"));
+    // taps: the frame's tab plates, its bottom plates (B Close, A Open)
+    const Page::Geo g = page.geo();
+    PadInput tap;
+    tap.touch = true, tap.x = g.tab[1].x + 10, tap.y = g.tab[1].y + 10;
+    assert(page.input(tap, rs).sound == Sound::Tab && page.tab() == 1);
+    page.input(press(0), rs);
+    tap.x = g.tab[0].x + 10, tap.y = g.tab[0].y + 10;
+    page.input(tap, rs);
+    page.input(press(0), rs);
+    assert(page.tab() == 0);
+    tap.x = g.track.x + 10, tap.y = g.track.y + 10;  // A Open
+    assert(page.input(tap, rs).sound == Sound::Decide && page.mode() == Page::Mode::Detail);
+    page.input(press(0), rs);
+    // the detail page: the pieces, the progress, the step done before, the mini chart with Link and the route
+    std::vector<Command> detail = page.draw(rs);
+    for (const char* n : {"nb:dframe", "nb:sheet", "nb:uline", "nb:band0", "nb:band1", "nb:band2", "nb:card", "nb:uplate", "nb:header", "nb:linkface"})
+        assert(has(detail, n));
+    assert(says(detail, "Step 2 of 3") && says(detail, "Done: Read the letter.") && says(detail, "Bring it to the keeper."));
+    size_t dots = 0;
+    for (const Command& c : detail) dots += c.kind == Command::Circle && c.rgba == 0xD12E1EFF && c.size > 2.0f && c.size < 2.5f;
+    assert(dots > 3);
+    scene.header = false;  // the header band can be left out
+    page.set_scene(scene);
+    assert(!has(page.draw(rs), "nb:header"));
+    // no close in the slot under the header band; the plates: A tracks, B goes back
+    assert(page.input(PadInput{0, 0, true, g.close_x, g.close_y}, rs).kind == Page::Action::None && page.open());
+    page.input(press(0), rs);
+    tap.x = g.track.x + 10, tap.y = g.track.y + 10;
+    assert(page.input(tap, rs).kind == Page::Action::Toggle);
+    page.input(press(0), rs);
+    tap.x = g.back.x + 10, tap.y = g.back.y + 10;
+    assert(page.input(tap, rs).sound == Sound::Cancel && page.mode() == Page::Mode::List);
+    page.input(press(0), rs);
+    // a done quest: all steps done, the reward received
+    assert(finish(b, qs[0].key) == kStepDone);
+    rs = rows(qs, b);
+    page.input(press(kPadRight), rs);
+    page.input(press(0), rs);
+    page.input(press(kPadA), rs);
+    page.input(press(0), rs);
+    detail = page.draw(rs);
+    assert(says(detail, "All 3 steps done") && says(detail, "A tale (received)") && says(detail, "Done"));
+    // a step that isn't possible yet says so in the Next step band
+    Book b2(raw);
+    std::vector<Quest> q2 = {quest("m", "c")};
+    q2[0].next = "Talk to him.", q2[0].hint = "Not yet possible: by day";
+    assert(reach_step(b2, q2[0].key, 1) == 1);
+    auto r2 = rows(q2, b2);
+    Page p2;
+    p2.set_scene(scene);
+    p2.show();
+    p2.input(press(0), r2);
+    p2.input(press(kPadA), r2);
+    assert(says(p2.draw(r2), "Not yet possible: by day"));
+    // the list's close plate
+    Page p3;
+    p3.set_scene(scene);
+    p3.show();
+    p3.input(press(0), rs);
+    tap.x = g.back.x + 10, tap.y = g.back.y + 10;
+    assert(p3.input(tap, rs).kind == Page::Action::Close);
 }
 
 void test_page_feel() {
@@ -1752,6 +1871,7 @@ int main() {
     test_style();
     test_page_feel();
     test_caption();
+    test_framed();
     test_npc_catalogue();
     test_takeover_rules();
     test_takeover_hooks();

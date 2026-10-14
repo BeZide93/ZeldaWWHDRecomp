@@ -88,4 +88,9 @@ void mark_layout(Cpu* c);     // hdSeaChartGrid_c::updateChartMarkLayout
 void mark_refresh(Cpu* c);    // hdSeaChartGrid_c::refreshChartMarks
 }  // namespace hooks
 
+// The game's sea chart menu (hdSeaChartMenu_c) once it has been shown this session (it stays alive
+// with the pause menus), 0 before that or after it was destroyed. Read-only users: the story
+// notebook's mini chart takes the chart's own icons from its layout.
+uint32_t sea_chart_menu();
+
 }  // namespace story_chart

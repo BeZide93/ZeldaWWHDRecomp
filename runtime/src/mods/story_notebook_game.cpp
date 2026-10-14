@@ -157,6 +157,24 @@ bool art(uint32_t menu, style::Art& out, std::string& why) {
     return true;
 }
 
+bool chart_icons(uint32_t chart, style::Art& out) {
+    const uint32_t layout = guest_pointer(chart) ? ld32(chart + 0x44) : 0, lyt = guest_pointer(layout) ? ld32(layout + 4) : 0;
+    const uint32_t root = guest_pointer(lyt) ? ld32(lyt + 0xC) : 0;
+    if (!guest_pointer(root) || pane_name(root) != "L_Map_00") {
+        LOG("[notebook] the sea chart's layout is not where it was expected: no chart icons");
+        return false;
+    }
+    const uint32_t face = find_pane(root, "P_MapLinkFace_00"), ship = find_pane(root, "P_DecoShip_00");
+    game_glyph::Bitmap f, sh;
+    if (!face || !texture_at(face, {0xF4, 0x28}, f, 64, 64)) {
+        LOG("[notebook] the sea chart's Link icon (P_MapLinkFace_00) is not readable");
+        return false;
+    }
+    out.link_face = std::move(f);
+    if (ship && texture_at(ship, {0xF4, 0x28}, sh, 32, 32)) out.ship = std::move(sh);
+    return true;
+}
+
 // ---- research aid: the menu layout's panes and the textures reachable from them (log only) ----
 std::string pane_name(uint32_t pane) {
     const char* name = (const char*)mem::ptr(pane + 0x80);
@@ -220,7 +238,7 @@ font::Prompts prompts() {
     return out;
 }
 
-const GameUi kUi = {glyphs, sound, art, prompts, dump};
+const GameUi kUi = {glyphs, sound, art, chart_icons, prompts, dump};
 
 }  // namespace
 
