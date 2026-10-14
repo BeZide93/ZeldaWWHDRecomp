@@ -436,6 +436,9 @@ def build(art, out_dir):
         textures.update(detail.get("textures", {}))
         materials.update(detail.get("materials", {}))
         kids.append(null("N_Detail", 0, 0, W, H, detail["panes"], page_c, visible=False))
+        for plate in plates:  # the A plate's chart scroll and cursor brackets on the detail page
+            if plate["name"] == "N_PlateTrack":
+                plate["children"] += detail.get("track_plate", [])
     kids += plates
     kids.append(content)
     page = null("N_Page", 0, 0, W, H, kids)

@@ -1395,7 +1395,7 @@ endif()
 # the story notebook's page as a game layout: page state -> view, and the layout's draw (panes, texts,
 # cursor glide, animations) against recording fakes of story_lyt_screen / story_lyt_text / lyt_build
 add_executable(story_notebook_layout_test runtime/tools/story_notebook_layout_test.cpp runtime/src/mods/story_notebook_layout.cpp
-               runtime/src/mods/guest_png.cpp runtime/src/mods/mod_archive.cpp)
+               runtime/src/mods/guest_png.cpp runtime/src/mods/mod_archive.cpp runtime/src/mods/story_notebook_layout_detail.cpp)
 target_include_directories(story_notebook_layout_test PRIVATE runtime/include runtime/src runtime/src/mods)
 target_compile_options(story_notebook_layout_test PRIVATE -UNDEBUG)
 target_link_libraries(story_notebook_layout_test PRIVATE ZLIB::ZLIB)
