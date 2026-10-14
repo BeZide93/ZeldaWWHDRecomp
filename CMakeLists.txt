@@ -441,6 +441,11 @@ add_executable(story_lyt_text_test runtime/tools/story_lyt_text_test.cpp runtime
 target_include_directories(story_lyt_text_test PRIVATE runtime/src)
 target_compile_options(story_lyt_text_test PRIVATE -UNDEBUG)
 add_test(NAME story_lyt_text COMMAND story_lyt_text_test)
+# the story layouts' clients (runtime/src/mods/story_lyt_clients.h: several layouts with the item screen)
+add_executable(story_lyt_clients_test runtime/tools/story_lyt_clients_test.cpp)
+target_include_directories(story_lyt_clients_test PRIVATE runtime/src)
+target_compile_options(story_lyt_clients_test PRIVATE -UNDEBUG)
+add_test(NAME story_lyt_clients COMMAND story_lyt_clients_test)
 # the port's layout writer (runtime/src/mods/lyt_build.cpp); tools/story_mods/test_lyt.py compares its
 # output with the reference generator's
 add_executable(lyt_build_test runtime/tools/lyt_build_test.cpp runtime/src/mods/lyt_build.cpp runtime/src/mods/guest_png.cpp
