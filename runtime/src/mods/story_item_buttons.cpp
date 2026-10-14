@@ -176,7 +176,28 @@ void tick() {
     }
 }
 
+namespace {
+// research aid: WWHD_ITEMS_TEST_PLACE=mod:item:place[:step] gives the item (if needed) and puts it in one
+// of the game's Delivery Bag places (0..7) once the logic step reaches `step` in play
+void test_place() {
+    static bool done = false;
+    const char* e = getenv("WWHD_ITEMS_TEST_PLACE");
+    if (done || !e || !*e || !have_save() || !ld32(kLinkActor)) return;
+    char mod[64] = {}, id[64] = {};
+    unsigned place = 0;
+    unsigned long long step = 0;
+    if (sscanf(e, "%63[^:]:%63[^:]:%u:%llu", mod, id, &place, &step) < 3 || mods::step() < step) return;
+    done = true;
+    if (story_items::count(mod, id) <= 0) story_items::give(mod, id, 1, "WWHD_ITEMS_TEST_PLACE");
+    const std::optional<story_items::Item> it = story_items::find(mod, id);
+    const bool ok = it && story_items::act(it->key, story_items::Action::MoveToGamePlace, int(place));
+    LOG("[items] WWHD_ITEMS_TEST_PLACE at logic step %llu: \"%s\" in place %u: %s", (unsigned long long)mods::step(), id, place,
+        ok ? "ok" : story_items::reason().c_str());
+}
+}  // namespace
+
 void test_assign() {
+    test_place();
     // research aid: WWHD_ITEMS_TEST_BUTTON=mod:item:button[:step] gives the item (if needed) and puts it
     // on the button once the game's logic step reaches `step` in play; mod "notebook" puts the notebook there
     static bool done = false;
