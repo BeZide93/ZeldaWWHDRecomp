@@ -70,6 +70,8 @@ std::vector<SalvagePoint> salvage_points_for_room(int room);
 // The save number of the point the salvage actor is working on now (daSalvage_c::mSalvageId's registry
 // slot), 0 when none: (c) asks it when the chest gives its item.
 uint32_t active_save_no();
+// The declared mod chart of a reserved save number (story_chart::charts()[index]); false for any other.
+bool chart_for_save_no(uint32_t save_no, std::string& mod, std::string& chart);
 
 // ---- (b) chart state (story_treasure_state.cpp) ----
 // The chart's record for a reserved save number: story_chart::kResultNone / kResultOwned / kResultDone
@@ -81,7 +83,8 @@ int32_t finish_salvaged(uint32_t save_no);     // the chest was opened: story_ch
 
 // ---- (c) chest item (story_treasure_chest.cpp) ----
 struct ChestItem {
-    uint8_t game_item = 0;   // the item number the point's parameters carry (for a mod item: (c)'s stand-in)
+    uint8_t game_item = 0;   // the parameters' item number (bits 4..11): the game item, or for a mod item (c)'s
+                             // marker number (kChestMarker 0x1B, no game data uses it)
     int32_t mod_item = -1;   // a mod item's pool number (story_items), -1: the game item itself
 };
 ChestItem chest_item_for(uint32_t save_no);
