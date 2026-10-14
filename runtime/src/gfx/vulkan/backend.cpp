@@ -1451,6 +1451,7 @@ static void recreate_surface(Screen &s) {
     return;
   }
   surfaceLost = false;
+  display_rate::surface_changed();
   s.resize = true;
   LOG("[vulkan] presentation surface recreated");
 }

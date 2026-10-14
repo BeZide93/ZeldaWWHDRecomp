@@ -16,6 +16,8 @@ copia del juego de Wii U; este proyecto nunca proporciona archivos del juego.
 | **Dispositivos Android antiguos** | Si el driver de tu GPU Adreno es demasiado antiguo, la pantalla de error ofrece instalar un driver como Mesa Turnip. |
 | **Partidas guardadas** | Exporta e importa tus partidas y guárdalas en la copia de seguridad de Android. Las partidas de una Wii U real (de EE. UU. o de Europa) también funcionan. |
 
+Android solicita 60 Hz para 30 fps, 60 fps interpolados y 60 fps reales, o la cadencia seleccionada de 120/240 Hz para una interpolación más rápida. Android puede elegir otra frecuencia compatible. La solicitud se repite al volver al juego. Para dejar la elección de frecuencia completamente en manos de Android, establece `WWHD_NO_60HZ=1` en una compilación de desarrollo (`0` mantiene la solicitud activada).
+
 ## Teléfonos probados
 
 Medido con el medidor del propio juego en la zona más exigente de la Isla Initia (unas 3900
