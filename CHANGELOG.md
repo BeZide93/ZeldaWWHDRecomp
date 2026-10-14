@@ -131,7 +131,10 @@ what is on `devel` and not released yet (also in the
   - **Characters take part:** a quest can give a resident new lines. When several quests want the same character,
     the game's own choice box asks which one. The King of Red Lions says a one-time line for the tracked quest.
     Residents are named by neutral ids; their names and places are read from your own game files.
-  - **Mod charts:** mods can mark places on Link's sea chart with the game's rings, like the game's treasure charts.
+  - **Mod charts:** a quest can hand Link its own chart (by letter, in a conversation or as a reward). It appears
+    in the MAP menu's chart list after the game's charts, opens in the game's own chart view with an X at its
+    place, and gets the check mark when its treasure is found. "Open chart" in the notebook jumps there. Mod
+    charts have their own numbers after the game's 61 charts and never touch the game's charts or save data.
   - **Progress is kept in the save file** in a small block the game itself ignores. Removing the mods leaves a normal
     save.
   Details for mod authors in docs/mod-sdk-v2.md; the Story Notebook package and the example quest mods are in the
