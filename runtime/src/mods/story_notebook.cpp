@@ -8,6 +8,7 @@
 #include "story_sail.h"
 #include "story_manifest.h"
 #include "story_chart.h"
+#include "story_items.h"
 #include "story_mail.h"
 #include "story_notebook_game.h"
 #include "story_notebook_font.h"
@@ -1075,7 +1076,7 @@ bool declare(const std::string& mod, const std::string& mod_name, const mods::js
                     npc_catalogue().entry(st.resident)->name.c_str());
             if (st.has_talk)
                 g_takeovers.push_back({reg->key, uint8_t(st.n), st.resident, st.needs_letter, st.lines, st.reward, st.when, st.follow,
-                                       st.give_chart.empty() ? std::string() : mod, st.give_chart});
+                                       st.give_chart.empty() && st.give_item.empty() ? std::string() : mod, st.give_chart, st.give_item});
             if (!st.sail_line.empty()) g_sail_lines.push_back({reg->key, uint8_t(st.n), st.sail_line});
         }
     }
@@ -1107,6 +1108,8 @@ void declared_tick() {
             if (d.quest.letter_encloses_letter) b.set(kRecordCarried, d.key, 1);
             LOG("[notebook] %s: quest \"%s\" started by its letter%s", d.mod.c_str(), d.quest.id.c_str(),
                 d.quest.letter_encloses_letter ? "; Link carries the enclosed letter" : "");
+            for (const std::string& item : d.quest.letter_items)  // the items in the letter
+                story_items::give(d.mod, item, 1, "the letter of its quest");
             for (const std::string& chart : d.quest.letter_charts)  // the charts in the letter
                 if (story_chart::give(d.mod, chart) == story_chart::kResultOwned)
                     LOG("[notebook] %s: the letter of quest \"%s\" gives Link chart \"%s\"", d.mod.c_str(), d.quest.id.c_str(), chart.c_str());
@@ -1127,6 +1130,9 @@ void declared_tick() {
         if (now == kStepDone && !d.quest.reward_chart.empty() && story_chart::state(d.mod, d.quest.reward_chart) == story_chart::kResultNone &&
             story_chart::give(d.mod, d.quest.reward_chart) == story_chart::kResultOwned)
             LOG("[notebook] %s: quest \"%s\" is done: Link gets chart \"%s\"", d.mod.c_str(), d.quest.id.c_str(), d.quest.reward_chart.c_str());
+        if (now == kStepDone && !d.quest.reward_mod_item.empty() && !b.get(story_items::kRecordQuestRewardItem, d.key) &&
+            story_items::give(d.mod, d.quest.reward_mod_item, 1, "its quest's reward") >= 0)
+            b.set(story_items::kRecordQuestRewardItem, d.key, 1);
     }
 }
 
@@ -1211,6 +1217,31 @@ bool open_letter(const char* how) {
     LOG("[notebook] the sealed letter's caption (%s)", how);
     return true;
 }
+// An item's caption (story_items.h): its Info, its use "show", a get. False while the page or a caption is open.
+bool show_info(const std::string& title, const std::string& text, const char* how) {
+    if (!g_installed || g_open || !have_save()) return false;
+    g_caption.show(title, text);
+    g_open = true;
+    g_close_time = 1.0f, g_closing.clear();
+    g_pending_sound = Sound::Open;
+    LOG("[notebook] caption \"%s\" (%s)", title.c_str(), how);
+    return true;
+}
+// A manifest quest reaches a step (an item's use action "quest_step"); its texts stay the manifest's
+int32_t reach(const std::string& mod, const std::string& quest, uint32_t n) {
+    uint16_t key;
+    {
+        std::lock_guard lock(g_mu);
+        Quest* q = find(mod, quest);
+        if (!q || !n || n > kMaxStep) return kResultInvalid;
+        key = q->key;
+    }
+    if (!have_save()) return kResultNoRoom;
+    story_mail::Book b = book();
+    const int now = reach_step(b, key, n);
+    if (now < 0) return kResultNoRoom;
+    return now;
+}
 void close_page() {
     if (g_open) LOG("[notebook] page closed (state load or shutdown)");
     g_page.hide();
@@ -1255,6 +1286,8 @@ void pad(input::PadState& p, Cpu* c) {
         if (const uint32_t s = g_swallow.load(std::memory_order_relaxed)) {
             g_swallow.store(s & p.buttons, std::memory_order_relaxed);
             p.buttons &= ~s;
+        } else if (g_close_time >= 1.0f && story_items::present(c)) {  // an item Link got: its caption, from the next read
+            g_pending_sound = Sound::None;  // present() played the get jingle
         }
         return;
     }
@@ -1595,6 +1628,7 @@ void people_execute(Cpu* c) {
             complete(b, g_talk.takeover);
             if (!g_talk.takeover.chart.empty() && story_chart::give(g_talk.takeover.chart_mod, g_talk.takeover.chart) == story_chart::kResultOwned)
                 LOG("[notebook] quest %04X: Link gets chart \"%s\"", g_talk.takeover.quest, g_talk.takeover.chart.c_str());
+            if (!g_talk.takeover.item.empty()) story_items::give(g_talk.takeover.chart_mod, g_talk.takeover.item, 1, "a talk of its quest");
         }
         LOG("[notebook] quest %04X: delivered, the quest is done", g_talk.takeover.quest);
         if (!g_talk.takeover.reward) {
