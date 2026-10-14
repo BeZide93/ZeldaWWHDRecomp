@@ -1270,6 +1270,10 @@ HLE(coreinit, OSTicksToCalendarTime) {
 // ---------------------------------------------------------------- save states
 
 namespace threads {
+uint32_t diagnostic_count() {
+    std::lock_guard<std::mutex> lock(g_threads_mutex);
+    return uint32_t(g_threads.size());
+}
 static std::string thread_name(HostThread* t) {
     uint32_t n = ld32(t->guest + osthread::kName);
     std::string s = n >= 0x10000 ? mem::read_cstr(n) : "";

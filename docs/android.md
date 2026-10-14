@@ -94,3 +94,5 @@ A nearby native crash report is included in the same share file when available. 
 The Android port is by [rhemfur](https://github.com/rhemfur), part of ZeldaWWHDRecomp. A fan
 project, not affiliated with or endorsed by Nintendo. The Legend of Zelda and The Wind Waker are
 trademarks of Nintendo.
+
+For developer crash diagnostics, `WWHD_CRASH_GUEST_MEMORY=1` adds a bounded 128-byte window for each guest register only when the complete window belongs to an executable, non-writable RPX section. The bytes come from a retained copy of the original executable image, **not live guest memory**; heap, stack, writable data, unknown ranges and section boundaries are redacted. No ASCII, thread names or save contents are added. The report also includes a recent numeric snapshot of guest address regions, registered thread count and process RSS (which may be unavailable). This option is off by default and adds no memory queries or image copies while off. The retained original code is capped at 16 MiB and 64 non-overlapping sections; larger or ambiguous ranges stay redacted. Original code bytes may still identify the game build; review the report before sharing.
