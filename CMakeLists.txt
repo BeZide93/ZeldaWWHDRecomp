@@ -175,6 +175,14 @@ file(GLOB RUNTIME_SOURCES CONFIGURE_DEPENDS runtime/src/*.cpp runtime/src/*.c ru
 list(APPEND RUNTIME_SOURCES runtime/src/platform/perf_hint.cpp runtime/src/platform/thread_sampler.cpp)  # Android performance hints (no-op elsewhere)
 list(APPEND RUNTIME_SOURCES ${WWHD_BUILD_INFO})
 list(APPEND RUNTIME_SOURCES ${WWHD_NPC_CATALOGUE})
+# the Delivery Bag's extra pages: their layout description (tools/story_mods/make_bag_page_layout.py), compiled in
+set(WWHD_STORY_BAG_LAYOUT ${CMAKE_BINARY_DIR}/generated/story_bag_layout.cpp)
+add_custom_command(OUTPUT ${WWHD_STORY_BAG_LAYOUT}
+  COMMAND ${CMAKE_COMMAND} -DIN=${CMAKE_SOURCE_DIR}/runtime/assets/story_bag/StoryBag_00.json -DOUT=${WWHD_STORY_BAG_LAYOUT}
+          -DSYMBOL=wwhd_story_bag_layout -P ${CMAKE_SOURCE_DIR}/cmake/EmbedBytes.cmake
+  DEPENDS ${CMAKE_SOURCE_DIR}/runtime/assets/story_bag/StoryBag_00.json ${CMAKE_SOURCE_DIR}/cmake/EmbedBytes.cmake
+  COMMENT "Delivery Bag page layout" VERBATIM)
+list(APPEND RUNTIME_SOURCES ${WWHD_STORY_BAG_LAYOUT})
 list(APPEND RUNTIME_SOURCES runtime/src/platform/touch_pad.cpp)  # Android on-screen controls (no-op elsewhere)
 if(APPLE)
   list(APPEND RUNTIME_SOURCES runtime/src/platform/https.mm)
@@ -361,13 +369,13 @@ target_link_libraries(guest_png_test PRIVATE ZLIB::ZLIB)
 add_test(NAME guest_png COMMAND guest_png_test "${CMAKE_SOURCE_DIR}/examples/guest-mods")
 
 # Synthetic integration tests call the real guest filesystem HLE handlers.
-add_executable(mod_content_fs_test runtime/tools/mod_content_fs_test.cpp runtime/tools/fs_story_stub.cpp runtime/src/hle/fs.cpp runtime/src/mods/story_mail.cpp runtime/src/mods/story_store.cpp runtime/src/mods/content.cpp runtime/src/mods/mod_archive.cpp runtime/src/game_languages.cpp runtime/src/guest_addr_identity.c)
+add_executable(mod_content_fs_test runtime/tools/mod_content_fs_test.cpp runtime/src/hle/fs.cpp runtime/tools/fs_story_stub.cpp runtime/src/mods/story_mail.cpp runtime/src/mods/story_store.cpp runtime/src/mods/content.cpp runtime/src/mods/mod_archive.cpp runtime/src/game_languages.cpp runtime/src/guest_addr_identity.c)
 target_include_directories(mod_content_fs_test PRIVATE runtime/src runtime/include)
 target_compile_options(mod_content_fs_test PRIVATE -UNDEBUG)
 target_link_libraries(mod_content_fs_test PRIVATE ZLIB::ZLIB Threads::Threads)
 
 # language sources: synthetic European/Japanese packs read through the guest file system (game_languages.h)
-add_executable(language_source_test runtime/tools/language_source_test.cpp runtime/tools/fs_story_stub.cpp runtime/src/hle/fs.cpp runtime/src/mods/story_mail.cpp runtime/src/mods/story_store.cpp runtime/src/mods/content.cpp runtime/src/mods/mod_archive.cpp runtime/src/game_languages.cpp runtime/src/guest_addr_identity.c)
+add_executable(language_source_test runtime/tools/language_source_test.cpp runtime/src/hle/fs.cpp runtime/tools/fs_story_stub.cpp runtime/src/mods/story_mail.cpp runtime/src/mods/story_store.cpp runtime/src/mods/content.cpp runtime/src/mods/mod_archive.cpp runtime/src/game_languages.cpp runtime/src/guest_addr_identity.c)
 target_include_directories(language_source_test PRIVATE runtime/src runtime/include)
 target_compile_options(language_source_test PRIVATE -UNDEBUG)
 target_link_libraries(language_source_test PRIVATE ZLIB::ZLIB Threads::Threads)
@@ -441,6 +449,16 @@ add_executable(story_lyt_text_test runtime/tools/story_lyt_text_test.cpp runtime
 target_include_directories(story_lyt_text_test PRIVATE runtime/src)
 target_compile_options(story_lyt_text_test PRIVATE -UNDEBUG)
 add_test(NAME story_lyt_text COMMAND story_lyt_text_test)
+# the story layouts' clients (runtime/src/mods/story_lyt_clients.h: several layouts with the item screen)
+add_executable(story_lyt_clients_test runtime/tools/story_lyt_clients_test.cpp)
+target_include_directories(story_lyt_clients_test PRIVATE runtime/src)
+target_compile_options(story_lyt_clients_test PRIVATE -UNDEBUG)
+add_test(NAME story_lyt_clients COMMAND story_lyt_clients_test)
+# the Delivery Bag's extra pages for mod items (runtime/src/mods/story_bag_page.h)
+add_executable(story_bag_page_test runtime/tools/story_bag_page_test.cpp)
+target_include_directories(story_bag_page_test PRIVATE runtime/src)
+target_compile_options(story_bag_page_test PRIVATE -UNDEBUG)
+add_test(NAME story_bag_page COMMAND story_bag_page_test)
 # the port's layout writer (runtime/src/mods/lyt_build.cpp); tools/story_mods/test_lyt.py compares its
 # output with the reference generator's
 add_executable(lyt_build_test runtime/tools/lyt_build_test.cpp runtime/src/mods/lyt_build.cpp runtime/src/mods/guest_png.cpp
@@ -993,12 +1011,25 @@ add_test(NAME story_chart COMMAND story_chart_test)
 # the story notebook: quest list, save record, page navigation, services and item menu hooks
 add_executable(story_notebook_test runtime/tools/story_notebook_test.cpp runtime/src/mods/story_notebook.cpp
                runtime/tools/story_notebook_layout_stub.cpp runtime/src/mods/story_mail.cpp runtime/src/mods/story_store.cpp
-               runtime/src/mods/story_chart.cpp runtime/src/mods/guest_png.cpp runtime/src/mods/mod_archive.cpp runtime/src/guest_addr_identity.c
+               runtime/src/mods/story_chart.cpp runtime/src/mods/story_items.cpp runtime/src/mods/story_item_buttons.cpp runtime/src/mods/guest_png.cpp runtime/src/mods/mod_archive.cpp runtime/src/guest_addr_identity.c
                ${WWHD_NPC_CATALOGUE})
 target_include_directories(story_notebook_test PRIVATE runtime/include runtime/src runtime/src/mods)
 target_compile_options(story_notebook_test PRIVATE -UNDEBUG)
 target_link_libraries(story_notebook_test PRIVATE ZLIB::ZLIB)
 add_test(NAME story_notebook COMMAND story_notebook_test)
+# mod items: save record, manifest items, registry, services, bag actions and the item table hooks
+add_executable(story_items_test runtime/tools/story_items_test.cpp runtime/src/mods/story_items.cpp runtime/src/mods/story_store.cpp runtime/src/guest_addr_identity.c ${WWHD_NPC_CATALOGUE})
+target_include_directories(story_items_test PRIVATE runtime/include runtime/src runtime/src/mods)
+target_compile_options(story_items_test PRIVATE -UNDEBUG)
+add_test(NAME story_items COMMAND story_items_test)
+# mod items and the notebook on X/Y/R: the decisions, the menu assignment, the game's reads and the item use
+add_executable(story_item_buttons_test runtime/tools/story_item_buttons_test.cpp runtime/src/mods/story_item_buttons.cpp runtime/src/mods/story_notebook.cpp runtime/tools/story_notebook_layout_stub.cpp
+               runtime/src/mods/story_mail.cpp runtime/src/mods/story_store.cpp runtime/src/mods/story_chart.cpp runtime/src/mods/story_items.cpp
+               runtime/src/mods/guest_png.cpp runtime/src/mods/mod_archive.cpp runtime/src/guest_addr_identity.c ${WWHD_NPC_CATALOGUE})
+target_include_directories(story_item_buttons_test PRIVATE runtime/include runtime/src runtime/src/mods)
+target_compile_options(story_item_buttons_test PRIVATE -UNDEBUG)
+target_link_libraries(story_item_buttons_test PRIVATE ZLIB::ZLIB)
+add_test(NAME story_item_buttons COMMAND story_item_buttons_test)
 if(Python3_Interpreter_FOUND)
   add_test(NAME release_sdk_package COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/release/test_sdk_package.py")
   add_test(NAME story_notebook_model COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/story_mods/test_notebook_model.py")
