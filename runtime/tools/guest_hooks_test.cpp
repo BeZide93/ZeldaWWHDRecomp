@@ -50,7 +50,7 @@ std::optional<Value> read(const std::string& key) {
 }
 namespace input {PadState read() {return {};}}
 namespace true60 {float dt() {return 0.5f;}}
-namespace mem { std::string read_cstr(uint32_t) { return "option"; } }
+namespace mem { std::string read_cstr(uint32_t) { return "option"; } uint32_t host_alloc(uint32_t,uint32_t) { return 0; } }
 namespace dispatch { void set(uint32_t, PpcFunc) {} }
 namespace mods::packages {
 static bool in_startup_callback=false, inspected=false;
@@ -92,6 +92,19 @@ bool imported() {return false;}
 void set_game_calls(void (*)(Cpu*,uint32_t),uint32_t (*)(Cpu*,uint32_t,std::initializer_list<uint32_t>)) {}
 void install(const std::function<std::string(uint32_t)>&,const std::function<void(uint32_t,void (*)(Cpu*))>&) {}
 void state_loaded() {}
+size_t declared() {return 0;}
+}
+// and so have the mod treasure charts (their tests)
+namespace story_treasure {
+std::vector<Hook> chest_hooks() {return {};}
+void set_game_calls(void (*)(Cpu*,uint32_t),uint32_t (*)(Cpu*,uint32_t,std::initializer_list<uint32_t>)) {}
+void set_scratch_memory(uint32_t) {}
+void install(const std::function<std::string(uint32_t)>&,const std::function<void(uint32_t,void (*)(Cpu*))>&) {}
+}
+namespace story_treasure_chest {
+void state_loaded() {}
+void set_item_get_next(void (*)(Cpu*),void (*)(Cpu*,uint32_t)) {}
+namespace hooks { void exec_item_get(Cpu*) {} }
 }
 // and so has the story notebook (story_notebook_test)
 namespace config { std::string game_dir; }
