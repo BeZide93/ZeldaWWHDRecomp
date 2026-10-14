@@ -43,7 +43,8 @@ void log_msg(const char* fmt, ...) {
     (void)fmt;
 }
 namespace input {
-bool pro_controller() { return false; }  // the menu on the GamePad
+bool g_pro = false;
+bool pro_controller() { return g_pro; }  // the menu on the GamePad unless a test says otherwise
 }
 
 namespace {
@@ -427,6 +428,7 @@ uint32_t game_call(Cpu*, uint32_t fn, std::initializer_list<uint32_t> args) {
     std::vector<uint32_t> a(args);
     switch (fn) {
     case 0x025200D4: return kPlayObj;
+    case 0x02006478: return ld32(a.at(0) + 4);  // hdStateMachine: the current state
     case 0x025D7DEC: calls.push_back("present item " + std::to_string(a.at(1))); return 77;
     case 0x025D7B98: calls.push_back("order item event " + std::to_string(a.at(0) == kItemActor)); return 1;
     case 0x025D54C4: st32(a.at(1), a.at(0) == 77 ? kItemActor : 0); return 1;  // fopAcM_SearchByID
@@ -589,6 +591,25 @@ void test_hooks() {
         call(0x0268FF50, kMenu);
         next_frame();
         assert(icon_place().shown);
+        // the Pro Controller: the menu is on the TV only while the game is paused in it (the in-game UI's
+        // state Menu or MenuSubWindow); closing it with + leaves the bag window running unseen
+        {
+            constexpr uint32_t kUiObj = kArena + 0x3F000;
+            st32(0x101F8344, kUiObj), st32(kUiObj + 0x18, 0);
+            input::g_pro = true;
+            st32(kUiObj + 0x14, 0x1049ECDC);  // MenuSubWindow: the bag window is shown
+            call(0x0268FF50, kMenu);
+            assert(icon_place().shown);
+            st32(kUiObj + 0x14, 0x1049EC00);  // Play: the menu was closed with +
+            call(0x0268FF50, kMenu);
+            assert(!icon_place().shown && std::string(icon_reason()) == "the menu is closed (Pro Controller)");
+            input::g_pro = false;
+            call(0x0268FF50, kMenu);
+            assert(icon_place().shown);  // the GamePad: the menu is always shown
+            st32(0x101F8344, 0);
+            call(0x0268FF50, kMenu);
+            next_frame();
+        }
         // the window closes (Back, B, the menu closes, a tab switch): its state no longer runs, the icon goes
         next_frame();
         assert(!icon_place().shown && std::string(icon_reason()) == "the bag window is closed");
@@ -711,6 +732,50 @@ void test_game_font() {
     font::Atlas half;
     half.build({font::line_key("abc", ink)}, main, nullptr, nullptr, {}, 1, 0.5f);
     assert(half.cell(font::line_key("abc", ink))->height == 10 && half.cell(font::line_key("abc", ink))->width == 15);
+    // sized lines: composed at the screen's pixel height (whole pixels, then 8 % steps never below it)
+    assert(font::pixel_height(12.3f) == 13 && font::pixel_height(16.0f) == 16 && font::pixel_height(0) == 1);
+    for (float px : {17.0f, 23.5f, 31.0f, 46.2f, 97.0f}) {
+        const int h = font::pixel_height(px);
+        assert(h >= px && h <= px * 1.09f + 1);
+    }
+    assert(font::pixel_height(46.2f) == font::pixel_height(45.0f));  // a resize by a pixel reuses the lines
+    {
+        // a bold glyph with the game's look: letters at full coverage inside a 2-texel border at half,
+        // 40 texels tall; shrunk 4 x its border is half a pixel, and the line still gets a border
+        font::Face big;
+        big.cell_height = 40;
+        game_glyph::Glyph g;
+        g.advance = 24, g.bitmap.width = 20, g.bitmap.height = 40;
+        g.bitmap.rgba.assign(20 * 40 * 4, 255);
+        for (int y = 0; y < 40; y++)
+            for (int x = 0; x < 20; x++)
+                if (x < 2 || x >= 18 || y < 2 || y >= 38) g.bitmap.rgba[(size_t(y) * 20 + x) * 4 + 3] = 128;
+        big.glyphs['a'] = g;
+        const std::string key = font::sized_key(font::kBold + "a", ink, 10);
+        font::Atlas sized;
+        sized.build({key, font::line_key("a", ink)}, big, nullptr, nullptr, {}, 1, 1.0f);
+        const font::Atlas::Cell* c = sized.cell(key);
+        assert(c && c->height == 10 && c->width == 8 && c->margin == 1 && sized.cell(font::line_key("a", ink))->height == 40);
+        auto im = sized.image();
+        const size_t x0 = size_t(c->u0 * im->width + 0.5f), y0 = size_t(c->v0 * im->height + 0.5f);
+        auto px = [&](int x, int y) { return &im->rgba[((y0 + y) * im->width + x0 + x) * 4]; };
+        // the middle: the ink; left of the letter (the cell's border room): the light border, opaque enough to be seen
+        assert(px(3, 5)[1] < 0x50 && px(3, 5)[3] == 255);
+        assert(px(0, 5)[0] > 200 && px(0, 5)[3] > 100);
+        // the same glyph not shrunk keeps its own 2-pixel border
+        const std::string full = font::sized_key(font::kBold + "a", ink, font::pixel_height(40.0f));  // 41
+        sized.build({full}, big, nullptr, nullptr, {}, 1);
+        c = sized.cell(full), im = sized.image();
+        const size_t fx = size_t(c->u0 * im->width + 0.5f), fy = size_t(c->v0 * im->height + 0.5f);
+        const uint8_t* edge = &im->rgba[((fy + 20) * im->width + fx + 1) * 4];
+        assert(edge[0] > 200 && edge[3] > 100);
+        // to_pictures finds the sized line of a Text command at that screen's pixels
+        Command st;
+        st.kind = Command::Text, st.x = 0, st.y = 0, st.size = 40, st.rgba = ink, st.text = font::kBold + "a";
+        auto pics = font::to_pictures({st}, &sized, 1.0f, 1.0f);
+        assert(pics.size() == 1 && pics[0].kind == Command::Picture && pics[0].h == 40 && pics[0].x < 0 && pics[0].x > -1);  // the border room left of the line
+        assert((font::lines_of({st}, 1.0f, 0.25f) == std::vector<std::string>{key}));
+    }
     // Text commands become pictures of their lines, scaled to the text size, faded by their alpha
     Command t;
     t.kind = Command::Text, t.x = 100, t.y = 50, t.size = 40, t.rgba = 0x00380080, t.text = "abc";
@@ -1743,7 +1808,7 @@ void test_sail_hooks() {
     st32(kPlayObj + 0x5B2C, kLink);
     // the letters' message hooks with text buffers: the line is shown through them
     story_mail::set_game_calls(original, game_call);
-    story_mail::set_text_buffers(kArena + 0x30000, 6144);
+    story_mail::set_text_buffers(kArena + 0x30000, 8192);
     story_mail::note_import();
     story_mail::install([](uint32_t) { return std::string(); }, [](uint32_t a, void (*fn)(Cpu*)) { mail_hooked[a] = fn; });
     assert(story_mail::can_say());
@@ -1869,6 +1934,53 @@ void test_sail_hooks() {
 }
 }  // namespace
 
+// Mod charts in the manifest: the declarations, how quests give and finish them, the page's "Open chart".
+void test_manifest_charts() {
+    const char* text = R"j({"charts": [{"id": "old-map", "name": "Old map", "description": "An X marks the lighthouse.",
+        "place": {"x": 1759, "z": -202572}}],
+      "quests_format": 1, "quests": [{"id": "hunt", "title": "The old map",
+        "letter": {"id": "hunt", "sender": "A sailor", "text": "Here.", "encloses": ["chart:old-map"]},
+        "reward": {"text": "A chart", "chart": "chart:old-map"},
+        "steps": [{"n": 1, "text": "Find the treasure marked on the Old map.", "where": "On your Old map (chart list)", "find": "chart:old-map"},
+                  {"n": 2, "text": "Talk to him.", "npc": {"who": "windfall-um1", "lines": ["Hi."], "then": {"give": "chart:old-map"}}}]}]})j";
+    std::vector<ManifestQuest> qs;
+    std::vector<ManifestChart> cs;
+    std::string why;
+    const auto m = mods::json::parse(text);
+    assert(parse_charts(m, cs, why) && cs.size() == 1 && cs[0].id == "old-map" && cs[0].name == "Old map" && cs[0].x == 1759);
+    assert(parse_quests(m, qs, why) && qs[0].letter_charts == std::vector<std::string>{"old-map"} && qs[0].reward_chart == "old-map");
+    assert(qs[0].steps[0].find_chart == "old-map" && qs[0].steps[1].give_chart == "old-map" && !qs[0].steps[1].reward);
+    // a chart the quests name must be declared; declarations are checked
+    std::string undeclared = text;
+    undeclared.replace(undeclared.find("\"id\": \"old-map\""), 15, "\"id\": \"new-map\"");
+    assert(!parse_quests(mods::json::parse(undeclared), qs, why) && why.find("not declared") != std::string::npos);
+    for (const char* bad : {R"({"charts": [{"id": "x", "name": "", "place": {"x": 0, "z": 0}}]})",
+                            R"({"charts": [{"id": "x", "name": "X"}]})", R"({"charts": [{"id": "x", "name": "X", "place": {"x": 900000, "z": 0}}]})",
+                            R"({"charts": [{"id": "x", "name": "X", "place": {"x": 0, "z": 0}}, {"id": "x", "name": "Y", "place": {"x": 0, "z": 0}}]})"})
+        assert(!parse_charts(mods::json::parse(bad), cs, why));
+    // the page: "Open chart" (X or its plate) while the step's chart is owned
+    uint8_t raw[story_mail::kBookSize] = {};
+    Book b(raw);
+    std::vector<Quest> quests{quest("m", "a")};
+    quests[0].chart_mod = "m", quests[0].chart = "old-map";
+    auto rs = rows(quests, b);
+    Page page;
+    page.show();
+    page.input(press(0), rs);
+    page.input(press(kPadA), rs);
+    page.input(press(0), rs);
+    assert(page.mode() == Page::Mode::Detail);
+    const auto act = page.input(press(kPadX), rs);
+    assert(act.kind == Page::Action::OpenChart && act.key == quests[0].key && !page.open());
+    quests[0].chart.clear();  // no chart: X does nothing
+    rs = rows(quests, b);
+    page.show();
+    page.input(press(0), rs);
+    page.input(press(kPadA), rs);
+    page.input(press(0), rs);
+    assert(page.input(press(kPadX), rs).kind == Page::Action::None && page.open());
+}
+
 int main() {
     assert(map(kGlobals, 0x10000) && map(kArena, 0x40000));
     story_store::set_memory(kArena + 0x20000);
@@ -1890,6 +2002,7 @@ int main() {
     test_takeover_hooks();
     test_choice();
     test_manifest();
+    test_manifest_charts();
     test_available();
     test_story_store();
     test_sail_manifest();

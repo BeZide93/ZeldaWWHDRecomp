@@ -9,6 +9,7 @@
 #include "story_sail.h"
 #include "story_manifest.h"
 #include "story_chart.h"
+#include "story_items.h"
 #include "story_mail.h"
 #include "story_notebook_game.h"
 #include "story_notebook_font.h"
@@ -299,7 +300,7 @@ PortPlaces port_places(Cpu* c) {
     if (!have_save()) return out;
     const bool notebook = notebook_owned(), letter = carried_letter() != 0;
     for (uint32_t k = kFirstDeliveryKey; k < kFirstDeliveryKey + kDeliveryPlaces && ((notebook && !out.notebook) || (letter && !out.letter)); k++) {
-        if (reserve(c, k) != kEmpty) continue;
+        if (reserve(c, k) != kEmpty || story_items::at_game_place(k - kFirstDeliveryKey)) continue;  // a mod item the player put there
         if (notebook && !out.notebook) out.notebook = k;
         else if (letter && !out.letter) out.letter = k;
     }
@@ -323,11 +324,30 @@ uint32_t icon_pane(uint32_t item) {
 // Keeps the game's sentinel icon of that place hidden.
 IconPlace place_over(uint32_t item, uint32_t number);
 IconPlace compute_icon_place() { return place_over(g_bag_item, kNotebookItem); }
+// With the Pro Controller the item menu is on the TV only while the game is paused in it: the in-game
+// UI's current state (hdIngameUi_c's state machine at +0x10, asked with the game's own
+// hdStateMachine current-state function) is ToMenu, Menu or MenuSubWindow. Closing the menu with +
+// leaves the bag window's state running unseen. On the GamePad the menu is always shown. Asked while
+// the bag window runs (execute_window), kept for the frames drawn until it runs again.
+const uint32_t kIngameUi = GD(0x101F8344);
+const uint32_t kCurrentState = GC(0x02006478);
+const uint32_t kStateToMenu = GD(0x1049EC84), kStateMenu = GD(0x1049ECB0), kStateMenuSubWindow = GD(0x1049ECDC);
+bool g_menu_shown = true;
+bool menu_shown_now(Cpu* c) {
+    if (!input::pro_controller()) return true;
+    const uint32_t ui = ld32(kIngameUi);
+    if (!ui || !g_call) return true;
+    Cpu probe = *c;
+    const uint32_t state = g_call(&probe, kCurrentState, {ui + 0x10});
+    return state == kStateToMenu || state == kStateMenu || state == kStateMenuSubWindow;
+}
+bool menu_shown() { return g_menu_shown; }
 IconPlace place_over(uint32_t item, uint32_t number) {
     IconPlace at;
     if (!item || !g_menu) return g_icon_reason = "no bag window yet", at;
     // the window runs once per logic step; frames drawn in between (interpolation, 120 Hz) keep the icon
     if (g_window_step + 1 < g_step.load(std::memory_order_relaxed)) return g_icon_reason = "the bag window is closed", at;
+    if (!menu_shown()) return g_icon_reason = "the menu is closed (Pro Controller)", at;
     if (ld32(g_menu + kMenuWindowMode) != kDeliveryWindow) return g_icon_reason = "another bag is open", at;
     if (ld32(item + kItemNumber) != number || !ld8(item + kItemVisible)) return g_icon_reason = "the place shows a game item", at;
     if (number == kNotebookItem && !notebook_owned()) return g_icon_reason = "no notebook in this save file", at;
@@ -497,7 +517,7 @@ struct Look {
 } g_look;
 constexpr float kBoxResolution = 0.75f;  // composed boxes: pixels per page unit (the GamePad shows 0.67)
 constexpr float kFontScale = 1.05f;
-constexpr float kAtlasScale = 0.62f;     // the text atlas: the font's lines at 62 % (46 of its 74 pixels; the TV shows up to 44)      // the game font's cell height per page text size (its cell has room above and below)
+constexpr float kAtlasScale = 0.62f;     // before the screen's pixels are known: the font's lines at 62 % (46 of its 74 pixels)
 float g_close_time = 1.0f;  // the closing animation: 0..1 after the page closed
 std::vector<Command> g_closing;  // the last page drawn (resolved), faded out while closing
 std::vector<guestmods::hud::Handle> g_closing_images;
@@ -653,14 +673,19 @@ void load_art() {
 
 // The page's commands as HUD commands: boxes and text become pictures of their images (handles
 // alongside; 0 for the commands that aren't pictures)
-std::vector<Command> render(std::vector<Command> cmds, std::vector<guestmods::hud::Handle>& images) {
+// `screen`: where the page is drawn; its text is composed at that screen's real pixel size.
+std::vector<Command> render(std::vector<Command> cmds, std::vector<guestmods::hud::Handle>& images, uint32_t screen) {
     auto& store = guestmods::hud::store();
     const uint64_t generation = store.state_generation();
     cmds = style::resolve(cmds, &g_look.art);  // each box uses its art when that piece was read
     // text: the line atlas, rebuilt when a line is new, the fonts grew or the prompts changed
     const bool font = g_look.main.ready();
+    // screen pixels per page unit (the page is laid out in TV units; the GamePad shows 854 / 1280 of them)
+    const float pixels = store.pixels(screen) * (screen == 1 ? 854.0f / 1280.0f : 1.0f);
+    static float traced = -1;
+    if (trace() && std::fabs(pixels - traced) > 0.01f) LOG("[notebook] text composed at %.2f screen pixels per page unit (screen %u)", traced = pixels, screen);
     if (font) {
-        const std::vector<std::string> lines = font::lines_of(cmds);
+        const std::vector<std::string> lines = font::lines_of(cmds, kFontScale, pixels);
         if (!g_look.atlas.holds(lines, g_look.prompts, g_look.fonts_key)) {
             g_look.atlas.build(lines, g_look.main, &g_look.fallback, g_look.icons.ready() ? &g_look.icons : nullptr, g_look.prompts, g_look.fonts_key,
                                kAtlasScale);
@@ -673,7 +698,7 @@ std::vector<Command> render(std::vector<Command> cmds, std::vector<guestmods::hu
             g_look.store_generation = generation;
         }
     }
-    cmds = font::to_pictures(cmds, font && g_look.atlas_image ? &g_look.atlas : nullptr, kFontScale);
+    cmds = font::to_pictures(cmds, font && g_look.atlas_image ? &g_look.atlas : nullptr, kFontScale, pixels);
     images.assign(cmds.size(), 0);
     for (size_t i = 0; i < cmds.size(); i++) {
         Command& c = cmds[i];
@@ -728,7 +753,7 @@ void publish(const std::vector<Row>& all, const std::vector<Command>* caption = 
     const guestmods::hud::Handle list = store.begin(kOwner, screen);
     if (!list) return;
     std::vector<guestmods::hud::Handle> images;
-    std::vector<Command> cmds = by_layout ? std::vector<Command>{} : render(caption ? *caption : g_page.draw(all), images);
+    std::vector<Command> cmds = by_layout ? std::vector<Command>{} : render(caption ? *caption : g_page.draw(all), images, screen);
     g_closing = cmds, g_closing_images = images, g_closing_screen = screen;  // for the closing animation
     fit_to_screen(cmds, screen);
     append_all(list, cmds, images);
@@ -999,6 +1024,8 @@ std::vector<Row> rows_now(std::vector<Quest>& storage) {
                 for (const ManifestStep& st : d.quest.steps)
                     if (st.n == n) {
                         q.next = st.text, q.where = st.where, q.has_place = st.has_place, q.x = st.x, q.z = st.z;
+                        if (!st.find_chart.empty() && story_chart::state(d.mod, st.find_chart) == story_chart::kResultOwned)
+                            q.chart_mod = d.mod, q.chart = st.find_chart;
                         if (st.when.any() && !available(st.when, event_flags(), hour_now())) {
                             q.hint = "Not yet possible: " + st.when.text;  // no ring, no talk until it holds
                             q.has_place = false;
@@ -1041,11 +1068,21 @@ std::vector<std::pair<std::string, std::string>> npc_recipes() {
 
 bool declare(const std::string& mod, const std::string& mod_name, const mods::json::Value& manifest) {
     std::vector<ManifestQuest> quests;
+    std::vector<ManifestChart> charts;
     std::string why;
     std::vector<std::string> warnings;
-    if (!parse_quests(manifest, quests, why, npc_catalogue(), &warnings)) {
+    if (!parse_quests(manifest, quests, why, npc_catalogue(), &warnings) || !parse_charts(manifest, charts, why)) {
         LOG("[notebook] %s: the manifest's quests are not used: %s", mod.c_str(), why.c_str());
         return false;
+    }
+    // the mod's charts: the MAP screen's chart list shows them while Link owns them
+    for (const ManifestChart& ch : charts)
+        if (story_chart::define(mod, ch.id, ch.name, ch.description, ch.x, ch.z) < 0)
+            LOG("[notebook] %s: chart \"%s\" not registered", mod.c_str(), ch.id.c_str());
+    if (!charts.empty()) {
+        story_chart::note_import();
+        story_mail::note_import();
+        LOG("[notebook] %s: %zu chart(s) from the manifest", mod.c_str(), charts.size());
     }
     for (const std::string& w : warnings) LOG("[notebook] %s: warning: %s", mod.c_str(), w.c_str());
     if (quests.empty()) return true;
@@ -1067,7 +1104,9 @@ bool declare(const std::string& mod, const std::string& mod_name, const mods::js
                 LOG("[notebook] %s: warning: quest \"%s\" step %u takes over %s with no condition (no letter, no \"available\"): it "
                     "speaks for the quest whenever the step is current", mod.c_str(), q.id.c_str(), st.n,
                     npc_catalogue().entry(st.resident)->name.c_str());
-            if (st.has_talk) g_takeovers.push_back({reg->key, uint8_t(st.n), st.resident, st.needs_letter, st.lines, st.reward, st.when, st.follow});
+            if (st.has_talk)
+                g_takeovers.push_back({reg->key, uint8_t(st.n), st.resident, st.needs_letter, st.lines, st.reward, st.when, st.follow,
+                                       st.give_chart.empty() && st.give_item.empty() ? std::string() : mod, st.give_chart, st.give_item});
             if (!st.sail_line.empty()) g_sail_lines.push_back({reg->key, uint8_t(st.n), st.sail_line});
         }
     }
@@ -1099,7 +1138,31 @@ void declared_tick() {
             if (d.quest.letter_encloses_letter) b.set(kRecordCarried, d.key, 1);
             LOG("[notebook] %s: quest \"%s\" started by its letter%s", d.mod.c_str(), d.quest.id.c_str(),
                 d.quest.letter_encloses_letter ? "; Link carries the enclosed letter" : "");
+            for (const std::string& item : d.quest.letter_items)  // the items in the letter
+                story_items::give(d.mod, item, 1, "the letter of its quest");
+            for (const std::string& chart : d.quest.letter_charts)  // the charts in the letter
+                if (story_chart::give(d.mod, chart) == story_chart::kResultOwned)
+                    LOG("[notebook] %s: the letter of quest \"%s\" gives Link chart \"%s\"", d.mod.c_str(), d.quest.id.c_str(), chart.c_str());
         }
+    }
+    // charts: a step's treasure found (the quest is past the step) finishes its chart; a done quest
+    // gives its reward chart
+    for (const Declared& d : declared) {
+        story_mail::Book b = book();
+        const uint8_t now = saved_step(b, d.key);
+        if (!now) continue;
+        for (const ManifestStep& st : d.quest.steps)
+            if (!st.find_chart.empty() && now > st.n && story_chart::state(d.mod, st.find_chart) == story_chart::kResultOwned) {
+                story_chart::finish(d.mod, st.find_chart);
+                LOG("[notebook] %s: quest \"%s\" is past step %u: chart \"%s\" is finished", d.mod.c_str(), d.quest.id.c_str(), st.n,
+                    st.find_chart.c_str());
+            }
+        if (now == kStepDone && !d.quest.reward_chart.empty() && story_chart::state(d.mod, d.quest.reward_chart) == story_chart::kResultNone &&
+            story_chart::give(d.mod, d.quest.reward_chart) == story_chart::kResultOwned)
+            LOG("[notebook] %s: quest \"%s\" is done: Link gets chart \"%s\"", d.mod.c_str(), d.quest.id.c_str(), d.quest.reward_chart.c_str());
+        if (now == kStepDone && !d.quest.reward_mod_item.empty() && !b.get(story_items::kRecordQuestRewardItem, d.key) &&
+            story_items::give(d.mod, d.quest.reward_mod_item, 1, "its quest's reward") >= 0)
+            b.set(story_items::kRecordQuestRewardItem, d.key, 1);
     }
 }
 
@@ -1202,6 +1265,31 @@ bool open_letter(const char* how) {
     LOG("[notebook] the sealed letter's caption (%s)", how);
     return true;
 }
+// An item's caption (story_items.h): its Info, its use "show", a get. False while the page or a caption is open.
+bool show_info(const std::string& title, const std::string& text, const char* how) {
+    if (!g_installed || g_open || !have_save()) return false;
+    g_caption.show(title, text);
+    g_open = true;
+    g_close_time = 1.0f, g_closing.clear();
+    g_pending_sound = Sound::Open;
+    LOG("[notebook] caption \"%s\" (%s)", title.c_str(), how);
+    return true;
+}
+// A manifest quest reaches a step (an item's use action "quest_step"); its texts stay the manifest's
+int32_t reach(const std::string& mod, const std::string& quest, uint32_t n) {
+    uint16_t key;
+    {
+        std::lock_guard lock(g_mu);
+        Quest* q = find(mod, quest);
+        if (!q || !n || n > kMaxStep) return kResultInvalid;
+        key = q->key;
+    }
+    if (!have_save()) return kResultNoRoom;
+    story_mail::Book b = book();
+    const int now = reach_step(b, key, n);
+    if (now < 0) return kResultNoRoom;
+    return now;
+}
 void close_page() {
     if (g_open) LOG("[notebook] page closed (state load or shutdown)");
     g_page.hide();
@@ -1212,6 +1300,9 @@ void close_page() {
     guestmods::hud::store().drop(kOwner);
 }
 bool page_open() { return g_open.load(std::memory_order_relaxed); }
+uint32_t delivery_window_menu() {
+    return g_menu && g_window_step + 1 >= g_step.load(std::memory_order_relaxed) && ld32(g_menu + kMenuWindowMode) == kDeliveryWindow ? g_menu : 0;
+}
 bool caption_open() { return g_caption.open(); }
 
 // buttons held when the page closed: the game gets them only once they are released
@@ -1246,6 +1337,8 @@ void pad(input::PadState& p, Cpu* c) {
         if (const uint32_t s = g_swallow.load(std::memory_order_relaxed)) {
             g_swallow.store(s & p.buttons, std::memory_order_relaxed);
             p.buttons &= ~s;
+        } else if (g_close_time >= 1.0f && story_items::present(c)) {  // an item Link got: its caption, from the next read
+            g_pending_sound = Sound::None;  // present() played the get jingle
         }
         return;
     }
@@ -1294,6 +1387,13 @@ void pad(input::PadState& p, Cpu* c) {
     in.x = p.tx * 1280.0f, in.y = p.ty * 720.0f;  // the GamePad picture (854 x 480) as the page's 1280 x 720
     const Page::Action act = g_page.input(in, rows);
     g_page.tick(dt);
+    if (act.kind == Page::Action::OpenChart) {  // the MAP screen's chart list, the step's chart selected
+        for (const Quest& q : storage)
+            if (q.key == act.key && !q.chart.empty()) {
+                const bool ok = story_chart::open_in_list(q.chart_mod, q.chart);
+                LOG("[notebook] quest %04X: open chart \"%s\" %s", act.key, q.chart.c_str(), ok ? "in the MAP screen's chart list" : "failed (no map screen)");
+            }
+    }
     if (act.kind == Page::Action::Toggle && have_save()) {
         story_mail::Book b = book();
         const bool on = toggle_tracked(b, act.key);
@@ -1339,6 +1439,11 @@ void inventory_item(Cpu* c) {
     g_original(c, kInventoryItem);
     if ((lr != kWindowBuild && lr != kWindowInit) || key < kFirstDeliveryKey || key >= kFirstDeliveryKey + kDeliveryPlaces) return;
     if ((c->r[3] & 0xFF) != kEmpty) return;
+    // a mod item the player put in this place (story_items.h): its pool number (nothing is in the save)
+    if (const uint32_t n = story_items::number_at_game_place(key - kFirstDeliveryKey)) {
+        c->r[3] = n;
+        return;
+    }
     const PortPlaces places = port_places(c);
     if (key != places.notebook && key != places.letter) return;
     c->r[3] = key == places.notebook ? kNotebookItem : kLetterItem;
@@ -1355,6 +1460,13 @@ void icon_frame(Cpu* c) {
         c->r[3] = c->r[4] == kNotebookItem ? kNotebookIcon : kLetterIcon;
         return;
     }
+    // a mod item's number: its frame in the extended icon layout, else a stand-in (the letter's)
+    if (story_items::pool_number(c->r[4])) {
+        const std::optional<story_items::Item> it = story_items::by_number(c->r[4]);
+        const int frame = it ? story_items::frame(it->key) : -1;
+        c->r[3] = frame >= 0 ? uint32_t(frame) : kLetterIcon;
+        return;
+    }
     g_original(c, kIconFrame);
 }
 
@@ -1367,6 +1479,11 @@ void open_child(Cpu* c) {
     if (trace()) LOG("[notebook] item menu: A on place %u (item %02X)", index, child ? ld32(child + kItemNumber) : 0xFFu);
     if (child && ld32(child + kItemNumber) == kNotebookItem && open_page("A on its bag place")) return;
     if (child && ld32(child + kItemNumber) == kLetterItem && open_letter("A on its bag place")) return;
+    if (child && story_items::pool_number(ld32(child + kItemNumber)))  // a mod item: its Info (the game has none for it)
+        if (const std::optional<story_items::Item> it = story_items::by_number(ld32(child + kItemNumber))) {
+            story_items::act(it->key, story_items::Action::Info);
+            return;
+        }
     g_original(c, kOpenChild);
 }
 
@@ -1384,6 +1501,7 @@ void set_visible(Cpu* c) {
 void execute_window(Cpu* c) {
     const uint32_t menu = c->r[3];
     g_original(c, kExecuteWindow);
+    g_menu_shown = menu_shown_now(c);
     g_menu = menu;
     g_window_step = g_step.load(std::memory_order_relaxed);
     g_bag_item = g_letter_item = 0;
@@ -1431,7 +1549,11 @@ void touch_select(Cpu* c) {
     if (ld32(item + kItemNumber) == kNotebookItem && open_page("a touch on its bag place"))
         hide_floating_notebook_icon();  // the tap lifted the place's item into the floating icon
     if (ld32(item + kItemNumber) == kLetterItem) open_letter("a touch on its bag place");
+    if (story_items::pool_number(ld32(item + kItemNumber)))
+        if (const std::optional<story_items::Item> it = story_items::by_number(ld32(item + kItemNumber)))
+            story_items::act(it->key, story_items::Action::Info);
 }
+
 
 // getSelectedItemValue(this, receiver): the notebook can't go on X, Y or R
 void selected_value(Cpu* c) {
@@ -1586,6 +1708,9 @@ void people_execute(Cpu* c) {
         if (have_save()) {
             story_mail::Book b = book();
             complete(b, g_talk.takeover);
+            if (!g_talk.takeover.chart.empty() && story_chart::give(g_talk.takeover.chart_mod, g_talk.takeover.chart) == story_chart::kResultOwned)
+                LOG("[notebook] quest %04X: Link gets chart \"%s\"", g_talk.takeover.quest, g_talk.takeover.chart.c_str());
+            if (!g_talk.takeover.item.empty()) story_items::give(g_talk.takeover.chart_mod, g_talk.takeover.item, 1, "a talk of its quest");
         }
         LOG("[notebook] quest %04X: delivered, the quest is done", g_talk.takeover.quest);
         if (!g_talk.takeover.reward) {
@@ -1806,7 +1931,7 @@ void install(const std::function<std::string(uint32_t)>& replaced_by, const std:
 
 void state_loaded() {
     close_page();
-    g_bag_item = 0, g_letter_item = 0, g_menu = 0, g_window_step = 0;
+    g_bag_item = 0, g_letter_item = 0, g_menu = 0, g_window_step = 0, g_menu_shown = true;
     g_talk = {};
     if (g_sail.phase == Sail::Talking) story_mail::unsay();
     g_sail = {};  // the state has its own boat

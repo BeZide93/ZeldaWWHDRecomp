@@ -1737,7 +1737,7 @@ def link_game(tc, manifest, objs, work, out_exe, recipe=None, glue=()):
         os.remove(lib)
     if tc.rsp:
         rsp = os.path.join(work, "ar.rsp")
-        with open(rsp, "w") as f:
+        with open(rsp, "w", encoding="utf-8") as f:  # LLVM reads response files as UTF-8; the folder may hold any character
             f.write("\n".join('"%s"' % fwd(o) for o in objs))
         run_logged(tc.ar + ["rcs", fwd(lib), "@" + fwd(rsp)], env=tc.env, what="archiving the game code")
     else:
@@ -1754,7 +1754,7 @@ def link_game(tc, manifest, objs, work, out_exe, recipe=None, glue=()):
         args += ["-Wl,-rpath,@executable_path"]
     if tc.rsp:
         rsp = os.path.join(work, "link.rsp")
-        with open(rsp, "w") as f:
+        with open(rsp, "w", encoding="utf-8") as f:
             f.write("\n".join('"%s"' % a.replace('"', '\\"') for a in args))
         cmd = tc.cxx + ["@" + fwd(rsp)]
     else:
@@ -2311,7 +2311,7 @@ def setup_code_mods(ctx, ui=None):
     if explicit is not None or "WWHD_CODE_MODS" in os.environ:
         return code_mods.hooks_option(explicit)
     try:
-        active = json.loads(Path(ctx.data_dir, "code-mods-active.json").read_text())
+        active = json.loads(Path(ctx.data_dir, "code-mods-active.json").read_text(encoding="utf-8"))
         remembered = active["hooks"] if active.get("state") == "ready" else None
     except (OSError, ValueError, KeyError, TypeError, AttributeError):
         remembered = None
@@ -2605,7 +2605,32 @@ def install(ctx, source, keys=None, info=None, ui=None, check_keys=None):
         old = old_state["decomp_exe"]
         if os.path.isfile(old) and old != state.get("exe"):
             os.remove(old)
+    if kind != "gen" and state.get("code_mods") and state.get("exe"):
+        install_story_notebook(state, data_dir)
     return state
+
+
+def install_story_notebook(state, data_dir, runner=subprocess.run):
+    """The story system's required package (runtime/src/mods/required.h): when the story system is on (the
+    default), the game downloads the Story Notebook from the mod catalogue once, here. Offline is fine: the
+    setup finishes and the Mods menu can install it later. Returns True when it is installed."""
+    say("")
+    say("Installing the story notebook (the story system's quest package) from the mod catalogue...")
+    args = [state["exe"], "--game", state.get("game_dir") or os.path.join(data_dir, "game"), "--save", os.path.join(data_dir, "save"),
+            "--install-story-notebook"]
+    try:
+        done = runner(args, cwd=data_dir, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600)
+        lines = [l for l in (done.stdout or "").splitlines() if l.startswith("{")]
+        result = json.loads(lines[-1]) if lines else {"ok": False, "message": "no answer from the game"}
+    except (OSError, ValueError, subprocess.TimeoutExpired) as e:
+        result = {"ok": False, "message": str(e)}
+    LOG.write("story notebook: %s" % result)
+    if result.get("ok"):
+        say("  The story notebook is installed.")
+        return True
+    say("  The story notebook couldn't be installed now (%s). The game works without it; install it later from the "
+        "Mods menu (it needs the internet once)." % result.get("message", ""))
+    return False
 
 
 def run_language_source(args, ui, data_dir, path):

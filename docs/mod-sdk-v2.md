@@ -444,8 +444,35 @@ game gets it back and the marker takes another square's circle (with all 49 in t
 waits). In the zoomed view of a square there is one circle: the notebook's shown quest comes first,
 then finished charts' markers, and the game's own circle wins over both.
 
-**Planned:** viewing a mod chart like a game chart (the MAP screen's chart list, the chart with its
-X at the spot) is not there yet.
+**Charts as data: the chart list.** Declare your charts in the manifest, and they are charts like
+the game's: while Link owns one, the MAP screen's chart list shows it after the game's charts, with
+its name, and opening it shows its square's map with the X at its place (the game's own chart view;
+once the chart is finished, its red circle).
+
+```json
+"charts": [{"id": "old-map", "name": "Old map",
+            "description": "An old chart. An X marks the top of the lighthouse.",
+            "place": {"x": 1759, "z": -202572}}],
+"quests": [{"id": "hunt", "title": "The old map",
+  "letter": {"id": "hunt", "sender": "A sailor", "text": "...", "encloses": ["chart:old-map"]},
+  "steps": [{"n": 1, "text": "Find the treasure marked on the Old map.",
+             "where": "On your Old map (chart list)", "find": "chart:old-map"}]}]
+```
+
+- **Declaring:** `id`, `name` (up to 40 bytes, the list's caption), `description` (up to 200 bytes)
+  and `place` (the X). Up to 8 per mod.
+- **Getting it:** a letter that encloses `"chart:<id>"` gives it when it is read; a resident's talk
+  with `"then": {"give": "chart:<id>"}`; the quest's reward (`"reward": {"chart": "chart:<id>"}`, when
+  the quest is done); or your code (`wwhd_chart_give`). A chart the quests name must be declared.
+- **Finishing it:** a step with `"find": "chart:<id>"` finishes the chart once the quest is past that
+  step (your code reports the step, a condition or a talk moves the quest on); or your code calls
+  `wwhd_chart_finish`. Finished: the red circle on the sea chart and in the chart view.
+- **"Open chart":** while the current step's chart (`find`) is Link's, the notebook's step page has
+  an Open chart plate (X): the notebook closes and the MAP screen opens with that chart selected.
+- **In the list,** a mod chart stands in for a treasure chart the save file does not own: the
+  game's chart bits are neither read nor written for it, and opening it in the list is kept in
+  the chart's record. With every treasure chart owned there is no room in the list; the chart
+  still works (the notebook, the red circle).
 
 **Saving.** Whether Link owns a chart, and whether it is finished, is stored in the save file in
 the same record as the letters (it stays unused by the game itself; letters and charts of all mods

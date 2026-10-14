@@ -24,6 +24,7 @@
 #include "story_mail_book.h"
 #include "story_chart.h"
 #include "story_notebook.h"
+#include "story_items.h"
 #include "story_manifest.h"
 #include "story_store.h"
 #include "story_takeover.h"
@@ -379,6 +380,23 @@ void svc_quest_flag(Cpu* c) {
     auto& mod=owner(c);std::string id;
     quest_result(c,mod_string(mod,c->r[3],story_mail::kMaxIdBytes,id)?story_notebook::flag(mod.id,id,c->r[4]):story_notebook::kResultInvalid);
 }
+// Mod items (story_items.h): IDs must lie in the calling mod's memory; counts 1..254
+void svc_item_give(Cpu* c) {
+    auto& mod=owner(c);std::string id;
+    c->r[3]=uint32_t(mod_string(mod,c->r[3],story_mail::kMaxIdBytes,id)?story_items::give(mod.id,id,c->r[4],"its mod"):story_items::kResultInvalid);
+}
+void svc_item_take(Cpu* c) {
+    auto& mod=owner(c);std::string id;
+    c->r[3]=uint32_t(mod_string(mod,c->r[3],story_mail::kMaxIdBytes,id)?story_items::take(mod.id,id,c->r[4]):story_items::kResultInvalid);
+}
+void svc_item_count(Cpu* c) {
+    auto& mod=owner(c);std::string id;
+    c->r[3]=uint32_t(mod_string(mod,c->r[3],story_mail::kMaxIdBytes,id)?story_items::count(mod.id,id):story_items::kResultInvalid);
+}
+void svc_item_used(Cpu* c) {
+    auto& mod=owner(c);std::string id;
+    c->r[3]=uint32_t(mod_string(mod,c->r[3],story_mail::kMaxIdBytes,id)?story_items::used(mod.id,id):story_items::kResultInvalid);
+}
 const std::unordered_map<std::string, PpcFunc> kServices = {
     {"wwhd_audio_epoch",svc_audio_epoch},{"wwhd_audio_open",svc_audio_open},
     {"wwhd_audio_available",svc_audio_available},{"wwhd_audio_submit",svc_audio_submit},{"wwhd_audio_close",svc_audio_close},
@@ -399,13 +417,17 @@ const std::unordered_map<std::string, PpcFunc> kServices = {
     {"wwhd_quest_done",svc_quest_done},{"wwhd_quest_state",svc_quest_state},
     {"wwhd_quest_carry",svc_quest_carry},{"wwhd_quest_talk",svc_quest_talk},
     {"wwhd_quest_set_flag",svc_quest_set_flag},{"wwhd_quest_flag",svc_quest_flag},
+    {"wwhd_item_give",svc_item_give},{"wwhd_item_take",svc_item_take},{"wwhd_item_count",svc_item_count},{"wwhd_item_used",svc_item_used},
     {"memcpy", svc_memcpy},      {"memmove", svc_memcpy},       {"memset", svc_memset},
 };
 PpcFunc service(const char* name) {
     auto it = kServices.find(name);
     if (it == kServices.end()) return nullptr;
     if (!strncmp(name, "wwhd_mail_", 10)) story_mail::note_import();  // the postbox hooks are needed
-    if (!strncmp(name, "wwhd_chart_", 11)) story_chart::note_import();  // the sea chart hooks are needed
+    if (!strncmp(name, "wwhd_chart_", 11)) {  // the sea chart hooks are needed, and the chart list's captions
+        story_chart::note_import();
+        story_mail::note_import();
+    }
     if (!strncmp(name, "wwhd_quest_", 11)) {  // the notebook's item menu entry, and its marker on the sea chart
         story_notebook::note_import();
         story_chart::note_import();
@@ -558,6 +580,15 @@ bool load_one(const std::string& path, std::string& err,const mods::packages::Gu
             prepare_npc_catalogue();
             story_notebook::declare(loaded.id,loaded.name,manifest);
         }
+        // the mod's items (story_items.h): kept in the Delivery Bag, owned in the save's story block
+        std::vector<story_notebook::ManifestItem> items;std::string why;
+        if(!story_notebook::parse_items(manifest,items,why))LOG("[items] %s: the manifest's items are not used: %s",loaded.id.c_str(),why.c_str());
+        for(const auto& item:items)
+            if(!story_items::define(loaded.id,pkg.path,item,why))LOG("[items] %s: %s",loaded.id.c_str(),why.c_str());
+        if(!items.empty()){
+            story_items::note_import();story_notebook::note_import();story_mail::note_import();
+            LOG("[items] %s: %zu item(s) from the manifest",loaded.id.c_str(),items.size());
+        }
     } catch(const std::exception& e) {LOG("[guestmods] %s: manifest quests not read: %s",loaded.id.c_str(),e.what());}
     g_loaded.push_back(std::move(loaded));
     guard.handle = nullptr; // module functions remain resident for the process lifetime
@@ -628,11 +659,11 @@ void init() {
     }
     // Letters from mods: host replacements of the postbox and message functions, only when a loaded
     // mod uses the letter services (story_mail.h).
-    if(story_mail::imported())story_mail::set_text_buffers(mem::host_alloc(6144,16),6144);
+    if(story_mail::imported())story_mail::set_text_buffers(mem::host_alloc(8192,16),8192);
     // Story progress (story_store.h): its areas in guest memory, so full save states carry them; saved
     // with the game's saves in the story block of cking.sav. Without a story mod the file's block is
     // still kept as it is.
-    const bool story=story_mail::imported()||story_chart::imported()||story_notebook::imported();
+    const bool story=story_mail::imported()||story_chart::imported()||story_notebook::imported()||story_items::imported();
     if(story){uint32_t areas=mem::host_alloc(story_store::kMemoryBytes,16);memset(mem::ptr(areas),0,story_store::kMemoryBytes);story_store::set_memory(areas);}
     // developer override of the notebook's model archive (the Story Notebook package's setup step builds it)
     if(const char* model=getenv("WWHD_NOTEBOOK_MODEL");model&&*model)story_mail::set_notebook_model(model);
@@ -649,6 +680,10 @@ void init() {
     // Mod charts: host replacements of the sea chart menu's story marks, only when a loaded mod uses
     // the chart services (story_chart.h).
     story_chart::set_game_calls(call_original,[](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);});
+    if(story_chart::imported()){
+        story_chart::set_entry_memory(mem::host_alloc(story_chart::kMaxCharts*0x28,16),story_chart::kMaxCharts*0x28);
+        story_chart::set_caption_text([](uint32_t number,const std::u16string* text){if(text)story_mail::caption(number,text);else story_mail::uncaption();});
+    }
     story_chart::install([](uint32_t addr) {
         auto it=g_chains.find(addr);return it==g_chains.end()?std::string():it->second.replace_mod;
     },[](uint32_t addr,PpcFunc fn) {
@@ -695,6 +730,20 @@ void init() {
         if(ordinal<0)fatal("[guestmods] story layout: %08X is not a game function",addr);
         Chain& ch=g_chains[addr];
         ch.addr=addr;ch.ordinal=uint32_t(ordinal);ch.replace=fn;ch.replace_mod="the port's story layout";
+        g_mod_hook_flags[ordinal]=1;
+    });
+    // Mod items (story_items.h): the game's item tables answer for the port's item numbers, only when a
+    // loaded mod declares items.
+    story_items::set_game_calls(call_original,[](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);});
+    story_items::set_presenter(story_notebook::show_info);
+    story_items::set_use_calls([](const char* how){return story_notebook::open_page(how);},story_notebook::reach);
+    story_items::install([](uint32_t addr) {
+        auto it=g_chains.find(addr);return it==g_chains.end()?std::string():it->second.replace_mod;
+    },[](uint32_t addr,PpcFunc fn) {
+        int ordinal=ordinal_of(addr);
+        if(ordinal<0)fatal("[guestmods] items: %08X is not a game function",addr);
+        Chain& ch=g_chains[addr];
+        ch.addr=addr;ch.ordinal=uint32_t(ordinal);ch.replace=fn;ch.replace_mod="the port's mod items";
         g_mod_hook_flags[ordinal]=1;
     });
     story_store::set_game_calls(call_original);
