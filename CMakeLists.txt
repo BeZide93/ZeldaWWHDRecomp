@@ -61,6 +61,13 @@ set(GEN_DIR ${CMAKE_SOURCE_DIR}/build/gen CACHE PATH "recompiler output")
 # Decomp build (docs/decomp-build.md): the game functions of the decompilation (git submodule decomp) run
 # as compiled source in place of the recompiled code; libraries and everything not decompiled stay
 # recompiled. GEN_DIR must then come from recomp.py --decomp-hooks (cmake/Decomp.cmake checks it).
+# Local diagnostic (not for releases): count signalling-NaN float loads/stores of the game code that the
+# host conversion would quiet (runtime/src/snan_count.cpp); logs to captures/snan.log with WWHD_SNAN_COUNT=1.
+option(WWHD_SNAN_COUNT "count signalling-NaN float loads/stores (diagnostic; log with WWHD_SNAN_COUNT=1)" OFF)
+if(WWHD_SNAN_COUNT)
+  add_compile_definitions(WWHD_SNAN_COUNT=1)
+endif()
+
 option(WWHD_DECOMP "decomp build: run the decompiled game functions (macOS; experimental)" OFF)
 include(cmake/Decomp.cmake)
 if(WWHD_DECOMP)
