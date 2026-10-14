@@ -447,6 +447,7 @@ const WWHDGuestHostV1 kHost = {
 // tools/story_mods/npc_catalogue.py (next to the guest builder) into the port's data folder, for the
 // compiled-in recipes (story_npc_catalogue.h); generated again when the recipes change.
 bool g_story_package=false;
+std::string g_notebook_icon,g_icon_cache;  // the notebook's icon and the built archives' cache (item_icons)
 void prepare_npc_catalogue() {
     static bool done=false;
     if(done)return;
@@ -576,16 +577,10 @@ bool load_one(const std::string& path, std::string& err,const mods::packages::Gu
             story_notebook::set_icon_open(icon_open.empty()?std::string():(std::filesystem::path(pkg.path)/icon_open).string());
             const std::string layout=look.get("layout").string();
             story_notebook::set_layout_description(layout.empty()?std::string():(std::filesystem::path(pkg.path)/layout).string(),pkg.data_path);
-            // the item icons (item_icons.h): the notebook's own frame (key 0), built into the game's 2D pack
-            // (test aid WWHD_TEST_ITEM_ICONS=a.png,b.png adds pictures as more items)
-            std::vector<item_icons::Item> icons;
-            if(!icon.empty())icons.push_back({0,(std::filesystem::path(pkg.path)/icon).string()});
-            if(const char* extra=std::getenv("WWHD_TEST_ITEM_ICONS")) {
-                std::string list=extra;uint16_t key=0xF000;
-                for(size_t a=0;a<list.size();){size_t b=list.find(',',a);if(b==std::string::npos)b=list.size();
-                    if(b>a)icons.push_back({key++,list.substr(a,b-a)});a=b+1;}
-            }
-            item_icons::set_items(icons,pkg.data_path);
+            // the item icons (item_icons.h): the notebook's own frame (key 0) first; the mod items follow once
+            // every package is loaded (the notebook is their dependency, so it loads before them)
+            g_notebook_icon=icon.empty()?std::string():(std::filesystem::path(pkg.path)/icon).string();
+            g_icon_cache=pkg.data_path;
         }
         if(manifest_text.find("\"quests\"")!=std::string::npos||manifest_text.find("\"charts\"")!=std::string::npos||manifest_text.find("\"letters\"")!=std::string::npos) {
             prepare_npc_catalogue();
@@ -662,6 +657,21 @@ void init() {
         if(result.module.empty()||!load_one(result.module,error,pkg,base,result.allocation_size))
             exception_report::raise(error.empty()?"Guest builder returned no module":error);
     });
+    // The item icons (item_icons.h): the notebook (key 0), then the mod items in declaration order (frames
+    // 56...), built into the game's 2D pack before the game opens it; the mod items draw from those frames.
+    // (test aid WWHD_TEST_ITEM_ICONS=a.png,b.png adds pictures as more items)
+    if(g_story_package) {
+        std::vector<item_icons::Item> icons;
+        if(!g_notebook_icon.empty())icons.push_back({0,g_notebook_icon});
+        for(const auto& item:story_items::installed())icons.push_back({item.key,item.icon_path});
+        if(const char* extra=std::getenv("WWHD_TEST_ITEM_ICONS")) {
+            std::string list=extra;uint16_t key=0xF000;
+            for(size_t a=0;a<list.size();){size_t b=list.find(',',a);if(b==std::string::npos)b=list.size();
+                if(b>a)icons.push_back({key++,list.substr(a,b-a)});a=b+1;}
+        }
+        item_icons::set_items(icons,g_icon_cache);
+        story_items::set_frame_source(item_icons::frame);
+    }
     // The story system runs only with its required package, the Story Notebook (packages.cpp makes every
     // quest mod depend on it); without it: no letters, takeovers, chart marks or notebook, the game as it is.
     if((story_mail::imported()||story_chart::imported()||story_notebook::imported())&&!g_story_package) {
