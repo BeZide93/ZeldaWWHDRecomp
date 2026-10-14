@@ -98,6 +98,9 @@ std::vector<Hook> state_hooks();    // (b)
 std::vector<Hook> chest_hooks();    // (c)
 // original(c, fn): the game's function behind a replacement; call(c, fn, args): a game function
 void set_game_calls(void (*original)(Cpu*, uint32_t), uint32_t (*call)(Cpu*, uint32_t, std::initializer_list<uint32_t>));
+// for the hooks of all three parts (part a keeps them): the replaced game function itself, a game function
+void original(Cpu* c, uint32_t fn);
+uint32_t call(Cpu* c, uint32_t fn, std::initializer_list<uint32_t> args);
 // guest memory for the spawn's position, angle and scale (part a): kScratchBytes
 inline constexpr uint32_t kScratchBytes = 0x40;
 void set_scratch_memory(uint32_t guest);
