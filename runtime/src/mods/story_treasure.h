@@ -64,8 +64,10 @@ struct SalvagePoint {
     float x, z;        // the chart's place (y: the sea's surface, 0)
     uint8_t item_no;   // the parameter's item number: chest_item_for(save_no).game_item
 };
-// The salvage points of the mod charts Link owns and hasn't finished in that sea room (any opened state:
-// like the game, the ring shows only once (b) answers the chart as opened).
+// The salvage points of the declared mod charts in that sea room Link hasn't finished. Like the game's own
+// (entry() registers every treasure point whose chart isn't complete), owned or not: the point stays
+// unused (no ring, no crane) until daSalvage_c::proc_wait finds the chart opened (b), so a chart Link
+// gets while in its room works at once.
 std::vector<SalvagePoint> salvage_points_for_room(int room);
 // The save number of the point the salvage actor is working on now (daSalvage_c::mSalvageId's registry
 // slot), 0 when none: (c) asks it when the chest gives its item.

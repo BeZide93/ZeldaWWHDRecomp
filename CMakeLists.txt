@@ -969,6 +969,12 @@ add_executable(story_chart_test runtime/tools/story_chart_test.cpp runtime/src/m
 target_include_directories(story_chart_test PRIVATE runtime/include runtime/src)
 target_compile_options(story_chart_test PRIVATE -UNDEBUG)
 add_test(NAME story_chart COMMAND story_chart_test)
+# mod treasure charts (a): reserved save numbers, salvage points, spawn and registration on a synthetic registry
+add_executable(story_treasure_salvage_test runtime/tools/story_treasure_salvage_test.cpp runtime/src/mods/story_treasure_salvage.cpp
+               runtime/src/mods/story_chart.cpp runtime/src/mods/story_store.cpp runtime/src/guest_addr_identity.c)
+target_include_directories(story_treasure_salvage_test PRIVATE runtime/include runtime/src)
+target_compile_options(story_treasure_salvage_test PRIVATE -UNDEBUG)
+add_test(NAME story_treasure_salvage COMMAND story_treasure_salvage_test)
 # the story notebook: quest list, save record, page navigation, services and item menu hooks
 add_executable(story_notebook_test runtime/tools/story_notebook_test.cpp runtime/src/mods/story_notebook.cpp runtime/src/mods/story_mail.cpp runtime/src/mods/story_store.cpp
                runtime/src/mods/story_chart.cpp runtime/src/mods/story_items.cpp runtime/src/mods/guest_png.cpp runtime/src/mods/mod_archive.cpp runtime/src/guest_addr_identity.c
