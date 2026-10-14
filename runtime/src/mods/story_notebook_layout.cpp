@@ -1,5 +1,6 @@
 // The story notebook's page as a game layout (story_notebook_layout.h).
 #include "story_notebook_layout.h"
+#include "story_notebook_layout_view.h"
 
 #include <cstdlib>
 #include <filesystem>
@@ -16,27 +17,12 @@
 namespace story_notebook_layout {
 namespace {
 namespace nb = story_notebook;
-constexpr int kRows = 5;
 constexpr const char* kLayout = "StoryNotebook_00";
 
 std::string g_description, g_data_dir;
 
-// The page as the layout shows it (written by update() on the controller read, read by the layout's draw)
-struct RowView {
-    std::string title, next, status, initial;
-    bool dim = false, tracked = false, initial_shown = false;
-    int pill = 0;  // 0 none, 1 New, 2 Not yet, 3 Done
-};
-struct View {
-    int mode = 0;  // 0 closed, 1 list, 2 detail (version 1: not drawn by the layout)
-    int tab = 0;
-    std::string tab_labels[2];
-    std::vector<RowView> rows;  // the rows shown (from the top), at most kRows
-    int selected = -1;          // in rows
-    bool up = false, down = false, empty = false, track_plate = false;
-    std::string empty1, empty2;
-    uint64_t serial = 0;  // changes when anything above changes
-};
+// the page as the layout shows it (story_notebook_layout_view.h): written by update() on the controller read,
+// read by the layout's draw
 std::mutex g_mu;
 View g_view;            // the latest (g_mu)
 bool g_drawing = false;  // the layout draws the page (or its closing) now (g_mu)
@@ -191,6 +177,8 @@ void built(Cpu* c, uint32_t) {
     room("T_Empty1", 64), room("T_Empty2", 96);
 }
 
+}  // namespace
+
 View view_of(const nb::Page& page, const std::vector<nb::Row>& all) {
     View v;
     v.mode = page.mode() == nb::Page::Mode::List ? 1 : page.mode() == nb::Page::Mode::Detail ? 2 : 0;
@@ -225,6 +213,7 @@ View view_of(const nb::Page& page, const std::vector<nb::Row>& all) {
     return v;
 }
 
+namespace {
 bool same(const View& a, const View& b) {
     if (a.mode != b.mode || a.tab != b.tab || a.selected != b.selected || a.up != b.up || a.down != b.down || a.empty != b.empty ||
         a.track_plate != b.track_plate || a.tab_labels[1] != b.tab_labels[1] || a.rows.size() != b.rows.size())
