@@ -43,7 +43,8 @@ void log_msg(const char* fmt, ...) {
     (void)fmt;
 }
 namespace input {
-bool pro_controller() { return false; }  // the menu on the GamePad
+bool g_pro = false;
+bool pro_controller() { return g_pro; }  // the menu on the GamePad unless a test says otherwise
 }
 
 namespace {
@@ -427,6 +428,7 @@ uint32_t game_call(Cpu*, uint32_t fn, std::initializer_list<uint32_t> args) {
     std::vector<uint32_t> a(args);
     switch (fn) {
     case 0x025200D4: return kPlayObj;
+    case 0x02006478: return ld32(a.at(0) + 4);  // hdStateMachine: the current state
     case 0x025D7DEC: calls.push_back("present item " + std::to_string(a.at(1))); return 77;
     case 0x025D7B98: calls.push_back("order item event " + std::to_string(a.at(0) == kItemActor)); return 1;
     case 0x025D54C4: st32(a.at(1), a.at(0) == 77 ? kItemActor : 0); return 1;  // fopAcM_SearchByID
@@ -588,6 +590,25 @@ void test_hooks() {
         call(0x0268FF50, kMenu);
         next_frame();
         assert(icon_place().shown);
+        // the Pro Controller: the menu is on the TV only while the game is paused in it (the in-game UI's
+        // state Menu or MenuSubWindow); closing it with + leaves the bag window running unseen
+        {
+            constexpr uint32_t kUiObj = kArena + 0x3F000;
+            st32(0x101F8344, kUiObj), st32(kUiObj + 0x18, 0);
+            input::g_pro = true;
+            st32(kUiObj + 0x14, 0x1049ECDC);  // MenuSubWindow: the bag window is shown
+            call(0x0268FF50, kMenu);
+            assert(icon_place().shown);
+            st32(kUiObj + 0x14, 0x1049EC00);  // Play: the menu was closed with +
+            call(0x0268FF50, kMenu);
+            assert(!icon_place().shown && std::string(icon_reason()) == "the menu is closed (Pro Controller)");
+            input::g_pro = false;
+            call(0x0268FF50, kMenu);
+            assert(icon_place().shown);  // the GamePad: the menu is always shown
+            st32(0x101F8344, 0);
+            call(0x0268FF50, kMenu);
+            next_frame();
+        }
         // the window closes (Back, B, the menu closes, a tab switch): its state no longer runs, the icon goes
         next_frame();
         assert(!icon_place().shown && std::string(icon_reason()) == "the bag window is closed");

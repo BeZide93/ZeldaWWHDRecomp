@@ -322,12 +322,31 @@ uint32_t icon_pane(uint32_t item) {
 // Keeps the game's sentinel icon of that place hidden.
 IconPlace place_over(uint32_t item, uint32_t number);
 IconPlace compute_icon_place() { return place_over(g_bag_item, kNotebookItem); }
+// With the Pro Controller the item menu is on the TV only while the game is paused in it: the in-game
+// UI's current state (hdIngameUi_c's state machine at +0x10, asked with the game's own
+// hdStateMachine current-state function) is ToMenu, Menu or MenuSubWindow. Closing the menu with +
+// leaves the bag window's state running unseen. On the GamePad the menu is always shown. Asked while
+// the bag window runs (execute_window), kept for the frames drawn until it runs again.
+const uint32_t kIngameUi = GD(0x101F8344);
+const uint32_t kCurrentState = GC(0x02006478);
+const uint32_t kStateToMenu = GD(0x1049EC84), kStateMenu = GD(0x1049ECB0), kStateMenuSubWindow = GD(0x1049ECDC);
+bool g_menu_shown = true;
+bool menu_shown_now(Cpu* c) {
+    if (!input::pro_controller()) return true;
+    const uint32_t ui = ld32(kIngameUi);
+    if (!ui || !g_call) return true;
+    Cpu probe = *c;
+    const uint32_t state = g_call(&probe, kCurrentState, {ui + 0x10});
+    return state == kStateToMenu || state == kStateMenu || state == kStateMenuSubWindow;
+}
+bool menu_shown() { return g_menu_shown; }
 IconPlace place_over(uint32_t item, uint32_t number) {
     IconPlace at;
     if (g_open.load(std::memory_order_relaxed)) return g_icon_reason = "the notebook page is open", at;  // the page covers the menu
     if (!item || !g_menu) return g_icon_reason = "no bag window yet", at;
     // the window runs once per logic step; frames drawn in between (interpolation, 120 Hz) keep the icon
     if (g_window_step + 1 < g_step.load(std::memory_order_relaxed)) return g_icon_reason = "the bag window is closed", at;
+    if (!menu_shown()) return g_icon_reason = "the menu is closed (Pro Controller)", at;
     if (ld32(g_menu + kMenuWindowMode) != kDeliveryWindow) return g_icon_reason = "another bag is open", at;
     if (ld32(item + kItemNumber) != number || !ld8(item + kItemVisible)) return g_icon_reason = "the place shows a game item", at;
     if (number == kNotebookItem && !notebook_owned()) return g_icon_reason = "no notebook in this save file", at;
@@ -1375,6 +1394,7 @@ void set_visible(Cpu* c) {
 void execute_window(Cpu* c) {
     const uint32_t menu = c->r[3];
     g_original(c, kExecuteWindow);
+    g_menu_shown = menu_shown_now(c);
     g_menu = menu;
     g_window_step = g_step.load(std::memory_order_relaxed);
     g_bag_item = g_letter_item = 0;
@@ -1790,7 +1810,7 @@ void install(const std::function<std::string(uint32_t)>& replaced_by, const std:
 
 void state_loaded() {
     close_page();
-    g_bag_item = 0, g_letter_item = 0, g_menu = 0, g_window_step = 0;
+    g_bag_item = 0, g_letter_item = 0, g_menu = 0, g_window_step = 0, g_menu_shown = true;
     g_talk = {};
     if (g_sail.phase == Sail::Talking) story_mail::unsay();
     g_sail = {};  // the state has its own boat
