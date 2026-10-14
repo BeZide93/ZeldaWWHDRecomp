@@ -747,6 +747,7 @@ void init() {
     if(story_notebook::imported()||g_story_package)story_notebook_layout::configure();  // the notebook's page layout (first client)
     // the Delivery Bag's extra pages for mod items (story_bag.h): a second layout with the item screen
     story_bag::set_game_calls(call_original,[](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);});
+    story_bag::set_after_assign(story_item_buttons::refresh_strip);  // X/Y on a bag page: the item menu's strip shows it at once
     if(g_story_package&&!g_story_data.empty())story_bag::configure(std::filesystem::path(g_story_data)/"bag_page");
     story_lyt::set_game_calls(call_original,[](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);});
     story_lyt::install([](uint32_t,PpcFunc){});

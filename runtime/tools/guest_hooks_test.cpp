@@ -162,11 +162,13 @@ void state_loaded() {}
 namespace story_notebook_layout { bool configure() {return false;} }
 namespace story_bag {
 bool configure(const std::filesystem::path&) {return false;}
+void set_after_assign(void (*)(Cpu*)) {}
 void set_game_calls(void (*)(Cpu*,uint32_t),uint32_t (*)(Cpu*,uint32_t,std::initializer_list<uint32_t>)) {}
 void state_loaded() {}
 }
 namespace story_item_buttons {
 void set_game_calls(void (*)(Cpu*,uint32_t),uint32_t (*)(Cpu*,uint32_t,std::initializer_list<uint32_t>)) {}
+void refresh_strip(Cpu*) {}
 void install(const std::function<std::string(uint32_t)>&,const std::function<void(uint32_t,void (*)(Cpu*))>&) {}
 }
 // and so has the story progress store (story_notebook_test)
