@@ -1252,6 +1252,7 @@ void close_page() {
     guestmods::hud::store().drop(kOwner);
 }
 bool page_open() { return g_open.load(std::memory_order_relaxed); }
+bool item_menu_shown() { return menu_shown(); }
 uint32_t delivery_window_menu() {
     return g_menu && g_window_step + 1 >= g_step.load(std::memory_order_relaxed) && ld32(g_menu + kMenuWindowMode) == kDeliveryWindow ? g_menu : 0;
 }

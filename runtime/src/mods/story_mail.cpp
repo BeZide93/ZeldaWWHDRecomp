@@ -396,6 +396,10 @@ void symbol(Cpu* c) {
     }
 }
 
+}  // namespace hooks
+void (*g_item_get_next)(Cpu*) = nullptr;
+void set_item_get_next(void (*next)(Cpu*)) { g_item_get_next = next; }
+namespace hooks {
 // execItemGet(itemNo): the notebook's stand-in item goes to the story record, not the Delivery Bag
 void item_get(Cpu* c) {
     if (g_notebook_pending && (c->r[3] & 0xFF) == g_notebook_model) {
@@ -405,6 +409,7 @@ void item_get(Cpu* c) {
         LOG("[mail] the story notebook is in this save file");
         return;
     }
+    if (g_item_get_next) return g_item_get_next(c);
     g_original(c, kExecItemGet);
 }
 

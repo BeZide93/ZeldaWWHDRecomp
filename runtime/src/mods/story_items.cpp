@@ -190,8 +190,19 @@ int32_t give(const std::string& mod, const std::string& id, uint32_t n, const ch
             placed ? "" : "; the bag's pages are full, it waits for a free place");
         std::string text = it->description;
         if (!placed) text += "\n\nThe Delivery Bag is full: it is kept until a place is free.";
-        std::lock_guard lock(g_mu);
-        g_pending.push_back({it->name + (now > 1 && it->stack > 1 ? " (" + std::to_string(now) + ")" : ""), text});
+        {
+            std::lock_guard lock(g_mu);
+            g_pending.push_back({it->name + (now > 1 && it->stack > 1 ? " (" + std::to_string(now) + ")" : ""), text});
+        }
+        // test aid: WWHD_ITEM_TEST_PLACE=mod:item:place puts a new item in one of the game's places (0..7),
+        // as the bag page would
+        static const char* test_place = getenv("WWHD_ITEM_TEST_PLACE");
+        if (!before && test_place && *test_place) {
+            const std::string spec = test_place, want = mod + ":" + id + ":";
+            if (spec.rfind(want, 0) == 0)
+                LOG("[items] test: %s:%s to the game's place %s: %s", mod.c_str(), id.c_str(), spec.c_str() + want.size(),
+                    act(it->key, Action::MoveToGamePlace, std::atoi(spec.c_str() + want.size())) ? "done" : reason().c_str());
+        }
     }
     return now;
 }
@@ -323,7 +334,9 @@ void set_game_calls(void (*original)(Cpu*, uint32_t), uint32_t (*call)(Cpu*, uin
 
 void install(const std::function<std::string(uint32_t)>& replaced_by, const std::function<void(uint32_t, void (*)(Cpu*))>& replace) {
     if (!g_imported || g_installed || !g_original) return;
-    const std::pair<uint32_t, void (*)(Cpu*)> table[] = {{kExecItemGet, hooks::exec_item_get}, {kCheckItemGet, hooks::check_item_get}};
+    // execItemGet is the letter service's hook (story_mail.cpp): it hands the mod items' numbers here
+    // (story_mail::set_item_get_next); checkItemGet is ours
+    const std::pair<uint32_t, void (*)(Cpu*)> table[] = {{kCheckItemGet, hooks::check_item_get}};
     for (const auto& [addr, fn] : table) {
         const std::string other = replaced_by(addr);
         if (!other.empty()) {
