@@ -4,6 +4,7 @@
 #include "lyt_build.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -20,6 +21,7 @@ namespace {
 
 constexpr const char* kWriterVersion = "lyt_build 1";
 constexpr uint32_t kVersion = 0x02020000;
+constexpr size_t kMaxArchive = size_t(12) << 20;  // the largest archive (SARC, in memory) the port builds
 
 [[noreturn]] void fail(const std::string& why) { throw std::runtime_error(why); }
 
@@ -314,6 +316,14 @@ Bytes utf16be(const std::string& s) {
 }
 
 // ---------------------------------------------------------------- description.py
+struct TexFormat { const char* key; uint8_t code; char suffix; uint32_t bpp; bool bc; };
+const TexFormat kFormats[] = {{"rgba8", 0x14, 'l', 32, false}, {"bc1", 0x15, 'o', 64, true}, {"bc3", 0x17, 'q', 128, true}};
+const TexFormat* format_of(const std::string& key) {
+    for (const TexFormat& f : kFormats)
+        if (key == f.key) return &f;
+    return nullptr;
+}
+
 struct Desc {
     J root;
     std::filesystem::path art_root;
@@ -343,8 +353,9 @@ struct Desc {
         const J* spec = textures.find(tex);
         if (!spec) fail("unknown texture \"" + tex + "\"");
         const std::string fmt = str_or(*spec, "format", "rgba8");
-        if (fmt != "rgba8") fail("texture \"" + tex + "\": format " + fmt + " is not written by the port (rgba8 only)");
-        return tex + "^l.bflim";
+        const TexFormat* f = format_of(fmt);
+        if (!f) fail("texture \"" + tex + "\": format " + fmt + " is not written by the port (rgba8, bc1, bc3)");
+        return tex + "^" + f->suffix + ".bflim";
     }
     void each_pane(const J& list, const std::function<void(const J&)>& fn) const {
         for (const J& p : list.arr) {
@@ -960,32 +971,164 @@ Surface surface_size(uint32_t w, uint32_t h, uint32_t bpp, int mode) {
     const uint32_t pitch = (w + 31) / 32 * 32, height = (h + 15) / 16 * 16;
     return {pitch, height, pitch * height * bpp / 8, 32 * 16 * bpp / 8};
 }
-uint32_t address(uint32_t x, uint32_t y, uint32_t pitch, int mode, uint32_t swizzle) {  // 32 bits per element
-    if (mode == 1) return (x + pitch * y) * 4;
+uint32_t address(uint32_t x, uint32_t y, uint32_t pitch, int mode, uint32_t swizzle, uint32_t bpp = 32) {  // gx2tile.addresses
+    const uint32_t bytes = bpp / 8;
+    if (mode == 1) return (x + pitch * y) * bytes;
     auto bit = [](uint32_t v, int i) { return (v >> i) & 1; };
-    const uint32_t pix = (bit(x, 0) | bit(x, 1) << 1 | bit(y, 0) << 2 | bit(x, 2) << 3 | bit(y, 1) << 4 | bit(y, 2) << 5) * 4;
-    if (mode == 2) return pix + 256 * ((x >> 3) + (pitch >> 3) * (y >> 3));
+    uint32_t idx;  // the element's place in its 8 x 8 micro tile (gx2tile._pixel_index)
+    if (bpp == 64) idx = bit(x, 0) | bit(y, 0) << 1 | bit(x, 1) << 2 | bit(x, 2) << 3 | bit(y, 1) << 4 | bit(y, 2) << 5;
+    else if (bpp == 128) idx = bit(y, 0) | bit(x, 0) << 1 | bit(x, 1) << 2 | bit(x, 2) << 3 | bit(y, 1) << 4 | bit(y, 2) << 5;
+    else idx = bit(x, 0) | bit(x, 1) << 1 | bit(y, 0) << 2 | bit(x, 2) << 3 | bit(y, 1) << 4 | bit(y, 2) << 5;
+    const uint32_t pix = idx * bytes;
+    if (mode == 2) return pix + 64 * bytes * ((x >> 3) + (pitch >> 3) * (y >> 3));
     uint32_t pipe = ((y >> 3) ^ (x >> 3)) & 1, bank = (y >> 4) & 3;
     bank = ((bank >> 1) | (bank << 1)) & 3;
     bank = (bank ^ (x >> 3)) & 3;
     uint32_t bank_pipe = ((pipe + 2 * bank) ^ (((swizzle >> 8) & 1) + 2 * ((swizzle >> 9) & 3))) % 8;
     pipe = bank_pipe % 2, bank = bank_pipe / 2;
-    const uint32_t macro_bytes = 32 * 16 * 4, macro_off = ((x / 32) + (pitch / 32) * (y / 16)) * macro_bytes;
+    const uint32_t macro_bytes = 32 * 16 * bytes, macro_off = ((x / 32) + (pitch / 32) * (y / 16)) * macro_bytes;
     uint32_t off = (macro_off >> 3) + pix;
     off = ((off & ~0xFFu) << 3) | (off & 0xFF);
     return off | (pipe << 8) | (bank << 9);
 }
-Bytes bflim_rgba8(const Bytes& rgba, uint32_t w, uint32_t h, const std::string& tile, uint32_t swizzle) {
+
+// ---- bc.py: BC1 / BC3 in integers (the same bytes as the generator) ----
+using Px = std::array<int, 4>;
+uint32_t q565(const int c[3]) {
+    return uint32_t((c[0] * 31 + 127) / 255) << 11 | uint32_t((c[1] * 63 + 127) / 255) << 5 | uint32_t((c[2] * 31 + 127) / 255);
+}
+void x565(uint32_t v, int out[3]) {
+    const int r = (v >> 11) & 31, g = (v >> 5) & 63, b = v & 31;
+    out[0] = (r << 3) | (r >> 2), out[1] = (g << 2) | (g >> 4), out[2] = (b << 3) | (b >> 2);
+}
+int floordiv(int a, int b) { return a >= 0 ? a / b : -((-a + b - 1) / b); }  // Python's //
+void colour_block(const Px* px, const bool* transparent, uint8_t out[8]) {
+    int use[16], n = 0;
+    for (int i = 0; i < 16; i++)
+        if (!(transparent && transparent[i])) use[n++] = i;
+    if (transparent && !n) {
+        const uint8_t all[8] = {0, 0, 0, 0, 0xFF, 0xFF, 0xFF, 0xFF};
+        memcpy(out, all, 8);
+        return;
+    }
+    int mn[3], mx[3], mean[3];
+    for (int c = 0; c < 3; c++) {
+        mn[c] = 255, mx[c] = 0;
+        int sum = 0;
+        for (int k = 0; k < n; k++) mn[c] = std::min(mn[c], px[use[k]][c]), mx[c] = std::max(mx[c], px[use[k]][c]), sum += px[use[k]][c];
+        mean[c] = sum / n;
+        const int d = (mx[c] - mn[c]) >> 4;
+        mn[c] += d, mx[c] -= d;
+    }
+    int p = 0;
+    for (int c = 1; c < 3; c++)
+        if (mx[c] - mn[c] > mx[p] - mn[p]) p = c;
+    int hi[3] = {mx[0], mx[1], mx[2]}, lo[3] = {mn[0], mn[1], mn[2]};
+    for (int c = 0; c < 3; c++) {
+        if (c == p) continue;
+        long cov = 0;
+        for (int k = 0; k < n; k++) cov += long(px[use[k]][p] - mean[p]) * (px[use[k]][c] - mean[c]);
+        if (cov < 0) hi[c] = mn[c], lo[c] = mx[c];
+    }
+    const uint32_t a = q565(hi), b = q565(lo);
+    const bool three = transparent && n < 16;
+    const uint32_t e0 = three ? std::min(a, b) : std::max(a, b), e1 = three ? std::max(a, b) : std::min(a, b);
+    int pal[4][3], count;
+    x565(e0, pal[0]), x565(e1, pal[1]);
+    if (three) {
+        for (int c = 0; c < 3; c++) pal[2][c] = (pal[0][c] + pal[1][c]) / 2;
+        count = 3;
+    } else if (e0 == e1) {
+        count = 1;
+    } else {
+        for (int c = 0; c < 3; c++) pal[2][c] = (2 * pal[0][c] + pal[1][c]) / 3, pal[3][c] = (pal[0][c] + 2 * pal[1][c]) / 3;
+        count = 4;
+    }
+    uint32_t bits = 0;
+    for (int i = 0; i < 16; i++) {
+        uint32_t k = 3;
+        if (!(transparent && transparent[i])) {
+            int best = -1;
+            k = 0;
+            for (int j = 0; j < count; j++) {
+                int d = 0;
+                for (int c = 0; c < 3; c++) d += (px[i][c] - pal[j][c]) * (px[i][c] - pal[j][c]);
+                if (best < 0 || d < best) best = d, k = uint32_t(j);
+            }
+        }
+        bits |= k << (2 * i);
+    }
+    out[0] = uint8_t(e0), out[1] = uint8_t(e0 >> 8), out[2] = uint8_t(e1), out[3] = uint8_t(e1 >> 8);
+    for (int i = 0; i < 4; i++) out[4 + i] = uint8_t(bits >> (8 * i));
+}
+void channel_block(const int v[16], uint8_t out[8]) {
+    int mx = 0, mn = 255;
+    for (int i = 0; i < 16; i++) mx = std::max(mx, v[i]), mn = std::min(mn, v[i]);
+    memset(out, 0, 8);
+    out[0] = uint8_t(mx), out[1] = uint8_t(mn);
+    if (mx == mn) return;
+    static const int w0[8] = {7, 0, 6, 5, 4, 3, 2, 1};
+    int pal[8];
+    for (int j = 0; j < 8; j++) pal[j] = (mx * w0[j] + mn * (7 - w0[j]) + 3) / 7;
+    uint64_t bits = 0;
+    for (int i = 0; i < 16; i++) {
+        int best = -1;
+        uint64_t k = 0;
+        for (int j = 0; j < 8; j++) {
+            const int d = std::abs(v[i] - pal[j]);
+            if (best < 0 || d < best) best = d, k = uint64_t(j);
+        }
+        bits |= k << (3 * i);
+    }
+    for (int i = 0; i < 6; i++) out[2 + i] = uint8_t(bits >> (8 * i));
+}
+// the texels as 4 x 4 blocks, row by row, edges repeated (bc.py to_blocks), each block coded
+Bytes bc_encode(const std::string& fmt, const Bytes& rgba, uint32_t w, uint32_t h) {
+    const uint32_t bw = (w + 3) / 4, bh = (h + 3) / 4, bytes = fmt == "bc1" ? 8 : 16;
+    Bytes out(size_t(bw) * bh * bytes);
+    for (uint32_t by = 0; by < bh; by++)
+        for (uint32_t bx = 0; bx < bw; bx++) {
+            Px px[16];
+            for (int i = 0; i < 16; i++) {
+                const uint32_t x = std::min(bx * 4 + uint32_t(i % 4), w - 1), y = std::min(by * 4 + uint32_t(i / 4), h - 1);
+                const uint8_t* t = &rgba[(size_t(y) * w + x) * 4];
+                px[i] = {t[0], t[1], t[2], t[3]};
+            }
+            uint8_t* o = &out[(size_t(by) * bw + bx) * bytes];
+            if (fmt == "bc1") {
+                bool tr[16];
+                for (int i = 0; i < 16; i++) tr[i] = px[i][3] < 128;
+                colour_block(px, tr, o);
+            } else {  // bc3: alpha (BC4), then the colour of the visible texels (4-colour mode)
+                int a[16], vis = -1, nvis = 0;
+                for (int i = 0; i < 16; i++) {
+                    a[i] = px[i][3];
+                    if (px[i][3] > 0) nvis++, vis = vis < 0 ? i : vis;
+                }
+                channel_block(a, o);
+                Px c[16];
+                for (int i = 0; i < 16; i++) c[i] = (nvis == 0 || nvis == 16 || px[i][3] > 0) ? px[i] : px[vis];
+                colour_block(c, nullptr, o + 8);
+            }
+        }
+    return out;
+}
+
+Bytes bflim(const Bytes& rgba, uint32_t w, uint32_t h, const std::string& fmt, const std::string& tile, uint32_t swizzle) {
+    const TexFormat* f = format_of(fmt);
+    if (!f) fail("format " + fmt + " is not written by the port");
     const int mode = tile == "linear" ? 1 : tile == "1d" ? 2 : tile == "tiled" ? 4 : 0;
     if (!mode) fail("unknown tile mode " + tile);
     if (swizzle > 7 || (swizzle && mode != 4)) fail("swizzle needs the tiled mode and 0-7");
-    const Surface s = surface_size(w, h, 32, mode);
+    const Bytes data = f->bc ? bc_encode(fmt, rgba, w, h) : rgba;
+    const uint32_t ew = f->bc ? (w + 3) / 4 : w, eh = f->bc ? (h + 3) / 4 : h, eb = f->bpp / 8;
+    const Surface s = surface_size(ew, eh, f->bpp, mode);
     Buf b;
     b.d.assign(s.size, 0);
-    for (uint32_t y = 0; y < h; y++)
-        for (uint32_t x = 0; x < w; x++) memcpy(&b.d[address(x, y, s.pitch, mode, swizzle << 8)], &rgba[(size_t(y) * w + x) * 4], 4);
+    for (uint32_t y = 0; y < eh; y++)
+        for (uint32_t x = 0; x < ew; x++) memcpy(&b.d[address(x, y, s.pitch, mode, swizzle << 8, f->bpp)], &data[(size_t(y) * ew + x) * eb], eb);
     b.add(std::string("FLIM")).u16(0xFEFF).u16(0x14).u32(kVersion).u32(s.size + 0x28).u16(1).u16(0);
-    b.add(std::string("imag")).u32(0x10).u16(w).u16(h).u16(s.align).u8(0x14).u8(uint32_t(mode) | (swizzle << 5)).u32(s.size);
+    b.add(std::string("imag")).u32(0x10).u16(w).u16(h).u16(s.align).u8(f->code).u8(uint32_t(mode) | (swizzle << 5)).u32(s.size);
     return b.d;
 }
 
@@ -1085,14 +1228,22 @@ std::map<std::string, Bytes> build_files(const std::string& description_json, co
     for (const auto& [tex, spec] : d.textures.obj) {
         uint32_t w = 0, h = 0;
         const Bytes px = texture_pixels(tex, spec, d, w, h);
-        files["timg/" + d.texture_file(tex)] = bflim_rgba8(px, w, h, str_or(spec, "tile", "linear"), uint32_t(num_or(spec, "swizzle", 0)));
+        files["timg/" + d.texture_file(tex)] =
+            bflim(px, w, h, str_or(spec, "format", "rgba8"), str_or(spec, "tile", "linear"), uint32_t(num_or(spec, "swizzle", 0)));
     }
     for (const auto& [a, spec] : d.animations.obj) files["anim/" + d.name + "_" + a + ".bflan"] = bflan(a, spec, d);
     return files;
 }
 
 Bytes build(const std::string& description_json, const std::filesystem::path& art_root) {
-    return yaz0_stored(sarc(build_files(description_json, art_root)));
+    const Bytes archive = sarc(build_files(description_json, art_root));
+    // The game's layout cache holds the archive in its layout heap: in game runs about 14 MB loaded and
+    // 17 MB crashed the game in hdLayoutResMgr_c::cache. A description that large is refused here (the
+    // page is then drawn on the HUD) instead (kMaxArchive: a safe margin under that).
+    if (archive.size() > kMaxArchive)
+        fail("the archive would be " + std::to_string(archive.size() >> 20) + " MB, more than the layout cache's safe " +
+             std::to_string(kMaxArchive >> 20) + " MB: compress its large pictures (bc1 / bc3)");
+    return yaz0_stored(archive);
 }
 
 Bytes tile_rgba8(const Bytes& rgba, uint32_t w, uint32_t h, int mode, uint32_t swizzle) {

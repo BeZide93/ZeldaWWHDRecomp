@@ -1,9 +1,13 @@
 """BC (S3TC / RGTC) block compression for layout textures: encoders and decoders, numpy-vectorised.
 
 Blocks are 4 x 4 texels; BC1 and BC4 blocks are 8 bytes, BC2 / BC3 / BC5 blocks 16 bytes (little-endian
-fields, as the GPU reads them). The encoders are simple and deterministic: endpoints from the block's
-range along its main colour axis (BC1) or its min / max (BC4), then every texel takes the nearest palette
-entry. Good enough for UI art; the decoders exist for the tests and for previews.
+fields, as the GPU reads them). The encoders use integer arithmetic only, so the port's own writer
+(runtime/src/mods/lyt_build.cpp) produces the same bytes (tools/story_mods/test_lyt.py compares them):
+  colour (BC1, BC3's colour): the texels' per-channel range, inset by 1/16, with each channel's direction
+    taken from the sign of its covariance with the widest channel (a range fit on the box's diagonal),
+    endpoints in 5:6:5; every texel takes the nearest palette entry (ties: the lower index)
+  one channel (BC4, BC3's alpha): min and max as the endpoints (8-value mode), nearest entry
+Good enough for UI art; the decoders exist for the tests and for previews.
 """
 import numpy as np
 
@@ -135,7 +139,104 @@ def _bc4_decode(blk):
 
 
 # ---------------------------------------------------------------- formats
+def _q565(c):
+    return ((c[0] * 31 + 127) // 255) << 11 | ((c[1] * 63 + 127) // 255) << 5 | ((c[2] * 31 + 127) // 255)
+
+
+def _x565(v):
+    r, g, b = (v >> 11) & 31, (v >> 5) & 63, v & 31
+    return [(r << 3) | (r >> 2), (g << 2) | (g >> 4), (b << 3) | (b >> 2)]
+
+
+def colour_block(px, transparent=None):
+    """8 bytes of BC1 colour for 16 RGBA texels (lists). transparent: per texel, None for the 4-colour mode
+    (BC3); with any transparent texel the 3-colour mode with index 3 transparent (BC1)."""
+    use = [i for i in range(16) if not (transparent and transparent[i])]
+    if transparent and not use:  # all transparent
+        return bytes([0, 0, 0, 0, 0xFF, 0xFF, 0xFF, 0xFF])
+    n = len(use)
+    mn = [min(px[i][c] for i in use) for c in range(3)]
+    mx = [max(px[i][c] for i in use) for c in range(3)]
+    for c in range(3):  # inset by 1/16 of the range
+        d = (mx[c] - mn[c]) >> 4
+        mn[c] += d
+        mx[c] -= d
+    rng = [mx[c] - mn[c] for c in range(3)]
+    p = rng.index(max(rng))
+    mean = [sum(px[i][c] for i in use) // n for c in range(3)]
+    hi, lo = list(mx), list(mn)
+    for c in range(3):
+        if c == p:
+            continue
+        cov = sum((px[i][p] - mean[p]) * (px[i][c] - mean[c]) for i in use)
+        if cov < 0:
+            hi[c], lo[c] = mn[c], mx[c]
+    a, b = _q565(hi), _q565(lo)
+    three = bool(transparent) and len(use) < 16
+    if three:
+        e0, e1 = min(a, b), max(a, b)
+    else:
+        e0, e1 = max(a, b), min(a, b)
+    p0, p1 = _x565(e0), _x565(e1)
+    if three:
+        pal = [p0, p1, [(p0[c] + p1[c]) // 2 for c in range(3)]]
+    elif e0 == e1:
+        pal = [p0]
+    else:
+        pal = [p0, p1, [(2 * p0[c] + p1[c]) // 3 for c in range(3)], [(p0[c] + 2 * p1[c]) // 3 for c in range(3)]]
+    bits = 0
+    for i in range(16):
+        if transparent and transparent[i]:
+            k = 3
+        else:
+            best, k = None, 0
+            for j, q in enumerate(pal):
+                d = sum((px[i][c] - q[c]) ** 2 for c in range(3))
+                if best is None or d < best:
+                    best, k = d, j
+        bits |= k << (2 * i)
+    return bytes([e0 & 0xFF, e0 >> 8, e1 & 0xFF, e1 >> 8]) + bits.to_bytes(4, "little")
+
+
+def channel_block(v):
+    """8 bytes of BC4 for 16 values."""
+    mx, mn = max(v), min(v)
+    if mx == mn:
+        return bytes([mx, mn, 0, 0, 0, 0, 0, 0])
+    w0 = [7, 0, 6, 5, 4, 3, 2, 1]
+    pal = [(mx * w + mn * (7 - w) + 3) // 7 for w in w0]
+    bits = 0
+    for i in range(16):
+        best, k = None, 0
+        for j, q in enumerate(pal):
+            d = abs(v[i] - q)
+            if best is None or d < best:
+                best, k = d, j
+        bits |= k << (3 * i)
+    return bytes([mx, mn]) + bits.to_bytes(6, "little")
+
+
 def encode(fmt, rgba, w, h):
+    if fmt in ("bc1", "bc3", "bc4", "bc5"):
+        b = to_blocks(rgba, w, h).tolist()
+        out = bytearray()
+        for row in b:
+            for blk in row:
+                if fmt == "bc1":
+                    out += colour_block(blk, [t[3] < 128 for t in blk])
+                elif fmt == "bc3":
+                    vis = [t for t in blk if t[3] > 0]
+                    out += channel_block([t[3] for t in blk])
+                    out += colour_block(blk if len(vis) in (0, 16) else [t if t[3] > 0 else vis[0] for t in blk])
+                elif fmt == "bc4":
+                    out += channel_block([t[0] for t in blk])
+                else:
+                    out += channel_block([t[0] for t in blk]) + channel_block([t[1] for t in blk])
+        return bytes(out)
+    return _encode_float(fmt, rgba, w, h)
+
+
+def _encode_float(fmt, rgba, w, h):
     b = to_blocks(rgba, w, h)
     if fmt == "bc1":
         return _bc1_colour(b[..., :3], b[..., 3] < 128).tobytes()

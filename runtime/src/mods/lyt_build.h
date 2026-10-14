@@ -4,10 +4,10 @@
 // for the same description and art both write the same bytes (tools/story_mods/test_lyt.py runs
 // lyt_build_test against the Python output).
 //
-// Supported: the description format of tools/story_mods/lyt/schema.json with RGBA8 textures (tile modes
-// linear, 1d, tiled and the swizzle), "fill" textures and PNG art at its own size. Not supported here (the
-// description is refused, the caller falls back): BC formats and resizing art ("width" / "height" other
-// than the PNG's own size).
+// Supported: the description format of tools/story_mods/lyt/schema.json with RGBA8, BC1 and BC3 textures
+// (encoded here with the generator's integer coders, tile modes linear, 1d, tiled and the swizzle), "fill"
+// textures and PNG art at its own size. Not supported here (the description is refused, the caller falls
+// back): BC4 / BC5 and resizing art ("width" / "height" other than the PNG's own size).
 #pragma once
 #include <cstdint>
 #include <filesystem>
@@ -24,6 +24,7 @@ using Bytes = std::vector<uint8_t>;
 // with a short reason for a description it can't write.
 std::map<std::string, Bytes> build_files(const std::string& description_json, const std::filesystem::path& art_root);
 // The archive: a Yaz0 (stored) SARC of build_files(), as tools/story_mods/notebook_model.py writes it.
+// Refused (std::runtime_error) above 12 MB: the game's layout cache crashes on archives near 16 MB.
 Bytes build(const std::string& description_json, const std::filesystem::path& art_root);
 // RGBA8 texels (w x h) placed as a .bflim's image of that size, tile mode (1 linear, 2 1d, 4 tiled) and
 // swizzle (0-7) would hold them (the image's size: as the archive's .bflim); for writing a texture of a

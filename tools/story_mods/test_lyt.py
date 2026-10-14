@@ -475,6 +475,10 @@ EVERYTHING = {
         "Art_02": {"png": "art.png"},
         "Fill_00": {"fill": {"color": [10, 20, 30], "border": [200, 100, 50, 128], "border_width": 3},
                     "width": 70, "height": 33, "tile": "tiled"},
+        "Bc1_00": {"png": "art.png", "format": "bc1", "tile": "tiled", "swizzle": 3},
+        "Bc1_01": {"png": "art.png", "format": "bc1", "tile": "1d"},
+        "Bc3_00": {"png": "art.png", "format": "bc3", "tile": "tiled"},
+        "Bc3_01": {"png": "art.png", "format": "bc3", "tile": "linear"},
     },
     "fonts": ["CKingMain.bffnt"],
     "materials": {
@@ -483,6 +487,8 @@ EVERYTHING = {
                   "black": [12, 34, 56, 0], "white": [128, 200, 64], "flags_extra": 0x40000, "raw_tail": "0102aabb"},
         "M_Two": {"textures": [{"texture": "Art_01"}, {"texture": "Fill_00"}]},
         "M_Plain": {"white": [255, 128, 0, 77]},
+        "M_Bc": {"textures": [{"texture": "Bc1_00"}, {"texture": "Bc1_01"}, {"texture": "Bc3_00"}]},
+        "M_Bc3": {"textures": [{"texture": "Bc3_01"}]},
     },
     "panes": [
         {"type": "null", "name": "N_All_00", "size": [30, 40], "influence_alpha": True, "rotate": 12.5, "children": [
@@ -512,6 +518,8 @@ EVERYTHING = {
                                                                 {"name": "F", "type": "float", "value": 0.5}]},
             {"type": "text", "name": "T_NoShadow_00", "size": [300, 40], "text": "x", "shadow": {"enabled": False}},
             {"type": "bounding", "name": "B_Btn_00", "size": [100, 40]},
+            {"type": "picture", "name": "P_Bc_00", "size": [96, 40], "material": "M_Bc"},
+            {"type": "picture", "name": "P_Bc3_00", "size": [96, 40], "material": "M_Bc3"},
             {"type": "parts", "name": "L_Btn_00", "size": [100, 40], "part": "BtnSample_00", "part_scale": [0.5, 2]},
         ]},
     ],
@@ -604,7 +612,7 @@ class CppWriter(unittest.TestCase):
     def test_refusals(self):
         import subprocess
         self.art("plate.png", 512, 171)
-        for change in ({"format": "bc1"}, {"width": 256}):
+        for change in ({"format": "bc4a"}, {"width": 256}):
             d = load_json(os.path.join(HERE, "lyt", "examples", "plate.json"))
             d["textures"]["StoryPlate_00"].update(change)
             path = os.path.join(self.tmp, "refused.json")

@@ -293,7 +293,7 @@ def build_detail(nb, art, out, track_box=None):
         return "M_D" + name.split("_", 1)[1].title().replace("_", ""), im.size
 
     # ---- the painted pieces (load_user_art(): cleaned, cropped, sized) ----
-    m_sheet, s_sheet = picture("d_sheet", cleaned(nb, art, "sheet.png", 640))
+    m_sheet, s_sheet = picture("d_sheet", cleaned(nb, art, "sheet.png"))
     m_card, s_card = picture("d_card", cleaned(nb, art, "card.png", 512))
     m_uline, s_uline = picture("d_underline", cleaned(nb, art, "underline.png", 48))
     bands = [picture("d_band_" + n, cleaned(nb, art, "band_%s.png" % n, 120)) for n in ("cream", "blue", "green")]

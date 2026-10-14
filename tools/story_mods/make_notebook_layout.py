@@ -220,6 +220,24 @@ def fit_textures_to_display(textures, materials, panes, out):
         done.add(png)
 
 
+BC_FROM = 256 * 256  # textures with at least this many texels are block-compressed (BC1 opaque, BC3 with alpha)
+
+
+def compress_large_textures(textures, out):
+    """The large pictures (frame, sheet, banner, card, bands, ...) as BC1 / BC3, which the port encodes
+    when it builds the archive: a quarter (BC3) or an eighth (BC1) of RGBA8, so the archive stays well
+    under the layout cache's limit. Small and runtime-written pictures (portrait slots) stay RGBA8."""
+    for t, spec in textures.items():
+        png = spec.get("png")
+        if not png or "portrait" in png or spec.get("format", "rgba8") != "rgba8":
+            continue
+        im = Image.open(os.path.join(out, png)).convert("RGBA")
+        if im.width * im.height < BC_FROM:
+            continue
+        opaque = im.getchannel("A").getextrema()[0] == 255
+        spec["format"] = "bc1" if opaque else "bc3"
+
+
 def fit_texture(im, limit=2048):
     """A picture at its own size, scaled down only to fit the texture limit (2048)."""
     if max(im.size) <= limit:
@@ -556,6 +574,7 @@ def build(art, out_dir):
                 {"pane": "N_Detail", "target": "alpha", "keys": sampled(lambda t: 255 * ease_out(t) if d > 0 else 255, turn_n)}]}
         anims.update(detail.get("animations", {}))
     fit_textures_to_display(textures, materials, [root], out)
+    compress_large_textures(textures, out)
     desc = {"name": "StoryNotebook_00", "size": [W, H], "textures": textures, "materials": materials, "panes": [root],
             "groups": groups, "animations": anims}
     with open(os.path.join(out, "notebook.json"), "w") as fh:
