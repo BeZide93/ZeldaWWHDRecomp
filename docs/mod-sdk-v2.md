@@ -526,6 +526,17 @@ the item menu, opens its page over the game:
   the mouse on the GamePad picture) work on the rows and buttons. The game gets no input while the
   page is open.
 
+The page looks like one of the item menu's own windows: its text is in the game's menu font, its
+window and plates are made from the item menu's torn-paper window and button plate, the A and B
+prompts are the game's button pictures (in the Xbox colours or as PlayStation shapes when the
+**Button prompts** setting restyles the game's own prompts), and the game's cursor brackets
+mark what A acts on. It opens and closes like the menu's mini windows, turns its page when you
+switch tabs or open a quest, and plays the menu's own sounds (cursor, decide, back, tab, show on
+chart). All of it is read from your copy of the game while you play; nothing of the game is stored
+in the port. If a piece can't be read (another mod changed the menu), the page falls back to plain
+boxes and the overlay font. The sealed letter of a quest is not the notebook: A or a touch on it in
+the Delivery Bag shows a small window with what it is (B, A or a tap closes it).
+
 **Saving.** The save file keeps the step reached, whether a quest is done, its flags, which quest is
 shown on the chart and the letters Link carries (see [Where story progress is saved](#where-story-progress-is-saved)).
 Quests that were never started take no room. Nothing is written to the inventory or the Delivery
@@ -586,7 +597,11 @@ code then only reports progress the port can't see (`wwhd_quest_step`, `wwhd_que
 - `letter`: the port sends it (the postbox hands it out once Link has the Delivery Bag). When it
   is read the quest reaches step 1, and with `"letter:..."` in `encloses` Link carries a sealed
   letter for the quest: it shows in the Delivery Bag next to the notebook (never in the game's
-  inventory) until it is handed over.
+  inventory) until it is handed over. A or a touch on it shows what it is; the enclosure may be
+  written as an object to say that in its own words: `{"id": "letter:friend", "name": "Sealed
+  Letter", "description": "A sealed letter from the storyteller for his old friend."}` (both
+  optional; `name` up to 40 bytes, `description` up to 200 bytes and three lines). Without them the
+  bag says "Sealed Letter" and "A sealed letter from <sender>. It isn't addressed to you."
 - `steps`: the notebook shows each step's `text`, `where` and `place` (world `x`/`z`, the
   coordinates of `wwhd_chart_mark`; the tracked quest's ring goes there). A step with an `npc`
   takes `where` and `place` from the NPC catalogue unless it gives its own. While that character is

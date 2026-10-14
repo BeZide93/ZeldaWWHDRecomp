@@ -65,7 +65,8 @@ std::vector<Row> rows_now(std::vector<Quest>& storage);
 bool notebook_owned();
 bool open_page(const char* how = "by the port");  // how: for the log
 void close_page();
-bool page_open();
+bool page_open();     // the page or the sealed letter's caption has the controller
+bool caption_open();  // the sealed letter's caption (A or a touch on the letter in the Delivery Bag)
 void pad(input::PadState& p, Cpu* c = nullptr);  // c: the reading thread (the game's fonts and sounds)
 void mute(input::PadState& p);  // other controller reads (the Pro Controller): idle while open, held buttons after
 

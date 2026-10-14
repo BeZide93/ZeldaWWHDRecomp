@@ -38,8 +38,19 @@ struct ManifestQuest {
     uint8_t reward_item = 0;
     bool has_letter = false, letter_encloses_letter = false;
     std::string letter_id, letter_sender, letter_text;
+    // the enclosed letter as the Delivery Bag describes it (A or a touch on it): its name and its
+    // description ("encloses": [{"id": "letter:friend", "name": ..., "description": ...}]); empty:
+    // the defaults (enclosure_name / enclosure_description)
+    std::string enclosure_name, enclosure_description;
     std::vector<ManifestStep> steps;
 };
+inline constexpr size_t kMaxEnclosureNameBytes = 40, kMaxEnclosureDescriptionBytes = 200;
+// What the Delivery Bag says about a quest's sealed letter
+inline std::string enclosure_name(const ManifestQuest& q) { return q.enclosure_name.empty() ? "Sealed Letter" : q.enclosure_name; }
+inline std::string enclosure_description(const ManifestQuest& q) {
+    if (!q.enclosure_description.empty()) return q.enclosure_description;
+    return q.letter_sender.empty() ? "A sealed letter. It isn't addressed to you." : "A sealed letter from " + q.letter_sender + ". It isn't addressed to you.";
+}
 
 // "rupee_green" .. "rupee_orange"; 0 if not one
 inline uint8_t rupee_item(const std::string& name) {
@@ -136,8 +147,16 @@ inline bool parse_quests(const mods::json::Value& manifest, std::vector<Manifest
                 !text(letter.get("text"), story_mail::kMaxTextBytes, true, m.letter_text, "letter text") || m.letter_sender.empty() ||
                 m.letter_text.empty())
                 return why = "quest " + m.id + ": invalid letter", false;
-            for (const Value& e : letter.get("encloses").array)
+            for (const Value& e : letter.get("encloses").array) {
                 if (e.type == Value::String && e.text.rfind("letter:", 0) == 0) m.letter_encloses_letter = true;
+                // the object form: the enclosure with what the Delivery Bag says about it
+                if (e.type == Value::Object && e.get("id").type == Value::String && e.get("id").text.rfind("letter:", 0) == 0) {
+                    m.letter_encloses_letter = true;
+                    if (!text(e.get("name"), kMaxEnclosureNameBytes, false, m.enclosure_name, "enclosure name") ||
+                        !text(e.get("description"), kMaxEnclosureDescriptionBytes, true, m.enclosure_description, "enclosure description"))
+                        return false;
+                }
+            }
         }
         for (const Value& st : q.get("steps").array) {
             ManifestStep s;

@@ -72,21 +72,29 @@ inline constexpr uint32_t kShade = 0x0A140A88, kInk = 0x003800FF, kInkSoft = 0x3
 // advance of the overlay font (as a share of the size; generous).
 inline constexpr float kAdvance = 0.40f;
 inline float (*g_text_measure)(const std::string& text, float size) = nullptr;
+// A text that starts with kBold is drawn in the game's bordered menu style (titles, tabs, plates;
+// story_notebook_font.h), others in its plain letters.
+// kMessage: in the game's message font (story_notebook_font.h).
+inline const std::string kBold = "\xEE\x83\xB1", kMessage = "\xEE\x83\xB2";  // U+E0F1, U+E0F2
+inline std::string bold(const std::string& s) { return kBold + s; }
+inline std::string message(const std::string& s) { return kMessage + s; }
 inline float text_width(const std::string& s, float size) {
     if (g_text_measure) return g_text_measure(s, size);
-    size_t n = 0;
-    for (unsigned char c : s) n += (c & 0xC0) != 0x80;
+    size_t n = 0, skip = 0;
+    while (s.compare(skip, 3, kBold) == 0 || s.compare(skip, 3, kMessage) == 0) skip += 3;
+    for (size_t i = skip; i < s.size(); i++) n += (s[i] & 0xC0) != 0x80;
     return float(n) * size * kAdvance;
 }
 inline size_t char_bytes(unsigned char c) { return c < 0x80 ? 1 : c < 0xE0 ? 2 : c < 0xF0 ? 3 : 4; }
 
-// One line of text cut to the width, with "...".
-inline std::string fit(const std::string& text, float size, float width) {
-    if (text_width(text, size) <= width) return text;
+// One line of text cut to the width, with "...". `style`: the style code it is drawn with (kMessage:
+// measured in that font).
+inline std::string fit(const std::string& text, float size, float width, const std::string& style = "") {
+    if (text_width(style + text, size) <= width) return text;
     std::string best;
     for (size_t i = 0; i < text.size();) {
         const size_t next = std::min(text.size(), i + char_bytes((unsigned char)text[i]));
-        if (text_width(text.substr(0, next) + "...", size) > width) break;
+        if (text_width(style + text.substr(0, next) + "...", size) > width) break;
         best = text.substr(0, next);
         i = next;
     }
@@ -94,7 +102,7 @@ inline std::string fit(const std::string& text, float size, float width) {
 }
 
 // Text broken into lines of the width at spaces (and at the mod's own line breaks), at most `lines`.
-inline std::vector<std::string> wrap(const std::string& text, float size, float width, unsigned lines) {
+inline std::vector<std::string> wrap(const std::string& text, float size, float width, unsigned lines, const std::string& style = "") {
     std::vector<std::string> out;
     std::string line;
     bool any = false;
@@ -108,7 +116,7 @@ inline std::vector<std::string> wrap(const std::string& text, float size, float 
         size_t end = text.find_first_of(" \n", start);
         if (end == std::string::npos) end = text.size();
         const std::string word = text.substr(start, end - start);
-        if (any && text_width(line + " " + word, size) > width) flush();
+        if (any && text_width(style + line + " " + word, size) > width) flush();
         if (any) line += ' ';
         line += word;
         any = true;
@@ -118,7 +126,7 @@ inline std::vector<std::string> wrap(const std::string& text, float size, float 
     if (any || out.empty()) flush();
     if (out.size() > lines) {
         out.resize(lines);
-        out.back() = fit(out.back() + " ...........", size, width);
+        out.back() = fit(out.back() + " ...........", size, width, style);
     }
     return out;
 }
@@ -415,19 +423,19 @@ private:
         if (s != 1.0f) transform(out, from, cx, cy, s, 0, 0, 1.0f);
     }
     // a button prompt: the game's button picture (A or B), then what it does; returns its width
-    float prompt(std::vector<Command>& out, float x, float y, bool a, const char* what, float pressed, float size = 32) const {
+    float prompt(std::vector<Command>& out, float x, float y, bool a, const char* what, float pressed, float size = 36) const {
         const size_t from = out.size();
         out.push_back(text(x, y, size, kWhite, a ? std::string("\xEE\x80\x80") : std::string("\xEE\x80\x81")));
-        out.push_back(text(x + size + 6, y + size * 0.1f, size * 0.8f, kInk, what));
+        out.push_back(text(x + size + 6, y + size * 0.1f, size * 0.8f, kInk, bold(what)));
         press(out, from, x + size / 2, y + size / 2, press_scale(pressed));
-        return size + 6 + text_width(what, size * 0.8f);
+        return size + 6 + text_width(bold(what), size * 0.8f);
     }
-    static float prompt_width(const char* what, float size = 32) { return size + 6 + text_width(what, size * 0.8f); }
+    static float prompt_width(const char* what, float size = 36) { return size + 6 + text_width(bold(what), size * 0.8f); }
     // a plate the player can press (A on it, or a tap): the game's button plate with its prompt
     void plate(std::vector<Command>& out, float x, float y, float w, float h, bool on, bool a, const char* what) const {
         const size_t from = out.size();
         out.push_back(box(on ? "nb:plate-on" : "nb:plate", x, y, w, h));
-        const float size = 32, width = prompt_width(what, size);
+        const float size = 34, width = prompt_width(what, size);
         prompt(out, x + (w - width) / 2, y + (h - size) / 2, a, what, 1.0f, size);
         press(out, from, x + w / 2, y + h / 2, press_scale(a ? press_a_ : press_b_));
         if (on) cursor(out, x, y, w, h);
@@ -451,7 +459,7 @@ private:
 
     void sheet(std::vector<Command>& out) const {
         out.push_back(box("nb:window", kPageX, kPageY, kPageW, kPageH));
-        out.push_back(text(kPageX + 66, kPageY + 38, 40, kInk, "Story Notebook"));
+        out.push_back(text(kPageX + 66, kPageY + 36, 42, kInk, bold("Story Notebook")));
         // the close mark (a tap closes the page, as B does)
         out.push_back(circle(kCloseX, kCloseY, kCloseR, 0xFFFFFFC8, true));
         out.push_back(circle(kCloseX, kCloseY, kCloseR, kInkSoft, false, 2.5f));
@@ -485,15 +493,15 @@ private:
             }
             const float tx = kListX + 100, tw = kListW - 100 - 230;
             const bool dim = r.status == Status::Done || r.status == Status::NotAvailable;
-            const std::string title = fit(q.title, 28, tw * 0.64f);
-            out.push_back(text(tx, y + 8, 28, dim ? kInkSoft : kInk, title));
-            const float after = tx + std::min(tw * 0.64f, text_width(title, 28)) + 16;
-            out.push_back(text(after, y + 14, 20, kInkLight, fit("- " + q.mod_name, 20, tx + tw - after)));
+            const std::string title = fit(q.title, 27, tw * 0.64f);
+            out.push_back(text(tx, y + 9, 27, dim ? kInkSoft : kInk, bold(title)));
+            const float after = tx + std::min(tw * 0.64f, text_width(title, 27)) + 16;
+            out.push_back(text(after, y + 14, 19, kInkLight, fit("- " + q.mod_name, 19, tx + tw - after)));
             std::string next = r.status == Status::Done ? "The story is told." : r.status == Status::NotAvailable ? "Not yet available: " + q.condition : q.next;
-            out.push_back(text(tx, y + 39, 23, dim ? kInkSoft : kInk, fit(next, 23, tw)));
+            out.push_back(text(tx, y + 38, 22, dim ? kInkSoft : kInk, fit(next, 22, tw)));
             std::string where = q.where.empty() ? std::string(q.has_place ? "On the sea chart" : "No place on the chart for this step")
                                                 : "Where: " + q.where;
-            if (r.status == Status::New || r.status == Status::InProgress) out.push_back(text(tx, y + 64, 19, kInkSoft, fit(where, 19, tw)));
+            if (r.status == Status::New || r.status == Status::InProgress) out.push_back(text(tx, y + 61, 18, kInkSoft, fit(where, 18, tw)));
             status(out, r, kListX + kListW - 216, y);
             // the selected row: a little bounce as the cursor arrives
             if (selected && ticked_ && bump_ < 1.0f) press(out, from, kListX + kListW / 2, y + kRowH / 2, 1.0f + 0.025f * std::sin(bump_ * 3.14159265f));
@@ -527,7 +535,7 @@ private:
             const float lift = on ? -3 : 0;
             out.push_back(box(on ? "nb:tab-on" : "nb:tab", xs[i], kTabY + lift, kTabW, kTabH));
             const float size = 26, w = text_width(labels[i], size);
-            out.push_back(text(xs[i] + (kTabW - w) / 2, kTabY + lift + (kTabH - size) / 2, size, on ? kPlateInk : kInkSoft, labels[i]));
+            out.push_back(text(xs[i] + (kTabW - w) / 2, kTabY + lift + (kTabH - size) / 2, size, on ? kPlateInk : kInkSoft, bold(labels[i])));
         }
     }
 
@@ -543,7 +551,7 @@ private:
         case Status::InProgress: {  // a label in the colour of its state, as wide as its word
             const char* word = status_text(r.status);
             out.push_back(rect(x, sy, text_width(word, 21) + 22, 30, r.status == Status::New ? kNew : kProgress));
-            out.push_back(text(x + 11, sy + 4, 21, kWhite, word));
+            out.push_back(text(x + 11, sy + 4, 21, kWhite, bold(word)));
             break;
         }
         case Status::NotAvailable: {
@@ -561,7 +569,7 @@ private:
         const float x = kPageX + 80, w = kPageW - 160;
         float y = kPageY + 108;
         out.push_back(box("nb:panel", x - 22, y - 14, w + 44, kTrackY - y - 4));
-        out.push_back(text(x, y, 34, kInk, fit(q.title, 34, w - 260)));
+        out.push_back(text(x, y, 34, kInk, bold(fit(q.title, 34, w - 260))));
         out.push_back(text(x, y + 40, 21, kInkLight, fit("from " + q.mod_name, 21, w - 260)));
         status(out, r, x + w - 220, y - 6);
         y += 80;

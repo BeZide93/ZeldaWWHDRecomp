@@ -2,6 +2,7 @@
 // page driver and the item menu entry.
 #include "story_notebook.h"
 #include "story_notebook_page.h"
+#include "story_notebook_caption.h"
 #include "story_notebook_bag.h"
 #include "story_takeover.h"
 #include "story_sail.h"
@@ -96,6 +97,7 @@ std::map<uint16_t, Portrait> g_portraits;
 bool g_imported = false, g_installed = false;
 std::atomic<bool> g_open{false};
 Page g_page;  // game thread
+Caption g_caption;  // the sealed letter's caption (game thread)
 void (*g_original)(Cpu*, uint32_t) = nullptr;
 uint32_t (*g_call)(Cpu*, uint32_t, std::initializer_list<uint32_t>) = nullptr;
 const GameUi* g_ui = nullptr;  // the game's font, sounds and window art (the game binary only)
@@ -465,7 +467,8 @@ struct Look {
     uint64_t fonts_key = 0;  // changes when glyphs are added
 } g_look;
 constexpr float kBoxResolution = 0.75f;  // composed boxes: pixels per page unit (the GamePad shows 0.67)
-constexpr float kFontScale = 1.05f;      // the game font's cell height per page text size (its cell has room above and below)
+constexpr float kFontScale = 1.05f;
+constexpr float kAtlasScale = 0.62f;     // the text atlas: the font's lines at 62 % (46 of its 74 pixels; the TV shows up to 44)      // the game font's cell height per page text size (its cell has room above and below)
 float g_close_time = 1.0f;  // the closing animation: 0..1 after the page closed
 std::vector<Command> g_closing;  // the last page drawn (resolved), faded out while closing
 std::vector<guestmods::hud::Handle> g_closing_images;
@@ -483,11 +486,16 @@ void load_glyphs(Cpu* c, const std::vector<std::string>& lines) {
     std::vector<uint32_t> want;
     for (const std::string& l : lines)
         for (uint32_t cp : font::codes(l))
-            if (!font::Atlas::button(cp) && !g_look.main.glyphs.count(cp) && !g_look.main.missing.count(cp) &&
+            if (!font::Atlas::button(cp) && !font::style_code(cp) && !g_look.main.glyphs.count(cp) && !g_look.main.missing.count(cp) &&
                 std::find(want.begin(), want.end(), cp) == want.end())
                 want.push_back(cp);
     if (!g_look.main.cell_height) want.push_back('?');  // the stand-in for characters no font has
-    if (!want.empty()) {
+    bool message_wanted = false;
+    for (const std::string& l : lines)
+        if (font::has_style(l, font::kMessage))
+            for (uint32_t cp : font::codes(l)) message_wanted |= !font::style_code(cp) && !font::Atlas::button(cp) && !g_look.fallback.glyphs.count(cp) &&
+                                                                 !g_look.fallback.missing.count(cp);
+    if (!want.empty() || message_wanted) {
         const size_t before = g_look.main.glyphs.size();
         if (!g_ui->glyphs(c, 0, want, g_look.main) || !g_look.main.ready()) {
             g_look.font_failed = true;
@@ -497,6 +505,13 @@ void load_glyphs(Cpu* c, const std::vector<std::string>& lines) {
         std::vector<uint32_t> lacking;
         for (uint32_t cp : want)
             if (g_look.main.missing.count(cp) && !g_look.fallback.glyphs.count(cp) && !g_look.fallback.missing.count(cp)) lacking.push_back(cp);
+        // the lines in the message font: all their characters from it
+        for (const std::string& l : lines)
+            if (font::has_style(l, font::kMessage))
+                for (uint32_t cp : font::codes(l))
+                    if (!font::Atlas::button(cp) && !font::style_code(cp) && !g_look.fallback.glyphs.count(cp) && !g_look.fallback.missing.count(cp) &&
+                        std::find(lacking.begin(), lacking.end(), cp) == lacking.end())
+                        lacking.push_back(cp);
         if (!lacking.empty()) g_ui->glyphs(c, 1, lacking, g_look.fallback);
         if (g_look.main.glyphs.size() != before || !lacking.empty()) g_look.fonts_key++;
         if (before == 0) {
@@ -542,7 +557,8 @@ std::vector<Command> render(std::vector<Command> cmds, std::vector<guestmods::hu
     if (font) {
         const std::vector<std::string> lines = font::lines_of(cmds);
         if (!g_look.atlas.holds(lines, g_look.prompts, g_look.fonts_key)) {
-            g_look.atlas.build(lines, g_look.main, &g_look.fallback, g_look.icons.ready() ? &g_look.icons : nullptr, g_look.prompts, g_look.fonts_key);
+            g_look.atlas.build(lines, g_look.main, &g_look.fallback, g_look.icons.ready() ? &g_look.icons : nullptr, g_look.prompts, g_look.fonts_key,
+                               kAtlasScale);
             if (g_look.atlas_image) store.release(kOwner, g_look.atlas_image);
             g_look.atlas_image = 0;
         }
@@ -591,9 +607,9 @@ void append_all(guestmods::hud::Handle list, std::vector<Command>& cmds, const s
     }
 }
 
-void publish(const std::vector<Row>& all) {
+void publish(const std::vector<Row>& all, const std::vector<Command>* caption = nullptr) {
     auto& store = guestmods::hud::store();
-    if (!g_page.open()) {
+    if (!g_page.open() && !caption) {
         store.drop(kOwner);
         return;
     }
@@ -603,12 +619,12 @@ void publish(const std::vector<Row>& all) {
     const guestmods::hud::Handle list = store.begin(kOwner, screen);
     if (!list) return;
     std::vector<guestmods::hud::Handle> images;
-    std::vector<Command> cmds = render(g_page.draw(all), images);
+    std::vector<Command> cmds = render(caption ? *caption : g_page.draw(all), images);
     g_closing = cmds, g_closing_images = images, g_closing_screen = screen;  // for the closing animation
     fit_to_screen(cmds, screen);
     append_all(list, cmds, images);
     const std::vector<Row> rows = g_page.shown(all);
-    if (g_page.mode() == Page::Mode::List) {  // portraits in the rows that show them
+    if (!caption && g_page.mode() == Page::Mode::List) {  // portraits in the rows that show them
         const uint64_t generation = store.state_generation();
         for (unsigned i = 0; i < kRowsShown && g_page.top() + i < rows.size(); i++) {
             const Quest& q = *rows[g_page.top() + i].quest;
@@ -992,15 +1008,37 @@ bool open_page(const char* how) {
     LOG("[notebook] page opened (%s)", how);
     return true;
 }
+// The sealed letter's caption (A or a touch on it in the Delivery Bag): its name and description
+bool open_letter(const char* how) {
+    const uint16_t key = carried_letter();
+    if (!g_installed || !key || g_open) return false;
+    std::string title = "Sealed Letter", text;
+    {
+        std::lock_guard lock(g_mu);
+        for (const Declared& d : g_declared)
+            if (d.key == key) title = enclosure_name(d.quest), text = enclosure_description(d.quest);
+        if (text.empty())  // a quest a mod's code defines: its mod as the sender
+            for (const Quest& q : g_quests)
+                if (q.key == key) text = "A sealed letter (" + q.mod_name + "). It isn't addressed to you.";
+    }
+    g_caption.show(title, text);
+    g_open = true;
+    g_close_time = 1.0f, g_closing.clear();
+    g_pending_sound = Sound::Open;
+    LOG("[notebook] the sealed letter's caption (%s)", how);
+    return true;
+}
 void close_page() {
     if (g_open) LOG("[notebook] page closed (state load or shutdown)");
     g_page.hide();
+    g_caption.hide();
     g_open = false;
     g_close_time = 1.0f, g_closing.clear(), g_closing_images.clear();
     g_pending_sound = Sound::None;
     guestmods::hud::store().drop(kOwner);
 }
 bool page_open() { return g_open.load(std::memory_order_relaxed); }
+bool caption_open() { return g_caption.open(); }
 
 // buttons held when the page closed: the game gets them only once they are released
 std::atomic<uint32_t> g_swallow{0};
@@ -1040,6 +1078,27 @@ void pad(input::PadState& p, Cpu* c) {
     if (g_ui && g_ui->prompts) g_look.prompts = g_ui->prompts();
     load_art();
     std::vector<Quest> storage;
+    if (g_caption.open()) {  // the sealed letter's caption
+        PadInput in;
+        in.buttons = p.buttons, in.touch = p.touch, in.x = p.tx * 1280.0f, in.y = p.ty * 720.0f;
+        const Sound sound = g_caption.input(in);
+        g_caption.tick(dt);
+        if (g_pending_sound != Sound::None) play(c, g_pending_sound), g_pending_sound = Sound::None;
+        play(c, sound);
+        if (g_caption.open()) {
+            const std::vector<Command> cmds = g_caption.draw();
+            load_glyphs(c, font::texts_of(cmds));
+            publish({}, &cmds);
+        } else {
+            g_open = false;
+            g_close_time = 0.0f;
+            g_swallow.store(p.buttons, std::memory_order_relaxed);
+            LOG("[notebook] the sealed letter's caption closed");
+            publish_closing(0.0f);
+        }
+        p = input::PadState{};
+        return;
+    }
     std::vector<Row> rows = rows_now(storage);
     PadInput in;
     in.buttons = p.buttons, in.ly = p.ly, in.touch = p.touch;
@@ -1062,7 +1121,7 @@ void pad(input::PadState& p, Cpu* c) {
             LOG("[notebook] page mode %d, quest %04X selected", int(g_page.mode()), g_page.selected_key());
         last_mode = int(g_page.mode()), last_key = g_page.selected_key();
     }
-    if (g_page.open()) load_glyphs(c, font::lines_of(g_page.draw(rows)));
+    if (g_page.open()) load_glyphs(c, font::texts_of(g_page.draw(rows)));
     publish(rows);
     if (!g_page.open()) {
         g_open = false;
@@ -1090,12 +1149,6 @@ void inventory_item(Cpu* c) {
     const uint32_t key = c->r[3], lr = c->lr;
     g_original(c, kInventoryItem);
     if ((lr != kWindowBuild && lr != kWindowInit) || key < kFirstDeliveryKey || key >= kFirstDeliveryKey + kDeliveryPlaces) return;
-    // research aid (local runs): a game delivery item in the third place, to compare the game's own caption
-    static const char* test_item = getenv("WWHD_NOTEBOOK_TEST_BAGITEM");
-    if (test_item && key == kFirstDeliveryKey + 2) {
-        c->r[3] = uint32_t(strtoul(test_item, nullptr, 0));
-        return;
-    }
     if ((c->r[3] & 0xFF) != kEmpty) return;
     const PortPlaces places = port_places(c);
     if (key != places.notebook && key != places.letter) return;
@@ -1123,6 +1176,7 @@ void open_child(Cpu* c) {
     const uint32_t child = data ? ld32(data + 4 * (index < count ? index : 0)) : 0;
     if (trace()) LOG("[notebook] item menu: A on place %u (item %02X)", index, child ? ld32(child + kItemNumber) : 0xFFu);
     if (child && ld32(child + kItemNumber) == kNotebookItem && open_page("A on its bag place")) return;
+    if (child && ld32(child + kItemNumber) == kLetterItem && open_letter("A on its bag place")) return;
     g_original(c, kOpenChild);
 }
 
@@ -1176,6 +1230,7 @@ void touch_select(Cpu* c) {
     g_original(c, kTouchSelect);
     if (trace()) LOG("[notebook] item menu: touch on item %02X", ld32(item + kItemNumber));
     if (ld32(item + kItemNumber) == kNotebookItem) open_page("a touch on its bag place");
+    if (ld32(item + kItemNumber) == kLetterItem) open_letter("a touch on its bag place");
 }
 
 // getSelectedItemValue(this, receiver): the notebook can't go on X, Y or R

@@ -4,7 +4,6 @@
 #include "story_notebook_style.h"
 
 #include <cstring>
-#include <filesystem>
 #include <functional>
 #include <map>
 #include <set>
@@ -12,7 +11,6 @@
 #include "guest_addr.h"
 #include "input_map.h"
 #include "runtime.h"
-#include "screenshot.h"
 
 namespace story_notebook {
 namespace {
@@ -70,18 +68,6 @@ bool glyphs(Cpu* c, int slot, const std::vector<uint32_t>& cps, font::Face& face
             continue;
         }
         if (!face.cell_height) face.cell_height = g.bitmap.height;
-        static const char* dump_dir = getenv("WWHD_NOTEBOOK_GLYPHS");  // research aid: the glyphs as pictures
-        if (dump_dir && *dump_dir && g.bitmap.width > 0 && (cp >= 0xE000 || cp == 'A')) {
-            char file[64];
-            snprintf(file, sizeof file, "/glyph_%d_%04X_%s.png", slot, cp, g.colour ? "rgba" : "cov");
-            std::vector<uint8_t> shown(g.bitmap.rgba);
-            for (size_t q = 0; q + 3 < shown.size(); q += 4) {  // over magenta, to see the alpha
-                const unsigned a = shown[q + 3];
-                const uint8_t bg[3] = {255, 0, 255};
-                for (int k = 0; k < 3; k++) shown[q + k] = uint8_t((shown[q + k] * a + bg[k] * (255 - a)) / 255);
-            }
-            screenshot::write_png(std::string(dump_dir) + file, g.bitmap.width, g.bitmap.height, size_t(g.bitmap.width) * 4, shown.data());
-        }
         face.glyphs[cp] = std::move(g);
     }
     return true;
@@ -156,10 +142,22 @@ bool art(uint32_t menu, style::Art& out, std::string& why) {
     } else if (!texture_at(plate, {0xF4, 0x44}, out.gloss, 320, 100)) {
         out.gloss = {};
     }
+    // the Info box (what A shows for an item on the TV): its torn edges and its swirls
+    for (const char* name : {"W_TextBase_00", "W_TextBase_01"}) {
+        const uint32_t box = find_pane(root, name);
+        const uint32_t deco = box ? find_pane(box, std::string(name) == "W_TextBase_00" ? "P_Deco_00" : "P_Deco_01") : 0;
+        if (!box || !deco || !texture_at(box, {0x10C, 0x28}, out.info_top, 0, 16) || !texture_at(ld32(box + 0xD0), {0xC, 0x10, 0x18}, out.info_bottom, 0, 16) ||
+            !texture_at(deco, {0xF4, 0x44}, out.swirl)) {
+            out.info_top = out.info_bottom = out.swirl = {};
+            continue;
+        }
+        break;
+    }
+    if (!out.info()) why += std::string(why.empty() ? "" : "; ") + "the Info box is not readable (a plain box)";
     return true;
 }
 
-// ---- research aid: the menu layout's panes and the textures reachable from them ----
+// ---- research aid: the menu layout's panes and the textures reachable from them (log only) ----
 std::string pane_name(uint32_t pane) {
     const char* name = (const char*)mem::ptr(pane + 0x80);
     return {name, strnlen(name, 24)};
@@ -172,14 +170,11 @@ bool looks_like_texture(uint32_t t) {
     return dim >= 1 && dim <= 5 && w && w <= 4096 && h && h <= 4096 && d && d <= 64 && mips && mips <= 13 && format && size &&
            guest_pointer(image);
 }
-void dump(Cpu* c, uint32_t menu, const std::string& dir) {
+void dump(Cpu* c, uint32_t menu, const std::string&) {
     (void)c;
     const uint32_t layout = ld32(menu + 0x44), lyt = layout ? ld32(layout + 4) : 0, root = lyt ? ld32(lyt + 0xC) : 0;
     LOG("[notebook-panes] menu %08X layout %08X lyt %08X root %08X", menu, layout, lyt, root);
     if (!root) return;
-    std::error_code ec;
-    std::filesystem::create_directories(dir, ec);
-    std::set<uint32_t> textures;
     std::function<void(uint32_t, int)> walk = [&](uint32_t pane, int depth) {
         if (!guest_pointer(pane) || depth > 24) return;
         char words[600];
@@ -204,17 +199,6 @@ void dump(Cpu* c, uint32_t menu, const std::string& dir) {
                 if (looks_like_texture(p)) {
                     LOG("[notebook-panes] %*s  texture via %s: %08X %ux%u fmt %X tile %u comp %08X", depth * 2, "", path.c_str(), p, ld32(p + 4),
                         ld32(p + 8), ld32(p + 0x14), ld32(p + 0x2C), ld32(p + 0x84));
-                    if (textures.insert(p).second) {
-                        game_glyph::Bitmap b;
-                        if (game_glyph::read_texture(p, b)) {
-                            char file[64];
-                            snprintf(file, sizeof file, "/tex_%08X_%dx%d.png", p, b.width, b.height);
-                            screenshot::write_png(dir + file, b.width, b.height, size_t(b.width) * 4, b.rgba.data());
-                            for (size_t q = 0; q + 3 < b.rgba.size(); q += 4) b.rgba[q] = b.rgba[q + 1] = b.rgba[q + 2] = b.rgba[q + 3];
-                            snprintf(file, sizeof file, "/tex_%08X_alpha.png", p);
-                            screenshot::write_png(dir + file, b.width, b.height, size_t(b.width) * 4, b.rgba.data());
-                        }
-                    }
                 } else if (it.hops < 3) {
                     todo.push_back({p, it.hops + 1, path});
                 }

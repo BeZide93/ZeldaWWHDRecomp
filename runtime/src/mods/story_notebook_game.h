@@ -28,7 +28,7 @@ struct GameUi {
     bool (*art)(uint32_t menu, style::Art& out, std::string& why) = nullptr;
     // How the game's button prompts look now (input_map::prompt_style, as button_glyphs.cpp)
     font::Prompts (*prompts)() = nullptr;
-    // research aid (WWHD_NOTEBOOK_PANES=dir): the menu layout's panes and their textures
+    // research aid (WWHD_NOTEBOOK_PANES=1): the menu layout's panes and their textures, in the log
     void (*dump)(Cpu* c, uint32_t menu, const std::string& dir) = nullptr;
 };
 const GameUi& game_ui();  // story_notebook_game.cpp

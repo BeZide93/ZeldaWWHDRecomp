@@ -11,6 +11,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <map>
 #include <memory>
 #include <string>
@@ -80,6 +82,8 @@ struct Face {
 inline int line_pixels(const Face& f, const std::string& text) {
     int w = 0;
     for (uint32_t cp : codes(text))
+        if (cp >= 0xE0F0 && cp <= 0xE0FF) continue;  // a style code (kBold)
+        else
         if (const game_glyph::Glyph* g = f.find(cp)) w += g->advance;
     return w;
 }
@@ -115,6 +119,30 @@ inline game_glyph::Bitmap button_picture(const game_glyph::Glyph* icon, int face
     return out;
 }
 
+// Text styles: a line that starts with kBold is drawn with the font's border (the game's menu
+// labels: a light border around dark letters, a dark one around light letters); other lines with
+// the letters only (the game's message text).
+// A line that starts with kMessage is drawn in the game's message font (CKingMsg, the font of its
+// talks and of the item menu's Info box) instead of its menu font.
+inline const std::string kBold = "\xEE\x83\xB1", kMessage = "\xEE\x83\xB2";  // U+E0F1, U+E0F2
+inline bool style_code(uint32_t cp) { return cp >= 0xE0F0 && cp <= 0xE0FF; }
+inline std::string plain_text(std::string text) {
+    while (text.size() >= 3 && (text.rfind(kBold, 0) == 0 || text.rfind(kMessage, 0) == 0)) text = text.substr(3);
+    return text;
+}
+inline bool has_style(const std::string& text, const std::string& code) {
+    for (size_t i = 0; i + 3 <= text.size() && (text.compare(i, 3, kBold) == 0 || text.compare(i, 3, kMessage) == 0); i += 3)
+        if (text.compare(i, 3, code) == 0) return true;
+    return false;
+}
+
+// A line as the atlas keeps it: its text and its colour (the colours are composed in)
+inline std::string line_key(const std::string& text, uint32_t rgba) {
+    char colour[8];
+    std::snprintf(colour, sizeof colour, "%06X", unsigned(rgba >> 8));
+    return text + '\x1F' + colour;
+}
+
 // The line atlas: every line the page shows, composed once.
 class Atlas {
 public:
@@ -122,42 +150,42 @@ public:
     struct Cell {
         float u0 = 0, v0 = 0, u1 = 0, v1 = 0;
         int width = 0, height = 0;  // pixels
-        bool picture = false;       // a coloured picture (a button): tinted by alpha only
     };
-    // true if every line of `lines` is in the atlas, composed with this look and these fonts
+    // true if every line of `lines` (line_key) is in the atlas, composed with this look and these fonts
     bool holds(const std::vector<std::string>& lines, const Prompts& look, uint64_t fonts) const {
         if (look != look_ || fonts != fonts_ || !image_) return false;
         for (const std::string& l : lines)
             if (!cells_.count(l)) return false;
         return true;
     }
-    // Compose the lines (the main font, and `fallback` for characters the main font lacks; the
-    // icon font for the button pictures). Lines that don't fit any more are left out (drawn with
-    // the overlay font).
+    // Compose the lines (line_key: the main font, and `fallback` for characters the main font lacks;
+    // the icon font for the button pictures) at `scale` of the font's own size. Lines that don't fit
+    // any more are left out (drawn with the overlay font).
     void build(const std::vector<std::string>& lines, const Face& main, const Face* fallback, const Face* icons, const Prompts& look,
-               uint64_t fonts) {
+               uint64_t fonts, float scale = 1.0f) {
         cells_.clear();
         look_ = look, fonts_ = fonts;
-        const int h = main.cell_height;
+        const int h = std::max(1, int(std::lround(main.cell_height * scale)));
         auto image = std::make_shared<guestmods::hud::Image>();
         image->width = kWidth;
         int x = kPad, y = kPad, used = 0;
         std::vector<std::string> order = lines;  // unique lines
         std::sort(order.begin(), order.end());
         order.erase(std::unique(order.begin(), order.end()), order.end());
-        if (h <= 0) order.clear();
-        // layout: rows of the cell height, left to right
+        if (main.cell_height <= 0) order.clear();
+        // layout: rows of the line height, left to right
         struct Place {
-            const std::string* text;
+            const std::string* key;
             int x, y, w;
         };
         std::vector<Place> places;
-        for (const std::string& text : order) {
+        for (const std::string& key : order) {
+            const std::string text = key.substr(0, key.rfind('\x1F'));
             const int w = std::max(1, line_width(text, main, fallback, h));
             if (w + 2 * kPad > kWidth) continue;
             if (x + w + kPad > kWidth) x = kPad, y += h + kPad;
             if (y + h + kPad > kMaxHeight) break;
-            places.push_back({&text, x, y, w});
+            places.push_back({&key, x, y, w});
             x += w + kPad;
             used = y + h + kPad;
         }
@@ -168,14 +196,16 @@ public:
             c.width = p.w, c.height = h;
             c.u0 = float(p.x) / kWidth, c.v0 = float(p.y) / image->height;
             c.u1 = float(p.x + p.w) / kWidth, c.v1 = float(p.y + h) / image->height;
-            c.picture = compose(*image, *p.text, main, fallback, icons, look, p.x, p.y, h);
-            cells_[*p.text] = c;
+            const size_t sep = p.key->rfind('\x1F');
+            const uint32_t rgb = uint32_t(std::strtoul(p.key->c_str() + sep + 1, nullptr, 16));
+            compose(*image, p.key->substr(0, sep), rgb, main, fallback, icons, look, p.x, p.y, h);
+            cells_[*p.key] = c;
         }
         image_ = image;
         generation_++;
     }
-    const Cell* cell(const std::string& line) const {
-        auto it = cells_.find(line);
+    const Cell* cell(const std::string& key) const {
+        auto it = cells_.find(key);
         return it == cells_.end() ? nullptr : &it->second;
     }
     std::shared_ptr<const guestmods::hud::Image> image() const { return image_; }
@@ -188,17 +218,22 @@ public:
 
     // the button characters' width in a line: as wide as tall (the game's icons are square cells)
     static bool button(uint32_t cp) { return cp == kButtonA || cp == kButtonB; }
+    // a line's width in pixels at line height h (each glyph scaled from its own font's cell height)
     static int line_width(const std::string& text, const Face& main, const Face* fallback, int h) {
-        int w = 0;
+        const bool message = has_style(text, kMessage) && fallback && fallback->ready();
+        const Face& first = message ? *fallback : main;
+        const Face* second = message ? &main : fallback;
+        float w = 0;
         for (uint32_t cp : codes(text)) {
+            if (style_code(cp)) continue;
             if (button(cp)) {
                 w += h;
                 continue;
             }
-            const game_glyph::Glyph* g = glyph(cp, main, fallback);
-            if (g) w += std::max(g->advance, g->left + g->bitmap.width);
+            const game_glyph::Glyph* g = glyph(cp, first, second);
+            if (g) w += std::max(g->advance, g->left + g->bitmap.width) * float(h) / float(std::max(1, g->bitmap.height));
         }
-        return w;
+        return int(std::ceil(w));
     }
 
 private:
@@ -211,73 +246,82 @@ private:
         }
         return main.find(cp);
     }
-    // draw a bitmap into the atlas at (x, y), scaled to height h (bilinear; a glyph of another
-    // font's height is fitted to the main font's line)
-    static void blit(guestmods::hud::Image& img, const game_glyph::Bitmap& b, int x, int y, int w, int h) {
+    // a bitmap drawn into the atlas at (x, y), scaled to w x h (bilinear), its pixels through `paint`
+    // (straight RGBA in, straight RGBA out), over what is already there
+    template <class Paint>
+    static void blit(guestmods::hud::Image& img, const game_glyph::Bitmap& b, float x, int y, int w, int h, Paint&& paint) {
         if (b.width <= 0 || b.height <= 0 || w <= 0 || h <= 0) return;
+        const int x0 = int(std::floor(x));
         for (int ty = 0; ty < h; ty++)
-            for (int tx = 0; tx < w; tx++) {
-                const int ax = x + tx, ay = y + ty;
+            for (int tx = 0; tx <= w; tx++) {
+                const int ax = x0 + tx, ay = y + ty;
                 if (ax < 0 || ay < 0 || ax >= int(img.width) || ay >= int(img.height)) continue;
-                const float sx = (tx + 0.5f) * b.width / w - 0.5f, sy = (ty + 0.5f) * b.height / h - 0.5f;
+                const float sx = (ax + 0.5f - x) * b.width / w - 0.5f, sy = (ty + 0.5f) * b.height / h - 0.5f;
+                if (sx < -1 || sx > b.width) continue;
                 const int ix = int(std::floor(sx)), iy = int(std::floor(sy));
                 const float fx = sx - ix, fy = sy - iy;
                 float acc[4] = {0, 0, 0, 0};
                 for (int k = 0; k < 4; k++) {
-                    const int px = std::clamp(ix + (k & 1), 0, b.width - 1), py = std::clamp(iy + (k >> 1), 0, b.height - 1);
+                    const int px = ix + (k & 1), py = std::clamp(iy + (k >> 1), 0, b.height - 1);
+                    if (px < 0 || px >= b.width) continue;  // outside the glyph: transparent
                     const float wgt = ((k & 1) ? fx : 1 - fx) * ((k >> 1) ? fy : 1 - fy);
                     const uint8_t* s = &b.rgba[(size_t(py) * b.width + px) * 4];
-                    // premultiplied, so transparent texels don't bleed their colour
-                    const float a = s[3] / 255.0f;
+                    const float a = s[3] / 255.0f;  // premultiplied, so transparent texels don't bleed their colour
                     for (int c = 0; c < 3; c++) acc[c] += s[c] * a * wgt;
                     acc[3] += s[3] * wgt;
                 }
+                if (acc[3] <= 0.0f) continue;
+                float src[4] = {acc[0] * 255.0f / acc[3], acc[1] * 255.0f / acc[3], acc[2] * 255.0f / acc[3], acc[3]};
+                paint(src);
+                if (src[3] <= 0.0f) continue;
                 uint8_t* d = &img.rgba[(size_t(ay) * img.width + ax) * 4];
-                const float a = acc[3];
-                if (a <= 0.0f) continue;
-                // over what is already there (glyphs may overlap a little)
-                const float da = d[3] / 255.0f, sa = a / 255.0f, oa = sa + da * (1 - sa);
-                for (int c = 0; c < 3; c++) {
-                    const float sc = acc[c] / a * 255.0f / 255.0f;  // straight colour
-                    d[c] = uint8_t(std::clamp((sc * sa + d[c] * da * (1 - sa)) / std::max(oa, 1e-4f), 0.0f, 255.0f));
-                }
+                const float da = d[3] / 255.0f, sa = src[3] / 255.0f, oa = sa + da * (1 - sa);
+                for (int c = 0; c < 3; c++) d[c] = uint8_t(std::clamp((src[c] * sa + d[c] * da * (1 - sa)) / std::max(oa, 1e-4f), 0.0f, 255.0f));
                 d[3] = uint8_t(std::clamp(oa * 255.0f + 0.5f, 0.0f, 255.0f));
             }
     }
-    // the glyph's own pixels at (x, y): no scaling (the main font)
-    static void put(guestmods::hud::Image& img, const game_glyph::Bitmap& b, int x, int y) {
-        for (int ty = 0; ty < b.height; ty++)
-            for (int tx = 0; tx < b.width; tx++) {
-                const int ax = x + tx, ay = y + ty;
-                if (ax < 0 || ay < 0 || ax >= int(img.width) || ay >= int(img.height)) continue;
-                const uint8_t* s = &b.rgba[(size_t(ty) * b.width + tx) * 4];
-                uint8_t* d = &img.rgba[(size_t(ay) * img.width + ax) * 4];
-                if (s[3] > d[3]) d[0] = s[0], d[1] = s[1], d[2] = s[2], d[3] = s[3];
-            }
-    }
-    // one line; true if it is a coloured picture (only buttons)
-    static bool compose(guestmods::hud::Image& img, const std::string& text, const Face& main, const Face* fallback, const Face* icons,
+    static float ramp(float t, float from, float to) { return std::clamp((t - from) / (to - from), 0.0f, 1.0f); }
+    // one line in its colour (0xRRGGBB)
+    static void compose(guestmods::hud::Image& img, std::string text, uint32_t rgb, const Face& main, const Face* fallback, const Face* icons,
                         const Prompts& look, int x, int y, int h) {
-        bool only_buttons = true;
-        int pen = x;
+        const bool bold = has_style(text, kBold), message = has_style(text, kMessage) && fallback && fallback->ready();
+        const Face& first = message ? *fallback : main;
+        const Face* second = message ? &main : fallback;
+        const float fill[3] = {float(rgb >> 16 & 255), float(rgb >> 8 & 255), float(rgb & 255)};
+        const bool light = fill[0] * 0.3f + fill[1] * 0.59f + fill[2] * 0.11f > 140.0f;
+        const float border[3] = {light ? 44.0f : 255.0f, light ? 58.0f : 255.0f, light ? 46.0f : 255.0f};
+        // The game's fonts keep their letters at full coverage and their border at about half: plain
+        // text keeps the letters, bold text draws the border in the border colour around them.
+        auto letters = [&](float* c) {
+            const float t = c[3] / 255.0f;
+            if (bold) {
+                const float f = ramp(t, 0.62f, 0.9f), b = ramp(t, 0.05f, 0.4f);
+                for (int i = 0; i < 3; i++) c[i] = border[i] + (fill[i] - border[i]) * f;
+                c[3] = 255.0f * std::max(f, b * 0.95f);
+            } else {
+                for (int i = 0; i < 3; i++) c[i] = fill[i];
+                c[3] = 255.0f * ramp(t, 0.42f, 0.85f);
+            }
+        };
+        auto as_is = [](float*) {};
+        float pen = float(x);
         for (uint32_t cp : codes(text)) {
+            if (style_code(cp)) continue;
             if (button(cp)) {
                 const game_glyph::Glyph* icon = icons ? icons->find(cp) : nullptr;
-                if (icon && icon != &icons->glyphs.find(cp)->second) icon = nullptr;  // not the stand-in
+                if (icon && icons->glyphs.find(cp) == icons->glyphs.end()) icon = nullptr;  // not the stand-in
                 const game_glyph::Bitmap b = button_picture(icon, cp == kButtonA ? 0 : 1, look, h);
-                blit(img, b, pen, y, h, h);
+                blit(img, b, pen, y, h, h, as_is);
                 pen += h;
                 continue;
             }
-            only_buttons = false;
-            const game_glyph::Glyph* g = glyph(cp, main, fallback);
+            const game_glyph::Glyph* g = glyph(cp, first, second);
             if (!g) continue;
-            const bool own = g->bitmap.height == h;
-            if (own) put(img, g->bitmap, pen + std::max(0, g->left), y);
-            else blit(img, g->bitmap, pen + std::max(0, g->left), y, std::max(1, g->bitmap.width * h / std::max(1, g->bitmap.height)), h);
-            pen += std::max(g->advance, g->left + g->bitmap.width);
+            const float k = float(h) / float(std::max(1, g->bitmap.height));  // its font's cell to the line
+            if (g->bitmap.width > 0)
+                blit(img, g->bitmap, pen + std::max(0, g->left) * k, y, std::max(1, int(std::lround(g->bitmap.width * k))), h, letters);
+            pen += std::max(g->advance, g->left + g->bitmap.width) * k;
         }
-        return only_buttons;
     }
 
     std::map<std::string, Cell> cells_;
@@ -286,8 +330,15 @@ private:
     uint64_t fonts_ = 0, generation_ = 0;
 };
 
-// The lines a draw list needs from the atlas
+// The lines a draw list needs from the atlas (line_key)
 inline std::vector<std::string> lines_of(const std::vector<Command>& cmds) {
+    std::vector<std::string> out;
+    for (const Command& c : cmds)
+        if (c.kind == Command::Text && !c.text.empty()) out.push_back(line_key(c.text, c.rgba));
+    return out;
+}
+// The text of the lines (for the glyphs the page needs)
+inline std::vector<std::string> texts_of(const std::vector<Command>& cmds) {
     std::vector<std::string> out;
     for (const Command& c : cmds)
         if (c.kind == Command::Text && !c.text.empty()) out.push_back(c.text);
@@ -306,7 +357,7 @@ inline std::vector<Command> to_pictures(const std::vector<Command>& in, const At
             out.push_back(c);
             continue;
         }
-        const Atlas::Cell* cell = atlas ? atlas->cell(c.text) : nullptr;
+        const Atlas::Cell* cell = atlas ? atlas->cell(line_key(c.text, c.rgba)) : nullptr;
         if (!cell) {
             if (c.text == kGlyphA || c.text == kGlyphB) {  // no font: the button as a dark disc with its letter
                 const float r = c.size * 0.5f;
@@ -320,7 +371,9 @@ inline std::vector<Command> to_pictures(const std::vector<Command>& in, const At
                 out.push_back(letter);
                 continue;
             }
-            out.push_back(c);
+            Command t = c;
+            t.text = plain_text(c.text);
+            out.push_back(t);
             continue;
         }
         Command p;
@@ -328,7 +381,7 @@ inline std::vector<Command> to_pictures(const std::vector<Command>& in, const At
         const float h = c.size * font_scale, k = h / float(cell->height);
         p.x = c.x, p.y = c.y - (h - c.size) * 0.5f, p.w = float(cell->width) * k, p.h = h;
         p.u0 = cell->u0, p.v0 = cell->v0, p.u1 = cell->u1, p.v1 = cell->v1;
-        p.rgba = cell->picture ? (0xFFFFFF00u | (c.rgba & 0xFF)) : c.rgba;
+        p.rgba = 0xFFFFFF00u | (c.rgba & 0xFF);  // the colours are in the atlas; the alpha fades it
         p.anchor = c.anchor, p.blend = c.blend;
         out.push_back(p);
     }

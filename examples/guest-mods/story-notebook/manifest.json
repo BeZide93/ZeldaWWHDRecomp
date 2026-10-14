@@ -26,7 +26,10 @@
         "text": "Dear Link,\na storm took my lantern and my mast,\nso I can't tell my tales on Windfall\nthis year. I enclose a notebook to keep\nthis tale in, and a sealed letter for my\nold friend who keeps Windfall's light.",
         "encloses": [
           "notebook",
-          "letter:friend"
+          {
+            "id": "letter:friend",
+            "description": "A sealed letter from the storyteller for his old friend who keeps Windfall's light."
+          }
         ]
       },
       "reward": {

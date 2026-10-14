@@ -37,12 +37,15 @@ struct Art {
     Bitmap plate_rim;      // the button plate's rim (luminance + alpha)
     Bitmap plate;          // the button plate with its cloth (luminance + alpha)
     Bitmap gloss;          // the plate's gloss (RGBA)
+    Bitmap info_top, info_bottom;  // the item menu's Info box (W_TextBase_00): its torn top and bottom edges
+    Bitmap swirl;          // its wind swirls (P_Deco_00)
     bool window() const {
         for (const Bitmap& b : edge)
             if (b.width <= 0) return false;
         return fibre.width > 0;
     }
     bool plates() const { return plate_rim.width > 0 && plate.width > 0; }
+    bool info() const { return info_top.width > 0 && info_bottom.width > 0 && swirl.width > 0; }
 };
 
 // The part of a bitmap inside (x0, y0)-(x1, y1)
@@ -55,13 +58,13 @@ inline Bitmap crop(const Bitmap& b, int x0, int y0, int x1, int y1) {
         std::copy_n(&b.rgba[(size_t(y0 + y) * b.width + x0) * 4], size_t(out.width) * 4, &out.rgba[size_t(y) * out.width * 4]);
     return out;
 }
-// The plate pictures without their empty margins (the rim's visible extent), so a plate fills its box
+// The plate pictures without their margins (the plate body's extent), so a plate fills its box
 inline void trim_plates(Art& art) {
     if (!art.plates() || art.plate.width != art.plate_rim.width || art.plate.height != art.plate_rim.height) return;
     int x0 = art.plate_rim.width, y0 = art.plate_rim.height, x1 = 0, y1 = 0;
-    for (int y = 0; y < art.plate_rim.height; y++)
-        for (int x = 0; x < art.plate_rim.width; x++)
-            if (art.plate_rim.rgba[(size_t(y) * art.plate_rim.width + x) * 4 + 3] > 24)
+    for (int y = 0; y < art.plate.height; y++)  // the plate's own body (the rim's soft shadow reaches further)
+        for (int x = 0; x < art.plate.width; x++)
+            if (art.plate.rgba[(size_t(y) * art.plate.width + x) * 4 + 3] > 128)
                 x0 = std::min(x0, x), y0 = std::min(y0, y), x1 = std::max(x1, x + 1), y1 = std::max(y1, y + 1);
     if (x1 - x0 < 16 || y1 - y0 < 8) return;
     art.plate_rim = crop(art.plate_rim, x0, y0, x1, y1);
@@ -71,7 +74,8 @@ inline void trim_plates(Art& art) {
 
 // colours of the notebook's window (the mini window's greens)
 inline constexpr uint32_t kWindowPaper = 0xB4DC8CFF, kPanelPaper = 0xE8F6C6FF, kPlateDark = 0x2F7A16FF, kPlateLight = 0xB8EC8EFF,
-                          kPlateOnDark = 0x3E9420FF, kPlateOnLight = 0xDAFFAEFF, kTabDark = 0x5E8F45FF, kTabLight = 0xCBE6AEFF,
+                          kPlateOnDark = 0x6DB443FF, kPlateOnLight = 0xEAFFCCFF, kTabDark = 0x5E8F45FF, kTabLight = 0xCBE6AEFF,
+                          kInfoPaper = 0xEDEBBCFF, kInfoEdge = 0xA3B2A3FF, kInfoSwirl = 0xE0DDA6FF,
                           kRimTop = 0xF4FFE4FF, kRimBottom = 0xCFE6B4FF, kCursorInk = 0x5A3A1CFF, kCursorFill = 0xFFFFFFFF;
 
 inline uint8_t ch(uint32_t rgba, int i) { return uint8_t(rgba >> (24 - 8 * i)); }
@@ -215,10 +219,48 @@ inline std::shared_ptr<guestmods::hud::Image> plate(const Art& art, int w, int h
     return out.image();
 }
 
+// The item menu's Info box (what A shows for an item on the TV) at w x h: the cream paper with the
+// game's wind swirls, its torn top and bottom edges
+inline std::shared_ptr<guestmods::hud::Image> info_box(const Art& art, int w, int h) {
+    w = std::clamp(w, 16, 2048), h = std::clamp(h, 16, 2048);
+    Canvas out(w, h);
+    const int edge = std::max(4, h / 40);
+    for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++) {
+            const bool rim = x < edge || x >= w - edge || y < edge || y >= h - edge;
+            float c[4] = {float(ch(rim ? kInfoEdge : kInfoPaper, 0)), float(ch(rim ? kInfoEdge : kInfoPaper, 1)),
+                          float(ch(rim ? kInfoEdge : kInfoPaper, 2)), 255.0f};
+            out.over(x, y, c);
+            if (rim) continue;
+            float sw[4];  // the swirls, at the size the game draws them (its 348 x 144 picture over 740 x 260)
+            sample(art.swirl, std::fmod(x * 0.47f, float(art.swirl.width)), std::fmod(y * 0.55f, float(art.swirl.height)), sw);
+            const float a = sw[3] / 255.0f * 0.7f;
+            const float s2[4] = {float(ch(kInfoSwirl, 0)), float(ch(kInfoSwirl, 1)), float(ch(kInfoSwirl, 2)), 255.0f * a};
+            out.over(x, y, s2);
+        }
+    // the torn edges along the top and the bottom
+    auto strip = [&](const Bitmap& b, int y0) {
+        const int sh = std::max(6, h / 16);
+        for (int y = 0; y < sh; y++)
+            for (int x = 0; x < w; x++) {
+                float t[4];
+                sample(b, (x + 0.5f) * b.width / w, (y + 0.5f) * b.height / sh, t);
+                const float l = t[0] / 255.0f;
+                const float c[4] = {ch(kInfoEdge, 0) + (ch(kInfoPaper, 0) - ch(kInfoEdge, 0)) * l, ch(kInfoEdge, 1) + (ch(kInfoPaper, 1) - ch(kInfoEdge, 1)) * l,
+                                    ch(kInfoEdge, 2) + (ch(kInfoPaper, 2) - ch(kInfoEdge, 2)) * l, t[3]};
+                out.over(x, y0 + y, c);
+            }
+    };
+    strip(art.info_top, 0);
+    strip(art.info_bottom, h - std::max(6, h / 16));
+    return out.image();
+}
+
 // The box a marker names, as the game's art (null when there is no art for it)
 inline std::shared_ptr<guestmods::hud::Image> compose(const Art& art, const std::string& name, int w, int h) {
     if (name == "nb:window" && art.window()) return torn_paper(art, w, h, kWindowPaper, 46);
     if (name == "nb:panel" && art.window()) return torn_paper(art, w, h, kPanelPaper, 34);
+    if (name == "nb:info" && art.info()) return info_box(art, w, h);
     if (name == "nb:plate" && art.plates()) return plate(art, w, h, kPlateDark, kPlateLight);
     if (name == "nb:plate-on" && art.plates()) return plate(art, w, h, kPlateOnDark, kPlateOnLight);
     if (name == "nb:tab" && art.plates()) return plate(art, w, h, kTabDark, kTabLight);
@@ -252,6 +294,9 @@ inline void shapes(const Command& m, std::vector<Command>& out) {
         rect(x, y, w, h, 0xF4FFE4FF);
         rect(x + 5, y + 5, w - 10, h - 10, kWindowPaper);
         rect(x + 5, y + 5, w - 10, h - 10, 0x7FB55AFF, true, 2);
+    } else if (n == "nb:info") {
+        rect(x, y, w, h, kInfoEdge);
+        rect(x + 5, y + 5, w - 10, h - 10, kInfoPaper);
     } else if (n == "nb:panel") {
         rect(x, y, w, h, kPanelPaper);
         rect(x, y, w, h, 0xFFFFFFFF, true, 3);
@@ -290,7 +335,7 @@ inline std::vector<Command> resolve(const std::vector<Command>& in, const Art* a
             continue;
         }
         const std::string n = box_name(c.text);
-        const bool has = art && n != "nb:cursor" && (((n == "nb:window" || n == "nb:panel") && art->window()) ||
+        const bool has = art && n != "nb:cursor" && (((n == "nb:window" || n == "nb:panel") && art->window()) || (n == "nb:info" && art->info()) ||
                                                      ((n.rfind("nb:plate", 0) == 0 || n.rfind("nb:tab", 0) == 0) && art->plates()));
         if (has) {
             Command p = c;

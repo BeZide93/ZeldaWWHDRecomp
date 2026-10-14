@@ -7,6 +7,7 @@
 #include "mods/story_notebook_page.h"
 #include "mods/story_notebook_font.h"
 #include "mods/story_notebook_style.h"
+#include "mods/story_notebook_caption.h"
 #include "mods/story_notebook_bag.h"
 #include "mods/story_takeover.h"
 #include "mods/story_sail.h"
@@ -215,7 +216,7 @@ void test_page() {
     // detail drawing: the button says what A does now
     auto cmds = page.draw(rs);
     bool stop = false;
-    for (const Command& c : cmds) stop |= c.kind == Command::Text && c.text == "Stop showing on chart";
+    for (const Command& c : cmds) stop |= c.kind == Command::Text && font::plain_text(c.text) == "Stop showing on chart";
     assert(stop);
     // B: back to the list, B again: the page closes
     page.input(press(kPadB), rs);
@@ -244,7 +245,7 @@ void test_page() {
     cmds = page.draw(rs);
     bool title = false;
     for (const Command& c : cmds) {
-        title |= c.kind == Command::Text && c.text == "Story Notebook";
+        title |= c.kind == Command::Text && font::plain_text(c.text) == "Story Notebook";
         assert(std::isfinite(c.x) && std::isfinite(c.y));
     }
     assert(title);
@@ -256,7 +257,7 @@ void test_page() {
     assert(page.tab() == 1 && page.shown(rs).size() == 1 && page.shown(rs)[0].quest == &qs[0]);
     assert(page.selected_key() == qs[0].key);
     bool archive = false;
-    for (const Command& c : page.draw(rs)) archive |= c.text == "Archive (1)";
+    for (const Command& c : page.draw(rs)) archive |= font::plain_text(c.text) == "Archive (1)";
     assert(archive);
     page.input(press(kPadA), rs);
     page.input(press(0), rs);
@@ -685,35 +686,47 @@ void test_game_font() {
     std::vector<uint32_t> want;
     main.wanted("abz", want);
     assert((want == std::vector<uint32_t>{'z'}));
-    // the atlas: each distinct line once, at the font's height; a button as wide as the line is tall
+    // the atlas: each distinct line (and colour) once, at the font's height; a button as wide as the line is tall
     font::Atlas atlas;
-    const std::vector<std::string> lines = {"abc", "a\xC3\xA9", "abc", font::kGlyphA};
+    const uint32_t ink = 0x003800FF;
+    const std::vector<std::string> lines = {font::line_key("abc", ink), font::line_key("a\xC3\xA9", ink), font::line_key("abc", ink),
+                                            font::line_key(font::kGlyphA, 0xFFFFFFFF), font::line_key(font::kBold + "abc", ink)};
     atlas.build(lines, main, &fallback, nullptr, {}, 1);
-    assert(atlas.holds(lines, {}, 1) && !atlas.holds(lines, {}, 2) && !atlas.holds({"new"}, {}, 1));
-    const font::Atlas::Cell* abc = atlas.cell("abc");
-    assert(abc && abc->width == 30 && abc->height == 20 && !abc->picture);
-    assert(atlas.cell("a\xC3\xA9")->width == 22);  // é from the fallback font
-    const font::Atlas::Cell* button = atlas.cell(font::kGlyphA);
-    assert(button && button->width == 20 && button->picture);  // no icon font: the port's own disc
+    assert(atlas.holds(lines, {}, 1) && !atlas.holds(lines, {}, 2) && !atlas.holds({font::line_key("new", ink)}, {}, 1));
+    assert(!atlas.holds({font::line_key("abc", 0xFFFFFFFF)}, {}, 1));  // another colour: another line
+    const font::Atlas::Cell* abc = atlas.cell(font::line_key("abc", ink));
+    assert(abc && abc->width == 30 && abc->height == 20);
+    assert(atlas.cell(font::line_key("a\xC3\xA9", ink))->width == 22);  // é from the fallback font
+    assert(atlas.cell(font::line_key(font::kBold + "abc", ink))->width == 30);  // the style code takes no room
+    const font::Atlas::Cell* button = atlas.cell(font::line_key(font::kGlyphA, 0xFFFFFFFF));
+    assert(button && button->width == 20);  // no icon font: the port's own disc
     auto img = atlas.image();
     assert(img && img->width == font::Atlas::kWidth && img->height >= 20);
-    // a pixel of 'a' in the atlas is white coverage
-    const size_t at = (size_t(abc->v0 * img->height + 5) * img->width + size_t(abc->u0 * img->width) + 2) * 4;
-    assert(img->rgba[at + 3] == 255);
-    // Text commands become pictures of their lines, scaled to the text size and tinted
+    // a pixel of 'a' in the atlas: the line's colour, opaque
+    const size_t at = (size_t(abc->v0 * img->height + 5) * img->width + size_t(abc->u0 * img->width) + 3) * 4;
+    assert(img->rgba[at] == 0x00 && img->rgba[at + 1] == 0x38 && img->rgba[at + 3] == 255);
+    // half the size: the line is half as tall and wide
+    font::Atlas half;
+    half.build({font::line_key("abc", ink)}, main, nullptr, nullptr, {}, 1, 0.5f);
+    assert(half.cell(font::line_key("abc", ink))->height == 10 && half.cell(font::line_key("abc", ink))->width == 15);
+    // Text commands become pictures of their lines, scaled to the text size, faded by their alpha
     Command t;
-    t.kind = Command::Text, t.x = 100, t.y = 50, t.size = 40, t.rgba = 0x003800FF, t.text = "abc";
+    t.kind = Command::Text, t.x = 100, t.y = 50, t.size = 40, t.rgba = 0x00380080, t.text = "abc";
     Command r;
     r.kind = Command::Rect;
     Command b = t;
     b.text = font::kGlyphB;  // not in the atlas: drawn as a disc with its letter
+    atlas.build({font::line_key("abc", t.rgba)}, main, nullptr, nullptr, {}, 1);
+    abc = atlas.cell(font::line_key("abc", t.rgba));
     auto out = font::to_pictures({r, t, b}, &atlas, 1.0f);
     assert(out.size() == 4 && out[0].kind == Command::Rect && out[1].kind == Command::Picture);
-    assert(out[1].h == 40 && out[1].w == 60 && out[1].rgba == 0x003800FF && out[1].u0 == abc->u0);
+    assert(out[1].h == 40 && out[1].w == 60 && out[1].rgba == 0xFFFFFF80 && out[1].u0 == abc->u0);
     assert(out[2].kind == Command::Circle && out[3].kind == Command::Text && out[3].text == "B");
-    // without the atlas, text stays text (the overlay font)
-    out = font::to_pictures({t}, nullptr);
-    assert(out.size() == 1 && out[0].kind == Command::Text);
+    // without the atlas, text stays text (the overlay font), without its style code
+    Command boldtext = t;
+    boldtext.text = font::kBold + "abc";
+    out = font::to_pictures({boldtext}, nullptr);
+    assert(out.size() == 1 && out[0].kind == Command::Text && out[0].text == "abc");
     // the button pictures follow the prompt setting: the PlayStation look is the port's shapes
     game_glyph::Glyph icon;
     icon.colour = true, icon.bitmap.width = icon.bitmap.height = 4, icon.bitmap.rgba.assign(64, 255);
@@ -798,6 +811,44 @@ void test_style() {
     assert(shapes.size() == 16);
 }
 
+void test_caption() {
+    Caption cap;
+    assert(cap.draw().empty());
+    cap.show("Sealed Letter", "A sealed letter from the storyteller for his old friend who keeps Windfall's light.");
+    // the A or touch that opened it does nothing; then B, A or a tap closes it with the menu's sound
+    PadInput held;
+    held.buttons = kPadA;
+    assert(cap.input(held) == Sound::None && cap.open());
+    bool info = false, title = false, body = false;
+    for (const Command& c : cap.draw()) {
+        info |= c.text.rfind("nb:info@740x276", 0) == 0;
+        title |= font::plain_text(c.text) == "Sealed Letter" && font::has_style(c.text, font::kBold);
+        body |= c.kind == Command::Text && font::has_style(c.text, font::kMessage) && font::plain_text(c.text).rfind("A sealed letter", 0) == 0;
+    }
+    assert(info && title && body);
+    assert(cap.input(press(0)) == Sound::None);
+    assert(cap.input(press(kPadB)) == Sound::Close && !cap.open());
+    cap.show("x", "y");
+    cap.input(press(0));
+    PadInput tap;
+    tap.touch = true;
+    assert(cap.input(tap) == Sound::Close && !cap.open());
+    // the info box: the game's art when it is read, else a plain box
+    style::Art art = synthetic_art();
+    Command m;
+    m.kind = Command::Picture, m.text = "nb:info@740x276", m.w = 740, m.h = 276, m.rgba = 0xFFFFFFFF;
+    assert(style::resolve({m}, &art)[0].kind == Command::Rect);  // no Info art in the synthetic set: plain
+    auto blank = [](int w, int h) {
+        game_glyph::Bitmap b;
+        b.width = w, b.height = h, b.rgba.assign(size_t(w) * h * 4, 255);
+        return b;
+    };
+    art.info_top = blank(361, 16), art.info_bottom = blank(360, 16), art.swirl = blank(348, 144);
+    assert(style::resolve({m}, &art)[0].text == "art:info@740x276");
+    auto box = style::compose(art, "nb:info", 370, 138);
+    assert(box && box->width == 370 && box->rgba[(69 * 370 + 185) * 4 + 3] == 255);
+}
+
 void test_page_feel() {
     uint8_t raw[story_mail::kBookSize] = {};
     Book b(raw);
@@ -844,7 +895,7 @@ void test_page_feel() {
     // the page turned back: the content slides in from the left and fades in
     page.tick(0.02f);
     bool sliding = false;
-    for (const Command& c : page.draw(rs)) sliding |= c.kind == Command::Text && c.text == qs[0].title && (c.rgba & 0xFF) < 255;
+    for (const Command& c : page.draw(rs)) sliding |= c.kind == Command::Text && font::plain_text(c.text) == qs[0].title && (c.rgba & 0xFF) < 255;
     assert(sliding);
     page.tick(0.5f);
     // the cursor is around the selected row; it breathes
@@ -1160,6 +1211,24 @@ void test_takeover_hooks() {
     assert(call(0x02632D94, 0x34, 0, 0x02692548) == 0xFF);
     assert(call(0x0262F880, 0, 0xA1) == 0x25);
     assert(call(0x0268F420, 0, 0x32) == 0xFF);  // it can't go on X/Y/R
+    // a touch on the sealed letter (or A on it) shows its caption, never the notebook's page
+    {
+        constexpr uint32_t kLetterChild = kArena + 0x5000;
+        st32(kLetterChild + 0xEC, 0xA1);
+        call(0x02630A64, kLetterChild);
+        assert(page_open() && caption_open());
+        input::PadState held;
+        held.touch = true;
+        pad(held);  // the touch that opened it does nothing
+        assert(caption_open());
+        input::PadState none;
+        pad(none);
+        input::PadState back;
+        back.buttons = 0x4000;  // B
+        pad(back);
+        assert(!page_open() && !caption_open());
+        pad(none);
+    }
     st8(kNpc + 0x905, 5);  // the harbour lady, at the harbour (stage "sea", room 11)
     st8(kNpc + 0x326, 11);
     memcpy(mem::ptr(kPlayObj + 0x5134), "sea", 4);
@@ -1347,6 +1416,20 @@ void test_manifest() {
     assert(refused(R"("journal": "on_enable")", R"("journal": "sometimes")"));
     std::vector<ManifestQuest> none;
     assert(parse_quests(mods::json::parse(R"({"format_version": 1})"), none, why) && none.empty());
+    // the sealed letter's caption: the defaults, or the enclosure's own name and description
+    assert(enclosure_name(q) == "Sealed Letter" && enclosure_description(q).find("A sealed letter from ") == 0);
+    {
+        std::string text = kLanternManifest;
+        const size_t at = text.find(R"("letter:friend")");
+        assert(at != std::string::npos);
+        text.replace(at, std::string(R"("letter:friend")").size(),
+                     R"({"id": "letter:friend", "name": "Letter for the keeper", "description": "A sealed letter for his old friend."})");
+        std::vector<ManifestQuest> out;
+        assert(parse_quests(mods::json::parse(text), out, why) && out[0].letter_encloses_letter);
+        assert(enclosure_name(out[0]) == "Letter for the keeper" && enclosure_description(out[0]) == "A sealed letter for his old friend.");
+        assert(refused(R"("letter:friend")", R"({"id": "letter:friend", "description": 7})"));
+        assert(refused(R"("letter:friend")", R"({"id": "letter:friend", "description": ")" + std::string(201, 'x') + R"("})"));
+    }
 
     // declared: in the notebook at once (the secret one not), its letter sent, started when read
     Book b = story_store::book();
@@ -1668,6 +1751,7 @@ int main() {
     test_game_font();
     test_style();
     test_page_feel();
+    test_caption();
     test_npc_catalogue();
     test_takeover_rules();
     test_takeover_hooks();
