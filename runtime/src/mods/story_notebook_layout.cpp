@@ -92,6 +92,7 @@ const char* test_portrait() {
 // slot texture once per quest (story_lyt_screen::set_texture_pixels); false if it can't be shown
 constexpr uint32_t kPortraitSize = 64;
 uint16_t g_slot_key[8] = {};
+}  // namespace
 bool portrait_into(int slot, uint16_t key) {
     if (slot < 0 || slot >= 8) return false;
     if (g_slot_key[slot] == key) return true;
@@ -117,6 +118,7 @@ bool portrait_into(int slot, uint16_t key) {
     g_slot_key[slot] = key;
     return true;
 }
+namespace {
 
 void apply(Cpu* c, const View& v) {
     for (int i = 0; i < 2; i++) {

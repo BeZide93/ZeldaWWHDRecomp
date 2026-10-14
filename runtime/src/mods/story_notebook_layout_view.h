@@ -33,6 +33,10 @@ struct View {
     uint64_t serial = 0;  // changes when anything above changes
 };
 
+// a quest's portrait written into the layout's portrait slot (0..4 the list rows, 5 the detail page);
+// false if it can't be shown (no picture, or the layout isn't built)
+bool portrait_into(int slot, uint16_t key);
+
 // the page as the layout shows it (serial left 0)
 View view_of(const story_notebook::Page& page, const std::vector<story_notebook::Row>& all);
 
