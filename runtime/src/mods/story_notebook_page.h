@@ -181,6 +181,7 @@ struct Scene {
     bool framed = false;      // the painted frame and row banners are loaded (story_notebook_art.h)
     bool pieces = false;      // the detail page's painted pieces (sheet, bands, chart card, plates)
     bool header = false;      // the header band (optional)
+    bool close_in_detail = false;  // the detail page shows the close button (the page drawn as a game layout)
     bool link_known = false;  // Link's place on the sea chart
     float link_x = 0, link_z = 0;
 };
@@ -469,7 +470,8 @@ private:
     }
     static bool inside(float x, float y, float rx, float ry, float rw, float rh) { return x >= rx && x < rx + rw && y >= ry && y < ry + rh; }
     bool hit_close(float x, float y) const {
-        if (mode_ == Mode::Detail && scene_.framed && scene_.pieces) return false;  // the slot is under the header band there
+        // the HUD's detail page has the slot under its header band; the layout's shows the close button
+        if (mode_ == Mode::Detail && scene_.framed && scene_.pieces && !scene_.close_in_detail) return false;
         const Geo g = geo();
         return (x - g.close_x) * (x - g.close_x) + (y - g.close_y) * (y - g.close_y) <= (g.close_r + 8) * (g.close_r + 8);
     }

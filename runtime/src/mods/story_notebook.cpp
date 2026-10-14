@@ -1250,6 +1250,7 @@ void pad(input::PadState& p, Cpu* c) {
         scene.framed = g_look.art.framed();
         scene.pieces = scene.framed && pieces_ready();
         scene.header = g_look.art.header.width > 0 && g_header;
+        scene.close_in_detail = story_notebook_layout::drawing();
         Cpu probe = *c_or_zero(c);
         const uint32_t play_object = c && g_call ? g_call(&probe, kPlay, {}) : 0;  // the game only (not in tests)
         const uint32_t link = play_object ? ld32(kLinkActor) : 0;
