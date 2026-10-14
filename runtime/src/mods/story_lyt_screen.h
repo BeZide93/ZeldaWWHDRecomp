@@ -5,8 +5,9 @@
 //           projection and matrix): hdLayoutResMgr_c::cache(name), NoControlPart_l, attachArchives,
 //           hdPartsLayout_c + vLoad, then the client's animations bound (bindGroup); then the client's
 //           built() (text pane capacities and first texts, story_lyt_text.h)
-//   drawn   every time the item menu's screens are drawn (hdIngameUi_c::drawPrimaryScreens, on the screen
-//           the item menu is on) and the item screen was among them: after all of them (sub window, menu
+//   drawn   every time the item menu's screens are drawn and the item screen was among them
+//           (hdIngameUi_c::drawPrimaryScreens on the GamePad; drawHudScreens on the TV, where the item menu
+//           is with the Pro Controller; the game's menu cursor is drawn by a later pass there, over ours): after all of them (sub window, menu
 //           buttons, cursor, messages), with the item screen's viewport; the client's frame() decides (and
 //           sets panes / plays animations), then hdParts_c::calcLayout + draw of our parts
 //   freed   when the game frees its screens (hdIngameUi_c::finalizeScreens): our parts' finalize + delete,
@@ -47,7 +48,7 @@ struct Client {
 void set_client(Client client);  // before install()
 bool has_client();
 void set_game_calls(void (*original)(Cpu*, uint32_t), uint32_t (*call)(Cpu*, uint32_t, std::initializer_list<uint32_t>));
-// The hooks (only with a client, and only when none of the four game functions is replaced already:
+// The hooks (only with a client, and only when none of the five game functions is replaced already:
 // replaced_by(addr) names who replaces it, "" if nobody).
 void install(const std::function<std::string(uint32_t)>& replaced_by, const std::function<void(uint32_t, void (*)(Cpu*))>& replace);
 void state_loaded();

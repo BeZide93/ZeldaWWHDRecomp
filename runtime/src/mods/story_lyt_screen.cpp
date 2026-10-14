@@ -11,13 +11,15 @@
 #include "ppc.h"
 #include "runtime.h"
 #include "story_lyt_text.h"
+#include "../input.h"
 
 namespace story_lyt_screen {
 namespace {
 const uint32_t kLoadItemScreen = GC(0x02693650);   // hdIngameLoadItemScreen(screen, projection, matrix, flags)
 const uint32_t kPartsDraw = GC(0x026F8B54);        // hdParts_c::draw(this, viewport)
 const uint32_t kFinalizeScreens = GC(0x02715374);  // hdIngameUi_c::finalizeScreens(this)
-const uint32_t kDrawPrimary = GC(0x02716AD0);      // hdIngameUi_c::drawPrimaryScreens(this, info): the item menu's screens
+const uint32_t kDrawPrimary = GC(0x02716AD0);      // hdIngameUi_c::drawPrimaryScreens(this, info): the item menu on the GamePad
+const uint32_t kDrawHud = GC(0x02715CA0);          // hdIngameUi_c::drawHudScreens(this, info): the TV (the item menu there with the Pro Controller)
 const uint32_t kResMgrCache = GC(0x026FB694);      // hdLayoutResMgr_c::cache(this, name, heap)
 const uint32_t kNoControlConstruct = GC(0x02700ADC);  // NoControlPart_l::construct(0)
 const uint32_t kAttachArchives = GC(0x026F90D8);   // hdParts_c::attachArchives(this, names, count)
@@ -123,10 +125,20 @@ void build(Cpu* c, uint32_t projection, uint32_t matrix) {
     if (g_client.built) g_client.built(c, ld32(g_layout + kLayoutLyt));
 }
 
+// Our calls into the game must not change what the hooked function's caller sees: the registers are
+// put back as they were (the original's return values included).
+struct Keep {
+    Cpu* c;
+    Cpu saved;
+    explicit Keep(Cpu* cpu) : c(cpu), saved(*cpu) {}
+    ~Keep() { *c = saved; }
+};
+
 namespace hooks {
 void load_item_screen(Cpu* c) {
     const uint32_t projection = c->r[4], matrix = c->r[5];
     g_original(c, kLoadItemScreen);
+    Keep keep(c);
     build(c, projection, matrix);
 }
 
@@ -139,13 +151,12 @@ void parts_draw(Cpu* c) {
     if (scene && self == ld32(scene + kItemScreen)) g_viewport = viewport;
 }
 
-// the item menu's screens (item screen, sub window, menu buttons, cursor, messages): ours on top of them
-void draw_primary(Cpu* c) {
-    g_viewport = 0;
-    g_original(c, kDrawPrimary);
+// after a screen group was drawn: ours on top of it, if the item screen was among it
+void draw_after(Cpu* c) {
     const uint32_t viewport = g_viewport;
     g_viewport = 0;
     if (!g_part || !viewport) return;
+    Keep keep(c);
     if (g_check) {
         g_check = false;
         if (!still_there()) return;
@@ -156,8 +167,30 @@ void draw_primary(Cpu* c) {
     g_call(c, kPartsDraw, {g_part, viewport});
 }
 
+// The item menu on the GamePad: its screens (item screen, sub window, menu buttons, cursor, messages) are
+// drawn by drawPrimaryScreens; ours right after them.
+void draw_primary(Cpu* c) {
+    g_viewport = 0;
+    g_original(c, kDrawPrimary);
+    if (input::pro_controller()) g_viewport = 0;  // the menu is the TV's
+    draw_after(c);
+}
+
+// With the Pro Controller the item menu is on the TV, drawn by drawHudScreens; ours right after it, in the
+// render state that pass set up (a later pass, e.g. drawInputScreens with the menu cursor, draws the layout's
+// pictures wrongly).
+void draw_hud(Cpu* c) {
+    g_viewport = 0;
+    g_original(c, kDrawHud);
+    if (!input::pro_controller()) g_viewport = 0;  // the menu is the GamePad's
+    draw_after(c);
+}
+
 void finalize_screens(Cpu* c) {
-    destroy(c);
+    {
+        Keep keep(c);  // the original still needs its `this` (r3)
+        destroy(c);
+    }
     g_failed = false;
     g_original(c, kFinalizeScreens);
 }
@@ -188,7 +221,7 @@ void set_game_calls(void (*original)(Cpu*, uint32_t), uint32_t (*call)(Cpu*, uin
 void install(const std::function<std::string(uint32_t)>& replaced_by, const std::function<void(uint32_t, void (*)(Cpu*))>& replace) {
     if (!g_has_client || !g_original || !g_call) return;
     // all three or nothing: a layout that is built but never freed (or never drawn) must not happen
-    for (uint32_t fn : {kLoadItemScreen, kPartsDraw, kFinalizeScreens, kDrawPrimary})
+    for (uint32_t fn : {kLoadItemScreen, kPartsDraw, kFinalizeScreens, kDrawPrimary, kDrawHud})
         if (const std::string by = replaced_by(fn); !by.empty()) {
             LOG("[lyt] %s: %08X is replaced by %s: no layout", g_client.layout.c_str(), fn, by.c_str());
             g_has_client = false;
@@ -198,6 +231,7 @@ void install(const std::function<std::string(uint32_t)>& replaced_by, const std:
     replace(kPartsDraw, hooks::parts_draw);
     replace(kFinalizeScreens, hooks::finalize_screens);
     replace(kDrawPrimary, hooks::draw_primary);
+    replace(kDrawHud, hooks::draw_hud);
     LOG("[lyt] %s (%s): from %s", g_client.layout.c_str(), g_client.owner, g_client.archive.c_str());
 }
 
