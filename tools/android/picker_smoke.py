@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 import re
 import shlex
-import subprocess
+import adb_util
 import tempfile
 import time
 import uuid
@@ -34,7 +34,7 @@ def main():
 
     def adb(*command, check=True, data=None):
         if command[0] == "shell": command = ("shell", shlex.join(command[1:]))
-        return subprocess.run(prefix + list(command), check=check, input=data, capture_output=True, timeout=30)
+        return adb_util.run(prefix + list(command), check=check, input=data, capture_output=True, timeout=30)
 
     def shell(*command, **kwargs):
         return adb("shell", *command, **kwargs)

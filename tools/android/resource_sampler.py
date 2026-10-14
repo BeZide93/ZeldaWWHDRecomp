@@ -144,7 +144,7 @@ def main():
     import argparse
     from pathlib import Path
     import shlex
-    import subprocess
+    import adb_util
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--adb", default="adb")
@@ -158,7 +158,7 @@ def main():
     package = "org.wwhdrecomp.wwhd"
 
     def shell(*command):
-        return subprocess.run([args.adb, "-s", args.serial, "shell", shlex.join(command)],
+        return adb_util.run([args.adb, "-s", args.serial, "shell", shlex.join(command)],
                               capture_output=True, check=True, timeout=5).stdout
 
     report = {"device": {key: shell("getprop", prop).decode().strip() for key, prop in

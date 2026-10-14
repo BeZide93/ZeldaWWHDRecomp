@@ -6,6 +6,7 @@ from pathlib import Path
 import re
 import shlex
 import subprocess
+import adb_util
 import time
 
 PACKAGE = "org.wwhdrecomp.wwhd"
@@ -21,7 +22,7 @@ def main():
 
     def adb(*command, data=None, check=True):
         if command[0] == "shell": command = ("shell", shlex.join(command[1:]))
-        return subprocess.run(prefix + list(command), input=data, stdout=subprocess.PIPE,
+        return adb_util.run(prefix + list(command), input=data, stdout=subprocess.PIPE,
                               stderr=subprocess.PIPE, check=check, timeout=30)
 
     def shell(*command):

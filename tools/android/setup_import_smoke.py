@@ -3,7 +3,7 @@
 import argparse
 import json
 from pathlib import Path
-import subprocess
+import adb_util
 import time
 
 
@@ -16,7 +16,7 @@ def main():
     prefix = [args.adb, "-s", args.serial]
 
     def adb(*arguments, check=True):
-        return subprocess.run(prefix + list(arguments), check=check, capture_output=True, text=True, timeout=30)
+        return adb_util.run(prefix + list(arguments), check=check, capture_output=True, text=True, timeout=30)
 
     if adb("shell", "getprop", "ro.kernel.qemu").stdout.strip() != "1":
         raise RuntimeError("This synthetic probe runs only on an emulator")

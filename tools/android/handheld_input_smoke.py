@@ -13,6 +13,7 @@ from pathlib import Path
 import re
 import shlex
 import subprocess
+import adb_util
 import time
 
 PACKAGE = 'org.wwhdrecomp.wwhd'
@@ -30,7 +31,7 @@ def main():
     def adb(*command, check=True, data=None):
         if command[0] == 'shell':
             command = ('shell', shlex.join(command[1:]))
-        return subprocess.run(prefix + list(command), input=data, check=check,
+        return adb_util.run(prefix + list(command), input=data, check=check,
                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30).stdout
 
     if adb('shell', 'getprop', 'ro.kernel.qemu').strip() != b'1':
@@ -97,7 +98,7 @@ def main():
         start()
         command('touchauto')
         until(lambda m: m['touch_buttons'])  # keyboard/D-pad alone is not a physical gamepad
-        process = subprocess.Popen(prefix + ['shell', 'uinput', '-'], stdin=subprocess.PIPE,
+        process = adb_util.open_stream(prefix + ['shell', 'uinput', '-'], stdin=subprocess.PIPE,
                                    stdout=log, stderr=log)
         registration_started = time.monotonic()
         send('register', name='Odin Controller', vid=0x2020, pid=0x0111, bus='usb',

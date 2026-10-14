@@ -5,7 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 import shlex
-import subprocess
+import adb_util
 import time
 
 PACKAGE = "org.wwhdrecomp.wwhd"
@@ -22,7 +22,7 @@ def main():
 
     def adb(*command, check=True):
         if command[0] == "shell": command = ("shell", shlex.join(command[1:]))
-        return subprocess.run(prefix + list(command), capture_output=True, text=True, check=check, timeout=25).stdout.strip()
+        return adb_util.run(prefix + list(command), capture_output=True, text=True, check=check, timeout=25).stdout.strip()
 
     if adb("shell", "getprop", "ro.kernel.qemu") != "1": parser.error("requires an emulator")
     adb("install", "-r", str(args.apk))
