@@ -122,6 +122,24 @@ bool imported() {return false;}
 void set_game_ui(const GameUi*) {}
 const GameUi& game_ui() {static GameUi none;return none;}
 }
+// and so have the item icon archive (item_icons_test), the story layouts and the notebook's page layout (their tests)
+namespace item_icons {
+void set_items(const std::vector<Item>&,const std::filesystem::path&) {}
+}
+namespace story_notebook {
+void set_icon_open(const std::string&) {}
+void set_layout_description(const std::string&,const std::string&) {}
+}
+namespace story_lyt {
+void set_game_calls(void (*)(Cpu*,uint32_t),uint32_t (*)(Cpu*,uint32_t,std::initializer_list<uint32_t>)) {}
+void install(const std::function<void(uint32_t,void (*)(Cpu*))>&) {}
+}
+namespace story_lyt_screen {
+void set_game_calls(void (*)(Cpu*,uint32_t),uint32_t (*)(Cpu*,uint32_t,std::initializer_list<uint32_t>)) {}
+void install(const std::function<std::string(uint32_t)>&,const std::function<void(uint32_t,void (*)(Cpu*))>&) {}
+void state_loaded() {}
+}
+namespace story_notebook_layout { bool configure() {return false;} }
 // and so has the story progress store (story_notebook_test)
 namespace story_store {
 void set_memory(uint32_t) {}
