@@ -552,7 +552,8 @@ bool pieces_ready() {
     return a.sheet.width && a.card.width && a.underline.width && a.uplate.width && a.bands[0].width && a.bands[1].width && a.bands[2].width;
 }
 // The page's painted art (user artwork, story_notebook_art.h): read once from the folder
-// WWHD_NOTEBOOK_ART names (outside the repository): frame.png, banner.png (the list) and sheet.png,
+// WWHD_NOTEBOOK_ART names (outside the repository): frame.png, banner.png (the list), frame_notabs.png
+// (optional: the detail page's frame) and sheet.png,
 // card.png, header.png, underline.png, band_cream.png, band_blue.png, band_green.png, plate.png
 // (the detail page). WWHD_NOTEBOOK_HEADER=0 leaves the header band out.
 bool g_header = true;
@@ -591,7 +592,12 @@ void load_user_art() {
     read("band_blue.png", a.bands[1], 120);
     read("band_green.png", a.bands[2], 120);
     read("plate.png", a.uplate, 140);
-    a.detail_frame = art::detail_frame(a.frame);
+    // the detail page's frame: the frame without its tab plates and close slot when the art has it
+    // (frame_notabs.png, the same picture painted without them), else the frame with those painted over
+    // by a stretched strip of its green (art::detail_frame, a visible patch)
+    game_glyph::Bitmap notabs;
+    read("frame_notabs.png", notabs, 1044, false);
+    a.detail_frame = notabs.width ? std::move(notabs) : art::detail_frame(a.frame);
     LOG("[notebook] painted art from %s: frame %s, banner %s, detail pieces %s, header band %s", dir, a.frame.width ? "yes" : "no",
         a.banner.width ? "yes" : "no", pieces_ready() ? "yes" : "no", a.header.width && g_header ? "on" : "off");
 }

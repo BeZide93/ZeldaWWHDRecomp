@@ -181,21 +181,85 @@ def clean_edges(im, min_alpha=96, crop=True):
     return im.crop((x0, y0, x1, y1)) if crop else im
 
 
+def painted_piece(old, box):
+    """A piece painted on the old frame (its tab plates, the close button's slot): the shape its dark
+    outline encloses inside `box` (frame picture pixels), outline included; (RGBA picture, its box)."""
+    import numpy as np
+    from PIL import ImageFilter
+    x0, y0, x1, y1 = box
+    o = np.asarray(old.crop(box).convert("RGBA")).astype(int)
+    r, g, b = o[..., 0], o[..., 1], o[..., 2]
+    outline = (np.maximum(np.maximum(r, g), b) < 90) & (g >= r)  # the plates' dark green outline
+    m = Image.fromarray(outline.astype(np.uint8) * 255, "L").filter(ImageFilter.MaxFilter(3))
+    # what the outside (flood-filled from the box's corner) doesn't reach is the piece
+    inv = Image.fromarray(255 - np.asarray(m), "L").copy()  # a writable copy for floodfill
+    ImageDraw.floodfill(inv, (0, 0), 128)
+    inside = np.asarray(inv) != 128
+    # only the part around the box's centre (strays of a neighbour's outline go)
+    part = Image.fromarray(inside.astype(np.uint8) * 255, "L").copy()
+    ImageDraw.floodfill(part, (part.width // 2, part.height // 2), 128)
+    inside = np.asarray(part) == 128
+    mask = np.asarray(Image.fromarray(inside.astype(np.uint8) * 255, "L").filter(ImageFilter.GaussianBlur(0.6)))
+    ys, xs = np.nonzero(mask > 8)
+    bx0, by0, bx1, by1 = xs.min(), ys.min(), xs.max() + 1, ys.max() + 1
+    rgba = o.astype(np.uint8)
+    rgba[..., 3] = (mask.astype(int) * o[..., 3] // 255).astype(np.uint8)
+    piece = Image.fromarray(rgba[by0:by1, bx0:bx1], "RGBA")
+    return piece, (x0 + bx0, y0 + by0, x0 + bx1, y0 + by1)
+
+
+def painted_plates(frame):
+    """The bottom Close / Open plates as the frame picture paints them: the boxes of their dark green
+    outlines (rows / columns mostly outline) in the bottom left and right; R in the picture's shares."""
+    import numpy as np
+    o = np.asarray(frame.convert("RGBA")).astype(int)
+    h, w = o.shape[:2]
+    found = []
+    for x0, x1 in ((0.03, 0.36), (0.62, 0.98)):
+        X0, X1, Y0, Y1 = int(x0 * w), int(x1 * w), int(0.80 * h), int(0.98 * h)
+        c = o[Y0:Y1, X0:X1]
+        r, g, b, a = c[..., 0], c[..., 1], c[..., 2], c[..., 3]
+        m = (np.maximum(np.maximum(r, g), b) < 90) & (g >= r) & (a > 200)
+        rows = [y for y in range(m.shape[0]) if m[y].sum() > m.shape[1] * 0.4]
+        cols = [x for x in range(m.shape[1]) if m[:, x].sum() > m.shape[0] * 0.3]
+        if not rows or not cols:
+            return None
+        found.append(R(X0 + cols[0], Y0 + rows[0], X0 + cols[-1] + 1, Y0 + rows[-1] + 1, w, h))
+    return found
+
+
 def prepare_art(art, out):
-    frame = clean_edges(Image.open(os.path.join(art, "frame.png")), crop=False)
+    """The frame (frame_notabs.png when the art has it: the frame without its tab plates and close button,
+    which then become pieces of their own, cut out of frame.png), the row banner."""
+    old = clean_edges(Image.open(os.path.join(art, "frame.png")), crop=False)
+    pieces = {}
+    notabs = os.path.join(art, "frame_notabs.png")
+    user_buttons = all(os.path.exists(os.path.join(art, n + ".png")) for n in ("tab_plate_a", "tab_plate_b", "close_round"))
+    if os.path.exists(notabs):
+        frame = Image.open(notabs).convert("RGBA")
+        assert frame.size == old.size, "frame_notabs.png must match frame.png"
+        for name, r, margin in [] if user_buttons else (("tab0", FR_TAB0, 8), ("tab1", FR_TAB1, 8), ("close", FR_SLOT, 4)):
+            box = (round(r.x0 * old.width) - margin, round(r.y0 * old.height) - margin,
+                   round(r.x1 * old.width) + margin, round(r.y1 * old.height) + margin)
+            piece, at = painted_piece(old, box)
+            piece.save(os.path.join(out, name + ".png"))
+            pieces[name] = at
+    else:
+        frame = old
     frame.save(os.path.join(out, "frame.png"))
     banner = clean_edges(Image.open(os.path.join(art, "banner.png")))
     bh = 160
     banner = banner.resize((round(banner.width * bh / banner.height), bh), Image.LANCZOS)
     banner.save(os.path.join(out, "banner.png"))
-    return frame.size, banner.size
+    plates = painted_plates(frame) or [FR_PLATE_L, FR_PLATE_R]  # where this frame paints them
+    return frame.size, banner.size, pieces, plates
 
 
 def build(art, out_dir):
     out = os.path.join(out_dir, "layout")
     os.makedirs(out, exist_ok=True)
     write_small_art(out)
-    (frame_w, frame_h), (banner_w, banner_h) = prepare_art(art, out)
+    (frame_w, frame_h), (banner_w, banner_h), pieces, (plate_l, plate_r) = prepare_art(art, out)
     tex = lambda png: {"png": png, "tile": "tiled"}
     textures = {"NbFrame_00": tex("frame.png"), "NbBanner_00": tex("banner.png"), "NbWhite_00": tex("white.png"),
                 "NbRing_00": tex("ring.png"), "NbCross_00": tex("cross.png"), "NbCorner_00": tex("corner.png")}
@@ -206,6 +270,22 @@ def build(art, out_dir):
                  "M_TabOn": mat("NbWhite_00", [255, 255, 255, 0x50]), "M_TabOff": mat("NbWhite_00", [0x1E, 0x3C, 0x14, 0x30]),
                  "M_PillNew": mat("NbWhite_00", [0x2E, 0x8A, 0x2E, 0xC8]), "M_PillNotYet": mat("NbWhite_00", [0x7C, 0x8A, 0x6C, 0xD8]),
                  "M_PillDone": mat("NbWhite_00", [0x9C, 0x3A, 0x2A, 0xD0])}
+    buttons = {}
+    if all(os.path.exists(os.path.join(art, n + ".png")) for n in ("tab_plate_a", "tab_plate_b", "close_round")):
+        for key, n in (("a", "tab_plate_a"), ("b", "tab_plate_b"), ("close", "close_round")):
+            im = Image.open(os.path.join(art, n + ".png")).convert("RGBA")
+            im.save(os.path.join(out, n + ".png"))
+            buttons[key] = (n, im.size)
+        textures.update({"NbTabA_00": tex("tab_plate_a.png"), "NbTabB_00": tex("tab_plate_b.png"),
+                         "NbCloseRound_00": tex("close_round.png")})
+        # the lit tab: plate b as painted; the shaded one: plate a, darker
+        materials.update({"M_TabPlateOn": mat("NbTabB_00"), "M_TabPlateOff": mat("NbTabA_00", [200, 212, 200, 255]),
+                          "M_CloseRound": mat("NbCloseRound_00")})
+        pieces = {}  # the user's buttons replace the pieces cut out of the old frame
+    for name in pieces:
+        tname = "Nb%s_00" % name.capitalize()
+        textures[tname] = tex(name + ".png")
+        materials["M_" + name.capitalize()] = mat(tname)
 
     fx, fy, fw, fh = frame_box()
     page_c = centre(fx, fy, fw, fh)  # N_Page sits at the screen centre (scales around it)
@@ -267,18 +347,44 @@ def build(art, out_dir):
     kids = [pic("P_Frame", fx, fy, fw, fh, "M_Frame", page_c)]
     tx, ty, tw, th = frame_part(FR_TITLE)
     kids.append(text("T_Title", tx, ty, 44, INK, "Story Notebook", bold=True, width=tw + 200, capacity=32, k=1.1))
+    def piece_box(name):  # a piece's place on the page (its box in the frame picture's pixels)
+        x0, y0, x1, y1 = pieces[name]
+        return fx + x0 / frame_w * fw, fy + y0 / frame_h * fh, (x1 - x0) / frame_w * fw, (y1 - y0) / frame_h * fh
     sx, sy, sw, sh = frame_part(FR_SLOT)
-    r = sw / 2 * 0.42 * 2 + 6
-    kids.append(pic("P_Close", sx + sw / 2 - r / 2, sy + sh / 2 - r / 2, r, r, "M_Cross", page_c))
+    if buttons:  # the user's own buttons: the round close button with the game's x on it
+        d = sw + 6
+        kids.append(pic("P_CloseButton", sx + sw / 2 - d / 2, sy + sh / 2 - d / 2, d, d, "M_CloseRound", page_c))
+        kids.append(text("T_CloseX", sx, sy + sh / 2 - 24, 44, INK_SOFT, "\u00d7", bold=True, width=sw, align="center", capacity=4,
+                         k=1.0))
+    else:
+        if "close" in pieces:  # the close button's round slot as an element of its own (the frame has none)
+            kids.append(pic("P_CloseButton", *piece_box("close"), "M_Close", page_c))
+        r = sw / 2 * 0.42 * 2 + 6
+        kids.append(pic("P_Close", sx + sw / 2 - r / 2, sy + sh / 2 - r / 2, r, r, "M_Cross", page_c))
     for i, fr in enumerate((FR_TAB0, FR_TAB1)):
         x, y, w, h = frame_part(fr)
-        kids.append(pic("P_Tab%dOn" % i, x + 6, y + 6, w - 12, h - 12, "M_TabOn", page_c, visible=False))
-        kids.append(pic("P_Tab%dOff" % i, x + 6, y + 6, w - 12, h - 12, "M_TabOff", page_c))
+        if buttons:  # the user's tab plates, 3-slice (the curled ends keep their shape): b lit, a shaded
+            tc = centre(x, y, w, h)
+            for state, (plate, (pw_, ph_)) in (("On", buttons["b"]), ("Off", buttons["a"])):
+                cap = min(w / 2, h * 0.75)  # each end, as wide as 3/4 of the height
+                share = cap / h * ph_ / pw_  # the end's share of the plate picture's width
+                m = "M_TabPlate" + state
+                kids.append(null("P_Tab%d%s" % (i, state), x, y, w, h, [
+                    pic("P_Tab%d%sL" % (i, state), x, y, cap, h, m, tc, [[0, 0], [share, 0], [0, 1], [share, 1]]),
+                    pic("P_Tab%d%sM" % (i, state), x + cap, y, w - 2 * cap, h, m, tc,
+                        [[share, 0], [1 - share, 0], [share, 1], [1 - share, 1]]),
+                    pic("P_Tab%d%sR" % (i, state), x + w - cap, y, cap, h, m, tc, [[1 - share, 0], [1, 0], [1 - share, 1], [1, 1]])],
+                    page_c, visible=state == "Off"))
+        else:
+            if "tab%d" % i in pieces:  # the tab plate as an element of its own
+                kids.append(pic("P_Tab%dPlate" % i, *piece_box("tab%d" % i), "M_Tab%d" % i, page_c))
+            kids.append(pic("P_Tab%dOn" % i, x + 6, y + 6, w - 12, h - 12, "M_TabOn", page_c, visible=False))
+            kids.append(pic("P_Tab%dOff" % i, x + 6, y + 6, w - 12, h - 12, "M_TabOff", page_c))
         for state, colour in (("On", PLATE_INK), ("Off", INK_SOFT)):
             kids.append(text("T_Tab%d%s" % (i, state), x, y + (h - 25) / 2, 25, colour, ("Quests", "Archive")[i], bold=True,
                              width=w, align="center", visible=state == "Off", capacity=24))
     plates = []
-    for name, fr, glyph, label in (("Back", FR_PLATE_L, "", "Close"), ("Track", FR_PLATE_R, "", "Open")):
+    for name, fr, glyph, label in (("Back", plate_l, "", "Close"), ("Track", plate_r, "", "Open")):
         x, y, w, h = frame_part(fr)
         pc = centre(x, y, w, h)
         size = 34
