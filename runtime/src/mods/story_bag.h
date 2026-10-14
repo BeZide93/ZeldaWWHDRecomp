@@ -30,6 +30,9 @@ void pad(input::PadState& p, Cpu* c);
 // The Pro Controller's read (KPADRead): idle while the page is open
 void mute(input::PadState& p);
 bool page_open();
+// Called (game thread) after X / Y on the page put an item on a button: the item buttons' strip refresh
+// (story_item_buttons::refresh_strip, wired where both are built)
+void set_after_assign(void (*after)(Cpu*));
 void state_loaded();
 
 }  // namespace story_bag
