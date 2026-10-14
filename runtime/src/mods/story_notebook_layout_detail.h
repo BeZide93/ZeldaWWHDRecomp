@@ -32,6 +32,8 @@ struct DetailView {
     int steps = 0;                   // markers shown (0..kSteps)
     uint8_t marker[kSteps] = {};     // step i + 1: 0 upcoming, 1 the current one, 2 done
     std::string bodies[3];           // next step, where, reward
+    std::string head0 = "Next step"; // the first band's head ("Finished" for a done quest)
+    bool where = true;               // the Where band (not for a done quest)
     std::string status;              // the pill's word
     int pill = 0;                    // its tint: 0 none (in progress), 1 New, 2 Not yet, 3 Done
     bool tracked = false;            // the chart ring and "On the chart"

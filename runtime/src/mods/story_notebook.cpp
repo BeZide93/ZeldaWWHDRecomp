@@ -995,7 +995,11 @@ std::vector<Row> rows_now(std::vector<Quest>& storage) {
                     q.steps[st.n - 1] = st.text;
                 }
                 const uint8_t n = saved_step(b, q.key);
-                if (n == 0) q.next = d.quest.start_text, q.where.clear(), q.has_place = false;
+                if (n == 0) {  // not started: the start text, and step 1's place ("Not started yet" in the detail)
+                    q.next = d.quest.start_text, q.where.clear(), q.has_place = false;
+                    for (const ManifestStep& st : d.quest.steps)
+                        if (st.n == 1) q.where = st.where, q.has_place = st.has_place, q.x = st.x, q.z = st.z;
+                }
                 for (const ManifestStep& st : d.quest.steps)
                     if (st.n == n) {
                         q.next = st.text, q.where = st.where, q.has_place = st.has_place, q.x = st.x, q.z = st.z;

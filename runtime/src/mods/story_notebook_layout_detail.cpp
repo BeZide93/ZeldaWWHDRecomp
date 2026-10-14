@@ -106,17 +106,17 @@ DetailView view_of(const nb::Page&, const nb::Row& r) {
     if (r.status == nb::Status::InProgress && r.step >= 2 && r.step - 2u < q.steps.size() && !q.steps[r.step - 2u].empty())
         v.done_before = "Done: " + q.steps[r.step - 2u];
     // the bands (page.h framed_detail())
-    if (r.status == nb::Status::Done) v.bodies[0] = "Done. The story is told.";
+    if (r.status == nb::Status::Done) v.bodies[0] = nb::kFinished, v.head0 = "Finished", v.where = false;
     else if (r.status == nb::Status::NotAvailable) v.bodies[0] = "Not yet available: " + q.condition;
     else if (!q.hint.empty()) v.bodies[0] = q.hint + (q.next.empty() ? std::string() : " " + q.next);
     else v.bodies[0] = q.next.empty() ? std::string("(not written down yet)") : q.next;
     if (q.hint.rfind("Not yet possible", 0) == 0 && !q.next.empty()) v.bodies[0] = q.next + "\n" + q.hint;
-    v.bodies[1] = q.where.empty() ? std::string(q.has_place ? "Marked on the sea chart." : "This step has no place on the chart.") : q.where;
+    v.bodies[1] = nb::where_text(r);
     v.bodies[2] = q.reward.empty() ? std::string("(none named)") : r.status == nb::Status::Done ? q.reward + " (received)" : q.reward;
     v.status = r.status == nb::Status::NotAvailable ? "Not yet" : nb::status_text(r.status);
     v.pill = r.status == nb::Status::New ? 1 : r.status == nb::Status::NotAvailable ? 2 : r.status == nb::Status::Done ? 3 : 0;
     v.tracked = r.tracked;
-    v.track_plate = r.status != nb::Status::Done;
+    v.track_plate = nb::trackable(r);
     v.back_label = "Back";
     v.track_label = r.tracked ? "Stop showing" : "Show on chart";
     return v;
@@ -129,6 +129,7 @@ bool same(const DetailView& a, const DetailView& b) {
         return false;
     for (int i = 0; i < 3; i++)
         if (a.bodies[i] != b.bodies[i]) return false;
+    if (a.head0 != b.head0 || a.where != b.where) return false;
     return std::equal(a.marker, a.marker + kSteps, b.marker);
 }
 
@@ -165,6 +166,8 @@ void apply(Cpu* c, const DetailView& v) {
     }
     show(c, "D_DoneBefore", !v.done_before.empty());
     set_text(c, "D_DoneBefore", fitted(c, pane(c, "D_DoneBefore"), utf16(v.done_before)));
+    set_text(c, "D_Head0", utf16(v.head0));
+    for (const char* p : {"D_Icon1", "D_Head1", "D_Band1", "D_Body1"}) show(c, p, v.where);
     for (int i = 0; i < 3; i++) {
         const std::string name = "D_Body" + std::to_string(i);
         set_text(c, name, wrapped(c, pane(c, name), v.bodies[i], kBodyLines[i]));
