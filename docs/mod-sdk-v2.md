@@ -147,7 +147,7 @@ The examples in [`examples/guest-mods`](../examples/guest-mods) are complete mod
 | `hud-demo` | HUD drawing with package artwork and text, texture reload after a state load |
 | `button-icons` | reading port settings, following the game's button panes |
 | `rito-letter` | a story mod's letter, delivered once per save file by the Rito postbox |
-| `story-chart` | a story mod's chart that marks Windfall Island on Link's sea chart |
+| `story-chart` | a story mod's chart, like a treasure chart: the red circle on Windfall's lighthouse once Link stands there |
 | `story-notebook` | a story mod that fills the story notebook: a letter, quests and the tracked quest on the sea chart |
 
 ## Hooks and replacements
@@ -369,10 +369,13 @@ in that session and the log says so.
 
 ## Charts and markers
 
-A story mod can show the player where to go the way Wind Waker does: on the sea chart. The
-game marks the next story island with a white ring (Dragon Roost Island, Forest Haven, the
-triangle islands...). Your mod gives Link a chart, and the chart's markers appear on his sea
-chart with that same ring.
+A story mod can give Link a chart the way Wind Waker gives him a treasure chart, and the sea
+chart treats it the same way. In the game, an owned treasure chart puts nothing on the sea chart:
+its X is only on the chart itself. Once the treasure is salvaged, the game's red hand-drawn circle
+marks the spot on the sea chart. Your mod's chart behaves the same way: while Link only owns it,
+the sea chart shows nothing for it; when your mod finishes it, the red circle marks each of its
+markers' spots. (The guiding marks of your quest are the story notebook's job: the quest shown on
+the chart gets the game's white story ring, see [The story notebook](#the-story-notebook).)
 
 ```c
 #include "wwhd_guest.h"
@@ -392,7 +395,7 @@ WWHD_HOOK(WWHD_ADDR_daPy_Execute, quest_step, (void* link)) {
 | Service | What it does |
 | --- | --- |
 | `wwhd_chart_give(chart)` | Link gets the chart in the loaded save file (once; later calls change nothing) |
-| `wwhd_chart_finish(chart)` | the chart is done: its markers are no longer shown |
+| `wwhd_chart_finish(chart)` | the chart is done: the red circle marks its markers' spots |
 | `wwhd_chart_state(chart)` | the chart's state, without changing it |
 | `wwhd_chart_mark(chart, marker, x, z, icon, label)` | adds the marker, or moves it if it exists |
 | `wwhd_chart_unmark(chart, marker)` | removes the marker; `NULL` removes all markers of the chart |
@@ -402,8 +405,8 @@ All of them return the chart's state in the loaded save file, or an error:
 | Result | Meaning |
 | --- | --- |
 | `WWHD_CHART_NONE` (0) | not given to this save file |
-| `WWHD_CHART_OWNED` (1) | Link has it: its markers are on the sea chart |
-| `WWHD_CHART_DONE` (2) | finished |
+| `WWHD_CHART_OWNED` (1) | Link has it (nothing on the sea chart yet, like an owned treasure chart) |
+| `WWHD_CHART_DONE` (2) | finished: its markers have the red circle |
 | `WWHD_CHART_INVALID` (-1) | invalid ID, place, icon or label |
 | `WWHD_CHART_NO_ROOM` (-2) | no save file loaded, or its record is full; or too many markers |
 
@@ -414,8 +417,9 @@ All of them return the chart's state in the loaded save file, or an error:
   and `z` to the south. `WWHD_CHART_COLUMN_X('A'..'G')` and `WWHD_CHART_ROW_Z(1..7)` give the
   center of a square, so Windfall Island (D2) is `WWHD_CHART_COLUMN_X('D'), WWHD_CHART_ROW_Z(2)`.
   The game's own marks sit on the island squares too.
-- **Icon:** `WWHD_CHART_ICON_STORY`, the game's story ring, is the only one for now.
-- **Label:** one line of UTF-8, up to 64 bytes, or `NULL`. The sea chart shows the ring only,
+- **Icon:** `WWHD_CHART_ICON_STORY` is the only one for now (the sea chart draws the game's red
+  circle for a finished chart's marker, whatever the icon).
+- **Label:** one line of UTF-8, up to 64 bytes, or `NULL`. The sea chart shows the circle only,
   like the game's own marks; the label names the marker for other screens (a quest notebook, a
   minimap).
 - **Markers** are placed by your mod in every session, like the letter text: call
@@ -423,18 +427,25 @@ All of them return the chart's state in the loaded save file, or an error:
   current step of your quest, and move or remove it as the quest goes on. Up to 8 markers per
   mod, 32 in all.
 
-**What the player sees.** The markers of every chart Link owns appear on the sea chart of the
-MAP screen, on the GamePad and on the TV (Pro Controller), with the ring and its blinking as the
-game draws it. Like the game's marks, they stay on the chart squares; the zoomed square view does
-not show them. The sea chart has eight rings; the game's own marks always come first, and the
-markers use the rings the game is not showing, in the order they were placed (a marker that
-finds none free waits for one).
+**What the player sees.** While Link owns a chart, nothing of it is on the sea chart. Once the
+chart is finished, each of its markers has the game's red hand-drawn circle (the mark of a
+salvaged treasure) at its exact spot: on the sea chart of the MAP screen, on the GamePad, on the
+TV (Pro Controller) and on the warp map, and in the zoomed view of the marker's square. The circle
+is drawn and animated by the game: it is the circle of the marker's own square, or of another
+square, as long as the game does not show that square's circle itself. The game's own circles
+always come first: when Link salvages the treasure of a square whose circle a marker uses, the
+game gets it back and the marker takes another square's circle (with all 49 in the game's use, it
+waits). In the zoomed view of a square there is one circle: the notebook's shown quest comes first,
+then finished charts' markers, and the game's own circle wins over both.
+
+**Planned:** viewing a mod chart like a game chart (the MAP screen's chart list, the chart with its
+X at the spot) is not there yet.
 
 **Saving.** Whether Link owns a chart, and whether it is finished, is stored in the save file in
 the same record as the letters (it stays unused by the game itself; letters and charts of all mods
 share its 19 places per save file). It is saved and loaded with
 the game and kept by full and portable save states. Full save states hold the sea chart as the
-game left it, without the markers; they appear again on the next frame. The places of the
+game left it, without the markers' circles; they appear again on the next frame. The places of the
 markers are not saved: your mod places them every session. Turning your mod off leaves its charts
 in the record, and the sea chart shows only the game's own marks.
 
@@ -514,13 +525,12 @@ the item menu, opens its page over the game:
 - the order: the quest shown on the chart, quests in progress, new ones, ones not yet available.
   Done quests move to the **Archive** tab (Left/Right or a tap on the tab switches);
 - choosing a row shows what is known so far and the reward, and **Show on chart**: that quest's
-  next step gets the game's story ring on the sea chart (the marker layer of
-  [Charts and markers](#charts-and-markers)); while a quest is shown, the chart shows only its
-  step and the markers of mod charts wait until no quest is shown. One quest at a time;
+  next step gets the game's story ring on the sea chart (the first of the game's eight story
+  rings the game is not showing; the game's own marks come first). One quest at a time;
   choosing it again stops showing it. The ring moves when you place the next step elsewhere and
   disappears when the quest is done or the step has no place (the page then says the step has no
   place on the chart). In the zoomed view of that square, the game's red hand-drawn circle (the one
-  it uses for the Fishman's spot) marks the step's exact place; where the game shows its own circle
+  it uses for a salvaged treasure) marks the step's exact place; where the game shows its own circle
   in that square, the game's wins;
 - Up/Down (or the stick) choose, A opens or shows on the chart, B goes back and closes. Taps (and
   the mouse on the GamePad picture) work on the rows and buttons. The game gets no input while the
