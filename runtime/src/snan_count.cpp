@@ -10,7 +10,8 @@
 //   # snapshot <local time> hits=<total>  +  SNAP <kind> <site> count=<n>  every 30 s while sites are hit
 //   SITE <kind> <site> count=<n>                                        every site at exit
 //   # end <local time> sites=<n> hits=<total>
-// tools/snan_merge.py combines all sessions into one table.
+// tools/snan_merge.py combines all sessions into one table. Known, analysed sources (kKnown) are not logged.
+// Diagnostic builds only: the option costs ~0.18 ms per frame even with logging off, so play builds leave it off.
 #ifdef WWHD_SNAN_COUNT
 #include <cinttypes>
 #include <cstdio>
@@ -145,9 +146,20 @@ void maybe_snapshot() {
 
 }  // namespace
 
+// known, analysed sources (not logged, so a diagnostic run shows only new ones)
+struct Known {
+    uint32_t ea;
+    uint64_t bits;
+};
+constexpr Known kKnown[] = {
+    {0x101FCBC8, 0x7F800001},  // JStudio "unset" constant (TAdaptor_sound::do_prepare, 02848C04): harmless
+};
+
 extern "C" __attribute__((noinline)) void wwhd_snan_hit(int kind, uint32_t ea, uint64_t bits) {
     uintptr_t ret = (uintptr_t)__builtin_extract_return_addr(__builtin_return_address(0));
     if (!g_slots) return;
+    for (const Known& k : kKnown)
+        if (k.ea == ea && k.bits == bits) return;
     uintptr_t key = (ret << 3) | ((uintptr_t)(kind & 3) << 1) | 1;
     size_t h = (size_t)((key * 0x9E3779B97F4A7C15ull) >> 52) & (kSlots - 1);
     for (size_t probe = 0; probe < kSlots; probe++, h = (h + 1) & (kSlots - 1)) {
