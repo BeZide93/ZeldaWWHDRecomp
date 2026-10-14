@@ -30,6 +30,14 @@ Bytes build(const std::string& description_json, const std::filesystem::path& ar
 // swizzle (0-7) would hold them (the image's size: as the archive's .bflim); for writing a texture of a
 // built layout at run time (story_lyt_screen::set_texture_pixels).
 Bytes tile_rgba8(const Bytes& rgba, uint32_t w, uint32_t h, int tile_mode, uint32_t swizzle);
+// A .bflim of RGBA texels (w x h): format rgba8, bc1, bc3 or bc5la (luminance + alpha, for item_icons.h),
+// tile "linear", "1d" or "tiled", swizzle 0-7 (tiled only); as the generator writes it. Throws
+// std::runtime_error on bad input.
+Bytes texture(const Bytes& rgba, uint32_t w, uint32_t h, const std::string& format, const std::string& tile, uint32_t swizzle);
+// A SARC of the files (names sorted by their hash, data aligned), as the archives above.
+Bytes sarc_of(const std::map<std::string, Bytes>& files, uint32_t align = 0x2000);
+// Data as a Yaz0 stream of literal bytes only (no compression), as the archives above.
+Bytes yaz0_store(const Bytes& data);
 // The layout name ("name") of a description, or "" if it has none.
 std::string layout_name(const std::string& description_json);
 

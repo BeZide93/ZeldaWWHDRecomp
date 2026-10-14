@@ -6,6 +6,7 @@
 #include <cctype>
 #include <cstdio>
 #include <cstring>
+#include <cstdlib>
 #include <map>
 
 #include "guest_addr.h"
@@ -58,6 +59,49 @@ uint64_t g_passes = 0, g_covered = 0;  // screen passes drawn (drawPrimaryScreen
 uint32_t g_viewport = 0;
 uint32_t g_archive = 0;  // the archive's data in guest memory (a SARC), found once built  // the item screen's viewport, while drawPrimaryScreens runs (0: it didn't draw)
 
+// Test aid (WWHD_STORY_LYT_HEAP=1): the free room of the heaps the layout manager and the UI use, logged
+// around our build and when the item screen goes (JKRHeap: getFreeSize vtable +0x74, getTotalFreeSize).
+const uint32_t kHeapTotalFree = GC(0x027EC1FC);  // JKRHeap::getTotalFreeSize(this)
+void heap_report(Cpu* c, const char* where) {
+    static const bool on = std::getenv("WWHD_STORY_LYT_HEAP") != nullptr;
+    if (!on) return;
+    const uint32_t mgr = ld32(kLayoutResMgr), ui = ld32(kUiSystem);
+    // and the game's main heaps (mDoExt_getArchiveHeap / GameHeap / ZeldaHeap / CommandHeap)
+    const std::pair<const char*, uint32_t> heaps[] = {{"mgr+10", mgr ? ld32(mgr + 0x10) : 0}, {"mgr+14", mgr ? ld32(mgr + 0x14) : 0},
+                                                      {"ui+10", ui ? ld32(ui + 0x10) : 0}, {"archive", g_call(c, GC(0x025E3268), {})},
+                                                      {"game", g_call(c, GC(0x025E2FBC), {})}, {"zelda", g_call(c, GC(0x025EE048), {})},
+                                                      {"command", g_call(c, GC(0x025EE060), {})}};
+    static bool dumped = false;
+    for (const auto& [label, h] : heaps) {
+        if (!h || !ld32(h + 0xC)) { LOG("[lyt-heap] %s %s: none", where, label); continue; }
+        const uint32_t vt = ld32(h + 0xC);
+        const uint32_t free_ = g_call(c, ld32(vt + 0x74), {h}), total = g_call(c, kHeapTotalFree, {h});
+        const uint32_t max4 = g_call(c, ld32(vt + 0x7C), {h, 4});
+        LOG("[lyt-heap] %s %s %08X: free %.2f MB, total free %.2f MB, vt+7C(4) %.2f MB", where, label, h, free_ / 1048576.0,
+            total / 1048576.0, max4 / 1048576.0);
+        if (!dumped) {
+            std::string words;
+            char b[16];
+            for (uint32_t o = 0; o < 0x80; o += 4) snprintf(b, sizeof b, " %08X", ld32(h + o)), words += b;
+            LOG("[lyt-heap] %s header:%s", label, words.c_str());
+        }
+    }
+    dumped = true;
+    // the item icons' count modes (sCountModes, one word per icon frame, 55 of them) and what follows: a
+    // frame past them reads on (item_icons.h; 1 or 2 there would show a count)
+    std::string words;
+    for (uint32_t i = 55; i < 128; i++) {
+        const uint32_t v = ld32(GD(0x100E7E48) + 4 * i);
+        if (v == 1 || v == 2) words += " [" + std::to_string(i) + "]=" + std::to_string(v);
+    }
+    LOG("[lyt-heap] count modes 1/2 past frame 54 (to 127):%s", words.empty() ? " none" : words.c_str());
+    // where the game's own archives sit (the heap ranges above), and their size in memory
+    for (const char* n : {"BtnItemIcon_00", "BtnCollectIcon_00", "BtnMenu_00"}) {
+        const uint32_t data = mgr ? g_call(c, kResMgrFind, {mgr, safe_string(n)}) : 0;
+        LOG("[lyt-heap] %s %s: %08X, %.2f MB", where, n, data, data && ld32(data) == 0x53415243 ? ld32(data + 8) / 1048576.0 : 0.0);
+    }
+}
+
 void drop() { g_part = g_layout = g_set = 0, g_archive = 0, g_panes.clear(); }
 
 // After a state load: are our objects still in guest memory (a portable state, or a full state saved after
@@ -97,9 +141,18 @@ void build(Cpu* c, uint32_t projection, uint32_t matrix) {
     const uint32_t name = safe_string(g_client.layout.c_str());
     const uint32_t mgr = ld32(kLayoutResMgr), ui = ld32(kUiSystem), heap = ui ? ld32(ui + 0x10) : 0;
     if (!mgr || !heap) return LOG("[lyt] %s: no layout manager / UI heap", g_client.layout.c_str());
+    heap_report(c, "before cache");
+    // Test aid (WWHD_TEST_ICON_FRAME=n): every item's icon frame in the game's item -> frame table (itemForSlot,
+    // 57 entries of 16 bytes: item, frame), to see the extended item icons (item_icons.h) without a mod item
+    static const char* icon_frame = std::getenv("WWHD_TEST_ICON_FRAME");
+    if (icon_frame) {
+        for (uint32_t e = GD(0x100E7AB8); e < GD(0x100E7AB8) + 57 * 16; e += 16) st32(e + 4, uint32_t(atoi(icon_frame)));
+        LOG("[lyt] test: every item icon shows frame %d", atoi(icon_frame));
+    }
     if (!g_call(c, kResMgrCache, {mgr, name, 0})) return LOG("[lyt] %s: the archive didn't load", g_client.layout.c_str());
     // cache() reports success even when the archive couldn't be read into memory (too large for the
     // layout heap, a bad file): only go on with the archive actually there
+    heap_report(c, "after cache");
     if (!g_call(c, kResMgrFind, {mgr, name})) return LOG("[lyt] %s: the archive is not in memory (too large?)", g_client.layout.c_str());
     const uint32_t part = g_call(c, kNoControlConstruct, {0});
     if (!part) return LOG("[lyt] %s: no parts object", g_client.layout.c_str());
@@ -225,6 +278,7 @@ void finalize_screens(Cpu* c) {
     {
         Keep keep(c);  // the original still needs its `this` (r3)
         destroy(c);
+        heap_report(c, "screen gone");
     }
     g_failed = false;
     g_original(c, kFinalizeScreens);

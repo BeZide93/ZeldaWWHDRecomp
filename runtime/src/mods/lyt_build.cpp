@@ -316,11 +316,13 @@ Bytes utf16be(const std::string& s) {
 }
 
 // ---------------------------------------------------------------- description.py
-struct TexFormat { const char* key; uint8_t code; char suffix; uint32_t bpp; bool bc; };
-const TexFormat kFormats[] = {{"rgba8", 0x14, 'l', 32, false}, {"bc1", 0x15, 'o', 64, true}, {"bc3", 0x17, 'q', 128, true}};
-const TexFormat* format_of(const std::string& key) {
+struct TexFormat { const char* key; uint8_t code; char suffix; uint32_t bpp; bool bc; bool described; };
+// described: usable in a layout description; bc5la only for the item icons' glow (item_icons.h)
+const TexFormat kFormats[] = {{"rgba8", 0x14, 'l', 32, false, true}, {"bc1", 0x15, 'o', 64, true, true}, {"bc3", 0x17, 'q', 128, true, true},
+                              {"bc5la", 0x11, 't', 128, true, false}};
+const TexFormat* format_of(const std::string& key, bool any = false) {
     for (const TexFormat& f : kFormats)
-        if (key == f.key) return &f;
+        if (key == f.key && (f.described || any)) return &f;
     return nullptr;
 }
 
@@ -1083,6 +1085,11 @@ void channel_block(const int v[16], uint8_t out[8]) {
     for (int i = 0; i < 6; i++) out[2 + i] = uint8_t(bits >> (8 * i));
 }
 // the texels as 4 x 4 blocks, row by row, edges repeated (bc.py to_blocks), each block coded
+// bflim.py _to_channels for "la": luminance (0.299 / 0.587 / 0.114, float32, rounded) and alpha
+int luminance(const Px& t) {
+    const float l = float(t[0]) * 0.299f + float(t[1]) * 0.587f + float(t[2]) * 0.114f;
+    return int(std::clamp(std::nearbyint(l), 0.0f, 255.0f));
+}
 Bytes bc_encode(const std::string& fmt, const Bytes& rgba, uint32_t w, uint32_t h) {
     const uint32_t bw = (w + 3) / 4, bh = (h + 3) / 4, bytes = fmt == "bc1" ? 8 : 16;
     Bytes out(size_t(bw) * bh * bytes);
@@ -1095,7 +1102,12 @@ Bytes bc_encode(const std::string& fmt, const Bytes& rgba, uint32_t w, uint32_t 
                 px[i] = {t[0], t[1], t[2], t[3]};
             }
             uint8_t* o = &out[(size_t(by) * bw + bx) * bytes];
-            if (fmt == "bc1") {
+            if (fmt == "bc5la") {  // luminance (BC4), then alpha (BC4)
+                int l[16], a[16];
+                for (int i = 0; i < 16; i++) l[i] = luminance(px[i]), a[i] = px[i][3];
+                channel_block(l, o);
+                channel_block(a, o + 8);
+            } else if (fmt == "bc1") {
                 bool tr[16];
                 for (int i = 0; i < 16; i++) tr[i] = px[i][3] < 128;
                 colour_block(px, tr, o);
@@ -1115,7 +1127,7 @@ Bytes bc_encode(const std::string& fmt, const Bytes& rgba, uint32_t w, uint32_t 
 }
 
 Bytes bflim(const Bytes& rgba, uint32_t w, uint32_t h, const std::string& fmt, const std::string& tile, uint32_t swizzle) {
-    const TexFormat* f = format_of(fmt);
+    const TexFormat* f = format_of(fmt, true);
     if (!f) fail("format " + fmt + " is not written by the port");
     const int mode = tile == "linear" ? 1 : tile == "1d" ? 2 : tile == "tiled" ? 4 : 0;
     if (!mode) fail("unknown tile mode " + tile);
@@ -1245,6 +1257,13 @@ Bytes build(const std::string& description_json, const std::filesystem::path& ar
              std::to_string(kMaxArchive >> 20) + " MB: compress its large pictures (bc1 / bc3)");
     return yaz0_stored(archive);
 }
+
+Bytes texture(const Bytes& rgba, uint32_t w, uint32_t h, const std::string& format, const std::string& tile, uint32_t swizzle) {
+    if (rgba.size() != size_t(w) * h * 4) fail("texture: expected " + std::to_string(size_t(w) * h * 4) + " RGBA bytes");
+    return bflim(rgba, w, h, format, tile, swizzle);
+}
+Bytes sarc_of(const std::map<std::string, Bytes>& files, uint32_t align) { return sarc(files, align); }
+Bytes yaz0_store(const Bytes& data) { return yaz0_stored(data); }
 
 Bytes tile_rgba8(const Bytes& rgba, uint32_t w, uint32_t h, int mode, uint32_t swizzle) {
     if (rgba.size() != size_t(w) * h * 4 || (mode != 1 && mode != 2 && mode != 4)) return {};

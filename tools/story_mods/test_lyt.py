@@ -622,5 +622,90 @@ class CppWriter(unittest.TestCase):
             self.assertEqual(r.returncode, 3, change)
 
 
+def item_icons_test():
+    """The C++ item icon builder's test tool (runtime/tools/item_icons_test.cpp)."""
+    exe = lyt_build_test()
+    if exe:
+        exe = os.path.join(os.path.dirname(exe), "item_icons_test")
+    return exe if exe and os.path.exists(exe) else os.environ.get("WWHD_ITEM_ICONS_TEST") or None
+
+
+def fake_icon_archive():
+    """A synthetic archive shaped like the game's BtnItemIcon_00 (no game data): IconChange with 55 frames
+    over Float128 / Icon128 textures (three pattern tracks as the game's), two of the textures, a layout."""
+    from lyt import item_icons as ii
+    from lyt.anim import pat1
+    textures = [ii.float_name(n) for n in range(55)] + [ii.icon_name(n) for n in range(55)]
+    contents = [("P_Btn_00", 1, [(b"FLTP", [(0, 0, tracks.STEP, [(float(n), 55 + n) for n in range(55)])])]),
+                ("P_BtnFloat_00", 1, [(b"FLTP", [(0, 0, tracks.STEP, [(float(n), n) for n in range(55)])])]),
+                ("P_BtnGlow_00", 1, [(b"FLTP", [(0, 0, tracks.STEP, [(float(n), n) for n in range(55)])])])]
+    anim = binio.file_header(b"FLAN", [pat1.write("IconChange", ["G_IconChange_00"], -200, -146, 8),
+                                       ii.write_pai1(54, False, textures, contents)])
+    return {ii.ANIM: anim, "blyt/BtnItemIcon_00.bflyt": b"FLYT" + bytes(60),
+            "anim/BtnItemIcon_00_In.bflan": b"FLAN" + bytes(28),
+            "timg/" + ii.icon_name(54): bflim.encode(gradient(128, 128), 128, 128, "rgba8", "tiled", 3),
+            "timg/" + ii.float_name(54): bflim.encode(gradient(128, 128), 128, 128, "bc5la", "tiled", 5)}
+
+
+class ItemIcons(unittest.TestCase):
+    """The extended item icon archive (lyt/item_icons.py) and its C++ twin (item_icons.cpp)."""
+
+    def test_animation(self):
+        from lyt import item_icons as ii
+        files = fake_icon_archive()
+        anim = files[ii.ANIM]
+        self.assertEqual(ii.extend_animation(anim, 0), anim)  # parsed and written back unchanged
+        out = ii.extend(files, [gradient(128, 128)])
+        frames, _, textures, contents = ii.parse_pai1(ii._sections(out[ii.ANIM])[1][1])
+        self.assertEqual(frames, 56)
+        self.assertEqual(textures[:110], [ii.float_name(n) for n in range(55)] + [ii.icon_name(n) for n in range(55)])
+        keys = {name: tags[0][1][0][3] for name, _, tags in contents}
+        self.assertEqual(textures[keys["P_Btn_00"][-1][1]], ii.icon_name(56))
+        self.assertEqual(textures[keys["P_BtnGlow_00"][-2][1]], ii.float_name(55))
+        self.assertEqual(ii.frame_of(0), 56)
+        for n in (55, 56):
+            self.assertEqual(bflim.parse_footer(out["timg/" + ii.icon_name(n)])[3], 0x14)
+            self.assertEqual(bflim.parse_footer(out["timg/" + ii.float_name(n)])[3], 0x11)
+        self.assertEqual(bflim.decode(out["timg/" + ii.icon_name(55)])[0], bytes(128 * 128 * 4))  # the dummy
+        with self.assertRaises(ValueError):
+            ii.extend({ii.ANIM: ii.extend_animation(anim, 1)}, [])  # not the game's 55 frames
+
+    def test_archive_layout(self):
+        from lyt import item_icons as ii
+        files = fake_icon_archive()
+        sarc = ii.archive(files)
+        self.assertEqual(ii.read_sarc(sarc), files)
+        self.assertEqual(ii.yaz0_decode(ii.yaz0_store(sarc)), sarc)
+        for data in (b"", b"a", b"abcabcabcabcabcabcabc" * 50, bytes(5000), gradient(64, 64), sarc):
+            packed = ii.yaz0_compress(data)
+            self.assertEqual(ii.yaz0_decode(packed), data)
+        self.assertLess(len(ii.yaz0_compress(sarc)), len(sarc) * 2 // 3)
+
+    def test_cpp_same_bytes(self):
+        import subprocess
+        import tempfile
+        from lyt import item_icons as ii
+        exe = item_icons_test()
+        if not exe:
+            self.skipTest("no item_icons_test (build it)")
+        tmp = tempfile.mkdtemp()
+        member = ii.yaz0_store(ii.archive(fake_icon_archive()))
+        pack = ii.archive({ii.MEMBER: member, "Other_00.szs": b"Yaz0" + bytes(40)}, align_of=lambda n, d: 0x2000)
+        icons = [gradient(128, 128), gradient(128, 128, alpha=False)]
+        paths = []
+        for i, icon in enumerate(icons):
+            paths.append(os.path.join(tmp, "icon%d.rgba" % i))
+            with open(paths[-1], "wb") as f:
+                f.write(icon)
+        with open(os.path.join(tmp, "in.pack"), "wb") as f:
+            f.write(pack)
+        r = subprocess.run([exe, os.path.join(tmp, "in.pack"), os.path.join(tmp, "out.pack")] + paths, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        with open(os.path.join(tmp, "out.pack"), "rb") as f:
+            self.assertEqual(f.read(), ii.extend_pack(pack, icons))
+        r = subprocess.run([exe], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()
