@@ -111,8 +111,30 @@ int main() {
     mods::moon_jump_step(&cpu, link, true);
     assert(mods::moon_jump_move(link, x, z) && (x != 0 || z != 0));
     mods::moon_jump_step(&cpu, link, false);
+    auto invalid_transition = [&](bool title_draw) {
+        std::memcpy(mem::ptr(0x104741E4), "Name\0\0\0\0", 8);
+        mods::moon_jump_step(&cpu, link, true);
+        mods::moon_jump_step(&cpu, link, false);
+        if (title_draw) mods::moon_jump_camera(camera);
+        std::memcpy(mem::ptr(0x104741E4), "Other\0\0\0", 8);
+        mods::moon_jump_input(pad);
+        mods::moon_jump_step(&cpu, link, true);
+        assert(mods::moon_jump_move(link, x, z) && x == 0 && z == 0);
+        mods::moon_jump_step(&cpu, link, false);
+        mods::moon_jump_camera(camera);
+        mods::moon_jump_step(&cpu, link, true);
+        assert(mods::moon_jump_move(link, x, z) && (x != 0 || z != 0));
+        mods::moon_jump_step(&cpu, link, false);
+    };
+    invalid_transition(false);
+    invalid_transition(true);
     mods::moon_jump_reset();
     assert(!mods::moon_jump_move(link, x, z));
+    mods::moon_jump_input(pad);
+    mods::moon_jump_camera(camera); // valid same-scene capture before initial execute
+    mods::moon_jump_step(&cpu, link, true);
+    assert(mods::moon_jump_move(link, x, z) && (x != 0 || z != 0));
+    mods::moon_jump_step(&cpu, link, false);
     mods::set_infinite(mods::kMoonJump, false);
     mods::moon_jump_step(&cpu, 0x18000000, true);
 }

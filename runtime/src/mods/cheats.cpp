@@ -134,6 +134,7 @@ std::atomic<int> g_pending{parse_env("WWHD_CHEAT", {{"items", kCheatItems}, {"sw
                                                     {"dungeon", kCheatDungeon}, {"key", kCheatKey}})};
 std::atomic<int> g_infinite{parse_env("WWHD_CHEAT_INFINITE", {{"health", kInfHealth}, {"magic", kInfMagic}, {"ammo", kInfAmmo}, {"moonjump", kMoonJump}, {"nofall", kMoonNoFall}})};
 std::atomic<uint32_t> moon_buttons{0}, moon_camera{0};
+std::atomic<uint64_t> moon_camera_scene{0};
 std::atomic<float> moon_stick_x{0}, moon_stick_y{0};
 std::atomic<bool> moon_reset_requested{false};
 struct Flight {
@@ -170,12 +171,16 @@ void moon_jump_input(const input::PadState& pad) {
 }
 
 void moon_jump_camera(uint32_t camera) {
-    if (infinite(kMoonJump)) moon_camera.store(camera, std::memory_order_relaxed);
+    if (!infinite(kMoonJump)) return;
+    const uint64_t scene = (uint64_t(ld32(kStageName)) << 32) | ld32(kStageName + 4);
+    moon_camera_scene.store(scene, std::memory_order_relaxed);
+    moon_camera.store(camera, std::memory_order_release);
 }
 
 void moon_jump_reset() {
     flight = {}; preview_saved = {}; preview_saved_valid = false;
     moon_camera.store(0, std::memory_order_relaxed);
+    moon_camera_scene.store(0, std::memory_order_relaxed);
     moon_buttons.store(0, std::memory_order_relaxed);
 }
 
@@ -188,6 +193,8 @@ void moon_jump_step(Cpu* cpu, uint32_t link, bool before) {
         if (link < 0x10000 || link > 0xFFFF9000 || !save_loaded(save_addr())) {
             flight = {};
             preview_saved_valid = false;
+            moon_camera.store(0, std::memory_order_relaxed);
+            moon_camera_scene.store(0, std::memory_order_relaxed);
             return;
         }
         const uint64_t scene = (uint64_t(ld32(kStageName)) << 32) | ld32(kStageName + 4);
@@ -220,8 +227,9 @@ void moon_jump_step(Cpu* cpu, uint32_t link, bool before) {
         if (infinite(kMoonNoFall)) st32(link + moon_fall_height, ld32(link + moon_pos_y));
         if (before) {
             float fx = 0, fz = 0;
-            const uint32_t camera = moon_camera.load(std::memory_order_relaxed);
-            if (camera >= 0x10000 && camera <= 0xFFFFFE00) {
+            const uint32_t camera = moon_camera.load(std::memory_order_acquire);
+            if (moon_camera_scene.load(std::memory_order_relaxed) == flight.scene &&
+                camera >= 0x10000 && camera <= 0xFFFFFE00) {
                 fx = ldf32(camera + 0xE8) - ldf32(camera + 0xDC);
                 fz = ldf32(camera + 0xF0) - ldf32(camera + 0xE4);
             }
