@@ -91,6 +91,7 @@ void set_visible(Cpu* c);     // hdMenuItem_c::setVisible(visible)
 void execute_window(Cpu* c);  // hdMenuMain_c::executeWindow()
 void cursor_float(Cpu* c);    // hdMenuItem_c::beginCursorSelection(point)
 void people_message(Cpu* c);  // daNpcPeople_c::getMsg()
+void people_next_message(Cpu* c);  // daNpcPeople_c::next_msgStatus()
 void people_execute(Cpu* c);  // daNpcPeople_Execute(actor)
 }  // namespace hooks
 // The notebook's icon in the bag window this frame (story_notebook_bag.h), and why; for tests

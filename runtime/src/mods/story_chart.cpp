@@ -375,6 +375,11 @@ void icon_update(Cpu* c) {
     st32(pane + kPaneTranslate + 4, f32_as_u32(py));
     st32(pane + kPaneTranslate + 8, 0);
     st8(pane + kPaneFlags, uint8_t(ld8(pane + kPaneFlags) | kMatrixDirty));
+    if (trace()) {  // the circle following a moving resident
+        static float last_x = 1e9f, last_y = 1e9f;
+        if (std::fabs(px - last_x) > 0.5f || std::fabs(py - last_y) > 0.5f)
+            LOG("[chart] balloon %08X: the tracked quest's circle at %.1f,%.1f (world %.0f,%.0f)", icon, px, py, x, z), last_x = px, last_y = py;
+    }
     if (!g_borrowed.count(icon)) {
         Cpu call = keep;
         g_call(&call, kAnimStop, {anims, kFishAnim, kFishSlot});

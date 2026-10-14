@@ -97,6 +97,10 @@ uint32_t (*g_call)(Cpu*, uint32_t, std::initializer_list<uint32_t>) = nullptr;
 // ---- resident takeovers (story_takeover.h) ----
 const uint32_t kPeopleGetMsg = GC(0x022C6C68);    // daNpcPeople_c::getMsg(): which line a Windfall/Outset resident says
 const uint32_t kPeopleExecute = GC(0x022C36D0);   // daNpcPeople_Execute(actor): the resident's process step
+const uint32_t kPeopleNextMsg = GC(0x022C6108);   // daNpcPeople_c::next_msgStatus(u32* msgNo): what follows a box
+const uint32_t kMessageManager = GD(0x101F4B5C);  // the talk's message manager (mSelectNum +0x948: the choice taken)
+constexpr uint32_t kSelectNum = 0x948;
+constexpr uint32_t kMsgContinues = 0x0F, kMsgEnds = 0x10;  // fopMsgStts
 const uint32_t kPlay = GC(0x025200D4);            // the play object
 const uint32_t kPresentItem = GC(0x025D7DEC);     // fopAcM_createItemForPresentDemo(pos, item, ...)
 const uint32_t kOrderItemEvent = GC(0x025D7B98);  // fopAcM_orderItemEvent(actor): the game's default get-item event
@@ -125,12 +129,16 @@ struct Declared {
 std::vector<Declared> g_declared;
 // the talk in progress: talking -> (reward: ordering the get-item event) -> done
 struct Talk {
-    enum Phase : uint8_t { None, Talking, Reward, After } phase = None;
+    enum Phase : uint8_t { None, Choosing, Talking, Reward, After } phase = None;
     uint32_t npc = 0, item = 0xFFFFFFFFu;
     Takeover takeover;
+    std::vector<Takeover> options;  // Choosing: the quests offered, in box order ("Never mind" last)
+    Resident resident = kResidentNone;
     std::u16string text;
     uint64_t since = 0;
 } g_talk;
+// "Never mind": the resident's next talk is the game's own line (one talk); the one after offers again
+Resident g_skip_once = kResidentNone;
 
 // ---- the King of Red Lions' one-time line for the tracked quest (story_sail.h) ----
 // HD decomp (wwhd-actors decomp-readable, wwhd_src/d/actor/d_a_ship*.cpp); tww d_a_ship.cpp has the
@@ -965,6 +973,8 @@ void people_message(Cpu* c) {
     const uint32_t npc = c->r[3];
     const Takeover* live = nullptr;
     Takeover copy;
+    Resident who = kResidentNone;
+    std::vector<Takeover> options;  // several quests want the resident: a choice first
     if (have_save() && g_talk.phase == Talk::None) {
         story_mail::Book b = book();
         std::lock_guard lock(g_mu);
@@ -979,11 +989,15 @@ void people_message(Cpu* c) {
             for (const NpcActor& a : catalogue.entries[i].actors)
                 here |= a.actor_class == "people" && a.people_number == number && (a.room < 0 || a.room == room) && stage_is(stage, a.stage);
             if (!here) continue;
+            if (g_skip_once == Resident(i + 1) && live_takeover(g_takeovers, b, Resident(i + 1), event_flags(), hour_now())) {
+                g_skip_once = kResidentNone;  // after "Never mind": this talk is the game's
+                LOG("[notebook] %s: after \"Never mind\", this talk is the game's", catalogue.entries[i].name.c_str());
+                break;
+            }
             if ((live = live_takeover(g_takeovers, b, Resident(i + 1), event_flags(), hour_now()))) {
                 copy = *live;
-                if (const size_t n = wanting(g_takeovers, b, Resident(i + 1), event_flags(), hour_now()); n > 1)
-                    LOG("[notebook] %zu quests want %s; quest %04X first, the others with later talks", n,
-                        catalogue.entries[i].name.c_str(), copy.quest);
+                who = Resident(i + 1);
+                if (wanting(g_takeovers, b, who, event_flags(), hour_now()) > 1) options = wanted(g_takeovers, b, who, event_flags(), hour_now(), 2);
             }
         }
     }
@@ -993,13 +1007,57 @@ void people_message(Cpu* c) {
         return;
     }
     g_talk = {};
-    g_talk.phase = Talk::Talking, g_talk.npc = npc, g_talk.takeover = copy, g_talk.since = g_step.load();
-    story_mail::append_utf16(copy.lines, true, g_talk.text);
+    g_talk.phase = Talk::Talking, g_talk.npc = npc, g_talk.takeover = copy, g_talk.since = g_step.load(), g_talk.resident = who;
+    if (options.size() > 1) {
+        // the game's own choice box: the quests (their titles) and "Never mind"
+        g_talk.phase = Talk::Choosing, g_talk.options = options;
+        std::string prompt = "Oh, hello there. What brings you here?\n";
+        story_mail::append_utf16(prompt, true, g_talk.text);
+        for (char16_t u : {u'\x0E', u'\x01', char16_t(options.size() + 1 == 3 ? 8 : 7), u'\x00'}) g_talk.text.push_back(u);
+        std::string labels;
+        for (const Takeover& t : options) {
+            std::string title;
+            for (const Quest& q : g_quests)
+                if (q.key == t.quest) title = q.title;
+            labels += choice_label(title.empty() ? "A quest" : title) + "\n";
+        }
+        labels += "Never mind";
+        story_mail::append_utf16(labels, true, g_talk.text);
+        LOG("[notebook] %zu quests want %s: the choice box", options.size(), npc_catalogue().entry(who)->name.c_str());
+    } else {
+        story_mail::append_utf16(copy.lines, true, g_talk.text);
+        LOG("[notebook] quest %04X: the resident says the quest's line (step %u)", copy.quest, copy.step);
+    }
     story_mail::say(kCarrierMessage, &g_talk.text);
     st32(npc + kPeopleMsgList, 0);
     st32(npc + kPeopleUbList, 0);
     c->r[3] = kCarrierMessage;
-    LOG("[notebook] quest %04X: the resident says the quest's line (step %u)", copy.quest, copy.step);
+}
+
+// next_msgStatus(this, msgNo): after our choice box, the chosen quest's lines continue the same talk; "Never
+// mind" ends it (and the resident's next talk is the game's). Any other box: the game's.
+void people_next_message(Cpu* c) {
+    const uint32_t npc = c->r[3], msg_no = c->r[4];
+    if (g_talk.phase != Talk::Choosing || npc != g_talk.npc) return g_original(c, kPeopleNextMsg);
+    const uint32_t manager = ld32(kMessageManager);
+    const uint32_t chosen = manager ? ld32(manager + kSelectNum) : 0xFFFFFFFFu;
+    if (chosen < g_talk.options.size()) {
+        g_talk.takeover = g_talk.options[chosen];
+        g_talk.options.clear();
+        g_talk.text.clear();
+        story_mail::append_utf16(g_talk.takeover.lines, true, g_talk.text);
+        story_mail::say(kCarrierMessage, &g_talk.text);
+        st32(msg_no, kCarrierMessage);
+        g_talk.phase = Talk::Talking;
+        LOG("[notebook] quest %04X chosen: the resident says the quest's line (step %u)", g_talk.takeover.quest, g_talk.takeover.step);
+        c->r[3] = kMsgContinues;
+        return;
+    }
+    g_skip_once = g_talk.resident;
+    LOG("[notebook] \"Never mind\": the talk ends; the next one is the game's");
+    story_mail::unsay();
+    g_talk = {};
+    c->r[3] = kMsgEnds;
 }
 
 // the resident's process step: after our talk, hand over the letter, the reward through the game's
@@ -1010,6 +1068,10 @@ void people_execute(Cpu* c) {
     note_live_place(c, npc);
     if (g_talk.phase == Talk::None || npc != g_talk.npc) return;
     const uint16_t command = ld16(npc + kEventCommand);  // the resident's: its talk
+    if (g_talk.phase == Talk::Choosing) {
+        if (command == kCommandNone) story_mail::unsay(), g_talk = {};  // the box went away without a choice
+        return;
+    }
     if (g_talk.phase == Talk::Talking) {
         if (command != kCommandNone) return;  // the talk is still on
         story_mail::unsay();
@@ -1218,7 +1280,8 @@ void install(const std::function<std::string(uint32_t)>& replaced_by, const std:
         {kInventoryItem, hooks::inventory_item}, {kIconFrame, hooks::icon_frame},     {kOpenChild, hooks::open_child},
         {kTouchSelect, hooks::touch_select},     {kSelectedValue, hooks::selected_value}, {kAssignButton, hooks::assign_button},
         {kSetVisible, hooks::set_visible},       {kExecuteWindow, hooks::execute_window}, {kCursorFloat, hooks::cursor_float},
-        {kPeopleGetMsg, hooks::people_message},  {kPeopleExecute, hooks::people_execute}};
+        {kPeopleGetMsg, hooks::people_message},  {kPeopleExecute, hooks::people_execute},
+        {kPeopleNextMsg, hooks::people_next_message}};
     // all or nothing: a notebook that shows but can't be opened, or can be put on a button, is worse than none
     for (const auto& [addr, fn] : list) {
         std::string other = replaced_by(addr);

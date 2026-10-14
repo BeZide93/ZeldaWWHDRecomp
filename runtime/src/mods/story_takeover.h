@@ -11,6 +11,7 @@
 //   for that talk, so a first-talk introduction it would have given is not lost but comes later.
 // Mods can't hook a resident's dialogue themselves; they declare the step (wwhd_quest_talk).
 #pragma once
+#include <algorithm>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -82,6 +83,32 @@ inline const Takeover* live_takeover(const std::vector<Takeover>& all, const sto
     }
     return best;
 }
+// The quests that want this resident right now, in the order they are offered: the tracked one first,
+// then by start order; at most `max`.
+inline std::vector<Takeover> wanted(const std::vector<Takeover>& all, const story_mail::Book& b, Resident who,
+                                    const uint8_t* event_flags, int hour, size_t max) {
+    std::vector<Takeover> out;
+    for (const Takeover& t : all)
+        if (t.resident == who && wants(t, b, event_flags, hour)) out.push_back(t);
+    const uint16_t tracked = tracked_key(b);
+    std::stable_sort(out.begin(), out.end(), [&](const Takeover& x, const Takeover& y) {
+        if ((x.quest == tracked) != (y.quest == tracked)) return x.quest == tracked;
+        return start_order(b, x.quest) < start_order(b, y.quest);
+    });
+    if (out.size() > max) out.resize(max);
+    return out;
+}
+// A quest's title as a choice in the game's choice box: one line, at most `max` bytes (cut at a word,
+// "..." added). UTF-8 safe.
+inline std::string choice_label(const std::string& title, size_t max = 24) {
+    if (title.size() <= max) return title;
+    size_t cut = max - 3;
+    while (cut > 0 && (title[cut] & 0xC0) == 0x80) cut--;  // not inside a character
+    const size_t space = title.rfind(' ', cut);
+    if (space != std::string::npos && space > max / 2) cut = space;
+    return title.substr(0, cut) + "...";
+}
+
 // How many quests want this resident right now (more than one: the others wait for a later talk)
 inline size_t wanting(const std::vector<Takeover>& all, const story_mail::Book& b, Resident who, const uint8_t* event_flags = nullptr,
                       int hour = 12) {

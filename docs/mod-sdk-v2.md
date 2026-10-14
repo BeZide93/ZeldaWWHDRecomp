@@ -615,8 +615,11 @@ done. The port arbitrates, not your mod:
 - the talk takes over while your quest is at that step and its conditions hold: Link carries its
   letter (`when.carries`) and the step's `available` holds. Tracking is not needed; it only decides
   the sea chart's ring and circle. Otherwise the resident talks exactly as in the game;
-- several quests (from any mods) may want the same resident at once. Then one quest per talk: the
-  quest shown on the chart first, else the one started first; the others come with later talks;
+- several quests (from any mods) may want the same resident at once. Then the talk starts with the
+  game's own choice box: two of the quests (the one shown on the chart first, else the ones started
+  first, by their titles, shortened to fit) and "Never mind". The chosen quest's lines follow in the
+  same talk. "Never mind" ends the talk, the resident's next talk is the game's own line, and the one
+  after that offers the quests again. One quest per talk;
 - a step that takes over a resident with no condition at all (no letter, no `available`) speaks for
   your quest whenever the step is current; the log warns about it, so give such steps a condition;
 - the port never sets or clears a game flag. For that one talk the resident's own choice of line

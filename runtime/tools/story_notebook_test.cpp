@@ -413,6 +413,7 @@ void original(Cpu* c, uint32_t fn) {
     case 0x02714B0C: calls.push_back("assign " + std::to_string(c->r[5])); break;
     case 0x022C6C68: calls.push_back("getMsg"); c->r[3] = 0x2CF1; break;  // the resident's own line
     case 0x022C36D0: calls.push_back("resident"); break;
+    case 0x022C6108: calls.push_back("next"); c->r[3] = 0x10; break;  // next_msgStatus: the game's talk ends
     default: assert(!"unexpected original");
     }
 }
@@ -451,7 +452,7 @@ void test_hooks() {
             [](uint32_t, void (*)(Cpu*)) { assert(!"installed despite a conflict"); });
     assert(!installed());
     install([](uint32_t) { return std::string(); }, [](uint32_t a, void (*fn)(Cpu*)) { hooked[a] = fn; });
-    assert(installed() && hooked.size() == 11);
+    assert(installed() && hooked.size() == 12);
     Book b = story_store::book();
     // no notebook yet: the bag window shows the save as it is
     b.erase(story_mail::kRecordItem, story_mail::kItemNotebook);
@@ -965,8 +966,9 @@ void test_takeover_hooks() {
     std::vector<Quest> storage;
     for (const Row& r : rows_now(storage)) assert(r.quest->hint.find("track it") == std::string::npos);
     assert(carry("lantern", "tale", true) == 1 && carry("other", "tale", true) == 1);
-    // the OTHER mod's quest tracked: its line, never the lantern's
+    // only the OTHER mod's quest wants her (the lantern's letter put away), tracked: its line
     assert(toggle_tracked(b, quest_key("other", "tale")));
+    assert(carry("lantern", "tale", false) == 1);
     // the same resident indoors (another stage) or in another room is not the catalogue's: the game's line
     memcpy(mem::ptr(kPlayObj + 0x5134), "Opub", 5);
     assert(call(0x022C6C68, kNpc) == 0x2CF1);
@@ -986,6 +988,7 @@ void test_takeover_hooks() {
     call(0x022C36D0, kNpc);
     assert(state("other", "tale") == kResultDone && !carries(b, quest_key("other", "tale")));
     // now the lantern quest tracked: its line, then the reward through the get-item event
+    assert(carry("lantern", "tale", true) == 1);
     assert(toggle_tracked(b, quest_key("lantern", "tale")));
     calls.clear();
     assert(call(0x022C6C68, kNpc) == 0x2CF3 && calls.empty());
@@ -1038,6 +1041,74 @@ const char* const kLanternManifest = R"({
               "lines": ["One.", "Two."], "then": {"give": "rupee_orange", "take": "letter:friend", "complete": true}}}]
   }, {"id": "secret", "title": "A secret", "journal": "on_trigger"}]
 })";
+
+// Several quests want the same resident: the game's choice box first (stage 2): a chosen quest's lines
+// continue the same talk; "Never mind" ends it, the next talk is the game's, the one after offers again.
+void test_choice() {
+    constexpr uint32_t kNpc = kArena + 0x8000, kManager = kArena + 0x9800, kMsgNo = kArena + 0x9C00;
+    Book b = story_store::book();
+    st32(0x101F4B5C, kManager);
+    // the pure parts: the order offered, the labels
+    {
+        uint8_t raw[story_mail::kBookSize] = {};
+        Book t(raw);
+        const uint16_t a = quest_key("x", "a"), c = quest_key("x", "c"), d = quest_key("x", "d");
+        std::vector<Takeover> all = {{a, 1, harbour(), false, "A"}, {c, 1, harbour(), false, "C"}, {d, 1, harbour(), false, "D"}};
+        assert(reach_step(t, c, 1) == 1 && reach_step(t, a, 1) == 1 && reach_step(t, d, 1) == 1);
+        auto w = wanted(all, t, harbour(), nullptr, 12, 2);
+        assert(w.size() == 2 && w[0].quest == c && w[1].quest == a);  // started first, then next
+        assert(toggle_tracked(t, d));
+        w = wanted(all, t, harbour(), nullptr, 12, 2);
+        assert(w.size() == 2 && w[0].quest == d && w[1].quest == c);  // the tracked one first
+        assert(choice_label("The storyteller's lantern") == "The storyteller's..." && choice_label("Short") == "Short");
+        assert(choice_label("Ünïcödé ünïcödé ünïcödé ünïcödé").size() <= 24);
+    }
+    assert(define("c1", "C1", "q", "First tale", "", "") == kResultNew && define("c2", "C2", "q", "Second tale", "", "") == kResultNew);
+    assert(talk("c1", "q", 1, "windfall-missy", "One.", 0) == kResultNew && talk("c2", "q", 1, "windfall-missy", "Two.", 0) == kResultNew);
+    assert(step("c1", "q", 1, "", "") == 1 && step("c2", "q", 1, "", "") == 1);
+    assert(carry("c1", "q", true) == 1 && carry("c2", "q", true) == 1);
+    while (tracked_key(b)) toggle_tracked(b, tracked_key(b));
+    st8(kNpc + 0x905, 5), st8(kNpc + 0x326, 11);
+    memcpy(mem::ptr(kPlayObj + 0x5134), "sea", 4);
+    std::vector<uint8_t> flags(mem::ptr(kSave + 0x644), mem::ptr(kSave + 0x644) + 0x100);
+    auto next = [&](uint32_t chosen) {
+        st32(kManager + 0x948, chosen);
+        st32(kMsgNo, 0);
+        Cpu c{};
+        c.r[1] = 0x2003F000, c.r[3] = kNpc, c.r[4] = kMsgNo;
+        hooked.at(0x022C6108)(&c);
+        return c.r[3];
+    };
+    auto end_talk = [&] {
+        st16(kNpc + 0xF8, 1);
+        call(0x022C36D0, kNpc);
+        st16(kNpc + 0xF8, 0);
+        call(0x022C36D0, kNpc);
+    };
+    // the box: both quests and "Never mind"; "Never mind" ends the talk
+    calls.clear();
+    assert(call(0x022C6C68, kNpc) == 0x2CF3 && calls.empty());
+    assert(next(2) == 0x10 && calls.empty());
+    end_talk();
+    // the next talk is the game's line, the one after offers the quests again
+    calls.clear();
+    assert(call(0x022C6C68, kNpc) == 0x2CF1 && calls == std::vector<std::string>{"getMsg"});
+    end_talk();
+    assert(call(0x022C6C68, kNpc) == 0x2CF3);
+    // the second quest chosen: its lines continue the same talk, then it is done
+    assert(next(1) == 0x0F && ld32(kMsgNo) == 0x2CF3);
+    calls.clear();
+    assert(next(0) == 0x10 && calls == std::vector<std::string>{"next"});  // after our box: the game's (the talk ends)
+    end_talk();
+    assert(state("c2", "q") == kResultDone && state("c1", "q") == 1);
+    // only one wants her now: no box, its lines straight away
+    assert(call(0x022C6C68, kNpc) == 0x2CF3);
+    calls.clear();
+    assert(next(0) == 0x10 && calls == std::vector<std::string>{"next"});
+    end_talk();
+    assert(state("c1", "q") == kResultDone);
+    assert(std::equal(flags.begin(), flags.end(), mem::ptr(kSave + 0x644)));
+}
 
 void test_manifest() {
     std::vector<ManifestQuest> qs;
@@ -1388,6 +1459,7 @@ int main() {
     test_npc_catalogue();
     test_takeover_rules();
     test_takeover_hooks();
+    test_choice();
     test_manifest();
     test_available();
     test_story_store();
