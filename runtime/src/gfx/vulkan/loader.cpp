@@ -3,6 +3,10 @@
 #include "loader.h"
 #include <stdexcept>
 #include <string>
+#ifdef __ANDROID__
+#include "android_driver.h"
+#include "result_observer.h"
+#endif
 
 namespace gfxvk {
 PFN_vkGetInstanceProcAddr vkGetInstanceProcAddr = nullptr;
@@ -16,6 +20,13 @@ WWHD_VK_RENDERING_FUNCTIONS(WWHD_VK_DEFINE)
 #undef WWHD_VK_DEFINE
 
 namespace {
+template<auto Slot,typename Function> Function observe(Function function) {
+#ifdef __ANDROID__
+  return detail::ResultObserver<Slot,Function,VkResult,VK_ERROR_DEVICE_LOST,drivers::note_device_lost>::bind(function);
+#else
+  return function;
+#endif
+}
 [[noreturn]] void missing(const char *name) {
   exception_report::raise(std::string("the Vulkan driver does not provide ") + name +
                            "; update the graphics driver");
@@ -27,27 +38,27 @@ void load_global_functions(PFN_vkGetInstanceProcAddr gipa) {
     exception_report::raise("the Vulkan loader has no vkGetInstanceProcAddr");
   vkGetInstanceProcAddr = gipa;
 #define WWHD_VK_LOAD(name) \
-  if (!(name = reinterpret_cast<PFN_##name>(gipa(nullptr, #name)))) missing(#name);
+  if (!(name = observe<&name>(reinterpret_cast<PFN_##name>(gipa(nullptr, #name))))) missing(#name);
   WWHD_VK_GLOBAL_FUNCTIONS(WWHD_VK_LOAD)
 #undef WWHD_VK_LOAD
   // Vulkan 1.1 loaders and newer; a 1.0 loader has none (the caller reports it)
   vkEnumerateInstanceVersion =
-      reinterpret_cast<PFN_vkEnumerateInstanceVersion>(gipa(nullptr, "vkEnumerateInstanceVersion"));
+      observe<&vkEnumerateInstanceVersion>(reinterpret_cast<PFN_vkEnumerateInstanceVersion>(gipa(nullptr, "vkEnumerateInstanceVersion")));
   // only for the log (the layers in the process); a loader without it is not refused
-  vkEnumerateInstanceLayerProperties = reinterpret_cast<PFN_vkEnumerateInstanceLayerProperties>(
-      gipa(nullptr, "vkEnumerateInstanceLayerProperties"));
+  vkEnumerateInstanceLayerProperties = observe<&vkEnumerateInstanceLayerProperties>(reinterpret_cast<PFN_vkEnumerateInstanceLayerProperties>(
+      gipa(nullptr, "vkEnumerateInstanceLayerProperties")));
 }
 
 void load_instance_functions(VkInstance instance) {
 #define WWHD_VK_LOAD(name) \
-  if (!(name = reinterpret_cast<PFN_##name>(vkGetInstanceProcAddr(instance, #name)))) missing(#name);
+  if (!(name = observe<&name>(reinterpret_cast<PFN_##name>(vkGetInstanceProcAddr(instance, #name))))) missing(#name);
   WWHD_VK_INSTANCE_FUNCTIONS(WWHD_VK_LOAD)
 #undef WWHD_VK_LOAD
 }
 
 void load_device_functions(VkDevice device, bool khrDynamicRendering) {
 #define WWHD_VK_LOAD(name) \
-  if (!(name = reinterpret_cast<PFN_##name>(vkGetDeviceProcAddr(device, #name)))) missing(#name);
+  if (!(name = observe<&name>(reinterpret_cast<PFN_##name>(vkGetDeviceProcAddr(device, #name))))) missing(#name);
   WWHD_VK_DEVICE_FUNCTIONS(WWHD_VK_LOAD)
 #undef WWHD_VK_LOAD
   // the core 1.3 function or the extension's: same parameters (VkRenderingInfoKHR = VkRenderingInfo)

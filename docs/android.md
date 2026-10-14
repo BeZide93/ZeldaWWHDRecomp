@@ -14,6 +14,7 @@ game; this project never provides game files.
 | **The GamePad screen on pause** | Press + and the picture switches to the GamePad screen (map and items), like the pause menu of the GameCube version. Press + again to go back. |
 | **60 fps that keeps the game's speed** | On fast Android devices the game shows 60 frames a second. When the Android device gets hot it switches to a steady 30 by itself, so the game never slows down. |
 | **Older Android devices** | If your Adreno GPU's driver is too old, the error screen offers to install a custom driver such as Mesa Turnip. |
+| **GPU recovery** | After a GPU device-lost error, the next start names the driver and offers the system driver, another installed driver, or the existing driver ZIP picker before starting Vulkan. Continuing keeps your current choice; an unfinished first-start probe still falls back to the system driver. |
 | **Saves** | Export and import your save files and keep them in Android's backup. Saves from a real Wii U (USA or Europe) work too. |
 
 ## Tested phones

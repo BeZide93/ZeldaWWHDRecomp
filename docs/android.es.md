@@ -14,6 +14,7 @@ copia del juego de Wii U; este proyecto nunca proporciona archivos del juego.
 | **La pantalla del GamePad al pausar** | Pulsa + y la imagen cambia a la pantalla del GamePad (mapa y objetos), como el menú de pausa de la versión de GameCube. Pulsa + otra vez para volver. |
 | **60 fps sin que el juego vaya lento** | En los dispositivos Android rápidos el juego muestra 60 imágenes por segundo. Cuando el dispositivo Android se calienta, pasa solo a 30 estables, y el juego nunca se ralentiza. |
 | **Dispositivos Android antiguos** | Si el driver de tu GPU Adreno es demasiado antiguo, la pantalla de error ofrece instalar un driver como Mesa Turnip. |
+| **Recuperación de la GPU** | Tras un error de dispositivo perdido de la GPU, el siguiente inicio muestra el driver y ofrece el driver del sistema, otro instalado o el selector de ZIP existente antes de iniciar Vulkan. Continuar conserva tu elección; una prueba inicial incompleta sigue usando el driver del sistema. |
 | **Partidas guardadas** | Exporta e importa tus partidas y guárdalas en la copia de seguridad de Android. Las partidas de una Wii U real (de EE. UU. o de Europa) también funcionan. |
 
 ## Teléfonos probados
