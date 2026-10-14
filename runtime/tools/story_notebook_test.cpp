@@ -17,6 +17,8 @@
 #include "mods/story_store.h"
 #include "mods/story_mail.h"
 #include "mods/story_mail_book.h"
+#include "mods/story_items.h"
+#include "mods/story_item_buttons.h"
 #include "input.h"
 #include "runtime.h"
 
@@ -41,6 +43,9 @@ using story_mail::Book;
 
 void log_msg(const char* fmt, ...) {
     (void)fmt;
+}
+namespace mods {
+uint64_t step() { return 0; }  // story_item_buttons.cpp's research aid
 }
 namespace input {
 bool g_pro = false;
@@ -524,12 +529,14 @@ void test_hooks() {
     call(0x026333F0, kChild, 1);
     call(0x026333F0, kChild + 0x200, 1);
     assert(calls.size() == 2 && !(ld8(kIconA + 0x44) & 1) && (ld8(kIconB + 0x44) & 1));
-    // the notebook can't go on X/Y/R
+    // the notebook goes on X/Y/R in the story block (record 15), never in the save's key; a game item
+    // put on the same button takes it back
     calls.clear();
-    assert(call(0x0268F420, kMenu, 0x31) == 0xFF && call(0x0268F420, kMenu, 0x30) == 0x30);
+    assert(call(0x0268F420, kMenu, 0x31) == 0x31 && call(0x0268F420, kMenu, 0x30) == 0x30);
     call(0x02714B0C, 0, 1, 0, 0x31);
+    assert(calls.empty() && story_items::notebook_on_button(1) && story_item_buttons::button_item(1) == 0xA0);
     call(0x02714B0C, 0, 1, 0, 0x30);
-    assert(calls == std::vector<std::string>{"assign 48"});
+    assert(calls == std::vector<std::string>{"assign 48"} && !story_items::notebook_on_button(1) && !story_item_buttons::button_item(1));
     // a full bag: no place for the notebook until one is free
     uint8_t keep[8];
     memcpy(keep, g_reserve, 8);
@@ -628,11 +635,11 @@ void test_hooks() {
         assert(!icon_place().shown);
         st8(kWin + 0x44, 1);
         assert(icon_place().shown);
-        // X/Y/R on the notebook doesn't lift it; on a game item it does
+        // X/Y/R lifts the notebook towards the button, as a game item
         calls.clear();
         call(0x026302B8, kChild);
         call(0x026302B8, kChild + 0x200);
-        assert(calls == std::vector<std::string>{"float"});
+        assert((calls == std::vector<std::string>{"float", "float"}));
         // a state load: nothing until the window runs again
         state_loaded();
         next_frame();
@@ -1982,6 +1989,7 @@ void test_manifest_charts() {
 
 int main() {
     assert(map(kGlobals, 0x10000) && map(kArena, 0x40000));
+    assert(map(0x10470000, 0x10000));  // g_dComIfG_gameInfo's play.mSelectItem (story_item_buttons.cpp)
     story_store::set_memory(kArena + 0x20000);
     test_list();
     test_record();

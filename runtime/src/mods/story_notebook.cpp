@@ -9,6 +9,7 @@
 #include "story_manifest.h"
 #include "story_chart.h"
 #include "story_items.h"
+#include "story_item_buttons.h"
 #include "story_mail.h"
 #include "story_notebook_game.h"
 #include "story_notebook_font.h"
@@ -310,6 +311,28 @@ bool port_key(Cpu* c, uint32_t key) {
     if (key < kFirstDeliveryKey || key >= kFirstDeliveryKey + kDeliveryPlaces) return false;
     const PortPlaces p = port_places(c);
     return key == p.notebook || key == p.letter;
+}
+// What a menu key of the Delivery Bag shows, for X/Y/R (story_item_buttons_core.h)
+story_item_buttons::MenuKey menu_key(Cpu* c, uint32_t key) {
+    story_item_buttons::MenuKey k;
+    if (key < kFirstDeliveryKey || key >= kFirstDeliveryKey + kDeliveryPlaces) return k;
+    if (const uint16_t item = story_items::at_game_place(key - kFirstDeliveryKey)) {
+        const std::optional<story_items::Item> it = story_items::find(item);
+        k.item = item, k.usable = it && it->usable();
+        return k;
+    }
+    const PortPlaces p = port_places(c);
+    k.notebook = key == p.notebook, k.letter = key == p.letter;
+    return k;
+}
+// An item number the menu may lift towards X/Y/R: not the carried letter, not a mod item without a use action
+bool liftable(uint32_t number) {
+    if (number == kLetterItem) return false;
+    if (story_items::pool_number(number)) {
+        const std::optional<story_items::Item> it = story_items::by_number(number);
+        return it && it->usable();
+    }
+    return true;
 }
 
 // The sentinel's icon pane of a bag place, or 0
@@ -1284,6 +1307,8 @@ void pad(input::PadState& p, Cpu* c) {
     static uint32_t ticks = 0;
     if (++ticks % 15 == 0) declared_tick();
     bag_icon();
+    story_item_buttons::test_assign();
+    story_item_buttons::tick();  // ours on X/Y/R: the item number the game reads this frame
     const float dt = frame_seconds();
     if (!g_open.load(std::memory_order_relaxed)) {
         publish_closing(dt);
@@ -1473,11 +1498,13 @@ void execute_window(Cpu* c) {
     }
 }
 
-// beginCursorSelection(this, point): X/Y/R on the notebook would lift it off its place towards the
-// button, which it can't go on: it stays where it is
+// beginCursorSelection(this, point): X/Y/R lifts an item off its place towards the button. The notebook
+// and a mod item with a use action go (story_item_buttons.h); the carried letter and a mod item
+// without one stay where they are
 void cursor_float(Cpu* c) {
-    if (port_item(ld32(c->r[3] + kItemNumber))) {
-        if (trace()) LOG("[notebook] item menu: the notebook and the letter can't go on X, Y or R");
+    const uint32_t number = ld32(c->r[3] + kItemNumber);
+    if (!liftable(number)) {
+        if (trace()) LOG("[notebook] item menu: item %02X can't go on X, Y or R (the letter, or a mod item without a use action)", number);
         return;
     }
     g_original(c, kCursorFloat);
@@ -1498,18 +1525,32 @@ void touch_select(Cpu* c) {
 }
 
 
-// getSelectedItemValue(this, receiver): the notebook can't go on X, Y or R
+// getSelectedItemValue(this, receiver): the key X/Y/R takes; none for the carried letter and a mod item without a use action
 void selected_value(Cpu* c) {
     g_original(c, kSelectedValue);
-    const uint32_t key = c->r[3];
-    if (port_key(c, key)) c->r[3] = kEmpty;
+    if (story_item_buttons::route(menu_key(c, c->r[3])) == story_item_buttons::Route::Blocked) c->r[3] = kEmpty;
 }
 
-// the game system's X/Y/R assignment (controller, button, key): never the notebook's place
+// the game system's X/Y/R assignment (this, button 0..2, key): the notebook and a mod item with a use
+// action go on the button in the story block (story_item_buttons.h), never in the save's key; a game
+// item is the game's, and takes the button back from ours
 void assign_button(Cpu* c) {
-    const uint32_t key = c->r[5];
-    if (port_key(c, key)) return;
+    const uint32_t slot = c->r[4], key = c->r[5];
+    const story_item_buttons::MenuKey k = menu_key(c, key);
+    switch (story_item_buttons::route(k)) {
+    case story_item_buttons::Route::Blocked: return;
+    case story_item_buttons::Route::Notebook:
+        if (story_item_buttons::assign_notebook(slot)) story_item_buttons::refresh_strip(c);
+        return;
+    case story_item_buttons::Route::Item:
+        if (story_item_buttons::assign_item(k.item, slot)) story_item_buttons::refresh_strip(c);
+        return;
+    case story_item_buttons::Route::Game: break;
+    }
+    uint8_t before[story_item_buttons::kAssignable];
+    story_item_buttons::save_keys(before);
     g_original(c, kAssignButton);
+    story_item_buttons::game_assigned(before, slot);
 }
 
 // the tracked step's resident (a following one): note where it stands (read-only)

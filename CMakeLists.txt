@@ -971,7 +971,7 @@ target_compile_options(story_chart_test PRIVATE -UNDEBUG)
 add_test(NAME story_chart COMMAND story_chart_test)
 # the story notebook: quest list, save record, page navigation, services and item menu hooks
 add_executable(story_notebook_test runtime/tools/story_notebook_test.cpp runtime/src/mods/story_notebook.cpp runtime/src/mods/story_mail.cpp runtime/src/mods/story_store.cpp
-               runtime/src/mods/story_chart.cpp runtime/src/mods/story_items.cpp runtime/src/mods/guest_png.cpp runtime/src/mods/mod_archive.cpp runtime/src/guest_addr_identity.c
+               runtime/src/mods/story_chart.cpp runtime/src/mods/story_items.cpp runtime/src/mods/story_item_buttons.cpp runtime/src/mods/guest_png.cpp runtime/src/mods/mod_archive.cpp runtime/src/guest_addr_identity.c
                ${WWHD_NPC_CATALOGUE})
 target_include_directories(story_notebook_test PRIVATE runtime/include runtime/src runtime/src/mods)
 target_compile_options(story_notebook_test PRIVATE -UNDEBUG)
@@ -982,6 +982,14 @@ add_executable(story_items_test runtime/tools/story_items_test.cpp runtime/src/m
 target_include_directories(story_items_test PRIVATE runtime/include runtime/src runtime/src/mods)
 target_compile_options(story_items_test PRIVATE -UNDEBUG)
 add_test(NAME story_items COMMAND story_items_test)
+# mod items and the notebook on X/Y/R: the decisions, the menu assignment, the game's reads and the item use
+add_executable(story_item_buttons_test runtime/tools/story_item_buttons_test.cpp runtime/src/mods/story_item_buttons.cpp runtime/src/mods/story_notebook.cpp
+               runtime/src/mods/story_mail.cpp runtime/src/mods/story_store.cpp runtime/src/mods/story_chart.cpp runtime/src/mods/story_items.cpp
+               runtime/src/mods/guest_png.cpp runtime/src/mods/mod_archive.cpp runtime/src/guest_addr_identity.c ${WWHD_NPC_CATALOGUE})
+target_include_directories(story_item_buttons_test PRIVATE runtime/include runtime/src runtime/src/mods)
+target_compile_options(story_item_buttons_test PRIVATE -UNDEBUG)
+target_link_libraries(story_item_buttons_test PRIVATE ZLIB::ZLIB)
+add_test(NAME story_item_buttons COMMAND story_item_buttons_test)
 if(Python3_Interpreter_FOUND)
   add_test(NAME release_sdk_package COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/release/test_sdk_package.py")
   add_test(NAME story_notebook_model COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/story_mods/test_notebook_model.py")

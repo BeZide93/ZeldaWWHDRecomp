@@ -23,6 +23,7 @@
 #include "story_chart.h"
 #include "story_notebook.h"
 #include "story_items.h"
+#include "story_item_buttons.h"
 #include "story_manifest.h"
 #include "story_store.h"
 #include "story_takeover.h"
@@ -719,6 +720,18 @@ void init() {
         if(ordinal<0)fatal("[guestmods] items: %08X is not a game function",addr);
         Chain& ch=g_chains[addr];
         ch.addr=addr;ch.ordinal=uint32_t(ordinal);ch.replace=fn;ch.replace_mod="the port's mod items";
+        g_mod_hook_flags[ordinal]=1;
+    });
+    // Mod items and the notebook on X/Y/R (story_item_buttons.h): the item use in play and the HUD's
+    // button read, with the story notebook's item menu hooks.
+    story_item_buttons::set_game_calls(call_original,[](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);});
+    story_item_buttons::install([](uint32_t addr) {
+        auto it=g_chains.find(addr);return it==g_chains.end()?std::string():it->second.replace_mod;
+    },[](uint32_t addr,PpcFunc fn) {
+        int ordinal=ordinal_of(addr);
+        if(ordinal<0)fatal("[guestmods] item buttons: %08X is not a game function",addr);
+        Chain& ch=g_chains[addr];
+        ch.addr=addr;ch.ordinal=uint32_t(ordinal);ch.replace=fn;ch.replace_mod="the port's item buttons";
         g_mod_hook_flags[ordinal]=1;
     });
     story_store::set_game_calls(call_original);
