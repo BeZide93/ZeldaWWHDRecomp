@@ -299,7 +299,7 @@ PortPlaces port_places(Cpu* c) {
     if (!have_save()) return out;
     const bool notebook = notebook_owned(), letter = carried_letter() != 0;
     for (uint32_t k = kFirstDeliveryKey; k < kFirstDeliveryKey + kDeliveryPlaces && ((notebook && !out.notebook) || (letter && !out.letter)); k++) {
-        if (reserve(c, k) != kEmpty) continue;
+        if (reserve(c, k) != kEmpty || story_items::at_game_place(k - kFirstDeliveryKey)) continue;  // a mod item the player put there
         if (notebook && !out.notebook) out.notebook = k;
         else if (letter && !out.letter) out.letter = k;
     }
@@ -1252,6 +1252,9 @@ void close_page() {
     guestmods::hud::store().drop(kOwner);
 }
 bool page_open() { return g_open.load(std::memory_order_relaxed); }
+uint32_t delivery_window_menu() {
+    return g_menu && g_window_step + 1 >= g_step.load(std::memory_order_relaxed) && ld32(g_menu + kMenuWindowMode) == kDeliveryWindow ? g_menu : 0;
+}
 bool caption_open() { return g_caption.open(); }
 
 // buttons held when the page closed: the game gets them only once they are released
@@ -1387,6 +1390,11 @@ void inventory_item(Cpu* c) {
     g_original(c, kInventoryItem);
     if ((lr != kWindowBuild && lr != kWindowInit) || key < kFirstDeliveryKey || key >= kFirstDeliveryKey + kDeliveryPlaces) return;
     if ((c->r[3] & 0xFF) != kEmpty) return;
+    // a mod item the player put in this place (story_items.h): its pool number (nothing is in the save)
+    if (const uint32_t n = story_items::number_at_game_place(key - kFirstDeliveryKey)) {
+        c->r[3] = n;
+        return;
+    }
     const PortPlaces places = port_places(c);
     if (key != places.notebook && key != places.letter) return;
     c->r[3] = key == places.notebook ? kNotebookItem : kLetterItem;
@@ -1403,6 +1411,13 @@ void icon_frame(Cpu* c) {
         c->r[3] = c->r[4] == kNotebookItem ? kNotebookIcon : kLetterIcon;
         return;
     }
+    // a mod item's number: its frame in the extended icon layout, else a stand-in (the letter's)
+    if (story_items::pool_number(c->r[4])) {
+        const std::optional<story_items::Item> it = story_items::by_number(c->r[4]);
+        const int frame = it ? story_items::frame(it->key) : -1;
+        c->r[3] = frame >= 0 ? uint32_t(frame) : kLetterIcon;
+        return;
+    }
     g_original(c, kIconFrame);
 }
 
@@ -1415,6 +1430,11 @@ void open_child(Cpu* c) {
     if (trace()) LOG("[notebook] item menu: A on place %u (item %02X)", index, child ? ld32(child + kItemNumber) : 0xFFu);
     if (child && ld32(child + kItemNumber) == kNotebookItem && open_page("A on its bag place")) return;
     if (child && ld32(child + kItemNumber) == kLetterItem && open_letter("A on its bag place")) return;
+    if (child && story_items::pool_number(ld32(child + kItemNumber)))  // a mod item: its Info (the game has none for it)
+        if (const std::optional<story_items::Item> it = story_items::by_number(ld32(child + kItemNumber))) {
+            story_items::act(it->key, story_items::Action::Info);
+            return;
+        }
     g_original(c, kOpenChild);
 }
 
@@ -1471,7 +1491,11 @@ void touch_select(Cpu* c) {
     if (trace()) LOG("[notebook] item menu: touch on item %02X", ld32(item + kItemNumber));
     if (ld32(item + kItemNumber) == kNotebookItem) open_page("a touch on its bag place");
     if (ld32(item + kItemNumber) == kLetterItem) open_letter("a touch on its bag place");
+    if (story_items::pool_number(ld32(item + kItemNumber)))
+        if (const std::optional<story_items::Item> it = story_items::by_number(ld32(item + kItemNumber)))
+            story_items::act(it->key, story_items::Action::Info);
 }
+
 
 // getSelectedItemValue(this, receiver): the notebook can't go on X, Y or R
 void selected_value(Cpu* c) {

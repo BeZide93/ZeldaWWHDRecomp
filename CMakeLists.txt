@@ -978,7 +978,7 @@ target_compile_options(story_notebook_test PRIVATE -UNDEBUG)
 target_link_libraries(story_notebook_test PRIVATE ZLIB::ZLIB)
 add_test(NAME story_notebook COMMAND story_notebook_test)
 # mod items: save record, manifest items, registry, services, bag actions and the item table hooks
-add_executable(story_items_test runtime/tools/story_items_test.cpp runtime/src/mods/story_items.cpp runtime/src/mods/story_store.cpp runtime/src/guest_addr_identity.c)
+add_executable(story_items_test runtime/tools/story_items_test.cpp runtime/src/mods/story_items.cpp runtime/src/mods/story_store.cpp runtime/src/guest_addr_identity.c ${WWHD_NPC_CATALOGUE})
 target_include_directories(story_items_test PRIVATE runtime/include runtime/src runtime/src/mods)
 target_compile_options(story_items_test PRIVATE -UNDEBUG)
 add_test(NAME story_items COMMAND story_items_test)

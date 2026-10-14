@@ -51,6 +51,16 @@ uint32_t number(uint16_t key);                // its bound pool number, 0 if non
 std::optional<Item> by_number(uint32_t number);  // the installed item bound to a pool number
 uint16_t at_game_place(unsigned place);       // the item the player put in one of the game's places (0..7), 0 if none
 uint16_t on_button(unsigned button);          // the installed item on an item button (0..4), 0 if none
+std::vector<uint16_t> owned();                // the installed items Link has, in the save's record order
+std::vector<uint16_t> unplaced();             // ... of them the ones without a place (the pages were full)
+uint32_t number_at_game_place(unsigned place); // the pool number of the item in a game place (0..7), bound now if needed; 0 if none
+// The bag's soft cap: how many pages new items fill (default kPages, 1..kMaxPages). Places beyond it
+// stay valid in a save.
+void set_page_limit(unsigned pages);
+unsigned page_limit();
+// The icon frame of an item in the game's icon layout (h-fw2's extended BtnItemIcon_00), -1 without it
+void set_frame_source(int (*frame)(uint16_t key));
+int frame(uint16_t key);
 bool notebook_on_button(unsigned button);     // the story notebook is on that button (kRecordNotebookButtons)
 bool assign_notebook(int button);             // puts the notebook on a button (0..4; takes any item off it), -1 takes it off all
 

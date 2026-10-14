@@ -30,7 +30,9 @@ inline constexpr uint8_t kRecordQuestRewardItem = 14;
 inline constexpr uint8_t kRecordNotebookButtons = 15;
 inline constexpr uint16_t kNotebookRecordKey = 1;
 inline constexpr uint8_t kMaxCount = 254;
-inline constexpr unsigned kGamePlaces = 8, kPageSlots = 8, kPages = 4;  // the soft cap: 4 pages of 8
+inline constexpr unsigned kGamePlaces = 8, kPageSlots = 8;
+inline constexpr unsigned kPages = 4;      // the default soft cap: 4 pages of 8 (Bag's limit, story_items::set_page_limit)
+inline constexpr unsigned kMaxPages = 16;  // places of up to 16 pages are valid in a save (a lower limit never loses an item)
 inline constexpr uint8_t kFirstPagePlace = 9;
 inline constexpr unsigned kButtons = 5;
 
@@ -50,13 +52,14 @@ inline bool pool_number(uint32_t number) {
 inline uint16_t item_key(const std::string& mod, const std::string& item) { return story_mail::letter_key(mod, item); }
 
 inline bool game_place(uint8_t place) { return place >= 1 && place <= kGamePlaces; }
-inline bool page_place(uint8_t place) { return place >= kFirstPagePlace && place < kFirstPagePlace + kPages * kPageSlots; }
+inline bool page_place(uint8_t place) { return place >= kFirstPagePlace && place < kFirstPagePlace + kMaxPages * kPageSlots; }
 inline uint8_t page_place(unsigned page, unsigned slot) { return uint8_t(kFirstPagePlace + page * kPageSlots + slot); }
 
 // The items of one save file (a view of its record block)
 class Bag {
 public:
-    explicit Bag(story_mail::Book book) : b_(book) {}
+    // `pages`: how many pages new items fill (the soft cap, 1..kMaxPages)
+    explicit Bag(story_mail::Book book, unsigned pages = kPages) : b_(book), pages_(pages < 1 ? 1 : pages > kMaxPages ? kMaxPages : pages) {}
 
     uint8_t count(uint16_t key) const { return b_.get(kRecordItemCount, key); }
     uint8_t place(uint16_t key) const { return b_.get(kRecordItemPlace, key); }
@@ -108,9 +111,16 @@ public:
         for (uint8_t kind : {kRecordItemCount, kRecordItemPlace, kRecordItemNumber, kRecordItemButtons}) b_.erase(kind, key);
     }
 
-    // The first free place of the extra pages (0: none)
+    // owned items with no place (the pages were full when Link got them)
+    std::vector<uint16_t> unplaced() const {
+        std::vector<uint16_t> out;
+        for (uint16_t k : owned())
+            if (!place(k)) out.push_back(k);
+        return out;
+    }
+    // The first free place of the extra pages within the limit (0: none)
     uint8_t free_page_place() const {
-        for (unsigned p = 0; p < kPages * kPageSlots; p++)
+        for (unsigned p = 0; p < pages_ * kPageSlots; p++)
             if (!at(uint8_t(kFirstPagePlace + p))) return uint8_t(kFirstPagePlace + p);
         return 0;
     }
@@ -187,6 +197,7 @@ private:
         return 0;
     }
     story_mail::Book b_;
+    unsigned pages_;
 };
 
 }  // namespace story_items

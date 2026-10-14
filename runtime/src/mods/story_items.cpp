@@ -12,6 +12,7 @@
 #include "story_items.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cstdlib>
 #include <deque>
 #include <filesystem>
@@ -45,6 +46,8 @@ ShowInfo g_show = nullptr;
 bool (*g_open_notebook)(const char*) = nullptr;
 int32_t (*g_reach)(const std::string&, const std::string&, uint32_t) = nullptr;
 bool g_imported = false, g_installed = false;
+std::atomic<unsigned> g_pages{kPages};
+int (*g_frame)(uint16_t) = nullptr;
 void (*g_original)(Cpu*, uint32_t) = nullptr;
 uint32_t (*g_call)(Cpu*, uint32_t, std::initializer_list<uint32_t>) = nullptr;
 
@@ -54,7 +57,7 @@ bool trace() {
 }
 uint32_t save_base() { return ld32(kSavePtr); }
 bool have_save() { return save_base() != 0 && story_store::book().usable(); }
-Bag bag() { return Bag(story_store::book()); }
+Bag bag() { return Bag(story_store::book(), g_pages.load()); }
 
 const Item* find_locked(uint16_t key) {
     for (const Item& i : g_items)
@@ -133,6 +136,31 @@ uint16_t on_button(unsigned button) {
     const uint16_t key = bag().on_button(button);
     return key && find(key) ? key : 0;
 }
+
+std::vector<uint16_t> owned() {
+    std::vector<uint16_t> out;
+    if (!have_save()) return out;
+    for (uint16_t k : bag().owned())
+        if (find(k)) out.push_back(k);
+    return out;
+}
+std::vector<uint16_t> unplaced() {
+    std::vector<uint16_t> out;
+    if (!have_save()) return out;
+    for (uint16_t k : bag().unplaced())
+        if (find(k)) out.push_back(k);
+    return out;
+}
+uint32_t number_at_game_place(unsigned p) {
+    const uint16_t key = at_game_place(p);
+    if (!key) return 0;
+    Bag b = bag();
+    return b.bind(key);
+}
+void set_page_limit(unsigned pages) { g_pages = std::clamp(pages, 1u, kMaxPages); }
+unsigned page_limit() { return g_pages.load(); }
+void set_frame_source(int (*f)(uint16_t)) { g_frame = f; }
+int frame(uint16_t key) { return g_frame ? g_frame(key) : -1; }
 
 bool notebook_on_button(unsigned button) { return have_save() && button < kButtons && (bag().notebook_buttons() >> button & 1); }
 bool assign_notebook(int button) {

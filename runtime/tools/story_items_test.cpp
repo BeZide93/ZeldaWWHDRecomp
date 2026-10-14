@@ -90,6 +90,9 @@ void test_bag() {
         assert(b.give(item_key("mod", "i" + std::to_string(i)), 1, 1, placed) == 1 && placed);
     }
     assert(b.give(item_key("mod", "extra"), 1, 1, placed) == 1 && !placed && !b.place(item_key("mod", "extra")));
+    assert(b.unplaced() == std::vector<uint16_t>{item_key("mod", "extra")});
+    Bag two(story_store::book(), 2);  // a lower limit: no free place, the items stay where they are
+    assert(!two.free_page_place() && b.place(item_key("mod", "i31")) == kFirstPagePlace + 31);
     // moving: only to a free page place, or a game place the game's save has empty
     const uint16_t i0 = item_key("mod", "i0");
     assert(!b.move(i0, kFirstPagePlace + 1, false));  // taken
@@ -212,6 +215,20 @@ void test_services() {
     st8(kSave + 0xA6 + 4, 0x99);                                  // the game holds a letter there
     assert(!act(k, Action::MoveToGamePlace, 4) && act(k, Action::MoveToGamePlace, 5) && at_game_place(5) == k && number(k));
     assert(act(k, Action::MoveToPage) && !at_game_place(5) && page_place(place(k)));
+    // the owned list, a game place's number, the page limit
+    assert(owned().size() == 3 && unplaced().empty());
+    assert(act(l, Action::MoveToGamePlace, 0) && number_at_game_place(0) == number(l) && pool_number(number_at_game_place(0)));
+    assert(!number_at_game_place(1));
+    assert(act(l, Action::MoveToPage));
+    set_page_limit(0);
+    assert(page_limit() == 1);
+    set_page_limit(99);
+    assert(page_limit() == kMaxPages);
+    set_page_limit(kPages);
+    assert(frame(k) == -1);
+    set_frame_source([](uint16_t) { return 60; });
+    assert(frame(k) == 60);
+    set_frame_source(nullptr);
     // the game's item tables: a pool number bound to an item is that item
     calls.clear();
     cpu.r[3] = number(k), cpu.r[4] = 9;
