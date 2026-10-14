@@ -7,6 +7,10 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Fixed: leftover memory in the save file's empty Quest Logs.** With story mods on, saving could copy leftover
+  bytes into unused padding of the empty Quest Log slots. Those bytes are now always zero; the game never reads
+  them, and the active Quest Log is unchanged.
+
 - **Mod SDK v2: items and treasure charts for story mods** (for mod makers; nothing changes without such a mod):
   - **Mod items:** mods can declare their own items with names, descriptions, icons in the game's item pictures
     and stacks. Link keeps them in the Delivery Bag on extra pages, can put them in the bag's own places, and can
