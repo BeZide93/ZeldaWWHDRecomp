@@ -1,0 +1,36 @@
+// Story UI layouts: the port's own writer of game layout archives (Layout/<name>.szs) from a layout
+// description (JSON) and the package's PNG art, built on the player's machine when a package that has a
+// layout loads. It mirrors the reference generator tools/story_mods/lyt (Python, docs in its modules):
+// for the same description and art both write the same bytes (tools/story_mods/test_lyt.py runs
+// lyt_build_test against the Python output).
+//
+// Supported: the description format of tools/story_mods/lyt/schema.json with RGBA8 textures (tile modes
+// linear, 1d, tiled and the swizzle), "fill" textures and PNG art at its own size. Not supported here (the
+// description is refused, the caller falls back): BC formats and resizing art ("width" / "height" other
+// than the PNG's own size).
+#pragma once
+#include <cstdint>
+#include <filesystem>
+#include <map>
+#include <string>
+#include <vector>
+
+namespace lyt_build {
+
+using Bytes = std::vector<uint8_t>;
+
+// The archive's files: blyt/<name>.bflyt, timg/<texture>^l.bflim, anim/<name>_<animation>.bflan.
+// art_root: where the description's "png" paths are (the package folder). Throws std::runtime_error
+// with a short reason for a description it can't write.
+std::map<std::string, Bytes> build_files(const std::string& description_json, const std::filesystem::path& art_root);
+// The archive: a Yaz0 (stored) SARC of build_files(), as tools/story_mods/notebook_model.py writes it.
+Bytes build(const std::string& description_json, const std::filesystem::path& art_root);
+// The layout name ("name") of a description, or "" if it has none.
+std::string layout_name(const std::string& description_json);
+
+// Builds the archive for a description file once and keeps it in cache_dir, named after a hash of the
+// description, the art it uses and this writer's version: the path of the archive, or "" (logged) if
+// the description can't be built.
+std::string build_cached(const std::filesystem::path& description, const std::filesystem::path& cache_dir);
+
+}  // namespace lyt_build

@@ -455,5 +455,164 @@ class Fill(unittest.TestCase):
         self.assertEqual(im.getpixel((1, 3)), (9, 9, 9, 255))
         self.assertEqual(im.getpixel((3, 3)), (1, 2, 3, 4))
 
+def lyt_build_test():
+    """The port's layout writer test tool (runtime/tools/lyt_build_test.cpp), from WWHD_LYT_BUILD_TEST or a
+    build next to the repo."""
+    root = os.path.dirname(os.path.dirname(HERE))
+    for p in (os.environ.get("WWHD_LYT_BUILD_TEST", ""), os.path.join(root, "build", "cmake", "lyt_build_test"),
+              os.path.join(root, "build", "lyt_build_test")):
+        if p and os.path.exists(p):
+            return p
+    return None
+
+
+# A description that uses every part the port's writer supports (art made in the test, no files)
+EVERYTHING = {
+    "name": "StoryAll_00", "size": [1280, 720], "part_size": [320, 200],
+    "textures": {
+        "Art_00": {"png": "art.png", "tile": "tiled", "swizzle": 5},
+        "Art_01": {"png": "art.png", "tile": "1d"},
+        "Art_02": {"png": "art.png"},
+        "Fill_00": {"fill": {"color": [10, 20, 30], "border": [200, 100, 50, 128], "border_width": 3},
+                    "width": 70, "height": 33, "tile": "tiled"},
+    },
+    "fonts": ["CKingMain.bffnt"],
+    "materials": {
+        "M_Art": {"textures": [{"texture": "Art_00", "wrap": [5, 4],
+                                "srt": {"translate": [0.25, -1], "rotate": 30, "scale": [2, 0.5]}}],
+                  "black": [12, 34, 56, 0], "white": [128, 200, 64], "flags_extra": 0x40000, "raw_tail": "0102aabb"},
+        "M_Two": {"textures": [{"texture": "Art_01"}, {"texture": "Fill_00"}]},
+        "M_Plain": {"white": [255, 128, 0, 77]},
+    },
+    "panes": [
+        {"type": "null", "name": "N_All_00", "size": [30, 40], "influence_alpha": True, "rotate": 12.5, "children": [
+            {"type": "picture", "name": "P_Art_00", "size": [128, 64], "translate": [-100, 50, 3], "material": "M_Art",
+             "alpha": 200, "origin": 4, "visible": False, "user": "abc",
+             "vertex_colors": [[255, 0, 0, 255], [0, 255, 0], [0, 0, 255, 10], [1, 2, 3, 4]]},
+            {"type": "picture", "name": "P_Two_00", "size": [64, 64], "material": "M_Two", "scale": [1.5, -1],
+             "uvs": [[[0, 0], [2, 0], [0, 2], [2, 2]], [[0.5, 0.5], [1, 0.5], [0.5, 1], [1, 1]]]},
+            {"type": "window", "name": "W_Win_00", "size": [300, 120], "frame_size": [16, 16, 12, 12],
+             "content": {"material": "M_Plain", "inflation": [1, -2, 3, -4]},
+             "frames": [{"texture": "Art_02", "flip": f} for f in ("none", "flip_h", "flip_v", "rot180")] +
+                       [{"material": "M_Art", "flip": 3}, {"texture": "Fill_00", "white": [10, 200, 30, 255]},
+                        {"texture": "Fill_00", "black": [1, 1, 1, 1], "flip": "rot270"}, {"material": "M_Two"}]},
+            {"type": "window", "name": "W_Bar_00", "size": [200, 20], "frame_size": 8, "kind": "horizontal",
+             "draw_content": False, "frames": [{"texture": "Art_02"}],
+             "content": {"texture": "Fill_00", "vertex_colors": [[9, 9, 9, 9]] * 4}},
+            {"type": "text", "name": "T_Title_00", "size": [400, 50], "font": "CKingMain.bffnt", "font_size": [40, 48],
+             "text": "Notebook \u00e9\u00e0 \U0001F600 line\nbreak", "capacity": 60, "text_position": ["left", "top"],
+             "line_alignment": "center", "italic": 0.25, "char_space": 1.5, "line_space": -2, "text_id": "MSG_01",
+             "colors": [[255, 236, 170, 255], [255, 200, 120]], "scalable": 75,
+             "shadow": {"offset": [2, -2], "scale": [1.1, 0.9], "colors": [[0, 0, 0, 255], [10, 10, 10, 128]],
+                        "black": [5, 6, 7], "white": [255, 255, 255, 100], "italic": 0.1},
+             "text_material": {"black": [1, 2, 3, 4], "white": [250, 240, 230, 220]}},
+            {"type": "text", "name": "T_Plain_00", "size": [300, 40], "text": "", "text_position": 5,
+             "line_alignment": 3, "text_flags": 4, "user_data": [{"name": "Copy", "type": "string", "value": "T_Title_00"},
+                                                                {"name": "N", "type": "int", "value": [1, -2, 3]},
+                                                                {"name": "F", "type": "float", "value": 0.5}]},
+            {"type": "text", "name": "T_NoShadow_00", "size": [300, 40], "text": "x", "shadow": {"enabled": False}},
+            {"type": "bounding", "name": "B_Btn_00", "size": [100, 40]},
+            {"type": "parts", "name": "L_Btn_00", "size": [100, 40], "part": "BtnSample_00", "part_scale": [0.5, 2]},
+        ]},
+    ],
+    "groups": {"G_All_00": ["N_All_00", "P_Art_00", "W_Win_00"], "G_Two_00": ["P_Two_00", "T_Title_00"]},
+    "animations": {
+        "InAll": {"frames": 10, "groups": ["G_All_00"], "tracks": [
+            {"pane": "N_All_00", "target": "alpha", "keys": [[0, 0], [10, 255]]},
+            {"pane": "P_Art_00", "target": "tx", "keys": [[0, -10], [4, 30], [10, 0]], "interp": "ease"},
+            {"pane": "P_Art_00", "target": "vc.br.a", "keys": [[0, 255, 3.5], [10, 0]]},
+            {"material": "M_Art", "target": "white.g", "keys": [[0, 128], [10, 255]]},
+            {"material": "M_Art", "target": "white.a", "keys": [[0, 128], [10, 255]]},
+            {"material": "M_Art", "target": "tex.sx", "keys": [[0, 1], [10, 2]]},
+            {"pane": "P_Art_00", "target": "visible", "keys": [[0, 0], [5, 1]]},
+        ]},
+        "Select": {"frames": 4, "start": 2, "loop": True, "order": 1, "groups": ["G_Two_00"], "tracks": [
+            {"material": "M_Two", "target": "tex.pattern", "index": 1, "keys": [[0, "Fill_00"], [2, "Art_01"], [3, "x^l.bflim"]]},
+            {"pane": "T_Title_00", "tag": "FLFS", "target": 3, "type": 0, "keys": [[0, 1], [4, 0]]},
+            {"pane": "P_Two_00", "target": "w", "keys": [[0, 64]]},
+        ]},
+        "Free": {"frames": 3, "child_binding": 1, "groups": ["G_All_00"], "tracks": [
+            {"pane": "T_Plain_00", "target": "h", "keys": [[0, 40], [3, 80]]}]},
+    },
+}
+
+
+class CppWriter(unittest.TestCase):
+    """The port's layout writer (C++, lyt_build.cpp) writes the same bytes as this generator."""
+
+    @classmethod
+    def setUpClass(cls):
+        import tempfile
+        cls.exe = lyt_build_test()
+        if not cls.exe:
+            raise unittest.SkipTest("no lyt_build_test (build it, or set WWHD_LYT_BUILD_TEST)")
+        cls.tmp = tempfile.mkdtemp()
+
+    @classmethod
+    def tearDownClass(cls):
+        import shutil
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def compare(self, d, art_dir, tag):
+        import subprocess
+        from notebook_model import sarc, yaz0_stored
+        path = os.path.join(art_dir, tag + ".json")
+        with open(path, "w") as f:
+            json.dump(d, f, indent=1)
+        out = os.path.join(self.tmp, tag)
+        os.makedirs(out, exist_ok=True)
+        r = subprocess.run([self.exe, path, out], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        files = lyt.build_files(lyt.Description.load(path))
+        for name, data in files.items():
+            with open(os.path.join(out, name.replace("/", "_")), "rb") as f:
+                self.assertEqual(f.read(), data, (tag, name))
+        with open(os.path.join(out, "archive.szs"), "rb") as f:
+            self.assertEqual(f.read(), yaz0_stored(sarc(files)), tag)
+        self.assertEqual(sorted(os.listdir(out)), sorted([n.replace("/", "_") for n in files] + ["archive.szs"]))
+
+    def art(self, name, w, h):
+        from PIL import Image
+        Image.frombytes("RGBA", (w, h), gradient(w, h)).save(os.path.join(self.tmp, name))
+
+    def test_everything(self):
+        self.art("art.png", 96, 40)
+        d = json.loads(json.dumps(EVERYTHING))
+        self.compare(d, self.tmp, "everything")
+        d["color_space"] = "linear"
+        self.compare(d, self.tmp, "everything_linear")
+
+    def test_examples(self):
+        self.art("plate.png", 512, 171)
+        for ex in ("plate.json", "text.json"):
+            d = load_json(os.path.join(HERE, "lyt", "examples", ex))
+            self.compare(d, self.tmp, ex[:-5])
+
+    def test_window_demo(self):
+        import subprocess
+        art = os.path.join(self.tmp, "wdemo")
+        js = os.path.join(art, "demo.json")
+        os.makedirs(art, exist_ok=True)
+        subprocess.run([sys.executable, os.path.join(HERE, "lyt", "examples", "window_demo.py"),
+                        os.path.join(art, "demo.szs"), "--art", art, "--json", js], check=True, capture_output=True)
+        d = load_json(js)
+        for spec in d["textures"].values():  # the port reads art only by paths relative to the package
+            if "png" in spec:
+                spec["png"] = os.path.relpath(spec["png"], art)
+        self.compare(d, art, "window_demo")
+
+    def test_refusals(self):
+        import subprocess
+        self.art("plate.png", 512, 171)
+        for change in ({"format": "bc1"}, {"width": 256}):
+            d = load_json(os.path.join(HERE, "lyt", "examples", "plate.json"))
+            d["textures"]["StoryPlate_00"].update(change)
+            path = os.path.join(self.tmp, "refused.json")
+            with open(path, "w") as f:
+                json.dump(d, f)
+            r = subprocess.run([self.exe, path, self.tmp], capture_output=True, text=True)
+            self.assertEqual(r.returncode, 3, change)
+
+
 if __name__ == "__main__":
     unittest.main()

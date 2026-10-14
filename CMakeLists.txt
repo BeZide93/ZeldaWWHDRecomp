@@ -437,6 +437,14 @@ add_executable(story_lyt_text_test runtime/tools/story_lyt_text_test.cpp runtime
 target_include_directories(story_lyt_text_test PRIVATE runtime/src)
 target_compile_options(story_lyt_text_test PRIVATE -UNDEBUG)
 add_test(NAME story_lyt_text COMMAND story_lyt_text_test)
+# the port's layout writer (runtime/src/mods/lyt_build.cpp); tools/story_mods/test_lyt.py compares its
+# output with the reference generator's
+add_executable(lyt_build_test runtime/tools/lyt_build_test.cpp runtime/src/mods/lyt_build.cpp runtime/src/mods/guest_png.cpp
+               runtime/src/mods/mod_archive.cpp)
+target_include_directories(lyt_build_test PRIVATE runtime/include runtime/src runtime/src/mods)
+target_compile_options(lyt_build_test PRIVATE -UNDEBUG)
+target_link_libraries(lyt_build_test PRIVATE ZLIB::ZLIB)
+add_test(NAME lyt_build COMMAND lyt_build_test)
 # the text prompt's reader of the game's name font (runtime/src/overlay/game_font.cpp)
 add_executable(rtl_text_test runtime/tools/rtl_text_test.cpp runtime/src/rtl_text.cpp)
 target_include_directories(rtl_text_test PRIVATE runtime/src)
