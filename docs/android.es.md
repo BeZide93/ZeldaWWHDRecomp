@@ -121,6 +121,28 @@ liberación de memoria en segundo plano y las paradas de las herramientas de par
 informe del sistema. Si hay un informe nativo cercano en el tiempo, se incluye en el mismo archivo.
 Compartir es opcional.
 
+### Diagnóstico de memoria opcional
+
+En ejecuciones de diagnóstico, `WWHD_VK_MEMORY_LOG_FRAMES=300` añade informes agregados
+`[gfx] memory` cada 300 fotogramas del renderizador a los registros normales y de fallos.
+Sin definir, con cero o con un valor inválido, desactiva la recopilación. Los informes
+incluyen RSS actual, asignaciones de imágenes en caché, bloques de carga y capacidades
+de datos de shaders retenidos; no contienen código de shaders ni datos de partidas.
+RSS no es el total del heap ni una medición del máximo.
+
+El GLSL final se comparte de forma inmutable entre shaders, registros de caché en disco
+y compilaciones pendientes. La capacidad de código canónico cuenta cada asignación
+compartida una vez; la capacidad GLSL corresponde al texto temporal de traducción,
+y las capacidades de código en disco/pendiente corresponden a copias independientes.
+El texto del descompilador se libera tras las reescrituras y comprobaciones de paquetes
+gráficos. Se conservan las comparaciones exactas, la exportación de shaders, los
+originales para verificación y la compatibilidad WWVKSC02. Los contadores excluyen
+resultados del compilador, instantáneas de disco, metadatos, sobrecarga del asignador
+e imágenes retiradas, ajenas a la caché o del controlador. Para investigar retención,
+usa resúmenes agregados del heap con una escena repetible; desactiva estos diagnósticos
+al comparar rendimiento.
+
+
 ---
 
 El port de Android es de [rhemfur](https://github.com/rhemfur) y forma parte de ZeldaWWHDRecomp.

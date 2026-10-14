@@ -7,6 +7,7 @@
 #include "shader_compiler.h"
 #include "shader_translation.h"
 #include "shader_binary.h"
+#include "shader_source.h"
 #include "worker_metrics.h"
 #include "backend.h"
 #include "vertex_formats.h"
@@ -39,6 +40,7 @@
 #include <future>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 
 LatteDecompilerShader* FinishDecompiledShader(LatteDecompilerOutput_t& output);
 LatteFetchShader* LatteShaderRecompiler_createFetchShader(LatteFetchShader::CacheHash hash,
@@ -116,7 +118,7 @@ constexpr size_t maxCacheBytes = 128u * 1024u * 1024u;
 constexpr size_t maxSourceBytes = 4u * 1024u * 1024u;
 constexpr size_t maxSpirvWords = 1024u * 1024u;
 constexpr size_t maxCacheEntries = 65536;
-struct DiskShader { std::string source; std::vector<uint32_t> words; bool vertex; bool fromDisk = false; };
+struct DiskShader { std::shared_ptr<const std::string> source; std::vector<uint32_t> words; bool vertex; bool fromDisk = false; };
 std::unordered_map<uint64_t, DiskShader> diskShaders;
 std::string diskPath;
 bool diskInitialized = false, diskDirty = false;
@@ -169,7 +171,7 @@ bool decode_disk_cache(const std::vector<uint8_t>& file,
         DiskShader entry;
         entry.vertex=stage!=0;
         entry.fromDisk=true;
-        entry.source.assign(reinterpret_cast<const char*>(file.data()+pos),size_t(sourceLength));
+        entry.source = std::make_shared<const std::string>(reinterpret_cast<const char*>(file.data()+pos),size_t(sourceLength));
         pos+=sourceLength;
         entry.words.reserve(size_t(wordCount));
         for(uint64_t j=0;j<wordCount;++j) {
@@ -526,13 +528,13 @@ uint32_t key_verify_rate() {
     return rate;
 }
 uint64_t output_hash(const Shader& shader) {
-    uint64_t hash = hash_bytes(shader.glsl.data(), shader.glsl.size(), shader.vertex ? 0x5151 : 0xA2A2);
+    uint64_t hash = hash_bytes(shader.source_text().data(), shader.source_text().size(), shader.vertex ? 0x5151 : 0xA2A2);
     hash = hash_bytes(&shader.mapping, sizeof shader.mapping, hash);
     hash = hash_bytes(&shader.uniforms, sizeof shader.uniforms, hash);
     return hash_bytes(&shader.descriptorRanks, sizeof shader.descriptorRanks, hash);
 }
 uint64_t portable_output_identity(const Shader& shader) {
-    PortableShaderIdentity id(shader.vertex, uint32_t(shader.kind), shader.glsl);
+    PortableShaderIdentity id(shader.vertex, uint32_t(shader.kind), shader.source_text());
     const auto& m=shader.mapping;
     id.words(m.textureUnitToBindingPoint); id.words(m.relBindingPointToRelTextureUnit);
     id.word(uint32_t(m.textureUnitBaseBindingPoint)); id.word(uint32_t(m.textureUnitCount));
@@ -552,7 +554,7 @@ uint64_t portable_output_identity(const Shader& shader) {
     return id.value();
 }
 bool same_output(const Shader& a, const Shader& b) {
-    return a.vertex == b.vertex && a.glsl == b.glsl &&
+    return a.vertex == b.vertex && a.source_text() == b.source_text() &&
            !std::memcmp(&a.mapping, &b.mapping, sizeof a.mapping) &&
            !std::memcmp(&a.uniforms, &b.uniforms, sizeof a.uniforms) &&
            !std::memcmp(&a.descriptorRanks, &b.descriptorRanks, sizeof a.descriptorRanks);
@@ -708,6 +710,11 @@ bool decompile(Shader& shader, const uint32_t* regs, bool vertex, LatteFetchShad
             }
         }
     }
+    // Rewrites and graphics-pack validation above have consumed the original
+    // decompiler text. Keep its metadata, but release this independent copy;
+    // exact aliases, verification and debug export use glsl/translatedGlsl.
+    delete shader.dec->strBuf_shaderSource;
+    shader.dec->strBuf_shaderSource = nullptr;
     return true;
 }
 bool translate_owned(Shader& shader, const uint32_t* regs, bool vertex,
@@ -787,17 +794,17 @@ void verify_key(const uint32_t* regs, bool vertex, LatteFetchShader* fetch, uint
     reference.vertex = vertex;
     bool built = translate_owned(reference, regs, vertex, fetch, address, size, base, false, link, ~uint64_t{0}, key);
     ++stats.verifyChecks;
-    const std::string& translated = shader.translatedGlsl.empty() ? shader.glsl : shader.translatedGlsl;
-    if (!built || reference.glsl != translated ||
+    const std::string& translated = shader.translatedGlsl.empty() ? shader.source_text() : shader.translatedGlsl;
+    if (!built || reference.source_text() != translated ||
         std::memcmp(&reference.mapping, &shader.mapping, sizeof shader.mapping) ||
         std::memcmp(&reference.uniforms, &shader.uniforms, sizeof shader.uniforms) ||
         std::memcmp(&reference.descriptorRanks, &shader.descriptorRanks, sizeof shader.descriptorRanks)) {
         ++stats.verifyViolations;
         std::string left, right;
-        first_difference(translated, reference.glsl, left, right);
+        first_difference(translated, reference.source_text(), left, right);
         fprintf(stderr, "[vulkan shader key] VIOLATION %s %08X key %016llx legacy %016llx: %s; cached \"%s\" vs now \"%s\"\n",
                 vertex ? "vs" : "ps", address, (unsigned long long)key, (unsigned long long)legacy,
-                !built ? reference.error.c_str() : reference.glsl != translated ? "GLSL differs" : "binding metadata differs",
+                !built ? reference.error.c_str() : reference.source_text() != translated ? "GLSL differs" : "binding metadata differs",
                 left.c_str(), right.c_str());
     }
     free_decompiler(reference.dec);
@@ -921,7 +928,7 @@ LatteFetchShader* get_fetch_shader(const uint32_t* regs, uint64_t* keyOut, uint6
 
 namespace {
 std::vector<Shader*> pendingShaderRecords;
-std::unordered_map<uint64_t, std::pair<std::string, std::weak_ptr<ShaderBinary>>> pendingBinarySources;
+std::unordered_map<uint64_t, std::pair<std::shared_ptr<const std::string>, std::weak_ptr<ShaderBinary>>> pendingBinarySources;
 void publish_shader_binary(Shader& shader, uint64_t frame) {
     if (!shader.binary) return;
     auto binary = shader.binary;
@@ -933,20 +940,23 @@ void publish_shader_binary(Shader& shader, uint64_t frame) {
         ++stats.spirvCompiles;
         stats.spirvCompileNs += result.compileNs;
     }
-    const auto key = cache_checksum(reinterpret_cast<const uint8_t*>(shader.glsl.data()), shader.glsl.size()) ^
+    const auto key = cache_checksum(reinterpret_cast<const uint8_t*>(shader.source_text().data()), shader.source_text().size()) ^
         cache_fingerprint() ^ (shader.vertex ? 0x9E3779B97F4A7C15ull : 0xD1B54A32D192ED03ull);
     auto cached = diskShaders.find(key);
-    if (shader.glsl.size() <= maxSourceBytes && cache_spirv_valid(shader.spirv) &&
+    if (shader.source_text().size() <= maxSourceBytes && cache_spirv_valid(shader.spirv) &&
         diskShaders.size() < maxCacheEntries) {
         const size_t oldBytes = cached == diskShaders.end() ? 0 :
-            20 + cached->second.source.size() + cached->second.words.size() * 4;
-        const size_t newBytes = 20 + shader.glsl.size() + shader.spirv.size() * 4;
+            20 + cached->second.source->size() + cached->second.words.size() * 4;
+        const size_t newBytes = 20 + shader.source_text().size() + shader.spirv.size() * 4;
         if (newBytes <= maxCacheBytes - (diskBytes - oldBytes)) {
-            diskShaders.insert_or_assign(key, DiskShader{shader.glsl, shader.spirv, shader.vertex, false});
+            diskShaders.insert_or_assign(key, DiskShader{shader.canonicalSource, shader.spirv, shader.vertex, false});
             diskBytes = diskBytes - oldBytes + newBytes;
             ++diskRevision; diskDirty = !diskPath.empty(); diskChangedFrame = frame;
         }
     }
+    // Only this compilation's source lease has ended. A hash collision or a
+    // newer submission may have replaced the map entry while it was pending.
+    release_pending_shader_source(pendingBinarySources, key, binary);
     shader.binary.reset();
 }
 void poll_shader_binaries(uint64_t frame, bool drain = false) {
@@ -1079,21 +1089,27 @@ Shader* translate(const uint32_t* regs, bool vertex, LatteFetchShader* fetch, ui
     initialize_disk_cache();
     // Guest variants retain distinct metadata, but identical final GLSL shares
     // compilation even with persistence disabled. Exact source checks collisions.
-    uint64_t spirvKey=cache_checksum(reinterpret_cast<const uint8_t*>(shader->glsl.data()),shader->glsl.size()) ^
+    uint64_t spirvKey=cache_checksum(reinterpret_cast<const uint8_t*>(shader->source_text().data()),shader->source_text().size()) ^
         cache_fingerprint() ^ (vertex ? 0x9E3779B97F4A7C15ull : 0xD1B54A32D192ED03ull);
     auto cached=diskShaders.find(spirvKey);
-    if(cached!=diskShaders.end() && cached->second.vertex==vertex && cached->second.source==shader->glsl) {
+    // Share only exact final text. Hash collisions keep independent immutable
+    // owners; cache replacement cannot invalidate a Shader or disk snapshot.
+    auto pendingSource = pendingBinarySources.find(spirvKey);
+    shader->canonicalSource = canonical_shader_source(shader->glsl,
+        cached != diskShaders.end() && cached->second.vertex == vertex ? cached->second.source : nullptr,
+        pendingSource != pendingBinarySources.end() ? pendingSource->second.first : nullptr);
+    if(cached!=diskShaders.end() && cached->second.vertex==vertex && *cached->second.source==shader->source_text()) {
         shader->spirv=cached->second.words;
         if(cached->second.fromDisk) ++stats.diskHits;
         else ++stats.spirvReuseHits;
     } else {
         auto pending = pendingBinarySources.find(spirvKey);
-        if (pending != pendingBinarySources.end() && pending->second.first == shader->glsl)
+        if (pending != pendingBinarySources.end() && *pending->second.first == shader->source_text())
             shader->binary = pending->second.second.lock();
         if (shader->binary) ++stats.spirvReuseHits;
         else {
             std::optional<ShaderCompileTicket> ticket;
-            while (!(ticket = request_shader_compile(shader->glsl,
+            while (!(ticket = request_shader_compile(shader->source_text(),
                 vertex ? ShaderStage::Vertex : ShaderStage::Fragment, frame, key,
                 async_shaders_enabled()))) {
                 if (frame != ~uint64_t{0}) {
@@ -1104,7 +1120,7 @@ Shader* translate(const uint32_t* regs, bool vertex, LatteFetchShader* fetch, ui
             }
             shader->binary = std::make_shared<ShaderBinary>(std::move(*ticket));
             pendingBinarySources.insert_or_assign(spirvKey,
-                std::make_pair(shader->glsl, std::weak_ptr<ShaderBinary>(shader->binary)));
+                std::make_pair(shader->canonicalSource, std::weak_ptr<ShaderBinary>(shader->binary)));
         }
         if (frame == ~uint64_t{0} || !async_shaders_enabled()) {
             (void)shader_binary_words_exact(shader->binary, frame);
@@ -1152,15 +1168,15 @@ DiskSaveResult write_shader_snapshot(DiskSnapshot snapshot,std::string path,uint
         std::vector<uint8_t> payload;
         size_t expected=0;
         for(const auto& [key,entry]:snapshot) {
-            size_t bytes=20+entry.source.size()+entry.words.size()*4;
+            size_t bytes=20+entry.source->size()+entry.words.size()*4;
             if(bytes>maxCacheBytes-40-expected) return finish();
             expected+=bytes;
         }
         payload.reserve(expected);
         for(const auto& [key,entry]:snapshot) {
             cache_put(payload,key,8); cache_put(payload,entry.vertex,4);
-            cache_put(payload,entry.source.size(),4); cache_put(payload,entry.words.size(),4);
-            payload.insert(payload.end(),entry.source.begin(),entry.source.end());
+            cache_put(payload,entry.source->size(),4); cache_put(payload,entry.words.size(),4);
+            payload.insert(payload.end(),entry.source->begin(),entry.source->end());
             for(uint32_t word:entry.words) cache_put(payload,word,4);
         }
         std::vector<uint8_t> header={'W','W','V','K','S','C','0','2'};
@@ -1242,20 +1258,26 @@ ShaderStats shader_stats() {
 ShaderMemoryStats shader_memory_stats() {
     ShaderMemoryStats result;
     result.shaders = shaders.size();
+    std::unordered_set<const std::string*> sources;
+    auto countSource = [&](const auto& source) {
+        if (source && sources.insert(source.get()).second)
+            result.canonicalSourceCapacity += source->capacity();
+    };
     for (const auto& [key, shader] : shaders) {
         if (shader->dec && shader->dec->strBuf_shaderSource)
             result.decompilerText += shader->dec->strBuf_shaderSource->getLen();
         result.glslCapacity += shader->glsl.capacity();
+        countSource(shader->canonicalSource);
         result.verifyCapacity += shader->translatedGlsl.capacity();
         result.spirvCapacity += shader->spirv.capacity() * sizeof(uint32_t);
     }
     result.diskEntries = diskShaders.size();
     for (const auto& [key, shader] : diskShaders) {
-        result.diskSourceCapacity += shader.source.capacity();
+        countSource(shader.source);
         result.diskSpirvCapacity += shader.words.capacity() * sizeof(uint32_t);
     }
     for (const auto& [key, pending] : pendingBinarySources)
-        result.pendingSourceCapacity += pending.first.capacity();
+        countSource(pending.first);
     return result;
 }
 

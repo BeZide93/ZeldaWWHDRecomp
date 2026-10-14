@@ -37,7 +37,9 @@ struct Shader {
     LatteDecompilerOutputUniformOffsets uniforms;
     std::vector<uint32_t> spirv;
     std::shared_ptr<ShaderBinary> binary; // CPU result; immutable metadata is already published
-    std::string glsl;
+    std::string glsl; // Mutable translation scratch, released when canonicalized.
+    std::shared_ptr<const std::string> canonicalSource;
+    const std::string& source_text() const { return canonicalSource ? *canonicalSource : glsl; }
     std::string translatedGlsl;  // verify mode only: the translation a graphics pack replaced
     std::string error;
     bool ready() const { return dec && (!spirv.empty() || binary) && error.empty(); }
@@ -73,7 +75,7 @@ ShaderStats shader_stats();
 struct ShaderMemoryStats {
     uint64_t shaders = 0, decompilerText = 0, glslCapacity = 0, verifyCapacity = 0;
     uint64_t spirvCapacity = 0, diskEntries = 0, diskSourceCapacity = 0, diskSpirvCapacity = 0;
-    uint64_t pendingSourceCapacity = 0;
+    uint64_t pendingSourceCapacity = 0, canonicalSourceCapacity = 0;
 };
 ShaderMemoryStats shader_memory_stats();
 // Render-thread-only checkpoint schedules one immutable disk worker after quiet frames.

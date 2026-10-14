@@ -114,6 +114,24 @@ traces, process-state bytes and logcat to avoid including names, save data or pr
 Normal quits, background memory reclamation and save-tool stops do not trigger a system report.
 A nearby native crash report is included in the same share file when available. Sharing is optional.
 
+### Optional memory diagnostics
+
+For diagnostic launches, `WWHD_VK_MEMORY_LOG_FRAMES=300` adds aggregate `[gfx] memory`
+reports every 300 renderer frames to regular and crash logs. Unset, zero or invalid
+values disable collection. Reports contain current RSS, cached image allocations,
+upload blocks and retained shader payload capacities; they contain no shader source
+or save data. RSS is not a heap total or peak measurement.
+
+Final GLSL is shared immutably by shaders, disk-cache records and pending compilations.
+Canonical-source capacity counts each shared allocation once; GLSL capacity covers
+translation scratch, and disk/pending source capacities cover independent copies.
+Decompiler text is released after rewriting and graphics-pack checks. Exact source
+comparisons, shader export, verification originals and WWVKSC02 compatibility remain.
+Counters exclude compiler results, disk snapshots, metadata, allocator overhead and
+retired/non-cache/driver images. Use aggregate heap summaries with a repeatable scene
+for retention investigations, and disable diagnostics for performance comparisons.
+
+
 ---
 
 The Android port is by [rhemfur](https://github.com/rhemfur), part of ZeldaWWHDRecomp. A fan

@@ -661,7 +661,7 @@ void capture_pipeline_failure(VkResult result, vk::Shader* vs, vk::Shader* ps,
       snprintf(name,sizeof name,"captures/pipeline-failed-%s-%016llX",
           shaders[i]->vertex ? "vs" : "ps",(unsigned long long)shaders[i]->key);
       if(FILE* f=fopen((std::string(name)+".glsl").c_str(),"wb")) {
-        fwrite(shaders[i]->glsl.data(),1,shaders[i]->glsl.size(),f); fclose(f);
+        fwrite(shaders[i]->source_text().data(),1,shaders[i]->source_text().size(),f); fclose(f);
       }
       if(FILE* f=fopen((std::string(name)+".spv").c_str(),"wb")) {
         fwrite(words[i]->data(),4,words[i]->size(),f); fclose(f);

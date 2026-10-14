@@ -2937,6 +2937,7 @@ void swap() {
     LOG("[gfx] memory disk %llu source-capacity %.2f MiB SPIRV-capacity %.2f MiB pending-source-capacity %.2f MiB",
         (unsigned long long)memory.diskEntries,memory.diskSourceCapacity/mib,
         memory.diskSpirvCapacity/mib,memory.pendingSourceCapacity/mib);
+    LOG("[gfx] memory unique canonical-source-capacity %.2f MiB (shared Shader/disk/pending owners)",memory.canonicalSourceCapacity/mib);
     LOG("[gfx] memory scope: payload/capacity excludes compiler results, disk snapshots, metadata and allocator overhead");
     LOG("[gfx] memory scope: cached image allocations exclude retired, non-cache and driver images");
     // Excludes map/metadata/allocator overhead, compiler tickets/results,
