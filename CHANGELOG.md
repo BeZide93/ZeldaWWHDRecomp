@@ -7,6 +7,16 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Mod SDK v2: items and treasure charts for story mods** (for mod makers; nothing changes without such a mod):
+  - **Mod items:** mods can declare their own items with names, descriptions, icons in the game's item pictures
+    and stacks. Link keeps them in the Delivery Bag on extra pages, can put them in the bag's own places, and can
+    put them, or the story notebook, on X, Y or R to use them. While Link has mod items, R in the Delivery Bag
+    turns to the extra pages (L/R turn pages) instead of putting an item on R; X and Y still assign items.
+  - **Treasure charts:** a mod's treasure chart now works like the game's own: the light ring at its spot, the
+    crane, the chest and its item (a game item or a mod item), then the chart counts as finished.
+  - **Saves:** mod items and charts are kept in the story mods' own part of the save, and turning the mods off
+    shows the game's inventory exactly as before.
+
 - **Story Notebook: a new look for mod quests** (Mod SDK v2): the notebook's list and quest pages are now drawn
   as real game layouts, on the TV and the GamePad, with a mini sea chart on each quest page, the open book in the
   Delivery Bag and the game's own fonts. A quest's page says "Not started yet" with its first place, "Finished"
