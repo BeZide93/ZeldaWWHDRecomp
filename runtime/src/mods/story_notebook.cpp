@@ -1405,6 +1405,14 @@ void cursor_float(Cpu* c) {
 // the game's own pick-up runs first and is put back as the touch ends (the page keeps the touch)
 void touch_select(Cpu* c) {
     const uint32_t item = c->r[3];
+    // a touch on the notebook's place opens the page, so the game doesn't lift the place's item into the
+    // floating icon (hdMenuItem_c::selectTouchEnter: prepareTouchSelection + the float animation): it would
+    // show the stand-in's icon (the Cabana Deed's parchment) for a frame before the page covers the bag
+    if (ld32(item + kItemNumber) == kNotebookItem && notebook_owned() && !g_open.load(std::memory_order_relaxed)) {
+        if (trace()) LOG("[notebook] item menu: touch on the notebook's place (no lift)");
+        open_page("a touch on its bag place");
+        return;
+    }
     g_original(c, kTouchSelect);
     if (trace()) LOG("[notebook] item menu: touch on item %02X", ld32(item + kItemNumber));
     if (ld32(item + kItemNumber) == kNotebookItem && open_page("a touch on its bag place"))

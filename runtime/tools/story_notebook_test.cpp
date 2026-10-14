@@ -503,12 +503,13 @@ void test_hooks() {
     p.buttons = input::kB;
     pad(p);
     assert(p.buttons == input::kB);  // a new press reaches the game
-    // a touch on the notebook: the game's pick-up, then the page; on a game item only the pick-up
+    // a touch on the notebook: the page, without the game's pick-up (the lift would show the stand-in's
+    // icon); on a game item only the pick-up
     calls.clear();
     call(0x02630A64, kChild + 0x200);
     assert(calls == std::vector<std::string>{"pick up"} && !page_open());
     call(0x02630A64, kChild);
-    assert(calls.size() == 2 && page_open());
+    assert(calls.size() == 1 && page_open());
     close_page();
     p = {};
     pad(p);
