@@ -58,7 +58,7 @@ uint32_t number_at_game_place(unsigned place); // the pool number of the item in
 // stay valid in a save.
 void set_page_limit(unsigned pages);
 unsigned page_limit();
-// The icon frame of an item in the game's icon layout (h-fw2's extended BtnItemIcon_00), -1 without it
+// The icon frame of an item in the game's icon layout (the port's extended BtnItemIcon_00), -1 without it
 void set_frame_source(int (*frame)(uint16_t key));
 int frame(uint16_t key);
 bool notebook_on_button(unsigned button);     // the story notebook is on that button (kRecordNotebookButtons)
