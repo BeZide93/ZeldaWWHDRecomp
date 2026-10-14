@@ -76,7 +76,7 @@ class Description:
             yield from self.iter_panes(p.get("children", []))
 
     def validate(self):
-        from .panes import PANE_TYPES
+        from .panes import PANE_TYPES, materials_of
         names = set()
         for p in self.iter_panes():
             if p.get("type", "null") not in PANE_TYPES:
@@ -95,8 +95,8 @@ class Description:
             bound = {p for g in spec.get("groups", []) for p in self.groups.get(g, [])}
             users = {}
             for p in self.iter_panes():
-                if p.get("material"):
-                    users.setdefault(p["material"], set()).add(p["name"])
+                for m in materials_of(p):
+                    users.setdefault(m, set()).add(p["name"])
             for t in spec.get("tracks", []):
                 if "pane" in t and t["pane"] not in names:
                     raise ValueError("animation %r: unknown pane %r" % (a, t["pane"]))

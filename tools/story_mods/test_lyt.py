@@ -130,6 +130,37 @@ class Colours(unittest.TestCase):
             self.assertAlmostEqual(struct.unpack(">f", anim[e + 16:e + 20])[0], key, 0)
 
 
+class MaterialUsers(unittest.TestCase):
+    def test_window_frame_material_track(self):
+        """An animated frame material of an 8-frame window in the groups is accepted (lyt-window)."""
+        from lyt.sections import wnd1
+        if not hasattr(wnd1, "materials"):
+            self.skipTest("window panes not merged yet")
+        d = load_json(EXAMPLE)
+        names = ["W_Btn_00" + s for s in ("LT", "RT", "LB", "RB", "L", "R", "T", "B")]
+        for n in names:
+            d["materials"][n] = {"textures": [{"texture": "StoryPlate_00"}]}
+        d["panes"].append({"type": "window", "name": "W_Btn_00", "size": [200, 80], "frame_size": 16,
+                           "frames": [{"material": n} for n in names]})
+        d["groups"]["G_Btn_00"] = ["W_Btn_00"]
+        track = {"material": "W_Btn_00LT", "target": "white.r", "keys": [[0, 255], [4, 128]]}
+        d["animations"]["Select"] = {"frames": 4, "groups": ["G_Btn_00"], "tracks": [track]}
+        lyt.Description(d)  # accepted
+        d["animations"]["Select"]["groups"] = ["G_All_00"]
+        with self.assertRaises(ValueError):
+            lyt.Description(d)
+
+    def test_registered_users(self):
+        from lyt import panes
+        d = load_json(EXAMPLE)
+        d["materials"]["M_X"] = {"textures": [{"texture": "StoryPlate_00"}]}
+        d["panes"][0]["children"][0]["material"] = "M_X"
+        d["groups"]["G_All_00"].append("P_Plate_00")
+        d["animations"]["InAll"]["tracks"].append({"material": "M_X", "target": "white.r", "keys": [[0, 1]]})
+        lyt.Description(d)
+        self.assertEqual(panes.materials_of({"type": "null", "name": "N"}), [])
+
+
 class Animation(unittest.TestCase):
     def test_hermite_slopes(self):
         keys = tracks.hermite_keys([[0, 0], [10, 100], [20, 100]])
