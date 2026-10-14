@@ -57,6 +57,7 @@ const uint32_t kWindowInit = GC(0x02693C24);      // its call in initializeSaveC
 const uint32_t kIconFrame = GC(0x0262F880);       // u32 itemForSlot(item, r4 = item number): the icon frame
 const uint32_t kOpenChild = GC(0x0268F060);       // hdMenuMain_c::openSelectedChild(index): A on a place: the item's caption
 const uint32_t kTouchSelect = GC(0x02630A64);     // hdMenuItem_c::selectTouchEnter(): a place is touched (an icon is picked up)
+const uint32_t kUnselectEnter = GC(0x02630FC4);   // hdMenuItem_c::unselectEnter(): the touch ended without lifting it (a tap)
 const uint32_t kSetVisible = GC(0x026333F0);      // hdMenuItem_c::setVisible(visible): shows the item's icon pane
 const uint32_t kExecuteWindow = GC(0x0268FF50);   // hdMenuMain_c::executeWindow(): the bag window's state, every frame it is open
 const uint32_t kCursorFloat = GC(0x026302B8);     // hdMenuItem_c::beginCursorSelection(point): X/Y/R lifts the item off its place
@@ -86,6 +87,7 @@ constexpr uint32_t kFirstWindowChild = 0x14, kWindowChildren = 8;          // th
 // window runs (executeWindow). Only that place carries the icon: the menu's floating icon (the item
 // the cursor or a touch lifts, sMenuIcon) is another item that may show the notebook's number too.
 uint32_t g_menu = 0, g_bag_item = 0, g_letter_item = 0;  // game thread
+uint32_t g_touch_item = 0;  // the port item a touch picked up, until it ends as a tap or becomes a drag (game thread)
 std::atomic<uint64_t> g_step{0};  // the game's logic steps (logic_step)
 uint64_t g_window_step = 0;     // the step the bag window last ran
 const char* g_icon_reason = "";       // why the icon is (not) shown, for the trace
@@ -1503,6 +1505,7 @@ void execute_window(Cpu* c) {
 // without one stay where they are
 void cursor_float(Cpu* c) {
     const uint32_t number = ld32(c->r[3] + kItemNumber);
+    if (c->r[3] == g_touch_item && liftable(number)) g_touch_item = 0;  // a drag, not a tap
     if (!liftable(number)) {
         if (trace()) LOG("[notebook] item menu: item %02X can't go on X, Y or R (the letter, or a mod item without a use action)", number);
         return;
@@ -1510,20 +1513,30 @@ void cursor_float(Cpu* c) {
     g_original(c, kCursorFloat);
 }
 
-// selectTouchEnter(this): touching the notebook opens its page, the sealed letter its Info box (the
-// GamePad has no A on its items);
-// the game's own pick-up runs first and is put back as the touch ends (the page keeps the touch)
+// selectTouchEnter(this): a touch on the notebook, the sealed letter or a mod item (the GamePad has no
+// A on its items). The game picks it up; what it opens waits for the touch to end as a tap
+// (unselect_enter): a drag lifts it towards X/Y/R instead (cursor_float)
 void touch_select(Cpu* c) {
     const uint32_t item = c->r[3];
     g_original(c, kTouchSelect);
-    if (trace()) LOG("[notebook] item menu: touch on item %02X", ld32(item + kItemNumber));
-    if (ld32(item + kItemNumber) == kNotebookItem) open_page("a touch on its bag place");
-    if (ld32(item + kItemNumber) == kLetterItem) open_letter("a touch on its bag place");
-    if (story_items::pool_number(ld32(item + kItemNumber)))
-        if (const std::optional<story_items::Item> it = story_items::by_number(ld32(item + kItemNumber)))
-            story_items::act(it->key, story_items::Action::Info);
+    const uint32_t number = ld32(item + kItemNumber);
+    if (trace()) LOG("[notebook] item menu: touch on item %02X", number);
+    g_touch_item = number == kNotebookItem || number == kLetterItem || story_items::pool_number(number) ? item : 0;
 }
 
+// unselectEnter(this): the touch ended without lifting the item (a tap): the notebook's page, the
+// sealed letter's caption, a mod item's Info
+void unselect_enter(Cpu* c) {
+    const uint32_t item = c->r[3];
+    g_original(c, kUnselectEnter);
+    if (!item || item != g_touch_item) return;
+    g_touch_item = 0;
+    const uint32_t number = ld32(item + kItemNumber);
+    if (number == kNotebookItem) open_page("a tap on its bag place");
+    if (number == kLetterItem) open_letter("a tap on its bag place");
+    if (story_items::pool_number(number))
+        if (const std::optional<story_items::Item> it = story_items::by_number(number)) story_items::act(it->key, story_items::Action::Info);
+}
 
 // getSelectedItemValue(this, receiver): the key X/Y/R takes; none for the carried letter and a mod item without a use action
 void selected_value(Cpu* c) {
@@ -1895,7 +1908,8 @@ void install(const std::function<std::string(uint32_t)>& replaced_by, const std:
     if (!g_imported || g_installed || !g_original || !g_call) return;
     const std::pair<uint32_t, void (*)(Cpu*)> list[] = {
         {kInventoryItem, hooks::inventory_item}, {kIconFrame, hooks::icon_frame},     {kOpenChild, hooks::open_child},
-        {kTouchSelect, hooks::touch_select},     {kSelectedValue, hooks::selected_value}, {kAssignButton, hooks::assign_button},
+        {kTouchSelect, hooks::touch_select},     {kUnselectEnter, hooks::unselect_enter}, {kSelectedValue, hooks::selected_value},
+        {kAssignButton, hooks::assign_button},
         {kSetVisible, hooks::set_visible},       {kExecuteWindow, hooks::execute_window}, {kCursorFloat, hooks::cursor_float},
         {kPeopleGetMsg, hooks::people_message},  {kPeopleExecute, hooks::people_execute},
         {kPeopleNextMsg, hooks::people_next_message}};
@@ -1915,7 +1929,7 @@ void install(const std::function<std::string(uint32_t)>& replaced_by, const std:
 
 void state_loaded() {
     close_page();
-    g_bag_item = 0, g_letter_item = 0, g_menu = 0, g_window_step = 0, g_menu_shown = true;
+    g_bag_item = 0, g_letter_item = 0, g_menu = 0, g_window_step = 0, g_menu_shown = true, g_touch_item = 0;
     g_talk = {};
     if (g_sail.phase == Sail::Talking) story_mail::unsay();
     g_sail = {};  // the state has its own boat

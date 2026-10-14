@@ -104,6 +104,7 @@ void inventory_item(Cpu* c);  // hdMenuItem_inventoryItem(key)
 void icon_frame(Cpu* c);      // hdMenuItem itemForSlot(this, item)
 void open_child(Cpu* c);      // hdMenuMain_c::openSelectedChild(index)
 void touch_select(Cpu* c);    // hdMenuItem_c::selectTouchEnter()
+void unselect_enter(Cpu* c);  // hdMenuItem_c::unselectEnter(): a tap ended
 void set_visible(Cpu* c);     // hdMenuItem_c::setVisible(visible)
 void execute_window(Cpu* c);  // hdMenuMain_c::executeWindow()
 void cursor_float(Cpu* c);    // hdMenuItem_c::beginCursorSelection(point)

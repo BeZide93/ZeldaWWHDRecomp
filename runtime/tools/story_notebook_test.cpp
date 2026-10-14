@@ -411,6 +411,7 @@ void original(Cpu* c, uint32_t fn) {
     case 0x0262F880: c->r[3] = c->r[4] == 0x99 ? 0x26 : c->r[4] == 0x9C ? 0x24 : 0x37; break;
     case 0x0268F060: calls.push_back("caption"); break;
     case 0x02630A64: calls.push_back("pick up"); break;
+    case 0x02630FC4: calls.push_back("put back"); break;
     case 0x0268FF50: calls.push_back("window"); break;
     case 0x026302B8: calls.push_back("float"); break;
     case 0x026333F0: {  // setVisible: the icon pane follows the item's visibility
@@ -463,7 +464,7 @@ void test_hooks() {
             [](uint32_t, void (*)(Cpu*)) { assert(!"installed despite a conflict"); });
     assert(!installed());
     install([](uint32_t) { return std::string(); }, [](uint32_t a, void (*fn)(Cpu*)) { hooked[a] = fn; });
-    assert(installed() && hooked.size() == 12);
+    assert(installed() && hooked.size() == 13);
     Book b = story_store::book();
     // no notebook yet: the bag window shows the save as it is
     b.erase(story_mail::kRecordItem, story_mail::kItemNotebook);
@@ -510,12 +511,20 @@ void test_hooks() {
     p.buttons = input::kB;
     pad(p);
     assert(p.buttons == input::kB);  // a new press reaches the game
-    // a touch on the notebook: the game's pick-up, then the page; on a game item only the pick-up
+    // a tap on the notebook: the game's pick-up and put-back, then the page; on a game item only the
+    // game's; a touch that becomes a drag (lifted towards X/Y/R) opens nothing
     calls.clear();
     call(0x02630A64, kChild + 0x200);
-    assert(calls == std::vector<std::string>{"pick up"} && !page_open());
+    call(0x02630FC4, kChild + 0x200);
+    assert((calls == std::vector<std::string>{"pick up", "put back"}) && !page_open());
     call(0x02630A64, kChild);
-    assert(calls.size() == 2 && page_open());
+    assert(calls.size() == 3 && !page_open());
+    call(0x026302B8, kChild);  // lifted
+    call(0x02630FC4, kChild);
+    assert(!page_open());
+    call(0x02630A64, kChild);
+    call(0x02630FC4, kChild);
+    assert(page_open());
     close_page();
     p = {};
     pad(p);
@@ -659,6 +668,7 @@ void test_hooks() {
             p2 = {};
             pad(p2);
             call(0x02630A64, kChild);
+            call(0x02630FC4, kChild);
             assert(page_open());
             pad(p2);  // the touch ended
             p2.buttons = input::kB;
@@ -1419,6 +1429,7 @@ void test_takeover_hooks() {
         constexpr uint32_t kLetterChild = kArena + 0x5000;
         st32(kLetterChild + 0xEC, 0xA1);
         call(0x02630A64, kLetterChild);
+        call(0x02630FC4, kLetterChild);
         assert(page_open() && caption_open());
         input::PadState held;
         held.touch = true;
