@@ -543,6 +543,54 @@ static void test_settings_and_sources() {
     recalibrate();
 }
 
+static void test_device_source() {
+    using namespace motion;
+    // All display rotations preserve the shown screen's right/top and its normal.
+    const Vec3 natural_right[] = {{1,0,0},{0,-1,0},{-1,0,0},{0,1,0}};
+    const Vec3 natural_top[] = {{0,1,0},{1,0,0},{0,-1,0},{-1,0,0}};
+    for(int r=0;r<4;r++) {
+        assert(close_to(device_to_sdl(natural_right[r],r),{1,0,0},1e-6f));
+        assert(close_to(device_to_sdl(natural_top[r],r),{0,0,-1},1e-6f));
+        assert(close_to(device_to_sdl({0,0,1},r),{0,1,0},1e-6f));
+    }
+    Settings s;
+    from_kv(s,"gyro.source","device");
+    assert(s.source==kDevice && value_of(s,"gyro.source")=="device");
+    set_settings(s);
+    assert(wants_device_sensors() && !wants_controller_sensors() && drives_gamepad());
+    set_device_sensors_available(false);
+    assert(status().find("No device gyro")!=std::string::npos);
+    set_device_sensors_available(true);
+    assert(status().find("Device gyro ready")!=std::string::npos);
+    float still[3]={},acc[3]={0,9.80665f,0},right[3]={0,-kPi/2,0};
+    uint64_t t=1000000000;
+    Game camera;
+    camera.frame(vpad(false));
+    const float initial=camera.yaw;
+    // A controller cannot feed the device source, even with a conflicting id.
+    for(int i=0;i<100;i++)controller_sample(42,t+=4000000,right,acc);
+    camera.frame(vpad(false));
+    assert(close_to(camera.yaw,initial,1e-4f));
+    for(int i=0;i<100;i++)device_sample(t+=4000000,right,acc);
+    camera.frame(vpad(false));
+    assert(close_to(camera.yaw-initial,game_units_one_frame(17.82f),0.02f));
+    // Background/rotation discards unread movement and old sensor time, without
+    // moving the virtual GamePad or producing a large turn on resume.
+    device_sample(t+=4000000,right,acc);
+    device_reset();
+    const float before=camera.yaw;
+    camera.frame(vpad(false));
+    assert(close_to(camera.yaw,before,1e-4f));
+    device_sample(t+=9000000000ull,still,acc);
+    camera.frame(vpad(false));
+    assert(close_to(camera.yaw,before,1e-4f));
+    set_settings(Settings{});
+    assert(!wants_device_sensors());
+    for(int i=0;i<100;i++)device_sample(t+=4000000,right,acc);
+    camera.frame(vpad(false));
+    assert(close_to(camera.yaw,before,1e-4f));
+}
+
 int main() {
     test_aim_conventions();
     test_game_reading();
@@ -550,6 +598,7 @@ int main() {
     test_dsu_packets();
     test_dsu_loopback();
     test_settings_and_sources();
+    test_device_source();
     puts("motion_test: aim conventions (player space, yaw, roll; SDL and Cemuhook), game reading, bias, sensitivity/invert, "
-         "mouse, device switching, timestamps, DSU packets and loopback, settings passed");
+         "mouse, device switching, phone sensor rotation/reset, timestamps, DSU packets and loopback, settings passed");
 }

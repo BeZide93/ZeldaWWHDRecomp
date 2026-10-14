@@ -35,6 +35,18 @@ segundo: 30 es la velocidad completa.
 Necesitas un dispositivo Android de 64 bits con Android 13 o posterior y Vulkan 1.3 (o un driver
 personalizado en Adreno), y unos pocos GB libres.
 
+## Apuntar con el giroscopio del teléfono
+
+Abre **Settings > Controls > Gyro** y elige **Device gyro (phone/tablet)**.
+Está desactivado de forma predeterminada y necesita giroscopio y acelerómetro.
+Deja el teléfono quieto un segundo para calibrarlo. Activa **Options > Gyro** en
+el juego y apunta en primera persona sin mover el stick derecho. Los ejes siguen
+la pantalla en ambas orientaciones horizontales. Funciona con controles táctiles
+o con mando. Los sensores se detienen en segundo plano y mientras los ajustes
+bloquean el juego; al volver, deja el teléfono quieto otra vez. La sensibilidad,
+la inversión y la recalibración se explican en la [guía del giroscopio](gyro.md).
+La línea de estado indica si faltan sensores.
+
 ## Cómo jugar
 
 ### La app de instalación (sin PC)

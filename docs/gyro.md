@@ -7,6 +7,7 @@ The port has no GamePad, so it turns a **virtual GamePad** with one of these sou
 | Source | What it uses |
 |---|---|
 | Off (default) | the GamePad lies still: no gyro aiming, as before |
+| Device gyro (phone/tablet) | the Android device’s own gyroscope and accelerometer; rotates with the displayed screen, works with touch or a controller |
 | Controller gyro | the gyro and accelerometer of a DualSense, DualShock 4, Switch Pro, Joy-Con, Steam Deck / Steam Controller and other controllers SDL3 reads (the macOS app uses GameController.framework: DualSense, DualShock 4, Switch Pro, Joy-Con) |
 | Cemuhook (DSU) | a Cemuhook motion server over UDP: DS4Windows, BetterJoy, SteamDeckGyroDSU, phone apps. Default 127.0.0.1, port 26760, slot 1 |
 | Mouse | mouse movement turns the GamePad while the game aims; made for Steam Input's "gyro to mouse" output, works with a plain mouse too |
@@ -18,8 +19,8 @@ Wii U Pro Controller", which is the Wii U's behaviour: in the port it does apply
 
 Settings overlay (F1) → **Controls** → **Gyro…**:
 
-- **Source** (above). `WWHD_GYRO=off|controller|cemuhook|mouse` overrides it at start.
-- **Turn left/right by** (controller and Cemuhook sources), the usual gyro aiming conventions (as in
+- **Source** (above). `WWHD_GYRO=off|controller|cemuhook|mouse|device` overrides it at start.
+- **Turn left/right by** (controller, device and Cemuhook sources), the usual gyro aiming conventions (as in
   JoyShockMapper and Steam Input):
   - **Player space** (default): turning the controller left or right about the real vertical,
     however you hold it (flat, tilted towards you, upright). Rolling it does nothing.
@@ -73,6 +74,17 @@ From the decompilation (`wwhd_src`):
 So what matters is how the direction matrix turns from one frame to the next, in the GamePad's own
 frame. Measured in R3 look (`WWHD_TEST_GYRO`, Outset): a GamePad turn of 60° right turned the view
 113° right, a tilt of 20° up 29° up.
+
+## Phone sensors
+
+On Android choose **Device gyro (phone/tablet)** in **Settings > Controls > Gyro**.
+It is off by default and requires both a gyro and an accelerometer. Rest the phone
+for a second, enable the game’s own **Options > Gyro**, then aim in first person with
+the right stick at rest. Player space, sensitivity, inversion and recalibration
+work as with a controller. Aiming follows the displayed screen in either landscape
+direction. Sensors close in the background and while settings block gameplay, and
+recalibrate on return. The status line reports unavailable sensors.
+`WWHD_GYRO=device` selects this source; `WWHD_GYRO=off` disables it.
 
 ## How the port does it
 

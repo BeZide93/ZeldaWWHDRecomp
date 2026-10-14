@@ -7,6 +7,7 @@
 //               macOS AppKit host)
 //   cemuhook    a Cemuhook (DSU) server over UDP, default 127.0.0.1:26760 (dsu.h): DS4Windows,
 //               BetterJoy, SteamDeckGyroDSU, phone apps
+//   device      this phone/tablet’s own gyro and accelerometer (SDL3 host, screen rotation applied)
 //   mouse       mouse movement turns the GamePad while the game aims (bow, telescope, ...): for Steam
 //               Input's "gyro to mouse" and plain mice
 // The game decides itself when it uses the gyro (its own Options "Gyro" switch, aiming, the right stick
@@ -34,8 +35,8 @@
 
 namespace motion {
 
-enum Source : int { kOff, kController, kCemuhook, kMouse, kSourceCount };
-const char* source_id(int s);     // "off", "controller", "cemuhook", "mouse"
+enum Source : int { kOff, kController, kCemuhook, kMouse, kDevice, kSourceCount };
+const char* source_id(int s);     // "off", "controller", "cemuhook", "mouse", "device"
 const char* source_label(int s);
 int source_from_id(const std::string& id);  // -1 if unknown
 
@@ -65,7 +66,7 @@ void upgrade_from_first_release(Settings& s);
 Settings settings();
 // applies at once (starts or stops the Cemuhook client, controller sensors follow on the next host update)
 void set_settings(const Settings& s);
-// WWHD_GYRO=off|controller|cemuhook|mouse overrides the saved source at startup
+// WWHD_GYRO=off|controller|cemuhook|mouse|device overrides the saved source at startup
 bool env_override();
 
 // ---- sources ----
@@ -73,6 +74,11 @@ bool env_override();
 // `timestamp_ns` is the sensor's time (0: the time it arrived)
 void controller_sample(uint64_t device, uint64_t timestamp_ns, const float gyro[3], const float accel[3]);
 void controller_gone(uint64_t device);
+// Device samples are already in SDL controller axes (screen rotation and flat-table pose applied).
+void device_sample(uint64_t timestamp_ns, const float gyro[3], const float accel[3]);
+void device_reset();  // discard pending motion/bias on rotation, background or source shutdown
+bool wants_device_sensors();
+void set_device_sensors_available(bool available);
 bool wants_controller_sensors();  // the hosts enable the sensors only for the controller source
 void set_gyro_controllers(int n); // hosts: connected controllers that have a gyro and an accelerometer
 int gyro_controllers();
