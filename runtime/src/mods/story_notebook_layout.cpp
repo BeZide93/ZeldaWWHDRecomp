@@ -12,6 +12,7 @@
 #include "ppc.h"
 #include "runtime.h"
 #include "story_lyt_screen.h"
+#include "story_notebook_layout_detail.h"
 #include "story_lyt_text.h"
 #include "story_notebook_page.h"
 #include "story_notebook_art.h"
@@ -27,12 +28,14 @@ std::string g_description, g_data_dir;
 // read by the layout's draw
 std::mutex g_mu;
 View g_view;            // the latest (g_mu)
+detail::DetailView g_detail;  // the quest the detail view shows (g_mu; with g_view.mode 2)
+uint64_t g_detail_serial = 0;
 bool g_drawing = false;  // the layout draws the page (or its closing) now (g_mu)
 
 // ---- the layout's draw (game thread, item screen draw) ----
 struct Shown {
     int mode = 0, tab = -1, selected = -2;
-    uint64_t serial = ~0ull;
+    uint64_t serial = ~0ull, detail_serial = ~0ull;
     bool closing = false;
     float cursor_y = 0, cursor_from = 0;
     int glide = 0;
@@ -171,16 +174,45 @@ float cursor_y_for(int i) { return g_cursor_y0 - g_row_step * float(i); }
 bool frame(Cpu* c, uint32_t) {
     View v;
     bool drawing;
+    detail::DetailView dv;
+    uint64_t dserial;
     {
         std::lock_guard lock(g_mu);
         v = g_view;
         drawing = g_drawing;
+        dv = g_detail;
+        dserial = g_detail_serial;
     }
-    if (!drawing && !g_shown.closing) {
-        if (v.mode == 2) g_shown.mode = 2;  // the detail view (the HUD's): coming back turns the page
-        return false;
+    if (!drawing && !g_shown.closing) return false;
+    // the detail view: N_Detail instead of the list's content and tabs, the plates' prompts for it
+    auto list_parts = [&](bool on) {
+        show(c, "N_Content", on);
+        for (const char* n : {"P_Tab0On", "P_Tab0Off", "P_Tab1On", "P_Tab1Off", "T_Tab0On", "T_Tab0Off", "T_Tab1On", "T_Tab1Off"})
+            if (!on) show(c, n, false);
+        show(c, "N_Detail", !on);
+    };
+    if (v.mode == 2) {
+        if (g_shown.mode != 2) {
+            if (g_shown.mode == 0) story_lyt_screen::play(c, "Open");
+            list_parts(false);
+            story_lyt_screen::play(c, "DetailIn");
+            story_lyt_screen::play(c, "TrackBreathe");
+            g_shown.closing = false;
+            g_shown.detail_serial = ~0ull;
+        }
+        if (dserial != g_shown.detail_serial) {
+            detail::apply(c, dv);
+            detail::place_prompts(c, dv.back_label, dv.track_label, dv.track_plate);
+            show(c, "N_PlateTrack", dv.track_plate);
+            g_shown.detail_serial = dserial;
+        }
+        g_shown.mode = 2;
+        return true;
     }
     if (v.mode == 1 && g_shown.mode != 1) {  // the page opens (or comes back from the detail view)
+        list_parts(true);
+        detail::place_prompts(c, "Close", "Open", false);
+        g_shown.serial = ~0ull;  // the tabs and the plates as the list has them
         if (g_shown.mode == 0) {
             story_lyt_screen::play(c, "Open");
             story_lyt_screen::play(c, "Breathe");
@@ -190,7 +222,7 @@ bool frame(Cpu* c, uint32_t) {
         g_shown.closing = false;
         g_shown.selected = -2;
     }
-    if (v.mode == 0 && g_shown.mode == 1) {  // it closes: the closing animation, then nothing
+    if (v.mode == 0 && (g_shown.mode == 1 || g_shown.mode == 2)) {  // it closes: the closing animation, then nothing
         story_lyt_screen::play(c, "Close");
         g_shown.closing = true;
         g_shown.mode = 0;
@@ -230,6 +262,8 @@ bool frame(Cpu* c, uint32_t) {
 void built(Cpu* c, uint32_t) {
     g_shown = Shown{};
     for (uint16_t& k : g_slot_key) k = 0;  // a new archive in memory: its slots are empty
+    detail::built(c);
+    show(c, "N_Detail", false);
     g_cursor_y0 = pane_f(story_lyt_screen::pane(c, "N_Cursor"), 0x20);
     g_row_step = pane_f(story_lyt_screen::pane(c, "N_Row0"), 0x20) - pane_f(story_lyt_screen::pane(c, "N_Row1"), 0x20);
     // the game sizes every text pane's buffer from its width when it builds the layout: the row texts
@@ -318,7 +352,8 @@ bool configure() {
     const std::vector<std::pair<std::string, std::string>> anims = {
         {"Open", "G_Open"},       {"Close", "G_Open"},       {"TurnLeft", "G_Content"}, {"TurnRight", "G_Content"},
         {"Breathe", "G_Cursor"},  {"Bump0", "G_Row0"},       {"Bump1", "G_Row1"},       {"Bump2", "G_Row2"},
-        {"Bump3", "G_Row3"},      {"Bump4", "G_Row4"},       {"PressBack", "G_Back"},   {"PressTrack", "G_Track"}};
+        {"Bump3", "G_Row3"},      {"Bump4", "G_Row4"},       {"PressBack", "G_Back"},   {"PressTrack", "G_Track"},
+        {"DetailIn", "G_Detail"}, {"DetailOut", "G_Detail"},   {"TrackBreathe", "G_TrackCursor"}};
     std::map<std::string, uint32_t> slots;
     for (const auto& [name, group] : anims) {
         const uint32_t slot = slots.emplace(group, uint32_t(slots.size())).first->second;
@@ -335,10 +370,12 @@ bool update(const nb::Page& page, const std::vector<nb::Row>& all) {
     if (!story_lyt_screen::has_client() || !story_lyt_screen::ready()) return false;
     View v = view_of(page, all);
     std::lock_guard lock(g_mu);
-    if (v.mode == 2) {  // version 1: the detail view is the HUD's
-        g_view.mode = 2;
-        g_drawing = false;
-        return false;
+    if (v.mode == 2) {  // the detail view: the selected quest
+        for (const nb::Row& r : page.shown(all))
+            if (r.quest->key == page.selected_key()) {
+                detail::DetailView d = detail::view_of(page, r);
+                if (!detail::same(d, g_detail)) g_detail = std::move(d), g_detail_serial++;
+            }
     }
     if (!same(v, g_view)) v.serial = g_view.serial + 1, g_view = std::move(v);
     g_drawing = g_view.mode != 0 || g_drawing;

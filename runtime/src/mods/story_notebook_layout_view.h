@@ -33,8 +33,8 @@ struct View {
     uint64_t serial = 0;  // changes when anything above changes
 };
 
-// a quest's portrait written into the layout's portrait slot (0..4 the list rows, 5 the detail page);
-// false if it can't be shown (no picture, or the layout isn't built)
+// a quest's portrait (its key) written into the layout's portrait slot (0..4 the rows, 5 the detail
+// page's sender); false when it has none or it can't be shown (layout draw, game thread)
 bool portrait_into(int slot, uint16_t key);
 
 // the page as the layout shows it (serial left 0)

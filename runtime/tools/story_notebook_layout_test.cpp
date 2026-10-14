@@ -107,6 +107,13 @@ bool set_text(Cpu*, uint32_t pane, const std::string& utf8, const Options&) {
     g.text_calls.push_back(g.name[pane]);
     return true;
 }
+bool set_text(Cpu*, uint32_t pane, const std::u16string& text, const Options&) {
+    assert(g.name.count(pane));
+    g.text[g.name[pane]] = std::string(text.begin(), text.end());  // the tests' texts are ASCII
+    g.text_calls.push_back(g.name[pane]);
+    return true;
+}
+std::u16string wrap(Cpu*, uint32_t, const std::u16string& text, float) { return text; }
 // a fixed advance per character, so nothing in the tests is cut
 float text_width(Cpu*, uint32_t, const std::u16string& text) { return float(text.size()); }
 bool set_capacity(Cpu*, uint32_t pane, uint32_t) {
@@ -504,24 +511,39 @@ void test_frame_tabs_turn() {
 
 void test_frame_detail_and_back() {
     build();
-    const std::vector<Quest> qs = {quest("a"), quest("b")};
-    const std::vector<Row> all = rows_of(qs, Status::New);
+    std::vector<Quest> qs = {quest("a"), quest("b")};
+    qs[0].steps = {"Find the lantern", "Bring it back"}, qs[0].where = "Windfall", qs[0].reward = "100 rupees";
+    std::vector<Row> all = rows_of(qs, Status::InProgress);
+    all[0].step = 2, all[0].tracked = true;
     Page p;
     open(p, all);
     CHECK(step(p, all));
     g.clear_calls();
-    press(p, all, kPadA);  // the quest's detail view: the HUD's in version 1
+    press(p, all, kPadA);  // the quest's detail view: N_Detail instead of the list's content
     CHECK(p.mode() == Page::Mode::Detail);
-    CHECK(!nl::update(p, all) && !nl::drawing());
-    CHECK(!frame());
-    CHECK(!frame());
-    CHECK(g.plays.empty());
-    press(p, all, kPadB);  // back to the list: the page turns back
+    CHECK(nl::update(p, all) && nl::drawing());
+    CHECK(frame());
+    CHECK((g.plays == std::vector<std::string>{"DetailIn", "TrackBreathe"}));
+    CHECK(g.visible["N_Detail"] && !g.visible["N_Content"] && !g.visible["P_Tab0On"] && !g.visible["T_Tab1Off"]);
+    CHECK(g.text["D_Title"] == "Quest a" && g.text["D_SenderName"] == "Mod of a" && g.text["D_SenderInitial"] == "M");
+    CHECK(g.text["D_Progress"] == "Step 2 of 2" && g.text["D_DoneBefore"] == "Done: Find the lantern" && g.visible["D_DoneBefore"]);
+    // step 1 done (slot 1, linked to slot 0), step 2 the current one (slot 0); no third marker
+    CHECK(g.visible["D_Step1"] && g.visible["D_Step1Done"] && !g.visible["D_Step1Now"] && g.visible["D_Step1Link"]);
+    CHECK(g.visible["D_Step0"] && g.visible["D_Step0Now"] && !g.visible["D_Step0Done"] && !g.visible["D_Step2"]);
+    CHECK(g.text["D_Body0"] == "Next of a" && g.text["D_Body1"] == "Windfall" && g.text["D_Body2"] == "100 rupees");
+    CHECK(g.text["D_Status"] == "In progress" && !g.visible["D_PillNew"] && g.visible["D_Ring"] && g.visible["D_OnChart"]);
+    CHECK(g.text["T_BackLabel"] == "Back" && g.text["T_TrackLabel"] == "Stop showing" && g.visible["D_TrackScroll"]);
+    CHECK(g.visible["N_PlateTrack"] && g.visible["D_TrackCursorTL"]);
+    g.clear_calls();
+    CHECK(frame());  // nothing changed: no texts set again
+    CHECK(g.text_calls.empty() && g.plays.empty());
+    press(p, all, kPadB);  // back to the list: the page turns back, the list's parts and prompts again
     CHECK(p.mode() == Page::Mode::List);
     CHECK(nl::update(p, all) && nl::drawing());
     CHECK(frame());
     CHECK((g.plays == std::vector<std::string>{"TurnLeft"}));
-    CHECK(g.visible["P_Row0Wash"] && g.visible["N_Cursor"]);
+    CHECK(g.visible["P_Row0Wash"] && g.visible["N_Cursor"] && g.visible["N_Content"] && !g.visible["N_Detail"]);
+    CHECK(g.text["T_BackLabel"] == "Close" && g.text["T_TrackLabel"] == "Open" && !g.visible["D_TrackScroll"]);
     close_fully(p);
 }
 
