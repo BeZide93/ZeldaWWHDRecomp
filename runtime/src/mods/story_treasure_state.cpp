@@ -80,6 +80,7 @@ void map_is_complete(Cpu* c) {
 void map_on_complete(Cpu* c) {
     if (is_mod_map_index(c->r[4])) {
         finish_salvaged(c->r[4] + 1);
+        note_mod_chest();  // its chest, going away next, doesn't count in the game's chest counter (part a)
         g_finished = c->r[4] + 1;
         return;
     }

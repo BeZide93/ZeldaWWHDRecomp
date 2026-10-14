@@ -74,6 +74,8 @@ void set_record(const std::string& mod, const std::string& chart, uint8_t value)
 
 // part (a) keeps these for all parts; the test's stand-ins: the game's functions as the game does them
 namespace story_treasure {
+unsigned g_mod_chests = 0;
+void note_mod_chest() { ++g_mod_chests; }
 void original(Cpu* c, uint32_t fn) {
     switch (fn) {
     case kIsOpenMap: case kIsCompleteMap: case kOnCompleteMap:
@@ -136,6 +138,7 @@ int main() {
     // the chest was opened: end_salvage finishes the chart; nothing of the game's save changes, not even 0x3E02
     end_salvage(129);
     assert((calls == std::vector<std::string>{"end_salvage"}));
+    assert(g_mod_chests == 1);  // its chest won't count in the game's chest counter (part a)
     assert(salvage_state(129) == kResultDone && story_chart::state("cq", "old-map") == kResultDone);
     assert(hook(kIsCompleteMap, 128) == 1 && hook(kIsOpenMap, 128) == 1);  // finished: the point is skipped
     assert(save_bytes() == game_before);
