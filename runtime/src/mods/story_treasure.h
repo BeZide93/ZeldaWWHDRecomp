@@ -87,7 +87,7 @@ int32_t finish_salvaged(uint32_t save_no);     // the chest was opened: story_ch
 struct ChestItem {
     uint8_t game_item = 0;   // the parameters' item number (bits 4..11): the game item, or for a mod item (c)'s
                              // marker number (kChestMarker 0x1B, no game data uses it)
-    int32_t mod_item = -1;   // a mod item's pool number (story_items), -1: the game item itself
+    int32_t mod_item = -1;   // a mod item's story key (story_items::item_key), -1: the game item itself
 };
 ChestItem chest_item_for(uint32_t save_no);
 
