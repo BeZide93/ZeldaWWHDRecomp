@@ -56,6 +56,7 @@ constexpr float kMessageSeconds = 3.0f;
 void (*g_original)(Cpu*, uint32_t) = nullptr;
 uint32_t (*g_call)(Cpu*, uint32_t, std::initializer_list<uint32_t>) = nullptr;
 bool g_configured = false;
+void (*g_after_assign)(Cpu*) = nullptr;  // story_item_buttons::refresh_strip (set_after_assign)
 story_lyt_screen::Id g_id = -1;
 
 // game thread
@@ -208,8 +209,10 @@ void carry_out(Cpu* c, const Action& a) {
         break;
     }
     case story_bag::Action::Assign:
-        if (story_items::act(a.key, Action::Assign, a.slot)) {
+        // one button at a time, as the game moves its own items between X, Y and R
+        if (story_items::act(a.key, Action::Assign, -1) && story_items::act(a.key, Action::Assign, a.slot)) {
             LOG("[bag] item %04X on %s", a.key, a.slot == 0 ? "X" : "Y");
+            if (g_after_assign) g_after_assign(c);  // the menu's X / Y / R strip shows it at once
             say(item_name(a.key) + (a.slot == 0 ? " is on X." : " is on Y."));
         } else {
             say(story_items::reason());
@@ -467,6 +470,7 @@ bool configure(const std::filesystem::path& cache_dir) {
 void set_game_calls(void (*original)(Cpu*, uint32_t), uint32_t (*call)(Cpu*, uint32_t, std::initializer_list<uint32_t>)) {
     g_original = original, g_call = call;
 }
+void set_after_assign(void (*after)(Cpu*)) { g_after_assign = after; }
 
 void pad(input::PadState& p, Cpu* c) {
     if (!g_configured) return;
