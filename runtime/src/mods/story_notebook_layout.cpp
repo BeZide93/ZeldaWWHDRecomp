@@ -2,8 +2,10 @@
 #include "story_notebook_layout.h"
 #include "story_notebook_layout_view.h"
 
+#include <atomic>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <map>
 #include <mutex>
 
@@ -33,12 +35,13 @@ detail::DetailView g_detail;  // the quest the detail view shows (g_mu; with g_v
 uint64_t g_detail_serial = 0;
 chart::ChartView g_chart;  // the detail view's mini chart (g_mu; with g_view.mode 2)
 bool g_drawing = false;  // the layout draws the page (or its closing) now (g_mu)
+std::atomic<bool> g_animating{false};  // the page's open or close animation runs (the bag shows the open book)
 
 // ---- the layout's draw (game thread, item screen draw) ----
 struct Shown {
     int mode = 0, tab = -1, selected = -2;
     uint64_t serial = ~0ull, detail_serial = ~0ull;
-    bool closing = false;
+    bool closing = false, opening = false;
     float cursor_y = 0, cursor_from = 0;
     int glide = 0;
     std::map<std::string, std::string> texts;  // what each text pane holds
@@ -173,7 +176,16 @@ void apply(Cpu* c, const View& v) {
 float g_cursor_y0 = 0, g_row_step = 0;
 float cursor_y_for(int i) { return g_cursor_y0 - g_row_step * float(i); }
 
-bool frame(Cpu* c, uint32_t) {
+bool frame_inner(Cpu* c, uint32_t);
+// the frame, and whether the page's open or close animation still runs
+bool frame(Cpu* c, uint32_t lyt) {
+    const bool drawn = frame_inner(c, lyt);
+    if (g_shown.opening && (!drawn || story_lyt_screen::ended(c, "Open"))) g_shown.opening = false;
+    g_animating.store(drawn && (g_shown.opening || g_shown.closing), std::memory_order_relaxed);
+    return drawn;
+}
+
+bool frame_inner(Cpu* c, uint32_t) {
     View v;
     bool drawing;
     detail::DetailView dv;
@@ -197,7 +209,7 @@ bool frame(Cpu* c, uint32_t) {
     };
     if (v.mode == 2) {
         if (g_shown.mode != 2) {
-            if (g_shown.mode == 0) story_lyt_screen::play(c, "Open");
+            if (g_shown.mode == 0) story_lyt_screen::play(c, "Open"), g_shown.opening = true;
             list_parts(false);
             story_lyt_screen::play(c, "DetailIn");
             story_lyt_screen::play(c, "TrackBreathe");
@@ -219,7 +231,7 @@ bool frame(Cpu* c, uint32_t) {
         detail::place_prompts(c, "Close", "Open", false);
         g_shown.serial = ~0ull;  // the tabs and the plates as the list has them
         if (g_shown.mode == 0) {
-            story_lyt_screen::play(c, "Open");
+            story_lyt_screen::play(c, "Open"), g_shown.opening = true;
             story_lyt_screen::play(c, "Breathe");
         } else {
             story_lyt_screen::play(c, "TurnLeft");
@@ -391,10 +403,13 @@ bool update(const nb::Page& page, const std::vector<nb::Row>& all) {
                 g_chart = chart::view_of(page, *r.quest);
             }
     }
+    if (v.mode != 0 && !g_drawing) g_animating.store(true, std::memory_order_relaxed);  // opening: until the layout's Open has run
     if (!same(v, g_view)) v.serial = g_view.serial + 1, g_view = std::move(v);
     g_drawing = g_view.mode != 0 || g_drawing;
     return g_view.mode != 0;
 }
+
+bool animating() { return g_animating.load(std::memory_order_relaxed); }
 
 bool drawing() {
     std::lock_guard lock(g_mu);
@@ -411,6 +426,21 @@ bool update_closed() {
 }  // namespace story_notebook_layout
 
 namespace story_notebook {
+namespace {
+std::vector<uint8_t> g_icon_open;
+}
+void set_icon_open(const std::string& png_path) {
+    std::string path = png_path;
+    if (const char* e = getenv("WWHD_NOTEBOOK_ICON_OPEN"); e && *e) path = e;
+    g_icon_open.clear();
+    if (path.empty()) return;
+    std::ifstream f(path, std::ios::binary);
+    std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    if (bytes.size() > 8 && bytes.size() <= 4u << 20) g_icon_open = std::move(bytes);
+    LOG("[notebook] the notebook's open icon: %s (%s)", path.c_str(), g_icon_open.empty() ? "not read" : "read");
+}
+const std::vector<uint8_t>& icon_open_png() { return g_icon_open; }
+
 void set_layout_description(const std::string& path, const std::string& data_dir) {
     story_notebook_layout::g_description = path;  // NOLINT: same translation unit
     story_notebook_layout::g_data_dir = data_dir;

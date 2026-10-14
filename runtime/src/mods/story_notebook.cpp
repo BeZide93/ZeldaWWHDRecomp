@@ -341,7 +341,10 @@ IconPlace place_over(uint32_t item, uint32_t number) {
     // ... also while the page is open: the page drawn as a game layout fades in over the bag (the HUD's page
     // covered it at once), and the game's selection animation of the tapped place shows the sentinel's
     // stand-in icon (the Cabana Deed's parchment) otherwise
-    if (g_open.load(std::memory_order_relaxed)) {
+    // the page drawn as a game layout: while it opens or closes the bag place shows the notebook open
+    const bool open_book = g_open.load(std::memory_order_relaxed) && number == kNotebookItem && story_notebook_layout::animating() &&
+                           !icon_open_png().empty();
+    if (g_open.load(std::memory_order_relaxed) && !open_book) {
         hide_floating_notebook_icon();
         return g_icon_reason = "the notebook page is open", at;  // the page covers the menu
     }
@@ -428,13 +431,22 @@ void bag_icon() {
         if (at.shown) lx = at.x, ly = at.y;
     }
     // the page drawn as a game layout covers the bag (the HUD's page did by being drawn later)
-    if (story_notebook_layout::drawing() || (!at.shown && !letter.shown)) {
+    const bool open_book = story_notebook_layout::animating() && !icon_open_png().empty();
+    if ((story_notebook_layout::drawing() && !open_book) || (!at.shown && !letter.shown)) {
         if (published) store.drop(kIconOwner);
         published = false;
         return;
     }
+    static guestmods::hud::Handle open_image = 0;
     if (!image || generation != store.state_generation()) {  // the icon image, again after a state load
         generation = store.state_generation();
+        open_image = 0;
+        if (!icon_open_png().empty()) try {
+            const auto png = guestmods::hud::decode_png({icon_open_png().data(), icon_open_png().size()});
+            open_image = store.create_image(kIconOwner, png.width, png.height, png.width * 4, png.rgba.data(), png.rgba.size());
+        } catch (const std::exception&) {
+            open_image = 0;
+        }
         if (g_icon_png.empty()) return;  // no Story Notebook package look: no icon
         try {
             const auto png = guestmods::hud::decode_png({g_icon_png.data(), g_icon_png.size()});
@@ -454,7 +466,7 @@ void bag_icon() {
         Command c;
         c.x = (at.x - at.size * kIconAnchorX) * k, c.y = (at.y - at.size * kIconAnchorY) * k, c.w = c.h = at.size * k;
         c.rgba = 0xFFFFFF00u | uint32_t(at.alpha * 255.0f + 0.5f);
-        store.picture(kIconOwner, list, image, c);
+        store.picture(kIconOwner, list, open_book && open_image ? open_image : image, c);
     }
     if (letter.shown)  // placeholder art: a sealed envelope
         for (Command& c : envelope(letter.x * k, letter.y * k, letter.size * k, letter.alpha)) store.append(kIconOwner, list, std::move(c));
@@ -592,7 +604,8 @@ void load_user_art() {
     read("banner.png", a.banner, 160);
     read("sheet.png", a.sheet, 800);
     read("card.png", a.card, 640);
-    read("header.png", a.header, 240);
+    read("header_v2.png", a.header, 240);  // the band without the Triforce, when the art has it
+    if (!a.header.width) read("header.png", a.header, 240);
     read("underline.png", a.underline, 48);
     read("band_cream.png", a.bands[0], 120);
     read("band_blue.png", a.bands[1], 120);

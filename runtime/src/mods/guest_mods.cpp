@@ -549,6 +549,8 @@ bool load_one(const std::string& path, std::string& err,const mods::packages::Gu
             story_notebook::set_look(icon.empty()?std::string():(std::filesystem::path(pkg.path)/icon).string(),
                                      model.empty()?std::string():notebook_model(std::filesystem::path(pkg.path)/model,pkg.data_path));
             // the page as a game layout (story_notebook_layout.h): its description in the package
+            const std::string icon_open=look.get("icon_open").string();
+            story_notebook::set_icon_open(icon_open.empty()?std::string():(std::filesystem::path(pkg.path)/icon_open).string());
             const std::string layout=look.get("layout").string();
             story_notebook::set_layout_description(layout.empty()?std::string():(std::filesystem::path(pkg.path)/layout).string(),pkg.data_path);
         }

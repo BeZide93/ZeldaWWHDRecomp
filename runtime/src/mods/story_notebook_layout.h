@@ -26,6 +26,10 @@ void set_layout_description(const std::string& path, const std::string& data_dir
 bool portrait_pixels(uint16_t key, guestmods::hud::Image& out);
 // the menu's floating (lifted) icon left out while it shows the notebook (the page opens over the bag)
 void hide_floating_notebook_icon();
+// The notebook drawn open (a PNG: the Story Notebook package's "notebook": {"icon_open"}, or
+// WWHD_NOTEBOOK_ICON_OPEN): shown in its bag place while the page opens and closes. Before install.
+void set_icon_open(const std::string& png_path);
+const std::vector<uint8_t>& icon_open_png();  // empty: none
 }  // namespace story_notebook
 
 namespace story_notebook_layout {
@@ -37,4 +41,5 @@ bool configure();
 bool update(const story_notebook::Page& page, const std::vector<story_notebook::Row>& all);
 bool update_closed();  // the page is closed: true while the layout's closing animation still runs
 bool drawing();        // the layout shows the page (or its closing) now
+bool animating();      // the page's open or close animation runs now
 }  // namespace story_notebook_layout

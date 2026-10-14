@@ -196,7 +196,13 @@ def header_boat(art, frame, out):
     pixels: (file name, (x0, y0, x1, y1) in frame pixels). The band's waves and birds are left out, the
     hull is continued under its painted waves down to the frame's wave line and cut off there."""
     import numpy as np
-    h = np.asarray(open_art(art, "header.png")).astype(int)
+    # header_v2.png (the user's band without the Triforce, 2172 x 724) when present, else header.png; at the
+    # 1600 x 533 the boat's measures below were taken on (the same 3:1 picture)
+    name = "header_v2.png" if os.path.exists(os.path.join(art, "header_v2.png")) else "header.png"
+    band = open_art(art, name)
+    if band.size != (1600, 533):
+        band = band.convert("RGBa").resize((1600, 533), Image.LANCZOS).convert("RGBA")
+    h = np.asarray(band).astype(int)
     r, g, b, a = h[..., 0], h[..., 1], h[..., 2], h[..., 3]
     dark = (np.maximum(np.maximum(r, g), b) < 125) & (a > 96)                       # the hull, the head, the sail
     teal = (r > 45) & (r < 170) & (g > 140) & (b < 205) & (b > 110) & (a > 96)       # the Triforce, the stripes
