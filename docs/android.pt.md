@@ -88,7 +88,13 @@ continua na velocidade total.
 Abra uma [issue](https://github.com/ZeldaWWHDRecomp/ZeldaWWHDRecomp/issues) com o modelo do dispositivo Android,
 a versão do Android e o que aconteceu (pode escrever em inglês ou português). Depois de um
 travamento, na próxima vez que você abrir o jogo ele oferece o relatório do travamento para
-compartilhar.
+compartilhar. Isso também cobre encerramentos por falta de memória em primeiro plano, sinais e ANRs
+registrados pelo Android, quando o sistema disponibiliza o histórico. O resumo inclui motivo, data,
+status/sinal, importância do processo e a última amostra de memória PSS/RSS. Omite descrições, traces,
+bytes de estado do processo e logcat para evitar nomes, dados de saves ou caminhos privados.
+Saídas normais, liberação de memória em segundo plano e paradas pelas ferramentas de saves não geram
+um relatório do sistema. Um relatório nativo próximo no tempo é incluído no mesmo arquivo, se houver.
+Compartilhar é opcional.
 
 ---
 
