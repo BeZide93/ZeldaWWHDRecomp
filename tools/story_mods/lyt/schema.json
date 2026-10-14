@@ -58,9 +58,12 @@
       "type": "object",
       "additionalProperties": {
         "type": "object",
-        "required": ["png"],
+        "oneOf": [{"required": ["png"]}, {"required": ["fill", "width", "height"]}],
         "properties": {
           "png": {"type": "string"},
+          "fill": {"type": "object", "required": ["color"], "additionalProperties": false,
+                   "properties": {"color": {"$ref": "#/definitions/rgba"}, "border": {"$ref": "#/definitions/rgba"},
+                                  "border_width": {"type": "integer", "minimum": 0}}},
           "format": {"enum": ["rgba8", "bc1", "bc3", "bc4a", "bc4l", "bc5la"], "default": "rgba8"},
           "tile": {"enum": ["linear", "1d", "tiled"], "default": "linear"},
           "swizzle": {"type": "integer", "minimum": 0, "maximum": 7, "description": "tiled mode: pipe + 2 x bank swizzle"},

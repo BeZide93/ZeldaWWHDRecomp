@@ -12,6 +12,7 @@
 #include "ppc.h"
 #include "guest_addr.h"
 #include "story_lyt_states.h"
+#include "story_lyt_text.h"
 
 #include <chrono>
 #include <cstdlib>
@@ -44,6 +45,7 @@ uint32_t g_part = 0, g_layout = 0, g_anim = 0;
 std::chrono::steady_clock::time_point g_last_draw{};
 bool g_failed = false;
 uint32_t g_draws = 0, g_replay = 0;  // WWHD_STORY_LYT_REPLAY=N: restart InAll every N item-screen draws (testing)
+bool g_text_demo = false;  // WWHD_STORY_LYT_TEXT_DEMO=1: fill the text demo layout's panes (story_lyt_text.cpp)
 
 // a sead SafeString in guest memory: { text pointer, vtable }
 uint32_t safe_string(const char* text) {
@@ -92,6 +94,7 @@ void create(Cpu* c, uint32_t projection, uint32_t matrix) {
         g_anim = set;
     }
     g_part = part, g_layout = layout;
+    if (g_text_demo && ok) story_lyt_text::demo(c, ld32(layout + 4), 0);
 }
 
 namespace hooks {
@@ -121,6 +124,7 @@ void parts_draw(Cpu* c) {
     }
     g_last_draw = now;
     if (g_anim) story_lyt_states::tick(c, g_call, g_anim, g_draws);
+    if (g_text_demo) story_lyt_text::demo(c, ld32(g_layout + 4), g_draws);
     g_call(c, kCalcLayout, {g_part});
     g_call(c, kPartsDraw, {g_part, viewport});
 }
@@ -137,6 +141,7 @@ void install(const std::function<void(uint32_t, void (*)(Cpu*))>& replace) {
     if (!file || !*file || !g_original || !g_call) return;
     g_file = file;
     if (const char* r = getenv("WWHD_STORY_LYT_REPLAY")) g_replay = uint32_t(atoi(r));
+    if (const char* t = getenv("WWHD_STORY_LYT_TEXT_DEMO")) g_text_demo = *t == '1';
     replace(kLoadItemScreen, hooks::load_item_screen);
     replace(kPartsDraw, hooks::parts_draw);
     LOG("[story-lyt] prototype layout from %s", file);

@@ -7,7 +7,7 @@ Panes are written first so that their writers can add textures, fonts and materi
 from . import binio
 from .context import Context
 from .panes import PANE_TYPES
-from .sections import fnl1, grp1, lyt1, mat1, pan1, txl1
+from .sections import fnl1, grp1, lyt1, mat1, pan1, txl1, usd1
 
 
 def _pane_tree(panes, ctx):
@@ -15,6 +15,7 @@ def _pane_tree(panes, ctx):
     for p in panes:
         magic, writer = PANE_TYPES[p.get("type", "null")]
         out.append(binio.section(magic, writer(p, ctx)))
+        out += usd1.for_pane(p)  # extended user data follows its pane (e.g. a text pane's "Scalable")
         if p.get("children"):
             out.append(binio.section(b"pas1", b""))
             out += _pane_tree(p["children"], ctx)

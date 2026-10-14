@@ -16,6 +16,7 @@ from lyt.sections import wnd1  # noqa: E402
 def desc(panes, materials=None, groups=None, animations=None):
     return lyt.Description({
         "name": "StoryLyt_00",
+        "color_space": "linear",  # raw encodings: colours written as given
         "textures": {"Frame_00": {"png": "frame.png"}, "Edge_00": {"png": "edge.png"}},
         "materials": materials or {},
         "panes": panes, "groups": groups or {}, "animations": animations or {},

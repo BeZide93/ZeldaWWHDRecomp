@@ -12,9 +12,24 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from notebook_model import sarc, yaz0_stored  # noqa: E402
 
 
+def fill_image(spec):
+    """A plain texture described in the description itself (no image file): "fill" is
+    {"color": rgba, "border": rgba, "border_width": n}; "width" and "height" are required."""
+    from PIL import Image, ImageDraw
+    f = spec["fill"]
+    w, h = int(spec["width"]), int(spec["height"])
+    im = Image.new("RGBA", (w, h), tuple(f["color"]))
+    n = int(f.get("border_width", 0))
+    if n:
+        d = ImageDraw.Draw(im)
+        for i in range(n):
+            d.rectangle([i, i, w - 1 - i, h - 1 - i], outline=tuple(f["border"]))
+    return im
+
+
 def load_texture(spec, desc):
     from PIL import Image
-    im = Image.open(desc.path(spec["png"])).convert("RGBA")
+    im = fill_image(spec) if "fill" in spec else Image.open(desc.path(spec["png"])).convert("RGBA")
     w = int(spec.get("width", im.width))
     h = int(spec.get("height", max(1, round(im.height * w / im.width))))
     if (w, h) != im.size:

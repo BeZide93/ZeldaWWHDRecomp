@@ -100,6 +100,7 @@ def description(art):
     cream = {"white": CREAM}  # untextured content: its colour is the white colour (x vertex colours)
     return {
         "name": "StoryLyt_00",
+        "color_space": "linear",  # the colours below are already converted with linear()
         "size": [1280, 720],
         "textures": {n: tex(n) for n in ("StoryFrame_00", "StoryEdge_00", "StoryBtnFrame_00", "StoryBtnEdge_00")},
         "materials": btn_mats,
