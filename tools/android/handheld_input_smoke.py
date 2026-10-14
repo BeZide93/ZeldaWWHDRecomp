@@ -26,6 +26,7 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
     prefix = [args.adb, '-s', args.serial]
+    adb_util.wait_until_ready(prefix)
     args.output.mkdir(parents=True, exist_ok=True)
 
     def adb(*command, check=True, data=None):

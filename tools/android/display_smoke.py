@@ -115,6 +115,7 @@ def main():
     args = parser.parse_args()
     if args.shared_general and not args.require_isolated_device: parser.error("--shared-general requires --require-isolated-device")
     prefix = [args.adb, "-s", args.serial]
+    adb_util.wait_until_ready(prefix)
 
     def adb(*command, check=True):
         if command and command[0] == "shell":

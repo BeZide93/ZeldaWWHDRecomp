@@ -28,6 +28,7 @@ def main():
     parser.add_argument("--sample-resources", action="store_true", help="sample app/child PSS/RSS and private storage during the first synthetic build")
     args = parser.parse_args()
     prefix = [args.adb, "-s", args.serial]
+    adb_util.wait_until_ready(prefix)
 
     def adb(*command, data=None, check=True):
         if command[0] == "shell": command = ("shell", shlex.join(command[1:]))

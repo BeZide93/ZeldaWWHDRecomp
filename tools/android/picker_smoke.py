@@ -27,6 +27,7 @@ def main():
     package = "org.wwhdrecomp.wwhd"
     fixture = "wwhd-picker-fixture-" + uuid.uuid4().hex
     prefix = [args.adb, "-s", args.serial]
+    adb_util.wait_until_ready(prefix)
     pointer = "no_backup/ondevice/setup.json"
     ui_path = "/data/local/tmp/wwhd-picker-smoke.xml"
     jobs = set()
@@ -322,16 +323,9 @@ def main():
             before_boot = shell("cat", "/proc/sys/kernel/random/boot_id").stdout.strip()
             # Exercise Android's framework shutdown/reboot path.
             shell("svc", "power", "reboot", check=False)
-            deadline = time.monotonic() + 120
-            while time.monotonic() < deadline:
-                state = adb("get-state", check=False)
-                if state.stdout.strip() == b"device":
-                    boot = shell("getprop", "sys.boot_completed", check=False)
-                    identity_result = shell("cat", "/proc/sys/kernel/random/boot_id", check=False)
-                    if (boot.returncode == 0 and boot.stdout.strip() == b"1" and identity_result.returncode == 0
-                            and identity_result.stdout.strip() and identity_result.stdout.strip() != before_boot): break
-                time.sleep(1)
-            else: raise AssertionError("Emulator did not finish rebooting")
+            # Preserve the changed-kernel-boot assertion while tolerating adb
+            # disconnects and waiting for external_primary after framework boot.
+            adb_util.wait_until_ready(prefix, timeout=120, previous_boot_id=before_boot)
             shell("wm", "dismiss-keyguard")
             home()
             if selected(kind="image")[0] != identity: raise AssertionError("Reboot lost input selection")

@@ -32,6 +32,7 @@ def main():
     if args.damage_complete and args.obsolete_generations:
         parser.error("choose cache damage or obsolete-generation cleanup")
     prefix = [args.adb, "-s", args.serial]
+    adb_util.wait_until_ready(prefix)
 
     def adb(*command, check=True, data=None):
         if command[0] == "shell": command = ("shell", shlex.join(command[1:]))

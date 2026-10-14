@@ -29,6 +29,7 @@ def main():
     if args.compiler_only and (args.require_isolated_device or args.exercise_lifecycle):
         parser.error("display checks cannot be combined with --compiler-only")
     prefix = [args.adb, "-s", args.serial]
+    adb_util.wait_until_ready(prefix)
 
     def adb(*command, data=None, check=True):
         if command[0] == "shell": command = ("shell", shlex.join(command[1:]))

@@ -27,6 +27,7 @@ def main():
     args = parser.parse_args()
     if args.general_layout and args.external_memory_capabilities: parser.error("choose GPU rendering or capability queries")
     prefix = [args.adb, "-s", args.serial]
+    adb_util.wait_until_ready(prefix)
     command = "external_memory_capabilities" if args.external_memory_capabilities else "shared_image_general_probe" if args.general_layout else "shared_image_probe"
     marker = "external memory capability probe" if args.external_memory_capabilities else "two-device shared image general shader probe" if args.general_layout else "two-device shared image shader probe"
 

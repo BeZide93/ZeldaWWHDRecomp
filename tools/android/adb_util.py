@@ -4,6 +4,7 @@ Exit 1 remains a command result when check=False. Only transport errors are
 retried; application assertions and ordinary remote command failures are not.
 """
 import shlex
+import re
 import subprocess
 import sys
 import time
@@ -121,6 +122,60 @@ def run(command, *, attempts=4, backoff=.5, check=False, **kwargs):
 
 def check_output(command, **kwargs):
     return run(command, check=True, **kwargs).stdout
+
+
+def wait_until_ready(prefix, *, timeout=180, interval=1, previous_boot_id=None):
+    """Wait for framework boot, package manager and user-0 shared storage.
+
+    boot_completed alone can precede external_primary being mounted. Each
+    read-only readiness probe is bounded by the remaining overall deadline;
+    ordinary smoke commands keep their existing exit-code semantics.
+    """
+    deadline = time.monotonic() + timeout
+    probes = (
+        ('boot', ['getprop', 'sys.boot_completed'], lambda r: r.stdout.strip() == b'1'),
+        ('package_manager', ['cmd', 'package', 'path', 'android'],
+         lambda r: r.stdout.startswith(b'package:')),
+        ('shared_volume', ['sm', 'list-volumes'],
+         lambda r: re.search(rb'^emulated(?:;0)? mounted(?: |$)', r.stdout, re.MULTILINE) is not None),
+        # Query no rows: confirm MediaProvider registered external_primary
+        # without inspecting any user's media. content can report errors at rc 0.
+        ('media_volume', ['content', 'query', '--uri', 'content://media/external_primary/file',
+                          '--projection', '_id', '--where', '0'],
+         lambda r: r.stdout.strip() == b'No result found.' and not r.stderr.strip()),
+        ('sdcard', ['sh', '-c', 'test -d /sdcard && test -r /sdcard && test -w /sdcard && ls /sdcard >/dev/null'],
+         lambda r: True),
+    )
+    if previous_boot_id is not None:
+        probes = probes[:1] + (
+            ('new_boot', ['cat', '/proc/sys/kernel/random/boot_id'],
+             lambda r: bool(r.stdout.strip()) and r.stdout.strip() != previous_boot_id),
+        ) + probes[1:]
+    last = 'no probe completed'
+    previous = None
+    while time.monotonic() < deadline:
+        for label, command, ready in probes:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0: break
+            try:
+                result = run(list(prefix) + ['shell', shlex.join(command)],
+                             attempts=1, check=False, timeout=min(5, remaining))
+                if result.returncode == 0 and ready(result): continue
+                last = (f'{label}: command={shlex.join(command)}; rc={result.returncode}; '
+                        f'stdout={result.stdout!r}; stderr={result.stderr!r}')
+            except AdbError as error:
+                last = f'{label}: {error}'
+            break
+        else:
+            print('Emulator ready: boot completed, package manager available, shared storage mounted',
+                  file=sys.stderr, flush=True)
+            return
+        if last != previous:
+            print('Waiting for emulator readiness: ' + last, file=sys.stderr, flush=True)
+            previous = last
+        remaining = deadline - time.monotonic()
+        if remaining > 0: time.sleep(min(interval, remaining))
+    raise TimeoutError(f'Emulator readiness timed out after {timeout}s; last probe={last}')
 
 
 def open_stream(command, **kwargs):

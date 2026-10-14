@@ -135,5 +135,84 @@ os.execvp('sh', ['sh', '-c', sys.argv[-1]])
             self.assertNotIn('private payload', str(caught.exception))
 
 
+class ReadinessTests(unittest.TestCase):
+    def test_reboot_requires_a_nonempty_changed_kernel_boot_id(self):
+        clock = [0]
+        offline = adb_util.AdbError(['adb'], subprocess.CompletedProcess(['adb'], 255, b'', b'device offline'), 1)
+        ids = iter((offline, b'', b'old-boot\n', b'new-boot\n'))
+        def probe(command, **kwargs):
+            remote = command[-1]
+            if remote == 'cat /proc/sys/kernel/random/boot_id':
+                out = next(ids)
+                if isinstance(out, Exception): raise out
+            elif remote == 'getprop sys.boot_completed': out = b'1'
+            elif remote == 'cmd package path android': out = b'package:android'
+            elif remote == 'sm list-volumes': out = b'emulated;0 mounted null'
+            elif remote.startswith('content query '): out = b'No result found.\n'
+            else: out = b''
+            return subprocess.CompletedProcess(command, 0, out, b'')
+        def sleep(seconds): clock[0] += seconds
+        with patch('adb_util.run', side_effect=probe), patch('adb_util.time.monotonic', side_effect=lambda: clock[0]), patch('adb_util.time.sleep', side_effect=sleep), redirect_stderr(io.StringIO()):
+            adb_util.wait_until_ready(['adb', '-s', 'emulator-test'], timeout=5, previous_boot_id=b'old-boot')
+        self.assertEqual(clock[0], 3)
+
+    def test_waits_for_every_readiness_signal(self):
+        clock = [0]
+        rounds = [0]
+        calls = []
+        def probe(command, **kwargs):
+            self.assertEqual(command[:3], ['adb', '-s', 'emulator-test'])
+            self.assertEqual(kwargs['attempts'], 1)
+            self.assertLessEqual(kwargs['timeout'], 5)
+            remote = command[-1]
+            calls.append(remote)
+            rc, out = 0, b''
+            if remote == 'getprop sys.boot_completed':
+                rounds[0] += 1
+                out = b'1' if rounds[0] > 1 else b'0'
+            elif remote == 'cmd package path android':
+                rc = 1 if rounds[0] == 2 else 0
+                out = b'package:/system/framework/framework-res.apk'
+            elif remote == 'sm list-volumes':
+                out = b'emulated;0 checking null' if rounds[0] == 3 else b'emulated;0 mounted null'
+            elif remote.startswith('content query '):
+                out = b'Error while accessing provider: Volume external_primary not found' if rounds[0] == 4 else b'No result found.\n'
+            else:
+                self.assertIn('ls /sdcard', remote)
+                rc = 1 if rounds[0] == 5 else 0
+            return subprocess.CompletedProcess(command, rc, out, b'')
+        def sleep(seconds): clock[0] += seconds
+        with patch('adb_util.run', side_effect=probe), patch('adb_util.time.monotonic', side_effect=lambda: clock[0]), patch('adb_util.time.sleep', side_effect=sleep), redirect_stderr(io.StringIO()) as log:
+            adb_util.wait_until_ready(['adb', '-s', 'emulator-test'], timeout=10)
+        self.assertEqual(rounds[0], 6)
+        self.assertEqual(clock[0], 5)
+        for name in ('boot:', 'package_manager:', 'shared_volume:', 'media_volume:', 'sdcard:', 'Emulator ready:'):
+            self.assertIn(name, log.getvalue())
+
+    def test_offline_device_stays_bounded_and_reports_last_probe(self):
+        clock = [0]
+        def probe(command, **kwargs):
+            self.assertLessEqual(kwargs['timeout'], 3 - clock[0])
+            raise adb_util.AdbError(command, subprocess.CompletedProcess(command, 255, b'', b'device offline'), 1)
+        def sleep(seconds): clock[0] += seconds
+        with patch('adb_util.run', side_effect=probe) as run, patch('adb_util.time.monotonic', side_effect=lambda: clock[0]), patch('adb_util.time.sleep', side_effect=sleep), redirect_stderr(io.StringIO()):
+            with self.assertRaisesRegex(TimeoutError, 'boot:.*rc=255.*device offline'):
+                adb_util.wait_until_ready(['adb', '-s', 'emulator-test'], timeout=3)
+        self.assertEqual(clock[0], 3)
+        self.assertEqual(run.call_count, 3)
+
+    def test_missing_volume_fails_instead_of_starting_storage_work(self):
+        clock = [0]
+        def probe(command, **kwargs):
+            remote = command[-1]
+            out = {'getprop sys.boot_completed': b'1', 'cmd package path android': b'package:android',
+                   'sm list-volumes': b'private mounted null\nemulated;0 unmounted null'}[remote]
+            return subprocess.CompletedProcess(command, 0, out, b'')
+        def sleep(seconds): clock[0] += seconds
+        with patch('adb_util.run', side_effect=probe), patch('adb_util.time.monotonic', side_effect=lambda: clock[0]), patch('adb_util.time.sleep', side_effect=sleep), redirect_stderr(io.StringIO()):
+            with self.assertRaisesRegex(TimeoutError, 'shared_volume:.*unmounted'):
+                adb_util.wait_until_ready(['adb', '-s', 'emulator-test'], timeout=2)
+
+
 if __name__ == '__main__':
     unittest.main()
