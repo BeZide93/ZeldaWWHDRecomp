@@ -229,7 +229,7 @@ bool load_rpx(const std::string& path, LoadedModule& out) {
             }
         }
     }
-    crash_memory::install(std::move(diagnostic_sections));
+    crash_memory::install(std::move(diagnostic_sections), PPC_MEM_BASE);
     return true;
 }
 

@@ -8,6 +8,7 @@
 #ifndef _WIN32
 #include <csignal>
 #include <sys/wait.h>
+#include <sys/mman.h>
 #include <unistd.h>
 #endif
 static std::string output;
@@ -36,7 +37,23 @@ int main(int argc,char** argv){
 #else
  setenv("WWHD_CRASH_GUEST_MEMORY",on?"1":"0",1);
 #endif
- auto sections=fixture();crash_memory::install(sections);
+ // Only this code page is readable: all rejected windows must avoid reads.
+#ifndef _WIN32
+ auto* arena=static_cast<uint8_t*>(mmap(nullptr,size_t(1)<<32,PROT_NONE,MAP_PRIVATE|MAP_ANON,-1,0));
+ assert(arena!=MAP_FAILED);assert(mprotect(arena+0x02000000,4096,PROT_READ|PROT_WRITE)==0);
+ // An original input mapping can disappear while the guest arena remains valid.
+ void* input=mmap(nullptr,4096,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANON,-1,0);assert(input!=MAP_FAILED);
+ std::memset(input,0xA5,256);
+#else
+ std::vector<uint8_t> storage(0x02001000);auto* arena=storage.data();
+#endif
+ auto sections=fixture();
+#ifndef _WIN32
+ sections[0].bytes.assign(static_cast<uint8_t*>(input),static_cast<uint8_t*>(input)+256);
+ assert(munmap(input,4096)==0);
+#endif
+ std::memset(arena+0x02000000,0xA5,256);
+ crash_memory::install(sections,arena);
  // Input mutation must never alter the immutable published original image.
  sections[0].bytes.assign(256,0x50);
  uint32_t registers[32]{};registers[0]=0x02000000;registers[1]=0x02000080;
@@ -45,6 +62,7 @@ int main(int argc,char** argv){
  registers[8]=0x60000000;registers[9]=0xE0000000;registers[10]=0xF4000000;
  crash_memory::refresh(7,0x60001000);crash_memory::note(-1,collect,registers);
  if(!on){assert(output.empty());return 0;}
+ assert(output.find("current-verified baseline")!=std::string::npos);
  assert(output.find("A5A5A5A5")!=std::string::npos);
  assert(output.find("50505050")==std::string::npos);assert(output.find("53535353")==std::string::npos);
  assert(output.find("42424242")==std::string::npos);assert(output.find("54545454")==std::string::npos);
@@ -53,10 +71,23 @@ int main(int argc,char** argv){
  for(const char* address:{"10000000","60000000","E0000000","F4000000"})assert(output.find(std::string("address ")+address+": <redacted")!=std::string::npos);
  assert(output.find("registered_guest_threads=7")!=std::string::npos);
  assert(output.size()<16000);
+ // A synthetic secret written into code must redact the WHOLE window: no
+ // unchanged prefix, changed bytes or secret-dependent hash is emitted.
+ const std::string unchanged=output;std::memset(arena+0x02000000,0x53,256);
+ output.clear();crash_memory::note(-1,collect,registers);
+ assert(output.find("modified code")!=std::string::npos);
+ assert(output.find("A5A5A5A5")==std::string::npos);
+ assert(output.find("53535353")==std::string::npos);
+ std::memset(arena+0x02000000,0xA5,256);output=unchanged;
 #ifndef _WIN32
  int fds[2];assert(pipe(fds)==0);pid_t child=fork();assert(child>=0);
  if(child==0){close(fds[0]);signal_fd=fds[1];std::memcpy(signal_regs,registers,sizeof registers);struct sigaction action{};action.sa_handler=handler;sigemptyset(&action.sa_mask);assert(sigaction(SIGUSR1,&action,nullptr)==0);raise(SIGUSR1);_exit(4);}
  close(fds[1]);std::string received;char buffer[512];ssize_t n;
  while((n=read(fds[0],buffer,sizeof buffer))>0)received.append(buffer,size_t(n));close(fds[0]);int status;assert(waitpid(child,&status,0)==child);assert(WIFEXITED(status)&&WEXITSTATUS(status)==0);assert(received==output);
+ // No live publication must not read even a valid baseline window.
+ crash_memory::install(fixture(),nullptr);output.clear();crash_memory::note(-1,collect,registers);
+ assert(output.find("current code unavailable")!=std::string::npos);
+ assert(output.find("A5A5A5A5")==std::string::npos);
+ assert(munmap(arena,size_t(1)<<32)==0);
 #endif
 }

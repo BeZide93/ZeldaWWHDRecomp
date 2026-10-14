@@ -17,6 +17,8 @@ constexpr size_t maxBytes=16*1024*1024, maxSections=64, summaryCapacity=1024;
 struct Image { std::vector<Section> sections; };
 std::atomic<const Image*> image{nullptr};
 std::atomic<bool> active{false};
+std::atomic<const uint8_t*> guestBase{nullptr};
+static_assert(std::atomic<const uint8_t*>::is_always_lock_free);
 std::atomic<unsigned> revision{0},summarySize{0};
 std::atomic<char> summary[summaryCapacity];
 static_assert(std::atomic<const Image*>::is_always_lock_free);
@@ -36,7 +38,7 @@ bool enabled(){
  static const bool value=[] {const char* p=std::getenv("WWHD_CRASH_GUEST_MEMORY");return p && !std::strcmp(p,"1");}();
  return value;
 }
-void install(std::vector<Section> sections){
+void install(std::vector<Section> sections,const uint8_t* live_guest_base){
  if(!enabled())return;
  // Reject all overlaps, even executable/data aliases. Do not admit wrapping, low,
  // high, non-executable, writable, or oversized sections from a malformed image.
@@ -51,7 +53,9 @@ void install(std::vector<Section> sections){
  }
  // Images intentionally remain alive until process exit: a signal reader may be
  // holding a prior publication. Installation is startup-only, not a per-frame cache.
- image.store(next,std::memory_order_release);active.store(true,std::memory_order_release);
+ image.store(next,std::memory_order_release);
+ guestBase.store(live_guest_base,std::memory_order_release);
+ active.store(true,std::memory_order_release);
 }
 void refresh(uint32_t guest_threads,uint32_t runtime_top){
  if(!active.load(std::memory_order_acquire))return;
@@ -75,15 +79,26 @@ void refresh(uint32_t guest_threads,uint32_t runtime_top){
 }
 void note(int fd,Output out,const uint32_t* registers){
  if(!active.load(std::memory_order_acquire))return;
- Line line;line.text("\n--- guest memory: original executable-image bytes only; all live data redacted ---\n");line.send(fd,out);
+ Line line;line.text("\n--- guest memory: verified executable baseline bytes only; all other live data redacted ---\n");line.send(fd,out);
  const Image* view=image.load(std::memory_order_acquire);
- if(view)for(const auto& section:view->sections){line.text("  trusted original code range ");line.hex(section.address);line.text("..");line.hex(uint32_t(uint64_t(section.address)+section.bytes.size()-1));line.text(" bytes=");line.hex(uint32_t(section.bytes.size()));line.text("\n");line.send(fd,out);}
+ if(view)for(const auto& section:view->sections){line.text("  trusted baseline code range ");line.hex(section.address);line.text("..");line.hex(uint32_t(uint64_t(section.address)+section.bytes.size()-1));line.text(" bytes=");line.hex(uint32_t(section.bytes.size()));line.text("\n");line.send(fd,out);}
  if(registers)for(unsigned reg=0;reg<32;++reg){
   const uint32_t address=registers[reg];const Section* section=nullptr;
   if(view)for(const auto& s:view->sections)if(address>=s.address && uint64_t(address)+128<=uint64_t(s.address)+s.bytes.size()){section=&s;break;}
   line.text("  register ");line.hex(reg);line.text(" address ");line.hex(address);
   if(!section){line.text(": <redacted: not a complete trusted executable window>\n");line.send(fd,out);continue;}
-  line.text(": 128 original code bytes (not current guest memory)\n");line.send(fd,out);
+  const uint8_t* base=guestBase.load(std::memory_order_acquire);
+  if(!base){line.text(": <redacted: current code unavailable>\n");line.send(fd,out);continue;}
+  // The loader publishes the permanent 4 GiB guest reservation after all section
+  // copies. The null guard is below every allowed section. Runtime write-watch
+  // changes preserve read permission; no guest range is subsequently unmapped.
+  // Volatile loads sample only a complete allowlisted window, never data/heap.
+  // Sampling is bounded but not atomic with guest writes. Never emit sampled
+  // bytes (or their hash): only an entirely matching immutable baseline is shown.
+  const volatile uint8_t* current=base+address;bool matches=true;
+  for(unsigned i=0;i<128;++i)if(current[i]!=section->bytes[address-section->address+i])matches=false;
+  if(!matches){line.text(": <redacted: modified code>\n");line.send(fd,out);continue;}
+  line.text(": 128 current-verified baseline code bytes (non-atomic sample)\n");line.send(fd,out);
   for(unsigned offset=0;offset<128;offset+=32){line.text("    ");line.hex(address+offset);line.text(": ");for(unsigned i=0;i<32;++i)line.byte(section->bytes[address-section->address+offset+i]);line.text("\n");line.send(fd,out);}
  }
  char text[summaryCapacity];unsigned before=revision.load(std::memory_order_seq_cst),size=summarySize.load(std::memory_order_seq_cst);
