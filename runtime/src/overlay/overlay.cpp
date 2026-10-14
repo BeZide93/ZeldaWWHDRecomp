@@ -1084,11 +1084,8 @@ void tab_display() {
 }
 
 mods::catalogue::Version catalogue_port_version() {
-    std::string version=build::version();
-    if(version.starts_with("v"))version.erase(0,1);
-    // "0.2.11+meta" and development builds "0.2.11-devel.<commit>" count as their release
-    version=version.substr(0,version.find_first_of("+-"));
-    try { return mods::catalogue::Version::parse(version); } catch (...) { return {}; }
+    // a build ahead of its release counts as the next one (mods::catalogue::port_version_from_build)
+    return mods::catalogue::port_version_from_build(build::version());
 }
 using setupflow::setup_run;
 using setupflow::setup_run_tick;
