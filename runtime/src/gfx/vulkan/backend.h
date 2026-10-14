@@ -111,6 +111,8 @@ struct Renderer {
  bool secondaryPresentFences=false; // Android: optional swapchain-maintenance presentation retirement
  std::atomic<uint64_t> secondaryIdleWaits{0},secondaryRetired{0},secondaryRetirementPending{0};
  bool dynamicRenderingKHR=false; // VK_KHR_dynamic_rendering (device older than Vulkan 1.3)
+ bool renderPasses=false;
+ const char* renderingReason="not initialized";
  bool portabilitySubset=false,imageViewSwizzle=true,imageViewReinterpretation=true;
  bool attachmentViewUsage=false; // attachment views name their usage (issue #144: Intel; WWHD_VK_ATTACHMENT_VIEW_USAGE)
  bool imageView2DOn3DImage=true; // 2D views of volume slices (render targets); core Vulkan 1.1, optional in the portability subset
@@ -165,6 +167,7 @@ struct Renderer {
  uint64_t vertexReuseChecks=0,vertexReuseHits=0,vertexReuseBytes=0,vertexReuseCompareNs=0;
  std::vector<std::function<void()>> completions;
  std::vector<Buffer> garbageBuffers;
+ std::vector<VkFramebuffer> garbageFramebuffers;
  std::vector<bufcache::Region> garbageCacheRegions; // buffer cache regions replaced while recording
  struct RetiredImage { VkImage image;VkDeviceMemory memory;std::vector<VkImageView> views; }; std::vector<RetiredImage> garbageImages;
  // Each submission retains its pools, upload bytes and deferred objects until
@@ -189,6 +192,7 @@ struct Renderer {
   std::vector<UploadBlock> uploadBlocks;
   std::vector<std::function<void()>> completions;
   std::vector<Buffer> garbageBuffers;
+  std::vector<VkFramebuffer> garbageFramebuffers;
   std::vector<RetiredImage> garbageImages;
   std::vector<bufcache::Region> garbageCacheRegions;
  };

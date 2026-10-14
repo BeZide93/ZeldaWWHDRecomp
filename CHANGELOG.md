@@ -11,6 +11,12 @@ what is on `devel` and not released yet (also in the
   performance and battery-saving game modes, and the system no longer downscales the picture or overrides the
   frame rate, so the port's own resolution and frame pacing stay in charge.
 
+- **Vulkan: a classic render-pass mode for older graphics drivers** (issues #144 and #51): the game now also runs
+  on Vulkan 1.1 / 1.2 drivers without dynamic rendering (for example older AMD drivers), and older Intel
+  Windows drivers (before 101.2121), which crashed on dynamic rendering, use the classic mode automatically.
+  `WWHD_VK_FORCE_RENDERPASS=1` forces it for testing; `=0` turns it off. Everyone else keeps the current
+  renderer path, with the same pictures and performance.
+
 - **Fixed: Windows setup stopped while linking when the folder name had an emoji or other special characters**
   ("'charmap' codec can't encode character"). Setup now writes its linker file lists as UTF-8, so the game can be
   set up in any folder.
