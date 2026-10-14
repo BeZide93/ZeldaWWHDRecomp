@@ -171,6 +171,8 @@ struct Def {
     uint16_t key;
     float x, z;
     std::u16string caption;  // the name as the caption shows it
+    std::string item_mod;    // its treasure chest: one of the mod's items, or ...
+    uint8_t item_game = 0;   // ... a game item (0: none declared)
 };
 std::vector<Def> g_defs;  // declaration order (g_mu)
 std::vector<Spot> done_spots() {
@@ -510,14 +512,15 @@ int32_t state(const std::string& mod, const std::string& chart) {
     return result_of(chart_value(book(), chart_key(mod, chart)));
 }
 
-int32_t define(const std::string& mod, const std::string& chart, const std::string& name, const std::string& description, float x, float z) {
+int32_t define(const std::string& mod, const std::string& chart, const std::string& name, const std::string& description, float x, float z,
+               const std::string& item_mod, uint8_t item_game) {
     std::u16string caption, ignored;
     if (!story_mail::valid_id(chart) || name.empty() || name.size() > kMaxNameBytes || !story_mail::append_utf16(name, false, caption) ||
         description.size() > kMaxDescriptionBytes || !story_mail::append_utf16(description, true, ignored))
         return kResultInvalid;
     if (!(x >= -kSeaHalf && x <= kSeaHalf && z >= -kSeaHalf && z <= kSeaHalf)) return kResultInvalid;
     std::lock_guard lock(g_mu);
-    Def d{mod, chart, name, description, chart_key(mod, chart), x, z, caption};
+    Def d{mod, chart, name, description, chart_key(mod, chart), x, z, caption, item_mod, item_game};
     for (Def& old : g_defs)
         if (old.mod == mod && old.id == chart) return old = d, kResultNone;
     if (g_defs.size() >= kMaxCharts) return kResultNoRoom;
@@ -531,7 +534,7 @@ std::vector<ChartView> charts() {
     std::lock_guard lock(g_mu);
     for (const Def& d : g_defs)
         out.push_back({d.mod, d.id, d.name, d.description, d.x, d.z, b.usable() ? result_of(chart_value(b, d.key)) : kResultNone,
-                       b.usable() && chart_value(b, d.key) == kChartOpened});
+                       b.usable() && chart_value(b, d.key) == kChartOpened, d.item_mod, d.item_game});
     return out;
 }
 

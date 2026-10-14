@@ -155,6 +155,37 @@ void test_manifest() {
     assert(quests[0].reward_mod_item == "old-key" && quests[0].letter_items == std::vector<std::string>{"old-key"} && !quests[0].reward_item);
     assert(!story_notebook::parse_quests(mods::json::parse("{" + quest + "}"), quests, why));
     assert(why.find("not declared") != std::string::npos);
+    // a chart's treasure: a declared item of the mod, or one of the allowed game items
+    std::vector<story_notebook::ManifestChart> charts;
+    const std::string items_decl = R"("items": [{"id": "old-key", "name": "Old key", "description": "D", "icon": "k.png"}])";
+    assert(story_notebook::parse_charts(mods::json::parse(R"({"charts": [{"id": "a", "name": "A", "place": {"x": 0, "z": 0}, "item": "item:old-key"},
+        {"id": "b", "name": "B", "place": {"x": 0, "z": 0}, "item": "game:heart_piece"}, {"id": "c", "name": "C", "place": {"x": 0, "z": 0}}], )" + items_decl + "}"),
+                                        charts, why));
+    assert(charts[0].item_mod == "old-key" && charts[1].item_game == 0x07 && charts[2].item_mod.empty() && !charts[2].item_game);
+    assert(!story_notebook::parse_charts(mods::json::parse(R"({"charts": [{"id": "a", "name": "A", "place": {"x": 0, "z": 0}, "item": "item:none"}]})"), charts, why));
+    assert(!story_notebook::parse_charts(mods::json::parse(R"({"charts": [{"id": "a", "name": "A", "place": {"x": 0, "z": 0}, "item": "game:triforce"}]})"), charts, why));
+    assert(!story_notebook::parse_charts(mods::json::parse(R"({"charts": [{"id": "a", "name": "A", "place": {"x": 0, "z": 0}, "item": "game:green_rupee"}]})"), charts, why));
+    // letters on their own: what they enclose must be declared; a quest of one chart find gets a warning
+    std::vector<story_notebook::ManifestLetter> letters;
+    const std::string decl = R"("charts": [{"id": "old-map", "name": "Old map", "description": "X", "place": {"x": 1759, "z": -202572}}],
+        "items": [{"id": "old-key", "name": "Old key", "description": "D", "icon": "k.png"}])";
+    assert(story_notebook::parse_letters(mods::json::parse("{" + decl + R"(, "letters": [{"id": "map-letter", "sender": "A sailor",
+        "text": "Dear Link,\nI found this map.", "encloses": ["chart:old-map", "item:old-key"]}]})"), letters, why));
+    assert(letters.size() == 1 && letters[0].charts == std::vector<std::string>{"old-map"} && letters[0].items == std::vector<std::string>{"old-key"});
+    assert(!story_notebook::parse_letters(mods::json::parse("{" + decl + R"(, "letters": [{"id": "l", "sender": "S", "text": "T", "encloses": ["chart:none"]}]})"),
+                                          letters, why));
+    assert(!story_notebook::parse_letters(mods::json::parse("{" + decl + R"(, "letters": [{"id": "l", "sender": "S", "text": "T", "encloses": ["notebook"]}]})"),
+                                          letters, why));
+    assert(!story_notebook::parse_letters(mods::json::parse("{" + decl + R"(, "letters": [{"id": "l", "sender": "", "text": "T"}]})"), letters, why));
+    std::vector<std::string> warnings;
+    const std::string one = R"("quests_format": 1, "quests": [{"id": "hunt", "title": "The old map", "steps": [{"n": 1, "text": "Find it", "find": "chart:old-map"}]}])";
+    assert(story_notebook::parse_quests(mods::json::parse("{" + decl + ", " + one + "}"), quests, why, story_notebook::npc_catalogue(), &warnings));
+    assert(warnings.size() == 1 && warnings[0].find("letters") != std::string::npos);
+    warnings.clear();
+    const std::string two = R"("quests_format": 1, "quests": [{"id": "hunt", "title": "The old map", "steps": [{"n": 1, "text": "Go"},
+        {"n": 2, "text": "Find it", "find": "chart:old-map"}]}])";
+    assert(story_notebook::parse_quests(mods::json::parse("{" + decl + ", " + two + "}"), quests, why, story_notebook::npc_catalogue(), &warnings));
+    assert(warnings.empty());  // a chart step inside a longer quest
     // an item's quest_step must name a quest of the manifest
     assert(!story_notebook::parse_quests(mods::json::parse("{" + quest + R"(, "items": [{"id": "old-key", "name": "K", "description": "D", "icon": "k.png",
         "use": {"action": "quest_step", "quest": "other", "step": 1}}]})"), quests, why));

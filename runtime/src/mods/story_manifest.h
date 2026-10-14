@@ -61,7 +61,21 @@ struct ManifestQuest {
 struct ManifestChart {
     std::string id, name, description;
     float x = 0, z = 0;
+    // "item": what its treasure chest holds: "item:<id>" one of the mod's items (item_mod), or
+    // "game:<name>" a game item (item_game, chart_game_item); none: an orange rupee
+    std::string item_mod;
+    uint8_t item_game = 0;
 };
+// The game items a mod chart's chest can hold ("game:<name>"): the rupees a salvage chest keeps as they
+// are (green to red become purple there) and the heart pieces; nothing that sets the game's own bits
+inline uint8_t chart_game_item(const std::string& name) {
+    static const std::pair<const char*, uint8_t> kItems[] = {
+        {"purple_rupee", 0x05}, {"orange_rupee", 0x06}, {"silver_rupee", 0x0F}, {"heart_piece", 0x07}, {"heart_container", 0x08}};
+    for (const auto& [n, v] : kItems)
+        if (name == n) return v;
+    return 0;
+}
+inline constexpr uint8_t kChartDefaultItem = 0x06;  // an orange rupee
 // "chart:<id>": the id, or empty
 inline std::string chart_ref(const mods::json::Value& v) {
     if (v.type != mods::json::Value::String || v.text.rfind("chart:", 0) != 0) return {};
@@ -72,6 +86,14 @@ inline std::string item_ref(const mods::json::Value& v) {
     if (v.type != mods::json::Value::String || v.text.rfind("item:", 0) != 0) return {};
     return v.text.substr(5);
 }
+
+// A letter on its own ("letters": [...]): no quest, no journal entry. The port sends it while the mod
+// is enabled; once Link has read it, he has what it encloses (charts, items), once.
+struct ManifestLetter {
+    std::string id, sender, text;
+    std::vector<std::string> charts, items;  // "encloses": ["chart:<id>", "item:<id>"]
+};
+inline constexpr unsigned kMaxLettersPerMod = 8;
 
 // An item declared in the manifest ("items": [...], docs/mod-sdk-v2.md "Items"): kept in the Delivery
 // Bag (its extra pages), owned in the save's story block (story_items_core.h)
@@ -169,6 +191,18 @@ inline bool parse_charts(const mods::json::Value& manifest, std::vector<Manifest
             return why = "chart " + m.id + ": the place of its mark is needed", false;
         m.x = float(place.get("x").number), m.z = float(place.get("z").number);
         if (!(std::fabs(m.x) <= 350000 && std::fabs(m.z) <= 350000)) return why = "chart " + m.id + ": place off the sea", false;
+        const Value& item = c.get("item");
+        if (item.type != Value::Null) {
+            if (!(m.item_mod = item_ref(item)).empty()) {
+                std::vector<ManifestItem> items;
+                if (!parse_items(manifest, items, why)) return false;
+                bool found = false;
+                for (const ManifestItem& i : items) found |= i.id == m.item_mod;
+                if (!found) return why = "chart " + m.id + ": item \"" + m.item_mod + "\" is not declared in \"items\"", false;
+            } else if (item.type != Value::String || item.text.rfind("game:", 0) != 0 || !(m.item_game = chart_game_item(item.text.substr(5))))
+                return why = "chart " + m.id + ": \"item\" must be \"item:<id>\" or one of game:purple_rupee, game:orange_rupee, "
+                             "game:silver_rupee, game:heart_piece, game:heart_container", false;
+        }
         for (const ManifestChart& o : out)
             if (o.id == m.id) return why = "chart " + m.id + " is declared twice", false;
         out.push_back(m);
@@ -389,6 +423,13 @@ inline bool parse_quests(const mods::json::Value& manifest, std::vector<Manifest
         for (const std::string& r : refs)
             if (!declared(r)) return why = "quest " + q.id + ": chart \"" + r + "\" is not declared in \"charts\"", false;
     }
+    // a quest that is nothing but one chart to find is a treasure chart: a letter can bring the chart
+    // ("letters"), with no journal entry (a chart step inside a longer quest is fine)
+    if (warnings)
+        for (const ManifestQuest& q : out)
+            if (q.steps.size() == 1 && !q.steps[0].find_chart.empty() && !q.steps[0].has_talk)
+                warnings->push_back("quest " + q.id + " is only one chart to find (\"" + q.steps[0].find_chart +
+                                    "\"): a treasure chart needs no quest; send the chart in a letter (\"letters\") instead");
     // so must the items they name, and an item's quest_step names one of the mod's quests
     std::vector<ManifestItem> items;
     if (!parse_items(manifest, items, why)) return false;
@@ -410,6 +451,52 @@ inline bool parse_quests(const mods::json::Value& manifest, std::vector<Manifest
         bool found = false;
         for (const ManifestQuest& q : out) found |= q.id == i.use_quest;
         if (!found) return why = "item " + i.id + ": its use names quest \"" + i.use_quest + "\", which the manifest doesn't declare", false;
+    }
+    return true;
+}
+
+// Parses the manifest's letters on their own ("letters": [{"id", "sender", "text", "encloses"}]); the
+// charts and items they enclose must be declared, and their ids must not be a quest letter's.
+inline bool parse_letters(const mods::json::Value& manifest, std::vector<ManifestLetter>& out, std::string& why) {
+    using mods::json::Value;
+    out.clear();
+    const Value& letters = manifest.get("letters");
+    if (letters.type == Value::Null) return true;
+    if (letters.type != Value::Array || letters.array.size() > kMaxLettersPerMod) return why = "letters must be a list of up to 8", false;
+    std::vector<ManifestChart> charts;
+    std::vector<ManifestItem> items;
+    if (!parse_charts(manifest, charts, why) || !parse_items(manifest, items, why)) return false;
+    std::vector<std::string> quest_letters;
+    for (const Value& q : manifest.get("quests").array)
+        if (q.get("letter").get("id").type == Value::String) quest_letters.push_back(q.get("letter").get("id").text);
+    for (const Value& l : letters.array) {
+        ManifestLetter m;
+        if (l.type != Value::Object || l.get("id").type != Value::String || !story_mail::valid_id(l.get("id").text))
+            return why = "invalid letter id", false;
+        m.id = l.get("id").text;
+        std::u16string ignored;
+        if (l.get("sender").type != Value::String || l.get("text").type != Value::String) return why = "letter " + m.id + ": sender and text are needed", false;
+        m.sender = l.get("sender").text, m.text = l.get("text").text;
+        if (story_mail::compose(m.sender, m.text).empty()) return why = "letter " + m.id + ": invalid sender or text", false;
+        for (const Value& e : l.get("encloses").array) {
+            if (const std::string c = chart_ref(e); !c.empty()) {
+                bool found = false;
+                for (const ManifestChart& d : charts) found |= d.id == c;
+                if (!found) return why = "letter " + m.id + ": chart \"" + c + "\" is not declared in \"charts\"", false;
+                m.charts.push_back(c);
+            } else if (const std::string i = item_ref(e); !i.empty()) {
+                bool found = false;
+                for (const ManifestItem& d : items) found |= d.id == i;
+                if (!found) return why = "letter " + m.id + ": item \"" + i + "\" is not declared in \"items\"", false;
+                m.items.push_back(i);
+            } else
+                return why = "letter " + m.id + ": it can enclose \"chart:<id>\" and \"item:<id>\"", false;
+        }
+        for (const std::string& q : quest_letters)
+            if (q == m.id) return why = "letter " + m.id + " is also a quest's letter", false;
+        for (const ManifestLetter& o : out)
+            if (o.id == m.id) return why = "letter " + m.id + " is declared twice", false;
+        out.push_back(std::move(m));
     }
     return true;
 }

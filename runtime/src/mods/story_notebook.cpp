@@ -144,6 +144,12 @@ struct Declared {
     ManifestQuest quest;
 };
 std::vector<Declared> g_declared;
+// manifest letters on their own ("letters"): no quest; what they enclose is given once they are read
+struct LooseLetter {
+    std::string mod;
+    ManifestLetter letter;
+};
+std::vector<LooseLetter> g_letters;
 // the talk in progress: talking -> (reward: ordering the get-item event) -> done
 struct Talk {
     enum Phase : uint8_t { None, Choosing, Talking, Reward, After } phase = None;
@@ -1041,13 +1047,25 @@ bool declare(const std::string& mod, const std::string& mod_name, const mods::js
     std::vector<ManifestChart> charts;
     std::string why;
     std::vector<std::string> warnings;
-    if (!parse_quests(manifest, quests, why, npc_catalogue(), &warnings) || !parse_charts(manifest, charts, why)) {
+    std::vector<ManifestLetter> letters;
+    if (!parse_quests(manifest, quests, why, npc_catalogue(), &warnings) || !parse_charts(manifest, charts, why) ||
+        !parse_letters(manifest, letters, why)) {
         LOG("[notebook] %s: the manifest's quests are not used: %s", mod.c_str(), why.c_str());
         return false;
     }
+    if (!letters.empty()) {
+        {
+            std::lock_guard lock(g_mu);
+            for (ManifestLetter& l : letters) g_letters.push_back({mod, std::move(l)});
+        }
+        note_import();
+        story_mail::note_import();
+        if (!charts.empty()) story_chart::note_import();
+        LOG("[notebook] %s: %zu letter(s) from the manifest", mod.c_str(), letters.size());
+    }
     // the mod's charts: the MAP screen's chart list shows them while Link owns them
     for (const ManifestChart& ch : charts)
-        if (story_chart::define(mod, ch.id, ch.name, ch.description, ch.x, ch.z) < 0)
+        if (story_chart::define(mod, ch.id, ch.name, ch.description, ch.x, ch.z, ch.item_mod, ch.item_game) < 0)
             LOG("[notebook] %s: chart \"%s\" not registered", mod.c_str(), ch.id.c_str());
     if (!charts.empty()) {
         story_chart::note_import();
@@ -1097,6 +1115,23 @@ void declared_tick() {
     {
         std::lock_guard lock(g_mu);
         declared = g_declared;
+    }
+    // letters on their own: sent while the mod is enabled; once read, what they enclose, once
+    std::vector<LooseLetter> loose;
+    {
+        std::lock_guard lock(g_mu);
+        loose = g_letters;
+    }
+    for (const LooseLetter& l : loose) {
+        if (story_mail::send(l.mod, l.letter.id, l.letter.sender, l.letter.text) != story_mail::kResultRead) continue;
+        story_mail::Book b = book();
+        const uint16_t key = story_mail::letter_key(l.mod, l.letter.id);
+        if (b.get(story_mail::kRecordLetterEnclosures, key)) continue;
+        if (!b.set(story_mail::kRecordLetterEnclosures, key, 1)) continue;  // no room: next time
+        for (const std::string& chart : l.letter.charts)
+            if (story_chart::give(l.mod, chart) == story_chart::kResultOwned)
+                LOG("[notebook] %s: letter \"%s\" gives Link chart \"%s\"", l.mod.c_str(), l.letter.id.c_str(), chart.c_str());
+        for (const std::string& item : l.letter.items) story_items::give(l.mod, item, 1, "its letter");
     }
     for (const Declared& d : declared) {
         if (!d.quest.has_letter) continue;

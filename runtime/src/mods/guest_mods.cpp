@@ -565,7 +565,7 @@ bool load_one(const std::string& path, std::string& err,const mods::packages::Gu
             story_notebook::set_look(icon.empty()?std::string():(std::filesystem::path(pkg.path)/icon).string(),
                                      model.empty()?std::string():notebook_model(std::filesystem::path(pkg.path)/model,pkg.data_path));
         }
-        if(manifest_text.find("\"quests\"")!=std::string::npos||manifest_text.find("\"charts\"")!=std::string::npos) {
+        if(manifest_text.find("\"quests\"")!=std::string::npos||manifest_text.find("\"charts\"")!=std::string::npos||manifest_text.find("\"letters\"")!=std::string::npos) {
             prepare_npc_catalogue();
             story_notebook::declare(loaded.id,loaded.name,manifest);
         }

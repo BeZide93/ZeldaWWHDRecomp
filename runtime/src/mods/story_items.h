@@ -66,7 +66,8 @@ bool assign_notebook(int button);             // puts the notebook on a button (
 
 // wwhd_item_give / take / count / used, and the manifest's gives: the new count, or < 0. A give
 // shows the item's caption with the game's small get jingle (present()).
-int32_t give(const std::string& mod, const std::string& id, uint32_t n, const char* how);
+// caption false: no get caption (a get the game's own message already names, e.g. a treasure chest)
+int32_t give(const std::string& mod, const std::string& id, uint32_t n, const char* how, bool caption = true);
 int32_t take(const std::string& mod, const std::string& id, uint32_t n);
 int32_t count(const std::string& mod, const std::string& id);
 int32_t used(const std::string& mod, const std::string& id);  // times used (use action "event") since the last call

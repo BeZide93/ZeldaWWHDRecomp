@@ -51,12 +51,16 @@ int32_t unmark(const std::string& mod, const std::string& chart, const std::stri
 // owns it, the MAP screen's chart list shows it after the game's charts (its own chart number, 61 and
 // up), with the square's art and the X at the place (story_chart.cpp).
 // Declaring again replaces it. Results: kResultNone, kResultInvalid, kResultNoRoom.
-int32_t define(const std::string& mod, const std::string& chart, const std::string& name, const std::string& description, float x, float z);
+// item_mod / item_game: what its treasure chest holds (manifest "item"; story_treasure.h)
+int32_t define(const std::string& mod, const std::string& chart, const std::string& name, const std::string& description, float x, float z,
+               const std::string& item_mod = {}, uint8_t item_game = 0);
 struct ChartView {
     std::string mod, chart, name, description;
     float x, z;
     int32_t state;  // kResultNone / kResultOwned / kResultDone in the loaded save file
     bool opened;    // owned and opened in the chart list
+    std::string item_mod;   // its treasure chest: one of the mod's items (manifest "item": "item:<id>"), or ...
+    uint8_t item_game = 0;  // ... a game item ("game:<name>", story_manifest.h chart_game_item); both empty: an orange rupee
 };
 std::vector<ChartView> charts();  // the declared charts, in declaration order
 // The in-game menu switches to the MAP screen with that chart selected in its chart list (game thread;

@@ -361,6 +361,23 @@ letters it comes with an enclosure, which Link takes after reading: the Story No
 letter encloses the **story notebook**, every other one a green rupee. Several waiting letters are
 handed out one after another.
 
+**Letters in the manifest.** A letter needs no code: declare it in `manifest.json` and the port
+sends it while your mod is on. Once Link has read it, he has what it encloses: your charts
+(`"chart:<id>"`, see [Charts and markers](#charts-and-markers)) and items (`"item:<id>"`, see
+[Items](#items)), each given once. Such a letter makes no entry in the story notebook; for a letter
+that starts a quest, use the quest's own `"letter"` (see [Quests in the manifest](#quests-in-the-manifest)).
+
+```json
+"letters": [
+  {"id": "map-letter", "sender": "A sailor",
+   "text": "Dear Link,\nI found this old map in a bottle.\nMaybe you can find what it marks.",
+   "encloses": ["chart:old-map"]}
+]
+```
+
+Up to 8 letters per mod; the same rules for ID, sender and text as above. Every chart and item a
+letter encloses must be declared in the manifest, and a letter's ID must not be a quest letter's.
+
 **The story notebook** is the port's journal for story mods (see [The story notebook](#the-story-notebook)).
 Link keeps it in the Delivery Bag. Receiving it writes nothing to the inventory: it is kept in the
 story record (below).
@@ -474,6 +491,28 @@ once the chart is finished, its red circle).
   game's chart bits are neither read nor written for it, and opening it in the list is kept in
   the chart's record. With every treasure chart owned there is no room in the list; the chart
   still works (the notebook, the red circle).
+
+**A treasure chart on its own.** A chart that is just a treasure to find needs no quest and no
+notebook entry. Declare it and send it in a letter; that is all. The Old map example:
+
+```json
+"charts": [
+  {"id": "old-map", "name": "Old map", "description": "An old map. An X marks the top of the lighthouse.",
+   "place": {"x": 1759, "z": -202572}}
+],
+"letters": [
+  {"id": "map-letter", "sender": "A sailor",
+   "text": "Dear Link,\nI found this old map in a bottle.\nMaybe you can find what it marks.",
+   "encloses": ["chart:old-map"]}
+]
+```
+
+Link gets the letter at the next Rito postbox; after reading it he owns the Old map, and the MAP
+screen's chart list shows it with its X. A chart's `"item"` says what its treasure chest holds: one of your items
+(`"item:<id>"`, see [Items](#items)) or a game item (`"game:purple_rupee"`, `"game:orange_rupee"`,
+`"game:silver_rupee"`, `"game:heart_piece"`, `"game:heart_container"`); without it, an orange rupee. A quest whose only step is to find a chart gets a warning in
+the log: make it a chart with a letter instead. A chart to find as one step of a longer quest is
+fine (`"find": "chart:<id>"`, see [Quests in the manifest](#quests-in-the-manifest)).
 
 **Saving.** Whether Link owns a chart, and whether it is finished, is stored in the save file in
 the same record as the letters (it stays unused by the game itself; letters and charts of all mods
