@@ -7,6 +7,29 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Linux: sharp picture with desktop scaling on Wayland** (issue #201, thanks @findel77): the game window now
+  uses the screen's real pixel size, so with display scaling (for example 4K at 250%) the picture and the
+  settings overlay are no longer rendered small and stretched. On older versions, `SDL_VIDEO_WAYLAND_SCALE_TO_DISPLAY=1`
+  works around it.
+
+- **Mods: development builds can install packages for the next release.** A development build counts as the next
+  version for the mod catalogue (for example v0.2.14 plus newer changes counts as 0.2.15), so packages that need
+  the coming release, like the Story Notebook 0.6.1, install on it. Releases are unchanged.
+
+- **Extended enemy lock-on** (#192, PR #193, thanks @mhbxyz): Mods → Extended enemy lock-on, off by default. The
+  enemy lock-on range can be raised to 1x–3x (saved per profile), and R3 while locked on to an enemy switches to the
+  next eligible enemy, wrapping around. The game's own targeting still decides who can be targeted; talking
+  distances to characters are unchanged.
+
+- **For porters: more overlay switches** (PR #205, thanks @Pulpparty): a port to another platform can now turn off
+  code mods, mod downloads, the Speakers choice and the keyboard hints in the settings menu (`overlay::ext::Features`).
+  Nothing changes on Windows, macOS, Linux or Android.
+
+- **Fixed: ropes jittered with frame interpolation** (issue #202, thanks @floysh and @JulianSK1999): the grappling
+  hook's rope in Link's hand and rope bridges (for example on Outset Island in the title scene) were drawn at the exact
+  game step while everything around them was drawn in between, so they jumped back and forth at 60, 120 or 240 fps.
+  They now move smoothly with the rest of the picture. 30 fps and true 60 are unchanged.
+
 - **Cheats: moon jump** (idea from the GreenNaugahyde Android fork): in Gameplay → Cheats, off by default. Hold L
   to rise; the left stick steers relative to the camera. **No fall damage after moon jump** is a separate option.
   Works at 30 fps, with frame interpolation and in true 60; loading a state ends a flight.
