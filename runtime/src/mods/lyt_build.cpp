@@ -27,25 +27,32 @@ constexpr size_t kMaxArchive = size_t(12) << 20;  // the largest archive (SARC, 
 
 // ---------------------------------------------------------------- an ordered JSON reader
 // (the description's objects are used in their written order, as Python's dicts)
+struct JMember;
 struct J {
     enum Type { Null, Bool, Number, String, Array, Object } type = Null;
     bool b = false;
     double num = 0;
     std::string s;
     std::vector<J> arr;
-    std::vector<std::pair<std::string, J>> obj;
-    const J* find(const std::string& k) const {
-        for (const auto& [key, v] : obj)
-            if (key == k) return &v;
-        return nullptr;
-    }
+    std::vector<JMember> obj;  // not std::pair: libstdc++ rejects a pair of a still incomplete J
+    const J* find(const std::string& k) const;
     bool has(const std::string& k) const { return find(k) != nullptr; }
-    const J& at(const std::string& k) const {
-        const J* v = find(k);
-        if (!v) fail("missing key \"" + k + "\"");
-        return *v;
-    }
+    const J& at(const std::string& k) const;
 };
+struct JMember {
+    std::string first;
+    J second;
+};
+const J* J::find(const std::string& k) const {
+    for (const auto& [key, v] : obj)
+        if (key == k) return &v;
+    return nullptr;
+}
+const J& J::at(const std::string& k) const {
+    const J* v = find(k);
+    if (!v) fail("missing key \"" + k + "\"");
+    return *v;
+}
 
 class Reader {
 public:
@@ -139,7 +146,7 @@ private:
                 bool replaced = false;  // Python: a repeated key keeps its first place, the last value
                 for (auto& kv : v.obj)
                     if (kv.first == k) kv.second = std::move(x), replaced = true;
-                if (!replaced) v.obj.emplace_back(std::move(k), std::move(x));
+                if (!replaced) v.obj.push_back({std::move(k), std::move(x)});
             } while (take(','));
             if (!take('}')) fail("description: '}' expected");
             return v;
