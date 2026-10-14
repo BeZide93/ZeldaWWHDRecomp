@@ -100,7 +100,16 @@ void build(Cpu* c, uint32_t projection, uint32_t matrix) {
     if (!g_call(c, kResMgrCache, {mgr, name, 0})) return LOG("[lyt] %s: the archive didn't load", g_client.layout.c_str());
     const uint32_t part = g_call(c, kNoControlConstruct, {0});
     if (!part) return LOG("[lyt] %s: no parts object", g_client.layout.c_str());
-    g_call(c, kAttachArchives, {part, name, 1});
+    // our archive first, then the game's archives whose textures the layout names (an array of SafeStrings)
+    // (made once: the client doesn't change after install)
+    const uint32_t count = 1 + uint32_t(g_client.game_archives.size());
+    static uint32_t names = 0;
+    if (!names) {
+        names = mem::host_alloc(8 * count, 4);
+        memcpy(mem::ptr(names), mem::ptr(name), 8);
+        for (uint32_t i = 1; i < count; i++) memcpy(mem::ptr(names + 8 * i), mem::ptr(safe_string(g_client.game_archives[i - 1].c_str())), 8);
+    }
+    g_call(c, kAttachArchives, {part, names, count});
     uint32_t layout = g_call(c, kPartsNew, {0x110, heap, 4});
     if (layout) layout = g_call(c, kLayoutConstruct, {layout});
     if (!layout) {
