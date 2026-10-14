@@ -1981,6 +1981,21 @@ StageResources bind_stage(const uint32_t *r, vk::Shader *sh,
   return out;
 }
 } // namespace
+VkDescriptorSet texture_stage_smoke_bind(const uint32_t* registers,
+    VkDescriptorSetLayout layout, uint32_t textureCount) {
+  if (textureCount > LATTE_NUM_MAX_TEX_UNITS)
+    exception_report::raise("invalid smoke texture count");
+  LatteDecompilerShader decoded(LatteConst::ShaderType::Pixel);
+  vk::Shader shader;
+  shader.dec = &decoded;
+  decoded.textureUnitListCount = uint8_t(textureCount);
+  for (uint32_t i = 0; i < textureCount; ++i) {
+    decoded.textureUnitList[i] = uint8_t(i);
+    decoded.textureUnitSamplerAssignment[i] = uint16_t(i);
+    shader.mapping.textureUnitToBindingPoint[i] = int8_t(i);
+  }
+  return bind_stage(registers, &shader, layout, false, 1, 1, {}, nullptr, nullptr).set;
+}
 void reset_feedback_images() { reset_feedback_scratch(); }
 UploadSlice vertex_window_smoke_snapshot(uint32_t binding,uint32_t address,
     uint32_t reservation,uint32_t windowOffset,uint32_t windowLength,
