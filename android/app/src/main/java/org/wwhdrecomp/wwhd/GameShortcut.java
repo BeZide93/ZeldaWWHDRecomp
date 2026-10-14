@@ -24,6 +24,17 @@ public final class GameShortcut {
 
     static final String ID = "game";
 
+    /** The game shortcut (the icon on launchers that can't pin widgets) is on the home screen. */
+    static boolean pinned(Context context) {
+        try {
+            ShortcutManager shortcuts = context.getSystemService(ShortcutManager.class);
+            if (shortcuts == null) return false;
+            for (ShortcutInfo pinned : shortcuts.getPinnedShortcuts())
+                if (pinned.getId().equals(ID)) return true;
+        } catch (Exception unavailable) {}
+        return false;
+    }
+
     /** Asks the launcher to pin the shortcut, unless it is pinned already or pinning is unsupported.
      *  False when Android refused the request (the app must be in front) or no launcher can pin. */
     public static boolean offer(Context context, File game) {

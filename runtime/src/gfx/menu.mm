@@ -266,7 +266,7 @@ static WWStateMenu* g_state_menu;
 - (void)rebuildShaders:(NSMenuItem*)item {
     NSAlert* alert = [NSAlert new];
     alert.messageText = shaderprebuild::request_rebuild() ? @"Shader cache rebuild requested" : @"Could not save the rebuild request";
-    alert.informativeText = @"Run setup and choose repair/update to prepare shaders and pipelines from your game files. The game will compile shaders as needed until then.";
+    alert.informativeText = [NSString stringWithUTF8String:shaderprebuild::setup_hint()];
     [alert runModal];
 }
 - (void)setBloom:(NSMenuItem*)item { render::set_bloom_strength(item.tag / 100.0f); update_title(); }

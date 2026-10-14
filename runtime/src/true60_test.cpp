@@ -31,6 +31,7 @@
 #include <cmath>
 #include <string>
 #include <vector>
+#include <algorithm>
 
 #include "guest_addr.h"
 #include "runtime.h"
@@ -722,4 +723,53 @@ extern "C" void hook_02753D6C(Cpu* c) {
         }
     }
     f_02753D6C_orig(c);
+}
+
+// A draw-path fixture for issue #163, using copied saves/states only. It bypasses
+// target acquisition, not marker drawing: five real nearby actors are submitted
+// through daBoomerang_c::setLockActor, with no sounds. No effect unless opted in.
+extern "C" void f_020CC020(Cpu*);
+namespace true60_test {
+void reticle_targets(Cpu* cpu, uint32_t link) {
+    const uint32_t boom = ld32(link + 0x6594);
+    if (boom < mem::kMem2Start || boom >= mem::kMem2End) return;
+    const uint32_t methods = ld32(boom + 0xF0);
+    if (methods < mem::kMem2Start || methods >= mem::kMem2End || ld32(methods + 8) != GC(0x020CC454)) return;
+    static uint32_t filled = 0;
+    if (filled == boom) return;
+    struct Target { uint32_t actor; float distance; };
+    std::vector<Target> candidates;
+    const uint32_t view = ld32(GD(0x1046F0B0) + 0x5FA4);
+    if (!view) return;
+    float eye[3], forward[3];
+    for (int i = 0; i < 3; ++i) {
+        eye[i] = ldf32(view + 0xDC + 4 * i);
+        forward[i] = float(ldf32(view + 0xE8 + 4 * i)) - eye[i];
+    }
+    uint32_t node = ld32(GD(0x101F3328));
+    for (int count = 0; node && count < 2048; ++count) {
+        if (node < mem::kMem2Start || node >= mem::kMem2End) break;
+        const uint32_t actor = ld32(node + 0xC);
+        node = ld32(node + 8);
+        if (actor < mem::kMem2Start || actor >= mem::kMem2End || actor == link || actor == boom) continue;
+        float distance = 0, ahead = 0;
+        for (int i = 0; i < 3; ++i) {
+            const float delta = float(ldf32(actor + 0x37C + 4 * i)) - eye[i];
+            distance += delta * delta;
+            ahead += delta * forward[i];
+        }
+        if (std::isfinite(distance) && distance > 10000 && distance < 8000.f * 8000.f && ahead > 0)
+            candidates.push_back({actor, distance});
+    }
+    std::sort(candidates.begin(), candidates.end(), [](const auto& a, const auto& b) { return a.distance < b.distance; });
+    for (const auto& target : candidates) {
+        if (ld8(boom + 0x26271) >= 5) break;
+        Cpu call = *cpu;
+        call.r[3] = boom; call.r[4] = target.actor; call.r[5] = 0;
+        f_020CC020(&call);
+        LOG("[reticle-fixture] boom %08X target %08X id %u eye %.3f %.3f %.3f", boom, target.actor,
+            ld32(target.actor + 4), ldf32(target.actor + 0x37C), ldf32(target.actor + 0x380), ldf32(target.actor + 0x384));
+    }
+    if (ld8(boom + 0x26271)) filled = boom;
+}
 }

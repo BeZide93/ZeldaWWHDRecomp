@@ -8,10 +8,10 @@ import android.os.Bundle;
 
 /**
  * The game widget's menu. Only the app icon has launcher shortcuts (export, import, setup); a
- * widget's long-press menu offers its configuration activity instead ("Settings" on Samsung),
- * since the widget is reconfigurable. This is that activity: the save tools and setup (a tap on
- * the widget itself plays). Launchers draw that long-press menu themselves; an app can't add
- * items to it for a widget.
+ * widget's long-press menu offers its configuration activity instead ("Settings" on Samsung,
+ * "Customize" on Pixel), since the widget is reconfigurable. This is that activity: the save
+ * tools and setup (a tap on the widget itself plays). Launchers draw that long-press menu
+ * themselves; an app can't add items to it for a widget.
  */
 public class GameWidgetMenu extends Activity {
     @Override public void onCreate(Bundle state) {

@@ -99,8 +99,8 @@ endif()
 
 add_library(gamecode STATIC ${GEN_SOURCES} ${GEN_DIR}/table.c ${GEN_DIR}/imports.c)
 target_include_directories(gamecode PUBLIC runtime/include ${GEN_DIR})
-# exact FP semantics: no contraction into FMA, no fast-math
-target_compile_options(gamecode PRIVATE -O3 -ffp-contract=off -fno-strict-aliasing -w)
+# exact FP semantics: no contraction into FMA, no fast-math; PowerPC integer arithmetic wraps
+target_compile_options(gamecode PRIVATE -O3 -ffp-contract=off -fno-strict-aliasing -fwrapv -w)
 if(APPLE AND CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
   target_compile_options(gamecode PRIVATE -mcpu=apple-m1)
 endif()
@@ -116,7 +116,7 @@ endif()
 add_library(cemu_latte STATIC ${CEMU_SOURCES})
 target_include_directories(cemu_latte PUBLIC ${CEMU_DIR} ${CEMU_DIR}/Cafe ${CMAKE_SOURCE_DIR}/runtime/third_party/metal-cpp
                                              ${CMAKE_SOURCE_DIR}/runtime/third_party/fmt/include)
-target_compile_options(cemu_latte PRIVATE "SHELL:-include ${CEMU_DIR}/cemu_shim.h")
+target_compile_options(cemu_latte PRIVATE "SHELL:-include \"${CEMU_DIR}/cemu_shim.h\"")
 if(WWHD_HAS_METAL)
   target_compile_definitions(cemu_latte PUBLIC ENABLE_METAL=1)
 endif()
@@ -198,7 +198,7 @@ endif()
 file(GLOB GX2_SOURCES CONFIGURE_DEPENDS runtime/src/gx2/*.cpp)
 # renderer selection / dispatch (runtime/src/gfx/renderer.cpp) and the GamePad screen modes / TV window
 # layout both window hosts share (display_modes.cpp): every configuration
-set(GFX_SOURCES runtime/src/gfx/renderer.cpp runtime/src/gfx/display_modes.cpp)
+set(GFX_SOURCES runtime/src/gfx/renderer.cpp runtime/src/gfx/display_modes.cpp runtime/src/gfx/gamepad_ui_state.cpp)
 set(MOD_GFX_SOURCES)
 if(WWHD_HAS_METAL)
   # Metal renderer and the AppKit host (windows, menus, input, controls window, display modes)
@@ -334,7 +334,7 @@ if(WWHD_HAS_METAL)
 add_executable(shadertest runtime/tools/shadertest.cpp runtime/src/gx2/gx2_shader_regs.cpp)
 target_include_directories(shadertest PRIVATE runtime/include runtime/src runtime/src/gx2)
 target_link_libraries(shadertest PRIVATE cemu_latte)
-target_compile_options(shadertest PRIVATE "SHELL:-include ${CEMU_DIR}/cemu_shim.h")
+target_compile_options(shadertest PRIVATE "SHELL:-include \"${CEMU_DIR}/cemu_shim.h\"")
 
 endif()
 
@@ -416,6 +416,11 @@ add_executable(headless_compose_test runtime/tools/headless_compose_test.cpp)
 target_include_directories(headless_compose_test PRIVATE runtime/src)
 target_compile_options(headless_compose_test PRIVATE -UNDEBUG)
 
+add_executable(controller_selection_test runtime/tools/controller_selection_test.cpp runtime/src/controller_selection.cpp runtime/src/guest_addr_identity.c)
+target_include_directories(controller_selection_test PRIVATE runtime/src runtime/include)
+target_compile_options(controller_selection_test PRIVATE -UNDEBUG)
+add_test(NAME controller_selection COMMAND controller_selection_test)
+
 add_executable(input_map_test runtime/tools/input_map_test.cpp runtime/src/input_map.cpp)
 target_include_directories(input_map_test PRIVATE runtime/src)
 # issue #153: what the game gets back after the settings overlay or the text prompt (overlay/release_gate.h)
@@ -452,6 +457,9 @@ target_compile_options(interp_pacing_test PRIVATE -UNDEBUG)
 add_executable(interp_nodraw_test runtime/tools/interp_nodraw_test.cpp)
 target_compile_options(interp_nodraw_test PRIVATE -UNDEBUG)
 add_test(NAME interp_nodraw COMMAND interp_nodraw_test)
+add_executable(interp_reticle_test runtime/tools/interp_reticle_test.cpp)
+target_compile_options(interp_reticle_test PRIVATE -UNDEBUG -ffp-contract=off)
+add_test(NAME interp_reticle COMMAND interp_reticle_test)
 # the virtual vsync's flip timing: late frames flip when ready (runtime/src/gx2/vsync_pacing.h)
 add_executable(vsync_pacing_test runtime/tools/vsync_pacing_test.cpp)
 target_compile_options(vsync_pacing_test PRIVATE -UNDEBUG)
@@ -460,6 +468,10 @@ target_include_directories(countdown_test PRIVATE runtime/src runtime/include)
 target_compile_options(countdown_test PRIVATE -UNDEBUG)
 add_test(NAME countdown COMMAND countdown_test)
 if(UNIX)
+  add_executable(interp_reticle_hooks_test runtime/tools/interp_reticle_hooks_test.cpp runtime/src/interp_reticle.cpp)
+  target_include_directories(interp_reticle_hooks_test PRIVATE runtime/include runtime/src)
+  target_compile_options(interp_reticle_hooks_test PRIVATE -UNDEBUG -ffp-contract=off)
+  add_test(NAME interp_reticle_hooks COMMAND interp_reticle_hooks_test)
   add_executable(interp_cloth_test runtime/tools/interp_cloth_test.cpp runtime/src/guest_addr_identity.c)
   target_include_directories(interp_cloth_test PRIVATE runtime/include runtime/src)
   target_compile_options(interp_cloth_test PRIVATE -UNDEBUG -ffunction-sections -fdata-sections)
@@ -640,7 +652,7 @@ if(WWHD_SDL_HOST)
 endif()
 
 if(WWHD_SDL_HOST)
-  add_executable(mouse_sdl_test runtime/tools/mouse_sdl_test.cpp runtime/src/platform/mouse_sdl.cpp)  # motion.h stubbed
+  add_executable(mouse_sdl_test runtime/tools/mouse_sdl_test.cpp runtime/src/platform/mouse_sdl.cpp runtime/src/input_map.cpp)  # motion.h stubbed
   target_include_directories(mouse_sdl_test PRIVATE runtime/src runtime/include ${CEMU_DIR} ${CEMU_DIR}/Cafe ${CMAKE_SOURCE_DIR}/runtime/third_party/fmt/include)
   target_compile_options(mouse_sdl_test PRIVATE -UNDEBUG)
   target_link_libraries(mouse_sdl_test PRIVATE SDL3::Headers)
@@ -693,6 +705,20 @@ add_executable(gamepad_touch_test runtime/tools/gamepad_touch_test.cpp)
 target_include_directories(gamepad_touch_test PRIVATE runtime/src)
 target_compile_options(gamepad_touch_test PRIVATE -UNDEBUG)
 add_test(NAME gamepad_touch COMMAND gamepad_touch_test)
+if(UNIX)
+  add_executable(gamepad_ui_state_test runtime/tools/gamepad_ui_state_test.cpp runtime/src/gfx/gamepad_ui_state.cpp)
+  target_include_directories(gamepad_ui_state_test PRIVATE runtime/src runtime/include runtime/third_party/fmt/include)
+  target_compile_options(gamepad_ui_state_test PRIVATE -UNDEBUG)
+  add_test(NAME gamepad_ui_state COMMAND gamepad_ui_state_test)
+endif()
+
+add_executable(auto_pip_test runtime/tools/auto_pip_test.cpp runtime/src/gfx/display_modes.cpp runtime/src/guest_addr_identity.c)
+target_include_directories(auto_pip_test PRIVATE runtime/src runtime/include runtime/third_party/fmt/include)
+target_compile_options(auto_pip_test PRIVATE -UNDEBUG)
+add_test(NAME auto_pip COMMAND auto_pip_test)
+add_test(NAME auto_pip_pause COMMAND auto_pip_test)
+set_tests_properties(auto_pip_pause PROPERTIES ENVIRONMENT "WWHD_DRC_PAUSE=1")
+
 add_executable(display_fallback_test runtime/tools/display_fallback_test.cpp runtime/src/gfx/display_modes.cpp)
 target_include_directories(display_fallback_test PRIVATE runtime/src runtime/include runtime/third_party/fmt/include)
 target_compile_options(display_fallback_test PRIVATE -UNDEBUG)
@@ -729,6 +755,11 @@ if(Python3_Interpreter_FOUND)
   target_include_directories(guest_addr_test PRIVATE runtime/include)
   target_compile_options(guest_addr_test PRIVATE -UNDEBUG)
   add_test(NAME guest_addr COMMAND guest_addr_test)
+  add_executable(auto_pip_eu_test runtime/tools/auto_pip_test.cpp runtime/src/gfx/display_modes.cpp
+    "${CMAKE_BINARY_DIR}/guest_map_fixture.c")
+  target_include_directories(auto_pip_eu_test PRIVATE runtime/src runtime/include runtime/third_party/fmt/include)
+  target_compile_options(auto_pip_eu_test PRIVATE -UNDEBUG)
+  add_test(NAME auto_pip_eu COMMAND auto_pip_eu_test)
   add_executable(guest_addr_identity_test runtime/tools/guest_addr_test.cpp runtime/src/guest_addr_identity.c)
   target_include_directories(guest_addr_identity_test PRIVATE runtime/include)
   target_compile_definitions(guest_addr_identity_test PRIVATE TEST_IDENTITY)
@@ -754,6 +785,22 @@ add_test(NAME mod_game_id COMMAND mod_package_test --game-id)
 add_test(NAME mod_guest_startup COMMAND mod_package_test --guest-startup)
 add_test(NAME mod_guest_metadata COMMAND mod_package_test --guest-metadata)
 add_test(NAME mod_guest_prepare COMMAND mod_package_test --guest-prepare)
+# issue #173: platform extensions of the settings overlay (overlay/extensions.h) and the overlay's text
+# fields through a platform keyboard (text_entry::field)
+add_executable(overlay_extensions_test runtime/tools/overlay_extensions_test.cpp runtime/src/overlay/extensions.cpp
+  runtime/src/overlay/text_field.cpp)
+target_include_directories(overlay_extensions_test PRIVATE runtime/src)
+target_compile_options(overlay_extensions_test PRIVATE -UNDEBUG)
+target_link_libraries(overlay_extensions_test PRIVATE imgui)
+add_test(NAME overlay_extensions COMMAND overlay_extensions_test)
+# issue #185: a platform port's own renderer (gfx/renderer_ext.h) and the GX2 decisions it can take over
+# (gx2/backend_hooks.h); renderer.cpp built as on macOS (Metal and Vulkan) with stub backend tables
+add_executable(renderer_ext_test runtime/tools/renderer_ext_test.cpp runtime/src/gfx/renderer.cpp)
+target_include_directories(renderer_ext_test PRIVATE runtime/include runtime/src runtime/src/gx2 ${CEMU_DIR}
+  runtime/third_party/metal-cpp runtime/third_party/fmt/include)
+target_compile_definitions(renderer_ext_test PRIVATE WWHD_HAS_METAL WWHD_HAS_VULKAN)
+target_compile_options(renderer_ext_test PRIVATE -UNDEBUG "SHELL:-include \"${CEMU_DIR}/cemu_shim.h\"")
+add_test(NAME renderer_ext COMMAND renderer_ext_test)
 add_executable(mod_cemu_dialog_test runtime/tools/mod_cemu_dialog_test.cpp)
 target_include_directories(mod_cemu_dialog_test PRIVATE runtime/src)
 target_compile_options(mod_cemu_dialog_test PRIVATE -UNDEBUG)
@@ -989,6 +1036,23 @@ if(Python3_Interpreter_FOUND)
 endif()
 
 add_executable(aspect_panes_test runtime/tools/aspect_panes_test.cpp)
+add_executable(gameplay_fov_test runtime/tools/gameplay_fov_test.cpp runtime/src/aspect.cpp runtime/src/guest_addr_identity.c)
+target_include_directories(gameplay_fov_test PRIVATE runtime/src runtime/include)
+target_compile_options(gameplay_fov_test PRIVATE -UNDEBUG)
+add_test(NAME gameplay_fov_events COMMAND gameplay_fov_test)
+add_executable(stereo_test runtime/tools/stereo_test.cpp)
+target_include_directories(stereo_test PRIVATE runtime/src)
+target_compile_options(stereo_test PRIVATE -UNDEBUG)
+add_test(NAME stereo_geometry_packing COMMAND stereo_test)
+add_executable(stereo_pointer_test runtime/tools/stereo_pointer_test.cpp runtime/src/gfx/display_modes.cpp)
+target_include_directories(stereo_pointer_test PRIVATE runtime/src runtime/include runtime/third_party/fmt/include)
+target_compile_options(stereo_pointer_test PRIVATE -UNDEBUG)
+target_link_libraries(stereo_pointer_test PRIVATE imgui)
+add_test(NAME stereo_pointer COMMAND stereo_pointer_test)
+add_executable(hdr_test runtime/tools/hdr_test.cpp)
+target_include_directories(hdr_test PRIVATE runtime/src)
+target_compile_options(hdr_test PRIVATE -UNDEBUG)
+add_test(NAME hdr_output_math COMMAND hdr_test)
 target_include_directories(aspect_panes_test PRIVATE runtime/src)
 add_test(NAME aspect_panes COMMAND aspect_panes_test)
 
@@ -1104,6 +1168,14 @@ add_test(NAME guest_audio_output_volume COMMAND guest_audio_output_test ${CMAKE_
 add_test(NAME guest_audio_output_saved COMMAND guest_audio_output_test ${CMAKE_CURRENT_BINARY_DIR}/synthetic-audio-saved.wav saved)
 add_test(NAME guest_audio_output_invalid_volume COMMAND guest_audio_output_test ${CMAKE_CURRENT_BINARY_DIR}/synthetic-audio-invalid.wav invalid)
 
+# Key selection uses only extract_test's authored encrypted disc and made-up keys.
+if(Python3_Interpreter_FOUND AND NOT ANDROID)
+  add_test(NAME setup_keys COMMAND ${CMAKE_COMMAND} -E env
+    WWHD_KEY_TEST_EXTRACTOR=$<TARGET_FILE:wwhd-extract>
+    WWHD_KEY_TEST_FIXTURE_BUILDER=$<TARGET_FILE:extract_test>
+    "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/installer/test_setup_keys.py")
+endif()
+
 # Synthetic setup build -> persisted host preference -> guest package enable gate.
 if(Python3_Interpreter_FOUND AND NOT ANDROID)
   add_test(NAME setup_code_mods COMMAND ${CMAKE_COMMAND} -E env
@@ -1192,7 +1264,8 @@ if(NOT ANDROID AND SDL3_FOUND AND Python3_Interpreter_FOUND)
   add_executable(mod_oneclick_flow_test runtime/tools/mod_oneclick_flow_test.cpp
     runtime/third_party/imgui/backends/imgui_impl_sdlrenderer3.cpp runtime/src/mods/code_mods.cpp
     runtime/src/mods/manager.cpp runtime/src/mods/traversal_settings.cpp runtime/src/mods/packages.cpp ${WWHD_NPC_CATALOGUE} runtime/src/mods/guest_png.cpp
-    runtime/src/mods/mod_archive.cpp runtime/src/mods/content.cpp runtime/src/mods/cemu_pack.cpp runtime/src/guest_addr_identity.c)
+    runtime/src/mods/mod_archive.cpp runtime/src/mods/content.cpp runtime/src/mods/cemu_pack.cpp runtime/src/guest_addr_identity.c
+    runtime/src/overlay/extensions.cpp runtime/src/overlay/text_field.cpp)
   target_include_directories(mod_oneclick_flow_test PRIVATE runtime/src runtime/include)
   target_compile_options(mod_oneclick_flow_test PRIVATE -UNDEBUG)
   target_link_libraries(mod_oneclick_flow_test PRIVATE imgui SDL3::SDL3 ZLIB::ZLIB Threads::Threads ${CMAKE_DL_LIBS})
@@ -1232,8 +1305,15 @@ add_executable(fetch_attributes_test runtime/tools/fetch_attributes_test.cpp
   runtime/src/gx2/fetch_attributes.cpp runtime/third_party/cemu/fetch_shader_parse.cpp)
 target_include_directories(fetch_attributes_test PRIVATE runtime/src ${CEMU_DIR}
   runtime/third_party/metal-cpp runtime/third_party/fmt/include)
-target_compile_options(fetch_attributes_test PRIVATE -UNDEBUG "SHELL:-include ${CEMU_DIR}/cemu_shim.h")
+target_compile_options(fetch_attributes_test PRIVATE -UNDEBUG "SHELL:-include \"${CEMU_DIR}/cemu_shim.h\"")
 add_test(NAME fetch_attributes_semantic_parity COMMAND fetch_attributes_test)
+# Cemu's StringBuf when allocations fail: every write stays in bounds.
+add_executable(stringbuf_test runtime/tools/stringbuf_test.cpp)
+target_include_directories(stringbuf_test PRIVATE runtime/src ${CEMU_DIR}
+  runtime/third_party/metal-cpp runtime/third_party/fmt/include)
+target_compile_options(stringbuf_test PRIVATE -UNDEBUG "SHELL:-include \"${CEMU_DIR}/cemu_shim.h\"")
+target_link_libraries(stringbuf_test PRIVATE Threads::Threads)
+add_test(NAME stringbuf_out_of_memory COMMAND stringbuf_test)
 add_executable(pipeline_identity_test runtime/tools/pipeline_identity_test.cpp)
 target_include_directories(pipeline_identity_test PRIVATE runtime/src)
 target_compile_options(pipeline_identity_test PRIVATE -UNDEBUG)
@@ -1253,4 +1333,56 @@ if(WIN32)
       WWHD_WINDOWS_UTF8_TEST=$<TARGET_FILE:windows_utf8_test>
       ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/installer/test_windows_utf8.py)
   endif()
+endif()
+
+add_executable(setup_polish_test runtime/tools/setup_polish_test.cpp)
+target_include_directories(setup_polish_test PRIVATE runtime/src)
+target_link_libraries(setup_polish_test PRIVATE imgui)
+target_compile_options(setup_polish_test PRIVATE -UNDEBUG)
+add_test(NAME setup_polish COMMAND setup_polish_test)
+if(Java_JAVA_EXECUTABLE AND Java_JAVAC_EXECUTABLE)
+  add_test(NAME android_setup_presentation COMMAND ${CMAKE_COMMAND}
+    "-DJAVA=${Java_JAVA_EXECUTABLE}" "-DJAVAC=${Java_JAVAC_EXECUTABLE}"
+    "-DWORK=${CMAKE_BINARY_DIR}/setup_presentation_test" "-DSOURCE=${CMAKE_SOURCE_DIR}"
+    -P ${CMAKE_SOURCE_DIR}/runtime/tools/setup_presentation_test.cmake)
+endif()
+
+# issue #112: menu toggle debounce and transition diagnostics, without game data.
+add_executable(overlay_toggle_test runtime/tools/overlay_toggle_test.cpp)
+target_include_directories(overlay_toggle_test PRIVATE runtime/src)
+target_compile_options(overlay_toggle_test PRIVATE -UNDEBUG)
+target_link_libraries(overlay_toggle_test PRIVATE imgui)
+add_test(NAME overlay_toggle COMMAND overlay_toggle_test)
+if(WWHD_SDL_HOST)
+  add_test(NAME overlay_focus_matrix COMMAND input_sdl_test --menu-matrix)
+endif()
+
+# Link only the overlay input API and SDL boundary. Dead code elimination drops renderer/game
+# dependencies, allowing real transition and focus regressions to run without game data.
+if(WWHD_SDL_HOST AND UNIX AND NOT ANDROID)
+  add_executable(overlay_input_integration_test runtime/tools/overlay_input_integration_test.cpp
+    runtime/src/gfx/display_modes.cpp runtime/src/overlay/extensions.cpp runtime/src/input_map.cpp
+    runtime/src/rumble.cpp runtime/src/platform/input_sdl.cpp runtime/src/platform/mouse_sdl.cpp ${MOTION_SOURCES})
+  target_include_directories(overlay_input_integration_test PRIVATE ${IMGUI_DIR} runtime/src runtime/include
+    ${CEMU_DIR} ${CEMU_DIR}/Cafe ${CMAKE_SOURCE_DIR}/runtime/third_party/fmt/include)
+  target_compile_definitions(overlay_input_integration_test PRIVATE WWHD_HAS_VULKAN=1 WWHD_SDL_HOST=1 WWHD_TEST_GAMESCOPE=1)
+  target_compile_options(overlay_input_integration_test PRIVATE -UNDEBUG -ffunction-sections -fdata-sections)
+  if(APPLE)
+    target_link_options(overlay_input_integration_test PRIVATE -Wl,-dead_strip)
+  else()
+    target_link_options(overlay_input_integration_test PRIVATE -Wl,--gc-sections)
+  endif()
+  target_link_libraries(overlay_input_integration_test PRIVATE imgui SDL3::SDL3 Threads::Threads)
+  add_test(NAME overlay_window_target COMMAND overlay_input_integration_test --window-target)
+  set_tests_properties(overlay_window_target PROPERTIES ENVIRONMENT "WWHD_OVERLAY_TRACE=1;WWHD_NO_AUDIO=1" TIMEOUT 30)
+  add_test(NAME overlay_input_integration COMMAND overlay_input_integration_test)
+  set_tests_properties(overlay_input_integration PROPERTIES ENVIRONMENT "WWHD_OVERLAY_TRACE=1;WWHD_NO_AUDIO=1" TIMEOUT 30)
+endif()
+
+if(APPLE)
+  add_executable(controls_ui_test runtime/tools/controls_ui_test.mm runtime/src/input_map.cpp)
+  target_include_directories(controls_ui_test PRIVATE runtime/src runtime/include)
+  target_compile_options(controls_ui_test PRIVATE -UNDEBUG $<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>)
+  target_link_libraries(controls_ui_test PRIVATE "-framework Cocoa" "-framework GameController" "-framework QuartzCore" "-framework Carbon")
+  add_test(NAME controls_ui COMMAND controls_ui_test)
 endif()

@@ -656,6 +656,55 @@ void options_test() {
     set_options(F::kLabels, P::kXbox, N::kAuto, true);
     draw_letter();
     assert(drawn_sheet == base + 0xD000 && drawn_quad[0] == 20 && drawn_quad[1] == 40);
+    // CommandA_00: its normal face letter and picture are siblings, not parent/child.
+    // Exercise all faces through the production TextBox wrapper in both PS styles and stock.
+    constexpr uint32_t hint_root = base + 0xC000;
+    constexpr const char* letters[] = {"T_A_00", "T_B_00", "T_X_00", "T_Y_00"};
+    constexpr const char* pictures[] = {"P_A_00", "P_B_00", "P_X_00", "P_Y_00"};
+    for (int face = 0; face < 4; face++) {
+        pane(hint_root, "N_Center_01", 0, 0);
+        pane(picture, pictures[face], 0, 0);
+        for (uint32_t i = 0; i < 4; i++) st32(picture + 0xA8 + i*4, corners[i]);
+        child(hint_root, picture);
+        child(hint_root, text_box);
+        std::strcpy((char*)mem::ptr(text_box + 0x80), letters[face]);
+        st16(base + 0xB000, "ABXY"[face]);
+        for (auto prompts : {P::kPlayStation, P::kXbox, P::kOriginal}) {
+            for (bool colours : {true, false}) {
+                set_options(F::kLabels, prompts, N::kAuto, colours);
+                st16(list + 4, 0); st8(list + 6, 0);
+                print("ABXY"[face]);
+                draw_letter();
+                draw_letter();  // also exercise the cached-list recognition path
+                assert(button_glyphs::marked_face(ld8(first_quad + 0x2F)) == face);
+                assert(drawn_sheet == (prompts == P::kPlayStation ?
+                    (colours ? atlas : atlas + 0x100) : base + 0xD000));
+                picture_face = face;
+                Cpu c{}; c.r[3] = picture; hook_02874D54(&c);
+            }
+        }
+    }
+    // Special A uses T_A_01 on P_ASpecial_00 in both HD command layouts.
+    std::strcpy((char*)mem::ptr(text_box + 0x80), "T_A_01");
+    std::strcpy((char*)mem::ptr(picture + 0x80), "P_ASpecial_00");
+    st32(text_box + 0x0C, picture); st16(base + 0xB000, 'A');
+    for (bool colours : {true, false}) {
+        set_options(F::kLabels, P::kPlayStation, N::kAuto, colours);
+        st16(list + 4, 0); st8(list + 6, 0); print('A'); draw_letter();
+        assert(button_glyphs::marked_face(ld8(first_quad + 0x2F)) == 0);
+        assert(drawn_sheet == (colours ? atlas : atlas + 0x100));
+    }
+    // A matching letter alone, a wrong sibling, or a similarly named container is insufficient.
+    hud_letter = false;
+    std::strcpy((char*)mem::ptr(text_box + 0x80), "T_A_00");
+    st32(text_box + 0x0C, hint_root);
+    for (auto wrong : {"N_Center_01", "N_Center_010"}) {
+        std::strcpy((char*)mem::ptr(hint_root + 0x80), wrong);
+        std::strcpy((char*)mem::ptr(picture + 0x80), "P_B_00");
+        st16(list + 4, 0); st8(list + 6, 0); print('A'); draw_letter(); draw_letter();
+        assert(button_glyphs::marked_face(ld8(first_quad + 0x2F)) < 0);
+        assert(drawn_sheet == base + 0xD000);
+    }
     hud_letter = false;
     std::memset(mem::ptr(text_box + 0x80), 0, 24);
     st32(text_box + 0x0C, 0);
@@ -1008,6 +1057,22 @@ int main() {
     hook_028F7C7C(&stock_draw);
     assert(!std::memcmp(untouched.data(), mem::ptr(first_quad), untouched.size()));
     assert(ld8(list + 6) == 1);  // the game marks the generated vertices valid
+
+    // Never-restyled CommandA sibling layout: the wrapper calls stock directly, without
+    // marking or invalidating even a matching cached plain-letter prompt.
+    constexpr uint32_t stock_hint = base + 0xC200, stock_root = base + 0xC000;
+    pane(stock_root, "N_Center_01", 0, 0);
+    pane(stock_hint, "T_A_00", 0, 0);
+    pane(picture, "P_A_00", 0, 0);
+    child(stock_root, picture); child(stock_root, stock_hint);
+    st32(stock_hint + 0xFC, list); st32(stock_hint + 0xA4, base + 0xB000);
+    st16(stock_hint + 0xCE, 1); st16(base + 0xB000, 'A');
+    std::array<uint8_t, 0x200> stock_list;
+    std::memcpy(stock_list.data(), mem::ptr(list), stock_list.size());
+    Cpu hint_draw{}; hint_draw.r[3] = stock_hint;
+    button_glyphs::draw_text_box(&hint_draw, [](Cpu* c) { assert(c->r[3] == base + 0xC200); c->r[3] = 0x1234; });
+    assert(hint_draw.r[3] == 0x1234);
+    assert(!std::memcmp(stock_list.data(), mem::ptr(list), stock_list.size()));
 
     // Selecting by label for the first time rebuilds each cached text box once: no markers
     // exist yet, so the game re-runs Print and the rebuilt quads are styled like any later

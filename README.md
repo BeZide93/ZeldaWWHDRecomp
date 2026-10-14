@@ -452,6 +452,31 @@ overlay, in `~/Library/Application Support/wwhd/screenshots`; also *Open Screens
 option to save the GamePad screen too), and a frame capture for debugging (**P** or fn+F12, written to `captures/`;
 captures contain game imagery, so keep them to yourself). The Graphics choices are remembered
 between launches (macOS preferences; `defaults delete wwhd` resets them).
+
+The settings overlay's **Graphics** tab also provides experimental **Stereoscopic 3D**
+(Vulkan-only): Half SBS, Full SBS and top-and-bottom (TAB), with depth, convergence and eye-swap
+controls. Each eye renders its own geometry and camera-dependent effects; this does not use
+depth-map reprojection. The HUD, settings cursor and GamePad touch mapping follow the packed
+output. Stereo starts off. **30 FPS is recommended for stereo for now: frame pacing is
+inconsistent at higher targets**, and performance and effect correctness have not been verified
+throughout the game or across all Vulkan platforms.
+
+**Gameplay FOV** in the same tab adjusts the camera from 75% to 250%, with a 110-degree
+vertical cap. It defaults to 100% (the original view). Gameplay and combat use matching camera
+and culling projections, including both stereo eyes; cutscenes, dialogue, menus and transitions
+retain their authored FOV. First-person view, item aiming and the Telescope are widened by the
+same factor, so their zoom is weaker above 100%. The setting is saved between launches.
+
+**HDR output** (Windows/Vulkan-only) offers scRGB presentation when Windows HDR is enabled
+and the display supports it. Paper white, peak brightness, exposure, highlight expansion and
+settings-menu brightness are adjustable. This expands the game's SDR output into HDR; it does
+not recover already-clipped lighting or provide native pre-tonemap HDR rendering. The in-game
+HUD follows paper white, while the settings menu has a separate brightness control. HDR starts
+off and must be enabled explicitly. If HDR is unavailable, output falls back to SDR with a
+note in the Graphics overlay. Default calibration is 240-nit paper white, 1025-nit peak,
+-0.32 EV exposure, 0.32 highlight expansion and 160-nit settings menus. Calibrate for the display
+in use. PNG screenshots remain SDR.
+
 True 60 (**7**) computes Link and the camera at 60 Hz while the game state after every 30 Hz step
 stays bit-identical to the 30 fps game, except the random-number sequence, which drifts because
 drawing code draws random numbers too (later drops and ambient behaviour differ like in any other
@@ -627,11 +652,11 @@ state and may repeat the last finished picture.
 Caches live in the host settings folder's `shader-prebuild` directory, or
 `data/user/shader-prebuild` in a portable installation. Keep generated caches and recordings local.
 
-**Help cover more scenes (issue #162):** **Settings → Graphics → Export shader template** saves a
+**Help cover more scenes (issue #177):** **Settings → Graphics → Export shader template** saves a
 code-free `my-template.bin` (hashes and settings only, no shader code) from the shaders your game has
-recorded. Attach it to [issue #162](https://github.com/ZeldaWWHDRecomp/ZeldaWWHDRecomp/issues/162).
+recorded. Attach it to [issue #177](https://github.com/ZeldaWWHDRecomp/ZeldaWWHDRecomp/issues/177).
 Terminal commands for Windows, macOS, Linux and the AppImage are in the
-[shader template guide](tools/shadercache/README.md#contributing-your-shader-template-players-issue-162).
+[shader template guide](tools/shadercache/README.md#contributing-your-shader-template-players-issue-177).
 
 ### Vulkan shader head start on Windows and Linux
 
@@ -698,6 +723,13 @@ Cemu side by side. It runs at the console's 30 fps or, with frame interpolation,
 240 fps (up to the display's refresh rate); true 60 fps is experimental. Known gaps: geometry
 shaders and rectangle primitives are not implemented yet (not encountered in the game so far),
 and the macOS app does not drive controller rumble yet.
+
+## Other platforms
+
+**Nintendo Switch:** [SwitchWakerHD](https://github.com/centollOS/SwitchWakerHD) is a community port built on this
+project, by Pulpparty, depende3000, centollOS and contributors. Like this project, it needs your own copy of the game,
+and no builds containing game code are shared. It is a separate project, not tested or supported here: please report
+Switch issues on its tracker.
 
 ## License
 

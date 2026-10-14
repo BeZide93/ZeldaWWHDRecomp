@@ -1,7 +1,7 @@
-// Graphics > Shader cache > "Export shader template" (issue #162): runs the release's
+// Graphics > Shader cache > "Export shader template" (issue #177): runs the release's
 // tools/shaderprep.py export on this player's live shader caches. The output is a code-free template
 // (hashes, register values, pipeline settings; the script refuses anything its release guard rejects)
-// in the screenshots folder, to attach to issue #162. Raw caches and SPIR-V never leave their folder.
+// in the screenshots folder, to attach to issue #177. Raw caches and SPIR-V never leave their folder.
 #pragma once
 #include "../gfx/shader_prebuild.h"
 #include "../mods/mod_json.h"
@@ -109,7 +109,7 @@ inline void start() {
                 }
                 if (result.code == 0 && done)
                     line = "Saved " + out.string() + " (" + std::to_string(states) + " states, " +
-                           std::to_string(pipelines) + " pipelines). Attach it to issue #162.";
+                           std::to_string(pipelines) + " pipelines). Attach it to issue #177.";
                 else
                     line = "Export failed: " + (!result.error.empty() ? result.error : last.empty() ? std::string("no output") : last);
             }

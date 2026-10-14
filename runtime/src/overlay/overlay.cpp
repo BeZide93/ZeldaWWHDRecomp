@@ -1,9 +1,14 @@
+#include "tooltip.h"
 #include "gfx/display_modes.h"
 #include <mutex>
 // In-game settings overlay: the Dear ImGui user interface (see overlay.h). The renderers draw the
 // resulting ImDrawData (gfx/overlay_metal.mm, gfx/vulkan/overlay.cpp); the hosts feed input and apply
 // changes on their main thread (hostui.h).
 #include "overlay.h"
+#include "pointer.h"
+#ifdef WWHD_SDL_HOST
+#include "window_target.h"
+#endif
 #include "gfx/shader_prebuild.h"
 #include "../audio_out.h"
 #include "guest_hud.h"
@@ -39,8 +44,12 @@
 #include "hostui.h"
 #include "../mods/code_mods.h"
 #include "controls_view.h"
+#include "extensions.h"
+#include "release_gate.h"
 #include "text_entry.h"
 #include "../aspect.h"
+#include "gfx/stereo.h"
+#include "gfx/hdr.h"
 #include "../crashrec.h"
 #include "../game_languages.h"
 #include "../gfx/renderer.h"
@@ -74,6 +83,9 @@ namespace gfxvk { bool buffer_cache_enabled(); }  // gfx/vulkan/buffer_cache.h
 #include "../perf_metrics.h"
 #include "../build_info.h"
 #include "settings_shortcut.h"
+#include "toggle_guard.h"
+#include "open_reason.h"
+#include "host_focus.h"
 #include "binding_capture.h"
 #include "mobile_ui.h"
 #include "../report_header.h"
@@ -88,6 +100,7 @@ double now_s() { return std::chrono::duration<double>(clock::now().time_since_ep
 
 std::atomic<bool> g_open{false};
 std::atomic<bool> g_perf{false};
+std::atomic<bool> g_stereo_pointer_visible{false};
 PerfAverage g_average;
 std::atomic<float> g_density{1.0f};
 std::atomic<float> g_android_dpi{160.0f};
@@ -106,6 +119,7 @@ struct Event {
     bool down = false;
     float x = 0, y = 0;
     int mods = 0;
+    bool touch = false;
     std::string text = {};  // Text: typed characters (UTF-8)
 };
 std::mutex g_mu;
@@ -158,13 +172,16 @@ ImGuiKey imgui_key(int code) {
 }
 
 // ---------------------------------------------------------------- UI state (render thread)
+// the built-in tabs (extensions.h kBuiltinTabs: ids and names); the tab bar is ext::tabs(), which a
+// platform may extend (added tabs, hidden ones)
 enum Tab { kSaves, kGraphics, kDisplay, kAudio, kMods, kControls, kAbout, kTabs };
-const char* const kTabNames[kTabs] = {"Saves", "Graphics", "Display", "Audio", "Mods", "Controls", "Language / About"};
-const char* const kTabIds[kTabs] = {"saves", "graphics", "display", "audio", "mods", "controls", "about"};
+static_assert(kTabs == ext::kBuiltinCount, "a built-in tab per kBuiltinTabs entry");
 
 struct Ui {
     bool init = false;
-    int tab = kSaves, select_tab = -1;  // select_tab: switch to this tab next frame (shoulder buttons, tests)
+    // tab: the open tab, an index in ext::tabs() (remembered while the game runs); select_tab: switch to
+    // this one next frame (shoulder buttons, tests)
+    int tab = 0, select_tab = -1;
     double last_time = 0;
     // controller
     float values[input_map::kPadCount] = {};
@@ -205,6 +222,7 @@ Ui U;
 bool controller_down(int p) { return U.values[p] > 0.5f; }
 bool controller_pressed(int p) { return U.values[p] > 0.5f && U.prev[p] <= 0.5f; }
 bool navigation_pressed(int p) { return U.gamepad_navigation.pressed(U.values, U.prev, p); }
+int shown_builtin() { return ext::builtin_tab(U.tab); }  // the open tab's Tab, -1 for an added one
 
 void post_changed(std::function<void()> fn) {
     hostui::post([fn] {
@@ -267,6 +285,7 @@ void setup_style() {
 // a font with arrows and accents if the system has one; Dear ImGui's own scalable font otherwise
 void setup_fonts() {
     ImGuiIO& io = ImGui::GetIO();
+    if (const ext::FontLoader& load = ext::font_loader(); load && load(io)) return;  // the platform's (extensions.h)
     static const char* const candidates[] = {
 #if defined(__APPLE__)
         "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
@@ -349,8 +368,7 @@ TestSwitch parse_test() {
     if (size_t c = s.find(':'); c != std::string::npos) { what = s.substr(0, c); tab = s.substr(c + 1); }
     t.open = what == "open";
     t.perf = what == "perf";
-    for (int i = 0; i < kTabs; i++)
-        if (tab == kTabIds[i]) t.tab = i;
+    if (!tab.empty()) t.tab = ext::tab_index(tab);  // built-in or added (extensions.h)
     return t;
 }
 
@@ -397,6 +415,12 @@ void read_controller() {
         return;
     }
     input::host_controller_values(U.values);
+    if (ext::text_input()) {
+        // a platform keyboard of a text field (text_entry::field) has the controller: the inputs held
+        // there stay from the menu until each one is released, as from the game (release_gate.h)
+        static ReleaseGate keyboard_gate;
+        keyboard_gate.filter(U.values, text_entry::field_active());
+    }
     using namespace input_map;
 #ifndef WWHD_SDL_HOST
     // The AppKit host still supplies controller state on its render path.
@@ -406,7 +430,7 @@ void read_controller() {
 
 // ---------------------------------------------------------------- widgets
 void help(const char* text) {
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort | ImGuiHoveredFlags_ForTooltip)) ImGui::SetTooltip("%s", text);
+    if (overlay::tooltip_hovered(ImGuiHoveredFlags_DelayShort | ImGuiHoveredFlags_ForTooltip)) ImGui::SetTooltip("%s", text);
 }
 void heading(const char* text) {
     ImGui::Spacing();
@@ -484,6 +508,8 @@ void refresh_slots(bool force) {
     for (int i = 1; i <= crashrec::kAutoSlots; i++) U.autos[i] = crashrec::auto_info(i);
 }
 
+void tab_saves_screenshots();
+void tab_saves_crash_recovery();
 void tab_saves() {
     refresh_slots(false);
     std::string msg = ss::last_message();
@@ -518,7 +544,7 @@ void tab_saves() {
                 if (s.older_other && s.portable) {
                     // decision: an older full state stays on disk; say so (it is large and must not be shared)
                     ImGui::TextDisabled("also holds an older full state (slot%d.bin, %.0f MB)", i, s.older_bytes / 1048576.0);
-                    if (ImGui::IsItemHovered())
+                    if (overlay::tooltip_hovered())
                         ImGui::SetTooltip("Kept on disk, not loaded: the newer portable state is. It contains game data: "
                                           "don't share it. Delete it in the states folder if you no longer need it.");
                 } else if (s.older_other) {
@@ -534,7 +560,7 @@ void tab_saves() {
             ImGui::BeginDisabled(!s.used || !s.compatible);
             if (ImGui::Button("Load")) {
                 ss::request_load(i);
-                set_open(false);
+                set_open(false, OpenReason::LoadSlot);
             }
             ImGui::EndDisabled();
             ImGui::PopID();
@@ -542,25 +568,46 @@ void tab_saves() {
         ImGui::EndTable();
     }
     // bug reports: the portable state and the save file, never a full state
-    static double copiedAt = -10;
-    if (ImGui::Button("Copy save for bug report")) {
-        std::string text = ss::bug_report_text();
-        hostui::post([text] { hostui::set_clipboard(text); });
-        copiedAt = ImGui::GetTime();
+    const ext::Features& features = ext::features();
+    if (features.clipboard) {
+        static double copiedAt = -10;
+        if (ImGui::Button("Copy save for bug report")) {
+            std::string text = ss::bug_report_text();
+            hostui::post([text] { hostui::set_clipboard(text); });
+            copiedAt = ImGui::GetTime();
+        }
+        if (ImGui::GetTime() - copiedAt < 2.0) {
+            ImGui::SameLine();
+            ImGui::TextDisabled("Copied");
+        }
+        help("Copies the paths of your newest save state and of your save file (cking.sav): attach both files to the bug "
+             "report. Save a state at the place of the problem first.");
+    } else {
+        // no clipboard on this host: the paths are shown (looked up at most once a second)
+        static std::string paths;
+        static double pathsAt = -10;
+        if (ImGui::GetTime() - pathsAt > 1.0) {
+            paths = ss::bug_report_text();
+            pathsAt = ImGui::GetTime();
+        }
+        note("For a bug report, attach your newest save state and your save file (cking.sav). Save a state at the "
+             "place of the problem first.");
+        note("%s", paths.c_str());
     }
-    if (ImGui::GetTime() - copiedAt < 2.0) {
-        ImGui::SameLine();
-        ImGui::TextDisabled("Copied");
-    }
-    help("Copies the paths of your newest save state and of your save file (cking.sav): attach both files to the bug "
-         "report. Save a state at the place of the problem first.");
     note("States folder: %s", ss::states_dir().c_str());
-    bool fs;
-    if (check("Full save states (large, contain game data, don't share) - for debugging", full, &fs, !ss::full_states_forced()))
-        ss::set_full_states(fs);
-    help(ss::full_states_forced() ? "Set by WWHD_FULL_SAVE_STATES or a test variable for this start."
-                                  : "Saves the whole running game instead (about 300 MB per slot), exactly as it is. "
-                                    "These files contain game code and data: never attach them to a bug report.");
+    if (features.full_states) {
+        bool fs;
+        if (check("Full save states (large, contain game data, don't share) - for debugging", full, &fs, !ss::full_states_forced()))
+            ss::set_full_states(fs);
+        help(ss::full_states_forced() ? "Set by WWHD_FULL_SAVE_STATES or a test variable for this start."
+                                      : "Saves the whole running game instead (about 300 MB per slot), exactly as it is. "
+                                        "These files contain game code and data: never attach them to a bug report.");
+    }
+    if (features.screenshots) tab_saves_screenshots();
+    if (features.full_states) tab_saves_crash_recovery();  // its automatic states are full states
+}
+
+void tab_saves_screenshots() {
     heading("Screenshots");
     {
         // the Screenshot binding (Controls tab): its keys and controller input
@@ -586,6 +633,9 @@ void tab_saves() {
     }
     ImGui::AlignTextToFramePadding();
     ImGui::TextDisabled("%s", screenshot::dir().c_str());
+}
+
+void tab_saves_crash_recovery() {
     heading("Crash Recovery");
     bool on;
     if (check("Crash Recovery (automatic state every few minutes)", crashrec::enabled(), &on)) crashrec::set_enabled(on);
@@ -597,7 +647,7 @@ void tab_saves() {
         ImGui::BeginDisabled(!a.used);
         if (ImGui::Button("Load")) {
             crashrec::request_load(i);
-            set_open(false);
+            set_open(false, OpenReason::LoadSlot);
         }
         ImGui::EndDisabled();
         ImGui::SameLine();
@@ -640,7 +690,7 @@ std::string performance_report() {
     h.variant = build::variant();
     h.os = reporthdr::os_description();
     h.gpu = performance_device();
-    h.renderer = render::vulkan() ? "Vulkan" : "Metal";
+    h.renderer = render::api_name(render::active());
     h.host = hostui::name();
     h.fps = interp::mode() == 2 ? "true 60 fps" : interp::mode() == 1 ? "60 fps interpolation" : "30 fps";
     h.scale = hostui::res_scale();
@@ -655,14 +705,16 @@ std::string performance_report() {
     return report;
 }
 
-void tab_graphics() {
+// Graphics > Shader cache. Left out with a platform backend (gfx/renderer_ext.h), which keeps its own
+// shader caches: the rebuild request and the template export work on Metal's and Vulkan's.
+static void shader_cache_section() {
     heading("Shader cache");
     static bool rebuildFailed = false;
     if (ImGui::Button("Rebuild shader cache"))
         rebuildFailed = !shaderprebuild::request_rebuild();
     if (rebuildFailed) note("Could not save the request. Check that the settings folder is writable.");
-    else if (shaderprebuild::requested()) note("Run setup and choose repair/update to rebuild shaders and pipelines.");
-    help("Requests preparation during setup repair/update. Preparation can take a few minutes; launching the game never starts it automatically.");
+    else if (shaderprebuild::requested()) note(shaderprebuild::setup_hint());
+    help(shaderprebuild::setup_hint());
 #ifndef __ANDROID__
     {
         const auto exported = template_export::status();
@@ -671,10 +723,14 @@ void tab_graphics() {
         ImGui::EndDisabled();
         if (!exported.line.empty()) note("%s", exported.line.c_str());
         help("Saves my-template.bin in the screenshots folder: the shader states and pipelines this computer\n"
-             "recorded, as hashes and settings only (no shader code, no game data). Attach it to issue #162\n"
+             "recorded, as hashes and settings only (no shader code, no game data). Attach it to issue #177\n"
              "so the next release prepares them for everyone.");
     }
 #endif
+}
+
+void tab_graphics() {
+    if (!render::platform()) shader_cache_section();
 #ifdef __ANDROID__
     heading("GPU driver (Snapdragon / Adreno)");
     note("Active: %s", gfxvk::drivers::active_name().c_str());
@@ -768,6 +824,15 @@ void tab_graphics() {
         if (radio(names[i], std::fabs(cur - s) < 0.01f)) post_changed([s] { hostui::set_res_scale(s); });
     }
 
+    float fovPercent=aspect::fov_scale()*100.0f;
+    if(ImGui::SliderFloat("Gameplay FOV", &fovPercent,75.0f,250.0f,"%.0f%%",ImGuiSliderFlags_AlwaysClamp))
+        post_changed([fovPercent] { aspect::set_fov_scale(fovPercent/100.0f); hostui::set("gameplayFovScale",std::to_string(fovPercent/100.0f)); });
+    help("100% keeps the original field of view. Higher values show more of the world and make Link\n"
+         "appear smaller. Applies to gameplay and combat in 2D and 3D. Cutscenes, dialogue,\n"
+         "scene transitions and menus keep their authored FOV. First-person view, item aiming and\n"
+         "the Telescope are widened by the same factor, so their zoom is weaker above 100%.\n"
+         "Maximum vertical FOV: 110 degrees. Wider settings also widen visibility/culling checks.");
+
     heading("Aspect ratio");
     int am = aspect::mode();
     for (int i = aspect::kOriginal; i <= aspect::k32x9; i++) {
@@ -776,6 +841,51 @@ void tab_graphics() {
             post_changed([i] { aspect::set_mode(i); hostui::set("aspectMode", std::to_string(i)); });
     }
 
+#ifdef WWHD_HAS_VULKAN
+    if (render::g_backend->api == render::Api::Vulkan) {
+        heading("Stereoscopic 3D (experimental)");
+        const char* modes[] = {"Off", "Half SBS", "Full SBS", "Top and bottom (TAB)"};
+        int mode = stereo::requestedMode.load();
+        if (ImGui::Combo("3D output", &mode, modes, stereo::Count))
+            post_changed([mode] { stereo::set_mode(mode); hostui::set("stereoMode", std::to_string(mode)); });
+        float depth = stereo::requestedDepth.load(), convergence = stereo::requestedConvergence.load();
+        if (ImGui::SliderFloat("3D depth", &depth, 0.0f, 5.0f, "%.2fx", ImGuiSliderFlags_AlwaysClamp))
+            post_changed([depth] { stereo::set_depth(depth); hostui::set("stereoDepth", std::to_string(depth)); });
+        if (ImGui::SliderFloat("Convergence", &convergence, 10.0f, 10000.0f, "%.0f", ImGuiSliderFlags_Logarithmic | ImGuiSliderFlags_AlwaysClamp))
+            post_changed([convergence] { stereo::set_convergence(convergence); hostui::set("stereoConvergence", std::to_string(convergence)); });
+        bool swap = stereo::requestedSwap.load();
+        if (ImGui::Checkbox("Swap eyes", &swap))
+            post_changed([swap] { stereo::requestedSwap = swap; hostui::set("stereoSwap", swap ? "1" : "0"); });
+        help("Separate geometry rendering for each eye. Half SBS and TAB are anamorphic; Full SBS preserves each eye's pixels. Experimental: scene and effect validation is in progress.");
+    }
+#endif
+#if defined(WWHD_HAS_VULKAN) && defined(_WIN32)
+    if(render::vulkan()) {
+        heading("HDR output");
+        if(radio("SDR",!hdr::enabled.load()))post_changed([] {hdr::enabled=false;hdr::fellBackToSdr=false;hostui::set("hdrEnabled","0");});
+        ImGui::SameLine();
+        if(radio("HDR (scRGB)",hdr::enabled.load(),hdr::displayEnabled.load()&&hdr::formatSupported.load()))
+            post_changed([] {hdr::enabled=true;hdr::fellBackToSdr=false;hostui::set("hdrEnabled","1");});
+        if(hdr::fellBackToSdr.load())note("HDR is unavailable on this display. Using SDR output.");
+        if(!hdr::displayEnabled.load())note("Enable HDR in Windows for the display containing this window.");
+        else if(!hdr::formatSupported.load())note("This Vulkan surface does not support scRGB HDR output.");
+        auto slider=[](const char* label,const char* key,std::atomic<float>& setting,float lo,float hi,const char* fmt) {
+            float v=setting.load();ImGui::SetNextItemWidth(260);
+            if(ImGui::SliderFloat(label,&v,lo,hi,fmt,ImGuiSliderFlags_AlwaysClamp)) {
+                auto* dst=&setting;
+                post_changed([dst,v,lo,hi,key] {hdr::set(*dst,v,lo,hi);hostui::set(key,std::to_string(v));});
+            }
+        };
+        ImGui::BeginDisabled(!hdr::enabled.load());
+        slider("Paper white","hdrPaperWhite",hdr::paperWhite,80,500,"%.0f nits");
+        slider("Peak brightness","hdrPeak",hdr::peak,200,4000,"%.0f nits");
+        slider("Exposure","hdrExposure",hdr::exposure,-3,3,"%+.2f EV");
+        slider("Highlight expansion","hdrHighlights",hdr::highlights,0,1,"%.2f");
+        slider("Settings menu brightness","hdrMenuWhite",hdr::menuWhite,80,500,"%.0f nits");
+        ImGui::EndDisabled();
+        help("HDR output expands the game's SDR picture; it cannot recover already clipped lighting. Paper white also affects the in-game HUD. Settings-menu brightness is independent. Set peak brightness to your display's capability. SDR screenshots remain SDR.");
+    }
+#endif
     heading("Effects");
     bool v;
     float bloom = render::bloom_strength() * 100.0f;
@@ -862,17 +972,19 @@ void tab_graphics() {
     if (check("Performance overlay (FPS, frame time)", perf_shown(), &v)) set_perf_shown(v);
     if (ImGui::Button("Reset performance averages")) { g_average.reset(); perf::reset(); }
     // the render-thread profiler's latest report (render_prof.h), for performance bug reports
-    static double copiedAt = -10;
-    if (ImGui::Button("Copy performance report")) {
-        std::string report = performance_report();
-        hostui::post([report] { hostui::set_clipboard(report); });
-        copiedAt = ImGui::GetTime();
+    if (ext::features().clipboard) {
+        static double copiedAt = -10;
+        if (ImGui::Button("Copy performance report")) {
+            std::string report = performance_report();
+            hostui::post([report] { hostui::set_clipboard(report); });
+            copiedAt = ImGui::GetTime();
+        }
+        if (ImGui::GetTime() - copiedAt < 2.0) {
+            ImGui::SameLine();
+            ImGui::TextDisabled("Copied");
+        }
+        help("Where the renderer spends its time over the last few seconds, as text for a bug report");
     }
-    if (ImGui::GetTime() - copiedAt < 2.0) {
-        ImGui::SameLine();
-        ImGui::TextDisabled("Copied");
-    }
-    help("Where the renderer spends its time over the last few seconds, as text for a bug report");
     heading("Bug reports");
     // read once at start-up (main.cpp start_log_file); WWHD_LOG_FILE decides when set
     static bool logFile = [] { std::string v; return hostui::get("logFile", v) && v == "1"; }();
@@ -934,10 +1046,10 @@ void tab_display() {
             first = false;
             if (radio(modes[i], mode == i)) hostui::post([i] { hostui::set_drc_mode(i); });
         }
-        if (mode == 2) note("The overlay appears for a few seconds when the GamePad picture changes a lot (a menu opens).");
+        if (mode == 2) note("Shows GamePad menus while open and follows Off-TV Play.");
         if (mode == 4) note("Only the GamePad picture. In the game, Minus switches to Off-TV Play (the game on the GamePad).");
     }
-    if (check("Show GamePad screen", hostui::drc_shown(), &v,
+    if (check(mode == 2 ? "Pin GamePad picture-in-picture" : "Show GamePad screen", hostui::drc_shown(), &v,
               hostui::drc_available() && !(hostui::drc_modes() >= 4 && (mode == 3 || mode == 4))))
         hostui::post([v] { hostui::show_drc(v); });
     if (hostui::drc_modes() >= 4 && (mode == 1 || mode == 2)) {
@@ -1189,6 +1301,7 @@ modsui::Host& mods_host() {
         h.android = true;
 #endif
         h.test = g_no_host && getenv("WWHD_MOD_MANAGER_DIR");
+        h.file_picker = ext::features().file_picker;
         return h;
     }();
     h.back = false;
@@ -1381,7 +1494,7 @@ void gyro_window(bool& open) {
         static bool init = false;
         if (!init || ImGui::IsWindowAppearing()) { snprintf(host, sizeof host, "%s", g.dsu_host.c_str()); port = g.dsu_port; init = true; }
         ImGui::SetNextItemWidth(220);
-        if (ImGui::InputText("Server", host, sizeof host, ImGuiInputTextFlags_EnterReturnsTrue) || ImGui::IsItemDeactivatedAfterEdit())
+        if (text_entry::field("Server", host, sizeof host, ImGuiInputTextFlags_EnterReturnsTrue) || ImGui::IsItemDeactivatedAfterEdit())
             g.dsu_host = host[0] ? host : "127.0.0.1";
         ImGui::SetNextItemWidth(120);
         if (ImGui::InputInt("Port", &port, 0, 0, ImGuiInputTextFlags_EnterReturnsTrue) || ImGui::IsItemDeactivatedAfterEdit())
@@ -1440,6 +1553,11 @@ void tab_controls() {
                     ImGui::GetFrameHeight() - ImGui::GetStyle().ItemInnerSpacing.x);
     ImGui::Checkbox("List view", &U.list_view);
     help("A plain table of all inputs instead of the controller drawing");
+    if (check("Skip controller selection", m.skip_controller_selection, &v)) {
+        m.skip_controller_selection = v;
+        input_map::set_current(m);
+    }
+    help("At the title screen, automatically choose the configured Wii U controller.");
     // face-button preset (issue #78): which host face buttons drive A/B/X/Y
     const input_map::FaceLayout fl = input_map::face_layout(m);
     ImGui::AlignTextToFramePadding();
@@ -1532,8 +1650,8 @@ void tab_controls() {
         sc = ImVec4(1.0f, 0.85f, 0.35f, 1.0f);
         status = std::string(input_map::action_label(U.cap_action)) + ": " +
                  (U.cap_col == kColPad   ? "press a controller button or stick direction (Esc cancels)"
-                  : U.cap_col == kColAny ? "press a key or a controller button (Esc cancels, Backspace clears)"
-                                         : "press a key (Esc cancels, Backspace clears)");
+                  : U.cap_col == kColAny ? "press a key, mouse button or controller button (Esc cancels, Backspace clears)"
+                                         : "press a key or mouse button (Esc cancels, Backspace clears)");
     } else if (!U.cap_note.empty()) {
         status = U.cap_note;
     } else if (U.hover_action >= 0) {
@@ -1574,9 +1692,7 @@ void tab_controls() {
             if (int p = m.pad[a]; p != input_map::kPadNone) x = std::max(x, live[p]);
             cv.act[a] = x;
         }
-        input_map::Mapping mm = m;
-        mm.invert_camera_y = false;
-        input::PadState ks = input_map::keyboard_state(mm, keys), cs = input_map::controller_state(mm, live);
+        input::PadState ks = input_map::keyboard_state(m, keys), cs = input_map::controller_state(m, live);
         const bool kl = ks.lx || ks.ly, kr = ks.rx || ks.ry;
         cv.stick[0][0] = kl ? ks.lx : cs.lx;
         cv.stick[0][1] = kl ? ks.ly : cs.ly;
@@ -1596,13 +1712,15 @@ void tab_controls() {
         m.deadzone = std::clamp(dz / 100.0f, 0.0f, 0.9f);
         input_map::set_current(m);
     }
-    if (ImGui::IsItemHovered())
+    if (overlay::tooltip_hovered())
         ImGui::SetTooltip("Default: 15%%. Filters resting-stick drift on both sticks.");
     ImGui::SameLine(0, 24);
     if (check("Invert camera up/down", m.invert_camera_y, &v)) {
         m.invert_camera_y = v;
         input_map::set_current(m);
     }
+    if (overlay::tooltip_hovered())
+        ImGui::SetTooltip("Camera only, including first-person views and item aiming (bow, hookshot, telescope, Picto Box) and the mouse camera. The Wind Waker baton and other right-stick controls are not inverted.");
     ImGui::SameLine(0, 24);
     // issue #35: a way to keep the controller motors still (saved; WWHD_RUMBLE=0 starts with it off)
     if (check("Rumble", rumble::enabled(), &v, input::has_rumble())) {
@@ -1846,7 +1964,7 @@ void settings_window() {
 #ifdef __ANDROID__
     const ImVec2 size(ds.x * 0.98f, ds.y * 0.97f);
 #else
-    const ImVec2 size = U.tab == kControls ? ImVec2(std::min(1240.0f, ds.x * 0.98f), std::min(720.0f, ds.y * 0.97f))
+    const ImVec2 size = shown_builtin() == kControls ? ImVec2(std::min(1240.0f, ds.x * 0.98f), std::min(720.0f, ds.y * 0.97f))
                                            : ImVec2(std::min(860.0f, ds.x * 0.94f), std::min(620.0f, ds.y * 0.92f));
 #endif
     ImGui::SetNextWindowPos(ImVec2(ds.x * 0.5f, ds.y * 0.5f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
@@ -1859,18 +1977,21 @@ void settings_window() {
         U.just_opened = false;
     }
     if (ImGui::Begin("Wind Waker HD  -  Settings", &open, fl)) {
+        const std::vector<ext::ShownTab>& tabs = ext::tabs();  // built-in and added (extensions.h)
         // L / R on a controller switch tabs
         if (U.cap_action < 0 && !ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId)) {
-            // in Mods, L / R move between its areas first
-            if (navigation_pressed(input_map::kPadLB) && !(U.tab == kMods && modsui::shoulder(-1))) U.select_tab = (U.tab + kTabs - 1) % kTabs;
-            if (navigation_pressed(input_map::kPadRB) && !(U.tab == kMods && modsui::shoulder(+1))) U.select_tab = (U.tab + 1) % kTabs;
+            // in Mods (or an added tab with sub-tabs), L / R move between its areas first
+            auto areas = [](int builtin, int direction) { return builtin == kMods && modsui::shoulder(direction); };
+            for (int direction : {-1, +1})
+                if (navigation_pressed(direction < 0 ? input_map::kPadLB : input_map::kPadRB))
+                    if (const int t = ext::shoulder(U.tab, direction, areas); t >= 0) U.select_tab = t;
         }
         if(!setup_run.rebuilding)code_mod_dialog();
         restart_notice_frame(true);
         if (ImGui::BeginTabBar("tabs", ImGuiTabBarFlags_FittingPolicyShrink)) {
-            for (int i = 0; i < kTabs; i++) {
+            for (int i = 0; i < int(tabs.size()); i++) {
                 ImGuiTabItemFlags f = U.select_tab == i ? ImGuiTabItemFlags_SetSelected : 0;
-                if (ImGui::BeginTabItem(kTabNames[i], nullptr, f)) {
+                if (ImGui::BeginTabItem(tabs[i].name.c_str(), nullptr, f)) {
                     if (U.tab != i) U.cap_action = -1, g_capturing_keys = false, U.cap_note.clear();
                     U.tab = i;
 #ifdef __ANDROID__
@@ -1878,14 +1999,15 @@ void settings_window() {
 #else
                     ImGui::BeginChild("page", ImVec2(0, 0), ImGuiChildFlags_NavFlattened);
 #endif
-                    switch (i) {
+                    switch (tabs[i].builtin) {
                     case kSaves: tab_saves(); break;
                     case kGraphics: tab_graphics(); break;
                     case kDisplay: tab_display(); break;
                     case kAudio: tab_audio(); break;
                     case kMods: tab_mods(); break;
                     case kControls: tab_controls(); break;
-                    default: tab_about(); break;
+                    case kAbout: tab_about(); break;
+                    default: if (tabs[i].draw) tabs[i].draw(); break;  // an added tab
                     }
                     ImGui::EndChild();
                     ImGui::EndTabItem();
@@ -1900,9 +2022,9 @@ void settings_window() {
     }
     ImGui::End();
     // B (not while choosing an input or in a list) or the close button closes the menu
-    if (!open) set_open(false);
+    if (!open) set_open(false, OpenReason::CloseButton);
     if (U.cap_action < 0 && navigation_pressed(input_map::face_input(input_map::kB)) && !g_pad_b_used && !ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId))
-        set_open(false);
+        set_open(false, OpenReason::B);
     g_pad_b_used = false;
 }
 
@@ -1910,15 +2032,25 @@ void settings_window() {
 
 // ---------------------------------------------------------------- API
 bool is_open() { return g_open.load(std::memory_order_relaxed); }
+static std::atomic<bool> g_shortcut_took{false};  // a platform shortcut took a poll's input (shortcut_took_input)
 void poll_controller_shortcuts(const float* values) {
     if (g_no_host) return;
+    PadValues pad;
+    std::copy(values, values + input_map::kPadCount, pad.begin());
+    // the platform's shortcuts (extensions.h) first: the inputs one takes stay from the settings shortcut
+    // until released, and from the game (shortcut_took_input)
+    if (!ext::shortcuts().empty() && ext::poll_shortcuts(pad, is_open())) g_shortcut_took = true;
     static SettingsShortcut shortcut;
-    const auto action = shortcut.poll(now_s(), values[input_map::kPadOptions] > 0.5f,
-                                     values[input_map::kPadHome] > 0.5f, is_open());
-    if (action != SettingsShortcut::None) set_open(action == SettingsShortcut::Open);
+    const auto action = shortcut.poll(now_s(), pad[input_map::kPadOptions] > 0.5f,
+                                     pad[input_map::kPadHome] > 0.5f, is_open());
+    if (action != SettingsShortcut::None) set_open(action == SettingsShortcut::Open, shortcut.reason());
 }
+bool shortcut_took_input() { return g_shortcut_took.exchange(false); }
 
-void set_open(bool open) {
+void set_open(bool open, OpenReason reason, KeyOrigin origin) {
+#ifdef WWHD_SDL_HOST
+    if (open && window_target::selected.load() == window_target::Window::None) return;
+#endif
     if (g_open.exchange(open) == open) return;
     for (auto& k : g_held_keys) k = false;
     input::release_keys();  // keys held now belong to the menu (opening) or are not stuck in the game (closing)
@@ -1928,7 +2060,8 @@ void set_open(bool open) {
         U.just_opened = true;
         U.slots_time = -1;
     }
-    LOG("[overlay] %s", open ? "opened" : "closed");
+    const auto message = open_message(open, reason, origin, render::frame_count());
+    LOG("%s", message.c_str());
 }
 // inputs still held when the overlay closes stay from the game in the hosts' input pumps (release_gate.h)
 bool blocks_input() { return captures(); }
@@ -1940,22 +2073,29 @@ void set_perf_shown(bool on) {
     hostui::post([on] { hostui::set("perfOverlay", on ? "1" : "0"); });
 }
 
-bool key(int code, bool down, bool repeat, int mods) {
+void focus_lost() {
+    for (auto& k : g_held_keys) k = false;
+    if (captures()) push({Event::Focus});
+}
+
+bool key(int code, bool down, bool repeat, int mods, KeyOrigin origin) {
     if (g_no_host_keys) return false;
+    static ToggleGuard f1;
+    const bool f1_press = code == kVK_F1 && f1.press(down, repeat, now_s());
 #ifdef __APPLE__
     // Cmd+, (the macOS settings shortcut; the AppKit host gets it as the app menu's Settings... item)
     if (code == kVK_ANSI_Comma && (mods & kSuper) && !g_capturing_keys.load()) {
-        if (down && !repeat) set_open(!is_open());
+        if (down && !repeat) set_open(!is_open(), OpenReason::API, origin);
         return true;
     }
 #endif
     // F1 (no modifiers; Shift+F1 saves slot 1) toggles; Esc closes
     if (code == kVK_F1 && !(mods & (kShift | kCtrl | kAlt | kSuper))) {
-        if (down && !repeat && !g_capturing_keys.load()) set_open(!is_open());
+        if (f1_press && !g_capturing_keys.load()) set_open(!is_open(), OpenReason::F1, origin);
         if (!g_capturing_keys.load()) return true;
     }
     if (!is_open()) {
-        // the game's text prompt (text_entry.h) has the keyboard while it shows
+        // the game's text prompt (text_entry.h) has the keyboard while it shows; F1 above still opens the menu
         if (!text_entry::active()) return false;
         text_entry::key(code, down, repeat);
         return true;
@@ -1970,7 +2110,7 @@ bool key(int code, bool down, bool repeat, int mods) {
         return true;
     }
     if (code == kVK_Escape && down && !repeat) {
-        set_open(false);
+        set_open(false, OpenReason::Esc, origin);
         return true;
     }
     push({Event::Key, code, down, 0, 0, mods});
@@ -1988,18 +2128,28 @@ void set_clipboard_text(const char* utf8) {
     g_clipboard = utf8 ? utf8 : "";
 }
 bool wants_text() { return is_open() && g_wants_text.load(); }
-bool mouse_move(float nx, float ny) {
-    if (!captures() || g_no_host) return false;
-    push({Event::MousePos, 0, false, nx, ny, 0});
-    return true;
+void set_stereo_pointer_visible(bool visible) { g_stereo_pointer_visible=visible; }
+bool mouse_move(float nx, float ny, bool touch) {
+    if (g_no_host || (!captures() && stereo::requestedMode==stereo::Off)) return false;
+    push({Event::MousePos, 0, false, nx, ny, 0, touch});
+    return captures();
 }
-bool mouse_button(int button, bool down) {
+bool mouse_button(int button, bool down, bool touch) {
     if (!captures() || g_no_host) return false;
-    push({Event::MouseButton, button, down, 0, 0, 0});
+    if (button < 0 || button >= 5) return true;
+    if (!touch && g_capturing_keys.load() && down) {
+        g_capture_key = input_map::kMouse1 + button;
+        return true;
+    }
+    push({Event::MouseButton, button, down, 0, 0, 0, touch});
     return true;
 }
 bool mouse_wheel(float dx, float dy) {
     if (!captures() || g_no_host) return false;
+    if (g_capturing_keys.load() && dy != 0) {
+        g_capture_key = dy > 0 ? input_map::kWheelUp : input_map::kWheelDown;
+        return true;
+    }
     push({Event::Wheel, 0, false, dx, dy, 0});
     return true;
 }
@@ -2019,6 +2169,7 @@ ImDrawData* frame(float pw, float ph, void (*renderer_init)()) {
         // the saved rumble choice (WWHD_RUMBLE wins)
         if (!rumble::env_override() && hostui::get("rumble", v)) rumble::set_enabled(v != "0");
         // the saved aspect ratio (WWHD_ASPECT wins; issue #108: it was not remembered)
+        if(hostui::get("gameplayFovScale",v))aspect::set_fov_scale(strtof(v.c_str(),nullptr));
         if (!getenv("WWHD_ASPECT") && hostui::get("aspectMode", v)) {
             const int m = atoi(v.c_str());
             if (m >= aspect::kOriginal && m <= aspect::k32x9) aspect::set_mode(m);
@@ -2067,7 +2218,7 @@ ImDrawData* frame(float pw, float ph, void (*renderer_init)()) {
         if (open && !was_open) { U.gamepad_navigation.reset_trace(); wwhd_trace::emit("open frame=%d", U.init ? ImGui::GetFrameCount() : 0); }
         was_open = open;
     }
-    perf::set_demand(perf, open && U.tab == kGraphics);
+    perf::set_demand(perf, open && shown_builtin() == kGraphics);
     // Headless report QA uses the same formatter as the clipboard button; no clipboard mutation.
     static const char* testReport = getenv("WWHD_TEST_PERF_REPORT");
     static const uint64_t reportAt = getenv("WWHD_TEST_PERF_REPORT_AT")
@@ -2082,11 +2233,27 @@ ImDrawData* frame(float pw, float ph, void (*renderer_init)()) {
     }
     // save state notices (saved, refused during a cutscene, loaded into another Quest Log) show over the
     // game for a few seconds while the menu is closed (the window title is not visible everywhere)
-    const std::string toast = open ? std::string() : ss::last_message();
+    std::string toast = open ? std::string() : ss::last_message();
+    // the platform's layers over the game (extensions.h): which draw this frame; their notice replaces
+    // the save state notice
+    const std::vector<ext::FrameLayer>& layers = ext::frame_layers();
+    static std::vector<const ext::FrameLayer*> drawn_layers;
+    drawn_layers.clear();
+    if (!open)
+        for (const ext::FrameLayer& layer : layers) {
+            std::string line;
+            if (layer.wanted(line)) drawn_layers.push_back(&layer);
+            if (!line.empty()) toast = std::move(line);
+        }
+    const bool stereoPointer=stereo::frame.mode!=stereo::Off && g_stereo_pointer_visible.load()
+#ifdef WWHD_SDL_HOST
+        && window_target::selected.load()==window_target::Window::TV
+#endif
+        ;
     U.linearized = false;
     // a mod install keeps running (and shows its progress) while the menu is closed
     const bool mods_busy = !setup_run.id.empty() || (U.init && modsui::wants_background());
-    if (!open && !perf && !text && toast.empty() && !guesthud::active() && !mods_busy) {
+    if (!open && !perf && !text && toast.empty() && !guesthud::active() && !mods_busy && !stereoPointer && drawn_layers.empty()) {
         if (U.init) {  // forget events and pressed keys while nothing is shown
             std::lock_guard<std::mutex> lk(g_mu);
             g_events.clear();
@@ -2113,6 +2280,10 @@ ImDrawData* frame(float pw, float ph, void (*renderer_init)()) {
 #endif
     io.DisplaySize = ImVec2(pw / scale, ph / scale);
     io.DisplayFramebufferScale = ImVec2(scale, scale);
+    io.MouseDrawCursor=stereoPointer;
+    // Refresh a stationary pointer too: resizing/HiDPI can change DisplaySize.
+    const ImVec2 pointer=pointer_position(U.mouse_position.x,U.mouse_position.y,io.DisplaySize);
+    overlay_trace::mouse_pos(io,pointer.x,pointer.y);
     io.DeltaTime = U.last_time > 0 ? (float)std::clamp(t - U.last_time, 1e-4, 0.25) : 1.0f / 60.0f;
     U.last_time = t;
     std::vector<Event> events;
@@ -2133,13 +2304,21 @@ ImDrawData* frame(float pw, float ph, void (*renderer_init)()) {
             if (ImGuiKey k = imgui_key(e.code); k != ImGuiKey_None) io.AddKeyEvent(k, e.down);
             break;
         case Event::MousePos:
+            io.AddMouseSourceEvent(e.touch ? ImGuiMouseSource_TouchScreen : ImGuiMouseSource_Mouse);
             mouse_used |= e.x != U.mouse_position.x || e.y != U.mouse_position.y;
             U.mouse_position = ImVec2(e.x, e.y);
-            overlay_trace::mouse_pos(io, e.x * io.DisplaySize.x, e.y * io.DisplaySize.y);
+            {
+                const ImVec2 p=pointer_position(e.x,e.y,io.DisplaySize);
+                overlay_trace::mouse_pos(io,p.x,p.y);
+            }
             break;
-        case Event::MouseButton: mouse_used = true; overlay_trace::mouse_button(io, e.code, e.down); break;
+        case Event::MouseButton: io.AddMouseSourceEvent(e.touch ? ImGuiMouseSource_TouchScreen : ImGuiMouseSource_Mouse); mouse_used = true; overlay_trace::mouse_button(io, e.code, e.down); break;
         case Event::Wheel: mouse_used |= e.x != 0 || e.y != 0; overlay_trace::wheel(io, e.x, e.y); break;
         case Event::Text: io.AddInputCharactersUTF8(e.text.c_str()); break;
+        case Event::Focus:
+            // Clear ImGui keys/buttons in event order; the overlay stays active on the other window.
+            release_focus_inputs(io);
+            break;
         default: break;
         }
     }
@@ -2164,8 +2343,10 @@ ImDrawData* frame(float pw, float ph, void (*renderer_init)()) {
             for (auto& k : g_held_keys) k = false;
         }
     }
+    bool covered = false;  // a platform layer drew over the whole picture: no notice
+    for (const ext::FrameLayer* layer : drawn_layers) covered |= layer->draw(io.DisplaySize.x, io.DisplaySize.y);
     if (perf) perf_window(open);
-    if (!toast.empty()) {
+    if (!toast.empty() && !covered) {
         ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y - 24), ImGuiCond_Always, ImVec2(0.5f, 1.0f));
         ImGui::SetNextWindowBgAlpha(0.7f);
         ImGui::SetNextWindowSizeConstraints(ImVec2(0, 0), ImVec2(io.DisplaySize.x * 0.8f, FLT_MAX));

@@ -4,6 +4,7 @@ refused, the pinned one is used, and --extract-runtime gets the runtime back out
 No network: downloads come from file:// URLs."""
 import hashlib
 import os
+import pathlib
 import re
 import struct
 import sys
@@ -43,7 +44,8 @@ class Runtime(unittest.TestCase):
 
     def source(self, name, data):
         self.write(os.path.join(name, "runtime-x86_64"), data)
-        return "file://" + os.path.join(self.dir, name) + "/"
+        # as_uri(): a valid file URL on Windows too ("file:///C:/..."; "file://C:\\..." is not one)
+        return pathlib.Path(self.dir, name).resolve().as_uri() + "/"
 
     def test_the_real_pin(self):
         for p in self.patches:

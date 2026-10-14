@@ -476,7 +476,8 @@ int main(int argc, char** argv) {
 #endif
         LOG("%zu", len((const char*)(uintptr_t)16));
     }
-    // Metal or Vulkan: --renderer=, WWHD_RENDERER_RUNTIME, Graphics > Renderer (gfx/renderer.h)
+    // Metal, Vulkan or a registered platform backend: --renderer=, WWHD_RENDERER_RUNTIME, Graphics > Renderer
+    // (gfx/renderer.h, gfx/renderer_ext.h)
     render::choose(argc, argv);
 #ifdef WWHD_HAS_VULKAN
     if(renderer_smoke) {
@@ -552,6 +553,14 @@ int main(int argc, char** argv) {
     st32(argv_arr, arg0);
     // the game runs on its own threads; the process main thread belongs to the window system
     const std::string shader_renderer = render::requested() == render::Api::Metal ? "metal" : "vulkan";
+    // a platform backend (gfx/renderer_ext.h) keeps its own shader caches: Metal's and Vulkan's prepared
+    // shaders are not activated for it, and a warm-up run has nothing to prepare
+    const bool own_shader_caches = render::requested() == render::Api::Platform;
+    if (own_shader_caches) {
+        LOG("[shaders] %s renderer: prepared Metal / Vulkan shaders not used (it keeps its own caches)",
+            render::api_name(render::requested()));
+        if (warm_shaders) return 3;  // tools/installer/shader_prebuild.py: RENDERER_UNAVAILABLE
+    }
     bool pending_shader_warm = false;
 #ifdef __ANDROID__
     if (warm_shaders && (shader_prebuild_root.empty() || std::filesystem::path(shader_prebuild_root).lexically_normal() == shaderprebuild::root().lexically_normal()))
@@ -561,7 +570,7 @@ int main(int argc, char** argv) {
     }
 #endif
     if (warm_shaders) shaderprebuild::bind_setup_live_caches();
-    if (!warm_shaders && !pending_shader_warm) shaderprebuild::activate(config::game_dir, shader_renderer);
+    if (!warm_shaders && !pending_shader_warm && !own_shader_caches) shaderprebuild::activate(config::game_dir, shader_renderer);
     render::init();
     if (warm_shaders && render::active() != render::requested()) {
         // the requested renderer could not start (e.g. no MoltenVK) and the game fell back:

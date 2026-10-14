@@ -1139,6 +1139,7 @@ extern "C" void hook_025D6800(Cpu* c) {
 
 // fpcM_Draw(process): remembers which process is drawing (nested: the play scene draws the actors),
 // so interpolation leaves the models of 60 Hz processes alone
+namespace interp { void reticle_keep_draw(uint32_t owner); }
 static uint32_t g_draw_stack[8];
 static int g_draw_depth = 0;
 static int g_force_draw_60 = 0;  // drawing that follows 60 Hz state although its process is 30 Hz
@@ -1249,6 +1250,7 @@ extern "C" void hook_025DF904(Cpu* c) {
         for (uint32_t i = 0; i < size / 4; i++)
             if (cur[i] != before[i] && std::find(keep.begin(), keep.end(), i) == keep.end()) cur[i] = before[i];
         if (cull_mtx) memcpy(ppc_ptr(cull_mtx), cull_before, 0x30);
+        interp::reticle_keep_draw(proc);
     }
     watch_link("draw", proc, wv);
     g_draw_depth--;

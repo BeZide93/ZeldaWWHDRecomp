@@ -91,6 +91,7 @@ thread_local int hud_shoulder = -1;
 thread_local int hud_face = -1;  // a HUD face-letter pane (T_A_00 on P_A_00, ...)
 thread_local uint32_t hud_box = 0;
 std::string_view pane_name(uint32_t pane);
+uint32_t child_named(uint32_t parent, std::string_view name);
 
 uint32_t shoulder_atlas(Cpu* cpu) {
     const uint32_t manager = ld32(GD(0x101F4A50));
@@ -197,10 +198,18 @@ int shoulder_row(ShoulderStyle names, int shoulder) {
 
 // A HUD face letter: T_A_00 holding "A" on its P_A_00 picture (and so on for B, X, Y).
 int face_box(uint32_t box) {
-    const int face = button_glyphs::face_text(pane_name(box));
+    const auto name = pane_name(box);
+    const int face = name == "T_A_01" ? 0 : button_glyphs::face_text(name);
     if (face < 0) return -1;
     const uint32_t parent = ld32(box + 0x0C);
-    if (!parent || button_glyphs::face_picture(pane_name(parent)) != face) return -1;
+    if (!parent) return -1;
+    if (button_glyphs::face_picture(pane_name(parent)) != face) {
+        // CommandA_00 puts the ordinary letter beside its picture under N_Center_01,
+        // unlike CommandGuide's child letter. Require that exact container and a matching
+        // sibling picture; never treat arbitrary single-letter text as a button prompt.
+        constexpr std::string_view pictures[] = {"P_A_00", "P_B_00", "P_X_00", "P_Y_00"};
+        if (pane_name(parent) != "N_Center_01" || !child_named(parent, pictures[face])) return -1;
+    }
     const uint32_t text = ld32(box + 0xA4);
     constexpr char letters[] = {'A', 'B', 'X', 'Y'};
     return text && ld16(box + 0xCE) == 1 && ld16(text) == letters[face] ? face : -1;
@@ -364,6 +373,7 @@ void button_glyphs::prepare_text_box(uint32_t text_box, Cpu* cpu) {
 }
 
 void button_glyphs::draw_text_box(Cpu* c, PpcFunc draw) {
+    if (!marking()) return draw(c);  // no pane recognition or writes in a never-restyled session
     const int previous = hud_shoulder;
     const uint32_t previous_box = hud_box;
     const int previous_face = hud_face;

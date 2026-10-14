@@ -16,7 +16,8 @@
     <string name="setup_common_key_ready">Clave común elegida (cambiar)</string>
     <string name="setup_common_key_again">Clave común: elígela otra vez</string>
     <string name="setup_keys">Elige los dos archivos de clave</string>
-    <string name="setup_keys_detail">Una imagen de disco necesita su clave del disco y la clave común de Wii U.</string>
+    <string name="setup_keys_ready">Claves seleccionadas. Pulsa Iniciar.</string>
+    <string name="setup_keys_detail">Las imágenes de disco necesitan dos claves; elige keys.txt de Cemu una vez para ambas. O usa «Convertir a archivo comprimido de Wii U (.wua)» en Cemu: no necesita claves.</string>
     <string name="setup_selected">Tu juego está elegido</string>
     <string name="setup_selected_detail">Pulsa Empezar para prepararlo para este dispositivo Android.</string>
     <string name="setup_start">Empezar</string>
@@ -50,7 +51,8 @@
     <string name="setup_shaders">Preparando los gráficos…</string>
     <string name="setup_shaders_detail">Así los primeros minutos de juego van más fluidos. Atrás omite este paso.</string>
     <string name="game_icon_add">Añadir el icono del juego a la pantalla de inicio</string>
-    <string name="game_icon_present">El icono ya está en la pantalla de inicio. Mantenlo pulsado y toca Ajustes.</string>
+    <string name="game_icon_present">El icono ya está en la pantalla de inicio. Mantenlo pulsado y abre sus ajustes.</string>
+    <string name="game_icon_present_shortcut">El icono ya está en la pantalla de inicio. Mantenlo pulsado para las partidas y la instalación.</string>
     <string name="game_icon_none">Primero instala el juego</string>
     <string name="game_widget">El juego, con su propio icono</string>
     <string name="save_export">Exportar partida</string>

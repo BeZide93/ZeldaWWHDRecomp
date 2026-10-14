@@ -8,6 +8,7 @@
 #include "backend.h"
 #include "gfx/display_modes.h"
 #include "settings.h"
+#include "stereo.h"
 #include "input.h"
 #include "interp.h"
 #include "overlay/hostui.h"
@@ -212,6 +213,7 @@ void load_saved_options() {
     if (saved("touchButtons", {})) gfx::g_touch_buttons = std::clamp((int)num("touchButtons"), 0, 2);
     if (saved("touchControls", {})) gfx::g_touch_controls = num("touchControls") != 0;
 #endif
+    gfxvk::load_saved_stereo_hdr();  // shared with the AppKit host (init_appkit)
     if (saved("resScale", {"WWHD_RES_SCALE"})) gfxvk::set_res_scale((float)num("resScale"));
     if (saved("aoMode", {"WWHD_AO_MODE", "WWHD_NO_AO_QUIRK"})) gfxvk::set_ao_mode((int)num("aoMode"));
     if (saved("aoHires", {"WWHD_AO_HIRES"})) gfxvk::set_ao_hires(num("aoHires") != 0);
