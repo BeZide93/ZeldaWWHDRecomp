@@ -65,6 +65,10 @@ double ppc_frsqrte(double);
 // Cpu::mod_skip uses former padding: save states (which store sizeof(Cpu) bytes) stay compatible
 static_assert(sizeof(void*) != 8 || sizeof(Cpu) == 752, "Cpu layout changed");
 
+namespace story_lyt {
+void set_game_calls(void (*original)(Cpu*, uint32_t), uint32_t (*call)(Cpu*, uint32_t, std::initializer_list<uint32_t>));
+void install(const std::function<void(uint32_t, void (*)(Cpu*))>& replace);
+}
 namespace guestmods {
 namespace {
 
@@ -592,6 +596,16 @@ void init() {
         if(ordinal<0)fatal("[guestmods] notebook: %08X is not a game function",addr);
         Chain& ch=g_chains[addr];
         ch.addr=addr;ch.ordinal=uint32_t(ordinal);ch.replace=fn;ch.replace_mod="the port's story notebook (King of Red Lions)";
+        g_mod_hook_flags[ordinal]=1;
+    });
+    // Feasibility prototype (local only): our own layout drawn by the game's UI framework (story_lyt_proto.cpp).
+    story_lyt::set_game_calls(call_original,[](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);});
+    story_lyt::install([](uint32_t addr,PpcFunc fn) {
+        int ordinal=ordinal_of(addr);
+        if(ordinal<0)fatal("[guestmods] story-lyt: %08X is not a game function",addr);
+        Chain& ch=g_chains[addr];
+        if(ch.replace){LOG("[story-lyt] %08X is already replaced by %s: no prototype layout",addr,ch.replace_mod.c_str());return;}
+        ch.addr=addr;ch.ordinal=uint32_t(ordinal);ch.replace=fn;ch.replace_mod="the story layout prototype";
         g_mod_hook_flags[ordinal]=1;
     });
     story_store::set_game_calls(call_original);

@@ -292,6 +292,18 @@ std::string model_override(const std::string& guest) {
     return g_notebook_model_file;
 }
 
+std::string layout_override(const std::string& guest) {
+    static const char* file = getenv("WWHD_STORY_LYT");
+    static const std::string kArchive = "layout/storylyt_00.szs";
+    if (!file || !*file || guest.size() < kArchive.size()) return {};
+    for (size_t i = 0; i < kArchive.size(); i++) {
+        char ch = guest[guest.size() - kArchive.size() + i];
+        if (ch >= 'A' && ch <= 'Z') ch = char(ch - 'A' + 'a');
+        if (ch != kArchive[i]) return {};
+    }
+    return file;
+}
+
 void note_import() { g_imported = true; }
 bool imported() { return g_imported; }
 bool installed() { return g_installed; }

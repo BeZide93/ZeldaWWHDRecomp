@@ -42,6 +42,8 @@ std::u16string notebook_page();
 // path the game opens (empty: none); any thread.
 void set_notebook_model(const std::string& file);
 std::string model_override(const std::string& guest);
+// feasibility prototype (local only): the story layout archive (WWHD_STORY_LYT) for "Layout/StoryLyt_00.szs"
+std::string layout_override(const std::string& guest);
 
 void note_import();  // a module imports a mail service: hooks are needed
 bool imported();
