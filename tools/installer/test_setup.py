@@ -1778,5 +1778,40 @@ class DecompOption(unittest.TestCase):
             self.assertEqual(started, [exe, dexe, dexe, exe])
 
 
+
+class StoryNotebookStep(unittest.TestCase):
+    """setup's story notebook step (runtime/src/mods/required.h): the game installs it once; offline is fine"""
+    def run_step(self, stdout=None, raise_error=None):
+        calls = []
+
+        def runner(args, **kw):
+            calls.append(args)
+            if raise_error:
+                raise raise_error
+            return mock.Mock(returncode=0, stdout=stdout)
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(setup, "say") as said:
+            ok = setup.install_story_notebook({"exe": "/app/wwhd", "game_dir": "/g"}, d, runner=runner)
+            text = " ".join(str(c.args[0]) for c in said.call_args_list)
+        return ok, calls, text
+
+    def test_installed(self):
+        ok, calls, text = self.run_step('[mods] ...\n{"ok": true, "message": "The story notebook is installed."}\n')
+        self.assertTrue(ok)
+        self.assertEqual(calls[0][0], "/app/wwhd")
+        self.assertIn("--install-story-notebook", calls[0])
+        self.assertIn("is installed", text)
+
+    def test_offline_finishes_with_a_hint(self):
+        ok, _, text = self.run_step('{"ok": false, "message": "Story notebook: not installed (offline)."}\n')
+        self.assertFalse(ok)
+        self.assertIn("install it later from the Mods menu", text)
+
+    def test_no_answer_or_timeout(self):
+        self.assertFalse(self.run_step("")[0])
+        ok, _, text = self.run_step(raise_error=setup.subprocess.TimeoutExpired("wwhd", 600))
+        self.assertFalse(ok)
+        self.assertIn("Mods menu", text)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

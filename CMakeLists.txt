@@ -342,7 +342,7 @@ target_compile_options(mod_manager_test PRIVATE -UNDEBUG)
 # External native package fixture and isolated lifecycle/integration tests.
 add_library(mod_fixture MODULE runtime/tools/mod_fixture.cpp)
 target_include_directories(mod_fixture PRIVATE runtime/include)
-add_executable(mod_package_test runtime/tools/mod_package_test.cpp runtime/src/mods/manager.cpp runtime/src/mods/traversal_settings.cpp runtime/src/mods/packages.cpp ${WWHD_NPC_CATALOGUE} runtime/src/mods/guest_png.cpp runtime/src/mods/mod_archive.cpp runtime/src/mods/content.cpp runtime/src/mods/cemu_pack.cpp runtime/src/guest_addr_identity.c)
+add_executable(mod_package_test runtime/tools/mod_package_test.cpp runtime/src/mods/required.cpp runtime/src/mods/manager.cpp runtime/src/mods/traversal_settings.cpp runtime/src/mods/packages.cpp ${WWHD_NPC_CATALOGUE} runtime/src/mods/guest_png.cpp runtime/src/mods/mod_archive.cpp runtime/src/mods/content.cpp runtime/src/mods/cemu_pack.cpp runtime/src/guest_addr_identity.c)
 target_include_directories(mod_package_test PRIVATE runtime/src runtime/include)
 target_compile_options(mod_package_test PRIVATE -UNDEBUG)
 target_link_libraries(mod_package_test PRIVATE ZLIB::ZLIB Threads::Threads ${CMAKE_DL_LIBS})
@@ -1099,6 +1099,8 @@ endif()
 if(Python3_Interpreter_FOUND AND NOT ANDROID)
   add_test(NAME catalogue_pilots COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_SOURCE_DIR}/tools/catalogue/test_pilots.py $<TARGET_FILE:mod_package_test>)
+  add_test(NAME story_notebook_required COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_SOURCE_DIR}/tools/catalogue/test_story_notebook.py $<TARGET_FILE:mod_package_test>)
 endif()
 
 add_executable(guest_settings_test runtime/tools/guest_settings_test.cpp)
@@ -1256,7 +1258,7 @@ if(NOT ANDROID AND SDL3_FOUND AND Python3_Interpreter_FOUND)
     runtime/third_party/imgui/backends/imgui_impl_sdlrenderer3.cpp runtime/src/mods/code_mods.cpp
     runtime/src/mods/manager.cpp runtime/src/mods/traversal_settings.cpp runtime/src/mods/packages.cpp ${WWHD_NPC_CATALOGUE} runtime/src/mods/guest_png.cpp
     runtime/src/mods/mod_archive.cpp runtime/src/mods/content.cpp runtime/src/mods/cemu_pack.cpp runtime/src/guest_addr_identity.c
-    runtime/src/overlay/extensions.cpp runtime/src/overlay/text_field.cpp)
+    runtime/src/overlay/extensions.cpp runtime/src/overlay/text_field.cpp runtime/src/mods/required.cpp ${WWHD_BUILD_INFO})
   target_include_directories(mod_oneclick_flow_test PRIVATE runtime/src runtime/include)
   target_compile_options(mod_oneclick_flow_test PRIVATE -UNDEBUG)
   target_link_libraries(mod_oneclick_flow_test PRIVATE imgui SDL3::SDL3 ZLIB::ZLIB Threads::Threads ${CMAKE_DL_LIBS})

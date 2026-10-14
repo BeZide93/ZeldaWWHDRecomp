@@ -1,21 +1,25 @@
 // Required packages: the story system's Story Notebook (the mod repository's "story-notebook": the
-// letter that brings the story notebook, the notebook's look, the first small quest). While the
-// story system is on (the "story-system" built-in, on by default), the mod manager installs it from
-// the mod catalogue by itself, confirms it like the port's own code and keeps it enabled; it can't be
-// switched off or removed on its own (packages.cpp). Every quest mod depends on it.
+// letter that brings the story notebook, the notebook's look, the first small quest). Every quest mod
+// depends on it; while the story system is on (the "story-system" built-in, on by default) it is
+// confirmed like the port's own code, kept enabled and can't be switched off or removed on its own
+// (packages.cpp).
 //
-// Offline, or when the download fails: the story system stays inactive (no letters, takeovers,
-// chart marks or notebook), quest mods wait with "Needs the Story Notebook quest", the plain game is
-// untouched and no save is changed; the next start (or Retry) tries again.
+// The game's start never uses the network: it only looks at what is installed (check_local). The
+// package is downloaded from the mod catalogue by setup (wwhd --install-story-notebook, a setup step
+// when the story system is on) or from the Mods menu (switching the story system on, Install on its
+// line, or switching on a quest mod while it is missing). Without it: the story system is inactive
+// (no letters, takeovers, chart marks or notebook), quest mods wait with "Needs the Story Notebook
+// quest", the plain game is untouched and no save is changed.
 #pragma once
 #include "catalogue_client.h"
+#include <functional>
 #include <string>
 
 namespace mods::required {
 inline const std::string kStoryNotebook = "story-notebook";
 // The catalogue the package comes from: WWHD_STORY_CATALOGUE, else the mod repository's main channel
-// for releases and its devel channel for development builds.
-std::string catalogue_url(bool development);
+// for releases and its devel channel for development builds ("v0.2.13+210", "dev").
+std::string catalogue_url(const std::string& build_version);
 struct Context {
     std::string catalogue;
     catalogue::Fetch fetch;
@@ -23,13 +27,21 @@ struct Context {
     std::string build = "USA";
     std::filesystem::path work;  // the catalogue cache folder
 };
-// At startup, after packages::initialize() and before the guest mods load: install, confirm and enable
-// the required package if the story system is on. Never throws; the outcome is status().
-void ensure(const Context& context);
+// At the start, after packages::initialize() and before the guest mods load: no network. Installed:
+// confirmed and enabled (true: the caller refreshes the guest startup list). Not installed: false and
+// the status says how to get it.
+bool check_local();
+// Download, install, confirm and enable it (setup, the Mods menu; blocking, on a background thread in
+// the menu). False with the reason in status().
+bool install(const Context& context);
+// The Mods menu: install() on a background thread (nothing if one is running)
+void install_in_background(const Context& context);
 struct Status {
     bool needed = false;     // the story system is on
-    bool installed = false;  // and the package is installed and enabled
-    std::string text;        // for the Mods tab: "", "Story notebook: waiting to download (...)"
+    bool installed = false;  // the package is installed and enabled
+    bool working = false;    // an install is running
+    bool restart = false;    // installed after the start: the story system starts with the next start
+    std::string text;        // for the Mods menu and setup
 };
 Status status();
 }  // namespace mods::required

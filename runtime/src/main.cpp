@@ -49,6 +49,7 @@
 #include "input.h"
 #include "mods/manager.h"
 #include "mods/required.h"
+#include "mods/mods.h"
 #include "platform/https.h"
 #include "mods/packages.h"
 #include "mods/save_backup.h"
@@ -414,6 +415,7 @@ int main(int argc, char** argv) {
     }
 #endif
     bool warm_shaders = false;
+    bool install_story_notebook = false;
 #ifdef WWHD_HAS_VULKAN
     bool renderer_smoke = false;
 #ifdef __ANDROID__
@@ -425,6 +427,7 @@ int main(int argc, char** argv) {
         else if (!strcmp(argv[i], "--save") && i + 1 < argc) config::save_dir = argv[++i];
         else if (!strcmp(argv[i], "--trace")) g_trace_hle = true;
         else if (!strcmp(argv[i], "--warm-shaders")) warm_shaders = true;
+        else if (!strcmp(argv[i], "--install-story-notebook")) install_story_notebook = true;  // setup's step (mods/required.h)
 #ifdef WWHD_HAS_VULKAN
         else if (!strcmp(argv[i], "--renderer-smoke")) renderer_smoke = true;
 #ifdef __ANDROID__
@@ -541,20 +544,27 @@ int main(int argc, char** argv) {
         g_guest_build_name, g_guest_build_title_id, m.entry, m.sda_base, m.sda2_base, m.data_end);
 
     dispatch::init();
-    {  // the story system's required package (mods/required.h), before the guest mods load
+    // the story system's required package (mods/required.h): what is installed, no network at the start.
+    // Setup's step (--install-story-notebook) downloads it here and exits.
+    if (install_story_notebook) {
         mods::required::Context rc;
         std::string version = build::version();
-        const bool development = version == "dev" || version.find_first_of("+-") != std::string::npos;
+        rc.catalogue = mods::required::catalogue_url(version);
         if (version.starts_with("v")) version.erase(0, 1);
         version = version.substr(0, version.find_first_of("+-"));
         try { rc.port = mods::catalogue::Version::parse(version); } catch (...) {}
-        rc.catalogue = mods::required::catalogue_url(development);
         rc.fetch = host::download_https;
         rc.build = g_guest_build_name;
         const std::string dir = mods::packages::directory();
         if (!dir.empty()) rc.work = std::filesystem::path(dir).parent_path() / "Catalogue";
-        if (!dir.empty() && mods::packages::has_code_mod_support()) mods::required::ensure(rc);
+        const bool ok = !dir.empty() && mods::story_system() && mods::required::install(rc);
+        const auto st = mods::required::status();
+        printf("{\"ok\": %s, \"message\": \"%s\"}\n", ok ? "true" : "false",
+               ok ? "The story notebook is installed." : !mods::story_system() ? "The story system is off." : st.text.c_str());
+        fflush(stdout);
+        _exit(ok ? 0 : 1);
     }
+    if (mods::packages::has_code_mod_support() && mods::required::check_local()) mods::packages::refresh_guest_startup();
     guestmods::init();  // trusted manager packages, before guest threads start
 #ifdef WWHD_DECOMP
     decomp::init();  // decomp build: which functions run decompiled (runtime/src/decomp), after the mods

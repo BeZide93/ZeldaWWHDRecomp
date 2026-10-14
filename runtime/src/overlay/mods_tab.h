@@ -11,6 +11,10 @@
 // overlay (overlay.cpp) and by the offscreen tests (runtime/tools/mods_tab_test.cpp).
 #pragma once
 #include "catalogue_loader.h"
+#include "../mods/required.h"
+#include "../mods/mods.h"
+#include "../build_info.h"
+#include <thread>
 #include "experimental_ui.h"
 #include "graphics_switch.h"
 #include "hostui.h"
@@ -914,9 +918,25 @@ inline void review_popup(Host& h) {
     ImGui::EndPopup();
 }
 
+// ---------------------------------------------------------------- the story system's required package
+inline void install_story_notebook(const Host& h) {
+    mods::required::Context c;
+    c.catalogue = mods::required::catalogue_url(build::version());
+    c.fetch = h.fetch, c.port = h.port_version, c.build = h.build_name, c.work = catalogue_work();
+    mods::required::install_in_background(c);
+}
+
 // ---------------------------------------------------------------- switching
-inline void switch_package(const mods::packages::View& v, bool on) {
+inline void switch_package(const mods::packages::View& v, bool on, const Host* h = nullptr) {
     auto& s = state();
+    // a quest mod while the story system's required package is missing: that one first
+    if (on && h && mods::story_system() && v.id != mods::required::kStoryNotebook &&
+        std::any_of(v.dependencies.begin(), v.dependencies.end(), [](const std::string& d) { return d.rfind(mods::required::kStoryNotebook + ">=", 0) == 0; }) &&
+        !find_view(mods::packages::list(), mods::required::kStoryNotebook)) {
+        install_story_notebook(*h);
+        s.error = "This mod needs the Story Notebook: it is being installed; switch this mod on again afterwards.";
+        return;
+    }
     if (!on) {
         if (!mods::packages::enable(v.id, false, s.error)) return;
         s.error.clear();
@@ -969,7 +989,7 @@ inline std::string unavailable_reason(const Host& h, const mods::catalogue::Entr
     return compatible ? "" : "Not available for this version of the game.";
 }
 // Built-in: the mods compiled into the game, each with its switch.
-inline void builtin_list(Host&) {
+inline void builtin_list(Host& h) {
     muted(kAreaCaptions[kBuiltin]);
     if (!begin_list("builtin")) return;
     for (const auto& e : mods::manager::entries()) {
@@ -979,7 +999,11 @@ inline void builtin_list(Host&) {
         Row r = row(fx);
         std::string id = e.id;
         row_line(id, e.name, r, e.restart_required ? "applies after a restart" : "", false, true,
-                 [id](bool on) { hostui::post([id, on] { mods::manager::set_enabled(id, on); }); });
+                 [id, &h](bool on) {
+                     hostui::post([id, on] { mods::manager::set_enabled(id, on); });
+                     // the story system comes with its required package: switching it on installs that
+                     if (id == "story-system" && on && !find_view(mods::packages::list(), mods::required::kStoryNotebook)) install_story_notebook(h);
+                 });
     }
     ImGui::EndTable();
 }
@@ -1014,9 +1038,24 @@ inline void community_list(Host& h) {
             bool update = e && newer(e->version, v.version);
             Row r = row(facts(v, update));
             auto view = v;
-            row_line(v.id, v.name, r, "", v.experimental, false, [view](bool on) { switch_package(view, on); });
+            std::string note;
+            if (v.id == mods::required::kStoryNotebook && mods::story_system()) {  // part of the story system: locked
+                r.switch_enabled = false;
+                r.switch_reason = "Part of the story system: turn off the story system (Built-in) to turn it off.";
+                note = "Part of the story system";
+            }
+            const Host* host = &h;
+            row_line(v.id, v.name, r, note, v.experimental, false, [view, host](bool on) { switch_package(view, on, host); });
         }
         ImGui::EndTable();
+    }
+    // the story system's required package (mods/required.h): its status, Install while it is missing
+    if (const auto required = mods::required::status(); !required.text.empty()) {
+        colored(required.working || required.restart ? kMuted : kWarn, required.text);
+        if (!required.working && !find_view(list, mods::required::kStoryNotebook) && mods::story_system()) {
+            ImGui::SameLine();
+            if (small_button("Install##story_notebook")) install_story_notebook(h);
+        }
     }
     // available to download
     ImGui::SeparatorText("Available to download");
@@ -1272,7 +1311,10 @@ inline void builtin_page(Host& h, const mods::manager::Entry& e) {
     ImGui::TextUnformatted(e.name);
     bool on = e.enabled();
     std::string id = e.id;
-    if (on_switch("##on_builtin", &on)) hostui::post([id, on] { mods::manager::set_enabled(id, on); });
+    if (on_switch("##on_builtin", &on)) {
+        hostui::post([id, on] { mods::manager::set_enabled(id, on); });
+        if (id == "story-system" && on && !find_view(mods::packages::list(), mods::required::kStoryNotebook)) install_story_notebook(h);
+    }
     ImGui::SameLine();
     colored(on ? kGood : kMuted, on ? "On" : "Off");
     text(e.description);
