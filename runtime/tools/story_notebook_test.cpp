@@ -175,6 +175,7 @@ void test_page() {
     std::vector<Quest> qs;
     for (int i = 0; i < 7; i++) qs.push_back(quest("m", "q" + std::to_string(i)));
     qs[2].has_place = true;
+    for (const Quest& q : qs) reach_step(b, q.key, 1);  // started: only a quest in progress can be tracked
     auto rs = rows(qs, b);
     Page page;
     assert(!page.open() && page.draw(rs).empty());
@@ -978,7 +979,7 @@ void test_page_feel() {
     Book b(raw);
     std::vector<Quest> qs;
     for (int i = 0; i < 3; i++) qs.push_back(quest("m", "q" + std::to_string(i)));
-    for (Quest& q : qs) q.has_place = true;  // the quests the test tracks (a quest with no place can't be shown on the chart)
+    for (Quest& q : qs) q.has_place = true, reach_step(b, q.key, 1);  // trackable: in progress, with a place
     auto rs = rows(qs, b);
     Page page;
     page.show();
@@ -1879,9 +1880,12 @@ void test_detail_texts() {
     Row r{&q, Status::New, 0, false};
     assert(where_text(r) == "This step has no place on the chart." && !trackable(r));
     q.where = "Outset Island", q.has_place = true;
-    assert(where_text(r) == "Not started yet: Outset Island" && trackable(r));
+    assert(where_text(r) == "Not started yet: Outset Island" && !trackable(r));  // not started: can't be tracked
+    r.tracked = true;
+    assert(trackable(r));  // tracked in an older save: it can be untracked
+    r.tracked = false;
     r.status = Status::InProgress, r.step = 1;
-    assert(where_text(r) == "Outset Island");
+    assert(where_text(r) == "Outset Island" && trackable(r));
     q.has_place = false;
     assert(!trackable(r));
     r.tracked = true;

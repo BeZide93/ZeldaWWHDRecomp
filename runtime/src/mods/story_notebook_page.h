@@ -132,12 +132,12 @@ inline std::vector<std::string> wrap(const std::string& text, float size, float 
     return out;
 }
 
-// Whether a quest's detail offers "Show on chart" / "Stop showing": not for a done quest, nor for one
-// whose current step has no place (a tracked one can always be untracked).
 // what a finished quest's detail says (under "Finished", with no Where)
 inline constexpr const char* kFinished = "All steps done.";
 
-inline bool trackable(const Row& r) { return r.status != Status::Done && (r.quest->has_place || r.tracked); }
+// Whether a quest's detail offers "Show on chart" / "Stop showing": only for a quest in progress whose
+// current step has a place (not one not started yet, nor a done one); a tracked one can always be untracked.
+inline bool trackable(const Row& r) { return r.tracked || (r.status == Status::InProgress && r.quest->has_place); }
 
 // The detail's "Where" text. A quest not started yet names step 1's place, marked as not started.
 inline std::string where_text(const Row& r) {
