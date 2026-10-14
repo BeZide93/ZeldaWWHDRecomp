@@ -2056,6 +2056,7 @@ void set_open(bool open, OpenReason reason, KeyOrigin origin) {
     input::release_keys();  // keys held now belong to the menu (opening) or are not stuck in the game (closing)
     if (open) {
         mods::fast_forward_reset();
+        mods::lock_on_reset();
         mods::mouse_release();
         U.just_opened = true;
         U.slots_time = -1;

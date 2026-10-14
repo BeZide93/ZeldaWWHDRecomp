@@ -1,5 +1,6 @@
 #include "mods/fast_forward.h"
 #include "mods/story_store.h"
+#include "mods/mods.h"
 // Save states: snapshot the whole running game into one of 5 slots and restore it, also in a new
 // process.
 //
@@ -465,6 +466,7 @@ std::string area_label(const char* stage) {
 // true when done (saved or failed for good); false to retry on the next frame
 bool do_save(int slot) {
     mods::fast_forward_reset();
+    mods::lock_on_reset();
     std::string busy, why;
     auto t0 = std::chrono::steady_clock::now();
     if (!threads::quiesce(250, busy, 1, 30)) {
@@ -555,6 +557,7 @@ bool do_save(int slot) {
 
 bool do_load(const std::shared_ptr<Snapshot>& s) {
     mods::fast_forward_reset();
+    mods::lock_on_reset();
     std::string busy, why;
     auto t0 = std::chrono::steady_clock::now();
     threads_ss_targets(s->section(kSecThreads));
@@ -964,6 +967,7 @@ std::string g_last_portable;      // newest portable state written or loaded (un
 struct Arrival { std::string stage; float pos[3]; uint64_t frame = 0; uint32_t link_id = 0; int frames = 0; std::shared_ptr<pstate::State> s; } g_arrival;
 
 void do_portable_save(Cpu* c, int slot) {
+    mods::lock_on_reset();
     pstate::State s;
     std::string why;
     bool retry;
@@ -1019,6 +1023,7 @@ void service_portable_load(Cpu* c) {
         p = g_pload;
     }
     if (!p.s) return;
+    mods::lock_on_reset();
     std::string why;
     bool retry = false;
     const uint32_t sv0 = ld32(kSaveInfoPtr);
