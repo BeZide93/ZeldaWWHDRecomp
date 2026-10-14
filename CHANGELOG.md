@@ -7,6 +7,9 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Vulkan: textures a graphics driver cannot filter smoothly** (some Android GPUs) are now sampled sharply
+  instead of breaking Vulkan's rules. Every other device keeps the same filtering as before.
+
 - **Fixed: leftover memory in the save file's empty Quest Logs.** With story mods on, saving could copy leftover
   bytes into unused padding of the empty Quest Log slots. Those bytes are now always zero; the game never reads
   them, and the active Quest Log is unchanged.
