@@ -148,18 +148,24 @@ void maybe_snapshot() {
 
 // known, analysed sources (not logged, so a diagnostic run shows only new ones)
 struct Known {
-    uint32_t ea;
+    uint32_t ea;  // the address in this region's game (GD)
     uint64_t bits;
 };
-constexpr Known kKnown[] = {
-    {0x101FCBC8, 0x7F800001},  // JStudio "unset" constant (TAdaptor_sound::do_prepare, 02848C04): harmless
-};
+const Known* known_sources(size_t& n) {
+    static const Known known[] = {
+        {GD(0x101FCBC8), 0x7F800001},  // JStudio "unset" constant (TAdaptor_sound::do_prepare, 02848C04): harmless
+    };
+    n = sizeof known / sizeof known[0];
+    return known;
+}
 
 extern "C" __attribute__((noinline)) void wwhd_snan_hit(int kind, uint32_t ea, uint64_t bits) {
     uintptr_t ret = (uintptr_t)__builtin_extract_return_addr(__builtin_return_address(0));
     if (!g_slots) return;
-    for (const Known& k : kKnown)
-        if (k.ea == ea && k.bits == bits) return;
+    size_t known_count = 0;
+    const Known* known = known_sources(known_count);
+    for (size_t i = 0; i < known_count; i++)
+        if (known[i].ea == ea && known[i].bits == bits) return;
     uintptr_t key = (ret << 3) | ((uintptr_t)(kind & 3) << 1) | 1;
     size_t h = (size_t)((key * 0x9E3779B97F4A7C15ull) >> 52) & (kSlots - 1);
     for (size_t probe = 0; probe < kSlots; probe++, h = (h + 1) & (kSlots - 1)) {
