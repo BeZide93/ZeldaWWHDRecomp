@@ -21,6 +21,7 @@
 #include "story_mail.h"
 #include "story_mail_book.h"
 #include "story_chart.h"
+#include "story_treasure.h"
 #include "story_notebook.h"
 #include "story_items.h"
 #include "story_manifest.h"
@@ -682,6 +683,21 @@ void init() {
         ch.addr=addr;ch.ordinal=uint32_t(ordinal);ch.replace=fn;ch.replace_mod="the port's chart service";
         g_mod_hook_flags[ordinal]=1;
     });
+    // Mod treasure charts (story_treasure.h): the game's salvage point, light ring, crane and chest for a
+    // declared mod chart, only when a loaded mod declares charts.
+    if(story_chart::declared()){
+        story_treasure::set_game_calls(call_original,[](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);});
+        story_treasure::set_scratch_memory(mem::host_alloc(story_treasure::kScratchBytes,16));
+        story_treasure::install([](uint32_t addr) {
+            auto it=g_chains.find(addr);return it==g_chains.end()?std::string():it->second.replace_mod;
+        },[](uint32_t addr,PpcFunc fn) {
+            int ordinal=ordinal_of(addr);
+            if(ordinal<0)fatal("[guestmods] treasure charts: %08X is not a game function",addr);
+            Chain& ch=g_chains[addr];
+            ch.addr=addr;ch.ordinal=uint32_t(ordinal);ch.replace=fn;ch.replace_mod="the port's treasure charts";
+            g_mod_hook_flags[ordinal]=1;
+        });
+    }
     // The story notebook: the item menu's Delivery Bag shows it and opens its page, only when a loaded
     // mod uses the quest services (story_notebook.h).
     story_notebook::set_game_ui(&story_notebook::game_ui());
