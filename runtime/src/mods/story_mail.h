@@ -70,6 +70,9 @@ void uncaption();
 void set_text_buffers(uint32_t guest, uint32_t bytes);
 // game code called from the hooks (guestmods::call_original / guest_call in the game)
 void set_game_calls(void (*original)(Cpu*, uint32_t), uint32_t (*call)(Cpu*, uint32_t, std::initializer_list<uint32_t>));
+// execItemGet for items that aren't the notebook's stand-in: the mod items' handler (story_items.h),
+// which runs the game's own function for the game's numbers. Null: the game's function.
+void set_item_get_next(void (*next)(Cpu*));
 
 // The hooks, exposed for runtime/tools/story_mail_test.cpp
 namespace hooks {

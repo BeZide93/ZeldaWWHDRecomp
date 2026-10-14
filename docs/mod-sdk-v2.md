@@ -21,6 +21,7 @@ supported.
 - [Drawing on screen (HUD API v1)](#drawing-on-screen-hud-api-v1)
 - [Letters](#letters)
 - [Charts and markers](#charts-and-markers)
+- [Items](#items)
 - [The story notebook](#the-story-notebook)
 - [Packages with content and images](#packages-with-content-and-images)
 - [Trust](#trust)
@@ -489,6 +490,62 @@ log says so.
 **For map mods (native).** `story_chart::shown_markers()` (`runtime/src/mods/story_chart.h`) lists
 the markers the sea chart shows now, with their world place, icon and label, so a minimap can draw
 them in its own style.
+
+## Items
+
+A story mod can give Link its own items. They are kept in the Delivery Bag like the game's
+delivery items, but they never take one of the bag's eight places unless the player puts one
+there: the bag gets extra pages for them. An item is declared in the manifest; Link gets it from
+the mod's quests (a letter, a talk, a reward) or from the mod's code.
+
+```json
+"items": [
+  {"id": "old-key", "name": "Old key", "description": "A rusty key. It smells of the sea.",
+   "icon": "assets/old_key.png"},
+  {"id": "lamp", "name": "Storm lamp", "description": "Shows the way in the dark.",
+   "icon": "assets/lamp.png", "stack": 3, "use": {"action": "show"}}
+]
+```
+
+- **id:** 1..32 of `a-z 0-9 - _ .`, unique within the mod.
+- **name** (up to 40 bytes) and **description** (up to 200 bytes, line breaks allowed): what the
+  item's Info box shows.
+- **icon:** a PNG in your package, best 128 × 128 with transparency.
+- **stack:** how many Link can carry, 1..254 (default 1). A give beyond it keeps the maximum.
+- **use** (optional): what using the item does. Only an item with a use can go on X, Y or R.
+  - `{"action": "show"}`: shows its Info box.
+  - `{"action": "open_notebook"}`: opens the story notebook.
+  - `{"action": "quest_step", "quest": "<quest id>", "step": 2}`: that quest of your manifest
+    reaches the step.
+  - `{"action": "event"}`: your code is told (`wwhd_item_used`).
+
+**Giving items from the manifest.** A quest's letter can enclose an item
+(`"encloses": ["item:old-key"]`), a resident's talk can give one (`"then": {"give": "item:old-key"}`)
+and a quest's reward can be one (`"reward": {"item": "item:old-key"}`, given once when the quest is
+done). Every item a quest names must be declared in `"items"`.
+
+**From code:**
+
+```c
+#include "wwhd_guest.h"
+s32 n = wwhd_item_give("lamp", 1);      /* the count now, or WWHD_ITEM_INVALID / WWHD_ITEM_NO_ROOM */
+if (wwhd_item_count("old-key") > 0) wwhd_item_take("old-key", 1);  /* WWHD_ITEM_NOT_ENOUGH if fewer */
+if (wwhd_item_used("token") > 0) { /* the player used it since the last call */ }
+```
+
+When Link gets an item, its name and description show with the game's small get jingle. If the
+bag's pages are full (4 pages of 8 by default), the item is kept and gets a place as soon as one is
+free; the caption says so.
+
+**In the bag.** The player can move an item from the extra pages into a free place of the game's
+own eight, and back. Selecting an item shows its Info box. Items with a use can go on X, Y or R.
+
+**Saving.** How many of each item Link has, where it sits in the bag and which button it is on are
+stored in the save file's story area (see [Where story progress is saved](#where-story-progress-is-saved)),
+never in the game's own item data. A save file without your mod is a normal save: the bag shows the
+game's items only, and the buttons keep the game's items. Turning your mod on again brings its items
+back. To draw an item in the game's own places and buttons, the port lends it one of the game's
+unused item numbers for that save file; the game's data never refers to these numbers.
 
 ## The story notebook
 

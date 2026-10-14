@@ -736,6 +736,7 @@ void init() {
     // loaded mod declares items.
     story_items::set_game_calls(call_original,[](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);});
     story_items::set_presenter(story_notebook::show_info);
+    if(story_items::imported())story_mail::set_item_get_next(story_items::hooks::exec_item_get);
     story_items::set_use_calls([](const char* how){return story_notebook::open_page(how);},story_notebook::reach);
     story_items::install([](uint32_t addr) {
         auto it=g_chains.find(addr);return it==g_chains.end()?std::string():it->second.replace_mod;
