@@ -25,6 +25,7 @@ from PIL import Image, ImageDraw
 W, H = 1280, 720
 FRAME_ASPECT = 1448 / 1086
 ROWS = 5
+PORTRAIT, PORTRAIT_SLOTS = 64, 6  # portrait slots: one per list row, the last for the detail page
 FPS = 30
 
 # colours of story_notebook_page.h (RGBA)
@@ -277,8 +278,12 @@ def build(art, out_dir):
     # boxes, story_notebook_page.h geo()), drawn as elements of their own
     plate_l, plate_r = painted or (FR_PLATE_L, FR_PLATE_R)
     tex = lambda png: {"png": png, "tile": "tiled"}
+    # portrait slots (64 x 64, transparent): the port writes each quest's picture into them at run time
+    Image.new("RGBA", (PORTRAIT, PORTRAIT), (0, 0, 0, 0)).save(os.path.join(out, "portrait_slot.png"))
     textures = {"NbFrame_00": tex("frame.png"), "NbBanner_00": tex("banner.png"), "NbWhite_00": tex("white.png"),
                 "NbRing_00": tex("ring.png"), "NbCross_00": tex("cross.png"), "NbCorner_00": tex("corner.png")}
+    for i in range(PORTRAIT_SLOTS):
+        textures["NbPortrait%d_00" % i] = tex("portrait_slot.png")
     mat = lambda t, white=None: {"textures": [{"texture": t}], **({"white": white} if white else {})}
     materials = {"M_Frame": mat("NbFrame_00"), "M_Banner": mat("NbBanner_00"), "M_Ring": mat("NbRing_00"),
                  "M_Cross": mat("NbCross_00"), "M_Corner": mat("NbCorner_00"),
@@ -286,6 +291,8 @@ def build(art, out_dir):
                  "M_TabOn": mat("NbWhite_00", [255, 255, 255, 0x50]), "M_TabOff": mat("NbWhite_00", [0x1E, 0x3C, 0x14, 0x30]),
                  "M_PillNew": mat("NbWhite_00", [0x2E, 0x8A, 0x2E, 0xC8]), "M_PillNotYet": mat("NbWhite_00", [0x7C, 0x8A, 0x6C, 0xD8]),
                  "M_PillDone": mat("NbWhite_00", [0x9C, 0x3A, 0x2A, 0xD0])}
+    for i in range(PORTRAIT_SLOTS):
+        materials["M_Portrait%d" % i] = mat("NbPortrait%d_00" % i)
     buttons = {}
     if all(os.path.exists(os.path.join(art, n + ".png")) for n in ("tab_plate_a", "tab_plate_b", "close_round")):
         for key, n in (("a", "tab_plate_a"), ("b", "tab_plate_b"), ("close", "close_round")):
@@ -323,6 +330,7 @@ def build(art, out_dir):
         bx = row_x(B_TEXT.x0 - 0.02, x, w, h)
         kids.append(pic("P_Row%dWash" % i, bx, y + h * 0.12, x + w - h * 0.25 - bx, h * 0.76, "M_Wash", rc, visible=False))
         mcx, mcy, mr = row_x(B_MED_X, x, w, h), y + B_MED_Y * h, B_MED_R * h * 0.86
+        kids.append(pic("P_Row%dPortrait" % i, mcx - mr, mcy - mr, 2 * mr, 2 * mr, "M_Portrait%d" % i, rc, visible=False))
         kids.append(text("T_Row%dInitial" % i, mcx - mr, mcy - mr * 0.68, mr * 1.3, SEAL, "?", bold=True, width=2 * mr,
                          align="center", parent=rc, capacity=4, k=1.0))
         tx, px0, px1 = row_x(B_TEXT.x0, x, w, h), row_x(B_PILL.x0, x, w, h), row_x(B_PILL.x1, x, w, h)

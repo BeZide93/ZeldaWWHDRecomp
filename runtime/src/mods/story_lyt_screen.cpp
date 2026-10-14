@@ -12,6 +12,7 @@
 #include "ppc.h"
 #include "runtime.h"
 #include "story_lyt_text.h"
+#include "lyt_build.h"
 #include "../input.h"
 
 namespace story_lyt_screen {
@@ -23,6 +24,7 @@ const uint32_t kDrawPrimary = GC(0x02716AD0);      // hdIngameUi_c::drawPrimaryS
 const uint32_t kCursorDraw = GC(0x026538A0);       // hdCursorMgr_c::draw(this, info): the menus' selection cursor
 const uint32_t kDrawHud = GC(0x02715CA0);          // hdIngameUi_c::drawHudScreens(this, info): the TV (the item menu there with the Pro Controller)
 const uint32_t kResMgrCache = GC(0x026FB694);      // hdLayoutResMgr_c::cache(this, name, heap)
+const uint32_t kResMgrFind = GC(0x026FBB24);       // hdLayoutResMgr_c::find(this, name): the archive's data
 const uint32_t kNoControlConstruct = GC(0x02700ADC);  // NoControlPart_l::construct(0)
 const uint32_t kAttachArchives = GC(0x026F90D8);   // hdParts_c::attachArchives(this, names, count)
 const uint32_t kPartsNew = GC(0x0273B050);         // allocate(size, heap, alignment)
@@ -53,9 +55,10 @@ uint32_t g_part_vt = 0, g_layout_vt = 0;
 bool g_check = false;  // a state was loaded: check still_there() before the next use
 std::map<std::string, uint32_t> g_panes;
 std::chrono::steady_clock::time_point g_covered{};  // when our layout last covered the item menu
-uint32_t g_viewport = 0;  // the item screen's viewport, while drawPrimaryScreens runs (0: it didn't draw)
+uint32_t g_viewport = 0;
+uint32_t g_archive = 0;  // the archive's data in guest memory (a SARC), found once built  // the item screen's viewport, while drawPrimaryScreens runs (0: it didn't draw)
 
-void drop() { g_part = g_layout = g_set = 0, g_panes.clear(); }
+void drop() { g_part = g_layout = g_set = 0, g_archive = 0, g_panes.clear(); }
 
 // After a state load: are our objects still in guest memory (a portable state, or a full state saved after
 // the build)? Otherwise the handles are dropped without touching the memory.
@@ -123,6 +126,7 @@ void build(Cpu* c, uint32_t projection, uint32_t matrix) {
     for (uint32_t i = 0; i < entries; i++)
         g_call(c, kBindGroup, {g_set, i, safe_string(g_client.anims[i].name.c_str()), safe_string(g_client.anims[i].group.c_str())});
     g_failed = false;
+    g_archive = g_call(c, kResMgrFind, {mgr, name});
     g_part_vt = ld32(part + kPartsVtable), g_layout_vt = ld32(layout + kLayoutVtable);
     LOG("[lyt] %s: built (parts %08X, layout %08X, %u animations)", g_client.layout.c_str(), part, layout, entries);
     if (g_client.built) g_client.built(c, ld32(g_layout + kLayoutLyt));
@@ -208,6 +212,32 @@ void finalize_screens(Cpu* c) {
 }
 }  // namespace hooks
 }  // namespace
+
+bool set_texture_pixels(const std::string& file, const uint8_t* rgba, uint32_t w, uint32_t h) {
+    const uint32_t sarc = g_archive;
+    if (!sarc || ld32(sarc) != 0x53415243) return false;  // "SARC"
+    const std::string path = "timg/" + file;
+    uint32_t hash = 0;
+    for (unsigned char ch : path) hash = hash * 0x65 + ch;  // the SARC name hash (key 0x65)
+    const uint32_t data = sarc + ld32(sarc + 0x0C), sfat = sarc + ld16(sarc + 0x04);  // SFAT after the 0x14-byte header
+    const uint32_t count = ld16(sfat + 0x06);
+    for (uint32_t i = 0; i < count; i++) {
+        const uint32_t e = sfat + 0x0C + 16 * i;
+        if (ld32(e) != hash) continue;
+        const uint32_t start = data + ld32(e + 8), end = data + ld32(e + 12);
+        if (end < start + 0x28) return false;
+        const uint32_t footer = end - 0x28;  // "FLIM" ... "imag" w h align format tile size
+        if (ld32(footer) != 0x464C494D || ld16(footer + 0x1C) != w || ld16(footer + 0x1E) != h || ld8(footer + 0x22) != 0x14)
+            return false;
+        const uint8_t tile = ld8(footer + 0x23);
+        const lyt_build::Bytes texels(rgba, rgba + size_t(w) * h * 4);
+        const lyt_build::Bytes image = lyt_build::tile_rgba8(texels, w, h, tile & 15, tile >> 5);
+        if (image.empty() || image.size() != ld32(footer + 0x24) || start + image.size() > footer) return false;
+        memcpy(mem::ptr(start), image.data(), image.size());
+        return true;
+    }
+    return false;
+}
 
 uint32_t safe_string(const char* text) {
     const uint32_t n = uint32_t(strlen(text)) + 1;

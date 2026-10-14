@@ -8,11 +8,13 @@
 #include <mutex>
 
 #include "lyt_build.h"
+#include "guest_png.h"
 #include "ppc.h"
 #include "runtime.h"
 #include "story_lyt_screen.h"
 #include "story_lyt_text.h"
 #include "story_notebook_page.h"
+#include "story_notebook_art.h"
 
 namespace story_notebook_layout {
 namespace {
@@ -80,6 +82,42 @@ std::string fitted(Cpu* c, const char* name, const std::string& text) {
     return best + "...";
 }
 
+// test aid: WWHD_NOTEBOOK_LAYOUT_TEST_PORTRAIT=<png> gives every quest that picture as its portrait
+const char* test_portrait() {
+    static const char* p = [] { const char* e = getenv("WWHD_NOTEBOOK_LAYOUT_TEST_PORTRAIT"); return e && *e ? e : nullptr; }();
+    return p;
+}
+
+// A quest's portrait in a portrait slot of the layout (NbPortrait<slot>_00: 64 x 64), written into the
+// slot texture once per quest (story_lyt_screen::set_texture_pixels); false if it can't be shown
+constexpr uint32_t kPortraitSize = 64;
+uint16_t g_slot_key[8] = {};
+bool portrait_into(int slot, uint16_t key) {
+    if (slot < 0 || slot >= 8) return false;
+    if (g_slot_key[slot] == key) return true;
+    guestmods::hud::Image img;
+    if (const char* t = test_portrait()) {
+        try {
+            const auto px = guestmods::hud::load_png(std::filesystem::path(t).parent_path(), std::filesystem::path(t).filename().string());
+            img.width = px.width, img.height = px.height, img.rgba = px.rgba;
+        } catch (const std::exception&) {
+        }
+    } else if (!nb::portrait_pixels(key, img)) {
+        return false;
+    }
+    if (!img.width || !img.height) return false;
+    game_glyph::Bitmap b;
+    b.width = int(img.width), b.height = int(img.height), b.rgba = img.rgba;
+    const game_glyph::Bitmap fit = nb::art::resized(b, int(kPortraitSize), int(kPortraitSize));
+    const std::string file = "NbPortrait" + std::to_string(slot) + "_00^l.bflim";
+    if (!story_lyt_screen::set_texture_pixels(file, fit.rgba.data(), kPortraitSize, kPortraitSize)) {
+        LOG("[notebook] layout: portrait %04X not written into %s", key, file.c_str());
+        return false;
+    }
+    g_slot_key[slot] = key;
+    return true;
+}
+
 void apply(Cpu* c, const View& v) {
     for (int i = 0; i < 2; i++) {
         const bool on = i == v.tab;
@@ -105,7 +143,9 @@ void apply(Cpu* c, const View& v) {
         set_text(c, next.c_str(), fitted(c, next.c_str(), r.next));
         set_text(c, row_pane("T", i, "Status").c_str(), r.status);
         set_text(c, row_pane("T", i, "Initial").c_str(), r.initial);
-        show(c, row_pane("T", i, "Initial").c_str(), r.initial_shown);
+        const bool portrait = r.portrait && portrait_into(i, r.portrait);
+        show(c, row_pane("P", i, "Portrait").c_str(), portrait);
+        show(c, row_pane("T", i, "Initial").c_str(), r.initial_shown || (r.portrait && !portrait));
         show(c, row_pane("P", i, "PillNew").c_str(), r.pill == 1);
         show(c, row_pane("P", i, "PillNotYet").c_str(), r.pill == 2);
         show(c, row_pane("P", i, "PillDone").c_str(), r.pill == 3);
@@ -187,6 +227,7 @@ bool frame(Cpu* c, uint32_t) {
 
 void built(Cpu* c, uint32_t) {
     g_shown = Shown{};
+    for (uint16_t& k : g_slot_key) k = 0;  // a new archive in memory: its slots are empty
     g_cursor_y0 = pane_f(story_lyt_screen::pane(c, "N_Cursor"), 0x20);
     g_row_step = pane_f(story_lyt_screen::pane(c, "N_Row0"), 0x20) - pane_f(story_lyt_screen::pane(c, "N_Row1"), 0x20);
     // the game sizes every text pane's buffer from its width when it builds the layout: the row texts
@@ -224,6 +265,8 @@ View view_of(const nb::Page& page, const std::vector<nb::Row>& all) {
         rv.pill = r.status == nb::Status::New ? 1 : r.status == nb::Status::NotAvailable ? 2 : r.status == nb::Status::Done ? 3 : 0;
         rv.tracked = r.tracked;
         rv.initial_shown = q.portrait.empty();
+        rv.portrait = q.portrait.empty() ? 0 : q.key;
+        if (test_portrait()) rv.portrait = q.key, rv.initial_shown = false;
         rv.initial = q.mod_name.empty() ? "?" : q.mod_name.substr(0, 1);
         if (q.key == page.selected_key()) v.selected = int(i);
         v.rows.push_back(std::move(rv));
@@ -245,7 +288,7 @@ bool same(const View& a, const View& b) {
     for (size_t i = 0; i < a.rows.size(); i++) {
         const RowView &x = a.rows[i], &y = b.rows[i];
         if (x.title != y.title || x.next != y.next || x.status != y.status || x.initial != y.initial || x.dim != y.dim ||
-            x.tracked != y.tracked || x.initial_shown != y.initial_shown || x.pill != y.pill)
+            x.tracked != y.tracked || x.initial_shown != y.initial_shown || x.pill != y.pill || x.portrait != y.portrait)
             return false;
     }
     return true;

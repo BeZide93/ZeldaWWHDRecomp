@@ -25,6 +25,10 @@ using Bytes = std::vector<uint8_t>;
 std::map<std::string, Bytes> build_files(const std::string& description_json, const std::filesystem::path& art_root);
 // The archive: a Yaz0 (stored) SARC of build_files(), as tools/story_mods/notebook_model.py writes it.
 Bytes build(const std::string& description_json, const std::filesystem::path& art_root);
+// RGBA8 texels (w x h) placed as a .bflim's image of that size, tile mode (1 linear, 2 1d, 4 tiled) and
+// swizzle (0-7) would hold them (the image's size: as the archive's .bflim); for writing a texture of a
+// built layout at run time (story_lyt_screen::set_texture_pixels).
+Bytes tile_rgba8(const Bytes& rgba, uint32_t w, uint32_t h, int tile_mode, uint32_t swizzle);
 // The layout name ("name") of a description, or "" if it has none.
 std::string layout_name(const std::string& description_json);
 

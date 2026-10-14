@@ -19,6 +19,7 @@ inline constexpr int kRows = 5;  // the layout's rows (N_Row0..N_Row4)
 struct RowView {
     std::string title, next, status, initial;
     bool dim = false, tracked = false, initial_shown = false;
+    uint16_t portrait = 0;  // the quest's key when it has a portrait (drawn in the row's medallion), else 0
     int pill = 0;  // 0 none, 1 New, 2 Not yet, 3 Done
 };
 struct View {

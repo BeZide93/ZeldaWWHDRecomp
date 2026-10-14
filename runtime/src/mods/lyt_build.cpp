@@ -1095,6 +1095,15 @@ Bytes build(const std::string& description_json, const std::filesystem::path& ar
     return yaz0_stored(sarc(build_files(description_json, art_root)));
 }
 
+Bytes tile_rgba8(const Bytes& rgba, uint32_t w, uint32_t h, int mode, uint32_t swizzle) {
+    if (rgba.size() != size_t(w) * h * 4 || (mode != 1 && mode != 2 && mode != 4)) return {};
+    const Surface s = surface_size(w, h, 32, mode);
+    Bytes out(s.size, 0);
+    for (uint32_t y = 0; y < h; y++)
+        for (uint32_t x = 0; x < w; x++) memcpy(&out[address(x, y, s.pitch, mode, swizzle << 8)], &rgba[(size_t(y) * w + x) * 4], 4);
+    return out;
+}
+
 std::string layout_name(const std::string& description_json) {
     try {
         const J root = Reader(description_json).parse();

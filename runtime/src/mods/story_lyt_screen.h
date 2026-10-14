@@ -73,6 +73,12 @@ void play(Cpu* c, const std::string& anim, float rate = 1.0f);
 void set_frame(Cpu* c, const std::string& anim, float frame);
 bool ended(Cpu* c, const std::string& anim);
 
+// A texture of the built layout (timg/<file>, e.g. "NbPortrait0_00^l.bflim"), found in the archive in guest
+// memory (hdLayoutResMgr_c::find): its RGBA8 texels replaced by `rgba` (w x h: the texture's own size).
+// The texture keeps being drawn from that memory, so the picture changes in place. False if there is no
+// such RGBA8 texture of that size.
+bool set_texture_pixels(const std::string& file, const uint8_t* rgba, uint32_t w, uint32_t h);
+
 uint32_t safe_string(const char* text);  // a sead SafeString in guest memory (kept for the session)
 
 }  // namespace story_lyt_screen

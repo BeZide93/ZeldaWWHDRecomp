@@ -716,7 +716,7 @@ void publish(const std::vector<Row>& all, const std::vector<Command>* caption = 
     const std::vector<Row> rows = g_page.shown(all);
     // portraits: in the rows that show them, and the sender's on the detail page (the painted frame)
     std::vector<std::pair<unsigned, const Quest*>> portraits;
-    if (!caption && g_page.mode() == Page::Mode::List)
+    if (!caption && !by_layout && g_page.mode() == Page::Mode::List)  // the layout has its own portraits
         for (unsigned i = 0; i < kRowsShown && g_page.top() + i < rows.size(); i++) portraits.push_back({i, rows[g_page.top() + i].quest});
     if (!caption && g_page.mode() == Page::Mode::Detail && g_page.scene().framed)
         for (const Row& r : rows)
@@ -1127,6 +1127,14 @@ int32_t talk(const std::string& mod, const std::string& quest, uint32_t step, co
     g_takeovers.push_back({q->key, uint8_t(step), who, true, lines, uint8_t(reward)});
     LOG("[notebook] %s: quest \"%s\" step %u talks to %s", mod.c_str(), quest.c_str(), step, npc_catalogue().entry(who)->name.c_str());
     return saved(q->key);
+}
+
+bool portrait_pixels(uint16_t key, guestmods::hud::Image& out) {
+    std::lock_guard lock(g_mu);
+    auto it = g_portraits.find(key);
+    if (it == g_portraits.end() || !it->second.pixels.width) return false;
+    out = it->second.pixels;
+    return true;
 }
 
 bool notebook_owned() { return story_mail::notebook_owned(); }

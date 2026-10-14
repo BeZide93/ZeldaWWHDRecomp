@@ -79,6 +79,7 @@ std::string build_cached(const std::filesystem::path&, const std::filesystem::pa
 }  // namespace lyt_build
 
 namespace story_lyt_screen {
+bool set_texture_pixels(const std::string&, const uint8_t*, uint32_t, uint32_t) { return false; }
 void set_client(Client client) { g.client = std::move(client), g.has_client = true; }
 bool has_client() { return g.has_client; }
 bool ready() { return true; }
@@ -96,6 +97,9 @@ void play(Cpu*, const std::string& anim, float) { g.plays.push_back(anim); }
 bool ended(Cpu*, const std::string& anim) { return anim == "Close" && g.close_ended; }
 }  // namespace story_lyt_screen
 
+namespace story_notebook {
+bool portrait_pixels(uint16_t, guestmods::hud::Image&) { return false; }  // no portraits in the tests
+}  // namespace story_notebook
 namespace story_lyt_text {
 bool set_text(Cpu*, uint32_t pane, const std::string& utf8, const Options&) {
     assert(g.name.count(pane));
@@ -378,14 +382,15 @@ void test_frame_open_and_panes() {
     CHECK(!g.visible["T_Up"] && !g.visible["T_Down"] && !g.visible["T_Empty1"] && !g.visible["T_Empty2"]);
     // the cursor starts on the selected row's place (no glide on opening)
     CHECK(!g.cursor.empty() && g.cursor.back().first == kCursorX && g.cursor.back().second == kCursorY);
-    // the archive: the done quest with its portrait (no initial)
+    // the archive: the done quest with its portrait; its picture isn't loaded (the fake has none), so the
+    // medallion keeps the initial and the portrait pane stays hidden
     g.clear_calls();
     press(p, all, kPadRight);
     CHECK(step(p, all));
     CHECK(g.visible["N_Row0"] && !g.visible["N_Row1"]);
     CHECK(g.text["T_Row0TitleDim"] == "Quest c" && g.text["T_Row0NextDim"] == "The story is told.");
     CHECK(g.text["T_Row0Status"] == "Done" && g.visible["P_Row0PillDone"] && !g.visible["P_Row0Ring"]);
-    CHECK(!g.visible["T_Row0Initial"]);
+    CHECK(g.visible["T_Row0Initial"] && !g.visible["P_Row0Portrait"]);
     close_fully(p);
 }
 

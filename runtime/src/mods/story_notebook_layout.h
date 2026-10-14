@@ -13,6 +13,7 @@
 #include <string>
 #include <vector>
 
+#include "guest_hud.h"
 #include "story_notebook_list.h"
 
 namespace story_notebook {
@@ -21,6 +22,8 @@ class Page;
 // The package's layout description (manifest "notebook": {"layout": ...}) and the folder for the built
 // archive (the package's data folder); before install. WWHD_NOTEBOOK_LAYOUT=<description> overrides it.
 void set_layout_description(const std::string& path, const std::string& data_dir);
+// a quest's portrait (its package picture, as the notebook loaded it), false if it has none
+bool portrait_pixels(uint16_t key, guestmods::hud::Image& out);
 }  // namespace story_notebook
 
 namespace story_notebook_layout {
