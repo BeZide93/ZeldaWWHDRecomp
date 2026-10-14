@@ -373,9 +373,11 @@ bool menu_shown_now(Cpu* c) {
     return state == kStateToMenu || state == kStateMenu || state == kStateMenuSubWindow;
 }
 bool menu_shown() { return g_menu_shown; }
+bool (*g_bag_covered)() = nullptr;  // the Delivery Bag's extra page covers the window (story_bag.h)
 IconPlace place_over(uint32_t item, uint32_t number) {
     IconPlace at;
     if (!item || !g_menu) return g_icon_reason = "no bag window yet", at;
+    if (g_bag_covered && g_bag_covered()) return g_icon_reason = "the bag's extra page covers the window", at;
     // the window runs once per logic step; frames drawn in between (interpolation, 120 Hz) keep the icon
     if (g_window_step + 1 < g_step.load(std::memory_order_relaxed)) return g_icon_reason = "the bag window is closed", at;
     if (!menu_shown()) return g_icon_reason = "the menu is closed (Pro Controller)", at;
@@ -1364,6 +1366,7 @@ void close_page() {
     guestmods::hud::store().drop(kOwner);
 }
 bool page_open() { return g_open.load(std::memory_order_relaxed); }
+void set_bag_cover(bool (*covered)()) { g_bag_covered = covered; }
 bool item_menu_shown() { return menu_shown(); }
 uint32_t delivery_window_menu() {
     return g_menu && g_window_step + 1 >= g_step.load(std::memory_order_relaxed) && ld32(g_menu + kMenuWindowMode) == kDeliveryWindow ? g_menu : 0;

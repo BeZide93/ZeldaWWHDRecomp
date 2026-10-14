@@ -39,6 +39,11 @@ constexpr const char* kLayout = "StoryBag_00";
 // hdMenuItem_c::mSlot (+0xEC) the item number a place shows (0xFF: empty)
 constexpr uint32_t kMenuChildren = 0x48, kFirstWindowChild = 0x14, kItemNumber = 0xEC, kEmpty = 0xFF;
 constexpr uint32_t kNotebookItem = 0xA0, kLetterItem = 0xA1;
+// which window child shows which save place: the menu's transition table for the Delivery Bag window
+// (hdMenuMain_c::executeSaveChildren: sMenuMainWindowItems[mode] = {key, child index} x
+// sMenuMainWindowCounts[mode]; keys 0x30..0x37 = the save's delivery places 0..7)
+const uint32_t kWindowItems = GD(0x101F63BC), kWindowCounts = GD(0x100FA2C0);
+constexpr uint32_t kDeliveryMode = 2, kFirstDeliveryKey = 0x30;
 constexpr uint32_t kItemLayout = 0x44, kLayoutLyt = 0x4;  // hdParts_c's layout, hdPartsLayout_c's layout object
 constexpr uint32_t kPaneParent = 0xC, kPaneTranslate = 0x1C, kPaneScale = 0x34, kPaneFlags = 0x44, kPaneGlobalAlpha = 0x46;
 const uint32_t kExecuteSaveChildren = GC(0x026924EC);  // hdMenuMain_c::executeSaveChildren(): the open window's places read again
@@ -58,6 +63,8 @@ Page g_page;
 Model g_model;
 uint32_t g_menu = 0;               // the item menu while its Delivery Bag window runs (this frame), else 0
 std::atomic<bool> g_open{false};   // the page has the controller
+std::atomic<bool> g_covering{false};  // the page lies over the game's window (not while a game place is chosen)
+std::atomic<bool> g_takes_lr{false};  // the game's Delivery Bag window with extra pages: L and R are the pages'
 std::atomic<uint32_t> g_swallow{0};  // buttons held when the page closed: the game gets them once released
 std::string g_message;             // a refusal or a result, shown for a while
 float g_message_time = 0;
@@ -151,6 +158,18 @@ void refresh_window(Cpu* c) {
     if (trace()) LOG("[bag] the Delivery Bag window's places read again");
 }
 
+std::string item_name(uint16_t key);
+// the save's delivery place (0..7) a window place (cell 0..7: child 0x14 + cell) shows, -1 if none
+int save_place_of_cell(int cell) {
+    const uint32_t items = ld32(kWindowItems + 4 * kDeliveryMode), count = ld32(kWindowCounts + 4 * kDeliveryMode);
+    for (uint32_t i = 0; items && i < count && i < 32; i++) {
+        const uint32_t key = ld32(items + 8 * i), child = ld32(items + 8 * i + 4);
+        if (child == kFirstWindowChild + uint32_t(cell) && key >= kFirstDeliveryKey && key < kFirstDeliveryKey + kSlots)
+            return int(key - kFirstDeliveryKey);
+    }
+    return -1;
+}
+
 void carry_out(Cpu* c, const Action& a) {
     using story_items::Action;
     switch (a.kind) {
@@ -160,24 +179,42 @@ void carry_out(Cpu* c, const Action& a) {
     case story_bag::Action::Use:
         if (!story_items::act(a.key, Action::Use)) say(story_items::reason());
         break;
-    case story_bag::Action::Put:
-        if (story_items::act(a.key, Action::MoveToGamePlace, a.place)) {
-            LOG("[bag] item %04X to the game's place %d", a.key, a.place);
+    case story_bag::Action::Put: {
+        const int place = save_place_of_cell(a.place);
+        if (place < 0) {
+            say("That place can't take it.");
+        } else if (story_items::act(a.key, Action::MoveToGamePlace, place)) {
+            LOG("[bag] item %04X to the game's place %d (the window's place %d)", a.key, place, a.place);
             refresh_window(c);
+            // its page place is free now: an item that waits for one (the pages were full) takes it
+            for (uint16_t waiting : story_items::unplaced())
+                if (story_items::act(waiting, Action::MoveToPage, 0)) {
+                    LOG("[bag] item %04X (it waited) gets the freed place", waiting);
+                    break;
+                }
         } else {
             say(story_items::reason());
         }
         break;
+    }
     case story_bag::Action::Take: {
         const int to = int(story_items::kFirstPagePlace + a.page * kSlots + unsigned(a.slot));
         if (story_items::act(a.key, Action::MoveToPage, to)) {
-            LOG("[bag] item %04X from the game's place %d to page %u place %d", a.key, a.place, a.page + 1, a.slot);
+            LOG("[bag] item %04X from the window's place %d to page %u place %d", a.key, a.place, a.page + 1, a.slot);
             refresh_window(c);
         } else {
             say(story_items::reason());
         }
         break;
     }
+    case story_bag::Action::Assign:
+        if (story_items::act(a.key, Action::Assign, a.slot)) {
+            LOG("[bag] item %04X on %s", a.key, a.slot == 0 ? "X" : "Y");
+            say(item_name(a.key) + (a.slot == 0 ? " is on X." : " is on Y."));
+        } else {
+            say(story_items::reason());
+        }
+        break;
     case story_bag::Action::Close:
     case story_bag::Action::None: break;
     }
@@ -418,6 +455,7 @@ bool configure(const std::filesystem::path& cache_dir) {
     client.built = built;
     client.frame = frame;
     client.covers = [] { return g_open.load(std::memory_order_relaxed); };
+    story_notebook::set_bag_cover([] { return g_covering.load(std::memory_order_relaxed); });
     g_id = story_lyt_screen::add_client(std::move(client));
     if (g_id < 0) return false;
     g_configured = true;
@@ -445,7 +483,18 @@ void pad(input::PadState& p, Cpu* c) {
         const int now = (g_menu ? 1 : 0) | (window ? 2 : 0) | (g_model.pages.empty() ? 0 : 4) | (g_page.open() ? 8 : 0);
         if (now != last) {
             const auto own = story_items::owned();
-            LOG("[bag] owned %zu, first place %u", own.size(), own.empty() ? 0u : unsigned(story_items::place(own[0])));
+            std::string places;
+            for (uint32_t i = 0; i < kSlots; i++) {
+                const uint32_t count = g_menu ? ld32(g_menu + kMenuChildren) : 0, data = g_menu ? ld32(g_menu + kMenuChildren + 4) : 0;
+                const uint32_t child = data && kFirstWindowChild + i < count ? ld32(data + 4 * (kFirstWindowChild + i)) : 0;
+                char b[8];
+                snprintf(b, sizeof b, " %02X", child ? ld32(child + kItemNumber) & 0xFF : 0xFFu);
+                places += b;
+            }
+            places += "; save places by window place:";
+            for (int i = 0; i < int(kSlots); i++) places += " " + std::to_string(save_place_of_cell(i));
+            LOG("[bag] owned %zu, first place %u; the game's places:%s", own.size(), own.empty() ? 0u : unsigned(story_items::place(own[0])),
+                places.c_str());
         }
         if (now != last)
             LOG("[bag] window %s, menu shown %d, %zu extra page(s), %u unplaced, page %s", g_menu ? "open" : "closed", menu_up() ? 1 : 0,
@@ -457,17 +506,31 @@ void pad(input::PadState& p, Cpu* c) {
             g_swallow.store(s & p.buttons, std::memory_order_relaxed);
             p.buttons &= ~s;
         }
-        if (!window || g_model.pages.empty()) return;
-        // the game's Delivery Bag window with extra pages: L and R are the pages' (R opens the first)
+        g_takes_lr = window && !g_model.pages.empty();
+        if (!g_takes_lr.load(std::memory_order_relaxed)) return;
+        // the game's Delivery Bag window with extra pages: L and R are the pages' (R opens the first), a tap on
+        // a page dot opens that page
         static uint32_t prev = 0;
+        static bool touch_prev = false;
+        static int touch_dot = -1;  // the page dot a touch began on
         const uint32_t pressed = p.buttons & ~prev;
         prev = p.buttons;
-        if (pressed & kPadR) {
-            g_page.open(p.buttons);
-            g_open = true, g_open_anim = true, g_turn = 1;
+        if (p.touch && !touch_prev) {
+            const WindowPlace at = window_place(c);
+            const float k = at.scale > 0.01f ? at.scale : 1.0f;
+            touch_dot = Page::hit_dot((p.tx * 1280.0f - 640.0f - at.x) / k, (360.0f - p.ty * 720.0f - at.y) / k, unsigned(g_model.pages.size()));
+        }
+        const bool tap = !p.touch && touch_prev && touch_dot >= 1;  // released: the page of the dot it began on
+        touch_prev = p.touch;
+        int open_at = (pressed & kPadR) ? 0 : -1;
+        if (tap && open_at < 0) open_at = touch_dot - 1;
+        if (open_at >= 0) {
+            g_page.open(p.buttons, unsigned(open_at));
+            g_open = true, g_covering = true, g_open_anim = true, g_turn = 1;
+            g_swallow.store(p.buttons | kPadR, std::memory_order_relaxed);  // the R (and what is held) never reaches the game
             say("");
             play(c, Sound::Turn);
-            LOG("[bag] extra page 1 of %zu opened (R in the Delivery Bag)", g_model.pages.size());
+            LOG("[bag] extra page %d of %zu opened (%s in the Delivery Bag)", open_at + 1, g_model.pages.size(), tap ? "a tap" : "R");
             p = input::PadState{};
             return;
         }
@@ -476,7 +539,7 @@ void pad(input::PadState& p, Cpu* c) {
     }
     if (story_notebook::page_open()) return;  // an item's Info box (the notebook's caption) has the controller
     if (!g_menu) {  // the window went (the menu closed, a state load): the page goes with it
-        g_page.close(), g_open = false;
+        g_page.close(), g_open = false, g_covering = false;
         LOG("[bag] the Delivery Bag window closed: the extra page with it");
         return;
     }
@@ -499,12 +562,13 @@ void pad(input::PadState& p, Cpu* c) {
     if (trace() && (g_page.mode() != before || g_page.page() != page_before || act.kind != Action::None))
         LOG("[bag] mode %d page %u cursor %d action %d", int(g_page.mode()), g_page.page(), g_page.cursor(), int(act.kind));
     if (!g_page.open()) {
-        g_open = false;
+        g_open = false, g_covering = false;
         g_swallow.store(p.buttons, std::memory_order_relaxed);
         LOG("[bag] back to the game's Delivery Bag window");
     } else if (before == Page::Mode::Pick && g_page.mode() == Page::Mode::Browse) {
         g_open_anim = true;
     }
+    g_covering = g_page.open() && g_page.mode() != Page::Mode::Pick;
     p = input::PadState{};  // the game sees an idle controller while the page is open
 }
 
@@ -514,13 +578,17 @@ void mute(input::PadState& p) {
         return;
     }
     if (const uint32_t s = g_swallow.load(std::memory_order_relaxed)) p.buttons &= ~s;
+    // the Pro Controller (its buttons in VPAD bits, as the GamePad's): in the Delivery Bag window with extra
+    // pages L and R turn the pages (VPADRead, pad()); the game never sees them there (no lift, no X/Y/R
+    // assignment, no tab switch)
+    if (g_takes_lr.load(std::memory_order_relaxed)) p.buttons &= ~(kPadL | kPadR);
 }
 
 bool page_open() { return g_open.load(std::memory_order_relaxed); }
 
 void state_loaded() {
     g_page.close();
-    g_open = false;
+    g_open = false, g_covering = false, g_takes_lr = false;
     g_menu = 0;
     g_model = {};
     for (uint16_t& k : g_slot_key) k = 0;
