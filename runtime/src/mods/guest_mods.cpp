@@ -27,6 +27,8 @@
 #include "story_manifest.h"
 #include "story_store.h"
 #include "story_takeover.h"
+#include "story_treasure.h"
+#include "story_treasure_chest.h"
 #include "mod_json.h"
 #include "input.h"
 #include "true60.h"
@@ -727,6 +729,10 @@ void init() {
     story_items::set_game_calls(call_original,[](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);});
     story_items::set_presenter(story_notebook::show_info);
     if(story_items::imported())story_mail::set_item_get_next(story_items::hooks::exec_item_get);
+    // a mod treasure chart's chest (story_treasure_chest.h): its stand-in's execItemGet, before the mod items'
+    // pool numbers; inert unless a chest of a mod item is pending
+    story_treasure_chest::set_item_get_next(story_items::imported()?story_items::hooks::exec_item_get:nullptr,call_original);
+    if(!story_treasure::chest_hooks().empty())story_mail::set_item_get_next(story_treasure_chest::hooks::exec_item_get);
     story_items::set_use_calls([](const char* how){return story_notebook::open_page(how);},story_notebook::reach);
     story_items::install([](uint32_t addr) {
         auto it=g_chains.find(addr);return it==g_chains.end()?std::string():it->second.replace_mod;
@@ -779,6 +785,7 @@ void state_loaded() {
     hud::store().reset();
     pcm::store().reset();
     story_mail::state_loaded();
+    story_treasure_chest::state_loaded();
     story_chart::state_loaded();
     story_notebook::state_loaded();
     for(auto& mod:g_loaded)mod.hud_called=false;

@@ -994,6 +994,13 @@ add_executable(story_items_test runtime/tools/story_items_test.cpp runtime/src/m
 target_include_directories(story_items_test PRIVATE runtime/include runtime/src runtime/src/mods)
 target_compile_options(story_items_test PRIVATE -UNDEBUG)
 add_test(NAME story_items COMMAND story_items_test)
+# mod treasure charts, the chest's item: game items, the mod item's stand-in and its get, on a synthetic save
+add_executable(story_treasure_chest_test runtime/tools/story_treasure_chest_test.cpp runtime/src/mods/story_treasure_chest.cpp
+               runtime/src/mods/story_items.cpp runtime/src/mods/story_chart.cpp runtime/src/mods/story_mail.cpp runtime/src/mods/story_store.cpp
+               runtime/src/guest_addr_identity.c ${WWHD_NPC_CATALOGUE})
+target_include_directories(story_treasure_chest_test PRIVATE runtime/include runtime/src runtime/src/mods)
+target_compile_options(story_treasure_chest_test PRIVATE -UNDEBUG)
+add_test(NAME story_treasure_chest COMMAND story_treasure_chest_test)
 if(Python3_Interpreter_FOUND)
   add_test(NAME release_sdk_package COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/release/test_sdk_package.py")
   add_test(NAME story_notebook_model COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/story_mods/test_notebook_model.py")

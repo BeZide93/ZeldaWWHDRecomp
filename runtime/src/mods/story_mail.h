@@ -66,6 +66,12 @@ bool can_say();  // the hooks are installed and have text buffers: say() can wor
 void caption(uint32_t number, const std::u16string* text);
 void uncaption();
 
+// A get-item message (0x65 + the item number) with the port's text, for a mod item handed out with a
+// game item's get demo (story_treasure_chest.cpp): while armed, the message `number` shows `text` (kept
+// alive by the caller); null ends it. Shares the notebook's slot: false while the notebook is being
+// handed out, or without the hooks.
+bool item_get_text(uint32_t number, const std::u16string* text);
+
 // guest memory for replaced message texts (host-only, at least 6 KiB), before install()
 void set_text_buffers(uint32_t guest, uint32_t bytes);
 // game code called from the hooks (guestmods::call_original / guest_call in the game)

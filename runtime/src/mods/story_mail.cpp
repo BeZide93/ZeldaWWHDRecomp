@@ -311,6 +311,16 @@ void caption(uint32_t number, const std::u16string* text) {
     g_caption_text = text && g_buffers && g_installed ? Override{number, g_buffers + 3 * kSlotBytes, text} : Override{};
 }
 void uncaption() { g_caption_text = {}; }
+bool item_get_text(uint32_t number, const std::u16string* text) {
+    if (g_notebook_pending) return false;
+    if (!text) {
+        g_notebook_text = {};
+        return true;
+    }
+    if (!g_installed || !g_buffers) return false;
+    g_notebook_text = Override{number, g_buffers + kSlotBytes, text};
+    return true;
+}
 bool said() { return g_npc_text.text && g_npc_text.keyed; }
 bool can_say() { return g_installed && g_buffers != 0; }
 
