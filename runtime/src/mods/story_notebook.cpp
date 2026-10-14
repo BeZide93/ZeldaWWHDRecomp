@@ -1169,7 +1169,8 @@ void icon_frame(Cpu* c) {
     g_original(c, kIconFrame);
 }
 
-// openSelectedChild(this, index): A on the notebook opens its page instead of an item caption
+// openSelectedChild(this, index): A on the notebook opens its page, A on the sealed letter its Info
+// box (story_notebook_caption.h), instead of the game's Info for an item
 void open_child(Cpu* c) {
     const uint32_t menu = c->r[3], index = c->r[4];
     const uint32_t count = ld32(menu + kMenuChildren), data = ld32(menu + kMenuChildren + 4);
@@ -1223,7 +1224,8 @@ void cursor_float(Cpu* c) {
     g_original(c, kCursorFloat);
 }
 
-// selectTouchEnter(this): touching the notebook opens its page (the GamePad has no A on its items);
+// selectTouchEnter(this): touching the notebook opens its page, the sealed letter its Info box (the
+// GamePad has no A on its items);
 // the game's own pick-up runs first and is put back as the touch ends (the page keeps the touch)
 void touch_select(Cpu* c) {
     const uint32_t item = c->r[3];
