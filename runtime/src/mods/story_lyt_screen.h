@@ -43,6 +43,9 @@ struct Client {
     std::vector<Anim> anims;   // the animation set's entries, in this order
     std::function<void(Cpu*, uint32_t lyt)> built;   // right after the build (lyt: the layout object)
     std::function<bool(Cpu*, uint32_t lyt)> frame;   // every item screen draw: true draws the layout
+    std::function<void()> before;                    // before the item menu's screens are drawn (each pass)
+    std::function<bool()> covers;                    // the client's page is up (before ours draws it, too):
+                                                     // the menus' selection cursor is not drawn
     const char* owner = "story layout";              // for the log and hook conflicts
 };
 

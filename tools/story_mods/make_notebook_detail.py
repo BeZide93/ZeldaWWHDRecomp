@@ -52,7 +52,6 @@ BOAT_RIGHT = 1312    # the boat's right edge (frame pixels), clear of the close 
 BOAT_WATER = 335     # the boat's water line in header.png (where its own waves meet the hull)
 
 
-PLAIN_BORDER = 0.5  # the plain letters' border colour: their ink this far towards white (linear values)
 HUD_WIDTH_K = 1.04  # the HUD page's letters are as wide as the layout's at k = 1.04 (and as high at k)
 
 
@@ -60,7 +59,7 @@ def text(nb, *args, **kw):
     """nb.text with the HUD page's letter widths: nb.text's size factor k matches the HUD's letter heights
     (cap height, x-height); the HUD's letters are narrower (measured in game against the HUD detail page:
     the lines were 1.14 - 1.16 times as long at k = 1.2, 1.05 at k = 1.1, the same at 1.0), so the font's
-    width is scaled by 1.04 / k. Plain letters get a light-ink border (PLAIN_BORDER)."""
+    width is scaled by 1.04 / k (now in nb.text, as the plain letters' border)."""
     return nb.text(*args, **kw)  # nb.text has the HUD's letter widths and the plain letters' border now
 
 
@@ -73,12 +72,14 @@ def open_art(art, name):
     return Image.open(os.path.join(art, name)).convert("RGBA")
 
 
-def cleaned(nb, art, name, height):
-    """story_notebook.cpp load_user_art(): edges cleaned (alpha < 96), cropped, at most `height` high."""
+def cleaned(nb, art, name, height=None):
+    """story_notebook.cpp load_user_art(): edges cleaned (alpha < 96), cropped, at most `height` high
+    (None: the source's own size, fitted into the 2048 texture limit and later to twice its display
+    size by make_notebook_layout.fit_textures_to_display)."""
     im = nb.clean_edges(open_art(art, name))
-    if im.height > height:
+    if height and im.height > height:
         im = im.resize((round(im.width * height / im.height), height), Image.LANCZOS)
-    return im
+    return nb.fit_texture(im)
 
 
 def slice3(nb, name, x, y, w, h, material, size, share, parent, **kw):

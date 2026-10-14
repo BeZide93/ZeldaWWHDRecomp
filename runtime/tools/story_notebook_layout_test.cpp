@@ -99,6 +99,7 @@ bool ended(Cpu*, const std::string& anim) { return anim == "Close" && g.close_en
 
 namespace story_notebook {
 bool portrait_pixels(uint16_t, guestmods::hud::Image&) { return false; }  // no portraits in the tests
+void hide_floating_notebook_icon() {}
 }  // namespace story_notebook
 namespace story_lyt_text {
 bool set_text(Cpu*, uint32_t pane, const std::string& utf8, const Options&) {

@@ -24,6 +24,8 @@ class Page;
 void set_layout_description(const std::string& path, const std::string& data_dir);
 // a quest's portrait (its package picture, as the notebook loaded it), false if it has none
 bool portrait_pixels(uint16_t key, guestmods::hud::Image& out);
+// the menu's floating (lifted) icon left out while it shows the notebook (the page opens over the bag)
+void hide_floating_notebook_icon();
 }  // namespace story_notebook
 
 namespace story_notebook_layout {

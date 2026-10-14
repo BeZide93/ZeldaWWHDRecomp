@@ -325,7 +325,6 @@ IconPlace place_over(uint32_t item, uint32_t number);
 IconPlace compute_icon_place() { return place_over(g_bag_item, kNotebookItem); }
 IconPlace place_over(uint32_t item, uint32_t number) {
     IconPlace at;
-    if (g_open.load(std::memory_order_relaxed)) return g_icon_reason = "the notebook page is open", at;  // the page covers the menu
     if (!item || !g_menu) return g_icon_reason = "no bag window yet", at;
     // the window runs once per logic step; frames drawn in between (interpolation, 120 Hz) keep the icon
     if (g_window_step + 1 < g_step.load(std::memory_order_relaxed)) return g_icon_reason = "the bag window is closed", at;
@@ -339,6 +338,13 @@ IconPlace place_over(uint32_t item, uint32_t number) {
     static const bool show_sentinel = [] { const char* e = getenv("WWHD_NOTEBOOK_SHOW_SENTINEL"); return e && *e == '1'; }();
     if (!show_sentinel)  // (test aid: WWHD_NOTEBOOK_SHOW_SENTINEL=1 leaves the stand-in's icon under ours, to check the alignment)
         st8(icon + kPaneFlags, uint8_t(ld8(icon + kPaneFlags) & ~1u));  // the game's sentinel icon stays hidden
+    // ... also while the page is open: the page drawn as a game layout fades in over the bag (the HUD's page
+    // covered it at once), and the game's selection animation of the tapped place shows the sentinel's
+    // stand-in icon (the Cabana Deed's parchment) otherwise
+    if (g_open.load(std::memory_order_relaxed)) {
+        hide_floating_notebook_icon();
+        return g_icon_reason = "the notebook page is open", at;  // the page covers the menu
+    }
     std::vector<PaneNode> chain;
     for (uint32_t pane = icon; pane && chain.size() < 32; pane = ld32(pane + kPaneParent))
         chain.push_back({u32_as_f32(ld32(pane + kPaneTranslate)), u32_as_f32(ld32(pane + kPaneTranslate + 4)),
@@ -1129,6 +1135,16 @@ int32_t talk(const std::string& mod, const std::string& quest, uint32_t step, co
     return saved(q->key);
 }
 
+void hide_floating_notebook_icon() {
+    // the menu's floating icon (hdMenuItem sMenuIcon, HD decomp hd_screen_menu_item.cpp): a tap on a place
+    // lifts its item into it; for the notebook's place it would show the stand-in's icon (the Cabana Deed's
+    // parchment) while the page opens over the bag
+    static const uint32_t kMenuIcon = GD(0x101F5578);
+    const uint32_t icon = ld32(kMenuIcon);
+    if (!icon || ld32(icon + kItemNumber) != kNotebookItem) return;
+    if (const uint32_t pane = icon_pane(icon)) st8(pane + kPaneFlags, uint8_t(ld8(pane + kPaneFlags) & ~1u));
+}
+
 bool portrait_pixels(uint16_t key, guestmods::hud::Image& out) {
     std::lock_guard lock(g_mu);
     auto it = g_portraits.find(key);
@@ -1391,7 +1407,8 @@ void touch_select(Cpu* c) {
     const uint32_t item = c->r[3];
     g_original(c, kTouchSelect);
     if (trace()) LOG("[notebook] item menu: touch on item %02X", ld32(item + kItemNumber));
-    if (ld32(item + kItemNumber) == kNotebookItem) open_page("a touch on its bag place");
+    if (ld32(item + kItemNumber) == kNotebookItem && open_page("a touch on its bag place"))
+        hide_floating_notebook_icon();  // the tap lifted the place's item into the floating icon
     if (ld32(item + kItemNumber) == kLetterItem) open_letter("a touch on its bag place");
 }
 

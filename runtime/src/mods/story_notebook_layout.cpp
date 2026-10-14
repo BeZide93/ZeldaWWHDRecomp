@@ -359,6 +359,10 @@ bool configure() {
         const uint32_t slot = slots.emplace(group, uint32_t(slots.size())).first->second;
         client.anims.push_back({name, group, slot});
     }
+    client.covers = [] { return drawing(); };
+    client.before = [] {  // the menu's floating icon is drawn with the menu's screens, before our layout
+        if (drawing()) nb::hide_floating_notebook_icon();
+    };
     client.built = built;
     client.frame = frame;
     story_lyt_screen::set_client(std::move(client));

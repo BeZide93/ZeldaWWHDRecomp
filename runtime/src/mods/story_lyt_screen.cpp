@@ -54,7 +54,7 @@ bool g_failed = false;  // this item screen's build failed: not again until the 
 uint32_t g_part_vt = 0, g_layout_vt = 0;
 bool g_check = false;  // a state was loaded: check still_there() before the next use
 std::map<std::string, uint32_t> g_panes;
-std::chrono::steady_clock::time_point g_covered{};  // when our layout last covered the item menu
+uint64_t g_passes = 0, g_covered = 0;  // screen passes drawn (drawPrimaryScreens / drawHudScreens), the last with ours
 uint32_t g_viewport = 0;
 uint32_t g_archive = 0;  // the archive's data in guest memory (a SARC), found once built  // the item screen's viewport, while drawPrimaryScreens runs (0: it didn't draw)
 
@@ -98,6 +98,9 @@ void build(Cpu* c, uint32_t projection, uint32_t matrix) {
     const uint32_t mgr = ld32(kLayoutResMgr), ui = ld32(kUiSystem), heap = ui ? ld32(ui + 0x10) : 0;
     if (!mgr || !heap) return LOG("[lyt] %s: no layout manager / UI heap", g_client.layout.c_str());
     if (!g_call(c, kResMgrCache, {mgr, name, 0})) return LOG("[lyt] %s: the archive didn't load", g_client.layout.c_str());
+    // cache() reports success even when the archive couldn't be read into memory (too large for the
+    // layout heap, a bad file): only go on with the archive actually there
+    if (!g_call(c, kResMgrFind, {mgr, name})) return LOG("[lyt] %s: the archive is not in memory (too large?)", g_client.layout.c_str());
     const uint32_t part = g_call(c, kNoControlConstruct, {0});
     if (!part) return LOG("[lyt] %s: no parts object", g_client.layout.c_str());
     g_call(c, kAttachArchives, {part, name, 1});
@@ -172,20 +175,25 @@ void draw_after(Cpu* c) {
     if (!g_part) return;
     g_call(c, kCalcLayout, {g_part});
     g_call(c, kPartsDraw, {g_part, viewport});
-    g_covered = std::chrono::steady_clock::now();
+    g_covered = g_passes;
 }
 
 // The menus' selection cursor (four corner brackets) is drawn by a pass after ours on the TV: while our
-// layout covers the item menu (drawn within the last 0.1 s) the cursor is not drawn; nothing of its state
+// layout covers the item menu (drawn in the last frame or this one) the cursor is not drawn; nothing of its state
 // changes, it is drawn again as soon as our layout is gone.
 void cursor_draw(Cpu* c) {
-    if (g_part && std::chrono::steady_clock::now() - g_covered < std::chrono::milliseconds(100)) return;
+    // covered: ours was drawn in one of the last passes (both passes run every frame, the cursor's pass may
+    // come before ours in a frame), counted in passes, not time: a slow frame must not show it
+    if (g_part && g_covered && g_passes <= g_covered + 3) return;
+    if (g_part && g_client.covers && g_client.covers()) return;
     g_original(c, kCursorDraw);
 }
 
 // The item menu on the GamePad: its screens (item screen, sub window, menu buttons, cursor, messages) are
 // drawn by drawPrimaryScreens; ours right after them.
 void draw_primary(Cpu* c) {
+    ++g_passes;
+    if (g_part && g_client.before) g_client.before();
     g_viewport = 0;
     g_original(c, kDrawPrimary);
     if (input::pro_controller()) g_viewport = 0;  // the menu is the TV's
@@ -196,6 +204,8 @@ void draw_primary(Cpu* c) {
 // render state that pass set up (a later pass, e.g. drawInputScreens with the menu cursor, draws the layout's
 // pictures wrongly).
 void draw_hud(Cpu* c) {
+    ++g_passes;
+    if (g_part && g_client.before) g_client.before();
     g_viewport = 0;
     g_original(c, kDrawHud);
     if (!input::pro_controller()) g_viewport = 0;  // the menu is the GamePad's

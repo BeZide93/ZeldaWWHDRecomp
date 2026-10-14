@@ -147,9 +147,9 @@ def text(name, x, y, size, colour, value="", bold=False, width=None, align="left
     # white, the font's border (about half value) a mix of both. Plain text: black = transparent white, as
     # the game's own plain panes (ffffff00): the border fades out on the paper (black = the ink at alpha 0
     # gives the border the ink at half alpha: heavy letters). Bold: the HUD's menu-label border.
-    # plain letters: the border a light ink (half way to white, alpha 0): as heavy as the HUD page's letters
-    # (white makes them too light, the ink itself far too heavy; measured against the HUD detail page)
-    border = ([44, 58, 46, 255] if light else [255, 255, 255, 255]) if bold else [round(c + (255 - c) * 0.5) for c in fill[:3]] + [0]
+    # plain letters: the game's own plain convention (border transparent white); a light-ink border made
+    # names heavy and smeared (lead's decision after the crispness check)
+    border = ([44, 58, 46, 255] if light else [255, 255, 255, 255]) if bold else [255, 255, 255, 0]
     p = {"type": "text", "name": name, "size": [round(w, 3), round(h, 3)], "translate": place(x, y, w, h, parent),
          # the HUD page draws all its text in the game's menu font (story_notebook_font.h)
          "font": "CKingMain.bffnt", "font_size": [round(size * min(k, 1.04) * (1.0 if square else 0.92), 2), round(size * k, 2)],
@@ -182,6 +182,50 @@ def write_small_art(out):
     d.rectangle([0, 0, s - 1, 7], fill=brown)
     d.rectangle([0, 0, 7, s - 1], fill=brown)
     im.save(os.path.join(out, "corner.png"))
+
+
+TEXELS_PER_UNIT = 2.0  # texture texels per layout unit (1 unit = 1 px of the 1280 x 720 TV at scale 1)
+
+
+def fit_textures_to_display(textures, materials, panes, out):
+    """Every texture at most TEXELS_PER_UNIT times its largest use on the page (the pane size over the
+    texture coordinates' span): the art's full size would not fit the game's layout memory, and twice the
+    display size is sharp up to resolution scale 2 on the TV and 3 on the GamePad."""
+    mat_tex = {m: [t["texture"] for t in v.get("textures", [])] for m, v in materials.items()}
+    need = {}
+
+    def walk(ps):
+        for p in ps:
+            yield p
+            yield from walk(p.get("children", []))
+    for p in walk(panes):
+        for t in mat_tex.get(p.get("material"), []):
+            uv = p.get("uvs", [[[0, 0], [1, 0], [0, 1], [1, 1]]])[0]
+            us = abs(uv[1][0] - uv[0][0]) or 1.0
+            vs = abs(uv[2][1] - uv[0][1]) or 1.0
+            sx, sy = p.get("scale", [1, 1])
+            w, h = p["size"][0] * abs(sx) / us, p["size"][1] * abs(sy) / vs
+            nw, nh = need.get(t, (0, 0))
+            need[t] = (max(nw, w), max(nh, h))
+    done = set()
+    for t, spec in textures.items():
+        png = spec.get("png")
+        if t not in need or not png or png in done or "portrait" in png:
+            continue
+        path = os.path.join(out, png)
+        im = Image.open(path)
+        k = max(need[t][0] * TEXELS_PER_UNIT / im.width, need[t][1] * TEXELS_PER_UNIT / im.height)
+        if k < 1.0:
+            im.convert("RGBA").resize((max(1, round(im.width * k)), max(1, round(im.height * k))), Image.LANCZOS).save(path)
+        done.add(png)
+
+
+def fit_texture(im, limit=2048):
+    """A picture at its own size, scaled down only to fit the texture limit (2048)."""
+    if max(im.size) <= limit:
+        return im
+    k = limit / max(im.size)
+    return im.resize((round(im.width * k), round(im.height * k)), Image.LANCZOS)
 
 
 def clean_edges(im, min_alpha=96, crop=True):
@@ -265,9 +309,7 @@ def prepare_art(art, out):
     else:
         frame = old
     frame.save(os.path.join(out, "frame.png"))
-    banner = clean_edges(Image.open(os.path.join(art, "banner.png")))
-    bh = 160
-    banner = banner.resize((round(banner.width * bh / banner.height), bh), Image.LANCZOS)
+    banner = fit_texture(clean_edges(Image.open(os.path.join(art, "banner.png"))))  # its own size
     banner.save(os.path.join(out, "banner.png"))
     painted = painted_plates(frame)  # where this frame paints its bottom plates (None: it has none)
     return frame.size, banner.size, pieces, painted
@@ -513,6 +555,7 @@ def build(art, out_dir):
                 {"pane": "N_Detail", "target": "tx", "keys": sampled(lambda t: d * (1 - ease_out(t)) * 70, turn_n)},
                 {"pane": "N_Detail", "target": "alpha", "keys": sampled(lambda t: 255 * ease_out(t) if d > 0 else 255, turn_n)}]}
         anims.update(detail.get("animations", {}))
+    fit_textures_to_display(textures, materials, [root], out)
     desc = {"name": "StoryNotebook_00", "size": [W, H], "textures": textures, "materials": materials, "panes": [root],
             "groups": groups, "animations": anims}
     with open(os.path.join(out, "notebook.json"), "w") as fh:
