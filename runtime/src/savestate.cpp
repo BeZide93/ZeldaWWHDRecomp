@@ -20,7 +20,8 @@
 // main thread always is. Worker threads normally idle at the same wait. If not, the load is retried
 // on the following frames and finally refused with a message; nothing is changed then.
 //
-// Slot file: header (uncompressed) + checksummed zstd chunks of the payload: tagged sections from each module
+// Slot file: unchanged platform fast compression or checksummed streaming zstd chunks,
+// with a common decoded payload: tagged sections from each module
 // (threads + HLE sync objects + alarms + guest clock, heaps, open files, AX voices, GX2 registers,
 // runtime allocations) and guest memory (MEM2, runtime objects, fixed slots, foreground bucket,
 // MEM1; all-zero 64 KiB chunks are left out).
@@ -101,7 +102,13 @@ namespace {
 
 constexpr char kMagic[8] = {'W', 'W', 'H', 'D', 'S', 'T', 'A', 'T'};
 constexpr uint32_t kVersion = kStreamVersion;
+#ifdef __APPLE__
+constexpr uint32_t kFastVersion = 1;
+#else
+constexpr uint32_t kFastVersion = 2;
+#endif
 constexpr uint32_t kChunk = 0x10000;
+constexpr uint32_t kBlock = 8 << 20;  // unchanged fast-format block size
 
 using Header = FullStateHeader;
 
@@ -294,12 +301,62 @@ std::string stage_name() {
 }
 
 // ---------------------------------------------------------------- memory
+void capture_memory(Writer& w) {
+    capture_regions(w,regions(),[](uint32_t a){return mem::ptr(a);},
+                    [](const uint8_t* p,size_t n){return host::memory_touched(const_cast<uint8_t*>(p),n);});
+}
+
 void restore_memory(const Snapshot& s) {
     restore_regions(s.regs,s.chunks,[](uint32_t a){return mem::ptr(a);},
                     [](const uint8_t* p,size_t n){return host::memory_touched(const_cast<uint8_t*>(p),n);});
 }
 
 // ---------------------------------------------------------------- slot files
+bool write_slot(int slot, const Header& h0, const std::vector<uint8_t>& payload) {
+    Header h = h0;
+    size_t nblocks = (payload.size() + kBlock - 1) / kBlock;
+    h.blocks = (uint32_t)nblocks;
+    h.raw_size = payload.size();
+    std::vector<std::vector<uint8_t>> out(nblocks);
+    std::vector<std::thread> pool;
+    std::atomic<size_t> next{0};
+    unsigned nt = std::max(1u, std::min(8u, std::thread::hardware_concurrency()));
+    for (unsigned t = 0; t < nt; t++)
+        pool.emplace_back([&] {
+#ifdef __APPLE__
+            std::vector<uint8_t> scratch(compression_encode_scratch_buffer_size(COMPRESSION_LZ4));
+#endif
+            for (size_t i; (i = next++) < nblocks;) {
+                size_t raw = std::min<size_t>(kBlock, payload.size() - i * kBlock);
+                std::vector<uint8_t>& o = out[i];
+                o.resize(8 + raw + raw / 8 + 1024);
+#ifdef __APPLE__
+                size_t n = compression_encode_buffer(o.data() + 8, o.size() - 8, payload.data() + i * kBlock, raw, scratch.data(), COMPRESSION_LZ4);
+#else
+                size_t n = (size_t)LZ4_compress_default((const char*)payload.data()+i*kBlock,(char*)o.data()+8,(int)raw,(int)o.size()-8);
+#endif
+                uint32_t hdr[2] = {(uint32_t)raw, (uint32_t)n};
+                if (!n || n >= raw) {  // incompressible: stored
+                    memcpy(o.data() + 8, payload.data() + i * kBlock, raw);
+                    hdr[1] = 0;
+                    n = raw;
+                }
+                memcpy(o.data(), hdr, 8);
+                o.resize(8 + n);
+            }
+        });
+    for (auto& t : pool) t.join();
+    std::string tmp = slot_path(slot, "tmp");
+    FILE* f = fopen(tmp.c_str(), "wb");
+    if (!f) return false;
+    bool ok = fwrite(&h, sizeof h, 1, f) == 1;
+    for (auto& o : out) ok = ok && fwrite(o.data(), 1, o.size(), f) == o.size();
+    ok = fclose(f) == 0 && ok;
+    if (ok) ok = host::replace_file(tmp,slot_path(slot));
+    else remove(tmp.c_str());
+    return ok;
+}
+
 template<class Pointer,class Touched>
 bool write_memory_slot(int slot,const Header& h,const Writer& metadata,const std::vector<Region>& regs,
                        Pointer pointer,Touched touched,uint64_t& rawSize) {
@@ -418,7 +475,97 @@ std::string area_label(const char* stage) {
 }
 
 // true when done (saved or failed for good); false to retry on the next frame
-bool do_save(int slot) {
+bool do_save_fast(int slot) {
+    mods::fast_forward_reset();
+    std::string busy, why;
+    auto t0 = std::chrono::steady_clock::now();
+    if (!threads::quiesce(250, busy, 1, 30)) {
+        threads::thaw();
+        if (++g_attempts < 30) return false;
+        if (!is_auto(slot)) message("Slot %d: not saved (game busy:%s)", slot, busy.c_str());
+        report_done(slot, false, "game busy:" + busy);
+        return true;
+    }
+    gx2_ss_drain();
+    Writer threads_w;
+    if (!threads_ss_save(threads_w, why)) {
+        threads::thaw();
+        if (++g_attempts < 30) return false;
+        if (!is_auto(slot)) message("Slot %d: not saved (%s)", slot, why.c_str());
+        report_done(slot, false, why);
+        return true;
+    }
+    auto payload = std::make_shared<Writer>();
+    payload->b.reserve(512u << 20);
+    put_section(*payload, kSecThreads, threads_w);
+    Writer w;
+    mem_ss_save(w);
+    put_section(*payload, kSecHeaps, w);
+    w = Writer();
+    fs_ss_save(w);
+    put_section(*payload, kSecFiles, w);
+    w = Writer();
+    ax_ss_save(w);
+    put_section(*payload, kSecAudio, w);
+    w = Writer();
+    gx2_ss_save(w);
+    put_section(*payload, kSecGx2, w);
+    w = Writer();
+    save_allocs(w);
+    put_section(*payload, kSecAllocs, w);
+    w = Writer();
+    save_dispatch(w);
+    put_section(*payload, kSecDispatch, w);
+    w=Writer();guestmods::save_mod_set(w,guestmods::enabled_mods());
+    put_section(*payload,kSecGuestMods,w);
+    // memory last, written straight into the payload
+    payload->u32(kSecMemory);
+    size_t len_at = payload->b.size();
+    payload->u64(0);
+    story_chart::capture_begin();  // the sea chart's story marks as the game left them (mod markers off)
+    capture_memory(*payload);
+    story_chart::capture_end();
+    uint64_t mlen = payload->b.size() - len_at - 8;
+    memcpy(&payload->b[len_at], &mlen, 8);
+    Header h{};
+    memcpy(h.magic, kMagic, 8);
+    h.version = kFastVersion;
+    h.header_size = sizeof(Header);
+    h.created = (uint64_t)time(nullptr);
+    std::string stage = stage_name();
+    snprintf(h.area, sizeof h.area, "%s", stage.c_str());
+    build_uuid(h.build);
+    h.game_id = game_id();
+    h.cpu_size = sizeof(Cpu);
+    h.controller = input::pro_controller() ? 2 : 1;
+    threads::thaw();
+    double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+    LOG("[savestate] slot %d: captured %.1f MB in %.1f ms (stage %s)", slot, payload->b.size() / 1048576.0, ms, stage.c_str());
+    if (!is_auto(slot)) render::request_tv_dump(slot_path(slot, "png"), 0);
+    else crashrec::on_auto_saved(slot - crashrec::kAutoBase);
+    // compress and write in the background; the game continues
+    std::thread([slot, h, payload, stage, done = take_done(slot)] {
+        auto t1 = std::chrono::steady_clock::now();
+        bool ok;
+        {
+            std::lock_guard<std::mutex> io(g_io);
+            ok = write_slot(slot, h, payload->b);
+        }
+        double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t1).count();
+        struct stat st{};
+        stat(slot_path(slot).c_str(), &st);
+        LOG("[savestate] slot %d: %s (%.1f MB on disk, %.0f ms)", slot, ok ? "written" : "WRITE FAILED", st.st_size / 1048576.0, ms);
+        if (done) done(ok, ok ? "" : "write failed");
+        if (is_auto(slot)) return;  // automatic states stay quiet
+        std::lock_guard<std::mutex> lk(g_mu);
+        g_message = ok ? "Saved to slot " + std::to_string(slot) + (stage.empty() ? "" : " (" + area_label(stage.c_str()) + ")")
+                       : "Slot " + std::to_string(slot) + ": write failed";
+        g_message_time = std::chrono::steady_clock::now();
+    }).detach();
+    return true;
+}
+
+bool do_save_streaming(int slot) {
     mods::fast_forward_reset();
     std::string busy, why;
     // Defer before freezing if a previous slot read is still in progress.
@@ -498,6 +645,10 @@ bool do_save(int slot) {
         g_message_time=std::chrono::steady_clock::now();
     }
     return true;
+}
+
+bool do_save(int slot) {
+    return use_streaming_save(save_path()) ? do_save_streaming(slot) : do_save_fast(slot);
 }
 
 bool do_load(const std::shared_ptr<Snapshot>& s) {
@@ -1056,6 +1207,8 @@ void watch_arrival(Cpu* c) {
 }
 
 // full states: the setting, the environment and the scripted tests
+int g_save_path_setting = -1;
+std::string save_path_cfg_path() { return state_dir() + "/full_save_path.cfg"; }
 int g_full_setting = -1;  // -1: not read yet
 std::string full_cfg_path() { return state_dir() + "/full_save_states.cfg"; }
 int full_env() {  // 1 / 0 forced by the environment, -1 not forced
@@ -1293,6 +1446,26 @@ void set_full_states(bool on) {
         fclose(f);
     }
     LOG("[savestate] full save states %s", on ? "on" : "off");
+}
+
+SavePath save_path() {
+    std::lock_guard<std::mutex> lock(g_mu);
+    if (g_save_path_setting < 0) {
+        g_save_path_setting = int(SavePath::Auto);
+        if (FILE* file=fopen(save_path_cfg_path().c_str(),"r")) {
+            char value[32]{};
+            if (fscanf(file,"%31s",value)==1) g_save_path_setting=int(parse_save_path(value));
+            fclose(file);
+        }
+    }
+    return SavePath(g_save_path_setting);
+}
+void set_save_path(SavePath path) {
+    path=parse_save_path(save_path_name(path));
+    { std::lock_guard<std::mutex> lock(g_mu);g_save_path_setting=int(path); }
+    if (FILE* file=fopen(save_path_cfg_path().c_str(),"w")) {
+        fprintf(file,"%s\n",save_path_name(path));fclose(file);
+    }
 }
 
 std::string bug_report_text() {

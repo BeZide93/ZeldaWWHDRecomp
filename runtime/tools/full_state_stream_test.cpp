@@ -57,6 +57,27 @@ int main() {
     std::string why;auto state=ss::read_slot(1,why);assert(state && state->h.version==3 && state->payload.size()==rawSize);
     assert(ss::check_file_section(state->section(ss::kSecFiles),why));
     ss::restore_regions(state->regs,state->chunks,[&](uint32_t a){return restored.data()+a-base;},touched);assert(restored==memory);
+
+    // Writer selection changes saving only: either selected path loads both formats.
+    ss::Writer fastPayload;
+    fastPayload.bytes(metadata.b.data(),metadata.b.size());
+    fastPayload.u32(ss::kSecMemory);fastPayload.u64(old.b.size());
+    fastPayload.bytes(old.b.data(),old.b.size());
+    assert(fastPayload.b==state->payload);
+    auto fastHeader=header(ss::kFastVersion);
+    assert(ss::write_slot(2,fastHeader,fastPayload.b));
+    const auto fastBytes=file_bytes(ss::slot_path(2));
+    for(auto mode:{ss::SavePath::Auto,ss::SavePath::Streaming,ss::SavePath::Fast}) {
+        ss::set_save_path(mode);assert(ss::save_path()==mode);
+        ss::g_save_path_setting=-1;assert(ss::save_path()==mode);
+        auto loadedFast=ss::read_slot(2,why);
+        auto loadedStream=ss::read_slot(1,why);
+        assert(loadedFast && loadedStream && loadedFast->payload==loadedStream->payload);
+        assert(loadedFast->h.version==ss::kFastVersion && loadedStream->h.version==3);
+        assert(file_bytes(ss::slot_path(2))==fastBytes);
+    }
+    {std::ofstream config(directory/"full_save_path.cfg");config<<"unknown-value\n";}
+    ss::g_save_path_setting=-1;assert(ss::save_path()==ss::SavePath::Auto);
     const auto good=file_bytes(ss::slot_path(1));
     // Independent golden raw-LZ4 block for ABCD repeated16 times, not produced by our writer.
     const uint8_t golden[]={0x4f,'A','B','C','D',4,0,36,0x50,'D','A','B','C','D'};
@@ -70,6 +91,32 @@ int main() {
         legacy_fixture(1,legacyHeader,state->payload);
 #endif
     }
+    // Independent Apple-framing golden: second block refers to the previous
+    // decoded block's dictionary, then a stored block and exact terminator.
+    const uint8_t appleGolden[]={
+        'b','v','4','1',64,0,0,0,sizeof golden,0,0,0,
+        0x4f,'A','B','C','D',4,0,36,0x50,'D','A','B','C','D',
+        'b','v','4','1',64,0,0,0,10,0,0,0,
+        0x0f,4,0,40,0x50,'D','A','B','C','D',
+        'b','v','4','-',4,0,0,0,'W','X','Y','Z','b','v','4','$'};
+    std::vector<uint8_t> appleRaw(132);
+    assert(ss::decode_apple_lz4(appleRaw.data(),appleRaw.size(),appleGolden,sizeof appleGolden));
+    for(size_t i=0;i<128;++i)assert(appleRaw[i]=="ABCD"[i%4]);
+    assert(!memcmp(appleRaw.data()+128,"WXYZ",4));
+    for(bool oldHeader:{false,true}) {
+        FILE* file=tmpfile();assert(file);auto h=header(1);
+        h.header_size=oldHeader?ss::kLegacyHeaderSize:sizeof h;h.raw_size=appleRaw.size();h.blocks=1;
+        fwrite(&h,h.header_size,1,file);uint32_t record[2]={uint32_t(appleRaw.size()),sizeof appleGolden};
+        fwrite(record,sizeof record,1,file);fwrite(appleGolden,1,sizeof appleGolden,file);rewind(file);
+        ss::FullStateHeader parsed{};assert(ss::read_full_state_header(file,parsed,why));std::vector<uint8_t> decoded;
+        assert(ss::read_full_state_payload(file,parsed,decoded,why) && decoded==appleRaw);fclose(file);
+    }
+    for(size_t length=0;length<sizeof appleGolden;++length)
+        assert(!ss::decode_apple_lz4(appleRaw.data(),appleRaw.size(),appleGolden,length));
+    auto badApple=std::vector<uint8_t>(appleGolden,appleGolden+sizeof appleGolden);
+    badApple[4]=255;assert(!ss::decode_apple_lz4(appleRaw.data(),appleRaw.size(),badApple.data(),badApple.size()));
+    badApple.assign(appleGolden,appleGolden+sizeof appleGolden);badApple.push_back(0);
+    assert(!ss::decode_apple_lz4(appleRaw.data(),appleRaw.size(),badApple.data(),badApple.size()));
     // Unsupported new format cleanly fails the exact version policy used by old builds.
     assert(state->h.version!=1 && state->h.version!=2);
     // Every rejected input leaves guest bytes untouched; restore is never reached.

@@ -17,11 +17,42 @@ inline constexpr uint32_t kStreamBlock = 65536;
 inline constexpr uint32_t kLegacyBlock = 8u << 20;
 inline constexpr uint64_t kMaxStateBytes = 2ull << 30;
 inline bool full_state_version_supported(uint32_t version) {
-#ifdef __APPLE__
-    if (version == 1) return true;
-#endif
-    return version == 2 || version == kStreamVersion;
+    return version == 1 || version == 2 || version == kStreamVersion;
 }
+// Apple documents this framing at developer.apple.com/documentation/compression/compression_lz4.
+// The fast macOS writer is unchanged; all hosts decode its bv41/bv4-/bv4$ framing.
+inline bool decode_apple_lz4(uint8_t* output,size_t raw,const uint8_t* input,size_t encoded) {
+    size_t at=0,used=0;
+    auto u32=[&](uint32_t& value) {
+        if(encoded-at<4)return false;
+        value=uint32_t(input[at]) | uint32_t(input[at+1])<<8 |
+              uint32_t(input[at+2])<<16 | uint32_t(input[at+3])<<24;
+        at+=4;return true;
+    };
+    while(encoded-at>=4) {
+        const auto* tag=input+at;at+=4;
+        if(!memcmp(tag,"bv4$",4))return used==raw && at==encoded;
+        const bool compressed=!memcmp(tag,"bv41",4);
+        if(!compressed && memcmp(tag,"bv4-",4))return false;
+        uint32_t decoded=0,stored=0;
+        if(!u32(decoded) || decoded>raw-used)return false;
+        if(compressed) {
+            if(!u32(stored) || !stored || stored>encoded-at ||
+               stored>uint32_t(INT32_MAX) || decoded>uint32_t(INT32_MAX))return false;
+            const size_t dictionary=std::min<size_t>(used,65536);
+            const auto result=LZ4_decompress_safe_usingDict(
+                reinterpret_cast<const char*>(input+at),reinterpret_cast<char*>(output+used),
+                int(stored),int(decoded),reinterpret_cast<const char*>(output+used-dictionary),int(dictionary));
+            if(result!=int(decoded))return false;
+        } else {
+            stored=decoded;if(stored>encoded-at)return false;
+            if(stored)memcpy(output+used,input+at,stored);
+        }
+        at+=stored;used+=decoded;
+    }
+    return false; // exact end marker is required
+}
+
 class FullStateStreamWriter {
     FILE* file;
     FullStateHeader header;
@@ -72,9 +103,6 @@ inline bool read_full_state_payload(FILE* file,const FullStateHeader& h,std::vec
     auto pass=[&](uint8_t* output) {
     std::vector<uint8_t> encoded;
     std::vector<uint8_t> scratchRaw(output?0:block);
-#ifdef __APPLE__
-    std::vector<uint8_t> scratch(h.version==1?compression_decode_scratch_buffer_size(COMPRESSION_LZ4):0);
-#endif
     size_t offset=0;
     for(uint32_t i=0;i<h.blocks;++i) {
         uint32_t record[2]{};
@@ -96,9 +124,7 @@ inline bool read_full_state_payload(FILE* file,const FullStateHeader& h,std::vec
                ZSTD_getFrameContentSize(encoded.data(),n)==raw && ZSTD_findFrameCompressedSize(encoded.data(),n)==n;
             if(ok) {const auto decoded=ZSTD_decompress(dst,raw,encoded.data(),n);ok=!ZSTD_isError(decoded)&&decoded==raw;}
         } else if(!record[1]) {memcpy(dst,encoded.data(),raw);ok=true;}
-#ifdef __APPLE__
-        else if(h.version==1) ok=compression_decode_buffer(dst,raw,encoded.data(),n,scratch.data(),COMPRESSION_LZ4)==raw;
-#endif
+        else if(h.version==1) ok=decode_apple_lz4(dst,raw,encoded.data(),n);
         else ok=LZ4_decompress_safe(reinterpret_cast<const char*>(encoded.data()),reinterpret_cast<char*>(dst),int(n),int(raw))==int(raw);
         if(!ok){why="file is corrupt";return false;}
         offset+=raw;

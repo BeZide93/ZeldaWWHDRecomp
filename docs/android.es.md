@@ -84,10 +84,12 @@ El juego es exigente. Cuando el dispositivo Android se calienta, el juego baja s
 y sigue a velocidad completa.
 
 **¿Qué ocurre al guardar un estado completo?**
-El juego se pausa mientras su memoria se comprime en bloques pequeños y se escribe en la ranura. Así
-se evita crear otra imagen completa de la memoria, pero el guardado puede pausar más tiempo en un
-almacenamiento lento. Los estados completos anteriores compatibles se siguen cargando; las versiones
-antiguas del programa no pueden cargar los nuevos estados completos.
+Por defecto, Android pausa el juego mientras comprime la memoria en bloques pequeños y la escribe
+en la ranura, sin crear otra imagen completa. El almacenamiento lento puede alargar la pausa.
+El escritorio conserva la compresión rápida en segundo plano. Todas las versiones nuevas cargan
+estados v3 de streaming y estados rápidos v1/v2 de cualquier plataforma; las versiones antiguas rechazan v3.
+
+**Método para guardar estados completos:** En Save states, elige **Auto** (predeterminado), **Streaming** o **Fast**. Auto usa streaming con menos memoria en Android y la compresión rápida en segundo plano existente en Windows, macOS y Linux, también para Crash Recovery. Se guarda como `auto`, `streaming` o `fast` en `full_save_path.cfg`, junto a `full_save_states.cfg` en la carpeta de estados. Todas las versiones nuevas cargan estados v3 de streaming con cualquier opción; los estados antiguos compatibles siguen siendo legibles.
 
 **Algo no funciona.**
 Abre una [issue](https://github.com/ZeldaWWHDRecomp/ZeldaWWHDRecomp/issues) con el modelo del

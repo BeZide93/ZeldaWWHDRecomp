@@ -80,9 +80,12 @@ The game is demanding. When the Android device gets warm, the game drops from 60
 own and keeps its full speed.
 
 **What happens when I save a full state?**
-The game pauses while its memory is compressed in small chunks and written to the slot. This avoids
-building a second full memory image, but saving can pause longer on slow storage. Compatible existing
-full states still load; older builds cannot load newly written full states.
+By default, Android pauses the game while memory is compressed in small chunks and written to the
+slot, avoiding a second full memory image. Slow storage can make this pause longer. Desktop keeps
+the existing fast path with background compression. All new builds load streaming v3 and fast v1/v2
+states from any platform; old builds reject v3 states.
+
+**Full-state save path:** In Save states, choose **Auto** (default), **Streaming** or **Fast**. Auto uses less-memory streaming on Android and the existing fast background-compression path on Windows, macOS and Linux, including Crash Recovery. The choice is stored as `auto`, `streaming` or `fast` in `full_save_path.cfg` beside `full_save_states.cfg` in the states folder. All new builds load v3 streaming states regardless of this setting; compatible legacy states remain readable.
 
 **Something doesn't work.**
 Please open an [issue](https://github.com/ZeldaWWHDRecomp/ZeldaWWHDRecomp/issues) with your Android device
