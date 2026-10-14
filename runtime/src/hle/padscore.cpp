@@ -83,6 +83,7 @@ HLE(padscore, KPADReadEx) {
     }
     last_p = p;
     story_notebook::mute(p);  // the notebook's page has the controller (VPADRead drives it)
+    mods::moon_jump_input(p);
     mods::move_speed_input(p.buttons);
     mods::fast_forward_input(p.buttons);
     if (!repeat) motion::right_stick(p.rx, p.ry);  // the Pro Controller's stick decides gyro use too (motion.h)

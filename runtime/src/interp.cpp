@@ -399,6 +399,7 @@ static void cam_trace(uint32_t cam, const char* what) {
 extern "C" void hook_024FFC40(Cpu* c) {
     using namespace interp;
     uint32_t cam = c->r[3];
+    mods::moon_jump_camera(cam);
     Prev* p = prev_for(cam);
     if (g_blend_draw && !true60::runs_60(cam)) {  // blended between the step drawn last (S) and the new one (S+1)
         CamState cur = read_cam(cam);
@@ -681,6 +682,7 @@ void nodraw_reset();          // fopAc_Draw hook: the step's one-shot no-draw re
 void reticle_reset();
 // a save state was loaded: nothing may blend across the jump
 void ss_reset() {
+    mods::moon_jump_reset();
     countdown::reset();
     for (auto& p : g_prev) p = Prev{};
     g_last_step = 0;

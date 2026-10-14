@@ -1268,8 +1268,10 @@ void cheats() {
     cheat("Equip Master Sword + Mirror Shield (until reload)", mods::kCheatSword);
     cheat("20 hearts, double magic, 5000 rupees", mods::kCheatStats);
     static const std::pair<const char*, int> inf[] = {{"Infinite health", mods::kInfHealth}, {"Infinite magic", mods::kInfMagic},
-                                                      {"Infinite arrows and bombs", mods::kInfAmmo}};
-    for (int i = 0; i < 3; i++) {
+                                                      {"Infinite arrows and bombs", mods::kInfAmmo},
+                                                      {"Moon jump (hold L; left stick steers)", mods::kMoonJump},
+                                                      {"No fall damage after moon jump", mods::kMoonNoFall}};
+    for (int i = 0; i < 5; i++) {
         int bit = inf[i].second;
         if (check(inf[i].first, mods::infinite(bit), &v)) hostui::post([bit, v] { mods::set_infinite(bit, v); });
     }

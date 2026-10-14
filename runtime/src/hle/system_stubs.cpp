@@ -109,6 +109,7 @@ HLE(vpad, VPADRead) {
     }
     last_p = p;
     story_notebook::pad(p, c);  // the story notebook's page takes the controller while it is open
+    if (!input::pro_controller()) mods::moon_jump_input(p);
     if (!input::pro_controller()) mods::move_speed_input(p.buttons);
     if (!input::pro_controller()) mods::fast_forward_input(p.buttons);
     if (input::pro_controller()) {  // GamePad on the table: screen and touch only
