@@ -72,6 +72,11 @@ std::vector<SalvagePoint> salvage_points_for_room(int room);
 // The save number of the point the salvage actor is working on now (daSalvage_c::mSalvageId's registry
 // slot), 0 when none: (c) asks it when the chest gives its item.
 uint32_t active_save_no();
+// The chest of a mod chart's point: the game's chest (daSTBox_c::_delete 024683D8) counts every treasure chart
+// chest it gave in an event register (0xADFF); a mod chart's chest doesn't count. note_mod_chest(): (b) calls it
+// when a reserved point is finished (onCompleteMap in end_salvage, before the chest goes away); the chest's
+// _delete then leaves the game's event bytes as they were.
+void note_mod_chest();
 // The declared mod chart of a reserved save number (story_chart::charts()[index]); false for any other.
 bool chart_for_save_no(uint32_t save_no, std::string& mod, std::string& chart);
 

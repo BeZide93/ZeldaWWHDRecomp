@@ -36,6 +36,9 @@ const uint32_t kCreate = GC(0x025D5834);        // fopAcM_create(proc, params, p
 const uint32_t kStageName = GD(0x1046F0B0) + 0x5134;  // dStage_startStage_c: the stage's name
 const uint32_t kTagData = GD(0x10475634);       // daSalvage_c::mTagData_p: the salvage registry
 const uint32_t kSalvageId = GD(0x10475638);     // daSalvage_c::mSalvageId: the registry slot being salvaged
+const uint32_t kChestDelete = GC(0x024683D8);   // daSTBox_c::_delete: counts a chart chest (event register 0xADFF)
+const uint32_t kSavePtr = GD(0x101F84DC);       // dSv_info_c (its event flags at +0x644, 0x100 bytes)
+constexpr uint32_t kSaveEvent = 0x644, kEventBytes = 0x100;
 
 constexpr uint32_t kProcSalvage = 0x191;
 constexpr uint32_t kTypeGetItem = 1;
@@ -51,6 +54,7 @@ void (*g_original)(Cpu*, uint32_t) = nullptr;
 uint32_t (*g_call)(Cpu*, uint32_t, std::initializer_list<uint32_t>) = nullptr;
 uint32_t g_scratch = 0;
 bool g_installed = false;
+bool g_mod_chest = false;  // the chest being salvaged is a mod chart's (note_mod_chest)
 
 bool trace() {
     static const bool on = [] { const char* e = getenv("WWHD_TREASURE_TRACE"); return e && *e == '1'; }();
@@ -100,6 +104,8 @@ uint32_t active_save_no() {
     const uint32_t save_no = ld8(s + kInfoSave);
     return is_mod_save_no(save_no) ? save_no : 0;
 }
+
+void note_mod_chest() { g_mod_chest = true; }
 
 bool chart_for_save_no(uint32_t save_no, std::string& mod, std::string& chart) {
     const int index = mod_chart_index(save_no);
@@ -167,9 +173,22 @@ void entry(Cpu* c) {
     st8(reg + kRegRoomNum, uint8_t(count + 1));
     if (trace()) LOG("[treasure] salvage point %u registered in room %d (slot %u)", save_no, room, kMaxSea + count);
 }
+// daSTBox_c::_delete(): a mod chart's chest leaves the game's event flags (its chest counter) as they were
+void chest_delete(Cpu* c) {
+    const uint32_t save = ld32(kSavePtr);
+    if (!(g_mod_chest || active_save_no()) || !save) return g_original(c, kChestDelete);
+    g_mod_chest = false;
+    uint8_t keep[kEventBytes];
+    memcpy(keep, mem::ptr(save + kSaveEvent), kEventBytes);
+    g_original(c, kChestDelete);
+    if (ld32(kSavePtr) == save) memcpy(mem::ptr(save + kSaveEvent), keep, kEventBytes);
+    if (trace()) LOG("[treasure] a mod chart's chest went away: the game's chest counter is unchanged");
+}
 }  // namespace hooks
 
-std::vector<Hook> salvage_hooks() { return {{kRoomReLoader, hooks::room_reloader}, {kEntry, hooks::entry}}; }
+std::vector<Hook> salvage_hooks() {
+    return {{kRoomReLoader, hooks::room_reloader}, {kEntry, hooks::entry}, {kChestDelete, hooks::chest_delete}};
+}
 
 void set_game_calls(void (*original_fn)(Cpu*, uint32_t), uint32_t (*call_fn)(Cpu*, uint32_t, std::initializer_list<uint32_t>)) {
     g_original = original_fn;
