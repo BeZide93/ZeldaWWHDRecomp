@@ -424,6 +424,18 @@ def build(art, out_dir):
                  k=1.0, square=True),
             text("T_%sLabel" % name, px + size + 6, py + size * 0.1, size * 0.8, INK, label, bold=True, width=w, parent=pc,
                  capacity=24)], page_c))
+    # the detail view (make_notebook_detail.py, when present): N_Detail above the frame, under the plates;
+    # its panes, textures, materials, groups and animations come from that module
+    detail = None
+    try:
+        import make_notebook_detail
+    except ImportError:
+        make_notebook_detail = None
+    if make_notebook_detail:
+        detail = make_notebook_detail.build_detail(sys.modules[__name__], art, out)
+        textures.update(detail.get("textures", {}))
+        materials.update(detail.get("materials", {}))
+        kids.append(null("N_Detail", 0, 0, W, H, detail["panes"], page_c, visible=False))
     kids += plates
     kids.append(content)
     page = null("N_Page", 0, 0, W, H, kids)
@@ -485,6 +497,15 @@ def build(art, out_dir):
         tracks.append({"pane": pane["name"], "target": "ty", "keys": sampled(lambda t: by_ + syn * off(t), breathe_n)})
     anims["Breathe"] = {"frames": breathe_n, "loop": True, "groups": ["G_Cursor"], "tracks": tracks}
 
+    if detail:
+        groups["G_Detail"] = ["N_Detail"]
+        groups.update(detail.get("groups", {}))
+        # the page turns into the detail view (from the right) and back (to the left), as the list's turn
+        for name, d in (("DetailIn", 1), ("DetailOut", -1)):
+            anims[name] = {"frames": turn_n, "groups": ["G_Detail"], "tracks": [
+                {"pane": "N_Detail", "target": "tx", "keys": sampled(lambda t: d * (1 - ease_out(t)) * 70, turn_n)},
+                {"pane": "N_Detail", "target": "alpha", "keys": sampled(lambda t: 255 * ease_out(t) if d > 0 else 255, turn_n)}]}
+        anims.update(detail.get("animations", {}))
     desc = {"name": "StoryNotebook_00", "size": [W, H], "textures": textures, "materials": materials, "panes": [root],
             "groups": groups, "animations": anims}
     with open(os.path.join(out, "notebook.json"), "w") as fh:
