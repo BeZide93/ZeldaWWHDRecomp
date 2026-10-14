@@ -1754,6 +1754,23 @@ class DecompOption(unittest.TestCase):
         link = calls[-1]
         self.assertEqual(link[1:4], [setup.fwd(os.path.join(setup.PKG, "sdk")) + "/decomp/obj/main.o", "hooks.o", "u1.o"])
 
+    def test_response_files_are_utf8(self):
+        # Windows links through response files; a folder with characters outside the code page (an emoji,
+        # Asian scripts) stopped setup with "'charmap' codec can't encode" before they were written as UTF-8
+        calls = []
+        tc = setup.Toolchain(["cc"], ["c++"], ["ar"], rsp=True)
+        with tempfile.TemporaryDirectory() as root:
+            d = os.path.join(root, "\U0001f3ae Games \u6e38\u620f")
+            os.makedirs(d)
+            obj = os.path.join(d, "g.o")
+            with mock.patch.object(setup, "run_logged", lambda cmd, **kw: calls.append(cmd)), \
+                    mock.patch.object(setup, "link_with_sdk_fallback", lambda cmd, env: calls.append(cmd) or
+                                      open(os.path.join(d, "out"), "w").close()):
+                setup.link_game(tc, {"link": ["{gamecode}", "-o", "{out}"]}, [obj], d, os.path.join(d, "out"))
+            for name in ("ar.rsp", "link.rsp"):
+                with open(os.path.join(d, name), encoding="utf-8") as f:
+                    self.assertIn("\U0001f3ae Games \u6e38\u620f", f.read(), name)
+
     def test_state_keeps_decomp_exe_relative(self):
         with tempfile.TemporaryDirectory() as d, mock.patch.object(setup, "PORTABLE", True):
             exe = os.path.join(d, "bin", "wwhd-decomp")
@@ -1776,6 +1793,41 @@ class DecompOption(unittest.TestCase):
                 os.remove(dexe)
                 setup.launch(dict(st, start_decomp=True), d)  # not built (any more): the normal game
             self.assertEqual(started, [exe, dexe, dexe, exe])
+
+
+
+class StoryNotebookStep(unittest.TestCase):
+    """setup's story notebook step (runtime/src/mods/required.h): the game installs it once; offline is fine"""
+    def run_step(self, stdout=None, raise_error=None):
+        calls = []
+
+        def runner(args, **kw):
+            calls.append(args)
+            if raise_error:
+                raise raise_error
+            return mock.Mock(returncode=0, stdout=stdout)
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(setup, "say") as said:
+            ok = setup.install_story_notebook({"exe": "/app/wwhd", "game_dir": "/g"}, d, runner=runner)
+            text = " ".join(str(c.args[0]) for c in said.call_args_list)
+        return ok, calls, text
+
+    def test_installed(self):
+        ok, calls, text = self.run_step('[mods] ...\n{"ok": true, "message": "The story notebook is installed."}\n')
+        self.assertTrue(ok)
+        self.assertEqual(calls[0][0], "/app/wwhd")
+        self.assertIn("--install-story-notebook", calls[0])
+        self.assertIn("is installed", text)
+
+    def test_offline_finishes_with_a_hint(self):
+        ok, _, text = self.run_step('{"ok": false, "message": "Story notebook: not installed (offline)."}\n')
+        self.assertFalse(ok)
+        self.assertIn("install it later from the Mods menu", text)
+
+    def test_no_answer_or_timeout(self):
+        self.assertFalse(self.run_step("")[0])
+        ok, _, text = self.run_step(raise_error=setup.subprocess.TimeoutExpired("wwhd", 600))
+        self.assertFalse(ok)
+        self.assertIn("Mods menu", text)
 
 
 if __name__ == "__main__":

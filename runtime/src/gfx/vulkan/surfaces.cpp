@@ -1,3 +1,4 @@
+#include "pass.h"
 #include "deferred_dispatch.h"
 #include "../../exception_report.h"
 #include "gfx/render_mips.h"
@@ -850,7 +851,7 @@ VkPipeline depth_copy_pipeline(const FormatInfo& fmt,bool stencilPass) {
         VkPipelineDynamicStateCreateInfo ds{VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};ds.dynamicStateCount=fmt.stencil?4:2;ds.pDynamicStates=states;
         VkPipelineRenderingCreateInfo rendering{VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};
         rendering.depthAttachmentFormat=fmt.pixel;rendering.stencilAttachmentFormat=fmt.stencil?fmt.pixel:VK_FORMAT_UNDEFINED;
-        VkGraphicsPipelineCreateInfo ci{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};ci.pNext=&rendering;ci.stageCount=2;ci.pStages=stages;
+        VkGraphicsPipelineCreateInfo ci{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};pipeline_targets(ci,rendering);ci.stageCount=2;ci.pStages=stages;
         ci.pVertexInputState=&vi;ci.pInputAssemblyState=&ia;ci.pViewportState=&vp;ci.pRasterizationState=&rs;ci.pMultisampleState=&ms;
         ci.pDepthStencilState=&dss;ci.pColorBlendState=&bs;ci.pDynamicState=&ds;ci.layout=depthCopy.layout;
         check_vk(stutter::create_graphics(R.frame, "surface_pipeline", R.device,R.pipelineCache,1,&ci,nullptr,&result, [] {
@@ -917,7 +918,10 @@ static void draw_depth_copy(Surface* src,uint32_t srcLevel,uint32_t srcLayer,uin
         attachment.loadOp=VK_ATTACHMENT_LOAD_OP_DONT_CARE;attachment.storeOp=VK_ATTACHMENT_STORE_OP_STORE;
         VkRenderingInfo rendering{VK_STRUCTURE_TYPE_RENDERING_INFO};rendering.renderArea=area;rendering.layerCount=1;
         rendering.pDepthAttachment=&attachment;rendering.pStencilAttachment=fmt.stencil?&attachment:nullptr;
-        record::vkCmdBeginRendering(cmd,&rendering);++R.renderPassCount;
+        begin_pass(cmd,rendering,[&] {
+            PassBegin pass;pass.formats.depth=dst->fmt.pixel;pass.formats.stencil=dst->fmt.stencil;
+            pass.layouts[8]=dst->layout;return pass;
+        });++R.renderPassCount;
         record::vkCmdSetViewport(cmd,0,1,&viewport);record::vkCmdSetScissor(cmd,0,1,&area);
         record::vkCmdBindDescriptorSets(cmd,VK_PIPELINE_BIND_POINT_GRAPHICS,depthCopy.layout,0,1,&set,0,nullptr);
         record::vkCmdBindPipeline(cmd,VK_PIPELINE_BIND_POINT_GRAPHICS,depthPass);
@@ -936,7 +940,7 @@ static void draw_depth_copy(Surface* src,uint32_t srcLevel,uint32_t srcLayer,uin
                 record::vkCmdDraw(cmd,3,1,0,0);
             }
         }
-        record::vkCmdEndRendering(cmd);
+        end_pass(cmd);
     }
     transition_image(dst,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 }
@@ -1208,7 +1212,8 @@ void clear_color(const uint32_t*,uint32_t cb,const float rgba[4]) {
             a.loadOp=VK_ATTACHMENT_LOAD_OP_CLEAR;a.storeOp=VK_ATTACHMENT_STORE_OP_STORE;a.clearValue.color=value;
             VkRenderingInfo ri{VK_STRUCTURE_TYPE_RENDERING_INFO};
             ri.renderArea.extent={s->extent.width,s->extent.height};ri.layerCount=1;ri.colorAttachmentCount=1;ri.pColorAttachments=&a;
-            record::vkCmdBeginRendering(command_buffer(),&ri);record::vkCmdEndRendering(command_buffer());
+            auto cmd=command_buffer();
+            begin_pass(cmd,ri,[&] { return color_pass(s->fmt.pixel,s->layout); });end_pass(cmd);
         }
         mark_gpu_written(s);return;
     }

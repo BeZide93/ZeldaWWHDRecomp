@@ -2,6 +2,8 @@
 #include "mod_test_host.h"
 #include "mods/packages.h"
 #include "mods/mods.h"
+#include "mods/required.h"
+#include <algorithm>
 #include "mods/content.h"
 #include "mods/cemu_pack.h"
 #include <filesystem>
@@ -254,6 +256,31 @@ int main(int argc, char** argv) {
         }
         fs::remove_all(root);
         std::cout<<"Animation startup override "<<override<<" survives saved mode "<<saved<<"\n";
+        return 0;
+    }
+    if(argc==3&&std::string(argv[1])=="--story-notebook") {  // tools/catalogue/test_story_notebook.py
+        auto fixtures=fs::absolute(argv[2]);
+        env("WWHD_MOD_MANAGER_DIR",(fixtures/"manager").string().c_str());env("WWHD_TEST_TRUST_NATIVE_MODS",nullptr);
+        set_code_mod_support(true);initialize();
+        // the start: what is installed only (no catalogue is given, nothing is fetched)
+        assert(!mods::required::check_local());
+        assert(mods::required::status().text.find("Install it from the Mods menu")!=std::string::npos);
+        mods::required::Context c;
+        c.port=mods::catalogue::Version::parse("0.2.13");c.work=fixtures/"work";
+        c.fetch=[](const std::string&,const fs::path&,uint64_t){assert(!"a local catalogue needs no transport");};
+        // offline: a clear message, nothing installed
+        c.catalogue=(fixtures/"missing/index.json").string();
+        assert(!mods::required::install(c));
+        assert(mods::required::status().text.find("Try again from the Mods menu")!=std::string::npos&&!mods::required::status().installed);
+        assert(std::none_of(list().begin(),list().end(),[](const View& v){return v.id=="story-notebook";}));
+        // setup or the Mods menu: installed, confirmed and enabled; locked while the story system is on
+        c.catalogue=(fixtures/"index.json").string();
+        assert(mods::required::install(c)&&mods::required::status().installed&&mods::required::status().restart);
+        assert(view("story-notebook").enabled&&view("story-notebook").native_confirmed);
+        std::string error;
+        assert(!enable("story-notebook",false,error)&&error.find("part of the story system")!=std::string::npos);
+        assert(mods::required::check_local());  // the next start
+        std::cout<<"Story notebook: offline message, install, confirm, enable, lock\n";
         return 0;
     }
     if(argc==4&&std::string(argv[1])=="--catalogue-pilots") {

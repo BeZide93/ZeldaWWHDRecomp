@@ -61,6 +61,13 @@ set(GEN_DIR ${CMAKE_SOURCE_DIR}/build/gen CACHE PATH "recompiler output")
 # Decomp build (docs/decomp-build.md): the game functions of the decompilation (git submodule decomp) run
 # as compiled source in place of the recompiled code; libraries and everything not decompiled stay
 # recompiled. GEN_DIR must then come from recomp.py --decomp-hooks (cmake/Decomp.cmake checks it).
+# Local diagnostic (not for releases): count signalling-NaN float loads/stores of the game code that the
+# host conversion would quiet (runtime/src/snan_count.cpp); logs to captures/snan.log with WWHD_SNAN_COUNT=1.
+option(WWHD_SNAN_COUNT "count signalling-NaN float loads/stores (diagnostic; log with WWHD_SNAN_COUNT=1)" OFF)
+if(WWHD_SNAN_COUNT)
+  add_compile_definitions(WWHD_SNAN_COUNT=1)
+endif()
+
 option(WWHD_DECOMP "decomp build: run the decompiled game functions (macOS; experimental)" OFF)
 include(cmake/Decomp.cmake)
 if(WWHD_DECOMP)
@@ -226,6 +233,7 @@ if(WWHD_SDL_HOST)
 endif()
 set_source_files_properties(${GX2_SOURCES} ${GFX_SOURCES} PROPERTIES COMPILE_OPTIONS "-include;${CEMU_DIR}/cemu_shim.h")
 set_source_files_properties(runtime/src/gfx/vulkan/pipeline_recipe.cpp PROPERTIES COMPILE_OPTIONS "")
+set_source_files_properties(runtime/src/gfx/vulkan/pass_cache.cpp PROPERTIES COMPILE_OPTIONS "")
 set_source_files_properties(runtime/src/gfx/vulkan/pipeline_demand.cpp PROPERTIES COMPILE_OPTIONS "")
 set_source_files_properties(runtime/src/gfx/vulkan/shader_translation.cpp
     runtime/src/gfx/vulkan/shader_compiler.cpp
@@ -342,7 +350,7 @@ target_compile_options(mod_manager_test PRIVATE -UNDEBUG)
 # External native package fixture and isolated lifecycle/integration tests.
 add_library(mod_fixture MODULE runtime/tools/mod_fixture.cpp)
 target_include_directories(mod_fixture PRIVATE runtime/include)
-add_executable(mod_package_test runtime/tools/mod_package_test.cpp runtime/src/mods/manager.cpp runtime/src/mods/traversal_settings.cpp runtime/src/mods/packages.cpp ${WWHD_NPC_CATALOGUE} runtime/src/mods/guest_png.cpp runtime/src/mods/mod_archive.cpp runtime/src/mods/content.cpp runtime/src/mods/cemu_pack.cpp runtime/src/guest_addr_identity.c)
+add_executable(mod_package_test runtime/tools/mod_package_test.cpp runtime/src/mods/required.cpp runtime/src/mods/manager.cpp runtime/src/mods/traversal_settings.cpp runtime/src/mods/packages.cpp ${WWHD_NPC_CATALOGUE} runtime/src/mods/guest_png.cpp runtime/src/mods/mod_archive.cpp runtime/src/mods/content.cpp runtime/src/mods/cemu_pack.cpp runtime/src/guest_addr_identity.c)
 target_include_directories(mod_package_test PRIVATE runtime/src runtime/include)
 target_compile_options(mod_package_test PRIVATE -UNDEBUG)
 target_link_libraries(mod_package_test PRIVATE ZLIB::ZLIB Threads::Threads ${CMAKE_DL_LIBS})
@@ -540,6 +548,16 @@ target_include_directories(shader_prebuild_test PRIVATE runtime/src)
 target_compile_options(shader_prebuild_test PRIVATE -UNDEBUG)
 add_test(NAME shader_prebuild_activation COMMAND shader_prebuild_test)
 if(WWHD_HAS_VULKAN)
+  add_executable(rendering_path_test runtime/tools/rendering_path_test.cpp)
+  target_include_directories(rendering_path_test PRIVATE runtime/src ${Vulkan_INCLUDE_DIRS})
+  target_compile_options(rendering_path_test PRIVATE -UNDEBUG)
+  add_test(NAME vulkan_rendering_path_selection COMMAND rendering_path_test)
+  add_executable(pass_cache_test runtime/tools/pass_cache_test.cpp runtime/src/gfx/vulkan/pass_cache.cpp)
+  target_include_directories(pass_cache_test PRIVATE runtime/src ${Vulkan_INCLUDE_DIRS})
+  target_compile_definitions(pass_cache_test PRIVATE VK_NO_PROTOTYPES)
+  target_compile_options(pass_cache_test PRIVATE -UNDEBUG)
+  target_link_libraries(pass_cache_test PRIVATE Threads::Threads)
+  add_test(NAME vulkan_pass_cache_lifetime COMMAND pass_cache_test)
   add_executable(deferred_commands_test runtime/tools/deferred_commands_test.cpp
       runtime/src/gfx/vulkan/deferred_commands.cpp)
   target_include_directories(deferred_commands_test PRIVATE runtime/src ${Vulkan_INCLUDE_DIRS})
@@ -975,12 +993,17 @@ add_test(NAME story_chart COMMAND story_chart_test)
 # the story notebook: quest list, save record, page navigation, services and item menu hooks
 add_executable(story_notebook_test runtime/tools/story_notebook_test.cpp runtime/src/mods/story_notebook.cpp
                runtime/tools/story_notebook_layout_stub.cpp runtime/src/mods/story_mail.cpp runtime/src/mods/story_store.cpp
-               runtime/src/mods/story_chart.cpp runtime/src/mods/guest_png.cpp runtime/src/mods/mod_archive.cpp runtime/src/guest_addr_identity.c
+               runtime/src/mods/story_chart.cpp runtime/src/mods/story_items.cpp runtime/src/mods/guest_png.cpp runtime/src/mods/mod_archive.cpp runtime/src/guest_addr_identity.c
                ${WWHD_NPC_CATALOGUE})
 target_include_directories(story_notebook_test PRIVATE runtime/include runtime/src runtime/src/mods)
 target_compile_options(story_notebook_test PRIVATE -UNDEBUG)
 target_link_libraries(story_notebook_test PRIVATE ZLIB::ZLIB)
 add_test(NAME story_notebook COMMAND story_notebook_test)
+# mod items: save record, manifest items, registry, services, bag actions and the item table hooks
+add_executable(story_items_test runtime/tools/story_items_test.cpp runtime/src/mods/story_items.cpp runtime/src/mods/story_store.cpp runtime/src/guest_addr_identity.c ${WWHD_NPC_CATALOGUE})
+target_include_directories(story_items_test PRIVATE runtime/include runtime/src runtime/src/mods)
+target_compile_options(story_items_test PRIVATE -UNDEBUG)
+add_test(NAME story_items COMMAND story_items_test)
 if(Python3_Interpreter_FOUND)
   add_test(NAME release_sdk_package COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/release/test_sdk_package.py")
   add_test(NAME story_notebook_model COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/story_mods/test_notebook_model.py")
@@ -1121,6 +1144,8 @@ endif()
 if(Python3_Interpreter_FOUND AND NOT ANDROID)
   add_test(NAME catalogue_pilots COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_SOURCE_DIR}/tools/catalogue/test_pilots.py $<TARGET_FILE:mod_package_test>)
+  add_test(NAME story_notebook_required COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_SOURCE_DIR}/tools/catalogue/test_story_notebook.py $<TARGET_FILE:mod_package_test>)
 endif()
 
 add_executable(guest_settings_test runtime/tools/guest_settings_test.cpp)
@@ -1278,7 +1303,7 @@ if(NOT ANDROID AND SDL3_FOUND AND Python3_Interpreter_FOUND)
     runtime/third_party/imgui/backends/imgui_impl_sdlrenderer3.cpp runtime/src/mods/code_mods.cpp
     runtime/src/mods/manager.cpp runtime/src/mods/traversal_settings.cpp runtime/src/mods/packages.cpp ${WWHD_NPC_CATALOGUE} runtime/src/mods/guest_png.cpp
     runtime/src/mods/mod_archive.cpp runtime/src/mods/content.cpp runtime/src/mods/cemu_pack.cpp runtime/src/guest_addr_identity.c
-    runtime/src/overlay/extensions.cpp runtime/src/overlay/text_field.cpp)
+    runtime/src/overlay/extensions.cpp runtime/src/overlay/text_field.cpp runtime/src/mods/required.cpp ${WWHD_BUILD_INFO})
   target_include_directories(mod_oneclick_flow_test PRIVATE runtime/src runtime/include)
   target_compile_options(mod_oneclick_flow_test PRIVATE -UNDEBUG)
   target_link_libraries(mod_oneclick_flow_test PRIVATE imgui SDL3::SDL3 ZLIB::ZLIB Threads::Threads ${CMAKE_DL_LIBS})

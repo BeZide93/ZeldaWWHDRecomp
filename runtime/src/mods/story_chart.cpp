@@ -55,6 +55,36 @@ const uint32_t kHidePanes = GC(0x02678B00);   // hdSeaChartMenu_c::hideMenuPanes
 const uint32_t kDestroy = GC(0x02677B90);     // hdSeaChartMenu_c::destroy(flags)
 const uint32_t kMarkLayout = GC(0x026815A8);  // hdSeaChartGrid_c::updateChartMarkLayout
 const uint32_t kMarkRefresh = GC(0x026834A4); // hdSeaChartGrid_c::refreshChartMarks (every update)
+// The MAP screen's chart list (hdMenuMap_c, hd_screen_menu_map_states.cpp) and its chart view (TreMap,
+// hd_screen_tre_map.cpp) ask the map display coordinator (hd_screen_map_display_coordinator.cpp)
+const uint32_t kFindChart = GC(0x02687A64);      // hdMapDisplayCoordinator_c::findChart(chart): the chart's entry
+const uint32_t kIsObtained = GC(0x0268A570);  // ::isChartObtained(chart)
+const uint32_t kIsOpened = GC(0x0268A5DC);    // ::isChartOpened(chart)
+const uint32_t kIsComplete = GC(0x0268A648);  // ::isChartComplete(chart)
+const uint32_t kObtainChart = GC(0x0268A52C);    // ::obtainChart(chart): the player opened it (onOpenMap)
+const uint32_t kCountObtained = GC(0x0268A3A0);  // ::countAllObtainedCharts(): the list's length
+const uint32_t kMenuFindChart = GC(0x02698998);  // hdMenuMap_c::findChart(chart, step): the list's order
+const uint32_t kChartCaption = GC(0x02699094);   // hdMenuMap_c::setChartCaption(chart): the chart's name
+// the coordinator's chart table (a heap copy of cmapdat.bin) and its entries (hdChartEntry_c, 0x26 bytes)
+constexpr uint32_t kCoordChartCount = 0x174, kCoordCharts = 0x17C;
+constexpr uint32_t kEntryBytes = 0x26, kEntrySea = 0, kEntrySave = 1, kEntryNumber = 2, kEntryType = 3, kEntryColumn = 4,
+                   kEntryRow = 5, kEntryPositions = 6;
+constexpr uint32_t kSaveMapGot = 0xF4;  // the save's owned-chart bits (dSv_player_map_c, 4 x u32)
+constexpr int kChartNumbers = 61;  // the game's charts 0..60
+const uint32_t kChartKind = GC(0x02698A94);      // hdMenuMapChartKind(map, chart): 1 treasure
+const uint32_t kChartIcon = GC(0x02698B44);      // hdMenuMapUpdateChartIcon(map, slot, chart)
+const uint32_t kChartFrame = GC(0x02698D74);     // hdMenuMapUpdateChartFrame(map, slot, chart): the chart view
+const uint32_t kChartDetails = GC(0x0269B414);   // hdMenuMapUpdateChartDetails(map, slot, chart)
+const uint32_t kResetSelection = GC(0x02699118); // hdMenuMap_c::resetChartSelection()
+constexpr uint32_t kMapChartIcons = 0x84, kTreMapChartIndex = 0x8C;
+// the in-game menu (hdIngameUi_c, hd_scene_ingame_ui.h): its tab buttons and the map coordinator; the
+// MAP screen's list (hdMenuMap_c): the selected chart. The menu switches tabs itself
+// (hdIngameUi_c::changeActiveScreen): with no tab button selected this frame (hdMenuButtons::mSelected
+// is reset every frame) it goes to the tab of mTransitionFrames; the MAP screen keeps a selected chart
+// Link owns when it opens (resetChartSelection).
+const uint32_t kIngameUi = GD(0x101F8344);
+constexpr uint32_t kUiMenuButtons = 0x184, kUiCoordinator = 0x218, kUiTransitionTab = 0x228, kCoordSeaMap = 0x28, kMapSelectedChart = 0xAC;
+constexpr uint32_t kTabMap = 1;
 // hdSeaChartGrid_c (hd_sea_chart_components.h): its 49 cells, the chart area, the owner of the panes
 constexpr uint32_t kGridCells = 0, kGridTouchPane = 0xC8, kGridMapOwner = 0x10C, kOwnerMarkPanes = 0x84;
 constexpr unsigned kCells = 49;
@@ -129,12 +159,22 @@ bool trace() {
 uint32_t save_base() { return ld32(kSavePtr); }
 bool have_save() { return save_base() != 0; }
 story_mail::Book book() { return story_store::book(); }
-// the chart's record (kind kRecordMarker): 1 owned, 2 finished, 0 none (story_chart.h)
+// the chart's record (kind kRecordMarker): 1 owned, 3 owned and opened, 2 finished, 0 none (story_chart.h)
 uint8_t chart_value(const story_mail::Book& b, uint16_t key) { return b.get(story_mail::kRecordMarker, key); }
 // the places of the markers whose chart is finished: the game's red circle marks them
 struct Spot {
     float x, z;
 };
+// a declared chart (manifest "charts", define()): what the MAP screen's chart list shows for it
+struct Def {
+    std::string mod, id, name, description;
+    uint16_t key;
+    float x, z;
+    std::u16string caption;  // the name as the caption shows it
+    std::string item_mod;    // its treasure chest: one of the mod's items, or ...
+    uint8_t item_game = 0;   // ... a game item (0: none declared)
+};
+std::vector<Def> g_defs;  // declaration order (g_mu)
 std::vector<Spot> done_spots() {
     std::vector<Spot> out;
     if (!have_save()) return out;
@@ -143,9 +183,16 @@ std::vector<Spot> done_spots() {
     std::lock_guard lock(g_mu);
     for (const Marker& m : g_markers)
         if (chart_value(b, m.key) == kChartDone) out.push_back({m.x, m.z});
+    // a declared chart without markers: its place
+    for (const Def& d : g_defs)
+        if (chart_value(b, d.key) == kChartDone &&
+            std::none_of(g_markers.begin(), g_markers.end(), [&](const Marker& m) { return m.key == d.key; }))
+            out.push_back({d.x, d.z});
     return out;
 }
-int32_t result_of(uint8_t v) { return v == kChartOwned ? kResultOwned : v == kChartDone ? kResultDone : kResultNone; }
+int32_t result_of(uint8_t v) {
+    return v == kChartOwned || v == kChartOpened ? kResultOwned : v == kChartDone ? kResultDone : kResultNone;
+}
 bool valid_label(const std::string& label) {
     std::u16string ignored;
     return label.size() <= kMaxLabelBytes && story_mail::append_utf16(label, false, ignored);
@@ -308,6 +355,118 @@ void place_circles(const Cpu& keep, uint32_t grid) {
     circles = std::move(next);
 }
 
+// ---- the MAP screen's chart list ----
+// A mod chart has its own chart number after the game's last one: 61 + its declaration's index. The
+// coordinator's questions about it (its entry, owned, opened, finished, opening it, the list's length
+// and order) are answered from the mod's record; the game's chart bits and tables are never read or
+// written for it. The list's functions that stop at the game's last chart (the icon, the chart view,
+// its details, the caption, the kind) run for a mod chart with a game chart number in its place for
+// the length of that one call only, the coordinator answering for the mod chart meanwhile; the chart
+// view then keeps the mod chart's own number. Nothing of a mod chart is in the game's part of the save.
+uint32_t g_entries = 0;  // guest memory: kMaxCharts entries of 0x28 bytes (built on each question)
+uint32_t g_coordinator = 0;
+CaptionFn g_caption = nullptr;
+constexpr uint32_t kFirstModChart = 61;  // after the game's 61 charts (0..60)
+constexpr uint32_t kProxyChart = 3;      // a treasure chart number, in place of a mod chart for one call
+struct Proxy {
+    bool on = false;
+    uint32_t chart = 0;  // the mod chart it stands for during the call
+} g_proxy;
+// a chart number as the coordinator is asked: the mod chart during a proxied call
+uint32_t asked(uint32_t chart) { return g_proxy.on && chart == kProxyChart ? g_proxy.chart : chart; }
+// a mod chart Link owns: its declaration's index and its record's value; false for anything else
+bool mod_chart(uint32_t chart, size_t& def, uint8_t& value) {
+    if (chart < kFirstModChart || chart >= kFirstModChart + kMaxCharts || !have_save()) return false;
+    story_mail::Book b = book();
+    if (!b.usable()) return false;
+    std::lock_guard lock(g_mu);
+    def = chart - kFirstModChart;
+    if (def >= g_defs.size()) return false;
+    value = chart_value(b, g_defs[def].key);
+    return value == kChartOwned || value == kChartOpened || value == kChartDone;
+}
+bool mod_chart(uint32_t chart) {
+    size_t d;
+    uint8_t v;
+    return mod_chart(chart, d, v);
+}
+// the mod charts Link owns, in declaration order (their chart numbers)
+std::vector<uint32_t> owned_mod_charts() {
+    std::vector<uint32_t> out;
+    size_t n;
+    {
+        std::lock_guard lock(g_mu);
+        n = g_defs.size();
+    }
+    for (size_t i = 0; i < n; i++)
+        if (mod_chart(kFirstModChart + uint32_t(i))) out.push_back(kFirstModChart + uint32_t(i));
+    return out;
+}
+bool got_bit(int save_no) {  // the save's owned bit of a game chart (dSv_player_map_c::isGetMap(save_no - 1))
+    const int n = save_no - 1;
+    if (n < 0 || n >= 128 || !have_save()) return false;
+    return (ld32(save_base() + kSaveMapGot + 4 * uint32_t(n >> 5)) >> (n & 31)) & 1;
+}
+uint32_t chart_entry(uint32_t coord, int number) {  // the game's entry of a chart number (0-based)
+    const int32_t count = int32_t(ld32(coord + kCoordChartCount));
+    const uint32_t table = ld32(coord + kCoordCharts);
+    if (!table || count <= 0 || count > 256) return 0;
+    for (int32_t i = 0; i < count; i++)
+        if (const uint32_t e = ld32(table + 4 * uint32_t(i)); e && int8_t(ld8(e + kEntryNumber)) == number + 1) return e;
+    return 0;
+}
+uint32_t square_entry(uint32_t coord, int column, int row) {  // the game's chart of a square: its art and origin
+    const int32_t count = int32_t(ld32(coord + kCoordChartCount));
+    const uint32_t table = ld32(coord + kCoordCharts);
+    if (!table || count <= 0 || count > 256) return 0;
+    for (int32_t i = 0; i < count; i++)
+        if (const uint32_t e = ld32(table + 4 * uint32_t(i));
+            e && int8_t(ld8(e + kEntryColumn)) == column && int8_t(ld8(e + kEntryRow)) == row)
+            return e;
+    for (int32_t i = 0; i < count; i++)  // (by the square's number: row by row from the north-west)
+        if (const uint32_t e = ld32(table + 4 * uint32_t(i)); e && int8_t(ld8(e + kEntrySea)) == (row + 3) * 7 + column + 3 + 1) return e;
+    return 0;
+}
+// the mod chart's entry, in its own guest memory: the game's entry of its square (art, origin), its
+// spot as the salvage point of every variant, its own number, a treasure chart's type, no save number
+uint32_t build_entry(uint32_t coord, uint32_t chart, size_t def) {
+    float x, z;
+    {
+        std::lock_guard lock(g_mu);
+        x = g_defs[def].x, z = g_defs[def].z;
+    }
+    const int column = int(std::lround(x / kSquare)), row = int(std::lround(z / kSquare));
+    const uint32_t square = square_entry(coord, column, row), treasure = chart_entry(coord, int(kProxyChart));
+    if (!square || !treasure || !g_entries) return 0;
+    const uint32_t e = g_entries + uint32_t(def) * 0x28;
+    for (uint32_t i = 0; i < kEntryBytes; i++) st8(e + i, ld8(square + i));
+    st8(e + kEntrySave, 0);  // none: the game's chart bits are never this chart's
+    st8(e + kEntryNumber, uint8_t(chart + 1));
+    st8(e + kEntryType, ld8(treasure + kEntryType));
+    auto offset = [](float v) { return uint16_t(int16_t(std::clamp(std::lround(v), -32767L, 32767L))); };
+    for (uint32_t k = 0; k < 4; k++) {  // {origin x, origin y, salvage x, salvage y} per salvage variant
+        st16(e + kEntryPositions + 2 * (4 * k + 2), offset(x - float(column) * kSquare));
+        st16(e + kEntryPositions + 2 * (4 * k + 3), offset(z - float(row) * kSquare));
+    }
+    if (trace()) {
+        static std::map<uint32_t, std::string> last;
+        char line[256];
+        snprintf(line, sizeof line, "mod chart %u: square %d,%d (sea %d), spot %.0f,%.0f; the square's entry: origin %d,%d salvage %d,%d", chart,
+                 column, row, int8_t(ld8(square + kEntrySea)), x, z, int16_t(ld16(square + kEntryPositions)),
+                 int16_t(ld16(square + kEntryPositions + 2)), int16_t(ld16(square + kEntryPositions + 4)), int16_t(ld16(square + kEntryPositions + 6)));
+        if (last[chart] != line) LOG("[chart] %s", line), last[chart] = line;
+    }
+    return e;
+}
+// the caption's message of a chart number (hdMenuMap_c::setChartCaption)
+uint32_t caption_message(uint32_t chart) {
+    if (chart < 3) return chart + 0x31D8;
+    if (chart < 36) return chart + 0x31DD;
+    if (chart < 44) return chart + 0x36F1;
+    if (chart < 49) return chart + 0x36FD;
+    return chart + 0x36EC;
+}
+
 Marker* find(const std::string& mod, const std::string& chart, const std::string& id) {
     for (Marker& m : g_markers)
         if (m.mod == mod && m.chart == chart && m.id == id) return &m;
@@ -341,7 +500,7 @@ int32_t finish(const std::string& mod, const std::string& chart) {
     const uint16_t key = chart_key(mod, chart);
     const uint8_t v = chart_value(b, key);
     if (v == kChartDone) return kResultDone;
-    if (v && v != kChartOwned) return kResultInvalid;  // a value this version doesn't know
+    if (v && v != kChartOwned && v != kChartOpened) return kResultInvalid;  // a value this version doesn't know
     if (!b.set(story_mail::kRecordMarker, key, kChartDone)) return kResultNoRoom;
     LOG("[chart] %s: chart \"%s\" finished", mod.c_str(), chart.c_str());
     return kResultDone;
@@ -351,6 +510,32 @@ int32_t state(const std::string& mod, const std::string& chart) {
     if (!story_mail::valid_id(chart)) return kResultInvalid;
     if (!have_save()) return kResultNone;
     return result_of(chart_value(book(), chart_key(mod, chart)));
+}
+
+int32_t define(const std::string& mod, const std::string& chart, const std::string& name, const std::string& description, float x, float z,
+               const std::string& item_mod, uint8_t item_game) {
+    std::u16string caption, ignored;
+    if (!story_mail::valid_id(chart) || name.empty() || name.size() > kMaxNameBytes || !story_mail::append_utf16(name, false, caption) ||
+        description.size() > kMaxDescriptionBytes || !story_mail::append_utf16(description, true, ignored))
+        return kResultInvalid;
+    if (!(x >= -kSeaHalf && x <= kSeaHalf && z >= -kSeaHalf && z <= kSeaHalf)) return kResultInvalid;
+    std::lock_guard lock(g_mu);
+    Def d{mod, chart, name, description, chart_key(mod, chart), x, z, caption, item_mod, item_game};
+    for (Def& old : g_defs)
+        if (old.mod == mod && old.id == chart) return old = d, kResultNone;
+    if (g_defs.size() >= kMaxCharts) return kResultNoRoom;
+    g_defs.push_back(d);
+    return kResultNone;
+}
+
+std::vector<ChartView> charts() {
+    std::vector<ChartView> out;
+    story_mail::Book b = have_save() ? book() : story_mail::Book(nullptr);
+    std::lock_guard lock(g_mu);
+    for (const Def& d : g_defs)
+        out.push_back({d.mod, d.id, d.name, d.description, d.x, d.z, b.usable() ? result_of(chart_value(b, d.key)) : kResultNone,
+                       b.usable() && chart_value(b, d.key) == kChartOpened, d.item_mod, d.item_game});
+    return out;
 }
 
 int32_t mark(const std::string& mod, const std::string& chart, const std::string& marker, float x, float z,
@@ -398,7 +583,28 @@ std::vector<MarkerView> shown_markers() {
     return out;
 }
 
+bool open_in_list(const std::string& mod, const std::string& chart) {
+    const uint32_t ui = ld32(kIngameUi);
+    const uint32_t coord = ui ? ld32(ui + kUiCoordinator) : 0;
+    const uint32_t map = coord ? ld32(coord + kCoordSeaMap) : 0;
+    if (!coord || !map || !g_installed) return false;
+    size_t def = SIZE_MAX;
+    {
+        std::lock_guard lock(g_mu);
+        for (size_t i = 0; i < g_defs.size(); i++)
+            if (g_defs[i].mod == mod && g_defs[i].id == chart) def = i;
+    }
+    const uint32_t number = kFirstModChart + uint32_t(def);
+    if (def == SIZE_MAX || !mod_chart(number)) return false;
+    st32(map + kMapSelectedChart, number);
+    st32(ui + kUiTransitionTab, kTabMap);
+    LOG("[chart] %s: chart \"%s\" selected in the MAP screen's chart list (chart %u)", mod.c_str(), chart.c_str(), number);
+    return true;
+}
+
 void note_import() { g_imported = true; }
+void set_entry_memory(uint32_t guest, uint32_t bytes) { g_entries = bytes >= kMaxCharts * 0x28 ? guest : 0; }
+void set_caption_text(CaptionFn fn) { g_caption = fn; }
 bool imported() { return g_imported; }
 bool installed() { return g_installed; }
 void set_game_calls(void (*original)(Cpu*, uint32_t), uint32_t (*call)(Cpu*, uint32_t, std::initializer_list<uint32_t>)) {
@@ -410,7 +616,12 @@ void install(const std::function<std::string(uint32_t)>& replaced_by, const std:
     if (!g_imported || g_installed || !g_original) return;
     const std::pair<uint32_t, void (*)(Cpu*)> hooks[] = {
         {kProgress, hooks::progress_icons}, {kHidePanes, hooks::hide_panes}, {kDestroy, hooks::destroy},
-        {kIconUpdate, hooks::icon_update}, {kMarkLayout, hooks::mark_layout}, {kMarkRefresh, hooks::mark_refresh}};
+        {kIconUpdate, hooks::icon_update}, {kMarkLayout, hooks::mark_layout}, {kMarkRefresh, hooks::mark_refresh},
+        {kFindChart, hooks::find_chart}, {kIsObtained, hooks::chart_obtained}, {kIsOpened, hooks::chart_opened},
+        {kIsComplete, hooks::chart_complete}, {kObtainChart, hooks::obtain_chart}, {kCountObtained, hooks::count_obtained},
+        {kMenuFindChart, hooks::menu_find_chart}, {kChartCaption, hooks::chart_caption}, {kChartKind, hooks::chart_kind},
+        {kChartIcon, hooks::chart_icon}, {kChartFrame, hooks::chart_frame}, {kChartDetails, hooks::chart_details},
+        {kResetSelection, hooks::reset_selection}};
     // all or nothing: a pane moved without the hook that puts it back would stay moved
     for (const auto& [addr, fn] : hooks) {
         std::string other = replaced_by(addr);
@@ -443,6 +654,7 @@ void capture_end() {
             if (grid_pane(grid, c.cell) == c.pane) st32(c.pane + kPaneTranslate, c.mx), st32(c.pane + kPaneTranslate + 4, c.my);
 }
 void state_loaded() {
+    g_coordinator = 0;
     g_applied.clear();
     g_borrowed.clear();
     g_circles.clear();
@@ -575,6 +787,137 @@ void destroy(Cpu* c) {
     g_borrowed.clear();
     g_circles.clear();
     g_original(c, kDestroy);
+}
+
+// ---- the MAP screen's chart list: mod charts after the game's (chart numbers 61 and up) ----
+// findChart(chart): the mod chart's entry
+void find_chart(Cpu* c) {
+    g_coordinator = c->r[3];
+    size_t def;
+    uint8_t value;
+    if (mod_chart(asked(c->r[4]), def, value)) {
+        if (const uint32_t e = build_entry(c->r[3], asked(c->r[4]), def)) return void(c->r[3] = e);
+        return void(c->r[3] = 0);
+    }
+    if (c->r[4] >= uint32_t(kChartNumbers)) return void(c->r[3] = 0);
+    g_original(c, kFindChart);
+}
+// isChartObtained / isChartOpened / isChartComplete: the mod chart's record
+void chart_obtained(Cpu* c) {
+    g_coordinator = c->r[3];
+    if (mod_chart(asked(c->r[4]))) return void(c->r[3] = 1);
+    g_original(c, kIsObtained);
+}
+void chart_opened(Cpu* c) {
+    g_coordinator = c->r[3];
+    size_t def;
+    uint8_t value;
+    if (mod_chart(asked(c->r[4]), def, value)) return void(c->r[3] = value == kChartOpened || value == kChartDone);
+    g_original(c, kIsOpened);
+}
+void chart_complete(Cpu* c) {
+    g_coordinator = c->r[3];
+    size_t def;
+    uint8_t value;
+    if (mod_chart(asked(c->r[4]), def, value)) return void(c->r[3] = value == kChartDone);
+    g_original(c, kIsComplete);
+}
+// obtainChart(chart): the player opens the chart in the list (the game's onOpenMap): the record's value
+void obtain_chart(Cpu* c) {
+    g_coordinator = c->r[3];
+    size_t def;
+    uint8_t value;
+    if (mod_chart(asked(c->r[4]), def, value)) {
+        if (value == kChartOwned) {
+            std::string mod, id;
+            {
+                std::lock_guard lock(g_mu);
+                mod = g_defs[def].mod, id = g_defs[def].id;
+            }
+            story_mail::Book b = book();
+            b.set(story_mail::kRecordMarker, chart_key(mod, id), kChartOpened);
+            LOG("[chart] %s: chart \"%s\" opened in the chart list", mod.c_str(), id.c_str());
+        }
+        return;
+    }
+    g_original(c, kObtainChart);
+}
+// countAllObtainedCharts(): the list's length, with the mod charts
+void count_obtained(Cpu* c) {
+    g_coordinator = c->r[3];
+    g_original(c, kCountObtained);
+    c->r[3] += uint32_t(owned_mod_charts().size());
+}
+// hdMenuMap_c::findChart(chart, step): the game's charts as the game orders them, then the mod charts
+void menu_find_chart(Cpu* c) {
+    const uint32_t chart = c->r[4];
+    const int32_t step = int32_t(c->r[5]);
+    const auto mods = owned_mod_charts();
+    if (mods.empty() || !g_coordinator || (step != 0 && step != 1 && step != -1)) return g_original(c, kMenuFindChart);
+    if (step == 0) {
+        if (chart >= kFirstModChart) return void(c->r[3] = std::find(mods.begin(), mods.end(), chart) != mods.end() ? chart : uint32_t(-1));
+        return g_original(c, kMenuFindChart);
+    }
+    std::vector<uint32_t> order;
+    for (int n = 0; n < kChartNumbers; n++)
+        if (const uint32_t e = chart_entry(g_coordinator, n); e && got_bit(int8_t(ld8(e + kEntrySave)))) order.push_back(uint32_t(n));
+    order.insert(order.end(), mods.begin(), mods.end());
+    const auto at = std::find(order.begin(), order.end(), chart);
+    if (at == order.end()) return void(c->r[3] = step > 0 ? order.front() : order.back());
+    const size_t i = size_t(at - order.begin()), n = order.size();
+    c->r[3] = order[(i + n + size_t(step > 0 ? 1 : n - 1)) % n];
+}
+// a list function that stops at the game's last chart, run for a mod chart: with kProxyChart in its
+// place for this call only
+void proxied(Cpu* c, uint32_t fn, uint32_t chart_reg) {
+    const uint32_t chart = c->r[chart_reg];
+    if (!mod_chart(chart) || g_proxy.on) return g_original(c, fn);
+    g_proxy = {true, chart};
+    c->r[chart_reg] = kProxyChart;
+    g_original(c, fn);
+    g_proxy = {};
+}
+// setChartCaption(chart): the mod chart's name
+void chart_caption(Cpu* c) {
+    size_t def;
+    uint8_t value;
+    if (!mod_chart(c->r[4], def, value) || !g_caption) return g_original(c, kChartCaption);
+    std::u16string text;
+    {
+        std::lock_guard lock(g_mu);
+        text = g_defs[def].caption;
+    }
+    g_caption(caption_message(kProxyChart), &text);
+    proxied(c, kChartCaption, 4);
+    g_caption(0, nullptr);
+}
+// hdMenuMapChartKind(map, chart): a mod chart is a treasure chart
+void chart_kind(Cpu* c) {
+    if (mod_chart(asked(c->r[4]))) return void(c->r[3] = 1);
+    g_original(c, kChartKind);
+}
+void chart_icon(Cpu* c) { proxied(c, kChartIcon, 5); }
+void chart_details(Cpu* c) { proxied(c, kChartDetails, 5); }
+// the chart view: then it keeps the mod chart's own number (its "got" circle follows the record)
+void chart_frame(Cpu* c) {
+    const uint32_t map = c->r[3], slot = c->r[4], chart = c->r[5];
+    proxied(c, kChartFrame, 5);
+    if (!mod_chart(chart)) return;
+    if (const uint32_t view = ld32(map + kMapChartIcons + 4 * (slot < 3 ? slot : 0))) st32(view + kTreMapChartIndex, chart);
+}
+// resetChartSelection(): the game shows its selected chart only below its last one: a mod chart too
+void reset_selection(Cpu* c) {
+    const uint32_t map = c->r[3];
+    Cpu keep = *c;
+    g_original(c, kResetSelection);
+    const uint32_t chart = ld32(map + kMapSelectedChart);
+    if (!mod_chart(chart)) return;
+    for (const uint32_t fn : {kChartIcon, kChartFrame}) {
+        Cpu call = keep;
+        g_call(&call, fn, {map, 0, chart});
+    }
+    Cpu call = keep;
+    g_call(&call, kChartCaption, {map, chart});
 }
 
 // updateChartMarkLayout(): the game puts every circle in its place and shows or hides it (complete or

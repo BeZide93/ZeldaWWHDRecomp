@@ -1,3 +1,4 @@
+#include "pass.h"
 #include "../../exception_report.h"
 #include "aspect.h"
 #include "aspect_panes.h"
@@ -1056,7 +1057,7 @@ Pipeline &pipeline(const uint32_t *r, vk::Shader *vs, vk::Shader *ps,
       depth && depth->fmt.stencil ? df : VK_FORMAT_UNDEFINED;
   VkGraphicsPipelineCreateInfo ci{
       VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
-  ci.pNext = &rc;
+  pipeline_targets(ci, rc);
   ci.stageCount = 2;
   ci.pStages = stages;
   ci.pVertexInputState = &vi;
@@ -1068,7 +1069,7 @@ Pipeline &pipeline(const uint32_t *r, vk::Shader *vs, vk::Shader *ps,
   ci.pColorBlendState = &bs;
   ci.pDynamicState = &dy;
   ci.layout = p.layout;
-  GraphicsPipelineState pipelineState(ci);
+  GraphicsPipelineState pipelineState(ci, &rc);
   WarmPipeline warmed;
   if (!recipeSpirv[0].empty() && !recipeSpirv[1].empty() &&
       take_warm_pipeline(recipeKey, recipeSpirv, descriptorBindings, p.dynamicUniforms, pipelineState, warmed)) {
@@ -2391,7 +2392,17 @@ void draw(const uint32_t *r, uint32_t prim, uint32_t count, uint32_t indexType,
     ri.pStencilAttachment = depth && depth->fmt.stencil ? &da : nullptr;
     if(R.gpuPassTimestampsEnabled) gpu_begin_render_scope(colors,depth,slices,depthSlice,width,height);
     trace_pass(colors, ncolor, depth, depthSlice, width, height);
-    record::vkCmdBeginRendering(cmd, &ri);
+    begin_pass(cmd, ri, [&] {
+      PassBegin pass; pass.formats.colorCount = ncolor;
+      for (uint32_t i = 0; i < ncolor; ++i) if (colors[i]) {
+        pass.formats.colors[i] = colors[i]->fmt.pixel; pass.layouts[i] = colors[i]->layout;
+      }
+      if (depth) {
+        pass.formats.depth = depth->fmt.pixel; pass.formats.stencil = depth->fmt.stencil;
+        pass.layouts[8] = depth->layout;
+      }
+      return pass;
+    });
     ++R.renderPassCount;
     R.rendering = true;
     R.passTracked = true;

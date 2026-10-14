@@ -7,6 +7,52 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Android: system game modes** (idea from the GreenNaugahyde Android fork): the game declares Android's
+  performance and battery-saving game modes, and the system no longer downscales the picture or overrides the
+  frame rate, so the port's own resolution and frame pacing stay in charge.
+
+- **Vulkan: a classic render-pass mode for older graphics drivers** (issues #144 and #51): the game now also runs
+  on Vulkan 1.1 / 1.2 drivers without dynamic rendering (for example older AMD drivers), and older Intel
+  Windows drivers (before 101.2121), which crashed on dynamic rendering, use the classic mode automatically.
+  `WWHD_VK_FORCE_RENDERPASS=1` forces it for testing; `=0` turns it off. Everyone else keeps the current
+  renderer path, with the same pictures and performance.
+
+- **Fixed: Windows setup stopped while linking when the folder name had an emoji or other special characters**
+  ("'charmap' codec can't encode character"). Setup now writes its linker file lists as UTF-8, so the game can be
+  set up in any folder.
+
+- **A new app icon** (issue #199, thanks @thorazine111-coder): a sailing boat on the sea, original artwork, on
+  Android (adaptive icon on Android 8+) and in the Linux AppImage. The game's own icon from your copy is still
+  available as a home-screen shortcut (Android setup: **Add the game icon to the home screen**).
+
+- **Story system for quest mods** (letters, a quest notebook and sea-chart marks, in the game's own style). The
+  port brings the system; all quest content comes from the mod catalogue:
+  - **Story system** (Mods > Built-in, on): it needs the **Story Notebook** package from the mod catalogue, which
+    setup installs (it needs the internet once). If setup was offline, install it later in Mods: switch the
+    Story system on, or press Install on its line. It's required for every quest mod and stays enabled. The game's
+    start never goes online; without the package the story system stays inactive and the normal game is
+    unchanged.
+  - **Letters by Rito mail:** a quest mod announces its quest with a letter from the Rito postbox, once Link has
+    the Delivery Bag. The Story Notebook package's letter brings the **story notebook**.
+  - **Story notebook:** in the Delivery Bag. Its page lists every mod quest with the next step, where to go and its
+    status, with an Archive tab for finished quests. "Show on chart" puts the game's red circle on the tracked
+    step, also in the zoomed chart square, and it follows characters who walk around.
+  - **Quests described as data:** a mod's `manifest.json` lists its quests, steps, places, characters and rewards.
+    Steps can wait for story or item conditions ("Not yet possible: ...").
+  - **Characters take part:** a quest can give a resident new lines. When several quests want the same character,
+    the game's own choice box asks which one. The King of Red Lions says a one-time line for the tracked quest.
+    Residents are named by neutral ids; their names and places are read from your own game files.
+  - **Mod charts:** a quest can hand Link its own chart (by letter, in a conversation or as a reward). It appears
+    in the MAP menu's chart list after the game's charts, opens in the game's own chart view with an X at its
+    place, and gets the check mark when its treasure is found. "Open chart" in the notebook jumps there. Mod
+    charts have their own numbers after the game's 61 charts and never touch the game's charts or save data.
+  - **Progress is kept in the save file** in a small block the game itself ignores. Removing the mods leaves a normal
+    save.
+  Details for mod authors in docs/mod-sdk-v2.md; the Story Notebook package and the example quest mods are in the
+  mod repository.
+
+## v0.2.14
+
 - **The controller selection after the title screen is skipped** (issue #189, thanks @floysh): the game no longer asks
   whether you play with the Wii U GamePad or a Pro Controller, because the port already knows it from Controls. It picks
   the matching option through the game's own selection, so everything that depends on it stays the same. To choose by
@@ -113,21 +159,6 @@ what is on `devel` and not released yet (also in the
   the picture hitched; the steps now follow the display's refresh. A hitch right after starting could also keep
   all in-between frames off (30 fps) until the frame rate was changed; that measurement is now retried. Slower PCs
   keep v0.2.13's smoother pacing (#125).
-
-- **Mod SDK: story mods with quests** (letters, a quest notebook and sea-chart marks, in the game's own style):
-  - **Letters by Rito mail:** a story mod announces its quest with a letter from the Rito postbox, once Link has
-    the Delivery Bag. The first one brings the **story notebook**.
-  - **Story notebook:** in the Delivery Bag (with its own icon and 3D model). Its page lists every mod quest with the
-    next step, where to go and its status, with an Archive tab for finished quests. "Show on chart" puts the game's
-    red circle on the tracked step, also in the zoomed chart square, and it follows characters who walk around.
-  - **Quests described as data:** a mod's `manifest.json` lists its quests, steps, places, characters and rewards.
-    Steps can wait for story or item conditions ("Not yet possible: ...").
-  - **Characters take part:** a quest can give a resident new lines. When several quests want the same character,
-    the game's own choice box asks which one. The King of Red Lions says a one-time line for the tracked quest.
-  - **Mod charts:** mods can mark places on Link's sea chart with the game's rings, like the game's treasure charts.
-  - **Progress is kept in the save file** in a small block the game itself ignores. Removing the mods leaves a normal
-    save, and without story mods nothing changes.
-  Details for mod authors in docs/mod-sdk-v2.md, with three example mods (rito-letter, story-chart, story-notebook).
 
 - **Mods tab: Built-in and Community.** The Mods list is split into *Built-in* (the options that come
   with the game, such as the camera and speed options) and *Community* (mods from the mod catalogue,

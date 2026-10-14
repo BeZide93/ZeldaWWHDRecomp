@@ -72,7 +72,15 @@ std::vector<Row> rows_now(std::vector<Quest>& storage);
 // when it closes reach the game only after they are released.
 bool notebook_owned();
 bool open_page(const char* how = "by the port");  // how: for the log
+// an item's caption (story_items.h: Info, use "show", a get); false while the page or a caption is open
+bool show_info(const std::string& title, const std::string& text, const char* how);
+// a manifest quest reaches a step without changing its texts (an item's use action); the step, or < 0
+int32_t reach(const std::string& mod, const std::string& quest, uint32_t step);
 void close_page();
+// the item menu while its Delivery Bag window runs (this logic step or the last), else 0 (the bag pages)
+uint32_t delivery_window_menu();
+// the item menu is on screen (with the Pro Controller, Plus can close it while the bag window's state still runs)
+bool item_menu_shown();
 bool page_open();     // the page or the sealed letter's caption has the controller
 bool caption_open();  // the sealed letter's caption (A or a touch on the letter in the Delivery Bag)
 void pad(input::PadState& p, Cpu* c = nullptr);  // c: the reading thread (the game's fonts and sounds)
