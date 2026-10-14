@@ -5,15 +5,17 @@
 // (tools/story_mods/make_bag_page_layout.py).
 //
 // The pages lie over the game's Delivery Bag window, in its look: eight places in the window's three
-// columns (places 0..7 as the game's L_BtnItemIcon_19..26), the Back button in the last column's bottom
+// columns (places 0..7 as the game's L_BtnItemIcon_19..26, the menu's children 0x14..0x1B), the Back button in the last column's bottom
 // row (index 8 of the grid), page dots above (the game's eight places are the first dot).
 //
 //   Game page  the game's own window. R opens the first extra page (only when Link has mod items).
-//   Browse     an extra page. The cross moves the cursor, L / R turn the pages (L on the first extra page
+//   Browse     an extra page. The cross moves the cursor, X / Y put the item on that button (an item with
+//              a use action; story_items decides), L / R turn the pages (L on the first extra page
 //              goes back to the game's page), B goes back to the game's page, A on an item opens its menu,
 //              A on an empty place brings an item there from the game's places (when one holds a mod
-//              item), A on Back goes back. Touch: a tap selects, a tap on the selected place acts as A;
-//              a tap on a page dot turns to that page.
+//              item), A on Back goes back. Touch: a tap (released where it began; a drag is left to the
+//              item buttons) selects, a tap on the selected place acts as A; a tap on a page dot turns
+//              to that page.
 //   Menu       Info, Use (items with a use action), Move to the first page (only into an empty place of the
 //              game's eight), Cancel. Up / Down, A, B (back to Browse).
 //   Pick       choosing one of the game's eight places: the extra page is hidden, the game's window shows
@@ -39,7 +41,7 @@ inline constexpr uint16_t kGameItem = 0xFFFF;  // Model::game: one of the game's
 // the window's places (and Back) relative to its centre, layout units (y up): MenuItem_00's bag window
 inline constexpr float kPlaceX[9] = {-131, -175, -127, -3, -47, 1, 125, 81, 129};
 inline constexpr float kPlaceY[9] = {130, -6, -142, 130, -6, -142, 130, -6, -142};
-inline constexpr float kTapRadius = 62;
+inline constexpr float kTapRadius = 62, kTapSlop = 24;
 inline constexpr float kDotY = 210, kDotStep = 24;
 inline constexpr float kMenuTop = 72, kMenuRow = 48, kMenuHalfWidth = 170;
 
@@ -88,10 +90,10 @@ inline unsigned pages_shown(const std::vector<unsigned>& used_pages) {
 enum class Sound { None, Cursor, Decide, Cancel, Open, Close, Turn, Error };
 
 struct Action {
-    enum Kind { None, Close, Info, Use, Put, Take } kind = None;
+    enum Kind { None, Close, Info, Use, Put, Take, Assign } kind = None;
     uint16_t key = 0;
     int place = -1;   // Put: the game's place (0..7); Take: the game's place it comes from
-    int slot = -1;    // Take: the page place it goes to (0..7)
+    int slot = -1;    // Take: the page place it goes to (0..7); Assign: the item button (0 X, 1 Y)
     unsigned page = 0;
 };
 
@@ -118,9 +120,10 @@ public:
     uint16_t pick_key() const { return pick_key_; }
     int turned() const { return turned_; }  // -1 / +1: the page was turned this input (its animation), else 0
 
-    // Opens the first extra page (R in the game's window). `held`: the buttons held now (released first).
-    void open(uint32_t held) {
-        mode_ = Mode::Browse, page_ = 0, cursor_ = 0, prev_ = held, touch_prev_ = true;
+    // Opens an extra page (R in the game's window: the first; a tap on its dot). `held`: the buttons held
+    // now (released first).
+    void open(uint32_t held, unsigned page = 0) {
+        mode_ = Mode::Browse, page_ = page, cursor_ = 0, prev_ = held, touch_prev_ = true, touch_moved_ = true;
     }
     void close() { mode_ = Mode::Closed, turned_ = 0; }
 
@@ -129,16 +132,22 @@ public:
         turned_ = 0;
         const uint32_t pressed = in.buttons & ~prev_;
         prev_ = in.buttons;
-        const bool tap = in.touch && !touch_prev_;
+        // a tap: a touch released near where it began (a drag, e.g. towards the X / Y / R buttons, is none),
+        // at the place it began
+        if (in.touch && !touch_prev_) touch_x_ = in.x, touch_y_ = in.y, touch_moved_ = false;
+        if (in.touch && std::hypot(in.x - touch_x_, in.y - touch_y_) > kTapSlop) touch_moved_ = true;
+        const bool tap = !in.touch && touch_prev_ && !touch_moved_;
         touch_prev_ = in.touch;
+        Input at = in;
+        if (tap) at.x = touch_x_, at.y = touch_y_;
         sound_ = Sound::None;
         if (mode_ == Mode::Closed) return act;
         const unsigned pages = std::max<unsigned>(1, unsigned(m.pages.size()));
         if (page_ >= pages) page_ = pages - 1;
         switch (mode_) {
-        case Mode::Browse: browse(pressed, tap, in, m, pages, act); break;
-        case Mode::Menu: menu(pressed, tap, in, m, act); break;
-        case Mode::Pick: pick(pressed, tap, in, m, act); break;
+        case Mode::Browse: browse(pressed, tap, at, m, pages, act); break;
+        case Mode::Menu: menu(pressed, tap, at, m, act); break;
+        case Mode::Pick: pick(pressed, tap, at, m, act); break;
         case Mode::Closed: break;
         }
         return act;
@@ -216,6 +225,15 @@ private:
             return;
         }
         if (pressed & kPadB) return close_to_game(act);
+        if (pressed & (kPadX | kPadY)) {  // X / Y: the item goes on that button (R turns the pages here)
+            const Entry e = selected(m);
+            if (!e.key) {
+                sound_ = Sound::Error;
+                return;
+            }
+            act.kind = Action::Assign, act.key = e.key, act.slot = (pressed & kPadX) ? 0 : 1, sound_ = Sound::Decide;
+            return;
+        }
         if (pressed & kCross) {
             const int to = move(cursor_, pressed);
             if (to != cursor_) cursor_ = to, sound_ = Sound::Cursor;
@@ -332,7 +350,8 @@ private:
     PickKind pick_kind_ = PickKind::Put;
     uint16_t pick_key_ = 0;
     uint32_t prev_ = 0;
-    bool touch_prev_ = false;
+    bool touch_prev_ = false, touch_moved_ = false;
+    float touch_x_ = 0, touch_y_ = 0;
     int turned_ = 0;
     Sound sound_ = Sound::None;
 };

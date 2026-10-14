@@ -81,6 +81,9 @@ void close_page();
 uint32_t delivery_window_menu();
 // the item menu is on screen (with the Pro Controller, Plus can close it while the bag window's state still runs)
 bool item_menu_shown();
+// The Delivery Bag's extra pages (story_bag.h): while `covered` says their page lies over the bag window,
+// the port's icons over the window's places (the notebook, a letter, mod items) are not drawn
+void set_bag_cover(bool (*covered)());
 bool page_open();     // the page or the sealed letter's caption has the controller
 bool caption_open();  // the sealed letter's caption (A or a touch on the letter in the Delivery Bag)
 void pad(input::PadState& p, Cpu* c = nullptr);  // c: the reading thread (the game's fonts and sounds)

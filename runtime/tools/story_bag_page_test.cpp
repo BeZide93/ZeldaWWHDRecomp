@@ -27,9 +27,8 @@ Action press(Page& p, const Model& m, uint32_t button) {
 Action tap(Page& p, const Model& m, float x, float y) {
     Input in;
     in.touch = true, in.x = x, in.y = y;
-    const Action a = p.input(in, m);
-    p.input({}, m);
-    return a;
+    p.input(in, m);
+    return p.input({}, m);  // a tap acts when it is released
 }
 }  // namespace
 
@@ -84,6 +83,17 @@ int main() {
     press(p, m, kPadRight);
     assert(p.cursor() == kBack);
     assert(press(p, m, kPadA).kind == Action::Close);  // A on Back
+
+    // X / Y on an item: it goes on that button; on an empty place nothing
+    p.open(0);
+    a = press(p, m, kPadY);
+    assert(a.kind == Action::Assign && a.key == 0x100 && a.slot == 1 && p.mode() == Page::Mode::Browse);
+    press(p, m, kPadRight);
+    press(p, m, kPadRight);
+    press(p, m, kPadDown);
+    press(p, m, kPadDown);  // Back
+    assert(press(p, m, kPadX).kind == Action::None && g_sound == Sound::Error);
+    p.close();
 
     // A on an item: its menu (Info, Use for usable items, Move, Cancel)
     p.open(0);
@@ -160,6 +170,28 @@ int main() {
     assert(p.page() == 1);
     a = tap(p, m, Page::dot_x(0, 3), kDotY);  // dot 0: the game's page
     assert(a.kind == Action::Close && !p.open());
+    // a drag (towards the item buttons) is no tap: nothing happens on the page
+    p.open(0);
+    p.input({}, m);
+    {
+        Input down;
+        down.touch = true, down.x = kPlaceX[0], down.y = kPlaceY[0];
+        p.input(down, m);
+        down.x += 120;
+        p.input(down, m);
+        assert(p.input({}, m).kind == Action::None && p.mode() == Page::Mode::Browse && p.cursor() == 0);
+    }
+    // a touch held while the page opens is no tap when it is released
+    p.close();
+    {
+        Input held;
+        held.touch = true, held.x = kPlaceX[2], held.y = kPlaceY[2];
+        p.open(0);
+        p.input(held, m);
+        p.input({}, m);
+        assert(p.cursor() == 0 && p.mode() == Page::Mode::Browse);
+    }
+    p.close();
     assert(Page::hit(1000, 1000) == -1);
     assert(Page::hit(kPlaceX[kBack], kPlaceY[kBack]) == kBack);
 
