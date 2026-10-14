@@ -15,6 +15,7 @@ própria cópia do jogo de Wii U; este projeto nunca fornece arquivos do jogo.
 | **A tela do GamePad ao pausar** | Aperte + e a imagem troca para a tela do GamePad (mapa e itens), como o menu de pausa da versão de GameCube. Aperte + de novo para voltar. |
 | **60 fps sem deixar o jogo lento** | Nos dispositivos Android rápidos o jogo mostra 60 quadros por segundo. Quando o dispositivo Android esquenta, ele passa sozinho para 30 estáveis, e o jogo nunca fica lento. |
 | **Dispositivos Android antigos** | Se o driver da sua GPU Adreno for antigo demais, a tela de erro oferece instalar um driver como o Mesa Turnip. |
+| **Recuperação da GPU** | Depois de um erro de dispositivo perdido da GPU, a próxima inicialização identifica o driver e oferece o driver do sistema, outro instalado ou o seletor de ZIP existente antes de iniciar o Vulkan. Continuar mantém sua escolha; um teste inicial incompleto ainda usa o driver do sistema. |
 | **Saves** | Exporte e importe seus saves e guarde no backup do Android. Saves de um Wii U de verdade (americano ou europeu) também funcionam. |
 
 O Android solicita 60 Hz para 30 fps, 60 fps interpolados e 60 fps reais, ou a cadência selecionada de 120/240 Hz para interpolação mais rápida. O Android pode escolher outra frequência compatível. A solicitação é reaplicada ao voltar ao jogo. Para deixar a escolha da frequência inteiramente com o Android, defina `WWHD_NO_60HZ=1` em uma compilação de desenvolvimento (`0` mantém a solicitação ativada).

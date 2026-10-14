@@ -1,3 +1,6 @@
+#ifdef __ANDROID__
+#include "android_driver.h"
+#endif
 #include "pass.h"
 #include "overlay/window_target.h"
 #include "deferred_dispatch.h"
@@ -201,7 +204,11 @@ struct PresentApi {
  X(vkAllocateDescriptorSets) X(vkUpdateDescriptorSets) X(vkCmdPipelineBarrier) \
  X(vkCmdSetScissor) X(vkCmdSetViewport) X(vkCmdBindPipeline) X(vkCmdBindDescriptorSets) \
  X(vkCmdPushConstants) X(vkCmdDraw)
+#ifdef __ANDROID__
+#define FIELD(name) drivers::ObservedFunction<PFN_##name> name;
+#else
 #define FIELD(name) PFN_##name name=nullptr;
+#endif
  PRESENT_FUNCTIONS(FIELD)
 #undef FIELD
  PassApi passes;

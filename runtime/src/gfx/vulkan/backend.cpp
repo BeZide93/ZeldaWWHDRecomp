@@ -440,6 +440,9 @@ public:
 };
 void vk_check(VkResult r, const char *op) {
   if (r != VK_SUCCESS) {
+#ifdef __ANDROID__
+    if(r==VK_ERROR_DEVICE_LOST)drivers::note_device_lost();
+#endif
     VulkanFailure failure(r, op);
     exception_report::record(failure.what());  // logged like every runtime error (exception_report.h)
     throw failure;
@@ -1909,6 +1912,7 @@ static void update_secondary_surface() {
   VkAndroidSurfaceCreateInfoKHR info{VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR};
   info.window = next;
   VkResult result = create(R.instance, &info, nullptr, &s.surface);
+  if(result==VK_ERROR_DEVICE_LOST)drivers::note_device_lost();
   if (result != VK_SUCCESS) {
     LOG("[vulkan] secondary surface unavailable (%d)", int(result));
     return;
@@ -3374,6 +3378,9 @@ static void init_device(std::vector<const char *> extensions,
             : "The graphics driver does not support the Vulkan features the game needs: Vulkan 1.1 or newer.\n" + unsuitable +
                   "\n\n" + kUpdateDriver);
   vkGetPhysicalDeviceProperties(R.physicalDevice, &R.properties);
+#ifdef __ANDROID__
+  drivers::set_vulkan_identity(std::string(R.properties.deviceName)+"; Vulkan driver "+driver_version_text(R.properties));
+#endif
   const uint32_t deviceApi = device_api_version(R.properties);
   LOG("[vulkan] device: %s (Vulkan %s, driver %s%s)", R.properties.deviceName,
       version_text(R.properties.apiVersion).c_str(), driver_version_text(R.properties).c_str(),
@@ -3390,6 +3397,14 @@ static void init_device(std::vector<const char *> extensions,
         (unsigned long long)limits.minUniformBufferOffsetAlignment,limits.maxUniformBufferRange);
   }
   const std::vector<VkExtensionProperties> des = device_extensions(R.physicalDevice);
+#ifdef __ANDROID__
+  if(R.properties.apiVersion>=VK_API_VERSION_1_2 || has_extension(des,"VK_KHR_driver_properties")) {
+    VkPhysicalDeviceDriverProperties driver{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES};
+    VkPhysicalDeviceProperties2 props{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};props.pNext=&driver;
+    vkGetPhysicalDeviceProperties2(R.physicalDevice,&props);
+    drivers::set_vulkan_identity(std::string(driver.driverName,strnlen(driver.driverName,sizeof driver.driverName))+"; "+R.properties.deviceName+"; version "+driver_version_text(R.properties));
+  }
+#endif
   std::vector<const char *> de{VK_KHR_SWAPCHAIN_EXTENSION_NAME};
   if (R.dynamicRenderingKHR) {
     de.push_back(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME);
