@@ -7,6 +7,12 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Vulkan: a classic render-pass mode for older graphics drivers** (issues #144 and #51): the game now also runs
+  on Vulkan 1.1 / 1.2 drivers without dynamic rendering (for example older AMD drivers), and older Intel
+  Windows drivers (before 101.2121), which crashed on dynamic rendering, use the classic mode automatically.
+  `WWHD_VK_FORCE_RENDERPASS=1` forces it for testing; `=0` turns it off. Everyone else keeps the current
+  renderer path, with the same pictures and performance.
+
 - **Story system for quest mods** (letters, a quest notebook and sea-chart marks, in the game's own style). The
   port brings the system; all quest content comes from the mod catalogue:
   - **Story system** (Mods > Built-in, on): it needs the **Story Notebook** package from the mod catalogue, which
