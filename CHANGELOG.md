@@ -7,6 +7,10 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Fixed: Windows setup stopped while linking when the folder name had an emoji or other special characters**
+  ("'charmap' codec can't encode character"). Setup now writes its linker file lists as UTF-8, so the game can be
+  set up in any folder.
+
 - **Story system for quest mods** (letters, a quest notebook and sea-chart marks, in the game's own style). The
   port brings the system; all quest content comes from the mod catalogue:
   - **Story system** (Mods > Built-in, on): it needs the **Story Notebook** package from the mod catalogue, which

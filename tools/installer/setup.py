@@ -1737,7 +1737,7 @@ def link_game(tc, manifest, objs, work, out_exe, recipe=None, glue=()):
         os.remove(lib)
     if tc.rsp:
         rsp = os.path.join(work, "ar.rsp")
-        with open(rsp, "w") as f:
+        with open(rsp, "w", encoding="utf-8") as f:  # LLVM reads response files as UTF-8; the folder may hold any character
             f.write("\n".join('"%s"' % fwd(o) for o in objs))
         run_logged(tc.ar + ["rcs", fwd(lib), "@" + fwd(rsp)], env=tc.env, what="archiving the game code")
     else:
@@ -1754,7 +1754,7 @@ def link_game(tc, manifest, objs, work, out_exe, recipe=None, glue=()):
         args += ["-Wl,-rpath,@executable_path"]
     if tc.rsp:
         rsp = os.path.join(work, "link.rsp")
-        with open(rsp, "w") as f:
+        with open(rsp, "w", encoding="utf-8") as f:
             f.write("\n".join('"%s"' % a.replace('"', '\\"') for a in args))
         cmd = tc.cxx + ["@" + fwd(rsp)]
     else:
