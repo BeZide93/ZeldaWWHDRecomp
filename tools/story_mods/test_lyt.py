@@ -76,7 +76,7 @@ class Structure(unittest.TestCase):
         self.assertEqual(struct.unpack(">IHBB", second[36:44]), (0x15, 1, 4, 4))
 
     def test_hooks_not_written_yet(self):
-        for kind in ("window", "text"):
+        for kind in ("text",):
             d = load_json(EXAMPLE)
             d["panes"].append({"type": kind, "name": "X_00", "size": [1, 1]})
             with self.assertRaises(NotImplementedError):

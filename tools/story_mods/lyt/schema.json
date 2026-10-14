@@ -13,7 +13,7 @@
       "type": "object",
       "required": ["name", "size"],
       "properties": {
-        "type": {"enum": ["null", "picture", "window", "text"], "default": "null"},
+        "type": {"enum": ["null", "picture", "window", "text", "bounding", "parts"], "default": "null"},
         "name": {"$ref": "#/definitions/name24"},
         "size": {"$ref": "#/definitions/vec2"},
         "translate": {"$ref": "#/definitions/vec3"},
@@ -30,7 +30,7 @@
         "children": {"type": "array", "items": {"$ref": "#/definitions/pane"}}
       },
       "additionalProperties": true,
-      "description": "Window (wnd1) and text (txt1) panes add their own keys; see sections/wnd1.py and sections/txt1.py."
+      "description": "Window (wnd1), text (txt1) and parts (prt1) panes add their own keys; see sections/wnd1.py, sections/txt1.py and sections/prt1.py."
     },
     "track": {
       "type": "object",

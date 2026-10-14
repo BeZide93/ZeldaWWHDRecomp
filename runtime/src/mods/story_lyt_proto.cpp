@@ -11,6 +11,7 @@
 #include "runtime.h"
 #include "ppc.h"
 #include "guest_addr.h"
+#include "story_lyt_states.h"
 
 #include <chrono>
 #include <cstdlib>
@@ -75,11 +76,17 @@ void create(Cpu* c, uint32_t projection, uint32_t matrix) {
     st32(part + 0x44, layout);
     const uint32_t vtable = ld32(layout + 0xE0);
     const uint32_t load = ld32(vtable + 0x14);
-    const uint32_t ok = g_call(c, load, {layout, name, accessor, projection, matrix, 1, 1, 0});
+    // animation entries and play slots (WWHD_STORY_LYT_ANIMS: several, e.g. button states; else InAll only)
+    const bool many = story_lyt_states::active();
+    const uint32_t entries = many ? story_lyt_states::entry_count() : 1, slots = many ? story_lyt_states::slot_count() : 1;
+    const uint32_t ok = g_call(c, load, {layout, name, accessor, projection, matrix, entries, slots, 0});
     const uint32_t set = ld32(layout + 0xD4);
     LOG("[story-lyt] parts %08X layout %08X accessor %08X vLoad -> %u, lyt %08X, animation set %08X", part, layout, accessor,
         ok, ld32(layout + 4), set);
-    if (set) {
+    if (set && many) {
+        story_lyt_states::bind(c, g_call, set, safe_string);
+        g_anim = set;
+    } else if (set) {
         const uint32_t anim = safe_string("InAll"), group = safe_string("G_All_00");
         g_call(c, kBindGroup, {set, 0, anim, group});
         g_anim = set;
@@ -103,12 +110,17 @@ void parts_draw(Cpu* c) {
     ++g_draws;
     const bool reopened = now - g_last_draw > std::chrono::milliseconds(500);  // the item screen opens (again)
     if (g_anim && (reopened || (g_replay && g_draws % g_replay == 0))) {           // fade in
-        c->f[1].ps0 = 1.0;
-        c->f[1].ps1 = 1.0;
-        g_call(c, kAnimPlay, {g_anim, 0, 0});
+        if (story_lyt_states::active()) {
+            story_lyt_states::play_named(c, g_call, g_anim, "InAll");
+        } else {
+            c->f[1].ps0 = 1.0;
+            c->f[1].ps1 = 1.0;
+            g_call(c, kAnimPlay, {g_anim, 0, 0});
+        }
         LOG("[story-lyt] InAll starts (item screen draw %u)", g_draws);
     }
     g_last_draw = now;
+    if (g_anim) story_lyt_states::tick(c, g_call, g_anim, g_draws);
     g_call(c, kCalcLayout, {g_part});
     g_call(c, kPartsDraw, {g_part, viewport});
 }
