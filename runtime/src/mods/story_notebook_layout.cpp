@@ -50,10 +50,34 @@ void show(Cpu* c, const char* name, bool on) { story_lyt_screen::set_visible(sto
 std::string row_name(int i, const char* part) { return "N_Row" + std::to_string(i) + part; }
 std::string row_pane(const char* kind, int i, const char* part) { return std::string(kind) + "_Row" + std::to_string(i) + part; }
 
-// the text, cut with "..." to its pane's width (the page's own fit(), measured in the game's font)
-std::string fitted(Cpu* c, const char* pane, const std::string& text, float size, bool bold) {
-    const float w = pane_f(story_lyt_screen::pane(c, pane), 0x3C);
-    return w > 0 ? nb::fit(text, size, w, bold ? nb::kBold : "") : text;
+std::u16string utf16(const std::string& s) {
+    std::u16string out;
+    for (size_t i = 0; i < s.size();) {
+        const unsigned char b = (unsigned char)s[i];
+        const size_t n = b < 0x80 ? 1 : b < 0xE0 ? 2 : b < 0xF0 ? 3 : 4;
+        uint32_t cp = n == 1 ? b : n == 2 ? b & 31 : n == 3 ? b & 15 : b & 7;
+        for (size_t k = 1; k < n && i + k < s.size(); k++) cp = (cp << 6) | ((unsigned char)s[i + k] & 63);
+        i += n;
+        if (cp >= 0x10000) out += char16_t(0xD800 + ((cp - 0x10000) >> 10)), out += char16_t(0xDC00 + ((cp - 0x10000) & 0x3FF));
+        else out += char16_t(cp);
+    }
+    return out;
+}
+
+// the text, cut with "..." to its pane's width: measured with the pane's own font at its size (the game's
+// measure, story_lyt_text::text_width)
+std::string fitted(Cpu* c, const char* name, const std::string& text) {
+    const uint32_t pane = story_lyt_screen::pane(c, name);
+    const float w = pane_f(pane, 0x3C);
+    if (!pane || w <= 0 || story_lyt_text::text_width(c, pane, utf16(text)) <= w) return text;
+    std::string best;
+    for (size_t i = 0; i < text.size();) {
+        const size_t next = std::min(text.size(), i + nb::char_bytes((unsigned char)text[i]));
+        if (story_lyt_text::text_width(c, pane, utf16(text.substr(0, next) + "...")) > w) break;
+        best = text.substr(0, next);
+        i = next;
+    }
+    return best + "...";
 }
 
 void apply(Cpu* c, const View& v) {
@@ -77,8 +101,8 @@ void apply(Cpu* c, const View& v) {
         show(c, row_pane("T", i, "TitleDim").c_str(), r.dim);
         show(c, row_pane("T", i, "Next").c_str(), !r.dim);
         show(c, row_pane("T", i, "NextDim").c_str(), r.dim);
-        set_text(c, title.c_str(), fitted(c, title.c_str(), r.title, 25, true));
-        set_text(c, next.c_str(), fitted(c, next.c_str(), r.next, 19, false));
+        set_text(c, title.c_str(), fitted(c, title.c_str(), r.title));
+        set_text(c, next.c_str(), fitted(c, next.c_str(), r.next));
         set_text(c, row_pane("T", i, "Status").c_str(), r.status);
         set_text(c, row_pane("T", i, "Initial").c_str(), r.initial);
         show(c, row_pane("T", i, "Initial").c_str(), r.initial_shown);

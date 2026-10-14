@@ -103,6 +103,8 @@ bool set_text(Cpu*, uint32_t pane, const std::string& utf8, const Options&) {
     g.text_calls.push_back(g.name[pane]);
     return true;
 }
+// a fixed advance per character, so nothing in the tests is cut
+float text_width(Cpu*, uint32_t, const std::u16string& text) { return float(text.size()); }
 bool set_capacity(Cpu*, uint32_t pane, uint32_t) {
     assert(g.name.count(pane));
     return true;
