@@ -7,6 +7,34 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Story system for quest mods** (letters, a quest notebook and sea-chart marks, in the game's own style). The
+  port brings the system; all quest content comes from the mod catalogue:
+  - **Story system** (Mods > Built-in, on): it needs the **Story Notebook** package from the mod catalogue, which
+    setup installs (it needs the internet once). If setup was offline, install it later in Mods: switch the
+    Story system on, or press Install on its line. It's required for every quest mod and stays enabled. The game's
+    start never goes online; without the package the story system stays inactive and the normal game is
+    unchanged.
+  - **Letters by Rito mail:** a quest mod announces its quest with a letter from the Rito postbox, once Link has
+    the Delivery Bag. The Story Notebook package's letter brings the **story notebook**.
+  - **Story notebook:** in the Delivery Bag. Its page lists every mod quest with the next step, where to go and its
+    status, with an Archive tab for finished quests. "Show on chart" puts the game's red circle on the tracked
+    step, also in the zoomed chart square, and it follows characters who walk around.
+  - **Quests described as data:** a mod's `manifest.json` lists its quests, steps, places, characters and rewards.
+    Steps can wait for story or item conditions ("Not yet possible: ...").
+  - **Characters take part:** a quest can give a resident new lines. When several quests want the same character,
+    the game's own choice box asks which one. The King of Red Lions says a one-time line for the tracked quest.
+    Residents are named by neutral ids; their names and places are read from your own game files.
+  - **Mod charts:** a quest can hand Link its own chart (by letter, in a conversation or as a reward). It appears
+    in the MAP menu's chart list after the game's charts, opens in the game's own chart view with an X at its
+    place, and gets the check mark when its treasure is found. "Open chart" in the notebook jumps there. Mod
+    charts have their own numbers after the game's 61 charts and never touch the game's charts or save data.
+  - **Progress is kept in the save file** in a small block the game itself ignores. Removing the mods leaves a normal
+    save.
+  Details for mod authors in docs/mod-sdk-v2.md; the Story Notebook package and the example quest mods are in the
+  mod repository.
+
+## v0.2.14
+
 - **The controller selection after the title screen is skipped** (issue #189, thanks @floysh): the game no longer asks
   whether you play with the Wii U GamePad or a Pro Controller, because the port already knows it from Controls. It picks
   the matching option through the game's own selection, so everything that depends on it stays the same. To choose by
@@ -113,32 +141,6 @@ what is on `devel` and not released yet (also in the
   the picture hitched; the steps now follow the display's refresh. A hitch right after starting could also keep
   all in-between frames off (30 fps) until the frame rate was changed; that measurement is now retried. Slower PCs
   keep v0.2.13's smoother pacing (#125).
-
-- **Story system for quest mods** (letters, a quest notebook and sea-chart marks, in the game's own style). The
-  port brings the system; all quest content comes from the mod catalogue:
-  - **Story system** (Mods > Built-in, on): it needs the **Story Notebook** package from the mod catalogue, which
-    setup installs (it needs the internet once). If setup was offline, install it later in Mods: switch the
-    Story system on, or press Install on its line. It's required for every quest mod and stays enabled. The game's
-    start never goes online; without the package the story system stays inactive and the normal game is
-    unchanged.
-  - **Letters by Rito mail:** a quest mod announces its quest with a letter from the Rito postbox, once Link has
-    the Delivery Bag. The Story Notebook package's letter brings the **story notebook**.
-  - **Story notebook:** in the Delivery Bag. Its page lists every mod quest with the next step, where to go and its
-    status, with an Archive tab for finished quests. "Show on chart" puts the game's red circle on the tracked
-    step, also in the zoomed chart square, and it follows characters who walk around.
-  - **Quests described as data:** a mod's `manifest.json` lists its quests, steps, places, characters and rewards.
-    Steps can wait for story or item conditions ("Not yet possible: ...").
-  - **Characters take part:** a quest can give a resident new lines. When several quests want the same character,
-    the game's own choice box asks which one. The King of Red Lions says a one-time line for the tracked quest.
-    Residents are named by neutral ids; their names and places are read from your own game files.
-  - **Mod charts:** a quest can hand Link its own chart (by letter, in a conversation or as a reward). It appears
-    in the MAP menu's chart list after the game's charts, opens in the game's own chart view with an X at its
-    place, and gets the check mark when its treasure is found. "Open chart" in the notebook jumps there. Mod
-    charts have their own numbers after the game's 61 charts and never touch the game's charts or save data.
-  - **Progress is kept in the save file** in a small block the game itself ignores. Removing the mods leaves a normal
-    save.
-  Details for mod authors in docs/mod-sdk-v2.md; the Story Notebook package and the example quest mods are in the
-  mod repository.
 
 - **Mods tab: Built-in and Community.** The Mods list is split into *Built-in* (the options that come
   with the game, such as the camera and speed options) and *Community* (mods from the mod catalogue,
