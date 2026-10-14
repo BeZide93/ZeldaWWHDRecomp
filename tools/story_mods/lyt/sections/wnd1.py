@@ -144,3 +144,10 @@ def parse(section):
                  for j in range(4)] for k in range(ntc)],
         "frames": frames,
     }
+
+
+def materials(p):
+    """Names of the description materials this window uses (frames and content given by "material"):
+    for the animation check that a material track's pane is in the animation's groups."""
+    specs = list(p.get("frames", [])) + [p.get("content", {})]
+    return sorted({s["material"] for s in specs if "material" in s})

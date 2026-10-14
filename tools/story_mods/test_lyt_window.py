@@ -99,6 +99,11 @@ class Window(unittest.TestCase):
         self.assertEqual((a["content_material"], a["frames"]), (b["content_material"], b["frames"]))
         self.assertEqual((a["size"], b["size"]), ([100, 60], [700, 400]))
 
+    def test_materials_used(self):
+        p = {"frames": [{"material": "A"}, {"texture": "T"}, {"material": "B"}, {"material": "A"}],
+             "content": {"material": "C"}}
+        self.assertEqual(wnd1.materials(p), ["A", "B", "C"])
+
     def test_flags(self):
         f = lambda **k: wnd1.flags_of(dict({"name": "W"}, **k))
         self.assertEqual(f(), 0x01)
