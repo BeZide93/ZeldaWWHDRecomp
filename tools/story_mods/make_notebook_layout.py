@@ -127,10 +127,14 @@ def text(name, x, y, size, colour, value="", bold=False, width=None, align="left
     # around dark letters, a dark one around light letters. Material colours are linear, the HUD's sRGB.
     fill = rgba(colour)
     light = sum(fill[:3]) > 3 * 160
-    # plain text: the border in the letters' own colour (the HUD's plain letters are as heavy as that)
-    border = ([44, 58, 46, 255] if light else [255, 255, 255, 255]) if bold else fill[:3] + [96]
+    # The game's text material mixes black -> white by the glyph's value: the letters (full value) take
+    # white, the font's border (about half value) a mix of both. Plain text: black = transparent white, as
+    # the game's own plain panes (ffffff00): the border fades out on the paper (black = the ink at alpha 0
+    # gives the border the ink at half alpha: heavy letters). Bold: the HUD's menu-label border.
+    border = ([44, 58, 46, 255] if light else [255, 255, 255, 255]) if bold else [255, 255, 255, 0]
     p = {"type": "text", "name": name, "size": [round(w, 3), round(h, 3)], "translate": place(x, y, w, h, parent),
-         "font": "CKingMain.bffnt" if bold else "CKingMsg.bffnt", "font_size": [round(size * k * (1.0 if square else 0.92), 2), round(size * k, 2)],
+         # the HUD page draws all its text in the game's menu font (story_notebook_font.h)
+         "font": "CKingMain.bffnt", "font_size": [round(size * k * (1.0 if square else 0.92), 2), round(size * k, 2)],
          "text": value, "capacity": capacity, "text_position": pos, "line_alignment": align,
          "text_material": {"black": linear(border), "white": linear(fill)}}
     p.update(kw)
