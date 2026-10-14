@@ -91,6 +91,15 @@ int main(int argc, char** argv) {
 #endif
     using namespace mods;
     assert(!extended_lock_on() && lock_on_range() == 1.f && lock_on_cycling());
+    // Default-off wrapper must call native judgement exactly once and not read even
+    // an unmapped attention object (nor consult overlay/step/input state).
+    Cpu stock{}; stock.r[3] = attention;
+    Cpu expected = stock;
+    f_024ECCFC_orig(&expected);
+    const auto native_before = native_calls;
+    hook_024ECCFC(&stock);
+    assert(native_calls == native_before + 1 && rebuilds == 0);
+    assert(!std::memcmp(&stock, &expected, sizeof stock));
     map(actor); map(0x10470000); map(0x101E0000); map(0x101F0000);
     st16(rule, 2); st32(actor + 0x39C, 4);
     auto c = arguments();
@@ -141,8 +150,12 @@ int main(int argc, char** argv) {
     st32(attention + 0x54 + 8, 2); st32(attention + 0x54 + 12, 10);
     auto judgement = [&] {
         Cpu cpu{}; cpu.r[3] = attention; cpu.r[1] = actor + 0xF000;
+        Cpu expected = cpu;
+        f_024ECCFC_orig(&expected);
+        const auto calls = native_calls;
         hook_024ECCFC(&cpu);
-        assert(cpu.r[3] == 0x12345678 && cpu.r[4] == 0xDEADBEEF && cpu.f[1].ps0 == 17);
+        assert(native_calls == calls + 1);
+        assert(!std::memcmp(&cpu, &expected, sizeof cpu)); // complete native register ABI
     };
     auto pad = [&](uint32_t buttons) {
         input::PadState s{}; s.buttons = buttons; s.rx = .7f;
@@ -155,7 +168,6 @@ int main(int argc, char** argv) {
     judgement(); pad(input::kStickR); judgement(); assert(rebuilds == 1); // a hold is one cycle
     pad(0); pad(input::kStickR); judgement(); assert(selected() == 30 && rebuilds == 2);
     pad(0); pad(input::kStickR); judgement(); assert(selected() == 10 && rebuilds == 3); // wrap
-    assert(native_calls >= 6);
     // No live alternate: retain both lists/index exactly, including a release-range-only target.
     unsigned char before[0xD0]; std::memcpy(before, mem::ptr(attention + 0x54), sizeof before);
     candidates = {{10, 2}, {99, 0}, {UINT32_MAX, 2}, {20, 2, false}};
@@ -221,6 +233,14 @@ int main(int argc, char** argv) {
     // A save/load reset disarms a queued press; release is required for the next one.
     pad(0); judgement(); pad(input::kStickR); lock_on_reset(); judgement();
     assert(rebuilds == last_rebuild);
+    pad(input::kStickR); judgement(); assert(rebuilds == last_rebuild);
+    pad(0); judgement(); pad(input::kStickR); judgement(); assert(rebuilds == last_rebuild + 1);
+    // Disabling with a queued press cancels it; a held R3 cannot replay on re-enable.
+    last_rebuild = rebuilds;
+    pad(0); judgement(); pad(input::kStickR);
+    set_extended_lock_on(false); judgement();
+    assert(rebuilds == last_rebuild);
+    set_extended_lock_on(true);
     pad(input::kStickR); judgement(); assert(rebuilds == last_rebuild);
     pad(0); judgement(); pad(input::kStickR); judgement(); assert(rebuilds == last_rebuild + 1);
     // The default 1x path is numerically identical even with the assistance enabled.

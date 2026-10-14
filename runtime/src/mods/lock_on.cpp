@@ -87,6 +87,9 @@ void scale_enemy_distance(Cpu* c, unsigned category, uint32_t attention_info) {
 // through native eligibility, then change only the selected list index; Link/camera publication,
 // chase/release and target deletion remain native. Never retain actor pointers between frames.
 void cycle_after_judgement(Cpu* c, uint32_t attention) {
+    // Enabling/disabling resets queued input under input_mutex. Keep the stock path
+    // free of guest reads and locking; retain the active check below for concurrent changes.
+    if (!extended_lock_on()) return;
     const uint32_t index = ld32(attention + 0xD8);
     const uint32_t previous_count = ld32(attention + 0xD4);
     const uint32_t entry = attention + 0x54 + (index < 8 ? index * 16 : 0);

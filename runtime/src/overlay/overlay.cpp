@@ -1176,6 +1176,18 @@ void builtin_options(const std::string& id) {
         float speed = mods::camera_speed();
         if (ImGui::SliderFloat("Camera speed", &speed, .5f, 2.f, "%.2fx"))
             hostui::post([speed] { mods::set_camera_speed(speed); hostui::set("mod.direct-camera.speed", std::to_string(speed)); mods::packages::remember_option("direct-camera.speed", speed); });
+    } else if (id == "lock-on") {
+        float range = mods::lock_on_range();
+        if (ImGui::SliderFloat("Enemy lock-on range", &range, 1.f, 3.f, "%.2fx"))
+            hostui::post([range] { mods::set_lock_on_range(range); hostui::set("mod.lock-on.range", std::to_string(range)); mods::packages::remember_option("lock-on.range", range); });
+        bool cycling = mods::lock_on_cycling();
+        if (ImGui::Checkbox("Cycle enemy targets with R3", &cycling))
+            hostui::post([cycling] { mods::set_lock_on_cycling(cycling); hostui::set("mod.lock-on.cycling", cycling ? "1" : "0"); mods::packages::remember_option("lock-on.cycling", cycling); });
+        help("Range 1 keeps the original enemy targeting distance. Press R3 while locked on "
+             "to cycle enemy targets. Disabling this mod restores original targeting behavior.");
+        for (const char* env : {"WWHD_MOD_LOCK_ON_RANGE", "WWHD_MOD_LOCK_ON_CYCLING"})
+            if (const char* override = std::getenv(env))
+                note("%s=%s overrides the saved option at startup.", env, override);
     } else if (id == "fast-forward") {
         for (unsigned rate : {2u, 3u, 4u}) {
             if (rate != 2) ImGui::SameLine();
