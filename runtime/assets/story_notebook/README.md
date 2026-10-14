@@ -11,5 +11,6 @@ and its 512 × 512 base colour texture embedded), same author. `tools/story_mods
 the get-item model from it on the player's machine (with the material and shader of the player's own
 game files, which are never part of the repository).
 
-Licence: original artwork by the project lead (made with ChatGPT image generation), published under the
-repository's licence (confirmed 2026-10-13).
+Licence: both are original artwork by the project lead and published under the repository's licence
+(confirmed 2026-10-13). The icon was made with ChatGPT image generation, the 3D model with Meshy on a paid plan
+(the output belongs to its author).

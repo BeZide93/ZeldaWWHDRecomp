@@ -114,13 +114,19 @@ what is on `devel` and not released yet (also in the
   all in-between frames off (30 fps) until the frame rate was changed; that measurement is now retried. Slower PCs
   keep v0.2.13's smoother pacing (#125).
 
-- **Mod SDK: story mods can guide the player** (letters, chart marks and a notebook, in the game's own style):
+- **Mod SDK: story mods with quests** (letters, a quest notebook and sea-chart marks, in the game's own style):
   - **Letters by Rito mail:** a story mod announces its quest with a letter from the Rito postbox, once Link has
     the Delivery Bag. The first one brings the **story notebook**.
-  - **Mod charts:** mods can mark places on Link's sea chart with the game's story rings.
-  - **Story notebook:** in the Delivery Bag (with its own icon); its page lists every mod quest with the next step,
-    where to go and its status, and "Show on chart" marks the tracked quest's next step on the sea chart.
-  - Without story mods nothing changes, and saves stay compatible: removing the mods leaves a normal save.
+  - **Story notebook:** in the Delivery Bag (with its own icon and 3D model). Its page lists every mod quest with the
+    next step, where to go and its status, with an Archive tab for finished quests. "Show on chart" puts the game's
+    red circle on the tracked step, also in the zoomed chart square, and it follows characters who walk around.
+  - **Quests described as data:** a mod's `manifest.json` lists its quests, steps, places, characters and rewards.
+    Steps can wait for story or item conditions ("Not yet possible: ...").
+  - **Characters take part:** a quest can give a resident new lines. When several quests want the same character,
+    the game's own choice box asks which one. The King of Red Lions says a one-time line for the tracked quest.
+  - **Mod charts:** mods can mark places on Link's sea chart with the game's rings, like the game's treasure charts.
+  - **Progress is kept in the save file** in a small block the game itself ignores. Removing the mods leaves a normal
+    save, and without story mods nothing changes.
   Details for mod authors in docs/mod-sdk-v2.md, with three example mods (rito-letter, story-chart, story-notebook).
 
 - **Mods tab: Built-in and Community.** The Mods list is split into *Built-in* (the options that come
