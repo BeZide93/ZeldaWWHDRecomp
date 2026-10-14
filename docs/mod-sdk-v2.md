@@ -515,7 +515,8 @@ the item menu, opens its page over the game:
   Done quests move to the **Archive** tab (Left/Right or a tap on the tab switches);
 - choosing a row shows what is known so far and the reward, and **Show on chart**: that quest's
   next step gets the game's story ring on the sea chart (the marker layer of
-  [Charts and markers](#charts-and-markers), before your chart markers). One quest at a time;
+  [Charts and markers](#charts-and-markers)); while a quest is shown, the chart shows only its
+  step and the markers of mod charts wait until no quest is shown. One quest at a time;
   choosing it again stops showing it. The ring moves when you place the next step elsewhere and
   disappears when the quest is done or the step has no place (the page then says the step has no
   place on the chart). In the zoomed view of that square, the game's red hand-drawn circle (the one

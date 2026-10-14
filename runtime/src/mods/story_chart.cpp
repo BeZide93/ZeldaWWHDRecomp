@@ -139,8 +139,9 @@ void apply(uint32_t menu) {
         if (g_tracked(t.x, t.z, label)) shown.push_back(t), tracked = true;
     }
     std::lock_guard lock(g_mu);
-    for (const Marker& m : g_markers)
-        if (chart_value(b, m.key) == kChartOwned) shown.push_back({m.x, m.z});
+    if (!tracked)  // while a quest is tracked, the chart shows only its step
+        for (const Marker& m : g_markers)
+            if (chart_value(b, m.key) == kChartOwned) shown.push_back({m.x, m.z});
     if (shown.empty()) return;
     const float cx = float(ldf32(main + kPaneTranslate)), cy = float(ldf32(main + kPaneTranslate + 4));
     const float sx = float(ldf32(main + kPaneSize)) / kSquaresPerSide, sy = float(ldf32(main + kPaneSize + 4)) / kSquaresPerSide;

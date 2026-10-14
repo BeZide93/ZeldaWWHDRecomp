@@ -267,6 +267,24 @@ void test_balloon() {
     st32(kIcon + 0x150, f32_as_u32(0.01f)), st32(kIcon + 0x154, f32_as_u32(0.01f));
     st32(kIcon + 0x144, 1);  // zoomed in (detail)
     set_tracked_source(tracked_source);
+    // while a quest is tracked, the sea chart shows only its step: the mod chart markers wait
+    {
+        build_menu();
+        game_shows = {};
+        auto shown_now = [] {
+            unsigned n = 0;
+            for (unsigned i = 0; i < 8; i++) n += visible(i);
+            return n;
+        };
+        give("bal", "c");
+        assert(mark("bal", "c", "m", 0, 0, kIconStory, "") == kResultOwned);
+        tracked_on = false;
+        update();
+        const unsigned untracked = shown_now();
+        tracked_on = true;
+        update();
+        assert(shown_now() == 1 && untracked >= 1);
+    }
     auto run = [&] {
         Cpu c{};
         c.r[3] = kIcon;
