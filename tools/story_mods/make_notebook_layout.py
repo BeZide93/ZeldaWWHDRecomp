@@ -110,6 +110,19 @@ def null(name, x, y, w, h, children, parent=(0.0, 0.0), **kw):
     return p
 
 
+def three_slice(name, x, y, w, h, material, size, parent, **kw):
+    """A plate picture (size: its pixels) as a null pane with 3 pictures: the ends keep their shape (3/4 of
+    the height each), the middle stretches."""
+    pw_, ph_ = size
+    cap = min(w / 2, h * 0.75)
+    share = cap / h * ph_ / pw_
+    c = centre(x, y, w, h)
+    return null(name, x, y, w, h, [
+        pic(name + "L", x, y, cap, h, material, c, [[0, 0], [share, 0], [0, 1], [share, 1]]),
+        pic(name + "M", x + cap, y, w - 2 * cap, h, material, c, [[share, 0], [1 - share, 0], [share, 1], [1 - share, 1]]),
+        pic(name + "R", x + w - cap, y, cap, h, material, c, [[1 - share, 0], [1, 0], [1 - share, 1], [1, 1]])], parent, **kw)
+
+
 def centre(x, y, w, h):
     return (x + w / 2 - W / 2, H / 2 - (y + h / 2))
 
@@ -251,15 +264,18 @@ def prepare_art(art, out):
     bh = 160
     banner = banner.resize((round(banner.width * bh / banner.height), bh), Image.LANCZOS)
     banner.save(os.path.join(out, "banner.png"))
-    plates = painted_plates(frame) or [FR_PLATE_L, FR_PLATE_R]  # where this frame paints them
-    return frame.size, banner.size, pieces, plates
+    painted = painted_plates(frame)  # where this frame paints its bottom plates (None: it has none)
+    return frame.size, banner.size, pieces, painted
 
 
 def build(art, out_dir):
     out = os.path.join(out_dir, "layout")
     os.makedirs(out, exist_ok=True)
     write_small_art(out)
-    (frame_w, frame_h), (banner_w, banner_h), pieces, (plate_l, plate_r) = prepare_art(art, out)
+    (frame_w, frame_h), (banner_w, banner_h), pieces, painted = prepare_art(art, out)
+    # the bottom plates: where the frame paints them, else at the old frame's plates (the page's own touch
+    # boxes, story_notebook_page.h geo()), drawn as elements of their own
+    plate_l, plate_r = painted or (FR_PLATE_L, FR_PLATE_R)
     tex = lambda png: {"png": png, "tile": "tiled"}
     textures = {"NbFrame_00": tex("frame.png"), "NbBanner_00": tex("banner.png"), "NbWhite_00": tex("white.png"),
                 "NbRing_00": tex("ring.png"), "NbCross_00": tex("cross.png"), "NbCorner_00": tex("corner.png")}
@@ -280,6 +296,7 @@ def build(art, out_dir):
                          "NbCloseRound_00": tex("close_round.png")})
         # the lit tab: plate b as painted; the shaded one: plate a, darker
         materials.update({"M_TabPlateOn": mat("NbTabB_00"), "M_TabPlateOff": mat("NbTabA_00", [200, 212, 200, 255]),
+                          "M_PlateA": mat("NbTabA_00"),
                           "M_CloseRound": mat("NbCloseRound_00")})
         pieces = {}  # the user's buttons replace the pieces cut out of the old frame
     for name in pieces:
@@ -390,7 +407,11 @@ def build(art, out_dir):
         size = 34
         pw = size + 6 + len(label) * size * 0.8 * 0.44  # the label's width as the HUD measures it
         px, py = x + (w - pw) / 2, y + (h - size) / 2 - 2
-        plates.append(null("N_Plate" + name, x, y, w, h, [
+        plate = []
+        if buttons and not painted:  # the frame has no plates: the user's plate (A's plate lit, B's plain)
+            key, m = ("b", "M_TabPlateOn") if name == "Track" else ("a", "M_PlateA")
+            plate.append(three_slice("P_Plate" + name, x, y, w, h, m, buttons[key][1], pc))
+        plates.append(null("N_Plate" + name, x, y, w, h, plate + [
             text("T_%sIcon" % name, px, py, size, WHITE, glyph, width=size + 4, parent=pc, capacity=4, font="CKingPic.bffnt",
                  k=1.0, square=True),
             text("T_%sLabel" % name, px + size + 6, py + size * 0.1, size * 0.8, INK, label, bold=True, width=w, parent=pc,
