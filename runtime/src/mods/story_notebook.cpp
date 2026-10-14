@@ -421,7 +421,8 @@ void bag_icon() {
         last = g_icon_reason;
         if (at.shown) lx = at.x, ly = at.y;
     }
-    if (!at.shown && !letter.shown) {
+    // the page drawn as a game layout covers the bag (the HUD's page did by being drawn later)
+    if (story_notebook_layout::drawing() || (!at.shown && !letter.shown)) {
         if (published) store.drop(kIconOwner);
         published = false;
         return;

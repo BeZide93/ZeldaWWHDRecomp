@@ -287,6 +287,11 @@ bool update(const nb::Page& page, const std::vector<nb::Row>& all) {
     return g_view.mode != 0;
 }
 
+bool drawing() {
+    std::lock_guard lock(g_mu);
+    return g_drawing;
+}
+
 bool update_closed() {
     if (!story_lyt_screen::has_client()) return false;
     std::lock_guard lock(g_mu);

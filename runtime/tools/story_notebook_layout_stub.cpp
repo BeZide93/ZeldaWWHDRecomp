@@ -9,4 +9,5 @@ namespace story_notebook_layout {
 bool configure() { return false; }
 bool update(const story_notebook::Page&, const std::vector<story_notebook::Row>&) { return false; }
 bool update_closed() { return false; }
+bool drawing() { return false; }
 }  // namespace story_notebook_layout

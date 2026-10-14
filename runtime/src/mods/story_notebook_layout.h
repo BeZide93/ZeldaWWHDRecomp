@@ -31,4 +31,5 @@ bool configure();
 // layout shows it (the HUD then draws none of the page, only its portraits)
 bool update(const story_notebook::Page& page, const std::vector<story_notebook::Row>& all);
 bool update_closed();  // the page is closed: true while the layout's closing animation still runs
+bool drawing();        // the layout shows the page (or its closing) now
 }  // namespace story_notebook_layout
