@@ -30,7 +30,7 @@ namespace {
 constexpr uint32_t kGlobals = 0x101F0000, kGlobals2 = 0x10460000, kArena = 0x20000000;
 constexpr uint32_t kSave = kArena, kRegistry = kArena + 0x2000, kActor = kArena + 0x6000, kScratch = kArena + 0x7000;
 constexpr uint32_t kStageName = 0x1046F0B0 + 0x5134, kTagData = 0x10475634, kSalvageId = 0x10475638;
-constexpr uint32_t kRoomReLoader = 0x025C2E8C, kEntry = 0x025B44A0, kCreate = 0x025D5834;
+constexpr uint32_t kRoomReLoader = 0x025C2E8C, kEntry = 0x025B44A0, kCreate = 0x025D5834, kChestDelete = 0x024683D8;
 
 void* map(uint32_t at, uint32_t size) {
 #ifdef _WIN32
@@ -50,6 +50,11 @@ struct Create {
 std::vector<Create> creates;
 void original(Cpu* c, uint32_t fn) {
     if (fn == kRoomReLoader) calls.push_back("roomReLoader " + std::to_string(int32_t(c->r[5])));
+    else if (fn == kChestDelete) {  // daSTBox_c::_delete of a chart chest: the counter register (made-up byte)
+        const uint32_t ev = ld32(0x101F84DC) + 0x644;
+        st8(ev + 0xA1, uint8_t(ld8(ev + 0xA1) + 1));
+        calls.push_back("chest delete");
+    }
     else if (fn == kEntry) calls.push_back("entry");
     else calls.push_back("other");
 }
@@ -154,7 +159,7 @@ void test_install() {
             [](uint32_t, void (*)(Cpu*)) { assert(!"conflict: all or nothing"); });
     assert(!installed());
     install([](uint32_t) { return std::string(); }, [](uint32_t addr, void (*fn)(Cpu*)) { installed_hooks[addr] = fn; });
-    assert(installed() && installed_hooks.size() == 6 && installed_hooks.count(kRoomReLoader) && installed_hooks.count(kEntry) &&
+    assert(installed() && installed_hooks.size() == 7 && installed_hooks.count(0x024683D8) && installed_hooks.count(kRoomReLoader) && installed_hooks.count(kEntry) &&
            installed_hooks.count(0x025B8228) && installed_hooks.count(0x025D7E88));
 }
 
@@ -252,6 +257,25 @@ void test_active() {
     assert(active_save_no() == 0);
 }
 
+// a chart chest's _delete counts it in the game's event flags; a mod chart's chest doesn't
+void test_chest() {
+    const uint32_t ev = kSave + 0x644;
+    st8(ev + 0xA1, 1);
+    Cpu c{};
+    reset_registry();
+    st32(kTagData, kRegistry), st32(kSalvageId, 0xFFFFFFFF);
+    hooks_of(kChestDelete)(&c);  // the game's chest
+    assert(ld8(ev + 0xA1) == 2);
+    note_mod_chest();  // (b): a reserved point was finished
+    hooks_of(kChestDelete)(&c);
+    assert(ld8(ev + 0xA1) == 2);
+    hooks_of(kChestDelete)(&c);  // once only: the next chest is the game's again
+    assert(ld8(ev + 0xA1) == 3);
+    st8(slot(140) + 0x2C, 25), st8(slot(140) + 0x2D, 131), st8(slot(140) + 0x2F, 0), st32(kSalvageId, 140);  // still being salvaged
+    hooks_of(kChestDelete)(&c);
+    assert(ld8(ev + 0xA1) == 3);
+}
+
 }  // namespace
 
 int main() {
@@ -263,6 +287,7 @@ int main() {
     test_spawn();
     test_entry();
     test_active();
+    test_chest();
     std::puts("story_treasure_salvage_test: ok");
     return 0;
 }
