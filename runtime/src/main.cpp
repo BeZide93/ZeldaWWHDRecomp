@@ -48,6 +48,8 @@
 #include "crash_context.h"
 #include "input.h"
 #include "mods/manager.h"
+#include "mods/required.h"
+#include "platform/https.h"
 #include "mods/packages.h"
 #include "mods/save_backup.h"
 #include "runtime.h"
@@ -539,6 +541,20 @@ int main(int argc, char** argv) {
         g_guest_build_name, g_guest_build_title_id, m.entry, m.sda_base, m.sda2_base, m.data_end);
 
     dispatch::init();
+    {  // the story system's required package (mods/required.h), before the guest mods load
+        mods::required::Context rc;
+        std::string version = build::version();
+        const bool development = version == "dev" || version.find_first_of("+-") != std::string::npos;
+        if (version.starts_with("v")) version.erase(0, 1);
+        version = version.substr(0, version.find_first_of("+-"));
+        try { rc.port = mods::catalogue::Version::parse(version); } catch (...) {}
+        rc.catalogue = mods::required::catalogue_url(development);
+        rc.fetch = host::download_https;
+        rc.build = g_guest_build_name;
+        const std::string dir = mods::packages::directory();
+        if (!dir.empty()) rc.work = std::filesystem::path(dir).parent_path() / "Catalogue";
+        if (!dir.empty() && mods::packages::has_code_mod_support()) mods::required::ensure(rc);
+    }
     guestmods::init();  // trusted manager packages, before guest threads start
 #ifdef WWHD_DECOMP
     decomp::init();  // decomp build: which functions run decompiled (runtime/src/decomp), after the mods

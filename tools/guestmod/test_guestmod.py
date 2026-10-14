@@ -121,7 +121,7 @@ WWHD_HOOK(0x0240EBB0, mapped, (void* actor)) {
         return os.path.join(d, "mod.elf")
 
     def test_examples_build(self):
-        for mod in ("heart-ticker", "addcalc-replace", "hud-demo", "button-icons", "hud-cost", "rito-letter", "story-chart", "story-notebook"):
+        for mod in ("heart-ticker", "addcalc-replace", "hud-demo", "button-icons", "hud-cost"):
             with tempfile.TemporaryDirectory() as d:
                 pkg = os.path.join(d, "pkg")
                 os.makedirs(pkg)
@@ -215,7 +215,7 @@ WWHD_HOOK(0x02000000, all_services, (void)) {
     wwhd_quest_portrait("tale", "assets/p.png");
     wwhd_log_int("quest", wwhd_quest_state("tale"));
     wwhd_quest_carry("tale", 1);
-    wwhd_quest_talk("tale", 1, "windfall-kreeb", "Hello", 6);
+    wwhd_quest_talk("tale", 1, "windfall-um1", "Hello", 6);
     wwhd_quest_set_flag("tale", 1, 1);
     wwhd_log_int("flag", wwhd_quest_flag("tale", 1));
     wwhd_quest_done("tale");

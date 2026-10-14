@@ -44,6 +44,10 @@ const Entry catalogue[] = {
     {"fast-forward", "Fast forward cutscenes and dialogue", "Gameplay",
      "Hold the selected button during events to play faster. Choices still wait for input.",
      "WWHD_MOD_FAST_FORWARD", fast_forward, set_fast_forward},
+    {"story-system", "Story system", "Story",
+     "Letters, quests, the story notebook and mod charts. It comes with the Story Notebook package, which the "
+     "mod manager downloads from the mod catalogue and keeps installed while this is on.",
+     "WWHD_STORY_SYSTEM", story_system, set_story_system, true},
     {"fast-scenes", "Fast scene changes", "Gameplay",
      "Speed up fades and scene transitions while keeping ordinary gameplay at normal speed.",
      "WWHD_MOD_FAST_SCENES", fast_scenes, set_fast_scenes},

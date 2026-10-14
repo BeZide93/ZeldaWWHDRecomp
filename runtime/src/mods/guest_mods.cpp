@@ -22,6 +22,7 @@
 #include "story_mail_book.h"
 #include "story_chart.h"
 #include "story_notebook.h"
+#include "story_manifest.h"
 #include "story_store.h"
 #include "story_takeover.h"
 #include "mod_json.h"
@@ -48,6 +49,7 @@
 
 #include "recomp_table.h"
 #include "runtime.h"
+#include "../platform/host.h"
 #include "wwhd_guest_abi.h"
 
 extern "C" {
@@ -412,6 +414,62 @@ const WWHDGuestHostV1 kHost = {
     g_core_preempt, call_original, service,
 };
 
+// The NPC catalogue's names and spots come from the player's own game files: generated once by
+// tools/story_mods/npc_catalogue.py (next to the guest builder) into the port's data folder, for the
+// compiled-in recipes (story_npc_catalogue.h); generated again when the recipes change.
+bool g_story_package=false;
+void prepare_npc_catalogue() {
+    static bool done=false;
+    if(done)return;
+    done=true;
+    std::string recipes;for(const auto& r:story_notebook::npc_recipes())recipes+=r.second;
+    char tag[17];snprintf(tag,sizeof tag,"%016llx",(unsigned long long)std::hash<std::string>{}(recipes));
+    const char* forced=getenv("WWHD_NPC_CATALOGUE");
+    const std::filesystem::path dir=std::filesystem::path(host::config_dir())/"story";
+    const std::filesystem::path file=forced&&*forced?std::filesystem::path(forced):dir/("npc_catalogue-"+std::string(tag)+".json");
+    std::error_code ec;
+    if(!std::filesystem::is_regular_file(file,ec)) {
+        try {
+            const auto bridge=BuildBridge::installed(std::string());
+            const auto tool=std::filesystem::path(bridge.builder).parent_path().parent_path()/"story_mods"/"npc_catalogue.py";
+            std::filesystem::create_directories(dir/"recipes",ec);
+            auto command=bridge.python;command.push_back(tool.string());command.insert(command.end(),{"--game",config::game_dir,"--out",file.string(),"--json"});
+            for(const auto& [place,text]:story_notebook::npc_recipes()) {
+                const auto recipe=dir/"recipes"/(place+".recipe.json");
+                std::ofstream(recipe,std::ios::binary)<<text;
+                command.insert(command.end(),{"--recipe",recipe.string()});
+            }
+            const auto process=host::run_process(command);
+            LOG("[notebook] NPC catalogue generated from the game files: %s",process.code==0?"ok":(process.output+process.error).c_str());
+        } catch(const std::exception& e) {LOG("[notebook] NPC catalogue not generated: %s",e.what());}
+    }
+    if(!story_notebook::load_local_npc_catalogue(file.string()))
+        LOG("[notebook] NPC catalogue: no names from the game yet (residents show their description and have no spot)");
+}
+
+// The story notebook's game model, built from the Story Notebook package's .glb with the player's own
+// stand-in item archive (tools/story_mods/notebook_model.py, next to the guest builder) into the
+// package's data folder; built again when the .glb changes. Empty when it can't be built (the game's
+// stand-in model shows).
+std::string notebook_model(const std::filesystem::path& glb,const std::string& data_dir) {
+    std::error_code ec;
+    if(data_dir.empty()||!std::filesystem::is_regular_file(glb,ec))return {};
+    std::ifstream in(glb,std::ios::binary);std::string bytes{std::istreambuf_iterator<char>(in),{}};
+    char tag[17];snprintf(tag,sizeof tag,"%016llx",(unsigned long long)std::hash<std::string>{}(bytes));
+    const auto out=std::filesystem::path(data_dir)/("notebook_model-"+std::string(tag)+".szs");
+    if(std::filesystem::is_regular_file(out,ec))return out.string();
+    try {
+        const auto bridge=BuildBridge::installed(std::string());
+        const auto tool=std::filesystem::path(bridge.builder).parent_path().parent_path()/"story_mods"/"notebook_model.py";
+        std::filesystem::create_directories(data_dir,ec);
+        auto command=bridge.python;command.push_back(tool.string());
+        command.insert(command.end(),{"--game",config::game_dir,"--glb",glb.string(),"--out",out.string()});
+        const auto process=host::run_process(command);
+        LOG("[notebook] the notebook's model built from %s: %s",glb.filename().string().c_str(),process.code==0?"ok":(process.output+process.error).c_str());
+    } catch(const std::exception& e) {LOG("[notebook] the notebook's model not built: %s",e.what());}
+    return std::filesystem::is_regular_file(out,ec)?out.string():std::string();
+}
+
 bool load_one(const std::string& path, std::string& err,const mods::packages::GuestPackage& pkg,uint32_t base,uint32_t reserved) {
 #ifdef _WIN32
     void* lib = (void*)LoadLibraryA(path.c_str());
@@ -471,11 +529,24 @@ bool load_one(const std::string& path, std::string& err,const mods::packages::Gu
         LOG("[guestmods] %s %08X", h.kind == WWHD_GUEST_REPLACE ? "replace" : h.kind == WWHD_GUEST_HOOK_ENTRY ? "entry hook" : "return hook",
             h.target);
     }
-    // story quests declared in the manifest (story_notebook.h): known without running the mod's code
+    // story quests declared in the manifest (story_notebook.h): known without running the mod's code.
+    // The story system runs only with its required package, the Story Notebook (it brings the notebook
+    // and its look); without it no mod's quests are declared.
     try {
         std::ifstream manifest_file(std::filesystem::path(pkg.path)/"manifest.json",std::ios::binary);
         std::string manifest_text{std::istreambuf_iterator<char>(manifest_file),{}};
-        if(manifest_text.find("\"quests\"")!=std::string::npos)story_notebook::declare(loaded.id,loaded.name,mods::json::parse(manifest_text));
+        const auto manifest=mods::json::parse(manifest_text);
+        if(loaded.id==story_notebook::kNotebookPackage) {
+            g_story_package=true;
+            const auto& look=manifest.get("notebook");
+            const std::string icon=look.get("icon").string(),model=look.get("model").string();
+            story_notebook::set_look(icon.empty()?std::string():(std::filesystem::path(pkg.path)/icon).string(),
+                                     model.empty()?std::string():notebook_model(std::filesystem::path(pkg.path)/model,pkg.data_path));
+        }
+        if(manifest_text.find("\"quests\"")!=std::string::npos||manifest_text.find("\"charts\"")!=std::string::npos) {
+            prepare_npc_catalogue();
+            story_notebook::declare(loaded.id,loaded.name,manifest);
+        }
     } catch(const std::exception& e) {LOG("[guestmods] %s: manifest quests not read: %s",loaded.id.c_str(),e.what());}
     g_loaded.push_back(std::move(loaded));
     guard.handle = nullptr; // module functions remain resident for the process lifetime
@@ -538,6 +609,12 @@ void init() {
         if(result.module.empty()||!load_one(result.module,error,pkg,base,result.allocation_size))
             exception_report::raise(error.empty()?"Guest builder returned no module":error);
     });
+    // The story system runs only with its required package, the Story Notebook (packages.cpp makes every
+    // quest mod depend on it); without it: no letters, takeovers, chart marks or notebook, the game as it is.
+    if((story_mail::imported()||story_chart::imported()||story_notebook::imported())&&!g_story_package) {
+        LOG("[guestmods] the story system is inactive: the Story Notebook package (%s) isn't installed",story_notebook::kNotebookPackage.c_str());
+        return;
+    }
     // Letters from mods: host replacements of the postbox and message functions, only when a loaded
     // mod uses the letter services (story_mail.h).
     if(story_mail::imported())story_mail::set_text_buffers(mem::host_alloc(6144,16),6144);
@@ -546,7 +623,7 @@ void init() {
     // still kept as it is.
     const bool story=story_mail::imported()||story_chart::imported()||story_notebook::imported();
     if(story){uint32_t areas=mem::host_alloc(story_store::kMemoryBytes,16);memset(mem::ptr(areas),0,story_store::kMemoryBytes);story_store::set_memory(areas);}
-    // feasibility test: the notebook's model archive (tools/story_mods/notebook_model.py)
+    // developer override of the notebook's model archive (the Story Notebook package's setup step builds it)
     if(const char* model=getenv("WWHD_NOTEBOOK_MODEL");model&&*model)story_mail::set_notebook_model(model);
     story_mail::set_game_calls(call_original,[](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);});
     story_mail::install([](uint32_t addr) {

@@ -142,24 +142,15 @@ add_custom_target(wwhd_build_info
           -P ${CMAKE_SOURCE_DIR}/cmake/BuildInfo.cmake
   BYPRODUCTS ${WWHD_BUILD_INFO}
   COMMENT "Build info (version, commit)" VERBATIM)
-# ---- the story notebook's Delivery Bag icon (runtime/assets/story_notebook, story_notebook.cpp): the PNG
-# is compiled in, so no asset path is needed at run time
-set(WWHD_NOTEBOOK_ICON_PNG ${CMAKE_SOURCE_DIR}/runtime/assets/story_notebook/notebook_icon_192.png)
-set(WWHD_NOTEBOOK_ICON ${CMAKE_BINARY_DIR}/generated/story_notebook_icon.cpp)
-add_custom_command(OUTPUT ${WWHD_NOTEBOOK_ICON}
-  COMMAND ${CMAKE_COMMAND} -DIN=${WWHD_NOTEBOOK_ICON_PNG} -DOUT=${WWHD_NOTEBOOK_ICON} -DSYMBOL=story_notebook_icon_png
-          -P ${CMAKE_SOURCE_DIR}/cmake/EmbedBytes.cmake
-  DEPENDS ${WWHD_NOTEBOOK_ICON_PNG} ${CMAKE_SOURCE_DIR}/cmake/EmbedBytes.cmake
-  COMMENT "Story notebook icon" VERBATIM)
-# ---- the NPC catalogue story mods name residents from (story_npc_catalogue.h): one JSON table per place in
-# runtime/assets/npc_catalogue, compiled in
-file(GLOB WWHD_NPC_CATALOGUE_TABLES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/runtime/assets/npc_catalogue/*.json)
-set(WWHD_NPC_CATALOGUE ${CMAKE_BINARY_DIR}/generated/npc_catalogue.cpp)
+# ---- the NPC catalogue's recipes (story_npc_catalogue.h): one per place in runtime/assets/npc_catalogue, compiled
+# in; our own words and references into the game only (names and spots come from the player's game files)
+file(GLOB WWHD_NPC_RECIPE_FILES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/runtime/assets/npc_catalogue/*.recipe.json)
+set(WWHD_NPC_CATALOGUE ${CMAKE_BINARY_DIR}/generated/npc_recipes.cpp)
 add_custom_command(OUTPUT ${WWHD_NPC_CATALOGUE}
   COMMAND ${CMAKE_COMMAND} -DDIR=${CMAKE_SOURCE_DIR}/runtime/assets/npc_catalogue -DOUT=${WWHD_NPC_CATALOGUE}
-          -P ${CMAKE_SOURCE_DIR}/cmake/EmbedNpcCatalogue.cmake
-  DEPENDS ${WWHD_NPC_CATALOGUE_TABLES} ${CMAKE_SOURCE_DIR}/cmake/EmbedNpcCatalogue.cmake
-  COMMENT "NPC catalogue" VERBATIM)
+          -P ${CMAKE_SOURCE_DIR}/cmake/EmbedNpcRecipes.cmake
+  DEPENDS ${WWHD_NPC_RECIPE_FILES} ${CMAKE_SOURCE_DIR}/cmake/EmbedNpcRecipes.cmake
+  COMMENT "NPC catalogue recipes" VERBATIM)
 # Windows: VERSIONINFO + application manifest (wwhd_windows_resources); release builds strip the shipped
 # programs' debug information (WWHD_STRIP_RELEASE: -s for GNU-style linkers in Release/MinSizeRel)
 include(cmake/WindowsResources.cmake)
@@ -176,7 +167,7 @@ file(GLOB RUNTIME_SOURCES CONFIGURE_DEPENDS runtime/src/*.cpp runtime/src/*.c ru
                                             runtime/src/overlay/*.cpp)
 list(APPEND RUNTIME_SOURCES runtime/src/platform/perf_hint.cpp runtime/src/platform/thread_sampler.cpp)  # Android performance hints (no-op elsewhere)
 list(APPEND RUNTIME_SOURCES ${WWHD_BUILD_INFO})
-list(APPEND RUNTIME_SOURCES ${WWHD_NOTEBOOK_ICON} ${WWHD_NPC_CATALOGUE})
+list(APPEND RUNTIME_SOURCES ${WWHD_NPC_CATALOGUE})
 list(APPEND RUNTIME_SOURCES runtime/src/platform/touch_pad.cpp)  # Android on-screen controls (no-op elsewhere)
 if(APPLE)
   list(APPEND RUNTIME_SOURCES runtime/src/platform/https.mm)
@@ -963,7 +954,7 @@ add_test(NAME story_chart COMMAND story_chart_test)
 # the story notebook: quest list, save record, page navigation, services and item menu hooks
 add_executable(story_notebook_test runtime/tools/story_notebook_test.cpp runtime/src/mods/story_notebook.cpp runtime/src/mods/story_mail.cpp runtime/src/mods/story_store.cpp
                runtime/src/mods/story_chart.cpp runtime/src/mods/guest_png.cpp runtime/src/mods/mod_archive.cpp runtime/src/guest_addr_identity.c
-               ${WWHD_NOTEBOOK_ICON} ${WWHD_NPC_CATALOGUE})
+               ${WWHD_NPC_CATALOGUE})
 target_include_directories(story_notebook_test PRIVATE runtime/include runtime/src runtime/src/mods)
 target_compile_options(story_notebook_test PRIVATE -UNDEBUG)
 target_link_libraries(story_notebook_test PRIVATE ZLIB::ZLIB)

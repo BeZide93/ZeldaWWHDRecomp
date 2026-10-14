@@ -212,7 +212,7 @@ s32 wwhd_chart_state(const char* chart_id);
 s32 wwhd_chart_mark(const char* chart_id, const char* marker_id, f32 x, f32 z, u32 icon, const char* label);
 s32 wwhd_chart_unmark(const char* chart_id, const char* marker_id); /* NULL marker_id: all of the chart */
 
-/* The story notebook v1: the port's quest journal. Link gets it with the first letter from a mod
+/* The story notebook v1: the port's quest journal. Link gets it with the Story Notebook package's letter
  * (wwhd_mail_send); it is kept in the Delivery Bag, and selecting it opens its page: one row per
  * quest with its next step, where, and status, and one quest the player may show on the sea chart.
  * Register the quest in every session (wwhd_quest_define, then the texts of its current step); the
@@ -248,6 +248,6 @@ s32 wwhd_quest_carry(const char* quest_id, s32 carried);
  * resident's own line, takes the letter, gives `reward` (a rupee item 0x01..0x06, 0 none, through the
  * game's get-item scene) and the quest is done. When several quests want the resident, the one shown on the
  * chart talks first, else the one started first. `resident` is a
- * name from the NPC catalogue (docs/mod-sdk-v2.md), e.g. "windfall-kreeb"; an unknown name is
+ * name from the NPC catalogue (docs/mod-sdk-v2.md), e.g. "windfall-um1"; an unknown name is
  * refused (WWHD_QUEST_INVALID). */
 s32 wwhd_quest_talk(const char* quest_id, u32 step, const char* resident, const char* lines, u32 reward);

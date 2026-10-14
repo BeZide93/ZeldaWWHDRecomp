@@ -18,7 +18,7 @@
 //   - getReadableLetterNum / getReceiveLetterNum also count waiting mod letters;
 //   - for index 13 the table is not read: no postage, the letter window of the game's first letter
 //     (its message number is read from the table at run time), the read state goes to the record;
-//   - the enclosure (the receive event waits for one): the story notebook with the first mod letter
+//   - the enclosure (the receive event waits for one): the story notebook with the Story Notebook package's letter
 //     of a save file, shown with the Cabana Deed's get-item demo and the port's own text; its get
 //     function is not run, the notebook goes to the record. Later letters enclose a green rupee;
 //   - mod letters are handed out once Link has the Delivery Bag (bag_owned: the game's own
@@ -81,7 +81,8 @@ constexpr int32_t kModIndex = 13;
 // Every game letter encloses an item that Link takes after reading (rupees, a piece of heart...);
 // the receive event waits for it. A mod letter encloses the smallest one: a green rupee.
 constexpr uint32_t kEnclosedItem = 0x01;
-// The first mod letter of a save file encloses the story notebook instead. Link takes it with the
+// The letter of the Story Notebook package (the one its manifest says "encloses": ["notebook"]; the
+// required package of the story system) encloses the story notebook instead. Link takes it with the
 // get-item demo of a game item that looks like it (kNotebookModel); its get function, which would
 // put that item in the Delivery Bag, is not run: the notebook is recorded in the story record.
 constexpr uint32_t g_notebook_model = 0x9C;  // Cabana Deed: a sheet of parchment
@@ -255,6 +256,9 @@ std::vector<LetterInfo> letters() {
     return out;
 }
 
+uint16_t g_notebook_letter = 0;  // the key of the letter that brings the notebook (0: none declared)
+void set_notebook_letter(const std::string& mod, const std::string& letter) { g_notebook_letter = letter_key(mod, letter); }
+
 bool notebook_owned() { return have_save() && book().get(kRecordItem, kItemNotebook) == 1; }
 
 std::u16string notebook_page() {
@@ -420,7 +424,8 @@ void present(Cpu* c) {
         g_original(c, kPresent);
         return;
     }
-    const bool notebook = have_save() && !book().get(kRecordItem, kItemNotebook);
+    const uint16_t letter = g_show.key ? g_show.key : next_waiting().key;  // the mod letter this postbox hands out
+    const bool notebook = have_save() && g_notebook_letter && letter == g_notebook_letter && !book().get(kRecordItem, kItemNotebook);
     g_notebook_pending = notebook;
     g_notebook_text = notebook && g_buffers ? Override{kMsgItemGet, g_buffers + kSlotBytes, &g_notebook_body} : Override{};
     const uint32_t item = notebook ? g_notebook_model : kEnclosedItem;

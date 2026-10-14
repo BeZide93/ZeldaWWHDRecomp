@@ -50,6 +50,7 @@ uint64_t disk_use(const std::string& id);
 bool enable_after_code_rebuild(const std::string& id,std::string& error); // requires the same trust confirmation
 // switch_conflicts is the confirmed Switch action: disable conflicting Cemu packs atomically.
 bool enable(const std::string& id,bool on,std::string& error,bool switch_conflicts=false); // refuses unconfirmed native code
+void refresh_guest_startup(); // after a required package was installed or enabled at startup (required.h)
 // Native packages that enabling `id` would newly turn on (itself and disabled dependencies) whose
 // code the player has not confirmed yet, as {id, name}. Empty: enable() needs no confirmation.
 std::vector<std::pair<std::string,std::string>> unconfirmed_native(const std::string& id);

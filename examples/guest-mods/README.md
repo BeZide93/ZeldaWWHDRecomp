@@ -4,14 +4,16 @@ Small mods written in C and compiled for the game's CPU (32-bit big-endian Power
 [docs/mod-sdk-v2.md](../../docs/mod-sdk-v2.md) for the design. They contain no game code or data:
 game functions and variables are referenced by address only.
 
+Story mods (letters, quests, charts) live in the mod repository with their content: the required
+`story-notebook` package (the letter that brings the story notebook) and the `rito-letter` and
+`story-chart` examples are in [ZeldaWWHDMods](https://github.com/ZeldaWWHDRecomp/ZeldaWWHDMods).
+
 | Mod | What it shows |
 | --- | --- |
 | `heart-ticker` | entry and return hooks on Link's per-step function (`0240EBB0`), a call of a game function (`cLib_addCalc2`), an option (`every`). Link's hearts tick down a quarter heart every `every` logic steps to half, then refill. |
 | `hud-demo` | rectangle, original PNG and heart-count text on TV and GamePad, with anchors and state-load handle renewal. |
 | `button-icons` | combined code/art package and face-layout setting reads; currently an overdraw candidate awaiting game-frame calibration. |
 | `hud-cost` | performance fixture: exactly 200 rectangles versus no HUD callback, selected by a restart-only option. |
-| `rito-letter` | a story mod's letter (`wwhd_mail_send`): it waits in the Rito postbox of the loaded save file and arrives once per file. Original text. |
-| `story-chart` | a story mod's chart (`wwhd_chart_give`, `wwhd_chart_mark`): Link gets it in the loaded save file and it marks Windfall Island on his sea chart with the game's story-mark ring. |
 | `addcalc-replace` | a full replacement of a small game function (`cLib_addCalc2`, `0200ED84`) with an equivalent implementation; every other call goes to the game's own code (`WWHD_GAME_ORIGINAL`). No visible change; the log counts the calls. |
 
 Build (needs clang with the PowerPC target and ld.lld; on macOS `brew install llvm lld`):

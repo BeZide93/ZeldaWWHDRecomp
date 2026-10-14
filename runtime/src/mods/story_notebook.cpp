@@ -21,6 +21,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <map>
@@ -32,14 +33,13 @@
 #include "input.h"
 #include "runtime.h"
 
-// the icon's PNG, compiled in (runtime/assets/story_notebook/notebook_icon_192.png, cmake/EmbedBytes.cmake)
-extern const unsigned char story_notebook_icon_png[];
-extern const unsigned long story_notebook_icon_png_size;
 
 namespace story_notebook {
 namespace {
 
 const uint32_t kSavePtr = GD(0x101F84DC);  // save base pointer (d_com_inf_game)
+// the notebook's look, from the Story Notebook package (set_look): its icon's PNG
+std::vector<uint8_t> g_icon_png;
 const std::string kOwner = "port:story-notebook";  // the HUD list's owner (no mod ID has a colon)
 // the notebook's "to continue" line for a step that only works while the quest is tracked
 
@@ -427,8 +427,9 @@ void bag_icon() {
     }
     if (!image || generation != store.state_generation()) {  // the icon image, again after a state load
         generation = store.state_generation();
+        if (g_icon_png.empty()) return;  // no Story Notebook package look: no icon
         try {
-            const auto png = guestmods::hud::decode_png({story_notebook_icon_png, size_t(story_notebook_icon_png_size)});
+            const auto png = guestmods::hud::decode_png({g_icon_png.data(), g_icon_png.size()});
             image = store.create_image(kIconOwner, png.width, png.height, png.width * 4, png.rgba.data(), png.rgba.size());
         } catch (const std::exception&) {
             image = 0;
@@ -979,6 +980,35 @@ std::vector<Row> rows_now(std::vector<Quest>& storage) {
     return rows(storage, b);
 }
 
+void set_look(const std::string& icon_png, const std::string& model_archive) {
+    if (!icon_png.empty()) {
+        std::ifstream f(icon_png, std::ios::binary);
+        std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+        if (bytes.size() > 8 && bytes.size() <= 4u << 20) g_icon_png = std::move(bytes);
+        LOG("[notebook] the notebook's icon: %s (%s)", icon_png.c_str(), g_icon_png.empty() ? "not read" : "read");
+    }
+    if (!model_archive.empty()) {
+        std::error_code ec;
+        if (std::filesystem::is_regular_file(model_archive, ec)) story_mail::set_notebook_model(model_archive);
+        LOG("[notebook] the notebook's model: %s (%s)", model_archive.c_str(), ec || !std::filesystem::is_regular_file(model_archive, ec) ? "not built yet: the game's stand-in" : "built");
+    }
+}
+
+bool load_local_npc_catalogue(const std::string& file) {
+    std::ifstream f(file, std::ios::binary);
+    if (!f) return false;
+    const std::string text((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    const unsigned n = npc_catalogue_mutable().add_local(text);
+    LOG("[notebook] NPC catalogue: %u residents named from the player's game (%s)", n, file.c_str());
+    return n > 0;
+}
+
+std::vector<std::pair<std::string, std::string>> npc_recipes() {
+    std::vector<std::pair<std::string, std::string>> out;
+    for (unsigned i = 0; i < wwhd_npc_recipe_count; i++) out.push_back({std::to_string(i), wwhd_npc_recipes[i]});
+    return out;
+}
+
 bool declare(const std::string& mod, const std::string& mod_name, const mods::json::Value& manifest) {
     std::vector<ManifestQuest> quests;
     std::string why;
@@ -998,6 +1028,10 @@ bool declare(const std::string& mod, const std::string& mod_name, const mods::js
         Quest* reg = find(mod, q.id);
         reg->hidden = q.journal != "on_enable";
         g_declared.push_back({mod, reg->key, q});
+        if (q.letter_encloses_notebook && q.has_letter) {
+            if (mod == kNotebookPackage) story_mail::set_notebook_letter(mod, q.letter_id);
+            else LOG("[notebook] %s: only the Story Notebook package's letter brings the notebook", mod.c_str());
+        }
         for (const ManifestStep& st : q.steps) {
             if (st.has_talk && !st.needs_letter && !st.when.any())
                 LOG("[notebook] %s: warning: quest \"%s\" step %u takes over %s with no condition (no letter, no \"available\"): it "
