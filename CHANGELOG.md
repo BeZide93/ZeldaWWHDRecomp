@@ -7,6 +7,11 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Mod SDK v3 preview (opt-in, for mod makers):** mods can place a small set of the game's own actors (chests,
+  signs, a Windfall resident) with talk actions, and play short scenes: camera shots, dialogue, fades and the game's
+  letterbox bars, skippable with Plus/Start. Placed chests and signs keep their state in the mod's own part of the
+  save. Nothing changes without such a mod. See docs/mod-sdk-v3.md and the sdk-v3-windfall example.
+
 - **Android: "Share log"** in the setup app and in Graphics → Bug reports: it shares the latest game logs through
   Android's share sheet, with your user paths removed (as in crash reports). Android now writes a log by default
   (at most 64 MB per run), so there is one to share after a problem. The log also lists more about the GPU (driver,

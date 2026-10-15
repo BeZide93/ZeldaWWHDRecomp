@@ -1,9 +1,8 @@
 # Actors and scenes (SDK v3 preview)
 
-**Draft preview.** This is an experimental extension to [SDK v2](mod-sdk-v2.md).
-The worked example's game proof and the remaining verification limits are recorded
-in the [phase report](sdk-v3-report.md). Custom actor types, models and guest
-behaviour callbacks are not available in this phase 1 draft.
+**Preview.** This is an experimental extension to [SDK v2](mod-sdk-v2.md), and it may still change.
+Mods can place a small set of the game's own actors, give them talk actions and play short
+scenes. Custom actor types, your own models and behaviour callbacks are not available yet.
 
 The worked package is [sdk-v3-windfall](../examples/guest-mods/sdk-v3-windfall/manifest.json).
 It contains original text and names existing game actors; it includes no game
@@ -121,4 +120,3 @@ mid-scene state can restore control even after the host player has finished that
 scene. The port checks ownership before resetting anything: an unrelated native
 event must retain its camera and control. Press **Plus/Start** during a scene to skip it; the skip press is consumed so it
 does not also open the pause menu. A/B remain available for the message window.
-Proof and remaining limits are recorded in the phase report.
