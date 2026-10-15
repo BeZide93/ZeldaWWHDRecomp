@@ -7,6 +7,11 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Vulkan: a fallback for GPUs without 3-part vertex formats** (issue #207, Pixel 10 Pro with a PowerVR GPU): some
+  GPUs can't read three-component vertex data directly, which showed as "exploded" shapes and a black screen. The
+  game now checks this at start and reads such data in two parts on those GPUs. Every other GPU keeps exactly the
+  same shaders and caches as before.
+
 - **Fixed: a story mod's treasure chart showed its X outside the map.** The chart view shows a small window of the
   sea square; a mod chart now uses the window that contains its treasure spot, so the X sits on the map at the spot,
   on the TV and the GamePad.
