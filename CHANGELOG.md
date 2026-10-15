@@ -10,6 +10,11 @@ what is on `devel` and not released yet (also in the
 - **Mods on Windows:** a mod's preparation tool can now load its own helper files there too (the port's Python on
   Windows didn't look next to the tool). This stopped the GC minimap from installing on Windows; gc-minimap 0.2.2
   also fixes it on its own for v0.3.0 (#224).
+
+- **Settings → Shortcuts:** remap the app's shortcuts (Settings, full screen, screenshot, save and load states, the
+  graphics toggles), each with a key, a second key and a controller combination such as Select + D-pad Up. New
+  actions (GamePad picture-in-picture, performance overlay, mute, volume) start unbound, and **F6** now loads state
+  slot 1. The defaults stay as they were (#220).
 - **macOS setup:** when macOS points to another developer folder than the installed Command Line Tools (a removed
   Xcode, or one whose license hasn't been accepted), setup now uses the installed tools directly instead of waiting
   forever, and says what to do if they still can't be used (#219).

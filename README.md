@@ -468,9 +468,8 @@ overlay, mute and volume actions start unbound. Defaults otherwise stay unchange
 A combination consumes only its two buttons, only while both are held; other game inputs keep
 working. Select used as a combination's hold button is reserved for combinations instead of the
 held-Select Settings shortcut. **Tapping Home always opens Settings**, even if its keys are cleared;
-If Home is a combination hold button, its Settings tap acts on release. Esc always closes Settings.
-On Android, shortcuts from a keyboard require
-`WWHD_ANDROID_KEYBOARD`; controller combinations always work. Shortcuts are saved in the
+if Home is a combination hold button, its Settings tap acts on release. Esc always closes Settings.
+On Android, shortcuts from a keyboard require `WWHD_ANDROID_KEYBOARD`; controller combinations always work. Shortcuts are saved in the
 `shortcuts` section of **controls.json**, with the game controls. An existing Screenshot key
 or controller binding is preserved when loading an older file. macOS shows the assigned keys
 in the **Shortcuts** menu.
