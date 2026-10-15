@@ -1518,3 +1518,10 @@ if(WWHD_HAS_VULKAN)
   target_compile_options(vertex_format_policy_test PRIVATE -UNDEBUG)
   add_test(NAME vertex_format_policy COMMAND vertex_format_policy_test)
 endif()
+
+# Validation capture must keep forwarding after its bounded copy is full.
+add_executable(validation_diagnostics_test runtime/tools/validation_diagnostics_test.cpp)
+target_include_directories(validation_diagnostics_test PRIVATE runtime/src)
+target_compile_options(validation_diagnostics_test PRIVATE -UNDEBUG)
+target_link_libraries(validation_diagnostics_test PRIVATE Threads::Threads)
+add_test(NAME validation_diagnostics COMMAND validation_diagnostics_test)

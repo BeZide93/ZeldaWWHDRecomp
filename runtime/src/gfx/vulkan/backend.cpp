@@ -1,4 +1,5 @@
 #include "atomic_temporary.h"
+#include "validation_diagnostics.h"
 #include "../../audio_out.h"
 #ifndef VK_ENABLE_BETA_EXTENSIONS
 #define VK_ENABLE_BETA_EXTENSIONS
@@ -295,12 +296,29 @@ void init_pipeline_cache() try {
   if (async_pipeline_enabled()) start_pipeline_demand(R.device, {});
   LOG("[vulkan cache] load disabled after error: %s",error.what());
 }
+static ValidationDiagnostics validationDiagnostics;
+static void log_vulkan_result(VkResult result, const char* operation) {
+  static std::atomic<unsigned> errors{0};
+  if (result < 0 && errors.fetch_add(1) < 32)
+    LOG("[vulkan result] %s: %d%s", operation, int(result), result == VK_ERROR_DEVICE_LOST ? " DEVICE_LOST" : "");
+  if (result == VK_ERROR_DEVICE_LOST) {
+    static std::atomic<bool> reported{false};
+    if (!reported.exchange(true))
+      for (const auto& message : validationDiagnostics.snapshot())
+        LOG("[vulkan retained validation] %s", message.c_str());
+  }
+}
 // profWait: also report the wait to the render-thread profiler (render_prof.h)
 template<class F> VkResult timed_call(WaitTiming& timing, F&& call, int profWait = -1) {
   const bool profiled = profWait >= 0 && rprof::enabled();
-  if (!perf_enabled() && !profiled) return call();
+  if (!perf_enabled() && !profiled) {
+    const auto result = call();
+    log_vulkan_result(result, "queue/presentation/wait");
+    return result;
+  }
   auto start = std::chrono::steady_clock::now();
   VkResult result = call();
+  log_vulkan_result(result, "queue/presentation/wait");
   const uint64_t ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
       std::chrono::steady_clock::now() - start).count();
   if (perf_enabled()) { ++timing.count; timing.ns += ns; }
@@ -419,6 +437,7 @@ public:
 };
 void vk_check(VkResult r, const char *op) {
   if (r != VK_SUCCESS) {
+    log_vulkan_result(r, op);
     VulkanFailure failure(r, op);
     exception_report::record(failure.what());  // logged like every runtime error (exception_report.h)
     throw failure;
@@ -1781,6 +1800,7 @@ static void collect_secondary_swapchains() {
 
 static void finish_isolated_secondary(AndroidIsolatedPresenter::Result result) {
   R.secondaryPresentPending=R.secondaryAcquirePending=false;
+  log_vulkan_result(result.status, "isolated secondary presentation");
   if(result.operation==AndroidIsolatedPresenter::Operation::Present &&
       (result.status==VK_SUCCESS || result.status==VK_SUBOPTIMAL_KHR))++R.drc.presented;
   if(result.status==VK_ERROR_SURFACE_LOST_KHR) { secondary_surface_lost();return; }
@@ -3033,9 +3053,13 @@ void set_tv_format(uint32_t format, bool tv) {
 static VKAPI_ATTR VkBool32 VKAPI_CALL debug_message(
     VkDebugUtilsMessageSeverityFlagBitsEXT severity, VkDebugUtilsMessageTypeFlagsEXT,
     const VkDebugUtilsMessengerCallbackDataEXT *data, void *) {
-  LOG("[vulkan validation %s] %s: %s",
-          severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT ? "error" : "warning",
-          data->pMessageIdName ? data->pMessageIdName : "validation", data->pMessage);
+  const std::string message = std::string("[vulkan validation ") +
+      (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT ? "error" : "warning") + "] " +
+      (data->pMessageIdName ? data->pMessageIdName : "validation") + ": " +
+      (data->pMessage ? data->pMessage : "");
+  validationDiagnostics.record(message, [](std::string_view text) {
+    LOG("%.*s", int(text.size()), text.data());
+  });
   return VK_FALSE;
 }
 // Test aids for the paths of older drivers (docs/vulkan.md): WWHD_VK_FORCE_API=1.2 treats every GPU as
@@ -3226,9 +3250,21 @@ static void init_device(std::vector<const char *> extensions,
   VkValidationFeaturesEXT validation{VK_STRUCTURE_TYPE_VALIDATION_FEATURES_EXT};
   validation.enabledValidationFeatureCount = 1;
   validation.pEnabledValidationFeatures = &syncFeature;
-  if (getenv("WWHD_VK_VALIDATION")) {
+  uint32_t layerCount = 0;
+  vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
+  std::vector<VkLayerProperties> layers(layerCount);
+  vkEnumerateInstanceLayerProperties(&layerCount, layers.data());
+  bool validationAvailable = std::any_of(layers.begin(), layers.end(), [layer](const auto& p) {
+    return !strcmp(p.layerName, layer);
+  }) && has_extension(ies, VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+  bool validationWanted = getenv("WWHD_VK_VALIDATION") != nullptr;
+#ifdef __ANDROID__
+  validationWanted = true;
+#endif
+  bool validationEnabled = validationWanted && validationAvailable;
+  LOG("[vulkan] validation available=%u enabled=%u; first 64 warnings/errors retained", validationAvailable, validationEnabled);
+  if (validationEnabled) {
     extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
-    extensions.push_back(VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME);
     ci.enabledLayerCount = 1;
     ci.ppEnabledLayerNames = &layer;
     debug.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
@@ -3237,8 +3273,25 @@ static void init_device(std::vector<const char *> extensions,
                         VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
                         VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
     debug.pfnUserCallback = debug_message;
-    validation.pNext = &debug;
-    ci.pNext = &validation;
+    ci.pNext = &debug;
+    if (getenv("WWHD_VK_VALIDATION")) {
+      // Validation features are provided by the enabled layer; they need not be
+      // advertised by vkEnumerateInstanceExtensionProperties(nullptr, ...).
+      uint32_t validationExtensionCount = 0;
+      vk_check(vkEnumerateInstanceExtensionProperties(layer, &validationExtensionCount, nullptr),
+               "enumerate validation layer extensions");
+      std::vector<VkExtensionProperties> validationExtensions(validationExtensionCount);
+      vk_check(vkEnumerateInstanceExtensionProperties(layer, &validationExtensionCount, validationExtensions.data()),
+               "read validation layer extensions");
+      validationExtensions.resize(validationExtensionCount);
+      if (!has_extension(ies, VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME) &&
+          !has_extension(validationExtensions, VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME))
+        exception_report::raise("The validation layer does not provide VK_EXT_validation_features; synchronization validation cannot be enabled");
+      extensions.push_back(VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME);
+      validation.pNext = &debug;
+      ci.pNext = &validation;
+      LOG("[vulkan] synchronization validation enabled");
+    }
   }
   VkApplicationInfo ai{VK_STRUCTURE_TYPE_APPLICATION_INFO};
   ai.pApplicationName = "WWHD Vulkan";
@@ -3246,11 +3299,23 @@ static void init_device(std::vector<const char *> extensions,
   ci.pApplicationInfo = &ai;
   ci.enabledExtensionCount = extensions.size();
   ci.ppEnabledExtensionNames = extensions.data();
-  vk_check(vkCreateInstance(&ci, nullptr, &R.instance),
-           "create Vulkan instance");
+  VkResult instanceResult = vkCreateInstance(&ci, nullptr, &R.instance);
+  if (instanceResult != VK_SUCCESS && validationEnabled && !getenv("WWHD_VK_VALIDATION")) {
+    // Optional Android diagnostics must not prevent a working driver from starting
+    // when a layer is advertised but cannot be loaded (or its initialization fails).
+    log_vulkan_result(instanceResult, "create instance with optional validation");
+    LOG("[vulkan] optional validation failed to initialize; retrying without the layer");
+    validationEnabled = false;
+    ci.enabledLayerCount = 0;
+    ci.ppEnabledLayerNames = nullptr;
+    ci.pNext = nullptr;
+    R.instance = VK_NULL_HANDLE;
+    instanceResult = vkCreateInstance(&ci, nullptr, &R.instance);
+  }
+  vk_check(instanceResult, "create Vulkan instance");
   debug.pNext = nullptr;
   load_instance_functions(R.instance);
-  if (getenv("WWHD_VK_VALIDATION")) {
+  if (validationEnabled) {
     auto create = (PFN_vkCreateDebugUtilsMessengerEXT)vkGetInstanceProcAddr(
         R.instance, "vkCreateDebugUtilsMessengerEXT");
     VkDebugUtilsMessengerEXT messenger;
@@ -3364,6 +3429,21 @@ static void init_device(std::vector<const char *> extensions,
         (unsigned long long)limits.minUniformBufferOffsetAlignment,limits.maxUniformBufferRange);
   }
   const std::vector<VkExtensionProperties> des = device_extensions(R.physicalDevice);
+  LOG("[vulkan diagnostics] vendor=0x%04x device=0x%04x API=%s driverRaw=0x%08x",
+      R.properties.vendorID, R.properties.deviceID, version_text(R.properties.apiVersion).c_str(), R.properties.driverVersion);
+  if (R.properties.apiVersion >= VK_API_VERSION_1_2 || has_extension(des, VK_KHR_DRIVER_PROPERTIES_EXTENSION_NAME)) {
+    VkPhysicalDeviceDriverProperties driver{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES};
+    VkPhysicalDeviceProperties2 props{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
+    props.pNext = &driver;
+    vkGetPhysicalDeviceProperties2(R.physicalDevice, &props);
+    LOG("[vulkan diagnostics] driverName=%s driverInfo=%s driverID=%u conformance=%u.%u.%u.%u",
+        driver.driverName, driver.driverInfo, unsigned(driver.driverID), driver.conformanceVersion.major,
+        driver.conformanceVersion.minor, driver.conformanceVersion.subminor, driver.conformanceVersion.patch);
+  } else LOG("[vulkan diagnostics] driver properties unavailable");
+  const auto& vertexLimits = R.properties.limits;
+  LOG("[vulkan diagnostics] maxVertexInputAttributeOffset=%u maxVertexInputBindingStride=%u maxVertexInputAttributes=%u maxVertexInputBindings=%u maxDrawIndexedIndexValue=%u",
+      vertexLimits.maxVertexInputAttributeOffset, vertexLimits.maxVertexInputBindingStride,
+      vertexLimits.maxVertexInputAttributes, vertexLimits.maxVertexInputBindings, vertexLimits.maxDrawIndexedIndexValue);
   std::vector<const char *> de{VK_KHR_SWAPCHAIN_EXTENSION_NAME};
   if (R.dynamicRenderingKHR) {
     de.push_back(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME);
@@ -3410,6 +3490,14 @@ static void init_device(std::vector<const char *> extensions,
     R.vertexAttributeAccessBeyondStride =
         portability.vertexAttributeAccessBeyondStride;
   }
+  LOG("[vulkan diagnostics] vertexAttributeAccessBeyondStride=%u portabilitySubset=%u", R.vertexAttributeAccessBeyondStride, R.portabilitySubset);
+  if (R.portabilitySubset) {
+    VkPhysicalDevicePortabilitySubsetPropertiesKHR subset{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PORTABILITY_SUBSET_PROPERTIES_KHR};
+    VkPhysicalDeviceProperties2 props{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
+    props.pNext = &subset;
+    vkGetPhysicalDeviceProperties2(R.physicalDevice, &props);
+    LOG("[vulkan diagnostics] minVertexInputBindingStrideAlignment=%u", subset.minVertexInputBindingStrideAlignment);
+  } else LOG("[vulkan diagnostics] minVertexInputBindingStrideAlignment=1 (core Vulkan; attribute alignment follows component width)");
   VkPhysicalDeviceVulkan12Features enabled12{
       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
   enabled12.samplerMirrorClampToEdge = available12.samplerMirrorClampToEdge;
@@ -3436,6 +3524,27 @@ static void init_device(std::vector<const char *> extensions,
   enabled.dualSrcBlend = available.dualSrcBlend;
   enabled.logicOp = available.logicOp;
   R.enabledFeatures = enabled;
+  LOG("[vulkan diagnostics] features supported/enabled: robustBufferAccess=%u/%u shaderInt16=%u/%u shaderInt64=%u/%u shaderFloat64=%u/%u geometryShader=%u/%u",
+      available.robustBufferAccess, enabled.robustBufferAccess, available.shaderInt16, enabled.shaderInt16,
+      available.shaderInt64, enabled.shaderInt64, available.shaderFloat64, enabled.shaderFloat64,
+      available.geometryShader, enabled.geometryShader);
+  LOG("[vulkan diagnostics] features supported/enabled: fullDrawIndexUint32=%u/%u shaderClipDistance=%u/%u shaderCullDistance=%u/%u independentBlend=%u/%u depthClamp=%u/%u",
+      available.fullDrawIndexUint32, enabled.fullDrawIndexUint32, available.shaderClipDistance, enabled.shaderClipDistance,
+      available.shaderCullDistance, enabled.shaderCullDistance, available.independentBlend, enabled.independentBlend,
+      available.depthClamp, enabled.depthClamp);
+  if (has_extension(des, VK_EXT_PRIMITIVE_TOPOLOGY_LIST_RESTART_EXTENSION_NAME)) {
+    VkPhysicalDevicePrimitiveTopologyListRestartFeaturesEXT restart{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRIMITIVE_TOPOLOGY_LIST_RESTART_FEATURES_EXT};
+    VkPhysicalDeviceFeatures2 query{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
+    query.pNext = &restart;
+    vkGetPhysicalDeviceFeatures2(R.physicalDevice, &query);
+    LOG("[vulkan diagnostics] primitiveTopologyListRestart supported/enabled=%u/0 patchListRestart=%u/0",
+        restart.primitiveTopologyListRestart, restart.primitiveTopologyPatchListRestart);
+  }
+  LOG("[vulkan diagnostics] listRestartExtension=%u (unused); indices=uint16,uint32; restart=strip-only; uint8 indices unused",
+      has_extension(des, VK_EXT_PRIMITIVE_TOPOLOGY_LIST_RESTART_EXTENSION_NAME));
+  LOG("[vulkan diagnostics] vertex metadata legend: endian 0=none 1=swap16 2=swap32; numeric 0=normalized 1=integer 2=scaled; observations capped at 64 inputs/32 strides/32 index paths");
+  LOG("[vulkan diagnostics] vertex fetch=raw UINT (8/16/32 bit); SNORM/SSCALED/half/endian conversion=32-bit shader arithmetic; shaderInt16 unused");
+  LOG("[vulkan diagnostics] fans/quads/loops=CPU index conversion; line/triangle strips=native; gl_VertexIndex=32-bit signed builtin including baseVertex, translated to guest vertex ID");
   portability.pNext=nullptr;
   VkPhysicalDeviceVulkan13Features f13{
       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
@@ -3514,6 +3623,8 @@ static void init_device(std::vector<const char *> extensions,
   // Prime the support cache once, before any shader translation jobs start.
   std::string missingVertexFormats;
   for (auto format : vk::vertex_formats) {
+    LOG("[vulkan diagnostics] vertex format %s VERTEX_BUFFER_BIT=%u", vk::vertex_format_name(format),
+        bool(format_properties(format).bufferFeatures & VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT));
     if (!(format_properties(format).bufferFeatures & VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT)) {
       if (!missingVertexFormats.empty()) missingVertexFormats += ", ";
       missingVertexFormats += vk::vertex_format_name(format);
@@ -3522,9 +3633,14 @@ static void init_device(std::vector<const char *> extensions,
   if (!missingVertexFormats.empty())
     LOG("[vulkan] vertex formats without vertex-buffer support: %s", missingVertexFormats.c_str());
   const char* forceVertexFallback = std::getenv("WWHD_VK_VERTEX_FALLBACK");
+  std::string fallbackSetting;
+  const bool forceFallback = forceVertexFallback ? !std::strcmp(forceVertexFallback, "1") :
+      (hostui::get("vkVertexFallback", fallbackSetting) && fallbackSetting == "1");
   R.vertexFormats = vk::vertex_format_policy([](VkFormat format) {
     return bool(format_properties(format).bufferFeatures & VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT);
-  }, forceVertexFallback && !std::strcmp(forceVertexFallback, "1"));
+  }, forceFallback);
+  LOG("[vulkan diagnostics] RGB fallback forced=%u active=%u mask=%u (8-bit=1 16-bit=2 32-bit=4)",
+      forceFallback, R.vertexFormats.fallbackMask != 0, R.vertexFormats.fallbackMask);
   if (R.vertexFormats.fallbackMask)
     LOG("[vulkan] vertex format fallback mask: %u", R.vertexFormats.fallbackMask);
   vk_check(vkCreateDevice(R.physicalDevice, &di, nullptr, &R.device),
