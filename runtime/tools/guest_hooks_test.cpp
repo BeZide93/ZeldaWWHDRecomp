@@ -171,6 +171,7 @@ namespace story_lyt_screen {
 void set_game_calls(void (*)(Cpu*,uint32_t),uint32_t (*)(Cpu*,uint32_t,std::initializer_list<uint32_t>)) {}
 void install(const std::function<std::string(uint32_t)>&,const std::function<void(uint32_t,void (*)(Cpu*))>&) {}
 void state_loaded() {}
+void service(Cpu*) {}
 }
 namespace story_notebook_layout { bool configure() {return false;} }
 namespace story_bag {

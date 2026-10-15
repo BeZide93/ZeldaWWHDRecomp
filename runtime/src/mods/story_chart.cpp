@@ -729,7 +729,10 @@ void capture_end() {
             if (grid_pane(grid, c.cell) == c.pane) st32(c.pane + kPaneTranslate, c.mx), st32(c.pane + kPaneTranslate + 4, c.my);
     for (const auto& [view, pictures] : g_views) show_picture(view, pictures.shown);
 }
+uint32_t g_chart_menu = 0;  // the sea chart menu (hdSeaChartMenu_c) since it last ran, until destroyed
+
 void state_loaded() {
+    g_chart_menu = 0;  // the loaded memory has its own (seen again when it runs)
     g_views.clear();
     g_coordinator = 0;
     g_applied.clear();
@@ -739,7 +742,6 @@ void state_loaded() {
     g_heal_grids = g_heal_balloons = true;
 }
 
-uint32_t g_chart_menu = 0;  // the sea chart menu (hdSeaChartMenu_c) since it last ran, until destroyed
 uint32_t sea_chart_menu() { return g_chart_menu; }
 
 namespace hooks {

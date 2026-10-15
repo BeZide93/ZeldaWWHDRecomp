@@ -1410,6 +1410,7 @@ void service(Cpu* c) {
     service_portable_load(c);
     watch_arrival(c);
     controller_reapply::service(c);
+    guestmods::service(c);  // story layouts dropped by a load: built for the loaded item screen
     // test aid: WWHD_STATE_DUMP=n dumps the n TV frames after each save/load (state_<save|load><slot>_<k>.png)
     static const int dump = getenv("WWHD_STATE_DUMP") ? atoi(getenv("WWHD_STATE_DUMP")) : 0;
     if (int slot = g_save_req.load()) {

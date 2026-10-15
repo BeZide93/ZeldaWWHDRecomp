@@ -846,6 +846,7 @@ void draw_frame(Cpu* c,uint64_t step) {
         *c=saved;
     }
 }
+void service(Cpu* c) { story_lyt_screen::service(c); }
 void state_loaded() {
     std::lock_guard lock(g_hud_mutex);
     hud::store().reset();

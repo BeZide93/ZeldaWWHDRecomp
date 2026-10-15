@@ -2,11 +2,19 @@
 // d/hd_scene_ingame_ui_part2.cpp, d/hd_screen_sequence_option.cpp, d/hd_input_ctrl.cpp).
 //
 // The game's in-game controller change runs from its pause menu: Options -> controller, then
-// StateID_ExchangeProMode (setMode, HUD rebuild, back to StateID_Menu). After a load, once the player
-// is playing (StateID_Play), the same steps run: the menu opens (StateID_ToMenu), the exchange runs
-// with the Options category, and the menu it returns to is closed by the menu's own close
-// (hdIngameUi_c::menuExecute with its cancel input held). Starting the exchange straight from play
-// leaves the TV-mode switch screen waiting forever (its screens are still on).
+// StateID_ExchangeProMode. Of its steps only two concern play (ingameExchangeProModeExecute): the
+// controller mode itself, hdInputManager::setMode (the controller the game reads, the GamePad
+// output), and for the GamePad its touch pointer (mPointerEnabled, the exchange's
+// mModeChangeRequested). The rest is the switch's own screens (the "look at the TV" curtain, the
+// mode hint), and where a menu opens is decided again each time one opens (prepareMapCoordinator,
+// from the mode). So after a load, once the player is in play (StateID_Play) or in an event or dialog
+// (StateID_PauseDrc), the switch is those two steps, made directly: no menu, no screens, no input.
+//
+// Only when setMode refuses (the controller it needs is not there) do the menu's steps run as the
+// player would: the menu opens (StateID_ToMenu), the exchange runs with the Options category, and
+// the menu it returns to is closed by the menu's own close (hdIngameUi_c::menuExecute with its cancel
+// input held for that one call). Starting the exchange straight from play leaves the TV-mode switch
+// screen waiting forever (its screens are still on).
 #include "controller_reapply.h"
 #include "guest_addr.h"
 #include "input.h"
@@ -22,17 +30,24 @@ const uint32_t kInputManager = GD(0x101F5088);  // hdInputManager* (the in-game 
 constexpr uint32_t kHold = 0x18;                // its pointer controller's held buttons (mPointer.mHold)
 constexpr uint32_t kCancel = 2;                 // the menu's close button (hdIngameUi_c::menuExecute)
 constexpr uint32_t kMode = 0x1D0;               // hdInputManager::mMode
+constexpr uint32_t kPointerEnabled = 0x26C;     // hdInputManager::mPointerEnabled (the GamePad's touch)
+constexpr uint32_t kTrigger = 0x1C;             // its pointer controller's new buttons (mPointer.mTrigger)
 const uint32_t kIngameUi = GD(0x101F8344);      // sIngameUi (hdIngameUi_c*, 0 outside gameplay)
 constexpr uint32_t kUiState = 0x10;             // hdIngameUi_c::mState (hdStateMachine)
 constexpr uint32_t kUiOptionScreen = 0x1C0;     // hdIngameUi_c::mpOptionScreen (hdSequenceOption_c*)
 constexpr uint32_t kOptionCategory = 0x11C;     // hdSequenceOption_c::mPreviousCategory
 const uint32_t kPlayState = GD(0x1049EC00);     // l_ingamePlayState
+const uint32_t kPauseDrcState = GD(0x1049EC58); // l_ingamePauseDrcState (events, dialogs)
 const uint32_t kToMenuState = GD(0x1049EC84);   // l_ingameToMenuState
 const uint32_t kMenuState = GD(0x1049ECB0);     // l_ingameMenuState
 const uint32_t kExchangeState = GD(0x1049F4F0); // l_ingameExchangeProModeState
 const uint32_t fn_currentState = GC(0x02006478);  // the state machine's current state id
 const uint32_t fn_changeState = GC(0x020063C0);   // hdIngameChangeState(machine, id)
 const uint32_t fn_menuExecute = GC(0x0270E4E4);   // hdIngameUi_c::menuExecute
+const uint32_t fn_setMode = GC(0x02618094);       // hdInputManager::setMode(this, mode): 1 if switched
+const uint32_t kPlay = GD(0x1046F0B0);            // g_dComIfG_gameInfo.play
+const uint32_t kLinkPtr = kPlay + 0x5B34;         // its mpPlayerPtr[0]: daPy_lk_c
+constexpr uint32_t kActorPos = 0x314, kShapeAngleY = 0x32A, kLinkProc = 0x65F0;
 
 constexpr int kSettleFrames = 20;    // the in-game UI has been in this state this long (fades, arrival)
 constexpr int kGiveUpFrames = 3600;  // ~1 min without an in-game UI (title screen): nothing to switch
@@ -42,6 +57,7 @@ enum Phase { kIdle, kWaitPlay, kWaitMenuOpen, kWaitMenuBack };
 Phase g_phase = kIdle;
 const char* g_kind = "";
 int g_frames = 0, g_stable = 0, g_trace = 0, g_category = -1;
+bool g_direct_refused = false;  // setMode refused the mode: the menu path, once in play
 std::atomic<bool> g_hold_pro{false};  // see holds_pro_controller
 
 int game_mode() {
@@ -83,6 +99,18 @@ void trace_ui(Cpu* c) {
     if (key != last || phase != last_phase)
         LOG("[controller] in-game UI state %u (mode switch phase %d), game mode %d", key, (int)phase, game_mode());
     last = key, last_phase = phase;
+    // what the game reads from its controller (its pointer controller: the buttons every scene reads),
+    // and Link: position, facing, procedure, every 30 frames and whenever a button is held
+    const uint32_t mgr = ld32(kInputManager), link = ld32(kLinkPtr);
+    const uint32_t hold = object(mgr) ? ld32(mgr + kHold) : 0, trig = object(mgr) ? ld32(mgr + kTrigger) : 0;
+    if (hold || trig || g_trace % 30 == 0) {
+        if (object(link))
+            LOG("[controller] game input hold %08X trigger %08X; Link %.1f %.1f %.1f facing %d procedure 0x%X", hold, trig,
+                ldf32(link + kActorPos), ldf32(link + kActorPos + 4), ldf32(link + kActorPos + 8), (int16_t)ld16(link + kShapeAngleY),
+                ld32(link + kLinkProc));
+        else
+            LOG("[controller] game input hold %08X trigger %08X; no Link", hold, trig);
+    }
 }
 
 void wait_play(Cpu* c, uint32_t ui) {
@@ -95,9 +123,27 @@ void wait_play(Cpu* c, uint32_t ui) {
         g_phase = kIdle;
         return;
     }
-    const bool ready = object(ld32(ui + kUiOptionScreen)) && ui_state(c, ui) == state_key(c, kPlayState);
-    g_stable = ready ? g_stable + 1 : 0;
+    // play, or an event or dialog (StateID_PauseDrc: the GamePad's item screen paused; a state saved in
+    // a dialog must not wait for an input the game can't read), for a moment (fades, arrival)
+    const uint32_t state = ui_state(c, ui);
+    const bool play = state == state_key(c, kPlayState);
+    g_stable = play || state == state_key(c, kPauseDrcState) ? g_stable + 1 : 0;
     if (g_stable < kSettleFrames) return;
+    // the exchange's own steps for play, directly (see the top of this file)
+    const uint32_t mgr = ld32(kInputManager);
+    static const bool menu_path = getenv("WWHD_TEST_CONTROLLER_MENU") != nullptr;  // test aid: the fallback
+    if (!menu_path && !g_direct_refused) {
+        if (guest_call(c, fn_setMode, {mgr, (uint32_t)category}) && game_mode() == category) {
+            if (category == 1) st8(mgr + kPointerEnabled, 1);  // the GamePad's touch, as the exchange does
+            LOG("[controller] after the %s: the game was in mode %d; it plays with the %s now (mode %d)", g_kind, mode,
+                category == 0 ? "Pro Controller" : "GamePad", game_mode());
+            g_phase = kIdle;
+            return;
+        }
+        g_direct_refused = true;
+        LOG("[controller] after the %s: the game did not take mode %d directly; through the menu once in play", g_kind, category);
+    }
+    if (!play || !object(ld32(ui + kUiOptionScreen))) return;  // the menu path starts from play
     // the player opens the pause menu (StateID_ToMenu: screens off, game paused)
     guest_call(c, fn_changeState, {ui + kUiState, kToMenuState});
     LOG("[controller] after the %s: the game is in mode %d; switching it to the %s", g_kind, mode,
@@ -162,6 +208,7 @@ void service(Cpu* c) {
         g_kind = kind;
         g_frames = g_stable = 0;
         g_category = -1;
+        g_direct_refused = false;
         g_trace = 600;
     }
     trace_ui(c);
