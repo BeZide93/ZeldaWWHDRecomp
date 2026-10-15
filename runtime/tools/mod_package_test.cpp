@@ -662,7 +662,7 @@ int main(int argc, char** argv) {
         assert(loaded==1&&view("story-notebook").active);
         // Other content dependencies retain their previous restriction.
         auto invalid=root/"invalid";fs::copy(pack,invalid,fs::copy_options::recursive);
-        std::ifstream input(invalid/"manifest.json");auto bad=mods::json::parse(std::string{std::istreambuf_iterator<char>(input),{}});
+        mods::json::Value bad;{std::ifstream input(invalid/"manifest.json");bad=mods::json::parse(std::string{std::istreambuf_iterator<char>(input),{}});}  // closed before rewriting and removing the file (Windows)
         bad["id"]="plain-content-dependency";bad.object.erase("actors");bad.object.erase("scenes");
         std::ofstream(invalid/"manifest.json")<<mods::json::dump(bad);std::string error;assert(!install(invalid.string(),error));
         bad["id"]="world-content-other-dependency";bad["actors"]=mods::json::parse(R"([{"id":"notice","actor":"sign","stage":"sea","room":11,"flag":"read","position":{"x":0,"y":0,"z":0}}])");
@@ -677,7 +677,7 @@ int main(int argc, char** argv) {
         world_fixture("graph-a",9);world_fixture("graph-b",8);
         assert(enable("graph-a",true,error));assert(!enable("graph-b",true,error)&&error.find("16 actors")!=std::string::npos);
         assert(view("graph-a").enabled&&!view("graph-b").enabled);
-        fs::remove_all(root);std::cout<<"Real world-content example starts with notebook dependency; content dependency policy and aggregate actor graph validated\n";return 0;
+        {std::error_code ignored;fs::remove_all(root,ignored);}std::cout<<"Real world-content example starts with notebook dependency; content dependency policy and aggregate actor graph validated\n";return 0;
     }
     if(argc==2&&std::string(argv[1])=="--content-startup"){
         auto root=fs::temp_directory_path()/("wwhd-content-test-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
