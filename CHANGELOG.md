@@ -7,6 +7,10 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Mod SDK v3 preview: static mod models.** A quest mod can now place its own static model (a glTF `.glb` from
+  Blender) in the world, lit and shadowed like the game's objects, with collision, L-targeting and a Check/Talk
+  prompt. The model is converted on your own machine using a material from your own game, so packages never contain
+  game files. The Windfall example gained an original carved post (preview, for mod makers).
 - **Mods on Windows:** a mod's preparation tool can now load its own helper files there too (the port's Python on
   Windows didn't look next to the tool). This stopped the GC minimap from installing on Windows; gc-minimap 0.2.2
   also fixes it on its own for v0.3.0 (#224).
