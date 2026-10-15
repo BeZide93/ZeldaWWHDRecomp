@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
+#include <atomic>
 #include <map>
 
 #include "guest_addr.h"
@@ -40,6 +41,13 @@ const uint32_t kUiSystem = GD(0x1018C404);         // the UI system (its heap at
 const uint32_t kLayoutResMgr = GD(0x101F7274);     // the layout resource manager
 const uint32_t kIngameUi = GD(0x101F8344);         // the in-game UI scene (item screen at +0x17C)
 const uint32_t kSafeStringVtable = GD(0x1010A3FC); // a sead SafeString vtable of the parts framework
+// where hdIngameUi_c's screen creation takes the item screen's projection and matrix from (HD decomp
+// hd_scene_ingame_ui.cpp, the screens' load: the GamePad's render layer, 7, else the UI defaults):
+// the render manager (layer count +0x1020, layers +0x1024) and hdLayerBase_c (view matrix pointer
+// +0x48, projection pointer +0x4C, flags +0x50, own view matrix +0x84, internal projection +0x164)
+const uint32_t kRenderManager = GD(0x101F95D0);
+const uint32_t kBecomeCurrentHeap = GC(0x027EC220);  // JKRHeap::becomeCurrentHeap(this): the heap current before
+const uint32_t kDefaultUiProjection = GD(0x104A20FC), kDefaultUiMatrix = GD(0x104A2098);
 constexpr uint32_t kItemScreen = 0x17C;
 // hdParts_c: vtable at +4 (delete +0x0C, finalize +0x54); its layout at +0x44, resource accessor +0x34;
 // hdPartsLayout_c: vtable +0xE0 (vLoad +0x14), layout object +4, animation set +0xD4
@@ -47,6 +55,10 @@ constexpr uint32_t kPartsVtable = 4, kVtDelete = 0x0C, kVtFinalize = 0x54, kPart
 constexpr uint32_t kLayoutVtable = 0xE0, kVtLoad = 0x14, kLayoutLyt = 4, kLayoutAnimSet = 0xD4;
 constexpr uint32_t kPaneTranslate = 0x1C, kPaneSize = 0x3C, kPaneFlags = 0x44, kPaneAlpha = 0x45;
 
+
+bool guest_pointer(uint32_t a) {
+    return (a >= mem::kMem2Start && a < mem::kMem2End - 0x200) || (a >= mem::kMem1 && a < mem::kMem1 + mem::kMem1Size - 0x200);
+}
 
 void (*g_original)(Cpu*, uint32_t) = nullptr;
 uint32_t (*g_call)(Cpu*, uint32_t, std::initializer_list<uint32_t>) = nullptr;
@@ -59,11 +71,13 @@ struct Slot {
     uint32_t archive = 0;   // the archive's data in guest memory (a SARC), found once built
     uint32_t names = 0;     // the archive names for attachArchives (made once)
     std::map<std::string, uint32_t> panes;
+    bool rebuild = false;   // dropped by a state load: built again once the game's item screen draws
 };
 std::vector<Slot> g_slots;   // by id
 std::vector<int> g_order;    // ids in draw (and build) order
 bool g_installed = false;
 bool g_check = false;  // a state was loaded: check still_there() before the next use
+std::atomic<uint32_t> g_drawn_screen{0};  // the item screen drawn while a layout waits for its build (draw passes)
 uint64_t g_passes = 0, g_covered = 0;  // screen passes drawn (drawPrimaryScreens / drawHudScreens), the last with ours
 uint32_t g_viewport = 0;  // the item screen's viewport, while drawPrimaryScreens runs (0: it didn't draw)
 
@@ -124,11 +138,12 @@ void drop(Slot& s) { s.part = s.layout = s.set = 0, s.archive = 0, s.panes.clear
 // saved after the build)? Otherwise the handles are dropped without touching the memory.
 bool still_there(Slot& s) {
     if (!s.part) return false;
-    if (ld32(s.part + kPartsVtable) == s.part_vt && ld32(s.part + kPartsLayout) == s.layout &&
-        ld32(s.layout + kLayoutVtable) == s.layout_vt && ld32(s.layout + kLayoutAnimSet) == s.set)
-        return true;
-    LOG("[lyt] %s: not in the loaded state: built again with the next item screen", name_of(s));
+    const bool there = ld32(s.part + kPartsVtable) == s.part_vt && ld32(s.part + kPartsLayout) == s.layout &&
+                       ld32(s.layout + kLayoutVtable) == s.layout_vt && ld32(s.layout + kLayoutAnimSet) == s.set;
+    if (after_load(true, there) == AfterLoad::Keep) return true;
+    LOG("[lyt] %s: not in the loaded state: built again when the item screen is next shown", name_of(s));
     drop(s);
+    s.rebuild = true;
     return false;
 }
 void check_all() {
@@ -158,6 +173,7 @@ uint32_t archive_bytes(uint32_t sarc) { return sarc && ld32(sarc) == 0x53415243 
 
 void build(Cpu* c, Slot& s, uint32_t projection, uint32_t matrix) {
     if (s.part) destroy(c, s);  // a new item screen (should have been freed with the old one)
+    s.rebuild = false;          // built now, or failed with its reason logged (not tried every frame)
     const Client& cl = s.client;
     if (FILE* f = fopen(cl.archive.c_str(), "rb")) fclose(f);
     else return LOG("[lyt] %s: no archive %s", name_of(s), cl.archive.c_str());
@@ -231,6 +247,51 @@ void build_all(Cpu* c, uint32_t projection, uint32_t matrix) {
     if (g_slots.size() > 1) LOG("[lyt] %d of %zu layouts built, their archives %.2f MB together", built, g_slots.size(), total / 1048576.0);
 }
 
+// The item screen's projection and matrix as the game's screen creation picks them (kRenderManager):
+// for a build without the game's load call (after a state load). False if the renderer isn't there.
+bool item_screen_view(uint32_t& projection, uint32_t& matrix) {
+    const uint32_t mgr = ld32(kRenderManager);
+    if (!guest_pointer(mgr)) return false;
+    const uint32_t count = ld32(mgr + 0x1020), layers = ld32(mgr + 0x1024);
+    const uint32_t layer = guest_pointer(layers) ? ld32(layers + 4 * (count > 7 ? 7 : 0)) : 0;
+    if (!guest_pointer(layer)) return false;
+    LayerView l;
+    l.flags = ld32(layer + 0x50), l.projection = ld32(layer + 0x4C), l.internal_projection = ld32(layer + 0x164);
+    l.view_matrix = ld32(layer + 0x48), l.own_matrix = layer + 0x84;
+    const ScreenView v = story_lyt_screen::item_screen_view(l, kDefaultUiProjection, kDefaultUiMatrix);
+    projection = v.projection, matrix = v.matrix;
+    return true;
+}
+
+bool any_rebuild() {
+    for (const Slot& s : g_slots)
+        if (s.rebuild) return true;
+    return false;
+}
+
+// After a state load whose memory doesn't hold our layouts: the loaded game's item screen was built
+// before the state was saved, and the game builds it again only with the next stage or controller
+// change (hdIngameLoadItemScreen). The layouts are built once that item screen has been drawn (it is
+// there and in use), at the next frame boundary on the main thread (as the game's own build: a draw
+// pass runs on the graphics thread, where loading the archive waits forever), with the projection
+// and matrix the game gave it. The game builds its screens with the UI heap as the current heap (the
+// parts object comes from it); at the frame boundary another one is current: the UI heap is made
+// current for the build (JKRHeap::becomeCurrentHeap, which returns the one before), then the one before.
+void rebuild_dropped(Cpu* c) {
+    if (!any_rebuild()) return;
+    uint32_t projection = 0, matrix = 0;
+    const uint32_t ui = ld32(kUiSystem), heap = ui ? ld32(ui + 0x10) : 0;
+    if (!item_screen_view(projection, matrix) || !guest_pointer(heap)) return;
+    const uint32_t before = g_call(c, kBecomeCurrentHeap, {heap});
+    for (int id : g_order) {
+        Slot& s = g_slots[size_t(id)];
+        if (!s.rebuild || s.part) continue;
+        LOG("[lyt] %s: building again for the loaded state's item screen", name_of(s));
+        build(c, s, projection, matrix);
+    }
+    if (guest_pointer(before)) g_call(c, kBecomeCurrentHeap, {before});
+}
+
 // Our calls into the game must not change what the hooked function's caller sees: the registers are
 // put back as they were (the original's return values included).
 struct Keep {
@@ -245,6 +306,13 @@ void load_item_screen(Cpu* c) {
     const uint32_t projection = c->r[4], matrix = c->r[5];
     g_original(c, kLoadItemScreen);
     Keep keep(c);
+    static const bool check_view = std::getenv("WWHD_STORY_LYT_VIEW_CHECK") != nullptr;  // test aid
+    if (check_view) {
+        uint32_t p = 0, m = 0;
+        const bool ok = item_screen_view(p, m);
+        LOG("[lyt] view check: the game's projection %08X matrix %08X, ours %08X %08X (%s)", projection, matrix, p, m,
+            ok && p == projection && m == matrix ? "same" : "DIFFERENT");
+    }
     build_all(c, projection, matrix);
 }
 
@@ -252,16 +320,18 @@ void load_item_screen(Cpu* c) {
 void parts_draw(Cpu* c) {
     const uint32_t self = c->r[3], viewport = c->r[4];
     g_original(c, kPartsDraw);
-    if (!any_built()) return;
+    if (!any_built() && !any_rebuild()) return;
     const uint32_t scene = ld32(kIngameUi);
-    if (scene && self == ld32(scene + kItemScreen)) g_viewport = viewport;
+    if (!scene || self != ld32(scene + kItemScreen)) return;
+    g_viewport = viewport;
+    if (any_rebuild()) g_drawn_screen = self;
 }
 
 // after a screen group was drawn: ours on top of it (in draw order), if the item screen was among it
 void draw_after(Cpu* c) {
     const uint32_t viewport = g_viewport;
     g_viewport = 0;
-    if (!viewport || !any_built()) return;
+    if (!viewport || (!any_built() && !g_check && !any_rebuild())) return;
     Keep keep(c);
     check_all();
     for (int id : g_order) {
@@ -421,10 +491,27 @@ void install(const std::function<std::string(uint32_t)>& replaced_by, const std:
             g_slots[size_t(id)].client.order, g_slots[size_t(id)].client.archive.c_str());
 }
 
+void service(Cpu* c) {
+    const uint32_t drawn = g_drawn_screen.exchange(0);
+    if (!drawn) return;
+    const uint32_t scene = ld32(kIngameUi);
+    if (!scene || ld32(scene + kItemScreen) != drawn) return;  // gone since (a stage change builds them anyway)
+    Keep keep(c);
+    check_all();
+    rebuild_dropped(c);
+}
+
 void state_loaded() {
     bool any = false;
-    for (Slot& s : g_slots) s.panes.clear(), any |= s.part != 0;
+    // our guest objects made by the host (archive names, text buffers) may be the loaded state's memory
+    // now: made again. A client without a layout now (none built yet, e.g. a load from the title screen)
+    // gets one with the loaded state's item screen as well.
+    for (Slot& s : g_slots) {
+        s.panes.clear(), s.names = 0, any |= s.part != 0;
+        if (!s.part && after_load(false, false) == AfterLoad::BuildWithItemScreen) s.rebuild = true;
+    }
     g_check = any;
+    story_lyt_text::state_loaded();
 }
 
 std::string archive_for(const std::string& guest) {

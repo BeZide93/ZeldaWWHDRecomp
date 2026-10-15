@@ -62,6 +62,10 @@ void init() {
     st32(g.measure, g.measure_vtable);
 }
 
+}  // namespace
+void state_loaded() { g = Guest{}; }
+namespace {
+
 void put(uint32_t buf, const std::u16string& s, size_t n) {
     for (size_t i = 0; i < n; i++) st16(buf + 2 * uint32_t(i), uint16_t(s[i]));
     st16(buf + 2 * uint32_t(n), 0);

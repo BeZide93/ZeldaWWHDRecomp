@@ -19,8 +19,11 @@
 //           game's own screens' archives do too) and is reused when the item screen is built again.
 //   state load  before their next use the handles are checked against the loaded memory (our objects'
 //           vtables and links as built): kept when the objects are there (a portable state, or a full state
-//           saved after the build), else dropped without touching the memory; the layout is then built
-//           again with the next item screen and until then nothing is drawn (the client falls back).
+//           saved after the build), else dropped without touching the memory. The loaded game keeps the
+//           item screen it was saved with (the game builds one only with a stage or controller change), so
+//           a dropped layout (or one never built, a load from the title screen) is built for that item
+//           screen the next time it is drawn, with the projection and matrix the game's screen creation
+//           gives it (the GamePad's render layer); until then nothing is drawn (the client falls back).
 //
 // The archive file: archive_for() serves the client's archive for the game's read of
 // Layout/<name>.szs (hle/fs.cpp). Nothing is hooked without a client.
@@ -72,6 +75,7 @@ void set_game_calls(void (*original)(Cpu*, uint32_t), uint32_t (*call)(Cpu*, uin
 // replaced_by(addr) names who replaces it, "" if nobody).
 void install(const std::function<std::string(uint32_t)>& replaced_by, const std::function<void(uint32_t, void (*)(Cpu*))>& replace);
 void state_loaded();
+void service(Cpu* c);  // at the frame boundary (main thread): builds after a state load (see "state load")
 
 // the host file for a game read of `guest` (Layout/<layout>.szs of a client), else ""
 std::string archive_for(const std::string& guest);

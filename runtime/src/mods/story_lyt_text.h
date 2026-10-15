@@ -20,6 +20,9 @@ struct Cpu;
 namespace story_lyt_text {
 
 // a pane of a built layout by name (the layout object: hdPartsLayout_c +4), 0 if there is none
+// a state was loaded: our guest buffers (made by the host) may hold the loaded state's memory now;
+// they are made again with their next use
+void state_loaded();
 uint32_t find_pane(Cpu* c, uint32_t lyt, const char* name);
 // is `pane` one of the game's text panes (hdTextPane_c)?
 bool is_text_pane(uint32_t pane);
