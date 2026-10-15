@@ -10,6 +10,9 @@ what is on `devel` and not released yet (also in the
 - **macOS setup:** when macOS points to another developer folder than the installed Command Line Tools (a removed
   Xcode, or one whose license hasn't been accepted), setup now uses the installed tools directly instead of waiting
   forever, and says what to do if they still can't be used (#219).
+
+- **Android, two screens (AYN Thor and similar):** GamePad screen **Off** (or hiding it) now works: the second screen
+  turns black and ignores touches while the game plays on the main screen (#222).
 - **Mod SDK v3 preview (opt-in, for mod makers):** mods can place a small set of the game's own actors (chests,
   signs, a Windfall resident) with talk actions, and play short scenes: camera shots, dialogue, fades and the game's
   letterbox bars, skippable with Plus/Start. Placed chests and signs keep their state in the mod's own part of the

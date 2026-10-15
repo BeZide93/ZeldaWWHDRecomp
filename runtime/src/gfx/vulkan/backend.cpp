@@ -1565,6 +1565,10 @@ static void prepare_secondary_drawing(const Surface& source) {
   create_surface_image(&snapshot,false,source.extent,R.secondaryQueueFamily);
 }
 
+// The second screen shows the GamePad picture and the GamePad screen is switched off: draw it black
+// (issue #222). Swapping is suspended while off, so the second screen never carries the TV then.
+static bool secondary_blank() { return gfx::drc_screen_off() && !dual_display::active_swap; }
+
 static void prepare_secondary_snapshot() {
   if(isolatedSecondary) {
     if(!isolatedSecondary->acquired() || isolatedSecondary->prepared())return;
@@ -1572,7 +1576,8 @@ static void prepare_secondary_snapshot() {
     auto* scan=source.scan.get();if(!scan || !scan->image)return;
     end_encoder();
     transition_image(scan,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_ACCESS_TRANSFER_READ_BIT);
-    isolatedSecondary->record_snapshot(command_buffer(),scan->image,scan->fmt.pixel,{scan->extent.width,scan->extent.height});
+    isolatedSecondary->record_snapshot(command_buffer(),scan->image,scan->fmt.pixel,{scan->extent.width,scan->extent.height},
+        secondary_blank());
     isolatedSourceLinear=source.scanSrgb || scan->fmt.pixel==VK_FORMAT_R8G8B8A8_SRGB ||
         scan->fmt.pixel==VK_FORMAT_B8G8R8A8_SRGB || scan->fmt.pixel==VK_FORMAT_A8B8G8R8_SRGB_PACK32;
     secondarySnapshotWait=isolatedSecondary->snapshot_wait();
@@ -1590,12 +1595,18 @@ static void prepare_secondary_snapshot() {
       sourceScreen.scanSrgb,scale_filter(),fxaa_enabled());
   if(!draw)return;
   auto& snapshot=secondaryDrawing.snapshot;
-  transition_image(scan,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_ACCESS_TRANSFER_READ_BIT);
   transition_image(&snapshot,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_ACCESS_TRANSFER_WRITE_BIT);
-  VkImageCopy copy{};copy.srcSubresource={VK_IMAGE_ASPECT_COLOR_BIT,0,0,1};
-  copy.dstSubresource=copy.srcSubresource;copy.extent=scan->extent;
-  record::vkCmdCopyImage(command_buffer(),scan->image,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-      snapshot.image,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,1,&copy);
+  if(secondary_blank()) {
+    static const VkClearColorValue black{};
+    const VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1};
+    record::vkCmdClearColorImage(command_buffer(),snapshot.image,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,&black,1,&range);
+  } else {
+    transition_image(scan,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_ACCESS_TRANSFER_READ_BIT);
+    VkImageCopy copy{};copy.srcSubresource={VK_IMAGE_ASPECT_COLOR_BIT,0,0,1};
+    copy.dstSubresource=copy.srcSubresource;copy.extent=scan->extent;
+    record::vkCmdCopyImage(command_buffer(),scan->image,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        snapshot.image,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,1,&copy);
+  }
   transition_image(&snapshot,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,VK_ACCESS_SHADER_READ_BIT);
   secondaryPreparedDraw=*draw;
   // Whichever graphics submission consumes this command buffer (normally TV
@@ -1635,6 +1646,7 @@ Java_org_wwhdrecomp_wwhd_GamePadDisplay_touch(
   if (generation != secondaryGeneration || generation != activeSecondaryGeneration)
     return JNI_FALSE;
   if (dual_display::active_swap) return JNI_FALSE; // this surface is showing TV
+  if (gfx::drc_screen_off()) return JNI_FALSE;     // GamePad screen off: shown black, no touches (#222)
   if (!down) { input::set_touch(false, 0, 0); return JNI_TRUE; }
   float tx, ty;
   if (!gamepad_touch::map(secondaryTouchBox, x, y, dragging, tx, ty)) return JNI_FALSE;
@@ -2641,7 +2653,8 @@ void swap() {
   update_secondary_surface();
   {
     std::lock_guard<std::mutex> guard(secondaryMutex);
-    bool wanted = gfx::g_has_drc_window && dual_display::requested_swap;
+    // GamePad screen off: the TV stays on the main screen and the second one goes black (issue #222)
+    bool wanted = gfx::g_has_drc_window && dual_display::requested_swap && !gfx::drc_screen_off();
     if (dual_display::active_swap.exchange(wanted) != wanted) {
       secondaryTouchBox = primaryTouchBox = {};
       ++touchLayoutGeneration;

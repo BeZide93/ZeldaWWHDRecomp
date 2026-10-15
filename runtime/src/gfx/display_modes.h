@@ -60,6 +60,8 @@ int display_test_mode(uint64_t frame);
 // state changes of the modes (the hosts then show or hide their GamePad window and save)
 bool drc_window_wanted();          // window mode and shown
 bool pip_shown_now();              // the overlay is up (pip / auto modes)
+bool drc_screen_off();             // switched off (Off, or hidden in window mode): a physical second screen
+                                   // (Android) shows black and ignores touches (issue #222)
 bool drc_screen_shown(bool drc_window_visible);  // show/hide control state; auto: whether the overlay is pinned
 void display_show_drc(bool on);    // show / hide the GamePad screen; auto: set / clear the pin
 void display_set_mode(int m);      // a new mode (shown again unless off; auto starts unpinned)

@@ -136,6 +136,7 @@ int display_test_mode(uint64_t frame) {
 
 // ---------------------------------------------------------------- mode state
 bool drc_window_wanted() { return g_mode == kDrcWindow && g_shown; }
+bool drc_screen_off() { return g_mode == kDrcOff || (g_mode == kDrcWindow && !g_shown); }
 bool pip_shown_now() {
     if (g_mode == kDrcPip) return g_shown;
     if (g_mode == kDrcAuto) {
