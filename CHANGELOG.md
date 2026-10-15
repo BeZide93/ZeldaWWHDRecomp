@@ -17,6 +17,8 @@ what is on `devel` and not released yet (also in the
   (at most 64 MB per run), so there is one to share after a problem. The log also lists more about the GPU (driver,
   vertex formats, limits), and Graphics → Advanced has **Force RGB vertex fallback** for testing GPUs like PowerVR
   (#207).
+- **Intel graphics on Windows:** drivers older than 101.5000 now use the classic render-pass mode automatically,
+  which fixes the crash at start on driver 101.3111 (Iris Xe) without setting anything (#204).
 
 ## v0.3.0
 
