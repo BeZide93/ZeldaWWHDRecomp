@@ -2162,7 +2162,13 @@ void settings_window() {
 #ifdef __ANDROID__
     placement = placement && !gfx::g_has_drc_window;
 #endif
-    if (placement) {
+    // Moving the panel out of the preview's way: never while dragging (the panel would jump under the
+    // pointer), and only to a space that keeps it usable; otherwise it stays centred over the preview.
+    static ImVec2 lastPanelSize, lastPanelPos;
+    static bool lastPlaced = false;
+    if (placement && lastPlaced && ImGui::IsAnyItemActive()) {
+        panelSize = lastPanelSize, panelPos = lastPanelPos;
+    } else if (placement) {
         const auto b = gfx::pip_box(pip_tv_box(), gfx::g_drc_aspect, gfx::g_pip_size, gfx::pip_position());
         const float gap = 8;
         const gfx::Box spaces[] = {
@@ -2175,9 +2181,13 @@ void settings_window() {
         auto best = spaces[0];
         for (auto area : spaces)
             if (usable(area) > usable(best)) best = area;
-        panelSize = ImVec2(std::min(size.x, best.w), std::min(size.y, best.h));
-        panelPos = ImVec2(best.x + best.w / 2, best.y + best.h / 2);
+        const ImVec2 fitted(std::min(size.x, best.w), std::min(size.y, best.h));
+        if (fitted.x >= size.x * 0.75f && fitted.y >= size.y * 0.6f) {
+            panelSize = fitted;
+            panelPos = ImVec2(best.x + best.w / 2, best.y + best.h / 2);
+        }
     }
+    lastPlaced = placement, lastPanelSize = panelSize, lastPanelPos = panelPos;
     ImGui::SetNextWindowPos(panelPos, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
     ImGui::SetNextWindowSize(panelSize, ImGuiCond_Always);
     ImGuiWindowFlags fl = ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
