@@ -14,6 +14,7 @@
 #include <filesystem>
 #include <unistd.h>
 #include "../src/overlay/overlay.cpp"
+#include "imgui_internal.h"
 
 static std::vector<std::string> logs;
 static int saves=0,loads=0,promptKeys=0;
@@ -49,6 +50,101 @@ static void event_key(SDL_Window* window,SDL_Scancode key,bool down,SDL_Keymod m
  e.key.timestamp=123456789;e.key.scancode=key;e.key.mod=mods;e.key.repeat=repeat;
  input::handle_event(e);
 }
+// Exercise the actual Shortcuts widgets and capture loop without a renderer or game data.
+static int shortcut_ui_test() {
+ using namespace input_map;
+ using namespace overlay;
+ const auto file = std::filesystem::temp_directory_path() / ("wwhd-shortcut-ui-" + std::to_string(getpid()) + ".json");
+ setenv("WWHD_CONTROLS", file.c_str(), 1);
+ set_current(Mapping::defaults(), false);
+ ImGui::CreateContext();
+ auto& io = ImGui::GetIO();
+ io.IniFilename = nullptr;
+ io.DisplaySize = ImVec2(1280,720); io.DeltaTime = 1.0f/60;
+ io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_NavEnableGamepad;
+ io.BackendFlags |= ImGuiBackendFlags_HasGamepad | ImGuiBackendFlags_RendererHasTextures;
+ io.Fonts->AddFontDefault();
+ g_open = true;
+ U.cap_action = -1;
+ std::fill(std::begin(U.values), std::end(U.values), 0.0f);
+ auto frame = [&](bool focusReset = false) {
+  ImGui::NewFrame();
+  ImGui::SetNextWindowPos(ImVec2(100,20), ImGuiCond_Always);
+  ImGui::SetNextWindowSize(ImVec2(1000,680), ImGuiCond_Always);
+  if (focusReset) ImGui::SetNextWindowFocus();
+  ImGui::Begin("Shortcut UI regression");
+  if (focusReset) ImGui::SetKeyboardFocusHere();
+  tab_shortcuts();
+  ImGui::End(); ImGui::Render();
+ };
+ auto press = [&](ImGuiKey key) {
+  io.AddKeyEvent(key,true); frame(); io.AddKeyEvent(key,false); frame(); frame();
+ };
+ auto clickFocused = [&](ImGuiMouseSource source) {
+  auto& g = *ImGui::GetCurrentContext();
+  assert(g.NavId && g.NavWindow);
+  const auto center = ImGui::WindowRectRelToAbs(g.NavWindow,g.NavWindow->NavRectRel[g.NavLayer]).GetCenter();
+  io.AddMouseSourceEvent(source); io.AddMousePosEvent(center.x,center.y);
+  io.AddMouseButtonEvent(0,true); frame(); io.AddMouseButtonEvent(0,false); frame(); frame();
+ };
+ auto bindingId = [&](int action, int column, const char* label = "###shortcut_binding") {
+  ImGuiID id = ImHashStr("shortcut bindings",0,ImHashStr("Shortcut UI regression"));
+  id=ImHashData(&action,sizeof action,id); id=ImHashData(&column,sizeof column,id);
+  return ImHashStr(label,0,id);
+ };
+ auto focus = [&](ImGuiID id) {
+  for (int i=0;i<200 && ImGui::GetCurrentContext()->NavId!=id;++i) press(ImGuiKey_Tab);
+  assert(ImGui::GetCurrentContext()->NavId == id);
+ };
+ frame(true); frame(); frame();
+ focus(bindingId(kSettings,0));
+ clickFocused(ImGuiMouseSource_Mouse);
+ assert(U.cap_action == kActionCount+kSettings && U.cap_col == 0);
+ assert(key(kVK_F9,true,false,kCtrl|kShift)); frame();
+ assert((current().shortcuts[kSettings].keys[0] == ShortcutKey{kVK_F9,kModCtrl|kModShift}));
+ assert(U.cap_action == -1);
+ // The same actual widget can start another capture, and Escape must preserve its binding.
+ focus(bindingId(kSettings,0));
+ clickFocused(ImGuiMouseSource_Mouse);
+ const auto beforeCancel = current();
+ assert(U.cap_action == kActionCount+kSettings);
+ assert(key(kVK_Escape,true,false,0)); frame();
+ assert(current() == beforeCancel && U.cap_action == -1);
+ // Navigate to the controller column and activate with the gamepad's confirm key.
+ focus(bindingId(kSettings,2));
+ press(ImGuiKey_GamepadFaceDown);
+ assert(U.cap_action == kActionCount+kSettings && U.cap_col == 2);
+ frame(); // release gate: the UI activation must not become the binding
+ U.values[kPadOptions]=1; frame();
+ assert(U.cap_action >= 0);
+ U.values[kPadDUp]=1; frame();
+ assert(current().shortcuts[kSettings].hold == kPadOptions && current().shortcuts[kSettings].button == kPadDUp);
+ assert(U.cap_action == -1);
+ std::fill(std::begin(U.values),std::end(U.values),0.0f);
+ // Escape also wins over a complete controller combination in the same frame.
+ focus(bindingId(kSettings,2));
+ press(ImGuiKey_GamepadFaceDown);
+ assert(U.cap_action >= 0); frame();
+ U.values[kPadLB]=1; frame();
+ const auto beforeControllerCancel=current();
+ U.values[kPadDRight]=1; assert(key(kVK_Escape,true,false,0)); frame();
+ assert(current() == beforeControllerCancel && U.cap_action == -1);
+ std::fill(std::begin(U.values),std::end(U.values),0.0f);
+ // The explicit Clear button is usable with a touch source, without right-click support.
+ focus(bindingId(kSettings,2,"Clear"));
+ clickFocused(ImGuiMouseSource_TouchScreen);
+ assert(!current().shortcuts[kSettings].hold && !current().shortcuts[kSettings].button);
+ // Reset applies only to Shortcuts, keeping game controls intact.
+ auto m=current(); m.keys[kA] = {kVK_F8,kNoKey}; set_current(m,false);
+ frame(); focus(ImHashStr("Reset to defaults",0,ImHashStr("Shortcut UI regression"))); clickFocused(ImGuiMouseSource_Mouse);
+ assert(current().shortcuts == shortcut_defaults());
+ assert(current().keys[kA] == m.keys[kA]);
+ Mapping saved; assert(load_file(file.string(),saved)); assert(saved == current());
+ g_open=false; ImGui::DestroyContext(); std::filesystem::remove(file);
+ puts("Shortcut UI: mouse/gamepad activation, modifiers, Escape, controller capture, touch clear and scoped reset passed");
+ return 0;
+}
+
 static int window_target_test() {
  using namespace overlay::window_target;
  unsetenv("GAMESCOPE_WAYLAND_DISPLAY");unsetenv("WAYLAND_DISPLAY");
@@ -175,6 +271,7 @@ static int window_target_test() {
  return 0;
 }
 int main(int argc,char** argv){
+ if(argc>1&&std::string(argv[1])=="--shortcuts-ui")return shortcut_ui_test();
  if(argc>1&&std::string(argv[1])=="--window-target")return window_target_test();
  const auto controlsFile=std::filesystem::temp_directory_path()/("wwhd-overlay-mouse-165-"+std::to_string(getpid())+".json");
  setenv("WWHD_CONTROLS",controlsFile.c_str(),1);

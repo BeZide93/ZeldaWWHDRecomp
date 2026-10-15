@@ -1558,7 +1558,7 @@ void tab_shortcuts() {
                     b.hold ? "Hold " + std::string(pad_short_label(b.hold)) + " + " + pad_short_label(b.button) :
                     a == kPhoto && m.pad[kScreenshot] ? std::string(pad_short_label(m.pad[kScreenshot])) + " (legacy)" : "Unbound";
                 if (U.cap_action == kActionCount + a && U.cap_col == col) label = "Press...";
-                if (ImGui::Button(label.c_str(), ImVec2(-FLT_MIN, 0)) && U.cap_action < 0) {
+                if (ImGui::Button((label + "###shortcut_binding").c_str(), ImVec2(-FLT_MIN, 0)) && U.cap_action < 0) {
                     U.cap_action = kActionCount + a; U.cap_col = col; U.cap_started = now_s();
                     U.binding_capture.reset(); capture_hold = 0; g_capture_key = -2; g_shortcut_capture = true; g_capturing_keys = true;
                 }
