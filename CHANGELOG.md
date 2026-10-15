@@ -7,6 +7,10 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Fixed: a story mod's treasure chart showed its X outside the map.** The chart view shows a small window of the
+  sea square; a mod chart now uses the window that contains its treasure spot, so the X sits on the map at the spot,
+  on the TV and the GamePad.
+
 - **Linux: sharp picture with desktop scaling on Wayland** (issue #201, thanks @findel77): the game window now
   uses the screen's real pixel size, so with display scaling (for example 4K at 250%) the picture and the
   settings overlay are no longer rendered small and stretched. On older versions, `SDL_VIDEO_WAYLAND_SCALE_TO_DISPLAY=1`
