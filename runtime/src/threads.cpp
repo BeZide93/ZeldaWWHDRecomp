@@ -30,6 +30,7 @@
 
 #include "runtime.h"
 #include "savestate.h"
+#include "state_metadata_validation.h"
 #include "scheduler_tick.h"
 #include "render_prof.h"
 #include "platform/perf_hint.h"
@@ -1480,7 +1481,13 @@ bool threads_ss_save(ss::Writer& w, std::string& why) {
 }
 
 // can the threads of this snapshot be put back into the current process? (all threads parked)
+bool threads_ss_validate(ss::Reader r, std::string& why) {
+    if (!ss::metadata::threads<ThreadRec>(r)) { why = "corrupt threads section"; return false; }
+    return true;
+}
+
 bool threads_ss_check(ss::Reader r, std::string& why) {
+    if (!threads_ss_validate(r,why)) return false;
     uint32_t n = r.u32();
     std::vector<ThreadRec> recs(n);
     for (auto& t : recs) r.bytes(&t, sizeof t);

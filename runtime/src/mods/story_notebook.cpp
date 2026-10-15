@@ -1,6 +1,7 @@
 // The story notebook (story_notebook.h, docs/mod-sdk-v2.md "The story notebook"): the services, the
 // page driver and the item menu entry.
 #include "story_notebook.h"
+#include "story_notebook_layout.h"
 #include "story_notebook_page.h"
 #include "story_notebook_caption.h"
 #include "story_notebook_bag.h"
@@ -342,7 +343,6 @@ bool menu_shown_now(Cpu* c) {
 bool menu_shown() { return g_menu_shown; }
 IconPlace place_over(uint32_t item, uint32_t number) {
     IconPlace at;
-    if (g_open.load(std::memory_order_relaxed)) return g_icon_reason = "the notebook page is open", at;  // the page covers the menu
     if (!item || !g_menu) return g_icon_reason = "no bag window yet", at;
     // the window runs once per logic step; frames drawn in between (interpolation, 120 Hz) keep the icon
     if (g_window_step + 1 < g_step.load(std::memory_order_relaxed)) return g_icon_reason = "the bag window is closed", at;
@@ -357,6 +357,16 @@ IconPlace place_over(uint32_t item, uint32_t number) {
     static const bool show_sentinel = [] { const char* e = getenv("WWHD_NOTEBOOK_SHOW_SENTINEL"); return e && *e == '1'; }();
     if (!show_sentinel)  // (test aid: WWHD_NOTEBOOK_SHOW_SENTINEL=1 leaves the stand-in's icon under ours, to check the alignment)
         st8(icon + kPaneFlags, uint8_t(ld8(icon + kPaneFlags) & ~1u));  // the game's sentinel icon stays hidden
+    // ... also while the page is open: the page drawn as a game layout fades in over the bag (the HUD's page
+    // covered it at once), and the game's selection animation of the tapped place shows the sentinel's
+    // stand-in icon (the Cabana Deed's parchment) otherwise
+    // the page drawn as a game layout: while it opens or closes the bag place shows the notebook open
+    const bool open_book = g_open.load(std::memory_order_relaxed) && number == kNotebookItem && story_notebook_layout::animating() &&
+                           !icon_open_png().empty();
+    if (g_open.load(std::memory_order_relaxed) && !open_book) {
+        hide_floating_notebook_icon();
+        return g_icon_reason = "the notebook page is open", at;  // the page covers the menu
+    }
     std::vector<PaneNode> chain;
     for (uint32_t pane = icon; pane && chain.size() < 32; pane = ld32(pane + kPaneParent))
         chain.push_back({u32_as_f32(ld32(pane + kPaneTranslate)), u32_as_f32(ld32(pane + kPaneTranslate + 4)),
@@ -439,13 +449,23 @@ void bag_icon() {
         last = g_icon_reason;
         if (at.shown) lx = at.x, ly = at.y;
     }
-    if (!at.shown && !letter.shown) {
+    // the page drawn as a game layout covers the bag (the HUD's page did by being drawn later)
+    const bool open_book = story_notebook_layout::animating() && !icon_open_png().empty();
+    if ((story_notebook_layout::drawing() && !open_book) || (!at.shown && !letter.shown)) {
         if (published) store.drop(kIconOwner);
         published = false;
         return;
     }
+    static guestmods::hud::Handle open_image = 0;
     if (!image || generation != store.state_generation()) {  // the icon image, again after a state load
         generation = store.state_generation();
+        open_image = 0;
+        if (!icon_open_png().empty()) try {
+            const auto png = guestmods::hud::decode_png({icon_open_png().data(), icon_open_png().size()});
+            open_image = store.create_image(kIconOwner, png.width, png.height, png.width * 4, png.rgba.data(), png.rgba.size());
+        } catch (const std::exception&) {
+            open_image = 0;
+        }
         if (g_icon_png.empty()) return;  // no Story Notebook package look: no icon
         try {
             const auto png = guestmods::hud::decode_png({g_icon_png.data(), g_icon_png.size()});
@@ -465,7 +485,7 @@ void bag_icon() {
         Command c;
         c.x = (at.x - at.size * kIconAnchorX) * k, c.y = (at.y - at.size * kIconAnchorY) * k, c.w = c.h = at.size * k;
         c.rgba = 0xFFFFFF00u | uint32_t(at.alpha * 255.0f + 0.5f);
-        store.picture(kIconOwner, list, image, c);
+        store.picture(kIconOwner, list, open_book && open_image ? open_image : image, c);
     }
     if (letter.shown)  // placeholder art: a sealed envelope
         for (Command& c : envelope(letter.x * k, letter.y * k, letter.size * k, letter.alpha)) store.append(kIconOwner, list, std::move(c));
@@ -569,7 +589,8 @@ bool pieces_ready() {
     return a.sheet.width && a.card.width && a.underline.width && a.uplate.width && a.bands[0].width && a.bands[1].width && a.bands[2].width;
 }
 // The page's painted art (user artwork, story_notebook_art.h): read once from the folder
-// WWHD_NOTEBOOK_ART names (outside the repository): frame.png, banner.png (the list) and sheet.png,
+// WWHD_NOTEBOOK_ART names (outside the repository): frame.png, banner.png (the list), frame_notabs.png
+// (optional: the detail page's frame) and sheet.png,
 // card.png, header.png, underline.png, band_cream.png, band_blue.png, band_green.png, plate.png
 // (the detail page). WWHD_NOTEBOOK_HEADER=0 leaves the header band out.
 bool g_header = true;
@@ -602,13 +623,19 @@ void load_user_art() {
     read("banner.png", a.banner, 160);
     read("sheet.png", a.sheet, 800);
     read("card.png", a.card, 640);
-    read("header.png", a.header, 240);
+    read("header_v2.png", a.header, 240);  // the band without the Triforce, when the art has it
+    if (!a.header.width) read("header.png", a.header, 240);
     read("underline.png", a.underline, 48);
     read("band_cream.png", a.bands[0], 120);
     read("band_blue.png", a.bands[1], 120);
     read("band_green.png", a.bands[2], 120);
     read("plate.png", a.uplate, 140);
-    a.detail_frame = art::detail_frame(a.frame);
+    // the detail page's frame: the frame without its tab plates and close slot when the art has it
+    // (frame_notabs.png, the same picture painted without them), else the frame with those painted over
+    // by a stretched strip of its green (art::detail_frame, a visible patch)
+    game_glyph::Bitmap notabs;
+    read("frame_notabs.png", notabs, 1044, false);
+    a.detail_frame = notabs.width ? std::move(notabs) : art::detail_frame(a.frame);
     LOG("[notebook] painted art from %s: frame %s, banner %s, detail pieces %s, header band %s", dir, a.frame.width ? "yes" : "no",
         a.banner.width ? "yes" : "no", pieces_ready() ? "yes" : "no", a.header.width && g_header ? "on" : "off");
 }
@@ -713,6 +740,8 @@ void append_all(guestmods::hud::Handle list, std::vector<Command>& cmds, const s
 
 void publish(const std::vector<Row>& all, const std::vector<Command>* caption = nullptr) {
     auto& store = guestmods::hud::store();
+    // the page as a game layout (story_notebook_layout.h): then the HUD draws only its portraits
+    const bool by_layout = !caption && story_notebook_layout::update(g_page, all);
     if (!g_page.open() && !caption) {
         store.drop(kOwner);
         return;
@@ -723,14 +752,14 @@ void publish(const std::vector<Row>& all, const std::vector<Command>* caption = 
     const guestmods::hud::Handle list = store.begin(kOwner, screen);
     if (!list) return;
     std::vector<guestmods::hud::Handle> images;
-    std::vector<Command> cmds = render(caption ? *caption : g_page.draw(all), images, screen);
+    std::vector<Command> cmds = by_layout ? std::vector<Command>{} : render(caption ? *caption : g_page.draw(all), images, screen);
     g_closing = cmds, g_closing_images = images, g_closing_screen = screen;  // for the closing animation
     fit_to_screen(cmds, screen);
     append_all(list, cmds, images);
     const std::vector<Row> rows = g_page.shown(all);
     // portraits: in the rows that show them, and the sender's on the detail page (the painted frame)
     std::vector<std::pair<unsigned, const Quest*>> portraits;
-    if (!caption && g_page.mode() == Page::Mode::List)
+    if (!caption && !by_layout && g_page.mode() == Page::Mode::List)  // the layout has its own portraits
         for (unsigned i = 0; i < kRowsShown && g_page.top() + i < rows.size(); i++) portraits.push_back({i, rows[g_page.top() + i].quest});
     if (!caption && g_page.mode() == Page::Mode::Detail && g_page.scene().framed)
         for (const Row& r : rows)
@@ -765,6 +794,7 @@ void publish(const std::vector<Row>& all, const std::vector<Command>* caption = 
 // After the page closed: the last page shrinks a little and fades out (0.15 s), then it is gone.
 void publish_closing(float dt) {
     auto& store = guestmods::hud::store();
+    story_notebook_layout::update_closed();  // the layout's own closing animation (its page commands aren't kept)
     if (g_close_time >= 1.0f) return;
     g_close_time = std::min(1.0f, g_close_time + dt / 0.15f);
     if (g_close_time >= 1.0f || g_closing.empty()) {
@@ -989,7 +1019,11 @@ std::vector<Row> rows_now(std::vector<Quest>& storage) {
                     q.steps[st.n - 1] = st.text;
                 }
                 const uint8_t n = saved_step(b, q.key);
-                if (n == 0) q.next = d.quest.start_text, q.where.clear(), q.has_place = false;
+                if (n == 0) {  // not started: the start text, and step 1's place ("Not started yet" in the detail)
+                    q.next = d.quest.start_text, q.where.clear(), q.has_place = false;
+                    for (const ManifestStep& st : d.quest.steps)
+                        if (st.n == 1) q.where = st.where, q.has_place = st.has_place, q.x = st.x, q.z = st.z;
+                }
                 for (const ManifestStep& st : d.quest.steps)
                     if (st.n == n) {
                         q.next = st.text, q.where = st.where, q.has_place = st.has_place, q.x = st.x, q.z = st.z;
@@ -1175,6 +1209,24 @@ int32_t talk(const std::string& mod, const std::string& quest, uint32_t step, co
     return saved(q->key);
 }
 
+void hide_floating_notebook_icon() {
+    // the menu's floating icon (hdMenuItem sMenuIcon, HD decomp hd_screen_menu_item.cpp): a tap on a place
+    // lifts its item into it; for the notebook's place it would show the stand-in's icon (the Cabana Deed's
+    // parchment) while the page opens over the bag
+    static const uint32_t kMenuIcon = GD(0x101F5578);
+    const uint32_t icon = ld32(kMenuIcon);
+    if (!icon || ld32(icon + kItemNumber) != kNotebookItem) return;
+    if (const uint32_t pane = icon_pane(icon)) st8(pane + kPaneFlags, uint8_t(ld8(pane + kPaneFlags) & ~1u));
+}
+
+bool portrait_pixels(uint16_t key, guestmods::hud::Image& out) {
+    std::lock_guard lock(g_mu);
+    auto it = g_portraits.find(key);
+    if (it == g_portraits.end() || !it->second.pixels.width) return false;
+    out = it->second.pixels;
+    return true;
+}
+
 bool notebook_owned() { return story_mail::notebook_owned(); }
 
 bool open_page(const char* how) {
@@ -1288,6 +1340,7 @@ void pad(input::PadState& p, Cpu* c) {
         scene.framed = g_look.art.framed();
         scene.pieces = scene.framed && pieces_ready();
         scene.header = g_look.art.header.width > 0 && g_header;
+        scene.close_in_detail = story_notebook_layout::drawing();
         Cpu probe = *c_or_zero(c);
         const uint32_t play_object = c && g_call ? g_call(&probe, kPlay, {}) : 0;  // the game only (not in tests)
         const uint32_t link = play_object ? ld32(kLinkActor) : 0;
@@ -1434,9 +1487,18 @@ void cursor_float(Cpu* c) {
 // the game's own pick-up runs first and is put back as the touch ends (the page keeps the touch)
 void touch_select(Cpu* c) {
     const uint32_t item = c->r[3];
+    // a touch on the notebook's place opens the page, so the game doesn't lift the place's item into the
+    // floating icon (hdMenuItem_c::selectTouchEnter: prepareTouchSelection + the float animation): it would
+    // show the stand-in's icon (the Cabana Deed's parchment) for a frame before the page covers the bag
+    if (ld32(item + kItemNumber) == kNotebookItem && notebook_owned() && !g_open.load(std::memory_order_relaxed)) {
+        if (trace()) LOG("[notebook] item menu: touch on the notebook's place (no lift)");
+        open_page("a touch on its bag place");
+        return;
+    }
     g_original(c, kTouchSelect);
     if (trace()) LOG("[notebook] item menu: touch on item %02X", ld32(item + kItemNumber));
-    if (ld32(item + kItemNumber) == kNotebookItem) open_page("a touch on its bag place");
+    if (ld32(item + kItemNumber) == kNotebookItem && open_page("a touch on its bag place"))
+        hide_floating_notebook_icon();  // the tap lifted the place's item into the floating icon
     if (ld32(item + kItemNumber) == kLetterItem) open_letter("a touch on its bag place");
 }
 

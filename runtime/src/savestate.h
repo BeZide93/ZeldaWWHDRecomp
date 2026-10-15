@@ -1,6 +1,7 @@
 // Save states: snapshot the whole running game (guest memory, guest threads, HLE state) into one
 // of 5 slots and restore it later, also in a fresh process. See savestate.cpp for the design.
 #pragma once
+#include "save_path.h"
 #include <cstdint>
 #include <cstring>
 #include <functional>
@@ -91,6 +92,8 @@ void request_load(int slot);
 void request_load_portable_file(const std::string& path);  // a .wwstate anywhere (WWHD_PORTABLE_LOAD)
 bool full_states();                     // save button / shortcuts make full states
 void set_full_states(bool on);          // the setting (kept in the states folder)
+SavePath save_path();                   // auto (Android streaming, desktop fast), streaming, fast
+void set_save_path(SavePath path);      // stored beside the full-state option
 bool full_states_forced();              // the environment decides (WWHD_FULL_SAVE_STATES or test variables)
 std::string bug_report_text();          // paths of the newest portable state and of cking.sav, for a bug report
 std::string states_dir();               // where slots live (created on first use)

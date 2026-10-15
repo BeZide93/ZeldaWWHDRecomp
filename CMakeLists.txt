@@ -361,13 +361,13 @@ target_link_libraries(guest_png_test PRIVATE ZLIB::ZLIB)
 add_test(NAME guest_png COMMAND guest_png_test "${CMAKE_SOURCE_DIR}/examples/guest-mods")
 
 # Synthetic integration tests call the real guest filesystem HLE handlers.
-add_executable(mod_content_fs_test runtime/tools/mod_content_fs_test.cpp runtime/src/hle/fs.cpp runtime/src/mods/story_mail.cpp runtime/src/mods/story_store.cpp runtime/src/mods/content.cpp runtime/src/mods/mod_archive.cpp runtime/src/game_languages.cpp runtime/src/guest_addr_identity.c)
+add_executable(mod_content_fs_test runtime/tools/mod_content_fs_test.cpp runtime/tools/fs_story_stub.cpp runtime/src/hle/fs.cpp runtime/src/mods/story_mail.cpp runtime/src/mods/story_store.cpp runtime/src/mods/content.cpp runtime/src/mods/mod_archive.cpp runtime/src/game_languages.cpp runtime/src/guest_addr_identity.c)
 target_include_directories(mod_content_fs_test PRIVATE runtime/src runtime/include)
 target_compile_options(mod_content_fs_test PRIVATE -UNDEBUG)
 target_link_libraries(mod_content_fs_test PRIVATE ZLIB::ZLIB Threads::Threads)
 
 # language sources: synthetic European/Japanese packs read through the guest file system (game_languages.h)
-add_executable(language_source_test runtime/tools/language_source_test.cpp runtime/src/hle/fs.cpp runtime/src/mods/story_mail.cpp runtime/src/mods/story_store.cpp runtime/src/mods/content.cpp runtime/src/mods/mod_archive.cpp runtime/src/game_languages.cpp runtime/src/guest_addr_identity.c)
+add_executable(language_source_test runtime/tools/language_source_test.cpp runtime/tools/fs_story_stub.cpp runtime/src/hle/fs.cpp runtime/src/mods/story_mail.cpp runtime/src/mods/story_store.cpp runtime/src/mods/content.cpp runtime/src/mods/mod_archive.cpp runtime/src/game_languages.cpp runtime/src/guest_addr_identity.c)
 target_include_directories(language_source_test PRIVATE runtime/src runtime/include)
 target_compile_options(language_source_test PRIVATE -UNDEBUG)
 target_link_libraries(language_source_test PRIVATE ZLIB::ZLIB Threads::Threads)
@@ -436,6 +436,27 @@ add_executable(screenshot_test runtime/tools/screenshot_test.cpp runtime/src/scr
 target_include_directories(screenshot_test PRIVATE runtime/src runtime/include)
 target_compile_options(screenshot_test PRIVATE -UNDEBUG)
 target_link_libraries(screenshot_test PRIVATE ZLIB::ZLIB Threads::Threads)
+# the story layouts' text markup (runtime/src/mods/story_lyt_text_markup.cpp)
+add_executable(story_lyt_text_test runtime/tools/story_lyt_text_test.cpp runtime/src/mods/story_lyt_text_markup.cpp)
+target_include_directories(story_lyt_text_test PRIVATE runtime/src)
+target_compile_options(story_lyt_text_test PRIVATE -UNDEBUG)
+add_test(NAME story_lyt_text COMMAND story_lyt_text_test)
+# the port's layout writer (runtime/src/mods/lyt_build.cpp); tools/story_mods/test_lyt.py compares its
+# output with the reference generator's
+add_executable(lyt_build_test runtime/tools/lyt_build_test.cpp runtime/src/mods/lyt_build.cpp runtime/src/mods/guest_png.cpp
+               runtime/src/mods/mod_archive.cpp)
+target_include_directories(lyt_build_test PRIVATE runtime/include runtime/src runtime/src/mods)
+target_compile_options(lyt_build_test PRIVATE -UNDEBUG)
+target_link_libraries(lyt_build_test PRIVATE ZLIB::ZLIB)
+add_test(NAME lyt_build COMMAND lyt_build_test)
+# the extended item icon archive (runtime/src/mods/item_icons.cpp); test_lyt.py compares it with
+# tools/story_mods/lyt/item_icons.py
+add_executable(item_icons_test runtime/tools/item_icons_test.cpp runtime/src/mods/item_icons.cpp runtime/src/mods/lyt_build.cpp
+               runtime/src/mods/guest_png.cpp runtime/src/mods/mod_archive.cpp)
+target_include_directories(item_icons_test PRIVATE runtime/include runtime/src runtime/src/mods)
+target_compile_options(item_icons_test PRIVATE -UNDEBUG)
+target_link_libraries(item_icons_test PRIVATE ZLIB::ZLIB)
+add_test(NAME item_icons COMMAND item_icons_test)
 # the text prompt's reader of the game's name font (runtime/src/overlay/game_font.cpp)
 add_executable(rtl_text_test runtime/tools/rtl_text_test.cpp runtime/src/rtl_text.cpp)
 target_include_directories(rtl_text_test PRIVATE runtime/src)
@@ -681,6 +702,10 @@ endif()
 # disc image / Cemu archive extractor used by the installer (tools/wudextract; no Python or
 # pycryptodome needed) and its tests; zstd (for .wua) from pinned source (cmake/Zstd.cmake)
 include(cmake/Zstd.cmake)
+# Full-state v3 uses the existing pinned zstd; raw LZ4 remains for v2 compatibility,
+# including loading portable v2 states on macOS (v1 uses Apple's codec).
+include(cmake/FullStateCodecs.cmake)
+target_link_libraries(wwhd PRIVATE wwhd_state_codecs)
 add_library(wudcrypto STATIC tools/wudextract/crypto.cpp)
 target_include_directories(wudcrypto PUBLIC tools/wudextract)
 add_executable(wwhd-extract tools/wudextract/wwhd_extract.cpp tools/wudextract/zarchive.cpp)
@@ -788,6 +813,11 @@ if(Python3_Interpreter_FOUND)
 endif()
 
 add_test(NAME register_blocks COMMAND register_blocks_test)
+add_executable(state_metadata_validation_test runtime/tools/state_metadata_validation_test.cpp)
+target_include_directories(state_metadata_validation_test PRIVATE runtime/src runtime/include)
+target_compile_options(state_metadata_validation_test PRIVATE -UNDEBUG)
+add_test(NAME state_metadata_validation COMMAND state_metadata_validation_test)
+
 add_test(NAME scheduler_tick COMMAND scheduler_tick_test)
 add_test(NAME full_state_header COMMAND full_state_header_test)
 add_test(NAME mod_manager COMMAND mod_manager_test)
@@ -989,7 +1019,8 @@ target_include_directories(story_chart_test PRIVATE runtime/include runtime/src)
 target_compile_options(story_chart_test PRIVATE -UNDEBUG)
 add_test(NAME story_chart COMMAND story_chart_test)
 # the story notebook: quest list, save record, page navigation, services and item menu hooks
-add_executable(story_notebook_test runtime/tools/story_notebook_test.cpp runtime/src/mods/story_notebook.cpp runtime/src/mods/story_mail.cpp runtime/src/mods/story_store.cpp
+add_executable(story_notebook_test runtime/tools/story_notebook_test.cpp runtime/src/mods/story_notebook.cpp
+               runtime/tools/story_notebook_layout_stub.cpp runtime/src/mods/story_mail.cpp runtime/src/mods/story_store.cpp
                runtime/src/mods/story_chart.cpp runtime/src/mods/guest_png.cpp runtime/src/mods/mod_archive.cpp runtime/src/guest_addr_identity.c
                ${WWHD_NPC_CATALOGUE})
 target_include_directories(story_notebook_test PRIVATE runtime/include runtime/src runtime/src/mods)
@@ -1448,3 +1479,58 @@ if(WIN32)
 endif()
 add_test(NAME crash_memory_private COMMAND crash_memory_test on)
 add_test(NAME crash_memory_disabled COMMAND crash_memory_test off)
+
+# the story notebook's page as a game layout: page state -> view, and the layout's draw (panes, texts,
+# cursor glide, animations) against recording fakes of story_lyt_screen / story_lyt_text / lyt_build
+add_executable(story_notebook_layout_test runtime/tools/story_notebook_layout_test.cpp runtime/src/mods/story_notebook_layout.cpp runtime/src/mods/story_notebook_layout_chart.cpp
+               runtime/src/mods/guest_png.cpp runtime/src/mods/mod_archive.cpp runtime/src/mods/story_notebook_layout_detail.cpp)
+target_include_directories(story_notebook_layout_test PRIVATE runtime/include runtime/src runtime/src/mods)
+target_compile_options(story_notebook_layout_test PRIVATE -UNDEBUG)
+target_link_libraries(story_notebook_layout_test PRIVATE ZLIB::ZLIB)
+add_test(NAME story_notebook_layout COMMAND story_notebook_layout_test)
+# Explicit opt-in synthetic full-state RSS tool; excluded from CTest and normal builds.
+if(NOT WIN32 AND NOT ANDROID)
+  add_executable(full_state_stream_test runtime/tools/full_state_stream_test.cpp runtime/src/guest_addr_identity.c)
+  target_include_directories(full_state_stream_test PRIVATE runtime/src runtime/include)
+  target_compile_options(full_state_stream_test PRIVATE -UNDEBUG -ffunction-sections -fdata-sections)
+  target_link_libraries(full_state_stream_test PRIVATE Threads::Threads wwhd_state_codecs)
+  if(APPLE)
+    target_link_libraries(full_state_stream_test PRIVATE compression)
+    target_link_options(full_state_stream_test PRIVATE -Wl,-dead_strip)
+  else()
+    target_link_options(full_state_stream_test PRIVATE -Wl,--gc-sections)
+  endif()
+  add_test(NAME full_state_stream COMMAND full_state_stream_test)
+  if(Python3_Interpreter_FOUND)
+    add_test(NAME full_state_memory_gate COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/runtime/tools/test_full_state_memory_bench.py)
+  endif()
+  add_executable(full_state_memory_bench EXCLUDE_FROM_ALL runtime/tools/full_state_memory_bench.cpp runtime/src/guest_addr_identity.c)
+  target_include_directories(full_state_memory_bench PRIVATE runtime/src runtime/include)
+  target_compile_options(full_state_memory_bench PRIVATE -ffunction-sections -fdata-sections)
+  target_link_libraries(full_state_memory_bench PRIVATE Threads::Threads wwhd_state_codecs)
+  if(APPLE)
+    target_link_options(full_state_memory_bench PRIVATE -Wl,-dead_strip)
+    target_link_libraries(full_state_memory_bench PRIVATE compression)
+  else()
+    target_link_options(full_state_memory_bench PRIVATE -Wl,--gc-sections)
+    if(TARGET lz4_static)
+      target_link_libraries(full_state_memory_bench PRIVATE lz4_static)
+    else()
+      find_path(FULL_STATE_LZ4_INCLUDE_DIR lz4.h REQUIRED)
+      find_library(FULL_STATE_LZ4_LIBRARY NAMES lz4 REQUIRED)
+      target_link_libraries(full_state_memory_bench PRIVATE ${FULL_STATE_LZ4_LIBRARY})
+      target_include_directories(full_state_memory_bench PRIVATE ${FULL_STATE_LZ4_INCLUDE_DIR})
+    endif()
+  endif()
+endif()
+
+# Pure platform policy: exercise both Android and desktop auto defaults on every host.
+foreach(platform IN ITEMS desktop android)
+  add_executable(save_path_${platform}_test runtime/tools/save_path_test.cpp)
+  target_include_directories(save_path_${platform}_test PRIVATE runtime/src)
+  target_compile_options(save_path_${platform}_test PRIVATE -UNDEBUG)
+  if(platform STREQUAL "android")
+    target_compile_definitions(save_path_${platform}_test PRIVATE __ANDROID__=1)
+  endif()
+  add_test(NAME save_path_${platform} COMMAND save_path_${platform}_test)
+endforeach()

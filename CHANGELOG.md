@@ -7,6 +7,12 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Story Notebook: a new look for mod quests** (Mod SDK v2): the notebook's list and quest pages are now drawn
+  as real game layouts, on the TV and the GamePad, with a mini sea chart on each quest page, the open book in the
+  Delivery Bag and the game's own fonts. A quest's page says "Not started yet" with its first place, "Finished"
+  when done, and offers "Show on chart" only for a step with a place on the sea chart. For mod makers: mods can
+  give their items their own icons in the game's item pictures (built from your own game files on your machine).
+
 - **Android: system game modes** (idea from the GreenNaugahyde Android fork): the game declares Android's
   performance and battery-saving game modes, and the system no longer downscales the picture or overrides the
   frame rate, so the port's own resolution and frame pacing stay in charge.

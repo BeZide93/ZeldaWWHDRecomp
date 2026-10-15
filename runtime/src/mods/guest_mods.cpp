@@ -19,6 +19,9 @@
 #include "story_notebook_game.h"
 #include "guest_png.h"
 #include "story_mail.h"
+#include "item_icons.h"
+#include "story_lyt_screen.h"
+#include "story_notebook_layout.h"
 #include "story_mail_book.h"
 #include "story_chart.h"
 #include "story_notebook.h"
@@ -67,6 +70,10 @@ double ppc_frsqrte(double);
 // Cpu::mod_skip uses former padding: save states (which store sizeof(Cpu) bytes) stay compatible
 static_assert(sizeof(void*) != 8 || sizeof(Cpu) == 752, "Cpu layout changed");
 
+namespace story_lyt {
+void set_game_calls(void (*original)(Cpu*, uint32_t), uint32_t (*call)(Cpu*, uint32_t, std::initializer_list<uint32_t>));
+void install(const std::function<void(uint32_t, void (*)(Cpu*))>& replace);
+}
 namespace guestmods {
 namespace {
 
@@ -545,6 +552,21 @@ bool load_one(const std::string& path, std::string& err,const mods::packages::Gu
             const std::string icon=look.get("icon").string(),model=look.get("model").string();
             story_notebook::set_look(icon.empty()?std::string():(std::filesystem::path(pkg.path)/icon).string(),
                                      model.empty()?std::string():notebook_model(std::filesystem::path(pkg.path)/model,pkg.data_path));
+            // the page as a game layout (story_notebook_layout.h): its description in the package
+            const std::string icon_open=look.get("icon_open").string();
+            story_notebook::set_icon_open(icon_open.empty()?std::string():(std::filesystem::path(pkg.path)/icon_open).string());
+            const std::string layout=look.get("layout").string();
+            story_notebook::set_layout_description(layout.empty()?std::string():(std::filesystem::path(pkg.path)/layout).string(),pkg.data_path);
+            // the item icons (item_icons.h): the notebook's own frame (key 0), built into the game's 2D pack
+            // (test aid WWHD_TEST_ITEM_ICONS=a.png,b.png adds pictures as more items)
+            std::vector<item_icons::Item> icons;
+            if(!icon.empty())icons.push_back({0,(std::filesystem::path(pkg.path)/icon).string()});
+            if(const char* extra=std::getenv("WWHD_TEST_ITEM_ICONS")) {
+                std::string list=extra;uint16_t key=0xF000;
+                for(size_t a=0;a<list.size();){size_t b=list.find(',',a);if(b==std::string::npos)b=list.size();
+                    if(b>a)icons.push_back({key++,list.substr(a,b-a)});a=b+1;}
+            }
+            item_icons::set_items(icons,pkg.data_path);
         }
         if(manifest_text.find("\"quests\"")!=std::string::npos||manifest_text.find("\"charts\"")!=std::string::npos) {
             prepare_npc_catalogue();
@@ -678,6 +700,21 @@ void init() {
         ch.addr=addr;ch.ordinal=uint32_t(ordinal);ch.replace=fn;ch.replace_mod="the port's story notebook (King of Red Lions)";
         g_mod_hook_flags[ordinal]=1;
     });
+    // Story layouts (story_lyt_screen.h): a layout of our own with the item screen. Its client: the layout
+    // test harness (WWHD_STORY_LYT, story_lyt_proto.cpp); nothing is hooked without one.
+    if(story_notebook::imported()||g_story_package)story_notebook_layout::configure();  // the notebook's page layout (first client)
+    story_lyt::set_game_calls(call_original,[](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);});
+    story_lyt::install([](uint32_t,PpcFunc){});
+    story_lyt_screen::set_game_calls(call_original,[](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);});
+    story_lyt_screen::install([](uint32_t addr) {
+        auto it=g_chains.find(addr);return it==g_chains.end()?std::string():it->second.replace_mod;
+    },[](uint32_t addr,PpcFunc fn) {
+        int ordinal=ordinal_of(addr);
+        if(ordinal<0)fatal("[guestmods] story layout: %08X is not a game function",addr);
+        Chain& ch=g_chains[addr];
+        ch.addr=addr;ch.ordinal=uint32_t(ordinal);ch.replace=fn;ch.replace_mod="the port's story layout";
+        g_mod_hook_flags[ordinal]=1;
+    });
     story_store::set_game_calls(call_original);
     story_store::install([](uint32_t addr) {
         auto it=g_chains.find(addr);return it==g_chains.end()?std::string():it->second.replace_mod;
@@ -722,6 +759,7 @@ void state_loaded() {
     story_mail::state_loaded();
     story_chart::state_loaded();
     story_notebook::state_loaded();
+    story_lyt_screen::state_loaded();
     for(auto& mod:g_loaded)mod.hud_called=false;
 }
 

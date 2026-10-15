@@ -605,6 +605,12 @@ void tab_saves() {
         help(ss::full_states_forced() ? "Set by WWHD_FULL_SAVE_STATES or a test variable for this start."
                                       : "Saves the whole running game instead (about 300 MB per slot), exactly as it is. "
                                         "These files contain game code and data: never attach them to a bug report.");
+        int savePath=int(ss::save_path());
+        if (ImGui::Combo("Full-state save path", &savePath, "Auto\0Streaming (less memory)\0Fast (background compression)\0"))
+            ss::set_save_path(ss::SavePath(savePath));
+        help("Auto uses less-memory streaming on Android and fast background compression on desktop. "
+             "Applies to manual full states and Crash Recovery; loading works with either path.");
+
     }
     if (features.screenshots) tab_saves_screenshots();
     if (features.full_states) tab_saves_crash_recovery();  // its automatic states are full states
