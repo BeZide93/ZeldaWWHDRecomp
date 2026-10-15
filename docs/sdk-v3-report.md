@@ -1,8 +1,9 @@
 # SDK v3 phase report — 2026-10-15
 
 Branch: `sdk-v3-actors-events`. Base: fresh `origin/devel`,
-`7d96afe239ed1e0513e791ed1ab40e3c4c9809c1`. The phase-1 checkpoint is the commit
-containing this report; its full SHA is reported in the delivery message.
+`7d96afe239ed1e0513e791ed1ab40e3c4c9809c1`. The initial phase-1 implementation
+checkpoint is `eadc9824768d852768cb61e906e24c630cd6bbf2`; the final audited
+revision's full SHA is reported in the delivery message.
 All work is local; nothing was pushed.
 
 ## Phase 1

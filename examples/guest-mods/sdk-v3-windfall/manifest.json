@@ -4,7 +4,7 @@
   "name": "Windfall lantern walk (SDK v3 preview)",
   "version": "0.1.0",
   "author": "Lukas S",
-  "description": "Preview world-content fixture: a sign, a resident and a short lighthouse scene. Placement and scene effects require game verification.",
+  "description": "Experimental SDK v3 example: a sign, a resident and a short lighthouse scene on Windfall. Game proof and verification limits are recorded in the SDK phase report.",
   "game_id": "wwhd",
   "minimum_manager_version": "1.5.0",
   "kind": "content",

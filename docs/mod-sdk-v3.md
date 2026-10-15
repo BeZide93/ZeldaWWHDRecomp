@@ -1,8 +1,9 @@
 # Actors and scenes (SDK v3 preview)
 
 **Draft preview.** This is an experimental extension to [SDK v2](mod-sdk-v2.md).
-The implementation and its game proof are still being checked. Custom actor types,
-models and guest behaviour callbacks are not available in this phase 1 draft.
+The worked example's game proof and the remaining verification limits are recorded
+in the [phase report](sdk-v3-report.md). Custom actor types, models and guest
+behaviour callbacks are not available in this phase 1 draft.
 
 The worked package is [sdk-v3-windfall](../examples/guest-mods/sdk-v3-windfall/manifest.json).
 It contains original text and names existing game actors; it includes no game
