@@ -7,6 +7,12 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Controls: Xbox and PlayStation button prompts also with "By position"** (issue #209, thanks @jamescastells):
+  with the Nintendo button layout on an Xbox or PlayStation controller, the game's button icons now show the button
+  that is physically in that place (for example the roll as a red B and the sword as a green A on an Xbox pad).
+  Custom face-button mappings show the buttons they are bound to. The settings' help texts now explain the two
+  options more clearly. "By label" and "Original" look as before.
+
 - **Vulkan: a fallback for GPUs without 3-part vertex formats** (issue #207, Pixel 10 Pro with a PowerVR GPU): some
   GPUs can't read three-component vertex data directly, which showed as "exploded" shapes and a black screen. The
   game now checks this at start and reads such data in two parts on those GPUs. Every other GPU keeps exactly the
