@@ -14,9 +14,10 @@ what is on `devel` and not released yet (also in the
 
 - **Fixed: loading a save state switched the controller back** to the one the state was made with (for example a
   GamePad state loaded while playing with a Pro Controller). Save states now keep your current controller, and the
-  game follows it: after a full state, or after switching the controller in the Input menu during play, the game
-  changes its own controller mode the same way as in its Options (a short transition), so Link moves and the
-  button prompts match.
+  game follows it right away, without any menus: after loading a full state, or after switching the controller in
+  the Input menu during play, Link moves with the controller you use and the button prompts match.
+- **Fixed: after loading a save state, story mod pages fell back to their plain look** (for example the Story
+  Notebook's page). Their layouts are now built again right after the load.
 
 - **Fixed: a story mod's treasure chart showed its X outside the map.** The chart view shows a small window of the
   sea square; a mod chart now uses the window that contains its treasure spot, so the X sits on the map at the spot,
