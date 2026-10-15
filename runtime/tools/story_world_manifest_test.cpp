@@ -62,5 +62,20 @@ int main() {
     face["actor"]="link";assert(!parse_scenes(v,scenes,why));face["actor"]="notice";assert(!parse_scenes(v,scenes,why));
     v["actors"].array[1]["actor"]="chest";face["actor"]="notice";assert(!parse_scenes(v,scenes,why));
     face["actor"]="guide";face["target_actor"]="notice";assert(parse_scenes(v,scenes,why));
+    auto mod=mods::json::parse(R"({"models":[{"id":"post","source":"models/post.glb"}],"actors":[{"id":"post","kind":"mod","model":"post","stage":"town","room":0,"position":{"x":0,"y":0,"z":0},"collision":{"radius":30,"height":120,"mode":"solid"},"attention":{"prompt":"check"},"lines":"Hello"}]})");
+    assert(parse_actors(mod,actors,why)&&actors[0].kind=="mod"&&actors[0].model=="post"&&actors[0].collision_height==120&&!actors[0].pushable);
+    auto valid_mod=mod;mod["actors"].array[0]["collision"]["mode"]="pushable";assert(parse_actors(mod,actors,why)&&actors[0].pushable);
+    for(const auto& source:{"../post.glb","/post.glb","models//post.glb","models/./post.glb","models/post.bfres","C:post.glb"}){mod=valid_mod;mod["models"].array[0]["source"]=source;assert(!parse_actors(mod,actors,why));}
+    mod=valid_mod;mod["actors"].array[0]["actor"]="sign";assert(!parse_actors(mod,actors,why));
+    mod=valid_mod;mod["actors"].array[0]["model"]="missing";assert(!parse_actors(mod,actors,why));
+    mod=valid_mod;mod["actors"].array[0]["params"]=0;assert(!parse_actors(mod,actors,why));
+    mod=valid_mod;mod["actors"].array[0]["collision"]["radius"]=0;assert(!parse_actors(mod,actors,why));
+    mod=valid_mod;mod["actors"].array[0]["collision"]["height"]=2001;assert(!parse_actors(mod,actors,why));
+    mod=valid_mod;mod["actors"].array[0]["attention"]["prompt"]="attack";assert(!parse_actors(mod,actors,why));
+    mod=valid_mod;mod["actors"].array[0].object.erase("kind");assert(!parse_actors(mod,actors,why));
+    mod=valid_mod;mod["models"].array.push_back(mod["models"].array[0]);assert(!parse_actors(mod,actors,why));
+    mod=valid_mod;mod["actors"].array[0]["collision"]["radius"]=1e-300;assert(!parse_actors(mod,actors,why));
+    mod=valid_mod;mod["actors"].array[0]["collision"]["height"]=1e-300;assert(!parse_actors(mod,actors,why));
+    mod=example();mod["actors"].array[0]["actor"]="mod";assert(!parse_actors(mod,actors,why));
     std::cout<<"story world manifest tests passed\n";
 }

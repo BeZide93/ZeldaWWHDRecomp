@@ -2,6 +2,7 @@
 #include "../game_clock.h"
 #include "vsync_pacing.h"
 #include "../mods/fast_forward.h"
+#include "../mods/mod_actor_shadow_proof.h"
 #include "../platform/host.h"
 #ifdef __APPLE__
 #include <pthread/qos.h>
@@ -823,8 +824,8 @@ HLE(gx2, GX2CallDisplayList) { emit(OP_CALL, {arg(c, 0), arg(c, 1)}); }
 HLE(gx2, GX2DirectCallDisplayList) { emit(OP_CALL, {arg(c, 0), arg(c, 1)}); }
 
 // ---------------------------------------------------------------- draws
-HLE(gx2, GX2DrawEx) { emit(OP_DRAW, {arg(c, 0), arg(c, 1), arg(c, 2), arg(c, 3)}); }
-HLE(gx2, GX2DrawIndexedEx) { emit(OP_DRAW_INDEXED, {arg(c, 0), arg(c, 1), arg(c, 2), arg(c, 3), arg(c, 4), arg(c, 5)}); }
+HLE(gx2, GX2DrawEx) { mod_actor_shadow_proof::draw_submitted(arg(c,1));emit(OP_DRAW, {arg(c, 0), arg(c, 1), arg(c, 2), arg(c, 3)}); }
+HLE(gx2, GX2DrawIndexedEx) { mod_actor_shadow_proof::draw_submitted(arg(c,1));emit(OP_DRAW_INDEXED, {arg(c, 0), arg(c, 1), arg(c, 2), arg(c, 3), arg(c, 4), arg(c, 5)}); }
 
 // ---------------------------------------------------------------- clears and copies
 static float farg(Cpu* c, int i) { return (float)c->f[1 + i].ps0; }

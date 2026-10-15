@@ -108,7 +108,12 @@ void set_item_get_next(void (*)(Cpu*),void (*)(Cpu*,uint32_t)) {}
 namespace hooks { void exec_item_get(Cpu*) {} }
 }
 // World runtime has its own actor/scene tests; loader tests only exercise registration.
+namespace actor_model_cache {
+bool bounds_for(const std::string&,story_notebook::WorldPoint&,story_notebook::WorldPoint&){return false;}
+std::string prepare(const std::string&,const story_notebook::ManifestModel&,const std::string&,const std::string&,const std::vector<std::string>&,const std::string&,const std::string&){return {}; }
+}
 namespace story_actors {
+bool register_model(const std::string&,const std::string&,const std::string&,int,std::string&,story_notebook::WorldPoint,story_notebook::WorldPoint){return true;}
 bool register_flags(const std::string&,const std::vector<std::string>&,std::string&){return true;}
 void service(Cpu*){}
 bool load(const std::string&,const std::vector<story_notebook::ManifestActor>&,std::string&){return true;}

@@ -4,7 +4,7 @@
   "name": "Windfall lantern walk (SDK v3 preview)",
   "version": "0.1.0",
   "author": "Lukas S",
-  "description": "Experimental SDK v3 example: a sign, a resident and a short lighthouse scene on Windfall.",
+  "description": "Experimental SDK v3 example: a sign, a resident, an original carved post and a short lighthouse scene on Windfall.",
   "game_id": "wwhd",
   "minimum_manager_version": "1.5.0",
   "kind": "content",
@@ -76,6 +76,38 @@
           "id": "lighthouse"
         }
       ]
+    },
+    {
+      "id": "carved-post",
+      "kind": "mod",
+      "model": "carved-post",
+      "stage": "sea",
+      "room": 11,
+      "position": {
+        "x": 100,
+        "y": 1040,
+        "z": -201500
+      },
+      "collision": {
+        "radius": 42,
+        "height": 160,
+        "mode": "solid"
+      },
+      "attention": {
+        "prompt": "check"
+      },
+      "flag": "carved-post-checked",
+      "lines": [
+        "A diamond is carved into the wood.",
+        "Below it: Follow the evening light."
+      ],
+      "then": [
+        {
+          "action": "flag",
+          "id": "carved-post-checked",
+          "value": true
+        }
+      ]
     }
   ],
   "scenes": [
@@ -134,6 +166,12 @@
           ]
         }
       ]
+    }
+  ],
+  "models": [
+    {
+      "id": "carved-post",
+      "source": "assets/carved_post.glb"
     }
   ]
 }

@@ -42,6 +42,7 @@ bool has_code_mod_support(); // this executable was built with code-mod support
 bool needs_code_mod_support(const std::string& id); // includes package dependencies
 void initialize(); // metadata only; before the game starts
 std::string directory();
+std::string package_data_directory(const std::string& id); // configured manager Data/id, empty for unknown packages
 std::vector<View> list();
 bool install(const std::string& source,std::string& error,std::string* installed_id=nullptr); // directory or ZIP/.wwhdmod
 bool remove(const std::string& id,std::string& error); // also deletes the files its setup prepared

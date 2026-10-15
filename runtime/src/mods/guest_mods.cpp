@@ -26,6 +26,8 @@
 #include "story_chart.h"
 #include "story_treasure.h"
 #include "story_actors.h"
+#include "mod_actor.h"
+#include "actor_model_cache.h"
 #include "story_scenes.h"
 #include "story_notebook.h"
 #include "story_items.h"
@@ -128,12 +130,25 @@ void call_original(Cpu* c, uint32_t func) {
 }
 
 // Declarative world content is shared by guest and data-only content packages.
-void load_world(const std::string& mod,const mods::json::Value& manifest) {
+void load_world(const std::string& mod,const mods::json::Value& manifest,const std::string& package_dir,const std::string& data_dir) {
     std::vector<story_notebook::ManifestActor> actors;
     std::vector<story_notebook::ManifestScene> scenes;
     std::string why;
     if(!story_notebook::parse_actors(manifest,actors,why)||!story_notebook::parse_scenes(manifest,scenes,why))
         exception_report::raise("World manifest "+mod+": "+why);
+    std::vector<story_notebook::ManifestModel> models;
+    if(!story_notebook::parse_models(manifest,models,why))exception_report::raise("World models "+mod+": "+why);
+    for(const auto& model:models) {
+        if(std::none_of(actors.begin(),actors.end(),[&](const auto& actor){return actor.kind=="mod"&&actor.model==model.id;}))continue;
+        try {
+            const auto bridge=BuildBridge::installed(std::string());
+            const auto tool=std::filesystem::path(bridge.builder).parent_path().parent_path()/"story_mods"/"actor_model.py";
+            const auto archive=actor_model_cache::prepare(mod,model,package_dir,data_dir,bridge.python,tool.string(),config::game_dir);
+            story_notebook::WorldPoint minimum,maximum;
+            if(!actor_model_cache::bounds_for(archive,minimum,maximum))exception_report::raise("Prepared model bounds unavailable");
+            if(!story_actors::register_model(mod,model.id,archive,1,why,minimum,maximum))exception_report::raise("World model "+mod+": "+why);
+        } catch(const std::exception& e) {exception_report::raise("World model "+mod+":"+model.id+": "+e.what());}
+    }
     std::vector<std::string> flags;
     for(const auto& scene:scenes)for(const auto& step:scene.steps)for(const auto& action:step.then)
         if(action.kind==story_notebook::StoryAction::Kind::Flag)flags.push_back(action.id);
@@ -615,7 +630,7 @@ bool load_one(const std::string& path, std::string& err,const mods::packages::Gu
             prepare_npc_catalogue();
             story_notebook::declare(loaded.id,loaded.name,manifest);
         }
-        load_world(loaded.id,manifest);
+        load_world(loaded.id,manifest,pkg.path,pkg.data_path);
         // the mod's items (story_items.h): kept in the Delivery Bag, owned in the save's story block
         std::vector<story_notebook::ManifestItem> items;std::string why;
         if(!story_notebook::parse_items(manifest,items,why))LOG("[items] %s: the manifest's items are not used: %s",loaded.id.c_str(),why.c_str());
@@ -703,7 +718,7 @@ void init() {
         for(const auto& item:items)if(!story_items::define(pkg.id,path.string(),item,why))
             exception_report::raise("World items "+pkg.id+": "+why);
         if(!items.empty()){story_items::note_import();story_notebook::note_import();story_mail::note_import();}
-        load_world(pkg.id,manifest);
+        load_world(pkg.id,manifest,path.string(),packages::package_data_directory(pkg.id));
     }
     // The item icons (item_icons.h): the notebook (key 0), then the mod items in declaration order (frames
     // 56...), built into the game's 2D pack before the game opens it; the mod items draw from those frames.

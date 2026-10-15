@@ -665,7 +665,7 @@ int main(int argc, char** argv) {
         // Other content dependencies retain their previous restriction.
         auto invalid=root/"invalid";fs::copy(pack,invalid,fs::copy_options::recursive);
         mods::json::Value bad;{std::ifstream input(invalid/"manifest.json");bad=mods::json::parse(std::string{std::istreambuf_iterator<char>(input),{}});}  // closed before rewriting and removing the file (Windows)
-        bad["id"]="plain-content-dependency";bad.object.erase("actors");bad.object.erase("scenes");
+        bad["id"]="plain-content-dependency";bad.object.erase("actors");bad.object.erase("scenes");bad.object.erase("models");
         std::ofstream(invalid/"manifest.json")<<mods::json::dump(bad);std::string error;assert(!install(invalid.string(),error));
         bad["id"]="world-content-other-dependency";bad["actors"]=mods::json::parse(R"([{"id":"notice","actor":"sign","stage":"sea","room":11,"flag":"read","position":{"x":0,"y":0,"z":0}}])");
         bad["dependencies"].array.push_back(mods::json::parse(R"({"id":"other-content"})"));

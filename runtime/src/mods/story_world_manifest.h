@@ -15,8 +15,10 @@ struct StoryAction {
     enum class Kind { Give,Take,QuestStep,Flag,StartScene };
     Kind kind=Kind::Flag; std::string id; unsigned value=1;
 };
+struct ManifestModel { std::string id,source; };
 struct ManifestActor {
-    std::string id,actor,stage; unsigned room=0;
+    std::string id,actor,stage,kind,model,prompt="check"; unsigned room=0;
+    float collision_radius=30,collision_height=100; bool pushable=false;
     WorldPoint position,rotation,scale{1,1,1}; uint32_t params=0; unsigned resident=9; uint8_t item_game=6;
     std::string flag,quest,item,time,lines; unsigned quest_step=0;
     std::vector<StoryAction> then;
@@ -93,17 +95,46 @@ inline bool lines(const Value& v,std::string& text) {
     std::u16string ignored;return !text.empty()&&text.size()<=240&&breaks<=2&&story_mail::append_utf16(text,true,ignored);
 }
 }
+inline bool parse_models(const mods::json::Value& m,std::vector<ManifestModel>& out,std::string& why) {
+    using namespace world_manifest;out.clear();const auto& list=m.get("models");
+    if(list.type==Value::Null)return true;
+    if(list.type!=Value::Array||list.array.size()>8)return why="models must be a list of up to 8",false;
+    std::vector<ManifestModel> parsed;
+    for(const auto& v:list.array){
+        if(!keys(v,{"id","source"})||!id(v.get("id"))||v.get("source").type!=Value::String)return why="invalid model declaration",false;
+        const auto& source=v.get("source").text;
+        if(source.empty()||source.size()>240||source.front()=='/'||source.find('\\')!=std::string::npos||source.find(':')!=std::string::npos||source.size()<5||source.substr(source.size()-4)!=".glb")return why="model source must be a package-relative .glb",false;
+        size_t start=0;while(start<=source.size()){const auto end=source.find('/',start);const auto part=source.substr(start,end==std::string::npos?end:end-start);if(part.empty()||part=="."||part=="..")return why="invalid model source path",false;if(end==std::string::npos)break;start=end+1;}
+        for(unsigned char c:source)if(c<32||c==127)return why="invalid model source path",false;
+        for(const auto& old:parsed)if(old.id==v.get("id").text)return why="duplicate model id",false;
+        parsed.push_back({v.get("id").text,source});
+    }out=std::move(parsed);return true;
+}
 inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestActor>& out,std::string& why) {
-    using namespace world_manifest;out.clear();const auto& list=m.get("actors");
+    using namespace world_manifest;out.clear();std::vector<ManifestModel> models;if(!parse_models(m,models,why))return false;const auto& list=m.get("actors");
     if(list.type==Value::Null)return true;
     if(list.type!=Value::Array||list.array.size()>kMaxActorsPerMod)return why="actors must be a list of up to 64",false;
     for(const auto& v:list.array){ManifestActor a;
-        if(!keys(v,{"id","actor","stage","room","position","rotation","scale","params","parameters","flag","when","lines","then"}))return why="unknown actor field",false;
+        if(!keys(v,{"id","actor","kind","model","collision","attention","stage","room","position","rotation","scale","params","parameters","flag","when","lines","then"}))return why="unknown actor field",false;
         if(!id(v.get("id")))return why="invalid actor id",false;a.id=v.get("id").text;a.actor=v.get("actor").string();
+        if(v.object.contains("kind")) {
+            if(v.get("kind").string()!="mod"||v.object.contains("actor"))return why="mod actor kind cannot name a native actor",false;
+            a.kind="mod";a.actor="mod";a.model=v.get("model").string();
+            if(!declared(m,"models",a.model))return why="mod actor names an undeclared model",false;
+            if(v.object.contains("params")||v.object.contains("parameters"))return why="mod actors cannot use native parameters",false;
+            const auto& collision=v.get("collision");
+            if(!keys(collision,{"radius","height","mode"}))return why="mod actor needs cylinder collision",false;
+            const auto& radius=collision.get("radius");const auto& height=collision.get("height");
+            if(radius.type!=Value::Number||height.type!=Value::Number||!std::isfinite(radius.number)||!std::isfinite(height.number)||radius.number<=0||radius.number>1000||height.number<=0||height.number>2000)return why="collision radius must be 0..1000 and height 0..2000 (exclusive zero)",false;
+            const auto mode=collision.get("mode").string();if(mode!="solid"&&mode!="pushable")return why="collision mode must be solid or pushable",false;
+            a.collision_radius=float(radius.number);a.collision_height=float(height.number);if(a.collision_radius<=0||a.collision_height<=0)return why="collision dimensions are too small",false;a.pushable=mode=="pushable";
+            const auto& attention=v.get("attention");if(attention.type!=Value::Null){if(!keys(attention,{"prompt"}))return why="invalid mod actor attention",false;a.prompt=attention.get("prompt").string();if(a.prompt!="talk"&&a.prompt!="check")return why="attention prompt must be talk or check",false;}
+            if(v.object.contains("flag")){if(!flag_id(v.get("flag")))return why="mod actor flag must be a mod-owned id",false;a.flag=v.get("flag").text;}
+        }else if(v.object.contains("model")||v.object.contains("collision")||v.object.contains("attention"))return why="model, collision and attention require kind mod",false;
         if(a.actor=="kanban"||a.actor=="PROC_KANBAN")a.actor="sign";
         if(a.actor=="Tbox"||a.actor=="takara"||a.actor=="PROC_TBOX")a.actor="chest";
         if(a.actor=="NpcPeople"||a.actor=="PROC_NPC_PEOPLE")a.actor="resident";
-        if(a.actor!="sign"&&a.actor!="resident"&&a.actor!="chest")return why="unknown or unsupported flag-setting actor: "+a.actor,false;
+        if(a.actor!="sign"&&a.actor!="resident"&&a.actor!="chest"&&!(a.actor=="mod"&&a.kind=="mod"))return why="unknown or unsupported flag-setting actor: "+a.actor,false;
         if(!place(v,a.stage,a.room)||!point(v.get("position"),a.position))return why="actor "+a.id+": invalid stage, room or position",false;
         if(v.get("rotation").type!=Value::Null&&!point(v.get("rotation"),a.rotation,360))return why="invalid actor rotation",false;
         if(v.get("scale").type!=Value::Null&&(!point(v.get("scale"),a.scale,10)||a.scale.x<=0||a.scale.y<=0||a.scale.z<=0))return why="invalid actor scale",false;
