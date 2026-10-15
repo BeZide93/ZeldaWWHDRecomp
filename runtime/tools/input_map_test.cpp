@@ -951,7 +951,11 @@ static void test_shortcuts() {
         CHECK(!m.shortcuts[a].hold && !m.shortcuts[a].button);
     }
     m.shortcuts[kPhoto].keys[1] = {kVK_ANSI_K, kModCtrl};
-    CHECK(shortcut_conflict(m, kPhoto)); // game inputs count, even with modifiers
+    CHECK(!shortcut_conflict(m, kPhoto)); // a Ctrl/Alt/Cmd shortcut takes its key press before the game
+    m.shortcuts[kPhoto].keys[1] = {kVK_ANSI_K, kModShift};
+    CHECK(shortcut_conflict(m, kPhoto) && has_conflict(m, kA)); // plain or Shift keys share the game's K
+    m.shortcuts[kPhoto].keys[1] = {kVK_ANSI_K, 0};
+    CHECK(shortcut_conflict(m, kPhoto));
     m.shortcuts[kPhoto].keys[1] = m.shortcuts[kSettings].keys[0];
     CHECK(shortcut_conflict(m, kPhoto) && shortcut_conflict(m, kSettings));
     m.shortcuts[kSettings] = {};

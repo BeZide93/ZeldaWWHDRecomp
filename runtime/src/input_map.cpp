@@ -225,9 +225,11 @@ bool shortcut_conflict(const Mapping& m, int a) {
     for (auto k : b.keys) {
         if (k.code == kNoKey) continue;
         if (reserved_key(k.code)) return true;
-        // Game bindings do not test modifiers; they also conflict with a modified shortcut.
-        for (int g = 0; g < kScreenshot; ++g)
-            for (int v : m.keys[g]) if (v == k.code) return true;
+        // Game bindings do not test modifiers, so a plain or Shift shortcut shares their key. A Ctrl/Alt/Cmd
+        // shortcut takes its key press before the game sees it (F11/Alt+Enter beside Plus on Enter).
+        if (!(k.mods & (kModCtrl | kModAlt | kModSuper)))
+            for (int g = 0; g < kScreenshot; ++g)
+                for (int v : m.keys[g]) if (v == k.code) return true;
         for (int other = 0; other < kShortcutCount; ++other) if (other != a)
             for (auto v : m.shortcuts[other].keys) if (v == k) return true;
     }
@@ -534,7 +536,8 @@ bool has_conflict(const Mapping& m, int a) {
     for (int k : m.keys[a])
         if (k != kNoKey && !key_users(m, k, a).empty()) return true;
     if (a < kScreenshot) for (int k : m.keys[a]) if (k != kNoKey)
-        for (const auto& b : m.shortcuts) for (auto key : b.keys) if (key.code == k) return true;
+        for (const auto& b : m.shortcuts) for (auto key : b.keys)
+            if (key.code == k && !(key.mods & (kModCtrl | kModAlt | kModSuper))) return true;
     return m.pad[a] != kPadNone && !pad_users(m, m.pad[a], a).empty();
 }
 
