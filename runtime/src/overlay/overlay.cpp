@@ -1131,6 +1131,20 @@ static void pip_live_drag() {
     ImGui::PopStyleVar();
 }
 
+// Integer widgets share the same bounds for mouse, touch, typed and controller input.
+static void pip_percent(const char* label, const char* exactLabel, float value, int minimum, int maximum,
+                        void (*save)(float)) {
+    int percent = int(std::round(value * 100));
+    if (ImGui::SliderInt(label, &percent, minimum, maximum, "%d%%", ImGuiSliderFlags_AlwaysClamp))
+        hostui::post([percent, save] { save(percent / 100.0f); });
+    // Android's taller +/- buttons need room without squeezing the number field.
+    ImGui::SetNextItemWidth(std::max(120.0f, ImGui::GetFrameHeight() * 4));
+    if (ImGui::InputInt(exactLabel, &percent, 1, 5)) {
+        percent = std::clamp(percent, minimum, maximum);
+        hostui::post([percent, save] { save(percent / 100.0f); });
+    }
+}
+
 void tab_display() {
     bool v;
     heading("GamePad screen");
@@ -1176,14 +1190,7 @@ void tab_display() {
                 ImGui::EndCombo();
             }
             pip_diagram();
-            int size = int(std::round(hostui::pip_size() * 100));
-            if (ImGui::SliderInt("Size (%)", &size, 10, 50, "%d%%", ImGuiSliderFlags_AlwaysClamp))
-                hostui::post([size] { hostui::set_pip_size(size / 100.0f); });
-            ImGui::SetNextItemWidth(120);
-            if (ImGui::InputInt("Exact size (%)", &size, 1, 5)) {
-                size = std::clamp(size, 10, 50);
-                hostui::post([size] { hostui::set_pip_size(size / 100.0f); });
-            }
+            pip_percent("Size (%)", "Exact size (%)", hostui::pip_size(), 10, 50, hostui::set_pip_size);
             for (int v : {20, 25, 33, 40}) {
                 if (v != 20)
                     ImGui::SameLine();
@@ -1192,14 +1199,7 @@ void tab_display() {
                 if (ImGui::Button(label))
                     hostui::post([v] { hostui::set_pip_size(v / 100.0f); });
             }
-            int opacity = int(std::round(hostui::pip_opacity() * 100));
-            if (ImGui::SliderInt("Opacity (%)", &opacity, 20, 100, "%d%%", ImGuiSliderFlags_AlwaysClamp))
-                hostui::post([opacity] { hostui::set_pip_opacity(opacity / 100.0f); });
-            ImGui::SetNextItemWidth(120);
-            if (ImGui::InputInt("Exact opacity (%)", &opacity, 1, 5)) {
-                opacity = std::clamp(opacity, 20, 100);
-                hostui::post([opacity] { hostui::set_pip_opacity(opacity / 100.0f); });
-            }
+            pip_percent("Opacity (%)", "Exact opacity (%)", hostui::pip_opacity(), 20, 100, hostui::set_pip_opacity);
             note("Ctrl+click a slider to type an exact percentage. The game picture "
                  "previews changes while this section is open.");
         }

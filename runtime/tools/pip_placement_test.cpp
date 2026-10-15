@@ -38,18 +38,27 @@ int main() {
                 const float x = (b.x - tv.x + b.w / 2) / tv.w, y = (b.y - tv.y + b.h / 2) / tv.h;
                 auto mapped = pip_place(tv, 854.0f / 480, size, x, y, false);
                 auto back = pip_box(tv, 854.0f / 480, size, mapped);
-                assert(near(b.x, back.x) && near(b.y, back.y));
+                assert(near(mapped.x, (back.x - tv.x + back.w / 2) / tv.w));
+                assert(near(mapped.y, (back.y - tv.y + back.h / 2) / tv.h));
+                if (a == kPipCustom) assert(near(b.x, back.x) && near(b.y, back.y));
                 if (a < kPipCustom) {
                     auto snapped = pip_place(tv, 854.0f / 480, size, x + 0.001f, y + 0.001f);
                     auto q = pip_box(tv, 854.0f / 480, size, snapped);
                     assert(near(q.x, b.x) && near(q.y, b.y));
                 }
             }
+        // An exact 50% Custom width fits even at 32:9; another anchor's HUD
+        // restrictions must not silently reduce it.
+        auto exact = pip_box(tv, 854.0f / 480, 0.5f, {kPipCustom, 0.5f, 0.5f});
+        assert(near(exact.w, tv.w * 0.5f));
         for (float x : {-10.0f, 0.0f, 0.5f, 1.0f, 10.0f, NAN}) {
             auto b = pip_box(tv, 854.0f / 480, 0.5f, {kPipCustom, x, x});
             assert(b.x >= tv.x && b.y >= tv.y && b.x + b.w <= tv.x + tv.w + 0.002f &&
                    b.y + b.h <= tv.y + tv.h + 0.002f);
         }
+        // A drag beyond the TV edge still snaps the clamped picture to a
+        // nearby edge preset, even though the pointer centre is outside.
+        assert(pip_place(tv, 854.0f / 480, 0.25f, -1, 0.5f).anchor == kPipCL);
         auto p = pip_place(tv, 854.0f / 480, 0.25f, 0.41f, 0.37f);
         assert(p.anchor == kPipCustom);
         g_pip_anchor = kPipBR;

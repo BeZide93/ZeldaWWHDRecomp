@@ -242,8 +242,16 @@ Box pip_box(Box tv, float aspect, float size, PipPosition p) {
         return {};
     aspect = pip_clamp(aspect, 0.01f, 100, 854.0f / 480);
     float w = tv.w * pip_clamp(size, 0.1f, 0.5f, 0.25f), h = w / aspect;
-    // Preserve the GamePad aspect even when a wide TV makes 50% width too tall.
-    const float maxHeight = tv.h * (1.0f - kPipRightHudBottom - 0.02f);
+    // Keep the requested width wherever it fits. Only the selected preset's
+    // margins/HUD clearance may reduce it; Custom can use the whole TV picture.
+    const float margin = std::min(tv.w, tv.h) * 0.02f;
+    float maxHeight = tv.h;
+    if (p.anchor >= 0 && p.anchor < kPipCustom) {
+        maxHeight -= 2 * margin;
+        if (p.anchor == kPipBR) maxHeight = tv.h * kPipRupeeBottom - margin;
+        if (p.anchor == kPipTL) maxHeight = tv.h * (1 - kPipLeftHudBottom) - margin;
+        if (p.anchor == kPipTR) maxHeight = tv.h * (1 - kPipRightHudBottom) - margin;
+    }
     if (h > maxHeight) {
         w *= maxHeight / h;
         h = maxHeight;
@@ -274,10 +282,18 @@ PipPosition pip_place(Box tv, float aspect, float size, float x, float y, bool s
         float best = 0.035f * std::min(tv.w, tv.h);
         for (int a = 0; a < kPipCustom; ++a) {
             Box q = pip_box(tv, aspect, size, {a, 0, 0});
-            float d = std::hypot(b.x - q.x, b.y - q.y);
+            // Compare the requested centre before Custom's edge clamping:
+            // a HUD-safe preset can be smaller than Custom at the same size.
+            const float qx = (q.x - tv.x + q.w / 2) / tv.w;
+            const float qy = (q.y - tv.y + q.h / 2) / tv.h;
+            const float requested = std::hypot((pip_clamp(x, 0, 1, 0.5f) - qx) * tv.w,
+                                               (pip_clamp(y, 0, 1, 0.5f) - qy) * tv.h);
+            const float actual = std::hypot(b.x + b.w / 2 - q.x - q.w / 2,
+                                            b.y + b.h / 2 - q.y - q.h / 2);
+            const float d = std::min(requested, actual);
             if (d <= best) {
                 best = d;
-                p.anchor = a;
+                p = {a, qx, qy};
             }
         }
     }
