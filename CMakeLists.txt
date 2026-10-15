@@ -1506,3 +1506,11 @@ target_include_directories(story_notebook_layout_test PRIVATE runtime/include ru
 target_compile_options(story_notebook_layout_test PRIVATE -UNDEBUG)
 target_link_libraries(story_notebook_layout_test PRIVATE ZLIB::ZLIB)
 add_test(NAME story_notebook_layout COMMAND story_notebook_layout_test)
+
+if(WWHD_HAS_VULKAN)
+  add_executable(vertex_format_policy_test runtime/tools/vertex_format_policy_test.cpp)
+  target_include_directories(vertex_format_policy_test PRIVATE runtime/src
+    $<TARGET_PROPERTY:Vulkan::Vulkan,INTERFACE_INCLUDE_DIRECTORIES>)
+  target_compile_options(vertex_format_policy_test PRIVATE -UNDEBUG)
+  add_test(NAME vertex_format_policy COMMAND vertex_format_policy_test)
+endif()

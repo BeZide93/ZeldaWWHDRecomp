@@ -819,6 +819,7 @@ Pipeline &pipeline(const uint32_t *r, vk::Shader *vs, vk::Shader *ps,
   p.trimFetch = fs;
   p.trimVertex = vs;
   p.bindingTrims.reserve(fs->bufferGroups.size());
+  uint32_t tailLocation = vk::vertex_tail_location(vs->mapping.attributeMapping);
   for (auto &g : fs->bufferGroups) {
     bool instance = false;
     BindingTrimMetadata trim;
@@ -828,14 +829,25 @@ Pipeline &pipeline(const uint32_t *r, vk::Shader *vs, vk::Shader *ps,
       int loc = vs->mapping.attributeMapping[a.semanticId];
       if (loc < 0)
         continue;
-      auto fmt = vk::vertex_format(a.format);
+      auto fmt = R.vertexFormats.fetch(vk::vertex_format(a.format));
       if (fmt == VK_FORMAT_UNDEFINED)
         exception_report::raise("unsupported vertex format");
       attributes.push_back(
           {uint32_t(loc), g.attributeBufferIndex, fmt, a.offset});
-      // Mirror the conservative prefix rules using the actual pipeline format.
+      const auto nativeFormat = vk::vertex_format(a.format);
+      if (R.vertexFormats.fallback(nativeFormat)) {
+        if (tailLocation >= R.properties.limits.maxVertexInputAttributes ||
+            attributes.size() >= R.properties.limits.maxVertexInputAttributes)
+          exception_report::raise("RGB fallback exceeds device vertex attribute limit");
+        const uint64_t tailOffset = uint64_t(a.offset) + vk::vertex_tail_offset(nativeFormat);
+        if (tailOffset > R.properties.limits.maxVertexInputAttributeOffset)
+          exception_report::raise("RGB fallback exceeds device vertex attribute offset limit");
+        attributes.push_back({tailLocation++, g.attributeBufferIndex,
+            vk::vertex_tail_format(nativeFormat), uint32_t(tailOffset)});
+      }
+      // Split fetches cover exactly the native attribute bytes.
       if (trim.supported) {
-        const uint32_t width = vertex_format_bytes(fmt);
+        const uint32_t width = vertex_format_bytes(vk::vertex_format(a.format));
         if (!width || (trim.rate && *trim.rate != a.fetchType) ||
             (a.fetchType != LatteConst::VertexFetchType2::VERTEX_DATA &&
              a.fetchType != LatteConst::VertexFetchType2::INSTANCE_DATA) ||
@@ -865,6 +877,8 @@ Pipeline &pipeline(const uint32_t *r, vk::Shader *vs, vk::Shader *ps,
     trim.stride = stride;
     p.bindingTrims.push_back(trim);
   }
+  if (R.vertexFormats.fallbackMask && attributes.size() > R.properties.limits.maxVertexInputAttributes)
+    exception_report::raise("RGB fallback exceeds device vertex attribute limit");
   VkPipelineVertexInputStateCreateInfo vi{
       VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
   vi.vertexBindingDescriptionCount = bindings.size();
