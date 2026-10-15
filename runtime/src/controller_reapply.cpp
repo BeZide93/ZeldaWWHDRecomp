@@ -35,7 +35,7 @@ const uint32_t fn_changeState = GC(0x020063C0);   // hdIngameChangeState(machine
 const uint32_t fn_menuExecute = GC(0x0270E4E4);   // hdIngameUi_c::menuExecute
 
 constexpr int kSettleFrames = 20;    // the in-game UI has been in this state this long (fades, arrival)
-constexpr int kGiveUpFrames = 3600;  // ~1 min without a play state (cutscene, menus): leave it to the player
+constexpr int kGiveUpFrames = 3600;  // ~1 min without an in-game UI (title screen): nothing to switch
 constexpr int kMenuFrames = 600;     // the exchange is back in its menu within this many frames
 
 enum Phase { kIdle, kWaitPlay, kWaitMenuOpen, kWaitMenuBack };
@@ -90,13 +90,8 @@ void wait_play(Cpu* c, uint32_t ui) {
     const bool pro = input::pro_controller();
     const int category = needed_category(mode, pro);
     if (category < 0) {
-        LOG("[controller] after the %s load: the game plays with the %s (mode %d), as the player", g_kind,
+        LOG("[controller] after the %s: the game plays with the %s (mode %d), as the player", g_kind,
             pro ? "Pro Controller" : "GamePad", mode);
-        g_phase = kIdle;
-        return;
-    }
-    if (++g_frames > kGiveUpFrames) {
-        LOG("[controller] after the %s load: the game is still in mode %d; not switched (no play state)", g_kind, mode);
         g_phase = kIdle;
         return;
     }
@@ -105,10 +100,9 @@ void wait_play(Cpu* c, uint32_t ui) {
     if (g_stable < kSettleFrames) return;
     // the player opens the pause menu (StateID_ToMenu: screens off, game paused)
     guest_call(c, fn_changeState, {ui + kUiState, kToMenuState});
-    LOG("[controller] after the %s load: the game is in mode %d; switching it to the %s", g_kind, mode,
+    LOG("[controller] after the %s: the game is in mode %d; switching it to the %s", g_kind, mode,
         category == 0 ? "Pro Controller" : "GamePad");
     g_category = category;
-    g_hold_pro = category == 1;
     g_phase = kWaitMenuOpen;
     g_frames = g_stable = 0;
 }
@@ -116,7 +110,7 @@ void wait_play(Cpu* c, uint32_t ui) {
 // waits until the in-game UI has been in its menu state for a moment; false after a timeout
 bool menu_settled(Cpu* c, uint32_t ui, const char* what) {
     if (++g_frames > kMenuFrames) {
-        LOG("[controller] after the %s load: %s (mode %d)", g_kind, what, game_mode());
+        LOG("[controller] after the %s: %s (mode %d)", g_kind, what, game_mode());
         g_phase = kIdle;
         return false;
     }
@@ -142,27 +136,38 @@ void wait_menu_back(Cpu* c, uint32_t ui) {
     st32(mgr + kHold, hold | kCancel);
     guest_call(c, fn_menuExecute, {ui});
     st32(mgr + kHold, hold);
-    LOG("[controller] after the %s load: the game plays with the %s (mode %d)", g_kind,
+    LOG("[controller] after the %s: the game plays with the %s (mode %d)", g_kind,
         game_mode() == 0 ? "Pro Controller" : "GamePad", game_mode());
     g_phase = kIdle;
 }
+
+std::atomic<const char*> g_request{nullptr};
+
+// the host's choice changed (Input menu, Controls, shortcut): the game follows it as after a load
+void host_changed(bool pro) {
+    if (!pro) g_hold_pro = true;  // no reconnect prompt before the game thread has looked at it
+    request("controller change");
+}
+const bool g_listening = (input::set_controller_listener(host_changed), true);
 }  // namespace
 
-void request(const char* kind) {
-    g_phase = kWaitPlay;
-    g_kind = kind;
-    g_frames = g_stable = 0;
-    g_trace = 600;
-}
+void request(const char* kind) { g_request = kind; }
 
 bool holds_pro_controller() { return g_hold_pro.load(std::memory_order_relaxed); }
 
 void service(Cpu* c) {
-    trace_ui(c);
-    if (g_phase == kIdle) {
-        g_hold_pro = false;
-        return;
+    (void)g_listening;
+    if (const char* kind = g_request.exchange(nullptr)) {
+        g_phase = kWaitPlay;
+        g_kind = kind;
+        g_frames = g_stable = 0;
+        g_category = -1;
+        g_trace = 600;
     }
+    trace_ui(c);
+    // the Pro Controller stays connected (idle) while the game still plays with it or is being switched off it
+    g_hold_pro = g_phase != kIdle && !input::pro_controller() && (game_mode() == 0 || g_category == 1);
+    if (g_phase == kIdle) return;
     const uint32_t ui = ld32(kIngameUi);
     if (!object(ui) || !object(ld32(kInputManager))) {
         if (++g_frames > kGiveUpFrames) g_phase = kIdle;  // title screen or a stage change: no in-game UI

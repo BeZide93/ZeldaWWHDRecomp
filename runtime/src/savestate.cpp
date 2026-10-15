@@ -608,7 +608,7 @@ bool do_load(const std::shared_ptr<Snapshot>& s) {
     message("Loaded %s%s", is_auto(s->slot) ? slot_label(s->slot).c_str() : ("slot " + std::to_string(s->slot)).c_str(), area.c_str());
     append_mod_warning(mods_differ);
     LOG("[savestate] slot %d: restored in %.1f ms", s->slot, ms);
-    controller_reapply::request("full");
+    controller_reapply::request("full load");
     return true;
 }
 
@@ -1088,7 +1088,7 @@ void watch_arrival(Cpu* c) {
         }
     }
     g_arrival = Arrival{};
-    controller_reapply::request("progress");
+    controller_reapply::request("progress load");
 }
 
 // full states: the setting, the environment and the scripted tests

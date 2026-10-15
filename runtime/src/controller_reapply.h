@@ -23,7 +23,9 @@ constexpr int needed_category(int game_mode, bool host_pro) {
     return -1;
 }
 
-// a state was loaded: check the game's controller once it is playing again (game thread)
+// a state was loaded (any thread): check the game's controller once it is playing again. A change of
+// the host's choice (input::set_pro_controller) requests the same by itself. While the game's mode does
+// not match, it waits for the play state (cutscenes and menus finish first).
 void request(const char* kind);
 // at the frame boundary (ss::service)
 void service(Cpu* c);
