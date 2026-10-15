@@ -58,6 +58,7 @@
 
 #include "runtime.h"
 #include "build_info.h"
+#include "controller_reapply.h"
 #include "crashrec.h"
 #include "portable_state.h"
 #include "state_memory.h"
@@ -582,8 +583,7 @@ bool do_load(const std::shared_ptr<Snapshot>& s) {
         message("%s: cannot load here (%s)", slot_label(s->slot).c_str(), why.c_str());
         return true;
     }
-    restore_memory(*s);
-    if (s->h.controller) input::set_pro_controller(restored_pro_controller(s->h.controller, input::pro_controller()));
+    restore_memory(*s);  // the host's controller choice stays (controller_reapply: the game follows it)
     Reader r = s->section(kSecAllocs);
     mem::raise_runtime_top(r.u32());
     r = s->section(kSecHeaps);
@@ -608,6 +608,7 @@ bool do_load(const std::shared_ptr<Snapshot>& s) {
     message("Loaded %s%s", is_auto(s->slot) ? slot_label(s->slot).c_str() : ("slot " + std::to_string(s->slot)).c_str(), area.c_str());
     append_mod_warning(mods_differ);
     LOG("[savestate] slot %d: restored in %.1f ms", s->slot, ms);
+    controller_reapply::request("full");
     return true;
 }
 
@@ -912,7 +913,6 @@ bool apply_portable(Cpu* c, const pstate::State& s, std::string& why, bool& retr
     st8(kNextStage + 10, (uint8_t)s.room);
     st8(kNextStage + 11, (uint8_t)s.layer);
     st8(kNextStage + 13, 0);  // wipe: fade
-    if (s.controller) input::set_pro_controller(restored_pro_controller(s.controller, input::pro_controller()));
     st8(kNextStage + 12, 1);  // enabled
     return true;
 }
@@ -1088,6 +1088,7 @@ void watch_arrival(Cpu* c) {
         }
     }
     g_arrival = Arrival{};
+    controller_reapply::request("progress");
 }
 
 // full states: the setting, the environment and the scripted tests
@@ -1401,6 +1402,7 @@ void service(Cpu* c) {
     if (int slot = g_psave_req.exchange(0)) do_portable_save(c, slot);
     service_portable_load(c);
     watch_arrival(c);
+    controller_reapply::service(c);
     // test aid: WWHD_STATE_DUMP=n dumps the n TV frames after each save/load (state_<save|load><slot>_<k>.png)
     static const int dump = getenv("WWHD_STATE_DUMP") ? atoi(getenv("WWHD_STATE_DUMP")) : 0;
     if (int slot = g_save_req.load()) {
