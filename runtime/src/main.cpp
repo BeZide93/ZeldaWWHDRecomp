@@ -289,7 +289,7 @@ static void default_vulkan_cpu_paths() {
 // captures/wwhd.log: the whole log of this run (the previous run's is kept as wwhd-previous.log), so
 // players can attach it to an issue; on Windows the console output of the game is otherwise lost.
 // User paths are redacted as in crash logs. WWHD_LOG_FILE=<path> writes elsewhere, =0 turns it off
-// (Android: off unless set; logcat has it). The file stops at 64 MiB.
+// (Android: on by default). The file stops at 64 MiB.
 static int g_log_fd = -1;
 static size_t g_log_bytes = 0;
 static constexpr size_t kLogFileMax = 64u << 20;
@@ -327,7 +327,7 @@ static void index_game_functions() {
     crash_addr::set_game_functions(host, guest, v.size());
 }
 
-// Off unless the player turns on Settings > Graphics > "Write a log file" (saved as logFile=1),
+// Android defaults on; elsewhere the player turns on Graphics > "Write a log file" (logFile=1),
 // or WWHD_LOG_FILE is set: 1 = the default file, a path = that file, 0 = off.
 static void start_log_file(bool error = false) {
     const char* e = getenv("WWHD_LOG_FILE");
@@ -337,7 +337,13 @@ static void start_log_file(bool error = false) {
     std::string saved;
     const char* overlay_trace = getenv("WWHD_OVERLAY_TRACE");
     const bool tracing_overlay = overlay_trace && !strcmp(overlay_trace,"1");
-    if (!(e && *e) && !tracing_overlay && !(hostui::get("logFile", saved) && saved == "1")) return;
+    const bool hasSaved = hostui::get("logFile", saved);
+#ifdef __ANDROID__
+    const bool enabledBySetting = !hasSaved || saved != "0";
+#else
+    const bool enabledBySetting = hasSaved && saved == "1";
+#endif
+    if (!(e && *e) && !tracing_overlay && !enabledBySetting) return;
     std::string path = chosen ? e : "captures/wwhd.log";
     std::error_code ec;
     if (!chosen) {

@@ -1,3 +1,5 @@
+#include <set>
+#include <tuple>
 #include "pass.h"
 #include "../../exception_report.h"
 #include "aspect.h"
@@ -835,6 +837,16 @@ Pipeline &pipeline(const uint32_t *r, vk::Shader *vs, vk::Shader *ps,
       attributes.push_back(
           {uint32_t(loc), g.attributeBufferIndex, fmt, a.offset});
       const auto nativeFormat = vk::vertex_format(a.format);
+#ifdef __ANDROID__
+      // Metadata only: never record vertex contents, guest addresses, or save data.
+      static std::set<std::tuple<unsigned, unsigned, unsigned, unsigned, unsigned>> seenVertexInputs;
+      const auto diagnostic = std::make_tuple(unsigned(a.format), unsigned(a.endianSwap),
+          unsigned(a.nfa), unsigned(a.isSigned), unsigned(a.offset % 4));
+      if (seenVertexInputs.size() < 64 && seenVertexInputs.insert(diagnostic).second)
+        LOG("[vulkan vertex observed] guestFormat=0x%02x native=%s fetch=%s endian=%u numeric=%u signed=%u offset=%u offsetMod4=%u offsetWithinLimit=%u fallback=%u",
+            unsigned(a.format), vk::vertex_format_name(nativeFormat), vk::vertex_format_name(fmt), unsigned(a.endianSwap),
+            unsigned(a.nfa), unsigned(a.isSigned), a.offset, a.offset % 4, a.offset <= R.properties.limits.maxVertexInputAttributeOffset, R.vertexFormats.fallback(nativeFormat));
+#endif
       if (R.vertexFormats.fallback(nativeFormat)) {
         if (tailLocation >= R.properties.limits.maxVertexInputAttributes ||
             attributes.size() >= R.properties.limits.maxVertexInputAttributes)
@@ -871,6 +883,12 @@ Pipeline &pipeline(const uint32_t *r, vk::Shader *vs, vk::Shader *ps,
         (r[mmSQ_VTX_ATTRIBUTE_BLOCK_START + g.attributeBufferIndex * 7 + 2] >>
          11) &
         0xFFFF;
+#ifdef __ANDROID__
+    static std::set<uint32_t> seenStrides;
+    if (seenStrides.size() < 32 && seenStrides.insert(stride).second)
+      LOG("[vulkan stride observed] stride=%u mod4=%u withinLimit=%u", stride, stride % 4,
+          stride <= R.properties.limits.maxVertexInputBindingStride);
+#endif
     bindings.push_back({g.attributeBufferIndex, stride,
                         instance ? VK_VERTEX_INPUT_RATE_INSTANCE
                                  : VK_VERTEX_INPUT_RATE_VERTEX});
@@ -2668,6 +2686,15 @@ void draw(const uint32_t *r, uint32_t prim, uint32_t count, uint32_t indexType,
     if(!skip)
       record::vkCmdBindVertexBuffers(cmd,g.attributeBufferIndex,1,&b.buffer,&offset);
   }
+#ifdef __ANDROID__
+  static std::set<std::tuple<uint32_t, uint32_t, bool, bool, bool, bool>> seenIndexPaths;
+  const auto indexDiagnostic = std::make_tuple(prim, indexType, nativeIndices, bool(indexAddr), baseVertex != 0, stripRestart);
+  if (seenIndexPaths.size() < 32 && seenIndexPaths.insert(indexDiagnostic).second)
+    LOG("[vulkan index observed] guestPrimitive=0x%x guestIndexType=%u indexed=%u native=%u hostType=%s stripRestart=%u nonzeroBaseVertex=%u",
+        prim, indexType, bool(indexAddr), nativeIndices,
+        nativeIndices ? (indexType == 0 ? "uint16" : "uint32") : (convertedEntry || !indices.empty() ? "uint32-converted" : "none"),
+        stripRestart, baseVertex != 0);
+#endif
   rprof::g_upload_kind = rprof::kUpIndex;
   rprof::mark(rprof::kVertex);
   if (nativeIndices) {

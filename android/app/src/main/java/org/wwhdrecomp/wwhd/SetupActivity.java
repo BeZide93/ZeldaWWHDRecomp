@@ -151,6 +151,7 @@ public class SetupActivity extends Activity {
         layout.addView(detail);
         // Play first: once a game is ready it is the main action
         play = button(layout, getString(R.string.setup_play), () -> startActivity(new Intent(this, WwhdActivity.class)));
+        button(layout, "Share log", () -> LogShare.share(this));
         play.setTextSize(20);
         play.setTextColor(0xFFFFFFFF);
         play.setBackgroundTintList(android.content.res.ColorStateList.valueOf(0xFF0D5C8A));

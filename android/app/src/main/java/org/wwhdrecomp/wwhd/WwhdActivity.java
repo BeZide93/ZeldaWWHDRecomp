@@ -120,6 +120,8 @@ public class WwhdActivity extends SDLActivity {
         if (files != null && savedInstanceState == null) offerCrashLog(files);
     }
 
+    public void shareLog() { runOnUiThread(() -> LogShare.share(this)); }
+
     private void offerCrashLog(File files) {
         File[] reports = new File(files, "captures").listFiles((dir, name) -> name.startsWith("crash-") && name.endsWith(".log"));
         if (reports == null) return;

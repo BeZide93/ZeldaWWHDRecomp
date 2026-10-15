@@ -21,6 +21,8 @@
 #include "perf_average.h"
 #ifdef __ANDROID__
 #include "android_telemetry.h"
+#include <SDL3/SDL_system.h>
+#include <jni.h>
 #endif
 
 #include <algorithm>
@@ -985,16 +987,49 @@ void tab_graphics() {
         }
         help("Where the renderer spends its time over the last few seconds, as text for a bug report");
     }
+#ifdef WWHD_HAS_VULKAN
+    heading("Advanced");
+    static bool forceVertexFallback = [] { std::string value; return hostui::get("vkVertexFallback", value) && value == "1"; }();
+    if (check("Force RGB vertex fallback", forceVertexFallback, &v, !getenv("WWHD_VK_VERTEX_FALLBACK"))) {
+        forceVertexFallback = v;
+        hostui::post([v] { hostui::set("vkVertexFallback", v ? "1" : "0"); });
+    }
+    help("Applies after restarting the game. Splits RGB vertex inputs for driver troubleshooting.");
+#endif
     heading("Bug reports");
+#ifdef __ANDROID__
+    if (ImGui::Button("Share log")) hostui::post([] {
+        auto* env = static_cast<JNIEnv*>(SDL_GetAndroidJNIEnv());
+        auto activity = static_cast<jobject>(SDL_GetAndroidActivity());
+        if (!env || !activity) return;
+        auto cls = env->GetObjectClass(activity);
+        auto method = env->GetMethodID(cls, "shareLog", "()V");
+        if (method) env->CallVoidMethod(activity, method);
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        env->DeleteLocalRef(cls);
+        env->DeleteLocalRef(activity);
+    });
+#endif
     // read once at start-up (main.cpp start_log_file); WWHD_LOG_FILE decides when set
-    static bool logFile = [] { std::string v; return hostui::get("logFile", v) && v == "1"; }();
+    static bool logFile = [] { std::string v;
+#ifdef __ANDROID__
+        return !hostui::get("logFile", v) || v != "0";
+#else
+        return hostui::get("logFile", v) && v == "1";
+#endif
+    }();
     if (check("Write a log file", logFile, &v, !getenv("WWHD_LOG_FILE"))) {
         logFile = v;
         hostui::post([v] { hostui::set("logFile", v ? "1" : "0"); });
     }
+#ifdef __ANDROID__
+    help("Logging is on by default. Share the current and previous run after reproducing a bug. "
+         "User paths are removed; each log stops at 64 MiB. Changes apply on the next start.");
+#else
     help("From the next start: captures/wwhd.log in the game's data folder (the previous run's is kept as "
          "wwhd-previous.log), with your user paths removed. Turn it on before reproducing a bug and attach "
          "the file to the bug report.");
+#endif
 }
 
 void tab_display() {
