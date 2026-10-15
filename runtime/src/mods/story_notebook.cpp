@@ -605,7 +605,7 @@ void load_glyphs(Cpu* c, const std::vector<std::string>& lines) {
         g_look.icons_probed = true;
         for (int slot : {1, 4, 0}) {
             font::Face f;
-            if (g_ui->glyphs(c, slot, {font::kButtonA, font::kButtonB}, f) && f.glyphs.count(font::kButtonA) && f.glyphs.count(font::kButtonB)) {
+            if (g_ui->glyphs(c, slot, {font::kButtonA, font::kButtonB, font::kButtonA+2, font::kButtonA+3}, f) && f.glyphs.count(font::kButtonA) && f.glyphs.count(font::kButtonB)) {
                 g_look.icons = std::move(f);
                 g_look.fonts_key++;
                 LOG("[notebook] the button pictures come from font slot %d (%s)", slot,

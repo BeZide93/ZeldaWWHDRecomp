@@ -1592,11 +1592,10 @@ void tab_controls() {
         input_map::set_face_auto(m, true);
         input_map::set_current(m);
     }
-    help("How the controller's face buttons drive the Wii U's A/B/X/Y. By position: the bottom "
-         "button is B (Nintendo layout). By label: the button named A is A — on an Xbox pad that "
-         "makes A accept/act and B go back (issue #78). Automatic reads the labels printed on the "
-         "pad that was plugged in first and follows them. Only these four bindings are rewritten; "
-         "keyboard keys and the other inputs stay as they are.");
+    help("Which physical button does each Wii U action. By position: right is A, bottom B, "
+         "top X and left Y. By label: A does A, B does B, X does X and Y does Y. Automatic "
+         "reads the connected pad's labels. Button prompts below chooses how those buttons "
+         "look in the game. Only the four face bindings change.");
     if (m.face_auto) {
         ImGui::SameLine();
         ImGui::TextDisabled("(-> %s)", input_map::face_layout_label(fl));
@@ -1620,10 +1619,12 @@ void tab_controls() {
             }
         }
         ImGui::PopID();
-        help("How the game's button icons look while the face buttons are by label. Automatic: "
-             "PlayStation shapes on a PlayStation controller, the Xbox colours and positions on any "
-             "other. Original keeps the game's look. By position always keeps the game's look: its "
-             "prompts then already match the buttons' positions.");
+        help("How the game's button icons look, with any face-button setting. Xbox and "
+             "PlayStation show the button bound to each Wii U action. By position on Xbox, "
+             "roll shows B and sword shows A. Automatic follows the connected pad; Nintendo "
+             "keeps the game's look. By label keeps its existing automatic Xbox fallback. "
+             "Original keeps the game's look. Custom bindings need four distinct face buttons; "
+             "otherwise the original icons are used.");
         ImGui::SameLine();
         ImGui::TextDisabled("(-> %s)", look.face == input_map::FaceStyle::kPlayStation ? "PlayStation"
                                        : look.face == input_map::FaceStyle::kXbox      ? "Xbox"
