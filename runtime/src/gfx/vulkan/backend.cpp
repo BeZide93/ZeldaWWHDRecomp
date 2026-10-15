@@ -276,7 +276,8 @@ void init_pipeline_cache() try {
     put(36, R.properties.limits.maxDescriptorSetUniformBuffersDynamic);
     put(40, 3); // Runtime-build identity, portable content IDs, exact descriptors and fixed-state recipe schema.
     put(44, (R.portabilitySubset ? 1u : 0u) | (R.separateStencilMaskRef ? 2u : 0u) |
-        (R.constantAlphaColorBlendFactors ? 4u : 0u) | (R.vertexAttributeAccessBeyondStride ? 8u : 0u));
+        (R.constantAlphaColorBlendFactors ? 4u : 0u) | (R.vertexAttributeAccessBeyondStride ? 8u : 0u) |
+        (R.vertexFormats.fallbackMask << 4));
     const char* warmup = std::getenv("WWHD_VK_PIPELINE_WARMUP");
     if (!warmup || std::strcmp(warmup, "0")) try {
       const auto headstart=path_environment_utf8("WWHD_HEADSTART");
@@ -3510,6 +3511,22 @@ static void init_device(std::vector<const char *> extensions,
   di.pEnabledFeatures = &enabled;
   di.enabledExtensionCount = de.size();
   di.ppEnabledExtensionNames = de.data();
+  // Prime the support cache once, before any shader translation jobs start.
+  std::string missingVertexFormats;
+  for (auto format : vk::vertex_formats) {
+    if (!(format_properties(format).bufferFeatures & VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT)) {
+      if (!missingVertexFormats.empty()) missingVertexFormats += ", ";
+      missingVertexFormats += vk::vertex_format_name(format);
+    }
+  }
+  if (!missingVertexFormats.empty())
+    LOG("[vulkan] vertex formats without vertex-buffer support: %s", missingVertexFormats.c_str());
+  const char* forceVertexFallback = std::getenv("WWHD_VK_VERTEX_FALLBACK");
+  R.vertexFormats = vk::vertex_format_policy([](VkFormat format) {
+    return bool(format_properties(format).bufferFeatures & VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT);
+  }, forceVertexFallback && !std::strcmp(forceVertexFallback, "1"));
+  if (R.vertexFormats.fallbackMask)
+    LOG("[vulkan] vertex format fallback mask: %u", R.vertexFormats.fallbackMask);
   vk_check(vkCreateDevice(R.physicalDevice, &di, nullptr, &R.device),
            "create Vulkan device");
   load_device_functions(R.device, R.dynamicRenderingKHR, R.renderPasses);

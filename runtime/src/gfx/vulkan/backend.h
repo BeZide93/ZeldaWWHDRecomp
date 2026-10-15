@@ -1,4 +1,5 @@
 #pragma once
+#include "vertex_format_policy.h"
 #include "loader.h"
 #include "barrier_state.h"
 #ifdef WWHD_SDL_HOST
@@ -84,6 +85,7 @@ struct GpuScopeToken { uint64_t generation=0; uint32_t index=UINT32_MAX; };
 inline constexpr std::array<const char*,9> secondaryStageNames{
  "acquire", "acquire_wait", "ready_fd", "record", "submit", "draw_wait", "returned_fd", "present", "primary_snapshot_record"};
 struct Renderer {
+ vk::VertexFormatPolicy vertexFormats;
  VkInstance instance=VK_NULL_HANDLE; VkPhysicalDevice physicalDevice=VK_NULL_HANDLE; VkDevice device=VK_NULL_HANDLE;
  std::unordered_map<VkFormat,VkFormatProperties> formatProperties;
  VkPhysicalDeviceFeatures enabledFeatures{};
