@@ -6,6 +6,16 @@ import struct
 import zlib
 
 
+def stored_zlib(data):
+    """zlib stream with uncompressed (stored) deflate blocks: the same bytes on every platform, unlike
+    zlib.compress, whose output depends on the zlib build (Windows Python uses zlib-ng)."""
+    out = bytearray(b'\x78\x01')
+    for start in range(0, len(data), 65535):
+        block = data[start:start + 65535]
+        out += bytes([1 if start + 65535 >= len(data) else 0]) + struct.pack('<HH', len(block), len(block) ^ 0xffff) + block
+    return bytes(out + struct.pack('>I', zlib.adler32(data) & 0xffffffff))
+
+
 def make():
     positions, normals, uv, indices = [], [], [], []
     # Six independently textured faces, post rooted at local ground origin.
@@ -25,7 +35,7 @@ def make():
             rgba.extend((52,85,100,255) if mark else (145+grain,93+grain,48+grain,255))
     def chunk(kind,body): return struct.pack('>I',len(body))+kind+body+struct.pack('>I',zlib.crc32(kind+body)&0xffffffff)
     rows=b''.join(b'\0'+rgba[y*512:(y+1)*512] for y in range(128))
-    image=b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('>IIBBBBB',128,128,8,6,0,0,0))+chunk(b'IDAT',zlib.compress(rows))+chunk(b'IEND',b'')
+    image=b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('>IIBBBBB',128,128,8,6,0,0,0))+chunk(b'IDAT',stored_zlib(rows))+chunk(b'IEND',b'')
     parts=[struct.pack('<%df'%(len(positions)*3),*(v for p in positions for v in p)),struct.pack('<%df'%(len(normals)*3),*(v for p in normals for v in p)),struct.pack('<%df'%(len(uv)*2),*(v for p in uv for v in p)),struct.pack('<%dH'%len(indices),*indices),image]
     binary=bytearray(); views=[]
     for part in parts:

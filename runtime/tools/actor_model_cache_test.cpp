@@ -22,7 +22,7 @@ int main(int argc,char** argv){
     story_notebook::ManifestModel model{"post","models/own.glb"};
     auto prepare=[&](const std::string& mod,const std::string& tool){return actor_model_cache::prepare(mod,model,(root/"package with spaces").string(),(root/"data").string(),command,tool,"game with spaces");};
     const auto first=prepare("owner","ok");assert(first.size()==31&&first.starts_with("mod"));
-    const auto guest="/vol/content/Common/Object/"+first+".szs";const auto file=actor_model_cache::archive_for(guest);assert(file==(root/"data/models"/(first+".szs")).string());
+    const auto guest="/vol/content/Common/Object/"+first+".szs";const auto file=actor_model_cache::archive_for(guest);assert(fs::path(file).lexically_normal()==(root/"data"/"models"/(first+".szs")).lexically_normal());
     story_notebook::WorldPoint minimum,maximum;assert(actor_model_cache::bounds_for(first,minimum,maximum));assert(minimum.x==0&&minimum.y==50&&minimum.z==100&&maximum.x==200&&maximum.y==350&&maximum.z==500);
     assert(!actor_model_cache::bounds_for("missing",minimum,maximum));
     const auto second=prepare("other","ok");assert(second!=first);assert(prepare("owner","reuse")==first);
