@@ -90,6 +90,9 @@ void save_display_locked() {
         snprintf(v, sizeof v, "%g", g_pip_opacity.load());
         g_values["pipOpacity"] = v;
     }
+#ifdef __ANDROID__
+    g_values["androidSecondScreenOff"] = g_second_screen_off ? "1" : "0";
+#endif
     save_locked();
 }
 void save_display() {
@@ -232,6 +235,7 @@ void load_saved_options() {
     if (saved("vkPresentMode", {"WWHD_VK_PRESENT_MODE"})) gfxvk::set_present_mode((int)num("vkPresentMode"));
 #ifdef __ANDROID__
     if (v.count("androidSwapDisplays")) dual_display::requested_swap = num("androidSwapDisplays") != 0;
+    if (v.count("androidSecondScreenOff")) gfx::g_second_screen_off = num("androidSecondScreenOff") != 0;
 #endif
     // GamePad screen (display_modes.h); the start-up test overrides after the saved choices
     using namespace gfx;
@@ -335,6 +339,9 @@ bool drc_shown() {
 void show_drc(bool on) {
     gfx::display_show_drc(on);
     apply_drc_window();
+#ifdef __ANDROID__
+    save_display();  // the second screen's on/off is remembered (#222)
+#endif
     LOG("[display] GamePad screen %s (%s)", on ? "shown" : "hidden", gfx::kModeNames[gfx::g_mode]);
 }
 void toggle_drc() { show_drc(!drc_shown()); }

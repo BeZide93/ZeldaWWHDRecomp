@@ -64,6 +64,7 @@ static GamePadUiState gamepad_ui() {
 }
 std::atomic<float> g_drc_aspect{854.0f / 480.0f};
 std::atomic<bool> g_has_drc_window{false};
+std::atomic<bool> g_second_screen_off{false};
 
 int find_name(const char* const* names, int n, const char* s, int def) {
     for (int i = 0; i < n; i++)
@@ -138,7 +139,7 @@ int display_test_mode(uint64_t frame) {
 
 // ---------------------------------------------------------------- mode state
 bool drc_window_wanted() { return g_mode == kDrcWindow && g_shown; }
-bool drc_screen_off() { return g_mode == kDrcOff || (g_mode == kDrcWindow && !g_shown); }
+bool drc_screen_off() { return g_second_screen_off; }
 bool pip_shown_now() {
     if (g_pip_preview) return true;
     if (g_mode == kDrcPip) return g_shown;
@@ -159,12 +160,14 @@ void display_show_drc(bool on) {
         g_auto_pin = on;
     } else {
         g_shown = on;
+        if (g_has_drc_window) g_second_screen_off = !on;
     }
 }
 void display_set_mode(int m) {
     g_pause_restore = -1;
     g_plus_at = -1;
     g_mode = m;
+    if (g_has_drc_window) g_second_screen_off = m == kDrcOff;  // chosen while the second screen is there
     if (m == kDrcAuto) { g_auto_pin = false; g_auto_until = 0; g_gamepad_ui = 0; }
     else if (m != kDrcOff) g_shown = true;
 }

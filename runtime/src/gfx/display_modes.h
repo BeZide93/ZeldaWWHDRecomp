@@ -55,6 +55,9 @@ extern std::atomic<bool> g_auto_pin;       // auto mode: Cmd+G keeps the overlay
 extern std::atomic<double> g_auto_until;   // auto mode: closing grace expires at this time (display_now)
 extern std::atomic<float> g_drc_aspect;    // of the GamePad image, for the GamePad window's touch
 extern std::atomic<bool> g_has_drc_window; // the host made a GamePad window (window mode possible)
+// a physical second screen (Android) switched off by the player while it was connected: Off chosen, or the
+// GamePad screen hidden (#222). Not the single-screen mode, which is Off by default on Android.
+extern std::atomic<bool> g_second_screen_off;
 
 int find_name(const char* const* names, int n, const char* s, int def);  // index of s, def if absent
 double display_now();  // seconds, monotonic (the automatic overlay's clock)

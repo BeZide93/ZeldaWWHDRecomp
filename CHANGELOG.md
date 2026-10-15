@@ -14,8 +14,9 @@ what is on `devel` and not released yet (also in the
   Xcode, or one whose license hasn't been accepted), setup now uses the installed tools directly instead of waiting
   forever, and says what to do if they still can't be used (#219).
 
-- **Android, two screens (AYN Thor and similar):** GamePad screen **Off** (or hiding it) now works: the second screen
-  turns black and ignores touches while the game plays on the main screen (#222).
+- **Android, two screens (AYN Thor and similar):** choosing GamePad screen **Off** (or hiding it) while the second
+  screen is connected now turns that screen black and ignores its touches while the game plays on the main screen;
+  the choice is remembered. Without that choice the second screen shows the GamePad as before (#222).
 
 - **GamePad picture-in-picture placement:** nine positions (corners, edge centres, centre) plus a custom one,
   exact size (10–50%) and opacity (20–100%), and a small screen diagram in Settings → Display where you tap or drag
