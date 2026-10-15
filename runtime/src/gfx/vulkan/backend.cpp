@@ -3768,6 +3768,9 @@ static void set_window_icons() {
 void init() {
 #ifdef __ANDROID__
   SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
+  // Back always reaches the game (input_sdl.cpp: it opens and closes Settings); without this, Android's
+  // default Back handling can still close the app after the key event on some devices
+  SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");
 #endif
   // hidden test runs: no Dock icon, no activation (the app never takes the focus from the user)
   if (hidden_windows())

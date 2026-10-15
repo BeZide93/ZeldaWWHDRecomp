@@ -640,6 +640,16 @@ void handle_event(const SDL_Event& event){
   }return;
  }
  if(getenv("WWHD_NO_HOST_INPUT")&&!test_event(event))return;
+#ifdef __ANDROID__
+ // Android's Back (the navigation bar's back button or the back gesture) opens and closes Settings, like F1 on
+ // desktop: the one control every Android device has (#215). SDL passes it on as AC_BACK; backend.cpp traps it
+ // so Android does not close the app. Left alone while a text prompt is open (the game's name entry).
+ if((event.type==SDL_EVENT_KEY_DOWN||event.type==SDL_EVENT_KEY_UP)&&event.key.scancode==SDL_SCANCODE_AC_BACK&&
+    !text_entry::active()&&!overlay::wants_text()){
+  if(event.type==SDL_EVENT_KEY_DOWN&&!event.key.repeat)overlay::set_open(!overlay::is_open(),overlay::OpenReason::API);
+  return;
+ }
+#endif
  if(overlay_event(event))return;
  // the Screenshot binding (F10 by default), in any game window; posted test keys take this path too
  if(event.type==SDL_EVENT_KEY_DOWN&&!event.key.repeat){int code=keycode(event.key.scancode);if(code>=0&&screenshot::key_down(code))return;}
