@@ -1394,10 +1394,26 @@ float frame_seconds() {
     return std::min(dt, 0.1f);
 }
 
+// research aid: WWHD_CHART_TEST_OPEN=mod:chart:read gives the chart (if Link doesn't own it) and opens it
+// in the MAP screen's chart list (as "Open chart") at that controller read, once Link is in play
+void chart_test_open(uint32_t read) {
+    static bool done = false;
+    const char* e = getenv("WWHD_CHART_TEST_OPEN");
+    if (done || !e || !*e || !ld32(kLinkActor)) return;
+    char mod[64] = {}, chart[64] = {};
+    unsigned at = 0;
+    if (sscanf(e, "%63[^:]:%63[^:]:%u", mod, chart, &at) < 2 || read < at) return;
+    done = true;
+    const int32_t owned = story_chart::state(mod, chart) > story_chart::kResultNone ? story_chart::kResultOwned : story_chart::give(mod, chart);
+    const bool ok = story_chart::open_in_list(mod, chart);
+    LOG("[chart] WWHD_CHART_TEST_OPEN at read %u: \"%s\" state %d, %s", read, chart, owned, ok ? "opened in the chart list" : "not opened");
+}
+
 void pad(input::PadState& p, Cpu* c) {
     if (!g_installed) return;  // no quest mod: nothing of the notebook runs
     static uint32_t ticks = 0;
     if (++ticks % 15 == 0) declared_tick();
+    chart_test_open(ticks);
     bag_icon();
     story_item_buttons::test_assign();
     story_item_buttons::tick();  // ours on X/Y/R: the item number the game reads this frame

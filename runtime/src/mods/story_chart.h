@@ -37,6 +37,22 @@ inline constexpr size_t kMaxNameBytes = 40, kMaxDescriptionBytes = 200;
 inline constexpr unsigned kMaxCharts = 32;
 // The Great Sea: 7 x 7 squares of 100000 units, square D4's center at (0, 0), x east, z south.
 inline constexpr float kSquare = 100000.0f, kSeaHalf = 3.5f * kSquare;
+// A point's square (column and row -3..3, from square D4) and its place from the square's centre
+struct SquarePlace {
+    int column = 0, row = 0;
+    float x = 0, z = 0;
+};
+SquarePlace square_place(float x, float z);
+// The chart view of a treasure chart (the MAP screen's chart list) is not the whole square: it shows a
+// window of kViewSize x kViewSize units, centred on an origin in the square. The game has four pictures
+// of each square, one per salvage variant, each the window around that variant's origin (cmapdat.bin,
+// the chart's entry: {origin x, origin z, salvage x, salvage z} per variant, from the square's centre);
+// the game's chart shows the picture of the save's variant, and its salvage spot is always in it.
+// A mod chart's spot can be anywhere: its view shows the picture whose window holds the spot (the most
+// central one), centred on that picture's origin; -1 when none does: no picture, the window centred on
+// the spot (plain sea).
+inline constexpr float kViewSize = 10000.0f;
+int view_variant(const int16_t origins[4][2], float x, float z);
 
 // wwhd_chart_give / wwhd_chart_finish / wwhd_chart_state: the chart's state in the current save file
 int32_t give(const std::string& mod, const std::string& chart);
@@ -124,6 +140,7 @@ void chart_caption(Cpu* c);   // hdMenuMap_c::setChartCaption
 void chart_kind(Cpu* c);      // hdMenuMapChartKind
 void chart_icon(Cpu* c);      // hdMenuMapUpdateChartIcon
 void chart_frame(Cpu* c);     // hdMenuMapUpdateChartFrame
+void view_destroy(Cpu* c);    // hdTreMapScreen_c::destroy (the chart view)
 void chart_details(Cpu* c);   // hdMenuMapUpdateChartDetails
 void reset_selection(Cpu* c); // hdMenuMap_c::resetChartSelection
 }  // namespace hooks
