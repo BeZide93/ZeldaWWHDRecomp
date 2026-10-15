@@ -5,10 +5,11 @@
 // d/hd_input_ctrl.cpp): 0 Pro Controller (TV menus), 1 GamePad, 2 GamePad Off-TV, 3 both (boot,
 // title, file select), 4 none. A full state brings back the mode it was saved with; a progress state
 // keeps the running one. When it does not match the host, the game reads a controller that is idle
-// (Link does not move), so the mode is switched with the game's own in-game path, once the player is
-// in play again: pause menu, the Options screen's controller change (hdSequenceOption_c::
-// beginConnection category, then hdIngameUi_c StateID_ExchangeProMode: setMode and the HUD for the
-// new controller), menu closed. Same-controller loads change nothing.
+// (Link does not move), so the mode is switched once the player is in play again, with the steps of
+// the game's own in-game controller change (Options, StateID_ExchangeProMode) that concern play:
+// hdInputManager::setMode and, for the GamePad, its touch pointer. Nothing is shown and no input is
+// made. Only if the game refuses the mode directly does the change run through the pause menu (the
+// Options screen's controller change, menu closed). Same-controller loads change nothing.
 #pragma once
 #include <cstdint>
 
