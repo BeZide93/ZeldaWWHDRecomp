@@ -7,6 +7,8 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+## v0.3.0
+
 - **Controls: Xbox and PlayStation button prompts also with "By position"** (issue #209, thanks @jamescastells):
   with the Nintendo button layout on an Xbox or PlayStation controller, the game's button icons now show the button
   that is physically in that place (for example the roll as a red B and the sword as a green A on an Xbox pad).
