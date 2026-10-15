@@ -1,6 +1,8 @@
 // The story notebook (story_notebook.h, docs/mod-sdk-v2.md "The story notebook"): the services, the
 // page driver and the item menu entry.
 #include "story_notebook.h"
+#include "story_actors.h"
+#include "story_scenes.h"
 #include "story_notebook_layout.h"
 #include "story_notebook_page.h"
 #include "story_notebook_caption.h"
@@ -932,6 +934,7 @@ int32_t step(const std::string& mod, const std::string& quest, uint32_t n, const
         return kResultNoRoom;
     }
     if (now != before) LOG("[notebook] %s: quest \"%s\" step %d reached", mod.c_str(), quest.c_str(), now);
+    if (now != before) story_scenes::trigger("quest_step", mod, quest, unsigned(now));
     return now;
 }
 
@@ -1352,8 +1355,10 @@ int32_t reach(const std::string& mod, const std::string& quest, uint32_t n) {
     }
     if (!have_save()) return kResultNoRoom;
     story_mail::Book b = book();
+    const int before = saved_step(b, key);
     const int now = reach_step(b, key, n);
     if (now < 0) return kResultNoRoom;
+    if (now != before) story_scenes::trigger("quest_step", mod, quest, unsigned(now));
     return now;
 }
 void close_page() {
@@ -1707,6 +1712,7 @@ void note_live_place(Cpu* c, uint32_t npc) {
 // run for this talk (it would set its first-talk flag; nothing is set), the list is cleared so the
 // talk ends after the one box, and our text shows in the carrier message for exactly this talk.
 void people_message(Cpu* c) {
+    if (story_actors::people_message(c)) return;
     const uint32_t npc = c->r[3];
     const Takeover* live = nullptr;
     Takeover copy;
@@ -1774,6 +1780,7 @@ void people_message(Cpu* c) {
 // next_msgStatus(this, msgNo): after our choice box, the chosen quest's lines continue the same talk; "Never
 // mind" ends it (and the resident's next talk is the game's). Any other box: the game's.
 void people_next_message(Cpu* c) {
+    if (story_actors::people_next_message(c)) return;
     const uint32_t npc = c->r[3], msg_no = c->r[4];
     if (g_talk.phase != Talk::Choosing || npc != g_talk.npc) return g_original(c, kPeopleNextMsg);
     const uint32_t manager = ld32(kMessageManager);
@@ -1801,7 +1808,12 @@ void people_next_message(Cpu* c) {
 // own get-item event (the way the game's items order it), and finish the quest
 void people_execute(Cpu* c) {
     const uint32_t npc = c->r[3];
+    const bool mod_actor = story_actors::people_execute(c, true);
     g_original(c, kPeopleExecute);
+    if (mod_actor) {
+        const Cpu keep = *c; c->r[3] = npc;
+        story_actors::people_execute(c, false); *c = keep; return;
+    }
     note_live_place(c, npc);
     if (g_talk.phase == Talk::None || npc != g_talk.npc) return;
     const uint16_t command = ld16(npc + kEventCommand);  // the resident's: its talk

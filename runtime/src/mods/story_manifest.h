@@ -16,6 +16,7 @@
 #include "story_notebook_list.h"
 #include "story_sail.h"
 #include "story_takeover.h"
+#include "story_world_manifest.h"
 
 namespace story_notebook {
 

@@ -14,6 +14,7 @@
 // Any other number runs the game's code unchanged. The hooks are installed with the other parts' (install()
 // in story_treasure_salvage.cpp), only when a mod declares charts.
 #include "story_treasure.h"
+#include "story_scenes.h"
 
 #include "guest_addr.h"
 #include "runtime.h"
@@ -63,6 +64,7 @@ int32_t finish_salvaged(uint32_t save_no) {
     if (!chart_view(save_no, v) || v.state == story_chart::kResultNone) return story_chart::kResultInvalid;  // not Link's
     const int32_t r = story_chart::finish(v.mod, v.chart);
     LOG("[treasure] %s: the treasure of chart \"%s\" was salvaged (save number %u): %d", v.mod.c_str(), v.chart.c_str(), save_no, r);
+    if (r == story_chart::kResultDone) story_scenes::trigger("salvage", v.mod, v.chart);
     return r;
 }
 

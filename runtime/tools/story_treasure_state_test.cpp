@@ -167,3 +167,5 @@ int main() {
     std::puts("story_treasure_state_test: ok");
     return 0;
 }
+
+namespace story_scenes { void trigger(const std::string&,const std::string&,const std::string&,unsigned) {} }

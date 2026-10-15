@@ -18,6 +18,7 @@
 // Like the game, every chart that isn't finished gets its point (owned or not): the ring and the crane only
 // work while the chart is opened (proc_wait), so a chart Link gets while in its room works at once.
 #include "story_treasure.h"
+#include "story_actors.h"
 
 #include <algorithm>
 #include <cmath>
@@ -122,6 +123,7 @@ void room_reloader(Cpu* c) {
     const Cpu keep = *c;
     const int32_t room = int32_t(c->r[5]);
     g_original(c, kRoomReLoader);
+    story_actors::room_loaded(c, room);
     if (!g_scratch || !on_sea()) return;
     for (const SalvagePoint& p : salvage_points_for_room(room)) {
         // position (x, 0, z), angle (0, 0, 0), scale (1, 1, 1)

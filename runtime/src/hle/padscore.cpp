@@ -8,6 +8,7 @@
 #include "../controller_reapply.h"
 #include "../mods/story_notebook.h"
 #include "../mods/story_bag.h"
+#include "../mods/story_scenes.h"
 #include "../motion/motion.h"
 #include "../rumble.h"
 
@@ -89,6 +90,7 @@ HLE(padscore, KPADReadEx) {
     last_p = p;
     if (!input::pro_controller()) p = input::PadState{};  // held connected for a controller switch: idle
     story_notebook::mute(p);  // the notebook's page has the controller (VPADRead drives it)
+    story_scenes::mute(p);
     story_bag::mute(p);       // so do the Delivery Bag's extra pages
     mods::moon_jump_input(p);
     mods::move_speed_input(p.buttons);

@@ -1,0 +1,139 @@
+{
+  "format_version": 1,
+  "id": "sdk-v3-windfall",
+  "name": "Windfall lantern walk (SDK v3 preview)",
+  "version": "0.1.0",
+  "author": "Lukas S",
+  "description": "Preview world-content fixture: a sign, a resident and a short lighthouse scene. Placement and scene effects require game verification.",
+  "game_id": "wwhd",
+  "minimum_manager_version": "1.5.0",
+  "kind": "content",
+  "content_dir": "content",
+  "experimental": true,
+  "dependencies": [
+    {
+      "id": "story-notebook",
+      "minimum_version": "0.0.0"
+    }
+  ],
+  "actors": [
+    {
+      "id": "lantern-sign",
+      "actor": "sign",
+      "stage": "sea",
+      "room": 11,
+      "position": {
+        "x": -800,
+        "y": 1040,
+        "z": -201500
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0
+      },
+      "scale": {
+        "x": 1,
+        "y": 1,
+        "z": 1
+      },
+      "flag": "lantern-sign-read",
+      "lines": [
+        "A light is a promise:",
+        "someone is waiting for you."
+      ]
+    },
+    {
+      "id": "lantern-guide",
+      "actor": "resident",
+      "parameters": {
+        "resident": 9
+      },
+      "stage": "sea",
+      "room": 11,
+      "position": {
+        "x": -500,
+        "y": 1200,
+        "z": -201500
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0
+      },
+      "scale": {
+        "x": 1,
+        "y": 1,
+        "z": 1
+      },
+      "lines": [
+        "Have you watched the lighthouse",
+        "when the evening wind settles?"
+      ],
+      "then": [
+        {
+          "action": "scene",
+          "id": "lighthouse"
+        }
+      ]
+    }
+  ],
+  "scenes": [
+    {
+      "id": "lighthouse",
+      "steps": [
+        {
+          "type": "camera",
+          "eye": {
+            "x": -3500,
+            "y": 3600,
+            "z": -205000
+          },
+          "target": {
+            "x": -1500,
+            "y": 3000,
+            "z": -202000
+          },
+          "frames": 120
+        },
+        {
+          "type": "say",
+          "actor": "lantern-guide",
+          "text": [
+            "From here, the light reaches",
+            "beyond the island."
+          ],
+          "frames": 600
+        },
+        {
+          "type": "say",
+          "actor": "lantern-guide",
+          "text": [
+            "Perhaps it will help someone",
+            "find their way home."
+          ],
+          "frames": 600
+        },
+        {
+          "type": "fade",
+          "direction": "out",
+          "frames": 30
+        },
+        {
+          "type": "fade",
+          "direction": "in",
+          "frames": 30
+        },
+        {
+          "type": "end",
+          "then": [
+            {
+              "action": "flag",
+              "id": "lighthouse-seen"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

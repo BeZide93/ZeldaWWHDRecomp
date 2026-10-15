@@ -26,6 +26,7 @@ namespace mods { void move_speed_input(uint32_t){} void fast_forward_input(uint3
 namespace motion { void right_stick(float,float){} VpadMotion vpad(bool){return {};} }
 namespace threads { void park_sleep_until(std::chrono::steady_clock::time_point,bool,void (*)()){} }
 namespace story_notebook { void pad(input::PadState&, Cpu*){} void mute(input::PadState&){} }  // the notebook page (not under test)
+namespace story_scenes {void mute(input::PadState&){} }
 namespace story_bag { void pad(input::PadState&, Cpu*){} void mute(input::PadState&){} }  // the bag pages (not under test)
 extern "C" void f_0203DEEC_orig(Cpu*){}
 extern "C" void imp_vpad_VPADRead(Cpu*);

@@ -42,6 +42,7 @@ inline constexpr uint8_t kRecordSailLine = 8;   // the King of Red Lions said a 
 inline constexpr uint8_t kRecordQuestOrder = 9; // when a quest was started: key quest_key, value 1.. in start order (255: later)
 // 10..15: mod items (story_items_core.h)
 inline constexpr uint8_t kRecordLetterEnclosures = 16; // a manifest letter on its own was read and gave what it encloses: key letter_key, value 1
+inline constexpr uint8_t kRecordActorFlag = 17; // SDK v3 actors: mod-owned opened/read flags, key actor flag_key, value 0/1
 
 inline constexpr uint16_t kItemNotebook = 1;  // the story notebook
 

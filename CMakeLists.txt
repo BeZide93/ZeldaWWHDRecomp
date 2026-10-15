@@ -1018,6 +1018,31 @@ target_include_directories(guest_validation_test PRIVATE runtime/include runtime
 target_compile_options(guest_validation_test PRIVATE -UNDEBUG)
 add_test(NAME guest_validation COMMAND guest_validation_test)
 
+add_executable(story_world_manifest_test runtime/tools/story_world_manifest_test.cpp)
+target_include_directories(story_world_manifest_test PRIVATE runtime/src)
+target_compile_options(story_world_manifest_test PRIVATE -UNDEBUG)
+add_test(NAME story_world_manifest COMMAND story_world_manifest_test)
+add_executable(story_actors_test runtime/tools/story_actors_test.cpp)
+target_include_directories(story_actors_test PRIVATE runtime/src)
+target_compile_options(story_actors_test PRIVATE -UNDEBUG)
+add_test(NAME story_actor_flags COMMAND story_actors_test)
+add_executable(story_actors_runtime_test runtime/tools/story_actors_runtime_test.cpp runtime/src/mods/story_actors.cpp
+  runtime/src/guest_addr_identity.c)
+target_include_directories(story_actors_runtime_test PRIVATE runtime/include runtime/src)
+target_compile_options(story_actors_runtime_test PRIVATE -UNDEBUG)
+add_test(NAME story_actor_native_contract COMMAND story_actors_runtime_test)
+add_executable(story_scenes_core_test runtime/tools/story_scenes_core_test.cpp)
+target_include_directories(story_scenes_core_test PRIVATE runtime/src)
+target_compile_options(story_scenes_core_test PRIVATE -UNDEBUG)
+add_test(NAME story_scene_lifecycle COMMAND story_scenes_core_test)
+add_executable(story_scenes_native_test runtime/tools/story_scenes_native_test.cpp runtime/src/mods/story_scenes.cpp
+  runtime/src/guest_addr_identity.c)
+target_include_directories(story_scenes_native_test PRIVATE runtime/include runtime/src runtime/src/mods)
+target_compile_options(story_scenes_native_test PRIVATE -UNDEBUG)
+add_test(NAME story_scene_native_contract COMMAND story_scenes_native_test)
+add_test(NAME mod_world_content_startup COMMAND mod_package_test --world-content-startup
+  "${CMAKE_SOURCE_DIR}/examples/guest-mods/sdk-v3-windfall")
+
 add_executable(guest_hooks_test runtime/tools/guest_hooks_test.cpp runtime/tools/guest_hooks_body.c runtime/src/mods/guest_png.cpp runtime/src/mods/mod_archive.cpp)
 # The entry musttail regression must reach the optimized backend even in Debug builds.
 set_source_files_properties(runtime/tools/guest_hooks_body.c PROPERTIES COMPILE_OPTIONS "-O3")

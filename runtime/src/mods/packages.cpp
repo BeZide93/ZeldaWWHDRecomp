@@ -39,6 +39,7 @@ namespace fs=std::filesystem;
 using json::Value;
 struct Requirement {std::string id,version;};
 struct Manifest {
+    Value world; // cached validated manifest for aggregate actor/scene graph checks
     std::string id,name,version,author,description,kind,binary,problem,fingerprint,trust_fingerprint,manifest_fingerprint; // fingerprint: SHA-256 of the native library or guest ELF
     std::vector<Requirement> dependencies;
     std::vector<std::string> conflicts;
@@ -141,7 +142,7 @@ bool valid_option(const Option& o,const Value& v){
 Manifest manifest(const fs::path& path){
     auto manifest_text=read_text(path/"manifest.json");auto v=json::parse(manifest_text);require(v.type==Value::Object,"Manifest must be an object");
     require(v.get("format_version").type==Value::Number&&v.get("format_version").number==1,"Unsupported manifest format");
-    Manifest m;m.manifest_fingerprint=hash::sha256_text(manifest_text);m.id=string_field(v,"id",false,64);require(id_ok(m.id)&&!manager::find(m.id),"Invalid or reserved mod ID");
+    Manifest m;if(v.get("actors").type!=Value::Null||v.get("scenes").type!=Value::Null)m.world=v;m.manifest_fingerprint=hash::sha256_text(manifest_text);m.id=string_field(v,"id",false,64);require(id_ok(m.id)&&!manager::find(m.id),"Invalid or reserved mod ID");
     m.name=string_field(v,"name",false,128);require(!m.name.empty(),"Mod name is empty");
     m.version=string_field(v,"version",false,64);version(m.version);
     m.author=string_field(v,"author",true,256);m.description=string_field(v,"description",true);
@@ -153,11 +154,12 @@ Manifest manifest(const fs::path& path){
     if(!minimum.empty()&&version(minimum)>version(kManagerVersion))m.problem="Requires mod manager "+minimum;
     // story quests (story_manifest.h): an NPC this port's catalogue doesn't know, or a newer catalogue
     // version, keeps the mod from being enabled with the reason, never a silent no-op
-    if(m.problem.empty()&&(v.get("quests").type!=Value::Null||v.get("npc_catalogue").type!=Value::Null||v.get("charts").type!=Value::Null||v.get("letters").type!=Value::Null||v.get("items").type!=Value::Null)){
+    if(m.problem.empty()&&(v.get("quests").type!=Value::Null||v.get("npc_catalogue").type!=Value::Null||v.get("charts").type!=Value::Null||v.get("letters").type!=Value::Null||v.get("items").type!=Value::Null||v.get("actors").type!=Value::Null||v.get("scenes").type!=Value::Null)){
         std::vector<story_notebook::ManifestQuest> quests;std::vector<story_notebook::ManifestChart> charts;
+        std::vector<story_notebook::ManifestActor> actors;std::vector<story_notebook::ManifestScene> scenes;
         std::vector<story_notebook::ManifestLetter> letters;std::vector<story_notebook::ManifestItem> items;std::string why;
         if(!story_notebook::parse_quests(v,quests,why)||!story_notebook::parse_charts(v,charts,why)||!story_notebook::parse_letters(v,letters,why)||
-           !story_notebook::parse_items(v,items,why))m.problem="Story quests: "+why;
+           !story_notebook::parse_items(v,items,why)||!story_notebook::parse_actors(v,actors,why)||!story_notebook::parse_scenes(v,scenes,why))m.problem="Story quests: "+why;
     }
     if(m.kind=="native") {
         require(v.get("abi_version").type==Value::Number&&v.get("abi_version").number==1,"Unsupported native mod ABI");
@@ -203,7 +205,7 @@ Manifest manifest(const fs::path& path){
     const auto& deps=v.get("dependencies");require(deps.type==Value::Null||deps.type==Value::Array,"Dependencies must be an array");
     for(const auto& dep:deps.array){Requirement r;r.id=string_field(dep,"id",false,80);r.version=string_field(dep,"minimum_version",true,64);if(r.version.empty())r.version="0.0.0";version(r.version);require(id_ok(r.id)||(r.id.starts_with("builtin:")&&manager::find(r.id.substr(8))),"Invalid dependency ID");m.dependencies.push_back(r);}
     // every quest mod depends on the story system's required package (required.h), declared or not
-    if(m.id!=story_notebook::kNotebookPackage&&(v.get("quests").type!=Value::Null||v.get("charts").type!=Value::Null)&&
+    if(m.id!=story_notebook::kNotebookPackage&&(v.get("quests").type!=Value::Null||v.get("charts").type!=Value::Null||v.get("actors").type!=Value::Null||v.get("scenes").type!=Value::Null)&&
        std::none_of(m.dependencies.begin(),m.dependencies.end(),[](const Requirement& r){return r.id==story_notebook::kNotebookPackage;}))
         m.dependencies.push_back({story_notebook::kNotebookPackage,"0.0.0"});
     const auto& conflicts=v.get("conflicts");require(conflicts.type==Value::Null||conflicts.type==Value::Array,"Conflicts must be an array");
@@ -256,7 +258,13 @@ Manifest manifest(const fs::path& path){
     }
     if(m.kind=="native"||m.kind=="guest"||!m.setup_tools.empty())m.trust_fingerprint=package_fingerprint(path);
     if(m.trust_fingerprint.empty())m.trust_fingerprint=m.fingerprint;
-    if(m.kind=="content")require(m.dependencies.empty(),"Content packages do not support dependencies yet");
+    if(m.kind=="content") {
+        // Declarative world content uses the story service without carrying executable guest code.
+        // Keep the existing dependency restriction for all other content and dependencies.
+        const bool world_content=!v.get("actors").array.empty()||!v.get("scenes").array.empty();
+        require(m.dependencies.empty()||(world_content&&std::all_of(m.dependencies.begin(),m.dependencies.end(),[](const Requirement& r){return r.id==story_notebook::kNotebookPackage;})),
+                "Content packages only support the Story Notebook dependency for actors or scenes");
+    }
     return m;
 }
 Value& profile(){return database["profiles"][database.get("active").string("Default")];}
@@ -439,6 +447,9 @@ std::vector<std::string> repair_graphics(){
     return messages;
 }
 void validate_conflicts(const std::set<std::string>& enabled,const Value* planned=nullptr){
+    std::vector<std::pair<std::string,Value>> world_packages;
+    for(const auto& id:enabled)if(records.at(id).manifest.world.type!=Value::Null)world_packages.push_back({id,records.at(id).manifest.world});
+    std::string world_error;require(story_notebook::world_manifest::validate_world_packages(world_packages,world_error),world_error);
     auto builtin_on=[&](const std::string& id){return planned?planned->get(id).boolean:manager::find(id)->enabled();};
     std::map<std::string,std::string> setting_owners,file_owners;
     std::vector<cemu::Selection> graphics;

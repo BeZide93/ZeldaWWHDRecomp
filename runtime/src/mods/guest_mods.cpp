@@ -25,6 +25,8 @@
 #include "story_mail_book.h"
 #include "story_chart.h"
 #include "story_treasure.h"
+#include "story_actors.h"
+#include "story_scenes.h"
 #include "story_notebook.h"
 #include "story_items.h"
 #include "story_item_buttons.h"
@@ -103,6 +105,7 @@ struct Loaded {
 std::vector<Loaded> g_loaded;
 std::atomic<uint64_t> g_logic_step{0};
 std::atomic<bool> g_hud_callbacks{false};
+bool g_world_scenes=false;
 std::mutex g_hud_mutex;
 Loaded& owner(Cpu* c) {
     for(auto& mod:g_loaded)
@@ -122,6 +125,26 @@ void call_original(Cpu* c, uint32_t func) {
     if (i < 0) fatal("[guestmods] call_original: %08X is not a game function", func);
     if (g_mod_hook_flags[i]) c->mod_skip = func;  // consumed by the check at the start of the body
     g_mod_bodies[i](c);
+}
+
+// Declarative world content is shared by guest and data-only content packages.
+void load_world(const std::string& mod,const mods::json::Value& manifest) {
+    std::vector<story_notebook::ManifestActor> actors;
+    std::vector<story_notebook::ManifestScene> scenes;
+    std::string why;
+    if(!story_notebook::parse_actors(manifest,actors,why)||!story_notebook::parse_scenes(manifest,scenes,why))
+        exception_report::raise("World manifest "+mod+": "+why);
+    std::vector<std::string> flags;
+    for(const auto& scene:scenes)for(const auto& step:scene.steps)for(const auto& action:step.then)
+        if(action.kind==story_notebook::StoryAction::Kind::Flag)flags.push_back(action.id);
+    if(!story_scenes::validate(scenes,why)||!story_actors::register_flags(mod,flags,why)||
+       !story_actors::load(mod,actors,why)||!story_scenes::declare(mod,scenes,why))
+        exception_report::raise("World content "+mod+": "+why);
+    g_world_scenes|=!scenes.empty();
+    if(!actors.empty()||!scenes.empty()) {
+        story_notebook::note_import();story_mail::note_import();
+        LOG("[world] %s: %zu actors, %zu scenes",mod.c_str(),actors.size(),scenes.size());
+    }
 }
 
 // ---- host services (imports of guest mods by name; arguments in r3..r10 / f1..f8, result in r3 / f1)
@@ -592,6 +615,7 @@ bool load_one(const std::string& path, std::string& err,const mods::packages::Gu
             prepare_npc_catalogue();
             story_notebook::declare(loaded.id,loaded.name,manifest);
         }
+        load_world(loaded.id,manifest);
         // the mod's items (story_items.h): kept in the Delivery Bag, owned in the save's story block
         std::vector<story_notebook::ManifestItem> items;std::string why;
         if(!story_notebook::parse_items(manifest,items,why))LOG("[items] %s: the manifest's items are not used: %s",loaded.id.c_str(),why.c_str());
@@ -663,6 +687,24 @@ void init() {
         if(result.module.empty()||!load_one(result.module,error,pkg,base,result.allocation_size))
             exception_report::raise(error.empty()?"Guest builder returned no module":error);
     });
+    // Content packages have no ELF; their enabled startup snapshot still declares world data.
+    for(const auto& pkg:packages::list()) if(pkg.kind=="content"&&pkg.active&&pkg.compatible) {
+        std::ifstream file(std::filesystem::path(packages::directory())/pkg.id/"manifest.json",std::ios::binary);
+        const std::string text{std::istreambuf_iterator<char>(file),{}};
+        const auto manifest=mods::json::parse(text);
+        const auto path=std::filesystem::path(packages::directory())/pkg.id;
+        if(manifest.get("quests").type!=mods::json::Value::Null||manifest.get("charts").type!=mods::json::Value::Null||
+           manifest.get("letters").type!=mods::json::Value::Null) {
+            prepare_npc_catalogue();
+            story_notebook::declare(pkg.id,pkg.name,manifest);
+        }
+        std::vector<story_notebook::ManifestItem> items;std::string why;
+        if(!story_notebook::parse_items(manifest,items,why))exception_report::raise("World items "+pkg.id+": "+why);
+        for(const auto& item:items)if(!story_items::define(pkg.id,path.string(),item,why))
+            exception_report::raise("World items "+pkg.id+": "+why);
+        if(!items.empty()){story_items::note_import();story_notebook::note_import();story_mail::note_import();}
+        load_world(pkg.id,manifest);
+    }
     // The item icons (item_icons.h): the notebook (key 0), then the mod items in declaration order (frames
     // 56...), built into the game's 2D pack before the game opens it; the mod items draw from those frames.
     // (test aid WWHD_TEST_ITEM_ICONS=a.png,b.png adds pictures as more items)
@@ -746,6 +788,30 @@ void init() {
         if(ordinal<0)fatal("[guestmods] notebook: %08X is not a game function",addr);
         Chain& ch=g_chains[addr];
         ch.addr=addr;ch.ordinal=uint32_t(ordinal);ch.replace=fn;ch.replace_mod="the port's story notebook";
+        g_mod_hook_flags[ordinal]=1;
+    });
+    if(story_actors::declared()) {
+        story_actors::set_game_calls(call_original,[](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);});
+        story_actors::set_scratch_memory(mem::runtime_alloc(story_actors::kScratchBytes,16));
+        story_actors::set_scene_start(story_scenes::request);
+        story_actors::install([](uint32_t addr) {
+            auto it=g_chains.find(addr);return it==g_chains.end()?std::string():it->second.replace_mod;
+        },[](uint32_t addr,PpcFunc fn) {
+            int ordinal=ordinal_of(addr);
+            if(ordinal<0)fatal("[guestmods] actors: %08X is not a game function",addr);
+            Chain& ch=g_chains[addr];ch.addr=addr;ch.ordinal=uint32_t(ordinal);ch.replace=fn;ch.replace_mod="the port's world actors";
+            g_mod_hook_flags[ordinal]=1;
+        });
+    }
+    story_scenes::set_game_calls([](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);});
+    if(g_world_scenes)story_scenes::set_scratch_memory(mem::runtime_alloc(story_scenes::kScratchBytes,16));
+    story_scenes::set_callbacks(story_actors::actor_address,story_actors::actions);
+    story_scenes::install(call_original,[](uint32_t addr) {
+        auto it=g_chains.find(addr);return it==g_chains.end()?std::string():it->second.replace_mod;
+    },[](uint32_t addr,PpcFunc fn) {
+        int ordinal=ordinal_of(addr);
+        if(ordinal<0)fatal("[guestmods] scenes: %08X is not a game function",addr);
+        Chain& ch=g_chains[addr];ch.addr=addr;ch.ordinal=uint32_t(ordinal);ch.replace=fn;ch.replace_mod="the port's scene player";
         g_mod_hook_flags[ordinal]=1;
     });
     // The King of Red Lions' one-time line for the tracked quest (story_sail.h): the boat's execute,
@@ -846,11 +912,14 @@ void draw_frame(Cpu* c,uint64_t step) {
         *c=saved;
     }
 }
+void logic_service(Cpu* c) { story_scenes::tick(c,false,2); story_actors::service(c); }
 void service(Cpu* c) { story_lyt_screen::service(c); }
 void state_loaded() {
     std::lock_guard lock(g_hud_mutex);
     hud::store().reset();
     pcm::store().reset();
+    story_scenes::state_loaded();
+    story_actors::state_loaded();
     story_mail::state_loaded();
     story_treasure_chest::state_loaded();
     story_chart::state_loaded();

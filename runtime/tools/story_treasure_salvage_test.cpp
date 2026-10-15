@@ -291,3 +291,5 @@ int main() {
     std::puts("story_treasure_salvage_test: ok");
     return 0;
 }
+
+namespace story_actors { void room_loaded(Cpu*,int) {} }

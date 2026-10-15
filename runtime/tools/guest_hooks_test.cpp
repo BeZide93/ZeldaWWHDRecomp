@@ -50,9 +50,10 @@ std::optional<Value> read(const std::string& key) {
 }
 namespace input {PadState read() {return {};}}
 namespace true60 {float dt() {return 0.5f;}}
-namespace mem { std::string read_cstr(uint32_t) { return "option"; } uint32_t host_alloc(uint32_t,uint32_t) { return 0; } }
+namespace mem { std::string read_cstr(uint32_t) { return "option"; } uint32_t host_alloc(uint32_t,uint32_t) { return 0; } uint32_t runtime_alloc(uint32_t,uint32_t) {return 0;} }
 namespace dispatch { void set(uint32_t, PpcFunc) {} }
 namespace mods::packages {
+std::vector<View> list(){return {};}
 static bool in_startup_callback=false, inspected=false;
 std::string directory() { assert(!in_startup_callback); return {}; }
 void set_guest_builder(GuestInspect, GuestBuild, GuestCacheCheck) {}
@@ -105,6 +106,31 @@ namespace story_treasure_chest {
 void state_loaded() {}
 void set_item_get_next(void (*)(Cpu*),void (*)(Cpu*,uint32_t)) {}
 namespace hooks { void exec_item_get(Cpu*) {} }
+}
+// World runtime has its own actor/scene tests; loader tests only exercise registration.
+namespace story_actors {
+bool register_flags(const std::string&,const std::vector<std::string>&,std::string&){return true;}
+void service(Cpu*){}
+bool load(const std::string&,const std::vector<story_notebook::ManifestActor>&,std::string&){return true;}
+bool declared(){return false;}
+void set_game_calls(void (*)(Cpu*,uint32_t),uint32_t (*)(Cpu*,uint32_t,std::initializer_list<uint32_t>)){}
+void set_scratch_memory(uint32_t){}
+void set_scene_start(std::function<bool(const std::string&,const std::string&)>){}
+void install(const std::function<std::string(uint32_t)>&,const std::function<void(uint32_t,void(*)(Cpu*))>&){}
+void state_loaded(){}
+uint32_t actor_address(Cpu*,const std::string&,const std::string&){return 0;}
+bool actions(const std::string&,const std::vector<story_notebook::StoryAction>&){return true;}
+}
+namespace story_scenes {
+bool validate(const std::vector<story_notebook::ManifestScene>&,std::string&){return true;}
+void set_game_calls(uint32_t (*)(Cpu*,uint32_t,std::initializer_list<uint32_t>)){}
+void set_scratch_memory(uint32_t){}
+void set_callbacks(Resolve,Actions){}
+bool declare(const std::string&,const std::vector<story_notebook::ManifestScene>&,std::string&){return true;}
+bool request(const std::string&,const std::string&){return false;}
+void tick(Cpu*,bool,unsigned){}
+void install(void (*)(Cpu*,uint32_t),const std::function<std::string(uint32_t)>&,const std::function<void(uint32_t,void(*)(Cpu*))>&){}
+void state_loaded(){}
 }
 // and so has the story notebook (story_notebook_test)
 namespace config { std::string game_dir; }

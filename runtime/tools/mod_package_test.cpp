@@ -646,6 +646,39 @@ int main(int argc, char** argv) {
         assert(!remove("cemu.test",error));assert(!install(pack.string(),error));fs::remove_all(root);
         std::cout<<"Cemu startup presets and restart-only immutable lifecycle passed\n";return 0;
     }
+    if(argc==3&&std::string(argv[1])=="--world-content-startup") {
+        auto root=fs::temp_directory_path()/("wwhd-world-content-test-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        auto storage=root/"storage";auto pack=storage/"Mods"/"sdk-v3-windfall";
+        fs::create_directories(pack.parent_path());fs::copy(fs::absolute(argv[2]),pack,fs::copy_options::recursive);
+        auto notebook=storage/"Mods"/"story-notebook";fs::create_directories(notebook);
+        std::ofstream(notebook/"manifest.json")<<R"({"format_version":1,"id":"story-notebook","name":"Notebook fixture","version":"1.0.0","game_id":"wwhd","kind":"guest","guest":{"api_version":1}})";
+        {std::ofstream elf(notebook/"mod.elf",std::ios::binary);elf.write("\x7f" "ELF\x01\x02",6);}
+        std::ofstream(storage/"profiles.json")<<R"({"format_version":1,"active":"Default","profiles":{"Default":{"enabled":{"sdk-v3-windfall":true,"story-notebook":true}}}})";
+        env("WWHD_NO_HOST_INPUT","1");env("WWHD_MOD_MANAGER_DIR",storage.string().c_str());env("WWHD_TEST_TRUST_NATIVE_MODS","story-notebook");
+        set_code_mod_support(true);initialize();
+        assert(view("sdk-v3-windfall").compatible&&view("sdk-v3-windfall").enabled&&view("sdk-v3-windfall").active);
+        assert(view("story-notebook").compatible&&view("story-notebook").enabled);
+        unsigned loaded=0;start_guests([](const GuestPackage&){return uint32_t(65536);},[&](const GuestPackage& pkg,uint32_t){assert(pkg.id=="story-notebook");++loaded;});
+        assert(loaded==1&&view("story-notebook").active);
+        // Other content dependencies retain their previous restriction.
+        auto invalid=root/"invalid";fs::copy(pack,invalid,fs::copy_options::recursive);
+        std::ifstream input(invalid/"manifest.json");auto bad=mods::json::parse(std::string{std::istreambuf_iterator<char>(input),{}});
+        bad["id"]="plain-content-dependency";bad.object.erase("actors");bad.object.erase("scenes");
+        std::ofstream(invalid/"manifest.json")<<mods::json::dump(bad);std::string error;assert(!install(invalid.string(),error));
+        bad["id"]="world-content-other-dependency";bad["actors"]=mods::json::parse(R"([{"id":"notice","actor":"sign","stage":"sea","room":11,"flag":"read","position":{"x":0,"y":0,"z":0}}])");
+        bad["dependencies"].array.push_back(mods::json::parse(R"({"id":"other-content"})"));
+        std::ofstream(invalid/"manifest.json")<<mods::json::dump(bad);assert(!install(invalid.string(),error));
+        auto world_fixture=[&](const std::string& id,unsigned count){
+            auto source=root/id;fs::create_directories(source/"content");std::ofstream(source/"content"/(id+".marker"))<<"original fixture";
+            auto m=mods::json::parse(R"({"format_version":1,"id":"fixture","name":"World graph fixture","version":"1.0.0","game_id":"wwhd","kind":"content","content_dir":"content","actors":[]})");m["id"]=id;
+            for(unsigned i=0;i<count;++i){auto actor=mods::json::parse(R"({"id":"resident","actor":"resident","stage":"sea","room":0,"position":{"x":0,"y":0,"z":0}})");actor["id"]="resident"+std::to_string(i);m["actors"].array.push_back(actor);}
+            std::ofstream(source/"manifest.json")<<mods::json::dump(m);assert(install(source.string(),error));
+        };
+        world_fixture("graph-a",9);world_fixture("graph-b",8);
+        assert(enable("graph-a",true,error));assert(!enable("graph-b",true,error)&&error.find("16 actors")!=std::string::npos);
+        assert(view("graph-a").enabled&&!view("graph-b").enabled);
+        fs::remove_all(root);std::cout<<"Real world-content example starts with notebook dependency; content dependency policy and aggregate actor graph validated\n";return 0;
+    }
     if(argc==2&&std::string(argv[1])=="--content-startup"){
         auto root=fs::temp_directory_path()/("wwhd-content-test-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
         auto storage=root/"storage";auto pack=storage/"Mods"/"content.test";
