@@ -427,6 +427,10 @@ add_executable(controller_selection_test runtime/tools/controller_selection_test
 target_include_directories(controller_selection_test PRIVATE runtime/src runtime/include)
 target_compile_options(controller_selection_test PRIVATE -UNDEBUG)
 add_test(NAME controller_selection COMMAND controller_selection_test)
+add_executable(controller_reapply_test runtime/tools/controller_reapply_test.cpp)
+target_include_directories(controller_reapply_test PRIVATE runtime/src)
+target_compile_options(controller_reapply_test PRIVATE -UNDEBUG)
+add_test(NAME controller_reapply COMMAND controller_reapply_test)
 
 add_executable(input_map_test runtime/tools/input_map_test.cpp runtime/src/input_map.cpp)
 target_include_directories(input_map_test PRIVATE runtime/src)
