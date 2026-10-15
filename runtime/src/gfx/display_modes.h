@@ -1,13 +1,13 @@
 // GamePad screen modes and the TV window's layout, shared by both window hosts: the AppKit host
 // (display.mm: macOS, Metal and Vulkan) and the SDL host (gfx/vulkan: Windows, Linux, Android, macOS
 // test builds). The hosts keep their own windows, menus and settings files; what is decided here is
-// the same everywhere: the mode, the picture-in-picture corner / size / opacity, where the pictures
+// the same everywhere: the mode, the picture-in-picture anchor / size / opacity, where the pictures
 // go in the TV window (display_plan, display.h), the automatic overlay and the mapping of clicks on
 // the GamePad picture inside the TV window to GamePad touches.
 //
 // Modes (WWHD_DRC_MODE at start, not saved):
 //   window   the GamePad picture in its own window (hosts with a GamePad window)
-//   pip      picture-in-picture: the GamePad picture in a corner of the TV window
+//   pip      picture-in-picture: the GamePad picture inside the TV window
 //   auto     GamePad menus while open; follows the game's Off-TV Play routing
 //   off      not shown (the game keeps drawing it)
 //   gamepad  only the GamePad picture, fitted to the TV window, like a Wii U played without a TV
@@ -25,12 +25,28 @@ namespace gfx {
 enum DrcMode { kDrcWindow, kDrcPip, kDrcAuto, kDrcOff, kDrcGamePad, kDrcModeCount };
 enum Filter { kSmooth, kSharp, kInteger };
 extern const char* const kModeNames[kDrcModeCount];  // window, pip, auto, off, gamepad
-extern const char* const kCornerNames[4];             // tl, tr, bl, br (bit 0: right, bit 1: bottom)
+enum PipAnchor { kPipTL, kPipTC, kPipTR, kPipCL, kPipCC, kPipCR, kPipBL, kPipBC, kPipBR, kPipCustom };
+extern const char* const kAnchorNames[10];
+// Gameplay capture at 1280x720: rupees at y=670..696 (93–97%); reserve
+// everything below 86% to clear the counter and its shadow across aspects.
+inline constexpr float kPipRupeeBottom = 0.86f;
+// Gameplay HUD extents at 720p: sword/D-pad ends near y=158, actions near y=215.
+inline constexpr float kPipLeftHudBottom = 0.24f;
+inline constexpr float kPipRightHudBottom = 0.32f;
+struct PipPosition { int anchor; float x, y; };
+float pip_clamp(float value, float lo, float hi, float fallback);
+int pip_load_anchor(const char* anchor, const char* legacy);
+Box pip_box(Box tv, float aspect, float size, PipPosition position);
+PipPosition pip_place(Box tv, float aspect, float size, float x, float y, bool snap = true);
+PipPosition pip_position();
+void pip_set_position(PipPosition position);
 extern const char* const kFilterNames[3];             // smooth, sharp, integer
 
 // the options (read from any thread; changed on the host's main thread)
 extern std::atomic<int> g_mode;
-extern std::atomic<int> g_corner;
+extern std::atomic<int> g_pip_anchor;
+extern std::atomic<float> g_pip_x, g_pip_y;
+extern std::atomic<bool> g_pip_preview;
 extern std::atomic<float> g_pip_size;      // fraction of the TV picture's width, 0.1..0.5
 extern std::atomic<float> g_pip_opacity;   // 0.2..1
 extern std::atomic<int> g_filter;          // picture scaling (the SDL host mirrors gfxvk::scale_filter)
@@ -76,7 +92,7 @@ void display_gamepad_ui(GamePadUiState state); // publish a host-only snapshot
 // pixel rectangles in the target (drawable), top-left origin
 struct Layout { Box tv, pip; bool pip_on = false; bool drc_only = false; float scale = 1; };
 // the TV window's layout: TV picture (tw x th) scaled to fit dw x dh, GamePad picture (pw x ph) in
-// the overlay corner (pip_on) or alone, fitted (drc_only)
+// the selected anchor (pip_on) or alone, fitted (drc_only)
 Layout layout(float dw, float dh, float tw, float th, float pw, float ph, bool pip_on, bool drc_only = false);
 // a point in the TV window (0..1 from top left) on the GamePad picture -> touch position (0..1),
 // from the last display_plan; clamp_outside: a drag that left the picture keeps touching its edge

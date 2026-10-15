@@ -4,7 +4,7 @@
 //
 // Debug / test environment (both hosts):
 //   WWHD_DRC_MODE=window|pip|auto|off|gamepad   GamePad screen mode at start (not saved)
-//   WWHD_DRC_PIP=br:0.25[:0.85]          overlay corner (tl, tr, bl, br), size (fraction of the TV picture
+//   WWHD_DRC_PIP=br:0.25[:0.85]          overlay anchor (tl, tc, tr, cl, cc, cr, bl, bc, br, custom), size (fraction of the TV picture
 //                                        width) and opacity at start (not saved)
 //   WWHD_SCALE_FILTER=smooth|sharp|integer
 //   WWHD_SIM_SCREEN=3024x1964            lay the TV picture out for a target of that size (present dumps and
@@ -36,7 +36,7 @@ namespace gfx {
 
 // ---------------------------------------------------------------- options
 const char* const kModeNames[kDrcModeCount] = {"window", "pip", "auto", "off", "gamepad"};
-const char* const kCornerNames[4] = {"tl", "tr", "bl", "br"};
+const char* const kAnchorNames[10] = {"tl", "tc", "tr", "cl", "cc", "cr", "bl", "bc", "br", "custom"};
 const char* const kFilterNames[3] = {"smooth", "sharp", "integer"};
 
 #ifdef __ANDROID__
@@ -46,7 +46,9 @@ std::atomic<int> g_mode{kDrcOff};
 #else
 std::atomic<int> g_mode{kDrcWindow};
 #endif
-std::atomic<int> g_corner{3};
+std::atomic<int> g_pip_anchor{kPipBR};
+std::atomic<float> g_pip_x{0.5f}, g_pip_y{0.5f};
+std::atomic<bool> g_pip_preview{false};
 std::atomic<float> g_pip_size{0.25f};
 std::atomic<float> g_pip_opacity{1.0f};
 std::atomic<int> g_filter{kSmooth};
@@ -81,12 +83,12 @@ bool drc_mode_offered(int m) {
 void display_env_overrides() {
     if (const char* e = getenv("WWHD_DRC_MODE")) g_mode = find_name(kModeNames, kDrcModeCount, e, g_mode);
     if (const char* e = getenv("WWHD_DRC_PIP")) {
-        char c[8] = {};
+        char c[16] = {};
         float sz = g_pip_size, op = g_pip_opacity;
-        if (sscanf(e, "%2[a-z]:%f:%f", c, &sz, &op) >= 1) {
-            g_corner = find_name(kCornerNames, 4, c, g_corner);
-            g_pip_size = std::clamp(sz, 0.1f, 0.5f);
-            g_pip_opacity = std::clamp(op, 0.2f, 1.0f);
+        if (sscanf(e, "%15[a-z]:%f:%f", c, &sz, &op) >= 1) {
+            g_pip_anchor = find_name(kAnchorNames, 10, c, g_pip_anchor);
+            g_pip_size = pip_clamp(sz, 0.1f, 0.5f, 0.25f);
+            g_pip_opacity = pip_clamp(op, 0.2f, 1.0f, 1.0f);
         }
     }
     if (const char* e = getenv("WWHD_SCALE_FILTER")) g_filter = find_name(kFilterNames, 3, e, g_filter);
@@ -138,6 +140,7 @@ int display_test_mode(uint64_t frame) {
 bool drc_window_wanted() { return g_mode == kDrcWindow && g_shown; }
 bool drc_screen_off() { return g_mode == kDrcOff || (g_mode == kDrcWindow && !g_shown); }
 bool pip_shown_now() {
+    if (g_pip_preview) return true;
     if (g_mode == kDrcPip) return g_shown;
     if (g_mode == kDrcAuto) {
         AutoPipDecision decision{g_auto_until.load()};
@@ -217,6 +220,67 @@ void display_gamepad_ui(GamePadUiState state) {
     }
 }
 
+// Pure placement geometry is shared by the compositor, Settings diagram and
+// drag input.
+float pip_clamp(float v, float lo, float hi, float fallback) {
+    return std::isfinite(v) ? std::clamp(v, lo, hi) : fallback;
+}
+int pip_load_anchor(const char *anchor, const char *legacy) {
+    return find_name(kAnchorNames, 10, anchor, find_name(kAnchorNames, 9, legacy, kPipBR));
+}
+PipPosition pip_position() { return {g_pip_anchor.load(), g_pip_x.load(), g_pip_y.load()}; }
+void pip_set_position(PipPosition p) {
+    g_pip_x = pip_clamp(p.x, 0, 1, 0.5f);
+    g_pip_y = pip_clamp(p.y, 0, 1, 0.5f);
+    g_pip_anchor = std::clamp(p.anchor, 0, int(kPipCustom));
+}
+Box pip_box(Box tv, float aspect, float size, PipPosition p) {
+    if (!std::isfinite(tv.w) || !std::isfinite(tv.h) || tv.w <= 0 || tv.h <= 0)
+        return {};
+    aspect = pip_clamp(aspect, 0.01f, 100, 854.0f / 480);
+    float w = tv.w * pip_clamp(size, 0.1f, 0.5f, 0.25f), h = w / aspect;
+    // Preserve the GamePad aspect even when a wide TV makes 50% width too tall.
+    const float maxHeight = tv.h * (1.0f - kPipRightHudBottom - 0.02f);
+    if (h > maxHeight) {
+        w *= maxHeight / h;
+        h = maxHeight;
+    }
+    const float mx = std::min(std::min(tv.w, tv.h) * 0.02f, (tv.w - w) / 2);
+    const float my = std::min(std::min(tv.w, tv.h) * 0.02f, (tv.h - h) / 2);
+    float x, y;
+    if (p.anchor >= 0 && p.anchor < kPipCustom) {
+        const int col = p.anchor % 3, row = p.anchor / 3;
+        x = col == 0 ? mx : col == 1 ? (tv.w - w) / 2 : tv.w - w - mx;
+        y = row == 0 ? my : row == 1 ? (tv.h - h) / 2 : tv.h - h - my;
+        if (p.anchor == kPipBR)
+            y = std::max(0.0f, tv.h * kPipRupeeBottom - h);
+        if (p.anchor == kPipTL) y = std::max(my, tv.h * kPipLeftHudBottom);
+        if (p.anchor == kPipTR) y = std::max(my, tv.h * kPipRightHudBottom);
+    } else {
+        x = tv.w * pip_clamp(p.x, 0, 1, 0.5f) - w / 2;
+        y = tv.h * pip_clamp(p.y, 0, 1, 0.5f) - h / 2;
+    }
+    return {tv.x + std::clamp(x, 0.0f, tv.w - w), tv.y + std::clamp(y, 0.0f, tv.h - h), w, h};
+}
+PipPosition pip_place(Box tv, float aspect, float size, float x, float y, bool snap) {
+    if (!std::isfinite(tv.w) || !std::isfinite(tv.h) || tv.w <= 0 || tv.h <= 0)
+        return {kPipCustom, 0.5f, 0.5f};
+    Box b = pip_box(tv, aspect, size, {kPipCustom, x, y});
+    PipPosition p{kPipCustom, (b.x - tv.x + b.w / 2) / tv.w, (b.y - tv.y + b.h / 2) / tv.h};
+    if (snap) {
+        float best = 0.035f * std::min(tv.w, tv.h);
+        for (int a = 0; a < kPipCustom; ++a) {
+            Box q = pip_box(tv, aspect, size, {a, 0, 0});
+            float d = std::hypot(b.x - q.x, b.y - q.y);
+            if (d <= best) {
+                best = d;
+                p.anchor = a;
+            }
+        }
+    }
+    return p;
+}
+
 // ---------------------------------------------------------------- layout
 static Box fit(float dw, float dh, float tw, float th, float* scale) {
     float s = std::min(dw / tw, dh / th);  // scale to fit: bars only when the aspect ratios differ
@@ -238,11 +302,7 @@ Layout layout(float dw, float dh, float tw, float th, float pw, float ph, bool p
     if (tw <= 0 || th <= 0) return L;
     L.tv = fit(dw, dh, tw, th, &L.scale);
     if (pip_on && pw > 0 && ph > 0) {
-        // the GamePad picture in a corner of the TV picture
-        float ow = roundf(L.tv.w * g_pip_size), oh = roundf(ow * ph / pw);
-        float m = roundf(std::min(L.tv.w, L.tv.h) * 0.02f);
-        int c = g_corner;
-        L.pip = {(c & 1) ? L.tv.x + L.tv.w - ow - m : L.tv.x + m, (c & 2) ? L.tv.y + L.tv.h - oh - m : L.tv.y + m, ow, oh};
+        L.pip = pip_box(L.tv, pw / ph, g_pip_size, pip_position());
         L.pip_on = true;
     }
     return L;
@@ -409,20 +469,48 @@ static PresentPlan plan_from(const Layout& L, float dw, float dh) {
     p.pip_opacity = L.drc_only ? 1.0f : g_pip_opacity.load();
     p.filter = g_filter;
     p.drc_window = g_mode == kDrcWindow && g_has_drc_window && g_shown;
-    if (view_button_enabled()) p.button = view_button(dw, dh);
+    if (!g_pip_preview && view_button_enabled()) p.button = view_button(dw, dh);
     return p;
+}
+
+// Deterministic placement captures without manipulating a user's settings or pointer.
+// WWHD_TEST_PIP=frame:anchor:size:opacity:x:y,... (requires WWHD_NO_HOST_INPUT).
+static void test_pip(uint64_t frame) {
+    struct Step { uint64_t frame; PipPosition position; float size, opacity; };
+    static const std::vector<Step> steps = [] {
+        std::vector<Step> result;
+        const char* e = getenv("WWHD_NO_HOST_INPUT") ? getenv("WWHD_TEST_PIP") : nullptr;
+        unsigned long long at; char anchor[16]; float size, opacity, x, y; int n;
+        while (e && sscanf(e, "%llu:%15[a-z]:%f:%f:%f:%f%n", &at, anchor, &size, &opacity, &x, &y, &n) == 6) {
+            result.push_back({at, {find_name(kAnchorNames, 10, anchor, kPipBR), x, y}, size, opacity});
+            e += n;
+            if (*e != ',') break;
+            ++e;
+        }
+        return result;
+    }();
+    static size_t next = 0;
+    while (next < steps.size() && frame >= steps[next].frame) {
+        const auto& step = steps[next++];
+        pip_set_position(step.position);
+        g_pip_size = pip_clamp(step.size, 0.1f, 0.5f, 0.25f);
+        g_pip_opacity = pip_clamp(step.opacity, 0.2f, 1.0f, 1);
+        LOG("[display] test PiP: %s, %.0f%% size, %.0f%% opacity at frame %llu", kAnchorNames[step.position.anchor],
+            step.size * 100, step.opacity * 100, (unsigned long long)frame);
+    }
 }
 
 // start of a present (render thread): everything both renderers share
 PresentPlan display_plan(bool have_tv, float tw, float th, bool have_drc, float pw, float ph, float layer_w, float layer_h,
                          uint64_t frame, bool publish_input) {
     test_touch(frame);
+    test_pip(frame);
     if (have_drc) g_drc_aspect = pw / ph;
     // Preserve a requested separate-window mode across display removal. Until
     // that window returns, keep the GamePad accessible in the primary picture.
     bool window_fallback = g_mode == kDrcWindow && !g_has_drc_window && g_shown;
-    bool pip = (((g_mode == kDrcPip || g_mode == kDrcAuto) && pip_shown_now()) || window_fallback) && have_drc;
-    bool drc_only = (g_mode == kDrcGamePad ||
+    bool pip = (g_pip_preview || ((g_mode == kDrcPip || g_mode == kDrcAuto) && pip_shown_now()) || window_fallback) && have_drc;
+    bool drc_only = !g_pip_preview && (g_mode == kDrcGamePad ||
         (g_mode == kDrcAuto && gamepad_ui().available && gamepad_ui().off_tv)) && have_drc;
     float dw = 0, dh = 0;
     bool sim = sim_screen(&dw, &dh);

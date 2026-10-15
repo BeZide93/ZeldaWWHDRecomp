@@ -775,6 +775,21 @@ add_executable(display_fallback_test runtime/tools/display_fallback_test.cpp run
 target_include_directories(display_fallback_test PRIVATE runtime/src runtime/include runtime/third_party/fmt/include)
 target_compile_options(display_fallback_test PRIVATE -UNDEBUG)
 add_test(NAME display_fallback COMMAND display_fallback_test)
+add_executable(pip_placement_test runtime/tools/pip_placement_test.cpp runtime/src/gfx/display_modes.cpp)
+target_include_directories(pip_placement_test PRIVATE runtime/src runtime/include runtime/third_party/fmt/include)
+target_compile_options(pip_placement_test PRIVATE -UNDEBUG)
+add_test(NAME pip_placement COMMAND pip_placement_test)
+if(APPLE)
+  add_executable(pip_preview_ui_test runtime/tools/pip_preview_ui_test.cpp runtime/src/gfx/display_modes.cpp)
+  target_include_directories(pip_preview_ui_test PRIVATE ${IMGUI_DIR} runtime/src runtime/include
+    ${CEMU_DIR} ${CEMU_DIR}/Cafe runtime/third_party/fmt/include)
+  target_compile_options(pip_preview_ui_test PRIVATE -UNDEBUG -ffunction-sections -fdata-sections)
+  target_link_options(pip_preview_ui_test PRIVATE -Wl,-dead_strip)
+  target_link_libraries(pip_preview_ui_test PRIVATE imgui)
+  add_test(NAME pip_preview_ui COMMAND pip_preview_ui_test)
+endif()
+
+
 if(WIN32 AND WWHD_SDL_HOST)
   get_target_property(SDL3_LIBRARY_TYPE SDL3::SDL3 TYPE)
   if(SDL3_LIBRARY_TYPE STREQUAL "SHARED_LIBRARY")

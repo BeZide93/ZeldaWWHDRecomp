@@ -77,12 +77,13 @@ int drc_modes() { return gfx::kDrcModeCount; }
 bool drc_mode_offered(int m) { return m >= 0 && m < gfx::kDrcModeCount; }  // as the Display menu (window: greyed there without one)
 int drc_mode() { return gfx::display_drc_mode(); }
 void set_drc_mode(int m) { gfx::set_drc_mode(m); }
-int pip_corner() { return gfx::g_corner; }
-void set_pip_corner(int c) { gfx::display_set_pip(c, gfx::g_pip_size, gfx::g_pip_opacity); }
+void save_pip_position() { gfx::display_set_pip(gfx::g_pip_anchor, gfx::g_pip_size, gfx::g_pip_opacity); }
+int pip_anchor() { return gfx::g_pip_anchor; }
+void set_pip_anchor(int c) { gfx::display_set_pip(c, gfx::g_pip_size, gfx::g_pip_opacity); }
 float pip_size() { return gfx::g_pip_size; }
-void set_pip_size(float s) { gfx::display_set_pip(gfx::g_corner, s, gfx::g_pip_opacity); }
+void set_pip_size(float s) { gfx::display_set_pip(gfx::g_pip_anchor, s, gfx::g_pip_opacity); }
 float pip_opacity() { return gfx::g_pip_opacity; }
-void set_pip_opacity(float o) { gfx::display_set_pip(gfx::g_corner, gfx::g_pip_size, o); }
+void set_pip_opacity(float o) { gfx::display_set_pip(gfx::g_pip_anchor, gfx::g_pip_size, o); }
 bool drc_available() { return gfx::drc_window_available(); }
 bool drc_shown() { return gfx::drc_window_shown(); }
 void show_drc(bool on) { gfx::show_drc_window(on); }

@@ -5,6 +5,7 @@
 // resulting ImDrawData (gfx/overlay_metal.mm, gfx/vulkan/overlay.cpp); the hosts feed input and apply
 // changes on their main thread (hostui.h).
 #include "overlay.h"
+#include "imgui_internal.h"
 #include "pointer.h"
 #ifdef WWHD_SDL_HOST
 #include "window_target.h"
@@ -1032,11 +1033,181 @@ void tab_graphics() {
 #endif
 }
 
+// Both previews use the exact same geometry as the host compositor.
+static gfx::Box pip_tv_box() {
+    float x = 0, y = 0, w = 1, h = 1;
+    gfx::main_picture(&x, &y, &w, &h);
+    const ImVec2 ds = ImGui::GetIO().DisplaySize;
+    return {x * ds.x, y * ds.y, w * ds.x, h * ds.y};
+}
+static void pip_move(gfx::Box tv, float x, float y, bool snap = true) {
+    auto p = gfx::pip_place(tv, gfx::g_drc_aspect, gfx::g_pip_size, x, y, snap);
+    gfx::pip_set_position(p);
+}
+static void pip_diagram() {
+    const gfx::Box screen = pip_tv_box();
+    const float w = std::min(240.0f, ImGui::GetContentRegionAvail().x);
+    const ImVec2 origin = ImGui::GetCursorScreenPos();
+    const gfx::Box tv{origin.x, origin.y, w, w * screen.h / screen.w};
+    ImGui::InvisibleButton("Placement diagram", ImVec2(tv.w, tv.h), ImGuiButtonFlags_EnableNav);
+    const bool active = ImGui::IsItemActive(), focused = ImGui::IsItemFocused();
+    auto b = gfx::pip_box(tv, gfx::g_drc_aspect, gfx::g_pip_size, gfx::pip_position());
+    static ImVec2 offset;
+    if (ImGui::IsItemActivated()) {
+        const ImVec2 m = ImGui::GetIO().MousePos;
+        const bool inside = m.x >= b.x && m.x <= b.x + b.w && m.y >= b.y && m.y <= b.y + b.h;
+        offset = inside ? ImVec2(m.x - b.x - b.w / 2, m.y - b.y - b.h / 2) : ImVec2(0, 0);
+    }
+    if (active && ImGui::IsMouseDown(0)) {
+        const auto m = ImGui::GetIO().MousePos;
+        pip_move(tv, (m.x - offset.x - tv.x) / tv.w, (m.y - offset.y - tv.y) / tv.h);
+    }
+    if (ImGui::IsItemDeactivated())
+        hostui::post([] { hostui::save_pip_position(); });
+    if (focused) {
+        for (auto key :
+             {ImGuiKey_GamepadDpadLeft, ImGuiKey_GamepadDpadRight, ImGuiKey_GamepadDpadUp, ImGuiKey_GamepadDpadDown,
+              ImGuiKey_LeftArrow, ImGuiKey_RightArrow, ImGuiKey_UpArrow, ImGuiKey_DownArrow})
+            ImGui::SetKeyOwner(key, ImGui::GetItemID(), ImGuiInputFlags_LockThisFrame);
+        auto pressed = [](ImGuiKey key) {
+            return ImGui::IsKeyPressed(key, ImGuiInputFlags_Repeat, ImGui::GetItemID());
+        };
+        float dx = 0, dy = 0;
+        if (pressed(ImGuiKey_GamepadDpadLeft) || pressed(ImGuiKey_LeftArrow))
+            dx = -0.01f;
+        if (pressed(ImGuiKey_GamepadDpadRight) || pressed(ImGuiKey_RightArrow))
+            dx = 0.01f;
+        if (pressed(ImGuiKey_GamepadDpadUp) || pressed(ImGuiKey_UpArrow))
+            dy = -0.01f;
+        if (pressed(ImGuiKey_GamepadDpadDown) || pressed(ImGuiKey_DownArrow))
+            dy = 0.01f;
+        // Do not snap each step: otherwise a 1% step would stick at a preset
+        // forever.
+        if (dx || dy) {
+            pip_move(tv, (b.x - tv.x + b.w / 2) / tv.w + dx, (b.y - tv.y + b.h / 2) / tv.h + dy, false);
+            hostui::post([] { hostui::save_pip_position(); });
+        }
+    }
+    b = gfx::pip_box(tv, gfx::g_drc_aspect, gfx::g_pip_size, gfx::pip_position());
+    auto *d = ImGui::GetWindowDrawList();
+    d->AddRectFilled(origin, ImVec2(tv.x + tv.w, tv.y + tv.h), IM_COL32(18, 28, 36, 255));
+    d->AddRect(origin, ImVec2(tv.x + tv.w, tv.y + tv.h),
+               focused ? IM_COL32(255, 210, 80, 255) : IM_COL32(180, 190, 200, 255));
+    for (int a = 0; a < 9; ++a) {
+        const auto q = gfx::pip_box(tv, gfx::g_drc_aspect, gfx::g_pip_size, {a, 0, 0});
+        d->AddCircleFilled(ImVec2(q.x + q.w / 2, q.y + q.h / 2), 2, IM_COL32(180, 190, 200, 110));
+    }
+    d->AddRectFilled(ImVec2(b.x, b.y), ImVec2(b.x + b.w, b.y + b.h),
+                     IM_COL32(75, 180, 220, int(255 * gfx::g_pip_opacity)));
+    d->AddRect(ImVec2(b.x, b.y), ImVec2(b.x + b.w, b.y + b.h), IM_COL32(235, 245, 255, 255));
+    note("Tap or drag to place. Focus the diagram and use the D-pad to move.");
+}
+static void pip_live_drag() {
+    if (!gfx::g_pip_preview)
+        return;
+    const auto tv = pip_tv_box();
+    const auto b = gfx::pip_box(tv, gfx::g_drc_aspect, gfx::g_pip_size, gfx::pip_position());
+    ImGui::SetNextWindowPos(ImVec2(b.x, b.y));
+    ImGui::SetNextWindowSize(ImVec2(b.w, b.h));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+    const auto flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoMove |
+                       ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoFocusOnAppearing;
+    ImGui::Begin("##pip_live_drag", nullptr, flags);
+    ImGui::InvisibleButton("##drag", ImVec2(b.w, b.h));
+    static ImVec2 offset;
+    if (ImGui::IsItemActivated()) {
+        const auto m = ImGui::GetIO().MousePos;
+        offset = ImVec2(m.x - b.x - b.w / 2, m.y - b.y - b.h / 2);
+    }
+    if (ImGui::IsItemActive() && ImGui::IsMouseDown(0)) {
+        const auto m = ImGui::GetIO().MousePos;
+        pip_move(tv, (m.x - offset.x - tv.x) / tv.w, (m.y - offset.y - tv.y) / tv.h);
+    }
+    if (ImGui::IsItemDeactivated())
+        hostui::post([] { hostui::save_pip_position(); });
+    ImGui::GetForegroundDrawList()->AddRect(ImVec2(b.x, b.y), ImVec2(b.x + b.w, b.y + b.h), IM_COL32(255, 220, 90, 255),
+                                            0, 1.5f);
+    ImGui::End();
+    ImGui::PopStyleVar();
+}
+
 void tab_display() {
     bool v;
+    heading("GamePad screen");
+#ifdef __ANDROID__
+    if (check("Swap TV and GamePad displays", hostui::displays_swapped(), &v))
+        hostui::post([v] { hostui::set_displays_swapped(v); });
+#endif
+    // the modes of display_modes.h; a host offers those it can show (no "Separate
+    // window" without one, as on Android)
+    const int mode = hostui::drc_mode();
+    if (hostui::drc_modes() >= 4) {
+        static const char* const modes[] = {"Separate window", "Picture-in-picture", "Automatic picture-in-picture", "Off", "GamePad only"};
+        if (ImGui::BeginCombo("View", modes[mode])) {
+            for (int i=0; i<5; ++i) {
+                if (hostui::drc_mode_offered(i) && ImGui::Selectable(modes[i],mode==i))
+                    hostui::post([i] { hostui::set_drc_mode(i); });
+            }
+            ImGui::EndCombo();
+        }
+        if (mode == 2)
+            note("Shows GamePad menus while open and follows Off-TV Play.");
+        if (mode == 4)
+            note("Only the GamePad picture. In the game, Minus switches to Off-TV "
+                 "Play (the game on the GamePad).");
+    }
+    if (check(mode == 2 ? "Pin GamePad picture-in-picture" : "Show GamePad screen", hostui::drc_shown(), &v,
+              hostui::drc_available() && !(hostui::drc_modes() >= 4 && (mode == 3 || mode == 4))))
+        hostui::post([v] { hostui::show_drc(v); });
+    if (hostui::drc_modes() >= 4 && (mode == 1 || mode == 2 || mode == 3)) {
+        bool eligible = true;
+#ifdef __ANDROID__
+        eligible = !gfx::g_has_drc_window;
+#endif
+        if (eligible && ImGui::CollapsingHeader("Picture-in-picture placement", ImGuiTreeNodeFlags_DefaultOpen)) {
+            gfx::g_pip_preview = true;
+            static const char *const names[] = {"Top left",     "Top centre",   "Top right",   "Centre left",
+                                                "Centre",       "Centre right", "Bottom left", "Bottom centre",
+                                                "Bottom right", "Custom"};
+            if (ImGui::BeginCombo("Position", names[hostui::pip_anchor()])) {
+                for (int i = 0; i < 10; ++i)
+                    if (ImGui::Selectable(names[i], hostui::pip_anchor() == i))
+                        hostui::post([i] { hostui::set_pip_anchor(i); });
+                ImGui::EndCombo();
+            }
+            pip_diagram();
+            int size = int(std::round(hostui::pip_size() * 100));
+            if (ImGui::SliderInt("Size (%)", &size, 10, 50, "%d%%", ImGuiSliderFlags_AlwaysClamp))
+                hostui::post([size] { hostui::set_pip_size(size / 100.0f); });
+            ImGui::SetNextItemWidth(120);
+            if (ImGui::InputInt("Exact size (%)", &size, 1, 5)) {
+                size = std::clamp(size, 10, 50);
+                hostui::post([size] { hostui::set_pip_size(size / 100.0f); });
+            }
+            for (int v : {20, 25, 33, 40}) {
+                if (v != 20)
+                    ImGui::SameLine();
+                char label[24];
+                snprintf(label, sizeof label, "%d%%##pipSize", v);
+                if (ImGui::Button(label))
+                    hostui::post([v] { hostui::set_pip_size(v / 100.0f); });
+            }
+            int opacity = int(std::round(hostui::pip_opacity() * 100));
+            if (ImGui::SliderInt("Opacity (%)", &opacity, 20, 100, "%d%%", ImGuiSliderFlags_AlwaysClamp))
+                hostui::post([opacity] { hostui::set_pip_opacity(opacity / 100.0f); });
+            ImGui::SetNextItemWidth(120);
+            if (ImGui::InputInt("Exact opacity (%)", &opacity, 1, 5)) {
+                opacity = std::clamp(opacity, 20, 100);
+                hostui::post([opacity] { hostui::set_pip_opacity(opacity / 100.0f); });
+            }
+            note("Ctrl+click a slider to type an exact percentage. The game picture "
+                 "previews changes while this section is open.");
+        }
+    }
     heading("Window");
-    if (check("Full screen", hostui::fullscreen(), &v)) hostui::post([v] { hostui::set_fullscreen(v); });
-#ifndef __ANDROID__  // always full screen there
+    if (check("Full screen", hostui::fullscreen(), &v))
+        hostui::post([v] { hostui::set_fullscreen(v); });
+#ifndef __ANDROID__ // always full screen there
     help(!strcmp(hostui::name(), "AppKit") ? "The TV window (Cmd+F); remembered for the next start"
                                            : "The TV window (F11 or Alt+Enter); remembered for the next start");
 #endif
@@ -1044,78 +1215,37 @@ void tab_display() {
     heading("Interface");
     int uiSize = g_ui_size;
     if (combo("UI size", &uiSize, "Automatic\0Small\0Medium\0Large\0"))
-        hostui::post([uiSize] { g_ui_size = uiSize; hostui::set("uiSize", std::to_string(uiSize)); });
-    help("Automatic adapts Settings to your Android device's screen. Choose Small, Medium or Large to adjust the controls.");
+        hostui::post([uiSize] {
+            g_ui_size = uiSize;
+            hostui::set("uiSize", std::to_string(uiSize));
+        });
+    help("Automatic adapts Settings to your Android device's screen. Choose "
+         "Small, Medium or Large to adjust the controls.");
     heading("Touch controls");
     int touchMode = gfx::g_touch_buttons;
     if (combo("Touch buttons", &touchMode, "Automatic\0Always show\0Hide\0"))
-        hostui::post([touchMode] { gfx::g_touch_buttons = touchMode; hostui::set("touchButtons", std::to_string(touchMode)); });
-    help("Automatic hides the floating buttons while a controller is connected. Tap near the top-left corner to reveal them for five seconds.");
+        hostui::post([touchMode] {
+            gfx::g_touch_buttons = touchMode;
+            hostui::set("touchButtons", std::to_string(touchMode));
+        });
+    help("Automatic hides the floating buttons while a controller is connected. "
+         "Tap near the top-left corner to reveal them for five seconds.");
     if (check("On-screen controls", gfx::g_touch_controls, &v))
-        hostui::post([v] { gfx::g_touch_controls = v; hostui::set("touchControls", v ? "1" : "0"); });
+        hostui::post([v] {
+            gfx::g_touch_controls = v;
+            hostui::set("touchControls", v ? "1" : "0");
+        });
 #endif
     heading("Picture scaling");
-    static const char* const f[] = {"Smooth", "Sharp", "Integer scale (pixel exact)"};
+    static const char *const f[] = {"Smooth", "Sharp", "Integer scale (pixel exact)"};
     const bool fok = hostui::scale_filter_available();
     for (int i = 0; i < 3; i++) {
-        if (i) ImGui::SameLine();
-        if (radio(f[i], hostui::scale_filter() == i, fok)) hostui::post([i] { hostui::set_scale_filter(i); });
-    }
-    heading("GamePad screen");
-#ifdef __ANDROID__
-    if (check("Swap TV and GamePad displays", hostui::displays_swapped(), &v))
-        hostui::post([v] { hostui::set_displays_swapped(v); });
-#endif
-    // the modes of display_modes.h; a host offers those it can show (no "Separate window" without one,
-    // as on Android)
-    const int mode = hostui::drc_mode();
-    if (hostui::drc_modes() >= 4) {
-        static const char* const modes[] = {"Separate window", "Picture-in-picture", "Automatic picture-in-picture", "Off",
-                                            "GamePad only"};
-        bool first = true;
-        for (int i = 0; i < hostui::drc_modes() && i < 5; i++) {
-            if (!hostui::drc_mode_offered(i)) continue;
-#ifndef __ANDROID__
-            if (!first) ImGui::SameLine();
-#endif
-            first = false;
-            if (radio(modes[i], mode == i)) hostui::post([i] { hostui::set_drc_mode(i); });
-        }
-        if (mode == 2) note("Shows GamePad menus while open and follows Off-TV Play.");
-        if (mode == 4) note("Only the GamePad picture. In the game, Minus switches to Off-TV Play (the game on the GamePad).");
-    }
-    if (check(mode == 2 ? "Pin GamePad picture-in-picture" : "Show GamePad screen", hostui::drc_shown(), &v,
-              hostui::drc_available() && !(hostui::drc_modes() >= 4 && (mode == 3 || mode == 4))))
-        hostui::post([v] { hostui::show_drc(v); });
-    if (hostui::drc_modes() >= 4 && (mode == 1 || mode == 2)) {
-        // the overlay's corner, size and opacity (also in the Display menu on macOS)
-        static const char* const corners[] = {"Top left", "Top right", "Bottom left", "Bottom right"};
-        ImGui::AlignTextToFramePadding();
-        ImGui::TextUnformatted("Picture-in-picture corner:");
-        for (int i = 0; i < 4; i++) {
-#ifndef __ANDROID__
+        if (i)
             ImGui::SameLine();
-#endif
-            if (radio(corners[i], hostui::pip_corner() == i)) hostui::post([i] { hostui::set_pip_corner(i); });
-        }
-        ImGui::AlignTextToFramePadding();
-        ImGui::TextUnformatted("Size (of the TV picture's width):");
-        for (int s : {20, 25, 33, 40}) {
-            ImGui::SameLine();
-            char l[16];
-            snprintf(l, sizeof l, "%d%%##size", s);
-            if (radio(l, std::fabs(hostui::pip_size() * 100 - s) < 0.5f)) hostui::post([s] { hostui::set_pip_size(s / 100.0f); });
-        }
-        ImGui::AlignTextToFramePadding();
-        ImGui::TextUnformatted("Opacity:");
-        for (int o : {100, 85, 70, 50}) {
-            ImGui::SameLine();
-            char l[16];
-            snprintf(l, sizeof l, "%d%%##opacity", o);
-            if (radio(l, std::fabs(hostui::pip_opacity() * 100 - o) < 0.5f)) hostui::post([o] { hostui::set_pip_opacity(o / 100.0f); });
-        }
-        note("A click (or touch) on the GamePad picture touches the GamePad screen.");
+        if (radio(f[i], hostui::scale_filter() == i, fok))
+            hostui::post([i] { hostui::set_scale_filter(i); });
     }
+
 }
 
 mods::catalogue::Version catalogue_port_version() {
@@ -2026,8 +2156,30 @@ void settings_window() {
     const ImVec2 size = shown_builtin() == kControls ? ImVec2(std::min(1240.0f, ds.x * 0.98f), std::min(720.0f, ds.y * 0.97f))
                                            : ImVec2(std::min(860.0f, ds.x * 0.94f), std::min(620.0f, ds.y * 0.92f));
 #endif
-    ImGui::SetNextWindowPos(ImVec2(ds.x * 0.5f, ds.y * 0.5f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
-    ImGui::SetNextWindowSize(size, ImGuiCond_Always);
+    ImVec2 panelSize = size, panelPos(ds.x * 0.5f, ds.y * 0.5f);
+    bool placement = shown_builtin() == kDisplay &&
+                     (gfx::g_mode == gfx::kDrcPip || gfx::g_mode == gfx::kDrcAuto || gfx::g_mode == gfx::kDrcOff);
+#ifdef __ANDROID__
+    placement = placement && !gfx::g_has_drc_window;
+#endif
+    if (placement) {
+        const auto b = gfx::pip_box(pip_tv_box(), gfx::g_drc_aspect, gfx::g_pip_size, gfx::pip_position());
+        const float gap = 8;
+        const gfx::Box spaces[] = {
+            {0, 0, std::max(0.0f, b.x - gap), ds.y},
+            {b.x + b.w + gap, 0, std::max(0.0f, ds.x - b.x - b.w - gap), ds.y},
+            {0, 0, ds.x, std::max(0.0f, b.y - gap)},
+            {0, b.y + b.h + gap, ds.x, std::max(0.0f, ds.y - b.y - b.h - gap)}
+        };
+        auto usable = [&](gfx::Box area) { return std::min(area.w, size.x) * std::min(area.h, size.y); };
+        auto best = spaces[0];
+        for (auto area : spaces)
+            if (usable(area) > usable(best)) best = area;
+        panelSize = ImVec2(std::min(size.x, best.w), std::min(size.y, best.h));
+        panelPos = ImVec2(best.x + best.w / 2, best.y + best.h / 2);
+    }
+    ImGui::SetNextWindowPos(panelPos, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(panelSize, ImGuiCond_Always);
     ImGuiWindowFlags fl = ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
                           ImGuiWindowFlags_NoSavedSettings;
     bool open = true;
@@ -2313,6 +2465,7 @@ ImDrawData* frame(float pw, float ph, void (*renderer_init)()) {
     U.linearized = false;
     // a mod install keeps running (and shows its progress) while the menu is closed
     const bool mods_busy = !setup_run.id.empty() || (U.init && modsui::wants_background());
+    if (!open) gfx::g_pip_preview=false;
     if (!open && !perf && !text && toast.empty() && !guesthud::active() && !mods_busy && !stereoPointer && drawn_layers.empty()) {
         if (U.init) {  // forget events and pressed keys while nothing is shown
             std::lock_guard<std::mutex> lk(g_mu);
@@ -2392,8 +2545,10 @@ ImDrawData* frame(float pw, float ph, void (*renderer_init)()) {
     if (!open && !g_restart_notice.started()) restart_notice_frame(false);
     g_wants_text = open && io.WantTextInput;
     guesthud::frame();
+    gfx::g_pip_preview=false;
     if (open) settings_window();
     else modsui::background(mods_host());
+    pip_live_drag();
     if (text) {
         float pad[input_map::kPadCount];
         std::copy(std::begin(U.values), std::end(U.values), pad);
