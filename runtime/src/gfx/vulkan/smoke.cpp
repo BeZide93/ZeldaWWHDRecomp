@@ -930,6 +930,7 @@ int android_display_smoke_test() {
       const bool secondOff=gfx::g_second_screen_off;
       hostui::set_drc_mode(value[4]-'0');
       gfx::g_second_screen_off=secondOff;
+      hostui::save_pip_position();  // saves the display options again, with the player's choice
     }
     if (value == "secondary_profile1") R.secondaryProfile=true;
     if (value == "secondary_profile0") R.secondaryProfile=false;
