@@ -1,4 +1,5 @@
 #include "atomic_temporary.h"
+#include "validation_diagnostics.h"
 #include "../../audio_out.h"
 #ifndef VK_ENABLE_BETA_EXTENSIONS
 #define VK_ENABLE_BETA_EXTENSIONS
@@ -295,10 +296,17 @@ void init_pipeline_cache() try {
   if (async_pipeline_enabled()) start_pipeline_demand(R.device, {});
   LOG("[vulkan cache] load disabled after error: %s",error.what());
 }
+static ValidationDiagnostics validationDiagnostics;
 static void log_vulkan_result(VkResult result, const char* operation) {
   static std::atomic<unsigned> errors{0};
   if (result < 0 && errors.fetch_add(1) < 32)
     LOG("[vulkan result] %s: %d%s", operation, int(result), result == VK_ERROR_DEVICE_LOST ? " DEVICE_LOST" : "");
+  if (result == VK_ERROR_DEVICE_LOST) {
+    static std::atomic<bool> reported{false};
+    if (!reported.exchange(true))
+      for (const auto& message : validationDiagnostics.snapshot())
+        LOG("[vulkan retained validation] %s", message.c_str());
+  }
 }
 // profWait: also report the wait to the render-thread profiler (render_prof.h)
 template<class F> VkResult timed_call(WaitTiming& timing, F&& call, int profWait = -1) {
@@ -3045,11 +3053,13 @@ void set_tv_format(uint32_t format, bool tv) {
 static VKAPI_ATTR VkBool32 VKAPI_CALL debug_message(
     VkDebugUtilsMessageSeverityFlagBitsEXT severity, VkDebugUtilsMessageTypeFlagsEXT,
     const VkDebugUtilsMessengerCallbackDataEXT *data, void *) {
-  static std::atomic<unsigned> messages{0};
-  if (messages.fetch_add(1) >= 64) return VK_FALSE;
-  LOG("[vulkan validation %s] %s: %s",
-          severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT ? "error" : "warning",
-          data->pMessageIdName ? data->pMessageIdName : "validation", data->pMessage);
+  const std::string message = std::string("[vulkan validation ") +
+      (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT ? "error" : "warning") + "] " +
+      (data->pMessageIdName ? data->pMessageIdName : "validation") + ": " +
+      (data->pMessage ? data->pMessage : "");
+  validationDiagnostics.record(message, [](std::string_view text) {
+    LOG("%.*s", int(text.size()), text.data());
+  });
   return VK_FALSE;
 }
 // Test aids for the paths of older drivers (docs/vulkan.md): WWHD_VK_FORCE_API=1.2 treats every GPU as
@@ -3264,10 +3274,23 @@ static void init_device(std::vector<const char *> extensions,
                         VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
     debug.pfnUserCallback = debug_message;
     ci.pNext = &debug;
-    if (getenv("WWHD_VK_VALIDATION") && has_extension(ies, VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME)) {
+    if (getenv("WWHD_VK_VALIDATION")) {
+      // Validation features are provided by the enabled layer; they need not be
+      // advertised by vkEnumerateInstanceExtensionProperties(nullptr, ...).
+      uint32_t validationExtensionCount = 0;
+      vk_check(vkEnumerateInstanceExtensionProperties(layer, &validationExtensionCount, nullptr),
+               "enumerate validation layer extensions");
+      std::vector<VkExtensionProperties> validationExtensions(validationExtensionCount);
+      vk_check(vkEnumerateInstanceExtensionProperties(layer, &validationExtensionCount, validationExtensions.data()),
+               "read validation layer extensions");
+      validationExtensions.resize(validationExtensionCount);
+      if (!has_extension(ies, VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME) &&
+          !has_extension(validationExtensions, VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME))
+        exception_report::raise("The validation layer does not provide VK_EXT_validation_features; synchronization validation cannot be enabled");
       extensions.push_back(VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME);
       validation.pNext = &debug;
       ci.pNext = &validation;
+      LOG("[vulkan] synchronization validation enabled");
     }
   }
   VkApplicationInfo ai{VK_STRUCTURE_TYPE_APPLICATION_INFO};
