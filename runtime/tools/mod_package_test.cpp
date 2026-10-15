@@ -343,8 +343,10 @@ int main(int argc, char** argv) {
         std::cout<<"Catalogue pilots install/trust/source/options/real Python tool/remove passed\n";return 0;
     }
     // stands in for Python: the tool must be started with -B (no __pycache__ in the package)
-    if(argc==6&&std::string(argv[1])=="--setup-tool"&&std::string(argv[2])=="-B") {
-        ++argv;
+    // python -B -c <bootstrap that puts the tool's folder on sys.path (#224)> tool data source
+    if(argc==8&&std::string(argv[1])=="--setup-tool"&&std::string(argv[2])=="-B"&&std::string(argv[3])=="-c"&&
+       std::string(argv[4]).find("sys.path.insert(0,os.path.dirname(os.path.abspath(s)))")!=std::string::npos) {
+        argv+=3;
         std::ifstream input(argv[2]);std::string script{std::istreambuf_iterator<char>(input),{}};
         std::cout<<"Source: "<<argv[4]<<"\n";
         if(script.find("fail")!=std::string::npos||std::getenv("WWHD_TEST_SETUP_FAILURE")){

@@ -7,6 +7,9 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Mods on Windows:** a mod's preparation tool can now load its own helper files there too (the port's Python on
+  Windows didn't look next to the tool). This stopped the GC minimap from installing on Windows; gc-minimap 0.2.2
+  also fixes it on its own for v0.3.0 (#224).
 - **macOS setup:** when macOS points to another developer folder than the installed Command Line Tools (a removed
   Xcode, or one whose license hasn't been accepted), setup now uses the installed tools directly instead of waiting
   forever, and says what to do if they still can't be used (#219).

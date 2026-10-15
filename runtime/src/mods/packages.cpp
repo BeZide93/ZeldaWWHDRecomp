@@ -776,6 +776,11 @@ bool run_setup_tool(const std::string& id,const std::string& step_id,std::string
                 // .pyc files made every later step report "Package changed" (gc-minimap's prepare tool
                 // imports its own modules)
                 command.insert(command.begin()+std::ptrdiff_t(bridge.python.size()),"-B");
+                // The Windows embeddable Python doesn't put the script's folder on sys.path, so a tool
+                // importing its own modules failed there (issue #224): run it through a bootstrap that adds it
+                command.insert(command.begin()+std::ptrdiff_t(bridge.python.size())+1,{"-c",
+                    "import os,runpy,sys;s=sys.argv[1];sys.path.insert(0,os.path.dirname(os.path.abspath(s)));"
+                    "sys.argv=sys.argv[1:];runpy.run_path(s,run_name='__main__')"});
             }
             // A failed rerun must not reuse an earlier success and leftover outputs.
             auto previous=database;database["setup_receipts"][id].object.erase(step_id);
