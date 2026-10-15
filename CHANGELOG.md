@@ -7,6 +7,12 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Android: "Share log"** in the setup app and in Graphics → Bug reports: it shares the latest game logs through
+  Android's share sheet, with your user paths removed (as in crash reports). Android now writes a log by default
+  (at most 64 MB per run), so there is one to share after a problem. The log also lists more about the GPU (driver,
+  vertex formats, limits), and Graphics → Advanced has **Force RGB vertex fallback** for testing GPUs like PowerVR
+  (#207).
+
 ## v0.3.0
 
 - **Controls: Xbox and PlayStation button prompts also with "By position"** (issue #209, thanks @jamescastells):
