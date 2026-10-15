@@ -131,6 +131,8 @@ std::vector<Event> g_events;
 // Dear ImGui reads it on the render thread when Ctrl/Cmd+V reaches a text field
 std::string g_clipboard;
 std::atomic<bool> g_wants_text{false};  // a text field of the overlay has the keyboard
+std::atomic<bool> g_shortcut_capture{false};
+std::atomic<int> g_capture_mods{0};
 std::atomic<int> g_capture_key{-2};  // remap: key pressed while capturing (-2 none, -1 cancel, -3 clear)
 std::atomic<bool> g_capturing_keys{false};
 // keys held while the overlay is open (the Controls tab lights them; the game never sees them)
@@ -177,7 +179,7 @@ ImGuiKey imgui_key(int code) {
 // ---------------------------------------------------------------- UI state (render thread)
 // the built-in tabs (extensions.h kBuiltinTabs: ids and names); the tab bar is ext::tabs(), which a
 // platform may extend (added tabs, hidden ones)
-enum Tab { kSaves, kGraphics, kDisplay, kAudio, kMods, kControls, kAbout, kTabs };
+enum Tab { kSaves, kGraphics, kDisplay, kAudio, kMods, kControls, kShortcuts, kAbout, kTabs };
 static_assert(kTabs == ext::kBuiltinCount, "a built-in tab per kBuiltinTabs entry");
 
 struct Ui {
@@ -415,6 +417,9 @@ void read_controller() {
     std::copy(std::begin(U.values), std::end(U.values), std::begin(U.prev));
     if (g_no_host) {
         std::fill(std::begin(U.values), std::end(U.values), 0.0f);
+#ifndef WWHD_SDL_HOST
+        if (getenv("WWHD_TEST_PAD")) { test_pad(U.values); poll_controller_shortcuts(U.values); }
+#endif
         return;
     }
     input::host_controller_values(U.values);
@@ -519,7 +524,7 @@ void tab_saves() {
     if (!msg.empty()) note("%s", msg.c_str());
     heading("Save states");
     const bool full = ss::full_states();
-    const char* keys = ext::features().keyboard ? " Shift+F1..F5 save in game, F2..F5 load (F1 opens this menu)." : "";
+    const char* keys = ext::features().keyboard ? " Shift+F1..F5 save in game, F6 loads slot 1, F2..F5 load slots 2..5 (F1 opens this menu)." : "";
     if (full)
         note("Full save states: the whole running game (large, contain game data: never share them).%s", keys);
     else
@@ -613,14 +618,14 @@ void tab_saves() {
 void tab_saves_screenshots() {
     heading("Screenshots");
     {
-        // the Screenshot binding (Controls tab): its keys and controller input
+        // The Screenshot shortcut and any migrated single-button controller binding.
         const input_map::Mapping m = input_map::current();
         std::string keys;
-        for (int k : m.keys[input_map::kScreenshot])
-            if (k != input_map::kNoKey) keys += (keys.empty() ? "" : " or ") + input_map::key_label(k);
+        for (auto k : m.shortcuts[input_map::kPhoto].keys)
+            if (k.code != input_map::kNoKey) keys += (keys.empty() ? "" : " or ") + input_map::shortcut_key_label(k);
         if (m.pad[input_map::kScreenshot] != input_map::kPadNone)
             keys += (keys.empty() ? "controller " : " or controller ") + std::string(input_map::pad_short_label(m.pad[input_map::kScreenshot]));
-        if (keys.empty()) note("Screenshot is not bound: set a key in the Controls tab (Screenshot).");
+        if (keys.empty()) note("Screenshot is not bound: set a key in the Shortcuts tab.");
         else note("%s in game saves the TV picture as a PNG at the internal resolution, without this menu (change the key in Controls).", keys.c_str());
     }
     bool gp;
@@ -1494,7 +1499,88 @@ void tab_mods() {
     if (h.b_used) g_pad_b_used = true;
 }
 
+void tab_shortcuts() {
+    using namespace input_map;
+    static int capture_hold = 0;
+    auto m = current();
+    note("Hold a controller button, then press a second button. Only the complete combination consumes its buttons. Tap Home always opens Settings. Using Select as a hold button reserves it for combinations.");
+    if (ImGui::Button("Reset to defaults")) {
+        m.shortcuts = shortcut_defaults();
+        m.pad[kScreenshot] = kPadNone;
+        set_current(m);
+        U.cap_action = -1; g_capturing_keys = false; capture_hold = 0;
+    }
+    if (U.cap_action >= kActionCount) {
+        int a = U.cap_action - kActionCount;
+        int code = g_capture_key.exchange(-2);
+        bool done = code == -1;
+        if (U.cap_col < 2 && code >= 0 && code < 256 && code != kVK_Shift && code != kVK_RightShift &&
+            code != kVK_Control && code != kVK_RightControl && code != kVK_Option && code != kVK_RightOption &&
+            code != kVK_Command && code != kVK_RightCommand) {
+            m.shortcuts[a].keys[U.cap_col] = {code, g_capture_mods.load() & 15};
+            done = true; set_current(m);
+        }
+        if (U.cap_col == 2 && !done) {
+            // Wait for the button that activated the UI to be released before capturing a hold.
+            int& hold = capture_hold;
+            if (U.binding_capture.poll(U.values) > 0 && !hold)
+                for (int p = 1; p < kPadCount; ++p) if (U.values[p] > 0.5f) { hold = p; break; }
+            if (hold && U.values[hold] <= 0.5f) hold = 0;
+            if (hold) for (int p = 1; p < kPadCount; ++p) if (p != hold && U.values[p] > 0.5f) {
+                m.shortcuts[a].hold = hold; m.shortcuts[a].button = p;
+                if (a == kPhoto) m.pad[kScreenshot] = kPadNone;
+                set_current(m); done = true; hold = 0; break;
+            }
+            if (done) hold = 0;
+        }
+        if (done || now_s() - U.cap_started > 15) { U.cap_action = -1; g_capturing_keys = false; capture_hold = 0; g_pad_b_used = true; }
+        else note(U.cap_col == 2 ? "Hold one button and press another; Esc cancels." : "Press a key with optional modifiers; Esc cancels.");
+    }
+    if (ImGui::BeginTable("shortcut bindings", 4, ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_RowBg)) {
+        ImGui::TableSetupColumn("Action", ImGuiTableColumnFlags_WidthStretch, 1.4f);
+        ImGui::TableSetupColumn("Key"); ImGui::TableSetupColumn("Alternate"); ImGui::TableSetupColumn("Controller");
+        ImGui::TableHeadersRow();
+        std::string group;
+        for (int a = 0; a < kShortcutCount; ++a) {
+            if (group != shortcut_info(a).group) {
+                group = shortcut_info(a).group;
+                ImGui::TableNextRow(); ImGui::TableNextColumn(); ImGui::TextUnformatted(group.c_str());
+            }
+            ImGui::PushID(a); ImGui::TableNextRow(); ImGui::TableNextColumn();
+            const bool conflict = shortcut_conflict(m, a);
+            if (conflict) ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 0.45f, 0.3f, 1));
+            ImGui::TextWrapped("%s%s", shortcut_info(a).name, conflict ? " (conflict)" : "");
+            if (conflict) ImGui::PopStyleColor();
+            for (int col = 0; col < 3; ++col) {
+                ImGui::TableNextColumn(); ImGui::PushID(col);
+                const auto& b = m.shortcuts[a];
+                std::string label = col < 2 ? shortcut_key_label(b.keys[col]) :
+                    b.hold ? "Hold " + std::string(pad_short_label(b.hold)) + " + " + pad_short_label(b.button) :
+                    a == kPhoto && m.pad[kScreenshot] ? std::string(pad_short_label(m.pad[kScreenshot])) + " (legacy)" : "Unbound";
+                if (U.cap_action == kActionCount + a && U.cap_col == col) label = "Press...";
+                if (ImGui::Button(label.c_str(), ImVec2(-FLT_MIN, 0)) && U.cap_action < 0) {
+                    U.cap_action = kActionCount + a; U.cap_col = col; U.cap_started = now_s();
+                    U.binding_capture.reset(); capture_hold = 0; g_capture_key = -2; g_shortcut_capture = true; g_capturing_keys = true;
+                }
+                bool clear = ImGui::IsItemClicked(ImGuiMouseButton_Right);
+                if (ImGui::BeginPopupContextItem("binding")) { clear |= ImGui::MenuItem("Clear"); ImGui::EndPopup(); }
+                if (label != "Unbound" && ImGui::SmallButton("Clear")) clear = true;
+                if (clear) {
+                    if (col < 2) m.shortcuts[a].keys[col] = {};
+                    else { m.shortcuts[a].hold = m.shortcuts[a].button = 0; if (a == kPhoto) m.pad[kScreenshot] = 0; }
+                    if (settings_reachable(m)) set_current(m);
+                    U.cap_action = -1; g_capturing_keys = false; capture_hold = 0;
+                }
+                ImGui::PopID();
+            }
+            ImGui::PopID();
+        }
+        ImGui::EndTable();
+    }
+}
+
 void start_capture(int a, int col) {
+    g_shortcut_capture = false;
     U.cap_action = a;
     U.cap_col = col;
     U.binding_capture.reset();
@@ -1570,7 +1656,7 @@ void controls_list(input_map::Mapping& m, float h) {
         ImGui::TableSetupColumn("Key 2");
         ImGui::TableSetupColumn("Controller");
         ImGui::TableHeadersRow();
-        for (int a = 0; a < input_map::kActionCount; a++) {
+        for (int a = 0; a < input_map::kScreenshot; a++) {
             ImGui::PushID(a);
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
@@ -1864,7 +1950,7 @@ void tab_controls() {
         static bool keys[256];
         for (int i = 0; i < 256; i++) keys[i] = g_held_keys[i].load(std::memory_order_relaxed);
         cv.keys = keys;
-        for (int a = 0; a < input_map::kActionCount; a++) {
+        for (int a = 0; a < input_map::kScreenshot; a++) {
             float x = 0;
             for (int key : m.keys[a])
                 if (key != input_map::kNoKey && keys[key]) x = 1;
@@ -2227,6 +2313,7 @@ void settings_window() {
                     case kAudio: tab_audio(); break;
                     case kMods: tab_mods(); break;
                     case kControls: tab_controls(); break;
+                    case kShortcuts: tab_shortcuts(); break;
                     case kAbout: tab_about(); break;
                     default: if (tabs[i].draw) tabs[i].draw(); break;  // an added tab
                     }
@@ -2254,16 +2341,74 @@ void settings_window() {
 // ---------------------------------------------------------------- API
 bool is_open() { return g_open.load(std::memory_order_relaxed); }
 static std::atomic<bool> g_shortcut_took{false};  // a platform shortcut took a poll's input (shortcut_took_input)
+void activate_shortcut(int action, KeyOrigin origin) {
+    using namespace input_map;
+    if (action < 0 || action >= kShortcutCount) return;
+    if (action == kSettings) { set_open(!is_open(), OpenReason::F1, origin); return; }
+    LOG("[shortcuts] %s", shortcut_info(action).id);
+    hostui::post([action] {
+        if (action >= kSave1 && action <= kSave5) { ss::request_save(action - kSave1 + 1); return; }
+        if (action >= kLoad1 && action <= kLoad5) { ss::request_load(action - kLoad1 + 1); return; }
+        switch (action) {
+        case kFullscreen: hostui::set_fullscreen(!hostui::fullscreen()); break;
+        case kPhoto: screenshot::request(); break;
+        case kResolution: {
+            const float scales[] = {1, 1.5f, 2, 3};
+            float next = scales[0];
+            for (float scale : scales) if (scale > hostui::res_scale() + 0.01f) { next = scale; break; }
+            hostui::set_res_scale(next); break;
+        }
+        case kAO: if (render::feature_available(render::kFeatureAO)) render::set_ao_mode((render::ao_mode() + 1) % 3); break;
+        case kAOHires: if (render::feature_available(render::kFeatureAOHires)) render::set_ao_hires(!render::ao_hires()); break;
+        case kAniso: if (render::feature_available(render::kFeatureAniso)) render::set_aniso(!render::aniso()); break;
+        case kInterpolation: interp::toggle_fps(60); break;
+        case kTrue60: interp::set_mode(interp::mode() == 2 ? 0 : 2); break;
+        case kFXAA: if (render::feature_available(render::kFeatureFXAA)) render::set_fxaa(!render::fxaa()); break;
+        case kPiP:
+            if (hostui::drc_mode() != gfx::kDrcPip) { hostui::set_drc_mode(gfx::kDrcPip); hostui::show_drc(true); }
+            else hostui::show_drc(!hostui::drc_shown());
+            break;
+        case kPerformance: set_perf_shown(!perf_shown()); break;
+        case kMute: {
+            static float before = 1;
+            float v = audio::master_volume(); if (v > 0) before = v;
+            audio::set_master_volume(v > 0 ? 0 : before); break;
+        }
+        case kVolumeDown: audio::set_master_volume(std::max(0.0f, audio::master_volume() - 0.05f)); break;
+        case kVolumeUp: audio::set_master_volume(std::min(1.0f, audio::master_volume() + 0.05f)); break;
+        default: break;
+        }
+        hostui::graphics_changed();
+    });
+}
 void poll_controller_shortcuts(const float* values) {
-    if (g_no_host) return;
+    if (g_no_host && !getenv("WWHD_TEST_PAD")) return;
     PadValues pad;
     std::copy(values, values + input_map::kPadCount, pad.begin());
     // the platform's shortcuts (extensions.h) first: the inputs one takes stay from the settings shortcut
     // until released, and from the game (shortcut_took_input)
     if (!ext::shortcuts().empty() && ext::poll_shortcuts(pad, is_open())) g_shortcut_took = true;
+    static input_map::ShortcutPoll bindings;
+    const auto m = input_map::current();
+    const PadValues available = pad;
+    const auto pressed = bindings.poll(m, available.data(), pad.data());
+    if (!captures()) for (int a : pressed) activate_shortcut(a);
+    else for (int a : pressed) if (a == input_map::kSettings && !g_capturing_keys.load()) activate_shortcut(a);
     static SettingsShortcut shortcut;
-    const auto action = shortcut.poll(now_s(), pad[input_map::kPadOptions] > 0.5f,
-                                     pad[input_map::kPadHome] > 0.5f, is_open());
+    bool selectModifier = false;
+    for (const auto& b : m.shortcuts) if (b.hold == input_map::kPadOptions && b.button) selectModifier = true;
+    // If Home is itself a hold modifier, a tap still opens Settings on release. A completed
+    // combination suppresses that tap, so Home + another button does not first open the menu.
+    bool homeModifier = false;
+    for (const auto& b : m.shortcuts) if (b.hold == input_map::kPadHome && b.button) homeModifier = true;
+    static bool homeHeld = false, homeUsed = false;
+    const bool homeDown = available[input_map::kPadHome] > 0.5f;
+    if (!homeHeld && homeDown) homeUsed = false;
+    if (homeDown && pad[input_map::kPadHome] <= 0.5f) homeUsed = true;
+    const bool homeTap = homeHeld && !homeDown && !homeUsed;
+    homeHeld = homeDown;
+    const auto action = shortcut.poll(now_s(), !g_capturing_keys.load() && !selectModifier && pad[input_map::kPadOptions] > 0.5f,
+                                     !g_capturing_keys.load() && (homeModifier ? homeTap : pad[input_map::kPadHome] > 0.5f), is_open());
     if (action != SettingsShortcut::None) set_open(action == SettingsShortcut::Open, shortcut.reason());
 }
 bool shortcut_took_input() { return g_shortcut_took.exchange(false); }
@@ -2302,19 +2447,19 @@ void focus_lost() {
 
 bool key(int code, bool down, bool repeat, int mods, KeyOrigin origin) {
     if (g_no_host_keys) return false;
-    static ToggleGuard f1;
-    const bool f1_press = code == kVK_F1 && f1.press(down, repeat, now_s());
-#ifdef __APPLE__
-    // Cmd+, (the macOS settings shortcut; the AppKit host gets it as the app menu's Settings... item)
-    if (code == kVK_ANSI_Comma && (mods & kSuper) && !g_capturing_keys.load()) {
-        if (down && !repeat) set_open(!is_open(), OpenReason::API, origin);
-        return true;
-    }
+#ifdef __ANDROID__
+    if (!getenv("WWHD_ANDROID_KEYBOARD") && !captures()) return false;
 #endif
-    // F1 (no modifiers; Shift+F1 saves slot 1) toggles; Esc closes
-    if (code == kVK_F1 && !(mods & (kShift | kCtrl | kAlt | kSuper))) {
-        if (f1_press && !g_capturing_keys.load()) set_open(!is_open(), OpenReason::F1, origin);
-        if (!g_capturing_keys.load()) return true;
+#ifdef __ANDROID__
+    const int action = getenv("WWHD_ANDROID_KEYBOARD") ? input_map::shortcut_for_key(input_map::current(), code, mods) : -1;
+#else
+    const int action = input_map::shortcut_for_key(input_map::current(), code, mods);
+#endif
+    if (!g_capturing_keys.load() && action >= 0 && (action == input_map::kSettings || !captures())) {
+        static ToggleGuard settings;
+        const bool activate = action == input_map::kSettings ? settings.press(down, repeat, now_s()) : down && !repeat;
+        if (activate) activate_shortcut(action, origin);
+        return true;
     }
     if (!is_open()) {
         // the game's text prompt (text_entry.h) has the keyboard while it shows; F1 above still opens the menu
@@ -2326,8 +2471,8 @@ bool key(int code, bool down, bool repeat, int mods, KeyOrigin origin) {
     if (g_capturing_keys.load()) {
         if (down && !repeat) {
             if (code == kVK_Escape) g_capture_key = -1;
-            else if (code == kVK_Delete || code == kVK_ForwardDelete) g_capture_key = -3;
-            else g_capture_key = code;
+            else if ((code == kVK_Delete || code == kVK_ForwardDelete) && !g_shortcut_capture.load()) g_capture_key = -3;
+            else { g_capture_mods = mods; g_capture_key = code; }
         }
         return true;
     }

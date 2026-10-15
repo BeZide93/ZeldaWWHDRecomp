@@ -51,6 +51,7 @@ static double shortcutClock=0;
 // a port's controller shortcut (overlay/extensions.h) when platformShortcut: LB + RB + Select, once per
 // press; the overlay keeps the inputs it took from the settings shortcut and reports the poll as taken
 static bool platformShortcut=false,shortcutTook=false;static int platformShortcuts=0;
+namespace screenshot { bool key_down(int); }
 namespace overlay { void set_open(bool open,OpenReason,KeyOrigin){overlayOpen=open;} void focus_lost(){}
  void poll_controller_shortcuts(const float* v){static SettingsShortcut sc;static bool latched=false;
   using namespace input_map;bool select=v[kPadOptions]>0.5f;
@@ -60,7 +61,20 @@ namespace overlay { void set_open(bool open,OpenReason,KeyOrigin){overlayOpen=op
  bool shortcut_took_input(){const bool took=shortcutTook;shortcutTook=false;return took;}
  bool key(int code,bool down,bool repeat,int mods,KeyOrigin){
   if(promptShown){++promptKeys;return true;}
-  if(!menuMatrix)return false;
+  if(!menuMatrix || (!overlayOpen && (code != kVK_F1 || mods))) {
+   const int a = input_map::shortcut_for_key(input_map::current(), code, mods);
+   if (a < 0) return false;
+   if (down && !repeat) {
+    if (a >= input_map::kSave1 && a <= input_map::kSave5) ss::request_save(a-input_map::kSave1+1);
+    else if (a >= input_map::kLoad1 && a <= input_map::kLoad5) ss::request_load(a-input_map::kLoad1+1);
+    else if (a == input_map::kPhoto) screenshot::key_down(code);
+    else if (a >= input_map::kResolution && a <= input_map::kFXAA) {
+     const char keys[] = {'R','O','M','N','6','7','8'};
+     gfxvk::graphics_hotkey(keys[a-input_map::kResolution],true);
+    }
+   }
+   return true;
+  }
 #ifdef MENU112_BASELINE
   const bool press=down&&!repeat;
 #else
@@ -214,14 +228,14 @@ int main(int argc,char** argv){
   e.key.windowID=SDL_GetWindowID(window?window:game);e.key.mod=mod;e.key.repeat=repeat;input::handle_event(e);
  };
  for(int slot=1;slot<=5;++slot){
-  stateKey(slot,SDL_KMOD_NONE);assert(loadedSlot==slot&&loadRequests==slot);
+  if(slot>1){stateKey(slot,SDL_KMOD_NONE);assert(loadedSlot==slot&&loadRequests==slot-1);}
   stateKey(slot,SDL_KMOD_LSHIFT);assert(savedSlot==slot&&saveRequests==2*slot-1);
   stateKey(slot,SDL_KMOD_RSHIFT);assert(savedSlot==slot&&saveRequests==2*slot);
  }
  const int saves=saveRequests,loads=loadRequests;
  stateKey(1,SDL_KMOD_LSHIFT,true);stateKey(1,SDL_KMOD_NONE,false,controls);
  stateKey(1,SDL_KMOD_LSHIFT,false,nullptr,SDL_EVENT_KEY_UP);
- stateKey(6,SDL_KMOD_NONE);input::set_prompt_window(nullptr);stateKey(1,SDL_KMOD_NONE);
+ input::set_prompt_window(nullptr);stateKey(1,SDL_KMOD_NONE);
  assert(saveRequests==saves&&loadRequests==loads);
  input::set_prompt_window(game);input::release_keys();
  for(int slot=1;slot<=5;++slot)stateKey(slot,SDL_KMOD_NONE,true);

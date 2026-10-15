@@ -151,21 +151,108 @@ int key_from_id(const std::string& id) {
 const char* reserved_key(int code) {
     // keep in sync with gfx::menu_hotkey (gfx/menu.mm)
     switch (code) {
-    case kVK_ANSI_O: return "Graphics › Ambient occlusion";
-    case kVK_ANSI_M: return "Graphics › Full-size occlusion depth";
-    case kVK_ANSI_N: return "Graphics › Anisotropic filtering";
-    case kVK_ANSI_R: return "Graphics › Internal resolution";
-    case kVK_ANSI_6: return "Graphics › 60 fps: frame interpolation";
-    case kVK_ANSI_7: return "Graphics › 60 fps: true 60";
-    case kVK_ANSI_8: return "Graphics › FXAA";
     case kVK_ANSI_9: return "Graphics › Record sound activity";
     case kVK_ANSI_P: case kVK_F12: return "Graphics › Capture frame";
-    case kVK_F1: return "the settings overlay (F1; Shift+F1 saves slot 1)";
-    case kVK_F2: case kVK_F3: case kVK_F4: case kVK_F5: return "Save States (F2-F5 load, Shift+F1-F5 save)";
     case kVK_Escape: return "cancelling a key assignment";
     case kVK_Command: case kVK_RightCommand: return "menu shortcuts (⌘)";
     default: return nullptr;
     }
+}
+
+// All host action labels and defaults live here. F6 loads slot 1: no existing binding uses it.
+static const ShortcutInfo kShortcuts[kShortcutCount] = {
+    {"Settings", "Settings", "General", {kVK_F1},
+#if defined(__APPLE__) && !defined(WWHD_SDL_HOST)
+     {kVK_ANSI_Comma, kModSuper}},
+#else
+     {}},
+#endif
+    {"Fullscreen", "Full screen", "General",
+#if defined(__APPLE__) && !defined(WWHD_SDL_HOST)
+     {kVK_ANSI_F, kModSuper}, {kVK_ANSI_F, kModCtrl | kModSuper}},
+#else
+     {kVK_F11}, {kVK_Return, kModAlt}},
+#endif
+    {"Screenshot", "Screenshot", "General", {kVK_F10}, {}},
+    {"Save1", "Save state 1", "Save states", {kVK_F1, kModShift}, {}},
+    {"Save2", "Save state 2", "Save states", {kVK_F2, kModShift}, {}},
+    {"Save3", "Save state 3", "Save states", {kVK_F3, kModShift}, {}},
+    {"Save4", "Save state 4", "Save states", {kVK_F4, kModShift}, {}},
+    {"Save5", "Save state 5", "Save states", {kVK_F5, kModShift}, {}},
+    {"Load1", "Load state 1", "Save states", {kVK_F6}, {}},
+    {"Load2", "Load state 2", "Save states", {kVK_F2}, {}},
+    {"Load3", "Load state 3", "Save states", {kVK_F3}, {}},
+    {"Load4", "Load state 4", "Save states", {kVK_F4}, {}},
+    {"Load5", "Load state 5", "Save states", {kVK_F5}, {}},
+    {"Resolution", "Internal resolution", "Graphics", {kVK_ANSI_R}, {}},
+    {"AO", "Ambient occlusion", "Graphics", {kVK_ANSI_O}, {}},
+    {"AOHires", "Full-size occlusion depth", "Graphics", {kVK_ANSI_M}, {}},
+    {"Aniso", "Anisotropic filtering", "Graphics", {kVK_ANSI_N}, {}},
+    {"Interpolation", "Frame interpolation", "Graphics", {kVK_ANSI_6}, {}},
+    {"True60", "True 60 fps", "Graphics", {kVK_ANSI_7}, {}},
+    {"FXAA", "FXAA", "Graphics", {kVK_ANSI_8}, {}},
+    {"PiP", "GamePad picture-in-picture", "Display and audio", {}, {}},
+    {"Performance", "Performance overlay", "Display and audio", {}, {}},
+    {"Mute", "Mute", "Display and audio", {}, {}},
+    {"VolumeDown", "Volume down", "Display and audio", {}, {}},
+    {"VolumeUp", "Volume up", "Display and audio", {}, {}},
+};
+const ShortcutInfo& shortcut_info(int a) { return kShortcuts[a]; }
+std::array<ShortcutBinding, kShortcutCount> shortcut_defaults() {
+    std::array<ShortcutBinding, kShortcutCount> out{};
+    for (int a = 0; a < kShortcutCount; ++a) out[a].keys = {kShortcuts[a].primary, kShortcuts[a].alternate};
+    return out;
+}
+std::string shortcut_key_label(ShortcutKey k) {
+    if (k.code == kNoKey) return "Unbound";
+    return std::string(k.mods & kModCtrl ? "Ctrl+" : "") + (k.mods & kModAlt ? "Alt+" : "") +
+        (k.mods & kModShift ? "Shift+" : "") + (k.mods & kModSuper ? "Cmd+" : "") + key_label(k.code);
+}
+int shortcut_for_key(const Mapping& m, int code, int mods) {
+    if (code == kNoKey) return -1;
+    for (int a = 0; a < kShortcutCount; ++a)
+        for (auto k : m.shortcuts[a].keys) if (k.code == code && k.mods == (mods & 15)) return a;
+    return -1;
+}
+bool settings_reachable(const Mapping& m, bool controller_settings) {
+    if (controller_settings) return true; // Home and held Select cannot be rebound away.
+    for (auto k : m.shortcuts[kSettings].keys) if (k.code >= 0 && k.code < 256 && k.code != kVK_Escape) return true;
+    const auto& b = m.shortcuts[kSettings];
+    return b.hold > 0 && b.hold < kPadCount && b.button > 0 && b.button < kPadCount && b.hold != b.button;
+}
+bool shortcut_conflict(const Mapping& m, int a) {
+    const auto& b = m.shortcuts[a];
+    for (auto k : b.keys) {
+        if (k.code == kNoKey) continue;
+        if (reserved_key(k.code)) return true;
+        // Game bindings do not test modifiers; they also conflict with a modified shortcut.
+        for (int g = 0; g < kScreenshot; ++g)
+            for (int v : m.keys[g]) if (v == k.code) return true;
+        for (int other = 0; other < kShortcutCount; ++other) if (other != a)
+            for (auto v : m.shortcuts[other].keys) if (v == k) return true;
+    }
+    if (b.hold && b.button) for (int other = 0; other < kShortcutCount; ++other) if (other != a) {
+        const auto& v = m.shortcuts[other];
+        if ((v.hold == b.hold && v.button == b.button) || (v.hold == b.button && v.button == b.hold)) return true;
+    }
+    return false;
+}
+static bool combo_down(const ShortcutBinding& b, const float* raw) {
+    return b.hold > 0 && b.hold < kPadCount && b.button > 0 && b.button < kPadCount &&
+        b.hold != b.button && raw[b.hold] > 0.5f && raw[b.button] > 0.5f;
+}
+void consume_shortcut_buttons(const Mapping& m, const float* raw, float* game) {
+    for (const auto& b : m.shortcuts) if (combo_down(b, raw)) game[b.hold] = game[b.button] = 0;
+}
+std::vector<int> ShortcutPoll::poll(const Mapping& m, const float* raw, float* game) {
+    std::vector<int> pressed;
+    for (int a = 0; a < kShortcutCount; ++a) {
+        bool down = combo_down(m.shortcuts[a], raw);
+        if (down && !held[a]) pressed.push_back(a);
+        held[a] = down;
+    }
+    consume_shortcut_buttons(m, raw, game);
+    return pressed;
 }
 
 // ---- model
@@ -446,6 +533,8 @@ bool has_conflict(const Mapping& m, int a) {
     if (a < 0 || a >= kActionCount) return false;
     for (int k : m.keys[a])
         if (k != kNoKey && !key_users(m, k, a).empty()) return true;
+    if (a < kScreenshot) for (int k : m.keys[a]) if (k != kNoKey)
+        for (const auto& b : m.shortcuts) for (auto key : b.keys) if (key.code == k) return true;
     return m.pad[a] != kPadNone && !pad_users(m, m.pad[a], a).empty();
 }
 
@@ -717,7 +806,20 @@ std::string to_json(const Mapping& m) {
              "    \"skip_controller_selection\": %s,\n    \"invert_camera_y\": %s%s",
              m.deadzone, m.left_range, m.right_range, m.skip_controller_selection ? "true" : "false", m.invert_camera_y ? "true" : "false",
              m.face_auto ? ",\n    \"face_layout\": \"auto\"" : "");
-    return o + opt + prompts + "\n  }\n}\n";
+    o += opt + prompts + "\n  },\n  \"shortcuts\": {\n";
+    for (int a = 0; a < kShortcutCount; ++a) {
+        const auto& b = m.shortcuts[a];
+        o += "    " + quote(shortcut_info(a).id) + ": {\"keys\": [";
+        for (int slot = 0; slot < 2; ++slot) {
+            if (slot) o += ", ";
+            const auto k = b.keys[slot];
+            o += "{\"key\": " + (k.code == kNoKey ? std::string("null") : quote(key_id(k.code))) +
+                ", \"modifiers\": " + std::to_string(k.mods) + "}";
+        }
+        o += "], \"hold\": " + quote(pad_id(b.hold)) + ", \"button\": " + quote(pad_id(b.button)) + "}";
+        o += a + 1 < kShortcutCount ? ",\n" : "\n";
+    }
+    return o + "  }\n}\n";
 }
 
 bool from_json(const std::string& text, Mapping& out, std::string* error) {
@@ -796,6 +898,32 @@ bool from_json(const std::string& text, Mapping& out, std::string* error) {
             else if (n->s != "auto") warn += "unknown shoulder_names \"" + n->s + "\"; ";
         }
         if (const Json* c = op->get("button_colours"); c && c->type == Json::Bool) m.prompt_colours = c->b;
+    }
+    // Migration is one-way: an explicit shortcuts.Screenshot wins over the old Photo row.
+    for (int i = 0; i < 2; ++i) m.shortcuts[kPhoto].keys[i] = {m.keys[kScreenshot][i], 0};
+    // Legacy single-button controller screenshots retain their original path.
+    if (const Json* sc = root.get("shortcuts"); sc && sc->type == Json::Obj) {
+        for (int a = 0; a < kShortcutCount; ++a) {
+            const Json* v = sc->get(shortcut_info(a).id);
+            if (!v || v->type != Json::Obj) continue;
+            auto& b = m.shortcuts[a];
+            if (const Json* keys = v->get("keys"); keys && keys->type == Json::Arr) {
+                b.keys = {};
+                for (size_t i = 0; i < keys->arr.size() && i < 2; ++i) {
+                    const auto& e = keys->arr[i];
+                    const auto* key = e.get("key"); const auto* mods = e.get("modifiers");
+                    if (key && key->type == Json::Str) {
+                        int code = key_from_id(key->s);
+                        if (code >= 0 && code < (a == kPhoto ? kInputCount : 256) && code != kVK_Escape) b.keys[i].code = code;
+                    }
+                    if (mods && mods->type == Json::Num && mods->n >= 0 && mods->n <= 15 && std::floor(mods->n) == mods->n)
+                        b.keys[i].mods = int(mods->n);
+                }
+            }
+            if (const Json* h = v->get("hold"); h && h->type == Json::Str) b.hold = std::max(0, pad_from_id(h->s));
+            if (const Json* h = v->get("button"); h && h->type == Json::Str) b.button = std::max(0, pad_from_id(h->s));
+            if (!b.hold || !b.button || b.hold == b.button) b.hold = b.button = kPadNone;
+        }
     }
     out = m;
     if (error) *error = warn;
@@ -911,7 +1039,14 @@ Mapping current() {
     return g_map;
 }
 
-void set_current(const Mapping& m, bool save) {
+void set_current(const Mapping& requested, bool save) {
+    Mapping m = requested;
+    {
+        std::lock_guard<std::mutex> lk(g_mu);
+        if (m.shortcuts[kPhoto] == g_map.shortcuts[kPhoto] && m.keys[kScreenshot] != g_map.keys[kScreenshot])
+            for (int i = 0; i < 2; ++i) m.shortcuts[kPhoto].keys[i] = {m.keys[kScreenshot][i], 0};
+    }
+
     {
         std::lock_guard<std::mutex> lk(g_mu);
         g_map = m;

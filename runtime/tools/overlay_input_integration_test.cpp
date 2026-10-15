@@ -22,20 +22,27 @@ void log_msg(const char* format,...) {
  char line[2048];va_list args;va_start(args,format);vsnprintf(line,sizeof line,format,args);va_end(args);
  logs.emplace_back(line);
 }
-namespace audio { void flush(){} }
+namespace audio { void flush(){} float master_volume(){return 1;} void set_master_volume(float,bool){} }
 namespace ss { void request_save(int){++saves;} void request_load(int){++loads;} }
-namespace render { uint64_t frame_count(){return 42;} Api active(){return Api::Vulkan;} }
+namespace render { const Backend* g_backend = nullptr; uint64_t frame_count(){return 42;} Api active(){return Api::Vulkan;} }
 namespace gx2 { void checkpoint_vulkan_caches(){} }
 namespace gfxvk { bool graphics_hotkey(char,bool){return false;} }
 namespace aspect { void set_window_aspect(float){} }
 namespace mods { double game_time(){return 0;} void filter_pad(input::PadState&){} bool mouse_camera(){return false;} bool first_person_wheel(){return false;} void mouse_button(int,bool){} void mouse_add(float,float){} void mouse_wheel(float){} void fast_forward_reset(){} void lock_on_reset(){} }
-namespace interp { void set_mode(int){} uint64_t logic_steps(){return 0;} }
+namespace interp { int mode(){return 0;} void toggle_fps(int){} void set_mode(int){} uint64_t logic_steps(){return 0;} }
 namespace timebase { uint64_t now(){return 0;} }
 namespace true60 { uint64_t link_steps(){return 0;} bool state_loaded(){return false;} }
 namespace true60_test { void set_origin_step(uint64_t){} void tick(double,bool){} }
 namespace text_entry { bool active(){return prompt;} void text(const char*){} void preedit(const char*){} void key(int,bool,bool){++promptKeys;} }
-namespace hostui { void graphics_changed(){} }
-namespace screenshot { bool key_down(int){return false;} void poll_controller(const float*){} }
+namespace hostui {
+ void graphics_changed(){} void post(std::function<void()> fn){fn();}
+ bool fullscreen(){return false;} void set_fullscreen(bool){}
+ float res_scale(){return 1;} void set_res_scale(float){}
+ int drc_mode(){return 0;} void set_drc_mode(int){} bool drc_shown(){return true;} void show_drc(bool){}
+ void set(const char*,const std::string&){}
+}
+static int shots = 0;
+namespace screenshot { void request(){++shots;} bool key_down(int){return false;} void poll_controller(const float*){} }
 
 static void event_key(SDL_Window* window,SDL_Scancode key,bool down,SDL_Keymod mods=SDL_KMOD_NONE,bool repeat=false) {
  SDL_Event e{};e.type=down?SDL_EVENT_KEY_DOWN:SDL_EVENT_KEY_UP;e.key.windowID=SDL_GetWindowID(window);
@@ -226,6 +233,41 @@ int main(int argc,char** argv){
 #else
  assert(saves==5&&loads==4);
 #endif
+ event_key(tv,SDL_SCANCODE_F6,true);assert(loads == 5);
+ event_key(tv,SDL_SCANCODE_F10,true);assert(shots == 1);
+ auto remapped = input_map::current();
+ remapped.shortcuts[input_map::kPhoto].keys = {{{kVK_F9,input_map::kModCtrl}, {}}};
+ remapped.shortcuts[input_map::kPhoto].hold = input_map::kPadOptions;
+ remapped.shortcuts[input_map::kPhoto].button = input_map::kPadDUp;
+ input_map::set_current(remapped, false);
+ event_key(tv,SDL_SCANCODE_F10,true);assert(shots == 1);
+ event_key(tv,SDL_SCANCODE_F9,true,SDL_KMOD_CTRL);assert(shots == 2);
+ event_key(tv,SDL_SCANCODE_F9,true);assert(shots == 2);
+ pad[input_map::kPadOptions]=1;pad[input_map::kPadDUp]=1;
+ overlay::poll_controller_shortcuts(pad);assert(shots == 3 && !overlay::is_open());
+ overlay::poll_controller_shortcuts(pad);assert(shots == 3);
+ float game[input_map::kPadCount];std::copy(std::begin(pad),std::end(pad),game);
+ input_map::consume_shortcut_buttons(remapped,pad,game);
+ assert(!game[input_map::kPadOptions]&&!game[input_map::kPadDUp]);
+ pad[input_map::kPadDUp]=0;overlay::poll_controller_shortcuts(pad);
+ pad[input_map::kPadOptions]=0;overlay::poll_controller_shortcuts(pad);
+ remapped.shortcuts[input_map::kPhoto].hold = input_map::kPadHome;
+ input_map::set_current(remapped, false);
+ pad[input_map::kPadHome]=1;overlay::poll_controller_shortcuts(pad);assert(!overlay::is_open());
+ pad[input_map::kPadDUp]=1;overlay::poll_controller_shortcuts(pad);assert(shots == 4 && !overlay::is_open());
+ pad[input_map::kPadDUp]=pad[input_map::kPadHome]=0;overlay::poll_controller_shortcuts(pad);assert(!overlay::is_open());
+ pad[input_map::kPadHome]=1;overlay::poll_controller_shortcuts(pad);assert(!overlay::is_open());
+ pad[input_map::kPadHome]=0;overlay::poll_controller_shortcuts(pad);assert(overlay::is_open());
+ event_key(tv,SDL_SCANCODE_ESCAPE,true);assert(!overlay::is_open());
+ remapped.shortcuts[input_map::kPhoto].hold = input_map::kPadOptions;
+ overlay::poll_controller_shortcuts(pad);
+ remapped.shortcuts[input_map::kSettings] = {};
+ input_map::set_current(remapped, false);
+ event_key(tv,SDL_SCANCODE_F1,true);assert(!overlay::is_open());
+ pad[input_map::kPadHome]=1;overlay::poll_controller_shortcuts(pad);assert(overlay::is_open());
+ pad[input_map::kPadHome]=0;overlay::poll_controller_shortcuts(pad);
+ event_key(tv,SDL_SCANCODE_ESCAPE,true);assert(!overlay::is_open());
+ input_map::set_current(input_map::Mapping::defaults(),false);
  const int beforeSaves=saves,beforeLoads=loads;prompt=true;
  event_key(drc,SDL_SCANCODE_F1,true,SDL_KMOD_SHIFT);event_key(drc,SDL_SCANCODE_F2,true);
  assert(saves==beforeSaves&&loads==beforeLoads&&promptKeys==2);prompt=false;

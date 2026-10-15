@@ -193,6 +193,50 @@ static void choose_renderer(render::Api a) {
     }];
 }
 
+// AppKit can display one key equivalent per item. Alternate keys get adjacent items.
+static NSString* shortcut_equivalent(input_map::ShortcutKey key) {
+    if (key.code < 0) return @"";
+    const int functions[] = {kVK_F1,kVK_F2,kVK_F3,kVK_F4,kVK_F5,kVK_F6,kVK_F7,kVK_F8,
+                            kVK_F9,kVK_F10,kVK_F11,kVK_F12,kVK_F13,kVK_F14,kVK_F15,kVK_F16};
+    for (int i = 0; i < 16; ++i) if (key.code == functions[i])
+        return [NSString stringWithFormat:@"%C", (unichar)(NSF1FunctionKey + i)];
+    std::string label = input_map::key_label(key.code);
+    if (label.size() == 1) return [[NSString stringWithUTF8String:label.c_str()] lowercaseString];
+    if (key.code == kVK_Return) return @"\r";
+    if (key.code == kVK_Tab) return @"\t";
+    if (key.code == kVK_Space) return @" ";
+    return @""; // unsupported physical keys still work in the event path
+}
+static void apply_shortcut_equivalent(NSMenuItem* item, input_map::ShortcutKey key) {
+    item.keyEquivalent = shortcut_equivalent(key);
+    item.keyEquivalentModifierMask = (key.mods & input_map::kModShift ? NSEventModifierFlagShift : 0) |
+        (key.mods & input_map::kModCtrl ? NSEventModifierFlagControl : 0) |
+        (key.mods & input_map::kModAlt ? NSEventModifierFlagOption : 0) |
+        (key.mods & input_map::kModSuper ? NSEventModifierFlagCommand : 0);
+}
+@interface WWShortcutMenu : NSObject <NSMenuDelegate>
+@end
+@implementation WWShortcutMenu
+- (void)activate:(NSMenuItem*)item { overlay::activate_shortcut((int)item.tag); }
+- (void)menuNeedsUpdate:(NSMenu*)menu {
+    [menu removeAllItems];
+    const auto m = input_map::current();
+    for (int a = 0; a < input_map::kShortcutCount; ++a) {
+        const auto& info = input_map::shortcut_info(a);
+        for (int slot = 0; slot < 2; ++slot) {
+            auto key = m.shortcuts[a].keys[slot];
+            if (slot && key.code == input_map::kNoKey) continue;
+            NSString* title = [NSString stringWithUTF8String:info.name];
+            if (slot) title = [title stringByAppendingString:@" (alternate)"];
+            NSMenuItem* item = [menu addItemWithTitle:title action:@selector(activate:) keyEquivalent:@""];
+            item.tag = a; item.target = self;
+            apply_shortcut_equivalent(item, key);
+        }
+    }
+}
+@end
+static WWShortcutMenu* g_shortcut_menu;
+
 // Save States menu: items are rebuilt each time it opens (slot time and area)
 @interface WWStateMenu : NSObject <NSMenuDelegate>
 @end
@@ -218,7 +262,7 @@ static void choose_renderer(render::Api a) {
         NSMenuItem* it = [m addItemWithTitle:[NSString stringWithFormat:@"Save to slot %d  (%@)", i, label(i)] action:@selector(save:) keyEquivalent:@""];
         it.target = self;
         it.tag = i;
-        it.toolTip = [NSString stringWithFormat:@"Shortcut in game: Shift+F%d", i];
+        it.toolTip = [NSString stringWithFormat:@"Shortcut in game: %s", input_map::shortcut_key_label(input_map::current().shortcuts[input_map::kSave1 + i - 1].keys[0]).c_str()];
     }
     [m addItem:[NSMenuItem separatorItem]];
     for (int i = 1; i <= ss::kSlots; i++) {
@@ -226,7 +270,7 @@ static void choose_renderer(render::Api a) {
         it.target = self;
         it.tag = i;
         it.enabled = info[i].used && info[i].compatible;
-        it.toolTip = i == 1 ? @"In game: F1 (or \u2318,) opens the settings overlay (Saves)" : [NSString stringWithFormat:@"Shortcut in game: F%d", i];
+        it.toolTip = [NSString stringWithFormat:@"Shortcut in game: %s", input_map::shortcut_key_label(input_map::current().shortcuts[input_map::kLoad1 + i - 1].keys[0]).c_str()];
     }
     // full save states (savestate.h): off by default, for debugging
     [m addItem:[NSMenuItem separatorItem]];
@@ -348,11 +392,8 @@ static WWStateMenu* g_state_menu;
     }
     if (item.action == @selector(capture:)) return render::feature_available(render::kFeatureCapture);
     if (item.action == @selector(screenshot:)) {
-        // the Screenshot binding's key (Controls), shown in the title: it can be rebound
-        int k = input_map::current().keys[input_map::kScreenshot][0];
-        if (k == input_map::kNoKey) k = input_map::current().keys[input_map::kScreenshot][1];
-        item.title = k == input_map::kNoKey ? @"Take Screenshot"
-                                            : [NSString stringWithFormat:@"Take Screenshot (%s)", input_map::key_label(k).c_str()];
+        item.title = @"Take Screenshot";
+
     }
     if (item.action == @selector(toggleScreenshotGamePad:))
         item.state = screenshot::gamepad_too() ? NSControlStateValueOn : NSControlStateValueOff;
@@ -432,7 +473,7 @@ void install_menu(NSWindow* tv) {
             [@"Vulkan through MoltenVK (included in the release; source builds: brew install vulkan-loader molten-vk glslang). Falls back to Metal if it cannot start." stringByAppendingString:why];
         [g addItem:[NSMenuItem separatorItem]];
     }
-    [g addItemWithTitle:@"Internal resolution (R cycles)" action:nil keyEquivalent:@""].enabled = NO;
+    [g addItemWithTitle:@"Internal resolution" action:nil keyEquivalent:@""].enabled = NO;
     add(g, @"    1x (1280x720, as on Wii U)", @selector(setRes:), @"R", 0);
     add(g, @"    1.5x (1920x1080)", @selector(setRes:), @"R", 1);
     add(g, @"    2x (2560x1440)", @selector(setRes:), @"R", 2);
@@ -446,11 +487,11 @@ void install_menu(NSWindow* tv) {
     add(g, @"    21:9", @selector(setAspect:), @"", aspect::k21x9);
     add(g, @"    32:9", @selector(setAspect:), @"", aspect::k32x9);
     [g addItem:[NSMenuItem separatorItem]];
-    [g addItemWithTitle:@"Ambient occlusion (O cycles)" action:nil keyEquivalent:@""].enabled = NO;
+    [g addItemWithTitle:@"Ambient occlusion" action:nil keyEquivalent:@""].enabled = NO;
     add(g, @"    Original (as on Wii U)", @selector(setAO:), @"O", 0);
     add(g, @"    Centre fix", @selector(setAO:), @"O", 1);
     add(g, @"    Centre + noise fix", @selector(setAO:), @"O", 2);
-    add(g, @"Full-size occlusion depth (M)", @selector(toggleHires:), @"M");
+    add(g, @"Full-size occlusion depth", @selector(toggleHires:), @"M");
     [g addItem:[NSMenuItem separatorItem]];
     NSMenuItem* bloomItem = [g addItemWithTitle:@"Bloom strength" action:nil keyEquivalent:@""];
     NSMenu* bloomMenu = [[NSMenu alloc] initWithTitle:@"Bloom strength"];
@@ -461,15 +502,15 @@ void install_menu(NSWindow* tv) {
     add(bloomMenu, @"150%", @selector(setBloom:), @"", 150);
     add(bloomMenu, @"200%", @selector(setBloom:), @"", 200);
     add(g, @"16x anisotropic filtering (N)", @selector(toggleAniso:), @"N");
-    add(g, @"Edge smoothing, FXAA (8)", @selector(toggleFxaa:), @"8");
+    add(g, @"Edge smoothing, FXAA", @selector(toggleFxaa:), @"8");
     add(g, @"60 fps: frame interpolation (6)", @selector(toggleInterpFps:), @"6", 60);
     add(g, @"120 fps: frame interpolation", @selector(toggleInterpFps:), @"", 120);
     add(g, @"240 fps: frame interpolation", @selector(toggleInterpFps:), @"", 240);
     add(g, @"60 fps: true 60, game logic at 60 steps/s (7, experimental)", @selector(toggleInterp:), @"7", 2);
     [g addItem:[NSMenuItem separatorItem]];
-    add(g, @"Take Screenshot (F10)", @selector(screenshot:), @"").toolTip =
+    add(g, @"Take Screenshot", @selector(screenshot:), @"").toolTip =
         @"Saves the TV picture as a PNG (internal resolution, without the settings overlay) in the screenshots folder. "
-        @"The key can be changed in Input > Controls (Screenshot).";
+        @"The key can be changed in Settings > Shortcuts.";
     add(g, @"    Also Save the GamePad Screen", @selector(toggleScreenshotGamePad:), @"").toolTip =
         @"A second file, ..._GamePad.png, while the GamePad picture is shown (its window or the overlay)";
     add(g, @"    Open Screenshots Folder", @selector(openScreenshots:), @"");
@@ -595,6 +636,24 @@ void install_menu(NSWindow* tv) {
     winItem.submenu = wm;
     NSApp.windowsMenu = wm;  // macOS lists the open windows below
 
+    // Remappable equivalents live together, so an old native item cannot keep a removed key alive.
+    std::function<void(NSMenu*)> clearHostKeys = [&](NSMenu* menu) {
+        for (NSMenuItem* item in menu.itemArray) {
+            NSString* selector = NSStringFromSelector(item.action);
+            if ([selector isEqualToString:@"openSettings:"] || [selector isEqualToString:@"fullScreen:"] ||
+                [selector isEqualToString:@"screenshot:"] || [selector isEqualToString:@"toggleAniso:"] ||
+                [selector isEqualToString:@"toggleHires:"] || [selector isEqualToString:@"toggleFxaa:"] ||
+                [selector isEqualToString:@"toggleInterp:"] || [selector isEqualToString:@"toggleInterpFps:"] ||
+                [selector isEqualToString:@"setRes:"] || [selector isEqualToString:@"setAO:"]) item.keyEquivalent = @"";
+            if (item.submenu) clearHostKeys(item.submenu);
+        }
+    };
+    clearHostKeys(bar);
+    g_shortcut_menu = [WWShortcutMenu new];
+    NSMenu* shortcuts = [[NSMenu alloc] initWithTitle:@"Shortcuts"];
+    shortcuts.delegate = g_shortcut_menu;
+    [g_shortcut_menu menuNeedsUpdate:shortcuts];
+    [bar addItemWithTitle:@"Shortcuts" action:nil keyEquivalent:@""].submenu = shortcuts;
     NSApp.mainMenu = bar;
     install_overlay_input();  // settings overlay (F1): mouse in the TV window (overlay_appkit.mm)
     update_title();
@@ -606,6 +665,11 @@ void install_menu(NSWindow* tv) {
     });
     // live frame rate: presented frames over the last half second
     [NSTimer scheduledTimerWithTimeInterval:0.5 repeats:YES block:^(NSTimer*) {
+        static uint32_t shortcutGeneration = 0;
+        if (shortcutGeneration != input_map::generation()) {
+            shortcutGeneration = input_map::generation();
+            [g_shortcut_menu menuNeedsUpdate:shortcuts];
+        }
         static uint64_t last = gx2::flips_presented();
         static CFAbsoluteTime t0 = CFAbsoluteTimeGetCurrent();
         uint64_t n = gx2::flips_presented();
@@ -625,20 +689,7 @@ void menu_options_changed() { update_title(); }
 // single-key shortcuts from the game window; true if the key was used
 bool menu_hotkey(uint16_t code) {
     switch (code) {
-    case kVK_ANSI_O: if (render::feature_available(render::kFeatureAO)) render::set_ao_mode((render::ao_mode() + 1) % 3); break;
-    case kVK_ANSI_N: if (render::feature_available(render::kFeatureAniso)) render::set_aniso(!render::aniso()); break;
-    case kVK_ANSI_M: if (render::feature_available(render::kFeatureAOHires)) render::set_ao_hires(!render::ao_hires()); break;
-    case kVK_ANSI_6: interp::toggle_fps(60); break;
-    case kVK_ANSI_7: interp::set_mode(interp::mode() == 2 ? 0 : 2); break;
-    case kVK_ANSI_8: if (render::feature_available(render::kFeatureFXAA)) render::set_fxaa(!render::fxaa()); break;
-    case kVK_ANSI_R: cycle_res(); break;
     case kVK_ANSI_P: case kVK_F12: render::request_capture(); return true;
-    case kVK_F1: case kVK_F2: case kVK_F3: case kVK_F4: case kVK_F5: {
-        int slot = code == kVK_F1 ? 1 : code == kVK_F2 ? 2 : code == kVK_F3 ? 3 : code == kVK_F4 ? 4 : 5;
-        if ([NSEvent modifierFlags] & NSEventModifierFlagShift) ss::request_save(slot);
-        else if (slot != 1) ss::request_load(slot);  // F1: the settings overlay (overlay_appkit.mm)
-        return true;
-    }
     case kVK_ANSI_9: {
         // 3 s of sound activity (voice starts), without the frame capture's stall
         char path[96];

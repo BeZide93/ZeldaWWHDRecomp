@@ -33,7 +33,7 @@ struct BuiltinTab {
 };
 inline constexpr BuiltinTab kBuiltinTabs[] = {
     {"saves", "Saves"}, {"graphics", "Graphics"}, {"display", "Display"}, {"audio", "Audio"},
-    {"mods", "Mods"},   {"controls", "Controls"}, {"about", "Language / About"},
+    {"mods", "Mods"},   {"controls", "Controls"}, {"shortcuts", "Shortcuts"}, {"about", "Language / About"},
 };
 inline constexpr int kBuiltinCount = int(sizeof kBuiltinTabs / sizeof kBuiltinTabs[0]);
 

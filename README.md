@@ -409,8 +409,7 @@ those languages from your own European or Japanese copy of the game played with 
 into Arabic or Hebrew are drawn right to left, see [docs/rtl-text.md](docs/rtl-text.md)).
 Mouse, keyboard (arrows, Enter, Esc) and controller (D-pad / stick, A, B; L / R switch tabs) all work.
 The game keeps running but gets no input while it is open; Esc, F1 or B closes it. On macOS it shows
-the same options as the menu bar, and both stay in sync. Shift+F1 still saves state slot 1; slot 1 is
-loaded from the overlay (F1 used to load it).
+the same options as the menu bar, and both stay in sync. Shift+F1 still saves state slot 1; **F6 loads slot 1**.
 
 **Entering text (the name screen):** when the game asks for text — your name when you start a new
 file — a text window appears under the game's own name field (also in the GamePad-only and
@@ -456,9 +455,25 @@ buttons light up and the sticks show their deflection, so you can test the mappi
 twice is marked with a warning. Changes apply immediately, also while playing. A dead zone for
 controller sticks and an option to invert the camera's up/down are at the bottom, with **Reset to
 Defaults…**. The mapping is saved to `~/Library/Application Support/WWHD/controls.json`
-(`WWHD_CONTROLS=<file>` uses another file); deleting it restores the defaults. The app's
-single-key shortcuts (R, O, M, N, 6–9, P, F1–F5, F12) and Esc can't be bound. The **Screenshot**
-key (row "Photo", **F10** by default) is bound here like a button, to a key or a controller input.
+(`WWHD_CONTROLS=<file>` uses another file); deleting it restores the defaults. The diagnostic keys P, F12 and 9, and Esc, remain reserved.
+
+**Settings → Shortcuts** remaps Settings, full screen, Screenshot (**F10**), saving and loading
+slots 1–5, and the graphics shortcuts. Each action has a key with Shift/Ctrl/Alt (also Cmd on
+macOS), an alternate key, and a controller combination: hold one button, then press another,
+for example **Select + D-pad Up**. Click a binding to capture it; Esc cancels, right-click or
+**Clear** unbinds it. Conflicting keys (including game controls) and duplicate combinations
+are marked. **Reset to defaults** resets this tab. The GamePad picture-in-picture, performance
+overlay, mute and volume actions start unbound. Defaults otherwise stay unchanged.
+
+A combination consumes only its two buttons, only while both are held; other game inputs keep
+working. Select used as a combination's hold button is reserved for combinations instead of the
+held-Select Settings shortcut. **Tapping Home always opens Settings**, even if its keys are cleared;
+If Home is a combination hold button, its Settings tap acts on release. Esc always closes Settings.
+On Android, shortcuts from a keyboard require
+`WWHD_ANDROID_KEYBOARD`; controller combinations always work. Shortcuts are saved in the
+`shortcuts` section of **controls.json**, with the game controls. An existing Screenshot key
+or controller binding is preserved when loading an older file. macOS shows the assigned keys
+in the **Shortcuts** menu.
 
 The **Graphics** menu in the menu bar switches fixes and enhancements while playing (the TV
 window title shows what is active and the current frame rate): 60 fps by frame interpolation
@@ -511,7 +526,7 @@ dungeon map/compass/boss key, a small key) can change or break story events, so 
 file. Cheats edit the live save data; save in game to keep them.
 
 The **Save States** menu (and the Saves tab of the settings overlay) saves to one of 5 slots and
-loads it back (**Shift+F1–F5** save, **F2–F5** load; slot 1 loads from the F1 settings overlay);
+loads it back (**Shift+F1–F5** save, **F2–F5** load; F6 loads slot 1);
 each slot shows its time and area. Slots are kept in `~/Library/Application Support/wwhd/states/`
 and survive restarts. By default a slot holds a **portable state** (`slotN.wwstate`, a few KB):
 your progress and Link's place, no game data, safe to attach to bug reports. Loading one works
@@ -594,7 +609,7 @@ In Gaming Mode the Steam button belongs to Steam and there is no keyboard, so ke
 - **Settings overlay:** hold the **View** button (two squares, left of the screen) for half a second.
   Save states are in its first tab (Saves).
 - **Save-state shortcuts:** in Steam, open the game's controller settings and map the back buttons
-  (L4/R4/L5/R5) to keyboard keys: **Shift+F1** saves slot 1, **F2–F5** load slots 2–5,
+  (L4/R4/L5/R5) to keyboard keys: **Shift+F1** saves slot 1, **F6** loads slot 1, **F2–F5** load slots 2–5,
   **Shift+F2–F5** save them. Steam sends those keys to the game.
 
 ## Mods

@@ -42,6 +42,7 @@ bool shortcut_took_input();
 bool is_open();             // any thread
 enum class OpenReason { API, F1, Esc, Home, View, B, CloseButton, LoadSlot, Focus };
 struct KeyOrigin { uint32_t window = 0; uint64_t timestamp = 0; const char* name = "host"; };
+void activate_shortcut(int action, KeyOrigin origin = {});
 void set_open(bool open, OpenReason reason = OpenReason::API, KeyOrigin origin = {});   // any thread
 // the game sees no input: the overlay has it (captures()). Controller inputs held when it closes stay
 // from the game until each is released (the hosts' input pumps, release_gate.h).

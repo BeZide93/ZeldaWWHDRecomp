@@ -35,7 +35,7 @@ void defaults() {
         assert(tabs[i].id == ext::kBuiltinTabs[i].id && tabs[i].name == ext::kBuiltinTabs[i].name);
         assert(tabs[i].builtin == i && ext::builtin_tab(i) == i && !tabs[i].draw);
     }
-    assert((ids() == std::vector<std::string>{"saves", "graphics", "display", "audio", "mods", "controls", "about"}));
+    assert((ids() == std::vector<std::string>{"saves", "graphics", "display", "audio", "mods", "controls", "shortcuts", "about"}));
     const ext::Features f = ext::features(), plain{};
     assert(f.clipboard && f.file_picker && f.screenshots && f.full_states);
     assert(plain.clipboard && plain.file_picker && plain.screenshots && plain.full_states);
@@ -63,12 +63,13 @@ void added_and_hidden() {
     ext::hide_tab("graphics");
     ext::hide_tab("display");
     ext::hide_tab("controls");
+    ext::hide_tab("shortcuts");
     ext::hide_tab("tools");  // an added tab can be hidden too
     // a later registration may still name a hidden tab as its place
     ext::add_tab({"early", "Early", [] {}, nullptr}, "graphics");
     assert((ids() == std::vector<std::string>{"saves", "early", "audio", "platform", "mods", "warp", "about"}));
     const auto& tabs = ext::tabs();
-    assert(tabs[3].builtin == -1 && tabs[3].name == "Platform" && tabs[4].builtin == 4 && tabs[6].builtin == 6);
+    assert(tabs[3].builtin == -1 && tabs[3].name == "Platform" && tabs[4].builtin == 4 && tabs[6].builtin == 7);
     tabs[3].draw();
     tabs[5].draw();
     assert(drawn == 11);
@@ -83,7 +84,7 @@ void added_and_hidden() {
     ext::reset_for_test();
     ext::hide_tab("about");
     ext::add_tab({"warp", "Warp", [] {}, nullptr});
-    assert((ids() == std::vector<std::string>{"saves", "graphics", "display", "audio", "mods", "controls", "warp"}));
+    assert((ids() == std::vector<std::string>{"saves", "graphics", "display", "audio", "mods", "controls", "shortcuts", "warp"}));
 }
 
 void sealed_late() {

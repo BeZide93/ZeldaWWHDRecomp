@@ -1,3 +1,5 @@
+#include "platform/keycodes.h"
+#include "input_map.h"
 #include "atomic_temporary.h"
 #include "validation_diagnostics.h"
 #include "../../audio_out.h"
@@ -4116,10 +4118,14 @@ static void toggle_fullscreen(SDL_Window* window) {
 // F11 or Alt+Enter toggles the focused window (TV or GamePad)
 static bool fullscreen_key(const SDL_Event& event) {
   if (event.type != SDL_EVENT_KEY_DOWN || event.key.repeat) return false;
-  const bool f11 = event.key.scancode == SDL_SCANCODE_F11 && !(event.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_GUI));
-  const bool altEnter = (event.key.scancode == SDL_SCANCODE_RETURN || event.key.scancode == SDL_SCANCODE_KP_ENTER) &&
-                        (event.key.mod & SDL_KMOD_ALT);
-  if (!f11 && !altEnter) return false;
+  if (overlay::captures() || getenv("WWHD_NO_HOST_INPUT")) return false;
+#ifdef __ANDROID__
+  if (!getenv("WWHD_ANDROID_KEYBOARD")) return false;
+#endif
+  const int code = input::physical_keycode(event.key.scancode);
+  int mods = (event.key.mod & SDL_KMOD_SHIFT ? 1 : 0) | (event.key.mod & SDL_KMOD_CTRL ? 2 : 0) |
+             (event.key.mod & SDL_KMOD_ALT ? 4 : 0) | (event.key.mod & SDL_KMOD_GUI ? 8 : 0);
+  if (input_map::shortcut_for_key(input_map::current(), code, mods) != input_map::kFullscreen) return false;
   SDL_Window* window = SDL_GetWindowFromID(event.key.windowID);
   toggle_fullscreen(window ? window : R.tv.window);
   return true;

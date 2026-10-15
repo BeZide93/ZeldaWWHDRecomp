@@ -432,10 +432,6 @@ struct UIState {
     multi(@"Left stick (move)", {kLUp, kLDown, kLLeft, kLRight, kStickLClick}, {@"↑", @"↓", @"←", @"→", @"Click"}, PU(d.lstick), false);
     multi(@"Right stick (camera)", {kRUp, kRDown, kRLeft, kRRight, kStickRClick}, {@"↑", @"↓", @"←", @"→", @"Click"}, PU(d.rstick), true);
     multi(@"D-pad", {kDUp, kDDown, kDLeft, kDRight}, {@"↑", @"↓", @"←", @"→"}, PU(d.dpad), false);
-    // app actions: the bottom of the left column, no leader line ("Photo": the row label column is narrow;
-    // hovering shows "Screenshot (app)")
-    single(@"Photo", kScreenshot, NSMakePoint(0, sz.height), false);
-    g.groups.back().leader = false;
     for (auto& p : g.parts)
         if (p.kind == kPartRound) {
             bool right = p.action == kPlus || p.action == kA || p.action == kB || p.action == kX || p.action == kY ||
@@ -1694,8 +1690,8 @@ static int self_test() {
     expect(current().keys[kB][0] == kVK_ANSI_K && conflict_count(current()) == 0, "B key 1 = K: A/B swapped, no conflict");
     // 3. an app hotkey is refused and capture continues
     [c beginCapture:kY mode:kCapKey1];
-    [w sendEvent:key_event(w, kVK_ANSI_R, @"r")];
-    expect(current().keys[kY][1] == kNoKey, "R (resolution hotkey) refused");
+    [w sendEvent:key_event(w, kVK_ANSI_P, @"p")];
+    expect(current().keys[kY][1] == kNoKey, "P (frame capture) refused");
     expect([c.status.stringValue containsString:@"app shortcut"], "hotkey warning shown");
     // 4. Esc cancels
     [w sendEvent:key_event(w, kVK_Escape, @"\x1b")];

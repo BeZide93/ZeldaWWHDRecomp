@@ -58,7 +58,27 @@ const char* reserved_key(int code);
 
 constexpr float kMinStickRange = 1.0f, kMaxStickRange = 1.5f;
 
+// Host actions share controls.json, but do not drive GamePad inputs.
+enum Shortcut { kSettings, kFullscreen, kPhoto, kSave1, kSave2, kSave3, kSave4, kSave5,
+    kLoad1, kLoad2, kLoad3, kLoad4, kLoad5, kResolution, kAO, kAOHires, kAniso,
+    kInterpolation, kTrue60, kFXAA, kPiP, kPerformance, kMute, kVolumeDown, kVolumeUp, kShortcutCount };
+enum KeyModifier { kModShift = 1, kModCtrl = 2, kModAlt = 4, kModSuper = 8 };
+struct ShortcutKey {
+    int code = kNoKey, mods = 0;
+    bool operator==(const ShortcutKey&) const = default;
+};
+struct ShortcutBinding {
+    std::array<ShortcutKey, 2> keys{};
+    int hold = kPadNone, button = kPadNone;
+    bool operator==(const ShortcutBinding&) const = default;
+};
+struct ShortcutInfo { const char* id; const char* name; const char* group; ShortcutKey primary, alternate; };
+const ShortcutInfo& shortcut_info(int action);
+std::array<ShortcutBinding, kShortcutCount> shortcut_defaults();
+std::string shortcut_key_label(ShortcutKey key);
+
 struct Mapping {
+    std::array<ShortcutBinding, kShortcutCount> shortcuts = shortcut_defaults();
     std::array<std::array<int, kKeysPerAction>, kActionCount> keys;  // kNoKey = empty slot
     std::array<int, kActionCount> pad;                                // kPadNone = unbound
     // Real sticks do not reliably return exact zero. In particular, a tiny residual zoom input
@@ -198,6 +218,17 @@ bool from_json(const std::string& text, Mapping& out, std::string* error = nullp
 bool load_file(const std::string& path, Mapping& out, std::string* error = nullptr);
 bool save_file(const std::string& path, const Mapping& m);
 std::string default_path();
+
+// Settings also retains the built-in Home / held Select controller shortcut.
+bool settings_reachable(const Mapping& m, bool controller_settings = true);
+bool shortcut_conflict(const Mapping& m, int action);
+int shortcut_for_key(const Mapping& m, int code, int mods);
+// A combination consumes its two inputs only while both are held. One activation per press.
+struct ShortcutPoll {
+    std::array<bool, kShortcutCount> held{};
+    std::vector<int> poll(const Mapping& m, const float* raw, float* game);
+};
+void consume_shortcut_buttons(const Mapping& m, const float* raw, float* game);
 
 // The live mapping (thread safe). load_startup() reads default_path() if it exists.
 void load_startup();

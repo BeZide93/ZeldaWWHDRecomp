@@ -579,8 +579,7 @@ static void test_names() {
 }
 
 static void test_reserved() {
-    for (int k : std::initializer_list<int>{kVK_ANSI_O, kVK_ANSI_M, kVK_ANSI_N, kVK_ANSI_6, kVK_ANSI_7, kVK_ANSI_8, kVK_ANSI_9, kVK_ANSI_P,
-                  kVK_ANSI_R, kVK_F12, kVK_Escape})
+    for (int k : std::initializer_list<int>{kVK_ANSI_9, kVK_ANSI_P, kVK_F12, kVK_Escape})
         CHECK(reserved_key(k) != nullptr);
     CHECK(reserved_key(kVK_ANSI_K) == nullptr);
     CHECK(reserved_key(kVK_ANSI_5) == nullptr);
@@ -648,7 +647,7 @@ static void test_json_partial_and_bad() {
     // unknown names and app shortcuts are dropped with a warning, the rest still loads
     CHECK(from_json(R"({"keyboard": {"A": ["R", "K"], "Jump": ["J"], "B": ["Bogus"]}, "options": {"stick_deadzone": 5}})", r, &err));
     CHECK(!err.empty());
-    CHECK(r.keys[kA][0] == kVK_ANSI_K && r.keys[kA][1] == kNoKey);
+    CHECK(r.keys[kA][0] == kVK_ANSI_R && r.keys[kA][1] == kVK_ANSI_K);
     CHECK(r.keys[kB][0] == kNoKey);
     CHECK(r.deadzone == 0.9f);  // clamped
     // syntax errors fail and leave the output alone
@@ -935,7 +934,60 @@ static void test_settings_shortcut() {
     CHECK(opened == 0.5);
 }
 
+static void test_shortcuts() {
+    auto m = Mapping::defaults();
+    CHECK(shortcut_for_key(m, kVK_F6, 0) == kLoad1);
+    CHECK(shortcut_for_key(m, kVK_F1, 0) == kSettings);
+    CHECK(shortcut_for_key(m, kVK_F1, kModShift) == kSave1);
+    CHECK(shortcut_for_key(m, kVK_F10, 0) == kPhoto);
+    for (int a = 0; a < kShortcutCount; ++a) {
+        CHECK(*shortcut_info(a).id && *shortcut_info(a).name && *shortcut_info(a).group);
+        CHECK(!shortcut_conflict(m, a));
+        for (int b = a + 1; b < kShortcutCount; ++b) CHECK(std::string(shortcut_info(a).id) != shortcut_info(b).id);
+    }
+    for (int a = kPiP; a < kShortcutCount; ++a) {
+        CHECK(m.shortcuts[a].keys[0].code == kNoKey);
+        CHECK(m.shortcuts[a].keys[1].code == kNoKey);
+        CHECK(!m.shortcuts[a].hold && !m.shortcuts[a].button);
+    }
+    m.shortcuts[kPhoto].keys[1] = {kVK_ANSI_K, kModCtrl};
+    CHECK(shortcut_conflict(m, kPhoto)); // game inputs count, even with modifiers
+    m.shortcuts[kPhoto].keys[1] = m.shortcuts[kSettings].keys[0];
+    CHECK(shortcut_conflict(m, kPhoto) && shortcut_conflict(m, kSettings));
+    m.shortcuts[kSettings] = {};
+    CHECK(settings_reachable(m)); // immutable Home / Select fallback
+    CHECK(!settings_reachable(m, false));
+    m.shortcuts[kSettings].keys[1] = {kVK_F9, kModAlt};
+    CHECK(settings_reachable(m, false));
+    m.shortcuts[kPhoto].keys = {{{kVK_F9, kModShift | kModCtrl}, {kVK_F8, kModAlt}}};
+    m.shortcuts[kPhoto].hold = kPadOptions; m.shortcuts[kPhoto].button = kPadDUp;
+    CHECK(shortcut_for_key(m, kVK_F9, kModShift | kModCtrl) == kPhoto);
+    CHECK(shortcut_for_key(m, kVK_F10, 0) == -1);
+    Mapping out; CHECK(from_json(to_json(m), out)); CHECK(out == m);
+    CHECK(from_json(R"({"keyboard":{"Screenshot":["F9","F8"]},"controller":{"Screenshot":"RightStickButton"}})", out));
+    CHECK(out.shortcuts[kPhoto].keys[0].code == kVK_F9 && out.shortcuts[kPhoto].keys[1].code == kVK_F8);
+    CHECK(out.pad[kScreenshot] == kPadR3);
+    CHECK(from_json(R"({"keyboard":{"Screenshot":["Mouse4"]}})", out));
+    CHECK(out.shortcuts[kPhoto].keys[0].code == kMouse4);
+    CHECK(from_json(to_json(out), m)); CHECK(out == m);
+    m = Mapping::defaults();
+    m.shortcuts[kPhoto].hold = kPadOptions; m.shortcuts[kPhoto].button = kPadDUp;
+    float raw[kPadCount]{}, game[kPadCount]{}; ShortcutPoll poll;
+    raw[kPadOptions] = 1; std::copy(std::begin(raw), std::end(raw), game);
+    CHECK(poll.poll(m, raw, game).empty()); CHECK(game[kPadOptions] == 1);
+    raw[kPadDUp] = 1; raw[kPadA] = 1; std::copy(std::begin(raw), std::end(raw), game);
+    CHECK(poll.poll(m, raw, game) == std::vector<int>{kPhoto});
+    CHECK(game[kPadOptions] == 0 && game[kPadDUp] == 0 && game[kPadA] == 1);
+    CHECK(poll.poll(m, raw, game).empty());
+    raw[kPadDUp] = 0; std::copy(std::begin(raw), std::end(raw), game);
+    CHECK(poll.poll(m, raw, game).empty()); CHECK(game[kPadOptions] == 1);
+    raw[kPadDUp] = 1; CHECK(poll.poll(m, raw, game) == std::vector<int>{kPhoto});
+    m.shortcuts[kMute].hold = kPadDUp; m.shortcuts[kMute].button = kPadOptions;
+    CHECK(shortcut_conflict(m, kPhoto) && shortcut_conflict(m, kMute));
+}
+
 int main() {
+    test_shortcuts();
     for (int mode : {touch_buttons::Automatic, touch_buttons::AlwaysShow, touch_buttons::Hide})
         for (bool controller : {false, true}) {
             CHECK(touch_buttons::visible(mode, controller, false) ==
