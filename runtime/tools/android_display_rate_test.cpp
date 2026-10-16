@@ -22,4 +22,19 @@ int main() {
     assert(state.changed(2, 1, 60)); // new native window
     assert(state.changed(2, 1, 0)); // clear request / opt out
     assert(!state.changed(2, 1, 0));
+
+    Resend resend;
+    assert(!resend.due(5000, 60));       // nothing sent yet
+    resend.sent(0, 60);
+    assert(!resend.due(10000, 60));      // 60 Hz requests are never repeated
+    resend.sent(0, 120);
+    assert(!resend.due(1000, 60));       // too early
+    assert(!resend.due(4000, 120));      // the display follows
+    assert(!resend.due(4000, 0));        // read-back unknown
+    assert(resend.due(4000, 60));        // stayed at 60 Hz: once
+    assert(!resend.due(5000, 60));       // again only 3 s later
+    assert(resend.due(7000, 90));        // still lower: twice
+    assert(!resend.due(20000, 60));      // and no more
+    resend.sent(30000, 120);             // a new request (setting or surface change) starts over
+    assert(resend.due(33000, 60));
 }

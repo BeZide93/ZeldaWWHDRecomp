@@ -26,4 +26,22 @@ public:
         return true;
     }
 };
+// After a request the system may keep a lower rate (vendor per-app policies). If the read-back
+// rate stays below the request for 3 s, the request is sent again, at most twice per request.
+class Resend {
+    int64_t sentMs_ = -1;
+    int hz_ = 0;
+    int resends_ = 0;
+public:
+    static constexpr int64_t kDelayMs = 3000;
+    static constexpr int kMaxResends = 2;
+    void sent(int64_t nowMs, int hz) { sentMs_ = nowMs; hz_ = hz; resends_ = 0; }
+    bool due(int64_t nowMs, int actualHz) {
+        if (sentMs_ < 0 || hz_ <= 60 || actualHz <= 0 || actualHz >= hz_ - 1) return false;
+        if (resends_ >= kMaxResends || nowMs - sentMs_ < kDelayMs) return false;
+        ++resends_;
+        sentMs_ = nowMs;
+        return true;
+    }
+};
 } // namespace android_display_rate

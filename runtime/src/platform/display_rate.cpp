@@ -49,19 +49,27 @@ float call_float(const char* name) {
     return v;
 }
 std::atomic<unsigned> surfaceRevision{0};
-void request(SDL_Window* tv) {
+void request(SDL_Window* tv, int actualHz) {
     static const bool disabled = [] {
         const char* value = std::getenv("WWHD_NO_60HZ");
         return value && std::atoi(value) != 0;
     }();
     static android_display_rate::RequestState state;
+    static android_display_rate::Resend resend;
     auto* window = tv ? static_cast<ANativeWindow*>(SDL_GetPointerProperty(
         SDL_GetWindowProperties(tv), SDL_PROP_WINDOW_ANDROID_WINDOW_POINTER, nullptr)) : nullptr;
     const int hz = android_display_rate::requested_hz(interp::mode(), interp::fps(), disabled);
-    if (!state.changed(reinterpret_cast<uintptr_t>(window), surfaceRevision.load(), hz)) return;
-    const int result = ANativeWindow_setFrameRate(window, static_cast<float>(hz),
-        ANATIVEWINDOW_FRAME_RATE_COMPATIBILITY_DEFAULT);
-    if (result == 0) LOG("[display] requested %d Hz for Android surface%s", hz, disabled ? " (system choice)" : "");
+    const int64_t now = (int64_t)SDL_GetTicks();
+    const bool again = window && resend.due(now, actualHz);
+    if (!state.changed(reinterpret_cast<uintptr_t>(window), surfaceRevision.load(), hz) && !again) return;
+    // the player's explicit choice: game content at exactly this rate, switching modes if needed
+    // (the default, seamless-only strategy let the system keep 60 Hz with 120 fps chosen)
+    const int result = ANativeWindow_setFrameRateWithChangeStrategy(window, static_cast<float>(hz),
+        ANATIVEWINDOW_FRAME_RATE_COMPATIBILITY_FIXED_SOURCE, ANATIVEWINDOW_CHANGE_FRAME_RATE_ALWAYS);
+    if (!again) resend.sent(now, hz);
+    if (result == 0)
+        LOG("[display] requested %d Hz for Android surface%s%s", hz, disabled ? " (system choice)" : "",
+            again ? " again (the display stayed at a lower rate)" : "");
     else LOG("[display] Android frame-rate request %d Hz failed (%d); system choice retained", hz, result);
 }
 #endif
@@ -75,8 +83,10 @@ void surface_changed() {
 
 void poll(SDL_Window* tv) {
 #ifdef __ANDROID__
-    request(tv);
-    interp::set_display_hz((int)std::lround(call_float("displayRefreshRate")));
+    static int actualHz = 0;  // the previous poll's read-back (0: not known yet)
+    request(tv, actualHz);
+    actualHz = (int)std::lround(call_float("displayRefreshRate"));
+    interp::set_display_hz(actualHz);
 #else
     const SDL_DisplayID id = tv ? SDL_GetDisplayForWindow(tv) : SDL_GetPrimaryDisplay();
     const SDL_DisplayMode* m = id ? SDL_GetCurrentDisplayMode(id) : nullptr;
