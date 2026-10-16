@@ -132,8 +132,11 @@ def read_glb(path):
     clean = copy.deepcopy(doc); clean.pop('skins'); clean.pop('animations', None)
     for n in clean['nodes']: n.pop('skin', None)
     for k in ('JOINTS_0','WEIGHTS_0'): clean['meshes'][0]['primitives'][0]['attributes'].pop(k)
-    with tempfile.NamedTemporaryFile(suffix='.glb') as tmp:
-        tmp.write(pack_glb(clean, binary)); tmp.flush(); geometry, info = static.read_glb(tmp.name)
+    # a closed file in a temporary folder: Windows can't open a NamedTemporaryFile again while it is open
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = os.path.join(tmpdir, 'geometry.glb')
+        with open(path, 'wb') as tmp: tmp.write(pack_glb(clean, binary))
+        geometry, info = static.read_glb(path)
     require(len(geometry[0]) == len(influences), 'skin vertex count mismatch')
     info.update(kind='skinned', bones=len(bones), weights_per_vertex=2, bounds_min=[min(p[k] for p in geometry[0]) for k in range(3)], bounds_max=[max(p[k] for p in geometry[0]) for k in range(3)])
     model = dict(geometry=geometry, bones=bones, influences=influences, document=doc, binary=binary)
