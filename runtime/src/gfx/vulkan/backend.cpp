@@ -409,6 +409,9 @@ void start_pipeline_cache_write() {
       !R.pipelineCacheDirty || pipelineCachePath.empty()) return;
   // This is the only Vulkan cache read, serialized with pipeline creation on
   // the render thread. Worker serialization/checksum never holds that thread.
+  // With serial pipeline creation, workers cannot change the cache between the
+  // size query and the copy.
+  const auto serial=pipeline_serial_lock();
   size_t size=0;
   if (vkGetPipelineCacheData(R.device,R.pipelineCache,&size,nullptr)!=VK_SUCCESS ||
       size<16+VK_UUID_SIZE || size>maxPipelineCacheBytes) return;
@@ -3710,8 +3713,9 @@ static void init_device(std::vector<const char *> extensions,
   const bool serialPipelines = serial_pipelines_wanted(driver.driverID, R.properties.driverVersion,
                                                      getenv("WWHD_SERIAL_PIPELINES"));
   serialize_pipeline_creation(serialPipelines);
-  if (serialPipelines)
-    LOG("[vulkan] serial pipeline creation enabled (WWHD_SERIAL_PIPELINES=0 disables it)");
+  if (driver.driverID == VK_DRIVER_ID_QUALCOMM_PROPRIETARY || serialPipelines)
+    LOG("[vulkan] serial pipeline creation %s (driver id %d, Qualcomm release v%u; WWHD_SERIAL_PIPELINES=0/1 overrides)",
+        serialPipelines ? "on" : "off", int(driver.driverID), qualcomm_driver_release(R.properties.driverVersion));
   init_pass_caches();
   vkGetDeviceQueue(R.device, R.queueFamily, 0, &R.queue);
 #ifdef __ANDROID__

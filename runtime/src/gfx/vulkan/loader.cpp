@@ -3,6 +3,7 @@
 #include "loader.h"
 #include <stdexcept>
 #include <string>
+#include <atomic>
 #include <mutex>
 #ifdef __ANDROID__
 #include "android_driver.h"
@@ -22,13 +23,17 @@ WWHD_VK_RENDERING_FUNCTIONS(WWHD_VK_DEFINE)
 
 namespace {
 // Old Qualcomm proprietary drivers can hang when different renderer threads
-// compile simultaneously, even with separate caches. Cache snapshots/merges use
-// the same lock. Install these wrappers once at device initialization only.
-std::mutex pipelineMutex;
+// compile simultaneously, even with separate caches. Cache creation from saved
+// data, snapshots and merges use the same lock. Install these wrappers once at
+// device initialization only. Recursive: pipeline_serial_lock() holds it across
+// several wrapped calls (cache size + data).
+std::recursive_mutex pipelineMutex;
+std::atomic<bool> serialEnabled{false};
 PFN_vkCreateGraphicsPipelines graphicsPipelines;
 PFN_vkCreateComputePipelines computePipelines;
 PFN_vkGetPipelineCacheData cacheData;
 PFN_vkMergePipelineCaches mergeCaches;
+PFN_vkCreatePipelineCache createCache;
 
 VKAPI_ATTR VkResult VKAPI_CALL serial_graphics(VkDevice device, VkPipelineCache cache, uint32_t count,
     const VkGraphicsPipelineCreateInfo* info, const VkAllocationCallbacks* allocator, VkPipeline* out) {
@@ -48,6 +53,11 @@ VKAPI_ATTR VkResult VKAPI_CALL serial_merge(VkDevice device, VkPipelineCache cac
     const VkPipelineCache* sources) {
   std::lock_guard lock(pipelineMutex);
   return mergeCaches(device, cache, count, sources);
+}
+VKAPI_ATTR VkResult VKAPI_CALL serial_create_cache(VkDevice device, const VkPipelineCacheCreateInfo* info,
+    const VkAllocationCallbacks* allocator, VkPipelineCache* cache) {
+  std::lock_guard lock(pipelineMutex);
+  return createCache(device, info, allocator, cache);
 }
 template<auto Slot,typename Function> Function observe(Function function) {
 #ifdef __ANDROID__
@@ -86,10 +96,15 @@ void load_instance_functions(VkInstance instance) {
 }
 
 void serialize_pipeline_creation(bool enabled) {
+  serialEnabled = enabled;
   vkCreateGraphicsPipelines = enabled ? serial_graphics : graphicsPipelines;
   vkCreateComputePipelines = enabled ? serial_compute : computePipelines;
   vkGetPipelineCacheData = enabled ? serial_cache_data : cacheData;
   vkMergePipelineCaches = enabled ? serial_merge : mergeCaches;
+  vkCreatePipelineCache = enabled ? serial_create_cache : createCache;
+}
+std::unique_lock<std::recursive_mutex> pipeline_serial_lock() {
+  return serialEnabled ? std::unique_lock(pipelineMutex) : std::unique_lock<std::recursive_mutex>();
 }
 
 void load_device_functions(VkDevice device, bool khrDynamicRendering, bool renderPasses) {
@@ -101,6 +116,8 @@ void load_device_functions(VkDevice device, bool khrDynamicRendering, bool rende
   computePipelines = vkCreateComputePipelines;
   cacheData = vkGetPipelineCacheData;
   mergeCaches = vkMergePipelineCaches;
+  createCache = vkCreatePipelineCache;
+  serialEnabled = false; // a new device starts unwrapped until serialize_pipeline_creation
   if (renderPasses) { vkCmdBeginRendering=nullptr; vkCmdEndRendering=nullptr; return; }
   // the core 1.3 function or the extension's: same parameters (VkRenderingInfoKHR = VkRenderingInfo)
 #define WWHD_VK_LOAD(name)                                                                          \
