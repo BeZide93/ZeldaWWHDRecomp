@@ -7,6 +7,7 @@
 #include <cassert>
 #include <utility>
 #include <cmath>
+#include <string>
 #ifdef _WIN32
 #include <windows.h>
 #else
@@ -82,7 +83,9 @@ void before(unsigned joint) {
     hook_023D6B30(&c);
     assert(c.r[3]==1);
 }
-int main(int argc, char**) {
+int main(int argc, char** argv) {
+    // WWHD_MOD_MOVE_BUTTON=roll-a picks "Roll, then hold A" at startup
+    if(argc==2 && std::string(argv[1])=="--button") { assert(mods::move_speed_button()==mods::kMoveButtonRollA); return 0; }
     if(argc==2) { assert(mods::move_speed_anim()==mods::MoveAnim::kSprint); return 0; }
     map(kLink); map(0x10030000); map(0x10470000); map(mem::kFixedStart);
     st32(kLink+0x65F0,mods::kProcMove);
@@ -322,6 +325,25 @@ int main(int argc, char**) {
     for(int i=0;i<20;++i) mods::link_move_factor(kLink);
     assert(mods::move_hud().alpha==0.f);
     mods::set_move_speed_bar(true);
+    // "Roll, then hold A": the live boost follows the state machine, also with Toggle selected.
+    mods::set_move_speed(false); mods::link_move_factor(kLink); mods::move_speed_input(0);
+    mods::set_move_speed(true); mods::set_move_speed_mode(mods::MoveMode::kToggle);
+    mods::set_move_speed_button(mods::kMoveButtonRollA); assert(mods::move_speed_button()==mods::kMoveButtonRollA);
+    mods::set_move_speed_stamina_seconds(5.f);
+    st32(kLink+0x65F0,mods::kProcMove);
+    for(int i=0;i<5;++i) assert(mods::link_move_factor(kLink)==1.f);
+    mods::move_speed_input(input::kStickL);  // the old button does nothing with this choice
+    for(int i=0;i<5;++i) assert(mods::link_move_factor(kLink)==1.f && !mods::move_hud().boosted);
+    mods::move_speed_input(input::kA);
+    st32(kLink+0x65F0,mods::kProcFrontRoll);
+    for(int i=0;i<10;++i) { assert(mods::link_move_factor(kLink)==1.f); assert(!mods::move_hud().boosted); }
+    st32(kLink+0x65F0,mods::kProcMove);
+    float boosted=1.f; for(int i=0;i<30;++i) boosted=mods::link_move_factor(kLink);
+    assert(boosted>1.4f && mods::move_hud().boosted && mods::move_hud().stamina<1.f);
+    mods::move_speed_input(0);
+    for(int i=0;i<30;++i) mods::link_move_factor(kLink);
+    assert(mods::link_move_factor(kLink)==1.f && !mods::move_hud().boosted);
+    mods::set_move_speed_button(input::kStickL); mods::set_move_speed_mode(mods::MoveMode::kHold);
     assert(calls>100);
     return 0;
 }

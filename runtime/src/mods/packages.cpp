@@ -404,7 +404,8 @@ void load_move_speed_options(const Value& options, bool startup = false) {
     if (!std::getenv("WWHD_MOD_MOVE_ANIM") && !(startup && anim.type == Value::Null))
         set_move_speed_anim(move_anim_from_id(anim.string("native")));
     const auto& button = options.get("move-speed.button");
-    if (button.type == Value::Number && button.number >= 0 && button.number <= UINT32_MAX && std::floor(button.number) == button.number)
+    if (!std::getenv("WWHD_MOD_MOVE_BUTTON") && button.type == Value::Number && button.number >= 0 &&
+        button.number <= UINT32_MAX && std::floor(button.number) == button.number)
         set_move_speed_button(uint32_t(button.number));
     // "Show boost bar". Older profiles have no key: at startup they keep the loaded setting,
     // profile switches show the bar (the default).

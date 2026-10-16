@@ -157,7 +157,7 @@ void load_saved() {
     for (const auto& option : traversal_options()) number(option.key, option.startup_env, 1.f, 3.f, option.apply);
     number("mod.direct-camera.speed", "WWHD_MOD_CAMERA_SPEED", .5f, 2.f, set_camera_speed);
     std::string button;
-    if (hostui::get("mod.move-speed.button", button)) {
+    if (!std::getenv("WWHD_MOD_MOVE_BUTTON") && hostui::get("mod.move-speed.button", button)) {
         char* end = nullptr;
         auto value = std::strtoul(button.c_str(), &end, 10);
         if (end != button.c_str() && *end == '\0' && value <= UINT32_MAX) set_move_speed_button(uint32_t(value));

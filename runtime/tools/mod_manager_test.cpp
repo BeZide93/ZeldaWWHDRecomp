@@ -152,6 +152,10 @@ int main() {
     preferences["mod.move-speed.bar"] = "maybe";  // not a saved checkbox value: keeps the setting
     mods::set_move_speed_bar(true); load_saved(); assert(mods::move_speed_bar());
     preferences["mod.move-speed.bar"] = "1";
+    preferences["mod.move-speed.button"] = "2147483648";  // "Roll, then hold A"
+    load_saved(); assert(mods::move_speed_button() == mods::kMoveButtonRollA);
+    preferences["mod.move-speed.button"] = "65536";
+    load_saved();
     assert(mods::move_speed_land_factor() == 2.5f && mods::move_speed_swim_factor() == 1.f);
     assert(mods::move_speed_stamina_seconds() == 8.f && mods::move_speed_mode() == mods::MoveMode::kToggle);
     assert(mods::move_speed_cooldown_seconds() == 5.f);

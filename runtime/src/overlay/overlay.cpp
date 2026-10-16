@@ -1448,6 +1448,11 @@ void builtin_options(const std::string& id) {
                 hostui::post([button] { mods::set_move_speed_button(button); hostui::set("mod.move-speed.button", std::to_string(button)); mods::packages::remember_option("move-speed.button", button); });
             }
         }
+        modsui::same_line_if_fits("Roll, then hold A");
+        if (radio("Roll, then hold A", mods::move_speed_button() == mods::kMoveButtonRollA))
+            hostui::post([] { mods::set_move_speed_button(mods::kMoveButtonRollA); hostui::set("mod.move-speed.button", std::to_string(mods::kMoveButtonRollA)); mods::packages::remember_option("move-speed.button", mods::kMoveButtonRollA); });
+        if (const char* override = std::getenv("WWHD_MOD_MOVE_BUTTON"))
+            note("WWHD_MOD_MOVE_BUTTON=%s overrides the saved button at startup.", override);
         help("A multiplier of 1 leaves that state alone. Boost time is how long a full bar lasts; "
              "0 has no limit, and the bar refills whenever you are not boosting. Cooldown is the "
              "bar's refill time (0 for immediate refill). With no limit, or with Show boost bar off, "
@@ -1455,7 +1460,9 @@ void builtin_options(const std::string& id) {
              "a cutscene or a conversation is on screen. The dash option replaces the walk clip "
              "while boosting; full-speed running already uses dash. Sprint pose adds a forward "
              "lean and arm drive while running freely, blended with the boost. Rebind the "
-             "chosen game button in Controls.");
+             "chosen game button in Controls. Roll, then hold A: roll while running and keep A "
+             "held as you come out of the roll to boost until you let go. It is always held "
+             "(Press to toggle does not apply) and works on land only.");
     } else if (id == "ladder-speed" || id == "sidle-speed") {
         const bool ladder = id == "ladder-speed";
         const char* key = ladder ? "ladder-speed.factor" : "sidle-speed.factor";

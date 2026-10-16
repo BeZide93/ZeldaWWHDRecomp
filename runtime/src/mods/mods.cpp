@@ -62,7 +62,13 @@ std::atomic<bool> g_move_bar{[]{
     const char* e = getenv("WWHD_MOD_MOVE_BAR");
     return !e || atoi(e) != 0;
 }()};
-std::atomic<uint32_t> g_move_button{input::kStickL};
+// WWHD_MOD_MOVE_BUTTON=L3|R3|L|R|ZL|ZR|roll-a picks the boost button (test aid; overrides the saved choice)
+std::atomic<uint32_t> g_move_button{[]{
+    const char* e = getenv("WWHD_MOD_MOVE_BUTTON");
+    const uint32_t b = e ? move_button_from_id(e) : 0;
+    return b ? b : uint32_t(input::kStickL);
+}()};
+RollHoldA g_roll_a;  // "Roll, then hold A" (game thread)
 std::atomic<uint32_t> g_move_buttons{0};  // the live sample, from input::read()
 // Live tick state. Only link_move_factor (the game's logic thread) writes these; the HUD reads the
 // atomic ones from the render thread (stage 3).
@@ -174,7 +180,7 @@ bool move_speed_bar() { return g_move_bar.load(std::memory_order_relaxed); }
 void set_move_speed_bar(bool on) { g_move_bar = on; note("run/swim boost bar", on); }
 uint32_t move_speed_button() { return g_move_button.load(std::memory_order_relaxed); }
 void set_move_speed_button(uint32_t button) {
-    constexpr uint32_t allowed = input::kStickL | input::kStickR | input::kL | input::kR | input::kZL | input::kZR;
+    constexpr uint32_t allowed = input::kStickL | input::kStickR | input::kL | input::kR | input::kZL | input::kZR | kMoveButtonRollA;
     if (button && !(button & (button - 1)) && (button & allowed)) g_move_button = button;
 }
 void move_speed_input(uint32_t buttons) { g_move_buttons.store(buttons, std::memory_order_relaxed); }
@@ -204,17 +210,31 @@ float link_move_factor(uint32_t link) {
         g_move_swimming = false;
         g_move_hud_alpha = 0.f;
         g_move_hud_hold = 0.f;
+        g_roll_a.reset();
         apply_anim_ramp();  // ramp is 1: put the authored animation rates back
         return 1.f;
     }
-    const uint32_t held = g_move_buttons.load(std::memory_order_relaxed) & move_speed_button();
+    const uint32_t buttons = g_move_buttons.load(std::memory_order_relaxed);
+    const bool roll_a = move_speed_button() == kMoveButtonRollA;
     const uint32_t proc = ld32(link + 0x65F0);
     if (true60::dt() >= 1.0f) {  // a full step, not a true60 preview
         const float dt = 1.f / 30.f;
         const float seconds = move_speed_stamina_seconds();
+        // "Roll, then hold A" is held by nature (A is the game's own button): the boost is the state
+        // machine's verdict, and Toggle does not apply to it
+        if (!roll_a) g_roll_a.reset();
+        const uint32_t held = roll_a ? (g_roll_a.step((buttons & kButtonA) != 0, proc) ? 1u : 0u)
+                                     : buttons & move_speed_button();
+        if (roll_a && trace_on()) {
+            static bool was_rolling = false, was_active = false;
+            if (g_roll_a.rolling != was_rolling || g_roll_a.active != was_active)
+                trace("roll-a proc=%X A=%d rolling=%d boost=%d", proc, (buttons & kButtonA) ? 1 : 0,
+                      g_roll_a.rolling ? 1 : 0, g_roll_a.active ? 1 : 0);
+            was_rolling = g_roll_a.rolling, was_active = g_roll_a.active;
+        }
         const bool was_held = g_move_held_prev;
         g_move_held_prev = held != 0;
-        if (move_speed_mode() == MoveMode::kToggle) {
+        if (move_speed_mode() == MoveMode::kToggle && !roll_a) {
             // One press starts one cycle and another press stops it. The cycle also ends by itself the
             // moment he stops running or swimming (a forward roll only suspends the boost), or when
             // the bar runs out, so cycles never queue up

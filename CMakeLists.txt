@@ -1022,6 +1022,7 @@ target_include_directories(move_sprint_runtime_test PRIVATE runtime/src runtime/
 target_compile_options(move_sprint_runtime_test PRIVATE -UNDEBUG)
 add_test(NAME move_sprint_runtime COMMAND move_sprint_runtime_test)
 add_test(NAME move_sprint_startup COMMAND ${CMAKE_COMMAND} -E env WWHD_MOD_MOVE_ANIM=sprint $<TARGET_FILE:move_sprint_runtime_test> --startup)
+add_test(NAME move_button_startup COMMAND ${CMAKE_COMMAND} -E env WWHD_MOD_MOVE_BUTTON=roll-a $<TARGET_FILE:move_sprint_runtime_test> --button)
 add_executable(crash_addr_test runtime/tools/crash_addr_test.cpp runtime/src/crash_addr.cpp)
 target_include_directories(crash_addr_test PRIVATE runtime/src)
 target_compile_options(crash_addr_test PRIVATE -UNDEBUG)
