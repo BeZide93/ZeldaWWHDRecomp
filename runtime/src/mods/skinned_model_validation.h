@@ -1,6 +1,7 @@
 // Original GLB skin/clip validation. No player template resources are needed here.
 #pragma once
 #include "static_model_validation.h"
+#include <algorithm>
 #include <set>
 #include <map>
 namespace skinned_models {

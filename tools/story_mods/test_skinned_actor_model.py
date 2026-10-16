@@ -3,6 +3,7 @@
 import importlib.util
 import pathlib
 import struct
+import os
 import tempfile
 import unittest
 import skinned_actor_model as skin
@@ -51,8 +52,11 @@ class SkinTests(unittest.TestCase):
 
 
     def parse(self,data):
-        with tempfile.NamedTemporaryFile(suffix='.glb') as f:
-            f.write(data);f.flush();return skin.read_glb(f.name)
+        # a closed file: Windows can't open a NamedTemporaryFile a second time while it is open
+        with tempfile.TemporaryDirectory() as d:
+            path=os.path.join(d,'model.glb')
+            with open(path,'wb') as f: f.write(data)
+            return skin.read_glb(path)
 
     def test_original_reproducible_and_two_influences(self):
         data=asset.make();self.assertEqual(data,(ROOT/'examples/guest-mods/sdk-v3-windfall/assets/tide_sprite.glb').read_bytes())
