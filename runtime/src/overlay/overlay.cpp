@@ -2242,6 +2242,18 @@ void tab_audio() {
     if (audio::master_volume_from_env())
         note("WWHD_AUDIO_VOLUME=%s is set for this start and takes precedence; changes here are not saved.",
              getenv("WWHD_AUDIO_VOLUME"));
+    bool pad_sounds = audio::gamepad_sounds();
+    if (ImGui::Checkbox("GamePad sounds through main speakers", &pad_sounds))
+        hostui::post([pad_sounds] { audio::set_gamepad_sounds(pad_sounds); });
+    float pad_volume = audio::gamepad_sounds_volume() * 100.0f;
+    ImGui::SetNextItemWidth(260);
+    if (ImGui::SliderFloat("GamePad sounds volume", &pad_volume, 0.0f, 100.0f, "%.0f%%", ImGuiSliderFlags_AlwaysClamp))
+        hostui::post([pad_volume] { audio::set_gamepad_sounds_volume(pad_volume / 100.0f, false); });
+    if (ImGui::IsItemDeactivatedAfterEdit())
+        hostui::post([pad_volume] { audio::set_gamepad_sounds_volume(pad_volume / 100.0f); });
+    help("Play sounds from the GamePad speaker through your main speakers during TV play. Applies immediately and is remembered. Master volume also applies.");
+    if (audio::gamepad_sounds_from_env() || audio::gamepad_sounds_volume_from_env())
+        note("GamePad audio test overrides are set for this start; overridden preferences are not saved.");
     if (ext::features().speaker_choice) {
         int speakers = audio::requested_surround() ? 1 : 0;
         if (combo("Speakers", &speakers, "Stereo\0Surround 5.1\0"))
