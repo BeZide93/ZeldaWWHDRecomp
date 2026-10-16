@@ -119,13 +119,16 @@ namespace {
 RecordWorker* worker = nullptr;
 PodCommands pending;
 thread_local bool producerPresentationRecording = false;
+bool savedChoice = false;
 }
+void set_record_worker_saved_choice(bool on) { savedChoice = on; }
 bool record_worker_requested() {
-    static const bool value = [] {
+    // -1: no environment override; the variable takes precedence over the saved setting
+    static const int environment = [] {
         const char* e = std::getenv("WWHD_VK_RECORD_WORKER");
-        return e && !std::strcmp(e, "1");
+        return e ? int(!std::strcmp(e, "1")) : -1;
     }();
-    return value;
+    return environment >= 0 ? environment == 1 : savedChoice;
 }
 bool producer_presentation_recording() { return producerPresentationRecording; }
 bool record_worker_active() { return bool(worker); }

@@ -3755,6 +3755,12 @@ static void init_device(std::vector<const char *> extensions,
   LOG("[vulkan diagnostics] maxVertexInputAttributeOffset=%u maxVertexInputBindingStride=%u maxVertexInputAttributes=%u maxVertexInputBindings=%u maxDrawIndexedIndexValue=%u",
       vertexLimits.maxVertexInputAttributeOffset, vertexLimits.maxVertexInputBindingStride,
       vertexLimits.maxVertexInputAttributes, vertexLimits.maxVertexInputBindings, vertexLimits.maxDrawIndexedIndexValue);
+  // Graphics > Advanced "Record graphics on a second thread", read once per start (the worker
+  // starts with the device); WWHD_VK_RECORD_WORKER takes precedence (record_worker.cpp)
+  {
+    std::string value;
+    set_record_worker_saved_choice(::hostui::get("vkRecordWorker", value) && value == "1");
+  }
   nativeWorkerPresentation = false;
   if (record_worker_requested()) {
     const char* nativeOption = std::getenv("WWHD_R5_NATIVE_PRESENT");

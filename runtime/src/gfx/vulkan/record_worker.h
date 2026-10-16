@@ -47,7 +47,10 @@ public:
 private:
     bool previousDispatch_ = false;
 };
-bool record_worker_requested(); // cached option; no thread while disabled
+// The saved Graphics > Advanced choice ("Record graphics on a second thread"), set by the
+// renderer before it starts; WWHD_VK_RECORD_WORKER (exactly 1 on, anything else off) wins.
+void set_record_worker_saved_choice(bool on);
+bool record_worker_requested(); // no thread while disabled
 bool producer_presentation_recording(); // producer-only scoped routing
 bool record_worker_active(); // producer only, under GX2 execution mutex
 void start_record_worker();
