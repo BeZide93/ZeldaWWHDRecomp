@@ -117,6 +117,7 @@ public class WwhdActivity extends SDLActivity {
     @Override public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
         if (hasFocus) applyFullScreen();  // also after a dialog, the file picker or another app had the screen
+        if (hasFocus && gamePadDisplay != null) gamePadDisplay.focusChanged();
     }
 
     // SDL changes the window style when the Full screen setting changes (setSystemUiVisibility, which calls
@@ -143,11 +144,6 @@ public class WwhdActivity extends SDLActivity {
         runOnUiThread(() -> {
             if (gamePadDisplay != null) gamePadDisplay.settingChanged();
         });
-    }
-
-    @Override public void onWindowFocusChanged(boolean focused) {
-        super.onWindowFocusChanged(focused);
-        if (focused && gamePadDisplay != null) gamePadDisplay.focusChanged();
     }
 
     /** Render-thread notification; surface replacement always belongs to the UI thread. */
