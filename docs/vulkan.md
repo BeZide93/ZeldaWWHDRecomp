@@ -39,6 +39,9 @@ the windows' views through a `CAMetalLayer` and `VK_EXT_metal_surface`; `display
 same layout as the Metal composition (picture rectangle, GamePad overlay with frame and opacity,
 filter), and `gfx/vulkan/present.cpp` draws it. The TV window title starts with the renderer in use.
 
+Settings → Display includes exact PiP size/opacity percentages, nine positions and a draggable
+placement diagram; the outlined game preview can also be dragged while placement is open.
+
 | Feature (macOS app) | Metal | Vulkan |
 | --- | --- | --- |
 | TV / GamePad windows, full screen, display modes, PiP, automatic PiP | yes | yes |
@@ -46,7 +49,7 @@ filter), and `gfx/vulkan/present.cpp` draws it. The TV window title starts with 
 | Internal resolution, AO modes, full-size AO depth, 16x AF | yes | yes |
 | Aspect ratio (16:10, 21:9, 32:9, match window) | yes | yes |
 | 60 fps interpolation, true 60 | yes | yes |
-| Save states (menu, Shift+F1..F5 / F1..F5) | yes | yes (a state loads with either renderer) |
+| Save states (menu, Shift+F1..F5 / F6, F2..F5) | yes | yes (a state loads with either renderer) |
 | Controls window, keyboard, game controllers, mouse camera, mods | yes | yes |
 | Climb mod stamina wheel | yes | yes (ported shader; not yet seen in a test run) |
 | Frame dumps `WWHD_DUMP_FRAMES`, `WWHD_DUMP_PRESENT` | yes | yes |
@@ -564,7 +567,9 @@ Verify mode found 0 mismatches in 142 million checked hits (330 s per scene, 30 
 ## Live graphics controls
 
 In the macOS app the Graphics and Display menus and their keys work as with Metal. The SDL game window
-also accepts the following plain-key shortcuts; repeated keydown events are ignored.
+also accepts the following default shortcuts; change them in **Settings → Shortcuts**.
+Each action supports a modified key, an alternate key, and a controller combination.
+Repeated keydown events are ignored.
 The shortcuts are scoped to the game window, respect host-input disabling, and do
 not toggle settings while entering text. Menu checkmarks reflect pending settings;
 resolution changes latch at the next render-frame boundary. Unsupported effect
@@ -603,11 +608,19 @@ roughly 30 FPS while other CPU workloads were active.
 
 ## Save-state shortcuts
 
-In the macOS app, the Save States menu and keys work as with Metal. In the SDL game window, `F1` through `F5` load slots 1 through 5;
+In the macOS app, the Save States menu and keys work as with Metal. In the SDL game window, `F6` loads slot 1 and `F2` through `F5` load slots 2 through 5;
 `Shift+F1` through `Shift+F5` save those slots. Repeated keydown events are ignored,
 and these keys do not reach the game's button mapping. The Screenshot binding (F10 by default,
-Controls) works in every game window the same way; `WWHD_TEST_SCREENSHOT=<frames>` scripts it. Host-input-disabled scripted
+Settings → Shortcuts) works in every game window the same way; `WWHD_TEST_SCREENSHOT=<frames>` scripts it. Host-input-disabled scripted
 runs do not accept the shortcuts. State files remain in the configured state directory.
+
+The Shortcuts tab also offers picture-in-picture, the performance overlay, mute and volume,
+initially unbound. Bindings are stored with the game controls in `controls.json`; older Screenshot
+bindings migrate automatically. Conflicts include game keys and duplicate combinations.
+Combinations consume only their two buttons while both are held. Using Select as a hold button
+reserves it for combinations; tapping Home remains the Settings fallback (on release when Home
+is itself a hold button), and Esc closes Settings.
+Android keyboard shortcuts require `WWHD_ANDROID_KEYBOARD`; controller combinations do not.
 
 A load must pass the existing allocation, thread, and guest-stack guards. A state
 that loads in the same process may fail during a new process's startup; matching

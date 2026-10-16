@@ -35,10 +35,12 @@ void defaults() {
         assert(tabs[i].id == ext::kBuiltinTabs[i].id && tabs[i].name == ext::kBuiltinTabs[i].name);
         assert(tabs[i].builtin == i && ext::builtin_tab(i) == i && !tabs[i].draw);
     }
-    assert((ids() == std::vector<std::string>{"saves", "graphics", "display", "audio", "mods", "controls", "about"}));
+    assert((ids() == std::vector<std::string>{"saves", "graphics", "display", "audio", "mods", "controls", "shortcuts", "about"}));
     const ext::Features f = ext::features(), plain{};
     assert(f.clipboard && f.file_picker && f.screenshots && f.full_states);
     assert(plain.clipboard && plain.file_picker && plain.screenshots && plain.full_states);
+    assert(f.code_mods && f.mod_downloads && f.speaker_choice && f.keyboard);
+    assert(plain.code_mods && plain.mod_downloads && plain.speaker_choice && plain.keyboard);
     assert(!ext::font_loader() && ext::shortcuts().empty() && !ext::text_input() && ext::frame_layers().empty());
     // L / R wrap around the bar, as before
     assert(ext::next_tab(0, -1) == ext::kBuiltinCount - 1 && ext::next_tab(ext::kBuiltinCount - 1, +1) == 0);
@@ -61,12 +63,13 @@ void added_and_hidden() {
     ext::hide_tab("graphics");
     ext::hide_tab("display");
     ext::hide_tab("controls");
+    ext::hide_tab("shortcuts");
     ext::hide_tab("tools");  // an added tab can be hidden too
     // a later registration may still name a hidden tab as its place
     ext::add_tab({"early", "Early", [] {}, nullptr}, "graphics");
     assert((ids() == std::vector<std::string>{"saves", "early", "audio", "platform", "mods", "warp", "about"}));
     const auto& tabs = ext::tabs();
-    assert(tabs[3].builtin == -1 && tabs[3].name == "Platform" && tabs[4].builtin == 4 && tabs[6].builtin == 6);
+    assert(tabs[3].builtin == -1 && tabs[3].name == "Platform" && tabs[4].builtin == 4 && tabs[6].builtin == 7);
     tabs[3].draw();
     tabs[5].draw();
     assert(drawn == 11);
@@ -81,7 +84,7 @@ void added_and_hidden() {
     ext::reset_for_test();
     ext::hide_tab("about");
     ext::add_tab({"warp", "Warp", [] {}, nullptr});
-    assert((ids() == std::vector<std::string>{"saves", "graphics", "display", "audio", "mods", "controls", "warp"}));
+    assert((ids() == std::vector<std::string>{"saves", "graphics", "display", "audio", "mods", "controls", "shortcuts", "warp"}));
 }
 
 void sealed_late() {
@@ -89,8 +92,11 @@ void sealed_late() {
     ext::Features f;
     f.clipboard = false;
     f.file_picker = false;
+    f.code_mods = false;
+    f.keyboard = false;
     ext::set_features(f);
     assert(!ext::features().clipboard && !ext::features().file_picker && ext::features().screenshots);
+    assert(!ext::features().code_mods && ext::features().mod_downloads && !ext::features().keyboard);
     assert(!ext::sealed());
     (void)ext::tabs();  // the overlay's first frame
     assert(ext::sealed());
@@ -104,6 +110,7 @@ void sealed_late() {
     ext::add_frame_layer({[](std::string&) { return true; }, [](float, float) { return true; }});
     assert(ext::tab_index("late") == -1 && ext::tab_index("saves") == 0);
     assert(!ext::features().clipboard && ext::shortcuts().empty() && !ext::font_loader() && !ext::text_input());
+    assert(!ext::features().code_mods && !ext::features().keyboard);
     assert(ext::frame_layers().empty());
 }
 

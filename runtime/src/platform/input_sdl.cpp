@@ -6,6 +6,7 @@
 #include "gfx/display_modes.h"
 #include "android_controller.h"
 #include "../mods/fast_forward.h"
+#include "../mods/mods.h"
 #ifdef WWHD_HAS_VULKAN
 #include "gfx/vulkan/stutter_trace.h"
 #include "gfx/vulkan/headstart.h"
@@ -208,7 +209,7 @@ static int keycode(SDL_Scancode code) {
  }
 }
 void set_touch(bool down,float x,float y){std::lock_guard lk(g_mu);g_touch=down;g_tx=x;g_ty=y;}
-void release_keys(){mods::fast_forward_reset();std::lock_guard lk(g_mu);g_mouse_bindings.consume();memset(g_keys,0,sizeof g_keys);g_touch=false;}
+void release_keys(){mods::fast_forward_reset();mods::lock_on_reset();std::lock_guard lk(g_mu);g_mouse_bindings.consume();memset(g_keys,0,sizeof g_keys);g_touch=false;}
 void held_keys(bool* keys){std::lock_guard lk(g_mu);for(int i=0;i<256;i++)keys[i]=g_keys[i]||g_script_keys[i];}
 void controller_values(float* out){std::lock_guard lk(g_mu);std::copy(std::begin(g_values),std::end(g_values),out);}
 void host_controller_values(float* out){controller_values(out);}
@@ -698,6 +699,7 @@ static bool text_entry_event(const SDL_Event& event){
  default:return false;
  }
 }
+int physical_keycode(int scancode) { return keycode(static_cast<SDL_Scancode>(scancode)); }
 void handle_event(const SDL_Event& event){
  // Defer focus loss until update(), after the event queue drains: a TV -> GamePad
  // handoff must move the menu rather than close it between the loss and gain events.
@@ -766,34 +768,7 @@ void handle_event(const SDL_Event& event){
  }
  if(getenv("WWHD_NO_HOST_INPUT")&&!test_event(event))return;
  if(overlay_event(event))return;
- // the Screenshot binding (F10 by default), in any game window; posted test keys take this path too
- if(event.type==SDL_EVENT_KEY_DOWN&&!event.key.repeat){int code=keycode(event.key.scancode);if(code>=0&&screenshot::key_down(code))return;}
- if(test_event(event))return;  // posted test keys reach only the overlay (and the Screenshot binding)
- // Save states belong to either game window, not auxiliary controls/text windows.
- if((event.type==SDL_EVENT_KEY_DOWN||event.type==SDL_EVENT_KEY_UP) &&
-    game_window(event.key.windowID) &&
-    event.key.scancode>=SDL_SCANCODE_F1 && event.key.scancode<=SDL_SCANCODE_F5){
-  if(event.type==SDL_EVENT_KEY_DOWN && !event.key.repeat){
-   const int slot=int(event.key.scancode-SDL_SCANCODE_F1)+1;
-   if(event.key.mod&SDL_KMOD_SHIFT)ss::request_save(slot);
-   else ss::request_load(slot);
-  }
-  return;
- }
- // Graphics shortcuts are plain keys scoped to the game window; repeats never toggle.
- if((event.type==SDL_EVENT_KEY_DOWN||event.type==SDL_EVENT_KEY_UP) && g_prompt_window &&
-    event.key.windowID==SDL_GetWindowID(g_prompt_window) &&
-    !(event.key.mod&(SDL_KMOD_CTRL|SDL_KMOD_ALT|SDL_KMOD_GUI))){
-  char action=0;
-  switch(event.key.scancode){
-   case SDL_SCANCODE_R: action='R';break; case SDL_SCANCODE_O: action='O';break;
-   case SDL_SCANCODE_M: action='M';break; case SDL_SCANCODE_N: action='N';break;
-   case SDL_SCANCODE_8: action='8';break; case SDL_SCANCODE_6: action='6';break;
-   case SDL_SCANCODE_7: action='7';break; default:break;
-  }
-  const bool activate=event.type==SDL_EVENT_KEY_DOWN&&!event.key.repeat;
-  if(action && gfxvk::graphics_hotkey(action,activate)){if(activate)hostui::graphics_changed();return;}
- }
+ if(test_event(event))return;
  #ifdef __ANDROID__
  // phones: the controller is the GamePad. Keys only type text (above): controllers such as the
  // GameSir also show up as a keyboard and would press keyboard-mapped GamePad buttons twice.
@@ -871,6 +846,7 @@ void update(){
  overlay::poll_controller_shortcuts(v);
  const bool captured=captured_before||overlay::captures()||overlay::shortcut_took_input();
  g_gates.combine(devices,captured,v,game);  // a reconnected pad (new id) gets a new gate
+ input_map::consume_shortcut_buttons(input_map::current(),v,game);
  auto state=input_map::controller_state(input_map::current(),game);
  // + went down: the view may switch to the GamePad screen while the game is paused
  // (not while the settings overlay or the text prompt takes the buttons: Start acts there)
@@ -1058,7 +1034,14 @@ static void apply_scenario(PadState& s) {
 
 static std::atomic<bool> g_pro{getenv("WWHD_PRO_CONTROLLER") != nullptr};
 bool pro_controller() { return g_pro.load(std::memory_order_relaxed); }
-void set_pro_controller(bool on) { g_pro = on; LOG("[input] keyboard/controller act as %s", on ? "Pro Controller" : "GamePad"); }
+static std::atomic<void (*)(bool)> g_controller_listener{nullptr};
+void set_controller_listener(void (*fn)(bool pro)) { g_controller_listener = fn; }
+void set_pro_controller(bool on) {
+    const bool was = g_pro.exchange(on);
+    LOG("[input] keyboard/controller act as %s", on ? "Pro Controller" : "GamePad");
+    if (was != on)
+        if (auto fn = g_controller_listener.load()) fn(on);
+}
 
 PadState read() {
     static const std::vector<Press> script = scripted();

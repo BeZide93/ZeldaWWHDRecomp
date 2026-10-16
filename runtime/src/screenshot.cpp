@@ -184,8 +184,8 @@ void request() {
 bool key_down(int code) {
     if (code < 0 || code >= input_map::kInputCount) return false;
     const auto mapping = input_map::current();
-    for (int k : mapping.keys[input_map::kScreenshot])
-        if (k == code) {
+    for (auto k : mapping.shortcuts[input_map::kPhoto].keys)
+        if (k.code == code && k.mods == 0) {
             request();
             return true;
         }

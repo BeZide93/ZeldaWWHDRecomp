@@ -7,6 +7,107 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Mods on Windows:** a mod's preparation tool can now load its own helper files there too (the port's Python on
+  Windows didn't look next to the tool). This stopped the GC minimap from installing on Windows; gc-minimap 0.2.2
+  also fixes it on its own for v0.3.0 (#224).
+
+- **Settings → Shortcuts:** remap the app's shortcuts (Settings, full screen, screenshot, save and load states, the
+  graphics toggles), each with a key, a second key and a controller combination such as Select + D-pad Up. New
+  actions (GamePad picture-in-picture, performance overlay, mute, volume) start unbound, and **F6** now loads state
+  slot 1. The defaults stay as they were (#220).
+- **macOS setup:** when macOS points to another developer folder than the installed Command Line Tools (a removed
+  Xcode, or one whose license hasn't been accepted), setup now uses the installed tools directly instead of waiting
+  forever, and says what to do if they still can't be used (#219).
+
+- **Android, two screens (AYN Thor and similar):** choosing GamePad screen **Off** (or hiding it) while the second
+  screen is connected now turns that screen black and ignores its touches while the game plays on the main screen;
+  the choice is remembered. Without that choice the second screen shows the GamePad as before (#222).
+
+- **GamePad picture-in-picture placement:** nine positions (corners, edge centres, centre) plus a custom one,
+  exact size (10–50%) and opacity (20–100%), and a small screen diagram in Settings → Display where you tap or drag
+  the GamePad picture into place; while that section is open the game shows a live, draggable preview. The default
+  bottom-right position now sits above the rupee counter instead of covering it (#221).
+- **Mod SDK v3 preview (opt-in, for mod makers):** mods can place a small set of the game's own actors (chests,
+  signs, a Windfall resident) with talk actions, and play short scenes: camera shots, dialogue, fades and the game's
+  letterbox bars, skippable with Plus/Start. Placed chests and signs keep their state in the mod's own part of the
+  save. Nothing changes without such a mod. See docs/mod-sdk-v3.md and the sdk-v3-windfall example.
+
+- **Android: "Share log"** in the setup app and in Graphics → Bug reports: it shares the latest game logs through
+  Android's share sheet, with your user paths removed (as in crash reports). Android now writes a log by default
+  (at most 64 MB per run), so there is one to share after a problem. The log also lists more about the GPU (driver,
+  vertex formats, limits), and Graphics → Advanced has **Force RGB vertex fallback** for testing GPUs like PowerVR
+  (#207).
+- **Intel graphics on Windows:** drivers older than 101.5000 now use the classic render-pass mode automatically,
+  which fixes the crash at start on driver 101.3111 (Iris Xe) without setting anything (#204).
+
+## v0.3.0
+
+- **Controls: Xbox and PlayStation button prompts also with "By position"** (issue #209, thanks @jamescastells):
+  with the Nintendo button layout on an Xbox or PlayStation controller, the game's button icons now show the button
+  that is physically in that place (for example the roll as a red B and the sword as a green A on an Xbox pad).
+  Custom face-button mappings show the buttons they are bound to. The settings' help texts now explain the two
+  options more clearly. "By label" and "Original" look as before.
+
+- **Vulkan: a fallback for GPUs without 3-part vertex formats** (issue #207, Pixel 10 Pro with a PowerVR GPU): some
+  GPUs can't read three-component vertex data directly, which showed as "exploded" shapes and a black screen. The
+  game now checks this at start and reads such data in two parts on those GPUs. Every other GPU keeps exactly the
+  same shaders and caches as before.
+
+- **Fixed: loading a save state switched the controller back** to the one the state was made with (for example a
+  GamePad state loaded while playing with a Pro Controller). Save states now keep your current controller, and the
+  game follows it right away, without any menus: after loading a full state, or after switching the controller in
+  the Input menu during play, Link moves with the controller you use and the button prompts match.
+- **Fixed: after loading a save state, story mod pages fell back to their plain look** (for example the Story
+  Notebook's page). Their layouts are now built again right after the load.
+
+- **Fixed: a story mod's treasure chart showed its X outside the map.** The chart view shows a small window of the
+  sea square; a mod chart now uses the window that contains its treasure spot, so the X sits on the map at the spot,
+  on the TV and the GamePad.
+
+- **Linux: sharp picture with desktop scaling on Wayland** (issue #201, thanks @findel77): the game window now
+  uses the screen's real pixel size, so with display scaling (for example 4K at 250%) the picture and the
+  settings overlay are no longer rendered small and stretched. On older versions, `SDL_VIDEO_WAYLAND_SCALE_TO_DISPLAY=1`
+  works around it.
+
+- **Mods: development builds can install packages for the next release.** A development build counts as the next
+  version for the mod catalogue (for example v0.2.14 plus newer changes counts as 0.2.15), so packages that need
+  the coming release, like the Story Notebook 0.6.1, install on it. Releases are unchanged.
+
+- **Extended enemy lock-on** (#192, PR #193, thanks @mhbxyz): Mods → Extended enemy lock-on, off by default. The
+  enemy lock-on range can be raised to 1x–3x (saved per profile), and R3 while locked on to an enemy switches to the
+  next eligible enemy, wrapping around. The game's own targeting still decides who can be targeted; talking
+  distances to characters are unchanged.
+
+- **For porters: more overlay switches** (PR #205, thanks @Pulpparty): a port to another platform can now turn off
+  code mods, mod downloads, the Speakers choice and the keyboard hints in the settings menu (`overlay::ext::Features`).
+  Nothing changes on Windows, macOS, Linux or Android.
+
+- **Fixed: ropes jittered with frame interpolation** (issue #202, thanks @floysh and @JulianSK1999): the grappling
+  hook's rope in Link's hand and rope bridges (for example on Outset Island in the title scene) were drawn at the exact
+  game step while everything around them was drawn in between, so they jumped back and forth at 60, 120 or 240 fps.
+  They now move smoothly with the rest of the picture. 30 fps and true 60 are unchanged.
+
+- **Cheats: moon jump** (idea from the GreenNaugahyde Android fork): in Gameplay → Cheats, off by default. Hold L
+  to rise; the left stick steers relative to the camera. **No fall damage after moon jump** is a separate option.
+  Works at 30 fps, with frame interpolation and in true 60; loading a state ends a flight.
+
+- **Vulkan: textures a graphics driver cannot filter smoothly** (some Android GPUs) are now sampled sharply
+  instead of breaking Vulkan's rules. Every other device keeps the same filtering as before.
+
+- **Fixed: leftover memory in the save file's empty Quest Logs.** With story mods on, saving could copy leftover
+  bytes into unused padding of the empty Quest Log slots. Those bytes are now always zero; the game never reads
+  them, and the active Quest Log is unchanged.
+
+- **Mod SDK v2: items and treasure charts for story mods** (for mod makers; nothing changes without such a mod):
+  - **Mod items:** mods can declare their own items with names, descriptions, icons in the game's item pictures
+    and stacks. Link keeps them in the Delivery Bag on extra pages, can put them in the bag's own places, and can
+    put them, or the story notebook, on X, Y or R to use them. While Link has mod items, R in the Delivery Bag
+    turns to the extra pages (L/R turn pages) instead of putting an item on R; X and Y still assign items.
+  - **Treasure charts:** a mod's treasure chart now works like the game's own: the light ring at its spot, the
+    crane, the chest and its item (a game item or a mod item), then the chart counts as finished.
+  - **Saves:** mod items and charts are kept in the story mods' own part of the save, and turning the mods off
+    shows the game's inventory exactly as before.
+
 - **Story Notebook: a new look for mod quests** (Mod SDK v2): the notebook's list and quest pages are now drawn
   as real game layouts, on the TV and the GamePad, with a mini sea chart on each quest page, the open book in the
   Delivery Bag and the game's own fonts. A quest's page says "Not started yet" with its first place, "Finished"

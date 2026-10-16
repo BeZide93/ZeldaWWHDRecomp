@@ -80,12 +80,19 @@ void save_display_locked() {
     if (!env_set({"WWHD_DRC_MODE"})) g_values["drcMode"] = kModeNames[display_saved_mode()];
     if (!env_set({"WWHD_DRC_PIP"})) {
         char v[16];
-        g_values["pipCorner"] = kCornerNames[g_corner];
+        g_values["pipAnchor"] = kAnchorNames[g_pip_anchor];
+        snprintf(v, sizeof v, "%g", g_pip_x.load());
+        g_values["pipX"] = v;
+        snprintf(v, sizeof v, "%g", g_pip_y.load());
+        g_values["pipY"] = v;
         snprintf(v, sizeof v, "%g", g_pip_size.load());
         g_values["pipSize"] = v;
         snprintf(v, sizeof v, "%g", g_pip_opacity.load());
         g_values["pipOpacity"] = v;
     }
+#ifdef __ANDROID__
+    g_values["androidSecondScreenOff"] = g_second_screen_off ? "1" : "0";
+#endif
     save_locked();
 }
 void save_display() {
@@ -228,6 +235,7 @@ void load_saved_options() {
     if (saved("vkPresentMode", {"WWHD_VK_PRESENT_MODE"})) gfxvk::set_present_mode((int)num("vkPresentMode"));
 #ifdef __ANDROID__
     if (v.count("androidSwapDisplays")) dual_display::requested_swap = num("androidSwapDisplays") != 0;
+    if (v.count("androidSecondScreenOff")) gfx::g_second_screen_off = num("androidSecondScreenOff") != 0;
 #endif
     // GamePad screen (display_modes.h); the start-up test overrides after the saved choices
     using namespace gfx;
@@ -235,9 +243,12 @@ void load_saved_options() {
         const int m = find_name(kModeNames, kDrcModeCount, v["drcMode"].c_str(), g_mode);
         if (drc_mode_offered(m)) g_mode = m;
     }
-    if (v.count("pipCorner")) g_corner = find_name(kCornerNames, 4, v["pipCorner"].c_str(), g_corner);
-    if (v.count("pipSize")) g_pip_size = std::clamp((float)num("pipSize"), 0.1f, 0.5f);
-    if (v.count("pipOpacity")) g_pip_opacity = std::clamp((float)num("pipOpacity"), 0.2f, 1.0f);
+    g_pip_anchor = pip_load_anchor(v.count("pipAnchor") ? v["pipAnchor"].c_str() : nullptr,
+                                   v.count("pipCorner") ? v["pipCorner"].c_str() : nullptr);
+    if (v.count("pipX")) g_pip_x = pip_clamp((float)num("pipX"), 0, 1, 0.5f);
+    if (v.count("pipY")) g_pip_y = pip_clamp((float)num("pipY"), 0, 1, 0.5f);
+    if (v.count("pipSize")) g_pip_size = pip_clamp((float)num("pipSize"), 0.1f, 0.5f, 0.25f);
+    if (v.count("pipOpacity")) g_pip_opacity = pip_clamp((float)num("pipOpacity"), 0.2f, 1.0f, 1.0f);
     display_env_overrides();
     if (!drc_mode_offered(g_mode) && g_mode == kDrcWindow) g_mode = kDrcOff;  // no GamePad window (WWHD_NO_GAMEPAD, Android)
     g_shown = !input::pro_controller();  // Pro Controller: GamePad screen starts hidden (as on macOS)
@@ -301,19 +312,20 @@ void set_drc_mode(int m) {
     save_display();
     LOG("[display] GamePad screen mode: %s", gfx::kModeNames[m]);
 }
-int pip_corner() { return gfx::g_corner; }
-void set_pip_corner(int c) {
-    gfx::g_corner = std::clamp(c, 0, 3);
+void save_pip_position() { save_display(); }
+int pip_anchor() { return gfx::g_pip_anchor; }
+void set_pip_anchor(int c) {
+    gfx::g_pip_anchor = std::clamp(c, 0, int(gfx::kPipCustom));
     save_display();
 }
 float pip_size() { return gfx::g_pip_size; }
 void set_pip_size(float s) {
-    gfx::g_pip_size = std::clamp(s, 0.1f, 0.5f);
+    gfx::g_pip_size = gfx::pip_clamp(s, 0.1f, 0.5f, 0.25f);
     save_display();
 }
 float pip_opacity() { return gfx::g_pip_opacity; }
 void set_pip_opacity(float o) {
-    gfx::g_pip_opacity = std::clamp(o, 0.2f, 1.0f);
+    gfx::g_pip_opacity = gfx::pip_clamp(o, 0.2f, 1.0f, 1.0f);
     save_display();
 }
 bool drc_available() {
@@ -327,6 +339,9 @@ bool drc_shown() {
 void show_drc(bool on) {
     gfx::display_show_drc(on);
     apply_drc_window();
+#ifdef __ANDROID__
+    save_display();  // the second screen's on/off is remembered (#222)
+#endif
     LOG("[display] GamePad screen %s (%s)", on ? "shown" : "hidden", gfx::kModeNames[gfx::g_mode]);
 }
 void toggle_drc() { show_drc(!drc_shown()); }

@@ -140,7 +140,9 @@ bool host_setting(const char* key, std::string& value) {
 void set_host_setting(const char* key, const std::string& value) { set_setting(@(key), @(value.c_str())); }
 static void save_options() {
     g_settings[@"drcMode"] = @(kModeNames[display_saved_mode()]);
-    g_settings[@"pipCorner"] = @(kCornerNames[g_corner]);
+    g_settings[@"pipAnchor"] = @(kAnchorNames[g_pip_anchor]);
+    g_settings[@"pipX"] = @(g_pip_x.load());
+    g_settings[@"pipY"] = @(g_pip_y.load());
     g_settings[@"pipSize"] = @(g_pip_size.load());
     g_settings[@"pipOpacity"] = @(g_pip_opacity.load());
     g_settings[@"scaleFilter"] = @(kFilterNames[g_filter]);
@@ -149,10 +151,15 @@ static void save_options() {
 static void load_options() {
     g_mode = find_name(kModeNames, kDrcModeCount, g_settings[@"drcMode"], kDrcWindow);
     if (!drc_mode_offered(g_mode)) g_mode = kDrcWindow;
-    g_corner = find_name(kCornerNames, 4, g_settings[@"pipCorner"], 3);
+    NSString* anchor = g_settings[@"pipAnchor"];
+    NSString* legacy = g_settings[@"pipCorner"];
+    g_pip_anchor = pip_load_anchor([anchor isKindOfClass:[NSString class]] ? anchor.UTF8String : nullptr,
+                                   [legacy isKindOfClass:[NSString class]] ? legacy.UTF8String : nullptr);
+    if (NSNumber* n = g_settings[@"pipX"]) g_pip_x = pip_clamp(n.floatValue, 0, 1, 0.5f);
+    if (NSNumber* n = g_settings[@"pipY"]) g_pip_y = pip_clamp(n.floatValue, 0, 1, 0.5f);
     g_filter = find_name(kFilterNames, 3, g_settings[@"scaleFilter"], kSmooth);
-    if (NSNumber* n = g_settings[@"pipSize"]) g_pip_size = std::clamp(n.floatValue, 0.1f, 0.5f);
-    if (NSNumber* n = g_settings[@"pipOpacity"]) g_pip_opacity = std::clamp(n.floatValue, 0.2f, 1.0f);
+    if (NSNumber* n = g_settings[@"pipSize"]) g_pip_size = pip_clamp(n.floatValue, 0.1f, 0.5f, 0.25f);
+    if (NSNumber* n = g_settings[@"pipOpacity"]) g_pip_opacity = pip_clamp(n.floatValue, 0.2f, 1.0f, 1.0f);
     display_env_overrides();  // start-up overrides for tests (not saved)
 }
 
@@ -952,10 +959,10 @@ void display_set_filter(int f) {
 }
 int display_drc_mode() { return g_mode; }
 // settings overlay: the Display menu's picture-in-picture choices
-void display_set_pip(int corner, float size, float opacity) {
-    g_corner = std::clamp(corner, 0, 3);
-    g_pip_size = std::clamp(size, 0.1f, 0.5f);
-    g_pip_opacity = std::clamp(opacity, 0.2f, 1.0f);
+void display_set_pip(int anchor, float size, float opacity) {
+    g_pip_anchor = std::clamp(anchor, 0, int(kPipCustom));
+    g_pip_size = pip_clamp(size, 0.1f, 0.5f, 0.25f);
+    g_pip_opacity = pip_clamp(opacity, 0.2f, 1.0f, 1.0f);
     save_options();
 }
 void display_set_tv_fullscreen(bool on) {
@@ -984,7 +991,7 @@ bool drc_overlay_hit(void* window, double wx, double wy) {
 - (void)setFilter:(NSMenuItem*)item { gfx::g_filter = (int)item.tag; gfx::save_options(); }
 - (void)setMode:(NSMenuItem*)item { gfx::set_drc_mode((int)item.tag); }
 - (void)toggleDrc:(NSMenuItem*)item { gfx::toggle_drc_screen(); }
-- (void)setCorner:(NSMenuItem*)item { gfx::g_corner = (int)item.tag; gfx::save_options(); }
+- (void)setAnchor:(NSMenuItem*)item { gfx::g_pip_anchor = (int)item.tag; gfx::save_options(); }
 - (void)setSize:(NSMenuItem*)item { gfx::g_pip_size = item.tag / 100.0f; gfx::save_options(); }
 - (void)setOpacity:(NSMenuItem*)item { gfx::g_pip_opacity = item.tag / 100.0f; gfx::save_options(); }
 - (void)drcScreen:(NSMenuItem*)item {
@@ -1025,7 +1032,7 @@ bool drc_overlay_hit(void* window, double wx, double wy) {
         on(gfx::drc_window_shown());
         return gfx::g_mode != gfx::kDrcOff && gfx::drc_window_available();
     }
-    if (a == @selector(setCorner:)) on(gfx::g_corner == item.tag);
+    if (a == @selector(setAnchor:)) on(gfx::g_pip_anchor == item.tag);
     if (a == @selector(setSize:)) on(fabsf(gfx::g_pip_size * 100 - item.tag) < 0.5f);
     if (a == @selector(setOpacity:)) on(fabsf(gfx::g_pip_opacity * 100 - item.tag) < 0.5f);
     if (a == @selector(drcScreen:)) {
@@ -1081,11 +1088,10 @@ void install_display_menu(NSMenu* bar) {
     add(m, @"Show GamePad screen", @selector(toggleDrc:), 0, @"g");
     NSMenuItem* pipItem = [m addItemWithTitle:@"Picture-in-picture" action:nil keyEquivalent:@""];
     NSMenu* pm = [[NSMenu alloc] initWithTitle:@"Picture-in-picture"];
-    header(pm, @"Corner");
-    add(pm, @"    Top left", @selector(setCorner:), 0);
-    add(pm, @"    Top right", @selector(setCorner:), 1);
-    add(pm, @"    Bottom left", @selector(setCorner:), 2);
-    add(pm, @"    Bottom right", @selector(setCorner:), 3);
+    header(pm, @"Position");
+    NSArray* positions = @[@"Top left", @"Top centre", @"Top right", @"Centre left", @"Centre", @"Centre right",
+                           @"Bottom left", @"Bottom centre", @"Bottom right"];
+    for (int i = 0; i < 9; ++i) add(pm, positions[i], @selector(setAnchor:), i);
     header(pm, @"Size (of the TV picture's width)");
     for (int s : {20, 25, 33, 40}) add(pm, [NSString stringWithFormat:@"    %d%%", s], @selector(setSize:), s);
     header(pm, @"Opacity");

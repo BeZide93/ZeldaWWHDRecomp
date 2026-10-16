@@ -175,6 +175,14 @@ file(GLOB RUNTIME_SOURCES CONFIGURE_DEPENDS runtime/src/*.cpp runtime/src/*.c ru
 list(APPEND RUNTIME_SOURCES runtime/src/platform/perf_hint.cpp runtime/src/platform/thread_sampler.cpp)  # Android performance hints (no-op elsewhere)
 list(APPEND RUNTIME_SOURCES ${WWHD_BUILD_INFO})
 list(APPEND RUNTIME_SOURCES ${WWHD_NPC_CATALOGUE})
+# the Delivery Bag's extra pages: their layout description (tools/story_mods/make_bag_page_layout.py), compiled in
+set(WWHD_STORY_BAG_LAYOUT ${CMAKE_BINARY_DIR}/generated/story_bag_layout.cpp)
+add_custom_command(OUTPUT ${WWHD_STORY_BAG_LAYOUT}
+  COMMAND ${CMAKE_COMMAND} -DIN=${CMAKE_SOURCE_DIR}/runtime/assets/story_bag/StoryBag_00.json -DOUT=${WWHD_STORY_BAG_LAYOUT}
+          -DSYMBOL=wwhd_story_bag_layout -P ${CMAKE_SOURCE_DIR}/cmake/EmbedBytes.cmake
+  DEPENDS ${CMAKE_SOURCE_DIR}/runtime/assets/story_bag/StoryBag_00.json ${CMAKE_SOURCE_DIR}/cmake/EmbedBytes.cmake
+  COMMENT "Delivery Bag page layout" VERBATIM)
+list(APPEND RUNTIME_SOURCES ${WWHD_STORY_BAG_LAYOUT})
 list(APPEND RUNTIME_SOURCES runtime/src/platform/touch_pad.cpp)  # Android on-screen controls (no-op elsewhere)
 if(APPLE)
   list(APPEND RUNTIME_SOURCES runtime/src/platform/https.mm)
@@ -361,13 +369,13 @@ target_link_libraries(guest_png_test PRIVATE ZLIB::ZLIB)
 add_test(NAME guest_png COMMAND guest_png_test "${CMAKE_SOURCE_DIR}/examples/guest-mods")
 
 # Synthetic integration tests call the real guest filesystem HLE handlers.
-add_executable(mod_content_fs_test runtime/tools/mod_content_fs_test.cpp runtime/tools/fs_story_stub.cpp runtime/src/hle/fs.cpp runtime/src/mods/story_mail.cpp runtime/src/mods/story_store.cpp runtime/src/mods/content.cpp runtime/src/mods/mod_archive.cpp runtime/src/game_languages.cpp runtime/src/guest_addr_identity.c)
+add_executable(mod_content_fs_test runtime/tools/mod_content_fs_test.cpp runtime/src/hle/fs.cpp runtime/tools/fs_story_stub.cpp runtime/src/mods/story_mail.cpp runtime/src/mods/story_store.cpp runtime/src/mods/content.cpp runtime/src/mods/mod_archive.cpp runtime/src/game_languages.cpp runtime/src/guest_addr_identity.c)
 target_include_directories(mod_content_fs_test PRIVATE runtime/src runtime/include)
 target_compile_options(mod_content_fs_test PRIVATE -UNDEBUG)
 target_link_libraries(mod_content_fs_test PRIVATE ZLIB::ZLIB Threads::Threads)
 
 # language sources: synthetic European/Japanese packs read through the guest file system (game_languages.h)
-add_executable(language_source_test runtime/tools/language_source_test.cpp runtime/tools/fs_story_stub.cpp runtime/src/hle/fs.cpp runtime/src/mods/story_mail.cpp runtime/src/mods/story_store.cpp runtime/src/mods/content.cpp runtime/src/mods/mod_archive.cpp runtime/src/game_languages.cpp runtime/src/guest_addr_identity.c)
+add_executable(language_source_test runtime/tools/language_source_test.cpp runtime/src/hle/fs.cpp runtime/tools/fs_story_stub.cpp runtime/src/mods/story_mail.cpp runtime/src/mods/story_store.cpp runtime/src/mods/content.cpp runtime/src/mods/mod_archive.cpp runtime/src/game_languages.cpp runtime/src/guest_addr_identity.c)
 target_include_directories(language_source_test PRIVATE runtime/src runtime/include)
 target_compile_options(language_source_test PRIVATE -UNDEBUG)
 target_link_libraries(language_source_test PRIVATE ZLIB::ZLIB Threads::Threads)
@@ -419,6 +427,10 @@ add_executable(controller_selection_test runtime/tools/controller_selection_test
 target_include_directories(controller_selection_test PRIVATE runtime/src runtime/include)
 target_compile_options(controller_selection_test PRIVATE -UNDEBUG)
 add_test(NAME controller_selection COMMAND controller_selection_test)
+add_executable(controller_reapply_test runtime/tools/controller_reapply_test.cpp)
+target_include_directories(controller_reapply_test PRIVATE runtime/src)
+target_compile_options(controller_reapply_test PRIVATE -UNDEBUG)
+add_test(NAME controller_reapply COMMAND controller_reapply_test)
 
 add_executable(input_map_test runtime/tools/input_map_test.cpp runtime/src/input_map.cpp)
 target_include_directories(input_map_test PRIVATE runtime/src)
@@ -441,6 +453,16 @@ add_executable(story_lyt_text_test runtime/tools/story_lyt_text_test.cpp runtime
 target_include_directories(story_lyt_text_test PRIVATE runtime/src)
 target_compile_options(story_lyt_text_test PRIVATE -UNDEBUG)
 add_test(NAME story_lyt_text COMMAND story_lyt_text_test)
+# the story layouts' clients (runtime/src/mods/story_lyt_clients.h: several layouts with the item screen)
+add_executable(story_lyt_clients_test runtime/tools/story_lyt_clients_test.cpp)
+target_include_directories(story_lyt_clients_test PRIVATE runtime/src)
+target_compile_options(story_lyt_clients_test PRIVATE -UNDEBUG)
+add_test(NAME story_lyt_clients COMMAND story_lyt_clients_test)
+# the Delivery Bag's extra pages for mod items (runtime/src/mods/story_bag_page.h)
+add_executable(story_bag_page_test runtime/tools/story_bag_page_test.cpp)
+target_include_directories(story_bag_page_test PRIVATE runtime/src)
+target_compile_options(story_bag_page_test PRIVATE -UNDEBUG)
+add_test(NAME story_bag_page COMMAND story_bag_page_test)
 # the port's layout writer (runtime/src/mods/lyt_build.cpp); tools/story_mods/test_lyt.py compares its
 # output with the reference generator's
 add_executable(lyt_build_test runtime/tools/lyt_build_test.cpp runtime/src/mods/lyt_build.cpp runtime/src/mods/guest_png.cpp
@@ -768,6 +790,21 @@ add_executable(display_fallback_test runtime/tools/display_fallback_test.cpp run
 target_include_directories(display_fallback_test PRIVATE runtime/src runtime/include runtime/third_party/fmt/include)
 target_compile_options(display_fallback_test PRIVATE -UNDEBUG)
 add_test(NAME display_fallback COMMAND display_fallback_test)
+add_executable(pip_placement_test runtime/tools/pip_placement_test.cpp runtime/src/gfx/display_modes.cpp)
+target_include_directories(pip_placement_test PRIVATE runtime/src runtime/include runtime/third_party/fmt/include)
+target_compile_options(pip_placement_test PRIVATE -UNDEBUG)
+add_test(NAME pip_placement COMMAND pip_placement_test)
+if(APPLE)
+  add_executable(pip_preview_ui_test runtime/tools/pip_preview_ui_test.cpp runtime/src/gfx/display_modes.cpp)
+  target_include_directories(pip_preview_ui_test PRIVATE ${IMGUI_DIR} runtime/src runtime/include
+    ${CEMU_DIR} ${CEMU_DIR}/Cafe runtime/third_party/fmt/include)
+  target_compile_options(pip_preview_ui_test PRIVATE -UNDEBUG -ffunction-sections -fdata-sections)
+  target_link_options(pip_preview_ui_test PRIVATE -Wl,-dead_strip)
+  target_link_libraries(pip_preview_ui_test PRIVATE imgui)
+  add_test(NAME pip_preview_ui COMMAND pip_preview_ui_test)
+endif()
+
+
 if(WIN32 AND WWHD_SDL_HOST)
   get_target_property(SDL3_LIBRARY_TYPE SDL3::SDL3 TYPE)
   if(SDL3_LIBRARY_TYPE STREQUAL "SHARED_LIBRARY")
@@ -957,6 +994,21 @@ add_executable(perf_average_test runtime/tools/perf_average_test.cpp)
 target_include_directories(perf_average_test PRIVATE runtime/src)
 target_compile_options(perf_average_test PRIVATE -UNDEBUG)
 add_test(NAME perf_average COMMAND perf_average_test)
+add_executable(lock_on_runtime_test runtime/tools/lock_on_runtime_test.cpp runtime/src/mods/lock_on.cpp runtime/src/guest_addr_identity.c)
+target_include_directories(lock_on_runtime_test PRIVATE runtime/src runtime/include)
+target_compile_options(lock_on_runtime_test PRIVATE -UNDEBUG)
+add_test(NAME lock_on_runtime COMMAND lock_on_runtime_test)
+if(Python3_Interpreter_FOUND)
+  add_executable(lock_on_runtime_eu_test runtime/tools/lock_on_runtime_test.cpp runtime/src/mods/lock_on.cpp "${CMAKE_BINARY_DIR}/guest_map_fixture.c")
+  target_include_directories(lock_on_runtime_eu_test PRIVATE runtime/src runtime/include)
+  target_compile_options(lock_on_runtime_eu_test PRIVATE -UNDEBUG)
+  target_compile_definitions(lock_on_runtime_eu_test PRIVATE TEST_EU)
+  add_test(NAME lock_on_runtime_eu COMMAND lock_on_runtime_eu_test)
+endif()
+add_test(NAME lock_on_startup COMMAND ${CMAKE_COMMAND} -E env WWHD_MOD_LOCK_ON=1 WWHD_MOD_LOCK_ON_RANGE=2.5 WWHD_MOD_LOCK_ON_CYCLING=0 $<TARGET_FILE:lock_on_runtime_test> --startup 1 2.5 0)
+add_test(NAME lock_on_startup_invalid COMMAND ${CMAKE_COMMAND} -E env WWHD_MOD_LOCK_ON=0 WWHD_MOD_LOCK_ON_RANGE=nan WWHD_MOD_LOCK_ON_CYCLING=1 $<TARGET_FILE:lock_on_runtime_test> --startup 0 1 1)
+add_test(NAME lock_on_startup_clamp COMMAND ${CMAKE_COMMAND} -E env WWHD_MOD_LOCK_ON_RANGE=20 $<TARGET_FILE:lock_on_runtime_test> --startup 0 3 1)
+
 add_executable(move_speed_test runtime/tools/move_speed_test.cpp)
 target_include_directories(move_speed_test PRIVATE runtime/src)
 target_compile_options(move_speed_test PRIVATE -UNDEBUG)
@@ -991,6 +1043,14 @@ add_executable(cheats_test runtime/tools/cheats_test.cpp runtime/src/mods/cheats
 target_include_directories(cheats_test PRIVATE runtime/src runtime/include)
 target_compile_options(cheats_test PRIVATE -UNDEBUG)
 add_test(NAME cheats_story_progress COMMAND cheats_test)
+add_executable(moon_jump_policy_test runtime/tools/moon_jump_policy_test.cpp)
+target_include_directories(moon_jump_policy_test PRIVATE runtime/src)
+target_compile_options(moon_jump_policy_test PRIVATE -UNDEBUG)
+add_test(NAME moon_jump_policy COMMAND moon_jump_policy_test)
+add_executable(moon_jump_movement_test runtime/tools/moon_jump_movement_test.cpp runtime/src/true60_link.cpp)
+target_include_directories(moon_jump_movement_test PRIVATE runtime/src runtime/include)
+target_compile_options(moon_jump_movement_test PRIVATE -UNDEBUG)
+add_test(NAME moon_jump_movement COMMAND moon_jump_movement_test)
 if(Python3_Interpreter_FOUND)
   add_test(NAME repair_medli COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/savegame/repair_medli_test.py")
   add_test(NAME medli_scenario_evidence COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/runtime/tools/medli_scenario_test.py")
@@ -1000,6 +1060,31 @@ add_executable(guest_validation_test runtime/tools/guest_validation_test.cpp)
 target_include_directories(guest_validation_test PRIVATE runtime/include runtime/src)
 target_compile_options(guest_validation_test PRIVATE -UNDEBUG)
 add_test(NAME guest_validation COMMAND guest_validation_test)
+
+add_executable(story_world_manifest_test runtime/tools/story_world_manifest_test.cpp)
+target_include_directories(story_world_manifest_test PRIVATE runtime/src)
+target_compile_options(story_world_manifest_test PRIVATE -UNDEBUG)
+add_test(NAME story_world_manifest COMMAND story_world_manifest_test)
+add_executable(story_actors_test runtime/tools/story_actors_test.cpp)
+target_include_directories(story_actors_test PRIVATE runtime/src)
+target_compile_options(story_actors_test PRIVATE -UNDEBUG)
+add_test(NAME story_actor_flags COMMAND story_actors_test)
+add_executable(story_actors_runtime_test runtime/tools/story_actors_runtime_test.cpp runtime/src/mods/story_actors.cpp
+  runtime/src/guest_addr_identity.c)
+target_include_directories(story_actors_runtime_test PRIVATE runtime/include runtime/src)
+target_compile_options(story_actors_runtime_test PRIVATE -UNDEBUG)
+add_test(NAME story_actor_native_contract COMMAND story_actors_runtime_test)
+add_executable(story_scenes_core_test runtime/tools/story_scenes_core_test.cpp)
+target_include_directories(story_scenes_core_test PRIVATE runtime/src)
+target_compile_options(story_scenes_core_test PRIVATE -UNDEBUG)
+add_test(NAME story_scene_lifecycle COMMAND story_scenes_core_test)
+add_executable(story_scenes_native_test runtime/tools/story_scenes_native_test.cpp runtime/src/mods/story_scenes.cpp
+  runtime/src/guest_addr_identity.c)
+target_include_directories(story_scenes_native_test PRIVATE runtime/include runtime/src runtime/src/mods)
+target_compile_options(story_scenes_native_test PRIVATE -UNDEBUG)
+add_test(NAME story_scene_native_contract COMMAND story_scenes_native_test)
+add_test(NAME mod_world_content_startup COMMAND mod_package_test --world-content-startup
+  "${CMAKE_SOURCE_DIR}/examples/guest-mods/sdk-v3-windfall")
 
 add_executable(guest_hooks_test runtime/tools/guest_hooks_test.cpp runtime/tools/guest_hooks_body.c runtime/src/mods/guest_png.cpp runtime/src/mods/mod_archive.cpp)
 # The entry musttail regression must reach the optimized backend even in Debug builds.
@@ -1018,15 +1103,47 @@ add_executable(story_chart_test runtime/tools/story_chart_test.cpp runtime/src/m
 target_include_directories(story_chart_test PRIVATE runtime/include runtime/src)
 target_compile_options(story_chart_test PRIVATE -UNDEBUG)
 add_test(NAME story_chart COMMAND story_chart_test)
+# mod treasure charts (a): reserved save numbers, salvage points, spawn and registration on a synthetic registry
+add_executable(story_treasure_salvage_test runtime/tools/story_treasure_salvage_test.cpp runtime/src/mods/story_treasure_salvage.cpp
+               runtime/src/mods/story_chart.cpp runtime/src/mods/story_store.cpp runtime/src/guest_addr_identity.c)
+target_include_directories(story_treasure_salvage_test PRIVATE runtime/include runtime/src)
+target_compile_options(story_treasure_salvage_test PRIVATE -UNDEBUG)
+add_test(NAME story_treasure_salvage COMMAND story_treasure_salvage_test)
+# mod treasure charts, chart state: the salvage code's collect-map questions for reserved save numbers
+add_executable(story_treasure_state_test runtime/tools/story_treasure_state_test.cpp runtime/src/mods/story_treasure_state.cpp
+               runtime/src/mods/story_chart.cpp runtime/src/mods/story_store.cpp runtime/src/guest_addr_identity.c)
+target_include_directories(story_treasure_state_test PRIVATE runtime/include runtime/src)
+target_compile_options(story_treasure_state_test PRIVATE -UNDEBUG)
+add_test(NAME story_treasure_state COMMAND story_treasure_state_test)
 # the story notebook: quest list, save record, page navigation, services and item menu hooks
 add_executable(story_notebook_test runtime/tools/story_notebook_test.cpp runtime/src/mods/story_notebook.cpp
                runtime/tools/story_notebook_layout_stub.cpp runtime/src/mods/story_mail.cpp runtime/src/mods/story_store.cpp
-               runtime/src/mods/story_chart.cpp runtime/src/mods/guest_png.cpp runtime/src/mods/mod_archive.cpp runtime/src/guest_addr_identity.c
+               runtime/src/mods/story_chart.cpp runtime/src/mods/story_items.cpp runtime/src/mods/story_item_buttons.cpp runtime/src/mods/guest_png.cpp runtime/src/mods/mod_archive.cpp runtime/src/guest_addr_identity.c
                ${WWHD_NPC_CATALOGUE})
 target_include_directories(story_notebook_test PRIVATE runtime/include runtime/src runtime/src/mods)
 target_compile_options(story_notebook_test PRIVATE -UNDEBUG)
 target_link_libraries(story_notebook_test PRIVATE ZLIB::ZLIB)
 add_test(NAME story_notebook COMMAND story_notebook_test)
+# mod items: save record, manifest items, registry, services, bag actions and the item table hooks
+add_executable(story_items_test runtime/tools/story_items_test.cpp runtime/src/mods/story_items.cpp runtime/src/mods/story_store.cpp runtime/src/guest_addr_identity.c ${WWHD_NPC_CATALOGUE})
+target_include_directories(story_items_test PRIVATE runtime/include runtime/src runtime/src/mods)
+target_compile_options(story_items_test PRIVATE -UNDEBUG)
+add_test(NAME story_items COMMAND story_items_test)
+# mod items and the notebook on X/Y/R: the decisions, the menu assignment, the game's reads and the item use
+add_executable(story_item_buttons_test runtime/tools/story_item_buttons_test.cpp runtime/src/mods/story_item_buttons.cpp runtime/src/mods/story_notebook.cpp runtime/tools/story_notebook_layout_stub.cpp
+               runtime/src/mods/story_mail.cpp runtime/src/mods/story_store.cpp runtime/src/mods/story_chart.cpp runtime/src/mods/story_items.cpp
+               runtime/src/mods/guest_png.cpp runtime/src/mods/mod_archive.cpp runtime/src/guest_addr_identity.c ${WWHD_NPC_CATALOGUE})
+target_include_directories(story_item_buttons_test PRIVATE runtime/include runtime/src runtime/src/mods)
+target_compile_options(story_item_buttons_test PRIVATE -UNDEBUG)
+target_link_libraries(story_item_buttons_test PRIVATE ZLIB::ZLIB)
+add_test(NAME story_item_buttons COMMAND story_item_buttons_test)
+# mod treasure charts, the chest's item: game items, the mod item's stand-in and its get, on a synthetic save
+add_executable(story_treasure_chest_test runtime/tools/story_treasure_chest_test.cpp runtime/src/mods/story_treasure_chest.cpp
+               runtime/src/mods/story_items.cpp runtime/src/mods/story_chart.cpp runtime/src/mods/story_mail.cpp runtime/src/mods/story_store.cpp
+               runtime/src/guest_addr_identity.c ${WWHD_NPC_CATALOGUE})
+target_include_directories(story_treasure_chest_test PRIVATE runtime/include runtime/src runtime/src/mods)
+target_compile_options(story_treasure_chest_test PRIVATE -UNDEBUG)
+add_test(NAME story_treasure_chest COMMAND story_treasure_chest_test)
 if(Python3_Interpreter_FOUND)
   add_test(NAME release_sdk_package COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/release/test_sdk_package.py")
   add_test(NAME story_notebook_model COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/story_mods/test_notebook_model.py")
@@ -1138,6 +1255,11 @@ if(WWHD_HAS_VULKAN)
   target_include_directories(attachment_view_usage_test SYSTEM PRIVATE $<TARGET_PROPERTY:Vulkan::Vulkan,INTERFACE_INCLUDE_DIRECTORIES>)
   target_compile_options(attachment_view_usage_test PRIVATE -UNDEBUG)
   add_test(NAME attachment_view_usage COMMAND attachment_view_usage_test)
+  add_executable(sampler_filtering_test runtime/tools/sampler_filtering_test.cpp)
+  target_include_directories(sampler_filtering_test PRIVATE runtime/src)
+  target_include_directories(sampler_filtering_test SYSTEM PRIVATE $<TARGET_PROPERTY:Vulkan::Vulkan,INTERFACE_INCLUDE_DIRECTORIES>)
+  target_compile_options(sampler_filtering_test PRIVATE -UNDEBUG)
+  add_test(NAME sampler_filtering COMMAND sampler_filtering_test)
   add_executable(barrier_state_test runtime/tools/barrier_state_test.cpp)
   target_include_directories(barrier_state_test PRIVATE runtime/src)
   target_include_directories(barrier_state_test SYSTEM PRIVATE $<TARGET_PROPERTY:Vulkan::Vulkan,INTERFACE_INCLUDE_DIRECTORIES>)
@@ -1458,6 +1580,8 @@ if(WWHD_SDL_HOST AND UNIX AND NOT ANDROID)
     target_link_options(overlay_input_integration_test PRIVATE -Wl,--gc-sections)
   endif()
   target_link_libraries(overlay_input_integration_test PRIVATE imgui SDL3::SDL3 Threads::Threads)
+  add_test(NAME shortcut_ui COMMAND overlay_input_integration_test --shortcuts-ui)
+  set_tests_properties(shortcut_ui PROPERTIES ENVIRONMENT "WWHD_NO_AUDIO=1" TIMEOUT 30)
   add_test(NAME overlay_window_target COMMAND overlay_input_integration_test --window-target)
   set_tests_properties(overlay_window_target PROPERTIES ENVIRONMENT "WWHD_OVERLAY_TRACE=1;WWHD_NO_AUDIO=1" TIMEOUT 30)
   add_test(NAME overlay_input_integration COMMAND overlay_input_integration_test)
@@ -1534,3 +1658,18 @@ foreach(platform IN ITEMS desktop android)
   endif()
   add_test(NAME save_path_${platform} COMMAND save_path_${platform}_test)
 endforeach()
+
+if(WWHD_HAS_VULKAN)
+  add_executable(vertex_format_policy_test runtime/tools/vertex_format_policy_test.cpp)
+  target_include_directories(vertex_format_policy_test PRIVATE runtime/src
+    $<TARGET_PROPERTY:Vulkan::Vulkan,INTERFACE_INCLUDE_DIRECTORIES>)
+  target_compile_options(vertex_format_policy_test PRIVATE -UNDEBUG)
+  add_test(NAME vertex_format_policy COMMAND vertex_format_policy_test)
+endif()
+
+# Validation capture must keep forwarding after its bounded copy is full.
+add_executable(validation_diagnostics_test runtime/tools/validation_diagnostics_test.cpp)
+target_include_directories(validation_diagnostics_test PRIVATE runtime/src)
+target_compile_options(validation_diagnostics_test PRIVATE -UNDEBUG)
+target_link_libraries(validation_diagnostics_test PRIVATE Threads::Threads)
+add_test(NAME validation_diagnostics COMMAND validation_diagnostics_test)

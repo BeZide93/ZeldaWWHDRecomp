@@ -17,3 +17,12 @@ bool update_closed() { return false; }
 bool drawing() { return false; }
 bool animating() { return false; }
 }  // namespace story_notebook_layout
+
+// World actors/scenes are separate integration services; notebook tests use ordinary residents.
+struct Cpu;
+namespace story_actors {
+bool people_message(Cpu*) { return false; }
+bool people_next_message(Cpu*) { return false; }
+bool people_execute(Cpu*,bool) { return false; }
+}
+namespace story_scenes { void trigger(const std::string&,const std::string&,const std::string&,unsigned) {} }

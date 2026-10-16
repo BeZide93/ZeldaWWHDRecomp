@@ -17,6 +17,8 @@
 #include "mods/story_store.h"
 #include "mods/story_mail.h"
 #include "mods/story_mail_book.h"
+#include "mods/story_items.h"
+#include "mods/story_item_buttons.h"
 #include "input.h"
 #include "runtime.h"
 
@@ -41,6 +43,9 @@ using story_mail::Book;
 
 void log_msg(const char* fmt, ...) {
     (void)fmt;
+}
+namespace mods {
+uint64_t step() { return 0; }  // story_item_buttons.cpp's research aid
 }
 namespace input {
 bool g_pro = false;
@@ -411,6 +416,7 @@ void original(Cpu* c, uint32_t fn) {
     case 0x0262F880: c->r[3] = c->r[4] == 0x99 ? 0x26 : c->r[4] == 0x9C ? 0x24 : 0x37; break;
     case 0x0268F060: calls.push_back("caption"); break;
     case 0x02630A64: calls.push_back("pick up"); break;
+    case 0x02630FC4: calls.push_back("put back"); break;
     case 0x0268FF50: calls.push_back("window"); break;
     case 0x026302B8: calls.push_back("float"); break;
     case 0x026333F0: {  // setVisible: the icon pane follows the item's visibility
@@ -463,7 +469,7 @@ void test_hooks() {
             [](uint32_t, void (*)(Cpu*)) { assert(!"installed despite a conflict"); });
     assert(!installed());
     install([](uint32_t) { return std::string(); }, [](uint32_t a, void (*fn)(Cpu*)) { hooked[a] = fn; });
-    assert(installed() && hooked.size() == 12);
+    assert(installed() && hooked.size() == 13);
     Book b = story_store::book();
     // no notebook yet: the bag window shows the save as it is
     b.erase(story_mail::kRecordItem, story_mail::kItemNotebook);
@@ -510,13 +516,20 @@ void test_hooks() {
     p.buttons = input::kB;
     pad(p);
     assert(p.buttons == input::kB);  // a new press reaches the game
-    // a touch on the notebook: the page, without the game's pick-up (the lift would show the stand-in's
-    // icon); on a game item only the pick-up
+    // a tap on the notebook: the game's pick-up and put-back, then the page; on a game item only the
+    // game's; a touch that becomes a drag (lifted towards X/Y/R) opens nothing
     calls.clear();
     call(0x02630A64, kChild + 0x200);
-    assert(calls == std::vector<std::string>{"pick up"} && !page_open());
+    call(0x02630FC4, kChild + 0x200);
+    assert((calls == std::vector<std::string>{"pick up", "put back"}) && !page_open());
     call(0x02630A64, kChild);
-    assert(calls.size() == 1 && page_open());
+    assert(calls.size() == 3 && !page_open());
+    call(0x026302B8, kChild);  // lifted
+    call(0x02630FC4, kChild);
+    assert(!page_open());
+    call(0x02630A64, kChild);
+    call(0x02630FC4, kChild);
+    assert(page_open());
     close_page();
     p = {};
     pad(p);
@@ -530,12 +543,14 @@ void test_hooks() {
     call(0x026333F0, kChild, 1);
     call(0x026333F0, kChild + 0x200, 1);
     assert(calls.size() == 2 && !(ld8(kIconA + 0x44) & 1) && (ld8(kIconB + 0x44) & 1));
-    // the notebook can't go on X/Y/R
+    // the notebook goes on X/Y/R in the story block (record 15), never in the save's key; a game item
+    // put on the same button takes it back
     calls.clear();
-    assert(call(0x0268F420, kMenu, 0x31) == 0xFF && call(0x0268F420, kMenu, 0x30) == 0x30);
+    assert(call(0x0268F420, kMenu, 0x31) == 0x31 && call(0x0268F420, kMenu, 0x30) == 0x30);
     call(0x02714B0C, 0, 1, 0, 0x31);
+    assert(calls.empty() && story_items::notebook_on_button(1) && story_item_buttons::button_item(1) == 0xA0);
     call(0x02714B0C, 0, 1, 0, 0x30);
-    assert(calls == std::vector<std::string>{"assign 48"});
+    assert(calls == std::vector<std::string>{"assign 48"} && !story_items::notebook_on_button(1) && !story_item_buttons::button_item(1));
     // a full bag: no place for the notebook until one is free
     uint8_t keep[8];
     memcpy(keep, g_reserve, 8);
@@ -634,11 +649,11 @@ void test_hooks() {
         assert(!icon_place().shown);
         st8(kWin + 0x44, 1);
         assert(icon_place().shown);
-        // X/Y/R on the notebook doesn't lift it; on a game item it does
+        // X/Y/R lifts the notebook towards the button, as a game item
         calls.clear();
         call(0x026302B8, kChild);
         call(0x026302B8, kChild + 0x200);
-        assert(calls == std::vector<std::string>{"float"});
+        assert((calls == std::vector<std::string>{"float", "float"}));
         // a state load: nothing until the window runs again
         state_loaded();
         next_frame();
@@ -658,6 +673,7 @@ void test_hooks() {
             p2 = {};
             pad(p2);
             call(0x02630A64, kChild);
+            call(0x02630FC4, kChild);
             assert(page_open());
             pad(p2);  // the touch ended
             p2.buttons = input::kB;
@@ -1125,14 +1141,18 @@ void put_file(const std::filesystem::path& p, const std::vector<uint8_t>& b) {
 }
 std::map<uint32_t, void (*)(Cpu*)> store_hooks;
 std::vector<uint32_t> store_calls;
+// the guest stack of the store hooks' calls (the top of the arena): initdata_to_card's frame lies below it
+constexpr uint32_t kStoreStack = kArena + 0x3F000, kInitdataFrame = 0x420;
+bool g_initdata_frame_clear = false;  // what the last initdata_to_card call found in its frame
 void store_original(Cpu* c, uint32_t fn) {
     store_calls.push_back(fn);
     assert(fn == 0x025BA7B0 || fn == 0x025BA9FC || fn == 0x025BAC50);
-    (void)c;
+    assert(c->r[1] == kStoreStack);
+    if (fn == 0x025BAC50) g_initdata_frame_clear = story_block::all_zero(mem::ptr(c->r[1] - kInitdataFrame), kInitdataFrame);
 }
 void store_hook(uint32_t fn, uint32_t data_num) {
     Cpu c{};
-    c.r[3] = kSave + 0x20, c.r[4] = kArena + 0x30000, c.r[5] = data_num;
+    c.r[1] = kStoreStack, c.r[3] = kSave + 0x20, c.r[4] = kArena + 0x30000, c.r[5] = data_num;
     store_hooks.at(fn)(&c);
 }
 
@@ -1232,7 +1252,15 @@ void test_story_store() {
     }
     store_hook(0x025BA7B0, 1);
     assert(story_store::book().get(story_mail::kRecordQuest, 0x0BAD) == 4);
+    // a new Quest Log's data comes from initdata_to_card's stack frame, padding included: the hook clears
+    // the frame first, so stale bytes of earlier calls (0x14 -> 0xD4 in each status C's status A byte 0x17
+    // after the item menu) never reach the save; the caller's frame above it is left alone
+    memset(mem::ptr(kStoreStack - kInitdataFrame - 0x40), 0xC0, kInitdataFrame + 0x80);
+    g_initdata_frame_clear = false;
     store_hook(0x025BAC50, 1);
+    assert(g_initdata_frame_clear);
+    for (uint32_t o = 0; o < 0x40; o++)
+        assert(ld8(kStoreStack + o) == 0xC0 && ld8(kStoreStack - kInitdataFrame - 0x40 + o) == 0xC0);
     store_hook(0x025BA7B0, 1);
     assert(story_store::book().empty());
     // loading a Quest Log moves the old record out of the game's reserved bytes
@@ -1418,6 +1446,7 @@ void test_takeover_hooks() {
         constexpr uint32_t kLetterChild = kArena + 0x5000;
         st32(kLetterChild + 0xEC, 0xA1);
         call(0x02630A64, kLetterChild);
+        call(0x02630FC4, kLetterChild);
         assert(page_open() && caption_open());
         input::PadState held;
         held.touch = true;
@@ -2008,6 +2037,7 @@ void test_manifest_charts() {
 
 int main() {
     assert(map(kGlobals, 0x10000) && map(kArena, 0x40000));
+    assert(map(0x10470000, 0x10000));  // g_dComIfG_gameInfo's play.mSelectItem (story_item_buttons.cpp)
     story_store::set_memory(kArena + 0x20000);
     test_list();
     test_record();

@@ -39,6 +39,7 @@ namespace fs=std::filesystem;
 using json::Value;
 struct Requirement {std::string id,version;};
 struct Manifest {
+    Value world; // cached validated manifest for aggregate actor/scene graph checks
     std::string id,name,version,author,description,kind,binary,problem,fingerprint,trust_fingerprint,manifest_fingerprint; // fingerprint: SHA-256 of the native library or guest ELF
     std::vector<Requirement> dependencies;
     std::vector<std::string> conflicts;
@@ -141,7 +142,7 @@ bool valid_option(const Option& o,const Value& v){
 Manifest manifest(const fs::path& path){
     auto manifest_text=read_text(path/"manifest.json");auto v=json::parse(manifest_text);require(v.type==Value::Object,"Manifest must be an object");
     require(v.get("format_version").type==Value::Number&&v.get("format_version").number==1,"Unsupported manifest format");
-    Manifest m;m.manifest_fingerprint=hash::sha256_text(manifest_text);m.id=string_field(v,"id",false,64);require(id_ok(m.id)&&!manager::find(m.id),"Invalid or reserved mod ID");
+    Manifest m;if(v.get("actors").type!=Value::Null||v.get("scenes").type!=Value::Null)m.world=v;m.manifest_fingerprint=hash::sha256_text(manifest_text);m.id=string_field(v,"id",false,64);require(id_ok(m.id)&&!manager::find(m.id),"Invalid or reserved mod ID");
     m.name=string_field(v,"name",false,128);require(!m.name.empty(),"Mod name is empty");
     m.version=string_field(v,"version",false,64);version(m.version);
     m.author=string_field(v,"author",true,256);m.description=string_field(v,"description",true);
@@ -153,9 +154,12 @@ Manifest manifest(const fs::path& path){
     if(!minimum.empty()&&version(minimum)>version(kManagerVersion))m.problem="Requires mod manager "+minimum;
     // story quests (story_manifest.h): an NPC this port's catalogue doesn't know, or a newer catalogue
     // version, keeps the mod from being enabled with the reason, never a silent no-op
-    if(m.problem.empty()&&(v.get("quests").type!=Value::Null||v.get("npc_catalogue").type!=Value::Null||v.get("charts").type!=Value::Null)){
-        std::vector<story_notebook::ManifestQuest> quests;std::vector<story_notebook::ManifestChart> charts;std::string why;
-        if(!story_notebook::parse_quests(v,quests,why)||!story_notebook::parse_charts(v,charts,why))m.problem="Story quests: "+why;
+    if(m.problem.empty()&&(v.get("quests").type!=Value::Null||v.get("npc_catalogue").type!=Value::Null||v.get("charts").type!=Value::Null||v.get("letters").type!=Value::Null||v.get("items").type!=Value::Null||v.get("actors").type!=Value::Null||v.get("scenes").type!=Value::Null)){
+        std::vector<story_notebook::ManifestQuest> quests;std::vector<story_notebook::ManifestChart> charts;
+        std::vector<story_notebook::ManifestActor> actors;std::vector<story_notebook::ManifestScene> scenes;
+        std::vector<story_notebook::ManifestLetter> letters;std::vector<story_notebook::ManifestItem> items;std::string why;
+        if(!story_notebook::parse_quests(v,quests,why)||!story_notebook::parse_charts(v,charts,why)||!story_notebook::parse_letters(v,letters,why)||
+           !story_notebook::parse_items(v,items,why)||!story_notebook::parse_actors(v,actors,why)||!story_notebook::parse_scenes(v,scenes,why))m.problem="Story quests: "+why;
     }
     if(m.kind=="native") {
         require(v.get("abi_version").type==Value::Number&&v.get("abi_version").number==1,"Unsupported native mod ABI");
@@ -201,7 +205,7 @@ Manifest manifest(const fs::path& path){
     const auto& deps=v.get("dependencies");require(deps.type==Value::Null||deps.type==Value::Array,"Dependencies must be an array");
     for(const auto& dep:deps.array){Requirement r;r.id=string_field(dep,"id",false,80);r.version=string_field(dep,"minimum_version",true,64);if(r.version.empty())r.version="0.0.0";version(r.version);require(id_ok(r.id)||(r.id.starts_with("builtin:")&&manager::find(r.id.substr(8))),"Invalid dependency ID");m.dependencies.push_back(r);}
     // every quest mod depends on the story system's required package (required.h), declared or not
-    if(m.id!=story_notebook::kNotebookPackage&&(v.get("quests").type!=Value::Null||v.get("charts").type!=Value::Null)&&
+    if(m.id!=story_notebook::kNotebookPackage&&(v.get("quests").type!=Value::Null||v.get("charts").type!=Value::Null||v.get("actors").type!=Value::Null||v.get("scenes").type!=Value::Null)&&
        std::none_of(m.dependencies.begin(),m.dependencies.end(),[](const Requirement& r){return r.id==story_notebook::kNotebookPackage;}))
         m.dependencies.push_back({story_notebook::kNotebookPackage,"0.0.0"});
     const auto& conflicts=v.get("conflicts");require(conflicts.type==Value::Null||conflicts.type==Value::Array,"Conflicts must be an array");
@@ -254,7 +258,13 @@ Manifest manifest(const fs::path& path){
     }
     if(m.kind=="native"||m.kind=="guest"||!m.setup_tools.empty())m.trust_fingerprint=package_fingerprint(path);
     if(m.trust_fingerprint.empty())m.trust_fingerprint=m.fingerprint;
-    if(m.kind=="content")require(m.dependencies.empty(),"Content packages do not support dependencies yet");
+    if(m.kind=="content") {
+        // Declarative world content uses the story service without carrying executable guest code.
+        // Keep the existing dependency restriction for all other content and dependencies.
+        const bool world_content=!v.get("actors").array.empty()||!v.get("scenes").array.empty();
+        require(m.dependencies.empty()||(world_content&&std::all_of(m.dependencies.begin(),m.dependencies.end(),[](const Requirement& r){return r.id==story_notebook::kNotebookPackage;})),
+                "Content packages only support the Story Notebook dependency for actors or scenes");
+    }
     return m;
 }
 Value& profile(){return database["profiles"][database.get("active").string("Default")];}
@@ -325,6 +335,26 @@ void load_fast_forward_options(const Value& options) {
     const auto& mute = options.get("fast-forward.mute");
     if (!std::getenv("WWHD_MOD_FF_MUTE")) set_fast_forward_mute(mute.type == Value::Bool ? mute.boolean : mute.type == Value::Number ? mute.number != 0 : true);
 }
+void save_lock_on_options(Value& options) {
+    options["lock-on.range"] = double(lock_on_range());
+    options["lock-on.cycling"] = lock_on_cycling();
+}
+void load_lock_on_options(const Value& options, bool startup = false) {
+    const auto& range = options.get("lock-on.range");
+    // Older profiles inherit host preferences at startup; switching profiles restores defaults.
+    if (!std::getenv("WWHD_MOD_LOCK_ON_RANGE") && !(startup && range.type == Value::Null))
+        set_lock_on_range(range.type == Value::Number && std::isfinite(range.number) &&
+                          range.number >= 1 && range.number <= 3 ? float(range.number) : 1.f);
+    const auto& cycling = options.get("lock-on.cycling");
+    if (!std::getenv("WWHD_MOD_LOCK_ON_CYCLING") && !(startup && cycling.type == Value::Null)) {
+        bool on = true;
+        if (cycling.type == Value::Bool) on = cycling.boolean;
+        // remember_option stores checkbox values as numeric 0/1.
+        else if (cycling.type == Value::Number && (cycling.number == 0 || cycling.number == 1))
+            on = cycling.number == 1;
+        set_lock_on_cycling(on);
+    }
+}
 void save_move_speed_options(Value& options) {
     options["move-speed.land"] = double(move_speed_land_factor());
     options["move-speed.swim"] = double(move_speed_swim_factor());
@@ -368,7 +398,7 @@ void load_traversal_options(const Value& options) {
         option.apply(v.type == Value::Number && v.number >= 1.0 && v.number <= 3.0 ? float(v.number) : traversal::kDefaultFactor);
     }
 }
-void defaults(){database=Value{};database["format_version"]=1;database["active"]="Default";auto& p=profile();save_fast_forward_options(p["builtin_options"]);save_move_speed_options(p["builtin_options"]);save_traversal_options(p["builtin_options"]);p["enabled"].type=Value::Object;for(const auto& e:manager::entries())p["builtins"][e.id]=e.enabled();p["builtin_options"]["direct-camera.speed"]=double(camera_speed());p["builtin_options"]["mouse-camera.sensitivity"]=double(mouse_sensitivity());}
+void defaults(){database=Value{};database["format_version"]=1;database["active"]="Default";auto& p=profile();save_fast_forward_options(p["builtin_options"]);save_move_speed_options(p["builtin_options"]);save_traversal_options(p["builtin_options"]);save_lock_on_options(p["builtin_options"]);p["enabled"].type=Value::Object;for(const auto& e:manager::entries())p["builtins"][e.id]=e.enabled();p["builtin_options"]["direct-camera.speed"]=double(camera_speed());p["builtin_options"]["mouse-camera.sensitivity"]=double(mouse_sensitivity());}
 void scan(){records.clear();if(!ready)return;fs::create_directories(root/"Mods");for(const auto& e:fs::directory_iterator(root/"Mods")){if(!e.is_directory()||e.is_symlink()||!id_ok(e.path().filename().string()))continue;Record r;r.path=e.path();try{r.manifest=manifest(e.path());require(r.manifest.id==e.path().filename(),"Folder and manifest IDs differ");}catch(const std::exception& ex){r.manifest.id=e.path().filename().string();r.manifest.name=r.manifest.id;r.manifest.problem=ex.what();}auto id=r.manifest.id;records.emplace(id,std::move(r));}}
 std::string source_warning(const std::vector<catalogue::Step>& steps) {
     catalogue::Sources sources(database.get("game_sources"));
@@ -417,6 +447,9 @@ std::vector<std::string> repair_graphics(){
     return messages;
 }
 void validate_conflicts(const std::set<std::string>& enabled,const Value* planned=nullptr){
+    std::vector<std::pair<std::string,Value>> world_packages;
+    for(const auto& id:enabled)if(records.at(id).manifest.world.type!=Value::Null)world_packages.push_back({id,records.at(id).manifest.world});
+    std::string world_error;require(story_notebook::world_manifest::validate_world_packages(world_packages,world_error),world_error);
     auto builtin_on=[&](const std::string& id){return planned?planned->get(id).boolean:manager::find(id)->enabled();};
     std::map<std::string,std::string> setting_owners,file_owners;
     std::vector<cemu::Selection> graphics;
@@ -521,7 +554,7 @@ void initialize(){
     try{fs::create_directories(root);if(fs::exists(root/"profiles.json")){auto saved=json::parse(read_text(root/"profiles.json"));require(saved.get("format_version").type==Value::Number&&saved.get("format_version").number==1,"Unsupported profile format");require(saved.get("profiles").type==Value::Object&&!saved.get("profiles").object.empty(),"Invalid profiles");require(saved.get("active").type==Value::String&&saved.get("profiles").object.contains(saved.get("active").text),"Invalid active profile");database=std::move(saved);}scan();
         {auto messages=repair_graphics();if(!messages.empty()){save();notices.insert(notices.end(),messages.begin(),messages.end());}}
         for(const auto& e:manager::entries()){const auto& v=profile().get("builtins").get(e.id);if(!std::getenv(e.startup_env)&&v.type==Value::Bool)e.apply(v.boolean);}
-        const auto& options=profile().get("builtin_options");load_fast_forward_options(options);load_move_speed_options(options,true);load_traversal_options(options);auto speed=options.get("direct-camera.speed"),sens=options.get("mouse-camera.sensitivity");if(!std::getenv("WWHD_MOD_CAMERA_SPEED")&&speed.type==Value::Number&&speed.number>=.5&&speed.number<=2)set_camera_speed(speed.number);if(!std::getenv("WWHD_MOD_MOUSE_SENS")&&sens.type==Value::Number&&sens.number>=.08&&sens.number<=.3)set_mouse_sensitivity(sens.number);
+        const auto& options=profile().get("builtin_options");load_fast_forward_options(options);load_move_speed_options(options,true);load_traversal_options(options);load_lock_on_options(options,true);auto speed=options.get("direct-camera.speed"),sens=options.get("mouse-camera.sensitivity");if(!std::getenv("WWHD_MOD_CAMERA_SPEED")&&speed.type==Value::Number&&speed.number>=.5&&speed.number<=2)set_camera_speed(speed.number);if(!std::getenv("WWHD_MOD_MOUSE_SENS")&&sens.type==Value::Number&&sens.number>=.08&&sens.number<=.3)set_mouse_sensitivity(sens.number);
         // A rebuild offer queues an enable for this profile. Apply it only in a
         // new process whose generated code registered the actual hook marker.
         if(code_mod_support&&!profile().get("code_mod_pending").object.empty()) {
@@ -743,6 +776,11 @@ bool run_setup_tool(const std::string& id,const std::string& step_id,std::string
                 // .pyc files made every later step report "Package changed" (gc-minimap's prepare tool
                 // imports its own modules)
                 command.insert(command.begin()+std::ptrdiff_t(bridge.python.size()),"-B");
+                // The Windows embeddable Python doesn't put the script's folder on sys.path, so a tool
+                // importing its own modules failed there (issue #224): run it through a bootstrap that adds it
+                command.insert(command.begin()+std::ptrdiff_t(bridge.python.size())+1,{"-c",
+                    "import os,runpy,sys;s=sys.argv[1];sys.path.insert(0,os.path.dirname(os.path.abspath(s)));"
+                    "sys.argv=sys.argv[1:];runpy.run_path(s,run_name='__main__')"});
             }
             // A failed rerun must not reuse an earlier success and leftover outputs.
             auto previous=database;database["setup_receipts"][id].object.erase(step_id);
@@ -870,8 +908,8 @@ std::vector<std::string> take_notices(){std::lock_guard guard(mutex);auto result
 void disable_all(){std::string ignored;operation(ignored,[&]{auto previous=database;for(const auto& [id,r]:records)profile()["enabled"][id]=false;profile()["setup_pending"].object.clear();try{save();}catch(...){database=previous;throw;}dirty=true;});manager::disable_all();}
 std::vector<std::string> profiles(){std::lock_guard guard(mutex);std::vector<std::string> result;if(ready)for(const auto& [name,p]:database.get("profiles").object)result.push_back(name);return result;}
 std::string current_profile(){std::lock_guard guard(mutex);return ready?database.get("active").string():"Default";}
-bool create_profile(const std::string& name,std::string& error){return operation(error,[&]{require(!name.empty()&&name.size()<=64&&name.find('\0')==std::string::npos,"Invalid profile name");require(database.get("profiles").object.size()<64,"Profile limit reached");require(!database.get("profiles").object.contains(name),"Profile already exists");auto previous=database;Value copy=profile();copy["setup_pending"].object.clear();save_fast_forward_options(copy["builtin_options"]);save_move_speed_options(copy["builtin_options"]);save_traversal_options(copy["builtin_options"]);for(const auto& e:manager::entries())copy["builtins"][e.id]=e.enabled();copy["builtin_options"]["direct-camera.speed"]=double(camera_speed());copy["builtin_options"]["mouse-camera.sensitivity"]=double(mouse_sensitivity());database["profiles"][name]=std::move(copy);try{save();}catch(...){database=previous;throw;}});}
-bool select_profile(const std::string& name,std::string& error){Value chosen;bool ok=operation(error,[&]{for(const auto& [id,r]:records)require(!r.loading,"Wait for mod preparation to finish before changing profiles");require(database.get("profiles").object.contains(name),"Profile not found");auto previous=database;database["active"]=name;try{auto messages=repair_graphics();order(enabled_set());validate_conflicts(enabled_set(),&profile().get("builtins"));save();notices.insert(notices.end(),messages.begin(),messages.end());}catch(...){database=previous;throw;}chosen=profile();profile_changed=true;dirty=true;});if(ok){for(const auto& e:manager::entries()){const auto& v=chosen.get("builtins").get(e.id);manager::set_enabled(e.id,v.type==Value::Bool&&v.boolean);}load_fast_forward_options(chosen.get("builtin_options"));load_move_speed_options(chosen.get("builtin_options"));load_traversal_options(chosen.get("builtin_options"));auto speed=chosen.get("builtin_options").get("direct-camera.speed"),sens=chosen.get("builtin_options").get("mouse-camera.sensitivity");if(speed.type==Value::Number&&speed.number>=.5&&speed.number<=2)set_camera_speed(speed.number);if(sens.type==Value::Number&&sens.number>=.08&&sens.number<=.3)set_mouse_sensitivity(sens.number);}return ok;}
+bool create_profile(const std::string& name,std::string& error){return operation(error,[&]{require(!name.empty()&&name.size()<=64&&name.find('\0')==std::string::npos,"Invalid profile name");require(database.get("profiles").object.size()<64,"Profile limit reached");require(!database.get("profiles").object.contains(name),"Profile already exists");auto previous=database;Value copy=profile();copy["setup_pending"].object.clear();save_fast_forward_options(copy["builtin_options"]);save_move_speed_options(copy["builtin_options"]);save_traversal_options(copy["builtin_options"]);save_lock_on_options(copy["builtin_options"]);for(const auto& e:manager::entries())copy["builtins"][e.id]=e.enabled();copy["builtin_options"]["direct-camera.speed"]=double(camera_speed());copy["builtin_options"]["mouse-camera.sensitivity"]=double(mouse_sensitivity());database["profiles"][name]=std::move(copy);try{save();}catch(...){database=previous;throw;}});}
+bool select_profile(const std::string& name,std::string& error){Value chosen;bool ok=operation(error,[&]{for(const auto& [id,r]:records)require(!r.loading,"Wait for mod preparation to finish before changing profiles");require(database.get("profiles").object.contains(name),"Profile not found");auto previous=database;database["active"]=name;try{auto messages=repair_graphics();order(enabled_set());validate_conflicts(enabled_set(),&profile().get("builtins"));save();notices.insert(notices.end(),messages.begin(),messages.end());}catch(...){database=previous;throw;}chosen=profile();profile_changed=true;dirty=true;});if(ok){for(const auto& e:manager::entries()){const auto& v=chosen.get("builtins").get(e.id);manager::set_enabled(e.id,v.type==Value::Bool&&v.boolean);}load_fast_forward_options(chosen.get("builtin_options"));load_move_speed_options(chosen.get("builtin_options"));load_traversal_options(chosen.get("builtin_options"));load_lock_on_options(chosen.get("builtin_options"));auto speed=chosen.get("builtin_options").get("direct-camera.speed"),sens=chosen.get("builtin_options").get("mouse-camera.sensitivity");if(speed.type==Value::Number&&speed.number>=.5&&speed.number<=2)set_camera_speed(speed.number);if(sens.type==Value::Number&&sens.number>=.08&&sens.number<=.3)set_mouse_sensitivity(sens.number);}return ok;}
 bool delete_profile(const std::string& name,std::string& error){return operation(error,[&]{require(name!=database.get("active").string(),"Switch profiles before deleting the active one");require(database.get("profiles").object.contains(name),"Profile not found");auto previous=database;database["profiles"].object.erase(name);try{save();}catch(...){database=previous;throw;}});}
 void remember_builtin(const std::string& id,bool on){std::string error;operation(error,[&]{profile()["builtins"][id]=on;save();dirty=true;});}
 void remember_option(const std::string& id,double value){std::string error;operation(error,[&]{profile()["builtin_options"][id]=value;save();});}

@@ -37,6 +37,22 @@ inline constexpr size_t kMaxNameBytes = 40, kMaxDescriptionBytes = 200;
 inline constexpr unsigned kMaxCharts = 32;
 // The Great Sea: 7 x 7 squares of 100000 units, square D4's center at (0, 0), x east, z south.
 inline constexpr float kSquare = 100000.0f, kSeaHalf = 3.5f * kSquare;
+// A point's square (column and row -3..3, from square D4) and its place from the square's centre
+struct SquarePlace {
+    int column = 0, row = 0;
+    float x = 0, z = 0;
+};
+SquarePlace square_place(float x, float z);
+// The chart view of a treasure chart (the MAP screen's chart list) is not the whole square: it shows a
+// window of kViewSize x kViewSize units, centred on an origin in the square. The game has four pictures
+// of each square, one per salvage variant, each the window around that variant's origin (cmapdat.bin,
+// the chart's entry: {origin x, origin z, salvage x, salvage z} per variant, from the square's centre);
+// the game's chart shows the picture of the save's variant, and its salvage spot is always in it.
+// A mod chart's spot can be anywhere: its view shows the picture whose window holds the spot (the most
+// central one), centred on that picture's origin; -1 when none does: no picture, the window centred on
+// the spot (plain sea).
+inline constexpr float kViewSize = 10000.0f;
+int view_variant(const int16_t origins[4][2], float x, float z);
 
 // wwhd_chart_give / wwhd_chart_finish / wwhd_chart_state: the chart's state in the current save file
 int32_t give(const std::string& mod, const std::string& chart);
@@ -51,14 +67,19 @@ int32_t unmark(const std::string& mod, const std::string& chart, const std::stri
 // owns it, the MAP screen's chart list shows it after the game's charts (its own chart number, 61 and
 // up), with the square's art and the X at the place (story_chart.cpp).
 // Declaring again replaces it. Results: kResultNone, kResultInvalid, kResultNoRoom.
-int32_t define(const std::string& mod, const std::string& chart, const std::string& name, const std::string& description, float x, float z);
+// item_mod / item_game: what its treasure chest holds (manifest "item"; story_treasure.h)
+int32_t define(const std::string& mod, const std::string& chart, const std::string& name, const std::string& description, float x, float z,
+               const std::string& item_mod = {}, uint8_t item_game = 0);
 struct ChartView {
     std::string mod, chart, name, description;
     float x, z;
     int32_t state;  // kResultNone / kResultOwned / kResultDone in the loaded save file
     bool opened;    // owned and opened in the chart list
+    std::string item_mod;   // its treasure chest: one of the mod's items (manifest "item": "item:<id>"), or ...
+    uint8_t item_game = 0;  // ... a game item ("game:<name>", story_manifest.h chart_game_item); both empty: an orange rupee
 };
 std::vector<ChartView> charts();  // the declared charts, in declaration order
+size_t declared();                // how many charts are declared (no save data read: safe at startup)
 // The in-game menu switches to the MAP screen with that chart selected in its chart list (game thread;
 // false when Link doesn't own it or there is no in-game menu).
 bool open_in_list(const std::string& mod, const std::string& chart);
@@ -119,6 +140,7 @@ void chart_caption(Cpu* c);   // hdMenuMap_c::setChartCaption
 void chart_kind(Cpu* c);      // hdMenuMapChartKind
 void chart_icon(Cpu* c);      // hdMenuMapUpdateChartIcon
 void chart_frame(Cpu* c);     // hdMenuMapUpdateChartFrame
+void view_destroy(Cpu* c);    // hdTreMapScreen_c::destroy (the chart view)
 void chart_details(Cpu* c);   // hdMenuMapUpdateChartDetails
 void reset_selection(Cpu* c); // hdMenuMap_c::resetChartSelection
 }  // namespace hooks

@@ -1,4 +1,5 @@
 #pragma once
+#include "vertex_format_policy.h"
 #include "loader.h"
 #include "barrier_state.h"
 #ifdef WWHD_SDL_HOST
@@ -35,6 +36,7 @@ struct Surface {
  std::unordered_map<uint32_t,VkImageView> sampledViews;
  uint32_t addr=0,mipAddr=0,width=0,height=0,slices=1,pitch=0,mips=1,format=0,dim=1,tileMode=0,swizzle=0;
  bool isDepth=false,gpuWritten=false,dirty=true,bcDecoded=false;
+ bool linearFiltering=false; // device capability for the actual optimal-tiling image format
  uint64_t writeSeq=0,contentHash=0,lastCheckedFrame=~0ull,sparseHash=0;
  bool formatViews=false; // another surface at this address has the same texel bits in another format (adopt_newer_alias)
  uint64_t writtenBackSeq=0; // writeSeq when last written back to guest memory (linear surfaces, write_back_linear_targets)
@@ -83,6 +85,7 @@ struct GpuScopeToken { uint64_t generation=0; uint32_t index=UINT32_MAX; };
 inline constexpr std::array<const char*,9> secondaryStageNames{
  "acquire", "acquire_wait", "ready_fd", "record", "submit", "draw_wait", "returned_fd", "present", "primary_snapshot_record"};
 struct Renderer {
+ vk::VertexFormatPolicy vertexFormats;
  VkInstance instance=VK_NULL_HANDLE; VkPhysicalDevice physicalDevice=VK_NULL_HANDLE; VkDevice device=VK_NULL_HANDLE;
  std::unordered_map<VkFormat,VkFormatProperties> formatProperties;
  VkPhysicalDeviceFeatures enabledFeatures{};

@@ -1,3 +1,5 @@
+#include <set>
+#include <tuple>
 #include "pass.h"
 #include "../../exception_report.h"
 #include "aspect.h"
@@ -11,6 +13,7 @@
 #include "backend.h"
 #include "stereo.h"
 #include "../stereo_projection.h"
+#include "sampler_filtering.h"
 #include "deferred_dispatch.h"
 #include "buffer_cache.h"
 #include "render_prof.h"
@@ -818,6 +821,7 @@ Pipeline &pipeline(const uint32_t *r, vk::Shader *vs, vk::Shader *ps,
   p.trimFetch = fs;
   p.trimVertex = vs;
   p.bindingTrims.reserve(fs->bufferGroups.size());
+  uint32_t tailLocation = vk::vertex_tail_location(vs->mapping.attributeMapping);
   for (auto &g : fs->bufferGroups) {
     bool instance = false;
     BindingTrimMetadata trim;
@@ -827,14 +831,35 @@ Pipeline &pipeline(const uint32_t *r, vk::Shader *vs, vk::Shader *ps,
       int loc = vs->mapping.attributeMapping[a.semanticId];
       if (loc < 0)
         continue;
-      auto fmt = vk::vertex_format(a.format);
+      auto fmt = R.vertexFormats.fetch(vk::vertex_format(a.format));
       if (fmt == VK_FORMAT_UNDEFINED)
         exception_report::raise("unsupported vertex format");
       attributes.push_back(
           {uint32_t(loc), g.attributeBufferIndex, fmt, a.offset});
-      // Mirror the conservative prefix rules using the actual pipeline format.
+      const auto nativeFormat = vk::vertex_format(a.format);
+#ifdef __ANDROID__
+      // Metadata only: never record vertex contents, guest addresses, or save data.
+      static std::set<std::tuple<unsigned, unsigned, unsigned, unsigned, unsigned>> seenVertexInputs;
+      const auto diagnostic = std::make_tuple(unsigned(a.format), unsigned(a.endianSwap),
+          unsigned(a.nfa), unsigned(a.isSigned), unsigned(a.offset % 4));
+      if (seenVertexInputs.size() < 64 && seenVertexInputs.insert(diagnostic).second)
+        LOG("[vulkan vertex observed] guestFormat=0x%02x native=%s fetch=%s endian=%u numeric=%u signed=%u offset=%u offsetMod4=%u offsetWithinLimit=%u fallback=%u",
+            unsigned(a.format), vk::vertex_format_name(nativeFormat), vk::vertex_format_name(fmt), unsigned(a.endianSwap),
+            unsigned(a.nfa), unsigned(a.isSigned), a.offset, a.offset % 4, a.offset <= R.properties.limits.maxVertexInputAttributeOffset, R.vertexFormats.fallback(nativeFormat));
+#endif
+      if (R.vertexFormats.fallback(nativeFormat)) {
+        if (tailLocation >= R.properties.limits.maxVertexInputAttributes ||
+            attributes.size() >= R.properties.limits.maxVertexInputAttributes)
+          exception_report::raise("RGB fallback exceeds device vertex attribute limit");
+        const uint64_t tailOffset = uint64_t(a.offset) + vk::vertex_tail_offset(nativeFormat);
+        if (tailOffset > R.properties.limits.maxVertexInputAttributeOffset)
+          exception_report::raise("RGB fallback exceeds device vertex attribute offset limit");
+        attributes.push_back({tailLocation++, g.attributeBufferIndex,
+            vk::vertex_tail_format(nativeFormat), uint32_t(tailOffset)});
+      }
+      // Split fetches cover exactly the native attribute bytes.
       if (trim.supported) {
-        const uint32_t width = vertex_format_bytes(fmt);
+        const uint32_t width = vertex_format_bytes(vk::vertex_format(a.format));
         if (!width || (trim.rate && *trim.rate != a.fetchType) ||
             (a.fetchType != LatteConst::VertexFetchType2::VERTEX_DATA &&
              a.fetchType != LatteConst::VertexFetchType2::INSTANCE_DATA) ||
@@ -858,12 +883,20 @@ Pipeline &pipeline(const uint32_t *r, vk::Shader *vs, vk::Shader *ps,
         (r[mmSQ_VTX_ATTRIBUTE_BLOCK_START + g.attributeBufferIndex * 7 + 2] >>
          11) &
         0xFFFF;
+#ifdef __ANDROID__
+    static std::set<uint32_t> seenStrides;
+    if (seenStrides.size() < 32 && seenStrides.insert(stride).second)
+      LOG("[vulkan stride observed] stride=%u mod4=%u withinLimit=%u", stride, stride % 4,
+          stride <= R.properties.limits.maxVertexInputBindingStride);
+#endif
     bindings.push_back({g.attributeBufferIndex, stride,
                         instance ? VK_VERTEX_INPUT_RATE_INSTANCE
                                  : VK_VERTEX_INPUT_RATE_VERTEX});
     trim.stride = stride;
     p.bindingTrims.push_back(trim);
   }
+  if (R.vertexFormats.fallbackMask && attributes.size() > R.properties.limits.maxVertexInputAttributes)
+    exception_report::raise("RGB fallback exceeds device vertex attribute limit");
   VkPipelineVertexInputStateCreateInfo vi{
       VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
   vi.vertexBindingDescriptionCount = bindings.size();
@@ -1167,24 +1200,25 @@ Pipeline &pipeline(const uint32_t *r, vk::Shader *vs, vk::Shader *ps,
 struct SamplerMemo {
   VkDevice device = VK_NULL_HANDLE;
   std::array<uint32_t, 3> words{};
-  bool compare = false, integer = false, forceAniso = false;
+  bool compare = false, integer = false, forceAniso = false, nearestOnly = false;
   VkSampler value = VK_NULL_HANDLE;
   bool matches(VkDevice nextDevice, const uint32_t* nextWords,
-               bool nextCompare, bool nextInteger, bool nextForceAniso) const {
+               bool nextCompare, bool nextInteger, bool nextForceAniso, bool nextNearestOnly) const {
     return value && device == nextDevice && compare == nextCompare &&
-        integer == nextInteger && forceAniso == nextForceAniso &&
+        integer == nextInteger && forceAniso == nextForceAniso && nearestOnly == nextNearestOnly &&
         words[0] == nextWords[0] && words[1] == nextWords[1] && words[2] == nextWords[2];
   }
   void remember(VkDevice nextDevice, const uint32_t* nextWords,
-                bool nextCompare, bool nextInteger, bool nextForceAniso, VkSampler nextValue) {
+                bool nextCompare, bool nextInteger, bool nextForceAniso, bool nextNearestOnly, VkSampler nextValue) {
     device = nextDevice;
     std::memcpy(words.data(), nextWords, sizeof(words));
-    compare = nextCompare; integer = nextInteger; forceAniso = nextForceAniso;
+    compare = nextCompare; integer = nextInteger; forceAniso = nextForceAniso; nearestOnly = nextNearestOnly;
     value = nextValue;
   }
 };
 SamplerMemo samplerMemo;
-VkSampler sampler(const uint32_t *words, bool compare, bool integer, bool allowAniso) {
+VkSampler sampler(const uint32_t *words, bool compare, bool integer, bool allowAniso, bool linearSupported) {
+  const bool nearestOnly = sampler_nearest_only(integer, compare, linearSupported);
   static const bool memo = [] {
     const char* e = std::getenv("WWHD_VK_SAMPLER_MEMO");
     return e && !std::strcmp(e, "1");
@@ -1192,19 +1226,20 @@ VkSampler sampler(const uint32_t *words, bool compare, bool integer, bool allowA
   const bool forceAniso = allowAniso && aniso_enabled();
   const bool stats = preparation_stats_enabled();
   if (stats) ++R.cpuPreparation.samplerRequests;
-  if (memo && samplerMemo.matches(R.device, words, compare, integer, forceAniso)) {
+  if (memo && samplerMemo.matches(R.device, words, compare, integer, forceAniso, nearestOnly)) {
     if (stats) ++R.cpuPreparation.samplerMemoHits;
     return samplerMemo.value;
   }
   if (stats) ++R.cpuPreparation.samplerMapLookups;
   auto remember = [&](VkSampler value) {
-    if (memo) samplerMemo.remember(R.device, words, compare, integer, forceAniso, value);
+    if (memo) samplerMemo.remember(R.device, words, compare, integer, forceAniso, nearestOnly, value);
     return value;
   };
   std::string key(reinterpret_cast<const char *>(words), 12);
   key.push_back(compare);
   key.push_back(integer);
   key.push_back(forceAniso);
+  key.push_back(nearestOnly);
   static std::unordered_map<std::string, VkSampler> cache;
   if (auto it = cache.find(key); it != cache.end())
     return remember(it->second);
@@ -1238,7 +1273,7 @@ VkSampler sampler(const uint32_t *words, bool compare, bool integer, bool allowA
   VkSamplerCreateInfo ci{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
   ci.magFilter = filter(static_cast<uint32_t>(w.get_XY_MAG_FILTER()));
   ci.minFilter = filter(static_cast<uint32_t>(w.get_XY_MIN_FILTER()));
-  if (integer)
+  if (nearestOnly)
     ci.minFilter = ci.magFilter = VK_FILTER_NEAREST;
   ci.mipmapMode = static_cast<uint32_t>(w.get_MIP_FILTER()) == 2
                       ? VK_SAMPLER_MIPMAP_MODE_LINEAR
@@ -1269,7 +1304,7 @@ VkSampler sampler(const uint32_t *words, bool compare, bool integer, bool allowA
   if (forceAniso && uint32_t(w.get_MIP_FILTER()) != 0 && ci.minFilter == VK_FILTER_LINEAR &&
       uint32_t(w.get_DEPTH_COMPARE_FUNCTION()) == 0)
     anisotropy = 16;
-  if (R.enabledFeatures.samplerAnisotropy && !integer && anisotropy > 1) {
+  if (R.enabledFeatures.samplerAnisotropy && !nearestOnly && anisotropy > 1) {
     ci.anisotropyEnable = VK_TRUE;
     ci.maxAnisotropy = std::min(float(anisotropy), R.properties.limits.maxSamplerAnisotropy);
   }
@@ -1283,6 +1318,7 @@ VkSampler sampler(const uint32_t *words, bool compare, bool integer, bool allowA
     ci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
     ci.borderColor = VkBorderColor(uint32_t(ci.borderColor) + 1);
   }
+  restrict_sampler_filtering(ci, nearestOnly);
   VkSampler s;
   vk_check(vkCreateSampler(R.device, &ci, nullptr, &s), "sampler");
   cache.emplace(std::move(key), s);
@@ -1911,7 +1947,7 @@ StageResources bind_stage(const uint32_t *r, vk::Shader *sh,
     }
     info = {sampler(samplerWords, sh->dec->textureUsesDepthCompare[unit],
                    s->fmt.kind != FormatInfo::FLOAT,
-                   !s->gpuWritten && s->mips > 1),
+                   !s->gpuWritten && s->mips > 1, s->linearFiltering),
                              sampledView,
                              VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
     auto &write = appendWrite(rankPlan.textures[unit]);
@@ -2665,6 +2701,15 @@ void draw(const uint32_t *r, uint32_t prim, uint32_t count, uint32_t indexType,
     if(!skip)
       record::vkCmdBindVertexBuffers(cmd,g.attributeBufferIndex,1,&b.buffer,&offset);
   }
+#ifdef __ANDROID__
+  static std::set<std::tuple<uint32_t, uint32_t, bool, bool, bool, bool>> seenIndexPaths;
+  const auto indexDiagnostic = std::make_tuple(prim, indexType, nativeIndices, bool(indexAddr), baseVertex != 0, stripRestart);
+  if (seenIndexPaths.size() < 32 && seenIndexPaths.insert(indexDiagnostic).second)
+    LOG("[vulkan index observed] guestPrimitive=0x%x guestIndexType=%u indexed=%u native=%u hostType=%s stripRestart=%u nonzeroBaseVertex=%u",
+        prim, indexType, bool(indexAddr), nativeIndices,
+        nativeIndices ? (indexType == 0 ? "uint16" : "uint32") : (convertedEntry || !indices.empty() ? "uint32-converted" : "none"),
+        stripRestart, baseVertex != 0);
+#endif
   rprof::g_upload_kind = rprof::kUpIndex;
   rprof::mark(rprof::kVertex);
   if (nativeIndices) {

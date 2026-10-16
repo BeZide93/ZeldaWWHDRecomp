@@ -24,10 +24,17 @@
 #include "story_notebook_layout.h"
 #include "story_mail_book.h"
 #include "story_chart.h"
+#include "story_treasure.h"
+#include "story_actors.h"
+#include "story_scenes.h"
 #include "story_notebook.h"
+#include "story_items.h"
+#include "story_item_buttons.h"
+#include "story_bag.h"
 #include "story_manifest.h"
 #include "story_store.h"
 #include "story_takeover.h"
+#include "story_treasure_chest.h"
 #include "mod_json.h"
 #include "input.h"
 #include "true60.h"
@@ -98,6 +105,7 @@ struct Loaded {
 std::vector<Loaded> g_loaded;
 std::atomic<uint64_t> g_logic_step{0};
 std::atomic<bool> g_hud_callbacks{false};
+bool g_world_scenes=false;
 std::mutex g_hud_mutex;
 Loaded& owner(Cpu* c) {
     for(auto& mod:g_loaded)
@@ -117,6 +125,26 @@ void call_original(Cpu* c, uint32_t func) {
     if (i < 0) fatal("[guestmods] call_original: %08X is not a game function", func);
     if (g_mod_hook_flags[i]) c->mod_skip = func;  // consumed by the check at the start of the body
     g_mod_bodies[i](c);
+}
+
+// Declarative world content is shared by guest and data-only content packages.
+void load_world(const std::string& mod,const mods::json::Value& manifest) {
+    std::vector<story_notebook::ManifestActor> actors;
+    std::vector<story_notebook::ManifestScene> scenes;
+    std::string why;
+    if(!story_notebook::parse_actors(manifest,actors,why)||!story_notebook::parse_scenes(manifest,scenes,why))
+        exception_report::raise("World manifest "+mod+": "+why);
+    std::vector<std::string> flags;
+    for(const auto& scene:scenes)for(const auto& step:scene.steps)for(const auto& action:step.then)
+        if(action.kind==story_notebook::StoryAction::Kind::Flag)flags.push_back(action.id);
+    if(!story_scenes::validate(scenes,why)||!story_actors::register_flags(mod,flags,why)||
+       !story_actors::load(mod,actors,why)||!story_scenes::declare(mod,scenes,why))
+        exception_report::raise("World content "+mod+": "+why);
+    g_world_scenes|=!scenes.empty();
+    if(!actors.empty()||!scenes.empty()) {
+        story_notebook::note_import();story_mail::note_import();
+        LOG("[world] %s: %zu actors, %zu scenes",mod.c_str(),actors.size(),scenes.size());
+    }
 }
 
 // ---- host services (imports of guest mods by name; arguments in r3..r10 / f1..f8, result in r3 / f1)
@@ -380,6 +408,23 @@ void svc_quest_flag(Cpu* c) {
     auto& mod=owner(c);std::string id;
     quest_result(c,mod_string(mod,c->r[3],story_mail::kMaxIdBytes,id)?story_notebook::flag(mod.id,id,c->r[4]):story_notebook::kResultInvalid);
 }
+// Mod items (story_items.h): IDs must lie in the calling mod's memory; counts 1..254
+void svc_item_give(Cpu* c) {
+    auto& mod=owner(c);std::string id;
+    c->r[3]=uint32_t(mod_string(mod,c->r[3],story_mail::kMaxIdBytes,id)?story_items::give(mod.id,id,c->r[4],"its mod"):story_items::kResultInvalid);
+}
+void svc_item_take(Cpu* c) {
+    auto& mod=owner(c);std::string id;
+    c->r[3]=uint32_t(mod_string(mod,c->r[3],story_mail::kMaxIdBytes,id)?story_items::take(mod.id,id,c->r[4]):story_items::kResultInvalid);
+}
+void svc_item_count(Cpu* c) {
+    auto& mod=owner(c);std::string id;
+    c->r[3]=uint32_t(mod_string(mod,c->r[3],story_mail::kMaxIdBytes,id)?story_items::count(mod.id,id):story_items::kResultInvalid);
+}
+void svc_item_used(Cpu* c) {
+    auto& mod=owner(c);std::string id;
+    c->r[3]=uint32_t(mod_string(mod,c->r[3],story_mail::kMaxIdBytes,id)?story_items::used(mod.id,id):story_items::kResultInvalid);
+}
 const std::unordered_map<std::string, PpcFunc> kServices = {
     {"wwhd_audio_epoch",svc_audio_epoch},{"wwhd_audio_open",svc_audio_open},
     {"wwhd_audio_available",svc_audio_available},{"wwhd_audio_submit",svc_audio_submit},{"wwhd_audio_close",svc_audio_close},
@@ -400,6 +445,7 @@ const std::unordered_map<std::string, PpcFunc> kServices = {
     {"wwhd_quest_done",svc_quest_done},{"wwhd_quest_state",svc_quest_state},
     {"wwhd_quest_carry",svc_quest_carry},{"wwhd_quest_talk",svc_quest_talk},
     {"wwhd_quest_set_flag",svc_quest_set_flag},{"wwhd_quest_flag",svc_quest_flag},
+    {"wwhd_item_give",svc_item_give},{"wwhd_item_take",svc_item_take},{"wwhd_item_count",svc_item_count},{"wwhd_item_used",svc_item_used},
     {"memcpy", svc_memcpy},      {"memmove", svc_memcpy},       {"memset", svc_memset},
 };
 PpcFunc service(const char* name) {
@@ -428,6 +474,8 @@ const WWHDGuestHostV1 kHost = {
 // tools/story_mods/npc_catalogue.py (next to the guest builder) into the port's data folder, for the
 // compiled-in recipes (story_npc_catalogue.h); generated again when the recipes change.
 bool g_story_package=false;
+std::string g_notebook_icon,g_icon_cache;  // the notebook's icon and the built archives' cache (item_icons)
+std::string g_story_data;  // the Story Notebook package's data folder
 void prepare_npc_catalogue() {
     static bool done=false;
     if(done)return;
@@ -557,20 +605,25 @@ bool load_one(const std::string& path, std::string& err,const mods::packages::Gu
             story_notebook::set_icon_open(icon_open.empty()?std::string():(std::filesystem::path(pkg.path)/icon_open).string());
             const std::string layout=look.get("layout").string();
             story_notebook::set_layout_description(layout.empty()?std::string():(std::filesystem::path(pkg.path)/layout).string(),pkg.data_path);
-            // the item icons (item_icons.h): the notebook's own frame (key 0), built into the game's 2D pack
-            // (test aid WWHD_TEST_ITEM_ICONS=a.png,b.png adds pictures as more items)
-            std::vector<item_icons::Item> icons;
-            if(!icon.empty())icons.push_back({0,(std::filesystem::path(pkg.path)/icon).string()});
-            if(const char* extra=std::getenv("WWHD_TEST_ITEM_ICONS")) {
-                std::string list=extra;uint16_t key=0xF000;
-                for(size_t a=0;a<list.size();){size_t b=list.find(',',a);if(b==std::string::npos)b=list.size();
-                    if(b>a)icons.push_back({key++,list.substr(a,b-a)});a=b+1;}
-            }
-            item_icons::set_items(icons,pkg.data_path);
+            // the item icons (item_icons.h): the notebook's own frame (key 0) first; the mod items follow once
+            // every package is loaded (the notebook is their dependency, so it loads before them)
+            g_notebook_icon=icon.empty()?std::string():(std::filesystem::path(pkg.path)/icon).string();
+            g_icon_cache=pkg.data_path;
+            g_story_data=pkg.data_path;  // the Delivery Bag's extra pages build their layout there (story_bag.h)
         }
-        if(manifest_text.find("\"quests\"")!=std::string::npos||manifest_text.find("\"charts\"")!=std::string::npos) {
+        if(manifest_text.find("\"quests\"")!=std::string::npos||manifest_text.find("\"charts\"")!=std::string::npos||manifest_text.find("\"letters\"")!=std::string::npos) {
             prepare_npc_catalogue();
             story_notebook::declare(loaded.id,loaded.name,manifest);
+        }
+        load_world(loaded.id,manifest);
+        // the mod's items (story_items.h): kept in the Delivery Bag, owned in the save's story block
+        std::vector<story_notebook::ManifestItem> items;std::string why;
+        if(!story_notebook::parse_items(manifest,items,why))LOG("[items] %s: the manifest's items are not used: %s",loaded.id.c_str(),why.c_str());
+        for(const auto& item:items)
+            if(!story_items::define(loaded.id,pkg.path,item,why))LOG("[items] %s: %s",loaded.id.c_str(),why.c_str());
+        if(!items.empty()){
+            story_items::note_import();story_notebook::note_import();story_mail::note_import();
+            LOG("[items] %s: %zu item(s) from the manifest",loaded.id.c_str(),items.size());
         }
     } catch(const std::exception& e) {LOG("[guestmods] %s: manifest quests not read: %s",loaded.id.c_str(),e.what());}
     g_loaded.push_back(std::move(loaded));
@@ -634,6 +687,39 @@ void init() {
         if(result.module.empty()||!load_one(result.module,error,pkg,base,result.allocation_size))
             exception_report::raise(error.empty()?"Guest builder returned no module":error);
     });
+    // Content packages have no ELF; their enabled startup snapshot still declares world data.
+    for(const auto& pkg:packages::list()) if(pkg.kind=="content"&&pkg.active&&pkg.compatible) {
+        std::ifstream file(std::filesystem::path(packages::directory())/pkg.id/"manifest.json",std::ios::binary);
+        const std::string text{std::istreambuf_iterator<char>(file),{}};
+        const auto manifest=mods::json::parse(text);
+        const auto path=std::filesystem::path(packages::directory())/pkg.id;
+        if(manifest.get("quests").type!=mods::json::Value::Null||manifest.get("charts").type!=mods::json::Value::Null||
+           manifest.get("letters").type!=mods::json::Value::Null) {
+            prepare_npc_catalogue();
+            story_notebook::declare(pkg.id,pkg.name,manifest);
+        }
+        std::vector<story_notebook::ManifestItem> items;std::string why;
+        if(!story_notebook::parse_items(manifest,items,why))exception_report::raise("World items "+pkg.id+": "+why);
+        for(const auto& item:items)if(!story_items::define(pkg.id,path.string(),item,why))
+            exception_report::raise("World items "+pkg.id+": "+why);
+        if(!items.empty()){story_items::note_import();story_notebook::note_import();story_mail::note_import();}
+        load_world(pkg.id,manifest);
+    }
+    // The item icons (item_icons.h): the notebook (key 0), then the mod items in declaration order (frames
+    // 56...), built into the game's 2D pack before the game opens it; the mod items draw from those frames.
+    // (test aid WWHD_TEST_ITEM_ICONS=a.png,b.png adds pictures as more items)
+    if(g_story_package) {
+        std::vector<item_icons::Item> icons;
+        if(!g_notebook_icon.empty())icons.push_back({0,g_notebook_icon});
+        for(const auto& item:story_items::installed())icons.push_back({item.key,item.icon_path});
+        if(const char* extra=std::getenv("WWHD_TEST_ITEM_ICONS")) {
+            std::string list=extra;uint16_t key=0xF000;
+            for(size_t a=0;a<list.size();){size_t b=list.find(',',a);if(b==std::string::npos)b=list.size();
+                if(b>a)icons.push_back({key++,list.substr(a,b-a)});a=b+1;}
+        }
+        item_icons::set_items(icons,g_icon_cache);
+        story_items::set_frame_source(item_icons::frame);
+    }
     // The story system runs only with its required package, the Story Notebook (packages.cpp makes every
     // quest mod depend on it); without it: no letters, takeovers, chart marks or notebook, the game as it is.
     if((story_mail::imported()||story_chart::imported()||story_notebook::imported())&&!g_story_package) {
@@ -646,7 +732,7 @@ void init() {
     // Story progress (story_store.h): its areas in guest memory, so full save states carry them; saved
     // with the game's saves in the story block of cking.sav. Without a story mod the file's block is
     // still kept as it is.
-    const bool story=story_mail::imported()||story_chart::imported()||story_notebook::imported();
+    const bool story=story_mail::imported()||story_chart::imported()||story_notebook::imported()||story_items::imported();
     if(story){uint32_t areas=mem::host_alloc(story_store::kMemoryBytes,16);memset(mem::ptr(areas),0,story_store::kMemoryBytes);story_store::set_memory(areas);}
     // developer override of the notebook's model archive (the Story Notebook package's setup step builds it)
     if(const char* model=getenv("WWHD_NOTEBOOK_MODEL");model&&*model)story_mail::set_notebook_model(model);
@@ -676,6 +762,21 @@ void init() {
         ch.addr=addr;ch.ordinal=uint32_t(ordinal);ch.replace=fn;ch.replace_mod="the port's chart service";
         g_mod_hook_flags[ordinal]=1;
     });
+    // Mod treasure charts (story_treasure.h): the game's salvage point, light ring, crane and chest for a
+    // declared mod chart, only when a loaded mod declares charts.
+    if(story_chart::declared()){
+        story_treasure::set_game_calls(call_original,[](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);});
+        story_treasure::set_scratch_memory(mem::host_alloc(story_treasure::kScratchBytes,16));
+        story_treasure::install([](uint32_t addr) {
+            auto it=g_chains.find(addr);return it==g_chains.end()?std::string():it->second.replace_mod;
+        },[](uint32_t addr,PpcFunc fn) {
+            int ordinal=ordinal_of(addr);
+            if(ordinal<0)fatal("[guestmods] treasure charts: %08X is not a game function",addr);
+            Chain& ch=g_chains[addr];
+            ch.addr=addr;ch.ordinal=uint32_t(ordinal);ch.replace=fn;ch.replace_mod="the port's treasure charts";
+            g_mod_hook_flags[ordinal]=1;
+        });
+    }
     // The story notebook: the item menu's Delivery Bag shows it and opens its page, only when a loaded
     // mod uses the quest services (story_notebook.h).
     story_notebook::set_game_ui(&story_notebook::game_ui());
@@ -687,6 +788,30 @@ void init() {
         if(ordinal<0)fatal("[guestmods] notebook: %08X is not a game function",addr);
         Chain& ch=g_chains[addr];
         ch.addr=addr;ch.ordinal=uint32_t(ordinal);ch.replace=fn;ch.replace_mod="the port's story notebook";
+        g_mod_hook_flags[ordinal]=1;
+    });
+    if(story_actors::declared()) {
+        story_actors::set_game_calls(call_original,[](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);});
+        story_actors::set_scratch_memory(mem::runtime_alloc(story_actors::kScratchBytes,16));
+        story_actors::set_scene_start(story_scenes::request);
+        story_actors::install([](uint32_t addr) {
+            auto it=g_chains.find(addr);return it==g_chains.end()?std::string():it->second.replace_mod;
+        },[](uint32_t addr,PpcFunc fn) {
+            int ordinal=ordinal_of(addr);
+            if(ordinal<0)fatal("[guestmods] actors: %08X is not a game function",addr);
+            Chain& ch=g_chains[addr];ch.addr=addr;ch.ordinal=uint32_t(ordinal);ch.replace=fn;ch.replace_mod="the port's world actors";
+            g_mod_hook_flags[ordinal]=1;
+        });
+    }
+    story_scenes::set_game_calls([](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);});
+    if(g_world_scenes)story_scenes::set_scratch_memory(mem::runtime_alloc(story_scenes::kScratchBytes,16));
+    story_scenes::set_callbacks(story_actors::actor_address,story_actors::actions);
+    story_scenes::install(call_original,[](uint32_t addr) {
+        auto it=g_chains.find(addr);return it==g_chains.end()?std::string():it->second.replace_mod;
+    },[](uint32_t addr,PpcFunc fn) {
+        int ordinal=ordinal_of(addr);
+        if(ordinal<0)fatal("[guestmods] scenes: %08X is not a game function",addr);
+        Chain& ch=g_chains[addr];ch.addr=addr;ch.ordinal=uint32_t(ordinal);ch.replace=fn;ch.replace_mod="the port's scene player";
         g_mod_hook_flags[ordinal]=1;
     });
     // The King of Red Lions' one-time line for the tracked quest (story_sail.h): the boat's execute,
@@ -703,6 +828,10 @@ void init() {
     // Story layouts (story_lyt_screen.h): a layout of our own with the item screen. Its client: the layout
     // test harness (WWHD_STORY_LYT, story_lyt_proto.cpp); nothing is hooked without one.
     if(story_notebook::imported()||g_story_package)story_notebook_layout::configure();  // the notebook's page layout (first client)
+    // the Delivery Bag's extra pages for mod items (story_bag.h): a second layout with the item screen
+    story_bag::set_game_calls(call_original,[](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);});
+    story_bag::set_after_assign(story_item_buttons::refresh_strip);  // X/Y on a bag page: the item menu's strip shows it at once
+    if(g_story_package&&!g_story_data.empty())story_bag::configure(std::filesystem::path(g_story_data)/"bag_page");
     story_lyt::set_game_calls(call_original,[](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);});
     story_lyt::install([](uint32_t,PpcFunc){});
     story_lyt_screen::set_game_calls(call_original,[](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);});
@@ -713,6 +842,37 @@ void init() {
         if(ordinal<0)fatal("[guestmods] story layout: %08X is not a game function",addr);
         Chain& ch=g_chains[addr];
         ch.addr=addr;ch.ordinal=uint32_t(ordinal);ch.replace=fn;ch.replace_mod="the port's story layout";
+        g_mod_hook_flags[ordinal]=1;
+    });
+    // Mod items (story_items.h): the game's item tables answer for the port's item numbers, only when a
+    // loaded mod declares items.
+    story_items::set_game_calls(call_original,[](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);});
+    story_items::set_presenter(story_notebook::show_info);
+    if(story_items::imported())story_mail::set_item_get_next(story_items::hooks::exec_item_get);
+    // a mod treasure chart's chest (story_treasure_chest.h): its stand-in's execItemGet, before the mod items'
+    // pool numbers; inert unless a chest of a mod item is pending
+    story_treasure_chest::set_item_get_next(story_items::imported()?story_items::hooks::exec_item_get:nullptr,call_original);
+    if(!story_treasure::chest_hooks().empty())story_mail::set_item_get_next(story_treasure_chest::hooks::exec_item_get);
+    story_items::set_use_calls([](const char* how){return story_notebook::open_page(how);},story_notebook::reach);
+    story_items::install([](uint32_t addr) {
+        auto it=g_chains.find(addr);return it==g_chains.end()?std::string():it->second.replace_mod;
+    },[](uint32_t addr,PpcFunc fn) {
+        int ordinal=ordinal_of(addr);
+        if(ordinal<0)fatal("[guestmods] items: %08X is not a game function",addr);
+        Chain& ch=g_chains[addr];
+        ch.addr=addr;ch.ordinal=uint32_t(ordinal);ch.replace=fn;ch.replace_mod="the port's mod items";
+        g_mod_hook_flags[ordinal]=1;
+    });
+    // Mod items and the notebook on X/Y/R (story_item_buttons.h): the item use in play and the HUD's
+    // button read, with the story notebook's item menu hooks.
+    story_item_buttons::set_game_calls(call_original,[](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);});
+    story_item_buttons::install([](uint32_t addr) {
+        auto it=g_chains.find(addr);return it==g_chains.end()?std::string():it->second.replace_mod;
+    },[](uint32_t addr,PpcFunc fn) {
+        int ordinal=ordinal_of(addr);
+        if(ordinal<0)fatal("[guestmods] item buttons: %08X is not a game function",addr);
+        Chain& ch=g_chains[addr];
+        ch.addr=addr;ch.ordinal=uint32_t(ordinal);ch.replace=fn;ch.replace_mod="the port's item buttons";
         g_mod_hook_flags[ordinal]=1;
     });
     story_store::set_game_calls(call_original);
@@ -752,13 +912,19 @@ void draw_frame(Cpu* c,uint64_t step) {
         *c=saved;
     }
 }
+void logic_service(Cpu* c) { story_scenes::tick(c,false,2); story_actors::service(c); }
+void service(Cpu* c) { story_lyt_screen::service(c); }
 void state_loaded() {
     std::lock_guard lock(g_hud_mutex);
     hud::store().reset();
     pcm::store().reset();
+    story_scenes::state_loaded();
+    story_actors::state_loaded();
     story_mail::state_loaded();
+    story_treasure_chest::state_loaded();
     story_chart::state_loaded();
     story_notebook::state_loaded();
+    story_bag::state_loaded();
     story_lyt_screen::state_loaded();
     for(auto& mod:g_loaded)mod.hud_called=false;
 }

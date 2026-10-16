@@ -1,4 +1,5 @@
 #include "../mods/fast_forward.h"
+#include "../mods/mods.h"
 #ifdef WWHD_HAS_VULKAN
 #include "gfx/vulkan/stutter_trace.h"
 #include "gfx/vulkan/headstart.h"
@@ -195,6 +196,7 @@ void held_keys(bool* keys) {
 
 void release_keys() {
     mods::fast_forward_reset();
+    mods::lock_on_reset();
     std::lock_guard<std::mutex> lk(g_mu);
     g_mouse_bindings.consume();
     memset(g_keys, 0, sizeof(g_keys));
@@ -249,7 +251,13 @@ static void start_test_keys() {
             pr.hold = strtoull(k.c_str() + sl + 1, nullptr, 10);
             k.resize(sl);
         }
-        if (k.rfind("Cmd+", 0) == 0) { pr.flags = NSEventModifierFlagCommand; k = k.substr(4); }
+        for (;;) {
+            if (k.rfind("Cmd+",0)==0) { pr.flags |= NSEventModifierFlagCommand; k=k.substr(4); }
+            else if (k.rfind("Shift+",0)==0) { pr.flags |= NSEventModifierFlagShift; k=k.substr(6); }
+            else if (k.rfind("Ctrl+",0)==0) { pr.flags |= NSEventModifierFlagControl; k=k.substr(5); }
+            else if (k.rfind("Alt+",0)==0) { pr.flags |= NSEventModifierFlagOption; k=k.substr(4); }
+            else break;
+        }
         if (k == "F1") { pr.code = kVK_F1; pr.chars = [NSString stringWithFormat:@"%C", (unichar)NSF1FunctionKey]; pr.flags |= NSEventModifierFlagFunction; }
         else if (k == "Comma") { pr.code = kVK_ANSI_Comma; pr.chars = @","; }
         else if (k == "Escape") { pr.code = kVK_Escape; pr.chars = @"\x1b"; }
@@ -394,8 +402,6 @@ void init() {
                 }
                 return nil;
             }
-            // the Screenshot binding (F10 by default; posted test keys take this path too)
-            if (e.type == NSEventTypeKeyDown && !e.isARepeat && screenshot::key_down(code)) return nil;
             if (posted) return nil;  // test keys only reach the overlay
         }
         std::lock_guard<std::mutex> lk(g_mu);
@@ -439,6 +445,7 @@ void init() {
         // counts as captured, overlay/extensions.h)
         static overlay::DeviceGates<uintptr_t> gates;
         gates.combine(devices_values(), overlay::captures() || overlay::shortcut_took_input(), v, game);
+        input_map::consume_shortcut_buttons(input_map::current(), v, game);
         PadState s = input_map::controller_state(input_map::current(), game);
         {
             std::lock_guard<std::mutex> lk(g_mu);
@@ -678,7 +685,14 @@ static void apply_scenario(PadState& s) {
 
 static std::atomic<bool> g_pro{getenv("WWHD_PRO_CONTROLLER") != nullptr};
 bool pro_controller() { return g_pro.load(std::memory_order_relaxed); }
-void set_pro_controller(bool on) { g_pro = on; LOG("[input] keyboard/controller act as %s", on ? "Pro Controller" : "GamePad"); }
+static std::atomic<void (*)(bool)> g_controller_listener{nullptr};
+void set_controller_listener(void (*fn)(bool pro)) { g_controller_listener = fn; }
+void set_pro_controller(bool on) {
+    const bool was = g_pro.exchange(on);
+    LOG("[input] keyboard/controller act as %s", on ? "Pro Controller" : "GamePad");
+    if (was != on)
+        if (auto fn = g_controller_listener.load()) fn(on);
+}
 
 PadState read() {
     static const std::vector<Press> script = scripted();

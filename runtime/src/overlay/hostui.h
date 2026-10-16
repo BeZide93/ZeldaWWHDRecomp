@@ -37,8 +37,9 @@ int drc_modes();                   // GamePad screen modes (gfx/display_modes.h)
 bool drc_mode_offered(int m);      // the host can show this mode (no separate window on Android)
 int drc_mode();
 void set_drc_mode(int m);
-int pip_corner();                  // picture-in-picture: 0 top left, 1 top right, 2 bottom left, 3 bottom right
-void set_pip_corner(int c);
+int pip_anchor();                  // gfx::PipAnchor
+void save_pip_position();
+void set_pip_anchor(int c);
 float pip_size();                  // fraction of the TV picture's width
 void set_pip_size(float s);
 float pip_opacity();

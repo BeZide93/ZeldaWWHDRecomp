@@ -130,6 +130,8 @@ public class WwhdActivity extends SDLActivity {
         if (savedInstanceState == null) CrashReports.offer(this);
     }
 
+    public void shareLog() { runOnUiThread(() -> LogShare.share(this)); }
+
     private static final int GPU_DRIVER_REQUEST = 4972;
     private static native String installGpuDriver(String path, boolean select);
     // afterFailure: the renderer could not start with the system driver (renderer.cpp), so the

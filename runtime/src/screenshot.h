@@ -1,4 +1,4 @@
-// Screenshots for players: the Screenshot binding (F10 by default, rebindable in the Controls tab /
+// Screenshots for players: the Screenshot binding (F10 by default, rebindable in the Shortcuts tab /
 // window like the GamePad inputs, also to a controller input) saves the TV picture as a PNG.
 //
 // What is saved: the TV picture of the frame shown when the key was pressed, as the game drew it, at

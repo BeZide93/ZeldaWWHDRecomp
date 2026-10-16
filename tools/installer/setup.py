@@ -907,6 +907,24 @@ def repair_guest_python(data_dir):
     say("Local mod setup Python is ready (compression.zstd verified).")
 
 
+CLT_DIR = "/Library/Developer/CommandLineTools"
+
+
+def use_installed_clt(ok):
+    """Point xcrun at the installed Command Line Tools (DEVELOPER_DIR, for setup and what it starts) when the
+    developer folder macOS uses doesn't work. True when the tools are usable afterwards."""
+    if ok():
+        return True
+    if os.environ.get("DEVELOPER_DIR") or not os.path.exists(os.path.join(CLT_DIR, "usr", "bin", "clang")):
+        return False
+    os.environ["DEVELOPER_DIR"] = CLT_DIR
+    if ok():
+        say("  Using the Command Line Tools in %s (macOS points to another developer folder)." % CLT_DIR)
+        return True
+    del os.environ["DEVELOPER_DIR"]
+    return False
+
+
 def ensure_xcode_clt(ui):
     def ok():
         try:
@@ -918,6 +936,14 @@ def ensure_xcode_clt(ui):
 
     if ok():
         return
+    # macOS can point to another developer folder than the installed Command Line Tools: a removed Xcode, or one
+    # whose license hasn't been accepted (issue #219). The tools themselves work, so use them directly then.
+    if use_installed_clt(ok):
+        return
+    if os.path.exists(os.path.join(CLT_DIR, "usr", "bin", "clang")):
+        raise SetupError("Apple's Command Line Tools are installed, but macOS can't use them. Open Terminal and run: "
+                         "sudo xcode-select --switch " + CLT_DIR + "  (or, if you use Xcode: sudo xcodebuild -license "
+                         "accept), then run setup again")
     if not ui.interactive:
         raise SetupError("Apple's Command Line Tools are not installed (run: xcode-select --install)")
     say("  The game code is compiled with Apple's free Command Line Tools, which are not installed yet.")
@@ -928,6 +954,7 @@ def ensure_xcode_clt(ui):
         if time.time() - t0 > 3 * 3600:
             raise SetupError("the Command Line Tools installation did not finish; run setup again afterwards")
         time.sleep(5)
+    use_installed_clt(ok)
     say("  Command Line Tools installed.")
 
 

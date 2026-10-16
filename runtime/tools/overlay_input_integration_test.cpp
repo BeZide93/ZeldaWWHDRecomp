@@ -14,6 +14,7 @@
 #include <filesystem>
 #include <unistd.h>
 #include "../src/overlay/overlay.cpp"
+#include "imgui_internal.h"
 
 static std::vector<std::string> logs;
 static int saves=0,loads=0,promptKeys=0;
@@ -22,26 +23,128 @@ void log_msg(const char* format,...) {
  char line[2048];va_list args;va_start(args,format);vsnprintf(line,sizeof line,format,args);va_end(args);
  logs.emplace_back(line);
 }
-namespace audio { void flush(){} }
+namespace audio { void flush(){} float master_volume(){return 1;} void set_master_volume(float,bool){} }
 namespace ss { void request_save(int){++saves;} void request_load(int){++loads;} }
-namespace render { uint64_t frame_count(){return 42;} Api active(){return Api::Vulkan;} }
+namespace render { const Backend* g_backend = nullptr; uint64_t frame_count(){return 42;} Api active(){return Api::Vulkan;} }
 namespace gx2 { void checkpoint_vulkan_caches(){} }
 namespace gfxvk { bool graphics_hotkey(char,bool){return false;} }
 namespace aspect { void set_window_aspect(float){} }
-namespace mods { double game_time(){return 0;} void filter_pad(input::PadState&){} bool mouse_camera(){return false;} bool first_person_wheel(){return false;} void mouse_button(int,bool){} void mouse_add(float,float){} void mouse_wheel(float){} void fast_forward_reset(){} }
-namespace interp { void set_mode(int){} uint64_t logic_steps(){return 0;} }
+namespace mods { double game_time(){return 0;} void filter_pad(input::PadState&){} bool mouse_camera(){return false;} bool first_person_wheel(){return false;} void mouse_button(int,bool){} void mouse_add(float,float){} void mouse_wheel(float){} void fast_forward_reset(){} void lock_on_reset(){} }
+namespace interp { int mode(){return 0;} void toggle_fps(int){} void set_mode(int){} uint64_t logic_steps(){return 0;} }
 namespace timebase { uint64_t now(){return 0;} }
 namespace true60 { uint64_t link_steps(){return 0;} bool state_loaded(){return false;} }
 namespace true60_test { void set_origin_step(uint64_t){} void tick(double,bool){} }
 namespace text_entry { bool active(){return prompt;} void text(const char*){} void preedit(const char*){} void key(int,bool,bool){++promptKeys;} }
-namespace hostui { void graphics_changed(){} }
-namespace screenshot { bool key_down(int){return false;} void poll_controller(const float*){} }
+namespace hostui {
+ void graphics_changed(){} void post(std::function<void()> fn){fn();}
+ bool fullscreen(){return false;} void set_fullscreen(bool){}
+ float res_scale(){return 1;} void set_res_scale(float){}
+ int drc_mode(){return 0;} void set_drc_mode(int){} bool drc_shown(){return true;} void show_drc(bool){}
+ void set(const char*,const std::string&){}
+}
+static int shots = 0;
+namespace screenshot { void request(){++shots;} bool key_down(int){return false;} void poll_controller(const float*){} }
 
 static void event_key(SDL_Window* window,SDL_Scancode key,bool down,SDL_Keymod mods=SDL_KMOD_NONE,bool repeat=false) {
  SDL_Event e{};e.type=down?SDL_EVENT_KEY_DOWN:SDL_EVENT_KEY_UP;e.key.windowID=SDL_GetWindowID(window);
  e.key.timestamp=123456789;e.key.scancode=key;e.key.mod=mods;e.key.repeat=repeat;
  input::handle_event(e);
 }
+// Exercise the actual Shortcuts widgets and capture loop without a renderer or game data.
+static int shortcut_ui_test() {
+ using namespace input_map;
+ using namespace overlay;
+ const auto file = std::filesystem::temp_directory_path() / ("wwhd-shortcut-ui-" + std::to_string(getpid()) + ".json");
+ setenv("WWHD_CONTROLS", file.c_str(), 1);
+ set_current(Mapping::defaults(), false);
+ ImGui::CreateContext();
+ auto& io = ImGui::GetIO();
+ io.IniFilename = nullptr;
+ io.DisplaySize = ImVec2(1280,720); io.DeltaTime = 1.0f/60;
+ io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_NavEnableGamepad;
+ io.BackendFlags |= ImGuiBackendFlags_HasGamepad | ImGuiBackendFlags_RendererHasTextures;
+ io.Fonts->AddFontDefault();
+ g_open = true;
+ U.cap_action = -1;
+ std::fill(std::begin(U.values), std::end(U.values), 0.0f);
+ auto frame = [&](bool focusReset = false) {
+  ImGui::NewFrame();
+  ImGui::SetNextWindowPos(ImVec2(100,20), ImGuiCond_Always);
+  ImGui::SetNextWindowSize(ImVec2(1000,680), ImGuiCond_Always);
+  if (focusReset) ImGui::SetNextWindowFocus();
+  ImGui::Begin("Shortcut UI regression");
+  if (focusReset) ImGui::SetKeyboardFocusHere();
+  tab_shortcuts();
+  ImGui::End(); ImGui::Render();
+ };
+ auto press = [&](ImGuiKey key) {
+  io.AddKeyEvent(key,true); frame(); io.AddKeyEvent(key,false); frame(); frame();
+ };
+ auto clickFocused = [&](ImGuiMouseSource source) {
+  auto& g = *ImGui::GetCurrentContext();
+  assert(g.NavId && g.NavWindow);
+  const auto center = ImGui::WindowRectRelToAbs(g.NavWindow,g.NavWindow->NavRectRel[g.NavLayer]).GetCenter();
+  io.AddMouseSourceEvent(source); io.AddMousePosEvent(center.x,center.y);
+  io.AddMouseButtonEvent(0,true); frame(); io.AddMouseButtonEvent(0,false); frame(); frame();
+ };
+ auto bindingId = [&](int action, int column, const char* label = "###shortcut_binding") {
+  ImGuiID id = ImHashStr("shortcut bindings",0,ImHashStr("Shortcut UI regression"));
+  id=ImHashData(&action,sizeof action,id); id=ImHashData(&column,sizeof column,id);
+  return ImHashStr(label,0,id);
+ };
+ auto focus = [&](ImGuiID id) {
+  for (int i=0;i<200 && ImGui::GetCurrentContext()->NavId!=id;++i) press(ImGuiKey_Tab);
+  assert(ImGui::GetCurrentContext()->NavId == id);
+ };
+ frame(true); frame(); frame();
+ focus(bindingId(kSettings,0));
+ clickFocused(ImGuiMouseSource_Mouse);
+ assert(U.cap_action == kActionCount+kSettings && U.cap_col == 0);
+ assert(key(kVK_F9,true,false,kCtrl|kShift)); frame();
+ assert((current().shortcuts[kSettings].keys[0] == ShortcutKey{kVK_F9,kModCtrl|kModShift}));
+ assert(U.cap_action == -1);
+ // The same actual widget can start another capture, and Escape must preserve its binding.
+ focus(bindingId(kSettings,0));
+ clickFocused(ImGuiMouseSource_Mouse);
+ const auto beforeCancel = current();
+ assert(U.cap_action == kActionCount+kSettings);
+ assert(key(kVK_Escape,true,false,0)); frame();
+ assert(current() == beforeCancel && U.cap_action == -1);
+ // Navigate to the controller column and activate with the gamepad's confirm key.
+ focus(bindingId(kSettings,2));
+ press(ImGuiKey_GamepadFaceDown);
+ assert(U.cap_action == kActionCount+kSettings && U.cap_col == 2);
+ frame(); // release gate: the UI activation must not become the binding
+ U.values[kPadOptions]=1; frame();
+ assert(U.cap_action >= 0);
+ U.values[kPadDUp]=1; frame();
+ assert(current().shortcuts[kSettings].hold == kPadOptions && current().shortcuts[kSettings].button == kPadDUp);
+ assert(U.cap_action == -1);
+ std::fill(std::begin(U.values),std::end(U.values),0.0f);
+ // Escape also wins over a complete controller combination in the same frame.
+ focus(bindingId(kSettings,2));
+ press(ImGuiKey_GamepadFaceDown);
+ assert(U.cap_action >= 0); frame();
+ U.values[kPadLB]=1; frame();
+ const auto beforeControllerCancel=current();
+ U.values[kPadDRight]=1; assert(key(kVK_Escape,true,false,0)); frame();
+ assert(current() == beforeControllerCancel && U.cap_action == -1);
+ std::fill(std::begin(U.values),std::end(U.values),0.0f);
+ // The explicit Clear button is usable with a touch source, without right-click support.
+ focus(bindingId(kSettings,2,"Clear"));
+ clickFocused(ImGuiMouseSource_TouchScreen);
+ assert(!current().shortcuts[kSettings].hold && !current().shortcuts[kSettings].button);
+ // Reset applies only to Shortcuts, keeping game controls intact.
+ auto m=current(); m.keys[kA] = {kVK_F8,kNoKey}; set_current(m,false);
+ frame(); focus(ImHashStr("Reset to defaults",0,ImHashStr("Shortcut UI regression"))); clickFocused(ImGuiMouseSource_Mouse);
+ assert(current().shortcuts == shortcut_defaults());
+ assert(current().keys[kA] == m.keys[kA]);
+ Mapping saved; assert(load_file(file.string(),saved)); assert(saved == current());
+ g_open=false; ImGui::DestroyContext(); std::filesystem::remove(file);
+ puts("Shortcut UI: mouse/gamepad activation, modifiers, Escape, controller capture, touch clear and scoped reset passed");
+ return 0;
+}
+
 static int window_target_test() {
  using namespace overlay::window_target;
  unsetenv("GAMESCOPE_WAYLAND_DISPLAY");unsetenv("WAYLAND_DISPLAY");
@@ -168,6 +271,7 @@ static int window_target_test() {
  return 0;
 }
 int main(int argc,char** argv){
+ if(argc>1&&std::string(argv[1])=="--shortcuts-ui")return shortcut_ui_test();
  if(argc>1&&std::string(argv[1])=="--window-target")return window_target_test();
  const auto controlsFile=std::filesystem::temp_directory_path()/("wwhd-overlay-mouse-165-"+std::to_string(getpid())+".json");
  setenv("WWHD_CONTROLS",controlsFile.c_str(),1);
@@ -226,6 +330,41 @@ int main(int argc,char** argv){
 #else
  assert(saves==5&&loads==4);
 #endif
+ event_key(tv,SDL_SCANCODE_F6,true);assert(loads == 5);
+ event_key(tv,SDL_SCANCODE_F10,true);assert(shots == 1);
+ auto remapped = input_map::current();
+ remapped.shortcuts[input_map::kPhoto].keys = {{{kVK_F9,input_map::kModCtrl}, {}}};
+ remapped.shortcuts[input_map::kPhoto].hold = input_map::kPadOptions;
+ remapped.shortcuts[input_map::kPhoto].button = input_map::kPadDUp;
+ input_map::set_current(remapped, false);
+ event_key(tv,SDL_SCANCODE_F10,true);assert(shots == 1);
+ event_key(tv,SDL_SCANCODE_F9,true,SDL_KMOD_CTRL);assert(shots == 2);
+ event_key(tv,SDL_SCANCODE_F9,true);assert(shots == 2);
+ pad[input_map::kPadOptions]=1;pad[input_map::kPadDUp]=1;
+ overlay::poll_controller_shortcuts(pad);assert(shots == 3 && !overlay::is_open());
+ overlay::poll_controller_shortcuts(pad);assert(shots == 3);
+ float game[input_map::kPadCount];std::copy(std::begin(pad),std::end(pad),game);
+ input_map::consume_shortcut_buttons(remapped,pad,game);
+ assert(!game[input_map::kPadOptions]&&!game[input_map::kPadDUp]);
+ pad[input_map::kPadDUp]=0;overlay::poll_controller_shortcuts(pad);
+ pad[input_map::kPadOptions]=0;overlay::poll_controller_shortcuts(pad);
+ remapped.shortcuts[input_map::kPhoto].hold = input_map::kPadHome;
+ input_map::set_current(remapped, false);
+ pad[input_map::kPadHome]=1;overlay::poll_controller_shortcuts(pad);assert(!overlay::is_open());
+ pad[input_map::kPadDUp]=1;overlay::poll_controller_shortcuts(pad);assert(shots == 4 && !overlay::is_open());
+ pad[input_map::kPadDUp]=pad[input_map::kPadHome]=0;overlay::poll_controller_shortcuts(pad);assert(!overlay::is_open());
+ pad[input_map::kPadHome]=1;overlay::poll_controller_shortcuts(pad);assert(!overlay::is_open());
+ pad[input_map::kPadHome]=0;overlay::poll_controller_shortcuts(pad);assert(overlay::is_open());
+ event_key(tv,SDL_SCANCODE_ESCAPE,true);assert(!overlay::is_open());
+ remapped.shortcuts[input_map::kPhoto].hold = input_map::kPadOptions;
+ overlay::poll_controller_shortcuts(pad);
+ remapped.shortcuts[input_map::kSettings] = {};
+ input_map::set_current(remapped, false);
+ event_key(tv,SDL_SCANCODE_F1,true);assert(!overlay::is_open());
+ pad[input_map::kPadHome]=1;overlay::poll_controller_shortcuts(pad);assert(overlay::is_open());
+ pad[input_map::kPadHome]=0;overlay::poll_controller_shortcuts(pad);
+ event_key(tv,SDL_SCANCODE_ESCAPE,true);assert(!overlay::is_open());
+ input_map::set_current(input_map::Mapping::defaults(),false);
  const int beforeSaves=saves,beforeLoads=loads;prompt=true;
  event_key(drc,SDL_SCANCODE_F1,true,SDL_KMOD_SHIFT);event_key(drc,SDL_SCANCODE_F2,true);
  assert(saves==beforeSaves&&loads==beforeLoads&&promptKeys==2);prompt=false;

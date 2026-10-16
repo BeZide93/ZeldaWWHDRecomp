@@ -34,7 +34,8 @@ namespace interp { void set_mode(int){} uint64_t logic_steps(){return 0;} }
 namespace timebase { uint64_t now(){return 0;} }
 namespace true60 { uint64_t link_steps(){return 0;} bool state_loaded(){return false;} }  // test scenario clock (input_sdl.cpp)
 namespace true60_test { void set_origin_step(uint64_t){} void tick(double,bool){} }
-namespace mods { void fast_forward_reset(){} }  // fast forward (mods/fast_forward.cpp): releases the hold on focus loss
+static int lockOnResets=0;
+namespace mods { void fast_forward_reset(){} void lock_on_reset(){++lockOnResets;} }  // mods: release required on focus loss
 void log_msg(const char*,...){}
 // settings overlay: closed (keys reach the game and its shortcuts as before); the game's text prompt
 // (overlay/text_entry.h) shows while promptShown: overlay::key takes every key then, as the real one does
@@ -50,6 +51,7 @@ static double shortcutClock=0;
 // a port's controller shortcut (overlay/extensions.h) when platformShortcut: LB + RB + Select, once per
 // press; the overlay keeps the inputs it took from the settings shortcut and reports the poll as taken
 static bool platformShortcut=false,shortcutTook=false;static int platformShortcuts=0;
+namespace screenshot { bool key_down(int); }
 namespace overlay { void set_open(bool open,OpenReason,KeyOrigin){overlayOpen=open;} void focus_lost(){}
  void poll_controller_shortcuts(const float* v){static SettingsShortcut sc;static bool latched=false;
   using namespace input_map;bool select=v[kPadOptions]>0.5f;
@@ -59,7 +61,20 @@ namespace overlay { void set_open(bool open,OpenReason,KeyOrigin){overlayOpen=op
  bool shortcut_took_input(){const bool took=shortcutTook;shortcutTook=false;return took;}
  bool key(int code,bool down,bool repeat,int mods,KeyOrigin){
   if(promptShown){++promptKeys;return true;}
-  if(!menuMatrix)return false;
+  if(!menuMatrix || (!overlayOpen && (code != kVK_F1 || mods))) {
+   const int a = input_map::shortcut_for_key(input_map::current(), code, mods);
+   if (a < 0) return false;
+   if (down && !repeat) {
+    if (a >= input_map::kSave1 && a <= input_map::kSave5) ss::request_save(a-input_map::kSave1+1);
+    else if (a >= input_map::kLoad1 && a <= input_map::kLoad5) ss::request_load(a-input_map::kLoad1+1);
+    else if (a == input_map::kPhoto) screenshot::key_down(code);
+    else if (a >= input_map::kResolution && a <= input_map::kFXAA) {
+     const char keys[] = {'R','O','M','N','6','7','8'};
+     gfxvk::graphics_hotkey(keys[a-input_map::kResolution],true);
+    }
+   }
+   return true;
+  }
 #ifdef MENU112_BASELINE
   const bool press=down&&!repeat;
 #else
@@ -153,7 +168,9 @@ int main(int argc,char** argv){
  key(SDL_SCANCODE_W,true);assert(input::read().ly==1);
  key(SDL_SCANCODE_D,true);assert(input::read().lx>0.7f&&input::read().lx<0.71f);
  key(SDL_SCANCODE_LSHIFT,true);assert(input::read().buttons&input::kZL);
+ const int resetsBeforeFocus=lockOnResets;
  SDL_Event focus{};focus.type=SDL_EVENT_WINDOW_FOCUS_LOST;input::handle_event(focus);assert(input::read().buttons==0&&input::read().lx==0);
+ assert(lockOnResets==resetsBeforeFocus+1);
  auto map=input_map::Mapping::defaults();map.keys[input_map::kA]={input_map::key_from_id("J"),input_map::kNoKey};map.keys[input_map::kB]={input_map::kNoKey,input_map::kNoKey};input_map::set_current(map,false);
  key(SDL_SCANCODE_J,true);assert(input::read().buttons==input::kA);
  input::set_touch(true,0.25f,0.75f);auto pad=input::read();assert(pad.touch&&pad.tx==0.25f&&pad.ty==0.75f);
@@ -211,14 +228,14 @@ int main(int argc,char** argv){
   e.key.windowID=SDL_GetWindowID(window?window:game);e.key.mod=mod;e.key.repeat=repeat;input::handle_event(e);
  };
  for(int slot=1;slot<=5;++slot){
-  stateKey(slot,SDL_KMOD_NONE);assert(loadedSlot==slot&&loadRequests==slot);
+  if(slot>1){stateKey(slot,SDL_KMOD_NONE);assert(loadedSlot==slot&&loadRequests==slot-1);}
   stateKey(slot,SDL_KMOD_LSHIFT);assert(savedSlot==slot&&saveRequests==2*slot-1);
   stateKey(slot,SDL_KMOD_RSHIFT);assert(savedSlot==slot&&saveRequests==2*slot);
  }
  const int saves=saveRequests,loads=loadRequests;
  stateKey(1,SDL_KMOD_LSHIFT,true);stateKey(1,SDL_KMOD_NONE,false,controls);
  stateKey(1,SDL_KMOD_LSHIFT,false,nullptr,SDL_EVENT_KEY_UP);
- stateKey(6,SDL_KMOD_NONE);input::set_prompt_window(nullptr);stateKey(1,SDL_KMOD_NONE);
+ input::set_prompt_window(nullptr);stateKey(1,SDL_KMOD_NONE);
  assert(saveRequests==saves&&loadRequests==loads);
  input::set_prompt_window(game);input::release_keys();
  for(int slot=1;slot<=5;++slot)stateKey(slot,SDL_KMOD_NONE,true);

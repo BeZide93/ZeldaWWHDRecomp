@@ -40,6 +40,9 @@ inline constexpr uint8_t kRecordCarried = 6; // Link carries a quest's letter (s
 inline constexpr uint8_t kRecordQuestFlags = 7; // a quest's 8 flags (wwhd_quest_set_flag): key quest_key, value bit n-1 = flag n
 inline constexpr uint8_t kRecordSailLine = 8;   // the King of Red Lions said a step's sail_line (story_sail.h): key quest_key, value the step
 inline constexpr uint8_t kRecordQuestOrder = 9; // when a quest was started: key quest_key, value 1.. in start order (255: later)
+// 10..15: mod items (story_items_core.h)
+inline constexpr uint8_t kRecordLetterEnclosures = 16; // a manifest letter on its own was read and gave what it encloses: key letter_key, value 1
+inline constexpr uint8_t kRecordActorFlag = 17; // SDK v3 actors: mod-owned opened/read flags, key actor flag_key, value 0/1
 
 inline constexpr uint16_t kItemNotebook = 1;  // the story notebook
 
@@ -65,12 +68,13 @@ public:
     explicit Book(uint8_t* bytes, unsigned records = kRecords) : b_(bytes), n_(records) {}
     unsigned records() const { return n_; }
     bool empty() const {
+        if (!b_) return true;
         for (uint32_t i = 0; i < 4 + 4 * n_; i++)
             if (b_[i]) return false;
         return true;
     }
     // ours: a valid header, or still all zero (a fresh save)
-    bool usable() const { return empty() || (b_[0] == kMagic && b_[1] == kVersion && !b_[2] && !b_[3]); }
+    bool usable() const { return b_ && (empty() || (b_[0] == kMagic && b_[1] == kVersion && !b_[2] && !b_[3])); }  // none: no save
     // The value of a record, 0 when there is none.
     uint8_t get(uint8_t kind, uint16_t key) const {
         int i = usable() ? find(kind, key) : -1;

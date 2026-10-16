@@ -5,6 +5,7 @@
 // resulting ImDrawData (gfx/overlay_metal.mm, gfx/vulkan/overlay.cpp); the hosts feed input and apply
 // changes on their main thread (hostui.h).
 #include "overlay.h"
+#include "imgui_internal.h"
 #include "pointer.h"
 #ifdef WWHD_SDL_HOST
 #include "window_target.h"
@@ -21,6 +22,8 @@
 #include "perf_average.h"
 #ifdef __ANDROID__
 #include "android_telemetry.h"
+#include <SDL3/SDL_system.h>
+#include <jni.h>
 #endif
 
 #include <algorithm>
@@ -131,6 +134,8 @@ std::vector<Event> g_events;
 // Dear ImGui reads it on the render thread when Ctrl/Cmd+V reaches a text field
 std::string g_clipboard;
 std::atomic<bool> g_wants_text{false};  // a text field of the overlay has the keyboard
+std::atomic<bool> g_shortcut_capture{false};
+std::atomic<int> g_capture_mods{0};
 std::atomic<int> g_capture_key{-2};  // remap: key pressed while capturing (-2 none, -1 cancel, -3 clear)
 std::atomic<bool> g_capturing_keys{false};
 // keys held while the overlay is open (the Controls tab lights them; the game never sees them)
@@ -177,7 +182,7 @@ ImGuiKey imgui_key(int code) {
 // ---------------------------------------------------------------- UI state (render thread)
 // the built-in tabs (extensions.h kBuiltinTabs: ids and names); the tab bar is ext::tabs(), which a
 // platform may extend (added tabs, hidden ones)
-enum Tab { kSaves, kGraphics, kDisplay, kAudio, kMods, kControls, kAbout, kTabs };
+enum Tab { kSaves, kGraphics, kDisplay, kAudio, kMods, kControls, kShortcuts, kAbout, kTabs };
 static_assert(kTabs == ext::kBuiltinCount, "a built-in tab per kBuiltinTabs entry");
 
 struct Ui {
@@ -415,6 +420,9 @@ void read_controller() {
     std::copy(std::begin(U.values), std::end(U.values), std::begin(U.prev));
     if (g_no_host) {
         std::fill(std::begin(U.values), std::end(U.values), 0.0f);
+#ifndef WWHD_SDL_HOST
+        if (getenv("WWHD_TEST_PAD")) { test_pad(U.values); poll_controller_shortcuts(U.values); }
+#endif
         return;
     }
     input::host_controller_values(U.values);
@@ -519,12 +527,12 @@ void tab_saves() {
     if (!msg.empty()) note("%s", msg.c_str());
     heading("Save states");
     const bool full = ss::full_states();
+    const char* keys = ext::features().keyboard ? " Shift+F1..F5 save in game, F6 loads slot 1, F2..F5 load slots 2..5 (F1 opens this menu)." : "";
     if (full)
-        note("Full save states: the whole running game (large, contain game data: never share them). Shift+F1..F5 save in "
-             "game, F2..F5 load (F1 opens this menu).");
+        note("Full save states: the whole running game (large, contain game data: never share them).%s", keys);
     else
         note("A save state keeps your progress and where Link stands (a few KB, no game data). Loading enters that place "
-             "with that progress; enemies and cutscenes start fresh. Shift+F1..F5 save in game, F2..F5 load (F1 opens this menu).");
+             "with that progress; enemies and cutscenes start fresh.%s", keys);
     if (ImGui::BeginTable("slots", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_SizingStretchProp)) {
         ImGui::TableSetupColumn("Slot", ImGuiTableColumnFlags_WidthFixed);
         ImGui::TableSetupColumn("Saved");
@@ -619,14 +627,14 @@ void tab_saves() {
 void tab_saves_screenshots() {
     heading("Screenshots");
     {
-        // the Screenshot binding (Controls tab): its keys and controller input
+        // The Screenshot shortcut and any migrated single-button controller binding.
         const input_map::Mapping m = input_map::current();
         std::string keys;
-        for (int k : m.keys[input_map::kScreenshot])
-            if (k != input_map::kNoKey) keys += (keys.empty() ? "" : " or ") + input_map::key_label(k);
+        for (auto k : m.shortcuts[input_map::kPhoto].keys)
+            if (k.code != input_map::kNoKey) keys += (keys.empty() ? "" : " or ") + input_map::shortcut_key_label(k);
         if (m.pad[input_map::kScreenshot] != input_map::kPadNone)
             keys += (keys.empty() ? "controller " : " or controller ") + std::string(input_map::pad_short_label(m.pad[input_map::kScreenshot]));
-        if (keys.empty()) note("Screenshot is not bound: set a key in the Controls tab (Screenshot).");
+        if (keys.empty()) note("Screenshot is not bound: set a key in the Shortcuts tab.");
         else note("%s in game saves the TV picture as a PNG at the internal resolution, without this menu (change the key in Controls).", keys.c_str());
     }
     bool gp;
@@ -994,23 +1002,226 @@ void tab_graphics() {
         }
         help("Where the renderer spends its time over the last few seconds, as text for a bug report");
     }
+#ifdef WWHD_HAS_VULKAN
+    heading("Advanced");
+    static bool forceVertexFallback = [] { std::string value; return hostui::get("vkVertexFallback", value) && value == "1"; }();
+    if (check("Force RGB vertex fallback", forceVertexFallback, &v, !getenv("WWHD_VK_VERTEX_FALLBACK"))) {
+        forceVertexFallback = v;
+        hostui::post([v] { hostui::set("vkVertexFallback", v ? "1" : "0"); });
+    }
+    help("Applies after restarting the game. Splits RGB vertex inputs for driver troubleshooting.");
+#endif
     heading("Bug reports");
+#ifdef __ANDROID__
+    if (ImGui::Button("Share log")) hostui::post([] {
+        auto* env = static_cast<JNIEnv*>(SDL_GetAndroidJNIEnv());
+        auto activity = static_cast<jobject>(SDL_GetAndroidActivity());
+        if (!env || !activity) return;
+        auto cls = env->GetObjectClass(activity);
+        auto method = env->GetMethodID(cls, "shareLog", "()V");
+        if (method) env->CallVoidMethod(activity, method);
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        env->DeleteLocalRef(cls);
+        env->DeleteLocalRef(activity);
+    });
+#endif
     // read once at start-up (main.cpp start_log_file); WWHD_LOG_FILE decides when set
-    static bool logFile = [] { std::string v; return hostui::get("logFile", v) && v == "1"; }();
+    static bool logFile = [] { std::string v;
+#ifdef __ANDROID__
+        return !hostui::get("logFile", v) || v != "0";
+#else
+        return hostui::get("logFile", v) && v == "1";
+#endif
+    }();
     if (check("Write a log file", logFile, &v, !getenv("WWHD_LOG_FILE"))) {
         logFile = v;
         hostui::post([v] { hostui::set("logFile", v ? "1" : "0"); });
     }
+#ifdef __ANDROID__
+    help("Logging is on by default. Share the current and previous run after reproducing a bug. "
+         "User paths are removed; each log stops at 64 MiB. Changes apply on the next start.");
+#else
     help("From the next start: captures/wwhd.log in the game's data folder (the previous run's is kept as "
          "wwhd-previous.log), with your user paths removed. Turn it on before reproducing a bug and attach "
          "the file to the bug report.");
+#endif
+}
+
+// Both previews use the exact same geometry as the host compositor.
+static gfx::Box pip_tv_box() {
+    float x = 0, y = 0, w = 1, h = 1;
+    gfx::main_picture(&x, &y, &w, &h);
+    const ImVec2 ds = ImGui::GetIO().DisplaySize;
+    return {x * ds.x, y * ds.y, w * ds.x, h * ds.y};
+}
+static void pip_move(gfx::Box tv, float x, float y, bool snap = true) {
+    auto p = gfx::pip_place(tv, gfx::g_drc_aspect, gfx::g_pip_size, x, y, snap);
+    gfx::pip_set_position(p);
+}
+static void pip_diagram() {
+    const gfx::Box screen = pip_tv_box();
+    const float w = std::min(240.0f, ImGui::GetContentRegionAvail().x);
+    const ImVec2 origin = ImGui::GetCursorScreenPos();
+    const gfx::Box tv{origin.x, origin.y, w, w * screen.h / screen.w};
+    ImGui::InvisibleButton("Placement diagram", ImVec2(tv.w, tv.h), ImGuiButtonFlags_EnableNav);
+    const bool active = ImGui::IsItemActive(), focused = ImGui::IsItemFocused();
+    auto b = gfx::pip_box(tv, gfx::g_drc_aspect, gfx::g_pip_size, gfx::pip_position());
+    static ImVec2 offset;
+    if (ImGui::IsItemActivated()) {
+        const ImVec2 m = ImGui::GetIO().MousePos;
+        const bool inside = m.x >= b.x && m.x <= b.x + b.w && m.y >= b.y && m.y <= b.y + b.h;
+        offset = inside ? ImVec2(m.x - b.x - b.w / 2, m.y - b.y - b.h / 2) : ImVec2(0, 0);
+    }
+    if (active && ImGui::IsMouseDown(0)) {
+        const auto m = ImGui::GetIO().MousePos;
+        pip_move(tv, (m.x - offset.x - tv.x) / tv.w, (m.y - offset.y - tv.y) / tv.h);
+    }
+    if (ImGui::IsItemDeactivated())
+        hostui::post([] { hostui::save_pip_position(); });
+    if (focused) {
+        for (auto key :
+             {ImGuiKey_GamepadDpadLeft, ImGuiKey_GamepadDpadRight, ImGuiKey_GamepadDpadUp, ImGuiKey_GamepadDpadDown,
+              ImGuiKey_LeftArrow, ImGuiKey_RightArrow, ImGuiKey_UpArrow, ImGuiKey_DownArrow})
+            ImGui::SetKeyOwner(key, ImGui::GetItemID(), ImGuiInputFlags_LockThisFrame);
+        auto pressed = [](ImGuiKey key) {
+            return ImGui::IsKeyPressed(key, ImGuiInputFlags_Repeat, ImGui::GetItemID());
+        };
+        float dx = 0, dy = 0;
+        if (pressed(ImGuiKey_GamepadDpadLeft) || pressed(ImGuiKey_LeftArrow))
+            dx = -0.01f;
+        if (pressed(ImGuiKey_GamepadDpadRight) || pressed(ImGuiKey_RightArrow))
+            dx = 0.01f;
+        if (pressed(ImGuiKey_GamepadDpadUp) || pressed(ImGuiKey_UpArrow))
+            dy = -0.01f;
+        if (pressed(ImGuiKey_GamepadDpadDown) || pressed(ImGuiKey_DownArrow))
+            dy = 0.01f;
+        // Do not snap each step: otherwise a 1% step would stick at a preset
+        // forever.
+        if (dx || dy) {
+            pip_move(tv, (b.x - tv.x + b.w / 2) / tv.w + dx, (b.y - tv.y + b.h / 2) / tv.h + dy, false);
+            hostui::post([] { hostui::save_pip_position(); });
+        }
+    }
+    b = gfx::pip_box(tv, gfx::g_drc_aspect, gfx::g_pip_size, gfx::pip_position());
+    auto *d = ImGui::GetWindowDrawList();
+    d->AddRectFilled(origin, ImVec2(tv.x + tv.w, tv.y + tv.h), IM_COL32(18, 28, 36, 255));
+    d->AddRect(origin, ImVec2(tv.x + tv.w, tv.y + tv.h),
+               focused ? IM_COL32(255, 210, 80, 255) : IM_COL32(180, 190, 200, 255));
+    for (int a = 0; a < 9; ++a) {
+        const auto q = gfx::pip_box(tv, gfx::g_drc_aspect, gfx::g_pip_size, {a, 0, 0});
+        d->AddCircleFilled(ImVec2(q.x + q.w / 2, q.y + q.h / 2), 2, IM_COL32(180, 190, 200, 110));
+    }
+    d->AddRectFilled(ImVec2(b.x, b.y), ImVec2(b.x + b.w, b.y + b.h),
+                     IM_COL32(75, 180, 220, int(255 * gfx::g_pip_opacity)));
+    d->AddRect(ImVec2(b.x, b.y), ImVec2(b.x + b.w, b.y + b.h), IM_COL32(235, 245, 255, 255));
+    note("Tap or drag to place. Focus the diagram and use the D-pad to move.");
+}
+static void pip_live_drag() {
+    if (!gfx::g_pip_preview)
+        return;
+    const auto tv = pip_tv_box();
+    const auto b = gfx::pip_box(tv, gfx::g_drc_aspect, gfx::g_pip_size, gfx::pip_position());
+    ImGui::SetNextWindowPos(ImVec2(b.x, b.y));
+    ImGui::SetNextWindowSize(ImVec2(b.w, b.h));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+    const auto flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoMove |
+                       ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoFocusOnAppearing;
+    ImGui::Begin("##pip_live_drag", nullptr, flags);
+    ImGui::InvisibleButton("##drag", ImVec2(b.w, b.h));
+    static ImVec2 offset;
+    if (ImGui::IsItemActivated()) {
+        const auto m = ImGui::GetIO().MousePos;
+        offset = ImVec2(m.x - b.x - b.w / 2, m.y - b.y - b.h / 2);
+    }
+    if (ImGui::IsItemActive() && ImGui::IsMouseDown(0)) {
+        const auto m = ImGui::GetIO().MousePos;
+        pip_move(tv, (m.x - offset.x - tv.x) / tv.w, (m.y - offset.y - tv.y) / tv.h);
+    }
+    if (ImGui::IsItemDeactivated())
+        hostui::post([] { hostui::save_pip_position(); });
+    ImGui::GetForegroundDrawList()->AddRect(ImVec2(b.x, b.y), ImVec2(b.x + b.w, b.y + b.h), IM_COL32(255, 220, 90, 255),
+                                            0, 1.5f);
+    ImGui::End();
+    ImGui::PopStyleVar();
+}
+
+// Integer widgets share the same bounds for mouse, touch, typed and controller input.
+static void pip_percent(const char* label, const char* exactLabel, float value, int minimum, int maximum,
+                        void (*save)(float)) {
+    int percent = int(std::round(value * 100));
+    if (ImGui::SliderInt(label, &percent, minimum, maximum, "%d%%", ImGuiSliderFlags_AlwaysClamp))
+        hostui::post([percent, save] { save(percent / 100.0f); });
+    // Android's taller +/- buttons need room without squeezing the number field.
+    ImGui::SetNextItemWidth(std::max(120.0f, ImGui::GetFrameHeight() * 4));
+    if (ImGui::InputInt(exactLabel, &percent, 1, 5)) {
+        percent = std::clamp(percent, minimum, maximum);
+        hostui::post([percent, save] { save(percent / 100.0f); });
+    }
 }
 
 void tab_display() {
     bool v;
+    heading("GamePad screen");
+#ifdef __ANDROID__
+    if (check("Swap TV and GamePad displays", hostui::displays_swapped(), &v))
+        hostui::post([v] { hostui::set_displays_swapped(v); });
+#endif
+    // the modes of display_modes.h; a host offers those it can show (no "Separate
+    // window" without one, as on Android)
+    const int mode = hostui::drc_mode();
+    if (hostui::drc_modes() >= 4) {
+        static const char* const modes[] = {"Separate window", "Picture-in-picture", "Automatic picture-in-picture", "Off", "GamePad only"};
+        if (ImGui::BeginCombo("View", modes[mode])) {
+            for (int i=0; i<5; ++i) {
+                if (hostui::drc_mode_offered(i) && ImGui::Selectable(modes[i],mode==i))
+                    hostui::post([i] { hostui::set_drc_mode(i); });
+            }
+            ImGui::EndCombo();
+        }
+        if (mode == 2)
+            note("Shows GamePad menus while open and follows Off-TV Play.");
+        if (mode == 4)
+            note("Only the GamePad picture. In the game, Minus switches to Off-TV "
+                 "Play (the game on the GamePad).");
+    }
+    if (check(mode == 2 ? "Pin GamePad picture-in-picture" : "Show GamePad screen", hostui::drc_shown(), &v,
+              hostui::drc_available() && !(hostui::drc_modes() >= 4 && (mode == 3 || mode == 4))))
+        hostui::post([v] { hostui::show_drc(v); });
+    if (hostui::drc_modes() >= 4 && (mode == 1 || mode == 2 || mode == 3)) {
+        bool eligible = true;
+#ifdef __ANDROID__
+        eligible = !gfx::g_has_drc_window;
+#endif
+        if (eligible && ImGui::CollapsingHeader("Picture-in-picture placement", ImGuiTreeNodeFlags_DefaultOpen)) {
+            gfx::g_pip_preview = true;
+            static const char *const names[] = {"Top left",     "Top centre",   "Top right",   "Centre left",
+                                                "Centre",       "Centre right", "Bottom left", "Bottom centre",
+                                                "Bottom right", "Custom"};
+            if (ImGui::BeginCombo("Position", names[hostui::pip_anchor()])) {
+                for (int i = 0; i < 10; ++i)
+                    if (ImGui::Selectable(names[i], hostui::pip_anchor() == i))
+                        hostui::post([i] { hostui::set_pip_anchor(i); });
+                ImGui::EndCombo();
+            }
+            pip_diagram();
+            pip_percent("Size (%)", "Exact size (%)", hostui::pip_size(), 10, 50, hostui::set_pip_size);
+            for (int v : {20, 25, 33, 40}) {
+                if (v != 20)
+                    ImGui::SameLine();
+                char label[24];
+                snprintf(label, sizeof label, "%d%%##pipSize", v);
+                if (ImGui::Button(label))
+                    hostui::post([v] { hostui::set_pip_size(v / 100.0f); });
+            }
+            pip_percent("Opacity (%)", "Exact opacity (%)", hostui::pip_opacity(), 20, 100, hostui::set_pip_opacity);
+            note("Ctrl+click a slider to type an exact percentage. The game picture "
+                 "previews changes while this section is open.");
+        }
+    }
     heading("Window");
-    if (check("Full screen", hostui::fullscreen(), &v)) hostui::post([v] { hostui::set_fullscreen(v); });
-#ifndef __ANDROID__  // always full screen there
+    if (check("Full screen", hostui::fullscreen(), &v))
+        hostui::post([v] { hostui::set_fullscreen(v); });
+#ifndef __ANDROID__ // always full screen there
     help(!strcmp(hostui::name(), "AppKit") ? "The TV window (Cmd+F); remembered for the next start"
                                            : "The TV window (F11 or Alt+Enter); remembered for the next start");
 #endif
@@ -1018,86 +1229,42 @@ void tab_display() {
     heading("Interface");
     int uiSize = g_ui_size;
     if (combo("UI size", &uiSize, "Automatic\0Small\0Medium\0Large\0"))
-        hostui::post([uiSize] { g_ui_size = uiSize; hostui::set("uiSize", std::to_string(uiSize)); });
-    help("Automatic adapts Settings to your Android device's screen. Choose Small, Medium or Large to adjust the controls.");
+        hostui::post([uiSize] {
+            g_ui_size = uiSize;
+            hostui::set("uiSize", std::to_string(uiSize));
+        });
+    help("Automatic adapts Settings to your Android device's screen. Choose "
+         "Small, Medium or Large to adjust the controls.");
     heading("Touch controls");
     int touchMode = gfx::g_touch_buttons;
     if (combo("Touch buttons", &touchMode, "Automatic\0Always show\0Hide\0"))
-        hostui::post([touchMode] { gfx::g_touch_buttons = touchMode; hostui::set("touchButtons", std::to_string(touchMode)); });
-    help("Automatic hides the floating buttons while a controller is connected. Tap near the top-left corner to reveal them for five seconds.");
+        hostui::post([touchMode] {
+            gfx::g_touch_buttons = touchMode;
+            hostui::set("touchButtons", std::to_string(touchMode));
+        });
+    help("Automatic hides the floating buttons while a controller is connected. "
+         "Tap near the top-left corner to reveal them for five seconds.");
     if (check("On-screen controls", gfx::g_touch_controls, &v))
-        hostui::post([v] { gfx::g_touch_controls = v; hostui::set("touchControls", v ? "1" : "0"); });
+        hostui::post([v] {
+            gfx::g_touch_controls = v;
+            hostui::set("touchControls", v ? "1" : "0");
+        });
 #endif
     heading("Picture scaling");
-    static const char* const f[] = {"Smooth", "Sharp", "Integer scale (pixel exact)"};
+    static const char *const f[] = {"Smooth", "Sharp", "Integer scale (pixel exact)"};
     const bool fok = hostui::scale_filter_available();
     for (int i = 0; i < 3; i++) {
-        if (i) ImGui::SameLine();
-        if (radio(f[i], hostui::scale_filter() == i, fok)) hostui::post([i] { hostui::set_scale_filter(i); });
-    }
-    heading("GamePad screen");
-#ifdef __ANDROID__
-    if (check("Swap TV and GamePad displays", hostui::displays_swapped(), &v))
-        hostui::post([v] { hostui::set_displays_swapped(v); });
-#endif
-    // the modes of display_modes.h; a host offers those it can show (no "Separate window" without one,
-    // as on Android)
-    const int mode = hostui::drc_mode();
-    if (hostui::drc_modes() >= 4) {
-        static const char* const modes[] = {"Separate window", "Picture-in-picture", "Automatic picture-in-picture", "Off",
-                                            "GamePad only"};
-        bool first = true;
-        for (int i = 0; i < hostui::drc_modes() && i < 5; i++) {
-            if (!hostui::drc_mode_offered(i)) continue;
-#ifndef __ANDROID__
-            if (!first) ImGui::SameLine();
-#endif
-            first = false;
-            if (radio(modes[i], mode == i)) hostui::post([i] { hostui::set_drc_mode(i); });
-        }
-        if (mode == 2) note("Shows GamePad menus while open and follows Off-TV Play.");
-        if (mode == 4) note("Only the GamePad picture. In the game, Minus switches to Off-TV Play (the game on the GamePad).");
-    }
-    if (check(mode == 2 ? "Pin GamePad picture-in-picture" : "Show GamePad screen", hostui::drc_shown(), &v,
-              hostui::drc_available() && !(hostui::drc_modes() >= 4 && (mode == 3 || mode == 4))))
-        hostui::post([v] { hostui::show_drc(v); });
-    if (hostui::drc_modes() >= 4 && (mode == 1 || mode == 2)) {
-        // the overlay's corner, size and opacity (also in the Display menu on macOS)
-        static const char* const corners[] = {"Top left", "Top right", "Bottom left", "Bottom right"};
-        ImGui::AlignTextToFramePadding();
-        ImGui::TextUnformatted("Picture-in-picture corner:");
-        for (int i = 0; i < 4; i++) {
-#ifndef __ANDROID__
+        if (i)
             ImGui::SameLine();
-#endif
-            if (radio(corners[i], hostui::pip_corner() == i)) hostui::post([i] { hostui::set_pip_corner(i); });
-        }
-        ImGui::AlignTextToFramePadding();
-        ImGui::TextUnformatted("Size (of the TV picture's width):");
-        for (int s : {20, 25, 33, 40}) {
-            ImGui::SameLine();
-            char l[16];
-            snprintf(l, sizeof l, "%d%%##size", s);
-            if (radio(l, std::fabs(hostui::pip_size() * 100 - s) < 0.5f)) hostui::post([s] { hostui::set_pip_size(s / 100.0f); });
-        }
-        ImGui::AlignTextToFramePadding();
-        ImGui::TextUnformatted("Opacity:");
-        for (int o : {100, 85, 70, 50}) {
-            ImGui::SameLine();
-            char l[16];
-            snprintf(l, sizeof l, "%d%%##opacity", o);
-            if (radio(l, std::fabs(hostui::pip_opacity() * 100 - o) < 0.5f)) hostui::post([o] { hostui::set_pip_opacity(o / 100.0f); });
-        }
-        note("A click (or touch) on the GamePad picture touches the GamePad screen.");
+        if (radio(f[i], hostui::scale_filter() == i, fok))
+            hostui::post([i] { hostui::set_scale_filter(i); });
     }
+
 }
 
 mods::catalogue::Version catalogue_port_version() {
-    std::string version=build::version();
-    if(version.starts_with("v"))version.erase(0,1);
-    // "0.2.11+meta" and development builds "0.2.11-devel.<commit>" count as their release
-    version=version.substr(0,version.find_first_of("+-"));
-    try { return mods::catalogue::Version::parse(version); } catch (...) { return {}; }
+    // a build ahead of its release counts as the next one (mods::catalogue::port_version_from_build)
+    return mods::catalogue::port_version_from_build(build::version());
 }
 using setupflow::setup_run;
 using setupflow::setup_run_tick;
@@ -1185,6 +1352,18 @@ void builtin_options(const std::string& id) {
         float speed = mods::camera_speed();
         if (ImGui::SliderFloat("Camera speed", &speed, .5f, 2.f, "%.2fx"))
             hostui::post([speed] { mods::set_camera_speed(speed); hostui::set("mod.direct-camera.speed", std::to_string(speed)); mods::packages::remember_option("direct-camera.speed", speed); });
+    } else if (id == "lock-on") {
+        float range = mods::lock_on_range();
+        if (ImGui::SliderFloat("Enemy lock-on range", &range, 1.f, 3.f, "%.2fx"))
+            hostui::post([range] { mods::set_lock_on_range(range); hostui::set("mod.lock-on.range", std::to_string(range)); mods::packages::remember_option("lock-on.range", range); });
+        bool cycling = mods::lock_on_cycling();
+        if (ImGui::Checkbox("Cycle enemy targets with R3", &cycling))
+            hostui::post([cycling] { mods::set_lock_on_cycling(cycling); hostui::set("mod.lock-on.cycling", cycling ? "1" : "0"); mods::packages::remember_option("lock-on.cycling", cycling); });
+        help("Range 1 keeps the original enemy targeting distance. Press R3 while locked on "
+             "to cycle enemy targets. Disabling this mod restores original targeting behavior.");
+        for (const char* env : {"WWHD_MOD_LOCK_ON_RANGE", "WWHD_MOD_LOCK_ON_CYCLING"})
+            if (const char* override = std::getenv(env))
+                note("%s=%s overrides the saved option at startup.", env, override);
     } else if (id == "fast-forward") {
         for (unsigned rate : {2u, 3u, 4u}) {
             if (rate != 2) ImGui::SameLine();
@@ -1277,8 +1456,10 @@ void cheats() {
     cheat("Equip Master Sword + Mirror Shield (until reload)", mods::kCheatSword);
     cheat("20 hearts, double magic, 5000 rupees", mods::kCheatStats);
     static const std::pair<const char*, int> inf[] = {{"Infinite health", mods::kInfHealth}, {"Infinite magic", mods::kInfMagic},
-                                                      {"Infinite arrows and bombs", mods::kInfAmmo}};
-    for (int i = 0; i < 3; i++) {
+                                                      {"Infinite arrows and bombs", mods::kInfAmmo},
+                                                      {"Moon jump (hold L; left stick steers)", mods::kMoonJump},
+                                                      {"No fall damage after moon jump", mods::kMoonNoFall}};
+    for (int i = 0; i < 5; i++) {
         int bit = inf[i].second;
         if (check(inf[i].first, mods::infinite(bit), &v)) hostui::post([bit, v] { mods::set_infinite(bit, v); });
     }
@@ -1311,6 +1492,8 @@ modsui::Host& mods_host() {
 #endif
         h.test = g_no_host && getenv("WWHD_MOD_MANAGER_DIR");
         h.file_picker = ext::features().file_picker;
+        h.code_mods = ext::features().code_mods;
+        h.mod_downloads = ext::features().mod_downloads;
         return h;
     }();
     h.back = false;
@@ -1325,7 +1508,88 @@ void tab_mods() {
     if (h.b_used) g_pad_b_used = true;
 }
 
+void tab_shortcuts() {
+    using namespace input_map;
+    static int capture_hold = 0;
+    auto m = current();
+    note("Hold a controller button, then press a second button. Only the complete combination consumes its buttons. Tap Home always opens Settings. Using Select as a hold button reserves it for combinations.");
+    if (ImGui::Button("Reset to defaults")) {
+        m.shortcuts = shortcut_defaults();
+        m.pad[kScreenshot] = kPadNone;
+        set_current(m);
+        U.cap_action = -1; g_capturing_keys = false; capture_hold = 0;
+    }
+    if (U.cap_action >= kActionCount) {
+        int a = U.cap_action - kActionCount;
+        int code = g_capture_key.exchange(-2);
+        bool done = code == -1;
+        if (U.cap_col < 2 && code >= 0 && code < 256 && code != kVK_Shift && code != kVK_RightShift &&
+            code != kVK_Control && code != kVK_RightControl && code != kVK_Option && code != kVK_RightOption &&
+            code != kVK_Command && code != kVK_RightCommand) {
+            m.shortcuts[a].keys[U.cap_col] = {code, g_capture_mods.load() & 15};
+            done = true; set_current(m);
+        }
+        if (U.cap_col == 2 && !done) {
+            // Wait for the button that activated the UI to be released before capturing a hold.
+            int& hold = capture_hold;
+            if (U.binding_capture.poll(U.values) > 0 && !hold)
+                for (int p = 1; p < kPadCount; ++p) if (U.values[p] > 0.5f) { hold = p; break; }
+            if (hold && U.values[hold] <= 0.5f) hold = 0;
+            if (hold) for (int p = 1; p < kPadCount; ++p) if (p != hold && U.values[p] > 0.5f) {
+                m.shortcuts[a].hold = hold; m.shortcuts[a].button = p;
+                if (a == kPhoto) m.pad[kScreenshot] = kPadNone;
+                set_current(m); done = true; hold = 0; break;
+            }
+            if (done) hold = 0;
+        }
+        if (done || now_s() - U.cap_started > 15) { U.cap_action = -1; g_capturing_keys = false; capture_hold = 0; g_pad_b_used = true; }
+        else note(U.cap_col == 2 ? "Hold one button and press another; Esc cancels." : "Press a key with optional modifiers; Esc cancels.");
+    }
+    if (ImGui::BeginTable("shortcut bindings", 4, ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_RowBg)) {
+        ImGui::TableSetupColumn("Action", ImGuiTableColumnFlags_WidthStretch, 1.4f);
+        ImGui::TableSetupColumn("Key"); ImGui::TableSetupColumn("Alternate"); ImGui::TableSetupColumn("Controller");
+        ImGui::TableHeadersRow();
+        std::string group;
+        for (int a = 0; a < kShortcutCount; ++a) {
+            if (group != shortcut_info(a).group) {
+                group = shortcut_info(a).group;
+                ImGui::TableNextRow(); ImGui::TableNextColumn(); ImGui::TextUnformatted(group.c_str());
+            }
+            ImGui::PushID(a); ImGui::TableNextRow(); ImGui::TableNextColumn();
+            const bool conflict = shortcut_conflict(m, a);
+            if (conflict) ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 0.45f, 0.3f, 1));
+            ImGui::TextWrapped("%s%s", shortcut_info(a).name, conflict ? " (conflict)" : "");
+            if (conflict) ImGui::PopStyleColor();
+            for (int col = 0; col < 3; ++col) {
+                ImGui::TableNextColumn(); ImGui::PushID(col);
+                const auto& b = m.shortcuts[a];
+                std::string label = col < 2 ? shortcut_key_label(b.keys[col]) :
+                    b.hold ? "Hold " + std::string(pad_short_label(b.hold)) + " + " + pad_short_label(b.button) :
+                    a == kPhoto && m.pad[kScreenshot] ? std::string(pad_short_label(m.pad[kScreenshot])) + " (legacy)" : "Unbound";
+                if (U.cap_action == kActionCount + a && U.cap_col == col) label = "Press...";
+                if (ImGui::Button((label + "###shortcut_binding").c_str(), ImVec2(-FLT_MIN, 0)) && U.cap_action < 0) {
+                    U.cap_action = kActionCount + a; U.cap_col = col; U.cap_started = now_s();
+                    U.binding_capture.reset(); capture_hold = 0; g_capture_key = -2; g_shortcut_capture = true; g_capturing_keys = true;
+                }
+                bool clear = ImGui::IsItemClicked(ImGuiMouseButton_Right);
+                if (ImGui::BeginPopupContextItem("binding")) { clear |= ImGui::MenuItem("Clear"); ImGui::EndPopup(); }
+                if (label != "Unbound" && ImGui::SmallButton("Clear")) clear = true;
+                if (clear) {
+                    if (col < 2) m.shortcuts[a].keys[col] = {};
+                    else { m.shortcuts[a].hold = m.shortcuts[a].button = 0; if (a == kPhoto) m.pad[kScreenshot] = 0; }
+                    if (settings_reachable(m)) set_current(m);
+                    U.cap_action = -1; g_capturing_keys = false; capture_hold = 0;
+                }
+                ImGui::PopID();
+            }
+            ImGui::PopID();
+        }
+        ImGui::EndTable();
+    }
+}
+
 void start_capture(int a, int col) {
+    g_shortcut_capture = false;
     U.cap_action = a;
     U.cap_col = col;
     U.binding_capture.reset();
@@ -1401,7 +1665,7 @@ void controls_list(input_map::Mapping& m, float h) {
         ImGui::TableSetupColumn("Key 2");
         ImGui::TableSetupColumn("Controller");
         ImGui::TableHeadersRow();
-        for (int a = 0; a < input_map::kActionCount; a++) {
+        for (int a = 0; a < input_map::kScreenshot; a++) {
             ImGui::PushID(a);
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
@@ -1588,11 +1852,10 @@ void tab_controls() {
         input_map::set_face_auto(m, true);
         input_map::set_current(m);
     }
-    help("How the controller's face buttons drive the Wii U's A/B/X/Y. By position: the bottom "
-         "button is B (Nintendo layout). By label: the button named A is A — on an Xbox pad that "
-         "makes A accept/act and B go back (issue #78). Automatic reads the labels printed on the "
-         "pad that was plugged in first and follows them. Only these four bindings are rewritten; "
-         "keyboard keys and the other inputs stay as they are.");
+    help("Which physical button does each Wii U action. By position: right is A, bottom B, "
+         "top X and left Y. By label: A does A, B does B, X does X and Y does Y. Automatic "
+         "reads the connected pad's labels. Button prompts below chooses how those buttons "
+         "look in the game. Only the four face bindings change.");
     if (m.face_auto) {
         ImGui::SameLine();
         ImGui::TextDisabled("(-> %s)", input_map::face_layout_label(fl));
@@ -1616,10 +1879,12 @@ void tab_controls() {
             }
         }
         ImGui::PopID();
-        help("How the game's button icons look while the face buttons are by label. Automatic: "
-             "PlayStation shapes on a PlayStation controller, the Xbox colours and positions on any "
-             "other. Original keeps the game's look. By position always keeps the game's look: its "
-             "prompts then already match the buttons' positions.");
+        help("How the game's button icons look, with any face-button setting. Xbox and "
+             "PlayStation show the button bound to each Wii U action. By position on Xbox, "
+             "roll shows B and sword shows A. Automatic follows the connected pad; Nintendo "
+             "keeps the game's look. By label keeps its existing automatic Xbox fallback. "
+             "Original keeps the game's look. Custom bindings need four distinct face buttons; "
+             "otherwise the original icons are used.");
         ImGui::SameLine();
         ImGui::TextDisabled("(-> %s)", look.face == input_map::FaceStyle::kPlayStation ? "PlayStation"
                                        : look.face == input_map::FaceStyle::kXbox      ? "Xbox"
@@ -1694,7 +1959,7 @@ void tab_controls() {
         static bool keys[256];
         for (int i = 0; i < 256; i++) keys[i] = g_held_keys[i].load(std::memory_order_relaxed);
         cv.keys = keys;
-        for (int a = 0; a < input_map::kActionCount; a++) {
+        for (int a = 0; a < input_map::kScreenshot; a++) {
             float x = 0;
             for (int key : m.keys[a])
                 if (key != input_map::kNoKey && keys[key]) x = 1;
@@ -1889,17 +2154,25 @@ void tab_about() {
     if (*build::variant())  // the decomp build (docs/decomp-build.md)
         ImGui::Text("%s (%s), %s build: the game code runs from the decompiled source (experimental)", build::version(),
                     build::commit(), build::variant());
+    if (!ext::features().keyboard) {  // a controller only
+        note("Settings overlay: hold Select / press Home on a controller. B closes. L / R switch tabs. The game keeps "
+             "running and sees no input while this menu is open.");
+        note("When the game asks for text (your name), a text window appears over the game: D-pad / left stick choose a "
+             "key, A types it, B deletes, X adds a space, Y is Shift, L / R switch between letters, accents and symbols, "
+             "Start confirms.");
+    } else {
 #ifdef __APPLE__
-    note("Settings overlay: F1 (Fn+F1 on most Mac keyboards), Cmd+, or Settings... in the app menu, or hold Select / "
-         "press Home on a controller. Esc, F1 or B closes. "
+        note("Settings overlay: F1 (Fn+F1 on most Mac keyboards), Cmd+, or Settings... in the app menu, or hold Select / "
+             "press Home on a controller. Esc, F1 or B closes. "
 #else
-    note("Settings overlay: F1, or hold Select / press Home on a controller. Esc, F1 or B closes. "
+        note("Settings overlay: F1, or hold Select / press Home on a controller. Esc, F1 or B closes. "
 #endif
-         "L / R switch tabs on a controller. The game keeps running and sees no input while this menu is open.");
-    note("When the game asks for text (your name), a text window appears over the game: type on the keyboard "
-         "(Enter = OK, Esc = Cancel), click the on-screen keys, or use a controller: D-pad / left stick choose a key, "
-         "A types it, B deletes, X adds a space, Y is Shift, L / R switch between letters, accents and symbols, "
-         "Start confirms.");
+             "L / R switch tabs on a controller. The game keeps running and sees no input while this menu is open.");
+        note("When the game asks for text (your name), a text window appears over the game: type on the keyboard "
+             "(Enter = OK, Esc = Cancel), click the on-screen keys, or use a controller: D-pad / left stick choose a key, "
+             "A types it, B deletes, X adds a space, Y is Shift, L / R switch between letters, accents and symbols, "
+             "Start confirms.");
+    }
     note("Built with Dear ImGui %s (MIT License, Omar Cornut and contributors).", IMGUI_VERSION);
 }
 
@@ -1959,10 +2232,12 @@ void tab_audio() {
     if (audio::master_volume_from_env())
         note("WWHD_AUDIO_VOLUME=%s is set for this start and takes precedence; changes here are not saved.",
              getenv("WWHD_AUDIO_VOLUME"));
-    int speakers = audio::requested_surround() ? 1 : 0;
-    if (combo("Speakers", &speakers, "Stereo\0Surround 5.1\0"))
-        hostui::post([speakers] { audio::set_requested_surround(speakers == 1); });
-    note("Restart the game after changing Speakers.");
+    if (ext::features().speaker_choice) {
+        int speakers = audio::requested_surround() ? 1 : 0;
+        if (combo("Speakers", &speakers, "Stereo\0Surround 5.1\0"))
+            hostui::post([speakers] { audio::set_requested_surround(speakers == 1); });
+        note("Restart the game after changing Speakers.");
+    }
     if (audio::surround_fallback())
         note("Surround 5.1 unavailable on this output. Using stereo; restart after connecting a 5.1 device.");
     if (audio::output_device_changed())
@@ -1987,8 +2262,40 @@ void settings_window() {
     const ImVec2 size = shown_builtin() == kControls ? ImVec2(std::min(1240.0f, ds.x * 0.98f), std::min(720.0f, ds.y * 0.97f))
                                            : ImVec2(std::min(860.0f, ds.x * 0.94f), std::min(620.0f, ds.y * 0.92f));
 #endif
-    ImGui::SetNextWindowPos(ImVec2(ds.x * 0.5f, ds.y * 0.5f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
-    ImGui::SetNextWindowSize(size, ImGuiCond_Always);
+    ImVec2 panelSize = size, panelPos(ds.x * 0.5f, ds.y * 0.5f);
+    bool placement = shown_builtin() == kDisplay &&
+                     (gfx::g_mode == gfx::kDrcPip || gfx::g_mode == gfx::kDrcAuto || gfx::g_mode == gfx::kDrcOff);
+#ifdef __ANDROID__
+    placement = placement && !gfx::g_has_drc_window;
+#endif
+    // Moving the panel out of the preview's way: never while dragging (the panel would jump under the
+    // pointer), and only to a space that keeps it usable; otherwise it stays centred over the preview.
+    static ImVec2 lastPanelSize, lastPanelPos;
+    static bool lastPlaced = false;
+    if (placement && lastPlaced && ImGui::IsAnyItemActive()) {
+        panelSize = lastPanelSize, panelPos = lastPanelPos;
+    } else if (placement) {
+        const auto b = gfx::pip_box(pip_tv_box(), gfx::g_drc_aspect, gfx::g_pip_size, gfx::pip_position());
+        const float gap = 8;
+        const gfx::Box spaces[] = {
+            {0, 0, std::max(0.0f, b.x - gap), ds.y},
+            {b.x + b.w + gap, 0, std::max(0.0f, ds.x - b.x - b.w - gap), ds.y},
+            {0, 0, ds.x, std::max(0.0f, b.y - gap)},
+            {0, b.y + b.h + gap, ds.x, std::max(0.0f, ds.y - b.y - b.h - gap)}
+        };
+        auto usable = [&](gfx::Box area) { return std::min(area.w, size.x) * std::min(area.h, size.y); };
+        auto best = spaces[0];
+        for (auto area : spaces)
+            if (usable(area) > usable(best)) best = area;
+        const ImVec2 fitted(std::min(size.x, best.w), std::min(size.y, best.h));
+        if (fitted.x >= size.x * 0.75f && fitted.y >= size.y * 0.6f) {
+            panelSize = fitted;
+            panelPos = ImVec2(best.x + best.w / 2, best.y + best.h / 2);
+        }
+    }
+    lastPlaced = placement, lastPanelSize = panelSize, lastPanelPos = panelPos;
+    ImGui::SetNextWindowPos(panelPos, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(panelSize, ImGuiCond_Always);
     ImGuiWindowFlags fl = ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
                           ImGuiWindowFlags_NoSavedSettings;
     bool open = true;
@@ -2026,6 +2333,7 @@ void settings_window() {
                     case kAudio: tab_audio(); break;
                     case kMods: tab_mods(); break;
                     case kControls: tab_controls(); break;
+                    case kShortcuts: tab_shortcuts(); break;
                     case kAbout: tab_about(); break;
                     default: if (tabs[i].draw) tabs[i].draw(); break;  // an added tab
                     }
@@ -2053,16 +2361,74 @@ void settings_window() {
 // ---------------------------------------------------------------- API
 bool is_open() { return g_open.load(std::memory_order_relaxed); }
 static std::atomic<bool> g_shortcut_took{false};  // a platform shortcut took a poll's input (shortcut_took_input)
+void activate_shortcut(int action, KeyOrigin origin) {
+    using namespace input_map;
+    if (action < 0 || action >= kShortcutCount) return;
+    if (action == kSettings) { set_open(!is_open(), OpenReason::F1, origin); return; }
+    LOG("[shortcuts] %s", shortcut_info(action).id);
+    hostui::post([action] {
+        if (action >= kSave1 && action <= kSave5) { ss::request_save(action - kSave1 + 1); return; }
+        if (action >= kLoad1 && action <= kLoad5) { ss::request_load(action - kLoad1 + 1); return; }
+        switch (action) {
+        case kFullscreen: hostui::set_fullscreen(!hostui::fullscreen()); break;
+        case kPhoto: screenshot::request(); break;
+        case kResolution: {
+            const float scales[] = {1, 1.5f, 2, 3};
+            float next = scales[0];
+            for (float scale : scales) if (scale > hostui::res_scale() + 0.01f) { next = scale; break; }
+            hostui::set_res_scale(next); break;
+        }
+        case kAO: if (render::feature_available(render::kFeatureAO)) render::set_ao_mode((render::ao_mode() + 1) % 3); break;
+        case kAOHires: if (render::feature_available(render::kFeatureAOHires)) render::set_ao_hires(!render::ao_hires()); break;
+        case kAniso: if (render::feature_available(render::kFeatureAniso)) render::set_aniso(!render::aniso()); break;
+        case kInterpolation: interp::toggle_fps(60); break;
+        case kTrue60: interp::set_mode(interp::mode() == 2 ? 0 : 2); break;
+        case kFXAA: if (render::feature_available(render::kFeatureFXAA)) render::set_fxaa(!render::fxaa()); break;
+        case kPiP:
+            if (hostui::drc_mode() != gfx::kDrcPip) { hostui::set_drc_mode(gfx::kDrcPip); hostui::show_drc(true); }
+            else hostui::show_drc(!hostui::drc_shown());
+            break;
+        case kPerformance: set_perf_shown(!perf_shown()); break;
+        case kMute: {
+            static float before = 1;
+            float v = audio::master_volume(); if (v > 0) before = v;
+            audio::set_master_volume(v > 0 ? 0 : before); break;
+        }
+        case kVolumeDown: audio::set_master_volume(std::max(0.0f, audio::master_volume() - 0.05f)); break;
+        case kVolumeUp: audio::set_master_volume(std::min(1.0f, audio::master_volume() + 0.05f)); break;
+        default: break;
+        }
+        hostui::graphics_changed();
+    });
+}
 void poll_controller_shortcuts(const float* values) {
-    if (g_no_host) return;
+    if (g_no_host && !getenv("WWHD_TEST_PAD")) return;
     PadValues pad;
     std::copy(values, values + input_map::kPadCount, pad.begin());
     // the platform's shortcuts (extensions.h) first: the inputs one takes stay from the settings shortcut
     // until released, and from the game (shortcut_took_input)
     if (!ext::shortcuts().empty() && ext::poll_shortcuts(pad, is_open())) g_shortcut_took = true;
+    static input_map::ShortcutPoll bindings;
+    const auto m = input_map::current();
+    const PadValues available = pad;
+    const auto pressed = bindings.poll(m, available.data(), pad.data());
+    if (!captures()) for (int a : pressed) activate_shortcut(a);
+    else for (int a : pressed) if (a == input_map::kSettings && !g_capturing_keys.load()) activate_shortcut(a);
     static SettingsShortcut shortcut;
-    const auto action = shortcut.poll(now_s(), pad[input_map::kPadOptions] > 0.5f,
-                                     pad[input_map::kPadHome] > 0.5f, is_open());
+    bool selectModifier = false;
+    for (const auto& b : m.shortcuts) if (b.hold == input_map::kPadOptions && b.button) selectModifier = true;
+    // If Home is itself a hold modifier, a tap still opens Settings on release. A completed
+    // combination suppresses that tap, so Home + another button does not first open the menu.
+    bool homeModifier = false;
+    for (const auto& b : m.shortcuts) if (b.hold == input_map::kPadHome && b.button) homeModifier = true;
+    static bool homeHeld = false, homeUsed = false;
+    const bool homeDown = available[input_map::kPadHome] > 0.5f;
+    if (!homeHeld && homeDown) homeUsed = false;
+    if (homeDown && pad[input_map::kPadHome] <= 0.5f) homeUsed = true;
+    const bool homeTap = homeHeld && !homeDown && !homeUsed;
+    homeHeld = homeDown;
+    const auto action = shortcut.poll(now_s(), !g_capturing_keys.load() && !selectModifier && pad[input_map::kPadOptions] > 0.5f,
+                                     !g_capturing_keys.load() && (homeModifier ? homeTap : pad[input_map::kPadHome] > 0.5f), is_open());
     if (action != SettingsShortcut::None) set_open(action == SettingsShortcut::Open, shortcut.reason());
 }
 bool shortcut_took_input() { return g_shortcut_took.exchange(false); }
@@ -2076,6 +2442,7 @@ void set_open(bool open, OpenReason reason, KeyOrigin origin) {
     input::release_keys();  // keys held now belong to the menu (opening) or are not stuck in the game (closing)
     if (open) {
         mods::fast_forward_reset();
+        mods::lock_on_reset();
         mods::mouse_release();
         U.just_opened = true;
         U.slots_time = -1;
@@ -2100,19 +2467,19 @@ void focus_lost() {
 
 bool key(int code, bool down, bool repeat, int mods, KeyOrigin origin) {
     if (g_no_host_keys) return false;
-    static ToggleGuard f1;
-    const bool f1_press = code == kVK_F1 && f1.press(down, repeat, now_s());
-#ifdef __APPLE__
-    // Cmd+, (the macOS settings shortcut; the AppKit host gets it as the app menu's Settings... item)
-    if (code == kVK_ANSI_Comma && (mods & kSuper) && !g_capturing_keys.load()) {
-        if (down && !repeat) set_open(!is_open(), OpenReason::API, origin);
-        return true;
-    }
+#ifdef __ANDROID__
+    if (!getenv("WWHD_ANDROID_KEYBOARD") && !captures()) return false;
 #endif
-    // F1 (no modifiers; Shift+F1 saves slot 1) toggles; Esc closes
-    if (code == kVK_F1 && !(mods & (kShift | kCtrl | kAlt | kSuper))) {
-        if (f1_press && !g_capturing_keys.load()) set_open(!is_open(), OpenReason::F1, origin);
-        if (!g_capturing_keys.load()) return true;
+#ifdef __ANDROID__
+    const int action = getenv("WWHD_ANDROID_KEYBOARD") ? input_map::shortcut_for_key(input_map::current(), code, mods) : -1;
+#else
+    const int action = input_map::shortcut_for_key(input_map::current(), code, mods);
+#endif
+    if (!g_capturing_keys.load() && action >= 0 && (action == input_map::kSettings || !captures())) {
+        static ToggleGuard settings;
+        const bool activate = action == input_map::kSettings ? settings.press(down, repeat, now_s()) : down && !repeat;
+        if (activate) activate_shortcut(action, origin);
+        return true;
     }
     if (!is_open()) {
         // the game's text prompt (text_entry.h) has the keyboard while it shows; F1 above still opens the menu
@@ -2124,8 +2491,8 @@ bool key(int code, bool down, bool repeat, int mods, KeyOrigin origin) {
     if (g_capturing_keys.load()) {
         if (down && !repeat) {
             if (code == kVK_Escape) g_capture_key = -1;
-            else if (code == kVK_Delete || code == kVK_ForwardDelete) g_capture_key = -3;
-            else g_capture_key = code;
+            else if ((code == kVK_Delete || code == kVK_ForwardDelete) && !g_shortcut_capture.load()) g_capture_key = -3;
+            else { g_capture_mods = mods; g_capture_key = code; }
         }
         return true;
     }
@@ -2276,6 +2643,7 @@ ImDrawData* frame(float pw, float ph, void (*renderer_init)()) {
     U.linearized = false;
     // a mod install keeps running (and shows its progress) while the menu is closed
     const bool mods_busy = !setup_run.id.empty() || (U.init && modsui::wants_background());
+    if (!open) gfx::g_pip_preview=false;
     if (!open && !perf && !text && toast.empty() && !guesthud::active() && !mods_busy && !stereoPointer && drawn_layers.empty()) {
         if (U.init) {  // forget events and pressed keys while nothing is shown
             std::lock_guard<std::mutex> lk(g_mu);
@@ -2355,8 +2723,10 @@ ImDrawData* frame(float pw, float ph, void (*renderer_init)()) {
     if (!open && !g_restart_notice.started()) restart_notice_frame(false);
     g_wants_text = open && io.WantTextInput;
     guesthud::frame();
+    gfx::g_pip_preview=false;
     if (open) settings_window();
     else modsui::background(mods_host());
+    pip_live_drag();
     if (text) {
         float pad[input_map::kPadCount];
         std::copy(std::begin(U.values), std::end(U.values), pad);

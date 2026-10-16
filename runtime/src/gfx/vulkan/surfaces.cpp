@@ -633,7 +633,8 @@ void create_surface_image(Surface* s, bool forRendering, VkExtent3D explicitExte
         const bool sign = (s->format & 0x200) && (s->format & 0x3f) >= 0x34;
         s->fmt.pixel = sign ? VK_FORMAT_R8G8B8A8_SNORM : (s->format & 0x400) ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
     }
-    VkFormatProperties properties{}; vkGetPhysicalDeviceFormatProperties(R.physicalDevice,s->fmt.pixel,&properties);
+    const auto& properties = format_properties(s->fmt.pixel);
+    s->linearFiltering = (properties.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT) != 0;
     auto features=properties.optimalTilingFeatures;
     VkFormatFeatureFlags required=VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT|VK_FORMAT_FEATURE_TRANSFER_SRC_BIT|VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
     auto attachment=s->fmt.depth?VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT:VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT;

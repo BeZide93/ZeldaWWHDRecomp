@@ -432,10 +432,6 @@ struct UIState {
     multi(@"Left stick (move)", {kLUp, kLDown, kLLeft, kLRight, kStickLClick}, {@"↑", @"↓", @"←", @"→", @"Click"}, PU(d.lstick), false);
     multi(@"Right stick (camera)", {kRUp, kRDown, kRLeft, kRRight, kStickRClick}, {@"↑", @"↓", @"←", @"→", @"Click"}, PU(d.rstick), true);
     multi(@"D-pad", {kDUp, kDDown, kDLeft, kDRight}, {@"↑", @"↓", @"←", @"→"}, PU(d.dpad), false);
-    // app actions: the bottom of the left column, no leader line ("Photo": the row label column is narrow;
-    // hovering shows "Screenshot (app)")
-    single(@"Photo", kScreenshot, NSMakePoint(0, sz.height), false);
-    g.groups.back().leader = false;
     for (auto& p : g.parts)
         if (p.kind == kPartRound) {
             bool right = p.action == kPlus || p.action == kA || p.action == kB || p.action == kX || p.action == kY ||
@@ -727,7 +723,23 @@ static NSRect x_rect(NSRect chip) { return NSMakeRect(NSMaxX(chip) - 7, chip.ori
             NSFont* f = p.action == kHome || p.action == kPlus || p.action == kMinus
                             ? [NSFont systemFontOfSize:std::max<CGFloat>(8, 0.021 * s) weight:NSFontWeightBold]
                             : bf;
-            draw_centered(p.text, p.c, f, [self lit:p.action] ? NSColor.whiteColor : P.buttonText);
+            NSString* caption = p.text;
+            NSColor* ink = [self lit:p.action] ? NSColor.whiteColor : P.buttonText;
+            const auto look = prompt_style(self.st->m, pad_family());
+            if (p.action >= kA && p.action <= kY && face_layout(self.st->m) != FaceLayout::kLabels && look.face != FaceStyle::kOriginal) {
+                const int host = look.buttons[p.action - kA];
+                NSArray<NSString*>* captions = look.face == FaceStyle::kPlayStation
+                    ? @[@"✕", @"○", @"□", @"△"] : @[@"A", @"B", @"X", @"Y"];
+                caption = captions[host];
+                if (look.colours) {
+                    constexpr uint32_t xbox[] = {0x58BE36, 0xE34B49, 0x3B91E5, 0xEBC52E};
+                    constexpr uint32_t ps[] = {0x3C7DD9, 0xD9413C, 0xD05FB0, 0x2AA67D};
+                    const uint32_t rgb = look.face == FaceStyle::kXbox ? xbox[host] : ps[host];
+                    ink = [NSColor colorWithRed:((rgb >> 16) & 255)/255.0 green:((rgb >> 8) & 255)/255.0
+                                          blue:(rgb & 255)/255.0 alpha:1];
+                }
+            }
+            draw_centered(caption, p.c, f, ink);
             break;
         }
         case kPartDpad: break;  // drawn as one cross below
@@ -1030,10 +1042,9 @@ static NSTextField* label(NSString* s) {
                                                                 trackingMode:NSSegmentSwitchTrackingSelectOne
                                                                       target:self
                                                                       action:@selector(faceLayoutChanged:)];
-    fl.toolTip = @"Which host face buttons drive the Wii U's A/B/X/Y (issue #78). By position: the bottom "
-                 @"button is B (Nintendo layout). By label: the button named A is A — on an Xbox pad that "
-                 @"makes A accept/act and B go back. Automatic reads the labels printed on the pad that was "
-                 @"plugged in first. Only these four bindings are rewritten.";
+    fl.toolTip = @"Which physical button performs each Wii U action. By position: right is A, bottom B, "
+                 @"top X and left Y. By label: A does A, B does B, X does X and Y does Y. Automatic "
+                 @"reads the connected pad's labels. Button prompts chooses how the icons look in the game.";
     self.faceLayout = fl;
     NSTextField* pi = label(@"");
     pi.textColor = NSColor.secondaryLabelColor;
@@ -1110,10 +1121,11 @@ static NSTextField* label(NSString* s) {
     }
     pp.target = self;
     pp.action = @selector(promptsChanged:);
-    pp.toolTip = @"How the game's button icons look while the face buttons are by label. Automatic: PlayStation "
-                 @"shapes on a PlayStation controller, the Xbox colours and positions on any other. Original keeps "
-                 @"the game's look. By position always keeps the game's look: its prompts then already match the "
-                 @"buttons' positions.";
+    pp.toolTip = @"How the game's button icons look, with any face-button setting. Xbox and PlayStation "
+                 @"show the button bound to each Wii U action. By position on Xbox: roll is B, sword is A. "
+                 @"Automatic follows the connected pad; Nintendo keeps the game's look. By label keeps its "
+                 @"existing Xbox fallback. Original keeps the game's look. Custom bindings need four "
+                 @"distinct face buttons; otherwise the original icons are used.";
     self.prompts = pp;
     NSTextField* snl = label(@"Shoulder names:");
     NSPopUpButton* sn = [[NSPopUpButton alloc] initWithFrame:NSZeroRect pullsDown:NO];
@@ -1678,8 +1690,8 @@ static int self_test() {
     expect(current().keys[kB][0] == kVK_ANSI_K && conflict_count(current()) == 0, "B key 1 = K: A/B swapped, no conflict");
     // 3. an app hotkey is refused and capture continues
     [c beginCapture:kY mode:kCapKey1];
-    [w sendEvent:key_event(w, kVK_ANSI_R, @"r")];
-    expect(current().keys[kY][1] == kNoKey, "R (resolution hotkey) refused");
+    [w sendEvent:key_event(w, kVK_ANSI_P, @"p")];
+    expect(current().keys[kY][1] == kNoKey, "P (frame capture) refused");
     expect([c.status.stringValue containsString:@"app shortcut"], "hotkey warning shown");
     // 4. Esc cancels
     [w sendEvent:key_event(w, kVK_Escape, @"\x1b")];
