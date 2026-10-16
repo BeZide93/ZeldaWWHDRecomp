@@ -3034,6 +3034,8 @@ void draw(const uint32_t *r, uint32_t prim, uint32_t count, uint32_t indexType,
     if (R.vertexDiagnostics.cpuVertices)
       b = cpu_vertex_stream(g, addr, size, stride,
           supported && attributeEnd && extent.valid && vertexExtent.valid ? uint64_t(extent.maximum) + 1 : 0);
+    else if (R.vertexDiagnostics.noVertexReuse)
+      b = snapshot(mem::ptr(addr), size, 4);  // the whole declared buffer, fresh every draw
     else if (!buffer_cache_enabled() || !cached_guest_range(addr, copied, rprof::kUpVertex, b))
       b = copyWindow
         ? vertex_window_snapshot(g.attributeBufferIndex,addr,copied,
@@ -3047,7 +3049,7 @@ void draw(const uint32_t *r, uint32_t prim, uint32_t count, uint32_t indexType,
     }();
     // Snapshot preparation above stays fresh even when its immutable slice is
     // unchanged. Compare host binding identity, never guest addresses alone.
-    const bool skip=skipVertexBinds && state.vertex_bind_matches(cmd,
+    const bool skip=skipVertexBinds && !R.vertexDiagnostics.noVertexReuse && state.vertex_bind_matches(cmd,
         R.submissionGeneration,g.attributeBufferIndex,b.buffer,offset);
     if(preparation_stats_enabled()) {
       R.vertexBindCalls+=!skip;
