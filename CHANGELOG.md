@@ -24,10 +24,10 @@ what is on `devel` and not released yet (also in the
     game and shader caches are read-only there and console keys are never shown (#213, #226).
   - The system **Back** button or gesture opens and closes Settings, like F1 on desktop (#215, #227).
 
-- **Optional render-thread fast path** (Vulkan, for devices where the render thread limits the frame rate, like the
-  Steam Deck): `WWHD_VK_FASTPATH=1` reuses a draw's prepared state when only pointers or arithmetic values change,
-  about 6–9% less render-thread CPU in tests, with identical pictures. Off by default while it is tested on real
-  devices (#178).
+- **Render-thread fast path** (Vulkan): a draw reuses the previous draw's prepared state when only pointers or
+  arithmetic values change, about 6–9% less render-thread CPU in tests (most on devices where the render thread limits
+  the frame rate, like the Steam Deck), with identical pictures. On by default; `WWHD_VK_FASTPATH=0` turns it off if
+  you see wrong textures or blending, and please report it (#178).
 - **Mods on Windows:** a mod's preparation tool can now load its own helper files there too (the port's Python on
   Windows didn't look next to the tool). This stopped the GC minimap from installing on Windows; gc-minimap 0.2.2
   also fixes it on its own for v0.3.0 (#224).

@@ -1739,7 +1739,7 @@ VkImageView feedback_view(Surface *source, const uint32_t *textureWords,
   return view;
 }
 // ---------------------------------------------------------------- continued-draw fast path
-// WWHD_VK_FASTPATH=1: while only "continued" register groups changed since the previous resolved
+// On by default (WWHD_VK_FASTPATH=0 turns it off): while only "continued" register groups changed since the previous resolved
 // draw (gx2/state_groups.h: ALU constants, uniform-block and vertex-buffer pointers, per-draw
 // dynamic words), in the same frame and surface epoch (backend.h), with the same primitive type and
 // graphics settings, a draw reuses that draw's fetch/vertex/pixel shaders, render targets, pipeline
@@ -1750,7 +1750,7 @@ VkImageView feedback_view(Surface *source, const uint32_t *textureWords,
 // draw resolves fully. Draws that sample one of their own targets' addresses (feedback loops and
 // lookups whose winner can change with the target's write sequence), AO replays and AO-substituted
 // textures are never continued.
-// WWHD_VK_FASTPATH_VERIFY=N (implies WWHD_VK_FASTPATH=1 unless it is 0): on every Nth continued draw
+// WWHD_VK_FASTPATH_VERIFY=N (unless WWHD_VK_FASTPATH=0): on every Nth continued draw
 // also run the full resolution, compare shaders, targets, pipeline and texture/sampler bindings,
 // count and log mismatches (the draw then uses the full result). Statistics every 120 frames.
 struct FastPathConfig {
@@ -1762,9 +1762,9 @@ const FastPathConfig& fastpath_config() {
     FastPathConfig c;
     if (const char* v = std::getenv("WWHD_VK_FASTPATH_VERIFY")) c.verifyEvery = uint32_t(std::max(0, std::atoi(v)));
     const char* e = std::getenv("WWHD_VK_FASTPATH");
-    c.on = e ? std::atoi(e) != 0 : c.verifyEvery != 0;
+    c.on = e ? std::atoi(e) != 0 : true;
     if (!c.on) c.verifyEvery = 0;
-    if (c.on) LOG("[vulkan] continued-draw fast path on%s", c.verifyEvery ? " (verify mode)" : "");
+    LOG("[vulkan] continued-draw fast path %s%s", c.on ? "on" : "off (WWHD_VK_FASTPATH=0)", c.verifyEvery ? " (verify mode)" : "");
     return c;
   }();
   return config;
