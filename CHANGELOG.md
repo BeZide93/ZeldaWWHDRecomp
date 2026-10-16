@@ -7,6 +7,12 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Shortcuts: remapping works, Esc opens Settings** (#220). Remapped shortcuts take effect again (the Controls tab was
+  catching the input first). Every binding clears the same way in Controls and Shortcuts (right-click, or Delete /
+  Backspace / X on a focused binding); extra controller buttons (Capture/Share, rear paddles, touchpad click) can be
+  bound; Home is listed under Settings. **Esc** now opens Settings (with a captured mouse the first Esc frees it), F1
+  keeps working for now, and on macOS Cmd+, still opens Settings from the app menu.
+
 - **True 60: no more crash at Orca's sword training** (#223). Talking to Orca and choosing "yes" stopped the game in True 60
   mode; event commands now only run on full game steps.
 
