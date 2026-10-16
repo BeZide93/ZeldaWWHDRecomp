@@ -1,6 +1,7 @@
 // Issue #207 driver troubleshooting helpers: the CPU vertex decoder (vertex_cpu_decode.h) against
-// values written out by hand from Cemu's GLSL decoder.
+// values written out by hand from Cemu's GLSL decoder, and the RelaxedPrecision strip.
 #include "gfx/vulkan/vertex_cpu_decode.h"
+#include "gfx/vulkan/spirv_precision.h"
 #include <cassert>
 #include <cstdio>
 #include <cstring>
@@ -48,5 +49,15 @@ int main() {
     // a combination the shader does not decode either
     assert(!cpu_decode_attribute(attr(F::HWFMT_8_8_8, 0, false, E::SWAP_NONE), c, out) && !out[0]);
 
+    // SPIR-V: header + OpDecorate %5 RelaxedPrecision + OpDecorate %6 Location 0 + OpMemberDecorate %7 1 RelaxedPrecision
+    std::vector<uint32_t> words = {0x07230203u, 0x00010300u, 0, 8, 0,
+                                   (3u << 16) | 71, 5, 0,
+                                   (4u << 16) | 71, 6, 30, 0,
+                                   (4u << 16) | 72, 7, 1, 0};
+    assert(strip_relaxed_precision(words) == 2);
+    assert(words.size() == 9 && words[5] == ((4u << 16) | 71) && words[7] == 30);
+    assert(strip_relaxed_precision(words) == 0);
+    std::vector<uint32_t> broken = {0x07230203u, 0, 0, 0, 0, (9u << 16) | 71, 5};
+    assert(strip_relaxed_precision(broken) == 0 && broken.size() == 7);
     puts("vertex_diagnostics_test: ok");
 }

@@ -31,6 +31,7 @@
 #include "deferred_dispatch.h"
 #include "pipeline_cache_path.h"
 #include "bc_decode.h"
+#include "shader_compiler.h"
 #include "android_driver.h"
 #include "stutter_trace.h"
 #include "pipeline_worker.h"
@@ -3663,6 +3664,7 @@ static void init_device(std::vector<const char *> extensions,
   R.vertexDiagnostics.fullPrecision = diagnostic("WWHD_VK_FULL_PRECISION", "vkFullPrecision");
   R.vertexDiagnostics.noVertexReuse = diagnostic("WWHD_VK_NO_VERTEX_REUSE", "vkNoVertexReuse");
   g_latteCpuVertexDecode = R.vertexDiagnostics.cpuVertices;
+  vk::set_full_precision(R.vertexDiagnostics.fullPrecision);
   LOG("[vulkan diagnostics] convert vertices on the CPU=%u, full precision in shaders=%u, no vertex reuse=%u",
       R.vertexDiagnostics.cpuVertices, R.vertexDiagnostics.fullPrecision, R.vertexDiagnostics.noVertexReuse);
   // CPU-converted vertices are fetched as 4x32-bit float/uint only: the RGB split does not apply

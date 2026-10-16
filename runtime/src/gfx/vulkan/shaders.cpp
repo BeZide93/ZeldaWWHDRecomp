@@ -3,6 +3,7 @@
 #include "atomic_temporary.h"
 // Real Latte microcode -> Cemu GLSL -> SPIR-V for the Vulkan backend.
 #include "shaders.h"
+#include "spirv_precision.h"
 #include "pipeline_identity.h"
 #include "shader_compiler.h"
 #include "shader_translation.h"
@@ -1091,6 +1092,7 @@ Shader* translate(const uint32_t* regs, bool vertex, LatteFetchShader* fetch, ui
     auto cached=diskShaders.find(spirvKey);
     if(cached!=diskShaders.end() && cached->second.vertex==vertex && cached->second.source==shader->glsl) {
         shader->spirv=cached->second.words;
+        if(full_precision_enabled()) note_relaxed_precision_stripped(strip_relaxed_precision(shader->spirv));
         if(cached->second.fromDisk) ++stats.diskHits;
         else ++stats.spirvReuseHits;
     } else {
