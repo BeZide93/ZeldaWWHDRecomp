@@ -79,6 +79,19 @@ def meminfo(serial, package):
     return {"pss_kib": int(pss.group(1)) if pss else None, "rss_kib": int(rss.group(1)) if rss else None}
 
 
+def process_cpu_s(serial, package):
+    """utime + stime of the app process (/proc/<pid>/stat, clock ticks of 10 ms), or None."""
+    pid = shell(serial, "pidof " + package, check=False).strip().split()
+    if not pid:
+        return None
+    stat = shell(serial, "cat /proc/%s/stat" % pid[0], check=False)
+    fields = stat.rsplit(")", 1)[-1].split()
+    try:
+        return (int(fields[11]) + int(fields[12])) / 100.0
+    except (IndexError, ValueError):
+        return None
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--serial")
@@ -171,6 +184,7 @@ def main():
             measuring_after = time.monotonic() + args.warmup
         if measuring_after is not None and time.monotonic() >= measuring_after:
             sample = meminfo(args.serial, args.package)
+            sample["cpu_s"] = process_cpu_s(args.serial, args.package)
             sample["t"] = round(time.monotonic() - started, 1)
             memory.append(sample)
     else:
@@ -198,6 +212,13 @@ def main():
     if os.path.exists(trace):
         # the trace's first frames are boot and loading: skip by time up to the measured TV frame
         result["frames"] = frame_stats_from_frame(trace, first)
+    cpu = [m for m in memory if m.get("cpu_s") is not None]
+    if len(cpu) >= 2 and cpu[-1]["t"] > cpu[0]["t"]:
+        # whole-process CPU over the measured part (all threads), per second and per presented frame
+        per_s = (cpu[-1]["cpu_s"] - cpu[0]["cpu_s"]) / (cpu[-1]["t"] - cpu[0]["t"])
+        result["total_cpu_ms_per_s"] = per_s * 1000
+        if result["frames"].get("fps"):
+            result["total_cpu_ms_per_frame"] = per_s * 1000 / result["frames"]["fps"]
     if memory:
         for key in ("pss_kib", "rss_kib"):
             values = [m[key] for m in memory if m[key]]
