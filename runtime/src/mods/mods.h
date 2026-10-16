@@ -127,9 +127,13 @@ enum Cheat {
     kCheatItems = 1, kCheatSword = 2, kCheatStats = 4,
     // story progress (can change or break story events)
     kCheatSongs = 8, kCheatTriforce = 16, kCheatDungeon = 32, kCheatKey = 64,
+    kCheatBags = 128,  // spoils and bait bag filled (not story progress)
 };
 void request_cheat(int which);  // any thread
-enum Infinite { kInfHealth = 1, kInfMagic = 2, kInfAmmo = 4, kMoonJump = 8, kMoonNoFall = 16 };
+enum Infinite {
+    kInfHealth = 1, kInfMagic = 2, kInfAmmo = 4, kMoonJump = 8, kMoonNoFall = 16,
+    kInfRupees = 32, kInfBags = 64, kInfBreath = 128,
+};
 bool infinite(int which);
 void set_infinite(int which, bool on);
 void moon_jump_input(const input::PadState& pad);

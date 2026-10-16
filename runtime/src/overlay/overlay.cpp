@@ -1455,13 +1455,17 @@ void cheats() {
     cheat("Give all items", mods::kCheatItems);
     cheat("Equip Master Sword + Mirror Shield (until reload)", mods::kCheatSword);
     cheat("20 hearts, double magic, 5000 rupees", mods::kCheatStats);
+    cheat("Fill the bags (spoils and bait)", mods::kCheatBags);
     static const std::pair<const char*, int> inf[] = {{"Infinite health", mods::kInfHealth}, {"Infinite magic", mods::kInfMagic},
                                                       {"Infinite arrows and bombs", mods::kInfAmmo},
+                                                      {"Infinite rupees", mods::kInfRupees},
+                                                      {"Infinite bait and spoils", mods::kInfBags},
+                                                      {"Infinite swimming", mods::kInfBreath},
                                                       {"Moon jump (hold L; left stick steers)", mods::kMoonJump},
                                                       {"No fall damage after moon jump", mods::kMoonNoFall}};
-    for (int i = 0; i < 5; i++) {
-        int bit = inf[i].second;
-        if (check(inf[i].first, mods::infinite(bit), &v)) hostui::post([bit, v] { mods::set_infinite(bit, v); });
+    for (const auto& [label, which] : inf) {
+        int bit = which;
+        if (check(label, mods::infinite(bit), &v)) hostui::post([bit, v] { mods::set_infinite(bit, v); });
     }
     heading("Story cheats (can break story events; use a spare save file)");
     auto story = [first = true](const char* label, int which) mutable {

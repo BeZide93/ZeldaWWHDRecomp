@@ -601,8 +601,11 @@ void install_menu(NSWindow* tv) {
     toggle(gp, @"    Equip Master Sword and Mirror Shield (until reload)", ^BOOL { return NO; }, ^(BOOL) { mods::request_cheat(mods::kCheatSword); });
     toggle(gp, @"    20 hearts, double magic, 5000 rupees", ^BOOL { return NO; }, ^(BOOL) { mods::request_cheat(mods::kCheatStats); },
            @"Also refills hearts and magic");
+    toggle(gp, @"    Fill the bags (spoils and bait)", ^BOOL { return NO; }, ^(BOOL) { mods::request_cheat(mods::kCheatBags); },
+           @"Spoils bag and bait bag (if missing), every kind of spoils x99, empty bait slots filled");
     for (auto [title, which] : {std::pair{@"    Infinite health", mods::kInfHealth}, {@"    Infinite magic", mods::kInfMagic},
-                                {@"    Infinite arrows and bombs", mods::kInfAmmo}}) {
+                                {@"    Infinite arrows and bombs", mods::kInfAmmo}, {@"    Infinite rupees", mods::kInfRupees},
+                                {@"    Infinite bait and spoils", mods::kInfBags}, {@"    Infinite swimming", mods::kInfBreath}}) {
         int bit = which;  // (blocks cannot capture structured bindings)
         toggle(gp, title, ^BOOL { return mods::infinite(bit); }, ^(BOOL on) { mods::set_infinite(bit, on); });
     }
