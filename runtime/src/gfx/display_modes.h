@@ -58,10 +58,11 @@ extern std::atomic<bool> g_has_drc_window; // the host made a GamePad window (wi
 // a physical second screen (Android) switched off by the player while it was connected: Off chosen, or the
 // GamePad screen hidden (#222). Not the single-screen mode, which is Off by default on Android.
 extern std::atomic<bool> g_second_screen_off;
+extern std::atomic<bool> g_second_display_available; // capability, independent of live surface
 
 int find_name(const char* const* names, int n, const char* s, int def);  // index of s, def if absent
 double display_now();  // seconds, monotonic (the automatic overlay's clock)
-bool drc_mode_offered(int m);  // window: the host has a GamePad window
+bool drc_mode_offered(int m);  // window: the host has a window or an available second display
 // start-up overrides for tests, after the saved options were read (not saved):
 // WWHD_DRC_MODE, WWHD_DRC_PIP=br:0.25[:0.85], WWHD_SCALE_FILTER
 void display_env_overrides();

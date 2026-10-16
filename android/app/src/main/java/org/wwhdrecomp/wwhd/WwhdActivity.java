@@ -139,6 +139,17 @@ public class WwhdActivity extends SDLActivity {
         }
     }
 
+    public void refreshGamePadDisplay() {
+        runOnUiThread(() -> {
+            if (gamePadDisplay != null) gamePadDisplay.settingChanged();
+        });
+    }
+
+    @Override public void onWindowFocusChanged(boolean focused) {
+        super.onWindowFocusChanged(focused);
+        if (focused && gamePadDisplay != null) gamePadDisplay.focusChanged();
+    }
+
     /** Render-thread notification; surface replacement always belongs to the UI thread. */
     public void recoverGamePadSurface(long generation) {
         runOnUiThread(() -> {

@@ -28,8 +28,7 @@ public:
  Result wait(); // explicit shutdown/drain only
  // Caller transitions the source to TRANSFER_SRC. The returned semaphores must
  // be included in the primary submission containing these commands.
- // blank: clear the snapshot to black instead of copying (GamePad screen off, issue #222)
- void record_snapshot(VkCommandBuffer,VkImage source,VkFormat sourceFormat,VkExtent2D,bool blank=false);
+ void record_snapshot(VkCommandBuffer,VkImage source,VkFormat sourceFormat,VkExtent2D);
  VkSemaphore snapshot_wait() const;
  VkSemaphore snapshot_signal() const;
  void primary_submitted(); // only after the signal has been queued

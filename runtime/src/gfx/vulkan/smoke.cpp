@@ -896,6 +896,8 @@ int android_display_smoke_test() {
     if (value == "touchauto") { gfx::g_touch_buttons = 0; hostui::set("touchButtons", "0"); }
     if (value == "touchshow") { gfx::g_touch_buttons = 1; hostui::set("touchButtons", "1"); }
     if (value == "touchhide") { gfx::g_touch_buttons = 2; hostui::set("touchButtons", "2"); }
+    if (value == "show_drc") hostui::show_drc(true);
+    if (value == "hide_drc") hostui::show_drc(false);
     if (value == "swap1") hostui::set_displays_swapped(true);
     if (value == "swap0") hostui::set_displays_swapped(false);
     if (value == "filter0") hostui::set_scale_filter(0);
@@ -1009,6 +1011,8 @@ int android_display_smoke_test() {
         << ",\"secondary_idle_waits\":" << R.secondaryIdleWaits.load()
         << ",\"secondary_retired\":" << R.secondaryRetired.load()
         << ",\"secondary_retirement_pending\":" << R.secondaryRetirementPending.load()
+        << ",\"second_available\":" << (gfx::g_second_display_available ? "true" : "false")
+        << ",\"second_off\":" << (gfx::drc_screen_off() ? "true" : "false")
         << ",\"dual\":" << (gfx::g_has_drc_window ? "true" : "false")
         << ",\"swap_requested\":" << (dual_display::requested_swap ? "true" : "false")
         << ",\"swap_active\":" << (dual_display::active_swap ? "true" : "false")

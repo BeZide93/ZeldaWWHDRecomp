@@ -1186,8 +1186,8 @@ void tab_display() {
     if (check("Swap TV and GamePad displays", hostui::displays_swapped(), &v))
         hostui::post([v] { hostui::set_displays_swapped(v); });
 #endif
-    // the modes of display_modes.h; a host offers those it can show (no "Separate
-    // window" without one, as on Android)
+    // Offer separate-window mode while Android has a usable display, including
+    // when its surface has been released.
     const int mode = hostui::drc_mode();
     if (hostui::drc_modes() >= 4) {
         static const char* const modes[] = {"Separate window", "Picture-in-picture", "Automatic picture-in-picture", "Off", "GamePad only"};
@@ -1205,7 +1205,8 @@ void tab_display() {
                  "Play (the game on the GamePad).");
     }
     if (check(mode == 2 ? "Pin GamePad picture-in-picture" : "Show GamePad screen", hostui::drc_shown(), &v,
-              hostui::drc_available() && !(hostui::drc_modes() >= 4 && (mode == 3 || mode == 4))))
+              hostui::drc_available() && (gfx::g_second_display_available ||
+                  !(hostui::drc_modes() >= 4 && (mode == 3 || mode == 4)))))
         hostui::post([v] { hostui::show_drc(v); });
     if (hostui::drc_modes() >= 4 && (mode == 1 || mode == 2 || mode == 3)) {
         bool eligible = true;

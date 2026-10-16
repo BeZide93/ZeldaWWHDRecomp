@@ -266,7 +266,7 @@ std::optional<AndroidIsolatedPresenter::Result> AndroidIsolatedPresenter::poll()
  return {};
 }
 AndroidIsolatedPresenter::Result AndroidIsolatedPresenter::wait() { return impl->consume(impl->worker->wait()); }
-void AndroidIsolatedPresenter::record_snapshot(VkCommandBuffer cmd,VkImage source,VkFormat sourceFormat,VkExtent2D extent,bool blank) {
+void AndroidIsolatedPresenter::record_snapshot(VkCommandBuffer cmd,VkImage source,VkFormat sourceFormat,VkExtent2D extent) {
  StageTimer timer(8);
  auto& s=*impl;
  if(s.pending || !s.hasAcquired || s.framePrepared)throw std::logic_error("Secondary snapshot is not available");
@@ -284,11 +284,7 @@ void AndroidIsolatedPresenter::record_snapshot(VkCommandBuffer cmd,VkImage sourc
  s.barrier(cmd,out.image,s.snapshotUsed?VK_IMAGE_LAYOUT_GENERAL:VK_IMAGE_LAYOUT_UNDEFINED,copyLayout,
      s.snapshotUsed?VK_QUEUE_FAMILY_EXTERNAL:VK_QUEUE_FAMILY_IGNORED,s.snapshotUsed?s.family:VK_QUEUE_FAMILY_IGNORED,
      0,VK_ACCESS_TRANSFER_WRITE_BIT,VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,VK_PIPELINE_STAGE_TRANSFER_BIT,true);
- if(blank) {
-  static const VkClearColorValue black{};
-  const VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1};
-  gfxvk::vkCmdClearColorImage(cmd,out.image,copyLayout,&black,1,&range);
- } else if(sourceFormat==VK_FORMAT_R8G8B8A8_UNORM) {
+ if(sourceFormat==VK_FORMAT_R8G8B8A8_UNORM) {
   VkImageCopy copy{};copy.srcSubresource={VK_IMAGE_ASPECT_COLOR_BIT,0,0,1};copy.dstSubresource=copy.srcSubresource;
   copy.extent={extent.width,extent.height,1};
   gfxvk::vkCmdCopyImage(cmd,source,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,out.image,copyLayout,1,&copy);

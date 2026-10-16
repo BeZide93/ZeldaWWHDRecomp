@@ -330,9 +330,15 @@ void set_pip_opacity(float o) {
     save_display();
 }
 bool drc_available() {
+#ifdef __ANDROID__
+    if (gfx::g_second_display_available) return true;
+#endif
     return gfxvk::R.drc.window != nullptr || gfx::g_mode == gfx::kDrcPip || gfx::g_mode == gfx::kDrcAuto;
 }
 bool drc_shown() {
+#ifdef __ANDROID__
+    if (gfx::g_second_display_available) return !gfx::drc_screen_off();
+#endif
     SDL_Window* w = gfxvk::R.drc.window;
     return gfx::drc_screen_shown(w && !(SDL_GetWindowFlags(w) & SDL_WINDOW_HIDDEN));
 }
