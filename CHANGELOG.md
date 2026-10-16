@@ -7,6 +7,9 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **PowerVR phones (e.g. Pixel 10): no more stretched spikes** (#207). On PowerVR GPUs the game now converts vertex
+  data on the CPU automatically, because their drivers decode some of it wrongly in the shader. It can cost some speed;
+  **Graphics → Advanced → Convert vertices on the CPU** switches it off (Automatic restores it).
 - **Shortcuts: remapping works, Esc opens Settings** (#220). Remapped shortcuts take effect again (the Controls tab was
   catching the input first). Every binding clears the same way in Controls and Shortcuts (right-click, or Delete /
   Backspace / X on a focused binding); extra controller buttons (Capture/Share, rear paddles, touchpad click) can be
