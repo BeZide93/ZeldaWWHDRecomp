@@ -617,9 +617,17 @@ runs do not accept the shortcuts. State files remain in the configured state dir
 The Shortcuts tab also offers picture-in-picture, the performance overlay, mute and volume,
 initially unbound. Bindings are stored with the game controls in `controls.json`; older Screenshot
 bindings migrate automatically. Conflicts include game keys and duplicate combinations.
-Combinations consume only their two buttons while both are held. Using Select as a hold button
-reserves it for combinations; tapping Home remains the Settings fallback (on release when Home
-is itself a hold button), and Esc closes Settings.
+Home is the default controller button shown under **Settings**, and is remappable there.
+F1 remains the default Settings key. Escape closes Settings when no input is being recorded,
+and releases a captured mouse. While recording, Escape, L/R, Select and Home are assigned
+without triggering their normal menu actions.
+
+Right-click to clear a binding in either Controls or Shortcuts. With a binding focused,
+Delete, Backspace or the controller button mapped to X clears it. Right-click during mouse
+capture assigns the right mouse button. Capture/Share, rear paddles and touchpad clicks are
+also assignable and start unbound. Combinations consume only their two buttons while both
+are held; single-button shortcuts consume their button while held. Using Select as a hold
+button reserves it for combinations.
 Android keyboard shortcuts require `WWHD_ANDROID_KEYBOARD`; controller combinations do not.
 
 A load must pass the existing allocation, thread, and guest-stack guards. A state

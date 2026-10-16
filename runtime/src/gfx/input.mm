@@ -92,6 +92,14 @@ static bool device_values(GCController* c, float* v) {
         b(g.leftShoulder, kPadLB); b(g.rightShoulder, kPadRB);
         b(g.leftTrigger, kPadLT); b(g.rightTrigger, kPadRT);
         b(g.buttonMenu, kPadMenu); b(g.buttonOptions, kPadOptions); b(g.buttonHome, kPadHome);
+        if (@available(macOS 12.0, *)) b(c.physicalInputProfile.buttons[GCInputButtonShare], kPadCapture);
+        if (@available(macOS 11.0, *)) {
+            b(c.physicalInputProfile.buttons[GCInputXboxPaddleOne], kPadRightPaddle1);
+            b(c.physicalInputProfile.buttons[GCInputXboxPaddleTwo], kPadRightPaddle2);
+            b(c.physicalInputProfile.buttons[GCInputXboxPaddleThree], kPadLeftPaddle1);
+            b(c.physicalInputProfile.buttons[GCInputXboxPaddleFour], kPadLeftPaddle2);
+            b(c.physicalInputProfile.buttons[GCInputDualShockTouchpadButton], kPadTouchpad);
+        }
         b(g.leftThumbstickButton, kPadL3); b(g.rightThumbstickButton, kPadR3);
         b(g.dpad.up, kPadDUp); b(g.dpad.down, kPadDDown); b(g.dpad.left, kPadDLeft); b(g.dpad.right, kPadDRight);
         auto stick = [&](GCControllerDirectionPad* d, int up, int down, int left, int right) {

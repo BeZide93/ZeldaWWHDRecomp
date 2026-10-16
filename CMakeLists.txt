@@ -1581,6 +1581,7 @@ endif()
 # dependencies, allowing real transition and focus regressions to run without game data.
 if(WWHD_SDL_HOST AND UNIX AND NOT ANDROID)
   add_executable(overlay_input_integration_test runtime/tools/overlay_input_integration_test.cpp
+    runtime/src/overlay/controls_view.cpp
     runtime/src/gfx/display_modes.cpp runtime/src/overlay/extensions.cpp runtime/src/input_map.cpp
     runtime/src/rumble.cpp runtime/src/platform/input_sdl.cpp runtime/src/platform/mouse_sdl.cpp ${MOTION_SOURCES})
   target_include_directories(overlay_input_integration_test PRIVATE ${IMGUI_DIR} runtime/src runtime/include

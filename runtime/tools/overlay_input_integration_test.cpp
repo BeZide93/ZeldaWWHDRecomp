@@ -57,6 +57,8 @@ static int shortcut_ui_test() {
  const auto file = std::filesystem::temp_directory_path() / ("wwhd-shortcut-ui-" + std::to_string(getpid()) + ".json");
  setenv("WWHD_CONTROLS", file.c_str(), 1);
  set_current(Mapping::defaults(), false);
+ SDL_SetHint(SDL_HINT_VIDEO_DRIVER,"dummy"); assert(SDL_Init(SDL_INIT_VIDEO|SDL_INIT_EVENTS));
+ auto* window=SDL_CreateWindow("Shortcuts",1280,720,SDL_WINDOW_HIDDEN); assert(window); input::set_prompt_window(window);
  ImGui::CreateContext();
  auto& io = ImGui::GetIO();
  io.IniFilename = nullptr;
@@ -67,15 +69,24 @@ static int shortcut_ui_test() {
  g_open = true;
  U.cap_action = -1;
  std::fill(std::begin(U.values), std::end(U.values), 0.0f);
+ bool controlsDrawing=false;
  auto frame = [&](bool focusReset = false) {
+  poll_controller_shortcuts(U.values);
+  prepare_menu_input(io, is_open(), false); // actual production capture/navigation dispatcher
   ImGui::NewFrame();
   ImGui::SetNextWindowPos(ImVec2(100,20), ImGuiCond_Always);
   ImGui::SetNextWindowSize(ImVec2(1000,680), ImGuiCond_Always);
   if (focusReset) ImGui::SetNextWindowFocus();
   ImGui::Begin("Shortcut UI regression");
   if (focusReset) ImGui::SetKeyboardFocusHere();
-  tab_shortcuts();
+  if (controlsDrawing) {
+   ControlsView view; view.m=current();view.cap_action=U.cap_action;view.cap_col=U.cap_col;
+   draw_controls(view,980,600);
+   if(view.clear_action>=0) clear_binding(view.clear_action,view.clear_col);
+   if(view.start_action>=0) start_capture(view.start_action,view.start_col);
+  } else tab_shortcuts();
   ImGui::End(); ImGui::Render();
+  std::copy(std::begin(U.values),std::end(U.values),std::begin(U.prev));
  };
  auto press = [&](ImGuiKey key) {
   io.AddKeyEvent(key,true); frame(); io.AddKeyEvent(key,false); frame(); frame();
@@ -96,52 +107,86 @@ static int shortcut_ui_test() {
   for (int i=0;i<200 && ImGui::GetCurrentContext()->NavId!=id;++i) press(ImGuiKey_Tab);
   assert(ImGui::GetCurrentContext()->NavId == id);
  };
+ auto keyPress = [&](SDL_Scancode code,SDL_Keymod mods=SDL_KMOD_NONE) {
+  event_key(window,code,true,mods); event_key(window,code,false,mods);
+ };
+ auto pressPad = [&](int pad) { U.values[pad]=1; frame(); U.values[pad]=0; frame(); frame(); };
  frame(true); frame(); frame();
- focus(bindingId(kSettings,0));
- clickFocused(ImGuiMouseSource_Mouse);
+ // The real SDL path captures a new primary key, saves it, and dispatches only the new key.
+ focus(bindingId(kSettings,0)); clickFocused(ImGuiMouseSource_Mouse);
  assert(U.cap_action == kActionCount+kSettings && U.cap_col == 0);
- assert(key(kVK_F9,true,false,kCtrl|kShift)); frame();
+ keyPress(SDL_SCANCODE_F9,SDL_Keymod(SDL_KMOD_CTRL|SDL_KMOD_SHIFT)); frame();
  assert((current().shortcuts[kSettings].keys[0] == ShortcutKey{kVK_F9,kModCtrl|kModShift}));
- assert(U.cap_action == -1);
- // The same actual widget can start another capture, and Escape must preserve its binding.
- focus(bindingId(kSettings,0));
- clickFocused(ImGuiMouseSource_Mouse);
- const auto beforeCancel = current();
- assert(U.cap_action == kActionCount+kSettings);
- assert(key(kVK_Escape,true,false,0)); frame();
- assert(current() == beforeCancel && U.cap_action == -1);
- // Navigate to the controller column and activate with the gamepad's confirm key.
- focus(bindingId(kSettings,2));
- press(ImGuiKey_GamepadFaceDown);
- assert(U.cap_action == kActionCount+kSettings && U.cap_col == 2);
- frame(); // release gate: the UI activation must not become the binding
- U.values[kPadOptions]=1; frame();
- assert(U.cap_action >= 0);
- U.values[kPadDUp]=1; frame();
- assert(current().shortcuts[kSettings].hold == kPadOptions && current().shortcuts[kSettings].button == kPadDUp);
- assert(U.cap_action == -1);
- std::fill(std::begin(U.values),std::end(U.values),0.0f);
- // Escape also wins over a complete controller combination in the same frame.
- focus(bindingId(kSettings,2));
- press(ImGuiKey_GamepadFaceDown);
- assert(U.cap_action >= 0); frame();
- U.values[kPadLB]=1; frame();
- const auto beforeControllerCancel=current();
- U.values[kPadDRight]=1; assert(key(kVK_Escape,true,false,0)); frame();
- assert(current() == beforeControllerCancel && U.cap_action == -1);
- std::fill(std::begin(U.values),std::end(U.values),0.0f);
- // The explicit Clear button is usable with a touch source, without right-click support.
- focus(bindingId(kSettings,2,"Clear"));
- clickFocused(ImGuiMouseSource_TouchScreen);
+ auto saved=current(); set_current(Mapping::defaults(),false); load_startup(); assert(current()==saved);
+ g_open=false; keyPress(SDL_SCANCODE_F1); assert(!is_open());
+ keyPress(SDL_SCANCODE_F9,SDL_Keymod(SDL_KMOD_CTRL|SDL_KMOD_SHIFT)); assert(is_open());
+ // The alternate key uses the same SDL capture, serialization and dispatch paths.
+ focus(bindingId(kSettings,1)); clickFocused(ImGuiMouseSource_Mouse);
+ keyPress(SDL_SCANCODE_F8,SDL_KMOD_ALT); frame();
+ assert((current().shortcuts[kSettings].keys[1] == ShortcutKey{kVK_F8,kModAlt}));
+ saved=current(); set_current(Mapping::defaults(),false); load_startup(); assert(current()==saved);
+ g_open=false; SDL_Delay(160); keyPress(SDL_SCANCODE_F8,SDL_KMOD_ALT); assert(is_open());
+ // Escape is recorded instead of canceling capture or closing Settings.
+ focus(bindingId(kSettings,0)); clickFocused(ImGuiMouseSource_Mouse);
+ keyPress(SDL_SCANCODE_ESCAPE); frame();
+ assert(current().shortcuts[kSettings].keys[0].code==kVK_Escape && is_open() && U.cap_action<0);
+ // A right click while waiting is a real mouse binding, not the clearing gesture.
+ focus(bindingId(kPhoto,0)); clickFocused(ImGuiMouseSource_Mouse);
+ assert(mouse_button(1,true)); assert(mouse_button(1,false)); frame();
+ assert(current().shortcuts[kPhoto].keys[0].code==kMouse2);
+ g_open=false; const int beforeMouse=shots; assert(pointer_shortcut(kMouse2,true)); assert(shots==beforeMouse+1); g_open=true;
+ // Home is visible and remappable. A tap can replace it with Capture/Share.
+ focus(bindingId(kSettings,2)); pressPad(face_input(kA)); assert(U.cap_action==kActionCount+kSettings);
+ pressPad(kPadCapture);
+ assert(current().shortcuts[kSettings].button==kPadCapture && !current().shortcuts[kSettings].hold && is_open());
+ saved=current(); set_current(Mapping::defaults(),false); load_startup(); assert(current()==saved);
+ g_open=false; pressPad(kPadHome); assert(!is_open()); pressPad(kPadCapture); assert(is_open());
+ // A held button plus a press is captured, persists, and does not also navigate or toggle.
+ focus(bindingId(kSettings,2)); pressPad(face_input(kA));
+ U.values[kPadLB]=1; frame(); U.values[kPadCapture]=1; frame(); frame();
+ assert(current().shortcuts[kSettings].hold==kPadLB && current().shortcuts[kSettings].button==kPadCapture && is_open());
+ assert(!navigation_pressed(kPadLB));
+ std::fill(std::begin(U.values),std::end(U.values),0.0f); frame();
+ saved=current(); set_current(Mapping::defaults(),false); load_startup(); assert(current()==saved);
+ g_open=false; pressPad(kPadCapture); assert(!is_open());
+ U.values[kPadLB]=U.values[kPadCapture]=1; frame(); assert(is_open());
+ std::fill(std::begin(U.values),std::end(U.values),0.0f); frame();
+ // Clear is the same focused-X gesture as Controls, without a button or popup.
+ focus(bindingId(kSettings,2)); pressPad(face_input(kX));
  assert(!current().shortcuts[kSettings].hold && !current().shortcuts[kSettings].button);
- // Reset applies only to Shortcuts, keeping game controls intact.
- auto m=current(); m.keys[kA] = {kVK_F8,kNoKey}; set_current(m,false);
+ // Controls capture owns L/R, Select, Home and Capture through completion and until release.
+ for (int pad : {kPadLB,kPadRB,kPadOptions,kPadHome,kPadCapture,kPadRightPaddle1,kPadTouchpad}) {
+  start_capture(kZR,kColPad); frame(); U.values[pad]=1; frame(); frame();
+  assert(current().pad[kZR]==pad && is_open() && !navigation_pressed(pad));
+  U.values[pad]=0; frame();
+ }
+ start_capture(kY,kColKey1); keyPress(SDL_SCANCODE_ESCAPE); frame();
+ assert(current().keys[kY][1]==kVK_Escape && is_open());
+ // Return keyboard focus to Shortcuts after exercising the Controls capture path.
+ frame(true); frame(); frame();
+ // Right click clears a shortcut; right mouse remains bindable above during capture.
+ focus(bindingId(kPhoto,0));
+ const auto center=ImGui::WindowRectRelToAbs(ImGui::GetCurrentContext()->NavWindow,ImGui::GetCurrentContext()->NavWindow->NavRectRel[0]).GetCenter();
+ io.AddMousePosEvent(center.x,center.y); io.AddMouseButtonEvent(1,true); frame(); io.AddMouseButtonEvent(1,false); frame();
+ assert(current().shortcuts[kPhoto].keys[0].code==kNoKey);
+ // Reset is scoped to Shortcuts and the resulting controls file reads back exactly.
+ auto m=current(); m.keys[kA]={kVK_F8,kNoKey}; set_current(m,false);
  frame(); focus(ImHashStr("Reset to defaults",0,ImHashStr("Shortcut UI regression"))); clickFocused(ImGuiMouseSource_Mouse);
- assert(current().shortcuts == shortcut_defaults());
- assert(current().keys[kA] == m.keys[kA]);
- Mapping saved; assert(load_file(file.string(),saved)); assert(saved == current());
- g_open=false; ImGui::DestroyContext(); std::filesystem::remove(file);
- puts("Shortcut UI: mouse/gamepad activation, modifiers, Escape, controller capture, touch clear and scoped reset passed");
+ assert(current().shortcuts==shortcut_defaults() && current().keys[kA]==m.keys[kA]);
+ Mapping disk; assert(load_file(file.string(),disk)); assert(disk==current());
+ // The actual Controls drawing uses the same right-click gesture, and can still bind Mouse 2.
+ controlsDrawing=true;frame(true);frame();frame();
+ int chip=4*kA+kColKey0;
+ const ImGuiID chipId=ImHashStr("##chip",0,ImHashData(&chip,sizeof chip,ImHashStr("Shortcut UI regression")));
+ focus(chipId);
+ auto chipCenter=ImGui::WindowRectRelToAbs(ImGui::GetCurrentContext()->NavWindow,ImGui::GetCurrentContext()->NavWindow->NavRectRel[0]).GetCenter();
+ io.AddMousePosEvent(chipCenter.x,chipCenter.y);io.AddMouseButtonEvent(1,true);frame();io.AddMouseButtonEvent(1,false);frame();
+ assert(current().keys[kA][0]==kNoKey);
+ focus(chipId);clickFocused(ImGuiMouseSource_Mouse);assert(U.cap_action==kA);
+ assert(mouse_button(1,true));assert(mouse_button(1,false));frame();assert(current().keys[kA][0]==kMouse2);
+
+ g_open=false; ImGui::DestroyContext(); std::filesystem::remove(file); input::set_prompt_window(nullptr); SDL_DestroyWindow(window); SDL_Quit();
+ puts("Shortcut UI: real SDL capture, primary/alternate dispatch, reload, Escape, right mouse, Home/Capture, combinations and shared clearing passed");
  return 0;
 }
 
@@ -348,21 +393,15 @@ int main(int argc,char** argv){
  assert(!game[input_map::kPadOptions]&&!game[input_map::kPadDUp]);
  pad[input_map::kPadDUp]=0;overlay::poll_controller_shortcuts(pad);
  pad[input_map::kPadOptions]=0;overlay::poll_controller_shortcuts(pad);
- remapped.shortcuts[input_map::kPhoto].hold = input_map::kPadHome;
- input_map::set_current(remapped, false);
- pad[input_map::kPadHome]=1;overlay::poll_controller_shortcuts(pad);assert(!overlay::is_open());
- pad[input_map::kPadDUp]=1;overlay::poll_controller_shortcuts(pad);assert(shots == 4 && !overlay::is_open());
- pad[input_map::kPadDUp]=pad[input_map::kPadHome]=0;overlay::poll_controller_shortcuts(pad);assert(!overlay::is_open());
- pad[input_map::kPadHome]=1;overlay::poll_controller_shortcuts(pad);assert(!overlay::is_open());
- pad[input_map::kPadHome]=0;overlay::poll_controller_shortcuts(pad);assert(overlay::is_open());
- event_key(tv,SDL_SCANCODE_ESCAPE,true);assert(!overlay::is_open());
- remapped.shortcuts[input_map::kPhoto].hold = input_map::kPadOptions;
- overlay::poll_controller_shortcuts(pad);
- remapped.shortcuts[input_map::kSettings] = {};
- input_map::set_current(remapped, false);
+ remapped.shortcuts[input_map::kSettings].keys = {};
+ remapped.shortcuts[input_map::kSettings].hold = 0;
+ remapped.shortcuts[input_map::kSettings].button = input_map::kPadCapture;
+ input_map::set_current(remapped,false);
  event_key(tv,SDL_SCANCODE_F1,true);assert(!overlay::is_open());
- pad[input_map::kPadHome]=1;overlay::poll_controller_shortcuts(pad);assert(overlay::is_open());
+ pad[input_map::kPadHome]=1;overlay::poll_controller_shortcuts(pad);assert(!overlay::is_open());
  pad[input_map::kPadHome]=0;overlay::poll_controller_shortcuts(pad);
+ pad[input_map::kPadCapture]=1;overlay::poll_controller_shortcuts(pad);assert(overlay::is_open());
+ pad[input_map::kPadCapture]=0;overlay::poll_controller_shortcuts(pad);
  event_key(tv,SDL_SCANCODE_ESCAPE,true);assert(!overlay::is_open());
  input_map::set_current(input_map::Mapping::defaults(),false);
  const int beforeSaves=saves,beforeLoads=loads;prompt=true;
@@ -419,10 +458,18 @@ int main(int argc,char** argv){
  }
  overlay::start_capture(input_map::kR,2); // controller field does not take a mouse binding
  overlay::mouse_button(0,true);overlay::apply_capture();assert(overlay::U.cap_action==input_map::kR);
- overlay::g_capture_key=-1;overlay::apply_capture();
+ overlay::U.cap_action=-1;overlay::g_capturing_keys=false; // end the deliberately unfilled controller capture
  overlay::set_open(false);
  puts("real overlay transitions, key/focus trace, Home, text prompt and auxiliary-window checks passed");
 #endif
+ // Native Controls can finish capture before the overlay's poll sees the pressed Home button.
+ overlay::set_open(false);std::fill(std::begin(pad),std::end(pad),0.0f);overlay::poll_controller_shortcuts(pad);
+ overlay::external_binding_capture(true);pad[input_map::kPadHome]=1;
+ overlay::external_binding_capture(false);overlay::poll_controller_shortcuts(pad);assert(!overlay::is_open());
+ overlay::poll_controller_shortcuts(pad);assert(!overlay::is_open());
+ pad[input_map::kPadHome]=0;overlay::poll_controller_shortcuts(pad);
+ pad[input_map::kPadHome]=1;overlay::poll_controller_shortcuts(pad);assert(overlay::is_open());
+ overlay::set_open(false);
  SDL_DestroyWindow(auxiliary);SDL_DestroyWindow(drc);SDL_DestroyWindow(tv);SDL_Quit();
  std::filesystem::remove(controlsFile);
 }

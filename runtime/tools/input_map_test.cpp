@@ -579,7 +579,7 @@ static void test_names() {
 }
 
 static void test_reserved() {
-    for (int k : std::initializer_list<int>{kVK_ANSI_9, kVK_ANSI_P, kVK_F12, kVK_Escape})
+    for (int k : std::initializer_list<int>{kVK_ANSI_9, kVK_ANSI_P, kVK_F12})
         CHECK(reserved_key(k) != nullptr);
     CHECK(reserved_key(kVK_ANSI_K) == nullptr);
     CHECK(reserved_key(kVK_ANSI_5) == nullptr);
@@ -950,6 +950,19 @@ static void test_shortcuts() {
         CHECK(m.shortcuts[a].keys[1].code == kNoKey);
         CHECK(!m.shortcuts[a].hold && !m.shortcuts[a].button);
     }
+    CHECK(m.shortcuts[kSettings].button==kPadHome && !m.shortcuts[kSettings].hold);
+    CHECK(!reserved_key(kVK_Escape));
+    for (int p=kPadCapture;p<kPadCount;++p) {
+        CHECK(*pad_id(p) && *pad_label(p) && *pad_short_label(p));
+        m.pad[kZR]=p; Mapping round; CHECK(from_json(to_json(m),round)); CHECK(round==m);
+        float raw[kPadCount]{};raw[p]=1;CHECK(controller_state(m,raw).buttons&input::kZR);
+    }
+    m=Mapping::defaults();
+    CHECK(from_json(R"({"shortcuts":{"Settings":{"keys":[{"key":"F9","modifiers":0}],"hold":"","button":""}}})",m));
+    CHECK(m.shortcuts[kSettings].keys[0].code==kVK_F9 && m.shortcuts[kSettings].button==kPadHome);
+    m.shortcuts[kSettings].button=0;
+    Mapping round;CHECK(from_json(to_json(m),round));CHECK(!round.shortcuts[kSettings].button);
+    m=Mapping::defaults();
     m.shortcuts[kPhoto].keys[1] = {kVK_ANSI_K, kModCtrl};
     CHECK(!shortcut_conflict(m, kPhoto)); // a Ctrl/Alt/Cmd shortcut takes its key press before the game
     m.shortcuts[kPhoto].keys[1] = {kVK_ANSI_K, kModShift};

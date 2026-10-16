@@ -549,7 +549,7 @@ bool touch_from_controller(SDL_TouchID id){
 static constexpr Uint64 kTestEventTime=4242;  // timestamp that marks them
 static bool test_event(const SDL_Event& e){return e.common.timestamp==kTestEventTime;}
 static void post_test_keys(){
- struct Post{uint64_t frame;SDL_Scancode code;bool down;std::string text;};
+ struct Post{uint64_t frame;SDL_Scancode code;bool down;std::string text;SDL_Keymod mods=SDL_KMOD_NONE;};
  static std::vector<Post> posts=[]{
   std::vector<Post> v;const char* e=getenv("WWHD_TEST_POST_KEYS");
   for(const char* p=e;p&&*p;){
@@ -557,10 +557,18 @@ static void post_test_keys(){
    size_t len=strcspn(p,",");std::string k(p,len);p+=len+(p[len]==',');
    if(k.rfind("Text=",0)==0){v.push_back({f,SDL_SCANCODE_UNKNOWN,true,k.substr(5)});continue;}
    uint64_t hold=0;if(size_t sl=k.find('/');sl!=std::string::npos){hold=strtoull(k.c_str()+sl+1,nullptr,10);k.resize(sl);}
+   SDL_Keymod mods=SDL_KMOD_NONE;
+   for(;;){
+    if(k.rfind("Shift+",0)==0){mods=SDL_Keymod(mods|SDL_KMOD_SHIFT);k=k.substr(6);}
+    else if(k.rfind("Ctrl+",0)==0){mods=SDL_Keymod(mods|SDL_KMOD_CTRL);k=k.substr(5);}
+    else if(k.rfind("Alt+",0)==0){mods=SDL_Keymod(mods|SDL_KMOD_ALT);k=k.substr(4);}
+    else if(k.rfind("Cmd+",0)==0){mods=SDL_Keymod(mods|SDL_KMOD_GUI);k=k.substr(4);}
+    else break;
+   }
    int code=input_map::key_from_id(k);SDL_Scancode sc=SDL_SCANCODE_UNKNOWN;
    for(int i=0;i<SDL_SCANCODE_COUNT&&code!=input_map::kNoKey;i++)if(keycode((SDL_Scancode)i)==code){sc=(SDL_Scancode)i;break;}
    if(sc==SDL_SCANCODE_UNKNOWN){LOG("[input] WWHD_TEST_POST_KEYS: unknown key %s",k.c_str());continue;}
-   v.push_back({f,sc,true,{}});v.push_back({f+hold,sc,false,{}});
+   v.push_back({f,sc,true,{},mods});v.push_back({f+hold,sc,false,{},mods});
   }
   std::stable_sort(v.begin(),v.end(),[](const Post& a,const Post& b){return a.frame<b.frame;});
   return v;
@@ -569,7 +577,7 @@ static void post_test_keys(){
  for(;next<posts.size()&&render::frame_count()>=posts[next].frame;next++){
   const Post& p=posts[next];SDL_Event e{};e.common.timestamp=kTestEventTime;
   if(!p.text.empty()){texts.push_back(p.text);e.type=SDL_EVENT_TEXT_INPUT;e.text.windowID=g_prompt_window?SDL_GetWindowID(g_prompt_window):0;e.text.text=texts.back().c_str();}
-  else{e.type=p.down?SDL_EVENT_KEY_DOWN:SDL_EVENT_KEY_UP;e.key.scancode=p.code;e.key.down=p.down;e.key.windowID=g_prompt_window?SDL_GetWindowID(g_prompt_window):0;}
+  else{e.type=p.down?SDL_EVENT_KEY_DOWN:SDL_EVENT_KEY_UP;e.key.scancode=p.code;e.key.down=p.down;e.key.mod=p.mods;e.key.windowID=g_prompt_window?SDL_GetWindowID(g_prompt_window):0;}
   LOG("[input] test %s %s%s at frame %llu",p.text.empty()?"key":"text",p.text.empty()?SDL_GetScancodeName(p.code):p.text.c_str(),p.text.empty()?(p.down?" down":" up"):"",(unsigned long long)render::frame_count());
   SDL_PushEvent(&e);
  }
@@ -606,11 +614,15 @@ void handle_event(const SDL_Event& event){
   const bool eligible = g_prompt_window && mods::mouse_captured() && !overlay::captures() && !g_done;
   if (event.type==SDL_EVENT_MOUSE_BUTTON_DOWN || event.type==SDL_EVENT_MOUSE_BUTTON_UP) {
    int b=event.button.button==SDL_BUTTON_LEFT?0:event.button.button==SDL_BUTTON_RIGHT?1:event.button.button==SDL_BUTTON_MIDDLE?2:event.button.button==SDL_BUTTON_X1?3:event.button.button==SDL_BUTTON_X2?4:-1;
+   if (b>=0 && event.button.which!=SDL_TOUCH_MOUSEID && game_window(event.button.windowID) &&
+       overlay::pointer_shortcut(input_map::kMouse1+b,event.type==SDL_EVENT_MOUSE_BUTTON_DOWN)) return;
    mouse_binding_button(event.button.which,b,event.type==SDL_EVENT_MOUSE_BUTTON_DOWN,
        eligible && event.button.which != SDL_TOUCH_MOUSEID && event.button.windowID==SDL_GetWindowID(g_prompt_window));
   }
   if(event.type==SDL_EVENT_MOUSE_WHEEL) {
    float y=event.wheel.y; if(event.wheel.direction==SDL_MOUSEWHEEL_FLIPPED)y=-y;
+   if (y!=0 && event.wheel.which!=SDL_TOUCH_MOUSEID && game_window(event.wheel.windowID) &&
+       overlay::pointer_shortcut(y>0?input_map::kWheelUp:input_map::kWheelDown,true)) return;
    mouse_binding_wheel(y,eligible && event.wheel.which != SDL_TOUCH_MOUSEID && event.wheel.windowID==SDL_GetWindowID(g_prompt_window) && !mods::first_person_wheel());
   }
  }
@@ -713,6 +725,12 @@ void update(){
   button(SDL_GAMEPAD_BUTTON_SOUTH,kPadA);button(SDL_GAMEPAD_BUTTON_EAST,kPadB);button(SDL_GAMEPAD_BUTTON_WEST,kPadX);button(SDL_GAMEPAD_BUTTON_NORTH,kPadY);
   button(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER,kPadLB);button(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER,kPadRB);
   button(SDL_GAMEPAD_BUTTON_START,kPadMenu);button(SDL_GAMEPAD_BUTTON_BACK,kPadOptions);button(SDL_GAMEPAD_BUTTON_GUIDE,kPadHome);
+  button(SDL_GAMEPAD_BUTTON_MISC1,kPadCapture);
+  button(SDL_GAMEPAD_BUTTON_RIGHT_PADDLE1,kPadRightPaddle1);button(SDL_GAMEPAD_BUTTON_LEFT_PADDLE1,kPadLeftPaddle1);
+  button(SDL_GAMEPAD_BUTTON_RIGHT_PADDLE2,kPadRightPaddle2);button(SDL_GAMEPAD_BUTTON_LEFT_PADDLE2,kPadLeftPaddle2);
+  button(SDL_GAMEPAD_BUTTON_TOUCHPAD,kPadTouchpad);
+  button(SDL_GAMEPAD_BUTTON_MISC2,kPadMisc2);button(SDL_GAMEPAD_BUTTON_MISC3,kPadMisc3);button(SDL_GAMEPAD_BUTTON_MISC4,kPadMisc4);
+  button(SDL_GAMEPAD_BUTTON_MISC5,kPadMisc5);button(SDL_GAMEPAD_BUTTON_MISC6,kPadMisc6);
   button(SDL_GAMEPAD_BUTTON_LEFT_STICK,kPadL3);button(SDL_GAMEPAD_BUTTON_RIGHT_STICK,kPadR3);
   button(SDL_GAMEPAD_BUTTON_DPAD_UP,kPadDUp);button(SDL_GAMEPAD_BUTTON_DPAD_DOWN,kPadDDown);button(SDL_GAMEPAD_BUTTON_DPAD_LEFT,kPadDLeft);button(SDL_GAMEPAD_BUTTON_DPAD_RIGHT,kPadDRight);
   put(kPadLT,std::max(0.f,SDL_GetGamepadAxis(pad,SDL_GAMEPAD_AXIS_LEFT_TRIGGER)/32767.f));put(kPadRT,std::max(0.f,SDL_GetGamepadAxis(pad,SDL_GAMEPAD_AXIS_RIGHT_TRIGGER)/32767.f));

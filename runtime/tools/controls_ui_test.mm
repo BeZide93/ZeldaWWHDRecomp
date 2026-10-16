@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <unistd.h>
 namespace gfx { void show_drc_window(bool){} }
+namespace overlay { void external_binding_capture(bool){} }
 namespace input {
 bool pro_controller(){return false;}
 void set_pro_controller(bool){}

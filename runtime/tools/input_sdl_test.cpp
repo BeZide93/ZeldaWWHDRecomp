@@ -52,7 +52,7 @@ static double shortcutClock=0;
 // press; the overlay keeps the inputs it took from the settings shortcut and reports the poll as taken
 static bool platformShortcut=false,shortcutTook=false;static int platformShortcuts=0;
 namespace screenshot { bool key_down(int); }
-namespace overlay { void set_open(bool open,OpenReason,KeyOrigin){overlayOpen=open;} void focus_lost(){}
+namespace overlay { bool pointer_shortcut(int,bool){return false;} void set_open(bool open,OpenReason,KeyOrigin){overlayOpen=open;} void focus_lost(){}
  void poll_controller_shortcuts(const float* v){static SettingsShortcut sc;static bool latched=false;
   using namespace input_map;bool select=v[kPadOptions]>0.5f;
   if(platformShortcut&&v[kPadLB]>0.5f&&v[kPadRB]>0.5f&&select){if(!latched){latched=true;shortcutTook=true;++platformShortcuts;}}
@@ -328,6 +328,20 @@ int main(int argc,char** argv){
      assert(SDL_SetJoystickVirtualAxis(joystick,axis,0));p=poll();assert(p.lx==0&&p.ly==0&&p.rx==0&&p.ry==0);
     }
    }
+  }
+  // Every additional SDL button reaches the same raw mapping and can drive a game input.
+  const std::pair<SDL_GamepadButton,int> extra[] = {
+   {SDL_GAMEPAD_BUTTON_MISC1,input_map::kPadCapture},
+   {SDL_GAMEPAD_BUTTON_RIGHT_PADDLE1,input_map::kPadRightPaddle1}, {SDL_GAMEPAD_BUTTON_LEFT_PADDLE1,input_map::kPadLeftPaddle1},
+   {SDL_GAMEPAD_BUTTON_RIGHT_PADDLE2,input_map::kPadRightPaddle2}, {SDL_GAMEPAD_BUTTON_LEFT_PADDLE2,input_map::kPadLeftPaddle2},
+   {SDL_GAMEPAD_BUTTON_TOUCHPAD,input_map::kPadTouchpad}, {SDL_GAMEPAD_BUTTON_MISC2,input_map::kPadMisc2},
+   {SDL_GAMEPAD_BUTTON_MISC3,input_map::kPadMisc3}, {SDL_GAMEPAD_BUTTON_MISC4,input_map::kPadMisc4},
+   {SDL_GAMEPAD_BUTTON_MISC5,input_map::kPadMisc5}, {SDL_GAMEPAD_BUTTON_MISC6,input_map::kPadMisc6}};
+  for (auto [button,bind] : extra) {
+   auto m=input_map::Mapping::defaults();m.pad[input_map::kZR]=bind;input_map::set_current(m,false);
+   assert(SDL_SetJoystickVirtualButton(joystick,button,true));assert(poll().buttons==input::kZR);
+   float values[input_map::kPadCount]{};input::host_controller_values(values);assert(values[bind]>0.5f);
+   assert(SDL_SetJoystickVirtualButton(joystick,button,false));assert(poll().buttons==0);
   }
   // Binding edits must also reach the game: route D-pad down to stick-down.
   auto rebound=input_map::Mapping::defaults();rebound.pad[input_map::kDDown]=input_map::kPadNone;

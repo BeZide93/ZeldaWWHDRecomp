@@ -5,6 +5,7 @@
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
 #include "../input.h"
+#include "../input_map.h"
 #include "../overlay/hostui.h"
 #include "../overlay/overlay.h"
 #include "../runtime.h"
@@ -125,7 +126,15 @@ void install_overlay_input() {
                        NSEventMaskLeftMouseDown | NSEventMaskLeftMouseUp | NSEventMaskRightMouseDown | NSEventMaskRightMouseUp |
                        NSEventMaskOtherMouseDown | NSEventMaskOtherMouseUp | NSEventMaskScrollWheel;
     [NSEvent addLocalMonitorForEventsMatchingMask:mask handler:^NSEvent*(NSEvent* e) {
-        if (!overlay::captures() || e.window != tv) return e;
+        if (e.window != tv) return e;
+        if (!overlay::captures()) {
+            const bool down = e.type==NSEventTypeLeftMouseDown || e.type==NSEventTypeRightMouseDown || e.type==NSEventTypeOtherMouseDown;
+            const bool up = e.type==NSEventTypeLeftMouseUp || e.type==NSEventTypeRightMouseUp || e.type==NSEventTypeOtherMouseUp;
+            if ((down || up) && e.buttonNumber < 5 && overlay::pointer_shortcut(input_map::kMouse1+(int)e.buttonNumber,down)) return nil;
+            if (e.type==NSEventTypeScrollWheel && e.scrollingDeltaY!=0 &&
+                overlay::pointer_shortcut(e.scrollingDeltaY>0?input_map::kWheelUp:input_map::kWheelDown,true)) return nil;
+            return e;
+        }
         NSView* v = tv.contentView;
         NSPoint p = [v convertPoint:e.locationInWindow fromView:nil];
         NSSize sz = v.bounds.size;

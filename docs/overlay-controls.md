@@ -23,6 +23,28 @@ the game the same way as closing its window. Settings are already saved as you c
 them. Progress since your last in-game save is lost, so save in the game first (or
 use a save state). On Android the game also leaves the recent apps list.
 
+## Changing bindings
+
+**Controls** changes the game's inputs. **Shortcuts** changes Settings, full screen,
+screenshots, save/load slots, graphics, picture-in-picture, the performance overlay and audio.
+Each shortcut has a key, an alternate key and a controller binding. Home is the default
+controller binding shown under **Settings**, and can be changed there. Holding Select also
+opens Settings unless Select is used as a combination's hold button.
+
+Select a key field and press a key or mouse button. Select a controller field and tap a button,
+or hold one button and press another. While a field waits for input, that input is recorded:
+Escape does not close Settings, L/R does not switch tabs, and Select/Home does not open or close
+Settings. Outside capture, Escape still closes Settings. Escape also releases a captured mouse.
+
+Right-click a binding to clear it, in either tab. With a binding focused, Delete, Backspace,
+or the controller button mapped to X clears it too. Right-click while recording a mouse
+binding records the right mouse button instead. Settings must keep a working binding or its
+held-Select shortcut. Changes are saved automatically and survive restarting the game.
+
+Capture/Share, rear paddles and touchpad clicks are available when your controller supplies
+them. They start unbound. A combination consumes only its two buttons while both are held;
+a single-button shortcut consumes that button while held.
+
 ## Diagnostics
 
 If asked to capture a menu problem, `WWHD_OVERLAY_TRACE=1` records controller

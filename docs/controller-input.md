@@ -126,3 +126,22 @@ checks do not replace testing a particular physical device and its driver.
 Controls → **Skip controller selection** is on by default. At the title screen it chooses the
 configured Wii U GamePad or Pro Controller through the game's normal selection path; turn it off
 to choose manually. Unavailable options and controller-disconnect prompts remain interactive.
+
+## App shortcuts and extra buttons
+
+Open **Settings → Shortcuts** to change app actions. **Settings** shows Home as its default
+controller button. You can replace it with another button or a hold-and-press combination.
+The key, alternate key and controller binding are saved together. F1 remains the default
+Settings key; Escape closes Settings when you are not recording an input, and releases a
+captured mouse.
+
+Select a controller field, then tap a button or hold one button and press another. During
+recording, L/R, Select and Home are captured without switching tabs or closing the menu.
+Capture/Share, rear paddles, touchpad clicks and other extra buttons can be assigned in both
+Controls and Shortcuts; they start unbound. Extra buttons without a standard name appear by
+number. Availability depends on the controller and its driver.
+
+Right-click a binding to clear it. Controller users can focus it and press the button mapped
+to X; keyboard users can press Delete or Backspace. The right mouse button remains assignable
+while a field is recording. A combination takes only its two buttons, and only while both
+are held. A single-button shortcut takes that button while held.
