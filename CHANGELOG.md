@@ -7,6 +7,9 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Graphics → Advanced, diagnostic options for broken 3D geometry** (e.g. PowerVR GPUs, #207): "Convert vertices on
+  the CPU", "Full precision in shaders" and "No vertex reuse", each off by default and applied after a restart. They help
+  us find the cause on GPUs we can't test ourselves; the first one is slow and only meant for testing.
 - **Mod SDK v3 preview: animated characters and scenes.** Mods can add animated characters (a rigged glTF model
   with idle, walk, talk and extra clips) that look at Link, walk paths or to quest places, block Link and react to
   sword hits; mod code can drive them through a small C API. Scenes gain eased camera paths, follow shots, music,
