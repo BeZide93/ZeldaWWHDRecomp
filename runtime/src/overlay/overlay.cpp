@@ -2173,7 +2173,7 @@ void tab_about() {
              "Start confirms.");
     } else {
 #ifdef __APPLE__
-        note("Settings overlay: Esc or F1 (Fn+F1 on most Mac keyboards), Settings... in the app menu, or hold Select / "
+        note("Settings overlay: Esc or F1 (Fn+F1 on most Mac keyboards), Cmd+, or Settings... in the app menu, or hold Select / "
              "press Home on a controller. With a captured mouse, the first Esc frees the mouse. Esc, F1 or B closes. "
 #else
         note("Settings overlay: Esc or F1, or hold Select / press Home on a controller. With a captured mouse, the first "

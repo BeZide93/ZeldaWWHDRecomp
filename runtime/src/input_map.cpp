@@ -946,7 +946,8 @@ bool from_json(const std::string& text, Mapping& out, std::string* error) {
         }
     }
     // Files from before Esc opened Settings keep custom keys; the untouched old default (F1, plus
-    // Cmd+, in the macOS app) becomes the current one, unless a game input already uses Esc.
+    // Cmd+, in the macOS app) becomes the current one, unless a game input already uses Esc. Cmd+, stays
+    // available on macOS as the app menu's fixed Settings... key (gfx/menu_shortcuts.h).
     if (version < 3) {
         auto& keys = m.shortcuts[kSettings].keys;
         bool escUsed = false;

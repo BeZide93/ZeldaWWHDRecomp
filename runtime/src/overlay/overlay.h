@@ -1,7 +1,7 @@
 // In-game settings overlay (Dear ImGui), drawn on top of the TV window's picture by both renderers.
 //
 // The Settings shortcut (default Esc, alternate F1) opens and closes it (Esc closes; with a captured mouse
-// the first Esc only frees the mouse); on macOS also app menu > Settings... (most Mac keyboards
+// the first Esc only frees the mouse); on macOS also Cmd+, (app menu > Settings..., fixed; most Mac keyboards
 // send F1 only with Fn unless the top row is set to standard function keys); on a controller, hold Select/Minus for half a second or press
 // Home. While it is open the game sees no buttons (it keeps running) and the overlay takes keyboard,
 // mouse and controller. Tabs: Saves, Graphics, Display, Audio, Mods, Controls, Language / About. Every option

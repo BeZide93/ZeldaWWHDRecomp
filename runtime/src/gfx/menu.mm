@@ -16,6 +16,7 @@
 #include "../savestate.h"
 #include "../screenshot.h"
 #include "../input_map.h"
+#include "menu_shortcuts.h"
 #include "../overlay/hostui.h"
 #include "../overlay/overlay.h"
 #include "../mods/code_mods.h"
@@ -193,46 +194,12 @@ static void choose_renderer(render::Api a) {
     }];
 }
 
-// AppKit can display one key equivalent per item. Alternate keys get adjacent items.
-static NSString* shortcut_equivalent(input_map::ShortcutKey key) {
-    if (key.code < 0) return @"";
-    const int functions[] = {kVK_F1,kVK_F2,kVK_F3,kVK_F4,kVK_F5,kVK_F6,kVK_F7,kVK_F8,
-                            kVK_F9,kVK_F10,kVK_F11,kVK_F12,kVK_F13,kVK_F14,kVK_F15,kVK_F16};
-    for (int i = 0; i < 16; ++i) if (key.code == functions[i])
-        return [NSString stringWithFormat:@"%C", (unichar)(NSF1FunctionKey + i)];
-    std::string label = input_map::key_label(key.code);
-    if (label.size() == 1) return [[NSString stringWithUTF8String:label.c_str()] lowercaseString];
-    if (key.code == kVK_Return) return @"\r";
-    if (key.code == kVK_Tab) return @"\t";
-    if (key.code == kVK_Space) return @" ";
-    return @""; // unsupported physical keys still work in the event path
-}
-static void apply_shortcut_equivalent(NSMenuItem* item, input_map::ShortcutKey key) {
-    item.keyEquivalent = shortcut_equivalent(key);
-    item.keyEquivalentModifierMask = (key.mods & input_map::kModShift ? NSEventModifierFlagShift : 0) |
-        (key.mods & input_map::kModCtrl ? NSEventModifierFlagControl : 0) |
-        (key.mods & input_map::kModAlt ? NSEventModifierFlagOption : 0) |
-        (key.mods & input_map::kModSuper ? NSEventModifierFlagCommand : 0);
-}
 @interface WWShortcutMenu : NSObject <NSMenuDelegate>
 @end
 @implementation WWShortcutMenu
 - (void)activate:(NSMenuItem*)item { overlay::activate_shortcut((int)item.tag); }
 - (void)menuNeedsUpdate:(NSMenu*)menu {
-    [menu removeAllItems];
-    const auto m = input_map::current();
-    for (int a = 0; a < input_map::kShortcutCount; ++a) {
-        const auto& info = input_map::shortcut_info(a);
-        for (int slot = 0; slot < 2; ++slot) {
-            auto key = m.shortcuts[a].keys[slot];
-            if (slot && key.code == input_map::kNoKey) continue;
-            NSString* title = [NSString stringWithUTF8String:info.name];
-            if (slot) title = [title stringByAppendingString:@" (alternate)"];
-            NSMenuItem* item = [menu addItemWithTitle:title action:@selector(activate:) keyEquivalent:@""];
-            item.tag = a; item.target = self;
-            apply_shortcut_equivalent(item, key);
-        }
-    }
+    menu_shortcuts::fill_shortcut_menu(menu, input_map::current(), self, @selector(activate:));
 }
 @end
 static WWShortcutMenu* g_shortcut_menu;
@@ -451,11 +418,9 @@ void install_menu(NSWindow* tv) {
 
     NSMenuItem* appItem = [bar addItemWithTitle:@"" action:nil keyEquivalent:@""];
     NSMenu* app = [NSMenu new];
-    // the settings overlay (overlay/overlay.h), at the place and with the shortcut macOS apps use;
+    // the settings overlay (overlay/overlay.h), at the place and with the fixed Cmd+, macOS apps use;
     // Esc and F1 work in the game window (Fn+F1 unless the top row sends standard function keys)
-    NSMenuItem* settings = [app addItemWithTitle:@"Settings\u2026" action:@selector(openSettings:) keyEquivalent:@","];
-    settings.target = g_target;
-    settings.toolTip = @"In-game settings overlay over the picture (Esc or F1 in the game window)";
+    menu_shortcuts::add_settings_item(app, g_target, @selector(openSettings:));
     [app addItem:[NSMenuItem separatorItem]];
     [app addItemWithTitle:@"Quit Wind Waker HD" action:@selector(terminate:) keyEquivalent:@"q"];
     appItem.submenu = app;
@@ -636,19 +601,7 @@ void install_menu(NSWindow* tv) {
     winItem.submenu = wm;
     NSApp.windowsMenu = wm;  // macOS lists the open windows below
 
-    // Remappable equivalents live together, so an old native item cannot keep a removed key alive.
-    std::function<void(NSMenu*)> clearHostKeys = [&](NSMenu* menu) {
-        for (NSMenuItem* item in menu.itemArray) {
-            NSString* selector = NSStringFromSelector(item.action);
-            if ([selector isEqualToString:@"openSettings:"] || [selector isEqualToString:@"fullScreen:"] ||
-                [selector isEqualToString:@"screenshot:"] || [selector isEqualToString:@"toggleAniso:"] ||
-                [selector isEqualToString:@"toggleHires:"] || [selector isEqualToString:@"toggleFxaa:"] ||
-                [selector isEqualToString:@"toggleInterp:"] || [selector isEqualToString:@"toggleInterpFps:"] ||
-                [selector isEqualToString:@"setRes:"] || [selector isEqualToString:@"setAO:"]) item.keyEquivalent = @"";
-            if (item.submenu) clearHostKeys(item.submenu);
-        }
-    };
-    clearHostKeys(bar);
+    menu_shortcuts::clear_host_keys(bar);  // Settings... keeps its fixed Cmd+,
     g_shortcut_menu = [WWShortcutMenu new];
     NSMenu* shortcuts = [[NSMenu alloc] initWithTitle:@"Shortcuts"];
     shortcuts.delegate = g_shortcut_menu;

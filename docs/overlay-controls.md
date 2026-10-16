@@ -2,6 +2,9 @@
 
 Press Esc (or F1) to open Settings. With a captured mouse, the first Esc frees the mouse and a
 second one opens Settings. On a controller, press Home or hold Select / Minus.
+On macOS, Cmd+, (or **Settings…** in the app menu) also opens and closes Settings. This
+shortcut is fixed: it is not listed in Shortcuts, and it still opens Settings if you bind Cmd+,
+to another action.
 Use the D-pad or left stick to navigate, A to select, B to go back or close,
 and L / R to switch tabs.
 
