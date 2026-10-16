@@ -1,7 +1,8 @@
-// Exercise the production movement instruction hook using synthetic vectors only.
+// Exercise production Link hooks using synthetic state only.
 #include "runtime.h"
 #include "mods/mods.h"
 #include <cassert>
+#include <cstring>
 #ifdef _WIN32
 #include <windows.h>
 #else
@@ -31,6 +32,9 @@ extern "C" void f_023FB230_orig(Cpu*){}
 extern "C" void f_023FBCEC_orig(Cpu*){}
 extern "C" void f_02416230_orig(Cpu*){}
 extern "C" void f_025AAE08_orig(Cpu*){}
+static unsigned demo_commands = 0;
+extern "C" void f_023F22FC_orig(Cpu*){++demo_commands;}
+extern "C" void hook_023F22FC(Cpu*);
 extern "C" void f_023F695C_orig(Cpu*){}
 extern "C" void f_023F7820_orig(Cpu*){}
 extern "C" void f_023F81A4_orig(Cpu*){}
@@ -57,7 +61,18 @@ static void map(uint32_t address,size_t size){
 #endif
  assert(p==mem::ptr(address));
 }
-int main(){
+int main(int argc,char** argv){
+ // Event commands can destroy model heaps; the actual preview fence must keep
+ // them on full steps while leaving the number of half-step previews intact.
+ if (argc==2 && !std::strcmp(argv[1],"--event-fence")) {
+  Cpu event_cpu{};
+  for (unsigned pass=0;pass<60;++pass) {
+   step=(pass&1)?.5f:1.0f;
+   hook_023F22FC(&event_cpu);
+  }
+  assert(demo_commands==30);
+  return 0;
+ }
  map(actor,0x10000);map(mem::kFixedStart,0x10000);
  Cpu cpu{};cpu.r[4]=actor+0x33C;cpu.f[31].ps0=10;
  stf32(cpu.r[4],3);stf32(cpu.r[4]+4,12);stf32(cpu.r[4]+8,4);

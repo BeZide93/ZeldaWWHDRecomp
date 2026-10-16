@@ -44,6 +44,7 @@
 #include "runtime.h"
 #include "savestate.h"
 #include "true60.h"
+#include "true60_steps.h"
 #include "gx2/gx2.h"
 #include "gfx/renderer.h"
 
@@ -1248,7 +1249,7 @@ extern "C" void hook_02039834(Cpu* c) { g_hold_child_cpu = c; if (!hold_skip_chi
 // (1 execute, 2 delete, 4 priority, 8 create, 16 fapGm_After, 32 counter, 64 HD UI screens)
 static bool skip(int bit) {
     static const int run = getenv("WWHD_INTERP_RUN") ? atoi(getenv("WWHD_INTERP_RUN")) : 0;
-    return interp::g_hold && !(run & bit);
+    return true60::skip_step_part(interp::g_hold, true60::enabled(), run, bit);
 }
 static bool g_in_execute = false;  // inside fpcEx_Handler (actor Execute): logic, not drawing
 namespace mods { void after_execute(Cpu* c, uint32_t execute_fn); }  // mods/turbo.cpp
