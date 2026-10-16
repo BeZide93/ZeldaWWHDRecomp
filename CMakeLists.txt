@@ -568,7 +568,7 @@ add_test(NAME android_user_directory COMMAND android_user_directory_test)
 add_executable(shader_source_test runtime/tools/shader_source_test.cpp)
 target_include_directories(shader_source_test PRIVATE runtime/src)
 target_compile_options(shader_source_test PRIVATE -UNDEBUG)
-add_test(NAME shader_source_ownership COMMAND shader_source_test)
+add_test(NAME shader_source_cache COMMAND shader_source_test)
 
 add_executable(shader_prebuild_test runtime/tools/shader_prebuild_test.cpp)
 target_include_directories(shader_prebuild_test PRIVATE runtime/src)

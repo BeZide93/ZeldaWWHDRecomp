@@ -122,11 +122,8 @@ values disable collection. Reports contain current RSS, cached image allocations
 upload blocks and retained shader payload capacities; they contain no shader source
 or save data. RSS is not a heap total or peak measurement.
 
-Final GLSL is shared immutably by shaders, disk-cache records and pending compilations.
-Canonical-source capacity counts each shared allocation once; GLSL capacity covers
-translation scratch, and disk/pending source capacities cover independent copies.
-Decompiler text is released after rewriting and graphics-pack checks. Exact source
-comparisons, shader export, verification originals and WWVKSC02 compatibility remain.
+After compiling, the game keeps only the SPIR-V and a hash of each shader's GLSL text; the
+text itself is released (set `WWHD_VK_SHADER_SOURCE_VERIFY=1` to keep it for diagnostics).
 Counters exclude compiler results, disk snapshots, metadata, allocator overhead and
 retired/non-cache/driver images. Use aggregate heap summaries with a repeatable scene
 for retention investigations, and disable diagnostics for performance comparisons.

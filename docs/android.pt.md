@@ -128,16 +128,12 @@ incluem RSS atual, alocações de imagens em cache, blocos de upload e capacidad
 dados de shaders retidos; não contêm código de shaders nem dados de partidas.
 RSS não é o total do heap nem uma medição do pico.
 
-O GLSL final é compartilhado de forma imutável entre shaders, registros do cache em
-disco e compilações pendentes. A capacidade de código canônico conta cada alocação
-compartilhada uma vez; a capacidade GLSL cobre o texto temporário de tradução, e as
-capacidades de código em disco/pendente cobrem cópias independentes. O texto do
-descompilador é liberado após reescritas e verificações de pacotes gráficos. As
-comparações exatas, a exportação de shaders, os originais para verificação e a
-compatibilidade WWVKSC02 são preservados. Os contadores excluem resultados do
-compilador, snapshots de disco, metadados, sobrecarga do alocador e imagens retiradas,
-fora do cache ou do driver. Para investigar retenção, use resumos agregados do heap
-com uma cena repetível; desative os diagnósticos ao comparar desempenho.
+Depois de compilar, o jogo mantém só o SPIR-V e um hash do texto GLSL de cada shader;
+o texto é liberado (defina `WWHD_VK_SHADER_SOURCE_VERIFY=1` para mantê-lo em diagnósticos).
+Os contadores excluem resultados do compilador, snapshots de disco, metadados,
+sobrecarga do alocador e imagens retiradas, fora do cache ou do driver. Para investigar
+retenção, use resumos agregados do heap com uma cena repetível, e desative o diagnóstico
+ao comparar desempenho.
 
 
 ---
