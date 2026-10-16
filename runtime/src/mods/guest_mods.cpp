@@ -637,7 +637,6 @@ bool load_one(const std::string& path, std::string& err,const mods::packages::Gu
             prepare_npc_catalogue();
             story_notebook::declare(loaded.id,loaded.name,manifest);
         }
-        load_world(loaded.id,manifest,pkg.path,pkg.data_path);
         // the mod's items (story_items.h): kept in the Delivery Bag, owned in the save's story block
         std::vector<story_notebook::ManifestItem> items;std::string why;
         if(!story_notebook::parse_items(manifest,items,why))LOG("[items] %s: the manifest's items are not used: %s",loaded.id.c_str(),why.c_str());
@@ -647,6 +646,7 @@ bool load_one(const std::string& path, std::string& err,const mods::packages::Gu
             story_items::note_import();story_notebook::note_import();story_mail::note_import();
             LOG("[items] %s: %zu item(s) from the manifest",loaded.id.c_str(),items.size());
         }
+        load_world(loaded.id,manifest,pkg.path,pkg.data_path);
     } catch(const std::exception& e) {LOG("[guestmods] %s: manifest quests not read: %s",loaded.id.c_str(),e.what());}
     g_loaded.push_back(std::move(loaded));
     guard.handle = nullptr; // module functions remain resident for the process lifetime
@@ -755,7 +755,7 @@ void init() {
     // with the game's saves in the story block of cking.sav. Without a story mod the file's block is
     // still kept as it is.
     const bool story=story_mail::imported()||story_chart::imported()||story_notebook::imported()||story_items::imported();
-    if(story){uint32_t areas=mem::host_alloc(story_store::kMemoryBytes,16);memset(mem::ptr(areas),0,story_store::kMemoryBytes);story_store::set_memory(areas);}
+    if(story){uint32_t areas=mem::runtime_alloc(story_store::kMemoryBytes,16);memset(mem::ptr(areas),0,story_store::kMemoryBytes);story_store::set_memory(areas);}
     // developer override of the notebook's model archive (the Story Notebook package's setup step builds it)
     if(const char* model=getenv("WWHD_NOTEBOOK_MODEL");model&&*model)story_mail::set_notebook_model(model);
     story_mail::set_game_calls(call_original,[](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);});
@@ -945,14 +945,15 @@ void state_loaded() {
     g_actor_registry.invalidate_all();g_actor_identities.clear();
     hud::store().reset();
     pcm::store().reset();
+    story_mail::state_loaded();
     story_scenes::state_loaded();
     story_actors::state_loaded();
-    story_mail::state_loaded();
     story_treasure_chest::state_loaded();
     story_chart::state_loaded();
     story_notebook::state_loaded();
     story_bag::state_loaded();
     story_lyt_screen::state_loaded();
+    story_actors::restore_talk_text(); // Hydrate only after every old host text owner has been cleared.
     for(auto& mod:g_loaded)mod.hud_called=false;
 }
 

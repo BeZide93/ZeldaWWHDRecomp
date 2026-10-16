@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "story_items_core.h"
+#include "story_prop_rewards.h"
 #include "story_manifest.h"
 
 struct Cpu;
@@ -43,6 +44,24 @@ bool define(const std::string& mod, const std::string& package_dir, const story_
 std::vector<Item> installed();  // in declaration order (mod by mod)
 std::optional<Item> find(uint16_t key);
 std::optional<Item> find(const std::string& mod, const std::string& id);
+
+// Startup-only world batch checkpoints. No native instances/hooks may consume registrations
+// until the batch succeeds. Rollback never recycles opaque handles or changes loaded Book bytes.
+PropMarkerCheckpoint prop_marker_checkpoint();
+bool rollback_prop_markers(PropMarkerCheckpoint checkpoint); // includes enemy markers in the same startup batch
+// Internal native-prop claims; callbacks run serially on the game logic thread.
+PropMarkerHandle register_prop_marker(const std::string& mod, const std::string& actor_id,
+                                     const std::string& broken_flag, std::string& why);
+bool prop_broken(PropMarkerHandle handle);
+PropClaimStatus claim_prop_drops(PropMarkerHandle handle, const std::string& mod,
+                                const std::vector<PropDrop>& drops, bool caption = true);
+
+// Enemy terminal adapters alone decide when to claim; Delete/unload/Create failure never imply defeat.
+EnemyMarkerHandle register_enemy_marker(const std::string& mod, const std::string& actor_id,
+                                       const std::string& defeat_flag, std::string& why);
+bool enemy_defeated(EnemyMarkerHandle handle);
+EnemyClaimStatus claim_enemy_drops(EnemyMarkerHandle handle, const std::string& mod,
+                                  const std::vector<PropDrop>& drops, bool caption = true);
 
 // The loaded save file (none: 0 / nullopt)
 uint8_t count(uint16_t key);

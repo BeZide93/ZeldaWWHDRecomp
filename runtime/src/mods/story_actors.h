@@ -6,10 +6,22 @@
 #include "story_world_manifest.h"
 #include "mod_actor.h"
 #include "story_actors_core.h"
+#include "story_enemy_ownership.h"
 struct Cpu;
 namespace story_actors {
 inline constexpr uint32_t kModScratchOffset=1280;
-inline constexpr uint32_t kScratchBytes=5376;
+inline constexpr uint32_t kPropsScratchOffset=5376;
+inline constexpr uint32_t kSwitchScratchOffset=kPropsScratchOffset+0x30;
+inline constexpr uint32_t kDoorScratchOffset=kSwitchScratchOffset+0x30;
+inline constexpr uint32_t kIdentityScratchOffset=5632;
+static_assert(kDoorScratchOffset+0x30<=kIdentityScratchOffset);
+// Preserve existing resident/prop/switch snapshot offsets when adding enemies.
+inline constexpr uint32_t kEnemyProfilesScratchOffset=10752;
+inline constexpr uint32_t kEnemyOwnershipScratchOffset=kEnemyProfilesScratchOffset+4*0x30;
+inline constexpr uint32_t kEnemyEpochScratchOffset=kEnemyOwnershipScratchOffset+story_enemy_ownership::kStorageBytes;
+inline constexpr uint32_t kScratchBytes=kEnemyEpochScratchOffset+128*4;
+static_assert(kEnemyProfilesScratchOffset>=kIdentityScratchOffset+128*40);
+static_assert((kEnemyOwnershipScratchOffset&15)==0);
 bool load(const std::string& mod,const std::vector<story_notebook::ManifestActor>& actors,std::string& why);
 bool declared();
 bool mod_declared();
@@ -27,6 +39,8 @@ void room_loaded(Cpu*,int room);
 // Call once after native room actor setup (including the shared treasure hook).
 void native_room_loaded(Cpu*,int room);
 void state_loaded();
+// Pure host hydration after mail state clear, before restored guest threads resume.
+void restore_talk_text();
 uint32_t actor_address(Cpu*,const std::string& mod,const std::string& id);
 bool position(Cpu*,const std::string& mod,const std::string& id,story_notebook::WorldPoint& out);
 bool actions(const std::string& mod,const std::vector<story_notebook::StoryAction>& actions);

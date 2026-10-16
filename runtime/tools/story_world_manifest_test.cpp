@@ -1,4 +1,5 @@
 #include "mods/story_world_manifest.h"
+#include "mods/story_actor_identity.h"
 #include <cassert>
 #include <iostream>
 using namespace story_notebook;
@@ -8,6 +9,79 @@ static Value example() {
 }
 int main() {
     std::string why;std::vector<ManifestActor> actors;std::vector<ManifestScene> scenes;
+    { // A captured native PID must never be rebound to a different declared reward/config.
+        using namespace story_actors::identity;ManifestActor a;a.id="a";a.actor="pot";a.stage="sea";a.room=11;a.broken_flag="a.broken";a.drops={{"shard",1}};
+        const auto expected=fingerprint("test",a);const auto saved=record(expected);assert(matches(saved.data(),expected));
+        const auto different=[&](const ManifestActor&b){const auto hash=fingerprint("test",b);assert(hash!=expected&&!matches(saved.data(),hash));};
+        auto b=a;b.id="b";different(b);const auto second=record(fingerprint("test",b));assert(!matches(second.data(),expected));
+        std::array<std::array<uint8_t,kRecordBytes>,2> rows{saved,second};const auto second_hash=fingerprint("test",b);std::swap(rows[0],rows[1]);assert(!matches(rows[0].data(),expected)&&!matches(rows[1].data(),second_hash));
+        b=a;b.actor="crate";different(b);b=a;b.stage="town";different(b);b=a;b.room=12;different(b);
+        b=a;b.position.x=1;different(b);b=a;b.rotation.y=90;different(b);b=a;b.scale={2,2,2};different(b);
+        b=a;b.broken_flag="other";different(b);b=a;b.defeated_flag="other";different(b);b=a;b.drops[0].quantity=2;different(b);b=a;b.drops[0].item="other";different(b);
+        b=a;b.drops.push_back({"second",1});const auto ordered=fingerprint("test",b);std::swap(b.drops[0],b.drops[1]);assert(fingerprint("test",b)!=ordered);
+        b=a;b.quest="quest";b.quest_step=2;different(b);b=a;b.item="item:key";different(b);b=a;b.time="night";different(b);
+        b=a;b.flag="flag";different(b);b=a;b.params=1;different(b);b=a;b.lines="text";different(b);b=a;b.then.push_back({StoryAction::Kind::Flag,"flag",1});different(b);
+        assert(fingerprint("foreign",a)!=expected);auto corrupt=saved;corrupt[0]^=1;assert(!matches(corrupt.data(),expected));corrupt=saved;corrupt[7]=2;assert(!matches(corrupt.data(),expected));corrupt=saved;corrupt.back()^=1;assert(!matches(corrupt.data(),expected));assert(!matches(nullptr,expected));
+    }
+    const auto prop_example=[](){return mods::json::parse(R"({"items":[{"id":"shard"}],"actors":[{"id":"vase","actor":"pot","stage":"town","room":0,"position":{"x":0,"y":0,"z":0},"broken_flag":"vase.broken","drops":[{"item":"item:shard","quantity":2}]}]})");};
+    { // Validate all four curated native enemy declarations through the public parser.
+        const auto fixture=[](){return mods::json::parse(R"({"items":[{"id":"shard"}],"actors":[{"id":"enemy","actor":"chuchu","stage":"sea","room":11,"position":{"x":0,"y":0,"z":0},"defeated_flag":"enemy.defeated","drops":[{"item":"item:shard","quantity":2}]}]})");};
+        for(const char* type:{"chuchu","bokoblin","moblin","keese"}){
+            auto data=fixture();auto& value=data["actors"].array[0];value["actor"]=type;ManifestActor candidate;candidate.actor=type;
+            assert(world_manifest::native_enemy_fields(data,value,candidate,why)&&candidate.defeated_flag=="enemy.defeated"&&candidate.drops.size()==1&&candidate.drops[0].quantity==2);
+            assert(parse_actors(data,actors,why)&&actors.size()==1&&actors[0].actor==type&&actors[0].defeated_flag=="enemy.defeated"&&actors[0].drops[0].item=="shard");
+            for(const char* field:{"params","parameters","flag","broken_flag","switch_flag","switch","lines","then","model","animation","look_at","path","collision","attention","kind"}){auto bad=value;bad[field]=Value{};assert(!world_manifest::native_enemy_fields(data,bad,candidate,why));}
+            for(int quantity:{0,255}){auto bad=value;bad["drops"].array[0]["quantity"]=quantity;assert(!world_manifest::native_enemy_fields(data,bad,candidate,why));}
+            auto bad=value;bad["drops"].array[0]["item"]="item:foreign";assert(!world_manifest::native_enemy_fields(data,bad,candidate,why));
+            bad=value;bad["defeated_flag"]="0x80";assert(!world_manifest::native_enemy_fields(data,bad,candidate,why));
+            for(const char* field:{"defeated_flag","drops"}){auto bad=data;bad["actors"].array[0].object.erase(field);assert(!parse_actors(bad,actors,why)&&actors.empty());}
+            for(const char* field:{"params","parameters","flag","broken_flag","switch_flag","switch","lines","then","model","animation","look_at","path","collision","attention","kind"}){auto bad=data;bad["actors"].array[0][field]=Value{};assert(!parse_actors(bad,actors,why)&&actors.empty());}
+            {auto bad=data;auto duplicate=bad["actors"].array[0];duplicate["id"]="second";bad["actors"].array.push_back(duplicate);assert(!parse_actors(bad,actors,why)&&actors.empty());}
+            {auto empty=data;empty["actors"].array[0]["drops"].array.clear();assert(parse_actors(empty,actors,why)&&actors[0].drops.empty());}
+            {auto bad=data;auto drop=bad["actors"].array[0]["drops"].array[0];bad["actors"].array[0]["drops"].array.push_back(drop);assert(!parse_actors(bad,actors,why)&&actors.empty());}
+            {auto bad=data;bad["actors"].array[0]["scale"]=mods::json::parse(R"({"x":2,"y":2,"z":2})");assert(!parse_actors(bad,actors,why)&&actors.empty());}
+            candidate.scale={2,2,2};assert(!world_manifest::native_enemy_fields(data,value,candidate,why));candidate.scale={1,1,1};candidate.rotation.z=1;assert(!world_manifest::native_enemy_fields(data,value,candidate,why));
+        }
+    }
+    for(const auto& name:{"pot","barrel","crate"}){auto p=prop_example();p["actors"].array[0]["actor"]=name;assert(parse_actors(p,actors,why)&&actors[0].broken_flag=="vase.broken"&&actors[0].drops[0].item=="shard"&&actors[0].drops[0].quantity==2);}
+    for(const auto& field:{"params","parameters","flag","lines","then","path","attention","collision","model"}){auto p=prop_example();p["actors"].array[0][field]=0;assert(!parse_actors(p,actors,why));}
+    {auto p=prop_example();p["actors"].array[0].object.erase("broken_flag");assert(!parse_actors(p,actors,why));}
+    {auto p=prop_example();p["actors"].array[0].object.erase("drops");assert(!parse_actors(p,actors,why));}
+    {auto p=prop_example();p["actors"].array[0]["drops"].array.clear();assert(parse_actors(p,actors,why));}
+    for(int n:{0,255}){auto p=prop_example();p["actors"].array[0]["drops"].array[0]["quantity"]=n;assert(!parse_actors(p,actors,why));}
+    {auto p=prop_example();p["actors"].array[0]["drops"].array[0]["item"]="item:foreign";assert(!parse_actors(p,actors,why));}
+    {auto p=prop_example();auto drop=p["actors"].array[0]["drops"].array[0];p["actors"].array[0]["drops"].array.push_back(drop);assert(!parse_actors(p,actors,why));}
+    {auto p=prop_example();auto a=p["actors"].array[0];a["id"]="other";p["actors"].array.push_back(a);assert(!parse_actors(p,actors,why));}
+    for(double scale:{.09,4.01}){auto p=prop_example();p["actors"].array[0]["scale"]=mods::json::parse("{\"x\":1,\"y\":1,\"z\":1}");for(const auto& axis:{"x","y","z"})p["actors"].array[0]["scale"][axis]=scale;assert(!parse_actors(p,actors,why));}
+    {auto p=prop_example();p["actors"].array[0]["rotation"]=mods::json::parse("{\"x\":1,\"y\":0,\"z\":0}");assert(!parse_actors(p,actors,why));}
+    { // Fixed native switch/door adapters: public fields never expose native IDs/events.
+        const auto fixture=[](){return mods::json::parse(R"({"actors":[{"id":"gate","actor":"door","switch":"plate","stage":"sea","room":11,"position":{"x":300,"y":1040,"z":-201500}},{"id":"plate","actor":"switch","switch_flag":"plate-on","stage":"sea","room":11,"position":{"x":100,"y":1040,"z":-201500}}]})");};
+        auto data=fixture();assert(parse_actors(data,actors,why)&&actors.size()==2);
+        assert(actors[0].switch_actor=="plate"&&actors[0].switch_flag.empty()&&actors[1].switch_flag=="plate-on"&&actors[1].switch_actor.empty());
+        const auto door_hash=story_actors::identity::fingerprint("own-mod",actors[0]);
+        const auto switch_hash=story_actors::identity::fingerprint("own-mod",actors[1]);
+        auto changed=actors[0];changed.switch_actor="other-plate";assert(story_actors::identity::fingerprint("own-mod",changed)!=door_hash);
+        changed=actors[1];changed.switch_flag="other-on";assert(story_actors::identity::fingerprint("own-mod",changed)!=switch_hash);
+        const auto invalid=[&](Value bad){assert(!parse_actors(bad,actors,why)&&actors.empty()&&!why.empty());};
+        for(const char* field:{"params","parameters","flag","lines","then","broken_flag","drops","model","path","collision","attention","animation","look_at"}){
+            for(unsigned index:{0u,1u}){auto bad=fixture();bad["actors"].array[index][field]=Value{};invalid(bad);}
+        }
+        for(const char* field:{"type","mode","event","key","destination","variant"}){auto bad=fixture();bad["actors"].array[0][field]="retail";invalid(bad);}
+        for(const char* source:{"missing","gate","foreign:plate",""}){auto bad=fixture();bad["actors"].array[0]["switch"]=source;invalid(bad);}
+        {auto bad=fixture();bad["actors"].array[0].object.erase("switch");invalid(bad);}
+        {auto bad=fixture();bad["actors"].array[1].object.erase("switch_flag");invalid(bad);}
+        {auto bad=fixture();bad["actors"].array[1]["switch_flag"]="game:4";invalid(bad);}
+        {auto bad=fixture();bad["actors"].array[0]["switch_flag"]="wrong";invalid(bad);}
+        {auto bad=fixture();bad["actors"].array[1]["switch"]="plate";invalid(bad);}
+        {auto bad=fixture();auto other=bad["actors"].array[1];other["id"]="plate-two";bad["actors"].array.push_back(other);invalid(bad);}
+        {auto good=fixture();auto other=good["actors"].array[0];other["id"]="gate-two";good["actors"].array.push_back(other);assert(parse_actors(good,actors,why)&&actors.size()==3);}
+        for(unsigned index:{0u,1u}){
+            auto bad=fixture();bad["actors"].array[index]["rotation"]=mods::json::parse(R"({"x":1,"y":0,"z":0})");invalid(bad);
+            bad=fixture();bad["actors"].array[index]["scale"]=mods::json::parse(R"({"x":2,"y":2,"z":2})");invalid(bad);
+            auto good=fixture();good["actors"].array[index]["rotation"]=mods::json::parse(R"({"x":0,"y":180,"z":0})");assert(parse_actors(good,actors,why));
+        }
+        {auto bad=example();bad["actors"].array[0]["switch_flag"]="wrong";invalid(bad);}
+    }
     auto v=example();assert(parse_actors(v,actors,why)&&actors.size()==2);assert(parse_scenes(v,scenes,why)&&scenes[0].steps.size()==4);
     assert(parse_actors(Value{},actors,why)&&actors.empty());assert(parse_scenes(Value{},scenes,why)&&scenes.empty());
     v=example();v["actors"].array[0]["actor"]="bomb";assert(!parse_actors(v,actors,why));
@@ -27,6 +101,16 @@ int main() {
     v=example();v["actors"].array[1]["actor"]="Tbox";v["actors"].array[1]["params"]=0;v["actors"].array[1]["parameters"]["item"]="rupee_blue";assert(parse_actors(v,actors,why)&&actors[1].item_game==2);
     v["actors"].array[1]["parameters"]["item"]="heart_piece";assert(!parse_actors(v,actors,why)&&actors.empty());
     v=example();v["actors"].array[0]["parameters"]["resident"]=10;assert(!parse_actors(v,actors,why)&&actors.empty());
+    for(const auto& name:{"uo2","um1","ym1"}){v=example();v["actors"].array[0]["parameters"]["resident"]=name;assert(parse_actors(v,actors,why));assert(actors[0].resident==(std::string(name)=="uo2"?1u:std::string(name)=="ym1"?19u:9u));}
+    for(const auto& name:{"Uo2","uo1","ug1","1",""}){v=example();v["actors"].array[0]["parameters"]["resident"]=name;assert(!parse_actors(v,actors,why));}
+    v=example();v["actors"].array[0]["parameters"]["resident"]=19;assert(!parse_actors(v,actors,why));
+    v=example();v["actors"].array[0]["parameters"]["resident"]=1;assert(!parse_actors(v,actors,why));
+    v=example();v["actors"].array[0]["parameters"]["resident"]=9;assert(parse_actors(v,actors,why)&&actors[0].resident==9);
+    v=example();v["actors"].array[0]["parameters"]["resident"]="ym1";v["actors"].array[0]["position"]["x"]=-202066;v["actors"].array[0]["position"]["z"]=320123;assert(!parse_actors(v,actors,why));
+    v["actors"].array[0]["position"]["x"]=-202056;assert(parse_actors(v,actors,why));
+    v=example();v["actors"].array[0]["parameters"]["resident"]="ym1";assert(!story_notebook::world_manifest::resident_character(v,"guide"));
+
+
     v=example();v["actors"].array[0]["then"]=Value("bad");assert(!parse_actors(v,actors,why));
     v=example();v["scenes"].array.push_back(v["scenes"].array[0]);assert(!parse_scenes(v,scenes,why)&&scenes.empty());
     v=example();v["scenes"].array[0]["steps"].array[3]["then"]=true;assert(!parse_scenes(v,scenes,why)&&scenes.empty());

@@ -125,6 +125,7 @@ void set_scratch_memory(uint32_t){}
 void set_scene_start(std::function<bool(const std::string&,const std::string&)>){}
 void install(const std::function<std::string(uint32_t)>&,const std::function<void(uint32_t,void(*)(Cpu*))>&){}
 void state_loaded(){}
+void restore_talk_text(){}
 uint32_t actor_address(Cpu*,const std::string&,const std::string&){return 0;}
 bool actions(const std::string&,const std::vector<story_notebook::StoryAction>&){return true;}
 }

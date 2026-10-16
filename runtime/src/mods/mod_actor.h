@@ -1,6 +1,7 @@
 #pragma once
 #include "story_world_manifest.h"
 #include <functional>
+#include <cstddef>
 #include <array>
 #include <vector>
 #include <initializer_list>
@@ -46,6 +47,9 @@ bool end_scene(Cpu*,const Identity&,uint32_t lease);
 bool scene_path(Cpu*,const Identity&,uint32_t lease,const std::vector<story_notebook::WorldPoint>&,float speed);
 bool scene_rotation(Cpu*,const Identity&,uint32_t lease,story_notebook::WorldPoint degrees);
 bool scene_animation(Cpu*,const Identity&,uint32_t lease,const std::string&,float blend_frames=6,bool loop=true);
+// Startup-private provisional declarations cannot escape through installed services.
+size_t checkpoint();
+void rollback(size_t) noexcept;
 void configure(void(*original)(Cpu*,uint32_t),uint32_t(*call)(Cpu*,uint32_t,std::initializer_list<uint32_t>),uint32_t scratch);
 // Declaration tokens go into native create parameters; they remain stable across state loads.
 uint32_t declare(const std::string& mod,const story_notebook::ManifestActor&,const std::string& archive,int resource_index,std::function<void()> talked,

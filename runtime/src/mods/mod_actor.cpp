@@ -1,4 +1,5 @@
 #include "mod_actor.h"
+#include "native_actor_profiles.h"
 #include "mod_actor_shadow_proof.h"
 #include "mod_actor_budget.h"
 #include "mod_actor_motion.h"
@@ -336,18 +337,11 @@ void archive_wrapper(Cpu*c){
     if(returned.r[3]&&current.heap){const uint32_t size=heap_size(c,current.heap),free=heap_free(c,current.heap);model_cost(own,12,size);if(heap_trace())LOG("[mod_actor_heaps] archive=%s stage=archive_adjusted heap=%08X info=%08X size=%u free=%u used=%u",own->archive.c_str(),current.heap,current.info,size,free,size>=free?size-free:0);}
     *c=returned;
 }
-void delete_wrapper(Cpu*c){const uint32_t actor=c->r[3];const bool own=actor&&ld16(actor+0xE)==kProfile&&heap_trace();const auto before=own?heaps(c):HeapSnapshot{};c->r[3]=actor;original(c,GC(0x025D4B4C));const Cpu returned=*c;if(own)report_heaps(actor,"actor_delete",before,heaps(c));*c=returned;}
-void base_create_wrapper(Cpu*c){
-    if(c->r[3]!=kProfile){original(c,GC(0x025DD414));return;}
-    const Cpu incoming=*c;const uint32_t parameters=c->r[5],token=parameters?ld32(parameters):0;
-    const uint32_t allocation_heap=ld32(GD(0x1018CA3C)),before=heap_free(c,allocation_heap);*c=incoming;
-    original(c,GC(0x025DD414));const Cpu returned=*c;const uint32_t after=heap_free(c,allocation_heap);
-    if(returned.r[3]&&token&&token<=declarations.size()){st32(record(token-1)+24,before>=after?before-after:0);if(heap_trace())LOG("[mod_actor_heaps] actor=%08X stage=actor_base heap=%08X free_before=%u free_after=%u delta=%u",returned.r[3],allocation_heap,before,after,before>=after?before-after:0);}
-    *c=returned;
+void base_allocated(uint32_t token,uint32_t,uint32_t bytes){if(token&&token<=declarations.size())st32(record(token-1)+24,bytes);}
 }
-void profile(Cpu*c){if(c->r[3]==kProfile)result(c,scratch);else original(c,GC(0x025E10E0));}
-}
-void configure(void(*o)(Cpu*,uint32_t),uint32_t(*i)(Cpu*,uint32_t,std::initializer_list<uint32_t>),uint32_t s){original=o;invoke=i;scratch=s;}
+size_t checkpoint(){return declarations.size();}
+void rollback(size_t count) noexcept{if(!installed&&count<=declarations.size())declarations.resize(count);}
+void configure(void(*o)(Cpu*,uint32_t),uint32_t(*i)(Cpu*,uint32_t,std::initializer_list<uint32_t>),uint32_t s){original=o;invoke=i;scratch=s;native_actor_profiles::configure(o,i);}
 uint32_t declare(const std::string&mod,const story_notebook::ManifestActor&spec,const std::string&archive,int index,std::function<void()> talked,story_notebook::WorldPoint minimum,story_notebook::WorldPoint maximum,bool skinned,std::vector<std::string> clips,ModelRig rig){
     if(clips.size()>8||(!skinned&&!clips.empty())||(!spec.animation.empty()&&std::find(clips.begin(),clips.end(),spec.animation)==clips.end()))return 0;
     for(size_t i=0;i<clips.size();++i)if(!story_mail::valid_id(clips[i])||std::find(clips.begin(),clips.begin()+i,clips[i])!=clips.begin()+i)return 0;
@@ -359,7 +353,7 @@ uint32_t declare(const std::string&mod,const story_notebook::ManifestActor&spec,
     if(archive.empty()||archive.size()>63||index<0||index>16||declarations.size()>=128)return 0;
     declarations.push_back({mod,archive,spec,index,std::move(talked),minimum,maximum,skinned,std::move(clips),std::move(rig),head,upper,false});return uint32_t(declarations.size());
 }
-bool install(const std::function<std::string(uint32_t)>&owner,const std::function<void(uint32_t,void(*)(Cpu*))>&replace){if(installed)return true;if(declarations.empty()||!scratch||!invoke||!original||!owner(GC(0x025E10E0)).empty()||!owner(GC(0x025D4B4C)).empty()||!owner(GC(0x02604550)).empty()||!owner(GC(0x02604EB4)).empty()||!owner(GC(0x02612E64)).empty()||!owner(GC(0x025DD414)).empty())return false;std::memset(mem::ptr(scratch+256),0,kScratchBytes-256);uint32_t native=ld32(GD(0x101F3EE0)+0xB6*4);if(!native)return false;for(unsigned i=0;i<0x30;i+=4)st32(scratch+i,ld32(native+i));st16(scratch+8,kProfile);st32(scratch+0x10,Size);st32(scratch+0x14,0);st32(scratch+0x18,0);st32(scratch+0x24,scratch+0x30);st32(scratch+0x28,0x44100);st8(scratch+0x2C,0);st8(scratch+0x2D,14);void(*methods[])(Cpu*)={create,destroy,execute,is_delete,draw};for(unsigned i=0;i<5;++i)st32(scratch+0x30+i*4,dispatch::register_host(methods[i],"mod_actor_method"));heap_callback=dispatch::register_host(heap,"mod_actor_heap");look_callback=dispatch::register_host(pre_joint,"mod_actor_look_joint");post_callback=dispatch::register_host(post_joint,"mod_actor_look_post_joint");replace(GC(0x025E10E0),profile);replace(GC(0x025D4B4C),delete_wrapper);replace(GC(0x02604550),resource_table);replace(GC(0x02604EB4),archive_wrapper);replace(GC(0x02612E64),backing_archive_wrapper);replace(GC(0x025DD414),base_create_wrapper);installed=true;return true;}
+bool install(const std::function<std::string(uint32_t)>&owner,const std::function<void(uint32_t,void(*)(Cpu*))>&replace){if(installed)return true;if(declarations.empty()||!scratch||!invoke||!original||!native_actor_profiles::available(owner)||!owner(GC(0x02604550)).empty()||!owner(GC(0x02604EB4)).empty()||!owner(GC(0x02612E64)).empty())return false;std::memset(mem::ptr(scratch+256),0,kScratchBytes-256);uint32_t native=ld32(GD(0x101F3EE0)+0xB6*4);if(!native)return false;for(unsigned i=0;i<0x30;i+=4)st32(scratch+i,ld32(native+i));st16(scratch+8,kProfile);st32(scratch+0x10,Size);st32(scratch+0x14,0);st32(scratch+0x18,0);st32(scratch+0x24,scratch+0x30);st32(scratch+0x28,0x44100);st8(scratch+0x2C,0);st8(scratch+0x2D,14);void(*methods[])(Cpu*)={create,destroy,execute,is_delete,draw};for(unsigned i=0;i<5;++i)st32(scratch+0x30+i*4,dispatch::register_host(methods[i],"mod_actor_method"));heap_callback=dispatch::register_host(heap,"mod_actor_heap");look_callback=dispatch::register_host(pre_joint,"mod_actor_look_joint");post_callback=dispatch::register_host(post_joint,"mod_actor_look_post_joint");if(!native_actor_profiles::add(kProfile,scratch,base_allocated)||!native_actor_profiles::install(owner,replace))return false;replace(GC(0x02604550),resource_table);replace(GC(0x02604EB4),archive_wrapper);replace(GC(0x02612E64),backing_archive_wrapper);installed=true;return true;}
 void set_behavior_sink(BehaviorSink sink){behavior_sink=std::move(sink);}
 uint32_t declaration_token(const std::string&mod,const std::string&id){for(size_t i=0;i<declarations.size();++i)if(declarations[i].mod==mod&&declarations[i].spec.id==id)return uint32_t(i+1);return 0;}
 bool identify(Cpu*c,uint32_t actor,Identity&out){if(!valid_actor(actor))return false;const auto*d=declaration(actor);Identity candidate{d->mod,d->spec.id,ld32(actor+0xB0),ld32(actor+4)};if(resolve(c,candidate)!=actor)return false;out=std::move(candidate);return true;}
