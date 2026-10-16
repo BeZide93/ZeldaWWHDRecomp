@@ -590,6 +590,9 @@ void install_menu(NSWindow* tv) {
            @"Makes the normal sail behave like the Swift Sail: the wind always blows the way the boat is heading");
     toggle(gp, @"Quick doors", ^BOOL { return mods::quick_doors(); }, ^(BOOL on) { mods::set_quick_doors(on); },
            @"Door events (walk-in, opening, closing) run at 4x speed");
+    toggle(gp, @"Jump anywhere (L by default)", ^BOOL { return mods::jump_anywhere(); },
+           ^(BOOL on) { mods::manager::set_enabled("jump-anywhere", on); },
+           @"Choose the button, double jump and automatic ledge jumps in Settings > Mods > Gameplay");
     toggle(gp, @"Fast forward cutscenes and dialogue (hold ZR by default)", ^BOOL { return mods::fast_forward(); },
            ^(BOOL on) { mods::manager::set_enabled("fast-forward", on); }, @"Choose the speed, hold button and audio setting in Settings > Mods > Gameplay");
     toggle(gp, @"Fast scene changes", ^BOOL { return mods::fast_scenes(); }, ^(BOOL on) { mods::set_fast_scenes(on); },

@@ -390,12 +390,27 @@ void load_move_speed_options(const Value& options, bool startup = false) {
 }
 void save_traversal_options(Value& options) {
     for (const auto& option : manager::traversal_options()) options[option.profile_key] = double(option.value());
+    options["jump-anywhere.double"] = double_jump();
+    options["jump-anywhere.no-auto"] = no_auto_jump();
+    options["jump-anywhere.button"] = double(jump_button());
 }
 void load_traversal_options(const Value& options) {
     for (const auto& option : manager::traversal_options()) {
         if (std::getenv(option.startup_env)) continue;
         const auto& v = options.get(option.profile_key);
         option.apply(v.type == Value::Number && v.number >= 1.0 && v.number <= 3.0 ? float(v.number) : traversal::kDefaultFactor);
+    }
+    auto flag = [&](const char* key, const char* env, void (*apply)(bool)) {
+        if (std::getenv(env)) return;
+        const auto& v = options.get(key);
+        apply(v.type == Value::Bool ? v.boolean : v.type == Value::Number && v.number != 0);
+    };
+    flag("jump-anywhere.double", "WWHD_MOD_JUMP_DOUBLE", set_double_jump);
+    flag("jump-anywhere.no-auto", "WWHD_MOD_JUMP_NO_AUTO", set_no_auto_jump);
+    if (!std::getenv("WWHD_MOD_JUMP_BUTTON")) {
+        const auto& b = options.get("jump-anywhere.button");
+        set_jump_button(b.type == Value::Number && b.number >= 0 && b.number <= UINT32_MAX && std::floor(b.number) == b.number &&
+                                valid_jump_button(uint32_t(b.number)) ? uint32_t(b.number) : 0x20);
     }
 }
 void defaults(){database=Value{};database["format_version"]=1;database["active"]="Default";auto& p=profile();save_fast_forward_options(p["builtin_options"]);save_move_speed_options(p["builtin_options"]);save_traversal_options(p["builtin_options"]);save_lock_on_options(p["builtin_options"]);p["enabled"].type=Value::Object;for(const auto& e:manager::entries())p["builtins"][e.id]=e.enabled();p["builtin_options"]["direct-camera.speed"]=double(camera_speed());p["builtin_options"]["mouse-camera.sensitivity"]=double(mouse_sensitivity());}

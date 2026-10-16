@@ -81,6 +81,22 @@ void set_sail_speed_normal_factor(float factor);
 float sail_speed_swift_factor();          // the HD Swift Sail
 void set_sail_speed_swift_factor(float factor);
 bool auto_wind();                         // the wind follows the boat with the normal sail too
+// ---- jump anywhere (jump.cpp; settings in traversal_settings.cpp) ----
+bool jump_anywhere();                     // the jump button jumps from standing or running
+void set_jump_anywhere(bool on);
+bool double_jump();                       // once more in the air
+void set_double_jump(bool on);
+bool no_auto_jump();                      // the game's own jump off ledges becomes a plain fall
+void set_no_auto_jump(bool on);
+uint32_t jump_button();                   // one of L3, R3, L, R, ZL, ZR (default L)
+void set_jump_button(uint32_t button);
+inline bool valid_jump_button(uint32_t b) {
+    constexpr uint32_t allowed = 0x40000 | 0x20000 | 0x20 | 0x10 | 0x80 | 0x40;
+    return b && !(b & (b - 1)) && (b & allowed);
+}
+void jump_input(uint32_t buttons);                  // the active controller's buttons (VPAD/KPAD read)
+void jump_step(Cpu* c, uint32_t link, bool before); // around daPy_lk_c::execute (climb.cpp)
+void jump_reset();                                  // game thread after a state load
 bool story_system();                      // letters, quests, the story notebook, mod charts (mods/required.h)
 void set_story_system(bool on);
 void set_auto_wind(bool on);

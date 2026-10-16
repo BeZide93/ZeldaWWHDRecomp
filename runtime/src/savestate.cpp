@@ -1034,6 +1034,7 @@ bool apply_portable(Cpu* c, const pstate::State& s, std::string& why, bool& retr
     st8(kNextStage + 11, (uint8_t)s.layer);
     st8(kNextStage + 13, 0);  // wipe: fade
     mods::moon_jump_reset();
+    mods::jump_reset();
     st8(kNextStage + 12, 1);  // enabled
     return true;
 }

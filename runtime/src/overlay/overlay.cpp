@@ -1364,6 +1364,23 @@ void builtin_options(const std::string& id) {
         for (const char* env : {"WWHD_MOD_LOCK_ON_RANGE", "WWHD_MOD_LOCK_ON_CYCLING"})
             if (const char* override = std::getenv(env))
                 note("%s=%s overrides the saved option at startup.", env, override);
+    } else if (id == "jump-anywhere") {
+        const char* names[] = {"L", "R", "ZL", "ZR", "L3", "R3"};
+        const uint32_t buttons[] = {input::kL, input::kR, input::kZL, input::kZR, input::kStickL, input::kStickR};
+        for (int i = 0; i < 6; ++i) {
+            if (i) ImGui::SameLine();
+            if (radio(names[i], mods::jump_button() == buttons[i])) {
+                auto button = buttons[i];
+                hostui::post([button] { mods::set_jump_button(button); hostui::set("mod.jump-anywhere.button", std::to_string(button)); mods::packages::remember_option("jump-anywhere.button", button); });
+            }
+        }
+        bool dj = mods::double_jump();
+        if (ImGui::Checkbox("Double jump (once more in the air)", &dj))
+            hostui::post([dj] { mods::set_double_jump(dj); hostui::set("mod.jump-anywhere.double", dj ? "1" : "0"); mods::packages::remember_option("jump-anywhere.double", dj); });
+        bool no_auto = mods::no_auto_jump();
+        if (ImGui::Checkbox("No automatic jumps off ledges", &no_auto))
+            hostui::post([no_auto] { mods::set_no_auto_jump(no_auto); hostui::set("mod.jump-anywhere.no-auto", no_auto ? "1" : "0"); mods::packages::remember_option("jump-anywhere.no-auto", no_auto); });
+        help("The button also keeps its normal use. Link drops off ledges instead of jumping when automatic ledge jumps are off; press the button just after leaving the edge to jump. The moon jump cheat takes L while it is on.");
     } else if (id == "fast-forward") {
         for (unsigned rate : {2u, 3u, 4u}) {
             if (rate != 2) ImGui::SameLine();

@@ -45,6 +45,10 @@ const Entry catalogue[] = {
     {"auto-wind", "Automatic wind", "Gameplay",
      "Makes the normal sail behave like the Swift Sail: the wind always blows the way the boat is heading.",
      "WWHD_MOD_AUTO_WIND", auto_wind, set_auto_wind},
+    {"jump-anywhere", "Jump anywhere", "Gameplay",
+     "Jump from standing or running with a button (default L), optionally once more in the air. "
+     "Can also turn off the automatic jumps off ledges.",
+     "WWHD_MOD_JUMP", jump_anywhere, set_jump_anywhere},
     {"fast-forward", "Fast forward cutscenes and dialogue", "Gameplay",
      "Hold the selected button during events to play faster. Choices still wait for input.",
      "WWHD_MOD_FAST_FORWARD", fast_forward, set_fast_forward},
@@ -156,6 +160,18 @@ void load_saved() {
         if (end != button.c_str() && *end == '\0' && value <= UINT32_MAX) set_move_speed_button(uint32_t(value));
     }
     number("mod.mouse-camera.sensitivity", "WWHD_MOD_MOUSE_SENS", .08f, .3f, set_mouse_sensitivity);
+    auto flag = [](const char* key, const char* env, void (*apply)(bool)) {
+        std::string v;
+        if (!std::getenv(env) && hostui::get(key, v) && (v == "0" || v == "1")) apply(v == "1");
+    };
+    flag("mod.jump-anywhere.double", "WWHD_MOD_JUMP_DOUBLE", set_double_jump);
+    flag("mod.jump-anywhere.no-auto", "WWHD_MOD_JUMP_NO_AUTO", set_no_auto_jump);
+    std::string jump;
+    if (!std::getenv("WWHD_MOD_JUMP_BUTTON") && hostui::get("mod.jump-anywhere.button", jump)) {
+        char* end = nullptr;
+        auto value = std::strtoul(jump.c_str(), &end, 10);
+        if (end != jump.c_str() && *end == '\0' && value <= UINT32_MAX) set_jump_button(uint32_t(value));
+    }
 }
 bool set_enabled(std::string_view id, bool on) {
     const auto* entry = find(id);

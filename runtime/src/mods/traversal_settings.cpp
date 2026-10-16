@@ -7,6 +7,9 @@
 //   WWHD_MOD_SAIL_SPEED=1      sailing speed    (WWHD_MOD_SAIL_FACTOR=1.5 normal sail,
 //                                                WWHD_MOD_SWIFT_SAIL_FACTOR=1.5 Swift Sail)
 //   WWHD_MOD_AUTO_WIND=1       the wind follows the boat with the normal sail
+//   WWHD_MOD_JUMP=1            jump anywhere    (WWHD_MOD_JUMP_DOUBLE=1 double jump,
+//                                                WWHD_MOD_JUMP_NO_AUTO=1 no automatic ledge jumps,
+//                                                WWHD_MOD_JUMP_BUTTON=0x20 the button, default L)
 #include "mods.h"
 #include "traversal.h"
 
@@ -31,6 +34,14 @@ std::atomic<bool> g_sail{env_on("WWHD_MOD_SAIL_SPEED")};
 std::atomic<float> g_sail_normal{env_factor("WWHD_MOD_SAIL_FACTOR")};
 std::atomic<float> g_sail_swift{env_factor("WWHD_MOD_SWIFT_SAIL_FACTOR")};
 std::atomic<bool> g_auto_wind{env_on("WWHD_MOD_AUTO_WIND")};
+std::atomic<bool> g_jump{env_on("WWHD_MOD_JUMP")};
+std::atomic<bool> g_jump_double{env_on("WWHD_MOD_JUMP_DOUBLE")};
+std::atomic<bool> g_jump_no_auto{env_on("WWHD_MOD_JUMP_NO_AUTO")};
+std::atomic<uint32_t> g_jump_button{[] {
+    const char* e = getenv("WWHD_MOD_JUMP_BUTTON");
+    const uint32_t b = e ? (uint32_t)strtoul(e, nullptr, 0) : 0x20;
+    return valid_jump_button(b) ? b : 0x20u;
+}()};
 // the story system: on unless WWHD_STORY_SYSTEM=0 (or the player turns it off)
 std::atomic<bool> g_story_system{[] { const char* e = std::getenv("WWHD_STORY_SYSTEM"); return !(e && *e == '0'); }()};
 constexpr auto kRelaxed = std::memory_order_relaxed;
@@ -54,6 +65,14 @@ bool auto_wind() { return g_auto_wind.load(kRelaxed); }
 bool story_system() { return g_story_system.load(kRelaxed); }
 void set_story_system(bool on) { g_story_system = on; }
 void set_auto_wind(bool on) { g_auto_wind = on; }
+bool jump_anywhere() { return g_jump.load(kRelaxed); }
+void set_jump_anywhere(bool on) { g_jump = on; }
+bool double_jump() { return g_jump_double.load(kRelaxed); }
+void set_double_jump(bool on) { g_jump_double = on; }
+bool no_auto_jump() { return g_jump_no_auto.load(kRelaxed); }
+void set_no_auto_jump(bool on) { g_jump_no_auto = on; }
+uint32_t jump_button() { return g_jump_button.load(kRelaxed); }
+void set_jump_button(uint32_t b) { if (valid_jump_button(b)) g_jump_button = b; }
 
 bool traversal_anim() { return ladder_speed() || sidle_speed(); }
 float traversal_anim_factor(uint32_t proc) {
