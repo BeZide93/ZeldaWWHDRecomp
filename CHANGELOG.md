@@ -10,6 +10,10 @@ what is on `devel` and not released yet (also in the
 - **Linux AppImage: code mods work again** (#230). Turning on a code mod such as the story quests failed with "Guest mod
   build tools are missing". Setups made with an earlier start of the AppImage are repaired automatically, without running
   setup again.
+
+- **Settings: Quit Game** (#231). A button at the bottom right of every Settings tab, with a confirmation (Cancel is
+  preselected), so you can quit with just a controller, e.g. on a Steam Deck in Gaming Mode or an Android handheld. On
+  Android the game also leaves the recent apps list.
 - **Graphics → Advanced, diagnostic options for broken 3D geometry** (e.g. PowerVR GPUs, #207): "Convert vertices on
   the CPU", "Full precision in shaders" and "No vertex reuse", each off by default and applied after a restart. They help
   us find the cause on GPUs we can't test ourselves; the first one is slow and only meant for testing.
