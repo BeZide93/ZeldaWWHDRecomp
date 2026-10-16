@@ -1390,6 +1390,10 @@ if(NOT ANDROID)
       "-DJAVAC=${Java_JAVAC_EXECUTABLE}" "-DJAVA=${Java_JAVA_EXECUTABLE}"
       "-DWORK=${CMAKE_BINARY_DIR}/https_java_test" "-DSOURCE=${CMAKE_SOURCE_DIR}"
       -P ${CMAKE_SOURCE_DIR}/runtime/tools/https_java_test.cmake)
+    add_test(NAME android_display_mode COMMAND ${CMAKE_COMMAND}
+      "-DJAVAC=${Java_JAVAC_EXECUTABLE}" "-DJAVA=${Java_JAVA_EXECUTABLE}"
+      "-DWORK=${CMAKE_BINARY_DIR}/display_mode_java_test" "-DSOURCE=${CMAKE_SOURCE_DIR}"
+      -P ${CMAKE_SOURCE_DIR}/runtime/tools/display_mode_java_test.cmake)
     add_test(NAME android_phone_rumble COMMAND ${CMAKE_COMMAND}
       "-DJAVAC=${Java_JAVAC_EXECUTABLE}" "-DJAVA=${Java_JAVA_EXECUTABLE}"
       "-DWORK=${CMAKE_BINARY_DIR}/phone_rumble_java_test" "-DSOURCE=${CMAKE_SOURCE_DIR}"

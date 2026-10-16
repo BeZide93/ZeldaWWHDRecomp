@@ -267,4 +267,33 @@ public class WwhdActivity extends SDLActivity {
         return d != null ? d.getRefreshRate() : 0;
     }
 
+    /**
+     * With more than 60 fps chosen, also prefer a display mode of the current resolution with at
+     * least that rate (some vendor policies ignore the surface request alone); 60 or less clears it
+     * so the system chooses again. Native display_rate.cpp calls it only when the chosen rate
+     * changes, never per surface, so a window attribute change cannot feed back into a new request.
+     */
+    public static void preferDisplayMode(final int hz) {
+        final SDLActivity a = mSingleton;
+        if (a == null) return;
+        a.runOnUiThread(() -> {
+            android.view.Window w = a.getWindow();
+            Display d = a.getDisplay();
+            if (w == null || d == null) return;
+            Display.Mode current = d.getMode();
+            Display.Mode[] supported = d.getSupportedModes();
+            int[][] modes = new int[supported.length][];
+            for (int i = 0; i < supported.length; i++) {
+                Display.Mode m = supported[i];
+                modes[i] = new int[] {m.getModeId(), m.getPhysicalWidth(), m.getPhysicalHeight(), Math.round(m.getRefreshRate())};
+            }
+            int id = DisplayModeChoice.pick(modes, current.getPhysicalWidth(), current.getPhysicalHeight(), hz);
+            WindowManager.LayoutParams lp = w.getAttributes();
+            if (lp.preferredDisplayModeId == id) return;
+            lp.preferredDisplayModeId = id;
+            w.setAttributes(lp);
+            Log.i("wwhd", id != 0 ? "preferred display mode " + id + " for " + hz + " fps" : "preferred display mode cleared");
+        });
+    }
+
 }

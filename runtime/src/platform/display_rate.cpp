@@ -48,6 +48,15 @@ float call_float(const char* name) {
     env->DeleteLocalRef(cls);
     return v;
 }
+void call_void_int(const char* name, int value) {
+    JNIEnv* env = (JNIEnv*)SDL_GetAndroidJNIEnv();
+    if (!env) return;
+    jclass cls = activity_class(env);
+    if (!cls) return;
+    if (jmethodID m = env->GetStaticMethodID(cls, name, "(I)V")) env->CallStaticVoidMethod(cls, m, (jint)value);
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    env->DeleteLocalRef(cls);
+}
 std::atomic<unsigned> surfaceRevision{0};
 void request(SDL_Window* tv, int actualHz) {
     static const bool disabled = [] {
@@ -67,6 +76,13 @@ void request(SDL_Window* tv, int actualHz) {
     const int result = ANativeWindow_setFrameRateWithChangeStrategy(window, static_cast<float>(hz),
         ANATIVEWINDOW_FRAME_RATE_COMPATIBILITY_FIXED_SOURCE, ANATIVEWINDOW_CHANGE_FRAME_RATE_ALWAYS);
     if (!again) resend.sent(now, hz);
+    // the activity's preferred display mode follows the chosen rate (not each surface): above 60 Hz
+    // a mode of the current resolution with at least that rate, else the system's choice
+    static int preferredHz = -1;
+    if (window && hz != preferredHz) {
+        preferredHz = hz;
+        call_void_int("preferDisplayMode", hz);
+    }
     if (result == 0)
         LOG("[display] requested %d Hz for Android surface%s%s", hz, disabled ? " (system choice)" : "",
             again ? " again (the display stayed at a lower rate)" : "");
