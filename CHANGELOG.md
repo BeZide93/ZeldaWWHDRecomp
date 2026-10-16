@@ -7,6 +7,8 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **True 60: no more crash at Orca's sword training** (#223). Talking to Orca and choosing "yes" stopped the game in True 60
+  mode; event commands now only run on full game steps.
 - **Linux AppImage: code mods work again** (#230). Turning on a code mod such as the story quests failed with "Guest mod
   build tools are missing". Setups made with an earlier start of the AppImage are repaired automatically, without running
   setup again.
