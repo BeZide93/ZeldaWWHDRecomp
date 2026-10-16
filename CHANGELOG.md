@@ -13,6 +13,10 @@ what is on `devel` and not released yet (also in the
   bound; Home is listed under Settings. **Esc** now opens Settings (with a captured mouse the first Esc frees it), F1
   keeps working for now, and on macOS Cmd+, still opens Settings from the app menu.
 
+- **Steam Deck Gaming Mode: sharp picture by default** (#214). In Gaming Mode the game now starts in full screen with the
+  GamePad picture as picture-in-picture, because Gaming Mode shows one window at a time and a separate GamePad window
+  made the picture blurry. Also with the Windows build through Proton. Your own saved choices and launch options still
+  win; the old launch-option workaround is no longer needed.
 - **True 60: no more crash at Orca's sword training** (#223). Talking to Orca and choosing "yes" stopped the game in True 60
   mode; event commands now only run on full game steps.
 
