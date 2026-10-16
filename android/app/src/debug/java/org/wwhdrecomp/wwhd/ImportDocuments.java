@@ -15,7 +15,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 /** Authored streaming documents, compiled only into debug APKs. */
 public final class ImportDocuments extends DocumentsProvider {
-    public static final String AUTHORITY = "org.wwhdrecomp.wwhd.import-fixture";
+    /** Per install (the manifest's ${applicationId}.import-fixture), so debug builds with another
+     *  applicationId suffix can be installed side by side. */
+    public static String authority(android.content.Context context) { return context.getPackageName() + ".import-fixture"; }
     public static final ConcurrentHashMap<String, AtomicInteger> OPENS = new ConcurrentHashMap<>();
     private static final String[] DOC = {Document.COLUMN_DOCUMENT_ID, Document.COLUMN_DISPLAY_NAME,
         Document.COLUMN_MIME_TYPE, Document.COLUMN_SIZE, Document.COLUMN_LAST_MODIFIED};

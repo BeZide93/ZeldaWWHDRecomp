@@ -26,8 +26,8 @@ public final class SetupImportSmokeActivity extends Activity {
         SetupStore.write(new File(job, "source.json"), new JSONObject().put("schema", 1).put("kind", kind).put("uri", uri.toString()));
         return job;
     }
-    private Uri tree(String id) { return DocumentsContract.buildTreeDocumentUri(ImportDocuments.AUTHORITY, id); }
-    private Uri document(String id) { return DocumentsContract.buildDocumentUri(ImportDocuments.AUTHORITY, id); }
+    private Uri tree(String id) { return DocumentsContract.buildTreeDocumentUri(ImportDocuments.authority(this), id); }
+    private Uri document(String id) { return DocumentsContract.buildDocumentUri(ImportDocuments.authority(this), id); }
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         TextView view = new TextView(this);
