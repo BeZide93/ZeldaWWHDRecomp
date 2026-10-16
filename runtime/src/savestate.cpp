@@ -72,6 +72,7 @@
 #include "mods/story_chart.h"
 #include "quit_prompt.h"
 #include "rumble.h"
+#include "save_convenience.h"
 
 // module sections
 bool threads_ss_save(ss::Writer& w, std::string& why);
@@ -244,10 +245,20 @@ std::string state_dir() {
     return dir;
 }
 bool is_auto(int slot) { return slot > crashrec::kAutoBase && slot <= crashrec::kAutoBase + crashrec::kAutoSlots; }
+namespace conv = convenience;
 std::string slot_label(int slot) {
+    if (slot == conv::kLastSessionSlot) return "Last session";
+    if (conv::is_auto_save(slot)) return "Auto save " + std::to_string(slot - conv::kAutoSaveBase);
     return is_auto(slot) ? "Automatic state " + std::to_string(slot - crashrec::kAutoBase) : "Slot " + std::to_string(slot);
 }
 std::string slot_path(int slot, const char* ext = "bin") {
+    // the convenience slots (save_convenience.h) hold portable states only
+    if (slot == conv::kLastSessionSlot) return state_dir() + "/last_session." + ext;
+    if (conv::is_auto_save(slot)) {
+        std::error_code ec;
+        std::filesystem::create_directories(state_dir() + "/autosave", ec);
+        return state_dir() + "/autosave/autosave" + std::to_string(slot - conv::kAutoSaveBase) + "." + ext;
+    }
     if (is_auto(slot)) return state_dir() + "/auto/auto" + std::to_string(slot - crashrec::kAutoBase) + "." + ext;  // crashrec.cpp
     return state_dir() + "/slot" + std::to_string(slot) + "." + ext;
 }
@@ -1039,7 +1050,7 @@ bool apply_portable(Cpu* c, const pstate::State& s, std::string& why, bool& retr
     return true;
 }
 
-std::string portable_label(int slot) { return slot > 0 ? "Slot " + std::to_string(slot) : std::string("Portable state"); }
+std::string portable_label(int slot) { return slot > 0 ? slot_label(slot) : std::string("Portable state"); }
 
 bool read_text(const std::string& path, std::string& out, std::string& why) {
     FILE* f = fopen(path.c_str(), "rb");
@@ -1085,7 +1096,19 @@ std::string g_last_portable;      // newest portable state written or loaded (un
 // after a portable load: the old Link's process id (a new Link has a new one), the state for the HD sections
 struct Arrival { std::string stage; float pos[3]; uint64_t frame = 0; uint32_t link_id = 0; int frames = 0; std::shared_ptr<pstate::State> s; } g_arrival;
 
+std::atomic<int> g_conv_result{0};  // a convenience slot's save finished: +slot written, -slot not
+
 void do_portable_save(Cpu* c, int slot) {
+    // the convenience slots (last session, auto saves) save quietly: a log line, no message
+    const bool quiet = conv::is_convenience(slot);
+    auto fail = [&](const std::string& shown, const std::string& why) {
+        if (quiet) {
+            LOG("[savestate] %s: not saved (%s)", slot_label(slot).c_str(), why.c_str());
+            g_conv_result = -slot;
+        } else {
+            message("%s", shown.c_str());
+        }
+    };
     mods::lock_on_reset();
     pstate::State s;
     std::string why;
@@ -1093,18 +1116,18 @@ void do_portable_save(Cpu* c, int slot) {
     // only while the player controls Link (decision: no portable states mid-cutscene/dialogue; full states stay allowed)
     if (gameplay_ready(why, retry) && !player_has_control(c, why)) {
         LOG("[savestate] slot %d: portable state refused: %s", slot, why.c_str());
-        message("Slot %d: can't save during a cutscene or dialogue - try again when you have control of Link", slot);
+        fail("Slot " + std::to_string(slot) + ": can't save during a cutscene or dialogue - try again when you have control of Link", why);
         report_done(slot, false, "Can't save during a cutscene or dialogue (" + why + "): try again when you have control of Link.");
         return;
     }
     if (!capture_portable(c, s, why)) {
-        message("Slot %d: not saved (%s)", slot, why.c_str());
+        fail("Slot " + std::to_string(slot) + ": not saved (" + why + ")", why);
         report_done(slot, false, why);
         return;
     }
     std::string path = slot_path(slot, pstate::kExtension);
     if (!write_portable(path, s, why)) {
-        message("Slot %d: not saved (%s)", slot, why.c_str());
+        fail("Slot " + std::to_string(slot) + ": not saved (" + why + ")", why);
         report_done(slot, false, why);
         return;
     }
@@ -1115,6 +1138,11 @@ void do_portable_save(Cpu* c, int slot) {
         s.on_ship ? ", on the boat" : s.has_ship ? ", boat nearby" : "");
     if (s.has_ship)
         LOG("[savestate] slot %d: boat at %.1f %.1f %.1f, angle %d", slot, s.ship_pos[0], s.ship_pos[1], s.ship_pos[2], s.ship_angle_y);
+    if (quiet) {
+        LOG("[savestate] %s written (%s)", slot_label(slot).c_str(), path.c_str());
+        g_conv_result = slot;
+        return;
+    }
     // decision: an older full state in the same slot is kept (never deleted), but the player is told
     struct stat full{};
     std::string older;
@@ -1164,7 +1192,8 @@ void service_portable_load(Cpu* c) {
             message("This state is from Quest Log %d; it is loaded into Quest Log %d (saving in game will write it there).",
                     p.s->file_slot + 1, current_log + 1);
         } else {
-            message("Loaded %s (%s; progress and position)", p.slot ? ("slot " + std::to_string(p.slot)).c_str() : "portable state",
+            message("Loaded %s (%s; progress and position)",
+                    p.slot ? (conv::is_convenience(p.slot) ? slot_label(p.slot) : "slot " + std::to_string(p.slot)).c_str() : "portable state",
                     area_label(p.s->stage.c_str()).c_str());
         }
         append_mod_warning(guestmods::different_mods(p.s->guest_mods,guestmods::enabled_mods()));
@@ -1339,6 +1368,7 @@ SlotInfo portable_slot_info(int slot) {
 
 SlotInfo slot_info(int slot) {
     if (is_auto(slot)) return full_slot_info(slot);
+    if (conv::is_convenience(slot)) return portable_slot_info(slot);
     SlotInfo info = newer_is_portable(slot) ? portable_slot_info(slot) : full_slot_info(slot);
     // the slot's other, older file (kept; shown so it is not forgotten)
     struct stat st{};
@@ -1392,11 +1422,17 @@ void request_load_portable_file(const std::string& path) {
     int slot = 0;
     for (int i = 1; i <= kSlots; i++)
         if (path == slot_path(i, pstate::kExtension)) slot = i;
+    for (int i = conv::kLastSessionSlot; i <= conv::kAutoSaveBase + conv::kAutoSaves; i++)
+        if (path == slot_path(i, pstate::kExtension)) slot = i;
     std::lock_guard<std::mutex> lk(g_mu);
     g_pload = PendingPortable{s, slot, path};
 }
 
 void request_load(int slot) {
+    if (conv::is_convenience(slot)) {
+        request_load_portable_file(slot_path(slot, pstate::kExtension));
+        return;
+    }
     if ((slot < 1 || slot > kSlots) && !is_auto(slot)) return;
     if (!is_auto(slot) && newer_is_portable(slot)) {
         request_load_portable_file(slot_path(slot, pstate::kExtension));
@@ -1524,6 +1560,110 @@ uint64_t last_load_step() { return g_last_load_step.load(); }
 
 std::string states_dir() { return state_dir(); }
 
+// ---- conveniences (save_convenience.h) ----
+namespace {
+std::mutex g_conv_mu;
+bool g_conv_read = false;
+conv::Options g_conv;
+std::string conv_cfg_path() { return state_dir() + "/save_options.cfg"; }
+conv::Options conv_options() {
+    std::lock_guard<std::mutex> lk(g_conv_mu);
+    if (!g_conv_read) {
+        g_conv_read = true;
+        std::string text, why;
+        if (read_text(conv_cfg_path(), text, why)) g_conv = conv::parse_options(text);
+    }
+    return g_conv;
+}
+void store_conv(const conv::Options& o) {
+    {
+        std::lock_guard<std::mutex> lk(g_conv_mu);
+        g_conv = o;
+        g_conv_read = true;
+    }
+    const std::string text = conv::format_options(o), tmp = conv_cfg_path() + ".tmp";
+    if (FILE* f = fopen(tmp.c_str(), "wb")) {
+        const bool ok = fwrite(text.data(), 1, text.size(), f) == text.size();
+        if (fclose(f) == 0 && ok) host::replace_file(tmp, conv_cfg_path());
+        else remove(tmp.c_str());
+    }
+}
+double conv_now() { return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
+conv::AutoSaveTimer g_auto_timer;  // game thread
+int g_auto_slot = 0;               // the auto save being written (game thread)
+
+// At start, once the title screen or the file select is up (the game finished booting). Scripted
+// runs (WWHD_NO_HOST_INPUT) ignore the setting; WWHD_AT_START=intro|last|slotN sets it for one start.
+void service_at_start() {
+    static bool done = false;
+    if (done) return;
+    const std::string st = stage_name();
+    if (st != "sea_T" && st != "Name" && !quitprompt::gameplay_stage(st)) return;
+    done = true;
+    conv::StartChoice choice;
+    if (const char* e = getenv("WWHD_AT_START")) choice = conv::parse_start(e);
+    else if (!getenv("WWHD_NO_HOST_INPUT")) choice = conv_options().start;
+    if (choice.what == conv::Start::kIntro) return;
+    const int slot = choice.what == conv::Start::kLastSession ? conv::kLastSessionSlot : choice.slot;
+    if (!slot_info(slot).used) {
+        LOG("[savestate] at start: %s is empty; the game starts as usual", slot_label(slot).c_str());
+        return;
+    }
+    LOG("[savestate] at start: loading %s once a Quest Log is being played", slot_label(slot).c_str());
+    request_load(slot);
+}
+
+// Auto save: the timer, and the result of the save it asked for
+void service_auto_save() {
+    // do_portable_save runs right after this in the same service call, so by the next call the result
+    // is there; without it another request replaced ours (tried again a little later)
+    if (g_auto_slot) {
+        const int result = g_conv_result.load();
+        const bool ours = result == g_auto_slot || result == -g_auto_slot;
+        if (ours) g_conv_result = 0;
+        g_auto_timer.done(conv_now(), ours && result > 0);
+        g_auto_slot = 0;
+    }
+    const bool gameplay = in_gameplay() && !g_loading.load() && !g_save_req.load() && !g_psave_req.load();
+    if (g_auto_timer.due(conv_now(), conv_options().autosave_minutes, gameplay)) {
+        g_auto_slot = conv::kAutoSaveBase + g_auto_timer.next;
+        g_conv_result = 0;
+        g_psave_req = g_auto_slot;
+    }
+}
+}  // namespace
+
+std::string at_start() { return conv::format_start(conv_options().start); }
+void set_at_start(const std::string& choice) {
+    conv::Options o = conv_options();
+    o.start = conv::parse_start(choice);
+    store_conv(o);
+    LOG("[savestate] at start: %s", conv::format_start(o.start).c_str());
+}
+int auto_save_minutes() { return conv_options().autosave_minutes; }
+void set_auto_save_minutes(int minutes) {
+    conv::Options o = conv_options();
+    o.autosave_minutes = conv::valid_auto_save_minutes(minutes) ? minutes : 0;
+    store_conv(o);
+    LOG("[savestate] auto save: %s", o.autosave_minutes ? (std::to_string(o.autosave_minutes) + " min").c_str() : "off");
+}
+
+bool save_last_session(int timeout_ms) {
+    if (!conv::last_session_enabled(getenv("WWHD_LAST_SESSION"), getenv("WWHD_NO_HOST_INPUT") != nullptr)) return false;
+    if (!in_gameplay() || g_loading.load()) return false;
+    g_conv_result = 0;
+    g_psave_req = conv::kLastSessionSlot;
+    const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+    while (std::chrono::steady_clock::now() < until) {
+        const int r = g_conv_result.load();
+        if (r == conv::kLastSessionSlot) return true;
+        if (r == -conv::kLastSessionSlot) return false;
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    LOG("[savestate] last session: the game did not save within %d ms", timeout_ms);
+    return false;
+}
+
 void service(Cpu* c) {
     crashrec::service();
     // test aids (TV frames): WWHD_STATE_SAVE_AT / WWHD_STATE_LOAD_AT for full states,
@@ -1550,6 +1690,8 @@ void service(Cpu* c) {
     }();
     (void)env_load;
     track_events();
+    service_at_start();
+    service_auto_save();
     if (int slot = g_psave_req.exchange(0)) do_portable_save(c, slot);
     service_portable_load(c);
     watch_arrival(c);

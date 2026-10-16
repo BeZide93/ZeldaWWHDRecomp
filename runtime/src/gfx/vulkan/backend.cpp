@@ -1486,6 +1486,9 @@ static bool SDLCALL lifecycle_watch(void *, SDL_Event *event) {
   if (event->type == SDL_EVENT_WILL_ENTER_BACKGROUND) {
     try { gx2::request_background_vulkan_cache_checkpoint(); }
     catch (const std::exception& error) { LOG("[vulkan cache] background request skipped: %s", error.what()); }
+    // the "Last session" state while the game still runs and presents (Android may end a background
+    // app without notice); this thread is the app's UI thread, so the wait is kept short
+    ss::save_last_session(1000);
   }
   if (event->type == SDL_EVENT_WILL_ENTER_BACKGROUND || event->type == SDL_EVENT_DID_ENTER_BACKGROUND) {
     if (!surfaceLost.exchange(true))
@@ -4212,6 +4215,7 @@ static void test_fullscreen_key() {
 // with the GamePad window open the close button of the TV window did nothing. Closing the GamePad
 // window only hides it (WWHD_NO_GAMEPAD=1 starts without it).
 static void quit_game() {
+  ss::save_last_session(1500);  // the "Last session" state (a few KB; skipped outside gameplay)
   audio::finish_dump();  // _Exit bypasses atexit handlers
   screenshot::finish();  // the screenshots taken are written first
   gx2::shutdown_vulkan_caches();

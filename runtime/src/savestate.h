@@ -79,7 +79,8 @@ struct SlotInfo {
     bool older_other = false;  // the slot also has an older file of the other kind (kept, never deleted)
     uint64_t older_bytes = 0;
 };
-SlotInfo slot_info(int slot);           // 1..5 (101..103: crash recovery's automatic states, crashrec.h)
+SlotInfo slot_info(int slot);           // 1..5 (101..103: crash recovery's automatic states, crashrec.h;
+                                        //  110: last session, 111..113: auto saves, save_convenience.h)
 void request_save(int slot);            // the kind full_states() selects (automatic states: always full)
 // request_save, and `done` once the slot file is written (ok) or the save gave up (message in `why`;
 // a portable state is refused while Link is not under the player's control); it runs on a background
@@ -100,6 +101,22 @@ std::string states_dir();               // where slots live (created on first us
 std::string last_message();             // short status for the title bar ("" when stale)
 // a short notice shown the same way (overlay toast, title bar) for a few seconds: screenshots
 void notice(const std::string& text);
+
+// ---- conveniences (save_convenience.h): portable states in their own slots ----
+// "Last session" (slot 110): written when the game is quit, on Android also when the app goes to the
+// background. Blocks the calling host thread (never the game thread) until the state is written or
+// `timeout_ms` passed; nothing happens outside gameplay or while the game cannot save (cutscene), and
+// the previous last session then stays. True once written.
+bool save_last_session(int timeout_ms);
+// At start: "intro" (default), "last" (the last session) or "slot1".."slot5". The state is loaded as
+// soon as a Quest Log is being played (a portable state needs one; the player picks it on the title
+// screen). Kept in the states folder.
+std::string at_start();
+void set_at_start(const std::string& choice);
+// Auto save every 2, 5 or 10 minutes (0: off, the default) into Auto save 1..3 (slots 111..113),
+// oldest first; quiet, and retried a little later when the game cannot save at that moment.
+int auto_save_minutes();
+void set_auto_save_minutes(int minutes);
 
 // ---- game thread: call at the frame boundary (top of the per-frame function) ----
 void service(Cpu* c);

@@ -81,6 +81,7 @@ namespace gfxvk { bool buffer_cache_enabled(); }  // gfx/vulkan/buffer_cache.h
 #include "../interp.h"
 #include "../runtime.h"
 #include "../savestate.h"
+#include "../save_convenience.h"
 #include "../screenshot.h"
 #ifndef __ANDROID__
 #include "template_export.h"
@@ -204,6 +205,7 @@ struct Ui {
     // save state slots, refreshed twice a second while the Saves tab is shown
     ss::SlotInfo slots[ss::kSlots + 1];
     crashrec::AutoInfo autos[crashrec::kAutoSlots + 1];
+    ss::SlotInfo last_session, auto_saves[ss::convenience::kAutoSaves + 1];
     double slots_time = -1;
     // performance
     double fps_t0 = 0, fps = 0;
@@ -517,10 +519,13 @@ void refresh_slots(bool force) {
     U.slots_time = t;
     for (int i = 1; i <= ss::kSlots; i++) U.slots[i] = ss::slot_info(i);
     for (int i = 1; i <= crashrec::kAutoSlots; i++) U.autos[i] = crashrec::auto_info(i);
+    U.last_session = ss::slot_info(ss::convenience::kLastSessionSlot);
+    for (int i = 1; i <= ss::convenience::kAutoSaves; i++) U.auto_saves[i] = ss::slot_info(ss::convenience::kAutoSaveBase + i);
 }
 
 void tab_saves_screenshots();
 void tab_saves_crash_recovery();
+void tab_saves_convenience();
 void tab_saves() {
     refresh_slots(false);
     std::string msg = ss::last_message();
@@ -578,6 +583,7 @@ void tab_saves() {
         }
         ImGui::EndTable();
     }
+    tab_saves_convenience();
     // bug reports: the portable state and the save file, never a full state
     const ext::Features& features = ext::features();
     if (features.clipboard) {
@@ -650,6 +656,52 @@ void tab_saves_screenshots() {
     }
     ImGui::AlignTextToFramePadding();
     ImGui::TextDisabled("%s", screenshot::dir().c_str());
+}
+
+// Last session, Auto save and At start (save_convenience.h): portable states in their own slots
+void tab_saves_convenience() {
+    namespace conv = ss::convenience;
+    heading("Last session and auto saves");
+    auto row = [](int id, const char* name, const ss::SlotInfo& s) {
+        ImGui::PushID(id);
+        ImGui::BeginDisabled(!s.used || !s.compatible);
+        if (ImGui::Button("Load")) {
+            ss::request_load(id);
+            set_open(false, OpenReason::LoadSlot);
+        }
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        ImGui::AlignTextToFramePadding();
+        if (s.used && s.compatible) ImGui::Text("%s:  %s%s%s", name, s.when.c_str(), s.area.empty() ? "" : "  -  ", s.area.c_str());
+        else ImGui::TextDisabled("%s:  %s", name, s.used ? "incompatible" : "empty");
+        ImGui::PopID();
+    };
+    row(conv::kLastSessionSlot, "Last session", U.last_session);
+    help("Taken when you quit the game (on Android also when the app goes to the background), unless a cutscene or "
+         "dialogue is running then. A small portable state: your progress and where Link stands.");
+    for (int i = 1; i <= conv::kAutoSaves; i++) {
+        char name[32];
+        snprintf(name, sizeof name, "Auto save %d", i);
+        row(conv::kAutoSaveBase + i, name, U.auto_saves[i]);
+    }
+    const int minutes = ss::auto_save_minutes();
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted("Auto save every");
+    for (int m : conv::kAutoSaveMinutes) {
+        ImGui::SameLine();
+        char label[16];
+        if (m) snprintf(label, sizeof label, "%d min", m);
+        else snprintf(label, sizeof label, "Off");
+        if (radio(label, minutes == m)) ss::set_auto_save_minutes(m);
+    }
+    help("Saves a small portable state in the background into Auto save 1 to 3, the oldest first. If the game is in a "
+         "cutscene or dialogue, it tries again a little later. Separate from Crash Recovery.");
+    const conv::StartChoice start = conv::parse_start(ss::at_start());
+    int current = start.what == conv::Start::kLastSession ? 1 : start.what == conv::Start::kSlot ? 1 + start.slot : 0;
+    if (combo("At start", &current, "Intro as usual\0Continue last session\0Slot 1\0Slot 2\0Slot 3\0Slot 4\0Slot 5\0\0"))
+        ss::set_at_start(current == 0 ? "intro" : current == 1 ? "last" : "slot" + std::to_string(current - 1));
+    help("Loads that state when the game starts, as soon as you continue a Quest Log on the title screen. An empty "
+         "slot starts the game as usual.");
 }
 
 void tab_saves_crash_recovery() {
