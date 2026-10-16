@@ -389,7 +389,8 @@ void init() {
         const bool posted = e.timestamp == kTestKeyTimestamp;  // WWHD_TEST_POST_KEYS
         if (getenv("WWHD_NO_HOST_INPUT") && !posted) return e;
         {
-            // settings overlay (overlay/overlay.h): F1 opens and closes it; while open it has the keyboard
+            // settings overlay (overlay/overlay.h): the Settings key (Esc, F1) opens and closes it, Esc frees a
+            // captured mouse first (before mods::host_key_down below); while open it has the keyboard
             NSEventModifierFlags f = e.modifierFlags;
             int m = (f & NSEventModifierFlagShift ? overlay::kShift : 0) | (f & NSEventModifierFlagControl ? overlay::kCtrl : 0) |
                     (f & NSEventModifierFlagOption ? overlay::kAlt : 0) | (f & NSEventModifierFlagCommand ? overlay::kSuper : 0);

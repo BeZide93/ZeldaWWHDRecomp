@@ -452,10 +452,10 @@ void install_menu(NSWindow* tv) {
     NSMenuItem* appItem = [bar addItemWithTitle:@"" action:nil keyEquivalent:@""];
     NSMenu* app = [NSMenu new];
     // the settings overlay (overlay/overlay.h), at the place and with the shortcut macOS apps use;
-    // F1 also works (Fn+F1 unless the top row sends standard function keys)
+    // Esc and F1 work in the game window (Fn+F1 unless the top row sends standard function keys)
     NSMenuItem* settings = [app addItemWithTitle:@"Settings\u2026" action:@selector(openSettings:) keyEquivalent:@","];
     settings.target = g_target;
-    settings.toolTip = @"In-game settings overlay over the picture (F1, or \u2318, in the game window)";
+    settings.toolTip = @"In-game settings overlay over the picture (Esc or F1 in the game window)";
     [app addItem:[NSMenuItem separatorItem]];
     [app addItemWithTitle:@"Quit Wind Waker HD" action:@selector(terminate:) keyEquivalent:@"q"];
     appItem.submenu = app;

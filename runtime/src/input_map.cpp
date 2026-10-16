@@ -163,13 +163,11 @@ const char* reserved_key(int code) {
 }
 
 // All host action labels and defaults live here. F6 loads slot 1: no existing binding uses it.
+// Settings: Esc is the long-term key. F1 stays as the alternate during the transition; dropping it
+// later is this one line ({kVK_Escape}, {}). With a captured mouse the first Esc only frees the mouse
+// (overlay::key).
 static const ShortcutInfo kShortcuts[kShortcutCount] = {
-    {"Settings", "Settings", "General", {kVK_F1},
-#if defined(__APPLE__) && !defined(WWHD_SDL_HOST)
-     {kVK_ANSI_Comma, kModSuper}, kPadHome},
-#else
-     {}, kPadHome},
-#endif
+    {"Settings", "Settings", "General", {kVK_Escape}, {kVK_F1}, kPadHome},
     {"Fullscreen", "Full screen", "General",
 #if defined(__APPLE__) && !defined(WWHD_SDL_HOST)
      {kVK_ANSI_F, kModSuper}, {kVK_ANSI_F, kModCtrl | kModSuper}},
@@ -824,7 +822,7 @@ std::string to_json(const Mapping& m) {
              "    \"skip_controller_selection\": %s,\n    \"invert_camera_y\": %s%s",
              m.deadzone, m.left_range, m.right_range, m.skip_controller_selection ? "true" : "false", m.invert_camera_y ? "true" : "false",
              m.face_auto ? ",\n    \"face_layout\": \"auto\"" : "");
-    o += opt + prompts + "\n  },\n  \"shortcuts_version\": 2,\n  \"shortcuts\": {\n";
+    o += opt + prompts + "\n  },\n  \"shortcuts_version\": " + std::to_string(kShortcutsVersion) + ",\n  \"shortcuts\": {\n";
     for (int a = 0; a < kShortcutCount; ++a) {
         const auto& b = m.shortcuts[a];
         o += "    " + quote(shortcut_info(a).id) + ": {\"keys\": [";
@@ -920,6 +918,8 @@ bool from_json(const std::string& text, Mapping& out, std::string* error) {
     // Migration is one-way: an explicit shortcuts.Screenshot wins over the old Photo row.
     for (int i = 0; i < 2; ++i) m.shortcuts[kPhoto].keys[i] = {m.keys[kScreenshot][i], 0};
     // Legacy single-button controller screenshots retain their original path.
+    const Json* versionValue = root.get("shortcuts_version");
+    const double version = versionValue && versionValue->type == Json::Num ? versionValue->n : 0;
     if (const Json* sc = root.get("shortcuts"); sc && sc->type == Json::Obj) {
         for (int a = 0; a < kShortcutCount; ++a) {
             const Json* v = sc->get(shortcut_info(a).id);
@@ -942,9 +942,19 @@ bool from_json(const std::string& text, Mapping& out, std::string* error) {
             if (const Json* h = v->get("button"); h && h->type == Json::Str) b.button = std::max(0, pad_from_id(h->s));
             if (!b.button || b.hold == b.button) b.hold = b.button = kPadNone;
             // Old files could not edit the built-in Home shortcut. Make that implicit default visible.
-            const Json* version = root.get("shortcuts_version");
-            if (a == kSettings && !b.button && (!version || version->type != Json::Num || version->n < 2)) b.button = kPadHome;
+            if (a == kSettings && !b.button && version < 2) b.button = kPadHome;
         }
+    }
+    // Files from before Esc opened Settings keep custom keys; the untouched old default (F1, plus
+    // Cmd+, in the macOS app) becomes the current one, unless a game input already uses Esc.
+    if (version < 3) {
+        auto& keys = m.shortcuts[kSettings].keys;
+        bool escUsed = false;
+        for (int g = 0; g < kScreenshot; ++g) for (int v : m.keys[g]) escUsed |= v == kVK_Escape;
+        for (int a = 0; a < kShortcutCount; ++a) for (auto k : m.shortcuts[a].keys) escUsed |= k.code == kVK_Escape;
+        const bool legacy = keys[0] == ShortcutKey{kVK_F1} &&
+            (keys[1] == ShortcutKey{} || keys[1] == ShortcutKey{kVK_ANSI_Comma, kModSuper});
+        if (legacy && !escUsed) keys = shortcut_defaults()[kSettings].keys;
     }
     out = m;
     if (error) *error = warn;

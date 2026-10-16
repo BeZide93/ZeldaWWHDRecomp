@@ -5,6 +5,7 @@
 #include "gfx/renderer.h"
 #include "overlay/overlay.h"
 #include "platform/input_sdl.h"
+#include "platform/mouse_sdl.h"
 #include "platform/keycodes.h"
 #include <cassert>
 #include <cstdarg>
@@ -18,7 +19,7 @@
 
 static std::vector<std::string> logs;
 static int saves=0,loads=0,promptKeys=0;
-static bool prompt=false;
+static bool prompt=false,mouseCamera=false;
 void log_msg(const char* format,...) {
  char line[2048];va_list args;va_start(args,format);vsnprintf(line,sizeof line,format,args);va_end(args);
  logs.emplace_back(line);
@@ -29,7 +30,7 @@ namespace render { const Backend* g_backend = nullptr; uint64_t frame_count(){re
 namespace gx2 { void checkpoint_vulkan_caches(){} }
 namespace gfxvk { bool graphics_hotkey(char,bool){return false;} }
 namespace aspect { void set_window_aspect(float){} }
-namespace mods { double game_time(){return 0;} void filter_pad(input::PadState&){} bool mouse_camera(){return false;} bool first_person_wheel(){return false;} void mouse_button(int,bool){} void mouse_add(float,float){} void mouse_wheel(float){} void fast_forward_reset(){} void lock_on_reset(){} }
+namespace mods { double game_time(){return 0;} void filter_pad(input::PadState&){} bool mouse_camera(){return mouseCamera;} bool first_person_wheel(){return false;} void mouse_button(int,bool){} void mouse_add(float,float){} void mouse_wheel(float){} void fast_forward_reset(){} void lock_on_reset(){} }
 namespace interp { int mode(){return 0;} void toggle_fps(int){} void set_mode(int){} uint64_t logic_steps(){return 0;} }
 namespace timebase { uint64_t now(){return 0;} }
 namespace true60 { uint64_t link_steps(){return 0;} bool state_loaded(){return false;} }
@@ -118,14 +119,17 @@ static int shortcut_ui_test() {
  keyPress(SDL_SCANCODE_F9,SDL_Keymod(SDL_KMOD_CTRL|SDL_KMOD_SHIFT)); frame();
  assert((current().shortcuts[kSettings].keys[0] == ShortcutKey{kVK_F9,kModCtrl|kModShift}));
  auto saved=current(); set_current(Mapping::defaults(),false); load_startup(); assert(current()==saved);
- g_open=false; keyPress(SDL_SCANCODE_F1); assert(!is_open());
+ // The replaced default Esc no longer opens Settings; the F1 alternate still does.
+ g_open=false; keyPress(SDL_SCANCODE_ESCAPE); assert(!is_open());
  keyPress(SDL_SCANCODE_F9,SDL_Keymod(SDL_KMOD_CTRL|SDL_KMOD_SHIFT)); assert(is_open());
+ g_open=false; SDL_Delay(160); keyPress(SDL_SCANCODE_F1); assert(is_open());
  // The alternate key uses the same SDL capture, serialization and dispatch paths.
  focus(bindingId(kSettings,1)); clickFocused(ImGuiMouseSource_Mouse);
  keyPress(SDL_SCANCODE_F8,SDL_KMOD_ALT); frame();
  assert((current().shortcuts[kSettings].keys[1] == ShortcutKey{kVK_F8,kModAlt}));
  saved=current(); set_current(Mapping::defaults(),false); load_startup(); assert(current()==saved);
- g_open=false; SDL_Delay(160); keyPress(SDL_SCANCODE_F8,SDL_KMOD_ALT); assert(is_open());
+ g_open=false; SDL_Delay(160); keyPress(SDL_SCANCODE_F1); assert(!is_open());
+ keyPress(SDL_SCANCODE_F8,SDL_KMOD_ALT); assert(is_open());
  // Escape is recorded instead of canceling capture or closing Settings.
  focus(bindingId(kSettings,0)); clickFocused(ImGuiMouseSource_Mouse);
  keyPress(SDL_SCANCODE_ESCAPE); frame();
@@ -460,7 +464,46 @@ int main(int argc,char** argv){
  overlay::mouse_button(0,true);overlay::apply_capture();assert(overlay::U.cap_action==input_map::kR);
  overlay::U.cap_action=-1;overlay::g_capturing_keys=false; // end the deliberately unfilled controller capture
  overlay::set_open(false);
- puts("real overlay transitions, key/focus trace, Home, text prompt and auxiliary-window checks passed");
+ // Esc is the default Settings key (F1 the alternate). With the mouse captured by the mouse camera, the first
+ // Esc only frees the mouse; the next one opens Settings, and Esc inside Settings closes it.
+ {
+  input_map::set_current(input_map::Mapping::defaults(),false);
+  const auto& keys=input_map::current().shortcuts[input_map::kSettings].keys;
+  assert(keys[0].code==kVK_Escape&&keys[1].code==kVK_F1&&input_map::current().shortcuts[input_map::kSettings].button==input_map::kPadHome);
+  auto esc=[&](bool down){event_key(tv,SDL_SCANCODE_ESCAPE,down);};
+  auto capture=[&](){
+   SDL_Event e{};e.type=SDL_EVENT_MOUSE_BUTTON_DOWN;e.button.windowID=SDL_GetWindowID(tv);e.button.which=1;e.button.button=SDL_BUTTON_LEFT;
+   input::handle_event(e);e.type=SDL_EVENT_MOUSE_BUTTON_UP;input::handle_event(e);assert(mods::mouse_captured());
+  };
+  mouseCamera=true;mods::mouse_init(tv);
+  reset();capture();
+  esc(true);assert(!mods::mouse_captured()&&!overlay::is_open());esc(false);assert(!overlay::is_open());
+  esc(true);assert(overlay::is_open()&&matches("[overlay] opened (Esc key, window TV")==1);esc(false);
+  esc(true);assert(!overlay::is_open()&&matches("[overlay] closed (Esc key, window TV")==1);esc(false);
+  // no capture: Esc opens Settings directly; a held Esc (repeats) does not toggle it again
+  SDL_Delay(160);esc(true);assert(overlay::is_open());
+  event_key(tv,SDL_SCANCODE_ESCAPE,true,SDL_KMOD_NONE,true);assert(overlay::is_open());
+  esc(false);esc(true);assert(!overlay::is_open());esc(false);
+  // the macOS host gives overlay::key the key before its own mouse handling: same order there
+  reset();capture();
+  assert(overlay::key(kVK_Escape,true,false,0));mods::update_mouse();
+  assert(!mods::mouse_captured()&&!overlay::is_open());
+  assert(overlay::key(kVK_Escape,false,false,0));
+  assert(overlay::key(kVK_Escape,true,false,0)&&overlay::is_open());overlay::key(kVK_Escape,false,false,0);
+  overlay::set_open(false);
+  // the game's text prompt keeps Esc (cancel), also when Esc is the Settings key
+  reset();const int keysBefore=promptKeys;prompt=true;esc(true);esc(false);
+  assert(!overlay::is_open()&&promptKeys==keysBefore+2);prompt=false;
+  // Settings moved away from Esc: Esc still frees the mouse, but no longer opens Settings
+  auto moved=input_map::Mapping::defaults();moved.shortcuts[input_map::kSettings].keys={{{kVK_F1},{}}};
+  input_map::set_current(moved,false);
+  reset();capture();esc(true);esc(false);assert(!mods::mouse_captured()&&!overlay::is_open());
+  SDL_Delay(160);esc(true);esc(false);assert(!overlay::is_open());
+  f1(tv,true);assert(overlay::is_open());f1(tv,false);overlay::set_open(false);
+  input_map::set_current(input_map::Mapping::defaults(),false);
+  mouseCamera=false;mods::mouse_init(nullptr);
+ }
+ puts("real overlay transitions, key/focus trace, Home, text prompt, Esc mouse release / Settings and auxiliary-window checks passed");
 #endif
  // Native Controls can finish capture before the overlay's poll sees the pressed Home button.
  overlay::set_open(false);std::fill(std::begin(pad),std::end(pad),0.0f);overlay::poll_controller_shortcuts(pad);

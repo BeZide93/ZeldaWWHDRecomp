@@ -532,7 +532,7 @@ void tab_saves() {
     if (!msg.empty()) note("%s", msg.c_str());
     heading("Save states");
     const bool full = ss::full_states();
-    const char* keys = ext::features().keyboard ? " Shift+F1..F5 save in game, F6 loads slot 1, F2..F5 load slots 2..5 (F1 opens this menu)." : "";
+    const char* keys = ext::features().keyboard ? " Shift+F1..F5 save in game, F6 loads slot 1, F2..F5 load slots 2..5 (Esc or F1 opens this menu)." : "";
     if (full)
         note("Full save states: the whole running game (large, contain game data: never share them).%s", keys);
     else
@@ -2173,10 +2173,11 @@ void tab_about() {
              "Start confirms.");
     } else {
 #ifdef __APPLE__
-        note("Settings overlay: F1 (Fn+F1 on most Mac keyboards), Cmd+, or Settings... in the app menu, or hold Select / "
-             "press Home on a controller. Esc, F1 or B closes. "
+        note("Settings overlay: Esc or F1 (Fn+F1 on most Mac keyboards), Settings... in the app menu, or hold Select / "
+             "press Home on a controller. With a captured mouse, the first Esc frees the mouse. Esc, F1 or B closes. "
 #else
-        note("Settings overlay: F1, or hold Select / press Home on a controller. Esc, F1 or B closes. "
+        note("Settings overlay: Esc or F1, or hold Select / press Home on a controller. With a captured mouse, the first "
+             "Esc frees the mouse. Esc, F1 or B closes. "
 #endif
              "L / R switch tabs on a controller. The game keeps running and sees no input while this menu is open.");
         note("When the game asks for text (your name), a text window appears over the game: type on the keyboard "
@@ -2540,10 +2541,21 @@ bool key(int code, bool down, bool repeat, int mods, KeyOrigin origin) {
 #else
     const int action = input_map::shortcut_for_key(input_map::current(), code, mods);
 #endif
-    if (!g_capturing_keys.load() && action >= 0 && (action == input_map::kSettings || !captures())) {
-        static ToggleGuard settings;
-        const bool activate = action == input_map::kSettings ? settings.press(down, repeat, now_s()) : down && !repeat;
-        if (activate) activate_shortcut(action, origin);
+    const bool escape = code == kVK_Escape;
+    // Esc with a captured mouse (mouse camera) only frees the mouse, whatever it is bound to; Settings
+    // opens on the next Esc. Both hosts route keys here before their own mouse handling.
+    if (escape && !captures() && mods::mouse_captured()) {
+        if (down && !repeat) mods::mouse_release();
+        return true;
+    }
+    // Inside Settings or the game's text prompt Esc keeps its own meaning (close, cancel) below,
+    // also when it is the Settings key.
+    const bool settings = action == input_map::kSettings && !(escape && captures());
+    if (!g_capturing_keys.load() && action >= 0 && (settings || !captures())) {
+        static ToggleGuard settingsGuard;
+        const bool activate = settings ? settingsGuard.press(down, repeat, now_s()) : down && !repeat;
+        if (activate && settings && escape) set_open(!is_open(), OpenReason::Esc, origin);
+        else if (activate) activate_shortcut(action, origin);
         return true;
     }
     if (!is_open()) {

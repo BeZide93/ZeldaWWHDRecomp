@@ -618,9 +618,9 @@ The Shortcuts tab also offers picture-in-picture, the performance overlay, mute 
 initially unbound. Bindings are stored with the game controls in `controls.json`; older Screenshot
 bindings migrate automatically. Conflicts include game keys and duplicate combinations.
 Home is the default controller button shown under **Settings**, and is remappable there.
-F1 remains the default Settings key. Escape closes Settings when no input is being recorded,
-and releases a captured mouse. While recording, Escape, L/R, Select and Home are assigned
-without triggering their normal menu actions.
+Esc (or F1) opens Settings. With a captured mouse, the first Esc frees the mouse and a second
+one opens Settings. Escape closes Settings when no input is being recorded. While recording,
+Escape, L/R, Select and Home are assigned without triggering their normal menu actions.
 
 Right-click to clear a binding in either Controls or Shortcuts. With a binding focused,
 Delete, Backspace or the controller button mapped to X clears it. Right-click during mouse

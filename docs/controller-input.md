@@ -68,7 +68,8 @@ scrolls accumulate to a notch.
 Enable **Mouse camera** and click the TV picture to capture the pointer. That
 first click only captures; release it and click again to use its binding. Bound
 buttons work only in the TV window while the mouse camera has captured the
-pointer. Escape releases it. A left click in the GamePad window remains a touch;
+pointer. Escape releases it; with the pointer free, Escape opens Settings. A left
+click in the GamePad window remains a touch;
 settings and text prompts take priority over game bindings. A button held during
 these transitions stays blocked until released, without blocking other buttons
 or other SDL mice.
@@ -131,9 +132,10 @@ to choose manually. Unavailable options and controller-disconnect prompts remain
 
 Open **Settings → Shortcuts** to change app actions. **Settings** shows Home as its default
 controller button. You can replace it with another button or a hold-and-press combination.
-The key, alternate key and controller binding are saved together. F1 remains the default
-Settings key; Escape closes Settings when you are not recording an input, and releases a
-captured mouse.
+The key, alternate key and controller binding are saved together. Esc (or F1) opens Settings.
+With a captured mouse, the first Esc frees the mouse and a second one opens Settings. Inside
+Settings, Esc closes it when you are not recording an input. If you already changed the
+Settings key, your choice is kept; if you move Settings away from Esc, Esc still frees the mouse.
 
 Select a controller field, then tap a button or hold one button and press another. During
 recording, L/R, Select and Home are captured without switching tabs or closing the menu.

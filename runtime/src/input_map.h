@@ -77,6 +77,8 @@ struct ShortcutBinding {
 struct ShortcutInfo { const char* id; const char* name; const char* group; ShortcutKey primary, alternate; int button = kPadNone; };
 const ShortcutInfo& shortcut_info(int action);
 std::array<ShortcutBinding, kShortcutCount> shortcut_defaults();
+// controls.json "shortcuts_version": 2 shows Home under Settings, 3 moves an untouched F1 Settings key to Esc + F1.
+constexpr int kShortcutsVersion = 3;
 std::string shortcut_key_label(ShortcutKey key);
 
 struct Mapping {

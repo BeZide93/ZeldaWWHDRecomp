@@ -40,7 +40,7 @@ void log_msg(const char*,...){}
 // settings overlay: closed (keys reach the game and its shortcuts as before); the game's text prompt
 // (overlay/text_entry.h) shows while promptShown: overlay::key takes every key then, as the real one does
 static bool promptShown=false;static int promptKeys=0;static std::string promptText;
-static bool overlayOpen=false;
+static bool overlayOpen=false;static int escapeKeys=0;
 // Matrix: real SDL routing and shared production guard; the overlay API is a lightweight model
 // (no renderer/game). MENU112_BASELINE pairs the pre-fix router with its original F1 semantics.
 static bool menuMatrix=false; static double keyClock=0; static overlay::ToggleGuard keyGuard;
@@ -60,6 +60,7 @@ namespace overlay { bool pointer_shortcut(int,bool){return false;} void set_open
   const auto a=sc.poll(shortcutClock,select,v[input_map::kPadHome]>0.5f,overlayOpen);if(a!=SettingsShortcut::None)overlayOpen=a==SettingsShortcut::Open;}
  bool shortcut_took_input(){const bool took=shortcutTook;shortcutTook=false;return took;}
  bool key(int code,bool down,bool repeat,int mods,KeyOrigin){
+  if(code==kVK_Escape)++escapeKeys;
   if(promptShown){++promptKeys;return true;}
   if(!menuMatrix || (!overlayOpen && (code != kVK_F1 || mods))) {
    const int a = input_map::shortcut_for_key(input_map::current(), code, mods);
@@ -210,6 +211,16 @@ int main(int argc,char** argv){
  promptShown=false;assert(input::read().buttons==0);click(game,SDL_BUTTON_LEFT,false);
  mods::mouse_release();mods::update_mouse();assert(!mods::mouse_captured());
  click(game,SDL_BUTTON_X1,true);assert(input::read().buttons==0);click(game,SDL_BUTTON_X1,false);
+ // Esc with the mouse captured only frees it (mouse_sdl.cpp, before the overlay sees keys); the next Esc
+ // reaches the overlay, where it is the default Settings key.
+ auto escape=[&](bool down){SDL_Event e{};e.type=down?SDL_EVENT_KEY_DOWN:SDL_EVENT_KEY_UP;e.key.windowID=SDL_GetWindowID(game);
+  e.key.scancode=SDL_SCANCODE_ESCAPE;e.key.down=down;input::handle_event(e);};
+ assert(input_map::shortcut_for_key(input_map::current(),kVK_Escape,0)==input_map::kSettings);
+ click(game,SDL_BUTTON_LEFT,true);click(game,SDL_BUTTON_LEFT,false);assert(mods::mouse_captured());
+ const int escapesBefore=escapeKeys;
+ escape(true);assert(!mods::mouse_captured()&&escapeKeys==escapesBefore);
+ escape(false);escape(true);assert(escapeKeys==escapesBefore+2);escape(false);
+ {bool held[256];input::held_keys(held);assert(!held[kVK_Escape]);}
  mouseCamera=false;input_map::set_current(map,false);SDL_DestroyWindow(drc);input::set_gamepad_window(nullptr);
  // Touch-emulated pointers keep their source through the overlay boundary; a real mouse restores hover.
  overlayOpen=true;

@@ -1,6 +1,7 @@
 // In-game settings overlay (Dear ImGui), drawn on top of the TV window's picture by both renderers.
 //
-// F1 opens and closes it (Esc closes); on macOS also Cmd+, (app menu > Settings...; most Mac keyboards
+// The Settings shortcut (default Esc, alternate F1) opens and closes it (Esc closes; with a captured mouse
+// the first Esc only frees the mouse); on macOS also app menu > Settings... (most Mac keyboards
 // send F1 only with Fn unless the top row is set to standard function keys); on a controller, hold Select/Minus for half a second or press
 // Home. While it is open the game sees no buttons (it keeps running) and the overlay takes keyboard,
 // mouse and controller. Tabs: Saves, Graphics, Display, Audio, Mods, Controls, Language / About. Every option
@@ -62,7 +63,8 @@ void set_perf_shown(bool on);
 enum Mods : int { kShift = 1, kCtrl = 2, kAlt = 4, kSuper = 8 };
 // Release UI keys on host focus loss without changing the menu or shortcut latch.
 void focus_lost();
-// Returns true when the overlay used the key: F1 toggles, and every key while it is open.
+// Returns true when the overlay used the key: the Settings key toggles, Esc frees a captured mouse first,
+// and every key while it is open.
 bool key(int code, bool down, bool repeat, int mods, KeyOrigin origin = {});
 // pointer in the TV window, normalised to its content area (0..1 from the top left); return true while
 // the overlay is open (the event is the overlay's, not the game's or the mouse camera's)

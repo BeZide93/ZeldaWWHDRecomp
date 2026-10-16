@@ -546,10 +546,11 @@ bool touch_from_controller(SDL_TouchID id){
 // debug: WWHD_TEST_POST_KEYS=300:F1,410:Down,420:Return,430:K/30 (held 30 frames),500:Text=Tetra pushes key
 // presses (and typed text) at TV frames into SDL's event queue, as gfx/input.mm does on macOS: they take the
 // real path in hidden test runs and reach only the settings overlay and the game's text prompt.
+// Mouse1..Mouse5 click in the TV window (the mouse camera captures the pointer; needs host input).
 static constexpr Uint64 kTestEventTime=4242;  // timestamp that marks them
 static bool test_event(const SDL_Event& e){return e.common.timestamp==kTestEventTime;}
 static void post_test_keys(){
- struct Post{uint64_t frame;SDL_Scancode code;bool down;std::string text;SDL_Keymod mods=SDL_KMOD_NONE;};
+ struct Post{uint64_t frame;SDL_Scancode code;bool down;std::string text;SDL_Keymod mods=SDL_KMOD_NONE;Uint8 button=0;};
  static std::vector<Post> posts=[]{
   std::vector<Post> v;const char* e=getenv("WWHD_TEST_POST_KEYS");
   for(const char* p=e;p&&*p;){
@@ -566,6 +567,11 @@ static void post_test_keys(){
     else break;
    }
    int code=input_map::key_from_id(k);SDL_Scancode sc=SDL_SCANCODE_UNKNOWN;
+   if(code>=input_map::kMouse1&&code<input_map::kMouse1+5){
+    static constexpr Uint8 kButtons[]={SDL_BUTTON_LEFT,SDL_BUTTON_RIGHT,SDL_BUTTON_MIDDLE,SDL_BUTTON_X1,SDL_BUTTON_X2};
+    const Uint8 button=kButtons[code-input_map::kMouse1];
+    v.push_back({f,sc,true,{},mods,button});v.push_back({f+hold,sc,false,{},mods,button});continue;
+   }
    for(int i=0;i<SDL_SCANCODE_COUNT&&code!=input_map::kNoKey;i++)if(keycode((SDL_Scancode)i)==code){sc=(SDL_Scancode)i;break;}
    if(sc==SDL_SCANCODE_UNKNOWN){LOG("[input] WWHD_TEST_POST_KEYS: unknown key %s",k.c_str());continue;}
    v.push_back({f,sc,true,{},mods});v.push_back({f+hold,sc,false,{},mods});
@@ -577,6 +583,12 @@ static void post_test_keys(){
  for(;next<posts.size()&&render::frame_count()>=posts[next].frame;next++){
   const Post& p=posts[next];SDL_Event e{};e.common.timestamp=kTestEventTime;
   if(!p.text.empty()){texts.push_back(p.text);e.type=SDL_EVENT_TEXT_INPUT;e.text.windowID=g_prompt_window?SDL_GetWindowID(g_prompt_window):0;e.text.text=texts.back().c_str();}
+  else if(p.button){
+   e.type=p.down?SDL_EVENT_MOUSE_BUTTON_DOWN:SDL_EVENT_MOUSE_BUTTON_UP;e.button.button=p.button;e.button.down=p.down;e.button.which=1;
+   e.button.windowID=g_prompt_window?SDL_GetWindowID(g_prompt_window):0;
+   LOG("[input] test mouse button %d %s at frame %llu",p.button,p.down?"down":"up",(unsigned long long)render::frame_count());
+   SDL_PushEvent(&e);continue;
+  }
   else{e.type=p.down?SDL_EVENT_KEY_DOWN:SDL_EVENT_KEY_UP;e.key.scancode=p.code;e.key.down=p.down;e.key.mod=p.mods;e.key.windowID=g_prompt_window?SDL_GetWindowID(g_prompt_window):0;}
   LOG("[input] test %s %s%s at frame %llu",p.text.empty()?"key":"text",p.text.empty()?SDL_GetScancodeName(p.code):p.text.c_str(),p.text.empty()?(p.down?" down":" up"):"",(unsigned long long)render::frame_count());
   SDL_PushEvent(&e);
