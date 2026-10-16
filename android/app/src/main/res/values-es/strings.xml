@@ -66,4 +66,6 @@
     <string name="save_import_failed">No se pudo importar la partida: %1$s</string>
     <string name="controller_settings_hint">Mantén Select/− para abrir Ajustes</string>
     <string name="controller_settings_hint_home">Mantén Select/− o pulsa Home para abrir Ajustes</string>
+    <string name="setup_code_mods">Mods de código</string>
+    <string name="setup_code_mods_detail">Permite activar mods de código (por ejemplo las misiones de historia) en Ajustes › Mods. El código del juego se vuelve a compilar con soporte para mods, lo que tarda más o menos lo mismo que la primera instalación, y el juego va un poco más lento. Mientras tanto puedes seguir jugando con la versión actual.</string>
 </resources>

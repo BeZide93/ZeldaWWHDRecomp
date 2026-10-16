@@ -36,6 +36,8 @@ public class SetupActivity extends Activity {
     private Button disc;
     private Button common;
     private Button restore;
+    private android.widget.CheckBox codeMods;
+    private TextView codeModsDetail;
     private final ArrayList<Button> pickers = new ArrayList<>();
     private boolean phoneSetup;
     private String actionMessage;
@@ -170,6 +172,17 @@ public class SetupActivity extends Activity {
         pause = button(layout, getString(R.string.setup_pause), () -> control(SetupService.PAUSE));
         continueAnyway = button(layout, getString(R.string.setup_continue_anyway), () -> { if (continueAction != null) control(continueAction); });
         continueAnyway.setVisibility(android.view.View.GONE);
+        // the desktop setup's "code mods" choice: the game code with mod support for guest mods
+        codeMods = new android.widget.CheckBox(this);
+        codeMods.setText(R.string.setup_code_mods);
+        codeMods.setTextSize(16);
+        codeMods.setChecked(AndroidGame.codeModsChosen(this));
+        codeMods.setOnCheckedChangeListener((view, checked) -> chooseCodeMods(checked));
+        layout.addView(codeMods);
+        codeModsDetail = new TextView(this);
+        codeModsDetail.setText(R.string.setup_code_mods_detail);
+        codeModsDetail.setPadding(0, 0, 0, gap);
+        layout.addView(codeModsDetail);
         details = new Button(this, null, android.R.attr.borderlessButtonStyle);
         details.setText(R.string.setup_details_show);
         layout.addView(details);
@@ -185,6 +198,26 @@ public class SetupActivity extends Activity {
         ScrollView scroll = new ScrollView(this);
         scroll.addView(layout);
         setContentView(scroll);
+    }
+
+    /** The Code mods switch: remembered for the next build; a finished setup builds again now (the
+     *  current build stays playable until the new one is ready). */
+    private void chooseCodeMods(boolean enabled) {
+        new Thread(() -> {
+            try {
+                AndroidGame.chooseCodeMods(this, enabled);
+                File job = SetupStore.current(this);
+                File host = job == null ? null : new File(job, "host.json");
+                if (host != null && host.isFile() && SetupStore.read(host).optString("state").equals("complete") &&
+                        AndroidGame.needsRebuild(this))
+                    runOnUiThread(() -> {
+                        try { SetupService.start(this, null); }
+                        catch (Exception failure) { status.setText("Tap Resume to continue setup: " + failure.getMessage()); }
+                    });
+            } catch (Exception failure) {
+                runOnUiThread(() -> status.setText("Cannot save the code-mod choice: " + failure.getMessage()));
+            }
+        }, "wwhd-code-mods").start();
     }
 
     /** "Choose your game": a folder, a Cemu .wua archive or a .wud/.wux disc image. */
@@ -434,6 +467,15 @@ public class SetupActivity extends Activity {
                 show(choose, phoneSetup && !working);
                 setTextIfChanged(choose, getString(job == null ? R.string.setup_choose : R.string.setup_choose_other));
                 show(pause, phoneSetup && working);
+                show(codeMods, phoneSetup);
+                show(codeModsDetail, phoneSetup);
+                codeMods.setEnabled(!working);
+                if (!working && codeMods.isChecked() != AndroidGame.codeModsChosen(SetupActivity.this)) {
+                    // changed in the game's Settings > Mods meanwhile
+                    codeMods.setOnCheckedChangeListener(null);
+                    codeMods.setChecked(!codeMods.isChecked());
+                    codeMods.setOnCheckedChangeListener((view, checked) -> chooseCodeMods(checked));
+                }
                 show(resume, phoneSetup && job != null && !working && !hostName.equals("complete"));
                 setTextIfChanged(resume, getString(hostName.equals("selected") ? R.string.setup_start : R.string.setup_continue));
                 show(updateStatus, hostState != null && SetupPresentation.showUpdate(hostState.optBoolean("updating"), hostName));
