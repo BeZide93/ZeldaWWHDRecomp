@@ -24,6 +24,11 @@ what is on `devel` and not released yet (also in the
 - **Option to turn off the letterbox bars while targeting** (#114). Settings → Mods → Built-in → Camera →
   **Letterbox while targeting** (on by default). Switched off, normal Z-targeting no longer shows the black bars;
   cutscenes, scripted cameras, minigames and item aiming keep theirs.
+
+- **Run/swim speed: boost bar options and "Roll, then hold A"** (#233). New **Show boost bar** switch; with Boost time
+  set to no limit the bar no longer appears; the boost bar and the climbing stamina wheel now hide while menus, cutscenes
+  and conversations are on screen. New boost button **Roll, then hold A**: roll while running and keep A held to boost
+  until you let go (on land).
 - **True 60: no more crash at Orca's sword training** (#223). Talking to Orca and choosing "yes" stopped the game in True 60
   mode; event commands now only run on full game steps.
 
