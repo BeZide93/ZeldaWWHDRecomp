@@ -11,6 +11,13 @@ what is on `devel` and not released yet (also in the
   Blender) in the world, lit and shadowed like the game's objects, with collision, L-targeting and a Check/Talk
   prompt. The model is converted on your own machine using a material from your own game, so packages never contain
   game files. The Windfall example gained an original carved post (preview, for mod makers).
+
+- **Android handhelds** (thanks to almost-drowned-rat):
+  - **Full screen** now hides the system bars on Android 11 and newer too, so they no longer cover the top and bottom
+    of the picture (based on GreenNaugahyde's Android fork; #212, #225).
+  - The app's **files folder** (saves, settings, mods) appears in the system Files app and file picker; the prepared
+    game and shader caches are read-only there and console keys are never shown (#213, #226).
+  - The system **Back** button or gesture opens and closes Settings, like F1 on desktop (#215, #227).
 - **Mods on Windows:** a mod's preparation tool can now load its own helper files there too (the port's Python on
   Windows didn't look next to the tool). This stopped the GC minimap from installing on Windows; gc-minimap 0.2.2
   also fixes it on its own for v0.3.0 (#224).
