@@ -28,6 +28,22 @@ Auto no longer measures brightness or picture changes. `WWHD_DRC_AUTO` and `WWHD
 have been removed. No GPU sampling, signature textures or signature readback is used. Screenshots
 and present dumps retain their own capture path.
 
+## Steam Deck Gaming Mode
+
+In Gaming Mode, the GamePad screen defaults to **Picture-in-picture** and the game starts
+in **Full screen**, unless you already saved a choice or supplied a launch override.
+This also applies to the Windows build through Proton when the gamescope session is detected.
+Desktop Mode keeps its existing defaults.
+
+Change **View** under **Settings → Graphics → GamePad screen**, or change **Full screen**
+in Graphics. Your choices are remembered. A separate GamePad window is still available,
+but Gaming Mode shows one window at a time and may scale the game picture, making it blurry.
+
+The old launch-option workaround to hide the GamePad and force full screen is no longer
+needed for a fresh configuration. Remove those launch options to use picture-in-picture;
+existing launch overrides still take precedence. The aspect default is unchanged: choose
+**Match window** or **16:10** to use the Deck screen's shape.
+
 ## State source and implementation
 
 The reader runs on the guest thread at `GX2SwapScanBuffers`, before the frame is queued. Addresses

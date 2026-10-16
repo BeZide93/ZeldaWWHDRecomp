@@ -779,6 +779,10 @@ add_test(NAME auto_pip COMMAND auto_pip_test)
 add_test(NAME auto_pip_pause COMMAND auto_pip_test)
 set_tests_properties(auto_pip_pause PROPERTIES ENVIRONMENT "WWHD_DRC_PAUSE=1")
 
+add_executable(gaming_mode_test runtime/tools/gaming_mode_test.cpp runtime/src/gfx/display_modes.cpp)
+target_include_directories(gaming_mode_test PRIVATE runtime/src runtime/include runtime/third_party/fmt/include)
+target_compile_options(gaming_mode_test PRIVATE -UNDEBUG)
+add_test(NAME gaming_mode COMMAND gaming_mode_test)
 add_executable(display_fallback_test runtime/tools/display_fallback_test.cpp runtime/src/gfx/display_modes.cpp)
 target_include_directories(display_fallback_test PRIVATE runtime/src runtime/include runtime/third_party/fmt/include)
 target_compile_options(display_fallback_test PRIVATE -UNDEBUG)
@@ -1580,6 +1584,18 @@ endif()
 # Link only the overlay input API and SDL boundary. Dead code elimination drops renderer/game
 # dependencies, allowing real transition and focus regressions to run without game data.
 if(WWHD_SDL_HOST AND UNIX AND NOT ANDROID)
+  add_executable(gaming_mode_settings_test runtime/tools/gaming_mode_settings_test.cpp runtime/src/gfx/display_modes.cpp)
+  target_include_directories(gaming_mode_settings_test PRIVATE runtime/src runtime/include runtime/third_party/fmt/include ${IMGUI_DIR})
+  target_compile_definitions(gaming_mode_settings_test PRIVATE WWHD_SDL_HOST=1 WWHD_HAS_VULKAN=1 VK_NO_PROTOTYPES WWHD_TEST_GAMESCOPE=1)
+  target_compile_options(gaming_mode_settings_test PRIVATE -UNDEBUG -ffunction-sections -fdata-sections)
+  if(APPLE)
+    target_link_options(gaming_mode_settings_test PRIVATE -Wl,-dead_strip)
+  else()
+    target_link_options(gaming_mode_settings_test PRIVATE -Wl,--gc-sections)
+  endif()
+  target_link_libraries(gaming_mode_settings_test PRIVATE SDL3::SDL3 Vulkan::Vulkan Threads::Threads)
+  add_test(NAME gaming_mode_settings COMMAND gaming_mode_settings_test)
+  set_tests_properties(gaming_mode_settings PROPERTIES ENVIRONMENT "SDL_VIDEODRIVER=dummy")
   add_executable(overlay_input_integration_test runtime/tools/overlay_input_integration_test.cpp
     runtime/src/overlay/controls_view.cpp
     runtime/src/gfx/display_modes.cpp runtime/src/overlay/extensions.cpp runtime/src/input_map.cpp

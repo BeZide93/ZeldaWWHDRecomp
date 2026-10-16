@@ -59,6 +59,7 @@ void quit();
 
 // SDL host only (gfx/vulkan/overlay_sdl.cpp, called by its main loop)
 void run_posted();                 // the functions post()ed since the last call
+int startup_drc_mode();            // SDL: resolve saved choices/defaults before creating windows
 void load_saved_options();         // start-up: graphics and GamePad screen options saved in settings.ini
 void toggle_drc();                 // Ctrl+G: show / hide the GamePad screen in the current mode
 void drc_window_closed();          // the GamePad window's close button (window mode: hidden until shown again)

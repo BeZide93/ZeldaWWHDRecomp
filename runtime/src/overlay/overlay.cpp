@@ -1203,6 +1203,8 @@ void tab_display() {
             }
             ImGui::EndCombo();
         }
+        if (mode == 0)
+            note("Gaming Mode shows one window at a time. A separate GamePad window may make the game picture blurry.");
         if (mode == 2)
             note("Shows GamePad menus while open and follows Off-TV Play.");
         if (mode == 4)

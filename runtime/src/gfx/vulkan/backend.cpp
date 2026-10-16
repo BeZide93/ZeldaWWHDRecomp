@@ -2639,8 +2639,29 @@ void present_completed_frame_while_pipeline_pending() {
     stutter::trace().add("repeated_frame_age", R.frame, 0, lastNewPresentNs, ended, 0);
   }
 }
+#if defined(WWHD_SDL_HOST) && !defined(__ANDROID__)
+static std::atomic<SDL_Window*> pendingGamepadWindow{nullptr};
+static VkSurfaceKHR pendingGamepadSurface = VK_NULL_HANDLE;
+static void attach_gamepad_window() {
+  SDL_Window* window = pendingGamepadWindow.exchange(nullptr);
+  if (!window) return;
+  R.drc.surface = pendingGamepadSurface;
+  VkBool32 supported = false;
+  vk_check(vkGetPhysicalDeviceSurfaceSupportKHR(R.physicalDevice, R.queueFamily, R.drc.surface, &supported), "GamePad presentation support");
+  if (!supported) exception_report::raise("GamePad window cannot present on the graphics queue");
+  VkSemaphoreCreateInfo si{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
+  vk_check(vkCreateSemaphore(R.device, &si, nullptr, &R.drc.acquired), "GamePad acquire semaphore");
+  vk_check(vkCreateSemaphore(R.device, &si, nullptr, &R.drc.finished), "GamePad present semaphore");
+  R.drc.window = window;
+  make_swapchain(R.drc);
+  gfx::g_has_drc_window = true;
+}
+#endif
 void swap() {
   if(active_deferred_commands)active_deferred_commands->finish_exact();
+#if defined(WWHD_SDL_HOST) && !defined(__ANDROID__)
+  attach_gamepad_window();
+#endif
   for (Screen* s : {&R.tv, &R.drc, &stereoRight}) if (s->buildingScanDirty) {
     s->scan.swap(s->buildingScan);
     s->scanSrgb = s->buildingScanSrgb;
@@ -3794,6 +3815,42 @@ static void set_window_icons() {
       SDL_SetWindowIcon(s->window, icon);
   SDL_DestroySurface(icon);
 }
+bool gamepad_window_available() {
+#ifdef __ANDROID__
+  return false;
+#else
+  return !getenv("WWHD_NO_GAMEPAD");
+#endif
+}
+SDL_Window* ensure_gamepad_window(bool create) {
+#if !defined(__ANDROID__)
+  // Main thread creates the native window and surface; the render thread attaches Vulkan
+  // resources at its next frame boundary. No second window exists until requested.
+  static SDL_Window* requested = nullptr;
+  if (R.drc.window) return R.drc.window;
+  if (requested) return requested;
+  if (!create || !gamepad_window_available()) return nullptr;
+  requested = SDL_CreateWindow("GamePad — Vulkan", 854, 480,
+      SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIDDEN
+#ifdef __linux__
+      | SDL_WINDOW_HIGH_PIXEL_DENSITY
+#endif
+  );
+  if (!requested) exception_report::raise(SDL_GetError());
+  if (!WWHD_CREATE_WINDOW_SURFACE(requested, R.instance, nullptr, &pendingGamepadSurface))
+    exception_report::raise(SDL_GetError());
+  int width = 854, height = 480;
+  SDL_GetWindowSizeInPixels(requested, &width, &height);
+  R.drc.width = width; R.drc.height = height;
+  input::set_gamepad_window(requested);
+  // Release/acquire publishes the surface and dimensions to the render thread.
+  pendingGamepadWindow = requested;
+  LOG("[display] GamePad window created on request");
+  return requested;
+#else
+  return nullptr;
+#endif
+}
 // SDL host (Vulkan-only builds): SDL windows, input and audio
 void init() {
 #ifdef __ANDROID__
@@ -3842,7 +3899,8 @@ void init() {
   // one surface: the GamePad picture is drawn into it (display_modes.h: picture-in-picture, GamePad
   // only), never a window of its own
 #else
-  if (!getenv("WWHD_NO_GAMEPAD")) {
+  if (!getenv("WWHD_NO_GAMEPAD") && (!overlay::window_target::gamescope_session() ||
+      ::hostui::startup_drc_mode() == gfx::kDrcWindow)) {
     // made hidden: the GamePad screen mode (load_saved_options below) shows it in window mode only;
     // the other modes draw the GamePad picture into the TV window (gfx/display_modes.h)
     R.drc.window = SDL_CreateWindow("GamePad — Vulkan", 854, 480, windowFlags | SDL_WINDOW_HIDDEN);
@@ -4158,7 +4216,7 @@ static bool fullscreen_key(const SDL_Event& event) {
              (event.key.mod & SDL_KMOD_ALT ? 4 : 0) | (event.key.mod & SDL_KMOD_GUI ? 8 : 0);
   if (input_map::shortcut_for_key(input_map::current(), code, mods) != input_map::kFullscreen) return false;
   SDL_Window* window = SDL_GetWindowFromID(event.key.windowID);
-  toggle_fullscreen(window ? window : R.tv.window);
+  toggle_fullscreen(window ? window : R.tv.window.load());
   return true;
 }
 // debug: WWHD_TEST_FULLSCREEN_KEY=3500,3700 simulates F11 on the TV window at those frames (with
