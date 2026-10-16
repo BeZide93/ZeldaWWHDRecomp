@@ -258,6 +258,15 @@ public class WwhdActivity extends SDLActivity {
         System.exit(0);
     }
 
+    // Settings > Quit Game (native code, after the caches are written): close the game and remove it
+    // from the recent apps, as after a driver install. False: no activity to close (native code exits).
+    public static boolean quitApp() {
+        final SDLActivity a = mSingleton;
+        if (!(a instanceof WwhdActivity)) return false;
+        a.runOnUiThread(() -> ((WwhdActivity) a).endApp());
+        return true;
+    }
+
     // Frame interpolation at 120/240 fps (runtime/src/platform/display_rate.cpp, called from native
     // code on any thread). Phones with 90/120 Hz screens often run apps at 60 Hz unless the app asks
     // for more, so the game asks for a display mode of the same resolution with at least the

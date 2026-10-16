@@ -4161,13 +4161,43 @@ static void test_fullscreen_key() {
   }
 }
 
+#ifdef __ANDROID__
+// Settings > Quit Game on Android: the activity closes the app and removes it from the recent apps
+// (WwhdActivity.quitApp: finishAndRemoveTask, then the process ends); a bare _Exit would leave the
+// game's task in the recent apps. False if the activity could not be asked.
+static bool android_end_task() {
+  auto* env=static_cast<JNIEnv*>(SDL_GetAndroidJNIEnv());
+  if(!env)return false;
+  jobject activity=static_cast<jobject>(SDL_GetAndroidActivity());
+  if(!activity)return false;
+  bool asked=false;
+  if(jclass cls=env->GetObjectClass(activity)) {
+    if(jmethodID method=env->GetStaticMethodID(cls,"quitApp","()Z"))
+      asked=env->CallStaticBooleanMethod(cls,method);
+    env->DeleteLocalRef(cls);
+  }
+  if(env->ExceptionCheck()) {
+    env->ExceptionClear();
+    asked=false;
+  }
+  env->DeleteLocalRef(activity);
+  return asked;
+}
+#endif
 // Closing the TV window ends the game. SDL only sends SDL_EVENT_QUIT once every window is closed, so
 // with the GamePad window open the close button of the TV window did nothing. Closing the GamePad
 // window only hides it (WWHD_NO_GAMEPAD=1 starts without it).
+// Settings > Quit Game ends the game the same way (hostui::quit: SDL_EVENT_QUIT).
 static void quit_game() {
   audio::finish_dump();  // _Exit bypasses atexit handlers
   screenshot::finish();  // the screenshots taken are written first
   gx2::shutdown_vulkan_caches();
+#ifdef __ANDROID__
+  if (::hostui::quit_from_menu() && android_end_task()) {
+    LOG("[quit] closing the app");
+    for (int i = 0; i < 50; i++) SDL_Delay(100);  // the activity ends the process; this is a fallback
+  }
+#endif
   std::_Exit(0);
 }
 static bool close_request(const SDL_Event& event) {
