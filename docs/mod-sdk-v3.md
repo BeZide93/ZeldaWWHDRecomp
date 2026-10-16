@@ -1,15 +1,17 @@
 # Actors and scenes (SDK v3 preview)
 
 **Preview.** This is an experimental extension to [SDK v2](mod-sdk-v2.md), and it may still change.
-Mods can place a small set of the game's own actors, add static models of their own, give them
-talk actions and play short scenes. Static mod actors use the game's lighting, shadow, collision,
-attention and dialogue systems. Animated characters and behaviour callbacks are not available yet.
+Mods can place a small set of the game's own actors, add static and animated models of their own with
+behaviour from mod code, give them talk actions and play scenes with camera paths and choices. Mod actors
+use the game's lighting, shadow, collision, attention and dialogue systems, and survive room changes and
+save-state loads.
 
 The worked package is [sdk-v3-windfall](../examples/guest-mods/sdk-v3-windfall/manifest.json).
 It contains original text, names existing game actors and includes an original
-carved-post model; it includes no game resources. It requires the Story Notebook package and a build with code-mod
-support. The example is a data-only content package: its empty content directory
-has a placeholder so the package manager can index it. World declarations are
+carved-post model and rigged tide sprite; it includes no game resources. It requires the Story Notebook package and a build with code-mod
+support. The example is a data-only content package. A content package with valid, nonempty
+world declarations can use an empty content directory without replacement game files.
+Empty generic content packages remain invalid. World declarations are
 read at startup; enabling or changing a package requires a restart.
 
 ## Placing actors
@@ -104,8 +106,7 @@ at most 2000. The cylinder stays upright and uses these declared dimensions
 independently of the model's rendered XYZ rotation and scale. Choose `mode: "solid"`
 or `"pushable"`. `attention.prompt` chooses `"check"` (the default) or `"talk"`.
 Dialogue uses the existing message and action system; static actors face Link by
-turning their whole body. Animation, skeletal look-at and custom behaviour code
-are not part of this model format. Model counts and geometry caps bound input
+turning their whole body. Skinned models add the bounded features described below. Model counts and geometry caps bound input
 size. The runtime also measures native game heap allocations and enforces
 2 MiB per model, 8 MiB per mod and 16 MiB per room. Shared model resources count
 once; actor instances count separately. Cached model resources remain charged
@@ -113,6 +114,105 @@ until the game unloads them. Loading preserves at least 8 MiB in the backing
 archive heap and 1 MiB in the actor heap's parent. A model that cannot fit fails
 creation and retries on a room reload, rather than allocating repeatedly.
 These budgets cover game heaps; they do not describe GPU memory usage.
+
+
+## Skinned models and motion
+
+Set a model declaration's `kind` to `"skinned"`; omitted `kind` means `"static"`.
+The geometry, material and embedded PNG limits above also apply to skinned GLBs.
+Export one identity mesh node with one skin, and a connected, parent-first skeleton
+of at most 32 uniquely named bones. Bone names use ASCII letters followed by
+letters, digits or underscores, at most 31 characters. Bones use translation and
+rotation with unit scale; bone matrices, multiple roots, morph targets and glTF
+extensions are unsupported. Include inverse bind matrices. Each vertex has at
+most two distinct positive joint influences, with finite nonnegative weights
+summing to one (tolerance 0.0001). All four exported joint indices must be valid,
+including slots with zero weight.
+
+For Blender export, apply mesh transforms, keep bone scale at one, select the mesh
+and armature, export glTF Binary with embedded PNG, normals, UVs, skinning and
+named animation actions. Check the exported bone hierarchy and inverse binds.
+Clips use skeletal translation or rotation channels with `LINEAR` or `STEP`
+interpolation. Scale channels and `CUBICSPLINE` are rejected. Up to eight named
+clips are sampled at 30 Hz, with at most 900 timeline frames per clip and 2 MiB
+of sampled animation data per model. Clip IDs use lowercase letters, digits,
+underscore, dot or hyphen, at most 32 characters. Conventional `idle`, `walk`
+and `talk` clips support actor motion and conversation; extra clips such as
+`wave` are selected by name. Skeleton-only assets are also accepted.
+
+Skinned actors may declare `look_at` and `path`:
+
+```json
+"look_at": {
+  "head": "head", "yaw_degrees": 65, "pitch_degrees": 30,
+  "rate_degrees": 120, "radius": 650,
+  "upper_body": {"bone": "body", "yaw_degrees": 25, "fraction": 0.3}
+},
+"path": {
+  "points": [{"x": 300, "y": 1040, "z": -201500},
+             {"x": 500, "y": 1040, "z": -201500}],
+  "speed": 45, "mode": "loop"
+}
+```
+
+Look-at yaw is bounded to 180 degrees, pitch to 90, rate to 1080 degrees/second,
+and radius to 1000000 game units. The optional upper-body bone must be an ancestor
+of the head; its fraction is 0–1 and yaw limit 0–180 degrees. Look-at requires
+bones authored with +Z forward and +Y up: the head, optional upper-body bone and
+every ancestor must have identity bind rotation within 0.0001. This is a checked
+rig restriction, not automatic bone-axis retargeting. Nonidentity bind rotations
+remain valid for ordinary skinning and animation, but cannot enable look-at on
+that chain. Look-at actors must remain upright: X/Z rotation is zero modulo
+360 degrees and XYZ scale is uniform and positive; yaw rotation is supported.
+The angle limits constrain the local joint pose, not exact world-space targeting
+under arbitrary animated ancestor roll. Paths have 2–16
+points, speed greater than zero and at most 1500 game units/second, and mode
+`"once"` or `"loop"`. Adjacent points, including a loop's closing edge, need more
+than one game unit of horizontal separation. Native ground and collision checks
+can refuse movement; the path advances from accepted positions. Actors stop at
+Link's capsule rather than walking through it. Path-driven body facing turns
+at at most 240 degrees/second on game logic steps. Positions follow the authored
+piecewise-linear segments, so sharp corners can still cause foot sliding. Explicit
+`face` and rotation commands remain immediate. Scene walks are once-only leases
+and restore the actor's previous motion and animation clip/frame afterward.
+They retain the actor's resulting position and facing. The backup lives in the actor's state-captured memory and is restored only for its matching process and lease.
+A scene `quest_place` uses
+that mod's visible active quest marker X/Z in the current room, retaining the
+actor's height; it does not teleport between stages or rooms.
+
+## Guest actor callbacks
+
+The public declarations are in `runtime/guest/include/wwhd_guest.h`. Data-only
+packages, including Windfall, do not need guest behaviour code. The original
+[coral creature example](../examples/guest-mods/sdk-v3-creature/manifest.json)
+demonstrates wandering, informational hit reactions and a real PCM music hook.
+Code packages
+register an owned declared actor ID with `wwhd_actor_register` and a
+`wwhd_actor_behavior_v1` table (`size=32`, `version=1`, `userdata_size=0..256`).
+Keep the table in the module's static region or its `wwhd_malloc` memory;
+callbacks must be exact functions in that module. Foreign tables, interior code
+addresses and arbitrary game pointers are rejected.
+
+The required callbacks are `create(handle, userdata, reason)` and
+`execute(handle, userdata, dt_seconds)`. Optional callbacks are `draw(handle, userdata)`,
+`talk(handle, userdata, phase)` and `on_hit(handle, userdata, hit)`.
+Execute runs once per 30 Hz actor logic step. Draw must not advance simulation:
+actor mutation services reject Draw calls and calls while a scene owns the actor.
+Callbacks restore the caller's CPU state. An exception quarantines the actor's
+registration until restart. Hit packets are informational, 64-byte version-1
+records; they do not provide combat damage or retail save-bit access.
+
+Handles are scoped to the owning module, never reused, and valid only for the
+current native process. `wwhd_actor_find`, `wwhd_actor_get` (80-byte version-1
+state) and `wwhd_actor_userdata` query them. Full state restore issues a fresh
+handle and calls create with `WWHD_ACTOR_RESTORED`, preserving userdata; update
+stored handles there. Room/progress recreation calls `WWHD_ACTOR_NEW` and clears
+userdata. Position, rotation (degrees), collision, named animation, walk,
+quest-walk and stop services reject stale or foreign handles. State/path buffers
+must lie in the owning module's region or its live actor userdata; stack and
+foreign buffers are unsupported. Walk accepts 2–16 points, speed in (0,1500],
+and loop 0/1. Collision flags are `WWHD_ACTOR_COLLISION_ENABLED` and
+`WWHD_ACTOR_PUSHABLE`; animation blend is 0–2 seconds and loop 0/1.
 
 ## Dialogue and actions
 
@@ -138,29 +238,35 @@ mod. Multiple mods may place separate characters using the same native resident
 model. They do not compete for that placed character's lines. Existing catalogue
 resident takeovers keep SDK v2's rules: tracked quest first, then start order;
 one quest per talk. The existing choice box chooses among eligible quest topics.
-This preview adds no choice box to a placed character's `lines` or to a scene.
+A placed character's `lines` remains linear. Scene `choice` steps provide two explicit forward branches.
 
 ## Scenes
 
 `scenes` contains up to 16 scenes per package. Each scene has an `id` and 1–64
-`steps`, with exactly one final `end`. Timed steps require positive `frames` or
+`steps`. Linear scenes have one final `end`; branching scenes may have branch-local `end` steps, and the final step must also be `end`. Timed steps require positive `frames` or
 `seconds` (not both). Frames are 60 Hz timeline units; the base 30 Hz game logic
-advances two units per service. Validation caps the total at 18000 units (five
+advances two units per service. Validation caps the longest possible path at 18000 units (five
 minutes). Fast-forward intentionally follows the game clock.
 
 | Step | Fields |
 | --- | --- |
 | `camera` | `eye`, `target` or `target_actor`, duration; optional `pan: true`, `eye_to`, `target_to` |
 | `say` | `actor`, `text`, duration as a completion deadline |
-| `move` | A placed resident `actor`, `position`, duration |
-| `face` | A placed resident `actor`, `position` or `target_actor` |
+| `move` | A placed resident or mod `actor`, `position`, duration |
+| `face` | A placed resident or mod `actor`, `position` or `target_actor` |
 | `wait` | Duration |
 | `sound` | A validated game UI sound name |
 | `fade` | `direction: "in"` or `"out"`, duration |
+| `camera_path` | 2–16 `points` with `eye`, `target`, and outgoing `frames`; final point omits `frames`; optional `easing: "linear"` or `"smoothstep"` |
+| `camera_follow` | `actor`, `eye_offset`, `target_offset`, duration; optional `half_life` in seconds (0–10, default 0.2) |
+| `animation` | Owned skinned `actor`, named `clip`; optional `blend_seconds`, `loop` (default true); starts immediately |
+| `walk` | Owned skinned `actor`, `speed`, deadline; either 2–16 `points` or owned quest ID `quest_place` |
+| `choice` | `text`, exactly two `options: [{"text": "…", "next": "step-id"}, …]`, deadline; optional `default: 0` or `1` |
+| `music` | Textual `cue`, `action: "start"` or `"stop"`, optional `fade_frames` (0–600) |
 | `end` | Optional `then` actions |
 
 Character references name a placed actor ID or `link` where supported. Movement
-and facing are limited to placed residents; they cannot move or turn Link, signs
+and facing support placed residents and mod actors; they cannot move or turn Link, signs
 or chests. Unknown
 references, missing durations, nonfinite coordinates and unsupported sound names
 are errors. Dialogue deadlines abort if the message has not completed; they do
@@ -169,8 +275,12 @@ not silently award the scene's rewards.
 An optional `trigger` uses `type`: `room` (stage/room), `area` (also position and
 radius), `talk` (actor), `quest_step` (quest/step), or `salvage` (chart). A dialogue
 `scene` action can also request playback. Requests wait for native events to end;
-only one scene holds control at a time, with a bounded queue and duplicate-request
-suppression.
+only one scene holds control at a time, with a global FIFO of at most 16 waiting
+requests and duplicate-request suppression. An interruption or state load clears
+waiting requests. Plus/Start skips the current scene while allowing other queued
+scenes to continue. Already fired room/area triggers do not immediately fire again
+after an interruption; loading a state also suppresses those triggers in the loaded
+room until the room changes.
 
 The implementation uses the **fallback route**: native compulsory-event admission,
 the game's camera and message functions, and native event teardown. It does not
@@ -188,3 +298,26 @@ event must retain its camera and control. Press **Plus/Start** during a scene to
 does not also open the pause menu. A/B remain available for the message window.
 The scene route remains experimental; native event-list generation is not part
 of this preview.
+
+Every scene step may have an `id`; `next` names a strictly later step. Without
+`next`, playback continues to the following step. Choice options name their own
+strictly later targets and cannot also use step-level `next`. All steps must be
+reachable and every branch must end. Option labels are single-line, at most 32
+UTF-16 units. Keep labels short: the native pane may wrap them, and the memory
+limit is not a guarantee of rendered width. The native choice pane disables cancel;
+there is no third cancel branch. `default` selects the initial cursor, rather than
+automatically choosing an answer at the deadline. A choice deadline aborts the scene.
+Camera path eye and target must remain distinct throughout interpolation.
+
+A `music` step requires that code from the same mod registered a real
+`wwhd_scene_music_register` callback before scene preflight. There is no implicit
+retail BGM service or successful no-op. The callback receives cue, START/STOP/
+RESTORE phase, fade frames and stop reason, and returns nonzero only after
+handling the event. It owns playback through audio services or authored bindings.
+RESTORE is sent once per distinct cue whose START or STOP callback was invoked,
+even if that invocation failed, when the lease ends, including abort or load.
+The callback must restore its prior audio state; a failed restore prevents natural
+end rewards. Stop reasons are 0 Finished, 1 Skipped, 2 Aborted, 3 StateLoaded,
+4 Interrupted, 5 Failed and 6 TimedOut. START/STOP receive reason 0; RESTORE receives
+the actual lease exit reason. A data-only scene without
+a registered hook must not declare music steps.

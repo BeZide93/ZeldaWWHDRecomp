@@ -9,23 +9,36 @@
 #include <vector>
 #include "mod_json.h"
 #include "story_mail_book.h"
+#include "story_scenes_core.h"
 namespace story_notebook {
 struct WorldPoint { float x=0,y=0,z=0; };
 struct StoryAction {
     enum class Kind { Give,Take,QuestStep,Flag,StartScene };
     Kind kind=Kind::Flag; std::string id; unsigned value=1;
 };
-struct ManifestModel { std::string id,source; };
+struct ManifestModel { std::string id,source,kind="static"; };
+struct ManifestLookAt {
+    bool enabled=false;std::string head,upper_bone;
+    float yaw_degrees=0,pitch_degrees=0,rate_degrees=0,radius=0,upper_yaw_degrees=0,upper_fraction=0;
+};
+struct ManifestPath {std::vector<WorldPoint> points;float speed=100;bool loop=false;};
 struct ManifestActor {
-    std::string id,actor,stage,kind,model,prompt="check"; unsigned room=0;
+    std::string id,actor,stage,kind,model,animation,prompt="check"; unsigned room=0;
     float collision_radius=30,collision_height=100; bool pushable=false;
+    ManifestLookAt look_at;ManifestPath path;
     WorldPoint position,rotation,scale{1,1,1}; uint32_t params=0; unsigned resident=9; uint8_t item_game=6;
     std::string flag,quest,item,time,lines; unsigned quest_step=0;
     std::vector<StoryAction> then;
 };
+struct SceneCameraKey {WorldPoint eye,target;unsigned frames=0;};
+struct SceneChoiceOption {std::string text,next;size_t next_step=0;};
 struct SceneStep {
-    enum class Kind { Camera,Say,Move,Face,Wait,Sound,Fade,End };
+    enum class Kind { Camera,Say,Move,Face,Wait,Sound,Fade,End,CameraPath,CameraFollow,Animation,Walk,Choice,Music };
     Kind kind=Kind::Wait; std::string actor,target_actor,text,sound;
+    std::string id,next,clip,quest_place,cue,music_action,easing="linear";
+    std::vector<size_t> successors;std::vector<SceneCameraKey> camera_keys;
+    WorldPoint eye_offset,target_offset;float half_life=0.2f,blend_seconds=0,speed=100;bool loop=true;
+    std::vector<WorldPoint> walk_points;std::vector<SceneChoiceOption> choices;unsigned default_choice=0,fade_frames=0;
     WorldPoint eye,target,position,eye_to,target_to; unsigned frames=0; bool pan=false,fade_in=false;
     std::vector<StoryAction> then;
 };
@@ -43,6 +56,11 @@ inline bool keys(const Value& v,std::initializer_list<const char*> allowed) {
     if(v.type!=Value::Object)return false;
     for(const auto& [key,value]:v.object){bool found=false;for(const auto name:allowed)found|=key==name;if(!found)return false;}return true;
 }
+inline bool number(const Value&v,double low,double high,float&out,bool positive=false){
+    if(v.type!=Value::Number||!std::isfinite(v.number)||v.number<low||v.number>high||(positive&&v.number<=0))return false;
+    out=float(v.number);return std::isfinite(out)&&(!positive||out>0);
+}
+inline bool bone_name(const Value&v){if(v.type!=Value::String||v.text.empty()||v.text.size()>31)return false;const auto alpha=[](char c){return(c>='a'&&c<='z')||(c>='A'&&c<='Z');};if(!alpha(v.text[0]))return false;for(char c:v.text)if(!alpha(c)&&!(c>='0'&&c<='9')&&c!='_')return false;return true;}
 inline bool flag_id(const Value& v) {return id(v)&&v.text.rfind("0x",0)!=0;}
 inline bool point(const Value& v,WorldPoint& p,float limit=350000) {
     if(v.type!=Value::Object) return false;
@@ -61,6 +79,21 @@ inline bool quest_step(const Value& m,const std::string& quest,unsigned step) {
 inline bool character(const Value& m,const std::string& name) {return name=="link"||declared(m,"actors",name);}
 inline bool resident_character(const Value& m,const std::string& name) {
     for(const auto& a:m.get("actors").array)if(a.get("id").string()==name){const auto type=a.get("actor").string();return type=="resident"||type=="NpcPeople"||type=="PROC_NPC_PEOPLE";}return false;
+}
+inline bool mod_character(const Value&m,const std::string&name,bool skinned=false){
+    for(const auto&actor:m.get("actors").array)if(actor.get("id").string()==name&&actor.get("kind").string()=="mod"){
+        if(!skinned)return true;for(const auto&model:m.get("models").array)if(model.get("id").string()==actor.get("model").string())return model.get("kind").string()=="skinned";
+    }return false;
+}
+inline bool scene_duration(const Value&v,unsigned&frames,std::string&why){
+    const bool f=v.object.contains("frames"),s=v.object.contains("seconds");if(f&&s)return why="use frames or seconds, not both",false;
+    if(s){const auto&n=v.get("seconds");if(n.type!=Value::Number||!std::isfinite(n.number)||n.number<=0||n.number>300)return why="scene seconds must be in (0,300]",false;frames=unsigned(std::ceil(n.number*60));}
+    else{if(!integer(v.get("frames"),1,kMaxSceneFrames))return why="scene step requires frames in 1..18000",false;frames=unsigned(v.get("frames").number);}return true;
+}
+inline bool scene_point(const Value&v,WorldPoint&p){return keys(v,{"x","y","z"})&&point(v,p);}
+inline bool camera_separated(const WorldPoint&a,const WorldPoint&b){return std::hypot(std::hypot(double(a.x)-b.x,double(a.y)-b.y),double(a.z)-b.z)>0.0001;}
+inline bool camera_segment(const SceneCameraKey&a,const SceneCameraKey&b){
+    const double from[]={double(a.eye.x)-a.target.x,double(a.eye.y)-a.target.y,double(a.eye.z)-a.target.z};const double to[]={double(b.eye.x)-b.target.x,double(b.eye.y)-b.target.y,double(b.eye.z)-b.target.z};double dot=0,length=0;for(size_t k=0;k<3;++k){dot+=from[k]*(to[k]-from[k]);length+=(to[k]-from[k])*(to[k]-from[k]);}const double t=length?std::clamp(-dot/length,0.0,1.0):0;double distance=0;for(size_t k=0;k<3;++k){const double d=from[k]+(to[k]-from[k])*t;distance+=d*d;}return distance>1e-8;
 }
 inline bool actions(const Value& m,const Value& v,std::vector<StoryAction>& out,std::string& why) {
     if(v.type==Value::Null) return true;
@@ -101,13 +134,15 @@ inline bool parse_models(const mods::json::Value& m,std::vector<ManifestModel>& 
     if(list.type!=Value::Array||list.array.size()>8)return why="models must be a list of up to 8",false;
     std::vector<ManifestModel> parsed;
     for(const auto& v:list.array){
-        if(!keys(v,{"id","source"})||!id(v.get("id"))||v.get("source").type!=Value::String)return why="invalid model declaration",false;
+        if(!keys(v,{"id","source","kind"})||!id(v.get("id"))||v.get("source").type!=Value::String)return why="invalid model declaration",false;
+        const std::string kind=v.object.contains("kind")?v.get("kind").string():"static";
+        if(kind!="static"&&kind!="skinned")return why="model kind must be static or skinned",false;
         const auto& source=v.get("source").text;
         if(source.empty()||source.size()>240||source.front()=='/'||source.find('\\')!=std::string::npos||source.find(':')!=std::string::npos||source.size()<5||source.substr(source.size()-4)!=".glb")return why="model source must be a package-relative .glb",false;
         size_t start=0;while(start<=source.size()){const auto end=source.find('/',start);const auto part=source.substr(start,end==std::string::npos?end:end-start);if(part.empty()||part=="."||part=="..")return why="invalid model source path",false;if(end==std::string::npos)break;start=end+1;}
         for(unsigned char c:source)if(c<32||c==127)return why="invalid model source path",false;
         for(const auto& old:parsed)if(old.id==v.get("id").text)return why="duplicate model id",false;
-        parsed.push_back({v.get("id").text,source});
+        parsed.push_back({v.get("id").text,source,kind});
     }out=std::move(parsed);return true;
 }
 inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestActor>& out,std::string& why) {
@@ -115,12 +150,32 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
     if(list.type==Value::Null)return true;
     if(list.type!=Value::Array||list.array.size()>kMaxActorsPerMod)return why="actors must be a list of up to 64",false;
     for(const auto& v:list.array){ManifestActor a;
-        if(!keys(v,{"id","actor","kind","model","collision","attention","stage","room","position","rotation","scale","params","parameters","flag","when","lines","then"}))return why="unknown actor field",false;
+        if(!keys(v,{"id","actor","kind","model","animation","look_at","path","collision","attention","stage","room","position","rotation","scale","params","parameters","flag","when","lines","then"}))return why="unknown actor field",false;
         if(!id(v.get("id")))return why="invalid actor id",false;a.id=v.get("id").text;a.actor=v.get("actor").string();
         if(v.object.contains("kind")) {
             if(v.get("kind").string()!="mod"||v.object.contains("actor"))return why="mod actor kind cannot name a native actor",false;
             a.kind="mod";a.actor="mod";a.model=v.get("model").string();
             if(!declared(m,"models",a.model))return why="mod actor names an undeclared model",false;
+            bool skinned_model=false;for(const auto& model:models)if(model.id==a.model)skinned_model=model.kind=="skinned";
+            if(v.object.contains("look_at")){
+                const auto& look=v.get("look_at");if(!skinned_model)return why="look_at requires a skinned model",false;
+                if(!keys(look,{"head","yaw_degrees","pitch_degrees","rate_degrees","radius","upper_body"})||!bone_name(look.get("head"))||!number(look.get("yaw_degrees"),0,180,a.look_at.yaw_degrees)||!number(look.get("pitch_degrees"),0,90,a.look_at.pitch_degrees)||!number(look.get("rate_degrees"),0,1080,a.look_at.rate_degrees,true)||!number(look.get("radius"),0,1000000,a.look_at.radius,true))return why="invalid bounded look_at settings",false;
+                a.look_at.enabled=true;a.look_at.head=look.get("head").text;
+                if(look.object.contains("upper_body")){const auto& upper=look.get("upper_body");if(!keys(upper,{"bone","yaw_degrees","fraction"})||!bone_name(upper.get("bone"))||upper.get("bone").text==a.look_at.head||!number(upper.get("yaw_degrees"),0,180,a.look_at.upper_yaw_degrees)||!number(upper.get("fraction"),0,1,a.look_at.upper_fraction))return why="invalid upper_body look_at settings",false;a.look_at.upper_bone=upper.get("bone").text;}
+            }
+            if(v.object.contains("path")){
+                const auto& path=v.get("path");if(!skinned_model)return why="path requires a skinned model",false;
+                if(!keys(path,{"points","speed","mode"})||path.get("points").type!=Value::Array||path.get("points").array.size()<2||path.get("points").array.size()>16||!number(path.get("speed"),0,1500,a.path.speed,true))return why="invalid bounded actor path",false;
+                const auto mode=path.get("mode").string();if(mode!="once"&&mode!="loop")return why="path mode must be once or loop",false;a.path.loop=mode=="loop";
+                for(const auto& p:path.get("points").array){WorldPoint point_;if(!keys(p,{"x","y","z"})||!point(p,point_))return why="invalid path point",false;a.path.points.push_back(point_);}
+                for(size_t n=1;n<a.path.points.size();++n){const auto& p=a.path.points[n-1];const auto& q=a.path.points[n];if(std::hypot(double(p.x)-q.x,double(p.z)-q.z)<=1)return why="path points must be separated horizontally by more than one unit",false;}
+                if(a.path.loop){const auto& p=a.path.points.front();const auto& q=a.path.points.back();if(std::hypot(double(p.x)-q.x,double(p.z)-q.z)<=1)return why="loop closing edge is too short",false;}
+            }
+            if(v.object.contains("animation")){
+                if(!id(v.get("animation")))return why="invalid initial animation name",false;
+                bool skinned=false;for(const auto& model:models)if(model.id==a.model)skinned=model.kind=="skinned";
+                if(!skinned)return why="animation requires a skinned model",false;a.animation=v.get("animation").text;
+            }
             if(v.object.contains("params")||v.object.contains("parameters"))return why="mod actors cannot use native parameters",false;
             const auto& collision=v.get("collision");
             if(!keys(collision,{"radius","height","mode"}))return why="mod actor needs cylinder collision",false;
@@ -130,7 +185,7 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
             a.collision_radius=float(radius.number);a.collision_height=float(height.number);if(a.collision_radius<=0||a.collision_height<=0)return why="collision dimensions are too small",false;a.pushable=mode=="pushable";
             const auto& attention=v.get("attention");if(attention.type!=Value::Null){if(!keys(attention,{"prompt"}))return why="invalid mod actor attention",false;a.prompt=attention.get("prompt").string();if(a.prompt!="talk"&&a.prompt!="check")return why="attention prompt must be talk or check",false;}
             if(v.object.contains("flag")){if(!flag_id(v.get("flag")))return why="mod actor flag must be a mod-owned id",false;a.flag=v.get("flag").text;}
-        }else if(v.object.contains("model")||v.object.contains("collision")||v.object.contains("attention"))return why="model, collision and attention require kind mod",false;
+        }else if(v.object.contains("model")||v.object.contains("animation")||v.object.contains("look_at")||v.object.contains("path")||v.object.contains("collision")||v.object.contains("attention"))return why="model, animation, look_at, path, collision and attention require kind mod",false;
         if(a.actor=="kanban"||a.actor=="PROC_KANBAN")a.actor="sign";
         if(a.actor=="Tbox"||a.actor=="takara"||a.actor=="PROC_TBOX")a.actor="chest";
         if(a.actor=="NpcPeople"||a.actor=="PROC_NPC_PEOPLE")a.actor="resident";
@@ -180,35 +235,80 @@ inline bool parse_scenes_impl(const mods::json::Value& m,std::vector<ManifestSce
             else return why="unknown scene trigger",false;
         }
         const auto& steps=v.get("steps");if(steps.type!=Value::Array||steps.array.empty()||steps.array.size()>kMaxSceneSteps)return why="scene needs 1..64 steps",false;
-        unsigned duration=0;for(const auto& st:steps.array){SceneStep p;const auto type=st.get("type").string();bool timed=false;
+        bool explicit_graph=false;for(const auto& st:steps.array){SceneStep p;const auto type=st.get("type").string();bool timed=false;
+            if(st.object.contains("id")){if(!id(st.get("id")))return why="invalid scene step id",false;p.id=st.get("id").text;for(const auto&old:s.steps)if(old.id==p.id)return why="duplicate scene step id",false;}
+            if(st.object.contains("next")){if(!id(st.get("next")))return why="invalid scene successor id",false;p.next=st.get("next").text;explicit_graph=true;}
+            auto fields=st;fields.object.erase("id");fields.object.erase("next");
             bool step_keys=false;
-            if(type=="camera")step_keys=keys(st,{"type","eye","target","target_actor","pan","eye_to","target_to","frames","seconds"});
-            else if(type=="say")step_keys=keys(st,{"type","actor","text","frames","seconds"});
-            else if(type=="move")step_keys=keys(st,{"type","actor","position","frames","seconds"});
-            else if(type=="face")step_keys=keys(st,{"type","actor","position","target_actor"});
-            else if(type=="wait")step_keys=keys(st,{"type","frames","seconds"});
-            else if(type=="sound")step_keys=keys(st,{"type","name"});
-            else if(type=="fade")step_keys=keys(st,{"type","direction","frames","seconds"});
-            else if(type=="end")step_keys=keys(st,{"type","then"});
+            if(type=="camera")step_keys=keys(fields,{"type","eye","target","target_actor","pan","eye_to","target_to","frames","seconds"});
+            else if(type=="say")step_keys=keys(fields,{"type","actor","text","frames","seconds"});
+            else if(type=="move")step_keys=keys(fields,{"type","actor","position","frames","seconds"});
+            else if(type=="face")step_keys=keys(fields,{"type","actor","position","target_actor"});
+            else if(type=="wait")step_keys=keys(fields,{"type","frames","seconds"});
+            else if(type=="sound")step_keys=keys(fields,{"type","name"});
+            else if(type=="fade")step_keys=keys(fields,{"type","direction","frames","seconds"});
+            else if(type=="end")step_keys=keys(fields,{"type","then"});
+            else if(type=="camera_path")step_keys=keys(fields,{"type","points","easing"});
+            else if(type=="camera_follow")step_keys=keys(fields,{"type","actor","eye_offset","target_offset","half_life","frames","seconds"});
+            else if(type=="animation")step_keys=keys(fields,{"type","actor","clip","blend_seconds","loop"});
+            else if(type=="walk")step_keys=keys(fields,{"type","actor","points","quest_place","speed","frames","seconds"});
+            else if(type=="choice")step_keys=keys(fields,{"type","text","options","default","frames","seconds"});
+            else if(type=="music")step_keys=keys(fields,{"type","cue","action","fade_frames"});
             if(!step_keys)return why="unknown scene step or field",false;
             if(type=="camera"){p.kind=SceneStep::Kind::Camera;timed=true;if(!point(st.get("eye"),p.eye))return why="camera needs an eye",false;if(st.get("target_actor").type!=Value::Null){p.target_actor=st.get("target_actor").string();if(!character(m,p.target_actor))return why="unknown camera character",false;}else if(!point(st.get("target"),p.target))return why="camera needs a target",false;if(st.get("pan").type!=Value::Null){if(st.get("pan").type!=Value::Bool)return why="pan must be boolean",false;p.pan=st.get("pan").boolean;if(p.pan&&(!point(st.get("eye_to"),p.eye_to)||!point(st.get("target_to"),p.target_to)))return why="pan needs eye_to and target_to",false;}}
             else if(type=="say"){p.kind=SceneStep::Kind::Say;timed=true;p.actor=st.get("actor").string();if(!character(m,p.actor)||!lines(st.get("text"),p.text))return why="say needs a known character and text",false;}
-            else if(type=="move"||type=="face"){p.kind=type=="move"?SceneStep::Kind::Move:SceneStep::Kind::Face;timed=type=="move";p.actor=st.get("actor").string();if(!character(m,p.actor))return why="unknown scene character",false;if(!resident_character(m,p.actor))return why="move/face requires a placed resident",false;if(type=="face"&&st.get("target_actor").type!=Value::Null){p.target_actor=st.get("target_actor").string();if(!character(m,p.target_actor))return why="unknown face target",false;}else if(!point(st.get("position"),p.position))return why="move/face needs a position",false;}
+            else if(type=="move"||type=="face"){p.kind=type=="move"?SceneStep::Kind::Move:SceneStep::Kind::Face;timed=type=="move";p.actor=st.get("actor").string();if(!character(m,p.actor))return why="unknown scene character",false;if(!resident_character(m,p.actor)&&!mod_character(m,p.actor))return why="move/face requires a placed resident or mod actor",false;if(type=="face"&&st.get("target_actor").type!=Value::Null){p.target_actor=st.get("target_actor").string();if(!character(m,p.target_actor))return why="unknown face target",false;}else if(!point(st.get("position"),p.position))return why="move/face needs a position",false;}
             else if(type=="wait"){p.kind=SceneStep::Kind::Wait;timed=true;}
             else if(type=="sound"){p.kind=SceneStep::Kind::Sound;p.sound=st.get("name").string();if(p.sound!="SE_MENU_CANCEL"&&p.sound!="SE_MENU_DECIDE"&&p.sound!="SE_MENU_CURSOR"&&p.sound!="SE_MENU_MINI_WINDOW_OPEN"&&p.sound!="SE_MENU_MINI_WINDOW_CLOSE")return why="unknown scene sound",false;}
             else if(type=="fade"){p.kind=SceneStep::Kind::Fade;timed=true;const auto dir=st.get("direction").string();if(dir!="in"&&dir!="out")return why="fade direction must be in or out",false;p.fade_in=dir=="in";}
-            else if(type=="end"){p.kind=SceneStep::Kind::End;if(!actions(m,st.get("then"),p.then,why))return false;if(&st!=&steps.array.back())return why="end must be the final step",false;}
-            else return why="unknown scene step",false;
-            if(timed){
-                const auto& frames=st.get("frames");const auto& seconds=st.get("seconds");
-                if(frames.type!=Value::Null&&seconds.type!=Value::Null)return why="use frames or seconds, not both",false;
-                if(seconds.type!=Value::Null){if(seconds.type!=Value::Number||!std::isfinite(seconds.number)||seconds.number<=0||seconds.number>300)return why="scene seconds must be in (0,300]",false;p.frames=unsigned(std::ceil(seconds.number*60));}
-                else {if(!integer(frames,1,kMaxSceneFrames))return why="scene step requires frames in 1..18000",false;p.frames=unsigned(frames.number);}
+            else if(type=="end"){p.kind=SceneStep::Kind::End;if(!actions(m,st.get("then"),p.then,why))return false;if(!p.next.empty())return why="end cannot have a successor",false;}
+            else if(type=="camera_path"){
+                p.kind=SceneStep::Kind::CameraPath;const auto&keys_=st.get("points");if(keys_.type!=Value::Array||keys_.array.size()<2||keys_.array.size()>16)return why="camera_path needs 2..16 points",false;
+                if(st.object.contains("easing")){p.easing=st.get("easing").string();if(p.easing!="linear"&&p.easing!="smoothstep")return why="unsupported camera easing",false;}
+                for(size_t n=0;n<keys_.array.size();++n){const auto&key=keys_.array[n];SceneCameraKey camera;if(!keys(key,{"eye","target","frames"})||!scene_point(key.get("eye"),camera.eye)||!scene_point(key.get("target"),camera.target)||!camera_separated(camera.eye,camera.target))return why="invalid camera path key",false;
+                    if(n+1==keys_.array.size()){if(key.object.contains("frames"))return why="final camera key has no outgoing duration",false;}
+                    else{if(!integer(key.get("frames"),1,kMaxSceneFrames))return why="camera key needs bounded outgoing frames",false;camera.frames=unsigned(key.get("frames").number);if(camera.frames>kMaxSceneFrames-p.frames)return why="camera path exceeds five minute limit",false;p.frames+=camera.frames;}
+                    if(!p.camera_keys.empty()&&!camera_segment(p.camera_keys.back(),camera))return why="camera path crosses a degenerate view",false;p.camera_keys.push_back(camera);
+                }
             }
+            else if(type=="camera_follow"){
+                p.kind=SceneStep::Kind::CameraFollow;timed=true;p.actor=st.get("actor").string();if(!character(m,p.actor)||!scene_point(st.get("eye_offset"),p.eye_offset)||!scene_point(st.get("target_offset"),p.target_offset)||!camera_separated(p.eye_offset,p.target_offset))return why="invalid camera follow character or offsets",false;if(st.object.contains("half_life")&&!number(st.get("half_life"),0,10,p.half_life))return why="invalid camera follow half_life",false;
+            }
+            else if(type=="animation"){
+                p.kind=SceneStep::Kind::Animation;p.actor=st.get("actor").string();if(!mod_character(m,p.actor,true)||!id(st.get("clip")))return why="animation needs an owned skinned actor and clip",false;p.clip=st.get("clip").text;
+                if(st.object.contains("blend_seconds")&&!number(st.get("blend_seconds"),0,10,p.blend_seconds))return why="invalid animation blend_seconds",false;
+                if(st.object.contains("loop")){if(st.get("loop").type!=Value::Bool)return why="animation loop must be boolean",false;p.loop=st.get("loop").boolean;}
+            }
+            else if(type=="walk"){
+                p.kind=SceneStep::Kind::Walk;timed=true;p.actor=st.get("actor").string();if(!mod_character(m,p.actor,true)||!number(st.get("speed"),0,1500,p.speed,true))return why="walk needs an owned skinned actor and bounded speed",false;
+                if(st.object.contains("points")==st.object.contains("quest_place"))return why="walk needs points or quest_place, exclusively",false;
+                if(st.object.contains("quest_place")){if(!id(st.get("quest_place"))||!declared(m,"quests",st.get("quest_place").text))return why="walk quest_place must be an owned declared quest",false;p.quest_place=st.get("quest_place").text;}
+                else{const auto&points=st.get("points");if(points.type!=Value::Array||points.array.size()<2||points.array.size()>16)return why="walk needs 2..16 points",false;for(const auto&value:points.array){WorldPoint point_;if(!keys(value,{"x","y","z"})||!point(value,point_))return why="invalid walk point",false;if(!p.walk_points.empty()&&std::hypot(double(point_.x)-p.walk_points.back().x,double(point_.z)-p.walk_points.back().z)<=1)return why="walk points need horizontal separation",false;p.walk_points.push_back(point_);}}
+                p.loop=false;
+            }
+            else if(type=="choice"){
+                p.kind=SceneStep::Kind::Choice;timed=true;explicit_graph=true;if(!p.next.empty()||!lines(st.get("text"),p.text))return why="choice needs bounded text and option successors",false;const auto&options=st.get("options");if(options.type!=Value::Array||options.array.size()!=2)return why="choice needs exactly two options",false;
+                for(const auto&option:options.array){std::u16string label;if(!keys(option,{"text","next"})||option.get("text").type!=Value::String||option.get("text").text.empty()||!story_mail::append_utf16(option.get("text").text,false,label)||label.size()>32||!id(option.get("next")))return why="invalid choice label or successor",false;p.choices.push_back({option.get("text").text,option.get("next").text,0});}
+                if(st.object.contains("default")){if(!integer(st.get("default"),0,1))return why="choice default must be 0 or 1",false;p.default_choice=unsigned(st.get("default").number);}
+            }
+            else if(type=="music"){
+                p.kind=SceneStep::Kind::Music;if(!id(st.get("cue")))return why="music cue must be a textual id",false;p.cue=st.get("cue").text;p.music_action=st.get("action").string();if(p.music_action!="start"&&p.music_action!="stop")return why="music action must be start or stop",false;
+                if(st.object.contains("fade_frames")){if(!integer(st.get("fade_frames"),0,600))return why="music fade_frames must be 0..600",false;p.fade_frames=unsigned(st.get("fade_frames").number);}
+            }
+            else return why="unknown scene step",false;
+            if(timed&&!scene_duration(st,p.frames,why))return false;
             if(p.kind!=SceneStep::Kind::End&&p.frames==0)p.frames=1;
-            duration+=p.frames;if(duration>kMaxSceneFrames)return why="scene exceeds five minute limit",false;s.steps.push_back(std::move(p));
+            s.steps.push_back(std::move(p));
         }
-        if(s.steps.back().kind!=SceneStep::Kind::End)return why="scene must finish with end",false;out.push_back(std::move(s));
+        if(s.steps.back().kind!=SceneStep::Kind::End)return why="scene must finish with end",false;
+        std::vector<story_scenes::Timing> graph;for(size_t n=0;n<s.steps.size();++n){auto&step=s.steps[n];auto resolve_next=[&](const std::string&name,size_t&index){for(size_t j=n+1;j<s.steps.size();++j)if(s.steps[j].id==name){index=j;return true;}return false;};
+            if(!explicit_graph&&step.kind==SceneStep::Kind::End&&n+1!=s.steps.size())return why="end must be the final step",false;
+            if(!step.next.empty()){size_t index;if(!resolve_next(step.next,index))return why="scene next must name a forward step",false;step.successors.push_back(index);}
+            for(auto&choice:step.choices){if(!resolve_next(choice.next,choice.next_step))return why="choice must name a forward step",false;step.successors.push_back(choice.next_step);}
+            graph.push_back({step.frames,step.kind==SceneStep::Kind::End,step.successors});
+        }
+        if(!story_scenes::valid_graph(graph))return why="scene graph must be reachable, forward, bounded and end on every path",false;
+        out.push_back(std::move(s));
     }return true;
 }
 inline bool parse_actors(const mods::json::Value& m,std::vector<ManifestActor>& out,std::string& why) {

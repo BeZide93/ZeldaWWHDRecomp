@@ -101,6 +101,64 @@ s32 wwhd_file_write(const char* filename, const void* buffer, u32 size);
 /* Seconds in the current logic step (including true-60 scaling), and full-step count. */
 double wwhd_logic_dt(void);
 unsigned long long wwhd_logic_step(void);
+
+/* Mod actors: register an actor ID declared by this mod. Keep the registration
+ * table in this mod's static data or wwhd_malloc memory. Callbacks must be exact
+ * functions from this module. Handles are owner-scoped and never reused.
+ * Full restore calls create again with RESTORED, a fresh handle and preserved
+ * userdata; replace stored handles there. Room/progress recreation uses NEW.
+ * Execute runs once per actor game step. Draw must not advance behavior; actor
+ * mutation services reject calls from draw or while a scene owns the actor.
+ * A failing callback quarantines this actor registration until restart. */
+typedef u32 wwhd_actor_handle;
+enum { WWHD_ACTOR_NEW=0, WWHD_ACTOR_RESTORED=1 };
+enum { WWHD_ACTOR_TALK_BEGIN=0, WWHD_ACTOR_TALK_END=1, WWHD_ACTOR_TALK_CANCEL=2 };
+enum { WWHD_ACTOR_SOURCE_LINK=1, WWHD_ACTOR_SOURCE_MOD=2, WWHD_ACTOR_SOURCE_OTHER=3 };
+enum { WWHD_ACTOR_COLLISION_ENABLED=1, WWHD_ACTOR_PUSHABLE=2, WWHD_ACTOR_SCENE_OWNED=4 };
+typedef struct { f32 x,y,z; } wwhd_actor_vec3;
+typedef struct {
+    u32 size,version,sequence,attack_type,attack_power,source_kind;
+    wwhd_actor_handle source_handle;
+    wwhd_actor_vec3 position,reaction;
+    u32 reserved[3];
+} wwhd_actor_hit_v1; /* 64 bytes; informational native hit, no combat damage API. */
+typedef struct {
+    u32 size,version,userdata_size;
+    void (*create)(wwhd_actor_handle,void* userdata,u32 reason);
+    void (*execute)(wwhd_actor_handle,void* userdata,f32 dt_seconds);
+    void (*draw)(wwhd_actor_handle,void* userdata);
+    void (*talk)(wwhd_actor_handle,void* userdata,u32 phase);
+    void (*on_hit)(wwhd_actor_handle,void* userdata,const wwhd_actor_hit_v1* hit);
+} wwhd_actor_behavior_v1; /* size=32, version=1, userdata_size=0..256. */
+typedef struct {
+    u32 size,version;
+    wwhd_actor_vec3 position,rotation; /* rotation in degrees */
+    f32 collision_radius,collision_height;
+    u32 flags;
+    char animation[36];
+} wwhd_actor_state_v1; /* size=80, version=1 */
+u32 wwhd_actor_register(const char* actor_id,const wwhd_actor_behavior_v1* behavior);
+wwhd_actor_handle wwhd_actor_find(const char* actor_id); /* zero until create dispatch */
+u32 wwhd_actor_get(wwhd_actor_handle,wwhd_actor_state_v1* state);
+void* wwhd_actor_userdata(wwhd_actor_handle); /* valid only while the handle is live */
+u32 wwhd_actor_set_position(wwhd_actor_handle,f32 x,f32 y,f32 z);
+u32 wwhd_actor_set_rotation(wwhd_actor_handle,f32 x,f32 y,f32 z);
+u32 wwhd_actor_set_collision(wwhd_actor_handle,f32 radius,f32 height,u32 flags);
+u32 wwhd_actor_set_animation(wwhd_actor_handle,const char* clip,f32 blend_seconds,u32 loop);
+/* Points/state buffers must lie in this mod's region or its live actor userdata.
+ * Paths use game units, 2..16 points, speed>0..1500, loop=0/1. Native collision
+ * and ground checks can refuse movement. A quest place uses current-room X/Z. */
+u32 wwhd_actor_walk(wwhd_actor_handle,const wwhd_actor_vec3* points,u32 count,f32 speed,u32 loop);
+u32 wwhd_actor_walk_quest(wwhd_actor_handle,const char* quest_id,f32 speed);
+u32 wwhd_actor_stop(wwhd_actor_handle);
+
+/* A scene music cue invokes this mod's real hook. A music step fails preflight
+ * without one. RESTORE is sent once per distinct cue whose START or STOP callback
+ * was invoked when the scene releases its lease, including failure/abort/load.
+ * The callback owns playback through audio services
+ * or authored game bindings; return nonzero only after handling the event. */
+enum { WWHD_SCENE_MUSIC_START=0, WWHD_SCENE_MUSIC_STOP=1, WWHD_SCENE_MUSIC_RESTORE=2 };
+u32 wwhd_scene_music_register(u32 (*callback)(const char* cue,u32 phase,u32 fade_frames,u32 stop_reason));
 void* memcpy(void* dst, const void* src, unsigned long n);
 void* memmove(void* dst, const void* src, unsigned long n);
 void* memset(void* dst, int v, unsigned long n);

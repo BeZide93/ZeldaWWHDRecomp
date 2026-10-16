@@ -334,6 +334,7 @@ void test_bag_place() {
 
 void test_services() {
     // no save loaded
+    float place_x=123,place_z=456;assert(!place_position("m","tale",place_x,place_z)&&place_x==123&&place_z==456);
     assert(define("m", "My mod", "tale", "The tale", "A heart piece", "") == kResultNew);
     assert(step("m", "tale", 1, "Talk to the storyteller.", "Windfall Island") == kResultNoRoom);
     st32(0x101F84DC, kSave);
@@ -355,6 +356,11 @@ void test_services() {
     assert(step("m", "tale", 1, "Talk to the storyteller.", "Windfall Island") == 1);
     assert(step("m", "tale", 1, "Talk to the storyteller.", "Windfall Island") == 1);  // idempotent
     assert(place("m", "tale", 0, -200000) == 1 && known("m", "tale", "A storyteller came to Windfall.\nHe looks for Link.") == 1);
+    const std::vector<uint8_t> before_place_area(story_store::area(),story_store::area()+story_block::kAreaSize);
+    const std::vector<uint8_t> before_place_save(mem::ptr(kSave),mem::ptr(kSave)+0x800);
+    assert(place_position("m","tale",place_x,place_z)&&place_x==0&&place_z==-200000);
+    assert(!place_position("foreign","tale",place_x,place_z)&&!place_position("m","unknown",place_x,place_z)&&!place_position("m","Tale",place_x,place_z));
+    assert(std::equal(before_place_area.begin(),before_place_area.end(),story_store::area())&&std::equal(before_place_save.begin(),before_place_save.end(),mem::ptr(kSave)));
     assert(saved_step(b, quest_key("m", "tale")) == 1);
     assert(define("m", "My mod", "later", "Later", "", "Finish the tale first") == kResultNew);
     std::vector<Quest> storage;
@@ -364,9 +370,11 @@ void test_services() {
     // the tracked quest on the sea chart (story_chart's source)
     assert(toggle_tracked(b, quest_key("m", "tale")));
     assert(no_place("m", "tale") == 1);
+    assert(!place_position("m","tale",place_x,place_z)&&place_x==0&&place_z==-200000);
     assert(step("m", "tale", 2, "Bring him a Skull Necklace.", "") == 2);
     assert(done("m", "tale") == kResultDone && done("m", "tale") == kResultDone && state("m", "tale") == kResultDone);
     assert(tracked_key(b) == 0 && step("m", "tale", 3, "", "") == kResultDone);
+    assert(!place_position("m","tale",place_x,place_z));
     // per-mod limit
     for (unsigned i = 2; i < kMaxQuestsPerMod; i++) assert(define("m", "My mod", "q" + std::to_string(i), "Q", "", "") == kResultNew);
     assert(define("m", "My mod", "one-more", "Q", "", "") == kResultNoRoom);
@@ -1675,6 +1683,8 @@ void test_manifest() {
         }
     }
     assert(found);
+    float manifest_x=0,manifest_z=0;assert(place_position("lantern-mod","lantern",manifest_x,manifest_z)&&manifest_x==3827&&manifest_z==-202189);
+    assert(!place_position("lantern-mod","secret",manifest_x,manifest_z)); // hidden quest is not a navigation destination
     declared_tick();
     const uint16_t letter = story_mail::letter_key("lantern-mod", "lantern"), key = quest_key("lantern-mod", "lantern");
     assert(b.state(letter) == story_mail::kWaiting && saved_step(b, key) == 0);

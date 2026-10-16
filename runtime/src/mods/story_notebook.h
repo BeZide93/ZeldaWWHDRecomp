@@ -34,6 +34,10 @@ int32_t step(const std::string& mod, const std::string& quest, uint32_t step, co
 // wwhd_quest_place / wwhd_quest_no_place: the next step's place on the sea chart
 int32_t place(const std::string& mod, const std::string& quest, float x, float z);
 int32_t no_place(const std::string& mod, const std::string& quest);
+// Read the owner's current resolved quest place (XZ only, not stage/room/height).
+// Uses existing mod-owned progress; never writes a record. Outputs stay unchanged on failure.
+// The actor adapter must constrain navigation to its current room and ground.
+bool place_position(const std::string& mod,const std::string& quest,float& x,float& z);
 // wwhd_quest_known, wwhd_quest_portrait: what is known so far; the quest's portrait (package image)
 int32_t known(const std::string& mod, const std::string& quest, const std::string& text);
 int32_t portrait(const std::string& mod, const std::string& quest, const std::string& path, const std::string& package_dir);

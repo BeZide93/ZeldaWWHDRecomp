@@ -20,7 +20,7 @@ namespace {
 using story_notebook::ManifestActor;
 struct Actor {std::string mod; ManifestActor spec; uint32_t process=0xFFFFFFFFu; bool deleting=false; uint32_t mod_token=0;};
 std::vector<Actor> g_actors;
-struct ModelResource {std::string archive;int index;story_notebook::WorldPoint minimum,maximum;};
+struct ModelResource {std::string archive;int index;story_notebook::WorldPoint minimum,maximum;bool skinned=false;std::vector<std::string> clips;mod_actor::ModelRig rig;};
 std::map<std::pair<std::string,std::string>,ModelResource> g_models;
 std::map<uint16_t,std::pair<std::string,std::string>> g_flag_names;
 
@@ -143,6 +143,13 @@ bool load(const std::string& mod,const std::vector<ManifestActor>& actors,std::s
         for(const auto& other:actors)if(other.stage==a.stage&&other.room==a.room)++count;
         if(count>story_notebook::kMaxActorsPerRoom)return why="enabled mods exceed 16 actors per room",false;
     }
+    for(const auto&a:actors)if(a.kind=="mod"){
+        const auto resource=g_models.find({mod,a.model});if(resource==g_models.end())return why="prepared actor model missing",false;
+        const auto& rig=resource->second.rig;
+        if(a.look_at.enabled){const auto head=std::find(rig.joint_names.begin(),rig.joint_names.end(),a.look_at.head);if(head==rig.joint_names.end())return why="look_at head is not a model joint",false;if(rig.joint_look_compatible.size()!=rig.joint_names.size()||!rig.joint_look_compatible[size_t(head-rig.joint_names.begin())])return why="look_at requires identity bind rotation along the joint chain",false;if(std::fabs(std::remainder(a.rotation.x,360.f))>1e-4||std::fabs(std::remainder(a.rotation.z,360.f))>1e-4||a.scale.x<=0||std::fabs(a.scale.x-a.scale.y)>1e-4||std::fabs(a.scale.x-a.scale.z)>1e-4)return why="look_at requires upright actor and uniform positive scale",false;
+            if(!a.look_at.upper_bone.empty()){const auto upper=std::find(rig.joint_names.begin(),rig.joint_names.end(),a.look_at.upper_bone);if(upper==rig.joint_names.end())return why="look_at upper_body is not a model joint",false;if(!rig.joint_look_compatible[size_t(upper-rig.joint_names.begin())])return why="look_at upper_body has incompatible bind rotation",false;int parent=rig.joint_parents[size_t(head-rig.joint_names.begin())];const int target=int(upper-rig.joint_names.begin());while(parent>=0&&parent!=target)parent=rig.joint_parents[size_t(parent)];if(parent!=target)return why="look_at upper_body must be an ancestor of head",false;}}
+        if(!a.path.points.empty()&&(std::find(resource->second.clips.begin(),resource->second.clips.end(),"idle")==resource->second.clips.end()||std::find(resource->second.clips.begin(),resource->second.clips.end(),"walk")==resource->second.clips.end()))return why="authored paths require idle and walk clips",false;
+    }
     if(!register_flags(mod,flags,why))return false;
     for(const auto& a:actors)g_actors.push_back({mod,a});return true;
 }
@@ -158,13 +165,17 @@ bool register_flags(const std::string& mod,const std::vector<std::string>& flags
 }
 bool declared(){return !g_actors.empty();}
 bool mod_declared(){return std::any_of(g_actors.begin(),g_actors.end(),[](const Actor& a){return a.spec.kind=="mod";});}
-bool register_model(const std::string& mod,const std::string& model,const std::string& archive,int index,std::string& why,story_notebook::WorldPoint minimum,story_notebook::WorldPoint maximum){
+bool register_model(const std::string& mod,const std::string& model,const std::string& archive,int index,std::string& why,story_notebook::WorldPoint minimum,story_notebook::WorldPoint maximum,bool skinned,std::vector<std::string> clips,mod_actor::ModelRig rig){
     if(g_installed)return why="actor models must be registered before hooks are installed",false;
     if(mod.empty()||model.empty()||archive.empty()||archive.size()>63||index<0||index>16)return why="invalid prepared actor model resource",false;
     const float lo[]={minimum.x,minimum.y,minimum.z},hi[]={maximum.x,maximum.y,maximum.z};for(unsigned i=0;i<3;++i)if(!std::isfinite(lo[i])||!std::isfinite(hi[i])||lo[i]>hi[i])return why="invalid prepared model bounds",false;
+    if(rig.joint_names.size()!=rig.joint_parents.size()||rig.joint_names.size()>32||(!skinned&&!rig.joint_names.empty()))return why="invalid prepared model rig",false;
+    for(size_t i=0;i<rig.joint_parents.size();++i)if(rig.joint_parents[i]>=int(i)||(i&&rig.joint_parents[i]<0)||rig.joint_parents[i]<-1)return why="invalid prepared joint hierarchy",false;
+    if(clips.size()>8||(!skinned&&!clips.empty()))return why="invalid prepared animation list",false;
+    for(size_t i=0;i<clips.size();++i)if(!story_mail::valid_id(clips[i])||std::find(clips.begin(),clips.begin()+i,clips[i])!=clips.begin()+i)return why="invalid prepared animation name",false;
     const auto key=std::make_pair(mod,model);if(g_models.contains(key))return why="duplicate prepared actor model",false;
     for(const auto& entry:g_models)if(entry.second.archive==archive)return why="actor model archive identity collision",false;
-    g_models.emplace(key,ModelResource{archive,index,minimum,maximum});return true;
+    g_models.emplace(key,ModelResource{archive,index,minimum,maximum,skinned,std::move(clips),std::move(rig)});return true;
 }
 void set_game_calls(void(*original)(Cpu*,uint32_t),uint32_t(*call)(Cpu*,uint32_t,std::initializer_list<uint32_t>)){g_original=original;g_call=call;}
 void set_scratch_memory(uint32_t guest){g_scratch=guest;for(size_t i=0;i<g_actors.size();++i)st32(g_scratch+128+uint32_t(i)*4,0xFFFFFFFFu);std::memset(mem::ptr(g_scratch+0x300),0,28);std::memset(mem::ptr(g_scratch+0x400),0,256);}
@@ -294,7 +305,7 @@ void install(const std::function<std::string(uint32_t)>& replaced_by,const std::
             auto found=std::find_if(g_actors.begin(),g_actors.end(),[&](const Actor& a){return a.mod==mod&&a.spec.id==id;});if(found==g_actors.end())return;
             if(!found->spec.flag.empty())set_flag(story_store::book(),mod,found->spec.flag);
             actions(mod,found->spec.then);story_scenes::trigger("talk",mod,id);
-        },model->second.minimum,model->second.maximum);if(!a.mod_token)exception_report::raise("Cannot declare generic mod actor "+mod+":"+id);has_mod=true;
+        },model->second.minimum,model->second.maximum,model->second.skinned,model->second.clips,model->second.rig);if(!a.mod_token)exception_report::raise("Cannot declare generic mod actor "+mod+":"+id);has_mod=true;
     }
     if(has_mod&&!mod_actor::install(replaced_by,replace))exception_report::raise("Cannot install generic mod actor profile");
     if(has_mod){mod_actor_shadow_proof::configure(g_original,g_call);mod_actor_shadow_proof::install(replaced_by,replace);}

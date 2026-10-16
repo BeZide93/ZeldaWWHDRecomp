@@ -111,7 +111,7 @@ void import_legacy(const fs::path& stage,const std::string& source_name){
     m["description"]=description;
     std::ofstream out(stage/"manifest.json");out<<json::dump(m)<<'\n';out.close();require(bool(out),"Cannot write imported manifest");
 }
-Files index(const fs::path& directory){
+Files index(const fs::path& directory, bool allow_empty_world){
     require(fs::is_directory(directory),"Content folder is missing");
     require(!fs::is_symlink(directory),"Content paths may not use symlinks");
     Files out;uint64_t total=0;size_t count=0;
@@ -124,7 +124,7 @@ Files index(const fs::path& directory){
         require(archive::relative_path(relative),"Invalid content path");
         require(out.emplace(lower(relative),e.path().string()).second,"Duplicate content path (case insensitive)");
     }
-    require(!out.empty(),"Content mod contains no files");return out;
+    require(allow_empty_world || !out.empty(),"Content mod contains no files");return out;
 }
 void activate(Files files){
     auto next=files.empty()?nullptr:std::make_shared<const Files>(std::move(files));

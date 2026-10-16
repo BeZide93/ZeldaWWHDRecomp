@@ -31,6 +31,7 @@ int main(int argc,char** argv){
     fails("fail");prepare("owner","ok");fails("wrong");
     fs::remove(file);fails("missing");
     assert(prepare(std::string(64,'a'),"ok").size()==31);
+    model.kind="unknown";bool bad_kind_failed=false;try{prepare("owner","ok");}catch(const std::exception&){bad_kind_failed=true;}assert(bad_kind_failed);model.kind="static";
     bool long_owner_failed=false;try{prepare(std::string(65,'a'),"ok");}catch(const std::exception&){long_owner_failed=true;}assert(long_owner_failed);
     model.source="../outside.glb";fails("ok");
     assert(actor_model_cache::archive_for("/vol/content/Common/Object/mod0000000000000000000000000000.szs").empty());

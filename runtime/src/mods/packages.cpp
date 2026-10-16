@@ -17,6 +17,7 @@
 #include "wwhd_mod.h"
 #include "story_manifest.h"
 #include "static_model_validation.h"
+#include "skinned_model_validation.h"
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -153,6 +154,7 @@ Manifest manifest(const fs::path& path){
     if(!game_id_supported(string_field(v,"game_id",false,64)))m.problem="This package targets another game";
     auto minimum=string_field(v,"minimum_manager_version",true,64);
     if(!minimum.empty()&&version(minimum)>version(kManagerVersion))m.problem="Requires mod manager "+minimum;
+    bool world_declarations = false;
     // story quests (story_manifest.h): an NPC this port's catalogue doesn't know, or a newer catalogue
     // version, keeps the mod from being enabled with the reason, never a silent no-op
     if(m.problem.empty()&&(v.get("quests").type!=Value::Null||v.get("npc_catalogue").type!=Value::Null||v.get("charts").type!=Value::Null||v.get("letters").type!=Value::Null||v.get("items").type!=Value::Null||v.get("models").type!=Value::Null||v.get("actors").type!=Value::Null||v.get("scenes").type!=Value::Null)){
@@ -161,14 +163,19 @@ Manifest manifest(const fs::path& path){
         std::vector<story_notebook::ManifestLetter> letters;std::vector<story_notebook::ManifestItem> items;std::string why;
         if(!story_notebook::parse_quests(v,quests,why)||!story_notebook::parse_charts(v,charts,why)||!story_notebook::parse_letters(v,letters,why)||
            !story_notebook::parse_items(v,items,why)||!story_notebook::parse_actors(v,actors,why)||!story_notebook::parse_scenes(v,scenes,why))m.problem="Story quests: "+why;
+        else world_declarations = !quests.empty() || !charts.empty() || !letters.empty() ||
+                                  !items.empty() || !actors.empty() || !scenes.empty();
     }
     std::vector<story_notebook::ManifestModel> models;std::string model_error;
     require(story_notebook::parse_models(v,models,model_error),"Models: "+model_error);
+    world_declarations = world_declarations || (!models.empty() && m.problem.empty());
     for(const auto& model:models){
         auto checked=path;for(const auto& part:fs::path(model.source)){checked/=part;require(!fs::is_symlink(checked),"Model source paths may not use symlinks");}
         require(fs::is_regular_file(checked)&&fs::file_size(checked)<=static_models::kMaxSourceBytes,"Missing or oversized model source");
         std::ifstream input(checked,std::ios::binary);std::vector<uint8_t> bytes{std::istreambuf_iterator<char>(input),{}};
-        static_models::ModelInfo info;require(static_models::validate_glb(bytes,info,model_error),"Model "+model.id+": "+model_error);
+        static_models::ModelInfo info;
+        if(model.kind=="skinned"){skinned_models::ModelInfo skin;require(skinned_models::validate_glb(bytes,skin,model_error),"Model "+model.id+": "+model_error);info=skin;}
+        else require(static_models::validate_glb(bytes,info,model_error),"Model "+model.id+": "+model_error);
         const auto pixels=guestmods::hud::decode_png(std::span<const uint8_t>(bytes).subspan(info.image_offset,info.image_size));
         require(pixels.width==info.texture_width&&pixels.height==info.texture_height,"Invalid model PNG");
     }
@@ -208,7 +215,7 @@ Manifest manifest(const fs::path& path){
         auto folder=string_field(v,"content_dir",false,512);
         require(archive::relative_path(folder),"Invalid content directory");
         auto checked=path;for(const auto& part:fs::path(folder)){checked/=part;require(!fs::is_symlink(checked),"Content paths may not use symlinks");}
-        m.files=content::index(path/folder);
+        m.files=content::index(path/folder, world_declarations && m.problem.empty());
     } else {
         const auto& settings=v.get("settings");require(settings.type==Value::Object&&!settings.object.empty(),"Settings mod has no settings");
         for(const auto& [id,b]:settings.object){require(manager::find(id)&&b.type==Value::Bool,"Unknown built-in setting: "+id);m.settings[id]=b.boolean;}

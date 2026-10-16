@@ -670,6 +670,22 @@ int main(int argc, char** argv) {
         bad["id"]="world-content-other-dependency";bad["actors"]=mods::json::parse(R"([{"id":"notice","actor":"sign","stage":"sea","room":11,"flag":"read","position":{"x":0,"y":0,"z":0}}])");
         bad["dependencies"].array.push_back(mods::json::parse(R"({"id":"other-content"})"));
         std::ofstream(invalid/"manifest.json")<<mods::json::dump(bad);assert(!install(invalid.string(),error));
+        // Manifest-only owners must not install fake game replacements to carry scenes.
+        auto scene_only=root/"scene-only";fs::create_directories(scene_only/"content");
+        auto scene_manifest=mods::json::parse(R"({"format_version":1,"id":"scene-only","name":"Scene only","version":"1.0.0","game_id":"wwhd","kind":"content","content_dir":"content","scenes":[{"id":"test","trigger":{"type":"area","stage":"sea","room":11,"position":{"x":0,"y":0,"z":0},"radius":80},"steps":[{"type":"wait","frames":1},{"type":"end"}]}]})");
+        std::ofstream(scene_only/"manifest.json")<<mods::json::dump(scene_manifest);
+        assert(install(scene_only.string(),error)&&view("scene-only").compatible);
+        assert(mods::content::index(scene_only/"content",true).empty());
+        assert(mods::content::replacement("/vol/content/scene-only.marker").empty());
+        scene_manifest["id"]="empty-content";scene_manifest.object.erase("scenes");
+        std::ofstream(scene_only/"manifest.json")<<mods::json::dump(scene_manifest);
+        assert(!install(scene_only.string(),error)&&error.find("contains no files")!=std::string::npos);
+        scene_manifest["id"]="empty-scene-array";scene_manifest["scenes"]=mods::json::parse("[]");
+        std::ofstream(scene_only/"manifest.json")<<mods::json::dump(scene_manifest);
+        assert(!install(scene_only.string(),error)&&error.find("contains no files")!=std::string::npos);
+        scene_manifest["id"]="malformed-scene";scene_manifest["scenes"]=mods::json::parse(R"([{"id":"bad"}])");
+        std::ofstream(scene_only/"manifest.json")<<mods::json::dump(scene_manifest);
+        assert(!install(scene_only.string(),error));
         auto world_fixture=[&](const std::string& id,unsigned count){
             auto source=root/id;fs::create_directories(source/"content");std::ofstream(source/"content"/(id+".marker"))<<"original fixture";
             auto m=mods::json::parse(R"({"format_version":1,"id":"fixture","name":"World graph fixture","version":"1.0.0","game_id":"wwhd","kind":"content","content_dir":"content","actors":[]})");m["id"]=id;

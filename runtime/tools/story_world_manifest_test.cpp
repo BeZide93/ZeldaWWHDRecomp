@@ -65,7 +65,13 @@ int main() {
     auto mod=mods::json::parse(R"({"models":[{"id":"post","source":"models/post.glb"}],"actors":[{"id":"post","kind":"mod","model":"post","stage":"town","room":0,"position":{"x":0,"y":0,"z":0},"collision":{"radius":30,"height":120,"mode":"solid"},"attention":{"prompt":"check"},"lines":"Hello"}]})");
     assert(parse_actors(mod,actors,why)&&actors[0].kind=="mod"&&actors[0].model=="post"&&actors[0].collision_height==120&&!actors[0].pushable);
     auto valid_mod=mod;mod["actors"].array[0]["collision"]["mode"]="pushable";assert(parse_actors(mod,actors,why)&&actors[0].pushable);
+    std::vector<ManifestModel> models;assert(parse_models(valid_mod,models,why)&&models[0].kind=="static");
+    mod=valid_mod;mod["models"].array[0]["kind"]="skinned";assert(parse_models(mod,models,why)&&models[0].kind=="skinned");
+    mod["models"].array[0]["kind"]="static";assert(parse_models(mod,models,why)&&models[0].kind=="static");
+    for(const auto& kind:{"animated","", "native"}){mod["models"].array[0]["kind"]=kind;assert(!parse_models(mod,models,why));}
+    mod["models"].array[0]["kind"]=mods::json::Value{};assert(!parse_models(mod,models,why));
     for(const auto& source:{"../post.glb","/post.glb","models//post.glb","models/./post.glb","models/post.bfres","C:post.glb"}){mod=valid_mod;mod["models"].array[0]["source"]=source;assert(!parse_actors(mod,actors,why));}
+    mod=valid_mod;mod["actors"].array[0]["animation"]="wave";assert(!parse_actors(mod,actors,why));mod["models"].array[0]["kind"]="skinned";assert(parse_actors(mod,actors,why)&&actors[0].animation=="wave");mod["actors"].array[0]["animation"]="";assert(!parse_actors(mod,actors,why));
     mod=valid_mod;mod["actors"].array[0]["actor"]="sign";assert(!parse_actors(mod,actors,why));
     mod=valid_mod;mod["actors"].array[0]["model"]="missing";assert(!parse_actors(mod,actors,why));
     mod=valid_mod;mod["actors"].array[0]["params"]=0;assert(!parse_actors(mod,actors,why));
@@ -77,5 +83,60 @@ int main() {
     mod=valid_mod;mod["actors"].array[0]["collision"]["radius"]=1e-300;assert(!parse_actors(mod,actors,why));
     mod=valid_mod;mod["actors"].array[0]["collision"]["height"]=1e-300;assert(!parse_actors(mod,actors,why));
     mod=example();mod["actors"].array[0]["actor"]="mod";assert(!parse_actors(mod,actors,why));
+    auto moving=valid_mod;moving["models"].array[0]["kind"]="skinned";auto& ma=moving["actors"].array[0];
+    ma["look_at"]=mods::json::parse(R"({"head":"Head","yaw_degrees":70,"pitch_degrees":30,"rate_degrees":180,"radius":500,"upper_body":{"bone":"Root","yaw_degrees":20,"fraction":0.3}})");
+    ma["path"]=mods::json::parse(R"({"points":[{"x":0,"y":0,"z":0},{"x":100,"y":0,"z":0},{"x":100,"y":0,"z":100}],"speed":100,"mode":"loop"})");
+    assert(parse_actors(moving,actors,why)&&actors[0].look_at.enabled&&actors[0].look_at.head=="Head"&&actors[0].look_at.upper_bone=="Root"&&actors[0].path.loop&&actors[0].path.points.size()==3);
+    for(const auto& field:{"look_at","path"}){mod=moving;mod["models"].array[0]["kind"]="static";mod["actors"].array[0].object.erase(field==std::string("look_at")?"path":"look_at");assert(!parse_actors(mod,actors,why));mod=moving;mod["actors"].array[0][field]=Value{};assert(!parse_actors(mod,actors,why));}
+    for(const auto& pair:{std::pair{"yaw_degrees",181.},std::pair{"pitch_degrees",91.},std::pair{"rate_degrees",0.},std::pair{"rate_degrees",1081.},std::pair{"rate_degrees",1e-300},std::pair{"radius",0.},std::pair{"radius",1000001.}}){mod=moving;mod["actors"].array[0]["look_at"][pair.first]=Value(pair.second);assert(!parse_actors(mod,actors,why));}
+    for(const auto& bone:{"", "1Head", "Head/Bad", "Head Bad"}){mod=moving;mod["actors"].array[0]["look_at"]["head"]=bone;assert(!parse_actors(mod,actors,why));}
+    mod=moving;mod["actors"].array[0]["look_at"]["upper_body"]["bone"]="Head";assert(!parse_actors(mod,actors,why));mod=moving;mod["actors"].array[0]["look_at"]["upper_body"]["fraction"]=1.01;assert(!parse_actors(mod,actors,why));mod=moving;mod["actors"].array[0]["look_at"]["upper_body"]=Value{};assert(!parse_actors(mod,actors,why));
+    mod=moving;mod["actors"].array[0]["look_at"]["yaw_degrees"]=0;mod["actors"].array[0]["look_at"]["pitch_degrees"]=0;mod["actors"].array[0]["look_at"].object.erase("upper_body");assert(parse_actors(mod,actors,why)&&actors[0].look_at.upper_bone.empty());
+    for(const auto& speed:{0.,-1.,1501.,1e-300}){mod=moving;mod["actors"].array[0]["path"]["speed"]=Value(speed);assert(!parse_actors(mod,actors,why));}
+    mod=moving;mod["actors"].array[0]["path"]["mode"]="teleport";assert(!parse_actors(mod,actors,why));mod=moving;mod["actors"].array[0]["path"]["points"].array.resize(1);assert(!parse_actors(mod,actors,why));mod=moving;mod["actors"].array[0]["path"]["points"].array.resize(17);assert(!parse_actors(mod,actors,why));
+    mod=moving;mod["actors"].array[0]["path"]["points"].array[1]=mod["actors"].array[0]["path"]["points"].array[0];assert(!parse_actors(mod,actors,why));mod=moving;mod["actors"].array[0]["path"]["points"].array.back()=mod["actors"].array[0]["path"]["points"].array.front();assert(!parse_actors(mod,actors,why));mod["actors"].array[0]["path"]["mode"]="once";assert(parse_actors(mod,actors,why));
+    mod=moving;mod["actors"].array[0]["path"]["points"].array[0]["speed"]=1;assert(!parse_actors(mod,actors,why));mod=moving;mod["actors"].array[0]["look_at"]["extra"]=true;assert(!parse_actors(mod,actors,why));
+    mod=example();mod["actors"].array[0]["look_at"]=ma.get("look_at");assert(!parse_actors(mod,actors,why));mod=example();mod["actors"].array[0]["path"]=ma.get("path");assert(!parse_actors(mod,actors,why));
+    auto extended=moving;extended["scenes"]=mods::json::parse(R"([{"id":"extended","steps":[
+      {"id":"opening","type":"camera_path","easing":"smoothstep","points":[{"eye":{"x":0,"y":100,"z":100},"target":{"x":0,"y":0,"z":0},"frames":30},{"eye":{"x":100,"y":100,"z":100},"target":{"x":0,"y":0,"z":0},"frames":60},{"eye":{"x":200,"y":100,"z":100},"target":{"x":0,"y":0,"z":0}}]},
+      {"id":"follow","type":"camera_follow","actor":"post","eye_offset":{"x":0,"y":100,"z":100},"target_offset":{"x":0,"y":0,"z":0},"half_life":0.2,"frames":60},
+      {"id":"animate","type":"animation","actor":"post","clip":"wave","blend_seconds":0.3,"loop":false},
+      {"id":"walk","type":"walk","actor":"post","points":[{"x":0,"y":0,"z":0},{"x":100,"y":0,"z":0}],"speed":100,"frames":300},
+      {"id":"question","type":"choice","text":"Which way?","options":[{"text":"Left","next":"left"},{"text":"Right","next":"right"}],"default":1,"frames":600},
+      {"id":"left","type":"music","cue":"calm","action":"start","fade_frames":60,"next":"left-end"},{"id":"left-end","type":"end"},
+      {"id":"right","type":"music","cue":"calm","action":"stop","next":"right-end"},{"id":"right-end","type":"end"}
+    ]}])");
+    assert(parse_scenes(extended,scenes,why)&&scenes[0].steps[0].frames==90&&scenes[0].steps[0].camera_keys.size()==3&&scenes[0].steps[4].successors==std::vector<size_t>({5,7})&&scenes[0].steps[4].choices[1].next_step==7&&scenes[0].steps[4].default_choice==1&&scenes[0].steps[5].successors==std::vector<size_t>({6}));
+    auto bad_scene=[&](Value data){assert(!parse_scenes(data,scenes,why)&&scenes.empty()&&!why.empty());};
+    v=extended;v["scenes"].array[0]["steps"].array[0]["points"].array.back()["frames"]=1;bad_scene(v);
+    v=extended;v["scenes"].array[0]["steps"].array[0]["points"].array[0]["frames"]=18000;bad_scene(v);
+    v=extended;v["scenes"].array[0]["steps"].array[0]["points"].array.resize(1);bad_scene(v);
+    v=extended;v["scenes"].array[0]["steps"].array[0]["easing"]="bounce";bad_scene(v);
+    v=extended;v["scenes"].array[0]["steps"].array[0]["points"].array[1]["eye"]=mods::json::parse("{\"x\":0,\"y\":-100,\"z\":-100}");bad_scene(v); // crossing eye/target despite valid endpoints
+    v=extended;v["scenes"].array[0]["steps"].array[1]["half_life"]=11;bad_scene(v);
+    v=extended;v["scenes"].array[0]["steps"].array[1]["target_offset"]=v["scenes"].array[0]["steps"].array[1]["eye_offset"];bad_scene(v);
+    v=extended;v["scenes"].array[0]["steps"].array[2]["loop"]=1;bad_scene(v);
+    v=extended;v["scenes"].array[0]["steps"].array[2]["blend_seconds"]=11;bad_scene(v);
+    v=extended;v["models"].array[0]["kind"]="static";bad_scene(v);
+    v=extended;v["scenes"].array[0]["steps"].array[3]["speed"]=1e-300;bad_scene(v);
+    v=extended;v["scenes"].array[0]["steps"].array[3]["quest_place"]="unknown";bad_scene(v);
+    v=extended;v["scenes"].array[0]["steps"].array[3].object.erase("points");v["scenes"].array[0]["steps"].array[3]["quest_place"]="destination";bad_scene(v);v["quests"]=mods::json::parse("[{\"id\":\"destination\"}]");assert(parse_scenes(v,scenes,why)&&scenes[0].steps[3].quest_place=="destination");
+    v=extended;v["scenes"].array[0]["steps"].array[4]["options"].array[0]["text"]=std::string(33,'x');bad_scene(v);
+    v=extended;v["scenes"].array[0]["steps"].array[4]["options"].array[0]["text"]="two\nlines";bad_scene(v);
+    v=extended;v["scenes"].array[0]["steps"].array[4]["default"]=2;bad_scene(v);
+    v=extended;v["scenes"].array[0]["steps"].array[4]["options"].array[1]["next"]="left";bad_scene(v);
+    v=extended;v["scenes"].array[0]["steps"].array[4]["options"].array[0]["next"]="opening";bad_scene(v);
+    v=extended;v["scenes"].array[0]["steps"].array[4]["next"]="left";bad_scene(v);
+    v=extended;v["scenes"].array[0]["steps"].array[0]["next"]="question";bad_scene(v); // skipped unreachable steps
+    v=extended;v["scenes"].array[0]["steps"].array[1]["id"]="opening";bad_scene(v);
+    v=extended;v["scenes"].array[0]["steps"].array[5]["next"]="missing";bad_scene(v);
+    v=extended;v["scenes"].array[0]["steps"].array[6]["next"]="right";bad_scene(v);
+    v=extended;v["scenes"].array[0]["steps"].array[5]["fade_frames"]=601;bad_scene(v);
+    v=extended;v["scenes"].array[0]["steps"].array[5]["action"]="native-bgm-id";bad_scene(v);
+    v=extended;v["scenes"].array[0]["steps"].array[1]["eye_offset"]["extra"]=0;bad_scene(v);
+    v=extended;v["scenes"].array[0]["steps"].array[0]["next"]=Value{};bad_scene(v);
+    v=moving;v["scenes"]=mods::json::parse(R"([{"id":"branch-duration","steps":[{"id":"choose","type":"choice","text":"Choose","frames":1,"options":[{"text":"A","next":"a"},{"text":"B","next":"b"}]},{"id":"a","type":"wait","frames":10000,"next":"a-end"},{"id":"a-end","type":"end"},{"id":"b","type":"wait","frames":10000,"next":"b-end"},{"id":"b-end","type":"end"}]}])");assert(parse_scenes(v,scenes,why));v["scenes"].array[0]["steps"].array[1]["frames"]=18000;bad_scene(v);
+    v=extended;v["scenes"].array[0]["steps"].array[1]["actor"]="link";assert(parse_scenes(v,scenes,why));
+    v=moving;v["scenes"]=mods::json::parse(R"([{"id":"mod-move","steps":[{"type":"move","actor":"post","position":{"x":100,"y":0,"z":0},"frames":60},{"type":"face","actor":"post","target_actor":"link"},{"type":"end"}]}])");assert(parse_scenes(v,scenes,why));
     std::cout<<"story world manifest tests passed\n";
 }

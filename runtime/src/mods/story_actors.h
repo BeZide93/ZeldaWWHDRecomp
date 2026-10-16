@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 #include "story_world_manifest.h"
+#include "mod_actor.h"
 #include "story_actors_core.h"
 struct Cpu;
 namespace story_actors {
@@ -14,7 +15,8 @@ bool declared();
 bool mod_declared();
 // Prepared player-local model archive; register before install.
 bool register_model(const std::string& mod,const std::string& model,const std::string& archive,int resource_index,std::string& why,
-                    story_notebook::WorldPoint minimum={-50,0,-50},story_notebook::WorldPoint maximum={50,200,50});
+                    story_notebook::WorldPoint minimum={-50,0,-50},story_notebook::WorldPoint maximum={50,200,50},
+                    bool skinned=false,std::vector<std::string> clips={},mod_actor::ModelRig rig={});
 bool register_flags(const std::string& mod,const std::vector<std::string>& flags,std::string& why);
 void service(Cpu*);
 void set_game_calls(void (*original)(Cpu*,uint32_t),uint32_t (*call)(Cpu*,uint32_t,std::initializer_list<uint32_t>));

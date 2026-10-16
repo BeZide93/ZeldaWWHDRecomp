@@ -1,6 +1,7 @@
 #include "actor_model_cache.h"
 #include "mod_hash.h"
 #include "static_model_validation.h"
+#include "skinned_model_validation.h"
 #include "../platform/process.h"
 #include <filesystem>
 #include <fstream>
@@ -8,7 +9,7 @@
 #include <mutex>
 namespace actor_model_cache {
 namespace {
-struct Entry {std::string mod,model,path;story_notebook::WorldPoint minimum,maximum;};
+struct Entry {std::string mod,model,path;story_notebook::WorldPoint minimum,maximum;std::vector<std::string> clips;mod_actor::ModelRig rig;};
 std::mutex mutex;
 std::map<std::string,Entry> entries;
 void check(bool ok,const char* reason){if(!ok)exception_report::raise(reason);}
@@ -19,7 +20,7 @@ std::string prepare(const std::string& mod,const story_notebook::ManifestModel& 
     namespace fs=std::filesystem;
     const bool owner_ok=!mod.empty()&&mod.size()<=64&&mod.front()!='.'&&std::all_of(mod.begin(),mod.end(),[](unsigned char c){return (c>='a'&&c<='z')||(c>='0'&&c<='9')||c=='_'||c=='-'||c=='.';});
     check(owner_ok&&story_mail::valid_id(model.id),"Invalid model owner or id");
-    mods::json::Value manifest,source;source["id"]=model.id;source["source"]=model.source;manifest["models"].type=mods::json::Value::Array;manifest["models"].array.push_back(source);
+    mods::json::Value manifest,source;source["id"]=model.id;source["source"]=model.source;source["kind"]=model.kind;manifest["models"].type=mods::json::Value::Array;manifest["models"].array.push_back(source);
     std::vector<story_notebook::ManifestModel> validated;std::string why;check(story_notebook::parse_models(manifest,validated,why),"Invalid model source path");
     check(!package_dir.empty()&&!data_dir.empty()&&!game_dir.empty()&&!python.empty()&&!tool.empty(),"Static model conversion tools are unavailable");
     auto input=fs::path(package_dir);for(const auto& part:fs::path(model.source)){input/=part;check(!fs::is_symlink(input),"Model source paths may not use symlinks");}
@@ -32,7 +33,11 @@ std::string prepare(const std::string& mod,const story_notebook::ManifestModel& 
         if(old!=entries.end())entries.erase(old); // a failed rebuild must never expose stale output
     }
     std::ifstream source_file(input,std::ios::binary);std::vector<uint8_t> bytes{std::istreambuf_iterator<char>(source_file),{}};
-    static_models::ModelInfo info;check(static_models::validate_glb(bytes,info,why),"Invalid static model source");
+    static_models::ModelInfo info;std::vector<std::string> clips;mod_actor::ModelRig rig;
+    if(model.kind=="skinned"){
+        skinned_models::ModelInfo skin;check(skinned_models::validate_glb(bytes,skin,why),"Invalid skinned model source");
+        info=skin;rig={skin.joint_names,skin.joint_parents,skin.joint_look_compatible};for(const auto& clip:skin.clips)clips.push_back(clip.name);
+    }else check(static_models::validate_glb(bytes,info,why),"Invalid static model source");
     const story_notebook::WorldPoint minimum{info.minimum[0],info.minimum[1],info.minimum[2]},maximum{info.maximum[0],info.maximum[1],info.maximum[2]};
     check(!fs::is_symlink(fs::path(data_dir)/"models"),"Static model cache cannot use a symlink directory");
     fs::create_directories(destination.parent_path());
@@ -50,7 +55,7 @@ std::string prepare(const std::string& mod,const story_notebook::ManifestModel& 
     check(result.get("identity").string()==identity,"Static model converter returned another archive identity");
     check(fs::is_regular_file(destination)&&!fs::is_symlink(destination)&&fs::file_size(destination)>=16&&fs::file_size(destination)<=16*1024*1024,"Static model converter produced a missing or oversized archive");
     std::ifstream archive(destination,std::ios::binary);char magic[4]{};archive.read(magic,4);check(archive&&std::string(magic,4)=="Yaz0","Static model converter produced an invalid archive");
-    {std::lock_guard guard(mutex);entries.emplace(identity,Entry{mod,model.id,destination.string(),minimum,maximum});}
+    {std::lock_guard guard(mutex);entries.emplace(identity,Entry{mod,model.id,destination.string(),minimum,maximum,std::move(clips),std::move(rig)});}
     return identity;
 }
 std::string archive_for(const std::string& guest_path){
@@ -62,4 +67,6 @@ bool bounds_for(const std::string& archive,story_notebook::WorldPoint& minimum,s
     std::lock_guard guard(mutex);auto found=entries.find(archive);if(found==entries.end())return false;
     minimum=found->second.minimum;maximum=found->second.maximum;return true;
 }
+mod_actor::ModelRig rig_for(const std::string& archive){std::lock_guard guard(mutex);auto found=entries.find(archive);return found==entries.end()?mod_actor::ModelRig{}:found->second.rig;}
+std::vector<std::string> clips_for(const std::string& archive){std::lock_guard guard(mutex);auto found=entries.find(archive);return found==entries.end()?std::vector<std::string>{}:found->second.clips;}
 }

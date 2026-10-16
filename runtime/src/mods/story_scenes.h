@@ -5,13 +5,21 @@
 #include <initializer_list>
 #include <string>
 #include <vector>
+#include <optional>
 #include "story_world_manifest.h"
 #include "story_scenes_core.h"
 struct Cpu;
 namespace input {struct PadState;}
 namespace story_scenes {
-inline constexpr uint32_t kScratchBytes = 256;
+inline constexpr uint32_t kScratchBytes = 1024;
 using Resolve = std::function<uint32_t(Cpu*,const std::string&,const std::string&)>;
+using ResolvePlace = std::function<std::optional<story_notebook::WorldPoint>(Cpu*,const std::string&,const std::string&)>;
+enum class MusicPhase {Start,Stop,Restore};
+using MusicHook=std::function<bool(Cpu*,const std::string&,MusicPhase,unsigned,StopReason)>;
+// A real owned callback must implement the cue and restore its own prior state.
+// No retail BGM ID or implicit successful no-op is provided by this hook.
+bool register_music_hook(const std::string& owner,MusicHook);
+void set_place_resolver(ResolvePlace);
 using Actions = std::function<bool(const std::string&,const std::vector<story_notebook::StoryAction>&)>;
 void set_game_calls(uint32_t (*call)(Cpu*,uint32_t,std::initializer_list<uint32_t>));
 void set_scratch_memory(uint32_t guest);
