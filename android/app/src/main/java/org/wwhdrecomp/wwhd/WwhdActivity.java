@@ -55,10 +55,13 @@ public class WwhdActivity extends SDLActivity {
         }
         selection = AndroidGame.selected(this);
         onDeviceGame = selection != null ? selection.library : null;
+        // debug builds: WWHD_* intent extras (benchmark starts over adb), set once SDL's JNI is
+        // there but before the game library loads, so its static initializers see them too
+        System.loadLibrary("SDL3");
+        DebugLaunch.apply(this);
         if (onDeviceGame == null) {
             super.loadLibraries();
         } else {
-            System.loadLibrary("SDL3");
             System.load(onDeviceGame.getAbsolutePath());
             Log.i("wwhd-game", "Loaded on-device game " + onDeviceGame.getAbsolutePath());
             if (selection.game != null) Log.i("wwhd-game", "Selected game assets " + selection.game.getAbsolutePath());
