@@ -1,3 +1,4 @@
+#include "record_worker.h"
 #include "pass.h"
 #ifdef __ANDROID__
 #include "overlay/overlay.h"
@@ -307,15 +308,20 @@ void renderpass_retirement_check() {
   VkRenderingInfo rendering{VK_STRUCTURE_TYPE_RENDERING_INFO};
   rendering.renderArea.extent={8,8};rendering.layerCount=1;
   rendering.colorAttachmentCount=1;rendering.pColorAttachments=&attachment;
-  DeferredCommands captured;captured.start_capture();
+  DeferredCommands captured;
+  auto* pod = record_worker_commands();
+  const size_t commandsBefore = pod ? pod->command_count() : 0;
+  if (!pod) captured.start_capture();
   begin_pass(cmd,rendering,[&] { return color_pass(surface.fmt.pixel,surface.layout); });
   end_pass(cmd);
-  require(captured.command_count()==2,"classic begin/end did not enter the deferred command stream");
+  require((pod ? pod->command_count()-commandsBefore : captured.command_count())==2,
+      "classic begin/end did not enter the owned command stream");
   require(pass_caches().framebuffer_count()==cached+1,"captured framebuffer was not resolved at recording time");
   destroy_surface_image(&surface);
   require(pass_caches().framebuffer_count()==cached,"view deferral retained a framebuffer cache entry");
   require(R.garbageFramebuffers.size()==retired+1,"framebuffer did not share its view's submission retirement");
-  captured.finish_exact();flush_async();
+  if (!pod) captured.finish_exact();
+  flush_async();
  }
  wait_idle();
  for(const auto& slot:R.submissions)
@@ -1275,8 +1281,9 @@ int renderer_smoke_test() {
   }
   save_pipeline_cache();
   wait_idle();
+  stop_record_worker();
   reset_pass_caches();
   LOG("[renderer smoke] PASS: actual device upload/clear/blit/depth/triangle/present");return 0;
- }catch(const std::exception& e){LOG("[renderer smoke] FAIL: %s",e.what());try {command_buffer();flush();}catch(...){}return 1;}
+ }catch(const std::exception& e){LOG("[renderer smoke] FAIL: %s",e.what());try {command_buffer();flush();}catch(...){}try {stop_record_worker();}catch(...){}return 1;}
 }
 } // namespace gfxvk
