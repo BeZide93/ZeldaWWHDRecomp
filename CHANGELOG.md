@@ -20,6 +20,10 @@ what is on `devel` and not released yet (also in the
 
 - **Sploosh Kaboom: no more doubled hit and miss markers at higher frame rates** (#179). The board's markers are moved
   between cells once per game step; the in-between frames no longer blend a marker from its old cell to its new one.
+
+- **Option to turn off the letterbox bars while targeting** (#114). Settings → Mods → Built-in → Camera →
+  **Letterbox while targeting** (on by default). Switched off, normal Z-targeting no longer shows the black bars;
+  cutscenes, scripted cameras, minigames and item aiming keep theirs.
 - **True 60: no more crash at Orca's sword training** (#223). Talking to Orca and choosing "yes" stopped the game in True 60
   mode; event commands now only run on full game steps.
 
