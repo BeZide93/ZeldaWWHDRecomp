@@ -40,6 +40,10 @@ what is on `devel` and not released yet (also in the
   arithmetic values change, about 6–9% less render-thread CPU in tests (most on devices where the render thread limits
   the frame rate, like the Steam Deck), with identical pictures. On by default; `WWHD_VK_FASTPATH=0` turns it off if
   you see wrong textures or blending, and please report it (#178).
+
+- **Android two-screen handhelds: GamePad screen Off frees the lower screen** (#222). With the GamePad screen switched off,
+  the lower screen is released to the launcher and other apps (e.g. a video on an AYN Thor); switching it back on takes it
+  again with picture and touch.
 - **Mods on Windows:** a mod's preparation tool can now load its own helper files there too (the port's Python on
   Windows didn't look next to the tool). This stopped the GC minimap from installing on Windows; gc-minimap 0.2.2
   also fixes it on its own for v0.3.0 (#224).
