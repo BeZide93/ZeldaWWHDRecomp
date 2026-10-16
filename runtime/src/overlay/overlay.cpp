@@ -1027,7 +1027,32 @@ void tab_graphics() {
         diagnosticRead = true;
         for (int i = 0; i < 3; ++i) { std::string value; diagnosticOn[i] = hostui::get(diagnostics[i].key, value) && value == "1"; }
     }
-    for (int i = 0; i < 3; ++i) {
+    static int cpuMode = [] { std::string value; hostui::get("vkCpuVertices", value);
+        return value == "1" ? 1 : value == "0" ? 2 : 0; }();
+    ImGui::BeginDisabled(getenv("WWHD_VK_CPU_VERTICES") != nullptr);
+    if (ImGui::Combo("Convert vertices on the CPU", &cpuMode, "Automatic\0On (all)\0Off\0")) {
+        const std::string value = cpuMode == 1 ? "1" : cpuMode == 2 ? "0" : "auto";
+        hostui::post([value] { hostui::set("vkCpuVertices", value); });
+    }
+    ImGui::EndDisabled();
+    help("Applies after restarting. Automatic enables the PowerVR workaround. On converts every attribute; Off disables it.");
+    if (ImGui::TreeNode("Vertex conversion diagnostics")) {
+        static int cpuClass = [] { std::string value; hostui::get("vkCpuVertexClasses", value);
+            const char* names[] = {"", "none", "swap16", "swap32", "snorm", "scaled", "3comp", "unaligned", "integer", "unorm", "all"};
+            for (int i = 0; i < 11; ++i) if (value == names[i]) return i;
+            return 0; }();
+        ImGui::BeginDisabled(cpuMode != 0 || getenv("WWHD_VK_CPU_VERTICES") || getenv("WWHD_VK_CPU_VERTEX_CLASSES"));
+        if (ImGui::Combo("CPU conversion class", &cpuClass,
+            "Driver default\0None\0Swap16\0Swap32\0SNORM\0Scaled integers\0Three components\0Unaligned offset\0Integer\0UNORM\0All\0")) {
+            const char* names[] = {"", "none", "swap16", "swap32", "snorm", "scaled", "3comp", "unaligned", "integer", "unorm", "all"};
+            const std::string value = names[cpuClass];
+            hostui::post([value] { hostui::set("vkCpuVertexClasses", value); });
+        }
+        ImGui::EndDisabled();
+        help("For driver testing. Use Automatic above, select one class, then restart. The log records the active classes.");
+        ImGui::TreePop();
+    }
+    for (int i = 1; i < 3; ++i) {
         if (check(diagnostics[i].label, diagnosticOn[i], &v, !getenv(diagnostics[i].env))) {
             diagnosticOn[i] = v;
             const char* key = diagnostics[i].key;
