@@ -1001,6 +1001,32 @@ void tab_graphics() {
         hostui::post([v] { hostui::set("vkVertexFallback", v ? "1" : "0"); });
     }
     help("Applies after restarting the game. Splits RGB vertex inputs for driver troubleshooting.");
+    // issue #207 driver troubleshooting (gfx/vulkan/vertex_format_policy.h VertexDiagnostics)
+    struct Diagnostic { const char* label; const char* key; const char* env; const char* tip; };
+    static const Diagnostic diagnostics[] = {
+        {"Convert vertices on the CPU", "vkCpuVertices", "WWHD_VK_CPU_VERTICES",
+         "Applies after restarting the game. Byte swap and format conversion of the game's vertices run on the "
+         "CPU instead of the vertex shader (slower; for driver troubleshooting)."},
+        {"Full precision in shaders", "vkFullPrecision", "WWHD_VK_FULL_PRECISION",
+         "Applies after restarting the game. Removes reduced-precision hints from every shader (driver troubleshooting)."},
+        {"No vertex reuse", "vkNoVertexReuse", "WWHD_VK_NO_VERTEX_REUSE",
+         "Applies after restarting the game. Copies and binds every vertex buffer in full for every draw "
+         "(slower; for driver troubleshooting)."},
+    };
+    static bool diagnosticOn[3] = {};
+    static bool diagnosticRead = false;
+    if (!diagnosticRead) {
+        diagnosticRead = true;
+        for (int i = 0; i < 3; ++i) { std::string value; diagnosticOn[i] = hostui::get(diagnostics[i].key, value) && value == "1"; }
+    }
+    for (int i = 0; i < 3; ++i) {
+        if (check(diagnostics[i].label, diagnosticOn[i], &v, !getenv(diagnostics[i].env))) {
+            diagnosticOn[i] = v;
+            const char* key = diagnostics[i].key;
+            hostui::post([key, v] { hostui::set(key, v ? "1" : "0"); });
+        }
+        help(diagnostics[i].tip);
+    }
 #endif
     heading("Bug reports");
 #ifdef __ANDROID__

@@ -17,6 +17,7 @@
 #include "deferred_dispatch.h"
 #include "buffer_cache.h"
 #include "gx2/state_groups.h"
+#include "vertex_cpu_decode.h"
 #include "render_prof.h"
 #include "runtime.h"
 #include "gx2/gx2.h"
@@ -221,6 +222,44 @@ UploadSlice vertex_snapshot(uint32_t binding, uint32_t address, uint32_t size,
   }
   return history.remember(address, size, mem::ptr(address), historyEnabled, R.uploadReadsDirect,
                           [](const void* bytes, size_t n) { return snapshot(bytes, n, 4); });
+}
+
+uint32_t vertex_format_bytes(VkFormat format);
+// Diagnostic "Convert vertices on the CPU" (issue #207): the group's attributes, decoded exactly like
+// the shader decoder would (vertex_cpu_decode.h), 16 bytes each, interleaved per element; elements:
+// 0..limit-1 when the draw's vertex extent is known (limit), else every element of the declared buffer.
+UploadSlice cpu_vertex_stream(const LatteParsedFetchShaderBufferGroup& g, uint32_t addr, uint32_t size,
+                              uint32_t stride, uint64_t limit) {
+  uint64_t elements = stride ? (uint64_t(size) + stride - 1) / stride : 1;
+  if (limit && limit < elements) elements = limit;
+  const uint32_t attributes = uint32_t(std::max<int>(g.attribCount, 0));
+  const uint64_t bytes = elements * attributes * 16;
+  if (bytes > 0x10000000u) exception_report::raise("CPU vertex conversion exceeds 256 MiB");
+  auto slice = allocate_upload(std::max<size_t>(size_t(bytes), 16), 16);
+  auto* out = static_cast<uint32_t*>(slice.mapped);
+  if (bytes < slice.size) std::memset(static_cast<uint8_t*>(slice.mapped) + bytes, 0, slice.size - bytes);
+  const auto* guest = static_cast<const uint8_t*>(mem::ptr(addr));
+  for (uint32_t j = 0; j < attributes; ++j) {
+    const auto& a = g.attrib[j];
+    uint32_t probe[4];
+    static std::set<std::tuple<unsigned, unsigned, unsigned, unsigned>> unsupported;
+    uint8_t zero[16]{};
+    if (!vk::cpu_decode_attribute(a, zero, probe) &&
+        unsupported.insert({unsigned(a.format), unsigned(a.nfa), unsigned(a.isSigned), unsigned(a.endianSwap)}).second)
+      LOG("[vulkan cpu vertices] no decoder for format 0x%02x nfa %u signed %u endian %u (reads as zero, like the shader)",
+          unsigned(a.format), unsigned(a.nfa), unsigned(a.isSigned), unsigned(a.endianSwap));
+  }
+  for (uint64_t e = 0; e < elements; ++e)
+    for (uint32_t j = 0; j < attributes; ++j) {
+      const auto& a = g.attrib[j];
+      const uint64_t at = e * stride + a.offset;
+      uint32_t value[4] = {0, 0, 0, 0};
+      if (at + vertex_format_bytes(vk::vertex_format(a.format)) <= size)
+        vk::cpu_decode_attribute(a, guest + at, value);
+      std::memcpy(out + (e * attributes + j) * 4, value, 16);
+    }
+  rprof::add_upload(rprof::kUpVertex, bytes);
+  return slice;
 }
 
 // Separate immutable window cache: a partially initialized reservation must
@@ -835,6 +874,10 @@ Pipeline &pipeline(const uint32_t *r, vk::Shader *vs, vk::Shader *ps,
       auto fmt = R.vertexFormats.fetch(vk::vertex_format(a.format));
       if (fmt == VK_FORMAT_UNDEFINED)
         exception_report::raise("unsupported vertex format");
+      if (R.vertexDiagnostics.cpuVertices)
+        // CPU-converted stream: 16 bytes per attribute of the group (cpu_vertex_stream)
+        attributes.push_back({uint32_t(loc), g.attributeBufferIndex, vk::cpu_vertex_format(a), uint32_t(16 * j)});
+      else
       attributes.push_back(
           {uint32_t(loc), g.attributeBufferIndex, fmt, a.offset});
       const auto nativeFormat = vk::vertex_format(a.format);
@@ -890,7 +933,8 @@ Pipeline &pipeline(const uint32_t *r, vk::Shader *vs, vk::Shader *ps,
       LOG("[vulkan stride observed] stride=%u mod4=%u withinLimit=%u", stride, stride % 4,
           stride <= R.properties.limits.maxVertexInputBindingStride);
 #endif
-    bindings.push_back({g.attributeBufferIndex, stride,
+    bindings.push_back({g.attributeBufferIndex,
+                        R.vertexDiagnostics.cpuVertices && stride ? uint32_t(16 * g.attribCount) : stride,
                         instance ? VK_VERTEX_INPUT_RATE_INSTANCE
                                  : VK_VERTEX_INPUT_RATE_VERTEX});
     trim.stride = stride;
@@ -2987,7 +3031,10 @@ void draw(const uint32_t *r, uint32_t prim, uint32_t count, uint32_t indexType,
         attributeEnd && stride && extent.valid && vertexExtent.valid &&
         windowEnd<=copied && windowBegin<windowEnd && windowBegin!=0;
     UploadSlice b;
-    if (!buffer_cache_enabled() || !cached_guest_range(addr, copied, rprof::kUpVertex, b))
+    if (R.vertexDiagnostics.cpuVertices)
+      b = cpu_vertex_stream(g, addr, size, stride,
+          supported && attributeEnd && extent.valid && vertexExtent.valid ? uint64_t(extent.maximum) + 1 : 0);
+    else if (!buffer_cache_enabled() || !cached_guest_range(addr, copied, rprof::kUpVertex, b))
       b = copyWindow
         ? vertex_window_snapshot(g.attributeBufferIndex,addr,copied,
                                  uint32_t(windowBegin),uint32_t(windowEnd-windowBegin))

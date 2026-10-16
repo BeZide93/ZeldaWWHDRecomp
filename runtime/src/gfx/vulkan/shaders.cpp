@@ -663,6 +663,12 @@ bool decompile(Shader& shader, const uint32_t* regs, bool vertex, LatteFetchShad
     if(packReplacement && mods::cemu::has_shaders()) {
         auto packAux=cemu_pack_hash::auxiliary(*shader.dec,regs,vertex);
         auto custom=mods::cemu::shader_source(packBase,packAux,vertex);
+        // graphics-pack vertex shaders decode raw guest attributes themselves: not with CPU-converted ones
+        if(vertex&&!custom.empty()&&R.vertexDiagnostics.cpuVertices) {
+            fprintf(stderr,"[cemu-pack] %016llx_%016llx_vs skipped: Convert vertices on the CPU is on\n",
+                (unsigned long long)packBase,(unsigned long long)packAux);
+            custom.clear();
+        }
         if(!custom.empty()) {
             if(!vertex&&link.unfed) {
                 // the inputs the translation made constants (ps_link), with the same values
@@ -983,7 +989,8 @@ Shader* translate(const uint32_t* regs, bool vertex, LatteFetchShader* fetch, ui
     // Level 1: program, fetch shader and linkage.
     std::array<uint32_t, kLinkageWords> words;
     const size_t count = gather_linkage(regs, vertex, fetch, words.data());
-    const uint64_t seed = base ^ (vertex ? (fsKey * 31) ^ R.vertexFormats.shader_salt() : 0);
+    const uint64_t seed = base ^ (vertex ? (fsKey * 31) ^ R.vertexFormats.shader_salt() : 0) ^
+                          R.vertexDiagnostics.shader_salt();
     ++stats.stateHashLookups;
     static const bool memoEnabled = [] {
         const char* value = getenv("WWHD_VK_SHADER_STATE_MEMO");

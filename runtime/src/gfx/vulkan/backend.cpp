@@ -96,6 +96,7 @@
 namespace gx2 { uint64_t flips_presented(); void checkpoint_vulkan_caches(); void shutdown_vulkan_caches(); }
 #include "../../interp.h"
 
+extern bool g_latteCpuVertexDecode;  // Cemu GLSL attribute decoder (LatteDecompiler.h), issue #207 diagnostic
 namespace gfxvk {
 Renderer R;
 const VkFormatProperties& format_properties(VkFormat format) {
@@ -280,7 +281,8 @@ void init_pipeline_cache() try {
     put(40, 3); // Runtime-build identity, portable content IDs, exact descriptors and fixed-state recipe schema.
     put(44, (R.portabilitySubset ? 1u : 0u) | (R.separateStencilMaskRef ? 2u : 0u) |
         (R.constantAlphaColorBlendFactors ? 4u : 0u) | (R.vertexAttributeAccessBeyondStride ? 8u : 0u) |
-        (R.vertexFormats.fallbackMask << 4));
+        (R.vertexFormats.fallbackMask << 4) | (R.vertexDiagnostics.cpuVertices ? 0x100u : 0u) |
+        (R.vertexDiagnostics.fullPrecision ? 0x200u : 0u));
     const char* warmup = std::getenv("WWHD_VK_PIPELINE_WARMUP");
     if (!warmup || std::strcmp(warmup, "0")) try {
       const auto headstart=path_environment_utf8("WWHD_HEADSTART");
@@ -3651,7 +3653,20 @@ static void init_device(std::vector<const char *> extensions,
   std::string fallbackSetting;
   const bool forceFallback = forceVertexFallback ? !std::strcmp(forceVertexFallback, "1") :
       (hostui::get("vkVertexFallback", fallbackSetting) && fallbackSetting == "1");
-  R.vertexFormats = vk::vertex_format_policy([](VkFormat format) {
+  // issue #207 driver troubleshooting: environment first, else the saved Graphics > Advanced choice
+  auto diagnostic = [](const char* env, const char* key) {
+    if (const char* e = std::getenv(env)) return !std::strcmp(e, "1");
+    std::string value;
+    return hostui::get(key, value) && value == "1";
+  };
+  R.vertexDiagnostics.cpuVertices = diagnostic("WWHD_VK_CPU_VERTICES", "vkCpuVertices");
+  R.vertexDiagnostics.fullPrecision = diagnostic("WWHD_VK_FULL_PRECISION", "vkFullPrecision");
+  R.vertexDiagnostics.noVertexReuse = diagnostic("WWHD_VK_NO_VERTEX_REUSE", "vkNoVertexReuse");
+  g_latteCpuVertexDecode = R.vertexDiagnostics.cpuVertices;
+  LOG("[vulkan diagnostics] convert vertices on the CPU=%u, full precision in shaders=%u, no vertex reuse=%u",
+      R.vertexDiagnostics.cpuVertices, R.vertexDiagnostics.fullPrecision, R.vertexDiagnostics.noVertexReuse);
+  // CPU-converted vertices are fetched as 4x32-bit float/uint only: the RGB split does not apply
+  R.vertexFormats = R.vertexDiagnostics.cpuVertices ? vk::VertexFormatPolicy{} : vk::vertex_format_policy([](VkFormat format) {
     return bool(format_properties(format).bufferFeatures & VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT);
   }, forceFallback);
   LOG("[vulkan diagnostics] RGB fallback forced=%u active=%u mask=%u (8-bit=1 16-bit=2 32-bit=4)",

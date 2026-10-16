@@ -1609,6 +1609,13 @@ if(WWHD_HAS_VULKAN)
     $<TARGET_PROPERTY:Vulkan::Vulkan,INTERFACE_INCLUDE_DIRECTORIES>)
   target_compile_options(vertex_format_policy_test PRIVATE -UNDEBUG)
   add_test(NAME vertex_format_policy COMMAND vertex_format_policy_test)
+  # issue #207 driver troubleshooting: CPU vertex decoder and RelaxedPrecision strip
+  add_executable(vertex_diagnostics_test runtime/tools/vertex_diagnostics_test.cpp)
+  target_include_directories(vertex_diagnostics_test PRIVATE runtime/src ${CEMU_DIR}
+    runtime/third_party/metal-cpp runtime/third_party/fmt/include
+    $<TARGET_PROPERTY:Vulkan::Vulkan,INTERFACE_INCLUDE_DIRECTORIES>)
+  target_compile_options(vertex_diagnostics_test PRIVATE -UNDEBUG "SHELL:-include \"${CEMU_DIR}/cemu_shim.h\"")
+  add_test(NAME vertex_diagnostics COMMAND vertex_diagnostics_test)
 endif()
 
 # Validation capture must keep forwarding after its bounded copy is full.

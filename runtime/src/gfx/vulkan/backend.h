@@ -86,6 +86,7 @@ inline constexpr std::array<const char*,9> secondaryStageNames{
  "acquire", "acquire_wait", "ready_fd", "record", "submit", "draw_wait", "returned_fd", "present", "primary_snapshot_record"};
 struct Renderer {
  vk::VertexFormatPolicy vertexFormats;
+ vk::VertexDiagnostics vertexDiagnostics; // issue #207 driver troubleshooting (vertex_format_policy.h)
  VkInstance instance=VK_NULL_HANDLE; VkPhysicalDevice physicalDevice=VK_NULL_HANDLE; VkDevice device=VK_NULL_HANDLE;
  std::unordered_map<VkFormat,VkFormatProperties> formatProperties;
  VkPhysicalDeviceFeatures enabledFeatures{};
