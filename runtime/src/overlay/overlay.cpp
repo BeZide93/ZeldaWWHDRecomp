@@ -1004,14 +1004,19 @@ void tab_graphics() {
 #ifdef WWHD_HAS_VULKAN
     heading("Advanced");
     // Vulkan commands recorded and submitted on a worker thread (gfx/vulkan/record_worker.h)
-    static bool recordWorker = [] { std::string value; return hostui::get("vkRecordWorker", value) && value == "1"; }();
+#ifdef __ANDROID__
+    constexpr bool recordWorkerDefault = true;  // gfx/vulkan/record_worker.h record_worker_default()
+#else
+    constexpr bool recordWorkerDefault = false;
+#endif
+    static bool recordWorker = [] { std::string value; return hostui::get("vkRecordWorker", value) ? value == "1" : recordWorkerDefault; }();
     if (check("Record graphics on a second thread", recordWorker, &v, !getenv("WWHD_VK_RECORD_WORKER"))) {
         recordWorker = v;
         hostui::post([v] { hostui::set("vkRecordWorker", v ? "1" : "0"); });
     }
     help("Applies after restarting the game. Hands the graphics work to a second CPU thread. This can raise "
          "the frame rate on devices whose CPU holds it back (phones, handhelds). On other computers it can "
-         "make frame times less even. Uses a little more CPU and battery.");
+         "make frame times less even. Uses a little more CPU and battery. On by default on Android, off elsewhere.");
     static bool forceVertexFallback = [] { std::string value; return hostui::get("vkVertexFallback", value) && value == "1"; }();
     if (check("Force RGB vertex fallback", forceVertexFallback, &v, !getenv("WWHD_VK_VERTEX_FALLBACK"))) {
         forceVertexFallback = v;

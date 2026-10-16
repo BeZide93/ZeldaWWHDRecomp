@@ -51,6 +51,15 @@ private:
 // renderer before it starts; WWHD_VK_RECORD_WORKER (exactly 1 on, anything else off) wins.
 void set_record_worker_saved_choice(bool on);
 bool record_worker_requested(); // no thread while disabled
+// Default of Graphics > Advanced "Record graphics on a second thread" when the player never chose:
+// on for Android (phones are usually limited by the render thread), off elsewhere
+constexpr bool record_worker_default() {
+#ifdef __ANDROID__
+    return true;
+#else
+    return false;
+#endif
+}
 bool producer_presentation_recording(); // producer-only scoped routing
 bool record_worker_active(); // producer only, under GX2 execution mutex
 void start_record_worker();

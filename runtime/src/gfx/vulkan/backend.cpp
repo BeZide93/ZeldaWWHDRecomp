@@ -3759,7 +3759,7 @@ static void init_device(std::vector<const char *> extensions,
   // starts with the device); WWHD_VK_RECORD_WORKER takes precedence (record_worker.cpp)
   {
     std::string value;
-    set_record_worker_saved_choice(::hostui::get("vkRecordWorker", value) && value == "1");
+    set_record_worker_saved_choice(::hostui::get("vkRecordWorker", value) ? value == "1" : record_worker_default());
   }
   nativeWorkerPresentation = false;
   if (record_worker_requested()) {
