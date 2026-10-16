@@ -7,6 +7,11 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Mod SDK v3 preview: animated characters and scenes.** Mods can add animated characters (a rigged glTF model
+  with idle, walk, talk and extra clips) that look at Link, walk paths or to quest places, block Link and react to
+  sword hits; mod code can drive them through a small C API. Scenes gain eased camera paths, follow shots, music,
+  and the game's choice box with branches. Two original examples: a tide sprite on Windfall and a wandering creature
+  (preview, for mod makers).
 - **Mod SDK v3 preview: static mod models.** A quest mod can now place its own static model (a glTF `.glb` from
   Blender) in the world, lit and shadowed like the game's objects, with collision, L-targeting and a Check/Talk
   prompt. The model is converted on your own machine using a material from your own game, so packages never contain
