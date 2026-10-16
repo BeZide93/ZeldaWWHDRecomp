@@ -96,6 +96,8 @@ now** (on Android: close and reopen the app). There is one restart offer at a ti
 the end of an install and the page of a mod that is off but still loaded offer
 their own instead, and switching mods does not open a popup.
 
+**Letterbox while targeting** is on by default in **Mods > Built-in > Camera**; switch it off to remove bars during normal targeting while keeping cutscenes and special cameras unchanged.
+
 ### Extended enemy lock-on
 
 **Extended enemy lock-on** is off by default. Switch it on in **Mods > Built-in**

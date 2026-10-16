@@ -1,4 +1,4 @@
-// Optional gameplay mods (Gameplay menu). All off by default; each can be switched live.
+// Gameplay options (Gameplay menu). Original behavior by default; each can be switched live.
 //   camera.cpp  direct right-stick camera, mouse camera, first person on R3 / mouse wheel
 //   lock_on.cpp optional enemy range and R3 cycling through the native eligible list
 //   mouse.mm    mouse capture in the game window (macOS events)
@@ -18,6 +18,8 @@ namespace mods {
 
 // ---- switches (menu + env) ----
 bool direct_camera();
+bool letterbox_while_targeting();
+void set_letterbox_while_targeting(bool on);
 void set_direct_camera(bool on);
 float camera_speed();  // direct camera: multiplier of the game's own top turning speed
 void set_camera_speed(float s);

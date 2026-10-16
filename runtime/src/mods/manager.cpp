@@ -10,6 +10,9 @@
 namespace mods::manager {
 namespace {
 const Entry catalogue[] = {
+    {"target-letterbox", "Letterbox while targeting", "Camera",
+     "Show letterbox bars during normal targeting; cutscenes and special cameras keep their original bars.",
+     "WWHD_TARGET_LETTERBOX", letterbox_while_targeting, set_letterbox_while_targeting, false, true},
     {"direct-camera", "Direct right-stick camera", "Camera",
      "Turn the camera immediately with the right stick, without the original easing.",
      "WWHD_MOD_DIRECT_CAMERA", direct_camera, set_direct_camera},

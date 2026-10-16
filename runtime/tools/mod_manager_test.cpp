@@ -23,6 +23,9 @@ void env(const char* key, const char* value) {
 }
 }
 namespace mods {
+static bool target_letterbox = true;
+bool letterbox_while_targeting() { return target_letterbox; }
+void set_letterbox_while_targeting(bool on) { target_letterbox = on; }
 static bool ff_on = false, ff_mute = true;
 static unsigned ff_rate = 2;
 static uint32_t ff_button = 0x40;
@@ -85,9 +88,20 @@ int main() {
     for(const auto& entry:entries()) env(entry.startup_env,nullptr);
     env("WWHD_MOD_CAMERA_SPEED",nullptr);env("WWHD_MOD_MOUSE_SENS",nullptr);
     env("WWHD_MOD_MOVE_FACTOR",nullptr);env("WWHD_MOD_MOVE_SWIM",nullptr);env("WWHD_MOD_MOVE_STAMINA",nullptr);
-    assert(entries().size()==14);
+    assert(entries().size()==15);
     for(const auto& option:traversal_options()) env(option.startup_env,nullptr);
     env("WWHD_MOD_LOCK_ON_RANGE",nullptr);env("WWHD_MOD_LOCK_ON_CYCLING",nullptr);
+    assert(find("target-letterbox") && find("target-letterbox")->default_enabled);
+    assert(mods::letterbox_while_targeting());
+    preferences["mod.target-letterbox.enabled"] = "0";
+    load_saved(); assert(!mods::letterbox_while_targeting());
+    assert(set_enabled("target-letterbox", true));
+    assert(preferences["mod.target-letterbox.enabled"] == "1");
+    env("WWHD_TARGET_LETTERBOX", "0");
+    mods::set_letterbox_while_targeting(false);
+    load_saved(); assert(!mods::letterbox_while_targeting());
+    env("WWHD_TARGET_LETTERBOX", nullptr);
+    load_saved(); assert(mods::letterbox_while_targeting());
     assert(find("lock-on") && std::string(find("lock-on")->name)=="Extended enemy lock-on");
     assert(std::string(find("lock-on")->category)=="Gameplay");
     assert(!mods::extended_lock_on() && mods::lock_on_range()==1.f && mods::lock_on_cycling());

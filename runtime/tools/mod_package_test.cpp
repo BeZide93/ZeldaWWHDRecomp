@@ -763,8 +763,10 @@ int main(int argc, char** argv) {
     assert(!mods::extended_lock_on() && mods::lock_on_range()==1.f && mods::lock_on_cycling());
     mods::set_lock_on_range(2.5f);mods::set_lock_on_cycling(false);
     assert(mods::manager::set_enabled("lock-on",true));
+    assert(mods::manager::set_enabled("target-letterbox",false));
     remember_option("lock-on.range",2.5);remember_option("lock-on.cycling",0);
     assert(create_profile("Adventure",error));
+    assert(mods::manager::set_enabled("target-letterbox",true));
     mods::set_lock_on_range(1.f);mods::set_lock_on_cycling(true);
     assert(mods::manager::set_enabled("lock-on",false));
     remember_option("lock-on.range",1);remember_option("lock-on.cycling",1);
@@ -772,6 +774,7 @@ int main(int argc, char** argv) {
     remember_option("fast-forward.rate", 4); remember_option("fast-forward.button", 0x80); remember_option("fast-forward.mute", 1);
     assert(enable("climb-preset",true,error));frame(20);assert(state[3]);
     assert(select_profile("Adventure",error));frame(21);assert(!state[3]);
+    assert(!mods::letterbox_while_targeting());
     assert(mods::fast_forward_rate()==3 && mods::fast_forward_button()==0x20 && !mods::fast_forward_mute());
     assert(mods::extended_lock_on() && mods::lock_on_range()==2.5f && !mods::lock_on_cycling());
     {std::ifstream saved_file(root/"storage/profiles.json");
@@ -782,6 +785,7 @@ int main(int argc, char** argv) {
     assert(current_profile()=="Adventure");assert(!delete_profile("Adventure",error));
     assert(select_profile("Default",error));assert(mods::fast_forward_rate()==4 && mods::fast_forward_button()==0x80 && mods::fast_forward_mute());assert(delete_profile("Adventure",error));
     assert(!mods::extended_lock_on() && mods::lock_on_range()==1.f && mods::lock_on_cycling());
+    assert(mods::letterbox_while_targeting());
     assert(install(package("missing-dep",",\"dependencies\":[{\"id\":\"absent\"}]"),error));
     assert(!enable("missing-dep",true,error));
     assert(remove("missing-dep",error));
