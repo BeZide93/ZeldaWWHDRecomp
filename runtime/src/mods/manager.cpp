@@ -147,6 +147,10 @@ void load_saved() {
     std::string mode;
     if (hostui::get("mod.move-speed.mode", mode) && (mode == "0" || mode == "1"))
         set_move_speed_mode(mode == "1" ? MoveMode::kToggle : MoveMode::kHold);
+    if (!std::getenv("WWHD_MOD_MOVE_BAR")) {
+        std::string v;
+        if (hostui::get("mod.move-speed.bar", v) && (v == "0" || v == "1")) set_move_speed_bar(v == "1");
+    }
     std::string anim;
     if (!std::getenv("WWHD_MOD_MOVE_ANIM") && hostui::get("mod.move-speed.anim", anim) && valid_move_anim_id(anim))
         set_move_speed_anim(move_anim_from_id(anim));

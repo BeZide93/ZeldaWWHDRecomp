@@ -131,6 +131,16 @@ emit a second starting burst. While the swim boost is active, each arm pull spla
 own sea-coloured water element at that side, and a light foam trail follows behind every few
 steps. Both use the game's own water particles, so the native swim wake is untouched.
 
+The boost bar is the ring that shows how much boost is left. It appears while you boost and
+while it refills, then fades out. Set **Boost time** to "no limit" and there is nothing to run
+out, so no bar appears at all. To keep a limit but hide the bar, turn off **Show boost bar**
+(on by default): the boost, its time limit and its cooldown work exactly as before, you just
+don't see the ring. The option is saved with your other run/swim settings and in your mod
+profiles; `WWHD_MOD_MOVE_BAR=0` or `1` overrides it at startup. The boost bar and the
+stamina wheel of "Climb any wall" both fade out while the pause menu, an item or collection
+screen, the map, a cutscene or a conversation is on screen, and come back when you return
+to play.
+
 Faster ladders and faster sidling each have one speed slider on their mod page (1x to 3x,
 1.5x when first switched on). Both speed up the game's own animation, so hands and feet stay in step with the
 movement: a ladder clip moves Link by its own motion, and sidling scales the animation and the

@@ -3,7 +3,9 @@
 #include "mods/mods.h"
 #include "input.h"
 #include "runtime.h"
+#include <algorithm>
 #include <cassert>
+#include <utility>
 #include <cmath>
 #ifdef _WIN32
 #include <windows.h>
@@ -299,6 +301,27 @@ int main(int argc, char**) {
     mods::set_move_speed(false); mods::link_move_factor(kLink);
     mods::move_swim_effect(&fx,kLink);
     assert(swirl_calls==swirl_before+2 && swim_trail_calls==foam_before+1);
+    // The boost's bar (issue #233): shown for a limited boost, never with no limit or with "Show
+    // boost bar" off, and the boost itself is the same in all three.
+    auto run_boost=[](float limit,bool bar,int steps){
+        mods::set_move_speed(false); mods::link_move_factor(kLink); mods::move_speed_input(0);
+        mods::set_move_speed(true); mods::set_move_speed_mode(mods::MoveMode::kHold);
+        mods::set_move_speed_stamina_seconds(limit); mods::set_move_speed_bar(bar);
+        st32(kLink+0x65F0,mods::kProcMove); mods::move_speed_input(input::kStickL);
+        float factor=1.f, alpha=0.f;
+        for(int i=0;i<steps;++i) { factor=mods::link_move_factor(kLink); alpha=std::max(alpha,mods::move_hud().alpha); }
+        return std::pair{factor,alpha};
+    };
+    const auto limited=run_boost(5.f,true,30), unlimited=run_boost(0.f,true,30), hidden=run_boost(5.f,false,30);
+    assert(limited.first>1.f && limited.second>.9f);
+    assert(unlimited.first==limited.first && unlimited.second==0.f);
+    assert(hidden.first==limited.first && hidden.second==0.f);
+    assert(mods::move_hud().stamina<1.f);  // the bar is hidden, yet the stamina still drains
+    // Switching the bar off while it shows fades it out at once, without the one-second hold.
+    run_boost(5.f,true,30); mods::move_speed_input(0); mods::set_move_speed_bar(false);
+    for(int i=0;i<20;++i) mods::link_move_factor(kLink);
+    assert(mods::move_hud().alpha==0.f);
+    mods::set_move_speed_bar(true);
     assert(calls>100);
     return 0;
 }

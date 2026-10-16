@@ -57,6 +57,11 @@ std::atomic<float> g_move_land{clamp_factor(env_f("WWHD_MOD_MOVE_FACTOR", kDefau
 std::atomic<float> g_move_swim{clamp_factor(env_f("WWHD_MOD_MOVE_SWIM", env_f("WWHD_MOD_MOVE_FACTOR", kDefaultSwimFactor)))};
 std::atomic<float> g_move_stamina_seconds{clamp_stamina_seconds(env_f("WWHD_MOD_MOVE_STAMINA", kDefaultStaminaSeconds))};
 std::atomic<float> g_move_cooldown_seconds{clamp_cooldown_seconds(env_f("WWHD_MOD_MOVE_COOLDOWN", kDefaultCooldownSeconds))};
+// WWHD_MOD_MOVE_BAR=0 hides the boost's bar (the "Show boost bar" option; on unless set to 0)
+std::atomic<bool> g_move_bar{[]{
+    const char* e = getenv("WWHD_MOD_MOVE_BAR");
+    return !e || atoi(e) != 0;
+}()};
 std::atomic<uint32_t> g_move_button{input::kStickL};
 std::atomic<uint32_t> g_move_buttons{0};  // the live sample, from input::read()
 // Live tick state. Only link_move_factor (the game's logic thread) writes these; the HUD reads the
@@ -165,6 +170,8 @@ float move_speed_stamina_seconds() { return g_move_stamina_seconds.load(std::mem
 void set_move_speed_stamina_seconds(float seconds) { g_move_stamina_seconds = clamp_stamina_seconds(seconds); }
 float move_speed_cooldown_seconds() { return g_move_cooldown_seconds.load(std::memory_order_relaxed); }
 void set_move_speed_cooldown_seconds(float seconds) { g_move_cooldown_seconds = clamp_cooldown_seconds(seconds); }
+bool move_speed_bar() { return g_move_bar.load(std::memory_order_relaxed); }
+void set_move_speed_bar(bool on) { g_move_bar = on; note("run/swim boost bar", on); }
 uint32_t move_speed_button() { return g_move_button.load(std::memory_order_relaxed); }
 void set_move_speed_button(uint32_t button) {
     constexpr uint32_t allowed = input::kStickL | input::kStickR | input::kL | input::kR | input::kZL | input::kZR;
@@ -256,8 +263,10 @@ float link_move_factor(uint32_t link) {
                                          kRampTau, dt)
                           : 1.f;
         apply_anim_ramp();  // the legs follow the ramp, so they do not skate at 2x
-        // HUD: shown while boosting or while the bar refills, held a second, then faded out
-        const bool show = boosting || g_move_stamina.load(std::memory_order_relaxed) < 1.f;
+        // HUD: shown while a limited boost drains or the bar refills, held a second, then faded out;
+        // never with no limit or with the bar switched off (the boost runs the same either way)
+        const bool show = move_bar_wanted(move_speed_bar(), seconds, boosting, g_move_stamina.load(std::memory_order_relaxed));
+        if (!show && (!move_speed_bar() || !(seconds > 0.f))) g_move_hud_hold = 0.f;
         if (show) g_move_hud_hold = 1.f;
         else if (g_move_hud_hold > 0.f) g_move_hud_hold -= dt;
         const float target = (show || g_move_hud_hold > 0.f) ? 1.f : 0.f;

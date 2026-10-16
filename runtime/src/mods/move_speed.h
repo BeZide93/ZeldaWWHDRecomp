@@ -86,4 +86,13 @@ inline float refill_stamina_over(float s, float cooldown_seconds, float dt) {
     return cooldown_seconds > 0.f ? refill_stamina(s, cooldown_seconds, dt) : 1.f;
 }
 
+// Whether the boost's bar wants to be on screen this step (before its one-second hold and fade, and
+// before the game's menus, events and messages hide it: hud_visibility.h). Only a limited boost has
+// a bar to show: with no limit (0 s) there is nothing to run out, and "Show boost bar" off hides it
+// for good. The boost itself does not depend on the bar.
+inline bool move_bar_wanted(bool bar_setting, float limit_seconds, bool boosting, float stamina) {
+    if (!bar_setting || !(limit_seconds > 0.f)) return false;
+    return boosting || stamina < 1.f;
+}
+
 }  // namespace mods

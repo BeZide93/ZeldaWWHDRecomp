@@ -1436,6 +1436,9 @@ void builtin_options(const std::string& id) {
         float cooldown = mods::move_speed_cooldown_seconds();
         if (ImGui::SliderFloat("Cooldown", &cooldown, 0.f, 20.f, cooldown <= 0.f ? "none" : "%.1f s"))
             hostui::post([cooldown] { mods::set_move_speed_cooldown_seconds(cooldown); hostui::set("mod.move-speed.cooldown", std::to_string(cooldown)); mods::packages::remember_option("move-speed.cooldown", cooldown); });
+        bool bar = mods::move_speed_bar();
+        if (ImGui::Checkbox("Show boost bar", &bar))
+            hostui::post([bar] { mods::set_move_speed_bar(bar); hostui::set("mod.move-speed.bar", bar ? "1" : "0"); mods::packages::remember_option("move-speed.bar", bar); });
         const char* names[] = {"L3", "R3", "L", "R", "ZL", "ZR"};
         const uint32_t buttons[] = {input::kStickL, input::kStickR, input::kL, input::kR, input::kZL, input::kZR};
         for (int i = 0; i < 6; ++i) {
@@ -1447,7 +1450,9 @@ void builtin_options(const std::string& id) {
         }
         help("A multiplier of 1 leaves that state alone. Boost time is how long a full bar lasts; "
              "0 has no limit, and the bar refills whenever you are not boosting. Cooldown is the "
-             "bar's refill time (0 for immediate refill). The dash option replaces the walk clip "
+             "bar's refill time (0 for immediate refill). With no limit, or with Show boost bar off, "
+             "no bar is shown; the boost works the same. The bar also hides while a menu, "
+             "a cutscene or a conversation is on screen. The dash option replaces the walk clip "
              "while boosting; full-speed running already uses dash. Sprint pose adds a forward "
              "lean and arm drive while running freely, blended with the boost. Rebind the "
              "chosen game button in Controls.");

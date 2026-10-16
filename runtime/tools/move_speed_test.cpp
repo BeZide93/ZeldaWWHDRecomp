@@ -2,6 +2,7 @@
 // the live state (button, mode, stamina, ramp) is mods.cpp and needs no game either.
 //   make -C build/cmake move_speed_test && ./build/cmake/move_speed_test
 #include "mods/move_speed.h"
+#include "mods/hud_visibility.h"
 #include <cassert>
 #include <cmath>
 #include <limits>
@@ -133,6 +134,51 @@ static void test_cooldown() {
     assert(refill_stamina_over(1.f, 3.f, dt) == 1.f);
 }
 
+// The boost's bar and the game's own screens (issue #233).
+static void test_bar_visibility() {
+    // a normal limited boost shows the bar, and so does the refill after it
+    assert(move_bar_wanted(true, 5.f, true, 1.f));
+    assert(move_bar_wanted(true, 5.f, true, .4f));
+    assert(move_bar_wanted(true, 5.f, false, .4f));
+    assert(!move_bar_wanted(true, 5.f, false, 1.f));
+    // no limit: nothing to run out, so no bar at all, boosting or not, whatever is left of a refill
+    for (float stamina : {0.f, .5f, 1.f})
+        for (bool boosting : {false, true}) {
+            assert(!move_bar_wanted(true, 0.f, boosting, stamina));
+            assert(!move_bar_wanted(true, -1.f, boosting, stamina));
+            assert(!move_bar_wanted(true, std::numeric_limits<float>::quiet_NaN(), boosting, stamina));
+            // "Show boost bar" off: never shown
+            assert(!move_bar_wanted(false, 5.f, boosting, stamina));
+        }
+}
+
+static void test_game_ui() {
+    assert(!game_ui_hides_hud(GameUi{}));
+    assert(game_ui_hides_hud(GameUi{true, false, false}));   // a cutscene or event
+    assert(game_ui_hides_hud(GameUi{false, true, false}));   // a message or dialogue
+    assert(game_ui_hides_hud(GameUi{false, false, true}));   // the pause menu, items, map, ...
+    // the fade: gone in about a quarter of a second at any frame rate, back as quickly
+    for (int rate : {30, 60, 144}) {
+        const float dt = 1.f / rate;
+        float alpha = 1.f;
+        int frames = 0;
+        while (alpha > 0.f) { alpha = game_ui_fade(alpha, true, dt); ++frames; assert(frames < rate); }
+        assert(frames * dt <= .35f && alpha == 0.f);
+        for (int i = 0; i < rate / 2; ++i) alpha = game_ui_fade(alpha, false, dt);
+        assert(alpha == 1.f);
+    }
+    // monotonic, bounded, and a stalled clock or a missing frame time changes nothing
+    float alpha = 1.f, previous = 1.f;
+    for (int i = 0; i < 30; ++i) { alpha = game_ui_fade(alpha, true, 1.f / 60); assert(alpha <= previous && alpha >= 0.f); previous = alpha; }
+    assert(game_ui_fade(.5f, true, 0.f) == .5f && game_ui_fade(.5f, false, -1.f) == .5f);
+    assert(game_ui_fade(.5f, true, 10.f) == 0.f && game_ui_fade(.5f, false, 10.f) == 1.f);
+    // the HUD is drawn with its own alpha times this: a menu over a visible bar leaves nothing
+    const float bar = 1.f;
+    float shown = 1.f;
+    for (int i = 0; i < 30; ++i) shown = game_ui_fade(shown, game_ui_hides_hud(GameUi{false, false, true}), 1.f / 30);
+    assert(bar * shown == 0.f);
+}
+
 int main() {
     test_distance();
     test_target();
@@ -141,5 +187,7 @@ int main() {
     test_animation();
     test_stamina();
     test_cooldown();
+    test_bar_visibility();
+    test_game_ui();
     return 0;
 }
