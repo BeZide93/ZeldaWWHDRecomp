@@ -63,7 +63,8 @@ namespace interp { void set_mode(int); }
 #ifdef WWHD_HAS_VULKAN
 namespace gfxvk { int renderer_smoke_test(); int warm_headstart_shaders(); }
 #ifdef __ANDROID__
-namespace gfxvk { int android_display_smoke_test(); void shutdown_renderer_caches(); }
+namespace gfxvk { int android_display_smoke_test(); }
+namespace gx2 { void shutdown_vulkan_caches(); }
 #endif
 #endif
 #ifdef WWHD_HAS_METAL
@@ -505,7 +506,7 @@ int main(int argc, char** argv) {
 #ifdef __ANDROID__
             if (display_smoke) {
                 result = gfxvk::android_display_smoke_test();
-                gfxvk::shutdown_renderer_caches();
+                gx2::shutdown_vulkan_caches();
             }
             else
 #endif
