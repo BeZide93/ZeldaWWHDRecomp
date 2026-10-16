@@ -39,7 +39,7 @@ mod's page), the *Experimental* tag where it applies and a one-word status (*On*
 
 - **Built-in** ("Included with the game. Switch on or off any time."): the mods compiled
   into the game: direct camera, mouse camera, first-person shortcut, extended enemy lock-on, wall climbing,
-  run/swim speed, faster ladders, faster sidling, sailing speed, automatic wind, jump anywhere,
+  run/swim speed, faster ladders, faster sidling, faster ivy climbing, faster ledge hanging, sailing speed, automatic wind, jump anywhere,
   quick doors, fast forward and fast scene changes; all off by default.
 - **Community** ("Made by players. Downloaded from the mod catalogue."): every installed
   package (from the catalogue, from a file or folder, graphics packs and content packs),
@@ -134,15 +134,18 @@ Faster ladders and faster sidling each have one speed slider on their mod page (
 movement: a ladder clip moves Link by its own motion, and sidling scales the animation and the
 sidling speed together. Climbing on and off a ladder speeds up the same way, and the next rung
 starts right after the footstep instead of after a short pause, so the climb speeds up by about
-the chosen factor; the footstep sounds stay on their frames. Sailing speed multiplies the speed
+the chosen factor; the footstep sounds stay on their frames. Faster ivy climbing (up, down and
+sideways on ivy and vines, also on walls climbed with Climb any wall) and faster ledge hanging
+(moving along a ledge while hanging from it) work the same way, each with its own slider. Sailing speed multiplies the speed
 the wind gives the boat, with separate sliders on its mod page for the normal sail and the Swift Sail; the
 boat's jump keeps its normal height. Automatic wind makes the normal sail behave like the Swift
 Sail: while you sail, the wind turns to blow the way the boat is heading (in eight directions,
 as with the Swift Sail). It changes only the wind; the normal sail keeps its own speed, look and
 sounds. On the macOS menu bar the same switches and a few speed presets are under Gameplay.
-`WWHD_MOD_LADDER_SPEED`, `WWHD_MOD_SIDLE_SPEED`, `WWHD_MOD_SAIL_SPEED` and `WWHD_MOD_AUTO_WIND`
-(`=1`) switch them on at startup, with the factors `WWHD_MOD_LADDER_FACTOR`,
-`WWHD_MOD_SIDLE_FACTOR`, `WWHD_MOD_SAIL_FACTOR` and `WWHD_MOD_SWIFT_SAIL_FACTOR`. With a mod off,
+`WWHD_MOD_LADDER_SPEED`, `WWHD_MOD_SIDLE_SPEED`, `WWHD_MOD_IVY_SPEED`, `WWHD_MOD_HANG_SPEED`,
+`WWHD_MOD_SAIL_SPEED` and `WWHD_MOD_AUTO_WIND` (`=1`) switch them on at startup, with the factors
+`WWHD_MOD_LADDER_FACTOR`, `WWHD_MOD_SIDLE_FACTOR`, `WWHD_MOD_IVY_FACTOR`, `WWHD_MOD_HANG_FACTOR`,
+`WWHD_MOD_SAIL_FACTOR` and `WWHD_MOD_SWIFT_SAIL_FACTOR`. With a mod off,
 the game runs its original code. These mods work the same at 30 fps, with 60/120/240 fps
 interpolation and with true 60: they change animation rates and speed targets inside the game's
 own steps, never amounts added per frame.

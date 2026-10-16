@@ -4,6 +4,8 @@
 // Start-up / test switches (all off by default, also switchable from the Gameplay menu):
 //   WWHD_MOD_LADDER_SPEED=1    faster ladders   (WWHD_MOD_LADDER_FACTOR=1.5)
 //   WWHD_MOD_SIDLE_SPEED=1     faster sidling   (WWHD_MOD_SIDLE_FACTOR=1.5)
+//   WWHD_MOD_IVY_SPEED=1       faster ivy climbing (WWHD_MOD_IVY_FACTOR=1.5)
+//   WWHD_MOD_HANG_SPEED=1      faster moving along a ledge while hanging (WWHD_MOD_HANG_FACTOR=1.5)
 //   WWHD_MOD_SAIL_SPEED=1      sailing speed    (WWHD_MOD_SAIL_FACTOR=1.5 normal sail,
 //                                                WWHD_MOD_SWIFT_SAIL_FACTOR=1.5 Swift Sail)
 //   WWHD_MOD_AUTO_WIND=1       the wind follows the boat with the normal sail
@@ -30,6 +32,10 @@ std::atomic<bool> g_ladder{env_on("WWHD_MOD_LADDER_SPEED")};
 std::atomic<float> g_ladder_factor{env_factor("WWHD_MOD_LADDER_FACTOR")};
 std::atomic<bool> g_sidle{env_on("WWHD_MOD_SIDLE_SPEED")};
 std::atomic<float> g_sidle_factor{env_factor("WWHD_MOD_SIDLE_FACTOR")};
+std::atomic<bool> g_ivy{env_on("WWHD_MOD_IVY_SPEED")};
+std::atomic<float> g_ivy_factor{env_factor("WWHD_MOD_IVY_FACTOR")};
+std::atomic<bool> g_hang{env_on("WWHD_MOD_HANG_SPEED")};
+std::atomic<float> g_hang_factor{env_factor("WWHD_MOD_HANG_FACTOR")};
 std::atomic<bool> g_sail{env_on("WWHD_MOD_SAIL_SPEED")};
 std::atomic<float> g_sail_normal{env_factor("WWHD_MOD_SAIL_FACTOR")};
 std::atomic<float> g_sail_swift{env_factor("WWHD_MOD_SWIFT_SAIL_FACTOR")};
@@ -55,6 +61,14 @@ bool sidle_speed() { return g_sidle.load(kRelaxed); }
 void set_sidle_speed(bool on) { g_sidle = on; }
 float sidle_speed_factor() { return g_sidle_factor.load(kRelaxed); }
 void set_sidle_speed_factor(float f) { g_sidle_factor = traversal::clamp_factor(f); }
+bool ivy_speed() { return g_ivy.load(kRelaxed); }
+void set_ivy_speed(bool on) { g_ivy = on; }
+float ivy_speed_factor() { return g_ivy_factor.load(kRelaxed); }
+void set_ivy_speed_factor(float f) { g_ivy_factor = traversal::clamp_factor(f); }
+bool hang_speed() { return g_hang.load(kRelaxed); }
+void set_hang_speed(bool on) { g_hang = on; }
+float hang_speed_factor() { return g_hang_factor.load(kRelaxed); }
+void set_hang_speed_factor(float f) { g_hang_factor = traversal::clamp_factor(f); }
 bool sail_speed() { return g_sail.load(kRelaxed); }
 void set_sail_speed(bool on) { g_sail = on; }
 float sail_speed_normal_factor() { return g_sail_normal.load(kRelaxed); }
@@ -75,6 +89,11 @@ uint32_t jump_button() { return g_jump_button.load(kRelaxed); }
 void set_jump_button(uint32_t b) { if (valid_jump_button(b)) g_jump_button = b; }
 
 bool traversal_anim() { return ladder_speed() || sidle_speed(); }
+float traversal_getter_factor(int getter, uint32_t proc) {
+    return traversal::anm_getter_factor(traversal::AnmGetter(getter), proc,
+                                        traversal::active_factor(ivy_speed(), ivy_speed_factor()),
+                                        traversal::active_factor(hang_speed(), hang_speed_factor()));
+}
 float traversal_anim_factor(uint32_t proc) {
     return traversal::anim_rate_factor(proc, traversal::active_factor(ladder_speed(), ladder_speed_factor()),
                                        traversal::active_factor(sidle_speed(), sidle_speed_factor()));

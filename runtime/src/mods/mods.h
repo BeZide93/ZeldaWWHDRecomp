@@ -74,6 +74,14 @@ bool sidle_speed();                       // faster sidling along walls
 void set_sidle_speed(bool on);
 float sidle_speed_factor();
 void set_sidle_speed_factor(float factor);
+bool ivy_speed();                         // faster ivy climbing (the clips play faster)
+void set_ivy_speed(bool on);
+float ivy_speed_factor();
+void set_ivy_speed_factor(float factor);
+bool hang_speed();                        // faster moving along a ledge while hanging
+void set_hang_speed(bool on);
+float hang_speed_factor();
+void set_hang_speed_factor(float factor);
 bool sail_speed();                        // sailing speed, one factor per sail
 void set_sail_speed(bool on);
 float sail_speed_normal_factor();         // the normal sail
@@ -104,6 +112,7 @@ void set_auto_wind(bool on);
 // hooks' helpers (traversal_settings.cpp, traversal.cpp)
 bool traversal_anim();                          // a mod that scales Link's clips is on (ladders, sidling)
 float traversal_anim_factor(uint32_t proc);    // setFrameCtrl: rate factor in Link's procedure `proc` (1 = stock)
+float traversal_getter_factor(int getter, uint32_t proc);  // traversal::AnmGetter's rate factor (1 = stock)
 // mMaxNormalSpeed x the sidle factor for the length of one call (setNormalSpeedF with its steps,
 // setBlendWHideMoveAnime), while Link sidles with the mod on; a no-op otherwise
 struct SidleScope { uint32_t link = 0, stock = 0, scaled = 0; };

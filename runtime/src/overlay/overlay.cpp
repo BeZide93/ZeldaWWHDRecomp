@@ -1440,10 +1440,11 @@ void builtin_options(const std::string& id) {
              "while boosting; full-speed running already uses dash. Sprint pose adds a forward "
              "lean and arm drive while running freely, blended with the boost. Rebind the "
              "chosen game button in Controls.");
-    } else if (id == "ladder-speed" || id == "sidle-speed") {
-        const bool ladder = id == "ladder-speed";
-        const char* key = ladder ? "ladder-speed.factor" : "sidle-speed.factor";
-        float factor = ladder ? mods::ladder_speed_factor() : mods::sidle_speed_factor();
+    } else if (id == "ladder-speed" || id == "sidle-speed" || id == "ivy-speed" || id == "hang-speed") {
+        const char* key = id == "ladder-speed" ? "ladder-speed.factor" : id == "sidle-speed" ? "sidle-speed.factor"
+                        : id == "ivy-speed" ? "ivy-speed.factor" : "hang-speed.factor";
+        float factor = id == "ladder-speed" ? mods::ladder_speed_factor() : id == "sidle-speed" ? mods::sidle_speed_factor()
+                     : id == "ivy-speed" ? mods::ivy_speed_factor() : mods::hang_speed_factor();
         if (ImGui::SliderFloat("Speed", &factor, 1.f, 3.f, "%.2fx"))
             hostui::post([key, factor] { mods::manager::set_traversal_option(key, factor); });
     } else if (id == "sail-speed") {

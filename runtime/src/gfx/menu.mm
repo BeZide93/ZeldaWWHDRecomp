@@ -574,6 +574,10 @@ void install_menu(NSWindow* tv) {
             @"The climbing animation plays faster, so hands and feet stay in step", "ladder-speed.factor", mods::ladder_speed_factor);
     factors(@"Faster sidling", "sidle-speed", ^BOOL { return mods::sidle_speed(); },
             @"Sidling along walls is faster; the animation speeds up with the movement", "sidle-speed.factor", mods::sidle_speed_factor);
+    factors(@"Faster ivy climbing", "ivy-speed", ^BOOL { return mods::ivy_speed(); },
+            @"Climbing ivy and vines is faster, up, down and sideways", "ivy-speed.factor", mods::ivy_speed_factor);
+    factors(@"Faster ledge hanging", "hang-speed", ^BOOL { return mods::hang_speed(); },
+            @"Moving along a ledge while hanging from it is faster", "hang-speed.factor", mods::hang_speed_factor);
     toggle(gp, @"Sailing speed", ^BOOL { return mods::sail_speed(); }, ^(BOOL on) { mods::manager::set_enabled("sail-speed", on); },
            @"Multiplies the speed the wind gives the boat; the jump keeps its normal height");
     for (auto [title, key, value] : {std::tuple{@"    Normal sail", "sail-speed.normal", mods::sail_speed_normal_factor},

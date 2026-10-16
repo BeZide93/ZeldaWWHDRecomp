@@ -39,6 +39,12 @@ const Entry catalogue[] = {
     {"sidle-speed", "Faster sidling", "Gameplay",
      "Sidle along walls faster. The animation speeds up with the movement.",
      "WWHD_MOD_SIDLE_SPEED", sidle_speed, set_sidle_speed},
+    {"ivy-speed", "Faster ivy climbing", "Gameplay",
+     "Climb ivy and vines faster, up, down and sideways. The climbing animation plays faster.",
+     "WWHD_MOD_IVY_SPEED", ivy_speed, set_ivy_speed},
+    {"hang-speed", "Faster ledge hanging", "Gameplay",
+     "Move along a ledge faster while hanging from it. The animation plays faster.",
+     "WWHD_MOD_HANG_SPEED", hang_speed, set_hang_speed},
     {"sail-speed", "Sailing speed", "Gameplay",
      "Sail faster, with separate multipliers for the normal sail and the Swift Sail.",
      "WWHD_MOD_SAIL_SPEED", sail_speed, set_sail_speed},
@@ -65,6 +71,8 @@ bool player_preferences() { return !std::getenv("WWHD_NO_HOST_INPUT"); }
 const NumberOption traversal_catalogue[] = {
     {"mod.ladder-speed.factor", "ladder-speed.factor", "WWHD_MOD_LADDER_FACTOR", ladder_speed_factor, set_ladder_speed_factor},
     {"mod.sidle-speed.factor", "sidle-speed.factor", "WWHD_MOD_SIDLE_FACTOR", sidle_speed_factor, set_sidle_speed_factor},
+    {"mod.ivy-speed.factor", "ivy-speed.factor", "WWHD_MOD_IVY_FACTOR", ivy_speed_factor, set_ivy_speed_factor},
+    {"mod.hang-speed.factor", "hang-speed.factor", "WWHD_MOD_HANG_FACTOR", hang_speed_factor, set_hang_speed_factor},
     {"mod.sail-speed.normal", "sail-speed.normal", "WWHD_MOD_SAIL_FACTOR", sail_speed_normal_factor, set_sail_speed_normal_factor},
     {"mod.sail-speed.swift", "sail-speed.swift", "WWHD_MOD_SWIFT_SAIL_FACTOR", sail_speed_swift_factor, set_sail_speed_swift_factor},
 };
