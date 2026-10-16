@@ -958,6 +958,18 @@ int32_t no_place(const std::string& mod, const std::string& quest) {
     return saved(q->key);
 }
 
+bool place_position(const std::string& mod,const std::string& quest,float& x,float& z) {
+    if(mod.empty()||!story_mail::valid_id(quest)||!have_save()||!book().usable())return false;
+    std::vector<Quest> storage;
+    const auto current=rows_now(storage); // resolves the manifest step from this save's story record
+    for(const auto& row:current){const Quest& q=*row.quest;
+        if(q.mod!=mod||q.id!=quest)continue;
+        if((row.status!=Status::New&&row.status!=Status::InProgress)||!q.has_place||!std::isfinite(q.x)||!std::isfinite(q.z)||std::fabs(q.x)>350000||std::fabs(q.z)>350000)return false;
+        x=q.x;z=q.z;return true;
+    }
+    return false;
+}
+
 int32_t known(const std::string& mod, const std::string& quest, const std::string& text) {
     if (!story_mail::valid_id(quest) || !lines(text, kMaxKnownBytes)) return kResultInvalid;
     std::lock_guard lock(g_mu);

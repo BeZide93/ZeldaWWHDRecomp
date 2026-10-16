@@ -51,7 +51,10 @@ TOOL_FILES = [
     "tools/guestmod/build_guest_mod.py",
     "tools/guestmod/guestmod.py",
     "tools/story_mods/npc_catalogue.py",  # the NPC catalogue from the player's game files (story_npc_catalogue.h)
-    "tools/story_mods/notebook_model.py",  # the story notebook's model from the Story Notebook package
+    "tools/story_mods/notebook_model.py",  # shared player-local BFRES template patching
+    "tools/story_mods/actor_model.py",  # original static GLB models using the player's own materials
+    "tools/story_mods/skinned_actor_model.py",  # original rigged GLB and player-local skin material
+    "tools/story_mods/actor_animation.py",  # original skeletal clips in the native format
     "tools/savegame/gc2hd.py",
     "tools/savegame/wwsave.py",
     "tools/savegame/README.md",

@@ -108,7 +108,14 @@ void set_item_get_next(void (*)(Cpu*),void (*)(Cpu*,uint32_t)) {}
 namespace hooks { void exec_item_get(Cpu*) {} }
 }
 // World runtime has its own actor/scene tests; loader tests only exercise registration.
+namespace actor_model_cache {
+mod_actor::ModelRig rig_for(const std::string&){return {};}
+std::vector<std::string> clips_for(const std::string&){return {};}
+bool bounds_for(const std::string&,story_notebook::WorldPoint&,story_notebook::WorldPoint&){return false;}
+std::string prepare(const std::string&,const story_notebook::ManifestModel&,const std::string&,const std::string&,const std::vector<std::string>&,const std::string&,const std::string&){return {}; }
+}
 namespace story_actors {
+bool register_model(const std::string&,const std::string&,const std::string&,int,std::string&,story_notebook::WorldPoint,story_notebook::WorldPoint,bool,std::vector<std::string>,mod_actor::ModelRig){return true;}
 bool register_flags(const std::string&,const std::vector<std::string>&,std::string&){return true;}
 void service(Cpu*){}
 bool load(const std::string&,const std::vector<story_notebook::ManifestActor>&,std::string&){return true;}
@@ -122,6 +129,9 @@ uint32_t actor_address(Cpu*,const std::string&,const std::string&){return 0;}
 bool actions(const std::string&,const std::vector<story_notebook::StoryAction>&){return true;}
 }
 namespace story_scenes {
+static MusicHook music_hook;
+bool register_music_hook(const std::string&,MusicHook hook){music_hook=std::move(hook);return true;}
+void set_place_resolver(ResolvePlace){}
 bool validate(const std::vector<story_notebook::ManifestScene>&,std::string&){return true;}
 void set_game_calls(uint32_t (*)(Cpu*,uint32_t,std::initializer_list<uint32_t>)){}
 void set_scratch_memory(uint32_t){}
@@ -132,9 +142,38 @@ void tick(Cpu*,bool,unsigned){}
 void install(void (*)(Cpu*,uint32_t),const std::function<std::string(uint32_t)>&,const std::function<void(uint32_t,void(*)(Cpu*))>&){}
 void state_loaded(){}
 }
+// Synthetic actor bridge: identities belong to one declared mod actor, and
+// process changes invalidate previously captured identities.
+namespace mod_actor {
+static BehaviorSink sink;
+static Identity actor{"first","sprite",11,101},other{"first","other",12,102};
+static State current{};
+static uint32_t handle=0,other_handle=0;
+static unsigned paths_started=0;
+static constexpr uint32_t address=0x7F030000,userdata=0x7F020000;
+void set_behavior_sink(BehaviorSink value){sink=std::move(value);}
+uint32_t declaration_token(const std::string&m,const std::string&id){return m==actor.mod&&id==actor.id?actor.token:m==other.mod&&id==other.id?other.token:0;}
+bool identify(Cpu*,uint32_t a,Identity&out){if(a==address){out=actor;return true;}if(a==address+0x1000){out=other;return true;}return false;}
+bool live(const Identity&i){return (i.mod==actor.mod&&i.id==actor.id&&i.token==actor.token&&i.process_id==actor.process_id)||(i.mod==other.mod&&i.id==other.id&&i.token==other.token&&i.process_id==other.process_id);}
+uint32_t resolve(Cpu*,const Identity&i){return live(i)?address+(i.token==other.token?0x1000:0):0;}
+bool snapshot(Cpu*,const Identity&i,State&out){if(!live(i))return false;out=current;return true;}
+bool set_position(Cpu*,const Identity&i,story_notebook::WorldPoint p){if(!live(i)||current.scene_owned)return false;current.position=p;return true;}
+bool set_rotation(Cpu*,const Identity&i,story_notebook::WorldPoint p){if(!live(i)||current.scene_owned)return false;current.rotation=p;return true;}
+bool set_collision(Cpu*,const Identity&i,float r,float h,bool e,bool p){if(!live(i)||current.scene_owned)return false;current.collision_radius=r;current.collision_height=h;current.collision_enabled=e;current.pushable=p;return true;}
+bool has_animation(Cpu*,const Identity&i,const std::string&clip){return live(i)&&clip=="wave";}
+bool set_animation(Cpu*c,const Identity&i,const std::string&clip,float,bool){if(!has_animation(c,i,clip))return false;current.animation=clip;return true;}
+uint32_t hit_event_address(Cpu*,const Identity&i){return live(i)?userdata+256:0;}
+uint32_t userdata_address(Cpu*,const Identity&i){return live(i)?userdata+(i.token==other.token?0x1000:0):0;}
+uint32_t behavior_handle(Cpu*,const Identity&i){return live(i)?(i.token==other.token?other_handle:handle):0;}
+bool set_behavior_handle(Cpu*,const Identity&i,uint32_t value){if(!live(i))return false;if(i.token==other.token)other_handle=value;else handle=value;return true;}
+bool set_hit_notifications(const std::string&m,const std::string&id,bool){return declaration_token(m,id)!=0;}
+bool start_path(Cpu*,const Identity&i,const std::vector<story_notebook::WorldPoint>&p,float speed,bool){if(!live(i)||current.scene_owned||p.size()<2||p.size()>16||!std::isfinite(speed)||speed<=0||speed>1500)return false;for(const auto&point:p)if(!std::isfinite(point.x)||!std::isfinite(point.y)||!std::isfinite(point.z))return false;++paths_started;return true;}
+bool stop_path(Cpu*,const Identity&i){return live(i);}
+}
 // and so has the story notebook (story_notebook_test)
 namespace config { std::string game_dir; }
 namespace story_notebook {
+bool place_position(const std::string&,const std::string&,float&x,float&z){x=20;z=30;return true;}
 void logic_step(uint64_t) {}
 void set_look(const std::string&,const std::string&) {}
 bool load_local_npc_catalogue(const std::string&) {return false;}
@@ -218,7 +257,27 @@ void set_game_calls(void (*)(Cpu*,uint32_t)) {}
 void install(const std::function<std::string(uint32_t)>&,const std::function<void(uint32_t,void (*)(Cpu*))>&) {}
 }
 static unsigned hud_calls=0;
+struct ActorCall {uint32_t function=0;std::vector<uint32_t> args;double dt=0;};
+static std::vector<ActorCall> actor_calls;
+static bool actor_callback_throws=false;
+static bool actor_draw_mutation=false;
+static uint32_t actor_draw_result=99;
+static uint32_t actor_callback_result=1;
+static uint32_t actor_nested_handle=0,actor_nested_result=99;
+static bool actor_nested_active=false;
+
 uint32_t guest_call(Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args) {
+    if(fn>=0x7F000090&&fn<=0x7F0000D0){
+        actor_calls.push_back({fn,std::vector<uint32_t>(args),c->f[1].ps0});
+        if(actor_draw_mutation&&fn==0x7F0000B0){c->pc=fn;c->r[3]=*args.begin();c->f[1].ps0=999;guestmods::svc_actor_set_position(c);actor_draw_result=c->r[3];}
+        if(actor_nested_handle&&actor_nested_active&&fn==0x7F0000A0){c->pc=fn;c->r[3]=actor_nested_handle;c->f[1].ps0=777;guestmods::svc_actor_set_position(c);actor_nested_result=c->r[3];}
+        else if(actor_nested_handle&&!actor_nested_active&&(fn==0x7F0000B0||fn==0x7F0000A0)){
+            actor_nested_active=true;assert(guestmods::actor_dispatch(c,actor_nested_handle,mod_actor::behavior::Event::Execute));actor_nested_active=false;
+        }
+        c->pc=fn;c->r[10]=0xBAD;c->f[7].ps0=1234;c->lr=0xABCD;
+        if(actor_callback_throws)throw std::runtime_error("synthetic actor callback failure");
+        return actor_callback_result;
+    }
     assert(fn==0x7F000080&&args.size()==1);++hud_calls;
     auto list=*args.begin();c->pc=fn;c->r[3]=list;c->r[4]=0x7F000600;
     guestmods::svc_hud_emit(c);assert(c->r[3]==1);
@@ -257,9 +316,9 @@ int main() {
     // Map only synthetic mod data for string/input/heap service checks.
     constexpr uint32_t data_base=0x7F000000;
 #ifdef _WIN32
-    void* data=VirtualAlloc(mem::ptr(data_base),0x20000,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE);
+    void* data=VirtualAlloc(mem::ptr(data_base),0x30000,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE);
 #else
-    void* data=mmap(mem::ptr(data_base),0x20000,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYMOUS,-1,0);
+    void* data=mmap(mem::ptr(data_base),0x30000,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYMOUS,-1,0);
 #endif
     assert(data==mem::ptr(data_base));
     // Typed services select the owning mod by its translated import callsite.
@@ -307,7 +366,7 @@ int main() {
     assert(c.r[3]==data_base+0x1010);guestmods::svc_free(&c);
     c.r[3]=data_base+0x300;guestmods::svc_input(&c);assert(ld32(data_base+0x300)==0);
     // Packed guest element decoding and automatic per-step recording/publication.
-    WWHDGuestFunc functions[]={{data_base+0x80,nullptr}};module.funcs=functions;module.func_count=1;
+    WWHDGuestFunc functions[]={{data_base+0x80,nullptr},{data_base+0x90,nullptr},{data_base+0xA0,nullptr},{data_base+0xB0,nullptr},{data_base+0xC0,nullptr},{data_base+0xD0,nullptr}};module.funcs=functions;module.func_count=6;
     uint32_t element=data_base+0x600;memset(mem::ptr(element),0,72);
     st32(element,0);stf32(element+20,20);stf32(element+24,30);stf32(element+32,1);
     stf32(element+48,1);stf32(element+52,1);st32(element+56,0x12345678);
@@ -324,10 +383,87 @@ int main() {
     guestmods::draw_frame(&c,5);assert(hud_calls==3); // rebuilt even if restored clock repeats
     c.r[3]=0;c.r[4]=2;guestmods::svc_hud_register(&c);assert(c.r[3]==1);
     guestmods::draw_frame(&c,6);assert(hud_calls==3&&!guestmods::hud::store().active());
+    // Public actor services use exact owner metadata, packed BE tables and live
+    // process identities. Callback CPU mutations must never escape dispatch.
+    const uint32_t actor_id=data_base+0x700,table=data_base+0x740,state=data_base+0x800;
+    std::strcpy(reinterpret_cast<char*>(mem::ptr(actor_id)),"sprite");
+    auto reg=[&](uint32_t pointer){c.pc=data_base+0x100;c.r[3]=actor_id;c.r[4]=pointer;guestmods::svc_actor_register(&c);return c.r[3];};
+    st32(table,32);st32(table+4,1);st32(table+8,256);
+    for(unsigned i=0;i<5;++i)st32(table+12+i*4,data_base+0x90+i*0x10);
+    assert(reg(data_base+0x10000)==0); // foreign table
+    assert(reg(table+1)==0); // alignment
+    st32(table,31);assert(reg(table)==0);st32(table,32);
+    st32(table+4,2);assert(reg(table)==0);st32(table+4,1);
+    st32(table+8,257);assert(reg(table)==0);st32(table+8,256);
+    st32(table+16,data_base+0x10090);assert(reg(table)==0); // foreign callback
+    st32(table+16,data_base+0xA1);assert(reg(table)==0); // interior, not exact function
+    st32(table+16,data_base+0xA0);assert(reg(table)==1);
+    memset(mem::ptr(mod_actor::userdata),0xCC,256);
+    Cpu actor_saved=c;guestmods::behavior_sink(&c,mod_actor::address,mod_actor::BehaviorEvent::CreateNew,nullptr);
+    assert(memcmp(&actor_saved,&c,sizeof c)==0&&actor_calls.size()==1);
+    const uint32_t first_handle=mod_actor::handle;
+    assert(first_handle&&actor_calls.back().function==data_base+0x90&&actor_calls.back().args==std::vector<uint32_t>({first_handle,mod_actor::userdata,0}));
+    assert(ld32(mod_actor::userdata)==0);
+    c.pc=data_base+0x100;c.r[3]=actor_id;guestmods::svc_actor_find(&c);assert(c.r[3]==first_handle);
+    c.r[3]=first_handle;guestmods::svc_actor_userdata(&c);assert(c.r[3]==mod_actor::userdata);
+    c.pc=data_base+0x10100;c.r[3]=first_handle;guestmods::svc_actor_userdata(&c);assert(c.r[3]==0);
+    c.pc=data_base+0x100;
+    auto get=[&](uint32_t out){c.r[3]=first_handle;c.r[4]=out;guestmods::svc_actor_get(&c);return c.r[3];};
+    st32(state,80);st32(state+4,1);assert(get(state)==1);
+    st32(mod_actor::userdata,80);st32(mod_actor::userdata+4,1);assert(get(mod_actor::userdata)==1);
+    assert(get(data_base+0x10000)==0&&get(mod_actor::userdata+240)==0&&get(0xFFFFFFF0)==0);
+    c.r[3]=first_handle;c.f[1].ps0=1;c.f[2].ps0=2;c.f[3].ps0=3;guestmods::svc_actor_set_position(&c);assert(c.r[3]==1&&mod_actor::current.position.x==1);
+    c.r[3]=first_handle;c.f[1].ps0=10;c.f[2].ps0=20;c.f[3].ps0=30;guestmods::svc_actor_set_rotation(&c);assert(c.r[3]==1&&mod_actor::current.rotation.x==10&&mod_actor::current.rotation.z==30);
+    c.r[3]=first_handle;c.r[4]=3;c.f[1].ps0=24;c.f[2].ps0=80;guestmods::svc_actor_set_collision(&c);assert(c.r[3]==1&&mod_actor::current.collision_radius==24&&mod_actor::current.collision_height==80&&mod_actor::current.pushable);
+    c.r[3]=first_handle;c.r[4]=4;guestmods::svc_actor_set_collision(&c);assert(c.r[3]==0);
+    std::strcpy(reinterpret_cast<char*>(mem::ptr(state)),"wave");c.r[3]=first_handle;c.r[4]=state;c.r[5]=1;c.f[1].ps0=.5;guestmods::svc_actor_set_animation(&c);assert(c.r[3]==1&&mod_actor::current.animation=="wave");
+    mod_actor::current.scene_owned=true;c.r[3]=first_handle;guestmods::svc_actor_set_position(&c);assert(c.r[3]==0);mod_actor::current.scene_owned=false;
+    actor_saved=c;guestmods::behavior_sink(&c,mod_actor::address,mod_actor::BehaviorEvent::Execute,nullptr);
+    assert(memcmp(&actor_saved,&c,sizeof c)==0&&actor_calls.back().dt==1.0/30.0);
+    actor_draw_mutation=true;guestmods::behavior_sink(&c,mod_actor::address,mod_actor::BehaviorEvent::Draw,nullptr);actor_draw_mutation=false;
+    assert(actor_draw_result==0&&mod_actor::current.position.x==1&&memcmp(&actor_saved,&c,sizeof c)==0);
+    for(unsigned phase=0;phase<3;++phase){guestmods::behavior_sink(&c,mod_actor::address,phase==0?mod_actor::BehaviorEvent::TalkBegin:phase==1?mod_actor::BehaviorEvent::TalkEnd:mod_actor::BehaviorEvent::TalkCancel,nullptr);assert(actor_calls.back().function==data_base+0xC0&&actor_calls.back().args[2]==phase);}
+    mod_actor::Hit hit;hit.sequence=9;hit.attack_type=0x80;hit.attack_power=3;hit.source_kind=1;hit.position={4,5,6};hit.reaction={7,8,9};
+    guestmods::behavior_sink(&c,mod_actor::address,mod_actor::BehaviorEvent::Hit,&hit);
+    const uint32_t packet=mod_actor::userdata+256;
+    assert(actor_calls.back().function==data_base+0xD0&&actor_calls.back().args[2]==packet&&ld32(packet)==64&&ld32(packet+4)==1&&ld32(packet+8)==9&&ld32(packet+24)==0&&u32_as_f32(ld32(packet+28))==4&&ld32(packet+60)==0);
+    // Packed paths accept own static data and live userdata only.
+    auto walk=[&](uint32_t pointer,uint32_t count,uint32_t loop,float speed){c.pc=data_base+0x100;c.r[3]=first_handle;c.r[4]=pointer;c.r[5]=count;c.r[6]=loop;c.f[1].ps0=speed;guestmods::svc_actor_walk(&c);return c.r[3];};
+    for(unsigned i=0;i<6;++i){stf32(state+i*4,float(i));stf32(mod_actor::userdata+i*4,float(i));}
+    assert(walk(state,2,0,100)==1&&walk(mod_actor::userdata,2,1,100)==1);
+    assert(walk(data_base+0x10000,2,0,100)==0&&walk(mod_actor::userdata+240,2,0,100)==0&&walk(state,17,0,100)==0&&walk(state,2,2,100)==0&&walk(state,2,0,1501)==0);
+    stf32(state,std::numeric_limits<float>::quiet_NaN());assert(walk(state,2,0,100)==0);
+    c.pc=data_base+0x100;c.r[3]=data_base+0x10090;guestmods::svc_scene_music_register(&c);assert(c.r[3]==0);
+    c.r[3]=data_base+0xD0;guestmods::svc_scene_music_register(&c);assert(c.r[3]==1&&story_scenes::music_hook);
+    actor_saved=c;assert(story_scenes::music_hook(&c,"harbor",story_scenes::MusicPhase::Start,12,story_scenes::StopReason::Finished));
+    assert(memcmp(&actor_saved,&c,sizeof c)==0&&actor_calls.back().args.size()==4&&actor_calls.back().args[1]==0&&actor_calls.back().args[2]==12);
+    actor_callback_result=0;assert(!story_scenes::music_hook(&c,"harbor",story_scenes::MusicPhase::Stop,7,story_scenes::StopReason::Finished));actor_callback_result=1;assert(memcmp(&actor_saved,&c,sizeof c)==0);
+    actor_callback_throws=true;assert(!story_scenes::music_hook(&c,"harbor",story_scenes::MusicPhase::Restore,0,story_scenes::StopReason::Aborted));actor_callback_throws=false;assert(memcmp(&actor_saved,&c,sizeof c)==0);
+    // Registry permits cross-actor nesting: an outer Draw must keep its
+    // mutation guard through inner Execute, while ordinary Execute may mutate.
+    std::strcpy(reinterpret_cast<char*>(mem::ptr(actor_id)),"other");assert(reg(table)==1);
+    guestmods::behavior_sink(&c,mod_actor::address+0x1000,mod_actor::BehaviorEvent::CreateNew,nullptr);
+    std::strcpy(reinterpret_cast<char*>(mem::ptr(actor_id)),"sprite");
+    actor_nested_handle=mod_actor::other_handle;assert(actor_nested_handle&&actor_nested_handle!=first_handle);actor_saved=c;
+    guestmods::behavior_sink(&c,mod_actor::address,mod_actor::BehaviorEvent::Draw,nullptr);
+    assert(actor_nested_result==0&&mod_actor::current.position.x==1&&!guestmods::g_actor_draw_callback&&memcmp(&actor_saved,&c,sizeof c)==0);
+    guestmods::behavior_sink(&c,mod_actor::address,mod_actor::BehaviorEvent::Execute,nullptr);
+    assert(actor_nested_result==1&&mod_actor::current.position.x==777&&!guestmods::g_actor_draw_callback&&memcmp(&actor_saved,&c,sizeof c)==0);
+    actor_nested_handle=0;mod_actor::current.position.x=1;
+    // State restore invalidates old handles while preserving native userdata.
+    st32(mod_actor::userdata,0x12345678);guestmods::state_loaded();
+    c.pc=data_base+0x100;c.r[3]=first_handle;guestmods::svc_actor_userdata(&c);assert(c.r[3]==0);
+    guestmods::behavior_sink(&c,mod_actor::address,mod_actor::BehaviorEvent::CreateRestored,nullptr);
+    const uint32_t restored_handle=mod_actor::handle;assert(restored_handle!=first_handle&&ld32(mod_actor::userdata)==0x12345678&&actor_calls.back().args[2]==1);
+    ++mod_actor::actor.process_id;c.r[3]=restored_handle;guestmods::svc_actor_userdata(&c);assert(c.r[3]==0);
+    guestmods::behavior_sink(&c,mod_actor::address,mod_actor::BehaviorEvent::CreateNew,nullptr);assert(ld32(mod_actor::userdata)==0&&mod_actor::handle!=restored_handle);
+    actor_callback_throws=true;actor_saved=c;guestmods::behavior_sink(&c,mod_actor::address,mod_actor::BehaviorEvent::Execute,nullptr);actor_callback_throws=false;
+    assert(memcmp(&actor_saved,&c,sizeof c)==0);const size_t quarantined_count=actor_calls.size();
+    guestmods::behavior_sink(&c,mod_actor::address,mod_actor::BehaviorEvent::Execute,nullptr);assert(actor_calls.size()==quarantined_count);
 #ifdef _WIN32
     VirtualFree(data,0,MEM_RELEASE);
 #else
-    munmap(data,0x20000);
+    munmap(data,0x30000);
 #endif
     std::puts("guest hook ordering and original passed");
 }

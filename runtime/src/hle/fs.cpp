@@ -4,6 +4,7 @@
 //   /vol/meta/...     -> <game>/meta/...
 //   /vol/save/...     -> <save dir>/...
 #include "../mods/story_mail.h"
+#include "../mods/actor_model_cache.h"
 #include "../mods/item_icons.h"
 #include "../mods/story_lyt_screen.h"
 #include "../mods/story_store.h"
@@ -131,6 +132,8 @@ std::string host_path(const std::string& guest) {
 // the pack of the active language source (game_languages.h: the European or Japanese pack the player
 // chose, read under the name the game asks for), then the installed game.
 std::string read_path(const std::string& guest,const std::string& mode="rb") {
+    if(const char* trace=std::getenv("WWHD_MOD_ACTOR_HEAPS");trace&&std::string(trace)=="1"&&guest.find("/mod")!=std::string::npos)LOG("[mod_actor_fs] %s mode=%s override=%s",guest.c_str(),mode.c_str(),actor_model_cache::archive_for(guest).c_str());
+    if(mode=="r"||mode=="rb")if(auto model=actor_model_cache::archive_for(guest);!model.empty())return model;
     if(mode=="r"||mode=="rb")if(auto model=story_mail::model_override(guest);!model.empty())return model;  // the story notebook's model
     if(mode=="r"||mode=="rb")if(auto lyt=story_lyt_screen::archive_for(guest);!lyt.empty())return lyt;  // a story layout (story_lyt_screen.h)
     auto override=mods::content::replacement(guest,mode);

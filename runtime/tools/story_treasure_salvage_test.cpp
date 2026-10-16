@@ -292,4 +292,4 @@ int main() {
     return 0;
 }
 
-namespace story_actors { void room_loaded(Cpu*,int) {} }
+namespace story_actors { void native_room_loaded(Cpu*,int) {} }

@@ -66,6 +66,18 @@ struct VertexFormatPolicy {
         return fallbackMask ? 0x5646583200000000ull | fallbackMask : 0;
     }
 };
+// Driver troubleshooting switches for issue #207 (Graphics > Advanced, applied at the next start;
+// WWHD_VK_CPU_VERTICES, WWHD_VK_FULL_PRECISION, WWHD_VK_NO_VERTEX_REUSE take precedence). All off
+// by default; off leaves shaders, pipelines and caches exactly as before.
+struct VertexDiagnostics {
+    bool cpuVertices = false;    // byte swap + format conversion on the CPU, native float/uint fetch
+    bool fullPrecision = false;  // strip RelaxedPrecision from every SPIR-V module
+    bool noVertexReuse = false;  // fresh full vertex copies and binds every draw
+    // shader/pipeline cache identity; zero when all are off
+    constexpr uint64_t shader_salt() const {
+        return (cpuVertices || fullPrecision) ? 0x4449414700000000ull | (cpuVertices ? 1u : 0u) | (fullPrecision ? 2u : 0u) : 0;
+    }
+};
 template<class Supported>
 VertexFormatPolicy vertex_format_policy(Supported supported, bool force) {
     VertexFormatPolicy policy;

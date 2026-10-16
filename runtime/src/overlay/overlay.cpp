@@ -18,6 +18,7 @@
 #include "mods_tab.h"
 #include "graphics_switch.h"
 #include "restart_dialog.h"
+#include "quit_dialog.h"
 #include "gamepad_nav.h"
 #include "perf_average.h"
 #ifdef __ANDROID__
@@ -360,7 +361,7 @@ void init_context() {
 
 // ---------------------------------------------------------------- test switch
 struct TestSwitch {
-    bool open = false, perf = false;
+    bool open = false, perf = false, quit = false;
     int tab = -1;
     uint64_t at = 1;
     bool done = false;
@@ -376,7 +377,9 @@ TestSwitch parse_test() {
     }
     std::string what = s, tab;
     if (size_t c = s.find(':'); c != std::string::npos) { what = s.substr(0, c); tab = s.substr(c + 1); }
-    t.open = what == "open";
+    // quit: open the menu and choose Quit Game (its confirmation stays up unless WWHD_TEST_QUIT_ANSWER answers)
+    t.quit = what == "quit";
+    t.open = what == "open" || t.quit;
     t.perf = what == "perf";
     if (!tab.empty()) t.tab = ext::tab_index(tab);  // built-in or added (extensions.h)
     return t;
@@ -1062,6 +1065,32 @@ void tab_graphics() {
         hostui::post([v] { hostui::set("vkVertexFallback", v ? "1" : "0"); });
     }
     help("Applies after restarting the game. Splits RGB vertex inputs for driver troubleshooting.");
+    // issue #207 driver troubleshooting (gfx/vulkan/vertex_format_policy.h VertexDiagnostics)
+    struct Diagnostic { const char* label; const char* key; const char* env; const char* tip; };
+    static const Diagnostic diagnostics[] = {
+        {"Convert vertices on the CPU", "vkCpuVertices", "WWHD_VK_CPU_VERTICES",
+         "Applies after restarting the game. Byte swap and format conversion of the game's vertices run on the "
+         "CPU instead of the vertex shader (slower; for driver troubleshooting)."},
+        {"Full precision in shaders", "vkFullPrecision", "WWHD_VK_FULL_PRECISION",
+         "Applies after restarting the game. Removes reduced-precision hints from every shader (driver troubleshooting)."},
+        {"No vertex reuse", "vkNoVertexReuse", "WWHD_VK_NO_VERTEX_REUSE",
+         "Applies after restarting the game. Copies and binds every vertex buffer in full for every draw "
+         "(slower; for driver troubleshooting)."},
+    };
+    static bool diagnosticOn[3] = {};
+    static bool diagnosticRead = false;
+    if (!diagnosticRead) {
+        diagnosticRead = true;
+        for (int i = 0; i < 3; ++i) { std::string value; diagnosticOn[i] = hostui::get(diagnostics[i].key, value) && value == "1"; }
+    }
+    for (int i = 0; i < 3; ++i) {
+        if (check(diagnostics[i].label, diagnosticOn[i], &v, !getenv(diagnostics[i].env))) {
+            diagnosticOn[i] = v;
+            const char* key = diagnostics[i].key;
+            hostui::post([key, v] { hostui::set(key, v ? "1" : "0"); });
+        }
+        help(diagnostics[i].tip);
+    }
 #endif
     heading("Bug reports");
 #ifdef __ANDROID__
@@ -2326,6 +2355,47 @@ void tab_audio() {
     note("Plays each active channel in turn at a low level. Subwoofer uses an 80 Hz tone.");
 }
 
+// The bottom row of the Settings window (every tab): Quit Game, and on Android Close Settings before it.
+// Quit Game asks first (quit_dialog.h); Quit then ends the game through the host (hostui::quit).
+bool g_test_quit = false;  // WWHD_TEST_OVERLAY=quit: choose Quit Game once the menu is up
+void quit_row(bool& open) {
+#ifdef __ANDROID__
+    bool close = false;
+    bool ask = quit::bottom_row(true, &close);
+    if (close) open = false;
+#else
+    (void)open;
+    bool ask = quit::bottom_row(false, nullptr);
+#endif
+    if (ask) LOG("[quit] Settings > Quit Game: asking");
+    if (g_test_quit && !ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId)) {
+        g_test_quit = false;
+        ask = true;
+        LOG("[quit] test: Settings > Quit Game chosen");
+    }
+    // test runs: WWHD_TEST_QUIT_ANSWER=quit|cancel answers 1.5 s after the question shows (as on macOS)
+    static const quitprompt::Answer test = quitprompt::test_answer([](const char* n) -> const char* { return getenv(n); });
+    static double asked = -1;
+    if (ask) asked = ImGui::GetTime();
+    quit::Answer forced = quit::Answer::None;
+    if (asked >= 0 && ImGui::GetTime() - asked >= 1.5) {
+        if (test == quitprompt::Answer::Quit) forced = quit::Answer::Quit;
+        if (test == quitprompt::Answer::Cancel) forced = quit::Answer::Cancel;
+    }
+    const bool back = navigation_pressed(input_map::face_input(input_map::kB));
+    const auto answer = quit::dialog(ask, ss::in_gameplay(), back, forced);
+    if (answer == quit::Answer::None) return;
+    asked = -1;
+    if (answer == quit::Answer::Cancel) {
+        if (back) g_pad_b_used = true;  // B answered: the menu stays open
+        LOG("[quit] answer: Cancel; back to Settings");
+        return;
+    }
+    LOG("[quit] answer: Quit");
+    // posted: the settings changes posted before (each one saved as it is made) are done first
+    hostui::post([] { hostui::quit(); });
+}
+
 void settings_window() {
     ImGuiIO& io = ImGui::GetIO();
     const ImVec2 ds = io.DisplaySize;
@@ -2395,11 +2465,8 @@ void settings_window() {
                 if (ImGui::BeginTabItem(tabs[i].name.c_str(), nullptr, f)) {
                     if (U.tab != i) U.cap_action = -1, g_capturing_keys = false, U.cap_note.clear();
                     U.tab = i;
-#ifdef __ANDROID__
+                    // the page ends one row above the bottom of the window: the bottom row (quit_row)
                     ImGui::BeginChild("page", ImVec2(0, -ImGui::GetFrameHeightWithSpacing()), ImGuiChildFlags_NavFlattened);
-#else
-                    ImGui::BeginChild("page", ImVec2(0, 0), ImGuiChildFlags_NavFlattened);
-#endif
                     switch (tabs[i].builtin) {
                     case kSaves: tab_saves(); break;
                     case kGraphics: tab_graphics(); break;
@@ -2418,9 +2485,7 @@ void settings_window() {
             U.select_tab = -1;
             ImGui::EndTabBar();
         }
-#ifdef __ANDROID__
-        if (ImGui::Button("Close Settings", ImVec2(-FLT_MIN, 0))) open = false;
-#endif
+        quit_row(open);
     }
     ImGui::End();
     // B (not while choosing an input or in a list) or the close button closes the menu
@@ -2645,6 +2710,7 @@ ImDrawData* frame(float pw, float ph, void (*renderer_init)()) {
         test.done = true;
         if (test.tab >= 0) U.select_tab = U.tab = test.tab;
         if (test.open) set_open(true);
+        if (test.quit) g_test_quit = true;
         if (test.perf) g_perf = true;
         LOG("[overlay] test switch: %s", getenv("WWHD_TEST_OVERLAY"));
     }

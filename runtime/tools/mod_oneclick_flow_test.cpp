@@ -6,6 +6,7 @@
 #include "mod_test_host.h"
 #include "overlay/mods_tab.h"
 #include "overlay/extensions.h"
+#include "overlay/quit_dialog.h"
 #include "mods/catalogue_client.h"
 #include "imgui_internal.h"
 #include "backends/imgui_impl_sdlrenderer3.h"
@@ -143,17 +144,17 @@ int main(int argc,char** argv) {
     int platform_area=0;
     if(ids||tabs)ext_tabs_for_test(platform_area);
     // the rest of the Settings window around the tab: the settings tabs above (every tab of the overlay,
-    // built-in and added); on Android the page ends above the full-width "Close Settings" button.
+    // built-in and added); the page ends above the bottom row (Quit Game; on Android Close Settings too).
     // shown_tab: the tab drawn, "mods" or an added one
     std::string shown_tab="mods";
     auto draw_tab=[&](ui::Host& h) {
         if(ImGui::BeginTabBar("settings_tabs")){for(const auto& t:overlay::ext::tabs())
             if(ImGui::BeginTabItem(t.name.c_str(),nullptr,t.id==shown_tab?ImGuiTabItemFlags_SetSelected:0))ImGui::EndTabItem();ImGui::EndTabBar();}
-        ImGui::BeginChild("page",ImVec2(0,android_style?-ImGui::GetFrameHeightWithSpacing():0),ImGuiChildFlags_NavFlattened);
+        ImGui::BeginChild("page",ImVec2(0,-ImGui::GetFrameHeightWithSpacing()),ImGuiChildFlags_NavFlattened);
         if(shown_tab=="mods")ui::draw(h,"");
         else for(const auto& t:overlay::ext::tabs())if(t.id==shown_tab&&t.draw)t.draw();
         ImGui::EndChild();
-        if(android_style)ImGui::Button("Close Settings",ImVec2(-FLT_MIN,0));
+        overlay::quit::bottom_row(android_style,nullptr);
     };
     auto window_size=[&]{return android_style?ImVec2(width*0.98f,height*0.97f):ImVec2(std::min(860.f,width*0.94f),std::min(620.f,height*0.92f));};
     assert(ImGui_ImplSDLRenderer3_Init(renderer));

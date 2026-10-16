@@ -119,9 +119,11 @@ void begin(){
         const char* override=std::getenv("WWHD_GUEST_BUILD_CONFIG");
         fs::path config=override?fs::path(override):fs::path("guest-sdk.json");
         auto cfg=read(config);auto base=fs::absolute(config).parent_path();
-        auto resolve=[&](const std::string& name){fs::path p(cfg.get(name.c_str()).string());if(p.empty())exception_report::raise("Code-mod setup tools are missing; run setup again");return p.is_absolute()?p:base/p;};
+        // the same rules as the guest build bridge: $RELEASE/ (AppImage), relative paths, stale AppImage mounts
+        const auto release=guestmods::release_root();
+        auto resolve=[&](const std::string& name){auto p=guestmods::resolve_path(cfg.get(name.c_str()).string(),base,release);if(p.empty())exception_report::raise("Code-mod setup tools are missing; run setup again");return fs::path(p);};
         auto python=guestmods::BuildBridge::arguments(cfg.get("python"));
-        fs::path executable(python.front());if(executable.is_relative()&&executable.has_parent_path())python.front()=(base/executable).lexically_normal().string();
+        python.front()=guestmods::resolve_path(python.front(),base,release,true);
         auto data=resolve("data_dir");auto setup=resolve("setup");
         status_path=data/"code-mods-status.json";cancel_path=data/"code-mods-cancel";
         std::error_code ec;fs::remove(status_path,ec);fs::remove(cancel_path,ec);

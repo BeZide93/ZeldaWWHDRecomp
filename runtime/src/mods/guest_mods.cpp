@@ -26,6 +26,9 @@
 #include "story_chart.h"
 #include "story_treasure.h"
 #include "story_actors.h"
+#include "mod_actor.h"
+#include "mod_actor_behavior_core.h"
+#include "actor_model_cache.h"
 #include "story_scenes.h"
 #include "story_notebook.h"
 #include "story_items.h"
@@ -128,12 +131,25 @@ void call_original(Cpu* c, uint32_t func) {
 }
 
 // Declarative world content is shared by guest and data-only content packages.
-void load_world(const std::string& mod,const mods::json::Value& manifest) {
+void load_world(const std::string& mod,const mods::json::Value& manifest,const std::string& package_dir,const std::string& data_dir) {
     std::vector<story_notebook::ManifestActor> actors;
     std::vector<story_notebook::ManifestScene> scenes;
     std::string why;
     if(!story_notebook::parse_actors(manifest,actors,why)||!story_notebook::parse_scenes(manifest,scenes,why))
         exception_report::raise("World manifest "+mod+": "+why);
+    std::vector<story_notebook::ManifestModel> models;
+    if(!story_notebook::parse_models(manifest,models,why))exception_report::raise("World models "+mod+": "+why);
+    for(const auto& model:models) {
+        if(std::none_of(actors.begin(),actors.end(),[&](const auto& actor){return actor.kind=="mod"&&actor.model==model.id;}))continue;
+        try {
+            const auto bridge=BuildBridge::installed(std::string());
+            const auto tool=std::filesystem::path(bridge.builder).parent_path().parent_path()/"story_mods"/(model.kind=="skinned"?"skinned_actor_model.py":"actor_model.py");
+            const auto archive=actor_model_cache::prepare(mod,model,package_dir,data_dir,bridge.python,tool.string(),config::game_dir);
+            story_notebook::WorldPoint minimum,maximum;
+            if(!actor_model_cache::bounds_for(archive,minimum,maximum))exception_report::raise("Prepared model bounds unavailable");
+            if(!story_actors::register_model(mod,model.id,archive,1,why,minimum,maximum,model.kind=="skinned",actor_model_cache::clips_for(archive),actor_model_cache::rig_for(archive)))exception_report::raise("World model "+mod+": "+why);
+        } catch(const std::exception& e) {exception_report::raise("World model "+mod+":"+model.id+": "+e.what());}
+    }
     std::vector<std::string> flags;
     for(const auto& scene:scenes)for(const auto& step:scene.steps)for(const auto& action:step.then)
         if(action.kind==story_notebook::StoryAction::Kind::Flag)flags.push_back(action.id);
@@ -425,7 +441,13 @@ void svc_item_used(Cpu* c) {
     auto& mod=owner(c);std::string id;
     c->r[3]=uint32_t(mod_string(mod,c->r[3],story_mail::kMaxIdBytes,id)?story_items::used(mod.id,id):story_items::kResultInvalid);
 }
+#include "guest_actor_services.inc"
 const std::unordered_map<std::string, PpcFunc> kServices = {
+    {"wwhd_actor_register",svc_actor_register},{"wwhd_actor_find",svc_actor_find},{"wwhd_actor_get",svc_actor_get},
+    {"wwhd_actor_userdata",svc_actor_userdata},{"wwhd_actor_set_position",svc_actor_set_position},{"wwhd_actor_set_rotation",svc_actor_set_rotation},
+    {"wwhd_actor_set_collision",svc_actor_set_collision},{"wwhd_actor_set_animation",svc_actor_set_animation},
+    {"wwhd_actor_walk",svc_actor_walk},{"wwhd_actor_walk_quest",svc_actor_walk_quest},{"wwhd_actor_stop",svc_actor_stop},
+    {"wwhd_scene_music_register",svc_scene_music_register},
     {"wwhd_audio_epoch",svc_audio_epoch},{"wwhd_audio_open",svc_audio_open},
     {"wwhd_audio_available",svc_audio_available},{"wwhd_audio_submit",svc_audio_submit},{"wwhd_audio_close",svc_audio_close},
     {"wwhd_log", svc_log},       {"wwhd_log_int", svc_log_int}, {"wwhd_log_hex", svc_log_hex},
@@ -615,7 +637,7 @@ bool load_one(const std::string& path, std::string& err,const mods::packages::Gu
             prepare_npc_catalogue();
             story_notebook::declare(loaded.id,loaded.name,manifest);
         }
-        load_world(loaded.id,manifest);
+        load_world(loaded.id,manifest,pkg.path,pkg.data_path);
         // the mod's items (story_items.h): kept in the Delivery Bag, owned in the save's story block
         std::vector<story_notebook::ManifestItem> items;std::string why;
         if(!story_notebook::parse_items(manifest,items,why))LOG("[items] %s: the manifest's items are not used: %s",loaded.id.c_str(),why.c_str());
@@ -703,7 +725,7 @@ void init() {
         for(const auto& item:items)if(!story_items::define(pkg.id,path.string(),item,why))
             exception_report::raise("World items "+pkg.id+": "+why);
         if(!items.empty()){story_items::note_import();story_notebook::note_import();story_mail::note_import();}
-        load_world(pkg.id,manifest);
+        load_world(pkg.id,manifest,path.string(),packages::package_data_directory(pkg.id));
     }
     // The item icons (item_icons.h): the notebook (key 0), then the mod items in declaration order (frames
     // 56...), built into the game's 2D pack before the game opens it; the mod items draw from those frames.
@@ -791,6 +813,7 @@ void init() {
         g_mod_hook_flags[ordinal]=1;
     });
     if(story_actors::declared()) {
+        mod_actor::set_behavior_sink(behavior_sink);
         story_actors::set_game_calls(call_original,[](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);});
         story_actors::set_scratch_memory(mem::runtime_alloc(story_actors::kScratchBytes,16));
         story_actors::set_scene_start(story_scenes::request);
@@ -806,6 +829,9 @@ void init() {
     story_scenes::set_game_calls([](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);});
     if(g_world_scenes)story_scenes::set_scratch_memory(mem::runtime_alloc(story_scenes::kScratchBytes,16));
     story_scenes::set_callbacks(story_actors::actor_address,story_actors::actions);
+    story_scenes::set_place_resolver([](Cpu*,const std::string& mod,const std::string& quest)->std::optional<story_notebook::WorldPoint>{
+        float x=0,z=0;if(!story_notebook::place_position(mod,quest,x,z))return {};return story_notebook::WorldPoint{x,0,z};
+    });
     story_scenes::install(call_original,[](uint32_t addr) {
         auto it=g_chains.find(addr);return it==g_chains.end()?std::string():it->second.replace_mod;
     },[](uint32_t addr,PpcFunc fn) {
@@ -912,10 +938,11 @@ void draw_frame(Cpu* c,uint64_t step) {
         *c=saved;
     }
 }
-void logic_service(Cpu* c) { story_scenes::tick(c,false,2); story_actors::service(c); }
+void logic_service(Cpu* c) { actor_sweep(c);story_scenes::tick(c,false,2); story_actors::service(c); }
 void service(Cpu* c) { story_lyt_screen::service(c); }
 void state_loaded() {
     std::lock_guard lock(g_hud_mutex);
+    g_actor_registry.invalidate_all();g_actor_identities.clear();
     hud::store().reset();
     pcm::store().reset();
     story_scenes::state_loaded();

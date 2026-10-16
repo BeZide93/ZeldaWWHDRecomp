@@ -7,6 +7,37 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Linux AppImage: code mods work again** (#230). Turning on a code mod such as the story quests failed with "Guest mod
+  build tools are missing". Setups made with an earlier start of the AppImage are repaired automatically, without running
+  setup again.
+
+- **Settings: Quit Game** (#231). A button at the bottom right of every Settings tab, with a confirmation (Cancel is
+  preselected), so you can quit with just a controller, e.g. on a Steam Deck in Gaming Mode or an Android handheld. On
+  Android the game also leaves the recent apps list.
+- **Graphics → Advanced, diagnostic options for broken 3D geometry** (e.g. PowerVR GPUs, #207): "Convert vertices on
+  the CPU", "Full precision in shaders" and "No vertex reuse", each off by default and applied after a restart. They help
+  us find the cause on GPUs we can't test ourselves; the first one is slow and only meant for testing.
+- **Mod SDK v3 preview: animated characters and scenes.** Mods can add animated characters (a rigged glTF model
+  with idle, walk, talk and extra clips) that look at Link, walk paths or to quest places, block Link and react to
+  sword hits; mod code can drive them through a small C API. Scenes gain eased camera paths, follow shots, music,
+  and the game's choice box with branches. Two original examples: a tide sprite on Windfall and a wandering creature
+  (preview, for mod makers).
+- **Mod SDK v3 preview: static mod models.** A quest mod can now place its own static model (a glTF `.glb` from
+  Blender) in the world, lit and shadowed like the game's objects, with collision, L-targeting and a Check/Talk
+  prompt. The model is converted on your own machine using a material from your own game, so packages never contain
+  game files. The Windfall example gained an original carved post (preview, for mod makers).
+
+- **Android handhelds** (thanks to almost-drowned-rat):
+  - **Full screen** now hides the system bars on Android 11 and newer too, so they no longer cover the top and bottom
+    of the picture (based on GreenNaugahyde's Android fork; #212, #225).
+  - The app's **files folder** (saves, settings, mods) appears in the system Files app and file picker; the prepared
+    game and shader caches are read-only there and console keys are never shown (#213, #226).
+  - The system **Back** button or gesture opens and closes Settings, like F1 on desktop (#215, #227).
+
+- **Render-thread fast path** (Vulkan): a draw reuses the previous draw's prepared state when only pointers or
+  arithmetic values change, about 6–9% less render-thread CPU in tests (most on devices where the render thread limits
+  the frame rate, like the Steam Deck), with identical pictures. On by default; `WWHD_VK_FASTPATH=0` turns it off if
+  you see wrong textures or blending, and please report it (#178).
 - **Mods on Windows:** a mod's preparation tool can now load its own helper files there too (the port's Python on
   Windows didn't look next to the tool). This stopped the GC minimap from installing on Windows; gc-minimap 0.2.2
   also fixes it on its own for v0.3.0 (#224).

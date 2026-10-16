@@ -7,7 +7,11 @@ import java.io.FileOutputStream;
 import java.io.InputStream;
 import android.util.Log;
 import android.view.Display;
+import android.view.View;
 import android.view.ViewGroup;
+import android.view.Window;
+import android.view.WindowInsets;
+import android.view.WindowInsetsController;
 import android.view.WindowManager;
 import android.widget.RelativeLayout;
 
@@ -86,9 +90,60 @@ public class WwhdActivity extends SDLActivity {
         return args.toArray(new String[0]);
     }
 
+    // Settings › Display › Full screen on Android: hide the system bars, also the space of the status bar
+    // (adapted from GreenNaugahyde's MainActivity.hideSystemBars, MPL-2.0). SDL asks for full screen with the
+    // old setSystemUiVisibility flags only, which on Android 11+ leave the navigation bar's space reserved
+    // (AYN Odin 2 Portal: status bar space at the top, navigation bar over the bottom of the picture). With
+    // the setting on, a swipe from the edge shows the bars for a moment; with it off, they stay visible.
+    static void syncSystemBars(Window w) {
+        WindowInsetsController c = w != null ? w.getInsetsController() : null;
+        if (c == null) return;
+        if (mFullscreenModeActive) {
+            c.hide(WindowInsets.Type.systemBars());
+            c.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+        } else {
+            c.show(WindowInsets.Type.systemBars());
+        }
+    }
+
+    private void applyFullScreen() {
+        Window w = getWindow();
+        if (w == null) return;
+        w.setDecorFitsSystemWindows(!mFullscreenModeActive);
+        if (mFullscreenModeActive) {
+            // into a display cutout on the short edges too (SDL's window style sets ALWAYS, which includes them)
+            WindowManager.LayoutParams lp = w.getAttributes();
+            if (lp.layoutInDisplayCutoutMode != WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES &&
+                lp.layoutInDisplayCutoutMode != WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS) {
+                lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+                w.setAttributes(lp);
+            }
+        }
+        syncSystemBars(w);
+        if (gamePadDisplay != null) gamePadDisplay.syncSystemBars();
+    }
+
+    private final Runnable reapplyFullScreen = this::applyFullScreen;
+
+    @Override public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) applyFullScreen();  // also after a dialog, the file picker or another app had the screen
+    }
+
+    // SDL changes the window style when the Full screen setting changes (setSystemUiVisibility, which calls
+    // this): follow it right away. Bars shown by something else while full screen: hidden again after a moment.
+    @Override public void onSystemUiVisibilityChange(int visibility) {
+        super.onSystemUiVisibilityChange(visibility);
+        final boolean barsShown = (visibility & View.SYSTEM_UI_FLAG_HIDE_NAVIGATION) == 0;
+        View decor = getWindow().getDecorView();
+        decor.removeCallbacks(reapplyFullScreen);
+        decor.postDelayed(reapplyFullScreen, mFullscreenModeActive && barsShown && hasWindowFocus() ? 2000 : 0);
+    }
+
     @Override protected void onResume() {
         super.onResume();
         if (phoneRumble != null) phoneRumble.setActive(true);
+        applyFullScreen();
         // Only start after SDL successfully loaded the native game library.
         if (!mBrokenLibraries) {
             if (gamePadDisplay == null) gamePadDisplay = new GamePadDisplay(this, mLayout, mSurface);
@@ -126,6 +181,7 @@ public class WwhdActivity extends SDLActivity {
         super.onCreate(savedInstanceState);
         phoneRumble = new PhoneRumble(this);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        applyFullScreen();
         // on-screen controls over the game (the button under the view button shows or hides them)
         if (mLayout != null)
             mLayout.addView(new TouchControls(this), new RelativeLayout.LayoutParams(
@@ -175,17 +231,26 @@ public class WwhdActivity extends SDLActivity {
             finally { if (zip != null) zip.delete(); }
             final String problem = error;
             final boolean ok = problem == null || problem.isEmpty();
-            runOnUiThread(() -> new AlertDialog.Builder(this).setTitle(ok ? "Driver installed" : "Driver installation failed")
+            runOnUiThread(() -> syncSystemBars(new AlertDialog.Builder(this).setTitle(ok ? "Driver installed" : "Driver installation failed")
                 .setMessage(!ok ? problem : afterFailure ? "The game uses it from the next start: open the game again."
                                                          : "Select the driver in Graphics, then restart the game.")
                 .setCancelable(!afterFailure)
-                .setPositiveButton("OK", afterFailure ? (dialog, which) -> endApp() : null).show());
+                .setPositiveButton("OK", afterFailure ? (dialog, which) -> endApp() : null).show().getWindow()));
         }, "gpu-driver-install").start();
     }
 
     private void endApp() {
         finishAndRemoveTask();
         System.exit(0);
+    }
+
+    // Settings > Quit Game (native code, after the caches are written): close the game and remove it
+    // from the recent apps, as after a driver install. False: no activity to close (native code exits).
+    public static boolean quitApp() {
+        final SDLActivity a = mSingleton;
+        if (!(a instanceof WwhdActivity)) return false;
+        a.runOnUiThread(() -> ((WwhdActivity) a).endApp());
+        return true;
     }
 
     // Native display_rate.cpp requests the surface cadence and reads back the actual display rate.

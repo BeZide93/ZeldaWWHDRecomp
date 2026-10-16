@@ -10,6 +10,19 @@ trigger already held when you use the mouse will not keep moving the menu. Relea
 to return to controller navigation. The right stick does not navigate the overlay.
 Keyboard navigation remains available while using the mouse.
 
+## Quitting the game
+
+**Quit Game** sits at the bottom right of Settings, on every tab (on Android next to
+**Close Settings**). It is meant for a Steam Deck in Gaming Mode, a handheld or a TV
+setup where there is no window to close. With a controller, press Down until the
+button is highlighted and press A.
+
+It first asks *Quit Wind Waker HD?*. **Cancel** is selected first, so pressing A
+straight away (or B) returns to Settings and the game keeps running. **Quit** closes
+the game the same way as closing its window. Settings are already saved as you change
+them. Progress since your last in-game save is lost, so save in the game first (or
+use a save state). On Android the game also leaves the recent apps list.
+
 ## Diagnostics
 
 If asked to capture a menu problem, `WWHD_OVERLAY_TRACE=1` records controller

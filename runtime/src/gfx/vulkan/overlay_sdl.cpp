@@ -18,6 +18,7 @@
 #include "runtime.h"
 #include <SDL3/SDL.h>
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <cstdio>
 #include <cstring>
@@ -354,6 +355,17 @@ void set_pro_controller(bool on) {
     input::set_pro_controller(on);
     show_drc(!on);
 }
+// Settings > Quit Game: as closing the TV window. SDL_PushEvent runs the event watches at once (the rumble
+// stops, platform/input_sdl.cpp); the renderer's loop then quits (quit_game in backend.cpp).
+static std::atomic<bool> g_quit_from_menu{false};
+void quit() {
+    g_quit_from_menu = true;
+    SDL_Event event{};
+    event.type = SDL_EVENT_QUIT;
+    if (!SDL_PushEvent(&event)) LOG("[quit] cannot post the quit event: %s", SDL_GetError());
+}
+bool quit_from_menu() { return g_quit_from_menu; }
+
 const char* name() { return "SDL"; }
 void set_clipboard(const std::string& text) { SDL_SetClipboardText(text.c_str()); }
 #ifdef __ANDROID__

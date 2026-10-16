@@ -53,6 +53,9 @@ const char* name();                // "AppKit" or "SDL"
 void set_clipboard(const std::string& text);  // main thread: put text on the system clipboard
 bool can_open_folder();            // open_folder works on this host (not on Android)
 void open_folder(const std::string& path);    // main thread: show a folder in the file manager (Finder, Explorer, ...)
+// main thread: Settings > Quit Game, answered: end the game the way closing the TV window does (SDL host:
+// SDL_EVENT_QUIT; Android also closes the app's task) or the app menu's Quit (AppKit host)
+void quit();
 
 // SDL host only (gfx/vulkan/overlay_sdl.cpp, called by its main loop)
 void run_posted();                 // the functions post()ed since the last call
@@ -60,5 +63,6 @@ void load_saved_options();         // start-up: graphics and GamePad screen opti
 void toggle_drc();                 // Ctrl+G: show / hide the GamePad screen in the current mode
 void drc_window_closed();          // the GamePad window's close button (window mode: hidden until shown again)
 void tv_fullscreen_changed();      // the TV window may have entered or left full screen (remembered, as on macOS)
+bool quit_from_menu();             // quit() asked for the end (the renderer's quit: Android ends the task too)
 
 }  // namespace hostui

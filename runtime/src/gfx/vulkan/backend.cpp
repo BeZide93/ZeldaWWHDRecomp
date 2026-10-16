@@ -33,6 +33,7 @@
 #include "deferred_dispatch.h"
 #include "pipeline_cache_path.h"
 #include "bc_decode.h"
+#include "shader_compiler.h"
 #include "android_driver.h"
 #include "stutter_trace.h"
 #include "pipeline_worker.h"
@@ -136,6 +137,7 @@ uint64_t resident_bytes() {
 namespace gx2 { uint64_t flips_presented(); void checkpoint_vulkan_caches(); void shutdown_vulkan_caches(); void request_background_vulkan_cache_checkpoint(); }
 #include "../../interp.h"
 
+extern bool g_latteCpuVertexDecode;  // Cemu GLSL attribute decoder (LatteDecompiler.h), issue #207 diagnostic
 namespace gfxvk {
 Renderer R;
 namespace { BackgroundCacheReadiness backgroundCacheReadiness; }
@@ -321,7 +323,8 @@ void init_pipeline_cache() try {
     put(40, 3); // Runtime-build identity, portable content IDs, exact descriptors and fixed-state recipe schema.
     put(44, (R.portabilitySubset ? 1u : 0u) | (R.separateStencilMaskRef ? 2u : 0u) |
         (R.constantAlphaColorBlendFactors ? 4u : 0u) | (R.vertexAttributeAccessBeyondStride ? 8u : 0u) |
-        (R.vertexFormats.fallbackMask << 4));
+        (R.vertexFormats.fallbackMask << 4) | (R.vertexDiagnostics.cpuVertices ? 0x100u : 0u) |
+        (R.vertexDiagnostics.fullPrecision ? 0x200u : 0u));
     const char* warmup = std::getenv("WWHD_VK_PIPELINE_WARMUP");
     if (!warmup || std::strcmp(warmup, "0")) try {
       const auto headstart=path_environment_utf8("WWHD_HEADSTART");
@@ -3769,7 +3772,21 @@ static void init_device(std::vector<const char *> extensions,
   std::string fallbackSetting;
   const bool forceFallback = forceVertexFallback ? !std::strcmp(forceVertexFallback, "1") :
       (hostui::get("vkVertexFallback", fallbackSetting) && fallbackSetting == "1");
-  R.vertexFormats = vk::vertex_format_policy([](VkFormat format) {
+  // issue #207 driver troubleshooting: environment first, else the saved Graphics > Advanced choice
+  auto diagnostic = [](const char* env, const char* key) {
+    if (const char* e = std::getenv(env)) return !std::strcmp(e, "1");
+    std::string value;
+    return hostui::get(key, value) && value == "1";
+  };
+  R.vertexDiagnostics.cpuVertices = diagnostic("WWHD_VK_CPU_VERTICES", "vkCpuVertices");
+  R.vertexDiagnostics.fullPrecision = diagnostic("WWHD_VK_FULL_PRECISION", "vkFullPrecision");
+  R.vertexDiagnostics.noVertexReuse = diagnostic("WWHD_VK_NO_VERTEX_REUSE", "vkNoVertexReuse");
+  g_latteCpuVertexDecode = R.vertexDiagnostics.cpuVertices;
+  vk::set_full_precision(R.vertexDiagnostics.fullPrecision);
+  LOG("[vulkan diagnostics] convert vertices on the CPU=%u, full precision in shaders=%u, no vertex reuse=%u",
+      R.vertexDiagnostics.cpuVertices, R.vertexDiagnostics.fullPrecision, R.vertexDiagnostics.noVertexReuse);
+  // CPU-converted vertices are fetched as 4x32-bit float/uint only: the RGB split does not apply
+  R.vertexFormats = R.vertexDiagnostics.cpuVertices ? vk::VertexFormatPolicy{} : vk::vertex_format_policy([](VkFormat format) {
     return bool(format_properties(format).bufferFeatures & VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT);
   }, forceFallback);
   LOG("[vulkan diagnostics] RGB fallback forced=%u active=%u mask=%u (8-bit=1 16-bit=2 32-bit=4)",
@@ -3905,6 +3922,9 @@ static void set_window_icons() {
 void init() {
 #ifdef __ANDROID__
   SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
+  // Back always reaches the game (input_sdl.cpp: it opens and closes Settings); without this, Android's
+  // default Back handling can still close the app after the key event on some devices
+  SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");
 #endif
   // hidden test runs: no Dock icon, no activation (the app never takes the focus from the user)
   if (hidden_windows())
@@ -4290,14 +4310,44 @@ static void test_fullscreen_key() {
   }
 }
 
+#ifdef __ANDROID__
+// Settings > Quit Game on Android: the activity closes the app and removes it from the recent apps
+// (WwhdActivity.quitApp: finishAndRemoveTask, then the process ends); a bare _Exit would leave the
+// game's task in the recent apps. False if the activity could not be asked.
+static bool android_end_task() {
+  auto* env=static_cast<JNIEnv*>(SDL_GetAndroidJNIEnv());
+  if(!env)return false;
+  jobject activity=static_cast<jobject>(SDL_GetAndroidActivity());
+  if(!activity)return false;
+  bool asked=false;
+  if(jclass cls=env->GetObjectClass(activity)) {
+    if(jmethodID method=env->GetStaticMethodID(cls,"quitApp","()Z"))
+      asked=env->CallStaticBooleanMethod(cls,method);
+    env->DeleteLocalRef(cls);
+  }
+  if(env->ExceptionCheck()) {
+    env->ExceptionClear();
+    asked=false;
+  }
+  env->DeleteLocalRef(activity);
+  return asked;
+}
+#endif
 // Closing the TV window ends the game. SDL only sends SDL_EVENT_QUIT once every window is closed, so
 // with the GamePad window open the close button of the TV window did nothing. Closing the GamePad
 // window only hides it (WWHD_NO_GAMEPAD=1 starts without it).
+// Settings > Quit Game ends the game the same way (hostui::quit: SDL_EVENT_QUIT).
 static void quit_game() {
   ss::save_last_session(1500);  // the "Last session" state (a few KB; skipped outside gameplay)
   audio::finish_dump();  // _Exit bypasses atexit handlers
   screenshot::finish();  // the screenshots taken are written first
   gx2::shutdown_vulkan_caches();
+#ifdef __ANDROID__
+  if (::hostui::quit_from_menu() && android_end_task()) {
+    LOG("[quit] closing the app");
+    for (int i = 0; i < 50; i++) SDL_Delay(100);  // the activity ends the process; this is a fallback
+  }
+#endif
   std::_Exit(0);
 }
 static bool close_request(const SDL_Event& event) {

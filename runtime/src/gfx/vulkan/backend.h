@@ -87,6 +87,7 @@ inline constexpr std::array<const char*,9> secondaryStageNames{
  "acquire", "acquire_wait", "ready_fd", "record", "submit", "draw_wait", "returned_fd", "present", "primary_snapshot_record"};
 struct Renderer {
  vk::VertexFormatPolicy vertexFormats;
+ vk::VertexDiagnostics vertexDiagnostics; // issue #207 driver troubleshooting (vertex_format_policy.h)
  VkInstance instance=VK_NULL_HANDLE; VkPhysicalDevice physicalDevice=VK_NULL_HANDLE; VkDevice device=VK_NULL_HANDLE;
  std::unordered_map<VkFormat,VkFormatProperties> formatProperties;
  VkPhysicalDeviceFeatures enabledFeatures{};
@@ -269,7 +270,16 @@ enum class DepthCopyOverride { None, Draw, Unsupported };
 extern DepthCopyOverride g_depthCopyOverride;
 float res_scale();void set_res_scale(float);void latch_res_scale();
 uint64_t next_write_seq();
-inline void mark_gpu_written(Surface* s){s->gpuWritten=true;s->writeSeq=next_write_seq();}
+// Surface epoch (surfaces.cpp): bumped whenever the result of a texture or render-target lookup
+// (find_or_create_surface, sampled views, sampler choice) or the content of a sampled CPU texture can
+// change without a register write: surfaces created or their images destroyed/replaced, CPU texture
+// uploads, GPU writes outside the draw's own targets (clears, copies), CPU copies, save-state resets.
+// The continued-draw fast path (draw.cpp) reuses resolved state only within one epoch.
+extern uint64_t g_surface_epoch;
+inline void mark_gpu_written(Surface* s){s->gpuWritten=true;s->writeSeq=next_write_seq();++g_surface_epoch;}
+// A draw's own attachments: their newer writeSeq can only change lookups at their own addresses,
+// which the fast path excludes (draw.cpp); a surface becoming GPU-written still ends the epoch.
+inline void mark_draw_target_written(Surface* s){if(!s->gpuWritten)++g_surface_epoch;s->gpuWritten=true;s->writeSeq=next_write_seq();}
 }
 
 namespace gfxvk { void reset_feedback_images(); } // Call before device teardown, then drain retirements.
