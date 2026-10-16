@@ -17,6 +17,9 @@ what is on `devel` and not released yet (also in the
   GamePad picture as picture-in-picture, because Gaming Mode shows one window at a time and a separate GamePad window
   made the picture blurry. Also with the Windows build through Proton. Your own saved choices and launch options still
   win; the old launch-option workaround is no longer needed.
+
+- **Sploosh Kaboom: no more doubled hit and miss markers at higher frame rates** (#179). The board's markers are moved
+  between cells once per game step; the in-between frames no longer blend a marker from its old cell to its new one.
 - **True 60: no more crash at Orca's sword training** (#223). Talking to Orca and choosing "yes" stopped the game in True 60
   mode; event commands now only run on full game steps.
 
