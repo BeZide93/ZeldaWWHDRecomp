@@ -226,6 +226,24 @@ int startup_drc_mode() {
         mode = gfx::find_name(gfx::kModeNames, gfx::kDrcModeCount, e, mode);
     return mode;
 }
+#ifndef __ANDROID__
+// SDL defers fullscreen changes on hidden windows until they are shown. This
+// lets hidden Gaming Mode runs exercise the real request without taking focus.
+bool apply_startup_fullscreen(bool saved) {
+    SDL_Window* tv = gfxvk::R.tv.window;
+    if (!tv) return false;
+    const bool hidden = SDL_GetWindowFlags(tv) & SDL_WINDOW_HIDDEN;
+    const bool wanted = gfx::display_fullscreen_env() ? atoi(getenv("WWHD_FULLSCREEN")) != 0 : saved;
+    const bool apply = gfx::display_start_fullscreen(saved, hidden) ||
+        (hidden && gaming_mode::active() && wanted);
+    const bool requested = apply && SDL_SetWindowFullscreen(tv, true);
+    if (hidden && requested)
+        LOG("[display] TV full screen requested while hidden; SDL defers the switch until shown");
+    // Startup ENTER events describe the default, not a player choice.
+    g_last_fullscreen = requested || fullscreen();
+    return requested;
+}
+#endif
 // start-up (backend.cpp init): the saved graphics options
 void load_saved_options() {
     std::map<std::string, std::string> v;
@@ -278,15 +296,9 @@ void load_saved_options() {
 #ifndef __ANDROID__  // always full screen there
     // TV window: full screen as it was left (tv_fullscreen_changed); test runs with hidden windows
     // only log it
-    SDL_Window* tv = gfxvk::R.tv.window;
     const auto defaults = gaming_mode::defaults(gaming_mode::active(), g_mode, true,
         v.count("tvFullScreen") && v.at("tvFullScreen") == "1", v.count("tvFullScreen") != 0);
-    const bool start_fullscreen = tv && display_start_fullscreen(defaults.fullscreen,
-        SDL_GetWindowFlags(tv) & SDL_WINDOW_HIDDEN);
-    const bool requested_fullscreen = start_fullscreen && SDL_SetWindowFullscreen(tv, true);
-    // SDL may complete asynchronously. Its startup ENTER event is a default,
-    // not a player choice, so compare future events to the requested state.
-    g_last_fullscreen = requested_fullscreen || fullscreen();
+    apply_startup_fullscreen(defaults.fullscreen);
     if (const char* reason = gaming_mode::reason()) {
         int window_count = 0;
         SDL_Window** windows = SDL_GetWindows(&window_count);

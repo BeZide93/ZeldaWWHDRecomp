@@ -14,6 +14,8 @@ namespace aspect { void set_window_aspect(float) {} }
 int main() {
     const auto file = std::filesystem::temp_directory_path() / ("wwhd-gaming-settings-" + std::to_string(getpid()) + ".ini");
     setenv("WWHD_SETTINGS", file.c_str(), 1);
+    unsetenv("WAYLAND_DISPLAY"); unsetenv("GAMESCOPE_WAYLAND_DISPLAY");
+    unsetenv("WINE_HOST_XDG_CURRENT_DESKTOP");
     setenv("XDG_CURRENT_DESKTOP", "gamescope", 1);
     unsetenv("WWHD_DRC_MODE"); unsetenv("WWHD_FULLSCREEN"); unsetenv("WWHD_TEST_DRC_MODE");
     unsetenv("WWHD_NO_GAMEPAD");
@@ -47,6 +49,26 @@ int main() {
     gfxvk::R.tv.window = SDL_CreateWindow("settings test", 128, 128, SDL_WINDOW_HIDDEN);
     assert(gfxvk::R.tv.window);
     hostui::set_fullscreen(false);
+    assert(hostui::g_values.at("tvFullScreen") == "0");
+    // A hidden Gaming Mode startup issues the real SDL request. On the dummy
+    // display, showing it proves fullscreen is queued, without a real display.
+    reset(); setenv("XDG_CURRENT_DESKTOP", "gamescope", 1);
+    setenv("WWHD_FULLSCREEN", "0", 1);
+    assert(!hostui::apply_startup_fullscreen(true)); // environment wins
+    unsetenv("WWHD_FULLSCREEN");
+    assert(!hostui::apply_startup_fullscreen(false)); // saved windowed choice wins
+    setenv("XDG_CURRENT_DESKTOP", "KDE", 1);
+    assert(!hostui::apply_startup_fullscreen(true)); // Desktop hidden-window behavior stays
+    setenv("XDG_CURRENT_DESKTOP", "gamescope", 1);
+    assert(hostui::apply_startup_fullscreen(true));
+    assert(SDL_GetWindowFlags(gfxvk::R.tv.window) & SDL_WINDOW_HIDDEN);
+    assert(!hostui::g_values.count("tvFullScreen"));
+    assert(SDL_ShowWindow(gfxvk::R.tv.window));
+    assert(SDL_GetWindowFlags(gfxvk::R.tv.window) & SDL_WINDOW_FULLSCREEN);
+    hostui::tv_fullscreen_changed();
+    assert(!hostui::g_values.count("tvFullScreen")); // queued default isn't a choice
+    hostui::set_fullscreen(false);
+    assert(!(SDL_GetWindowFlags(gfxvk::R.tv.window) & SDL_WINDOW_FULLSCREEN));
     assert(hostui::g_values.at("tvFullScreen") == "0");
     SDL_DestroyWindow(gfxvk::R.tv.window); gfxvk::R.tv.window = nullptr;
     SDL_Quit(); std::filesystem::remove(file);
