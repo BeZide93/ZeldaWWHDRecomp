@@ -38,14 +38,22 @@ panels for quick changes.
 
 | | |
 | --- | --- |
-| **Toolbar** | the open mod, Undo, Redo, Check, Save…, Revert…, **Add**, Move / Turn, grid and angle snapping, **Play**, Play from Link, Restore at Stop, Test mode, and which panels show |
+| **Toolbar** | the open mod, Undo, Redo, Check, Save…, Revert…, **Add**, Move / Turn, grid and angle snapping, **Play**, Play from Link, Restore at Stop, Test mode, and which panels show (also **Quests**, **Flags** and **Search**) |
 | **Outliner** | the open mod's actors, models, scenes and quests, and the warp destinations |
 | **Inspector** | the selected actor: place, properties, dialogue and actions |
 | **Problems & export** | the check's problem list, and the export |
 | **Camera & test** | reload the room, test mode, test states |
-| **Status bar** | the stage and room, the camera's position and speed, Link's position, the last result |
+| **Status bar** | the stage and room, the camera's position and speed, Link's position, the last result, and the quest step the game is at ("Lighthouse quest: step 3 of 6") |
+| **Quests** | the open mod's quests as a graph to edit, or as a list, with the step and transition inspector |
+| **Flags** | the open mod's flags and their values in the game |
+| **Search** | everything of the open mod by name or text |
 
 The panels can be moved and resized; their places are remembered.
+
+To select more than one actor, hold Ctrl (Cmd on a Mac) or Shift while clicking labels in the picture or
+names in the Outliner. Dragging the handle then moves them all (one Undo step). **Ctrl+C** copies the
+selected actors and **Ctrl+V** pastes them where the camera looks, with ids and flags of their own; that
+also works in another room or on another island.
 
 In the picture, every actor of the open mod has a label. Click a label to select the actor (or pick it in
 the Outliner; a double click there flies the camera to it). The selected actor shows its collision
@@ -63,6 +71,8 @@ degrees. Letting go of a handle is one change (one Undo step).
 | click | | select an actor, or place the chosen new one |
 | Ctrl+Z / Ctrl+Y (Cmd on a Mac) | | undo / redo |
 | Ctrl+D | | duplicate the selected actor |
+| Ctrl / Shift + click | | select more than one actor |
+| Ctrl+C / Ctrl+V | | copy the selected actors / paste them where the camera looks (in the Quests window: the selected step) |
 | F | | fly to the selected actor |
 | Tab | View button | Play / Stop |
 
@@ -132,11 +142,76 @@ For signs, residents, chests and your own models, the Inspector has:
 Pots, barrels, crates, enemies and your own enemies have **Drops** (up to eight of the mod's items) and
 their broken or defeated flag.
 
+## Quests
+
+**Quests** (toolbar) opens the quest editor. A quest is a graph: **Start** on the left, one box per step,
+**End** on the right, and arrows for what moves the quest on.
+
+- **A step's box** shows its number and place name, its goal (what the notebook says to do next), its
+  place on the sea chart, and small marks for its conditions and rewards (T a resident's talk, R a reward,
+  E game progress it needs, t a time of day, C a chart to find, S a line of the King of Red Lions). Hover
+  over a mark to read it.
+- **An arrow** says what moves the quest on: the quest's letter being read, talking to an actor (reading a
+  sign, opening a chest), using one of the mod's items, a scene ending, or a resident's talk, which
+  finishes the quest (End). Its label shows **[if]** when it has conditions and **[+]** when it hands
+  something out. When a step leads to two different steps, a yellow dot marks the branch.
+- **Add a step** with the toolbar's **Add step**, or right-click into the graph and choose **Add step here**.
+  Right-click a step for **Start at this step**, **Edit text**, **Duplicate**, **Add a step after it**,
+  **Copy** and **Remove…**. A double click on a step edits its goal in place (Enter keeps it).
+- **Connect two steps:** drag from a step's right-hand dot to another step (or from Start: "any time"),
+  then choose the actor that moves the quest on. The actor is then there only while the quest is at the
+  first step, and talking to it (reading it, opening it) sets the second. Steps only go forward, so an
+  arrow always points to a later step. A quest ends with a step's resident talk (**Talk** in the
+  Inspector); an actor can't end it.
+- **Click an arrow** to see and change it: the item Link must carry and the time of day it needs, or
+  remove it (also with Delete). Its actor's dialogue and other actions are in the actor's Inspector.
+- **Drag a step's box** to arrange the graph; **Arrange all** (right-click) lays it out again. The places
+  are kept in the mod's own `editor/quest-layout.json` when you save: the game never reads that file and
+  the mod manager ignores it.
+- **The Inspector** beside the graph edits the selected step: its goal, its place name, its place on the
+  sea chart (from Link's place, the camera's, or a destination of the warp list; the sea chart only knows
+  places at sea), its time of day, its transitions, its resident talk, and Earlier / Later / Duplicate /
+  Remove. With nothing selected it edits the quest: its title, what the notebook says before step 1, its
+  reward text, and whether the notebook shows it.
+- **List** (instead of Graph) shows the steps as a compact table; the arrows move a step earlier or later.
+  Moving or inserting steps gives them new numbers, and every actor and item that names them follows.
+- Every change is one command: Undo and Redo work for all of them, arranging the graph included.
+
+Problems show on the steps themselves: a red mark (hover over it to read them) and a red frame on a step
+nothing leads to.
+
+## Testing a quest step by step
+
+- **Start at this step** (right-click a step, or its Inspector) turns test mode on, sets the quest to that
+  step, sets the flags and gives the items the earlier steps would have (along the shortest way there,
+  through the earlier steps), warps Link in front of the actor that moves the quest on (or to the step's
+  place), and plays from there. It only changes this mod's own quest step, flags and items: never the
+  game's own progress, events or save, and never another mod's.
+- **While playing,** the status bar (and the small bar at the top) says where the quest is, for example
+  "Lighthouse quest: step 2 of 3", and changes as you play. With **Show while playing** on in the Quests
+  window, the graph stays over the game: the step the game is at has a yellow frame and "now", the steps
+  before it say "done".
+- **Flags** (toolbar) lists the open mod's flags (signs read, chests opened, switches, flag actions, broken
+  props and defeated enemies), who uses each, and their values in the game. In test mode you can switch a
+  flag on or off to try a later part of the quest; broken and defeated only show.
+- Stop, change the quest, **Save…** and start the game again to try the new version: quest changes take
+  effect after a restart.
+
+## Search
+
+**Search** (toolbar) finds the open mod's actors, quests and steps, scenes, items and flags by their id
+or text. Clicking a result selects that actor (and flies the camera to it) or opens that quest step.
+
 ## Checking and exporting
 
 **Check** (toolbar) checks every actor, model, scene and quest as the mod manager does and lists the
 problems in **Problems & export**, each with what it is about. Clicking a problem selects that actor,
 flies the camera to it and marks the field in the Inspector.
+
+For quests it also warns (in yellow) about steps nothing leads to, steps nothing moves on from, steps
+without a place on the sea chart, arrows that point backwards, items a condition needs that nothing in
+the package gives, and flag actions on a prop's or enemy's own flag. These warnings don't stop saving or
+exporting. Clicking one opens that step in the quest editor.
 
 **Export…** checks the package and writes it into a new or empty folder: the manifest and the mod's own
 files (models, textures, assets). Files in the game's own formats are never exported; if the package
@@ -282,3 +357,26 @@ separated by `;`, or `@file` with one such line per row. Results go to the log.
 | `save_state` | `slot` (1–3) | test mode: save a test state |
 | `load_state` | `slot` (1–3), `confirm` | test mode: load a test state (replaces the current progress) |
 | `command_log` | `count`? | the last commands |
+| `get_quest` | `quest`, `mod`? | one quest as the manifest declares it |
+| `quest_graph` | `quest`, `mod`? | the quest's nodes and edges, each node's problems, the graph's places, and the step the game is at |
+| `add_quest` | `title`, `id`?, `text`?, `mod`? | a new quest with its first step |
+| `remove_quest` | `quest`, `confirm`, `mod`? | remove a quest and the actor conditions and actions that name it |
+| `set_quest` | `quest`, `property` (`title`, `journal`, `start`, `reward`, `letter`), `value`, `mod`? | |
+| `add_quest_step` | `quest`, `after`?, `text`?, `where`?, `place`?, `mod`? | a step at the end, or after a step (later steps move up) |
+| `edit_quest_step` | `quest`, `step`, `fields`, `mod`? | several step properties at once (`null` removes one) |
+| `remove_quest_step` | `quest`, `step`, `confirm`, `mod`? | remove a step and what names it |
+| `duplicate_quest_step` | `quest`, `step`, `mod`? | a copy as the new last step |
+| `move_quest_step` | `quest`, `step`, `to`, `mod`? | move a step in the order; the numbers and references follow |
+| `set_step_place` | `quest`, `step`, `from` (`link`, `camera`, `location`, `none`), `location`?, `mod`? | the step's place on the sea chart and its name |
+| `connect_quest_steps` | `quest`, `from` (0: any time), `to`, `via`, `item`?, `time`?, `mod`? | an actor moves the quest on from one step to another |
+| `disconnect_quest_steps` | `quest`, `from`, `to`, `via`, `mod`? | remove that |
+| `set_quest_layout` | `quest`, `positions`, `mod`? | the graph's places (`start`, `end`, `step:N`: `{x, y}`) |
+| `start_at_step` | `quest`, `step`, `warp`? (`next`, `place`, `none`), `play`?, `mod`? | test mode: start the quest at a step |
+| `quest_state` | `mod`? | the step each quest is at in the game |
+| `list_flags` | `mod`? | the mod's flags, who uses them, their values |
+| `set_flag` | `id`, `value`, `mod`? | test mode: set one of the mod's flags |
+| `search` | `text`, `mod`? | find actors, quests and steps, scenes, items and flags |
+| `copy` | `ids` or `quest` and `steps`, `mod`? | copy actors or quest steps |
+| `paste` | `at`? (`offset`, `link`, `camera`, `position`), `offset`?, `position`?, `quest`?, `mod`? | paste them (actors get ids and flags of their own) |
+| `move_actors` | `ids`, `offset`, `mod`? | move several actors (one Undo step) |
+| `remove_actors` | `ids`, `confirm`, `mod`? | remove several actors (one Undo step) |
