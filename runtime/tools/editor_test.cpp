@@ -631,6 +631,58 @@ void building(const fs::path& examples) {
     fs::remove_all(out);
 }
 
+// The handle drag (Session::drag_preview): the game shows every step of it, but the package, the undo
+// stack and the log change only once, when the handle is let go.
+void handle_drag() {
+    FakeHost host;
+    editor::Session s(&host);
+    s.add_package("editor-test", "Editor test", "", json(kManifest));
+    const Value before = *s.manifest("editor-test");
+    const size_t logged = s.log().size();
+    std::vector<std::string> later;
+    std::string why;
+    for (int i = 1; i <= 20; i++) {
+        Value poses = json(R"([{"id": "sign-a"}])");
+        poses.array[0]["position"] = point(10 + i, 1040, -201500);
+        CHECK(s.drag_preview("editor-test", poses, later, why) && later.empty());
+        CHECK(host.last_changed == std::vector<std::string>{"sign-a"} && host.last_actors[0].position.x == 10 + i);
+    }
+    CHECK(host.applied == 20);
+    CHECK(*s.manifest("editor-test") == before && s.undo_depth() == 0 && s.log().size() == logged && !s.dirty("editor-test"));
+    // let go: one command, one undo step, one log entry
+    Value p;
+    p["id"] = "sign-a";
+    p["position"] = point(30, 1040, -201500);
+    Value r = s.run("move_actor", p);
+    CHECK(ok(r) && s.undo_depth() == 1 && s.log().size() == logged + 1 && host.last_actors[0].position.x == 30);
+    // undo: back at the start in one step
+    r = s.run("undo");
+    CHECK(ok(r) && s.undo_depth() == 0 && host.last_actors[0].position.x == 10 && *s.manifest("editor-test") == before);
+    // a group drag: both actors follow every step; letting go is one move_actors (one undo step)
+    const int applied = host.applied;
+    for (int i = 1; i <= 5; i++) {
+        Value poses = json(R"([{"id": "sign-a"}, {"id": "guide"}])");
+        poses.array[0]["position"] = point(10 + i, 1040, -201500);
+        poses.array[1]["position"] = point(-500 + i, 1200, -201500);
+        CHECK(s.drag_preview("editor-test", poses, later, why));
+        CHECK(host.last_changed.size() == 2 && host.last_actors[1].position.x == -500 + i);
+    }
+    CHECK(host.applied == applied + 5 && s.undo_depth() == 0);
+    r = s.run("move_actors", json(R"({"ids": ["sign-a", "guide"], "offset": {"x": 5, "y": 0, "z": 0}})"));
+    CHECK(ok(r) && s.undo_depth() == 1 && host.last_actors[0].position.x == 15 && host.last_actors[1].position.x == -495);
+    // a turn drag
+    Value turn = json(R"([{"id": "guide", "rotation": {"x": 0, "y": 90, "z": 0}}])");
+    CHECK(s.drag_preview("editor-test", turn, later, why) && host.last_changed == std::vector<std::string>{"guide"});
+    // cancelled (Esc): a pose without a place shows the package's place again
+    CHECK(s.drag_preview("editor-test", json(R"([{"id": "sign-a"}, {"id": "guide"}])"), later, why));
+    CHECK(host.last_actors[0].position.x == 15 && host.last_actors[1].position.x == -495 && s.undo_depth() == 1);
+    // refused: an unknown actor or mod, nothing dragged
+    CHECK(!s.drag_preview("editor-test", json(R"([{"id": "nobody"}])"), later, why) && !why.empty());
+    CHECK(!s.drag_preview("no-such-mod", turn, later, why));
+    CHECK(!s.drag_preview("editor-test", json("[]"), later, why));
+    CHECK(s.log().size() == logged + 3);  // move_actor, undo, move_actors: the drag steps never show in the log
+}
+
 int main(int argc, char** argv) {
     // editor_test --game <game dir> [stage room]: what the editor reads from a game folder (manual check)
     if (argc >= 3 && std::string(argv[1]) == "--game") {
@@ -648,6 +700,7 @@ int main(int argc, char** argv) {
         return 2;
     }
     command_layer();
+    handle_drag();
     locations();
     records();
     package_files(argv[1]);

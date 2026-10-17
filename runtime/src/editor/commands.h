@@ -74,6 +74,15 @@ public:
     // `note` may say what needs a room reload or a restart.
     virtual bool apply_actors(const std::string& mod, const std::vector<story_notebook::ManifestActor>& actors,
                               const std::vector<std::string>& changed, std::string& note, std::string& why) = 0;
+    // A handle drag in progress (Session::drag_preview): the same live update as apply_actors, but
+    // quietly (no status per step) and only for what can change while the game runs; `later` gets the
+    // changed ids that can't (restart-only kinds), which keep their old state. The default: apply_actors.
+    virtual bool preview_actors(const std::string& mod, const std::vector<story_notebook::ManifestActor>& actors,
+                                const std::vector<std::string>& changed, std::vector<std::string>& later, std::string& why) {
+        (void)later;
+        std::string note;
+        return apply_actors(mod, actors, changed, note, why);
+    }
     virtual bool reload_room(std::string& why) = 0;
     // Stages and the rooms each has, from the game's own files (sorted). Empty without game files.
     virtual std::vector<std::pair<std::string, std::vector<int>>> stage_rooms() = 0;
@@ -170,6 +179,12 @@ public:
     void note(const std::string& command, const Value& params, const Value& result, const std::string& source);
     // {"command": "...", "params": {...}} as text, the result as text
     std::string run_json(const std::string& request);
+    // A handle drag in progress: the game shows the actors in `poses` ([{"id", "position"?, "rotation"?}])
+    // where the drag has them, through the host's live update (Host::preview_actors). Nothing changes in
+    // the package: no command, no undo step, no log entry; letting go runs the one command that keeps the
+    // change. A pose without position and rotation puts that actor back at the package's place (a drag
+    // cancelled). `later`: the ids that can't move while the game runs. False with `why`: nothing shown.
+    bool drag_preview(const std::string& mod, const Value& poses, std::vector<std::string>& later, std::string& why);
 
     const std::deque<LogEntry>& log() const { return log_; }
     std::string open_mod() const { return open_; }

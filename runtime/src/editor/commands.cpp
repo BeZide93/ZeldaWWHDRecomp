@@ -676,6 +676,27 @@ void Session::apply_live(const Package& p, const Value& before, Value& result) {
     else if (!note.empty()) result["note"] = note;
 }
 
+bool Session::drag_preview(const std::string& mod, const Value& poses, std::vector<std::string>& later, std::string& why) {
+    later.clear();
+    const Package* p = find(mod);
+    if (!p) return why = "no active mod \"" + mod + "\"", false;
+    if (!host_) return why = "the game is not running", false;
+    if (poses.type != Value::Array || poses.array.empty()) return why = "nothing is dragged", false;
+    Value shown = p->manifest;  // a copy: the package itself never changes here
+    std::vector<std::string> changed;
+    for (const auto& pose : poses.array) {
+        const std::string id = pose.get("id").string();
+        Value* a = find_by_id(shown["actors"], id);
+        if (!a) return why = "no placed actor \"" + id + "\" in " + mod, false;
+        for (const char* field : {"position", "rotation"})
+            if (pose.get(field).type == Value::Object) (*a)[field] = pose.get(field);
+        changed.push_back(id);
+    }
+    std::vector<ManifestActor> actors;
+    if (!story_notebook::parse_actors(shown, actors, why)) return false;
+    return host_->preview_actors(mod, actors, changed, later, why);
+}
+
 bool Session::change(Package& p, const std::string& label, const std::function<bool(Value&, std::string&)>& edit, Value& result,
                      std::string& why) {
     Value next = p.manifest;

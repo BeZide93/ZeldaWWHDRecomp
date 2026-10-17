@@ -546,6 +546,26 @@ public:
             note = changed.empty() ? "" : "Changed actors are created again in their room.";
         return true;
     }
+    bool preview_actors(const std::string& mod, const std::vector<story_notebook::ManifestActor>& actors, const std::vector<std::string>& changed,
+                        std::vector<std::string>& later, std::string& why) override {
+        // restart-only kinds keep their place until the change is saved and the game starts again
+        std::vector<std::string> now;
+        for (const auto& id : changed) {
+            const auto it = std::find_if(actors.begin(), actors.end(), [&](const story_notebook::ManifestActor& a) { return a.id == id; });
+            if (it != actors.end() && story_actors::editor_restart_only(*it)) later.push_back(id);
+            else now.push_back(id);
+        }
+        if (now.empty()) return true;
+        auto update = [mod, actors, now](Cpu*) {
+            std::string w;
+            std::vector<std::string> pending;
+            if (!story_actors::editor_update(mod, actors, now, w, &pending)) set_status("Live update refused: " + w);
+        };
+        if (t_game) update(t_game);  // the drag's own step (drag_tick): at once
+        else post(update);
+        (void)why;
+        return true;
+    }
     bool reload_room(std::string& why) override {
         (void)why;
         when_free([](Cpu*) {
@@ -887,6 +907,57 @@ void reapply_mod(const std::string& mod) {
     if (!story_actors::editor_update(mod, actors, {}, why, &pending)) set_status("Live update refused: " + why);
 }
 
+// ---------------------------------------------------------------- the handle drag
+// The render thread leaves the latest poses here (never waiting); the game thread shows them at most once per
+// logic step, when the session is free (a command that waits for the game holds it: the next step then).
+std::mutex g_drag_mu;
+struct DragSlot {
+    std::string mod;
+    Value poses;            // the latest poses (or the ids to put back, without places)
+    uint64_t seq = 0, shown = 0;
+    std::string note;       // what can't move live
+} g_drag;
+constexpr int kDragSettle = 4;  // logic steps a re-created actor shows before the next pose (its first frames draw nothing)
+void drag_tick(Cpu* c) {
+    // An actor moves by being created again at its new place (story_actors::editor_update), and a new
+    // actor takes a few logic steps to load and draw: the next pose waits until the last one's actors
+    // exist and have shown for kDragSettle steps, or a drag would remove them before they ever show.
+    static int settled = kDragSettle;
+    static std::vector<std::string> shown_ids;
+    static std::string shown_mod;
+    if (story_actors::editor_pending()) return;
+    for (const auto& id : shown_ids)
+        if (!story_actors::actor_address(c, shown_mod, id)) return void(settled = 0);
+    if (settled < kDragSettle) return void(++settled);
+    std::string mod;
+    Value poses;
+    uint64_t seq;
+    {
+        std::lock_guard<std::mutex> lk(g_drag_mu);
+        if (g_drag.seq == g_drag.shown) return;
+        mod = g_drag.mod, poses = g_drag.poses, seq = g_drag.seq;
+    }
+    std::unique_lock<std::recursive_mutex> session(g_mu, std::try_to_lock);
+    if (!session.owns_lock()) return;  // the next logic step
+    std::vector<std::string> later;
+    std::string why;
+    const bool ok = g_session.drag_preview(mod, poses, later, why);
+    session.unlock();
+    std::string note;
+    if (!ok) note = "Live move: " + why;
+    else if (!later.empty()) {
+        note = "Moves when you let go, shows after a restart:";
+        for (const auto& id : later) note += " " + id;
+    }
+    shown_mod = mod, shown_ids.clear(), settled = 0;
+    if (ok)
+        for (const auto& pose : poses.array)
+            if (std::find(later.begin(), later.end(), pose.get("id").string()) == later.end()) shown_ids.push_back(pose.get("id").string());
+    std::lock_guard<std::mutex> lk(g_drag_mu);
+    g_drag.shown = seq;
+    g_drag.note = note;
+}
+
 // ---------------------------------------------------------------- Play / Stop
 bool request_play(bool from_camera, bool restore, std::string& why) {
     if (g_playing) return why = "already playing (Stop first)", false;
@@ -1077,6 +1148,36 @@ void run_async(const std::string& command, const Value& params, std::function<vo
     g_queue_cv.notify_one();
 }
 bool commands_pending() { return g_queued.load() > 0; }
+void drag_actors(const std::string& mod, const Value& poses) {
+    std::lock_guard<std::mutex> lk(g_drag_mu);
+    if (g_drag.mod == mod && g_drag.poses == poses) return;  // held still: nothing new to show
+    g_drag.mod = mod;
+    g_drag.poses = poses;
+    ++g_drag.seq;
+}
+void end_drag(const std::string& mod, const std::vector<std::string>& ids, bool put_back) {
+    std::lock_guard<std::mutex> lk(g_drag_mu);
+    g_drag.note.clear();
+    if (!put_back || ids.empty()) {
+        g_drag.shown = g_drag.seq;  // nothing more to show: the released command applies the change
+        g_drag.poses = Value();
+        return;
+    }
+    Value back;
+    back.type = Value::Array;
+    for (const auto& id : ids) {
+        Value pose;
+        pose["id"] = id;
+        back.array.push_back(pose);
+    }
+    g_drag.mod = mod;
+    g_drag.poses = back;
+    ++g_drag.seq;
+}
+std::string drag_note() {
+    std::lock_guard<std::mutex> lk(g_drag_mu);
+    return g_drag.note;
+}
 void note(const std::string& command, const Value& params, const Value& result, const std::string& source) {
     std::lock_guard<std::recursive_mutex> lk(g_mu);
     g_session.note(command, params, result, source);
@@ -1123,6 +1224,7 @@ void logic_service(Cpu* c) {
             g_play_after = 1;
     }
     run_script();
+    drag_tick(c);
     preview_tick(c);
     t_game = nullptr;
 }

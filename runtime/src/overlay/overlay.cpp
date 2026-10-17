@@ -2765,6 +2765,10 @@ bool mouse_move(float nx, float ny, bool touch) {
     push({Event::MousePos, 0, false, nx, ny, 0, touch});
     return captures() || layer_takes_pointer();
 }
+void test_pointer(float nx, float ny, bool down) {
+    push({Event::MousePos, 0, false, nx, ny, 0, false});
+    push({Event::MouseButton, 0, down, 0, 0, 0, false});
+}
 // The capture and navigation order is shared with the game-free SDL UI regression.
 void prepare_menu_input(ImGuiIO& io, bool open, bool mouse_used) {
     U.capture_completed = false;

@@ -12,6 +12,7 @@
 
 #include "../editor/editor_game.h"
 #include "../editor/mcp_game.h"
+#include "../gfx/renderer.h"
 #include "../input_map.h"
 #include "../platform/keycodes.h"
 #include "editor_panel.h"
@@ -19,6 +20,7 @@
 #include "hostui.h"
 #include "imgui.h"
 #include "imgui_internal.h"
+#include "overlay.h"
 // ImGuizmo needs Dear ImGui declared first
 #include "ImGuizmo.h"
 
@@ -41,6 +43,9 @@ struct ShellState {
     bool dragging = false;    // the gizmo was used last frame
     float drag[16] = {};
     std::string drag_actor;
+    std::string drag_mod;                // the dragged actors follow the handle in the game (editor::drag_actors)
+    std::vector<std::string> drag_ids;
+    bool drag_cancelled = false;         // Esc during the drag: the handle rests until the mouse is let go
     std::vector<std::string> types, type_labels, type_groups;
     std::vector<bool> type_model;
     bool layout_loaded = false;
@@ -181,6 +186,93 @@ std::string current_stage(const Value& state) {
     return state.get("link").get("stage").string();
 }
 
+// ---------------------------------------------------------------- the handle drag, live in the game
+double rounded(double v) { return std::round(v * 10) / 10; }
+Value point_of(double x, double y, double z) {
+    Value p;
+    p["x"] = rounded(x), p["y"] = rounded(y), p["z"] = rounded(z);
+    return p;
+}
+// Moving the group: the selected actor and the others of the multiple selection, by the same offset.
+bool group_drag(const std::string& selected) {
+    const auto& group = editor_ui::multi_selection();
+    return S.gizmo == 0 && group.size() > 1 && std::find(group.begin(), group.end(), selected) != group.end();
+}
+double drag_degrees() {
+    double deg = std::atan2(S.drag[8], S.drag[10]) * 180 / kPi;
+    return deg < 0 ? deg + 360 : deg;
+}
+// The poses the handle gives the dragged actors now: what the game shows while dragging and what the
+// released command keeps.
+Value drag_poses(const Value& manifest, const Value& sel, const std::string& selected, std::vector<std::string>& ids) {
+    Value poses;
+    poses.type = Value::Array;
+    ids.clear();
+    float at[3];
+    if (!position_of(sel, at)) return poses;
+    if (S.gizmo == 0) {
+        const float off[3] = {S.drag[12] - at[0], S.drag[13] - at[1], S.drag[14] - at[2]};
+        std::vector<std::string> group = group_drag(selected) ? editor_ui::multi_selection() : std::vector<std::string>{selected};
+        for (const auto& a : manifest.get("actors").array) {
+            const std::string id = a.get("id").string();
+            float p[3];
+            if (std::find(group.begin(), group.end(), id) == group.end() || !position_of(a, p)) continue;
+            Value pose;
+            pose["id"] = id;
+            // the selected actor exactly at the handle; the others by the rounded offset, as move_actors does
+            pose["position"] = id == selected ? point_of(S.drag[12], S.drag[13], S.drag[14])
+                                              : point_of(p[0] + rounded(off[0]), p[1] + rounded(off[1]), p[2] + rounded(off[2]));
+            poses.array.push_back(pose);
+            ids.push_back(id);
+        }
+        return poses;
+    }
+    Value rot = sel.get("rotation").type == Value::Object ? sel.get("rotation") : Value();
+    rot["x"] = num(rot, "x");
+    rot["y"] = rounded(drag_degrees());
+    rot["z"] = num(rot, "z");
+    Value pose;
+    pose["id"] = selected;
+    pose["rotation"] = rot;
+    poses.array.push_back(pose);
+    ids.push_back(selected);
+    return poses;
+}
+// The selection went away (or Play started) during a drag: the actors go back to the package's places, no command.
+void cancel_drag() {
+    if (!S.dragging) return;
+    editor::end_drag(S.drag_mod, S.drag_ids, true);
+    S.dragging = false;
+    S.drag_cancelled = true;
+    S.drag_actor.clear();
+}
+
+// test aid: WWHD_TEST_EDITOR_DRAG=<from>-<to>:<dx>:<dy> drags the selected actor's handle (from its centre)
+// by dx, dy picture units between those TV frames, the mouse button held until <to> (screenshots of a live drag)
+struct TestDrag {
+    uint64_t from = 0, to = 0;
+    float dx = 0, dy = 0;
+    bool on = false, started = false;
+    ImVec2 start;
+} g_test_drag = [] {
+    TestDrag t;
+    unsigned long long a, b;
+    if (const char* e = std::getenv("WWHD_TEST_EDITOR_DRAG"); e && std::sscanf(e, "%llu-%llu:%f:%f", &a, &b, &t.dx, &t.dy) == 4 && b > a + 1)
+        t.from = a, t.to = b, t.on = true;
+    return t;
+}();
+void test_drag(ImVec2 centre) {
+    TestDrag& t = g_test_drag;
+    const uint64_t f = render::frame_count();
+    if (!t.on || f < t.from || f > t.to + 1) return;
+    const ImVec2 size = ImGui::GetIO().DisplaySize;
+    if (!t.started) t.started = true, t.start = centre;
+    const float k = std::min(1.0f, float(f - t.from) / float(t.to - t.from));
+    // as the host's pointer (the overlay feeds it at the next frame)
+    overlay::test_pointer((t.start.x + t.dx * k) / size.x, (t.start.y + t.dy * k) / size.y, f > t.from && f < t.to);
+    if (f >= t.to) t.on = false;
+}
+
 // ---------------------------------------------------------------- the picture: labels, cylinders, handles, clicks
 void world(float w, float h) {
     const editor_ui::Snapshot& snap = editor_ui::snapshot();
@@ -235,11 +327,14 @@ void world(float w, float h) {
     // the selected actor: its cylinder and handles
     float model[16] = {};
     bool gizmo = false;
+    if (S.dragging && (!sel || S.drag_actor != selected)) cancel_drag();  // the selection went away mid-drag
+    if (S.drag_cancelled && !ImGui::IsMouseDown(0)) S.drag_cancelled = false;
     if (sel) {
         float p[3], radius, height;
         position_of(*sel, p);
         cylinder_of(*sel, radius, height);
         draw_cylinder(dl, v, p, radius, height, IM_COL32(255, 210, 90, 230));
+        if (ImVec2 centre; g_test_drag.on && project(v, p, centre)) test_drag(centre);
         const double yaw = num(sel->get("rotation"), "y") * kPi / 180;
         const float c = float(std::cos(yaw)), s = float(std::sin(yaw));
         const float m[16] = {c, 0, -s, 0, 0, 1, 0, 0, s, 0, c, 0, p[0], p[1], p[2], 1};
@@ -253,51 +348,51 @@ void world(float w, float h) {
         float snap_values[3] = {kGrid[S.grid], kGrid[S.grid], kGrid[S.grid]};
         if (S.gizmo == 1) snap_values[0] = kAngle[S.angle];
         const bool snapping = S.gizmo == 0 ? S.grid > 0 : S.angle > 0;
-        ImGuizmo::Manipulate(view, proj, S.gizmo == 0 ? ImGuizmo::TRANSLATE : ImGuizmo::ROTATE_Y, ImGuizmo::WORLD, model, nullptr,
-                             snapping ? snap_values : nullptr);
-        gizmo = true;
-        const bool using_now = ImGuizmo::IsUsing();
+        // after an Esc the handle rests (not interactive) until the mouse button is let go
+        if (!S.drag_cancelled) {
+            ImGuizmo::Manipulate(view, proj, S.gizmo == 0 ? ImGuizmo::TRANSLATE : ImGuizmo::ROTATE_Y, ImGuizmo::WORLD, model, nullptr,
+                                 snapping ? snap_values : nullptr);
+            gizmo = true;
+        }
+        const bool using_now = gizmo && ImGuizmo::IsUsing();
         if (using_now) {
             S.dragging = true;
             S.drag_actor = selected;
+            S.drag_mod = snap.open;
             std::memcpy(S.drag, model, sizeof model);
             const float q[3] = {model[12], model[13], model[14]};
             draw_cylinder(dl, v, q, radius, height, IM_COL32(120, 220, 255, 230));
-        } else if (S.dragging && S.drag_actor == selected) {
-            // released: one command, one undo step
+            // live: the game shows the actors where the handle is (once per logic step; no command, no undo step)
+            editor::drag_actors(S.drag_mod, drag_poses(snap.manifest, *sel, selected, S.drag_ids));
+        } else if (S.dragging && S.drag_actor == selected && gizmo) {
+            // released: one command, one undo step, one log entry
             S.dragging = false;
+            std::vector<std::string> ids;
+            const Value poses = drag_poses(snap.manifest, *sel, selected, ids);
+            const std::string mod = S.drag_mod;
+            editor::end_drag(mod, ids, false);
+            // a refused or empty change: the game shows the package's places again
+            auto put_back = [mod, ids](const Value& r) {
+                if (!r.get("ok").boolean || !r.get("result").get("changed").boolean) editor::end_drag(mod, ids, true);
+            };
             Value prm;
             prm["id"] = selected;
-            const auto& group = editor_ui::multi_selection();
-            if (S.gizmo == 0 && group.size() > 1 && std::find(group.begin(), group.end(), selected) != group.end()) {
+            if (group_drag(selected)) {
                 float at[3];
                 position_of(*sel, at);
-                Value many, off;
+                Value many;
                 many.type = Value::Array;
-                for (const auto& id : group) many.array.push_back(Value(id));
-                off["x"] = std::round((S.drag[12] - at[0]) * 10) / 10;
-                off["y"] = std::round((S.drag[13] - at[1]) * 10) / 10;
-                off["z"] = std::round((S.drag[14] - at[2]) * 10) / 10;
+                for (const auto& id : editor_ui::multi_selection()) many.array.push_back(Value(id));
                 Value mp;
                 mp["ids"] = many;
-                mp["offset"] = off;
-                editor_ui::command("move_actors", mp);
+                mp["offset"] = point_of(S.drag[12] - at[0], S.drag[13] - at[1], S.drag[14] - at[2]);
+                editor_ui::command("move_actors", mp, put_back);
             } else if (S.gizmo == 0) {
-                Value pos;
-                pos["x"] = std::round(S.drag[12] * 10) / 10;
-                pos["y"] = std::round(S.drag[13] * 10) / 10;
-                pos["z"] = std::round(S.drag[14] * 10) / 10;
-                prm["position"] = pos;
-                editor_ui::command("move_actor", prm);
+                prm["position"] = point_of(S.drag[12], S.drag[13], S.drag[14]);
+                editor_ui::command("move_actor", prm, put_back);
             } else {
-                double deg = std::atan2(S.drag[8], S.drag[10]) * 180 / kPi;
-                if (deg < 0) deg += 360;
-                Value rot = sel->get("rotation").type == Value::Object ? sel->get("rotation") : Value();
-                rot["x"] = num(rot, "x");
-                rot["y"] = std::round(deg * 10) / 10;
-                rot["z"] = num(rot, "z");
-                prm["rotation"] = rot;
-                editor_ui::command("rotate_actor", prm);
+                prm["rotation"] = poses.array.empty() ? Value() : poses.array[0].get("rotation");
+                editor_ui::command("rotate_actor", prm, put_back);
             }
         }
     }
@@ -504,7 +599,13 @@ void status_bar(float w, float h) {
     ImGui::SameLine();
     if (editor_ui::busy()) ImGui::TextColored(kHead, "working...  ");
     else if (!message.empty()) ImGui::TextColored(ok ? kGood : kBad, "%s", message.c_str());
-    if (!status.empty()) {
+    if (S.dragging) {
+        // the handle drag: live in the game, or what waits (restart-only kinds keep the release behaviour)
+        const std::string note = editor::drag_note();
+        ImGui::SameLine();
+        if (note.empty()) ImGui::TextColored(kGood, "  Moving live in the game");
+        else ImGui::TextColored(kHead, "  %s", note.c_str());
+    } else if (!status.empty()) {
         ImGui::SameLine();
         ImGui::TextColored(kMuted, "  %s", status.c_str());
     }
@@ -663,6 +764,7 @@ bool draw(float w, float h) {
     editor_ui::mcp_prompt();  // a tool client's question comes first, whatever the editor shows
     if (!editor::editor_view() && !editor::playing()) return false;
     if (editor::playing()) {
+        cancel_drag();
         // only Stop over the running game
         ImGui::SetNextWindowPos(ImVec2(w * 0.5f, 10), ImGuiCond_Always, ImVec2(0.5f, 0));
         ImGui::SetNextWindowBgAlpha(0.75f);

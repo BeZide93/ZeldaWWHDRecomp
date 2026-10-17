@@ -41,6 +41,15 @@ bool try_with_session(const std::function<void(Session&)>& f);  // the same, fal
 // `source` marks the command log entry ("MCP": a tool client, editor/mcp.h).
 void run_async(const std::string& command, const Value& params, std::function<void(const Value&)> done, const std::string& source = {});
 bool commands_pending();
+// The editor's handle drag (render thread, never waits): while a handle is dragged the actors follow it
+// in the game, once per logic step, through the live update the commands use (Session::drag_preview),
+// without a command, an undo step or a log entry. `poses`: [{"id", "position"?, "rotation"?}], sent every
+// frame (unchanged poses cost nothing). end_drag: the drag is over; `put_back` shows `ids` at the
+// package's places again (cancelled, or the released command changed nothing); otherwise the released
+// command's own live update follows.
+void drag_actors(const std::string& mod, const Value& poses);
+void end_drag(const std::string& mod, const std::vector<std::string>& ids, bool put_back);
+std::string drag_note();  // what the drag can't move live ("" all of it)
 void note(const std::string& command, const Value& params, const Value& result, const std::string& source);  // a log entry
 
 // The last asynchronous outcome (a warp started, a test state written, a live update refused), for the UI.

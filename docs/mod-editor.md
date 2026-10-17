@@ -59,7 +59,11 @@ In the picture, every actor of the open mod has a label. Click a label to select
 the Outliner; a double click there flies the camera to it). The selected actor shows its collision
 cylinder and handles: drag them to move it, or to turn it with **Turn** chosen in the toolbar. With grid
 or angle snapping on, it moves in steps of 10, 50 or 100 units and turns in steps of 15, 45 or 90
-degrees. Letting go of a handle is one change (one Undo step).
+degrees. While you drag, the actor follows the handle in the game (all selected actors when you move a
+group); it is created again at each new place, so it trails the handle a little. Letting go is one change
+(one Undo step, one entry in the Log). Actors that change
+only after a restart (see below) stay where they are while you drag; the status bar says so, and letting
+go keeps the new place in the package as before.
 
 | Keyboard / mouse | Controller | |
 | --- | --- | --- |
