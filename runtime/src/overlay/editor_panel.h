@@ -52,4 +52,14 @@ void export_area();                     // check and write the package into a fo
 void mod_bar();                         // the open mod, undo / redo, check, save, revert
 void mcp_area();                        // Claude / MCP: the switch, the address, the token and the command
 void mcp_prompt();                      // a tool client's Allow / Deny question, when one waits
+
+// ---- the quest editor (editor_quests.cpp) ----
+void quest_editor(const Value& m);      // the Quests window: the graph (or the list) and its inspector
+void quest_live(const Value& m);        // while playing: the graph with the game's step highlighted
+bool quest_graph_while_playing();       // the user wants the graph over the game while playing
+void flags_area();                      // the open mod's flags and their values (test mode: editable)
+void search_area();                     // search the open mod
+std::string quest_status();             // "Lighthouse quest: step 3 of 6" for the status bar ("" none)
+void show_quest(const std::string& quest, const std::string& field);  // a problem was clicked: open that quest and step
+std::vector<std::string>& multi_selection();  // the selected actors (Ctrl or Shift adds); selected() is the main one
 }  // namespace editor_ui

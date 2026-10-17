@@ -1,6 +1,7 @@
 // The world editor's panels (editor_panel.h). They only read the session's snapshot and run commands.
 #include "editor_panel.h"
 
+#include <algorithm>
 #include <array>
 #include <cctype>
 #include <cfloat>
@@ -419,8 +420,19 @@ std::string& focus_field() { return U.field; }
 void actor_list(const Value& m) {
     for (const auto& a : m.get("actors").array) {
         const std::string id = a.get("id").string();
-        if (ImGui::Selectable((id + "##actor").c_str(), U.actor == id)) {
-            U.actor = id;
+        auto& multi = multi_selection();
+        const bool in_multi = std::find(multi.begin(), multi.end(), id) != multi.end();
+        if (ImGui::Selectable((id + "##actor").c_str(), U.actor == id || in_multi)) {
+            const ImGuiIO& io = ImGui::GetIO();
+            if (io.KeyCtrl || io.KeySuper || io.KeyShift) {  // more than one: Ctrl (Cmd) or Shift adds or takes away
+                if (multi.empty() && !U.actor.empty()) multi.push_back(U.actor);
+                if (in_multi) multi.erase(std::find(multi.begin(), multi.end(), id));
+                else multi.push_back(id);
+                U.actor = multi.empty() ? std::string() : (in_multi ? multi.back() : id);
+            } else {
+                U.actor = id;
+                multi = {id};
+            }
             U.field.clear();
         }
         if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0)) {
@@ -673,53 +685,21 @@ void scenes_area(const Value& m) {
 }
 
 void quests_area(const Value& m) {
+    if (ImGui::Button("Open the quest editor")) show_quest(U.quest, "");
     for (const auto& q : m.get("quests").array) {
         const std::string id = q.get("id").string();
         if (!ImGui::TreeNode((id + "##quest").c_str(), "%s  %s", id.c_str(), q.get("title").string().c_str())) continue;
         for (const auto& s : q.get("steps").array) {
             const int n = int(num(s, "n"));
             const std::string label = "Step " + std::to_string(n) + ": " + s.get("text").string() + "##" + id + std::to_string(n);
-            if (ImGui::Selectable(label.c_str(), U.quest == id && U.step == n)) U.quest = id, U.step = n;
+            if (ImGui::Selectable(label.c_str(), U.quest == id && U.step == n)) {
+                U.quest = id, U.step = n;
+                show_quest(id, "step:" + std::to_string(n));
+            }
         }
         ImGui::TreePop();
     }
-    if (m.get("quests").array.empty()) muted("This mod has no quests.");
-    const Value* q = by_id(m.get("quests"), U.quest);
-    if (!q) return;
-    const Value* step = nullptr;
-    for (const auto& s : q->get("steps").array)
-        if (int(num(s, "n")) == U.step) step = &s;
-    if (!step) return;
-    ImGui::Separator();
-    ImGui::TextColored(kHead, "%s step %d", U.quest.c_str(), U.step);
-    auto set = [&](const char* property, const Value& value) {
-        Value p;
-        p["quest"] = U.quest;
-        p["step"] = U.step;
-        p["property"] = property;
-        p["value"] = value;
-        command("set_quest_step", p);
-    };
-    std::string t;
-    ImGui::TextUnformatted("Text");
-    if (edit_text("##step_text", step->get("text").string(), t, 120)) set("text", t);
-    ImGui::TextUnformatted("Where");
-    if (edit_text("##step_where", step->get("where").string(), t, 60)) set("where", t.empty() ? Value() : Value(t));
-    const auto& place = step->get("place");
-    double x, z;
-    ImGui::TextUnformatted("Place on the sea chart (x, z)");
-    const bool ex = edit_number("##place_x", num(place, "x"), x);
-    ImGui::SameLine();
-    const bool ez = edit_number("##place_z", num(place, "z"), z);
-    if (ex || ez) {
-        Value p = place.type == Value::Object ? place : Value();
-        if (ex) p["x"] = x;
-        if (ez) p["z"] = z;
-        if (p.get("x").type != Value::Number) p["x"] = 0;
-        if (p.get("z").type != Value::Number) p["z"] = 0;
-        set("place", p);
-    }
-    muted("Quest changes take effect when the game starts again (save the package first).");
+    if (m.get("quests").array.empty()) muted("This mod has no quests: the quest editor (Quests in the toolbar) adds one.");
 }
 
 void warp_area() {
@@ -838,7 +818,9 @@ void problems_area() {
         const auto& pr = U.problems.array[i];
         const std::string what = pr.get("kind").string() + (pr.get("id").type == Value::String ? " " + pr.get("id").text : std::string());
         ImGui::PushID(int(i));
-        ImGui::PushStyleColor(ImGuiCol_Text, kBad);
+        // the quest editor's own checks are warnings (yellow); the mod manager's refusals are problems (red)
+        const std::string severity = pr.get("severity").string();
+        ImGui::PushStyleColor(ImGuiCol_Text, severity == "warning" ? ImVec4(0.98f, 0.78f, 0.35f, 1) : severity == "info" ? kMuted : kBad);
         if (ImGui::Selectable((what + ": " + pr.get("message").string()).c_str())) {
             // jump: select the actor and look at it, and mark the field
             if (pr.get("kind").string() == "actor") {
@@ -856,6 +838,7 @@ void problems_area() {
             } else if (pr.get("kind").string() == "quest") {
                 U.quest = pr.get("id").string();
                 U.select_area = 3;
+                show_quest(U.quest, pr.get("field").string());
             } else if (pr.get("kind").string() == "model")
                 U.select_area = 1;
         }

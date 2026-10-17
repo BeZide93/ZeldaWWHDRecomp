@@ -9,4 +9,5 @@ namespace editor_shell {
 void register_layers();  // main thread, at start-up (from editor_ui::register_tab)
 void show_inspector();   // render thread: bring the inspector to the front (a problem was clicked)
 void show_problems();
+void show_quests();      // bring the Quests window to the front
 }  // namespace editor_shell

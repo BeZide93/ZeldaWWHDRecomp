@@ -31,6 +31,8 @@ constexpr double kPi = 3.14159265358979323846;
 struct ShellState {
     bool outliner = true, inspector = true, problems = false, test = false, log = false;
     bool focus_inspector = false, focus_problems = false;
+    bool quests = false, flags = false, search = false, focus_quests = false;  // the quest editor's windows
+    bool quests_focused = false;  // Ctrl+C / Ctrl+V are the quest editor's there
     int gizmo = 0;           // 0 move, 1 turn
     int grid = 0, angle = 1;  // snapping: indexes into kGrid / kAngle
     std::string placing;      // a type from list_actor_types while placing by click
@@ -221,6 +223,15 @@ void world(float w, float h) {
         labels.push_back({id, at, std::sqrt(d2)});
         if (id == selected) sel = &a;
     }
+    // the other selected actors: their cylinders
+    for (const auto& a : snap.manifest.get("actors").array) {
+        const auto& group = editor_ui::multi_selection();
+        const std::string id = a.get("id").string();
+        float p[3], radius, height;
+        if (id == selected || std::find(group.begin(), group.end(), id) == group.end() || a.get("stage").string() != stage || !position_of(a, p)) continue;
+        cylinder_of(a, radius, height);
+        draw_cylinder(dl, v, p, radius, height, IM_COL32(255, 210, 90, 140));
+    }
     // the selected actor: its cylinder and handles
     float model[16] = {};
     bool gizmo = false;
@@ -257,7 +268,21 @@ void world(float w, float h) {
             S.dragging = false;
             Value prm;
             prm["id"] = selected;
-            if (S.gizmo == 0) {
+            const auto& group = editor_ui::multi_selection();
+            if (S.gizmo == 0 && group.size() > 1 && std::find(group.begin(), group.end(), selected) != group.end()) {
+                float at[3];
+                position_of(*sel, at);
+                Value many, off;
+                many.type = Value::Array;
+                for (const auto& id : group) many.array.push_back(Value(id));
+                off["x"] = std::round((S.drag[12] - at[0]) * 10) / 10;
+                off["y"] = std::round((S.drag[13] - at[1]) * 10) / 10;
+                off["z"] = std::round((S.drag[14] - at[2]) * 10) / 10;
+                Value mp;
+                mp["ids"] = many;
+                mp["offset"] = off;
+                editor_ui::command("move_actors", mp);
+            } else if (S.gizmo == 0) {
                 Value pos;
                 pos["x"] = std::round(S.drag[12] * 10) / 10;
                 pos["y"] = std::round(S.drag[13] * 10) / 10;
@@ -278,8 +303,9 @@ void world(float w, float h) {
     }
     // labels: far ones fainter; the selected one highlighted
     std::sort(labels.begin(), labels.end(), [](const Label& a, const Label& b) { return a.depth > b.depth; });
+    const auto& multi = editor_ui::multi_selection();
     for (const auto& l : labels) {
-        const bool me = l.id == selected;
+        const bool me = l.id == selected || std::find(multi.begin(), multi.end(), l.id) != multi.end();
         const ImVec2 sz = ImGui::CalcTextSize(l.id.c_str());
         const ImVec2 a(l.at.x - sz.x / 2 - 4, l.at.y - sz.y - 8), b(l.at.x + sz.x / 2 + 4, l.at.y - 6);
         dl->AddRectFilled(a, b, me ? IM_COL32(120, 90, 20, 220) : IM_COL32(20, 24, 30, l.depth > 6000 ? 110 : 180), 4);
@@ -320,7 +346,18 @@ void world(float w, float h) {
                 const float dx = l.at.x - m.x, dy = l.at.y - 12 - m.y, d = dx * dx + dy * dy;
                 if (d < best_d) best_d = d, best = &l;
             }
-            editor_ui::selected() = best ? best->id : std::string();
+            auto& many = editor_ui::multi_selection();
+            if ((io.KeyCtrl || io.KeySuper || io.KeyShift) && best) {  // more than one: Ctrl (Cmd) or Shift adds or takes away
+                if (many.empty() && !editor_ui::selected().empty()) many.push_back(editor_ui::selected());
+                const auto it = std::find(many.begin(), many.end(), best->id);
+                if (it != many.end()) many.erase(it);
+                else many.push_back(best->id);
+                editor_ui::selected() = many.empty() ? std::string() : many.back();
+            } else {
+                editor_ui::selected() = best ? best->id : std::string();
+                many.clear();
+                if (best) many.push_back(best->id);
+            }
             editor_ui::focus_field().clear();
         }
     }
@@ -436,6 +473,12 @@ void toolbar(float w) {
     ImGui::SameLine();
     ImGui::Checkbox("Log", &S.log);
     ImGui::SameLine();
+    ImGui::Checkbox("Quests", &S.quests);
+    ImGui::SameLine();
+    ImGui::Checkbox("Flags", &S.flags);
+    ImGui::SameLine();
+    ImGui::Checkbox("Search", &S.search);
+    ImGui::SameLine();
     ImGui::TextDisabled("  Esc: Settings");
     ImGui::End();
 }
@@ -464,6 +507,12 @@ void status_bar(float w, float h) {
     if (!status.empty()) {
         ImGui::SameLine();
         ImGui::TextColored(kMuted, "  %s", status.c_str());
+    }
+    if (const std::string quest = editor_ui::quest_status(); !quest.empty()) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("|");
+        ImGui::SameLine();
+        ImGui::TextColored(kHead, "%s", quest.c_str());
     }
     if (editor_mcp::available()) {
         const std::string mcp = editor_mcp::status_line();
@@ -539,6 +588,31 @@ void panels(float w, float h) {
         if (ImGui::Begin("Log", &S.log)) editor_ui::log_area();
         ImGui::End();
     }
+    // the quest editor: the graph is where quests are made
+    if (S.quests) {
+        ImGui::SetNextWindowPos(ImVec2(316, 110), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(std::min(w - 330, 1100.0f), std::min(h * 0.56f, 600.0f)), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowBgAlpha(0.95f);
+        if (S.focus_quests) ImGui::SetNextWindowFocus(), S.focus_quests = false;
+        if (ImGui::Begin("Quests", &S.quests)) editor_ui::quest_editor(snap.manifest);
+        S.quests_focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
+        ImGui::End();
+    }
+    if (S.flags) {
+        // below the Quests window, at the right
+        const float top = 110 + std::min(h * 0.56f, 600.0f) + 8;
+        ImGui::SetNextWindowPos(ImVec2(w - 456, top), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(440, std::max(140.0f, h - top - 70)), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowBgAlpha(0.92f);
+        if (ImGui::Begin("Flags", &S.flags)) editor_ui::flags_area();
+        ImGui::End();
+    }
+    if (S.search) {
+        ImGui::SetNextWindowPos(ImVec2(320, 110), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(420, 300), ImGuiCond_FirstUseEver);
+        if (ImGui::Begin("Search", &S.search)) editor_ui::search_area();
+        ImGui::End();
+    }
 }
 
 // the panels' places and sizes, remembered between sessions (the host's settings, never next to the game)
@@ -571,7 +645,8 @@ void layout(ImGuiIO& io) {
             if (!line.empty() && line[0] == '[') {
                 flush();
                 keep = line == "[Window][Editor]" || line == "[Window][Outliner]" || line == "[Window][Inspector]" ||
-                       line == "[Window][Problems & export]" || line == "[Window][Camera & test]" || line == "[Window][Log]";
+                       line == "[Window][Problems & export]" || line == "[Window][Camera & test]" || line == "[Window][Log]" ||
+                       line == "[Window][Quests]" || line == "[Window][Flags]" || line == "[Window][Search]" || line == "[Window][Quest (playing)]";
             }
             block += line + "|";
             at = end + 1;
@@ -599,7 +674,17 @@ bool draw(float w, float h) {
         if (ImGui::Button("Stop / back to editor")) editor_ui::command("stop");
         ImGui::SameLine();
         ImGui::TextDisabled("Tab");
+        if (const std::string quest = editor_ui::quest_status(); !quest.empty()) ImGui::TextColored(kHead, "%s", quest.c_str());
         ImGui::End();
+        // the quest graph over the game, the step it is at highlighted live
+        if (S.quests && editor_ui::quest_graph_while_playing()) {
+            layout(io);
+            ImGui::SetNextWindowPos(ImVec2(w - 620, 70), ImGuiCond_FirstUseEver);
+            ImGui::SetNextWindowSize(ImVec2(600, 300), ImGuiCond_FirstUseEver);
+            ImGui::SetNextWindowBgAlpha(0.85f);
+            if (ImGui::Begin("Quest (playing)", nullptr, ImGuiWindowFlags_NoFocusOnAppearing)) editor_ui::quest_live(editor_ui::snapshot().manifest);
+            ImGui::End();
+        }
         return false;
     }
     layout(io);
@@ -619,6 +704,41 @@ bool draw(float w, float h) {
             editor_ui::command("duplicate_actor", p, [](const Value& r) {
                 if (r.get("ok").boolean) editor_ui::selected() = r.get("result").get("id").string();
             });
+        }
+        // copy and paste: the selected actors (also into another room: they go where the camera looks)
+        if (cmd && ImGui::IsKeyPressed(ImGuiKey_C, false) && !editor_ui::selected().empty() && !S.quests_focused) {
+            Value p, ids;
+            ids.type = Value::Array;
+            auto group = editor_ui::multi_selection();
+            if (std::find(group.begin(), group.end(), editor_ui::selected()) == group.end()) group = {editor_ui::selected()};
+            for (const auto& id : group) ids.array.push_back(Value(id));
+            p["ids"] = ids;
+            editor_ui::command("copy", p);
+        }
+        if (cmd && ImGui::IsKeyPressed(ImGuiKey_V, false) && !S.quests_focused) {
+            const View v = view_of(io.DisplaySize.x, io.DisplaySize.y);
+            if (v.ok) {
+                Value prm, o, d;
+                o["x"] = v.eye[0], o["y"] = v.eye[1], o["z"] = v.eye[2];
+                d["x"] = -v.back[0], d["y"] = -v.back[1], d["z"] = -v.back[2];
+                prm["origin"] = o;
+                prm["direction"] = d;
+                editor_ui::command("pick", prm, [](const Value& r) {
+                    Value p;
+                    if (r.get("ok").boolean) {
+                        p["at"] = "position";
+                        p["position"] = r.get("result").get("position");
+                    }
+                    editor_ui::command("paste", p, [](const Value& pr) {
+                        if (!pr.get("ok").boolean || pr.get("result").get("ids").array.empty()) return;
+                        auto& many = editor_ui::multi_selection();
+                        many.clear();
+                        for (const auto& id : pr.get("result").get("ids").array)
+                            if (id.type == Value::String) many.push_back(id.text);
+                        if (!many.empty()) editor_ui::selected() = many.back();
+                    });
+                });
+            }
         }
         if (ImGui::IsKeyPressed(ImGuiKey_F, false) && !editor_ui::selected().empty()) {
             Value p;
@@ -659,6 +779,11 @@ void register_layers() {
         S.problems = w.find("problems") != std::string::npos;
         S.test = w.find("test") != std::string::npos;
         S.log = w.find("log") != std::string::npos;
+        S.quests = w.find("quests") != std::string::npos;
+        S.flags = w.find("flags") != std::string::npos;
+        S.search = w.find("search") != std::string::npos;
+        if (w.find("nooutliner") != std::string::npos) S.outliner = false;
+        if (w.find("noinspector") != std::string::npos) S.inspector = false;
     }
     if (const char* e = std::getenv("WWHD_TEST_EDITOR_PLACING")) S.placing = e;
     if (const char* e = std::getenv("WWHD_TEST_EDITOR_ACTOR")) editor_ui::selected() = e;
@@ -671,6 +796,10 @@ void show_inspector() {
 void show_problems() {
     S.problems = true;
     S.focus_problems = true;
+}
+void show_quests() {
+    S.quests = true;
+    S.focus_quests = true;
 }
 
 }  // namespace editor_shell
