@@ -18,10 +18,6 @@ what is on `devel` and not released yet (also in the
 - **Shader cache saved more often:** pipelines built while playing are now saved every few minutes and when the Android
   app goes to the background, so fewer are rebuilt after a crash or after Android closes the game.
 
-- **World editor (preview, for mod makers):** start the game with `--editor` to get an Editor tab for your mod: change
-  placed actors live with undo/redo, warp to any island, room or quest place, fly a free camera, and test quests in a
-  test mode that never touches your real save. Saving writes only your mod's own package. See docs/mod-editor.md.
-
 - **World editor (preview, for mod makers):** start the game with `--editor` for a dedicated editor mode: after the
   title screen and file select it opens a free camera with its own panels (toolbar, outliner, inspector, problems &
   export, log). Place new actors by clicking into the picture, move and turn them with handles (grid and angle
@@ -31,19 +27,11 @@ what is on `devel` and not released yet (also in the
   never touches your real save, and Stop puts the world back. New enemies, pots, switches and doors appear after a
   restart. Saving writes only your mod's own package. See docs/mod-editor.md.
 
-- **World editor (preview, for mod makers):** start the game with `--editor` to get an Editor tab for your mod: change
-  placed actors live with undo/redo, warp to any island, room or quest place, fly a free camera, and test quests in a
-  test mode that never touches your real save. Saving writes only your mod's own package. See docs/mod-editor.md.
-
 - **World editor: Claude and other MCP clients** (for mod makers). In `--editor` mode, Settings → Editor → **Claude /
   MCP access** lets Claude Code (or another MCP client) use the editor's commands: place and change actors, write
   dialogue, warp, take screenshots and check the package. It is off at every start, only reachable from your own
   computer with a new token each session, and removing, replacing or exporting asks you to **Allow** in the game first.
   See docs/mod-editor.md.
-
-- **World editor (preview, for mod makers):** start the game with `--editor` to get an Editor tab for your mod: change
-  placed actors live with undo/redo, warp to any island, room or quest place, fly a free camera, and test quests in a
-  test mode that never touches your real save. Saving writes only your mod's own package. See docs/mod-editor.md.
 
 - **World editor: visual quest editor** (for mod makers). Build a quest as a graph: steps are nodes, and dragging
   from one step to the next chooses who moves the quest on; branches, unreachable steps and other problems show on
@@ -51,14 +39,11 @@ what is on `devel` and not released yet (also in the
   is set), the quest step and your mod's flags show live while you play, and you can search, select several actors
   and copy/paste actors and steps, also into another room.
 
-- **World editor (preview, for mod makers):** start the game with `--editor` to get an Editor tab for your mod: change
-  placed actors live with undo/redo, warp to any island, room or quest place, fly a free camera, and test quests in a
-  test mode that never touches your real save. Saving writes only your mod's own package. See docs/mod-editor.md.
-
 - **World editor: live handles, docking panels, Esc** (for mod makers). Dragging a move or turn handle now moves the
   actor (or the whole selection) live in the game, still as one Undo step. The editor's panels dock to the screen edges
   and into each other as tabs, with a default layout and **Reset layout**. While placing, dragging or connecting quest
   steps, the first Esc cancels that; Esc with nothing to cancel opens Settings.
+
 - **Mod SDK v3 preview: enemies, props, switches and effects** (for mod makers). Mods can now place the game's own
   residents, breakable props, switches and doors, and enemies with their own state; original mod enemies take damage,
   react to hits, can be targeted, defeated and drop items; mod props can be carried and thrown, and original item models
