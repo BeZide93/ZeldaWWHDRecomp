@@ -650,7 +650,7 @@ the actual lease exit reason. A data-only scene without
 a registered hook must not declare music steps.
 
 
-## Native particles (Part 4 preview)
+## Native particles (preview)
 
 The curated effects `auction-sparkle` (`8153`, blue geometric sparkle) and
 `beacon-sparkle` (`8152`, orange/yellow beacon burst) use callback-free native
@@ -707,7 +707,7 @@ These calls create a one-shot at a copied position: the effect does not follow
 an actor, expose a cancellation handle, or retain a guest pointer. The native
 particle system owns its expiry.
 
-## Textures on owned native props (Part 4 preview)
+## Textures on owned native props (preview)
 
 A placed `pot`, `barrel`, or `crate` may name a PNG in its own package. The SDK
 replaces the supported base-colour texture on that copy of the native object;
