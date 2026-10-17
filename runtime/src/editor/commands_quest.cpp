@@ -534,14 +534,15 @@ Value Session::dispatch_quest(const std::string& command, const Value& p, std::s
             Place place;
             if (at == "offset") {
                 if (p.get("offset").type != Value::Null && !point_of(p.get("offset"), offset)) return why = "\"offset\" is {x, y, z}", r;
-            } else if (at == "link" || at == "camera") {
+            } else if (at == "link" || at == "camera" || at == "position") {
                 if (!host_) return why = "the game is not running", r;
-                place = at == "link" ? host_->link() : host_->camera();
-                if (!place.valid) return why = at == "link" ? "Link is not in the scene" : "the fly camera is off", r;
+                place = at == "camera" ? host_->camera() : host_->link();
+                if (!place.valid) return why = at == "camera" ? "the fly camera is off" : "Link is not in the scene", r;
+                if (at == "position" && !point_of(p.get("position"), place.position)) return why = "at = position needs \"position\": {x, y, z}", r;
                 point_of(items.front().get("position"), first);
                 offset = {place.position.x - first.x, place.position.y - first.y, place.position.z - first.z};
             } else
-                return why = "\"at\" is offset, link or camera", r;
+                return why = "\"at\" is offset, link, camera or position", r;
             std::vector<Value> added;
             Value list = pkg->manifest.get("actors").type == Value::Array ? pkg->manifest.get("actors") : arr();
             for (const auto& a : items) {

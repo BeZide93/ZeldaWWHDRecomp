@@ -467,6 +467,12 @@ void search_copy_paste(const fs::path& tmp) {
     CHECK(actor(m(), "sign-a-2")->get("room").number == 44 && actor(m(), "pot-a-2")->get("room").number == 44);
     CHECK(actor(m(), "sign-a-2")->get("position").get("x").number == -200000);
     CHECK(ok(s.run("undo")));
+    // where the camera looks (a picked ground point): the first one there, the others around it
+    r = s.run("paste", params(R"({"at": "position", "position": {"x": 50, "y": 1000, "z": -200050}})"));
+    CHECK(ok(r) && actor(m(), "sign-a-2")->get("position").get("x").number == 50 && actor(m(), "sign-a-2")->get("room").number == 11);
+    CHECK(actor(m(), "pot-a-2")->get("position").get("x").number == 40 && actor(m(), "pot-a-2")->get("position").get("z").number == -199850);
+    CHECK(!ok(s.run("paste", params(R"({"at": "position"})"))));
+    CHECK(ok(s.run("undo")));
     // several actors: move and remove as one step
     CHECK(ok(s.run("move_actors", params(R"({"ids": ["sign-a", "post"], "offset": {"x": 10, "y": 0, "z": 0}})"))));
     CHECK(actor(m(), "sign-a")->get("position").get("x").number == 20 && actor(m(), "post")->get("position").get("x").number == 310);
