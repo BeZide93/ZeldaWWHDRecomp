@@ -437,6 +437,7 @@ int main(int argc, char** argv) {
         else if (!strcmp(argv[i], "--trace")) g_trace_hle = true;
         else if (!strcmp(argv[i], "--warm-shaders")) warm_shaders = true;
         else if (!strcmp(argv[i], "--install-story-notebook")) install_story_notebook = true;  // setup's step (mods/required.h)
+        else if (!strcmp(argv[i], "--editor")) editor::set_launch_mode(true);  // the world editor (docs/mod-editor.md)
 #ifdef WWHD_HAS_VULKAN
         else if (!strcmp(argv[i], "--renderer-smoke")) renderer_smoke = true;
 #ifdef __ANDROID__
@@ -451,7 +452,7 @@ int main(int argc, char** argv) {
 #endif
     }
     crash_context::initialize();
-    editor_ui::register_tab();  // the world editor's Editor tab (shown while the editor is on)
+    editor_ui::register_tab();  // the world editor's Editor tab (only with --editor)
     index_game_functions();
     install_crash_handler();
     start_log_file();

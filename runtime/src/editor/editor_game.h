@@ -10,7 +10,8 @@
 //     interpolation draws it smoothly; with true 60 the camera runs at 60 Hz, and so does the fly
 //     camera (every pass, 1/60 s each).
 //
-// Off unless Settings > Mods > More > World editor is on (saved) or WWHD_EDITOR=1.
+// Only in the editor launch mode: the game started with --editor (WWHD_EDITOR=1 or WWHD_EDITOR_MODE=1 in
+// scripted runs). A normal launch has no editor at all.
 #pragma once
 #include <functional>
 #include <string>
@@ -22,8 +23,9 @@ namespace input { struct PadState; }
 
 namespace editor {
 
-bool enabled();             // any thread
-void set_enabled(bool on);  // the setting (saved by the host)
+bool launch_mode();               // started with --editor (any thread)
+void set_launch_mode(bool on);    // main(), from the command line, before the overlay starts
+inline bool enabled() { return launch_mode(); }
 
 // While each mod's manifest loads (guest_mods.cpp load_world): packages with actors, models, scenes or quests.
 void register_package(const std::string& mod, const std::string& name, const std::string& dir, const Value& manifest);

@@ -10,10 +10,11 @@ scenes and quests ([SDK v2](mod-sdk-v2.md)). The examples
 [sdk-v3-windfall](../examples/guest-mods/sdk-v3-windfall/manifest.json) and
 [sdk-v3-creature](../examples/guest-mods/sdk-v3-creature/manifest.json) are good packages to try it on.
 
-## Turning it on
+## Starting it
 
-Settings → Mods → More → **World editor**. An **Editor** tab appears in the settings menu. It is off by
-default and stays off for players who never turn it on.
+Start the game with `--editor`, for example from a terminal (`wwhd --editor`, on Windows `wwhd.exe --editor`)
+or from a shortcut with that option added. An **Editor** tab then appears in the settings menu. A normal
+start has no editor at all: no Editor tab and nothing that players see.
 
 ## What it changes, and what it never changes
 
@@ -110,7 +111,7 @@ camera moves at the same speed in every mode.
 ## Commands
 
 Everything the Editor tab does is a command with named parameters and a JSON result. The same commands
-will be available to tools later. For scripted tests, `WWHD_EDITOR=1` turns the editor on for one run
+will be available to tools later. For scripted tests, `WWHD_EDITOR=1` starts a run in the editor mode, like `--editor`,
 and `WWHD_EDITOR_SCRIPT` runs commands at given frames: `frame {"command": "...", "params": {...}}`
 separated by `;`, or `@file` with one such line per row. Results go to the log.
 

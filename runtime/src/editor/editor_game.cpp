@@ -37,8 +37,9 @@ constexpr double kPi = 3.14159265358979323846;
 // ---------------------------------------------------------------- enabled
 std::atomic<int> g_enabled{-1};  // -1: not read yet
 bool env_on() {
-    const char* e = std::getenv("WWHD_EDITOR");
-    return e && *e == '1';
+    for (const char* name : {"WWHD_EDITOR_MODE", "WWHD_EDITOR"})
+        if (const char* e = std::getenv(name); e && *e == '1') return true;
+    return false;
 }
 
 // ---------------------------------------------------------------- status and game-thread jobs
@@ -528,18 +529,16 @@ void run_script() {
 }
 }  // namespace
 
-bool enabled() {
+bool launch_mode() {
     int v = g_enabled.load();
     if (v < 0) {
-        std::string s;
-        v = env_on() || (hostui::get("modEditor", s) && s == "1") ? 1 : 0;
+        v = env_on() ? 1 : 0;
         g_enabled = v;
     }
     return v == 1;
 }
-void set_enabled(bool on) {
-    g_enabled = on ? 1 : 0;
-    hostui::post([on] { hostui::set("modEditor", on ? "1" : "0"); });
+void set_launch_mode(bool on) {
+    if (on) g_enabled = 1;
 }
 
 void register_package(const std::string& mod, const std::string& name, const std::string& dir, const Value& manifest) {

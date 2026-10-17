@@ -553,14 +553,6 @@ void register_tab() {
     overlay::ext::add_frame_layer({fly_wanted, fly_hud});
 }
 
-void setting() {
-    bool on = editor::enabled();
-    if (ImGui::Checkbox("World editor##editor_switch", &on)) editor::set_enabled(on);
-    ImGui::TextColored(kMuted, "%s",
-                       "An Editor tab to look at the active mods' placed actors, models, scenes and quests, change them while "
-                       "you play, warp around and test. It changes only the mod you open, and only when you save.");
-}
-
 void draw() {
     // test aids: WWHD_TEST_EDITOR_AREA=<0..6> and WWHD_TEST_EDITOR_ACTOR=<id> preselect (screenshots)
     static bool test_aids = [] {
@@ -569,10 +561,7 @@ void draw() {
         return true;
     }();
     (void)test_aids;
-    if (!editor::enabled()) {
-        muted("Turn the world editor on under Mods > More > World editor.");
-        return;
-    }
+    if (!editor::enabled()) return;  // the tab exists only in the editor launch mode
     // the open mod, undo / redo, validate, save
     std::vector<std::string> mods;
     std::string open;

@@ -1565,7 +1565,6 @@ modsui::Host& mods_host() {
         h.restart = [](bool code_build) { restart_now(code_build); };
         h.builtin_options = [](const char* id) { builtin_options(id); };
         h.cheats = [] { cheats(); };
-        h.editor = [] { editor_ui::setting(); };
         h.port_version = catalogue_port_version();
         h.build_name = g_guest_build_name;
 #ifdef __ANDROID__
@@ -2437,7 +2436,7 @@ void settings_window() {
         restart_notice_frame(true);
         if (ImGui::BeginTabBar("tabs", ImGuiTabBarFlags_FittingPolicyShrink)) {
             for (int i = 0; i < int(tabs.size()); i++) {
-                if (!tabs[i].visible()) continue;  // a tab a setting turns on (the world editor)
+                if (!tabs[i].visible()) continue;  // a tab only some launches have (the world editor's, with --editor)
                 ImGuiTabItemFlags f = U.select_tab == i ? ImGuiTabItemFlags_SetSelected : 0;
                 if (ImGui::BeginTabItem(tabs[i].name.c_str(), nullptr, f)) {
                     if (U.tab != i) U.cap_action = -1, g_capturing_keys = false, U.cap_note.clear();

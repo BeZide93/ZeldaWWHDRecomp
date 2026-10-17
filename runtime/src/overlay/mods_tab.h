@@ -51,7 +51,6 @@ struct Host {
     std::function<void(bool code_build)> restart; // relaunch now
     std::function<void(const char* id)> builtin_options;  // a built-in mod's options (overlay.cpp)
     std::function<void()> cheats;                 // the cheats section (More)
-    std::function<void()> editor;                 // the world editor's switch (More)
     mods::catalogue::Version port_version;
     std::string build_name = "USA";
     bool android = false;
@@ -1525,11 +1524,6 @@ inline void more(Host& h) {
     if (h.cheats && section("Cheats")) {
         ImGui::Indent();
         h.cheats();
-        ImGui::Unindent();
-    }
-    if (h.editor && section("World editor")) {
-        ImGui::Indent();
-        h.editor();
         ImGui::Unindent();
     }
     if (section("Mods folder")) {
