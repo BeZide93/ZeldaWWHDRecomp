@@ -973,6 +973,9 @@ int android_display_smoke_test() {
       gfx::g_second_screen_off=secondOff;
       hostui::save_pip_position();  // saves the display options again, with the player's choice
     }
+    // the player choosing a mode in Settings: Off releases a connected second screen (#222)
+    if (value.size()==12 && value.starts_with("choose_mode") && value[11]>='0' && value[11]<'0'+gfx::kDrcModeCount)
+      hostui::set_drc_mode(value[11]-'0');
     if (value == "secondary_profile1") R.secondaryProfile=true;
     if (value == "secondary_profile0") R.secondaryProfile=false;
     if (value == "timing_reset") {

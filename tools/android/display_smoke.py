@@ -175,7 +175,7 @@ def main():
         before = metrics()
         command("swap0")
         until(label + " swap suspended", lambda m: not m["swap_requested"])
-        command("mode3")
+        command("choose_mode3")
         released = until(label + " releases surface", lambda m:
                          m["second_available"] and m["second_off"] and not m["dual"] and
                          not m["touch"] and not m["swap_active"] and
@@ -210,7 +210,7 @@ def main():
             until(label + " primary resumes with screen released", lambda m:
                   m["second_off"] and m["second_available"] and not m["dual"] and
                   m["primary_presented"] >= released["primary_presented"] + 20)
-        command("mode0")
+        command("choose_mode0")
         restored = until(label + " republishes surface and picture", lambda m:
                          m["dual"] and not m["second_off"] and
                          m["secondary_presented"] >= released["secondary_presented"] + 10)
@@ -763,7 +763,7 @@ def main():
             if "game" not in active or sum("Selected game assets " in line and line.endswith("/" + active["game"])
                                             for line in loaded.splitlines()) < 2:
                 raise AssertionError("Both SDL launches must select the runtime's paired asset tree")
-        command("mode3")
+        command("choose_mode3")
         until("saved Off releases display", lambda m:
               m["second_available"] and m["second_off"] and not m["dual"] and not m["swap_active"])
         settings = adb("shell", "cat", settings_path)
@@ -785,7 +785,7 @@ def main():
         command("hide_drc")
         hidden = until("hide releases display again", lambda m:
                        m["second_available"] and m["second_off"] and not m["dual"] and not m["touch"])
-        command("mode0")
+        command("choose_mode0")
         until("mode reacquires hidden display", lambda m:
               m["dual"] and not m["second_off"] and m["swap_active"] and
               m["secondary_presented"] >= hidden["secondary_presented"] + 10)
