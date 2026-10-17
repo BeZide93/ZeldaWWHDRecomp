@@ -41,6 +41,9 @@ public class SetupActivity extends Activity {
     private boolean launchingGame;
     private String actionMessage;
     private TextView keysHint;
+    private TextView folderHint;
+    /** A chosen folder is being checked for the game (off the UI thread). */
+    private volatile boolean checkingFolder;
     private String pickerJob;
     private String shaderWarmJob;
     private static final int FOLDER = 10, ARCHIVE = 11, IMAGE = 12, DISC = 13, COMMON = 14, RESTORE = 15;
@@ -113,6 +116,7 @@ public class SetupActivity extends Activity {
              java.io.InputStream compiler = getAssets().open("toolchain-apk.json");
              java.io.InputStream sdk = getAssets().open("runtime-sdk.json")) { phoneSetup = true; }
         catch (Exception unavailable) { phoneSetup = false; }
+        if (phoneSetup && state == null) cleanJobs();  // failed or abandoned imports left by an earlier run
         // the app icon starts the game once there is one to play; the launcher's "Game setup"
         // shortcut (and an update that needs a rebuild, or a setup still running) opens this screen
         if ((state != null && state.getBoolean("launching_game", false)) ||
@@ -166,6 +170,10 @@ public class SetupActivity extends Activity {
         // one button for the three kinds of dump; the activity results are the same as before
         choose = button(layout, getString(R.string.setup_choose), this::chooseKind);
         pickers.add(choose);
+        folderHint = new TextView(this);
+        folderHint.setText(R.string.setup_folder_hint);
+        folderHint.setPadding(0, 0, 0, gap);
+        layout.addView(folderHint);
         restore = button(layout, getString(R.string.setup_restore), () -> pick(RESTORE));
         keysHint = new TextView(this);
         keysHint.setText(R.string.setup_keys_detail);
@@ -230,6 +238,7 @@ public class SetupActivity extends Activity {
             actionMessage = null;
             File job = SetupStore.current(this);
             if (!replaceable(job)) throw new Exception("Pause setup and wait for its checkpoint before changing input");
+            if (checkingFolder) throw new Exception("Still checking the chosen folder");
             pickerJob = job == null ? null : job.getName();
             boolean folder = request == FOLDER;
             if (request == RESTORE) {
@@ -238,6 +247,12 @@ public class SetupActivity extends Activity {
             }
             Intent intent = new Intent(folder ? Intent.ACTION_OPEN_DOCUMENT_TREE : Intent.ACTION_OPEN_DOCUMENT);
             if (!folder) intent.addCategory(Intent.CATEGORY_OPENABLE).setType("*/*");
+            // start in Download (Android refuses Download itself as a folder, not a folder inside it) and
+            // ask for the internal storage among the picker's places
+            for (java.util.Map.Entry<String, Object> extra : SetupPicker.extras(folder).entrySet()) {
+                if (extra.getValue() instanceof Boolean) intent.putExtra(extra.getKey(), (Boolean)extra.getValue());
+                else intent.putExtra(extra.getKey(), Uri.parse((String)extra.getValue()));
+            }
             intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
             startActivityForResult(intent, request);
         } catch (Exception failure) { actionMessage = "Cannot choose input: " + failure.getMessage(); }
@@ -269,18 +284,87 @@ public class SetupActivity extends Activity {
                 SetupImport.selectKey(this, current, request == DISC ? "disc" : "common", uri);
                 if (new File(current, "job.json").isFile())
                     actionMessage = "Replacement key file selected. Tap Start / resume to read it and retry. Your dump copy is retained.";
-            } else if (request == FOLDER || request == ARCHIVE || request == IMAGE) {
+            } else if (request == FOLDER) checkFolder(uri);
+            else if (request == ARCHIVE || request == IMAGE) {
                 getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                String id = UUID.randomUUID().toString().replace("-", "");
-                File job = SetupStore.job(this, id);
-                SetupStore.write(new File(job, "source.json"), new JSONObject().put("schema", 1)
-                    .put("kind", request == FOLDER ? "folder" : request == ARCHIVE ? "archive" : "image").put("uri", uri.toString()));
-                SetupStore.write(new File(job, "manual-pause.json"), new JSONObject().put("schema", 1));
-                SetupStore.write(new File(job, "host.json"), new JSONObject().put("schema", 1).put("state", "selected"));
-                SetupStore.select(this, id);
+                newJob(this, request == ARCHIVE ? "archive" : "image", uri, null);
+                cleanJobs();
             }
         } catch (Exception failure) { actionMessage = "Cannot keep selected input: " + failure.getMessage(); }
         finally { pickerJob = null; }
+    }
+
+    /** A new setup job for the chosen game becomes the selected one. */
+    private static void newJob(android.content.Context context, String kind, Uri uri, String document) throws Exception {
+        synchronized (SetupJobCleanup.CREATION) {
+            String id = UUID.randomUUID().toString().replace("-", "");
+            File job = SetupStore.job(context, id);
+            JSONObject source = new JSONObject().put("schema", 1).put("kind", kind).put("uri", uri.toString());
+            if (document != null) source.put("document", document);
+            SetupStore.write(new File(job, "source.json"), source);
+            SetupStore.write(new File(job, "manual-pause.json"), new JSONObject().put("schema", 1));
+            SetupStore.write(new File(job, "host.json"), new JSONObject().put("schema", 1).put("state", "selected"));
+            SetupStore.select(context, id);
+        }
+    }
+
+    /** Removes the private copies of games no longer chosen (never the selected game, the installed build
+     *  or a job the setup service holds), off the UI thread. */
+    private void cleanJobs() {
+        android.content.Context context = getApplicationContext();
+        new Thread(() -> {
+            SetupJobCleanup.Report report = SetupJobCleanup.clean(AndroidGame.storage(context));
+            if (!report.removed.isEmpty() || !report.failed.isEmpty() || report.skipped != null)
+                android.util.Log.i("wwhd-setup", report.summary());
+        }, "wwhd-setup-cleanup").start();
+    }
+
+    /** Checks the chosen folder for the game before anything is copied; a wrong folder is refused with a
+     *  message that says which folder to choose, and nothing is kept of it. */
+    private void checkFolder(Uri uri) {
+        checkingFolder = true;
+        android.content.Context context = getApplicationContext();
+        new Thread(() -> {
+            String message = null, refusal = null;
+            try {
+                SetupFolderCheck.Result found = SetupImport.checkFolder(context,
+                    uri, android.provider.DocumentsContract.getTreeDocumentId(uri));
+                android.util.Log.i("wwhd-setup", "chosen folder: " + found.kind + " " + found.path);
+                if (!found.usable()) refusal = folderMessage(found);
+                else {
+                    if (!replaceable(SetupStore.current(context))) throw new Exception("Pause setup before changing input");
+                    context.getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                    newJob(context, "folder", uri, found.kind == SetupFolderCheck.Kind.SUBFOLDER ? found.document : null);
+                    if (found.kind == SetupFolderCheck.Kind.SUBFOLDER) message = folderMessage(found);
+                    SetupJobCleanup.Report report = SetupJobCleanup.clean(AndroidGame.storage(context));
+                    android.util.Log.i("wwhd-setup", report.summary());
+                }
+            } catch (Exception failure) {
+                refusal = getString(R.string.setup_folder_unreadable, String.valueOf(failure.getMessage()));
+            }
+            final String chosen = message, refused = refusal;
+            runOnUiThread(() -> {
+                checkingFolder = false;
+                actionMessage = refused != null ? refused : chosen;
+                if (refused == null && chosen != null)  // the game was found in a folder inside the chosen one
+                    android.widget.Toast.makeText(this, chosen, android.widget.Toast.LENGTH_LONG).show();
+                if (refused != null && !isFinishing() && !isDestroyed())
+                    new android.app.AlertDialog.Builder(this).setTitle(R.string.setup_folder_wrong)
+                        .setMessage(refused).setPositiveButton(R.string.setup_folder_again, (dialog, which) -> pick(FOLDER))
+                        .setNegativeButton(android.R.string.cancel, null).show();
+            });
+        }, "wwhd-setup-folder-check").start();
+    }
+
+    private String folderMessage(SetupFolderCheck.Result found) {
+        switch (found.kind) {
+            case SUBFOLDER: return getString(R.string.setup_folder_subfolder, found.path);
+            case INSIDE_GAME: return getString(R.string.setup_folder_inside, found.path);
+            case NOT_THIS_GAME: return found.path.isEmpty() ? getString(R.string.setup_folder_not_game_here) :
+                getString(R.string.setup_folder_not_game, found.path);
+            case SEVERAL: return getString(R.string.setup_folder_several, found.path);
+            default: return getString(R.string.setup_folder_none);
+        }
     }
 
     @Override protected void onSaveInstanceState(Bundle state) {
@@ -325,10 +409,11 @@ public class SetupActivity extends Activity {
         return grants.contains(source.optString(key + "_uri"));
     }
 
-    private static final String CHECKPOINTS = "Setup keeps a private copy of your input. Leave room for that copy, extracted files, compiled output and at least 1 GiB working reserve. Selected key files are read only. Earlier private key copies are retained until setup completes.\n\nYou can close this screen while setup runs. Import resumes from verified complete files; an interrupted file copy or extraction restarts. Python and compiler resource preparation pause during unpacking and restart the incomplete stage. Checksum validation and translation respond to pause requests; an interrupted translation restarts. Compilation and linking also respond to pause requests. An interrupted command restarts; verified objects are kept. Saves stay in their current folder.\n\nThe optional PC route still uses the game folder copied over USB.";
+    private static final String CHECKPOINTS = "Setup keeps a private copy of your input. Leave room for that copy, extracted files, compiled output and at least 1 GiB working reserve. Selected key files are read only. Earlier private key copies are retained until setup completes. Choosing a different game deletes the private copy of the earlier choice; the game you can already play is kept.\n\nYou can close this screen while setup runs. Import resumes from verified complete files; an interrupted file copy or extraction restarts. Python and compiler resource preparation pause during unpacking and restart the incomplete stage. Checksum validation and translation respond to pause requests; an interrupted translation restarts. Compilation and linking also respond to pause requests. An interrupted command restarts; verified objects are kept. Saves stay in their current folder.\n\nThe optional PC route still uses the game folder copied over USB.";
 
     /** The top of the screen: one plain sentence, a detail line and the bar. */
     private void plainPhase(File job, JSONObject host, String state, boolean needsKeys, boolean canStart) throws Exception {
+        if (checkingFolder) { phase(getString(R.string.setup_folder_checking), null, -1); return; }
         if (!phoneSetup) { phase(getString(play.isEnabled() ? R.string.setup_ready : R.string.setup_pc_route), null, -2); return; }
         if (job == null) {
             phase(getString(play.isEnabled() ? R.string.setup_ready : R.string.setup_welcome), getString(R.string.setup_welcome_detail), -2);
@@ -429,7 +514,7 @@ public class SetupActivity extends Activity {
                 common.setEnabled(needsKeys && replaceable(job));
                 resume.setEnabled(phoneSetup && job != null && (!needsKeys || (discReady && commonReady)));
                 pause.setEnabled(phoneSetup && job != null);
-                for (Button picker : pickers) picker.setEnabled(phoneSetup && replaceable(job));
+                for (Button picker : pickers) picker.setEnabled(phoneSetup && replaceable(job) && !checkingFolder);
                 File external = getExternalFilesDir(null);
                 play.setEnabled(new File(AndroidGame.storage(SetupActivity.this), "active.json").isFile() ||
                     (external != null && new File(external, "game/code/cking.rpx").isFile()));
@@ -439,6 +524,7 @@ public class SetupActivity extends Activity {
                     hostName.equals("warming shaders");
                 show(play, play.isEnabled() && !working);
                 show(choose, phoneSetup && !working);
+                show(folderHint, phoneSetup && !working);
                 setTextIfChanged(choose, getString(job == null ? R.string.setup_choose : R.string.setup_choose_other));
                 show(pause, phoneSetup && working);
                 show(resume, phoneSetup && job != null && !working && !hostName.equals("complete"));

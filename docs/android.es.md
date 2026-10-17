@@ -61,9 +61,19 @@ cuando una actualización lo necesita).
 
 1. Instala el APK. Si ya tienes una versión preparada en tu PC, exporta antes tu partida (mantén
    pulsado el icono de la app) y desinstala esa versión: las dos están firmadas de forma distinta.
-2. Abre la app y elige tu juego: **Choose extracted game folder** (carpeta extraída), **Choose WUA
-   archive** (archivo `.wua`) o **Choose WUD / WUX disc image** (imagen de disco; después también
-   **Choose disc key file** y **Choose common key file**, las claves).
+2. Abre la app, pulsa **Elegir mi juego** y elige lo que tengas:
+   - **Carpeta del juego extraída**: pon el juego en una carpeta propia, por ejemplo `Download/WindWakerHD`,
+     y elige esa carpeta (la que contiene `code`, `content` y `meta`). El selector de carpetas se abre en
+     Download. Android no permite elegir la carpeta Download en sí, la raíz del almacenamiento interno ni
+     `Android/data`, así que el juego necesita una carpeta propia. Si eliges la carpeta justo encima del
+     juego, la app encuentra el juego dentro; si eliges una carpeta equivocada, te dice cuál elegir antes
+     de copiar nada.
+   - **Archivo de Cemu (.wua)** o **Imagen de disco (.wud / .wux) con las claves**: un solo archivo, que
+     puedes elegir desde cualquier carpeta. Una imagen de disco necesita además la clave del disco y la
+     clave común (el `keys.txt` de Cemu sirve para las dos).
+
+   Cuando eliges otro juego, la copia que la app hizo de la elección anterior se borra para liberar
+   espacio; el juego que ya puedes jugar se conserva.
 3. Pulsa **Start / resume / retry setup**. El dispositivo Android extrae y compila el juego una sola vez; la
    pantalla muestra el progreso, por ejemplo "Compiling: 30/80 · about 12 min left". Puedes salir
    de la app mientras tanto, y **Pause setup** lo detiene de forma segura.

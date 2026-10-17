@@ -58,8 +58,19 @@ your saves and settings (the Android device prepares the game again when an upda
 
 1. Install the APK. If you already have a version you built on your PC, export your save first
    (long-press the app icon), then uninstall it: the two are signed differently.
-2. Open the app and choose your game: **Choose extracted game folder**, **Choose WUA archive**, or
-   **Choose WUD / WUX disc image** (then also **Choose disc key file** and **Choose common key file**).
+2. Open the app, tap **Choose your game** and pick what you have:
+   - **Extracted game folder**: put the game in a folder of its own, for example `Download/WindWakerHD`,
+     and choose that folder (the one that contains `code`, `content` and `meta`). The folder picker opens in
+     Download. Android doesn't allow choosing Download itself, the top of the internal storage or
+     `Android/data`, so the game needs a folder of its own. If you choose the folder just above the game,
+     the app finds the game inside it; if you choose a wrong folder, it tells you which one to choose
+     before anything is copied.
+   - **Cemu archive (.wua)** or **Disc image (.wud / .wux) with keys**: a single file, which you can
+     choose from any folder. A disc image also needs the disc key and the common key (Cemu's `keys.txt`
+     covers both).
+
+   When you choose a different game, the copy the app made of the earlier choice is deleted to free the
+   space; the game you can already play stays.
 3. Tap **Start / resume / retry setup**. The Android device extracts and compiles the game once; the screen
    shows the progress, for example "Compiling: 30/80 · about 12 min left". You can leave the app
    meanwhile, and **Pause setup** stops it safely.
