@@ -578,12 +578,55 @@ void listener() {
 }
 }  // namespace
 
+// The quest editor's commands reach tool clients by themselves (the tool list is the command list), and
+// the ones that delete something need confirm and the player's Allow like remove_actor.
+void quest_tools() {
+    FakeBackend be;
+    be.session.add_package("editor-test", "Editor test", "", json(kManifest));
+    Handler h(be, kToken, 47615);
+    bool reply = false;
+    Value r = h.message(json(R"({"jsonrpc":"2.0","id":3,"method":"tools/list"})"), reply);
+    std::set<std::string> names;
+    for (const auto& t : r.get("result").get("tools").array) {
+        names.insert(t.get("name").string());
+        const std::string n = t.get("name").string();
+        if (n == "remove_quest" || n == "remove_quest_step" || n == "remove_actors") CHECK(t.get("annotations").get("destructiveHint").boolean);
+        if (n == "add_quest_step" || n == "start_at_step" || n == "set_flag") CHECK(!t.get("annotations").get("destructiveHint").boolean);
+    }
+    for (const char* c : {"quest_graph", "add_quest", "add_quest_step", "connect_quest_steps", "start_at_step", "list_flags", "set_flag", "search", "copy", "paste"})
+        CHECK(names.count(c) == 1);
+    for (const char* c : {"remove_quest", "remove_quest_step", "remove_actors"}) CHECK(needs_allow(c, Value()));
+    for (const char* c : {"add_quest", "edit_quest_step", "move_quest_step", "connect_quest_steps", "set_quest_layout", "paste", "set_flag"}) CHECK(!needs_allow(c, Value()));
+    // building a quest needs no question; removing a step does
+    Value v = call(h, "add_quest", json(R"({"id":"tale","title":"A tale","text":"Read the sign."})"));
+    CHECK(!is_error(v) && be.asked == 0);
+    v = call(h, "add_quest_step", json(R"({"quest":"tale","text":"Come back."})"));
+    CHECK(!is_error(v) && be.asked == 0);
+    v = call(h, "remove_quest_step", json(R"({"quest":"tale","step":2})"));
+    CHECK(is_error(v) && text_of(v).find("confirm") != std::string::npos && be.asked == 0);
+    be.allow = false;
+    v = call(h, "remove_quest_step", json(R"({"quest":"tale","step":2,"confirm":true})"));
+    CHECK(is_error(v) && be.asked == 1 && be.last_question.find("remove_quest_step") != std::string::npos);
+    CHECK(be.session.manifest("editor-test")->get("quests").array[0].get("steps").array.size() == 2);
+    be.allow = true;
+    v = call(h, "remove_quest_step", json(R"({"quest":"tale","step":2,"confirm":true})"));
+    CHECK(!is_error(v) && be.asked == 2 && be.session.manifest("editor-test")->get("quests").array[0].get("steps").array.size() == 1);
+    v = call(h, "remove_actors", json(R"({"ids":["sign-b"],"confirm":true})"));
+    CHECK(!is_error(v) && be.asked == 3);
+    v = call(h, "remove_quest", json(R"({"quest":"tale","confirm":true})"));
+    CHECK(!is_error(v) && be.asked == 4 && be.session.manifest("editor-test")->get("quests").type == Value::Null);
+    // flags: test mode only, never asked about
+    v = call(h, "set_flag", json(R"({"id":"sign-a-read","value":true})"));
+    CHECK(is_error(v) && text_of(v).find("test mode") != std::string::npos && be.asked == 4);
+}
+
 int main() {
     http_parsing();
     checks();
     json_rpc();
     http_checks();
     safety();
+    quest_tools();
     listener();
     if (g_failures) {
         std::fprintf(stderr, "%d check(s) failed\n", g_failures);
