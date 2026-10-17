@@ -7,6 +7,8 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Mouse camera: smooth while sailing** (#237). Turning the camera with the mouse on the boat (sailing, paddling,
+  salvage) now follows the mouse directly at the same sensitivity as on foot, instead of turning in jerky steps.
 - **Android: code mods** (such as the story quests). Turn on **Code mods** in the setup app (or Settings → Mods): your
   device builds the game again with mod support, and builds each code mod itself the first time it's used. Uses the
   compiler and Python the setup already has; the download grows by only a few KB.
