@@ -17,11 +17,11 @@ what is on `devel` and not released yet (also in the
 - **Android: code mods** (such as the story quests). Turn on **Code mods** in the setup app (or Settings → Mods): your
   device builds the game again with mod support, and builds each code mod itself the first time it's used. Uses the
   compiler and Python the setup already has; the download grows by only a few KB.
-- **Record graphics on a second thread** (Graphics → Advanced; **on by default on Android**, off elsewhere). The
-  render thread hands recording and submitting the Vulkan commands to a second CPU thread. On a Xiaomi 14 Ultra that
-  gave 4–7% more fps with 15–23% less render-thread time and identical pictures; it uses a little more CPU and battery.
-  On other devices it can make frame times less even, so it stays opt-in there. **Steam Deck owners:** please try it
-  on and off in the same spot and tell us the fps, the 1% lows and whether the Deck runs warmer.
+- **Record graphics on a second thread** (Graphics → Advanced, off by default). The render thread hands recording and
+  submitting the Vulkan commands to a second CPU thread. On a Xiaomi 14 it makes typical frames a little faster (about
+  20% less render-thread time) but adds short hitches (the slowest 1% of frames about 3 ms slower), so it stays opt-in
+  everywhere for now. **Steam Deck owners:** please try it on and off in the same spot and tell us the fps, the 1% lows
+  and whether the Deck runs warmer.
 - **Shader cache saved more often:** pipelines built while playing are now saved every few minutes and when the Android
   app goes to the background, so fewer are rebuilt after a crash or after Android closes the game.
 
