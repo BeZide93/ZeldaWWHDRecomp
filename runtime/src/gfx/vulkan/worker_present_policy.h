@@ -25,7 +25,7 @@ inline bool known_native(VkDriverId id) {
   case VK_DRIVER_ID_SAMSUNG_PROPRIETARY:
   case VK_DRIVER_ID_MESA_NVK:
   case VK_DRIVER_ID_IMAGINATION_OPEN_SOURCE_MESA:
-  case VK_DRIVER_ID_MESA_HONEYKRISP:
+  case static_cast<VkDriverId>(26):  // VK_DRIVER_ID_MESA_HONEYKRISP; older Vulkan headers (Linux CI) lack the name
     return true;
   default: return false;
   }
