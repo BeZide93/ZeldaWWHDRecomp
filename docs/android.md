@@ -76,6 +76,10 @@ your saves and settings (the Android device prepares the game again when an upda
    meanwhile, and **Pause setup** stops it safely.
 4. When it says the setup is complete, tap **Play current build**.
 
+Code mods (for example the story quests) need the game built with code-mod support: turn on
+**Code mods** in the setup app, before or after the first setup. See
+[Choosing code-mod support](setup-code-mods.md#android).
+
 ### Or: build it on your PC
 
 1. Install the Android SDK and NDK, JDK 17 or newer, CMake, Ninja and Python 3.

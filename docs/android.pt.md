@@ -78,6 +78,11 @@ precisar).
    enquanto isso, e **Pause setup** pausa com segurança.
 4. Quando aparecer que a instalação terminou, toque em **Play current build**.
 
+Os mods de código (por exemplo as missões de história) precisam do jogo compilado com suporte a
+mods: ative **Mods de código** no app de instalação, antes ou depois da primeira instalação. A
+compilação leva mais ou menos o mesmo tempo que a primeira instalação; enquanto isso, você pode
+continuar jogando a versão atual. Mais detalhes em [setup-code-mods.md](setup-code-mods.md#android) (em inglês).
+
 ### Ou: monte no seu PC
 
 1. Instale o Android SDK e o NDK, o JDK 17 ou mais novo, CMake, Ninja e Python 3.

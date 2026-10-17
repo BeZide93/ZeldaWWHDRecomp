@@ -204,6 +204,9 @@ public class SetupService extends Service {
                 // the APK's native Yaz0 decoder for shader preparation (shaderprep.py; android/build_native.sh)
                 File yaz0 = new File(getApplicationInfo().nativeLibraryDir, "libyaz0.so");
                 if (yaz0.isFile()) configuration.put("yaz0", yaz0.getAbsolutePath());
+                // the setup's Code mods switch: game code with mod support (read at every start, so a
+                // changed choice rebuilds)
+                configuration.put("code_mods", AndroidGame.codeModsChosen(this));
                 configuration.put("port_revision", revision).put("jobs", compileJobs())
                     .put("shader_cache_root", AndroidUserDirectories.shaderPrebuild(getExternalFilesDir(null)).getAbsolutePath());
                 SetupStore.write(new File(active, "job.json"), configuration);
@@ -216,12 +219,14 @@ public class SetupService extends Service {
                 if (!status.getString("state").equals("ready_to_activate")) throw new IOException("Setup did not finish building");
                 JSONObject ready = SetupStore.read(new File(active, "ready.json"));
                 if (ready.getInt("schema") != 1 || !ready.getString("port_revision").equals(revision) ||
-                    !ready.getString("compiler_identity").equals(configuration.getJSONObject("compiler").getString("identity")))
+                    !ready.getString("compiler_identity").equals(configuration.getJSONObject("compiler").getString("identity")) ||
+                    ready.optBoolean("code_mods", false) != configuration.getBoolean("code_mods"))
                     throw new IOException("Completed build belongs to different setup inputs");
                 if (!active.equals(SetupStore.current(this))) throw new IOException("The selected setup job changed");
                 host("activating", null, null);
                 checkPause(active);
-                AndroidGame.activate(this, new File(ready.getString("library")), new File(ready.getString("game")));
+                AndroidGame.activate(this, new File(ready.getString("library")), new File(ready.getString("game")),
+                    configuration.getBoolean("code_mods"));
                 JSONObject shaders = ready.optJSONObject("shader_prebuild");
                 if (shaders != null && shaders.optString("status").equals("warm_pending")) {
                     File result = new File(active, "shader-warm-result.json");
