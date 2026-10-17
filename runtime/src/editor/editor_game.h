@@ -38,8 +38,10 @@ void with_session(const std::function<void(Session&)>& f);  // the UI's read-onl
 bool try_with_session(const std::function<void(Session&)>& f);  // the same, false while a command runs (no waiting)
 // The UI's commands: run in order on a worker thread (a command may wait for the game); `done` gets the
 // result there.
-void run_async(const std::string& command, const Value& params, std::function<void(const Value&)> done);
+// `source` marks the command log entry ("MCP": a tool client, editor/mcp.h).
+void run_async(const std::string& command, const Value& params, std::function<void(const Value&)> done, const std::string& source = {});
 bool commands_pending();
+void note(const std::string& command, const Value& params, const Value& result, const std::string& source);  // a log entry
 
 // The last asynchronous outcome (a warp started, a test state written, a live update refused), for the UI.
 std::string status();

@@ -108,6 +108,9 @@ public:
     virtual bool play(bool from_camera, bool restore, std::string& why) { return why = "the game is not running", false; }
     virtual bool stop(std::string& why) { return why = "the game is not running", false; }
     virtual bool playing() { return false; }
+    // The current values of story records (-1: not set), for read_state: the open mod's quest steps and
+    // flags. False: not known (no story progress, or the game has not looked yet).
+    virtual bool record_values(const std::vector<Record>& records, std::vector<int>& values) { return false; }
 };
 inline constexpr int kTestSlots = 3;
 
@@ -129,6 +132,7 @@ struct LogEntry {
     uint64_t seq = 0;
     std::string command;
     Value params, result;
+    std::string source;  // "" the editor's own UI or a script; "MCP" a tool client (editor/mcp.h)
 };
 
 class Session {
@@ -139,13 +143,16 @@ public:
     void add_package(const std::string& mod, const std::string& name, const std::string& dir, const Value& manifest);
     // {"ok": true, "result": ...} or {"ok": false, "error": "..."}; never throws. `log`: false for the UI's
     // own reads every frame (read_state, list_locations...), which stay out of the command log.
-    Value run(const std::string& command, const Value& params = Value(), bool log = true);
+    Value run(const std::string& command, const Value& params = Value(), bool log = true, const std::string& source = {});
+    // A log entry for something that is not a command (a tool client's screenshot, a refused request).
+    void note(const std::string& command, const Value& params, const Value& result, const std::string& source);
     // {"command": "...", "params": {...}} as text, the result as text
     std::string run_json(const std::string& request);
 
     const std::deque<LogEntry>& log() const { return log_; }
     std::string open_mod() const { return open_; }
     const Value* manifest(const std::string& mod) const;
+    std::string package_dir(const std::string& mod) const;  // the package folder ("" unknown)
     bool dirty(const std::string& mod) const;
     std::vector<std::string> mods() const;
     size_t undo_depth() const { return undo_.size(); }
@@ -189,6 +196,7 @@ private:
     // the building commands (commands_build.cpp): add, remove, place, models, dialogue, export, play
     Value dispatch_build(const std::string& command, const Value& params, std::string& why, bool& ok, bool& handled);
     bool where(const Value& params, Place& place, std::string& why);  // at: link, camera or position (snapped)
+    Value progress(const std::string& mod, const Value& manifest);    // read_state: quest steps and flags
 };
 
 // One problem of a package, with what it is about (for the editor's problem list: a click selects it).

@@ -50,6 +50,12 @@ bool env_on() {
     return false;
 }
 
+// ---------------------------------------------------------------- read_state's story records
+std::mutex g_records_mu;
+std::vector<Record> g_records_want;  // under g_records_mu
+std::vector<int> g_records_values;
+bool g_records_seen = false;
+
 // ---------------------------------------------------------------- status and game-thread jobs
 std::mutex g_status_mu;
 std::string g_status;
@@ -778,6 +784,19 @@ public:
     bool play(bool from_camera, bool restore, std::string& why) override { return request_play(from_camera, restore, why); }
     bool stop(std::string& why) override;
     bool playing() override { return g_playing; }
+    // read_state may run on any thread (the UI reads it every frame): the game thread refreshes the
+    // values of the records last asked for twice a second (records_tick), this returns its last look
+    bool record_values(const std::vector<Record>& records, std::vector<int>& values) override {
+        std::lock_guard<std::mutex> lk(g_records_mu);
+        if (!(g_records_want == records)) {
+            g_records_want = records;
+            g_records_seen = false;
+            return false;
+        }
+        if (!g_records_seen) return false;
+        values = g_records_values;
+        return true;
+    }
 };
 
 std::recursive_mutex g_mu;  // the session (recursive: a script runs on the game thread inside logic_service)
@@ -954,13 +973,14 @@ struct Queued {
     std::string command;
     Value params;
     std::function<void(const Value&)> done;
+    std::string source;
 };
 std::mutex g_queue_mu;
 std::condition_variable g_queue_cv;
 std::deque<Queued> g_queue;
 std::atomic<int> g_queued{0};
 }  // namespace
-void run_async(const std::string& command, const Value& params, std::function<void(const Value&)> done) {
+void run_async(const std::string& command, const Value& params, std::function<void(const Value&)> done, const std::string& source) {
     static std::once_flag started;
     std::call_once(started, [] {
         std::thread([] {
@@ -972,7 +992,11 @@ void run_async(const std::string& command, const Value& params, std::function<vo
                     q = std::move(g_queue.front());
                     g_queue.pop_front();
                 }
-                const Value r = run(q.command, q.params);
+                Value r;
+                {
+                    std::lock_guard<std::recursive_mutex> lk(g_mu);
+                    r = g_session.run(q.command, q.params, true, q.source);
+                }
                 if (q.done) q.done(r);
                 --g_queued;
             }
@@ -980,18 +1004,43 @@ void run_async(const std::string& command, const Value& params, std::function<vo
     });
     ++g_queued;
     std::lock_guard<std::mutex> lk(g_queue_mu);
-    g_queue.push_back({command, params, std::move(done)});
+    g_queue.push_back({command, params, std::move(done), source});
     g_queue_cv.notify_one();
 }
 bool commands_pending() { return g_queued.load() > 0; }
+void note(const std::string& command, const Value& params, const Value& result, const std::string& source) {
+    std::lock_guard<std::recursive_mutex> lk(g_mu);
+    g_session.note(command, params, result, source);
+}
 std::string status() {
     std::lock_guard<std::mutex> lk(g_status_mu);
     return g_status;
 }
 
+namespace {
+void records_tick() {
+    static int pass = 0;
+    if (++pass % 15) return;
+    std::vector<Record> want;
+    {
+        std::lock_guard<std::mutex> lk(g_records_mu);
+        want = g_records_want;
+    }
+    if (want.empty() || !story_store::ready()) return;
+    const story_mail::Book book = story_store::book();
+    std::vector<int> values;
+    for (const auto& r : want) values.push_back(book.has(r.kind, r.key) ? int(book.get(r.kind, r.key)) : -1);
+    std::lock_guard<std::mutex> lk(g_records_mu);
+    if (!(g_records_want == want)) return;
+    g_records_values = std::move(values);
+    g_records_seen = true;
+}
+}  // namespace
+
 void logic_service(Cpu* c) {
     if (!enabled()) return;
     t_game = c;
+    records_tick();
     // the jobs first: a command waiting on the game thread (a ground check) never waits for a script
     std::vector<std::function<void(Cpu*)>> jobs;
     {

@@ -61,7 +61,8 @@ const std::vector<CommandInfo> kCommands = {
     {"test_mode", "Test mode: in-game saves go to a separate test save, and the test commands are allowed.", {{"on", "boolean", "", true}}},
     {"reset_quest", "Test mode: erases the open mod's quest progress and flags from the loaded Quest Log (never another mod's).", {{"mod", "string", ""}, {"confirm", "boolean", "must be true", true}}, false, true},
     {"save_state", "Test mode: saves a test state (the game's progress, Link's place and the open mod's flags).", {{"slot", "integer", "1..3", true}}},
-    {"load_state", "Test mode: loads a test state.", {{"slot", "integer", "1..3", true}}},
+    {"load_state", "Test mode: loads a test state (the game's current progress is replaced).",
+     {{"slot", "integer", "1..3", true}, {"confirm", "boolean", "must be true: the current progress is replaced", true}}, false, true},
     {"command_log", "The last commands with their parameters and results.", {{"count", "integer", "how many (default 20)"}}},
     // building new content
     {"list_actor_types", "The kinds of actor add_actor places, and which appear without a restart.", {}},
@@ -456,6 +457,10 @@ const Value* Session::manifest(const std::string& mod) const {
     auto* p = find(mod);
     return p ? &p->manifest : nullptr;
 }
+std::string Session::package_dir(const std::string& mod) const {
+    auto* p = find(mod);
+    return p ? p->dir : std::string();
+}
 bool Session::dirty(const std::string& mod) const {
     auto* p = find(mod);
     return p && !(p->manifest == p->saved);
@@ -471,7 +476,7 @@ std::vector<std::pair<std::string, Value>> Session::all_manifests() const {
     return out;
 }
 
-Value Session::run(const std::string& command, const Value& params, bool log) {
+Value Session::run(const std::string& command, const Value& params, bool log, const std::string& source) {
     Value out;
     std::string why;
     bool ok = false;
@@ -492,10 +497,72 @@ Value Session::run(const std::string& command, const Value& params, bool log) {
     out["ok"] = ok;
     if (!ok) out["error"] = why.empty() ? std::string("failed") : why;
     if (!log) return out;
-    LogEntry e{++seq_, command, params, out};
+    note(command, params, out, source);
+    return out;
+}
+
+// read_state: the open mod's quest steps and flags as the loaded Quest Log holds them (the game's last look)
+Value Session::progress(const std::string& mod, const Value& manifest) {
+    using namespace story_mail;
+    Value out;
+    std::vector<Record> want;
+    std::vector<std::string> flag_ids;
+    auto flag = [&](const std::string& id) {
+        if (id.empty() || std::find(flag_ids.begin(), flag_ids.end(), id) != flag_ids.end()) return;
+        flag_ids.push_back(id);
+        want.push_back({kRecordActorFlag, letter_key(mod, "actor-flag:" + id)});
+    };
+    auto actions = [&](const Value& then) {
+        for (const auto& a : then.array)
+            if (a.get("action").string() == "flag") flag(a.get("id").string());
+    };
+    for (const auto& a : manifest.get("actors").array) {
+        flag(a.get("flag").string());
+        actions(a.get("then"));
+    }
+    for (const auto& sc : manifest.get("scenes").array)
+        for (const auto& st : sc.get("steps").array) actions(st.get("then"));
+    const size_t quests_at = want.size();
+    for (const auto& q : manifest.get("quests").array) {
+        const uint16_t key = letter_key(mod, q.get("id").string());
+        want.push_back({kRecordQuest, key});
+        want.push_back({kRecordQuestFlags, key});
+    }
+    std::vector<int> values;
+    if (want.empty() || !host_ || !host_->record_values(want, values) || values.size() != want.size()) {
+        out["known"] = false;
+        return out;
+    }
+    out["known"] = true;
+    Value flags;
+    flags.type = Value::Object;
+    for (size_t i = 0; i < flag_ids.size(); i++) flags[flag_ids[i]] = values[i] < 0 ? Value(false) : Value(values[i]);
+    out["flags"] = flags;
+    Value quests;
+    quests.type = Value::Array;
+    size_t i = quests_at;
+    for (const auto& q : manifest.get("quests").array) {
+        Value v;
+        v["id"] = q.get("id").string();
+        const int step = values[i++], bits = values[i++];
+        if (step < 0 || step == 0) v["step"] = "not started";
+        else if (step == 255) v["step"] = "done";
+        else v["step"] = step;
+        Value set;
+        set.type = Value::Array;
+        for (int b = 0; b < 8; b++)
+            if (bits > 0 && (bits >> b) & 1) set.array.push_back(b + 1);
+        v["flags"] = set;
+        quests.array.push_back(v);
+    }
+    out["quests"] = quests;
+    return out;
+}
+
+void Session::note(const std::string& command, const Value& params, const Value& result, const std::string& source) {
+    LogEntry e{++seq_, command, params, result, source};
     log_.push_back(std::move(e));
     while (log_.size() > kLogSize) log_.pop_front();
-    return out;
 }
 
 std::string Session::run_json(const std::string& request) {
@@ -904,6 +971,7 @@ Value Session::dispatch(const std::string& command, const Value& p, std::string&
             r["test_mode"] = host_->test_mode();
             std::string busy;
             if (host_->busy(busy)) r["busy"] = busy;
+            if (const Package* pkg = find(open_)) r["progress"] = progress(pkg->mod, pkg->manifest);
         }
         ok = true;
         return r;
@@ -958,6 +1026,7 @@ Value Session::dispatch(const std::string& command, const Value& p, std::string&
             v["command"] = log_[i].command;
             v["params"] = log_[i].params;
             v["result"] = log_[i].result;
+            if (!log_[i].source.empty()) v["source"] = log_[i].source;
             r.array.push_back(v);
         }
         ok = true;
