@@ -29,6 +29,7 @@ inline Fingerprint fingerprint(const std::string&mod,const story_notebook::Manif
         const auto&at=c.attack;word(at.damage);word(at.active_frames);word(at.cooldown_frames);number(at.radius);number(at.height);number(at.forward_offset);number(at.y_offset);
     }
     if(a.carry_enabled){text("wwhd.mod-carry.v1");word(a.carry_break_on_impact);}
+    if(!a.texture.empty()){text("wwhd.actor-texture.v1");text(a.texture);text(a.texture_digest);}
     const auto hex=mods::hash::sha256_text(bytes);Fingerprint out{};
     const auto digit=[](char c){return uint8_t(c<='9'?c-'0':c-'a'+10);};for(size_t i=0;i<out.size();++i)out[i]=uint8_t(digit(hex[i*2])*16+digit(hex[i*2+1]));return out;
 }

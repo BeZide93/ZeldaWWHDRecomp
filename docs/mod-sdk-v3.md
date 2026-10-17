@@ -589,6 +589,7 @@ minutes). Fast-forward intentionally follows the game clock.
 | `walk` | Owned skinned `actor`, `speed`, deadline; either 2–16 `points` or owned quest ID `quest_place` |
 | `choice` | `text`, exactly two `options: [{"text": "…", "next": "step-id"}, …]`, deadline; optional `default: 0` or `1` |
 | `music` | Textual `cue`, `action: "start"` or `"stop"`, optional `fade_frames` (0–600) |
+| `particle` | `effect: "auction-sparkle"` or `"beacon-sparkle"`; exactly one `actor` or world XYZ `position`; optional `scale` and `alpha`; emits once |
 | `end` | Optional `then` actions |
 
 Character references name a placed actor ID or `link` where supported. Movement
@@ -647,3 +648,87 @@ end rewards. Stop reasons are 0 Finished, 1 Skipped, 2 Aborted, 3 StateLoaded,
 4 Interrupted, 5 Failed and 6 TimedOut. START/STOP receive reason 0; RESTORE receives
 the actual lease exit reason. A data-only scene without
 a registered hook must not declare music steps.
+
+
+## Native particles (Part 4 preview)
+
+The curated effects `auction-sparkle` (`8153`, blue geometric sparkle) and
+`beacon-sparkle` (`8152`, orange/yellow beacon burst) use callback-free native
+effects. Native 30 fps proof covers both visible bursts and their exact emitters'
+return to the native free list. `door-debris` and `dust` are unavailable in the
+public preview. The stock dust effect needs its retail callback to stop; it is
+not a safe callback-free one-shot.
+
+The [guest C header](../runtime/guest/include/wwhd_guest.h) provides:
+
+```c
+u32 wwhd_actor_particle(wwhd_actor_handle actor, const char* effect,
+                       f32 scale, u32 alpha);
+u32 wwhd_particle_at(const char* effect, f32 x, f32 y, f32 z,
+                    f32 scale, u32 alpha);
+```
+
+The actor call copies the current position of a live handle owned by the calling
+mod and requires the actor to be in Link's current room. The place call accepts
+explicit world XYZ in that current room; it does not infer height from a map or
+quest marker. Coordinates must be finite and within ±1000000 game units, scale
+must be 0.1–4, and alpha must be 0–255. Both calls reject Draw callbacks and return
+1 only when the native emitter is accepted. C API calls share a global limit of
+four emission attempts per logic step across mods; an attempt may consume the
+budget even when emission fails.
+
+```c
+wwhd_actor_handle actor = wwhd_actor_find("tide-sprite");
+if (actor) wwhd_actor_particle(actor, "auction-sparkle", 1.0f, 255);
+/* Explicit XYZ, using Link's current room. */
+wwhd_particle_at("auction-sparkle", 100.0f, 1040.0f, -201580.0f, 1.0f, 255);
+```
+
+A scene can emit at a declared character (including `link`) or at an explicit
+world position in the scene's room:
+
+```json
+{"type":"particle","effect":"auction-sparkle","actor":"link"}
+```
+
+```json
+{"type":"particle","effect":"auction-sparkle",
+ "position":{"x":100,"y":1040,"z":-201580},"scale":1,"alpha":255}
+```
+
+Use exactly one of `actor` and `position`; `scale` defaults to 1 and `alpha` to
+255. The step emits once when entered and has no duration field. A missing or
+stale actor, room mismatch, or unavailable native effect fails the step and aborts
+the scene rather than silently continuing to its end rewards.
+
+Effects use the currently loaded native bank. Availability can change between
+rooms; an absent effect returns failure without replacing or loading a bank.
+These calls create a one-shot at a copied position: the effect does not follow
+an actor, expose a cancellation handle, or retain a guest pointer. The native
+particle system owns its expiry.
+
+## Textures on owned native props (Part 4 preview)
+
+A placed `pot`, `barrel`, or `crate` may name a PNG in its own package. The SDK
+replaces the supported base-colour texture on that copy of the native object;
+other copies in the room continue using the game's texture. Lighting and the
+native toon texture still come from the object. For example:
+
+```json
+{"actors":[{"id":"harbor-pot","actor":"pot","stage":"sea","room":11,
+  "position":{"x":100,"y":1040,"z":-201580},
+  "broken_flag":"harbor-pot.broken","texture":"textures/harbor-pot.png"}]}
+```
+
+The path must be a relative `.png` inside `textures/` or `assets/` in the
+package. The file must be at most 2 MiB and decode as a noninterlaced 8-bit RGBA
+PNG. Width and height may be at most 512 pixels; width must be a multiple of
+64 and height a multiple of 8. Invalid or missing files reject the declaration.
+The preview supports one named base-colour slot for a pot or crate, and the
+barrel's primary base-colour slot; other native objects and material slots are
+not accepted. Up to eight texture definitions can be active in one session.
+
+Mod-shipped simple JPAC sprites are not registered in this preview. The isolated
+writer is experimental: native draw selectors, private texture-context binding,
+and snapshot-safe bank ownership and retained texture/emitter lifetimes still
+need integration and native proof before custom effects can be loaded.

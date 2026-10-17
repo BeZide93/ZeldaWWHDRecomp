@@ -151,6 +151,12 @@ u32 wwhd_actor_set_animation(wwhd_actor_handle,const char* clip,f32 blend_second
 u32 wwhd_actor_walk(wwhd_actor_handle,const wwhd_actor_vec3* points,u32 count,f32 speed,u32 loop);
 u32 wwhd_actor_walk_quest(wwhd_actor_handle,const char* quest_id,f32 speed);
 u32 wwhd_actor_stop(wwhd_actor_handle);
+/* One-shot native particles from the curated named list. The actor call takes
+ * the current position of a live owned handle; the place call takes explicit
+ * world XYZ in Link's current room. Neither follows the actor after emission.
+ * Return 1 only when the native bank accepts the emitter. Both refuse Draw. */
+u32 wwhd_actor_particle(wwhd_actor_handle,const char* effect,f32 scale,u32 alpha);
+u32 wwhd_particle_at(const char* effect,f32 x,f32 y,f32 z,f32 scale,u32 alpha);
 /* Combat is opt-in immutable manifest configuration. These additions preserve v1
  * behavior/hit/state layouts. on_hit remains informational; execute may poll. */
 enum { WWHD_COMBAT_ALIVE=0, WWHD_COMBAT_FLINCH=1, WWHD_COMBAT_STUNNED=2,

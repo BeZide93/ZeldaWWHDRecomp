@@ -44,6 +44,9 @@ int main() {
         }
     }
     for(const auto& name:{"pot","barrel","crate"}){auto p=prop_example();p["actors"].array[0]["actor"]=name;assert(parse_actors(p,actors,why)&&actors[0].broken_flag=="vase.broken"&&actors[0].drops[0].item=="shard"&&actors[0].drops[0].quantity==2);}
+    for(const auto& name:{"pot","barrel","crate"}){auto p=prop_example();p["actors"].array[0]["actor"]=name;p["actors"].array[0]["texture"]="textures/blue.png";assert(parse_actors(p,actors,why)&&actors[0].texture=="textures/blue.png");const auto initial=story_actors::identity::fingerprint("test",actors[0]);actors[0].texture_digest="different";assert(story_actors::identity::fingerprint("test",actors[0])!=initial);}
+    for(const auto& path:{"other.png","textures/../bad.png","textures/bad.jpg","textures//bad.png","assets/link\\bad.png"}){auto p=prop_example();p["actors"].array[0]["texture"]=path;assert(!parse_actors(p,actors,why));}
+    {auto p=example();p["actors"].array[0]["texture"]="textures/blue.png";assert(!parse_actors(p,actors,why));}
     for(const auto& field:{"params","parameters","flag","lines","then","path","attention","collision","model"}){auto p=prop_example();p["actors"].array[0][field]=0;assert(!parse_actors(p,actors,why));}
     {auto p=prop_example();p["actors"].array[0].object.erase("broken_flag");assert(!parse_actors(p,actors,why));}
     {auto p=prop_example();p["actors"].array[0].object.erase("drops");assert(!parse_actors(p,actors,why));}
@@ -222,6 +225,13 @@ int main() {
     v=moving;v["scenes"]=mods::json::parse(R"([{"id":"branch-duration","steps":[{"id":"choose","type":"choice","text":"Choose","frames":1,"options":[{"text":"A","next":"a"},{"text":"B","next":"b"}]},{"id":"a","type":"wait","frames":10000,"next":"a-end"},{"id":"a-end","type":"end"},{"id":"b","type":"wait","frames":10000,"next":"b-end"},{"id":"b-end","type":"end"}]}])");assert(parse_scenes(v,scenes,why));v["scenes"].array[0]["steps"].array[1]["frames"]=18000;bad_scene(v);
     v=extended;v["scenes"].array[0]["steps"].array[1]["actor"]="link";assert(parse_scenes(v,scenes,why));
     v=moving;v["scenes"]=mods::json::parse(R"([{"id":"mod-move","steps":[{"type":"move","actor":"post","position":{"x":100,"y":0,"z":0},"frames":60},{"type":"face","actor":"post","target_actor":"link"},{"type":"end"}]}])");assert(parse_scenes(v,scenes,why));
+    v=moving;v["scenes"]=mods::json::parse(R"([{"id":"sparkle","steps":[{"type":"particle","effect":"auction-sparkle","actor":"post","scale":1.5,"alpha":180},{"type":"particle","effect":"auction-sparkle","position":{"x":1,"y":2,"z":3}},{"type":"end"}]}])");
+    assert(parse_scenes(v,scenes,why)&&scenes[0].steps[0].kind==SceneStep::Kind::Particle&&scenes[0].steps[1].particle_has_position);
+    auto beacon_particle=v;beacon_particle["scenes"].array[0]["steps"].array[0]["effect"]="beacon-sparkle";assert(parse_scenes(beacon_particle,scenes,why)&&scenes[0].steps[0].particle=="beacon-sparkle");
+    auto invalid_particle=v;invalid_particle["scenes"].array[0]["steps"].array[0]["effect"]="door-debris";bad_scene(invalid_particle);
+    invalid_particle=v;invalid_particle["scenes"].array[0]["steps"].array[0]["position"]=mods::json::parse(R"({"x":1,"y":2,"z":3})");bad_scene(invalid_particle);
+    invalid_particle=v;invalid_particle["scenes"].array[0]["steps"].array[0]["scale"]=5;bad_scene(invalid_particle);
+    invalid_particle=v;invalid_particle["scenes"].array[0]["steps"].array[1].object.erase("position");bad_scene(invalid_particle);
     { // Generic combat is additive to kind:mod and cannot select native enemy variants.
         const auto combat_fixture=[](){return mods::json::parse(R"({"items":[{"id":"token"}],"models":[{"id":"creature","source":"assets/creature.glb","kind":"skinned"}],"actors":[{"id":"enemy","kind":"mod","model":"creature","stage":"sea","room":11,"position":{"x":100,"y":1040,"z":-201500},"collision":{"radius":30,"height":100,"mode":"solid"},"combat":{"health":10,"invulnerability_frames":15,"flinch":{"clip":"flinch","frames":8,"knockback_speed":300,"knockback_frames":6},"stun":{"clip":"stun","frames":30},"death":{"clip":"death","frames":30},"attack":{"damage":1,"radius":40,"height":100,"forward_offset":30,"y_offset":0,"active_frames":6,"cooldown_frames":30}},"defeated_flag":"enemy.defeated","drops":[{"item":"item:token","quantity":1}],"native_drops":[{"item":"heart","quantity":1}]}]})");};
         const auto rejects=[&](const Value& data){std::vector<ManifestActor> rejected;assert(!parse_actors(data,rejected,why));};

@@ -209,6 +209,16 @@ int main(int argc,char** argv){
         map_guest(0x101D0000,0x10000);st32(0x101D2B1C+0x10,story_props::kClassBytes);
         story_notebook::ManifestActor prop;prop.id="pot";prop.actor="pot";prop.broken_flag="pot.broken";prop.stage="sea";prop.scale={2,2,2};std::string why;
         auto invalid=prop;invalid.id="invalid";invalid.broken_flag="invalid.broken";invalid.drops.push_back({"missing",1});
+        // Scene-only flags must not survive rejected or throwing actor batches.
+        auto collision_pair=[](const std::string& mod){std::map<uint16_t,std::string> seen;for(unsigned i=0;i<100000;++i){auto id="scene"+std::to_string(i);auto [it,fresh]=seen.emplace(story_actors::flag_key(mod,id),id);if(!fresh)return std::make_pair(it->second,id);}assert(false);return std::make_pair(std::string(),std::string());};
+        auto failed_flags=collision_pair("scene-failed");
+        assert(!story_actors::load("scene-failed",{prop,invalid},why,{failed_flags.first}));
+        assert(story_actors::register_flags("scene-failed",{failed_flags.second},why));
+        auto throw_flags=collision_pair("scene-throw");auto flag_throw=prop;flag_throw.id="throwing";flag_throw.broken_flag="throw.broken";bool flag_caught=false;
+        try{story_actors::load("scene-throw",{prop,flag_throw},why,{throw_flags.first});}catch(const std::runtime_error&){flag_caught=true;}
+        assert(flag_caught&&story_actors::register_flags("scene-throw",{throw_flags.second},why));
+        auto committed_flags=collision_pair("scene-commit");assert(story_actors::load("scene-commit",{},why,{committed_flags.first}));
+        assert(!story_actors::register_flags("scene-commit",{committed_flags.second},why));
         const auto old_models=mod_actor::checkpoint();assert(!story_actors::load("test",{prop,invalid},why)&&!story_actors::declared()&&story_props::checkpoint()==0&&mod_actor::checkpoint()==old_models&&story_items::prop_marker_checkpoint()==0);
         auto throwing=prop;throwing.id="throwing";throwing.broken_flag="throw.broken";bool caught=false;try{story_actors::load("test",{prop,throwing},why);}catch(const std::runtime_error&){caught=true;}assert(caught&&!story_actors::declared()&&story_props::checkpoint()==0&&story_items::prop_marker_checkpoint()==0);
         assert(story_actors::register_model("test","model","original_model",1,why));auto generic=prop;generic.actor="mod";generic.kind="mod";generic.id="model.actor";generic.model="model";generic.broken_flag.clear();
@@ -216,6 +226,20 @@ int main(int argc,char** argv){
         assert(story_actors::load("test",{prop},why));story_actors::install([](uint32_t){return std::string();},[](uint32_t a,void(*fn)(Cpu*)){hooks[a]=fn;});
         Cpu c{};story_actors::native_room_loaded(&c,0);assert(created==1&&current_layer==kArena+0x6800&&ld32(kScratch+128)==100);
         assert(story_actors::actor_address(&c,"test","pot")==kActor);
+        // Scene particles must use exact owned native identity, not merely a
+        // same-room address returned by native SearchByID.
+        story_notebook::WorldPoint particle_point;
+        st32(0x1047E6C4,77);st32(kScratch+0x318,77);
+        st8(kActor+0x326,0);st32(kActor+0x314,f32_as_u32(12));st32(kActor+0x318,f32_as_u32(34));st32(kActor+0x31C,f32_as_u32(56));
+        assert(story_actors::particle_position(&c,"test","pot",0,particle_point));
+        assert(particle_point.x==12&&particle_point.y==34&&particle_point.z==56);
+        st32(kActor+4,999);assert(!story_actors::particle_position(&c,"test","pot",0,particle_point));st32(kActor+4,100);
+        st16(kActor+0xE,0x1C5);assert(!story_actors::particle_position(&c,"test","pot",0,particle_point));st16(kActor+0xE,story_props::kProfile);
+        assert(!story_actors::particle_position(&c,"foreign","pot",0,particle_point));
+        assert(!story_actors::particle_position(&c,"test","pot",1,particle_point));
+        assert(story_actors::particle_position(&c,"test","pot",0,particle_point));
+
+        st32(0x1047E6C4,0);st32(kScratch+0x318,0);
         const uint32_t fp=kScratch+story_actors::kIdentityScratchOffset;std::array<uint8_t,story_actors::identity::kRecordBytes> snapshot{};std::memcpy(snapshot.data(),mem::ptr(fp),snapshot.size());
         story_actors::state_loaded();assert(story_actors::actor_address(&c,"test","pot")==kActor); // legitimate same-config restore
         auto other=prop;other.id="other-pot";other.broken_flag="other.broken";const auto foreign=story_actors::identity::record(story_actors::identity::fingerprint("test",other));

@@ -25,7 +25,7 @@ struct ManifestLookAt {
 struct ManifestPath {std::vector<WorldPoint> points;float speed=100;bool loop=false;};
 struct ManifestPropDrop {std::string item;unsigned quantity=1;};
 struct ManifestActor {
-    std::string id,actor,stage,kind,model,animation,prompt="check"; unsigned room=0;
+    std::string id,actor,stage,kind,model,animation,prompt="check",texture,texture_digest; unsigned room=0,texture_token=0;
     float collision_radius=30,collision_height=100; bool pushable=false;
     ManifestLookAt look_at;ManifestPath path;
     bool carry_enabled=false,carry_break_on_impact=false;
@@ -39,13 +39,13 @@ struct ManifestActor {
 struct SceneCameraKey {WorldPoint eye,target;unsigned frames=0;};
 struct SceneChoiceOption {std::string text,next;size_t next_step=0;};
 struct SceneStep {
-    enum class Kind { Camera,Say,Move,Face,Wait,Sound,Fade,End,CameraPath,CameraFollow,Animation,Walk,Choice,Music };
+    enum class Kind { Camera,Say,Move,Face,Wait,Sound,Fade,End,CameraPath,CameraFollow,Animation,Walk,Choice,Music,Particle };
     Kind kind=Kind::Wait; std::string actor,target_actor,text,sound;
-    std::string id,next,clip,quest_place,cue,music_action,easing="linear";
+    std::string id,next,clip,quest_place,cue,music_action,particle,easing="linear";
     std::vector<size_t> successors;std::vector<SceneCameraKey> camera_keys;
     WorldPoint eye_offset,target_offset;float half_life=0.2f,blend_seconds=0,speed=100;bool loop=true;
     std::vector<WorldPoint> walk_points;std::vector<SceneChoiceOption> choices;unsigned default_choice=0,fade_frames=0;
-    WorldPoint eye,target,position,eye_to,target_to; unsigned frames=0; bool pan=false,fade_in=false;
+    WorldPoint eye,target,position,eye_to,target_to; unsigned frames=0,particle_alpha=255; float particle_scale=1; bool pan=false,fade_in=false,particle_has_position=false;
     std::vector<StoryAction> then;
 };
 struct ManifestScene {
@@ -67,6 +67,11 @@ inline bool number(const Value&v,double low,double high,float&out,bool positive=
     out=float(v.number);return std::isfinite(out)&&(!positive||out>0);
 }
 inline bool bone_name(const Value&v){if(v.type!=Value::String||v.text.empty()||v.text.size()>31)return false;const auto alpha=[](char c){return(c>='a'&&c<='z')||(c>='A'&&c<='Z');};if(!alpha(v.text[0]))return false;for(char c:v.text)if(!alpha(c)&&!(c>='0'&&c<='9')&&c!='_')return false;return true;}
+inline bool texture_path(const Value&v){
+    if(v.type!=Value::String||v.text.size()<12||v.text.size()>240||
+       (!v.text.starts_with("textures/")&&!v.text.starts_with("assets/"))||!v.text.ends_with(".png"))return false;
+    size_t start=0;while(start<v.text.size()){const size_t end=v.text.find('/',start);const auto part=v.text.substr(start,end==std::string::npos?end:end-start);if(part.empty()||part=="."||part=="..")return false;for(unsigned char c:part)if(c<32||c==127||c=='\\'||c==':')return false;if(end==std::string::npos)break;start=end+1;}return true;
+}
 inline bool flag_id(const Value& v) {return id(v)&&v.text.rfind("0x",0)!=0;}
 inline bool point(const Value& v,WorldPoint& p,float limit=350000) {
     if(v.type!=Value::Object) return false;
@@ -173,7 +178,7 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
     if(list.type==Value::Null)return true;
     if(list.type!=Value::Array||list.array.size()>kMaxActorsPerMod)return why="actors must be a list of up to 64",false;
     for(const auto& v:list.array){ManifestActor a;
-        if(!keys(v,{"id","actor","kind","model","animation","look_at","path","collision","attention","stage","room","position","rotation","scale","params","parameters","flag","broken_flag","defeated_flag","drops","carry","combat","native_drops","switch_flag","switch","when","lines","then"}))return why="unknown actor field",false;
+        if(!keys(v,{"id","actor","kind","model","animation","look_at","path","collision","attention","stage","room","position","rotation","scale","params","parameters","flag","broken_flag","defeated_flag","drops","carry","combat","native_drops","switch_flag","switch","when","lines","then","texture"}))return why="unknown actor field",false;
         if(!id(v.get("id")))return why="invalid actor id",false;a.id=v.get("id").text;a.actor=v.get("actor").string();
         if(v.object.contains("kind")) {
             if(v.get("kind").string()!="mod"||v.object.contains("actor"))return why="mod actor kind cannot name a native actor",false;
@@ -234,6 +239,7 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
         if(a.actor=="Tbox"||a.actor=="takara"||a.actor=="PROC_TBOX")a.actor="chest";
         if(a.actor=="NpcPeople"||a.actor=="PROC_NPC_PEOPLE")a.actor="resident";
         const bool prop=a.actor=="pot"||a.actor=="barrel"||a.actor=="crate";
+        if(v.object.contains("texture")){if(!prop||!texture_path(v.get("texture")))return why="texture requires a placed pot, barrel or crate and a package PNG in textures/ or assets/",false;a.texture=v.get("texture").text;}
         const bool switch_actor=a.actor=="switch",door=a.actor=="door";
         const bool enemy=a.actor=="chuchu"||a.actor=="bokoblin"||a.actor=="moblin"||a.actor=="keese";
         if(a.actor!="sign"&&a.actor!="resident"&&a.actor!="chest"&&!prop&&!switch_actor&&!door&&!enemy&&!(a.actor=="mod"&&a.kind=="mod"))return why="unknown or unsupported flag-setting actor: "+a.actor,false;
@@ -340,6 +346,7 @@ inline bool parse_scenes_impl(const mods::json::Value& m,std::vector<ManifestSce
             else if(type=="walk")step_keys=keys(fields,{"type","actor","points","quest_place","speed","frames","seconds"});
             else if(type=="choice")step_keys=keys(fields,{"type","text","options","default","frames","seconds"});
             else if(type=="music")step_keys=keys(fields,{"type","cue","action","fade_frames"});
+            else if(type=="particle")step_keys=keys(fields,{"type","effect","actor","position","scale","alpha"});
             if(!step_keys)return why="unknown scene step or field",false;
             if(type=="camera"){p.kind=SceneStep::Kind::Camera;timed=true;if(!point(st.get("eye"),p.eye))return why="camera needs an eye",false;if(st.get("target_actor").type!=Value::Null){p.target_actor=st.get("target_actor").string();if(!character(m,p.target_actor))return why="unknown camera character",false;}else if(!point(st.get("target"),p.target))return why="camera needs a target",false;if(st.get("pan").type!=Value::Null){if(st.get("pan").type!=Value::Bool)return why="pan must be boolean",false;p.pan=st.get("pan").boolean;if(p.pan&&(!point(st.get("eye_to"),p.eye_to)||!point(st.get("target_to"),p.target_to)))return why="pan needs eye_to and target_to",false;}}
             else if(type=="say"){p.kind=SceneStep::Kind::Say;timed=true;p.actor=st.get("actor").string();if(!character(m,p.actor)||!lines(st.get("text"),p.text))return why="say needs a known character and text",false;}
@@ -380,6 +387,17 @@ inline bool parse_scenes_impl(const mods::json::Value& m,std::vector<ManifestSce
             else if(type=="music"){
                 p.kind=SceneStep::Kind::Music;if(!id(st.get("cue")))return why="music cue must be a textual id",false;p.cue=st.get("cue").text;p.music_action=st.get("action").string();if(p.music_action!="start"&&p.music_action!="stop")return why="music action must be start or stop",false;
                 if(st.object.contains("fade_frames")){if(!integer(st.get("fade_frames"),0,600))return why="music fade_frames must be 0..600",false;p.fade_frames=unsigned(st.get("fade_frames").number);}
+            }
+            else if(type=="particle"){
+                p.kind=SceneStep::Kind::Particle;
+                if(st.get("effect").type!=Value::String||(st.get("effect").text!="auction-sparkle"&&st.get("effect").text!="beacon-sparkle"))return why="unknown curated particle effect",false;
+                p.particle=st.get("effect").text;
+                if(st.object.contains("actor")==st.object.contains("position"))return why="particle needs one actor or world position",false;
+                if(st.object.contains("actor")){p.actor=st.get("actor").string();if(!character(m,p.actor))return why="particle actor must be a declared scene character",false;}
+                else if(!scene_point(st.get("position"),p.position))return why="particle needs a world XYZ position",false;
+                else p.particle_has_position=true;
+                if(st.object.contains("scale")&&!number(st.get("scale"),0.1,4,p.particle_scale))return why="particle scale must be 0.1..4",false;
+                if(st.object.contains("alpha")){if(!integer(st.get("alpha"),0,255))return why="particle alpha must be 0..255",false;p.particle_alpha=unsigned(st.get("alpha").number);}
             }
             else return why="unknown scene step",false;
             if(timed&&!scene_duration(st,p.frames,why))return false;

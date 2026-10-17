@@ -23,6 +23,8 @@ inline constexpr uint32_t kScratchBytes=kEnemyEpochScratchOffset+128*4;
 static_assert(kEnemyProfilesScratchOffset>=kIdentityScratchOffset+128*40);
 static_assert((kEnemyOwnershipScratchOffset&15)==0);
 bool load(const std::string& mod,const std::vector<story_notebook::ManifestActor>& actors,std::string& why);
+// Scene flags commit or roll back with the complete actor declaration batch.
+bool load(const std::string& mod,const std::vector<story_notebook::ManifestActor>& actors,std::string& why,const std::vector<std::string>& scene_flags);
 bool declared();
 bool mod_declared();
 // Prepared player-local model archive; register before install.
@@ -43,6 +45,13 @@ void state_loaded();
 void restore_talk_text();
 uint32_t actor_address(Cpu*,const std::string& mod,const std::string& id);
 bool position(Cpu*,const std::string& mod,const std::string& id,story_notebook::WorldPoint& out);
+// Resolve a scene particle's declared actor by exact live identity in the
+// active stage and room, then copy its position. Never expose the raw search
+// result to the particle service.
+bool particle_position(Cpu*,const std::string& mod,const std::string& id,unsigned room,story_notebook::WorldPoint& out);
+// Exact placed prop snapshot identity for owned texture binding. Returns the
+// declaration token and current native stage/room generation, never a retail copy.
+bool prop_texture_identity(uint32_t actor,uint32_t pid,uint32_t& token,uint32_t& epoch,uint32_t& generation);
 bool actions(const std::string& mod,const std::vector<story_notebook::StoryAction>& actions);
 // Notebook hooks delegate only actors created by this service. Returns true when handled.
 bool people_message(Cpu*);

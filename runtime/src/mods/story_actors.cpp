@@ -284,11 +284,12 @@ void ym1_execute(Cpu* c){
 void ym1_delete(Cpu* c){Actor* a=find(c->r[3]);if(a&&a->spec.resident==kYm1){if(g_talk.actor==a)cancel_talk("delete");talk_latch(a,0);a->restore_talk=false;native_trace(a,c->r[3],"ym1-native-delete");a->process=0xFFFFFFFFu;st32(g_scratch+128+uint32_t(a-g_actors.data())*4,0xFFFFFFFFu);}g_original(c,kYm1Delete);}
 
 }
-bool load(const std::string& mod,const std::vector<ManifestActor>& actors,std::string& why) {
+bool load(const std::string& mod,const std::vector<ManifestActor>& actors,std::string& why) {return load(mod,actors,why,{});}
+bool load(const std::string& mod,const std::vector<ManifestActor>& actors,std::string& why,const std::vector<std::string>& scene_flags) {
     if(g_installed)return why="world actors require startup declaration",false;
     for(size_t i=0;i<actors.size();++i){for(const auto&old:g_actors)if(old.mod==mod&&old.spec.id==actors[i].id)return why="duplicate enabled actor identity",false;for(size_t j=0;j<i;++j)if(actors[j].id==actors[i].id)return why="duplicate actor identity",false;}
     if(g_actors.size()+actors.size()>128)return why="enabled mods exceed 128 actors overall",false;
-    std::vector<std::string> flags;
+    std::vector<std::string> flags=scene_flags;
     for(const auto& a:actors){if(!a.flag.empty())flags.push_back(a.flag);if(!a.switch_flag.empty())flags.push_back(a.switch_flag);for(const auto& action:a.then)if(action.kind==story_notebook::StoryAction::Kind::Flag)flags.push_back(action.id);}
     for(const auto& a:actors) {
         unsigned count=0;for(const auto& old:g_actors)if(old.spec.stage==a.stage&&old.spec.room==a.room)++count;
@@ -319,6 +320,7 @@ bool load(const std::string& mod,const std::vector<ManifestActor>& actors,std::s
     }
     std::vector<Actor> staged;staged.reserve(actors.size());g_actors.reserve(g_actors.size()+actors.size());
     struct LoadRollback {size_t props=story_props::checkpoint(),models=mod_actor::checkpoint(),switches=story_switches::checkpoint(),enemies=story_enemies::checkpoint(),ownership=story_enemy_ownership::checkpoint();story_items::PropMarkerCheckpoint markers=story_items::prop_marker_checkpoint();decltype(g_flag_names) flags=g_flag_names;bool committed=false;~LoadRollback(){if(!committed){story_props::rollback(props);mod_actor::rollback(models);story_switches::rollback(switches);story_enemies::rollback(enemies);story_enemy_ownership::rollback(ownership);story_items::rollback_prop_markers(markers);g_flag_names=std::move(flags);}}} rollback;
+    if(!register_flags(mod,flags,why))return false;
     for(const auto& a:actors){Actor added{mod,a};if(a.kind=="mod"&&a.combat_enabled){added.combat_marker=story_items::register_enemy_marker(mod,a.id,a.defeated_flag,why);if(!added.combat_marker.value)return false;added.fingerprint=identity::fingerprint(mod,a);}if(a.kind=="mod"&&a.carry_break_on_impact){added.carry_marker=story_items::register_prop_marker(mod,a.id,a.broken_flag,why);if(!added.carry_marker)return false;added.fingerprint=identity::fingerprint(mod,a);}story_enemies::Kind enemy;if(enemy_kind(a,enemy)){added.fingerprint=identity::fingerprint(mod,a);story_enemies::Spec spec{enemy,mod,a.id,a.defeated_flag,{},added.fingerprint,1};for(const auto&drop:a.drops)spec.drops.push_back({drop.item,drop.quantity});added.enemy_token=story_enemies::declare(spec,why);if(!added.enemy_token)return false;}if(story_props::is_prop(a)){added.fingerprint=identity::fingerprint(mod,a);added.prop_token=story_props::declare(mod,a,why);if(!added.prop_token)return false;}if(a.actor=="switch"){if(a.switch_flag.empty())return why="switch requires an own flag",false;added.fingerprint=identity::fingerprint(mod,a);added.switch_token=story_switches::declare_switch(mod,a.id,why);added.switch_source=added.switch_token;if(!added.switch_token)return false;}staged.push_back(std::move(added));}
     for(auto& a:staged)if(a.spec.actor=="door"){
         const Actor* source=nullptr;for(const auto& candidate:staged)if(candidate.spec.actor=="switch"&&candidate.spec.id==a.spec.switch_actor)source=&candidate;
@@ -326,7 +328,6 @@ bool load(const std::string& mod,const std::vector<ManifestActor>& actors,std::s
         if(!source||!source->switch_token)return why="door must reference a same-mod switch",false;
         a.fingerprint=identity::fingerprint(mod,a.spec);a.switch_source=source->switch_token;a.switch_token=story_switches::declare_door(mod,a.spec.id,a.switch_source,why);if(!a.switch_token)return false;
     }
-    if(!register_flags(mod,flags,why))return false;
     for(auto& a:staged)g_actors.push_back(std::move(a));rollback.committed=true;return true;
 }
 bool register_flags(const std::string& mod,const std::vector<std::string>& flags,std::string& why){
@@ -496,6 +497,45 @@ uint32_t actor_address(Cpu* c,const std::string& mod,const std::string& id) {
     for(auto& a:g_actors)if(a.mod==mod&&a.spec.id==id&&a.process!=0xFFFFFFFFu){Cpu call=*c;st32(g_scratch+0x40,0);g_call(&call,kSearch,{a.process,g_scratch+0x40});return ld32(g_scratch+0x40);}return 0;
 }
 bool position(Cpu* c,const std::string& mod,const std::string& id,story_notebook::WorldPoint& p){const uint32_t a=actor_address(c,mod,id);if(!a)return false;p={u32_as_f32(ld32(a+0x314)),u32_as_f32(ld32(a+0x318)),u32_as_f32(ld32(a+0x31C))};return true;}
+bool particle_position(Cpu* c,const std::string& mod,const std::string& id,unsigned room,story_notebook::WorldPoint& out){
+    out={};if(!c||!g_installed||!g_scratch||room>63)return false;
+    for(auto& entry:g_actors)if(entry.mod==mod&&entry.spec.id==id){
+        if(entry.process==0xFFFFFFFFu||entry.deleting||entry.restore_quarantined||entry.spec.room!=room||
+           std::strncmp(reinterpret_cast<const char*>(mem::ptr(kStage)),entry.spec.stage.c_str(),8)!=0||
+           std::memcmp(mem::ptr(g_scratch+0x300),mem::ptr(kStage),8)!=0)return false;
+        const uint32_t actor=actor_address(c,mod,id),pid=entry.process;
+        if((actor&3)||actor<mem::kMem2Start||uint64_t(actor)+0xA24>mem::kMem2End||
+           ld32(actor+4)!=pid||ld8(actor+0x326)!=room||find(actor)!=&entry)return false;
+        if(entry.spec.kind=="mod"){
+            mod_actor::Identity identity;
+            if(!entry.mod_token||!mod_actor::identify(c,actor,identity)||identity.mod!=mod||identity.id!=id||
+               identity.token!=entry.mod_token||identity.process_id!=pid)return false;
+        }else if(entry.spec.actor=="resident"){
+            if((entry.spec.resident==kYm1?ym1(actor):people(actor))!=&entry)return false;
+        }else if(!entry.prop_token&&!entry.enemy_token&&!entry.switch_token)return false;
+        if((entry.prop_token||entry.enemy_token||entry.switch_token)&&
+           !identity::matches(mem::ptr(g_scratch+kIdentityScratchOffset+uint32_t(&entry-g_actors.data())*identity::kRecordBytes),entry.fingerprint))return false;
+        const uint32_t stage=ld32(GD(0x1047E6C4)),active_room=ld32(GD(0x1047E8F0)+room*0x22C);
+        if(!stage||!active_room||ld32(g_scratch+0x318)!=stage||ld32(g_scratch+0x400+room*4)!=active_room)return false;
+        out={u32_as_f32(ld32(actor+0x314)),u32_as_f32(ld32(actor+0x318)),u32_as_f32(ld32(actor+0x31C))};
+        return std::isfinite(out.x)&&std::isfinite(out.y)&&std::isfinite(out.z);
+    }
+    return false;
+}
+bool prop_texture_identity(uint32_t actor,uint32_t pid,uint32_t& token,uint32_t& epoch,uint32_t& generation){
+    token=epoch=generation=0;
+    if(!g_installed||!g_scratch||actor<mem::kMem2Start||actor>mem::kMem2End-story_props::kClassBytes||
+       !pid||pid==0xFFFFFFFFu||ld32(actor+4)!=pid||ld16(actor+0xE)!=story_props::kProfile)return false;
+    Actor* a=find(actor);if(!a||!a->prop_token||!a->spec.texture_token||a->process!=pid)return false;
+    const size_t index=size_t(a-g_actors.data());if(ld32(g_scratch+128+uint32_t(index)*4)!=pid||
+       !identity::matches(mem::ptr(g_scratch+kIdentityScratchOffset+uint32_t(index)*identity::kRecordBytes),a->fingerprint))return false;
+    if(a->spec.room>63||ld8(actor+0x326)!=a->spec.room||
+       std::strncmp(reinterpret_cast<const char*>(mem::ptr(kStage)),a->spec.stage.c_str(),8)!=0||
+       std::memcmp(mem::ptr(g_scratch+0x300),mem::ptr(kStage),8)!=0)return false;
+    const uint32_t stage=ld32(GD(0x1047E6C4)),room=ld32(GD(0x1047E8F0)+a->spec.room*0x22C);
+    if(!stage||!room||ld32(g_scratch+0x318)!=stage||ld32(g_scratch+0x400+a->spec.room*4)!=room)return false;
+    token=a->prop_token;epoch=stage;generation=room;return true;
+}
 bool actions(const std::string& mod,const std::vector<story_notebook::StoryAction>& list) {
     using Kind=story_notebook::StoryAction::Kind;
     for(const auto& a:list){bool ok=false;switch(a.kind){
