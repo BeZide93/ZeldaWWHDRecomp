@@ -21,6 +21,7 @@ extern "C" uint64_t g_shader_state_gen;  // gx2_core.cpp: bumped by shader-relev
 #include "gx2/gx2_cmd.h"
 #include "write_watch.h"
 #include "metal.h"
+#include "cloud_proto.h"
 #include "runtime.h"
 #include "util/helpers/StringBuf.h"
 
@@ -1587,6 +1588,12 @@ void report_skips() {
     g_stat_full_checks = g_stat_uploads = g_stat_invalidates = g_stat_invalidated_surfaces = g_stat_hashed_bytes = 0;
 }
 
+
+// cloud research prototype (metal_clouds.mm)
+bool clouds_draw(id<MTLRenderCommandEncoder> enc, const MTLViewport& vp, Surface* const* colors, const uint32_t* colorSlices,
+                 Surface* depth, uint32_t depthSlice, bool (*ensure)(Surface* const*, const uint32_t*, Surface*, uint32_t));
+void clouds_mark_start(Surface* const* colors, const uint32_t* colorSlices, Surface* depth, uint32_t depthSlice,
+                       bool (*ensure)(Surface* const*, const uint32_t*, Surface*, uint32_t));
 void draw(const uint32_t* regs, uint32_t prim, uint32_t count, uint32_t indexType, uint32_t indexAddr, uint32_t baseVertex,
           uint32_t instances) {
     static bool cacheLoaded = (cache_load(), true);
@@ -1692,6 +1699,7 @@ void draw(const uint32_t* regs, uint32_t prim, uint32_t count, uint32_t indexTyp
     rprof::mark(rprof::kTextures);
     if (!ensure_pass(colors, colorSlices, depth, depthSlice)) { g_skip[SK_PASS]++; return; }
     rprof::mark(rprof::kPass);
+    if (cloud_proto::g_active_seq) clouds_mark_start(colors, colorSlices, depth, depthSlice, ensure_pass);
     TargetFormats tf;
     for (int i = 0; i < 8; i++)
         if (colors[i]) tf.color[i] = colors[i]->format;
@@ -1752,6 +1760,7 @@ void draw(const uint32_t* regs, uint32_t prim, uint32_t count, uint32_t indexTyp
         aspect::panes::clip(w, h, ax, ay, sx, sy, ex, ey);
     if (ex <= sx || ey <= sy) { g_skip[SK_SCISSOR]++; return; }
     [enc setScissorRect:MTLScissorRect{sx, sy, ex - sx, ey - sy}];
+    if (cloud_proto::g_active_seq && clouds_draw(enc, vp, colors, colorSlices, depth, depthSlice, ensure_pass)) return;
     rprof::mark(rprof::kRecord);
     rprof::UploadKind vertexUploads(rprof::kUpVertex);
 

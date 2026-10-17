@@ -25,6 +25,7 @@
 
 #include "gx2.h"
 #include "gx2_cmd.h"
+#include "../cloud_proto.h"
 #include "gx2_regs.h"
 #include "register_blocks.h"
 #include "gx2_texture_regs.h"
@@ -605,6 +606,11 @@ static void execute_op(Op op, const uint32* p, uint32 n) {
     }
     case OP_LAYOUT_CONTENT:
         aspect::set_content_clip(n && p[0]);
+        break;
+    case OP_CLOUDS_BEGIN: cloud_proto::g_active_seq = n ? p[0] : 0; cloud_proto::g_drawn = false; break;
+    case OP_CLOUDS_END:
+        if (cloud_proto::g_on_end && cloud_proto::g_active_seq) cloud_proto::g_on_end();
+        cloud_proto::g_active_seq = 0;
         break;
     case OP_LAYOUT_ROOT: {
         float kx, ky;
