@@ -2505,7 +2505,7 @@ void settings_window() {
     ImGui::SetNextWindowPos(panelPos, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
     ImGui::SetNextWindowSize(panelSize, ImGuiCond_Always);
     ImGuiWindowFlags fl = ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
-                          ImGuiWindowFlags_NoSavedSettings;
+                          ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoDocking;  // docking: the editor's panels only
     bool open = true;
     if (U.just_opened) {
         ImGui::SetNextWindowFocus();  // keyboard / controller navigation starts in the menu

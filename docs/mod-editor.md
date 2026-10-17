@@ -40,7 +40,7 @@ Settings.
 
 | | |
 | --- | --- |
-| **Toolbar** | the open mod, Undo, Redo, Check, Save…, Revert…, **Add**, Move / Turn, grid and angle snapping, **Play**, Play from Link, Restore at Stop, Test mode, and which panels show (also **Quests**, **Flags** and **Search**) |
+| **Toolbar** | the open mod, Undo, Redo, Check, Save…, Revert…, **Add**, Move / Turn, grid and angle snapping, **Play**, Play from Link, Restore at Stop, Test mode, which panels show (also **Quests**, **Flags** and **Search**), and **Reset layout** |
 | **Outliner** | the open mod's actors, models, scenes and quests, and the warp destinations |
 | **Inspector** | the selected actor: place, properties, dialogue and actions |
 | **Problems & export** | the check's problem list, and the export |
@@ -50,7 +50,12 @@ Settings.
 | **Flags** | the open mod's flags and their values in the game |
 | **Search** | everything of the open mod by name or text |
 
-The panels can be moved and resized; their places are remembered.
+The panels are docked: the toolbar along the top, the Outliner at the left, the Inspector (with Flags and
+Search as tabs) at the right, and Quests, Problems & export, Camera & test and Log as tabs along the bottom;
+the picture stays free in the middle. Drag a panel by its tab (or title) to another edge, onto another
+panel to make them tabs of one place, or into the picture to let it float on its own; drag the borders
+between panels to resize them. The layout is remembered. **Reset layout** in the toolbar puts every panel
+back in its default place.
 
 To select more than one actor, hold Ctrl (Cmd on a Mac) or Shift while clicking labels in the picture or
 names in the Outliner. Dragging the handle then moves them all (one Undo step). **Ctrl+C** copies the

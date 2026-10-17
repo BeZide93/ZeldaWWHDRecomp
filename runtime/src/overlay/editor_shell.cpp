@@ -50,6 +50,8 @@ struct ShellState {
     std::vector<std::string> types, type_labels, type_groups;
     std::vector<bool> type_model;
     bool layout_loaded = false;
+    bool reset_layout = false;  // Reset layout: the default docked layout again
+    float status_h = 52;        // the status bar's height at the last frame (the dockspace ends above it)
 } S;
 editor_escape::Gate g_escape;  // Esc: the placing, the handle drag or the quest connection first
 const float kGrid[] = {0, 10, 50, 100};
@@ -188,6 +190,61 @@ std::string current_stage(const Value& state) {
     return state.get("link").get("stage").string();
 }
 
+// ---------------------------------------------------------------- docking (the launch mode only)
+// The editor's panels dock to the screen's edges and into each other as tabs (Dear ImGui's docking
+// branch, turned on in the launch mode only: Settings and every other overlay never dock). The middle
+// of the dockspace stays open: the picture, its labels and handles take the clicks there.
+const ImGuiWindowClass& panel_class() {
+    static const ImGuiWindowClass c = [] {
+        ImGuiWindowClass k;
+        k.ClassId = ImHashStr("wwhd-editor-panel");
+        k.DockingAllowUnclassed = false;  // only the editor's panels dock here
+        return k;
+    }();
+    return c;
+}
+// Before each panel's Begin: it may dock with the other panels
+void panel() { ImGui::SetNextWindowClass(&panel_class()); }
+// The default layout: the toolbar along the top, the Outliner at the left, the Inspector (with Flags and
+// Search as tabs) at the right, Quests, Problems & export, Camera & test and Log as tabs along the bottom.
+void default_layout(ImGuiID id, ImVec2 size) {
+    ImGui::DockBuilderRemoveNode(id);
+    ImGui::DockBuilderAddNode(id, ImGuiDockNodeFlags_DockSpace);
+    ImGui::DockBuilderSetNodeSize(id, size);
+    ImGuiID rest = id;
+    const float bar = ImGui::GetFrameHeightWithSpacing() * 2 + ImGui::GetStyle().WindowPadding.y * 2 + 4;
+    const ImGuiID top = ImGui::DockBuilderSplitNode(rest, ImGuiDir_Up, std::clamp(bar / std::max(1.0f, size.y), 0.05f, 0.4f), nullptr, &rest);
+    const ImGuiID left = ImGui::DockBuilderSplitNode(rest, ImGuiDir_Left, 0.22f, nullptr, &rest);
+    const ImGuiID right = ImGui::DockBuilderSplitNode(rest, ImGuiDir_Right, 0.3f, nullptr, &rest);
+    const ImGuiID bottom = ImGui::DockBuilderSplitNode(rest, ImGuiDir_Down, 0.4f, nullptr, &rest);
+    if (ImGuiDockNode* n = ImGui::DockBuilderGetNode(top)) n->LocalFlags |= ImGuiDockNodeFlags_AutoHideTabBar;
+    ImGui::DockBuilderDockWindow("Editor", top);
+    ImGui::DockBuilderDockWindow("Outliner", left);
+    for (const char* name : {"Inspector", "Flags", "Search"}) ImGui::DockBuilderDockWindow(name, right);
+    for (const char* name : {"Quests", "Problems & export", "Camera & test", "Log"}) ImGui::DockBuilderDockWindow(name, bottom);
+    ImGui::DockBuilderFinish(id);
+}
+// The dockspace over the picture (above the status bar), before the panels each frame
+void dockspace(float w, float h) {
+    const ImVec2 size(w, std::max(100.0f, h - S.status_h));
+    ImGui::SetNextWindowPos(ImVec2(0, 0));
+    ImGui::SetNextWindowSize(size);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+    ImGui::Begin("##editor_dock", nullptr,
+                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoDocking |
+                     ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus | ImGuiWindowFlags_NoMove);
+    ImGui::PopStyleVar(3);
+    const ImGuiID id = ImGui::GetID("editor_dockspace");
+    if (S.reset_layout || !ImGui::DockBuilderGetNode(id)) {  // first start, an old layout without docking, or Reset layout
+        S.reset_layout = false;
+        default_layout(id, size);
+    }
+    ImGui::DockSpace(id, ImVec2(0, 0), ImGuiDockNodeFlags_PassthruCentralNode, &panel_class());
+    ImGui::End();
+}
+
 // ---------------------------------------------------------------- the handle drag, live in the game
 double rounded(double v) { return std::round(v * 10) / 10; }
 Value point_of(double x, double y, double z) {
@@ -283,7 +340,7 @@ void world(float w, float h) {
     ImGui::SetNextWindowSize(ImVec2(w, h));
     ImGui::Begin("##editor_world", nullptr,
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoSavedSettings |
-                     ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoScrollWithMouse);
+                     ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoDocking);
     ImDrawList* dl = ImGui::GetWindowDrawList();
     ImGuiIO& io = ImGui::GetIO();
     const bool hovered = ImGui::IsWindowHovered();
@@ -508,6 +565,7 @@ void toolbar(float w) {
     ImGui::SetNextWindowPos(ImVec2(8, 8), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize(ImVec2(std::min(w - 16, 1260.0f), 0), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowBgAlpha(0.88f);
+    panel();
     ImGui::Begin("Editor", nullptr, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoScrollbar);
     editor_ui::mod_bar();
     ImGui::SameLine();
@@ -576,6 +634,9 @@ void toolbar(float w) {
     ImGui::SameLine();
     ImGui::Checkbox("Search", &S.search);
     ImGui::SameLine();
+    if (ImGui::SmallButton("Reset layout")) S.reset_layout = true;
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("The panels back to their default places (docked at the edges)");
+    ImGui::SameLine();
     ImGui::TextDisabled("  Esc: cancel placing, else Settings");
     ImGui::End();
 }
@@ -587,7 +648,8 @@ void status_bar(float w, float h) {
     ImGui::SetNextWindowBgAlpha(0.8f);
     ImGui::Begin("##editor_status", nullptr,
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav |
-                     ImGuiWindowFlags_NoBringToFrontOnFocus);
+                     ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoDocking);
+    S.status_h = ImGui::GetWindowHeight();
     const Value& fly = snap.state.get("fly");
     const Value& link = snap.state.get("link");
     ImGui::Text("%s room %d   camera %.0f %.0f %.0f   speed %.0f   Link %.0f %.0f %.0f", fly.get("stage").string(link.get("stage").string()).c_str(),
@@ -633,6 +695,7 @@ void panels(float w, float h) {
         ImGui::SetNextWindowPos(ImVec2(8, 110), ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowSize(ImVec2(300, h * 0.62f), ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowBgAlpha(0.9f);
+        panel();
         if (ImGui::Begin("Outliner", &S.outliner)) {
             if (ImGui::BeginTabBar("outliner_tabs")) {
                 if (ImGui::BeginTabItem("Actors")) {
@@ -665,6 +728,7 @@ void panels(float w, float h) {
         ImGui::SetNextWindowSize(ImVec2(380, h * 0.7f), ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowBgAlpha(0.9f);
         if (S.focus_inspector) ImGui::SetNextWindowFocus(), S.focus_inspector = false;
+        panel();
         if (ImGui::Begin("Inspector", &S.inspector)) editor_ui::actor_inspector(snap.manifest);
         ImGui::End();
     }
@@ -673,6 +737,7 @@ void panels(float w, float h) {
         ImGui::SetNextWindowSize(ImVec2(520, 260), ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowBgAlpha(0.92f);
         if (S.focus_problems) ImGui::SetNextWindowFocus(), S.focus_problems = false;
+        panel();
         if (ImGui::Begin("Problems & export", &S.problems)) {
             editor_ui::problems_area();
             ImGui::Separator();
@@ -683,12 +748,14 @@ void panels(float w, float h) {
     if (S.test) {
         ImGui::SetNextWindowPos(ImVec2(320, 140), ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowSize(ImVec2(420, 360), ImGuiCond_FirstUseEver);
+        panel();
         if (ImGui::Begin("Camera & test", &S.test)) editor_ui::camera_test_area();
         ImGui::End();
     }
     if (S.log) {
         ImGui::SetNextWindowPos(ImVec2(320, 140), ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowSize(ImVec2(520, 300), ImGuiCond_FirstUseEver);
+        panel();
         if (ImGui::Begin("Log", &S.log)) editor_ui::log_area();
         ImGui::End();
     }
@@ -698,6 +765,7 @@ void panels(float w, float h) {
         ImGui::SetNextWindowSize(ImVec2(std::min(w - 330, 1100.0f), std::min(h * 0.56f, 600.0f)), ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowBgAlpha(0.95f);
         if (S.focus_quests) ImGui::SetNextWindowFocus(), S.focus_quests = false;
+        panel();
         if (ImGui::Begin("Quests", &S.quests)) editor_ui::quest_editor(snap.manifest);
         S.quests_focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
         ImGui::End();
@@ -708,12 +776,14 @@ void panels(float w, float h) {
         ImGui::SetNextWindowPos(ImVec2(w - 456, top), ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowSize(ImVec2(440, std::max(140.0f, h - top - 70)), ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowBgAlpha(0.92f);
+        panel();
         if (ImGui::Begin("Flags", &S.flags)) editor_ui::flags_area();
         ImGui::End();
     }
     if (S.search) {
         ImGui::SetNextWindowPos(ImVec2(320, 110), ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowSize(ImVec2(420, 300), ImGuiCond_FirstUseEver);
+        panel();
         if (ImGui::Begin("Search", &S.search)) editor_ui::search_area();
         ImGui::End();
     }
@@ -750,7 +820,8 @@ void layout(ImGuiIO& io) {
                 flush();
                 keep = line == "[Window][Editor]" || line == "[Window][Outliner]" || line == "[Window][Inspector]" ||
                        line == "[Window][Problems & export]" || line == "[Window][Camera & test]" || line == "[Window][Log]" ||
-                       line == "[Window][Quests]" || line == "[Window][Flags]" || line == "[Window][Search]" || line == "[Window][Quest (playing)]";
+                       line == "[Window][Quests]" || line == "[Window][Flags]" || line == "[Window][Search]" || line == "[Window][Quest (playing)]" ||
+                       line == "[Docking][Data]";  // where the panels are docked
             }
             block += line + "|";
             at = end + 1;
@@ -802,14 +873,16 @@ bool draw(float w, float h) {
             ImGui::SetNextWindowPos(ImVec2(w - 620, 70), ImGuiCond_FirstUseEver);
             ImGui::SetNextWindowSize(ImVec2(600, 300), ImGuiCond_FirstUseEver);
             ImGui::SetNextWindowBgAlpha(0.85f);
-            if (ImGui::Begin("Quest (playing)", nullptr, ImGuiWindowFlags_NoFocusOnAppearing)) editor_ui::quest_live(editor_ui::snapshot().manifest);
+            if (ImGui::Begin("Quest (playing)", nullptr, ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoDocking)) editor_ui::quest_live(editor_ui::snapshot().manifest);
             ImGui::End();
         }
         return false;
     }
+    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;  // the launch mode only (this layer exists only there)
     layout(io);
     ImGuizmo::BeginFrame();
     world(w, h);
+    dockspace(w, h);
     toolbar(w);
     panels(w, h);
     status_bar(w, h);
@@ -895,7 +968,7 @@ void register_layers() {
     layer.cancel = [] { return g_escape.take(); };
     overlay::ext::set_input_layer(std::move(layer));
     overlay::ext::add_shortcut(view_button);
-    // test aid: WWHD_TEST_EDITOR_WINDOWS=problems,test,log opens more windows (screenshots)
+    // test aid: WWHD_TEST_EDITOR_WINDOWS=problems,test,log opens more windows (screenshots; resetlayout: Reset layout)
     if (const char* e = std::getenv("WWHD_TEST_EDITOR_WINDOWS")) {
         const std::string w = e;
         S.problems = w.find("problems") != std::string::npos;
@@ -904,6 +977,7 @@ void register_layers() {
         S.quests = w.find("quests") != std::string::npos;
         S.flags = w.find("flags") != std::string::npos;
         S.search = w.find("search") != std::string::npos;
+        S.reset_layout = w.find("resetlayout") != std::string::npos;  // as Reset layout at the first frame
         if (w.find("nooutliner") != std::string::npos) S.outliner = false;
         if (w.find("noinspector") != std::string::npos) S.inspector = false;
     }
