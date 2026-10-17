@@ -45,6 +45,11 @@ uint32_t link_generation();
 void retire_link(uint32_t actor,uint32_t pid);
 using ProjectileVerifier=std::function<bool(uint32_t attack_object)>;
 void set_projectile_verifier(ProjectileVerifier,bool enabled=false);
+// Pure generic-actor classifier, composed with the same early native pair hook.
+// Invalid includes recognizable private colliders with stale or damaged identity.
+enum class ModCollider { Foreign,Body,Attack,Invalid };
+using ModColliderVerifier=std::function<ModCollider(uint32_t object)>;
+void set_mod_collider_verifier(ModColliderVerifier);
 enum class PairPolicy { Delegate,Reject };
 PairPolicy pair_policy(uint32_t attack,uint32_t target);
 bool install(const std::function<std::string(uint32_t)>& owner,const std::function<void(uint32_t,void(*)(Cpu*))>& replace);

@@ -14,7 +14,7 @@ constexpr Collider mo[]={{0x2494,0x1014,0},{0x25C4,0x1014,0},{0x26F4,0x1014,0},{
 constexpr Collider ki[]={{0x734,0x6F8,0},{0x860,0x6F8,0},{0x98C,0x6F8,0},{0xB44,0xB08,0xAD8},{0xF6C,0xF30,0xE90}};
 constexpr Descriptor descriptors[]={{0x7FFA,0xCE,0xF10,cc,3},{0x7FF9,0xBD,0x19A4,bk,7},{0x7FF8,0xBC,0x343C,mo,8},{0x7FF7,0xD7,0x10BC,ki,5}};
 struct Entry {Kind kind;uint32_t params,epoch;Fingerprint fingerprint;Token token;uint32_t pid=0,address=0;bool active=false,quarantined=false;};
-std::vector<Entry> entries;Token next_token=1;uint32_t arena=0,link=0,link_pid=0;void(*original)(Cpu*,uint32_t)=nullptr;bool installed=false;VerifyActor verify_actor;ProjectileVerifier projectile_verifier;bool projectile_enabled=false;
+std::vector<Entry> entries;Token next_token=1;uint32_t arena=0,link=0,link_pid=0;void(*original)(Cpu*,uint32_t)=nullptr;bool installed=false;VerifyActor verify_actor;ProjectileVerifier projectile_verifier;bool projectile_enabled=false;ModColliderVerifier mod_collider_verifier;
 constexpr uint32_t Magic=0x454F5731,RetiredMagic=0x454F5752,PendingMagic=0x454F5750,Version=2,ActorOffset=256,LineageOffset=ActorOffset+128*128;
 const uint32_t NoAtTg=GC(0x0200CE78);
 bool memory(uint32_t a,uint32_t n){return !(a&3)&&n&&a>=0x10000000u&&a<=0x50000000u-n;}
@@ -82,7 +82,21 @@ bool set_link(uint32_t a,uint32_t pid){if(!memory(a,0x8260)||!pid||pid==0xFFFFFF
 uint32_t link_generation(){return arena&&link&&ld32(arena+8)==link&&ld32(arena+12)==link_pid?ld32(arena+16):0;}
 void retire_link(uint32_t a,uint32_t pid){if(link==a&&link_pid==pid){link=link_pid=0;if(arena){st32(arena+8,0);st32(arena+12,0);}}}
 void set_projectile_verifier(ProjectileVerifier verifier,bool enabled){projectile_verifier=std::move(verifier);projectile_enabled=enabled;}
-PairPolicy pair_policy(uint32_t at,uint32_t tg){const bool child_at=owned_child_object(at),child_tg=owned_child_object(tg);if(child_at||child_tg){if(child_at&&child_tg)return PairPolicy::Reject;int16_t timer=0;if(child_tg&&fire_child(tg,timer)&&timer==0&&ignition_source(at)&&(ld32(at+0x10)&0x20200u))return PairPolicy::Delegate;if(child_at&&fire_child(at,timer)&&timer>0&&(ld32(at)&1u)&&link_object(tg))return PairPolicy::Delegate;return PairPolicy::Reject;}Token a=lookup_collider(at),t=lookup_collider(tg);bool ao=a||suspected_owned(at),to=t||suspected_owned(tg);if(!ao&&!to)return PairPolicy::Delegate;if(ao&&to)return PairPolicy::Reject;if(a&&link_object(tg))return PairPolicy::Delegate;if(t&&link_object(at))return PairPolicy::Delegate;if(t&&projectile_enabled&&projectile_verifier){try{if(projectile_verifier(at))return PairPolicy::Delegate;}catch(...){}}return PairPolicy::Reject;}
+void set_mod_collider_verifier(ModColliderVerifier verifier){mod_collider_verifier=std::move(verifier);}
+PairPolicy pair_policy(uint32_t at,uint32_t tg){
+ if(mod_collider_verifier){
+  ModCollider a=ModCollider::Invalid,t=ModCollider::Invalid;
+  try{a=mod_collider_verifier(at);t=mod_collider_verifier(tg);}catch(...){return PairPolicy::Reject;}
+  if(a!=ModCollider::Foreign||t!=ModCollider::Foreign){
+   if(a==ModCollider::Attack&&t==ModCollider::Foreign&&link_object(tg))return PairPolicy::Delegate;
+   if(t==ModCollider::Body&&a==ModCollider::Foreign){
+    if(link_object(at))return PairPolicy::Delegate;
+    if(projectile_enabled&&projectile_verifier)try{if(projectile_verifier(at))return PairPolicy::Delegate;}catch(...){}
+   }
+   return PairPolicy::Reject;
+  }
+ }
+const bool child_at=owned_child_object(at),child_tg=owned_child_object(tg);if(child_at||child_tg){if(child_at&&child_tg)return PairPolicy::Reject;int16_t timer=0;if(child_tg&&fire_child(tg,timer)&&timer==0&&ignition_source(at)&&(ld32(at+0x10)&0x20200u))return PairPolicy::Delegate;if(child_at&&fire_child(at,timer)&&timer>0&&(ld32(at)&1u)&&link_object(tg))return PairPolicy::Delegate;return PairPolicy::Reject;}Token a=lookup_collider(at),t=lookup_collider(tg);bool ao=a||suspected_owned(at),to=t||suspected_owned(tg);if(!ao&&!to)return PairPolicy::Delegate;if(ao&&to)return PairPolicy::Reject;if(a&&link_object(tg))return PairPolicy::Delegate;if(t&&link_object(at))return PairPolicy::Delegate;if(t&&projectile_enabled&&projectile_verifier){try{if(projectile_verifier(at))return PairPolicy::Delegate;}catch(...){}}return PairPolicy::Reject;}
 bool install(const std::function<std::string(uint32_t)>& owner,const std::function<void(uint32_t,void(*)(Cpu*))>& replace){if(installed)return true;if(!arena||!original||!owner(NoAtTg).empty())return false;replace(NoAtTg,hook);installed=true;return true;}
 bool queue_impl(bool pending,Lineage role,Token source,uint32_t a,uint32_t pid,uint32_t queued,uint16_t profile,uint32_t params,uint32_t epoch){if(!arena||(!queued&&!pending)||queued==0xFFFFFFFFu||!epoch||!profile)return false;bool child=role==Lineage::EnemyChild;if(child){auto*e=get(source);if(!e||e->quarantined||e->pid!=pid||e->epoch!=epoch||!identity(*e,a)||(e->address&&e->address!=a)||(!pending&&!valid(*e)))return false;if(!definition_matches(*e,true)){uint32_t saved=e->address;e->address=a;write_record(*e);e->address=saved;uint32_t r=record(*e);st32(r,PendingMagic);st32(r+124,checksum(r,124));}}else if(role!=Lineage::LinkProjectile||a!=link||pid!=link_pid||!set_link(a,pid))return false;size_t begin=child?0:kChildCapacity,end=child?kChildCapacity:kChildCapacity+kProjectileCapacity;uint32_t free=0;for(size_t i=0;i<kChildCapacity+kProjectileCapacity;++i){uint32_t r=arena+LineageOffset+uint32_t(i)*64;if(queued&&ld32(r)==Magic&&ld32(r+20)==queued)return false;if(i>=begin&&i<end&&!free&&ld32(r)!=Magic)free=r;}if(!free)return false;for(unsigned i=0;i<64;++i)st8(free+i,0);st32(free,Magic);st32(free+4,Version);st32(free+8,unsigned(role));st32(free+12,source);st32(free+16,pid);st32(free+20,queued);st32(free+24,a);st32(free+28,profile);st32(free+32,params);st32(free+36,epoch);uint32_t generation=ld32(arena+24)+1;if(!generation){st32(free,0);return false;}st32(arena+24,generation);st32(free+44,generation);st32(free+52,child?0:link_generation());st32(free+56,1);st32(free+60,checksum(free,60));return true;}
 uint32_t source_epoch(Token token){auto*e=get(token);return e?e->epoch:0;}

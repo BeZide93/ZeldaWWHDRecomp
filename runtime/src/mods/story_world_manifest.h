@@ -10,6 +10,7 @@
 #include "mod_json.h"
 #include "story_mail_book.h"
 #include "story_scenes_core.h"
+#include "story_mod_combat_manifest.h"
 namespace story_notebook {
 struct WorldPoint { float x=0,y=0,z=0; };
 struct StoryAction {
@@ -27,6 +28,7 @@ struct ManifestActor {
     std::string id,actor,stage,kind,model,animation,prompt="check"; unsigned room=0;
     float collision_radius=30,collision_height=100; bool pushable=false;
     ManifestLookAt look_at;ManifestPath path;
+    bool combat_enabled=false,native_heart_drop=false;story_mod_combat::Config combat;
     WorldPoint position,rotation,scale{1,1,1}; uint32_t params=0; unsigned resident=9; // 19 is the seated Ym1 adapter, not a People subtype.
     uint8_t item_game=6;
     std::string broken_flag,switch_flag,switch_actor,defeated_flag;std::vector<ManifestPropDrop> drops;
@@ -170,7 +172,7 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
     if(list.type==Value::Null)return true;
     if(list.type!=Value::Array||list.array.size()>kMaxActorsPerMod)return why="actors must be a list of up to 64",false;
     for(const auto& v:list.array){ManifestActor a;
-        if(!keys(v,{"id","actor","kind","model","animation","look_at","path","collision","attention","stage","room","position","rotation","scale","params","parameters","flag","broken_flag","defeated_flag","drops","switch_flag","switch","when","lines","then"}))return why="unknown actor field",false;
+        if(!keys(v,{"id","actor","kind","model","animation","look_at","path","collision","attention","stage","room","position","rotation","scale","params","parameters","flag","broken_flag","defeated_flag","drops","combat","native_drops","switch_flag","switch","when","lines","then"}))return why="unknown actor field",false;
         if(!id(v.get("id")))return why="invalid actor id",false;a.id=v.get("id").text;a.actor=v.get("actor").string();
         if(v.object.contains("kind")) {
             if(v.get("kind").string()!="mod"||v.object.contains("actor"))return why="mod actor kind cannot name a native actor",false;
@@ -205,7 +207,23 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
             a.collision_radius=float(radius.number);a.collision_height=float(height.number);if(a.collision_radius<=0||a.collision_height<=0)return why="collision dimensions are too small",false;a.pushable=mode=="pushable";
             const auto& attention=v.get("attention");if(attention.type!=Value::Null){if(!keys(attention,{"prompt"}))return why="invalid mod actor attention",false;a.prompt=attention.get("prompt").string();if(a.prompt!="talk"&&a.prompt!="check")return why="attention prompt must be talk or check",false;}
             if(v.object.contains("flag")){if(!flag_id(v.get("flag")))return why="mod actor flag must be a mod-owned id",false;a.flag=v.get("flag").text;}
+            if(v.object.contains("combat")){
+                if(!skinned_model||!story_mod_combat::parse(v.get("combat"),a.combat,why))return why=why.empty()?"combat requires a skinned model":why,false;
+                if(a.combat.stun.clip.empty()||a.combat.death.clip.empty())return why="combat requires named stun and death animation clips",false;
+                for(const char* forbidden:{"flag","lines","then","attention"})if(v.object.contains(forbidden))return why="combat actors cannot declare dialogue, prompts or generic flags",false;
+                if(!flag_id(v.get("defeated_flag")))return why="combat requires a mod-owned defeated_flag",false;
+                if(a.pushable||a.collision_radius>200||a.collision_height>400)return why="combat requires solid collision with radius up to 200 and height up to 400",false;
+                a.combat_enabled=true;a.defeated_flag=v.get("defeated_flag").text;
+                const auto& drops=v.get("drops");if(drops.type!=Value::Array||drops.array.size()>8)return why="combat requires up to eight mod-item drops",false;
+                for(const auto& drop:drops.array){
+                    if(!keys(drop,{"item","quantity"})||drop.get("item").type!=Value::String||drop.get("item").text.rfind("item:",0)!=0||!declared(m,"items",drop.get("item").text.substr(5))||!integer(drop.get("quantity"),1,254))return why="invalid same-mod combat drop",false;
+                    const auto item=drop.get("item").text.substr(5);for(const auto& old:a.drops)if(old.item==item)return why="duplicate combat drop item",false;
+                    a.drops.push_back({item,unsigned(drop.get("quantity").number)});
+                }
+                if(v.object.contains("native_drops")&&!story_mod_combat::parse_native_drops(v.get("native_drops"),a.native_heart_drop,why))return false;
+            }
         }else if(v.object.contains("model")||v.object.contains("animation")||v.object.contains("look_at")||v.object.contains("path")||v.object.contains("collision")||v.object.contains("attention"))return why="model, animation, look_at, path, collision and attention require kind mod",false;
+        if((v.object.contains("combat")||v.object.contains("native_drops"))&&!a.combat_enabled)return why="combat and native_drops require a combat mod actor",false;
         if(a.actor=="kanban"||a.actor=="PROC_KANBAN")a.actor="sign";
         if(a.actor=="Tbox"||a.actor=="takara"||a.actor=="PROC_TBOX")a.actor="chest";
         if(a.actor=="NpcPeople"||a.actor=="PROC_NPC_PEOPLE")a.actor="resident";
@@ -219,7 +237,10 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
         if(enemy){
             if(!native_enemy_fields(m,v,a,why))return false;
             for(const auto& old:out)if(old.defeated_flag==a.defeated_flag)return why="enemies require distinct defeated_flag IDs",false;
-        }else if(v.object.contains("defeated_flag"))return why="defeated_flag requires a native enemy",false;
+        }else if(a.combat_enabled){
+            if(a.rotation.x!=0||a.rotation.z!=0||a.scale.x!=1||a.scale.y!=1||a.scale.z!=1)return why="combat actors require yaw-only rotation and scale 1",false;
+            for(const auto& old:out)if(old.defeated_flag==a.defeated_flag)return why="combat actors require distinct defeated_flag IDs",false;
+        }else if(v.object.contains("defeated_flag"))return why="defeated_flag requires an enemy",false;
         if(switch_actor||door){
             if(v.object.contains("params")||v.object.contains("parameters")||v.object.contains("flag")||v.object.contains("lines")||v.object.contains("then")||v.object.contains("broken_flag")||v.object.contains("drops"))return why="switches and doors cannot use native parameters, dialogue, drops or generic flags",false;
             if(a.rotation.x!=0||a.rotation.z!=0||a.scale.x!=1||a.scale.y!=1||a.scale.z!=1)return why="switches and doors require yaw-only rotation and scale 1",false;
@@ -244,7 +265,7 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
                 const std::string item=drop.get("item").text.substr(5);for(const auto& old:a.drops)if(old.item==item)return why="duplicate prop drop item",false;
                 a.drops.push_back({item,unsigned(drop.get("quantity").number)});
             }
-        }else if(v.object.contains("broken_flag")||(!enemy&&v.object.contains("drops")))return why="broken_flag and drops require a prop or enemy actor",false;
+        }else if(v.object.contains("broken_flag")||(!enemy&&!a.combat_enabled&&v.object.contains("drops")))return why="broken_flag and drops require a prop or enemy actor",false;
         if(v.get("params").type!=Value::Null) {if(a.actor!="chest"||!integer(v.get("params"),0,0))return why="unsupported actor params: only ordinary chest params 0 are safe",false;}
         const auto& named=v.get("parameters");
         if(named.type!=Value::Null&&named.type!=Value::Object)return why="actor parameters must be an object",false;

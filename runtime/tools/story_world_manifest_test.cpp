@@ -222,5 +222,24 @@ int main() {
     v=moving;v["scenes"]=mods::json::parse(R"([{"id":"branch-duration","steps":[{"id":"choose","type":"choice","text":"Choose","frames":1,"options":[{"text":"A","next":"a"},{"text":"B","next":"b"}]},{"id":"a","type":"wait","frames":10000,"next":"a-end"},{"id":"a-end","type":"end"},{"id":"b","type":"wait","frames":10000,"next":"b-end"},{"id":"b-end","type":"end"}]}])");assert(parse_scenes(v,scenes,why));v["scenes"].array[0]["steps"].array[1]["frames"]=18000;bad_scene(v);
     v=extended;v["scenes"].array[0]["steps"].array[1]["actor"]="link";assert(parse_scenes(v,scenes,why));
     v=moving;v["scenes"]=mods::json::parse(R"([{"id":"mod-move","steps":[{"type":"move","actor":"post","position":{"x":100,"y":0,"z":0},"frames":60},{"type":"face","actor":"post","target_actor":"link"},{"type":"end"}]}])");assert(parse_scenes(v,scenes,why));
+    { // Generic combat is additive to kind:mod and cannot select native enemy variants.
+        const auto combat_fixture=[](){return mods::json::parse(R"({"items":[{"id":"token"}],"models":[{"id":"creature","source":"assets/creature.glb","kind":"skinned"}],"actors":[{"id":"enemy","kind":"mod","model":"creature","stage":"sea","room":11,"position":{"x":100,"y":1040,"z":-201500},"collision":{"radius":30,"height":100,"mode":"solid"},"combat":{"health":10,"invulnerability_frames":15,"flinch":{"clip":"flinch","frames":8,"knockback_speed":300,"knockback_frames":6},"stun":{"clip":"stun","frames":30},"death":{"clip":"death","frames":30},"attack":{"damage":1,"radius":40,"height":100,"forward_offset":30,"y_offset":0,"active_frames":6,"cooldown_frames":30}},"defeated_flag":"enemy.defeated","drops":[{"item":"item:token","quantity":1}],"native_drops":[{"item":"heart","quantity":1}]}]})");};
+        const auto rejects=[&](const Value& data){std::vector<ManifestActor> rejected;assert(!parse_actors(data,rejected,why));};
+        auto data=combat_fixture();assert(parse_actors(data,actors,why)&&actors.size()==1&&actors[0].kind=="mod");
+        for(const char* field:{"defeated_flag","drops"}){auto bad=data;bad["actors"].array[0].object.erase(field);rejects(bad);}
+        for(const char* field:{"flag","lines","then","attention","params","parameters"}){auto bad=data;bad["actors"].array[0][field]=Value{};rejects(bad);}
+        for(const char* kind:{"chuchu","bokoblin","resident","pot","switch","door"}){auto bad=data;auto& a=bad["actors"].array[0];a.object.erase("kind");a.object.erase("model");a["actor"]=kind;rejects(bad);}
+        {auto bad=data;bad["models"].array[0]["kind"]="static";rejects(bad);}
+        for(const char* reaction:{"stun","death"}){auto bad=data;bad["actors"].array[0]["combat"][reaction].object.erase("clip");rejects(bad);bad=data;bad["actors"].array[0]["combat"][reaction]["clip"]="";rejects(bad);}
+        for(const char* field:{"rotation","scale"}){auto bad=data;bad["actors"].array[0][field]=mods::json::parse(field==std::string("rotation")?R"({"x":1,"y":0,"z":0})":R"({"x":1,"y":2,"z":1})");rejects(bad);}
+        for(const char* item:{"rupee","game:heart","item:token"}){auto bad=data;bad["actors"].array[0]["native_drops"].array[0]["item"]=item;rejects(bad);}
+        for(int quantity:{0,2}){auto bad=data;bad["actors"].array[0]["native_drops"].array[0]["quantity"]=quantity;rejects(bad);}
+        {auto bad=data;auto& a=bad["actors"].array[0];a.object.erase("combat");rejects(bad);}
+        {auto valid=data;valid["actors"].array[0]["drops"].array.clear();valid["actors"].array[0]["native_drops"].array.clear();assert(parse_actors(valid,actors,why));}
+        {auto bad=data;auto duplicate=bad["actors"].array[0];duplicate["id"]="second";bad["actors"].array.push_back(duplicate);rejects(bad);}
+        {auto bad=data;bad["actors"].array.push_back(mods::json::parse(R"({"id":"native","actor":"chuchu","stage":"sea","room":11,"position":{"x":0,"y":0,"z":0},"defeated_flag":"enemy.defeated","drops":[]})"));rejects(bad);}
+        {auto bad=data;bad["actors"].array[0]["drops"].array[0]["item"]="item:foreign";rejects(bad);}
+        {auto bad=data;bad["actors"].array[0]["combat"]["native_type"]=2048;rejects(bad);}
+    }
     std::cout<<"story world manifest tests passed\n";
 }

@@ -200,6 +200,105 @@ replacements for these declarations. Retail originals retain their own behavior
 and progress. The fixed variants are the entire preview allowlist; elemental,
 quest and alternate weapon variants are unsupported.
 
+## Original mod enemies (combat preview)
+
+An original skinned mod actor can opt into `combat`. The original patrol example is in
+[`examples/guest-mods/sdk-v3-enemy`](../examples/guest-mods/sdk-v3-enemy/).
+Its guest behavior requests attacks; the runtime owns health and reactions.
+The example was exercised at 30 fps against native Link combat, including
+guarded and unguarded attacks, Link's damage invulnerability, sword flinch and
+defeat, boomerang stun, lock-on priority, and native heart pickup.
+
+Add these fields to a placed `kind: "mod"` actor using a declared skinned model:
+
+```json
+{
+  "collision": {"radius": 35, "height": 140, "mode": "solid"},
+  "combat": {
+    "health": 6,
+    "invulnerability_frames": 15,
+    "flinch": {"clip": "flinch", "frames": 12,
+               "knockback_speed": 180, "knockback_frames": 6},
+    "stun": {"clip": "stun", "frames": 30},
+    "death": {"clip": "death", "frames": 30},
+    "attack": {"damage": 1, "radius": 55, "height": 100,
+               "forward_offset": 55, "y_offset": 0,
+               "active_frames": 8, "cooldown_frames": 45},
+    "target_priority": "normal"
+  },
+  "defeated_flag": "patrol-enemy.defeated",
+  "drops": [],
+  "native_drops": [{"item": "heart", "quantity": 1}]
+}
+```
+
+The model must contain `idle` plus the named stun and death clips; any named
+flinch clip must also exist. Combat requires yaw-only rotation, scale one and
+solid body collision with radius at most 200 and height at most 400. Dialogue,
+prompts, `then` and generic actor flags cannot be combined with combat.
+`when` conditions still control eligibility. Configuration is immutable after
+registration; attack requests cannot supply new damage or collision types.
+
+| Field | Accepted values |
+| --- | --- |
+| `health` | Required integer 1–255 |
+| `invulnerability_frames` | 0–900; default 15 |
+| Reaction `frames` | 0–900; a named clip requires a positive value |
+| Flinch `knockback_speed`, `knockback_frames` | Speed 0–1500; frames 0–30; both positive or both zero |
+| Attack `damage` | Required integer 1–4 native quarter-heart units; native Hero Mode rules still apply |
+| Attack `radius`, `height` | Required 1–200 and 1–400 |
+| Attack `forward_offset`, `y_offset` | Optional 0–300 and −200–300 |
+| Attack `active_frames` | Required integer 1–150 |
+| Attack `cooldown_frames` | Required integer from `active_frames` through 900 |
+| `target_priority` | `low`, `normal` or `high`; default `normal` |
+
+All frame durations use 30 Hz game logic, never display frames. Priority changes
+only the owned actor's native attention weight; it does not rewrite retail actors
+or guarantee selection over every competing target. Knockback uses native
+background wall/ground correction and can be refused at a boundary.
+
+Incoming combat accepts exact Link attacks or explicitly verified Link projectile
+lineage. Zero-power ordinary hits do not remove health. Verified boomerang and
+hookshot hits apply damage-free stun; Link hammer hits can damage and stun.
+Native outgoing collision supplies Link's ordinary shield and invulnerability
+path. The 30 fps game runs confirmed that guarding prevents damage during active
+attack windows and that an unguarded hit follows the native damage-wait timer.
+Sword and boomerang reactions were also checked in game; hookshot and hammer
+lineage are bounded by the same source contract but were not separately exercised
+in those runs.
+The runtime protects reaction/death animations and disables attacks while the
+actor is reacting, dying, scene-owned or quarantined.
+
+`defeated_flag` and a `drops` array are required; `drops: []` is valid. Nonempty
+mod drops follow the same atomic marker/count and Bag placement rules as native
+enemy rewards above. Each copy needs a distinct defeat flag. Optional
+`native_drops` is empty or contains exactly one `heart` with quantity 1. After a
+newly committed mod reward, the runtime requests that native heart once. The
+native queue is separate from the atomic mod-record transaction: allocation or
+asynchronous creation can fail without undoing the committed reward, and there
+is no automatic retry. Native Hero Mode may suppress the heart. Queue status
+never means the heart was created or picked up; successful native pickup is what
+changes Link's life. Packages do not ship the game's heart resources.
+
+The additive C API preserves the existing v1 behavior, actor-state and hit packet
+layouts. Initialize `wwhd_actor_combat_state_v1` with `size = 64` and
+`version = 1`, then call `wwhd_actor_combat_get(handle, &state)`. It reports health,
+phase, flags, last damage sequence, reward/drop status and remaining timers.
+The output must be owned package memory or live actor userdata; a failed query
+leaves it unchanged. Queries are allowed during draw. `wwhd_actor_attack_begin`
+requests the immutable declared attack and fails while unavailable, scene-owned
+or cooling down. `wwhd_actor_attack_cancel` disables it without refunding cooldown.
+Both mutations are denied during draw. `on_hit` remains informational: runtime
+health has already been handled, so the callback must not deduct damage again.
+
+Invalid ownership, callback faults or mismatched captured configuration fail
+closed through quarantine. Full states rewind native combat objects, health,
+timers, mod records and once-only queue state together. Progress loads preserve
+current mod story records while recreating eligible actors; a committed defeat
+keeps that copy absent. Restored identities must match the declaration fingerprint
+and ownership generation. Editing a manifest is not a supported way to preserve
+compatibility with an old full state.
+
 ## Static mod actors
 
 Declare original assets in `models` and refer to their IDs with `kind: "mod"`.

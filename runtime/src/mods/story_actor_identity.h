@@ -23,6 +23,11 @@ inline Fingerprint fingerprint(const std::string&mod,const story_notebook::Manif
     number(a.path.speed);word(a.path.loop);word(uint32_t(a.path.points.size()));for(const auto&p:a.path.points)point(p);
     word(uint32_t(a.drops.size()));for(const auto&d:a.drops){text(d.item);word(d.quantity);}
     word(uint32_t(a.then.size()));for(const auto&action:a.then){word(uint32_t(action.kind));text(action.id);word(action.value);}
+    if(a.combat_enabled){
+        text("wwhd.mod-combat.v1");const auto&c=a.combat;word(c.health);word(c.invulnerability_frames);word(c.target_priority);word(a.native_heart_drop);
+        for(const auto*r:{&c.flinch,&c.stun,&c.death}){text(r->clip);word(r->frames);number(r->knockback_speed);word(r->knockback_frames);}
+        const auto&at=c.attack;word(at.damage);word(at.active_frames);word(at.cooldown_frames);number(at.radius);number(at.height);number(at.forward_offset);number(at.y_offset);
+    }
     const auto hex=mods::hash::sha256_text(bytes);Fingerprint out{};
     const auto digit=[](char c){return uint8_t(c<='9'?c-'0':c-'a'+10);};for(size_t i=0;i<out.size();++i)out[i]=uint8_t(digit(hex[i*2])*16+digit(hex[i*2+1]));return out;
 }

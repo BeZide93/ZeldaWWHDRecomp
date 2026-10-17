@@ -444,6 +444,7 @@ void svc_item_used(Cpu* c) {
 #include "guest_actor_services.inc"
 const std::unordered_map<std::string, PpcFunc> kServices = {
     {"wwhd_actor_register",svc_actor_register},{"wwhd_actor_find",svc_actor_find},{"wwhd_actor_get",svc_actor_get},
+    {"wwhd_actor_combat_get",svc_actor_combat_get},{"wwhd_actor_attack_begin",svc_actor_attack_begin},{"wwhd_actor_attack_cancel",svc_actor_attack_cancel},
     {"wwhd_actor_userdata",svc_actor_userdata},{"wwhd_actor_set_position",svc_actor_set_position},{"wwhd_actor_set_rotation",svc_actor_set_rotation},
     {"wwhd_actor_set_collision",svc_actor_set_collision},{"wwhd_actor_set_animation",svc_actor_set_animation},
     {"wwhd_actor_walk",svc_actor_walk},{"wwhd_actor_walk_quest",svc_actor_walk_quest},{"wwhd_actor_stop",svc_actor_stop},

@@ -31,6 +31,21 @@ int main(){using namespace story_enemy_ownership;map(Arena,0x10000);map(Base,0x1
  Token ts[4];uint32_t addresses[4];for(unsigned i=0;i<4;++i){auto k=Kind(i);uint32_t a=Base+0x10000*i;addresses[i]=a;const uint32_t params=i==1?0xFFFF0004u:0xFFFF0000u+i;fixture(k,a,100+i,params);ts[i]=declare_actor(k,params,fp,1,why);assert(ts[i]);Binding state;assert(binding_state(ts[i],state)&&state.state==BindingState::Fresh&&can_spawn(ts[i]));assert(bind_pending(ts[i],100+i));assert(binding_state(ts[i],state)&&state.state==BindingState::Queued&&state.pid==100+i&&!can_spawn(ts[i]));assert(admit_created(ts[i],a));assert(binding_state(ts[i],state)&&state.state==BindingState::Active&&state.actor==a&&!can_spawn(ts[i]));assert(enroll_colliders(ts[i]));for(size_t n=0;n<descriptor(k).collider_count;++n)assert(lookup_collider(a+descriptor(k).colliders[n].object)==ts[i]);}
  assert(pair_policy(Base+0x7C4,Base+0x10000+0xCE8)==PairPolicy::Reject);uint32_t retail=Base+0x80000;assert(pair_policy(retail,retail+0x100)==PairPolicy::Delegate);assert(pair_policy(Base+0x7C4,retail)==PairPolicy::Reject);
  uint32_t player=Base+0x60000;st32(player+4,900);st16(player+0xE,0xA8);st32(player+0x762C,player);st32(player+0x7630,900);st32(player+0x765C+0x44,player+0x7620);st32(player+0x7B1C+0x44,player+0x7620);assert(set_link(player,900));assert(pair_policy(Base+0x7C4,player+0x765C)==PairPolicy::Delegate);assert(pair_policy(player+0x7B1C,Base+0x7C4)==PairPolicy::Delegate);assert(pair_policy(player+0x100,Base+0x7C4)==PairPolicy::Reject);st32(player+4,901);assert(pair_policy(player+0x7B1C,Base+0x7C4)==PairPolicy::Reject);st32(player+4,900);
+ // Generic combat shares the early hook, with separate incoming/outgoing roles.
+ const uint32_t generic_body=retail+0x400,generic_attack=retail+0x600,invalid_generic=retail+0x800;
+ set_mod_collider_verifier([&](uint32_t o){return o==generic_body?ModCollider::Body:o==generic_attack?ModCollider::Attack:o==invalid_generic?ModCollider::Invalid:ModCollider::Foreign;});
+ assert(pair_policy(generic_attack,player+0x765C)==PairPolicy::Delegate);
+ assert(pair_policy(player+0x7B1C,generic_body)==PairPolicy::Delegate);
+ assert(pair_policy(generic_body,player+0x765C)==PairPolicy::Reject);
+ assert(pair_policy(player+0x7B1C,generic_attack)==PairPolicy::Reject);
+ assert(pair_policy(generic_attack,retail)==PairPolicy::Reject);
+ assert(pair_policy(generic_attack,Base+0x7C4)==PairPolicy::Reject);
+ assert(pair_policy(Base+0x7C4,generic_body)==PairPolicy::Reject);
+ assert(pair_policy(generic_attack,generic_body)==PairPolicy::Reject);
+ assert(pair_policy(invalid_generic,player+0x765C)==PairPolicy::Reject);
+ st32(player+4,901);assert(pair_policy(generic_attack,player+0x765C)==PairPolicy::Reject);st32(player+4,900);
+ set_mod_collider_verifier([](uint32_t)->ModCollider{throw 1;});assert(pair_policy(retail,retail+0x100)==PairPolicy::Reject);
+ set_mod_collider_verifier({});assert(pair_policy(retail,retail+0x100)==PairPolicy::Delegate);
  // Known object ownership cannot be erased by replacing its Stts pointer.
  st32(Base+0x7C4+0x44,retail);assert(!lookup_collider(Base+0x7C4));assert(pair_policy(Base+0x7C4,retail)==PairPolicy::Reject);fixture(Kind::ChuChu,Base,100,0xFFFF0000);
  st32(Base+0x924,retail);assert(!lookup_collider(Base+0x990));fixture(Kind::ChuChu,Base,100,0xFFFF0000);

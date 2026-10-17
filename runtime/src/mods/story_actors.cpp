@@ -28,7 +28,7 @@ static_assert(kIdentityScratchOffset>=kPropsScratchOffset+0x100);
 static_assert(kScratchBytes>=kIdentityScratchOffset+128*identity::kRecordBytes);
 namespace {
 using story_notebook::ManifestActor;
-struct Actor {std::string mod; ManifestActor spec; uint32_t process=0xFFFFFFFFu; bool deleting=false; uint32_t mod_token=0; bool restore_talk=false;uint32_t prop_token=0,switch_token=0,switch_source=0,enemy_token=0;identity::Fingerprint fingerprint{};bool restore_quarantined=false;};
+struct Actor {std::string mod; ManifestActor spec; uint32_t process=0xFFFFFFFFu; bool deleting=false; uint32_t mod_token=0; bool restore_talk=false;uint32_t prop_token=0,switch_token=0,switch_source=0,enemy_token=0;story_items::EnemyMarkerHandle combat_marker{};identity::Fingerprint fingerprint{};bool restore_quarantined=false;};
 std::vector<Actor> g_actors;
 struct ModelResource {std::string archive;int index;story_notebook::WorldPoint minimum,maximum;bool skinned=false;std::vector<std::string> clips;mod_actor::ModelRig rig;};
 std::map<std::pair<std::string,std::string>,ModelResource> g_models;
@@ -58,8 +58,9 @@ struct Talk {uint32_t npc=0; Actor* actor=nullptr;std::u16string text;bool start
 Talk g_talk;
 bool enemy_kind(const ManifestActor& a,story_enemies::Kind& kind){if(a.actor=="chuchu")kind=story_enemies::Kind::ChuChu;else if(a.actor=="bokoblin")kind=story_enemies::Kind::Bokoblin;else if(a.actor=="moblin")kind=story_enemies::Kind::Moblin;else if(a.actor=="keese")kind=story_enemies::Kind::Keese;else return false;return true;}
 bool enemies_declared(){return std::any_of(g_actors.begin(),g_actors.end(),[](const Actor&a){return a.enemy_token!=0;});}
+bool combat_declared(){return enemies_declared()||std::any_of(g_actors.begin(),g_actors.end(),[](const Actor&a){return a.spec.kind=="mod"&&a.spec.combat_enabled;});}
 bool pure_link(uint32_t& actor,uint32_t& pid){actor=ld32(GD(0x1046F0B0)+0x5B34);if(actor<mem::kMem2Start||actor>mem::kMem2End-0x8260u||(actor&3)||ld16(actor+0xE)!=0xA8)return false;pid=ld32(actor+4);return pid&&pid!=0xFFFFFFFFu;}
-void refresh_link(){if(!enemies_declared())return;uint32_t actor=0,pid=0;if(pure_link(actor,pid))story_enemy_ownership::set_link(actor,pid);}
+void refresh_link(){if(!combat_declared())return;uint32_t actor=0,pid=0;if(pure_link(actor,pid))story_enemy_ownership::set_link(actor,pid);}
 // Typed child routes passed source and real module composition contracts.
 // Native per-weapon/type/mode acceptance remains a separate proof gate.
 constexpr bool kEnemyChildRoutesReady=true;
@@ -102,6 +103,7 @@ void bind_talk(Actor* a,uint32_t npc,bool terminal=false){
     else story_mail::say(kCarrier,&g_talk.text);talk_latch(a,terminal?2:1);
 }
 bool eligible(const Actor& a) {
+    if(a.spec.combat_enabled&&story_items::enemy_defeated(a.combat_marker))return false;
     if(!a.spec.quest.empty()&&story_notebook::state(a.mod,a.spec.quest)!=int32_t(a.spec.quest_step))return false;
     if(!a.spec.item.empty()&&story_items::count(a.mod,a.spec.item.substr(5))<=0)return false;
     if(!a.spec.time.empty()) {
@@ -296,6 +298,11 @@ bool load(const std::string& mod,const std::vector<ManifestActor>& actors,std::s
     for(const auto& a:actors)if(a.actor=="resident"&&a.resident==kYm1&&std::fabs(a.position.x+202066.f)<10&&std::fabs(a.position.z-320123.f)<10)return why="ym1 position intersects native relocation area",false;
     for(const auto&a:actors)if(a.kind=="mod"){
         const auto resource=g_models.find({mod,a.model});if(resource==g_models.end())return why="prepared actor model missing",false;
+        if(a.combat_enabled){
+            if(!resource->second.skinned||a.defeated_flag.empty()||!story_mail::valid_id(a.defeated_flag)||a.rotation.x!=0||a.rotation.z!=0||a.scale.x!=1||a.scale.y!=1||a.scale.z!=1||!a.flag.empty()||!a.lines.empty()||!a.then.empty())return why="unsupported generic combat configuration",false;
+            for(const auto* clip:{&a.combat.flinch.clip,&a.combat.stun.clip,&a.combat.death.clip})if(((clip==&a.combat.stun.clip||clip==&a.combat.death.clip)&&clip->empty())||(!clip->empty()&&std::find(resource->second.clips.begin(),resource->second.clips.end(),*clip)==resource->second.clips.end()))return why="combat reaction clip unavailable",false;
+            if(a.drops.size()>8)return why="too many generic combat drops",false;for(size_t n=0;n<a.drops.size();++n){const auto&drop=a.drops[n];if(!drop.quantity||drop.quantity>254||!story_items::find(mod,drop.item))return why="invalid generic combat item drop",false;for(size_t j=0;j<n;++j)if(a.drops[j].item==drop.item)return why="duplicate generic combat drop",false;}
+        }
         const auto& rig=resource->second.rig;
         if(a.look_at.enabled){const auto head=std::find(rig.joint_names.begin(),rig.joint_names.end(),a.look_at.head);if(head==rig.joint_names.end())return why="look_at head is not a model joint",false;if(rig.joint_look_compatible.size()!=rig.joint_names.size()||!rig.joint_look_compatible[size_t(head-rig.joint_names.begin())])return why="look_at requires identity bind rotation along the joint chain",false;if(std::fabs(std::remainder(a.rotation.x,360.f))>1e-4||std::fabs(std::remainder(a.rotation.z,360.f))>1e-4||a.scale.x<=0||std::fabs(a.scale.x-a.scale.y)>1e-4||std::fabs(a.scale.x-a.scale.z)>1e-4)return why="look_at requires upright actor and uniform positive scale",false;
             if(!a.look_at.upper_bone.empty()){const auto upper=std::find(rig.joint_names.begin(),rig.joint_names.end(),a.look_at.upper_bone);if(upper==rig.joint_names.end())return why="look_at upper_body is not a model joint",false;if(!rig.joint_look_compatible[size_t(upper-rig.joint_names.begin())])return why="look_at upper_body has incompatible bind rotation",false;int parent=rig.joint_parents[size_t(head-rig.joint_names.begin())];const int target=int(upper-rig.joint_names.begin());while(parent>=0&&parent!=target)parent=rig.joint_parents[size_t(parent)];if(parent!=target)return why="look_at upper_body must be an ancestor of head",false;}}
@@ -311,7 +318,7 @@ bool load(const std::string& mod,const std::vector<ManifestActor>& actors,std::s
     }
     std::vector<Actor> staged;staged.reserve(actors.size());g_actors.reserve(g_actors.size()+actors.size());
     struct LoadRollback {size_t props=story_props::checkpoint(),models=mod_actor::checkpoint(),switches=story_switches::checkpoint(),enemies=story_enemies::checkpoint(),ownership=story_enemy_ownership::checkpoint();story_items::PropMarkerCheckpoint markers=story_items::prop_marker_checkpoint();decltype(g_flag_names) flags=g_flag_names;bool committed=false;~LoadRollback(){if(!committed){story_props::rollback(props);mod_actor::rollback(models);story_switches::rollback(switches);story_enemies::rollback(enemies);story_enemy_ownership::rollback(ownership);story_items::rollback_prop_markers(markers);g_flag_names=std::move(flags);}}} rollback;
-    for(const auto& a:actors){Actor added{mod,a};story_enemies::Kind enemy;if(enemy_kind(a,enemy)){added.fingerprint=identity::fingerprint(mod,a);story_enemies::Spec spec{enemy,mod,a.id,a.defeated_flag,{},added.fingerprint,1};for(const auto&drop:a.drops)spec.drops.push_back({drop.item,drop.quantity});added.enemy_token=story_enemies::declare(spec,why);if(!added.enemy_token)return false;}if(story_props::is_prop(a)){added.fingerprint=identity::fingerprint(mod,a);added.prop_token=story_props::declare(mod,a,why);if(!added.prop_token)return false;}if(a.actor=="switch"){if(a.switch_flag.empty())return why="switch requires an own flag",false;added.fingerprint=identity::fingerprint(mod,a);added.switch_token=story_switches::declare_switch(mod,a.id,why);added.switch_source=added.switch_token;if(!added.switch_token)return false;}staged.push_back(std::move(added));}
+    for(const auto& a:actors){Actor added{mod,a};if(a.kind=="mod"&&a.combat_enabled){added.combat_marker=story_items::register_enemy_marker(mod,a.id,a.defeated_flag,why);if(!added.combat_marker.value)return false;added.fingerprint=identity::fingerprint(mod,a);}story_enemies::Kind enemy;if(enemy_kind(a,enemy)){added.fingerprint=identity::fingerprint(mod,a);story_enemies::Spec spec{enemy,mod,a.id,a.defeated_flag,{},added.fingerprint,1};for(const auto&drop:a.drops)spec.drops.push_back({drop.item,drop.quantity});added.enemy_token=story_enemies::declare(spec,why);if(!added.enemy_token)return false;}if(story_props::is_prop(a)){added.fingerprint=identity::fingerprint(mod,a);added.prop_token=story_props::declare(mod,a,why);if(!added.prop_token)return false;}if(a.actor=="switch"){if(a.switch_flag.empty())return why="switch requires an own flag",false;added.fingerprint=identity::fingerprint(mod,a);added.switch_token=story_switches::declare_switch(mod,a.id,why);added.switch_source=added.switch_token;if(!added.switch_token)return false;}staged.push_back(std::move(added));}
     for(auto& a:staged)if(a.spec.actor=="door"){
         const Actor* source=nullptr;for(const auto& candidate:staged)if(candidate.spec.actor=="switch"&&candidate.spec.id==a.spec.switch_actor)source=&candidate;
         if(!source)for(const auto& candidate:g_actors)if(candidate.mod==mod&&candidate.spec.actor=="switch"&&candidate.spec.id==a.spec.switch_actor)source=&candidate;
@@ -355,10 +362,10 @@ void native_room_loaded(Cpu* c,int room){
     const bool new_prop_epoch=ld32(g_scratch+0x318)!=stage_process||ld32(g_scratch+0x400+uint32_t(room)*4)!=room_process||std::memcmp(mem::ptr(g_scratch+0x300),mem::ptr(kStage),8)!=0;
     if(ld32(g_scratch+0x318)!=stage_process){std::memset(mem::ptr(g_scratch+0x308),0,8);std::memset(mem::ptr(g_scratch+0x400),0,256);st32(g_scratch+0x318,stage_process);}
     st32(g_scratch+0x400+uint32_t(room)*4,ld32(GD(0x1047E8F0)+uint32_t(room)*0x22C));
-    if(new_prop_epoch&&enemies_declared())story_enemy_projectiles::room_changed();
+    if(new_prop_epoch&&combat_declared())story_enemy_projectiles::room_changed();
     for(size_t i=0;i<g_actors.size();++i){auto&a=g_actors[i];if(!a.enemy_token||!new_prop_epoch||a.spec.room!=unsigned(room)||std::strncmp(reinterpret_cast<const char*>(mem::ptr(kStage)),a.spec.stage.c_str(),8)!=0)continue;uint32_t counter=g_scratch+kEnemyEpochScratchOffset+uint32_t(i)*4,epoch=ld32(counter);if(!epoch||epoch==0xFFFFFFFFu){a.restore_quarantined=true;story_enemies::quarantine(a.enemy_token);continue;}++epoch;if(story_enemies::begin_epoch(a.enemy_token,epoch)){st32(counter,epoch);a.restore_quarantined=false;a.process=0xFFFFFFFFu;a.deleting=false;st32(g_scratch+128+uint32_t(i)*4,0xFFFFFFFFu);}}
     refresh_link();
-    for(auto& a:g_actors)if(a.spec.room==unsigned(room)){if(a.spec.kind=="mod")mod_actor::retry(a.mod_token);if(a.prop_token&&new_prop_epoch&&std::strncmp(reinterpret_cast<const char*>(mem::ptr(kStage)),a.spec.stage.c_str(),8)==0){a.restore_quarantined=false;story_props::retry(a.prop_token);}if(a.switch_token&&new_prop_epoch&&std::strncmp(reinterpret_cast<const char*>(mem::ptr(kStage)),a.spec.stage.c_str(),8)==0){a.restore_quarantined=false;story_switches::retry(a.switch_token);}}room_loaded(c,room);}
+    for(auto& a:g_actors)if(a.spec.room==unsigned(room)){if(a.spec.kind=="mod"&&(!a.spec.combat_enabled||(new_prop_epoch&&std::strncmp(reinterpret_cast<const char*>(mem::ptr(kStage)),a.spec.stage.c_str(),8)==0)))mod_actor::retry(a.mod_token);if(a.prop_token&&new_prop_epoch&&std::strncmp(reinterpret_cast<const char*>(mem::ptr(kStage)),a.spec.stage.c_str(),8)==0){a.restore_quarantined=false;story_props::retry(a.prop_token);}if(a.switch_token&&new_prop_epoch&&std::strncmp(reinterpret_cast<const char*>(mem::ptr(kStage)),a.spec.stage.c_str(),8)==0){a.restore_quarantined=false;story_switches::retry(a.switch_token);}}room_loaded(c,room);}
 void room_loaded(Cpu* c,int room) {
     if(!g_installed||!g_scratch)return;
     refresh_link();
@@ -447,7 +454,7 @@ void service(Cpu* c){
     }
     room_loaded(c,room);
 }
-void state_loaded(){if(enemies_declared()){story_enemy_ownership::state_loaded();story_enemies::state_loaded();story_enemy_children::state_loaded();}
+void state_loaded(){if(combat_declared())story_enemy_ownership::state_loaded();if(enemies_declared()){story_enemies::state_loaded();story_enemy_children::state_loaded();}
     mod_actor::state_loaded();story_props::state_loaded();story_switches::state_loaded();cancel_talk("state-load",false,true);g_opening=nullptr;
     for(size_t i=0;i<g_actors.size();++i){auto&a=g_actors[i];const uint32_t slot=g_scratch?g_scratch+128+uint32_t(i)*4:0;const uint32_t id=slot?ld32(slot):0;a.process=id?id:0xFFFFFFFFu;a.deleting=false;a.restore_talk=a.spec.actor=="resident";a.restore_quarantined=false;
         if(a.enemy_token){story_enemy_ownership::Binding binding;const bool known=story_enemy_ownership::binding_state(a.enemy_token,binding);const uint32_t epoch=g_scratch?ld32(g_scratch+kEnemyEpochScratchOffset+uint32_t(i)*4):0;const bool queued=known&&(binding.state==story_enemy_ownership::BindingState::Queued||binding.state==story_enemy_ownership::BindingState::Active);const bool fresh=known&&binding.state==story_enemy_ownership::BindingState::Fresh;const bool retired=known&&binding.state==story_enemy_ownership::BindingState::Retired;const bool identity_ok=queued&&a.process==binding.pid&&identity::matches(mem::ptr(g_scratch+kIdentityScratchOffset+uint32_t(i)*identity::kRecordBytes),a.fingerprint);const bool no_pid=a.process==0xFFFFFFFFu;
@@ -463,7 +470,7 @@ void state_loaded(){if(enemies_declared()){story_enemy_ownership::state_loaded()
             else {if(a.prop_token)story_props::bind(a.prop_token,a.process);if(a.switch_token)story_switches::bind(a.switch_token,a.process,live);}
         }
     }
-    if(enemies_declared())story_enemy_projectiles::state_loaded();
+    if(combat_declared())story_enemy_projectiles::state_loaded();
 }
 void restore_talk_text(){
     story_mail::SayOwner owner;
@@ -550,14 +557,17 @@ void install(const std::function<std::string(uint32_t)>& replaced_by,const std::
         [](uint32_t token,bool& on){for(const auto& a:g_actors)if(a.spec.actor=="switch"&&a.switch_token==token){const auto book=story_store::book();if(!book.usable()||!book.has(kRecordActorFlag,flag_key(a.mod,a.spec.switch_flag)))return false;on=flag(book,a.mod,a.spec.switch_flag);return true;}return false;},
         [](uint32_t token,bool on){for(const auto& a:g_actors)if(a.spec.actor=="switch"&&a.switch_token==token)return set_flag(story_store::book(),a.mod,a.spec.switch_flag,on);return false;},
         [](uint32_t token,uint32_t pid){if(!g_scratch)return;for(size_t i=0;i<g_actors.size();++i){auto&a=g_actors[i];const uint32_t slot=g_scratch+128+uint32_t(i)*4;if(a.switch_token==token&&a.process==pid&&ld32(slot)==pid){a.process=0xFFFFFFFFu;a.deleting=false;st32(slot,0xFFFFFFFFu);std::memset(mem::ptr(g_scratch+kIdentityScratchOffset+uint32_t(i)*identity::kRecordBytes),0,identity::kRecordBytes);return;}}});
-    const bool has_enemies=enemies_declared();
-    if(has_enemies){
-        if(!story_enemy_ownership::configure(g_scratch+kEnemyOwnershipScratchOffset,story_enemy_ownership::kStorageBytes,g_original,story_enemies::verify_actor))exception_report::raise("Cannot configure native enemy snapshot ownership");
+    const bool has_enemies=enemies_declared(),has_combat=combat_declared();
+    if(has_combat){
+        if(!story_enemy_ownership::configure(g_scratch+kEnemyOwnershipScratchOffset,story_enemy_ownership::kStorageBytes,g_original,story_enemies::verify_actor))exception_report::raise("Cannot configure combat snapshot ownership");
         story_enemy_ownership::initialize_storage();
-        const std::array<uint32_t,4> profiles={g_scratch+kEnemyProfilesScratchOffset,g_scratch+kEnemyProfilesScratchOffset+0x30,g_scratch+kEnemyProfilesScratchOffset+0x60,g_scratch+kEnemyProfilesScratchOffset+0x90};
-        story_enemies::configure(g_original,g_call,profiles,[](uint32_t token,uint32_t pid){if(!g_scratch)return;for(size_t i=0;i<g_actors.size();++i){auto&a=g_actors[i];const uint32_t slot=g_scratch+128+uint32_t(i)*4;if(a.enemy_token==token&&a.process==pid&&ld32(slot)==pid){a.process=0xFFFFFFFFu;a.deleting=false;st32(slot,0xFFFFFFFFu);return;}}});
-        if(!story_enemy_projectiles::configure(g_original,pure_link,true)||!story_enemy_children::configure(g_original,g_call,story_enemies::child_retired)||!native_actor_carry::configure(g_original,g_call)||!native_actor_carry::register_guard("enemies",story_enemies::deny_carry))exception_report::raise("Cannot configure native enemy isolation bridges");
-        if(!story_enemy_ownership::install(replaced_by,replace)||!story_enemy_projectiles::install(replaced_by,replace)||!story_enemy_children::install(replaced_by,replace))exception_report::raise("Cannot install native enemy ownership hooks");
+        if(!story_enemy_projectiles::configure(g_original,pure_link,true))exception_report::raise("Cannot configure combat projectile ownership");
+        if(has_enemies){
+            const std::array<uint32_t,4> profiles={g_scratch+kEnemyProfilesScratchOffset,g_scratch+kEnemyProfilesScratchOffset+0x30,g_scratch+kEnemyProfilesScratchOffset+0x60,g_scratch+kEnemyProfilesScratchOffset+0x90};
+            story_enemies::configure(g_original,g_call,profiles,[](uint32_t token,uint32_t pid){if(!g_scratch)return;for(size_t i=0;i<g_actors.size();++i){auto&a=g_actors[i];const uint32_t slot=g_scratch+128+uint32_t(i)*4;if(a.enemy_token==token&&a.process==pid&&ld32(slot)==pid){a.process=0xFFFFFFFFu;a.deleting=false;st32(slot,0xFFFFFFFFu);return;}}});
+            if(!story_enemy_children::configure(g_original,g_call,story_enemies::child_retired)||!native_actor_carry::configure(g_original,g_call)||!native_actor_carry::register_guard("enemies",story_enemies::deny_carry))exception_report::raise("Cannot configure native enemy isolation bridges");
+        }
+        if(!story_enemy_ownership::install(replaced_by,replace)||!story_enemy_projectiles::install(replaced_by,replace)||(has_enemies&&!story_enemy_children::install(replaced_by,replace)))exception_report::raise("Cannot install combat ownership hooks");
     }
     bool has_mod=false;
     for(size_t i=0;i<g_actors.size();++i){auto& a=g_actors[i];if(a.spec.kind!="mod")continue;
@@ -568,6 +578,8 @@ void install(const std::function<std::string(uint32_t)>& replaced_by,const std::
             if(!found->spec.flag.empty())set_flag(story_store::book(),mod,found->spec.flag);
             actions(mod,found->spec.then);story_scenes::trigger("talk",mod,id);
         },model->second.minimum,model->second.maximum,model->second.skinned,model->second.clips,model->second.rig);if(!a.mod_token)exception_report::raise("Cannot declare generic mod actor "+mod+":"+id);has_mod=true;
+        if(a.spec.combat_enabled){const auto marker=a.combat_marker;std::vector<story_items::PropDrop> drops;for(const auto&drop:a.spec.drops)drops.push_back({drop.item,drop.quantity});
+            if(!mod_actor::set_combat_reward(mod,id,[marker,mod,drops](){const auto result=story_items::claim_enemy_drops(marker,mod,drops);return result==story_items::EnemyClaimStatus::Committed?mod_actor::CombatReward::Committed:result==story_items::EnemyClaimStatus::AlreadyDefeated?mod_actor::CombatReward::AlreadyDone:mod_actor::CombatReward::Failed;}))exception_report::raise("Cannot bind generic combat rewards");}
     }
     if(has_mod&&!mod_actor::install(replaced_by,replace))exception_report::raise("Cannot install generic mod actor profile");
     if(has_mod){mod_actor_shadow_proof::configure(g_original,g_call);mod_actor_shadow_proof::install(replaced_by,replace);}

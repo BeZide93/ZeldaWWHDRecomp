@@ -10,6 +10,7 @@ struct Cpu;
 namespace mod_actor {
 inline constexpr uint16_t kProfile=0x7FFE;
 inline constexpr uint32_t kScratchBytes=4096;
+inline constexpr uint32_t kInstanceBytes=0xF40;
 struct ModelRig {std::vector<std::string> joint_names;std::vector<int> joint_parents;std::vector<bool> joint_look_compatible;};
 struct Identity {std::string mod,id;uint32_t token=0,process_id=0;};
 struct State {
@@ -22,6 +23,17 @@ struct MotionState {
 };
 enum class BehaviorEvent:uint32_t {CreateNew,CreateRestored,Execute,Draw,TalkBegin,TalkEnd,TalkCancel,Hit,Destroy};
 struct Hit {uint32_t sequence=0,attack_type=0,attack_power=0,source_kind=0,source_process_id=0;story_notebook::WorldPoint position,reaction;};
+struct CombatState {
+    uint32_t health=0,max_health=0,phase=0,flags=0,last_damage_sequence=0,reward_status=0,native_drop_status=0;
+    uint32_t invulnerability_frames=0,reaction_frames=0,attack_active_frames=0,attack_cooldown_frames=0;
+};
+bool combat_snapshot(Cpu*,const Identity&,CombatState&);
+bool attack_begin(Cpu*,const Identity&);
+bool attack_cancel(Cpu*,const Identity&);
+void quarantine_combat(Cpu*,const Identity&);
+enum class CombatReward {Committed,AlreadyDone,Failed};
+using CombatRewardSink=std::function<CombatReward()>;
+bool set_combat_reward(const std::string& mod,const std::string& id,CombatRewardSink);
 using BehaviorSink=std::function<void(Cpu*,uint32_t,BehaviorEvent,const Hit*)>;
 void set_behavior_sink(BehaviorSink);
 uint32_t declaration_token(const std::string& mod,const std::string& id);

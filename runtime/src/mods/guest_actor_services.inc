@@ -36,7 +36,7 @@ bool actor_dispatch(Cpu* c,uint32_t handle,mod_actor::behavior::Event event,uint
     const auto dispatch=g_actor_registry.begin_callback(handle,identity.mod,event,[&](const auto& native){return native.process_id==identity.process_id&&native.declaration_token==identity.token&&mod_actor::resolve(c,identity)!=0;},actor_owned_function);
     if(!dispatch)return actor_binding(c,handle,identity.mod).has_value(); // optional callback
     const uint32_t userdata=dispatch->binding.userdata_size?mod_actor::userdata_address(c,identity):0;
-    if(dispatch->binding.userdata_size&&!userdata){g_actor_registry.finish_callback(dispatch->ticket,false);return false;}
+    if(dispatch->binding.userdata_size&&!userdata){g_actor_registry.finish_callback(dispatch->ticket,false);mod_actor::quarantine_combat(c,identity);return false;}
     const Cpu saved=*c;const bool prior_draw=g_actor_draw_callback;g_actor_draw_callback=prior_draw||event==mod_actor::behavior::Event::Draw;
     bool success=true;
     try{
@@ -44,7 +44,7 @@ bool actor_dispatch(Cpu* c,uint32_t handle,mod_actor::behavior::Event event,uint
         else if(event==mod_actor::behavior::Event::Create||event==mod_actor::behavior::Event::Talk||event==mod_actor::behavior::Event::Hit)guest_call(c,dispatch->function,{handle,userdata,argument});
         else guest_call(c,dispatch->function,{handle,userdata});
     }catch(...){success=false;LOG("[guestmod:%s] actor %s callback failed; registration quarantined",identity.mod.c_str(),identity.id.c_str());}
-    *c=saved;g_actor_draw_callback=prior_draw;g_actor_registry.finish_callback(dispatch->ticket,success);
+    *c=saved;g_actor_draw_callback=prior_draw;g_actor_registry.finish_callback(dispatch->ticket,success);if(!success)mod_actor::quarantine_combat(c,identity);
     return success&&actor_binding(c,handle,identity.mod).has_value();
 }
 void behavior_sink(Cpu* c,uint32_t actor,mod_actor::BehaviorEvent event,const mod_actor::Hit* hit){
@@ -104,6 +104,15 @@ void svc_actor_get(Cpu* c){
     st32(out+40,(state.collision_enabled?1u:0u)|(state.pushable?2u:0u)|(state.scene_owned?4u:0u));std::memset(mem::ptr(out+44),0,36);std::memcpy(mem::ptr(out+44),state.animation.data(),std::min(size_t(32),state.animation.size()));c->r[3]=1;
 }
 std::optional<mod_actor::Identity> actor_mutable(Cpu* c){auto& mod=owner(c);const uint32_t handle=c->r[3];if(g_actor_draw_callback||!actor_binding(c,handle,mod.id))return {};return g_actor_identities.at(handle);}
+void svc_actor_combat_get(Cpu* c){
+    auto& mod=owner(c);const uint32_t handle=c->r[3],out=c->r[4];c->r[3]=0;
+    if(!actor_binding(c,handle,mod.id)||!actor_buffer(c,mod,out,64)||ld32(out)!=64||ld32(out+4)!=1)return;
+    mod_actor::CombatState state;if(!mod_actor::combat_snapshot(c,g_actor_identities.at(handle),state))return;
+    const uint32_t values[]={state.health,state.max_health,state.phase,state.flags,state.last_damage_sequence,state.reward_status,state.native_drop_status,state.invulnerability_frames,state.reaction_frames,state.attack_active_frames,state.attack_cooldown_frames};
+    for(unsigned i=0;i<11;++i)st32(out+8+i*4,values[i]);for(unsigned i=0;i<3;++i)st32(out+52+i*4,0);c->r[3]=1;
+}
+void svc_actor_attack_begin(Cpu* c){const auto id=actor_mutable(c);c->r[3]=id&&mod_actor::attack_begin(c,*id);}
+void svc_actor_attack_cancel(Cpu* c){const auto id=actor_mutable(c);c->r[3]=id&&mod_actor::attack_cancel(c,*id);}
 void svc_actor_set_position(Cpu* c){const auto id=actor_mutable(c);c->r[3]=id&&mod_actor::set_position(c,*id,{float(c->f[1].ps0),float(c->f[2].ps0),float(c->f[3].ps0)});}
 void svc_actor_set_rotation(Cpu* c){const auto id=actor_mutable(c);c->r[3]=id&&mod_actor::set_rotation(c,*id,{float(c->f[1].ps0),float(c->f[2].ps0),float(c->f[3].ps0)});}
 void svc_actor_set_collision(Cpu* c){const uint32_t flags=c->r[4];const auto id=actor_mutable(c);c->r[3]=id&&!(flags&~3u)&&mod_actor::set_collision(c,*id,float(c->f[1].ps0),float(c->f[2].ps0),flags&1,flags&2);}
