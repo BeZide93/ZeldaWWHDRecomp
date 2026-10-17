@@ -7,6 +7,10 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Android/Vulkan: texture decoder self-test.** Phones that decode compressed (BC) textures in a compute shader now
+  check that decoder at start-up and switch to the CPU decoder if the graphics driver gets it wrong (Qualcomm's driver
+  762 miscompiled it, leaving speckled edges on the HUD hearts and streaks on water when that path was used). One rare
+  case in signed BC4/BC5 textures also decodes correctly now.
 - **Mouse camera: smooth while sailing** (#237). Turning the camera with the mouse on the boat (sailing, paddling,
   salvage) now follows the mouse directly at the same sensitivity as on foot, instead of turning in jerky steps.
 
