@@ -67,4 +67,6 @@
     <string name="game_icon_none">Set up the game first</string>
     <string name="controller_settings_hint">Hold Select/− to open Settings</string>
     <string name="controller_settings_hint_home">Hold Select/− or press Home to open Settings</string>
+    <string name="setup_code_mods">Code mods</string>
+    <string name="setup_code_mods_detail">Lets you turn on code mods (for example the story quests) in Settings › Mods. The game code is built again with mod support, which takes about as long as the first setup, and the game runs a little slower. You can keep playing the current build meanwhile.</string>
 </resources>

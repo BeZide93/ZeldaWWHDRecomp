@@ -33,6 +33,65 @@ public class WwhdActivity extends SDLActivity {
     // Public thermal/battery APIs, sampled by the overlay/report via JNI at most once a second.
     public static String performanceThermals() { return PerformanceThermals.read(mSingleton); }
 
+    // ---- code mods (runtime/src/mods/code_mods.cpp, guest_build.h; JNI from game threads)
+    /** The code-mod build tools file: "ok:" + its path, or "error:" + a message for the player. */
+    public static String guestBuildTools() {
+        try { return "ok:" + AndroidGuestTools.prepare(mSingleton.getApplicationContext()); }
+        catch (Exception failure) {
+            Log.e("wwhd-game", "code-mod tools unavailable", failure);
+            return "error:Code-mod tools are unavailable: " + failure.getMessage();
+        }
+    }
+
+    /** Settings > Mods > Use code mods: the setup builds the game code again with (or without) mod
+     *  support, in its own process while the game runs. "" or a message for the player. */
+    public static String requestCodeModBuild(boolean enabled) {
+        try {
+            android.content.Context context = mSingleton.getApplicationContext();
+            File job = SetupStore.current(context);
+            if (job == null || !new File(job, "host.json").isFile() || !new File(AndroidGame.storage(context), "active.json").isFile())
+                return "This game was built on a computer: build it there again with code-mod support";
+            AndroidGame.chooseCodeMods(context, enabled);
+            codeModRequest = System.currentTimeMillis();
+            if (AndroidGame.needsRebuild(context)) SetupService.start(context, null);
+            return "";
+        } catch (Exception failure) {
+            Log.e("wwhd-game", "code-mod rebuild not started", failure);
+            return "Setup could not start: " + failure.getMessage();
+        }
+    }
+
+    private static volatile long codeModRequest;
+
+    /** The setup's rebuild for the code-mod choice, as JSON: state ("building", "ready", "failed"),
+     *  stage, done, total, error. */
+    public static String codeModBuildStatus() {
+        try {
+            android.content.Context context = mSingleton.getApplicationContext();
+            org.json.JSONObject out = new org.json.JSONObject();
+            File job = SetupStore.current(context);
+            org.json.JSONObject host = job == null || !new File(job, "host.json").isFile() ? new org.json.JSONObject() :
+                SetupStore.read(new File(job, "host.json"));
+            // a record from before the request (an earlier run's end) is not this rebuild's
+            String state = host.optLong("updated") < codeModRequest ? "" : host.optString("state");
+            if (!AndroidGame.needsRebuild(context)) out.put("state", "ready");  // the active build has the chosen support
+            else if (state.equals("failed")) out.put("state", "failed").put("error", host.optString("error", "Setup failed; open setup for details"));
+            else if (state.equals("paused")) out.put("state", "building").put("stage", "Setup paused: open setup to continue");
+            else {
+                out.put("state", "building").put("stage", "Setup: " + (state.isEmpty() || state.equals("complete") ? "starting" : state));
+                File progress = job == null ? null : new File(job, "state.json");
+                org.json.JSONObject event = progress != null && progress.isFile() ? SetupStore.read(progress).optJSONObject("last_event") : null;
+                if (event != null && event.optString("stage").equals("compile")) {
+                    out.put("stage", "Compiling the game code");
+                    out.put("done", event.optInt("compiled") + event.optInt("reused")).put("total", event.optInt("total"));
+                } else if (event != null && event.optString("stage").equals("translate")) out.put("stage", "Translating the game code");
+            }
+            return out.toString();
+        } catch (Exception failure) {
+            return "{\"state\":\"failed\",\"error\":\"Cannot read setup progress\"}";
+        }
+    }
+
 
     protected GamePadDisplay gamePadDisplay;
     private File onDeviceGame;

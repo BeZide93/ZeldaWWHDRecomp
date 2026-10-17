@@ -1357,10 +1357,15 @@ void code_mod_dialog() {
         } else if(status.building) {
             ImGui::TextUnformatted(status.stage.c_str());
             if(status.total)ImGui::ProgressBar(float(status.done)/status.total,ImVec2(360,0));
+#ifdef __ANDROID__
+            ImGui::TextWrapped("The setup builds it in the background; you can keep playing. Its notification and screen can pause it.");
+            if(ImGui::Button("Hide")){mods::code::cancel();mods::code::dismiss();ImGui::CloseCurrentPopup();}
+#else
             if(ImGui::Button("Cancel rebuild"))mods::code::cancel();
+#endif
         } else {
             if(status.target)ImGui::TextWrapped("This mod needs code-mod support. Enable it now?");
-            ImGui::TextWrapped("Code mods need the game code to be rebuilt %s mod support, about 5 minutes. Rebuild now?",status.target?"with":"without");
+            ImGui::TextWrapped("Code mods need the game code to be rebuilt %s mod support, %s. Rebuild now?",status.target?"with":"without",mods::code::rebuild_duration());
             if(!status.error.empty())ImGui::TextWrapped("%s",status.error.c_str());
             if(ImGui::Button("Rebuild now"))mods::code::begin();
             ImGui::SameLine();

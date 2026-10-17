@@ -7,6 +7,9 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Android: code mods** (such as the story quests). Turn on **Code mods** in the setup app (or Settings → Mods): your
+  device builds the game again with mod support, and builds each code mod itself the first time it's used. Uses the
+  compiler and Python the setup already has; the download grows by only a few KB.
 - **Record graphics on a second thread** (Graphics → Advanced; **on by default on Android**, off elsewhere). The
   render thread hands recording and submitting the Vulkan commands to a second CPU thread. On a Xiaomi 14 Ultra that
   gave 4–7% more fps with 15–23% less render-thread time and identical pictures; it uses a little more CPU and battery.

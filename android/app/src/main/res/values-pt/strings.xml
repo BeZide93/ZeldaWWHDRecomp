@@ -66,4 +66,6 @@
     <string name="game_icon_none">Instale o jogo primeiro</string>
     <string name="controller_settings_hint">Segure Select/− para abrir Configurações</string>
     <string name="controller_settings_hint_home">Segure Select/− ou pressione Home para abrir Configurações</string>
+    <string name="setup_code_mods">Mods de código</string>
+    <string name="setup_code_mods_detail">Permite ativar mods de código (por exemplo as missões de história) em Configurações › Mods. O código do jogo é compilado de novo com suporte a mods, o que leva mais ou menos o mesmo tempo que a primeira instalação, e o jogo fica um pouco mais lento. Enquanto isso, você pode continuar jogando a versão atual.</string>
 </resources>

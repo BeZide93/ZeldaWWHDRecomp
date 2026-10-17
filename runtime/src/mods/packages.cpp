@@ -202,9 +202,6 @@ Manifest manifest(const fs::path& path){
         require(elf.gcount()==sizeof header&&std::string(header,6)==std::string("\x7f" "ELF\x01\x02",6),
                 "Guest mod must contain a 32-bit big-endian ELF");
         if(m.problem.empty())m.fingerprint=sha256_file(checked);
-#ifdef __ANDROID__
-        m.problem="Guest mods are not supported on Android yet";
-#endif
     } else if(m.kind=="cemu") {
         auto folder=string_field(v,"cemu_dir",false,512);
         require(folder.empty()||archive::relative_path(folder),"Invalid Cemu directory");
@@ -781,7 +778,7 @@ bool set_game_source(const std::string& game,const std::string& path,std::string
     });
 }
 bool run_setup_tool(const std::string& id,const std::string& step_id,std::string& error,std::string& last_output) {
-    std::vector<std::string> command,private_paths;fs::path data;std::string fingerprint;catalogue::Step step;bool marked=false;
+    std::vector<std::string> command,private_paths;fs::path data;std::string fingerprint,directory;catalogue::Step step;bool marked=false;
     last_output.clear();
     try {
         {
@@ -796,12 +793,12 @@ bool run_setup_tool(const std::string& id,const std::string& step_id,std::string
             require(!fs::is_symlink(data)&&!fs::is_symlink(data.parent_path()),"Mod data folder is a symlink");
             fs::create_directories(data);
             require(!fs::is_symlink(data)&&!fs::is_symlink(data.parent_path()),"Mod data folder is a symlink");
+            directory=data.string();
             catalogue::Sources sources(database.get("game_sources"));command=catalogue::tool_arguments(step,sources,r.path,data);
             fingerprint=catalogue::tool_receipt(step,sources,r.path,data,trust_fingerprint(r.manifest));
             for(const auto& [game,path]:sources.local_settings().object)if(path.type==Value::String&&!path.text.empty())private_paths.push_back(path.text);
             if(fs::path(command[0]).extension()==".py") {
-                const char* config=std::getenv("WWHD_GUEST_BUILD_CONFIG");
-                auto bridge=guestmods::BuildBridge::read(config?config:"guest-sdk.json",(root/"GuestBuild").string());
+                auto bridge=guestmods::BuildBridge::read(guestmods::BuildBridge::config_path(),(root/"GuestBuild").string());
                 command.insert(command.begin(),bridge.python.begin(),bridge.python.end());
                 // -B: Python must not write __pycache__ into the package; it is fingerprinted, and new
                 // .pyc files made every later step report "Package changed" (gc-minimap's prepare tool
@@ -809,16 +806,21 @@ bool run_setup_tool(const std::string& id,const std::string& step_id,std::string
                 command.insert(command.begin()+std::ptrdiff_t(bridge.python.size()),"-B");
                 // The Windows embeddable Python doesn't put the script's folder on sys.path, so a tool
                 // importing its own modules failed there (issue #224): run it through a bootstrap that adds it
-                command.insert(command.begin()+std::ptrdiff_t(bridge.python.size())+1,{"-c",
-                    "import os,runpy,sys;s=sys.argv[1];sys.path.insert(0,os.path.dirname(os.path.abspath(s)));"
-                    "sys.argv=sys.argv[1:];runpy.run_path(s,run_name='__main__')"});
+#ifdef __ANDROID__
+                // Android 13's process spawning has no working-directory option (host::run_process): the
+                // bootstrap enters the mod's data folder itself
+                command.insert(command.begin()+std::ptrdiff_t(bridge.python.size())+1,{"-c",guestmods::tool_bootstrap_in_folder,data.string()});
+                directory.clear();
+#else
+                command.insert(command.begin()+std::ptrdiff_t(bridge.python.size())+1,{"-c",guestmods::tool_bootstrap});
+#endif
             }
             // A failed rerun must not reuse an earlier success and leftover outputs.
             auto previous=database;database["setup_receipts"][id].object.erase(step_id);
             try{save();}catch(...){database=previous;throw;}
             r.loading=true;r.status="Preparing local mod files";marked=true;
         }
-        auto result=host::run_process(command,data.string());
+        auto result=host::run_process(command,directory);
         last_output=result.output.substr(result.output.size()>16384?result.output.size()-16384:0);
         std::sort(private_paths.begin(),private_paths.end(),[](const auto& a,const auto& b){return a.size()>b.size();});
         for(const auto& path:private_paths)for(size_t from=0;(from=last_output.find(path,from))!=std::string::npos;from+=13)last_output.replace(from,path.size(),"[game source]");
