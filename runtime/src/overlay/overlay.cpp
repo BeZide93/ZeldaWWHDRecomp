@@ -1113,7 +1113,7 @@ void tab_graphics() {
         hostui::post([value] { hostui::set("vkCpuVertices", value); });
     }
     ImGui::EndDisabled();
-    help("Applies after restarting. Automatic enables the PowerVR workaround. On converts every attribute; Off disables it.");
+    help("Applies after restarting. Automatic converts only what PowerVR GPUs decode wrongly (32-bit byte-swapped data). On converts every attribute; Off disables it.");
     if (ImGui::TreeNode("Vertex conversion diagnostics")) {
         static int cpuClass = [] { std::string value; hostui::get("vkCpuVertexClasses", value);
             const char* names[] = {"", "none", "swap16", "swap32", "snorm", "scaled", "3comp", "unaligned", "integer", "unorm", "all"};

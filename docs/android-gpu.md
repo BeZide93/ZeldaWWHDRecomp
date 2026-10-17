@@ -142,8 +142,10 @@ pushes, merges or GitHub posts were made.
 
 ## PowerVR graphics
 
-PowerVR devices automatically convert vertices on the CPU to prevent stretched spikes and
-broken geometry. This can reduce performance. In **Graphics → Advanced**, set
+PowerVR devices automatically convert one kind of vertex data on the CPU (32-bit values stored in
+the console's byte order, which their drivers decode wrongly) to prevent stretched spikes and
+broken geometry. All other vertex data stays on the fast GPU path. If something still looks
+broken, **On (all)** converts all vertex data instead, at a larger speed cost. In **Graphics → Advanced**, set
 **Convert vertices on the CPU** to **Off** to disable the workaround, or **Automatic**
 to restore it. **On (all)** enables it on any device. Restart the game after changing it.
 

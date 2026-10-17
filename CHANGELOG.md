@@ -58,7 +58,8 @@ what is on `devel` and not released yet (also in the
 
 - **Android two-screen handhelds:** with GamePad screen set to Off, the game no longer takes the lower screen for a moment when it starts (#222).
 - **PowerVR phones (e.g. Pixel 10): no more stretched spikes** (#207). On PowerVR GPUs the game now converts vertex
-  data on the CPU automatically, because their drivers decode some of it wrongly in the shader. It can cost some speed;
+  data on the CPU automatically, because their drivers decode some of it wrongly in the shader. Only the one kind of
+  data they get wrong is converted (found with a tester's help), so it costs much less speed than converting all of it;
   **Graphics → Advanced → Convert vertices on the CPU** switches it off (Automatic restores it).
 - **Shortcuts: remapping works, Esc opens Settings** (#220). Remapped shortcuts take effect again (the Controls tab was
   catching the input first). Every binding clears the same way in Controls and Shortcuts (right-click, or Delete /
