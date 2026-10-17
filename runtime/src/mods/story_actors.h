@@ -44,6 +44,16 @@ void state_loaded();
 // Pure host hydration after mail state clear, before restored guest threads resume.
 void restore_talk_text();
 uint32_t actor_address(Cpu*,const std::string& mod,const std::string& id);
+// World editor (live reload, main game thread): `actors` are all of the mod's actors as the changed manifest
+// declares them; the ones named in `changed` are removed from the game and created again from their new
+// spec (in their room, once it is the player's). The same actors (ids, game or mod kind) must be declared
+// as at start-up and mod models must be prepared ones. False with a reason leaves everything unchanged.
+bool editor_update(const std::string& mod,const std::vector<story_notebook::ManifestActor>& actors,const std::vector<std::string>& changed,std::string& why);
+// true for kinds whose changes take effect only after a restart (native props, switches, doors and
+// enemies, mod enemies and carried props): the editor says so instead of reloading them live
+bool editor_restart_only(const story_notebook::ManifestActor&);
+// actors removed for the editor and not created again yet
+unsigned editor_pending();
 bool position(Cpu*,const std::string& mod,const std::string& id,story_notebook::WorldPoint& out);
 // Resolve a scene particle's declared actor by exact live identity in the
 // active stage and room, then copy its position. Never expose the raw search

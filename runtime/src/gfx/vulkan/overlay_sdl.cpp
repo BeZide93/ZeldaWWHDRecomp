@@ -273,7 +273,7 @@ void load_saved_options() {
     if (saved("vkPresentMode", {"WWHD_VK_PRESENT_MODE"})) gfxvk::set_present_mode((int)num("vkPresentMode"));
 #ifdef __ANDROID__
     if (v.count("androidSwapDisplays")) dual_display::requested_swap = num("androidSwapDisplays") != 0;
-    if (v.count("androidSecondScreenOff")) gfx::g_second_screen_off = num("androidSecondScreenOff") != 0;
+    gfx::load_second_screen_off(v.count("androidSecondScreenOff") && num("androidSecondScreenOff") != 0);
 #endif
     // GamePad screen (display_modes.h); the start-up test overrides after the saved choices
     using namespace gfx;
