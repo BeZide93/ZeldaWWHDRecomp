@@ -45,6 +45,11 @@ what is on `devel` and not released yet (also in the
   placed actors live with undo/redo, warp to any island, room or quest place, fly a free camera, and test quests in a
   test mode that never touches your real save. Saving writes only your mod's own package. See docs/mod-editor.md.
 
+- **World editor: visual quest editor** (for mod makers). Build a quest as a graph: steps are nodes, and dragging
+  from one step to the next chooses who moves the quest on; branches, unreachable steps and other problems show on
+  the nodes. **Start at this step** jumps straight into a test of any step (test mode, only your mod's own progress
+  is set), the quest step and your mod's flags show live while you play, and you can search, select several actors
+  and copy/paste actors and steps, also into another room.
 - **Mod SDK v3 preview: enemies, props, switches and effects** (for mod makers). Mods can now place the game's own
   residents, breakable props, switches and doors, and enemies with their own state; original mod enemies take damage,
   react to hits, can be targeted, defeated and drop items; mod props can be carried and thrown, and original item models
