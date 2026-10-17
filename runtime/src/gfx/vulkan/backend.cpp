@@ -4228,6 +4228,7 @@ static void init_device(std::vector<const char *> extensions,
     const char* frame = getenv("WWHD_CAPTURE");
     request_tv_dump(path, frame ? std::max(0, atoi(frame)) : 120);
   }
+  bc_decode_startup_check();
   // Instantiate both static worker states before the saver can be constructed, even when
   // async compilation/warmup is disabled. They must outlive the saver's static destructor.
   merge_pipeline_demand_cache(VK_NULL_HANDLE);
