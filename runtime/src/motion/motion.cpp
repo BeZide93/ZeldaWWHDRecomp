@@ -201,6 +201,7 @@ std::string value_of(const Settings& s, const std::string& k) {
     if (k == "gyro.dsuSlot") return std::to_string(s.dsu_slot);
     if (k == "gyro.recenterPad") return std::to_string(s.recenter_pad);
     if (k == "gyro.recenterKey") return std::to_string(s.recenter_key);
+    if (k == "gyro.format") return std::to_string(kFormat);
     return {};
 }
 std::string to_ini(const Settings& s) {
@@ -231,6 +232,22 @@ void from_kv(Settings& s, const std::string& k, const std::string& v) {
 void upgrade_from_first_release(Settings& s) {
     if (s.tuning.sensitivity_x == 1.0f) s.tuning.sensitivity_x = Tuning::kDefaultSensitivity;
     if (s.tuning.sensitivity_y == 1.0f) s.tuning.sensitivity_y = Tuning::kDefaultSensitivity;
+}
+float default_sensitivity(int source) { return source == kDevice ? 1.0f : Tuning::kDefaultSensitivity; }
+Settings from_saved(const std::vector<std::pair<std::string, std::string>>& saved) {
+    Settings s;
+    bool format = false, axis = false, x = false, y = false;
+    for (const auto& [k, v] : saved) {
+        from_kv(s, k, v);
+        format |= k == "gyro.format";
+        axis |= k == "gyro.axis";
+        x |= k == "gyro.sensitivityX";
+        y |= k == "gyro.sensitivityY";
+    }
+    if (!x) s.tuning.sensitivity_x = default_sensitivity(s.source);
+    if (!y) s.tuning.sensitivity_y = default_sensitivity(s.source);
+    if (!saved.empty() && !format && !axis && s.source != kDevice) upgrade_from_first_release(s);
+    return s;
 }
 
 Settings settings() {

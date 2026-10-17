@@ -1845,17 +1845,11 @@ void save_gyro(const motion::Settings& g) {
     });
 }
 void load_gyro() {
-    motion::Settings g;
+    std::vector<std::pair<std::string, std::string>> saved;
     std::string v;
-    bool saved = false, axis = false;
     for (const char* k : motion::kKeys)
-        if (hostui::get(k, v)) {
-            motion::from_kv(g, k, v);
-            saved = true;
-            axis |= !strcmp(k, "gyro.axis");
-        }
-    if (saved && !axis) motion::upgrade_from_first_release(g);
-    motion::set_settings(g);
+        if (hostui::get(k, v)) saved.emplace_back(k, v);
+    motion::set_settings(motion::from_saved(saved));
 }
 // the Gyro window (Controls tab > Gyro...): source, axis, sensitivity, invert, recalibrate, Cemuhook server
 void gyro_window(bool& open) {
@@ -1871,7 +1865,13 @@ void gyro_window(bool& open) {
          "Options > Gyro switch still decides whether it uses the motion, and it ignores the motion while the right "
          "stick is pushed.");
     for (int i = 0; i < motion::kSourceCount; i++)
-        if (radio(motion::source_label(i), g.source == i)) g.source = i;
+        if (radio(motion::source_label(i), g.source == i)) {
+            // an untouched sensitivity follows the new source's default (the device's own sensors: 1.0)
+            const float was = motion::default_sensitivity(g.source), now = motion::default_sensitivity(i);
+            if (g.tuning.sensitivity_x == was) g.tuning.sensitivity_x = now;
+            if (g.tuning.sensitivity_y == was) g.tuning.sensitivity_y = now;
+            g.source = i;
+        }
     if (motion::env_override()) note("WWHD_GYRO=%s overrides the saved source.", getenv("WWHD_GYRO"));
     if (g.source == motion::kOff && motion::gyro_controllers() > 0) note("A controller with a gyro is connected: choose Controller gyro to use it.");
     if (g.source == motion::kController || g.source == motion::kCemuhook || g.source == motion::kDevice) {
@@ -1894,9 +1894,10 @@ void gyro_window(bool& open) {
     ImGui::SameLine(0, 16);
     if (check("Invert##y", g.tuning.invert_y, &v)) g.tuning.invert_y = v;
     if (ImGui::Button("Default sensitivity"))
-        g.tuning.sensitivity_x = g.tuning.sensitivity_y = motion::Tuning::kDefaultSensitivity;
+        g.tuning.sensitivity_x = g.tuning.sensitivity_y = motion::default_sensitivity(g.source);
     help("1.0 turns the view as far as moving a real Wii U GamePad by the same angle would (about twice the "
-         "controller's turn); the default 0.5 lets the view follow the controller about one to one.");
+         "controller's turn). The default for a controller, 0.5, lets the view follow it about one to one; "
+         "with the device gyro the screen you hold is the GamePad, so its default is 1.0.");
     if (g.source == motion::kMouse) {
         ImGui::SetNextItemWidth(220);
         ImGui::SliderFloat("Mouse: degrees per point", &g.mouse_degrees, 0.01f, 1.0f, "%.3f", ImGuiSliderFlags_Logarithmic);

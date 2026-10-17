@@ -413,6 +413,41 @@ static void test_settings_and_sources() {
     from_kv(old, "gyro.sensitivityY", "0.4");
     upgrade_from_first_release(old);
     assert(old.tuning.sensitivity_x == Tuning::kDefaultSensitivity && old.tuning.sensitivity_y == 0.4f);
+    // per-source defaults: 1.0 for the device's own sensors (1:1 like a real GamePad), 0.5 for the others
+    assert(motion::default_sensitivity(motion::kDevice) == 1.0f);
+    for (int src : {kOff, kController, kCemuhook, kMouse})
+        assert(motion::default_sensitivity(src) == Tuning::kDefaultSensitivity);
+    using Saved = std::vector<std::pair<std::string, std::string>>;
+    Settings fresh = motion::from_saved({});
+    assert(fresh == Settings{});
+    Settings dev = motion::from_saved(Saved{{"gyro.source", "device"}});  // no sensitivity saved yet
+    assert(dev.tuning.sensitivity_x == 1.0f && dev.tuning.sensitivity_y == 1.0f);
+    Settings ctl = motion::from_saved(Saved{{"gyro.source", "controller"}});
+    assert(ctl.tuning.sensitivity_x == 0.5f && ctl.tuning.sensitivity_y == 0.5f);
+    // a deliberately saved 1.0 stays: saved with the format marker (every save since), whatever the source
+    for (const char* src : {"device", "controller", "cemuhook", "mouse"}) {
+        Settings chosen;
+        chosen.source = motion::source_from_id(src);
+        chosen.tuning.sensitivity_x = chosen.tuning.sensitivity_y = 1.0f;
+        Saved all;
+        for (const char* k : motion::kKeys) all.emplace_back(k, motion::value_of(chosen, k));
+        assert(to_ini(chosen).find("gyro.format=2\n") != std::string::npos);
+        assert(motion::from_saved(all) == chosen);
+        // even a hand-written file with only a few keys, as long as it has the marker
+        Settings few = motion::from_saved(Saved{{"gyro.source", src}, {"gyro.sensitivityX", "1"},
+                                                {"gyro.sensitivityY", "1.0"}, {"gyro.format", "2"}});
+        assert(few.tuning.sensitivity_x == 1.0f && few.tuning.sensitivity_y == 1.0f);
+    }
+    // the device source came after the first release: its 1.0 is never migrated (a hand-edited settings.ini)
+    Settings hand = motion::from_saved(Saved{{"gyro.source", "device"}, {"gyro.sensitivityX", "1"}, {"gyro.sensitivityY", "1"}});
+    assert(hand.tuning.sensitivity_x == 1.0f && hand.tuning.sensitivity_y == 1.0f);
+    // settings of v0.2.6 and later (with gyro.axis, no marker) keep their 1.0, as before
+    Settings later = motion::from_saved(Saved{{"gyro.source", "controller"}, {"gyro.axis", "yaw"}, {"gyro.sensitivityX", "1"}});
+    assert(later.tuning.sensitivity_x == 1.0f && later.tuning.sensitivity_y == 0.5f && later.tuning.axis == kYawAxis);
+    // the legacy migration still works: v0.2.5 settings (no marker, no axis) lose their untouched 1.0
+    Settings first = motion::from_saved(Saved{{"gyro.source", "controller"}, {"gyro.sensitivityX", "1"},
+                                              {"gyro.sensitivityY", "0.4"}, {"gyro.invertY", "1"}});
+    assert(first.tuning.sensitivity_x == Tuning::kDefaultSensitivity && first.tuning.sensitivity_y == 0.4f && first.tuning.invert_y);
 
     // the mouse source: movement counts only while the game aims; 100 points x 0.1 degrees x sensitivity 1
     Settings m;

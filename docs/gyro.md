@@ -28,11 +28,14 @@ Settings overlay (F1) → **Controls** → **Gyro…**:
   - **Roll**: tilting it to the side like a steering wheel.
 
   Tilting the controller's top up or down always looks up or down.
-- **Sensitivity left/right** and **up/down** (0.05x to 5x, default 0.5x), each with **Invert**.
-  1.0x turns the view as far as a real Wii U GamePad turned by the same angle would; the game turns
-  its first-person view about 1.9 times the GamePad's left/right turn and 1.5 times its up/down tilt
-  (measured in R3 look), so 0.5x lets the view follow the controller about one to one.
-  Settings saved by v0.2.5 to v0.2.7 with the old default 1.0x start at the new default.
+- **Sensitivity left/right** and **up/down** (0.05x to 5x, default 0.5x; 1.0x with the device gyro),
+  each with **Invert**. 1.0x turns the view as far as a real Wii U GamePad turned by the same angle
+  would; the game turns its first-person view about 1.9 times the GamePad's left/right turn and 1.5
+  times its up/down tilt (measured in R3 look), so 0.5x lets the view follow a controller about one
+  to one. With the device gyro the screen you hold is the GamePad, so 1.0x matches it one to one.
+  Choosing another source moves a sensitivity you have not changed to that source's default, and
+  **Default sensitivity** sets the current source's default. A value you choose, 1.0x included, is
+  kept. Settings saved by v0.2.5 to v0.2.7 with the old default 1.0x start at the new default.
 - **Mouse: degrees per point**: how far one point of mouse movement turns the controller (then the
   sensitivity applies).
 - **Cemuhook**: server, port and controller slot (1 to 4).
@@ -81,7 +84,8 @@ On Android choose **Device gyro (phone/tablet)** in **Settings > Controls > Gyro
 It is off by default and requires both a gyro and an accelerometer. Rest the phone
 for a second, enable the game’s own **Options > Gyro**, then aim in first person with
 the right stick at rest. Player space, sensitivity, inversion and recalibration
-work as with a controller. Aiming follows the displayed screen in either landscape
+work as with a controller. The default sensitivity here is 1.0x: the view turns as far
+as the phone, like the real GamePad. Aiming follows the displayed screen in either landscape
 direction. Sensors close in the background and while settings block gameplay, and
 recalibrate on return. The status line reports unavailable sensors.
 `WWHD_GYRO=device` selects this source; `WWHD_GYRO=off` disables it.

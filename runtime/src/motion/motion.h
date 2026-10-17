@@ -30,6 +30,8 @@
 #pragma once
 #include <cstdint>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "fusion.h"
 
@@ -52,16 +54,26 @@ struct Settings {
     int recenter_key = -1;         // keyboard key (macOS virtual key code) that recalibrates (-1 = none)
     bool operator==(const Settings&) const = default;
 };
+// The default sensitivity of a source: 1.0 for the device's own sensors (the phone or tablet is the
+// GamePad: the view turns with it one to one, as with a real GamePad), Tuning::kDefaultSensitivity (0.5)
+// for the others (a controller in the hands: the view follows it about one to one at 0.5, fusion.h).
+float default_sensitivity(int source);
 // key=value lines, the form hostui keeps settings in (also used by the tests)
 std::string to_ini(const Settings& s);
 void from_kv(Settings& s, const std::string& key, const std::string& value);  // unknown keys ignored
+// "gyro.format" marks settings saved since the per-source defaults (value kFormat): never migrated
+constexpr int kFormat = 2;
 const char* const kKeys[] = {"gyro.source", "gyro.axis", "gyro.sensitivityX", "gyro.sensitivityY", "gyro.invertX",
                              "gyro.invertY", "gyro.mouseDegrees", "gyro.dsuHost", "gyro.dsuPort", "gyro.dsuSlot",
-                             "gyro.recenterPad", "gyro.recenterKey"};
+                             "gyro.recenterPad", "gyro.recenterKey", "gyro.format"};
 std::string value_of(const Settings& s, const std::string& key);
 // settings saved by v0.2.5 (the first release with gyro; it had no "gyro.axis"): its default sensitivity
 // 1.0 was too high (issue #45), so an untouched 1.0 becomes the new default
 void upgrade_from_first_release(Settings& s);
+// The saved gyro.* keys (key, value; only those present) as the settings to use: missing sensitivities
+// take the source's default, and only settings of the first release are migrated: no "gyro.format",
+// no "gyro.axis" and not the device source (which came later). A 1.0 chosen since then stays.
+Settings from_saved(const std::vector<std::pair<std::string, std::string>>& saved);
 
 Settings settings();
 // applies at once (starts or stops the Cemuhook client, controller sensors follow on the next host update)
