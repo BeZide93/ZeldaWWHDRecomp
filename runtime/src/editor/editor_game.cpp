@@ -25,8 +25,10 @@
 #include "../mods/guest_mods.h"
 #include "../mods/packages.h"
 #include "../mods/story_actors.h"
+#include "../mods/story_items.h"
 #include "../mods/story_mail.h"
 #include "../mods/story_mail_book.h"
+#include "../mods/story_notebook_list.h"
 #include "../mods/story_scenes.h"
 #include "../mods/story_store.h"
 #include "../overlay/hostui.h"
@@ -56,6 +58,7 @@ bool env_on() {
 // second and right after the editor writes records (records_tick).
 std::mutex g_records_mu;
 std::vector<uint8_t> g_records_copy;  // under g_records_mu; empty: no story progress seen
+void records_tick(bool now = false);   // game thread
 
 // ---------------------------------------------------------------- status and game-thread jobs
 std::mutex g_status_mu;
@@ -472,6 +475,7 @@ void preview_tick(Cpu* c) {
 
 // ---------------------------------------------------------------- Play
 std::atomic<bool> g_playing{false};
+std::atomic<int> g_play_after{0};  // > 0: start at a step asked for Play once the editor's view is back (logic steps counted)
 struct PlayState {
     bool restore = true, turned_test = false, snapshot = false;
     ResumeView view;
@@ -794,6 +798,74 @@ public:
         for (const auto& r : records) values.push_back(book.has(r.kind, r.key) ? int(book.get(r.kind, r.key)) : -1);
         return true;
     }
+    bool write_records(const std::string& mod, const std::vector<RecordValue>& values, std::string& why) override {
+        if (!g_test) return why = "test mode only", false;
+        if (!story_store::ready()) return why = "no story progress in this game (no story mod is loaded)", false;
+        post([mod, values](Cpu*) {
+            story_mail::Book book = story_store::book();
+            unsigned n = 0;
+            for (const auto& v : values) n += v.value < 0 ? book.erase(v.record.kind, v.record.key) : book.set(v.record.kind, v.record.key, uint8_t(v.value));
+            set_status("Set " + std::to_string(n) + " flag(s) of " + mod + " (test mode)");
+            records_tick(true);
+        });
+        return true;
+    }
+    bool start_at_step(const std::string& mod, const std::vector<Record>& erase, const std::vector<RecordValue>& values,
+                       const std::vector<std::pair<std::string, int>>& items, const Location& to, bool play, std::string& why) override {
+        if (!story_store::ready()) return why = "no story progress in this game (no story mod is loaded)", false;
+        if (g_playing) return why = "Stop first: a quest starts at a step from the editor's view", false;
+        bool turned = false;
+        if (!g_test) {  // as Play does: in-game saves go to the test save from now on
+            if (!test_save(why)) return false;
+            turned = true;
+        }
+        const bool warp = !to.id.empty();
+        ss::Warp w;
+        if (warp) {  // the start-at-step destinations stand at a position (an actor's front, a step's place)
+            w.stage = to.stage;
+            w.room = to.room;
+            w.at_position = true;
+            w.pos[0] = to.position.x, w.pos[1] = to.position.y, w.pos[2] = to.position.z;
+            w.angle = to.angle;
+        }
+        const std::string label = to.label;
+        // the records first, then the warp: one state request at a time (test mode's return state first)
+        auto go = [mod, erase, values, items, warp, w, play, label]() {
+            post([mod, erase, values, items, warp, w, play, label](Cpu*) {
+                story_mail::Book book = story_store::book();
+                for (const auto& r : erase) book.erase(r.kind, r.key);
+                unsigned quest_step = 0;
+                for (const auto& v : values) {
+                    if (v.record.kind == story_mail::kRecordTracked) {  // never untrack another mod's quest
+                        const uint16_t now = story_notebook::tracked_key(book);
+                        if (now && now != v.record.key) continue;
+                    }
+                    if (v.record.kind == story_mail::kRecordQuest) quest_step = unsigned(v.value);
+                    book.set(v.record.kind, v.record.key, uint8_t(v.value));
+                }
+                for (const auto& [id, n] : items) {
+                    const int have = std::max(0, int(story_items::count(mod, id)));
+                    if (have < n) story_items::give(mod, id, uint32_t(n - have), "the editor (start at a step)", false);
+                    else if (have > n) story_items::take(mod, id, uint32_t(have - n));
+                }
+                records_tick(true);
+                set_status("Quest of " + mod + " at step " + std::to_string(quest_step) + (warp ? ": warping to " + label : ""));
+                if (warp) {
+                    g_resume.set = false;  // the editor's view comes back at the destination
+                    ss::request_warp(w, [play](bool ok, const std::string& why) {
+                        if (!ok) set_status("Start at step: " + why);
+                        else if (play) g_play_after = 1;
+                    });
+                } else if (play)
+                    g_play_after = 1;
+            });
+        };
+        when_free([turned, go](Cpu*) {
+            if (turned) test_start([go](bool) { go(); });  // the story area and place from before the test, kept first
+            else go();
+        });
+        return true;
+    }
 };
 
 std::recursive_mutex g_mu;  // the session (recursive: a script runs on the game thread inside logic_service)
@@ -1015,7 +1087,7 @@ std::string status() {
 }
 
 namespace {
-void records_tick(bool now = false) {
+void records_tick(bool now) {
     static int pass = 0;
     if (++pass % 8 && !now) return;  // about four times a second
     const uint8_t* area = story_store::ready() ? story_store::area() : nullptr;
@@ -1038,6 +1110,18 @@ void logic_service(Cpu* c) {
     }
     for (auto& job : jobs) job(c);
     run_free_jobs(c);
+    // start at a step: Play from Link once the editor's view is back (after the warp), half a second calm
+    if (g_play_after > 0) {
+        if (g_playing) g_play_after = 0;
+        else if (g_flying && g_free_jobs.empty()) {
+            if (++g_play_after > 15) {
+                g_play_after = 0;
+                std::string why;
+                if (!request_play(false, true, why)) set_status("Play: " + why);
+            }
+        } else
+            g_play_after = 1;
+    }
     run_script();
     preview_tick(c);
     t_game = nullptr;
