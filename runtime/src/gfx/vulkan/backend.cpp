@@ -27,6 +27,7 @@
 #include "stereo.h"
 #include "../hdr.h"
 #include "serial_pipelines.h"
+#include "bc_decoder_choice.h"
 #include "attachment_view_usage.h"
 #include "background_cache_readiness.h"
 #include "../../build_info.h"
@@ -3682,7 +3683,6 @@ static void init_device(std::vector<const char *> extensions,
   // The game's BC1-BC5 textures need this core feature enabled, not just supported (Vulkan spec);
   // devices without it (many Mali/PowerVR GPUs) decode BC uploads with a compute shader (bc_decode).
   enabled.textureCompressionBC = available.textureCompressionBC;
-  if (!available.textureCompressionBC) LOG("[vulkan] device has no BC texture support; compute upload decoder enabled");
   enabled.samplerAnisotropy = available.samplerAnisotropy;
   enabled.independentBlend = available.independentBlend;
   enabled.depthClamp = available.depthClamp;
@@ -3852,6 +3852,16 @@ static void init_device(std::vector<const char *> extensions,
   if (driver.driverID == VK_DRIVER_ID_QUALCOMM_PROPRIETARY || serialPipelines)
     LOG("[vulkan] serial pipeline creation %s (driver id %d, Qualcomm release v%u; WWHD_SERIAL_PIPELINES=0/1 overrides)",
         serialPipelines ? "on" : "off", int(driver.driverID), qualcomm_driver_release(R.properties.driverVersion));
+  {
+    const BcDecoderChoice bc = choose_bc_decoder(driver.driverID, R.properties.vendorID, R.properties.driverVersion,
+                                                 getenv("WWHD_VK_BC_CPU"));
+    R.bcCpuDecode = bc.decoder == BcDecoder::Cpu;
+    const char* forced = getenv("WWHD_VK_FORCE_BC_DECODE");
+    if (!R.enabledFeatures.textureCompressionBC || (forced && strcmp(forced, "0")))
+      LOG("[vulkan] %s; %s upload decoder enabled (%s; WWHD_VK_BC_CPU=0/1 overrides)",
+          R.enabledFeatures.textureCompressionBC ? "WWHD_VK_FORCE_BC_DECODE" : "device has no BC texture support",
+          R.bcCpuDecode ? "CPU" : "compute", bc.reason);
+  }
   init_pass_caches();
   vkGetDeviceQueue(R.device, R.queueFamily, 0, &R.queue);
 #ifdef __ANDROID__

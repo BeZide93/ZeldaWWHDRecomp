@@ -92,6 +92,7 @@ struct Renderer {
  std::unordered_map<VkFormat,VkFormatProperties> formatProperties;
  VkPhysicalDeviceFeatures enabledFeatures{};
  bool computeQueue=false;
+ bool bcCpuDecode=false; // BC uploads without BC textures: CPU decoder instead of compute (bc_decoder_choice.h)
  std::atomic<bool> secondaryPresentHeld{false}; // game-free blocked-present diagnostic
  std::atomic<bool> secondaryInjectAcquireLoss{false},secondaryInjectPresentLoss{false}; // authored WSI diagnostics
  std::atomic<bool> secondaryInjectQueryLoss{false};
