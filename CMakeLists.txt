@@ -2041,3 +2041,8 @@ target_include_directories(validation_diagnostics_test PRIVATE runtime/src)
 target_compile_options(validation_diagnostics_test PRIVATE -UNDEBUG)
 target_link_libraries(validation_diagnostics_test PRIVATE Threads::Threads)
 add_test(NAME validation_diagnostics COMMAND validation_diagnostics_test)
+
+add_executable(camera_mouse_test runtime/tools/camera_mouse_test.cpp)
+target_include_directories(camera_mouse_test PRIVATE runtime/src)
+target_compile_options(camera_mouse_test PRIVATE -UNDEBUG)
+add_test(NAME camera_mouse COMMAND camera_mouse_test)
