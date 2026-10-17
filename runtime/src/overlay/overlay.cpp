@@ -94,6 +94,7 @@ namespace gfxvk { bool buffer_cache_enabled(); }  // gfx/vulkan/buffer_cache.h
 #include "../perf_metrics.h"
 #include "../build_info.h"
 #include "settings_shortcut.h"
+#include "layer_escape.h"
 #include "toggle_guard.h"
 #include "open_reason.h"
 #include "host_focus.h"
@@ -2703,6 +2704,15 @@ bool key(int code, bool down, bool repeat, int mods, KeyOrigin origin) {
     if (escape && !captures() && mods::mouse_captured()) {
         if (down && !repeat) mods::mouse_release();
         return true;
+    }
+    // Next, an action of a platform layer (the world editor's placing, handle drag or quest connection):
+    // the first Esc cancels it, its release and repeats stay with it; Settings opens on an Esc with nothing
+    // to cancel.
+    static LayerEscape layer_escape;
+    if (escape) {
+        static const std::function<bool()> none;
+        const bool active = !captures() && layer_mode() != 0;  // layer_mode: only once the registry is sealed
+        if (layer_escape.route(down, repeat, active, active ? ext::input_layer().cancel : none)) return true;
     }
     // Inside Settings or the game's text prompt Esc keeps its own meaning (close, cancel) below,
     // also when it is the Settings key.

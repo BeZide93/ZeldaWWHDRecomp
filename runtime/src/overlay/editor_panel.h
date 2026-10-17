@@ -57,6 +57,8 @@ void mcp_prompt();                      // a tool client's Allow / Deny question
 void quest_editor(const Value& m);      // the Quests window: the graph (or the list) and its inspector
 void quest_live(const Value& m);        // while playing: the graph with the game's step highlighted
 bool quest_graph_while_playing();       // the user wants the graph over the game while playing
+bool quest_connecting();                // two steps are being connected (the drag, or the popup that completes it)
+void cancel_quest_connect();            // Esc: drop that connection
 void flags_area();                      // the open mod's flags and their values (test mode: editable)
 void search_area();                     // search the open mod
 std::string quest_status();             // "Lighthouse quest: step 3 of 6" for the status bar ("" none)

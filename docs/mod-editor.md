@@ -18,7 +18,9 @@ or from a shortcut with that option added. A normal start has no editor at all: 
 The game starts as usual: the title screen, then your file. As soon as Link is in the world, the
 **editor view** begins: the camera flies freely, Link stands still, and the editor's own panels are over
 the picture. The settings menu still opens with Esc (or F1) and has an **Editor** tab with the same
-panels for quick changes.
+panels for quick changes. While you place a new actor, drag a handle or connect two quest steps, the first
+Esc cancels that instead (as the first Esc frees a captured mouse); Esc with nothing to cancel opens
+Settings.
 
 ## What it changes, and what it never changes
 
@@ -61,7 +63,7 @@ cylinder and handles: drag them to move it, or to turn it with **Turn** chosen i
 or angle snapping on, it moves in steps of 10, 50 or 100 units and turns in steps of 15, 45 or 90
 degrees. While you drag, the actor follows the handle in the game (all selected actors when you move a
 group); it is created again at each new place, so it trails the handle a little. Letting go is one change
-(one Undo step, one entry in the Log). Actors that change
+(one Undo step, one entry in the Log), and Esc during the drag puts everything back. Actors that change
 only after a restart (see below) stay where they are while you drag; the status bar says so, and letting
 go keeps the new place in the package as before.
 
@@ -73,6 +75,7 @@ go keeps the new place in the package as before.
 | Shift / C | ZL / ZR | faster / slower while held |
 | mouse wheel | | change the speed |
 | click | | select an actor, or place the chosen new one |
+| Esc | | cancel placing, a handle drag or a quest connection; with nothing to cancel: Settings |
 | Ctrl+Z / Ctrl+Y (Cmd on a Mac) | | undo / redo |
 | Ctrl+D | | duplicate the selected actor |
 | Ctrl / Shift + click | | select more than one actor |
@@ -87,7 +90,7 @@ field, the camera does not move.
 
 Press **Add** and choose what to place, then click into the picture: the actor stands on the ground where
 you clicked (the game's own collision decides where the ground is). Hold Shift while clicking to place
-more of the same; **Stop placing** in the toolbar ends it.
+more of the same; **Stop placing** in the toolbar or Esc ends it.
 
 - **Game actors:** sign, resident (uo2, um1 or the seated ym1), chest.
 - **Props:** pot, barrel, crate.
@@ -163,7 +166,7 @@ their broken or defeated flag.
   Right-click a step for **Start at this step**, **Edit text**, **Duplicate**, **Add a step after it**,
   **Copy** and **Remove…**. A double click on a step edits its goal in place (Enter keeps it).
 - **Connect two steps:** drag from a step's right-hand dot to another step (or from Start: "any time"),
-  then choose the actor that moves the quest on. The actor is then there only while the quest is at the
+  then choose the actor that moves the quest on (Esc drops the connection). The actor is then there only while the quest is at the
   first step, and talking to it (reading it, opening it) sets the second. Steps only go forward, so an
   arrow always points to a later step. A quest ends with a step's resident talk (**Talk** in the
   Inspector); an actor can't end it.

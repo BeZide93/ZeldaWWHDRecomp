@@ -20,6 +20,7 @@
 #include "hostui.h"
 #include "imgui.h"
 #include "imgui_internal.h"
+#include "layer_escape.h"
 #include "overlay.h"
 // ImGuizmo needs Dear ImGui declared first
 #include "ImGuizmo.h"
@@ -50,6 +51,7 @@ struct ShellState {
     std::vector<bool> type_model;
     bool layout_loaded = false;
 } S;
+editor_escape::Gate g_escape;  // Esc: the placing, the handle drag or the quest connection first
 const float kGrid[] = {0, 10, 50, 100};
 const char* const kGridNames[] = {"Grid off", "Grid 10", "Grid 50", "Grid 100"};
 const float kAngle[] = {0, 15, 45, 90};
@@ -238,7 +240,7 @@ Value drag_poses(const Value& manifest, const Value& sel, const std::string& sel
     ids.push_back(selected);
     return poses;
 }
-// The selection went away (or Play started) during a drag: the actors go back to the package's places, no command.
+// Esc (or the selection went away) during a drag: the actors go back to the package's places, no command.
 void cancel_drag() {
     if (!S.dragging) return;
     editor::end_drag(S.drag_mod, S.drag_ids, true);
@@ -574,7 +576,7 @@ void toolbar(float w) {
     ImGui::SameLine();
     ImGui::Checkbox("Search", &S.search);
     ImGui::SameLine();
-    ImGui::TextDisabled("  Esc: Settings");
+    ImGui::TextDisabled("  Esc: cancel placing, else Settings");
     ImGui::End();
 }
 
@@ -603,7 +605,7 @@ void status_bar(float w, float h) {
         // the handle drag: live in the game, or what waits (restart-only kinds keep the release behaviour)
         const std::string note = editor::drag_note();
         ImGui::SameLine();
-        if (note.empty()) ImGui::TextColored(kGood, "  Moving live in the game");
+        if (note.empty()) ImGui::TextColored(kGood, "  Moving live in the game (Esc cancels)");
         else ImGui::TextColored(kHead, "  %s", note.c_str());
     } else if (!status.empty()) {
         ImGui::SameLine();
@@ -620,7 +622,8 @@ void status_bar(float w, float h) {
         ImGui::SameLine(std::max(ImGui::GetCursorPosX(), w - ImGui::CalcTextSize(mcp.c_str()).x - 16));
         ImGui::TextColored(mcp == "MCP: off" ? kMuted : kGood, "%s", mcp.c_str());
     }
-    ImGui::TextColored(kMuted, "%s", "W A S D fly   E / Q up / down   right mouse look   wheel speed   click select   Tab play");
+    ImGui::TextColored(kMuted, "%s", S.placing.empty() ? "W A S D fly   E / Q up / down   right mouse look   wheel speed   click select   Tab play"
+                                                       : "click: place   Shift+click: place more   Esc: stop placing");
     ImGui::End();
 }
 
@@ -757,13 +760,28 @@ void layout(ImGuiIO& io) {
     }
 }
 
+// Esc taken by the input thread (InputLayer::cancel): cancel what was going on, at the start of the frame
+void escape_frame() {
+    switch (g_escape.requested()) {
+    case editor_escape::Cancel::Drag: cancel_drag(); break;
+    case editor_escape::Cancel::Connect: editor_ui::cancel_quest_connect(); break;
+    case editor_escape::Cancel::Placing: S.placing.clear(); break;
+    case editor_escape::Cancel::None: break;
+    }
+}
+void publish_escape(bool view) {
+    g_escape.publish(view ? editor_escape::what(S.dragging, S.quests && editor_ui::quest_connecting(), !S.placing.empty()) : editor_escape::Cancel::None);
+}
+
 bool wanted(std::string&) { return editor::editor_view() || editor::playing() || editor_mcp::prompt_waiting(); }
 bool draw(float w, float h) {
     ImGuiIO& io = ImGui::GetIO();
     editor_ui::refresh();
+    escape_frame();
     editor_ui::mcp_prompt();  // a tool client's question comes first, whatever the editor shows
-    if (!editor::editor_view() && !editor::playing()) return false;
+    if (!editor::editor_view() && !editor::playing()) return publish_escape(false), false;
     if (editor::playing()) {
+        publish_escape(false);
         cancel_drag();
         // only Stop over the running game
         ImGui::SetNextWindowPos(ImVec2(w * 0.5f, 10), ImGuiCond_Always, ImVec2(0.5f, 0));
@@ -795,6 +813,7 @@ bool draw(float w, float h) {
     toolbar(w);
     panels(w, h);
     status_bar(w, h);
+    publish_escape(true);
     // undo / redo / remove from the keyboard (not while typing)
     if (!io.WantTextInput) {
         const bool cmd = io.KeyCtrl || io.KeySuper;
@@ -873,6 +892,7 @@ void register_layers() {
     overlay::ext::InputLayer layer;
     layer.mode = [] { return editor::editor_view() ? 1 : editor::playing() ? 2 : 0; };
     layer.key = key;
+    layer.cancel = [] { return g_escape.take(); };
     overlay::ext::set_input_layer(std::move(layer));
     overlay::ext::add_shortcut(view_button);
     // test aid: WWHD_TEST_EDITOR_WINDOWS=problems,test,log opens more windows (screenshots)

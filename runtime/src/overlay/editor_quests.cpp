@@ -51,6 +51,8 @@ struct QuestUi {
     bool moved = false, panning = false;
     std::string connecting;             // dragging from this node's output
     std::string connect_from, connect_to;  // the connection the popup completes
+    bool connect_open = false;          // that popup shows
+    bool connect_cancel = false;        // Esc: close it
     std::string editing;                // a node's text edited in place
     char edit_buf[256] = {};
     bool edit_focus = false;
@@ -732,7 +734,14 @@ void node_menu(const Value&) {
 
 // Dropped on a step: which actor moves the quest on (talking to it, reading or opening it).
 void connect_popup(const Value& m) {
-    if (!ImGui::BeginPopup("connect_via")) return;
+    Q.connect_open = ImGui::BeginPopup("connect_via");
+    if (!Q.connect_open) return void(Q.connect_cancel = false);
+    if (Q.connect_cancel) {  // Esc (editor_shell): the connection is dropped
+        Q.connect_cancel = Q.connect_open = false;
+        ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+        return;
+    }
     const int from = step_of(Q.connect_from), to = step_of(Q.connect_to);
     if (Q.connect_to == "end") {
         ImGui::TextColored(kHead, "Step %d -> End", from);
@@ -1196,6 +1205,11 @@ void quest_editor(const Value& m) {
 }
 
 bool quest_graph_while_playing() { return Q.while_playing; }
+bool quest_connecting() { return !Q.connecting.empty() || Q.connect_open; }
+void cancel_quest_connect() {
+    Q.connecting.clear();
+    if (Q.connect_open) Q.connect_cancel = true;
+}
 
 // While playing: the quest graph small, read only, the game's step highlighted.
 void quest_live(const Value& m) {
