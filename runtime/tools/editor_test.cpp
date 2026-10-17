@@ -317,6 +317,7 @@ void package_files(const fs::path& examples) {
     std::ifstream in(dir / "manifest.json");
     std::stringstream text;
     text << in.rdbuf();
+    in.close();  // Windows cannot replace or delete a file that is still open
     const Value manifest = mods::json::parse(text.str());
     FakeHost host;
     editor::Session s(&host);
@@ -345,6 +346,7 @@ void package_files(const fs::path& examples) {
     std::ifstream saved(dir / "manifest.json");
     std::stringstream st;
     st << saved.rdbuf();
+    saved.close();
     const Value back = mods::json::parse(st.str());
     CHECK(back == *s.manifest("sdk-v3-windfall"));
     CHECK(back.get("actors").array[2].get("position").get("x").number == 150);
