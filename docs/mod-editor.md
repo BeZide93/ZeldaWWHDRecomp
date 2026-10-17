@@ -167,6 +167,64 @@ and the mod's flags.
   - turning test mode off takes you back to your progress and place from before the test.
 - **Log** shows the last commands the editor ran, with their parameters and results.
 
+## Using Claude or another MCP client
+
+Claude Code (or any other program that speaks MCP, the Model Context Protocol) can work the editor for you:
+warp around, place and move actors, write their dialogue, check the package and look at the result
+through screenshots. It uses the same commands as the editor's panels, so everything it does is checked,
+can be undone and shows in the editor's **Log**.
+
+### Turning it on
+
+1. Start the game with `--editor` and open **Settings → Editor → Claude / MCP**.
+2. Turn on **Claude / MCP access**. It is off at every start.
+3. Press **Copy command** and run the copied line in a terminal. For Claude Code it looks like this:
+
+   ```sh
+   claude mcp add --transport http wwhd-editor http://127.0.0.1:47615/mcp --header "Authorization: Bearer <token>"
+   ```
+
+4. Start Claude Code and ask, for example: "Warp to the lantern sign, put a new sign next to Link and let
+   it say hello."
+
+The token is a long random password, made new each time you turn the switch on and never saved. After
+you restart the game, run `claude mcp remove wwhd-editor` and add it again with the new command. Other
+MCP clients need the address (`http://127.0.0.1:<port>/mcp`, "Streamable HTTP") and the header
+`Authorization: Bearer <token>`; both are shown in the same place, each with a **Copy** button.
+
+The editor's status bar shows **MCP: off**, **MCP: on, port N** or **MCP: connected**.
+
+### What it can do
+
+- Every command in the [list below](#commands), with the same parameters.
+- `screenshot`: a picture of the game as you see it (`screen`: `tv` or `gamepad`), without the editor's
+  panels, at most 1280 pixels wide.
+- `read_state`: where Link is, the camera, test mode, unsaved changes, and the open mod's quest steps and
+  flags.
+
+### Allow / Deny
+
+Some commands remove or replace things: `remove_actor`, `revert_package`, `save_package`,
+`export_package`, `reset_quest`, `load_state`, and `import_model` when it replaces a file. The client
+must ask for them with `"confirm": true`, and then the game asks **you**: a window "Claude wants to: …"
+with **Allow** and **Deny**. Nothing happens until you press **Allow**; without an answer within two
+minutes the request is refused. Undo works for these changes as in the editor.
+
+### Safety rules
+
+- Only programs on your own computer can connect (the game listens on 127.0.0.1 only), and only with
+  the token. Web pages cannot use it.
+- It exists only when the game was started with `--editor` and you turned it on. It is not available on
+  Android.
+- Files: the client can read files inside the open mod's package and files you picked yourself in the
+  editor (**Choose…** under Import or Export). For any other file the game asks you first and shows the
+  full path.
+- Exports over MCP go only into the `editor-exports` folder of the game's user data (the panel shows
+  where), or into a folder you picked under **Export**. Nothing is ever written anywhere else, and game files are never
+  included.
+- Every call shows in the editor's **Log**, marked **[MCP]**, with its parameters and its result. The
+  token never appears there, in the game's log or in crash reports.
+
 ## Frame rates
 
 The editor and its camera work at 30 fps, with 60 or 120 fps interpolation and with True 60. The camera
@@ -174,8 +232,8 @@ moves at the same speed in every mode.
 
 ## Commands
 
-Everything the editor does is a command with named parameters and a JSON result. The same commands will
-be available to tools later. For scripted tests, `WWHD_EDITOR=1` starts a run in the editor mode, like
+Everything the editor does is a command with named parameters and a JSON result. Claude and other MCP
+clients use exactly these commands (see [Using Claude or another MCP client](#using-claude-or-another-mcp-client)). For scripted tests, `WWHD_EDITOR=1` starts a run in the editor mode, like
 `--editor`, and `WWHD_EDITOR_SCRIPT` runs commands at given frames: `frame {"command": "...", "params": {...}}`
 separated by `;`, or `@file` with one such line per row. Results go to the log.
 
@@ -215,11 +273,12 @@ separated by `;`, or `@file` with one such line per row. Results go to the log.
 | `warp` | `stage`, `room`, `point`?, `position`?, `angle`? | warp to a room's entry point or a position |
 | `warp_to` | `location` | warp to a `list_locations` entry |
 | `warp_back` | | back to before the last warp |
-| `read_state` | | Link's place, the camera, test mode, unsaved changes |
+| `read_state` | | Link's place, the camera, test mode, unsaved changes, the open mod's quest steps and flags |
 | `fly_camera` | `on`, `place_link`? | the free camera on or off |
 | `play` | `from`? (`camera`, `link`), `restore`? | play as Link (test mode on) |
 | `stop` | | back to the editor view |
 | `test_mode` | `on` | test mode |
 | `reset_quest` | `confirm`, `mod`? | test mode: reset the mod's quest progress and flags |
-| `save_state`, `load_state` | `slot` (1–3) | test mode: the test states |
+| `save_state` | `slot` (1–3) | test mode: save a test state |
+| `load_state` | `slot` (1–3), `confirm` | test mode: load a test state (replaces the current progress) |
 | `command_log` | `count`? | the last commands |
