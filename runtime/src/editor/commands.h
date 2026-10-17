@@ -58,6 +58,11 @@ struct Record {
     uint16_t key = 0;
     bool operator==(const Record& o) const { return kind == o.kind && key == o.key; }
 };
+// A record and the value to write (< 0: erase it).
+struct RecordValue {
+    Record record;
+    int value = 0;
+};
 
 // What the command layer needs from the running game. Every call comes from the thread that runs the
 // session; the game implementation queues the work for its own thread and returns at once.
@@ -108,9 +113,26 @@ public:
     virtual bool play(bool from_camera, bool restore, std::string& why) { return why = "the game is not running", false; }
     virtual bool stop(std::string& why) { return why = "the game is not running", false; }
     virtual bool playing() { return false; }
-    // The current values of story records (-1: not set), for read_state: the open mod's quest steps and
-    // flags. False: not known (no story progress, or the game has not looked yet).
-    virtual bool record_values(const std::vector<Record>& records, std::vector<int>& values) { return false; }
+
+    // ---- quests and flags (each optional) ----
+    // The values of story records in the loaded Quest Log (-1: no such record): read_state's quest steps and
+    // flags, the quest editor's graph, status bar and Flags panel. Any thread, cheap: the game may answer
+    // from its own copy of the story records (refreshed a few times a second). False: not known (no story
+    // progress, or the game has not looked yet).
+    virtual bool read_records(const std::vector<Record>& records, std::vector<int>& values, std::string& why) {
+        return why = "the game is not running", false;
+    }
+    // Test mode only: writes records of `mod` (value < 0 erases one).
+    virtual bool write_records(const std::string& mod, const std::vector<RecordValue>& values, std::string& why) {
+        return why = "the game is not running", false;
+    }
+    // Start a quest at a step (test mode, turned on first as Play does): erases `erase` (the mod's own
+    // records), writes `values`, gives or takes the mod's items to the `items` counts, warps to `to` when it
+    // names a place, then plays from Link when `play`.
+    virtual bool start_at_step(const std::string& mod, const std::vector<Record>& erase, const std::vector<RecordValue>& values,
+                               const std::vector<std::pair<std::string, int>>& items, const Location& to, bool play, std::string& why) {
+        return why = "the game is not running", false;
+    }
 };
 inline constexpr int kTestSlots = 3;
 
@@ -168,10 +190,12 @@ private:
     struct Package {
         std::string mod, name, dir;
         Value manifest, saved;
+        Value layout, layout_saved;  // the editor's own sidecar (editor/quest-layout.json): graph node places
     };
     struct Step {
         std::string mod, label;
         Value before, after;
+        bool layout = false;  // a layout step: before / after are layouts
     };
     Host* host_;
     std::vector<Package> packages_;
@@ -197,6 +221,10 @@ private:
     Value dispatch_build(const std::string& command, const Value& params, std::string& why, bool& ok, bool& handled);
     bool where(const Value& params, Place& place, std::string& why);  // at: link, camera or position (snapped)
     Value progress(const std::string& mod, const Value& manifest);    // read_state: quest steps and flags
+    // quests, flags, search, copy and paste (commands_quest.cpp)
+    Value dispatch_quest(const std::string& command, const Value& params, std::string& why, bool& ok, bool& handled);
+    bool change_layout(Package& p, const std::string& label, const Value& layout, Value& result);
+    Value clipboard_;  // copy / paste: {"kind": "actors" | "quest_steps", "items": [...]}
 };
 
 // One problem of a package, with what it is about (for the editor's problem list: a click selects it).
@@ -205,6 +233,7 @@ struct Problem {
     std::string kind;   // "actor", "model", "scene", "quest", "item", "file" or "package"
     std::string id;     // the actor's (model's...) id; empty for the whole package
     std::string field;  // the field when known ("position", "model", ...)
+    std::string severity;  // "" an error (the mod manager refuses the package), "warning" or "info" (the editor's own checks)
 };
 
 // ---- pure helpers (unit-tested) ----

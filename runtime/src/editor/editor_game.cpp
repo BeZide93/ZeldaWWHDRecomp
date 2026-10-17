@@ -50,11 +50,12 @@ bool env_on() {
     return false;
 }
 
-// ---------------------------------------------------------------- read_state's story records
+// ---------------------------------------------------------------- the story records, for any thread
+// read_state, the quest graph, the status bar and the Flags panel read story records from any thread (the UI
+// every frame): the game thread keeps a copy of the loaded Quest Log's story area, refreshed a few times a
+// second and right after the editor writes records (records_tick).
 std::mutex g_records_mu;
-std::vector<Record> g_records_want;  // under g_records_mu
-std::vector<int> g_records_values;
-bool g_records_seen = false;
+std::vector<uint8_t> g_records_copy;  // under g_records_mu; empty: no story progress seen
 
 // ---------------------------------------------------------------- status and game-thread jobs
 std::mutex g_status_mu;
@@ -784,17 +785,13 @@ public:
     bool play(bool from_camera, bool restore, std::string& why) override { return request_play(from_camera, restore, why); }
     bool stop(std::string& why) override;
     bool playing() override { return g_playing; }
-    // read_state may run on any thread (the UI reads it every frame): the game thread refreshes the
-    // values of the records last asked for twice a second (records_tick), this returns its last look
-    bool record_values(const std::vector<Record>& records, std::vector<int>& values) override {
+    // any thread, cheap: the game thread's last copy of the story area (records_tick)
+    bool read_records(const std::vector<Record>& records, std::vector<int>& values, std::string& why) override {
         std::lock_guard<std::mutex> lk(g_records_mu);
-        if (!(g_records_want == records)) {
-            g_records_want = records;
-            g_records_seen = false;
-            return false;
-        }
-        if (!g_records_seen) return false;
-        values = g_records_values;
+        if (g_records_copy.empty()) return why = "no story progress in this game yet (no story mod, or no save file loaded)", false;
+        const story_mail::Book book(g_records_copy.data(), story_block::kAreaRecords);
+        values.clear();
+        for (const auto& r : records) values.push_back(book.has(r.kind, r.key) ? int(book.get(r.kind, r.key)) : -1);
         return true;
     }
 };
@@ -1018,22 +1015,14 @@ std::string status() {
 }
 
 namespace {
-void records_tick() {
+void records_tick(bool now = false) {
     static int pass = 0;
-    if (++pass % 15) return;
-    std::vector<Record> want;
-    {
-        std::lock_guard<std::mutex> lk(g_records_mu);
-        want = g_records_want;
-    }
-    if (want.empty() || !story_store::ready()) return;
-    const story_mail::Book book = story_store::book();
-    std::vector<int> values;
-    for (const auto& r : want) values.push_back(book.has(r.kind, r.key) ? int(book.get(r.kind, r.key)) : -1);
+    if (++pass % 8 && !now) return;  // about four times a second
+    const uint8_t* area = story_store::ready() ? story_store::area() : nullptr;
+    std::vector<uint8_t> copy;
+    if (area) copy.assign(area, area + story_block::kAreaSize);
     std::lock_guard<std::mutex> lk(g_records_mu);
-    if (!(g_records_want == want)) return;
-    g_records_values = std::move(values);
-    g_records_seen = true;
+    g_records_copy = std::move(copy);
 }
 }  // namespace
 

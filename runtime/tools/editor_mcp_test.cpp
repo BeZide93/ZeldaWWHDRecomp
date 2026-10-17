@@ -68,7 +68,7 @@ struct FakeHost : editor::Host {
         return true;
     }
     bool test_state(bool, int, const std::string&, const std::vector<editor::Record>&, std::string&) override { return true; }
-    bool record_values(const std::vector<editor::Record>& records, std::vector<int>& values) override {
+    bool read_records(const std::vector<editor::Record>& records, std::vector<int>& values, std::string&) override {
         values.assign(records.size(), -1);
         if (!values.empty()) values.back() = 0;  // the last quest's flags
         for (size_t i = 0; i < records.size(); i++)

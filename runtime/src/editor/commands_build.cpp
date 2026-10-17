@@ -13,6 +13,7 @@
 #include "../mods/static_model_validation.h"
 #include "../mods/story_manifest.h"
 #include "commands.h"
+#include "quests.h"
 
 namespace editor {
 namespace {
@@ -705,6 +706,16 @@ Value Session::dispatch_build(const std::string& command, const Value& p, std::s
             r["problems"].array.push_back(v);
         }
         r["valid"] = r["problems"].array.empty();
+        // the quest editor's own checks: warnings, they never block saving or exporting (quests.h)
+        for (const auto& pr : quest_problems(pkg->mod, pkg->manifest)) {
+            Value v;
+            v["message"] = pr.message;
+            v["kind"] = pr.kind;
+            v["id"] = pr.id;
+            if (!pr.field.empty()) v["field"] = pr.field;
+            v["severity"] = pr.severity;
+            r["problems"].array.push_back(v);
+        }
         ok = true;
         return r;
     }

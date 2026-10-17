@@ -10,6 +10,7 @@
 #include <fstream>
 #include <map>
 #include <set>
+#include <sstream>
 #include <system_error>
 
 #include "../mods/story_mail_book.h"
@@ -100,6 +101,55 @@ const std::vector<CommandInfo> kCommands = {
     {"play", "Play: the editor hides and Link plays (test mode on: saves go to the test save) from the camera's place or his own.",
      {{"from", "string", "camera (default) or link"}, {"restore", "boolean", "Stop returns to the world as it was before Play (default true)"}}},
     {"stop", "Stop: back to the editor's camera view (restoring the world from before Play when asked).", {}},
+    // ---- quests, flags, search, copy and paste (commands_quest.cpp)
+    {"get_quest", "One quest as the manifest declares it.", {{"quest", "string", "the quest's id", true}, {"mod", "string", ""}}},
+    {"quest_graph", "A quest as a graph: Start, its steps and End as nodes; what moves the quest on (a letter, an actor, an item, a scene, a resident's talk) as edges; each node's problems, the editor's node places and the step the loaded game is at.",
+     {{"quest", "string", "the quest's id", true}, {"mod", "string", ""}}},
+    {"add_quest", "Adds a quest to the open mod (with its first step).",
+     {{"id", "string", "the quest's id (default: from the title)"}, {"title", "string", "the title the notebook shows", true}, {"text", "string", "the first step's text"}, {"mod", "string", ""}},
+     true},
+    {"remove_quest", "Removes a quest and every actor condition and action that names it (an undo step).", {{"quest", "string", "", true}, {"confirm", "boolean", "must be true", true}, {"mod", "string", ""}}, true, true},
+    {"set_quest", "Sets one property of a quest: title, journal, start, reward, letter (null removes it).",
+     {{"quest", "string", "", true}, {"property", "string", "title, journal, start, reward or letter", true}, {"value", "any", "", true}, {"mod", "string", ""}}, true},
+    {"add_quest_step", "Adds a step to a quest: after a step (later steps move up by one) or at the end.",
+     {{"quest", "string", "", true}, {"after", "integer", "the step it follows (default: the last)"}, {"text", "string", "what to do next"}, {"where", "string", "the place's name"},
+      {"place", "object", "{x, z} on the sea chart"}, {"mod", "string", ""}},
+     true},
+    {"edit_quest_step", "Sets several properties of a quest step at once: text, where, place, npc, available, sail_line, find (null removes one).",
+     {{"quest", "string", "", true}, {"step", "integer", "the step's n", true}, {"fields", "object", "{property: value}", true}, {"mod", "string", ""}}, true},
+    {"remove_quest_step", "Removes a quest step and the actor conditions and actions that name it.",
+     {{"quest", "string", "", true}, {"step", "integer", "", true}, {"confirm", "boolean", "must be true", true}, {"mod", "string", ""}}, true, true},
+    {"duplicate_quest_step", "Copies a quest step as a new last step.", {{"quest", "string", "", true}, {"step", "integer", "", true}, {"mod", "string", ""}}, true},
+    {"move_quest_step", "Moves a step to another place in the order: the steps get new numbers and every actor and item that names them follows.",
+     {{"quest", "string", "", true}, {"step", "integer", "", true}, {"to", "integer", "its new place, 1 = first", true}, {"mod", "string", ""}}, true},
+    {"set_step_place", "Sets a step's place on the sea chart (and its name) from Link's place, the camera's or a warp destination.",
+     {{"quest", "string", "", true}, {"step", "integer", "", true}, {"from", "string", "link, camera, location or none (removes it)", true},
+      {"location", "string", "a list_locations id with from = location"}, {"mod", "string", ""}},
+     true},
+    {"connect_quest_steps", "Makes an actor move the quest on: while the quest is at step \"from\" (0: any time) talking to it, reading or opening it sets step \"to\". Also changes the edge's conditions (item, time).",
+     {{"quest", "string", "", true}, {"from", "integer", "the step (0: any time)", true}, {"to", "integer", "the step it sets", true}, {"via", "string", "the actor's id", true},
+      {"item", "string", "a mod item Link must carry (item:<id>; \"-\" removes)"}, {"time", "string", "day or night (\"-\" removes)"}, {"mod", "string", ""}},
+     true},
+    {"disconnect_quest_steps", "Removes an actor's action that sets a step.",
+     {{"quest", "string", "", true}, {"from", "integer", "", true}, {"to", "integer", "", true}, {"via", "string", "the actor's id", true}, {"mod", "string", ""}}, true},
+    {"set_quest_layout", "Places of a quest's graph nodes in the editor (its own file in the package, never the manifest; the game ignores it).",
+     {{"quest", "string", "", true}, {"positions", "object", "{node id: {x, y}}, node ids start, end, step:N", true}, {"mod", "string", ""}}, true},
+    {"start_at_step", "Test mode (turned on first): starts the quest at a step. Sets this mod's quest step and the mod flags and items the earlier steps hand out, warps there and plays from Link. Never sets the game's own event or save bits.",
+     {{"quest", "string", "", true}, {"step", "integer", "", true}, {"warp", "string", "next (in front of the actor that moves it on, the default), place or none"},
+      {"play", "boolean", "play from Link afterwards (default true)"}, {"mod", "string", ""}}},
+    {"quest_state", "The step each of the open mod's quests is at in the loaded game, as the status bar says it (\"Lighthouse quest: step 3 of 6\").", {{"mod", "string", ""}}},
+    {"list_flags", "The open mod's flags (actors, switches, flag actions, props, enemies), who uses each, and their values in the loaded game.", {{"mod", "string", ""}}},
+    {"set_flag", "Test mode: sets one of the open mod's flags in the loaded game (never a game flag).",
+     {{"id", "string", "the flag's id", true}, {"value", "boolean", "", true}, {"mod", "string", ""}}},
+    {"search", "Everything of the open mod whose id or text contains the text: actors, quests and steps, scenes, items, flags.", {{"text", "string", "", true}, {"mod", "string", ""}}},
+    {"copy", "Copies actors or quest steps for paste.",
+     {{"ids", "array", "actor ids"}, {"quest", "string", "with steps: the quest"}, {"steps", "array", "step numbers of that quest"}, {"mod", "string", ""}}},
+    {"paste", "Pastes what copy took: actors (new ids and flags of their own) at Link, at the camera, in the room Link is in or offset; quest steps as new last steps of a quest.",
+     {{"at", "string", "actors: offset (default), link or camera"}, {"offset", "point", "with at = offset (default {x: 100, y: 0, z: 0})"},
+      {"quest", "string", "steps: the quest (default: the one they came from)"}, {"mod", "string", ""}},
+     true},
+    {"move_actors", "Moves several actors by an offset (one undo step).", {{"ids", "array", "", true}, {"offset", "point", "", true}, {"mod", "string", ""}}, true},
+    {"remove_actors", "Removes several actors (one undo step).", {{"ids", "array", "", true}, {"confirm", "boolean", "must be true", true}, {"mod", "string", ""}}, true, true},
 };
 
 // ---------------------------------------------------------------- JSON helpers
@@ -437,6 +487,18 @@ unsigned reset_records(story_mail::Book& book, const std::vector<Record>& own, c
 void Session::add_package(const std::string& mod, const std::string& name, const std::string& dir, const Value& manifest) {
     if (find(mod)) return;
     packages_.push_back({mod, name, dir, manifest, manifest});
+    // the editor's own sidecar in the package (quest graph places); the game never reads it
+    if (!dir.empty()) {
+        std::ifstream f(fs::path(dir) / "editor" / "quest-layout.json", std::ios::binary);
+        if (f) {
+            std::stringstream text;
+            text << f.rdbuf();
+            try {
+                packages_.back().layout = packages_.back().layout_saved = mods::json::parse(text.str());
+            } catch (const std::exception&) {
+            }
+        }
+    }
     // open the first mod that places actors (a quest-only package like a shared notebook comes first otherwise)
     const Package* current = find(open_);
     if (open_.empty() || (current && current->manifest.get("actors").array.empty() && !manifest.get("actors").array.empty())) open_ = mod;
@@ -463,7 +525,7 @@ std::string Session::package_dir(const std::string& mod) const {
 }
 bool Session::dirty(const std::string& mod) const {
     auto* p = find(mod);
-    return p && !(p->manifest == p->saved);
+    return p && (!(p->manifest == p->saved) || !(p->layout == p->layout_saved));
 }
 std::vector<std::string> Session::mods() const {
     std::vector<std::string> out;
@@ -529,7 +591,8 @@ Value Session::progress(const std::string& mod, const Value& manifest) {
         want.push_back({kRecordQuestFlags, key});
     }
     std::vector<int> values;
-    if (want.empty() || !host_ || !host_->record_values(want, values) || values.size() != want.size()) {
+    std::string unknown;
+    if (want.empty() || !host_ || !host_->read_records(want, values, unknown) || values.size() != want.size()) {
         out["known"] = false;
         return out;
     }
@@ -849,7 +912,13 @@ Value Session::dispatch(const std::string& command, const Value& p, std::string&
         auto& to = command == "undo" ? redo_ : undo_;
         if (from.empty()) return why = std::string("nothing to ") + command, r;
         Step s = from.back();
-        if (!restore(s.mod, command == "undo" ? s.before : s.after, r, why)) return r;
+        if (s.layout) {  // the quest graph's node places
+            auto* lp = const_cast<Package*>(find(s.mod));
+            if (!lp) return why = "the mod of this step is gone", r;
+            lp->layout = command == "undo" ? s.before : s.after;
+            r["mod"] = s.mod;
+        } else if (!restore(s.mod, command == "undo" ? s.before : s.after, r, why))
+            return r;
         from.pop_back();
         to.push_back(s);
         r["step"] = s.label;
@@ -896,12 +965,25 @@ Value Session::dispatch(const std::string& command, const Value& p, std::string&
         }
         pkg->saved = pkg->manifest;
         r["file"] = file.string();
+        // the quest graph's node places, next to it in the package's editor folder
+        if (!(pkg->layout == pkg->layout_saved) && pkg->layout.type == Value::Object) {
+            const fs::path dir = fs::path(pkg->dir) / "editor";
+            fs::create_directories(dir, ec);
+            std::ofstream f(dir / "quest-layout.json", std::ios::binary | std::ios::trunc);
+            f << pretty(pkg->layout);
+            if (f.good()) {
+                pkg->layout_saved = pkg->layout;
+                r["layout"] = (dir / "quest-layout.json").string();
+            } else
+                r["note"] = "the quest graph's node places could not be written";
+        }
         ok = true;
         return r;
     }
     if (command == "revert_package") {
         Package* pkg = package(p, why);
         if (!pkg) return r;
+        pkg->layout = pkg->layout_saved;  // the quest graph's node places too
         if (pkg->manifest == pkg->saved) {
             r["changed"] = false;
             ok = true;
@@ -1034,6 +1116,8 @@ Value Session::dispatch(const std::string& command, const Value& p, std::string&
     }
     bool handled = false;
     r = dispatch_build(command, p, why, ok, handled);
+    if (handled) return r;
+    r = dispatch_quest(command, p, why, ok, handled);
     if (handled) return r;
     why = "command \"" + command + "\" is not implemented";
     return r;
