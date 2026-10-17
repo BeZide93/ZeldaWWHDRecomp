@@ -7,6 +7,9 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Android: code mods** (such as the story quests). Turn on **Code mods** in the setup app (or Settings → Mods): your
+  device builds the game again with mod support, and builds each code mod itself the first time it's used. Uses the
+  compiler and Python the setup already has; the download grows by only a few KB.
 - **Mod SDK v3 preview: enemies, props, switches and effects** (for mod makers). Mods can now place the game's own
   residents, breakable props, switches and doors, and enemies with their own state; original mod enemies take damage,
   react to hits, can be targeted, defeated and drop items; mod props can be carried and thrown, and original item models
