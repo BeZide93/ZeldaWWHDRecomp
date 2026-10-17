@@ -50,4 +50,6 @@ void problems_area();                   // the last check's problems: a click se
 void import_area();                     // a .glb into the open mod (check, import)
 void export_area();                     // check and write the package into a folder
 void mod_bar();                         // the open mod, undo / redo, check, save, revert
+void mcp_area();                        // Claude / MCP: the switch, the address, the token and the command
+void mcp_prompt();                      // a tool client's Allow / Deny question, when one waits
 }  // namespace editor_ui

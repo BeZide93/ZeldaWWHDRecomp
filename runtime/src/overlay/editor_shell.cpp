@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "../editor/editor_game.h"
+#include "../editor/mcp_game.h"
 #include "../input_map.h"
 #include "../platform/keycodes.h"
 #include "editor_panel.h"
@@ -464,6 +465,11 @@ void status_bar(float w, float h) {
         ImGui::SameLine();
         ImGui::TextColored(kMuted, "  %s", status.c_str());
     }
+    if (editor_mcp::available()) {
+        const std::string mcp = editor_mcp::status_line();
+        ImGui::SameLine(std::max(ImGui::GetCursorPosX(), w - ImGui::CalcTextSize(mcp.c_str()).x - 16));
+        ImGui::TextColored(mcp == "MCP: off" ? kMuted : kGood, "%s", mcp.c_str());
+    }
     ImGui::TextColored(kMuted, "%s", "W A S D fly   E / Q up / down   right mouse look   wheel speed   click select   Tab play");
     ImGui::End();
 }
@@ -575,10 +581,12 @@ void layout(ImGuiIO& io) {
     }
 }
 
-bool wanted(std::string&) { return editor::editor_view() || editor::playing(); }
+bool wanted(std::string&) { return editor::editor_view() || editor::playing() || editor_mcp::prompt_waiting(); }
 bool draw(float w, float h) {
     ImGuiIO& io = ImGui::GetIO();
     editor_ui::refresh();
+    editor_ui::mcp_prompt();  // a tool client's question comes first, whatever the editor shows
+    if (!editor::editor_view() && !editor::playing()) return false;
     if (editor::playing()) {
         // only Stop over the running game
         ImGui::SetNextWindowPos(ImVec2(w * 0.5f, 10), ImGuiCond_Always, ImVec2(0.5f, 0));

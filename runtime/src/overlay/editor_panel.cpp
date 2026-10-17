@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "../editor/editor_game.h"
+#include "../editor/mcp_game.h"
 #include "editor_shell.h"
 #include "extensions.h"
 #include "hostui.h"
@@ -603,6 +604,7 @@ void import_area() {
     ImGui::SameLine();
     if (ImGui::Button("Choose...##import"))
         hostui::choose_file("Choose a model (.glb)", "glb", false, [](std::string path) {
+            editor_mcp::user_picked(path);  // tool clients may read what the player picked
             std::lock_guard<std::mutex> lk(g_pick_mu);
             g_picked = path;
             g_picked_for = 1;
@@ -787,7 +789,11 @@ void camera_test_area() {
         if (ImGui::Button(label)) command("save_state", p);
         ImGui::SameLine();
         std::snprintf(label, sizeof label, "Load test %d", slot);
-        if (ImGui::Button(label)) command("load_state", p);
+        if (ImGui::Button(label)) {  // the button is the user's own choice: confirmed
+            Value q = p;
+            q["confirm"] = true;
+            command("load_state", q);
+        }
     }
     ImGui::EndDisabled();
     if (confirm_popup("Reset quest?", "Erase this mod's quest progress and flags from the loaded Quest Log?\n"
@@ -805,7 +811,8 @@ void log_area() {
         const auto& e = log[i];
         const bool ok = e.result.get("ok").boolean;
         ImGui::PushID(int(e.seq));
-        if (ImGui::TreeNode("entry", "%llu  %s  %s", (unsigned long long)e.seq, e.command.c_str(), ok ? "ok" : e.result.get("error").string().c_str())) {
+        if (ImGui::TreeNode("entry", "%llu  %s%s  %s", (unsigned long long)e.seq, e.source.empty() ? "" : "[MCP] ", e.command.c_str(),
+                            ok ? "ok" : e.result.get("error").string().c_str())) {
             ImGui::TextWrapped("params: %s", mods::json::dump(e.params).c_str());
             ImGui::TextWrapped("result: %s", mods::json::dump(e.result).substr(0, 4000).c_str());
             ImGui::TreePop();
@@ -866,6 +873,7 @@ void export_area() {
     ImGui::SameLine();
     if (ImGui::Button("Choose...##export"))
         hostui::choose_file("Choose a folder for the package", "", true, [](std::string path) {
+            editor_mcp::user_picked(path);  // tool clients may export into a folder the player picked
             std::lock_guard<std::mutex> lk(g_pick_mu);
             g_picked = path + "/" + g_snap.open;
             g_picked_for = 2;
@@ -942,12 +950,82 @@ void mod_bar() {
     }
 }
 
+// ---------------------------------------------------------------- Claude / MCP
+void mcp_area() {
+    ImGui::TextColored(kHead, "Claude / MCP access");
+    if (!editor_mcp::available()) {
+        muted("This build has no MCP interface.");
+        return;
+    }
+    muted("Lets Claude Code, or another MCP client on this computer, use the editor's commands: warp, place and move "
+          "actors, write dialogue, check the package, take screenshots. Off at every start.");
+    editor_mcp::Status st = editor_mcp::status();
+    bool on = st.on;
+    if (ImGui::Checkbox("Claude / MCP access", &on)) {
+        std::string why;
+        if (!editor_mcp::set_on(on, why)) {
+            U.message = why;
+            U.message_ok = false;
+        }
+        st = editor_mcp::status();
+    }
+    if (!st.error.empty()) wrapped(kBad, "Could not start: " + st.error);
+    if (!st.on) return;
+    ImGui::TextColored(st.connected ? kGood : kMuted, "%s", st.connected ? "A client is connected." : "Waiting for a client.");
+    ImGui::SameLine();
+    ImGui::TextDisabled("(%llu call(s))", (unsigned long long)st.calls);
+    ImGui::Text("Address: http://127.0.0.1:%d/mcp  (this computer only)", st.port);
+    ImGui::TextUnformatted("Token:");
+    ImGui::SameLine();
+    ImGui::TextUnformatted(st.token.c_str());
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Copy##mcp_token")) ImGui::SetClipboardText(st.token.c_str());
+    ImGui::Spacing();
+    ImGui::TextUnformatted("For Claude Code, run this in a terminal:");
+    const std::string cmd = editor_mcp::client_command(st);
+    wrapped(ImVec4(0.85f, 0.88f, 0.92f, 1), cmd);
+    if (ImGui::Button("Copy command##mcp_command")) ImGui::SetClipboardText(cmd.c_str());
+    muted("Exports over MCP go into " + editor_mcp::export_folder() + " or a folder you choose under Export.");
+    ImGui::Spacing();
+    muted("The token is new each time you turn this on and is never saved. After a restart, run "
+          "\"claude mcp remove wwhd-editor\" and add it again with the new command.");
+    muted("Removing actors, reverting, saving, exporting, resetting a quest and loading a test state ask you first "
+          "(Allow / Deny). Claude reads files only inside the open package or ones you picked here; anything else asks "
+          "you. Every call shows in the Log, marked [MCP].");
+}
+
+// Claude wants to: ... Allow / Deny (drawn by the editor's overlays and by this tab, once per frame)
+void mcp_prompt() {
+    static int drawn = -1;
+    if (drawn == ImGui::GetFrameCount()) return;
+    uint64_t id = 0;
+    std::string text;
+    if (!editor_mcp::prompt(id, text)) return;
+    drawn = ImGui::GetFrameCount();
+    const ImGuiViewport* vp = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x * 0.5f, vp->WorkPos.y + vp->WorkSize.y * 0.4f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(std::min(600.0f, vp->WorkSize.x - 32), 0));
+    ImGui::SetNextWindowFocus();
+    ImGui::Begin("Claude / MCP##mcp_prompt", nullptr,
+                 ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
+                     ImGuiWindowFlags_AlwaysAutoResize);
+    ImGui::PushTextWrapPos(0);
+    ImGui::TextUnformatted(text.c_str());
+    ImGui::PopTextWrapPos();
+    ImGui::Spacing();
+    if (ImGui::Button("Allow")) editor_mcp::answer(id, true);
+    ImGui::SameLine();
+    if (ImGui::Button("Deny")) editor_mcp::answer(id, false);
+    ImGui::End();
+}
+
 // ---------------------------------------------------------------- the Editor tab
 void register_tab() {
     overlay::ext::Tab tab{"editor", "Editor", [] { draw(); }, nullptr};
     tab.shown = [] { return editor::enabled(); };
     overlay::ext::add_tab(std::move(tab), "about");
     editor_shell::register_layers();
+    editor_mcp::start_for_tests();  // test runs only (WWHD_TEST_EDITOR_MCP)
 }
 
 void draw() {
@@ -971,9 +1049,11 @@ void draw() {
     const std::string status = editor::status();
     if (!U.message.empty()) wrapped(U.message_ok ? kGood : kBad, U.message);
     if (!status.empty()) wrapped(kMuted, status);
-    static const char* const kAreas[] = {"Actors", "Models", "Scenes", "Quests", "Warp", "Camera & test", "Problems", "Export", "Log"};
+    mcp_prompt();
+    static const char* const kAreas[] = {"Actors", "Models", "Scenes", "Quests", "Warp", "Camera & test", "Problems", "Export", "Log", "Claude / MCP"};
+    const int areas = int(sizeof kAreas / sizeof kAreas[0]) - (editor_mcp::available() ? 0 : 1);
     if (ImGui::BeginTabBar("editor_areas", ImGuiTabBarFlags_FittingPolicyShrink)) {
-        for (int i = 0; i < int(sizeof kAreas / sizeof kAreas[0]); i++) {
+        for (int i = 0; i < areas; i++) {
             const ImGuiTabItemFlags f = U.select_area == i ? ImGuiTabItemFlags_SetSelected : 0;
             if (ImGui::BeginTabItem(kAreas[i], nullptr, f)) {
                 U.area = i;
@@ -1004,6 +1084,7 @@ void draw() {
     case 5: camera_test_area(); break;
     case 6: problems_area(); break;
     case 7: export_area(); break;
+    case 9: mcp_area(); break;
     default: log_area(); break;
     }
     ImGui::EndChild();
