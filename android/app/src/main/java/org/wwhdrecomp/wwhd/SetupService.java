@@ -42,6 +42,8 @@ public class SetupService extends Service {
     private PowerManager power;
     private PowerManager.WakeLock wake;
     private File job;
+    /** This service's lock on {@link #job}: old-job cleanup leaves a held job alone. */
+    private SetupJobCleanup.Hold hold;
     private boolean running;
     private boolean updating;
     private volatile boolean destroyed;
@@ -103,6 +105,11 @@ public class SetupService extends Service {
             if (selected == null) throw new IOException("Choose a game dump before starting setup");
             if (running && !selected.equals(job)) throw new IOException("Another setup job is still running");
             job = selected;
+            if (hold == null || !hold.job.equals(job)) {
+                if (hold != null) { hold.close(); hold = null; }
+                hold = SetupJobCleanup.hold(job);
+                if (hold == null) throw new IOException("The chosen setup job is in use");
+            }
             File previousHost = new File(job, "host.json");
             if (!running) updating = false;
             if (!running && previousHost.isFile()) {
@@ -387,6 +394,11 @@ public class SetupService extends Service {
         }
         if (wake.isHeld()) wake.release();
         worker.shutdown();
+        if (hold != null && !running) {
+            try { hold.close(); }
+            catch (IOException failure) { Log.w("wwhd-setup", "Cannot release the setup job", failure); }
+            hold = null;
+        }
         super.onDestroy();
     }
 }

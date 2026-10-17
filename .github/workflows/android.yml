@@ -69,6 +69,12 @@ jobs:
           java -cp build/resource-cleanup-test org.wwhdrecomp.wwhd.ResourceCacheCleanupTest
           javac -d build/setup-recovery-test android/app/src/main/java/org/wwhdrecomp/wwhd/SetupRecoveryPolicy.java tools/android/SetupRecoveryPolicyTest.java
           java -cp build/setup-recovery-test SetupRecoveryPolicyTest
+          javac -d build/setup-folder-test android/app/src/main/java/org/wwhdrecomp/wwhd/SetupFolderCheck.java tools/android/SetupFolderCheckTest.java
+          java -cp build/setup-folder-test org.wwhdrecomp.wwhd.SetupFolderCheckTest
+          javac -d build/setup-job-cleanup-test android/app/src/main/java/org/wwhdrecomp/wwhd/SetupJobCleanup.java tools/android/SetupJobCleanupTest.java
+          java -cp build/setup-job-cleanup-test org.wwhdrecomp.wwhd.SetupJobCleanupTest
+          javac -d build/setup-picker-test android/app/src/main/java/org/wwhdrecomp/wwhd/SetupPicker.java tools/android/SetupPickerTest.java
+          java -cp build/setup-picker-test org.wwhdrecomp.wwhd.SetupPickerTest
           javac -d build/fold-layout-test android/app/src/main/java/org/wwhdrecomp/wwhd/FoldLayout.java tools/android/FoldLayoutTest.java
           java -cp build/fold-layout-test FoldLayoutTest
           javac -d build/guest-tools-config-test android/app/src/main/java/org/wwhdrecomp/wwhd/GuestToolsConfig.java tools/android/GuestToolsConfigTest.java

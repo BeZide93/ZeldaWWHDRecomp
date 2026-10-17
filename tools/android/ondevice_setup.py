@@ -87,7 +87,12 @@ def run(configuration, package=None, native_run=None, adapter_factory=Adapter, k
             path = private_input(root, source["path"])
             if source["kind"] == "folder":
                 if not adapter.setup.valid_game_folder(str(path)):
-                    raise ValueError("Imported game folder is incomplete")
+                    missing = [name for name, present in (
+                        ("code/cking.rpx", (path / "code" / "cking.rpx").is_file()),
+                        ("content", (path / "content").is_dir()),
+                        ("meta/meta.xml", (path / "meta" / "meta.xml").is_file())) if not present]
+                    raise ValueError("Imported game folder is incomplete (missing " + ", ".join(missing) +
+                                     "). Choose the folder that contains code, content and meta.")
                 game = path
             elif source["kind"] in ("archive", "image"):
                 extractor = job["extractor"]
