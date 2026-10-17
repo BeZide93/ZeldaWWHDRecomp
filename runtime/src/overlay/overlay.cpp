@@ -1268,7 +1268,7 @@ static void pip_live_drag() {
     }
     if (ImGui::IsItemDeactivated())
         hostui::post([] { hostui::save_pip_position(); });
-    ImGui::GetForegroundDrawList()->AddRect(ImVec2(b.x, b.y), ImVec2(b.x + b.w, b.y + b.h), IM_COL32(255, 220, 90, 255),
+    ImGui::GetForegroundDrawList(ImGui::GetMainViewport())->AddRect(ImVec2(b.x, b.y), ImVec2(b.x + b.w, b.y + b.h), IM_COL32(255, 220, 90, 255),
                                             0, 1.5f);
     ImGui::End();
     ImGui::PopStyleVar();
