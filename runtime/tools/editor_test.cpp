@@ -601,7 +601,10 @@ void building(const fs::path& examples) {
     bool model_problem = false;
     for (const auto& pr : r.get("result").get("problems").array) model_problem |= pr.get("kind").string() == "model" && pr.get("id").string() == "carved-post";
     CHECK(model_problem);
-    CHECK(!ok(v.run("export_package", json((std::string(R"({"confirm": true, "path": ")") + (dir.string() + "-out") + "\"}").c_str()))));
+    Value bad_export;  // built as a value: a Windows path has backslashes that are not JSON escapes
+    bad_export["confirm"] = true;
+    bad_export["path"] = dir.string() + "-out";
+    CHECK(!ok(v.run("export_package", bad_export)));
 
     // export: a new folder with the manifest and the package's files; never into the package, never game files
     const fs::path out = temp_dir("export");
