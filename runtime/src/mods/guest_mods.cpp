@@ -137,6 +137,7 @@ void call_original(Cpu* c, uint32_t func) {
     g_mod_bodies[i](c);
 }
 
+PackageObserver g_package_observer=nullptr;
 // Declarative world content is shared by guest and data-only content packages.
 bool prop_texture_context_valid(const story_prop_textures::Context& context){
     if(context.actor<mem::kMem2Start||context.actor>mem::kMem2End-story_props::kClassBytes)return false;
@@ -206,6 +207,7 @@ void load_world(const std::string& mod,const mods::json::Value& manifest,const s
     texture_batch.committed=true;
     scene_batch.committed=true;
     g_world_scenes|=!scenes.empty();
+    if(g_package_observer)g_package_observer(mod,manifest.get("name").string(mod),package_dir,manifest);  // the world editor's inspector
     if(!actors.empty()||!scenes.empty()) {
         story_notebook::note_import();story_mail::note_import();
         LOG("[world] %s: %zu actors, %zu scenes",mod.c_str(),actors.size(),scenes.size());
@@ -992,6 +994,8 @@ void init() {
     });
     if(getenv("WWHD_GUEST_MODS"))LOG("[guestmods] WWHD_GUEST_MODS is retired; install and trust guest packages in the mod manager");
 }
+
+void set_package_observer(PackageObserver observer){g_package_observer=observer;}
 
 std::vector<ModIdentity> enabled_mods() {
     std::vector<ModIdentity> mods;for(const auto& mod:g_loaded)mods.push_back({mod.id,mod.version});return mods;

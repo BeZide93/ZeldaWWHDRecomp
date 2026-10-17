@@ -107,6 +107,7 @@ void set_memory(uint32_t guest) {
     }
 }
 bool ready() { return g_memory != 0; }
+uint8_t* memory_block() { return g_memory ? mem::ptr(g_memory) : nullptr; }
 uint8_t* area() { return g_memory ? mem::ptr(g_memory) : nullptr; }
 story_mail::Book book() { return story_mail::Book(area(), story_block::kAreaRecords); }
 

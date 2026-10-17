@@ -111,8 +111,8 @@ struct LogEntry {
 class Session {
 public:
     explicit Session(Host* host = nullptr) : host_(host) {}
-    // The active mods' packages, at start-up (each with world content or quests). The first one added
-    // becomes the open mod.
+    // The active mods' packages, at start-up (each with world content or quests). The first one that
+    // places actors becomes the open mod (else the first one).
     void add_package(const std::string& mod, const std::string& name, const std::string& dir, const Value& manifest);
     // {"ok": true, "result": ...} or {"ok": false, "error": "..."}; never throws. `log`: false for the UI's
     // own reads every frame (read_state, list_locations...), which stay out of the command log.

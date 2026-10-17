@@ -68,6 +68,11 @@ void configure(void(*original)(Cpu*,uint32_t),uint32_t(*call)(Cpu*,uint32_t,std:
 uint32_t declare(const std::string& mod,const story_notebook::ManifestActor&,const std::string& archive,int resource_index,std::function<void()> talked,
                  story_notebook::WorldPoint minimum={-50,0,-50},story_notebook::WorldPoint maximum={50,200,50},
                  bool skinned=false,std::vector<std::string> clips={},ModelRig rig={});
+// World editor (live reload): the declaration `token` takes a changed spec and model; the actor is
+// created again by its owner. Same checks as declare; combat and carry actors are refused (they take
+// effect after a restart). False leaves the declaration unchanged; apply=false only checks.
+bool redeclare(uint32_t token,const story_notebook::ManifestActor&,const std::string& archive,int resource_index,
+               story_notebook::WorldPoint minimum,story_notebook::WorldPoint maximum,bool skinned,std::vector<std::string> clips,ModelRig rig,bool apply=true);
 bool install(const std::function<std::string(uint32_t)>& replaced_by,const std::function<void(uint32_t,void(*)(Cpu*))>& replace);
 void state_loaded();
 bool talking(uint32_t actor);

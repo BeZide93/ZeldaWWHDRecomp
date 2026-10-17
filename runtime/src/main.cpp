@@ -54,6 +54,8 @@
 #include "mods/packages.h"
 #include "mods/save_backup.h"
 #include "runtime.h"
+#include "overlay/editor_panel.h"
+#include "editor/editor_game.h"
 #ifdef __ANDROID__
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>  // main() becomes SDL_main, called by SDLActivity
@@ -449,6 +451,7 @@ int main(int argc, char** argv) {
 #endif
     }
     crash_context::initialize();
+    editor_ui::register_tab();  // the world editor's Editor tab (shown while the editor is on)
     index_game_functions();
     install_crash_handler();
     start_log_file();
@@ -575,6 +578,7 @@ int main(int argc, char** argv) {
         _exit(ok ? 0 : 1);
     }
     if (mods::packages::has_code_mod_support() && mods::required::check_local()) mods::packages::refresh_guest_startup();
+    guestmods::set_package_observer(editor::register_package);  // the world editor's inspector
     guestmods::init();  // trusted manager packages, before guest threads start
 #ifdef WWHD_DECOMP
     decomp::init();  // decomp build: which functions run decompiled (runtime/src/decomp), after the mods

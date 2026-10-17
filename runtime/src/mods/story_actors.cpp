@@ -28,7 +28,7 @@ static_assert(kIdentityScratchOffset>=kPropsScratchOffset+0x100);
 static_assert(kScratchBytes>=kIdentityScratchOffset+128*identity::kRecordBytes);
 namespace {
 using story_notebook::ManifestActor;
-struct Actor {std::string mod; ManifestActor spec; uint32_t process=0xFFFFFFFFu; bool deleting=false; uint32_t mod_token=0; bool restore_talk=false;uint32_t prop_token=0,switch_token=0,switch_source=0,enemy_token=0;story_items::EnemyMarkerHandle combat_marker{};story_items::PropMarkerHandle carry_marker=0;identity::Fingerprint fingerprint{};bool restore_quarantined=false;};
+struct Actor {std::string mod; ManifestActor spec; uint32_t process=0xFFFFFFFFu; bool deleting=false; uint32_t mod_token=0; bool restore_talk=false;uint32_t prop_token=0,switch_token=0,switch_source=0,enemy_token=0;story_items::EnemyMarkerHandle combat_marker{};story_items::PropMarkerHandle carry_marker=0;identity::Fingerprint fingerprint{};bool restore_quarantined=false;bool respawn=false;};
 std::vector<Actor> g_actors;
 struct ModelResource {std::string archive;int index;story_notebook::WorldPoint minimum,maximum;bool skinned=false;std::vector<std::string> clips;mod_actor::ModelRig rig;};
 std::map<std::pair<std::string,std::string>,ModelResource> g_models;
@@ -283,16 +283,13 @@ void ym1_execute(Cpu* c){
 }
 void ym1_delete(Cpu* c){Actor* a=find(c->r[3]);if(a&&a->spec.resident==kYm1){if(g_talk.actor==a)cancel_talk("delete");talk_latch(a,0);a->restore_talk=false;native_trace(a,c->r[3],"ym1-native-delete");a->process=0xFFFFFFFFu;st32(g_scratch+128+uint32_t(a-g_actors.data())*4,0xFFFFFFFFu);}g_original(c,kYm1Delete);}
 
-}
-bool load(const std::string& mod,const std::vector<ManifestActor>& actors,std::string& why) {return load(mod,actors,why,{});}
-bool load(const std::string& mod,const std::vector<ManifestActor>& actors,std::string& why,const std::vector<std::string>& scene_flags) {
-    if(g_installed)return why="world actors require startup declaration",false;
-    for(size_t i=0;i<actors.size();++i){for(const auto&old:g_actors)if(old.mod==mod&&old.spec.id==actors[i].id)return why="duplicate enabled actor identity",false;for(size_t j=0;j<i;++j)if(actors[j].id==actors[i].id)return why="duplicate actor identity",false;}
-    if(g_actors.size()+actors.size()>128)return why="enabled mods exceed 128 actors overall",false;
-    std::vector<std::string> flags=scene_flags;
-    for(const auto& a:actors){if(!a.flag.empty())flags.push_back(a.flag);if(!a.switch_flag.empty())flags.push_back(a.switch_flag);for(const auto& action:a.then)if(action.kind==story_notebook::StoryAction::Kind::Flag)flags.push_back(action.id);}
+// The checks a mod's actor list must pass, shared by start-up loading and the world editor's live
+// reload so both validate identically. `replacing`: the list replaces the mod's own loaded actors.
+bool check_specs(const std::string& mod,const std::vector<ManifestActor>& actors,bool replacing,std::string& why){
+    for(size_t i=0;i<actors.size();++i){if(!replacing)for(const auto&old:g_actors)if(old.mod==mod&&old.spec.id==actors[i].id)return why="duplicate enabled actor identity",false;for(size_t j=0;j<i;++j)if(actors[j].id==actors[i].id)return why="duplicate actor identity",false;}
+    if(!replacing&&g_actors.size()+actors.size()>128)return why="enabled mods exceed 128 actors overall",false;
     for(const auto& a:actors) {
-        unsigned count=0;for(const auto& old:g_actors)if(old.spec.stage==a.stage&&old.spec.room==a.room)++count;
+        unsigned count=0;for(const auto& old:g_actors)if((!replacing||old.mod!=mod)&&old.spec.stage==a.stage&&old.spec.room==a.room)++count;
         for(const auto& other:actors)if(other.stage==a.stage&&other.room==a.room)++count;
         if(count>story_notebook::kMaxActorsPerRoom)return why="enabled mods exceed 16 actors per room",false;
     }
@@ -312,12 +309,21 @@ bool load(const std::string& mod,const std::vector<ManifestActor>& actors,std::s
     }
     for(size_t i=0;i<actors.size();++i){const auto&a=actors[i];if(a.actor!="switch"&&a.actor!="door")continue;
         if(a.params||a.rotation.x!=0||a.rotation.z!=0||a.scale.x!=1||a.scale.y!=1||a.scale.z!=1||!a.flag.empty()||!a.lines.empty()||!a.then.empty()||!a.drops.empty()||!a.broken_flag.empty())return why="unsupported native switch/door configuration",false;
-        if(a.actor=="switch"){if(a.switch_flag.empty()||!a.switch_actor.empty())return why="invalid switch flag",false;for(const auto&old:g_actors)if(old.mod==mod&&old.spec.actor=="switch"&&old.spec.switch_flag==a.switch_flag)return why="duplicate switch flag",false;for(size_t j=0;j<i;++j)if(actors[j].actor=="switch"&&actors[j].switch_flag==a.switch_flag)return why="duplicate switch flag",false;}
+        if(a.actor=="switch"){if(a.switch_flag.empty()||!a.switch_actor.empty())return why="invalid switch flag",false;if(!replacing)for(const auto&old:g_actors)if(old.mod==mod&&old.spec.actor=="switch"&&old.spec.switch_flag==a.switch_flag)return why="duplicate switch flag",false;for(size_t j=0;j<i;++j)if(actors[j].actor=="switch"&&actors[j].switch_flag==a.switch_flag)return why="duplicate switch flag",false;}
         else if(a.switch_actor.empty()||!a.switch_flag.empty())return why="invalid door switch reference",false;
     }
-    for(const auto&a:actors){story_enemies::Kind kind;if(!enemy_kind(a,kind))continue;if(!configure_enemy_declarations()||!story_enemies::supported(kind))return why="Native enemy child ownership route is not admitted",false;
+    for(const auto&a:actors){story_enemies::Kind kind;if(!enemy_kind(a,kind))continue;if((!replacing&&!configure_enemy_declarations())||!story_enemies::supported(kind))return why="Native enemy child ownership route is not admitted",false;
         if(!a.kind.empty()||a.params||a.rotation.x!=0||a.rotation.z!=0||a.scale.x!=1||a.scale.y!=1||a.scale.z!=1||a.defeated_flag.empty()||!story_mail::valid_id(a.defeated_flag)||!a.flag.empty()||!a.broken_flag.empty()||!a.switch_flag.empty()||!a.switch_actor.empty()||!a.lines.empty()||!a.then.empty()||!a.model.empty()||!a.animation.empty()||a.look_at.enabled||!a.path.points.empty())return why="Unsupported native enemy configuration",false;
     }
+    return true;
+}
+}
+bool load(const std::string& mod,const std::vector<ManifestActor>& actors,std::string& why) {return load(mod,actors,why,{});}
+bool load(const std::string& mod,const std::vector<ManifestActor>& actors,std::string& why,const std::vector<std::string>& scene_flags) {
+    if(g_installed)return why="world actors require startup declaration",false;
+    if(!check_specs(mod,actors,false,why))return false;
+    std::vector<std::string> flags=scene_flags;
+    for(const auto& a:actors){if(!a.flag.empty())flags.push_back(a.flag);if(!a.switch_flag.empty())flags.push_back(a.switch_flag);for(const auto& action:a.then)if(action.kind==story_notebook::StoryAction::Kind::Flag)flags.push_back(action.id);}
     std::vector<Actor> staged;staged.reserve(actors.size());g_actors.reserve(g_actors.size()+actors.size());
     struct LoadRollback {size_t props=story_props::checkpoint(),models=mod_actor::checkpoint(),switches=story_switches::checkpoint(),enemies=story_enemies::checkpoint(),ownership=story_enemy_ownership::checkpoint();story_items::PropMarkerCheckpoint markers=story_items::prop_marker_checkpoint();decltype(g_flag_names) flags=g_flag_names;bool committed=false;~LoadRollback(){if(!committed){story_props::rollback(props);mod_actor::rollback(models);story_switches::rollback(switches);story_enemies::rollback(enemies);story_enemy_ownership::rollback(ownership);story_items::rollback_prop_markers(markers);g_flag_names=std::move(flags);}}} rollback;
     if(!register_flags(mod,flags,why))return false;
@@ -442,6 +448,18 @@ void service(Cpu* c){
     }
     Cpu probe=*c;const uint32_t play=g_call(&probe,kPlay,{});if(!play)return;
     const uint32_t player=ld32(play+0x5B34);if(!player)return;
+    // the editor's changed actors: removed wherever they are, then created again by room_loaded below
+    for(auto& a:g_actors){
+        if(!a.respawn)continue;
+        if(a.process==0xFFFFFFFFu){a.respawn=false;continue;}
+        if(g_talk.actor==&a)continue;
+        st32(g_scratch+0x40,0);probe=*c;const uint32_t exists=g_call(&probe,kSearch,{a.process,g_scratch+0x40});
+        const uint32_t actor=ld32(g_scratch+0x40);
+        if(mod_actor::talking(actor))continue;
+        if(actor&&!a.deleting){probe=*c;if(g_call(&probe,kDelete,{actor}))a.deleting=true;}
+        if(!exists){a.process=0xFFFFFFFFu;st32(g_scratch+128+uint32_t(&a-g_actors.data())*4,a.process);a.respawn=false;a.deleting=false;
+            if(a.mod_token)mod_actor::retry(a.mod_token);LOG("[actors] %s:%s removed for the editor; created again from its new spec",a.mod.c_str(),a.spec.id.c_str());}
+    }
     const int room=int8_t(ld8(player+0x326));if(room<0||room>63)return;
     if(ld32(g_scratch+0x318)!=ld32(GD(0x1047E6C4))||ld32(g_scratch+0x400+uint32_t(room)*4)!=ld32(GD(0x1047E8F0)+uint32_t(room)*0x22C))return;
     if(std::memcmp(mem::ptr(g_scratch+0x300),mem::ptr(kStage),8)!=0||!(ld8(g_scratch+0x308+uint32_t(room)/8)&(1u<<(uint32_t(room)%8))))return;
@@ -496,6 +514,56 @@ uint32_t actor_address(Cpu* c,const std::string& mod,const std::string& id) {
     if(!g_call||!g_scratch)return 0;
     for(auto& a:g_actors)if(a.mod==mod&&a.spec.id==id&&a.process!=0xFFFFFFFFu){Cpu call=*c;st32(g_scratch+0x40,0);g_call(&call,kSearch,{a.process,g_scratch+0x40});return ld32(g_scratch+0x40);}return 0;
 }
+namespace {
+// Actors whose game-side state is declared once at start-up (native props, switches, doors and enemies,
+// mod enemies and carried props): their markers, reward/break sinks and saved identities follow the
+// declaration, so a changed spec takes effect after a restart.
+const char* restart_kind(const ManifestActor& a){
+    story_enemies::Kind enemy;
+    if(enemy_kind(a,enemy))return "an enemy";
+    if(story_props::is_prop(a))return "a pot, barrel or crate";
+    if(a.actor=="switch"||a.actor=="door")return "a switch or door";
+    if(a.kind=="mod"&&a.combat_enabled)return "a mod enemy (combat)";
+    if(a.kind=="mod"&&a.carry_enabled)return "a carried prop";
+    return nullptr;
+}
+}
+bool editor_restart_only(const ManifestActor& a){return restart_kind(a)!=nullptr;}
+bool editor_update(const std::string& mod,const std::vector<ManifestActor>& actors,const std::vector<std::string>& changed,std::string& why){
+    std::vector<Actor*> own;for(auto& a:g_actors)if(a.mod==mod)own.push_back(&a);
+    if(own.size()!=actors.size())return why="adding or removing actors takes effect when the game starts again (save the package, then restart)",false;
+    std::vector<Actor*> target;
+    for(const auto& spec:actors){
+        auto it=std::find_if(own.begin(),own.end(),[&](Actor* a){return a->spec.id==spec.id;});
+        if(it==own.end())return why="actor "+spec.id+" is new: it appears when the game starts again",false;
+        if(((*it)->spec.kind=="mod")!=(spec.kind=="mod"))return why="actor "+spec.id+": changing between a game actor and a mod model takes effect when the game starts again",false;
+        if(std::find(changed.begin(),changed.end(),spec.id)!=changed.end()){
+            const char* kind=restart_kind((*it)->spec);if(!kind)kind=restart_kind(spec);
+            if(kind)return why="actor "+spec.id+" is "+kind+": the change takes effect after a restart (save the package, then restart)",false;
+        }
+        target.push_back(*it);
+    }
+    // mod models: only prepared ones (a new model is prepared when the game starts)
+    for(const auto& spec:actors)if(spec.kind=="mod"&&!g_models.contains({mod,spec.model}))
+        return why="model "+spec.model+" is prepared when the game starts: save the package and restart to see it",false;
+    if(!check_specs(mod,actors,true,why))return false;
+    std::vector<std::string> flags;for(const auto& a:actors){if(!a.flag.empty())flags.push_back(a.flag);if(!a.switch_flag.empty())flags.push_back(a.switch_flag);for(const auto& action:a.then)if(action.kind==story_notebook::StoryAction::Kind::Flag)flags.push_back(action.id);}
+    auto saved_flags=g_flag_names;if(!register_flags(mod,flags,why))return false;
+    // check every changed mod model first, then apply: a refusal leaves all declarations unchanged
+    for(const bool apply:{false,true})for(size_t i=0;i<actors.size();++i){const auto& spec=actors[i];if(spec.kind!="mod")continue;
+        if(std::find(changed.begin(),changed.end(),spec.id)==changed.end())continue;
+        const auto& r=g_models.at({mod,spec.model});
+        if(!target[i]->mod_token||!mod_actor::redeclare(target[i]->mod_token,spec,r.archive,r.index,r.minimum,r.maximum,r.skinned,r.clips,r.rig,apply)){
+            g_flag_names=saved_flags;return why="actor "+spec.id+": the model can't serve this spec (animation, look_at, rotation or scale)",false;}
+    }
+    for(size_t i=0;i<actors.size();++i){
+        if(std::find(changed.begin(),changed.end(),actors[i].id)==changed.end())continue;
+        target[i]->spec=actors[i];target[i]->respawn=true;
+        LOG("[actors] %s:%s changed by the editor",mod.c_str(),actors[i].id.c_str());
+    }
+    return true;
+}
+unsigned editor_pending(){unsigned n=0;for(const auto& a:g_actors)n+=a.respawn;return n;}
 bool position(Cpu* c,const std::string& mod,const std::string& id,story_notebook::WorldPoint& p){const uint32_t a=actor_address(c,mod,id);if(!a)return false;p={u32_as_f32(ld32(a+0x314)),u32_as_f32(ld32(a+0x318)),u32_as_f32(ld32(a+0x31C))};return true;}
 bool particle_position(Cpu* c,const std::string& mod,const std::string& id,unsigned room,story_notebook::WorldPoint& out){
     out={};if(!c||!g_installed||!g_scratch||room>63)return false;

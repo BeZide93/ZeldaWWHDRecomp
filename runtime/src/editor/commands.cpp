@@ -27,7 +27,7 @@ const std::vector<CommandInfo> kCommands = {
     {"open_mod", "Opens a mod: later commands without \"mod\" act on it.", {{"mod", "string", "the mod's id", true}}},
     {"list_actors", "The open mod's placed actors (game actors and mod models).", {{"mod", "string", "another mod than the open one"}}},
     {"get_actor", "One placed actor as the manifest declares it.", {{"id", "string", "the actor's id", true}, {"mod", "string", ""}}},
-    {"set_actor", "Sets one property of a placed actor (null removes it): position, rotation, scale, model, lines, collision, attention, animation, flag, stage, room, when, then, look_at, path, parameters.",
+    {"set_actor", "Sets one property of a placed actor (null removes it): position, rotation, scale, model, lines, collision, attention, animation, flag, stage, room, when, then, look_at, path, parameters, defeated_flag, broken_flag, drops, native_drops, combat, carry, switch_flag, switch, texture.",
      {{"id", "string", "the actor's id", true}, {"property", "string", "the manifest field", true}, {"value", "any", "the new value; null removes the field", true}, {"mod", "string", ""}},
      true},
     {"move_actor", "Moves a placed actor.", {{"id", "string", "", true}, {"position", "point", "{x, y, z} in world units", true}, {"mod", "string", ""}}, true},
@@ -400,7 +400,9 @@ unsigned reset_records(story_mail::Book& book, const std::vector<Record>& own, c
 void Session::add_package(const std::string& mod, const std::string& name, const std::string& dir, const Value& manifest) {
     if (find(mod)) return;
     packages_.push_back({mod, name, dir, manifest, manifest});
-    if (open_.empty()) open_ = mod;
+    // open the first mod that places actors (a quest-only package like a shared notebook comes first otherwise)
+    const Package* current = find(open_);
+    if (open_.empty() || (current && current->manifest.get("actors").array.empty() && !manifest.get("actors").array.empty())) open_ = mod;
 }
 const Session::Package* Session::find(const std::string& mod) const {
     for (const auto& p : packages_)
@@ -682,7 +684,8 @@ Value Session::dispatch(const std::string& command, const Value& p, std::string&
     if (command == "set_actor") {
         static const std::set<std::string> allowed = {"actor", "kind", "model", "animation", "look_at", "path", "collision", "attention",
                                                       "stage", "room", "position", "rotation", "scale", "params", "parameters", "flag",
-                                                      "when", "lines", "then"};
+                                                      "when", "lines", "then", "defeated_flag", "broken_flag", "drops",
+                                                      "native_drops", "combat", "carry", "switch_flag", "switch", "texture"};
         const std::string property = text(p, "property");
         if (!allowed.contains(property)) return why = "\"" + property + "\" is not an actor property the editor sets", r;
         return actor_edit("Set " + property + " of " + text(p, "id"), [&](Value& a, std::string&) {
