@@ -1266,10 +1266,11 @@ add_executable(story_actors_runtime_test runtime/tools/story_actors_runtime_test
   runtime/src/mods/story_props.cpp runtime/src/mods/story_switches.cpp runtime/src/mods/native_actor_carry.cpp runtime/src/mods/native_actor_profiles.cpp
   runtime/src/mods/story_enemies.cpp runtime/src/mods/story_enemy_ownership.cpp runtime/src/mods/story_enemy_projectiles.cpp runtime/src/mods/story_enemy_children.cpp runtime/src/guest_addr_identity.c)
 target_include_directories(story_actors_runtime_test PRIVATE runtime/include runtime/src)
-target_sources(story_actors_runtime_test PRIVATE runtime/src/mods/mod_actor_knockback.cpp runtime/src/mods/mod_actor_native_combat.cpp runtime/src/mods/mod_actor_attention.cpp runtime/src/mods/story_item_models.cpp)
+target_sources(story_actors_runtime_test PRIVATE runtime/src/mods/mod_actor_knockback.cpp runtime/src/mods/mod_actor_native_combat.cpp runtime/src/mods/mod_actor_attention.cpp runtime/src/mods/story_item_models.cpp runtime/src/mods/actor_model_cache.cpp)
 target_compile_options(story_actors_runtime_test PRIVATE -UNDEBUG)
 add_test(NAME story_actor_native_contract COMMAND story_actors_runtime_test)
 add_test(NAME story_actor_nonresident_hook_scope COMMAND story_actors_runtime_test --no-resident)
+add_test(NAME story_actor_editor_live COMMAND story_actors_runtime_test --editor)
 add_test(NAME story_actor_seated_resident_contract COMMAND story_actors_runtime_test --ym1)
 add_test(NAME story_actor_prop_spawn_contract COMMAND story_actors_runtime_test --props)
 add_test(NAME story_actor_switch_door_contract COMMAND story_actors_runtime_test --switches)
