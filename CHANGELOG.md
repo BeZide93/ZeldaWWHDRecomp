@@ -30,6 +30,10 @@ what is on `devel` and not released yet (also in the
   the package with a clickable problem list and export it. **Play / Stop** lets you test as Link in a test mode that
   never touches your real save, and Stop puts the world back. New enemies, pots, switches and doors appear after a
   restart. Saving writes only your mod's own package. See docs/mod-editor.md.
+
+- **World editor (preview, for mod makers):** start the game with `--editor` to get an Editor tab for your mod: change
+  placed actors live with undo/redo, warp to any island, room or quest place, fly a free camera, and test quests in a
+  test mode that never touches your real save. Saving writes only your mod's own package. See docs/mod-editor.md.
 - **Mod SDK v3 preview: enemies, props, switches and effects** (for mod makers). Mods can now place the game's own
   residents, breakable props, switches and doors, and enemies with their own state; original mod enemies take damage,
   react to hits, can be targeted, defeated and drop items; mod props can be carried and thrown, and original item models
