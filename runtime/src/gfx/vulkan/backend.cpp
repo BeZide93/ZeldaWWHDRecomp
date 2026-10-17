@@ -16,6 +16,7 @@
 #define VK_USE_PLATFORM_METAL_EXT  // VK_EXT_metal_surface: AppKit views' CAMetalLayers
 #endif
 #include "../../exception_report.h"
+#include "platform/present_observer.h"
 #ifdef __ANDROID__
 #define VK_USE_PLATFORM_ANDROID_KHR
 #include <android/native_window_jni.h>
@@ -32,6 +33,11 @@
 #include "background_cache_readiness.h"
 #include "../../build_info.h"
 #include "deferred_commands.h"
+#include "record_worker.h"
+#include "submission_cpu_ack.h"
+#include "worker_present_policy.h"
+#include "handoff_trace.h"
+#include <optional>
 #include "deferred_dispatch.h"
 #include "pipeline_cache_path.h"
 #include "bc_decode.h"
@@ -143,6 +149,80 @@ extern uint32_t g_latteCpuVertexClasses;
 extern bool g_latteCpuVertexDecode;  // Cemu GLSL attribute decoder (LatteDecompiler.h), issue #207 diagnostic
 namespace gfxvk {
 Renderer R;
+namespace {
+// Opt-in TV-only observation. IDs never derive from a mutable drawable-acquire
+// ticket: command encoding may acquire the Metal drawable on another thread.
+struct ObservedPresent { uint64_t epoch, frame; };
+bool presentObservation = false;
+PFN_vkGetPastPresentationTimingGOOGLE observedHistory = nullptr;
+uint32_t nextObservedPresent = 0;
+constexpr size_t MaxObservedPresents = 65536;
+std::unordered_map<uint32_t, ObservedPresent> pendingObservedPresents;
+}
+void poll_present_observer() {
+  if (!presentObservation || !observedHistory || !R.tv.swapchain) return;
+  uint32_t count = 0;
+  VkResult result = observedHistory(R.device, R.tv.swapchain, &count, nullptr);
+  if (result != VK_SUCCESS || count > MaxObservedPresents) {
+    present_observer::fail("GOOGLE history count query failed/overflowed");
+    return;
+  }
+  if (!count) return;
+  std::vector<VkPastPresentationTimingGOOGLE> values(count);
+  result = observedHistory(R.device, R.tv.swapchain, &count, values.data());
+  if ((result != VK_SUCCESS && result != VK_INCOMPLETE) || count > values.size()) {
+    present_observer::fail("GOOGLE history data query failed/overflowed");
+    return;
+  }
+  // VK_INCOMPLETE still returns and consumes the first count records.
+  for (uint32_t i = 0; i < count; ++i) {
+    const auto& value = values[i];
+    auto found = pendingObservedPresents.find(value.presentID);
+    if (found == pendingObservedPresents.end() ||
+        found->second.epoch != R.tv.swapchainGeneration) {
+      present_observer::fail("unknown/duplicate/wrong-epoch GOOGLE present ID");
+      continue;
+    }
+    const auto immutable = found->second;
+    present_observer::google_history(immutable.epoch, value.presentID, immutable.frame,
+        value.desiredPresentTime, value.actualPresentTime,
+        value.earliestPresentTime, value.presentMargin);
+    pendingObservedPresents.erase(found);
+  }
+}
+static void drain_observed_history() {
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+  do {
+    poll_present_observer();
+    if (pendingObservedPresents.empty()) break;
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  } while (std::chrono::steady_clock::now() < deadline);
+  if (!pendingObservedPresents.empty())
+    present_observer::fail("missing GOOGLE history at bounded scripted endpoint");
+}
+void wait_idle();
+void flush_present_observer() {
+  if (fallback_stats::storage) {
+    fallback_stats::begin_frame(R.frame);
+    drain_record_commands(fallback_stats::Boundary::Endpoint);
+    const bool complete = fallback_stats::flush();
+    LOG("[vulkan fallback stats] %s", complete ? "complete" : "failed");
+  }
+  if (handoff_trace::enabled()) {
+    drain_record_commands();
+    const bool complete = handoff_trace::flush();
+    LOG("[vulkan handoff trace] %s", complete ? "complete" : "failed");
+  }
+  if (!present_observer::enabled()) return;
+  if (presentObservation && R.device && observedHistory) {
+    // Caller owns the renderer execution mutex. No default-path queue wait.
+    wait_idle();
+    drain_observed_history();
+  } else {
+    present_observer::fail("present observation unavailable at endpoint");
+  }
+  present_observer::flush();
+}
 namespace { BackgroundCacheReadiness backgroundCacheReadiness; }
 const VkFormatProperties& format_properties(VkFormat format) {
   auto [entry, inserted] = R.formatProperties.try_emplace(format);
@@ -627,10 +707,12 @@ UploadSlice allocate_upload(VkDeviceSize size, VkDeviceSize alignment) {
     auto result = slice(block);
     if (result.buffer) return result;
   }
+  if (handoff_trace::enabled()) handoff_trace::emit(handoff_trace::Lane::Producer, handoff_trace::Kind::UploadGrowBegin, 0, R.frame, size, R.uploadBlocks.size());
   auto buffer = create_buffer(std::max<VkDeviceSize>(32ull<<20,size),
       VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
       VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+  if (handoff_trace::enabled()) handoff_trace::emit(handoff_trace::Lane::Producer, handoff_trace::Kind::UploadGrowEnd, 0, R.frame, buffer.size, R.uploadBlocks.size());
   note_upload_block(buffer);
   R.uploadBlocks.push_back({buffer,0});
   ++R.uploadAllocations;
@@ -879,10 +961,17 @@ static void report_gpu_timestamps() {
   previousFrame = R.frame;
 }
 VkCommandBuffer command_buffer() {
+  fallback_stats::begin_frame(R.frame);
+  if (handoff_trace::enabled()) handoff_trace::set_producer_frame(R.frame);
   if (!R.recording) {
     VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
     bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vk_check(vkBeginCommandBuffer(R.cmd, &bi), "begin command buffer");
+    if (auto* stream = record_worker_commands()) {
+      if (!stream->beginCommandBuffer(R.cmd, bi.flags)) {
+        drain_record_commands(fallback_stats::Boundary::EncoderFallback, 28, stream->failure_reason());
+        vk_check(vkBeginCommandBuffer(R.cmd, &bi), "begin command buffer fallback");
+      }
+    } else vk_check(vkBeginCommandBuffer(R.cmd, &bi), "begin command buffer");
     R.recording = true;
     begin_overlay_gpu_queries(R.cmd, R.submissions[R.activeSubmission]);
     if (R.gpuTimestampsEnabled) {
@@ -1025,6 +1114,7 @@ static VkResult initialize_submission_queries(Renderer::Submission& slot,bool pa
   return vkCreateQueryPool(R.device,&info,nullptr,&slot.timestampQueries);
 }
 bool begin_exact_preparation() {
+  if (record_worker_active()) return false; // resolve pipeline handles on the producer; no lambda queue
   if(!active_deferred_commands)deferred_commands().start_capture();
   return active_deferred_commands!=nullptr;
 }
@@ -1060,7 +1150,22 @@ static VkResult try_initialize_submission(Renderer::Submission& slot) {
 void initialize_submission(Renderer::Submission& slot) {
   vk_check(try_initialize_submission(slot),"initialize submission slot");
 }
+static void wait_record_submission(Renderer::Submission& slot) {
+  // A still-signaled old fence is not evidence for a queued worker submission.
+  // Wait until the CPU worker actually ended/reset/submitted this exact slot.
+  acknowledge_submission_cpu(slot.recordWorkerSerial, [&](uint64_t serial) {
+    if (handoff_trace::enabled()) handoff_trace::emit(handoff_trace::Lane::Producer, handoff_trace::Kind::DrainBegin, slot.recordWorkerSerial, R.frame, uint64_t(handoff_trace::Reason::CpuSubmissionAck), slot.serial);
+    wait_record_commands(serial, handoff_trace::Reason::CpuSubmissionAck);
+    if (handoff_trace::enabled()) handoff_trace::emit(handoff_trace::Lane::Producer, handoff_trace::Kind::DrainEnd, slot.recordWorkerSerial, R.frame, uint64_t(handoff_trace::Reason::CpuSubmissionAck), slot.serial);
+  });
+}
+static bool try_record_submission(Renderer::Submission& slot) {
+  if (!record_commands_emitted(slot.recordWorkerSerial)) return false;
+  slot.recordWorkerSerial = 0;
+  return true;
+}
 static void resolve_retained_submission(Renderer::Submission& slot) {
+  wait_record_submission(slot);
   if(slot.retainedUnsubmitted) {
     if(!slot.deferredOwner)throw std::logic_error("retained submission has no command owner");
     slot.deferredOwner->finish_exact();
@@ -1105,7 +1210,11 @@ static void retire_submission(Renderer::Submission& slot, WaitTiming& timing=sub
   VkResult status=timed_call(fenceStatusTiming,[&] { return vkGetFenceStatus(R.device,slot.fence); });
   if (status==VK_NOT_READY) {
     vk_check(timed_call(timing,[&] {
-      return vkWaitForFences(R.device,1,&slot.fence,VK_TRUE,UINT64_MAX);
+      // Submission serial identifies the fence; deque slots have no contiguous index.
+      if (handoff_trace::enabled()) handoff_trace::emit(handoff_trace::Lane::Producer, handoff_trace::Kind::FenceWaitBegin, 0, R.frame, slot.serial, 0);
+      const auto result = vkWaitForFences(R.device,1,&slot.fence,VK_TRUE,UINT64_MAX);
+      if (handoff_trace::enabled()) handoff_trace::emit(handoff_trace::Lane::Producer, handoff_trace::Kind::FenceWaitEnd, 0, R.frame, slot.serial, uint64_t(int64_t(result)));
+      return result;
     },rprof::kWaitGpu),"wait submission retirement");
   } else vk_check(status,"submission fence status");
   timed_call(retirementCleanupTiming,[&] {
@@ -1167,6 +1276,14 @@ static size_t next_submission_slot() {
   resolve_retained_submission(R.submissions[next]);
   return next;
 }
+// Resolved once from the selected driver, only when the worker is requested.
+// Unknown drivers conservatively retain producer presentation on every OS.
+static bool nativeWorkerPresentation = false;
+static void publish_or_finish_present_prefix(DeferredCommands& owner) {
+  if (nativeWorkerPresentation && record_worker_active()) {
+    if (publish_record_commands()) fallback_stats::native_prefix_publication();
+  } else owner.finish_exact();
+}
 static void submit(VkSemaphore wait = VK_NULL_HANDLE,
                    VkSemaphore signal = VK_NULL_HANDLE, bool asynchronous=false) {
   if (!R.recording)return;
@@ -1176,7 +1293,11 @@ static void submit(VkSemaphore wait = VK_NULL_HANDLE,
 #ifdef __ANDROID__
   externalSync=externalSync || secondarySnapshotWait || secondarySnapshotSignal;
 #endif
-  if(externalSync && active_deferred_commands)active_deferred_commands->finish_exact();
+  if(externalSync && active_deferred_commands) {
+    if (handoff_trace::enabled()) handoff_trace::emit(handoff_trace::Lane::Producer, handoff_trace::Kind::DrainBegin, 0, R.frame, uint64_t(handoff_trace::Reason::ExternalSyncPrefix));
+    publish_or_finish_present_prefix(*active_deferred_commands);
+    if (handoff_trace::enabled()) handoff_trace::emit(handoff_trace::Lane::Producer, handoff_trace::Kind::DrainEnd, 0, R.frame, uint64_t(handoff_trace::Reason::ExternalSyncPrefix));
+  }
   end_encoder();
   auto& slot=R.submissions[R.activeSubmission];
   if (slot.perfQuery != UINT32_MAX) {
@@ -1232,7 +1353,35 @@ static void submit(VkSemaphore wait = VK_NULL_HANDLE,
 #endif
     slot.pending=true;slot.retainedUnsubmitted=false;slot.deferredOwner=nullptr;
   };
-  if(owner)owner->owned_boundary(seal,execute);
+  if (record_worker_active()) {
+    if (producer_presentation_recording()) {
+      // The scope drained every earlier worker prefix. No worker may touch this
+      // command buffer or queue until the producer's ordered present is complete.
+      seal();
+      slot.recordWorkerSerial = 0;
+      execute(); // same end/reset/submit, semaphore and snapshot bookkeeping
+    } else {
+      seal();
+      // Only opaque Vulkan handles and copied POD arguments cross threads. All
+      // Renderer aliases, layouts, cache state and slot flags stay producer-owned.
+      slot.recordWorkerSerial = submit_record_commands(R.device, R.queue, slot.cmd,
+          slot.fence, wait, signal
+  #ifdef __ANDROID__
+          , snapshotWait, snapshotSignal
+  #endif
+      );
+      slot.pending = true; slot.retainedUnsubmitted = false; slot.deferredOwner = nullptr;
+      // Presentation/isolated DRC handshakes share queue/semaphore host lifetime.
+      // Publish them only after the worker has actually submitted the batch.
+      if (externalSync) resolve_retained_submission(slot);
+  #ifdef __ANDROID__
+      if (snapshotSignal && isolatedSecondary && isolatedSecondary->prepared()) {
+        isolatedSecondary->primary_submitted();
+        isolatedSnapshotSubmission = std::pair{slotIndex, slot.serial};
+      }
+  #endif
+    }
+  } else if(owner) owner->owned_boundary(seal,execute);
   else { seal();execute(); }
   if(asynchronous)activate_submission(next_submission_slot());
   else {
@@ -1258,6 +1407,7 @@ void flush() {
 static void wait_secondary_present();
 #endif
 static VkResult device_wait_idle() {
+  drain_record_commands();
 #ifdef __ANDROID__
   wait_secondary_present(); // synchronize host access to the dedicated queue
 #endif
@@ -1279,13 +1429,15 @@ static bool has_extension(const std::vector<VkExtensionProperties> &es,
 static void retire_secondary_swapchain(bool surface);
 static bool secondary_retirement_available();
 #endif
+static bool async_present();
 static void make_swapchain(Screen &s) {
   if(active_deferred_commands)active_deferred_commands->finish_exact();
 #ifdef __ANDROID__
   if (&s == &R.tv) {
     // Primary views only reference graphics-queue work. Do not synchronize
     // the separate WSI queue just to resize the main display.
-    vk_check(vkQueueWaitIdle(R.queue), "primary resize graphics idle");
+    drain_record_commands();
+  vk_check(vkQueueWaitIdle(R.queue), "primary resize graphics idle");
   } else if (!R.secondaryPresentFences) {
     ++R.secondaryIdleWaits;
     vk_check(device_wait_idle(), "resize device idle");
@@ -1464,6 +1616,10 @@ static void make_swapchain(Screen &s) {
   // for it (interp::output_fps)
   if (&s == &R.tv) interp::set_present_vsync(chosen == kPresentFifo);
   ci.clipped = VK_TRUE;
+  if (presentObservation && &s == &R.tv && s.swapchain) {
+    drain_observed_history();
+    pendingObservedPresents.clear();
+  }
   ci.oldSwapchain = s.swapchain;
   VkSwapchainKHR sc;
   vk_check(vkCreateSwapchainKHR(R.device, &ci, nullptr, &sc),
@@ -1485,6 +1641,9 @@ static void make_swapchain(Screen &s) {
   vkGetSwapchainImagesKHR(R.device, sc, &n, nullptr);
   s.images.resize(n);
   vkGetSwapchainImagesKHR(R.device, sc, &n, s.images.data());
+  if (presentObservation && &s == &R.tv)
+    present_observer::presentation_topology(s.swapchainGeneration, n, async_present() ? 3u : 1u,
+        uint32_t(R.submissions.size()), uint32_t(ci.presentMode), async_present());
   s.layouts.assign(n, VK_IMAGE_LAYOUT_UNDEFINED);
   s.imageUses.assign(n, {});
   prepare_present_screen(s,shaderPresentation,captureTransfer);
@@ -1508,6 +1667,7 @@ static void recreate_surface(Screen &s) {
     surfaceRecreate = true;  // the new native surface is not there yet: next frame
     return;
   }
+  drain_record_commands();
   vk_check(vkQueueWaitIdle(R.queue), "primary surface recreation graphics idle");
   reset_present_screen(s);
   if (s.swapchain)
@@ -1654,7 +1814,11 @@ static void prepare_secondary_snapshot() {
     auto* scan=source.scan.get();if(!scan || !scan->image)return;
     end_encoder();
     transition_image(scan,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_ACCESS_TRANSFER_READ_BIT);
-    isolatedSecondary->record_snapshot(command_buffer(),scan->image,scan->fmt.pixel,{scan->extent.width,scan->extent.height});
+    const auto snapshotCommandBuffer = command_buffer();
+    // This primary snapshot uses raw barriers/copy/blit. Complete its queued
+    // End/transition/Begin prefix before producer recording touches the buffer.
+    if (record_worker_active()) drain_record_commands(fallback_stats::Boundary::RawPrimarySnapshot);
+    isolatedSecondary->record_snapshot(snapshotCommandBuffer,scan->image,scan->fmt.pixel,{scan->extent.width,scan->extent.height});
     isolatedSourceLinear=source.scanSrgb || scan->fmt.pixel==VK_FORMAT_R8G8B8A8_SRGB ||
         scan->fmt.pixel==VK_FORMAT_B8G8R8A8_SRGB || scan->fmt.pixel==VK_FORMAT_A8B8G8R8_SRGB_PACK32;
     secondarySnapshotWait=isolatedSecondary->snapshot_wait();
@@ -1863,7 +2027,10 @@ static void collect_secondary_swapchains() {
     bool complete=true;
     for(auto [index,serial]:it->submissions) {
       auto& slot=R.submissions[index];
-      if(slot.pending && slot.serial==serial && !ready(slot.fence))complete=false;
+      // Never force a legacy deferred tail from this retirement iterator.
+      // A not-yet-emitted POD submit is simply not ready for nonblocking poll.
+      if (slot.pending && slot.serial==serial &&
+          (!try_record_submission(slot) || !ready(slot.fence))) complete=false;
     }
     for(auto present:it->presents)if(present.pending && !ready(present.fence))complete=false;
     // A replaced surface remains owned until all older resize generations of
@@ -2022,7 +2189,13 @@ static bool screen_has_window(const Screen& s) {
   return s.window != nullptr;
 }
 static bool present(Screen &s) {
-  if(active_deferred_commands)active_deferred_commands->finish_exact();
+  if (handoff_trace::enabled()) handoff_trace::set_producer_frame(R.frame);
+  if (presentObservation && &s == &R.tv) poll_present_observer();
+  if(active_deferred_commands) {
+    if (handoff_trace::enabled()) handoff_trace::emit(handoff_trace::Lane::Producer, handoff_trace::Kind::DrainBegin, 0, R.frame, uint64_t(handoff_trace::Reason::PresentPrefix), &s == &R.tv ? 1 : 2);
+    publish_or_finish_present_prefix(*active_deferred_commands);
+    if (handoff_trace::enabled()) handoff_trace::emit(handoff_trace::Lane::Producer, handoff_trace::Kind::DrainEnd, 0, R.frame, uint64_t(handoff_trace::Reason::PresentPrefix), &s == &R.tv ? 1 : 2);
+  }
 #ifdef __ANDROID__
   if(&s==&R.drc && isolatedSecondary) {
     if(isolatedSecondary->busy()) { ++R.secondaryPresentSkipped;return false; }
@@ -2106,6 +2279,18 @@ static bool present(Screen &s) {
   if (s.resize || !s.swapchain)
     make_swapchain(s);
 #endif
+  // Reserve the observer identity before even eager drawable acquisition.
+  // Enqueue time is still recorded immediately before QueuePresent below.
+  uint32_t observedPresentId = 0;
+  std::optional<present_observer::DrawableIdentityScope> drawableIdentity;
+  if (presentObservation && &s == &R.tv && observedHistory) {
+    if (nextObservedPresent >= MaxObservedPresents || pendingObservedPresents.size() >= MaxObservedPresents)
+      present_observer::fail("bounded TV present observation capacity exceeded");
+    else {
+      observedPresentId = ++nextObservedPresent;
+      drawableIdentity.emplace(s.swapchainGeneration, observedPresentId, R.frame);
+    }
+  }
   uint32_t index;
   auto& timing = screenTiming[&s == &R.tv ? 0 : 1];
   bool async = async_present() && !present_capture_requested();
@@ -2147,6 +2332,7 @@ static bool present(Screen &s) {
     auto &previous = R.submissions[ap.slot[acquireIndex]];
     if (ap.serial[acquireIndex] && previous.pending && previous.serial == ap.serial[acquireIndex]) {
       if (secondary) {
+        if (!try_record_submission(previous)) return false;
         const VkResult ready = timed_call(fenceStatusTiming,[&] { return vkGetFenceStatus(R.device, previous.fence); });
         if (ready == VK_NOT_READY)
           return false;
@@ -2205,8 +2391,11 @@ static bool present(Screen &s) {
 #ifdef __ANDROID__
     if(secondary && R.secondaryInjectAcquireLoss.exchange(false))return VK_ERROR_SURFACE_LOST_KHR;
 #endif
-    return vkAcquireNextImageKHR(R.device, s.swapchain, secondary ? 0 : UINT64_MAX,
+    if (handoff_trace::enabled()) handoff_trace::emit(handoff_trace::Lane::Producer, handoff_trace::Kind::AcquireBegin, 0, R.frame, &s == &R.tv ? 1 : 2, acquireIndex);
+    const auto result = vkAcquireNextImageKHR(R.device, s.swapchain, secondary ? 0 : UINT64_MAX,
                                 acquireSemaphore, VK_NULL_HANDLE, &index);
+    if (handoff_trace::enabled()) handoff_trace::emit(handoff_trace::Lane::Producer, handoff_trace::Kind::AcquireEnd, 0, R.frame, &s == &R.tv ? 1 : 2, uint64_t(int64_t(result)));
+    return result;
   }, rprof::kWaitAcquire);
   // No image was acquired and the semaphore remains unsignalled. Leave it
   // available for another frame; submitting a wait here would deadlock.
@@ -2289,6 +2478,12 @@ static bool present(Screen &s) {
     }
   }
 #endif
+  // MoltenVK may acquire a CAMetalDrawable lazily inside BeginRendering. Keep
+  // this presentation-only wait on the original producer path, after completing
+  // older worker commands. Keep end/reset/submit and QueuePresent on this
+  // producer too; restore worker routing when present() returns.
+  std::optional<ProducerPresentationRecording> producerPresentation;
+  if (record_worker_active() && !nativeWorkerPresentation) producerPresentation.emplace();
   bool composed=false;
   timed_call(timing.compose, [&] {
     composed=draw_present_screen(s,index);
@@ -2350,7 +2545,10 @@ static bool present(Screen &s) {
   if (async || workerAcquired) {
     if (ap.finished.size() != s.images.size()) {  // new swapchain
 #ifdef __ANDROID__
-      if (!secondary) vk_check(vkQueueWaitIdle(R.queue), "primary presentation semaphores idle");
+      if (!secondary) {
+        drain_record_commands();
+        vk_check(vkQueueWaitIdle(R.queue), "primary presentation semaphores idle");
+      }
       else if (!R.secondaryPresentFences) vk_check(device_wait_idle(), "presentation semaphores idle");
 #else
       vk_check(device_wait_idle(), "presentation semaphores idle");
@@ -2408,13 +2606,38 @@ static bool present(Screen &s) {
     return false;
   }
 #endif
+  uint64_t handoffPresentId = 0;
   VkResult pr = timed_call(timing.present, [&] {
+    if (handoff_trace::enabled()) handoff_trace::emit(handoff_trace::Lane::Producer, handoff_trace::Kind::PresentBegin, 0, R.frame, &s == &R.tv ? 1 : 2);
+    if (presentObservation && &s == &R.tv && observedHistory) {
+      VkPresentTimeGOOGLE observedTime{};
+      VkPresentTimesInfoGOOGLE observedTimes{VK_STRUCTURE_TYPE_PRESENT_TIMES_INFO_GOOGLE};
+      if (observedPresentId) {
+        observedTime.presentID = observedPresentId;
+        handoffPresentId = observedTime.presentID;
+        observedTime.desiredPresentTime = 0; // Observe; never change pacing.
+        pendingObservedPresents.emplace(observedTime.presentID,
+            ObservedPresent{s.swapchainGeneration, R.frame});
+        present_observer::google_present(s.swapchainGeneration, observedTime.presentID, R.frame);
+        observedTimes.swapchainCount = 1;
+        observedTimes.pTimes = &observedTime;
+        observedTimes.pNext = pi.pNext;
+        pi.pNext = &observedTimes;
+        return vkQueuePresentKHR(R.queue, &pi);
+      }
+    }
     VkResult result=vkQueuePresentKHR(R.queue, &pi);
 #ifdef __ANDROID__
     if(secondary)result=secondary_present_result(result);
 #endif
     return result;
   }, rprof::kWaitPresent);
+  if (handoff_trace::enabled()) handoff_trace::emit(handoff_trace::Lane::Producer, handoff_trace::Kind::PresentEnd, 0, R.frame, &s == &R.tv ? 1 : 2, handoffPresentId);
+  if (presentObservation && &s == &R.tv) {
+    if (pr != VK_SUCCESS && pr != VK_SUBOPTIMAL_KHR)
+      present_observer::fail("observed TV queue presentation failed");
+    poll_present_observer();
+  }
   if (pr == VK_SUCCESS || pr == VK_SUBOPTIMAL_KHR)
     ++s.presented;
 #ifdef __ANDROID__
@@ -2590,6 +2813,7 @@ static void service_screenshots() {
     }
     // a slot reused for a newer submission retired ours first
     if(slot.retainedUnsubmitted && slot.serial==it->serial) { ++it;continue; }
+    if (slot.pending && slot.serial==it->serial && !try_record_submission(slot)) { ++it; continue; }
     const bool done = !slot.pending || slot.serial != it->serial || vkGetFenceStatus(R.device, slot.fence) == VK_SUCCESS;
     if (!done) {
       ++it;
@@ -2736,7 +2960,13 @@ static void attach_gamepad_window() {
 }
 #endif
 void swap() {
-  if(active_deferred_commands)active_deferred_commands->finish_exact();
+  fallback_stats::begin_frame(R.frame);
+  if (handoff_trace::enabled()) handoff_trace::set_producer_frame(R.frame);
+  if(active_deferred_commands) {
+    if (handoff_trace::enabled()) handoff_trace::emit(handoff_trace::Lane::Producer, handoff_trace::Kind::DrainBegin, 0, R.frame, uint64_t(handoff_trace::Reason::SwapPrefix));
+    publish_or_finish_present_prefix(*active_deferred_commands);
+    if (handoff_trace::enabled()) handoff_trace::emit(handoff_trace::Lane::Producer, handoff_trace::Kind::DrainEnd, 0, R.frame, uint64_t(handoff_trace::Reason::SwapPrefix));
+  }
 #if defined(WWHD_SDL_HOST) && !defined(__ANDROID__)
   attach_gamepad_window();
 #endif
@@ -2888,7 +3118,8 @@ void swap() {
 #ifdef __ANDROID__
   if(isolatedSecondary && isolatedSecondary->published() && isolatedSnapshotSubmission) {
     const auto [index,serial]=*isolatedSnapshotSubmission;
-    const auto& producer=R.submissions[index];
+    auto& producer=R.submissions[index];
+    if (producer.pending && producer.serial==serial) wait_record_submission(producer);
     // Do not export a pending sync FD while the driver may serialize export
     // against later primary submissions. Poll on this thread; a retired/reused
     // slot also proves that this snapshot's original submission completed.
@@ -2932,8 +3163,10 @@ void swap() {
   }
   set_present_plan(nullptr);
   service_screenshots();  // this frame's: the submission that holds them
+  fallback_stats::complete_frame(R.frame);
   stutter::frame(R.frame);
   std::atomic_ref<uint64_t>(R.frame).fetch_add(1);
+  fallback_stats::begin_frame(R.frame); // Attribute early next-frame state drains exactly.
   R.completed = R.frame;
 #ifdef __ANDROID__
   if (tvScan) drivers::frame_done();
@@ -3484,9 +3717,10 @@ static void init_device(std::vector<const char *> extensions,
     auto create = (PFN_vkCreateDebugUtilsMessengerEXT)vkGetInstanceProcAddr(
         R.instance, "vkCreateDebugUtilsMessengerEXT");
     VkDebugUtilsMessengerEXT messenger;
-    if (create)
-      vk_check(create(R.instance, &debug, nullptr, &messenger),
-               "create validation messenger");
+    if (!create) throw std::runtime_error("validation messenger function unavailable");
+    vk_check(create(R.instance, &debug, nullptr, &messenger),
+             "create validation messenger");
+    LOG("[vulkan validation] VK_LAYER_KHRONOS_validation active; synchronization validation enabled");
   }
   create_surfaces();
   vkEnumeratePhysicalDevices(R.instance, &n, nullptr);
@@ -3615,7 +3849,49 @@ static void init_device(std::vector<const char *> extensions,
   LOG("[vulkan diagnostics] maxVertexInputAttributeOffset=%u maxVertexInputBindingStride=%u maxVertexInputAttributes=%u maxVertexInputBindings=%u maxDrawIndexedIndexValue=%u",
       vertexLimits.maxVertexInputAttributeOffset, vertexLimits.maxVertexInputBindingStride,
       vertexLimits.maxVertexInputAttributes, vertexLimits.maxVertexInputBindings, vertexLimits.maxDrawIndexedIndexValue);
+  // Graphics > Advanced "Record graphics on a second thread", read once per start (the worker
+  // starts with the device); WWHD_VK_RECORD_WORKER takes precedence (record_worker.cpp)
+  {
+    std::string value;
+    set_record_worker_saved_choice(::hostui::get("vkRecordWorker", value) ? value == "1" : record_worker_default());
+  }
+  nativeWorkerPresentation = false;
+  if (record_worker_requested()) {
+    const char* nativeOption = std::getenv("WWHD_R5_NATIVE_PRESENT");
+    const bool nativeRequested = nativeOption && !std::strcmp(nativeOption, "1");
+    if (nativeRequested) {
+#ifdef __APPLE__
+      constexpr bool appleHost = true;
+#else
+      constexpr bool appleHost = false;
+#endif
+      nativeWorkerPresentation = worker_present_policy::resolve(
+          true, R.properties.apiVersion,
+          has_extension(des, VK_KHR_DRIVER_PROPERTIES_EXTENSION_NAME),
+          vkGetPhysicalDeviceProperties2 != nullptr, appleHost, [&] {
+            VkPhysicalDeviceDriverProperties driver{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES};
+            VkPhysicalDeviceProperties2 properties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
+            properties.pNext = &driver;
+            vkGetPhysicalDeviceProperties2(R.physicalDevice, &properties);
+            return driver.driverID;
+          }) == worker_present_policy::Mode::NativeWorker;
+    }
+    LOG("[vulkan worker] native_present_requested=%u presentation=%s",
+        unsigned(nativeRequested), nativeWorkerPresentation ? "native worker" : "conservative producer");
+  }
   std::vector<const char *> de{VK_KHR_SWAPCHAIN_EXTENSION_NAME};
+  presentObservation = present_observer::enabled();
+  observedHistory = nullptr;
+  nextObservedPresent = 0;
+  pendingObservedPresents.clear();
+  if (presentObservation) {
+    if (has_extension(des, VK_GOOGLE_DISPLAY_TIMING_EXTENSION_NAME))
+      de.push_back(VK_GOOGLE_DISPLAY_TIMING_EXTENSION_NAME);
+    else {
+      present_observer::fail("VK_GOOGLE_display_timing unavailable");
+      presentObservation = false;
+    }
+  }
   if (R.dynamicRenderingKHR) {
     de.push_back(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME);
     if (deviceApi < VK_API_VERSION_1_2) {
@@ -3862,6 +4138,14 @@ static void init_device(std::vector<const char *> extensions,
           R.enabledFeatures.textureCompressionBC ? "WWHD_VK_FORCE_BC_DECODE" : "device has no BC texture support",
           R.bcCpuDecode ? "CPU" : "compute", bc.reason);
   }
+  if (presentObservation) {
+    observedHistory = reinterpret_cast<PFN_vkGetPastPresentationTimingGOOGLE>(
+        vkGetDeviceProcAddr(R.device, "vkGetPastPresentationTimingGOOGLE"));
+    if (!observedHistory) {
+      present_observer::fail("enabled GOOGLE history entry point unavailable");
+      presentObservation = false;
+    }
+  }
   init_pass_caches();
   vkGetDeviceQueue(R.device, R.queueFamily, 0, &R.queue);
 #ifdef __ANDROID__
@@ -3936,6 +4220,10 @@ static void init_device(std::vector<const char *> extensions,
   // async compilation/warmup is disabled. They must outlive the saver's static destructor.
   merge_pipeline_demand_cache(VK_NULL_HANDLE);
   merge_pipeline_worker_cache(VK_NULL_HANDLE);
+  start_record_worker();
+  LOG("[vulkan record worker] %s", record_worker_active()
+      ? "enabled: POD recording/submission; producer-owned pipeline state"
+      : "disabled: original immediate/deferred path");
   backgroundCacheReadiness.publish();
 }
 
@@ -4120,8 +4408,17 @@ std::function<void()> background_renderer_caches() {
 void shutdown_renderer_caches() {
   backgroundCacheReadiness.withdraw();
   // Destructive teardown is reserved for orderly shutdown under execution lock.
-  reset_feedback_images();
-  wait_idle();
+  try {
+    if (presentObservation || handoff_trace::enabled() || fallback_stats::storage) flush_present_observer();
+    reset_feedback_images();
+    wait_idle();
+  } catch (...) {
+    // A replay error can surface during flush/idle. Always join and withdraw
+    // the worker before propagating it; no queued driver calls survive teardown.
+    try { stop_record_worker(); } catch (...) {}
+    throw;
+  }
+  stop_record_worker();
   bc_decode_shutdown();
 #ifdef __ANDROID__
   collect_secondary_swapchains();

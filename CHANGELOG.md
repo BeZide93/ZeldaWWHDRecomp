@@ -7,6 +7,18 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Record graphics on a second thread** (Graphics → Advanced; **on by default on Android**, off elsewhere). The
+  render thread hands recording and submitting the Vulkan commands to a second CPU thread. On a Xiaomi 14 Ultra that
+  gave 4–7% more fps with 15–23% less render-thread time and identical pictures; it uses a little more CPU and battery.
+  On other devices it can make frame times less even, so it stays opt-in there. **Steam Deck owners:** please try it
+  on and off in the same spot and tell us the fps, the 1% lows and whether the Deck runs warmer.
+- **Shader cache saved more often:** pipelines built while playing are now saved every few minutes and when the Android
+  app goes to the background, so fewer are rebuilt after a crash or after Android closes the game.
+- **Mod SDK v3 preview: enemies, props, switches and effects** (for mod makers). Mods can now place the game's own
+  residents, breakable props, switches and doors, and enemies with their own state; original mod enemies take damage,
+  react to hits, can be targeted, defeated and drop items; mod props can be carried and thrown, and original item models
+  can sit in Link's hand; plus a curated set of the game's particle effects, simple mod effects and custom textures on
+  placed props. New original example: a patrolling enemy.
 - **PowerVR phones (e.g. Pixel 10): no more stretched spikes** (#207). On PowerVR GPUs the game now converts vertex
   data on the CPU automatically, because their drivers decode some of it wrongly in the shader. It can cost some speed;
   **Graphics → Advanced → Convert vertices on the CPU** switches it off (Automatic restores it).
