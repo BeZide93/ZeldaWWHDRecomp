@@ -32,6 +32,8 @@
 #include "story_scenes.h"
 #include "story_notebook.h"
 #include "story_items.h"
+#include "story_item_models.h"
+#include "mod_hash.h"
 #include "story_item_buttons.h"
 #include "story_bag.h"
 #include "story_manifest.h"
@@ -132,6 +134,7 @@ void call_original(Cpu* c, uint32_t func) {
 
 // Declarative world content is shared by guest and data-only content packages.
 void load_world(const std::string& mod,const mods::json::Value& manifest,const std::string& package_dir,const std::string& data_dir) {
+    struct ItemModelBatch {size_t checkpoint=story_item_models::checkpoint();bool committed=false;~ItemModelBatch(){if(!committed)story_item_models::rollback(checkpoint);}} item_model_batch;
     std::vector<story_notebook::ManifestActor> actors;
     std::vector<story_notebook::ManifestScene> scenes;
     std::string why;
@@ -139,15 +142,22 @@ void load_world(const std::string& mod,const mods::json::Value& manifest,const s
         exception_report::raise("World manifest "+mod+": "+why);
     std::vector<story_notebook::ManifestModel> models;
     if(!story_notebook::parse_models(manifest,models,why))exception_report::raise("World models "+mod+": "+why);
+    std::vector<story_notebook::ManifestItem> model_items;
+    if(!story_notebook::parse_items(manifest,model_items,why))exception_report::raise("Item models "+mod+": "+why);
+    for(const auto& item:model_items)if(!item.held_model.empty()&&std::none_of(models.begin(),models.end(),[&](const auto&m){return m.id==item.held_model;}))exception_report::raise("Unknown held model "+mod+":"+item.held_model);
     for(const auto& model:models) {
-        if(std::none_of(actors.begin(),actors.end(),[&](const auto& actor){return actor.kind=="mod"&&actor.model==model.id;}))continue;
+        const bool actor_uses=std::any_of(actors.begin(),actors.end(),[&](const auto& actor){return actor.kind=="mod"&&actor.model==model.id;});
+        const bool item_uses=std::any_of(model_items.begin(),model_items.end(),[&](const auto& item){return item.held_model==model.id;});
+        if(!actor_uses&&!item_uses)continue;
+        if(item_uses&&model.kind!="static")exception_report::raise("Held item models currently require static kind; skinned needs a separate Morf lifetime");
         try {
             const auto bridge=BuildBridge::installed(std::string());
             const auto tool=std::filesystem::path(bridge.builder).parent_path().parent_path()/"story_mods"/(model.kind=="skinned"?"skinned_actor_model.py":"actor_model.py");
             const auto archive=actor_model_cache::prepare(mod,model,package_dir,data_dir,bridge.python,tool.string(),config::game_dir);
             story_notebook::WorldPoint minimum,maximum;
             if(!actor_model_cache::bounds_for(archive,minimum,maximum))exception_report::raise("Prepared model bounds unavailable");
-            if(!story_actors::register_model(mod,model.id,archive,1,why,minimum,maximum,model.kind=="skinned",actor_model_cache::clips_for(archive),actor_model_cache::rig_for(archive)))exception_report::raise("World model "+mod+": "+why);
+            for(const auto& item:model_items)if(item.held_model==model.id&&!story_item_models::declare(story_items::item_key(mod,item.id),archive,item.held_frames,why,mods::hash::sha256_file(actor_model_cache::archive_for("/vol/content/Common/Object/"+archive+".szs"))))exception_report::raise("Item model "+mod+": "+why);
+            if(actor_uses&&!story_actors::register_model(mod,model.id,archive,1,why,minimum,maximum,model.kind=="skinned",actor_model_cache::clips_for(archive),actor_model_cache::rig_for(archive)))exception_report::raise("World model "+mod+": "+why);
         } catch(const std::exception& e) {exception_report::raise("World model "+mod+":"+model.id+": "+e.what());}
     }
     std::vector<std::string> flags;
@@ -156,6 +166,7 @@ void load_world(const std::string& mod,const mods::json::Value& manifest,const s
     if(!story_scenes::validate(scenes,why)||!story_actors::register_flags(mod,flags,why)||
        !story_actors::load(mod,actors,why)||!story_scenes::declare(mod,scenes,why))
         exception_report::raise("World content "+mod+": "+why);
+    item_model_batch.committed=true;
     g_world_scenes|=!scenes.empty();
     if(!actors.empty()||!scenes.empty()) {
         story_notebook::note_import();story_mail::note_import();
@@ -892,6 +903,9 @@ void init() {
     });
     // Mod items and the notebook on X/Y/R (story_item_buttons.h): the item use in play and the HUD's
     // button read, with the story notebook's item menu hooks.
+    story_item_models::configure(mem::runtime_alloc(story_item_models::kMemoryBytes,16),call_original,[](Cpu*c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);});
+    story_items::set_model_presenter(story_item_models::request);
+    if(!story_item_models::install([](uint32_t fn){auto it=g_chains.find(fn);return it==g_chains.end()?std::string():it->second.replace_mod;},[](uint32_t fn,PpcFunc hook){int i=ordinal_of(fn);if(i<0)fatal("item model hook missing");auto&ch=g_chains[fn];ch.addr=fn;ch.ordinal=uint32_t(i);ch.replace=hook;ch.replace_mod="the port's item models";g_mod_hook_flags[i]=1;}))exception_report::raise("Item model hook conflict");
     story_item_buttons::set_game_calls(call_original,[](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);});
     story_item_buttons::install([](uint32_t addr) {
         auto it=g_chains.find(addr);return it==g_chains.end()?std::string():it->second.replace_mod;
@@ -903,6 +917,7 @@ void init() {
         g_mod_hook_flags[ordinal]=1;
     });
     story_store::set_game_calls(call_original);
+    story_store::set_progress_loaded(story_item_models::progress_loaded);
     story_store::install([](uint32_t addr) {
         auto it=g_chains.find(addr);return it==g_chains.end()?std::string():it->second.replace_mod;
     },[](uint32_t addr,PpcFunc fn) {
@@ -939,13 +954,14 @@ void draw_frame(Cpu* c,uint64_t step) {
         *c=saved;
     }
 }
-void logic_service(Cpu* c) { actor_sweep(c);story_scenes::tick(c,false,2); story_actors::service(c); }
+void logic_service(Cpu* c) { story_item_models::tick(c);actor_sweep(c);story_scenes::tick(c,false,2); story_actors::service(c); }
 void service(Cpu* c) { story_lyt_screen::service(c); }
 void state_loaded() {
     std::lock_guard lock(g_hud_mutex);
     g_actor_registry.invalidate_all();g_actor_identities.clear();
     hud::store().reset();
     pcm::store().reset();
+    story_item_models::state_loaded();
     story_mail::state_loaded();
     story_scenes::state_loaded();
     story_actors::state_loaded();

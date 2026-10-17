@@ -84,12 +84,15 @@ uint8_t game_reserve(unsigned place) { return have_save() && place < kGamePlaces
 
 }  // namespace
 
+namespace { std::function<void(uint16_t)> model_presenter; }
+void set_model_presenter(std::function<void(uint16_t)> fn){model_presenter=std::move(fn);}
 bool define(const std::string& mod, const std::string& package_dir, const story_notebook::ManifestItem& m, std::string& why) {
     Item it;
     it.key = item_key(mod, m.id), it.mod = mod, it.id = m.id, it.name = m.name, it.description = m.description;
     it.icon_path = (std::filesystem::path(package_dir) / m.icon).string();
     it.icon_hash = file_hash(it.icon_path);
     if (!it.icon_hash) return why = "item " + m.id + ": no icon file " + m.icon, false;
+    it.held_model=m.held_model;it.held_frames=m.held_frames;
     it.stack = m.stack, it.use = m.use, it.use_quest = m.use_quest, it.use_step = m.use_step;
     std::lock_guard lock(g_mu);
     for (Item& o : g_items) {
@@ -350,26 +353,28 @@ bool act(uint16_t key, Action action, int arg) {
     switch (action) {
     case Action::Info:
         return g_show && g_show(it->name, it->description, "the item's Info") ? true : refuse("The item's Info can't be shown now.");
-    case Action::Use:
+    case Action::Use: {
+        auto used=[&](bool ok){if(ok&&model_presenter&&!it->held_model.empty())model_presenter(key);return ok;};
         switch (it->use) {
         case story_notebook::ManifestItem::Use::None: return refuse("This item can't be used.");
         case story_notebook::ManifestItem::Use::Show:
-            return g_show && g_show(it->name, it->description, "the item's use") ? true : refuse("The item can't be shown now.");
+            return used(g_show && g_show(it->name, it->description, "the item's use") ? true : refuse("The item can't be shown now."));
         case story_notebook::ManifestItem::Use::OpenNotebook:
-            return g_open_notebook && g_open_notebook("an item's use") ? true : refuse("The notebook can't be opened now.");
+            return used(g_open_notebook && g_open_notebook("an item's use") ? true : refuse("The notebook can't be opened now."));
         case story_notebook::ManifestItem::Use::QuestStep:
             if (!g_reach || g_reach(it->mod, it->use_quest, it->use_step) < 0) return refuse("Nothing happens.");
             LOG("[items] %s: item \"%s\" used: quest \"%s\" step %u", it->mod.c_str(), it->id.c_str(), it->use_quest.c_str(), it->use_step);
-            return true;
+            return used(true);
         case story_notebook::ManifestItem::Use::Event: {
             std::lock_guard lock(g_mu);
             unsigned& n = g_uses[key];
             n = std::min(n + 1, 255u);
             if (trace()) LOG("[items] %s: item \"%s\" used (%u unread)", it->mod.c_str(), it->id.c_str(), n);
-            return true;
+            return used(true);
         }
         }
         return false;
+    }
     case Action::Assign:
         if (arg >= 0 && !it->usable()) return refuse("This item can't go on a button.");
         if (arg < 0) {

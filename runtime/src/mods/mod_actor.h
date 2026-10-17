@@ -10,7 +10,7 @@ struct Cpu;
 namespace mod_actor {
 inline constexpr uint16_t kProfile=0x7FFE;
 inline constexpr uint32_t kScratchBytes=4096;
-inline constexpr uint32_t kInstanceBytes=0xF40;
+inline constexpr uint32_t kInstanceBytes=0x1040;
 struct ModelRig {std::vector<std::string> joint_names;std::vector<int> joint_parents;std::vector<bool> joint_look_compatible;};
 struct Identity {std::string mod,id;uint32_t token=0,process_id=0;};
 struct State {
@@ -34,6 +34,7 @@ void quarantine_combat(Cpu*,const Identity&);
 enum class CombatReward {Committed,AlreadyDone,Failed};
 using CombatRewardSink=std::function<CombatReward()>;
 bool set_combat_reward(const std::string& mod,const std::string& id,CombatRewardSink);
+bool set_carry_break(const std::string& mod,const std::string& id,std::function<bool()>);
 using BehaviorSink=std::function<void(Cpu*,uint32_t,BehaviorEvent,const Hit*)>;
 void set_behavior_sink(BehaviorSink);
 uint32_t declaration_token(const std::string& mod,const std::string& id);

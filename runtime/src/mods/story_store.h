@@ -50,6 +50,7 @@ void written(const std::string& guest_path, const std::string& host_path);
 
 // the game side
 void set_game_calls(void (*original)(Cpu*, uint32_t));
+void set_progress_loaded(void (*callback)());
 void install(const std::function<std::string(uint32_t)>& replaced_by, const std::function<void(uint32_t, void (*)(Cpu*))>& replace);
 bool installed();
 // while alive, the game's save copy functions don't move story areas (portable save states use

@@ -208,6 +208,7 @@ const GameUi& game_ui() {static GameUi none;return none;}
 }
 // and so have the mod items (story_items_test) and the item icon archive (item_icons_test)
 namespace story_items {
+void set_model_presenter(std::function<void(uint16_t)>) {}
 bool define(const std::string&,const std::string&,const story_notebook::ManifestItem&,std::string&) {return false;}
 std::vector<Item> installed() {return {};}
 void set_frame_source(int (*)(uint16_t)) {}
@@ -256,8 +257,21 @@ void set_game_calls(void (*)(Cpu*,uint32_t),uint32_t (*)(Cpu*,uint32_t,std::init
 void refresh_strip(Cpu*) {}
 void install(const std::function<std::string(uint32_t)>&,const std::function<void(uint32_t,void (*)(Cpu*))>&) {}
 }
+// Item presentation has its own native-routing/lifetime tests; this fixture isolates guest hooks.
+namespace story_item_models {
+bool declare(uint16_t,const std::string&,unsigned,std::string&,const std::string&) {return true;}
+size_t checkpoint() {return 0;}
+void rollback(size_t) noexcept {}
+void configure(uint32_t,void(*)(Cpu*,uint32_t),Invoke) {}
+bool install(const std::function<std::string(uint32_t)>&,const std::function<void(uint32_t,void(*)(Cpu*))>&) {return true;}
+void request(uint16_t) {}
+void tick(Cpu*) {}
+void state_loaded() {}
+void progress_loaded() {}
+}
 // and so has the story progress store (story_notebook_test)
 namespace story_store {
+void set_progress_loaded(void(*)()) {}
 void set_memory(uint32_t) {}
 void set_game_calls(void (*)(Cpu*,uint32_t)) {}
 void install(const std::function<std::string(uint32_t)>&,const std::function<void(uint32_t,void (*)(Cpu*))>&) {}

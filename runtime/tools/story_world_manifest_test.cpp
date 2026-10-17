@@ -241,5 +241,21 @@ int main() {
         {auto bad=data;bad["actors"].array[0]["drops"].array[0]["item"]="item:foreign";rejects(bad);}
         {auto bad=data;bad["actors"].array[0]["combat"]["native_type"]=2048;rejects(bad);}
     }
+    { // Carry opts into native Link procedures; raw flags and native actors are excluded.
+        auto data=mods::json::parse(R"({"items":[{"id":"token"}],"models":[{"id":"box","source":"assets/box.glb"}],"actors":[{"id":"box","kind":"mod","model":"box","stage":"sea","room":11,"position":{"x":0,"y":0,"z":0},"collision":{"radius":25,"height":60,"mode":"solid"},"carry":{}}]})");
+        const auto rejects=[&](const Value&d){assert(!parse_actors(d,actors,why));};assert(parse_actors(data,actors,why)&&actors[0].carry_enabled&&!actors[0].carry_break_on_impact);
+        for(const char*f:{"lines","then","attention","flag","combat"}){auto bad=data;bad["actors"].array[0][f]=Value{};rejects(bad);}
+        {auto bad=data;bad["actors"].array[0]["carry"]["native_flags"]=16;rejects(bad);}
+        {auto bad=data;bad["actors"].array[0]["carry"]["break_on_impact"]=1;rejects(bad);}
+        {auto bad=data;bad["actors"].array[0].object.erase("collision");rejects(bad);}
+        {auto bad=data;bad["actors"].array[0]["collision"]["radius"]=101;rejects(bad);}
+        {auto bad=data;bad["actors"].array[0]["collision"]["height"]=201;rejects(bad);}
+        {auto bad=data;bad["actors"].array[0]["rotation"]=mods::json::parse(R"({"x":1,"y":0,"z":0})");rejects(bad);}
+        {auto bad=data;bad["actors"].array[0]["scale"]=mods::json::parse(R"({"x":2,"y":2,"z":2})");rejects(bad);}
+        {auto bad=data;auto&a=bad["actors"].array[0];a.object.erase("kind");a.object.erase("model");a["actor"]="pot";rejects(bad);}
+        data["actors"].array[0]["carry"]["break_on_impact"]=true;rejects(data);data["actors"].array[0]["broken_flag"]="box.broken";rejects(data);data["actors"].array[0]["drops"]=mods::json::parse(R"([{"item":"item:token","quantity":1}])");assert(parse_actors(data,actors,why)&&actors[0].carry_break_on_impact&&actors[0].drops.size()==1);
+        {auto bad=data;bad["actors"].array[0]["drops"].array[0]["item"]="item:foreign";rejects(bad);}
+        {auto bad=data;auto second=bad["actors"].array[0];second["id"]="other";bad["actors"].array.push_back(second);rejects(bad);}
+    }
     std::cout<<"story world manifest tests passed\n";
 }

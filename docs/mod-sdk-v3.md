@@ -299,6 +299,84 @@ keeps that copy absent. Restored identities must match the declaration fingerpri
 and ownership generation. Editing a manifest is not a supported way to preserve
 compatibility with an old full state.
 
+## Carrying original mod actors (preview)
+
+A noncombat original `kind: "mod"` actor can opt into Link's normal lift, carry,
+put-down and throw controls with `"carry": {"break_on_impact": false}`. Static
+and skinned models are supported. Use solid body collision with radius at most
+100 and height at most 200, yaw-only placement and scale one. Carry cannot be
+combined with dialogue, attention prompts, look-at, pushable collision or combat.
+Lift, put-down, throw and ground landing have been exercised in the native game.
+
+Link's native grab procedures attach the actor to his hands and determine when
+put-down or throw releases it. The runtime pauses its authored path while held
+or airborne and resumes the saved path cursor after landing or put-down.
+Position, rotation, collision, animation, path and scene mutations are refused
+while carry owns the actor. Draw does not advance carry physics.
+
+Flight uses the native release speed (19 horizontal and 34 upward units per
+logic tick), bounded authored gravity of −2 units per tick and a −50 terminal
+vertical speed, with the game's native wall/ground correction. This is not the
+native pot's complete material-specific bounce or fracture simulation. A wall
+stops horizontal travel; an unbroken object then falls to the ground. Flight is
+bounded to 300 logic ticks and malformed ownership or motion quarantines the
+actor. Held and airborne bodies do not register their solid cylinder or deal
+contact damage to other actors.
+
+To break on a thrown wall or ground impact, set `break_on_impact: true` and add a
+distinct mod-owned `broken_flag` plus a `drops` array using the same-mod item
+syntax as native props. An empty array is valid. Impact atomically records the
+marker and grants those drops before requesting deletion; failure grants nothing
+and quarantines the copy. Put-down and ordinary deletion do not grant a reward.
+This preview removes the model on break; it does not provide native pot shards.
+
+Full states retain the carry mode, exact actor/Link identities, paused path and
+flight velocity in guest memory. Progress loads recreate only eligible copies;
+a committed broken marker keeps its copy absent. Changed declarations cannot
+rebind an old full-state actor. Native room transitions, interrupted carry and
+throw-camera cleanup still require acceptance evidence before release.
+
+## Original item models in Link's hand (preview)
+
+An inventory item may reference a same-mod static entry from `models` using
+`held_model`. A successful item **Use** requests a separate model presentation
+attached to Link's animated left hand. It does not equip a native weapon or
+change Link's equipment slots. This preview does not add a custom use animation.
+The native Delivery Bag assignment and Use path has been exercised with an
+original textured model visible in Link's hand.
+
+```json
+{
+  "models": [{"id": "lantern", "kind": "static", "source": "assets/lantern.glb"}],
+  "items": [{
+    "id": "lantern", "name": "Lantern", "description": "An original lantern.",
+    "icon": "assets/lantern.png", "use": {"action": "event"},
+    "held_model": "lantern", "held_frames": 90
+  }]
+}
+```
+
+Author the original model with its grip at the origin; the native left-hand
+joint supplies its transform. The model follows the existing hand pose. The
+static-model validation and player-local conversion requirements below apply.
+Skinned item models and item-model animation are currently unsupported.
+`held_frames` is an integer from 1 to 300, default 90, measured in game logic
+frames at 30 Hz. Loading uses this same bounded interval. Rendering does not
+advance it. An item needs a `use` action; failed Use and Info do not request a
+presentation. An event action is suitable when no modal information page is
+wanted. At most eight item model declarations are accepted per session.
+
+One presentation is active for Link. A later successful modeled Use replaces
+it; expiry, room/stage change, Link replacement and a real Quest Log load retire
+it. Full-state loading restores its remaining interval and native allocation
+when its item/model fingerprint still matches; it does not replay Use. Resource
+loading may delay replacement while an outstanding native load finishes.
+Original retail equipment and resource tables remain separate.
+
+`held_model` does **not** replace a chest's get-item model. Custom chest get-item
+presentation is unsupported in this preview; existing chest rewards retain
+their existing stand-in presentation.
+
 ## Static mod actors
 
 Declare original assets in `models` and refer to their IDs with `kind: "mod"`.

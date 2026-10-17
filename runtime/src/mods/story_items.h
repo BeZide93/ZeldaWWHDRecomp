@@ -35,12 +35,15 @@ struct Item {
     story_notebook::ManifestItem::Use use = story_notebook::ManifestItem::Use::None;
     std::string use_quest;
     unsigned use_step = 0;
+    std::string held_model;
+    unsigned held_frames = 90;
     bool usable() const { return use != story_notebook::ManifestItem::Use::None; }
 };
 
 // The registry: the items of the enabled mods' manifests (story_notebook::declare). False (and why)
 // when the item can't be used: a bad icon, or its key is another item's.
 bool define(const std::string& mod, const std::string& package_dir, const story_notebook::ManifestItem& m, std::string& why);
+void set_model_presenter(std::function<void(uint16_t)> presenter);
 std::vector<Item> installed();  // in declaration order (mod by mod)
 std::optional<Item> find(uint16_t key);
 std::optional<Item> find(const std::string& mod, const std::string& id);

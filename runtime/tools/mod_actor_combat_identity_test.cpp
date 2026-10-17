@@ -56,4 +56,9 @@ int main(){
     auto legacy=base;legacy.combat_enabled=false;const auto legacy_hash=fingerprint("owner",legacy);
     for(const auto& [name,change]:changes){auto changed=legacy;change(changed);changed.combat_enabled=false;if(name=="defeat flag"||name.starts_with("drop "))assert(fingerprint("owner",changed)!=legacy_hash);else assert(fingerprint("owner",changed)==legacy_hash);}
     auto unused=legacy;unused.combat={};unused.combat.health=255;unused.combat.invulnerability_frames=900;unused.combat.target_priority=2;unused.combat.attack={4,150,900,200,400,300,-200};unused.combat.flinch={"unused-a",900,1500,30};unused.combat.stun={"unused-b",899,42,3};unused.combat.death={"unused-c",898,43,4};unused.native_heart_drop=true;assert(fingerprint("owner",unused)==legacy_hash);
+    auto unused_carry=legacy;unused_carry.carry_break_on_impact=true;assert(fingerprint("owner",unused_carry)==legacy_hash);
+    auto carry=legacy;carry.carry_enabled=true;const auto carry_hash=fingerprint("owner",carry);assert(carry_hash!=legacy_hash);
+    carry.carry_break_on_impact=true;const auto breaking_hash=fingerprint("owner",carry);assert(breaking_hash!=carry_hash);
+    const auto carry_record=story_actors::identity::record(carry_hash);assert(story_actors::identity::matches(carry_record.data(),carry_hash));
+    assert(!story_actors::identity::matches(carry_record.data(),breaking_hash));
 }

@@ -28,6 +28,7 @@ struct ManifestActor {
     std::string id,actor,stage,kind,model,animation,prompt="check"; unsigned room=0;
     float collision_radius=30,collision_height=100; bool pushable=false;
     ManifestLookAt look_at;ManifestPath path;
+    bool carry_enabled=false,carry_break_on_impact=false;
     bool combat_enabled=false,native_heart_drop=false;story_mod_combat::Config combat;
     WorldPoint position,rotation,scale{1,1,1}; uint32_t params=0; unsigned resident=9; // 19 is the seated Ym1 adapter, not a People subtype.
     uint8_t item_game=6;
@@ -172,7 +173,7 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
     if(list.type==Value::Null)return true;
     if(list.type!=Value::Array||list.array.size()>kMaxActorsPerMod)return why="actors must be a list of up to 64",false;
     for(const auto& v:list.array){ManifestActor a;
-        if(!keys(v,{"id","actor","kind","model","animation","look_at","path","collision","attention","stage","room","position","rotation","scale","params","parameters","flag","broken_flag","defeated_flag","drops","combat","native_drops","switch_flag","switch","when","lines","then"}))return why="unknown actor field",false;
+        if(!keys(v,{"id","actor","kind","model","animation","look_at","path","collision","attention","stage","room","position","rotation","scale","params","parameters","flag","broken_flag","defeated_flag","drops","carry","combat","native_drops","switch_flag","switch","when","lines","then"}))return why="unknown actor field",false;
         if(!id(v.get("id")))return why="invalid actor id",false;a.id=v.get("id").text;a.actor=v.get("actor").string();
         if(v.object.contains("kind")) {
             if(v.get("kind").string()!="mod"||v.object.contains("actor"))return why="mod actor kind cannot name a native actor",false;
@@ -223,6 +224,11 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
                 if(v.object.contains("native_drops")&&!story_mod_combat::parse_native_drops(v.get("native_drops"),a.native_heart_drop,why))return false;
             }
         }else if(v.object.contains("model")||v.object.contains("animation")||v.object.contains("look_at")||v.object.contains("path")||v.object.contains("collision")||v.object.contains("attention"))return why="model, animation, look_at, path, collision and attention require kind mod",false;
+        if(v.object.contains("carry")){
+            const auto& carry=v.get("carry");if(a.kind!="mod"||a.combat_enabled||!keys(carry,{"break_on_impact"})||(carry.object.contains("break_on_impact")&&carry.get("break_on_impact").type!=Value::Bool))return why="carry requires a noncombat mod actor and boolean break_on_impact",false;
+            a.carry_enabled=true;a.carry_break_on_impact=carry.get("break_on_impact").boolean;
+            if(!v.object.contains("collision")||v.object.contains("attention")||v.object.contains("lines")||v.object.contains("then")||v.object.contains("flag")||a.look_at.enabled||a.pushable||a.collision_radius>100||a.collision_height>200)return why="carry actors require a bounded solid body and no talk, look_at or pushable mode",false;
+        }
         if((v.object.contains("combat")||v.object.contains("native_drops"))&&!a.combat_enabled)return why="combat and native_drops require a combat mod actor",false;
         if(a.actor=="kanban"||a.actor=="PROC_KANBAN")a.actor="sign";
         if(a.actor=="Tbox"||a.actor=="takara"||a.actor=="PROC_TBOX")a.actor="chest";
@@ -241,6 +247,7 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
             if(a.rotation.x!=0||a.rotation.z!=0||a.scale.x!=1||a.scale.y!=1||a.scale.z!=1)return why="combat actors require yaw-only rotation and scale 1",false;
             for(const auto& old:out)if(old.defeated_flag==a.defeated_flag)return why="combat actors require distinct defeated_flag IDs",false;
         }else if(v.object.contains("defeated_flag"))return why="defeated_flag requires an enemy",false;
+        if(a.carry_enabled&&(a.rotation.x!=0||a.rotation.z!=0||a.scale.x!=1||a.scale.y!=1||a.scale.z!=1))return why="carry actors require yaw-only rotation and scale 1",false;
         if(switch_actor||door){
             if(v.object.contains("params")||v.object.contains("parameters")||v.object.contains("flag")||v.object.contains("lines")||v.object.contains("then")||v.object.contains("broken_flag")||v.object.contains("drops"))return why="switches and doors cannot use native parameters, dialogue, drops or generic flags",false;
             if(a.rotation.x!=0||a.rotation.z!=0||a.scale.x!=1||a.scale.y!=1||a.scale.z!=1)return why="switches and doors require yaw-only rotation and scale 1",false;
@@ -253,7 +260,7 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
                 a.switch_actor=v.get("switch").text;
             }
         }else if(v.object.contains("switch_flag")||v.object.contains("switch"))return why="switch_flag and switch require switch or door actors",false;
-        if(prop){
+        if(prop||a.carry_break_on_impact){
             if(!flag_id(v.get("broken_flag")))return why="props require a mod-owned broken_flag",false;
             a.broken_flag=v.get("broken_flag").text;
             for(const auto& old:out)if(!old.broken_flag.empty()&&old.broken_flag==a.broken_flag)return why="props must have distinct broken_flag IDs",false;
