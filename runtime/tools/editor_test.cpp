@@ -567,6 +567,7 @@ void building(const fs::path& examples) {
     std::ifstream in(dir / "manifest.json");
     std::stringstream text;
     text << in.rdbuf();
+    in.close();  // Windows cannot replace or delete a file that is still open
     editor::Session w(&host);
     w.add_package("sdk-v3-windfall", "Windfall", dir.string(), mods::json::parse(text.str()));
     const std::string creature = (examples / "sdk-v3-creature" / "assets" / "creature.glb").string();
