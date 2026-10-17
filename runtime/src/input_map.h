@@ -36,6 +36,8 @@ enum Pad : int {
     kPadDUp, kPadDDown, kPadDLeft, kPadDRight,
     kPadLSUp, kPadLSDown, kPadLSLeft, kPadLSRight,
     kPadRSUp, kPadRSDown, kPadRSLeft, kPadRSRight,
+    kPadCapture, kPadRightPaddle1, kPadLeftPaddle1, kPadRightPaddle2, kPadLeftPaddle2, kPadTouchpad,
+    kPadMisc2, kPadMisc3, kPadMisc4, kPadMisc5, kPadMisc6,
     kPadCount
 };
 const char* pad_id(int p);     // JSON value, e.g. "LeftTrigger"
@@ -72,9 +74,11 @@ struct ShortcutBinding {
     int hold = kPadNone, button = kPadNone;
     bool operator==(const ShortcutBinding&) const = default;
 };
-struct ShortcutInfo { const char* id; const char* name; const char* group; ShortcutKey primary, alternate; };
+struct ShortcutInfo { const char* id; const char* name; const char* group; ShortcutKey primary, alternate; int button = kPadNone; };
 const ShortcutInfo& shortcut_info(int action);
 std::array<ShortcutBinding, kShortcutCount> shortcut_defaults();
+// controls.json "shortcuts_version": 2 shows Home under Settings, 3 moves an untouched F1 Settings key to Esc + F1.
+constexpr int kShortcutsVersion = 3;
 std::string shortcut_key_label(ShortcutKey key);
 
 struct Mapping {
@@ -219,11 +223,11 @@ bool load_file(const std::string& path, Mapping& out, std::string* error = nullp
 bool save_file(const std::string& path, const Mapping& m);
 std::string default_path();
 
-// Settings also retains the built-in Home / held Select controller shortcut.
+// Settings has a remappable Home default and a held-Select fallback unless Select is a modifier.
 bool settings_reachable(const Mapping& m, bool controller_settings = true);
 bool shortcut_conflict(const Mapping& m, int action);
 int shortcut_for_key(const Mapping& m, int code, int mods);
-// A combination consumes its two inputs only while both are held. One activation per press.
+// A single button or complete combination consumes its inputs only while held. One activation per press.
 struct ShortcutPoll {
     std::array<bool, kShortcutCount> held{};
     std::vector<int> poll(const Mapping& m, const float* raw, float* game);

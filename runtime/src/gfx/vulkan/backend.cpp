@@ -1,3 +1,4 @@
+#include "vertex_cpu_policy.h"
 #include "platform/keycodes.h"
 #include "input_map.h"
 #include "atomic_temporary.h"
@@ -137,6 +138,7 @@ uint64_t resident_bytes() {
 namespace gx2 { uint64_t flips_presented(); void checkpoint_vulkan_caches(); void shutdown_vulkan_caches(); void request_background_vulkan_cache_checkpoint(); }
 #include "../../interp.h"
 
+extern uint32_t g_latteCpuVertexClasses;
 extern bool g_latteCpuVertexDecode;  // Cemu GLSL attribute decoder (LatteDecompiler.h), issue #207 diagnostic
 namespace gfxvk {
 Renderer R;
@@ -324,7 +326,7 @@ void init_pipeline_cache() try {
     put(44, (R.portabilitySubset ? 1u : 0u) | (R.separateStencilMaskRef ? 2u : 0u) |
         (R.constantAlphaColorBlendFactors ? 4u : 0u) | (R.vertexAttributeAccessBeyondStride ? 8u : 0u) |
         (R.vertexFormats.fallbackMask << 4) | (R.vertexDiagnostics.cpuVertices ? 0x100u : 0u) |
-        (R.vertexDiagnostics.fullPrecision ? 0x200u : 0u));
+        (R.vertexDiagnostics.fullPrecision ? 0x200u : 0u) | (R.vertexDiagnostics.cpuClasses << 10));
     const char* warmup = std::getenv("WWHD_VK_PIPELINE_WARMUP");
     if (!warmup || std::strcmp(warmup, "0")) try {
       const auto headstart=path_environment_utf8("WWHD_HEADSTART");
@@ -1644,10 +1646,6 @@ static void prepare_secondary_drawing(const Surface& source) {
   create_surface_image(&snapshot,false,source.extent,R.secondaryQueueFamily);
 }
 
-// The second screen shows the GamePad picture and the GamePad screen is switched off: draw it black
-// (issue #222). Swapping is suspended while off, so the second screen never carries the TV then.
-static bool secondary_blank() { return gfx::drc_screen_off() && !dual_display::active_swap; }
-
 static void prepare_secondary_snapshot() {
   if(isolatedSecondary) {
     if(!isolatedSecondary->acquired() || isolatedSecondary->prepared())return;
@@ -1655,8 +1653,7 @@ static void prepare_secondary_snapshot() {
     auto* scan=source.scan.get();if(!scan || !scan->image)return;
     end_encoder();
     transition_image(scan,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_ACCESS_TRANSFER_READ_BIT);
-    isolatedSecondary->record_snapshot(command_buffer(),scan->image,scan->fmt.pixel,{scan->extent.width,scan->extent.height},
-        secondary_blank());
+    isolatedSecondary->record_snapshot(command_buffer(),scan->image,scan->fmt.pixel,{scan->extent.width,scan->extent.height});
     isolatedSourceLinear=source.scanSrgb || scan->fmt.pixel==VK_FORMAT_R8G8B8A8_SRGB ||
         scan->fmt.pixel==VK_FORMAT_B8G8R8A8_SRGB || scan->fmt.pixel==VK_FORMAT_A8B8G8R8_SRGB_PACK32;
     secondarySnapshotWait=isolatedSecondary->snapshot_wait();
@@ -1675,17 +1672,11 @@ static void prepare_secondary_snapshot() {
   if(!draw)return;
   auto& snapshot=secondaryDrawing.snapshot;
   transition_image(&snapshot,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_ACCESS_TRANSFER_WRITE_BIT);
-  if(secondary_blank()) {
-    static const VkClearColorValue black{};
-    const VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1};
-    record::vkCmdClearColorImage(command_buffer(),snapshot.image,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,&black,1,&range);
-  } else {
-    transition_image(scan,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_ACCESS_TRANSFER_READ_BIT);
-    VkImageCopy copy{};copy.srcSubresource={VK_IMAGE_ASPECT_COLOR_BIT,0,0,1};
-    copy.dstSubresource=copy.srcSubresource;copy.extent=scan->extent;
-    record::vkCmdCopyImage(command_buffer(),scan->image,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-        snapshot.image,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,1,&copy);
-  }
+  transition_image(scan,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_ACCESS_TRANSFER_READ_BIT);
+  VkImageCopy copy{};copy.srcSubresource={VK_IMAGE_ASPECT_COLOR_BIT,0,0,1};
+  copy.dstSubresource=copy.srcSubresource;copy.extent=scan->extent;
+  record::vkCmdCopyImage(command_buffer(),scan->image,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+      snapshot.image,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,1,&copy);
   transition_image(&snapshot,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,VK_ACCESS_SHADER_READ_BIT);
   secondaryPreparedDraw=*draw;
   // Whichever graphics submission consumes this command buffer (normally TV
@@ -1698,6 +1689,11 @@ std::atomic<uint64_t> touchLayoutGeneration{0};
 }
 // The Java UI thread transfers one retained native-window reference to the
 // mailbox. Coalesce rapid resize/destroy events without touching Vulkan here.
+extern "C" JNIEXPORT jboolean JNICALL
+Java_org_wwhdrecomp_wwhd_GamePadDisplay_publishAvailability(JNIEnv*, jclass, jboolean available) {
+  gfx::g_second_display_available = available;
+  return gfx::drc_screen_off();
+}
 extern "C" JNIEXPORT void JNICALL
 Java_org_wwhdrecomp_wwhd_GamePadDisplay_publishSurface(
     JNIEnv* env, jclass, jobject surface, jint width, jint height, jlong generation) {
@@ -1725,7 +1721,7 @@ Java_org_wwhdrecomp_wwhd_GamePadDisplay_touch(
   if (generation != secondaryGeneration || generation != activeSecondaryGeneration)
     return JNI_FALSE;
   if (dual_display::active_swap) return JNI_FALSE; // this surface is showing TV
-  if (gfx::drc_screen_off()) return JNI_FALSE;     // GamePad screen off: shown black, no touches (#222)
+  if (gfx::drc_screen_off()) return JNI_FALSE;     // GamePad screen released: no touches (#222)
   if (!down) { input::set_touch(false, 0, 0); return JNI_TRUE; }
   float tx, ty;
   if (!gamepad_touch::map(secondaryTouchBox, x, y, dragging, tx, ty)) return JNI_FALSE;
@@ -2720,8 +2716,29 @@ void present_completed_frame_while_pipeline_pending() {
     stutter::trace().add("repeated_frame_age", R.frame, 0, lastNewPresentNs, ended, 0);
   }
 }
+#if defined(WWHD_SDL_HOST) && !defined(__ANDROID__)
+static std::atomic<SDL_Window*> pendingGamepadWindow{nullptr};
+static VkSurfaceKHR pendingGamepadSurface = VK_NULL_HANDLE;
+static void attach_gamepad_window() {
+  SDL_Window* window = pendingGamepadWindow.exchange(nullptr);
+  if (!window) return;
+  R.drc.surface = pendingGamepadSurface;
+  VkBool32 supported = false;
+  vk_check(vkGetPhysicalDeviceSurfaceSupportKHR(R.physicalDevice, R.queueFamily, R.drc.surface, &supported), "GamePad presentation support");
+  if (!supported) exception_report::raise("GamePad window cannot present on the graphics queue");
+  VkSemaphoreCreateInfo si{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
+  vk_check(vkCreateSemaphore(R.device, &si, nullptr, &R.drc.acquired), "GamePad acquire semaphore");
+  vk_check(vkCreateSemaphore(R.device, &si, nullptr, &R.drc.finished), "GamePad present semaphore");
+  R.drc.window = window;
+  make_swapchain(R.drc);
+  gfx::g_has_drc_window = true;
+}
+#endif
 void swap() {
   if(active_deferred_commands)active_deferred_commands->finish_exact();
+#if defined(WWHD_SDL_HOST) && !defined(__ANDROID__)
+  attach_gamepad_window();
+#endif
   for (Screen* s : {&R.tv, &R.drc, &stereoRight}) if (s->buildingScanDirty) {
     s->scan.swap(s->buildingScan);
     s->scanSrgb = s->buildingScanSrgb;
@@ -2730,10 +2747,27 @@ void swap() {
   service_screenshots();
   const auto swapPhaseStarted=std::chrono::steady_clock::now();
 #ifdef __ANDROID__
+  // Notify Java only on a setting transition; lifecycle/topology refreshes read
+  // the saved native value directly through publishAvailability().
+  static int notifiedOff = false; // native default; saved Off still triggers a notification
+  const int off = gfx::drc_screen_off();
+  if (notifiedOff != off) {
+    auto* env = static_cast<JNIEnv*>(SDL_GetAndroidJNIEnv());
+    jobject activity = env ? static_cast<jobject>(SDL_GetAndroidActivity()) : nullptr;
+    if (activity) {
+      jclass cls = env->GetObjectClass(activity);
+      jmethodID method = cls ? env->GetMethodID(cls, "refreshGamePadDisplay", "()V") : nullptr;
+      if (method) env->CallVoidMethod(activity, method);
+      if (!env->ExceptionCheck() && method) notifiedOff = off;
+      if (env->ExceptionCheck()) env->ExceptionClear();
+      if (cls) env->DeleteLocalRef(cls);
+      env->DeleteLocalRef(activity);
+    }
+  }
   update_secondary_surface();
   {
     std::lock_guard<std::mutex> guard(secondaryMutex);
-    // GamePad screen off: the TV stays on the main screen and the second one goes black (issue #222)
+    // GamePad screen off: the TV stays on the main screen and the second one is released (issue #222)
     bool wanted = gfx::g_has_drc_window && dual_display::requested_swap && !gfx::drc_screen_off();
     if (dual_display::active_swap.exchange(wanted) != wanted) {
       secondaryTouchBox = primaryTouchBox = {};
@@ -3778,15 +3812,25 @@ static void init_device(std::vector<const char *> extensions,
     std::string value;
     return hostui::get(key, value) && value == "1";
   };
-  R.vertexDiagnostics.cpuVertices = diagnostic("WWHD_VK_CPU_VERTICES", "vkCpuVertices");
+  std::string cpuOption, cpuClasses;
+  const bool hasCpuOption = hostui::get("vkCpuVertices", cpuOption);
+  hostui::get("vkCpuVertexClasses", cpuClasses);
+  const char* classesEnv = std::getenv("WWHD_VK_CPU_VERTEX_CLASSES");
+  const auto cpuChoice = vk::choose_cpu_vertices(R.properties.vendorID,
+      hasCpuOption ? cpuOption.c_str() : nullptr, std::getenv("WWHD_VK_CPU_VERTICES"),
+      classesEnv ? classesEnv : (cpuClasses.empty() ? nullptr : cpuClasses.c_str()));
+  R.vertexDiagnostics.cpuClasses = cpuChoice.mask;
+  R.vertexDiagnostics.cpuVertices = cpuChoice.mask != 0;
+  LOG("[vulkan] %s; CPU vertex classes=%s", cpuChoice.reason, vk::cpu_vertex_class_names(cpuChoice.mask).c_str());
   R.vertexDiagnostics.fullPrecision = diagnostic("WWHD_VK_FULL_PRECISION", "vkFullPrecision");
   R.vertexDiagnostics.noVertexReuse = diagnostic("WWHD_VK_NO_VERTEX_REUSE", "vkNoVertexReuse");
   g_latteCpuVertexDecode = R.vertexDiagnostics.cpuVertices;
+  g_latteCpuVertexClasses = R.vertexDiagnostics.cpuClasses;
   vk::set_full_precision(R.vertexDiagnostics.fullPrecision);
   LOG("[vulkan diagnostics] convert vertices on the CPU=%u, full precision in shaders=%u, no vertex reuse=%u",
       R.vertexDiagnostics.cpuVertices, R.vertexDiagnostics.fullPrecision, R.vertexDiagnostics.noVertexReuse);
   // CPU-converted vertices are fetched as 4x32-bit float/uint only: the RGB split does not apply
-  R.vertexFormats = R.vertexDiagnostics.cpuVertices ? vk::VertexFormatPolicy{} : vk::vertex_format_policy([](VkFormat format) {
+  R.vertexFormats = R.vertexDiagnostics.cpuClasses == vk::CpuAll ? vk::VertexFormatPolicy{} : vk::vertex_format_policy([](VkFormat format) {
     return bool(format_properties(format).bufferFeatures & VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT);
   }, forceFallback);
   LOG("[vulkan diagnostics] RGB fallback forced=%u active=%u mask=%u (8-bit=1 16-bit=2 32-bit=4)",
@@ -3918,6 +3962,42 @@ static void set_window_icons() {
       SDL_SetWindowIcon(s->window, icon);
   SDL_DestroySurface(icon);
 }
+bool gamepad_window_available() {
+#ifdef __ANDROID__
+  return false;
+#else
+  return !getenv("WWHD_NO_GAMEPAD");
+#endif
+}
+SDL_Window* ensure_gamepad_window(bool create) {
+#if !defined(__ANDROID__)
+  // Main thread creates the native window and surface; the render thread attaches Vulkan
+  // resources at its next frame boundary. No second window exists until requested.
+  static SDL_Window* requested = nullptr;
+  if (R.drc.window) return R.drc.window;
+  if (requested) return requested;
+  if (!create || !gamepad_window_available()) return nullptr;
+  requested = SDL_CreateWindow("GamePad — Vulkan", 854, 480,
+      SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIDDEN
+#ifdef __linux__
+      | SDL_WINDOW_HIGH_PIXEL_DENSITY
+#endif
+  );
+  if (!requested) exception_report::raise(SDL_GetError());
+  if (!WWHD_CREATE_WINDOW_SURFACE(requested, R.instance, nullptr, &pendingGamepadSurface))
+    exception_report::raise(SDL_GetError());
+  int width = 854, height = 480;
+  SDL_GetWindowSizeInPixels(requested, &width, &height);
+  R.drc.width = width; R.drc.height = height;
+  input::set_gamepad_window(requested);
+  // Release/acquire publishes the surface and dimensions to the render thread.
+  pendingGamepadWindow = requested;
+  LOG("[display] GamePad window created on request");
+  return requested;
+#else
+  return nullptr;
+#endif
+}
 // SDL host (Vulkan-only builds): SDL windows, input and audio
 void init() {
 #ifdef __ANDROID__
@@ -3966,7 +4046,8 @@ void init() {
   // one surface: the GamePad picture is drawn into it (display_modes.h: picture-in-picture, GamePad
   // only), never a window of its own
 #else
-  if (!getenv("WWHD_NO_GAMEPAD")) {
+  if (!getenv("WWHD_NO_GAMEPAD") && (!overlay::window_target::gamescope_session() ||
+      ::hostui::startup_drc_mode() == gfx::kDrcWindow)) {
     // made hidden: the GamePad screen mode (load_saved_options below) shows it in window mode only;
     // the other modes draw the GamePad picture into the TV window (gfx/display_modes.h)
     R.drc.window = SDL_CreateWindow("GamePad — Vulkan", 854, 480, windowFlags | SDL_WINDOW_HIDDEN);
@@ -4296,7 +4377,7 @@ static bool fullscreen_key(const SDL_Event& event) {
              (event.key.mod & SDL_KMOD_ALT ? 4 : 0) | (event.key.mod & SDL_KMOD_GUI ? 8 : 0);
   if (input_map::shortcut_for_key(input_map::current(), code, mods) != input_map::kFullscreen) return false;
   SDL_Window* window = SDL_GetWindowFromID(event.key.windowID);
-  toggle_fullscreen(window ? window : R.tv.window);
+  toggle_fullscreen(window ? window : R.tv.window.load());
   return true;
 }
 // debug: WWHD_TEST_FULLSCREEN_KEY=3500,3700 simulates F11 on the TV window at those frames (with

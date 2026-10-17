@@ -624,9 +624,17 @@ runs do not accept the shortcuts. State files remain in the configured state dir
 The Shortcuts tab also offers picture-in-picture, the performance overlay, mute and volume,
 initially unbound. Bindings are stored with the game controls in `controls.json`; older Screenshot
 bindings migrate automatically. Conflicts include game keys and duplicate combinations.
-Combinations consume only their two buttons while both are held. Using Select as a hold button
-reserves it for combinations; tapping Home remains the Settings fallback (on release when Home
-is itself a hold button), and Esc closes Settings.
+Home is the default controller button shown under **Settings**, and is remappable there.
+Esc (or F1) opens Settings. With a captured mouse, the first Esc frees the mouse and a second
+one opens Settings. Escape closes Settings when no input is being recorded. While recording,
+Escape, L/R, Select and Home are assigned without triggering their normal menu actions.
+
+Right-click to clear a binding in either Controls or Shortcuts. With a binding focused,
+Delete, Backspace or the controller button mapped to X clears it. Right-click during mouse
+capture assigns the right mouse button. Capture/Share, rear paddles and touchpad clicks are
+also assignable and start unbound. Combinations consume only their two buttons while both
+are held; single-button shortcuts consume their button while held. Using Select as a hold
+button reserves it for combinations.
 Android keyboard shortcuts require `WWHD_ANDROID_KEYBOARD`; controller combinations do not.
 
 A load must pass the existing allocation, thread, and guest-stack guards. A state
@@ -964,3 +972,19 @@ Readbacks deliberately stall submissions and may allow the compiler to finish
 during capture, so this diagnostic must be disabled for performance measurements.
 No artificial compilation delay is introduced. The diagnostic attempts at most
 once per process and bounds each scan to 16 megapixels; keep its output local.
+
+## Steam Deck Gaming Mode
+
+In Gaming Mode, the GamePad screen defaults to **Picture-in-picture** and the game starts
+in **Full screen**, unless you already saved a choice or supplied a launch override.
+This also applies to the Windows build through Proton when the gamescope session is detected.
+Desktop Mode keeps its existing defaults.
+
+Change **View** under **Settings → Graphics → GamePad screen**, or change **Full screen**
+in Graphics. Your choices are remembered. A separate GamePad window is still available,
+but Gaming Mode shows one window at a time and may scale the game picture, making it blurry.
+
+The old launch-option workaround to hide the GamePad and force full screen is no longer
+needed for a fresh configuration. Remove those launch options to use picture-in-picture;
+existing launch overrides still take precedence. The aspect default is unchanged: choose
+**Match window** or **16:10** to use the Deck screen's shape.

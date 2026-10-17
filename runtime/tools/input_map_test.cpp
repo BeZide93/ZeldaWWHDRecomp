@@ -579,7 +579,7 @@ static void test_names() {
 }
 
 static void test_reserved() {
-    for (int k : std::initializer_list<int>{kVK_ANSI_9, kVK_ANSI_P, kVK_F12, kVK_Escape})
+    for (int k : std::initializer_list<int>{kVK_ANSI_9, kVK_ANSI_P, kVK_F12})
         CHECK(reserved_key(k) != nullptr);
     CHECK(reserved_key(kVK_ANSI_K) == nullptr);
     CHECK(reserved_key(kVK_ANSI_5) == nullptr);
@@ -938,6 +938,7 @@ static void test_shortcuts() {
     auto m = Mapping::defaults();
     CHECK(shortcut_for_key(m, kVK_F6, 0) == kLoad1);
     CHECK(shortcut_for_key(m, kVK_F1, 0) == kSettings);
+    CHECK(shortcut_for_key(m, kVK_Escape, 0) == kSettings);
     CHECK(shortcut_for_key(m, kVK_F1, kModShift) == kSave1);
     CHECK(shortcut_for_key(m, kVK_F10, 0) == kPhoto);
     for (int a = 0; a < kShortcutCount; ++a) {
@@ -950,6 +951,57 @@ static void test_shortcuts() {
         CHECK(m.shortcuts[a].keys[1].code == kNoKey);
         CHECK(!m.shortcuts[a].hold && !m.shortcuts[a].button);
     }
+    CHECK(m.shortcuts[kSettings].button==kPadHome && !m.shortcuts[kSettings].hold);
+    CHECK(!reserved_key(kVK_Escape));
+    // Settings: Esc first, F1 as the alternate, Home on a controller.
+    CHECK(m.shortcuts[kSettings].keys[0] == ShortcutKey{kVK_Escape} && m.shortcuts[kSettings].keys[1] == ShortcutKey{kVK_F1});
+    CHECK(shortcut_for_key(m, kVK_Escape, 0) == kSettings && settings_reachable(m, false));
+    {
+        // Files written before Esc opened Settings: only the untouched default moves to Esc + F1.
+        auto legacy = [](std::array<ShortcutKey, 2> keys, int escGameInput = -1) {
+            Mapping old = Mapping::defaults();
+            old.shortcuts[kSettings].keys = keys;
+            if (escGameInput >= 0) old.keys[escGameInput][1] = kVK_Escape;
+            std::string text = to_json(old);
+            const std::string now = "\"shortcuts_version\": " + std::to_string(kShortcutsVersion);
+            const size_t at = text.find(now);
+            CHECK(at != std::string::npos);
+            return std::pair{text.replace(at, now.size(), "\"shortcuts_version\": 2"), old};
+        };
+        const auto defaults = shortcut_defaults()[kSettings].keys;
+        Mapping loaded;
+        for (auto keys : {std::array<ShortcutKey, 2>{{{kVK_F1}, {}}}, std::array<ShortcutKey, 2>{{{kVK_F1}, {kVK_ANSI_Comma, kModSuper}}}}) {
+            auto [text, old] = legacy(keys);
+            CHECK(from_json(text, loaded) && loaded.shortcuts[kSettings].keys == defaults);
+            CHECK(loaded.shortcuts[kSettings].button == kPadHome);
+            loaded.shortcuts[kSettings].keys = old.shortcuts[kSettings].keys; CHECK(loaded == old); // nothing else changes
+        }
+        // Saved custom bindings are kept, as is F1 when a game input already uses Esc.
+        for (auto keys : {std::array<ShortcutKey, 2>{{{kVK_F9}, {kVK_F1}}}, std::array<ShortcutKey, 2>{{{kVK_F1}, {kVK_F8, kModAlt}}},
+                          std::array<ShortcutKey, 2>{{{}, {kVK_F1}}}, std::array<ShortcutKey, 2>{{{kVK_F1, kModCtrl}, {}}}}) {
+            auto [text, old] = legacy(keys);
+            CHECK(from_json(text, loaded) && loaded == old);
+        }
+        auto [text, old] = legacy({{{kVK_F1}, {}}}, kB);
+        CHECK(from_json(text, loaded) && loaded == old && loaded.shortcuts[kSettings].keys[0] == ShortcutKey{kVK_F1});
+        // A current file is never migrated: a player who removed Esc keeps F1 alone.
+        Mapping f1Only = Mapping::defaults(); f1Only.shortcuts[kSettings].keys = {{{kVK_F1}, {}}};
+        CHECK(to_json(f1Only).find("\"shortcuts_version\": 3") != std::string::npos);
+        CHECK(from_json(to_json(f1Only), loaded) && loaded == f1Only);
+        // A file without shortcuts gets the current defaults.
+        CHECK(from_json(R"({"keyboard":{"A":["K"]}})", loaded) && loaded.shortcuts[kSettings].keys == defaults);
+    }
+    for (int p=kPadCapture;p<kPadCount;++p) {
+        CHECK(*pad_id(p) && *pad_label(p) && *pad_short_label(p));
+        m.pad[kZR]=p; Mapping round; CHECK(from_json(to_json(m),round)); CHECK(round==m);
+        float raw[kPadCount]{};raw[p]=1;CHECK(controller_state(m,raw).buttons&input::kZR);
+    }
+    m=Mapping::defaults();
+    CHECK(from_json(R"({"shortcuts":{"Settings":{"keys":[{"key":"F9","modifiers":0}],"hold":"","button":""}}})",m));
+    CHECK(m.shortcuts[kSettings].keys[0].code==kVK_F9 && m.shortcuts[kSettings].button==kPadHome);
+    m.shortcuts[kSettings].button=0;
+    Mapping round;CHECK(from_json(to_json(m),round));CHECK(!round.shortcuts[kSettings].button);
+    m=Mapping::defaults();
     m.shortcuts[kPhoto].keys[1] = {kVK_ANSI_K, kModCtrl};
     CHECK(!shortcut_conflict(m, kPhoto)); // a Ctrl/Alt/Cmd shortcut takes its key press before the game
     m.shortcuts[kPhoto].keys[1] = {kVK_ANSI_K, kModShift};

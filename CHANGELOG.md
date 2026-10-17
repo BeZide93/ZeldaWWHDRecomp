@@ -7,6 +7,31 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **PowerVR phones (e.g. Pixel 10): no more stretched spikes** (#207). On PowerVR GPUs the game now converts vertex
+  data on the CPU automatically, because their drivers decode some of it wrongly in the shader. It can cost some speed;
+  **Graphics → Advanced → Convert vertices on the CPU** switches it off (Automatic restores it).
+- **Shortcuts: remapping works, Esc opens Settings** (#220). Remapped shortcuts take effect again (the Controls tab was
+  catching the input first). Every binding clears the same way in Controls and Shortcuts (right-click, or Delete /
+  Backspace / X on a focused binding); extra controller buttons (Capture/Share, rear paddles, touchpad click) can be
+  bound; Home is listed under Settings. **Esc** now opens Settings (with a captured mouse the first Esc frees it), F1
+  keeps working for now, and on macOS Cmd+, still opens Settings from the app menu.
+
+- **Steam Deck Gaming Mode: sharp picture by default** (#214). In Gaming Mode the game now starts in full screen with the
+  GamePad picture as picture-in-picture, because Gaming Mode shows one window at a time and a separate GamePad window
+  made the picture blurry. Also with the Windows build through Proton. Your own saved choices and launch options still
+  win; the old launch-option workaround is no longer needed.
+
+- **Sploosh Kaboom: no more doubled hit and miss markers at higher frame rates** (#179). The board's markers are moved
+  between cells once per game step; the in-between frames no longer blend a marker from its old cell to its new one.
+
+- **Option to turn off the letterbox bars while targeting** (#114). Settings → Mods → Built-in → Camera →
+  **Letterbox while targeting** (on by default). Switched off, normal Z-targeting no longer shows the black bars;
+  cutscenes, scripted cameras, minigames and item aiming keep theirs.
+
+- **Run/swim speed: boost bar options and "Roll, then hold A"** (#233). New **Show boost bar** switch; with Boost time
+  set to no limit the bar no longer appears; the boost bar and the climbing stamina wheel now hide while menus, cutscenes
+  and conversations are on screen. New boost button **Roll, then hold A**: roll while running and keep A held to boost
+  until you let go (on land).
 - **Android: big update for phones and handhelds** (most ideas from GreenNaugahyde's Android fork):
   - **Fewer stutters after Android closes the game:** the shader cache is now also saved every few minutes and when the
     app goes to the background, so the next start doesn't rebuild what you already had (desktop benefits after a crash
@@ -41,6 +66,10 @@ what is on `devel` and not released yet (also in the
   - phones with **older Adreno** or other GPUs, and whether 120 fps reaches your display.
 - **True 60: no more crash at Orca's sword training** (#223). Talking to Orca and choosing "yes" stopped the game in True 60
   mode; event commands now only run on full game steps.
+
+- **GamePad sounds through the main speakers** (#218). Sounds the Wii U plays only on the GamePad's own speaker (switching
+  items, saving and other GamePad menu sounds) are now heard during TV play too. Settings → Audio has the switch (on by
+  default) and its own volume; sounds already on the TV aren't doubled, and Off-TV Play is unchanged.
 - **Linux AppImage: code mods work again** (#230). Turning on a code mod such as the story quests failed with "Guest mod
   build tools are missing". Setups made with an earlier start of the AppImage are repaired automatically, without running
   setup again.
@@ -72,6 +101,10 @@ what is on `devel` and not released yet (also in the
   arithmetic values change, about 6–9% less render-thread CPU in tests (most on devices where the render thread limits
   the frame rate, like the Steam Deck), with identical pictures. On by default; `WWHD_VK_FASTPATH=0` turns it off if
   you see wrong textures or blending, and please report it (#178).
+
+- **Android two-screen handhelds: GamePad screen Off frees the lower screen** (#222). With the GamePad screen switched off,
+  the lower screen is released to the launcher and other apps (e.g. a video on an AYN Thor); switching it back on takes it
+  again with picture and touch.
 - **Mods on Windows:** a mod's preparation tool can now load its own helper files there too (the port's Python on
   Windows didn't look next to the tool). This stopped the GC minimap from installing on Windows; gc-minimap 0.2.2
   also fixes it on its own for v0.3.0 (#224).

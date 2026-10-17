@@ -2,6 +2,7 @@
 // Controls window (gfx/controls_ui.mm: controller_def, pro_body, the callout columns), ported to
 // plain C++ and Dear ImGui's draw list; the colours are the overlay's.
 #include "controls_view.h"
+#include "binding_widget.h"
 
 #include <algorithm>
 #include <cmath>
@@ -415,13 +416,9 @@ void draw_controls(ControlsView& v, float w, float h) {
                                                           ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight | ImGuiButtonFlags_EnableNav);
                     ch.focused = ImGui::IsItemFocused() && ImGui::GetIO().NavVisible;
                     ch.hovered = ImGui::IsItemHovered() || ch.focused;
-                    if (pressed && v.cap_action < 0) {
-                        if (ImGui::IsMouseReleased(ImGuiMouseButton_Right)) v.clear_action = ch.action, v.clear_col = c;
-                        else v.start_action = ch.action, v.start_col = c;
-                    }
-                    if (ImGui::IsItemFocused() && v.cap_action < 0 &&
-                        (ImGui::IsKeyPressed(ImGuiKey_Delete, false) || ImGui::IsKeyPressed(ImGuiKey_Backspace, false) ||
-                         ImGui::IsKeyPressed(ImGuiKey_GamepadFaceLeft, false)))
+                    if (pressed && v.cap_action < 0 && !ImGui::IsMouseReleased(ImGuiMouseButton_Right))
+                        v.start_action = ch.action, v.start_col = c;
+                    if (binding_clear_requested(v.cap_action >= 0, pressed && ImGui::IsMouseReleased(ImGuiMouseButton_Right)))
                         v.clear_action = ch.action, v.clear_col = c;
                     if (ch.hovered) v.hover_action = ch.action, v.hover_col = c;
                     ImGui::PopID();

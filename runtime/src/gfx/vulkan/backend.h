@@ -51,7 +51,7 @@ struct Surface {
 struct SurfaceDesc { uint32_t addr=0,mipAddr=0,width=0,height=0,slices=1,pitch=0,mips=1,format=0,dim=1,tileMode=0,swizzle=0; bool isDepth=false; };
 struct Screen {
 #ifdef WWHD_SDL_HOST
- SDL_Window* window=nullptr;
+ std::atomic<SDL_Window*> window{nullptr};
 #else
  void* window=nullptr; // CAMetalLayer of the AppKit view (display.mm)
 #endif
@@ -283,3 +283,7 @@ inline void mark_draw_target_written(Surface* s){if(!s->gpuWritten)++g_surface_e
 }
 
 namespace gfxvk { void reset_feedback_images(); } // Call before device teardown, then drain retirements.
+
+#ifdef WWHD_SDL_HOST
+namespace gfxvk { SDL_Window* ensure_gamepad_window(bool create = true); bool gamepad_window_available(); }
+#endif

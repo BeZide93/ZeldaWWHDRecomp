@@ -92,6 +92,14 @@ static bool device_values(GCController* c, float* v) {
         b(g.leftShoulder, kPadLB); b(g.rightShoulder, kPadRB);
         b(g.leftTrigger, kPadLT); b(g.rightTrigger, kPadRT);
         b(g.buttonMenu, kPadMenu); b(g.buttonOptions, kPadOptions); b(g.buttonHome, kPadHome);
+        if (@available(macOS 12.0, *)) b(c.physicalInputProfile.buttons[GCInputButtonShare], kPadCapture);
+        if (@available(macOS 11.0, *)) {
+            b(c.physicalInputProfile.buttons[GCInputXboxPaddleOne], kPadRightPaddle1);
+            b(c.physicalInputProfile.buttons[GCInputXboxPaddleTwo], kPadRightPaddle2);
+            b(c.physicalInputProfile.buttons[GCInputXboxPaddleThree], kPadLeftPaddle1);
+            b(c.physicalInputProfile.buttons[GCInputXboxPaddleFour], kPadLeftPaddle2);
+            b(c.physicalInputProfile.buttons[GCInputDualShockTouchpadButton], kPadTouchpad);
+        }
         b(g.leftThumbstickButton, kPadL3); b(g.rightThumbstickButton, kPadR3);
         b(g.dpad.up, kPadDUp); b(g.dpad.down, kPadDDown); b(g.dpad.left, kPadDLeft); b(g.dpad.right, kPadDRight);
         auto stick = [&](GCControllerDirectionPad* d, int up, int down, int left, int right) {
@@ -381,7 +389,8 @@ void init() {
         const bool posted = e.timestamp == kTestKeyTimestamp;  // WWHD_TEST_POST_KEYS
         if (getenv("WWHD_NO_HOST_INPUT") && !posted) return e;
         {
-            // settings overlay (overlay/overlay.h): F1 opens and closes it; while open it has the keyboard
+            // settings overlay (overlay/overlay.h): the Settings key (Esc, F1) opens and closes it, Esc frees a
+            // captured mouse first (before mods::host_key_down below); while open it has the keyboard
             NSEventModifierFlags f = e.modifierFlags;
             int m = (f & NSEventModifierFlagShift ? overlay::kShift : 0) | (f & NSEventModifierFlagControl ? overlay::kCtrl : 0) |
                     (f & NSEventModifierFlagOption ? overlay::kAlt : 0) | (f & NSEventModifierFlagCommand ? overlay::kSuper : 0);

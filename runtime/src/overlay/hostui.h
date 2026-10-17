@@ -34,7 +34,7 @@ bool fullscreen();
 void set_fullscreen(bool on);
 int drc_modes();                   // GamePad screen modes (gfx/display_modes.h): 4 (window, picture-in-picture,
                                    // auto, off), 5 (and GamePad only) or 0
-bool drc_mode_offered(int m);      // the host can show this mode (no separate window on Android)
+bool drc_mode_offered(int m);      // the host can show this mode (Android also offers released displays)
 int drc_mode();
 void set_drc_mode(int m);
 int pip_anchor();                  // gfx::PipAnchor
@@ -59,6 +59,7 @@ void quit();
 
 // SDL host only (gfx/vulkan/overlay_sdl.cpp, called by its main loop)
 void run_posted();                 // the functions post()ed since the last call
+int startup_drc_mode();            // SDL: resolve saved choices/defaults before creating windows
 void load_saved_options();         // start-up: graphics and GamePad screen options saved in settings.ini
 void toggle_drc();                 // Ctrl+G: show / hide the GamePad screen in the current mode
 void drc_window_closed();          // the GamePad window's close button (window mode: hidden until shown again)

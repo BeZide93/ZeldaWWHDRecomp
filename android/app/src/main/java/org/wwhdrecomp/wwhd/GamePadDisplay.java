@@ -53,6 +53,7 @@ final class GamePadDisplay implements DisplayManager.DisplayListener {
     private final View.OnLayoutChangeListener layoutListener =
             (v, l, t, r, b, oldL, oldT, oldR, oldB) -> refresh();
 
+    private static native boolean publishAvailability(boolean available);
     private static native void publishSurface(Surface surface, int width, int height, long generation);
     private static native boolean touch(float x, float y, boolean down, boolean dragging, long generation);
 
@@ -99,6 +100,7 @@ final class GamePadDisplay implements DisplayManager.DisplayListener {
         layout.removeOnLayoutChangeListener(layoutListener);
         manager.unregisterDisplayListener(this);
         close();
+        publishAvailability(false);
     }
 
     // the GamePad screen on a second display (AYN Thor) follows the Full screen setting too
@@ -127,6 +129,18 @@ final class GamePadDisplay implements DisplayManager.DisplayListener {
         }
     }
 
+    void settingChanged() {
+        failedDisplay = -1;
+        invalidShows = 0;
+        refresh();
+    }
+
+    void focusChanged() {
+        // Initial focus must not restart an in-flight bounded startup retry.
+        if (invalidShows >= 4) settingChanged();
+        else refresh();
+    }
+
     // The renderer may lose WSI independently of DisplayManager/SurfaceHolder.
     // Ignore a delayed failure from an older host; close() also cancels touch.
     void recoverSurface(long failedGeneration) {
@@ -148,6 +162,11 @@ final class GamePadDisplay implements DisplayManager.DisplayListener {
         for (Display display : displays) {
             if (display.getDisplayId() == mainId || !display.isValid()) continue;
             if (pick == null || display.getDisplayId() < pick.getDisplayId()) pick = display;
+        }
+        boolean available = pick != null || foldPanes() != null;
+        if (publishAvailability(available)) {
+            if (presentation != null || embedded != null || dismissalRecovery != null) close();
+            return;
         }
         if (presentation != null && pick != null &&
                 presentation.getDisplay().getDisplayId() == pick.getDisplayId()) return;
@@ -198,11 +217,14 @@ final class GamePadDisplay implements DisplayManager.DisplayListener {
             }
             next.show();
             failedDisplay = -1; invalidShows = 0;
-        } catch (WindowManager.InvalidDisplayException exception) {
+        } catch (WindowManager.InvalidDisplayException | WindowManager.BadTokenException | SecurityException exception) {
             close(); // A display may disappear or be temporarily unready after enumeration.
             failedDisplay = pick.getDisplayId();
             ++invalidShows;
             Log.w("wwhd-display", "secondary host rejected display=" + failedDisplay + " attempt=" + invalidShows + "/4");
+            if (invalidShows >= 4)
+                android.widget.Toast.makeText(activity, "GamePad display unavailable. Try switching it on again.",
+                        android.widget.Toast.LENGTH_SHORT).show();
             if (!pick.isValid() || invalidShows >= 4) return;
             final long retryGeneration = generation;
             invalidRetryPending = true;
@@ -262,7 +284,7 @@ final class GamePadDisplay implements DisplayManager.DisplayListener {
         return view;
     }
 
-    private void refreshFold() {
+    private int[] foldPanes() {
         int[] panes = null;
         if (hinge != null && layout instanceof RelativeLayout) {
             int[] location = new int[2];
@@ -270,6 +292,11 @@ final class GamePadDisplay implements DisplayManager.DisplayListener {
             panes = FoldLayout.panes(layout.getWidth(), layout.getHeight(), location[0], location[1],
                     hinge.left, hinge.top, hinge.right, hinge.bottom, verticalHinge);
         }
+        return panes;
+    }
+
+    private void refreshFold() {
+        int[] panes = foldPanes();
         if (embedded != null && java.util.Arrays.equals(panes, embeddedPanes)) return;
         if (panes == null && embedded == null && presentation == null) return;
         // Invalidate the old touch/surface generation before changing either pane.

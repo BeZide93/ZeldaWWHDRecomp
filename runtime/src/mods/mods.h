@@ -1,4 +1,4 @@
-// Optional gameplay mods (Gameplay menu). All off by default; each can be switched live.
+// Gameplay options (Gameplay menu). Original behavior by default; each can be switched live.
 //   camera.cpp  direct right-stick camera, mouse camera, first person on R3 / mouse wheel
 //   lock_on.cpp optional enemy range and R3 cycling through the native eligible list
 //   mouse.mm    mouse capture in the game window (macOS events)
@@ -18,6 +18,8 @@ namespace mods {
 
 // ---- switches (menu + env) ----
 bool direct_camera();
+bool letterbox_while_targeting();
+void set_letterbox_while_targeting(bool on);
 void set_direct_camera(bool on);
 float camera_speed();  // direct camera: multiplier of the game's own top turning speed
 void set_camera_speed(float s);
@@ -57,6 +59,8 @@ float move_speed_stamina_seconds();              // seconds of boosting on a ful
 void set_move_speed_stamina_seconds(float seconds);
 float move_speed_cooldown_seconds();             // wait after the bar empties; 0 = none
 void set_move_speed_cooldown_seconds(float seconds);
+bool move_speed_bar();                           // "Show boost bar": the bar is drawn (the boost works either way)
+void set_move_speed_bar(bool on);
 uint32_t move_speed_button();
 void set_move_speed_button(uint32_t button);
 void move_speed_input(uint32_t buttons); // actual active-controller sample, including replay/held half steps
@@ -128,6 +132,13 @@ struct MoveHud {
     bool exhausted;   // out of stamina: the bar is refilling over the cooldown
 };
 MoveHud move_hud();
+// ---- the gameplay HUDs and the game's own screens (hud_gate.cpp) ----
+// once per frame on the game thread (interp.cpp, frame start): reads whether a game menu, an event
+// or a message is up and advances the HUDs' fade over it
+void hud_service();
+// 0..1, multiplies the boost bar's and the climb wheel's own alpha (mod_hud.mm, vulkan/present.cpp):
+// 0 while a game menu, a cutscene/event or a dialogue is shown. Any thread.
+float game_ui_hud_alpha();
 
 // ---- input (input.mm) ----
 // called at the end of input::read(): synthetic stick and buttons (mouse camera, R3 pulses)

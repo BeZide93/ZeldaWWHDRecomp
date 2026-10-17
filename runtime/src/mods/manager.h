@@ -14,6 +14,7 @@ struct Entry {
     bool (*enabled)();
     void (*apply)(bool);
     bool restart_required = false;
+    bool default_enabled = false;
 };
 std::span<const Entry> entries();
 // A number setting of a built-in mod: saved as `key` (settings file), `profile_key` (mod profiles).

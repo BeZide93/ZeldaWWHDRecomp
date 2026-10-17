@@ -3,7 +3,7 @@
 //
 // The drawing is an original, simplified schematic made in code (no artwork). Each button, d-pad
 // direction and stick direction / click on it can be clicked: the window then waits for a key or a
-// host-controller input and binds it (Esc cancels). Callouts on both sides show every binding (key,
+// host-controller input and binds it (the next input is recorded). Callouts on both sides show every binding (key,
 // alternate key, controller); clicking one of those binds just that slot, right-click or its × clears
 // it. Pressed inputs light up and sticks show their deflection, so the mapping can be tried out.
 // Bindings used twice are drawn in orange. Changes apply at once and are saved to controls.json.
@@ -26,6 +26,7 @@
 #include "../input_map.h"
 #include "../runtime.h"
 #include "../platform/host.h"
+#include "../overlay/overlay.h"
 
 namespace gfx { void show_drc_window(bool on); }
 
@@ -1232,7 +1233,7 @@ static NSTextField* label(NSString* s) {
         NSString* what = _st.capMode == kCapPad   ? @"press a controller button or move a stick"
                          : _st.capMode == kCapAny ? @"press a key, mouse button or controller button"
                                                   : (_st.capMode == kCapKey1 ? @"press an alternate key or mouse button" : @"press a key or mouse button");
-        s = [NSString stringWithFormat:@"%@: %@ (Esc cancels).", ns(action_label(_st.capAction)), what];
+        s = [NSString stringWithFormat:@"%@: %@ (the next input is recorded).", ns(action_label(_st.capAction)), what];
         if (_st.capMode != kCapKey0 && _st.capMode != kCapKey1 && !_st.padConnected)
             s = [s stringByAppendingString:@" No game controller connected."];
         level = 3;
@@ -1356,6 +1357,7 @@ static NSTextField* label(NSString* s) {
 // ---- capture
 
 - (void)beginCapture:(int)a mode:(int)mode {
+    overlay::external_binding_capture(true);
     _st.capAction = a;
     _st.capMode = mode;
     _message = nil;
@@ -1366,6 +1368,7 @@ static NSTextField* label(NSString* s) {
 
 - (void)cancelCapture {
     if (_st.capAction < 0) return;
+    overlay::external_binding_capture(false);
     _st.capAction = -1;
     [self refreshStatus];
     self.padView.needsDisplay = YES;
@@ -1397,7 +1400,7 @@ static bool modifier_down(uint16_t code, NSEventModifierFlags f, bool* known) {
 }
 
 - (BOOL)handleKeyEvent:(NSEvent*)e {
-    if (e.type == NSEventTypeKeyDown && (e.modifierFlags & NSEventModifierFlagCommand) && e.keyCode == kVK_ANSI_W) {
+    if (_st.capAction < 0 && e.type == NSEventTypeKeyDown && (e.modifierFlags & NSEventModifierFlagCommand) && e.keyCode == kVK_ANSI_W) {
         [self.window performClose:nil];  // Cmd-W, before the Window menu sees it
         return YES;
     }
@@ -1420,13 +1423,8 @@ static bool modifier_down(uint16_t code, NSEventModifierFlags f, bool* known) {
     } else if (e.isARepeat) {
         return YES;
     }
-    if (code == kVK_Escape) {
-        [self cancelCapture];
-        [self setStatus:@"Cancelled." level:0];
-        return YES;
-    }
     if (_st.capMode == kCapPad) {
-        [self setStatus:@"Waiting for a controller button — click a key field to bind a key (Esc cancels)." level:1];
+        [self setStatus:@"Waiting for a controller button — click a key field to bind a key (the next input is recorded)." level:1];
         return YES;
     }
     [self assignKey:code];
@@ -1438,13 +1436,14 @@ static bool modifier_down(uint16_t code, NSEventModifierFlags f, bool* known) {
     NSString* name = ns(key_label(code));
     if (const char* why = reserved_key(code)) {
         [self setStatus:[NSString stringWithFormat:@"“%@” is an app shortcut (%@) and can’t be used for game input. "
-                                                   @"Press another key, or Esc.", name, ns(why)]
+                                                   @"Press another key.", name, ns(why)]
                   level:2];
         NSBeep();
         return;  // still waiting
     }
     _st.m.keys[a][slot] = code;
     if (_st.m.keys[a][slot ^ 1] == code) _st.m.keys[a][slot ^ 1] = kNoKey;  // same key twice on one input
+    overlay::external_binding_capture(false);
     _st.capAction = -1;
     [self commit];
     auto others = key_users(_st.m, code, a);
@@ -1460,6 +1459,7 @@ static bool modifier_down(uint16_t code, NSEventModifierFlags f, bool* known) {
 - (void)assignPad:(int)p {
     int a = _st.capAction;
     set_pad_binding(_st.m, a, p);  // a hand-edited face binding drops the Automatic preset
+    overlay::external_binding_capture(false);
     _st.capAction = -1;
     [self commit];
     auto others = pad_users(_st.m, p, a);
@@ -1475,7 +1475,7 @@ static bool modifier_down(uint16_t code, NSEventModifierFlags f, bool* known) {
 // ---- clearing / reset
 
 - (void)clearAction:(int)a slot:(int)slot {
-    if (_st.capAction == a) _st.capAction = -1;
+    if (_st.capAction == a) { overlay::external_binding_capture(false); _st.capAction = -1; }
     if (slot == kSlotPad) set_pad_binding(_st.m, a, kPadNone);
     else _st.m.keys[a][slot] = kNoKey;
     [self commit];
@@ -1494,7 +1494,7 @@ static bool modifier_down(uint16_t code, NSEventModifierFlags f, bool* known) {
     case 3: _st.m.keys[a].fill(kNoKey); set_pad_binding(_st.m, a, kPadNone); break;
     case 4: _st.m.keys[a] = d.keys[a]; set_pad_binding(_st.m, a, d.pad[a]); break;
     }
-    if (_st.capAction == a) _st.capAction = -1;
+    if (_st.capAction == a) { overlay::external_binding_capture(false); _st.capAction = -1; }
     [self commit];
     static const char* done[] = {"", "Cleared the keys of", "Cleared the controller input of", "Cleared", "Reset"};
     [self setStatus:[NSString stringWithFormat:@"%s %@.", done[what], ns(action_label(a))] level:0];
@@ -1529,6 +1529,7 @@ static bool modifier_down(uint16_t code, NSEventModifierFlags f, bool* known) {
 
 - (void)resetNow {
     _st.m = Mapping::defaults();
+    overlay::external_binding_capture(false);
     _st.capAction = -1;
     [self commit];
     [self syncOptions];
@@ -1693,9 +1694,9 @@ static int self_test() {
     [w sendEvent:key_event(w, kVK_ANSI_P, @"p")];
     expect(current().keys[kY][1] == kNoKey, "P (frame capture) refused");
     expect([c.status.stringValue containsString:@"app shortcut"], "hotkey warning shown");
-    // 4. Esc cancels
+    // 4. Esc is recorded without closing the window
     [w sendEvent:key_event(w, kVK_Escape, @"\x1b")];
-    expect(current().keys[kY][1] == kNoKey, "Esc cancels without binding");
+    expect(current().keys[kY][1] == kVK_Escape, "Esc binds without closing");
     // 5. clicking the drawing waits for a key or a controller button: a key replaces the main key
     [c beginCapture:kHome mode:kCapAny];
     [w sendEvent:key_event(w, kVK_ANSI_G, @"g")];

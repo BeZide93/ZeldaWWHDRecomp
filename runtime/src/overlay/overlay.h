@@ -1,6 +1,7 @@
 // In-game settings overlay (Dear ImGui), drawn on top of the TV window's picture by both renderers.
 //
-// F1 opens and closes it (Esc closes); on macOS also Cmd+, (app menu > Settings...; most Mac keyboards
+// The Settings shortcut (default Esc, alternate F1) opens and closes it (Esc closes; with a captured mouse
+// the first Esc only frees the mouse); on macOS also Cmd+, (app menu > Settings..., fixed; most Mac keyboards
 // send F1 only with Fn unless the top row is set to standard function keys); on a controller, hold Select/Minus for half a second or press
 // Home. While it is open the game sees no buttons (it keeps running) and the overlay takes keyboard,
 // mouse and controller. Tabs: Saves, Graphics, Display, Audio, Mods, Controls, Language / About. Every option
@@ -35,6 +36,8 @@ namespace overlay {
 // Host input thread, every input poll (the AppKit host: the overlay's frame): the settings shortcut
 // (Home, Select held) and the platform's shortcuts (extensions.h).
 void poll_controller_shortcuts(const float* values);
+// Native Controls capture also owns controller presses until they are released.
+void external_binding_capture(bool active);
 // A platform shortcut took the input since the last call (and clears that). Hosts count such a poll as
 // captured, as the press that opens or closes the menu: the inputs held stay from the game until each one
 // is released (release_gate.h). Always false without platform shortcuts.
@@ -60,7 +63,8 @@ void set_perf_shown(bool on);
 enum Mods : int { kShift = 1, kCtrl = 2, kAlt = 4, kSuper = 8 };
 // Release UI keys on host focus loss without changing the menu or shortcut latch.
 void focus_lost();
-// Returns true when the overlay used the key: F1 toggles, and every key while it is open.
+// Returns true when the overlay used the key: the Settings key toggles, Esc frees a captured mouse first,
+// and every key while it is open.
 bool key(int code, bool down, bool repeat, int mods, KeyOrigin origin = {});
 // pointer in the TV window, normalised to its content area (0..1 from the top left); return true while
 // the overlay is open (the event is the overlay's, not the game's or the mouse camera's)
@@ -71,6 +75,7 @@ void set_clipboard_text(const char* utf8);
 // a text field of the overlay has the keyboard (hosts turn on text input / the on-screen keyboard)
 bool wants_text();
 bool mouse_move(float nx, float ny, bool touch = false);
+bool pointer_shortcut(int code, bool down); // physical mouse buttons/wheel, before game mouse handling
 bool mouse_button(int button, bool down, bool touch = false);  // 0 left, 1 right, 2 middle
 void set_stereo_pointer_visible(bool visible); // host: pointer is inside the TV window
 bool mouse_wheel(float dx, float dy);      // in lines, +y = away from the user

@@ -381,6 +381,7 @@ void save_move_speed_options(Value& options) {
     options["move-speed.mode"] = double((int)move_speed_mode());
     options["move-speed.anim"] = std::string(move_anim_label(move_speed_anim()));
     options["move-speed.button"] = double(move_speed_button());
+    options["move-speed.bar"] = move_speed_bar();
 }
 void load_move_speed_options(const Value& options, bool startup = false) {
     auto number = [&](const char* key, const char* env, double lo, double hi, float fallback, void (*apply)(float)) {
@@ -403,8 +404,19 @@ void load_move_speed_options(const Value& options, bool startup = false) {
     if (!std::getenv("WWHD_MOD_MOVE_ANIM") && !(startup && anim.type == Value::Null))
         set_move_speed_anim(move_anim_from_id(anim.string("native")));
     const auto& button = options.get("move-speed.button");
-    if (button.type == Value::Number && button.number >= 0 && button.number <= UINT32_MAX && std::floor(button.number) == button.number)
+    if (!std::getenv("WWHD_MOD_MOVE_BUTTON") && button.type == Value::Number && button.number >= 0 &&
+        button.number <= UINT32_MAX && std::floor(button.number) == button.number)
         set_move_speed_button(uint32_t(button.number));
+    // "Show boost bar". Older profiles have no key: at startup they keep the loaded setting,
+    // profile switches show the bar (the default).
+    const auto& bar = options.get("move-speed.bar");
+    if (!std::getenv("WWHD_MOD_MOVE_BAR") && !(startup && bar.type == Value::Null)) {
+        bool on = true;
+        if (bar.type == Value::Bool) on = bar.boolean;
+        // remember_option stores checkbox values as numeric 0/1.
+        else if (bar.type == Value::Number && (bar.number == 0 || bar.number == 1)) on = bar.number == 1;
+        set_move_speed_bar(on);
+    }
 }
 void save_traversal_options(Value& options) {
     for (const auto& option : manager::traversal_options()) options[option.profile_key] = double(option.value());
@@ -943,7 +955,7 @@ void disable_all(){std::string ignored;operation(ignored,[&]{auto previous=datab
 std::vector<std::string> profiles(){std::lock_guard guard(mutex);std::vector<std::string> result;if(ready)for(const auto& [name,p]:database.get("profiles").object)result.push_back(name);return result;}
 std::string current_profile(){std::lock_guard guard(mutex);return ready?database.get("active").string():"Default";}
 bool create_profile(const std::string& name,std::string& error){return operation(error,[&]{require(!name.empty()&&name.size()<=64&&name.find('\0')==std::string::npos,"Invalid profile name");require(database.get("profiles").object.size()<64,"Profile limit reached");require(!database.get("profiles").object.contains(name),"Profile already exists");auto previous=database;Value copy=profile();copy["setup_pending"].object.clear();save_fast_forward_options(copy["builtin_options"]);save_move_speed_options(copy["builtin_options"]);save_traversal_options(copy["builtin_options"]);save_lock_on_options(copy["builtin_options"]);for(const auto& e:manager::entries())copy["builtins"][e.id]=e.enabled();copy["builtin_options"]["direct-camera.speed"]=double(camera_speed());copy["builtin_options"]["mouse-camera.sensitivity"]=double(mouse_sensitivity());database["profiles"][name]=std::move(copy);try{save();}catch(...){database=previous;throw;}});}
-bool select_profile(const std::string& name,std::string& error){Value chosen;bool ok=operation(error,[&]{for(const auto& [id,r]:records)require(!r.loading,"Wait for mod preparation to finish before changing profiles");require(database.get("profiles").object.contains(name),"Profile not found");auto previous=database;database["active"]=name;try{auto messages=repair_graphics();order(enabled_set());validate_conflicts(enabled_set(),&profile().get("builtins"));save();notices.insert(notices.end(),messages.begin(),messages.end());}catch(...){database=previous;throw;}chosen=profile();profile_changed=true;dirty=true;});if(ok){for(const auto& e:manager::entries()){const auto& v=chosen.get("builtins").get(e.id);manager::set_enabled(e.id,v.type==Value::Bool&&v.boolean);}load_fast_forward_options(chosen.get("builtin_options"));load_move_speed_options(chosen.get("builtin_options"));load_traversal_options(chosen.get("builtin_options"));load_lock_on_options(chosen.get("builtin_options"));auto speed=chosen.get("builtin_options").get("direct-camera.speed"),sens=chosen.get("builtin_options").get("mouse-camera.sensitivity");if(speed.type==Value::Number&&speed.number>=.5&&speed.number<=2)set_camera_speed(speed.number);if(sens.type==Value::Number&&sens.number>=.08&&sens.number<=.3)set_mouse_sensitivity(sens.number);}return ok;}
+bool select_profile(const std::string& name,std::string& error){Value chosen;bool ok=operation(error,[&]{for(const auto& [id,r]:records)require(!r.loading,"Wait for mod preparation to finish before changing profiles");require(database.get("profiles").object.contains(name),"Profile not found");auto previous=database;database["active"]=name;try{auto messages=repair_graphics();order(enabled_set());validate_conflicts(enabled_set(),&profile().get("builtins"));save();notices.insert(notices.end(),messages.begin(),messages.end());}catch(...){database=previous;throw;}chosen=profile();profile_changed=true;dirty=true;});if(ok){for(const auto& e:manager::entries()){const auto& v=chosen.get("builtins").get(e.id);manager::set_enabled(e.id,v.type==Value::Bool?v.boolean:e.default_enabled);}load_fast_forward_options(chosen.get("builtin_options"));load_move_speed_options(chosen.get("builtin_options"));load_traversal_options(chosen.get("builtin_options"));load_lock_on_options(chosen.get("builtin_options"));auto speed=chosen.get("builtin_options").get("direct-camera.speed"),sens=chosen.get("builtin_options").get("mouse-camera.sensitivity");if(speed.type==Value::Number&&speed.number>=.5&&speed.number<=2)set_camera_speed(speed.number);if(sens.type==Value::Number&&sens.number>=.08&&sens.number<=.3)set_mouse_sensitivity(sens.number);}return ok;}
 bool delete_profile(const std::string& name,std::string& error){return operation(error,[&]{require(name!=database.get("active").string(),"Switch profiles before deleting the active one");require(database.get("profiles").object.contains(name),"Profile not found");auto previous=database;database["profiles"].object.erase(name);try{save();}catch(...){database=previous;throw;}});}
 void remember_builtin(const std::string& id,bool on){std::string error;operation(error,[&]{profile()["builtins"][id]=on;save();dirty=true;});}
 void remember_option(const std::string& id,double value){std::string error;operation(error,[&]{profile()["builtin_options"][id]=value;save();});}
@@ -1046,7 +1058,7 @@ void frame(uint64_t step){
         std::map<std::string,std::pair<Record,Value>> desired;std::vector<std::string> sequence;std::set<std::string> unconfirmed;Value baseline;bool switching=false;
         {std::lock_guard guard(mutex);switching=profile_changed.exchange(false);baseline=profile().get("builtins");try{auto enabled=enabled_set();sequence=order(enabled);validate_conflicts(enabled);std::erase_if(sequence,[](const auto& id){return records.at(id).manifest.kind=="content"||records.at(id).manifest.kind=="cemu"||records.at(id).manifest.kind=="guest";});for(const auto& id:sequence){desired[id]={records.at(id),config(records.at(id).manifest)};records.at(id).loading=true;if(!confirmed(records.at(id)))unconfirmed.insert(id);}}catch(const std::exception& e){last_problem=e.what();for(auto& [id,r]:records)if(wanted(id))r.error=e.what();sequence.clear();desired.clear();}}
         for(auto it=live_order.rbegin();it!=live_order.rend();++it)if(!desired.contains(*it)||(switching&&live.at(*it).kind=="settings")){auto found=live.find(*it);if(found!=live.end()){unload(found->second);live.erase(found);}std::lock_guard guard(mutex);if(records.contains(*it)){records.at(*it).active=false;records.at(*it).status.clear();}}
-        if(switching)for(const auto& entry:manager::entries()){const auto& value=baseline.get(entry.id);entry.apply(value.type==Value::Bool&&value.boolean);}
+        if(switching)for(const auto& entry:manager::entries()){const auto& value=baseline.get(entry.id);entry.apply(value.type==Value::Bool?value.boolean:entry.default_enabled);}
         live_order.clear();
         for(const auto& id:sequence){const auto& [record,cfg]=desired.at(id);bool deps_ok=true;for(const auto& dep:record.manifest.dependencies)if(!dep.id.starts_with("builtin:")&&!live.contains(dep.id)){std::lock_guard guard(mutex);if(!records.at(dep.id).active)deps_ok=false;}
             if(!deps_ok){std::lock_guard guard(mutex);records.at(id).loading=false;records.at(id).error="A dependency is unavailable (content dependencies may require restart)";continue;}

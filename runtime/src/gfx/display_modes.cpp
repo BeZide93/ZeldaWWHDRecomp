@@ -65,6 +65,7 @@ static GamePadUiState gamepad_ui() {
 std::atomic<float> g_drc_aspect{854.0f / 480.0f};
 std::atomic<bool> g_has_drc_window{false};
 std::atomic<bool> g_second_screen_off{false};
+std::atomic<bool> g_second_display_available{false};
 
 int find_name(const char* const* names, int n, const char* s, int def) {
     for (int i = 0; i < n; i++)
@@ -77,7 +78,7 @@ double display_now() {
 
 bool drc_mode_offered(int m) {
     if (m < 0 || m >= kDrcModeCount) return false;
-    if (m == kDrcWindow) return g_has_drc_window;
+    if (m == kDrcWindow) return g_has_drc_window || g_second_display_available;
     return true;
 }
 
@@ -156,18 +157,18 @@ bool drc_screen_shown(bool drc_window_visible) {
     return pip_shown_now();
 }
 void display_show_drc(bool on) {
+    if (g_has_drc_window || g_second_display_available) g_second_screen_off = !on;
     if (g_mode == kDrcAuto) {
         g_auto_pin = on;
     } else {
         g_shown = on;
-        if (g_has_drc_window) g_second_screen_off = !on;
     }
 }
 void display_set_mode(int m) {
     g_pause_restore = -1;
     g_plus_at = -1;
     g_mode = m;
-    if (g_has_drc_window) g_second_screen_off = m == kDrcOff;  // chosen while the second screen is there
+    if (g_has_drc_window || g_second_display_available) g_second_screen_off = m == kDrcOff;  // chosen while the second screen is there
     if (m == kDrcAuto) { g_auto_pin = false; g_auto_until = 0; g_gamepad_ui = 0; }
     else if (m != kDrcOff) g_shown = true;
 }
@@ -531,6 +532,9 @@ PresentPlan display_plan(bool have_tv, float tw, float th, bool have_drc, float 
     bool pip = (g_pip_preview || ((g_mode == kDrcPip || g_mode == kDrcAuto) && pip_shown_now()) || window_fallback) && have_drc;
     bool drc_only = !g_pip_preview && (g_mode == kDrcGamePad ||
         (g_mode == kDrcAuto && gamepad_ui().available && gamepad_ui().off_tv)) && have_drc;
+    // Releasing a connected Android display also suspends its single-screen
+    // fallback (including a hidden GamePad-only or pinned automatic view).
+    if (g_second_display_available && g_second_screen_off) pip = drc_only = false;
     float dw = 0, dh = 0;
     bool sim = sim_screen(&dw, &dh);
     if (!sim) dw = layer_w, dh = layer_h;

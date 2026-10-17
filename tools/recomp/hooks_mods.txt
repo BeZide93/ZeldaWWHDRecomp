@@ -7,6 +7,13 @@
 @02510EA0 # manualCamera: V smoothing factor (cSAngle * f1)
 @02510EE4 # manualCamera: U smoothing factor (cSAngle * f1)
 025071FC  # dCamera_c::subjectCamera: first person is active
+02515280  # dCamera_c::SetTrimSize: trace explicit size-1 callers
+024FBF9C  # dCamera_c::defaultTriming: trace normal-play trim provenance
+@024FC080 # defaultTriming: table-result store (normal targeting provenance)
+@024FF980 # CalcTrimSize: Vista height operand, normal targeting only
+@024FF8C0 # CalcTrimSize: opt-in size/height trace
+@024FF4C0 # eventCamera: event-data trim write, invalidate targeting provenance
+@024FF4E4 # eventCamera: alternate event-data trim write
 # Invert camera up/down (issue #167; runtime/src/camera_invert.h): after the camera's right-stick Y reads
 @024F9DA4 # dCamera_c::updatePad: after CPad_GET_SUBSTICK_POS_Y
 @0250074C # dCamera_c::initPad: after CPad_GET_SUBSTICK_POS_Y

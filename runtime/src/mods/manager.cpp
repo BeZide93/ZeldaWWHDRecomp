@@ -10,6 +10,9 @@
 namespace mods::manager {
 namespace {
 const Entry catalogue[] = {
+    {"target-letterbox", "Letterbox while targeting", "Camera",
+     "Show letterbox bars during normal targeting; cutscenes and special cameras keep their original bars.",
+     "WWHD_TARGET_LETTERBOX", letterbox_while_targeting, set_letterbox_while_targeting, false, true},
     {"direct-camera", "Direct right-stick camera", "Camera",
      "Turn the camera immediately with the right stick, without the original easing.",
      "WWHD_MOD_DIRECT_CAMERA", direct_camera, set_direct_camera},
@@ -156,13 +159,17 @@ void load_saved() {
     std::string mode;
     if (hostui::get("mod.move-speed.mode", mode) && (mode == "0" || mode == "1"))
         set_move_speed_mode(mode == "1" ? MoveMode::kToggle : MoveMode::kHold);
+    if (!std::getenv("WWHD_MOD_MOVE_BAR")) {
+        std::string v;
+        if (hostui::get("mod.move-speed.bar", v) && (v == "0" || v == "1")) set_move_speed_bar(v == "1");
+    }
     std::string anim;
     if (!std::getenv("WWHD_MOD_MOVE_ANIM") && hostui::get("mod.move-speed.anim", anim) && valid_move_anim_id(anim))
         set_move_speed_anim(move_anim_from_id(anim));
     for (const auto& option : traversal_options()) number(option.key, option.startup_env, 1.f, 3.f, option.apply);
     number("mod.direct-camera.speed", "WWHD_MOD_CAMERA_SPEED", .5f, 2.f, set_camera_speed);
     std::string button;
-    if (hostui::get("mod.move-speed.button", button)) {
+    if (!std::getenv("WWHD_MOD_MOVE_BUTTON") && hostui::get("mod.move-speed.button", button)) {
         char* end = nullptr;
         auto value = std::strtoul(button.c_str(), &end, 10);
         if (end != button.c_str() && *end == '\0' && value <= UINT32_MAX) set_move_speed_button(uint32_t(value));

@@ -1,6 +1,10 @@
 # Settings overlay controls
 
-Press F1 to open Settings. On a controller, press Home or hold Select / Minus.
+Press Esc (or F1) to open Settings. With a captured mouse, the first Esc frees the mouse and a
+second one opens Settings. On a controller, press Home or hold Select / Minus.
+On macOS, Cmd+, (or **Settings…** in the app menu) also opens and closes Settings. This
+shortcut is fixed: it is not listed in Shortcuts, and it still opens Settings if you bind Cmd+,
+to another action.
 Use the D-pad or left stick to navigate, A to select, B to go back or close,
 and L / R to switch tabs.
 
@@ -22,6 +26,29 @@ straight away (or B) returns to Settings and the game keeps running. **Quit** cl
 the game the same way as closing its window. Settings are already saved as you change
 them. Progress since your last in-game save is lost, so save in the game first (or
 use a save state). On Android the game also leaves the recent apps list.
+
+## Changing bindings
+
+**Controls** changes the game's inputs. **Shortcuts** changes Settings, full screen,
+screenshots, save/load slots, graphics, picture-in-picture, the performance overlay and audio.
+Each shortcut has a key, an alternate key and a controller binding. **Settings** uses Esc, with
+F1 as the alternate key and Home on a controller; all three can be changed there. Holding Select also
+opens Settings unless Select is used as a combination's hold button.
+
+Select a key field and press a key or mouse button. Select a controller field and tap a button,
+or hold one button and press another. While a field waits for input, that input is recorded:
+Escape does not close Settings, L/R does not switch tabs, and Select/Home does not open or close
+Settings. Outside capture, Escape still closes Settings. With a captured mouse, the first Escape
+only frees the mouse, also after you move Settings to another key.
+
+Right-click a binding to clear it, in either tab. With a binding focused, Delete, Backspace,
+or the controller button mapped to X clears it too. Right-click while recording a mouse
+binding records the right mouse button instead. Settings must keep a working binding or its
+held-Select shortcut. Changes are saved automatically and survive restarting the game.
+
+Capture/Share, rear paddles and touchpad clicks are available when your controller supplies
+them. They start unbound. A combination consumes only its two buttons while both are held;
+a single-button shortcut consumes that button while held.
 
 ## Diagnostics
 
@@ -47,7 +74,7 @@ set "WWHD_OVERLAY_MOUSE_HANDOFF=0"
 "Wind Waker HD.exe"
 ```
 
-Double-click it to launch the game. Use the stick once and release it, open Settings with F1, click
+Double-click it to launch the game. Use the stick once and release it, open Settings with Esc or F1, click
 an option, then scroll down with the mouse wheel. Wait a few seconds, quit, and attach
 `captures\wwhd.log` from the game's data folder to the issue. Keep the session around two minutes or
 less. The variables apply only to this launch; starting `Wind Waker HD.exe` normally restores the

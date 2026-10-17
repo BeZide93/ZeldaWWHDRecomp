@@ -40,7 +40,7 @@ void log_msg(const char*,...){}
 // settings overlay: closed (keys reach the game and its shortcuts as before); the game's text prompt
 // (overlay/text_entry.h) shows while promptShown: overlay::key takes every key then, as the real one does
 static bool promptShown=false;static int promptKeys=0;static std::string promptText;
-static bool overlayOpen=false;
+static bool overlayOpen=false;static int escapeKeys=0;
 // Matrix: real SDL routing and shared production guard; the overlay API is a lightweight model
 // (no renderer/game). MENU112_BASELINE pairs the pre-fix router with its original F1 semantics.
 static bool menuMatrix=false; static double keyClock=0; static overlay::ToggleGuard keyGuard;
@@ -52,7 +52,7 @@ static double shortcutClock=0;
 // press; the overlay keeps the inputs it took from the settings shortcut and reports the poll as taken
 static bool platformShortcut=false,shortcutTook=false;static int platformShortcuts=0;
 namespace screenshot { bool key_down(int); }
-namespace overlay { void set_open(bool open,OpenReason,KeyOrigin){overlayOpen=open;} void focus_lost(){}
+namespace overlay { bool pointer_shortcut(int,bool){return false;} void set_open(bool open,OpenReason,KeyOrigin){overlayOpen=open;} void focus_lost(){}
  void poll_controller_shortcuts(const float* v){static SettingsShortcut sc;static bool latched=false;
   using namespace input_map;bool select=v[kPadOptions]>0.5f;
   if(platformShortcut&&v[kPadLB]>0.5f&&v[kPadRB]>0.5f&&select){if(!latched){latched=true;shortcutTook=true;++platformShortcuts;}}
@@ -60,6 +60,7 @@ namespace overlay { void set_open(bool open,OpenReason,KeyOrigin){overlayOpen=op
   const auto a=sc.poll(shortcutClock,select,v[input_map::kPadHome]>0.5f,overlayOpen);if(a!=SettingsShortcut::None)overlayOpen=a==SettingsShortcut::Open;}
  bool shortcut_took_input(){const bool took=shortcutTook;shortcutTook=false;return took;}
  bool key(int code,bool down,bool repeat,int mods,KeyOrigin){
+  if(code==kVK_Escape)++escapeKeys;
   if(promptShown){++promptKeys;return true;}
   if(!menuMatrix || (!overlayOpen && (code != kVK_F1 || mods))) {
    const int a = input_map::shortcut_for_key(input_map::current(), code, mods);
@@ -210,6 +211,16 @@ int main(int argc,char** argv){
  promptShown=false;assert(input::read().buttons==0);click(game,SDL_BUTTON_LEFT,false);
  mods::mouse_release();mods::update_mouse();assert(!mods::mouse_captured());
  click(game,SDL_BUTTON_X1,true);assert(input::read().buttons==0);click(game,SDL_BUTTON_X1,false);
+ // Esc with the mouse captured only frees it (mouse_sdl.cpp, before the overlay sees keys); the next Esc
+ // reaches the overlay, where it is the default Settings key.
+ auto escape=[&](bool down){SDL_Event e{};e.type=down?SDL_EVENT_KEY_DOWN:SDL_EVENT_KEY_UP;e.key.windowID=SDL_GetWindowID(game);
+  e.key.scancode=SDL_SCANCODE_ESCAPE;e.key.down=down;input::handle_event(e);};
+ assert(input_map::shortcut_for_key(input_map::current(),kVK_Escape,0)==input_map::kSettings);
+ click(game,SDL_BUTTON_LEFT,true);click(game,SDL_BUTTON_LEFT,false);assert(mods::mouse_captured());
+ const int escapesBefore=escapeKeys;
+ escape(true);assert(!mods::mouse_captured()&&escapeKeys==escapesBefore);
+ escape(false);escape(true);assert(escapeKeys==escapesBefore+2);escape(false);
+ {bool held[256];input::held_keys(held);assert(!held[kVK_Escape]);}
  mouseCamera=false;input_map::set_current(map,false);SDL_DestroyWindow(drc);input::set_gamepad_window(nullptr);
  // Touch-emulated pointers keep their source through the overlay boundary; a real mouse restores hover.
  overlayOpen=true;
@@ -328,6 +339,20 @@ int main(int argc,char** argv){
      assert(SDL_SetJoystickVirtualAxis(joystick,axis,0));p=poll();assert(p.lx==0&&p.ly==0&&p.rx==0&&p.ry==0);
     }
    }
+  }
+  // Every additional SDL button reaches the same raw mapping and can drive a game input.
+  const std::pair<SDL_GamepadButton,int> extra[] = {
+   {SDL_GAMEPAD_BUTTON_MISC1,input_map::kPadCapture},
+   {SDL_GAMEPAD_BUTTON_RIGHT_PADDLE1,input_map::kPadRightPaddle1}, {SDL_GAMEPAD_BUTTON_LEFT_PADDLE1,input_map::kPadLeftPaddle1},
+   {SDL_GAMEPAD_BUTTON_RIGHT_PADDLE2,input_map::kPadRightPaddle2}, {SDL_GAMEPAD_BUTTON_LEFT_PADDLE2,input_map::kPadLeftPaddle2},
+   {SDL_GAMEPAD_BUTTON_TOUCHPAD,input_map::kPadTouchpad}, {SDL_GAMEPAD_BUTTON_MISC2,input_map::kPadMisc2},
+   {SDL_GAMEPAD_BUTTON_MISC3,input_map::kPadMisc3}, {SDL_GAMEPAD_BUTTON_MISC4,input_map::kPadMisc4},
+   {SDL_GAMEPAD_BUTTON_MISC5,input_map::kPadMisc5}, {SDL_GAMEPAD_BUTTON_MISC6,input_map::kPadMisc6}};
+  for (auto [button,bind] : extra) {
+   auto m=input_map::Mapping::defaults();m.pad[input_map::kZR]=bind;input_map::set_current(m,false);
+   assert(SDL_SetJoystickVirtualButton(joystick,button,true));assert(poll().buttons==input::kZR);
+   float values[input_map::kPadCount]{};input::host_controller_values(values);assert(values[bind]>0.5f);
+   assert(SDL_SetJoystickVirtualButton(joystick,button,false));assert(poll().buttons==0);
   }
   // Binding edits must also reach the game: route D-pad down to stick-down.
   auto rebound=input_map::Mapping::defaults();rebound.pad[input_map::kDDown]=input_map::kPadNone;
