@@ -55,6 +55,10 @@ what is on `devel` and not released yet (also in the
   placed actors live with undo/redo, warp to any island, room or quest place, fly a free camera, and test quests in a
   test mode that never touches your real save. Saving writes only your mod's own package. See docs/mod-editor.md.
 
+- **World editor: live handles, docking panels, Esc** (for mod makers). Dragging a move or turn handle now moves the
+  actor (or the whole selection) live in the game, still as one Undo step. The editor's panels dock to the screen edges
+  and into each other as tabs, with a default layout and **Reset layout**. While placing, dragging or connecting quest
+  steps, the first Esc cancels that; Esc with nothing to cancel opens Settings.
 - **Mod SDK v3 preview: enemies, props, switches and effects** (for mod makers). Mods can now place the game's own
   residents, breakable props, switches and doors, and enemies with their own state; original mod enemies take damage,
   react to hits, can be targeted, defeated and drop items; mod props can be carried and thrown, and original item models
