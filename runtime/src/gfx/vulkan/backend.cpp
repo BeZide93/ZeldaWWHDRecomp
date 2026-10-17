@@ -1801,13 +1801,22 @@ static void prepare_secondary_snapshot() {
 
 
 std::atomic<uint64_t> touchLayoutGeneration{0};
+// The GamePad screen Off value Java last decided with (publishAvailability); -1 before the first.
+std::atomic<int> javaSeenOff{-1};
 }
 // The Java UI thread transfers one retained native-window reference to the
 // mailbox. Coalesce rapid resize/destroy events without touching Vulkan here.
 extern "C" JNIEXPORT jboolean JNICALL
 Java_org_wwhdrecomp_wwhd_GamePadDisplay_publishAvailability(JNIEnv*, jclass, jboolean available) {
   gfx::g_second_display_available = available;
-  return gfx::drc_screen_off();
+  const bool off = gfx::drc_screen_off();
+  javaSeenOff = off;
+  return off;
+}
+// Before onResume acquires a second display: the saved Off choice (#222).
+extern "C" JNIEXPORT void JNICALL
+Java_org_wwhdrecomp_wwhd_GamePadDisplay_seedSavedOff(JNIEnv*, jclass, jboolean off) {
+  gfx::seed_second_screen_off(off);
 }
 extern "C" JNIEXPORT void JNICALL
 Java_org_wwhdrecomp_wwhd_GamePadDisplay_publishSurface(
@@ -2927,11 +2936,14 @@ void swap() {
   service_screenshots();
   const auto swapPhaseStarted=std::chrono::steady_clock::now();
 #ifdef __ANDROID__
-  // Notify Java only on a setting transition; lifecycle/topology refreshes read
-  // the saved native value directly through publishAvailability().
-  static int notifiedOff = false; // native default; saved Off still triggers a notification
+  // Notify Java when it decided with another value: a setting transition, or the
+  // native settings correcting the start-up choice Java read early (seedSavedOff).
+  // Lifecycle/topology refreshes read the native value through publishAvailability().
+  static int notifiedOff = -1;
   const int off = gfx::drc_screen_off();
-  if (notifiedOff != off) {
+  const int seen = javaSeenOff;
+  if (seen == off) notifiedOff = off;
+  else if (seen != -1 && notifiedOff != off) {
     auto* env = static_cast<JNIEnv*>(SDL_GetAndroidJNIEnv());
     jobject activity = env ? static_cast<jobject>(SDL_GetAndroidActivity()) : nullptr;
     if (activity) {
