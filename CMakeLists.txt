@@ -134,8 +134,10 @@ target_compile_options(cemu_latte PRIVATE -w -O2)
 
 # ---- Dear ImGui (MIT, runtime/third_party/imgui, pinned release): the in-game settings overlay
 set(IMGUI_DIR ${CMAKE_SOURCE_DIR}/runtime/third_party/imgui)
-add_library(imgui STATIC ${IMGUI_DIR}/imgui.cpp ${IMGUI_DIR}/imgui_draw.cpp ${IMGUI_DIR}/imgui_tables.cpp ${IMGUI_DIR}/imgui_widgets.cpp)
-target_include_directories(imgui PUBLIC ${IMGUI_DIR})
+# ImGuizmo (MIT, runtime/third_party/imguizmo, pinned commit): the world editor's move and turn handles
+add_library(imgui STATIC ${IMGUI_DIR}/imgui.cpp ${IMGUI_DIR}/imgui_draw.cpp ${IMGUI_DIR}/imgui_tables.cpp ${IMGUI_DIR}/imgui_widgets.cpp
+            ${CMAKE_SOURCE_DIR}/runtime/third_party/imguizmo/ImGuizmo.cpp)
+target_include_directories(imgui PUBLIC ${IMGUI_DIR} ${CMAKE_SOURCE_DIR}/runtime/third_party/imguizmo)
 target_compile_definitions(imgui PUBLIC IMGUI_DISABLE_DEMO_WINDOWS IMGUI_DISABLE_OBSOLETE_FUNCTIONS)
 target_compile_options(imgui PRIVATE -w -O2)
 

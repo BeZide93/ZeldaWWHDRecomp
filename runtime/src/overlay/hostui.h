@@ -10,6 +10,8 @@ namespace hostui {
 
 void choose_game_source(bool folder, std::function<void(std::string)> chosen);
 void choose_mod_source(bool folder, std::function<void(std::string)> chosen);
+// any file or folder (the world editor's model import and export): `extension` limits files ("glb"; empty: any)
+void choose_file(const char* title, const char* extension, bool folder, std::function<void(std::string)> chosen);
 void post(std::function<void()> fn);  // run on the main thread (soon, in order)
 
 // persistent settings: display.plist (AppKit) or <config dir>/settings.ini (SDL host). Test runs
