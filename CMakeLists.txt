@@ -696,7 +696,8 @@ if(WWHD_HAS_VULKAN)
   set_tests_properties(vulkan_fallback_stats_bounded_storage PROPERTIES TIMEOUT 30)
   add_executable(vulkan_record_worker_test runtime/tools/vulkan_record_worker_test.cpp
       runtime/src/gfx/vulkan/deferred_commands.cpp runtime/src/gfx/vulkan/pod_commands.cpp
-      runtime/src/gfx/vulkan/record_worker.cpp runtime/src/gfx/vulkan/handoff_trace.cpp runtime/tools/handoff_cpu_clock_test_stub.cpp)
+      runtime/src/gfx/vulkan/record_worker.cpp runtime/src/gfx/vulkan/handoff_trace.cpp runtime/tools/handoff_cpu_clock_test_stub.cpp
+      runtime/src/platform/perf_hint.cpp)
   target_include_directories(vulkan_record_worker_test PRIVATE runtime/src ${Vulkan_INCLUDE_DIRS})
   target_compile_definitions(vulkan_record_worker_test PRIVATE VK_NO_PROTOTYPES)
   target_compile_options(vulkan_record_worker_test PRIVATE -UNDEBUG)

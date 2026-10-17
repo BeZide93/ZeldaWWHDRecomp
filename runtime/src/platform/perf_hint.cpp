@@ -190,6 +190,16 @@ void add_current_thread() {
     g_changed = true;
 }
 
+void remove_current_thread() {
+    if (!enabled()) return;
+    std::lock_guard<std::mutex> lk(g_mu);
+    const auto tid = (int32_t)gettid();
+    const auto end = std::remove(g_tids.begin(), g_tids.end(), tid);
+    if (end == g_tids.end()) return;
+    g_tids.erase(end, g_tids.end());
+    g_changed = true;
+}
+
 void frame_done() {
     using clock = std::chrono::steady_clock;
     static clock::time_point last{};
@@ -225,6 +235,7 @@ void frame_done() {
 #else
 namespace perf_hint {
 void add_current_thread() {}
+void remove_current_thread() {}
 void frame_done() {}
 bool fps60_chosen() { return false; }
 void set_fps60_chosen(bool) {}
