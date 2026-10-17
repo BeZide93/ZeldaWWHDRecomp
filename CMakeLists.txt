@@ -171,7 +171,7 @@ endif()
 # GX2 sources are compiled into the executable (not a static library) so their
 # strong HLE definitions replace the generated weak import stubs.
 file(GLOB RUNTIME_SOURCES CONFIGURE_DEPENDS runtime/src/*.cpp runtime/src/*.c runtime/src/hle/*.cpp runtime/src/mods/*.cpp runtime/src/motion/*.cpp
-                                            runtime/src/overlay/*.cpp)
+                                            runtime/src/overlay/*.cpp runtime/src/editor/*.cpp)
 list(APPEND RUNTIME_SOURCES runtime/src/platform/perf_hint.cpp runtime/src/platform/thread_sampler.cpp)  # Android performance hints (no-op elsewhere)
 list(APPEND RUNTIME_SOURCES ${WWHD_BUILD_INFO})
 list(APPEND RUNTIME_SOURCES ${WWHD_NPC_CATALOGUE})
@@ -365,6 +365,11 @@ add_executable(mod_package_test runtime/tools/mod_package_test.cpp runtime/src/m
 target_include_directories(mod_package_test PRIVATE runtime/src runtime/include)
 target_compile_options(mod_package_test PRIVATE -UNDEBUG)
 target_link_libraries(mod_package_test PRIVATE ZLIB::ZLIB Threads::Threads ${CMAKE_DL_LIBS})
+# World editor command layer (runtime/src/editor): commands, warp list, test-mode record reset, saving.
+add_executable(editor_test runtime/tools/editor_test.cpp runtime/src/editor/commands.cpp runtime/src/editor/stage_files.cpp ${WWHD_NPC_CATALOGUE})
+target_include_directories(editor_test PRIVATE runtime/src)
+target_compile_options(editor_test PRIVATE -UNDEBUG)
+add_test(NAME editor COMMAND editor_test "${CMAKE_SOURCE_DIR}/examples/guest-mods")
 add_executable(guest_png_test runtime/tools/guest_png_test.cpp runtime/src/mods/guest_png.cpp runtime/src/mods/mod_archive.cpp)
 target_include_directories(guest_png_test PRIVATE runtime/src)
 target_compile_options(guest_png_test PRIVATE -UNDEBUG)

@@ -17,6 +17,7 @@
 #include "setup_test.h"
 #include "setup_flow.h"
 #include "mods_tab.h"
+#include "editor_panel.h"
 #include "graphics_switch.h"
 #include "restart_dialog.h"
 #include "quit_dialog.h"
@@ -2517,6 +2518,7 @@ void settings_window() {
         restart_notice_frame(true);
         if (ImGui::BeginTabBar("tabs", ImGuiTabBarFlags_FittingPolicyShrink)) {
             for (int i = 0; i < int(tabs.size()); i++) {
+                if (!tabs[i].visible()) continue;  // a tab only some launches have (the world editor's, with --editor)
                 ImGuiTabItemFlags f = U.select_tab == i ? ImGuiTabItemFlags_SetSelected : 0;
                 if (ImGui::BeginTabItem(tabs[i].name.c_str(), nullptr, f)) {
                     if (U.tab != i) U.cap_action = -1, g_capturing_keys = false, U.cap_note.clear();

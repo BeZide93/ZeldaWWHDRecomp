@@ -187,6 +187,9 @@ public class WwhdActivity extends SDLActivity {
         }
         super.onCreate(savedInstanceState);
         phoneRumble = new PhoneRumble(this);
+        // GamePad screen saved Off: known before onResume acquires a second display (AYN Thor, #222)
+        if (!mBrokenLibraries && !isReusingNativeSession())
+            GamePadDisplay.seedSavedOff(SavedSecondScreen.off(files));
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         applyFullScreen();
         // on-screen controls over the game (the button under the view button shows or hides them)
