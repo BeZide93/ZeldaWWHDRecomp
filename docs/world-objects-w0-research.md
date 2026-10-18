@@ -1,228 +1,199 @@
-# World objects: W0 investigation
+# World objects: W0 proof report
 
-W0 is in progress. This is a source investigation record, not a passed proof gate.
-No W1 converter or public world-object manifest fields have been added.
+The W0 proof passes for the tested sea-room scenarios. W1 has not started.
+The work is on `sdk-world-objects`; the implementation revision is
+`97220ea233842ee38cd3b4ad770b2f67c277a4ef`.
 
-## Collision storage
+W0 provides original handmade platform/ramp, buoy and raft fixtures using native
+moving-background collision. The proof is private and opt-in; the converter,
+public world-object format and editor commands belong to the later phases.
 
-The native background registry has 256 entries shared by loaded backgrounds and
-moving actors. It is not a separate 256-body allowance for each room. Registration
-returns failure when the shared registry is full. Each entry occupies 20 bytes;
-the registry plus its virtual table pointer occupies 5,124 bytes.
+## Answers to the three unknowns
 
-Mesh storage is allocated separately. Moving collision setup runs inside a solid
-heap. The proof must create collision in its actor heap callback, before
-registration, and release the body before the heap is destroyed. Calling mesh
-setup from an arbitrary per-frame service would violate that allocation contract.
+**Collision memory is shared, rather than a fixed byte allowance per room.**
+The background registry contains 256 slots shared by loaded backgrounds and
+moving actors. Each slot occupies 20 bytes; the registry including its virtual
+table pointer occupies 5,124 bytes. Meshes allocate separately in native actor
+solid heaps. The final three fixtures consume 4,636 collision bytes and three
+registry slots. The sampled room still has about 9.1 MB free in its actual parent
+heap. These measurements establish fixture costs and admission inputs, rather
+than a universal room capacity.
 
-The sizing helper distinguishes input geometry, working arrays and the 188-byte
-body. For V vertices, T triangles, B blocks, N tree nodes, G groups and A polygon
-attributes, input payload is 52 + 12V + 10T + 2B + 20N + 52G + 16A bytes.
-Moving-body working payload is 12V + 32T + 6B + 28N + 32G bytes.
-These exclude allocation headers, array cookies, alignment, names, transforms,
-actors and rendering. An eight-vertex, twelve-triangle box with one block, node,
-group and attribute has 1,092 bytes of collision payload, not a measured heap cost.
+**The tested state loads and room changes stay clean.** Full and portable loads,
+Last session, a real automatic save and its load, and leaving/re-entering the sea
+square completed successfully. Portable/scene reconstruction released the three
+old registrations and created three replacements. Occupancy returned to 14 in
+the settled proof scene, with exactly three mod bodies. No stale-registration
+rejections or crashes occurred in those acceptance runs.
 
-The live measurements below cover the proof site. There is no fixed room-wide
-collision byte allowance: meshes share native actor heaps with rendering and
-other actors. Admission must retain both free memory and a large enough
-contiguous allocation. A safe general mod budget still needs a conservative
-policy and broader room samples.
+**Native riding carries Link without a Link-specific movement patch.** The bodies
+must execute before Link, following the native raft's schedule. A passive observer
+confirmed the game's correction function changing Link's actual current and
+previous positions. Normal input also made Link jump from the platform onto the
+raft and remain aboard through repeated wave cycles and state loads.
 
-## Native integration points
+## Playable proof and evidence
 
-| Function | Entry | Purpose |
+The main site is sea room 12, east of Windfall, away from Pawprint's island centre.
+The platform is at X=75,000, Y=150, Z=-201,500; the buoy is at X=78,000; the main
+raft is at X=76,500. The same raft was placed at X=75,700 for the normal jump,
+leaving a 150-unit gap from the platform. All models and handmade collision are
+original; asset provenance is recorded with the example.
+
+| Check | Observed result |
+| --- | --- |
+| Ramp and platform | Link walked from ramp ground height 20 to the platform at height 150, then stood normally. |
+| Buoy | Native wave height and slope changed its height, pitch and roll; a close run also kept Link grounded on its top. |
+| Raft riding | Link remained on the raft through repeated waves; native correction changed his retained position. |
+| Normal jump | Ordinary directional input triggered the native automatic jump, landing and standing procedures. |
+| Ship against platform | Continued sailing stopped the ship at X=74,450 against the wall at X=74,700. |
+| Ship against buoy | Continued sailing held the ship near Z=-201,820, outside the buoy. |
+| Ship against raft | The final object envelope held the ship near Z=-202,100 through repeated waves. |
+| Full state | Captured/restored successfully on both platform and raft; the final raft-envelope run also passed. |
+| Portable state | Removed/recreated the bodies and returned Link to the platform or raft. |
+| Room change | A trip to the Windfall square and back released/recreated all three bodies. |
+| Last session | Saved on quit, then loaded at startup into the proof scene. |
+| Automatic save | The supported two-minute timer wrote Auto save 1; loading it recreated the bodies and returned Link to the platform. |
+| 60 fps interpolation | Completed with Link grounded through repeated waves; diagnostics recorded two output frames per logic step and active model blending. |
+
+Acceptance runs used hidden, silent windows, disabled host input, and independent
+copies of save and mod-manager inputs. Source input inventories were unchanged.
+Crops, run receipts, binary/source hashes and compact native-position summaries
+accompany the report. Large raw actor dumps, full frames, copied inputs and shader
+caches were removed after recording results.
+
+True 60 is experimental and was removed from acceptance scope. Its interrupted
+run contributes no passing result. Higher interpolation rates, storms and drift
+remain later-phase checks.
+
+## Native functions and integration
+
+| Function or integration | Entry or value | Use |
 | --- | --- | --- |
-| `dBgW` constructor | `024F23F4` | Construct the moving collision body. |
-| `cBgW::Set` | `0200A030` | Build collision arrays in the solid heap. |
-| `dBgS::Regist` | `024EEA6C` | Register a body and its owning actor. |
-| `cBgS::Release` | `020087EC` | Remove the registration before heap destruction. |
-| `dBgW::Move` | `024F43DC` | Refresh collision after updating its transform. |
-| `dBgS_MoveBGProc_Typical` | `024EE658` | Native rider position correction. |
-| `dBgS_MoveBGProc_TypicalRotY` | `024EE708` | Rider correction including yaw; used by the native rideable raft. |
-| `dLib_getWaterY` | `025871F8` | Water-height selection; requires a valid collision-check argument. |
-| Native sea-height query | `0246BA0C` | Wave height at X/Z, used by this proof. |
+| `dBgW` constructor | `024F23F4` | Construct each native moving background. |
+| `cBgW::Set` | `0200A030` | Build native collision arrays inside the actor's solid-heap callback. |
+| `dBgS::Regist` | `024EEA6C` | Register the body with its actor and process ID. |
+| `cBgS::Release` | `020087EC` | Remove owned registrations before heap teardown. |
+| `dBgW::Move` | `024F43DC` | Update collision after the actor matrix changes. |
+| `dBgS_MoveBGProc_TypicalRotY` | `024EE708` | Native rider correction; the proof observer delegates it exactly once. |
+| Native sea-height query | `0246BA0C` | Sample centre and nearby wave heights to derive height, pitch and roll. |
+| Native raft scheduling | List 3, list priority 65533, execution priority 432 | Update moving backgrounds before Link. |
+| Native heap virtual slots | `0x74`, `0x7C` | Read total free space and largest allocation aligned to 32 bytes. |
 
-The native raft registers a moving background and assigns a rider-correction
-function. Its ride callback records rider presence and adds rocking behavior;
-the background correction path performs the positional carrying. This supports
-trying the ordinary native riding path first. It does not prove that a new mod
-body carries Link correctly, especially under pitch and roll.
+The native water-height selector at `025871F8` requires a valid collision-check
+argument. The proof uses the underlying sea-height query with its verified ABI.
 
-`dLib_getWaterY` also reads its collision-check argument. A proof must supply a
-valid check object or use the underlying sea query with its own verified ABI;
-passing a null check is not safe.
+Body, matrix, owner identity and observation counters reside in guest memory.
+Ownership checks include the body pointer, actor pointer, process ID and registry
+slot. A foreign registration is never released or replaced. Full restoration
+uses restored guest state; portable/scene changes use the actor lifecycle to
+remove and recreate native bodies.
 
-## Outstanding proof
+The private proof rejects mixed fixture/ordinary mod-actor declarations before
+installing its shared-profile schedule. Ordinary mod actors keep their existing
+schedule when the proof is disabled.
 
-- Verify the jump onto the final raft envelope and its state-load cases.
-- Verify Last session loading and automatic saves.
-- Choose conservative collision limits from measured storage and heap headroom.
-- Capture hidden, silent game runs, including interpolation and True 60.
-- Report the W0 results and revised phase estimates before W1.
+## Memory measurements and proposed limits
 
-Focused sizing, mesh, lifecycle, scheduling and existing actor-contract tests pass
-on macOS. The complete W0 gate and final cross-platform refresh remain outstanding; no
-universal memory safety limit is claimed. The full macOS suite and targeted
-retries have passed all 325 configured tests. Initial retries were needed for a
-Java-runtime selection and insufficient free disk; both environment issues were
-resolved without weakening tests.
+| Final handmade collision | Vertices | Triangles | Attribute records | Measured collision allocation |
+| --- | ---: | ---: | ---: | ---: |
+| Platform and ramp | 16 | 24 | 1 | 1,828 bytes |
+| Buoy | 8 | 12 | 1 | 1,132 bytes |
+| Raft including object envelope | 16 | 20 | 2 | 1,676 bytes |
+| Total | 40 | 56 | 4 | 4,636 bytes |
 
-## First live diagnostic
+These deltas include source collision and native body/working arrays, excluding
+render models and the actor base. Each actor base separately costs 4,176 bytes.
+Existing allocation accounting charged approximately 0.98 MB for the three
+actors and their original render resources in that room.
 
-The first hidden, silent macOS run registered all three original bodies through
-the native registry. Landing on the platform exercised its polygon attributes.
-Shared occupancy reached 25 bodies, including the game's bodies;
-the three mod bodies used three slots.
+For V vertices, T triangles, B blocks, N tree nodes, G groups and A attributes,
+source payload is 52 + 12V + 10T + 2B + 20N + 52G + 16A bytes. Moving working
+arrays use 12V + 32T + 6B + 28N + 32G bytes; the body uses another 188 bytes.
+Names, array cookies, alignment and allocation headers are additional. The
+native measured deltas remain authoritative.
 
-| Handmade mesh | Vertices | Triangles | Measured allocation delta inside its heap callback |
-| --- | ---: | ---: | ---: |
-| Platform and ramp | 16 | 24 | 1,828 bytes |
-| Buoy | 8 | 12 | 1,132 bytes |
-| Raft | 8 | 12 | 1,132 bytes |
+Capacity is sampled after native heap creation returns and shrinks its temporary
+solid heap. Measuring free space inside the callback would incorrectly report
+the temporary largest-block construction allowance as a room budget. With the
+final fixtures, the actual parent had 9,073,872 bytes free and a largest aligned
+block of 7,551,008 bytes. The settled scene used 14 background slots, including
+three mod slots. Subsequent recreation retained three mod registrations and
+stable fixture allocation costs; native allocations/fragmentation varied.
 
-These deltas include the fixture input and the native collision body/arrays, not
-render models or the actor's base allocation. Each native actor base allocation
-was separately measured as 4,176 bytes. The existing actor allocation accounting
-accepted the three actors with approximately 0.98 MB charged in that room. This
-is a diagnostic sample, not a certified room capacity or a final mod limit.
+A starting **W1 policy to validate**, not an enforced or demonstrated safe limit,
+is 16 mod bodies per room, 1 MiB aggregate collision, 256 KiB per body, and 16
+native registry slots left unused. Candidate per-body vertex/triangle caps are
+2,048/4,096, subject to the actual tree, group and attribute byte budget. Rendering
+and actor allocations retain separate budgets. Admission should also leave at
+least 2 MiB free in the actual parent and sufficient contiguous space. Crowded
+rooms and larger meshes need their own acceptance before these limits ship.
 
-The initial collision attributes were zero-filled. In this format, zero is a
-valid native exit reference: landing on the platform selected exit 0 and caused
-a room reload. The bodies released cleanly during that transition and were
-recreated, with the same allocation deltas, but this is not acceptance of the
-intended static-platform behavior. The builder now writes explicit no-exit,
-no-camera, no-Link-reference and no-path sentinels. Regression tests check those
-fields. Wall, special-ground, through and hookshot attributes remain ordinary.
+## Findings that changed the proof
 
-The sheltered Windfall square returned a constant native wave height. The next
-proof site is in sea room 12, east of Windfall, around x=75,000 and z=-201,500,
-away from the neighbouring island's centre. The native sea function samples its
-rendered height table and returns the base height outside its active area, so
-observing stationary distant fixtures does not establish wave following. A live
-run near the bodies remains necessary.
+The ordinary static-actor schedule updated collision after Link. Link could
+appear grounded through vertical correction while only the camera received
+moving-background correction. Copying the native raft schedule made actual Link
+correction occur; camera callbacks alone were not accepted as riding evidence.
 
-Current checks: three new native sizing/mesh/lifecycle tests, two original-asset
-tests, and the four existing static/skinned/combat/carry actor contracts pass on
-macOS. The executable builds from freshly generated game code for the current
-branch. An earlier attempt using older SDK-generated code failed at link time;
-that generated-code mismatch was corrected. Compile-only Linux, Windows and
-Android checks passed for the actor unit before the neutral-attribute fix and
-must be refreshed against the final proof sources.
+The original 50-unit raft sides stopped the ship intermittently, then allowed it
+through as wave phases changed. Native ship wall circles sample a few heights:
+ship height, +75, +150 and a deep sea-stage sample at world height -600. A shallow
+wall can fall between those samples.
 
+The final raft keeps its thin visible/walkable deck and adds eight vertical
+object-collision triangles at the same footprint, spanning local Y=-300 to 200.
+They add no ground faces. A second native attribute has through-mask `0xED`, so
+Link, camera, arrows, bombs, boomerangs and rope pass through while object-class
+queries collide. The ship uses the object category: **this is not a native
+ship-exclusive mask**. The envelope costs 544 additional bytes. W1 must reflect
+this distinction in its public attributes rather than promise an unsupported
+ship-only bit.
 
-## Native riding and scheduling
+Zero-filled polygon attributes initially selected native exit 0 on landing.
+The builder now writes explicit no-exit, no-camera, no-Link-reference and no-path
+sentinels, covered by regression tests.
 
-The original proof copied the ordinary static mod actor's schedule. That ran its
-collision update after Link. Scene drawing clears the native background movement
-flags, so Link saw no movement flag on his next execute. He could remain grounded
-by vertical collision correction while the camera followed the raft. Camera
-correction callbacks alone were therefore insufficient evidence of riding.
+## Validation and performance
 
-The private proof rejects mixed fixture and ordinary mod-actor declarations, so
-its shared-profile scheduling change cannot affect another mod actor. The
-isolated proof now copies the native raft's process list (3), list priority
-(65533) and execution priority (432). It updates the moving background before
-Link. A passive observer delegates the native rider function exactly once and
-records its arguments and results. The corrected run shows calls on Link's actual
-current and previous positions, including persistent changes in X/Z and height.
-No code moves Link on behalf of the raft.
+- macOS Metal application build and full CTest: **325/325 passed** in the final run.
+- Focused mesh, sizing, owner/lifecycle, schedule and mixed-actor isolation checks,
+  plus existing static/skinned/combat/carry actor contracts, pass.
+- Original render assets pass reproducibility, geometry and texture checks.
+- Linux x86-64, Windows x86-64 and Android arm64 compile checks pass for the actor
+  translation unit including all collision headers. These are compile checks,
+  not complete platform application links. No phone was used.
 
-Link remained grounded on the raft for over 1,200 logic steps through repeated
-native wave cycles. The raft uses the sea-height query at its centre and four
-nearby points; pitch and roll follow that slope. This establishes the native
-carrying path at 30 Hz, pending the frame-rate and state-load cases above.
+Initial checks encountered stale generated-code inputs, an unavailable selected
+Java runtime and insufficient free disk. Fresh generated inputs, the installed
+JDK and restored disk space resolved them without weakening checks. The final
+full suite is green. Two automatic-save harness attempts were excluded: escaped
+newlines and an unsupported one-minute interval left the feature disabled. The
+passing run used real newline-delimited settings and the supported two-minute
+interval, observed the actual timer write, then loaded that file.
 
-## Ramp, state loads and room recreation
+Uncapped interpolation diagnostics sampled roughly 49–59 logic steps/s near the
+proof scene, with two output frames per step. Main-thread logic samples were
+about 5.3–6.0 ms and record passes about 1.2–1.4 ms in the late samples. These
+include the game's existing scene work; they are not collision-only overhead,
+percentile frame times or stable capped-FPS measurements. Android performance
+was not measured. The crops and native position records support the tested
+motion; they do not certify all hardware, weather or frame rates.
 
-A scripted walk moved Link from the ramp near z=-202,320 (ground height 20) to the
-platform at z=-201,585 (height 150), without moving his position through proof
-code. A full state captured 575.3 MB, compressed to 275.4 MB, then restored
-successfully. The portable state was 6,786 bytes. Its native arrival starts above
-the saved location; Link subsequently settled back onto the platform.
+## Public surface, remaining risks and next phases
 
-Portable loading released all three old bodies and constructed three new ones.
-An explicit trip to the Windfall square and back repeated that release/recreate
-cycle. Shared registry occupancy returned to 14 (11 native bodies plus three
-proof bodies), with unchanged collision allocation deltas. The run exited cleanly
-and wrote a 6,781-byte Last session state. Source save and mod-manager inputs were
-unchanged. Last session loading and the automatic-save path still need proof.
+New public manifest fields: **none**. New editor commands: **none**. The original
+example uses existing model/actor declarations; `WWHD_WORLD_OBJECT_PROOF=1`
+activates only its private handmade proof. Mod progress continues through the
+SDK's mod-owned state; this feature adds no game-event/save-bit manipulation.
 
-## Parent heap sample
+Automatic placement-conflict checks, general collision conversion, material
+mapping and production budgets remain W1 work. Storms, drift and obstacle
+response remain W2 work. Native object/ship category sharing and thin-surface
+collision need explicit handling in that design. The tested room/load cycles
+provide evidence for those cases, not a universal leak or capacity guarantee.
 
-Capacity must be measured after the native solid-heap callback returns. Native
-creation temporarily allocates the largest parent block, then shrinks the actor
-heap to its actual use; free space inside that temporary heap is not a room
-budget. The proof now queries the actor solid heap's actual parent after shrink.
-The native heap vtable provides total free space at slot 0x74 and maximum aligned
-allocation at slot 0x7C, with alignment 32.
-
-At the sea-room-12 site, after all three bodies were created, the parent had
-9,074,416 bytes free and a largest aligned block of 7,551,552 bytes. On a later
-room recreation, free space was 9,074,472 bytes and the largest block was
-7,708,480 bytes. Total free space remained effectively stable, while fragmentation
-changed the largest block. These are measured headroom for this room/save state,
-not an engine guarantee for every room or a claim that this much collision may
-safely be added.
-
-
-## Ship collision and the raft envelope
-
-The ship's native wall correction samples circles at its position height, 75 and
-150 units above it, plus a deep sea-stage sample at world height -600. A thin
-floating wall can fall between those samples. The original 50-unit raft hull
-stopped the ship initially, then let it pass as the independent wave phases
-changed. Mesh registration alone therefore did not establish reliable ship
-collision.
-
-The final handmade raft retains that thin, walkable deck and adds eight vertical
-object-collision triangles spanning local height -300 to 200 at the same outer
-footprint. There are no extra ground faces. A second native polygon attribute
-uses through-mask 0xED: camera, Link, arrows, bombs, boomerangs and rope pass
-through; object-class queries still collide. This is a collision envelope for
-objects, including the ship, not a ship-exclusive category. Native filtering has
-no separate ship bit: the ship uses the object category. W1 must account for this
-when defining its public attribute names.
-
-The ship reached the static platform and remained at X=74,450 against the wall
-at X=74,700 under continued sailing input. It similarly remained near
-Z=-201,820 against the buoy, and near Z=-202,100 against the final raft envelope,
-through repeated waves. No ship movement or collision code was added.
-
-The final raft contains 16 vertices, 20 triangles and two attribute records. Its
-measured collision allocation is 1,676 bytes, 544 bytes more than the original
-thin hull. The three final proof bodies cost 4,636 collision bytes in total. At
-the same room-12 site, parent free space after construction is 9,073,872 bytes;
-the largest aligned block is 7,551,008 bytes. The native registry still uses
-exactly three mod slots.
-
-## Limits proposed for the next phase
-
-There is no universal collision-memory allowance for a room. The registry is
-shared globally, and mesh storage competes with other allocations in the
-selected native heap. The proof's native allocation deltas match the sizing
-model plus names, alignment and native array cookies. This allows conservative
-admission without attempting to fill the game's heap or registry to failure.
-
-A starting W1 policy to validate is: at most 16 mod background bodies in a room,
-a 1 MiB aggregate collision budget, a 256 KiB collision budget per body, and at
-least 16 native registry slots left unused. Vertex/triangle limits must fit those
-byte budgets; 2,048 vertices and 4,096 triangles are upper candidates per body,
-not an entitlement to allocate every body at that size. Rendering and actor
-allocations retain their separate existing budgets. A new body must also leave
-at least 2 MiB free in its actual parent and enough contiguous aligned space for
-construction. These are proposed SDK safety margins for W1, not measured engine
-maxima. More crowded rooms and storm conditions remain validation cases.
-
-## Public surface and phase estimates
-
-W0 adds no public manifest fields or editor commands. The original example uses
-existing model and actor declarations. Only the private collision-proof option
-activates its handmade native bodies; ordinary mod actors keep their existing
-profile and collision behavior. Exported assets remain original source models.
-
-Rough engineering estimates after this gate, including proofs and regression
-checks:
+Rough engineering estimates, including playable proofs and regression checks:
 
 | Phase | Estimate | Main uncertainty |
 | --- | --- | --- |
@@ -231,16 +202,7 @@ checks:
 | W3 | 3–6 days | Whether grapple anchors need native actor behavior beyond polygon attributes. |
 | W4 | 5–10 days | Neighbour-square drawing, shoreline effects and chart/banner integration. |
 
-These estimates should be revised at each phase's playable proof. W1 has not
-started.
+Changelog suggestion: Added a prototype for walkable and floating mod objects
+with native Link riding and ship collision.
 
-
-## Jump and final-envelope state loads
-
-A second placement, using the same original models, put the raft at X=75,700 so
-there was a 150-unit gap from the platform. Normal directional input made Link
-run off the platform, enter the native automatic-jump procedure, land on the
-raft and resume ordinary standing/riding. His position was not changed after
-the initial test setup. Full and portable state loads then succeeded with the
-final 20-triangle raft envelope present; after portable reconstruction, Link
-settled back onto the raft and continued riding.
+Work stops at the W0 report gate before W1.
