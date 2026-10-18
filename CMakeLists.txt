@@ -949,6 +949,11 @@ add_executable(pip_placement_test runtime/tools/pip_placement_test.cpp runtime/s
 target_include_directories(pip_placement_test PRIVATE runtime/src runtime/include runtime/third_party/fmt/include)
 target_compile_options(pip_placement_test PRIVATE -UNDEBUG)
 add_test(NAME pip_placement COMMAND pip_placement_test)
+# the world editor's window stack: docked panels in front of the picture (Dear ImGui only, no game)
+add_executable(editor_dock_ui_test runtime/tools/editor_dock_ui_test.cpp runtime/src/overlay/editor_dock.cpp)
+target_compile_options(editor_dock_ui_test PRIVATE -UNDEBUG)
+target_link_libraries(editor_dock_ui_test PRIVATE imgui)
+add_test(NAME editor_dock_ui COMMAND editor_dock_ui_test)
 if(APPLE)
   add_executable(pip_preview_ui_test runtime/tools/pip_preview_ui_test.cpp runtime/src/gfx/display_modes.cpp)
   target_include_directories(pip_preview_ui_test PRIVATE ${IMGUI_DIR} runtime/src runtime/include
