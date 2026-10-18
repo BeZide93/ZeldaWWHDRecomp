@@ -86,9 +86,15 @@ static bool take(Snapshot& s) {
     s.count = (int32_t)ld32(kEnvLight + 0xA90 - 4);  // mVrkumoCount (+0xA8C)
     s.curTime = ldf(kEnvLight + 0x1020);
     s.phase = ldf(packet + 0x11D4);
-    static const uint32_t kConst[8] = {0x1004FCD8, 0x1004FCDC, 0x1004FCF8, 0x1004FCFC,
-                                       0x1004FD00, 0x1004FD04, 0x1004FC98, 0x1004FCC8};
-    for (int i = 0; i < 8; i++) s.k[i] = ldf(GD(kConst[i]));
+    if (getenv("WWHD_CLOUDS_STORMPOINT")) {  // research: the sea storm point and radius (room 9 rule)
+        static int n = 0;
+        if (n++ % 600 == 0)
+            LOG("[clouds] storm point %.0f %.0f %.0f radius %.0f, eye %.0f %.0f %.0f", ldf(GD(0x104775B0)), ldf(GD(0x104775B4)),
+                ldf(GD(0x104775B8)), ldf(GD(0x10050130)), s.eye[0], s.eye[1], s.eye[2]);
+    }
+    static const uint32_t kConst[8] = {GD(0x1004FCD8), GD(0x1004FCDC), GD(0x1004FCF8), GD(0x1004FCFC),
+                                       GD(0x1004FD00), GD(0x1004FD04), GD(0x1004FC98), GD(0x1004FCC8)};
+    for (int i = 0; i < 8; i++) s.k[i] = ldf(kConst[i]);
     s.n = 0;
     s.nShadow = 0;
     // shadow anchors (host state, game memory untouched): a cloud slot keeps its world position and moves

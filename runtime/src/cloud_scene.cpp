@@ -105,7 +105,7 @@ void build(const cloud_proto::Snapshot& s, float aspect, int mode, bool depthTes
         rw = std::min(rw, D * maxAng) * (1.0f - 0.45f * std::clamp(pitch / 0.6f, 0.0f, 1.0f));
         float rh = D * std::tan(std::min(tall, 1.2f));
         if (rw < 1) continue;
-        bool far = hor > bankDist;
+        bool isFar = hor > bankDist;
         float tower = h01(c.index * 7 + 1) < 0.3f ? 1.45f : 1.0f;  // some clouds grow into towers
         float hs = std::clamp(rh / rw * hsK * tower * (1.0f - 0.4f * strength), 0.55f, 1.6f);
         auto add = [&](float cx, float cy, float cz, float r, float shp, float seed, float a) {
@@ -119,12 +119,12 @@ void build(const cloud_proto::Snapshot& s, float aspect, int mode, bool depthTes
                 mx = std::max(mx, lit[i]);
             }
             for (int i = 0; i < 3; i++) it.base[i] = std::min(1.0f, lit[i] / std::max(mx, 1e-3f) * std::clamp(mx, 0.0f, 1.0f));
-            it.base[3] = far ? 1.0f : 0.0f;
+            it.base[3] = isFar ? 1.0f : 0.0f;
             inst.push_back(it);
             dist.push_back(std::sqrt(cx * cx + cy * cy + cz * cz));
         };
         add(x, y, z, rw, hs, (float)c.index * 7.31f + 3.0f, c.alpha);
-        if (far && bankK > 0) {
+        if (isFar && bankK > 0) {
             // satellites along the horizon (perpendicular to the view direction), lower and a bit smaller
             float tx = -z / hor, tz = x / hor;
             int ns = 2 + (h01(c.index * 13 + 5) < 0.5f ? 1 : 0);
