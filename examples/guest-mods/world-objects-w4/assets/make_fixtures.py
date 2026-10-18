@@ -34,7 +34,7 @@ def make(kind="island"):
     faces.extend(tuple(start+i for i in face)+(2,) for face in box)
     if kind == 'island-foam':
         vertices=[];faces=[]
-        inner=ring(1205,1005,12);outer=ring(1290,1090,12)
+        inner=ring(1205,1005,12);outer=ring(1680,1480,12)
         for i in range(4):
             j=(i+1)%4
             quad(inner[i],inner[j],outer[j],outer[i],0)
@@ -44,13 +44,20 @@ def make(kind="island"):
     elif kind != 'island':
         raise ValueError(kind)
     positions,normals,uv=[],[],[]
-    for a,b,c,material in faces:
+    for face_index,(a,b,c,material) in enumerate(faces):
         p,q,r=vertices[a],vertices[b],vertices[c]
         u=[q[k]-p[k] for k in range(3)];v=[r[k]-p[k] for k in range(3)]
         normal=(u[1]*v[2]-u[2]*v[1],u[2]*v[0]-u[0]*v[2],u[0]*v[1]-u[1]*v[0]);length=math.sqrt(sum(x*x for x in normal))
         positions.extend(tuple(x/100 for x in point) for point in (p,q,r));normals.extend([tuple(x/length for x in normal)]*3)
         left=(material*20+1)/64;right=(material*20+18)/64
-        uv.extend(((left,.1),(right,.1),(right,.9)))
+        if kind == 'island-foam':
+            edge=face_index//2
+            start,end=vertices[edge],vertices[(edge+1)%4]
+            length=math.hypot(end[0]-start[0],end[2]-start[2])/1000
+            corners={edge:(0,0),(edge+1)%4:(length,0),4+edge:(0,1),4+(edge+1)%4:(length,1)}
+            uv.extend(corners[index] for index in (a,b,c))
+        else:
+            uv.extend(((left,.1),(right,.1),(right,.9)))
     colors=((235,245,237),(220,237,233),(243,250,245)) if kind=="island-foam" else ((205,183,125),(64,133,67),(128,87,47))
     rows=b''.join(b'\0'+b''.join(bytes(tuple(min(255,c+(12 if (x//4+y//4)%2 else 0)) for c in colors[min(x//20,2)])+(255,)) for x in range(64)) for y in range(16))
     def chunk(kind,body):return struct.pack('>I',len(body))+kind+body+struct.pack('>I',zlib.crc32(kind+body)&0xffffffff)

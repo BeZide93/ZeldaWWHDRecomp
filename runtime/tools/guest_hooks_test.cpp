@@ -1,3 +1,22 @@
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <filesystem>
+#include <functional>
+#include <initializer_list>
+#include <iterator>
+#include <limits>
+#include <memory>
+#include <optional>
+#include <span>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+#include <thread>
+#include <utility>
 // Exercise the actual hook runner with synthetic game bodies and a port wrapper.
 #define WWHD_GUEST_HOOKS_STARTUP_FIXTURE 1
 // This entire harness constructs synthetic startup registries; production has no unseal.
@@ -192,13 +211,14 @@ namespace hooks { void exec_item_get(Cpu*) {} }
 }
 // World runtime has its own actor/scene tests; loader tests only exercise registration.
 namespace actor_model_cache {
+bool shoreline_for(const std::string&){return false;}
 unsigned triangles_for(const std::string&){return 12;}
 std::shared_ptr<const story_world_collision::mesh::Mesh> collision_for(const std::string&){return {};}
 std::string archive_for(const std::string&){return {};}
 mod_actor::ModelRig rig_for(const std::string&){return {};}
 std::vector<std::string> clips_for(const std::string&){return {};}
 bool bounds_for(const std::string&,story_notebook::WorldPoint&,story_notebook::WorldPoint&){return false;}
-std::string prepare(const std::string&,const story_notebook::ManifestModel&,const std::string&,const std::string&,const std::vector<std::string>&,const std::string&,const std::string&,bool){return {}; }
+std::string prepare(const std::string&,const story_notebook::ManifestModel&,const std::string&,const std::string&,const std::vector<std::string>&,const std::string&,const std::string&,bool,bool){return {}; }
 }
 namespace story_actors {
 bool resident_event_declaration(const std::string&,const std::string&,ResidentEventDeclaration&){return false;}
@@ -743,12 +763,13 @@ int main() {
     stage_owner_pass_through_test();
     stage_owner_observer_test::run();
     native_wait_route_test::run();
+    // Reserve the exact synthetic guest pages; a hint can move under Guard Malloc.
     // Map only synthetic mod data for string/input/heap service checks.
     constexpr uint32_t data_base=0x7F000000;
 #ifdef _WIN32
     void* data=VirtualAlloc(mem::ptr(data_base),0x30000,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE);
 #else
-    void* data=mmap(mem::ptr(data_base),0x30000,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYMOUS,-1,0);
+    void* data=mmap(mem::ptr(data_base),0x30000,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED,-1,0);
 #endif
     assert(data==mem::ptr(data_base));
     // Typed services select the owning mod by its translated import callsite.
@@ -840,7 +861,7 @@ int main() {
 #ifdef _WIN32
         void* particle_mem=VirtualAlloc(mem::ptr(0x10000000),0x10000,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE);
 #else
-        void* particle_mem=mmap(mem::ptr(0x10000000),0x10000,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYMOUS,-1,0);
+        void* particle_mem=mmap(mem::ptr(0x10000000),0x10000,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED,-1,0);
 #endif
         assert(particle_mem==mem::ptr(0x10000000));
         st32(0x10005B34,0x10007000);st16(0x1000700E,0xA8);st32(0x10007004,55);st8(0x10007326,11);st8(0x10008326,11);

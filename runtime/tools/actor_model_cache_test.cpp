@@ -1,7 +1,13 @@
 #include "mods/actor_model_cache.h"
 #include "mods/mod_json.h"
 #include "mods/mod_hash.h"
+#include <algorithm>
 #include <bit>
+#include <cstdint>
+#include <exception>
+#include <string>
+#include <system_error>
+#include <vector>
 #include "static_model_fixture.h"
 #include <cassert>
 #include <chrono>
@@ -23,6 +29,7 @@ int main(int argc,char** argv){
         if(std::string(argv[2])=="reuse"&&!fs::is_regular_file(output))return 2;
         if(std::string(argv[2])!="missing"&&std::string(argv[2])!="reuse"){std::ofstream file(output,std::ios::binary);file.write("Yaz0synthetic-test",18);}
         mods::json::Value result;
+        for(int i=2;i<argc;++i)if(std::string(argv[i])=="--shoreline"&&std::string(argv[2])!="wrong_mode")result["shoreline"]=true;
         if(std::string(argv[2])!="triangles_missing")result["triangles"]=std::string(argv[2])=="triangles_wrong"?13:12;
         if(std::string(argv[2])=="triangles_fraction")result["triangles"]=12.5;
         if(std::string(argv[2])=="triangles_string")result["triangles"]="12";
@@ -59,6 +66,11 @@ int main(int argc,char** argv){
     }
     assert(prepare_collision("ok")==first);assert(actor_model_cache::collision_for(first));
     prepare("owner","ok");assert(!actor_model_cache::collision_for(first)); // Render-only rebuild cannot retain old collision.
+    auto prepare_coast=[&](const char* tool){return actor_model_cache::prepare("owner",model,(root/"package with spaces").string(),(root/"data").string(),command,tool,"game with spaces",false,true);};
+    assert(prepare_coast("ok")==first&&actor_model_cache::shoreline_for(first));
+    assert(!actor_model_cache::shoreline_for("missing")&&!actor_model_cache::collision_for(first));
+    bool wrong_mode=false;try{prepare_coast("wrong_mode");}catch(const std::exception&){wrong_mode=true;}assert(wrong_mode&&!actor_model_cache::shoreline_for(first)&&actor_model_cache::archive_for(guest).empty());
+    prepare("owner","ok");assert(!actor_model_cache::shoreline_for(first));
     fails("fail");
     assert(prepare(std::string(64,'a'),"ok").size()==31);
     model.kind="unknown";bool bad_kind_failed=false;try{prepare("owner","ok");}catch(const std::exception&){bad_kind_failed=true;}assert(bad_kind_failed);model.kind="static";

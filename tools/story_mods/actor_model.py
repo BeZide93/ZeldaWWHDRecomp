@@ -327,13 +327,17 @@ def build(game, glb_path, identity, out, collision_out=None):
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--glb',required=True); parser.add_argument('--inspect',action='store_true'); parser.add_argument('--game'); parser.add_argument('--identity'); parser.add_argument('--out'); parser.add_argument('--collision-out')
+    parser.add_argument('--glb',required=True); parser.add_argument('--inspect',action='store_true'); parser.add_argument('--game'); parser.add_argument('--identity'); parser.add_argument('--out'); parser.add_argument('--collision-out'); parser.add_argument('--shoreline',action='store_true')
     args=parser.parse_args()
     try:
         if args.inspect: result=inspect(args.glb)
         else:
             require(all((args.game,args.identity,args.out)),'--game, --identity and --out required')
-            result=build(args.game,args.glb,args.identity,args.out,args.collision_out)
+            if args.shoreline:
+                require(not args.collision_out,'shoreline is collision-free')
+                import shoreline_model
+                result=shoreline_model.build(args.game,args.glb,args.identity,args.out)
+            else: result=build(args.game,args.glb,args.identity,args.out,args.collision_out)
     except (BuildError,OSError) as exc: parser.exit(1,'actor_model: '+str(exc)+'\n')
     print(json.dumps(result,sort_keys=True))
 

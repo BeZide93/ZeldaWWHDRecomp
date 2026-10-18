@@ -385,7 +385,7 @@ not set the game's tutorial or progression flags.
 ## Island presentation
 
 A static sea object can declare original models for its distant silhouette and
-coast decoration, plus an arrival name and sea-chart marker:
+animated coast foam, plus an arrival name and sea-chart marker:
 
 ```json
 {
@@ -410,11 +410,20 @@ the home square. Actors and their visual variants share 128 declaration slots;
 a sea square accepts at most 16 active visual variants. Removing objects in the
 editor retains their identities for undo and state restoration until restart.
 
-Author the shoreline model as a narrow ribbon along the model's coast. The
-current converter supports opaque materials: use an original pale texture and
-geometry with an uneven edge, rather than transparent water planes. Shoreline
-models are decoration and do not supply Link or ship collision. Native waves
-may cover low parts of the ribbon.
+Author the shoreline model as strips along the model's coast, just above the
+water. The game supplies the foam material, texture and animation from the
+player's installation. These resources stay in the player's local cache; your
+mod ships only its original geometry. The shoreline model's placeholder texture
+is ignored. Give it a separate model declaration: it cannot also be used as the
+island, collision mesh, distant model or held item.
+
+Map the strips with U running along the coast and V from 0 at the inner edge to
+1 at the outer edge. Repeat U to control the pattern's length along the coast;
+one repeat per ten metres is a useful starting point. The example's strips are
+about five metres wide. Keep their outer edge within the model-bound limits.
+The foam is translucent, animates during game updates, and pauses with the
+game. Its lighting follows the environment. Shorelines supply no Link or ship
+collision, and native waves may cover low parts of the strips.
 
 Arrival names and chart labels allow up to 96 UTF-8 bytes. Arrival radius is
 100 to 20000 game units. Entering that radius produces the named flag in the
@@ -432,7 +441,7 @@ block to keep its current settings. Preparing a new visual model may require
 a reload or restart before the editor can use it.
 
 `examples/guest-mods/world-objects-w4` contains Horizon Isle, with a 40-triangle
-full model, 26-triangle distant model and 8-triangle opaque foam ribbon. Its
+full model, 26-triangle distant model and 8-triangle animated foam strip model. Its
 source generator also reproduces the embedded textures and authored footstep
 materials. Enable this example separately from the earlier island and tower
 examples because their demonstration placements share the same sea area.
