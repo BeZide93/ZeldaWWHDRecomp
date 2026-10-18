@@ -1,6 +1,6 @@
 # GamePad screen modes
 
-Choose a mode in Graphics → GamePad screen (or set `WWHD_DRC_MODE` for one launch):
+Choose a mode in Display → GamePad screen (or set `WWHD_DRC_MODE` for one launch):
 
 | Mode | Behavior |
 | --- | --- |
@@ -52,7 +52,7 @@ in **Full screen**, unless you already saved a choice or supplied a launch overr
 This also applies to the Windows build through Proton when the gamescope session is detected.
 Desktop Mode keeps its existing defaults.
 
-Change **View** under **Settings → Graphics → GamePad screen**, or change **Full screen**
+Change **View** under **Settings → Display → GamePad screen**, or change **Full screen**
 in Graphics. Your choices are remembered. A separate GamePad window is still available,
 but Gaming Mode shows one window at a time and may scale the game picture, making it blurry.
 

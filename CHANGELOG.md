@@ -24,6 +24,10 @@ what is on `devel` and not released yet (also in the
   with collision from the model and wood, sand or grass ground; objects that bob on the waves or drift and can be
   ridden; surfaces Link can climb, hookshot and grapple; islands that are visible from neighbouring sea squares, get
   a ring on the sea chart and an arrival notice; and animated coast foam that uses the game's own foam look.
+
+- **GamePad picture-in-picture: simpler settings** (#221). Settings → Display → Picture-in-picture now has one slider each
+  for size (5–100 %) and opacity (10–100 %). Dragging the picture places it freely, and clicking one of the nine circles
+  in the diagram snaps it to that spot.
 - **Mod quests: finishing, flags and places inside buildings** (for mod makers). A character's dialogue or a scene's end
   can now finish a quest (the reward is given once), characters and quest steps can react to the mod's own flags or to
   several quests at once, a character can offer step-specific conversations, and a quest step can point into a
