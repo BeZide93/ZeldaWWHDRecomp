@@ -607,7 +607,12 @@ static void execute_op(Op op, const uint32* p, uint32 n) {
     case OP_LAYOUT_CONTENT:
         aspect::set_content_clip(n && p[0]);
         break;
-    case OP_CLOUDS_BEGIN: cloud_proto::g_active_seq = n ? p[0] : 0; cloud_proto::g_drawn = false; break;
+    case OP_CLOUDS_BEGIN:
+        cloud_proto::g_active_seq = n ? p[0] : 0;
+        cloud_proto::g_drawn = false;
+        if (render::g_backend->sky_clouds_begin && cloud_proto::g_active_seq)
+            render::g_backend->sky_clouds_begin(g_regs, cloud_proto::g_active_seq);
+        break;
     case OP_CLOUDS_END:
         if (cloud_proto::g_on_end && cloud_proto::g_active_seq) cloud_proto::g_on_end();
         cloud_proto::g_active_seq = 0;

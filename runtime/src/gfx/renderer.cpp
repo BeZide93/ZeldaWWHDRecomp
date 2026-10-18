@@ -4,6 +4,7 @@
 #include "renderer_ext.h"
 #include "../screenshot.h"
 #include "../audio_out.h"
+#include "../sky_frame.h"
 
 #include <atomic>
 #include <algorithm>
@@ -55,6 +56,14 @@ std::atomic<float> g_bloom{[] {
     const float v = e ? std::strtof(e, nullptr) : 1.0f;
     return std::isfinite(v) ? std::clamp(v, 0.0f, 2.0f) : 1.0f;
 }()};
+// horizon haze (the sky's haze band): 1 = the original game, 0 = removed; WWHD_HORIZON_HAZE, or the
+// research name WWHD_SKY_HAZE (the amount removed, 0..1)
+std::atomic<float> g_haze{sky::haze_from_env(std::getenv("WWHD_HORIZON_HAZE"), std::getenv("WWHD_SKY_HAZE"))};
+}  // namespace
+float horizon_haze() { return g_haze.load(std::memory_order_relaxed); }
+void set_horizon_haze(float v) {
+    if (!std::isfinite(v)) v = 1.0f;
+    g_haze.store(std::clamp(v, 0.0f, 1.0f), std::memory_order_relaxed);
 }
 float bloom_strength() { return g_bloom.load(std::memory_order_relaxed); }
 void set_bloom_strength(float v) {

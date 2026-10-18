@@ -81,6 +81,9 @@ struct Backend {
     void (*set_present_interval)(uint32_t ns, bool hold);
     int64_t (*present_due)();
     void (*service_present)();
+    // optional: the game starts drawing its sky clouds (drawVrkumo, cloud_proto.cpp) into the sky
+    // buffer, whose pass is the open one; `seq` names the cloud snapshot. Draws the horizon-haze grade.
+    void (*sky_clouds_begin)(const uint32_t* regs, uint32_t seq);
 };
 enum Feature : int { kFeatureAO, kFeatureAOHires, kFeatureAniso, kFeatureFXAA, kFeatureScaleFilter, kFeatureCapture,
                      kFeatureShaderHeadStart };
@@ -161,6 +164,10 @@ inline void set_aniso(bool v) { g_backend->set_aniso(v); }
 // Bloom intensity multiplier: 0 off, 1 original, 2 double. Shared by both renderers.
 float bloom_strength();
 void set_bloom_strength(float strength);
+// Horizon haze, the pale band low in the sky: 1 original, 0 removed (a deeper blue sky). Shared by both
+// renderers; below 1 the sky-cloud hook (cloud_proto.cpp) is active.
+float horizon_haze();
+void set_horizon_haze(float haze);
 // The bloom extract shader's remapped[2].z is cThresholdParam.z (intensity).
 void scale_bloom_uniforms(void* remapped, size_t size);
 inline bool fxaa() { return g_backend->fxaa(); }

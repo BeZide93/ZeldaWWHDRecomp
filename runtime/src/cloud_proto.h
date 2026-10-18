@@ -2,7 +2,10 @@
 #pragma once
 #include <cstdint>
 
+#include "sky_frame.h"
+
 namespace cloud_proto {
+using sky::SkyFrame;
 
 enum Mode : int { kOff = 0, kSdf, kVolume, kHide, kMark, kCombo };
 int mode();  // WWHD_CLOUDS_PROTO, read once
@@ -37,5 +40,14 @@ const Snapshot* snapshot(uint32_t seq);
 extern uint32_t g_active_seq;
 extern bool g_drawn;
 extern void (*g_on_end)();  // OP_CLOUDS_END hook of the renderer (timing), may be null
+
+// per-frame sky values for the renderers' sky passes: sky_frame.h
+inline void sky_frame(const Snapshot& s, float aspect, float hazeReduction, SkyFrame& out) {
+    sky::Inputs in{};
+    for (int i = 0; i < 3; i++) in.eye[i] = s.eye[i], in.sunPos[i] = s.sunPos[i], in.fog[i] = s.fogColor[i];
+    for (int i = 0; i < 12; i++) in.viewRot[i] = s.viewRot[i];
+    in.fovy = s.fovy, in.curTime = s.curTime, in.sunVisible = s.sunVisible != 0;
+    sky::frame(in, aspect, hazeReduction, out);
+}
 
 }  // namespace cloud_proto

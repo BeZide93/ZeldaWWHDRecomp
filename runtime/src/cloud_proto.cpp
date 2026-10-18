@@ -14,6 +14,7 @@
 
 #include "cloud_proto.h"
 #include "guest_addr.h"
+#include "gfx/renderer.h"
 #include "gx2/gx2_cmd.h"
 #include "runtime.h"
 
@@ -96,7 +97,8 @@ static bool take(Snapshot& s) {
 using namespace cloud_proto;
 
 extern "C" void hook_02575B6C(Cpu* c) {
-    if (!mode()) { f_02575B6C_orig(c); return; }
+    // inactive (bit-identical to the original) unless toon clouds or a reduced horizon haze are on
+    if (!mode() && render::horizon_haze() >= 1.0f) { f_02575B6C_orig(c); return; }
     uint32_t seq = g_seq.load(std::memory_order_relaxed) + 1;
     if (!take(g_ring[seq % kRing])) { f_02575B6C_orig(c); return; }
     g_seq.store(seq, std::memory_order_release);

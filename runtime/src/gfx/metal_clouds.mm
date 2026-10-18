@@ -23,6 +23,7 @@
 #include <unordered_map>
 
 #include "cloud_proto.h"
+#include "renderer.h"
 #include "metal.h"
 #include "runtime.h"
 
@@ -469,6 +470,7 @@ static void encode(id<MTLRenderCommandEncoder> enc, const cloud_proto::Snapshot&
         noDepth = [R.device newDepthStencilStateWithDescriptor:dd];
         LOG("[clouds] prototype shaders ready (mode %d)", cloud_proto::mode());
     }
+    if (!(what & kClouds) && render::horizon_haze() >= 1.0f) return;  // nothing to draw: leave the encoder alone
     const int mode = cloud_proto::mode();
     // pipeline for the open pass's attachment formats
     auto pipe = [&](NSString* vsName, NSString* fsName) -> id<MTLRenderPipelineState> {
@@ -552,7 +554,7 @@ static void encode(id<MTLRenderCommandEncoder> enc, const cloud_proto::Snapshot&
     for (int i = 0; i < 3; i++) g.sky[i] = s.fogColor[i];
     g.sky[3] = strength;
     g.lit[3] = warm;
-    static const float haze = envf("WWHD_SKY_HAZE", 0.0f);  // 0 = game's haze .. 1 = horizon haze band removed
+    const float haze = 1.0f - render::horizon_haze();  // 0 = the game's haze .. 1 = horizon haze band removed
     g.params[0] = envf("WWHD_CLOUDS_BAND", 0.010f), g.params[1] = envf("WWHD_CLOUDS_NOISE", 0.38f), g.params[2] = haze;
     g.params[3] = envf("WWHD_CLOUDS_SELFSHADOW", 6.0f);
     g.tune[0] = envf("WWHD_CLOUDS_FRINGE", 0.02f), g.tune[1] = envf("WWHD_CLOUDS_SAT", 0.25f);
@@ -771,19 +773,14 @@ void clouds_mark_start(Surface* const* colors, const uint32_t* colorSlices, Surf
         flush();
         ensure(colors, colorSlices, depth, depthSlice);
     }
-    // the game's own cards stay; the vivid-sky grade (if asked for) goes under them. Also builds the
-    // shaders at the same moment as the other modes do, so the runs stay comparable.
-    Surface* t = R.passColor[0];
-    if (!t || !R.enc) return;
-    MTLViewport vp{0, 0, (double)t->tex.width, (double)t->tex.height, 0, 1};
-    encode(R.enc, *cloud_proto::snapshot(cloud_proto::g_active_seq), vp, kGrade);
 }
+
 // draw(), with the draw's state set up to the scissor: true = skip the game's draw
 bool clouds_draw(id<MTLRenderCommandEncoder> enc, const MTLViewport& vp, Surface* const* colors, const uint32_t* colorSlices,
                  Surface* depth, uint32_t depthSlice, bool (*ensure)(Surface* const*, const uint32_t*, Surface*, uint32_t)) {
     const int mode = cloud_proto::mode();
     static const bool timing = env_on("WWHD_CLOUDS_TIME");
-    if (mode == cloud_proto::kMark) return false;
+    if (mode == cloud_proto::kMark || mode == cloud_proto::kOff) return false;  // the game's own cards
     if (cloud_proto::g_drawn) return true;
     cloud_proto::g_drawn = true;
     if (timing) {
@@ -792,12 +789,24 @@ bool clouds_draw(id<MTLRenderCommandEncoder> enc, const MTLViewport& vp, Surface
         enc = R.enc;
     }
     static const bool fullres = env_on("WWHD_CLOUDS_FULLRES");
-    encode(enc, *cloud_proto::snapshot(cloud_proto::g_active_seq), vp, fullres ? kGrade : kGrade | kClouds);
+    encode(enc, *cloud_proto::snapshot(cloud_proto::g_active_seq), vp, fullres ? 0 : kClouds);
     if (fullres) {  // the clouds go into the full-resolution picture where the sky buffer is composited
         g_sky = R.passColor[0], g_skyFrame = R.frame, g_pendingSeq = cloud_proto::g_active_seq;
     }
     if (timing) timed_commit(mode == cloud_proto::kVolume ? "volume" : mode == cloud_proto::kHide ? "hide" : "sdf");
     return true;
+}
+// OP_CLOUDS_BEGIN: the sky buffer's pass is open (the sky dome and its haze band are drawn); the
+// horizon-haze grade goes in before the clouds. Also builds the shaders at the same moment in every
+// mode, so the game's cloud set does not depend on the mode (comparable runs).
+bool open_target_pass(const uint32_t* regs);  // metal_draw.mm
+void sky_clouds_begin(const uint32_t* regs, uint32_t seq) {
+    if (render::horizon_haze() >= 1.0f && cloud_proto::mode() == cloud_proto::kOff) return;
+    if ((!R.enc || !R.passColor[0]) && !open_target_pass(regs)) return;  // no open pass: the target registers' one
+    Surface* t = R.passColor[0];
+    if (!t || !R.enc) return;
+    MTLViewport vp{0, 0, (double)t->tex.width, (double)t->tex.height, 0, 1};
+    encode(R.enc, *cloud_proto::snapshot(seq), vp, kGrade);
 }
 // OP_CLOUDS_END (mark + timing): closes the command buffer of the game's own cards
 static void clouds_end() {

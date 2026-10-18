@@ -970,6 +970,14 @@ void tab_graphics() {
     flow::next(flow::button("Default##bloom"));
     if (ImGui::Button("Default##bloom")) post_changed([] { render::set_bloom_strength(1.0f); });
     help("Glow around bright areas. 100% matches the original game; 0% turns bloom off. Applies immediately.");
+    float haze = render::horizon_haze() * 100.0f;
+    ImGui::SetNextItemWidth(260);
+    if (ImGui::SliderFloat("Horizon haze", &haze, 0.0f, 100.0f, "%.0f%%", ImGuiSliderFlags_AlwaysClamp))
+        post_changed([haze] { render::set_horizon_haze(haze / 100.0f); });
+    flow::next(flow::button("Default##haze"));
+    if (ImGui::Button("Default##haze")) post_changed([] { render::set_horizon_haze(1.0f); });
+    help("The pale band low in the sky. 100% matches the original game; lower values give a clearer, deeper blue "
+         "sky near the horizon. Together with less bloom it gives a more vivid sky. Applies immediately.");
     const bool ao_ok = render::feature_available(render::kFeatureAO);
     static const char* const ao[] = {"AO: original", "AO: centre fix", "AO: centre + noise fix"};
     for (int i = 0; i < 3; i++) {

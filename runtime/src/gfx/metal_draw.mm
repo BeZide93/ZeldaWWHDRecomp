@@ -1246,6 +1246,20 @@ static bool ensure_pass(Surface* const* colors, const uint32_t* colorSlices, Sur
     return R.enc != nil;
 }
 
+// cloud prototype (metal_clouds.mm): opens a pass on colour target 0 of the registers (and their depth
+// buffer), when the sky-cloud hook finds no open pass
+bool open_target_pass(const uint32_t* regs) {
+    uint32_t slice = 0, depthSlice = 0;
+    Surface* colors[8] = {};
+    uint32_t slices[8] = {};
+    colors[0] = color_target(regs, 0, &slice);
+    slices[0] = slice;
+    if (!colors[0]) return false;
+    Surface* depth = regs[mmDB_DEPTH_BASE] ? depth_target(regs, &depthSlice) : nullptr;
+    if (depth && (depth->tex.width < colors[0]->tex.width || depth->tex.height < colors[0]->tex.height)) depth = nullptr;
+    return ensure_pass(colors, slices, depth, depthSlice);
+}
+
 // ---------------------------------------------------------------- indices
 // Converts guest indices (possibly big-endian, possibly a primitive type Metal lacks)
 // into a 32-bit little-endian index list. Returns the Metal primitive type.
