@@ -38,7 +38,7 @@ mod's page), the *Experimental* tag where it applies and a one-word status (*On*
 *Restart to apply*, *Update available*, *Error*).
 
 - **Built-in** ("Included with the game. Switch on or off any time."): the mods compiled
-  into the game: direct camera, mouse camera, first-person shortcut, extended enemy lock-on, wall climbing,
+  into the game: direct camera, mouse camera, camera-directed items, first-person shortcut, extended enemy lock-on, wall climbing,
   run/swim speed, faster ladders, faster sidling, faster ivy climbing, faster ledge hanging, sailing speed, automatic wind, jump anywhere,
   quick doors, fast forward and fast scene changes; all off by default.
 - **Community** ("Made by players. Downloaded from the mod catalogue."): every installed
@@ -97,6 +97,18 @@ the end of an install and the page of a mod that is off but still loaded offer
 their own instead, and switching mods does not open a popup.
 
 **Letterbox while targeting** is on by default in **Mods > Built-in > Camera**; switch it off to remove bars during normal targeting while keeping cutscenes and special cameras unchanged.
+
+### Camera-directed items (prototype)
+
+**Camera-directed items (prototype)** is off by default. Enable it in
+**Mods > Built-in** to turn Link toward the free camera once when starting a
+supported grounded item action: bows, boomerang, hookshot, grappling hook,
+qualifying inventory-bomb throws, hammer strikes and empty-bottle swings.
+Grounded Deku Leaf gusts also follow the camera's up/down direction.
+Enemy lock-on and existing first-person aiming keep priority; other projectile
+pitch and ongoing aim stay native. This is partial, experimental coverage, not
+continuous camera-facing movement or full camera aiming for every item.
+Water, bait and other unsupported or contextual actions stay unchanged.
 
 ### Extended enemy lock-on
 

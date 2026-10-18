@@ -1,5 +1,5 @@
 // Experimental partial implementation of #197: Leaf gust plus grounded initial item facing.
-// See docs/camera-directed-items-research.md for native evidence and unsupported item matrix.
+// Coverage and native evidence are recorded in PR #203; player settings: docs/mod-manager.md.
 #include "mods.h"
 #include "../runtime.h"
 #include "../input.h"
