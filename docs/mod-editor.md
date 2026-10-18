@@ -347,7 +347,7 @@ separated by `;`, or `@file` with one such line per row. Results go to the log.
 | `focus` | `id`, `mod`? | fly the camera to an actor |
 | `check_model` | `file` | check a `.glb` file |
 | `import_model` | `file`, `id`?, `confirm`?, `mod`? | copy a `.glb` into the mod and add the model |
-| `set_scene` | `id`, `property` (`trigger`, `steps`), `value`, `mod`? | |
+| `set_scene` | `id`, `property` (`trigger`, `steps`, `native`), `value`, `mod`? | (`null` removes a trigger or the native version) |
 | `set_quest_step` | `quest`, `step`, `property`, `value`, `mod`? | |
 | `undo`, `redo`, `history` | | |
 | `validate` | `mod`? | the checks, with the first problem |
@@ -388,7 +388,28 @@ separated by `;`, or `@file` with one such line per row. Results go to the log.
 | `list_flags` | `mod`? | the mod's flags, who uses them, their values |
 | `set_flag` | `id`, `value`, `mod`? | test mode: set one of the mod's flags |
 | `search` | `text`, `mod`? | find actors, quests and steps, scenes, items and flags |
-| `copy` | `ids` or `quest` and `steps`, `mod`? | copy actors or quest steps |
-| `paste` | `at`? (`offset`, `link`, `camera`, `position`), `offset`?, `position`?, `quest`?, `mod`? | paste them (actors get ids and flags of their own) |
+| `copy` | `ids`, or `quest` and `steps`, or `scenes`, or `scene` and `steps`, `mod`? | copy actors, quest steps, scenes or scene steps |
+| `paste` | `at`? (`offset`, `link`, `camera`, `position`), `offset`?, `position`?, `quest`?, `scene`?, `before`?, `mod`? | paste them (actors get ids and flags of their own, scenes ids of their own; scene steps go before the scene's end or before `before`) |
 | `move_actors` | `ids`, `offset`, `mod`? | move several actors (one Undo step) |
 | `remove_actors` | `ids`, `confirm`, `mod`? | remove several actors (one Undo step) |
+| `add_scene` | `id`?, `mod`? | a new scene (with its end step) |
+| `remove_scene` | `id`, `confirm`, `mod`? | remove a scene (refused while an actor or another scene starts it) |
+| `duplicate_scene` | `id`, `new_id`?, `mod`? | a copy of a scene, without its trigger |
+| `set_scene_trigger` | `scene`, `type` (`none`, `talk`, `quest_step`, `room`, `area`, `salvage`), `actor`?, `quest`?, `step`?, `chart`?, `at`? (`link`, `camera`), `stage`?, `room`?, `position`?, `radius`?, `mod`? | what starts the scene |
+| `add_scene_step` | `scene`, `type`, `at`?, `fields`?, `mod`? | a step with defaults that fit (a camera takes the fly camera's view; a choice comes with its two branches) |
+| `edit_scene_step` | `scene`, `step`, `fields`, `mod`? | several fields of a step at once (`null` removes one); a new id moves the links to it along |
+| `remove_scene_step` | `scene`, `step`, `mod`? | remove a step (refused while another step leads to it) |
+| `move_scene_step` | `scene`, `step`, `to`, `mod`? | move a step in the list |
+| `duplicate_scene_step` | `scene`, `step`, `mod`? | a copy right after it |
+| `add_camera_key` | `scene`, `step`?, `at`?, `frames`?, `eye`?, `target`?, `mod`? | the fly camera's view as a camera key: a new camera step, a camera step that becomes a path, or a new key of a path |
+| `set_camera_key` | `scene`, `step`, `key`, `from`? (`camera`, `none`), `eye`?, `target`?, `frames`?, `mod`? | a key takes the fly camera's view, and its time to the next key |
+| `remove_camera_key` | `scene`, `step`, `key`, `mod`? | remove a key (a path of two becomes a camera step) |
+| `retime_scene_step` | `scene`, `step`, `frames`, `key`?, `mod`? | a step's duration, a path key's time to the next, or a whole path (scaled) |
+| `scene_timeline` | `scene`, `mod`? | each step's start and duration on the default path, the branches, the camera keys |
+| `scrub_scene` | `scene`, `time`, `move`?, `mod`? | the scene's camera at a time; the fly camera shows it |
+| `set_scene_choice` | `scene`, `step`, `option`?, `label`?, `next`?, `default`?, `mod`? | a choice's labels, where each option leads, the default answer |
+| `add_walk_point`, `set_walk_point`, `remove_walk_point` | `scene`, `step`, `at`? / `point`, `from`? (`camera`, `link`, `position`), `position`?, `mod`? | the points of a walk |
+| `native_scene` | `scene`, `from_steps`?, `value`?, `mod`? | the scene's native version: made from its steps, set or removed; whether it would play |
+| `preview_scene` | `scene`, `from`?, `to`?, `restore`?, `mod`? | test mode: play the scene (or some of its steps) in the game |
+| `skip_scene`, `stop_scene` | | skip the scene that plays; stop the preview and go back to the editor |
+| `scene_state` | | whether a preview plays, which scene and step |

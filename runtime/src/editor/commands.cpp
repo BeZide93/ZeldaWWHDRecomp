@@ -38,7 +38,7 @@ const std::vector<CommandInfo> kCommands = {
     {"list_models", "The open mod's models and the actors that use them.", {{"mod", "string", ""}}},
     {"list_scenes", "The open mod's scenes.", {{"mod", "string", ""}}},
     {"get_scene", "One scene as the manifest declares it.", {{"id", "string", "the scene's id", true}, {"mod", "string", ""}}},
-    {"set_scene", "Sets one property of a scene (trigger or steps).", {{"id", "string", "", true}, {"property", "string", "trigger or steps", true}, {"value", "any", "", true}, {"mod", "string", ""}}, true},
+    {"set_scene", "Sets one property of a scene (trigger, steps or native; null removes trigger or native).", {{"id", "string", "", true}, {"property", "string", "trigger, steps or native", true}, {"value", "any", "", true}, {"mod", "string", ""}}, true},
     {"list_quests", "The open mod's quests and their steps.", {{"mod", "string", ""}}},
     {"set_quest_step", "Sets one property of a quest step (text, where, place, npc, available, sail_line, find...).",
      {{"quest", "string", "the quest's id", true}, {"step", "integer", "the step's n", true}, {"property", "string", "", true}, {"value", "any", "null removes the field", true}, {"mod", "string", ""}},
@@ -142,15 +142,73 @@ const std::vector<CommandInfo> kCommands = {
     {"set_flag", "Test mode: sets one of the open mod's flags in the loaded game (never a game flag).",
      {{"id", "string", "the flag's id", true}, {"value", "boolean", "", true}, {"mod", "string", ""}}},
     {"search", "Everything of the open mod whose id or text contains the text: actors, quests and steps, scenes, items, flags.", {{"text", "string", "", true}, {"mod", "string", ""}}},
-    {"copy", "Copies actors or quest steps for paste.",
-     {{"ids", "array", "actor ids"}, {"quest", "string", "with steps: the quest"}, {"steps", "array", "step numbers of that quest"}, {"mod", "string", ""}}},
-    {"paste", "Pastes what copy took: actors (new ids and flags of their own) offset, at Link, at the camera or at a position (into the room there); quest steps as new last steps of a quest.",
+    {"copy", "Copies actors, quest steps, scenes or scene steps for paste.",
+     {{"ids", "array", "actor ids"}, {"quest", "string", "with steps: the quest"}, {"steps", "array", "step numbers of that quest (or of the scene)"},
+      {"scenes", "array", "scene ids"}, {"scene", "string", "with steps: the scene (steps by number or id)"}, {"mod", "string", ""}},
+     },
+    {"paste", "Pastes what copy took: actors (new ids and flags of their own) offset, at Link, at the camera or at a position (into the room there); quest steps as new last steps of a quest; scenes under new ids; scene steps before a scene's end (or before a step).",
      {{"at", "string", "actors: offset (default), link, camera or position (in the room Link is in)"}, {"offset", "point", "with at = offset (default {x: 100, y: 0, z: 0})"},
       {"position", "point", "with at = position: where the first one goes (the others keep their places around it)"},
-      {"quest", "string", "steps: the quest (default: the one they came from)"}, {"mod", "string", ""}},
+      {"quest", "string", "steps: the quest (default: the one they came from)"}, {"scene", "string", "scene steps: the scene (default: the one they came from)"},
+      {"before", "any", "scene steps: the step they go before (number or id; default: the scene's last step)"}, {"mod", "string", ""}},
      true},
     {"move_actors", "Moves several actors by an offset (one undo step).", {{"ids", "array", "", true}, {"offset", "point", "", true}, {"mod", "string", ""}}, true},
     {"remove_actors", "Removes several actors (one undo step).", {{"ids", "array", "", true}, {"confirm", "boolean", "must be true", true}, {"mod", "string", ""}}, true, true},
+    // ---- scenes: steps, camera keys, timeline, preview (commands_scene.cpp)
+    {"add_scene", "Adds a scene to the open mod (with its end step).", {{"id", "string", "the scene's id (default: scene, scene-2...)"}, {"mod", "string", ""}}, true},
+    {"remove_scene", "Removes a scene (refused while an actor or another scene starts it).", {{"id", "string", "", true}, {"confirm", "boolean", "must be true", true}, {"mod", "string", ""}}, true, true},
+    {"duplicate_scene", "Copies a scene under a new id (without its trigger).", {{"id", "string", "", true}, {"new_id", "string", "default: from the id"}, {"mod", "string", ""}}, true},
+    {"set_scene_trigger", "Sets what starts a scene: none, talk (an actor), quest_step, room or area (where Link or the camera is, or a given place) or salvage (a chart).",
+     {{"scene", "string", "", true}, {"type", "string", "none, talk, quest_step, room, area or salvage", true}, {"actor", "string", "talk: the actor"},
+      {"quest", "string", "quest_step: the quest"}, {"step", "integer", "quest_step: the step"}, {"chart", "string", "salvage: the chart"},
+      {"at", "string", "room / area: link (default) or camera"}, {"stage", "string", "room / area"}, {"room", "integer", "room / area"},
+      {"position", "point", "area: its centre"}, {"radius", "number", "area: its radius (default 500)"}, {"mod", "string", ""}},
+     true},
+    {"add_scene_step", "Adds a step to a scene, with defaults that fit (a camera takes the fly camera's view; a choice comes with its two branches).",
+     {{"scene", "string", "", true}, {"type", "string", "camera, say, move, face, wait, sound, fade, end, camera_path, camera_follow, animation, walk, choice, music or particle", true},
+      {"at", "integer", "the place it takes (1 = first; default: before the scene's last step)"}, {"fields", "object", "fields to set over the defaults (null removes one)"}, {"mod", "string", ""}},
+     true},
+    {"edit_scene_step", "Sets several fields of a scene step at once (null removes one).",
+     {{"scene", "string", "", true}, {"step", "any", "the step's number (1 = first) or id", true}, {"fields", "object", "{field: value}", true}, {"mod", "string", ""}}, true},
+    {"remove_scene_step", "Removes a scene step (refused while another step leads to it).", {{"scene", "string", "", true}, {"step", "any", "number or id", true}, {"mod", "string", ""}}, true},
+    {"move_scene_step", "Moves a scene step to another place in the list.", {{"scene", "string", "", true}, {"step", "any", "number or id", true}, {"to", "integer", "its new place, 1 = first", true}, {"mod", "string", ""}}, true},
+    {"duplicate_scene_step", "Copies a scene step right after it.", {{"scene", "string", "", true}, {"step", "any", "number or id", true}, {"mod", "string", ""}}, true},
+    {"add_camera_key", "Takes a camera key from the fly camera's view (or an eye and target): without step a new camera step; on a camera step it becomes a camera path; on a camera path a new key.",
+     {{"scene", "string", "", true}, {"step", "any", "a camera or camera_path step (number or id)"}, {"at", "integer", "the key's place in the path (1 = first; default: the end)"},
+      {"frames", "integer", "frames from the key before it (60 a second; default 60)"}, {"eye", "point", "instead of the fly camera's view"}, {"target", "point", "with eye"}, {"mod", "string", ""}},
+     true},
+    {"set_camera_key", "Sets a camera key to the fly camera's view (or an eye and target) and its time to the next key.",
+     {{"scene", "string", "", true}, {"step", "any", "number or id", true}, {"key", "integer", "1 = first", true}, {"from", "string", "camera (default) or none (keep the view)"},
+      {"eye", "point", ""}, {"target", "point", ""}, {"frames", "integer", "frames to the next key"}, {"mod", "string", ""}},
+     true},
+    {"remove_camera_key", "Removes a key of a camera path (a path of two keys becomes a camera step).",
+     {{"scene", "string", "", true}, {"step", "any", "number or id", true}, {"key", "integer", "1 = first", true}, {"mod", "string", ""}}, true},
+    {"retime_scene_step", "Changes a step's duration on the timeline (frames, 60 a second): a timed step, one key of a camera path, or the whole path (scaled).",
+     {{"scene", "string", "", true}, {"step", "any", "number or id", true}, {"frames", "integer", "the new duration", true}, {"key", "integer", "a camera path's key: the time from it to the next"}, {"mod", "string", ""}},
+     true},
+    {"scene_timeline", "A scene on a time axis: each step's start and duration on the default path (each choice's default answer), branches, camera keys.",
+     {{"scene", "string", "", true}, {"mod", "string", ""}}},
+    {"scrub_scene", "The scene's camera at a time (frames on the default path); the fly camera shows it unless move is false.",
+     {{"scene", "string", "", true}, {"time", "number", "frames from the start", true}, {"move", "boolean", "move the fly camera there (default true)"}, {"mod", "string", ""}}},
+    {"set_scene_choice", "Changes a choice step: an option's label and the step it leads to, or the default answer.",
+     {{"scene", "string", "", true}, {"step", "any", "the choice step (number or id)", true}, {"option", "integer", "1 or 2"}, {"label", "string", "the option's text (up to 32 characters)"},
+      {"next", "any", "the step the option leads to (a later step's number or id)"}, {"default", "integer", "the answer the cursor starts on: 1 or 2"}, {"mod", "string", ""}},
+     true},
+    {"add_walk_point", "Adds a point to a walk step's path: where the fly camera looks (on the ground), at Link, or at a position.",
+     {{"scene", "string", "", true}, {"step", "any", "a walk step (number or id)", true}, {"at", "integer", "the point's place (1 = first; default: the end)"},
+      {"from", "string", "camera (default: the ground where it looks), link or position"}, {"position", "point", "with from = position"}, {"mod", "string", ""}},
+     true},
+    {"set_walk_point", "Moves a point of a walk step's path.", {{"scene", "string", "", true}, {"step", "any", "", true}, {"point", "integer", "1 = first", true}, {"position", "point", "", true}, {"mod", "string", ""}}, true},
+    {"remove_walk_point", "Removes a point of a walk step's path (two stay at least).", {{"scene", "string", "", true}, {"step", "any", "", true}, {"point", "integer", "1 = first", true}, {"mod", "string", ""}}, true},
+    {"native_scene", "The scene's native version (the game's own event: two uo2 residents turn, the camera holds and moves): made from its steps, set, or removed; says whether it would play.",
+     {{"scene", "string", "", true}, {"from_steps", "boolean", "make it from the scene's face, camera and wait steps"}, {"value", "any", "the native block to set (null removes it)"}, {"mod", "string", ""}},
+     true},
+    {"preview_scene", "Test mode: plays a scene (or steps from..to of it) in the game from the editor's view; the editor's view comes back when it ends. Not while playing.",
+     {{"scene", "string", "", true}, {"from", "any", "the first step (number or id)"}, {"to", "any", "the last step (default: from, or the scene's end)"},
+      {"restore", "boolean", "afterwards the world goes back to how it was (default true)"}, {"mod", "string", ""}}},
+    {"skip_scene", "Skips the scene that plays (as Plus / Start does): its end actions don't run.", {}},
+    {"stop_scene", "Stops the scene preview at once and goes back to the editor's view.", {}},
+    {"scene_state", "Whether a scene preview plays, which scene and step.", {}},
 };
 
 // ---------------------------------------------------------------- JSON helpers
@@ -487,7 +545,7 @@ unsigned reset_records(story_mail::Book& book, const std::vector<Record>& own, c
 // ---------------------------------------------------------------- session
 void Session::add_package(const std::string& mod, const std::string& name, const std::string& dir, const Value& manifest) {
     if (find(mod)) return;
-    packages_.push_back({mod, name, dir, manifest, manifest});
+    packages_.push_back({mod, name, dir, manifest, manifest, manifest});
     // the editor's own sidecar in the package (quest graph places); the game never reads it
     if (!dir.empty()) {
         std::ifstream f(fs::path(dir) / "editor" / "quest-layout.json", std::ios::binary);
@@ -684,15 +742,29 @@ bool Session::drag_preview(const std::string& mod, const Value& poses, std::vect
     if (!host_) return why = "the game is not running", false;
     if (poses.type != Value::Array || poses.array.empty()) return why = "nothing is dragged", false;
     Value shown = p->manifest;  // a copy: the package itself never changes here
-    std::vector<std::string> changed;
+    Value placed;               // the poses with every place filled in (a pose without one: the package's)
+    placed.type = Value::Array;
     for (const auto& pose : poses.array) {
         const std::string id = pose.get("id").string();
         Value* a = find_by_id(shown["actors"], id);
         if (!a) return why = "no placed actor \"" + id + "\" in " + mod, false;
         for (const char* field : {"position", "rotation"})
             if (pose.get(field).type == Value::Object) (*a)[field] = pose.get(field);
-        changed.push_back(id);
+        Value full;
+        full["id"] = id;
+        for (const char* field : {"position", "rotation"})
+            if (a->get(field).type != Value::Null) full[field] = a->get(field);
+        placed.array.push_back(full);
     }
+    // in place first: the actors that exist in the game move where they are (no new actor, every step)
+    std::vector<std::string> moved;
+    std::string ignore;
+    host_->pose_actors(mod, placed, moved, ignore);
+    std::vector<std::string> changed;
+    for (const auto& pose : placed.array)
+        if (std::find(moved.begin(), moved.end(), pose.get("id").string()) == moved.end()) changed.push_back(pose.get("id").string());
+    if (changed.empty()) return true;
+    // the others (not created yet, or kinds that can't move in place): created again at the new place
     std::vector<ManifestActor> actors;
     if (!story_notebook::parse_actors(shown, actors, why)) return false;
     return host_->preview_actors(mod, actors, changed, later, why);
@@ -901,7 +973,8 @@ Value Session::dispatch(const std::string& command, const Value& p, std::string&
         Package* pkg = package(p, why);
         if (!pkg) return r;
         const std::string property = text(p, "property"), id = text(p, "id");
-        if (property != "trigger" && property != "steps") return why = "a scene's properties are trigger and steps", r;
+        if (property != "trigger" && property != "steps" && property != "native") return why = "a scene's properties are trigger, steps and native", r;
+        if (property == "steps" && p.get("value").type == Value::Null) return why = "a scene keeps its steps", r;
         ok = change(*pkg, "Set " + property + " of scene " + id, [&](Value& m, std::string& w) {
             Value* s = find_by_id(m["scenes"], id);
             if (!s) return w = "no scene \"" + id + "\"", false;
@@ -1139,6 +1212,8 @@ Value Session::dispatch(const std::string& command, const Value& p, std::string&
     }
     bool handled = false;
     r = dispatch_build(command, p, why, ok, handled);
+    if (handled) return r;
+    r = dispatch_scene(command, p, why, ok, handled);
     if (handled) return r;
     r = dispatch_quest(command, p, why, ok, handled);
     if (handled) return r;

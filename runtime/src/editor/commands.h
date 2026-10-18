@@ -142,6 +142,29 @@ public:
                                const std::vector<std::pair<std::string, int>>& items, const Location& to, bool play, std::string& why) {
         return why = "the game is not running", false;
     }
+
+    // ---- scenes (each optional) ----
+    // The fly camera looks from `eye` at `target` (scrubbing a scene's camera; turns it on if needed).
+    virtual bool look(const WorldPoint& eye, const WorldPoint& target, std::string& why) {
+        return why = "the game is not running", false;
+    }
+    // Plays `scene` of `mod` in the game from the editor's view, in test mode: the editor hides, the scene
+    // plays, and when it ends (or stops) the editor's view comes back; with `restore` the world goes back to
+    // how it was before. `declared`: the scene is the one the game started with (its native version may
+    // play); otherwise the edited steps play (never the native version).
+    virtual bool preview_scene(const std::string& mod, const story_notebook::ManifestScene& scene, bool declared, bool restore, std::string& why) {
+        return why = "the game is not running", false;
+    }
+    // The running preview: skip (as Plus / Start does) or stop (ends it at once, back to the editor).
+    virtual bool scene_control(bool stop, std::string& why) { return why = "the game is not running", false; }
+    // {"playing": bool, "scene", "step", "native", "phase"} of the editor's preview.
+    virtual Value scene_state() { return Value(); }
+    // A handle drag's step: the actors in `poses` moved where they are in the game, in place (no new
+    // actor); `moved` the ids that moved so. The default: none (the drag shows through preview_actors).
+    virtual bool pose_actors(const std::string& mod, const Value& poses, std::vector<std::string>& moved, std::string& why) {
+        (void)mod, (void)poses, (void)moved;
+        return why = "the game is not running", false;
+    }
 };
 inline constexpr int kTestSlots = 3;
 
@@ -205,6 +228,7 @@ private:
     struct Package {
         std::string mod, name, dir;
         Value manifest, saved;
+        Value started;  // the manifest the game started with (its scenes are the ones the game declared)
         Value layout, layout_saved;  // the editor's own sidecar (editor/quest-layout.json): graph node places
     };
     struct Step {
@@ -239,7 +263,9 @@ private:
     // quests, flags, search, copy and paste (commands_quest.cpp)
     Value dispatch_quest(const std::string& command, const Value& params, std::string& why, bool& ok, bool& handled);
     bool change_layout(Package& p, const std::string& label, const Value& layout, Value& result);
-    Value clipboard_;  // copy / paste: {"kind": "actors" | "quest_steps", "items": [...]}
+    Value clipboard_;  // copy / paste: {"kind": "actors" | "quest_steps" | "scenes" | "scene_steps", "items": [...]}
+    // scenes: steps, camera keys, timeline, preview (commands_scene.cpp)
+    Value dispatch_scene(const std::string& command, const Value& params, std::string& why, bool& ok, bool& handled);
 };
 
 // One problem of a package, with what it is about (for the editor's problem list: a click selects it).

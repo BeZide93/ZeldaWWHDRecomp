@@ -612,10 +612,19 @@ Value search_package(const std::string& mod, const Value& m, const std::string& 
     for (const auto& sc : m.get("scenes").array) {
         const std::string id = sc.get("id").string();
         std::string say;
-        for (const auto& st : sc.get("steps").array)
-            if (hit(st.get("text").string())) say = st.get("text").string();
+        int at = 0, n = 0;
+        for (const auto& st : sc.get("steps").array) {
+            ++n;
+            // a step's text (one line or several), its options' labels, its id
+            std::string t = st.get("id").string() + " " + lines(st.get("text"));
+            for (const auto& o : st.get("options").array) t += " " + o.get("text").string();
+            if (say.empty() && hit(t)) say = lines(st.get("text")).empty() ? st.get("id").string() : lines(st.get("text")), at = n;
+        }
         if (hit(id)) add("scene", id, "id", id);
-        else if (!say.empty()) add("scene", id, "text", say);
+        else if (!say.empty()) {
+            Value* v = add("scene", id, "text", say);
+            (*v)["step"] = at;
+        }
     }
     for (const auto& it : m.get("items").array) {
         const std::string id = it.get("id").string();
