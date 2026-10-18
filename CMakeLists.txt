@@ -160,6 +160,17 @@ add_custom_command(OUTPUT ${WWHD_NPC_CATALOGUE}
           -P ${CMAKE_SOURCE_DIR}/cmake/EmbedNpcRecipes.cmake
   DEPENDS ${WWHD_NPC_RECIPE_FILES} ${CMAKE_SOURCE_DIR}/cmake/EmbedNpcRecipes.cmake
   COMMENT "NPC catalogue recipes" VERBATIM)
+# ---- the game objects catalogue's recipes (story_game_objects_catalogue.h): one per group in
+# runtime/assets/game_objects, written as an include when cmake configures (and again when a recipe
+# changes), so every target that includes the catalogue header has it; references into the game only
+file(GLOB WWHD_GAME_OBJECT_RECIPE_FILES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/runtime/assets/game_objects/*.recipe.json)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${WWHD_GAME_OBJECT_RECIPE_FILES} ${CMAKE_SOURCE_DIR}/cmake/EmbedGameObjectRecipes.cmake)
+execute_process(COMMAND ${CMAKE_COMMAND} -DDIR=${CMAKE_SOURCE_DIR}/runtime/assets/game_objects -DOUT=${CMAKE_BINARY_DIR}/generated/game_object_recipes.inc
+                        -P ${CMAKE_SOURCE_DIR}/cmake/EmbedGameObjectRecipes.cmake RESULT_VARIABLE WWHD_GAME_OBJECT_RECIPES_RESULT)
+if(NOT WWHD_GAME_OBJECT_RECIPES_RESULT EQUAL 0)
+  message(FATAL_ERROR "game object recipes: ${WWHD_GAME_OBJECT_RECIPES_RESULT}")
+endif()
+include_directories(${CMAKE_BINARY_DIR}/generated)
 # Windows: VERSIONINFO + application manifest (wwhd_windows_resources); release builds strip the shipped
 # programs' debug information (WWHD_STRIP_RELEASE: -s for GNU-style linkers in Release/MinSizeRel)
 include(cmake/WindowsResources.cmake)

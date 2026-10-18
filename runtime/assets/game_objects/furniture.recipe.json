@@ -1,0 +1,24 @@
+{
+  "game_objects_format": 1,
+  "group": "furniture",
+  "about": "A recipe, not game data: neutral ids, our own words, and references into the game (the stage actor name, its process, the archive it loads, the fixed parameter word). The objects themselves load from the player's own game files.",
+  "objects": [
+    {
+      "id": "table",
+      "since": 1,
+      "category": "Furniture",
+      "label": "Wooden table",
+      "description": "a plain wooden table, or the small wooden stool that goes with it",
+      "native": {"name": "Table", "process": "Obj_Table", "source": "d_a_obj_table", "subtype": 255, "archive": "Table"},
+      "variants": [
+        {"id": "table", "label": "Table", "params": "0xFFFFFF00"},
+        {"id": "stool", "label": "Stool", "params": "0xFFFFFF01"},
+        {"id": "stool-open", "label": "Stool (Link walks through it)", "params": "0xFFFFFF02"}
+      ],
+      "transform": {"rotation": "yaw", "scale": [1, 1], "why": "its collision keeps the unscaled shape"},
+      "collision": true,
+      "memory": {"instance_bytes": 12288, "archive_bytes": 470000},
+      "notes": "the parameter's low byte picks the model (0 table, 1 stool, 2 stool without collision); nothing else is read"
+    }
+  ]
+}

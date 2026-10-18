@@ -1,0 +1,33 @@
+{
+  "game_objects_format": 1,
+  "group": "trees",
+  "about": "A recipe, not game data: neutral ids, our own words, and references into the game (the stage actor name, its process, the archive it loads, the fixed parameter word). The objects themselves load from the player's own game files; tools/story_mods/game_objects.py --game <dir> --list shows which ones the player's game has.",
+  "objects": [
+    {
+      "id": "palm",
+      "since": 1,
+      "category": "Trees and plants",
+      "label": "Palm tree",
+      "description": "a tall palm tree whose leaves sway in the wind; Link and the boat bump into its trunk",
+      "native": {"name": "Oyashi", "process": "Obj_Lpalm", "source": "d_a_obj_lpalm", "subtype": 255, "archive": "Oyashi"},
+      "variants": [{"id": "palm", "label": "Palm tree", "params": "0xFFFFFFFF"}],
+      "transform": {"rotation": "yaw", "scale": [1, 1], "why": "its collision keeps the unscaled trunk"},
+      "collision": true,
+      "memory": {"instance_bytes": 12288, "archive_bytes": 280000},
+      "notes": "no parameters are read; the wind sway is the game's own (dKyw wind)"
+    },
+    {
+      "id": "tree-large",
+      "since": 1,
+      "category": "Trees and plants",
+      "label": "Large tree",
+      "description": "a large leafy tree whose crown moves gently in the wind; its trunk is solid",
+      "native": {"name": "lwood", "process": "Lwood", "source": "d_a_lwood", "subtype": 255, "archive": "Lwood"},
+      "variants": [{"id": "tree", "label": "Large tree", "params": "0xFFFFFFFF"}],
+      "transform": {"rotation": "yaw", "scale": [0.5, 1.5], "why": "the collision follows the scale; the game culls it by an unscaled box, so it stays below 1.5"},
+      "collision": true,
+      "memory": {"instance_bytes": 12288, "archive_bytes": 275000},
+      "notes": "no parameters are read"
+    }
+  ]
+}
