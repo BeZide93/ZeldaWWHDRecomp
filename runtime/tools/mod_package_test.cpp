@@ -10,6 +10,8 @@
 #include <fstream>
 #include <iostream>
 #include <chrono>
+#include <iterator>
+#include <string>
 namespace {
 mods::packages::View view(const std::string& id) {for(auto v:mods::packages::list())if(v.id==id)return v;return {};}
 // Second process on the same storage: a confirmed native package loads after a restart without asking.
@@ -119,6 +121,43 @@ int main(int argc, char** argv) {
         assert(view(id).compatible);
         fs::remove_all(root);
         std::cout<<"Game IDs: wwhd and wwhd-usa accepted, others refused, old and new imports load\n";return 0;
+    }
+    if(argc==2&&std::string(argv[1])=="--new-package") {
+        // install_new (the world editor's new mod): a new package only, never one that is installed or whose
+        // folder exists; the new mod's manifest (an empty actor list, the notebook dependency) installs and enables
+        namespace fs=std::filesystem;
+        auto root=fs::temp_directory_path()/("wwhd-new-package-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        env("WWHD_NO_HOST_INPUT","1");env("WWHD_MOD_MANAGER_DIR",(root/"manager").string().c_str());
+        initialize();std::string error,id;
+        auto source=[&](const std::string& name,const std::string& text){auto dir=root/"sources"/name;fs::create_directories(dir);std::ofstream(dir/"manifest.json",std::ios::binary)<<text;return dir.string();};
+        auto settings=[&](const std::string& pkg,const std::string& label,const std::string& builtin="wall-climb"){return R"({"format_version":1,"id":")"+pkg+R"(","name":")"+label+R"(","version":"1.0.0","game_id":"wwhd","kind":"settings","settings":{")"+builtin+R"(":true}})";};
+        assert(install(source("notebook",settings("story-notebook","Notebook stand-in")),error)&&enable("story-notebook",true,error));
+        assert(install(source("other",settings("other","Other","quick-doors")),error));if(!enable("other",true,error)){std::cerr<<error<<"\n";return 1;}
+        auto slurp=[&](const fs::path& p){std::ifstream f(p,std::ios::binary);return std::string{std::istreambuf_iterator<char>(f),{}};};
+        const auto other_before=slurp(fs::path(directory())/"other"/"manifest.json");
+        // an installed ID: refused, the package stays as it was (install() would replace a disabled one)
+        assert(!install_new(source("other-again",settings("other","Replaced","quick-doors")),error)&&error.find("installed already")!=std::string::npos);
+        assert(enable("other",false,error));
+        assert(!install_new(source("other-again",settings("other","Replaced","quick-doors")),error)&&view("other").name=="Other");
+        assert(slurp(fs::path(directory())/"other"/"manifest.json")==other_before);
+        // a folder of that ID in the mods folder without a package: refused, left alone
+        fs::create_directories(fs::path(directory())/"stray");std::ofstream(fs::path(directory())/"stray"/"note.txt")<<"keep";
+        assert(!install_new(source("stray",settings("stray","Stray")),error)&&slurp(fs::path(directory())/"stray"/"note.txt")=="keep");
+        assert(enable("other",true,error));
+        auto enabled_before=mods::json::parse(slurp(root/"manager"/"profiles.json")).get("profiles").get("Default").get("enabled");
+        // the new mod: installed, enabled in the active profile, nothing else changed
+        const std::string fresh=R"({"format_version":1,"id":"my-mod","name":"My mod","version":"0.1.0","author":"Me","game_id":"wwhd","minimum_manager_version":"1.5.0","kind":"content","dependencies":[{"id":"story-notebook","minimum_version":"0.0.0"}],"actors":[]})";
+        if(!install_new(source("my-mod",fresh),error,&id)){std::cerr<<"new mod refused: "<<error<<"\n";return 1;}
+        assert(id=="my-mod"&&view("my-mod").compatible&&!view("my-mod").enabled);
+        assert(slurp(fs::path(directory())/"my-mod"/"manifest.json")==fresh);
+        assert(enable("my-mod",true,error)&&view("my-mod").enabled&&view("other").enabled&&view("story-notebook").enabled);
+        auto saved=mods::json::parse(slurp(root/"manager"/"profiles.json"));
+        auto enabled_after=saved.get("profiles").get("Default").get("enabled");
+        assert(enabled_after.get("my-mod").boolean);enabled_after.object.erase("my-mod");assert(enabled_after==enabled_before);
+        assert(slurp(fs::path(directory())/"other"/"manifest.json")==other_before);
+        assert(!install_new(source("my-mod",fresh),error));
+        fs::remove_all(root);
+        std::cout<<"New packages: installed IDs and existing folders refused, the editor's new mod installs and enables\n";return 0;
     }
     if(argc==2&&std::string(argv[1])=="--game-source") {
         namespace fs=std::filesystem;
