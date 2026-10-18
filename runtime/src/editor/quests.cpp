@@ -32,6 +32,13 @@ Value* by_id(Value& list, const std::string& id) {
 }
 bool whole(const Value& v) { return v.type == Value::Number && std::isfinite(v.number) && std::floor(v.number) == v.number; }
 unsigned step_n(const Value& s) { return whole(s.get("n")) && s.get("n").number >= 1 && s.get("n").number <= 254 ? unsigned(s.get("n").number) : 0; }
+// An actor's dialogues: the actor itself (its when / then) and each of its talks.
+template <class F>
+void dialogues(Value& a, F f) {
+    f(a);
+    if (a.get("talks").type == Value::Array)
+        for (auto& t : a["talks"].array) f(t);
+}
 std::string node_of(unsigned n) { return n ? "step:" + std::to_string(n) : std::string("start"); }
 Value badge(const std::string& kind, const std::string& text) {
     Value b;
@@ -132,44 +139,60 @@ std::vector<Edge> edges_of(const Value& m, const Value& q) {
         }
         out.push_back(std::move(e));
     }
-    // actors: their condition on this quest's step, their action that sets a step
+    // actors: each dialogue (the actor's own, or each of its talks) whose actions set a step of this
+    // quest (quest_step) or finish it (quest_done); its conditions say from which step
     for (const auto& a : m.get("actors").array) {
-        const Value& when = a.get("when");
-        for (const auto& t : a.get("then").array) {
-            if (t.get("action").string() != "quest_step" || t.get("id").string() != quest) continue;
-            Edge e;
-            const bool gated = when.get("quest").string() == quest && whole(when.get("step"));
-            e.from = gated ? node_of(unsigned(when.get("step").number)) : std::string("start");
-            e.to = node_of(whole(t.get("step")) ? unsigned(t.get("step").number) : 0);
-            e.via_kind = "actor";
-            e.via = a.get("id").string();
-            e.actor = e.via;
-            e.label = actor_verb(a) + e.via + (gated ? "" : " (any time)");
-            e.editable = true;
-            if (when.get("quest").type == Value::String && !gated) {
-                Value c;
-                c["kind"] = "quest";
-                c["id"] = when.get("quest");
-                c["text"] = "quest " + when.get("quest").text + " at step " + std::to_string(int(when.get("step").number));
-                e.conditions.array.push_back(c);
+        std::vector<std::pair<const Value*, int>> dialogues = {{&a, 0}};  // 0: the actor's own, n: talk n
+        for (size_t k = 0; k < a.get("talks").array.size(); k++) dialogues.push_back({&a.get("talks").array[k], int(k + 1)});
+        for (const auto& [d, talk] : dialogues) {
+            // the conditions: the actor's own when, and the talk's besides
+            std::vector<const Value*> whens = {&a.get("when")};
+            if (talk) whens.push_back(&d->get("when"));
+            unsigned at = 0;  // the step of this quest it needs
+            for (const Value* w : whens) {
+                if (w->get("quest").string() == quest && whole(w->get("step"))) at = unsigned(w->get("step").number);
+                for (const auto& qs : w->get("quests").array)
+                    if (qs.get("quest").string() == quest && whole(qs.get("step"))) at = unsigned(qs.get("step").number);
             }
-            if (when.get("item").type == Value::String) {
-                Value c;
-                c["kind"] = "item";
-                c["id"] = when.get("item");
-                c["text"] = "carries " + item_id(when.get("item").text);
-                e.conditions.array.push_back(c);
+            for (const auto& t : d->get("then").array) {
+                const std::string action = t.get("action").string();
+                if ((action != "quest_step" && action != "quest_done") || t.get("id").string() != quest) continue;
+                Edge e;
+                e.from = node_of(at);
+                e.to = action == "quest_done" ? std::string("end") : node_of(whole(t.get("step")) ? unsigned(t.get("step").number) : 0);
+                e.via_kind = "actor";
+                e.via = a.get("id").string();
+                e.actor = e.via;
+                e.label = actor_verb(a) + e.via + (talk ? " (talk " + std::to_string(talk) + ")" : std::string()) + (at ? "" : " (any time)");
+                e.editable = !talk && action == "quest_step";  // connect / disconnect change the actor's own dialogue
+                for (const Value* w : whens) {
+                    auto cond = [&](const std::string& kind, const Value& id, const std::string& text) {
+                        Value c;
+                        c["kind"] = kind;
+                        c["id"] = id;
+                        c["text"] = text;
+                        e.conditions.array.push_back(c);
+                    };
+                    if (w->get("quest").type == Value::String && w->get("quest").text != quest)
+                        cond("quest", w->get("quest"), "quest " + w->get("quest").text + " at step " + std::to_string(int(w->get("step").number)));
+                    for (const auto& qs : w->get("quests").array)
+                        if (qs.get("quest").string() != quest)
+                            cond("quest", qs.get("quest"), "quest " + qs.get("quest").string() + " at step " + std::to_string(int(qs.get("step").number)));
+                    if (w->get("item").type == Value::String) cond("item", w->get("item"), "carries " + item_id(w->get("item").text));
+                    if (w->get("time").type == Value::String) cond("time", w->get("time"), "by " + std::string(w->get("time").text == "night" ? "night" : "day"));
+                    for (const char* k : {"flag", "not_flag"}) {
+                        const Value& f = w->get(k);
+                        std::vector<std::string> ids;
+                        if (f.type == Value::String) ids.push_back(f.text);
+                        for (const auto& x : f.array) ids.push_back(x.string());
+                        for (const auto& id : ids) cond("flag", Value(id), std::string(k[0] == 'n' ? "flag " + id + " not set" : "flag " + id + " set"));
+                    }
+                }
+                if (a.get("flag").type == Value::String) e.flags.push_back({a.get("flag").text, true});
+                actions_of(d->get("then"), quest, e);
+                if (action == "quest_done") e.rewards.array.push_back(badge("done", "finishes the quest"));
+                out.push_back(std::move(e));
             }
-            if (when.get("time").type == Value::String) {
-                Value c;
-                c["kind"] = "time";
-                c["id"] = when.get("time");
-                c["text"] = "by " + std::string(when.get("time").text == "night" ? "night" : "day");
-                e.conditions.array.push_back(c);
-            }
-            if (a.get("flag").type == Value::String) e.flags.push_back({a.get("flag").text, true});
-            actions_of(a.get("then"), quest, e);
-            out.push_back(std::move(e));
         }
     }
     // items whose use sets a step: any time Link has one
@@ -198,18 +221,23 @@ std::vector<Edge> edges_of(const Value& m, const Value& q) {
             from = node_of(unsigned(trig.get("step").number));
         else  // an actor gated at a step of this quest that plays it
             for (const auto& a : m.get("actors").array) {
-                const Value& when = a.get("when");
-                if (when.get("quest").string() != quest || !whole(when.get("step"))) continue;
-                for (const auto& t : a.get("then").array)
-                    if (t.get("action").string() == "scene" && t.get("id").string() == sc.get("id").string())
-                        from = node_of(unsigned(when.get("step").number));
+                std::vector<const Value*> ds = {&a};
+                for (const auto& t : a.get("talks").array) ds.push_back(&t);
+                for (const Value* d : ds) {
+                    const Value& when = d->get("when").get("quest").type == Value::String ? d->get("when") : a.get("when");
+                    if (when.get("quest").string() != quest || !whole(when.get("step"))) continue;
+                    for (const auto& t : d->get("then").array)
+                        if (t.get("action").string() == "scene" && t.get("id").string() == sc.get("id").string())
+                            from = node_of(unsigned(when.get("step").number));
+                }
             }
         for (const auto& st : sc.get("steps").array)
             for (const auto& t : st.get("then").array) {
-                if (t.get("action").string() != "quest_step" || t.get("id").string() != quest) continue;
+                const std::string action = t.get("action").string();
+                if ((action != "quest_step" && action != "quest_done") || t.get("id").string() != quest) continue;
                 Edge e;
                 e.from = from;
-                e.to = node_of(whole(t.get("step")) ? unsigned(t.get("step").number) : 0);
+                e.to = action == "quest_done" ? std::string("end") : node_of(whole(t.get("step")) ? unsigned(t.get("step").number) : 0);
                 e.via_kind = "scene";
                 e.via = sc.get("id").string();
                 e.label = "scene " + e.via + " ends";
@@ -507,6 +535,8 @@ std::vector<Problem> quest_problems(const std::string& mod, const Value& m) {
                     for (const auto& [id, delta] : f.items) given = given || (id == item && delta > 0);
                 for (const auto& a : m.get("actors").array) {
                     for (const auto& t : a.get("then").array) given = given || (t.get("action").string() == "give" && item_id(t.get("id").string()) == item);
+                    for (const auto& tk : a.get("talks").array)
+                        for (const auto& t : tk.get("then").array) given = given || (t.get("action").string() == "give" && item_id(t.get("id").string()) == item);
                     for (const auto& d : a.get("drops").array) given = given || item_id(d.get("item").string()) == item;
                 }
                 for (const auto& l : m.get("letters").array)
@@ -553,6 +583,9 @@ std::vector<ModFlag> mod_flags(const std::string& mod, const Value& m) {
         add(a.get("defeated_flag").string(), "enemy", 19, "enemy-defeated:", actor, false);
         for (const auto& t : a.get("then").array)
             if (t.get("action").string() == "flag") add(t.get("id").string(), "action", kRecordActorFlag, "actor-flag:", actor, true);
+        for (const auto& tk : a.get("talks").array)
+            for (const auto& t : tk.get("then").array)
+                if (t.get("action").string() == "flag") add(t.get("id").string(), "action", kRecordActorFlag, "actor-flag:", actor, true);
     }
     for (const auto& s : m.get("scenes").array)
         for (const auto& st : s.get("steps").array)
@@ -597,6 +630,12 @@ Value search_package(const std::string& mod, const Value& m, const std::string& 
         else if (hit(a.get("actor").string())) add("actor", id, "actor", a.get("actor").string());
         else if (hit(a.get("model").string())) add("actor", id, "model", a.get("model").string());
         else if (hit(lines(a.get("lines")))) add("actor", id, "lines", lines(a.get("lines")));
+        else
+            for (const auto& tk : a.get("talks").array)
+                if (hit(lines(tk.get("lines")))) {
+                    add("actor", id, "talks", lines(tk.get("lines")));
+                    break;
+                }
     }
     for (const auto& q : m.get("quests").array) {
         const std::string id = q.get("id").string();
@@ -668,12 +707,16 @@ bool renumber_steps(Value& m, const std::string& quest, const std::vector<std::p
     for (auto& s : (*q)["steps"].array)
         if (unsigned n = step_n(s)) s["n"] = int(mapped(n));
     if (m.get("actors").type == Value::Array)
-    for (auto& a : m["actors"].array) {
-        if (a.get("when").get("quest").string() == quest && whole(a.get("when").get("step"))) a["when"]["step"] = int(mapped(unsigned(a.get("when").get("step").number)));
-        if (a.get("then").type == Value::Array)
-            for (auto& t : a["then"].array)
-                if (t.get("action").string() == "quest_step" && t.get("id").string() == quest && whole(t.get("step"))) t["step"] = int(mapped(unsigned(t.get("step").number)));
-    }
+    for (auto& a : m["actors"].array)
+        dialogues(a, [&](Value& d) {
+            if (d.get("when").get("quest").string() == quest && whole(d.get("when").get("step"))) d["when"]["step"] = int(mapped(unsigned(d.get("when").get("step").number)));
+            if (d.get("when").get("quests").type == Value::Array)
+                for (auto& qs : d["when"]["quests"].array)
+                    if (qs.get("quest").string() == quest && whole(qs.get("step"))) qs["step"] = int(mapped(unsigned(qs.get("step").number)));
+            if (d.get("then").type == Value::Array)
+                for (auto& t : d["then"].array)
+                    if (t.get("action").string() == "quest_step" && t.get("id").string() == quest && whole(t.get("step"))) t["step"] = int(mapped(unsigned(t.get("step").number)));
+        });
     if (m.get("items").type == Value::Array)
         for (auto& it : m["items"].array)
             if (it.get("use").get("action").string() == "quest_step" && it.get("use").get("quest").string() == quest && whole(it.get("use").get("step")))
@@ -705,21 +748,30 @@ bool remove_step(Value& m, const std::string& quest, unsigned step, std::vector<
     if (m.get("actors").type == Value::Array)
     for (auto& a : m["actors"].array) {
         bool touched = false;
-        if (a.get("when").get("quest").string() == quest && a.get("when").get("step").number == step) {
-            a["when"].object.erase("quest");
-            a["when"].object.erase("step");
-            if (a.get("when").object.empty()) a.object.erase("when");
-            touched = true;
-        }
-        if (a.get("then").type == Value::Array) {
-            auto& then = a["then"].array;
-            const size_t before = then.size();
-            then.erase(std::remove_if(then.begin(), then.end(),
-                                      [&](const Value& t) { return t.get("action").string() == "quest_step" && t.get("id").string() == quest && t.get("step").number == step; }),
-                       then.end());
-            if (then.size() != before) touched = true;
-            if (then.empty()) a.object.erase("then");
-        }
+        dialogues(a, [&](Value& d) {
+            if (d.get("when").get("quest").string() == quest && d.get("when").get("step").number == step) {
+                d["when"].object.erase("quest");
+                d["when"].object.erase("step");
+                touched = true;
+            }
+            if (d.get("when").get("quests").type == Value::Array) {
+                auto& qs = d["when"]["quests"].array;
+                const size_t before = qs.size();
+                qs.erase(std::remove_if(qs.begin(), qs.end(), [&](const Value& x) { return x.get("quest").string() == quest && x.get("step").number == step; }), qs.end());
+                if (qs.size() != before) touched = true;
+                if (qs.empty()) d["when"].object.erase("quests");
+            }
+            if (d.get("when").type == Value::Object && d.get("when").object.empty()) d.object.erase("when");
+            if (d.get("then").type == Value::Array) {
+                auto& then = d["then"].array;
+                const size_t before = then.size();
+                then.erase(std::remove_if(then.begin(), then.end(),
+                                          [&](const Value& t) { return t.get("action").string() == "quest_step" && t.get("id").string() == quest && t.get("step").number == step; }),
+                           then.end());
+                if (then.size() != before) touched = true;
+                if (then.empty()) d.object.erase("then");
+            }
+        });
         if (touched) changed.push_back(a.get("id").string());
     }
     return true;

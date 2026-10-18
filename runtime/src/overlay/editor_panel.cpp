@@ -601,6 +601,35 @@ void actor_inspector(const Value& m) {
     }
     edit_property(p, *a, "Flag (set when talked to or opened)", "flag");
     then_form(m, *a, p);
+    // when it appears and its ordered talks, as the package writes them
+    if (ImGui::CollapsingHeader("Conditions and talks (JSON)")) {
+        for (const char* property : {"when", "talks"}) {
+            static std::map<std::string, std::string> texts;
+            const std::string key = a->get("id").string() + ":" + property + ":" + mods::json::dump(a->get(property));
+            auto& t = texts[std::string(property)];
+            static std::map<std::string, std::string> shown_for;
+            if (shown_for[property] != key) shown_for[property] = key, t = a->get(property).type == Value::Null ? std::string() : editor::pretty(a->get(property));
+            static std::vector<char> buf;
+            buf.assign(t.begin(), t.end());
+            buf.resize(t.size() + 2048, 0);
+            ImGui::TextUnformatted(property);
+            if (ImGui::InputTextMultiline((std::string("##json_") + property).c_str(), buf.data(), buf.size(), ImVec2(-FLT_MIN, ImGui::GetTextLineHeight() * 5)))
+                t = buf.data();
+            if (ImGui::SmallButton((std::string("Apply ") + property).c_str())) {
+                try {
+                    Value q = p;
+                    q["property"] = property;
+                    q["value"] = t.find_first_not_of(" \n\t") == std::string::npos ? Value() : mods::json::parse(t);
+                    command("set_actor", q);
+                } catch (const std::exception& e) {
+                    U.message_ok = false;
+                    U.message = std::string(property) + ": " + e.what();
+                }
+            }
+        }
+        muted("when: quest and step, quests (all must hold), item, time, flag, not_flag. talks: up to eight "
+              "{when, lines, then}; the first that matches is said (one without when last).");
+    }
 }
 
 void models_area(const Value& m) {

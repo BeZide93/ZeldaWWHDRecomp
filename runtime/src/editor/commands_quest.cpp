@@ -170,7 +170,8 @@ Value Session::dispatch_quest(const std::string& command, const Value& p, std::s
             for (const auto& sc : m.get("scenes").array) {
                 bool names = sc.get("trigger").get("quest").string() == quest;
                 for (const auto& st : sc.get("steps").array) {
-                    for (const auto& t : st.get("then").array) names = names || (t.get("action").string() == "quest_step" && t.get("id").string() == quest);
+                    for (const auto& t : st.get("then").array)
+                        names = names || ((t.get("action").string() == "quest_step" || t.get("action").string() == "quest_done") && t.get("id").string() == quest);
                     names = names || st.get("quest_place").string() == quest;
                 }
                 if (names) return w = "scene " + sc.get("id").string() + " names quest " + quest + ": change the scene first", false;
@@ -181,19 +182,34 @@ Value Session::dispatch_quest(const std::string& command, const Value& p, std::s
                 m.object.erase("quests");
                 m.object.erase("quests_format");
             }
+            // every dialogue (the actor's own and its talks): conditions on the quest, actions on it
+            auto clean = [&](Value& d) {
+                if (d.get("when").get("quest").string() == quest) {
+                    d["when"].object.erase("quest");
+                    d["when"].object.erase("step");
+                }
+                if (d.get("when").get("quests").type == Value::Array) {
+                    auto& qs = d["when"]["quests"].array;
+                    qs.erase(std::remove_if(qs.begin(), qs.end(), [&](const Value& x) { return x.get("quest").string() == quest; }), qs.end());
+                    if (qs.empty()) d["when"].object.erase("quests");
+                }
+                if (d.get("when").type == Value::Object && d.get("when").object.empty()) d.object.erase("when");
+                if (d.get("then").type != Value::Array) return;
+                auto& then = d["then"].array;
+                then.erase(std::remove_if(then.begin(), then.end(),
+                                          [&](const Value& t) {
+                                              const std::string action = t.get("action").string();
+                                              return (action == "quest_step" || action == "quest_done") && t.get("id").string() == quest;
+                                          }),
+                           then.end());
+                if (then.empty()) d.object.erase("then");
+            };
             if (m.get("actors").type == Value::Array)
                 for (auto& a : m["actors"].array) {
-                if (a.get("when").get("quest").string() == quest) {
-                    a["when"].object.erase("quest");
-                    a["when"].object.erase("step");
-                    if (a.get("when").object.empty()) a.object.erase("when");
+                    clean(a);
+                    if (a.get("talks").type == Value::Array)
+                        for (auto& t : a["talks"].array) clean(t);
                 }
-                if (a.get("then").type != Value::Array) continue;
-                auto& then = a["then"].array;
-                then.erase(std::remove_if(then.begin(), then.end(), [&](const Value& t) { return t.get("action").string() == "quest_step" && t.get("id").string() == quest; }),
-                           then.end());
-                if (then.empty()) a.object.erase("then");
-            }
             if (m.get("actors").type == Value::Array && m.get("actors").array.empty()) m.object.erase("actors");
             return true;
         });

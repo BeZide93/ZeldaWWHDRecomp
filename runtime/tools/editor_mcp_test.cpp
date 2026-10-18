@@ -620,6 +620,46 @@ void quest_tools() {
     CHECK(is_error(v) && text_of(v).find("test mode") != std::string::npos && be.asked == 4);
 }
 
+// A small quest of the later forms built through tools/call: a quest with an interior place, a
+// resident with ordered talks (a flag condition, quest_done), a sign gated on two quests.
+void quest_format_tools() {
+    FakeBackend be;
+    be.session.add_package("editor-test", "Editor test", "", json(kManifest));
+    Handler h(be, kToken, 47615);
+    // the tool descriptions teach the forms
+    bool reply = false;
+    Value r = h.message(json(R"({"jsonrpc":"2.0","id":3,"method":"tools/list"})"), reply);
+    std::string all;
+    const Value tools = r.get("result").get("tools");
+    for (const auto& t : tools.array) all += t.get("description").string() + "\n";
+    for (const char* form : {"quest_done", "not_flag", "quests: [{quest, step}]", "talks", "sea: {x, z}"}) CHECK(all.find(form) != std::string::npos);
+    CHECK(!is_error(call(h, "add_quest", json(R"({"id":"tale","title":"A tale","text":"Talk to the keeper."})"))));
+    CHECK(!is_error(call(h, "add_quest_step", json(R"({"quest":"tale","text":"Look inside."})"))));
+    CHECK(!is_error(call(h, "add_quest", json(R"({"id":"bell","title":"The bell"})"))));
+    {
+        Value e = call(h, "edit_quest_step", json(R"({"quest":"tale","step":2,"fields":{"place":{"stage":"Pnezumi","room":0,"sea":{"x":0,"z":-200000},"point":0},"available":{"flag":["sign-a-read","sign-b-read"],"text":"Read both signs first."}}})"));
+        if (is_error(e)) std::fprintf(stderr, "  %s\n", text_of(e).c_str());
+        CHECK(!is_error(e));
+    }
+    CHECK(!is_error(call(h, "add_actor", json(R"({"type":"resident","id":"keeper","at":"position","position":{"x":100,"y":1040,"z":-201500},"stage":"sea","room":11,"snap":false,"options":{"resident":"uo2"}})"))));
+    CHECK(!is_error(call(h, "set_actor", json(R"({"id":"keeper","property":"lines","value":null})"))));
+    Value v = call(h, "set_actor", json(R"({"id":"keeper","property":"talks","value":[
+        {"when":{"quest":"tale","step":1},"lines":["Look inside."],"then":[{"action":"quest_step","id":"tale","step":2}]},
+        {"when":{"quest":"tale","step":2,"flag":"sign-a-read"},"lines":["Thank you."],"then":[{"action":"quest_done","id":"tale"}]},
+        {"lines":["Hello."]}]})"));
+    CHECK(!is_error(v));
+    CHECK(!is_error(call(h, "set_actor", json(R"({"id":"sign-b","property":"when","value":{"quests":[{"quest":"tale","step":2},{"quest":"bell","step":1}],"not_flag":"sign-a-read"}})"))));
+    CHECK(!is_error(call(h, "set_then", json(R"({"id":"sign-b","actions":[{"action":"quest_done","id":"bell"}]})"))));
+    // a bad value comes back as a tool error with the validator's reason, nothing changes
+    v = call(h, "set_then", json(R"({"id":"sign-b","actions":[{"action":"quest_done","id":"nope"}]})"));
+    CHECK(is_error(v) && !text_of(v).empty());
+    v = call(h, "quest_graph", json(R"({"quest":"tale"})"));
+    CHECK(!is_error(v) && text_of(v).find("\"to\":\"end\"") != std::string::npos);
+    v = call(h, "check_package", Value());
+    CHECK(!is_error(v) && text_of(v).find("\"valid\":true") != std::string::npos);
+    CHECK(be.asked == 0);
+}
+
 int main() {
     http_parsing();
     checks();
@@ -627,6 +667,7 @@ int main() {
     http_checks();
     safety();
     quest_tools();
+    quest_format_tools();
     listener();
     if (g_failures) {
         std::fprintf(stderr, "%d check(s) failed\n", g_failures);

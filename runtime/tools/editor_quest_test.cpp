@@ -517,6 +517,115 @@ void search_copy_paste(const fs::path& tmp) {
 }
 }  // namespace
 
+// The quest format's later forms through the command layer: talks, flag and multi-quest conditions,
+// quest_done, interior places and flag availability; each with undo, and refused bad values.
+const char* kFormat = R"({
+  "format_version": 1, "id": "format-test", "name": "Format test", "version": "1.0.0", "kind": "content",
+  "quests_format": 1,
+  "quests": [
+    {"id": "notice", "title": "The harbor notice", "steps": [
+      {"n": 1, "text": "Speak to the keeper.", "place": {"x": 100, "z": -201500}},
+      {"n": 2, "text": "Check the building."}]},
+    {"id": "bell", "title": "The bell", "steps": [{"n": 1, "text": "Ring it."}]}
+  ],
+  "actors": [
+    {"id": "notice-sign", "actor": "sign", "flag": "read", "stage": "sea", "room": 11,
+     "position": {"x": -800, "y": 1040, "z": -201500}, "lines": ["Speak to the keeper."],
+     "then": [{"action": "quest_step", "id": "notice", "step": 1}]},
+    {"id": "keeper", "actor": "resident", "parameters": {"resident": "uo2"}, "stage": "sea", "room": 11,
+     "position": {"x": 100, "y": 1040, "z": -201500}, "lines": ["Hello."]},
+    {"id": "post", "actor": "sign", "flag": "post-read", "stage": "sea", "room": 11,
+     "position": {"x": 300, "y": 1040, "z": -201500}, "lines": ["A post."]}
+  ]
+})";
+void quest_format() {
+    FakeHost host;
+    editor::Session s(&host);
+    s.add_package("format-test", "Format test", "", json(kFormat));
+    auto m = [&] { return *s.manifest("format-test"); };
+    const Value start = m();
+    // talks: refused next to lines (the validator's rule), kept once lines go; undo brings lines back
+    const char* talks = R"({"id": "keeper", "property": "talks", "value": [
+        {"when": {"quest": "notice", "step": 1}, "lines": ["The building is marked."], "then": [{"action": "quest_step", "id": "notice", "step": 2}]},
+        {"when": {"quest": "notice", "step": 2, "flag": "post-read"}, "lines": ["Thank you."],
+         "then": [{"action": "flag", "id": "thanked"}, {"action": "quest_done", "id": "notice"}]},
+        {"lines": ["All done."]}]})";
+    CHECK(!ok(s.run("set_actor", params(talks))));
+    CHECK(ok(s.run("set_actor", params(R"({"id": "keeper", "property": "lines", "value": null})"))));
+    Value r = s.run("set_actor", params(talks));
+    CHECK(ok(r));
+    CHECK(actor(m(), "keeper")->get("talks").array.size() == 3);
+    // nine talks, a talk with an unknown action: refused
+    {
+        Value nine = params(talks);
+        while (nine["value"].array.size() < 9) nine["value"].array.insert(nine["value"].array.begin(), nine["value"].array[1]);
+        CHECK(!ok(s.run("set_actor", nine)));
+        Value bad = params(talks);
+        bad["value"].array[0]["then"].array[0]["action"] = "dance";
+        CHECK(!ok(s.run("set_actor", bad)));
+    }
+    // the graph: talk 1 moves 1 -> 2, talk 2 finishes the quest from step 2 (with its flag condition)
+    Value g = s.run("quest_graph", params(R"({"quest": "notice"})")).get("result");
+    CHECK(edges(g, "step:1", "step:2", "keeper") == 1);
+    CHECK(edges(g, "step:2", "end", "keeper") == 1);
+    for (const auto& e : g.get("edges").array)
+        if (e.get("to").string() == "end" && e.get("via").get("id").string() == "keeper") {
+            bool flag = false, done = false;
+            for (const auto& c : e.get("conditions").array) flag = flag || (c.get("kind").string() == "flag" && c.get("id").string() == "post-read");
+            for (const auto& w : e.get("rewards").array) done = done || w.get("kind").string() == "done";
+            CHECK(flag && done && !e.get("editable").boolean);
+        }
+    CHECK(node(g, "step:2") && node(g, "step:2")->get("final").boolean);
+    // a talk's flag action is one of the mod's flags
+    bool thanked = false;
+    const Value flags = s.run("list_flags").get("result").get("flags");
+    for (const auto& f : flags.array) thanked = thanked || f.get("id").string() == "thanked";
+    CHECK(thanked);
+    // flag conditions: a string, a list, not_flag; a flag nothing sets is refused
+    CHECK(ok(s.run("set_actor", params(R"({"id": "post", "property": "when", "value": {"flag": "read"}})"))));
+    CHECK(ok(s.run("set_actor", params(R"({"id": "post", "property": "when", "value": {"flag": "thanked", "not_flag": "read"}})"))));
+    CHECK(actor(m(), "post")->get("when").get("not_flag").string() == "read");
+    // an actor's when takes one flag id each (a list is the quest step's available form)
+    CHECK(!ok(s.run("set_actor", params(R"({"id": "post", "property": "when", "value": {"flag": ["read", "thanked"]}})"))));
+    CHECK(!ok(s.run("set_actor", params(R"({"id": "post", "property": "when", "value": {"flag": "nobody-sets-this"}})"))));
+    CHECK(ok(s.run("undo")) && actor(m(), "post")->get("when").get("flag").string() == "read");
+    // several quests at once
+    CHECK(ok(s.run("set_actor", params(R"({"id": "post", "property": "when", "value": {"quests": [{"quest": "notice", "step": 2}, {"quest": "bell", "step": 1}]}})"))));
+    CHECK(!ok(s.run("set_actor", params(R"({"id": "post", "property": "when", "value": {"quests": [{"quest": "nope", "step": 1}]}})"))));
+    // quest_done in an actor's actions; an unknown quest is refused
+    CHECK(ok(s.run("set_then", params(R"({"id": "post", "actions": [{"action": "quest_done", "id": "bell"}]})"))));
+    CHECK(!ok(s.run("set_then", params(R"({"id": "post", "actions": [{"action": "quest_done", "id": "nope"}]})"))));
+    g = s.run("quest_graph", params(R"({"quest": "bell"})")).get("result");
+    CHECK(edges(g, "step:1", "end", "post") == 1);
+    // interior places: a spawn point, or coordinates; both, or no sea hint, are refused
+    CHECK(ok(s.run("edit_quest_step", params(R"({"quest": "notice", "step": 2, "fields": {"place": {"stage": "Pnezumi", "room": 0, "sea": {"x": 0, "z": -200000}, "point": 0}}})"))));
+    CHECK(step_of(m(), "notice", 2)->get("place").get("stage").string() == "Pnezumi");
+    CHECK(ok(s.run("set_quest_step", params(R"({"quest": "notice", "step": 2, "property": "place", "value": {"stage": "Pnezumi", "room": 0, "sea": {"x": 0, "z": -200000}, "x": 10, "y": 0, "z": 20}})"))));
+    CHECK(!ok(s.run("edit_quest_step", params(R"({"quest": "notice", "step": 2, "fields": {"place": {"stage": "Pnezumi", "room": 0, "sea": {"x": 0, "z": -200000}, "point": 0, "x": 1, "y": 2, "z": 3}}})"))));
+    CHECK(!ok(s.run("edit_quest_step", params(R"({"quest": "notice", "step": 2, "fields": {"place": {"stage": "Pnezumi", "room": 0, "point": 0}}})"))));
+    bool warp = false;
+    const Value places = s.run("list_locations", params(R"({"group": "Quest"})")).get("result");
+    for (const auto& l : places.array) warp = warp || (l.get("stage").string() == "Pnezumi" && l.get("room").number == 0);
+    CHECK(warp);
+    // availability by flags
+    CHECK(ok(s.run("edit_quest_step", params(R"({"quest": "notice", "step": 2, "fields": {"available": {"flag": ["read", "post-read"], "not_flag": "thanked", "text": "Read both first."}}})"))));
+    CHECK(!ok(s.run("edit_quest_step", params(R"({"quest": "notice", "step": 2, "fields": {"available": {"flag": "nobody-sets-this"}}})"))));
+    // a new step 2: the talks' conditions and actions follow (2 -> 3), undo puts them back
+    CHECK(ok(s.run("add_quest_step", params(R"({"quest": "notice", "after": 1, "text": "Look around."})"))));
+    const Value after = m();
+    const Value tk = actor(after, "keeper")->get("talks");
+    CHECK(tk.array[1].get("when").get("step").number == 3 && tk.array[0].get("then").array[0].get("step").number == 3);
+    CHECK(actor(m(), "post")->get("when").get("quests").array[0].get("step").number == 3);
+    CHECK(ok(s.run("undo")) && actor(m(), "keeper")->get("talks").array[1].get("when").get("step").number == 2);
+    // removing a quest takes its conditions and actions out of the talks and quests lists too
+    CHECK(ok(s.run("remove_quest", params(R"({"quest": "bell", "confirm": true})"))));
+    CHECK(actor(m(), "post")->get("when").get("quests").array.size() == 1 && actor(m(), "post")->get("then").type == Value::Null);
+    CHECK(ok(s.run("undo")) && actor(m(), "post")->get("then").array.size() == 1);
+    // everything undone: the package as it was
+    while (s.undo_depth()) CHECK(ok(s.run("undo")));
+    CHECK(m() == start);
+}
+
 int main() {
     graph();
     start_at();
@@ -525,6 +634,7 @@ int main() {
     transitions();
     checks();
     search_copy_paste(fs::temp_directory_path() / "wwhd-editor-quest-test");
+    quest_format();
     if (g_failures) {
         std::fprintf(stderr, "editor_quest_test: %d failure(s)\n", g_failures);
         return 1;

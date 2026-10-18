@@ -28,7 +28,7 @@ const std::vector<CommandInfo> kCommands = {
     {"open_mod", "Opens a mod: later commands without \"mod\" act on it.", {{"mod", "string", "the mod's id", true}}},
     {"list_actors", "The open mod's placed actors (game actors and mod models).", {{"mod", "string", "another mod than the open one"}}},
     {"get_actor", "One placed actor as the manifest declares it.", {{"id", "string", "the actor's id", true}, {"mod", "string", ""}}},
-    {"set_actor", "Sets one property of a placed actor (null removes it): position, rotation, scale, model, lines, collision, attention, animation, flag, stage, room, when, then, look_at, path, parameters, defeated_flag, broken_flag, drops, native_drops, combat, carry, switch_flag, switch, texture.",
+    {"set_actor", "Sets one property of a placed actor (null removes it): position, rotation, scale, model, lines, collision, attention, animation, flag, stage, room, when, then, talks, look_at, path, parameters, defeated_flag, broken_flag, drops, native_drops, combat, carry, switch_flag, switch, texture. when: {quest, step, quests: [{quest, step}] (all must hold), item, time, flag, not_flag (a flag id)}. talks: up to 8 [{when?, lines, then?}], the first that matches is said (one without when last; not with lines or then).",
      {{"id", "string", "the actor's id", true}, {"property", "string", "the manifest field", true}, {"value", "any", "the new value; null removes the field", true}, {"mod", "string", ""}},
      true},
     {"move_actor", "Moves a placed actor.", {{"id", "string", "", true}, {"position", "point", "{x, y, z} in world units", true}, {"mod", "string", ""}}, true},
@@ -40,7 +40,7 @@ const std::vector<CommandInfo> kCommands = {
     {"get_scene", "One scene as the manifest declares it.", {{"id", "string", "the scene's id", true}, {"mod", "string", ""}}},
     {"set_scene", "Sets one property of a scene (trigger, steps or native; null removes trigger or native).", {{"id", "string", "", true}, {"property", "string", "trigger, steps or native", true}, {"value", "any", "", true}, {"mod", "string", ""}}, true},
     {"list_quests", "The open mod's quests and their steps.", {{"mod", "string", ""}}},
-    {"set_quest_step", "Sets one property of a quest step (text, where, place, npc, available, sail_line, find...).",
+    {"set_quest_step", "Sets one property of a quest step (text, where, place, npc, available, sail_line, find...). place: {x, z} at sea, or inside {stage, room, sea: {x, z}, point} (or x, y, z instead of point). available may use flag / not_flag (a flag id or a list) and needs a text.",
      {{"quest", "string", "the quest's id", true}, {"step", "integer", "the step's n", true}, {"property", "string", "", true}, {"value", "any", "null removes the field", true}, {"mod", "string", ""}},
      true},
     {"undo", "Takes back the last change.", {}},
@@ -84,8 +84,8 @@ const std::vector<CommandInfo> kCommands = {
     {"pick", "The first ground a ray meets (the game's collision), for placing by clicking into the picture.",
      {{"origin", "point", "where the ray starts", true}, {"direction", "point", "its direction", true}, {"range", "number", "default 20000"}}},
     {"ground", "The ground height below a point (the game's collision).", {{"position", "point", "", true}}},
-    {"set_then", "Sets what happens after an actor's dialogue: give / take an item, a quest step, a flag, a scene.",
-     {{"id", "string", "", true}, {"actions", "array", "[{action: give|take, id: item:<id>, count}, {action: quest_step, id, step}, {action: flag, id, value}, {action: scene, id}]", true}, {"mod", "string", ""}},
+    {"set_then", "Sets what happens after an actor's dialogue: give / take an item, a quest step, finish a quest (quest_done), a flag, a scene.",
+     {{"id", "string", "", true}, {"actions", "array", "[{action: give|take, id: item:<id>, count}, {action: quest_step, id, step}, {action: quest_done, id}, {action: flag, id, value}, {action: scene, id}]", true}, {"mod", "string", ""}},
      true},
     {"set_drops", "Sets what an enemy or prop drops: up to eight of the mod's items.", {{"id", "string", "", true}, {"drops", "array", "[{item: item:<id>, quantity}]", true}, {"mod", "string", ""}}, true},
     {"preview_dialogue", "Shows an actor's dialogue (or given lines) in the game's own message box; close hides it.",
@@ -115,7 +115,7 @@ const std::vector<CommandInfo> kCommands = {
      {{"quest", "string", "", true}, {"after", "integer", "the step it follows (default: the last)"}, {"text", "string", "what to do next"}, {"where", "string", "the place's name"},
       {"place", "object", "{x, z} on the sea chart"}, {"mod", "string", ""}},
      true},
-    {"edit_quest_step", "Sets several properties of a quest step at once: text, where, place, npc, available, sail_line, find (null removes one).",
+    {"edit_quest_step", "Sets several properties of a quest step at once: text, where, place, npc, available, sail_line, find (null removes one). place: {x, z} at sea, or inside {stage, room, sea: {x, z}, point} (or x, y, z instead of point); available may use flag / not_flag (a flag id or a list) and needs a text.",
      {{"quest", "string", "", true}, {"step", "integer", "the step's n", true}, {"fields", "object", "{property: value}", true}, {"mod", "string", ""}}, true},
     {"remove_quest_step", "Removes a quest step and the actor conditions and actions that name it.",
      {{"quest", "string", "", true}, {"step", "integer", "", true}, {"confirm", "boolean", "must be true", true}, {"mod", "string", ""}}, true, true},
@@ -948,7 +948,7 @@ Value Session::dispatch(const std::string& command, const Value& p, std::string&
     if (command == "set_actor") {
         static const std::set<std::string> allowed = {"actor", "kind", "model", "animation", "look_at", "path", "collision", "attention",
                                                       "stage", "room", "position", "rotation", "scale", "params", "parameters", "flag",
-                                                      "when", "lines", "then", "defeated_flag", "broken_flag", "drops",
+                                                      "when", "lines", "then", "talks", "defeated_flag", "broken_flag", "drops",
                                                       "native_drops", "combat", "carry", "switch_flag", "switch", "texture"};
         const std::string property = text(p, "property");
         if (!allowed.contains(property)) return why = "\"" + property + "\" is not an actor property the editor sets", r;

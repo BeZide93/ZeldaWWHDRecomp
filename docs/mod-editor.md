@@ -183,7 +183,10 @@ their broken or defeated flag.
   then choose the actor that moves the quest on (Esc drops the connection). The actor is then there only while the quest is at the
   first step, and talking to it (reading it, opening it) sets the second. Steps only go forward, so an
   arrow always points to a later step. A quest ends with a step's resident talk (**Talk** in the
-  Inspector); an actor can't end it.
+  Inspector), or with an actor's or a scene's action that finishes it (`quest_done`, set in the actor's
+  actions or talks). An actor with several talks shows one arrow per talk that moves the quest on, each
+  with its own conditions (also flags and other quests); change those under **Conditions and talks** in
+  the actor's Inspector.
 - **Click an arrow** to see and change it: the item Link must carry and the time of day it needs, or
   remove it (also with Delete). Its actor's dialogue and other actions are in the actor's Inspector.
 - **Drag a step's box** to arrange the graph; **Arrange all** (right-click) lays it out again. The places
@@ -406,10 +409,10 @@ separated by `;`, or `@file` with one such line per row. Results go to the log.
 | `remove_actor` | `id`, `confirm`, `mod`? | remove an actor (needs `"confirm": true`) |
 | `duplicate_actor` | `id`, `new_id`?, `offset`?, `mod`? | a copy next to it, with flags of its own |
 | `place_actor` | `id`, `at` (`link`, `camera`, `ground`, `position`), `position`?, `snap`?, `mod`? | move an actor to Link, the camera, the ground below it or a position |
-| `set_actor` | `id`, `property`, `value`, `mod`? | set one actor property (`null` removes it) |
+| `set_actor` | `id`, `property`, `value`, `mod`? | set one actor property (`null` removes it); `when` may name `quest` and `step`, `quests` (`[{quest, step}]`, all must hold), `item`, `time`, `flag` and `not_flag` (a flag id); `talks` is up to eight `{when, lines, then}`, the first that matches is said (one without `when` last; not together with `lines` or `then`) |
 | `move_actor`, `rotate_actor`, `scale_actor` | `id`, `position` / `rotation` / `scale`, `mod`? | `{x, y, z}` |
 | `set_dialogue` | `id`, `lines`, `mod`? | one to three lines |
-| `set_then` | `id`, `actions`, `mod`? | what happens after the dialogue (an empty list removes it) |
+| `set_then` | `id`, `actions`, `mod`? | what happens after the dialogue (an empty list removes it): `give`, `take`, `quest_step`, `quest_done` (finishes a quest), `flag`, `scene` |
 | `set_drops` | `id`, `drops`, `mod`? | what a prop or enemy drops |
 | `preview_dialogue` | `id`?, `lines`?, `close`?, `mod`? | show lines in the game's message box (or hide it) |
 | `pick` | `origin`, `direction`, `range`? | the first ground a ray meets |
@@ -418,7 +421,7 @@ separated by `;`, or `@file` with one such line per row. Results go to the log.
 | `check_model` | `file` | check a `.glb` file |
 | `import_model` | `file`, `id`?, `confirm`?, `mod`? | copy a `.glb` into the mod and add the model |
 | `set_scene` | `id`, `property` (`trigger`, `steps`, `native`), `value`, `mod`? | (`null` removes a trigger or the native version) |
-| `set_quest_step` | `quest`, `step`, `property`, `value`, `mod`? | |
+| `set_quest_step` | `quest`, `step`, `property`, `value`, `mod`? | `place` is `{x, z}` at sea, or inside a building `{stage, room, sea: {x, z}, point}` (or `x`, `y`, `z` instead of `point`); `available` may use `flag` and `not_flag` (a flag id or a list) with its `text` |
 | `undo`, `redo`, `history` | | |
 | `validate` | `mod`? | the checks, with the first problem |
 | `check_package` | `mod`? | every problem, each with what it is about |
@@ -445,7 +448,7 @@ separated by `;`, or `@file` with one such line per row. Results go to the log.
 | `remove_quest` | `quest`, `confirm`, `mod`? | remove a quest and the actor conditions and actions that name it |
 | `set_quest` | `quest`, `property` (`title`, `journal`, `start`, `reward`, `letter`), `value`, `mod`? | |
 | `add_quest_step` | `quest`, `after`?, `text`?, `where`?, `place`?, `mod`? | a step at the end, or after a step (later steps move up) |
-| `edit_quest_step` | `quest`, `step`, `fields`, `mod`? | several step properties at once (`null` removes one) |
+| `edit_quest_step` | `quest`, `step`, `fields`, `mod`? | several step properties at once (`null` removes one), with the same `place` and `available` forms |
 | `remove_quest_step` | `quest`, `step`, `confirm`, `mod`? | remove a step and what names it |
 | `duplicate_quest_step` | `quest`, `step`, `mod`? | a copy as the new last step |
 | `move_quest_step` | `quest`, `step`, `to`, `mod`? | move a step in the order; the numbers and references follow |

@@ -4,10 +4,11 @@
 // a Start node, one node per step and an End node. The edges are what moves the quest from one step to
 // the next in the current format:
 //   - the quest's letter, read: Start -> the first step;
-//   - a placed actor whose "when" names the quest at step A and whose "then" sets step B: A -> B (an
-//     actor without such a condition: Start -> B, "any time");
+//   - a placed actor whose "when" names the quest at step A (also in "quests") and whose "then" sets
+//     step B: A -> B, or finishes the quest ("quest_done"): A -> End (an actor without such a condition:
+//     from Start, "any time"); each of an actor's "talks" the same way, with its own conditions;
 //   - one of the mod's items whose use sets a step: Start -> that step;
-//   - a scene whose end actions set a step: from its trigger's step (or Start);
+//   - a scene whose end actions set a step (or finish the quest): from its trigger's step (or Start);
 //   - a step's resident talk ("npc"): that step -> End (the talk finishes the quest).
 // Nothing here changes the format: the editor only reads and writes the fields that exist.
 #pragma once
