@@ -18,7 +18,7 @@ std::array<story_actors::ResidentEventProcess,2>processes;
 constexpr uint32_t actor=0x20001000,other=0x20003000,global=0x101F3328,profile=0x101C4CD0,scratch=0x60002000;
 unsigned producer_calls=0;bool producer_fail=false,identity_fail=false;
 void map(uint32_t a,size_t n){memory[a].resize(n);}
-bool read(uint32_t a,std::span<uint8_t>b){for(const auto&[at,data]:memory)if(a>=at&&uint64_t(a)+b.size()<=uint64_t(at)+data.size()){std::copy_n(data.begin()+a-at,b.size(),b.begin());return true;}return false;}
+bool read_guest(uint32_t a,std::span<uint8_t>b){for(const auto&[at,data]:memory)if(a>=at&&uint64_t(a)+b.size()<=uint64_t(at)+data.size()){std::copy_n(data.begin()+a-at,b.size(),b.begin());return true;}return false;}
 void word(uint32_t a,uint32_t v){for(auto&[at,data]:memory)if(a>=at&&uint64_t(a)+4<=uint64_t(at)+data.size()){for(unsigned n=0;n<4;++n)data[a-at+n]=uint8_t(v>>(24-n*8));return;}assert(false);}
 void byte(uint32_t a,uint8_t v){for(auto&[at,data]:memory)if(a>=at&&a<uint64_t(at)+data.size()){data[a-at]=v;return;}assert(false);}
 void setup(){memory.clear();producer_calls=0;producer_fail=identity_fail=false;
@@ -31,7 +31,7 @@ void setup(){memory.clear();producer_calls=0;producer_fail=identity_fail=false;
   auto&p=processes[n];p={};p.presence=story_actors::ResidentEventProcess::Presence::Present;p.pid=100+n;p.declaration={10+n,1,1,"sea",{}};
   p.pid_slot=scratch+128+n*4;p.identity_row=scratch+5632+n*40;p.scratch_window=scratch+0x300;
   word(p.pid_slot,p.pid);word(p.identity_row,0x52455631);word(p.identity_row+4,10+n);
-  assert(read(p.pid_slot,p.pid_bytes)&&read(p.identity_row,p.identity_bytes)&&read(p.scratch_window,p.scratch_bytes));
+  assert(read_guest(p.pid_slot,p.pid_bytes)&&read_guest(p.identity_row,p.identity_bytes)&&read_guest(p.scratch_window,p.scratch_bytes));
  }
 }
 }
@@ -42,20 +42,20 @@ bool resident_event_identity_quiet(const std::string&m,const std::string&id,uint
 int main(){namespace R=story_native_wait_snapshot_actor_roots;namespace F=story_native_wait_run_footprint;
  const auto layout=story_native_event_arena::make(0x60010000);const std::array<std::string,2>ids{"a","b"};
  setup();map(layout.allocation.address,layout.allocation.bytes);F::Footprint f{{layout.allocation.address,std::vector<uint8_t>(layout.allocation.bytes)}};
- assert(R::append(read,layout,"test",ids,f)&&f.size()<=16&&R::no_borrow(read,layout));const auto good=f;
- for(unsigned off:{0u,8u,0xCu,0x1Cu,0x40u,0x68u}){word(other+0x3E0+off,layout.allocation.address+0x100);assert(!R::no_borrow(read,layout));auto unchanged=good;assert(!R::append(read,layout,"test",ids,unchanged)&&unchanged==good);word(other+0x3E0+off,0);}
+ assert(R::append(read_guest,layout,"test",ids,f)&&f.size()<=16&&R::no_borrow(read_guest,layout));const auto good=f;
+ for(unsigned off:{0u,8u,0xCu,0x1Cu,0x40u,0x68u}){word(other+0x3E0+off,layout.allocation.address+0x100);assert(!R::no_borrow(read_guest,layout));auto unchanged=good;assert(!R::append(read_guest,layout,"test",ids,unchanged)&&unchanged==good);word(other+0x3E0+off,0);}
  // Timer/action/staff ID are scalars, even when their bit patterns resemble pointers.
- for(unsigned off:{4u,0x10u,0x18u})word(actor+0x3E0+off,layout.allocation.address);assert(R::no_borrow(read,layout));
- auto bad=good;producer_fail=true;assert(!R::append(read,layout,"test",ids,bad)&&bad==good);producer_fail=false;identity_fail=true;assert(!R::append(read,layout,"test",ids,bad));identity_fail=false;
- word(other+0xD0,actor+0xC8);assert(!R::no_borrow(read,layout));word(other+0xD0,0);
+ for(unsigned off:{4u,0x10u,0x18u})word(actor+0x3E0+off,layout.allocation.address);assert(R::no_borrow(read_guest,layout));
+ auto bad=good;producer_fail=true;assert(!R::append(read_guest,layout,"test",ids,bad)&&bad==good);producer_fail=false;identity_fail=true;assert(!R::append(read_guest,layout,"test",ids,bad));identity_fail=false;
+ word(other+0xD0,actor+0xC8);assert(!R::no_borrow(read_guest,layout));word(other+0xD0,0);
  // A changing actor classification cannot hide a borrower during traversal.
- bool changed=false;auto changing=[&](uint32_t at,std::span<uint8_t>bytes){const bool ok=read(at,bytes);if(ok&&at==actor&&bytes.size()==0x14&&!changed){changed=true;byte(actor+0xF,0x74);}return ok;};
+ bool changed=false;auto changing=[&](uint32_t at,std::span<uint8_t>bytes){const bool ok=read_guest(at,bytes);if(ok&&at==actor&&bytes.size()==0x14&&!changed){changed=true;byte(actor+0xF,0x74);}return ok;};
  assert(!R::no_borrow(changing,layout));byte(actor+0xF,0x75);
- word(other+4,100);auto duplicate=good;assert(!R::append(read,layout,"test",ids,duplicate));word(other+4,101);
- auto fail_read=[&](uint32_t at,std::span<uint8_t>bytes){return at!=other+0x3E0&&read(at,bytes);};assert(!R::no_borrow(fail_read,layout));
+ word(other+4,100);auto duplicate=good;assert(!R::append(read_guest,layout,"test",ids,duplicate));word(other+4,101);
+ auto fail_read=[&](uint32_t at,std::span<uint8_t>bytes){return at!=other+0x3E0&&read_guest(at,bytes);};assert(!R::no_borrow(fail_read,layout));
  // Genuine absent host rows do not excuse any still-listed native borrower.
- for(auto&p:processes){p.presence=story_actors::ResidentEventProcess::Presence::Absent;p.pid=0xFFFFFFFFu;word(p.pid_slot,p.pid);assert(read(p.pid_slot,p.pid_bytes));}
- F::Footprint absent;assert(R::append(read,layout,"test",ids,absent));word(actor+0x3E0,layout.allocation.address);assert(!R::append(read,layout,"test",ids,absent));word(actor+0x3E0,0);
+ for(auto&p:processes){p.presence=story_actors::ResidentEventProcess::Presence::Absent;p.pid=0xFFFFFFFFu;word(p.pid_slot,p.pid);assert(read_guest(p.pid_slot,p.pid_bytes));}
+ F::Footprint absent;assert(R::append(read_guest,layout,"test",ids,absent));word(actor+0x3E0,layout.allocation.address);assert(!R::append(read_guest,layout,"test",ids,absent));word(actor+0x3E0,0);
  // Saved-only proof reads actual chunks; missing even all-zero census bytes refuse.
  ss::MemoryChunks saved_chunks;std::map<uint32_t,std::vector<uint8_t>>chunks;
  for(const auto&[at,data]:memory)for(size_t n=0;n<data.size();++n){const auto address=at+uint32_t(n),base=address&~(ss::kMemoryChunk-1);auto&c=chunks[base];if(c.empty())c.resize(ss::kMemoryChunk);c[address-base]=data[n];}
