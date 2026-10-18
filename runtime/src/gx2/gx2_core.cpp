@@ -1023,6 +1023,7 @@ HLE(gx2, GX2DrawDone) {
     render_sync(kSyncDrawDone);
     ret(c, 1);
 }
+namespace dtrace { void on_swap(uint64_t swap, uint64_t steps); }
 HLE(gx2, GX2SwapScanBuffers) {
     // debug: WWHD_TRACE_SWAP=n logs the guest call chain of the first n swaps
     static int trace = getenv("WWHD_TRACE_SWAP") ? atoi(getenv("WWHD_TRACE_SWAP")) : 0;
@@ -1097,6 +1098,7 @@ HLE(gx2, GX2SwapScanBuffers) {
             present_observer::fail("diagnostic swap ID ordering/reset mismatch");
         g_pending_flips.push_back({g_swap_count, std::chrono::steady_clock::now(), !hold});
     }
+    dtrace::on_swap(g_swap_count, steps);
     // debug: WWHD_LOG_SLOW_SWAP=ms logs swaps that came more than ms after the previous one
     static const double slow_ms = getenv("WWHD_LOG_SLOW_SWAP") ? atof(getenv("WWHD_LOG_SLOW_SWAP")) : 0;
     if (slow_ms > 0) {
