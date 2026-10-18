@@ -2093,6 +2093,10 @@ add_test(NAME story_native_event_observation_contract COMMAND story_native_event
 add_executable(story_native_event_install_test runtime/tools/story_native_event_install_test.cpp runtime/src/mods/story_native_event_record.cpp runtime/src/mods/story_native_event_install.cpp runtime/src/mods/story_native_event_observation.cpp runtime/src/mods/story_native_event_image.cpp runtime/src/mods/story_native_event_lease.cpp runtime/src/mods/story_native_camera_return.cpp runtime/src/mods/story_native_manager_terminal.cpp runtime/src/guest_addr_identity.c)
 target_include_directories(story_native_event_install_test PRIVATE runtime/include runtime/src)
 target_compile_options(story_native_event_install_test PRIVATE -UNDEBUG)
+if(WIN32)
+  # main holds ~35 Install fixtures of ~80 KB each; the Windows default stack is 1 MB
+  target_link_options(story_native_event_install_test PRIVATE -Wl,--stack,16777216)
+endif()
 add_test(NAME story_native_event_install_contract COMMAND story_native_event_install_test)
 add_executable(story_native_event_collect_test runtime/tools/story_native_event_collect_test.cpp runtime/src/mods/story_native_event_collect.cpp runtime/src/mods/story_native_event_observation.cpp runtime/src/mods/story_native_event_image.cpp runtime/src/mods/story_native_event_lease.cpp runtime/src/guest_addr_identity.c)
 target_include_directories(story_native_event_collect_test PRIVATE runtime/include runtime/src)

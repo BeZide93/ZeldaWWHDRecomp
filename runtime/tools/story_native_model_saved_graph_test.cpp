@@ -29,7 +29,9 @@ int main(){
  chunks.erase(Base+ss::kMemoryChunk);assert(!moved.matches_saved(view));chunks[Base+ss::kMemoryChunk]=memory.data()+ss::kMemoryChunk;
  std::fill(memory.begin(),memory.end(),0);auto zero=Issuer::capture(e,lineage,t,read);assert(zero&&zero->matches_saved(view));chunks.erase(Base);assert(!zero->matches_saved(view));chunks[Base]=memory.data();
  chunks[Base]=nullptr;assert(!zero->matches_saved(view));chunks[Base]=memory.data();
- regions.push_back(regions[0]);assert(!zero->matches_saved(view));regions.pop_back();regions[0].size=ss::kMemoryChunk;assert(!zero->matches_saved(view));regions[0].size=memory.size();
+ // SavedView keeps a span of regions: build a new view after each change (push_back reallocates).
+ regions.push_back(regions[0]);assert(!zero->matches_saved(ss::native_gate::SavedView{{},regions,chunks}));regions.pop_back();
+ regions[0].size=ss::kMemoryChunk;assert(!zero->matches_saved(ss::native_gate::SavedView{{},regions,chunks}));regions[0].size=memory.size();
  S::Trace bad=t;bad.writes.clear();assert(!Issuer::capture(e,lineage,bad,read));bad=t;bad.reads[0]={0xFFFFFFFC,8};assert(!Issuer::capture(e,lineage,bad,read));bad=t;bad.reads[0].bytes=0;assert(!Issuer::capture(e,lineage,bad,read));bad=t;bad.reads.resize(4096,{Base,1});assert(!Issuer::capture(e,lineage,bad,read));
  unsigned reads=0;auto changing=[&](uint32_t p,std::span<uint8_t>b){bool ok=read(p,b);if(++reads==4&&ok)b[0]^=1;return ok;};assert(!Issuer::capture(e,lineage,t,changing));
  auto throwing=[](uint32_t,std::span<uint8_t>)->bool{throw 1;};assert(!Issuer::capture(e,lineage,t,throwing)&&!zero->matches_live(throwing));
