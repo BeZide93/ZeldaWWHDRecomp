@@ -7,6 +7,9 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **World editor: native scene previews after loading a save state.** A scene's native version now also plays in the
+  preview after a save state was loaded or after a preview fell back to the scene's steps, and the editor says why
+  when it can't restore the world after a preview.
 - **Android: heat guard for handhelds with a fan** (#247). AYANEO, KONKR, AYN and Retroid handhelds now keep 60 fps
   until they are much hotter than phones, and the new **Settings → Graphics → Heat guard** (Normal / Relaxed / Off)
   sets how early 60 fps pauses when the device gets hot. Phones keep their current limit by default.
