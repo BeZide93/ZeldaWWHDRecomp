@@ -978,6 +978,79 @@ void export_area() {
     }
 }
 
+namespace {
+// "New mod...": a small form (id, name, author), the error under it, Create runs new_mod
+struct NewModForm {
+    char id[65] = {}, name[129] = {}, author[257] = {};
+    std::string error;
+    bool running = false, open = false;
+} g_new_mod;
+void new_mod_button() {
+    if (ImGui::Button("New mod...")) {
+        g_new_mod = NewModForm();
+        g_new_mod.open = true;
+        ImGui::OpenPopup("New mod");
+    }
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Start a new, empty mod of your own");
+    const ImGuiViewport* vp = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x * 0.5f, vp->WorkPos.y + vp->WorkSize.y * 0.35f), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(std::min(460.0f, vp->WorkSize.x - 32), 0));
+    if (!ImGui::BeginPopupModal("New mod", nullptr, ImGuiWindowFlags_NoSavedSettings)) return;
+    muted("A new, empty mod: its own package in the mod manager, turned on in your current mod profile. "
+          "Add actors, quests or story items, then Save.");
+    ImGui::Spacing();
+    ImGui::TextUnformatted("Id");
+    ImGui::SetNextItemWidth(-FLT_MIN);
+    if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
+    text_entry::field("##new_mod_id", g_new_mod.id, sizeof g_new_mod.id, 0, "my-first-mod");
+    ImGui::TextDisabled("lower-case letters, digits, '-', '_' and '.'; it can't be changed later");
+    ImGui::TextUnformatted("Name");
+    ImGui::SetNextItemWidth(-FLT_MIN);
+    text_entry::field("##new_mod_name", g_new_mod.name, sizeof g_new_mod.name, 0, "My first mod");
+    ImGui::TextUnformatted("Author (optional)");
+    ImGui::SetNextItemWidth(-FLT_MIN);
+    text_entry::field("##new_mod_author", g_new_mod.author, sizeof g_new_mod.author);
+    // the same checks as the command, at once (the command checks again, and the mod manager after it)
+    std::string hint;
+    const std::string id = g_new_mod.id;
+    if (!id.empty() && !editor::package_id_valid(id)) hint = "The id may only use a-z, 0-9, '-', '_' and '.' (not starting with '.').";
+    else
+        for (const auto& m : snapshot().mods)
+            if (m == id) hint = "A mod with this id is open in the editor already.";
+    if (!hint.empty()) wrapped(kBad, hint);
+    else if (!g_new_mod.error.empty()) wrapped(kBad, g_new_mod.error);
+    ImGui::Spacing();
+    const bool ready = !g_new_mod.running && !id.empty() && hint.empty() && std::string(g_new_mod.name).find_first_not_of(' ') != std::string::npos;
+    ImGui::BeginDisabled(!ready);
+    if (ImGui::Button(g_new_mod.running ? "Creating..." : "Create")) {
+        Value p;
+        p["id"] = id;
+        p["name"] = std::string(g_new_mod.name);
+        if (g_new_mod.author[0]) p["author"] = std::string(g_new_mod.author);
+        p["confirm"] = true;
+        g_new_mod.running = true;
+        g_new_mod.error.clear();
+        command("new_mod", p, [](const Value& r) {
+            g_new_mod.running = false;
+            if (!r.get("ok").boolean) {
+                g_new_mod.error = r.get("error").string();
+                return;
+            }
+            g_new_mod.open = false;  // closes on the next frame
+            U.actor.clear(), U.scene.clear(), U.quest.clear();
+            U.problems = Value();
+        });
+    }
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    ImGui::BeginDisabled(g_new_mod.running);
+    if (ImGui::Button("Cancel")) g_new_mod.open = false;
+    ImGui::EndDisabled();
+    if (!g_new_mod.open) ImGui::CloseCurrentPopup();
+    ImGui::EndPopup();
+}
+}  // namespace
+
 void mod_bar() {
     const Snapshot& s = snapshot();
     ImGui::SetNextItemWidth(200);
@@ -992,6 +1065,8 @@ void mod_bar() {
             }
         ImGui::EndCombo();
     }
+    ImGui::SameLine();
+    new_mod_button();
     ImGui::SameLine();
     ImGui::BeginDisabled(s.undo.empty());
     if (ImGui::Button("Undo")) command("undo");
@@ -1072,7 +1147,7 @@ void mcp_area() {
     ImGui::Spacing();
     muted("The token is new each time you turn this on and is never saved. After a restart, run "
           "\"claude mcp remove wwhd-editor\" and add it again with the new command.");
-    muted("Removing actors, reverting, saving, exporting, resetting a quest and loading a test state ask you first "
+    muted("Creating a mod, removing actors, reverting, saving, exporting, resetting a quest and loading a test state ask you first "
           "(Allow / Deny). Claude reads files only inside the open package or ones you picked here; anything else asks "
           "you. Every call shows in the Log, marked [MCP].");
 }
@@ -1124,8 +1199,10 @@ void draw() {
     refresh();
     const Snapshot& s = snapshot();
     if (s.valid && s.mods.empty()) {
-        wrapped(kMuted, "None of the active mods places actors, has models, scenes or quests. Turn on a mod that does "
-                        "(for example the SDK v3 examples) and start the game again.");
+        wrapped(kMuted, "None of the active mods places actors, has models, scenes or quests. Start a new mod of your own, "
+                        "or turn on a mod that does (for example the SDK v3 examples) and start the game again.");
+        new_mod_button();
+        if (!U.message.empty()) wrapped(U.message_ok ? kGood : kBad, U.message);
         return;
     }
     mod_bar();
