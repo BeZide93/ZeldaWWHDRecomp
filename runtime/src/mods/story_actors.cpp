@@ -27,6 +27,7 @@
 #include "story_treasure.h"
 #include "story_treasure_chest.h"
 #include "story_resident_types.h"
+#include "story_game_objects.h"
 #include "guest_addr.h"
 #include "runtime.h"
 #include <algorithm>
@@ -45,7 +46,9 @@ std::function<void()> mod_talked(const std::string& mod,const std::string& id);
 mod_actor::TalkProvider mod_talk_provider(const std::string&,const std::string&);
 namespace {
 using story_notebook::ManifestActor;
-struct Actor {std::string mod; ManifestActor spec; uint32_t process=0xFFFFFFFFu; bool deleting=false; uint32_t mod_token=0; bool restore_talk=false;uint32_t prop_token=0,switch_token=0,switch_source=0,enemy_token=0;story_items::EnemyMarkerHandle combat_marker{};story_items::PropMarkerHandle carry_marker=0;identity::Fingerprint fingerprint{};bool restore_quarantined=false;bool respawn=false;bool removed=false;uint32_t resident_event_token=0;bool redeclare=false;uint32_t held_started=0xFFFFFFFFu;/* editor: the process whose first Execute a held pose ran */};
+struct Actor {std::string mod; ManifestActor spec; uint32_t process=0xFFFFFFFFu; bool deleting=false; uint32_t mod_token=0; bool restore_talk=false;uint32_t prop_token=0,switch_token=0,switch_source=0,enemy_token=0;story_items::EnemyMarkerHandle combat_marker{};story_items::PropMarkerHandle carry_marker=0;identity::Fingerprint fingerprint{};bool restore_quarantined=false;bool respawn=false;bool removed=false;uint32_t resident_event_token=0;bool redeclare=false;uint32_t held_started=0xFFFFFFFFu;/* editor: the process whose first Execute a held pose ran */
+    // a game object (story_game_objects.h): created on the retail profile, tracked by process id, read back once made
+    bool game=false,game_checked=false,game_mismatch=false;uint8_t game_attempts=0;story_game_objects::Native game_native{};};
 std::vector<Actor> g_actors;
 void native_redeclare(Actor& a);  // the editor: a changed native declaration, once its old copy is gone
 uint32_t g_next_resident_event_token=1;
@@ -96,6 +99,7 @@ Actor* find(uint32_t address) {
         if(story_props::is_prop(a.spec)&&(ld16(address+0xE)!=story_props::kProfile||ld32(address+0xB0)!=story_props::parameters(a.spec)||ld8(address+0x2DD)!=0xFF))return nullptr;
         if(a.enemy_token){story_enemies::Kind kind;if(!enemy_kind(a.spec,kind)||ld16(address+0xE)!=story_enemy_ownership::descriptor(kind).profile||ld32(address+0xB0)!=story_enemies::parameters(a.enemy_token)||ld8(address+0x2DD)!=0xFF)return nullptr;}
         if(a.switch_token&&(ld16(address+0xE)!=(a.spec.actor=="switch"?story_switches::kSwitchProfile:story_switches::kDoorProfile)||ld32(address+0xB0)!=story_switches::parameters(a.spec.actor=="switch"?story_switches::Kind::Switch:story_switches::Kind::Door)||ld8(address+0x2DD)!=0xFF))return nullptr;
+        if(a.game&&story_game_objects::read_back(address,a.game_native)!=story_game_objects::ReadBack::Match)return nullptr;
         if(a.spec.actor=="resident"){const bool seated=a.spec.resident==kYm1;if(ld16(address+0xE)!=(seated?0x13B:0x175)||ld8(address+0x2DD)!=(seated?0xFF:a.spec.resident))return nullptr;if(seated&&ld32(address+0xB0)!=1)return nullptr;}
         return &a;
     }
@@ -424,6 +428,15 @@ bool check_specs(const std::string& mod,const std::vector<ManifestActor>& actors
         if(!story_enemies::parameters(kind,a.variant))return why="Unsupported native enemy variant",false;
         if(!a.kind.empty()||a.params||a.rotation.x!=0||a.rotation.z!=0||a.scale.x!=1||a.scale.y!=1||a.scale.z!=1||a.defeated_flag.empty()||!story_mail::valid_id(a.defeated_flag)||!a.flag.empty()||!a.broken_flag.empty()||!a.switch_flag.empty()||!a.switch_actor.empty()||!a.lines.empty()||!a.then.empty()||!a.model.empty()||!a.animation.empty()||a.look_at.enabled||!a.path.points.empty())return why="Unsupported native enemy configuration",false;
     }
+    // game objects: catalogued, a fixed parameter word and nothing else; every mod's together within each room's budget
+    if(std::any_of(actors.begin(),actors.end(),[](const ManifestActor&a){return a.game_object();})){
+        std::vector<ManifestActor> all;for(const auto&old:g_actors)if((!replacing||old.mod!=mod)&&old.spec.game_object())all.push_back(old.spec);
+        for(const auto&a:actors){if(!a.game_object())continue;const auto*e=story_game_objects::catalogue().find(story_game_objects::reference(a.actor));
+            if(!e||!e->variant(a.variant)||!a.kind.empty()||a.params||!a.flag.empty()||!a.broken_flag.empty()||!a.switch_flag.empty()||!a.switch_actor.empty()||!a.defeated_flag.empty()||!a.lines.empty()||!a.then.empty()||!a.talks.empty()||!a.drops.empty()||!a.path.points.empty()||
+               (e->yaw_only&&(a.rotation.x!=0||a.rotation.z!=0))||a.scale.x!=a.scale.y||a.scale.x!=a.scale.z||a.scale.x<e->scale_min||a.scale.x>e->scale_max)return why="unsupported game object configuration: "+a.id,false;
+            all.push_back(a);}
+        if(!story_notebook::world_manifest::game_object_budget(all,why))return false;
+    }
     return true;
 }
 }
@@ -459,7 +472,7 @@ bool load(const std::string& mod,const std::vector<ManifestActor>& actors,std::s
     std::vector<Actor> staged;staged.reserve(actors.size());g_actors.reserve(g_actors.size()+actors.size());
     struct LoadRollback {decltype(g_island_mods) island_mods=g_island_mods;size_t visuals=g_visual_bindings.size();size_t props=story_props::checkpoint(),models=mod_actor::checkpoint(),switches=story_switches::checkpoint(),enemies=story_enemies::checkpoint(),ownership=story_enemy_ownership::checkpoint();story_items::PropMarkerCheckpoint markers=story_items::prop_marker_checkpoint();decltype(g_flag_names) flags=g_flag_names;bool committed=false;~LoadRollback(){if(!committed){g_island_mods=std::move(island_mods);g_visual_bindings.resize(visuals);story_props::rollback(props);mod_actor::rollback(models);story_switches::rollback(switches);story_enemies::rollback(enemies);story_enemy_ownership::rollback(ownership);story_items::rollback_prop_markers(markers);g_flag_names=std::move(flags);}}} rollback;
     if(!register_flags(mod,flags,why))return false;
-    for(const auto& a:actors){Actor added{mod,a};if(a.actor=="resident"&&people_type(a.resident)){if(!g_next_resident_event_token||g_next_resident_event_token==0xFFFFFFFFu)return why="resident event token exhausted",false;added.resident_event_token=g_next_resident_event_token++;added.fingerprint=identity::fingerprint(mod,a);}if(a.kind=="mod"&&a.combat_enabled){added.combat_marker=story_items::register_enemy_marker(mod,a.id,a.defeated_flag,why);if(!added.combat_marker.value)return false;added.fingerprint=identity::fingerprint(mod,a);}if(a.kind=="mod"&&a.carry_break_on_impact){added.carry_marker=story_items::register_prop_marker(mod,a.id,a.broken_flag,why);if(!added.carry_marker)return false;added.fingerprint=identity::fingerprint(mod,a);}story_enemies::Kind enemy;if(enemy_kind(a,enemy)){added.fingerprint=identity::fingerprint(mod,a);story_enemies::Spec spec{enemy,mod,a.id,a.defeated_flag,{},added.fingerprint,1,story_enemies::parameters(enemy,a.variant)};for(const auto&drop:a.drops)spec.drops.push_back({drop.item,drop.quantity});added.enemy_token=story_enemies::declare(spec,why);if(!added.enemy_token)return false;}if(story_props::is_prop(a)){added.fingerprint=identity::fingerprint(mod,a);added.prop_token=story_props::declare(mod,a,why);if(!added.prop_token)return false;}if(a.actor=="switch"){if(a.switch_flag.empty())return why="switch requires an own flag",false;added.fingerprint=identity::fingerprint(mod,a);added.switch_token=story_switches::declare_switch(mod,a.id,why);added.switch_source=added.switch_token;if(!added.switch_token)return false;}staged.push_back(std::move(added));}
+    for(const auto& a:actors){Actor added{mod,a};if(a.game_object()){added.game=true;added.fingerprint=identity::fingerprint(mod,a);}if(a.actor=="resident"&&people_type(a.resident)){if(!g_next_resident_event_token||g_next_resident_event_token==0xFFFFFFFFu)return why="resident event token exhausted",false;added.resident_event_token=g_next_resident_event_token++;added.fingerprint=identity::fingerprint(mod,a);}if(a.kind=="mod"&&a.combat_enabled){added.combat_marker=story_items::register_enemy_marker(mod,a.id,a.defeated_flag,why);if(!added.combat_marker.value)return false;added.fingerprint=identity::fingerprint(mod,a);}if(a.kind=="mod"&&a.carry_break_on_impact){added.carry_marker=story_items::register_prop_marker(mod,a.id,a.broken_flag,why);if(!added.carry_marker)return false;added.fingerprint=identity::fingerprint(mod,a);}story_enemies::Kind enemy;if(enemy_kind(a,enemy)){added.fingerprint=identity::fingerprint(mod,a);story_enemies::Spec spec{enemy,mod,a.id,a.defeated_flag,{},added.fingerprint,1,story_enemies::parameters(enemy,a.variant)};for(const auto&drop:a.drops)spec.drops.push_back({drop.item,drop.quantity});added.enemy_token=story_enemies::declare(spec,why);if(!added.enemy_token)return false;}if(story_props::is_prop(a)){added.fingerprint=identity::fingerprint(mod,a);added.prop_token=story_props::declare(mod,a,why);if(!added.prop_token)return false;}if(a.actor=="switch"){if(a.switch_flag.empty())return why="switch requires an own flag",false;added.fingerprint=identity::fingerprint(mod,a);added.switch_token=story_switches::declare_switch(mod,a.id,why);added.switch_source=added.switch_token;if(!added.switch_token)return false;}staged.push_back(std::move(added));}
     for(auto& a:staged)if(a.spec.actor=="door"){
         const Actor* source=nullptr;for(const auto& candidate:staged)if(candidate.spec.actor=="switch"&&candidate.spec.id==a.spec.switch_actor)source=&candidate;
         if(!source)for(const auto& candidate:g_actors)if(candidate.mod==mod&&candidate.spec.actor=="switch"&&candidate.spec.id==a.spec.switch_actor)source=&candidate;
@@ -524,7 +537,8 @@ void native_room_loaded(Cpu* c,int room){
     if(new_prop_epoch&&combat_declared())story_enemy_projectiles::room_changed();
     for(size_t i=0;i<g_actors.size();++i){auto&a=g_actors[i];if(!a.enemy_token||!new_prop_epoch||a.spec.room!=unsigned(room)||std::strncmp(reinterpret_cast<const char*>(mem::ptr(kStage)),a.spec.stage.c_str(),8)!=0)continue;uint32_t counter=g_scratch+kEnemyEpochScratchOffset+uint32_t(i)*4,epoch=ld32(counter);if(!epoch||epoch==0xFFFFFFFFu){a.restore_quarantined=true;story_enemies::quarantine(a.enemy_token);continue;}++epoch;if(story_enemies::begin_epoch(a.enemy_token,epoch)){st32(counter,epoch);a.restore_quarantined=false;a.process=0xFFFFFFFFu;a.deleting=false;st32(g_scratch+128+uint32_t(i)*4,0xFFFFFFFFu);}}
     refresh_link();
-    for(auto& a:g_actors)if(a.spec.room==unsigned(room)){if(a.spec.kind=="mod"&&(!a.spec.combat_enabled||(new_prop_epoch&&std::strncmp(reinterpret_cast<const char*>(mem::ptr(kStage)),a.spec.stage.c_str(),8)==0)))mod_actor::retry(a.mod_token);if(a.prop_token&&new_prop_epoch&&std::strncmp(reinterpret_cast<const char*>(mem::ptr(kStage)),a.spec.stage.c_str(),8)==0){a.restore_quarantined=false;story_props::retry(a.prop_token);}if(a.switch_token&&new_prop_epoch&&std::strncmp(reinterpret_cast<const char*>(mem::ptr(kStage)),a.spec.stage.c_str(),8)==0){a.restore_quarantined=false;story_switches::retry(a.switch_token);}}room_loaded(c,room);}
+    for(auto& a:g_actors)if(a.spec.room==unsigned(room)){if(a.spec.kind=="mod"&&(!a.spec.combat_enabled||(new_prop_epoch&&std::strncmp(reinterpret_cast<const char*>(mem::ptr(kStage)),a.spec.stage.c_str(),8)==0)))mod_actor::retry(a.mod_token);if(a.prop_token&&new_prop_epoch&&std::strncmp(reinterpret_cast<const char*>(mem::ptr(kStage)),a.spec.stage.c_str(),8)==0){a.restore_quarantined=false;story_props::retry(a.prop_token);}if(a.switch_token&&new_prop_epoch&&std::strncmp(reinterpret_cast<const char*>(mem::ptr(kStage)),a.spec.stage.c_str(),8)==0){a.restore_quarantined=false;story_switches::retry(a.switch_token);}
+        if(a.game&&new_prop_epoch&&std::strncmp(reinterpret_cast<const char*>(mem::ptr(kStage)),a.spec.stage.c_str(),8)==0){a.game_attempts=0;a.restore_quarantined=a.game_mismatch;}}room_loaded(c,room);}
 void room_loaded(Cpu* c,int room) {
     if(!g_installed||!g_scratch)return;
     refresh_link();
@@ -558,8 +572,15 @@ void room_loaded(Cpu* c,int room) {
         if(a.prop_token&&!story_props::available(a.prop_token))continue;
         if(a.switch_token&&!story_switches::available(a.switch_token))continue;
         if(a.enemy_token&&(!story_enemies::available(a.enemy_token)||!story_enemy_ownership::can_spawn(a.enemy_token)))continue;
+        if(a.game){
+            // the game's own object by name, like its stage loader; three creations the game gives up on in one room visit quarantine it
+            const auto*e=story_game_objects::catalogue().find(story_game_objects::reference(a.spec.actor));std::string why;
+            if(!e||!story_game_objects::resolve(c,g_call,g_scratch+0x50,*e,a.spec.variant,a.game_native,why)){LOG("[game_objects] %s:%s omitted: %s",a.mod.c_str(),a.spec.id.c_str(),e?why.c_str():"not in the catalogue");a.restore_quarantined=true;a.game_mismatch=true;continue;}
+            if(a.game_attempts>=3){LOG("[game_objects] %s:%s omitted until the room loads again: the game did not make it (3 tries)",a.mod.c_str(),a.spec.id.c_str());a.restore_quarantined=true;continue;}
+            ++a.game_attempts;a.game_checked=false;story_game_objects::trace_before_create(c,g_call,a.mod,a.spec.id);
+        }
         story_enemies::Kind enemy{};(void)enemy_kind(a.spec,enemy);
-        uint32_t proc=a.enemy_token?story_enemy_ownership::descriptor(enemy).profile:a.switch_token?(a.spec.actor=="switch"?story_switches::kSwitchProfile:story_switches::kDoorProfile):a.prop_token?story_props::kProfile:a.spec.kind=="mod"?(a.spec.world_object()?mod_actor::kWorldProfile:mod_actor::kProfile):a.spec.actor=="sign"?0xB6u:a.spec.resident==kYm1?0x13Bu:0x175u;
+        uint32_t proc=a.game?uint32_t(a.game_native.process):a.enemy_token?story_enemy_ownership::descriptor(enemy).profile:a.switch_token?(a.spec.actor=="switch"?story_switches::kSwitchProfile:story_switches::kDoorProfile):a.prop_token?story_props::kProfile:a.spec.kind=="mod"?(a.spec.world_object()?mod_actor::kWorldProfile:mod_actor::kProfile):a.spec.actor=="sign"?0xB6u:a.spec.resident==kYm1?0x13Bu:0x175u;
         if(a.spec.actor=="chest"&&!a.spec.item_mod.empty()&&!story_treasure_chest::item_hook_ready()){
             static bool told=false;if(!told)LOG("[actors] %s:%s holds a mod item: it appears after a restart",a.mod.c_str(),a.spec.id.c_str());told=true;continue;
         }
@@ -575,11 +596,11 @@ void room_loaded(Cpu* c,int room) {
         if(a.prop_token||a.switch_token)st16(g_scratch+0x10,255);
         if(a.enemy_token)st16(g_scratch+0x10,story_enemies::home_z(enemy));
         if(a.spec.actor=="chest")st16(g_scratch+0x10,uint16_t((uint32_t(a.spec.item_game)<<8)|255));
-        const uint32_t params=a.enemy_token?story_enemies::parameters(a.enemy_token):a.switch_token?story_switches::parameters(a.spec.actor=="switch"?story_switches::Kind::Switch:story_switches::Kind::Door):a.prop_token?story_props::parameters(a.spec):a.spec.kind=="mod"?a.mod_token:a.spec.actor=="sign"?kCarrier:a.spec.actor=="resident"?story_resident_types::params(uint8_t(a.spec.resident)):0;
+        const uint32_t params=a.game?a.game_native.params:a.enemy_token?story_enemies::parameters(a.enemy_token):a.switch_token?story_switches::parameters(a.spec.actor=="switch"?story_switches::Kind::Switch:story_switches::Kind::Door):a.prop_token?story_props::parameters(a.spec):a.spec.kind=="mod"?a.mod_token:a.spec.actor=="sign"?kCarrier:a.spec.actor=="resident"?story_resident_types::params(uint8_t(a.spec.resident)):0;
         Cpu call=*c;a.deleting=false;
         const uint32_t previous_layer=g_call(&call,GC(0x025DED64),{});
         g_call(&call,GC(0x025DEAB4),{room_layer});
-        try{talk_latch(&a,0);a.process=g_call(&call,kCreate,{proc,params,g_scratch,uint32_t(room),g_scratch+0xC,g_scratch+0x14,a.spec.actor=="resident"&&a.spec.resident!=kYm1?a.spec.resident:0xFFFFFFFFu,0});}
+        try{talk_latch(&a,0);a.process=g_call(&call,kCreate,{proc,params,g_scratch,uint32_t(room),g_scratch+0xC,g_scratch+0x14,a.game?(a.game_native.subtype==0xFF?0xFFFFFFFFu:uint32_t(a.game_native.subtype)):a.spec.actor=="resident"&&a.spec.resident!=kYm1?a.spec.resident:0xFFFFFFFFu,0});}
         catch(...){g_call(&call,GC(0x025DEAB4),{previous_layer});throw;}
         g_call(&call,GC(0x025DEAB4),{previous_layer});
         if(a.enemy_token&&a.process&&a.process!=0xFFFFFFFFu)story_enemies::bind(a.enemy_token,a.process);
@@ -589,7 +610,7 @@ void room_loaded(Cpu* c,int room) {
         // Residents reuse their previously unused existing 40-byte identity row.
         // Distinct magic/token format: never interpret this as a prop record.
         if(a.resident_event_token&&a.process&&a.process!=0xFFFFFFFFu){const uint32_t row=g_scratch+kIdentityScratchOffset+uint32_t(&a-g_actors.data())*identity::kRecordBytes;st32(row,0x52455631);st32(row+4,a.resident_event_token);std::memcpy(mem::ptr(row+8),a.fingerprint.data(),a.fingerprint.size());}
-        if((a.prop_token||a.switch_token||a.enemy_token)&&a.process&&a.process!=0xFFFFFFFFu){const auto record=identity::record(a.fingerprint);std::memcpy(mem::ptr(g_scratch+kIdentityScratchOffset+uint32_t(&a-g_actors.data())*identity::kRecordBytes),record.data(),record.size());}
+        if((a.prop_token||a.switch_token||a.enemy_token||a.game)&&a.process&&a.process!=0xFFFFFFFFu){const auto record=identity::record(a.fingerprint);std::memcpy(mem::ptr(g_scratch+kIdentityScratchOffset+uint32_t(&a-g_actors.data())*identity::kRecordBytes),record.data(),record.size());}
         LOG("[actors] %s:%s room %d process %08X room_layer=%08X",a.mod.c_str(),a.spec.id.c_str(),room,a.process,room_layer);
     }
 }
@@ -643,6 +664,20 @@ void service(Cpu* c){
         // Keep creating/queued-for-deletion IDs until native lookup confirms they are gone.
         if(!exists){a.process=0xFFFFFFFFu;st32(g_scratch+128+uint32_t(&a-g_actors.data())*4,a.process);}
     }
+    // game objects the game has made since: read back once (process, parameter word, subtype); a mismatch is deleted and quarantined
+    for(auto& a:g_actors){
+        if(!a.game||a.game_checked||a.process==0xFFFFFFFFu||a.deleting)continue;
+        st32(g_scratch+0x40,0);probe=*c;if(!g_call(&probe,kSearch,{a.process,g_scratch+0x40}))continue;
+        const uint32_t actor=ld32(g_scratch+0x40);if(!actor||ld32(actor+4)!=a.process)continue;  // still being created
+        if(story_game_objects::read_back(actor,a.game_native)!=story_game_objects::ReadBack::Match){
+            LOG("[game_objects] %s:%s quarantined: the game made process %04X params %08X subtype %u (wanted %04X %08X %u)",a.mod.c_str(),a.spec.id.c_str(),unsigned(ld16(actor+0xE)),ld32(actor+0xB0),unsigned(ld8(actor+0x2DD)),unsigned(a.game_native.process),a.game_native.params,unsigned(a.game_native.subtype));
+            probe=*c;if(g_call(&probe,kDelete,{actor}))a.deleting=true;a.restore_quarantined=a.game_mismatch=a.game_checked=true;continue;
+        }
+        if(!ld32(actor+0xF4))continue;  // its create phase hasn't made the object's own heap yet
+        a.game_checked=true;a.game_attempts=0;
+        LOG("[game_objects] %s:%s made: %s process %04X params %08X at %.1f %.1f %.1f",a.mod.c_str(),a.spec.id.c_str(),a.spec.actor.c_str(),unsigned(a.game_native.process),a.game_native.params,double(ldf32(actor+0x314)),double(ldf32(actor+0x318)),double(ldf32(actor+0x31C)));
+        story_game_objects::trace_created(c,g_call,a.mod,a.spec.id,actor);
+    }
     room_loaded(c,room);publish_islands(c,player);
     const float observer_x=ldf32(player+0x314),observer_z=ldf32(player+0x31C);
     int observer_square=-1;if(std::isfinite(observer_x)&&std::isfinite(observer_z)){const auto place=story_chart::square_place(observer_x,observer_z);observer_square=1+(place.row+3)*7+place.column+3;}
@@ -657,6 +692,10 @@ void state_loaded(){if(combat_declared())story_enemy_ownership::state_loaded();i
                 story_enemies::quarantine(a.enemy_token);a.process=0xFFFFFFFFu;a.restore_quarantined=true;if(slot)st32(slot,0xFFFFFFFFu);LOG("[native_enemy] %s:%s restored binding/epoch/fingerprint rejected",a.mod.c_str(),a.spec.id.c_str());
             }else if(queued)story_enemies::bind(a.enemy_token,a.process,true);
             else {a.process=0xFFFFFFFFu;a.restore_quarantined=retired;}
+        }
+        if(a.game){
+            a.game_checked=false;a.restore_quarantined=a.game_mismatch;const bool live=a.process!=0xFFFFFFFFu;
+            if(live&&(!g_scratch||!identity::matches(mem::ptr(g_scratch+kIdentityScratchOffset+uint32_t(i)*identity::kRecordBytes),a.fingerprint))){a.process=0xFFFFFFFFu;a.restore_quarantined=true;if(slot)st32(slot,0xFFFFFFFFu);LOG("[game_objects] %s:%s restored declaration fingerprint rejected",a.mod.c_str(),a.spec.id.c_str());}
         }
         if(a.prop_token||a.switch_token){
             const bool live=a.process!=0xFFFFFFFFu;
@@ -720,16 +759,16 @@ bool same_spec(const std::string& mod,const ManifestActor& a,const ManifestActor
 bool native_kind(const ManifestActor& a){story_enemies::Kind e;return enemy_kind(a,e)||story_props::is_prop(a)||a.actor=="switch"||a.actor=="door";}
 // Kinds with a solid background collision of their own: after a move they are created again (the
 // collision follows exactly), never only moved in place.
-bool solid_kind(const ManifestActor& a){return a.actor=="switch"||a.actor=="door"||a.actor=="chest";}
+bool solid_kind(const ManifestActor& a){return a.actor=="switch"||a.actor=="door"||a.actor=="chest"||a.game_object();}
 uint32_t pid_slot(const Actor& a){return g_scratch+128+uint32_t(&a-g_actors.data())*4;}
 uint32_t identity_row(const Actor& a){return g_scratch+kIdentityScratchOffset+uint32_t(&a-g_actors.data())*identity::kRecordBytes;}
 // The fingerprint and the saved identity row follow a changed spec (state loads compare them).
 void refingerprint(const std::string& mod,Actor& a){
-    if(a.resident_event_token||a.prop_token||a.switch_token||a.enemy_token||a.combat_marker.value||a.carry_marker)a.fingerprint=identity::fingerprint(mod,a.spec);
+    if(a.resident_event_token||a.prop_token||a.switch_token||a.enemy_token||a.combat_marker.value||a.carry_marker||a.game)a.fingerprint=identity::fingerprint(mod,a.spec);
     if(!g_scratch||a.process==0xFFFFFFFFu)return;
     const uint32_t row=identity_row(a);
     if(a.resident_event_token){st32(row,0x52455631);st32(row+4,a.resident_event_token);std::memcpy(mem::ptr(row+8),a.fingerprint.data(),a.fingerprint.size());}
-    else if(a.prop_token||a.switch_token||a.enemy_token){const auto record=identity::record(a.fingerprint);std::memcpy(mem::ptr(row),record.data(),record.size());}
+    else if(a.prop_token||a.switch_token||a.enemy_token||a.game){const auto record=identity::record(a.fingerprint);std::memcpy(mem::ptr(row),record.data(),record.size());}
 }
 story_enemies::Spec enemy_spec(const std::string& mod,const ManifestActor& a,const identity::Fingerprint& fp,uint32_t epoch){
     story_enemies::Kind kind{};enemy_kind(a,kind);story_enemies::Spec spec{kind,mod,a.id,a.defeated_flag,{},fp,epoch,story_enemies::parameters(kind,a.variant)};
@@ -812,8 +851,9 @@ bool editor_update(const std::string& mod,const std::vector<ManifestActor>& acto
         if(a->removed&&same_spec(mod,a->spec,spec)){plan.push_back({&spec,a,false,false});effective.push_back(spec);continue;}  // a removal undone
         const char* kind=restart_kind(a->spec);if(!kind)kind=restart_kind(spec);
         if(kind||(a->spec.kind=="mod")!=(spec.kind=="mod")||(spec.kind=="mod"&&!g_models.contains({mod,spec.model}))||
-           ((spec.actor=="resident"||!spec.distant.model.empty()||!spec.shoreline.model.empty()||spec.chart_marker.enabled)&&!live_capable(mod,spec,reason))||(native_kind(a->spec)!=native_kind(spec))||(story_props::is_prop(spec)&&spec.texture_token!=a->spec.texture_token)){
+           ((spec.actor=="resident"||!spec.distant.model.empty()||!spec.shoreline.model.empty()||spec.chart_marker.enabled)&&!live_capable(mod,spec,reason))||(native_kind(a->spec)!=native_kind(spec))||(a->spec.game_object()!=spec.game_object())||(story_props::is_prop(spec)&&spec.texture_token!=a->spec.texture_token)){
             if(!kind&&native_kind(a->spec)!=native_kind(spec))reason="switching between a native prop, switch, door or enemy and another kind takes effect after a restart";
+            if(!kind&&a->spec.game_object()!=spec.game_object())reason="switching between a game object and another kind takes effect after a restart";
             later.push_back(spec.id+": "+(kind?std::string(kind)+" takes changes after a restart":reason.empty()?std::string("takes this change after a restart"):reason));
             if(!a->removed)effective.push_back(a->spec);
             continue;
@@ -842,7 +882,8 @@ bool editor_update(const std::string& mod,const std::vector<ManifestActor>& acto
             if(added.mod_token&&!added.spec.talks.empty())mod_actor::set_talk_provider(mod,added.spec.id,mod_talk_provider(mod,added.spec.id));
             if(!added.mod_token){LOG("[actors] %s:%s: the model can't serve this spec; it appears after a restart",mod.c_str(),added.spec.id.c_str());later.push_back(added.spec.id+": the model can't serve this spec");continue;}
         }
-        if(native_kind(added.spec)||(added.spec.actor=="resident"&&people_type(added.spec.resident)))added.fingerprint=identity::fingerprint(mod,added.spec);
+        if(native_kind(added.spec)||added.spec.game_object()||(added.spec.actor=="resident"&&people_type(added.spec.resident)))added.fingerprint=identity::fingerprint(mod,added.spec);
+        added.game=added.spec.game_object();
         if(added.spec.actor=="resident"&&people_type(added.spec.resident)&&g_next_resident_event_token&&g_next_resident_event_token!=0xFFFFFFFFu)added.resident_event_token=g_next_resident_event_token++;
         story_enemies::Kind enemy{};
         if(story_props::is_prop(added.spec)){added.prop_token=story_props::editor_declare(mod,added.spec,w);if(!added.prop_token){later.push_back(added.spec.id+": "+w);continue;}}
@@ -910,6 +951,7 @@ bool editor_pose(Cpu* c,const std::string& mod,const std::string& id,const story
     if(!c||!g_call||!g_scratch)return false;
     Actor* a=nullptr;for(auto& x:g_actors)if(x.mod==mod&&x.spec.id==id)a=&x;
     if(!a||a->removed||a->respawn||a->deleting||a->process==0xFFFFFFFFu){if(pose_trace())LOG("[actors] pose-trace %s no live copy to pose",id.c_str());return false;}
+    if(a->game)return false;  // a game object sets its model and collision matrices once, when made: it is made again at the new place
     if(!std::isfinite(p.x)||!std::isfinite(p.y)||!std::isfinite(p.z)||!std::isfinite(r.y))return false;
     const uint32_t at=actor_address(c,mod,id);if(!at||find(at)!=a||ld8(at+0xC)==3)return false;
     if(a->spec.kind=="mod"){
