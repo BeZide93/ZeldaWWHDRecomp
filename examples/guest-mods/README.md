@@ -18,8 +18,8 @@ Story mods (letters, quests, charts) live in the mod repository with their conte
 
 The SDK v3 preview also includes the content-only [harbor meeting](sdk-v3-native-scene/README.md)
 example: two residents, a talk trigger, mandatory fallback steps and an experimental
-native alternative. It needs no C build; eligible `turn_camera` alternatives are
-available in the public preview when native readiness checks pass.
+native alternative. It needs no C build; the game plays an eligible `turn_camera`
+alternative itself when its readiness checks pass, and the fallback steps otherwise.
 
 Build (needs clang with the PowerPC target and ld.lld; on macOS `brew install llvm lld`):
 
