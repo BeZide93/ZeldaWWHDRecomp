@@ -382,7 +382,7 @@ Package manifest fields:
 | `experimental` | Optional `true` for untested mods: hidden by default, enabling backs up the saves first (manager 1.4) |
 | `kind` | `native`, `settings`, `content` or `cemu` |
 | `abi_version`, `binaries` | Native ABI `1`; platform-to-relative-library map |
-| `content_dir` | Content package: relative folder holding game-relative replacement files |
+| `content_dir` | Content package: relative folder holding game-relative replacement files. A content package that only declares story content (letters, charts, items, quests, models, actors, scenes) can leave it out |
 | `cemu_dir` | Cemu package: relative folder holding `rules.txt` and shader files (empty for the package root) |
 | `settings` | Settings preset: built-in IDs to booleans |
 | `dependencies` | Objects with `id` and optional `minimum_version`; `builtin:<id>` allowed |
@@ -532,7 +532,10 @@ resolver. Missing paths fall through unchanged. Directory enumeration retains
 original names but reports replacement sizes for replaced entries: this adapter
 targets replacement of existing resources, not discovery of new files or
 deletion/hiding. Conflicting enabled packages are rejected, rather than silently
-choosing a load order. Content packages can declare setup options, but cannot declare dependencies. Native packages can depend on content packages, but wait until
+choosing a load order. Content packages can declare setup options, but cannot declare dependencies, with one
+exception: a content package with story content (letters, charts, items, quests, models, actors or scenes)
+depends on the Story Notebook, the story system's own package; it gets that dependency even when it doesn't
+declare it, and it can't depend on anything else. Native packages can depend on content packages, but wait until
 the required startup content is active.
 
 Installed payloads should not be edited externally while the game runs.

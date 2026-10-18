@@ -365,7 +365,7 @@ static-model validation and player-local conversion requirements below apply.
 Skinned item models and item-model animation are currently unsupported.
 `held_frames` is an integer from 1 to 300, default 90, measured in game logic
 frames at 30 Hz. Loading uses this same bounded interval. Rendering does not
-advance it. An item needs a `use` action; failed Use and Info do not request a
+advance it. An item needs a `use` action (or `hold_up`, below); failed Use and Info do not request a
 presentation. An event action is suitable when no modal information page is
 wanted. At most eight item model declarations are accepted per session.
 
@@ -376,9 +376,25 @@ when its item/model fingerprint still matches; it does not replay Use. Resource
 loading may delay replacement while an outstanding native load finishes.
 Original retail equipment and resource tables remain separate.
 
-`held_model` does **not** replace a chest's get-item model. Custom chest get-item
-presentation is unsupported in this preview; existing chest rewards retain
-their existing stand-in presentation.
+**Holding it up when Link gets it.** With `"hold_up": true` the item is shown the
+way the game shows its own items: when Link gets it (a `give` action, a letter that
+encloses it, a quest reward, the chest of one of your treasure charts or your code),
+he plays the game's item-get pose and holds `held_model` up over his head, with the
+game's get message ("You got Lamp crystal!" and the item's description). The model
+takes the place of the item the game would hold up, turning the same way. The pose
+waits for a free moment (no talk, scene or other event running) and then plays once
+per get; when the Delivery Bag's pages are full, the caption says so instead. A full
+save state taken during the pose ends it the same way after loading. `hold_up` needs
+`held_model`; such an item needs no `use` action (with one, it is also shown in
+Link's hand when used).
+
+```json
+{"id": "crystal", "name": "Lamp crystal", "description": "It still glows faintly.",
+ "icon": "assets/crystal.png", "held_model": "crystal", "hold_up": true}
+```
+
+Without `hold_up`, a get shows the item's caption with a small jingle, and a chest of
+one of your charts holds up a stand-in of the game's.
 
 ## Static mod actors
 
@@ -565,6 +581,14 @@ array contains at most eight actions:
 `value`. Referenced items, quests, quest steps and scenes must be declared in the
 same manifest. Actions run in order after the talk closes; a failing action stops
 the sequence. Skipping or aborting a scene does not apply its end actions.
+
+`{"action": "give", "id": "chart:keeper-map"}` gives Link one of your treasure charts
+(declared in the same manifest's `charts`, see
+[Charts and markers](mod-sdk-v2.md#charts-and-markers)). It works like a chart a letter
+encloses: the MAP screen's chart list shows it and the story notebook knows it. A chart is
+given once; giving it again (or after it is finished) changes nothing. It takes no `count`,
+and `take` can't take a chart. This action works in an actor's `then`, a talk's `then` and a
+scene's final `end.then`.
 
 `{"action":"quest_done","id":"lantern"}` completes a quest declared in the
 same manifest. It gives the declared reward once, marks the quest done in the

@@ -230,21 +230,26 @@ form below adds a new one. Every change is one command, so Undo and Redo work fo
 - **Letters** are letters on their own: no quest and no notebook entry. Any Rito postbox hands them out
   while your mod is on (once Link has the Delivery Bag); once Link has read one, he gets what it encloses,
   once. Give it a sender (one line, the signature) and a text (about ten lines of 40 characters), and tick
-  the charts and items it encloses. A letter that starts a quest is the quest's own letter (the quest's
+  the charts and items it encloses. A letter can also wait: for a quest step, a done quest or one of
+  your flags (`when`), and then some days of the game's calendar (`after_days`), for example a thank-you
+  letter two days after the quest is done (set them in **JSON** or with `set_letter`; `advance_days`
+  moves the calendar on in test mode). A letter that starts a quest is the quest's own letter (the quest's
   Inspector), not one of these. Up to 8 per mod.
 - **Charts** are treasure charts. While Link owns one, the MAP screen's chart list shows it with an X at
   its place; salvaging the treasure there opens its chest. **Add with the X at Link** (or **at the
   camera**) puts the X where Link or the fly camera is on the Great Sea; **X at Link** / **X at the camera**
   moves it later. Choose what the chest holds: one of your items, a game item (purple, orange or silver
-  rupee, a piece of heart, a heart container) or, by default, an orange rupee. A letter, a resident's talk
-  or a quest's reward gives the chart; a quest step's **find** or a scene's **salvage** trigger uses it.
-  Up to 8 per mod.
+  rupee, a piece of heart, a heart container) or, by default, an orange rupee. A letter, a resident's talk,
+  an actor's dialogue or a scene's end (**After the dialogue**: give `chart:<id>`) or a quest's reward
+  gives the chart; a quest step's **find** or a scene's **salvage** trigger uses it. Up to 8 per mod.
 - **Items** are kept in the Delivery Bag's extra pages. When Link gets one, its name and description show
   with the game's small get jingle. An item needs an icon: **Choose...** picks a `.png` (best 128 x 128
   with transparency, at most 2048 x 2048), which is copied into the package's `icons` folder. **How many
   Link can carry** is 1 to 254. **Use** says what using it on X, Y or R does: show its Info box, open the
   story notebook, move one of your quests to a step, or tell your mod's code; without a use it stays in
-  the bag. Actors give or take items in their actions (**After the dialogue**), enemies and props drop
+  the bag. With a model of your own as its held model and **hold_up** on (in **JSON**, or `set_item`), Link
+  holds the model up over his head with the game's get message when he gets it, as he does with the
+  game's items. Actors give or take items in their actions (**After the dialogue**), enemies and props drop
   them, and letters and charts can hold them. Up to 32 per mod.
 
 Under each entry, **Used by** lists everything that names it. A chart or item that is still used can't be
@@ -354,8 +359,9 @@ and the mod's flags.
   at the destination.
 - **Test mode** (toolbar or Camera & test) protects your progress while you try your quest:
   - while it is on, saving in the game writes a separate test save, never your own;
-  - **Reset this mod's quest…** erases the open mod's quest progress and flags from the loaded game, so
-    you can play the quest from the start. Other mods and the game's own progress are not touched;
+  - **Reset this mod's quest…** erases the open mod's quest progress and flags from the loaded game, its
+    letters, and the charts and items Link got from it, so you can play the quest from the start. Other
+    mods and the game's own progress and items are not touched;
   - **Save test 1–3** / **Load test 1–3** keep test states: the game's progress, Link's place and the
     open mod's flags;
   - turning test mode off takes you back to your progress and place from before the test.
@@ -455,7 +461,7 @@ separated by `;`, or `@file` with one such line per row. Results go to the log.
 | `set_actor` | `id`, `property`, `value`, `mod`? | set one actor property (`null` removes it); `when` may name `quest` and `step`, `quests` (`[{quest, step}]`, all must hold), `item`, `time`, `flag` and `not_flag` (a flag id); `talks` is up to eight `{when, lines, then}`, the first that matches is said (one without `when` last; not together with `lines` or `then`) |
 | `move_actor`, `rotate_actor`, `scale_actor` | `id`, `position` / `rotation` / `scale`, `mod`? | `{x, y, z}` |
 | `set_dialogue` | `id`, `lines`, `mod`? | one to three lines |
-| `set_then` | `id`, `actions`, `mod`? | what happens after the dialogue (an empty list removes it): `give`, `take`, `quest_step`, `quest_done` (finishes a quest), `flag`, `scene` |
+| `set_then` | `id`, `actions`, `mod`? | what happens after the dialogue (an empty list removes it): `give`, `take`, `quest_step`, `quest_done` (finishes a quest), `flag`, `scene`; `{"action": "give", "id": "chart:<id>"}` gives one of the mod's charts |
 | `set_drops` | `id`, `drops`, `mod`? | what a prop or enemy drops |
 | `preview_dialogue` | `id`?, `lines`?, `close`?, `mod`? | show lines in the game's message box (or hide it) |
 | `pick` | `origin`, `direction`, `range`? | the first ground a ray meets |
@@ -485,7 +491,8 @@ separated by `;`, or `@file` with one such line per row. Results go to the log.
 | `play` | `from`? (`camera`, `link`), `restore`? | play as Link (test mode on) |
 | `stop` | | back to the editor view |
 | `test_mode` | `on` | test mode |
-| `reset_quest` | `confirm`, `mod`? | test mode: reset the mod's quest progress and flags |
+| `reset_quest` | `confirm`, `mod`? | test mode: reset the mod's quest progress and flags, its letters, and the charts and items Link got from it |
+| `advance_days` | `days` (1–255) | test mode: move the game's calendar on, to try letters that wait some days |
 | `save_state` | `slot` (1–3), `kind`? (`portable`, `full`) | test mode: save a test state |
 | `load_state` | `slot` (1–3), `kind`? (`portable`, `full`), `confirm` | test mode: load a test state (replaces the current progress) |
 | `command_log` | `count`? | the last commands |
@@ -534,10 +541,10 @@ separated by `;`, or `@file` with one such line per row. Results go to the log.
 | `skip_scene`, `stop_scene` | | skip the scene that plays; stop the preview and go back to the editor |
 | `scene_state` | | whether a preview plays, which scene and step |
 | `list_letters`, `list_charts`, `list_items` | `mod`? | the mod's letters on their own, charts or items, each with what uses it (`used_by`) |
-| `add_letter` | `sender`, `text`, `id`?, `encloses`?, `mod`? | a letter on its own; `encloses` lists `"chart:<id>"` and `"item:<id>"` |
-| `set_letter` | `id`, `fields`, `mod`? | its `sender`, `text` or `encloses` (`null` removes `encloses`) |
+| `add_letter` | `sender`, `text`, `id`?, `encloses`?, `when`?, `after_days`?, `mod`? | a letter on its own; `encloses` lists `"chart:<id>"` and `"item:<id>"`; `when` waits for `{quest, step}`, `{quest, done: true}`, `quests`, `flag`, `not_flag`; `after_days` waits that many game days more |
+| `set_letter` | `id`, `fields`, `mod`? | its `sender`, `text`, `encloses`, `when` or `after_days` (`null` removes `encloses`, `when` or `after_days`) |
 | `add_chart` | `name`, `place`? or `at`? (`link`, `camera`), `id`?, `description`?, `item`?, `mod`? | a treasure chart; `place` is `{x, z}` at sea; `item` is `"item:<id>"` or `game:purple_rupee`, `game:orange_rupee`, `game:silver_rupee`, `game:heart_piece`, `game:heart_container` |
 | `set_chart` | `id`, `fields`?, `at`?, `mod`? | its `name`, `description`, `place`, `item` (`null` removes `description` or `item`); `at` moves the X to Link or the camera |
-| `add_item` | `name`, `description`, `icon`? or `icon_file`?, `id`?, `stack`?, `use`?, `held_model`?, `held_frames`?, `mod`? | an item; `icon` is a PNG in the package, `icon_file` a PNG copied into its `icons` folder; `use` is `{action: show}`, `{action: open_notebook}`, `{action: quest_step, quest, step}` or `{action: event}` |
+| `add_item` | `name`, `description`, `icon`? or `icon_file`?, `id`?, `stack`?, `use`?, `held_model`?, `held_frames`?, `hold_up`?, `mod`? | an item; `icon` is a PNG in the package, `icon_file` a PNG copied into its `icons` folder; `use` is `{action: show}`, `{action: open_notebook}`, `{action: quest_step, quest, step}` or `{action: event}`; `hold_up: true` shows `held_model` over Link's head when he gets it |
 | `set_item` | `id`, `fields`?, `icon_file`?, `mod`? | its fields (`null` removes the optional ones); `icon_file` copies a new icon in |
 | `remove_letter`, `remove_chart`, `remove_item` | `id`, `confirm`, `mod`? | remove one (needs `"confirm": true`; a chart or item still in use is refused, with the list of uses) |
