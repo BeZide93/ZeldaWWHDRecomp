@@ -1594,7 +1594,7 @@ bool clouds_draw(id<MTLRenderCommandEncoder> enc, const MTLViewport& vp, Surface
                  Surface* depth, uint32_t depthSlice, bool (*ensure)(Surface* const*, const uint32_t*, Surface*, uint32_t));
 bool clouds_sky_surface(Surface* s);
 void clouds_after_sky_composite(id<MTLRenderCommandEncoder> enc, const uint32_t* regs, const MTLViewport& vp, bool hasDepth,
-                                id<MTLDepthStencilState> depthState);
+                                id<MTLDepthStencilState> depthState, bool (*ensure)(Surface* const*, const uint32_t*, Surface*, uint32_t));
 void clouds_mark_start(Surface* const* colors, const uint32_t* colorSlices, Surface* depth, uint32_t depthSlice,
                        bool (*ensure)(Surface* const*, const uint32_t*, Surface*, uint32_t));
 void draw(const uint32_t* regs, uint32_t prim, uint32_t count, uint32_t indexType, uint32_t indexAddr, uint32_t baseVertex,
@@ -1818,7 +1818,7 @@ void draw(const uint32_t* regs, uint32_t prim, uint32_t count, uint32_t indexTyp
     for (int i = 0; i < 8; i++)
         if (colors[i] && regs[mmCB_COLOR0_BASE + i]) g_target_drawn[regs[mmCB_COLOR0_BASE + i]].drawn(R.frame);
     if (depth && regs[mmDB_DEPTH_BASE]) g_target_drawn[regs[mmDB_DEPTH_BASE]].drawn(R.frame);
-    if (samplesSky) clouds_after_sky_composite(enc, regs, vp, depth != nullptr, get_depth_state(regs, depth != nullptr));
+    if (samplesSky) clouds_after_sky_composite(enc, regs, vp, depth != nullptr, get_depth_state(regs, depth != nullptr), ensure_pass);
     // debug: WWHD_DUMP_DRAWS=frame:i,j,k dumps color target 0 after those draws
     static uint64_t dumpFrame = ~0ull;
     static std::set<uint64_t> dumpDraws = [] {

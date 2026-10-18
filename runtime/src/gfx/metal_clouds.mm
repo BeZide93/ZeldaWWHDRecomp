@@ -72,9 +72,9 @@ static Shade palette(constant Globals& g, float3 base, float far) {
     float3 lit = mix(float3(luma), base, sat);
     // full brightness by day; at night the palette's own (dark) level
     float mx = max(max(base.r, max(base.g, base.b)), 1e-3);
-    lit = lit / max(max(lit.r, max(lit.g, lit.b)), 1e-3) * mix(min(mx * 1.7, 1.0), 1.0, g.sun.w);
+    lit = lit / max(max(lit.r, max(lit.g, lit.b)), 1e-3) * mix(min(mx * 1.15, 1.0), 1.0, g.sun.w);
     lit *= 1.0 - 0.45 * storm;
-    float3 skyAmb = mix(g.sky.rgb, float3(1.0), 0.42);
+    float3 skyAmb = mix(g.sky.rgb, float3(1.0), 0.42 * g.sun.w);  // no white ambient at night
     s.lit = lit;
     s.shadow = mix(lit * g.tune.z, skyAmb * mix(0.95, 0.55, storm), 0.48);
     s.mid = mix(lit * g.tune.w, skyAmb, 0.10);
@@ -84,7 +84,7 @@ static Shade palette(constant Globals& g, float3 base, float far) {
     s.mid = mix(s.mid, s.mid * float3(0.95, 0.80, 0.82), warm * 0.5);
     s.mid = mix(s.mid, s.mid * float3(1.0, 0.86, 0.80), warm * 0.8);
     s.rim = min(mix(lit * 1.08 + 0.04, float3(1.0, 0.86, 0.55), warm), float3(1.0));
-    float3 haze = mix(g.sky.rgb, float3(1.0), 0.55);
+    float3 haze = mix(g.sky.rgb, float3(1.0), 0.55 * g.sun.w);
     float f = far * 0.32;
     s.lit = mix(s.lit, haze, f), s.mid = mix(s.mid, haze, f), s.shadow = mix(s.shadow, haze, f), s.rim = mix(s.rim, haze, f * 0.5);
     return s;
@@ -584,7 +584,10 @@ static void encode(id<MTLRenderCommandEncoder> enc, const cloud_proto::Snapshot&
         float q = std::min(pitch / k[3], 1.0f), qc = q * q * q;
         float side = ang * k[0] * (1 + qc * k[4]);
         float tall = ang * (1 + c.height) * k[6] * (1 + qc * k[5]);
+        // overhead clouds: keep them from filling the sky (the game's cards grow toward the zenith)
+        static const float maxAng = envf("WWHD_CLOUDS_MAXANG", 0.16f);
         float rw = D * std::tan(std::min(side, 1.2f)) * sizeK;
+        rw = std::min(rw, D * maxAng) * (1.0f - 0.45f * std::clamp(pitch / 0.6f, 0.0f, 1.0f));
         float rh = D * std::tan(std::min(tall, 1.2f));
         if (rw < 1) continue;
         bool far = hor > bankDist;
@@ -710,6 +713,9 @@ static void timed_commit(const char* what) {
 }
 void flush();
 
+static void timed_commit(const char* what);
+void flush();
+
 // ---- full resolution (WWHD_CLOUDS_FULLRES=1): the clouds are drawn right after the draw that composites
 // the half-res sky buffer into the full-resolution target, with that draw's depth test
 static Surface* g_sky = nullptr;
@@ -717,7 +723,7 @@ static uint64_t g_skyFrame = ~0ull;
 static uint32_t g_pendingSeq = 0;
 bool clouds_sky_surface(Surface* s) { return g_pendingSeq && s == g_sky && g_skyFrame == R.frame; }
 void clouds_after_sky_composite(id<MTLRenderCommandEncoder> enc, const uint32_t* regs, const MTLViewport& vp, bool hasDepth,
-                                id<MTLDepthStencilState> depthState) {
+                                id<MTLDepthStencilState> depthState, bool (*ensure)(Surface* const*, const uint32_t*, Surface*, uint32_t)) {
     uint32_t seq = g_pendingSeq;
     g_pendingSeq = 0;
     static const bool trace = env_on("WWHD_CLOUDS_LOG");
@@ -734,7 +740,22 @@ void clouds_after_sky_composite(id<MTLRenderCommandEncoder> enc, const uint32_t*
         return [R.device newDepthStencilStateWithDescriptor:dd];
     }();
     (void)depthState;
+    static const bool timing = env_on("WWHD_CLOUDS_TIME");
+    if (timing && ensure) {  // the full-resolution cloud pass in a command buffer of its own
+        Surface* colors[8];
+        uint32_t slices[8];
+        for (int i = 0; i < 8; i++) colors[i] = R.passColor[i], slices[i] = R.passColorSlice[i];
+        Surface* depth = R.passDepth;
+        uint32_t depthSlice = R.passDepthSlice;
+        flush();
+        if (!ensure(colors, slices, depth, depthSlice)) return;
+        enc = R.enc;
+    }
     encode(enc, *cloud_proto::snapshot(seq), vp, kClouds, hasDepth ? skyOnly : nil);
+    if (timing && ensure) {
+        const int mode = cloud_proto::mode();
+        timed_commit(mode == cloud_proto::kVolume ? "volume, full res" : mode == cloud_proto::kCombo ? "combo, full res" : "sdf, full res");
+    }
 }
 
 // draw(), right after the pass is open, for every game draw between OP_CLOUDS_BEGIN and _END: with
