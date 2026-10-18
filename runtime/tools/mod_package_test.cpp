@@ -1,3 +1,4 @@
+#include <cctype>
 #include "mods/setup_run.h"
 #include "mod_test_host.h"
 #include "mods/packages.h"
@@ -761,6 +762,24 @@ int main(int argc, char** argv) {
         scene_manifest["id"]="malformed-scene";scene_manifest["scenes"]=mods::json::parse(R"([{"id":"bad"}])");
         std::ofstream(scene_only/"manifest.json")<<mods::json::dump(scene_manifest);
         assert(!install(scene_only.string(),error));
+        // The game's own objects by reference: the package carries no game data (by name or by content).
+        {
+            auto objects=root/"objects";fs::create_directories(objects/"content");std::ofstream(objects/"content"/"objects.marker")<<"original fixture";
+            auto om=mods::json::parse(R"({"format_version":1,"id":"objects","name":"Game objects","version":"1.0.0","game_id":"wwhd","kind":"content","content_dir":"content","requires":{"game_objects":1},"actors":[{"id":"palm","actor":"game:palm","stage":"sea","room":11,"position":{"x":0,"y":0,"z":0}}]})");
+            std::ofstream(objects/"manifest.json")<<mods::json::dump(om);
+            assert(install(objects.string(),error)&&view("objects").compatible);
+            fs::create_directories(objects/"assets");
+            for(const auto& [name,bytes]:std::vector<std::pair<std::string,std::string>>{{"Oyashi.bfres","x"},{"room.dzb","x"},{"tex.ftex","x"},{"Lwood.szs","x"},{"renamed.bin","Yaz0...."},{"data.dat","SARC...."},{"model.png","FRES...."}}){
+                om["id"]="objects-"+std::to_string(name.size())+name.substr(0,3);for(char& ch:om["id"].text)if(ch=='.')ch='-';for(char& ch:om["id"].text)ch=char(std::tolower((unsigned char)ch));
+                std::ofstream(objects/"manifest.json")<<mods::json::dump(om);
+                {std::ofstream f(objects/"assets"/name,std::ios::binary);f<<bytes;}
+                assert(!install(objects.string(),error)&&error.find("game data")!=std::string::npos&&error.find(name)!=std::string::npos);
+                fs::remove(objects/"assets"/name);
+            }
+            // a package without game objects keeps its own rules (a content mod may replace game files)
+            std::ofstream(objects/"assets"/"Lwood.szs")<<"x";om["id"]="objects-none";om.object.erase("actors");om.object.erase("requires");
+            std::ofstream(objects/"manifest.json")<<mods::json::dump(om);assert(install(objects.string(),error));
+        }
         auto world_fixture=[&](const std::string& id,unsigned count){
             auto source=root/id;fs::create_directories(source/"content");std::ofstream(source/"content"/(id+".marker"))<<"original fixture";
             auto m=mods::json::parse(R"({"format_version":1,"id":"fixture","name":"World graph fixture","version":"1.0.0","game_id":"wwhd","kind":"content","content_dir":"content","actors":[]})");m["id"]=id;

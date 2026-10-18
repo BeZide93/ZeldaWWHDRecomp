@@ -1,5 +1,6 @@
 #include "../exception_report.h"
 #include "packages.h"
+#include "story_game_objects_package.h"
 #include "manager.h"
 #include "mods.h"
 #include "traversal.h"
@@ -170,6 +171,10 @@ Manifest manifest(const fs::path& path){
            !story_notebook::parse_items(v,items,why)||!story_notebook::parse_actors(v,actors,why)||!story_notebook::parse_scenes(v,scenes,why))m.problem="Story quests: "+why;
         else world_declarations = !quests.empty() || !charts.empty() || !letters.empty() ||
                                   !items.empty() || !actors.empty() || !scenes.empty();
+        // the game's own objects by reference: the package holds no game data (they load from the player's game files)
+        if(m.problem.empty()&&std::any_of(actors.begin(),actors.end(),[](const story_notebook::ManifestActor& a){return a.game_object();}))
+            if(const auto found=story_game_objects::game_data_file(path);!found.empty())
+                m.problem="Game objects: the package holds game data ("+found+"); game objects load from the player's own game files";
     }
     std::vector<story_notebook::ManifestModel> models;std::string model_error;
     require(story_notebook::parse_models(v,models,model_error),"Models: "+model_error);

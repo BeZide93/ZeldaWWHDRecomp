@@ -107,7 +107,8 @@ std::string model_message(const std::string& why) {
 }
 bool game_file(const fs::path& p) {
     static const std::set<std::string> kinds = {".szs", ".arc", ".rarc", ".bfres", ".rpx", ".rpl", ".pack", ".bflim", ".bntx", ".sarc",
-                                                ".yaz0", ".wux", ".wud", ".iso", ".rvz", ".gcm", ".bfsar", ".bars", ".bfstm", ".msbt"};
+                                                ".yaz0", ".wux", ".wud", ".iso", ".rvz", ".gcm", ".bfsar", ".bars", ".bfstm", ".msbt",
+                                                ".dzb", ".dzr", ".dzs", ".ftex"};
     std::string ext = p.extension().string();
     for (char& c : ext) c = char(std::tolower((unsigned char)c));
     return kinds.contains(ext);
