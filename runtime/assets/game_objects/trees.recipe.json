@@ -13,7 +13,7 @@
       "variants": [{"id": "palm", "label": "Palm tree", "params": "0xFFFFFFFF"}],
       "transform": {"rotation": "yaw", "scale": [1, 1], "why": "its collision keeps the unscaled trunk"},
       "collision": true,
-      "memory": {"instance_bytes": 12288, "archive_bytes": 280000},
+      "memory": {"instance_bytes": 19456, "archive_bytes": 0, "measured": "solid heap 17060 bytes and about 1 KiB more (WWHD_MOD_ACTOR_HEAPS=1); the archive is in a permanent pack, already in memory"},
       "notes": "no parameters are read; the wind sway is the game's own (dKyw wind)"
     },
     {
@@ -26,7 +26,7 @@
       "variants": [{"id": "tree", "label": "Large tree", "params": "0xFFFFFFFF"}],
       "transform": {"rotation": "yaw", "scale": [0.5, 1.5], "why": "the collision follows the scale; the game culls it by an unscaled box, so it stays below 1.5"},
       "collision": true,
-      "memory": {"instance_bytes": 12288, "archive_bytes": 275000},
+      "memory": {"instance_bytes": 19456, "archive_bytes": 0, "measured": "solid heap 16764-16880 bytes and about 1 KiB more; the archive is in a permanent pack, already in memory"},
       "notes": "no parameters are read"
     }
   ]

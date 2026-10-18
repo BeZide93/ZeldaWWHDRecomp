@@ -17,7 +17,7 @@
       ],
       "transform": {"rotation": "yaw", "scale": [1, 1], "why": "its collision keeps the unscaled shape"},
       "collision": true,
-      "memory": {"instance_bytes": 12288, "archive_bytes": 470000},
+      "memory": {"instance_bytes": 16384, "archive_bytes": 0, "measured": "solid heap 13008-13412 bytes and about 1 KiB more; the archive is in a permanent pack, already in memory"},
       "notes": "the parameter's low byte picks the model (0 table, 1 stool, 2 stool without collision); nothing else is read"
     }
   ]

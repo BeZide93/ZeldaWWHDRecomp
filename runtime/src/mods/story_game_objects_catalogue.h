@@ -173,10 +173,17 @@ inline bool Catalogue::add_table(const std::string& table, std::string& why) {
 }  // namespace story_game_objects
 #include "game_object_recipes.inc"
 namespace story_game_objects {
+// whether the port's catalogue was built (the inert-start check: a start without mods and without --editor never does)
+inline bool& built_flag() {
+    static bool built = false;
+    return built;
+}
+inline bool built() { return built_flag(); }
 // The port's catalogue, built once from the compiled-in recipes, on first use (never at start-up: a
 // game without mods and without --editor doesn't build it).
 inline const Catalogue& catalogue() {
     static const Catalogue c = [] {
+        built_flag() = true;
         Catalogue built;
         for (const char* recipe : kRecipes) {
             std::string why;

@@ -745,6 +745,7 @@ int main() {
     assert(mem::fixture_runtime_allocs==0&&story_particles::configured==0&&story_item_models::configured==0);
     assert(story_native_wait_runtime::startups==0&&!guestmods::g_native_scenes&&!guestmods::g_package_observer);
     assert(story_actors::live_kinds==0);  // the editor's live kinds only with --editor
+    assert(!story_game_objects::built());  // the game objects catalogue only with a mod that names one, or --editor
     Cpu c{};
     c.r[3] = 5; port(&c);
     assert((calls == std::vector<int>{1, 3, 6})); assert(c.r[3] == 11);
