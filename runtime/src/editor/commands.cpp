@@ -20,6 +20,7 @@
 #include "commands.h"
 
 
+#include "../mods/story_items_core.h"
 #include "../mods/story_mail_book.h"
 #include "../mods/story_manifest.h"
 
@@ -67,7 +68,7 @@ const std::vector<CommandInfo> kCommands = {
     {"fly_camera", "The free camera: Link stays where he is and gets no input; fly with the mouse, WASD, Q/E, Shift (faster), or the controller's sticks and shoulder buttons.",
      {{"on", "boolean", "", true}, {"place_link", "boolean", "when turning it off: Link moves to the camera's position"}}},
     {"test_mode", "Test mode: in-game saves go to a separate test save, and the test commands are allowed.", {{"on", "boolean", "", true}}},
-    {"reset_quest", "Test mode: erases the open mod's quest progress and flags from the loaded Quest Log (never another mod's).", {{"mod", "string", ""}, {"confirm", "boolean", "must be true", true}}, false, true},
+    {"reset_quest", "Test mode: erases the open mod's story progress from the loaded Quest Log: its quests, flags, letters, the charts and items Link got from it (never another mod's, never the game's own).", {{"mod", "string", ""}, {"confirm", "boolean", "must be true", true}}, false, true},
     {"save_state", "Test mode: saves a test state (the game's progress, Link's place and the open mod's flags).", {{"slot", "integer", "1..3", true}, {"kind", "string", "portable (default) or full"}}},
     {"load_state", "Test mode: loads a test state (the game's current progress is replaced).",
      {{"slot", "integer", "1..3", true}, {"kind", "string", "portable (default) or full"}, {"confirm", "boolean", "must be true: the current progress is replaced", true}}, false, true},
@@ -621,16 +622,20 @@ std::vector<Record> mod_records(const std::string& mod, const Value& manifest) {
     for (const auto& q : manifest.get("quests").array) {
         const uint16_t key = letter_key(mod, q.get("id").string());  // story_notebook_list.h quest_key
         for (uint8_t kind : {kRecordQuest, kRecordTracked, kRecordCarried, kRecordQuestFlags, kRecordSailLine, kRecordQuestOrder,
-                             kRecordQuestActionReward}) add(kind, key);
+                             kRecordQuestActionReward, story_items::kRecordQuestRewardItem}) add(kind, key);
         if (q.get("letter").get("id").type == Value::String) {
             add(kRecordLetter, letter_key(mod, q.get("letter").get("id").text));
             add(kRecordLetterEnclosures, letter_key(mod, q.get("letter").get("id").text));
         }
     }
-    for (const auto& l : manifest.get("letters").array) {
-        add(kRecordLetter, letter_key(mod, l.get("id").string()));
-        add(kRecordLetterEnclosures, letter_key(mod, l.get("id").string()));
-    }
+    for (const auto& l : manifest.get("letters").array)
+        for (uint8_t kind : {kRecordLetter, kRecordLetterEnclosures, kRecordLetterDayLow, kRecordLetterDayHigh}) add(kind, letter_key(mod, l.get("id").string()));
+    // the mod's charts (owned, opened, finished: story_chart.h) and items (how many, their place in the bag,
+    // the game number lent to them, their buttons: story_items_core.h)
+    for (const auto& c : manifest.get("charts").array) add(kRecordMarker, letter_key(mod, c.get("id").string()));
+    for (const auto& it : manifest.get("items").array)
+        for (uint8_t kind : {story_items::kRecordItemCount, story_items::kRecordItemPlace, story_items::kRecordItemNumber, story_items::kRecordItemButtons})
+            add(kind, story_items::item_key(mod, it.get("id").string()));
     return out;
 }
 

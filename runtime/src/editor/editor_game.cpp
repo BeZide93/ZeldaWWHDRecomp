@@ -742,6 +742,14 @@ public:
         if (!story_store::ready()) return why = "no story progress in this game (no story mod is loaded)", false;
         erased = 0;
         post([mod, own, shared](Cpu*) {
+            // the mod's items first, as taking them does (an item that waited for a place gets the freed one)
+            for (const auto& item : story_items::installed()) {
+                const Record count{story_items::kRecordItemCount, item.key};
+                if (item.mod != mod || std::find(own.begin(), own.end(), count) == own.end() ||
+                    std::find(shared.begin(), shared.end(), count) != shared.end())
+                    continue;
+                if (const int32_t n = story_items::count(mod, item.id); n > 0) story_items::take(mod, item.id, uint32_t(n));
+            }
             story_mail::Book book = story_store::book();
             unsigned skipped = 0;
             const unsigned n = editor::reset_records(book, own, shared, skipped);

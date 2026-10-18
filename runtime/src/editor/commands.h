@@ -348,7 +348,8 @@ const char* island_name(int room);  // "Windfall Island"; nullptr outside 1..49
 // for each package its placed actors and quest step places.
 std::vector<Location> build_locations(const std::vector<std::pair<std::string, std::vector<int>>>& stage_rooms,
                                       const std::vector<std::pair<std::string, Value>>& packages);
-// The story records that hold a mod's progress (its actor and scene flags, quests and letters).
+// The story records that hold a mod's progress (its actor and scene flags, quests, letters, and the charts and
+// items Link got from it).
 std::vector<Record> mod_records(const std::string& mod, const Value& manifest);
 // Erases `own` from a story area, except records that another mod's names also map to (`shared`).
 unsigned reset_records(story_mail::Book& book, const std::vector<Record>& own, const std::vector<Record>& shared, unsigned& skipped);

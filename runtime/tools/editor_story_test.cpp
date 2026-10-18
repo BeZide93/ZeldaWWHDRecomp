@@ -6,6 +6,8 @@
 // Usage: editor_story_test
 #include "editor/commands.h"
 #include "editor/quests.h"
+#include "mods/story_items_core.h"
+#include "mods/story_mail_book.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -337,12 +339,150 @@ void search_and_graph() {
     CHECK(editor::story_references(m, "letter", "bottle").empty());
 }
 
+// The story format's gaps closed (letters that wait, charts from dialogue, items held up on receipt,
+// resets that clear charts and items): the fields through the commands, with undo, the validator's
+// refusals, references that follow, and the records reset_quest and test states cover.
+struct RecordingHost : FakeHost {
+    bool test = true;
+    std::vector<editor::Record> own, shared;
+    int days = 0;
+    bool test_mode() override { return test; }
+    bool reset_records(const std::string&, const std::vector<editor::Record>& o, const std::vector<editor::Record>& sh, unsigned&, std::string&) override {
+        own = o, shared = sh;
+        return true;
+    }
+    bool advance_days(int n, std::string&) override {
+        days += n;
+        return true;
+    }
+};
+bool has_record(const std::vector<editor::Record>& list, uint8_t kind, uint16_t key) {
+    return std::find(list.begin(), list.end(), editor::Record{kind, key}) != list.end();
+}
+
+void format_gaps(const fs::path& tmp) {
+    std::error_code ec;
+    fs::remove_all(tmp, ec);
+    const fs::path pkg = tmp / "pkg";
+    fs::create_directories(pkg / "models", ec);
+    fs::create_directories(pkg / "icons", ec);
+    { std::ofstream(pkg / "models" / "lamp.glb") << "glb"; }
+    write_png(pkg / "icons" / "crystal.png", 64, 64);
+    RecordingHost host;
+    editor::Session s(&host);
+    s.add_package("story-test", "Story test", pkg.string(), json(kManifest));
+    auto m = [&]() { return *s.manifest("story-test"); };
+    auto run = [&](const char* command, const char* params) { return s.run(command, json(params)); };
+    Value r;
+
+    // ---- items held up on receipt (hold_up needs held_model; held_model no longer needs a use with it)
+    r = run("add_item", R"({"id": "crystal", "name": "Lamp crystal", "description": "It glows.", "icon": "icons/crystal.png", "hold_up": true})");
+    CHECK(!ok(r) && has(error(r), "held_model"));
+    r = run("add_item", R"({"id": "crystal", "name": "Lamp crystal", "description": "It glows.", "icon": "icons/crystal.png", "held_model": "lamp-model"})");
+    CHECK(!ok(r) && has(error(r), "use action"));
+    r = run("add_item", R"({"id": "crystal", "name": "Lamp crystal", "description": "It glows.", "icon": "icons/crystal.png", "held_model": "lamp-model", "hold_up": "yes"})");
+    CHECK(!ok(r) && has(error(r), "boolean"));  // the command's own parameter check
+    r = run("set_item", R"({"id": "storm", "fields": {"hold_up": "yes"}})");
+    CHECK(!ok(r));
+    r = run("add_item", R"({"id": "crystal", "name": "Lamp crystal", "description": "It glows.", "icon": "icons/crystal.png", "held_model": "lamp-model", "hold_up": true})");
+    CHECK(ok(r) && m().get("items").array[0].get("hold_up").boolean);
+    r = run("set_item", R"({"id": "crystal", "fields": {"hold_up": null}})");
+    CHECK(!ok(r) && has(error(r), "use action"));  // the held model would be left without a use
+    r = run("set_item", R"({"id": "crystal", "fields": {"hold_up": null, "held_model": null}})");
+    CHECK(ok(r) && m().get("items").array[0].get("hold_up").type == Value::Null);
+    CHECK(ok(s.run("undo")) && m().get("items").array[0].get("hold_up").boolean && m().get("items").array[0].get("held_model").string() == "lamp-model");
+
+    // ---- charts from dialogue: give chart:<id> in an actor's then, a talk's then, a scene's end
+    CHECK(ok(run("add_chart", R"({"id": "keeper-map", "name": "Keeper's map", "place": {"x": 1000, "z": -200000}})")));
+    r = run("set_then", R"({"id": "keeper", "actions": [{"action": "give", "id": "chart:nowhere"}]})");
+    CHECK(!ok(r) && has(error(r), "undeclared mod chart"));
+    r = run("set_then", R"({"id": "keeper", "actions": [{"action": "give", "id": "chart:keeper-map", "count": 2}]})");
+    CHECK(!ok(r) && has(error(r), "no count"));
+    r = run("set_then", R"({"id": "keeper", "actions": [{"action": "take", "id": "chart:keeper-map"}]})");
+    CHECK(!ok(r) && has(error(r), "can't be taken"));
+    r = run("set_then", R"({"id": "keeper", "actions": [{"action": "give", "id": "chart:keeper-map"}, {"action": "give", "id": "item:crystal"},
+                                                        {"action": "quest_step", "id": "lighthouse", "step": 2}]})");
+    CHECK(ok(r) && m().get("actors").array[0].get("then").array[0].get("id").string() == "chart:keeper-map");
+    r = run("set_actor", R"({"id": "keeper", "property": "talks", "value": [{"lines": ["Here."], "then": [{"action": "give", "id": "chart:keeper-map"}]}]})");
+    CHECK(!ok(r));  // talks never together with lines or then
+    CHECK(ok(run("add_scene", R"({"id": "thanks"})")));
+    CHECK(ok(run("edit_scene_step", R"({"scene": "thanks", "step": 1, "fields": {"then": [{"action": "give", "id": "chart:keeper-map"}]}})")));
+    r = s.run("list_charts");
+    const std::string uses = mods::json::dump(r.get("result").array[0].get("used_by"));
+    CHECK(has(uses, "actor keeper > then") && has(uses, "scene thanks > steps"));
+    r = run("remove_chart", R"({"id": "keeper-map", "confirm": true})");
+    CHECK(!ok(r) && has(error(r), "still used"));
+    // the quest graph says it, and starting at step 2 the chart is Link's
+    r = s.run("quest_graph", json(R"({"quest": "lighthouse"})"));
+    CHECK(has(mods::json::dump(r.get("result")), "gives chart:keeper-map"));
+    editor::StepStart start;
+    std::string why;
+    CHECK(editor::step_start("story-test", m(), "lighthouse", 2, "none", start, why));
+    CHECK(start.charts == std::vector<std::string>{"keeper-map"});
+    bool chart_record = false;
+    for (const auto& v : editor::step_records("story-test", "lighthouse", start))
+        chart_record = chart_record || (v.record.kind == story_mail::kRecordMarker && v.record.key == story_mail::letter_key("story-test", "keeper-map") && v.value == 1);
+    CHECK(chart_record);
+    for (const auto& [id, n] : start.items) CHECK(id != "keeper-map");  // a chart is no item
+
+    // ---- letters that wait: when (a quest step or done, flags) and after_days
+    r = run("add_letter", R"({"id": "thanks", "sender": "The keeper", "text": "The ships come home.", "when": {"quest": "nope", "done": true}})");
+    CHECK(!ok(r) && has(error(r), "doesn't declare"));
+    r = run("add_letter", R"({"id": "thanks", "sender": "The keeper", "text": "The ships come home.", "after_days": 0})");
+    CHECK(!ok(r) && has(error(r), "1..255"));
+    r = run("add_letter", R"({"id": "thanks", "sender": "The keeper", "text": "The ships come home.", "when": {"quest": "lighthouse", "done": true},
+                              "after_days": 3, "encloses": ["chart:keeper-map"]})");
+    CHECK(ok(r) && m().get("letters").array[0].get("after_days").number == 3 && m().get("letters").array[0].get("when").get("done").boolean);
+    r = run("set_letter", R"({"id": "thanks", "fields": {"when": {"quest": "lighthouse", "step": 2, "flag": "keeper-read"}}})");
+    CHECK(ok(r) && m().get("letters").array[0].get("when").get("step").number == 2);
+    r = run("set_letter", R"({"id": "thanks", "fields": {"when": {"flag": "nobody-sets-it"}}})");
+    CHECK(!ok(r) && has(error(r), "flag"));
+    // the quest's steps move: the letter's step follows; a step or quest it waits for can't go
+    CHECK(ok(run("move_quest_step", R"({"quest": "lighthouse", "step": 2, "to": 1})")));
+    CHECK(m().get("letters").array[0].get("when").get("step").number == 1);
+    CHECK(ok(s.run("undo")) && m().get("letters").array[0].get("when").get("step").number == 2);
+    r = run("remove_quest_step", R"({"quest": "lighthouse", "step": 2, "confirm": true})");
+    CHECK(!ok(r) && has(error(r), "letter thanks waits"));
+    r = run("remove_quest", R"({"quest": "lighthouse", "confirm": true})");
+    CHECK(!ok(r) && has(error(r), "letter thanks waits"));
+    r = run("set_letter", R"({"id": "thanks", "fields": {"when": null, "after_days": null}})");
+    CHECK(ok(r) && m().get("letters").array[0].get("when").type == Value::Null && m().get("letters").array[0].get("after_days").type == Value::Null);
+    CHECK(ok(s.run("undo")) && m().get("letters").array[0].get("after_days").number == 3);
+    // the calendar for testing: test mode only
+    host.test = false;
+    CHECK(!ok(run("advance_days", R"({"days": 2})")));
+    host.test = true;
+    CHECK(!ok(run("advance_days", R"({"days": 0})")));
+    CHECK(ok(run("advance_days", R"({"days": 2})")) && host.days == 2);
+
+    // ---- reset_quest: the charts and items Link got from the mod, its letters' waiting days, never another mod's
+    Value other = json(kManifest);
+    other["id"] = "other";
+    other["charts"] = json(R"([{"id": "keeper-map", "name": "Other map", "place": {"x": 0, "z": 0}}])");
+    s.add_package("other", "Other", "", other);
+    CHECK(ok(run("reset_quest", R"({"mod": "story-test", "confirm": true})")));
+    using namespace story_mail;
+    const uint16_t chart = letter_key("story-test", "keeper-map"), item = letter_key("story-test", "crystal"), letter = letter_key("story-test", "thanks"),
+                   quest = letter_key("story-test", "lighthouse");
+    CHECK(has_record(host.own, kRecordMarker, chart));
+    for (uint8_t kind : {story_items::kRecordItemCount, story_items::kRecordItemPlace, story_items::kRecordItemNumber, story_items::kRecordItemButtons})
+        CHECK(has_record(host.own, kind, item));
+    CHECK(has_record(host.own, kRecordLetterDayLow, letter) && has_record(host.own, kRecordLetterDayHigh, letter));
+    CHECK(has_record(host.own, story_items::kRecordQuestRewardItem, quest));
+    CHECK(has_record(host.shared, kRecordMarker, letter_key("other", "keeper-map")) && !has_record(host.own, kRecordMarker, letter_key("other", "keeper-map")));
+    // everything undone: the package as it was
+    while (s.undo_depth()) CHECK(ok(s.run("undo")));
+    CHECK(m() == json(kManifest));
+    fs::remove_all(tmp, ec);
+}
+
 }  // namespace
 
 int main() {
     letters_charts_items(fs::temp_directory_path() / "wwhd-editor-story-test");
     problems();
     search_and_graph();
+    format_gaps(fs::temp_directory_path() / "wwhd-editor-story-gaps-test");
     if (g_failures) {
         std::fprintf(stderr, "editor_story_test: %d failure(s)\n", g_failures);
         return 1;

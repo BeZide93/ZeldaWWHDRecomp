@@ -4,7 +4,9 @@
 #include "editor/commands.h"
 #include "editor/mcp.h"
 #include "editor/mcp_server.h"
+#include "mods/story_mail_book.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
@@ -62,11 +64,15 @@ struct FakeHost : editor::Host {
     Value fly_state() override { return Value(); }
     bool set_test_mode(bool on, std::string&) override { return testing = on, true; }
     bool test_mode() override { return testing; }
-    bool reset_records(const std::string&, const std::vector<editor::Record>&, const std::vector<editor::Record>&, unsigned& erased,
+    bool reset_records(const std::string&, const std::vector<editor::Record>& own, const std::vector<editor::Record>&, unsigned& erased,
                        std::string&) override {
         erased = 0;
+        reset_own = own;
         return true;
     }
+    bool advance_days(int n, std::string&) override { return days += n, true; }
+    std::vector<editor::Record> reset_own;
+    int days = 0;
     bool test_state(bool, int, const std::string&, const std::vector<editor::Record>&, std::string&) override { return true; }
     bool read_records(const std::vector<editor::Record>& records, std::vector<int>& values, std::string&) override {
         values.assign(records.size(), -1);
@@ -714,6 +720,58 @@ void story_tools() {
     CHECK(m->get("items").array.size() == 1 && m->get("charts").array.size() == 1 && m->get("letters").array.size() == 1);
 }
 
+// The lighthouse keeper's quest without code, through tools/call: a content package without a content
+// folder (quest, chart, item, letters only besides the keeper), the keeper's dialogue that gives a chart
+// and an item Link holds up, a thank-you letter days after the quest is done, the calendar for testing,
+// and reset_quest covering the chart and the item.
+void story_gap_tools() {
+    FakeBackend be;
+    be.session.add_package("lighthouse", "The lighthouse keeper", "", json(R"({
+      "format_version": 1, "id": "lighthouse", "name": "The lighthouse keeper", "version": "1.0.0", "kind": "content",
+      "models": [{"id": "crystal-model", "source": "models/crystal.glb", "kind": "static"}],
+      "actors": [{"id": "keeper", "actor": "sign", "stage": "sea", "room": 11, "position": {"x": 10, "y": 1040, "z": -201500},
+                  "flag": "keeper-read", "lines": ["The light is back. Take my map."]}]})"));
+    Handler h(be, kToken, 47615);
+    bool reply = false;
+    Value r = h.message(json(R"({"jsonrpc":"2.0","id":3,"method":"tools/list"})"), reply);
+    std::string all;
+    for (const auto& t : r.get("result").get("tools").array) all += mods::json::dump(t) + "\n";
+    // the descriptions teach the new forms
+    for (const char* form : {"{action: give, id: chart:<id>}", "after_days", "{quest, done: true}", "hold_up", "advance_days", "charts and items Link got"})
+        if (all.find(form) == std::string::npos) {
+            std::fprintf(stderr, "  no %s in the tool descriptions\n", form);
+            CHECK(false);
+        }
+    CHECK(!is_error(call(h, "add_quest", json(R"({"id":"light","title":"The lost light","text":"Bring the crystal back."})"))));
+    CHECK(!is_error(call(h, "add_chart", json(R"({"id":"keeper-map","name":"Keeper's map","place":{"x":1200,"z":-198000}})"))));
+    Value v = call(h, "add_item", json(R"({"id":"crystal","name":"Lamp crystal","description":"It glows.","icon":"icons/crystal.png","hold_up":true})"));
+    CHECK(is_error(v) && text_of(v).find("held_model") != std::string::npos);
+    CHECK(!is_error(call(h, "add_item", json(R"({"id":"crystal","name":"Lamp crystal","description":"It glows.","icon":"icons/crystal.png","held_model":"crystal-model","hold_up":true})"))));
+    v = call(h, "set_then", json(R"({"id":"keeper","actions":[{"action":"give","id":"chart:nowhere"}]})"));
+    CHECK(is_error(v) && text_of(v).find("undeclared mod chart") != std::string::npos);
+    CHECK(!is_error(call(h, "set_then", json(R"({"id":"keeper","actions":[{"action":"give","id":"item:crystal"},{"action":"give","id":"chart:keeper-map"},{"action":"quest_done","id":"light"}]})"))));
+    v = call(h, "add_letter", json(R"({"id":"thanks","sender":"The keeper","text":"Dear Link,\nsince then the ships come safely home.","when":{"quest":"light","done":true},"after_days":2})"));
+    CHECK(!is_error(v));
+    v = call(h, "add_letter", json(R"({"id":"bad","sender":"The keeper","text":"Hi.","when":{"quest":"light"}})"));
+    CHECK(is_error(v) && text_of(v).find("done") != std::string::npos);
+    v = call(h, "check_package", Value());
+    CHECK(!is_error(v) && text_of(v).find("\"valid\":true") != std::string::npos);
+    v = call(h, "quest_graph", json(R"({"quest":"light"})"));
+    CHECK(!is_error(v) && text_of(v).find("gives chart:keeper-map") != std::string::npos);
+    // test mode: the calendar moves on, reset_quest clears the chart and the item with the quest
+    CHECK(is_error(call(h, "advance_days", json(R"({"days":2})"))));
+    CHECK(!is_error(call(h, "test_mode", json(R"({"on":true})"))));
+    CHECK(!is_error(call(h, "advance_days", json(R"({"days":2})"))) && be.host.days == 2);
+    be.allow = true;
+    CHECK(!is_error(call(h, "reset_quest", json(R"({"confirm":true})"))));
+    auto has = [&](uint8_t kind, const std::string& id) {
+        return std::find(be.host.reset_own.begin(), be.host.reset_own.end(), editor::Record{kind, story_mail::letter_key("lighthouse", id)}) != be.host.reset_own.end();
+    };
+    CHECK(has(story_mail::kRecordMarker, "keeper-map") && has(10, "crystal") && has(story_mail::kRecordLetterDayLow, "thanks") && has(story_mail::kRecordQuest, "light"));
+    const Value* m = be.session.manifest("lighthouse");
+    CHECK(m->get("content_dir").type == Value::Null && m->get("letters").array.size() == 1 && m->get("items").array[0].get("hold_up").boolean);
+}
+
 int main() {
     http_parsing();
     checks();
@@ -723,6 +781,7 @@ int main() {
     quest_tools();
     quest_format_tools();
     story_tools();
+    story_gap_tools();
     listener();
     if (g_failures) {
         std::fprintf(stderr, "%d check(s) failed\n", g_failures);
