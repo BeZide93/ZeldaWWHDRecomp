@@ -1190,30 +1190,51 @@ static gfx::Box pip_tv_box() {
     const ImVec2 ds = ImGui::GetIO().DisplaySize;
     return {x * ds.x, y * ds.y, w * ds.x, h * ds.y};
 }
-static void pip_move(gfx::Box tv, float x, float y, bool snap = true) {
-    auto p = gfx::pip_place(tv, gfx::g_drc_aspect, gfx::g_pip_size, x, y, snap);
-    gfx::pip_set_position(p);
+// Dragging and the D-pad place the picture freely (#221): passing over a preset never catches it.
+static void pip_move(gfx::Box tv, float x, float y) {
+    gfx::pip_set_position(gfx::pip_place(tv, gfx::g_drc_aspect, gfx::g_pip_size, x, y));
 }
+// The nine preset targets in the diagram: large enough to see and to hit with a finger.
+static float pip_target_radius() { return std::max(7.0f, ImGui::GetFontSize() * 0.5f); }
 static void pip_diagram() {
     const gfx::Box screen = pip_tv_box();
-    const float w = std::min(240.0f, ImGui::GetContentRegionAvail().x);
+    const float w = std::min(320.0f, ImGui::GetContentRegionAvail().x);
     const ImVec2 origin = ImGui::GetCursorScreenPos();
     const gfx::Box tv{origin.x, origin.y, w, w * screen.h / screen.w};
     ImGui::InvisibleButton("Placement diagram", ImVec2(tv.w, tv.h), ImGuiButtonFlags_EnableNav);
     const bool active = ImGui::IsItemActive(), focused = ImGui::IsItemFocused();
     auto b = gfx::pip_box(tv, gfx::g_drc_aspect, gfx::g_pip_size, gfx::pip_position());
+    const float radius = pip_target_radius();
+    // A press only becomes a drag once the pointer moves past ImGui's drag threshold. A press that is
+    // released without dragging is a click/tap: on a preset target it snaps there, elsewhere outside the
+    // picture it moves the picture's centre to that point.
     static ImVec2 offset;
+    static bool pointer = false, dragged = false, grabbed = false;
     if (ImGui::IsItemActivated()) {
+        pointer = ImGui::GetCurrentContext()->ActiveIdSource == ImGuiInputSource_Mouse;
+        dragged = false;
         const ImVec2 m = ImGui::GetIO().MousePos;
-        const bool inside = m.x >= b.x && m.x <= b.x + b.w && m.y >= b.y && m.y <= b.y + b.h;
-        offset = inside ? ImVec2(m.x - b.x - b.w / 2, m.y - b.y - b.h / 2) : ImVec2(0, 0);
+        grabbed = m.x >= b.x && m.x <= b.x + b.w && m.y >= b.y && m.y <= b.y + b.h;
+        offset = grabbed ? ImVec2(m.x - b.x - b.w / 2, m.y - b.y - b.h / 2) : ImVec2(0, 0);
     }
-    if (active && ImGui::IsMouseDown(0)) {
+    if (active && pointer && ImGui::IsMouseDown(0) && ImGui::IsMouseDragging(0))
+        dragged = true;
+    if (active && pointer && dragged) {
         const auto m = ImGui::GetIO().MousePos;
         pip_move(tv, (m.x - offset.x - tv.x) / tv.w, (m.y - offset.y - tv.y) / tv.h);
     }
-    if (ImGui::IsItemDeactivated())
+    if (ImGui::IsItemDeactivated()) {
+        if (pointer && !dragged) {
+            const ImVec2 m = ImGui::GetIO().MouseClickedPos[0];
+            const int a = gfx::pip_target_at(tv, m.x, m.y, radius * 1.5f);
+            if (a >= 0)
+                gfx::pip_set_position({a, gfx::g_pip_x, gfx::g_pip_y});
+            else if (!grabbed)
+                pip_move(tv, (m.x - tv.x) / tv.w, (m.y - tv.y) / tv.h);
+        }
+        pointer = dragged = false;
         hostui::post([] { hostui::save_pip_position(); });
+    }
     if (focused) {
         for (auto key :
              {ImGuiKey_GamepadDpadLeft, ImGuiKey_GamepadDpadRight, ImGuiKey_GamepadDpadUp, ImGuiKey_GamepadDpadDown,
@@ -1231,10 +1252,8 @@ static void pip_diagram() {
             dy = -0.01f;
         if (pressed(ImGuiKey_GamepadDpadDown) || pressed(ImGuiKey_DownArrow))
             dy = 0.01f;
-        // Do not snap each step: otherwise a 1% step would stick at a preset
-        // forever.
         if (dx || dy) {
-            pip_move(tv, (b.x - tv.x + b.w / 2) / tv.w + dx, (b.y - tv.y + b.h / 2) / tv.h + dy, false);
+            pip_move(tv, (b.x - tv.x + b.w / 2) / tv.w + dx, (b.y - tv.y + b.h / 2) / tv.h + dy);
             hostui::post([] { hostui::save_pip_position(); });
         }
     }
@@ -1243,14 +1262,20 @@ static void pip_diagram() {
     d->AddRectFilled(origin, ImVec2(tv.x + tv.w, tv.y + tv.h), IM_COL32(18, 28, 36, 255));
     d->AddRect(origin, ImVec2(tv.x + tv.w, tv.y + tv.h),
                focused ? IM_COL32(255, 210, 80, 255) : IM_COL32(180, 190, 200, 255));
-    for (int a = 0; a < 9; ++a) {
-        const auto q = gfx::pip_box(tv, gfx::g_drc_aspect, gfx::g_pip_size, {a, 0, 0});
-        d->AddCircleFilled(ImVec2(q.x + q.w / 2, q.y + q.h / 2), 2, IM_COL32(180, 190, 200, 110));
-    }
     d->AddRectFilled(ImVec2(b.x, b.y), ImVec2(b.x + b.w, b.y + b.h),
                      IM_COL32(75, 180, 220, int(255 * gfx::g_pip_opacity)));
     d->AddRect(ImVec2(b.x, b.y), ImVec2(b.x + b.w, b.y + b.h), IM_COL32(235, 245, 255, 255));
-    note("Tap or drag to place. Focus the diagram and use the D-pad to move.");
+    // Targets on top of the picture, so they stay visible at large sizes; the chosen preset is filled.
+    const int anchor = gfx::g_pip_anchor;
+    for (int a = 0; a < gfx::kPipCustom; ++a) {
+        ImVec2 c;
+        gfx::pip_target_centre(tv, a, &c.x, &c.y);
+        d->AddCircleFilled(c, radius, a == anchor ? IM_COL32(255, 210, 80, 235) : IM_COL32(18, 28, 36, 170));
+        d->AddCircle(c, radius, a == anchor ? IM_COL32(255, 240, 200, 255) : IM_COL32(220, 230, 240, 230), 0,
+                     std::max(1.5f, radius * 0.22f));
+    }
+    note("Drag to place the picture anywhere. Click or tap a circle to snap it to that spot. "
+         "Focus the diagram and use the D-pad to move.");
 }
 static void pip_live_drag() {
     if (!gfx::g_pip_preview)
@@ -1281,18 +1306,12 @@ static void pip_live_drag() {
     ImGui::PopStyleVar();
 }
 
-// Integer widgets share the same bounds for mouse, touch, typed and controller input.
-static void pip_percent(const char* label, const char* exactLabel, float value, int minimum, int maximum,
-                        void (*save)(float)) {
-    int percent = int(std::round(value * 100));
-    if (ImGui::SliderInt(label, &percent, minimum, maximum, "%d%%", ImGuiSliderFlags_AlwaysClamp))
+// One slider per value; the bounds hold for mouse, touch, controller and ImGui's Ctrl+click typing.
+static void pip_percent(const char* label, float value, float minimum, float maximum, void (*save)(float)) {
+    const int lo = int(std::lround(minimum * 100)), hi = int(std::lround(maximum * 100));
+    int percent = std::clamp(int(std::lround(value * 100)), lo, hi);
+    if (ImGui::SliderInt(label, &percent, lo, hi, "%d%%", ImGuiSliderFlags_AlwaysClamp))
         hostui::post([percent, save] { save(percent / 100.0f); });
-    // Android's taller +/- buttons need room without squeezing the number field.
-    ImGui::SetNextItemWidth(std::max(120.0f, ImGui::GetFrameHeight() * 4));
-    if (ImGui::InputInt(exactLabel, &percent, 1, 5)) {
-        percent = std::clamp(percent, minimum, maximum);
-        hostui::post([percent, save] { save(percent / 100.0f); });
-    }
 }
 
 void tab_display() {
@@ -1343,18 +1362,10 @@ void tab_display() {
                 ImGui::EndCombo();
             }
             pip_diagram();
-            pip_percent("Size (%)", "Exact size (%)", hostui::pip_size(), 10, 50, hostui::set_pip_size);
-            for (int v : {20, 25, 33, 40}) {
-                if (v != 20)
-                    ImGui::SameLine();
-                char label[24];
-                snprintf(label, sizeof label, "%d%%##pipSize", v);
-                if (ImGui::Button(label))
-                    hostui::post([v] { hostui::set_pip_size(v / 100.0f); });
-            }
-            pip_percent("Opacity (%)", "Exact opacity (%)", hostui::pip_opacity(), 20, 100, hostui::set_pip_opacity);
-            note("Ctrl+click a slider to type an exact percentage. The game picture "
-                 "previews changes while this section is open.");
+            pip_percent("Size (%)", hostui::pip_size(), gfx::kPipSizeMin, gfx::kPipSizeMax, hostui::set_pip_size);
+            pip_percent("Opacity (%)", hostui::pip_opacity(), gfx::kPipOpacityMin, gfx::kPipOpacityMax,
+                        hostui::set_pip_opacity);
+            note("The game picture previews changes while this section is open.");
         }
     }
     heading("Window");

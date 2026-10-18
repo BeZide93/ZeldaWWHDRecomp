@@ -317,8 +317,8 @@ void load_saved_options() {
                                    v.count("pipCorner") ? v["pipCorner"].c_str() : nullptr);
     if (v.count("pipX")) g_pip_x = pip_clamp((float)num("pipX"), 0, 1, 0.5f);
     if (v.count("pipY")) g_pip_y = pip_clamp((float)num("pipY"), 0, 1, 0.5f);
-    if (v.count("pipSize")) g_pip_size = pip_clamp((float)num("pipSize"), 0.1f, 0.5f, 0.25f);
-    if (v.count("pipOpacity")) g_pip_opacity = pip_clamp((float)num("pipOpacity"), 0.2f, 1.0f, 1.0f);
+    if (v.count("pipSize")) g_pip_size = pip_clamp_size((float)num("pipSize"));
+    if (v.count("pipOpacity")) g_pip_opacity = pip_clamp_opacity((float)num("pipOpacity"));
     display_env_overrides();
     if (!drc_mode_offered(g_mode) && g_mode == kDrcWindow) g_mode = kDrcOff;  // no GamePad window (WWHD_NO_GAMEPAD, Android)
     g_shown = !input::pro_controller();  // Pro Controller: GamePad screen starts hidden (as on macOS)
@@ -418,12 +418,12 @@ void set_pip_anchor(int c) {
 }
 float pip_size() { return gfx::g_pip_size; }
 void set_pip_size(float s) {
-    gfx::g_pip_size = gfx::pip_clamp(s, 0.1f, 0.5f, 0.25f);
+    gfx::g_pip_size = gfx::pip_clamp_size(s);
     save_display();
 }
 float pip_opacity() { return gfx::g_pip_opacity; }
 void set_pip_opacity(float o) {
-    gfx::g_pip_opacity = gfx::pip_clamp(o, 0.2f, 1.0f, 1.0f);
+    gfx::g_pip_opacity = gfx::pip_clamp_opacity(o);
     save_display();
 }
 bool drc_available() {

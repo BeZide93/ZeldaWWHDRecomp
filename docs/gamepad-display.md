@@ -20,6 +20,23 @@ the full-size GamePad picture takes precedence until the game returns to TV. In 
 shortcut keeps its usual show/hide behavior. PiP corner, size, opacity and touch mapping are shared
 with manual PiP.
 
+## Picture-in-picture placement
+
+Settings → Display → **Picture-in-picture placement** sets where the GamePad picture sits and how it
+looks. The game picture shows each change while this section is open.
+
+- **Position:** pick one of nine spots (or Custom) from the list, or use the small screen diagram.
+  Drag the picture in the diagram, or the outlined picture over the game, to put it anywhere; it
+  doesn't jump to a spot while you drag. To use one of the nine spots, click or tap its circle in
+  the diagram. With a controller, focus the diagram and move the picture with the D-pad.
+- **Size:** 5 to 100 % of the TV picture's width. At 100 % it covers the whole TV picture; at the
+  top-left, top-right and bottom-right spots it may stay a little smaller so the game's buttons
+  and rupee counter remain visible.
+- **Opacity:** 10 to 100 %. To hide the picture, turn off *Show GamePad screen* instead.
+
+Use the sliders for both; Ctrl+click a slider to type a number. Settings saved by an older
+version keep their values.
+
 The optional `WWHD_DRC_PAUSE=1` view (default on Android) still shows a paused menu full size after
 Plus in `pip` or `off`, then restores the previous view when that menu closes. It now reads menu
 state too. Auto always uses PiP for menus. Choosing a view manually cancels a temporary pause view.

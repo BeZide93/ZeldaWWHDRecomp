@@ -39,8 +39,9 @@ the windows' views through a `CAMetalLayer` and `VK_EXT_metal_surface`; `display
 same layout as the Metal composition (picture rectangle, GamePad overlay with frame and opacity,
 filter), and `gfx/vulkan/present.cpp` draws it. The TV window title starts with the renderer in use.
 
-Settings → Display includes exact PiP size/opacity percentages, nine positions and a draggable
-placement diagram; the outlined game preview can also be dragged while placement is open.
+Settings → Display has PiP size (5–100 %) and opacity (10–100 %) sliders, nine positions and a
+placement diagram (drag freely, click a circle to snap to a position); the outlined game preview
+can also be dragged while placement is open. See [GamePad screen modes](gamepad-display.md).
 
 | Feature (macOS app) | Metal | Vulkan |
 | --- | --- | --- |
