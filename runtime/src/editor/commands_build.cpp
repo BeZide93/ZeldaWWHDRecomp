@@ -125,7 +125,7 @@ const std::vector<ActorType>& actor_types() {
         {"crate", "Crate", "Props", "A crate to break.", false, false, false},
         {"switch", "Switch", "Switches", "A floor switch; sets its switch flag when pressed.", false, false, false},
         {"door", "Door", "Switches", "A door opened by one of the mod's switches (options.switch).", false, false, false},
-        {"chuchu", "ChuChu", "Enemies", "The game's ChuChu; its defeated flag and drops.", false, false, false},
+        {"chuchu", "ChuChu", "Enemies", "The game's ChuChu (green, red, blue or yellow: options.variant); its defeated flag and drops.", false, false, false},
         {"bokoblin", "Bokoblin", "Enemies", "The game's Bokoblin.", false, false, false},
         {"moblin", "Moblin", "Enemies", "The game's Moblin.", false, false, false},
         {"keese", "Keese", "Enemies", "The game's Keese.", false, false, false},
@@ -140,6 +140,9 @@ std::vector<TypeVariant> type_variants(const std::string& type) {
     std::vector<TypeVariant> out;
     if (type == "resident")
         for (const auto& t : story_resident_types::kTypes) out.push_back({"resident", t.code, t.label, t.help});
+    else if (story_enemy_variants::has_variants(type))
+        for (const auto& v : story_enemy_variants::kVariants)
+            if (type == v.kind) out.push_back({"variant", v.name, v.label, v.help});
     return out;
 }
 
@@ -235,6 +238,17 @@ bool new_actor(const std::string& type, const std::string& id, const Place& plac
     } else {  // the enemies
         a["defeated_flag"] = id + "-defeated";
         a["drops"] = array();
+        if (options.get("variant").type != Value::Null) {
+            const std::string v = options.get("variant").string();
+            if (!story_enemy_variants::has_variants(type)) return why = "a " + t->label + " has no variants", false;
+            if (v.empty() || !story_enemy_variants::find(type, v)) return why = "options.variant is " + story_enemy_variants::names(type), false;
+            const auto* chosen = story_enemy_variants::find(type, v);
+            if (chosen != story_enemy_variants::find(type, "")) {  // the default variant is no parameter at all
+                Value params;
+                params["variant"] = v;
+                a["parameters"] = params;
+            }
+        }
     }
     return true;
 }

@@ -704,6 +704,21 @@ void building(const fs::path& examples) {
     r = s.run("add_actor", json(R"({"type": "door"})"));
     CHECK(ok(r) && actor_of(s, "door")->get("switch").string() == "switch");
     CHECK(ok(s.run("add_actor", json(R"({"type": "bokoblin"})"))) && actor_of(s, "bokoblin")->get("defeated_flag").string() == "bokoblin-defeated");
+    // an enemy's variant: declared choices only; the default needs no parameter
+    CHECK(ok(s.run("add_actor", json(R"({"type": "chuchu", "id": "red-chu", "options": {"variant": "red"}})"))) &&
+          actor_of(s, "red-chu")->get("parameters").get("variant").string() == "red");
+    CHECK(ok(s.run("add_actor", json(R"({"type": "chuchu", "id": "green-chu", "options": {"variant": "green"}})"))) &&
+          actor_of(s, "green-chu")->get("parameters").type == Value::Null);
+    CHECK(!ok(s.run("add_actor", json(R"({"type": "chuchu", "id": "odd-chu", "options": {"variant": "purple"}})"))) && !actor_of(s, "odd-chu"));
+    CHECK(!ok(s.run("add_actor", json(R"({"type": "keese", "id": "odd-keese", "options": {"variant": "red"}})"))) && !actor_of(s, "odd-keese"));
+    {
+        bool listed = false;
+        const Value types = s.run("list_actor_types");
+        for (const auto& t : types.get("result").array)
+            if (t.get("type").string() == "chuchu") listed = t.get("option").string() == "variant" && t.get("variants").array.size() == 4;
+        CHECK(listed);
+    }
+    CHECK(ok(s.run("remove_actor", json(R"({"id": "red-chu", "confirm": true})"))) && ok(s.run("remove_actor", json(R"({"id": "green-chu", "confirm": true})"))));
     CHECK(!ok(s.run("add_actor", json(R"({"type": "model"})"))));
     CHECK(!ok(s.run("add_actor", json(R"({"type": "dragon"})"))));
     CHECK(!ok(s.run("add_actor", json(R"({"type": "sign", "id": "Bad Id"})"))));

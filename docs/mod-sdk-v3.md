@@ -196,7 +196,7 @@ The allowlist below defines the supported variants.
 
 | `actor` | Fixed variant |
 | --- | --- |
-| `chuchu` | Ordinary green ChuChu |
+| `chuchu` | Ordinary green ChuChu, or a declared colour (below) |
 | `bokoblin` | Ordinary type-4 Bokoblin |
 | `moblin` | Ordinary Moblin |
 | `keese` | Ordinary Keese, the native KI bat; not Morth |
@@ -243,9 +243,32 @@ drops are replaced by the declared Bag rewards. Some native disappearance effect
 are omitted because their native effect actor also creates retail drops; identical
 retail defeat effects are not promised.
 
+### Variants
+
+Some enemies have declared variants: name one with `"parameters": {"variant": "..."}`.
+Without it the enemy is its ordinary kind. A variant is a fixed choice the port has
+checked; packages still cannot give raw parameters.
+
+| `actor` | `variant` | What it does |
+| --- | --- | --- |
+| `chuchu` | `green` | The ordinary ChuChu (the same as no variant) |
+| `chuchu` | `red` | Jumps at Link when he comes close |
+| `chuchu` | `blue` | Sparks with electricity: a sword hit shocks Link; bombs or a stun first |
+| `chuchu` | `yellow` | Jumps at Link and sparks with electricity |
+
+```json
+{"id": "pier-chu", "actor": "chuchu", "parameters": {"variant": "blue"},
+ "stage": "sea", "room": 11, "position": {"x": 100, "y": 1040, "z": -201500},
+ "defeated_flag": "pier-chu.defeated", "drops": []}
+```
+
+Every colour uses the ordinary ground ChuChu with no game switch; defeat, drops and
+saves work as for the green one. Other names, and variants for an enemy that has
+none, are validator errors.
+
 Packages ship no game models, weapons, animations, shaders or global resource
 replacements for these declarations. Retail originals retain their own behavior
-and progress. The fixed variants are the entire preview allowlist; elemental,
+and progress. The variants above are the entire preview allowlist; other elemental,
 quest and alternate weapon variants are unsupported.
 
 ## Original mod enemies (combat preview)

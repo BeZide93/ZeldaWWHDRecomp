@@ -94,7 +94,7 @@ Actor* find(uint32_t address) {
     const uint32_t id=ld32(address+4);
     for(auto& a:g_actors)if(a.process==id){
         if(story_props::is_prop(a.spec)&&(ld16(address+0xE)!=story_props::kProfile||ld32(address+0xB0)!=story_props::parameters(a.spec)||ld8(address+0x2DD)!=0xFF))return nullptr;
-        if(a.enemy_token){story_enemies::Kind kind;if(!enemy_kind(a.spec,kind)||ld16(address+0xE)!=story_enemy_ownership::descriptor(kind).profile||ld32(address+0xB0)!=story_enemies::parameters(kind)||ld8(address+0x2DD)!=0xFF)return nullptr;}
+        if(a.enemy_token){story_enemies::Kind kind;if(!enemy_kind(a.spec,kind)||ld16(address+0xE)!=story_enemy_ownership::descriptor(kind).profile||ld32(address+0xB0)!=story_enemies::parameters(a.enemy_token)||ld8(address+0x2DD)!=0xFF)return nullptr;}
         if(a.switch_token&&(ld16(address+0xE)!=(a.spec.actor=="switch"?story_switches::kSwitchProfile:story_switches::kDoorProfile)||ld32(address+0xB0)!=story_switches::parameters(a.spec.actor=="switch"?story_switches::Kind::Switch:story_switches::Kind::Door)||ld8(address+0x2DD)!=0xFF))return nullptr;
         if(a.spec.actor=="resident"){const bool seated=a.spec.resident==kYm1;if(ld16(address+0xE)!=(seated?0x13B:0x175)||ld8(address+0x2DD)!=(seated?0xFF:a.spec.resident))return nullptr;if(seated&&ld32(address+0xB0)!=1)return nullptr;}
         return &a;
@@ -400,6 +400,7 @@ bool check_specs(const std::string& mod,const std::vector<ManifestActor>& actors
     for(const auto&old:g_actors)if(!replacing||old.mod!=mod){++logical;count_visual(old.spec);}for(const auto&a:actors)count_visual(a);
     if(logical+visual>128)return why="actors and distant/shoreline variants exceed 128 declarations",false;
     if(*std::max_element(views.begin(),views.end())>16)return why="distant/shoreline variants exceed 16 active views in a sea square",false;
+    for(const auto& a:actors){story_enemies::Kind kind;if(!a.variant.empty()&&!enemy_kind(a,kind))return why="only native enemies have variants",false;}
     for(const auto& a:actors)if(a.actor=="resident"&&(a.resident>255||!story_resident_types::supported(uint8_t(a.resident))))return why="unsupported resident subtype",false;
     for(const auto& a:actors)if(a.actor=="resident")if(const char* no=story_resident_types::place_problem(uint8_t(a.resident),a.stage,a.position.x,a.position.z))return why=no,false;
     for(const auto&a:actors)if(a.kind=="mod"){
@@ -420,6 +421,7 @@ bool check_specs(const std::string& mod,const std::vector<ManifestActor>& actors
         else if(a.switch_actor.empty()||!a.switch_flag.empty())return why="invalid door switch reference",false;
     }
     for(const auto&a:actors){story_enemies::Kind kind;if(!enemy_kind(a,kind))continue;if((!replacing&&!configure_enemy_declarations())||!story_enemies::supported(kind))return why="Native enemy child ownership route is not admitted",false;
+        if(!story_enemies::parameters(kind,a.variant))return why="Unsupported native enemy variant",false;
         if(!a.kind.empty()||a.params||a.rotation.x!=0||a.rotation.z!=0||a.scale.x!=1||a.scale.y!=1||a.scale.z!=1||a.defeated_flag.empty()||!story_mail::valid_id(a.defeated_flag)||!a.flag.empty()||!a.broken_flag.empty()||!a.switch_flag.empty()||!a.switch_actor.empty()||!a.lines.empty()||!a.then.empty()||!a.model.empty()||!a.animation.empty()||a.look_at.enabled||!a.path.points.empty())return why="Unsupported native enemy configuration",false;
     }
     return true;
@@ -457,7 +459,7 @@ bool load(const std::string& mod,const std::vector<ManifestActor>& actors,std::s
     std::vector<Actor> staged;staged.reserve(actors.size());g_actors.reserve(g_actors.size()+actors.size());
     struct LoadRollback {decltype(g_island_mods) island_mods=g_island_mods;size_t visuals=g_visual_bindings.size();size_t props=story_props::checkpoint(),models=mod_actor::checkpoint(),switches=story_switches::checkpoint(),enemies=story_enemies::checkpoint(),ownership=story_enemy_ownership::checkpoint();story_items::PropMarkerCheckpoint markers=story_items::prop_marker_checkpoint();decltype(g_flag_names) flags=g_flag_names;bool committed=false;~LoadRollback(){if(!committed){g_island_mods=std::move(island_mods);g_visual_bindings.resize(visuals);story_props::rollback(props);mod_actor::rollback(models);story_switches::rollback(switches);story_enemies::rollback(enemies);story_enemy_ownership::rollback(ownership);story_items::rollback_prop_markers(markers);g_flag_names=std::move(flags);}}} rollback;
     if(!register_flags(mod,flags,why))return false;
-    for(const auto& a:actors){Actor added{mod,a};if(a.actor=="resident"&&people_type(a.resident)){if(!g_next_resident_event_token||g_next_resident_event_token==0xFFFFFFFFu)return why="resident event token exhausted",false;added.resident_event_token=g_next_resident_event_token++;added.fingerprint=identity::fingerprint(mod,a);}if(a.kind=="mod"&&a.combat_enabled){added.combat_marker=story_items::register_enemy_marker(mod,a.id,a.defeated_flag,why);if(!added.combat_marker.value)return false;added.fingerprint=identity::fingerprint(mod,a);}if(a.kind=="mod"&&a.carry_break_on_impact){added.carry_marker=story_items::register_prop_marker(mod,a.id,a.broken_flag,why);if(!added.carry_marker)return false;added.fingerprint=identity::fingerprint(mod,a);}story_enemies::Kind enemy;if(enemy_kind(a,enemy)){added.fingerprint=identity::fingerprint(mod,a);story_enemies::Spec spec{enemy,mod,a.id,a.defeated_flag,{},added.fingerprint,1};for(const auto&drop:a.drops)spec.drops.push_back({drop.item,drop.quantity});added.enemy_token=story_enemies::declare(spec,why);if(!added.enemy_token)return false;}if(story_props::is_prop(a)){added.fingerprint=identity::fingerprint(mod,a);added.prop_token=story_props::declare(mod,a,why);if(!added.prop_token)return false;}if(a.actor=="switch"){if(a.switch_flag.empty())return why="switch requires an own flag",false;added.fingerprint=identity::fingerprint(mod,a);added.switch_token=story_switches::declare_switch(mod,a.id,why);added.switch_source=added.switch_token;if(!added.switch_token)return false;}staged.push_back(std::move(added));}
+    for(const auto& a:actors){Actor added{mod,a};if(a.actor=="resident"&&people_type(a.resident)){if(!g_next_resident_event_token||g_next_resident_event_token==0xFFFFFFFFu)return why="resident event token exhausted",false;added.resident_event_token=g_next_resident_event_token++;added.fingerprint=identity::fingerprint(mod,a);}if(a.kind=="mod"&&a.combat_enabled){added.combat_marker=story_items::register_enemy_marker(mod,a.id,a.defeated_flag,why);if(!added.combat_marker.value)return false;added.fingerprint=identity::fingerprint(mod,a);}if(a.kind=="mod"&&a.carry_break_on_impact){added.carry_marker=story_items::register_prop_marker(mod,a.id,a.broken_flag,why);if(!added.carry_marker)return false;added.fingerprint=identity::fingerprint(mod,a);}story_enemies::Kind enemy;if(enemy_kind(a,enemy)){added.fingerprint=identity::fingerprint(mod,a);story_enemies::Spec spec{enemy,mod,a.id,a.defeated_flag,{},added.fingerprint,1,story_enemies::parameters(enemy,a.variant)};for(const auto&drop:a.drops)spec.drops.push_back({drop.item,drop.quantity});added.enemy_token=story_enemies::declare(spec,why);if(!added.enemy_token)return false;}if(story_props::is_prop(a)){added.fingerprint=identity::fingerprint(mod,a);added.prop_token=story_props::declare(mod,a,why);if(!added.prop_token)return false;}if(a.actor=="switch"){if(a.switch_flag.empty())return why="switch requires an own flag",false;added.fingerprint=identity::fingerprint(mod,a);added.switch_token=story_switches::declare_switch(mod,a.id,why);added.switch_source=added.switch_token;if(!added.switch_token)return false;}staged.push_back(std::move(added));}
     for(auto& a:staged)if(a.spec.actor=="door"){
         const Actor* source=nullptr;for(const auto& candidate:staged)if(candidate.spec.actor=="switch"&&candidate.spec.id==a.spec.switch_actor)source=&candidate;
         if(!source)for(const auto& candidate:g_actors)if(candidate.mod==mod&&candidate.spec.actor=="switch"&&candidate.spec.id==a.spec.switch_actor)source=&candidate;
@@ -573,7 +575,7 @@ void room_loaded(Cpu* c,int room) {
         if(a.prop_token||a.switch_token)st16(g_scratch+0x10,255);
         if(a.enemy_token)st16(g_scratch+0x10,story_enemies::home_z(enemy));
         if(a.spec.actor=="chest")st16(g_scratch+0x10,uint16_t((uint32_t(a.spec.item_game)<<8)|255));
-        const uint32_t params=a.enemy_token?story_enemies::parameters(enemy):a.switch_token?story_switches::parameters(a.spec.actor=="switch"?story_switches::Kind::Switch:story_switches::Kind::Door):a.prop_token?story_props::parameters(a.spec):a.spec.kind=="mod"?a.mod_token:a.spec.actor=="sign"?kCarrier:a.spec.actor=="resident"?story_resident_types::params(uint8_t(a.spec.resident)):0;
+        const uint32_t params=a.enemy_token?story_enemies::parameters(a.enemy_token):a.switch_token?story_switches::parameters(a.spec.actor=="switch"?story_switches::Kind::Switch:story_switches::Kind::Door):a.prop_token?story_props::parameters(a.spec):a.spec.kind=="mod"?a.mod_token:a.spec.actor=="sign"?kCarrier:a.spec.actor=="resident"?story_resident_types::params(uint8_t(a.spec.resident)):0;
         Cpu call=*c;a.deleting=false;
         const uint32_t previous_layer=g_call(&call,GC(0x025DED64),{});
         g_call(&call,GC(0x025DEAB4),{room_layer});
@@ -730,7 +732,7 @@ void refingerprint(const std::string& mod,Actor& a){
     else if(a.prop_token||a.switch_token||a.enemy_token){const auto record=identity::record(a.fingerprint);std::memcpy(mem::ptr(row),record.data(),record.size());}
 }
 story_enemies::Spec enemy_spec(const std::string& mod,const ManifestActor& a,const identity::Fingerprint& fp,uint32_t epoch){
-    story_enemies::Kind kind{};enemy_kind(a,kind);story_enemies::Spec spec{kind,mod,a.id,a.defeated_flag,{},fp,epoch};
+    story_enemies::Kind kind{};enemy_kind(a,kind);story_enemies::Spec spec{kind,mod,a.id,a.defeated_flag,{},fp,epoch,story_enemies::parameters(kind,a.variant)};
     for(const auto&drop:a.drops)spec.drops.push_back({drop.item,drop.quantity});return spec;
 }
 // A new copy of an enemy needs a new epoch of its ownership record (the old copy retired it).

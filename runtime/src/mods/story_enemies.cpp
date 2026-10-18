@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 #include "story_enemies.h"
+#include "story_enemy_variants.h"
 #include "native_actor_profiles.h"
 #include "guest_addr.h"
 #include "runtime.h"
@@ -21,12 +22,13 @@ const uint32_t BKcreate=GC(0x0209F918),BKexec=GC(0x0209BD1C),BKdraw=GC(0x0209971
 const uint32_t MOcreate=GC(0x021CCB00),MOexec=GC(0x021C9B1C),MOdraw=GC(0x021C7344),MOdelete=GC(0x021CC44C);
 const uint32_t Disappear=GC(0x025D99E8),Ice=GC(0x020402C8),TableItem=GC(0x025D9154),KiSearch=GC(0x021992DC),RoomSearch=GC(0x025D9898);
 Entry* get(Token t){for(auto& e:entries)if(e.token==t)return &e;return nullptr;}
+uint32_t params_of(const Spec& s){return s.params?s.params:parameters(s.kind);}
 bool memory(uint32_t a,uint32_t bytes){return !(a&3)&&a>=0x10000000u&&bytes&&a<=0x50000000u-bytes;}
 bool reserved(uint32_t a){return memory(a,0x10)&&ld16(a+0xE)>=0x7FF7&&ld16(a+0xE)<=0x7FFA;}
 uint32_t native_vtable(Kind k){return GD(k==Kind::ChuChu?0x1000C5A0:k==Kind::Bokoblin?0x1000957C:k==Kind::Moblin?0x10014E9C:0x10012C24);}
-bool cleanup_identity(uint32_t a,uint32_t fn){for(Kind k:{Kind::ChuChu,Kind::Bokoblin,Kind::Moblin,Kind::Keese}){const auto&d=story_enemy_ownership::descriptor(k);const uint32_t destructor=k==Kind::ChuChu?CCdelete:k==Kind::Bokoblin?BKdelete:k==Kind::Moblin?MOdelete:KIdelete;if(fn==destructor&&memory(a,d.bytes)&&ld16(a+0xE)==d.profile&&ld32(a+0xB4)==native_vtable(k)&&ld32(a+0xB0)==parameters(k)&&ld8(a+0x2DD)==0xFF&&ld16(a+0x2D8)==0xFFFF){if(k==Kind::Bokoblin)st8(a+0x137D,0);if(k==Kind::Moblin)st8(a+0x2E0E,0);return true;}}return false;}
+bool cleanup_identity(uint32_t a,uint32_t fn){for(Kind k:{Kind::ChuChu,Kind::Bokoblin,Kind::Moblin,Kind::Keese}){const auto&d=story_enemy_ownership::descriptor(k);const uint32_t destructor=k==Kind::ChuChu?CCdelete:k==Kind::Bokoblin?BKdelete:k==Kind::Moblin?MOdelete:KIdelete;if(fn==destructor&&memory(a,d.bytes)&&ld16(a+0xE)==d.profile&&ld32(a+0xB4)==native_vtable(k)&&(story_enemy_variants::has_variants(kind_name(k))?story_enemy_variants::declared_params(kind_name(k),ld32(a+0xB0)):ld32(a+0xB0)==parameters(k))&&ld8(a+0x2DD)==0xFF&&ld16(a+0x2D8)==0xFFFF){if(k==Kind::Bokoblin)st8(a+0x137D,0);if(k==Kind::Moblin)st8(a+0x2E0E,0);return true;}}return false;}
 uint32_t ice_offset(Kind k){return k==Kind::ChuChu?0x924:k==Kind::Bokoblin?0x13BC:k==Kind::Moblin?0x2E54:0xAD8;}
-Entry* find(uint32_t a,bool initialized=true){if(!memory(a,0x10))return nullptr;for(auto&e:entries){const auto&d=story_enemy_ownership::descriptor(e.spec.kind);if(!memory(a,d.bytes)||e.pid==0xFFFFFFFFu||ld32(a+4)!=e.pid||ld16(a+0xE)!=d.profile||ld32(a+0xB0)!=parameters(e.spec.kind)||ld8(a+0x2DD)!=0xFF)continue;if(!initialized||verify_actor(e.token,e.spec.kind,a))return &e;}return nullptr;}
+Entry* find(uint32_t a,bool initialized=true){if(!memory(a,0x10))return nullptr;for(auto&e:entries){const auto&d=story_enemy_ownership::descriptor(e.spec.kind);if(!memory(a,d.bytes)||e.pid==0xFFFFFFFFu||ld32(a+4)!=e.pid||ld16(a+0xE)!=d.profile||ld32(a+0xB0)!=params_of(e.spec)||ld8(a+0x2DD)!=0xFF)continue;if(!initialized||verify_actor(e.token,e.spec.kind,a))return &e;}return nullptr;}
 void disable(Entry&e,uint32_t a){e.quarantine=true;if(a)story_enemy_ownership::retire_before_delete(a);}
 void trace(const Entry&e,uint32_t a,const char*what,uint32_t value=0){LOG("[native_enemy] %s:%s event=%s actor=%08X pid=%08X profile=%04X kind=%u value=%u",e.spec.mod.c_str(),e.spec.id.c_str(),what,a,e.pid,unsigned(ld16(a+0xE)),unsigned(e.spec.kind),value);}
 void no_carry(uint32_t a){st32(a+0x39C,ld32(a+0x39C)&~0x10u);st8(a+0x3A8,0xFF);st8(a+0x3A9,0);}
@@ -85,19 +87,22 @@ void delete_request(Cpu*c){const uint32_t a=c->r[3],lr=c->lr;auto*context=drowni
 void damage_reaction(Cpu*c){reaction(c,GC(0x02041F94));}void damage_set(Cpu*c){reaction(c,GC(0x02043F34));}
 void room_search(Cpu*c){if(executing){auto*e=find(c->r[3]);c->r[3]=e&&!e->quarantine&&e->spec.mod==executing->spec.mod?c->r[3]:0;return;}if(reserved(c->r[3])){c->r[3]=0;return;}original(c,RoomSearch);}
 }
+const char* kind_name(Kind k){return k==Kind::ChuChu?"chuchu":k==Kind::Bokoblin?"bokoblin":k==Kind::Moblin?"moblin":k==Kind::Keese?"keese":"";}
+uint32_t parameters(Kind k,const std::string& variant){if(!story_enemy_variants::has_variants(kind_name(k)))return variant.empty()?parameters(k):0u;const auto*v=story_enemy_variants::find(kind_name(k),variant);return v?v->params:0u;}
+uint32_t parameters(Token t){const auto*e=get(t);return e?params_of(e->spec):0u;}
 bool configure_children(ChildBridge b,bool verified){if(installed)return false;if(verified&&(!b.enter||!b.leave||!b.ready||!b.retire))return false;children=std::move(b);weapon_admission=verified;return true;}
 void child_retired(const story_enemy_ownership::LineageInfo&info){if(!info.source_valid||info.role!=story_enemy_ownership::Lineage::EnemyChild)return;auto*e=get(info.source);if(!e||(e->spec.kind!=Kind::Bokoblin&&e->spec.kind!=Kind::Moblin)||e->pid!=info.source_pid||!info.source_actor||find(info.source_actor)!=e||story_enemy_ownership::lookup_actor(info.source_actor)!=e->token||story_enemy_ownership::source_epoch(e->token)!=info.epoch)return;const uint32_t a=info.source_actor,reference=e->spec.kind==Kind::Bokoblin?0x1360:0x2D60;if(ld32(a+reference)!=info.pid)return;
  if(e->spec.kind==Kind::Bokoblin){st32(a+0xC90,0);st32(a+0xC94,0);st8(a+0x1374,0);}else{st8(a+0x10B3,0);}
  st32(a+reference,0xFFFFFFFFu);trace(*e,a,"child-retired-native-loss",info.pid);}
 bool supported(Kind k){return k==Kind::ChuChu||k==Kind::Keese||(weapon_admission&&(k==Kind::Bokoblin||k==Kind::Moblin));}
-bool verify_actor(Token t,Kind kind,uint32_t a){const auto*e=get(t);const auto&d=story_enemy_ownership::descriptor(kind);if(!e||kind!=e->spec.kind||!supported(kind)||!memory(a,d.bytes)||ld16(a+0xE)!=d.profile||ld32(a+0xB4)!=native_vtable(kind)||ld32(a+0xB0)!=parameters(kind)||ld8(a+0x2DD)!=0xFF||ld16(a+0x2D8)!=0xFFFF||ld16(a+0x2FC)!=home_z(kind))return false;
- if(kind==Kind::ChuChu)return ld8(a+0x3F8)==0&&ld8(a+0x3F9)==0&&ld8(a+0x3FA)==0&&ld8(a+0x3FB)==0xFF&&ld8(a+0x3FC)<=4&&ld8(a+0x924+0x1B1)==0;
+bool verify_actor(Token t,Kind kind,uint32_t a){const auto*e=get(t);const auto&d=story_enemy_ownership::descriptor(kind);if(!e||kind!=e->spec.kind||!supported(kind)||!memory(a,d.bytes)||ld16(a+0xE)!=d.profile||ld32(a+0xB4)!=native_vtable(kind)||ld32(a+0xB0)!=params_of(e->spec)||ld8(a+0x2DD)!=0xFF||ld16(a+0x2D8)!=0xFFFF||ld16(a+0x2FC)!=home_z(kind))return false;
+ if(kind==Kind::ChuChu)return ld8(a+0x3F8)==0&&ld8(a+0x3F9)==((params_of(e->spec)>>8)&0xFF)&&ld8(a+0x3FA)==0&&ld8(a+0x3FB)==0xFF&&ld8(a+0x3FC)<=4&&ld8(a+0x924+0x1B1)==0;
  if(kind==Kind::Bokoblin){const unsigned action=ld16(a+0x49C+6);return ld8(a+0x3D0)==4&&ld8(a+0x3D1)==0xFF&&ld8(a+0x3D2)==0xFF&&ld8(a+0x3D3)==0xFF&&ld8(a+0x3D4)==0&&ld8(a+0x3D5)==0&&ld8(a+0x3D6)==0&&ld8(a+0x3F0)==0&&ld8(a+0x3F1)==0&&ld8(a+0x3F8)==0&&ld32(a+0x1378)==0&&ld8(a+0x1375)==0&&ld32(a+0x1380)==0&&ld8(a+0x138D)==0&&ld8(a+0x137D)==0&&action<=23&&action!=15&&action!=16&&ld8(a+0x13BC+0x1B1)==0;}
  if(kind==Kind::Moblin){const unsigned action=ld16(a+0x8BC+6);return ld8(a+0x3D8)==0&&ld8(a+0x3D9)==0&&ld8(a+0x3DA)==0xFF&&ld8(a+0x3DB)==0xFF&&ld8(a+0x3DC)==0&&ld8(a+0x3DD)==0&&ld8(a+0x2D70)==0&&ld8(a+0x2D72)==0&&ld32(a+0x2D74)==0&&ld16(a+0x2E4C)==0&&ld8(a+0x2E4E)==0&&ld16(a+0x2E50)==0&&ld8(a+0x2E21)==0&&ld8(a+0x2E0E)==0&&!(ld32(a+0x2E0)&0x04000000u)&&action<=23&&action!=6&&ld8(a+0x2E54+0x1B1)==0;}
  return ld8(a+0x484)==0&&ld8(a+0x485)==0&&ld8(a+0x486)==0xFF&&ld8(a+0x487)==0xFF&&ld8(a+0x48C)==0&&ld8(a+0x48D)==0&&ld32(a+0x490)==0&&(ld8(a+0x489)==0||ld8(a+0x489)==10||ld8(a+0x489)==20||ld8(a+0x489)==30)&&ld8(a+0xAB9)==0&&ld8(a+0xAD8+0x1B1)==0;
 }
 Token declare(const Spec&s,std::string&why){if(installed||!supported(s.kind)||s.mod.empty()||s.id.empty()||s.defeated_flag.empty()||!s.epoch||entries.size()>=128){why="Unsupported or invalid native enemy declaration";return 0;}for(const auto&e:entries)if(e.spec.mod==s.mod&&(e.spec.id==s.id||e.spec.defeated_flag==s.defeated_flag)){why="Duplicate native enemy identity or defeat flag";return 0;}if(s.drops.size()>8){why="Too many native enemy drops";return 0;}for(size_t i=0;i<s.drops.size();++i){const auto&drop=s.drops[i];if(!drop.quantity||drop.quantity>254||!story_items::find(s.mod,drop.item)){why="Unavailable same-mod enemy item";return 0;}for(size_t j=0;j<i;++j)if(s.drops[j].item==drop.item){why="Duplicate native enemy item";return 0;}}
- auto marker=story_items::register_enemy_marker(s.mod,s.id,s.defeated_flag,why);if(!marker)return 0;Token t=story_enemy_ownership::declare_actor(s.kind,parameters(s.kind),s.fingerprint,s.epoch,why);if(!t)return 0;entries.push_back({s,t,marker});return t;}
+ auto marker=story_items::register_enemy_marker(s.mod,s.id,s.defeated_flag,why);if(!marker)return 0;Token t=story_enemy_ownership::declare_actor(s.kind,params_of(s),s.fingerprint,s.epoch,why);if(!t)return 0;entries.push_back({s,t,marker});return t;}
 size_t checkpoint(){return entries.size();}void rollback(size_t n)noexcept{if(!installed&&n<=entries.size())entries.resize(n);}
 void editor_enable(){editor_allowed=true;}
 bool live(){return installed&&editor_allowed;}
@@ -108,6 +113,7 @@ bool editor_redeclare(Token t,const Spec&s,std::string&why){auto*e=get(t);if(!li
  for(const auto&o:entries)if(o.token!=t&&o.spec.mod==s.mod&&(o.spec.id==s.id||o.spec.defeated_flag==s.defeated_flag)){why="Duplicate native enemy identity or defeat flag";return false;}
  auto marker=e->marker;
  if(s.defeated_flag!=e->spec.defeated_flag||s.id!=e->spec.id){story_items::forget_prop_marker(e->marker.value);marker=story_items::register_enemy_marker(s.mod,s.id,s.defeated_flag,why);if(!marker.value){e->marker=story_items::register_enemy_marker(e->spec.mod,e->spec.id,e->spec.defeated_flag,why);return false;}}
+ if(params_of(s)!=params_of(e->spec)&&!story_enemy_ownership::editor_reparameter(t,params_of(s))){why="the enemy's ownership record is gone";return false;}
  if(!story_enemy_ownership::editor_refingerprint(t,s.fingerprint)){why="the enemy's ownership record is gone";return false;}
  const uint32_t epoch=e->spec.epoch;e->spec=s;e->spec.epoch=epoch;e->marker=marker;e->quarantine=false;return true;}
 bool editor_refingerprint(Token t,const story_enemy_ownership::Fingerprint&fp){auto*e=get(t);if(!e||!story_enemy_ownership::editor_refingerprint(t,fp))return false;e->spec.fingerprint=fp;return true;}

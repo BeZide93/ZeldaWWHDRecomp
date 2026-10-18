@@ -11,11 +11,18 @@ struct Cpu;
 namespace story_enemies {
 using Kind=story_enemy_ownership::Kind;
 using Token=story_enemy_ownership::Token;
-struct Spec {Kind kind;std::string mod,id,defeated_flag;std::vector<story_items::PropDrop> drops;story_enemy_ownership::Fingerprint fingerprint{};uint32_t epoch=0;};
+// params: the actor parameters of the declared variant (story_enemy_variants.h); 0 is the kind's default
+struct Spec {Kind kind;std::string mod,id,defeated_flag;std::vector<story_items::PropDrop> drops;story_enemy_ownership::Fingerprint fingerprint{};uint32_t epoch=0;uint32_t params=0;};
 // The fixed native parameters. Bokoblin: type 4 (stands, then fights); byte 1 is its sight and
 // territory range in tens of units, 0xFF the game's own (500 to notice Link, 750 to give up); 0 made
 // it blind (it never noticed Link). Byte 2 no path, byte 3 no switch.
 constexpr uint32_t parameters(Kind k){return k==Kind::ChuChu?0xFF000000u:k==Kind::Bokoblin?0xFFFFFF04u:(k==Kind::Keese||k==Kind::Moblin)?0xFFFF0000u:0u;}
+// the manifest's actor name of a kind ("chuchu", ...)
+const char* kind_name(Kind);
+// the parameters of a kind's variant ("" the default); 0 for a variant the kind doesn't declare
+uint32_t parameters(Kind,const std::string& variant);
+// a declared enemy's parameters (its variant's), 0 for an unknown token
+uint32_t parameters(Token);
 constexpr uint16_t home_z(Kind k){return k==Kind::Bokoblin||k==Kind::Moblin?0xFF:0;}
 struct ChildBridge {
  std::function<bool(Token,Kind,uint32_t parent,uint32_t epoch)> enter;

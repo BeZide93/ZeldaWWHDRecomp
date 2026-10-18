@@ -1394,6 +1394,7 @@ add_test(NAME story_actor_seated_resident_contract COMMAND story_actors_runtime_
 add_test(NAME story_actor_prop_spawn_contract COMMAND story_actors_runtime_test --props)
 add_test(NAME story_actor_switch_door_contract COMMAND story_actors_runtime_test --switches)
 add_test(NAME story_actor_enemy_contract COMMAND story_actors_runtime_test --enemies)
+add_test(NAME story_actor_enemy_variant_contract COMMAND story_actors_runtime_test --enemy-variant)
 add_test(NAME story_actor_four_enemy_lifecycle_contract COMMAND story_actors_runtime_test --enemies-four)
 add_executable(native_actor_profiles_test runtime/tools/native_actor_profiles_test.cpp runtime/src/mods/native_actor_profiles.cpp runtime/src/guest_addr_identity.c)
 target_include_directories(native_actor_profiles_test PRIVATE runtime/include runtime/src)

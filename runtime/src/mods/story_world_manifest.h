@@ -14,6 +14,7 @@
 #include "story_mod_combat_manifest.h"
 #include "story_native_scene_manifest.h"
 #include "story_resident_types.h"
+#include "story_enemy_variants.h"
 namespace story_notebook {
 struct WorldPoint { float x=0,y=0,z=0; bool operator==(const WorldPoint&)const=default; };
 struct StoryAction {
@@ -53,7 +54,7 @@ struct ManifestActor {
     ManifestLookAt look_at;ManifestPath path;
     bool carry_enabled=false,carry_break_on_impact=false;
     bool combat_enabled=false,native_heart_drop=false;story_mod_combat::Config combat;
-    WorldPoint position,rotation,scale{1,1,1}; uint32_t params=0; unsigned resident=9; // 19 is the seated Ym1 adapter, not a People subtype.
+    WorldPoint position,rotation,scale{1,1,1}; uint32_t params=0; std::string variant; unsigned resident=9; // 19 is the seated Ym1 adapter, not a People subtype.
     uint8_t item_game=6;  // a chest's game item number ("parameters": {"item"}); kChestModItem with item_mod
     std::string item_mod; // a chest's "item:<id>": one of the mod's items (the id)
     std::string broken_flag,switch_flag,switch_actor,defeated_flag;std::vector<ManifestPropDrop> drops;
@@ -237,8 +238,17 @@ inline bool place(const Value& v,std::string& stage,unsigned& room) {
 // outside parse_actors' allowlist until their runtime adapters are integrated.
 inline bool native_enemy_fields(const Value& m,const Value& v,ManifestActor& a,std::string& why) {
     if(a.actor!="chuchu"&&a.actor!="bokoblin"&&a.actor!="moblin"&&a.actor!="keese")return why="unsupported native enemy",false;
-    for(const char* key:{"kind","params","parameters","flag","broken_flag","switch_flag","switch","lines","then","model","animation","look_at","path","collision","attention"})
+    for(const char* key:{"kind","params","flag","broken_flag","switch_flag","switch","lines","then","model","animation","look_at","path","collision","attention"})
         if(v.object.contains(key))return why="native enemies cannot override parameters, behavior, dialogue or models",false;
+    // a declared variant only (story_enemy_variants.h), never raw parameters
+    if(v.object.contains("parameters")){
+        const auto& named=v.get("parameters");
+        if(named.type!=Value::Object||!keys(named,{"variant"})||named.get("variant").type!=Value::String)return why="native enemy parameters take only a variant",false;
+        const std::string& name=named.get("variant").text;
+        if(!story_enemy_variants::has_variants(a.actor))return why="a "+a.actor+" has no variants",false;
+        if(name.empty()||!story_enemy_variants::find(a.actor,name))return why="a "+a.actor+" variant is "+story_enemy_variants::names(a.actor),false;
+        a.variant=name;
+    }
     if(a.rotation.x!=0||a.rotation.z!=0||a.scale.x!=1||a.scale.y!=1||a.scale.z!=1)return why="native enemies require yaw-only rotation and scale 1",false;
     if(!flag_id(v.get("defeated_flag")))return why="native enemies require a mod-owned defeated_flag",false;
     const auto& drops=v.get("drops");if(drops.type!=Value::Array||drops.array.size()>8)return why="native enemies require up to eight mod-item drops",false;
@@ -458,6 +468,7 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
         if(named.type!=Value::Null&&named.type!=Value::Object)return why="actor parameters must be an object",false;
         for(const auto& [key,value]:named.object) {
             if(key=="resident"&&a.actor=="resident") {const auto* type=value.type==Value::String?story_resident_types::find(value.text):nullptr;if(type)a.resident=type->subtype;else if(integer(value,9,9))a.resident=9;else if(const char* no=value.type==Value::String?story_resident_types::refused(value.text):nullptr)return why=no,false;else return why="resident must be one of "+story_resident_types::codes()+" (legacy numeric 9)",false;}
+            else if(key=="variant"&&enemy){}  // read by native_enemy_fields
             else if(key=="item"&&a.actor=="chest") {
                 if(value.type==Value::String&&value.text.rfind("item:",0)==0){
                     if(!declared(m,"items",value.text.substr(5)))return why="chest item names an undeclared mod item (item:<id> of \"items\")",false;

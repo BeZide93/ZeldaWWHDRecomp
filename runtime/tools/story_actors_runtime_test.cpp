@@ -75,8 +75,9 @@ void map_guest(uint32_t at,uint32_t size) {
 #endif
 }
 uint32_t enemy_address(unsigned kind){return kActor+0x20000+kind*0x4000;}
-void enemy_fixture(story_enemies::Kind kind,uint32_t a,uint32_t pid){const auto&d=story_enemy_ownership::descriptor(kind);std::memset(mem::ptr(a),0,d.bytes);st32(a+4,pid);st16(a+0xE,d.profile);st32(a+0xB0,story_enemies::parameters(kind));st32(a+0xB4,kind==story_enemies::Kind::ChuChu?0x1000C5A0:kind==story_enemies::Kind::Bokoblin?0x1000957C:kind==story_enemies::Kind::Moblin?0x10014E9C:0x10012C24);st8(a+0x2DD,0xFF);st16(a+0x2D8,0xFFFF);st16(a+0x2FC,story_enemies::home_z(kind));
- if(kind==story_enemies::Kind::ChuChu)st8(a+0x3FB,0xFF);else if(kind==story_enemies::Kind::Keese){st8(a+0x486,0xFF);st8(a+0x487,0xFF);}else if(kind==story_enemies::Kind::Bokoblin){st8(a+0x3D0,4);st8(a+0x3D1,0xFF);st8(a+0x3D2,0xFF);st8(a+0x3D3,0xFF);st32(a+0x49C,a);st16(a+0x49C+8,2);}else{st8(a+0x3DA,0xFF);st8(a+0x3DB,0xFF);st32(a+0x8BC,a);st16(a+0x8BC+8,1);st8(a+0x10B0,1);}
+uint32_t chuchu_params=0xFF000000u;  // the ChuChu variant the fixture creates
+void enemy_fixture(story_enemies::Kind kind,uint32_t a,uint32_t pid){const auto&d=story_enemy_ownership::descriptor(kind);std::memset(mem::ptr(a),0,d.bytes);st32(a+4,pid);st16(a+0xE,d.profile);st32(a+0xB0,kind==story_enemies::Kind::ChuChu?chuchu_params:story_enemies::parameters(kind));st32(a+0xB4,kind==story_enemies::Kind::ChuChu?0x1000C5A0:kind==story_enemies::Kind::Bokoblin?0x1000957C:kind==story_enemies::Kind::Moblin?0x10014E9C:0x10012C24);st8(a+0x2DD,0xFF);st16(a+0x2D8,0xFFFF);st16(a+0x2FC,story_enemies::home_z(kind));
+ if(kind==story_enemies::Kind::ChuChu){st8(a+0x3F9,uint8_t(chuchu_params>>8));st8(a+0x3FB,0xFF);}else if(kind==story_enemies::Kind::Keese){st8(a+0x486,0xFF);st8(a+0x487,0xFF);}else if(kind==story_enemies::Kind::Bokoblin){st8(a+0x3D0,4);st8(a+0x3D1,0xFF);st8(a+0x3D2,0xFF);st8(a+0x3D3,0xFF);st32(a+0x49C,a);st16(a+0x49C+8,2);}else{st8(a+0x3DA,0xFF);st8(a+0x3DB,0xFF);st32(a+0x8BC,a);st16(a+0x8BC+8,1);st8(a+0x10B0,1);}
  for(size_t n=0;n<d.collider_count;++n){auto&x=d.colliders[n];st32(a+x.object+0x44,a+x.stts);st32(a+x.stts+0xC,a);st32(a+x.stts+0x10,pid);if(x.helper)st32(a+x.helper,a);}
 }
 uint32_t child_address(uint32_t params){return kArena+0x60000+(params==4?0x2000:0);}
@@ -127,7 +128,7 @@ uint32_t call(Cpu*,uint32_t fn,std::initializer_list<uint32_t> args) {
     if(fn==0x025D57E0){++deleted;assert(a[0]>=kActor&&a[0]<=kActor+0x40000);st8(a[0]+0xC,3);return 1;}
     if(fn==0x025C109C){assert(std::strcmp(reinterpret_cast<char*>(mem::ptr(a[0])),"takara")==0);st16(kArena+8,0x125);return kArena;}
     if(fn==0x025D5834){++created;assert(args.size()==8);assert(current_layer==kArena+0x6000+a[3]*0x200+0xC0);
-        if(a[0]>=0x7FF7&&a[0]<=0x7FFA){if(refuse_enemy_request)return 0xFFFFFFFFu;const auto kind=story_enemies::Kind(0x7FFA-a[0]);const uint32_t address=enemy_address(unsigned(kind)),id=actor_id+40+unsigned(kind);assert(a[1]==story_enemies::parameters(kind)&&a[6]==0xFFFFFFFFu&&ld16(a[4]+4)==story_enemies::home_z(kind));enemy_fixture(kind,address,id);st32(address+0x2C,current_layer);live[id]=address;return id;}
+        if(a[0]>=0x7FF7&&a[0]<=0x7FFA){if(refuse_enemy_request)return 0xFFFFFFFFu;const auto kind=story_enemies::Kind(0x7FFA-a[0]);const uint32_t address=enemy_address(unsigned(kind)),id=actor_id+40+unsigned(kind);assert(a[1]==(kind==story_enemies::Kind::ChuChu?chuchu_params:story_enemies::parameters(kind))&&a[6]==0xFFFFFFFFu&&ld16(a[4]+4)==story_enemies::home_z(kind));enemy_fixture(kind,address,id);st32(address+0x2C,current_layer);live[id]=address;return id;}
         uint32_t address=kActor+((a[0]==0x175||a[0]==0x13B)?0x1000:a[0]==story_switches::kDoorProfile?0x1000:a[0]==0xB6?0x2000:a[0]==mod_actor::kProfile?0x3000:0);uint32_t id=actor_id+(address-kActor)/0x1000;
         if(a[0]==0x125){assert(a[1]==0);assert(a[3]==0);assert(ld16(a[4]+4)==0x06FF);}
         else if(a[0]==0x175){assert(a[1]==expect_people_params);assert(a[3]==1);assert(a[6]==expect_people_subtype);assert(ld16(a[4]+2)==expect_people_yaw);}
@@ -197,6 +198,25 @@ int main(int argc,char** argv){
     story_actors::set_game_calls(original,call);story_actors::set_scratch_memory(kScratch);
     for(uint32_t i=story_actors::kEnemyProfilesScratchOffset;i<story_actors::kScratchBytes;++i)assert(ld8(kScratch+i)==0);
     assert(ld8(kScratch+story_actors::kScratchBytes)==0x6D);
+    if(argc==2&&std::strcmp(argv[1],"--enemy-variant")==0){
+        // a declared ChuChu colour: created with its own parameter word, owned and verified with its colour;
+        // a copy with another colour is never recognized as the declared enemy
+        map_guest(0x10000000,0x10000);st32(0x100073AC,0x4000);st8(0x100073B0,2);
+        for(unsigned n=0;n<4;++n){const auto&d=story_enemy_ownership::descriptor(story_enemies::Kind(n));const uint32_t profile=kArena+0x80000+n*0x100;st32(0x101F3EE0+uint32_t(d.native_profile)*4,profile);st32(profile+0x10,d.bytes);}
+        st32(kArena+0x7004,55);st16(kArena+0x700E,0xA8);
+        story_notebook::ManifestActor cc;cc.id="red";cc.actor="chuchu";cc.defeated_flag="red.dead";cc.stage="sea";cc.variant="purple";std::string why;
+        assert(!story_actors::load("test",{cc},why)&&!story_actors::declared());
+        auto sign=cc;sign.actor="sign";sign.id="board";sign.flag="read";sign.defeated_flag.clear();assert(!story_actors::load("test",{sign},why));
+        cc.variant="red";chuchu_params=0xFF000100u;assert(story_actors::load("test",{cc},why));
+        story_actors::set_scratch_memory(kScratch);story_actors::install([](uint32_t){return std::string();},[](uint32_t f,void(*fn)(Cpu*)){hooks[f]=fn;});
+        Cpu c{};pending=true;story_actors::native_room_loaded(&c,0);pending=false;assert(created==1);
+        const uint32_t a=enemy_address(0);assert(ld32(a+0xB0)==0xFF000100u&&ld8(a+0x3F9)==1);
+        Cpu create{};create.r[3]=a;hooks.at(0x02110D4C)(&create);
+        Cpu exec{};exec.r[3]=a;hooks.at(0x0210DD3C)(&exec);
+        assert(story_enemy_ownership::lookup_actor(a)!=0);
+        st8(a+0x3F9,0);assert(!story_enemies::owns_actor(a));st8(a+0x3F9,1);assert(story_enemies::owns_actor(a));
+        std::puts("enemy variant: declared ChuChu colour created, owned and verified");return 0;
+    }
     if(argc==2&&(std::strcmp(argv[1],"--enemies")==0||std::strcmp(argv[1],"--enemies-four")==0)){
         enemy_four_mode=std::strcmp(argv[1],"--enemies-four")==0;const unsigned enemy_count=enemy_four_mode?4:2;map_guest(0x10000000,0x10000);st32(0x100073AC,0x4000);st8(0x100073B0,2);if(enemy_four_mode){map_guest(0x10190000,0x10000);map_guest(0x101B0000,0x10000);}
         for(unsigned n=0;n<4;++n){const auto&d=story_enemy_ownership::descriptor(story_enemies::Kind(n));const uint32_t profile=kArena+0x80000+n*0x100;st32(0x101F3EE0+uint32_t(d.native_profile)*4,profile);st32(profile+0x10,d.bytes);}

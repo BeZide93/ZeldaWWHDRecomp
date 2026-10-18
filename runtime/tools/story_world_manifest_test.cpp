@@ -110,6 +110,16 @@ int main() {
             {auto bad=data;bad["actors"].array[0]["scale"]=mods::json::parse(R"({"x":2,"y":2,"z":2})");assert(!parse_actors(bad,actors,why)&&actors.empty());}
             candidate.scale={2,2,2};assert(!world_manifest::native_enemy_fields(data,value,candidate,why));candidate.scale={1,1,1};candidate.rotation.z=1;assert(!world_manifest::native_enemy_fields(data,value,candidate,why));
         }
+        // declared variants only: ChuChu colours; never raw parameters, never another kind's variant
+        for(const auto& v:story_enemy_variants::kVariants){auto data=fixture();auto& a=data["actors"].array[0];a["actor"]=v.kind;a["parameters"]=mods::json::parse(std::string(R"({"variant":")")+v.name+"\"}");
+            assert(parse_actors(data,actors,why)&&actors[0].variant==v.name);
+            const auto fp=story_actors::identity::fingerprint("m",actors[0]);auto plain=actors[0];plain.variant.clear();assert(fp!=story_actors::identity::fingerprint("m",plain));}
+        {auto data=fixture();assert(parse_actors(data,actors,why)&&actors[0].variant.empty()&&story_enemy_variants::find("chuchu","")->params==0xFF000000u);}
+        for(const char* bad_variant:{R"({"variant":"purple"})",R"({"variant":""})",R"({"variant":3})",R"({"variant":"red","colour":1})",R"({"colour":"red"})",R"("red")"}){auto data=fixture();data["actors"].array[0]["parameters"]=mods::json::parse(bad_variant);assert(!parse_actors(data,actors,why)&&actors.empty());}
+        for(const char* plain_kind:{"bokoblin","moblin","keese"}){auto data=fixture();data["actors"].array[0]["actor"]=plain_kind;data["actors"].array[0]["parameters"]=mods::json::parse(R"({"variant":"red"})");assert(!parse_actors(data,actors,why)&&why.find("no variants")!=std::string::npos);}
+        {auto data=fixture();data["actors"].array[0]["parameters"]=mods::json::parse(R"({"variant":"purple"})");assert(!parse_actors(data,actors,why)&&why.find("green, red, blue or yellow")!=std::string::npos);}
+        for(const char* colour:{"red","blue","yellow"}){const auto*v=story_enemy_variants::find("chuchu",colour);assert(v&&(v->params&0xFFFF00FFu)==0xFF000000u&&((v->params>>8)&0xFF)>=1&&((v->params>>8)&0xFF)<=4);}
+        assert(!story_enemy_variants::find("chuchu","black"));
     }
     for(const auto& name:{"pot","barrel","crate"}){auto p=prop_example();p["actors"].array[0]["actor"]=name;assert(parse_actors(p,actors,why)&&actors[0].broken_flag=="vase.broken"&&actors[0].drops[0].item=="shard"&&actors[0].drops[0].quantity==2);}
     for(const auto& name:{"pot","barrel","crate"}){auto p=prop_example();p["actors"].array[0]["actor"]=name;p["actors"].array[0]["texture"]="textures/blue.png";assert(parse_actors(p,actors,why)&&actors[0].texture=="textures/blue.png");const auto initial=story_actors::identity::fingerprint("test",actors[0]);actors[0].texture_digest="different";assert(story_actors::identity::fingerprint("test",actors[0])!=initial);}
