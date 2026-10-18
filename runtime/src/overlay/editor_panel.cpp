@@ -993,7 +993,7 @@ void new_mod_button() {
     }
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("Start a new, empty mod of your own");
     const ImGuiViewport* vp = ImGui::GetMainViewport();
-    ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x * 0.5f, vp->WorkPos.y + vp->WorkSize.y * 0.35f), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x * 0.5f, vp->WorkPos.y + vp->WorkSize.y * 0.5f), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
     ImGui::SetNextWindowSize(ImVec2(std::min(460.0f, vp->WorkSize.x - 32), 0));
     if (!ImGui::BeginPopupModal("New mod", nullptr, ImGuiWindowFlags_NoSavedSettings)) return;
     muted("A new, empty mod: its own package in the mod manager, turned on in your current mod profile. "
