@@ -34,6 +34,7 @@ int mode() {
         if (!strcmp(e, "volume")) return kVolume;
         if (!strcmp(e, "hide")) return kHide;
         if (!strcmp(e, "mark")) return kMark;
+        if (!strcmp(e, "combo")) return kCombo;
         return kSdf;
     }();
     return m;
@@ -62,6 +63,7 @@ static bool take(Snapshot& s) {
         s.sunVisible = 1;
         s.sunAlpha = ldf(sun + 0xCC);
     }
+    vec3(kEnvLight + 0xB44, s.moonPos);  // mMoonPos
     rgb(kEnvLight + 0xB98, s.cloudColor);
     rgb(kEnvLight + 0xB9C, s.centerColor);
     rgb(kEnvLight + 0xB8C, s.fogColor);

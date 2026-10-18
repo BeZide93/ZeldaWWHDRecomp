@@ -4,7 +4,7 @@
 
 namespace cloud_proto {
 
-enum Mode : int { kOff = 0, kSdf, kVolume, kHide, kMark };
+enum Mode : int { kOff = 0, kSdf, kVolume, kHide, kMark, kCombo };
 int mode();  // WWHD_CLOUDS_PROTO, read once
 
 struct Cloud {
@@ -19,7 +19,7 @@ struct Snapshot {
     float eye[3], center[3];
     float viewRot[12];  // the view's camera matrix (3x4, rows), View +0x1E4
     float fovy, bank;
-    float sunPos[3], sunAlpha;
+    float sunPos[3], sunAlpha, moonPos[3];
     int32_t sunVisible;
     float cloudColor[3], centerColor[3], fogColor[3];  // palette (0..1)
     float cloudScale, centerScale, strength, curTime, phase;

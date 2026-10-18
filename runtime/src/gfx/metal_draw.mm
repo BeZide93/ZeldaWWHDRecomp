@@ -1592,6 +1592,9 @@ void report_skips() {
 // cloud research prototype (metal_clouds.mm)
 bool clouds_draw(id<MTLRenderCommandEncoder> enc, const MTLViewport& vp, Surface* const* colors, const uint32_t* colorSlices,
                  Surface* depth, uint32_t depthSlice, bool (*ensure)(Surface* const*, const uint32_t*, Surface*, uint32_t));
+bool clouds_sky_surface(Surface* s);
+void clouds_after_sky_composite(id<MTLRenderCommandEncoder> enc, const uint32_t* regs, const MTLViewport& vp, bool hasDepth,
+                                id<MTLDepthStencilState> depthState);
 void clouds_mark_start(Surface* const* colors, const uint32_t* colorSlices, Surface* depth, uint32_t depthSlice,
                        bool (*ensure)(Surface* const*, const uint32_t*, Surface*, uint32_t));
 void draw(const uint32_t* regs, uint32_t prim, uint32_t count, uint32_t indexType, uint32_t indexAddr, uint32_t baseVertex,
@@ -1687,12 +1690,13 @@ void draw(const uint32_t* regs, uint32_t prim, uint32_t count, uint32_t indexTyp
     MTLPrimitiveType ptype;
     if (!build_indices(prim, count, indexType, indexAddr, indices, ptype)) { g_skip[SK_PRIM]++; return; }
     rprof::mark(rprof::kIndices);
+    bool samplesSky = false;  // cloud prototype: this draw reads the half-res sky buffer (its composite)
     for (Shader* sh : {vs, ps}) {
         uint32_t texBase = sh == vs ? REGADDR::SQ_TEX_RESOURCE_WORD0_N_VS : REGADDR::SQ_TEX_RESOURCE_WORD0_N_PS;
         for (int u = 0; u < sh->dec->textureUnitListCount; u++) {
             uint8_t unit = sh->dec->textureUnitList[u];
             Surface* s = sampled_texture(&regs[texBase + unit * 7], sh->dec->textureUsesDepthCompare[unit]);
-            (void)s;
+            if (s && clouds_sky_surface(s)) samplesSky = true;
         }
     }
 
@@ -1814,6 +1818,7 @@ void draw(const uint32_t* regs, uint32_t prim, uint32_t count, uint32_t indexTyp
     for (int i = 0; i < 8; i++)
         if (colors[i] && regs[mmCB_COLOR0_BASE + i]) g_target_drawn[regs[mmCB_COLOR0_BASE + i]].drawn(R.frame);
     if (depth && regs[mmDB_DEPTH_BASE]) g_target_drawn[regs[mmDB_DEPTH_BASE]].drawn(R.frame);
+    if (samplesSky) clouds_after_sky_composite(enc, regs, vp, depth != nullptr, get_depth_state(regs, depth != nullptr));
     // debug: WWHD_DUMP_DRAWS=frame:i,j,k dumps color target 0 after those draws
     static uint64_t dumpFrame = ~0ull;
     static std::set<uint64_t> dumpDraws = [] {

@@ -34,101 +34,140 @@ using namespace metal;
 
 struct Globals {
     float3x3 view;      // world (camera-relative) -> camera
-    float4 proj;        // f/aspect, f, aspect, time
-    float4 sun;         // xyz: direction to the sun (world), w: sun weight (0 night .. 1 day)
-    float4 lit;         // palette colours (shader-side shades are derived from these)
-    float4 sky;
-    float4 params;      // x: band softness, y: noise strength, z: grade, w: mode
+    float4 proj;        // f/aspect, f, aspect, w: 1 = combined mode (D draws only the far banks)
+    float4 sun;         // xyz: light direction (sun, or the moon at night), w: daylight 0..1
+    float4 lit;         // rgb: palette lit colour (normalised), w: warmth (low sun) 0..1
+    float4 sky;         // rgb: palette sky/fog colour, w: storm strength 0..1
+    float4 params;      // x: band softness, y: noise strength, z: haze reduction, w: self-shadow steps
     float4 tune;        // x: fringe width, y: palette saturation, z: shadow level, w: mid level
-    float4 extra;       // x: max march steps, y: 1 = cheap normals (blob field only)
+    float4 extra;       // x: max march steps, y: 1 = cheap normals, z: clip-space depth, w: instance count
 };
 struct Inst {
     float4 center;      // xyz: cloud base centre (camera-relative world), w: width radius
-    float4 shape;       // x: height/width, y: seed, z: alpha, w: colour blend (1 - falloff)
-    float4 base;        // rgb: the game's colour for this cloud
+    float4 shape;       // x: height/width, y: seed, z: alpha, w: distance blend (1 - falloff)
+    float4 base;        // rgb: lit colour of this cloud, w: 1 = far (horizon bank)
 };
 struct VOut {
     float4 pos [[position]];
     float3 world;
     uint inst [[flat]];
 };
+struct FOut { float4 c [[color(0)]]; };
 
+static float hash1(float n) { return fract(sin(n) * 43758.5453); }
+static float smin(float a, float b, float k) {
+    float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
+    return mix(b, a, h) - k * h * (1.0 - h);
+}
+
+// ---- shared toon shading: 3 hard bands, warm lit / cool shadow with a height-gradient ambient
+// (sky above, sea bounce below: Cumulus' ambient idea), sun-side rim and a forward-scatter silver lining
+struct Shade { float3 lit, mid, shadow, rim; };
+static Shade palette(constant Globals& g, float3 base, float far) {
+    Shade s;
+    float storm = g.sky.w, warm = g.lit.w;
+    float luma = dot(base, float3(0.3, 0.59, 0.11));
+    // whiter at noon, the palette's own colour (gold, pink) when the sun is low
+    float sat = mix(g.tune.y, 1.0, warm);
+    float3 lit = mix(float3(luma), base, sat);
+    // full brightness by day; at night the palette's own (dark) level
+    float mx = max(max(base.r, max(base.g, base.b)), 1e-3);
+    lit = lit / max(max(lit.r, max(lit.g, lit.b)), 1e-3) * mix(min(mx * 1.7, 1.0), 1.0, g.sun.w);
+    lit *= 1.0 - 0.45 * storm;
+    float3 skyAmb = mix(g.sky.rgb, float3(1.0), 0.42);
+    s.lit = lit;
+    s.shadow = mix(lit * g.tune.z, skyAmb * mix(0.95, 0.55, storm), 0.48);
+    s.mid = mix(lit * g.tune.w, skyAmb, 0.10);
+    // low sun: golden-pink lit side, lavender shadows (warm/cool contrast)
+    s.lit = mix(s.lit, s.lit * float3(1.0, 0.82, 0.62) + float3(0.0, 0.02, 0.04), warm * 0.8);
+    s.shadow = mix(s.shadow, s.shadow * float3(0.80, 0.66, 0.92), warm);
+    s.mid = mix(s.mid, s.mid * float3(0.95, 0.80, 0.82), warm * 0.5);
+    s.mid = mix(s.mid, s.mid * float3(1.0, 0.86, 0.80), warm * 0.8);
+    s.rim = min(mix(lit * 1.08 + 0.04, float3(1.0, 0.86, 0.55), warm), float3(1.0));
+    float3 haze = mix(g.sky.rgb, float3(1.0), 0.55);
+    float f = far * 0.32;
+    s.lit = mix(s.lit, haze, f), s.mid = mix(s.mid, haze, f), s.shadow = mix(s.shadow, haze, f), s.rim = mix(s.rim, haze, f * 0.5);
+    return s;
+}
+static float3 toon(constant Globals& g, Shade c, float3 n, float3 nDetail, float3 rd, float height, float shadowTerm) {
+    float3 L = g.sun.xyz;
+    float ndl = dot(n, L) * 0.5 + 0.5;
+    float hw = 0.4 * (1.0 - 0.75 * g.lit.w);  // a low sun lights the sides it faces, not every top
+    float lightv = (ndl * (1.0 - hw) + height * hw) * mix(0.45, 1.0, shadowTerm);
+    float sw = g.params.x;
+    float3 col = mix(c.shadow, c.mid, smoothstep(0.26 - sw, 0.26 + sw, lightv));
+    col = mix(col, c.lit, smoothstep(0.40 - sw, 0.40 + sw, lightv));
+    // sea bounce under the base: cooler, a little lighter than the side shadow
+    float down = smoothstep(-0.3, -0.8, n.y);
+    col = mix(col, c.shadow * float3(0.94, 1.0, 1.06), down * 0.7);
+    // rim and silver lining: silhouette x light side; much stronger looking toward a low sun
+    // silhouette from the smooth normal (outer edges only), nudged by the detail normal for a frayed line
+    float facing = saturate(dot(normalize(mix(n, nDetail, 0.25)), -rd));
+    float toward = saturate(dot(rd, L));
+    float fwd = 0.5 + 3.0 * pow(toward, 2.0) * (0.3 + 0.7 * g.lit.w);
+    float rim = pow(1.0 - facing, 2.5) * saturate(dot(n, L) + 0.55) * fwd * g.sun.w;
+    col = mix(col, c.rim, smoothstep(0.32 - sw, 0.32 + sw, rim));
+    return col;
+}
+
+// ---- C: one impostor per cloud, raymarched against smooth-unioned spheres
 vertex VOut cl_vs(uint vid [[vertex_id]], uint iid [[instance_id]], constant Globals& g [[buffer(0)]],
                   const device Inst* inst [[buffer(1)]]) {
     Inst c = inst[iid];
     float2 corner = float2((vid & 1) ? 1.0 : -1.0, (vid & 2) ? 1.0 : -1.0);
-    float r = c.center.w * max(1.0, c.shape.x) * 1.5;
-    float3 mid = c.center.xyz + float3(0, c.center.w * c.shape.x * 0.55, 0);
+    float r = c.center.w * max(1.0, c.shape.x) * 1.6;
+    float3 mid = c.center.xyz + float3(0, c.center.w * c.shape.x * 0.6, 0);
     float3 right = float3(g.view[0][0], g.view[1][0], g.view[2][0]);
     float3 up = float3(g.view[0][1], g.view[1][1], g.view[2][1]);
     float3 p = mid + (corner.x * right + corner.y * up) * r;
     float3 q = g.view * p;
     VOut o;
     float w = -q.z;
-    o.pos = float4(q.x * g.proj.x, q.y * g.proj.y, 0.5 * w, w);
+    o.pos = float4(q.x * g.proj.x, q.y * g.proj.y, g.extra.z * w, w);
     o.world = p;
     o.inst = iid;
     return o;
 }
-
-// ---- shape: a few spheres per cloud, smooth union, flat base, baked noise displacement
-static float hash1(float n) { return fract(sin(n) * 43758.5453); }
-static float smin(float a, float b, float k) {
-    float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
-    return mix(b, a, h) - k * h * (1.0 - h);
-}
 static float blobs(float3 p, float hs, float seed) {
     float d = 1e9;
-    // base row
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < 4; i++) {  // base row
         float fi = float(i);
         float x = -0.85 + fi * 0.57 + (hash1(seed + fi) - 0.5) * 0.25;
         float r = 0.42 + hash1(seed + fi + 7.0) * 0.16;
         float z = (hash1(seed + fi + 13.0) - 0.5) * 0.35;
         d = smin(d, length(p - float3(x, r * 0.75 * hs, z)) - r, 0.12);
     }
-    // middle
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < 3; i++) {  // middle
         float fi = float(i);
         float x = -0.5 + fi * 0.5 + (hash1(seed + fi + 21.0) - 0.5) * 0.3;
         float r = 0.36 + hash1(seed + fi + 29.0) * 0.18;
         float y = (0.55 + hash1(seed + fi + 37.0) * 0.25) * hs;
         d = smin(d, length(p - float3(x, y, (hash1(seed + fi + 41.0) - 0.5) * 0.3)) - r, 0.1);
     }
-    // crown
-    for (int i = 0; i < 2; i++) {
+    for (int i = 0; i < 2; i++) {  // crown
         float fi = float(i);
         float cx = (hash1(seed + 53.0 + fi) - 0.5) * 0.7;
         d = smin(d, length(p - float3(cx, (0.95 + hash1(seed + 59.0 + fi) * 0.25) * hs, 0.0)) -
                     (0.26 + hash1(seed + 61.0 + fi) * 0.12), 0.1);
     }
-    // flat base
-    d = max(d, -(p.y - 0.06));
-    return d;
+    return max(d, -(p.y - 0.06));  // flat base
 }
 static float sdf(float3 p, float hs, float seed, texture3d<float> noise, sampler s, float amp, float ero) {
     float d = blobs(p, hs, seed) + ero;
-    if (d > 0.35) return d;  // far: skip the noise lookups
+    if (d > 0.35) return d;
     float3 np = p * 0.8 + float3(seed * 0.37, 0.0, seed * 0.11);
-    // billows: inverted Worley at the base frequency, value-noise fBm for detail (Perlin-Worley style)
     float n = noise.sample(s, np).g * 0.6 + noise.sample(s, np * 2.7).r * 0.4;
     return d + (0.5 - n) * amp;
 }
-
-struct FOut { float4 c [[color(0)]]; };
-
 fragment FOut cl_fs(VOut in [[stage_in]], constant Globals& g [[buffer(0)]], const device Inst* inst [[buffer(1)]],
                     texture3d<float> noise [[texture(0)]], sampler s [[sampler(0)]]) {
     Inst c = inst[in.inst];
     float hs = c.shape.x, seed = c.shape.y, amp = g.params.y;
-    // the game's fade (alpha) erodes the shape instead of making it translucent: clouds grow in and
-    // dissolve with toon edges (Sea of Thieves' alpha threshold idea)
-    float ero = (1.0 - saturate(c.shape.z * 1.25)) * 0.55;
+    float ero = (1.0 - saturate(c.shape.z * 1.25)) * 0.55;  // the game's fade erodes the shape
     float3 rd = normalize(in.world);
-    float3 ro = -c.center.xyz / c.center.w;  // eye in cloud units
-    // bounding sphere
-    float3 bc = float3(0, 0.55 * hs, 0);
-    float br = 1.45 * max(1.0, hs);
+    float3 ro = -c.center.xyz / c.center.w;
+    float3 bc = float3(0, 0.6 * hs, 0);
+    float br = 1.5 * max(1.0, hs);
     float3 oc = ro - bc;
     float b = dot(oc, rd), cc = dot(oc, oc) - br * br, h = b * b - cc;
     if (h < 0.0) discard_fragment();
@@ -137,148 +176,192 @@ fragment FOut cl_fs(VOut in [[stage_in]], constant Globals& g [[buffer(0)]], con
     float dmin = 1e9, tmin = t;
     bool hit = false;
     float3 p;
-    float eps = 0.0025 * t;
-    const int maxSteps = int(g.extra.x);
-    for (int i = 0; i < maxSteps && t < t1; i++) {
+    float eps = 0.0015 * t;
+    for (int i = 0; i < int(g.extra.x) && t < t1; i++) {
         p = ro + rd * t;
         float d = sdf(p, hs, seed, noise, s, amp, ero);
         if (d < dmin) { dmin = d; tmin = t; }
         if (d < eps) { hit = true; break; }
-        t += max(d * 0.85, 0.01);
+        t += max(d * 0.8, 0.008);
     }
-    float3 sunDir = g.sun.xyz;
-    float3 base = c.base.rgb;
-    // shades from the palette: lit (slightly above the game's colour), mid, cool shadow
-    float luma = dot(base, float3(0.3, 0.59, 0.11));
-    float3 litC = mix(float3(luma), base, g.tune.y);
-    float3 shadowC = mix(litC * g.tune.z, g.sky.rgb, 0.3);
-    float3 midC = mix(litC * g.tune.w, g.sky.rgb, 0.08);
-    // aerial perspective: distant clouds (near the horizon) lean toward a hazy sky colour
-    float3 haze = mix(g.sky.rgb, float3(1.0), 0.55);
-    float far = c.base.w * 0.3;
-    litC = mix(litC, haze, far), midC = mix(midC, haze, far), shadowC = mix(shadowC, haze, far);
+    Shade pal = palette(g, c.base.rgb, c.shape.w);
     FOut o;
-    if (!hit) {
-        // frayed fringe: a thin, noise-broken halo just outside the surface, sun-side brighter
+    if (!hit) {  // frayed fringe just outside the surface
         float fw = g.tune.x;
         if (dmin > fw) discard_fragment();
         float3 q = ro + rd * tmin;
         float n = noise.sample(s, q * 1.9 + seed).g;
-        float a = (1.0 - dmin / fw) * smoothstep(0.35, 0.75, n);
-        if (a < 0.02) discard_fragment();
-        float3 col = mix(midC, litC, saturate(q.y / (1.2 * hs)));
-        a *= saturate(c.shape.z * 4.0) * 0.85;
+        float a = (1.0 - dmin / fw) * smoothstep(0.4, 0.7, n);
+        if (a < 0.05) discard_fragment();
+        a = saturate(a * 2.0) * saturate(c.shape.z * 4.0);
+        float3 col = mix(pal.mid, pal.lit, saturate(q.y / (1.2 * hs)));
         o.c = float4(col * a, a);
         return o;
     }
-    // normals: the toon bands use the smooth blob field's gradient (proxy normal, Guilty Gear style:
-    // large clean light shapes), the noise-displaced one only adds a little detail and the rim
-    const float e = 0.01;
     float3 nb = normalize(float3( 1, -1, -1) * blobs(p + float3( 1, -1, -1) * 0.06, hs, seed) +
                           float3(-1, -1,  1) * blobs(p + float3(-1, -1,  1) * 0.06, hs, seed) +
                           float3(-1,  1, -1) * blobs(p + float3(-1,  1, -1) * 0.06, hs, seed) +
                           float3( 1,  1,  1) * blobs(p + float3( 1,  1,  1) * 0.06, hs, seed));
     float3 nd = nb;
-    if (g.extra.y < 0.5)
+    if (g.extra.y < 0.5) {
+        const float e = 0.01;
         nd = normalize(float3( 1, -1, -1) * sdf(p + float3( 1, -1, -1) * e, hs, seed, noise, s, amp, ero) +
                        float3(-1, -1,  1) * sdf(p + float3(-1, -1,  1) * e, hs, seed, noise, s, amp, ero) +
                        float3(-1,  1, -1) * sdf(p + float3(-1,  1, -1) * e, hs, seed, noise, s, amp, ero) +
                        float3( 1,  1,  1) * sdf(p + float3( 1,  1,  1) * e, hs, seed, noise, s, amp, ero));
-    float3 n = normalize(mix(nb, nd, 0.12));
-    float ndl = dot(n, sunDir) * 0.5 + 0.5;
-    float height = saturate(p.y / (1.1 * hs));
-    float lightv = ndl * 0.55 + height * 0.45;
-    // optional self-shadowing (idea from Nubis / Frostnova's light-occlusion grid, done here as a short
-    // soft-shadow march toward the sun through the smooth blob field): puffs shadow each other
-    if (g.params.w > 0.0) {
-        float sh = 1.0, ts = 0.06;
+    }
+    float3 n = normalize(mix(nb, nd, 0.15));
+    float sh = 1.0;
+    if (g.params.w > 0.0) {  // self-shadow: soft-shadow march toward the light through the blob field
+        float ts = 0.06;
         for (int i = 0; i < int(g.params.w); i++) {
-            float dd = blobs(p + sunDir * ts, hs, seed);
+            float dd = blobs(p + g.sun.xyz * ts, hs, seed);
             sh = min(sh, saturate(6.0 * dd / ts + 0.5));
             ts += max(dd, 0.08);
         }
-        lightv *= mix(0.45, 1.0, sh);
     }
-    float sw = g.params.x;
-    float3 col = mix(shadowC, midC, smoothstep(0.30 - sw, 0.30 + sw, lightv));
-    col = mix(col, litC, smoothstep(0.43 - sw, 0.43 + sw, lightv));
-    // rim / silver lining on the sun side of the silhouette
-    float facing = saturate(dot(n, -rd));
-    // rim / silver lining: silhouette (detail normal) x sun side, stronger looking toward the sun (forward scatter)
-    // forward scatter: looking toward the sun (dusk, back-lit clouds) the silver lining gets much stronger
-    float fwd = 0.6 + 1.4 * pow(saturate(dot(rd, sunDir)), 3.0);
-    float rim = pow(1.0 - facing, 3.0) * saturate(dot(nb, sunDir) + 0.35) * fwd * g.sun.w;
-    col = mix(col, min(litC + 0.10, float3(1.0)), smoothstep(0.30 - sw, 0.30 + sw, rim));
-    // underside: cooler and darker where the surface faces down
-    col = mix(col, shadowC * 0.92, smoothstep(-0.35, -0.75, n.y) * 0.6);
+    float3 col = toon(g, pal, n, nd, rd, saturate(p.y / (1.1 * hs)), sh);
     float a = saturate(c.shape.z * 6.0);
     o.c = float4(col * a, a);
     return o;
 }
 
-// ---- option D: one full-screen raymarched slab with posterised light
+// ---- D: one full-screen pass over a merged cloud field. Each game cloud is a flat-based, dome-topped
+// coverage blob; neighbouring blobs merge into banks; noise erodes billows; the first crossing of a
+// density threshold is the toon surface (hard edge), shaded like C, with a density march toward the sun
+// for self-shadowing.
 struct FVOut { float4 pos [[position]]; float2 ndc; };
-vertex FVOut vol_vs(uint vid [[vertex_id]]) {
+vertex FVOut vol_vs(uint vid [[vertex_id]], constant Globals& g [[buffer(0)]]) {
     float2 p = float2((vid << 1) & 2, vid & 2) * 2.0 - 1.0;
-    FVOut o; o.pos = float4(p, 0.5, 1); o.ndc = p; return o;
+    FVOut o; o.pos = float4(p, g.extra.z, 1); o.ndc = p; return o;
+}
+struct Cand { int k; float t0, t1; };
+constant float g_dfreq = 0.00042;
+static float field(float3 p, const device Inst* inst, thread const Cand* cand, int nc, texture3d<float> noise, sampler s,
+                   float amp, thread float& hgt, thread int& who, bool detail = true) {
+    float cov = 0.0, rr = 1000.0;
+    hgt = 0.0;
+    for (int j = 0; j < nc; j++) {
+        Inst c = inst[cand[j].k];
+        float R = c.center.w * 1.7, H = c.center.w * c.shape.x * 1.9;
+        float2 dxz = (p.xz - c.center.xz) / R;
+        float fh = 1.0 - dot(dxz, dxz);
+        if (fh <= 0.0) continue;
+        float v = (p.y - c.center.y) / H;
+        float prof = saturate(v * 6.0) * saturate(1.0 - v * v / max(fh, 0.05));
+        float a = saturate(c.shape.z * 1.3) * prof * sqrt(fh);
+        if (a > cov) { cov = a; hgt = saturate(v); who = cand[j].k; rr = R; }
+    }
+    if (cov <= 0.0) return -1.0;
+    if (!detail) return cov - 0.30;
+    float3 np = p / (rr * 0.85);
+    float n = noise.sample(s, np).g * 0.6 + noise.sample(s, np * 2.9).r * 0.4;
+    return cov - 0.30 - (0.55 - n) * amp * 1.25;
 }
 fragment FOut vol_fs(FVOut in [[stage_in]], constant Globals& g [[buffer(0)]], const device Inst* inst [[buffer(1)]],
-                     constant int& count [[buffer(2)]], texture3d<float> noise [[texture(0)]], sampler s [[sampler(0)]]) {
+                     texture3d<float> noise [[texture(0)]], sampler s [[sampler(0)]]) {
     float3 dc = normalize(float3(in.ndc.x / g.proj.x, in.ndc.y / g.proj.y, -1.0));
     float3 rd = transpose(g.view) * dc;
-    FOut o;
-    if (rd.y < 0.01) discard_fragment();
-    const float lo = 1800.0, hi = 4200.0;
-    float t0 = lo / rd.y, t1 = hi / rd.y;
-    t1 = min(t1, t0 + 9000.0);
-    const int N = 40;
-    float dt = (t1 - t0) / float(N);
-    float T = 1.0;
-    float3 acc = 0.0;
-    float3 base = g.lit.rgb;
-    float3 litC = min(base * 1.12 + 0.04, float3(1.0));
-    float3 shadowC = mix(base * float3(0.66, 0.72, 0.86), g.sky.rgb, 0.22);
-    for (int i = 0; i < N && T > 0.03; i++) {
-        float t = t0 + dt * (float(i) + 0.5);
-        float3 p = rd * t;
-        // coverage: the game's clouds as soft discs
-        float cov = 0.0;
-        for (int k = 0; k < count; k++) {
-            float3 cpos = inst[k].center.xyz;
-            float r = inst[k].center.w * 1.6;
-            float2 dxz = p.xz - cpos.xz;
-            cov = max(cov, inst[k].shape.z * saturate(1.0 - dot(dxz, dxz) / (r * r)));
-        }
-        if (cov <= 0.0) continue;
-        float hn = (p.y - lo) / (hi - lo);
-        float n = noise.sample(s, p * 0.00025).r * 0.6 + noise.sample(s, p * 0.0009).r * 0.4;
-        float dens = saturate(cov * 1.4 - n * 0.9 - hn * hn * 0.8) * 0.004;
-        if (dens <= 0.0) continue;
-        // one light sample toward the sun
-        float3 ps = p + g.sun.xyz * 400.0;
-        float nl = noise.sample(s, ps * 0.00025).r;
-        float occl = saturate(cov * 1.4 - nl * 0.9);
-        float lightv = (1.0 - occl) * 0.6 + hn * 0.4;
-        float band = lightv < 0.35 ? 0.0 : lightv < 0.6 ? 0.5 : 1.0;  // posterised
-        float3 col = mix(shadowC, litC, band);
-        float a = 1.0 - exp(-dens * dt);
-        acc += T * a * col;
-        T *= 1.0 - a;
+    // candidate clouds: ray vs each blob's vertical cylinder (up to 8, nearest first)
+    Cand cand[8];
+    int nc = 0;
+    int count = int(g.extra.w);
+    for (int k = 0; k < count; k++) {
+        Inst c = inst[k];
+        if (c.base.w < 0.5 && g.proj.w > 0.5) continue;  // combined mode: D draws only the far banks
+        float R = c.center.w * 1.7, H = c.center.w * c.shape.x * 1.9;
+        float2 o2 = -c.center.xz, d2 = rd.xz;
+        float A = dot(d2, d2), B = dot(o2, d2), C = dot(o2, o2) - R * R;
+        float disc = B * B - A * C;
+        if (disc <= 0.0 || A < 1e-8) continue;
+        disc = sqrt(disc);
+        float t0 = (-B - disc) / A, t1 = (-B + disc) / A;
+        // clip to the blob's height range
+        if (abs(rd.y) > 1e-5) {
+            float ya = (c.center.y - rd.y * 0.0) / rd.y, yb = (c.center.y + H) / rd.y;
+            float lo = min(ya, yb), hi = max(ya, yb);
+            t0 = max(t0, lo), t1 = min(t1, hi);
+        } else if (c.center.y > 0.0 || c.center.y + H < 0.0) continue;
+        t0 = max(t0, 0.0);
+        if (t1 <= t0) continue;
+        Cand nw = {k, t0, t1};
+        int at = nc < 8 ? nc : 8;
+        for (int j = 0; j < min(nc, 8); j++) if (t0 < cand[j].t0) { at = j; break; }
+        if (at >= 8) continue;
+        for (int j = min(nc, 7); j > at; j--) cand[j] = cand[j - 1];
+        cand[at] = nw;
+        nc = min(nc + 1, 8);
     }
-    float alpha = 1.0 - T;
-    if (alpha < 0.01) discard_fragment();
-    o.c = float4(acc, alpha);
+    if (nc == 0) discard_fragment();
+    float amp = g.params.y;
+    float hgt; int who = cand[0].k;
+    bool hit = false;
+    float3 p;
+    int steps = int(g.extra.x);
+    for (int j = 0; j < nc && !hit; j++) {
+        float dt = (cand[j].t1 - cand[j].t0) / float(steps);
+        for (int i = 0; i <= steps; i++) {
+            float t = cand[j].t0 + dt * float(i);
+            float3 q = rd * t;
+            float f = field(q, inst, cand, nc, noise, s, amp, hgt, who);
+            if (f > 0.0) {
+                // refine the crossing
+                float a = i > 0 ? t - dt : t, b2 = t;
+                for (int r = 0; r < 5; r++) {
+                    float m = 0.5 * (a + b2);
+                    if (field(rd * m, inst, cand, nc, noise, s, amp, hgt, who) > 0.0) b2 = m; else a = m;
+                }
+                p = rd * b2;
+                hit = true;
+                break;
+            }
+        }
+    }
+    if (!hit) discard_fragment();
+    Inst c = inst[who];
+    float hh; int ww;
+    float e = c.center.w * 0.04;
+    float f0 = field(p, inst, cand, nc, noise, s, amp, hh, ww);
+    float3 grad = float3(field(p + float3(e, 0, 0), inst, cand, nc, noise, s, amp, hh, ww) - f0,
+                         field(p + float3(0, e, 0), inst, cand, nc, noise, s, amp, hh, ww) - f0,
+                         field(p + float3(0, 0, e), inst, cand, nc, noise, s, amp, hh, ww) - f0);
+    float3 nd = normalize(-grad + float3(0, 1e-6, 0));
+    // proxy normal from the smooth coverage field (clean toon bands), detail normal for the rim
+    float e2 = c.center.w * 0.15;
+    float g0 = field(p, inst, cand, nc, noise, s, amp, hh, ww, false);
+    float3 gradC = float3(field(p + float3(e2, 0, 0), inst, cand, nc, noise, s, amp, hh, ww, false) - g0,
+                          field(p + float3(0, e2, 0), inst, cand, nc, noise, s, amp, hh, ww, false) - g0,
+                          field(p + float3(0, 0, e2), inst, cand, nc, noise, s, amp, hh, ww, false) - g0);
+    float3 nc2 = normalize(-gradC + float3(0, 1e-6, 0));
+    float3 n = normalize(mix(nc2, nd, 0.3));
+    float sh = 1.0;
+    if (g.params.w > 0.0) {
+        float acc = 0.0;
+        for (int i = 1; i <= int(g.params.w); i++) {
+            float fs = field(p + g.sun.xyz * c.center.w * 0.12 * float(i), inst, cand, nc, noise, s, amp, hh, ww);
+            acc += saturate(fs * 4.0);
+        }
+        sh = 1.0 - saturate(acc / max(g.params.w, 1.0) * 1.6);
+    }
+    Shade pal = palette(g, c.base.rgb, c.shape.w);
+    float3 col = toon(g, pal, n, nd, rd, hgt, sh);
+    float a = saturate(c.shape.z * 6.0);
+    FOut o;
+    o.c = float4(col * a, a);
     return o;
 }
 
-// ---- research: deepen the sky colour behind the clouds (full screen, before the clouds)
+// ---- vivid sky: pull the horizon haze band (kasumi) back toward the sky colour (sky buffer, before clouds)
 fragment FOut grade_fs(FVOut in [[stage_in]], constant Globals& g [[buffer(0)]]) {
     float3 dc = normalize(float3(in.ndc.x / g.proj.x, in.ndc.y / g.proj.y, -1.0));
     float3 rd = transpose(g.view) * dc;
-    float up = saturate(rd.y * 3.0);
+    float band = (1.0 - smoothstep(0.0, 0.32, rd.y)) * step(-0.02, rd.y);
+    float3 sky = g.sky.rgb * mix(0.95, 1.12, saturate(rd.y * 4.0));
+    // keep a warm glow around a low sun
+    float aroundSun = pow(saturate(dot(rd, g.sun.xyz)), 6.0) * g.lit.w;
+    float a = saturate(g.params.z) * band * (1.0 - aroundSun);
     FOut o;
-    float a = g.params.z * up * 0.35;
-    o.c = float4(float3(0.05, 0.25, 0.75) * a, a);
+    o.c = float4(sky * a, a);
     return o;
 }
 )";
@@ -353,7 +436,7 @@ static id<MTLTexture> make_noise() {
 
 struct Globals {
     float view[12];  // float3x3: 3 columns of float4 (padded)
-    float proj[4], sun[4], lit[4], sky[4], params[4], tune[4], extra[4];
+    float proj[4], sun[4], lit[4], sky[4], params[4], tune[4], extra[4];  // as the shader's Globals
 };
 struct Inst {
     float center[4], shape[4], base[4];
@@ -363,7 +446,9 @@ static float envf(const char* n, float d) { const char* e = getenv(n); return e 
 static bool env_on(const char* n) { const char* e = getenv(n); return e && *e && strcmp(e, "0"); }
 
 // draws the clouds of snapshot `seq` into the open encoder's pass; vp: the game's viewport
-static void encode(id<MTLRenderCommandEncoder> enc, const cloud_proto::Snapshot& s, const MTLViewport& vp) {
+enum { kGrade = 1, kClouds = 2 };
+static void encode(id<MTLRenderCommandEncoder> enc, const cloud_proto::Snapshot& s, const MTLViewport& vp, int what,
+                   id<MTLDepthStencilState> depthState = nil) {
     static id<MTLLibrary> lib;
     static id<MTLTexture> noise;
     static id<MTLSamplerState> samp;
@@ -430,36 +515,62 @@ static void encode(id<MTLRenderCommandEncoder> enc, const cloud_proto::Snapshot&
     float aspect = (float)(vp.width / std::fabs(vp.height));
     float f = 1.0f / std::tan(s.fovy * 0.5f * 3.14159265f / 180.0f);
     static const bool logOn = env_on("WWHD_CLOUDS_LOG");
-    g.proj[0] = f / aspect, g.proj[1] = f, g.proj[2] = aspect, g.proj[3] = 0;
-    float L[3] = {0, 1, 0};
-    if (s.sunVisible) {
-        float d[3] = {s.sunPos[0] - s.eye[0], s.sunPos[1] - s.eye[1], s.sunPos[2] - s.eye[2]};
+    g.proj[0] = f / aspect, g.proj[1] = f, g.proj[2] = aspect, g.proj[3] = mode == cloud_proto::kCombo ? 1.0f : 0.0f;
+    // light: the sun; below the horizon the moon (dimmer, no rim); never from below
+    auto dir = [&](const float* pos, float* out) {
+        float d[3] = {pos[0] - s.eye[0], pos[1] - s.eye[1], pos[2] - s.eye[2]};
         float len = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
-        if (len > 1e-3f) for (int i = 0; i < 3; i++) L[i] = d[i] / len;
+        if (len < 1e-3f) { out[0] = 0, out[1] = 1, out[2] = 0; return; }
+        for (int i = 0; i < 3; i++) out[i] = d[i] / len;
+    };
+    float L[3] = {0, 1, 0};
+    if (s.sunVisible) dir(s.sunPos, L);
+    float elev = L[1];
+    float day = std::clamp(elev * 5.0f + 0.3f, 0.0f, 1.0f);
+    if (elev < 0.02f) {
+        float M[3];
+        dir(s.moonPos, M);
+        if (M[1] > 0.05f) for (int i = 0; i < 3; i++) L[i] = M[i];
+        else L[0] *= 0.3f, L[2] *= 0.3f, L[1] = 0.9f;
     }
-    float sunW = std::clamp(L[1] * 4.0f + 0.2f, 0.0f, 1.0f);
-    if (L[1] < 0.05f) {  // night or sun below the horizon: light from above
-        L[0] *= 0.3f, L[2] *= 0.3f, L[1] = 0.9f;
+    if (L[1] < 0.12f) {  // keep the light a little above the horizon so tops stay lit
+        L[1] = 0.12f;
         float len = std::sqrt(L[0] * L[0] + L[1] * L[1] + L[2] * L[2]);
         for (float& v : L) v /= len;
     }
     for (int i = 0; i < 3; i++) g.sun[i] = L[i];
-    g.sun[3] = sunW;
-    for (int i = 0; i < 3; i++) {
-        g.lit[i] = std::min(1.0f, s.cloudColor[i] * s.cloudScale);
-        g.sky[i] = s.fogColor[i];
-    }
-    static const float grade = getenv("WWHD_SKY_GRADE") ? (float)atof(getenv("WWHD_SKY_GRADE")) : 0.0f;
-    g.params[0] = envf("WWHD_CLOUDS_BAND", 0.012f), g.params[1] = envf("WWHD_CLOUDS_NOISE", 0.38f), g.params[2] = grade;
-    g.params[3] = envf("WWHD_CLOUDS_SELFSHADOW", 0.0f);  // shadow march steps (0: off)
-    g.tune[0] = envf("WWHD_CLOUDS_FRINGE", 0.02f), g.tune[1] = envf("WWHD_CLOUDS_SAT", 0.8f);
-    g.extra[0] = envf("WWHD_CLOUDS_STEPS", 40.0f), g.extra[1] = envf("WWHD_CLOUDS_CHEAP", 0.0f);
-    g.tune[2] = envf("WWHD_CLOUDS_SHADOW", 0.72f), g.tune[3] = envf("WWHD_CLOUDS_MID", 0.91f);
+    g.sun[3] = day;
+    static const float strengthOverride = envf("WWHD_CLOUDS_STRENGTH", -1.0f);  // research: visual storm
+    const float strength = strengthOverride >= 0 ? strengthOverride : s.strength;
+    // warmth from the clock (the game's sun stays fairly high at dusk): dawn around 90, dusk around 270
+    // (360 = a day); WWHD_CLOUDS_WARM overrides
+    auto bump = [](float t, float c, float w) { return std::max(0.0f, 1.0f - std::fabs(t - c) / w); };
+    float warm = std::clamp(bump(s.curTime, 268.0f, 28.0f) + bump(s.curTime, 92.0f, 22.0f), 0.0f, 1.0f);
+    warm = std::max(warm, std::clamp(1.0f - (elev - 0.05f) * 3.0f, 0.0f, 1.0f) * day);
+    static const float warmOverride = envf("WWHD_CLOUDS_WARM", -1.0f);
+    if (warmOverride >= 0) warm = warmOverride;
+    for (int i = 0; i < 3; i++) g.sky[i] = s.fogColor[i];
+    g.sky[3] = strength;
+    g.lit[3] = warm;
+    static const float haze = envf("WWHD_SKY_HAZE", 0.0f);  // 0 = game's haze .. 1 = horizon haze band removed
+    g.params[0] = envf("WWHD_CLOUDS_BAND", 0.010f), g.params[1] = envf("WWHD_CLOUDS_NOISE", 0.38f), g.params[2] = haze;
+    g.params[3] = envf("WWHD_CLOUDS_SELFSHADOW", 6.0f);
+    g.tune[0] = envf("WWHD_CLOUDS_FRINGE", 0.02f), g.tune[1] = envf("WWHD_CLOUDS_SAT", 0.25f);
+    g.tune[2] = envf("WWHD_CLOUDS_SHADOW", 0.72f), g.tune[3] = envf("WWHD_CLOUDS_MID", 0.92f);
+    g.extra[0] = envf("WWHD_CLOUDS_STEPS", mode == cloud_proto::kSdf ? 48.0f : 24.0f), g.extra[1] = envf("WWHD_CLOUDS_CHEAP", 0.0f);
+    g.extra[2] = depthState ? envf("WWHD_CLOUDS_Z", 0.99999f) : 0.5f;
 
-    // instances: one per game cloud (layer 0 sizing of drawVrkumo), far to near
+    // instances: one per game cloud (drawVrkumo's layer-0 size), plus, for distant clouds near the
+    // horizon, satellites that turn them into banks; the game's placement, drift, fade and weather drive all
     std::vector<Inst> inst;
     std::vector<float> dist;
     const float* k = s.k;  // sizeBase, sizeGain, variation, pitchScale, sideGain, pitchGain, starSizeBase, farPlane
+    static const float sizeK = envf("WWHD_CLOUDS_SIZE", 1.35f), hsK = envf("WWHD_CLOUDS_HS", 0.75f);
+    static const float bankK = envf("WWHD_CLOUDS_BANKS", 1.0f), bankDist = envf("WWHD_CLOUDS_BANK_DIST", 10500.0f);
+    auto h01 = [](uint32_t x) {
+        x ^= x >> 16; x *= 0x7feb352d; x ^= x >> 15; x *= 0x846ca68b; x ^= x >> 16;
+        return (x & 0xFFFF) / 65535.0f;
+    };
     for (int n = 0; n < s.n; n++) {
         const cloud_proto::Cloud& c = s.c[n];
         float x = c.pos[0], y = c.pos[1], z = c.pos[2];
@@ -467,69 +578,76 @@ static void encode(id<MTLRenderCommandEncoder> enc, const cloud_proto::Snapshot&
         if (D < 1) continue;
         float v = (float)(c.index & 15) * k[2];
         float shape = 1 - v * v * v;
-        float weather = k[0] * s.strength + k[1];
+        float weather = k[0] * strength + k[1];
         float ang = shape * weather * c.falloff;
         float pitch = std::atan2(y, hor);
         float q = std::min(pitch / k[3], 1.0f), qc = q * q * q;
         float side = ang * k[0] * (1 + qc * k[4]);
         float tall = ang * (1 + c.height) * k[6] * (1 + qc * k[5]);
-        float rw = D * std::tan(std::min(side, 1.2f)) * envf("WWHD_CLOUDS_SIZE", 1.0f);
+        float rw = D * std::tan(std::min(side, 1.2f)) * sizeK;
         float rh = D * std::tan(std::min(tall, 1.2f));
         if (rw < 1) continue;
-        Inst it{};
-        it.center[0] = x, it.center[1] = y, it.center[2] = z, it.center[3] = rw;
-        it.shape[0] = std::clamp(rh / rw * envf("WWHD_CLOUDS_HS", 0.6f), 0.6f, 1.25f);
-        it.shape[1] = (float)c.index * 7.31f + 3.0f;
-        it.shape[2] = std::min(1.0f, c.alpha);
-        // lit colour: the palette's cloud centre colour (warm white at noon, golden at dusk), kept
-        // bright (normalised to its largest channel, at least 0.75); the cloud colour proper is greenish
-        // in the noon palette and is only blended in a little toward the horizon
-        float blend = 1 - c.falloff, mx = 0;
-        float lit[3];
-        for (int i = 0; i < 3; i++) {
-            float cc = s.cloudColor[i] * s.cloudScale, ce = s.centerColor[i] * s.centerScale;
-            lit[i] = ce + (cc - ce) * blend * 0.25f;
-            mx = std::max(mx, lit[i]);
+        bool far = hor > bankDist;
+        float tower = h01(c.index * 7 + 1) < 0.3f ? 1.45f : 1.0f;  // some clouds grow into towers
+        float hs = std::clamp(rh / rw * hsK * tower * (1.0f - 0.4f * strength), 0.55f, 1.6f);
+        auto add = [&](float cx, float cy, float cz, float r, float shp, float seed, float a) {
+            Inst it{};
+            it.center[0] = cx, it.center[1] = cy, it.center[2] = cz, it.center[3] = r;
+            it.shape[0] = shp, it.shape[1] = seed, it.shape[2] = std::min(1.0f, a), it.shape[3] = 1 - c.falloff;
+            float blend = 1 - c.falloff, mx = 0, lit[3];
+            for (int i = 0; i < 3; i++) {
+                float cc = s.cloudColor[i] * s.cloudScale, ce = s.centerColor[i] * s.centerScale;
+                lit[i] = ce + (cc - ce) * blend * 0.25f;
+                mx = std::max(mx, lit[i]);
+            }
+            for (int i = 0; i < 3; i++) it.base[i] = std::min(1.0f, lit[i] / std::max(mx, 1e-3f) * std::clamp(mx, 0.0f, 1.0f));
+            it.base[3] = far ? 1.0f : 0.0f;
+            inst.push_back(it);
+            dist.push_back(std::sqrt(cx * cx + cy * cy + cz * cz));
+        };
+        add(x, y, z, rw, hs, (float)c.index * 7.31f + 3.0f, c.alpha);
+        if (far && bankK > 0) {
+            // satellites along the horizon (perpendicular to the view direction), lower and a bit smaller
+            float tx = -z / hor, tz = x / hor;
+            int ns = 2 + (h01(c.index * 13 + 5) < 0.5f ? 1 : 0);
+            for (int j = 0; j < ns; j++) {
+                float sgn = (j & 1) ? -1.0f : 1.0f;
+                float off = rw * bankK * (0.85f + 0.5f * h01(c.index * 31 + j)) * (1.0f + 0.6f * (j / 2));
+                float r2 = rw * (0.7f + 0.3f * h01(c.index * 17 + j));
+                float hs2 = std::clamp(hs * (0.7f + 0.6f * h01(c.index * 19 + j)), 0.55f, 1.6f);
+                add(x + tx * off * sgn, y - rw * 0.08f, z + tz * off * sgn, r2, hs2, (float)c.index * 7.31f + 50.0f + j * 11.0f, c.alpha);
+            }
         }
-        float bright = std::clamp(mx, 0.75f, 1.0f) / std::max(mx, 1e-3f);
-        for (int i = 0; i < 3; i++) it.base[i] = std::min(1.0f, lit[i] * bright);
-        it.base[3] = blend;
-        inst.push_back(it);
-        dist.push_back(D);
     }
     std::vector<int> order(inst.size());
     for (size_t i = 0; i < order.size(); i++) order[i] = (int)i;
     std::sort(order.begin(), order.end(), [&](int a, int b) { return dist[a] > dist[b]; });
     std::vector<Inst> sorted;
     for (int i : order) sorted.push_back(inst[i]);
+    g.extra[3] = (float)sorted.size();
     if (logOn && R.frame % 150 == 0) {
-        LOG("[clouds] frame %llu: %d game clouds, %zu drawn, count %d strength %.2f time %.1f fovy %.1f eye %.0f %.0f %.0f sun %.2f %.2f %.2f (vis %d a %.2f) "
-            "cloud %.2f %.2f %.2f x%.2f centre %.2f %.2f %.2f x%.2f fog %.2f %.2f %.2f k %g %g %g %g %g %g %g %g",
-            (unsigned long long)R.frame, s.n, sorted.size(), s.count, s.strength, s.curTime, s.fovy, s.eye[0], s.eye[1], s.eye[2],
-            L[0], L[1], L[2], s.sunVisible, s.sunAlpha, s.cloudColor[0], s.cloudColor[1], s.cloudColor[2], s.cloudScale,
-            s.centerColor[0], s.centerColor[1], s.centerColor[2], s.centerScale, s.fogColor[0], s.fogColor[1], s.fogColor[2],
-            k[0], k[1], k[2], k[3], k[4], k[5], k[6], k[7]);
+        LOG("[clouds] frame %llu: %d game clouds, %zu instances, count %d strength %.2f time %.1f fovy %.1f light %.2f %.2f %.2f day %.2f warm %.2f "
+            "cloud %.2f %.2f %.2f x%.2f centre %.2f %.2f %.2f x%.2f fog %.2f %.2f %.2f",
+            (unsigned long long)R.frame, s.n, sorted.size(), s.count, strength, s.curTime, s.fovy, L[0], L[1], L[2], day, warm,
+            s.cloudColor[0], s.cloudColor[1], s.cloudColor[2], s.cloudScale, s.centerColor[0], s.centerColor[1], s.centerColor[2],
+            s.centerScale, s.fogColor[0], s.fogColor[1], s.fogColor[2]);
         if (R.passColor[0])
             LOG("[clouds]   target %lux%lu", (unsigned long)R.passColor[0]->tex.width, (unsigned long)R.passColor[0]->tex.height);
-        for (size_t i = 0; i < std::min<size_t>(sorted.size(), 4); i++)
-            LOG("[clouds]   c %.0f %.0f %.0f r %.0f hs %.2f a %.2f", sorted[i].center[0], sorted[i].center[1], sorted[i].center[2],
-                sorted[i].center[3], sorted[i].shape[0], sorted[i].shape[2]);
     }
 
-    [enc setDepthStencilState:noDepth];
+    [enc setDepthStencilState:depthState ? depthState : noDepth];
     [enc setCullMode:MTLCullModeNone];
     [enc setDepthBias:0 slopeScale:0 clamp:0];
     [enc setViewport:vp];
     [enc setVertexBytes:&g length:sizeof g atIndex:0];
     [enc setFragmentBytes:&g length:sizeof g atIndex:0];
-    if (grade > 0) {
+    if ((what & kGrade) && haze > 0) {
         if (id<MTLRenderPipelineState> p = pipe(@"vol_vs", @"grade_fs")) {
             [enc setRenderPipelineState:p];
             [enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
         }
     }
-    if (mode == cloud_proto::kHide || sorted.empty()) return;
-    // instances go in a small buffer (setBytes is limited to 4 KiB)
+    if (!(what & kClouds) || mode == cloud_proto::kHide || mode == cloud_proto::kMark || sorted.empty()) return;
     id<MTLBuffer> ib = [R.device newBufferWithBytes:sorted.data() length:sorted.size() * sizeof(Inst)
                                             options:MTLResourceStorageModeShared];
     [enc setVertexBuffer:ib offset:0 atIndex:1];
@@ -537,19 +655,32 @@ static void encode(id<MTLRenderCommandEncoder> enc, const cloud_proto::Snapshot&
     [enc setFragmentTexture:noise atIndex:0];
     [enc setFragmentSamplerState:samp atIndex:0];
     static const int repeat = getenv("WWHD_CLOUDS_REPEAT") ? std::max(1, atoi(getenv("WWHD_CLOUDS_REPEAT"))) : 1;
-    if (mode == cloud_proto::kVolume) {
-        id<MTLRenderPipelineState> p = pipe(@"vol_vs", @"vol_fs");
-        if (!p) return;
-        [enc setRenderPipelineState:p];
-        int count = (int)sorted.size();
-        [enc setFragmentBytes:&count length:sizeof count atIndex:2];
-        for (int r = 0; r < repeat; r++) [enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
-    } else {
-        id<MTLRenderPipelineState> p = pipe(@"cl_vs", @"cl_fs");
-        if (!p) return;
-        [enc setRenderPipelineState:p];
-        for (int r = 0; r < repeat; r++)
-            [enc drawPrimitives:MTLPrimitiveTypeTriangleStrip vertexStart:0 vertexCount:4 instanceCount:sorted.size()];
+    if (mode == cloud_proto::kVolume || mode == cloud_proto::kCombo) {
+        if (id<MTLRenderPipelineState> p = pipe(@"vol_vs", @"vol_fs")) {
+            [enc setRenderPipelineState:p];
+            for (int r = 0; r < repeat; r++) [enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
+        }
+    }
+    if (mode == cloud_proto::kSdf || mode == cloud_proto::kCombo) {
+        std::vector<Inst> near;
+        const std::vector<Inst>* list = &sorted;
+        if (mode == cloud_proto::kCombo) {
+            for (auto& it : sorted) if (it.base[3] < 0.5f) near.push_back(it);
+            list = &near;
+            if (near.empty()) return;
+            ib = [R.device newBufferWithBytes:near.data() length:near.size() * sizeof(Inst) options:MTLResourceStorageModeShared];
+            [enc setVertexBuffer:ib offset:0 atIndex:1];
+            [enc setFragmentBuffer:ib offset:0 atIndex:1];
+            Globals g2 = g;
+            g2.extra[0] = envf("WWHD_CLOUDS_STEPS_C", 48.0f);
+            [enc setVertexBytes:&g2 length:sizeof g2 atIndex:0];
+            [enc setFragmentBytes:&g2 length:sizeof g2 atIndex:0];
+        }
+        if (id<MTLRenderPipelineState> p = pipe(@"cl_vs", @"cl_fs")) {
+            [enc setRenderPipelineState:p];
+            for (int r = 0; r < repeat; r++)
+                [enc drawPrimitives:MTLPrimitiveTypeTriangleStrip vertexStart:0 vertexCount:4 instanceCount:list->size()];
+        }
     }
 }
 
@@ -579,17 +710,52 @@ static void timed_commit(const char* what) {
 }
 void flush();
 
+// ---- full resolution (WWHD_CLOUDS_FULLRES=1): the clouds are drawn right after the draw that composites
+// the half-res sky buffer into the full-resolution target, with that draw's depth test
+static Surface* g_sky = nullptr;
+static uint64_t g_skyFrame = ~0ull;
+static uint32_t g_pendingSeq = 0;
+bool clouds_sky_surface(Surface* s) { return g_pendingSeq && s == g_sky && g_skyFrame == R.frame; }
+void clouds_after_sky_composite(id<MTLRenderCommandEncoder> enc, const uint32_t* regs, const MTLViewport& vp, bool hasDepth,
+                                id<MTLDepthStencilState> depthState) {
+    uint32_t seq = g_pendingSeq;
+    g_pendingSeq = 0;
+    static const bool trace = env_on("WWHD_CLOUDS_LOG");
+    if (trace && R.frame % 150 == 0)
+        LOG("[clouds] sky composite: target %lux%lu depth %d DB_DEPTH_CONTROL %08X vp z %.3f..%.3f",
+            R.passColor[0] ? (unsigned long)R.passColor[0]->tex.width : 0, R.passColor[0] ? (unsigned long)R.passColor[0]->tex.height : 0,
+            hasDepth, regs[0xA200], vp.znear, vp.zfar);
+    // our own test, not the composite's EQUAL: the impostors' interpolated depth is not bit-exact 1.0,
+    // so test "in front of or at the far plane" with a depth just short of it (sky only, no write)
+    static id<MTLDepthStencilState> skyOnly = [] {
+        MTLDepthStencilDescriptor* dd = [MTLDepthStencilDescriptor new];
+        dd.depthCompareFunction = MTLCompareFunctionLessEqual;
+        dd.depthWriteEnabled = NO;
+        return [R.device newDepthStencilStateWithDescriptor:dd];
+    }();
+    (void)depthState;
+    encode(enc, *cloud_proto::snapshot(seq), vp, kClouds, hasDepth ? skyOnly : nil);
+}
+
 // draw(), right after the pass is open, for every game draw between OP_CLOUDS_BEGIN and _END: with
 // WWHD_CLOUDS_PROTO=mark and timing, the game's own cards start a command buffer of their own
 static void clouds_end();
 void clouds_mark_start(Surface* const* colors, const uint32_t* colorSlices, Surface* depth, uint32_t depthSlice,
                        bool (*ensure)(Surface* const*, const uint32_t*, Surface*, uint32_t)) {
     static const bool timing = env_on("WWHD_CLOUDS_TIME");
-    if (cloud_proto::mode() != cloud_proto::kMark || !timing || cloud_proto::g_drawn) return;
+    if (cloud_proto::mode() != cloud_proto::kMark || cloud_proto::g_drawn) return;
     cloud_proto::g_drawn = true;
-    cloud_proto::g_on_end = clouds_end;
-    flush();
-    ensure(colors, colorSlices, depth, depthSlice);
+    if (timing) {
+        cloud_proto::g_on_end = clouds_end;
+        flush();
+        ensure(colors, colorSlices, depth, depthSlice);
+    }
+    // the game's own cards stay; the vivid-sky grade (if asked for) goes under them. Also builds the
+    // shaders at the same moment as the other modes do, so the runs stay comparable.
+    Surface* t = R.passColor[0];
+    if (!t || !R.enc) return;
+    MTLViewport vp{0, 0, (double)t->tex.width, (double)t->tex.height, 0, 1};
+    encode(R.enc, *cloud_proto::snapshot(cloud_proto::g_active_seq), vp, kGrade);
 }
 // draw(), with the draw's state set up to the scissor: true = skip the game's draw
 bool clouds_draw(id<MTLRenderCommandEncoder> enc, const MTLViewport& vp, Surface* const* colors, const uint32_t* colorSlices,
@@ -604,7 +770,11 @@ bool clouds_draw(id<MTLRenderCommandEncoder> enc, const MTLViewport& vp, Surface
         if (!ensure(colors, colorSlices, depth, depthSlice)) return true;
         enc = R.enc;
     }
-    encode(enc, *cloud_proto::snapshot(cloud_proto::g_active_seq), vp);
+    static const bool fullres = env_on("WWHD_CLOUDS_FULLRES");
+    encode(enc, *cloud_proto::snapshot(cloud_proto::g_active_seq), vp, fullres ? kGrade : kGrade | kClouds);
+    if (fullres) {  // the clouds go into the full-resolution picture where the sky buffer is composited
+        g_sky = R.passColor[0], g_skyFrame = R.frame, g_pendingSeq = cloud_proto::g_active_seq;
+    }
     if (timing) timed_commit(mode == cloud_proto::kVolume ? "volume" : mode == cloud_proto::kHide ? "hide" : "sdf");
     return true;
 }
