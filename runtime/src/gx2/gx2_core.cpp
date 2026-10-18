@@ -483,9 +483,12 @@ static void execute_one(Op op, const uint32* p, uint32 n) {
 // Test only: WWHD_TEST_RENDER_LOAD_MS=x / WWHD_TEST_GAME_LOAD_MS=x busy-wait x ms per frame on the
 // render thread (before each swap is executed) / on the game thread (at each GX2SwapScanBuffers):
 // the frame time of a slower computer, for measuring frame pacing (docs/performance.md).
-static void test_frame_load(const char* name) {
+// WWHD_TEST_GAME_LOAD_MS=x:y busy-waits x ms at the swap of a logic step's frame and y ms at an
+// in-between frame's (the uneven passes of a phone whose game thread is the bottleneck).
+static void test_frame_load(const char* name, bool hold = false) {
     const char* e = getenv(name);
-    const double ms = e ? atof(e) : 0;
+    const char* colon = e ? strchr(e, ':') : nullptr;
+    const double ms = e ? (hold && colon ? atof(colon + 1) : atof(e)) : 0;
     if (ms <= 0) return;
     const auto until = std::chrono::steady_clock::now() + std::chrono::nanoseconds(int64_t(ms * 1e6));
     while (std::chrono::steady_clock::now() < until) {}
@@ -985,10 +988,6 @@ HLE(gx2, GX2SwapScanBuffers) {
         }
         LOG("%s", buf);
     }
-    {
-        static const bool load = getenv("WWHD_TEST_GAME_LOAD_MS") != nullptr;
-        if (load) test_frame_load("WWHD_TEST_GAME_LOAD_MS");
-    }
     gfx::display_read_gamepad_ui(); // read-only; no guest reads outside auto or a pending pause view
     float a = aspect::on_swap();  // aspect ratio of the next frame (game projections, render targets)
     uint32 ab;
@@ -998,6 +997,10 @@ HLE(gx2, GX2SwapScanBuffers) {
     const uint64_t steps = interp::logic_steps();
     const bool hold = steps == lastSteps;
     lastSteps = steps;
+    {
+        static const bool load = getenv("WWHD_TEST_GAME_LOAD_MS") != nullptr;
+        if (load) test_frame_load("WWHD_TEST_GAME_LOAD_MS", hold);
+    }
     // Opt-in correctness capture: select the guest frame before it enters
     // the asynchronous render queue. Renderer-frame parity is not a game clock.
     static const char* captureCounter = getenv("WWHD_TEST_CAPTURE_LOAD_COUNTER");
