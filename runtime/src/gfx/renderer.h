@@ -74,6 +74,13 @@ struct Backend {
     // the bits of a register that can change this renderer's shader key (true: `mask` is set; mask 0:
     // none); false: every change of a shader-relevant register counts. Null: as Metal / Vulkan.
     bool (*shader_key_mask)(uint32_t reg, uint32_t& mask);
+    // optional (null: frames are presented when they are swapped), render thread: even frame
+    // delivery (interp_pacing.h EvenSchedule). The next swap's intended frame interval (ns; 0: none)
+    // and whether it is an in-between frame; the steady-clock time (ns) a held frame is due (0:
+    // none); present a held frame whose time has come.
+    void (*set_present_interval)(uint32_t ns, bool hold);
+    int64_t (*present_due)();
+    void (*service_present)();
 };
 enum Feature : int { kFeatureAO, kFeatureAOHires, kFeatureAniso, kFeatureFXAA, kFeatureScaleFilter, kFeatureCapture,
                      kFeatureShaderHeadStart };
@@ -123,6 +130,9 @@ inline void copy_surface(uint32_t src, uint32_t srcMip, uint32_t srcSlice, uint3
 }
 inline void copy_to_scan(uint32_t cb, uint32_t target) { g_backend->copy_to_scan(cb, target); }
 inline void swap() { g_backend->swap(); }
+inline void set_present_interval(uint32_t ns, bool hold) { if (g_backend->set_present_interval) g_backend->set_present_interval(ns, hold); }
+inline int64_t present_due() { return g_backend->present_due ? g_backend->present_due() : 0; }
+inline void service_present() { if (g_backend->service_present) g_backend->service_present(); }
 inline void peek_z(const uint32_t* cells, uint32_t words) { g_backend->peek_z(cells, words); }
 inline void set_frame_aspect(float a) { g_backend->set_frame_aspect(a); }
 inline bool target_aspect_factors(uint32_t w, uint32_t h, float& kx, float& ky) { return g_backend->target_aspect_factors(w, h, kx, ky); }
