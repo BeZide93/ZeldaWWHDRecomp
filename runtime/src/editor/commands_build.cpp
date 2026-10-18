@@ -129,6 +129,7 @@ const std::vector<ActorType>& actor_types() {
         {"bokoblin", "Bokoblin", "Enemies", "The game's Bokoblin.", false, false, false},
         {"moblin", "Moblin", "Enemies", "The game's Moblin.", false, false, false},
         {"keese", "Keese", "Enemies", "The game's Keese.", false, false, false},
+        {"miniblin", "Miniblin", "Enemies", "The game's Miniblin: it pops up when Link comes near and is defeated for good.", false, false, false},
         {"model", "Your model", "Your models", "One of the mod's models (static or skinned), with collision.", true, false, true},
         {"model_enemy", "Your enemy", "Your models", "A skinned model that fights (needs flinch, stun, death and idle clips).", true, true, false},
         {"model_carry", "Carried prop", "Your models", "A model Link can lift and carry.", true, false, false},

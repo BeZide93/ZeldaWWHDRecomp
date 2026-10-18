@@ -80,7 +80,7 @@ const uint32_t kYm1Demo=GC(0x022F8344),kYm1Staff=GC(0x022F8504),kYm1CheckTalk=GC
 Actor* g_opening=nullptr;
 struct Talk {uint32_t npc=0; Actor* actor=nullptr;std::u16string text;bool started=false;bool terminal=false;std::vector<story_notebook::StoryAction> then;std::string flag;};
 Talk g_talk;
-bool enemy_kind(const ManifestActor& a,story_enemies::Kind& kind){if(a.actor=="chuchu")kind=story_enemies::Kind::ChuChu;else if(a.actor=="bokoblin")kind=story_enemies::Kind::Bokoblin;else if(a.actor=="moblin")kind=story_enemies::Kind::Moblin;else if(a.actor=="keese")kind=story_enemies::Kind::Keese;else return false;return true;}
+bool enemy_kind(const ManifestActor& a,story_enemies::Kind& kind){if(a.actor=="chuchu")kind=story_enemies::Kind::ChuChu;else if(a.actor=="bokoblin")kind=story_enemies::Kind::Bokoblin;else if(a.actor=="moblin")kind=story_enemies::Kind::Moblin;else if(a.actor=="keese")kind=story_enemies::Kind::Keese;else if(a.actor=="miniblin")kind=story_enemies::Kind::Miniblin;else return false;return true;}
 bool enemies_declared(){return std::any_of(g_actors.begin(),g_actors.end(),[](const Actor&a){return a.enemy_token!=0;});}
 bool combat_declared(){return enemies_declared()||std::any_of(g_actors.begin(),g_actors.end(),[](const Actor&a){return a.spec.kind=="mod"&&a.spec.combat_enabled;});}
 bool pure_link(uint32_t& actor,uint32_t& pid){actor=ld32(GD(0x1046F0B0)+0x5B34);if(actor<mem::kMem2Start||actor>mem::kMem2End-0x8260u||(actor&3)||ld16(actor+0xE)!=0xA8)return false;pid=ld32(actor+4);return pid&&pid!=0xFFFFFFFFu;}
@@ -787,7 +787,7 @@ bool editor_kind_live(const std::string& type,bool fallback){
     if(type=="pot"||type=="barrel"||type=="crate")return g_installed&&story_props::live();
     if(type=="switch")return g_installed&&story_switches::live(story_switches::Kind::Switch);
     if(type=="door")return g_installed&&story_switches::live(story_switches::Kind::Door);
-    if(type=="chuchu"||type=="bokoblin"||type=="moblin"||type=="keese")return g_installed&&story_enemies::live();
+    if(type=="chuchu"||type=="bokoblin"||type=="moblin"||type=="keese"||type=="miniblin")return g_installed&&story_enemies::live();
     if(type=="model_enemy"||type=="model_carry")return false;
     if(type=="resident")return g_installed&&g_resident_hooks;
     return fallback&&g_installed;
@@ -1169,7 +1169,7 @@ void install(const std::function<std::string(uint32_t)>& replaced_by,const std::
     // a failure here only means they appear after a restart
     bool live_enemies=false;
     if(g_live_kinds&&!has_combat){
-        const std::array<uint32_t,4> profiles={g_scratch+kEnemyProfilesScratchOffset,g_scratch+kEnemyProfilesScratchOffset+0x30,g_scratch+kEnemyProfilesScratchOffset+0x60,g_scratch+kEnemyProfilesScratchOffset+0x90};
+        const std::array<uint32_t,story_enemy_ownership::kKindCount> profiles={g_scratch+kEnemyProfilesScratchOffset,g_scratch+kEnemyProfilesScratchOffset+0x30,g_scratch+kEnemyProfilesScratchOffset+0x60,g_scratch+kEnemyProfilesScratchOffset+0x90,g_scratch+kMiniblinProfileScratchOffset};
         live_enemies=configure_enemy_declarations()&&story_enemy_ownership::configure(g_scratch+kEnemyOwnershipScratchOffset,story_enemy_ownership::kStorageBytes,g_original,story_enemies::verify_actor);
         if(live_enemies){
             story_enemy_ownership::initialize_storage();
@@ -1185,7 +1185,7 @@ void install(const std::function<std::string(uint32_t)>& replaced_by,const std::
         story_enemy_ownership::initialize_storage();
         if(!story_enemy_projectiles::configure(g_original,pure_link,true))exception_report::raise("Cannot configure combat projectile ownership");
         if(has_enemies){
-            const std::array<uint32_t,4> profiles={g_scratch+kEnemyProfilesScratchOffset,g_scratch+kEnemyProfilesScratchOffset+0x30,g_scratch+kEnemyProfilesScratchOffset+0x60,g_scratch+kEnemyProfilesScratchOffset+0x90};
+            const std::array<uint32_t,story_enemy_ownership::kKindCount> profiles={g_scratch+kEnemyProfilesScratchOffset,g_scratch+kEnemyProfilesScratchOffset+0x30,g_scratch+kEnemyProfilesScratchOffset+0x60,g_scratch+kEnemyProfilesScratchOffset+0x90,g_scratch+kMiniblinProfileScratchOffset};
             story_enemies::configure(g_original,g_call,profiles,[](uint32_t token,uint32_t pid){if(!g_scratch)return;for(size_t i=0;i<g_actors.size();++i){auto&a=g_actors[i];const uint32_t slot=g_scratch+128+uint32_t(i)*4;if(a.enemy_token==token&&a.process==pid&&ld32(slot)==pid){a.process=0xFFFFFFFFu;a.deleting=false;st32(slot,0xFFFFFFFFu);return;}}});
             if(!story_enemy_children::configure(g_original,g_call,story_enemies::child_retired)||!native_actor_carry::configure(g_original,g_call)||!native_actor_carry::register_guard("enemies",story_enemies::deny_carry))exception_report::raise("Cannot configure native enemy isolation bridges");
         }

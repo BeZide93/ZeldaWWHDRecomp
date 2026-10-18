@@ -7,7 +7,8 @@
 #include <string>
 struct Cpu;
 namespace story_enemy_ownership {
-enum class Kind:uint32_t { ChuChu,Bokoblin,Moblin,Keese };
+enum class Kind:uint32_t { ChuChu,Bokoblin,Moblin,Keese,Miniblin };
+inline constexpr unsigned kKindCount=5;
 struct Collider {uint32_t object,stts,helper;};
 struct Descriptor {uint16_t profile,native_profile;uint32_t bytes;const Collider* colliders;size_t collider_count;};
 const Descriptor& descriptor(Kind);

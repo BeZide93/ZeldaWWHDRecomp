@@ -33,7 +33,7 @@ The initial allowlist is deliberately small:
 | Breakable prop | `pot`, `barrel`, `crate` | Required mod-owned `broken_flag` and `drops` list |
 | Latched floor switch | `switch` | Required mod-owned `switch_flag`; fixed yellow switch |
 | Rotating gate | `door` | Required `switch` naming a switch actor in the same mod |
-| Native enemies (preview) | `chuchu`, `bokoblin`, `moblin`, `keese` | Required mod-owned `defeated_flag` and `drops`; fixed ordinary variants |
+| Native enemies (preview) | `chuchu`, `bokoblin`, `moblin`, `keese`, `miniblin` | Required mod-owned `defeated_flag` and `drops`; fixed ordinary variants |
 
 Resident names are exact native object codes in lower case. Each placed copy uses fixed ordinary
 parameters: it stands where you put it (no native walking route) and has none of the character's
@@ -200,6 +200,7 @@ The allowlist below defines the supported variants.
 | `bokoblin` | Ordinary type-4 Bokoblin |
 | `moblin` | Ordinary Moblin |
 | `keese` | Ordinary Keese, the native KI bat; not Morth |
+| `miniblin` | Ordinary Miniblin: hidden until Link comes near and looks its way; never respawns |
 
 All four use the same declaration fields:
 
@@ -214,7 +215,7 @@ All four use the same declaration fields:
 }
 ```
 
-Use `"actor": "chuchu"`, `"moblin"` or `"keese"` for the other fixed variants,
+Use `"actor": "chuchu"`, `"moblin"`, `"keese"` or `"miniblin"` for the other fixed variants,
 with a distinct actor ID and defeat flag for each copy. Declare reward items in
 the same package. `drops` is required and may be empty or contain up to eight
 distinct same-mod items, each with quantity 1–254. Only yaw rotation is accepted;

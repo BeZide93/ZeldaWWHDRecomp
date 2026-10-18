@@ -133,7 +133,7 @@ more of the same; **Stop placing** in the toolbar or Esc ends it.
   changes it; the resident is then created again in its room.
 - **Props:** pot, barrel, crate.
 - **Switches:** switch, door (it opens with one of the mod's switches).
-- **Enemies:** ChuChu (green, red, blue or yellow), Bokoblin, Moblin, Keese.
+- **Enemies:** ChuChu (green, red, blue or yellow), Bokoblin, Moblin, Keese, Miniblin.
 - **Your models:** one of the mod's models (static or skinned), your own enemy (a skinned model with
   flinch, stun, death and idle clips), a prop Link can carry.
 
@@ -144,8 +144,8 @@ a confirmation; Undo brings it back).
 
 ### What shows at once, and what after a restart
 
-Signs, residents, chests, pots, barrels and crates, switches and doors, ChuChus, Bokoblins, Moblins and
-Keese, and actors with your models appear, change and disappear in the game at once, in the room you are
+Signs, residents, chests, pots, barrels and crates, switches and doors, ChuChus, Bokoblins, Moblins,
+Keese and Miniblins, and actors with your models appear, change and disappear in the game at once, in the room you are
 in. Their drops and broken or defeated flags count from then on, as they do after a start. A change to
 one of them (another place, other drops, another flag) creates it again in the game.
 

@@ -20,6 +20,10 @@ inline constexpr uint32_t kTalkProofScratchOffset=kDoorScratchOffset+0x30;
 inline constexpr uint32_t kTalkProofBytes=64;
 static_assert(kTalkProofScratchOffset>=kDoorScratchOffset+0x30);
 static_assert(kTalkProofScratchOffset+kTalkProofBytes<=kIdentityScratchOffset);
+// The Miniblin's private profile (added after the first four enemy kinds): the free 0x30 bytes
+// between the talk proof and the identity rows, so no other offset moves.
+inline constexpr uint32_t kMiniblinProfileScratchOffset=kTalkProofScratchOffset+kTalkProofBytes;
+static_assert(kMiniblinProfileScratchOffset+0x30<=kIdentityScratchOffset&&(kMiniblinProfileScratchOffset&3)==0);
 // Preserve existing resident/prop/switch snapshot offsets when adding enemies.
 inline constexpr uint32_t kEnemyProfilesScratchOffset=10752;
 inline constexpr uint32_t kEnemyOwnershipScratchOffset=kEnemyProfilesScratchOffset+4*0x30;

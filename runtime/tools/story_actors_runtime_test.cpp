@@ -202,7 +202,7 @@ int main(int argc,char** argv){
         // a declared ChuChu colour: created with its own parameter word, owned and verified with its colour;
         // a copy with another colour is never recognized as the declared enemy
         map_guest(0x10000000,0x10000);st32(0x100073AC,0x4000);st8(0x100073B0,2);
-        for(unsigned n=0;n<4;++n){const auto&d=story_enemy_ownership::descriptor(story_enemies::Kind(n));const uint32_t profile=kArena+0x80000+n*0x100;st32(0x101F3EE0+uint32_t(d.native_profile)*4,profile);st32(profile+0x10,d.bytes);}
+        for(unsigned n=0;n<story_enemy_ownership::kKindCount;++n){const auto&d=story_enemy_ownership::descriptor(story_enemies::Kind(n));const uint32_t profile=kArena+0x80000+n*0x100;st32(0x101F3EE0+uint32_t(d.native_profile)*4,profile);st32(profile+0x10,d.bytes);}
         st32(kArena+0x7004,55);st16(kArena+0x700E,0xA8);
         story_notebook::ManifestActor cc;cc.id="red";cc.actor="chuchu";cc.defeated_flag="red.dead";cc.stage="sea";cc.variant="purple";std::string why;
         assert(!story_actors::load("test",{cc},why)&&!story_actors::declared());
@@ -219,7 +219,7 @@ int main(int argc,char** argv){
     }
     if(argc==2&&(std::strcmp(argv[1],"--enemies")==0||std::strcmp(argv[1],"--enemies-four")==0)){
         enemy_four_mode=std::strcmp(argv[1],"--enemies-four")==0;const unsigned enemy_count=enemy_four_mode?4:2;map_guest(0x10000000,0x10000);st32(0x100073AC,0x4000);st8(0x100073B0,2);if(enemy_four_mode){map_guest(0x10190000,0x10000);map_guest(0x101B0000,0x10000);}
-        for(unsigned n=0;n<4;++n){const auto&d=story_enemy_ownership::descriptor(story_enemies::Kind(n));const uint32_t profile=kArena+0x80000+n*0x100;st32(0x101F3EE0+uint32_t(d.native_profile)*4,profile);st32(profile+0x10,d.bytes);}
+        for(unsigned n=0;n<story_enemy_ownership::kKindCount;++n){const auto&d=story_enemy_ownership::descriptor(story_enemies::Kind(n));const uint32_t profile=kArena+0x80000+n*0x100;st32(0x101F3EE0+uint32_t(d.native_profile)*4,profile);st32(profile+0x10,d.bytes);}
         st32(kArena+0x7004,55);st16(kArena+0x700E,0xA8);
         story_notebook::ManifestActor cc;cc.id="cc";cc.actor="chuchu";cc.defeated_flag="cc.dead";cc.stage="sea";cc.quest="quest";cc.quest_step=1;auto ki=cc;ki.id="ki";ki.actor="keese";ki.defeated_flag="ki.dead";ki.quest.clear();std::string why;
         auto invalid=ki;invalid.drops.push_back({"missing",1});assert(!story_actors::load("test",{cc,invalid},why)&&!story_actors::declared()&&story_enemies::checkpoint()==0&&story_enemy_ownership::checkpoint()==0&&story_items::prop_marker_checkpoint()==0);
