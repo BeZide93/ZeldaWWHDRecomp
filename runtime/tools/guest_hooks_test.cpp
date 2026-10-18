@@ -4,6 +4,19 @@
 #include "mods/guest_mods.cpp"
 #include <cassert>
 #include <vector>
+#include <algorithm>
+#include <cstdlib>
+#include <string>
+#include <array>
+#include <optional>
+#include <cstdint>
+#include <span>
+#include <utility>
+#include <functional>
+#include <cstring>
+#include <string_view>
+#include <memory>
+#include <filesystem>
 namespace story_native_wait_runtime {
 void startup(bool,LogicStep) {assert(story_native_scene_request::startup_window_current());}
 void logic(Cpu*) {}

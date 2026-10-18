@@ -10,6 +10,11 @@
 #include "mods/story_native_wait_runtime_model_graph.h"
 #include <cassert>
 #include <functional>
+#include <array>
+#include <vector>
+#include <cstdint>
+#include <utility>
+#include <memory>
 namespace guestmods {class NativeRestoreTrackerIssuer {public:
  static auto acquire(const story_native_restore_resume::Boundary&b,Cpu*c){using namespace story_native_event_depth;return Tracker::restore_provisional(b,c,{{1,1,true},{2,2,true},{3,3,true},true},[]{return true;});}
 };}

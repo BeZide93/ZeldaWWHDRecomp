@@ -5,6 +5,9 @@
 #include "mods/story_native_restore_resume.h"
 #include "mods/story_native_event_game_thread.h"
 #include <cassert>
+#include <string>
+#include <cstdint>
+#include <cstdio>
 namespace guestmods {class NativeRestoreTrackerIssuer {public:
  static auto acquire(const story_native_restore_resume::Boundary&b,Cpu*c){using namespace story_native_event_depth;return Tracker::restore_provisional(b,c,{{1,1,true},{2,2,true},{3,3,true},true},[]{return true;});}
 };}

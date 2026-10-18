@@ -12,6 +12,14 @@
 #include "savestate_native_finished_load.h"
 #include <cassert>
 #include <cstdio>
+#include <algorithm>
+#include <string>
+#include <array>
+#include <optional>
+#include <cstdint>
+#include <utility>
+#include <functional>
+#include <memory>
 namespace PS=story_native_wait_pristine_snapshot;
 namespace ER=story_native_wait_runtime_controller;
 namespace ED=story_native_event_depth;

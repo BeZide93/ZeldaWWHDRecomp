@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: MPL-2.0
 #define STORY_NATIVE_WAIT_SESSION_FIXTURE_ONLY
 #include "story_native_wait_session_test.cpp"
+#include <algorithm>
+#include <array>
+#include <vector>
+#include <cstdint>
 #undef STORY_NATIVE_WAIT_SESSION_FIXTURE_ONLY
 #include "mods/story_native_wait_save_gate.h"
 #include "state_memory.h"

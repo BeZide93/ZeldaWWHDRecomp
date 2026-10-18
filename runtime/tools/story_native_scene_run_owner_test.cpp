@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: MPL-2.0
 #include "runtime.h"
+#include <string>
+#include <vector>
+#include <utility>
+#include <memory>
 #define main request_fixture_contract_unused
 #include "story_native_scene_request_test.cpp"
 #undef main

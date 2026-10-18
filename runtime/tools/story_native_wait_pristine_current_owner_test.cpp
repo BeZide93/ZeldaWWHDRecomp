@@ -7,6 +7,9 @@
 #include "mods/story_native_restore_front.h"
 #include "mods/story_native_wait_runtime_controller.h"
 #include <cassert>
+#include <algorithm>
+#include <utility>
+#include <memory>
 namespace PS=story_native_wait_pristine_snapshot;
 namespace story_native_wait_runtime {class NativeResumeFrontIssuer {public:
  static auto capture(std::atomic<story_native_wait_runtime_controller::Context*>&c,std::atomic<story_native_event_depth::Tracker*>&d){return story_native_restore_front::Front(c,d);}

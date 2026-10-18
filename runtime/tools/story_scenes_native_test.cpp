@@ -14,6 +14,12 @@
 #include <cstdio>
 #include <cmath>
 #include <vector>
+#include <cstdlib>
+#include <string>
+#include <optional>
+#include <cstdint>
+#include <utility>
+#include <string_view>
 #ifdef _WIN32
 #include <windows.h>
 #else

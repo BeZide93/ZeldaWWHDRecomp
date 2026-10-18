@@ -2,6 +2,10 @@
 // Exercise the actual threads.cpp issuer, registry, freeze gates and scheduler.
 // Only unused HLE registration and external logging/profiling are omitted.
 #include "runtime.h"
+#include <string>
+#include <cstdint>
+#include <utility>
+#include <cstring>
 #undef HLE
 #define HLE(lib,name) static void hle_impl_##lib##_##name(Cpu*c)
 #include "../src/threads.cpp"

@@ -1,5 +1,11 @@
 // SPDX-License-Identifier: MPL-2.0
 #include "runtime.h"
+#include <vector>
+#include <map>
+#include <cstdint>
+#include <span>
+#include <utility>
+#include <memory>
 #define STORY_NATIVE_WAIT_SESSION_FIXTURE_ONLY
 #include "story_native_wait_session_test.cpp"
 #include "native_quiescence.h"

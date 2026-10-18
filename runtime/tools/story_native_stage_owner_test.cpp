@@ -6,6 +6,8 @@
 #include <stdexcept>
 #include <cstdlib>
 #include <exception>
+#include <optional>
+#include <utility>
 #ifndef _WIN32
 #include <unistd.h>
 #include <sys/wait.h>

@@ -2,6 +2,19 @@
 #define log_msg fixture_silenced_log
 #define STORY_NATIVE_WAIT_SESSION_FIXTURE_ONLY
 #include "story_native_wait_session_test.cpp"
+#include <algorithm>
+#include <string>
+#include <array>
+#include <vector>
+#include <map>
+#include <optional>
+#include <cstdint>
+#include <span>
+#include <utility>
+#include <functional>
+#include <cstring>
+#include <memory>
+#include <cstdio>
 #undef log_msg
 #include <cstdarg>
 #include <cstdio>

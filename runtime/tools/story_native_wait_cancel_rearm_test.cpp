@@ -4,6 +4,13 @@
 // trusted primitives; no cancellation/rearm/idle certificate is fabricated.
 #include "native_quiescence.h"
 #include <cassert>
+#include <algorithm>
+#include <array>
+#include <cstdint>
+#include <span>
+#include <utility>
+#include <cstdio>
+#include <tuple>
 #define STORY_NATIVE_READINESS_QUERY_PRECONDITION(c) assert(!threads::current_thread_holds_native_quiescence())
 #include <tuple>
 #include "native_quiescence.h"

@@ -5,6 +5,10 @@
 #include "mods/story_native_turn_record.h"
 #include <cstring>
 #include <thread>
+#include <algorithm>
+#include <vector>
+#include <cstdint>
+#include <span>
 #ifdef _WIN32
 #define NOMINMAX
 #include <windows.h>

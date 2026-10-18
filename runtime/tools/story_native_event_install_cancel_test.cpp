@@ -11,6 +11,9 @@
 #include <memory>
 #include <vector>
 #include <stdexcept>
+#include <algorithm>
+#include <cstdint>
+#include <span>
 namespace NI=story_native_event_install;
 namespace XO=story_native_cancel_observation;
 namespace DO=story_native_event_depth;

@@ -1,6 +1,17 @@
 // SPDX-License-Identifier: MPL-2.0
 #define main legacy_scene_fixture_contract_unused
 #include "story_scenes_native_test.cpp"
+#include <cstdlib>
+#include <string>
+#include <array>
+#include <vector>
+#include <map>
+#include <optional>
+#include <cstdint>
+#include <utility>
+#include <functional>
+#include <cstring>
+#include <memory>
 #undef main
 #include "mods/story_native_scene_playback.h"
 #include "mods/story_native_scene_run_owner.h"

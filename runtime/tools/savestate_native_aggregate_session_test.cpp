@@ -1,5 +1,11 @@
 // SPDX-License-Identifier: MPL-2.0
 #include "runtime.h"
+#include <string>
+#include <array>
+#include <vector>
+#include <cstdint>
+#include <cstring>
+#include <memory>
 // Reuse native byte fixtures but supply a genuinely distinct allocation for
 // each actual Session. The old one-arena allocator remains an unused fixture.
 #define runtime_alloc aggregate_unused_alloc

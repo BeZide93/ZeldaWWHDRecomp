@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: MPL-2.0
 #include "runtime.h"
 #include "mods/story_native_scene_activation.h"
+#include <string>
+#include <cstdint>
+#include <span>
+#include <utility>
+#include <cstring>
+#include <memory>
 #define STORY_NATIVE_WAIT_READINESS_FIXTURE_ONLY 1
 #include "story_native_wait_readiness_test.cpp"
 #include <string>

@@ -3,6 +3,11 @@
 #include <cassert>
 #include <map>
 #include <stdexcept>
+#include <algorithm>
+#include <array>
+#include <vector>
+#include <cstdint>
+#include <span>
 
 using story_native_people_pose_plan::Snapshot;
 struct PoseFixture {

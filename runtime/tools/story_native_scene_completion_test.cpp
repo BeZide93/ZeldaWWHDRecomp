@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: MPL-2.0
 #define main request_fixture_main_unused
 #include "story_native_scene_request_test.cpp"
+#include <string>
+#include <vector>
+#include <cstdint>
+#include <utility>
+#include <memory>
 #undef main
 #include "mods/story_native_scene_activation.h"
 #include "mods/story_native_scene_completion.h"

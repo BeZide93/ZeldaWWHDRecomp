@@ -6,6 +6,10 @@
 #include "mods/story_native_wait_runtime_controller.h"
 #include "mods/story_native_restore_resume.h"
 #include <cassert>
+#include <string>
+#include <optional>
+#include <utility>
+#include <memory>
 namespace story_native_wait_runtime {class NativeResumeFrontIssuer {public:
  static auto capture(std::atomic<story_native_wait_runtime_controller::Context*>&context,std::atomic<story_native_event_depth::Tracker*>&depth){return story_native_restore_front::Front(context,depth);}
 };}

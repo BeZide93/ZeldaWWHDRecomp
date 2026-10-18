@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MPL-2.0
 #include "mods/story_native_cancel_consumer_write.h"
 #include <cassert>
+#include <cstdint>
+#include <span>
 namespace CW=story_native_cancel_consumer_write;
 static threads::NativeQuiescence read_only_quiescence(bool&);
 template<class F,class T,class Outer,class Q,class Closed,class Source>

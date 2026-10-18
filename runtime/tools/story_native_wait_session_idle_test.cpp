@@ -4,6 +4,13 @@
 #include "native_quiescence.h"
 #include "state_memory.h"
 #include <cassert>
+#include <vector>
+#include <map>
+#include <optional>
+#include <cstdint>
+#include <span>
+#include <utility>
+#include <memory>
 #ifdef STORY_NATIVE_IDLE_STAGE_TEST
 #include "mods/story_native_wait_idle_snapshot.h"
 namespace IdleStage=story_native_stage_owner_observer;

@@ -2,6 +2,10 @@
 // Reuse the bounded native class byte fixture, not its test entrypoint.
 #define main collector_fixture_contract_unused
 #include "story_native_event_collect_test.cpp"
+#include <algorithm>
+#include <array>
+#include <cstdint>
+#include <span>
 #undef main
 #include "mods/story_native_event_backend.h"
 #include <memory>

@@ -10,6 +10,10 @@
 #include "runtime.h"
 #include <cassert>
 #include <functional>
+#include <optional>
+#include <cstdint>
+#include <utility>
+#include <memory>
 #ifdef _WIN32
 #include <windows.h>
 #else

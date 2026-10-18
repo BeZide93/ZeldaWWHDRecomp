@@ -1,6 +1,13 @@
 // SPDX-License-Identifier: MPL-2.0
 #define main people_router_fixture_contract_unused
 #include "story_native_people_events_test.cpp"
+#include <algorithm>
+#include <string>
+#include <array>
+#include <vector>
+#include <cstdint>
+#include <span>
+#include <cstdio>
 #undef main
 #include "mods/story_native_people_admission.h"
 #include "mods/story_native_event_image.h"

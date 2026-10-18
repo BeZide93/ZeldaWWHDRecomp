@@ -3,6 +3,8 @@
 // scheduler/front issuance uses the existing isolated trusted primitive seam.
 #include "mods/story_native_wait_active_save_gate.h"
 #include "mods/story_native_restore_current_owner.h"
+#include <cstdint>
+#include <span>
 namespace story_native_wait_runtime {class NativeResumeFrontIssuer {public:
  static auto capture(std::atomic<story_native_wait_runtime_controller::Context*>&c,std::atomic<story_native_event_depth::Tracker*>&d){return story_native_restore_front::Front(c,d);}
 };}

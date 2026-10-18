@@ -5,6 +5,12 @@
 #include "state_memory.h"
 #include <cassert>
 #include <map>
+#include <algorithm>
+#include <vector>
+#include <optional>
+#include <cstdint>
+#include <utility>
+#include <memory>
 namespace threads {
 // Isolated scheduler witness; the Session and terminal/rearm lineage are real.
 class NativeQuiescenceIssuer {public:static QuiescenceWitness witness(Cpu*c){return QuiescenceWitness([c](const Cpu*x){return x==c;});}};

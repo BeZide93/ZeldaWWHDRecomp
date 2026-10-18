@@ -6,6 +6,13 @@
 #include <cstring>
 #include <map>
 #include <memory>
+#include <algorithm>
+#include <array>
+#include <vector>
+#include <cstdint>
+#include <span>
+#include <utility>
+#include <functional>
 using namespace story_native_manager_cancel;
 static void put(auto&b,unsigned p,uint32_t v){for(unsigned n=0;n<4;++n)b[p+n]=uint8_t(v>>(24-8*n));}
 struct Fixture {

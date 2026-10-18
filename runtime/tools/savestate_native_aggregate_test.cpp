@@ -7,6 +7,12 @@
 #include <functional>
 #include <thread>
 #include <stdexcept>
+#include <string>
+#include <array>
+#include <vector>
+#include <cstdint>
+#include <utility>
+#include <memory>
 #ifndef _WIN32
 #include <sys/wait.h>
 #include <unistd.h>

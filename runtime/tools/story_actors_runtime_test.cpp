@@ -23,6 +23,8 @@
 #include <string>
 #include <vector>
 #include <stdexcept>
+#include <optional>
+#include <cstdint>
 #ifdef _WIN32
 #include <windows.h>
 #else
