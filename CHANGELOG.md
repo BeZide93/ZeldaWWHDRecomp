@@ -14,6 +14,10 @@ what is on `devel` and not released yet (also in the
 - **Without mods and without `--editor`, the world editor and the Mod SDK v3 stay completely off.** Nothing of
   theirs runs or reserves game memory then, so full save states made without mods by builds from before 17 October
   load again.
+
+- **World editor: letters, treasure charts and items** (`--editor` and its MCP tools, for mod makers). A new Story tab
+  and commands create, change and remove letters on their own, treasure charts (with the X placed at Link or the
+  camera) and items (with icon import). Removing something still in use is refused with the list of its uses.
 - **Android: heat guard for handhelds with a fan** (#247). AYANEO, KONKR, AYN and Retroid handhelds now keep 60 fps
   until they are much hotter than phones, and the new **Settings → Graphics → Heat guard** (Normal / Relaxed / Off)
   sets how early 60 fps pauses when the device gets hot. Phones keep their current limit by default.
