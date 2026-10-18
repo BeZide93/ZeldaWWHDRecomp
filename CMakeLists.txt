@@ -677,7 +677,8 @@ if(WWHD_HAS_VULKAN)
   add_executable(deferred_commands_test runtime/tools/deferred_commands_test.cpp
       runtime/src/gfx/vulkan/deferred_commands.cpp
       runtime/src/gfx/vulkan/pod_commands.cpp runtime/src/gfx/vulkan/record_worker.cpp
-      runtime/src/gfx/vulkan/handoff_trace.cpp runtime/tools/handoff_cpu_clock_test_stub.cpp)
+      runtime/src/gfx/vulkan/handoff_trace.cpp runtime/tools/handoff_cpu_clock_test_stub.cpp
+      runtime/src/platform/perf_hint.cpp)
   target_include_directories(deferred_commands_test PRIVATE runtime/src ${Vulkan_INCLUDE_DIRS})
   target_compile_definitions(deferred_commands_test PRIVATE VK_NO_PROTOTYPES)
   target_compile_options(deferred_commands_test PRIVATE -UNDEBUG)
