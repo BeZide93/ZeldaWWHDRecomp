@@ -6,6 +6,8 @@
 #include "pass.h"
 #include "shaders.h"
 #include "../../cloud_proto.h"
+#include "../../cloud_noise.h"
+#include "../../cloud_scene.h"
 #include "../../exception_report.h"
 #include "gfx/renderer.h"
 #include "runtime.h"
@@ -162,13 +164,14 @@ VkPipeline grade_pipeline() {
 }  // namespace
 
 // OP_CLOUDS_BEGIN (renderer table): the sky buffer's pass is the open one
-static uint32_t g_skyAddr = 0, g_skySeq = 0;
+static uint32_t g_skyAddr = 0, g_skySeq = 0, g_cloudsWanted = 0;
 static uint64_t g_skyFrame = ~0ull;
 void sky_clouds_begin(const uint32_t* regs, uint32_t seq) {
     (void)regs;
     static uint64_t begins = 0, open = 0;
     begins++;
     if (R.rendering && R.passColors[0]) g_skyAddr = R.passColors[0]->addr, g_skySeq = seq, g_skyFrame = R.frame, open++;
+    if (cloud_proto::mode() == cloud_proto::kSdf) g_cloudsWanted = seq;
     if (begins % 300 == 0 && render::cloud_shadows())
         LOG("[shadows] Vulkan: sky begins %llu, with an open pass %llu", (unsigned long long)begins, (unsigned long long)open);
     const float reduce = 1.0f - render::horizon_haze();
@@ -381,7 +384,7 @@ void shadows_now() {
     for (int i = 0; i < 4; i++) g.sun[i] = sf.sun[i];
     g.layer[0] = 6000.0f, g.layer[1] = 24000.0f, g.layer[2] = s.eye[1], g.layer[3] = float(s.nShadow);
     auto envf = [](const char* n, float d) { const char* e = getenv(n); return e && *e ? (float)atof(e) : d; };
-    static const float dark = envf("WWHD_CLOUD_SHADOW_DARKNESS", 0.22f), debug = envf("WWHD_CLOUD_SHADOWS_DEBUG", 0.0f);
+    static const float dark = envf("WWHD_CLOUD_SHADOW_DARKNESS", 0.35f), debug = envf("WWHD_CLOUD_SHADOWS_DEBUG", 0.0f);
     g.look[0] = dark * (1.0f - 0.7f * sf.lit[3]) * std::clamp(1.0f - 0.6f * s.strength, 0.3f, 1.0f);
     g.look[1] = 0.04f, g.look[2] = debug;
     UploadSlice clouds = allocate_upload(sizeof(float) * 4 * 100, 256);
@@ -436,10 +439,437 @@ void shadows_now() {
 }
 }  // namespace
 
+// ---- toon clouds (Graphics > Cloud style), the Vulkan side of metal_clouds.mm's impostors: the game's
+// own cloud cards are skipped in the sky buffer (draw.cpp, clouds_skip_card) and the impostors are drawn
+// into the full-resolution picture right after the draw that composites the sky buffer, with a "sky only"
+// depth test (in front of or at the far plane, no depth writes)
+namespace {
+const char* kCloudVertex = R"glsl(#version 450
+layout(set=0, binding=0) uniform Globals {
+    vec4 view0, view1, view2, proj, sun, lit, sky, params, tune, extra;
+} g;
+struct Inst { vec4 center, shape, base; };
+layout(set=0, binding=1) uniform Instances { Inst i[320]; } inst;
+layout(location=0) out vec3 vWorld;
+layout(location=1) flat out int vInst;
+void main() {
+    Inst c = inst.i[gl_InstanceIndex];
+    vec2 corner = vec2((gl_VertexIndex & 1) != 0 ? 1.0 : -1.0, (gl_VertexIndex & 2) != 0 ? 1.0 : -1.0);
+    float r = c.center.w * max(1.0, c.shape.x) * 1.6;
+    vec3 mid = c.center.xyz + vec3(0, c.center.w * c.shape.x * 0.6, 0);
+    mat3 view = mat3(g.view0.xyz, g.view1.xyz, g.view2.xyz);
+    vec3 right = vec3(view[0][0], view[1][0], view[2][0]);
+    vec3 up = vec3(view[0][1], view[1][1], view[2][1]);
+    vec3 p = mid + (corner.x * right + corner.y * up) * r;
+    vec3 q = view * p;
+    float w = -q.z;
+    gl_Position = vec4(q.x * g.proj.x, -q.y * g.proj.y, g.extra.z * w, w);  // Vulkan clip y points down
+    vWorld = p;
+    vInst = gl_InstanceIndex;
+}
+)glsl";
+const char* kCloudFragment = R"glsl(#version 450
+layout(set=0, binding=0) uniform Globals {
+    vec4 view0, view1, view2, proj, sun, lit, sky, params, tune, extra;
+} g;
+struct Inst { vec4 center, shape, base; };
+layout(set=0, binding=1) uniform Instances { Inst i[320]; } inst;
+layout(set=0, binding=2) uniform sampler3D noiseTex;
+layout(location=0) in vec3 vWorld;
+layout(location=1) flat in int vInst;
+layout(location=0) out vec4 outColor;
+float saturate(float x) { return clamp(x, 0.0, 1.0); }
+vec3 saturate(vec3 x) { return clamp(x, 0.0, 1.0); }
+float hash1(float n) { return fract(sin(n) * 43758.5453); }
+float smin(float a, float b, float k) {
+    float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
+    return mix(b, a, h) - k * h * (1.0 - h);
+}
+
+// ---- shared toon shading: 3 hard bands, warm lit / cool shadow with a height-gradient ambient
+// (sky above, sea bounce below: Cumulus' ambient idea), sun-side rim and a forward-scatter silver lining
+struct Shade { vec3 lit, mid, shadow, rim; };
+Shade palette(vec3 base, float far) {
+    Shade s;
+    float storm = g.sky.w, warm = g.lit.w;
+    float luma = dot(base, vec3(0.3, 0.59, 0.11));
+    // whiter at noon, the palette's own colour (gold, pink) when the sun is low
+    float sat = mix(g.tune.y, 1.0, warm);
+    vec3 lit = mix(vec3(luma), base, sat);
+    // full brightness by day; at night the palette's own (dark) level
+    float mx = max(max(base.r, max(base.g, base.b)), 1e-3);
+    lit = lit / max(max(lit.r, max(lit.g, lit.b)), 1e-3) * mix(min(mx * 1.15, 1.0), 1.0, g.sun.w);
+    lit *= 1.0 - 0.45 * storm;
+    vec3 skyAmb = mix(g.sky.rgb, vec3(1.0), 0.42 * g.sun.w);  // no white ambient at night
+    s.lit = lit;
+    s.shadow = mix(lit * g.tune.z, skyAmb * mix(0.95, 0.55, storm), 0.48);
+    s.mid = mix(lit * g.tune.w, skyAmb, 0.10);
+    // low sun: golden-pink lit side, lavender shadows (warm/cool contrast)
+    s.lit = mix(s.lit, s.lit * vec3(1.0, 0.82, 0.62) + vec3(0.0, 0.02, 0.04), warm * 0.8);
+    s.shadow = mix(s.shadow, s.shadow * vec3(0.80, 0.66, 0.92), warm);
+    s.mid = mix(s.mid, s.mid * vec3(0.95, 0.80, 0.82), warm * 0.5);
+    s.mid = mix(s.mid, s.mid * vec3(1.0, 0.86, 0.80), warm * 0.8);
+    s.rim = min(mix(lit * 1.08 + 0.04, vec3(1.0, 0.86, 0.55), warm), vec3(1.0));
+    vec3 haze = mix(g.sky.rgb, vec3(1.0), 0.55 * g.sun.w);
+    float f = far * 0.32;
+    s.lit = mix(s.lit, haze, f), s.mid = mix(s.mid, haze, f), s.shadow = mix(s.shadow, haze, f), s.rim = mix(s.rim, haze, f * 0.5);
+    return s;
+}
+vec3 toon(Shade c, vec3 n, vec3 nDetail, vec3 rd, float height, float shadowTerm) {
+    vec3 L = g.sun.xyz;
+    float ndl = dot(n, L) * 0.5 + 0.5;
+    float hw = 0.4 * (1.0 - 0.75 * g.lit.w);  // a low sun lights the sides it faces, not every top
+    float lightv = (ndl * (1.0 - hw) + height * hw) * mix(0.45, 1.0, shadowTerm);
+    float sw = g.params.x;
+    vec3 col = mix(c.shadow, c.mid, smoothstep(0.26 - sw, 0.26 + sw, lightv));
+    col = mix(col, c.lit, smoothstep(0.40 - sw, 0.40 + sw, lightv));
+    // sea bounce under the base: cooler, a little lighter than the side shadow
+    float down = smoothstep(-0.3, -0.8, n.y);
+    col = mix(col, c.shadow * vec3(0.94, 1.0, 1.06), down * 0.7);
+    // rim and silver lining: silhouette x light side; much stronger looking toward a low sun
+    // silhouette from the smooth normal (outer edges only), nudged by the detail normal for a frayed line
+    float facing = saturate(dot(normalize(mix(n, nDetail, 0.25)), -rd));
+    float toward = saturate(dot(rd, L));
+    float fwd = 0.5 + 3.0 * pow(toward, 2.0) * (0.3 + 0.7 * g.lit.w);
+    float rim = pow(1.0 - facing, 2.5) * saturate(dot(n, L) + 0.55) * fwd * g.sun.w;
+    col = mix(col, c.rim, smoothstep(0.32 - sw, 0.32 + sw, rim));
+    return col;
+}
+
+// ---- C: one impostor per cloud, raymarched against smooth-unioned spheres
+float blobs(vec3 p, float hs, float seed) {
+    float d = 1e9;
+    for (int i = 0; i < 4; i++) {  // base row
+        float fi = float(i);
+        float x = -0.85 + fi * 0.57 + (hash1(seed + fi) - 0.5) * 0.25;
+        float r = 0.42 + hash1(seed + fi + 7.0) * 0.16;
+        float z = (hash1(seed + fi + 13.0) - 0.5) * 0.35;
+        d = smin(d, length(p - vec3(x, r * 0.75 * hs, z)) - r, 0.12);
+    }
+    for (int i = 0; i < 3; i++) {  // middle
+        float fi = float(i);
+        float x = -0.5 + fi * 0.5 + (hash1(seed + fi + 21.0) - 0.5) * 0.3;
+        float r = 0.36 + hash1(seed + fi + 29.0) * 0.18;
+        float y = (0.55 + hash1(seed + fi + 37.0) * 0.25) * hs;
+        d = smin(d, length(p - vec3(x, y, (hash1(seed + fi + 41.0) - 0.5) * 0.3)) - r, 0.1);
+    }
+    for (int i = 0; i < 2; i++) {  // crown
+        float fi = float(i);
+        float cx = (hash1(seed + 53.0 + fi) - 0.5) * 0.7;
+        d = smin(d, length(p - vec3(cx, (0.95 + hash1(seed + 59.0 + fi) * 0.25) * hs, 0.0)) -
+                    (0.26 + hash1(seed + 61.0 + fi) * 0.12), 0.1);
+    }
+    return max(d, -(p.y - 0.06));  // flat base
+}
+float sdf(vec3 p, float hs, float seed, float amp, float ero) {
+    float d = blobs(p, hs, seed) + ero;
+    if (d > 0.35) return d;
+    vec3 np = p * 0.8 + vec3(seed * 0.37, 0.0, seed * 0.11);
+    float n = texture(noiseTex, np).g * 0.6 + texture(noiseTex, np * 2.7).r * 0.4;
+    return d + (0.5 - n) * amp;
+}
+void main() {
+    Inst c = inst.i[vInst];
+    float hs = c.shape.x, seed = c.shape.y, amp = g.params.y;
+    float ero = (1.0 - saturate(c.shape.z * 1.25)) * 0.55;  // the game's fade erodes the shape
+    vec3 rd = normalize(vWorld);
+    vec3 ro = -c.center.xyz / c.center.w;
+    vec3 bc = vec3(0, 0.6 * hs, 0);
+    float br = 1.5 * max(1.0, hs);
+    vec3 oc = ro - bc;
+    float b = dot(oc, rd), cc = dot(oc, oc) - br * br, h = b * b - cc;
+    if (h < 0.0) discard;
+    h = sqrt(h);
+    float t = max(-b - h, 0.0), t1 = -b + h;
+    float dmin = 1e9, tmin = t;
+    bool hit = false;
+    vec3 p;
+    float eps = 0.0015 * t;
+    for (int i = 0; i < int(g.extra.x) && t < t1; i++) {
+        p = ro + rd * t;
+        float d = sdf(p, hs, seed, amp, ero);
+        if (d < dmin) { dmin = d; tmin = t; }
+        if (d < eps) { hit = true; break; }
+        t += max(d * 0.8, 0.008);
+    }
+    Shade pal = palette(c.base.rgb, c.shape.w);
+        if (!hit) {  // frayed fringe just outside the surface
+        float fw = g.tune.x;
+        if (dmin > fw) discard;
+        vec3 q = ro + rd * tmin;
+        float n = texture(noiseTex, q * 1.9 + seed).g;
+        float a = (1.0 - dmin / fw) * smoothstep(0.4, 0.7, n);
+        if (a < 0.05) discard;
+        a = saturate(a * 2.0) * saturate(c.shape.z * 4.0);
+        vec3 col = mix(pal.mid, pal.lit, saturate(q.y / (1.2 * hs)));
+        outColor = vec4(col * a, a);
+        return;
+    }
+    vec3 nb = normalize(vec3( 1, -1, -1) * blobs(p + vec3( 1, -1, -1) * 0.06, hs, seed) +
+                          vec3(-1, -1,  1) * blobs(p + vec3(-1, -1,  1) * 0.06, hs, seed) +
+                          vec3(-1,  1, -1) * blobs(p + vec3(-1,  1, -1) * 0.06, hs, seed) +
+                          vec3( 1,  1,  1) * blobs(p + vec3( 1,  1,  1) * 0.06, hs, seed));
+    vec3 nd = nb;
+    if (g.extra.y < 0.5) {
+        const float e = 0.01;
+        nd = normalize(vec3( 1, -1, -1) * sdf(p + vec3( 1, -1, -1) * e, hs, seed, amp, ero) +
+                       vec3(-1, -1,  1) * sdf(p + vec3(-1, -1,  1) * e, hs, seed, amp, ero) +
+                       vec3(-1,  1, -1) * sdf(p + vec3(-1,  1, -1) * e, hs, seed, amp, ero) +
+                       vec3( 1,  1,  1) * sdf(p + vec3( 1,  1,  1) * e, hs, seed, amp, ero));
+    }
+    vec3 n = normalize(mix(nb, nd, 0.15));
+    float sh = 1.0;
+    if (g.params.w > 0.0) {  // self-shadow: soft-shadow march toward the light through the blob field
+        float ts = 0.06;
+        for (int i = 0; i < int(g.params.w); i++) {
+            float dd = blobs(p + g.sun.xyz * ts, hs, seed);
+            sh = min(sh, saturate(6.0 * dd / ts + 0.5));
+            ts += max(dd, 0.08);
+        }
+    }
+    vec3 col = toon(pal, n, nd, rd, saturate(p.y / (1.1 * hs)), sh);
+    float a = saturate(c.shape.z * 6.0);
+    outColor = vec4(col * a, a);
+}
+
+)glsl";
+constexpr uint32_t kMaxInstances = 320;  // a 16 KiB uniform block
+struct CloudResources {
+    VkDevice device = VK_NULL_HANDLE;
+    VkDescriptorSetLayout set = VK_NULL_HANDLE;
+    VkPipelineLayout layout = VK_NULL_HANDLE;
+    VkSampler sampler = VK_NULL_HANDLE;
+    VkImage noise = VK_NULL_HANDLE;
+    VkDeviceMemory noiseMemory = VK_NULL_HANDLE;
+    VkImageView noiseView = VK_NULL_HANDLE;
+    bool noiseReady = false;
+    std::unordered_map<std::string, VkPipeline> pipelines;
+} cres;
+uint32_t g_cloudsSeq = 0;      // the composite was seen: draw the clouds before the next draw
+uint32_t g_cloudsPicture = 0;  // ... into this picture (address)
+
+void cloud_resources() {
+    if (cres.device && cres.device != R.device) cres = {};
+    cres.device = R.device;
+    if (!cres.set) {
+        VkDescriptorSetLayoutBinding b[3]{
+            {0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, nullptr},
+            {1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, nullptr},
+            {2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr}};
+        VkDescriptorSetLayoutCreateInfo ci{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+        ci.bindingCount = 3;
+        ci.pBindings = b;
+        check_vk(vkCreateDescriptorSetLayout(R.device, &ci, nullptr, &cres.set), "create cloud descriptors");
+        VkPipelineLayoutCreateInfo li{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+        li.setLayoutCount = 1;
+        li.pSetLayouts = &cres.set;
+        check_vk(vkCreatePipelineLayout(R.device, &li, nullptr, &cres.layout), "create cloud layout");
+        VkSamplerCreateInfo si{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+        si.minFilter = si.magFilter = VK_FILTER_LINEAR;
+        si.addressModeU = si.addressModeV = si.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        check_vk(vkCreateSampler(R.device, &si, nullptr, &cres.sampler), "create cloud sampler");
+    }
+    if (!cres.noise) {
+        const uint32_t N = cloud_noise::kSize;
+        VkImageCreateInfo ci{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+        ci.imageType = VK_IMAGE_TYPE_3D;
+        ci.format = VK_FORMAT_R8G8_UNORM;
+        ci.extent = {N, N, N};
+        ci.mipLevels = ci.arrayLayers = 1;
+        ci.samples = VK_SAMPLE_COUNT_1_BIT;
+        ci.tiling = VK_IMAGE_TILING_OPTIMAL;
+        ci.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+        ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        check_vk(vkCreateImage(R.device, &ci, nullptr, &cres.noise), "create cloud noise");
+        VkMemoryRequirements req;
+        vkGetImageMemoryRequirements(R.device, cres.noise, &req);
+        VkMemoryAllocateInfo ai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+        ai.allocationSize = req.size;
+        ai.memoryTypeIndex = memory_type(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        check_vk(vkAllocateMemory(R.device, &ai, nullptr, &cres.noiseMemory), "cloud noise memory");
+        check_vk(vkBindImageMemory(R.device, cres.noise, cres.noiseMemory, 0), "bind cloud noise");
+        VkImageViewCreateInfo vi{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+        vi.image = cres.noise;
+        vi.viewType = VK_IMAGE_VIEW_TYPE_3D;
+        vi.format = ci.format;
+        vi.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+        check_vk(vkCreateImageView(R.device, &vi, nullptr, &cres.noiseView), "cloud noise view");
+    }
+    if (!cres.noiseReady) {  // upload once, outside any pass
+        const uint32_t N = cloud_noise::kSize;
+        std::vector<uint8_t> data = cloud_noise::rg8();
+        end_encoder();
+        VkCommandBuffer cmd = command_buffer();
+        UploadSlice staging = allocate_upload(data.size(), 16);
+        std::memcpy(staging.mapped, data.data(), data.size());
+        VkImageMemoryBarrier b{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+        b.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        b.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        b.image = cres.noise;
+        b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+        b.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        record::vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &b);
+        VkBufferImageCopy copy{};
+        copy.bufferOffset = staging.offset;
+        copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+        copy.imageExtent = {N, N, N};
+        record::vkCmdCopyBufferToImage(cmd, staging.buffer, cres.noise, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+        b.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        b.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        b.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        b.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        record::vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &b);
+        cres.noiseReady = true;
+        LOG("[clouds] Vulkan: noise uploaded");
+    }
+}
+
+// a pipeline for the open pass's attachments (the composite's picture, its other targets, its depth)
+VkPipeline cloud_pipeline() {
+    std::string key = "c";
+    uint32_t ncolor = 0;
+    VkFormat colorFormats[8]{};
+    for (uint32_t i = 0; i < 8; i++)
+        if (R.passColors[i]) { colorFormats[i] = R.passColors[i]->fmt.pixel; ncolor = i + 1; }
+    for (uint32_t i = 0; i < ncolor; i++) key += "/" + std::to_string(int(colorFormats[i]));
+    Surface* depth = R.passDepth;
+    if (depth) key += "/d" + std::to_string(int(depth->fmt.pixel)) + (depth->fmt.stencil ? "s" : "");
+    if (auto it = cres.pipelines.find(key); it != cres.pipelines.end()) return it->second;
+    VkShaderModule vs = sky_module(kCloudVertex, true), fs = sky_module(kCloudFragment, false);
+    VkPipelineShaderStageCreateInfo stages[2]{};
+    for (int i = 0; i < 2; ++i) {
+        stages[i].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        stages[i].stage = i ? VK_SHADER_STAGE_FRAGMENT_BIT : VK_SHADER_STAGE_VERTEX_BIT;
+        stages[i].module = i ? fs : vs;
+        stages[i].pName = "main";
+    }
+    VkPipelineVertexInputStateCreateInfo vi{VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
+    VkPipelineInputAssemblyStateCreateInfo ia{VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
+    ia.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
+    VkPipelineViewportStateCreateInfo vp{VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO};
+    vp.viewportCount = vp.scissorCount = 1;
+    VkPipelineRasterizationStateCreateInfo rs{VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO};
+    rs.polygonMode = VK_POLYGON_MODE_FILL;
+    rs.cullMode = VK_CULL_MODE_NONE;
+    rs.lineWidth = 1;
+    VkPipelineMultisampleStateCreateInfo ms{VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
+    ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+    VkPipelineDepthStencilStateCreateInfo dss{VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
+    dss.depthTestEnable = depth ? VK_TRUE : VK_FALSE;
+    dss.depthWriteEnable = VK_FALSE;
+    dss.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+    VkPipelineColorBlendAttachmentState blend[8]{};
+    blend[0].blendEnable = VK_TRUE;  // premultiplied
+    blend[0].srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+    blend[0].dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    blend[0].colorBlendOp = VK_BLEND_OP_ADD;
+    blend[0].srcAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+    blend[0].dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+    blend[0].alphaBlendOp = VK_BLEND_OP_ADD;
+    blend[0].colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT;
+    VkPipelineColorBlendStateCreateInfo bs{VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
+    bs.attachmentCount = ncolor;
+    bs.pAttachments = blend;
+    VkDynamicState states[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+    VkPipelineDynamicStateCreateInfo ds{VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};
+    ds.dynamicStateCount = 2;
+    ds.pDynamicStates = states;
+    VkPipelineRenderingCreateInfo rendering{VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};
+    rendering.colorAttachmentCount = ncolor;
+    rendering.pColorAttachmentFormats = colorFormats;
+    if (depth) {
+        rendering.depthAttachmentFormat = depth->fmt.pixel;
+        rendering.stencilAttachmentFormat = depth->fmt.stencil ? depth->fmt.pixel : VK_FORMAT_UNDEFINED;
+    }
+    VkGraphicsPipelineCreateInfo ci{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
+    pipeline_targets(ci, rendering);
+    ci.stageCount = 2;
+    ci.pStages = stages;
+    ci.pVertexInputState = &vi;
+    ci.pInputAssemblyState = &ia;
+    ci.pViewportState = &vp;
+    ci.pRasterizationState = &rs;
+    ci.pMultisampleState = &ms;
+    ci.pDepthStencilState = &dss;
+    ci.pColorBlendState = &bs;
+    ci.pDynamicState = &ds;
+    ci.layout = cres.layout;
+    VkPipeline pipe = VK_NULL_HANDLE;
+    VkResult r = vkCreateGraphicsPipelines(R.device, R.pipelineCache, 1, &ci, nullptr, &pipe);
+    vkDestroyShaderModule(R.device, vs, nullptr);
+    vkDestroyShaderModule(R.device, fs, nullptr);
+    if (r != VK_SUCCESS) pipe = VK_NULL_HANDLE;
+    LOG("[clouds] Vulkan pipeline %s%s", key.c_str(), pipe ? "" : " failed");
+    cres.pipelines.emplace(key, pipe);
+    return pipe;
+}
+
+// into the open pass (the composite's), then a fresh pass for the game's next draw
+void draw_clouds(uint32_t seq) {
+    cloud_resources();  // may end the pass for the one-time noise upload
+    if (!R.rendering || !R.passTracked || !R.passColors[0] || R.passColors[0]->addr != g_cloudsPicture) {
+        static uint64_t missed = 0;
+        if (missed++ % 600 == 0) LOG("[clouds] Vulkan: the composite pass is closed (%llu times)", (unsigned long long)missed);
+        return;
+    }
+    VkPipeline pipe = cloud_pipeline();
+    if (!pipe) return;
+    const uint32_t w = R.passWidth, h = R.passHeight;
+    cloud_scene::Globals g;
+    std::vector<cloud_scene::Inst> inst;
+    cloud_scene::build(*cloud_proto::snapshot(seq), float(w) / float(h), cloud_proto::mode(), R.passDepth != nullptr, R.frame, g, inst);
+    if (inst.empty()) return;
+    if (inst.size() > kMaxInstances) inst.erase(inst.begin(), inst.end() - kMaxInstances);  // keep the nearest
+    UploadSlice gu = allocate_upload(sizeof g, 256), iu = allocate_upload(sizeof(cloud_scene::Inst) * kMaxInstances, 256);
+    std::memcpy(gu.mapped, &g, sizeof g);
+    std::memcpy(iu.mapped, inst.data(), sizeof(cloud_scene::Inst) * inst.size());
+    VkDescriptorSet set = VK_NULL_HANDLE;
+    VkDescriptorSetAllocateInfo alloc{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+    alloc.descriptorPool = R.descriptorPool;
+    alloc.descriptorSetCount = 1;
+    alloc.pSetLayouts = &cres.set;
+    check_vk(vkAllocateDescriptorSets(R.device, &alloc, &set), "allocate cloud descriptors");
+    VkDescriptorBufferInfo b0{gu.buffer, gu.offset, sizeof g}, b1{iu.buffer, iu.offset, sizeof(cloud_scene::Inst) * kMaxInstances};
+    VkDescriptorImageInfo img{cres.sampler, cres.noiseView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+    VkWriteDescriptorSet wr[3]{{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}, {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}, {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}};
+    for (int i = 0; i < 3; i++) wr[i].dstSet = set, wr[i].dstBinding = i, wr[i].descriptorCount = 1;
+    wr[0].descriptorType = wr[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    wr[0].pBufferInfo = &b0, wr[1].pBufferInfo = &b1;
+    wr[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, wr[2].pImageInfo = &img;
+    vkUpdateDescriptorSets(R.device, 3, wr, 0, nullptr);
+    VkCommandBuffer cmd = command_buffer();
+    VkViewport viewport{0, 0, float(w), float(h), 0, 1};
+    VkRect2D area{{0, 0}, {w, h}};
+    record::vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe);
+    record::vkCmdSetViewport(cmd, 0, 1, &viewport);
+    record::vkCmdSetScissor(cmd, 0, 1, &area);
+    record::vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, cres.layout, 0, 1, &set, 0, nullptr);
+    static const int repeat = getenv("WWHD_CLOUDS_REPEAT") ? std::max(1, atoi(getenv("WWHD_CLOUDS_REPEAT"))) : 1;
+    for (int r = 0; r < repeat; r++) record::vkCmdDraw(cmd, 4, uint32_t(inst.size()), 0, 0);
+    end_encoder();  // the game's next draw must not trust its cached pipeline / dynamic state
+}
+}  // namespace
+
+// draw.cpp, first thing: the game's own cloud cards are skipped while toon clouds replace them
+bool clouds_skip_card() {
+    const int m = cloud_proto::mode();
+    return cloud_proto::g_active_seq && (m == cloud_proto::kSdf || m == cloud_proto::kHide);
+}
+
+
 // draw.cpp, once a draw's targets are known and before its textures are bound: notices the sky
-// composite (it samples the sky buffer) and applies the pending cloud shadows before the picture is read
+// composite (it samples the sky buffer), draws the toon clouds right after it, and applies the pending
+// cloud shadows before the picture is read
 void clouds_before_draw(const uint32_t* r, const vk::Shader* ps, Surface* color0, uint32_t slice0, Surface* depth) {
-    if (!render::cloud_shadows() || !ps || !ps->dec || g_skyFrame != R.frame) return;
+    if (g_skyFrame != R.frame) return;
+    if (g_cloudsSeq) {  // the previous draw was the composite: its pass is still open
+        uint32_t seq = g_cloudsSeq;
+        g_cloudsSeq = 0;
+        draw_clouds(seq);
+    }
+    const bool shadows = render::cloud_shadows();
+    if ((!shadows && !g_cloudsWanted) || !ps || !ps->dec) return;
     bool samplesSky = false, readsPicture = false;
     for (int u = 0; u < ps->dec->textureUnitListCount; u++) {
         const uint32_t unit = ps->dec->textureUnitList[u];
@@ -451,8 +881,13 @@ void clouds_before_draw(const uint32_t* r, const vk::Shader* ps, Surface* color0
     static uint64_t composites = 0, applied = 0;
     if (readsPicture && g_shadowFrame == R.frame) shadows_now(), applied++;
     if (samplesSky) composites++;
-    if (samplesSky && composites % 300 == 0) LOG("[shadows] Vulkan: composites %llu, applied %llu", (unsigned long long)composites, (unsigned long long)applied);
-    if (samplesSky && color0 && depth && g_skySeq) {
+    if (samplesSky && composites % 300 == 0 && shadows)
+        LOG("[shadows] Vulkan: composites %llu, applied %llu", (unsigned long long)composites, (unsigned long long)applied);
+    if (samplesSky && color0 && g_cloudsWanted) {
+        g_cloudsSeq = g_cloudsWanted, g_cloudsPicture = color0->addr;
+        g_cloudsWanted = 0;
+    }
+    if (samplesSky && shadows && color0 && depth && g_skySeq) {
         g_picture = color0, g_pictureAddr = color0->addr, g_pictureSlice = slice0;
         g_pictureDepth = depth, g_pictureDepthAddr = depth->addr;
         g_shadowSeq = g_skySeq, g_shadowFrame = R.frame;

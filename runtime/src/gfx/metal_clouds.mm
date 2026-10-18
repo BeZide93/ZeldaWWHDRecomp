@@ -23,6 +23,8 @@
 #include <unordered_map>
 
 #include "cloud_proto.h"
+#include "cloud_scene.h"
+#include "cloud_noise.h"
 #include "renderer.h"
 #include "metal.h"
 #include "runtime.h"
@@ -519,61 +521,8 @@ fragment FOut shadow_apply_fs(FVOut in [[stage_in]], constant ShadowGlobals& g [
 
 // a tiling 64^3 RG8 noise: R value-noise fbm, G inverted Worley (cells of 8) - generated here
 static id<MTLTexture> make_noise() {
-    const int N = 64;
-    std::vector<uint8_t> data(size_t(N) * N * N * 2);
-    auto hash = [](uint32_t x) {
-        x ^= x >> 16; x *= 0x7feb352d; x ^= x >> 15; x *= 0x846ca68b; x ^= x >> 16;
-        return x;
-    };
-    auto lattice = [&](int x, int y, int z, int period, uint32_t salt) {
-        x = (x % period + period) % period, y = (y % period + period) % period, z = (z % period + period) % period;
-        return (hash((uint32_t)(x + period * (y + period * z)) * 2654435761u + salt) & 0xFFFF) / 65535.0f;
-    };
-    auto vnoise = [&](float x, float y, float z, int period, uint32_t salt) {
-        int ix = (int)std::floor(x), iy = (int)std::floor(y), iz = (int)std::floor(z);
-        float fx = x - ix, fy = y - iy, fz = z - iz;
-        auto sm = [](float t) { return t * t * (3 - 2 * t); };
-        fx = sm(fx), fy = sm(fy), fz = sm(fz);
-        float v = 0;
-        for (int c = 0; c < 8; c++) {
-            int dx = c & 1, dy = (c >> 1) & 1, dz = c >> 2;
-            float w = (dx ? fx : 1 - fx) * (dy ? fy : 1 - fy) * (dz ? fz : 1 - fz);
-            v += w * lattice(ix + dx, iy + dy, iz + dz, period, salt);
-        }
-        return v;
-    };
-    const int cells = 8;
-    std::vector<float> fp(cells * cells * cells * 3);
-    for (int i = 0; i < cells * cells * cells; i++)
-        for (int k = 0; k < 3; k++) fp[i * 3 + k] = (hash(i * 3 + k + 977) & 0xFFFF) / 65535.0f;
-    for (int z = 0; z < N; z++)
-        for (int y = 0; y < N; y++)
-            for (int x = 0; x < N; x++) {
-                float f = 0, amp = 0.5f, norm = 0;
-                for (int o = 0, per = 4; o < 4; o++, per *= 2, amp *= 0.5f) {
-                    float s = (float)per / N;
-                    f += amp * vnoise(x * s, y * s, z * s, per, 31u * o);
-                    norm += amp;
-                }
-                f /= norm;
-                // Worley: distance to the nearest feature point (tiling)
-                float cs = (float)N / cells, best = 9;
-                int cx = (int)(x / cs), cy = (int)(y / cs), cz = (int)(z / cs);
-                for (int dz = -1; dz <= 1; dz++)
-                    for (int dy = -1; dy <= 1; dy++)
-                        for (int dx = -1; dx <= 1; dx++) {
-                            int ox = cx + dx, oy = cy + dy, oz = cz + dz;
-                            int wx = (ox + cells) % cells, wy = (oy + cells) % cells, wz = (oz + cells) % cells;
-                            const float* q = &fp[(wx + cells * (wy + cells * wz)) * 3];
-                            float px = (ox + q[0]) * cs, py = (oy + q[1]) * cs, pz = (oz + q[2]) * cs;
-                            float ddx = px - x, ddy = py - y, ddz = pz - z;
-                            best = std::min(best, (ddx * ddx + ddy * ddy + ddz * ddz) / (cs * cs));
-                        }
-                float wv = 1.0f - std::min(1.0f, std::sqrt(best));
-                size_t i = (size_t(z) * N * N + size_t(y) * N + x) * 2;
-                data[i] = (uint8_t)std::lround(std::clamp(f, 0.0f, 1.0f) * 255);
-                data[i + 1] = (uint8_t)std::lround(wv * 255);
-            }
+    const int N = cloud_noise::kSize;
+    std::vector<uint8_t> data = cloud_noise::rg8();
     MTLTextureDescriptor* d = [MTLTextureDescriptor new];
     d.textureType = MTLTextureType3D;
     d.pixelFormat = MTLPixelFormatRG8Unorm;
@@ -585,13 +534,8 @@ static id<MTLTexture> make_noise() {
     return t;
 }
 
-struct Globals {
-    float view[12];  // float3x3: 3 columns of float4 (padded)
-    float proj[4], sun[4], lit[4], sky[4], params[4], tune[4], extra[4];  // as the shader's Globals
-};
-struct Inst {
-    float center[4], shape[4], base[4];
-};
+using cloud_scene::Globals;
+using cloud_scene::Inst;
 
 static float envf(const char* n, float d) { const char* e = getenv(n); return e && *e ? (float)atof(e) : d; }
 static bool env_on(const char* n) { const char* e = getenv(n); return e && *e && strcmp(e, "0"); }
@@ -660,143 +604,16 @@ static void encode(id<MTLRenderCommandEncoder> enc, const cloud_proto::Snapshot&
         return p;
     };
 
-    Globals g{};
-    // view rows (world -> camera) into a float3x3 with columns c: m[c][r] = row r, column c
-    for (int r = 0; r < 3; r++)
-        for (int c = 0; c < 3; c++) g.view[c * 4 + r] = s.viewRot[r * 4 + c];
-    float aspect = (float)(vp.width / std::fabs(vp.height));
-    float f = 1.0f / std::tan(s.fovy * 0.5f * 3.14159265f / 180.0f);
-    static const bool logOn = env_on("WWHD_CLOUDS_LOG");
-    g.proj[0] = f / aspect, g.proj[1] = f, g.proj[2] = aspect, g.proj[3] = mode == cloud_proto::kCombo ? 1.0f : 0.0f;
-    // light: the sun; below the horizon the moon (dimmer, no rim); never from below
-    auto dir = [&](const float* pos, float* out) {
-        float d[3] = {pos[0] - s.eye[0], pos[1] - s.eye[1], pos[2] - s.eye[2]};
-        float len = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
-        if (len < 1e-3f) { out[0] = 0, out[1] = 1, out[2] = 0; return; }
-        for (int i = 0; i < 3; i++) out[i] = d[i] / len;
-    };
-    float L[3] = {0, 1, 0};
-    if (s.sunVisible) dir(s.sunPos, L);
-    float elev = L[1];
-    float day = std::clamp(elev * 5.0f + 0.3f, 0.0f, 1.0f);
-    if (elev < 0.02f) {
-        float M[3];
-        dir(s.moonPos, M);
-        if (M[1] > 0.05f) for (int i = 0; i < 3; i++) L[i] = M[i];
-        else L[0] *= 0.3f, L[2] *= 0.3f, L[1] = 0.9f;
-    }
-    if (L[1] < 0.12f) {  // keep the light a little above the horizon so tops stay lit
-        L[1] = 0.12f;
-        float len = std::sqrt(L[0] * L[0] + L[1] * L[1] + L[2] * L[2]);
-        for (float& v : L) v /= len;
-    }
-    for (int i = 0; i < 3; i++) g.sun[i] = L[i];
-    g.sun[3] = day;
-    static const float strengthOverride = envf("WWHD_CLOUDS_STRENGTH", -1.0f);  // research: visual storm
-    const float strength = strengthOverride >= 0 ? strengthOverride : s.strength;
-    // warmth from the clock (the game's sun stays fairly high at dusk): dawn around 90, dusk around 270
-    // (360 = a day); WWHD_CLOUDS_WARM overrides
-    auto bump = [](float t, float c, float w) { return std::max(0.0f, 1.0f - std::fabs(t - c) / w); };
-    float warm = std::clamp(bump(s.curTime, 268.0f, 28.0f) + bump(s.curTime, 92.0f, 22.0f), 0.0f, 1.0f);
-    warm = std::max(warm, std::clamp(1.0f - (elev - 0.05f) * 3.0f, 0.0f, 1.0f) * day);
-    static const float warmOverride = envf("WWHD_CLOUDS_WARM", -1.0f);
-    if (warmOverride >= 0) warm = warmOverride;
-    for (int i = 0; i < 3; i++) g.sky[i] = s.fogColor[i];
-    g.sky[3] = strength;
-    g.lit[3] = warm;
-    const float haze = 1.0f - render::horizon_haze();  // 0 = the game's haze .. 1 = horizon haze band removed
-    g.params[0] = envf("WWHD_CLOUDS_BAND", 0.010f), g.params[1] = envf("WWHD_CLOUDS_NOISE", 0.38f), g.params[2] = haze;
-    g.params[3] = envf("WWHD_CLOUDS_SELFSHADOW", 6.0f);
-    g.tune[0] = envf("WWHD_CLOUDS_FRINGE", 0.02f), g.tune[1] = envf("WWHD_CLOUDS_SAT", 0.25f);
-    g.tune[2] = envf("WWHD_CLOUDS_SHADOW", 0.72f), g.tune[3] = envf("WWHD_CLOUDS_MID", 0.92f);
-    g.extra[0] = envf("WWHD_CLOUDS_STEPS", mode == cloud_proto::kSdf ? 48.0f : 24.0f), g.extra[1] = envf("WWHD_CLOUDS_CHEAP", 0.0f);
-    g.extra[2] = depthState ? envf("WWHD_CLOUDS_Z", 0.99999f) : 0.5f;
-
-    // instances: one per game cloud (drawVrkumo's layer-0 size), plus, for distant clouds near the
-    // horizon, satellites that turn them into banks; the game's placement, drift, fade and weather drive all
-    std::vector<Inst> inst;
-    std::vector<float> dist;
-    const float* k = s.k;  // sizeBase, sizeGain, variation, pitchScale, sideGain, pitchGain, starSizeBase, farPlane
-    static const float sizeK = envf("WWHD_CLOUDS_SIZE", 1.35f), hsK = envf("WWHD_CLOUDS_HS", 0.75f);
-    static const float bankK = envf("WWHD_CLOUDS_BANKS", 1.0f), bankDist = envf("WWHD_CLOUDS_BANK_DIST", 10500.0f);
-    auto h01 = [](uint32_t x) {
-        x ^= x >> 16; x *= 0x7feb352d; x ^= x >> 15; x *= 0x846ca68b; x ^= x >> 16;
-        return (x & 0xFFFF) / 65535.0f;
-    };
-    for (int n = 0; n < s.n; n++) {
-        const cloud_proto::Cloud& c = s.c[n];
-        float x = c.pos[0], y = c.pos[1], z = c.pos[2];
-        float hor = std::sqrt(x * x + z * z), D = std::sqrt(hor * hor + y * y);
-        if (D < 1) continue;
-        float v = (float)(c.index & 15) * k[2];
-        float shape = 1 - v * v * v;
-        float weather = k[0] * strength + k[1];
-        float ang = shape * weather * c.falloff;
-        float pitch = std::atan2(y, hor);
-        float q = std::min(pitch / k[3], 1.0f), qc = q * q * q;
-        float side = ang * k[0] * (1 + qc * k[4]);
-        float tall = ang * (1 + c.height) * k[6] * (1 + qc * k[5]);
-        // overhead clouds: keep them from filling the sky (the game's cards grow toward the zenith)
-        static const float maxAng = envf("WWHD_CLOUDS_MAXANG", 0.16f);
-        float rw = D * std::tan(std::min(side, 1.2f)) * sizeK;
-        rw = std::min(rw, D * maxAng) * (1.0f - 0.45f * std::clamp(pitch / 0.6f, 0.0f, 1.0f));
-        float rh = D * std::tan(std::min(tall, 1.2f));
-        if (rw < 1) continue;
-        bool far = hor > bankDist;
-        float tower = h01(c.index * 7 + 1) < 0.3f ? 1.45f : 1.0f;  // some clouds grow into towers
-        float hs = std::clamp(rh / rw * hsK * tower * (1.0f - 0.4f * strength), 0.55f, 1.6f);
-        auto add = [&](float cx, float cy, float cz, float r, float shp, float seed, float a) {
-            Inst it{};
-            it.center[0] = cx, it.center[1] = cy, it.center[2] = cz, it.center[3] = r;
-            it.shape[0] = shp, it.shape[1] = seed, it.shape[2] = std::min(1.0f, a), it.shape[3] = 1 - c.falloff;
-            float blend = 1 - c.falloff, mx = 0, lit[3];
-            for (int i = 0; i < 3; i++) {
-                float cc = s.cloudColor[i] * s.cloudScale, ce = s.centerColor[i] * s.centerScale;
-                lit[i] = ce + (cc - ce) * blend * 0.25f;
-                mx = std::max(mx, lit[i]);
-            }
-            for (int i = 0; i < 3; i++) it.base[i] = std::min(1.0f, lit[i] / std::max(mx, 1e-3f) * std::clamp(mx, 0.0f, 1.0f));
-            it.base[3] = far ? 1.0f : 0.0f;
-            inst.push_back(it);
-            dist.push_back(std::sqrt(cx * cx + cy * cy + cz * cz));
-        };
-        add(x, y, z, rw, hs, (float)c.index * 7.31f + 3.0f, c.alpha);
-        if (far && bankK > 0) {
-            // satellites along the horizon (perpendicular to the view direction), lower and a bit smaller
-            float tx = -z / hor, tz = x / hor;
-            int ns = 2 + (h01(c.index * 13 + 5) < 0.5f ? 1 : 0);
-            for (int j = 0; j < ns; j++) {
-                float sgn = (j & 1) ? -1.0f : 1.0f;
-                float off = rw * bankK * (0.85f + 0.5f * h01(c.index * 31 + j)) * (1.0f + 0.6f * (j / 2));
-                float r2 = rw * (0.7f + 0.3f * h01(c.index * 17 + j));
-                float hs2 = std::clamp(hs * (0.7f + 0.6f * h01(c.index * 19 + j)), 0.55f, 1.6f);
-                add(x + tx * off * sgn, y - rw * 0.08f, z + tz * off * sgn, r2, hs2, (float)c.index * 7.31f + 50.0f + j * 11.0f, c.alpha);
-            }
-        }
-    }
-    std::vector<int> order(inst.size());
-    for (size_t i = 0; i < order.size(); i++) order[i] = (int)i;
-    std::sort(order.begin(), order.end(), [&](int a, int b) { return dist[a] > dist[b]; });
+    Globals g;
     std::vector<Inst> sorted;
-    for (int i : order) sorted.push_back(inst[i]);
-    g.extra[3] = (float)sorted.size();
-    if (logOn && R.frame % 150 == 0) {
-        LOG("[clouds] frame %llu: %d game clouds, %zu instances, count %d strength %.2f time %.1f fovy %.1f light %.2f %.2f %.2f day %.2f warm %.2f "
-            "cloud %.2f %.2f %.2f x%.2f centre %.2f %.2f %.2f x%.2f fog %.2f %.2f %.2f",
-            (unsigned long long)R.frame, s.n, sorted.size(), s.count, strength, s.curTime, s.fovy, L[0], L[1], L[2], day, warm,
-            s.cloudColor[0], s.cloudColor[1], s.cloudColor[2], s.cloudScale, s.centerColor[0], s.centerColor[1], s.centerColor[2],
-            s.centerScale, s.fogColor[0], s.fogColor[1], s.fogColor[2]);
-        if (R.passColor[0])
-            LOG("[clouds]   target %lux%lu", (unsigned long)R.passColor[0]->tex.width, (unsigned long)R.passColor[0]->tex.height);
-    }
-
+    cloud_scene::build(s, (float)(vp.width / std::fabs(vp.height)), mode, depthState != nil, R.frame, g, sorted);
     [enc setDepthStencilState:depthState ? depthState : noDepth];
     [enc setCullMode:MTLCullModeNone];
     [enc setDepthBias:0 slopeScale:0 clamp:0];
     [enc setViewport:vp];
     [enc setVertexBytes:&g length:sizeof g atIndex:0];
     [enc setFragmentBytes:&g length:sizeof g atIndex:0];
-    if ((what & kGrade) && haze > 0) {
+    if ((what & kGrade) && g.params[2] > 0) {
         if (id<MTLRenderPipelineState> p = pipe(@"vol_vs", @"grade_fs")) {
             [enc setRenderPipelineState:p];
             [enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
@@ -1022,7 +839,7 @@ static void draw_cloud_shadows(const cloud_proto::Snapshot& s, Surface* color, u
     static const float layerH = envf("WWHD_CLOUD_SHADOW_HEIGHT", 6000.0f), half = envf("WWHD_CLOUD_SHADOW_RANGE", 24000.0f);
     g.layer[0] = layerH, g.layer[1] = half, g.layer[2] = s.eye[1], g.layer[3] = (float)s.nShadow;
     // subtle: darker at noon, weaker as the sun gets low (warmth) and in storms, none at night
-    static const float dark = envf("WWHD_CLOUD_SHADOW_DARKNESS", 0.22f);
+    static const float dark = envf("WWHD_CLOUD_SHADOW_DARKNESS", 0.35f);
     float strengthK = std::clamp(1.0f - 0.6f * s.strength, 0.3f, 1.0f);
     g.look[0] = dark * (1.0f - 0.7f * sf.lit[3]) * strengthK;
     g.look[1] = envf("WWHD_CLOUD_SHADOW_SOFTNESS", 0.04f);
@@ -1102,7 +919,7 @@ bool clouds_draw(id<MTLRenderCommandEncoder> enc, const MTLViewport& vp, Surface
         if (!ensure(colors, colorSlices, depth, depthSlice)) return true;
         enc = R.enc;
     }
-    static const bool fullres = env_on("WWHD_CLOUDS_FULLRES");
+    static const bool fullres = [] { const char* e = getenv("WWHD_CLOUDS_FULLRES"); return !e || strcmp(e, "0"); }();  // default on
     encode(enc, *cloud_proto::snapshot(cloud_proto::g_active_seq), vp, fullres ? 0 : kClouds);
     if (fullres) {  // the clouds go into the full-resolution picture where the sky buffer is composited
         g_sky = R.passColor[0], g_skyFrame = R.frame, g_pendingSeq = cloud_proto::g_active_seq;

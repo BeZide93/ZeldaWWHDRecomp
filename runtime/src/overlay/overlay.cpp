@@ -978,6 +978,14 @@ void tab_graphics() {
     if (ImGui::Button("Default##haze")) post_changed([] { render::set_horizon_haze(1.0f); });
     help("The pale band low in the sky. 100% matches the original game; lower values give a clearer, deeper blue "
          "sky near the horizon. Together with less bloom it gives a more vivid sky. Applies immediately.");
+    static const char* const cloudStyles[] = {"Clouds: original", "Toon clouds (Lite)", "Toon clouds (High)"};
+    for (int i = 0; i < 3; i++) {
+        if (i) flow::next(flow::check(cloudStyles[i]));
+        if (radio(cloudStyles[i], render::cloud_style() == i)) post_changed([i] { render::set_cloud_style(i); });
+    }
+    help("Original keeps the game's painted clouds. Toon clouds draws them as puffy cel-shaded clouds with sunlit "
+         "tops, shaded undersides and banks along the horizon, from the same clouds the game places, so weather and "
+         "time of day still drive them. Lite is lighter on the GPU (phones, handhelds); High adds self-shadowing.");
     if (check("Cloud shadows", render::cloud_shadows(), &v)) post_changed([v] { render::set_cloud_shadows(v); });
     help("Soft shadows of the drifting sky clouds on the sea, islands and characters. Weaker at dusk, off at night. "
          "Off matches the original game.");

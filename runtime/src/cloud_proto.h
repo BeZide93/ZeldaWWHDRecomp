@@ -8,7 +8,8 @@ namespace cloud_proto {
 using sky::SkyFrame;
 
 enum Mode : int { kOff = 0, kSdf, kVolume, kHide, kMark, kCombo };
-int mode();  // WWHD_CLOUDS_PROTO, read once
+int mode();  // the Cloud style setting (Original: kOff, Toon: kSdf), or WWHD_CLOUDS_PROTO for research
+int tier();  // 1 Lite, 2 High (0: Original)
 
 struct Cloud {
     float pos[3];   // VRKUMO_EFF position: camera-relative direction * distance (x, z on a 15000 disc)

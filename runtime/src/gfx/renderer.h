@@ -169,6 +169,9 @@ void set_bloom_strength(float strength);
 float horizon_haze();
 // Cloud shadows on the sea, islands and characters (off: the original game). WWHD_CLOUD_SHADOWS=1.
 bool cloud_shadows();
+// Cloud style: 0 Original (the game's own clouds), 1 Toon clouds (Lite), 2 Toon clouds (High). WWHD_CLOUD_STYLE.
+int cloud_style();
+void set_cloud_style(int style);
 void set_cloud_shadows(bool on);
 void set_horizon_haze(float haze);
 // The bloom extract shader's remapped[2].z is cThresholdParam.z (intensity).

@@ -64,6 +64,12 @@ std::atomic<bool> g_cloud_shadows{[] {
     const char* e = std::getenv("WWHD_CLOUD_SHADOWS");
     return e && *e && std::strcmp(e, "0") != 0;
 }()};
+std::atomic<int> g_cloud_style{[] {
+    const char* e = std::getenv("WWHD_CLOUD_STYLE");
+    return e ? std::clamp(std::atoi(e), 0, 2) : 0;
+}()};
+int cloud_style() { return g_cloud_style.load(std::memory_order_relaxed); }
+void set_cloud_style(int style) { g_cloud_style.store(std::clamp(style, 0, 2), std::memory_order_relaxed); }
 bool cloud_shadows() { return g_cloud_shadows.load(std::memory_order_relaxed); }
 void set_cloud_shadows(bool on) { g_cloud_shadows.store(on, std::memory_order_relaxed); }
 float horizon_haze() { return g_haze.load(std::memory_order_relaxed); }

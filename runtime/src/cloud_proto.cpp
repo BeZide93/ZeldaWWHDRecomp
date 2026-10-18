@@ -28,17 +28,28 @@ void (*g_on_end)() = nullptr;
 static Snapshot g_ring[kRing];
 static std::atomic<uint32_t> g_seq{0};
 
-int mode() {
+// research override: WWHD_CLOUDS_PROTO=sdf|volume|combo|hide|mark (-1: none, the Cloud style setting decides)
+static int env_mode() {
     static const int m = [] {
         const char* e = getenv("WWHD_CLOUDS_PROTO");
-        if (!e || !*e || !strcmp(e, "0") || !strcmp(e, "off")) return kOff;
-        if (!strcmp(e, "volume")) return kVolume;
-        if (!strcmp(e, "hide")) return kHide;
-        if (!strcmp(e, "mark")) return kMark;
-        if (!strcmp(e, "combo")) return kCombo;
-        return kSdf;
+        if (!e || !*e) return -1;
+        if (!strcmp(e, "0") || !strcmp(e, "off")) return (int)kOff;
+        if (!strcmp(e, "volume")) return (int)kVolume;
+        if (!strcmp(e, "hide")) return (int)kHide;
+        if (!strcmp(e, "mark")) return (int)kMark;
+        if (!strcmp(e, "combo")) return (int)kCombo;
+        return (int)kSdf;
     }();
     return m;
+}
+int mode() {
+    const int e = env_mode();
+    if (e >= 0) return e;
+    return render::cloud_style() > 0 ? kSdf : kOff;
+}
+int tier() {
+    const int style = render::cloud_style();
+    return env_mode() >= 0 ? 2 : style;
 }
 
 const Snapshot* snapshot(uint32_t seq) { return &g_ring[seq % kRing]; }
