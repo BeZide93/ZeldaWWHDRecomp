@@ -54,6 +54,22 @@ int32_t done_action(const std::string& mod,const std::string& quest);
 // The quests a mod declares in its manifest.json ("quests"), when the mod is loaded: false (logged)
 // if the declaration is not accepted.
 bool declare(const std::string& mod, const std::string& mod_name, const mods::json::Value& manifest);
+// World editor (game thread, while story_idle()): the mod's manifest quests, quest talks, sail lines,
+// letters and charts again, as the manifest has them now (docs/mod-editor.md, "Quests, letters, charts
+// and items while the game runs"). Only this mod's tables change: its declarations, its residents'
+// takeovers and sail lines, its letters on their own (and their texts in the postbox), its charts
+// (story_chart::redefine); quests its code defined keep their registration. Nothing of the save file is
+// written: progress stays as its records have it. All or nothing: false (why) when the manifest's story
+// is not accepted or there is no room (a key collision, more quests than the notebook takes).
+struct Redeclared {
+    unsigned quests = 0, talks = 0, letters = 0, charts = 0;
+    std::vector<std::string> charts_kept;  // charts the manifest dropped: declared until a restart
+    bool sail_waits = false;               // the manifest has sail lines, but the boat's hooks were not installed at start-up
+};
+bool redeclare(const std::string& mod, const std::string& mod_name, const mods::json::Value& manifest, Redeclared& out, std::string& why);
+// No page, quest talk, sail line or letter of the story system is running (game thread): a calm moment
+// for redeclare(). False with what runs.
+bool story_idle(std::string& why);
 // The notebook's look from the Story Notebook package: its icon (PNG file) and the model archive its
 // setup step built on the player's machine (empty: the game's stand-in model). Before install().
 void set_look(const std::string& icon_png, const std::string& model_archive);
