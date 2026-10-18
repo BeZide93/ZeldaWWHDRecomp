@@ -25,8 +25,8 @@ Settings.
 ## What it changes, and what it never changes
 
 - It changes **only the mod you open**, in that mod's own folder: its `manifest.json` (only when you press
-  **Save…** and confirm) and, when you import a model, the model file it copies into the mod's `models`
-  folder.
+  **Save…** and confirm) and, when you import a model or an item's icon, the file it copies into the
+  mod's `models` or `icons` folder.
 - It never changes the game's files, your save, or another mod. An export never includes game files.
 - Every change is checked by the same rules the mod manager uses. A change that breaks a rule is refused
   with the reason, and nothing changes.
@@ -41,7 +41,7 @@ Settings.
 | | |
 | --- | --- |
 | **Toolbar** | the open mod, Undo, Redo, Check, Save…, Revert…, **Add**, Move / Turn, grid and angle snapping, **Play**, Play from Link, Restore at Stop, Test mode, which panels show (also **Quests**, **Scenes**, **Flags** and **Search**), and **Reset layout** |
-| **Outliner** | the open mod's actors, models, scenes and quests, and the warp destinations |
+| **Outliner** | the open mod's actors, models, scenes and quests, its letters, charts and items (**Story**), and the warp destinations |
 | **Inspector** | the selected actor: place, properties, dialogue and actions |
 | **Problems & export** | the check's problem list, and the export |
 | **Camera & test** | reload the room, test mode, test states |
@@ -221,6 +221,37 @@ nothing leads to.
 - Stop, change the quest, **Save…** and start the game again to try the new version: quest changes take
   effect after a restart.
 
+## Letters, charts and items
+
+The Outliner's **Story** tab (also **Story** in the settings' Editor tab) holds the mod's letters on their
+own, its treasure charts and its items, one tab each. Each tab lists them; click one to edit it, and the
+form below adds a new one. Every change is one command, so Undo and Redo work for all of them.
+
+- **Letters** are letters on their own: no quest and no notebook entry. Any Rito postbox hands them out
+  while your mod is on (once Link has the Delivery Bag); once Link has read one, he gets what it encloses,
+  once. Give it a sender (one line, the signature) and a text (about ten lines of 40 characters), and tick
+  the charts and items it encloses. A letter that starts a quest is the quest's own letter (the quest's
+  Inspector), not one of these. Up to 8 per mod.
+- **Charts** are treasure charts. While Link owns one, the MAP screen's chart list shows it with an X at
+  its place; salvaging the treasure there opens its chest. **Add with the X at Link** (or **at the
+  camera**) puts the X where Link or the fly camera is on the Great Sea; **X at Link** / **X at the camera**
+  moves it later. Choose what the chest holds: one of your items, a game item (purple, orange or silver
+  rupee, a piece of heart, a heart container) or, by default, an orange rupee. A letter, a resident's talk
+  or a quest's reward gives the chart; a quest step's **find** or a scene's **salvage** trigger uses it.
+  Up to 8 per mod.
+- **Items** are kept in the Delivery Bag's extra pages. When Link gets one, its name and description show
+  with the game's small get jingle. An item needs an icon: **Choose...** picks a `.png` (best 128 x 128
+  with transparency, at most 2048 x 2048), which is copied into the package's `icons` folder. **How many
+  Link can carry** is 1 to 254. **Use** says what using it on X, Y or R does: show its Info box, open the
+  story notebook, move one of your quests to a step, or tell your mod's code; without a use it stays in
+  the bag. Actors give or take items in their actions (**After the dialogue**), enemies and props drop
+  them, and letters and charts can hold them. Up to 32 per mod.
+
+Under each entry, **Used by** lists everything that names it. A chart or item that is still used can't be
+removed: change or remove those first (**Remove…** says so). **JSON** shows the whole entry to edit by hand
+(a field you take out is removed). Letters, charts and items take effect when the game starts again, like
+quests: save the package and restart.
+
 ## Scenes
 
 **Scenes** (toolbar) opens the scene editor: the scene at the top (**New scene…**, **Duplicate**,
@@ -284,14 +315,17 @@ step, also into another scene; whole scenes are copied with the command `copy`.
 ## Search
 
 **Search** (toolbar) finds the open mod's actors, quests and steps, scenes (also by their steps' text),
-items and flags by their id or text. Clicking a result selects that actor (and flies the camera to it), or
+letters, charts, items and flags by their id or text. Searching for a chart or an item (`old-map`,
+`item:lamp`) also finds what uses it: the actors that give, take, need or drop it, the quests and steps
+that name it, the scenes its salvage starts, the letters and charts that hold it. Clicking a result selects that actor (and flies the camera to it), or
 opens that quest step or scene step.
 
 ## Checking and exporting
 
-**Check** (toolbar) checks every actor, model, scene and quest as the mod manager does and lists the
-problems in **Problems & export**, each with what it is about. Clicking a problem selects that actor,
-flies the camera to it and marks the field in the Inspector.
+**Check** (toolbar) checks every actor, model, scene, quest, letter, chart and item as the mod manager
+does (and that each item's icon is a PNG in the package) and lists the problems in **Problems & export**,
+each with what it is about. Clicking a problem selects that actor, flies the camera to it and marks the
+field in the Inspector; for a letter, chart or item it opens it in the **Story** tab.
 
 For quests it also warns (in yellow) about steps nothing leads to, steps nothing moves on from, steps
 without a place on the sea chart, arrows that point backwards, items a condition needs that nothing in
@@ -372,8 +406,9 @@ The editor's status bar shows **MCP: off**, **MCP: on, port N** or **MCP: connec
 
 ### Allow / Deny
 
-Some commands remove or replace things: `remove_actor`, `revert_package`, `save_package`,
-`export_package`, `reset_quest`, `load_state`, and `import_model` when it replaces a file. The client
+Some commands remove or replace things: `remove_actor`, `remove_letter`, `remove_chart`, `remove_item`,
+`revert_package`, `save_package`, `export_package`, `reset_quest`, `load_state`, and `import_model` when it
+replaces a file. The client
 must ask for them with `"confirm": true`, and then the game asks **you**: a window "Claude wants to: …"
 with **Allow** and **Deny**. Nothing happens until you press **Allow**; without an answer within two
 minutes the request is refused. Undo works for these changes as in the editor.
@@ -385,8 +420,8 @@ minutes the request is refused. Undo works for these changes as in the editor.
 - It exists only when the game was started with `--editor` and you turned it on. It is not available on
   Android.
 - Files: the client can read files inside the open mod's package and files you picked yourself in the
-  editor (**Choose…** under Import or Export). For any other file the game asks you first and shows the
-  full path.
+  editor (**Choose…** under Import or Export, or for an item's icon). For any other file (a model to
+  import, an icon to copy in) the game asks you first and shows the full path.
 - Exports over MCP go only into the `editor-exports` folder of the game's user data (the panel shows
   where), or into a folder you picked under **Export**. Nothing is ever written anywhere else, and game files are never
   included.
@@ -428,11 +463,10 @@ separated by `;`, or `@file` with one such line per row. Results go to the log.
 | `focus` | `id`, `mod`? | fly the camera to an actor |
 | `check_model` | `file` | check a `.glb` file |
 | `import_model` | `file`, `id`?, `confirm`?, `mod`? | copy a `.glb` into the mod and add the model |
-| `prepare_collision` | `model`, `mod`? | prepare a static model's collision for live world-object placement |
-| `place_world_object` | `id`, `model`, `collision`, `behaviour`?, `buoyancy`?, `drift`?, … , `mod`? | place a static, floating or drifting object with collision in one step (see [World objects](world-objects.md)) |
-| `set_world_object` | `id`, `collision`?, `behaviour`?, `buoyancy`?, `drift`?, … , `mod`? | change a world object's collision, behaviour and motion together |
-| `preview_collision` | `id`, `mod`? | a world object's collision as a wireframe, with placement findings |
-| `placement_conflicts` | `id`, `mod`? | placement conflicts and collision budget findings for a world object |
+| `place_world_object` | `id`, `model`, `collision`, `stage`, `room`, `position`, `behaviour`?, `buoyancy`?, `drift`?, `anchor`?, `grapple_points`?, `distant`?, `shoreline`?, `chart_marker`?, `arrival`?, `rotation`?, `scale`?, `mod`? | place a static, floating or drifting object of the mod with collision (one Undo step) |
+| `set_world_object` | `id`, `collision`?, `behaviour`?, `buoyancy`?, `drift`?, `anchor`?, `grapple_points`?, `distant`?, `shoreline`?, `chart_marker`?, `arrival`?, `mod`? | change a world object's collision, behaviour and motion together (`null` removes one) |
+| `preview_collision`, `placement_conflicts` | `id`, `mod`? | a world object's collision as a wireframe, and what its place conflicts with |
+| `prepare_collision` | `model`, `mod`? | prepare a static model's collision for placing world objects while the game runs |
 | `set_scene` | `id`, `property` (`trigger`, `steps`, `native`), `value`, `mod`? | (`null` removes a trigger or the native version) |
 | `set_quest_step` | `quest`, `step`, `property`, `value`, `mod`? | `place` is `{x, z}` at sea, or inside a building `{stage, room, sea: {x, z}, point}` (or `x`, `y`, `z` instead of `point`); `available` may use `flag` and `not_flag` (a flag id or a list) with its `text` |
 | `undo`, `redo`, `history` | | |
@@ -499,3 +533,11 @@ separated by `;`, or `@file` with one such line per row. Results go to the log.
 | `preview_scene` | `scene`, `from`?, `to`?, `restore`?, `mod`? | test mode: play the scene (or some of its steps) in the game |
 | `skip_scene`, `stop_scene` | | skip the scene that plays; stop the preview and go back to the editor |
 | `scene_state` | | whether a preview plays, which scene and step |
+| `list_letters`, `list_charts`, `list_items` | `mod`? | the mod's letters on their own, charts or items, each with what uses it (`used_by`) |
+| `add_letter` | `sender`, `text`, `id`?, `encloses`?, `mod`? | a letter on its own; `encloses` lists `"chart:<id>"` and `"item:<id>"` |
+| `set_letter` | `id`, `fields`, `mod`? | its `sender`, `text` or `encloses` (`null` removes `encloses`) |
+| `add_chart` | `name`, `place`? or `at`? (`link`, `camera`), `id`?, `description`?, `item`?, `mod`? | a treasure chart; `place` is `{x, z}` at sea; `item` is `"item:<id>"` or `game:purple_rupee`, `game:orange_rupee`, `game:silver_rupee`, `game:heart_piece`, `game:heart_container` |
+| `set_chart` | `id`, `fields`?, `at`?, `mod`? | its `name`, `description`, `place`, `item` (`null` removes `description` or `item`); `at` moves the X to Link or the camera |
+| `add_item` | `name`, `description`, `icon`? or `icon_file`?, `id`?, `stack`?, `use`?, `held_model`?, `held_frames`?, `mod`? | an item; `icon` is a PNG in the package, `icon_file` a PNG copied into its `icons` folder; `use` is `{action: show}`, `{action: open_notebook}`, `{action: quest_step, quest, step}` or `{action: event}` |
+| `set_item` | `id`, `fields`?, `icon_file`?, `mod`? | its fields (`null` removes the optional ones); `icon_file` copies a new icon in |
+| `remove_letter`, `remove_chart`, `remove_item` | `id`, `confirm`, `mod`? | remove one (needs `"confirm": true`; a chart or item still in use is refused, with the list of uses) |
