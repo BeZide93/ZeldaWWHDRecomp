@@ -150,6 +150,10 @@ int main() {
     ss::Writer emptyFileMetadata;ss::put_section(emptyFileMetadata,ss::kSecFiles,ss::Writer{});
     auto emptyFile=emptyFileMetadata.b;emptyFile.insert(emptyFile.end(),missingFile.begin(),missingFile.end());rejectPayload(emptyFile);
     replace_bytes(ss::slot_path(1),good);
+    // A refused commit (the native save gate's receipt) discards the written state and keeps the slot.
+    bool asked=false;
+    assert(!ss::write_memory_slot(1,header(),metadata,regions,pointer,touched,rawSize,[&]{asked=true;return false;}));
+    assert(asked&&file_bytes(ss::slot_path(1))==good&&!std::filesystem::exists(ss::slot_path(1,"tmp")));
     std::filesystem::create_directory(ss::slot_path(1,"tmp"));
     assert(!ss::write_memory_slot(1,header(),metadata,regions,pointer,touched,rawSize));assert(file_bytes(ss::slot_path(1))==good);
     // FILE preflight is nonmutating and rejects every truncated schema before any restore.

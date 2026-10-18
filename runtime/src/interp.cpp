@@ -1,4 +1,6 @@
 #include "interp.h"
+#include "mods/story_native_restore_resume.h"
+namespace interp {class NativeResumeBoundaryIssuer {public:static void after_service(Cpu*c){story_native_restore_resume::LoadWindow::service_return(c);}};}
 #include "countdown.h"
 #include "mods/guest_mods.h"
 #include "mods/mods.h"
@@ -1082,6 +1084,7 @@ extern "C" void hook_0203593C(Cpu* c) {
     perf::game_frame();
     fx_pass_start();
     ss::service(c);  // save states: exact values are back in guest memory, all other threads idle
+    interp::NativeResumeBoundaryIssuer::after_service(c); // before any resumed native/game service
     mods::cheats_service();
     mods::hud_service();  // the boost bar and climb wheel fade out over the game's menus, events, messages
     const bool was_fast_forward = mods::fast_forward_active();

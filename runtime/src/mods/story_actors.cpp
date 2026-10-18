@@ -22,6 +22,7 @@
 #include <cstring>
 #include <cstdlib>
 #include <map>
+#include <mutex>
 #include <set>
 
 namespace story_actors {
@@ -31,8 +32,9 @@ static_assert(kScratchBytes>=kIdentityScratchOffset+128*identity::kRecordBytes);
 std::function<void()> mod_talked(const std::string& mod,const std::string& id);
 namespace {
 using story_notebook::ManifestActor;
-struct Actor {std::string mod; ManifestActor spec; uint32_t process=0xFFFFFFFFu; bool deleting=false; uint32_t mod_token=0; bool restore_talk=false;uint32_t prop_token=0,switch_token=0,switch_source=0,enemy_token=0;story_items::EnemyMarkerHandle combat_marker{};story_items::PropMarkerHandle carry_marker=0;identity::Fingerprint fingerprint{};bool restore_quarantined=false;bool respawn=false;bool removed=false;};
+struct Actor {std::string mod; ManifestActor spec; uint32_t process=0xFFFFFFFFu; bool deleting=false; uint32_t mod_token=0; bool restore_talk=false;uint32_t prop_token=0,switch_token=0,switch_source=0,enemy_token=0;story_items::EnemyMarkerHandle combat_marker{};story_items::PropMarkerHandle carry_marker=0;identity::Fingerprint fingerprint{};bool restore_quarantined=false;bool respawn=false;bool removed=false;uint32_t resident_event_token=0;};
 std::vector<Actor> g_actors;
+uint32_t g_next_resident_event_token=1;
 struct ModelResource {std::string archive;int index;story_notebook::WorldPoint minimum,maximum;bool skinned=false;std::vector<std::string> clips;mod_actor::ModelRig rig;};
 std::map<std::pair<std::string,std::string>,ModelResource> g_models;
 std::map<uint16_t,std::pair<std::string,std::string>> g_flag_names;
@@ -340,7 +342,7 @@ bool load(const std::string& mod,const std::vector<ManifestActor>& actors,std::s
     std::vector<Actor> staged;staged.reserve(actors.size());g_actors.reserve(g_actors.size()+actors.size());
     struct LoadRollback {size_t props=story_props::checkpoint(),models=mod_actor::checkpoint(),switches=story_switches::checkpoint(),enemies=story_enemies::checkpoint(),ownership=story_enemy_ownership::checkpoint();story_items::PropMarkerCheckpoint markers=story_items::prop_marker_checkpoint();decltype(g_flag_names) flags=g_flag_names;bool committed=false;~LoadRollback(){if(!committed){story_props::rollback(props);mod_actor::rollback(models);story_switches::rollback(switches);story_enemies::rollback(enemies);story_enemy_ownership::rollback(ownership);story_items::rollback_prop_markers(markers);g_flag_names=std::move(flags);}}} rollback;
     if(!register_flags(mod,flags,why))return false;
-    for(const auto& a:actors){Actor added{mod,a};if(a.kind=="mod"&&a.combat_enabled){added.combat_marker=story_items::register_enemy_marker(mod,a.id,a.defeated_flag,why);if(!added.combat_marker.value)return false;added.fingerprint=identity::fingerprint(mod,a);}if(a.kind=="mod"&&a.carry_break_on_impact){added.carry_marker=story_items::register_prop_marker(mod,a.id,a.broken_flag,why);if(!added.carry_marker)return false;added.fingerprint=identity::fingerprint(mod,a);}story_enemies::Kind enemy;if(enemy_kind(a,enemy)){added.fingerprint=identity::fingerprint(mod,a);story_enemies::Spec spec{enemy,mod,a.id,a.defeated_flag,{},added.fingerprint,1};for(const auto&drop:a.drops)spec.drops.push_back({drop.item,drop.quantity});added.enemy_token=story_enemies::declare(spec,why);if(!added.enemy_token)return false;}if(story_props::is_prop(a)){added.fingerprint=identity::fingerprint(mod,a);added.prop_token=story_props::declare(mod,a,why);if(!added.prop_token)return false;}if(a.actor=="switch"){if(a.switch_flag.empty())return why="switch requires an own flag",false;added.fingerprint=identity::fingerprint(mod,a);added.switch_token=story_switches::declare_switch(mod,a.id,why);added.switch_source=added.switch_token;if(!added.switch_token)return false;}staged.push_back(std::move(added));}
+    for(const auto& a:actors){Actor added{mod,a};if(a.actor=="resident"&&(a.resident==1||a.resident==9)){if(!g_next_resident_event_token||g_next_resident_event_token==0xFFFFFFFFu)return why="resident event token exhausted",false;added.resident_event_token=g_next_resident_event_token++;added.fingerprint=identity::fingerprint(mod,a);}if(a.kind=="mod"&&a.combat_enabled){added.combat_marker=story_items::register_enemy_marker(mod,a.id,a.defeated_flag,why);if(!added.combat_marker.value)return false;added.fingerprint=identity::fingerprint(mod,a);}if(a.kind=="mod"&&a.carry_break_on_impact){added.carry_marker=story_items::register_prop_marker(mod,a.id,a.broken_flag,why);if(!added.carry_marker)return false;added.fingerprint=identity::fingerprint(mod,a);}story_enemies::Kind enemy;if(enemy_kind(a,enemy)){added.fingerprint=identity::fingerprint(mod,a);story_enemies::Spec spec{enemy,mod,a.id,a.defeated_flag,{},added.fingerprint,1};for(const auto&drop:a.drops)spec.drops.push_back({drop.item,drop.quantity});added.enemy_token=story_enemies::declare(spec,why);if(!added.enemy_token)return false;}if(story_props::is_prop(a)){added.fingerprint=identity::fingerprint(mod,a);added.prop_token=story_props::declare(mod,a,why);if(!added.prop_token)return false;}if(a.actor=="switch"){if(a.switch_flag.empty())return why="switch requires an own flag",false;added.fingerprint=identity::fingerprint(mod,a);added.switch_token=story_switches::declare_switch(mod,a.id,why);added.switch_source=added.switch_token;if(!added.switch_token)return false;}staged.push_back(std::move(added));}
     for(auto& a:staged)if(a.spec.actor=="door"){
         const Actor* source=nullptr;for(const auto& candidate:staged)if(candidate.spec.actor=="switch"&&candidate.spec.id==a.spec.switch_actor)source=&candidate;
         if(!source)for(const auto& candidate:g_actors)if(candidate.mod==mod&&candidate.spec.actor=="switch"&&candidate.spec.id==a.spec.switch_actor)source=&candidate;
@@ -456,6 +458,9 @@ void room_loaded(Cpu* c,int room) {
         if(a.prop_token)story_props::bind(a.prop_token,a.process);
         if(a.switch_token)story_switches::bind(a.switch_token,a.process);
         st32(g_scratch+128+uint32_t(&a-g_actors.data())*4,a.process);
+        // Residents reuse their previously unused existing 40-byte identity row.
+        // Distinct magic/token format: never interpret this as a prop record.
+        if(a.resident_event_token&&a.process&&a.process!=0xFFFFFFFFu){const uint32_t row=g_scratch+kIdentityScratchOffset+uint32_t(&a-g_actors.data())*identity::kRecordBytes;st32(row,0x52455631);st32(row+4,a.resident_event_token);std::memcpy(mem::ptr(row+8),a.fingerprint.data(),a.fingerprint.size());}
         if((a.prop_token||a.switch_token||a.enemy_token)&&a.process&&a.process!=0xFFFFFFFFu){const auto record=identity::record(a.fingerprint);std::memcpy(mem::ptr(g_scratch+kIdentityScratchOffset+uint32_t(&a-g_actors.data())*identity::kRecordBytes),record.data(),record.size());}
         LOG("[actors] %s:%s room %d process %08X room_layer=%08X",a.mod.c_str(),a.spec.id.c_str(),room,a.process,room_layer);
     }
@@ -473,8 +478,9 @@ void service(Cpu* c){
     Cpu probe=*c;const uint32_t play=g_call(&probe,kPlay,{});if(!play)return;
     const uint32_t player=ld32(play+0x5B34);if(!player)return;
     // the editor's changed actors: removed wherever they are, then created again by room_loaded below
+    // (not while a mod scene runs: a native scene's residents stay its own until it ends)
     for(auto& a:g_actors){
-        if(!a.respawn)continue;
+        if(!a.respawn||story_scenes::active())continue;
         if(a.process==0xFFFFFFFFu){a.respawn=false;continue;}
         if(g_talk.actor==&a)continue;
         st32(g_scratch+0x40,0);probe=*c;const uint32_t exists=g_call(&probe,kSearch,{a.process,g_scratch+0x40});
@@ -490,6 +496,7 @@ void service(Cpu* c){
     for(auto& a:g_actors){
         if(a.spec.room!=unsigned(room)||std::strncmp(reinterpret_cast<const char*>(mem::ptr(kStage)),a.spec.stage.c_str(),8)!=0||a.process==0xFFFFFFFFu||eligible(a))continue;
         if(g_talk.actor==&a)continue; // finish native dialogue before removing its talk partner
+        if(a.removed&&story_scenes::active())continue; // an editor removal waits for a running mod scene
         st32(g_scratch+0x40,0);probe=*c;const uint32_t exists=g_call(&probe,kSearch,{a.process,g_scratch+0x40});
         const uint32_t actor=ld32(g_scratch+0x40);
         if(mod_actor::talking(actor))continue; // native events retain their talk target until closure
@@ -657,6 +664,120 @@ bool particle_position(Cpu* c,const std::string& mod,const std::string& id,unsig
     }
     return false;
 }
+bool resident_event_declaration(const std::string& mod,const std::string& id,ResidentEventDeclaration& out){
+    out={};for(const auto&a:g_actors)if(a.mod==mod&&a.spec.id==id){
+        if(a.spec.actor!="resident"||a.spec.resident!=1||!a.resident_event_token||a.spec.room>63||a.spec.stage.empty()||a.spec.stage.size()>8)return false;
+        out={a.resident_event_token,a.spec.room,1,a.spec.stage,a.fingerprint};return true;
+    }return false;
+}
+bool resident_event_process(const std::string&mod,const std::string&id,ResidentEventProcess&out){
+    out={};
+    if(!g_installed||!g_scratch||(g_scratch&15)||g_scratch<mem::kRuntimeStart||uint64_t(g_scratch)+kScratchBytes>mem::kHostStart)return false;
+    for(size_t index=0;index<g_actors.size();++index){const auto&a=g_actors[index];if(a.mod!=mod||a.spec.id!=id)continue;
+        if(index>=128||a.spec.actor!="resident"||a.spec.resident!=1||!a.resident_event_token||a.deleting||a.restore_quarantined||a.spec.room>63||a.spec.stage.empty()||a.spec.stage.size()>8)return false;
+        ResidentEventProcess p;p.declaration={a.resident_event_token,a.spec.room,1,a.spec.stage,a.fingerprint};p.pid=a.process;
+        p.pid_slot=g_scratch+128+uint32_t(index)*4;p.identity_row=g_scratch+kIdentityScratchOffset+uint32_t(index)*identity::kRecordBytes;p.scratch_window=g_scratch+0x300;
+        if(!p.pid||ld32(p.pid_slot)!=p.pid)return false;
+        const bool absent=p.pid==0xFFFFFFFFu;
+        const bool zero=std::all_of(mem::ptr(p.identity_row),mem::ptr(p.identity_row)+identity::kRecordBytes,[](uint8_t b){return b==0;});
+        const bool row=ld32(p.identity_row)==0x52455631&&ld32(p.identity_row+4)==a.resident_event_token&&std::memcmp(mem::ptr(p.identity_row+8),a.fingerprint.data(),a.fingerprint.size())==0;
+        if((!absent&&!row)||(absent&&!zero&&!row))return false;
+        p.presence=absent?ResidentEventProcess::Presence::Absent:ResidentEventProcess::Presence::Present;
+        std::copy_n(mem::ptr(p.pid_slot),p.pid_bytes.size(),p.pid_bytes.begin());
+        std::copy_n(mem::ptr(p.identity_row),p.identity_bytes.size(),p.identity_bytes.begin());
+        std::copy_n(mem::ptr(p.scratch_window),p.scratch_bytes.size(),p.scratch_bytes.begin());
+        if(a.process!=p.pid||a.deleting||a.restore_quarantined||ld32(p.pid_slot)!=p.pid||
+           std::memcmp(mem::ptr(p.identity_row),p.identity_bytes.data(),p.identity_bytes.size())||
+           std::memcmp(mem::ptr(p.scratch_window),p.scratch_bytes.data(),p.scratch_bytes.size()))return false;
+        out=std::move(p);return true;
+    }
+    return false;
+}
+uint32_t query_resident_event_address(Cpu*c,const std::string&mod,const std::string&id){
+    ResidentEventDeclaration declaration;
+    if(!c||!g_call||!g_installed||!g_scratch||(g_scratch&15)||g_scratch<mem::kRuntimeStart||uint64_t(g_scratch)+kScratchBytes>mem::kHostStart||!resident_event_declaration(mod,id,declaration))return 0;
+    const uint32_t output=g_scratch+0x40,before=ld32(output);const Cpu cpu=*c;
+    struct Restore{Cpu*c;Cpu cpu;uint32_t address,value;~Restore(){st32(address,value);*c=cpu;}}restore{c,cpu,output,before};
+    return actor_address(c,mod,id);
+}
+static bool resident_event_identity_impl(const std::string& mod,const std::string& id,uint32_t actor,uint32_t pid,ResidentEventIdentity& out,bool diagnostics){
+    out={};
+    // Private, bounded diagnosis only. This must never change admission or
+    // dereference an unbounded guest address on the entry-rejection path.
+    auto rejected=[&](const char* category,const Actor* a,uint32_t layer,uint32_t scene){
+        if(!diagnostics)return;
+        const char* enabled=std::getenv("WWHD_TEST_NATIVE_WAIT");
+        if(!enabled||std::strcmp(enabled,"1"))return;
+        try{
+            static std::mutex diagnostic_mutex;static std::set<std::string> seen;static unsigned total=0;
+            std::unique_lock lock(diagnostic_mutex,std::try_to_lock);if(!lock.owns_lock())return;
+            if(total>=16||!seen.insert(mod+":"+id+":"+category).second)return;
+            ++total;
+            if(!std::strcmp(category,"nativeABI")&&a){
+                LOG("[native_wait_identity] %s:%s reject=%s actor=%08X pid=%08X/%08X profile=%04X/%04X profileptr=%08X/%08X vtable=%08X/%08X params=%08X/%08X subtype=%u/%u tail=%u/%u room=%u/%u delete=%u",
+                    mod.c_str(),id.c_str(),category,actor,ld32(actor+4),pid,unsigned(ld16(actor+0xE)),0x175u,
+                    ld32(actor+0x10),GD(0x101C4CD0),ld32(actor+0xB4),GD(0x100209C4),
+                    ld32(actor+0xB0),0x00FF0000u,unsigned(ld8(actor+0x2DD)),1u,
+                    unsigned(ld8(actor+0x905)),1u,unsigned(ld8(actor+0x326)),a->spec.room,unsigned(ld8(actor+0xC)));
+            }else if(!std::strcmp(category,"profile")){
+                const uint32_t profile=GD(0x101C4CD0);
+                LOG("[native_wait_identity] %s:%s reject=profile actor=%08X meta_profile=%04X/%04X size=%08X/%08X methods=%08X",
+                    mod.c_str(),id.c_str(),actor,unsigned(ld16(profile+8)),0x175u,ld32(profile+0x10),0x920u,
+                    ld32(profile+0x3C));
+            }else if(!std::strcmp(category,"stage")&&a){
+                LOG("[native_wait_identity] %s:%s reject=stage actor=%08X stage=%08X scratch_stage=%08X room=%08X scratch_room=%08X expected_room=%u",
+                    mod.c_str(),id.c_str(),actor,ld32(GD(0x1047E6C4)),ld32(g_scratch+0x318),
+                    ld32(GD(0x1047E8F0)+a->spec.room*0x22C),ld32(g_scratch+0x400+a->spec.room*4),a->spec.room);
+            }else if(!std::strcmp(category,"scratchPID")&&a){
+                LOG("[native_wait_identity] %s:%s reject=scratchPID actor=%08X pid=%08X stored=%08X scratch=%08X deleting=%u quarantined=%u token=%u",
+                    mod.c_str(),id.c_str(),actor,pid,a->process,ld32(g_scratch+128+uint32_t(a-g_actors.data())*4),
+                    unsigned(a->deleting),unsigned(a->restore_quarantined),a->resident_event_token);
+            }else if(!std::strcmp(category,"fingerprint")&&a){
+                const uint32_t row=g_scratch+kIdentityScratchOffset+uint32_t(a-g_actors.data())*identity::kRecordBytes;
+                LOG("[native_wait_identity] %s:%s reject=fingerprint actor=%08X row_magic=%08X row_token=%08X expected_token=%08X",
+                    mod.c_str(),id.c_str(),actor,ld32(row),ld32(row+4),a->resident_event_token);
+            }else{
+                LOG("[native_wait_identity] %s:%s reject=%s actor=%08X pid=%08X layer=%08X scene=%08X",
+                    mod.c_str(),id.c_str(),category,actor,pid,layer,scene);
+            }
+        }catch(...){/* Diagnostic allocation/logging must not affect admission. */}
+    };
+    if(!g_installed||!g_scratch||(g_scratch&15)||g_scratch<mem::kRuntimeStart||uint64_t(g_scratch)+kScratchBytes>mem::kHostStart||
+       (actor&3)||actor<mem::kMem2Start||uint64_t(actor)+0x920>mem::kMem2End||!pid||pid==0xFFFFFFFFu){rejected("entry",nullptr,0,0);return false;}
+    for(size_t index=0;index<g_actors.size();++index){const auto&a=g_actors[index];if(a.mod!=mod||a.spec.id!=id)continue;
+        if(a.spec.actor!="resident"||a.spec.resident!=1||!a.resident_event_token||a.process!=pid||a.deleting||a.restore_quarantined||a.spec.room>63||
+           ld32(g_scratch+128+uint32_t(index)*4)!=pid){rejected("scratchPID",&a,0,0);return false;}
+        const uint32_t row=g_scratch+kIdentityScratchOffset+uint32_t(index)*identity::kRecordBytes;
+        if(ld32(row)!=0x52455631||ld32(row+4)!=a.resident_event_token||std::memcmp(mem::ptr(row+8),a.fingerprint.data(),a.fingerprint.size())!=0){rejected("fingerprint",&a,0,0);return false;}
+        const uint32_t stage=ld32(GD(0x1047E6C4)),room=ld32(GD(0x1047E8F0)+a.spec.room*0x22C);
+        if(!stage||!room||ld32(g_scratch+0x318)!=stage||ld32(g_scratch+0x400+a.spec.room*4)!=room||
+           std::strncmp(reinterpret_cast<const char*>(mem::ptr(kStage)),a.spec.stage.c_str(),8)!=0||std::memcmp(mem::ptr(g_scratch+0x300),mem::ptr(kStage),8)!=0){rejected("stage",&a,0,0);return false;}
+        if(ld32(actor+4)!=pid||ld16(actor+0xE)!=0x175||ld32(actor+0x10)!=GD(0x101C4CD0)||ld32(actor+0xB4)!=GD(0x100209C4)||ld32(actor+0xB0)!=0x00FF0000||
+           ld8(actor+0x2DD)!=1||ld8(actor+0x905)!=1||ld8(actor+0x326)!=a.spec.room||ld8(actor+0xC)==3){rejected("nativeABI",&a,0,0);return false;}
+        const uint32_t profile=GD(0x101C4CD0);if(ld16(profile+8)!=0x175||ld32(profile+0x10)!=0x920){rejected("profile",&a,0,0);return false;}
+        uint32_t layer=ld32(actor+0x2C);if(!layer){rejected("layer",&a,layer,0);return false;}
+        bool ended=false;for(unsigned depth=0;depth<16;++depth){
+            // fpcM_Init creates this root layer with no owning scene. A room
+            // actor reaches it through its scene's parent layer; the root is
+            // only a valid terminator after the first room scene was checked.
+            if(layer==GD(0x1048A9BC)){
+                ended=depth>0&&ld32(layer+0xC)==0&&ld32(layer+0x18)==0;
+                if(!ended)rejected("layer",&a,layer,0);
+                break;
+            }
+            if((layer&3)||layer<mem::kMem2Start||uint64_t(layer)+0x1C>mem::kMem2End){rejected("layer",&a,layer,0);return false;}
+            const uint32_t scene=ld32(layer+0x18);if(!scene||(scene&3)||scene<mem::kMem2Start||uint64_t(scene)+0x60>mem::kMem2End||ld8(scene+0x5C)){rejected("layer",&a,layer,scene);return false;}
+            if(depth==0&&ld32(scene+4)!=room){rejected("layer",&a,layer,scene);return false;}
+            layer=ld32(scene+0x2C);
+        }
+        if(!ended){rejected("layer",&a,layer,0);return false;}
+        out={a.resident_event_token,actor,pid,stage,room,a.spec.room,1,a.fingerprint};return true;
+    }
+    rejected("declaration",nullptr,0,0);
+    return false;
+}
+bool resident_event_identity(const std::string&mod,const std::string&id,uint32_t actor,uint32_t pid,ResidentEventIdentity&out){return resident_event_identity_impl(mod,id,actor,pid,out,true);}
+bool resident_event_identity_quiet(const std::string&mod,const std::string&id,uint32_t actor,uint32_t pid,ResidentEventIdentity&out){return resident_event_identity_impl(mod,id,actor,pid,out,false);}
 bool prop_texture_identity(uint32_t actor,uint32_t pid,uint32_t& token,uint32_t& epoch,uint32_t& generation){
     token=epoch=generation=0;
     if(!g_installed||!g_scratch||actor<mem::kMem2Start||actor>mem::kMem2End-story_props::kClassBytes||

@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <initializer_list>
 #include <map>
+#include <optional>
 #include <utility>
 #include <string>
 #include <vector>
@@ -11,11 +12,13 @@
 #include "story_mail_book.h"
 #include "story_scenes_core.h"
 #include "story_mod_combat_manifest.h"
+#include "story_native_scene_manifest.h"
 namespace story_notebook {
-struct WorldPoint { float x=0,y=0,z=0; };
+struct WorldPoint { float x=0,y=0,z=0; bool operator==(const WorldPoint&)const=default; };
 struct StoryAction {
     enum class Kind { Give,Take,QuestStep,Flag,StartScene };
     Kind kind=Kind::Flag; std::string id; unsigned value=1;
+    bool operator==(const StoryAction&)const=default;
 };
 struct ManifestModel { std::string id,source,kind="static"; };
 struct ManifestLookAt {
@@ -36,8 +39,8 @@ struct ManifestActor {
     std::string flag,quest,item,time,lines; unsigned quest_step=0;
     std::vector<StoryAction> then;
 };
-struct SceneCameraKey {WorldPoint eye,target;unsigned frames=0;};
-struct SceneChoiceOption {std::string text,next;size_t next_step=0;};
+struct SceneCameraKey {WorldPoint eye,target;unsigned frames=0;bool operator==(const SceneCameraKey&)const=default;};
+struct SceneChoiceOption {std::string text,next;size_t next_step=0;bool operator==(const SceneChoiceOption&)const=default;};
 struct SceneStep {
     enum class Kind { Camera,Say,Move,Face,Wait,Sound,Fade,End,CameraPath,CameraFollow,Animation,Walk,Choice,Music,Particle };
     Kind kind=Kind::Wait; std::string actor,target_actor,text,sound;
@@ -47,11 +50,14 @@ struct SceneStep {
     std::vector<WorldPoint> walk_points;std::vector<SceneChoiceOption> choices;unsigned default_choice=0,fade_frames=0;
     WorldPoint eye,target,position,eye_to,target_to; unsigned frames=0,particle_alpha=255; float particle_scale=1; bool pan=false,fade_in=false,particle_has_position=false;
     std::vector<StoryAction> then;
+    bool operator==(const SceneStep&)const=default;
 };
 struct ManifestScene {
     std::string id; std::vector<SceneStep> steps;
+    std::optional<story_native_scene_manifest::Definition> native;
     std::string trigger,stage,actor,quest,chart; unsigned room=0,quest_step=0;
     WorldPoint position; float radius=0;
+    bool operator==(const ManifestScene&)const=default;
 };
 inline constexpr unsigned kMaxActorsPerRoom=16,kMaxActorsPerMod=64,kMaxScenesPerMod=16,kMaxSceneSteps=64,kMaxSceneFrames=18000;
 namespace world_manifest {
@@ -310,7 +316,7 @@ inline bool parse_scenes_impl(const mods::json::Value& m,std::vector<ManifestSce
     using namespace world_manifest;out.clear();const auto& list=m.get("scenes");
     if(list.type==Value::Null)return true;
     if(list.type!=Value::Array||list.array.size()>kMaxScenesPerMod)return why="scenes must be a list of up to 16",false;
-    for(const auto& v:list.array){ManifestScene s;if(!keys(v,{"id","trigger","steps"}))return why="unknown scene field",false;if(!id(v.get("id")))return why="invalid scene id",false;s.id=v.get("id").text;
+    for(const auto& v:list.array){ManifestScene s;if(!keys(v,{"id","trigger","steps","native"}))return why="unknown scene field",false;if(!id(v.get("id")))return why="invalid scene id",false;s.id=v.get("id").text;
         for(const auto& old:out)if(old.id==s.id)return why="duplicate scene id",false;
         const auto& trigger=v.get("trigger");if(trigger.type!=Value::Null){s.trigger=trigger.get("type").string();
             bool trigger_keys=false;
@@ -325,6 +331,19 @@ inline bool parse_scenes_impl(const mods::json::Value& m,std::vector<ManifestSce
             else if(s.trigger=="quest_step"){s.quest=trigger.get("quest").string();if(!integer(trigger.get("step"),1,254)||!quest_step(m,s.quest,unsigned(trigger.get("step").number)))return why="unknown trigger quest step",false;s.quest_step=unsigned(trigger.get("step").number);}
             else if(s.trigger=="salvage"){s.chart=trigger.get("chart").string();if(!declared(m,"charts",s.chart))return why="unknown trigger chart",false;}
             else return why="unknown scene trigger",false;
+        }
+        if(v.object.contains("native")){
+            story_native_scene_manifest::Definition definition;
+            if(!story_native_scene_manifest::parse(v.get("native"),definition,why))return false;
+            std::vector<ManifestActor> placed;if(!parse_actors_impl(m,placed,why))return false;
+            std::array<const ManifestActor*,2> references{};
+            for(unsigned n=0;n<2;++n){for(const auto&a:placed)if(a.id==definition.actors[n].id)references[n]=&a;
+                if(!references[n]||references[n]->actor!="resident"||references[n]->resident!=1)return why="native scene requires same-mod placed Uo2 resident actor references",false;
+            }
+            if(references[0]->stage!=references[1]->stage||references[0]->room!=references[1]->room)return why="native scene actors must share one stage and room",false;
+            definition.stage=references[0]->stage;definition.room=references[0]->room;
+            if((s.trigger=="room"||s.trigger=="area")&&(s.stage!=definition.stage||s.room!=definition.room))return why="native scene trigger and actor placements must share stage and room",false;
+            s.native=std::move(definition);
         }
         const auto& steps=v.get("steps");if(steps.type!=Value::Array||steps.array.empty()||steps.array.size()>kMaxSceneSteps)return why="scene needs 1..64 steps",false;
         bool explicit_graph=false;for(const auto& st:steps.array){SceneStep p;const auto type=st.get("type").string();bool timed=false;

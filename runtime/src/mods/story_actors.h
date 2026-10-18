@@ -1,4 +1,5 @@
 #pragma once
+#include <array>
 #include <functional>
 #include <initializer_list>
 #include <string>
@@ -69,6 +70,45 @@ bool position(Cpu*,const std::string& mod,const std::string& id,story_notebook::
 bool particle_position(Cpu*,const std::string& mod,const std::string& id,unsigned room,story_notebook::WorldPoint& out);
 // Exact placed prop snapshot identity for owned texture binding. Returns the
 // declaration token and current native stage/room generation, never a retail copy.
+// Pure resident ownership for native event Capture. No native search or writes.
+// Existing 40-byte resident row persists magic/token/full fingerprint; zero old
+// rows deny this accessor while ordinary resident talk remains unchanged.
+// Returns declaration + restored row identity only. Native leases must
+// independently match saved config fingerprint/token in the native-only arena;
+// this getter alone never authorizes a restored event. Historical scratch unchanged.
+struct ResidentEventIdentity {
+ uint32_t token=0,actor=0,pid=0,stage_pid=0,room_pid=0,room=0,subtype=0;
+ std::array<uint8_t,32> fingerprint{};
+};
+struct ResidentEventDeclaration {
+ uint32_t token=0,room=0,subtype=0;std::string stage;
+ std::array<uint8_t,32> fingerprint{};
+};
+// Pure startup declaration authority, independent of any snapshot/native address.
+bool resident_event_declaration(const std::string& mod,const std::string& id,ResidentEventDeclaration&);
+// Data-only placed process lineage. No address lookup, guest call or entry
+// authority. Absent is the private unplaced sentinel corroborated by scratch;
+// pending deletion/quarantine and incomplete rows refuse instead.
+struct ResidentEventProcess {
+ enum class Presence {Absent,Present};Presence presence=Presence::Absent;
+ ResidentEventDeclaration declaration;uint32_t pid=0;
+ uint32_t pid_slot=0,identity_row=0,scratch_window=0;
+ std::array<uint8_t,4>pid_bytes{};std::array<uint8_t,40>identity_bytes{};
+ // Contains the actual stage name, stage PID and all room PID clocks. Other
+ // bytes are retained verbatim, never interpreted as ownership predicates.
+ std::array<uint8_t,0x200>scratch_bytes{};
+};
+bool resident_event_process(const std::string& mod,const std::string& id,ResidentEventProcess&);
+// Explicit native query BEFORE pure Capture only. Restores its scratch output;
+// caller must verify game-thread boundary and preserve outgoing stack/Cpu.
+// Candidate address is NOT ownership; resident_event_identity must follow.
+uint32_t query_resident_event_address(Cpu*,const std::string& mod,const std::string& id);
+bool resident_event_identity(const std::string& mod,const std::string& id,
+ uint32_t actor,uint32_t pid,ResidentEventIdentity&);
+// Exact same identity predicates, with no diagnostic allocation/log mutex.
+// Required for bounded reads while other guest threads are physically parked.
+bool resident_event_identity_quiet(const std::string& mod,const std::string& id,
+ uint32_t actor,uint32_t pid,ResidentEventIdentity&);
 bool prop_texture_identity(uint32_t actor,uint32_t pid,uint32_t& token,uint32_t& epoch,uint32_t& generation);
 bool actions(const std::string& mod,const std::vector<story_notebook::StoryAction>& actions);
 // Notebook hooks delegate only actors created by this service. Returns true when handled.

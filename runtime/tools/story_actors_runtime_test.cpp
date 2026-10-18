@@ -38,7 +38,7 @@ uint32_t created=0,actor_id=100;unsigned originals=0,says=0,unsays=0,talk_finish
 uint32_t current_layer=kArena+0x6800;bool room_available=true;
 uint32_t ym1_partner=0,ym1_message_status=6;unsigned seated_actions=0,seated_bases=0;
 bool prop_broken_fixture=false;unsigned prop_claim_calls=0,enemy_claim_calls=0;bool enemy_terminal=false,refuse_enemy_request=false,enemy_four_mode=false,mo_disarm_fixture=false;
-bool pending=false,nested_chest=false;int32_t quest_state=1,item_count=1;unsigned deleted=0,native_calls=0;
+bool pending=false,nested_chest=false,throw_search=false;int32_t quest_state=1,item_count=1;unsigned deleted=0,native_calls=0;
 std::map<uint32_t,uint32_t> live;
 
 void map_guest(uint32_t at,uint32_t size) {
@@ -103,7 +103,7 @@ uint32_t call(Cpu*,uint32_t fn,std::initializer_list<uint32_t> args) {
         else if(a[0]==story_switches::kSwitchProfile||a[0]==story_switches::kDoorProfile){assert(a[1]==story_switches::parameters(a[0]==story_switches::kSwitchProfile?story_switches::Kind::Switch:story_switches::Kind::Door)&&a[3]==0&&a[6]==0xFFFFFFFFu&&ld16(a[4]+4)==255);}
         else if(a[0]==mod_actor::kProfile){assert(a[1]==1&&a[3]==3);}
         else {assert(a[0]==0xB6&&a[1]==0x2CF3&&a[3]==2);}
-        st32(address+4,id);st16(address+0xE,uint16_t(a[0]));if(a[0]==0x175){st8(address+0x2DD,uint8_t(a[6]));st8(address+0x905,uint8_t(a[6]));}if(a[0]==0x13B){st32(address+0xB0,1);st8(address+0x2DD,0xFF);st8(address+0xA20,1);st8(address+0xA21,1);}if(a[0]==story_props::kProfile){st32(address+0xB0,a[1]);st8(address+0x2DD,0xFF);st32(address+0x790,0);}
+        st32(address+4,id);st16(address+0xE,uint16_t(a[0]));if(a[0]==0x175){st8(address+0x2DD,uint8_t(a[6]));st8(address+0x905,uint8_t(a[6]));st32(address+0xB0,a[1]);st32(address+0x10,0x101C4CD0);st32(address+0xB4,0x100209C4);st8(address+0x326,uint8_t(a[3]));}if(a[0]==0x13B){st32(address+0xB0,1);st8(address+0x2DD,0xFF);st8(address+0xA20,1);st8(address+0xA21,1);}if(a[0]==story_props::kProfile){st32(address+0xB0,a[1]);st8(address+0x2DD,0xFF);st32(address+0x790,0);}
         if(a[0]==story_switches::kSwitchProfile||a[0]==story_switches::kDoorProfile){st32(address+0xB0,a[1]);st8(address+0x2DD,0xFF);}
         st32(address+0x2C,current_layer);live[id]=address;return id;
     }
@@ -119,7 +119,7 @@ uint32_t call(Cpu*,uint32_t fn,std::initializer_list<uint32_t> args) {
     if(fn==0x025A11EC){++seated_bases;assert(a[1]==1);if(ym1_message_status==0x13)st32(a[0]+0x7C8,0xFFFFFFFFu);return 0;}
     if(fn==0x022F9C2C){st8(a[0]+0xA1D,uint8_t(a[1]));return 1;}
     if(fn==0x021E1E78){assert(a[0]==15&&a[1]==30);return 20;}
-    if(fn==0x025D54C4){st32(a[1],pending?0:live[a[0]]);return live[a[0]]!=0;}
+    if(fn==0x025D54C4){if(throw_search){st32(a[1],0xBAD);throw std::runtime_error("query failure");}st32(a[1],pending?0:live[a[0]]);return live[a[0]]!=0;}
     assert(false);return 0;
 }
 }
@@ -151,9 +151,9 @@ int32_t take(const std::string&,const std::string&,uint32_t){return 0;}
 int32_t count(const std::string&,const std::string&){return item_count;}
 }
 namespace story_treasure {bool installed(){return false;}}
-namespace story_scenes {void trigger(const std::string&,const std::string&,const std::string&,unsigned){++talk_finishes;}}
+namespace story_scenes {bool scenes_active=false;void trigger(const std::string&,const std::string&,const std::string&,unsigned){++talk_finishes;}bool active(){return scenes_active;}}
 int main(int argc,char** argv){
-    map_guest(0x101F0000,0x10000);map_guest(0x10460000,0x20000);map_guest(kArena,0x100000);map_guest(0x60000000,0x10000);
+    map_guest(0x101F0000,0x10000);map_guest(0x10460000,0x30000);map_guest(kArena,0x100000);map_guest(0x60000000,0x20000);
     st32(0x101F84DC,kSave);st32(0x1046F0B0+0x5B34,kArena+0x7000);for(unsigned room=0;room<4;++room)st32(0x1047E8F0+room*0x22C,1000+room);std::memcpy(mem::ptr(0x1046F0B0+0x5134),"sea",4);
     std::memset(mem::ptr(kSave),0xA5,0x800);std::array<uint8_t,0x800> before;std::memcpy(before.data(),mem::ptr(kSave),before.size());
     std::memset(mem::ptr(kScratch+story_actors::kEnemyProfilesScratchOffset),0xA5,story_actors::kScratchBytes-story_actors::kEnemyProfilesScratchOffset);
@@ -317,6 +317,8 @@ int main(int argc,char** argv){
         assert(!story_actors::editor_update("test",crowded,ids,why)&&why.find("16")!=std::string::npos);
         story_actors::native_room_loaded(&c,0);assert(created==before);
         assert(story_actors::editor_update("test",{chest},{},why));
+        // a running mod scene (native or fallback) keeps its actors until it ends
+        story_scenes::scenes_active=true;story_actors::service(&c);assert(deleted==0);story_scenes::scenes_active=false;
         story_actors::service(&c);assert(deleted==1);
         live.erase(ld32(kScratch+128));story_actors::service(&c);assert(ld32(kScratch+128)==0xFFFFFFFFu&&!story_actors::actor_address(&c,"test","notice"));
         assert(story_actors::editor_update("test",{sign,chest},{},why));
@@ -343,7 +345,12 @@ int main(int argc,char** argv){
     assert(!story_actors::register_model("test","othermodel","unique_post",1,why));
     st32(0x101F3EE0+0xB6*4,kArena+0x6000);
     auto rejected_resident=resident;rejected_resident.resident=10;assert(!story_actors::load("bad",{rejected_resident},why));
-    assert(story_actors::load("test",{chest,resident,sign,own},why));story_actors::set_scratch_memory(kScratch);story_actors::install(replaced,replace);
+    assert(story_actors::load("test",{chest,resident,sign,own},why));const unsigned declaration_calls=native_calls;story_actors::ResidentEventDeclaration declaration;
+    assert(story_actors::resident_event_declaration("test","guide",declaration)&&declaration.token&&declaration.stage=="sea"&&declaration.room==1&&declaration.subtype==1&&native_calls==declaration_calls);
+    const auto declared_token=declaration.token;const auto declared_hash=declaration.fingerprint;declaration.stage="mutated";declaration.fingerprint.fill(0);assert(story_actors::resident_event_declaration("test","guide",declaration)&&declaration.stage=="sea"&&declaration.fingerprint==declared_hash);
+    assert(!story_actors::resident_event_declaration("foreign","guide",declaration)&&!declaration.token);assert(!story_actors::resident_event_declaration("test","chest",declaration)&&!declaration.token&&native_calls==declaration_calls);
+    assert(story_actors::resident_event_declaration("test","guide",declaration)&&declaration.token==declared_token);
+    story_actors::set_scratch_memory(kScratch);story_actors::install(replaced,replace);
     Cpu cpu{};story_actors::native_room_loaded(&cpu,0);assert(created==1&&current_layer==kArena+0x6800&&ld32(kActor+0x2C)==kArena+0x60C0);
     pending=true;story_actors::native_room_loaded(&cpu,0);assert(created==1);pending=false;
     Cpu check{};check.r[3]=kActor;hooks.at(0x024B4AB4)(&check);assert(check.r[3]==0);
@@ -366,6 +373,62 @@ int main(int argc,char** argv){
     item_count=1;std::memcpy(mem::ptr(0x1046F0B0+0x5134),"other",6);story_actors::native_room_loaded(&cpu,1);assert(created==1);
     std::memcpy(mem::ptr(0x1046F0B0+0x5134),"sea",4);story_actors::native_room_loaded(&cpu,1);assert(created==2);
     story_actors::native_room_loaded(&cpu,1);assert(created==2);
+    // Pure native-event resident identity uses committed declaration token,
+    // current guest PID and bounded native class/stage/room identity only.
+    // Restored lease config is independently validated by the native arena.
+    map_guest(0x101C0000,0x10000);st16(0x101C4CD0+8,0x175);st32(0x101C4CD0+0x10,0x920);
+    st32(0x1047E6C4,77);story_actors::native_room_loaded(&cpu,1);
+    const uint32_t event_npc=kActor+0x1000,event_pid=ld32(event_npc+4),event_scene=kArena+0x6200;
+    const uint32_t root_layer=0x1048A9BC;
+    st32(event_scene+4,1001);st32(kArena+0x62C0+0x18,event_scene);st32(event_scene+0x2C,root_layer);
+    st32(root_layer+0xC,0);st32(root_layer+0x18,0);
+    story_actors::ResidentEventIdentity event_identity;unsigned pure_calls=native_calls;
+    assert(story_actors::resident_event_identity("test","guide",event_npc,event_pid,event_identity));assert(native_calls==pure_calls&&event_identity.token&&event_identity.stage_pid==77&&event_identity.room_pid==1001&&event_identity.actor==event_npc);
+    st32(event_npc+0x2C,root_layer);assert(!story_actors::resident_event_identity("test","guide",event_npc,event_pid,event_identity));st32(event_npc+0x2C,kArena+0x62C0);
+    st32(root_layer+0x18,event_scene);assert(!story_actors::resident_event_identity("test","guide",event_npc,event_pid,event_identity));st32(root_layer+0x18,0);
+    st32(root_layer+0xC,1);assert(!story_actors::resident_event_identity("test","guide",event_npc,event_pid,event_identity));st32(root_layer+0xC,0);
+    st32(event_scene+0x2C,0);assert(!story_actors::resident_event_identity("test","guide",event_npc,event_pid,event_identity));st32(event_scene+0x2C,root_layer);
+    st32(event_scene+4,1002);assert(!story_actors::resident_event_identity("test","guide",event_npc,event_pid,event_identity));st32(event_scene+4,1001);
+    assert(story_actors::resident_event_identity("test","guide",event_npc,event_pid,event_identity));
+    story_actors::ResidentEventIdentity quiet_identity;
+    assert(story_actors::resident_event_identity_quiet("test","guide",event_npc,event_pid,quiet_identity)&&quiet_identity.token==event_identity.token);
+    assert(!story_actors::resident_event_identity_quiet("foreign","guide",event_npc,event_pid,quiet_identity)&&!quiet_identity.token);
+    // The placed-process producer is pure host/scratch data: it never runs
+    // native Search and distinguishes unplaced from a malformed PID row.
+    story_actors::ResidentEventProcess placed;
+    const Cpu placed_cpu=cpu;const unsigned placed_calls=native_calls;
+    assert(story_actors::resident_event_process("test","guide",placed));
+    assert(placed.presence==story_actors::ResidentEventProcess::Presence::Present&&placed.pid==event_pid);
+    assert(placed.pid_slot==kScratch+132&&placed.identity_row==kScratch+story_actors::kIdentityScratchOffset+40&&placed.scratch_window==kScratch+0x300);
+    assert(placed.declaration.token==event_identity.token&&placed.declaration.fingerprint==event_identity.fingerprint);
+    assert(!std::memcmp(placed.identity_bytes.data(),mem::ptr(placed.identity_row),40));
+    assert(!std::memcmp(placed.scratch_bytes.data(),mem::ptr(kScratch+0x300),0x200));
+    st32(placed.pid_slot,event_pid+1);assert(!story_actors::resident_event_process("test","guide",placed)&&placed.pid==0);st32(kScratch+132,event_pid);
+    const uint32_t placed_row=kScratch+story_actors::kIdentityScratchOffset+40;
+    const auto placed_magic=ld32(placed_row);st32(placed_row,0);assert(!story_actors::resident_event_process("test","guide",placed)&&placed.pid==0);st32(placed_row,placed_magic);
+    assert(!story_actors::resident_event_process("foreign","guide",placed));
+    assert(!story_actors::resident_event_process("test","chest",placed));
+    // state_loaded obtains the unplaced host sentinel from the actual saved
+    // PID slot. A historical authentic REV1 row remains valid after deletion.
+    st32(kScratch+132,0xFFFFFFFFu);story_actors::state_loaded();
+    assert(story_actors::resident_event_process("test","guide",placed)&&placed.presence==story_actors::ResidentEventProcess::Presence::Absent&&placed.pid==0xFFFFFFFFu);
+    st32(kScratch+132,event_pid);story_actors::state_loaded();
+    assert(story_actors::resident_event_process("test","guide",placed)&&placed.presence==story_actors::ResidentEventProcess::Presence::Present);
+    assert(native_calls==placed_calls&&!std::memcmp(&cpu,&placed_cpu,sizeof cpu));
+    const Cpu query_before=cpu;st32(kScratch+0x40,0xAABBCCDD);assert(story_actors::query_resident_event_address(&cpu,"test","guide")==event_npc&&ld32(kScratch+0x40)==0xAABBCCDD&&!std::memcmp(&cpu,&query_before,sizeof cpu));
+    pending=true;assert(story_actors::query_resident_event_address(&cpu,"test","guide")==0&&ld32(kScratch+0x40)==0xAABBCCDD&&!std::memcmp(&cpu,&query_before,sizeof cpu));pending=false;
+    throw_search=true;bool query_threw=false;try{story_actors::query_resident_event_address(&cpu,"test","guide");}catch(const std::runtime_error&){query_threw=true;}throw_search=false;assert(query_threw&&ld32(kScratch+0x40)==0xAABBCCDD&&!std::memcmp(&cpu,&query_before,sizeof cpu));
+    pure_calls=native_calls;
+    const auto event_token=event_identity.token;const uint32_t event_row=kScratch+story_actors::kIdentityScratchOffset+40;
+    std::array<uint8_t,40> event_record{};std::memcpy(event_record.data(),mem::ptr(event_row),40);
+    for(unsigned fault=0;fault<16;++fault){const uint32_t old_pid=ld32(event_npc+4),old_stage=ld32(0x1047E6C4);const uint8_t old_room=ld8(event_npc+0x326);
+        if(fault==0)st32(event_npc+4,999);if(fault==1)st16(event_npc+0xE,0x123);if(fault==2)st32(event_npc+0xB0,0);if(fault==3)st8(event_npc+0x2DD,9);if(fault==4)st8(event_npc+0x905,9);if(fault==5)st8(event_npc+0x326,2);if(fault==6)st32(0x1047E6C4,78);if(fault==7)st32(kScratch+132,event_pid+1);if(fault==8)st32(event_npc+0x10,0);if(fault==9)st8(event_scene+0x5C,1);if(fault==10)st32(event_npc+0x2C,0xFFFFFFFC);if(fault==11)st32(event_npc+0xB4,0);if(fault==12)st32(0x101C4CD0+0x10,0xA24);if(fault==13)st32(event_row+4,event_token+1);if(fault==14)st8(event_row+8,uint8_t(ld8(event_row+8)^1));if(fault==15)std::memset(mem::ptr(event_row),0,40);
+        assert(!story_actors::resident_event_identity("test","guide",event_npc,event_pid,event_identity)&&!event_identity.token&&native_calls==pure_calls);
+        if(fault==15){Cpu legacy{};legacy.r[3]=event_npc;assert(story_actors::people_next_message(&legacy)&&legacy.r[3]==0x10);}
+        st32(event_npc+4,old_pid);st16(event_npc+0xE,0x175);st32(event_npc+0xB0,0x00FF0000);st8(event_npc+0x2DD,1);st8(event_npc+0x905,1);st8(event_npc+0x326,old_room);st32(0x1047E6C4,old_stage);st8(event_scene+0x5C,0);st32(event_npc+0x2C,kArena+0x62C0);st32(kScratch+132,event_pid);st32(event_npc+0x10,0x101C4CD0);st32(event_npc+0xB4,0x100209C4);st32(0x101C4CD0+0x10,0x920);std::memcpy(mem::ptr(event_row),event_record.data(),40);
+    }
+    assert(!story_actors::resident_event_identity("foreign","guide",event_npc,event_pid,event_identity));assert(!story_actors::resident_event_identity("test","guide",0xFFFFFFFC,event_pid,event_identity));
+    story_actors::state_loaded();const unsigned after_rebind=native_calls;assert(story_actors::resident_event_identity("test","guide",event_npc,event_pid,event_identity)&&event_identity.token==event_token&&native_calls==after_rebind);
     // Resident execution strips private retail callbacks and preserves CPU return.
     const uint8_t event_before=ld8(kSave+0x644),memory_before=ld8(kSave+0x798);
     Cpu execute{};execute.r[3]=kActor+0x1000;hooks.at(0x022C36D0)(&execute);

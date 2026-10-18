@@ -609,22 +609,112 @@ scenes to continue. Already fired room/area triggers do not immediately fire aga
 after an interruption; loading a state also suppresses those triggers in the loaded
 room until the room changes.
 
-The implementation uses the **fallback route**: native compulsory-event admission,
+The **fallback route** uses native compulsory-event admission,
 the game's camera and message functions, and native event teardown. It does not
-replace the stage's event-list resource. Runtime event-list generation would need
-additional ownership and resource-lifetime verification. Native admission provides
-the event control lock; camera trimming supplies the letterbox framing.
+replace the stage's event-list resource. Native admission provides the event
+control lock; camera trimming supplies the letterbox framing.
 
-Completion, timeout, interruption and state load release the scene's ownership.
-Non-natural exits reset only the scene-owned message through the native message
-core, so restoring control does not require another A press.
+The public preview can select an eligible authored `turn_camera` alternative.
+Private game probes exercise two placed Uo2 residents turning in parallel,
+followed by native WAIT,
+with the native FIXEDFRM and UNITRANS camera actions. The WAIT prototype has
+completed native teardown and a mod-on/off save comparison with differences
+limited to time and checksum. A parallel TURN/camera probe has also completed
+native teardown, returned gameplay control and passed the same time/checksum-only
+mod-on/off save comparison. Early cancellation of the TURN/camera scene has now restored both residents
+and the camera, returned gameplay control, and passed a mod-on/off comparison
+with identical native save data and HD sections. These private probes retain and
+verify the residents’ original model state and resource graphs before scene entry.
+A private frontend probe also plays an authored native alternative through the
+scene FIFO, completes naturally, and rearms the same scene for later requests.
+Two successive frontend requests have completed and rearmed with native save
+data and HD sections identical to the mod-off control. A private 30 fps probe
+has also loaded one active full-state snapshot three times, including after
+earlier runs finished. Each restored run completed and rearmed, and the final
+native save data and HD sections matched the mod-off control byte for byte.
+A further private run restored scene A while scene B was active, then restored
+the same A snapshot again after the first restored run finished. Both loads
+resumed and completed naturally. Another run loaded a snapshot taken before
+either scene started while A was active, cleared the old frontend, and then
+ran B successfully. Both tests finished with native save data and all HD
+sections identical to their mod-off controls.
+Package scenes with an eligible native alternative use that route when the
+runtime's native readiness checks pass. Other scenes retain the fallback route.
+
+The [harbor meeting example](../examples/guest-mods/sdk-v3-native-scene/README.md)
+contains two residents, a talk action and both authored routes. Its public talk
+trigger has completed native entry, camera return, natural completion and rearm
+with strict native/HD save parity against the mod-off control. The unsupported
+actor-targeted FACE variant selected the whole fallback and passed the same
+comparison. These runs used an explicit native30 user override; the selector does
+not change the user's FPS setting. Other frame-rate modes are not established by
+these runs.
+
+The parser accepts an experimental `native` alternative alongside a scene's
+required `steps`. Its only supported `type` is `"turn_camera"`:
+
+| Native field | Meaning and limits |
+| --- | --- |
+| `actors` | Exactly two distinct same-mod placed resident IDs, both declared with `parameters.resident: "uo2"`, in the same stage and room. Each entry contains `id` and a fixed XYZ `turn_to`. |
+| `wait_ticks` | Native WAIT duration, 1–9000 logic ticks. Both residents turn toward their respective positions in parallel, then each performs WAIT. |
+| `camera` | `hold_ticks`, `move_ticks`, `start_eye`, `start_target`, `end_eye`, `end_target`, and `fovy`. The native camera holds the starting view with FIXEDFRM, then moves to the ending view with UNITRANS. |
+| `camera.hold_ticks`, `camera.move_ticks` | Each is 1–9000; their sum must not exceed 9000. |
+| `camera.fovy` | Finite field of view, 5–120 degrees. Eye and target must remain at least one world unit apart throughout the linear move. |
+| `timekeeper_ticks` | 1–9000; at least `wait_ticks` and at least `hold_ticks + move_ticks`. |
+| `watchdog_ticks` | At most 18000 and strictly greater than `timekeeper_ticks`; a completion deadline, not an extra native action. |
+
+These timers use 30 Hz game logic ticks, independently of rendering speed and
+the fallback timeline. All native XYZ components must be finite and within
+−350000 to 350000. Unknown fields are errors. Stage and room come from the two
+actor placements; a room or area trigger must match them.
+
+The native alternative is an explicitly authored parallel timeline, rather than
+a conversion of every fallback step. Native selection currently covers only
+the following fallback shapes:
+
+| Fallback scene content | Native alternative eligibility |
+| --- | --- |
+| `face` | Either of the two named Uo2 residents, facing a fixed `position`; no `target_actor`. |
+| `camera` | Fixed XYZ eye and target; an optional pan also uses fixed ending positions. No actor target. |
+| `wait` | Supported with a valid duration. |
+| `end` | Exactly one final END; its `then` actions remain the scene's completion actions. |
+| Dialogue, movement, animation, camera paths/follow, choices, sound, music, fades, particles | The whole scene uses the fallback route. |
+| Branches or intermediate `then` actions | The whole scene uses the fallback route. The eligible fallback graph must be linear. |
+
+Fallback `steps` remain mandatory, including for a scene with `native`. If the
+alternative is unsupported or readiness fails before native staging starts,
+the whole fallback scene can run. Once native staging or publication has been
+attempted, a failure stops the attempt; it does not replay the fallback scene.
+Transient pre-entry control, manager, camera or census contention retains the
+request at the FIFO front for up to 60 scene-tick attempts, then selects the
+whole fallback. Waiting acquires no native scene ownership; skip, abort and
+state load can discard the pending request without completion rewards.
+Restoration across multiple scene slots has passed private native30 game
+checks. Public natural completion and whole fallback have also passed the
+talk-trigger checks described above. A public Plus-skip run also returned control
+and rearmed, wrote and loaded a full state, then started the same native scene
+again and completed naturally. Its final native save payload and all four HD
+sections matched the mod-off control byte for byte; see the
+[Part 5 evidence report](sdk-v3-phase2c-part5-report.md).
+An initial, never-published snapshot can be imported without a host checkpoint
+when its arena is still empty and the current Stage proves the same native
+resource graph. This requires a current Stage receipt; imports before the first
+genuine SetInfo remain refused. Restoring an active native scene requires its
+original model and run lineage in the same host process.
+
+The fallback route releases its scene ownership on completion, timeout,
+interruption or state load. Its non-natural exits reset only the scene-owned
+message through the native message core, so restoring control does not require
+another A press. Native alternatives release ownership only after authenticated
+terminal or cancellation cleanup; a failed proof or partial cleanup retains
+ownership through quarantine rather than freeing live native consumers.
 The lease snapshot is stored in state-captured runtime memory so loading an older
 mid-scene state can restore control even after the host player has finished that
 scene. The port checks ownership before resetting anything: an unrelated native
 event must retain its camera and control. Press **Plus/Start** during a scene to skip it; the skip press is consumed so it
 does not also open the pause menu. A/B remain available for the message window.
-The scene route remains experimental; native event-list generation is not part
-of this preview.
+The scene route remains experimental; native execution is limited to the
+eligible `turn_camera` alternative described above.
 
 Every scene step may have an `id`; `next` names a strictly later step. Without
 `next`, playback continues to the following step. Choice options name their own
