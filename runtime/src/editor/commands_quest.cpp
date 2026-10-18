@@ -167,6 +167,8 @@ Value Session::dispatch_quest(const std::string& command, const Value& p, std::s
         quest_change("Remove quest " + quest, [&](Value& m, Value&, std::string& w) {
             for (const auto& it : m.get("items").array)
                 if (it.get("use").get("quest").string() == quest) return w = "item " + it.get("id").string() + " sets a step of " + quest + " when used: change the item first", false;
+            for (const auto& l : m.get("letters").array)
+                if (letter_waits_for(l, quest, 0)) return w = "letter " + l.get("id").string() + " waits for " + quest + " (its \"when\"): change the letter first", false;
             for (const auto& sc : m.get("scenes").array) {
                 bool names = sc.get("trigger").get("quest").string() == quest;
                 for (const auto& st : sc.get("steps").array) {
@@ -495,6 +497,17 @@ Value Session::dispatch_quest(const std::string& command, const Value& p, std::s
                 return r;
             }
         return why = "\"" + id + "\" is not a flag of " + pkg->mod + " the editor sets (list_flags)", r;
+    }
+    if (command == "advance_days") {
+        if (!test_only()) return r;
+        const Value& n = p.get("days");
+        if (n.type != Value::Number || !std::isfinite(n.number) || n.number < 1 || n.number > 255 || std::floor(n.number) != n.number)
+            return why = "\"days\" is a whole number, 1..255", r;
+        if (!host_->advance_days(int(n.number), why)) return r;
+        r["days"] = int(n.number);
+        r["requested"] = true;
+        ok = true;
+        return r;
     }
     if (command == "search") {
         Package* pkg = package(p, why);

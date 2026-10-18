@@ -75,7 +75,7 @@ std::string joined(const std::vector<std::string>& list, size_t most = 8) {
 }
 
 // the fields each kind takes (the parsers' own: story_manifest.h)
-const std::set<std::string> kLetterFields = {"sender", "text", "encloses"};
+const std::set<std::string> kLetterFields = {"sender", "text", "encloses", "when", "after_days"};
 const std::set<std::string> kChartFields = {"name", "description", "place", "item"};
 const std::set<std::string> kItemFields = {"name", "description", "icon", "stack", "use", "held_model", "held_frames"};
 

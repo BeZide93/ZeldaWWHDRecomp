@@ -39,6 +39,7 @@
 #include "../mods/story_items.h"
 #include "../mods/story_mail.h"
 #include "../mods/story_mail_book.h"
+#include "../mods/story_manifest.h"
 #include "../mods/story_notebook_list.h"
 #include "../mods/story_scenes.h"
 #include "../mods/story_store.h"
@@ -1005,6 +1006,17 @@ public:
             for (const auto& v : values) n += v.value < 0 ? book.erase(v.record.kind, v.record.key) : book.set(v.record.kind, v.record.key, uint8_t(v.value));
             set_status("Set " + std::to_string(n) + " flag(s) of " + mod + " (test mode)");
             records_tick(true);
+        });
+        return true;
+    }
+    bool advance_days(int days, std::string& why) override {
+        if (!g_test) return why = "test mode only", false;
+        post([days](Cpu*) {
+            const uint32_t save = ld32(GD(0x101F84DC));  // the save base (d_com_inf_game)
+            if (!save) return set_status("No save file loaded: the calendar stays");
+            const uint16_t today = uint16_t(ld16(save + story_notebook::kSaveDay) + days);
+            st16(save + story_notebook::kSaveDay, today);
+            set_status("The game's calendar is at day " + std::to_string(today) + " (test mode)");
         });
         return true;
     }

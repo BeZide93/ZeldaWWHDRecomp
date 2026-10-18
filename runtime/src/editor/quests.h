@@ -74,8 +74,10 @@ std::string quest_progress_text(const Value& quest, int saved);
 // their steps, scenes, items and flags. [{"kind", "id", "quest"?, "step"?, "field", "text"}]
 Value search_package(const std::string& mod, const Value& manifest, const std::string& text);
 
+// A letter on its own whose "when" names the quest (step 0) or that step of it.
+bool letter_waits_for(const Value& letter, const std::string& quest, unsigned step);
 // Gives a quest's steps new numbers (old -> new) and changes every reference to them: the actors'
-// conditions and actions and the items' use actions. Refused when a scene names one of the changed
+// conditions and actions, the items' use actions and the letters' "when". Refused when a scene names one of the changed
 // steps (the scene is changed first) or the numbers would collide.
 bool renumber_steps(Value& manifest, const std::string& quest, const std::vector<std::pair<unsigned, unsigned>>& map, std::string& why);
 // Removes a step and every reference to it (actor conditions on it, actions that set it); refused while a

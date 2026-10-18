@@ -1265,9 +1265,25 @@ void declared_tick() {
         loose = g_letters;
     }
     for (const LooseLetter& l : loose) {
-        if (story_mail::send(l.mod, l.letter.id, l.letter.sender, l.letter.text) != story_mail::kResultRead) continue;
-        story_mail::Book b = book();
         const uint16_t key = story_mail::letter_key(l.mod, l.letter.id);
+        // a timed letter waits for its condition and its days, until it is sent
+        if (l.letter.timed() && story_mail::state(l.mod, l.letter.id) == story_mail::kResultNone) {
+            story_mail::Book b = book();
+            const bool holds = letter_condition(l.letter.when, [&](const std::string& q) { return int32_t(saved_step(b, quest_key(l.mod, q))); },
+                                                [&](const std::string& f) { return story_actors::flag(b, l.mod, f); });
+            const uint16_t today = ld16(save_base() + kSaveDay);
+            const bool counting = b.has(story_mail::kRecordLetterDayLow, key);
+            const bool due = holds && letter_due(b, key, l.letter.after_days, today);
+            if (holds && !counting && b.has(story_mail::kRecordLetterDayLow, key))
+                LOG("[notebook] %s: letter \"%s\" waits %u day(s) from day %u", l.mod.c_str(), l.letter.id.c_str(), l.letter.after_days, today);
+            if (!due) continue;
+            LOG("[notebook] %s: letter \"%s\" is due: it waits in the postbox", l.mod.c_str(), l.letter.id.c_str());
+        }
+        const int32_t sent = story_mail::send(l.mod, l.letter.id, l.letter.sender, l.letter.text);
+        if (sent < story_mail::kResultWaiting) continue;
+        story_mail::Book b = book();
+        if (l.letter.after_days && b.has(story_mail::kRecordLetterDayLow, key)) erase_letter_day(b, key);
+        if (sent != story_mail::kResultRead) continue;
         if (b.get(story_mail::kRecordLetterEnclosures, key)) continue;
         if (!b.set(story_mail::kRecordLetterEnclosures, key, 1)) continue;  // no room: next time
         for (const std::string& chart : l.letter.charts)

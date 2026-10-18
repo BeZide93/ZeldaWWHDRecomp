@@ -151,6 +151,12 @@ public:
     virtual bool write_records(const std::string& mod, const std::vector<RecordValue>& values, std::string& why) {
         return why = "the game is not running", false;
     }
+    // Test mode only: moves the game's calendar (the save file's day counter, as the clock passing midnight
+    // does) on by `days`, for letters that wait some days ("after_days").
+    virtual bool advance_days(int days, std::string& why) {
+        (void)days;
+        return why = "the game is not running", false;
+    }
     // Start a quest at a step (test mode, turned on first as Play does): erases `erase` (the mod's own
     // records), writes `values`, gives or takes the mod's items to the `items` counts, warps to `to` when it
     // names a place, then plays from Link when `play`.

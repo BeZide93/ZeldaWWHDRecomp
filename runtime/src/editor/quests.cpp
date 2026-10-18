@@ -717,6 +717,15 @@ Value search_package(const std::string& mod, const Value& m, const std::string& 
     return out;
 }
 
+bool letter_waits_for(const Value& letter, const std::string& quest, unsigned step) {
+    const Value& w = letter.get("when");
+    auto names = [&](const Value& c) { return c.get("quest").string() == quest && (!step || (whole(c.get("step")) && unsigned(c.get("step").number) == step)); };
+    if (names(w)) return true;
+    for (const auto& c : w.get("quests").array)
+        if (names(c)) return true;
+    return false;
+}
+
 bool renumber_steps(Value& m, const std::string& quest, const std::vector<std::pair<unsigned, unsigned>>& map, std::string& why) {
     Value* q = by_id(m["quests"], quest);
     if (!q) return why = "no quest \"" + quest + "\"", false;
@@ -760,6 +769,15 @@ bool renumber_steps(Value& m, const std::string& quest, const std::vector<std::p
         for (auto& it : m["items"].array)
             if (it.get("use").get("action").string() == "quest_step" && it.get("use").get("quest").string() == quest && whole(it.get("use").get("step")))
                 it["use"]["step"] = int(mapped(unsigned(it.get("use").get("step").number)));
+    // a letter's "when" (story_manifest.h): its quest steps
+    if (m.get("letters").type == Value::Array)
+        for (auto& l : m["letters"].array) {
+            if (l.get("when").get("quest").string() == quest && whole(l.get("when").get("step")))
+                l["when"]["step"] = int(mapped(unsigned(l.get("when").get("step").number)));
+            if (l.get("when").get("quests").type == Value::Array)
+                for (auto& qs : l["when"]["quests"].array)
+                    if (qs.get("quest").string() == quest && whole(qs.get("step"))) qs["step"] = int(mapped(unsigned(qs.get("step").number)));
+        }
     // the steps in their numbers' order
     std::stable_sort((*q)["steps"].array.begin(), (*q)["steps"].array.end(), [](const Value& a, const Value& b) { return step_n(a) < step_n(b); });
     return true;
@@ -780,6 +798,9 @@ bool remove_step(Value& m, const std::string& quest, unsigned step, std::vector<
     for (const auto& it : m.get("items").array)
         if (it.get("use").get("quest").string() == quest && it.get("use").get("step").number == step)
             return why = "item " + it.get("id").string() + " sets step " + std::to_string(step) + " when used: change the item first", false;
+    for (const auto& l : m.get("letters").array)
+        if (letter_waits_for(l, quest, step))
+            return why = "letter " + l.get("id").string() + " waits for step " + std::to_string(step) + " (its \"when\"): change the letter first", false;
     auto& steps = (*q)["steps"].array;
     const auto it = std::find_if(steps.begin(), steps.end(), [&](const Value& s) { return step_n(s) == step; });
     if (it == steps.end()) return why = "quest " + quest + " has no step " + std::to_string(step), false;
