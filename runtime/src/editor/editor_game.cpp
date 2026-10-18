@@ -790,6 +790,7 @@ public:
         set_status("New mod " + id + " created and turned on");
         return true;
     }
+    std::string game_archive(const std::string& archive) override { return editor::game_archive(config::game_dir, archive); }
     bool reload_room(std::string& why) override {
         (void)why;
         when_free([](Cpu*) {

@@ -25,6 +25,7 @@
 #include "imgui.h"
 #include "imgui_internal.h"
 #include "text_entry.h"
+#include "game_objects_palette.h"
 #include "layer_escape.h"
 #include "overlay.h"
 // ImGuizmo needs Dear ImGui declared first
@@ -61,6 +62,9 @@ struct ShellState {
     bool drag_cancelled = false;         // Esc during the drag: the handle rests until the mouse is let go
     std::vector<std::string> types, type_labels, type_groups;
     std::vector<bool> type_model;
+    overlay::game_objects::Palette game_objects;  // the Game objects palette (Add > Game objects)
+    Value game_object_list;                       // list_game_objects, asked when the palette opens
+    int game_object_asked = -100000;
     bool layout_loaded = false;
     bool reset_layout = false;  // Reset layout: the default docked layout again
     float status_h = 52;        // the status bar's height at the last frame (the dockspace ends above it)
@@ -801,6 +805,22 @@ void add_menu() {
             if (m.get("models").array.empty()) ImGui::TextDisabled("no models yet: import one (Outliner > Models)");
             ImGui::EndMenu();
         }
+    }
+    // the game's own objects, by reference (the player's game files have them)
+    ImGui::SeparatorText("Game objects");
+    if (ImGui::BeginMenu("Game objects")) {
+        if (ImGui::GetFrameCount() - S.game_object_asked > 300) {  // asked when opened (the game installs its kinds after start-up)
+            S.game_object_asked = ImGui::GetFrameCount();
+            editor_ui::command("list_game_objects", Value(), [](const Value& r) {
+                if (r.get("ok").boolean) S.game_object_list = r.get("result");
+            });
+        }
+        const std::string type = overlay::game_objects::draw(S.game_objects, S.game_object_list);
+        if (!type.empty()) {
+            S.placing = type, S.place_model.clear(), S.place_resident.clear(), S.place_variant.clear();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndMenu();
     }
     ImGui::Separator();
     ImGui::TextDisabled("then click into the picture (Shift: more than one)");

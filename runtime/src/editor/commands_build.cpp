@@ -629,11 +629,14 @@ Value Session::dispatch_build(const std::string& command, const Value& p, std::s
         Value info;
         snap(place.position, info);
         const std::string type = text(p, "type");
-        const std::string id = p.get("id").type == Value::String ? p.get("id").text : free_id(pkg->manifest.get("actors"), type == "model" || type == "model_enemy" || type == "model_carry" ? text(p, "model").empty() ? type : text(p, "model") : type);
+        const bool game = story_game_objects::is_reference(type);
+        const std::string id = p.get("id").type == Value::String ? p.get("id").text : free_id(pkg->manifest.get("actors"), game ? story_game_objects::reference(type) : type == "model" || type == "model_enemy" || type == "model_carry" ? text(p, "model").empty() ? type : text(p, "model") : type);
         Value a;
-        if (!new_actor(type, id, place, text(p, "model"), pkg->manifest, p.get("options"), a, why)) return r;
+        if (game && !id_ok(id)) return why = "an actor id is 1 to 32 lower-case letters, digits, '-', '_' or '.'", r;
+        if (game ? !new_game_object(type, id, place, p.get("options"), a, why) : !new_actor(type, id, place, text(p, "model"), pkg->manifest, p.get("options"), a, why)) return r;
         if (by_id(pkg->manifest.get("actors"), id)) return why = "the mod has an actor \"" + id + "\" already", r;
         ok = change(*pkg, "Add " + id, [&](Value& m, std::string&) {
+            if (game) require_game_objects(m, type);  // "requires": {"game_objects": N}
             if (m.get("actors").type != Value::Array) m["actors"] = array();
             m["actors"].array.push_back(a);
             return true;

@@ -42,7 +42,7 @@ const std::vector<CommandInfo> kCommands = {
      false, true},
     {"list_actors", "The open mod's placed actors (game actors and mod models).", {{"mod", "string", "another mod than the open one"}}},
     {"get_actor", "One placed actor as the manifest declares it.", {{"id", "string", "the actor's id", true}, {"mod", "string", ""}}},
-    {"set_actor", "Sets one property of a placed actor (null removes it): position, rotation, scale, model, lines, collision, behaviour, buoyancy, drift, anchor, grapple_points, distant, shoreline, chart_marker, arrival, attention, animation, flag, stage, room, when, then, talks, look_at, path, parameters, defeated_flag, broken_flag, drops, native_drops, combat, carry, switch_flag, switch, texture. when: {quest, step, quests: [{quest, step}] (all must hold), item, time, flag, not_flag (a flag id)}. talks: up to 8 [{when?, lines, then?}], the first that matches is said (one without when last; not with lines or then). A chest's parameters: {item: rupee_green (1), rupee_blue (5), rupee_yellow (10), rupee_red (20), rupee_purple (50), rupee_orange (100, the default), rupee_silver (200), heart_piece, heart_container, or item:<id> (one of the mod's items; with hold_up Link holds its model up)}.",
+    {"set_actor", "Sets one property of a placed actor (null removes it): position, rotation, scale, model, lines, collision, behaviour, buoyancy, drift, anchor, grapple_points, distant, shoreline, chart_marker, arrival, attention, animation, flag, stage, room, when, then, talks, look_at, path, parameters, defeated_flag, broken_flag, drops, native_drops, combat, carry, switch_flag, switch, texture, variant (a game object's). when: {quest, step, quests: [{quest, step}] (all must hold), item, time, flag, not_flag (a flag id)}. talks: up to 8 [{when?, lines, then?}], the first that matches is said (one without when last; not with lines or then). A chest's parameters: {item: rupee_green (1), rupee_blue (5), rupee_yellow (10), rupee_red (20), rupee_purple (50), rupee_orange (100, the default), rupee_silver (200), heart_piece, heart_container, or item:<id> (one of the mod's items; with hold_up Link holds its model up)}.",
      {{"id", "string", "the actor's id", true}, {"property", "string", "the manifest field", true}, {"value", "any", "the new value; null removes the field", true}, {"mod", "string", ""}},
      true},
     {"move_actor", "Moves a placed actor.", {{"id", "string", "", true}, {"position", "point", "{x, y, z} in world units", true}, {"mod", "string", ""}}, true},
@@ -82,12 +82,14 @@ const std::vector<CommandInfo> kCommands = {
     // building new content
     {"list_actor_types", "The kinds of actor add_actor places, and which appear without a restart; a kind's variants are the choices of its option (who a resident is).", {}},
     {"add_actor", "Places a new actor of the open mod at Link, at the fly camera or at a position (snapped to the ground).",
-     {{"type", "string", "a list_actor_types type: sign, resident, chest, pot, barrel, crate, switch, door, chuchu, bokoblin, moblin, keese, miniblin, model, model_enemy, model_carry", true},
+     {{"type", "string", "a list_actor_types type: sign, resident, chest, pot, barrel, crate, switch, door, chuchu, bokoblin, moblin, keese, miniblin, model, model_enemy, model_carry; or a game object \"game:<id>\" (list_game_objects)", true},
       {"id", "string", "the new id (default: from the type)"}, {"at", "string", "link (default), camera or position"},
       {"position", "point", "with at = position"}, {"stage", "string", "with at = position (default: Link's)"}, {"room", "integer", "with at = position (default: Link's or the sea square's)"},
       {"angle", "number", "heading in degrees (default: facing like Link or the camera)"}, {"snap", "boolean", "onto the ground below (default true)"},
-      {"model", "string", "the model for model types"}, {"options", "object", "resident (who: a list_actor_types variant such as uo2, um1, sa2 or the seated ym1), variant (an enemy's: chuchu green, red, blue or yellow; bokoblin stick, shield or machete), switch (a door's switch id), lines"}, {"mod", "string", ""}},
+      {"model", "string", "the model for model types"}, {"options", "object", "resident (who: a list_actor_types variant such as uo2, um1, sa2 or the seated ym1), variant (an enemy's: chuchu green, red, blue or yellow; bokoblin stick, shield or machete), switch (a door's switch id), lines; variant also for a game object (list_game_objects)"}, {"mod", "string", ""}},
      true},
+    {"list_game_objects", "The game's own objects a mod places by reference (add_actor type \"game:<id>\"), by category, with their variants, turn and scale limits and whether the player's game files have them.",
+     {{"category", "string", "only this category"}, {"query", "string", "only those whose id, label or description contains this"}}},
     {"remove_actor", "Removes a placed actor (an undo step).", {{"id", "string", "", true}, {"confirm", "boolean", "must be true", true}, {"mod", "string", ""}}, true, true},
     {"duplicate_actor", "Copies a placed actor next to it under a new id, with flags of its own.",
      {{"id", "string", "", true}, {"new_id", "string", "default: from the id"}, {"offset", "point", "default {x: 100, y: 0, z: 0}"}, {"mod", "string", ""}}, true},
@@ -1189,7 +1191,7 @@ Value Session::dispatch(const std::string& command, const Value& p, std::string&
         static const std::set<std::string> allowed = {"actor", "kind", "model", "animation", "look_at", "path", "collision", "attention",
                                                       "stage", "room", "position", "rotation", "scale", "params", "parameters", "flag",
                                                       "when", "lines", "then", "talks", "defeated_flag", "broken_flag", "drops",
-                                                      "native_drops", "combat", "carry", "switch_flag", "switch", "texture", "behaviour", "buoyancy", "drift", "anchor", "grapple_points", "distant", "shoreline", "chart_marker", "arrival"};
+                                                      "native_drops", "combat", "carry", "switch_flag", "switch", "texture", "variant", "behaviour", "buoyancy", "drift", "anchor", "grapple_points", "distant", "shoreline", "chart_marker", "arrival"};
         const std::string property = text(p, "property");
         if (!allowed.contains(property)) return why = "\"" + property + "\" is not an actor property the editor sets", r;
         return actor_edit("Set " + property + " of " + text(p, "id"), [&](Value& a, std::string&) {
@@ -1465,6 +1467,8 @@ Value Session::dispatch(const std::string& command, const Value& p, std::string&
     r = dispatch_build(command, p, why, ok, handled);
     if (handled) return r;
     r = dispatch_scene(command, p, why, ok, handled);
+    if (handled) return r;
+    r = dispatch_game_objects(command, p, why, ok, handled);
     if (handled) return r;
     r = dispatch_quest(command, p, why, ok, handled);
     if (handled) return r;

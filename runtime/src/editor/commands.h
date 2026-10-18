@@ -168,6 +168,8 @@ public:
     // Whether actors of a list_actor_types type appear while the game runs (`fallback`: the type's own
     // default, when the game doesn't know). Native props, switches, doors and enemies do in --editor.
     virtual bool live_kind(const std::string& type, bool fallback) { return fallback; }
+    // where the player's game has an object archive (stage_files.h game_archive); "" none, "?" unknown (no game)
+    virtual std::string game_archive(const std::string& archive) { return "?"; }
 
     // ---- the story tables (optional) ----
     // The mod's quests, quest talks, letters, charts or items changed (`manifest` the whole new manifest,
@@ -323,6 +325,8 @@ private:
     Value dispatch_quest(const std::string& command, const Value& params, std::string& why, bool& ok, bool& handled);
     bool change_layout(Package& p, const std::string& label, const Value& layout, Value& result);
     Value clipboard_;  // copy / paste: {"kind": "actors" | "quest_steps" | "scenes" | "scene_steps", "items": [...]}
+    // the game objects palette (commands_game_objects.cpp)
+    Value dispatch_game_objects(const std::string& command, const Value& params, std::string& why, bool& ok, bool& handled);
     // scenes: steps, camera keys, timeline, preview (commands_scene.cpp)
     Value dispatch_scene(const std::string& command, const Value& params, std::string& why, bool& ok, bool& handled);
     // letters on their own, charts and items (commands_story.cpp)
@@ -361,6 +365,12 @@ std::vector<TypeVariant> type_variants(const std::string& type);
 // needs get ids of its own. `model` for model types; `options` may name "resident", "switch", "lines".
 bool new_actor(const std::string& type, const std::string& id, const Place& place, const std::string& model, const Value& manifest,
                const Value& options, Value& out, std::string& why);
+// Game objects (commands_game_objects.cpp): one catalogue entry as list_game_objects shows it; a new
+// placed game object of `type` ("game:palm", options.variant) at `place`; the manifest's
+// "requires": {"game_objects": N} raised to what `type` needs.
+Value game_object_info(const story_game_objects::Entry& e);
+bool new_game_object(const std::string& type, const std::string& id, const Place& place, const Value& options, Value& out, std::string& why);
+void require_game_objects(Value& manifest, const std::string& type);
 // A free actor id from `base` ("sign", "sign-2", ...).
 std::string free_id(const Value& list, const std::string& base);
 // A copy of the actor `a` under id `id`, with its own flags (each flag id gets the new id).

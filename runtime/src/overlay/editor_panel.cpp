@@ -23,6 +23,7 @@
 #include "../mods/story_enemy_variants.h"
 #include "editor_shell.h"
 #include "extensions.h"
+#include "game_objects_palette.h"
 #include "hostui.h"
 #include "imgui.h"
 #include "imgui_internal.h"
@@ -553,6 +554,18 @@ void actor_inspector(const Value& m) {
     if (edit_point("##position", a->get("position"), 0, v)) {
         p["position"] = point(v);
         command("move_actor", p);
+    }
+    if (actor.rfind("game:", 0) == 0) {  // a game object: its variant, turn and scale within the catalogue's limits
+        static Value catalogue;
+        static overlay::game_objects::Picker picker;
+        if (catalogue.type == Value::Null)
+            editor::try_with_session([&](editor::Session& s) { catalogue = s.run("list_game_objects", Value(), false).get("result"); });
+        const Value* info = nullptr;
+        for (const auto& o : catalogue.get("objects").array)
+            if (o.get("type").string() == actor) info = &o;
+        if (!info) return muted("\"" + actor + "\" is not in this port's game objects catalogue.");
+        for (auto& [name, params] : overlay::game_objects::inspector(picker, *a, *info)) command(name, params);
+        return;
     }
     ImGui::TextUnformatted("Rotation (degrees)");
     mark("rotation");

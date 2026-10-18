@@ -195,6 +195,16 @@ std::vector<Spawn> find_spawns(const std::vector<uint8_t>& d) {
     return {};
 }
 
+std::string game_archive(const std::string& game_dir, const std::string& archive) {
+    if (archive.empty() || archive.find_first_of("/\\.:") != std::string::npos) return {};
+    for (const auto& p : packs(game_dir))
+        for (const auto& m : p.members)
+            if (m.name == archive + ".szs") return "Pack/" + p.file.filename().string();
+    std::error_code ec;
+    if (fs::is_regular_file(fs::path(game_dir) / "content" / "Common" / "Object" / (archive + ".szs"), ec)) return "Object";
+    return {};
+}
+
 std::vector<std::pair<std::string, std::vector<int>>> game_stage_rooms(const std::string& game_dir) {
     std::vector<std::string> names = stage_dir_names(game_dir);
     for (const auto& p : packs(game_dir))
