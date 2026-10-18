@@ -10,6 +10,9 @@ what is on `devel` and not released yet (also in the
 - **World editor: the docked panels react to the mouse again.** Since the dockable panels arrived, the full-screen
   picture could sit in front of the docked panels, so they got no hover or clicks on any renderer; the picture now
   always stays behind them.
+- **Android: handhelds with a fan keep 60 fps longer** (#247). Their heat guard now pauses 60 fps at a thermal headroom of
+  1.00 instead of 0.90 (Relaxed: 1.10); the AYANEO EVO and KONKR Pocket FIT Elite ran 60 fps well around 0.90-0.96.
+  Phones keep their limit.
 - **World editor: native scene previews after loading a save state.** A scene's native version now also plays in the
   preview after a save state was loaded or after a preview fell back to the scene's steps, and the editor says why
   when it can't restore the world after a preview.

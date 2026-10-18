@@ -58,7 +58,7 @@ int64_t thread_cpu_ns() {
 }
 
 // The heat guard's limits for this device and setting; the rule in use goes to the log at start-up
-// and again when the setting changes, e.g. "[perf] heat guard: handheld (fan) 0.90/0.80".
+// and again when the setting changes, e.g. "[perf] heat guard: handheld (fan) 1.00/0.90".
 heat_guard::Limits heat_guard_limits() {
     const auto device = heat_guard::to_device(heat_guard::device.load());
     const auto setting = heat_guard::to_setting(heat_guard::choice.load());
@@ -104,7 +104,7 @@ void adapt_60(int64_t now) {
     // frames double the drawing work, so 60 fps pauses near the thermal limit (headroom forecast 10 s
     // ahead) and resumes once the device is well below it: the game keeps its 30 fps instead of
     // dropping below them. The limits (phones 0.72 / 0.60, a Galaxy S25 Ultra already halved its clocks
-    // at 0.76; fan-cooled handhelds 0.90 / 0.80) and the player's Heat guard setting: heat_guard.h.
+    // at 0.76; fan-cooled handhelds 1.00 / 0.90) and the player's Heat guard setting: heat_guard.h.
     static bool hot = false;
     {
         const heat_guard::Limits limits = heat_guard_limits();
