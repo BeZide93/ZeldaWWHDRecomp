@@ -60,6 +60,12 @@ std::atomic<float> g_bloom{[] {
 // research name WWHD_SKY_HAZE (the amount removed, 0..1)
 std::atomic<float> g_haze{sky::haze_from_env(std::getenv("WWHD_HORIZON_HAZE"), std::getenv("WWHD_SKY_HAZE"))};
 }  // namespace
+std::atomic<bool> g_cloud_shadows{[] {
+    const char* e = std::getenv("WWHD_CLOUD_SHADOWS");
+    return e && *e && std::strcmp(e, "0") != 0;
+}()};
+bool cloud_shadows() { return g_cloud_shadows.load(std::memory_order_relaxed); }
+void set_cloud_shadows(bool on) { g_cloud_shadows.store(on, std::memory_order_relaxed); }
 float horizon_haze() { return g_haze.load(std::memory_order_relaxed); }
 void set_horizon_haze(float v) {
     if (!std::isfinite(v)) v = 1.0f;

@@ -22,6 +22,7 @@ struct Snapshot {
     float eye[3], center[3];
     float viewRot[12];  // the view's camera matrix (3x4, rows), View +0x1E4
     float fovy, bank;
+    float viewNear, viewFar, viewAspect;  // View +0xCC/+0xD0/+0xD8 (projection, for depth reconstruction)
     float sunPos[3], sunAlpha, moonPos[3];
     int32_t sunVisible;
     float cloudColor[3], centerColor[3], fogColor[3];  // palette (0..1)
@@ -32,6 +33,10 @@ struct Snapshot {
     int32_t count;  // mVrkumoCount (weather)
     int32_t n;      // visible clouds in c[]
     Cloud c[100];
+    // cloud shadows: each game cloud anchored in the world (it drifts with the wind but no longer follows
+    // the camera), camera-relative at this frame: x, z, radius, alpha
+    int32_t nShadow;
+    float shadow[100][4];
 };
 constexpr uint32_t kRing = 32;
 const Snapshot* snapshot(uint32_t seq);

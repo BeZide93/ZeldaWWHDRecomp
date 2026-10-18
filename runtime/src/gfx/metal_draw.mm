@@ -1607,6 +1607,9 @@ void report_skips() {
 bool clouds_draw(id<MTLRenderCommandEncoder> enc, const MTLViewport& vp, Surface* const* colors, const uint32_t* colorSlices,
                  Surface* depth, uint32_t depthSlice, bool (*ensure)(Surface* const*, const uint32_t*, Surface*, uint32_t));
 bool clouds_sky_surface(Surface* s);
+bool clouds_shadow_target(Surface* s);
+bool clouds_shadow_depth(Surface* s);
+void clouds_shadows_now();
 void clouds_after_sky_composite(id<MTLRenderCommandEncoder> enc, const uint32_t* regs, const MTLViewport& vp, bool hasDepth,
                                 id<MTLDepthStencilState> depthState, bool (*ensure)(Surface* const*, const uint32_t*, Surface*, uint32_t));
 void clouds_mark_start(Surface* const* colors, const uint32_t* colorSlices, Surface* depth, uint32_t depthSlice,
@@ -1705,16 +1708,30 @@ void draw(const uint32_t* regs, uint32_t prim, uint32_t count, uint32_t indexTyp
     if (!build_indices(prim, count, indexType, indexAddr, indices, ptype)) { g_skip[SK_PRIM]++; return; }
     rprof::mark(rprof::kIndices);
     bool samplesSky = false;  // cloud prototype: this draw reads the half-res sky buffer (its composite)
+    bool readsPicture = false;  // ... or the picture the cloud shadows go into
     for (Shader* sh : {vs, ps}) {
         uint32_t texBase = sh == vs ? REGADDR::SQ_TEX_RESOURCE_WORD0_N_VS : REGADDR::SQ_TEX_RESOURCE_WORD0_N_PS;
         for (int u = 0; u < sh->dec->textureUnitListCount; u++) {
             uint8_t unit = sh->dec->textureUnitList[u];
             Surface* s = sampled_texture(&regs[texBase + unit * 7], sh->dec->textureUsesDepthCompare[unit]);
             if (s && clouds_sky_surface(s)) samplesSky = true;
+            if (s && clouds_shadow_target(s)) readsPicture = true;
         }
     }
 
     rprof::mark(rprof::kTextures);
+    {
+        static const uint64_t traceFrame = getenv("WWHD_CLOUDS_TRACE_FRAME") ? strtoull(getenv("WWHD_CLOUDS_TRACE_FRAME"), nullptr, 10) : 0;
+        if (traceFrame && R.frame == traceFrame)
+            LOG("[ctrace] draw %llu: target %08X %ux%u depth %08X/%p fmt %lu ps %08X sky %d picture %d prim %X count %u dctl %08X",
+                (unsigned long long)R.drawCount, colors[0] ? colors[0]->addr : 0, colors[0] ? colors[0]->width : 0,
+                colors[0] ? colors[0]->height : 0, depth ? depth->addr : 0, (void*)depth, depth ? (unsigned long)depth->tex.pixelFormat : 0,
+                regs[mmSQ_PGM_START_PS] << 8, samplesSky, readsPicture, prim, count, regs[REGADDR::DB_DEPTH_CONTROL]);
+    }
+    // ... or a depth-only draw into its depth buffer is next (the game rewrites the depth there before its
+    // post effects, which would lose the islands and characters)
+    if (!readsPicture && !colors[0] && depth && clouds_shadow_depth(depth)) readsPicture = true;
+    if (readsPicture) clouds_shadows_now();
     if (!ensure_pass(colors, colorSlices, depth, depthSlice)) { g_skip[SK_PASS]++; return; }
     rprof::mark(rprof::kPass);
     if (cloud_proto::g_active_seq) clouds_mark_start(colors, colorSlices, depth, depthSlice, ensure_pass);

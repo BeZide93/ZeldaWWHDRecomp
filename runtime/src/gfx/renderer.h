@@ -167,6 +167,9 @@ void set_bloom_strength(float strength);
 // Horizon haze, the pale band low in the sky: 1 original, 0 removed (a deeper blue sky). Shared by both
 // renderers; below 1 the sky-cloud hook (cloud_proto.cpp) is active.
 float horizon_haze();
+// Cloud shadows on the sea, islands and characters (off: the original game). WWHD_CLOUD_SHADOWS=1.
+bool cloud_shadows();
+void set_cloud_shadows(bool on);
 void set_horizon_haze(float haze);
 // The bloom extract shader's remapped[2].z is cThresholdParam.z (intensity).
 void scale_bloom_uniforms(void* remapped, size_t size);

@@ -57,6 +57,7 @@ static bool take(Snapshot& s) {
     vec3(camera + 0xE8, s.center);
     s.bank = (float)(int16_t)ld16(camera + 0x100) * (3.14159265f / 32768.0f);
     s.fovy = ldf(view + 0xD4);
+    s.viewNear = ldf(view + 0xCC), s.viewFar = ldf(view + 0xD0), s.viewAspect = ldf(view + 0xD8);
     for (int i = 0; i < 12; i++) s.viewRot[i] = ldf(view + 0x1E4 + 4 * i);
     s.sunVisible = 0;
     if (uint32_t sun = ld32(kEnvLight + 0xA34)) {
@@ -78,6 +79,33 @@ static bool take(Snapshot& s) {
                                        0x1004FD00, 0x1004FD04, 0x1004FC98, 0x1004FCC8};
     for (int i = 0; i < 8; i++) s.k[i] = ldf(GD(kConst[i]));
     s.n = 0;
+    s.nShadow = 0;
+    // shadow anchors (host state, game memory untouched): a cloud slot keeps its world position and moves
+    // only by its own drift (the change of its camera-relative position from frame to frame); a jump
+    // (the game respawns or wraps the slot) re-anchors it around the camera
+    static bool valid[100];
+    static float anchor[100][2], lastRel[100][2];
+    for (int i = 0; i < 100; i++) {
+        uint32_t e = packet + 0xA4 + 0x2C * i;
+        float rx = ldf(e + 4), rz = ldf(e + 12), a = ldf(e + 0x20);
+        float dx = rx - lastRel[i][0], dz = rz - lastRel[i][1];
+        if (!valid[i] || dx * dx + dz * dz > 400.0f * 400.0f || !(a > 0.0001f)) {
+            anchor[i][0] = s.eye[0] + rx, anchor[i][1] = s.eye[2] + rz;
+        } else {
+            anchor[i][0] += dx, anchor[i][1] += dz;
+        }
+        lastRel[i][0] = rx, lastRel[i][1] = rz;
+        valid[i] = a > 0.0001f;
+        if (!valid[i]) continue;
+        // a world size per cloud slot (the game's card sizes are angular, meant for the far sky): 1200..2500
+        // units, a little larger in stronger weather
+        static const float sizeK = getenv("WWHD_CLOUD_SHADOW_SIZE") ? (float)atof(getenv("WWHD_CLOUD_SHADOW_SIZE")) : 0.55f;
+        uint32_t h = (uint32_t)i * 2654435761u;
+        h ^= h >> 13;
+        float r = (1200.0f + 1300.0f * (float)(h & 0xFFFF) / 65535.0f) * (1.0f + 0.4f * s.strength) * sizeK;
+        float* o = s.shadow[s.nShadow++];
+        o[0] = anchor[i][0] - s.eye[0], o[1] = anchor[i][1] - s.eye[2], o[2] = r, o[3] = a;
+    }
     for (int i = 0; i < 100; i++) {
         uint32_t e = packet + 0xA4 + 0x2C * i;
         float alpha = ldf(e + 0x20);
@@ -98,7 +126,7 @@ using namespace cloud_proto;
 
 extern "C" void hook_02575B6C(Cpu* c) {
     // inactive (bit-identical to the original) unless toon clouds or a reduced horizon haze are on
-    if (!mode() && render::horizon_haze() >= 1.0f) { f_02575B6C_orig(c); return; }
+    if (!mode() && render::horizon_haze() >= 1.0f && !render::cloud_shadows()) { f_02575B6C_orig(c); return; }
     uint32_t seq = g_seq.load(std::memory_order_relaxed) + 1;
     if (!take(g_ring[seq % kRing])) { f_02575B6C_orig(c); return; }
     g_seq.store(seq, std::memory_order_release);

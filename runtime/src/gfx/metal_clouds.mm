@@ -365,6 +365,156 @@ fragment FOut grade_fs(FVOut in [[stage_in]], constant Globals& g [[buffer(0)]])
     o.c = float4(sky * a, a);
     return o;
 }
+
+vertex FVOut sh_vs(uint vid [[vertex_id]]) {
+    float2 p = float2((vid << 1) & 2, vid & 2) * 2.0 - 1.0;
+    FVOut o; o.pos = float4(p, 0.5, 1); o.ndc = p; return o;
+}
+// ---- cloud shadows. The shadow map is the cloud layer seen from above (camera-centred square, R8
+// coverage); the apply pass reconstructs each opaque pixel's world position from depth, follows the
+// light up to the cloud layer and darkens by the coverage there, in two toon steps.
+struct ShadowGlobals {
+    float4 view0, view1, view2;  // world (camera-relative) -> camera, columns
+    float4 proj;                 // f/aspect, f, near, far
+    float4 sun;                  // light direction, daylight
+    float4 layer;                // x: cloud layer height above the sea, y: map half size, z: eye height, w: count
+    float4 look;                 // x: darkness, y: softness, z: debug grid, w: depth mode (0 GL, 1 DX)
+};
+fragment FOut shmap_fs(FVOut in [[stage_in]], constant ShadowGlobals& g [[buffer(0)]],
+                       constant float4* clouds [[buffer(1)]], texture3d<float> noise [[texture(0)]], sampler s [[sampler(0)]]) {
+    float2 xz = float2(in.ndc.x, -in.ndc.y) * g.layer.y;  // camera-relative position in the cloud layer
+    float cov = 0.0;
+    for (int k = 0; k < int(g.layer.w); k++) {
+        float4 c = clouds[k];
+        float2 d = (xz - c.xy) / c.z;
+        float r2 = dot(d, d);
+        if (r2 >= 1.0) continue;
+        cov = max(cov, saturate(c.w * 1.3) * (1.0 - r2));
+    }
+    // billowy, eroded edges (the same noise as the clouds)
+    float n = noise.sample(s, float3(xz * 0.00035, 0.37)).g * 0.6 + noise.sample(s, float3(xz * 0.0011, 0.71)).r * 0.4;
+    cov = saturate((cov - 0.18 - (0.55 - n) * 0.45) * 3.0);
+    FOut o;
+    o.c = float4(cov, cov, cov, 1);
+    return o;
+}
+static float sh_hash(float2 p) { return fract(sin(dot(p, float2(127.1, 311.7))) * 43758.5453); }
+static float sh_vnoise(float2 p) {
+    float2 i = floor(p), f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(sh_hash(i), sh_hash(i + float2(1, 0)), f.x), mix(sh_hash(i + float2(0, 1)), sh_hash(i + float2(1, 1)), f.x), f.y);
+}
+fragment FOut shadow_apply_fs(FVOut in [[stage_in]], constant ShadowGlobals& g [[buffer(0)]],
+                              depth2d<float> depth [[texture(0)]], texture2d<float> map [[texture(1)]],
+                              sampler s [[sampler(0)]], device float* probe [[buffer(2)]],
+                              constant float4* clouds [[buffer(1)]]) {
+    uint2 px = uint2(in.pos.xy);
+    const int dbg = int(g.look.z + 0.5);
+    if (dbg == 9) {  // debug 9: depth at probe pixels (fractions of the screen) to the CPU
+        const float2 at[6] = {float2(0.5, 0.75), float2(0.5, 0.6), float2(0.7, 0.45), float2(0.3, 0.45), float2(0.5, 0.92), float2(0.85, 0.35)};
+        float2 sz = float2(depth.get_width(), depth.get_height());
+        for (int i = 0; i < 6; i++)
+            if (all(px == uint2(at[i] * sz))) probe[i] = depth.read(px);
+    }
+    if (dbg == 5) {  // debug 5: the shadow map itself, over the whole screen
+        float c = map.sample(s, in.ndc * float2(0.5, -0.5) + 0.5).r;
+        FOut o0;
+        o0.c = float4(1.0 - 0.8 * c, 1.0 - 0.8 * c, 1.0, 1);
+        return o0;
+    }
+    float d = depth.read(min(px, uint2(depth.get_width() - 1, depth.get_height() - 1)));
+    if (dbg == 10) {  // debug 10: magenta wherever there is geometry
+        FOut o0;
+        o0.c = d < 1.0 ? float4(1, 0, 1, 1) : float4(1, 1, 1, 1);
+        return o0;
+    }
+    if (dbg == 8) {  // debug 8: raw depth: red = exactly 1 (cleared), else grey by log distance to 1
+        FOut o0;
+        if (d >= 1.0) { o0.c = float4(1, 0.3, 0.3, 1); return o0; }
+        float v = saturate(-log2(max(1.0 - d, 1e-7)) / 24.0);
+        o0.c = float4(v, v, v, 1);
+        return o0;
+    }
+    if (d >= 0.99999) discard_fragment();  // sky
+    if (dbg == 7) {  // debug 7: which depth formula puts the sea at height 0
+        float n0 = g.proj.z, f0 = g.proj.w;
+        float zgl = 2.0 * f0 * n0 / ((f0 + n0) - (2.0 * d - 1.0) * (f0 - n0));
+        float zdx = n0 * f0 / (f0 - d * (f0 - n0));
+        float3 dc0 = float3(in.ndc.x / g.proj.x, in.ndc.y / g.proj.y, -1.0);
+        float3x3 view0 = float3x3(g.view0.xyz, g.view1.xyz, g.view2.xyz);
+        float3 rdw = transpose(view0) * dc0;  // world direction per unit of view depth
+        float zsea = rdw.y < -1e-4 ? g.layer.z / -rdw.y : 1e9;  // view depth where the ray meets y = 0
+        float rg = zgl / zsea, rx = zdx / zsea;
+        FOut o0;
+        o0.c = float4(abs(rg - 1.0) < 0.05 ? 1.0 : 0.5, abs(rx - 1.0) < 0.05 ? 1.0 : 0.5, 0.5, 1);
+        return o0;
+    }
+    float n = g.proj.z, f = g.proj.w;
+    float zlin = g.look.w > 0.5 ? n * f / (f - d * (f - n)) : 2.0 * f * n / ((f + n) - (2.0 * d - 1.0) * (f - n));
+    float3 dc = float3(in.ndc.x / g.proj.x, in.ndc.y / g.proj.y, -1.0);
+    float3 pc = dc * zlin;
+    float3x3 view = float3x3(g.view0.xyz, g.view1.xyz, g.view2.xyz);
+    float3 p = transpose(view) * pc;  // camera-relative world position
+    float wy = p.y + g.layer.z;       // world height
+    FOut o;
+    if (dbg == 3) {  // debug 3: world height bands every 50 units, sea level (|y| < 25) tinted red
+        float band = fract(wy / 100.0) < 0.5 ? 0.85 : 1.0;
+        o.c = abs(wy) < 25.0 ? float4(1.0, 0.4, 0.4, 1) : float4(band, band, band, 1);
+        return o;
+    }
+    if (dbg == 2) {  // debug 2: the reconstructed distance, as grey (dark = near)
+        float v = saturate(zlin / 20000.0);
+        o.c = float4(v, v, v, 1);
+        return o;
+    }
+    if (dbg == 1) {  // debug: a world-space grid (must stay put on the sea when the camera moves)
+        float2 w = p.xz + float2(0.0);
+        float2 gl = abs(fract(w / 1000.0) - 0.5);
+        float line = min(gl.x, gl.y) < 0.02 ? 0.5 : 1.0;
+        o.c = float4(line, line, line, 1);
+        return o;
+    }
+    float3 L = g.sun.xyz;
+    float t = (g.layer.x - wy) / max(L.y, 0.05);
+    float2 q = p.xz + L.xz * t;
+    float2 uv = q / (2.0 * g.layer.y) + 0.5;
+    if (dbg == 11) {  // debug 11: probes of uv, coverage, height
+        const float2 at[6] = {float2(0.5, 0.75), float2(0.5, 0.6), float2(0.7, 0.45), float2(0.3, 0.45), float2(0.5, 0.92), float2(0.85, 0.35)};
+        float2 sz = float2(depth.get_width(), depth.get_height());
+        for (int i = 0; i < 6; i++)
+            if (all(px == uint2(at[i] * sz))) { probe[i * 4] = uv.x; probe[i * 4 + 1] = uv.y; probe[i * 4 + 2] = t; probe[i * 4 + 3] = wy; }
+    }
+    // cloud coverage at q, as the Vulkan pass computes it (the game's clouds anchored in the world, eroded
+    // by value noise)
+    float cov = 0.0;
+    for (int k = 0; k < int(g.layer.w); k++) {
+        float4 c = clouds[k];
+        float2 dd = (q - c.xy) / c.z;
+        float r2 = dot(dd, dd);
+        if (r2 < 1.0) cov = max(cov, saturate(c.w * 1.3) * (1.0 - r2));
+    }
+    float nz = sh_vnoise(q * 0.0011) * 0.6 + sh_vnoise(q * 0.0034) * 0.4;
+    cov = saturate((cov - 0.18 - (0.55 - nz) * 0.45) * 3.0);
+    if (dbg == 6) {  // debug 6: the map coordinates (bands every 1/20)
+        float2 b = step(0.5, fract(uv * 200.0));
+        o.c = float4(0.6 + 0.4 * b.x, 0.6 + 0.4 * b.y, 1.0, 1);
+        return o;
+    }
+    if (dbg == 4) {  // debug 4: the raw coverage, strongly
+        float kk = 1.0 - 0.8 * cov;
+        o.c = float4(1.0, kk, kk, 1);
+        return o;
+    }
+    // two toon steps: a light outer shade and the full shadow
+    float sw = g.look.y;
+    float shade = 0.45 * smoothstep(0.25 - sw, 0.25 + sw, cov) + 0.55 * smoothstep(0.6 - sw, 0.6 + sw, cov);
+    // fade with distance so the far sea stays even
+    float fade = 1.0 - smoothstep(12000.0, 22000.0, length(p.xz));
+    float k = 1.0 - g.look.x * shade * fade * g.sun.w;
+    if (k > 0.999) discard_fragment();
+    o.c = float4(k, k, k, 1);
+    return o;
+}
 )";
 
 // a tiling 64^3 RG8 noise: R value-noise fbm, G inverted Worley (cells of 8) - generated here
@@ -722,42 +872,206 @@ void flush();
 // the half-res sky buffer into the full-resolution target, with that draw's depth test
 static Surface* g_sky = nullptr;
 static uint64_t g_skyFrame = ~0ull;
-static uint32_t g_pendingSeq = 0;
-bool clouds_sky_surface(Surface* s) { return g_pendingSeq && s == g_sky && g_skyFrame == R.frame; }
+static uint32_t g_pendingSeq = 0, g_skySeq = 0;
+static uint64_t g_composites = 0;
+static Surface *g_shadowColor = nullptr, *g_shadowDepth = nullptr;
+static uint32_t g_shadowSlice = 0, g_shadowSeq = 0;
+static uint64_t g_shadowFrame = ~0ull;
+bool clouds_sky_surface(Surface* s) { return (g_pendingSeq || g_skySeq) && s == g_sky && g_skyFrame == R.frame; }
+static void draw_cloud_shadows(const cloud_proto::Snapshot& s, Surface* color, uint32_t colorSlice, Surface* depth);
 void clouds_after_sky_composite(id<MTLRenderCommandEncoder> enc, const uint32_t* regs, const MTLViewport& vp, bool hasDepth,
                                 id<MTLDepthStencilState> depthState, bool (*ensure)(Surface* const*, const uint32_t*, Surface*, uint32_t)) {
-    uint32_t seq = g_pendingSeq;
+    const uint32_t cloudsSeq = g_pendingSeq, seq = g_skySeq;
+    g_composites++;
     g_pendingSeq = 0;
+    g_skySeq = 0;
     static const bool trace = env_on("WWHD_CLOUDS_LOG");
     if (trace && R.frame % 150 == 0)
         LOG("[clouds] sky composite: target %lux%lu depth %d DB_DEPTH_CONTROL %08X vp z %.3f..%.3f",
             R.passColor[0] ? (unsigned long)R.passColor[0]->tex.width : 0, R.passColor[0] ? (unsigned long)R.passColor[0]->tex.height : 0,
             hasDepth, regs[0xA200], vp.znear, vp.zfar);
-    // our own test, not the composite's EQUAL: the impostors' interpolated depth is not bit-exact 1.0,
-    // so test "in front of or at the far plane" with a depth just short of it (sky only, no write)
-    static id<MTLDepthStencilState> skyOnly = [] {
-        MTLDepthStencilDescriptor* dd = [MTLDepthStencilDescriptor new];
-        dd.depthCompareFunction = MTLCompareFunctionLessEqual;
-        dd.depthWriteEnabled = NO;
-        return [R.device newDepthStencilStateWithDescriptor:dd];
-    }();
     (void)depthState;
-    static const bool timing = env_on("WWHD_CLOUDS_TIME");
-    if (timing && ensure) {  // the full-resolution cloud pass in a command buffer of its own
-        Surface* colors[8];
-        uint32_t slices[8];
-        for (int i = 0; i < 8; i++) colors[i] = R.passColor[i], slices[i] = R.passColorSlice[i];
-        Surface* depth = R.passDepth;
-        uint32_t depthSlice = R.passDepthSlice;
-        flush();
-        if (!ensure(colors, slices, depth, depthSlice)) return;
-        enc = R.enc;
+    if (cloudsSeq) {
+        // our own test, not the composite's EQUAL: the impostors' interpolated depth is not bit-exact 1.0,
+        // so test "in front of or at the far plane" with a depth just short of it (sky only, no write)
+        static id<MTLDepthStencilState> skyOnly = [] {
+            MTLDepthStencilDescriptor* dd = [MTLDepthStencilDescriptor new];
+            dd.depthCompareFunction = MTLCompareFunctionLessEqual;
+            dd.depthWriteEnabled = NO;
+            return [R.device newDepthStencilStateWithDescriptor:dd];
+        }();
+        static const bool timing = env_on("WWHD_CLOUDS_TIME");
+        if (timing && ensure) {  // the full-resolution cloud pass in a command buffer of its own
+            Surface* colors[8];
+            uint32_t slices[8];
+            for (int i = 0; i < 8; i++) colors[i] = R.passColor[i], slices[i] = R.passColorSlice[i];
+            Surface* depth = R.passDepth;
+            uint32_t depthSlice = R.passDepthSlice;
+            flush();
+            if (!ensure(colors, slices, depth, depthSlice)) return;
+            enc = R.enc;
+        }
+        encode(enc, *cloud_proto::snapshot(cloudsSeq), vp, kClouds, hasDepth ? skyOnly : nil);
+        if (timing && ensure) {
+            const int mode = cloud_proto::mode();
+            timed_commit(mode == cloud_proto::kVolume ? "volume, full res" : mode == cloud_proto::kCombo ? "combo, full res" : "sdf, full res");
+        }
     }
-    encode(enc, *cloud_proto::snapshot(seq), vp, kClouds, hasDepth ? skyOnly : nil);
-    if (timing && ensure) {
-        const int mode = cloud_proto::mode();
-        timed_commit(mode == cloud_proto::kVolume ? "volume, full res" : mode == cloud_proto::kCombo ? "combo, full res" : "sdf, full res");
+    if (seq && render::cloud_shadows() && R.passColor[0] && R.passDepth) {
+        // the sea is drawn by now, but islands, Link, the boat and the pier come later: the shadows go in
+        // when the picture is first read (the post effects), or at the end of the frame
+        g_shadowColor = R.passColor[0], g_shadowDepth = R.passDepth, g_shadowSlice = R.passColorSlice[0];
+        g_shadowSeq = seq, g_shadowFrame = R.frame;
     }
+}
+// draw(), while it looks up its textures (before its pass opens): the picture is about to be read
+bool clouds_shadow_target(Surface* s) { return g_shadowSeq && s == g_shadowColor && g_shadowFrame == R.frame; }
+bool clouds_shadow_depth(Surface* s) { return g_shadowSeq && g_shadowDepth && s->addr == g_shadowDepth->addr && g_shadowFrame == R.frame; }
+void clouds_shadows_now() {
+    if (!g_shadowSeq) return;
+    static const uint64_t traceFrame = getenv("WWHD_CLOUDS_TRACE_FRAME") ? strtoull(getenv("WWHD_CLOUDS_TRACE_FRAME"), nullptr, 10) : 0;
+    if (traceFrame && R.frame == traceFrame) LOG("[ctrace] shadows applied before draw %llu", (unsigned long long)R.drawCount);
+    uint32_t seq = g_shadowSeq;
+    g_shadowSeq = 0;
+    static const bool timing = env_on("WWHD_CLOUD_SHADOWS_TIME");
+    // several surfaces can share an address (other shapes or formats): take the ones the last pass on
+    // this picture used, where the later scene draws (islands, Link, the boat) went
+    Surface* color = g_shadowColor;
+    Surface* depth = g_shadowDepth;
+    if (R.passColor[0] && R.passColor[0]->addr == color->addr) color = R.passColor[0];
+    if (R.passDepth && R.passDepth->addr == depth->addr) depth = R.passDepth;
+    static const bool logOn = env_on("WWHD_CLOUDS_LOG");
+    if (logOn && R.frame % 150 == 0)
+        LOG("[shadows] applied: colour %s, depth %s", color == g_shadowColor ? "as composited" : "of the last pass",
+            depth == g_shadowDepth ? "as composited" : "of the last pass");
+    if (timing) flush(); else end_encoder();  // the depth buffer is read: no pass may hold it
+    draw_cloud_shadows(*cloud_proto::snapshot(seq), color, g_shadowSlice, depth);
+    if (timing) timed_commit("cloud shadows");
+}
+
+// ---- cloud shadows (Graphics > Cloud shadows; WWHD_CLOUD_SHADOWS=1): after the sky composite, the
+// opaque picture and its depth are complete; the shadow map is drawn, then the apply pass multiplies
+// the colour target where clouds cover the light
+struct ShadowGlobals { float view[12], proj[4], sun[4], layer[4], look[4]; };
+static id<MTLLibrary> shadow_library() {
+    static id<MTLLibrary> lib;
+    if (!lib) {
+        NSError* err = nil;
+        lib = [R.device newLibraryWithSource:[NSString stringWithUTF8String:kCloudShader] options:nil error:&err];
+        if (!lib) LOG("[shadows] shader: %s", err.localizedDescription.UTF8String);
+    }
+    return lib;
+}
+static void draw_cloud_shadows(const cloud_proto::Snapshot& s, Surface* color, uint32_t colorSlice, Surface* depth) {
+    if (!color || !depth) return;
+    id<MTLLibrary> lib = shadow_library();
+    if (!lib) return;
+    static id<MTLTexture> map, noise3d;
+    static id<MTLSamplerState> linearClamp, linearRepeat;
+    static id<MTLRenderPipelineState> mapPipe;
+    static std::unordered_map<int, id<MTLRenderPipelineState>> applyPipes;
+    const int N = 256;
+    if (!map) {
+        MTLTextureDescriptor* d = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatR8Unorm width:N height:N mipmapped:NO];
+        d.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
+        d.storageMode = MTLStorageModePrivate;
+        map = [R.device newTextureWithDescriptor:d];
+        noise3d = make_noise();
+        MTLSamplerDescriptor* sd = [MTLSamplerDescriptor new];
+        sd.minFilter = sd.magFilter = MTLSamplerMinMagFilterLinear;
+        linearClamp = [R.device newSamplerStateWithDescriptor:sd];
+        sd.sAddressMode = sd.tAddressMode = sd.rAddressMode = MTLSamplerAddressModeRepeat;
+        linearRepeat = [R.device newSamplerStateWithDescriptor:sd];
+        MTLRenderPipelineDescriptor* pd = [MTLRenderPipelineDescriptor new];
+        pd.vertexFunction = [lib newFunctionWithName:@"sh_vs"];
+        pd.fragmentFunction = [lib newFunctionWithName:@"shmap_fs"];
+        pd.colorAttachments[0].pixelFormat = MTLPixelFormatR8Unorm;
+        NSError* err = nil;
+        mapPipe = [R.device newRenderPipelineStateWithDescriptor:pd error:&err];
+        if (!mapPipe) LOG("[shadows] map pipeline: %s", err.localizedDescription.UTF8String);
+    }
+    int fmt = (int)color->tex.pixelFormat;
+    auto it = applyPipes.find(fmt);
+    if (it == applyPipes.end()) {
+        MTLRenderPipelineDescriptor* pd = [MTLRenderPipelineDescriptor new];
+        pd.vertexFunction = [lib newFunctionWithName:@"sh_vs"];
+        pd.fragmentFunction = [lib newFunctionWithName:@"shadow_apply_fs"];
+        pd.colorAttachments[0].pixelFormat = color->tex.pixelFormat;
+        auto* a = pd.colorAttachments[0];
+        a.blendingEnabled = YES;  // multiply: dst * k
+        a.sourceRGBBlendFactor = MTLBlendFactorZero;
+        a.destinationRGBBlendFactor = MTLBlendFactorSourceColor;
+        a.sourceAlphaBlendFactor = MTLBlendFactorZero;
+        a.destinationAlphaBlendFactor = MTLBlendFactorOne;
+        NSError* err = nil;
+        id<MTLRenderPipelineState> p = [R.device newRenderPipelineStateWithDescriptor:pd error:&err];
+        if (!p) LOG("[shadows] apply pipeline: %s", err.localizedDescription.UTF8String);
+        it = applyPipes.emplace(fmt, p).first;
+    }
+    if (!it->second) return;
+    // values
+    ShadowGlobals g{};
+    for (int r = 0; r < 3; r++)
+        for (int c = 0; c < 3; c++) g.view[c * 4 + r] = s.viewRot[r * 4 + c];
+    float aspect = (float)color->tex.width / (float)color->tex.height;
+    float f = 1.0f / std::tan(s.fovy * 0.5f * 3.14159265f / 180.0f);
+    g.proj[0] = f / aspect, g.proj[1] = f, g.proj[2] = s.viewNear, g.proj[3] = s.viewFar;
+    sky::SkyFrame sf;
+    cloud_proto::sky_frame(s, aspect, 0, sf);
+    for (int i = 0; i < 4; i++) g.sun[i] = sf.sun[i];
+    static const float layerH = envf("WWHD_CLOUD_SHADOW_HEIGHT", 6000.0f), half = envf("WWHD_CLOUD_SHADOW_RANGE", 24000.0f);
+    g.layer[0] = layerH, g.layer[1] = half, g.layer[2] = s.eye[1], g.layer[3] = (float)s.nShadow;
+    // subtle: darker at noon, weaker as the sun gets low (warmth) and in storms, none at night
+    static const float dark = envf("WWHD_CLOUD_SHADOW_DARKNESS", 0.22f);
+    float strengthK = std::clamp(1.0f - 0.6f * s.strength, 0.3f, 1.0f);
+    g.look[0] = dark * (1.0f - 0.7f * sf.lit[3]) * strengthK;
+    g.look[1] = envf("WWHD_CLOUD_SHADOW_SOFTNESS", 0.04f);
+    g.look[2] = envf("WWHD_CLOUD_SHADOWS_DEBUG", 0.0f);
+    g.look[3] = envf("WWHD_CLOUD_SHADOW_ZMODE", 1.0f);  // GX2 depth is 0..1 (D3D-style)
+    static const bool logOn = env_on("WWHD_CLOUDS_LOG");
+    if (logOn && R.frame % 150 == 0)
+        LOG("[shadows] near %g far %g aspect %g fovy %g eye y %.0f, %d clouds, darkness %.2f (warm %.2f strength %.2f)", s.viewNear,
+            s.viewFar, s.viewAspect, s.fovy, s.eye[1], s.nShadow, g.look[0], sf.lit[3], s.strength);
+    // apply onto the picture
+    {
+        MTLRenderPassDescriptor* rp = [MTLRenderPassDescriptor renderPassDescriptor];
+        rp.colorAttachments[0].texture = color->tex;
+        if (color->tex.textureType == MTLTextureType3D) rp.colorAttachments[0].depthPlane = colorSlice;
+        else rp.colorAttachments[0].slice = colorSlice;
+        rp.colorAttachments[0].loadAction = MTLLoadActionLoad;
+        rp.colorAttachments[0].storeAction = MTLStoreActionStore;
+        id<MTLRenderCommandEncoder> e = [command_buffer() renderCommandEncoderWithDescriptor:rp];
+        [e setRenderPipelineState:it->second];
+        [e setFragmentBytes:&g length:sizeof g atIndex:0];
+        [e setFragmentTexture:depth->tex atIndex:0];
+        [e setFragmentTexture:map atIndex:1];
+        [e setFragmentSamplerState:linearClamp atIndex:0];
+        float clouds[100][4] = {};
+        for (int i = 0; i < s.nShadow; i++)
+            for (int k = 0; k < 4; k++) clouds[i][k] = s.shadow[i][k];
+        [e setFragmentBytes:clouds length:sizeof clouds atIndex:1];
+        static id<MTLBuffer> probe = [R.device newBufferWithLength:256 options:MTLResourceStorageModeShared];
+        [e setFragmentBuffer:probe offset:0 atIndex:2];
+        if (g.look[2] == 11.0f && R.frame % 60 == 0) {
+            id<MTLBuffer> pb = probe;
+            [command_buffer() addCompletedHandler:^(id<MTLCommandBuffer>) {
+                const float* v = (const float*)pb.contents;
+                for (int i = 0; i < 6; i++)
+                    LOG("[shadows] probe %d: uv %.4f %.4f cov %.3f height %.0f", i, v[i * 4], v[i * 4 + 1], v[i * 4 + 2], v[i * 4 + 3]);
+            }];
+        }
+        if (g.look[2] == 9.0f && R.frame % 60 == 0) {
+            id<MTLBuffer> pb = probe;
+            unsigned long w = depth->tex.width, h = depth->tex.height, sl = depth->tex.arrayLength;
+            [command_buffer() addCompletedHandler:^(id<MTLCommandBuffer>) {
+                const float* v = (const float*)pb.contents;
+                LOG("[shadows] depth probes (%lux%lu x%lu): %.7f %.7f %.7f %.7f %.7f %.7f", w, h, sl, v[0], v[1], v[2], v[3], v[4], v[5]);
+            }];
+        }
+        [e drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
+        [e endEncoding];
+    }
+    mark_gpu_written(color);
 }
 
 // draw(), right after the pass is open, for every game draw between OP_CLOUDS_BEGIN and _END: with
@@ -801,6 +1115,15 @@ bool clouds_draw(id<MTLRenderCommandEncoder> enc, const MTLViewport& vp, Surface
 // mode, so the game's cloud set does not depend on the mode (comparable runs).
 bool open_target_pass(const uint32_t* regs);  // metal_draw.mm
 void sky_clouds_begin(const uint32_t* regs, uint32_t seq) {
+    static uint64_t begins = 0, open = 0;
+    begins++;
+    if (render::cloud_shadows() && R.enc && R.passColor[0]) {  // the sky buffer: its composite triggers the shadows
+        g_sky = R.passColor[0], g_skyFrame = R.frame, g_skySeq = seq;
+        open++;
+    }
+    static const bool logOn = env_on("WWHD_CLOUDS_LOG");
+    if (logOn && begins % 300 == 0) LOG("[shadows] sky begins %llu, with an open sky pass %llu, composites %llu", (unsigned long long)begins,
+                                        (unsigned long long)open, (unsigned long long)g_composites);
     if (render::horizon_haze() >= 1.0f && cloud_proto::mode() == cloud_proto::kOff) return;
     if ((!R.enc || !R.passColor[0]) && !open_target_pass(regs)) return;  // no open pass: the target registers' one
     Surface* t = R.passColor[0];

@@ -2474,6 +2474,7 @@ void draw_stereo(const uint32_t *r,uint32_t prim,uint32_t count,uint32_t indexTy
     draw(r,prim,count,indexType,indexAddr,baseVertex,instances);
   } catch(...) { stereo_select_eye(0);throw; }
 }
+void clouds_before_draw(const uint32_t* r, const vk::Shader* ps, Surface* color0, uint32_t slice0, Surface* depth);
 void draw(const uint32_t *r, uint32_t prim, uint32_t count, uint32_t indexType,
           uint32_t indexAddr, uint32_t baseVertex, uint32_t instances, bool* viewIndependent) {
   const uint32_t dirtyGroups = gx2::take_dirty_groups();  // register groups changed since the previous draw
@@ -2713,6 +2714,7 @@ void draw(const uint32_t *r, uint32_t prim, uint32_t count, uint32_t indexType,
   Surface* depth = targets.depth;
   const uint32_t depthSlice = targets.depthSlice, width = targets.width, height = targets.height;
   const float sx = targets.sx, sy = targets.sy;
+  clouds_before_draw(r, ps, colors[0], slices[0], depth);  // clouds.cpp: cloud shadows
   rprof::mark(rprof::kTargets);
   auto &p = fast ? *continued.pipeline : pipeline(r, vs, ps, fs, topology, colors, depth);
   rprof::mark(rprof::kPipeline);
