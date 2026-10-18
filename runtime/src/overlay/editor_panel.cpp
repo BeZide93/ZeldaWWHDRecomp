@@ -213,19 +213,22 @@ bool confirm_popup(const char* id, const std::string& question, const char* yes)
 
 // ---------------------------------------------------------------- the "then" actions form
 struct ActionRow {
-    int kind = 0;  // give, take, quest_step, flag, scene
+    int kind = 0;  // give, take, quest_step, flag, scene, give a chart, quest_done
     char id[64] = {};
     int value = 1;  // count, step, flag value (1 set, 0 clear)
 };
-const char* const kActionKinds[] = {"give an item", "take an item", "set a quest step", "set a flag", "start a scene"};
-const char* const kActionNames[] = {"give", "take", "quest_step", "flag", "scene"};
+constexpr int kActionCount = 7, kGiveChart = 5, kQuestDone = 6;
+const char* const kActionKinds[kActionCount] = {"give an item", "take an item", "set a quest step", "set a flag", "start a scene", "give a chart",
+                                                "finish a quest"};
+const char* const kActionNames[kActionCount] = {"give", "take", "quest_step", "flag", "scene", "give", "quest_done"};
 std::vector<ActionRow> rows_of(const Value& then) {
     std::vector<ActionRow> rows;
     for (const auto& a : then.array) {
         ActionRow r;
         const std::string k = a.get("action").string();
-        for (int i = 0; i < 5; i++)
-            if (k == kActionNames[i]) r.kind = i;
+        for (int i = kActionCount - 1; i >= 0; i--)
+            if (k == kActionNames[i] && i != kGiveChart) r.kind = i;
+        if (k == "give" && a.get("id").string().rfind("chart:", 0) == 0) r.kind = kGiveChart;
         std::snprintf(r.id, sizeof r.id, "%s", a.get("id").string().c_str());
         if (r.kind <= 1) r.value = int(num(a, "count", 1));
         else if (r.kind == 2) r.value = int(num(a, "step", 1));
@@ -256,6 +259,10 @@ std::vector<std::string> choices(const Value& m, int kind) {
         for (const auto& q : m.get("quests").array) out.push_back(q.get("id").string());
     else if (kind == 4)
         for (const auto& s : m.get("scenes").array) out.push_back(s.get("id").string());
+    else if (kind == kGiveChart)
+        for (const auto& c : m.get("charts").array) out.push_back("chart:" + c.get("id").string());
+    else if (kind == kQuestDone)
+        for (const auto& q : m.get("quests").array) out.push_back(q.get("id").string());
     return out;
 }
 void then_form(const Value& m, const Value& a, const Value& p) {
@@ -275,7 +282,7 @@ void then_form(const Value& m, const Value& a, const Value& p) {
         ImGui::PushID(int(i));
         const float avail = ImGui::GetContentRegionAvail().x;
         ImGui::SetNextItemWidth(avail * 0.42f);
-        ImGui::Combo("##kind", &r.kind, kActionKinds, 5);
+        ImGui::Combo("##kind", &r.kind, kActionKinds, kActionCount);
         ImGui::SameLine();
         const auto ids = choices(m, r.kind);
         ImGui::SetNextItemWidth(avail * (r.kind == 4 ? 0.48f : 0.32f));

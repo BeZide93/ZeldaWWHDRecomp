@@ -16,7 +16,8 @@
 namespace story_notebook {
 struct WorldPoint { float x=0,y=0,z=0; bool operator==(const WorldPoint&)const=default; };
 struct StoryAction {
-    enum class Kind { Give,Take,QuestStep,Flag,StartScene,QuestDone };
+    // GiveChart: {"action": "give", "id": "chart:<id>"}, one of the mod's charts (once; never taken)
+    enum class Kind { Give,Take,QuestStep,Flag,StartScene,QuestDone,GiveChart };
     Kind kind=Kind::Flag; std::string id; unsigned value=1;
     bool operator==(const StoryAction&)const=default;
 };
@@ -177,10 +178,14 @@ inline bool actions(const Value& m,const Value& v,std::vector<StoryAction>& out,
     if(v.type!=Value::Array||v.array.size()>8) return why="then must be a list of up to 8 actions",false;
     for(const auto& a:v.array) {
         StoryAction s; const auto kind=a.get("action").string(); s.id=a.get("id").string();
-        if(kind=="give"||kind=="take") {s.kind=kind=="give"?StoryAction::Kind::Give:StoryAction::Kind::Take;
+        if(kind=="give"&&s.id.rfind("chart:",0)==0) {s.kind=StoryAction::Kind::GiveChart;
+            if(!keys(a,{"action","id"}))return why="a chart is given once: give chart:<id> takes no count",false;
+            if(!declared(m,"charts",s.id.substr(6)))return why="action names an undeclared mod chart (chart:<id> of \"charts\")",false;
+        } else if(kind=="take"&&s.id.rfind("chart:",0)==0) {return why="a chart can't be taken: take names an item (item:<id>)",false;
+        } else if(kind=="give"||kind=="take") {s.kind=kind=="give"?StoryAction::Kind::Give:StoryAction::Kind::Take;
             if(!keys(a,{"action","id","count"}))return why="unknown give/take action field",false;
             if(a.object.contains("count")){if(!integer(a.get("count"),1,254))return why="action count must be 1..254",false;s.value=unsigned(a.get("count").number);}
-            if(s.id.rfind("item:",0)!=0||!declared(m,"items",s.id.substr(5))) return why="action names an undeclared mod item",false;
+            if(s.id.rfind("item:",0)!=0||!declared(m,"items",s.id.substr(5))) return why="action names an undeclared mod item (give and take name item:<id>; give also chart:<id>)",false;
         } else if(kind=="quest_step") {s.kind=StoryAction::Kind::QuestStep;if(!keys(a,{"action","id","step"}))return why="unknown quest action field",false;
             if(!integer(a.get("step"),1,254)||!quest_step(m,s.id,unsigned(a.get("step").number))) return why="action names an undeclared quest step",false;
             s.value=unsigned(a.get("step").number);

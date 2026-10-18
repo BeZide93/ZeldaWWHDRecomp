@@ -1031,6 +1031,7 @@ bool actions(const std::string& mod,const std::vector<story_notebook::StoryActio
     for(const auto& a:list){bool ok=false;switch(a.kind){
         case Kind::Give:ok=story_items::give(mod,a.id.substr(5),a.value,"actor dialogue")>=0;break;
         case Kind::Take:ok=story_items::take(mod,a.id.substr(5),a.value)>=0;break;
+        case Kind::GiveChart:ok=story_chart::give(mod,a.id.substr(6))>=story_chart::kResultOwned;break;  // once: a chart Link has stays as it is
         case Kind::QuestStep:ok=story_notebook::reach(mod,a.id,a.value)>=0;break;
         case Kind::QuestDone:ok=story_notebook::done_action(mod,a.id)>=0;break;
         case Kind::Flag:ok=set_flag(story_store::book(),mod,a.id,a.value!=0);break;

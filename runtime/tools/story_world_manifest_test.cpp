@@ -193,6 +193,20 @@ int main() {
     v=example();v["items"]=mods::json::parse(R"([{"id":"token"}])");auto& give=v["actors"].array[0]["then"].array[0];give=mods::json::parse(R"({"action":"give","id":"item:token","count":254})");assert(parse_actors(v,actors,why)&&actors[0].then[0].value==254);
     for(const auto& bad:{Value{},Value(0),Value(255),Value(1.5),Value(true),Value("2")}){give["count"]=bad;assert(!parse_actors(v,actors,why));}
     give["count"]=2;give["action"]="take";assert(parse_actors(v,actors,why)&&actors[0].then[0].value==2);
+    // a chart from dialogue: give chart:<id> of the manifest's charts, once (no count, never taken), in an
+    // actor's then, a talk's then and a scene's end
+    v=example();v["charts"]=mods::json::parse(R"([{"id":"keeper-map","name":"Keeper's map","place":{"x":0,"z":0}}])");
+    {auto& chart=v["actors"].array[0]["then"].array[0];chart=mods::json::parse(R"({"action":"give","id":"chart:keeper-map"})");
+     assert(parse_actors(v,actors,why)&&actors[0].then[0].kind==StoryAction::Kind::GiveChart&&actors[0].then[0].id=="chart:keeper-map");
+     chart["count"]=1;assert(!parse_actors(v,actors,why)&&why.find("no count")!=std::string::npos);chart.object.erase("count");
+     chart["action"]="take";assert(!parse_actors(v,actors,why)&&why.find("can't be taken")!=std::string::npos);chart["action"]="give";
+     chart["id"]="chart:nowhere";assert(!parse_actors(v,actors,why)&&why.find("undeclared mod chart")!=std::string::npos);chart["id"]="chart:keeper-map";}
+    {auto& end=v["scenes"].array[0]["steps"].array[3]["then"];end=mods::json::parse(R"([{"action":"give","id":"chart:keeper-map"}])");
+     assert(parse_scenes(v,scenes,why)&&scenes[0].steps.back().then[0].kind==StoryAction::Kind::GiveChart);}
+    {auto& a=v["actors"].array[0];a.object.erase("lines");a.object.erase("then");
+     a["talks"]=mods::json::parse(R"([{"lines":["Take my map."],"then":[{"action":"give","id":"chart:keeper-map"}]}])");
+     assert(parse_actors(v,actors,why)&&actors[0].talks[0].then[0].kind==StoryAction::Kind::GiveChart);}
+    v.object.erase("charts");assert(!parse_actors(v,actors,why));
     v=example();v["actors"].array[0]["switch"]=1;assert(!parse_actors(v,actors,why));
     v=example();v["actors"].array[0]["parameters"]["switch"]=1;assert(!parse_actors(v,actors,why));
     v=example();v["scenes"].array[0]["kind"]="mod";assert(!parse_scenes(v,scenes,why));

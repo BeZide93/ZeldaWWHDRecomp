@@ -35,6 +35,7 @@ struct StepStart {
     std::vector<std::string> path;                      // node ids, "start" first
     std::vector<std::pair<std::string, bool>> flags;    // mod flags (story records of the mod)
     std::vector<std::pair<std::string, int>> items;     // the mod's items and how many Link has then
+    std::vector<std::string> charts;                    // the mod's charts given on the way (owned then)
     std::string letter;                                 // the quest's letter, read on the way
     bool carried = false;                               // Link carries the letter it encloses
     std::string location;                               // a list_locations id to warp to ("" none)
@@ -45,7 +46,7 @@ struct StepStart {
 bool step_start(const std::string& mod, const Value& manifest, const std::string& quest, unsigned step, const std::string& warp, StepStart& out,
                 std::string& why);
 // The story records start-at-step writes: the quest's step (and start order), the letter, the carried
-// letter, the tracked quest, and the flags.
+// letter, the tracked quest, the flags and the charts given on the way.
 std::vector<RecordValue> step_records(const std::string& mod, const std::string& quest, const StepStart& s);
 
 // The quest editor's checks beyond the validator's (each a warning unless said): steps nothing leads

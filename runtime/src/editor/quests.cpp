@@ -60,6 +60,7 @@ struct Edge {
     // for start-at-step: what taking it hands out
     std::vector<std::pair<std::string, bool>> flags;
     std::vector<std::pair<std::string, int>> items;  // + give, - take
+    std::vector<std::string> charts;                  // the mod's charts it gives
     std::string letter;
     bool carried = false;
     std::string actor;  // the actor to stand in front of
@@ -77,7 +78,14 @@ std::string actor_verb(const Value& a) {
 void actions_of(const Value& then, const std::string& quest, Edge& e) {
     for (const auto& t : then.array) {
         const std::string action = t.get("action").string(), id = t.get("id").string();
-        if (action == "give" || action == "take") {
+        if (action == "give" && id.rfind("chart:", 0) == 0) {
+            e.charts.push_back(id.substr(6));
+            Value r;
+            r["kind"] = "chart";
+            r["id"] = id;
+            r["text"] = "gives " + id;
+            e.rewards.array.push_back(r);
+        } else if (action == "give" || action == "take") {
             const int count = whole(t.get("count")) ? int(t.get("count").number) : 1;
             e.items.push_back({item_id(id), action == "give" ? count : -count});
             Value r;
@@ -137,7 +145,10 @@ std::vector<Edge> edges_of(const Value& m, const Value& q) {
                 e.items.push_back({item_id(id), 1});
                 e.rewards.array.push_back(badge("give", "encloses " + item_id(id)));
             }
-            if (id.rfind("chart:", 0) == 0) e.rewards.array.push_back(badge("chart", "encloses " + id));
+            if (id.rfind("chart:", 0) == 0) {
+                e.charts.push_back(id.substr(6));
+                e.rewards.array.push_back(badge("chart", "encloses " + id));
+            }
         }
         out.push_back(std::move(e));
     }
@@ -448,6 +459,8 @@ bool step_start(const std::string& mod, const Value& m, const std::string& quest
             flags[id] = on;
         }
         for (const auto& [id, delta] : e.items) count_item(id, delta, e.via_kind == "item" && id == e.via);
+        for (const auto& c : e.charts)
+            if (std::find(out.charts.begin(), out.charts.end(), c) == out.charts.end()) out.charts.push_back(c);
         // an actor that needs an item: Link had one there
         for (const auto& c : e.conditions.array)
             if (c.get("kind").string() == "item") count_item(item_id(c.get("id").string()), 0, true);
@@ -479,6 +492,7 @@ std::vector<RecordValue> step_records(const std::string& mod, const std::string&
     if (!s.letter.empty()) out.push_back({{kRecordLetter, letter_key(mod, s.letter)}, int(kRead)});
     if (s.carried) out.push_back({{kRecordCarried, key}, 1});
     for (const auto& [id, on] : s.flags) out.push_back({{kRecordActorFlag, letter_key(mod, "actor-flag:" + id)}, on ? 1 : 0});
+    for (const auto& c : s.charts) out.push_back({{kRecordMarker, letter_key(mod, c)}, 1});  // story_chart.h chart_key: owned
     return out;
 }
 

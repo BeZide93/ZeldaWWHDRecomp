@@ -37,6 +37,9 @@
 #include <sys/mman.h>
 #endif
 namespace story_chart {
+// a dialogue's chart give: the chart's record, owned once (as story_chart.cpp gives it)
+std::map<std::string,int32_t> given_charts;
+int32_t give(const std::string& mod,const std::string& chart){auto& v=given_charts[mod+":"+chart];if(!v)v=kResultOwned;return v;}
 void note_import(){} bool installed(){return true;}
 bool publish_world_markers(const std::string&,std::span<const WorldMarker>){return true;}
 SquarePlace square_place(float x,float z){const int col=int(std::floor((x+50000)/100000)),row=int(std::floor((z+50000)/100000));return {col,row,x-col*100000.f,z-row*100000.f};}
@@ -433,6 +436,10 @@ int main(int argc,char** argv){
         assert(!story_actors::flag(b,"test","retarget"));
 
         assert(story_actors::actions("test",{{story_notebook::StoryAction::Kind::QuestDone,"q",1}})&&quest_state==255);
+        // a chart from dialogue: given once; a second give (or a finished chart) changes nothing
+        assert(story_actors::actions("test",{{story_notebook::StoryAction::Kind::GiveChart,"chart:keeper-map",1}})&&story_chart::given_charts.at("test:keeper-map")==story_chart::kResultOwned);
+        story_chart::given_charts["test:keeper-map"]=story_chart::kResultDone;
+        assert(story_actors::actions("test",{{story_notebook::StoryAction::Kind::GiveChart,"chart:keeper-map",1}})&&story_chart::given_charts.at("test:keeper-map")==story_chart::kResultDone);
         return 0;
     }
     if(sign_talks_mode){
