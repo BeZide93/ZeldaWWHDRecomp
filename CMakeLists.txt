@@ -1307,6 +1307,8 @@ target_include_directories(mod_actor_runtime_test PRIVATE runtime/include runtim
 target_compile_options(mod_actor_runtime_test PRIVATE -UNDEBUG)
 target_sources(mod_actor_runtime_test PRIVATE runtime/src/mods/mod_actor_knockback.cpp runtime/src/mods/mod_actor_native_combat.cpp runtime/src/mods/mod_actor_attention.cpp runtime/src/mods/native_actor_carry.cpp runtime/src/mods/story_item_models.cpp runtime/src/mods/story_enemy_ownership.cpp runtime/src/mods/story_enemy_projectiles.cpp)
 add_test(NAME mod_actor_native_contract COMMAND mod_actor_runtime_test)
+add_test(NAME story_world_collision_profile_order COMMAND mod_actor_runtime_test --world-proof)
+add_test(NAME story_world_collision_profile_isolation COMMAND mod_actor_runtime_test --world-proof-mixed)
 add_test(NAME mod_actor_skinned_native_contract COMMAND mod_actor_runtime_test --skinned)
 add_test(NAME mod_actor_combat_native_contract COMMAND mod_actor_runtime_test --combat)
 add_test(NAME mod_actor_carry_native_contract COMMAND mod_actor_runtime_test --carry)

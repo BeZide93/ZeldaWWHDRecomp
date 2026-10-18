@@ -24,7 +24,7 @@ uint32_t invoke(Cpu*c,uint32_t fn,std::initializer_list<uint32_t> args){
     case 0x02000010:return Arena+Bytes-cursor;
     case 0x0273AD10:{assert(solid_context);const auto out=cursor;cursor=(cursor+a.at(0)+15)&~15u;return out;}
     case 0x024F23F4:assert(solid_context&&a.at(0)==0);body=cursor;cursor+=0xC0;st32(body,256);return body;
-    case 0x0200A030:assert(solid_context&&a.at(0)==body&&a.at(2)==1&&a.at(3)==Actor+Matrix);assert(ld32(a.at(1))==8&&ld32(a.at(1)+8)==12);st32(body+0x94,a.at(1));++sets;return 0;
+    case 0x0200A030:assert(solid_context&&a.at(0)==body&&a.at(2)==1&&a.at(3)==Actor+Matrix);assert(ld32(a.at(1))==16&&ld32(a.at(1)+8)==20);st32(body+0x94,a.at(1));++sets;return 0;
     case 0x025200D4:return Play;
     case 0x024EEA6C:{assert(a.at(0)==Play+0x12A0&&a.at(1)==body&&a.at(2)==Actor);st32(body,0);const uint32_t e=Play+0x12A0;st32(e,body);st32(e+4,1);st32(e+8,ld32(Actor+4));st32(e+12,Actor);++registrations;return 0;}
     case 0x020087EC:{assert(a.at(0)==Play+0x12A0&&a.at(1)==body);st32(Play+0x12A0+4,0);st32(body,256);++releases;return 0;}

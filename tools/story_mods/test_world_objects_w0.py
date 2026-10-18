@@ -1,4 +1,4 @@
-"""Original proof assets: reproducibility and model/collision dimensions, no game data."""
+"""Original render assets: reproducibility and visible deck dimensions, no game data."""
 import importlib.util
 from pathlib import Path
 import unittest
@@ -16,7 +16,7 @@ class Fixtures(unittest.TestCase):
                 info=actor_model.inspect(str(ASSETS/(name+'.glb')))
                 self.assertEqual(info['triangles'],triangles)
                 self.assertEqual((info['texture_width'],info['texture_height']),(64,16))
-    def test_fixed_collision_dimensions(self):
+    def test_visible_deck_dimensions(self):
         expected={'platform':((-300,-170,-900),(300,0,300)),'buoy':((-70,-100,-70),(70,100,70)),'raft':((-250,-50,-350),(250,0,350))}
         for name,bounds in expected.items():
             vertices=[p for prism in fixtures.geometry(name) for p in prism]

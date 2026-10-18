@@ -37,7 +37,7 @@ template<class Call> bool heap_create(Cpu*c,uint32_t actor,Kind kind,Call call){
     const uint32_t body=call(c,GC(0x024F23F4),{0});if(!address(body,0xBC))return false;
     if(call(c,GC(0x0200A030),{body,data,1,actor+Matrix}))return false;
     st32(body+0xA8,GC(0x024EE708));st16(body+0xB8,ld8(actor+0x326));st8(body+0xBB,ld8(actor+0x326));
-    st32(actor+State,Magic);st32(actor+State+4,body);st32(actor+State+8,uint32_t(kind));st32(actor+State+12,ld32(actor+4));st32(actor+State+64,0);
+    st32(actor+State,Magic);st32(actor+State+4,body);st32(actor+State+8,uint32_t(kind));st32(actor+State+12,ld32(actor+4));st32(actor+State+64,0);st32(actor+State+68,0);
     const uint32_t after=free_fn?call(c,free_fn,{heap}):0;
     LOG("[world_w0] heap actor=%08X pid=%u kind=%u vertices=%zu triangles=%zu source=%zu heap=%08X before=%u after=%u delta=%lld",actor,ld32(actor+4),unsigned(kind),geometry.vertices.size(),geometry.triangles.size(),size,heap,before,after,static_cast<long long>(before)-after);
     return true;
@@ -49,7 +49,14 @@ template<class Call> bool created(Cpu*c,uint32_t actor,Call call){
     // A body that claims an occupied slot has uncertain provenance. Never steal it.
     if(!address(registry,0x1404)||ld32(body)<RegistrySlots||!slots_available(occupied(registry),1,16))return false;
     const uint32_t before=occupied(registry);if(call(c,GC(0x024EEA6C),{registry,body,actor})||!registered(registry,body,actor))return false;
-    st32(actor+0x83C,0); // Prove native background collision without the SDK cylinder.
+    // Native heap entry has returned and shrunk the temporary construction heap.
+    const uint32_t solid=ld32(actor+0xF4),parent=address(solid,0x28)?ld32(solid+0x24):0;
+    if(address(parent,0x10)){const uint32_t vt=ld32(parent+0xC);if(address(vt,0x80)){
+        const uint32_t free_fn=ld32(vt+0x74),largest_fn=ld32(vt+0x7C);
+        const uint32_t free=free_fn?call(c,free_fn,{parent}):0,largest=largest_fn?call(c,largest_fn,{parent,32}):0;
+        LOG("[world_w0] capacity actor=%08X solid=%08X parent=%08X free=%u largest_align32=%u",actor,solid,parent,free,largest);
+    }}
+    st32(actor+0x83C,0);st32(actor+0x39C,0); // Native background only, without a cylinder or dialogue prompt.
     LOG("[world_w0] register actor=%08X pid=%u body=%08X slot=%u occupied_before=%u occupied_after=%u room=%u",actor,ld32(actor+4),body,ld32(body),before,occupied(registry),unsigned(ld8(actor+0x326)));
     return true;
 }
@@ -70,8 +77,8 @@ template<class Call> bool move(Cpu*c,uint32_t actor,Call call){
     if(!registered(registry,body,actor)){LOG("[world_w0] rejected stale registration actor=%08X body=%08X",actor,body);return false;}
     for(unsigned i=0;i<12;++i)st32(actor+Matrix+i*4,ld32(actor+0x56C+i*4));
     call(c,GC(0x024F43DC),{body});const uint32_t tick=ld32(actor+State+64)+1;st32(actor+State+64,tick);
-    if(tick%30==0){const uint32_t link=ld32(play+0x5B34);const bool riding=address(link,0xB50)&&ld16(link+0xB14+0x16)==ld32(body)&&ld32(link+0xB14+0x18)==body;
-        LOG("[world_w0] motion actor=%08X tick=%u body=%08X slot=%u occupied=%u y=%.3f pitch=%d roll=%d link=%08X riding=%u",actor,tick,body,ld32(body),occupied(registry),double(u32_as_f32(ld32(actor+0x318))),int(int16_t(ld16(actor+0x328))),int(int16_t(ld16(actor+0x32C))),link,unsigned(riding));}
+    if(tick%30==0){const uint32_t link=ld32(play+0x5B34);const bool riding=address(link,0x6600)&&(ld32(link+0x80C+0x28)&0x20)&&ld16(link+0x80C+0xD4+0x16)==ld32(body)&&ld32(link+0x80C+0xD4+0x18)==body;
+        LOG("[world_w0] motion actor=%08X tick=%u body=%08X slot=%u occupied=%u y=%.3f pitch=%d roll=%d link=%08X riding=%u link_x=%.3f link_y=%.3f link_z=%.3f proc=%u",actor,tick,body,ld32(body),occupied(registry),double(u32_as_f32(ld32(actor+0x318))),int(int16_t(ld16(actor+0x328))),int(int16_t(ld16(actor+0x32C))),link,unsigned(riding),address(link,0x6600)?double(u32_as_f32(ld32(link+0x314))):0,address(link,0x6600)?double(u32_as_f32(ld32(link+0x318))):0,address(link,0x6600)?double(u32_as_f32(ld32(link+0x31C))):0,address(link,0x6600)?ld32(link+0x65F0):0xFFFFFFFFu);}
     return true;
 }
 template<class Call> void destroy(Cpu*c,uint32_t actor,Call call){
