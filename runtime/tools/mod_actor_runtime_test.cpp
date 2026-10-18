@@ -1,7 +1,15 @@
 #include <algorithm>
 #include <array>
+#include <cassert>
+#include <cmath>
+#include <cstdarg>
+#include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <initializer_list>
+#include <map>
 #include <memory>
 #include <string>
 #include <utility>
@@ -13,13 +21,6 @@
 #include "mods/story_enemy_ownership.h"
 #include "mods/story_mail.h"
 #include "runtime.h"
-#include <cassert>
-#include <map>
-#include <cstring>
-#include <cstdlib>
-#include <cmath>
-#include <cstdio>
-#include <cstdarg>
 #ifdef _WIN32
 #include <windows.h>
 #else
@@ -174,26 +175,26 @@ c.r[3]=Arena+0xE000;c.r[4]=Arena+0xD000;hooks.at(0x02604EB4)(&c);assert(c.r[3]==
 st32(Arena+0xE400+0x14,Arena+0xE800);st32(Arena+0xE400+0x18,392000);c.r[3]=Arena+0xE000;c.r[4]=Arena+0xD000;c.r[6]=Arena+0x9000;hooks.at(0x02612E64)(&c);assert(c.r[3]==1);
 st32(Arena+0xF000,token);c.r[3]=mod_actor::kProfile;c.r[5]=Arena+0xF000;hooks.at(0x025DD414)(&c);assert(c.r[3]==A&&ld32(Scratch+512+24)==1648);
 st32(Play+0x5B34,Arena+0xF400);st32(A+4,42);st16(A+0xE,mod_actor::kProfile);st32(A+0xB0,token);for(int i=0;i<3;++i)st32(A+0x330+i*4,f32_as_u32(1));method(c,0);assert(c.r[3]==1&&ld8(A+0x3AA)==1&&!ld32(A+0x3B4));complete=true;method(c,0);assert(c.r[3]==4&&ld32(A+0x3B4)==Model);assert(ld32(A+0x3F4+0x44)==A+0x3B8);if(visual_mode){
-    const uint32_t link=Arena+0xF400,far=0x1048CFF0+0x54,old_far=0x47712345;
+    const uint32_t link=Arena+0xF400,far_plane_address=0x1048CFF0+0x54,old_far=0x47712345;
     auto observer=[&](unsigned room,unsigned square){st8(link+0x326,room);st32(link+0x314,f32_as_u32(float(int((square-1)%7)-3)*100000));st32(link+0x31C,f32_as_u32(float(int((square-1)/7)-3)*100000));};
     unsigned behavior_events=0;mod_actor::set_behavior_sink([&](Cpu*,uint32_t,mod_actor::BehaviorEvent,const mod_actor::Hit*){++behavior_events;});
     assert(mod_actor::owns_visual(A,token));assert(u32_as_f32(ld32(A+0x330))==2&&u32_as_f32(ld32(A+0x334))==3&&u32_as_f32(ld32(A+0x338))==4&&u32_as_f32(ld32(A+0x364))==10);
-    st8(A+0x326,13);observer(13,13);st32(far,old_far);method(c,2);assert(registered_collision==0&&attack_registrations==0&&ld32(A+0x39C)==0&&behavior_events==0);
-    method(c,4);assert(draws==1&&clip_recalculations==2&&clip_far_values[0]==f32_as_u32(500000.f)&&clip_far_values[1]==old_far&&ld32(far)==old_far&&behavior_events==0);
+    st8(A+0x326,13);observer(13,13);st32(far_plane_address,old_far);method(c,2);assert(registered_collision==0&&attack_registrations==0&&ld32(A+0x39C)==0&&behavior_events==0);
+    method(c,4);assert(draws==1&&clip_recalculations==2&&clip_far_values[0]==f32_as_u32(500000.f)&&clip_far_values[1]==old_far&&ld32(far_plane_address)==old_far&&behavior_events==0);
     observer(12,12);method(c,4);observer(14,14);method(c,4);assert(draws==1&&clip_recalculations==2);
-    std::array<unsigned char,mod_actor::kInstanceBytes> saved;std::memcpy(saved.data(),mem::ptr(A),saved.size());mod_actor::state_loaded();observer(13,13);method(c,2);method(c,4);assert(mod_actor::owns_visual(A,token)&&draws==2&&registered_collision==0&&behavior_events==0&&ld32(far)==old_far);
+    std::array<unsigned char,mod_actor::kInstanceBytes> saved;std::memcpy(saved.data(),mem::ptr(A),saved.size());mod_actor::state_loaded();observer(13,13);method(c,2);method(c,4);assert(mod_actor::owns_visual(A,token)&&draws==2&&registered_collision==0&&behavior_events==0&&ld32(far_plane_address)==old_far);
     st32(A+4,43);assert(!mod_actor::owns_visual(A,token));method(c,2);method(c,4);assert(draws==2&&registered_collision==0);std::memcpy(mem::ptr(A),saved.data(),saved.size());
     st16(A+0xE,0xB6);assert(!mod_actor::owns_visual(A,token));std::memcpy(mem::ptr(A),saved.data(),saved.size());
     st32(A+0xC48,ld32(A+0xC48)^1);assert(!mod_actor::owns_visual(A,token));method(c,4);assert(draws==2);std::memcpy(mem::ptr(A),saved.data(),saved.size());
     // Open ocean retains native room zero across geographic square boundaries.
-    st8(A+0x326,0);observer(0,11);method(c,4);assert(draws==3&&clip_recalculations==6&&ld32(far)==old_far);observer(0,12);method(c,4);assert(draws==3&&clip_recalculations==6);std::memcpy(mem::ptr(A),saved.data(),saved.size());observer(13,13);
-    // Recreate the same declaration as home-square shoreline, with no far-clip scope.
-    st16(Play+0x5D00,42);st32(Play+0x5D70,0x12345678);st32(Play+0x5D74,0x23456789);st32(0x104B4634,0x34567890);st32(0x104B4638,0x45678901);assert(mod_actor::visual_role(token,false));assert(mod_actor::owns_visual(A,token));method(c,4);assert(draws==3);st8(A+0x3AA,0);method(c,0);assert(c.r[3]==4&&mod_actor::owns_visual(A,token));st8(A+0x326,12);observer(13,13);method(c,4);assert(draws==3);observer(12,12);method(c,2);method(c,4);assert(draws==4&&clip_recalculations==6&&ld32(far)==old_far&&registered_collision==0&&behavior_events==0);
-    assert(ld32(Arena+0x12000+4)==f32_as_u32(43)&&ld32(0x104B4634)==0x34567890&&ld32(0x104B4638)==0x45678901);st16(Play+0x5D00,77);st8(A+0x326,0);observer(0,12);method(c,4);assert(ld32(Arena+0x12000+4)==f32_as_u32(43));assert(draws==5&&clip_recalculations==6&&ld32(far)==old_far);observer(0,11);method(c,4);assert(draws==5);observer(12,12);method(c,4);assert(draws==5); // Wrong native room cannot draw a stale proxy.
+    st8(A+0x326,0);observer(0,11);method(c,4);assert(draws==3&&clip_recalculations==6&&ld32(far_plane_address)==old_far);observer(0,12);method(c,4);assert(draws==3&&clip_recalculations==6);std::memcpy(mem::ptr(A),saved.data(),saved.size());observer(13,13);
+    // Recreate the same declaration as home-square shoreline, with no far_plane_address-clip scope.
+    st16(Play+0x5D00,42);st32(Play+0x5D70,0x12345678);st32(Play+0x5D74,0x23456789);st32(0x104B4634,0x34567890);st32(0x104B4638,0x45678901);assert(mod_actor::visual_role(token,false));assert(mod_actor::owns_visual(A,token));method(c,4);assert(draws==3);st8(A+0x3AA,0);method(c,0);assert(c.r[3]==4&&mod_actor::owns_visual(A,token));st8(A+0x326,12);observer(13,13);method(c,4);assert(draws==3);observer(12,12);method(c,2);method(c,4);assert(draws==4&&clip_recalculations==6&&ld32(far_plane_address)==old_far&&registered_collision==0&&behavior_events==0);
+    assert(ld32(Arena+0x12000+4)==f32_as_u32(43)&&ld32(0x104B4634)==0x34567890&&ld32(0x104B4638)==0x45678901);st16(Play+0x5D00,77);st8(A+0x326,0);observer(0,12);method(c,4);assert(ld32(Arena+0x12000+4)==f32_as_u32(43));assert(draws==5&&clip_recalculations==6&&ld32(far_plane_address)==old_far);observer(0,11);method(c,4);assert(draws==5);observer(12,12);method(c,4);assert(draws==5); // Wrong native room cannot draw a stale proxy.
     method(c,1);assert(!mod_actor::owns_visual(A,token)&&behavior_events==0);
-    // Main near geometry with a distant replacement is hidden outside its home room.
-    spec.id="near";const auto near=mod_actor::declare("test",spec,"mod_unique",1,{}, {-12,-4,-8},{15,80,10});assert(near&&near!=token);mod_actor::set_behavior_sink({});
-    std::memset(mem::ptr(A),0,mod_actor::kInstanceBytes);base_allocated=0;st32(Arena+0xF000,near);c.r[3]=mod_actor::kProfile;c.r[5]=Arena+0xF000;hooks.at(0x025DD414)(&c);st32(A+4,44);st16(A+0xE,mod_actor::kProfile);st32(A+0xB0,near);st8(A+0x326,12);method(c,0);assert(c.r[3]==4&&!mod_actor::owns_visual(A,near));observer(13,13);method(c,4);assert(draws==5);observer(0,12);method(c,4);assert(draws==6&&clip_recalculations==6&&ld32(far)==old_far);observer(12,12);method(c,4);assert(draws==7);
+    // Main near_token geometry with a distant replacement is hidden outside its home room.
+    spec.id="near";const auto near_token=mod_actor::declare("test",spec,"mod_unique",1,{}, {-12,-4,-8},{15,80,10});assert(near_token&&near_token!=token);mod_actor::set_behavior_sink({});
+    std::memset(mem::ptr(A),0,mod_actor::kInstanceBytes);base_allocated=0;st32(Arena+0xF000,near_token);c.r[3]=mod_actor::kProfile;c.r[5]=Arena+0xF000;hooks.at(0x025DD414)(&c);st32(A+4,44);st16(A+0xE,mod_actor::kProfile);st32(A+0xB0,near_token);st8(A+0x326,12);method(c,0);assert(c.r[3]==4&&!mod_actor::owns_visual(A,near_token));observer(13,13);method(c,4);assert(draws==5);observer(0,12);method(c,4);assert(draws==6&&clip_recalculations==6&&ld32(far_plane_address)==old_far);observer(12,12);method(c,4);assert(draws==7);
     std::puts("world visual runtime tests passed");return 0;
 }if(combat_mode){combat_tests(c);return 0;}if(carry_mode){
     const uint32_t link=Arena+0xF400;st16(link+0xE,0xA8);st32(link+4,77);st32(link+0x65B8,A);st32(link+0x65A0,42);st32(link+0x65A4,A);st32(A+0x2E0,0);

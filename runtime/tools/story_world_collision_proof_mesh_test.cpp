@@ -1,6 +1,9 @@
-#include "mods/story_world_collision_proof_mesh.h"
 #include <cassert>
 #include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <vector>
+#include "mods/story_world_collision_proof_mesh.h"
 using namespace story_world_collision::proof;
 static uint32_t word(const std::vector<uint8_t>&b,size_t at){return (uint32_t(b[at])<<24)|(uint32_t(b[at+1])<<16)|(uint32_t(b[at+2])<<8)|b[at+3];}
 int main(){

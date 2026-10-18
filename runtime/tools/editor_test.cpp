@@ -1,3 +1,18 @@
+#include <algorithm>
+#include <cassert>
+#include <chrono>
+#include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <iostream>
+#include <sstream>
+#include <string>
+#include <utility>
+#include <vector>
 // World editor command layer (runtime/src/editor/commands.h): apply / undo / redo, refused changes,
 // JSON round trips, the warp list, the test-mode record reset and saving into the package.
 // Usage: editor_test <examples/guest-mods>
@@ -5,16 +20,6 @@
 #include "editor/stage_files.h"
 #include "mods/story_mail_book.h"
 
-#include <algorithm>
-#include <cassert>
-#include <chrono>
-#include <cmath>
-#include <cstring>
-#include <cstdio>
-#include <filesystem>
-#include <fstream>
-#include <iostream>
-#include <sstream>
 
 namespace fs = std::filesystem;
 using editor::Value;

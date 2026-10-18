@@ -1,6 +1,13 @@
-#include "mods/static_model_validation.h"
+#include <array>
 #include <cassert>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
 #include <iostream>
+#include <span>
+#include <string>
+#include <vector>
+#include "mods/static_model_validation.h"
 #include "static_model_fixture.h"
 using namespace static_model_fixture;
 int main(){static_models::ModelInfo info;std::string why;auto doc=document();auto bin=binary();auto good=glb(doc,bin);assert(static_models::validate_glb(good,info,why));assert(info.vertex_count==3&&info.triangle_count==1&&info.texture_width==64&&info.texture_height==8);

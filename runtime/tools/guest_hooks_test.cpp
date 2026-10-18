@@ -1,6 +1,9 @@
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <cmath>
+#include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -17,25 +20,11 @@
 #include <string_view>
 #include <thread>
 #include <utility>
+#include <vector>
 // Exercise the actual hook runner with synthetic game bodies and a port wrapper.
 #define WWHD_GUEST_HOOKS_STARTUP_FIXTURE 1
 // This entire harness constructs synthetic startup registries; production has no unseal.
 #include "mods/guest_mods.cpp"
-#include <cassert>
-#include <vector>
-#include <algorithm>
-#include <cstdlib>
-#include <string>
-#include <array>
-#include <optional>
-#include <cstdint>
-#include <span>
-#include <utility>
-#include <functional>
-#include <cstring>
-#include <string_view>
-#include <memory>
-#include <filesystem>
 namespace story_native_wait_runtime {
 void startup(bool,LogicStep) {assert(story_native_scene_request::startup_window_current());}
 void logic(Cpu*) {}
@@ -43,19 +32,6 @@ void state_loaded() {}
 }
 #ifndef _WIN32
 #include <sys/mman.h>
-#include <algorithm>
-#include <cstdlib>
-#include <string>
-#include <array>
-#include <optional>
-#include <cstdint>
-#include <span>
-#include <utility>
-#include <functional>
-#include <cstring>
-#include <string_view>
-#include <memory>
-#include <filesystem>
 #endif
 
 namespace story_native_stage_owner_observer {story_native_stage_owner::Tracker&tracker()noexcept{static story_native_stage_owner::Tracker t;return t;}}

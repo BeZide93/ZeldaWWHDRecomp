@@ -1,10 +1,16 @@
-#include "mods/story_world_collision_mesh.h"
-#include <cassert>
+#include <array>
 #include <bit>
+#include <cassert>
 #include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
 #include <functional>
 #include <limits>
 #include <set>
+#include <string>
+#include <vector>
+#include "mods/story_world_collision_mesh.h"
 using namespace story_world_collision::mesh;
 namespace {
 uint32_t word(const std::vector<uint8_t>&b,size_t p){return (uint32_t(b[p])<<24)|(uint32_t(b[p+1])<<16)|(uint32_t(b[p+2])<<8)|b[p+3];}

@@ -1,6 +1,7 @@
-#include "mods/story_world_collision_budget.h"
 #include <cassert>
+#include <cstdint>
 #include <limits>
+#include "mods/story_world_collision_budget.h"
 using namespace story_world_collision;
 int main(){
     // Eight original box vertices, twelve triangles, one leaf/group/material.

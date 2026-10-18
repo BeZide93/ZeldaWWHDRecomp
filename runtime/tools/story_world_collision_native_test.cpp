@@ -1,8 +1,11 @@
+#include <cassert>
+#include <cstdint>
+#include <cstring>
+#include <initializer_list>
+#include <string>
+#include <vector>
 // Exercises guest-owned lifecycle against a deterministic native ABI stand-in.
 #include "mods/story_world_collision_native.h"
-#include <cassert>
-#include <cstring>
-#include <vector>
 #ifdef _WIN32
 #include <windows.h>
 #else

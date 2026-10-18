@@ -1,10 +1,13 @@
+#include <cassert>
+#include <cstdint>
+#include <cstring>
+#include <initializer_list>
+#include <map>
+#include <string>
+#include <vector>
 // SPDX-License-Identifier: MPL-2.0
 #include "mods/story_world_grapple.h"
 #include "runtime.h"
-#include <cassert>
-#include <cstring>
-#include <map>
-#include <vector>
 #ifdef _WIN32
 #include <windows.h>
 #else

@@ -1,9 +1,12 @@
+#include <cassert>
+#include <cmath>
+#include <cstring>
+#include <string>
+#include <utility>
+#include <vector>
 // SPDX-License-Identifier: MPL-2.0
 #include "mods/story_world_arrival.h"
 #include "overlay/extensions.h"
-#include <cassert>
-#include <cmath>
-#include <vector>
 namespace {bool sealed=false;std::vector<overlay::ext::FrameLayer> layers;}
 namespace overlay::ext {bool sealed(){return ::sealed;}void add_frame_layer(FrameLayer layer){layers.push_back(std::move(layer));}}
 int main(){using namespace story_world_arrival;

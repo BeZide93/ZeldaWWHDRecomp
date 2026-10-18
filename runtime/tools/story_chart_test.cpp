@@ -1,3 +1,13 @@
+#include <algorithm>
+#include <cassert>
+#include <cmath>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <initializer_list>
+#include <map>
+#include <string>
+#include <vector>
 // Mod charts and their sea chart markers (runtime/src/mods/story_chart.*): the shared save record, the
 // services and the sea chart menu hooks on a synthetic menu with synthetic panes and save. The game's
 // own functions are stubbed; no game files are needed.
@@ -6,14 +16,6 @@
 #include "mods/story_store.h"
 #include "runtime.h"
 
-#include <cassert>
-#include <algorithm>
-#include <cmath>
-#include <cstdio>
-#include <cstring>
-#include <map>
-#include <string>
-#include <vector>
 #ifdef _WIN32
 #include <windows.h>
 #else

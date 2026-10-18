@@ -1,19 +1,21 @@
-#include "mods/actor_model_cache.h"
-#include "mods/mod_json.h"
-#include "mods/mod_hash.h"
 #include <algorithm>
 #include <bit>
-#include <cstdint>
-#include <exception>
-#include <string>
-#include <system_error>
-#include <vector>
-#include "static_model_fixture.h"
 #include <cassert>
 #include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <string>
+#include <system_error>
+#include <vector>
+#include "mods/actor_model_cache.h"
+#include "mods/mod_json.h"
+#include "mods/mod_hash.h"
+#include "static_model_fixture.h"
 static std::vector<uint8_t> collision_fixture(){
     std::vector<uint8_t> b(84);
     auto u32=[&](size_t p,uint32_t v){for(unsigned k=0;k<4;++k)b[p+k]=uint8_t(v>>(24-8*k));};

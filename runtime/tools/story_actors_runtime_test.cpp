@@ -1,3 +1,19 @@
+#include <array>
+#include <cassert>
+#include <cmath>
+#include <cstdarg>
+#include <cstddef>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <initializer_list>
+#include <map>
+#include <optional>
+#include <span>
+#include <stdexcept>
+#include <string>
+#include <vector>
 // Synthetic guest memory: exercise the shipped actor spawn/check/open hooks, with no game assets.
 #include "mods/story_actors.h"
 #include "mods/story_chart.h"
@@ -15,24 +31,10 @@
 #include "mods/story_notebook.h"
 #include "mods/story_treasure.h"
 #include "runtime.h"
-#include <array>
-#include <cassert>
-#include <cstring>
-#include <cstdio>
-#include <cstdlib>
-#include <cstdarg>
-#include <map>
-#include <string>
-#include <vector>
-#include <stdexcept>
-#include <optional>
-#include <cstdint>
 #ifdef _WIN32
 #include <windows.h>
 #else
 #include <sys/mman.h>
-#include <optional>
-#include <cstdint>
 #endif
 namespace story_chart {
 void note_import(){} bool installed(){return true;}

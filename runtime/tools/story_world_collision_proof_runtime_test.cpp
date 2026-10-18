@@ -1,11 +1,15 @@
-// Synthetic guest memory tests the real W0 integration, not game physics.
-#include "mods/story_world_collision_proof.h"
 #include <cassert>
 #include <cstdarg>
+#include <cstdint>
+#include <cstdio>
 #include <cstring>
-#include <vector>
 #include <fstream>
+#include <initializer_list>
 #include <iterator>
+#include <string>
+#include <vector>
+// Synthetic guest memory tests the real W0 integration, not game physics.
+#include "mods/story_world_collision_proof.h"
 #ifdef _WIN32
 #include <windows.h>
 #else

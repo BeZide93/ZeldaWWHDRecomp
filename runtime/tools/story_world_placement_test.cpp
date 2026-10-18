@@ -1,12 +1,17 @@
-#include "mods/story_world_placement.h"
-#include <cassert>
+#include <algorithm>
 #include <bit>
+#include <cassert>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <string>
+#include <utility>
 #include <vector>
+#include "mods/story_world_placement.h"
 using namespace story_world_placement;
 using Bytes=std::vector<uint8_t>;
 static void u16(Bytes&b,size_t p,uint16_t v){b[p]=uint8_t(v>>8);b[p+1]=uint8_t(v);}
@@ -51,8 +56,8 @@ int main(){
   motion.bounds[0].bounds={{-.5f,0,-.5f},{.5f,1,.5f}};auto overlap=sweep("test",0,body,{100,0,100},motion,0);assert(overlap.blocked&&overlap.allowed_delta.x==0&&overlap.allowed_delta.z==0);
  }
  // Only original synthetic archives; no native resource fixtures are redistributed.
- const auto temporary=std::filesystem::temp_directory_path()/("world-placement-"+std::to_string(reinterpret_cast<uintptr_t>(&i)));std::filesystem::create_directories(temporary/"content/Common/Stage");auto write=[&](const char*name,const Bytes&b){std::ofstream f(temporary/"content/Common/Stage"/name,std::ios::binary);f.write(reinterpret_cast<const char*>(b.data()),std::streamsize(b.size()));};
+ const auto temporary=std::filesystem::temp_directory_path()/("world-placement-"+std::to_string(reinterpret_cast<uintptr_t>(&i)));std::filesystem::create_directories(temporary/"content/Common/Stage");auto write_fixture=[&](const char*name,const Bytes&b){std::ofstream f(temporary/"content/Common/Stage"/name,std::ios::binary);f.write(reinterpret_cast<const char*>(b.data()),std::streamsize(b.size()));};
  Bytes stage(4+12+12);u32(stage,0,1);tag(stage,4,"MULT");u32(stage,8,1);u32(stage,12,16);f32(stage,16,100);f32(stage,20,200);stage[26]=0;
- write("test_Stage.szs",sarc({{"stage.dzs",stage}}));write("test_Room0.szs",sarc({{"Room0.bfres",bfres({{"room.dzb",mesh()},{"room.dzr",layout()}})}}));auto loaded=load_native_room(temporary.string(),"test",0);bool complete=false;for(auto&c:loaded.coverage)if(c.room==0)complete=c.collision&&c.routes&&c.events;assert(complete);assert(loaded.bounds.size()==2);assert(near(loaded.bounds.back().bounds.minimum.x,20100));assert(check("test",0,{{-5000,0,-5000},{-4999,1,-4999}},loaded,0).empty());
- write("test_Room0.szs",{0,1,2});loaded=load_native_room(temporary.string(),"test",0);assert(check("test",0,local,loaded,0).front().kind=="coverage");assert(check("../test",0,local,load_native_room(temporary.string(),"../test",0)).front().kind=="coverage");std::filesystem::remove_all(temporary);
+ write_fixture("test_Stage.szs",sarc({{"stage.dzs",stage}}));write_fixture("test_Room0.szs",sarc({{"Room0.bfres",bfres({{"room.dzb",mesh()},{"room.dzr",layout()}})}}));auto loaded=load_native_room(temporary.string(),"test",0);bool complete=false;for(auto&c:loaded.coverage)if(c.room==0)complete=c.collision&&c.routes&&c.events;assert(complete);assert(loaded.bounds.size()==2);assert(near(loaded.bounds.back().bounds.minimum.x,20100));assert(check("test",0,{{-5000,0,-5000},{-4999,1,-4999}},loaded,0).empty());
+ write_fixture("test_Room0.szs",{0,1,2});loaded=load_native_room(temporary.string(),"test",0);assert(check("test",0,local,loaded,0).front().kind=="coverage");assert(check("../test",0,local,load_native_room(temporary.string(),"../test",0)).front().kind=="coverage");std::filesystem::remove_all(temporary);
 }

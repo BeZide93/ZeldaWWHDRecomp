@@ -1,7 +1,14 @@
+#include <array>
+#include <cassert>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <iostream>
+#include <string>
+#include <utility>
+#include <vector>
 #include "mods/story_world_manifest.h"
 #include "mods/story_actor_identity.h"
-#include <cassert>
-#include <iostream>
 using namespace story_notebook;
 using mods::json::Value;
 static Value example() {

@@ -1,9 +1,11 @@
+#include <cassert>
+#include <cstdint>
+#include <cstring>
+#include <map>
+#include <string>
 // SPDX-License-Identifier: MPL-2.0
 #include "mods/native_actor_profiles.h"
 #include "runtime.h"
-#include <cassert>
-#include <cstring>
-#include <map>
 #ifdef _WIN32
 #include <windows.h>
 #else
