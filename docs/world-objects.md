@@ -6,8 +6,9 @@ materials select the game's footstep sounds and surface effects.
 
 Static objects stay in place. Floating bodies follow the sea, and drifting bodies
 also move with wind or a current. Collision materials can make walls climbable
-and surfaces accept the hookshot. Grapple targets, distant island models, shore
-foam and sea-chart markers are later additions.
+and surfaces accept the hookshot. Objects can also declare grapple points.
+Static islands can add distant models, shore foam, sea-chart markers and arrival
+notices.
 
 ## Place a model with collision
 
@@ -380,3 +381,58 @@ loads recreate the points with their objects. Release the rope before making
 a portable or Last session save: those saves retain the game's existing
 restriction on saving while Link hangs from a rope. Grappling mod targets does
 not set the game's tutorial or progression flags.
+
+## Island presentation
+
+A static sea object can declare original models for its distant silhouette and
+coast decoration, plus an arrival name and sea-chart marker:
+
+```json
+{
+  "distant": {"model": "island-lod"},
+  "shoreline": {"model": "island-foam"},
+  "chart_marker": {"label": "Horizon Isle", "when_flag": "horizon.arrived"},
+  "arrival": {"name": "Horizon Isle", "radius": 2200, "flag": "horizon.arrived"}
+}
+```
+
+These fields are optional and belong on the island's actor declaration.
+`distant.model` and `shoreline.model` refer to rigid models declared in the same
+package. Both visual models must have 1–1024 triangles, and their bounds must
+stay within the main model bounds plus 512 local game units. Keep them aligned
+with the full model's origin. A readable silhouette and sufficient height help
+an island remain recognizable from neighboring sea squares. Distant geometry
+adds visibility, not remote collision or permission to overlap another island.
+
+The full model draws in its home square. Its distant model draws in the eight
+neighboring squares, with no distant collision. Shoreline decoration draws in
+the home square. Actors and their visual variants share 128 declaration slots;
+a sea square accepts at most 16 active visual variants. Removing objects in the
+editor retains their identities for undo and state restoration until restart.
+
+Author the shoreline model as a narrow ribbon along the model's coast. The
+current converter supports opaque materials: use an original pale texture and
+geometry with an uneven edge, rather than transparent water planes. Shoreline
+models are decoration and do not supply Link or ship collision. Native waves
+may cover low parts of the ribbon.
+
+Arrival names and chart labels allow up to 96 UTF-8 bytes. Arrival radius is
+100 to 20000 game units. Entering that radius produces the named flag in the
+mod's own progress; it never sets a retail game progression flag. A marker's
+`when_flag` can use that arrival flag to reveal the island after discovery.
+Use the same spelling in both fields. Keep collision placement within the
+usual limits and leave existing islands, events and sailing routes clear.
+
+The chart accepts eight island markers per mod and 32 across enabled mods.
+Its overview uses native story rings. A zoomed square has one available ring:
+the tracked quest takes priority, followed by the first eligible island marker.
+An arrival appears as a mod notice and is shown once per declared mod flag.
+Use `null` in an editor update to remove any island presentation block; omit a
+block to keep its current settings. Preparing a new visual model may require
+a reload or restart before the editor can use it.
+
+`examples/guest-mods/world-objects-w4` contains Horizon Isle, with a 40-triangle
+full model, 26-triangle distant model and 8-triangle opaque foam ribbon. Its
+source generator also reproduces the embedded textures and authored footstep
+materials. Enable this example separately from the earlier island and tower
+examples because their demonstration placements share the same sea area.

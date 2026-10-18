@@ -589,6 +589,24 @@ void grapple_world_object_commands() {
     auto cleared=place;cleared["id"]="tower-b";cleared["grapple_points"]=Value{};CHECK(ok(session.run("place_world_object",cleared))&&actor_of(session,"tower-b")->get("grapple_points").type==Value::Null);
 }
 
+void island_world_object_commands() {
+    FakeHost host;editor::Session session(&host);auto manifest=json(kManifest);manifest["models"]=json(R"([{"id":"island","source":"assets/island.glb"},{"id":"low","source":"assets/low.glb"},{"id":"coast","source":"assets/coast.glb"}])");session.add_package("editor-test","Editor test","",manifest);
+    auto place=json(R"({"id":"island-a","model":"island","collision":{"shape":"box","size":{"x":100,"y":100,"z":100}},"stage":"sea","room":12,"position":{"x":100,"y":0,"z":200},"distant":{"model":"low"},"shoreline":{"model":"coast"},"chart_marker":{"label":"Horizon Isle","when_flag":"island.arrived"},"arrival":{"name":"Horizon Isle","radius":2200,"flag":"island.arrived"}})");
+    CHECK(ok(session.run("place_world_object",place)));CHECK(actor_of(session,"island-a")->get("distant").get("model").string()=="low"&&actor_of(session,"island-a")->get("chart_marker").get("label").string()=="Horizon Isle");
+    CHECK(ok(session.run("set_world_object",json(R"({"id":"island-a","collision":{"shape":"sphere","radius":50}})"))));CHECK(actor_of(session,"island-a")->get("distant").get("model").string()=="low"&&actor_of(session,"island-a")->get("arrival").get("radius").number==2200);
+    CHECK(ok(session.run("set_world_object",json(R"({"id":"island-a","distant":null})"))));CHECK(actor_of(session,"island-a")->get("distant").type==Value::Null);CHECK(ok(session.run("undo"))&&actor_of(session,"island-a")->get("distant").get("model").string()=="low");CHECK(ok(session.run("redo")));CHECK(ok(session.run("undo")));
+    CHECK(ok(session.run("set_actor",json(R"({"id":"island-a","property":"shoreline","value":null})"))));CHECK(actor_of(session,"island-a")->get("shoreline").type==Value::Null);CHECK(ok(session.run("undo")));
+    CHECK(ok(session.run("set_actor",json(R"({"id":"island-a","property":"arrival","value":{"name":"New Horizon","radius":3000,"flag":"island.arrived"}})"))));CHECK(actor_of(session,"island-a")->get("arrival").get("name").string()=="New Horizon");
+    const auto before=*session.manifest("editor-test");const auto depth=session.undo_depth();
+    CHECK(!ok(session.run("set_world_object",json(R"({"id":"island-a","arrival":null})")))&&*session.manifest("editor-test")==before&&session.undo_depth()==depth); // Marker still reads this producer.
+    CHECK(!ok(session.run("set_world_object",json(R"({"id":"island-a","collision":{"shape":"box","size":{"x":200,"y":100,"z":100}},"distant":{"model":"missing"}})")))&&*session.manifest("editor-test")==before&&session.undo_depth()==depth);
+    CHECK(!ok(session.run("set_actor",json(R"({"id":"sign-a","property":"chart_marker","value":{"label":"Foreign"}})")))&&*session.manifest("editor-test")==before);
+    host.query_clear=false;CHECK(!ok(session.run("set_world_object",json(R"({"id":"island-a","arrival":{"name":"Other","radius":3000,"flag":"island.arrived"}})")))&&*session.manifest("editor-test")==before&&session.undo_depth()==depth);host.query_clear=true;
+    CHECK(ok(session.run("set_world_object",json(R"({"id":"island-a","distant":null,"shoreline":null,"chart_marker":null,"arrival":null,"behaviour":"floating"})"))));const auto*a=actor_of(session,"island-a");CHECK(a->get("behaviour").string()=="floating"&&a->get("distant").type==Value::Null&&a->get("chart_marker").type==Value::Null);
+    CHECK(ok(session.run("undo"))&&actor_of(session,"island-a")->get("distant").get("model").string()=="low"&&actor_of(session,"island-a")->get("arrival").get("name").string()=="New Horizon");
+    auto empty=place;empty["id"]="island-b";for(const char*key:{"distant","shoreline","chart_marker","arrival"})empty[key]=Value{};CHECK(ok(session.run("place_world_object",empty))&&actor_of(session,"island-b")->get("arrival").type==Value::Null);
+}
+
 void building(const fs::path& examples) {
     FakeHost host;
     editor::Session s(&host);
@@ -830,6 +848,7 @@ int main(int argc, char** argv) {
     world_object_commands();
     floating_world_object_commands();
     grapple_world_object_commands();
+    island_world_object_commands();
     command_layer();
     handle_drag();
     locations();

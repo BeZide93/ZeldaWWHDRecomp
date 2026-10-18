@@ -32,6 +32,9 @@ struct ManifestTalk {
     std::string quest,item,time,when_flag,when_not_flag,lines;unsigned quest_step=0;
     std::vector<QuestCondition> quests;std::vector<StoryAction> then;
 };
+struct ManifestVisualModel {std::string model;};
+struct ManifestChartMarker {bool enabled=false;std::string label,when_flag;};
+struct ManifestArrival {bool enabled=false;std::string name,flag;float radius=0;};
 struct ManifestGrapplePoint {std::string id;WorldPoint position;float yaw=0;};
 struct ManifestBuoyancy {float draft=0,damping=.25f,max_tilt=10;};
 struct ManifestDrift {float wind_speed=0,max_speed=30;WorldPoint current;};
@@ -42,6 +45,7 @@ struct ManifestActor {
     std::string behaviour,collision_mesh,collision_shape,collision_surface="stone";WorldPoint collision_size{};
     ManifestBuoyancy buoyancy;ManifestDrift drift;ManifestAnchor anchor;
     std::vector<ManifestGrapplePoint> grapple_points;
+    ManifestVisualModel distant,shoreline;ManifestChartMarker chart_marker;ManifestArrival arrival;
     bool world_object()const{return !behaviour.empty();}
     bool water_object()const{return behaviour=="floating"||behaviour=="drifting";}
     ManifestLookAt look_at;ManifestPath path;
@@ -118,6 +122,7 @@ inline bool known_flag(const Value& m,const std::string& name) {
         const bool chest=type=="chest"||type=="Tbox"||type=="takara"||type=="PROC_TBOX";
         const bool mod=a.get("kind").string()=="mod"&&!a.object.contains("actor");
         if((sign||chest||(mod&&!a.object.contains("combat")))&&produces(a.get("flag")))return true;
+        if(mod&&a.get("behaviour").string()=="static"&&a.get("stage").string()=="sea"&&produces(a.get("arrival").get("flag")))return true;
         if(type=="switch"&&produces(a.get("switch_flag")))return true;
         if((type=="pot"||type=="barrel"||type=="crate"||(mod&&a.get("carry").get("break_on_impact").type==Value::Bool&&a.get("carry").get("break_on_impact").boolean))&&produces(a.get("broken_flag")))return true;
         if((type=="chuchu"||type=="bokoblin"||type=="moblin"||type=="keese"||
@@ -255,8 +260,9 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
     using namespace world_manifest;out.clear();std::vector<ManifestModel> models;if(!parse_models(m,models,why))return false;const auto& list=m.get("actors");
     if(list.type==Value::Null)return true;
     if(list.type!=Value::Array||list.array.size()>kMaxActorsPerMod)return why="actors must be a list of up to 64",false;
+    unsigned chart_marker_count=0;
     for(const auto& v:list.array){ManifestActor a;
-        if(!keys(v,{"id","actor","kind","model","animation","look_at","path","collision","behaviour","buoyancy","drift","anchor","grapple_points","attention","stage","room","position","rotation","scale","params","parameters","flag","broken_flag","defeated_flag","drops","carry","combat","native_drops","switch_flag","switch","when","lines","then","texture","talks"}))return why="unknown actor field",false;
+        if(!keys(v,{"id","actor","kind","model","animation","look_at","path","collision","behaviour","buoyancy","drift","anchor","grapple_points","distant","shoreline","chart_marker","arrival","attention","stage","room","position","rotation","scale","params","parameters","flag","broken_flag","defeated_flag","drops","carry","combat","native_drops","switch_flag","switch","when","lines","then","texture","talks"}))return why="unknown actor field",false;
         if(!id(v.get("id")))return why="invalid actor id",false;a.id=v.get("id").text;a.actor=v.get("actor").string();
         if(v.object.contains("kind")) {
             if(v.get("kind").string()!="mod"||v.object.contains("actor"))return why="mod actor kind cannot name a native actor",false;
@@ -360,6 +366,28 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
         if(v.get("rotation").type!=Value::Null&&!point(v.get("rotation"),a.rotation,360))return why="invalid actor rotation",false;
         if(v.get("scale").type!=Value::Null&&(!point(v.get("scale"),a.scale,10)||a.scale.x<=0||a.scale.y<=0||a.scale.z<=0))return why="invalid actor scale",false;
         if((v.object.contains("buoyancy")||v.object.contains("drift")||v.object.contains("anchor"))&&!a.water_object())return why="motion settings require floating or drifting behaviour",false;
+        const bool island_fields=v.object.contains("distant")||v.object.contains("shoreline")||v.object.contains("chart_marker")||v.object.contains("arrival");
+        if(island_fields&&(!a.world_object()||a.behaviour!="static"||a.stage!="sea"))return why="distant, shoreline, chart_marker and arrival require a static sea world object",false;
+        auto visual_model=[&](const char*key,ManifestVisualModel&out){
+            if(!v.object.contains(key))return true;const auto&value=v.get(key);
+            if(!keys(value,{"model"})||!id(value.get("model")))return false;
+            out.model=value.get("model").text;
+            return std::any_of(models.begin(),models.end(),[&](const auto&model){return model.id==out.model&&model.kind=="static";});
+        };
+        if(!visual_model("distant",a.distant)||!visual_model("shoreline",a.shoreline))return why="distant and shoreline must name declared same-package rigid static models",false;
+        auto island_text=[](const Value&value,std::string&out){std::u16string decoded;if(value.type!=Value::String||value.text.empty()||value.text.size()>96||!story_mail::append_utf16(value.text,false,decoded))return false;out=value.text;return true;};
+        if(v.object.contains("arrival")){
+            const auto&value=v.get("arrival");
+            if(!keys(value,{"name","radius","flag"})||!island_text(value.get("name"),a.arrival.name)||!number(value.get("radius"),100,20000,a.arrival.radius)||!flag_id(value.get("flag")))return why="arrival requires a single-line name up to 96 bytes, radius 100..20000 and a mod-owned flag",false;
+            a.arrival.enabled=true;a.arrival.flag=value.get("flag").text;
+        }
+        if(v.object.contains("chart_marker")){
+            const auto&value=v.get("chart_marker");
+            if(!keys(value,{"label","when_flag"})||!island_text(value.get("label"),a.chart_marker.label))return why="chart_marker requires a single-line label up to 96 bytes",false;
+            if(value.object.contains("when_flag")){if(!flag_id(value.get("when_flag"))||!known_flag(m,value.get("when_flag").text))return why="chart marker when_flag must name a known mod-owned producer",false;a.chart_marker.when_flag=value.get("when_flag").text;}
+            if(++chart_marker_count>8)return why="a mod may declare at most eight island chart markers",false;
+            a.chart_marker.enabled=true;
+        }
         if(v.object.contains("grapple_points")){
             const auto&points=v.get("grapple_points");
             if(!a.world_object()||points.type!=Value::Array||points.array.size()>8)return why="grapple_points requires a world object and at most eight points",false;
@@ -562,6 +590,8 @@ inline bool parse_scenes_impl(const mods::json::Value& m,std::vector<ManifestSce
         out.push_back(std::move(s));
     }return true;
 }
+// Internal render roles needed in addition to the authored actor declaration.
+inline unsigned visual_variant_count(const ManifestActor&a){return unsigned(!a.distant.model.empty())+unsigned(!a.shoreline.model.empty());}
 inline bool parse_actors(const mods::json::Value& m,std::vector<ManifestActor>& out,std::string& why) {
     out.clear();std::vector<ManifestActor> parsed;if(!parse_actors_impl(m,parsed,why))return false;out=std::move(parsed);return true;
 }
@@ -571,16 +601,19 @@ inline bool parse_scenes(const mods::json::Value& m,std::vector<ManifestScene>& 
 namespace world_manifest {
 // Validate the selected package graph before any actor or scene registry is mutated.
 inline bool validate_world_packages(const std::vector<std::pair<std::string,mods::json::Value>>& packages,std::string& why) {
-    unsigned total=0;std::map<std::pair<std::string,unsigned>,unsigned> rooms;
+    unsigned total=0,chart_markers=0;std::map<std::pair<std::string,unsigned>,unsigned> rooms;
     std::map<uint16_t,std::pair<std::string,std::string>> flags;
     for(const auto& [mod,manifest]:packages){
         std::vector<ManifestActor> actors;std::vector<ManifestScene> scenes;
         if(!parse_actors(manifest,actors,why)||!parse_scenes(manifest,scenes,why)){why=mod+": "+why;return false;}
         total+=unsigned(actors.size());if(total>128)return why="enabled packages exceed 128 actors overall",false;
+        for(const auto&actor:actors)if(actor.chart_marker.enabled&&++chart_markers>32)return why="enabled packages exceed 32 island chart markers",false;
         std::vector<std::string> names;
         for(const auto& actor:actors){
             if(++rooms[{actor.stage,actor.room}]>kMaxActorsPerRoom)return why="enabled packages exceed 16 actors in "+actor.stage+" room "+std::to_string(actor.room),false;
             if(!actor.flag.empty())names.push_back(actor.flag);
+            if(actor.arrival.enabled)names.push_back(actor.arrival.flag);
+            if(actor.chart_marker.enabled&&!actor.chart_marker.when_flag.empty())names.push_back(actor.chart_marker.when_flag);
             for(const auto& action:actor.then)if(action.kind==StoryAction::Kind::Flag)names.push_back(action.id);
         }
         for(const auto& scene:scenes)for(const auto& step:scene.steps)for(const auto& action:step.then)

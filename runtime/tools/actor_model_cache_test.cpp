@@ -23,6 +23,9 @@ int main(int argc,char** argv){
         if(std::string(argv[2])=="reuse"&&!fs::is_regular_file(output))return 2;
         if(std::string(argv[2])!="missing"&&std::string(argv[2])!="reuse"){std::ofstream file(output,std::ios::binary);file.write("Yaz0synthetic-test",18);}
         mods::json::Value result;
+        if(std::string(argv[2])!="triangles_missing")result["triangles"]=std::string(argv[2])=="triangles_wrong"?13:12;
+        if(std::string(argv[2])=="triangles_fraction")result["triangles"]=12.5;
+        if(std::string(argv[2])=="triangles_string")result["triangles"]="12";
         if(!collision_output.empty()){
             auto bytes=collision_fixture();if(std::string(argv[2])=="collision_corrupt")bytes[0]=0;
             if(std::string(argv[2])!="collision_missing"){std::ofstream file(collision_output,std::ios::binary);file.write(reinterpret_cast<const char*>(bytes.data()),std::streamsize(bytes.size()));}
@@ -40,14 +43,16 @@ int main(int argc,char** argv){
     const auto guest="/vol/content/Common/Object/"+first+".szs";const auto file=actor_model_cache::archive_for(guest);assert(fs::path(file).lexically_normal()==(root/"data"/"models"/(first+".szs")).lexically_normal());
     story_notebook::WorldPoint minimum,maximum;assert(actor_model_cache::bounds_for(first,minimum,maximum));assert(minimum.x==0&&minimum.y==50&&minimum.z==100&&maximum.x==200&&maximum.y==350&&maximum.z==500);
     assert(!actor_model_cache::bounds_for("missing",minimum,maximum));
+    assert(actor_model_cache::triangles_for(first)==12&&actor_model_cache::triangles_for("missing")==0);
     const auto second=prepare("other","ok");assert(second!=first);assert(prepare("owner","reuse")==first);
     for(const auto& path:{first+".szs","/vol/content/Common/Object/../Object/"+first+".szs","/vol/content/Common/object/"+first+".szs",guest+"/tail","/vol/content/Common/Object/"+first+".bfres"})assert(actor_model_cache::archive_for(path).empty());
-    auto fails=[&](const std::string& tool){bool threw=false;try{prepare("owner",tool);}catch(const std::exception&){threw=true;}assert(threw&&actor_model_cache::archive_for(guest).empty()&&!actor_model_cache::bounds_for(first,minimum,maximum));};
+    auto fails=[&](const std::string& tool){bool threw=false;try{prepare("owner",tool);}catch(const std::exception&){threw=true;}assert(threw&&actor_model_cache::triangles_for(first)==0&&actor_model_cache::archive_for(guest).empty()&&!actor_model_cache::bounds_for(first,minimum,maximum));};
     fails("fail");prepare("owner","ok");fails("wrong");
+    for(const char* invalid:{"triangles_missing","triangles_wrong","triangles_fraction","triangles_string"}){prepare("owner","ok");fails(invalid);}
     fs::remove(file);fails("missing");
     auto prepare_collision=[&](const std::string& tool){return actor_model_cache::prepare("owner",model,(root/"package with spaces").string(),(root/"data").string(),command,tool,"game with spaces",true);};
     for(const char* invalid:{"collision_corrupt","collision_digest","collision_missing"}){
-        assert(prepare_collision("ok")==first);auto mesh=actor_model_cache::collision_for(first);assert(mesh&&mesh->vertices.size()==3&&mesh->triangles.size()==1&&mesh->triangles[0].indices[1]==2);
+        assert(prepare_collision("ok")==first);auto mesh=actor_model_cache::collision_for(first);assert(actor_model_cache::triangles_for(first)==12);assert(mesh&&mesh->vertices.size()==3&&mesh->triangles.size()==1&&mesh->triangles[0].indices[1]==2);
         if(std::string(invalid)=="collision_missing")fs::remove(file+".wcol");
         bool rejected=false;try{prepare_collision(invalid);}catch(const std::exception&){rejected=true;}
         assert(rejected&&actor_model_cache::archive_for(guest).empty()&&!actor_model_cache::collision_for(first)&&!actor_model_cache::bounds_for(first,minimum,maximum));

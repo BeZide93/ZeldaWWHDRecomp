@@ -1,5 +1,7 @@
 // Synthetic guest memory: exercise the shipped actor spawn/check/open hooks, with no game assets.
 #include "mods/story_actors.h"
+#include "mods/story_chart.h"
+#include "mods/story_world_arrival.h"
 #include "mods/mod_actor.h"
 #include "mods/story_props.h"
 #include "mods/story_switches.h"
@@ -32,6 +34,12 @@
 #include <optional>
 #include <cstdint>
 #endif
+namespace story_chart {
+void note_import(){} bool installed(){return true;}
+bool publish_world_markers(const std::string&,std::span<const WorldMarker>){return true;}
+SquarePlace square_place(float x,float z){const int col=int(std::floor((x+50000)/100000)),row=int(std::floor((z+50000)/100000));return {col,row,x-col*100000.f,z-row*100000.f};}
+}
+namespace story_world_arrival {bool show(const std::string&,float){return true;}void state_loaded(){}}
 std::vector<std::string> native_trace_records;
 void log_msg(const char* format,...){if(std::strncmp(format,"[native_actor]",14)!=0)return;char line[1024];va_list args;va_start(args,format);std::vsnprintf(line,sizeof(line),format,args);va_end(args);native_trace_records.emplace_back(line);}
 namespace {

@@ -192,6 +192,7 @@ namespace hooks { void exec_item_get(Cpu*) {} }
 }
 // World runtime has its own actor/scene tests; loader tests only exercise registration.
 namespace actor_model_cache {
+unsigned triangles_for(const std::string&){return 12;}
 std::shared_ptr<const story_world_collision::mesh::Mesh> collision_for(const std::string&){return {};}
 std::string archive_for(const std::string&){return {};}
 mod_actor::ModelRig rig_for(const std::string&){return {};}

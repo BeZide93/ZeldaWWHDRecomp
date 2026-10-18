@@ -9,7 +9,7 @@
 #include <mutex>
 namespace actor_model_cache {
 namespace {
-struct Entry {std::string mod,model,path;story_notebook::WorldPoint minimum,maximum;std::vector<std::string> clips;mod_actor::ModelRig rig;std::shared_ptr<const story_world_collision::mesh::Mesh> collision;};
+struct Entry {std::string mod,model,path;unsigned triangles=0;story_notebook::WorldPoint minimum,maximum;std::vector<std::string> clips;mod_actor::ModelRig rig;std::shared_ptr<const story_world_collision::mesh::Mesh> collision;};
 std::mutex mutex,prepare_mutex;
 std::map<std::string,Entry> entries;
 void check(bool ok,const char* reason){if(!ok)exception_report::raise(reason);}
@@ -55,6 +55,7 @@ std::string prepare(const std::string& mod,const story_notebook::ManifestModel& 
     const auto line=process.output.rfind('\n',end);const auto begin=line==std::string::npos?0:line+1;
     mods::json::Value result;try{result=mods::json::parse(process.output.substr(begin,end-begin+1));}catch(...){exception_report::raise("Static model converter returned invalid metadata");}
     check(result.get("identity").string()==identity,"Static model converter returned another archive identity");
+    check(static_models::integer(result.get("triangles"),1,static_models::kMaxTriangles)&&unsigned(result.get("triangles").number)==info.triangle_count,"Static model converter returned inconsistent render triangle metadata");
     check(fs::is_regular_file(destination)&&!fs::is_symlink(destination)&&fs::file_size(destination)>=16&&fs::file_size(destination)<=16*1024*1024,"Static model converter produced a missing or oversized archive");
     std::ifstream archive(destination,std::ios::binary);char magic[4]{};archive.read(magic,4);check(archive&&std::string(magic,4)=="Yaz0","Static model converter produced an invalid archive");
     std::shared_ptr<const story_world_collision::mesh::Mesh> collision_data;
@@ -66,9 +67,10 @@ std::string prepare(const std::string& mod,const story_notebook::ManifestModel& 
         check(result.get("collision_sha256").string()==mods::hash::sha256_text(std::string(bytes.begin(),bytes.end())),"Collision sidecar digest mismatch");
         collision_data=std::move(decoded);
     }
-    {std::lock_guard guard(mutex);entries.emplace(identity,Entry{mod,model.id,destination.string(),minimum,maximum,std::move(clips),std::move(rig),std::move(collision_data)});}
+    {std::lock_guard guard(mutex);entries.emplace(identity,Entry{mod,model.id,destination.string(),info.triangle_count,minimum,maximum,std::move(clips),std::move(rig),std::move(collision_data)});}
     return identity;
 }
+unsigned triangles_for(const std::string& archive){std::lock_guard guard(mutex);auto found=entries.find(archive);return found==entries.end()?0:found->second.triangles;}
 std::shared_ptr<const story_world_collision::mesh::Mesh> collision_for(const std::string& archive){std::lock_guard guard(mutex);auto found=entries.find(archive);return found==entries.end()?nullptr:found->second.collision;}
 std::string archive_for(const std::string& guest_path){
     constexpr const char* prefix="/vol/content/Common/Object/";constexpr size_t prefix_size=27;

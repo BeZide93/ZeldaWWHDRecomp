@@ -28,7 +28,7 @@ const std::vector<CommandInfo> kCommands = {
     {"open_mod", "Opens a mod: later commands without \"mod\" act on it.", {{"mod", "string", "the mod's id", true}}},
     {"list_actors", "The open mod's placed actors (game actors and mod models).", {{"mod", "string", "another mod than the open one"}}},
     {"get_actor", "One placed actor as the manifest declares it.", {{"id", "string", "the actor's id", true}, {"mod", "string", ""}}},
-    {"set_actor", "Sets one property of a placed actor (null removes it): position, rotation, scale, model, lines, collision, behaviour, buoyancy, drift, anchor, grapple_points, attention, animation, flag, stage, room, when, then, talks, look_at, path, parameters, defeated_flag, broken_flag, drops, native_drops, combat, carry, switch_flag, switch, texture.",
+    {"set_actor", "Sets one property of a placed actor (null removes it): position, rotation, scale, model, lines, collision, behaviour, buoyancy, drift, anchor, grapple_points, distant, shoreline, chart_marker, arrival, attention, animation, flag, stage, room, when, then, talks, look_at, path, parameters, defeated_flag, broken_flag, drops, native_drops, combat, carry, switch_flag, switch, texture.",
      {{"id", "string", "the actor's id", true}, {"property", "string", "the manifest field", true}, {"value", "any", "the new value; null removes the field", true}, {"mod", "string", ""}},
      true},
     {"move_actor", "Moves a placed actor.", {{"id", "string", "", true}, {"position", "point", "{x, y, z} in world units", true}, {"mod", "string", ""}}, true},
@@ -84,11 +84,15 @@ const std::vector<CommandInfo> kCommands = {
     {"place_world_object", "Places a static, floating or drifting mod object with collision in one undoable change.",
      {{"id", "string", "new actor id", true}, {"model", "string", "render model id", true}, {"collision", "object", "{mesh: model} or a simple shape", true},
       {"behaviour", "string", "static (default), floating or drifting"}, {"buoyancy", "object", "draft, damping seconds and max_tilt degrees"},
-      {"drift", "object", "wind_speed, current {x,z}, max_speed in units per second"}, {"anchor", "object", "world point and tether radius; drifting only"}, {"grapple_points", "array|null", "up to eight local grapple points {id,position,yaw}; null clears"}, {"stage", "string", "stage name", true}, {"room", "integer", "room number", true},
+      {"drift", "object", "wind_speed, current {x,z}, max_speed in units per second"}, {"anchor", "object", "world point and tether radius; drifting only"}, {"grapple_points", "array|null", "up to eight local grapple points {id,position,yaw}; null clears"},
+      {"distant", "object|null", "{model}: original low-detail model for adjacent sea squares"}, {"shoreline", "object|null", "{model}: original coast foam model"},
+      {"chart_marker", "object|null", "{label,when_flag?}: mod island marker"}, {"arrival", "object|null", "{name,radius,flag}: mod-owned arrival notice"}, {"stage", "string", "stage name", true}, {"room", "integer", "room number", true},
       {"position", "point", "world position", true}, {"rotation", "point", "degrees"}, {"scale", "point", "positive scale"}, {"mod", "string", ""}}, true},
     {"set_world_object", "Changes world-object collision, behaviour and motion parameters atomically.",
      {{"id", "string", "placed actor id", true}, {"collision", "object", "mesh reference or simple shape; unchanged when omitted"}, {"behaviour", "string", "static, floating or drifting; unchanged when omitted"},
-      {"buoyancy", "object|null", "draft, damping seconds and max_tilt degrees"}, {"drift", "object|null", "wind_speed, current {x,z}, max_speed in units per second"}, {"anchor", "object|null", "world point and tether radius; null removes it"}, {"grapple_points", "array|null", "local grapple points; omitted preserves, null clears"}, {"mod", "string", ""}}, true},
+      {"buoyancy", "object|null", "draft, damping seconds and max_tilt degrees"}, {"drift", "object|null", "wind_speed, current {x,z}, max_speed in units per second"}, {"anchor", "object|null", "world point and tether radius; null removes it"}, {"grapple_points", "array|null", "local grapple points; omitted preserves, null clears"},
+      {"distant", "object|null", "low-detail model; null removes it"}, {"shoreline", "object|null", "coast foam model; null removes it"},
+      {"chart_marker", "object|null", "island marker; null removes it"}, {"arrival", "object|null", "arrival notice; null removes it"}, {"mod", "string", ""}}, true},
     {"preview_collision", "Returns world-space collision vertices and edges for a wireframe preview, with placement findings.",
      {{"id", "string", "placed world object", true}, {"mod", "string", ""}}},
     {"placement_conflicts", "Returns placement conflicts and collision budget findings for a world object.",
@@ -996,7 +1000,7 @@ Value Session::dispatch(const std::string& command, const Value& p, std::string&
         static const std::set<std::string> allowed = {"actor", "kind", "model", "animation", "look_at", "path", "collision", "attention",
                                                       "stage", "room", "position", "rotation", "scale", "params", "parameters", "flag",
                                                       "when", "lines", "then", "talks", "defeated_flag", "broken_flag", "drops",
-                                                      "native_drops", "combat", "carry", "switch_flag", "switch", "texture", "behaviour", "buoyancy", "drift", "anchor", "grapple_points"};
+                                                      "native_drops", "combat", "carry", "switch_flag", "switch", "texture", "behaviour", "buoyancy", "drift", "anchor", "grapple_points", "distant", "shoreline", "chart_marker", "arrival"};
         const std::string property = text(p, "property");
         if (!allowed.contains(property)) return why = "\"" + property + "\" is not an actor property the editor sets", r;
         return actor_edit("Set " + property + " of " + text(p, "id"), [&](Value& a, std::string&) {

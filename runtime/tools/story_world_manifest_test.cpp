@@ -284,6 +284,38 @@ int main() {
         auto skinned=tower;skinned["models"].array[0]["kind"]="skinned";rejected(skinned);
     }
 
+    { // Island presentation is original, same-package, bounded and mod-flag owned.
+        auto island=mods::json::parse(R"({"models":[{"id":"island","source":"assets/island.glb"},{"id":"low","source":"assets/low.glb"},{"id":"coast","source":"assets/coast.glb"},{"id":"skin","source":"assets/skin.glb","kind":"skinned"}],"actors":[{"id":"island","kind":"mod","model":"island","behaviour":"static","stage":"sea","room":12,"position":{"x":100,"y":0,"z":200},"collision":{"shape":"box","size":{"x":100,"y":100,"z":100}},"distant":{"model":"low"},"shoreline":{"model":"coast"},"chart_marker":{"label":"Horizon Isle","when_flag":"island.arrived"},"arrival":{"name":"Horizon Isle","radius":2200,"flag":"island.arrived"}}]})");
+        assert(parse_actors(island,actors,why)&&actors[0].distant.model=="low"&&actors[0].shoreline.model=="coast"&&actors[0].chart_marker.enabled&&actors[0].chart_marker.when_flag=="island.arrived"&&actors[0].arrival.enabled&&actors[0].arrival.radius==2200&&actors[0].arrival.flag=="island.arrived");
+        assert(visual_variant_count(actors[0])==2&&world_manifest::known_flag(island,"island.arrived"));
+        auto rejected=[&](Value data){assert(!parse_actors(data,actors,why));};
+        const auto original=actors[0];const auto hash=story_actors::identity::fingerprint("own",original);
+        for(unsigned field=0;field<7;++field){auto changed=original;if(field==0)changed.distant.model="other";if(field==1)changed.shoreline.model="other";if(field==2)changed.chart_marker.label="Other";if(field==3)changed.chart_marker.when_flag="other";if(field==4)changed.arrival.name="Other";if(field==5)changed.arrival.radius+=1;if(field==6)changed.arrival.flag="other";assert(story_actors::identity::fingerprint("own",changed)!=hash);}
+        auto bare=island;for(const char*key:{"distant","shoreline","chart_marker","arrival"})bare["actors"].array[0].object.erase(key);assert(parse_actors(bare,actors,why)&&visual_variant_count(actors[0])==0);auto cleared=original;cleared.distant={};cleared.shoreline={};cleared.chart_marker={};cleared.arrival={};assert(story_actors::identity::fingerprint("own",actors[0])==story_actors::identity::fingerprint("own",cleared));
+        for(const char*key:{"distant","shoreline"})for(const char*id:{"missing","other:low","../low","skin"}){auto bad=island;bad["actors"].array[0][key]["model"]=id;rejected(bad);}
+        for(const char*key:{"distant","shoreline","chart_marker","arrival"}){auto bad=island;bad["actors"].array[0][key]=Value{};rejected(bad);bad=island;bad["actors"].array[0][key]["native_params"]=1;rejected(bad);}
+        for(const char*behaviour:{"floating","drifting"}){auto bad=island;bad["actors"].array[0]["behaviour"]=behaviour;if(std::string(behaviour)=="drifting")bad["actors"].array[0]["drift"]=mods::json::parse(R"({"wind_speed":1})");rejected(bad);}
+        {auto bad=island;bad["actors"].array[0]["stage"]="town";rejected(bad);}
+        {auto bad=island;auto&a=bad["actors"].array[0];a.object.erase("behaviour");a["collision"]=mods::json::parse(R"({"radius":30,"height":100,"mode":"solid"})");rejected(bad);}
+        {auto bad=example();bad["actors"].array[0]["distant"]=mods::json::parse(R"({"model":"low"})");rejected(bad);}
+        for(const char*key:{"label","name"}){
+            const char*block=std::string(key)=="label"?"chart_marker":"arrival";
+            for(const auto&text:{std::string(),std::string(97,'x'),std::string("two\nlines"),std::string(1,char(0xFF))}){auto bad=island;bad["actors"].array[0][block][key]=text;rejected(bad);}
+            auto data=island;data["actors"].array[0][block][key]=std::string(96,'x');assert(parse_actors(data,actors,why));data["actors"].array[0][block][key]="Île des étoiles";assert(parse_actors(data,actors,why));
+        }
+        for(int radius:{100,20000}){auto data=island;data["actors"].array[0]["arrival"]["radius"]=radius;assert(parse_actors(data,actors,why));}
+        for(int radius:{0,99,20001}){auto data=island;data["actors"].array[0]["arrival"]["radius"]=radius;rejected(data);}
+        for(const char*flag:{"missing","other:island.arrived","0x3510"}){auto bad=island;bad["actors"].array[0]["chart_marker"]["when_flag"]=flag;rejected(bad);}
+        for(const char*flag:{"","other:island.arrived","0x3510"}){auto bad=island;bad["actors"].array[0]["arrival"]["flag"]=flag;rejected(bad);}
+        {auto data=island;auto&a=data["actors"].array[0];a["chart_marker"].object.erase("when_flag");a.object.erase("arrival");assert(parse_actors(data,actors,why)&&actors[0].chart_marker.enabled&&!actors[0].arrival.enabled);}
+        {auto bad=island;bad["actors"].array[0].object.erase("arrival");rejected(bad);}
+        auto many=bare;auto prototype=many["actors"].array[0];many["actors"].array.clear();prototype["chart_marker"]=mods::json::parse(R"({"label":"An island"})");
+        for(unsigned n=0;n<8;++n){auto a=prototype;a["id"]="island"+std::to_string(n);a["position"]["x"]=int(1000*n);many["actors"].array.push_back(a);}assert(parse_actors(many,actors,why));
+        auto nine=many;auto ninth=prototype;ninth["id"]="ninth";nine["actors"].array.push_back(ninth);rejected(nine);
+        std::vector<std::pair<std::string,Value>> selected;for(unsigned n=0;n<4;++n){auto data=many;for(auto&a:data["actors"].array)a["room"]=int(n);selected.push_back({"owner"+std::to_string(n),data});}assert(world_manifest::validate_world_packages(selected,why));
+        auto extra=many;extra["actors"].array.resize(1);extra["actors"].array[0]["room"]=4;selected.push_back({"fifth",extra});assert(!world_manifest::validate_world_packages(selected,why));
+    }
+
     std::vector<ManifestModel> models;assert(parse_models(valid_mod,models,why)&&models[0].kind=="static");
     mod=valid_mod;mod["models"].array[0]["kind"]="skinned";assert(parse_models(mod,models,why)&&models[0].kind=="skinned");
     mod["models"].array[0]["kind"]="static";assert(parse_models(mod,models,why)&&models[0].kind=="static");

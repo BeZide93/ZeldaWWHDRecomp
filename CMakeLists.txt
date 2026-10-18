@@ -3301,3 +3301,15 @@ add_executable(story_world_grapple_test runtime/tools/story_world_grapple_test.c
 target_include_directories(story_world_grapple_test PRIVATE runtime/src runtime/include)
 target_compile_options(story_world_grapple_test PRIVATE -UNDEBUG)
 add_test(NAME story_world_grapple COMMAND story_world_grapple_test)
+
+# Island presentation uses native model instances without collision registrations.
+target_sources(story_actors_runtime_test PRIVATE runtime/src/mods/story_world_visuals.cpp)
+add_executable(story_world_visuals_test runtime/tools/story_world_visuals_test.cpp runtime/src/mods/story_world_visuals.cpp runtime/src/guest_addr_identity.c)
+target_include_directories(story_world_visuals_test PRIVATE runtime/src runtime/include)
+target_compile_options(story_world_visuals_test PRIVATE -UNDEBUG)
+add_test(NAME story_world_visuals COMMAND story_world_visuals_test)
+add_executable(story_world_arrival_test runtime/tools/story_world_arrival_test.cpp runtime/src/mods/story_world_arrival.cpp)
+target_include_directories(story_world_arrival_test PRIVATE runtime/src runtime/include)
+target_compile_options(story_world_arrival_test PRIVATE -UNDEBUG)
+add_test(NAME story_world_arrival COMMAND story_world_arrival_test)
+add_test(NAME story_world_visual_model_contract COMMAND mod_actor_runtime_test --world-visual)

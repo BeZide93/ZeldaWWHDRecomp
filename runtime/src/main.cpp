@@ -55,6 +55,7 @@
 #include "mods/packages.h"
 #include "mods/save_backup.h"
 #include "runtime.h"
+#include "mods/story_world_arrival.h"
 #include "overlay/editor_panel.h"
 #include "editor/editor_game.h"
 #ifdef __ANDROID__
@@ -456,6 +457,7 @@ int main(int argc, char** argv) {
 #endif
     }
     crash_context::initialize();
+    story_world_arrival::register_overlay();
     editor_ui::register_tab();  // the world editor's Editor tab (only with --editor)
     index_game_functions();
     install_crash_handler();

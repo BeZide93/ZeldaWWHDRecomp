@@ -1,4 +1,7 @@
 #include "story_actors.h"
+#include "story_world_visuals.h"
+#include "story_world_arrival.h"
+#include "story_chart.h"
 #include "mod_actor.h"
 #include "story_props.h"
 #include "story_switches.h"
@@ -40,6 +43,9 @@ uint32_t g_next_resident_event_token=1;
 struct ModelResource {std::string archive;int index;story_notebook::WorldPoint minimum,maximum;bool skinned=false;std::vector<std::string> clips;mod_actor::ModelRig rig;};
 std::map<std::pair<std::string,std::string>,ModelResource> g_models;
 std::map<uint16_t,std::pair<std::string,std::string>> g_flag_names;
+struct VisualBinding {std::string mod,id;story_world_visuals::Role role;uint32_t token=0;};
+std::vector<VisualBinding> g_visual_bindings;
+std::set<std::string> g_island_mods;
 
 void(*g_original)(Cpu*,uint32_t)=nullptr;
 uint32_t(*g_call)(Cpu*,uint32_t,std::initializer_list<uint32_t>)=nullptr;
@@ -339,6 +345,35 @@ void ym1_delete(Cpu* c){Actor* a=find(c->r[3]);if(a&&a->spec.resident==kYm1){if(
 
 // The checks a mod's actor list must pass, shared by start-up loading and the world editor's live
 // reload so both validate identically. `replacing`: the list replaces the mod's own loaded actors.
+bool visual_ready(const std::string&mod,const ManifestActor&a,std::string&why){
+ if(a.distant.model.empty()&&a.shoreline.model.empty())return true;
+ const auto main=g_models.find({mod,a.model});if(main==g_models.end())return why="prepared island model missing",false;
+ for(const auto*id:{&a.distant.model,&a.shoreline.model}){if(id->empty())continue;const auto r=g_models.find({mod,*id});if(r==g_models.end()||r->second.skinned)return why="distant/shoreline model must be prepared and rigid",false;const unsigned triangles=actor_model_cache::triangles_for(r->second.archive);if(!triangles||triangles>1024)return why="distant/shoreline model exceeds 1024 triangles or is unavailable",false;
+  const auto&v=r->second;const auto&m=main->second;const float lo[]={v.minimum.x,v.minimum.y,v.minimum.z},hi[]={v.maximum.x,v.maximum.y,v.maximum.z},ml[]={m.minimum.x,m.minimum.y,m.minimum.z},mh[]={m.maximum.x,m.maximum.y,m.maximum.z};for(unsigned k=0;k<3;++k)if(lo[k]<ml[k]-512||hi[k]>mh[k]+512)return why="distant/shoreline model must stay within the main model bounds plus 512 units",false;
+ }return true;
+}
+ManifestActor visual_actor(const std::string&mod,const ManifestActor&parent,story_world_visuals::Role role){
+ ManifestActor v;const bool far=role==story_world_visuals::Role::Distant;v.id="island-view."+mods::hash::sha256_text(mod+std::string(1,'\0')+parent.id+(far?".distant":".shoreline")).substr(0,16);v.kind="mod";v.model=far?parent.distant.model:parent.shoreline.model;v.stage=parent.stage;v.room=parent.room;v.position=parent.position;v.rotation=parent.rotation;v.scale=parent.scale;return v;
+}
+bool sync_visuals(const std::string&mod,const std::vector<ManifestActor>&actors,bool apply,std::string&why){
+ struct Planned{const ManifestActor*parent;story_world_visuals::Role role;ManifestActor spec;VisualBinding*binding;};std::vector<Planned> plan;size_t missing=0;
+ for(const auto&a:actors){if(!visual_ready(mod,a,why))return false;for(const auto role:{story_world_visuals::Role::Distant,story_world_visuals::Role::Shoreline}){const auto&id=role==story_world_visuals::Role::Distant?a.distant.model:a.shoreline.model;if(id.empty())continue;VisualBinding*binding=nullptr;for(auto&old:g_visual_bindings)if(old.mod==mod&&old.id==a.id&&old.role==role){binding=&old;break;}missing+=!binding;plan.push_back({&a,role,visual_actor(mod,a,role),binding});}}
+ if(g_visual_bindings.size()+missing>128||mod_actor::checkpoint()+missing>128)return why="visual declaration history is full; restart to reclaim removed variants",false;
+ for(const auto&p:plan)if(p.binding){const auto&r=g_models.at({mod,p.spec.model});if(!mod_actor::redeclare(p.binding->token,p.spec,r.archive,r.index,r.minimum,r.maximum,false,{}, {},false))return why="visual model cannot serve the requested transform",false;}
+ std::vector<story_world_visuals::Spec> preview;uint32_t future=uint32_t(mod_actor::checkpoint()+1);for(const auto&p:plan)preview.push_back({mod,p.parent->id,p.role,p.binding?p.binding->token:future++,int(p.parent->room),p.parent->position,p.parent->rotation,p.parent->scale,identity::fingerprint(mod,*p.parent)});
+ if(g_installed&&!story_world_visuals::replace(mod,preview,why,false))return false;
+ if(!apply)return true;g_visual_bindings.reserve(128);std::vector<story_world_visuals::Spec> specs;
+ for(const auto&p:plan){const auto&r=g_models.at({mod,p.spec.model});uint32_t token=p.binding?p.binding->token:mod_actor::declare(mod,p.spec,r.archive,r.index,{},r.minimum,r.maximum);if(!token)return why="cannot reserve visual model declaration",false;if(p.binding&&!mod_actor::redeclare(token,p.spec,r.archive,r.index,r.minimum,r.maximum,false,{}, {},true))return why="cannot update visual model declaration",false;if(!mod_actor::visual_role(token,p.role==story_world_visuals::Role::Distant))return why="cannot make collision-free model variant",false;if(!p.binding)g_visual_bindings.push_back({mod,p.parent->id,p.role,token});specs.push_back({mod,p.parent->id,p.role,token,int(p.parent->room),p.parent->position,p.parent->rotation,p.parent->scale,identity::fingerprint(mod,*p.parent)});}
+ if(g_installed&&!story_world_visuals::replace(mod,specs,why))return false;for(const auto&a:actors)if(a.arrival.enabled||a.chart_marker.enabled)g_island_mods.insert(mod);return true;
+}
+void publish_islands(Cpu*c,uint32_t player){
+ const auto book=story_store::book();std::map<std::string,std::vector<story_chart::WorldMarker>> markers;for(const auto&mod:g_island_mods)markers[mod];const bool sea=std::strncmp(reinterpret_cast<const char*>(mem::ptr(kStage)),"sea",8)==0;const int room=int8_t(ld8(player+0x326));
+ for(const auto&a:g_actors){if(!a.spec.chart_marker.enabled&&!a.spec.arrival.enabled)continue;auto&own=markers[a.mod];if(!eligible(a))continue;
+  if(a.spec.arrival.enabled&&sea&&room==int(a.spec.room)&&book.usable()&&!flag(book,a.mod,a.spec.arrival.flag)){const double dx=double(ldf32(player+0x314))-a.spec.position.x,dz=double(ldf32(player+0x31C))-a.spec.position.z;if(dx*dx+dz*dz<=double(a.spec.arrival.radius)*a.spec.arrival.radius&&set_flag(book,a.mod,a.spec.arrival.flag,true)){story_world_arrival::show(a.spec.arrival.name);LOG("[world_island] arrived mod=%s id=%s name=%s",a.mod.c_str(),a.spec.id.c_str(),a.spec.arrival.name.c_str());}}
+  if(a.spec.chart_marker.enabled&&(a.spec.chart_marker.when_flag.empty()||flag(book,a.mod,a.spec.chart_marker.when_flag)))own.push_back({a.spec.id,a.spec.chart_marker.label,a.spec.position.x,a.spec.position.z});
+ }
+ for(const auto&[mod,list]:markers)story_chart::publish_world_markers(mod,list);
+}
 bool check_specs(const std::string& mod,const std::vector<ManifestActor>& actors,bool replacing,std::string& why){
     for(const auto&a:actors)if(!a.talks.empty()&&a.actor!="resident"&&a.actor!="sign"&&!(a.kind=="mod"&&!a.combat_enabled&&!a.carry_enabled))return why="talks requires a dialogue actor",false;
 
@@ -349,10 +384,15 @@ bool check_specs(const std::string& mod,const std::vector<ManifestActor>& actors
         for(const auto& other:actors)if(other.stage==a.stage&&other.room==a.room)++count;
         if(count>story_notebook::kMaxActorsPerRoom)return why="enabled mods exceed 16 actors per room",false;
     }
+    size_t logical=actors.size(),visual=0;std::array<unsigned,50> views{};
+    auto count_visual=[&](const ManifestActor&a){visual+=story_notebook::visual_variant_count(a);if(a.stage!="sea"||a.room<1||a.room>49)return;const int col=(int(a.room)-1)%7,row=(int(a.room)-1)/7;if(!a.shoreline.model.empty())++views[a.room];if(!a.distant.model.empty())for(int z=std::max(0,row-1);z<=std::min(6,row+1);++z)for(int x=std::max(0,col-1);x<=std::min(6,col+1);++x)if(x!=col||z!=row)++views[1+z*7+x];};
+    for(const auto&old:g_actors)if(!replacing||old.mod!=mod){++logical;count_visual(old.spec);}for(const auto&a:actors)count_visual(a);
+    if(logical+visual>128)return why="actors and distant/shoreline variants exceed 128 declarations",false;
+    if(*std::max_element(views.begin(),views.end())>16)return why="distant/shoreline variants exceed 16 active views in a sea square",false;
     for(const auto& a:actors)if(a.actor=="resident"&&a.resident!=1&&a.resident!=9&&a.resident!=kYm1)return why="unsupported resident subtype",false;
     for(const auto& a:actors)if(a.actor=="resident"&&a.resident==kYm1&&std::fabs(a.position.x+202066.f)<10&&std::fabs(a.position.z-320123.f)<10)return why="ym1 position intersects native relocation area",false;
     for(const auto&a:actors)if(a.kind=="mod"){
-        const auto resource=g_models.find({mod,a.model});if(resource==g_models.end())return why="prepared actor model missing",false;
+        const auto resource=g_models.find({mod,a.model});if(resource==g_models.end())return why="prepared actor model missing",false;if(!visual_ready(mod,a,why))return false;
         if(a.combat_enabled){
             if(!resource->second.skinned||a.defeated_flag.empty()||!story_mail::valid_id(a.defeated_flag)||a.rotation.x!=0||a.rotation.z!=0||a.scale.x!=1||a.scale.y!=1||a.scale.z!=1||!a.flag.empty()||!a.lines.empty()||!a.then.empty())return why="unsupported generic combat configuration",false;
             for(const auto* clip:{&a.combat.flinch.clip,&a.combat.stun.clip,&a.combat.death.clip})if(((clip==&a.combat.stun.clip||clip==&a.combat.death.clip)&&clip->empty())||(!clip->empty()&&std::find(resource->second.clips.begin(),resource->second.clips.end(),*clip)==resource->second.clips.end()))return why="combat reaction clip unavailable",false;
@@ -402,9 +442,9 @@ bool load(const std::string& mod,const std::vector<ManifestActor>& actors,std::s
     if(!check_specs(mod,actors,false,why))return false;
     if(g_actors.capacity()<128)g_actors.reserve(128);  // the world editor adds actors later: their addresses stay put
     std::vector<std::string> flags=scene_flags;
-    for(const auto& a:actors){if(!a.when_flag.empty())flags.push_back(a.when_flag);if(!a.when_not_flag.empty())flags.push_back(a.when_not_flag);if(!a.flag.empty())flags.push_back(a.flag);if(!a.switch_flag.empty())flags.push_back(a.switch_flag);for(const auto&t:a.talks){if(!t.when_flag.empty())flags.push_back(t.when_flag);if(!t.when_not_flag.empty())flags.push_back(t.when_not_flag);for(const auto&action:t.then)if(action.kind==story_notebook::StoryAction::Kind::Flag)flags.push_back(action.id);}for(const auto& action:a.then)if(action.kind==story_notebook::StoryAction::Kind::Flag)flags.push_back(action.id);}
+    for(const auto& a:actors){if(!a.when_flag.empty())flags.push_back(a.when_flag);if(!a.when_not_flag.empty())flags.push_back(a.when_not_flag);if(!a.flag.empty())flags.push_back(a.flag);if(!a.switch_flag.empty())flags.push_back(a.switch_flag);if(a.arrival.enabled)flags.push_back(a.arrival.flag);if(a.chart_marker.enabled&&!a.chart_marker.when_flag.empty())flags.push_back(a.chart_marker.when_flag);for(const auto&t:a.talks){if(!t.when_flag.empty())flags.push_back(t.when_flag);if(!t.when_not_flag.empty())flags.push_back(t.when_not_flag);for(const auto&action:t.then)if(action.kind==story_notebook::StoryAction::Kind::Flag)flags.push_back(action.id);}for(const auto& action:a.then)if(action.kind==story_notebook::StoryAction::Kind::Flag)flags.push_back(action.id);}
     std::vector<Actor> staged;staged.reserve(actors.size());g_actors.reserve(g_actors.size()+actors.size());
-    struct LoadRollback {size_t props=story_props::checkpoint(),models=mod_actor::checkpoint(),switches=story_switches::checkpoint(),enemies=story_enemies::checkpoint(),ownership=story_enemy_ownership::checkpoint();story_items::PropMarkerCheckpoint markers=story_items::prop_marker_checkpoint();decltype(g_flag_names) flags=g_flag_names;bool committed=false;~LoadRollback(){if(!committed){story_props::rollback(props);mod_actor::rollback(models);story_switches::rollback(switches);story_enemies::rollback(enemies);story_enemy_ownership::rollback(ownership);story_items::rollback_prop_markers(markers);g_flag_names=std::move(flags);}}} rollback;
+    struct LoadRollback {decltype(g_island_mods) island_mods=g_island_mods;size_t visuals=g_visual_bindings.size();size_t props=story_props::checkpoint(),models=mod_actor::checkpoint(),switches=story_switches::checkpoint(),enemies=story_enemies::checkpoint(),ownership=story_enemy_ownership::checkpoint();story_items::PropMarkerCheckpoint markers=story_items::prop_marker_checkpoint();decltype(g_flag_names) flags=g_flag_names;bool committed=false;~LoadRollback(){if(!committed){g_island_mods=std::move(island_mods);g_visual_bindings.resize(visuals);story_props::rollback(props);mod_actor::rollback(models);story_switches::rollback(switches);story_enemies::rollback(enemies);story_enemy_ownership::rollback(ownership);story_items::rollback_prop_markers(markers);g_flag_names=std::move(flags);}}} rollback;
     if(!register_flags(mod,flags,why))return false;
     for(const auto& a:actors){Actor added{mod,a};if(a.actor=="resident"&&(a.resident==1||a.resident==9)){if(!g_next_resident_event_token||g_next_resident_event_token==0xFFFFFFFFu)return why="resident event token exhausted",false;added.resident_event_token=g_next_resident_event_token++;added.fingerprint=identity::fingerprint(mod,a);}if(a.kind=="mod"&&a.combat_enabled){added.combat_marker=story_items::register_enemy_marker(mod,a.id,a.defeated_flag,why);if(!added.combat_marker.value)return false;added.fingerprint=identity::fingerprint(mod,a);}if(a.kind=="mod"&&a.carry_break_on_impact){added.carry_marker=story_items::register_prop_marker(mod,a.id,a.broken_flag,why);if(!added.carry_marker)return false;added.fingerprint=identity::fingerprint(mod,a);}story_enemies::Kind enemy;if(enemy_kind(a,enemy)){added.fingerprint=identity::fingerprint(mod,a);story_enemies::Spec spec{enemy,mod,a.id,a.defeated_flag,{},added.fingerprint,1};for(const auto&drop:a.drops)spec.drops.push_back({drop.item,drop.quantity});added.enemy_token=story_enemies::declare(spec,why);if(!added.enemy_token)return false;}if(story_props::is_prop(a)){added.fingerprint=identity::fingerprint(mod,a);added.prop_token=story_props::declare(mod,a,why);if(!added.prop_token)return false;}if(a.actor=="switch"){if(a.switch_flag.empty())return why="switch requires an own flag",false;added.fingerprint=identity::fingerprint(mod,a);added.switch_token=story_switches::declare_switch(mod,a.id,why);added.switch_source=added.switch_token;if(!added.switch_token)return false;}staged.push_back(std::move(added));}
     for(auto& a:staged)if(a.spec.actor=="door"){
@@ -413,6 +453,7 @@ bool load(const std::string& mod,const std::vector<ManifestActor>& actors,std::s
         if(!source||!source->switch_token)return why="door must reference a same-mod switch",false;
         a.fingerprint=identity::fingerprint(mod,a.spec);a.switch_source=source->switch_token;a.switch_token=story_switches::declare_door(mod,a.spec.id,a.switch_source,why);if(!a.switch_token)return false;
     }
+    if(!sync_visuals(mod,actors,true,why))return false;for(const auto&a:actors)if(a.chart_marker.enabled)story_chart::note_import();
     for(auto& a:staged)g_actors.push_back(std::move(a));rollback.committed=true;return true;
 }
 bool register_flags(const std::string& mod,const std::vector<std::string>& flags,std::string& why){
@@ -568,10 +609,13 @@ void service(Cpu* c){
         // Keep creating/queued-for-deletion IDs until native lookup confirms they are gone.
         if(!exists){a.process=0xFFFFFFFFu;st32(g_scratch+128+uint32_t(&a-g_actors.data())*4,a.process);}
     }
-    room_loaded(c,room);
+    room_loaded(c,room);publish_islands(c,player);
+    const float observer_x=ldf32(player+0x314),observer_z=ldf32(player+0x31C);
+    int observer_square=-1;if(std::isfinite(observer_x)&&std::isfinite(observer_z)){const auto place=story_chart::square_place(observer_x,observer_z);observer_square=1+(place.row+3)*7+place.column+3;}
+    story_world_visuals::service(c,reinterpret_cast<const char*>(mem::ptr(kStage)),room,observer_square);
 }
 void state_loaded(){if(combat_declared())story_enemy_ownership::state_loaded();if(enemies_declared()){story_enemies::state_loaded();story_enemy_children::state_loaded();}
-    mod_actor::state_loaded();story_props::state_loaded();story_switches::state_loaded();cancel_talk("state-load",false,true);g_opening=nullptr;
+    story_world_visuals::state_loaded();story_world_arrival::state_loaded();mod_actor::state_loaded();story_props::state_loaded();story_switches::state_loaded();cancel_talk("state-load",false,true);g_opening=nullptr;
     for(size_t i=0;i<g_actors.size();++i){auto&a=g_actors[i];const uint32_t slot=g_scratch?g_scratch+128+uint32_t(i)*4:0;const uint32_t id=slot?ld32(slot):0;a.process=id?id:0xFFFFFFFFu;a.deleting=false;a.restore_talk=a.spec.actor=="resident"||a.spec.actor=="sign";a.restore_quarantined=false;
         if(a.enemy_token){story_enemy_ownership::Binding binding;const bool known=story_enemy_ownership::binding_state(a.enemy_token,binding);const uint32_t epoch=g_scratch?ld32(g_scratch+kEnemyEpochScratchOffset+uint32_t(i)*4):0;const bool queued=known&&(binding.state==story_enemy_ownership::BindingState::Queued||binding.state==story_enemy_ownership::BindingState::Active);const bool fresh=known&&binding.state==story_enemy_ownership::BindingState::Fresh;const bool retired=known&&binding.state==story_enemy_ownership::BindingState::Retired;const bool identity_ok=queued&&a.process==binding.pid&&identity::matches(mem::ptr(g_scratch+kIdentityScratchOffset+uint32_t(i)*identity::kRecordBytes),a.fingerprint);const bool no_pid=a.process==0xFFFFFFFFu;
             if(!epoch||!known||epoch!=binding.epoch||(!identity_ok&&!(no_pid&&(fresh||retired)))){
@@ -630,11 +674,11 @@ const char* restart_kind(const ManifestActor& a){
 // model is prepared. `why` says what waits for a restart otherwise.
 bool live_capable(const std::string& mod,const ManifestActor& a,std::string& why){
     if(const char* kind=restart_kind(a))return why=std::string(kind)+" appears after a restart",false;
-    if(!g_installed)return why="the game had no mod actors at start-up: new actors appear after a restart",false;
+    if(!g_installed)return why="the game had no mod actors at start-up: new actors appear after a restart",false;if(a.chart_marker.enabled&&!story_chart::installed())return why="the first island chart marker appears after a restart",false;
     if(a.actor=="resident"&&!(a.resident==kYm1?g_ym1_hooks:g_resident_hooks))return why="the first resident of this kind appears after a restart",false;
     if(a.kind=="mod"){
         if(!mod_actor::live_ready())return why="the first mod model actor appears after a restart",false;
-        if(!g_models.contains({mod,a.model}))return why="model "+a.model+" is not prepared yet: it appears after a reload or restart",false;
+        if(!g_models.contains({mod,a.model}))return why="model "+a.model+" is not prepared yet: it appears after a reload or restart",false;if(!visual_ready(mod,a,why))return false;
     }
     return true;
 }
@@ -734,7 +778,7 @@ bool editor_update(const std::string& mod,const std::vector<ManifestActor>& acto
         if(a->removed&&same_spec(mod,a->spec,spec)){plan.push_back({&spec,a,false,false});effective.push_back(spec);continue;}  // a removal undone
         const char* kind=restart_kind(a->spec);if(!kind)kind=restart_kind(spec);
         if(kind||(a->spec.kind=="mod")!=(spec.kind=="mod")||(spec.kind=="mod"&&!g_models.contains({mod,spec.model}))||
-           (spec.actor=="resident"&&!live_capable(mod,spec,reason))||(native_kind(a->spec)!=native_kind(spec))||(story_props::is_prop(spec)&&spec.texture_token!=a->spec.texture_token)){
+           ((spec.actor=="resident"||!spec.distant.model.empty()||!spec.shoreline.model.empty()||spec.chart_marker.enabled)&&!live_capable(mod,spec,reason))||(native_kind(a->spec)!=native_kind(spec))||(story_props::is_prop(spec)&&spec.texture_token!=a->spec.texture_token)){
             if(!kind&&native_kind(a->spec)!=native_kind(spec))reason="switching between a native prop, switch, door or enemy and another kind takes effect after a restart";
             later.push_back(spec.id+": "+(kind?std::string(kind)+" takes changes after a restart":reason.empty()?std::string("takes this change after a restart"):reason));
             if(!a->removed)effective.push_back(a->spec);
@@ -744,9 +788,9 @@ bool editor_update(const std::string& mod,const std::vector<ManifestActor>& acto
     }
     for(auto& [id,a]:own)if(!a->removed&&!listed.contains(id))remove.push_back(a);
     size_t creates=0;for(const auto& step:plan)creates+=step.create;
-    if(g_actors.size()+creates>128)return why="more than 128 world actors in all",false;
-    if(!check_specs(mod,effective,true,why))return false;
-    std::vector<std::string> flags;for(const auto& a:effective){if(!a.when_flag.empty())flags.push_back(a.when_flag);if(!a.when_not_flag.empty())flags.push_back(a.when_not_flag);if(!a.flag.empty())flags.push_back(a.flag);if(!a.switch_flag.empty())flags.push_back(a.switch_flag);for(const auto&t:a.talks){if(!t.when_flag.empty())flags.push_back(t.when_flag);if(!t.when_not_flag.empty())flags.push_back(t.when_not_flag);for(const auto&action:t.then)if(action.kind==story_notebook::StoryAction::Kind::Flag)flags.push_back(action.id);}for(const auto& action:a.then)if(action.kind==story_notebook::StoryAction::Kind::Flag)flags.push_back(action.id);}
+    if(g_actors.size()+creates>128)return why="more than 128 world actors in all",false;size_t new_views=0;for(const auto&a:effective)for(const auto role:{story_world_visuals::Role::Distant,story_world_visuals::Role::Shoreline}){const bool wanted=role==story_world_visuals::Role::Distant?!a.distant.model.empty():!a.shoreline.model.empty();if(wanted&&std::none_of(g_visual_bindings.begin(),g_visual_bindings.end(),[&](const VisualBinding&b){return b.mod==mod&&b.id==a.id&&b.role==role;}))++new_views;}if(g_actors.size()+creates+g_visual_bindings.size()+new_views>128)return why="actor/visual declaration history is full; restart to reclaim removed objects",false;
+    if(!check_specs(mod,effective,true,why))return false;if(!sync_visuals(mod,effective,false,why))return false;
+    std::vector<std::string> flags;for(const auto& a:effective){if(!a.when_flag.empty())flags.push_back(a.when_flag);if(!a.when_not_flag.empty())flags.push_back(a.when_not_flag);if(!a.flag.empty())flags.push_back(a.flag);if(!a.switch_flag.empty())flags.push_back(a.switch_flag);if(a.arrival.enabled)flags.push_back(a.arrival.flag);if(a.chart_marker.enabled&&!a.chart_marker.when_flag.empty())flags.push_back(a.chart_marker.when_flag);for(const auto&t:a.talks){if(!t.when_flag.empty())flags.push_back(t.when_flag);if(!t.when_not_flag.empty())flags.push_back(t.when_not_flag);for(const auto&action:t.then)if(action.kind==story_notebook::StoryAction::Kind::Flag)flags.push_back(action.id);}for(const auto& action:a.then)if(action.kind==story_notebook::StoryAction::Kind::Flag)flags.push_back(action.id);}
     auto saved_flags=g_flag_names;if(!register_flags(mod,flags,why))return false;
     // check every changed mod model first, then apply: a refusal leaves all declarations unchanged
     for(const bool apply:{false,true})for(const auto& step:plan){if(!step.update||step.spec->kind!="mod")continue;
@@ -800,6 +844,7 @@ bool editor_update(const std::string& mod,const std::vector<ManifestActor>& acto
         LOG("[actors] %s:%s %s by the editor",mod.c_str(),a->spec.id.c_str(),was_removed?"restored":"changed");
     }
     for(Actor* a:remove){a->removed=true;a->respawn=false;LOG("[actors] %s:%s removed by the editor",mod.c_str(),a->spec.id.c_str());}
+    if(!sync_visuals(mod,effective,true,why))return false;story_world_arrival::state_loaded();
     if(pending)*pending=std::move(later);
     return true;
 }
@@ -1071,6 +1116,8 @@ void install(const std::function<std::string(uint32_t)>& replaced_by,const std::
         }
         if(!story_enemy_ownership::install(replaced_by,replace)||!story_enemy_projectiles::install(replaced_by,replace)||(has_enemies&&!story_enemy_children::install(replaced_by,replace)))exception_report::raise("Cannot install combat ownership hooks");
     }
+    if(!story_world_visuals::configure({g_call,g_scratch+kVisualScratchOffset,[](const std::string&mod,const std::string&id){for(const auto&a:g_actors)if(a.mod==mod&&a.spec.id==id)return eligible(a);return false;},mod_actor::owns_visual}))exception_report::raise("Cannot configure island visual lifecycle");
+    std::set<std::string> visual_mods;for(const auto&binding:g_visual_bindings)visual_mods.insert(binding.mod);for(const auto&mod:visual_mods){std::vector<ManifestActor> own;for(const auto&a:g_actors)if(a.mod==mod)own.push_back(a.spec);std::string why;g_installed=true;const bool ok=sync_visuals(mod,own,true,why);g_installed=false;if(!ok)exception_report::raise("Cannot publish island views: "+why);}
     bool has_mod=false;
     for(size_t i=0;i<g_actors.size();++i){auto& a=g_actors[i];if(a.spec.kind!="mod")continue;
         auto model=g_models.find({a.mod,a.spec.model});if(model==g_models.end()){exception_report::raise("Prepared model unavailable for mod actor "+a.mod+":"+a.spec.id);}
