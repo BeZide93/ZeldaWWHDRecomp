@@ -935,15 +935,15 @@ bool clouds_draw(id<MTLRenderCommandEncoder> enc, const MTLViewport& vp, Surface
 // mode, so the game's cloud set does not depend on the mode (comparable runs).
 bool open_target_pass(const uint32_t* regs);  // metal_draw.mm
 void sky_clouds_begin(const uint32_t* regs, uint32_t seq) {
-    static uint64_t begins = 0, open = 0;
+    static uint64_t begins = 0, opened = 0;
     begins++;
     if (render::cloud_shadows() && R.enc && R.passColor[0]) {  // the sky buffer: its composite triggers the shadows
         g_sky = R.passColor[0], g_skyFrame = R.frame, g_skySeq = seq;
-        open++;
+        opened++;
     }
     static const bool logOn = env_on("WWHD_CLOUDS_LOG");
     if (logOn && begins % 300 == 0) LOG("[shadows] sky begins %llu, with an open sky pass %llu, composites %llu", (unsigned long long)begins,
-                                        (unsigned long long)open, (unsigned long long)g_composites);
+                                        (unsigned long long)opened, (unsigned long long)g_composites);
     if (render::horizon_haze() >= 1.0f && cloud_proto::mode() == cloud_proto::kOff) return;
     if ((!R.enc || !R.passColor[0]) && !open_target_pass(regs)) return;  // no open pass: the target registers' one
     Surface* t = R.passColor[0];

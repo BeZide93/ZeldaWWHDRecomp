@@ -18,9 +18,12 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace gfxvk {
 namespace {
@@ -169,12 +172,12 @@ static uint32_t g_skyAddr = 0, g_skySeq = 0, g_cloudsWanted = 0;
 static uint64_t g_skyFrame = ~0ull;
 void sky_clouds_begin(const uint32_t* regs, uint32_t seq) {
     (void)regs;
-    static uint64_t begins = 0, open = 0;
+    static uint64_t begins = 0, opened = 0;
     begins++;
-    if (R.rendering && R.passColors[0]) g_skyAddr = R.passColors[0]->addr, g_skySeq = seq, g_skyFrame = R.frame, open++;
+    if (R.rendering && R.passColors[0]) g_skyAddr = R.passColors[0]->addr, g_skySeq = seq, g_skyFrame = R.frame, opened++;
     if (cloud_proto::mode() == cloud_proto::kSdf) g_cloudsWanted = seq;
     if (begins % 300 == 0 && render::cloud_shadows())
-        LOG("[shadows] Vulkan: sky begins %llu, with an open pass %llu", (unsigned long long)begins, (unsigned long long)open);
+        LOG("[shadows] Vulkan: sky begins %llu, with an open pass %llu", (unsigned long long)begins, (unsigned long long)opened);
     const float reduce = 1.0f - render::horizon_haze();
     if (reduce <= 0.0f || stereo::frame.mode != stereo::Off) return;  // stereo 3D: the original sky (limitation)
     static uint64_t missed = 0;
