@@ -2630,6 +2630,7 @@ target_sources(guest_hooks_test PRIVATE runtime/src/native_quiescence.cpp)
 # is disabled only in this isolated test translation unit.
 add_executable(native_quiescence_test
     runtime/tools/native_quiescence_test.cpp
+    runtime/tools/native_quiescence_test_stubs.cpp
     runtime/src/native_quiescence.cpp
     runtime/src/mods/story_native_event_game_thread.cpp)
 target_include_directories(native_quiescence_test PRIVATE
