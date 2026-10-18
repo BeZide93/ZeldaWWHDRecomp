@@ -12,6 +12,7 @@
 
 #include "../editor/editor_game.h"
 #include "../editor/mcp_game.h"
+#include "../editor/scenes.h"
 #include "../gfx/renderer.h"
 #include "../input_map.h"
 #include "../platform/keycodes.h"
@@ -36,6 +37,10 @@ struct ShellState {
     bool focus_inspector = false, focus_problems = false;
     bool quests = false, flags = false, search = false, focus_quests = false;  // the quest editor's windows
     bool quests_focused = false;  // Ctrl+C / Ctrl+V are the quest editor's there
+    bool scenes = false, focus_scenes = false;  // the scene editor's window
+    // a walk point dragged with its handle in the picture
+    bool point_dragging = false;
+    float point_drag[16] = {};
     int gizmo = 0;           // 0 move, 1 turn
     int grid = 0, angle = 1;  // snapping: indexes into kGrid / kAngle
     std::string placing;      // a type from list_actor_types while placing by click
@@ -206,7 +211,7 @@ const ImGuiWindowClass& panel_class() {
 // Before each panel's Begin: it may dock with the other panels
 void panel() { ImGui::SetNextWindowClass(&panel_class()); }
 // The default layout: the toolbar along the top, the Outliner at the left, the Inspector (with Flags and
-// Search as tabs) at the right, Quests, Problems & export, Camera & test and Log as tabs along the bottom.
+// Search as tabs) at the right, Quests, Scenes, Problems & export, Camera & test and Log as tabs along the bottom.
 void default_layout(ImGuiID id, ImVec2 size) {
     ImGui::DockBuilderRemoveNode(id);
     ImGui::DockBuilderAddNode(id, ImGuiDockNodeFlags_DockSpace);
@@ -221,7 +226,7 @@ void default_layout(ImGuiID id, ImVec2 size) {
     ImGui::DockBuilderDockWindow("Editor", top);
     ImGui::DockBuilderDockWindow("Outliner", left);
     for (const char* name : {"Inspector", "Flags", "Search"}) ImGui::DockBuilderDockWindow(name, right);
-    for (const char* name : {"Quests", "Problems & export", "Camera & test", "Log"}) ImGui::DockBuilderDockWindow(name, bottom);
+    for (const char* name : {"Quests", "Scenes", "Problems & export", "Camera & test", "Log"}) ImGui::DockBuilderDockWindow(name, bottom);
     ImGui::DockBuilderFinish(id);
 }
 // The dockspace over the picture (above the status bar), before the panels each frame
@@ -332,6 +337,130 @@ void test_drag(ImVec2 centre) {
     if (f >= t.to) t.on = false;
 }
 
+// ---------------------------------------------------------------- the scene editor in the picture
+// The shown scene's camera keys (each eye, a line to what it looks at, lines from key to key), its
+// walking paths, and the camera at the timeline's cursor. The selected walk point gets the move handle;
+// letting go is one command (set_walk_point). True while that handle shows (the actor's handle waits).
+bool point3(const Value& v, float p[3]) {
+    if (v.type != Value::Object || v.get("x").type != Value::Number) return false;
+    p[0] = num(v, "x"), p[1] = num(v, "y"), p[2] = num(v, "z");
+    return true;
+}
+void line3(ImDrawList* dl, const View& v, const float a[3], const float b[3], ImU32 c, float t = 1.5f) {
+    ImVec2 pa, pb;
+    if (project(v, a, pa) && project(v, b, pb)) dl->AddLine(pa, pb, c, t);
+}
+void camera_mark(ImDrawList* dl, const View& v, const float eye[3], const float target[3], ImU32 c, const char* label) {
+    ImVec2 pe;
+    if (!project(v, eye, pe)) return;
+    // the direction it looks, 120 units long, and the view as a small box
+    float d[3] = {target[0] - eye[0], target[1] - eye[1], target[2] - eye[2]};
+    normalize(d);
+    const float tip[3] = {eye[0] + d[0] * 120, eye[1] + d[1] * 120, eye[2] + d[2] * 120};
+    line3(dl, v, eye, tip, c, 2.5f);
+    line3(dl, v, eye, target, (c & 0x00FFFFFFu) | 0x50000000u, 1);
+    dl->AddRectFilled(ImVec2(pe.x - 7, pe.y - 5), ImVec2(pe.x + 7, pe.y + 5), c, 2);
+    if (label && *label) dl->AddText(ImVec2(pe.x + 9, pe.y - 8), c, label);
+}
+bool scene_overlay(ImDrawList* dl, const View& v, const Value& m, bool& handle_busy) {
+    handle_busy = false;
+    std::string scene;
+    int step = 0, point = 0;
+    double scrub = -1;
+    if (!S.scenes || !editor_ui::scene_picture(scene, step, point, scrub)) return false;
+    const Value* sc = nullptr;
+    for (const auto& x : m.get("scenes").array)
+        if (x.get("id").string() == scene) sc = &x;
+    if (!sc) return false;
+    const auto& steps = sc->get("steps").array;
+    for (size_t i = 0; i < steps.size(); i++) {
+        const Value& st = steps[i];
+        const std::string t = st.get("type").string();
+        const bool sel = int(i + 1) == step;
+        const ImU32 cam = sel ? IM_COL32(255, 220, 90, 255) : IM_COL32(110, 175, 245, 200);
+        char label[48];
+        float e[3], g[3];
+        if (t == "camera" && point3(st.get("eye"), e)) {
+            if (!point3(st.get("target"), g)) std::memcpy(g, e, sizeof g), g[2] += 1;
+            std::snprintf(label, sizeof label, "%zu", i + 1);
+            camera_mark(dl, v, e, g, cam, label);
+            float e2[3], g2[3];
+            if (st.get("pan").boolean && point3(st.get("eye_to"), e2) && point3(st.get("target_to"), g2)) {
+                line3(dl, v, e, e2, cam, 2);
+                std::snprintf(label, sizeof label, "%zu end", i + 1);
+                camera_mark(dl, v, e2, g2, cam, label);
+            }
+        } else if (t == "camera_path") {
+            const auto& keys = st.get("points").array;
+            float prev[3] = {};
+            for (size_t k = 0; k < keys.size(); k++) {
+                if (!point3(keys[k].get("eye"), e) || !point3(keys[k].get("target"), g)) continue;
+                if (k) line3(dl, v, prev, e, cam, 2.5f);
+                std::snprintf(label, sizeof label, "%zu.%zu", i + 1, k + 1);
+                camera_mark(dl, v, e, g, cam, label);
+                std::memcpy(prev, e, sizeof prev);
+            }
+        } else if (t == "walk") {
+            const auto& pts = st.get("points").array;
+            const ImU32 c = sel ? IM_COL32(150, 240, 150, 255) : IM_COL32(110, 200, 120, 180);
+            float prev[3] = {};
+            for (size_t k = 0; k < pts.size(); k++) {
+                if (!point3(pts[k], e)) continue;
+                if (k) line3(dl, v, prev, e, c, 2.5f);
+                ImVec2 pp;
+                if (project(v, e, pp)) {
+                    const bool me = sel && int(k + 1) == point;
+                    dl->AddCircleFilled(pp, me ? 7.0f : 5.0f, me ? IM_COL32(255, 230, 120, 255) : c);
+                    std::snprintf(label, sizeof label, "%zu", k + 1);
+                    dl->AddText(ImVec2(pp.x + 8, pp.y - 8), c, label);
+                }
+                std::memcpy(prev, e, sizeof prev);
+            }
+        }
+    }
+    // the camera at the timeline's cursor
+    if (scrub >= 0) {
+        editor::WorldPoint eye, target;
+        size_t at = 0;
+        std::string why;
+        if (editor::scene_camera_at(*sc, scrub, eye, target, at, why)) {
+            const float e[3] = {eye.x, eye.y, eye.z}, g[3] = {target.x, target.y, target.z};
+            char label[48];
+            std::snprintf(label, sizeof label, "%.2fs", scrub / 60);
+            camera_mark(dl, v, e, g, IM_COL32(255, 120, 80, 255), label);
+        }
+    }
+    // the selected walk point's handle
+    if (step < 1 || step > int(steps.size()) || steps[size_t(step - 1)].get("type").string() != "walk") return false;
+    const auto& pts = steps[size_t(step - 1)].get("points").array;
+    float p[3];
+    if (point < 1 || point > int(pts.size()) || !point3(pts[size_t(point - 1)], p)) return false;
+    float model[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, p[0], p[1], p[2], 1};
+    if (S.point_dragging) std::memcpy(model, S.point_drag, sizeof model);
+    float view[16], proj[16];
+    gl_view(v, view);
+    gl_projection(v, proj);
+    ImGuizmo::SetDrawlist(dl);
+    ImGuizmo::SetOrthographic(false);
+    ImGuizmo::SetRect(v.pos.x, v.pos.y, v.size.x, v.size.y);
+    float snap_values[3] = {kGrid[S.grid], kGrid[S.grid], kGrid[S.grid]};
+    ImGuizmo::Manipulate(view, proj, ImGuizmo::TRANSLATE, ImGuizmo::WORLD, model, nullptr, S.grid > 0 ? snap_values : nullptr);
+    handle_busy = ImGuizmo::IsOver() || ImGuizmo::IsUsing();
+    if (ImGuizmo::IsUsing()) {
+        S.point_dragging = true;
+        std::memcpy(S.point_drag, model, sizeof model);
+    } else if (S.point_dragging) {
+        S.point_dragging = false;
+        Value prm;
+        prm["scene"] = scene;
+        prm["step"] = step;
+        prm["point"] = point;
+        prm["position"] = point_of(S.point_drag[12], S.point_drag[13], S.point_drag[14]);
+        editor_ui::command("set_walk_point", prm);
+    }
+    return true;
+}
+
 // ---------------------------------------------------------------- the picture: labels, cylinders, handles, clicks
 void world(float w, float h) {
     const editor_ui::Snapshot& snap = editor_ui::snapshot();
@@ -383,6 +512,9 @@ void world(float w, float h) {
         cylinder_of(a, radius, height);
         draw_cylinder(dl, v, p, radius, height, IM_COL32(255, 210, 90, 140));
     }
+    // the scene editor's cameras and walking paths; a walk point's handle comes before the actor's
+    bool point_handle_busy = false;
+    const bool point_handle = scene_overlay(dl, v, snap.manifest, point_handle_busy);
     // the selected actor: its cylinder and handles
     float model[16] = {};
     bool gizmo = false;
@@ -408,7 +540,7 @@ void world(float w, float h) {
         if (S.gizmo == 1) snap_values[0] = kAngle[S.angle];
         const bool snapping = S.gizmo == 0 ? S.grid > 0 : S.angle > 0;
         // after an Esc the handle rests (not interactive) until the mouse button is let go
-        if (!S.drag_cancelled) {
+        if (!S.drag_cancelled && !point_handle) {
             ImGuizmo::Manipulate(view, proj, S.gizmo == 0 ? ImGuizmo::TRANSLATE : ImGuizmo::ROTATE_Y, ImGuizmo::WORLD, model, nullptr,
                                  snapping ? snap_values : nullptr);
             gizmo = true;
@@ -467,7 +599,7 @@ void world(float w, float h) {
         dl->AddCircleFilled(l.at, 3, me ? IM_COL32(255, 210, 90, 255) : IM_COL32(200, 210, 225, 220));
     }
     // a click: place the chosen type on the ground there, or select the nearest label (or nothing)
-    const bool over_gizmo = gizmo && (ImGuizmo::IsOver() || ImGuizmo::IsUsing());
+    const bool over_gizmo = (gizmo && (ImGuizmo::IsOver() || ImGuizmo::IsUsing())) || point_handle_busy;
     if (hovered && !over_gizmo && ImGui::IsMouseClicked(0)) {
         const ImVec2 m = io.MousePos;
         if (!S.placing.empty()) {
@@ -630,6 +762,8 @@ void toolbar(float w) {
     ImGui::SameLine();
     ImGui::Checkbox("Quests", &S.quests);
     ImGui::SameLine();
+    ImGui::Checkbox("Scenes", &S.scenes);
+    ImGui::SameLine();
     ImGui::Checkbox("Flags", &S.flags);
     ImGui::SameLine();
     ImGui::Checkbox("Search", &S.search);
@@ -770,6 +904,16 @@ void panels(float w, float h) {
         S.quests_focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
         ImGui::End();
     }
+    // the scene editor: steps, timeline, inspector
+    if (S.scenes) {
+        ImGui::SetNextWindowPos(ImVec2(316, h * 0.45f), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(std::min(w - 330, 1200.0f), std::min(h * 0.5f, 520.0f)), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowBgAlpha(0.95f);
+        if (S.focus_scenes) ImGui::SetNextWindowFocus(), S.focus_scenes = false;
+        panel();
+        if (ImGui::Begin("Scenes", &S.scenes)) editor_ui::scene_editor(snap.manifest);
+        ImGui::End();
+    }
     if (S.flags) {
         // below the Quests window, at the right
         const float top = 110 + std::min(h * 0.56f, 600.0f) + 8;
@@ -844,12 +988,30 @@ void publish_escape(bool view) {
     g_escape.publish(view ? editor_escape::what(S.dragging, S.quests && editor_ui::quest_connecting(), !S.placing.empty()) : editor_escape::Cancel::None);
 }
 
-bool wanted(std::string&) { return editor::editor_view() || editor::playing() || editor_mcp::prompt_waiting(); }
+bool wanted(std::string&) { return editor::editor_view() || editor::playing() || editor::previewing() || editor_mcp::prompt_waiting(); }
 bool draw(float w, float h) {
     ImGuiIO& io = ImGui::GetIO();
     editor_ui::refresh();
     escape_frame();
     editor_ui::mcp_prompt();  // a tool client's question comes first, whatever the editor shows
+    if (editor::previewing()) {
+        // a scene preview: only its bar over the game
+        publish_escape(false);
+        cancel_drag();
+        ImGui::SetNextWindowPos(ImVec2(w * 0.5f, 10), ImGuiCond_Always, ImVec2(0.5f, 0));
+        ImGui::SetNextWindowBgAlpha(0.75f);
+        ImGui::Begin("##editor_preview", nullptr,
+                     ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
+                         ImGuiWindowFlags_NoNav);
+        const std::string label = editor::preview_label();
+        ImGui::TextColored(kGood, "%s", label.empty() ? "Scene preview (test mode)" : (label + " (test mode)").c_str());
+        ImGui::SameLine();
+        if (ImGui::Button("Skip")) editor_ui::command("skip_scene");
+        ImGui::SameLine();
+        if (ImGui::Button("Stop / back to editor")) editor_ui::command("stop_scene");
+        ImGui::End();
+        return false;
+    }
     if (!editor::editor_view() && !editor::playing()) return publish_escape(false), false;
     if (editor::playing()) {
         publish_escape(false);
@@ -900,7 +1062,7 @@ bool draw(float w, float h) {
             });
         }
         // copy and paste: the selected actors (also into another room: they go where the camera looks)
-        if (cmd && ImGui::IsKeyPressed(ImGuiKey_C, false) && !editor_ui::selected().empty() && !S.quests_focused) {
+        if (cmd && ImGui::IsKeyPressed(ImGuiKey_C, false) && !editor_ui::selected().empty() && !S.quests_focused && !editor_ui::scenes_focused()) {
             Value p, ids;
             ids.type = Value::Array;
             auto group = editor_ui::multi_selection();
@@ -909,7 +1071,7 @@ bool draw(float w, float h) {
             p["ids"] = ids;
             editor_ui::command("copy", p);
         }
-        if (cmd && ImGui::IsKeyPressed(ImGuiKey_V, false) && !S.quests_focused) {
+        if (cmd && ImGui::IsKeyPressed(ImGuiKey_V, false) && !S.quests_focused && !editor_ui::scenes_focused()) {
             const View v = view_of(io.DisplaySize.x, io.DisplaySize.y);
             if (v.ok) {
                 Value prm, o, d;
@@ -977,6 +1139,7 @@ void register_layers() {
         S.quests = w.find("quests") != std::string::npos;
         S.flags = w.find("flags") != std::string::npos;
         S.search = w.find("search") != std::string::npos;
+        S.scenes = w.find("scenes") != std::string::npos;
         S.reset_layout = w.find("resetlayout") != std::string::npos;  // as Reset layout at the first frame
         if (w.find("nooutliner") != std::string::npos) S.outliner = false;
         if (w.find("noinspector") != std::string::npos) S.inspector = false;
@@ -996,6 +1159,10 @@ void show_problems() {
 void show_quests() {
     S.quests = true;
     S.focus_quests = true;
+}
+void show_scenes() {
+    S.scenes = true;
+    S.focus_scenes = true;
 }
 
 }  // namespace editor_shell

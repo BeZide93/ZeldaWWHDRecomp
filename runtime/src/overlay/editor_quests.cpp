@@ -1294,6 +1294,8 @@ void search_area() {
                 editor_shell::show_inspector();
             } else if (kind == "quest" || kind == "quest_step")
                 show_quest(id, kind == "quest_step" ? "step:" + std::to_string(int(num(h, "step"))) : std::string());
+            else if (kind == "scene")
+                show_scene(id, int(num(h, "step")));
             else if (kind == "flag" && !h.get("used_by").array.empty()) {
                 selected() = h.get("used_by").array[0].string();
                 editor_shell::show_inspector();
