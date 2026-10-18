@@ -118,7 +118,7 @@ bool game_file(const fs::path& p) {
 const std::vector<ActorType>& actor_types() {
     static const std::vector<ActorType> types = {
         {"sign", "Sign", "Game actors", "A sign with up to three lines; its flag is set when read."},
-        {"resident", "Resident", "Game actors", "A villager who talks: uo2, um1 or the seated ym1 (options.resident)."},
+        {"resident", "Resident", "Game actors", "A villager of the game who talks with the mod's lines: options.resident picks who (the variants list them)."},
         {"chest", "Chest", "Game actors", "A treasure chest; its flag is set when opened."},
         {"pot", "Pot", "Props", "A pot to lift and break; its broken flag and drops.", false, false, false},
         {"barrel", "Barrel", "Props", "A barrel to lift and break.", false, false, false},
@@ -134,6 +134,13 @@ const std::vector<ActorType>& actor_types() {
         {"model_carry", "Carried prop", "Your models", "A model Link can lift and carry.", true, false, false},
     };
     return types;
+}
+
+std::vector<TypeVariant> type_variants(const std::string& type) {
+    std::vector<TypeVariant> out;
+    if (type == "resident")
+        for (const auto& t : story_resident_types::kTypes) out.push_back({"resident", t.code, t.label, t.help});
+    return out;
 }
 
 std::string free_id(const Value& list, const std::string& base) {
@@ -198,7 +205,14 @@ bool new_actor(const std::string& type, const std::string& id, const Place& plac
         lines("A new sign.");
     } else if (type == "resident") {
         Value params;
-        params["resident"] = options.get("resident").type == Value::String ? options.get("resident").text : std::string("uo2");
+        const std::string who = options.get("resident").type == Value::String ? options.get("resident").text : std::string("uo2");
+        if (!story_resident_types::find(who)) {
+            if (const char* no = story_resident_types::refused(who)) return why = no, false;
+            return why = "options.resident is one of " + story_resident_types::codes(), false;
+        }
+        if (const char* no = story_resident_types::place_problem(story_resident_types::find(who)->subtype, place.stage, place.position.x, place.position.z))
+            return why = no, false;
+        params["resident"] = who;
         a["parameters"] = params;
         lines("Hello!");
     } else if (type == "chest")
@@ -512,6 +526,18 @@ Value Session::dispatch_build(const std::string& command, const Value& p, std::s
             v["needs_model"] = t.needs_model;
             if (t.skinned) v["skinned"] = true;
             v["live"] = host_ ? host_->live_kind(t.type, t.live) : t.live;
+            const auto variants = type_variants(t.type);
+            if (!variants.empty()) {
+                v["option"] = variants.front().option;
+                v["variants"] = array();
+                for (const auto& x : variants) {
+                    Value e;
+                    e["value"] = x.value;
+                    e["label"] = x.label;
+                    e["help"] = x.help;
+                    v["variants"].array.push_back(e);
+                }
+            }
             r.array.push_back(v);
         }
         ok = true;

@@ -13,6 +13,7 @@
 #include "story_scenes_core.h"
 #include "story_mod_combat_manifest.h"
 #include "story_native_scene_manifest.h"
+#include "story_resident_types.h"
 namespace story_notebook {
 struct WorldPoint { float x=0,y=0,z=0; bool operator==(const WorldPoint&)const=default; };
 struct StoryAction {
@@ -456,7 +457,7 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
         const auto& named=v.get("parameters");
         if(named.type!=Value::Null&&named.type!=Value::Object)return why="actor parameters must be an object",false;
         for(const auto& [key,value]:named.object) {
-            if(key=="resident"&&a.actor=="resident") {if(value.type==Value::String&&(value.text=="uo2"||value.text=="um1"||value.text=="ym1"))a.resident=value.text=="uo2"?1:value.text=="ym1"?19:9;else if(integer(value,9,9))a.resident=9;else return why="resident must be uo2, um1 or seated ym1 (legacy numeric 9)",false;}
+            if(key=="resident"&&a.actor=="resident") {const auto* type=value.type==Value::String?story_resident_types::find(value.text):nullptr;if(type)a.resident=type->subtype;else if(integer(value,9,9))a.resident=9;else if(const char* no=value.type==Value::String?story_resident_types::refused(value.text):nullptr)return why=no,false;else return why="resident must be one of "+story_resident_types::codes()+" (legacy numeric 9)",false;}
             else if(key=="item"&&a.actor=="chest") {
                 if(value.type==Value::String&&value.text.rfind("item:",0)==0){
                     if(!declared(m,"items",value.text.substr(5)))return why="chest item names an undeclared mod item (item:<id> of \"items\")",false;
@@ -466,7 +467,7 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
             }
             else return why="unsupported named actor parameter: "+key,false;
         }
-        if(a.actor=="resident"&&a.resident==19&&std::fabs(a.position.x+202066.f)<10&&std::fabs(a.position.z-320123.f)<10)return why="ym1 position intersects native relocation area",false;
+        if(a.actor=="resident")if(const char* no=story_resident_types::place_problem(uint8_t(a.resident),a.stage,a.position.x,a.position.z))return why=no,false;
         if(a.actor=="sign"||a.actor=="chest"){if(!flag_id(v.get("flag")))return why="chests and signs require a mod-owned flag id",false;a.flag=v.get("flag").text;}
         if(!actor_condition(m,v.get("when"),a,why))return false;
         if(v.get("lines").type!=Value::Null&&!lines(v.get("lines"),a.lines))return why="invalid actor dialogue",false;

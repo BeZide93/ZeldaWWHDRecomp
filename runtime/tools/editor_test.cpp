@@ -30,6 +30,7 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <iterator>
 #include <utility>
 #include <vector>
 #include "editor/commands.h"
@@ -671,6 +672,27 @@ void building(const fs::path& examples) {
     CHECK(ok(r) && actor_of(s, "box")->get("position").get("x").number == 100 && actor_of(s, "box")->get("rotation").get("y").number == 90);
     r = s.run("add_actor", json(R"({"type": "resident", "at": "position", "position": {"x": 0, "y": 900, "z": -201500}, "stage": "sea", "options": {"resident": "um1"}})"));
     CHECK(ok(r) && actor_of(s, "resident")->get("room").number == 11 && actor_of(s, "resident")->get("parameters").get("resident").string() == "um1");
+    // who a resident is: the declared variants (list_actor_types), each one placeable; unsafe ones refused with the reason
+    {
+        const Value types = s.run("list_actor_types").get("result");
+        const Value* resident = nullptr;
+        for (const auto& t : types.array)
+            if (t.get("type").string() == "resident") resident = &t;
+        CHECK(resident && resident->get("option").string() == "resident" && resident->get("variants").array.size() == std::size(story_resident_types::kTypes));
+        bool sailor = false;
+        for (const auto& v : resident->get("variants").array) {
+            CHECK(!v.get("label").string().empty() && !v.get("help").string().empty());
+            sailor = sailor || v.get("value").string() == "sa2";
+        }
+        CHECK(sailor);
+        r = s.run("add_actor", json(R"({"type": "resident", "id": "lookout", "at": "position", "position": {"x": 0, "y": 900, "z": -201500}, "stage": "sea", "options": {"resident": "sa2"}})"));
+        CHECK(ok(r) && actor_of(s, "lookout")->get("parameters").get("resident").string() == "sa2");
+        r = s.run("add_actor", json(R"({"type": "resident", "id": "stargazer", "options": {"resident": "um3"}})"));
+        CHECK(!ok(r) && r.get("error").string().find("telescope") != std::string::npos && !actor_of(s, "stargazer"));
+        CHECK(!ok(s.run("add_actor", json(R"({"type": "resident", "id": "nobody", "options": {"resident": "zz9"}})"))));
+        CHECK(!ok(s.run("add_actor", json(R"({"type": "resident", "id": "studio", "at": "position", "position": {"x": 0, "y": 0, "z": 0}, "stage": "Ocmera", "room": 0, "options": {"resident": "ub4"}})"))));
+        CHECK(ok(s.run("remove_actor", json(R"({"id": "lookout", "confirm": true})"))));
+    }
     // no ground below: placed where asked, with a note
     host.has_ground = false;
     r = s.run("add_actor", json(R"({"type": "crate"})"));

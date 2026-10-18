@@ -26,6 +26,7 @@
 #include "story_scenes.h"
 #include "story_treasure.h"
 #include "story_treasure_chest.h"
+#include "story_resident_types.h"
 #include "guest_addr.h"
 #include "runtime.h"
 #include <algorithm>
@@ -69,7 +70,9 @@ const uint32_t kPeopleTalk=GC(0x022C1BBC),kPeopleDelete=GC(0x022BFF00);
 const uint32_t kPhotoActor=GC(0x025BED80),kPhotoPosition=GC(0x025BEBB8),kPhotoSnapshot=GC(0x025BEB4C);
 const uint32_t kNamedCandidate=GC(0x025D9E64),kStaffCandidate=GC(0x02542A38),kExtraOn=GC(0x02542AF4),kExtraOff=GC(0x02542BE0),kStaffId=GC(0x02542D88);
 const uint32_t kPeopleCheckOrder=GC(0x022C045C),kPeopleEventMove=GC(0x022C2958),kPeopleEventOrder=GC(0x022C2A04);
-constexpr uint32_t kCarrier=0x2CF3,kYm1=19,kTalkLatchOffset=0x280;
+constexpr uint32_t kCarrier=0x2CF3,kYm1=story_resident_types::kSeatedYm1,kTalkLatchOffset=0x280;
+// a daNpcPeople_c character from the shared table (every resident but the seated ym1)
+bool people_type(unsigned resident){return resident<256&&story_resident_types::people(uint8_t(resident));}
 static_assert(kTalkLatchOffset+128<=0x300); // Native PID slots precede this; room readiness follows it.
 const uint32_t kYm1Init=GC(0x022F75E4),kYm1SetAction=GC(0x022F7388),kYm1Pmf=GD(0x10023418);
 const uint32_t kYm1Msg=GC(0x022F9A48),kYm1Next=GC(0x022F9464),kYm1Talk=GC(0x022FA288),kYm1Execute=GC(0x022F8F2C),kYm1Delete=GC(0x022F82AC);
@@ -397,8 +400,8 @@ bool check_specs(const std::string& mod,const std::vector<ManifestActor>& actors
     for(const auto&old:g_actors)if(!replacing||old.mod!=mod){++logical;count_visual(old.spec);}for(const auto&a:actors)count_visual(a);
     if(logical+visual>128)return why="actors and distant/shoreline variants exceed 128 declarations",false;
     if(*std::max_element(views.begin(),views.end())>16)return why="distant/shoreline variants exceed 16 active views in a sea square",false;
-    for(const auto& a:actors)if(a.actor=="resident"&&a.resident!=1&&a.resident!=9&&a.resident!=kYm1)return why="unsupported resident subtype",false;
-    for(const auto& a:actors)if(a.actor=="resident"&&a.resident==kYm1&&std::fabs(a.position.x+202066.f)<10&&std::fabs(a.position.z-320123.f)<10)return why="ym1 position intersects native relocation area",false;
+    for(const auto& a:actors)if(a.actor=="resident"&&(a.resident>255||!story_resident_types::supported(uint8_t(a.resident))))return why="unsupported resident subtype",false;
+    for(const auto& a:actors)if(a.actor=="resident")if(const char* no=story_resident_types::place_problem(uint8_t(a.resident),a.stage,a.position.x,a.position.z))return why=no,false;
     for(const auto&a:actors)if(a.kind=="mod"){
         const auto resource=g_models.find({mod,a.model});if(resource==g_models.end())return why="prepared actor model missing",false;if(!visual_ready(mod,a,why))return false;
         if(a.combat_enabled){
@@ -454,7 +457,7 @@ bool load(const std::string& mod,const std::vector<ManifestActor>& actors,std::s
     std::vector<Actor> staged;staged.reserve(actors.size());g_actors.reserve(g_actors.size()+actors.size());
     struct LoadRollback {decltype(g_island_mods) island_mods=g_island_mods;size_t visuals=g_visual_bindings.size();size_t props=story_props::checkpoint(),models=mod_actor::checkpoint(),switches=story_switches::checkpoint(),enemies=story_enemies::checkpoint(),ownership=story_enemy_ownership::checkpoint();story_items::PropMarkerCheckpoint markers=story_items::prop_marker_checkpoint();decltype(g_flag_names) flags=g_flag_names;bool committed=false;~LoadRollback(){if(!committed){g_island_mods=std::move(island_mods);g_visual_bindings.resize(visuals);story_props::rollback(props);mod_actor::rollback(models);story_switches::rollback(switches);story_enemies::rollback(enemies);story_enemy_ownership::rollback(ownership);story_items::rollback_prop_markers(markers);g_flag_names=std::move(flags);}}} rollback;
     if(!register_flags(mod,flags,why))return false;
-    for(const auto& a:actors){Actor added{mod,a};if(a.actor=="resident"&&(a.resident==1||a.resident==9)){if(!g_next_resident_event_token||g_next_resident_event_token==0xFFFFFFFFu)return why="resident event token exhausted",false;added.resident_event_token=g_next_resident_event_token++;added.fingerprint=identity::fingerprint(mod,a);}if(a.kind=="mod"&&a.combat_enabled){added.combat_marker=story_items::register_enemy_marker(mod,a.id,a.defeated_flag,why);if(!added.combat_marker.value)return false;added.fingerprint=identity::fingerprint(mod,a);}if(a.kind=="mod"&&a.carry_break_on_impact){added.carry_marker=story_items::register_prop_marker(mod,a.id,a.broken_flag,why);if(!added.carry_marker)return false;added.fingerprint=identity::fingerprint(mod,a);}story_enemies::Kind enemy;if(enemy_kind(a,enemy)){added.fingerprint=identity::fingerprint(mod,a);story_enemies::Spec spec{enemy,mod,a.id,a.defeated_flag,{},added.fingerprint,1};for(const auto&drop:a.drops)spec.drops.push_back({drop.item,drop.quantity});added.enemy_token=story_enemies::declare(spec,why);if(!added.enemy_token)return false;}if(story_props::is_prop(a)){added.fingerprint=identity::fingerprint(mod,a);added.prop_token=story_props::declare(mod,a,why);if(!added.prop_token)return false;}if(a.actor=="switch"){if(a.switch_flag.empty())return why="switch requires an own flag",false;added.fingerprint=identity::fingerprint(mod,a);added.switch_token=story_switches::declare_switch(mod,a.id,why);added.switch_source=added.switch_token;if(!added.switch_token)return false;}staged.push_back(std::move(added));}
+    for(const auto& a:actors){Actor added{mod,a};if(a.actor=="resident"&&people_type(a.resident)){if(!g_next_resident_event_token||g_next_resident_event_token==0xFFFFFFFFu)return why="resident event token exhausted",false;added.resident_event_token=g_next_resident_event_token++;added.fingerprint=identity::fingerprint(mod,a);}if(a.kind=="mod"&&a.combat_enabled){added.combat_marker=story_items::register_enemy_marker(mod,a.id,a.defeated_flag,why);if(!added.combat_marker.value)return false;added.fingerprint=identity::fingerprint(mod,a);}if(a.kind=="mod"&&a.carry_break_on_impact){added.carry_marker=story_items::register_prop_marker(mod,a.id,a.broken_flag,why);if(!added.carry_marker)return false;added.fingerprint=identity::fingerprint(mod,a);}story_enemies::Kind enemy;if(enemy_kind(a,enemy)){added.fingerprint=identity::fingerprint(mod,a);story_enemies::Spec spec{enemy,mod,a.id,a.defeated_flag,{},added.fingerprint,1};for(const auto&drop:a.drops)spec.drops.push_back({drop.item,drop.quantity});added.enemy_token=story_enemies::declare(spec,why);if(!added.enemy_token)return false;}if(story_props::is_prop(a)){added.fingerprint=identity::fingerprint(mod,a);added.prop_token=story_props::declare(mod,a,why);if(!added.prop_token)return false;}if(a.actor=="switch"){if(a.switch_flag.empty())return why="switch requires an own flag",false;added.fingerprint=identity::fingerprint(mod,a);added.switch_token=story_switches::declare_switch(mod,a.id,why);added.switch_source=added.switch_token;if(!added.switch_token)return false;}staged.push_back(std::move(added));}
     for(auto& a:staged)if(a.spec.actor=="door"){
         const Actor* source=nullptr;for(const auto& candidate:staged)if(candidate.spec.actor=="switch"&&candidate.spec.id==a.spec.switch_actor)source=&candidate;
         if(!source)for(const auto& candidate:g_actors)if(candidate.mod==mod&&candidate.spec.actor=="switch"&&candidate.spec.id==a.spec.switch_actor)source=&candidate;
@@ -570,7 +573,7 @@ void room_loaded(Cpu* c,int room) {
         if(a.prop_token||a.switch_token)st16(g_scratch+0x10,255);
         if(a.enemy_token)st16(g_scratch+0x10,story_enemies::home_z(enemy));
         if(a.spec.actor=="chest")st16(g_scratch+0x10,uint16_t((uint32_t(a.spec.item_game)<<8)|255));
-        const uint32_t params=a.enemy_token?story_enemies::parameters(enemy):a.switch_token?story_switches::parameters(a.spec.actor=="switch"?story_switches::Kind::Switch:story_switches::Kind::Door):a.prop_token?story_props::parameters(a.spec):a.spec.kind=="mod"?a.mod_token:a.spec.actor=="sign"?kCarrier:a.spec.actor=="resident"?(a.spec.resident==kYm1?1u:0x00FF0000u):0;
+        const uint32_t params=a.enemy_token?story_enemies::parameters(enemy):a.switch_token?story_switches::parameters(a.spec.actor=="switch"?story_switches::Kind::Switch:story_switches::Kind::Door):a.prop_token?story_props::parameters(a.spec):a.spec.kind=="mod"?a.mod_token:a.spec.actor=="sign"?kCarrier:a.spec.actor=="resident"?story_resident_types::params(uint8_t(a.spec.resident)):0;
         Cpu call=*c;a.deleting=false;
         const uint32_t previous_layer=g_call(&call,GC(0x025DED64),{});
         g_call(&call,GC(0x025DEAB4),{room_layer});
@@ -837,8 +840,8 @@ bool editor_update(const std::string& mod,const std::vector<ManifestActor>& acto
             if(added.mod_token&&!added.spec.talks.empty())mod_actor::set_talk_provider(mod,added.spec.id,mod_talk_provider(mod,added.spec.id));
             if(!added.mod_token){LOG("[actors] %s:%s: the model can't serve this spec; it appears after a restart",mod.c_str(),added.spec.id.c_str());later.push_back(added.spec.id+": the model can't serve this spec");continue;}
         }
-        if(native_kind(added.spec)||(added.spec.actor=="resident"&&(added.spec.resident==1||added.spec.resident==9)))added.fingerprint=identity::fingerprint(mod,added.spec);
-        if(added.spec.actor=="resident"&&(added.spec.resident==1||added.spec.resident==9)&&g_next_resident_event_token&&g_next_resident_event_token!=0xFFFFFFFFu)added.resident_event_token=g_next_resident_event_token++;
+        if(native_kind(added.spec)||(added.spec.actor=="resident"&&people_type(added.spec.resident)))added.fingerprint=identity::fingerprint(mod,added.spec);
+        if(added.spec.actor=="resident"&&people_type(added.spec.resident)&&g_next_resident_event_token&&g_next_resident_event_token!=0xFFFFFFFFu)added.resident_event_token=g_next_resident_event_token++;
         story_enemies::Kind enemy{};
         if(story_props::is_prop(added.spec)){added.prop_token=story_props::editor_declare(mod,added.spec,w);if(!added.prop_token){later.push_back(added.spec.id+": "+w);continue;}}
         else if(enemy_kind(added.spec,enemy)){added.enemy_token=story_enemies::editor_declare(enemy_spec(mod,added.spec,added.fingerprint,1),w);if(!added.enemy_token){later.push_back(added.spec.id+": "+w);continue;}}

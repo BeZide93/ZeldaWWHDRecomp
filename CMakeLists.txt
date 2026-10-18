@@ -1388,6 +1388,7 @@ add_test(NAME story_actor_ordered_talks COMMAND story_actors_runtime_test --talk
 add_test(NAME story_actor_editor_without_declarations COMMAND story_actors_runtime_test --editor-empty)
 add_test(NAME story_actor_sign_ordered_talks COMMAND story_actors_runtime_test --talks-sign)
 add_test(NAME story_actor_nonresident_hook_scope COMMAND story_actors_runtime_test --no-resident)
+add_test(NAME story_actor_villager_catalogue COMMAND story_actors_runtime_test --catalogue)
 add_test(NAME story_actor_editor_live COMMAND story_actors_runtime_test --editor)
 add_test(NAME story_actor_seated_resident_contract COMMAND story_actors_runtime_test --ym1)
 add_test(NAME story_actor_prop_spawn_contract COMMAND story_actors_runtime_test --props)

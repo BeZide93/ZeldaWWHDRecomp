@@ -55,6 +55,7 @@ std::array<uint8_t,1024> extension{};
 std::map<uint32_t,void(*)(Cpu*)> hooks;
 uint32_t created=0,actor_id=100;unsigned originals=0,says=0,unsays=0,talk_finishes=0;
 uint32_t current_layer=kArena+0x6800;bool room_available=true;
+uint32_t expect_people_subtype=1,expect_people_params=0x00FF0000,expect_people_yaw=0x4000;
 bool sign_native_fixture=false,sign_a_pressed=false;unsigned sign_end_transitions=0;uint32_t sign_status=14;
 uint32_t ym1_partner=0,ym1_message_status=6;unsigned seated_actions=0,seated_bases=0;
 bool prop_broken_fixture=false;unsigned prop_claim_calls=0,enemy_claim_calls=0;bool enemy_terminal=false,refuse_enemy_request=false,enemy_four_mode=false,mo_disarm_fixture=false;
@@ -129,7 +130,7 @@ uint32_t call(Cpu*,uint32_t fn,std::initializer_list<uint32_t> args) {
         if(a[0]>=0x7FF7&&a[0]<=0x7FFA){if(refuse_enemy_request)return 0xFFFFFFFFu;const auto kind=story_enemies::Kind(0x7FFA-a[0]);const uint32_t address=enemy_address(unsigned(kind)),id=actor_id+40+unsigned(kind);assert(a[1]==story_enemies::parameters(kind)&&a[6]==0xFFFFFFFFu&&ld16(a[4]+4)==story_enemies::home_z(kind));enemy_fixture(kind,address,id);st32(address+0x2C,current_layer);live[id]=address;return id;}
         uint32_t address=kActor+((a[0]==0x175||a[0]==0x13B)?0x1000:a[0]==story_switches::kDoorProfile?0x1000:a[0]==0xB6?0x2000:a[0]==mod_actor::kProfile?0x3000:0);uint32_t id=actor_id+(address-kActor)/0x1000;
         if(a[0]==0x125){assert(a[1]==0);assert(a[3]==0);assert(ld16(a[4]+4)==0x06FF);}
-        else if(a[0]==0x175){assert(a[1]==0x00FF0000);assert(a[3]==1);assert(a[6]==1);assert(ld16(a[4]+2)==0x4000);}
+        else if(a[0]==0x175){assert(a[1]==expect_people_params);assert(a[3]==1);assert(a[6]==expect_people_subtype);assert(ld16(a[4]+2)==expect_people_yaw);}
         else if(a[0]==0x13B){assert(a[1]==1&&a[3]==1&&a[6]==0xFFFFFFFFu);}
         else if(a[0]==story_props::kProfile){assert(a[1]==0x007FFF3F&&a[3]==0&&a[6]==0xFFFFFFFFu&&ld16(a[4]+4)==255);assert(u32_as_f32(ld32(a[5]))==2&&ld32(a[5])==ld32(a[5]+4)&&ld32(a[5])==ld32(a[5]+8));}
         else if(a[0]==story_switches::kSwitchProfile||a[0]==story_switches::kDoorProfile){assert(a[1]==story_switches::parameters(a[0]==story_switches::kSwitchProfile?story_switches::Kind::Switch:story_switches::Kind::Door)&&a[3]==0&&a[6]==0xFFFFFFFFu&&ld16(a[4]+4)==255);}
@@ -398,6 +399,30 @@ int main(int argc,char** argv){
         st32(at+0x10,0);assert(!story_actors::editor_pose(&c,"late","guide",{710,20,800},{0,90,0})&&held_executes==2);st32(at+0x10,profile);
         std::puts("editor with no declared actors: live kinds installed, a new resident appears at once");return 0;
     }
+    if(argc==2&&std::strcmp(argv[1],"--catalogue")==0){
+        // the villager catalogue: a non-uo2/um1 character is created with its own subtype and fixed
+        // parameters and gets every placed-copy guard; refused characters and places never load
+        std::memcpy(mem::ptr(0x1046F0B0+0x5134),"sea",4);
+        std::string why;story_notebook::ManifestActor bad;bad.id="stargazer";bad.actor="resident";bad.stage="sea";bad.room=1;
+        for(unsigned refused:{11u,16u,17u,18u,20u}){bad.resident=refused;assert(!story_actors::load("cat",{bad},why));}
+        bad.resident=6;bad.stage="Ocmera";bad.room=0;assert(!story_actors::load("cat",{bad},why)&&why.find("Ocmera")!=std::string::npos);
+        story_notebook::ManifestActor young;young.id="young";young.actor="resident";young.stage="sea";young.room=1;young.resident=10;young.lines="Mod words";young.flag="young-talked";
+        expect_people_subtype=10;expect_people_params=0x00FF00FF;expect_people_yaw=0;
+        assert(story_actors::load("cat",{young},why));story_actors::set_scratch_memory(kScratch);
+        story_actors::install([](uint32_t){return std::string{};},[](uint32_t a,void(*h)(Cpu*)){hooks[a]=h;});
+        Cpu c{};story_actors::native_room_loaded(&c,1);assert(created==1);
+        const uint32_t npc=kActor+0x1000;assert(ld8(npc+0x905)==10&&ld8(npc+0x2DD)==10&&ld32(npc+0xB0)==0x00FF00FF);
+        assert(story_actors::actor_address(&c,"cat","young")==npc);
+        // never a retail event order, at either time of day
+        st16(npc+0xFC,0x1234);st8(npc+0x910,0);Cpu order{};order.r[3]=npc;hooks.at(0x022C045C)(&order);assert(ld16(npc+0xFC)==0xFFFF&&ld8(npc+0x910)==1);
+        // the message is the mod's text
+        st16(npc+0xF8,1);Cpu talk{};talk.r[3]=npc;hooks.at(0x022C6C68)(&talk);assert(talk.r[3]==0x2CF3);
+        // excluded from retail name searches, photos and event staff
+        const unsigned before=originals;Cpu named{};named.r[3]=npc;hooks.at(0x025D9E64)(&named);assert(named.r[3]==0&&originals==before);
+        Cpu photo{};photo.r[4]=npc;hooks.at(0x025BED80)(&photo);assert(originals==before);
+        Cpu staff{};staff.r[5]=npc;hooks.at(0x02542D88)(&staff);assert(staff.r[3]==0xFFFFFFFFu&&originals==before);
+        std::puts("villager catalogue: subtype, fixed parameters, guards and refusals passed");return 0;
+    }
     if(argc==2&&std::strcmp(argv[1],"--no-resident")==0){
         story_notebook::ManifestActor sign;sign.id="notice";sign.actor="sign";sign.stage="sea";sign.room=2;sign.flag="read";
         std::string why;assert(story_actors::load("sign-only",{sign},why));
@@ -423,7 +448,7 @@ int main(int argc,char** argv){
     assert(story_actors::register_model("test","postmodel","unique_post",1,why));
     assert(!story_actors::register_model("test","othermodel","unique_post",1,why));
     st32(0x101F3EE0+0xB6*4,kArena+0x6000);
-    auto rejected_resident=resident;rejected_resident.resident=10;assert(!story_actors::load("bad",{rejected_resident},why));
+    auto rejected_resident=resident;rejected_resident.resident=11;assert(!story_actors::load("bad",{rejected_resident},why));
     assert(story_actors::load("test",{chest,resident,sign,own},why));const unsigned declaration_calls=native_calls;story_actors::ResidentEventDeclaration declaration;
     assert(story_actors::resident_event_declaration("test","guide",declaration)&&declaration.token&&declaration.stage=="sea"&&declaration.room==1&&declaration.subtype==1&&native_calls==declaration_calls);
     const auto declared_token=declaration.token;const auto declared_hash=declaration.fingerprint;declaration.stage="mutated";declaration.fingerprint.fill(0);assert(story_actors::resident_event_declaration("test","guide",declaration)&&declaration.stage=="sea"&&declaration.fingerprint==declared_hash);

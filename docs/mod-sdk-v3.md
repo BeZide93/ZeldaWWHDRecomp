@@ -28,15 +28,40 @@ The initial allowlist is deliberately small:
 | Actor | Names accepted | Parameters |
 | --- | --- | --- |
 | Sign | `sign`, `kanban`, `PROC_KANBAN` | A mod-owned `flag`; optional dialogue |
-| Resident | `resident`, `NpcPeople`, `PROC_NPC_PEOPLE` | `parameters: {"resident": "uo2"}`, `"um1"` or seated `"ym1"`; default and legacy numeric `9` select Um1 |
+| Resident | `resident`, `NpcPeople`, `PROC_NPC_PEOPLE` | `parameters: {"resident": "uo2"}`: one of the villagers below; default and legacy numeric `9` select Um1 |
 | Chest | `chest`, `Tbox`, `takara`, `PROC_TBOX` | A mod-owned `flag`; what it holds in `parameters.item` (below) |
 | Breakable prop | `pot`, `barrel`, `crate` | Required mod-owned `broken_flag` and `drops` list |
 | Latched floor switch | `switch` | Required mod-owned `switch_flag`; fixed yellow switch |
 | Rotating gate | `door` | Required `switch` naming a switch actor in the same mod |
 | Native enemies (preview) | `chuchu`, `bokoblin`, `moblin`, `keese` | Required mod-owned `defeated_flag` and `drops`; fixed ordinary variants |
 
-Resident names are exact native object codes. This preview supports only `uo2`, `um1` and seated `ym1`, with fixed ordinary parameters and no native rail or quest variants.
-Other names and numeric values are rejected. Each placed copy uses mod dialogue
+Resident names are exact native object codes in lower case. Each placed copy uses fixed ordinary
+parameters: it stands where you put it (no native walking route) and has none of the character's
+quest or story variants.
+
+| Code | Who it looks like | Notes |
+| --- | --- | --- |
+| `uo2` | The man from the Windfall bar | |
+| `um1` | The windmill keeper | |
+| `uo1` | The old man on the sea-view bench | |
+| `uo3` | The well-dressed man walking through town | A placed copy stands still |
+| `ub1`, `ub2` | The two women chatting on the steps | Each is placed on its own |
+| `ub3` | The woman on the harbour pier | |
+| `ub4` | The woman by the town gate | Not in the photo studio (`Ocmera`) |
+| `uw1` | The young woman working in the bar | |
+| `uw2`, `um2` | The young woman and young man of the town square | A placed copy is there whatever their story |
+| `sa1` | The sailor who drinks in the bar at night | |
+| `sa2` | The sailor on the high lookout | |
+| `sa3` | The sailor on the stone dock | |
+| `sa4` | The sailor at the end of the wooden pier | |
+| `ym1` | A seated man | See below |
+
+Day and night: a copy looks like the character at the time of day it was created.
+Other names and numeric values are rejected. These Windfall people are not placeable, because
+their ordinary behaviour changes the game: `um3` (his telescope talk sets the game's progress at
+night), `sa5` (he moves the game's pigs), `ug1` and `ug2` (they follow the game's week and its
+hide-and-seek event). The other characters of the NPC catalogue are separate actor classes with
+their own quests and are not placeable yet. Each placed copy uses mod dialogue
 and flags; retail originals keep their own dialogue and quests. Placed copies
 are excluded from retail named cohorts and figurine registration, while normal
 world freezing, attention and collision remain native. Restored open dialogue

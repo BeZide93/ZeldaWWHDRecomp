@@ -351,6 +351,12 @@ struct ActorType {
     bool live = true;          // appears without a restart (where the game has the kind already)
 };
 const std::vector<ActorType>& actor_types();
+// The declared choices of a type (list_actor_types "variants"): the add_actor option that takes them
+// ("resident") and each choice's value, the editor's name for it and plain help. Empty: no choices.
+struct TypeVariant {
+    std::string option, value, label, help;
+};
+std::vector<TypeVariant> type_variants(const std::string& type);
 // A new placed actor of `type` (actor_types) with id `id` at `place`, valid on its own: the flags it
 // needs get ids of its own. `model` for model types; `options` may name "resident", "switch", "lines".
 bool new_actor(const std::string& type, const std::string& id, const Place& place, const std::string& model, const Value& manifest,
