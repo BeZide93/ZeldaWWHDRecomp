@@ -998,6 +998,11 @@ Full save states include the mods' memory and heaps. Both state formats record w
 continues. Loading a state never installs, enables or disables mods. Files a mod writes
 itself are not part of save states.
 
+Mod features reserve guest memory only when a loaded mod uses them (native particles, held item
+models, world actors and scenes, story progress). A start without mods reserves none, so its full
+save states keep the layout of the game without mods: full states made without mods by builds
+from before 2026-10-17 load again.
+
 ## Limits
 
 - macOS, Windows, Linux and Android. On Android the setup app builds the game code with code-mod

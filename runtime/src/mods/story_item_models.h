@@ -10,6 +10,8 @@ namespace story_item_models {
 inline constexpr uint32_t kMemoryBytes=1024;
 using Invoke=uint32_t(*)(Cpu*,uint32_t,std::initializer_list<uint32_t>);
 bool declare(uint16_t key,const std::string& archive,unsigned frames,std::string& why,const std::string& asset_digest={});
+// a held model is declared (start-up): only then does guestmods allocate the record and hook
+bool declared();
 size_t checkpoint();
 void rollback(size_t) noexcept;
 void configure(uint32_t memory,void(*original)(Cpu*,uint32_t),Invoke);

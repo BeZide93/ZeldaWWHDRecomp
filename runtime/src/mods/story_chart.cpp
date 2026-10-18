@@ -235,10 +235,14 @@ void apply(uint32_t menu) {
     };
     std::vector<Place> shown;
     bool tracked = false;
-    if (Place t{}; g_tracked) {  // the notebook's tracked quest comes first
+    // the notebook's tracked quest comes first, only with a story block the port can read (as before the
+    // world objects: an unreadable block shows no ring)
+    if (Place t{}; g_tracked && book().usable()) {
         std::string label;
         if (g_tracked(t.x, t.z, label)) shown.push_back(t), tracked = true;
     }
+    // world-object islands (publish_world_markers): fixed declarations that need no story record here;
+    // a marker behind a flag is published only once story_actors reads that flag from a usable block
     for(const auto& m:world_markers())shown.push_back({m.x,m.z});
     if (shown.empty()) return;
     const float cx = float(ldf32(main + kPaneTranslate)), cy = float(ldf32(main + kPaneTranslate + 4));

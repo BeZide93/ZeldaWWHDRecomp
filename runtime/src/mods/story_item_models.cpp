@@ -57,6 +57,7 @@ void create(Cpu*c){auto*d=definition(ld32(area+4));if(!d||ld32(area+32))return;
 }
 }
 bool declare(uint16_t key,const std::string&archive,unsigned frames,std::string&why,const std::string&asset_digest){if(installed||!key||archive.empty()||archive.size()>95||frames<1||frames>300||declarations.size()>=8)return why="invalid held model or more than eight item models",false;for(unsigned char c:archive)if(!(std::isalnum(c)||c=='_'||c=='-'))return why="invalid prepared archive identity",false;if(definition(key))return why="duplicate item model key",false;declarations.push_back({key,archive,frames,fingerprint(key,archive+":"+asset_digest,frames)});return true;}
+bool declared(){return !declarations.empty();}
 size_t checkpoint(){return declarations.size();}
 void rollback(size_t n) noexcept{if(!installed&&n<=declarations.size())declarations.resize(n);}
 void configure(uint32_t memory,void(*o)(Cpu*,uint32_t),Invoke i){area=memory;original=o;invoke=i;if(trace())LOG("[item_model] scratch=%08X bytes=%u",area,kMemoryBytes);}

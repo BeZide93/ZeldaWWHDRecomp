@@ -26,7 +26,8 @@
 // This entire harness constructs synthetic startup registries; production has no unseal.
 #include "mods/guest_mods.cpp"
 namespace story_native_wait_runtime {
-void startup(bool,LogicStep) {assert(story_native_scene_request::startup_window_current());}
+static unsigned startups=0;
+void startup(bool,LogicStep) {++startups;assert(story_native_scene_request::startup_window_current());}
 void logic(Cpu*) {}
 void state_loaded() {}
 }
@@ -119,7 +120,7 @@ std::optional<Value> read(const std::string& key) {
 }
 namespace input {PadState read() {return {};}}
 namespace true60 {float dt() {return 0.5f;}}
-namespace mem { std::string read_cstr(uint32_t) { return "option"; } uint32_t host_alloc(uint32_t,uint32_t) { return 0; } uint32_t runtime_alloc(uint32_t,uint32_t) {return 0;} uint32_t runtime_top(){return 0;} }
+namespace mem { std::string read_cstr(uint32_t) { return "option"; } uint32_t host_alloc(uint32_t,uint32_t) { return 0; } unsigned fixture_runtime_allocs=0; uint32_t runtime_alloc(uint32_t,uint32_t) {++fixture_runtime_allocs;return 0;} uint32_t runtime_top(){return 0;} }
 namespace dispatch { bool fixture_text_sealed=false,fixture_dispatch_tampered=false;void set(uint32_t, PpcFunc) {} PpcFunc lookup(uint32_t a){if(fixture_dispatch_tampered)return nullptr;for(unsigned n=0;n<g_recomp_func_count;++n)if(g_recomp_funcs[n].addr==a)return g_recomp_funcs[n].fn;return nullptr;} bool seal_native_text()noexcept{return false;} bool native_text_sealed()noexcept{return fixture_text_sealed;} }
 namespace model_probe {bool native_refresh_quiescent()noexcept{return true;}}
 // The hook runner fixture has no guest scheduler. Its logic-service thread
@@ -250,7 +251,8 @@ void set_texture_apply(TextureApply){}
 bool texture_heap(uint32_t,uint32_t&,uint32_t&){return false;}
 }
 namespace story_particles {
-bool configure(Invoke,uint32_t,uint32_t,uint32_t){return true;}
+static unsigned configured=0;
+bool configure(Invoke,uint32_t,uint32_t,uint32_t){++configured;return true;}
 bool burst(Cpu*,const Burst&){return false;}
 static unsigned calls=0;static bool accept=true;static std::string effect;static Placement placement;static Options options;
 bool burst_named(Cpu*,std::string_view e,const Placement&p,Options o){++calls;effect=e;placement=p;options=o;return accept;}
@@ -377,9 +379,11 @@ void install(const std::function<std::string(uint32_t)>&,const std::function<voi
 // Item presentation has its own native-routing/lifetime tests; this fixture isolates guest hooks.
 namespace story_item_models {
 bool declare(uint16_t,const std::string&,unsigned,std::string&,const std::string&) {return true;}
+bool declared() {return false;}
+static unsigned configured=0;
 size_t checkpoint() {return 0;}
 void rollback(size_t) noexcept {}
-void configure(uint32_t,void(*)(Cpu*,uint32_t),Invoke) {}
+void configure(uint32_t,void(*)(Cpu*,uint32_t),Invoke) {++configured;}
 bool install(const std::function<std::string(uint32_t)>&,const std::function<void(uint32_t,void(*)(Cpu*))>&) {return true;}
 void request(uint16_t) {}
 void tick(Cpu*) {}
@@ -720,6 +724,10 @@ int main() {
     guestmods::init();
     assert(!story_native_scene_request::startup_window_current());
     assert(mods::packages::inspected);
+    // Inert without mods: no guest runtime memory (the save-state layout of a start without mods), no
+    // particle or held-model setup, no native scene startup, no game-thread binding and no package observer.
+    assert(mem::fixture_runtime_allocs==0&&story_particles::configured==0&&story_item_models::configured==0);
+    assert(story_native_wait_runtime::startups==0&&!guestmods::g_native_scenes&&!guestmods::g_package_observer);
     Cpu c{};
     c.r[3] = 5; port(&c);
     assert((calls == std::vector<int>{1, 3, 6})); assert(c.r[3] == 11);

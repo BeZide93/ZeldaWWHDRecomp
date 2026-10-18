@@ -163,6 +163,8 @@ std::vector<Loaded> g_loaded;
 std::atomic<uint64_t> g_logic_step{0};
 std::atomic<bool> g_hud_callbacks{false};
 bool g_world_scenes=false;
+bool g_native_scenes=false;  // native scene playback can run (set once in init): the game-thread binding
+bool g_particle_import=false;  // a loaded code mod imports wwhd_actor_particle or wwhd_particle_at
 std::mutex g_hud_mutex;
 Loaded& owner(Cpu* c) {
     for(auto& mod:g_loaded)
@@ -835,6 +837,7 @@ const std::unordered_map<std::string, PpcFunc> kServices = {
 PpcFunc service(const char* name) {
     auto it = kServices.find(name);
     if (it == kServices.end()) return nullptr;
+    if (!strcmp(name, "wwhd_actor_particle") || !strcmp(name, "wwhd_particle_at")) g_particle_import = true;  // particle scratch
     if (!strncmp(name, "wwhd_mail_", 10)) story_mail::note_import();  // the postbox hooks are needed
     if (!strncmp(name, "wwhd_chart_", 11)) {  // the sea chart hooks are needed, and the chart list's captions
         story_chart::note_import();
@@ -1261,12 +1264,20 @@ void init() {
     if(story_actor_textures::declared()&&!story_actor_textures::allocate_session())exception_report::raise("Owned prop texture snapshot cache allocation failed");
     // 8152/8153 have native visual and finite-emitter proof. Door debris remains a
     // private probe until a loaded bank and independent expiry proof admit it.
+    // Its guest scratch only when something can ask for a burst: a code mod importing a particle service,
+    // declared actors or scenes (their particle steps), or a private particle probe. Without them no
+    // runtime_alloc, so a start without mods keeps the guest runtime layout (and its full save states)
+    // as before the particles; burst() refuses while unconfigured.
     const bool door_probe=std::getenv("WWHD_TEST_PARTICLE_DOOR_DEBRIS_TICK")!=nullptr;
-    const uint32_t particle_scratch=mem::runtime_alloc(story_particles::kScratchBytes,16);
-    const uint32_t particle_mask=story_particles::kAuctionSparkleMask|story_particles::kBeaconSparkleMask|
-        (door_probe?story_particles::kDoorDebrisMask:0);
-    if(!story_particles::configure([](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);},particle_scratch,story_particles::kScratchBytes,particle_mask))
-        exception_report::raise("Curated particle scratch unavailable");
+    const bool particle_probe=door_probe||std::getenv("WWHD_TEST_PARTICLE_AUCTION_SPARKLE_TICK")||
+        std::getenv("WWHD_TEST_PARTICLE_BEACON_SPARKLE_TICK");
+    if(g_particle_import||story_actors::declared()||g_world_scenes||particle_probe) {
+        const uint32_t particle_scratch=mem::runtime_alloc(story_particles::kScratchBytes,16);
+        const uint32_t particle_mask=story_particles::kAuctionSparkleMask|story_particles::kBeaconSparkleMask|
+            (door_probe?story_particles::kDoorDebrisMask:0);
+        if(!story_particles::configure([](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);},particle_scratch,story_particles::kScratchBytes,particle_mask))
+            exception_report::raise("Curated particle scratch unavailable");
+    }
     story_scenes::set_game_calls([](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);});
     if(g_world_scenes)story_scenes::set_scratch_memory(mem::runtime_alloc(story_scenes::kScratchBytes,16));
     story_scenes::set_callbacks(story_actors::actor_address,story_actors::actions);
@@ -1333,7 +1344,10 @@ void init() {
     });
     // Mod items and the notebook on X/Y/R (story_item_buttons.h): the item use in play and the HUD's
     // button read, with the story notebook's item menu hooks.
-    story_item_models::configure(mem::runtime_alloc(story_item_models::kMemoryBytes,16),call_original,[](Cpu*c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);});
+    // held item models (story_item_models.h): their guest record only when a loaded item declares a
+    // held model; without one nothing is allocated or hooked (install() keeps nothing to do)
+    if(story_item_models::declared())
+        story_item_models::configure(mem::runtime_alloc(story_item_models::kMemoryBytes,16),call_original,[](Cpu*c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);});
     story_items::set_model_presenter(story_item_models::request);
     if(!story_item_models::install([](uint32_t fn){auto it=g_chains.find(fn);return it==g_chains.end()?std::string():it->second.replace_mod;},[](uint32_t fn,PpcFunc hook){int i=ordinal_of(fn);if(i<0)fatal("item model hook missing");auto&ch=g_chains[fn];ch.addr=fn;ch.ordinal=uint32_t(i);ch.replace=hook;ch.replace_mod="the port's item models";g_mod_hook_flags[i]=1;}))exception_report::raise("Item model hook conflict");
     story_item_buttons::set_game_calls(call_original,[](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);});
@@ -1358,11 +1372,19 @@ void init() {
         g_mod_hook_flags[ordinal]=1;
     });
     if(getenv("WWHD_GUEST_MODS"))LOG("[guestmods] WWHD_GUEST_MODS is retired; install and trust guest packages in the mod manager");
-    NativeSceneRequestIssuer::startup(stage_pass_through,[]() -> uint64_t {
-        return g_logic_step.load(std::memory_order_relaxed);
-    });
+    // Native scene playback (story_native_wait_runtime.h): only with declared world scenes or the private
+    // native-wait test; otherwise no declaration catalogue, session or log line.
+    g_native_scenes=g_world_scenes||std::getenv("WWHD_TEST_NATIVE_WAIT");
+    if(g_native_scenes)
+        NativeSceneRequestIssuer::startup(stage_pass_through,[]() -> uint64_t {
+            return g_logic_step.load(std::memory_order_relaxed);
+        });
 #ifndef WWHD_GUEST_HOOKS_STARTUP_FIXTURE
     sealed_mod_flags=g_mod_hook_flags;sealed_mod_bodies=g_mod_bodies;sealed_mod_count=g_mod_hook_count;
+    // A safety seal, kept for every start: after this, the game-code dispatch table (dispatch::set on
+    // the .text range) takes no more writes. Nothing writes it after start-up (the recompiled table is
+    // built in dispatch::init, guest modules load above), so without native mods it changes nothing
+    // the game does; the native scene and hook checks require it (dispatch::native_text_sealed).
     if(!dispatch::seal_native_text())native_hooks_fault=true;
     native_hooks_sealed.store(true,std::memory_order_release);
 #endif
@@ -1485,7 +1507,7 @@ void draw_frame(Cpu* c,uint64_t step) {
 void logic_service(Cpu* c) {
     // Reached only from the game's completed logic Execute hook. Native event
     // admission may later use this live thread binding; it grants no lease.
-    story_native_event_game_thread::observe_logic(c);
+    if(g_native_scenes)story_native_event_game_thread::observe_logic(c);
     const bool beacon=std::getenv("WWHD_TEST_PARTICLE_BEACON_SPARKLE_TICK")!=nullptr;
     const bool sparkle=!beacon&&std::getenv("WWHD_TEST_PARTICLE_AUCTION_SPARKLE_TICK")!=nullptr;
     const char* probe=beacon?"WWHD_TEST_PARTICLE_BEACON_SPARKLE_TICK":sparkle?"WWHD_TEST_PARTICLE_AUCTION_SPARKLE_TICK":"WWHD_TEST_PARTICLE_DOOR_DEBRIS_TICK";
