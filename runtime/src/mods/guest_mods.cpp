@@ -1349,6 +1349,10 @@ void init() {
     if(story_item_models::declared())
         story_item_models::configure(mem::runtime_alloc(story_item_models::kMemoryBytes,16),call_original,[](Cpu*c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);});
     story_items::set_model_presenter(story_item_models::request);
+    // items with "hold_up": the game's item-get pose with the held model and the item's get message
+    story_items::set_hold_up_presenter(story_item_models::hold_up,story_item_models::chest_hold_up);
+    story_items::set_get_text(story_mail::item_get_text);
+    story_item_models::set_text(story_items::arm_get_text);
     if(!story_item_models::install([](uint32_t fn){auto it=g_chains.find(fn);return it==g_chains.end()?std::string():it->second.replace_mod;},[](uint32_t fn,PpcFunc hook){int i=ordinal_of(fn);if(i<0)fatal("item model hook missing");auto&ch=g_chains[fn];ch.addr=fn;ch.ordinal=uint32_t(i);ch.replace=hook;ch.replace_mod="the port's item models";g_mod_hook_flags[i]=1;}))exception_report::raise("Item model hook conflict");
     story_item_buttons::set_game_calls(call_original,[](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);});
     story_item_buttons::install([](uint32_t addr) {

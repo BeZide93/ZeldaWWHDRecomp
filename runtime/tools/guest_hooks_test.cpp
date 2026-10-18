@@ -389,7 +389,16 @@ void request(uint16_t) {}
 void tick(Cpu*) {}
 void state_loaded() {}
 void progress_loaded() {}
+bool hold_up(uint16_t) {return false;}
+void chest_hold_up(uint16_t,bool) {}
+void set_text(bool(*)(uint16_t,bool)) {}
 }
+namespace story_items {
+void set_hold_up_presenter(bool(*)(uint16_t),void(*)(uint16_t,bool)) {}
+void set_get_text(bool(*)(uint32_t,const std::u16string*)) {}
+bool arm_get_text(uint16_t,bool) {return false;}
+}
+namespace story_mail { bool item_get_text(uint32_t,const std::u16string*) {return false;} }
 // and so has the story progress store (story_notebook_test)
 namespace story_store {
 void set_progress_loaded(void(*)()) {}

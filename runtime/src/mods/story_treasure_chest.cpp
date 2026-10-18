@@ -110,6 +110,7 @@ void create_item(Cpu* c) {
     }
     LOG("[treasure] %s: chart \"%s\"'s chest holds item \"%s\"%s", chest->mod.c_str(), chest->chart.c_str(), item->id.c_str(),
         caption ? " (the get message can't be replaced now: the item's caption names it)" : "");
+    story_items::chest_hold_up(item->key, true);  // "hold_up": the stand-in shows the item's own model
     c->r[4] = kStandIn;
     story_treasure::original(c, kCreateItemForTrBoxDemo);
 }
@@ -125,6 +126,7 @@ void exec_item_get(Cpu* c) {
         }
     }
     if (p.armed) {
+        if (const std::optional<story_items::Item> it = story_items::find(p.mod, p.item)) story_items::chest_hold_up(it->key, false);
         const int32_t n = story_items::give(p.mod, p.item, 1, "a treasure chart's chest", p.caption);
         if (n < 0) LOG("[treasure] %s: item \"%s\" from the chest could not be given (%d)", p.mod.c_str(), p.item.c_str(), n);
         return;

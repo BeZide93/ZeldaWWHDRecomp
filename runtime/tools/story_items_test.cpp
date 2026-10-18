@@ -285,6 +285,24 @@ void test_letter_timing() {
     clear_save();
 }
 
+// "hold_up": true or false, needs held_model; with it a held model needs no use action
+void test_hold_up_manifest() {
+    std::vector<story_notebook::ManifestItem> items;
+    std::string why;
+    auto parse = [&](const std::string& fields) {
+        return story_notebook::parse_items(mods::json::parse(R"({"items": [{"id": "crystal", "name": "Crystal", "description": "It glows.", "icon": "c.png")" + fields + "}]}"),
+                                           items, why);
+    };
+    assert(parse("") && !items[0].hold_up);
+    assert(parse(R"(, "held_model": "crystal", "hold_up": true)") && items[0].hold_up && items[0].held_model == "crystal" &&
+           items[0].use == story_notebook::ManifestItem::Use::None);
+    assert(parse(R"(, "held_model": "crystal", "hold_up": true, "use": {"action": "show"}, "held_frames": 30)") && items[0].held_frames == 30);
+    assert(!parse(R"(, "hold_up": true)") && why.find("held_model") != std::string::npos);
+    assert(!parse(R"(, "held_model": "crystal", "hold_up": "yes")") && why.find("true or false") != std::string::npos);
+    assert(!parse(R"(, "held_model": "crystal", "hold_up": false)") && why.find("use action") != std::string::npos);
+    assert(!parse(R"(, "held_model": "crystal")"));  // as before: a held model needs a use (or hold_up)
+}
+
 void test_services() {
     clear_save();
     reset();
@@ -375,6 +393,44 @@ void test_services() {
     cpu.r[3] = kPool.back();  // a pool number bound to nothing: nothing has it
     hooks::check_item_get(&cpu);
     assert(cpu.r[3] == 0);
+    // an item Link holds up ("hold_up"): the item-get presenter takes the give, no light caption; without
+    // a model (the presenter says no) the caption as before; a quiet give, nothing
+    ManifestItem crystal = key;
+    crystal.id = "crystal", crystal.name = "Crystal", crystal.description = "It glows.", crystal.held_model = "crystal-model", crystal.hold_up = true;
+    assert(define("mod", dir.string(), crystal, why) && find("mod", "crystal")->hold_up);
+    static std::vector<uint16_t> held, chest;
+    static bool hold_ok = true;
+    set_hold_up_presenter([](uint16_t key) { held.push_back(key); return hold_ok; }, [](uint16_t key, bool on) { chest.push_back(on ? key : 0); });
+    const uint16_t c = item_key("mod", "crystal");
+    while (present(&cpu)) {
+    }
+    shown.clear();
+    assert(give("mod", "crystal", 1, "test") == 1 && held == std::vector<uint16_t>{c} && !present(&cpu) && shown.empty());
+    take("mod", "crystal", 1), held.clear();
+    hold_ok = false;
+    assert(give("mod", "crystal", 1, "test") == 1 && held.size() == 1 && present(&cpu) && shown.back() == "Crystal|It glows.");
+    take("mod", "crystal", 1), held.clear(), hold_ok = true;
+    assert(give("mod", "crystal", 1, "the editor", false) == 1 && held.empty() && !present(&cpu));
+    take("mod", "crystal", 1);
+    assert(give("mod", "old-key", 1, "test") >= 1 && held.empty());  // an item without hold_up: its caption
+    while (present(&cpu)) {
+    }
+    // a chest's own demo: only items with hold_up
+    chest_hold_up(c, true), chest_hold_up(k, true), chest_hold_up(c, false);
+    assert(chest == std::vector<uint16_t>({c, 0}));
+    // the get message: the stand-in's, with the item's name and description
+    static uint32_t armed_number = 1;
+    static std::u16string armed_text;
+    assert(arm_get_text(c, false));  // no letter service: nothing to disarm
+    assert(!arm_get_text(c, true));
+    set_get_text([](uint32_t number, const std::u16string* text) {
+        armed_number = number, armed_text = text ? *text : u"";
+        return true;
+    });
+    assert(arm_get_text(c, true) && armed_number == 0x65 + 0x9D && armed_text == u"You got Crystal!\nIt glows.");
+    assert(arm_get_text(c, false) && armed_number == 0 && armed_text.empty());
+    assert(!arm_get_text(0x1234, true));
+    set_get_text(nullptr), set_hold_up_presenter(nullptr, nullptr);
     // a mod that isn't enabled any more: its items stay in the save, hidden
     reset();
     assert(!find(k) && count(k) == 1 && !at_game_place(5));
@@ -391,6 +447,7 @@ int main() {
     test_bag();
     test_manifest();
     test_letter_timing();
+    test_hold_up_manifest();
     test_services();
     std::puts("story_items_test: ok");
     return 0;

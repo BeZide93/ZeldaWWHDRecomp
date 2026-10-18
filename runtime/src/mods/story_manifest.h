@@ -184,6 +184,7 @@ struct ManifestItem {
     unsigned use_step = 0;                    // ... reaches this step
     std::string held_model; // same-mod static models entry, separate hand presentation
     unsigned held_frames = 90; // logic frames at30Hz, 1..300
+    bool hold_up = false;      // "hold_up": true: getting it plays the game's item-get pose with held_model over Link's head
 };
 inline constexpr size_t kMaxItemNameBytes = 40, kMaxItemDescriptionBytes = 200, kMaxItemIconBytes = 128;
 inline constexpr unsigned kMaxItemsPerMod = 32;
@@ -237,11 +238,17 @@ inline bool parse_items(const mods::json::Value& manifest, std::vector<ManifestI
                 return why = "item " + m.id + ": unknown use action (show, open_notebook, quest_step, event)", false;
         } else if (use.type != Value::Null)
             return why = "item " + m.id + ": \"use\" must be an object", false;
+        const Value& hold=it.get("hold_up");
+        if(hold.type!=Value::Null){
+            if(hold.type!=Value::Bool)return why="item "+m.id+": \"hold_up\" must be true or false",false;
+            m.hold_up=hold.boolean;
+        }
         if(it.get("held_model").type!=Value::Null) {
-            if(it.get("held_model").type!=Value::String||!story_mail::valid_id(it.get("held_model").text)||m.use==ManifestItem::Use::None)
-                return why="held_model requires a valid same-mod model id and a use action",false;
+            if(it.get("held_model").type!=Value::String||!story_mail::valid_id(it.get("held_model").text)||(m.use==ManifestItem::Use::None&&!m.hold_up))
+                return why="held_model requires a valid same-mod model id and a use action (or \"hold_up\": true)",false;
             m.held_model=it.get("held_model").text;
         }
+        if(m.hold_up&&m.held_model.empty())return why="item "+m.id+": \"hold_up\" needs \"held_model\", the model Link holds up",false;
         if(it.get("held_frames").type!=Value::Null) {
             const auto& n=it.get("held_frames");
             if(m.held_model.empty()||n.type!=Value::Number||n.number<1||n.number>300||std::floor(n.number)!=n.number)
