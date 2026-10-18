@@ -21,6 +21,11 @@ what is on `devel` and not released yet (also in the
   theirs runs or reserves game memory then, so full save states made without mods by builds from before 17 October
   load again.
 
+- **Story mods: more of a quest without code** (for mod makers). Content packages may hold only letters, charts,
+  items or quests; letters can wait for a quest or flag and a number of game days (`when`, `after_days`); characters and
+  scenes can give a treasure chart; items with `hold_up` are held over Link's head when he gets them; placed chests can
+  hold more rupees, a heart piece or container, or the mod's own items (with a "Chest holds" picker in the editor); and
+  `reset_quest` also clears the quest's charts and items.
 - **World editor: letters, treasure charts and items** (`--editor` and its MCP tools, for mod makers). A new Story tab
   and commands create, change and remove letters on their own, treasure charts (with the X placed at Link or the
   camera) and items (with icon import). Removing something still in use is refused with the list of its uses.
