@@ -6,24 +6,24 @@
 #include <cmath>
 #include <cstdio>
 
-static bool near(float a, float b, float e = 1e-4f) { return std::fabs(a - b) <= e; }
+static bool close_to(float a, float b, float e = 1e-4f) { return std::fabs(a - b) <= e; }
 
 int main() {
     // Horizon haze from the environment: default original, clamped, research name = amount removed
-    assert(near(sky::haze_from_env(nullptr, nullptr), 1.0f));
-    assert(near(sky::haze_from_env("0.3", nullptr), 0.3f));
-    assert(near(sky::haze_from_env("-2", nullptr), 0.0f));
-    assert(near(sky::haze_from_env("7", nullptr), 1.0f));
-    assert(near(sky::haze_from_env("nan", nullptr), 1.0f));
-    assert(near(sky::haze_from_env(nullptr, "0.7"), 0.3f));
-    assert(near(sky::haze_from_env("0.5", "0.9"), 0.5f));  // the setting's own name wins
+    assert(close_to(sky::haze_from_env(nullptr, nullptr), 1.0f));
+    assert(close_to(sky::haze_from_env("0.3", nullptr), 0.3f));
+    assert(close_to(sky::haze_from_env("-2", nullptr), 0.0f));
+    assert(close_to(sky::haze_from_env("7", nullptr), 1.0f));
+    assert(close_to(sky::haze_from_env("nan", nullptr), 1.0f));
+    assert(close_to(sky::haze_from_env(nullptr, "0.7"), 0.3f));
+    assert(close_to(sky::haze_from_env("0.5", "0.9"), 0.5f));  // the setting's own name wins
 
     // warmth: dusk and dawn by the clock, none at noon or midnight with a high sun
-    assert(near(sky::warmth(268.0f, 0.6f, 1.0f), 1.0f));
-    assert(near(sky::warmth(92.0f, 0.6f, 1.0f), 1.0f));
-    assert(near(sky::warmth(180.0f, 0.8f, 1.0f), 0.0f));
+    assert(close_to(sky::warmth(268.0f, 0.6f, 1.0f), 1.0f));
+    assert(close_to(sky::warmth(92.0f, 0.6f, 1.0f), 1.0f));
+    assert(close_to(sky::warmth(180.0f, 0.8f, 1.0f), 0.0f));
     assert(sky::warmth(180.0f, 0.06f, 1.0f) > 0.9f);  // a low sun is warm whatever the clock says
-    assert(near(sky::warmth(0.0f, 0.06f, 0.0f), 0.0f));  // ... but not at night
+    assert(close_to(sky::warmth(0.0f, 0.06f, 0.0f), 0.0f));  // ... but not at night
 
     // frame: view transposed into columns, projection, light direction, daylight
     sky::Inputs in{};
@@ -35,19 +35,19 @@ int main() {
     in.fog[0] = 0.1f, in.fog[1] = 0.4f, in.fog[2] = 0.7f;
     sky::SkyFrame g;
     sky::frame(in, 2.0f, 0.7f, g);
-    assert(near(g.view[1 * 4 + 0], 2.0f));  // column 1, row 0
-    assert(near(g.proj[1], 1.0f) && near(g.proj[0], 0.5f) && near(g.proj[2], 2.0f));
-    assert(near(g.sun[0], 0.0f) && near(g.sun[1], 1.0f) && near(g.sun[3], 1.0f));
-    assert(near(g.lit[3], 0.0f));
-    assert(near(g.sky[2], 0.7f) && near(g.params[2], 0.7f));
+    assert(close_to(g.view[1 * 4 + 0], 2.0f));  // column 1, row 0
+    assert(close_to(g.proj[1], 1.0f) && close_to(g.proj[0], 0.5f) && close_to(g.proj[2], 2.0f));
+    assert(close_to(g.sun[0], 0.0f) && close_to(g.sun[1], 1.0f) && close_to(g.sun[3], 1.0f));
+    assert(close_to(g.lit[3], 0.0f));
+    assert(close_to(g.sky[2], 0.7f) && close_to(g.params[2], 0.7f));
     sky::frame(in, 2.0f, 3.0f, g);
-    assert(near(g.params[2], 1.0f));  // clamped
+    assert(close_to(g.params[2], 1.0f));  // clamped
     in.sunVisible = false;  // no sun packet: light from above
     sky::frame(in, 2.0f, 0.0f, g);
-    assert(near(g.sun[1], 1.0f));
+    assert(close_to(g.sun[1], 1.0f));
     in.sunVisible = true, in.sunPos[1] = -100.0f;  // below the horizon: night
     sky::frame(in, 2.0f, 0.0f, g);
-    assert(near(g.sun[3], 0.0f));
+    assert(close_to(g.sun[3], 0.0f));
     std::puts("sky_frame: ok");
     return 0;
 }
