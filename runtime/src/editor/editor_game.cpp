@@ -604,6 +604,33 @@ public:
         return true;
     }
     bool live_kind(const std::string& type, bool fallback) override { return story_actors::editor_kind_live(type, fallback); }
+    // new_mod: the package goes through the mod manager's own install (checked as any package is, refused
+    // for an installed ID) from a staging folder of its own, then is turned on in the current profile
+    bool create_package(const Value& manifest, std::string& dir, std::string& why) override {
+        const std::string mods_dir = mods::packages::directory();
+        if (mods_dir.empty()) return why = "the mod manager's storage is unavailable", false;
+        const std::string id = manifest.get("id").string();
+        for (const auto& v : mods::packages::list())
+            if (v.id == id) return why = "a mod with the id \"" + id + "\" is installed already", false;
+        std::error_code ec;
+        const fs::path stage = fs::temp_directory_path(ec) /
+                               ("wwhd-new-mod-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        if (ec || !fs::create_directory(stage, ec)) return why = "cannot create a staging folder for the new mod", false;
+        std::string staged, error;
+        bool ok = write_package_folder(stage.string(), manifest, staged, why);
+        if (ok && !mods::packages::install_new(staged, error)) ok = false, why = "the mod manager refused the new mod: " + error;
+        fs::remove_all(stage, ec);  // the staging copy only
+        if (!ok) return false;
+        if (!mods::packages::enable(id, true, error)) {
+            // the package this call just installed (still empty, never turned on) goes again
+            std::string ignored;
+            mods::packages::remove(id, ignored);
+            return why = "the new mod could not be turned on: " + error, false;
+        }
+        dir = (fs::path(mods_dir) / id).string();
+        set_status("New mod " + id + " created and turned on");
+        return true;
+    }
     bool reload_room(std::string& why) override {
         (void)why;
         when_free([](Cpu*) {

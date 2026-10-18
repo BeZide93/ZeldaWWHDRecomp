@@ -13,7 +13,9 @@
 #include <filesystem>
 #include <fstream>
 #include <set>
+#include <sstream>
 #include <string>
+#include <system_error>
 #include <thread>
 
 #if defined(_WIN32)
@@ -82,6 +84,11 @@ struct FakeHost : editor::Host {
         return true;
     }
     bool testing = false;
+    // new_mod: a folder of its own in the fake mods folder, as the game's mod manager makes it
+    std::string mods_dir;
+    bool create_package(const Value& manifest, std::string& dir, std::string& why) override {
+        return editor::write_package_folder(mods_dir, manifest, dir, why);
+    }
 };
 
 const char* kManifest = R"({
@@ -793,6 +800,56 @@ void chest_tools() {
     CHECK(be.session.manifest("editor-test")->get("actors").array[0].get("parameters").get("item").string() == "item:crystal");
 }
 
+// new_mod over MCP: listed as destructive, asks the player, creates and opens the mod; an actor goes into it
+void new_mod_tools() {
+    FakeBackend be;
+    const fs::path root = fs::temp_directory_path() / ("wwhd-mcp-new-mod-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    fs::create_directories(root / "Mods");
+    be.host.mods_dir = (root / "Mods").string();
+    be.session.add_package("editor-test", "Editor test", "", json(kManifest));
+    Handler h(be, kToken, 47615);
+    bool reply = false;
+    Value r = h.message(json(R"({"jsonrpc":"2.0","id":3,"method":"tools/list"})"), reply);
+    bool listed = false;
+    for (const auto& t : r.get("result").get("tools").array)
+        if (t.get("name").string() == "new_mod") {
+            listed = true;
+            CHECK(t.get("annotations").get("destructiveHint").boolean);
+            const Value& req = t.get("inputSchema").get("required");
+            auto has = [&](const char* k) {
+                for (const auto& v : req.array)
+                    if (v.string() == k) return true;
+                return false;
+            };
+            CHECK(has("id") && has("name") && has("confirm") && !has("author"));
+        }
+    CHECK(listed && needs_allow("new_mod", Value()));
+    // without confirm: refused, nobody asked; Deny: nothing written
+    Value v = call(h, "new_mod", json(R"({"id":"mcp-mod","name":"MCP mod"})"));
+    CHECK(is_error(v) && text_of(v).find("confirm") != std::string::npos && be.asked == 0);
+    be.allow = false;
+    v = call(h, "new_mod", json(R"({"id":"mcp-mod","name":"MCP mod","confirm":true})"));
+    CHECK(is_error(v) && be.asked == 1 && be.last_question.find("mcp-mod") != std::string::npos && !fs::exists(root / "Mods" / "mcp-mod"));
+    // Allow: created and opened; then an actor goes into it without "mod"
+    be.allow = true;
+    v = call(h, "new_mod", json(R"({"id":"mcp-mod","name":"MCP mod","author":"Claude","confirm":true})"));
+    CHECK(!is_error(v) && be.asked == 2 && be.session.open_mod() == "mcp-mod" && fs::exists(root / "Mods" / "mcp-mod" / "manifest.json"));
+    v = call(h, "add_actor", json(R"({"type":"resident","id":"greeter","at":"position","position":{"x":0,"y":1040,"z":-201000},"stage":"sea","room":11,"snap":false})"));
+    CHECK(!is_error(v) && be.session.manifest("mcp-mod")->get("actors").array.size() == 1);
+    CHECK(be.session.manifest("editor-test")->get("actors").array.size() == 2);
+    v = call(h, "save_package", json(R"({"confirm":true})"));
+    CHECK(!is_error(v) && be.asked == 3);
+    std::ifstream f(root / "Mods" / "mcp-mod" / "manifest.json", std::ios::binary);
+    std::stringstream text;
+    text << f.rdbuf();
+    CHECK(text.str().find("\"greeter\"") != std::string::npos);
+    // a duplicate is an error
+    v = call(h, "new_mod", json(R"({"id":"mcp-mod","name":"Again","confirm":true})"));
+    CHECK(is_error(v) && text_of(v).find("exists") != std::string::npos);
+    std::error_code ec;
+    fs::remove_all(root, ec);  // this test's own folder
+}
+
 int main() {
     http_parsing();
     checks();
@@ -804,6 +861,7 @@ int main() {
     story_tools();
     story_gap_tools();
     chest_tools();
+    new_mod_tools();
     listener();
     if (g_failures) {
         std::fprintf(stderr, "%d check(s) failed\n", g_failures);

@@ -34,6 +34,11 @@ const std::vector<CommandInfo> kCommands = {
     {"help", "The command list with each command's parameters, or one command.", {{"command", "string", "a command name"}}},
     {"list_mods", "The active mods the editor can open (each with placed actors, models, scenes or quests).", {}},
     {"open_mod", "Opens a mod: later commands without \"mod\" act on it.", {{"mod", "string", "the mod's id", true}}},
+    {"new_mod", "Creates a new, empty mod (a package of its own in the mod manager's mods folder), turns it on in the current mod profile and opens it. Refused when a mod with that id exists; other mods are not touched. Not an undo step: remove a mod you don't want in Settings > Mods (turn it off, then Remove).",
+     {{"id", "string", "the new mod's id: up to 64 of a-z, 0-9, '-', '_' and '.' (not starting with '.')", true}, {"name", "string", "the name players see (up to 128 characters)", true},
+      {"author", "string", "who made it"}, {"description", "string", "one or two sentences about it"},
+      {"confirm", "boolean", "must be true: a new package folder is written and the mod is turned on", true}},
+     false, true},
     {"list_actors", "The open mod's placed actors (game actors and mod models).", {{"mod", "string", "another mod than the open one"}}},
     {"get_actor", "One placed actor as the manifest declares it.", {{"id", "string", "the actor's id", true}, {"mod", "string", ""}}},
     {"set_actor", "Sets one property of a placed actor (null removes it): position, rotation, scale, model, lines, collision, behaviour, buoyancy, drift, anchor, grapple_points, distant, shoreline, chart_marker, arrival, attention, animation, flag, stage, room, when, then, talks, look_at, path, parameters, defeated_flag, broken_flag, drops, native_drops, combat, carry, switch_flag, switch, texture. when: {quest, step, quests: [{quest, step}] (all must hold), item, time, flag, not_flag (a flag id)}. talks: up to 8 [{when?, lines, then?}], the first that matches is said (one without when last; not with lines or then). A chest's parameters: {item: rupee_green (1), rupee_blue (5), rupee_yellow (10), rupee_red (20), rupee_purple (50), rupee_orange (100, the default), rupee_silver (200), heart_piece, heart_container, or item:<id> (one of the mod's items; with hold_up Link holds its model up)}.",
@@ -483,6 +488,76 @@ std::string pretty(const Value& v) {
     std::string out;
     pretty_into(out, v, 0);
     return out + '\n';
+}
+
+// ---------------------------------------------------------------- new mods
+bool package_id_valid(const std::string& id) {
+    return !id.empty() && id.size() <= 64 && id[0] != '.' && std::all_of(id.begin(), id.end(), [](unsigned char c) {
+        return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '-' || c == '.';
+    });
+}
+
+bool new_package_manifest(const Value& params, Value& out, std::string& why) {
+    const std::string id = params.get("id").string(), name = params.get("name").string();
+    const std::string author = params.get("author").string(), description = params.get("description").string();
+    if (!package_id_valid(id))
+        return why = "the id \"" + id + "\" is not a valid mod id: use 1 to 64 of a-z, 0-9, '-', '_' and '.' (not starting with '.')", false;
+    if (id == story_notebook::kNotebookPackage) return why = "the id \"" + id + "\" belongs to the Story Notebook", false;
+    auto has_nul = [](const std::string& s) { return s.find('\0') != std::string::npos; };
+    if (name.find_first_not_of(" \t") == std::string::npos) return why = "the new mod needs a name", false;
+    if (name.size() > 128 || has_nul(name)) return why = "the name is longer than 128 characters", false;
+    if (author.size() > 256 || has_nul(author)) return why = "the author is longer than 256 characters", false;
+    if (description.size() > 8192 || has_nul(description)) return why = "the description is longer than 8192 characters", false;
+    Value m;
+    m["format_version"] = 1;
+    m["id"] = id;
+    m["name"] = name;
+    m["version"] = "0.1.0";
+    if (!author.empty()) m["author"] = author;
+    if (!description.empty()) m["description"] = description;
+    m["game_id"] = "wwhd";
+    m["minimum_manager_version"] = "1.5.0";
+    m["kind"] = "content";
+    // the story content (actors, quests, letters...) runs on the Story Notebook package
+    Value dep;
+    dep["id"] = story_notebook::kNotebookPackage;
+    dep["minimum_version"] = "0.0.0";
+    m["dependencies"].type = Value::Array;
+    m["dependencies"].array.push_back(dep);
+    m["actors"].type = Value::Array;  // a story section, empty: the editor fills it
+    out = m;
+    return true;
+}
+
+bool write_package_folder(const std::string& parent, const Value& manifest, std::string& dir, std::string& why) {
+    const std::string id = manifest.get("id").string();
+    if (!package_id_valid(id)) return why = "the manifest has no valid id", false;
+    std::error_code ec;
+    const fs::path root(parent), target = root / id;
+    if (parent.empty() || !fs::is_directory(root, ec) || fs::is_symlink(root, ec)) return why = "the mods folder is not there", false;
+    if (fs::exists(fs::symlink_status(target, ec))) return why = "a folder \"" + id + "\" exists in the mods folder already", false;
+    // the folder first: creating it is the claim (false when someone else made it in the meantime)
+    if (!fs::create_directory(target, ec) || ec) return why = "cannot create the folder \"" + id + "\" in the mods folder", false;
+    const fs::path tmp = target / "manifest.json.editor-tmp", file = target / "manifest.json";
+    bool written = false;
+    {
+        std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
+        f << pretty(manifest);
+        f.close();
+        written = f.good();
+    }
+    if (written) {
+        fs::rename(tmp, file, ec);
+        written = !ec;
+    }
+    if (!written) {  // only what this call made: the file and the (still otherwise empty) folder
+        fs::remove(tmp, ec);
+        fs::remove(file, ec);
+        fs::remove(target, ec);
+        return why = "cannot write the new package's manifest.json", false;
+    }
+    dir = target.string();
+    return true;
 }
 
 // ---------------------------------------------------------------- validation
@@ -996,6 +1071,26 @@ Value Session::dispatch(const std::string& command, const Value& p, std::string&
         if (!find(text(p, "mod"))) return why = "no active mod \"" + text(p, "mod") + "\"", r;
         open_ = text(p, "mod");
         r["mod"] = open_;
+        ok = true;
+        return r;
+    }
+    if (command == "new_mod") {
+        Value m;
+        if (!new_package_manifest(p, m, why)) return r;
+        const std::string id = m.get("id").text;
+        if (find(id)) return why = "a mod with the id \"" + id + "\" exists already", r;
+        std::string problem;
+        if (!validate_package(id, m, all_manifests(), problem)) return why = "the new manifest is not valid: " + problem, r;
+        if (!host_) return why = "the game is not running", r;
+        std::string dir;
+        if (!host_->create_package(m, dir, why)) return r;
+        add_package(id, m.get("name").text, dir, m);
+        open_ = id;
+        r["mod"] = id;
+        r["name"] = m.get("name");
+        r["dir"] = dir;
+        r["open"] = true;
+        r["note"] = "Created " + id + ", turned on in the current mod profile and opened. Add actors, quests or story items, then save.";
         ok = true;
         return r;
     }

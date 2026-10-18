@@ -169,6 +169,16 @@ public:
     // default, when the game doesn't know). Native props, switches, doors and enemies do in --editor.
     virtual bool live_kind(const std::string& type, bool fallback) { return fallback; }
 
+    // ---- new mods (optional) ----
+    // A new, empty mod package (new_mod): the mod manager installs `manifest` as a new package in its
+    // mods folder (refused when a package or folder of that id exists) and turns it on in the current
+    // profile, so it also loads at the next start. `dir` gets the package folder. Nothing else changes;
+    // on a refusal nothing is left behind.
+    virtual bool create_package(const Value& manifest, std::string& dir, std::string& why) {
+        (void)manifest, (void)dir;
+        return why = "the game is not running", false;
+    }
+
     // ---- scenes (each optional) ----
     // The fly camera looks from `eye` at `target` (scrubbing a scene's camera; turns it on if needed).
     virtual bool look(const WorldPoint& eye, const WorldPoint& target, std::string& why) {
@@ -361,6 +371,16 @@ std::vector<std::string> story_references(const Value& manifest, const std::stri
 // A PNG an item can use as its icon: the file's signature and size (1..2048 pixels a side, up to 16 MiB),
 // as the game reads it. `width` / `height` get its size.
 bool check_icon_file(const std::string& path, unsigned& width, unsigned& height, std::string& why);
+// A mod id as the mod manager takes it: 1..64 of a-z, 0-9, '_', '-' and '.', not starting with '.'.
+bool package_id_valid(const std::string& id);
+// The manifest of a new, empty mod (new_mod's parameters: id, name, author?, description?): a content
+// package with an empty actor list and the Story Notebook dependency the story content needs, in the
+// current manifest format. False with `why` for an invalid id, a missing name or text that is too long.
+bool new_package_manifest(const Value& params, Value& out, std::string& why);
+// Writes `manifest` as a new package folder `parent`/<id> with its manifest.json. Refused when that
+// folder exists (it is created first, so two callers can't both get it); on a failure nothing is left.
+// `dir` gets the folder.
+bool write_package_folder(const std::string& parent, const Value& manifest, std::string& dir, std::string& why);
 // The manifest as package text: two-space indent, numbers in their shortest exact form.
 std::string pretty(const Value& v);
 // A point object {"x","y","z"}.

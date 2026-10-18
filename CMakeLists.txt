@@ -410,6 +410,14 @@ add_executable(editor_story_test runtime/tools/editor_story_test.cpp runtime/src
 target_include_directories(editor_story_test PRIVATE runtime/src)
 target_compile_options(editor_story_test PRIVATE -UNDEBUG)
 add_test(NAME editor_story COMMAND editor_story_test)
+# A new, empty mod from the editor (new_mod): ids, duplicates, registration, opening, saving and exporting,
+# and nothing outside the new package folder changes.
+add_executable(editor_new_mod_test runtime/tools/editor_new_mod_test.cpp runtime/src/editor/commands.cpp runtime/src/editor/commands_build.cpp
+                                   runtime/src/editor/stage_files.cpp runtime/src/editor/commands_quest.cpp runtime/src/editor/commands_story.cpp runtime/src/editor/quests.cpp
+                                   runtime/src/editor/commands_scene.cpp runtime/src/editor/scenes.cpp runtime/src/mods/story_native_scene_coverage.cpp ${WWHD_NPC_CATALOGUE})
+target_include_directories(editor_new_mod_test PRIVATE runtime/src)
+target_compile_options(editor_new_mod_test PRIVATE -UNDEBUG)
+add_test(NAME editor_new_mod COMMAND editor_new_mod_test)
 # The scene editor (runtime/src/editor/scenes.cpp, commands_scene.cpp): steps, camera keys, timeline and retiming, choices,
 # walking paths, triggers, the native version, previews, copy and paste, and a handle drag as one undo step.
 add_executable(editor_scene_test runtime/tools/editor_scene_test.cpp runtime/src/editor/commands.cpp runtime/src/editor/commands_build.cpp
