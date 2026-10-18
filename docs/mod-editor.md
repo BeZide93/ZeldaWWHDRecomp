@@ -40,18 +40,19 @@ Settings.
 
 | | |
 | --- | --- |
-| **Toolbar** | the open mod, Undo, Redo, Check, Save…, Revert…, **Add**, Move / Turn, grid and angle snapping, **Play**, Play from Link, Restore at Stop, Test mode, which panels show (also **Quests**, **Flags** and **Search**), and **Reset layout** |
+| **Toolbar** | the open mod, Undo, Redo, Check, Save…, Revert…, **Add**, Move / Turn, grid and angle snapping, **Play**, Play from Link, Restore at Stop, Test mode, which panels show (also **Quests**, **Scenes**, **Flags** and **Search**), and **Reset layout** |
 | **Outliner** | the open mod's actors, models, scenes and quests, and the warp destinations |
 | **Inspector** | the selected actor: place, properties, dialogue and actions |
 | **Problems & export** | the check's problem list, and the export |
 | **Camera & test** | reload the room, test mode, test states |
 | **Status bar** | the stage and room, the camera's position and speed, Link's position, the last result, and the quest step the game is at ("Lighthouse quest: step 3 of 6") |
 | **Quests** | the open mod's quests as a graph to edit, or as a list, with the step and transition inspector |
+| **Scenes** | the open mod's scenes: the steps, the timeline, the step inspector, what starts the scene, its native version, and previews in the game |
 | **Flags** | the open mod's flags and their values in the game |
 | **Search** | everything of the open mod by name or text |
 
 The panels are docked: the toolbar along the top, the Outliner at the left, the Inspector (with Flags and
-Search as tabs) at the right, and Quests, Problems & export, Camera & test and Log as tabs along the bottom;
+Search as tabs) at the right, and Quests, Scenes, Problems & export, Camera & test and Log as tabs along the bottom;
 the picture stays free in the middle. Drag a panel by its tab (or title) to another edge, onto another
 panel to make them tabs of one place, or into the picture to let it float on its own; drag the borders
 between panels to resize them. The layout is remembered. **Reset layout** in the toolbar puts every panel
@@ -66,11 +67,14 @@ In the picture, every actor of the open mod has a label. Click a label to select
 the Outliner; a double click there flies the camera to it). The selected actor shows its collision
 cylinder and handles: drag them to move it, or to turn it with **Turn** chosen in the toolbar. With grid
 or angle snapping on, it moves in steps of 10, 50 or 100 units and turns in steps of 15, 45 or 90
-degrees. While you drag, the actor follows the handle in the game (all selected actors when you move a
-group); it is created again at each new place, so it trails the handle a little. Letting go is one change
-(one Undo step, one entry in the Log), and Esc during the drag puts everything back. Actors that change
-only after a restart (see below) stay where they are while you drag; the status bar says so, and letting
-go keeps the new place in the package as before.
+degrees. While you drag, the actor moves with the handle in the game, smoothly and in place (all
+selected actors when you move a group). Letting go is one change (one Undo step, one entry in the Log),
+and Esc during the drag puts everything back. When you let go, the editor checks the actor in the game:
+it keeps the one that moved when it stands where the package now says; switches, doors and chests (they
+have solid ground the game builds when they are created) and an actor that wandered off are created
+again at their new place instead. Actors that change only after a restart (see below) stay where they
+are while you drag; the status bar says so, and letting go keeps the new place in the package as
+before.
 
 | Keyboard / mouse | Controller | |
 | --- | --- | --- |
@@ -84,7 +88,7 @@ go keeps the new place in the package as before.
 | Ctrl+Z / Ctrl+Y (Cmd on a Mac) | | undo / redo |
 | Ctrl+D | | duplicate the selected actor |
 | Ctrl / Shift + click | | select more than one actor |
-| Ctrl+C / Ctrl+V | | copy the selected actors / paste them where the camera looks (in the Quests window: the selected step) |
+| Ctrl+C / Ctrl+V | | copy the selected actors / paste them where the camera looks (in the Quests window: the selected step; in the Scenes window: the selected steps) |
 | F | | fly to the selected actor |
 | Tab | View button | Play / Stop |
 
@@ -111,16 +115,21 @@ a confirmation; Undo brings it back).
 
 ### What shows at once, and what after a restart
 
-Signs, residents, chests and actors with your models appear, change and disappear in the game at once.
+Signs, residents, chests, pots, barrels and crates, switches and doors, ChuChus, Bokoblins, Moblins and
+Keese, and actors with your models appear, change and disappear in the game at once, in the room you are
+in. Their drops and broken or defeated flags count from then on, as they do after a start. A change to
+one of them (another place, other drops, another flag) creates it again in the game.
+
 These wait until the game starts again (the change is in the package; save it first):
 
-- pots, barrels and crates, switches and doors, enemies, your own enemies and carried props (their
-  progress and drops are set up when the game starts);
-- the first actor of a kind the game had none of when it started (the first resident, the first actor
-  with one of your models), and actors of a mod that had no actors at start-up;
-- switching an actor between a game actor and one of your models.
+- your own enemies and carried props, and a pot, barrel or crate with a texture of its own;
+- the first actor with one of your models when the game had none at start-up, and the actors of a mod
+  that had no actors at start-up;
+- switching an actor between a game actor and one of your models, or between a pot, switch, door or
+  enemy and another kind.
 
-The status bar says which actors wait for a restart. **Reload room** (Camera & test) enters the room
+The status bar says which actors wait for a restart. A new kind of enemy loads its models from the game
+when it first appears, so it may take a moment to show. **Reload room** (Camera & test) enters the room
 again; it helps when an actor could not be created, for example a model over the room's memory budget.
 
 ## Models
@@ -209,10 +218,71 @@ nothing leads to.
 - Stop, change the quest, **Save…** and start the game again to try the new version: quest changes take
   effect after a restart.
 
+## Scenes
+
+**Scenes** (toolbar) opens the scene editor: the scene at the top (**New scene…**, **Duplicate**,
+**Remove…**), and below it three parts.
+
+- **The steps** of the scene, in order. Steps that only one answer of a choice reaches are indented and
+  say which choice and answer lead there. **Add step** adds one after the selected step (before the end):
+  camera, camera path, a camera that follows an actor, say, choice, move, face, walk, animation, wait,
+  fade, sound, music, particle or end. New steps come with values that fit: a camera takes the fly
+  camera's view, a say step the first resident, a walk two points by the actor. The arrows move a step,
+  **Duplicate** copies it, **Remove** takes it out (not while another step leads to it).
+- **The timeline**: each step as a bar on a time axis (60 frames a second), the way the scene plays when
+  every choice takes its default answer; camera keys are small diamonds. Click or drag on the ruler to put
+  the cursor at a time: with **Camera follows the cursor** on, the fly camera shows the scene's camera
+  there, so you see each moment of a camera path from where it is seen. Drag a bar's end to make the step
+  longer or shorter, or a key's diamond to change the time from the key before it. Each drag is one
+  change (one Undo step). Ctrl and the mouse wheel zoom; **Fit** shows the whole scene.
+- **The inspector** of the selected step: its id and the step it goes on to, its duration, and what the
+  step needs:
+  - **camera**: **View from the fly camera** takes the camera's view; **Pan to the fly camera's view**
+    makes the camera move there while the step lasts; **Add a key** turns it into a camera path;
+  - **camera path**: its keys, each with **from camera** and its time to the next key, and the easing
+    (linear or smooth). **Add a key from the fly camera** adds the view after the selected key;
+  - **say** and **choice**: who speaks and the text (lines separated by " / "); a choice's two answers,
+    the step each leads to, and which answer the cursor starts on;
+  - **move**, **face** and **particle**: the place, from where the camera looks or from Link;
+  - **walk**: the speed and the points. Select a point to move it with the handle in the picture;
+    **Add where the camera looks** and **Add at Link** add points;
+  - **Fields (JSON)** shows the step as the package writes it, to change any field.
+
+**Camera key** (at the top) is the quickest way to film a scene: fly to a view, press it, fly on, press it
+again. The first press adds a camera step; with that step selected, each further press adds a key to its
+path.
+
+In the picture, the shown scene's cameras appear as small boxes with a line where they look (the
+selected step's in yellow), camera paths as lines from key to key, walking paths as green lines with
+their points, and the camera at the timeline's cursor in orange.
+
+**Scene: what starts it, native version** (under the timeline):
+
+- **What starts it**: talking to an actor (reading a sign, opening a chest), a quest step, entering the
+  room, entering an area around where Link is (with its radius), or salvaging a chart; none: only an
+  actor's or another scene's action starts it.
+- **The native version**: a scene of two placed uo2 residents that turn to places (face steps), a camera
+  that holds a view and moves to another (camera steps), and waits can also play as the game's own event.
+  **Make it from the steps** writes that version from the steps; the panel says whether it would play,
+  and why not (for example a say step, which only the steps can play). The steps stay: they play wherever
+  the native version can't.
+
+**Play scene** plays the scene in the game, from the editor's view. Test mode turns on, the editor hides
+but for a small bar with **Skip** (as Plus / Start does: the end's actions don't run) and **Stop / back to
+editor**. When the scene ends, the world goes back to how it was before (Link, the actors, the progress
+and the mod's flags), and the editor's view returns. **Play step** plays only the selected step, or the
+steps from the selected one to the one selected with Shift, as a short scene of its own. An edited scene
+plays its steps; its native version plays once the package is saved and the game starts again.
+
+Scenes take effect for players after a restart, as quest changes do: **Save…**, then start the game
+again. Ctrl+C and Ctrl+V in the Scenes window copy the selected steps and paste them after the selected
+step, also into another scene; whole scenes are copied with the command `copy`.
+
 ## Search
 
-**Search** (toolbar) finds the open mod's actors, quests and steps, scenes, items and flags by their id
-or text. Clicking a result selects that actor (and flies the camera to it) or opens that quest step.
+**Search** (toolbar) finds the open mod's actors, quests and steps, scenes (also by their steps' text),
+items and flags by their id or text. Clicking a result selects that actor (and flies the camera to it), or
+opens that quest step or scene step.
 
 ## Checking and exporting
 
