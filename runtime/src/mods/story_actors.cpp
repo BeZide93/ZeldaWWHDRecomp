@@ -1036,7 +1036,7 @@ void install(const std::function<std::string(uint32_t)>& replaced_by,const std::
     for(const auto& h:hooks)if(!replaced_by(h.first).empty()){LOG("[actors] hook conflict %08X; world actors disabled",h.first);return;}
     // --editor: the native kinds are set up for live placement before they are configured (shared guards)
     if(g_live_kinds){story_props::editor_enable();story_switches::editor_enable();story_enemies::editor_enable();}
-    mod_actor::configure(g_original,g_call,g_scratch+kModScratchOffset);
+    mod_actor::configure(g_original,g_call,g_scratch+kModScratchOffset,g_scratch+kGrappleScratchOffset);
     story_props::configure(g_original,g_call,g_scratch+kPropsScratchOffset,[](uint32_t token,uint32_t pid){
         if(!g_scratch)return;for(size_t i=0;i<g_actors.size();++i){auto&a=g_actors[i];const uint32_t slot=g_scratch+128+uint32_t(i)*4;if(a.prop_token==token&&a.process==pid&&ld32(slot)==pid){a.process=0xFFFFFFFFu;a.deleting=false;st32(slot,0xFFFFFFFFu);std::memset(mem::ptr(g_scratch+kIdentityScratchOffset+uint32_t(i)*identity::kRecordBytes),0,identity::kRecordBytes);return;}}
     });

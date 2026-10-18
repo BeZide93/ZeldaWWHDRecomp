@@ -3293,3 +3293,11 @@ add_test(NAME story_world_static_contract COMMAND mod_actor_runtime_test --world
  target_compile_options(story_world_motion_test PRIVATE -UNDEBUG)
  add_test(NAME story_world_motion COMMAND story_world_motion_test)
  add_test(NAME story_world_floating_contract COMMAND mod_actor_runtime_test --world-floating)
+
+# Native grapple targeting with snapshot-owned proxy identities.
+target_sources(mod_actor_runtime_test PRIVATE runtime/src/mods/story_world_grapple.cpp)
+target_sources(story_actors_runtime_test PRIVATE runtime/src/mods/story_world_grapple.cpp)
+add_executable(story_world_grapple_test runtime/tools/story_world_grapple_test.cpp runtime/src/mods/story_world_grapple.cpp runtime/src/guest_addr_identity.c)
+target_include_directories(story_world_grapple_test PRIVATE runtime/src runtime/include)
+target_compile_options(story_world_grapple_test PRIVATE -UNDEBUG)
+add_test(NAME story_world_grapple COMMAND story_world_grapple_test)

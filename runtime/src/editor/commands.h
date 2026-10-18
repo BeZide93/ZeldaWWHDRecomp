@@ -117,7 +117,7 @@ public:
         return why = "the game is not running", false;
     }
     // Snapshot query: collision geometry and placement/budget findings for one
-    // parsed object, including its buoyancy/drift/anchor parameters. The host
+    // parsed object, including buoyancy/drift/anchor and local grapple points. The host
     // synchronizes its geometry, wave envelope and protected world snapshot.
     virtual bool world_object_query(const std::string& mod, const story_notebook::ManifestActor& actor,
                                     bool wireframe, Value& result, std::string& why) {

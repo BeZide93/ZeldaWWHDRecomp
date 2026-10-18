@@ -211,8 +211,7 @@ class CollisionMeshTests(unittest.TestCase):
         self.assertGreater(signed_volume,0)
 
     def test_reject_bad_collision_contract(self):
-        changes=[lambda d:d['materials'][1].update(name='col_climb'),
-                 lambda d:d['materials'][1].update(name='col_unknown'),
+        changes=[lambda d:d['materials'][1].update(name='col_unknown'),
                  lambda d:d['nodes'][1].update(scale=[0,1,1]),
                  lambda d:d['nodes'][1].update(scale=[1000,1,1]),
                  lambda d:d['nodes'][1].update(translation=[201,0,0]),
@@ -266,6 +265,28 @@ class CollisionMeshTests(unittest.TestCase):
         doc,binary=self.original();doc['materials'][1]['name']='col_objects'
         _,_,data=self.parse(doc,binary)
         self.assertEqual(struct.unpack_from('>H',data,40+8*12+6)[0],6)
+
+    def test_interactive_materials_and_original_tower(self):
+        for name,semantic in [('col_climb',7),('col_hookshot',8)]:
+            doc,binary=self.original();doc['materials'][1]['name']=name
+            _,_,data=self.parse(doc,binary)
+            self.assertEqual(struct.unpack_from('>H',data,40+8*12+6)[0],semantic)
+        source=ROOT/'examples/guest-mods/world-objects-w3/assets/tower.glb'
+        spec=importlib.util.spec_from_file_location('tower_fixture',source.with_name('make_fixtures.py'))
+        generator=importlib.util.module_from_spec(spec);spec.loader.exec_module(generator)
+        self.assertEqual(source.read_bytes(),generator.make())
+        _,info,data=collision_mesh.read_static(source,True)
+        v,t=info['collision_vertices'],info['collision_triangles']
+        triangles=[struct.unpack_from('>4H',data,40+v*12+i*8) for i in range(t)]
+        self.assertEqual({x[3] for x in triangles},{0,2,7,8})
+        self.assertEqual(sum(x[3]==7 for x in triangles),2)
+        points=[struct.unpack_from('>3f',data,40+i*12) for i in range(v)]
+        for a,b,c,semantic in triangles:
+            if semantic!=7:continue
+            p,q,r=points[a],points[b],points[c]
+            u=[q[k]-p[k] for k in range(3)];w=[r[k]-p[k] for k in range(3)]
+            self.assertEqual(u[2]*w[0]-u[0]*w[2],0)
+            self.assertLess(u[0]*w[1]-u[1]*w[0],0)
 
     def test_collision_cache_rebuilds_damaged_or_missing_sidecar(self):
         from unittest.mock import patch

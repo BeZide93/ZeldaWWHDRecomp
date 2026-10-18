@@ -15,7 +15,8 @@ import tempfile
 MAX_VERTICES = MAX_TRIANGLES = 4096
 MAX_EXTENT = 20000
 SEMANTICS = {'col_stone': 0, 'col_grass': 1, 'col_wood': 2,
-             'col_sand': 3, 'col_metal': 4, 'col_wall': 5, 'col_objects': 6}
+             'col_sand': 3, 'col_metal': 4, 'col_wall': 5, 'col_objects': 6,
+             'col_climb': 7, 'col_hookshot': 8}
 
 
 def _document(path, api):

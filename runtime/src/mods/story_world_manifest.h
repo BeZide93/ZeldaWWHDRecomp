@@ -32,6 +32,7 @@ struct ManifestTalk {
     std::string quest,item,time,when_flag,when_not_flag,lines;unsigned quest_step=0;
     std::vector<QuestCondition> quests;std::vector<StoryAction> then;
 };
+struct ManifestGrapplePoint {std::string id;WorldPoint position;float yaw=0;};
 struct ManifestBuoyancy {float draft=0,damping=.25f,max_tilt=10;};
 struct ManifestDrift {float wind_speed=0,max_speed=30;WorldPoint current;};
 struct ManifestAnchor {bool enabled=false;WorldPoint point;float radius=0;};
@@ -40,6 +41,7 @@ struct ManifestActor {
     float collision_radius=30,collision_height=100; bool pushable=false;
     std::string behaviour,collision_mesh,collision_shape,collision_surface="stone";WorldPoint collision_size{};
     ManifestBuoyancy buoyancy;ManifestDrift drift;ManifestAnchor anchor;
+    std::vector<ManifestGrapplePoint> grapple_points;
     bool world_object()const{return !behaviour.empty();}
     bool water_object()const{return behaviour=="floating"||behaviour=="drifting";}
     ManifestLookAt look_at;ManifestPath path;
@@ -254,7 +256,7 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
     if(list.type==Value::Null)return true;
     if(list.type!=Value::Array||list.array.size()>kMaxActorsPerMod)return why="actors must be a list of up to 64",false;
     for(const auto& v:list.array){ManifestActor a;
-        if(!keys(v,{"id","actor","kind","model","animation","look_at","path","collision","behaviour","buoyancy","drift","anchor","attention","stage","room","position","rotation","scale","params","parameters","flag","broken_flag","defeated_flag","drops","carry","combat","native_drops","switch_flag","switch","when","lines","then","texture","talks"}))return why="unknown actor field",false;
+        if(!keys(v,{"id","actor","kind","model","animation","look_at","path","collision","behaviour","buoyancy","drift","anchor","grapple_points","attention","stage","room","position","rotation","scale","params","parameters","flag","broken_flag","defeated_flag","drops","carry","combat","native_drops","switch_flag","switch","when","lines","then","texture","talks"}))return why="unknown actor field",false;
         if(!id(v.get("id")))return why="invalid actor id",false;a.id=v.get("id").text;a.actor=v.get("actor").string();
         if(v.object.contains("kind")) {
             if(v.get("kind").string()!="mod"||v.object.contains("actor"))return why="mod actor kind cannot name a native actor",false;
@@ -358,6 +360,17 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
         if(v.get("rotation").type!=Value::Null&&!point(v.get("rotation"),a.rotation,360))return why="invalid actor rotation",false;
         if(v.get("scale").type!=Value::Null&&(!point(v.get("scale"),a.scale,10)||a.scale.x<=0||a.scale.y<=0||a.scale.z<=0))return why="invalid actor scale",false;
         if((v.object.contains("buoyancy")||v.object.contains("drift")||v.object.contains("anchor"))&&!a.water_object())return why="motion settings require floating or drifting behaviour",false;
+        if(v.object.contains("grapple_points")){
+            const auto&points=v.get("grapple_points");
+            if(!a.world_object()||points.type!=Value::Array||points.array.size()>8)return why="grapple_points requires a world object and at most eight points",false;
+            for(const auto&value:points.array){ManifestGrapplePoint p;
+                if(!keys(value,{"id","position","yaw"})||!id(value.get("id"))||!keys(value.get("position"),{"x","y","z"})||!point(value.get("position"),p.position,20000))return why="grapple point needs an id and bounded local position",false;
+                p.id=value.get("id").text;
+                if(value.object.contains("yaw")&&!number(value.get("yaw"),-360,360,p.yaw))return why="grapple point yaw must be within -360 to 360 degrees",false;
+                if(std::any_of(a.grapple_points.begin(),a.grapple_points.end(),[&](const auto&old){return old.id==p.id;}))return why="grapple point ids must be unique within an object",false;
+                a.grapple_points.push_back(std::move(p));
+            }
+        }
         if(a.water_object()&&(a.stage!="sea"||a.rotation.x!=0||a.rotation.z!=0))return why="water objects require sea placement and yaw-only base rotation",false;
         if(a.anchor.enabled&&std::hypot(double(a.position.x)-a.anchor.point.x,double(a.position.z)-a.anchor.point.z)>a.anchor.radius)return why="object position lies outside its anchor radius",false;
         if(enemy){

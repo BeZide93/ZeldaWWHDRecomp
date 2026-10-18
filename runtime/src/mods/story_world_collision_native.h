@@ -9,7 +9,7 @@ inline bool stored(uint32_t actor,const story_actors::identity::Fingerprint& ide
     return proof::address(actor,0x10C0)&&ld32(actor+State)==Magic&&ld32(actor+State+8)==ld32(actor+4)&&proof::address(ld32(actor+State+4),0xBC)&&story_actors::identity::matches(mem::ptr(actor+Identity),identity);
 }
 template<class Call> bool heap_create(Cpu*c,uint32_t actor,const mesh::Mesh& geometry,const story_actors::identity::Fingerprint& identity,Call call){
-    std::array<uint8_t,7> raw{};
+    std::array<uint8_t,9> raw{};
     for(size_t i=0;i<raw.size();++i){bool found=false;for(unsigned code=0;code<32;++code)if(ld32(GD(0x101D51CC)+code*4)==mesh::NativeResultIds[i]){raw[i]=uint8_t(code);found=true;break;}if(!found)return false;}
     std::string why;std::vector<uint8_t> bytes;
     if(!mesh::build_native(geometry,raw,uint16_t(ld8(actor+0x326)),bytes,why))return false;
@@ -47,7 +47,7 @@ template<class Call> bool move(Cpu*c,uint32_t actor,const story_actors::identity
     if(!stored(actor,identity))return false;const uint32_t play=call(c,GC(0x025200D4),{}),body=ld32(actor+State+4);
     if(!play||!proof::registered(play+0x12A0,body,actor))return false;
     for(unsigned i=0;i<12;++i)st32(actor+Matrix+i*4,ld32(actor+0x56C+i*4));call(c,GC(0x024F43DC),{body});
-    const char*trace=std::getenv("WWHD_WORLD_COLLISION_TRACE");if(trace&&std::strcmp(trace,"1")==0){const uint32_t tick=ld32(actor+State+12)+1;st32(actor+State+12,tick);if(tick%30==0){const uint32_t link=ld32(play+0x5B34);if(proof::address(link,0x6600)&&ld32(link+0x8F8)==body){const uint32_t attribute=call(c,GC(0x024EF0F4),{play+0x12A0,link+0x8F4});LOG("[world_collision] ground tick=%u link=%08X body=%08X poly=%u attribute=%u x=%.3f y=%.3f z=%.3f",tick,link,body,unsigned(ld16(link+0x8F4)),attribute,double(u32_as_f32(ld32(link+0x314))),double(u32_as_f32(ld32(link+0x318))),double(u32_as_f32(ld32(link+0x31C))));}}}
+    const char*trace=std::getenv("WWHD_WORLD_COLLISION_TRACE");if(trace&&std::strcmp(trace,"1")==0){const uint32_t tick=ld32(actor+State+12)+1;st32(actor+State+12,tick);if(tick%30==0){const uint32_t link=ld32(play+0x5B34);if(proof::address(link,0x6B00)&&ld32(link+0x8F8)==body){const uint32_t attribute=call(c,GC(0x024EF0F4),{play+0x12A0,link+0x8F4});LOG("[world_collision] wall poly=%u front=%u floor=%.3f flags=%08X mode=%08X",unsigned(ld16(link+0x9E4)),unsigned(ld8(link+0x68D5)),double(u32_as_f32(ld32(link+0x6A2C))),ld32(link+0x3B8),ld32(link+0x6A70));LOG("[world_collision] ground tick=%u link=%08X body=%08X poly=%u attribute=%u x=%.3f y=%.3f z=%.3f",tick,link,body,unsigned(ld16(link+0x8F4)),attribute,double(u32_as_f32(ld32(link+0x314))),double(u32_as_f32(ld32(link+0x318))),double(u32_as_f32(ld32(link+0x31C))));}}}
     return true;
 }
 template<class Call> void destroy(Cpu*c,uint32_t actor,Call call){

@@ -77,7 +77,7 @@ bool scene_animation(Cpu*,const Identity&,uint32_t lease,const std::string&,floa
 // Startup-private provisional declarations cannot escape through installed services.
 size_t checkpoint();
 void rollback(size_t) noexcept;
-void configure(void(*original)(Cpu*,uint32_t),uint32_t(*call)(Cpu*,uint32_t,std::initializer_list<uint32_t>),uint32_t scratch);
+void configure(void(*original)(Cpu*,uint32_t),uint32_t(*call)(Cpu*,uint32_t,std::initializer_list<uint32_t>),uint32_t scratch,uint32_t grapple_storage=0);
 // Declaration tokens go into native create parameters; they remain stable across state loads.
 uint32_t declare(const std::string& mod,const story_notebook::ManifestActor&,const std::string& archive,int resource_index,std::function<void()> talked,
                  story_notebook::WorldPoint minimum={-50,0,-50},story_notebook::WorldPoint maximum={50,200,50},

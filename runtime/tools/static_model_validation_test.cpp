@@ -48,7 +48,8 @@ int main(){static_models::ModelInfo info;std::string why;auto doc=document();aut
     doc=with_collision();auto collision_glb=glb(doc,cube);assert(static_models::validate_glb(collision_glb,info,why));assert(info.vertex_count==8&&info.triangle_count==12);assert((info.minimum==std::array<float,3>{-50,-50,-50}));assert(collision_glb[info.image_offset]==137&&collision_glb[info.image_offset+1]==80);
     auto second=doc["meshes"].array[1]["primitives"].array[0];second["material"]=2;doc["materials"].array.push_back(mods::json::parse("{\"name\":\"col_wall\"}"));doc["meshes"].array[1]["primitives"].array.push_back(second);assert(static_models::validate_glb(glb(doc,cube),info,why));
     doc=with_collision();doc["materials"].array[1]["name"]="col_objects";assert(static_models::validate_glb(glb(doc,cube),info,why));
-    doc=with_collision();doc["materials"].array[1]["name"]="col_climb";bad(doc,cube);
+    doc=with_collision();doc["materials"].array[1]["name"]="col_climb";assert(static_models::validate_glb(glb(doc,cube),info,why));
+    doc=with_collision();doc["materials"].array[1]["name"]="col_hookshot";assert(static_models::validate_glb(glb(doc,cube),info,why));
     doc=with_collision();doc["materials"].array[1]["name"]="col_unknown";bad(doc,cube);
     doc=with_collision();doc["nodes"].array[2]["scale"]=mods::json::parse("[0,1,1]");bad(doc,cube);
     doc=with_collision();doc["nodes"].array[2]["scale"]=mods::json::parse("[1000,1,1]");bad(doc,cube);

@@ -5,8 +5,9 @@ own models. Link and the ship use the game's background collision. Ground
 materials select the game's footstep sounds and surface effects.
 
 Static objects stay in place. Floating bodies follow the sea, and drifting bodies
-also move with wind or a current. Climbable walls, hookshot and grapple targets,
-distant island models, shore foam and sea-chart markers are later additions.
+also move with wind or a current. Collision materials can make walls climbable
+and surfaces accept the hookshot. Grapple targets, distant island models, shore
+foam and sea-chart markers are later additions.
 
 ## Place a model with collision
 
@@ -65,6 +66,8 @@ are optional; they do not control collision. Assign one of these material names:
 | `col_metal` | Metal |
 | `col_wall` | Ordinary wall surface |
 | `col_objects` | Object collision, including the ship; Link and camera pass through |
+| `col_climb` | Native vine-style climbable wall |
+| `col_hookshot` | Hookshot attachment surface with wooden ground sounds |
 
 Use separate material slots for different ground types. Triangle direction
 matters: orient ground faces upward and obstacle faces outward. The converter
@@ -78,8 +81,7 @@ model to an arbitrary triangle budget. The visible material’s `col_*` name
 selects the fallback surface; other visible material names use stone. Use a
 separate, simpler `_col` mesh when the render mesh exceeds the collision limits.
 
-Names such as `col_climb`, `col_hookshot`, `col_noship` and `col_shiponly` are not
-available. The native collision filter groups the ship with other objects; it
+Names such as `col_noship` and `col_shiponly` are not available. The native collision filter groups the ship with other objects; it
 has no separate ship-only category.
 
 Use `col_objects` on vertical collision-envelope faces when the visible hull is
@@ -323,3 +325,58 @@ and license.
 Ship only your original source models and package files. The game prepares its
 rendering resources and collision cache locally; generated cache archives and
 resources taken from the game do not belong in an exported mod.
+
+## Climbable walls and hookshot surfaces
+
+Assign `col_climb` to an outward-facing vertical collision wall. Leave clear
+space in front for Link and connect its upper edge to an upward-facing walkable
+roof or platform. The native climb checks require a nearly vertical face
+(`abs(normal.y) <= 0.05`); sloped ground does not become a climbable wall merely
+by changing its material. Keep beams and other obstacles out of the climb lane.
+
+Assign `col_hookshot` to a visible target's collision triangles. Aim and fire
+the hookshot normally: the native reticle identifies eligible polygons within
+its 1500-game-unit sight range. Leave room for Link at the destination and an
+unobstructed pull path. Hookshot targets use wooden ground sounds. These
+materials are authored on GLB collision meshes; simple collision shapes retain
+the six ordinary ground materials.
+
+`examples/guest-mods/world-objects-w3/assets/make_fixtures.py` reproduces an
+original tower, checker atlas, climb face and hookshot patch. Its stone roof
+meets the climb face, and the front crossbeam leaves climb lanes at either
+side. The right-side gold patch is the hookshot target. Grapple anchors require
+separate object settings; a wooden collision material alone does not create
+a rope target.
+
+## Grapple points
+
+A grapple point marks the attachment position on a visible beam or post. Add it
+inside the world-object actor, alongside its collision:
+
+```json
+"grapple_points": [
+  {"id": "beam", "position": {"x": 0, "y": 800, "z": -330}, "yaw": 90}
+]
+```
+
+Point positions are local game units, relative to the model's origin. The actor's
+scale, rotation and movement apply to them. `yaw` is the local post orientation
+in degrees and defaults to zero. Use a visible beam and leave space for the
+rope, Link's swing and the landing. Collision geometry alone does not create a
+grapple point. Targeting, rope movement and release use the game's controls.
+
+Each object accepts at most eight points with unique IDs. Local coordinates
+must be within ±20,000 units, yaw within ±360 degrees, and points must lie inside
+the object's scaled collision bounds. On floating objects they must also fit
+its collision bounding radius. A room accepts at most 16 declared grapple
+points across enabled mods. Their actor storage is included in mod budgets.
+
+`place_world_object`, `set_world_object` and `set_actor` accept `grapple_points`.
+An omitted field keeps existing points; `null` in an editor update removes them.
+`preview_collision` also returns each point's authored world position and yaw.
+Removing an attached target requests a native rope release before its temporary
+target actor is freed. Full states preserve attachment identities; portable
+loads recreate the points with their objects. Release the rope before making
+a portable or Last session save: those saves retain the game's existing
+restriction on saving while Link hangs from a rope. Grappling mod targets does
+not set the game's tutorial or progression flags.

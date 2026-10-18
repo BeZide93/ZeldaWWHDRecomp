@@ -567,6 +567,28 @@ void floating_world_object_commands() {
     host.query_clear=false;CHECK(!ok(session.run("set_world_object",json(R"({"id":"raft-a","behaviour":"floating"})")))&&*session.manifest("editor-test")==before&&session.undo_depth()==depth);
 }
 
+void grapple_world_object_commands() {
+    FakeHost host;editor::Session session(&host);auto manifest=json(kManifest);
+    manifest["models"]=json(R"([{"id":"tower","source":"assets/tower.glb"}])");session.add_package("editor-test","Editor test","",manifest);
+    auto place=json(R"({"id":"tower-a","model":"tower","collision":{"shape":"box","size":{"x":100,"y":1000,"z":100}},"stage":"sea","room":12,"position":{"x":100,"y":500,"z":200},"grapple_points":[{"id":"beam","position":{"x":0,"y":800,"z":-330},"yaw":90}]})");
+    CHECK(ok(session.run("place_world_object",place)));CHECK(actor_of(session,"tower-a")->get("grapple_points").array.size()==1);
+    CHECK(ok(session.run("set_world_object",json(R"({"id":"tower-a","collision":{"shape":"box","size":{"x":200,"y":1000,"z":100}}})"))));CHECK(actor_of(session,"tower-a")->get("grapple_points").array.size()==1);
+    CHECK(ok(session.run("set_world_object",json(R"({"id":"tower-a","grapple_points":[{"id":"new-beam","position":{"x":1,"y":900,"z":-300}}]})"))));CHECK(actor_of(session,"tower-a")->get("grapple_points").array[0].get("id").string()=="new-beam");
+    CHECK(ok(session.run("undo"))&&actor_of(session,"tower-a")->get("grapple_points").array[0].get("id").string()=="beam");CHECK(ok(session.run("redo")));
+    CHECK(ok(session.run("set_world_object",json(R"({"id":"tower-a","grapple_points":null})"))));CHECK(actor_of(session,"tower-a")->get("grapple_points").type==Value::Null);CHECK(ok(session.run("undo")));
+    CHECK(ok(session.run("set_actor",json(R"({"id":"tower-a","property":"grapple_points","value":[{"id":"third","position":{"x":0,"y":10,"z":0},"yaw":180}]})"))));
+    CHECK(actor_of(session,"tower-a")->get("grapple_points").array[0].get("id").string()=="third");
+    CHECK(ok(session.run("set_world_object",json(R"({"id":"tower-a","behaviour":"floating","buoyancy":{"draft":0}})"))));CHECK(actor_of(session,"tower-a")->get("grapple_points").array.size()==1);
+    CHECK(ok(session.run("set_world_object",json(R"({"id":"tower-a","behaviour":"static"})"))));CHECK(actor_of(session,"tower-a")->get("grapple_points").array.size()==1);
+    const auto before=*session.manifest("editor-test");const auto depth=session.undo_depth();
+    CHECK(!ok(session.run("set_world_object",json(R"({"id":"tower-a","collision":{"shape":"sphere","radius":10},"grapple_points":[{"id":"bad","position":{"x":20001,"y":0,"z":0}}]})")))&&*session.manifest("editor-test")==before&&session.undo_depth()==depth);
+    CHECK(!ok(session.run("set_actor",json(R"({"id":"tower-a","property":"grapple_points","value":[{"id":"same","position":{"x":0,"y":0,"z":0}},{"id":"same","position":{"x":1,"y":0,"z":0}}]})")))&&*session.manifest("editor-test")==before);
+    CHECK(!ok(session.run("set_actor",json(R"({"id":"sign-a","property":"grapple_points","value":[]})")))&&*session.manifest("editor-test")==before);
+    host.query_clear=false;CHECK(!ok(session.run("set_world_object",json(R"({"id":"tower-a","grapple_points":[]})")))&&*session.manifest("editor-test")==before&&session.undo_depth()==depth);host.query_clear=true;
+    CHECK(ok(session.run("set_actor",json(R"({"id":"tower-a","property":"grapple_points","value":null})"))));CHECK(actor_of(session,"tower-a")->get("grapple_points").type==Value::Null);
+    auto cleared=place;cleared["id"]="tower-b";cleared["grapple_points"]=Value{};CHECK(ok(session.run("place_world_object",cleared))&&actor_of(session,"tower-b")->get("grapple_points").type==Value::Null);
+}
+
 void building(const fs::path& examples) {
     FakeHost host;
     editor::Session s(&host);
@@ -807,6 +829,7 @@ int main(int argc, char** argv) {
     }
     world_object_commands();
     floating_world_object_commands();
+    grapple_world_object_commands();
     command_layer();
     handle_drag();
     locations();

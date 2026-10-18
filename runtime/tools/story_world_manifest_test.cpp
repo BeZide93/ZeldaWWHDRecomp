@@ -265,6 +265,25 @@ int main() {
         for(const char*field:{"carry","combat","path","animation","attention","talks","lines","then"}){auto data=drifting;data["actors"].array[0][field]=Value{};rejected(data);}
     }
 
+    { // Grapple points bind to original rigid world objects and saved identities.
+        auto tower=mods::json::parse(R"({"models":[{"id":"tower","source":"assets/tower.glb"}],"actors":[{"id":"tower","kind":"mod","model":"tower","behaviour":"static","stage":"sea","room":12,"position":{"x":100,"y":500,"z":200},"collision":{"shape":"box","size":{"x":100,"y":1000,"z":100}},"grapple_points":[{"id":"beam","position":{"x":0,"y":800,"z":-330},"yaw":90}]}]})");
+        assert(parse_actors(tower,actors,why)&&actors[0].grapple_points.size()==1&&actors[0].grapple_points[0].id=="beam"&&actors[0].grapple_points[0].position.y==800&&actors[0].grapple_points[0].yaw==90);
+        auto rejected=[&](Value data){assert(!parse_actors(data,actors,why));};
+        const auto first=actors[0];const auto hash=story_actors::identity::fingerprint("own",first);
+        for(unsigned field=0;field<4;++field){auto changed=first;if(field==0)changed.grapple_points[0].id="other";if(field==1)changed.grapple_points[0].position.x=1;if(field==2)changed.grapple_points[0].position.y+=1;if(field==3)changed.grapple_points[0].yaw+=1;assert(story_actors::identity::fingerprint("own",changed)!=hash);}
+        auto bare=first;bare.grapple_points.clear();auto missing=tower;missing["actors"].array[0].object.erase("grapple_points");assert(parse_actors(missing,actors,why)&&actors[0].grapple_points.empty());assert(story_actors::identity::fingerprint("own",actors[0])==story_actors::identity::fingerprint("own",bare));assert(story_actors::identity::fingerprint("own",bare)!=hash);
+        auto empty=tower;empty["actors"].array[0]["grapple_points"]=mods::json::parse("[]");assert(parse_actors(empty,actors,why)&&actors[0].grapple_points.empty());assert(story_actors::identity::fingerprint("own",actors[0])==story_actors::identity::fingerprint("own",bare));
+        auto eight=tower;auto&points=eight["actors"].array[0]["grapple_points"].array;while(points.size()<8){auto p=points[0];p["id"]="beam"+std::to_string(points.size());points.push_back(p);}assert(parse_actors(eight,actors,why)&&actors[0].grapple_points.size()==8);
+        auto ordered=actors[0];const auto ordered_hash=story_actors::identity::fingerprint("own",ordered);std::swap(ordered.grapple_points[0],ordered.grapple_points[1]);assert(story_actors::identity::fingerprint("own",ordered)!=ordered_hash);points.push_back(points.back());rejected(eight);
+        for(const char*definition:{R"([{"id":"beam","position":{"x":-20000,"y":20000,"z":20000},"yaw":-360}])",R"([{"id":"beam","position":{"x":20000,"y":-20000,"z":-20000},"yaw":360}])",R"([{"id":"beam","position":{"x":0,"y":1,"z":0}}])"}){auto data=tower;data["actors"].array[0]["grapple_points"]=mods::json::parse(definition);assert(parse_actors(data,actors,why));}
+        for(const char*definition:{"null","{}",R"([{"id":"beam","position":{"x":0,"y":1,"z":0}},{"id":"beam","position":{"x":1,"y":2,"z":3}}])",R"([{"id":"foreign:beam","position":{"x":0,"y":1,"z":0}}])",R"([{"id":"beam","position":{"x":20001,"y":0,"z":0}}])",R"([{"id":"beam","position":{"x":0,"y":-20001,"z":0}}])",R"([{"id":"beam","position":{"x":0,"y":0,"z":20001}}])",R"([{"id":"beam","position":{"x":0,"z":0}}])",R"([{"id":"beam","position":{"x":0,"y":0,"z":0},"yaw":361}])",R"([{"id":"beam","position":{"x":0,"y":0,"z":0},"yaw":-361}])",R"([{"id":"beam","position":{"x":0,"y":0,"z":0},"yaw":"90"}])",R"([{"id":"beam","position":{"x":0,"y":0,"z":0},"native_params":1}])"}){auto data=tower;data["actors"].array[0]["grapple_points"]=mods::json::parse(definition);rejected(data);}
+        auto floating=tower;floating["actors"].array[0]["behaviour"]="floating";assert(parse_actors(floating,actors,why)&&actors[0].grapple_points.size()==1);
+        floating["actors"].array[0]["behaviour"]="drifting";floating["actors"].array[0]["drift"]=mods::json::parse(R"({"current":{"x":1,"z":0}})");assert(parse_actors(floating,actors,why)&&actors[0].grapple_points.size()==1);
+        auto ordinary=tower;ordinary["actors"].array[0].object.erase("behaviour");ordinary["actors"].array[0]["collision"]=mods::json::parse(R"({"radius":30,"height":100,"mode":"solid"})");rejected(ordinary);
+        auto native=example();native["actors"].array[0]["grapple_points"]=tower.get("actors").array[0].get("grapple_points");rejected(native);
+        auto skinned=tower;skinned["models"].array[0]["kind"]="skinned";rejected(skinned);
+    }
+
     std::vector<ManifestModel> models;assert(parse_models(valid_mod,models,why)&&models[0].kind=="static");
     mod=valid_mod;mod["models"].array[0]["kind"]="skinned";assert(parse_models(mod,models,why)&&models[0].kind=="skinned");
     mod["models"].array[0]["kind"]="static";assert(parse_models(mod,models,why)&&models[0].kind=="static");
