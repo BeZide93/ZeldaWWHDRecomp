@@ -44,7 +44,7 @@ std::function<void()> mod_talked(const std::string& mod,const std::string& id);
 mod_actor::TalkProvider mod_talk_provider(const std::string&,const std::string&);
 namespace {
 using story_notebook::ManifestActor;
-struct Actor {std::string mod; ManifestActor spec; uint32_t process=0xFFFFFFFFu; bool deleting=false; uint32_t mod_token=0; bool restore_talk=false;uint32_t prop_token=0,switch_token=0,switch_source=0,enemy_token=0;story_items::EnemyMarkerHandle combat_marker{};story_items::PropMarkerHandle carry_marker=0;identity::Fingerprint fingerprint{};bool restore_quarantined=false;bool respawn=false;bool removed=false;uint32_t resident_event_token=0;bool redeclare=false;};
+struct Actor {std::string mod; ManifestActor spec; uint32_t process=0xFFFFFFFFu; bool deleting=false; uint32_t mod_token=0; bool restore_talk=false;uint32_t prop_token=0,switch_token=0,switch_source=0,enemy_token=0;story_items::EnemyMarkerHandle combat_marker{};story_items::PropMarkerHandle carry_marker=0;identity::Fingerprint fingerprint{};bool restore_quarantined=false;bool respawn=false;bool removed=false;uint32_t resident_event_token=0;bool redeclare=false;uint32_t held_started=0xFFFFFFFFu;/* editor: the process whose first Execute a held pose ran */};
 std::vector<Actor> g_actors;
 void native_redeclare(Actor& a);  // the editor: a changed native declaration, once its old copy is gone
 uint32_t g_next_resident_event_token=1;
@@ -588,8 +588,19 @@ void room_loaded(Cpu* c,int room) {
         LOG("[actors] %s:%s room %d process %08X room_layer=%08X",a.mod.c_str(),a.spec.id.c_str(),room,a.process,room_layer);
     }
 }
+// test aid: WWHD_EDITOR_POSE_TRACE=1 logs each placed actor's place and where its model is drawn (the
+// translation of its cull matrix, the model's base matrix for most kinds) every 20 logic steps, and each
+// editor pose (in place or held)
+bool pose_trace(){static const bool on=[]{const char*v=std::getenv("WWHD_EDITOR_POSE_TRACE");return v&&*v=='1';}();return on;}
+void trace_drawn(Cpu* c,const Actor& a,const char* what){
+    const uint32_t at=actor_address(c,a.mod,a.spec.id);if(!at)return;
+    const uint32_t m=ld32(at+0x348);const bool ok=m>=mem::kMem2Start&&m<mem::kMem2End-0x30;
+    LOG("[actors] pose-trace %s %s pos %.1f %.1f %.1f drawn %.1f %.1f %.1f",a.spec.id.c_str(),what,double(u32_as_f32(ld32(at+0x314))),double(u32_as_f32(ld32(at+0x318))),double(u32_as_f32(ld32(at+0x31C))),
+        ok?double(u32_as_f32(ld32(m+0xC))):0.0,ok?double(u32_as_f32(ld32(m+0x1C))):0.0,ok?double(u32_as_f32(ld32(m+0x2C))):0.0);
+}
 void service(Cpu* c){
     if(!g_installed||!g_scratch)return;
+    if(pose_trace()){static unsigned n=0;if(n++%20==0)for(const auto& a:g_actors)if(!a.removed&&a.process!=0xFFFFFFFFu)trace_drawn(c,a,"step");}
     refresh_link();
     if(g_talk.actor&&g_talk.actor->spec.actor=="resident"){
         Cpu lookup=*c;st32(g_scratch+0x40,0);g_call(&lookup,kSearch,{g_talk.actor->process,g_scratch+0x40});
@@ -871,26 +882,54 @@ bool editor_moves_in_place(Cpu* c,uint32_t actor){
     const uint32_t play=g_call(c,GC(0x025200D4),{});
     return play&&g_call(c,GC(0x02540158),{play+0x51D0,actor})!=0;
 }
+// A held actor's matrices at its new place: its own Execute runs once (fpcMtd_Execute with its
+// methods, as fopAc_Execute calls it, through the port's hooks for owned kinds), and its own record,
+// the whole process allocation (profile sizes), is put back as it was: its AI, timers, actions and
+// requests stay held with the world; what it drew from (its model and joint matrices, its weapon's
+// place) follows. An actor that never ran yet (created in the held world) keeps its first Execute,
+// its one-time start (a bokoblin takes up its weapon there; undone, it would hide the weapon again on
+// every step). False when the record can't be read safely.
+bool editor_redraw_held(Cpu* c,uint32_t actor,bool keep_first){
+    // the profile: the game's (MEM2) or the port's copy for owned kinds (runtime memory)
+    auto readable=[](uint32_t at,uint32_t bytes){return !(at&3)&&((at>=mem::kMem2Start&&at<=mem::kMem2End-bytes)||(at>=mem::kRuntimeStart&&at<=mem::kRuntimeEnd-bytes));};
+    const uint32_t profile=ld32(actor+0x10),methods=ld32(actor+0xF0);
+    if(!readable(profile,0x18)||!readable(methods,0x10))return false;
+    const uint32_t size=ld32(profile+0x10)+ld32(profile+0x14);
+    if(size<0x330||size>0x40000||uint64_t(actor)+size>mem::kMem2End)return false;
+    std::vector<uint8_t> record(size);std::memcpy(record.data(),mem::ptr(actor),size);
+    g_call(c,GC(0x025DFCC4),{methods,actor});
+    if(!keep_first)std::memcpy(mem::ptr(actor),record.data(),size);
+    return true;
+}
 bool editor_pose(Cpu* c,const std::string& mod,const std::string& id,const story_notebook::WorldPoint& p,const story_notebook::WorldPoint& r){
     if(!c||!g_call||!g_scratch)return false;
     Actor* a=nullptr;for(auto& x:g_actors)if(x.mod==mod&&x.spec.id==id)a=&x;
-    if(!a||a->removed||a->respawn||a->deleting||a->process==0xFFFFFFFFu)return false;
+    if(!a||a->removed||a->respawn||a->deleting||a->process==0xFFFFFFFFu){if(pose_trace())LOG("[actors] pose-trace %s no live copy to pose",id.c_str());return false;}
     if(!std::isfinite(p.x)||!std::isfinite(p.y)||!std::isfinite(p.z)||!std::isfinite(r.y))return false;
     const uint32_t at=actor_address(c,mod,id);if(!at||find(at)!=a||ld8(at+0xC)==3)return false;
     if(a->spec.kind=="mod"){
         mod_actor::Identity who;if(!mod_actor::identify(c,at,who))return false;
         mod_actor::set_rotation(c,who,r);return mod_actor::set_position(c,who,p);
     }
-    // A native actor redraws at its place only from its own Execute (its model and joint matrices). The
-    // editor's view holds the world with an event, and the game then runs only the actors its event check
-    // lets move (dEvt_control_c::moveApproval: event members and actors with a run-in-events status,
-    // e.g. pots); the others (enemies...) would keep drawing at the old place. Those are not moved in
-    // place: the drag creates them again where they go, as for an actor without a copy.
-    if(!editor_moves_in_place(c,at))return false;
     // home, old and current place; the turn about the vertical axis only (native kinds keep their own X/Z)
     for(uint32_t off:{0x2ECu,0x300u,0x314u}){st32(at+off,f32_as_u32(p.x));st32(at+off+4,f32_as_u32(p.y));st32(at+off+8,f32_as_u32(p.z));}
     const uint16_t yaw=uint16_t(int32_t(r.y*65536.0f/360.0f));
     for(uint32_t off:{0x2FAu,0x30Eu,0x322u,0x32Au})st16(at+off,yaw);
+    // A native actor builds its model and joint matrices (and its held weapon's) from this place in its
+    // own Execute. The editor's view holds the world with an event, and the game then runs only the
+    // actors its event check lets move (dEvt_control_c::moveApproval: event members and actors with a
+    // run-in-events status, e.g. pots); a held one (an enemy...) would keep drawing at the old place.
+    const bool running=editor_moves_in_place(c,at);
+    // this copy's first held pose keeps its Execute (a copy created in the held world never ran yet)
+    const bool first=a->held_started!=a->process;
+    if(!running&&!editor_redraw_held(c,at,first)){if(pose_trace())LOG("[actors] pose-trace %s held, record not readable (profile %08X methods %08X)",id.c_str(),ld32(at+0x10),ld32(at+0xF0));return false;}
+    if(!running&&first){
+        a->held_started=a->process;
+        // the first Execute may have taken a step: the place and turn are the pose's again
+        for(uint32_t off:{0x2ECu,0x300u,0x314u}){st32(at+off,f32_as_u32(p.x));st32(at+off+4,f32_as_u32(p.y));st32(at+off+8,f32_as_u32(p.z));}
+        for(uint32_t off:{0x2FAu,0x30Eu,0x322u,0x32Au})st16(at+off,yaw);
+    }
+    if(pose_trace())trace_drawn(c,*a,running?"pose-running":first?"pose-held-first":"pose-held");
     return true;
 }
 unsigned editor_pending(){unsigned n=0;for(const auto& a:g_actors)n+=a.respawn;return n;}

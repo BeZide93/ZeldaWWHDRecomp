@@ -114,7 +114,7 @@ void original(Cpu* c,uint32_t fn) {
     }
     if(fn==0x025B8C0C)st32(c->r[3],ld32(c->r[3])|1);
 }
-uint32_t move_approval=1;
+uint32_t move_approval=1;unsigned held_executes=0;float held_drawn_x=0;
 uint32_t call(Cpu*,uint32_t fn,std::initializer_list<uint32_t> args) {
     ++native_calls;const auto* a=args.begin();
     if(sign_native_fixture&&fn==0x025F795C)return sign_status;
@@ -147,6 +147,7 @@ uint32_t call(Cpu*,uint32_t fn,std::initializer_list<uint32_t> args) {
     if(fn==0x022F7388){assert(a[1]==0x10023418&&a[2]==0);++seated_actions;st32(a[0]+0x86C,ld32(a[1]));st32(a[0]+0x870,ld32(a[1]+4));st8(a[0]+0xA1D,11);st8(a[0]+0xA22,1);return 1;}
     if(fn==0x0253EE04){assert(a[0]==0x1046F0B0+0x51D0);return ym1_partner;}
     if(fn==0x02540158){assert(a[0]==0x1046F0B0+0x51D0);return move_approval;}  // dEvt_control_c::moveApproval
+    if(fn==0x025DFCC4){++held_executes;st32(a[1]+0x400,0xDEAD);st32(a[1]+0x314,0);held_drawn_x=500;return 1;}  // fpcMtd_Execute: AI state and place change, matrices built
     if(fn==0x025F795C)return ym1_message_status;
     if(fn==0x022F9B64)return 1;
     if(fn==0x025A11EC){++seated_bases;assert(a[1]==1);if(ym1_message_status==0x13)st32(a[0]+0x7C8,0xFFFFFFFFu);return 0;}
@@ -379,8 +380,22 @@ int main(int argc,char** argv){
         // held by the event, it keeps its place and the drag creates it again instead
         const uint32_t at=story_actors::actor_address(&c,"late","guide");assert(at);
         const float x0=u32_as_f32(ld32(at+0x314));
-        move_approval=0;assert(!story_actors::editor_pose(&c,"late","guide",{500,10,600},{0,90,0})&&u32_as_f32(ld32(at+0x314))==x0);
-        move_approval=1;assert(story_actors::editor_pose(&c,"late","guide",{500,10,600},{0,90,0})&&u32_as_f32(ld32(at+0x314))==500&&u32_as_f32(ld32(at+0x31C))==600);
+        (void)x0;
+        // running (the event lets it move): moved in place, its own Execute does the rest next step
+        move_approval=1;assert(story_actors::editor_pose(&c,"late","guide",{500,10,600},{0,90,0})&&u32_as_f32(ld32(at+0x314))==500&&u32_as_f32(ld32(at+0x31C))==600&&held_executes==0);
+        // held by the editor's event: its own Execute runs once for its matrices, its record comes back
+        // as it was (AI state untouched) with the new place
+        const uint32_t profile=kArena+0x90000,methods=kArena+0x90100;st32(at+0x10,profile);st32(at+0xF0,methods);st32(profile+0x10,0x1000);st32(profile+0x14,0);
+        st32(at+0x400,7);move_approval=0;
+        // its first held pose keeps that Execute (its one-time start), at the pose's place
+        assert(story_actors::editor_pose(&c,"late","guide",{700,20,800},{0,90,0})&&held_executes==1);
+        assert(ld32(at+0x400)==0xDEAD&&u32_as_f32(ld32(at+0x314))==700&&u32_as_f32(ld32(at+0x31C))==800&&u32_as_f32(ld32(at+0x2EC))==700);
+        // the next ones put its record back (AI state untouched) with the new place
+        st32(at+0x400,7);
+        assert(story_actors::editor_pose(&c,"late","guide",{720,20,820},{0,90,0})&&held_executes==2&&held_drawn_x==500);
+        assert(ld32(at+0x400)==7&&u32_as_f32(ld32(at+0x314))==720&&u32_as_f32(ld32(at+0x31C))==820);
+        // no readable record: refused (the drag then creates it again)
+        st32(at+0x10,0);assert(!story_actors::editor_pose(&c,"late","guide",{710,20,800},{0,90,0})&&held_executes==2);st32(at+0x10,profile);
         std::puts("editor with no declared actors: live kinds installed, a new resident appears at once");return 0;
     }
     if(argc==2&&std::strcmp(argv[1],"--no-resident")==0){

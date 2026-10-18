@@ -954,6 +954,10 @@ add_executable(editor_dock_ui_test runtime/tools/editor_dock_ui_test.cpp runtime
 target_compile_options(editor_dock_ui_test PRIVATE -UNDEBUG)
 target_link_libraries(editor_dock_ui_test PRIVATE imgui)
 add_test(NAME editor_dock_ui COMMAND editor_dock_ui_test)
+add_executable(editor_resident_ui_test runtime/tools/editor_resident_ui_test.cpp runtime/src/overlay/editor_resident.cpp)
+target_compile_options(editor_resident_ui_test PRIVATE -UNDEBUG)
+target_link_libraries(editor_resident_ui_test PRIVATE imgui)
+add_test(NAME editor_resident_ui COMMAND editor_resident_ui_test)
 if(APPLE)
   add_executable(pip_preview_ui_test runtime/tools/pip_preview_ui_test.cpp runtime/src/gfx/display_modes.cpp)
   target_include_directories(pip_preview_ui_test PRIVATE ${IMGUI_DIR} runtime/src runtime/include

@@ -18,6 +18,7 @@
 #include "../platform/keycodes.h"
 #include "editor_panel.h"
 #include "editor_dock.h"
+#include "editor_resident.h"
 #include "extensions.h"
 #include "hostui.h"
 #include "imgui.h"
@@ -47,6 +48,7 @@ struct ShellState {
     int grid = 0, angle = 1;  // snapping: indexes into kGrid / kAngle
     std::string placing;      // a type from list_actor_types while placing by click
     std::string place_model;  // its model
+    std::string place_resident;  // a resident's type (uo2, um1, ym1) while placing one
     bool play_restore = true;
     bool dragging = false;    // the gizmo was used last frame
     float drag[16] = {};
@@ -558,8 +560,8 @@ void world(float w, float h) {
             d["x"] = dir[0], d["y"] = dir[1], d["z"] = dir[2];
             prm["origin"] = o;
             prm["direction"] = d;
-            const std::string type = S.placing, model_id = S.place_model;
-            editor_ui::command("pick", prm, [type, model_id](const Value& r) {
+            const std::string type = S.placing, model_id = S.place_model, resident = S.place_resident;
+            editor_ui::command("pick", prm, [type, model_id, resident](const Value& r) {
                 if (!r.get("ok").boolean) return;
                 Value add;
                 add["type"] = type;
@@ -568,6 +570,7 @@ void world(float w, float h) {
                 if (r.get("result").get("stage").type == Value::String) add["stage"] = r.get("result").get("stage");
                 if (r.get("result").get("room").type == Value::Number) add["room"] = r.get("result").get("room");
                 if (!model_id.empty()) add["model"] = model_id;
+                if (type == "resident" && !resident.empty()) add["options"]["resident"] = resident;
                 editor_ui::command("add_actor", add, [](const Value& a) {
                     if (a.get("ok").boolean) editor_ui::selected() = a.get("result").get("id").string();
                 });
@@ -624,14 +627,19 @@ void add_menu() {
             group = S.type_groups[i];
             ImGui::SeparatorText(group.c_str());
         }
+        if (S.types[i] == "resident") {  // a submenu of its types (what each looks like)
+            std::string code;
+            if (editor_resident::menu(S.type_labels[i].c_str(), code)) S.placing = S.types[i], S.place_model.clear(), S.place_resident = code;
+            continue;
+        }
         if (!S.type_model[i]) {
-            if (ImGui::MenuItem(S.type_labels[i].c_str())) S.placing = S.types[i], S.place_model.clear();
+            if (ImGui::MenuItem(S.type_labels[i].c_str())) S.placing = S.types[i], S.place_model.clear(), S.place_resident.clear();
             continue;
         }
         if (ImGui::BeginMenu(S.type_labels[i].c_str())) {
             for (const auto& md : m.get("models").array) {
                 const std::string id = md.get("id").string();
-                if (ImGui::MenuItem((id + "  (" + md.get("kind").string("static") + ")").c_str())) S.placing = S.types[i], S.place_model = id;
+                if (ImGui::MenuItem((id + "  (" + md.get("kind").string("static") + ")").c_str())) S.placing = S.types[i], S.place_model = id, S.place_resident.clear();
             }
             if (m.get("models").array.empty()) ImGui::TextDisabled("no models yet: import one (Outliner > Models)");
             ImGui::EndMenu();

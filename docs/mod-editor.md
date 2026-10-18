@@ -101,7 +101,9 @@ Press **Add** and choose what to place, then click into the picture: the actor s
 you clicked (the game's own collision decides where the ground is). Hold Shift while clicking to place
 more of the same; **Stop placing** in the toolbar or Esc ends it.
 
-- **Game actors:** sign, resident (uo2, um1 or the seated ym1), chest.
+- **Game actors:** sign, resident, chest. **Resident** opens a list of its types: Uo2 (the man who sits
+  at Windfall's bar), Um1 (the man on Windfall's windmill) or a seated villager (Ym1). A placed
+  resident's **Type** in the Inspector changes it; the resident is then created again in its room.
 - **Props:** pot, barrel, crate.
 - **Switches:** switch, door (it opens with one of the mod's switches).
 - **Enemies:** ChuChu, Bokoblin, Moblin, Keese.

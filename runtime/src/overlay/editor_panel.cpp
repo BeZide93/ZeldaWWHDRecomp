@@ -18,6 +18,7 @@
 
 #include "../editor/editor_game.h"
 #include "../editor/mcp_game.h"
+#include "editor_resident.h"
 #include "editor_shell.h"
 #include "extensions.h"
 #include "hostui.h"
@@ -174,10 +175,13 @@ bool restart_only(const Value& a) {
     static std::map<std::string, bool> live;
     static int asked = -1000;
     const int frame = ImGui::GetFrameCount();
-    if (live.empty() || frame - asked > 120)  // the game installs its kinds after the overlay starts: asked again now and then
-        asked = frame, editor::try_with_session([&](editor::Session& s) {
-            for (const auto& t : s.run("list_actor_types", Value(), false).get("result").array) live[t.get("type").string()] = t.get("live").boolean;
-        });
+    // the game installs its kinds after the overlay starts: asked again now and then; while the session is
+    // busy (a command running) the next frame asks again, so an early or missed answer never sticks
+    if (live.empty() || frame - asked > 120)
+        if (editor::try_with_session([&](editor::Session& s) {
+                for (const auto& t : s.run("list_actor_types", Value(), false).get("result").array) live[t.get("type").string()] = t.get("live").boolean;
+            }))
+            asked = frame;
     const std::string actor = a.get("actor").string();
     std::string type = actor;
     if (a.get("kind").string() == "mod") type = a.get("combat").type != Value::Null ? "model_enemy" : a.get("carry").type != Value::Null ? "model_carry" : "model";
@@ -599,6 +603,20 @@ void actor_inspector(const Value& m) {
             Value s = p;
             s["property"] = "animation";
             s["value"] = anim.empty() ? Value() : Value(anim);
+            command("set_actor", s);
+        }
+    }
+    if (actor == "resident") {  // its type (parameters.resident): changing it creates it again in its room
+        ImGui::TextUnformatted("Type");
+        mark("parameters");
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        std::string code;
+        if (editor_resident::combo("##resident_type", editor_resident::code_of(*a), code)) {
+            Value params = a->get("parameters").type == Value::Object ? a->get("parameters") : Value();
+            params["resident"] = code;
+            Value s = p;
+            s["property"] = "parameters";
+            s["value"] = params;
             command("set_actor", s);
         }
     }
