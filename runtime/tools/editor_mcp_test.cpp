@@ -633,6 +633,34 @@ void quest_tools() {
     CHECK(is_error(v) && text_of(v).find("test mode") != std::string::npos && be.asked == 4);
 }
 
+// Game objects through tools/call: list_game_objects (category, query) and add_actor "game:<id>", nothing
+// else of the game's data (references only), and a refused game object field as a tool error.
+void game_object_tools() {
+    FakeBackend be;
+    be.session.add_package("editor-test", "Editor test", "", json(kManifest));
+    Handler h(be, kToken, 47615);
+    bool reply = false;
+    Value r = h.message(json(R"({"jsonrpc":"2.0","id":3,"method":"tools/list"})"), reply);
+    bool listed = false;
+    for (const auto& t : r.get("result").get("tools").array)
+        if (t.get("name").string() == "list_game_objects") listed = t.get("inputSchema").get("properties").get("query").type == Value::Object;
+        else if (t.get("name").string() == "add_actor") CHECK(t.get("description").string().find("game") != std::string::npos || t.get("inputSchema").get("properties").get("type").get("description").string().find("game:<id>") != std::string::npos);
+    CHECK(listed);
+    Value v = call(h, "list_game_objects", json(R"({"category":"Furniture"})"));
+    CHECK(!is_error(v) && text_of(v).find("game:table") != std::string::npos && text_of(v).find("game:palm") == std::string::npos);
+    v = call(h, "list_game_objects", json(R"({"query":"palm"})"));
+    CHECK(!is_error(v) && text_of(v).find("game:palm") != std::string::npos && text_of(v).find("Oyashi") == std::string::npos);  // no native names
+    v = call(h, "add_actor", json(R"({"type":"game:palm","id":"palm-1","at":"position","position":{"x":100,"y":1040,"z":-201500},"stage":"sea","room":11,"snap":false})"));
+    CHECK(!is_error(v));
+    v = call(h, "get_actor", json(R"({"id":"palm-1"})"));
+    CHECK(!is_error(v) && text_of(v).find("\"actor\":\"game:palm\"") != std::string::npos);
+    v = call(h, "set_actor", json(R"({"id":"palm-1","property":"params","value":5})"));
+    CHECK(is_error(v) && text_of(v).find("game object") != std::string::npos);
+    v = call(h, "check_package", Value());
+    CHECK(!is_error(v) && text_of(v).find("\"valid\":true") != std::string::npos);
+    CHECK(be.asked == 0);
+}
+
 // A small quest of the later forms built through tools/call: a quest with an interior place, a
 // resident with ordered talks (a flag condition, quest_done), a sign gated on two quests.
 void quest_format_tools() {
@@ -869,6 +897,7 @@ int main() {
     story_gap_tools();
     chest_tools();
     new_mod_tools();
+    game_object_tools();
     listener();
     if (g_failures) {
         std::fprintf(stderr, "%d check(s) failed\n", g_failures);

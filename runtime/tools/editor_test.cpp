@@ -974,6 +974,92 @@ void ray_pick() {
     CHECK(!editor::ray_ground({0, 600, 0}, {0, 1, 0}, 20000, world, hit));
 }
 
+
+// The game objects palette (commands_game_objects.cpp): list_game_objects with the player's game files, add_actor
+// "game:<id>" (the manifest's requires), variants, the transform limits, undo; game_archive on a game folder.
+struct GameObjectHost : FakeHost {
+    std::string game_archive(const std::string& archive) override { return archive == "Oyashi" || archive == "Lwood" ? "Pack/first_szs_permanent.pack" : ""; }
+    bool live_kind(const std::string& type, bool fallback) override { return type.rfind("game:", 0) == 0 ? true : fallback; }
+};
+void game_objects() {
+    GameObjectHost host;
+    editor::Session s(&host);
+    s.add_package("editor-test", "Editor test", "", json(kManifest));
+    Value r = s.run("list_game_objects");
+    CHECK(ok(r) && r.get("result").get("catalogue").number == 1 && r.get("result").get("objects").array.size() == 3);
+    for (const auto& o : r.get("result").get("objects").array) {
+        if (o.get("id").string() == "palm") CHECK(o.get("available").boolean && o.get("type").string() == "game:palm" && o.get("live").boolean && o.get("scale").get("max").number == 1);
+        if (o.get("id").string() == "table") CHECK(!o.get("available").boolean && o.get("why").string() == "not available in your game files" && o.get("variants").array.size() == 3);
+    }
+    r = s.run("list_game_objects", json(R"({"query": "STOOL"})"));
+    CHECK(ok(r) && r.get("result").get("objects").array.size() == 1 && r.get("result").get("objects").array[0].get("id").string() == "table");
+    r = s.run("list_game_objects", json(R"({"category": "trees and plants"})"));
+    CHECK(ok(r) && r.get("result").get("objects").array.size() == 2 && r.get("result").get("categories").array.size() == 2);
+    // without the game: availability unknown
+    editor::Session offline;
+    offline.add_package("editor-test", "Editor test", "", json(kManifest));
+    r = offline.run("list_game_objects");
+    CHECK(ok(r) && r.get("result").get("objects").array[0].get("available").type == Value::Null);
+
+    // add: at Link, snapped, the manifest names the catalogue version it needs; one undo step
+    CHECK(!s.manifest("editor-test")->get("requires").object.count("game_objects"));
+    r = s.run("add_actor", json(R"({"type": "game:palm"})"));
+    CHECK(ok(r) && r.get("result").get("id").string() == "palm");
+    const Value* a = actor_of(s, "palm");
+    CHECK(a && a->get("actor").string() == "game:palm" && a->get("position").get("y").number == 5 && a->get("rotation").get("y").number == 0.5);
+    CHECK(a && a->get("variant").type == Value::Null && a->get("flag").type == Value::Null && a->get("params").type == Value::Null);
+    CHECK(s.manifest("editor-test")->get("requires").get("game_objects").number == 1);
+    CHECK(host.last_changed.size() == 1 && host.last_changed[0] == "palm");
+    r = s.run("add_actor", json(R"({"type": "game:table", "options": {"variant": "stool"}})"));
+    CHECK(ok(r) && r.get("result").get("id").string() == "table" && actor_of(s, "table")->get("variant").string() == "stool");
+    CHECK(!ok(s.run("add_actor", json(R"({"type": "game:table", "options": {"variant": "throne"}})"))));
+    CHECK(!ok(s.run("add_actor", json(R"({"type": "game:castle"})"))));
+    CHECK(!ok(s.run("add_actor", json(R"({"type": "game:palm", "id": "Bad Id"})"))));
+    // the Inspector's picker: variant, turn, scale within the limits; everything else refused
+    CHECK(ok(s.run("set_actor", json(R"({"id": "table", "property": "variant", "value": "stool-open"})"))) && actor_of(s, "table")->get("variant").string() == "stool-open");
+    CHECK(!ok(s.run("set_actor", json(R"({"id": "table", "property": "variant", "value": "nope"})"))) && actor_of(s, "table")->get("variant").string() == "stool-open");
+    CHECK(ok(s.run("set_actor", json(R"({"id": "table", "property": "variant", "value": null})"))) && actor_of(s, "table")->get("variant").type == Value::Null);
+    CHECK(!ok(s.run("set_actor", json(R"({"id": "table", "property": "params", "value": 1})"))));
+    CHECK(!ok(s.run("set_actor", json(R"({"id": "table", "property": "flag", "value": "f"})"))));
+    CHECK(ok(s.run("rotate_actor", json(R"({"id": "palm", "rotation": {"x": 0, "y": 45, "z": 0}})"))));
+    CHECK(!ok(s.run("rotate_actor", json(R"({"id": "palm", "rotation": {"x": 10, "y": 45, "z": 0}})"))));
+    CHECK(!ok(s.run("scale_actor", json(R"({"id": "palm", "scale": {"x": 1.5, "y": 1.5, "z": 1.5}})"))));
+    CHECK(ok(s.run("add_actor", json(R"({"type": "game:tree-large"})"))));
+    CHECK(ok(s.run("scale_actor", json(R"({"id": "tree-large", "scale": {"x": 1.5, "y": 1.5, "z": 1.5}})"))));
+    CHECK(!ok(s.run("scale_actor", json(R"({"id": "tree-large", "scale": {"x": 2, "y": 2, "z": 2}})"))));
+    // duplicate and remove with undo
+    CHECK(ok(s.run("duplicate_actor", json(R"({"id": "palm"})"))) && actor_of(s, "palm-2") && actor_of(s, "palm-2")->get("actor").string() == "game:palm");
+    CHECK(ok(s.run("remove_actor", json(R"({"id": "palm-2", "confirm": true})"))) && !actor_of(s, "palm-2"));
+    CHECK(ok(s.run("undo")) && actor_of(s, "palm-2"));
+    CHECK(ok(s.run("validate")));
+    // undo back to before the first game object: the requirement goes with it
+    while (actor_of(s, "palm")) CHECK(ok(s.run("undo")));
+    CHECK(s.manifest("editor-test")->get("requires").get("game_objects").type == Value::Null);
+
+    // game_archive: a pack member (read from the pack's header) or content/Common/Object/<name>.szs
+    const fs::path dir = fs::temp_directory_path() / "wwhd-editor-game-objects";
+    fs::remove_all(dir);
+    fs::create_directories(dir / "content" / "Common" / "Pack");
+    fs::create_directories(dir / "content" / "Common" / "Object");
+    std::ofstream(dir / "content" / "Common" / "Object" / "Rock.szs") << "Yaz0";
+    {
+        std::vector<uint8_t> d(0x14 + 0xC + 16 + 8 + 16, 0);
+        auto be32 = [&](size_t at, uint32_t v) { for (int i = 0; i < 4; i++) d[at + i] = uint8_t(v >> (24 - 8 * i)); };
+        auto be16 = [&](size_t at, uint16_t v) { d[at] = uint8_t(v >> 8), d[at + 1] = uint8_t(v); };
+        std::memcpy(&d[0], "SARC", 4); be16(4, 0x14); be16(6, 0xFEFF); be32(8, uint32_t(d.size())); be32(0xC, uint32_t(d.size()));
+        std::memcpy(&d[0x14], "SFAT", 4); be16(0x18, 0xC); be16(0x1A, 1);
+        be32(0x20 + 4, 0x01000000); be32(0x20 + 8, 0); be32(0x20 + 12, 0);
+        std::memcpy(&d[0x30], "SFNT", 4); be16(0x34, 8);
+        std::memcpy(&d[0x38], "Palm.szs", 8);
+        std::ofstream(dir / "content" / "Common" / "Pack" / "test.pack", std::ios::binary).write(reinterpret_cast<const char*>(d.data()), std::streamsize(d.size()));
+    }
+    CHECK(editor::game_archive(dir.string(), "Palm") == "Pack/test.pack");
+    CHECK(editor::game_archive(dir.string(), "Rock") == "Object");
+    CHECK(editor::game_archive(dir.string(), "Castle").empty());
+    CHECK(editor::game_archive(dir.string(), "../Rock").empty());
+    fs::remove_all(dir);
+}
+
 int main(int argc, char** argv) {
     // editor_test --game <game dir> [stage room]: what the editor reads from a game folder (manual check)
     if (argc >= 3 && std::string(argv[1]) == "--game") {
@@ -1001,6 +1087,7 @@ int main(int argc, char** argv) {
     package_files(argv[1]);
     live_kinds_note();
     building(argv[1]);
+    game_objects();
     stage_tables();
     ray_pick();
     if (g_failures) {

@@ -59,7 +59,11 @@ uint32_t expect_people_subtype=1,expect_people_params=0x00FF0000,expect_people_y
 bool sign_native_fixture=false,sign_a_pressed=false;unsigned sign_end_transitions=0;uint32_t sign_status=14;
 uint32_t ym1_partner=0,ym1_message_status=6;unsigned seated_actions=0,seated_bases=0;
 bool prop_broken_fixture=false;unsigned prop_claim_calls=0,enemy_claim_calls=0;bool enemy_terminal=false,refuse_enemy_request=false,enemy_four_mode=false,mo_disarm_fixture=false;
-bool pending=false,nested_chest=false,throw_search=false;int32_t quest_state=1,item_count=1;unsigned deleted=0,native_calls=0;
+bool pending=false,nested_chest=false,throw_search=false;
+// game objects: the object name table knows these stage actor names (process, subtype); a made object's
+// parameter word can be falsified (read-back) and its create phase can fail (the game gives up)
+std::map<std::string,std::pair<uint16_t,uint8_t>> object_names={{"takara",{0x125,0xFF}},{"Oyashi",{0x49,0xFF}},{"Table",{0x116,0xFF}}};
+bool game_object_falsify=false,game_object_fail=false;std::vector<std::array<uint32_t,8>> game_object_creates;int32_t quest_state=1,item_count=1;unsigned deleted=0,native_calls=0;
 std::map<uint32_t,uint32_t> live;
 
 void map_guest(uint32_t at,uint32_t size) {
@@ -125,9 +129,13 @@ uint32_t call(Cpu*,uint32_t fn,std::initializer_list<uint32_t> args) {
     if(fn==0x025DC80C){assert((a[0]>=1000&&a[0]<=1003)||(a[0]>=2000&&a[0]<=2003));return room_available?kArena+0x6000+(a[0]%1000)*0x200:0;}
     if(fn==0x025DED64)return current_layer;
     if(fn==0x025DEAB4){current_layer=a[0];return 0;}
-    if(fn==0x025D57E0){++deleted;assert(a[0]>=kActor&&a[0]<=kActor+0x40000);st8(a[0]+0xC,3);return 1;}
-    if(fn==0x025C109C){assert(std::strcmp(reinterpret_cast<char*>(mem::ptr(a[0])),"takara")==0);st16(kArena+8,0x125);return kArena;}
+    if(fn==0x025D57E0){++deleted;assert(a[0]>=kActor&&a[0]<=kActor+0x40000);st8(a[0]+0xC,3);if(a[0]>=kActor+0x30000)live.erase(ld32(a[0]+4));return 1;}
+    if(fn==0x025C109C){const auto found=object_names.find(reinterpret_cast<char*>(mem::ptr(a[0])));if(found==object_names.end())return 0;const uint32_t entry=kArena+0x10*uint32_t(std::distance(object_names.begin(),found));st16(entry+8,found->second.first);st8(entry+0xA,found->second.second);return entry;}
     if(fn==0x025D5834){++created;assert(args.size()==8);assert(current_layer==kArena+0x6000+a[3]*0x200+0xC0);
+        if(a[0]==0x49||a[0]==0x116){std::array<uint32_t,8> args_copy{};std::copy(args.begin(),args.end(),args_copy.begin());args_copy[4]=ld16(a[4]+2)|(uint32_t(ld16(a[4]+4))<<16);assert(ld16(a[4])==0);game_object_creates.push_back(args_copy);
+            const uint32_t id=actor_id+60+uint32_t(game_object_creates.size()),address=kActor+0x30000+uint32_t(game_object_creates.size())*0x800;std::memset(mem::ptr(address),0,0x800);
+            if(game_object_fail)return id;  // the request was taken; the game gives up in the create phase (never live)
+            st32(address+4,id);st16(address+0xE,uint16_t(a[0]));st32(address+0xB0,game_object_falsify?a[1]^1:a[1]);st8(address+0x2DD,uint8_t(a[6]));st32(address+0xF4,kArena+0x9000);st32(address+0x2C,current_layer);live[id]=address;return id;}
         if(a[0]>=0x7FF7&&a[0]<=0x7FFA){if(refuse_enemy_request)return 0xFFFFFFFFu;const auto kind=story_enemies::Kind(0x7FFA-a[0]);const uint32_t address=enemy_address(unsigned(kind)),id=actor_id+40+unsigned(kind);assert(a[1]==(kind==story_enemies::Kind::ChuChu?chuchu_params:story_enemies::parameters(kind))&&a[6]==0xFFFFFFFFu&&ld16(a[4]+4)==story_enemies::home_z(kind));enemy_fixture(kind,address,id);st32(address+0x2C,current_layer);live[id]=address;return id;}
         uint32_t address=kActor+((a[0]==0x175||a[0]==0x13B)?0x1000:a[0]==story_switches::kDoorProfile?0x1000:a[0]==0xB6?0x2000:a[0]==mod_actor::kProfile?0x3000:0);uint32_t id=actor_id+(address-kActor)/0x1000;
         if(a[0]==0x125){assert(a[1]==0);assert(a[3]==0);assert(ld16(a[4]+4)==0x06FF);}
@@ -260,6 +268,52 @@ int main(int argc,char** argv){
         c.r[3]=kActor;hooks.at(0x02397AD0)(&c);assert(ld32(kScratch+132)==0xFFFFFFFFu&&ld32(row)==0);story_actors::state_loaded();assert(!story_actors::actor_address(&c,"test","button"));
         st32(0x1047E8F0,2000);story_actors::native_room_loaded(&c,0);assert(created==count+1); // actual native room epoch admits fresh switch
         assert(story_actors::flag(story_store::book(),"test","pressed"));assert(std::memcmp(before.data(),mem::ptr(kSave),before.size())==0);return 0;
+    }
+    if(argc==2&&std::strcmp(argv[1],"--game-objects")==0){
+        // the game's own objects by reference: created by name on the retail profile with the fixed parameter
+        // word and a turn only, tracked by process id, read back, quarantined on a mismatch or after three failures
+        story_notebook::ManifestActor palm;palm.id="palm";palm.actor="game:palm";palm.variant="palm";palm.stage="sea";palm.room=0;palm.position={10,20,30};palm.rotation={0,90,0};
+        auto stool=palm;stool.id="stool";stool.actor="game:table";stool.variant="stool";stool.rotation={};
+        auto tree=palm;tree.id="tree";tree.actor="game:tree-large";tree.variant="tree";  // the fixture's game has no "lwood"
+        std::string why;auto bad=palm;bad.id="bad";bad.params=7;assert(!story_actors::load("test",{bad},why)&&!story_actors::declared());
+        bad=palm;bad.id="bad";bad.variant="coconut";assert(!story_actors::load("test",{bad},why));
+        bad=palm;bad.id="bad";bad.scale={1.5f,1.5f,1.5f};assert(!story_actors::load("test",{bad},why));
+        bad=palm;bad.id="bad";bad.rotation={5,0,0};assert(!story_actors::load("test",{bad},why));
+        assert(story_actors::load("test",{palm,stool,tree},why));
+        story_actors::install([](uint32_t){return std::string();},[](uint32_t a,void(*fn)(Cpu*)){hooks[a]=fn;});
+        assert(story_actors::editor_kind_live("game:palm",true)&&!story_actors::editor_restart_only(palm));
+        Cpu c{};story_actors::native_room_loaded(&c,0);
+        // palm and stool made by name into the room layer; the tree's name is unknown to this game: omitted
+        assert(game_object_creates.size()==2&&current_layer==kArena+0x6800);
+        const auto& p=game_object_creates[0];assert(p[0]==0x49&&p[1]==0xFFFFFFFFu&&p[3]==0&&p[6]==0xFFFFFFFFu&&p[7]==0);
+        assert((p[4]&0xFFFF)==0x4000&&(p[4]>>16)==0);  // yaw 90 degrees, no tilt: angle.z stays 0 (no switch or item field)
+        assert(game_object_creates[1][0]==0x116&&game_object_creates[1][1]==0xFFFFFF01);
+        const uint32_t palm_pid=ld32(kScratch+128),stool_pid=ld32(kScratch+132);assert(palm_pid!=0xFFFFFFFFu&&stool_pid!=0xFFFFFFFFu&&palm_pid!=stool_pid&&!story_actors::actor_address(&c,"test","tree"));
+        assert(story_actors::actor_address(&c,"test","palm")==live[palm_pid]);
+        story_actors::service(&c);assert(deleted==0&&game_object_creates.size()==2);  // read back: both match; nothing made again
+        // the saved identity row binds a full state load; a changed row drops the binding
+        story_actors::state_loaded();story_actors::service(&c);assert(story_actors::actor_address(&c,"test","palm")==live[palm_pid]&&game_object_creates.size()==2);
+        const uint32_t row=kScratch+story_actors::kIdentityScratchOffset;st8(row+39,uint8_t(ld8(row+39)^1));story_actors::state_loaded();
+        assert(ld32(kScratch+128)==0xFFFFFFFFu&&!story_actors::actor_address(&c,"test","palm"));
+        story_actors::service(&c);assert(game_object_creates.size()==2);  // quarantined until the room loads again
+        // a new room visit makes it again; the game gives up three times: omitted until the next visit
+        live.clear();game_object_fail=true;const size_t made=game_object_creates.size();
+        st32(0x1047E8F0,2000);story_actors::native_room_loaded(&c,0);
+        for(int i=0;i<6;++i)story_actors::service(&c);
+        assert(game_object_creates.size()==made+6);  // three tries each for palm and stool, then nothing more
+        story_actors::service(&c);assert(game_object_creates.size()==made+6);
+        // the next visit tries again; a parameter word that doesn't read back is deleted and quarantined for good
+        game_object_fail=false;game_object_falsify=true;st32(0x1047E8F0,1000);story_actors::native_room_loaded(&c,0);assert(game_object_creates.size()==made+8);
+        const unsigned before_delete=deleted;story_actors::service(&c);assert(deleted==before_delete+2);
+        game_object_falsify=false;story_actors::service(&c);story_actors::service(&c);assert(game_object_creates.size()==made+8);
+        st32(0x1047E8F0,2000);story_actors::native_room_loaded(&c,0);assert(game_object_creates.size()==made+8);  // a mismatch stays quarantined
+        // the editor: a new game object is made while the game runs; a changed one is made again (never moved in place)
+        auto palm2=palm;palm2.id="palm2";std::vector<std::string> pending_list;
+        assert(story_actors::editor_live_capable("test",palm2,why));
+        assert(story_actors::editor_update("test",{palm,stool,tree,palm2},{"palm2"},why,&pending_list)&&pending_list.empty());
+        story_actors::room_loaded(&c,0);assert(game_object_creates.size()==made+9&&game_object_creates.back()[0]==0x49);
+        assert(!story_actors::editor_pose(&c,"test","palm2",{1,2,3},{0,45,0}));
+        assert(std::memcmp(before.data(),mem::ptr(kSave),before.size())==0);return 0;
     }
     if(argc==2&&std::strcmp(argv[1],"--props")==0){
         map_guest(0x101D0000,0x10000);st32(0x101D2B1C+0x10,story_props::kClassBytes);
