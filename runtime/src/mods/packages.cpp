@@ -28,6 +28,7 @@
 #include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <memory>
 #include <mutex>
 #include <set>
@@ -85,6 +86,8 @@ std::array<unsigned,3> version(const std::string& s) {
 }
 std::string string_field(const Value& v,const char* key,bool optional=false,size_t limit=8192){const auto& f=v.get(key);if(optional&&f.type==Value::Null)return {};require(f.type==Value::String&&f.text.size()<=limit&&f.text.find('\0')==std::string::npos,"Invalid field: "+std::string(key));return f.text;}
 using hash::sha256_file;
+// The manifest sections the story system reads (story_manifest.h, story_world_manifest.h)
+constexpr const char* kStorySections[]={"quests","charts","letters","items","models","actors","scenes"};
 // The Story Notebook package's "notebook" block: {"icon": png, "model": glb, "layout": json}. Only that
 // package has one. Its files are its own: a PNG icon (up to 1024 x 1024), a binary glTF model (up to
 // 8 MiB) and a layout description whose folder holds the page's art (up to 64 PNGs, 64 MiB decoded);
@@ -155,9 +158,11 @@ Manifest manifest(const fs::path& path){
     auto minimum=string_field(v,"minimum_manager_version",true,64);
     if(!minimum.empty()&&version(minimum)>version(kManagerVersion))m.problem="Requires mod manager "+minimum;
     bool world_declarations = false;
+    // The manifest's story sections (story_manifest.h, story_world_manifest.h): present, even as an empty list
+    const bool story_sections=std::any_of(std::begin(kStorySections),std::end(kStorySections),[&](const char* key){return v.get(key).type!=Value::Null;});
     // story quests (story_manifest.h): an NPC this port's catalogue doesn't know, or a newer catalogue
     // version, keeps the mod from being enabled with the reason, never a silent no-op
-    if(m.problem.empty()&&(v.get("quests").type!=Value::Null||v.get("npc_catalogue").type!=Value::Null||v.get("charts").type!=Value::Null||v.get("letters").type!=Value::Null||v.get("items").type!=Value::Null||v.get("models").type!=Value::Null||v.get("actors").type!=Value::Null||v.get("scenes").type!=Value::Null)){
+    if(m.problem.empty()&&(story_sections||v.get("npc_catalogue").type!=Value::Null)){
         std::vector<story_notebook::ManifestQuest> quests;std::vector<story_notebook::ManifestChart> charts;
         std::vector<story_notebook::ManifestActor> actors;std::vector<story_notebook::ManifestScene> scenes;
         std::vector<story_notebook::ManifestLetter> letters;std::vector<story_notebook::ManifestItem> items;std::string why;
@@ -209,18 +214,24 @@ Manifest manifest(const fs::path& path){
         m.graphics=std::make_shared<cemu::Pack>(cemu::parse(path/folder));
         auto schema=cemu::options(*m.graphics);if(v.get("options").type==Value::Null)v["options"]=schema;else require(v.get("options")==schema,"Cemu preset options do not match rules.txt");
     } else if(m.kind=="content") {
-        auto folder=string_field(v,"content_dir",false,512);
-        require(archive::relative_path(folder),"Invalid content directory");
-        auto checked=path;for(const auto& part:fs::path(folder)){checked/=part;require(!fs::is_symlink(checked),"Content paths may not use symlinks");}
-        m.files=content::index(path/folder, world_declarations && m.problem.empty());
+        // A content package that only declares story content (a chart and its letter, say) needs no
+        // content folder: without "content_dir" it replaces no game files.
+        const bool story_only=story_sections&&v.get("content_dir").type==Value::Null;
+        if(!story_only){
+            auto folder=string_field(v,"content_dir",false,512);
+            require(archive::relative_path(folder),"Invalid content directory");
+            auto checked=path;for(const auto& part:fs::path(folder)){checked/=part;require(!fs::is_symlink(checked),"Content paths may not use symlinks");}
+            m.files=content::index(path/folder, world_declarations && m.problem.empty());
+        }
     } else {
         const auto& settings=v.get("settings");require(settings.type==Value::Object&&!settings.object.empty(),"Settings mod has no settings");
         for(const auto& [id,b]:settings.object){require(manager::find(id)&&b.type==Value::Bool,"Unknown built-in setting: "+id);m.settings[id]=b.boolean;}
     }
     const auto& deps=v.get("dependencies");require(deps.type==Value::Null||deps.type==Value::Array,"Dependencies must be an array");
     for(const auto& dep:deps.array){Requirement r;r.id=string_field(dep,"id",false,80);r.version=string_field(dep,"minimum_version",true,64);if(r.version.empty())r.version="0.0.0";version(r.version);require(id_ok(r.id)||(r.id.starts_with("builtin:")&&manager::find(r.id.substr(8))),"Invalid dependency ID");m.dependencies.push_back(r);}
-    // every quest mod depends on the story system's required package (required.h), declared or not
-    if(m.id!=story_notebook::kNotebookPackage&&(v.get("quests").type!=Value::Null||v.get("charts").type!=Value::Null||v.get("models").type!=Value::Null||v.get("actors").type!=Value::Null||v.get("scenes").type!=Value::Null)&&
+    // every story mod depends on the story system's required package (required.h), declared or not:
+    // without it the story system stays off, and its letters, charts, items, quests and actors with it
+    if(m.id!=story_notebook::kNotebookPackage&&story_sections&&
        std::none_of(m.dependencies.begin(),m.dependencies.end(),[](const Requirement& r){return r.id==story_notebook::kNotebookPackage;}))
         m.dependencies.push_back({story_notebook::kNotebookPackage,"0.0.0"});
     const auto& conflicts=v.get("conflicts");require(conflicts.type==Value::Null||conflicts.type==Value::Array,"Conflicts must be an array");
@@ -274,11 +285,13 @@ Manifest manifest(const fs::path& path){
     if(m.kind=="native"||m.kind=="guest"||!m.setup_tools.empty())m.trust_fingerprint=package_fingerprint(path);
     if(m.trust_fingerprint.empty())m.trust_fingerprint=m.fingerprint;
     if(m.kind=="content") {
-        // Declarative world content uses the story service without carrying executable guest code.
-        // Keep the existing dependency restriction for all other content and dependencies.
-        const bool world_content=!v.get("models").array.empty()||!v.get("actors").array.empty()||!v.get("scenes").array.empty();
-        require(m.dependencies.empty()||(world_content&&std::all_of(m.dependencies.begin(),m.dependencies.end(),[](const Requirement& r){return r.id==story_notebook::kNotebookPackage;})),
-                "Content packages only support the Story Notebook dependency for actors or scenes");
+        // Content packages are switched on at startup, before any code package loads, so they can't wait
+        // for a dependency to load or be confirmed: they declare none. The one exception is the Story
+        // Notebook for story content (letters, charts, items, quests, models, actors, scenes): it carries
+        // no game files, and the story system checks itself that the notebook is there (without it the
+        // story content stays off).
+        require(m.dependencies.empty()||(story_sections&&std::all_of(m.dependencies.begin(),m.dependencies.end(),[](const Requirement& r){return r.id==story_notebook::kNotebookPackage;})),
+                "Content packages can only depend on the Story Notebook, and only for story content (letters, charts, items, quests, models, actors, scenes)");
     }
     return m;
 }

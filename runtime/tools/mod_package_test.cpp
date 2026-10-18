@@ -670,6 +670,42 @@ int main(int argc, char** argv) {
         bad["id"]="world-content-other-dependency";bad["actors"]=mods::json::parse(R"([{"id":"notice","actor":"sign","stage":"sea","room":11,"flag":"read","position":{"x":0,"y":0,"z":0}}])");
         bad["dependencies"].array.push_back(mods::json::parse(R"({"id":"other-content"})"));
         std::ofstream(invalid/"manifest.json")<<mods::json::dump(bad);assert(!install(invalid.string(),error));
+        assert(error.find("only depend on the Story Notebook")!=std::string::npos);
+        {   // story content without actors or scenes: a chart and its letter, no content folder, the notebook added
+            auto chart=root/"chart-letter";fs::create_directories(chart);
+            std::ofstream(chart/"manifest.json")<<R"({"format_version":1,"id":"chart-letter","name":"Old map","version":"1.0.0","game_id":"wwhd","kind":"content",
+              "charts":[{"id":"old-map","name":"Old map","place":{"x":1759,"z":-202572}}],
+              "letters":[{"id":"map-letter","sender":"A sailor","text":"Dear Link,\nan old map.","encloses":["chart:old-map"]}]})";
+            assert(install(chart.string(),error)&&view("chart-letter").compatible);
+            auto deps=view("chart-letter").dependencies;
+            assert(deps.size()==1&&deps[0]=="story-notebook>=0.0.0");
+            assert(enable("chart-letter",true,error)&&view("chart-letter").enabled);
+            assert(enable("chart-letter",false,error));
+            // an item on its own, and a quest on its own, the same way
+            for(const char* section:{R"("items":[{"id":"key","name":"Key","description":"A key.","icon":"icons/key.png"}])",
+                                     R"("quests_format":1,"quests":[{"id":"q","title":"Q","steps":[{"n":1,"text":"Go."}]}])"}){
+                auto one=root/"story-one";fs::remove_all(one);fs::create_directories(one/"icons");
+                std::ofstream(one/"manifest.json")<<R"({"format_version":1,"id":"story-one","name":"One","version":"1.0.0","game_id":"wwhd","kind":"content",)"<<section<<"}";
+                assert(install(one.string(),error)&&view("story-one").compatible);
+                assert(view("story-one").dependencies.size()==1);
+                assert(remove("story-one",error));
+            }
+            // an empty actor list next to game files: the notebook dependency is accepted too
+            auto empty=root/"empty-actors";fs::create_directories(empty/"content");std::ofstream(empty/"content"/"fixture.marker")<<"original fixture";
+            std::ofstream(empty/"manifest.json")<<R"({"format_version":1,"id":"empty-actors","name":"Empty","version":"1.0.0","game_id":"wwhd","kind":"content","content_dir":"content","actors":[]})";
+            assert(install(empty.string(),error)&&view("empty-actors").compatible);
+            // the protection stays: plain game files can't depend on anything, story content on nothing but the notebook
+            std::ofstream(empty/"manifest.json")<<R"({"format_version":1,"id":"plain-notebook","name":"Plain","version":"1.0.0","game_id":"wwhd","kind":"content","content_dir":"content","dependencies":[{"id":"story-notebook"}]})";
+            assert(!install(empty.string(),error)&&error.find("only depend on the Story Notebook")!=std::string::npos);
+            std::ofstream(chart/"manifest.json")<<R"({"format_version":1,"id":"chart-other","name":"Old map","version":"1.0.0","game_id":"wwhd","kind":"content","dependencies":[{"id":"guest-code"}],
+              "charts":[{"id":"old-map","name":"Old map","place":{"x":1759,"z":-202572}}]})";
+            assert(!install(chart.string(),error)&&error.find("only depend on the Story Notebook")!=std::string::npos);
+            // a named content folder must still be there
+            std::ofstream(chart/"manifest.json")<<R"({"format_version":1,"id":"chart-folder","name":"Old map","version":"1.0.0","game_id":"wwhd","kind":"content","content_dir":"missing",
+              "charts":[{"id":"old-map","name":"Old map","place":{"x":1759,"z":-202572}}]})";
+            assert(!install(chart.string(),error)&&error.find("Content folder is missing")!=std::string::npos);
+            assert(remove("chart-letter",error)&&remove("empty-actors",error));
+        }
         // Manifest-only owners must not install fake game replacements to carry scenes.
         auto scene_only=root/"scene-only";fs::create_directories(scene_only/"content");
         auto scene_manifest=mods::json::parse(R"({"format_version":1,"id":"scene-only","name":"Scene only","version":"1.0.0","game_id":"wwhd","kind":"content","content_dir":"content","scenes":[{"id":"test","trigger":{"type":"area","stage":"sea","room":11,"position":{"x":0,"y":0,"z":0},"radius":80},"steps":[{"type":"wait","frames":1},{"type":"end"}]}]})");
