@@ -256,7 +256,9 @@ the villager talks as in the game.
 **The villager itself is never changed:** its own dialogue, its quests and the game's save flags stay as
 they are. Your mod only adds a talk that the port plays while your step is current.
 
-Like every quest change, the talk works in the game once you have saved and started the game again.
+The talk works in the game at once, like every quest change (see [Story changes while the game
+runs](#story-changes-while-the-game-runs)); change its line and the villager says the new one in the next
+talk, remove it (or Undo) and the villager talks as in the game again. Save the package to keep it.
 Something has to bring the quest to that step: its letter, an actor's action, an item, or, while testing,
 **Start at this step**. The villager may first say a short greeting of its own; your line follows in
 the same talk.
@@ -275,8 +277,8 @@ the same talk.
 - **Flags** (toolbar) lists the open mod's flags (signs read, chests opened, switches, flag actions, broken
   props and defeated enemies), who uses each, and their values in the game. In test mode you can switch a
   flag on or off to try a later part of the quest; broken and defeated only show.
-- Stop, change the quest, **Save…** and start the game again to try the new version: quest changes take
-  effect after a restart.
+- Change the quest while you test: the game takes each change at the next calm moment (see [Story
+  changes while the game runs](#story-changes-while-the-game-runs)), so there is no need to restart.
 
 ## Letters, charts and items
 
@@ -311,8 +313,49 @@ form below adds a new one. Every change is one command, so Undo and Redo work fo
 
 Under each entry, **Used by** lists everything that names it. A chart or item that is still used can't be
 removed: change or remove those first (**Remove…** says so). **JSON** shows the whole entry to edit by hand
-(a field you take out is removed). Letters, charts and items take effect when the game starts again, like
-quests: save the package and restart.
+(a field you take out is removed). Letters and charts change in the game at once, as quests do; of an item,
+its name, description, how many and use do, while a new item, its icon, held model and **hold_up** wait
+for a restart (see [Story changes while the game runs](#story-changes-while-the-game-runs)).
+
+## Story changes while the game runs
+
+Quests (their steps, places, conditions and texts), quest talks (also those for the game's villagers),
+the quests' letters, letters on their own and charts change in the running game. Every change, and every
+Undo and Redo, hands the open mod's new story to the game, which takes it at the next calm moment: at once
+in the editor view, and while playing as soon as no talk, letter, message, menu, scene or stage change is
+running (a talk that is running ends as it began). The status bar says when the game took it ("Story of
+... updated in the game") or what it waits for. Only the open mod's story changes: other mods and the
+game's own villagers, dialogue and quests stay as they are. A villager whose talk you remove talks as in
+the game again. Save the package to keep your changes: the next start reads the package.
+
+These wait for a restart (save, then start the game again); the status bar names them after the change:
+
+- a new item and a removed item, and an item's icon, held model and **hold_up** (the game builds them
+  into its menus when it starts); its name, description, how many and use change at once;
+- a removed chart: the chart list keeps it until a restart. A new or changed chart shows in the chart
+  list at once; its treasure's salvage point is set up when Link enters the sea room, so it follows
+  there after **Reload room** or the next visit;
+- what the game did not run at start-up: the King of Red Lions' lines when no quest had one, items when
+  no mod had any, a chart's treasure when no mod had a chart, and all of the story when the Story
+  Notebook package was not on;
+- scenes (see [Scenes](#scenes)).
+
+**Progress stays as it is.** A change never writes to the Quest Log: the step each quest is at, done
+quests, quest flags, the letters Link got and the charts and items he has stay. A quest's progress is its
+step number: editing a step keeps its number; adding, moving or removing steps gives the later steps new
+numbers (every actor, item and letter that names them follows), and a Quest Log is then at the step
+that has its number now, exactly as after a restart. When that is not the step it was at, the status bar
+says so ("quest lamp is at step 3, which is step 4 now", or "which was removed"). A step number that no
+step has any more shows no next step and no talk until something moves the quest on (in test mode,
+**Start at this step**) or the step comes back (Undo). A removed quest or letter keeps its records in the
+save, so Undo brings it back where it was.
+
+**Save files and save states hold progress, never the story.** A save file, a full save state and the
+editor's test states play with the story as the editor has it now, whenever they were made: a state taken
+before an edit comes back with its old progress under the new quests, as a save of an earlier version of
+a mod does after an update. Nothing of an older story comes back with it.
+
+Without `--editor` none of this runs.
 
 ## Scenes
 
@@ -370,8 +413,7 @@ and the mod's flags), and the editor's view returns. **Play step** plays only th
 steps from the selected one to the one selected with Shift, as a short scene of its own. An edited scene
 plays its steps; its native version plays once the package is saved and the game starts again.
 
-Scenes take effect for players after a restart, as quest changes do: **Save…**, then start the game
-again. Ctrl+C and Ctrl+V in the Scenes window copy the selected steps and paste them after the selected
+Scenes take effect for players after a restart: **Save…**, then start the game again. Ctrl+C and Ctrl+V in the Scenes window copy the selected steps and paste them after the selected
 step, also into another scene; whole scenes are copied with the command `copy`.
 
 ## Search
