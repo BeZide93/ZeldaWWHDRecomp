@@ -7,6 +7,10 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Mod quests: finishing, flags and places inside buildings** (for mod makers). A character's dialogue or a scene's end
+  can now finish a quest (the reward is given once), characters and quest steps can react to the mod's own flags or to
+  several quests at once, a character can offer step-specific conversations, and a quest step can point into a
+  building, cave or dungeon (the notebook shows where, and the sea chart marks the island).
 - **Mod SDK v3 preview: native scenes** (for mod makers). A scene can include an optional native `turn_camera`
   version that the game's own event system plays: two residents turning toward each other and a camera move. It can be
   skipped with Plus and survives save states, and the scene's normal steps play whenever the native version can't run.
