@@ -429,6 +429,10 @@ package's local data cache; do not ship them in packages. Editing the model or
 changing the player template invalidates its cache key. Packages and this
 repository must never include game-derived material or shader templates.
 
+For walkable meshes and solid shapes that also block the ship, see
+[Static world objects](world-objects.md). The following cylinder form remains
+available for ordinary model actors.
+
 `collision` specifies an upright cylinder with explicit game-unit dimensions:
 `radius` is greater than zero and at most 1000; `height` is greater than zero and
 at most 2000. The cylinder stays upright and uses these declared dimensions

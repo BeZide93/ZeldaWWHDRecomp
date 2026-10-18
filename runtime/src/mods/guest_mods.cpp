@@ -445,6 +445,7 @@ bool prop_texture_binding_valid(const story_actor_textures::Binding& binding){
     return prop_texture_context_valid(context)&&binding.no_pattern_animation;
 }
 void load_world(const std::string& mod,const mods::json::Value& manifest,const std::string& package_dir,const std::string& data_dir) {
+    mod_actor::configure_world_objects(config::game_dir);
     struct ItemModelBatch {size_t checkpoint=story_item_models::checkpoint();bool committed=false;~ItemModelBatch(){if(!committed)story_item_models::rollback(checkpoint);}} item_model_batch;
     struct TextureBatch {size_t checkpoint=story_actor_textures::checkpoint();bool committed=false;~TextureBatch(){if(!committed)story_actor_textures::rollback(checkpoint);}} texture_batch;
     struct SceneBatch {size_t checkpoint=story_scenes::checkpoint();bool committed=false;~SceneBatch(){if(!committed)story_scenes::rollback(checkpoint);}} scene_batch;
@@ -474,12 +475,14 @@ void load_world(const std::string& mod,const mods::json::Value& manifest,const s
     for(const auto& model:models) {
         const bool actor_uses=std::any_of(actors.begin(),actors.end(),[&](const auto& actor){return actor.kind=="mod"&&actor.model==model.id;});
         const bool item_uses=std::any_of(model_items.begin(),model_items.end(),[&](const auto& item){return item.held_model==model.id;});
-        if(!actor_uses&&!item_uses)continue;
+        const bool collision_uses=std::any_of(actors.begin(),actors.end(),[&](const auto& actor){return actor.collision_mesh==model.id;});
+        if(!actor_uses&&!item_uses&&!collision_uses)continue;
         if(item_uses&&model.kind!="static")exception_report::raise("Held item models currently require static kind; skinned needs a separate Morf lifetime");
         try {
             const auto bridge=BuildBridge::installed(std::string());
             const auto tool=std::filesystem::path(bridge.builder).parent_path().parent_path()/"story_mods"/(model.kind=="skinned"?"skinned_actor_model.py":"actor_model.py");
-            const auto archive=actor_model_cache::prepare(mod,model,package_dir,data_dir,bridge.python,tool.string(),config::game_dir);
+            const auto archive=actor_model_cache::prepare(mod,model,package_dir,data_dir,bridge.python,tool.string(),config::game_dir,collision_uses);
+            if(collision_uses&&!mod_actor::register_collision(mod,model.id,actor_model_cache::collision_for(archive)))exception_report::raise("Prepared collision unavailable");
             story_notebook::WorldPoint minimum,maximum;
             if(!actor_model_cache::bounds_for(archive,minimum,maximum))exception_report::raise("Prepared model bounds unavailable");
             for(const auto& item:model_items)if(item.held_model==model.id&&!story_item_models::declare(story_items::item_key(mod,item.id),archive,item.held_frames,why,mods::hash::sha256_file(actor_model_cache::archive_for("/vol/content/Common/Object/"+archive+".szs"))))exception_report::raise("Item model "+mod+": "+why);
@@ -1355,10 +1358,12 @@ void set_package_observer(PackageObserver observer){g_package_observer=observer;
 bool editor_prepare_model(const std::string& mod,const std::string& package_dir,const std::string& data_dir,const mods::json::Value& entry,std::string& archive,std::string& why){
     story_notebook::ManifestModel model;model.id=entry.get("id").string();model.source=entry.get("source").string();model.kind=entry.get("kind").string("static");
     if(model.id.empty()||model.source.empty())return why="the model has no id or source",false;
+    const bool collision=entry.get("collision").boolean;
+    if(collision&&model.kind!="static")return why="collision requires a static model",false;
     try {
         const auto bridge=BuildBridge::installed(std::string());
         const auto tool=std::filesystem::path(bridge.builder).parent_path().parent_path()/"story_mods"/(model.kind=="skinned"?"skinned_actor_model.py":"actor_model.py");
-        archive=actor_model_cache::prepare(mod,model,package_dir,data_dir,bridge.python,tool.string(),config::game_dir);
+        archive=actor_model_cache::prepare(mod,model,package_dir,data_dir,bridge.python,tool.string(),config::game_dir,collision);
         return true;
     } catch(const std::exception& e) {return why=e.what(),false;}
 }

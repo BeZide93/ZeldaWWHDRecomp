@@ -498,7 +498,7 @@ void room_loaded(Cpu* c,int room) {
         if(a.switch_token&&!story_switches::available(a.switch_token))continue;
         if(a.enemy_token&&(!story_enemies::available(a.enemy_token)||!story_enemy_ownership::can_spawn(a.enemy_token)))continue;
         story_enemies::Kind enemy{};(void)enemy_kind(a.spec,enemy);
-        uint32_t proc=a.enemy_token?story_enemy_ownership::descriptor(enemy).profile:a.switch_token?(a.spec.actor=="switch"?story_switches::kSwitchProfile:story_switches::kDoorProfile):a.prop_token?story_props::kProfile:a.spec.kind=="mod"?mod_actor::kProfile:a.spec.actor=="sign"?0xB6u:a.spec.resident==kYm1?0x13Bu:0x175u;
+        uint32_t proc=a.enemy_token?story_enemy_ownership::descriptor(enemy).profile:a.switch_token?(a.spec.actor=="switch"?story_switches::kSwitchProfile:story_switches::kDoorProfile):a.prop_token?story_props::kProfile:a.spec.kind=="mod"?(a.spec.world_object()?mod_actor::kWorldProfile:mod_actor::kProfile):a.spec.actor=="sign"?0xB6u:a.spec.resident==kYm1?0x13Bu:0x175u;
         if(a.spec.actor=="chest") {
             std::memcpy(mem::ptr(g_scratch+0x50),"takara",7);Cpu probe=*c;
             const uint32_t entry=g_call(&probe,kSearchName,{g_scratch+0x50});

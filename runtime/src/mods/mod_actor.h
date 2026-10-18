@@ -6,11 +6,19 @@
 #include <vector>
 #include <initializer_list>
 #include <string>
+#include <memory>
+#include "story_world_collision_mesh.h"
+#include "story_world_placement.h"
 struct Cpu;
 namespace mod_actor {
-inline constexpr uint16_t kProfile=0x7FFE;
+inline constexpr uint16_t kProfile=0x7FFE,kWorldProfile=0x7FF6;
+inline constexpr bool own_profile(uint16_t profile){return profile==kProfile||profile==kWorldProfile;}
 inline constexpr uint32_t kScratchBytes=4096;
-inline constexpr uint32_t kInstanceBytes=0x1040;
+inline constexpr uint32_t kInstanceBytes=0x10C0;
+using PlacementProvider=std::function<story_world_placement::Index(const std::string&,int)>;
+void configure_world_objects(const std::string& game_directory,PlacementProvider={});
+bool world_object_query(const std::string& mod,const story_notebook::ManifestActor&,bool wireframe,mods::json::Value&,std::string& why);
+bool register_collision(const std::string& mod,const std::string& model,std::shared_ptr<const story_world_collision::mesh::Mesh>);
 struct ModelRig {std::vector<std::string> joint_names;std::vector<int> joint_parents;std::vector<bool> joint_look_compatible;};
 struct Identity {std::string mod,id;uint32_t token=0,process_id=0;};
 struct State {

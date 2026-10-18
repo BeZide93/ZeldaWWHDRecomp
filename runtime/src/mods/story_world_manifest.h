@@ -35,6 +35,8 @@ struct ManifestTalk {
 struct ManifestActor {
     std::string id,actor,stage,kind,model,animation,prompt="check",texture,texture_digest; unsigned room=0,texture_token=0;
     float collision_radius=30,collision_height=100; bool pushable=false;
+    std::string behaviour,collision_mesh,collision_shape,collision_surface="stone";WorldPoint collision_size{};
+    bool world_object()const{return !behaviour.empty();}
     ManifestLookAt look_at;ManifestPath path;
     bool carry_enabled=false,carry_break_on_impact=false;
     bool combat_enabled=false,native_heart_drop=false;story_mod_combat::Config combat;
@@ -247,7 +249,7 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
     if(list.type==Value::Null)return true;
     if(list.type!=Value::Array||list.array.size()>kMaxActorsPerMod)return why="actors must be a list of up to 64",false;
     for(const auto& v:list.array){ManifestActor a;
-        if(!keys(v,{"id","actor","kind","model","animation","look_at","path","collision","attention","stage","room","position","rotation","scale","params","parameters","flag","broken_flag","defeated_flag","drops","carry","combat","native_drops","switch_flag","switch","when","lines","then","texture","talks"}))return why="unknown actor field",false;
+        if(!keys(v,{"id","actor","kind","model","animation","look_at","path","collision","behaviour","attention","stage","room","position","rotation","scale","params","parameters","flag","broken_flag","defeated_flag","drops","carry","combat","native_drops","switch_flag","switch","when","lines","then","texture","talks"}))return why="unknown actor field",false;
         if(!id(v.get("id")))return why="invalid actor id",false;a.id=v.get("id").text;a.actor=v.get("actor").string();
         if(v.object.contains("kind")) {
             if(v.get("kind").string()!="mod"||v.object.contains("actor"))return why="mod actor kind cannot name a native actor",false;
@@ -275,11 +277,35 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
             }
             if(v.object.contains("params")||v.object.contains("parameters"))return why="mod actors cannot use native parameters",false;
             const auto& collision=v.get("collision");
+            if(v.object.contains("behaviour")){
+                a.behaviour=v.get("behaviour").string();
+                if(a.behaviour!="static")return why="world object behaviour must be static; floating and drifting are not available yet",false;
+                if(skinned_model||v.object.contains("carry")||v.object.contains("combat")||v.object.contains("path")||v.object.contains("animation")||v.object.contains("attention")||v.object.contains("talks")||v.object.contains("lines")||v.object.contains("then"))return why="static world objects require a rigid model without actor interaction or motion",false;
+                if(collision.get("mesh").type!=Value::Null){
+                    if(!keys(collision,{"mesh"})||!id(collision.get("mesh")))return why="invalid collision mesh reference",false;
+                    a.collision_mesh=collision.get("mesh").text;
+                    auto source=std::find_if(models.begin(),models.end(),[&](const auto& model){return model.id==a.collision_mesh;});
+                    if(source==models.end()||source->kind!="static")return why="collision mesh must name a declared static model",false;
+                }else{
+                    if(!keys(collision,{"shape","size","radius","height","surface"}))return why="invalid simple collision shape",false;
+                    a.collision_shape=collision.get("shape").string();a.collision_surface=collision.get("surface").string("stone");
+                    if(a.collision_surface!="stone"&&a.collision_surface!="grass"&&a.collision_surface!="wood"&&a.collision_surface!="sand"&&a.collision_surface!="metal"&&a.collision_surface!="wall")return why="unknown collision surface",false;
+                    if(a.collision_shape=="box"){
+                        const auto& size=collision.get("size");
+                        if(collision.object.contains("radius")||collision.object.contains("height")||!keys(size,{"x","y","z"})||!number(size.get("x"),0,20000,a.collision_size.x,true)||!number(size.get("y"),0,20000,a.collision_size.y,true)||!number(size.get("z"),0,20000,a.collision_size.z,true))return why="box collision needs positive size x/y/z up to 20000",false;
+                    }else if(a.collision_shape=="cylinder"||a.collision_shape=="sphere"){
+                        if(collision.object.contains("size")||!number(collision.get("radius"),0,10000,a.collision_radius,true))return why="shape radius must be positive and at most 10000",false;
+                        if(a.collision_shape=="cylinder"){if(!number(collision.get("height"),0,20000,a.collision_height,true))return why="cylinder height must be positive and at most 20000",false;}
+                        else if(collision.object.contains("height"))return why="sphere collision does not take height",false;
+                    }else return why="collision requires mesh or box, cylinder or sphere shape",false;
+                }
+            }else{
             if(!keys(collision,{"radius","height","mode"}))return why="mod actor needs cylinder collision",false;
             const auto& radius=collision.get("radius");const auto& height=collision.get("height");
             if(radius.type!=Value::Number||height.type!=Value::Number||!std::isfinite(radius.number)||!std::isfinite(height.number)||radius.number<=0||radius.number>1000||height.number<=0||height.number>2000)return why="collision radius must be 0..1000 and height 0..2000 (exclusive zero)",false;
             const auto mode=collision.get("mode").string();if(mode!="solid"&&mode!="pushable")return why="collision mode must be solid or pushable",false;
             a.collision_radius=float(radius.number);a.collision_height=float(height.number);if(a.collision_radius<=0||a.collision_height<=0)return why="collision dimensions are too small",false;a.pushable=mode=="pushable";
+            }
             const auto& attention=v.get("attention");if(attention.type!=Value::Null){if(!keys(attention,{"prompt"}))return why="invalid mod actor attention",false;a.prompt=attention.get("prompt").string();if(a.prompt!="talk"&&a.prompt!="check")return why="attention prompt must be talk or check",false;}
             if(v.object.contains("flag")){if(!flag_id(v.get("flag")))return why="mod actor flag must be a mod-owned id",false;a.flag=v.get("flag").text;}
             if(v.object.contains("combat")){
@@ -297,7 +323,7 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
                 }
                 if(v.object.contains("native_drops")&&!story_mod_combat::parse_native_drops(v.get("native_drops"),a.native_heart_drop,why))return false;
             }
-        }else if(v.object.contains("model")||v.object.contains("animation")||v.object.contains("look_at")||v.object.contains("path")||v.object.contains("collision")||v.object.contains("attention"))return why="model, animation, look_at, path, collision and attention require kind mod",false;
+        }else if(v.object.contains("model")||v.object.contains("animation")||v.object.contains("look_at")||v.object.contains("path")||v.object.contains("collision")||v.object.contains("attention")||v.object.contains("behaviour"))return why="model, animation, look_at, path, collision and attention require kind mod",false;
         if(v.object.contains("carry")){
             const auto& carry=v.get("carry");if(a.kind!="mod"||a.combat_enabled||!keys(carry,{"break_on_impact"})||(carry.object.contains("break_on_impact")&&carry.get("break_on_impact").type!=Value::Bool))return why="carry requires a noncombat mod actor and boolean break_on_impact",false;
             a.carry_enabled=true;a.carry_break_on_impact=carry.get("break_on_impact").boolean;

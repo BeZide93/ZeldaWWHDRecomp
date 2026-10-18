@@ -490,6 +490,58 @@ Value Session::dispatch_build(const std::string& command, const Value& p, std::s
         ok = true;
         return r;
     }
+    if (command == "place_world_object") {
+        Package* pkg = package(p, why);
+        if (!pkg) return r;
+        const auto id = text(p, "id");
+        if (!id_ok(id) || by_id(pkg->manifest.get("actors"), id)) return why = "a world object needs a free actor id", r;
+        Value actor;
+        actor["id"] = id;
+        actor["kind"] = "mod";
+        actor["behaviour"] = p.get("behaviour").string("static");
+        for (const char* key : {"model", "collision", "stage", "room", "position", "rotation", "scale"})
+            if (p.get(key).type != Value::Null) actor[key] = p.get(key);
+        ok = change(*pkg, "Place world object " + id, [&](Value& manifest, std::string&) {
+            if (manifest.get("actors").type != Value::Array) manifest["actors"] = array();
+            manifest["actors"].array.push_back(actor);
+            return true;
+        }, r, why);
+        if (ok) { r["id"] = id; r["actor"] = actor; }
+        return r;
+    }
+    if (command == "set_world_object") {
+        actor_change("Set world object " + text(p, "id"), [&](Value& actor, std::string& error) {
+            if (actor.get("kind").string() != "mod") return error = "world objects require a mod model actor", false;
+            actor["behaviour"] = p.get("behaviour").string("static");
+            actor["collision"] = p.get("collision");
+            return true;
+        });
+        return r;
+    }
+    if (command == "preview_collision" || command == "placement_conflicts") {
+        Package* pkg = package(p, why);
+        if (!pkg) return r;
+        if (!host_) return why = "the game is not running", r;
+        std::vector<story_notebook::ManifestActor> actors;
+        if (!story_notebook::parse_actors(pkg->manifest, actors, why)) return r;
+        const auto found = std::find_if(actors.begin(), actors.end(), [&](const auto& actor) { return actor.id == text(p, "id"); });
+        if (found == actors.end() || !found->world_object()) return why = "no placed world object with that id", r;
+        ok = host_->world_object_query(pkg->mod, *found, command == "preview_collision", r, why);
+        return r;
+    }
+    if (command == "prepare_collision") {
+        Package* pkg = package(p, why);
+        if (!pkg) return r;
+        if (!host_) return why = "the game is not running", r;
+        const auto* model = by_id(pkg->manifest.get("models"), text(p, "model"));
+        if (!model || model->get("kind").string("static") != "static") return why = "collision needs a declared static model", r;
+        Value request = *model;
+        request["collision"] = true; // preparation option only; never a manifest field
+        std::string note;
+        ok = host_->prepare_model(pkg->mod, pkg->dir, request, note, why);
+        if (ok) { r["model"] = model->get("id"); r["note"] = note; }
+        return r;
+    }
     if (command == "add_actor") {
         Package* pkg = package(p, why);
         if (!pkg) return r;

@@ -23,6 +23,8 @@
 #include "../hle/save_root.h"
 #include "../input.h"
 #include "../mods/guest_mods.h"
+#include "../mods/mod_actor.h"
+#include "../mods/actor_model_cache.h"
 #include "../mods/packages.h"
 #include "../mods/story_actors.h"
 #include "../mods/story_items.h"
@@ -826,6 +828,8 @@ public:
             if (!guestmods::editor_prepare_model(mod, dir, mods::packages::package_data_directory(mod), model, archive, w)) return set_status("Model " + model.get("id").string() + ": " + w);
             post([mod, model, archive](Cpu*) {
                 std::string w2;
+                if (model.get("collision").boolean && !mod_actor::register_collision(mod, model.get("id").string(), actor_model_cache::collision_for(archive)))
+                    return set_status("Model " + model.get("id").string() + ": prepared collision could not be registered");
                 if (!story_actors::editor_register_model(mod, model.get("id").string(), archive, model.get("kind").string() == "skinned", w2))
                     return set_status("Model " + model.get("id").string() + ": " + w2 + " (it is prepared when the game starts)");
                 set_status("Model " + model.get("id").string() + " is ready: actors can use it now");
@@ -835,6 +839,9 @@ public:
         note = "The model is being prepared for the game; actors using it appear when it is ready (a restart is needed for the first model "
                "actor of a game that had none).";
         return true;
+    }
+    bool world_object_query(const std::string& mod, const story_notebook::ManifestActor& actor, bool wireframe, Value& result, std::string& why) override {
+        return mod_actor::world_object_query(mod, actor, wireframe, result, why);
     }
     bool preview_text(const std::string& text, bool close, std::string& why) override {
         if (close) {

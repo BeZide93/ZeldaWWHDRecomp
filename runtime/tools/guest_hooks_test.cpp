@@ -192,11 +192,12 @@ namespace hooks { void exec_item_get(Cpu*) {} }
 }
 // World runtime has its own actor/scene tests; loader tests only exercise registration.
 namespace actor_model_cache {
+std::shared_ptr<const story_world_collision::mesh::Mesh> collision_for(const std::string&){return {};}
 std::string archive_for(const std::string&){return {};}
 mod_actor::ModelRig rig_for(const std::string&){return {};}
 std::vector<std::string> clips_for(const std::string&){return {};}
 bool bounds_for(const std::string&,story_notebook::WorldPoint&,story_notebook::WorldPoint&){return false;}
-std::string prepare(const std::string&,const story_notebook::ManifestModel&,const std::string&,const std::string&,const std::vector<std::string>&,const std::string&,const std::string&){return {}; }
+std::string prepare(const std::string&,const story_notebook::ManifestModel&,const std::string&,const std::string&,const std::vector<std::string>&,const std::string&,const std::string&,bool){return {}; }
 }
 namespace story_actors {
 bool resident_event_declaration(const std::string&,const std::string&,ResidentEventDeclaration&){return false;}
@@ -260,6 +261,8 @@ bool burst_named(Cpu*,std::string_view e,const Placement&p,Options o){++calls;ef
 // Synthetic actor bridge: identities belong to one declared mod actor, and
 // process changes invalidate previously captured identities.
 namespace mod_actor {
+void configure_world_objects(const std::string&,PlacementProvider){}
+bool register_collision(const std::string&,const std::string&,std::shared_ptr<const story_world_collision::mesh::Mesh>){return true;}
 static BehaviorSink sink;
 static Identity actor{"first","sprite",11,101},other{"first","other",12,102};
 static State current{};

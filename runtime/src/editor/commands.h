@@ -116,6 +116,12 @@ public:
     virtual bool prepare_model(const std::string& mod, const std::string& dir, const Value& model, std::string& note, std::string& why) {
         return why = "the game is not running", false;
     }
+    // Snapshot query: collision geometry and placement/budget findings for one
+    // parsed object. The host synchronizes its geometry and world snapshot.
+    virtual bool world_object_query(const std::string& mod, const story_notebook::ManifestActor& actor,
+                                    bool wireframe, Value& result, std::string& why) {
+        return why = "the game is not running", false;
+    }
     // Shows `text` in the game's own message box (close: hides it again).
     virtual bool preview_text(const std::string& text, bool close, std::string& why) { return why = "the game is not running", false; }
     // Play: the editor hides, Link plays from the camera's place or his own, in test mode; Stop goes back.

@@ -81,6 +81,8 @@ struct FakeHost : editor::Host {
     float ground_height = 5;
     bool has_ground = true, camera_on = false, is_playing = false, last_restore = false, last_from_camera = false;
     std::string preview, prepared;
+    bool prepared_collision=false, queried_wireframe=false, query_fails=false, query_clear=true;
+    int world_queries=0;
     int focused = 0;
     bool ground(const editor::WorldPoint&, float& h, std::string& why) override {
         if (!has_ground) return why = "no ground below", false;
@@ -106,7 +108,18 @@ struct FakeHost : editor::Host {
     bool focus(const editor::WorldPoint&, std::string&) override { return ++focused, true; }
     bool prepare_model(const std::string& mod, const std::string&, const Value& model, std::string& note, std::string&) override {
         prepared = mod + ":" + model.get("id").string();
+        prepared_collision = model.get("collision").boolean;
         note = "prepared";
+        return true;
+    }
+    bool world_object_query(const std::string&, const story_notebook::ManifestActor& actor, bool wireframe, Value& result, std::string& why) override {
+        ++world_queries; queried_wireframe=wireframe;
+        if(query_fails)return why="collision is not prepared",false;
+        result["clear"]=query_clear;
+        result["id"]=actor.id;result["position"]["x"]=actor.position.x;
+        result["conflicts"].type=Value::Array;result["budget"]["bytes"]=1234;
+        if(!query_clear)result["conflicts"].array.push_back(mods::json::parse("{\"kind\":\"event\",\"message\":\"protected event\"}"));
+        if(wireframe){result["vertices"]=mods::json::parse("[[0,0,0],[1,0,0]]");result["edges"]=mods::json::parse("[[0,1]]");}
         return true;
     }
     bool preview_text(const std::string& text, bool close, std::string&) override { return preview = close ? "" : text, true; }
@@ -139,6 +152,7 @@ const char* kManifest = R"({
   ],
   "scenes": [{"id": "intro", "steps": [{"type": "wait", "frames": 30}, {"type": "end"}]}]
 })";
+
 
 void command_layer() {
     FakeHost host;
@@ -474,6 +488,56 @@ fs::path temp_dir(const char* name) {
     return dir;
 }
 
+void world_object_commands() {
+    FakeHost host;editor::Session session(&host);
+    auto manifest=json(kManifest);
+    manifest["models"]=json(R"([{"id":"island","source":"assets/island.glb"},{"id":"skin","source":"assets/skin.glb","kind":"skinned"}])");
+    session.add_package("editor-test","Editor test","",manifest);
+    Value place=json(R"({"id":"island-a","model":"island","collision":{"mesh":"island"},"stage":"sea","room":12,"position":{"x":75000,"y":0,"z":-201500}})");
+    auto result=session.run("place_world_object",place);
+    CHECK(ok(result)&&session.undo_depth()==1);
+    const auto* actor=actor_of(session,"island-a");
+    CHECK(actor&&actor->get("behaviour").string()=="static"&&actor->get("collision").get("mesh").string()=="island");
+    CHECK(ok(session.run("undo"))&&!actor_of(session,"island-a"));
+    CHECK(ok(session.run("redo"))&&actor_of(session,"island-a"));
+    auto before=*session.manifest("editor-test");const auto depth=session.undo_depth();
+    CHECK(!ok(session.run("place_world_object",place))&&*session.manifest("editor-test")==before&&session.undo_depth()==depth);
+    place["id"]="bad";place["behaviour"]="drifting";
+    CHECK(!ok(session.run("place_world_object",place))&&!actor_of(session,"bad")&&session.undo_depth()==depth);
+    CHECK(!ok(session.run("set_world_object",json(R"({"id":"island-a","collision":{"mesh":"missing"}})")))&&*session.manifest("editor-test")==before);
+    CHECK(ok(session.run("set_world_object",json(R"({"id":"island-a","collision":{"shape":"box","size":{"x":100,"y":40,"z":200},"surface":"wood"}})"))));
+    CHECK(actor_of(session,"island-a")->get("collision").get("shape").string()=="box");
+    CHECK(ok(session.run("undo"))&&actor_of(session,"island-a")->get("collision").get("mesh").string()=="island");
+    CHECK(!ok(session.run("set_actor",json(R"({"id":"island-a","property":"behaviour","value":null})"))));
+    CHECK(ok(session.run("set_actor",json(R"({"id":"island-a","property":"behaviour","value":"static"})"))));
+    before=*session.manifest("editor-test");const auto query_depth=session.undo_depth();
+    result=session.run("preview_collision",json(R"({"id":"island-a"})"));
+    CHECK(ok(result)&&host.queried_wireframe&&result.get("result").get("vertices").array.size()==2&&result.get("result").get("position").get("x").number==75000);
+    result=session.run("placement_conflicts",json(R"({"id":"island-a"})"));
+    CHECK(ok(result)&&!host.queried_wireframe&&result.get("result").get("budget").get("bytes").number==1234);
+    CHECK(*session.manifest("editor-test")==before&&session.undo_depth()==query_depth);
+    CHECK(!ok(session.run("preview_collision",json(R"({"id":"sign-a"})"))));
+    host.query_fails=true;CHECK(!ok(session.run("preview_collision",json(R"({"id":"island-a"})"))));
+    CHECK(ok(session.run("prepare_collision",json(R"({"model":"island"})")))&&host.prepared_collision&&host.prepared=="editor-test:island");
+    CHECK(*session.manifest("editor-test")==before&&session.undo_depth()==query_depth);
+    CHECK(!ok(session.run("prepare_collision",json(R"({"model":"skin"})"))));
+    CHECK(!ok(session.run("prepare_collision",json(R"({"model":"missing"})"))));
+    // Placement failures are refused before committing a manifest or undo step.
+    auto move=json(R"({"id":"island-a","position":{"x":76000,"y":0,"z":-201500}})");
+    CHECK(!ok(session.run("move_actor",move))&&*session.manifest("editor-test")==before&&session.undo_depth()==query_depth);
+    host.query_fails=false;host.query_clear=false;
+    result=session.run("move_actor",move);
+    CHECK(!ok(result)&&result.get("error").string().find("protected event")!=std::string::npos&&*session.manifest("editor-test")==before&&session.undo_depth()==query_depth);
+    auto validate=session.run("validate");CHECK(ok(validate)&&!validate.get("result").get("valid").boolean);
+    CHECK(!ok(session.run("save_package")));
+    // An existing unprepared object does not prevent unrelated dialogue work.
+    host.query_fails=true;
+    CHECK(ok(session.run("set_dialogue",json(R"({"id":"sign-a","lines":["Changed independently."]})"))));
+    host.query_fails=false;host.query_clear=true;
+    CHECK(ok(session.run("move_actor",move)));
+
+}
+
 void building(const fs::path& examples) {
     FakeHost host;
     editor::Session s(&host);
@@ -712,6 +776,7 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "usage: editor_test <examples/guest-mods>\n");
         return 2;
     }
+    world_object_commands();
     command_layer();
     handle_drag();
     locations();

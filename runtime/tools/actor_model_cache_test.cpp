@@ -1,19 +1,34 @@
 #include "mods/actor_model_cache.h"
 #include "mods/mod_json.h"
+#include "mods/mod_hash.h"
+#include <bit>
 #include "static_model_fixture.h"
 #include <cassert>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+static std::vector<uint8_t> collision_fixture(){
+    std::vector<uint8_t> b(84);
+    auto u32=[&](size_t p,uint32_t v){for(unsigned k=0;k<4;++k)b[p+k]=uint8_t(v>>(24-8*k));};
+    auto f32=[&](size_t p,float v){u32(p,std::bit_cast<uint32_t>(v));};
+    u32(0,0x57434f4c);u32(4,1);u32(8,3);u32(12,1);f32(28,100);f32(36,100);
+    f32(52,100);f32(72,100);b[79]=2;b[81]=1;return b;
+}
 int main(int argc,char** argv){
     namespace fs=std::filesystem;
     if(argc>1&&std::string(argv[1])=="--converter"){
-        std::string output,identity;for(int i=2;i+1<argc;++i){if(std::string(argv[i])=="--out")output=argv[i+1];if(std::string(argv[i])=="--identity")identity=argv[i+1];}
+        std::string output,identity,collision_output;for(int i=2;i+1<argc;++i){if(std::string(argv[i])=="--out")output=argv[i+1];if(std::string(argv[i])=="--identity")identity=argv[i+1];if(std::string(argv[i])=="--collision-out")collision_output=argv[i+1];}
         if(std::string(argv[2])=="fail")return 1;
         if(std::string(argv[2])=="reuse"&&!fs::is_regular_file(output))return 2;
         if(std::string(argv[2])!="missing"&&std::string(argv[2])!="reuse"){std::ofstream file(output,std::ios::binary);file.write("Yaz0synthetic-test",18);}
-        mods::json::Value result;result["identity"]=std::string(argv[2])=="wrong"?"wrong":identity;std::cout<<mods::json::dump(result)<<'\n';return 0;
+        mods::json::Value result;
+        if(!collision_output.empty()){
+            auto bytes=collision_fixture();if(std::string(argv[2])=="collision_corrupt")bytes[0]=0;
+            if(std::string(argv[2])!="collision_missing"){std::ofstream file(collision_output,std::ios::binary);file.write(reinterpret_cast<const char*>(bytes.data()),std::streamsize(bytes.size()));}
+            result["collision_sha256"]=std::string(argv[2])=="collision_digest"?"wrong":mods::hash::sha256_text(std::string(bytes.begin(),bytes.end()));
+        }
+        result["identity"]=std::string(argv[2])=="wrong"?"wrong":identity;std::cout<<mods::json::dump(result)<<'\n';return 0;
     }
     const auto root=fs::temp_directory_path()/("wwhd-model-cache-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     struct Clean{fs::path p;~Clean(){std::error_code e;fs::remove_all(p,e);}}clean{root};
@@ -30,6 +45,16 @@ int main(int argc,char** argv){
     auto fails=[&](const std::string& tool){bool threw=false;try{prepare("owner",tool);}catch(const std::exception&){threw=true;}assert(threw&&actor_model_cache::archive_for(guest).empty()&&!actor_model_cache::bounds_for(first,minimum,maximum));};
     fails("fail");prepare("owner","ok");fails("wrong");
     fs::remove(file);fails("missing");
+    auto prepare_collision=[&](const std::string& tool){return actor_model_cache::prepare("owner",model,(root/"package with spaces").string(),(root/"data").string(),command,tool,"game with spaces",true);};
+    for(const char* invalid:{"collision_corrupt","collision_digest","collision_missing"}){
+        assert(prepare_collision("ok")==first);auto mesh=actor_model_cache::collision_for(first);assert(mesh&&mesh->vertices.size()==3&&mesh->triangles.size()==1&&mesh->triangles[0].indices[1]==2);
+        if(std::string(invalid)=="collision_missing")fs::remove(file+".wcol");
+        bool rejected=false;try{prepare_collision(invalid);}catch(const std::exception&){rejected=true;}
+        assert(rejected&&actor_model_cache::archive_for(guest).empty()&&!actor_model_cache::collision_for(first)&&!actor_model_cache::bounds_for(first,minimum,maximum));
+    }
+    assert(prepare_collision("ok")==first);assert(actor_model_cache::collision_for(first));
+    prepare("owner","ok");assert(!actor_model_cache::collision_for(first)); // Render-only rebuild cannot retain old collision.
+    fails("fail");
     assert(prepare(std::string(64,'a'),"ok").size()==31);
     model.kind="unknown";bool bad_kind_failed=false;try{prepare("owner","ok");}catch(const std::exception&){bad_kind_failed=true;}assert(bad_kind_failed);model.kind="static";
     bool long_owner_failed=false;try{prepare(std::string(65,'a'),"ok");}catch(const std::exception&){long_owner_failed=true;}assert(long_owner_failed);

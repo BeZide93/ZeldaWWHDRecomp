@@ -34,6 +34,7 @@ inline Fingerprint fingerprint(const std::string&mod,const story_notebook::Manif
         for(const auto*r:{&c.flinch,&c.stun,&c.death}){text(r->clip);word(r->frames);number(r->knockback_speed);word(r->knockback_frames);}
         const auto&at=c.attack;word(at.damage);word(at.active_frames);word(at.cooldown_frames);number(at.radius);number(at.height);number(at.forward_offset);number(at.y_offset);
     }
+    if(a.world_object()){text("wwhd.world-object.v1");text(a.behaviour);text(a.collision_mesh);text(a.collision_shape);text(a.collision_surface);point(a.collision_size);}
     if(a.carry_enabled){text("wwhd.mod-carry.v1");word(a.carry_break_on_impact);}
     if(!a.texture.empty()){text("wwhd.actor-texture.v1");text(a.texture);text(a.texture_digest);}
     const auto hex=mods::hash::sha256_text(bytes);Fingerprint out{};

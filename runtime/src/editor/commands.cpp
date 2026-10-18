@@ -28,7 +28,7 @@ const std::vector<CommandInfo> kCommands = {
     {"open_mod", "Opens a mod: later commands without \"mod\" act on it.", {{"mod", "string", "the mod's id", true}}},
     {"list_actors", "The open mod's placed actors (game actors and mod models).", {{"mod", "string", "another mod than the open one"}}},
     {"get_actor", "One placed actor as the manifest declares it.", {{"id", "string", "the actor's id", true}, {"mod", "string", ""}}},
-    {"set_actor", "Sets one property of a placed actor (null removes it): position, rotation, scale, model, lines, collision, attention, animation, flag, stage, room, when, then, talks, look_at, path, parameters, defeated_flag, broken_flag, drops, native_drops, combat, carry, switch_flag, switch, texture. when: {quest, step, quests: [{quest, step}] (all must hold), item, time, flag, not_flag (a flag id)}. talks: up to 8 [{when?, lines, then?}], the first that matches is said (one without when last; not with lines or then).",
+    {"set_actor", "Sets one property of a placed actor (null removes it): position, rotation, scale, model, lines, collision, behaviour, attention, animation, flag, stage, room, when, then, talks, look_at, path, parameters, defeated_flag, broken_flag, drops, native_drops, combat, carry, switch_flag, switch, texture. when: {quest, step, quests: [{quest, step}] (all must hold), item, time, flag, not_flag (a flag id)}. talks: up to 8 [{when?, lines, then?}], the first that matches is said (one without when last; not with lines or then).",
      {{"id", "string", "the actor's id", true}, {"property", "string", "the manifest field", true}, {"value", "any", "the new value; null removes the field", true}, {"mod", "string", ""}},
      true},
     {"move_actor", "Moves a placed actor.", {{"id", "string", "", true}, {"position", "point", "{x, y, z} in world units", true}, {"mod", "string", ""}}, true},
@@ -81,6 +81,18 @@ const std::vector<CommandInfo> kCommands = {
      {{"id", "string", "", true}, {"at", "string", "link, camera, ground or position", true}, {"position", "point", "with at = position"},
       {"snap", "boolean", "onto the ground (default true)"}, {"mod", "string", ""}},
      true},
+    {"place_world_object", "Places a static mod object with its collision in one undoable change.",
+     {{"id", "string", "new actor id", true}, {"model", "string", "render model id", true}, {"collision", "object", "{mesh: model} or a simple shape", true},
+      {"behaviour", "string", "static (default)"}, {"stage", "string", "stage name", true}, {"room", "integer", "room number", true},
+      {"position", "point", "world position", true}, {"rotation", "point", "degrees"}, {"scale", "point", "positive scale"}, {"mod", "string", ""}}, true},
+    {"set_world_object", "Changes collision and behaviour together in one undoable change.",
+     {{"id", "string", "placed actor id", true}, {"collision", "object", "mesh reference or simple shape", true}, {"behaviour", "string", "static (default)"}, {"mod", "string", ""}}, true},
+    {"preview_collision", "Returns world-space collision vertices and edges for a wireframe preview, with placement findings.",
+     {{"id", "string", "placed world object", true}, {"mod", "string", ""}}},
+    {"placement_conflicts", "Returns placement conflicts and collision budget findings for a world object.",
+     {{"id", "string", "placed world object", true}, {"mod", "string", ""}}},
+    {"prepare_collision", "Prepares a static model's collision for live world-object placement.",
+     {{"model", "string", "declared static model id", true}, {"mod", "string", ""}}},
     {"pick", "The first ground a ray meets (the game's collision), for placing by clicking into the picture.",
      {{"origin", "point", "where the ray starts", true}, {"direction", "point", "its direction", true}, {"range", "number", "default 20000"}}},
     {"ground", "The ground height below a point (the game's collision).", {{"position", "point", "", true}}},
@@ -346,6 +358,36 @@ bool model_files(const std::string& dir, const Value& manifest, std::string& why
         const auto rel = file.lexically_relative(root);
         if (ec || rel.empty() || rel.begin()->string() == "..") return why = "model " + m.get("id").string() + ": its source is outside the package", false;
         if (!fs::is_regular_file(file, ec)) return why = "model " + m.get("id").string() + ": " + m.get("source").string() + " is not in the package", false;
+    }
+    return true;
+}
+
+bool world_placements(Host* host, const std::string& mod, const Value& before, const Value& next, bool all, std::string& why) {
+    if (!host) return true;
+    std::vector<ManifestActor> actors;
+    if (!story_notebook::parse_actors(next, actors, why)) return false;
+    for (const auto& actor : actors) {
+        if (!actor.world_object()) continue;
+        const auto* old = find_by_id(before.get("actors"), actor.id);
+        const auto* now = find_by_id(next.get("actors"), actor.id);
+        bool changed = !old || !now || !(*old == *now);
+        for (const auto& model : {actor.model, actor.collision_mesh}) {
+            if (model.empty()) continue;
+            const auto* previous = find_by_id(before.get("models"), model);
+            const auto* current = find_by_id(next.get("models"), model);
+            changed = changed || !previous || !current || !(*previous == *current);
+        }
+        if (!all && !changed) continue;
+        Value query;
+        if (!host->world_object_query(mod, actor, false, query, why)) {
+            why = "world object " + actor.id + ": " + (why.empty() ? "placement coverage or collision is unavailable" : why);
+            return false;
+        }
+        if (query.get("clear").type != Value::Bool || !query.get("clear").boolean) {
+            const auto& conflicts = query.get("conflicts").array;
+            why = "world object " + actor.id + ": " + (conflicts.empty() ? std::string("placement could not be cleared") : conflicts.front().get("message").string("placement conflicts with protected space"));
+            return false;
+        }
     }
     return true;
 }
@@ -782,7 +824,7 @@ bool Session::change(Package& p, const std::string& label, const std::function<b
         return true;
     }
     auto all = all_manifests();
-    if (!validate_package(p.mod, next, all, why) || !model_files(p.dir, next, why)) return false;
+    if (!validate_package(p.mod, next, all, why) || !model_files(p.dir, next, why) || !world_placements(host_, p.mod, p.manifest, next, false, why)) return false;
     const bool actors_changed = !(next.get("actors") == p.manifest.get("actors")) || !(next.get("models") == p.manifest.get("models"));
     const bool other_changed = !(next.get("scenes") == p.manifest.get("scenes")) || !(next.get("quests") == p.manifest.get("quests"));
     undo_.push_back({p.mod, label, p.manifest, next});
@@ -802,6 +844,7 @@ bool Session::change(Package& p, const std::string& label, const std::function<b
 bool Session::restore(const std::string& mod, const Value& manifest, Value& result, std::string& why) {
     auto* p = const_cast<Package*>(find(mod));
     if (!p) return why = "the mod of this step is gone", false;
+    if (!world_placements(host_, mod, p->manifest, manifest, false, why)) return false;
     const bool actors_changed = !(manifest.get("actors") == p->manifest.get("actors")) || !(manifest.get("models") == p->manifest.get("models"));
     const Value before = p->manifest;
     p->manifest = manifest;
@@ -949,7 +992,7 @@ Value Session::dispatch(const std::string& command, const Value& p, std::string&
         static const std::set<std::string> allowed = {"actor", "kind", "model", "animation", "look_at", "path", "collision", "attention",
                                                       "stage", "room", "position", "rotation", "scale", "params", "parameters", "flag",
                                                       "when", "lines", "then", "talks", "defeated_flag", "broken_flag", "drops",
-                                                      "native_drops", "combat", "carry", "switch_flag", "switch", "texture"};
+                                                      "native_drops", "combat", "carry", "switch_flag", "switch", "texture", "behaviour"};
         const std::string property = text(p, "property");
         if (!allowed.contains(property)) return why = "\"" + property + "\" is not an actor property the editor sets", r;
         return actor_edit("Set " + property + " of " + text(p, "id"), [&](Value& a, std::string&) {
@@ -1036,7 +1079,7 @@ Value Session::dispatch(const std::string& command, const Value& p, std::string&
         Package* pkg = package(p, why);
         if (!pkg) return r;
         std::string problem;
-        const bool valid = validate_package(pkg->mod, pkg->manifest, all_manifests(), problem) && model_files(pkg->dir, pkg->manifest, problem);
+        const bool valid = validate_package(pkg->mod, pkg->manifest, all_manifests(), problem) && model_files(pkg->dir, pkg->manifest, problem) && world_placements(host_, pkg->mod, pkg->manifest, pkg->manifest, true, problem);
         r["valid"] = valid;
         if (!valid) r["problem"] = problem;
         ok = true;
@@ -1046,7 +1089,7 @@ Value Session::dispatch(const std::string& command, const Value& p, std::string&
         Package* pkg = package(p, why);
         if (!pkg) return r;
         std::string problem;
-        if (!validate_package(pkg->mod, pkg->manifest, all_manifests(), problem) || !model_files(pkg->dir, pkg->manifest, problem))
+        if (!validate_package(pkg->mod, pkg->manifest, all_manifests(), problem) || !model_files(pkg->dir, pkg->manifest, problem) || !world_placements(host_, pkg->mod, pkg->manifest, pkg->manifest, true, problem))
             return why = "not saved: " + problem, r;
         const fs::path file = fs::path(pkg->dir) / "manifest.json";
         std::error_code ec;

@@ -219,6 +219,28 @@ int main() {
         a["then"]=mods::json::parse("[]");assert(!parse_actors(talks,actors,why));
     }
 
+    { // Public static collision is explicit and cannot inherit mobile actor behaviour.
+        auto island=valid_mod;auto&a=island["actors"].array[0];a.object.erase("attention");a.object.erase("lines");a["behaviour"]="static";a["collision"]=mods::json::parse(R"({"mesh":"post"})");
+        assert(parse_actors(island,actors,why)&&actors[0].world_object()&&actors[0].collision_mesh=="post"&&actors[0].collision_shape.empty());
+        auto rejected=[&](Value data){assert(!parse_actors(data,actors,why));};
+        for(const char*behaviour:{"floating","drifting","STATIC",""}){auto bad=island;bad["actors"].array[0]["behaviour"]=behaviour;rejected(bad);}
+        for(const char*id:{"missing","other:post","../post"}){auto bad=island;bad["actors"].array[0]["collision"]["mesh"]=id;rejected(bad);}
+        {auto bad=island;bad["models"].array[0]["kind"]="skinned";rejected(bad);}
+        {auto bad=island;auto other=bad["models"].array[0];other["id"]="skin";other["kind"]="skinned";bad["models"].array.push_back(other);bad["actors"].array[0]["collision"]["mesh"]="skin";rejected(bad);}
+        for(const char*field:{"carry","combat","path","animation","attention","talks","lines","then"}){auto bad=island;bad["actors"].array[0][field]=Value{};rejected(bad);}
+        {auto bad=island;bad["actors"].array[0].object.erase("behaviour");rejected(bad);}
+        {auto bad=island;bad["actors"].array[0].object.erase("collision");rejected(bad);}
+        for(const char*shape:{"box","cylinder","sphere"})for(const char*surface:{"stone","grass","wood","sand","metal","wall"}){
+            auto simple=island;auto&c=simple["actors"].array[0]["collision"];c=mods::json::parse(std::string(shape)=="box"?R"({"shape":"box","size":{"x":20000,"y":20,"z":40}})":std::string(shape)=="cylinder"?R"({"shape":"cylinder","radius":10000,"height":20000})":R"({"shape":"sphere","radius":10000})");c["surface"]=surface;
+            assert(parse_actors(simple,actors,why)&&actors[0].collision_shape==shape&&actors[0].collision_surface==surface&&actors[0].collision_mesh.empty());
+            {auto bad=simple;bad["actors"].array[0]["collision"]["surface"]="col_grass";rejected(bad);}
+            {auto bad=simple;bad["actors"].array[0]["collision"]["mesh"]="post";rejected(bad);}
+            for(int dimension:{0,-1,20001}){auto bad=simple;auto&bc=bad["actors"].array[0]["collision"];if(std::string(shape)=="box")bc["size"]["x"]=dimension;else bc["radius"]=dimension;rejected(bad);}
+            {auto bad=simple;auto&bc=bad["actors"].array[0]["collision"];if(std::string(shape)=="box")bc["radius"]=1;else bc["size"]=mods::json::parse(R"({"x":1,"y":1,"z":1})");rejected(bad);}
+            if(std::string(shape)=="sphere"){auto bad=simple;bad["actors"].array[0]["collision"]["height"]=1;rejected(bad);}
+        }
+    }
+
     std::vector<ManifestModel> models;assert(parse_models(valid_mod,models,why)&&models[0].kind=="static");
     mod=valid_mod;mod["models"].array[0]["kind"]="skinned";assert(parse_models(mod,models,why)&&models[0].kind=="skinned");
     mod["models"].array[0]["kind"]="static";assert(parse_models(mod,models,why)&&models[0].kind=="static");

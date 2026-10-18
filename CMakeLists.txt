@@ -3257,3 +3257,31 @@ add_test(NAME story_world_collision_proof_runtime COMMAND story_world_collision_
 if(Python3_Interpreter_FOUND)
   add_test(NAME story_world_objects_w0_assets COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/story_mods/test_world_objects_w0.py)
 endif()
+
+target_sources(mod_content_fs_test PRIVATE runtime/src/mods/story_world_collision_mesh.cpp)
+
+target_sources(language_source_test PRIVATE runtime/src/mods/story_world_collision_mesh.cpp)
+
+target_sources(actor_model_cache_test PRIVATE runtime/src/mods/story_world_collision_mesh.cpp)
+
+target_sources(mod_actor_runtime_test PRIVATE runtime/src/mods/story_world_collision_mesh.cpp)
+
+target_sources(story_actors_runtime_test PRIVATE runtime/src/mods/story_world_collision_mesh.cpp)
+
+add_executable(story_world_collision_mesh_test runtime/tools/story_world_collision_mesh_test.cpp runtime/src/mods/story_world_collision_mesh.cpp)
+target_include_directories(story_world_collision_mesh_test PRIVATE runtime/src)
+target_compile_options(story_world_collision_mesh_test PRIVATE -UNDEBUG)
+add_test(NAME story_world_collision_mesh COMMAND story_world_collision_mesh_test)
+add_executable(story_world_collision_native_test runtime/tools/story_world_collision_native_test.cpp runtime/src/mods/story_world_collision_mesh.cpp runtime/src/guest_addr_identity.c)
+target_include_directories(story_world_collision_native_test PRIVATE runtime/src runtime/include)
+target_compile_options(story_world_collision_native_test PRIVATE -UNDEBUG)
+add_test(NAME story_world_collision_native COMMAND story_world_collision_native_test)
+
+target_sources(mod_actor_runtime_test PRIVATE runtime/src/mods/story_world_placement.cpp)
+target_sources(story_actors_runtime_test PRIVATE runtime/src/mods/story_world_placement.cpp)
+add_executable(story_world_placement_test runtime/tools/story_world_placement_test.cpp runtime/src/mods/story_world_placement.cpp)
+target_include_directories(story_world_placement_test PRIVATE runtime/src)
+target_compile_options(story_world_placement_test PRIVATE -UNDEBUG)
+add_test(NAME story_world_placement COMMAND story_world_placement_test)
+
+add_test(NAME story_world_static_contract COMMAND mod_actor_runtime_test --world-static)
