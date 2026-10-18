@@ -48,7 +48,12 @@ std::map<uint32_t,uint32_t> live;
 
 void map_guest(uint32_t at,uint32_t size) {
 #ifdef _WIN32
-    assert(VirtualAlloc(mem::ptr(at),size,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE));
+    // Like MAP_FIXED below: mapping a range again gives fresh zeroed pages. Windows refuses a second
+    // reservation, so an already reserved range is decommitted and committed again.
+    if(!VirtualAlloc(mem::ptr(at),size,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE)){
+        assert(VirtualFree(mem::ptr(at),size,MEM_DECOMMIT));
+        assert(VirtualAlloc(mem::ptr(at),size,MEM_COMMIT,PAGE_READWRITE));
+    }
 #else
     assert(mmap(mem::ptr(at),size,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED,-1,0)!=MAP_FAILED);
 #endif
