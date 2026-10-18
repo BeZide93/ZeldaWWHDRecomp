@@ -7,6 +7,9 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Mod SDK v3 preview: native scenes** (for mod makers). A scene can include an optional native `turn_camera`
+  version that the game's own event system plays: two residents turning toward each other and a camera move. It can be
+  skipped with Plus and survives save states, and the scene's normal steps play whenever the native version can't run.
 - **Android/Vulkan: texture decoder self-test.** Phones that decode compressed (BC) textures in a compute shader now
   check that decoder at start-up and switch to the CPU decoder if the graphics driver gets it wrong (Qualcomm's driver
   762 miscompiled it, leaving speckled edges on the HUD hearts and streaks on water when that path was used). One rare
