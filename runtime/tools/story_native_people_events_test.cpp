@@ -6,6 +6,10 @@
 #include <map>
 #include <stdexcept>
 #include <vector>
+#include <algorithm>
+#include <array>
+#include <cstdint>
+#include <span>
 using namespace story_native_people_events;
 void put(auto&b,size_t p,uint32_t v){for(unsigned n=0;n<4;++n)b[p+n]=uint8_t(v>>(24-8*n));}
 struct Fake {

@@ -5,6 +5,15 @@
 #include "mods/story_native_refresh_dispatch_audit.h"
 #include <cassert>
 #include <map>
+#include <algorithm>
+#include <array>
+#include <vector>
+#include <cstdint>
+#include <span>
+#include <utility>
+#include <functional>
+#include <string_view>
+#include <memory>
 namespace G=story_native_people_model_graph;
 // Test-only issuer; the production issuer remains solely in threads.cpp.
 namespace threads {class NativeQuiescenceIssuer {public:static NativeQuiescence make(std::function<bool(const Cpu*)>c,bool readonly=false){return NativeQuiescence(std::move(c),[]{},readonly);}};}

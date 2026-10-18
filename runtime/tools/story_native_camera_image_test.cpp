@@ -5,6 +5,8 @@
 #include <cstring>
 #include <limits>
 #include <string>
+#include <vector>
+#include <cstdint>
 namespace N=story_native_camera_image;
 uint32_t be(const std::vector<uint8_t>&b,size_t p){return uint32_t(b[p])<<24|uint32_t(b[p+1])<<16|uint32_t(b[p+2])<<8|b[p+3];}
 void put(std::vector<uint8_t>&b,size_t p,uint32_t n){for(unsigned i=0;i<4;++i)b[p+i]=uint8_t(n>>(24-8*i));}

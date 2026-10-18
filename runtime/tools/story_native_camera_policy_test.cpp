@@ -5,6 +5,9 @@
 #include <map>
 #include <stdexcept>
 #include <vector>
+#include <algorithm>
+#include <cstdint>
+#include <span>
 namespace P=story_native_camera_policy;
 void put(auto&b,size_t at,uint32_t v){for(unsigned i=0;i<4;++i)b[at+i]=uint8_t(v>>(24-i*8));}
 int main(){

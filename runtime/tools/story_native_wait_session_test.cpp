@@ -10,6 +10,10 @@
 #include <windows.h>
 #else
 #include <sys/mman.h>
+#include <algorithm>
+#include <vector>
+#include <cstdint>
+#include <span>
 #endif
 
 namespace S=story_native_wait_session;

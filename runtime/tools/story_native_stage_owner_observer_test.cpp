@@ -5,6 +5,8 @@
 #include <thread>
 #include <atomic>
 #include "savestate_native_gate.h"
+#include <cstdint>
+#include <utility>
 
 namespace mem {uint32_t runtime_top(){return 0x68000000;}}
 using namespace story_native_stage_owner_observer;

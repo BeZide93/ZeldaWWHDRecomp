@@ -3,6 +3,10 @@
 #include "mods/story_native_event_image.h"
 #include <algorithm>
 #include <cassert>
+#include <array>
+#include <vector>
+#include <cstdint>
+#include <span>
 using namespace story_native_event_memory;
 struct Fake {
  Expected e;Config c;Scope s;unsigned reads=0,writes=0;bool allocation=true;std::array<uint8_t,0xF4>control{};

@@ -5,6 +5,10 @@
 #include "mods/story_native_people_admission.h"
 #include "mods/story_native_event_image.h"
 #include "mods/story_actors.h"
+#include <string>
+#include <array>
+#include <vector>
+#include <cstdint>
 namespace A=story_native_people_admission;
 static std::array<story_actors::ResidentEventIdentity,2>owned_rows;
 static bool row_valid=true;

@@ -5,8 +5,12 @@
 #include <cstring>
 #include <map>
 #include <vector>
+#include <algorithm>
+#include <array>
+#include <cstdint>
+#include <span>
 using namespace story_native_event_collect;
-static constexpr uint32_t play=0x1046F0B0,cam_process=0x20004000,link=0x20006000,stamp=0x60001000;
+static constexpr uint32_t play=0x1046F0B0,cam_process=0x20004000,link_actor=0x20006000,stamp=0x60001000;
 struct Fake {
  Expected e;Config config;std::map<uint32_t,std::vector<uint8_t>> memory;std::array<std::array<uint8_t,32>,2> actual_fingerprints{};bool owned=true,allocated=true,exclusive=true,camera_valid=true;unsigned reads=0;uint32_t allocation_extent=0x520;
  void add(uint32_t a,size_t n){memory[a].resize(n);}
@@ -17,8 +21,8 @@ struct Fake {
  void copy(uint32_t a,std::span<const uint8_t>b){auto*p=pointer(a,b.size());assert(p);std::copy(b.begin(),b.end(),p);}
  Fake(){
   e.identity={play+0x52C4,0x60000000,0x520,77,1000,3,4};e.stage_name={'s','e','a'};config.stamp=stamp;
-  add(0x10049348,8+3*0x40);put(0x10049348,3);add(0x10044878,4+4*0x84);put(0x10044878,4);add(play,0x5B38);add(0x10475000,0x1000);add(0x1047E000,0x1000);add(0x101C4CD0,0x30);add(0x101D5500,0x200);add(cam_process,0xB28);add(link,0x328);add(e.identity.image,0x520);add(stamp,64);
-  put(0x104753A8,1);put(0x1047E6C4,77);put(0x1047E8F0,1000);copy(play+0x5134,e.stage_name);put(play+0x5B34,link);put(link+4,55);half(link+14,0xA8);
+  add(0x10049348,8+3*0x40);put(0x10049348,3);add(0x10044878,4+4*0x84);put(0x10044878,4);add(play,0x5B38);add(0x10475000,0x1000);add(0x1047E000,0x1000);add(0x101C4CD0,0x30);add(0x101D5500,0x200);add(cam_process,0xB28);add(link_actor,0x328);add(e.identity.image,0x520);add(stamp,64);
+  put(0x104753A8,1);put(0x1047E6C4,77);put(0x1047E8F0,1000);copy(play+0x5134,e.stage_name);put(play+0x5B34,link_actor);put(link_actor+4,55);half(link_actor+14,0xA8);
   put(0x101C4CD0+0x10,0x920);half(0x101C4CD0+8,0x175);
   for(unsigned n=0;n<2;++n){auto&a=e.actors[n];a.address=0x20001000+n*0x1000;a.pid=10+n;a.token=1+n;a.profile=0x175;a.subtype=1;for(unsigned k=0;k<32;++k)a.fingerprint[k]=uint8_t(k+n+1);actual_fingerprints[n]=a.fingerprint;add(a.address,0x920);put(a.address+4,a.pid);half(a.address+14,0x175);put(a.address+0x10,0x101C4CD0);put(a.address+0xB0,0x00FF0000);byte(a.address+0x2DD,1);byte(a.address+0x905,1);}
   e.camera.address=cam_process+0x248;e.camera.pid=12;e.camera.event_type=2;e.camera.style_table=e.camera.param_pointer=0x1004487C;e.camera.style_count=4;e.camera.type_table=0x10049350;e.camera.type_count=3;put(cam_process+0x248+0x8A8,0x1004487C);put(cam_process+0x248+0x8B4,2);put(cam_process+0x248+0x408,0xFFFFFFFFu);e.camera.event_data[12]=e.camera.event_data[13]=e.camera.event_data[14]=e.camera.event_data[15]=0xFF;put(play+0x5AF8,cam_process);put(cam_process+4,12);half(cam_process+14,0x1DC);put(cam_process+0x10,0x101D55F0);put(cam_process+0x228,0x101D5538);put(cam_process+0x248,cam_process);

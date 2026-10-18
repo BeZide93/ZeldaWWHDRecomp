@@ -254,7 +254,7 @@ static void run(unsigned fault){
  auto*p=at>=arena.allocation.address&&uint64_t(at)+in.size()<=uint64_t(arena.allocation.address)+arena.allocation.bytes?mem::ptr(at):f.pointer(at,in.size());if(!p)return false;std::copy(in.begin(),in.end(),p);return true;};
  auto w=[&](uint32_t at,uint32_t v){std::array<uint8_t,4>b{};for(unsigned n=0;n<4;++n)b[n]=uint8_t(v>>(24-8*n));assert(write(at,b));};
  SO::state_loaded();const auto*observer=SO::observer();SO::Args args{{mapped.relocated(resource_fixture::Ctrl),mapped.relocated(resource_fixture::Args),mapped.relocated(resource_fixture::Args+0x20),0}};const auto cookie=observer->before_setinfo(&cpu,args);assert(cookie);cpu.r[3]=1;observer->after_setinfo(&cpu,args,1,cookie);const auto stage=SO::snapshot();assert(stage);
- RC::Context*actual_context=nullptr;uint64_t step=100;RB::Config config;config.collector=f.config;config.collector.stamp=selected.stamp.address;config.memory={selected.stamp.address,link,55,{selected.record.address,selected.record.bytes}};RB::Callbacks callbacks;callbacks.session=&session;callbacks.retained=[&](const auto&e){return e==expected&&actual_context&&actual_context->retained();};callbacks.read=read;callbacks.resident=[&](const Actor&a,const auto&i){return i==expected.identity&&std::any_of(expected.actors.begin(),expected.actors.end(),[&](const auto&saved){return a.address==saved.address&&a.pid==saved.pid&&a.token==saved.token&&a.profile==saved.profile&&a.subtype==saved.subtype&&a.fingerprint==saved.fingerprint;});};callbacks.fence=[&]{return session.fence_held();};callbacks.routes=[]{return true;};callbacks.baseline=[&](const auto&e){auto current=session.baseline();if(!current)current=session.staged_expected();return current&&*current==e;};callbacks.boundary=[&](const Cpu*c,story_native_wait_readiness::Boundary&b){if(c!=current_cpu)return false;b={guest_thread,stack_begin,stack_begin+stack_bytes,step,true};return true;};callbacks.allocation=[&](const auto&i,const auto&c){return i==expected.identity&&c.stamp==config.memory.stamp;};
+ RC::Context*actual_context=nullptr;uint64_t step=100;RB::Config config;config.collector=f.config;config.collector.stamp=selected.stamp.address;config.memory={selected.stamp.address,link_actor,55,{selected.record.address,selected.record.bytes}};RB::Callbacks callbacks;callbacks.session=&session;callbacks.retained=[&](const auto&e){return e==expected&&actual_context&&actual_context->retained();};callbacks.read=read;callbacks.resident=[&](const Actor&a,const auto&i){return i==expected.identity&&std::any_of(expected.actors.begin(),expected.actors.end(),[&](const auto&saved){return a.address==saved.address&&a.pid==saved.pid&&a.token==saved.token&&a.profile==saved.profile&&a.subtype==saved.subtype&&a.fingerprint==saved.fingerprint;});};callbacks.fence=[&]{return session.fence_held();};callbacks.routes=[]{return true;};callbacks.baseline=[&](const auto&e){auto current=session.baseline();if(!current)current=session.staged_expected();return current&&*current==e;};callbacks.boundary=[&](const Cpu*c,story_native_wait_readiness::Boundary&b){if(c!=current_cpu)return false;b={guest_thread,stack_begin,stack_begin+stack_bytes,step,true};return true;};callbacks.allocation=[&](const auto&i,const auto&c){return i==expected.identity&&c.stamp==config.memory.stamp;};
  [[maybe_unused]] const auto restore_callbacks=callbacks;auto backend=RB::make(expected,arena,config,*stage,GT::ticket(&cpu),&cpu,depth,std::move(callbacks));assert(backend);
  unsigned native_calls=0,restore_reads=0,resume_boundaries=0;RC::Sources source;[[maybe_unused]] RC::Sources restored_sources;
 #ifdef STORY_NATIVE_RUN_REAL_MODEL
@@ -324,6 +324,17 @@ source.restore_read=[&](auto at,auto bytes){++restore_reads;return read(at,bytes
 #endif
 #ifdef STORY_NATIVE_CROSS_SESSION_FLOW_INCLUDE
 #include STORY_NATIVE_CROSS_SESSION_FLOW_INCLUDE
+#include <algorithm>
+#include <string>
+#include <array>
+#include <vector>
+#include <optional>
+#include <cstdint>
+#include <span>
+#include <utility>
+#include <functional>
+#include <cstring>
+#include <memory>
   context.reset();fixture_frozen=false;++freeze_epoch;current_cpu=nullptr;hold.reset();unmap_arena(guest);return;
 #endif
 #ifdef STORY_NATIVE_CROSS_SESSION_FLOW

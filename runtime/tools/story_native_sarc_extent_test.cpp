@@ -6,6 +6,8 @@
 #include <iostream>
 #include <iterator>
 #include <vector>
+#include <cstdint>
+#include <span>
 using namespace story_native_sarc_extent;
 namespace {
 constexpr uint32_t Res=0x50000000, Base=0x60000000;

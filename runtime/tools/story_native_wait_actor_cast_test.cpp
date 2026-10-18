@@ -6,6 +6,11 @@
 #include <cstring>
 #include <map>
 #include <thread>
+#include <algorithm>
+#include <array>
+#include <vector>
+#include <cstdint>
+#include <span>
 namespace C=story_native_wait_actor_cast;
 namespace D=story_native_event_depth;
 using Expected=story_native_event_observation::Expected;

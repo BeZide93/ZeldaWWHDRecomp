@@ -120,6 +120,12 @@ assert(retained&&s.fence_held()&&!s.expected()&&!s.unexposed()&&!s.quarantined()
 #define STORY_NATIVE_SESSION_IDLE_TEST_HOOK(f,s,c,h) do {idle_test(f,s,c,h);h.reset();unmap_arena(guest);return;} while(false)
 #define STORY_NATIVE_WAIT_TERMINAL_FIXTURE_ONLY
 #include "story_native_wait_controller_terminal_test.cpp"
+#include <vector>
+#include <optional>
+#include <cstdint>
+#include <span>
+#include <utility>
+#include <memory>
 #undef STORY_NATIVE_WAIT_TERMINAL_FIXTURE_ONLY
 #undef STORY_NATIVE_SESSION_IDLE_TEST_HOOK
 int main(){

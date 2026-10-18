@@ -3,6 +3,10 @@
 #include <cassert>
 #include <map>
 #include <vector>
+#include <algorithm>
+#include <optional>
+#include <cstdint>
+#include <span>
 using namespace story_native_stage_table_owner;
 namespace {
 constexpr uint32_t Play=0x1046F0B0, Base=0x20000000;

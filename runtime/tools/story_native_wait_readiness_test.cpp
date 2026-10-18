@@ -25,15 +25,23 @@ struct RuntimeFixture:Fake {
   copy(0x60070300,e.stage_name);put(0x60070318,e.identity.stage);put(0x60070400,e.identity.room);
   for(unsigned offset:{0xC4u,0xC8u,0xCCu,0xD0u})put(play+0x51D0+offset,0xFFFFFFFFu);half(play+0x51D0+0xD8,0xFFFF);
  }
- B::Scaffold scaffold(D::Tracker&d){tracker=&d;B::Config cfg;cfg.collector=config;cfg.memory={stamp,link,55,{0x60002000,4096}};B::Sources sources;
+ B::Scaffold scaffold(D::Tracker&d){tracker=&d;B::Config cfg;cfg.collector=config;cfg.memory={stamp,link_actor,55,{0x60002000,4096}};B::Sources sources;
   sources.read=[&](uint32_t a,std::span<uint8_t>b){++reads;auto*p=pointer(a,b.size());if(!p)return false;std::copy_n(p,b.size(),b.begin());return true;};
-  sources.session=[&](story_native_event_memory::Scope&s){s.identity=e.identity;s.link=link;s.link_pid=55;s.exclusive=session_valid;s.bindings_verified=owned;s.logic_step=logic;s.serial=tracker->snapshot().serial;return true;};
+  sources.session=[&](story_native_event_memory::Scope&s){s.identity=e.identity;s.link=link_actor;s.link_pid=55;s.exclusive=session_valid;s.bindings_verified=owned;s.logic_step=logic;s.serial=tracker->snapshot().serial;return true;};
   sources.allocation=[&](const auto&,const auto&){return allocated;};sources.actor=[&](const Actor&a,const auto&){const auto n=(a.address-e.actors[0].address)/0x1000;return actor_valid&&n<2&&a.pid==e.actors[n].pid&&a.fingerprint==actual_fingerprints[n];};return B::Scaffold(e,cfg,sources,d);
  }
 };
 [[maybe_unused]] static D::Coverage covered(){return {{11,11,true},{0,0,true},{22,22,true},true};}
 #include "mods/story_native_wait_readiness.h"
 #include "mods/story_scenes.h"
+#include <algorithm>
+#include <string>
+#include <array>
+#include <vector>
+#include <cstdint>
+#include <span>
+#include <utility>
+#include <cstring>
 namespace W=story_native_wait_readiness;
 static RuntimeFixture*current_fixture=nullptr;
 static std::vector<mem::AllocRec>allocations;

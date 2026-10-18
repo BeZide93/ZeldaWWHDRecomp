@@ -2,6 +2,7 @@
 #include "mods/story_native_event_game_thread.h"
 #include <cassert>
 #include <thread>
+#include <cstdint>
 struct Cpu {};
 namespace {
 thread_local Cpu* running=nullptr;

@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: MPL-2.0
 #include "mods/story_native_turn_camera_observation.h"
 #include <cassert>
+#include <algorithm>
+#include <string>
+#include <vector>
+#include <cstdint>
 namespace O=story_native_turn_camera_observation;
 void put(auto&b,size_t p,uint32_t v){for(unsigned i=0;i<4;++i)b[p+i]=uint8_t(v>>(24-i*8));}
 void staff(O::Capture&c,unsigned s,uint32_t cut,uint32_t action){size_t at=0xF0+s*80;put(c.image,at+0x38,cut);put(c.image,at+0x3C,action);c.image[at+0x46]=1;}

@@ -6,6 +6,12 @@
 #include <cassert>
 #include <map>
 #include <cstring>
+#include <algorithm>
+#include <string>
+#include <array>
+#include <vector>
+#include <cstdint>
+#include <span>
 namespace {
 std::map<uint32_t,std::vector<uint8_t>>memory;
 std::array<story_actors::ResidentEventProcess,2>processes;

@@ -4,6 +4,11 @@
 #include <cstdio>
 #include <map>
 #include <stdexcept>
+#include <algorithm>
+#include <array>
+#include <vector>
+#include <cstdint>
+#include <span>
 using namespace story_native_people_pose_capture;
 using story_native_people_pose_plan::Snapshot;
 namespace {

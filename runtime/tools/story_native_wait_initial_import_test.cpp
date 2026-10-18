@@ -38,3 +38,5 @@ namespace story_native_wait_runtime {class NativeResumeFrontIssuer {public:
   group->close();load.reset();owner->close();assert(!session.fence_held()&&native_calls==0); \
  } while(false)
 #include "story_native_wait_run_restore_test.cpp"
+#include <cstdint>
+#include <span>

@@ -3,6 +3,8 @@
 #include <cassert>
 #include <array>
 #include <stdexcept>
+#include <cstdint>
+#include <memory>
 using namespace ss;
 namespace {
 struct TestHold final : native_gate::Hold {

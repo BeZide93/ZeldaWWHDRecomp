@@ -5,6 +5,9 @@
 #include <cstring>
 #include <map>
 #include <vector>
+#include <cstdint>
+#include <span>
+#include <string_view>
 using namespace story_native_uo_bfres_extent;
 namespace {
 constexpr uint32_t Heap=0x20000000,Res=Heap+0x100,Base=Heap+0x200;

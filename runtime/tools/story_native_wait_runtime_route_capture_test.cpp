@@ -65,6 +65,10 @@ struct CameraFixture {
 #include "mods/story_native_wait_runtime_route_capture.h"
 #include "mods/story_native_event_image.h"
 #include "runtime.h"
+#include <array>
+#include <vector>
+#include <cstdint>
+#include <span>
 int main(){
  PoseFixture actor;CameraFixture cam;auto e=actor.expected;e.camera=cam.e.camera;e.identity.manager=0x1046F0B0+0x52C4;e.frames=30;e.actors[1]=e.actors[0];e.actors[1].address+=0x20000;e.actors[1].pid+=2;e.actors[1].token++;
  auto memory=actor.memory;memory.insert(cam.memory.begin(),cam.memory.end());

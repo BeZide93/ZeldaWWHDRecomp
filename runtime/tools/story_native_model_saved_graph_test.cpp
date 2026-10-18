@@ -3,6 +3,10 @@
 #include <cassert>
 #include <array>
 #include <algorithm>
+#include <vector>
+#include <cstdint>
+#include <span>
+#include <utility>
 // Standalone primitive issuer fixture ONLY. This target never links the real
 // runtime Context, ticket, dispatch, lease or native invocation machinery.
 namespace story_native_wait_runtime_model_graph {

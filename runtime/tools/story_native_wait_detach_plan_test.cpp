@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: MPL-2.0
 #include "mods/story_native_wait_detach_plan.h"
 #include <cassert>
+#include <array>
+#include <cstdint>
+#include <span>
 using namespace story_native_wait_detach_plan;
 using story_native_event_observation::Camera;
 using story_native_event_lease::Identity;

@@ -3,6 +3,11 @@
 #include "mods/story_world_manifest.h"
 #include <cassert>
 #include <limits>
+#include <algorithm>
+#include <string>
+#include <array>
+#include <vector>
+#include <cstdint>
 namespace N=story_native_scene_manifest;
 namespace C=story_native_scene_compile;
 static mods::json::Value manifest(){return mods::json::parse(R"({"actors":[{"id":"npc_a","actor":"resident","stage":"sea","room":11,"position":{"x":250,"y":1040,"z":-201500},"parameters":{"resident":"uo2"}},{"id":"npc_b","actor":"resident","stage":"sea","room":11,"position":{"x":260,"y":1040,"z":-201500},"parameters":{"resident":"uo2"}}],"scenes":[{"id":"native_intro","steps":[{"type":"wait","frames":30},{"type":"end"}],"native":{"type":"turn_camera","actors":[{"id":"npc_a","turn_to":{"x":400,"y":1040,"z":-201500}},{"id":"npc_b","turn_to":{"x":100,"y":1040,"z":-201500}}],"wait_ticks":30,"camera":{"hold_ticks":30,"move_ticks":120,"start_eye":{"x":-500,"y":1350,"z":-201100},"start_target":{"x":250,"y":1100,"z":-201500},"end_eye":{"x":1000,"y":1350,"z":-201100},"end_target":{"x":250,"y":1100,"z":-201500},"fovy":45},"timekeeper_ticks":300,"watchdog_ticks":600}}]})");}

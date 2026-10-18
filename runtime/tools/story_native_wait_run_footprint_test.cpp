@@ -4,6 +4,10 @@
 #include <cassert>
 #include <map>
 #include <type_traits>
+#include <algorithm>
+#include <vector>
+#include <cstdint>
+#include <span>
 using namespace story_native_wait_run_footprint;
 namespace A=story_native_event_arena;
 namespace RC=story_native_wait_runtime_controller;

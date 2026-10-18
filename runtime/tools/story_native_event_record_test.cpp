@@ -2,6 +2,7 @@
 #include "mods/story_native_event_record.h"
 #include <cassert>
 #include <vector>
+#include <cstdint>
 namespace R=story_native_event_record;
 namespace O=story_native_event_observation;
 namespace L=story_native_event_lease;

@@ -5,6 +5,11 @@
 #include "mods/story_native_scene_activation.h"
 #include "mods/story_native_scene_completion.h"
 #include <atomic>
+#include <string>
+#include <vector>
+#include <cstdint>
+#include <utility>
+#include <memory>
 // Synthetic issuers ONLY for the isolated value/one-use contract. Actual
 // production issuers are runtime Context and the runtime activation frontend.
 namespace story_native_wait_runtime {class NativeScenePlaybackIssuer {public:static auto activation(std::shared_ptr<const R::DeclaredRequest>d){return std::shared_ptr<const story_native_scene_playback::Activation>(new story_native_scene_playback::Activation(std::move(d)));}};}

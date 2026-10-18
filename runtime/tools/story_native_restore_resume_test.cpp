@@ -4,6 +4,13 @@
 #include "runtime.h"
 #include <cassert>
 #include <thread>
+#include <algorithm>
+#include <optional>
+#include <cstdint>
+#include <span>
+#include <utility>
+#include <functional>
+#include <memory>
 // Standalone primitive scheduler and source-issuer fixtures only. This target
 // does not link savestate/interp, runtime Context, native routes or admission.
 namespace {thread_local Cpu*actual=nullptr;thread_local uint32_t guest=1;bool frozen=false,route_current=true;unsigned origin_fault=0;uint64_t freeze_epoch=0;

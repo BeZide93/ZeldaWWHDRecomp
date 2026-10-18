@@ -3,6 +3,7 @@
 #include "../src/mods/story_native_event_observation.h"
 #include <cassert>
 #include <stdexcept>
+#include <cstdint>
 using namespace story_native_manager_terminal;
 namespace {
 struct Fixture {

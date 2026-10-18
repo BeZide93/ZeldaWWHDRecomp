@@ -3,6 +3,12 @@
 #include "mods/story_native_scene_activation.h"
 #define STORY_NATIVE_WAIT_READINESS_FIXTURE_ONLY 1
 #include "story_native_wait_readiness_test.cpp"
+#include <string>
+#include <cstdint>
+#include <span>
+#include <utility>
+#include <cstring>
+#include <memory>
 namespace guestmods {class NativeSceneRequestIssuer {public:template<class F>static void run(F f){story_native_scene_request::StartupWindow window;f();}};}
 // Isolated activation issuer tests the Readiness source handshake. Actual
 // StoryScenes native_owner routing is covered by the queue contract.

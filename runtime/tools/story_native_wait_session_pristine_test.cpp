@@ -8,6 +8,11 @@
 namespace threads {class NativeQuiescenceIssuer{public:static QuiescenceWitness witness(Cpu*c,bool&live){return QuiescenceWitness([c,&live](const Cpu*x){return live&&c==x;});}};}
 #ifdef STORY_NATIVE_PRISTINE_STAGE_TEST
 #include "mods/story_native_wait_pristine_snapshot.h"
+#include <vector>
+#include <cstdint>
+#include <span>
+#include <utility>
+#include <memory>
 namespace PS=story_native_wait_pristine_snapshot;namespace PO=story_native_stage_owner_observer;
 namespace {
 PO::Candidate pristine_stage(){PO::Candidate c;c.info=0x60810000;c.archive_wrapper=0x60811000;c.archive_holder=0x60812000;c.archive_resource=0x60818000;c.archive_base=0x6081F000;c.archive_bytes=0x3000;c.outer_base=0x60820000;c.outer_bytes=0x1000;c.resource=0x60820240;c.resource_bytes=0x80;c.entry=0x60820118;c.archive_key=0x1004DF68;c.resource_key=0x1004DF70;c.request_heap=c.pack_heap=0x60830000;c.data_heap=0x60831000;c.data_heap_parent=0x60832000;c.stage_name[0]='s';return c;}

@@ -36,4 +36,10 @@ template<class F,class S,class H>void after(F&f,S&s,Cpu&cpu,H&hold){
 #define STORY_NATIVE_SESSION_IDLE_TEST_HOOK(f,s,c,h) do {after(f,s,c,h);h.reset();unmap_arena(guest);return;} while(false)
 #define STORY_NATIVE_WAIT_TERMINAL_FIXTURE_ONLY
 #include "story_native_wait_controller_terminal_test.cpp"
+#include <algorithm>
+#include <vector>
+#include <optional>
+#include <cstdint>
+#include <utility>
+#include <memory>
 int main(){(void)covered;terminal_run(0);}

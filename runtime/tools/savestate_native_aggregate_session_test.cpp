@@ -14,6 +14,12 @@
 #include "mods/story_native_wait_save_gate.h"
 #include "savestate_native_aggregate.h"
 #include "state_memory.h"
+#include <string>
+#include <array>
+#include <vector>
+#include <cstdint>
+#include <cstring>
+#include <memory>
 namespace mem {
 uint32_t runtime_alloc(uint32_t bytes,uint32_t align){assert(bytes==story_native_event_arena::kBytes&&align==16);const uint32_t base=arena_at+uint32_t(allocation_calls++)*0x10000;current_fixture->memory[base].assign(bytes,0);allocations.push_back({base,bytes,123});return base;}
 uint32_t runtime_top(){return allocations.empty()?arena_at:allocations.back().addr+allocations.back().size;}

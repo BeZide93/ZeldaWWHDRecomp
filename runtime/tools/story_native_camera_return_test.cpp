@@ -4,6 +4,7 @@
 #include "guest_addr.h"
 #include <cassert>
 #include <stdexcept>
+#include <cstdint>
 using namespace story_native_camera_return;
 namespace {
 void put(Camera&c,uint32_t v){for(unsigned n=0;n<4;++n)c.event_data[12+n]=uint8_t(v>>(24-8*n));}

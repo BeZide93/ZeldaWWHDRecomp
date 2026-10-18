@@ -4,6 +4,8 @@
 #include <cassert>
 #include <cstring>
 #include <vector>
+#include <cstdint>
+#include <span>
 using namespace story_native_bfres_extent;
 namespace {
 constexpr uint32_t Base = 0x60800000;

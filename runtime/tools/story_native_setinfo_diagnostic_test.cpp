@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <string>
 #include <vector>
+#include <cstdint>
 
 namespace {
 std::vector<std::string> logs;

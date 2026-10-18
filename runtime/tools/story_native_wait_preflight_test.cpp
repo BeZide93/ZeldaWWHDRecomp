@@ -2,6 +2,9 @@
 #include "mods/story_native_wait_preflight.h"
 #include <cassert>
 #include <algorithm>
+#include <array>
+#include <vector>
+#include <cstdint>
 
 namespace P=story_native_wait_preflight;
 namespace A=story_native_event_arena;

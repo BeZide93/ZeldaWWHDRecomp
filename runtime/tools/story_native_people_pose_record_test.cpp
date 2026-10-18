@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: MPL-2.0
 #include "mods/story_native_people_pose_record.h"
 #include <cassert>
+#include <vector>
+#include <cstdint>
+#include <span>
 namespace R=story_native_people_pose_record;
 using story_native_event_observation::Expected;
 static void put(auto&b,size_t p,uint32_t v){for(unsigned n=0;n<4;++n)b[p+n]=uint8_t(v>>(24-n*8));}

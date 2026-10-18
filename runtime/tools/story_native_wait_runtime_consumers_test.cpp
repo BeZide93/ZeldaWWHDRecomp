@@ -61,6 +61,9 @@ struct CameraFixture {
 
 
 #include "mods/story_native_wait_runtime_consumers.h"
+#include <vector>
+#include <cstdint>
+#include <span>
 int main(){
  PoseFixture a,b;CameraFixture cam;
  auto e=a.expected;e.camera=cam.e.camera;

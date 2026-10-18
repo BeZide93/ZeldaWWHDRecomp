@@ -2,6 +2,7 @@
 #include "mods/story_native_event_observation.h"
 #include "mods/story_native_event_image.h"
 #include <cassert>
+#include <cstdint>
 using namespace story_native_event_observation;
 static void put(auto&b,size_t p,uint32_t v){for(unsigned n=0;n<4;++n)b[p+n]=uint8_t(v>>(24-8*n));}
 int main(){

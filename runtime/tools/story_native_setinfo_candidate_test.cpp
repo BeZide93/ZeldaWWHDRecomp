@@ -3,6 +3,11 @@
 #include <cassert>
 #include <cstring>
 #include <vector>
+#include <cstdlib>
+#include <string>
+#include <cstdint>
+#include <span>
+#include <utility>
 using namespace story_native_setinfo_candidate;
 namespace {
 constexpr uint32_t Ctrl=0x50000000,Args=0x52000000,Mgr=0x53000000;

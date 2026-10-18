@@ -2,6 +2,8 @@
 #include "mods/story_world_manifest.h"
 #include <cassert>
 #include <limits>
+#include <string>
+#include <vector>
 namespace N=story_native_scene_manifest;
 using mods::json::Value;
 using namespace story_notebook;

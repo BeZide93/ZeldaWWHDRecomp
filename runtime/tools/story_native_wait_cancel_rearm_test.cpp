@@ -20,6 +20,12 @@ template<class...A>static void rearm_after(A&...);
 #define STORY_NATIVE_CANCEL_REARM_AFTER_OUTER(...) rearm_after(__VA_ARGS__)
 #define STORY_NATIVE_CANCEL_REARM_FIXTURE_ONLY
 #include "story_native_wait_controller_cancel_test.cpp"
+#include <algorithm>
+#include <array>
+#include <cstdint>
+#include <span>
+#include <utility>
+#include <cstdio>
 
 // Synthetic trusted frontend adapter exposes only the existing friend's private
 // read-only query. Cancellation, origin issuance and lifetime checks stay real;
@@ -75,7 +81,7 @@ template<class...A>static void rearm_after(A&...args){
  assert(session.inspect(&cpu));hold=session.try_fence();assert(hold);e=*session.expected();assert(e.identity.generation!=original.identity.generation);
  for(auto&p:poses)p.identity.generation=e.identity.generation;
  assert(session.stage_image(poses));D::Tracker next_depth(e,{{1,1,true},{2,2,true},{3,3,true},true});
- auto next_sources=sources;next_sources.validation.session=[&](story_native_event_memory::Scope&s){const auto d=next_depth.snapshot();s={};s.identity=e.identity;s.link=link;s.link_pid=55;s.exclusive=s.bindings_verified=true;s.fenced=d.state==D::State::Draining;s.logic_step=live_step;s.serial=d.serial;return true;};
+ auto next_sources=sources;next_sources.validation.session=[&](story_native_event_memory::Scope&s){const auto d=next_depth.snapshot();s={};s.identity=e.identity;s.link=link_actor;s.link_pid=55;s.exclusive=s.bindings_verified=true;s.fenced=d.state==D::State::Draining;s.logic_step=live_step;s.serial=d.serial;return true;};
  next_sources.arm_clock=[](const auto&published){return published.valid();};auto next_config=cfg;next_config.collector.clock=[&](story_native_event_collect::Clock&out){out={e.identity,live_step,next_depth.snapshot().serial,0};return true;};
  const auto before=calls;C::Controller next(session,next_depth,e,layout,{},next_config,next_sources);assert(next.start(&cpu)==C::State::Started&&calls==before+7&&claim);
 }

@@ -3,6 +3,9 @@
 #include "savestate_native_gate.h"
 #include <cassert>
 #include <thread>
+#include <array>
+#include <vector>
+#include <cstdint>
 namespace mem {uint32_t runtime_top(){return 0x68000000;}}
 namespace threads {class NativeQuiescenceIssuer {public:static QuiescenceWitness witness(Cpu*c,bool&live){return QuiescenceWitness([c,&live](const Cpu*x){return live&&c==x;});}};}
 namespace O=story_native_stage_owner_observer;

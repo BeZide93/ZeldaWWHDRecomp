@@ -3,6 +3,9 @@
 #include "mods/story_scenes.h"
 #include <cassert>
 #include <stdexcept>
+#include <string>
+#include <vector>
+#include <optional>
 namespace C=story_native_scene_catalog;namespace R=story_native_scene_request;namespace M=story_notebook;
 static std::vector<story_scenes::NativeSceneId>ids;
 static M::ManifestScene scene;static unsigned enumerations=0,actor_reads=0;static bool change_ids=false,throw_ids=false,bad_actor=false;

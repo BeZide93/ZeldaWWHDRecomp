@@ -3,6 +3,9 @@
 #include <algorithm>
 #include <cassert>
 #include <map>
+#include <vector>
+#include <cstdint>
+#include <span>
 using namespace story_native_camera_capture;
 static void put(std::span<uint8_t>b,unsigned p,uint32_t v){for(unsigned n=0;n<4;++n)b[p+n]=uint8_t(v>>(24-8*n));}
 struct Fixture {

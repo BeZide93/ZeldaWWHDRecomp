@@ -6,6 +6,10 @@
 #include "mods/story_native_scene_run_owner.h"
 #include <thread>
 #include <future>
+#include <string>
+#include <vector>
+#include <utility>
+#include <memory>
 namespace P=story_native_scene_playback;
 // Isolated host-protocol issuers only; no actual native resume is exercised.
 namespace story_native_wait_runtime {class NativeScenePlaybackIssuer {public:

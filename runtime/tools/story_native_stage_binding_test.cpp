@@ -2,6 +2,10 @@
 #include "mods/story_native_stage_binding.h"
 #include <cassert>
 #include <thread>
+#include <optional>
+#include <utility>
+#include <functional>
+#include <memory>
 // Isolated physical scheduler/ticket and runtime validator issuers only. No
 // production runtime Context, native routes or admission consumer is linked.
 namespace {const Cpu*const cpu=reinterpret_cast<const Cpu*>(uintptr_t(0x1000));bool parked=true,ticket_live=true;std::thread::id host=std::this_thread::get_id();}

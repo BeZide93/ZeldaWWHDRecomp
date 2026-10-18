@@ -6,6 +6,10 @@
 #include <cassert>
 #include <cstring>
 #include <stdexcept>
+#include <algorithm>
+#include <array>
+#include <cstdint>
+#include <span>
 namespace R=story_native_people_cancel_refresh;
 struct Fixture {
  R::Expected e;std::array<R::P::Snapshot,2>poses{};std::array<R::ModelIdentity,2>models{};std::array<R::Transform,2>transforms{};R::State live;

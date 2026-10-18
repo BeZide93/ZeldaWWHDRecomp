@@ -6,6 +6,8 @@
 #include <cassert>
 #include <cstring>
 #include <stdexcept>
+#include <algorithm>
+#include <cstdint>
 namespace I=story_native_event_invoke;
 int main(){
  Cpu c{};c.r[1]=0x60001000;c.lr=42;c.ctr=43;c.pc=44;c.f[3].ps0=1.25;c.f[3].ps1=2.5;c.res_addr=123;c.mod_skip=9;c.thread=reinterpret_cast<void*>(0x1234);Cpu before=c;

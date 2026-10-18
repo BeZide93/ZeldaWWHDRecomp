@@ -11,6 +11,19 @@ void state_loaded() {}
 }
 #ifndef _WIN32
 #include <sys/mman.h>
+#include <algorithm>
+#include <cstdlib>
+#include <string>
+#include <array>
+#include <optional>
+#include <cstdint>
+#include <span>
+#include <utility>
+#include <functional>
+#include <cstring>
+#include <string_view>
+#include <memory>
+#include <filesystem>
 #endif
 
 namespace story_native_stage_owner_observer {story_native_stage_owner::Tracker&tracker()noexcept{static story_native_stage_owner::Tracker t;return t;}}

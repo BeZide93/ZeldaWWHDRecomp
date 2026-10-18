@@ -9,6 +9,9 @@
 #include <thread>
 #include <atomic>
 #include <type_traits>
+#include <cstdint>
+#include <utility>
+#include <functional>
 namespace S=story_native_refresh_dispatch;
 namespace story_native_refresh_dispatch {struct Fixture {static Guard make(std::function<bool()>v){return Guard(std::move(v));}};}
 void native(Cpu*){} void other(Cpu*){}

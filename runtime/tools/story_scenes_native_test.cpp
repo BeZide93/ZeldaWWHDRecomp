@@ -18,6 +18,12 @@
 #include <windows.h>
 #else
 #include <sys/mman.h>
+#include <cstdlib>
+#include <string>
+#include <optional>
+#include <cstdint>
+#include <utility>
+#include <string_view>
 #endif
 void log_msg(const char*,...){}
 namespace {

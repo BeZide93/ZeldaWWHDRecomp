@@ -8,6 +8,16 @@
 #include "mods/story_native_scene_retire.h"
 #include "mods/story_native_restore_resume.h"
 #include <map>
+#include <cstdlib>
+#include <string>
+#include <array>
+#include <vector>
+#include <optional>
+#include <cstdint>
+#include <utility>
+#include <functional>
+#include <cstring>
+#include <memory>
 namespace P=story_native_scene_playback;namespace R=story_native_scene_request;using S=story_scenes::StopReason;
 // Actual StoryScenes FIFO/control adapter with a synthetic backend protocol.
 // The private token issuers below prove routing/value behavior only; genuine

@@ -2,6 +2,9 @@
 #include "mods/story_native_turn_camera_image.h"
 #include <cassert>
 #include <limits>
+#include <string>
+#include <vector>
+#include <cstdint>
 namespace T=story_native_turn_camera_image;
 uint32_t word(const auto&b,size_t p){return uint32_t(b[p])<<24|uint32_t(b[p+1])<<16|uint32_t(b[p+2])<<8|b[p+3];}
 void put(auto&b,size_t p,uint32_t x){for(unsigned i=0;i<4;++i)b[p+i]=uint8_t(x>>(24-i*8));}

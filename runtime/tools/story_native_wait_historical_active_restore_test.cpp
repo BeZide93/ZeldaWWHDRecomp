@@ -76,3 +76,8 @@ static std::function<void(Cpu*,const story_native_restore_resume::Boundary&)>his
  historical_observer={};actual_context=context.get();restored_contexts.clear();restored_depths.clear(); \
  }
 #include "story_native_wait_run_restore_test.cpp"
+#include <array>
+#include <vector>
+#include <cstdint>
+#include <utility>
+#include <memory>

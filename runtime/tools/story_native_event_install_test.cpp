@@ -7,6 +7,11 @@
 #include <cstring>
 #include <stdexcept>
 #include <vector>
+#include <algorithm>
+#include <array>
+#include <cstdint>
+#include <span>
+#include <utility>
 using namespace story_native_event_install;
 static void put(auto&b,size_t p,uint32_t v){for(unsigned n=0;n<4;++n)b[p+n]=uint8_t(v>>(24-8*n));}
 static uint32_t word(std::span<const uint8_t>b){return uint32_t(b[0])<<24|uint32_t(b[1])<<16|uint32_t(b[2])<<8|b[3];}

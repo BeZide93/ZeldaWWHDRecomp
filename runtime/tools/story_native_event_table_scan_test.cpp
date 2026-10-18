@@ -4,6 +4,9 @@
 #include <map>
 #include <vector>
 #include <stdexcept>
+#include <algorithm>
+#include <cstdint>
+#include <span>
 using namespace story_native_event_table_scan;
 constexpr uint32_t Play=0x1046F0B0,Manager=Play+0x52C4,Base=0x20000000;
 struct Fixture {

@@ -122,3 +122,11 @@ void empty_flow(unsigned fault,Fixture&f,story_native_wait_session::Session&sess
  if(fault==7)active_marker_flow(session,cpu,context,depth,[&]{return SavedMemory(f,mapped,arena);},[&](auto&saved){saved.restore(write,mapped,arena);},[&]{return ss::NativeRestorePipelineIssuer::open(&cpu);},native_calls); \
  else empty_flow(fault,f,session,cpu,context,depth,*pristine_checkpoint,pristine_objects,pristine_memory,[&]{pristine_memory.restore(write,mapped,arena);},native_calls)
 #include "story_native_wait_run_restore_test.cpp"
+#include <algorithm>
+#include <string>
+#include <array>
+#include <optional>
+#include <cstdint>
+#include <utility>
+#include <functional>
+#include <memory>

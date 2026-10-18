@@ -5,6 +5,11 @@
 #include <cassert>
 #include <limits>
 #include <type_traits>
+#include <string>
+#include <array>
+#include <vector>
+#include <cstdint>
+#include <span>
 using namespace story_native_event_program;
 int main(){
  static_assert(!std::is_default_constructible_v<Program>);

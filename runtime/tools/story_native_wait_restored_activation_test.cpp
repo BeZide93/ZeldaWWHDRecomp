@@ -37,3 +37,7 @@ void final_adoption_case(story_native_wait_runtime_controller::Context&restored,
 #define STORY_NATIVE_RESTORE_CASE_COUNT 21
 #define STORY_NATIVE_FINAL_ADOPT_OBSERVER(...) final_adoption_case(__VA_ARGS__)
 #include "story_native_wait_restored_adoption_test.cpp"
+#include <string>
+#include <optional>
+#include <utility>
+#include <memory>

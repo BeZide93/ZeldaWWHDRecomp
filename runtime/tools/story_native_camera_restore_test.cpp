@@ -2,6 +2,9 @@
 #include "mods/story_native_camera_restore.h"
 #include <algorithm>
 #include <cassert>
+#include <array>
+#include <cstdint>
+#include <span>
 using namespace story_native_camera_restore;
 static void put(std::span<uint8_t>b,unsigned o,uint32_t v){for(unsigned n=0;n<4;++n)b[o+n]=uint8_t(v>>(24-8*n));}
 static uint32_t word(std::span<const uint8_t>b,unsigned o){return uint32_t(b[o])<<24|uint32_t(b[o+1])<<16|uint32_t(b[o+2])<<8|b[o+3];}

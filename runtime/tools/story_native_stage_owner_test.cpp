@@ -9,6 +9,8 @@
 #ifndef _WIN32
 #include <unistd.h>
 #include <sys/wait.h>
+#include <optional>
+#include <utility>
 #endif
 using namespace story_native_stage_owner;
 namespace {

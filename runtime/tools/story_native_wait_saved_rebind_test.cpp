@@ -33,3 +33,6 @@ void saved_rebind_case(Cpu*c,const story_native_restore_resume::Boundary&b,Sessi
 #define STORY_NATIVE_RUN_REAL_MODEL_TURN
 #define STORY_NATIVE_REBIND_OBSERVER(...) saved_rebind_case(__VA_ARGS__)
 #include "story_native_wait_run_restore_test.cpp"
+#include <string>
+#include <cstdint>
+#include <cstdio>

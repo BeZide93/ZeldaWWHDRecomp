@@ -4,6 +4,15 @@
 #include "mods/story_native_wait_controller.h"
 #include <iostream>
 #include "mods/story_native_wait_runtime_consumers.h"
+#include <algorithm>
+#include <array>
+#include <vector>
+#include <cstdint>
+#include <span>
+#include <utility>
+#include <functional>
+#include <cstring>
+#include <memory>
 namespace C=story_native_wait_controller;
 static void terminal_run(unsigned mode){
  const bool before_return=mode==1;
@@ -22,7 +31,7 @@ static void terminal_run(unsigned mode){
  auto w=[&](uint32_t a,uint32_t v){std::array<uint8_t,4>b{};for(unsigned n=0;n<4;++n)b[n]=uint8_t(v>>(24-8*n));assert(write(a,b));};
  std::unique_ptr<story_native_wait_runtime_consumers::Adapter> consumers;story_native_wait_consumer_write::Writer writer;unsigned consumer_writes=0;
  C::Sources sources;sources.validation.read=read;sources.validation.actor=[&](const Actor&a,const auto&i){return i==e.identity&&a.pid==e.actors[(a.address-e.actors[0].address)/0x1000].pid;};sources.validation.allocation=[](const auto&,const auto&){return true;};
- sources.validation.session=[&](story_native_event_memory::Scope&s){auto d=depth.snapshot();s={};s.identity=e.identity;s.link=link;s.link_pid=55;s.exclusive=s.bindings_verified=true;s.fenced=d.state==D::State::Draining;s.logic_step=100;s.serial=d.serial;return true;};
+ sources.validation.session=[&](story_native_event_memory::Scope&s){auto d=depth.snapshot();s={};s.identity=e.identity;s.link=link_actor;s.link_pid=55;s.exclusive=s.bindings_verified=true;s.fenced=d.state==D::State::Draining;s.logic_step=100;s.serial=d.serial;return true;};
  sources.camera_tables={0x10049348,0x10049350,0x10044878,0x1004487C};sources.write=write;unsigned calls=0,claims=0,quarantines=0,releases=0;bool claim=false;
  sources.claim=[&](const auto&,const auto&,const auto&){claim=true;++claims;return true;};sources.retained=[&](const auto&){return claim;};sources.quarantine=[&]{++quarantines;};sources.detach=[&](Cpu*,const auto&expected){
   assert(expected==e&&session.journal()->phase==story_native_wait_journal::Phase::Detaching);
@@ -40,7 +49,7 @@ static void terminal_run(unsigned mode){
  case 0x02544534:w(e.identity.image+0xE4,1);return 1u;
  default:assert(false);return 0u;}};
  auto native=sources.call;sources.call=[&,native](Cpu*c,uint32_t fn,std::initializer_list<uint32_t>regs){auto v=native(c,fn,regs);c->r[10]=0xBAD;c->lr=44;return v;};
- C::B::Config cfg;cfg.collector=f.config;cfg.collector.stamp=layout.wait.stamp.address;cfg.memory={layout.wait.stamp.address,link,55,{layout.wait.record.address,layout.wait.record.bytes}};
+ C::B::Config cfg;cfg.collector=f.config;cfg.collector.stamp=layout.wait.stamp.address;cfg.memory={layout.wait.stamp.address,link_actor,55,{layout.wait.record.address,layout.wait.record.bytes}};
  sources.release=[&](const auto&x){assert(x==e&&session.journal()->phase==story_native_wait_journal::Phase::Unpublished);claim=false;++releases;return true;};
  auto controller_owner=std::make_unique<C::Controller>(session,depth,e,layout,C::Stage{},cfg,sources);auto&controller=*controller_owner;
  story_native_wait_runtime_consumers::Sources cs;cs.read=read;cs.retained=[&](const auto&x){return claim&&controller.retained(x);};cs.resident=sources.validation.actor;cs.quarantine=[&]{++quarantines;};
@@ -97,7 +106,7 @@ static void terminal_run(unsigned mode){
    for(unsigned n=0;n<2;++n){poses[n].identity.generation=e.identity.generation;poses[n].cut=e.actors[n].cut;}
    assert(session.stage_image()&&session.stage_poses(poses));
    D::Tracker next_depth(e,{{1,1,true},{2,2,true},{3,3,true},true});
-   auto next_sources=sources;next_sources.validation.session=[&](story_native_event_memory::Scope&out){auto d=next_depth.snapshot();out={};out.identity=e.identity;out.link=link;out.link_pid=55;out.exclusive=out.bindings_verified=true;out.fenced=d.state==D::State::Draining;out.logic_step=101;out.serial=d.serial;return true;};
+   auto next_sources=sources;next_sources.validation.session=[&](story_native_event_memory::Scope&out){auto d=next_depth.snapshot();out={};out.identity=e.identity;out.link=link_actor;out.link_pid=55;out.exclusive=out.bindings_verified=true;out.fenced=d.state==D::State::Draining;out.logic_step=101;out.serial=d.serial;return true;};
    const auto old_calls=calls;C::Controller next(session,next_depth,e,layout,{},cfg,next_sources);
    assert(!next.take_rearm_certificate()&&next.start(&cpu)==C::State::Started&&calls==old_calls+7&&claims==2);
    assert(session.journal()->phase==story_native_wait_journal::Phase::Published&&!session.unexposed());

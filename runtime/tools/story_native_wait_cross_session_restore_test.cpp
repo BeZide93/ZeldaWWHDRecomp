@@ -51,3 +51,7 @@ static std::function<void(Cpu*,const story_native_restore_resume::Boundary&)>cro
  {auto h=b_session.try_fence();auto parked=threads::current_quiescence(&cpu);assert(h&&parked);b_arena=b_session.arena();assert(b_arena.allocation.address==0x60050000&&b_arena.allocation.address!=arena.allocation.address);auto capture=b_session.begin_pristine_capture(&cpu,*parked);assert(capture);b_pristine=b_session.commit_pristine_capture(std::move(*capture),&cpu,*parked);assert(b_pristine);}
 #define STORY_NATIVE_CROSS_SESSION_FLOW_INCLUDE "story_native_wait_cross_session_restore_flow.inc"
 #include "story_native_wait_run_restore_test.cpp"
+#include <optional>
+#include <cstdint>
+#include <utility>
+#include <memory>

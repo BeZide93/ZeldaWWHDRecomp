@@ -58,6 +58,8 @@ void writer_cases(F&f,T&t,const Outer&outer,const Q&q,const Closed&closed,Source
 #define STORY_CANCEL_WRITER_TEST_HOOK(...) writer_cases(__VA_ARGS__)
 #define main cancellation_observation_fixture_main
 #include "story_native_cancel_observation_test.cpp"
+#include <cstdint>
+#include <span>
 #undef main
 static threads::NativeQuiescence read_only_quiescence(bool&live){return threads::NativeQuiescenceIssuer::test(live,true);}
 int main(){return cancellation_observation_fixture_main();}

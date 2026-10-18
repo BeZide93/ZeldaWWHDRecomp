@@ -5,6 +5,8 @@
 #include "savestate_native_gate.h"
 #include <map>
 #include <algorithm>
+#include <vector>
+#include <cstdint>
 namespace mem {uint32_t runtime_top(){return 0x68000000;}}
 struct SavedFixture {
  std::map<uint32_t,std::vector<uint8_t>> memory;

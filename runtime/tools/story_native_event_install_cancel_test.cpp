@@ -85,6 +85,9 @@ template<class F>struct InstallCancelDriver {
 #define STORY_CANCEL_AFTER_RELEASED(f,t,o,c,d,r,s) install_driver.released(t,o,c,d,r,s)
 #define main observation_cancel_fixture_main
 #include "story_native_cancel_observation_test.cpp"
+#include <algorithm>
+#include <cstdint>
+#include <span>
 #undef main
 static std::shared_ptr<const threads::NativeQuiescence> test_parking(bool&live){return std::make_shared<threads::NativeQuiescence>(threads::NativeQuiescenceIssuer::test(live));}
 int main(){for(cancel_case=0;cancel_case<=10;++cancel_case)assert(observation_cancel_fixture_main()==0);assert(completed_cases==11);}

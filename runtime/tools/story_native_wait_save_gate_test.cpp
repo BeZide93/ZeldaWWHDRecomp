@@ -7,6 +7,8 @@
 #include <algorithm>
 #include <array>
 #include <cassert>
+#include <vector>
+#include <cstdint>
 
 namespace A = story_native_event_arena;
 namespace J = story_native_wait_journal;

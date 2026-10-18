@@ -4,6 +4,8 @@
 #include "runtime.h"
 #include <cassert>
 #include <thread>
+#include <string>
+#include <cstdint>
 namespace story_actors {bool resident_event_identity(const std::string&,const std::string&,uint32_t,uint32_t,ResidentEventIdentity&){return false;}}
 namespace R=story_native_wait_owned_routes;
 namespace D=story_native_event_depth;

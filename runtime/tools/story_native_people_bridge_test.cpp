@@ -20,6 +20,12 @@ static std::array<A::Reference,2> refs(){return {{{"test","first"},{"test","seco
 #include "mods/story_native_people_bridge.h"
 #include <thread>
 #include <cstdio>
+#include <algorithm>
+#include <string>
+#include <array>
+#include <vector>
+#include <cstdint>
+#include <span>
 namespace P=story_native_people_bridge;
 namespace D=story_native_event_depth;
 static uint32_t bridge_word(std::span<const uint8_t>b,unsigned p){return uint32_t(b[p])<<24|uint32_t(b[p+1])<<16|uint32_t(b[p+2])<<8|b[p+3];}

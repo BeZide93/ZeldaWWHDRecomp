@@ -21,6 +21,9 @@ struct Fixture {
 #include "mods/story_native_wait_consumer_write.h"
 #include <algorithm>
 #include <stdexcept>
+#include <array>
+#include <cstdint>
+#include <span>
 namespace W=story_native_wait_consumer_write;
 static uint32_t get(std::span<const uint8_t>b,unsigned p){return uint32_t(b[p])<<24|uint32_t(b[p+1])<<16|uint32_t(b[p+2])<<8|b[p+3];}
 struct Memory {

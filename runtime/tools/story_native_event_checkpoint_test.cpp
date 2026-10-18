@@ -3,6 +3,10 @@
 #include "mods/story_native_event_record.h"
 #include "mods/story_native_event_image.h"
 #include <cassert>
+#include <array>
+#include <vector>
+#include <cstdint>
+#include <span>
 namespace C=story_native_event_checkpoint;namespace D=story_native_event_depth;namespace L=story_native_event_lease;
 void put(auto&b,size_t p,uint32_t v){for(unsigned i=0;i<4;++i)b[p+i]=uint8_t(v>>(24-i*8));}
 int main(){

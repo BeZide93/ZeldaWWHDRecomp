@@ -7,6 +7,7 @@
 #include <mutex>
 #include <stdexcept>
 #include <vector>
+#include <cstdint>
 using namespace story_native_stage_owner_hooks;
 namespace {
 std::vector<int> events;

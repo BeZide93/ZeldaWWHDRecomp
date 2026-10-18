@@ -27,6 +27,8 @@
 #include <windows.h>
 #else
 #include <sys/mman.h>
+#include <optional>
+#include <cstdint>
 #endif
 std::vector<std::string> native_trace_records;
 void log_msg(const char* format,...){if(std::strncmp(format,"[native_actor]",14)!=0)return;char line[1024];va_list args;va_start(args,format);std::vsnprintf(line,sizeof(line),format,args);va_end(args);native_trace_records.emplace_back(line);}

@@ -10,6 +10,12 @@
 #ifndef _WIN32
 #include <sys/wait.h>
 #include <unistd.h>
+#include <string>
+#include <array>
+#include <vector>
+#include <cstdint>
+#include <utility>
+#include <memory>
 #endif
 // Protocol-only stand-in. This target does not link the real Stage group and
 // cannot create resource, lease, restore or native admission authority.

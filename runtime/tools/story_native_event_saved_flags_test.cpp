@@ -6,6 +6,11 @@
 #include "mods/story_native_event_arena.h"
 #include <cassert>
 #include <limits>
+#include <algorithm>
+#include <string>
+#include <array>
+#include <vector>
+#include <cstdint>
 namespace T=story_native_turn_record;namespace L=story_native_event_lease;
 void put(auto&b,size_t p,uint32_t v){for(unsigned n=0;n<4;++n)b[p+n]=uint8_t(v>>(24-n*8));}
 int main(){T::Record v;auto&e=v.expected;e.identity={0x20000000,0x60000000,0xE60,1,2,3,4};e.stage_name={'s','e','a'};e.room_number=11;

@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: MPL-2.0
 #include "mods/story_native_event_arena.h"
 #include <cassert>
+#include <algorithm>
+#include <array>
+#include <vector>
+#include <cstdint>
 using namespace story_native_event_arena;
 int main(){
  auto l=make(0x6000F000);assert(valid(l)&&l.wait.image.bytes==0x520&&l.turn.image.bytes==0xE60&&l.wait.record.bytes==4096&&l.turn.record.bytes==16384);assert(!valid(make(0x68000000))&&!valid(make(0xFFFFFFF0))&&!valid(make(0x60000001)));

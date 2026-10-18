@@ -3,6 +3,12 @@
 #include "state_file_section.h"
 #include <cassert>
 #include <fstream>
+#include <algorithm>
+#include <string>
+#include <vector>
+#include <cstdint>
+#include <utility>
+#include <filesystem>
 namespace config {std::string game_dir="/nonexistent-synthetic-state-test";}
 void log_msg(const char*,...) {}
 namespace mem {std::vector<AllocRec> runtime_alloc_log(){return {{kRuntimeStart,32,0}};}}

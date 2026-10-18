@@ -5,6 +5,12 @@
 #undef main
 #include "mods/story_native_scene_playback.h"
 #include <limits>
+#include <string>
+#include <vector>
+#include <optional>
+#include <utility>
+#include <functional>
+#include <memory>
 namespace P=story_native_scene_playback;
 // Isolated value/protocol issuers only. This test asserts frontend behavior,
 // not native ownership; production Context alone verifies natural release.

@@ -5,6 +5,12 @@
 #include <map>
 #include <thread>
 #include "mods/story_native_cancel_dispatch_lifetime.h"
+#include <algorithm>
+#include <vector>
+#include <cstdint>
+#include <utility>
+#include <functional>
+#include <memory>
 namespace threads {class NativeQuiescenceIssuer {public:static NativeQuiescence make(std::function<void()>r){return NativeQuiescence([](const Cpu*){return true;},std::move(r));}};}
 namespace S=story_native_manager_cancel_dispatch;
 namespace story_native_manager_cancel_dispatch {struct Fixture{static Guard make(std::function<bool()>f){return Guard(std::move(f));}};}

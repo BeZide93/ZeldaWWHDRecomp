@@ -4,6 +4,11 @@
 #include <cassert>
 #include <thread>
 #include <stdexcept>
+#include <string>
+#include <array>
+#include <vector>
+#include <cstdint>
+#include <memory>
 namespace R=story_native_scene_request;
 namespace M=story_notebook;
 static M::ManifestScene definition;

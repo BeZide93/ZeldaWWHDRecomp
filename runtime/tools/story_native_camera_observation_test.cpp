@@ -2,6 +2,11 @@
 #include "mods/story_native_camera_observation.h"
 #include <cassert>
 #include <stdexcept>
+#include <algorithm>
+#include <string>
+#include <vector>
+#include <cstdint>
+#include <span>
 namespace O=story_native_camera_observation;
 void put(auto&b,size_t p,uint32_t x){for(unsigned i=0;i<4;++i)b[p+i]=uint8_t(x>>(24-i*8));}
 int main(){

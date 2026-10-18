@@ -6,6 +6,7 @@
 #include <memory>
 #include <stdexcept>
 #include <type_traits>
+#include <utility>
 namespace D=story_native_event_depth;
 namespace R=story_native_outer_return;
 // Standalone-only trusted issuer seam. Production defines this friend solely

@@ -7,6 +7,10 @@
 #include "../src/threads.cpp"
 #include <cassert>
 #include <future>
+#include <string>
+#include <cstdint>
+#include <utility>
+#include <cstring>
 void log_msg(const char*,...){}
 namespace mem {std::string read_cstr(uint32_t){return "test";}}
 namespace rprof {uint64_t thread_cpu_ns(){return 0;}}

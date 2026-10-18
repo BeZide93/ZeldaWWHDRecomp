@@ -56,6 +56,13 @@ struct CameraFixture:Fixture {
 
 #include "mods/story_native_cancel_observation.h"
 #include "mods/story_native_cancel_pose_capture.h"
+#include <algorithm>
+#include <array>
+#include <vector>
+#include <cstdint>
+#include <span>
+#include <utility>
+#include <functional>
 namespace R=story_native_people_cancel_refresh;
 struct RefreshFixture {
  R::Expected e;std::array<R::P::Snapshot,2>poses{};std::array<R::ModelIdentity,2>models{};std::array<R::Transform,2>transforms{};R::State live;

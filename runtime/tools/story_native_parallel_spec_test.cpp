@@ -2,6 +2,8 @@
 #include "mods/story_native_parallel_spec.h"
 #include "mods/mod_json.h"
 #include <cassert>
+#include <string>
+#include <vector>
 using namespace story_native_parallel_spec;
 int main(){const std::string json=R"({"version":1,"clock":"native30","actors":[{"actor":"a","action":"turn_to_pos","position":{"x":100,"y":150,"z":100}},{"actor":"b","action":"turn_to_pos","position":{"x":-100,"y":150,"z":100}}],"camera":{"action":"fixed_to_unitrans","start_eye":{"x":0,"y":100,"z":200},"start_center":{"x":0,"y":30,"z":0},"end_eye":{"x":100,"y":100,"z":200},"end_center":{"x":100,"y":30,"z":0},"hold_ticks":30,"move_ticks":30,"fovy":60},"wait_ticks":30,"timekeeper_ticks":300,"watchdog_ticks":900,"fallback_scene":"backup"})";
  std::vector<ActorDeclaration>actors={{"mod","a","sea",11,1,true},{"mod","b","sea",11,2,true}};std::vector<SceneDeclaration>scenes={{"mod","backup",true}};Spec spec;std::string why;

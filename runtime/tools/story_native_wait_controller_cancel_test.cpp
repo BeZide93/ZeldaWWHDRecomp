@@ -12,6 +12,15 @@ void log_msg(const char*fmt,...){va_list args;va_start(args,fmt);std::vfprintf(s
 #include "mods/story_native_cancel_pose_capture.h"
 #include "mods/story_native_camera_capture.h"
 #include "mods/story_native_cancel_consumer_write.h"
+#include <algorithm>
+#include <array>
+#include <vector>
+#include <cstdint>
+#include <span>
+#include <utility>
+#include <functional>
+#include <cstring>
+#include <memory>
 // Synthetic scheduler/outer-return issuer primitives only. Actual production
 // issuers live exclusively in threads.cpp/guest_mods.cpp; this test exercises
 // real Controller/Session journal and genuine helper receipts, not a scheduler.
@@ -31,7 +40,7 @@ static void run(unsigned cancel_fault){
  auto write=[&](uint32_t a,std::span<const uint8_t>b){auto*p=ptr(a,b.size());if(!p)return false;std::copy(b.begin(),b.end(),p);return true;};
  auto w=[&](uint32_t a,uint32_t v){std::array<uint8_t,4>b{};for(unsigned n=0;n<4;++n)b[n]=uint8_t(v>>(24-8*n));assert(write(a,b));};
  bool control_restore_fault=false;bool source_fault=false;uint64_t live_step=100;C::Sources sources;sources.validation.read=read;sources.validation.actor=[&](const Actor&a,const auto&i){return i==e.identity&&a.pid==e.actors[(a.address-e.actors[0].address)/0x1000].pid;};sources.validation.allocation=[](const auto&,const auto&){return true;};
- sources.validation.session=[&](story_native_event_memory::Scope&s){if(source_fault)return false;auto d=depth.snapshot();s={};s.identity=e.identity;s.link=link;s.link_pid=55;s.exclusive=s.bindings_verified=true;s.fenced=d.state==D::State::Draining;s.logic_step=live_step;s.serial=d.serial;return true;};
+ sources.validation.session=[&](story_native_event_memory::Scope&s){if(source_fault)return false;auto d=depth.snapshot();s={};s.identity=e.identity;s.link=link_actor;s.link_pid=55;s.exclusive=s.bindings_verified=true;s.fenced=d.state==D::State::Draining;s.logic_step=live_step;s.serial=d.serial;return true;};
  sources.camera_tables={0x10049348,0x10049350,0x10044878,0x1004487C};sources.write=[&](uint32_t at,std::span<const uint8_t>bytes){if(at==selected.record.address&&fail==18){auto*p=ptr(at,bytes.size());assert(p);std::copy_n(bytes.begin(),19,p);return false;}const bool copied=write(at,bytes);if(control_restore_fault&&at==cpu.r[1]-0x40&&bytes.size()==0x40){if(cancel_fault==11)throw std::runtime_error("control frame restore throw");return false;}if(at==selected.record.address){if(fail==15)return false;if(fail==16)throw std::runtime_error("checkpoint false-after-copy");if(fail==17)++live_step;}return copied;};unsigned calls=0,claims=0,quarantines=0,arms=0;bool claim=false;
  sources.claim=[&](const auto&,const auto&,const auto&){claim=true;++claims;if(fail==9)throw std::runtime_error("claim callback");return fail!=10;};sources.retained=[&](const auto&){return claim&&(fail!=11||calls==0);};sources.quarantine=[&]{++quarantines;};sources.detach=[](Cpu*,const auto&){return false;};sources.stack=[](Cpu*,story_native_event_invoke::Config&c){c.stack={0x60030000,0x1000};return true;};
  sources.call=[&](Cpu*,uint32_t fn,std::initializer_list<uint32_t>regs){++calls;std::vector<uint32_t>a(regs);switch(fn){
@@ -44,7 +53,7 @@ static void run(unsigned cancel_fault){
  case 0x02544534:w(e.identity.image+0xE4,1);return 1u;
  default:assert(false);return 0u;}};
  auto native=sources.call;sources.call=[&,native](Cpu*c,uint32_t fn,std::initializer_list<uint32_t>regs){auto v=native(c,fn,regs);c->r[10]=0xBAD;c->lr=44;if(fail<=7&&fail&&calls==fail)throw std::runtime_error("synthetic after native mutation");return v;};if(fail==8)sources.detach={};
- C::B::Config cfg;cfg.collector=f.config;cfg.collector.stamp=selected.stamp.address;cfg.memory={selected.stamp.address,link,55,{selected.record.address,selected.record.bytes}};
+ C::B::Config cfg;cfg.collector=f.config;cfg.collector.stamp=selected.stamp.address;cfg.memory={selected.stamp.address,link_actor,55,{selected.record.address,selected.record.bytes}};
  if(typed_turn)cfg.collector.clock=[&](story_native_event_collect::Clock&out){out={e.identity,live_step,depth.snapshot().serial,uint32_t(live_step-100)};return true;};
  sources.arm_clock=[&](const story_native_event_observation::Result&publish){++arms;assert(typed_turn&&calls==7&&claims==1&&claim&&publish.valid()&&publish.operation()==story_native_event_observation::Operation::Publish&&publish.event_state()==1&&publish.matches(e));assert(session.journal()->phase==story_native_wait_journal::Phase::Published&&session.baseline()==e);const auto snapshot=depth.snapshot();assert(snapshot.state==D::State::Active&&snapshot.idle()&&snapshot.coverage&&!snapshot.fault);const auto live_record=depth.record();story_native_event_depth::Record stored{};std::copy_n(mem::ptr(selected.depth.address),stored.size(),stored.begin());assert(stored==live_record&&story_native_event_depth::Tracker::valid_idle_record(stored,e));assert(mem::ptr(selected.image.address)[0xE7]==1);if(fail==13)throw std::runtime_error("clock arm callback");return fail!=12;};if(fail==14)sources.arm_clock={};
  sources.release=[&](const auto&x){assert(x==e&&session.journal()->phase==story_native_wait_journal::Phase::Unpublished);claim=false;return true;};

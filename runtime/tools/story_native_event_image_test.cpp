@@ -2,6 +2,7 @@
 #include "mods/story_native_event_image.h"
 #include <cassert>
 #include <stdexcept>
+#include <string>
 using namespace story_native_event_image;
 int main(){std::string why;auto a=make_wait_fixture();assert(validate_wait_fixture(a,why));auto b=a;b[0xf0+0x38]=0;assert(a[0xf0+0x38]==0xff);assert(!validate_wait_fixture(b,why));
  for(auto n:{1u,32767u})assert(validate_wait_fixture(make_wait_fixture(n),why));
