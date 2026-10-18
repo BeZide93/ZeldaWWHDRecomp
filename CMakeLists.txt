@@ -426,6 +426,14 @@ add_executable(editor_villager_test runtime/tools/editor_villager_test.cpp runti
 target_include_directories(editor_villager_test PRIVATE runtime/src)
 target_compile_options(editor_villager_test PRIVATE -UNDEBUG)
 add_test(NAME editor_villagers COMMAND editor_villager_test)
+# The story tables while the game runs (story_reload.h, Session::apply_story): saved step numbers after an
+# edit, item changes that wait for a restart, and that story changes, undo and redo hand the game that mod's manifest.
+add_executable(editor_live_story_test runtime/tools/editor_live_story_test.cpp runtime/src/editor/commands.cpp runtime/src/editor/commands_build.cpp
+                                      runtime/src/editor/stage_files.cpp runtime/src/editor/commands_quest.cpp runtime/src/editor/commands_story.cpp runtime/src/editor/quests.cpp
+                                      runtime/src/editor/commands_scene.cpp runtime/src/editor/scenes.cpp runtime/src/mods/story_native_scene_coverage.cpp ${WWHD_NPC_CATALOGUE})
+target_include_directories(editor_live_story_test PRIVATE runtime/src)
+target_compile_options(editor_live_story_test PRIVATE -UNDEBUG)
+add_test(NAME editor_live_story COMMAND editor_live_story_test)
 # The scene editor (runtime/src/editor/scenes.cpp, commands_scene.cpp): steps, camera keys, timeline and retiming, choices,
 # walking paths, triggers, the native version, previews, copy and paste, and a handle drag as one undo step.
 add_executable(editor_scene_test runtime/tools/editor_scene_test.cpp runtime/src/editor/commands.cpp runtime/src/editor/commands_build.cpp
