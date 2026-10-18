@@ -84,6 +84,7 @@ namespace gfxvk { bool buffer_cache_enabled(); }  // gfx/vulkan/buffer_cache.h
 #include "../rumble.h"
 #ifdef __ANDROID__
 #include "../platform/phone_rumble.h"
+#include "../platform/heat_guard.h"
 #endif
 #include "../interp.h"
 #include "../runtime.h"
@@ -860,6 +861,24 @@ void tab_graphics() {
             note("Off: if this computer cannot reach %d fps, the whole game slows down (the performance\n"
                  "overlay then shows fewer than 30 logic steps/s). Turn it on to keep the game's speed.", interp::fps());
     }
+#ifdef __ANDROID__
+    // the heat guard exists on Android only (platform/perf_hint.cpp); WWHD_HEAT_GUARD wins and is not saved
+    {
+        const int hg = heat_guard::choice.load();
+        const bool editable = !heat_guard::env_override();
+        ImGui::TextUnformatted("Heat guard");
+        static const char* const hgNames[] = {"Normal", "Relaxed", "Off"};
+        for (int i = heat_guard::kNormal; i <= heat_guard::kOff; i++) {
+            ImGui::SameLine();
+            char label[24];
+            snprintf(label, sizeof label, "%s##heatguard", hgNames[i]);
+            if (radio(label, hg == i, editable)) post_changed([i] { heat_guard::choice = i; });
+        }
+        help("When the device gets hot, 60 fps pauses until it cools down. Relaxed and Off keep 60 fps\n"
+             "longer, but the device may slow down or get warm. Normal suits this device; Relaxed waits\n"
+             "longer on any device; Off never pauses 60 fps for heat.");
+    }
+#endif
     // debug only, not saved (gx2::uncapped)
     bool unc;
     if (check("Uncapped (debug: the game runs too fast)", gx2::uncapped(), &unc)) hostui::post([unc] { gx2::set_uncapped(unc); });

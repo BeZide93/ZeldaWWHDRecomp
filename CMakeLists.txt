@@ -1064,6 +1064,10 @@ add_executable(phone_rumble_test runtime/tools/phone_rumble_test.cpp)
 target_include_directories(phone_rumble_test PRIVATE runtime/src)
 target_compile_options(phone_rumble_test PRIVATE -UNDEBUG)
 add_test(NAME phone_rumble_policy COMMAND phone_rumble_test)
+add_executable(heat_guard_test runtime/tools/heat_guard_test.cpp)
+target_include_directories(heat_guard_test PRIVATE runtime/src)
+target_compile_options(heat_guard_test PRIVATE -UNDEBUG)
+add_test(NAME heat_guard_policy COMMAND heat_guard_test)
 add_test(NAME state_groups COMMAND state_groups_test)
 add_test(NAME rumble COMMAND rumble_test)
 add_test(NAME motion COMMAND motion_test)
@@ -1653,6 +1657,10 @@ if(NOT ANDROID)
       "-DJAVAC=${Java_JAVAC_EXECUTABLE}" "-DJAVA=${Java_JAVA_EXECUTABLE}"
       "-DWORK=${CMAKE_BINARY_DIR}/phone_rumble_java_test" "-DSOURCE=${CMAKE_SOURCE_DIR}"
       -P ${CMAKE_SOURCE_DIR}/runtime/tools/phone_rumble_java_test.cmake)
+    add_test(NAME android_heat_guard_device COMMAND ${CMAKE_COMMAND}
+      "-DJAVAC=${Java_JAVAC_EXECUTABLE}" "-DJAVA=${Java_JAVA_EXECUTABLE}"
+      "-DWORK=${CMAKE_BINARY_DIR}/heat_guard_java_test" "-DSOURCE=${CMAKE_SOURCE_DIR}"
+      -P ${CMAKE_SOURCE_DIR}/runtime/tools/heat_guard_java_test.cmake)
   endif()
 endif()
 
