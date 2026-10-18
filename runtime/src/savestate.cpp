@@ -86,6 +86,7 @@ namespace ss {class NativeRestorePipelineIssuer {public:
 #include "controller_reapply.h"
 #include "crashrec.h"
 #include "portable_state.h"
+#include "fixed_seed.h"
 #include "state_memory.h"
 #include "state_file_section.h"
 #include "mods/guest_mods.h"
@@ -1308,6 +1309,23 @@ void do_portable_save(Cpu* c, int slot) {
     report_done(slot, true, "");
 }
 
+// test aid WWHD_TEST_FIXED_SEED=1 (fixed_seed.h): fixed random seeds and loading-frame offset at
+// the first gameplay frame and after each state load, for repeatable comparison runs
+const bool g_fixed_seed = fixed_seed::enabled();
+fixed_seed::BootGate g_fixed_seed_boot;
+fixed_seed::LoadGate g_fixed_seed_load;
+void apply_fixed_seed(const char* when) {
+    if (!g_fixed_seed) return;
+    g_fixed_seed_boot.mark();
+    const auto a = fixed_seed::apply([](uint32_t ea) { return ld32(ea); }, [](uint32_t ea, uint32_t v) { st32(ea, v); },
+                                     GD(0x101FF9D4), GD(0x104B5730), GD(0x101FF558),
+                                     GD(0x101FF560));  // cM_rnd seeds, JPA emitter seed, g_Counter.mCounter0, mTimer
+    LOG("[test] WWHD_TEST_FIXED_SEED: %s: cM_rnd seeds %u %u %u (were %u %u %u), particle seed %u (was %08X), mCounter0 %u "
+        "(was %u, mTimer %u)",
+        when, fixed_seed::kSeeds[0], fixed_seed::kSeeds[1], fixed_seed::kSeeds[2], a.seeds_before[0], a.seeds_before[1],
+        a.seeds_before[2], fixed_seed::kParticleSeed, a.particle_seed_before, a.counter0_after, a.counter0_before, a.timer);
+}
+
 // a pending portable load at the frame boundary
 void service_portable_load(Cpu* c) {
     PendingPortable p;
@@ -1332,6 +1350,10 @@ void service_portable_load(Cpu* c) {
     } else {
         LOG("[savestate] %s: portable state applied: entering %s room %d layer %d at %.1f %.1f %.1f", portable_label(p.slot).c_str(),
             p.s->stage.c_str(), p.s->room, p.s->layer, p.s->pos[0], p.s->pos[1], p.s->pos[2]);
+        if (g_fixed_seed) {
+            g_fixed_seed_boot.mark();
+            g_fixed_seed_load.start(ld32(GD(0x101FF560)));  // written once the old stage is gone (service)
+        }
         if (current_log >= 0 && current_log <= 2 && current_log != p.s->file_slot) {
             // decision: loading goes into the Quest Log being played; say so when the state is from another one
             LOG("[savestate] %s: this state is from Quest Log %d; it is loaded into Quest Log %d", portable_label(p.slot).c_str(),
@@ -1850,6 +1872,12 @@ void service_file_save(Cpu* c);
 
 void service(Cpu* c) {
     crashrec::service();
+    if (g_fixed_seed && g_fixed_seed_boot.due(ld32(GD(0x101FF560)))) {
+        fixed_seed::set_boot_frame(render::frame_count());
+        LOG("[test] WWHD_TEST_FIXED_SEED: TV frame %llu counts as frame %llu for scripted test aids",
+            (unsigned long long)render::frame_count(), (unsigned long long)fixed_seed::kBootFrame);
+        apply_fixed_seed("first gameplay frame");
+    }
     // test aids (TV frames): WWHD_STATE_SAVE_AT / WWHD_STATE_LOAD_AT for full states,
     // WWHD_PORTABLE_SAVE_AT / WWHD_PORTABLE_LOAD_AT for portable ones; WWHD_PORTABLE_LOAD=file loads
     // that portable state as soon as a Quest Log is being played (a state from a bug report)
@@ -1857,7 +1885,7 @@ void service(Cpu* c) {
                                     psave_at = parse_timed("WWHD_PORTABLE_SAVE_AT"), pload_at = parse_timed("WWHD_PORTABLE_LOAD_AT");
     if (!save_at.empty() || !load_at.empty() || !psave_at.empty() || !pload_at.empty()) {
         static uint64_t last = 0;
-        uint64_t f = render::frame_count();
+        uint64_t f = fixed_seed::script_frame(render::frame_count());
         for (auto& t : save_at)
             if (t.frame > last && t.frame <= f) request_save_full(t.slot);
         for (auto& t : load_at)
@@ -1879,6 +1907,14 @@ void service(Cpu* c) {
     service_warp(c);       // world editor
     service_file_save(c);  // world editor test states
     if (int slot = g_psave_req.exchange(0)) do_portable_save(c, slot);
+    if (g_fixed_seed) {  // (before service_portable_load: a load applied now is followed from the next boundary on)
+        switch (g_fixed_seed_load.step(ld32(GD(0x101FF560)))) {
+        case fixed_seed::LoadGate::kLoading: apply_fixed_seed("portable state: loading the new stage"); break;
+        case fixed_seed::LoadGate::kArrived: apply_fixed_seed("portable state: first frame in the new stage"); break;
+        case fixed_seed::LoadGate::kTimedOut: LOG("[test] WWHD_TEST_FIXED_SEED: portable state: no stage change seen"); break;
+        default: break;
+        }
+    }
     service_portable_load(c);
     watch_arrival(c);
     controller_reapply::service(c);
@@ -1903,7 +1939,8 @@ void service(Cpu* c) {
         if(s->load_applied){
             g_last_load_frame = render::frame_count();
             g_last_load_step = interp::logic_steps();
-            g_last_load_counter = ld32(GD(0x101FF560));
+            g_last_load_counter = ld32(GD(0x101FF560));  // g_Counter.mTimer: the game's own step counter, part of the state
+            apply_fixed_seed("full state loaded");
         } // g_Counter.mTimer is guest state; a refused load must not advance these markers.
         {
             std::lock_guard<std::mutex> lk(g_mu);

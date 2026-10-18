@@ -38,6 +38,7 @@ namespace gx2 { void checkpoint_vulkan_caches(); void checkpoint_present_observe
 #include "../overlay/overlay.h"
 #include "../overlay/release_gate.h"
 #include "../overlay/text_entry.h"
+#include "../fixed_seed.h"
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -1033,7 +1034,7 @@ static void apply_scenario(PadState& s) {
         ol_step = found;
         sc.origin = 1;
     }
-    if (!sc.origin || (!ol && render::frame_count() < sc.origin)) return;
+    if (!sc.origin || (!ol && fixed_seed::script_frame(render::frame_count()) < sc.origin)) return;
     // scenario time = game time: full logic steps / 30 (frame-time hitches don't shift the input)
     static const uint64_t s0 = [ol_step] {
         present_observer::scenario_origin(render::frame_count(), ol_step ? ol_step : interp::logic_steps());
@@ -1107,20 +1108,21 @@ PadState read() {
     std::lock_guard<std::mutex> lk(g_mu);
     // debug: WWHD_NO_HOST_INPUT=1 ignores keyboard and host controllers (scripted test runs)
     static const bool no_host = getenv("WWHD_NO_HOST_INPUT") != nullptr;
+    const uint64_t frame = fixed_seed::script_frame(render::frame_count());  // (TV frame unless WWHD_TEST_FIXED_SEED)
     if (!keys.empty()) {
         memset(g_script_keys, 0, sizeof g_script_keys);
         for (auto& p : keys)
-            if (render::frame_count() >= p.from && render::frame_count() <= p.to)
+            if (frame >= p.from && frame <= p.to)
                 for (int c : p.codes) if (c < 256) g_script_keys[c] = true;
     }
     PadState k = keyboard_state(!no_host), s = g_pad;
     if (no_host) s = PadState{};
     for (auto& p : script)
-        if (render::frame_count() >= p.from && render::frame_count() <= p.to) s.buttons |= p.bits;
+        if (frame >= p.from && frame <= p.to) s.buttons |= p.bits;
     for (auto& p : sticks)
-        if (render::frame_count() >= p.from && render::frame_count() <= p.to) { s.lx = p.x; s.ly = p.y; }
+        if (frame >= p.from && frame <= p.to) { s.lx = p.x; s.ly = p.y; }
     for (auto& p : rsticks)
-        if (render::frame_count() >= p.from && render::frame_count() <= p.to) { s.rx = p.x; s.ry = p.y; }
+        if (frame >= p.from && frame <= p.to) { s.rx = p.x; s.ry = p.y; }
     apply_scenario(s);
     s.buttons |= k.buttons;
     if (k.lx || k.ly) { s.lx = k.lx; s.ly = k.ly; }
