@@ -14,6 +14,12 @@ what is on `devel` and not released yet (also in the
   stays on screen equally long. With **Record graphics on a second thread** on, a third of the frames on a 120 Hz phone
   screen used to stay for one or three refreshes instead of two (a slight judder); now almost all stay for two. The
   game's speed is unchanged. On by default on Android.
+- **World editor: scene editor, live actors and smooth dragging** (`--editor`, for mod makers). A new Scenes window
+  edits a scene's steps, takes camera keys from the fly camera, shows a timeline to scrub and retime, and sets choices,
+  walking paths, triggers and the native version; scenes preview in the game with Skip and Stop. Pots, barrels, crates,
+  switches, doors and enemies now appear and change live in the room, and dragging an actor moves it smoothly in place
+  (one undo step). The editor and its MCP tools also cover the new quest forms: talks, flag and multi-quest conditions,
+  finishing a quest and places inside buildings.
 - **Mod quests: finishing, flags and places inside buildings** (for mod makers). A character's dialogue or a scene's end
   can now finish a quest (the reward is given once), characters and quest steps can react to the mod's own flags or to
   several quests at once, a character can offer step-specific conversations, and a quest step can point into a
