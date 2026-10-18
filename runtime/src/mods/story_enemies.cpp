@@ -4,7 +4,9 @@
 #include "guest_addr.h"
 #include "runtime.h"
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
+#include <map>
 #include <utility>
 namespace story_enemies {namespace {
 struct Entry {Spec spec;Token token=0;story_items::EnemyMarkerHandle marker{};uint32_t pid=0xFFFFFFFFu,address=0;bool quarantine=false,claiming=false,search_known=false;uint8_t search_mode=0;};
@@ -32,17 +34,23 @@ bool claim(Entry&e,uint32_t a){if(e.claiming)return false;e.claiming=true;struct
 // These globals are native temporary search results, not progress. Preserve them
 // through exceptions and nested native execution; owned cohorts cannot leak out.
 struct Scope {Entry* prior;Entry&entry;std::array<uint32_t,13> saved{};std::array<uint32_t,28> weapon_saved{};Scope(Entry&e):prior(executing),entry(e){executing=&e;saved[0]=ld32(GD(0x10462CF0));for(unsigned i=0;i<10;++i)saved[i+1]=ld32(GD(0x10462D00)+4*i);saved[11]=ld32(GD(0x10464B28));saved[12]=ld32(GD(0x10464B2C));if(e.spec.kind==Kind::Bokoblin||e.spec.kind==Kind::Moblin){const uint32_t base=GD(e.spec.kind==Kind::Bokoblin?0x10462320:0x10465498);weapon_saved[0]=ld32(base);for(unsigned i=0;i<10;++i)weapon_saved[i+1]=ld32(base+0x10+4*i);weapon_saved[11]=ld32(GD(0x1046231C));weapon_saved[12]=ld32(GD(0x1046232C));weapon_saved[13]=ld8(GD(0x104654A4));weapon_saved[14]=ld8(GD(0x101BA692));weapon_saved[20]=ld16(GD(0x10462474));const uint32_t offsets[]={0x28,0x34,0x3C,0x44,0x48};for(unsigned i=0;i<5;++i)weapon_saved[15+i]=ld32(GD(0x104654E0)+offsets[i]);if(e.search_known)st8(GD(e.spec.kind==Kind::Bokoblin?0x1046232D:0x104654A4),e.search_mode);}}~Scope(){st32(GD(0x10462CF0),saved[0]);for(unsigned i=0;i<10;++i)st32(GD(0x10462D00)+4*i,saved[i+1]);st32(GD(0x10464B28),saved[11]);st32(GD(0x10464B2C),saved[12]);if(entry.spec.kind==Kind::Bokoblin||entry.spec.kind==Kind::Moblin){const uint32_t base=GD(entry.spec.kind==Kind::Bokoblin?0x10462320:0x10465498);st32(base,weapon_saved[0]);for(unsigned i=0;i<10;++i)st32(base+0x10+4*i,weapon_saved[i+1]);st32(GD(0x1046231C),weapon_saved[11]);st32(GD(0x1046232C),weapon_saved[12]);st8(GD(0x104654A4),uint8_t(weapon_saved[13]));st8(GD(0x101BA692),uint8_t(weapon_saved[14]));st16(GD(0x10462474),uint16_t(weapon_saved[20]));const uint32_t offsets[]={0x28,0x34,0x3C,0x44,0x48};for(unsigned i=0;i<5;++i)st32(GD(0x104654E0)+offsets[i],weapon_saved[15+i]);}executing=prior;}};
-void lifecycle(Cpu*c,uint32_t fn,bool create,bool draw,bool destroy){const uint32_t a=c->r[3];Entry*e=find(a,!create&&!destroy);if(!e){if(destroy&&cleanup_identity(a,fn)){story_enemy_ownership::retire_before_delete(a);original(c,fn);return;}if(reserved(a)){c->r[3]=create?5:1;return;}original(c,fn);return;}
+// test aid: WWHD_ENEMY_TRACE=1 logs each owned enemy's execute path every 30 steps (place, action, what ran)
+bool enemy_trace(){static const bool on=[]{const char*v=std::getenv("WWHD_ENEMY_TRACE");return v&&*v=='1';}();return on;}
+void exec_trace(uint32_t a,const char*path){if(!enemy_trace())return;static std::map<uint32_t,unsigned> n;if(n[a]++%30)return;Entry*e=find(a,false);const uint16_t prof=ld16(a+0xE);const unsigned action=prof==0x7FF9?ld16(a+0x49C+6):prof==0x7FF8?ld16(a+0x8BC+6):0;
+ LOG("[native_enemy] trace %s actor=%08X path=%s pos=%.1f %.1f %.1f home=%.1f %.1f %.1f action=%u verify=%d",e?e->spec.id.c_str():"?",a,path,double(u32_as_f32(ld32(a+0x314))),double(u32_as_f32(ld32(a+0x318))),double(u32_as_f32(ld32(a+0x31C))),double(u32_as_f32(ld32(a+0x2EC))),double(u32_as_f32(ld32(a+0x2F0))),double(u32_as_f32(ld32(a+0x2F4))),action,e?int(verify_actor(e->token,e->spec.kind,a)):-1);}
+void lifecycle(Cpu*c,uint32_t fn,bool create,bool draw,bool destroy){const uint32_t a=c->r[3];Entry*e=find(a,!create&&!destroy);
+ if(!create&&!draw&&!destroy&&enemy_trace()){if(!e)exec_trace(a,find(a,false)?"unverified-original":"not-owned");}if(!e){if(destroy&&cleanup_identity(a,fn)){story_enemy_ownership::retire_before_delete(a);original(c,fn);return;}if(reserved(a)){c->r[3]=create?5:1;return;}original(c,fn);return;}
  if(destroy){if(e->spec.kind==Kind::Bokoblin)st8(a+0x137D,0);if(e->spec.kind==Kind::Moblin)st8(a+0x2E0E,0);if(children.retire&&(e->spec.kind==Kind::Bokoblin||e->spec.kind==Kind::Moblin))children.retire(e->token,a);const uint32_t pid=e->pid;story_enemy_ownership::retire_before_delete(a);e->address=0;e->pid=0xFFFFFFFFu;trace(*e,a,"delete");original(c,fn);const Cpu result=*c;if(retired)retired(e->token,pid);*c=result;return;}
- if(!supported(e->spec.kind)||e->quarantine){c->r[3]=create?5:1;return;}
+ if(!supported(e->spec.kind)||e->quarantine){if(!create&&!draw)exec_trace(a,"quarantined");c->r[3]=create?5:1;return;}
  if(!create&&story_items::enemy_defeated(e->marker)){if(!draw&&ld8(a+0xC)!=3){Cpu probe=*c;const uint32_t result=invoke(&probe,GC(0x025D57E0),{a});static unsigned reported=0;if(reported++<128)trace(*e,a,"terminal-delete-retry",result);}c->r[3]=1;return;}
  if(!create&&!draw){if(!story_enemy_ownership::lookup_actor(a)){if(!story_enemy_ownership::admit_created(e->token,a)){disable(*e,a);c->r[3]=1;return;}e->address=a;}e->address=a;
   // Carry is refused by the shared player admission hook, never undone here.
   if(ld32(a+0x2E0)&0x2000u){disable(*e,a);trace(*e,a,"unexpected-carried");c->r[3]=1;return;}no_carry(a);
  }
  struct ChildScope {bool active=false;~ChildScope(){if(active)children.leave();}} child_scope;
- if((create||!draw)&&(e->spec.kind==Kind::Bokoblin||e->spec.kind==Kind::Moblin)){if(!create&&!children.ready(e->token,a)){c->r[3]=1;return;}if(!children.enter(e->token,e->spec.kind,a,story_enemy_ownership::source_epoch(e->token))){disable(*e,a);c->r[3]=create?5:1;return;}child_scope.active=true;}
+ if((create||!draw)&&(e->spec.kind==Kind::Bokoblin||e->spec.kind==Kind::Moblin)){if(!create&&!children.ready(e->token,a)){if(!draw)exec_trace(a,"children-not-ready");c->r[3]=1;return;}if(!children.enter(e->token,e->spec.kind,a,story_enemy_ownership::source_epoch(e->token))){disable(*e,a);c->r[3]=create?5:1;return;}child_scope.active=true;}
  struct HioScope{uint32_t address=0;uint8_t old=0;HioScope(bool active,Kind k){if(active){address=GD(k==Kind::Bokoblin?0x10191468:0x101BA690);old=ld8(address);st8(address,1);}}~HioScope(){if(address)st8(address,old);}} hio(create&&(e->spec.kind==Kind::Bokoblin||e->spec.kind==Kind::Moblin),e->spec.kind);
+ if(!create&&!draw)exec_trace(a,"execute");
  Scope scope(*e);original(c,fn);const Cpu result=*c;
  if(create&&result.r[3]==4){if(!verify_actor(e->token,e->spec.kind,a)||(!story_enemy_ownership::lookup_actor(a)&&!story_enemy_ownership::admit_created(e->token,a))){disable(*e,a);c->r[3]=5;return;}e->address=a;if(e->spec.kind==Kind::Bokoblin||e->spec.kind==Kind::Moblin){e->search_mode=ld8(GD(e->spec.kind==Kind::Bokoblin?0x1046232D:0x104654A4));e->search_known=true;}no_carry(a);trace(*e,a,"created");}
  else if(create&&result.r[3]==5){disable(*e,a);trace(*e,a,"create-failed");}
@@ -84,7 +92,7 @@ void child_retired(const story_enemy_ownership::LineageInfo&info){if(!info.sourc
 bool supported(Kind k){return k==Kind::ChuChu||k==Kind::Keese||(weapon_admission&&(k==Kind::Bokoblin||k==Kind::Moblin));}
 bool verify_actor(Token t,Kind kind,uint32_t a){const auto*e=get(t);const auto&d=story_enemy_ownership::descriptor(kind);if(!e||kind!=e->spec.kind||!supported(kind)||!memory(a,d.bytes)||ld16(a+0xE)!=d.profile||ld32(a+0xB4)!=native_vtable(kind)||ld32(a+0xB0)!=parameters(kind)||ld8(a+0x2DD)!=0xFF||ld16(a+0x2D8)!=0xFFFF||ld16(a+0x2FC)!=home_z(kind))return false;
  if(kind==Kind::ChuChu)return ld8(a+0x3F8)==0&&ld8(a+0x3F9)==0&&ld8(a+0x3FA)==0&&ld8(a+0x3FB)==0xFF&&ld8(a+0x3FC)<=4&&ld8(a+0x924+0x1B1)==0;
- if(kind==Kind::Bokoblin){const unsigned action=ld16(a+0x49C+6);return ld8(a+0x3D0)==4&&ld8(a+0x3D1)==0&&ld8(a+0x3D2)==0xFF&&ld8(a+0x3D3)==0xFF&&ld8(a+0x3D4)==0&&ld8(a+0x3D5)==0&&ld8(a+0x3D6)==0&&ld8(a+0x3F0)==0&&ld8(a+0x3F1)==0&&ld8(a+0x3F8)==0&&ld32(a+0x1378)==0&&ld8(a+0x1375)==0&&ld32(a+0x1380)==0&&ld8(a+0x138D)==0&&ld8(a+0x137D)==0&&action<=23&&action!=15&&action!=16&&ld8(a+0x13BC+0x1B1)==0;}
+ if(kind==Kind::Bokoblin){const unsigned action=ld16(a+0x49C+6);return ld8(a+0x3D0)==4&&ld8(a+0x3D1)==0xFF&&ld8(a+0x3D2)==0xFF&&ld8(a+0x3D3)==0xFF&&ld8(a+0x3D4)==0&&ld8(a+0x3D5)==0&&ld8(a+0x3D6)==0&&ld8(a+0x3F0)==0&&ld8(a+0x3F1)==0&&ld8(a+0x3F8)==0&&ld32(a+0x1378)==0&&ld8(a+0x1375)==0&&ld32(a+0x1380)==0&&ld8(a+0x138D)==0&&ld8(a+0x137D)==0&&action<=23&&action!=15&&action!=16&&ld8(a+0x13BC+0x1B1)==0;}
  if(kind==Kind::Moblin){const unsigned action=ld16(a+0x8BC+6);return ld8(a+0x3D8)==0&&ld8(a+0x3D9)==0&&ld8(a+0x3DA)==0xFF&&ld8(a+0x3DB)==0xFF&&ld8(a+0x3DC)==0&&ld8(a+0x3DD)==0&&ld8(a+0x2D70)==0&&ld8(a+0x2D72)==0&&ld32(a+0x2D74)==0&&ld16(a+0x2E4C)==0&&ld8(a+0x2E4E)==0&&ld16(a+0x2E50)==0&&ld8(a+0x2E21)==0&&ld8(a+0x2E0E)==0&&!(ld32(a+0x2E0)&0x04000000u)&&action<=23&&action!=6&&ld8(a+0x2E54+0x1B1)==0;}
  return ld8(a+0x484)==0&&ld8(a+0x485)==0&&ld8(a+0x486)==0xFF&&ld8(a+0x487)==0xFF&&ld8(a+0x48C)==0&&ld8(a+0x48D)==0&&ld32(a+0x490)==0&&(ld8(a+0x489)==0||ld8(a+0x489)==10||ld8(a+0x489)==20||ld8(a+0x489)==30)&&ld8(a+0xAB9)==0&&ld8(a+0xAD8+0x1B1)==0;
 }

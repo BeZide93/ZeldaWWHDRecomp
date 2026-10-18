@@ -12,7 +12,10 @@ namespace story_enemies {
 using Kind=story_enemy_ownership::Kind;
 using Token=story_enemy_ownership::Token;
 struct Spec {Kind kind;std::string mod,id,defeated_flag;std::vector<story_items::PropDrop> drops;story_enemy_ownership::Fingerprint fingerprint{};uint32_t epoch=0;};
-constexpr uint32_t parameters(Kind k){return k==Kind::ChuChu?0xFF000000u:k==Kind::Bokoblin?0xFFFF0004u:(k==Kind::Keese||k==Kind::Moblin)?0xFFFF0000u:0u;}
+// The fixed native parameters. Bokoblin: type 4 (stands, then fights); byte 1 is its sight and
+// territory range in tens of units, 0xFF the game's own (500 to notice Link, 750 to give up); 0 made
+// it blind (it never noticed Link). Byte 2 no path, byte 3 no switch.
+constexpr uint32_t parameters(Kind k){return k==Kind::ChuChu?0xFF000000u:k==Kind::Bokoblin?0xFFFFFF04u:(k==Kind::Keese||k==Kind::Moblin)?0xFFFF0000u:0u;}
 constexpr uint16_t home_z(Kind k){return k==Kind::Bokoblin||k==Kind::Moblin?0xFF:0;}
 struct ChildBridge {
  std::function<bool(Token,Kind,uint32_t parent,uint32_t epoch)> enter;

@@ -866,6 +866,11 @@ bool editor_update(const std::string& mod,const std::vector<ManifestActor>& acto
     if(pending)*pending=std::move(later);
     return true;
 }
+// whether the game runs this actor's Execute now (dEvt_control_c::moveApproval != 0, as fopAc_Execute asks)
+bool editor_moves_in_place(Cpu* c,uint32_t actor){
+    const uint32_t play=g_call(c,GC(0x025200D4),{});
+    return play&&g_call(c,GC(0x02540158),{play+0x51D0,actor})!=0;
+}
 bool editor_pose(Cpu* c,const std::string& mod,const std::string& id,const story_notebook::WorldPoint& p,const story_notebook::WorldPoint& r){
     if(!c||!g_call||!g_scratch)return false;
     Actor* a=nullptr;for(auto& x:g_actors)if(x.mod==mod&&x.spec.id==id)a=&x;
@@ -876,6 +881,12 @@ bool editor_pose(Cpu* c,const std::string& mod,const std::string& id,const story
         mod_actor::Identity who;if(!mod_actor::identify(c,at,who))return false;
         mod_actor::set_rotation(c,who,r);return mod_actor::set_position(c,who,p);
     }
+    // A native actor redraws at its place only from its own Execute (its model and joint matrices). The
+    // editor's view holds the world with an event, and the game then runs only the actors its event check
+    // lets move (dEvt_control_c::moveApproval: event members and actors with a run-in-events status,
+    // e.g. pots); the others (enemies...) would keep drawing at the old place. Those are not moved in
+    // place: the drag creates them again where they go, as for an actor without a copy.
+    if(!editor_moves_in_place(c,at))return false;
     // home, old and current place; the turn about the vertical axis only (native kinds keep their own X/Z)
     for(uint32_t off:{0x2ECu,0x300u,0x314u}){st32(at+off,f32_as_u32(p.x));st32(at+off+4,f32_as_u32(p.y));st32(at+off+8,f32_as_u32(p.z));}
     const uint16_t yaw=uint16_t(int32_t(r.y*65536.0f/360.0f));

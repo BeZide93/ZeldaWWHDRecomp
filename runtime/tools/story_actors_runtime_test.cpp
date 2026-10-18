@@ -75,7 +75,7 @@ void map_guest(uint32_t at,uint32_t size) {
 }
 uint32_t enemy_address(unsigned kind){return kActor+0x20000+kind*0x4000;}
 void enemy_fixture(story_enemies::Kind kind,uint32_t a,uint32_t pid){const auto&d=story_enemy_ownership::descriptor(kind);std::memset(mem::ptr(a),0,d.bytes);st32(a+4,pid);st16(a+0xE,d.profile);st32(a+0xB0,story_enemies::parameters(kind));st32(a+0xB4,kind==story_enemies::Kind::ChuChu?0x1000C5A0:kind==story_enemies::Kind::Bokoblin?0x1000957C:kind==story_enemies::Kind::Moblin?0x10014E9C:0x10012C24);st8(a+0x2DD,0xFF);st16(a+0x2D8,0xFFFF);st16(a+0x2FC,story_enemies::home_z(kind));
- if(kind==story_enemies::Kind::ChuChu)st8(a+0x3FB,0xFF);else if(kind==story_enemies::Kind::Keese){st8(a+0x486,0xFF);st8(a+0x487,0xFF);}else if(kind==story_enemies::Kind::Bokoblin){st8(a+0x3D0,4);st8(a+0x3D2,0xFF);st8(a+0x3D3,0xFF);st32(a+0x49C,a);st16(a+0x49C+8,2);}else{st8(a+0x3DA,0xFF);st8(a+0x3DB,0xFF);st32(a+0x8BC,a);st16(a+0x8BC+8,1);st8(a+0x10B0,1);}
+ if(kind==story_enemies::Kind::ChuChu)st8(a+0x3FB,0xFF);else if(kind==story_enemies::Kind::Keese){st8(a+0x486,0xFF);st8(a+0x487,0xFF);}else if(kind==story_enemies::Kind::Bokoblin){st8(a+0x3D0,4);st8(a+0x3D1,0xFF);st8(a+0x3D2,0xFF);st8(a+0x3D3,0xFF);st32(a+0x49C,a);st16(a+0x49C+8,2);}else{st8(a+0x3DA,0xFF);st8(a+0x3DB,0xFF);st32(a+0x8BC,a);st16(a+0x8BC+8,1);st8(a+0x10B0,1);}
  for(size_t n=0;n<d.collider_count;++n){auto&x=d.colliders[n];st32(a+x.object+0x44,a+x.stts);st32(a+x.stts+0xC,a);st32(a+x.stts+0x10,pid);if(x.helper)st32(a+x.helper,a);}
 }
 uint32_t child_address(uint32_t params){return kArena+0x60000+(params==4?0x2000:0);}
@@ -114,6 +114,7 @@ void original(Cpu* c,uint32_t fn) {
     }
     if(fn==0x025B8C0C)st32(c->r[3],ld32(c->r[3])|1);
 }
+uint32_t move_approval=1;
 uint32_t call(Cpu*,uint32_t fn,std::initializer_list<uint32_t> args) {
     ++native_calls;const auto* a=args.begin();
     if(sign_native_fixture&&fn==0x025F795C)return sign_status;
@@ -145,6 +146,7 @@ uint32_t call(Cpu*,uint32_t fn,std::initializer_list<uint32_t> args) {
     if(fn==0x025E1A40)return 0;
     if(fn==0x022F7388){assert(a[1]==0x10023418&&a[2]==0);++seated_actions;st32(a[0]+0x86C,ld32(a[1]));st32(a[0]+0x870,ld32(a[1]+4));st8(a[0]+0xA1D,11);st8(a[0]+0xA22,1);return 1;}
     if(fn==0x0253EE04){assert(a[0]==0x1046F0B0+0x51D0);return ym1_partner;}
+    if(fn==0x02540158){assert(a[0]==0x1046F0B0+0x51D0);return move_approval;}  // dEvt_control_c::moveApproval
     if(fn==0x025F795C)return ym1_message_status;
     if(fn==0x022F9B64)return 1;
     if(fn==0x025A11EC){++seated_bases;assert(a[1]==1);if(ym1_message_status==0x13)st32(a[0]+0x7C8,0xFFFFFFFFu);return 0;}
@@ -373,6 +375,12 @@ int main(int argc,char** argv){
         auto seated=resident;seated.id="seated";seated.resident=19;assert(story_actors::editor_live_capable("late",seated,why));
         assert(story_actors::editor_update("late",{resident},{"guide"},why));
         Cpu c{};story_actors::native_room_loaded(&c,1);assert(created==1);
+        // a drag moves it in place only while the game runs its Execute (the editor's event lets it move);
+        // held by the event, it keeps its place and the drag creates it again instead
+        const uint32_t at=story_actors::actor_address(&c,"late","guide");assert(at);
+        const float x0=u32_as_f32(ld32(at+0x314));
+        move_approval=0;assert(!story_actors::editor_pose(&c,"late","guide",{500,10,600},{0,90,0})&&u32_as_f32(ld32(at+0x314))==x0);
+        move_approval=1;assert(story_actors::editor_pose(&c,"late","guide",{500,10,600},{0,90,0})&&u32_as_f32(ld32(at+0x314))==500&&u32_as_f32(ld32(at+0x31C))==600);
         std::puts("editor with no declared actors: live kinds installed, a new resident appears at once");return 0;
     }
     if(argc==2&&std::strcmp(argv[1],"--no-resident")==0){

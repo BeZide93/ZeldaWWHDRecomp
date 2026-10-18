@@ -49,7 +49,7 @@ void original(Cpu*c,uint32_t fn){const uint32_t a=c->r[3];
 }
 uint32_t invoke(Cpu*c,uint32_t fn,std::initializer_list<uint32_t> args){if(fn==0x025200D4){c->r[4]=999;c->pc=999;return Play;}if(fn==0x025E3268||fn==0x025E2FBC||fn==0x025EE048||fn==0x025EE060)return 0;unsigned r=3;for(uint32_t a:args)c->r[r++]=a;if(hooks.count(fn))hooks.at(fn)(c);else original(c,fn);c->r[4]=999;c->pc=999;return c->r[3];}
 void parent(uint32_t a,uint32_t pid,own::Kind kind){const auto&d=own::descriptor(kind);std::memset(mem::ptr(a),0,d.bytes);st32(a+4,pid);st16(a+0xE,d.profile);st32(a+0xB0,enemy::parameters(kind));st32(a+0xB4,kind==own::Kind::Bokoblin?0x1000957C:kind==own::Kind::Moblin?0x10014E9C:0x1000C5A0);st8(a+0x2DD,255);st16(a+0x2D8,0xFFFF);st16(a+0x2FC,enemy::home_z(kind));
- if(kind==own::Kind::Bokoblin){st8(a+0x3D0,4);st8(a+0x3D2,255);st8(a+0x3D3,255);st32(a+0x49C,a);st16(a+0x49C+8,2);}else if(kind==own::Kind::Moblin){st8(a+0x3DA,255);st8(a+0x3DB,255);st32(a+0x8BC,a);st16(a+0x8BC+8,1);}else st8(a+0x3FB,255);
+ if(kind==own::Kind::Bokoblin){st8(a+0x3D0,4);st8(a+0x3D1,255);st8(a+0x3D2,255);st8(a+0x3D3,255);st32(a+0x49C,a);st16(a+0x49C+8,2);}else if(kind==own::Kind::Moblin){st8(a+0x3DA,255);st8(a+0x3DB,255);st32(a+0x8BC,a);st16(a+0x8BC+8,1);}else st8(a+0x3FB,255);
  for(size_t i=0;i<d.collider_count;++i){const auto&x=d.colliders[i];st32(a+x.object+0x44,a+x.stts);st32(a+x.stts+0xC,a);st32(a+x.stts+0x10,pid);if(x.helper)st32(a+x.helper,a);}
 }
 void child(uint32_t a,uint32_t pid,uint32_t params){std::memset(mem::ptr(a),0,0xA34);st32(a+4,pid);st16(a+0xE,0x1CF);st32(a+0xB0,params);st8(a+0x2DD,255);st32(a+0x2E8,0xFFFFFFFFu);for(uint32_t off:{0x700u,0x82Cu})st32(a+off+0x44,a+0x6C4);st32(a+0x6D0,a);st32(a+0x6D4,pid);}

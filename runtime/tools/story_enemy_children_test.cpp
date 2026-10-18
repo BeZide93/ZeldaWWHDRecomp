@@ -58,7 +58,7 @@ assert(mmap(mem::ptr(Parent),0x10000,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYM
 #endif
 using namespace story_enemy_children;assert(configure(original,invoke,[](const o::LineageInfo&i){assert(i.source==1&&i.source_pid==10);++notices;}));
 auto owner=[](uint32_t){return std::string();};auto conflict=[](uint32_t){return std::string("foreign");};auto replace=[](uint32_t f,void(*fn)(Cpu*)){hooks[f]=fn;};assert(!install(conflict,replace)&&hooks.empty());assert(install(owner,replace)&&hooks.size()==9);assert(install(owner,replace));
-actor(Parent,10,0x7FF9,0xFFFF0004);actor(Child,50,0x1CF,0);actor(Other,51,0x1CF,0);assert(!enter(1,o::Kind::Bokoblin,Parent,2));assert(enter(1,o::Kind::Bokoblin,Parent,3));
+actor(Parent,10,0x7FF9,0xFFFFFF04);actor(Child,50,0x1CF,0);actor(Other,51,0x1CF,0);assert(!enter(1,o::Kind::Bokoblin,Parent,2));assert(enter(1,o::Kind::Bokoblin,Parent,3));
 capacity=false;Cpu q{};q.r[3]=0x1CF;q.r[4]=0;hooks.at(0x025D5834)(&q);assert(q.r[3]==0xFFFFFFFF&&queues==0&&rows.empty());capacity=true;
 q.r[3]=0x1CF;q.r[4]=4;hooks.at(0x025D5834)(&q);assert(queues==0);q.r[3]=0x1CF;q.r[4]=0;hooks.at(0x025D5834)(&q);assert(queues==1&&rows.count(50));leave();
 st32(Parent+0x1360,50);assert(!ready(1,Parent));st32(Child+0x39C,0x10);st32(Child+0x2E0,0x2000|0x400);call(0x020C25A4,Child,4);assert(ready(1,Parent)&&guard(Child));assert(ld32(Child+0x2E0)==0x2000&&!ld32(Child+0x39C));
@@ -69,6 +69,6 @@ listener(Other,50,0x1CF);assert(rows.count(50)&&notices==0);listener(Parent,10,0
 state_loaded();assert(rows.count(50)&&guard(Child)); // host scope reset does not erase snapshot lineage
 listener(Child,50,0x1CF);assert(rows.empty()&&notices==1);listener(Child,50,0x1CF);assert(notices==1);
 active=true;st32(Parent+0x1360,0xFFFFFFFF);st32(Parent+0xC90,0);st32(Parent+0xC94,0);st8(Parent+0x1374,0);assert(ready(1,Parent));st32(Parent+0xC90,1);assert(!ready(1,Parent));st32(Parent+0xC90,0);assert(ready(1,Parent));st32(Parent+0xC94,2);assert(!ready(1,Parent));st32(Parent+0xC94,0);assert(ready(1,Parent));st8(Parent+0x1374,1);assert(!ready(1,Parent));st8(Parent+0x1374,0);assert(ready(1,Parent));
-actor(Parent,10,0x7FF8,0xFFFF0000);st32(Parent+0x2D60,0xFFFFFFFF);for(unsigned innate=0;innate<2;++innate)for(unsigned pending=0;pending<3;++pending){st8(Parent+0x10B0,innate);st8(Parent+0x10B1,pending);st8(Parent+0x10B3,0);assert(ready(1,Parent));}st8(Parent+0x10B3,1);assert(!ready(1,Parent));st8(Parent+0x10B3,0);st8(Parent+0x10B1,3);assert(!ready(1,Parent));st8(Parent+0x10B1,0);st8(Parent+0x10B0,2);assert(!ready(1,Parent));actor(Parent,10,0x7FF9,0xFFFF0004);
+actor(Parent,10,0x7FF8,0xFFFF0000);st32(Parent+0x2D60,0xFFFFFFFF);for(unsigned innate=0;innate<2;++innate)for(unsigned pending=0;pending<3;++pending){st8(Parent+0x10B0,innate);st8(Parent+0x10B1,pending);st8(Parent+0x10B3,0);assert(ready(1,Parent));}st8(Parent+0x10B3,1);assert(!ready(1,Parent));st8(Parent+0x10B3,0);st8(Parent+0x10B1,3);assert(!ready(1,Parent));st8(Parent+0x10B1,0);st8(Parent+0x10B0,2);assert(!ready(1,Parent));actor(Parent,10,0x7FF9,0xFFFFFF04);
 active=true;nextPID=0xFFFFFFFF;assert(enter(1,o::Kind::Bokoblin,Parent,3));q.r[3]=0x1CF;q.r[4]=0;hooks.at(0x025D5834)(&q);leave();assert(rows.empty());
 }
