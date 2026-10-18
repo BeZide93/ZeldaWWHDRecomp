@@ -56,6 +56,7 @@ struct SceneUi {
     int trigger_type = 0;
     char chart[64] = {};
     float radius = 500;
+    bool open_settings = false;  // test aid: the scene's settings open (pictures)
 } C;
 
 void muted(const std::string& s) {
@@ -257,16 +258,14 @@ void timeline_view(const Value& sc, const Value& timeline) {
     if (ImGui::SmallButton("Fit")) C.fit = true;
     ImGui::SameLine();
     ImGui::Checkbox("Camera follows the cursor", &C.follow);
-    if (C.scrub >= 0) {
-        ImGui::SameLine();
-        ImGui::TextColored(kHead, "cursor %s (%d)", seconds(C.scrub).c_str(), int(std::lround(C.scrub)));
-    }
+    if (C.scrub >= 0) ImGui::TextColored(kHead, "cursor %s (frame %d)", seconds(C.scrub).c_str(), int(std::lround(C.scrub)));
+    else ImGui::TextColored(kMuted, "click the ruler to put the cursor");
     const ImVec2 origin = ImGui::GetCursorScreenPos();
     const float avail = std::max(200.0f, ImGui::GetContentRegionAvail().x);
     if (C.fit) C.px_per_frame = float((avail - 20) / total), C.fit = false;
-    const float row_h = 18, ruler_h = 22;
+    const float row_h = std::max(14.0f, ImGui::GetTextLineHeight() + 2), ruler_h = ImGui::GetTextLineHeight() + 6;
     const float width = float(total * C.px_per_frame) + 20, height = ruler_h + row_h * float(std::max<size_t>(1, rows.size())) + 6;
-    ImGui::BeginChild("##timeline_canvas", ImVec2(0, std::min(height + 18, std::max(120.0f, ImGui::GetContentRegionAvail().y))), false, ImGuiWindowFlags_HorizontalScrollbar);
+    ImGui::BeginChild("##timeline_canvas", ImVec2(0, std::max(80.0f, ImGui::GetContentRegionAvail().y)), false, ImGuiWindowFlags_HorizontalScrollbar);
     const ImVec2 o = ImGui::GetCursorScreenPos();
     ImDrawList* dl = ImGui::GetWindowDrawList();
     ImGui::InvisibleButton("##timeline", ImVec2(width, height), ImGuiButtonFlags_MouseButtonLeft);
@@ -742,6 +741,7 @@ bool scene_picture(std::string& scene, int& step, int& point, double& scrub) {
 }
 void scene_editor(const Value& m) {
     static bool test_aids = [] {
+        if (std::getenv("WWHD_TEST_EDITOR_SCENE_SETTINGS")) C.open_settings = true;
         if (const char* e = std::getenv("WWHD_TEST_EDITOR_SCENE")) {  // scene[:step[:scrub frames[:point]]] (pictures)
             const std::string v = e;
             size_t a = v.find(':');
@@ -856,11 +856,12 @@ void scene_editor(const Value& m) {
     const float right = 330;
     ImGui::BeginChild("##scene_timeline", ImVec2(std::max(200.0f, ImGui::GetContentRegionAvail().x - right - 8), h), true);
     timeline_view(*sc, timeline);
-    if (ImGui::CollapsingHeader("Scene: what starts it, native version")) scene_settings(m, *sc);
     ImGui::EndChild();
     ImGui::SameLine();
     ImGui::BeginChild("##scene_inspector", ImVec2(0, h), true);
     step_inspector(m, *sc, timeline);
+    ImGui::Spacing();
+    if (ImGui::CollapsingHeader("Scene: what starts it, native version", C.open_settings ? ImGuiTreeNodeFlags_DefaultOpen : 0)) scene_settings(m, *sc);
     ImGui::EndChild();
     // copy and paste of steps while the window has the keyboard (Ctrl+C / Ctrl+V)
     ImGuiIO& io = ImGui::GetIO();

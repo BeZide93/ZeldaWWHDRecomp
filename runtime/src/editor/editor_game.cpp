@@ -1117,7 +1117,7 @@ void scene_preview_end(const std::string& status) {
     g_retry = 450;
     if (!launch_mode()) g_fly_want = 1;  // the launch mode's editor view comes back by itself once Link is free
     publish_scene("", 0);
-    set_status(status + (restore ? ": the world is back as it was" : ""));
+    set_status(status + (restore ? ": the world goes back to how it was before" : ""));
 }
 void scene_preview_tick() {
     if (!g_previewing || g_scene.phase < 2 || g_scene.phase > 3) return;

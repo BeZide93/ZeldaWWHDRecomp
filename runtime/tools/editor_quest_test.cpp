@@ -293,7 +293,8 @@ void step_commands() {
     CHECK(actor(m(), "post")->get("when").get("step").number == 3);
     CHECK(actor(m(), "sign-a")->get("then").array[0].get("step").number == 3);
     CHECK(actor(m(), "guide")->get("then").array[0].get("step").number == 4);
-    for (const auto& it : m().get("items").array)
+    const Value items = m();  // a copy that lives through the loop (a temporary's member would not)
+    for (const auto& it : items.get("items").array)
         if (it.get("id").string() == "old-key") CHECK(it.get("use").get("step").number == 4);
     CHECK(ok(s.run("undo")));
     CHECK(actor(m(), "post")->get("when").get("step").number == 2 && step_of(m(), "lighthouse", 2)->get("text").string() == "Check the post.");
@@ -326,7 +327,8 @@ void step_commands() {
     r = s.run("remove_quest_step", params(R"({"quest": "lighthouse", "step": 2, "confirm": true})"));
     CHECK(ok(r) && !step_of(m(), "lighthouse", 2));
     CHECK(actor(m(), "post")->get("when").get("quest").type == Value::Null);
-    for (const auto& t : actor(m(), "sign-a")->get("then").array) CHECK(!(t.get("action").string() == "quest_step" && t.get("step").number == 2));
+    const Value after = m();
+    for (const auto& t : actor(after, "sign-a")->get("then").array) CHECK(!(t.get("action").string() == "quest_step" && t.get("step").number == 2));
     CHECK(ok(s.run("undo")) && step_of(m(), "lighthouse", 2));
     // a scene that names a step keeps it (scenes change first)
     {

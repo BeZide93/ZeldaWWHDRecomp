@@ -409,6 +409,14 @@ void native_version() {
     // a block that breaks the rules: refused by the validator
     CHECK(!ok(s.run("native_scene", params(R"({"scene": "harbor", "value": {"type": "turn_camera"}})"))));
     CHECK(ok(s.run("undo")) && scene_of(s, "harbor")->object.contains("native"));
+    // another scene of the package (the sign starts the first one): checked with the package's scenes
+    CHECK(ok(s.run("add_scene", params(R"({"id": "dock"})"))));
+    for (const char* step : {R"({"scene": "dock", "type": "face", "fields": {"actor": "guide", "position": {"x": 0, "y": 1040, "z": -201500}}})",
+                             R"({"scene": "dock", "type": "face", "fields": {"actor": "friend", "position": {"x": 500, "y": 1040, "z": -201500}}})",
+                             R"({"scene": "dock", "type": "camera"})", R"({"scene": "dock", "type": "wait"})"})
+        CHECK(ok(s.run("add_scene_step", params(step))));
+    r = s.run("native_scene", params(R"({"scene": "dock", "from_steps": true})"));
+    CHECK(ok(r) && r.get("result").get("eligible").boolean);
 }
 
 void previews() {

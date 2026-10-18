@@ -750,12 +750,18 @@ bool native_from_steps(const Value& m, const Value& scene, Value& native, std::s
 
 bool native_eligible(const Value& m, const Value& scene, std::string& why) {
     if (scene.get("native").type == Value::Null) return why = "the scene has no native version", false;
+    // parsed with the package's other scenes (actors and scenes name them)
     Value one = m;
-    one["scenes"] = arr();
-    one["scenes"].array.push_back(scene);
+    if (one.get("scenes").type != Value::Array) one["scenes"] = arr();
+    bool found = false;
+    for (auto& sc : one["scenes"].array)
+        if (sc.get("id").string() == scene.get("id").string()) sc = scene, found = true;
+    if (!found) one["scenes"].array.push_back(scene);
     std::vector<story_notebook::ManifestScene> parsed;
-    if (!story_notebook::parse_scenes(one, parsed, why) || parsed.empty()) return false;
-    const auto c = story_native_scene_coverage::inspect(parsed.front());
+    if (!story_notebook::parse_scenes(one, parsed, why)) return false;
+    const auto it = std::find_if(parsed.begin(), parsed.end(), [&](const story_notebook::ManifestScene& x) { return x.id == scene.get("id").string(); });
+    if (it == parsed.end()) return why = "the scene can't be read", false;
+    const auto c = story_native_scene_coverage::inspect(*it);
     if (c.selection != story_native_scene_coverage::Selection::NativeAlternative) return why = c.reason, false;
     return true;
 }
