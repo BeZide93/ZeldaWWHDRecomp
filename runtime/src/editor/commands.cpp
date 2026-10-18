@@ -23,6 +23,7 @@
 #include "../mods/story_items_core.h"
 #include "../mods/story_mail_book.h"
 #include "../mods/story_manifest.h"
+#include "../mods/story_reload.h"
 
 namespace editor {
 namespace {
@@ -898,6 +899,14 @@ std::string Session::run_json(const std::string& request) {
     return mods::json::dump(out);
 }
 
+namespace {
+// a result's note: one more sentence after what it says already
+void add_note(Value& result, const std::string& text) {
+    const std::string had = result.get("note").type == Value::String ? result.get("note").text : std::string();
+    result["note"] = had.empty() ? text : had + " " + text;
+}
+}  // namespace
+
 void Session::apply_live(const Package& p, const Value& before, Value& result) {
     std::vector<std::string> changed;
     for (const auto& a : p.manifest.get("actors").array) {
@@ -978,8 +987,8 @@ bool Session::change(Package& p, const std::string& label, const std::function<b
     auto all = all_manifests();
     if (!validate_package(p.mod, next, all, why) || !model_files(p.dir, next, why) || !world_placements(host_, p.mod, p.manifest, next, false, why)) return false;
     const bool actors_changed = !(next.get("actors") == p.manifest.get("actors")) || !(next.get("models") == p.manifest.get("models"));
-    bool other_changed = false;  // read when the game starts
-    for (const char* k : {"scenes", "quests", "letters", "charts", "items"}) other_changed = other_changed || !(next.get(k) == p.manifest.get(k));
+    const bool story_changed = story_reload::story_changed(p.manifest, next);
+    const bool scenes_changed = !(next.get("scenes") == p.manifest.get("scenes"));  // read when the game starts
     undo_.push_back({p.mod, label, p.manifest, next});
     if (undo_.size() > kUndoSize) undo_.erase(undo_.begin());
     redo_.clear();
@@ -987,11 +996,24 @@ bool Session::change(Package& p, const std::string& label, const std::function<b
     p.manifest = std::move(next);
     result["changed"] = true;
     if (actors_changed) apply_live(p, before, result);
-    if (other_changed) {
+    if (story_changed) apply_story(p, result);
+    if (scenes_changed) {
         result["live"] = false;
-        result["note"] = "Scene, quest, letter, chart and item changes take effect when the game starts again (save the package first).";
+        add_note(result, "Scene changes take effect when the game starts again (save the package first).");
     }
     return true;
+}
+
+void Session::apply_story(const Package& p, Value& result) {
+    std::string note, why;
+    const bool live = host_ && host_->apply_story(p.mod, p.name, p.dir, p.started, p.manifest, note, why);
+    result["story_live"] = live;
+    if (!live) {
+        result["live"] = false;
+        add_note(result, "Quest, letter, chart and item changes take effect when the game starts again (save the package first)" +
+                             (why.empty() ? std::string(".") : ": " + why + "."));
+    } else if (!note.empty())
+        add_note(result, note);
 }
 
 bool Session::restore(const std::string& mod, const Value& manifest, Value& result, std::string& why) {
@@ -999,10 +1021,12 @@ bool Session::restore(const std::string& mod, const Value& manifest, Value& resu
     if (!p) return why = "the mod of this step is gone", false;
     if (!world_placements(host_, mod, p->manifest, manifest, false, why)) return false;
     const bool actors_changed = !(manifest.get("actors") == p->manifest.get("actors")) || !(manifest.get("models") == p->manifest.get("models"));
+    const bool story_changed = story_reload::story_changed(p->manifest, manifest);
     const Value before = p->manifest;
     p->manifest = manifest;
     result["mod"] = mod;
     if (actors_changed) apply_live(*p, before, result);
+    if (story_changed) apply_story(*p, result);  // undo and redo: the same live update
     return true;
 }
 

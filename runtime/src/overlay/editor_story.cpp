@@ -150,7 +150,8 @@ void add_form(const Value& m, const std::string& kind) {
             ImGui::EndDisabled();
         }
         ImGui::EndDisabled();
-        muted("The X goes where Link (or the fly camera) is on the Great Sea; move it later the same way.");
+        muted("The X goes where Link (or the fly camera) is on the Great Sea; move it later the same way. The chart list shows a "
+              "change at once; the treasure's salvage point moves when the sea room loads again (Reload room).");
         return;
     }
     ImGui::SetNextItemWidth(-FLT_MIN);
@@ -318,6 +319,8 @@ void item_fields(const Value& m, const Value& e) {
         }
     }
     if (action == "none") muted("Without a use the item stays in the bag (it can't go on a button).");
+    muted("Its name, description, how many and use change in the game at once; a new item, its icon, held model and hold_up "
+          "after a restart (save, then start the game again).");
 }
 
 void selected_entry(const Value& m, const std::string& kind, const Value& e) {

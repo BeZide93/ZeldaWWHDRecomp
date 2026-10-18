@@ -43,6 +43,9 @@
 #include "../mods/story_manifest.h"
 #include "../mods/story_notebook.h"
 #include "../mods/story_notebook_list.h"
+#include "../mods/story_reload.h"
+#include "../mods/story_chart.h"
+#include "../mods/story_treasure.h"
 #include "../mods/story_scenes.h"
 #include "../mods/story_store.h"
 #include "../overlay/hostui.h"
@@ -540,6 +543,116 @@ void test_start(std::function<void(bool ok)> then) {
     });
 }
 
+// ---------------------------------------------------------------- the story tables while the game runs
+// apply_story (any thread) keeps the latest manifest of each mod whose quests, letters, charts or items
+// changed; the game thread takes it at a calm moment (story_tick): the mod's tables again
+// (story_notebook::redeclare), its items' texts (story_items::define), never a record of the save file.
+struct StoryChange {
+    std::string name, dir;
+    Value started, manifest;
+};
+std::mutex g_story_mu;
+std::map<std::string, StoryChange> g_story_pending;  // under g_story_mu
+std::map<std::string, Value> g_story_applied;        // game thread: the manifest whose tables the game has now
+std::string g_story_wait;                            // game thread: why the pending change waits (said once)
+
+std::string joined(const std::vector<std::string>& list) {
+    std::string s;
+    for (const auto& x : list) s += (s.empty() ? "" : ", ") + x;
+    return s;
+}
+// What of a story change waits for a restart (the note of apply_story)
+std::vector<std::string> story_later(const Value& started, const Value& manifest) {
+    std::vector<std::string> later;
+    const bool items_changed = !(started.get("items") == manifest.get("items"));
+    if (items_changed && !story_items::installed_hooks()) later.push_back("the items (the game had no mod items at start-up)");
+    else
+        for (const auto& i : story_reload::restart_items(started, manifest)) later.push_back("item " + i);
+    for (const auto& id : story_reload::gone(
+             [&] {
+                 std::vector<std::string> ids;
+                 for (const auto& c : started.get("charts").array) ids.push_back(c.get("id").string());
+                 return ids;
+             }(),
+             [&] {
+                 std::vector<std::string> ids;
+                 for (const auto& c : manifest.get("charts").array) ids.push_back(c.get("id").string());
+                 return ids;
+             }()))
+        later.push_back("chart " + id + " (removed)");
+    if (!manifest.get("charts").array.empty() && !story_treasure::installed() && !(started.get("charts") == manifest.get("charts")))
+        later.push_back("salvaging the treasure of a chart (the game had no chart at start-up)");
+    bool sail = false;
+    for (const auto& q : manifest.get("quests").array)
+        for (const auto& st : q.get("steps").array) sail |= st.get("sail_line").type != Value::Null;
+    if (sail && !story_notebook::sail_installed()) later.push_back("the King of Red Lions' sail lines (no quest had one at start-up)");
+    return later;
+}
+// game thread: no story talk, letter, scene, menu or stage change running
+bool story_calm(std::string& why) {
+    if (!story_notebook::story_idle(why)) return false;
+    if (story_scenes::active() || g_previewing) return why = "a scene is playing", false;
+    if (g_flying) return true;  // the editor view: the fly camera holds Link, nothing else runs
+    const std::string problem = ss::control_problem();
+    if (problem.empty() || problem == "no game in progress") return true;
+    return why = problem, false;
+}
+void story_tick() {
+    {
+        std::lock_guard<std::mutex> lk(g_story_mu);
+        if (g_story_pending.empty()) return;
+    }
+    std::string why;
+    if (!story_calm(why)) {
+        if (why != g_story_wait) set_status("The story change waits for a calm moment (" + why + ")");
+        g_story_wait = why;
+        return;
+    }
+    g_story_wait.clear();
+    std::map<std::string, StoryChange> pending;
+    {
+        std::lock_guard<std::mutex> lk(g_story_mu);
+        pending.swap(g_story_pending);
+    }
+    for (auto& [mod, ch] : pending) {
+        story_notebook::Redeclared r;
+        if (!story_notebook::redeclare(mod, ch.name, ch.manifest, r, why)) {
+            set_status("The story of " + mod + " is not changed in the game: " + why + " (it is in the package)");
+            continue;
+        }
+        // the items that change at once: their name, description, stack and use
+        unsigned items = 0;
+        if (story_items::installed_hooks()) {
+            std::vector<story_notebook::ManifestItem> list;
+            std::string w;
+            if (story_notebook::parse_items(ch.manifest, list, w)) {
+                const auto live = story_reload::live_items(ch.started, ch.manifest);
+                for (const auto& item : list)
+                    if (std::find(live.begin(), live.end(), item.id) != live.end() && story_items::define(mod, ch.dir, item, w)) items++;
+            }
+        }
+        // the loaded Quest Log keeps its step numbers: say where one now names another step
+        const auto applied = g_story_applied.find(mod);
+        const Value& before = applied != g_story_applied.end() ? applied->second : ch.started;
+        std::vector<std::string> moved;
+        if (story_store::ready()) {
+            story_mail::Book b = story_store::book();
+            for (const auto& m : story_reload::step_moves(before, ch.manifest))
+                if (b.usable() && story_notebook::saved_step(b, story_notebook::quest_key(mod, m.quest)) == m.saved)
+                    moved.push_back("quest " + m.quest + " is at step " + std::to_string(m.saved) +
+                                    (m.now ? ", which is step " + std::to_string(m.now) + " now" : ", which was removed"));
+        }
+        g_story_applied[mod] = ch.manifest;
+        std::string s = "Story of " + mod + " updated in the game: " + std::to_string(r.quests) + " quest(s), " + std::to_string(r.talks) +
+                        " quest talk(s), " + std::to_string(r.letters) + " letter(s), " + std::to_string(r.charts) + " chart(s), " +
+                        std::to_string(items) + " item(s)";
+        if (!moved.empty()) s += ". The loaded Quest Log keeps its steps: " + joined(moved);
+        if (!r.charts_kept.empty()) s += ". Until a restart the game keeps chart(s) " + joined(r.charts_kept);
+        set_status(s);
+    }
+    records_tick(true);
+}
+
 // ---------------------------------------------------------------- the host
 void reapply_mod(const std::string& mod);  // below: the live actors again (a model became ready)
 // the game's villagers the NPC catalogue knows (list_villagers): read from the actor list on the game
@@ -606,6 +719,19 @@ public:
         if (t_game) update(t_game);  // the drag's own step (drag_tick): at once
         else post(update);
         (void)why;
+        return true;
+    }
+    bool apply_story(const std::string& mod, const std::string& name, const std::string& dir, const Value& started, const Value& manifest,
+                     std::string& note, std::string& why) override {
+        if (!story_notebook::installed())
+            return why = "the story system was not running at start-up (it runs with the Story Notebook package on)", false;
+        {
+            std::lock_guard<std::mutex> lk(g_story_mu);
+            g_story_pending[mod] = {name, dir, started, manifest};
+        }
+        const auto later = story_later(started, manifest);
+        note = "Quests, quest talks, letters and charts change in the game at the next calm moment (after a talk, a letter or a scene).";
+        if (!later.empty()) note += " After a restart (save, then start the game again): " + joined(later) + ".";
         return true;
     }
     bool live_kind(const std::string& type, bool fallback) override { return story_actors::editor_kind_live(type, fallback); }
@@ -1516,6 +1642,7 @@ void logic_service(Cpu* c) {
     }
     for (auto& job : jobs) job(c);
     run_free_jobs(c);
+    story_tick();  // a story change at a calm moment
     // start at a step: Play from Link once the editor's view is back (after the warp), half a second calm
     if (g_play_after > 0) {
         if (g_playing) g_play_after = 0;

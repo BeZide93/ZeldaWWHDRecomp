@@ -169,6 +169,17 @@ public:
     // default, when the game doesn't know). Native props, switches, doors and enemies do in --editor.
     virtual bool live_kind(const std::string& type, bool fallback) { return fallback; }
 
+    // ---- the story tables (optional) ----
+    // The mod's quests, quest talks, letters, charts or items changed (`manifest` the whole new manifest,
+    // `started` the one the game started with, `dir` the package folder): the game takes the new tables
+    // at its next calm moment (story_reload.h; no quest talk, letter, scene, menu or stage change running).
+    // `note` says what waits for a restart. False (why): no story change shows before a restart.
+    virtual bool apply_story(const std::string& mod, const std::string& name, const std::string& dir, const Value& started,
+                             const Value& manifest, std::string& note, std::string& why) {
+        (void)mod, (void)name, (void)dir, (void)started, (void)manifest, (void)note;
+        return why = "the game is not running", false;
+    }
+
     // ---- the game's own villagers (optional) ----
     // The game's residents the NPC catalogue knows that are loaded now, read-only: [{"id" (catalogue id),
     // "name", "description", "where", "stage", "room", "position", "talks"}].
@@ -300,6 +311,7 @@ private:
                 std::string& why);
     bool restore(const std::string& mod, const Value& manifest, Value& result, std::string& why);
     void apply_live(const Package& p, const Value& before, Value& result);
+    void apply_story(const Package& p, Value& result);  // the story tables in the game (Host::apply_story)
     std::vector<std::pair<std::string, Value>> all_manifests() const;
     std::vector<Location> locations() const;
     bool warp_to(const Location& to, std::string& why);
