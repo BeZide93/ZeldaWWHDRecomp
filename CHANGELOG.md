@@ -20,6 +20,10 @@ what is on `devel` and not released yet (also in the
   switches, doors and enemies now appear and change live in the room, and dragging an actor moves it smoothly in place
   (one undo step). The editor and its MCP tools also cover the new quest forms: talks, flag and multi-quest conditions,
   finishing a quest and places inside buildings.
+- **Mod SDK v3 preview: world objects** (for mod makers). Mods can place solid scenery and walkable islands in the sea,
+  with collision from the model and wood, sand or grass ground; objects that bob on the waves or drift and can be
+  ridden; surfaces Link can climb, hookshot and grapple; islands that are visible from neighbouring sea squares, get
+  a ring on the sea chart and an arrival notice; and animated coast foam that uses the game's own foam look.
 - **Mod quests: finishing, flags and places inside buildings** (for mod makers). A character's dialogue or a scene's end
   can now finish a quest (the reward is given once), characters and quest steps can react to the mod's own flags or to
   several quests at once, a character can offer step-specific conversations, and a quest step can point into a
