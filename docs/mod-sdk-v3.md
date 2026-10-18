@@ -64,7 +64,10 @@ creation and the amount of additional actor work. It is a conservative policy,
 not a measurement of spare game heap.
 
 Optional `when` conditions can name `quest` plus `step`, an owned mod `item`
-(`item:<id>`), and `time` (`day` or `night`). Conditions are checked when the room
+(`item:<id>`), `time` (`day` or `night`), and `flag` / `not_flag` (a mod flag that
+must be set / unset). `quests` accepts up to eight `{"quest":"a","step":2}`
+entries; every entry must match. A single `quest` / `step`, if also present, must
+match too. Conditions are checked when the room
 is populated and reconciled in the current room on game logic steps. Pending
 creation/deletion retains its identity; an active conversation finishes before
 its partner is removed. Actors belong to the native room layer and unload with it.
@@ -559,12 +562,47 @@ array contains at most eight actions:
 same manifest. Actions run in order after the talk closes; a failing action stops
 the sequence. Skipping or aborting a scene does not apply its end actions.
 
+`{"action":"quest_done","id":"lantern"}` completes a quest declared in the
+same manifest. It gives the declared reward once, marks the quest done in the
+notebook, and clears its tracking selection. Completing an already completed
+quest does nothing. This action works in actor dialogue and a scene's final
+`end.then`; `quest_step` remains forward-only.
+
+Flag conditions read only the declaring mod's flags. Every referenced flag must
+have a producer in the same manifest: an actor's read/open, switch, break or defeat
+flag, or a `flag` action in an actor, talk or scene end. A reference alone does not
+declare a flag. Foreign mod IDs and game event bit numbers are rejected.
+
+Use `talks` to give a character different reactions to quest progress:
+
+```json
+"talks": [
+  {"when":{"quest":"lantern","step":1},
+   "lines":["Bring the lantern back."],
+   "then":[{"action":"quest_step","id":"lantern","step":2}]},
+  {"when":{"quest":"lantern","step":2},
+   "lines":["Thank you!"],
+   "then":[{"action":"quest_done","id":"lantern"}]},
+  {"lines":["The lantern is safe."]}
+]
+```
+
+Residents, signs and mod actors without combat or carry support can have up to
+eight talks. The first matching talk is selected;
+an entry without `when` is a fallback, so put it last. Each talk has the same
+line and eight-action limits as the single-dialogue form. The actor's top-level
+`when` still controls whether it appears. Do not combine `talks` with top-level
+`lines` or `then`; the old single-dialogue form remains valid. There is no `any`
+condition: all supplied conditions must hold. Once a conversation starts, its
+selected text and actions stay fixed. Restoring a conversation whose selected
+definition has changed must not run replacement actions.
+
 A placed character belongs to its declaring mod: its actor ID is local to that
 mod. Multiple mods may place separate characters using the same native resident
 model. They do not compete for that placed character's lines. Existing catalogue
 resident takeovers keep SDK v2's rules: tracked quest first, then start order;
 one quest per talk. The existing choice box chooses among eligible quest topics.
-A placed character's `lines` remains linear. Scene `choice` steps provide two explicit forward branches.
+A talk's `lines` remains linear. Scene `choice` steps provide two explicit forward branches.
 
 ## Scenes
 

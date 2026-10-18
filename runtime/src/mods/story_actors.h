@@ -15,7 +15,11 @@ inline constexpr uint32_t kPropsScratchOffset=5376;
 inline constexpr uint32_t kSwitchScratchOffset=kPropsScratchOffset+0x30;
 inline constexpr uint32_t kDoorScratchOffset=kSwitchScratchOffset+0x30;
 inline constexpr uint32_t kIdentityScratchOffset=5632;
-static_assert(kDoorScratchOffset+0x30<=kIdentityScratchOffset);
+// One snapshot-owned selected dialogue record in the existing unused gap.
+inline constexpr uint32_t kTalkProofScratchOffset=kDoorScratchOffset+0x30;
+inline constexpr uint32_t kTalkProofBytes=64;
+static_assert(kTalkProofScratchOffset>=kDoorScratchOffset+0x30);
+static_assert(kTalkProofScratchOffset+kTalkProofBytes<=kIdentityScratchOffset);
 // Preserve existing resident/prop/switch snapshot offsets when adding enemies.
 inline constexpr uint32_t kEnemyProfilesScratchOffset=10752;
 inline constexpr uint32_t kEnemyOwnershipScratchOffset=kEnemyProfilesScratchOffset+4*0x30;
@@ -23,6 +27,7 @@ inline constexpr uint32_t kEnemyEpochScratchOffset=kEnemyOwnershipScratchOffset+
 inline constexpr uint32_t kScratchBytes=kEnemyEpochScratchOffset+128*4;
 static_assert(kEnemyProfilesScratchOffset>=kIdentityScratchOffset+128*40);
 static_assert((kEnemyOwnershipScratchOffset&15)==0);
+static_assert(kTalkProofScratchOffset+kTalkProofBytes<=kScratchBytes);
 bool load(const std::string& mod,const std::vector<story_notebook::ManifestActor>& actors,std::string& why);
 // Scene flags commit or roll back with the complete actor declaration batch.
 bool load(const std::string& mod,const std::vector<story_notebook::ManifestActor>& actors,std::string& why,const std::vector<std::string>& scene_flags);

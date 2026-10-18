@@ -1309,6 +1309,8 @@ target_include_directories(story_actors_runtime_test PRIVATE runtime/include run
 target_sources(story_actors_runtime_test PRIVATE runtime/src/mods/mod_actor_knockback.cpp runtime/src/mods/mod_actor_native_combat.cpp runtime/src/mods/mod_actor_attention.cpp runtime/src/mods/story_item_models.cpp runtime/src/mods/actor_model_cache.cpp)
 target_compile_options(story_actors_runtime_test PRIVATE -UNDEBUG)
 add_test(NAME story_actor_native_contract COMMAND story_actors_runtime_test)
+add_test(NAME story_actor_ordered_talks COMMAND story_actors_runtime_test --talks)
+add_test(NAME story_actor_sign_ordered_talks COMMAND story_actors_runtime_test --talks-sign)
 add_test(NAME story_actor_nonresident_hook_scope COMMAND story_actors_runtime_test --no-resident)
 add_test(NAME story_actor_editor_live COMMAND story_actors_runtime_test --editor)
 add_test(NAME story_actor_seated_resident_contract COMMAND story_actors_runtime_test --ym1)

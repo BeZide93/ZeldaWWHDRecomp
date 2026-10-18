@@ -285,6 +285,10 @@ void locations() {
         quest += l.group == "Quest";
     }
     CHECK(islands == 49 && rooms == 3 && quest == 3);  // two actors, one step with a place
+    {auto interior=m;interior["quests"].array[0]["steps"].array[0]["place"]=json(R"({"stage":"Pnezumi","room":0,"point":2,"sea":{"x":-200000,"z":300000}})");
+        const auto places=editor::build_locations({},{{"editor-test",interior}});bool found=false;
+        for(const auto&p:places)if(p.id=="step:editor-test:q:1"){found=true;CHECK(p.stage=="Pnezumi"&&p.room==0&&p.point==2&&p.group=="Quest");}CHECK(found);}
+
     auto find = [&](const std::string& id) -> const editor::Location* {
         for (const auto& l : list)
             if (l.id == id) return &l;
@@ -303,11 +307,16 @@ void records() {
     Value m = json(kManifest);
     m["quests_format"] = 1;
     m["quests"] = json(R"([{"id": "q", "title": "Q", "steps": [{"n": 1, "text": "Go"}]}])");
+    m["actors"].array[1].object.erase("lines");
+    m["actors"].array[1].object.erase("then");
+    m["actors"].array[1]["talks"] = json(R"([{"lines":"Hi.","then":[{"action":"flag","id":"met-guide"},{"action":"flag","id":"branch-seen"}]}])");
     const auto own = editor::mod_records("editor-test", m);
     using namespace story_mail;
     auto has = [&](uint8_t kind, uint16_t key) { return std::find(own.begin(), own.end(), editor::Record{kind, key}) != own.end(); };
     CHECK(has(kRecordActorFlag, letter_key("editor-test", "actor-flag:sign-a-read")));
     CHECK(has(kRecordActorFlag, letter_key("editor-test", "actor-flag:met-guide")));
+    CHECK(has(kRecordActorFlag, letter_key("editor-test", "actor-flag:branch-seen")));
+    CHECK(has(kRecordQuestActionReward, letter_key("editor-test", "q")));
     CHECK(has(kRecordQuest, letter_key("editor-test", "q")) && has(kRecordQuestFlags, letter_key("editor-test", "q")));
 
     // a story area with the mod's records, another mod's, and a key both mods' names map to
@@ -315,6 +324,8 @@ void records() {
     Book book(area, 64);
     CHECK(book.set(kRecordActorFlag, letter_key("editor-test", "actor-flag:sign-a-read"), 1));
     CHECK(book.set(kRecordQuest, letter_key("editor-test", "q"), 2));
+    CHECK(book.set(kRecordQuestActionReward, letter_key("editor-test", "q"), 6));
+    CHECK(book.set(kRecordActorFlag, letter_key("editor-test", "actor-flag:branch-seen"), 1));
     CHECK(book.set(kRecordActorFlag, letter_key("other", "actor-flag:x"), 1));
     CHECK(book.set(kRecordQuest, letter_key("other", "q"), 5));
     CHECK(book.set(kRecordItem, 1, 1));  // the notebook
@@ -324,7 +335,9 @@ void records() {
     std::memcpy(copy, area, sizeof area);
     unsigned skipped = 0;
     const unsigned erased = editor::reset_records(book, own, {collide}, skipped);
-    CHECK(erased == 2 && skipped == 1);
+    CHECK(erased == 4 && skipped == 1);
+    CHECK(!book.has(kRecordQuestActionReward, letter_key("editor-test", "q")));
+    CHECK(!book.has(kRecordActorFlag, letter_key("editor-test", "actor-flag:branch-seen")));
     CHECK(!book.has(kRecordActorFlag, letter_key("editor-test", "actor-flag:sign-a-read")) && !book.has(kRecordQuest, letter_key("editor-test", "q")));
     CHECK(book.get(kRecordActorFlag, letter_key("other", "actor-flag:x")) == 1 && book.get(kRecordQuest, letter_key("other", "q")) == 5);
     CHECK(book.get(kRecordItem, 1) == 1 && book.get(collide.kind, collide.key) == 1);

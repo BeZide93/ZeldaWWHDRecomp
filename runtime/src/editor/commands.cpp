@@ -416,19 +416,17 @@ std::vector<Location> build_locations(const std::vector<std::pair<std::string, s
         for (const auto& q : m.get("quests").array)
             for (const auto& s : q.get("steps").array) {
                 const auto& place = s.get("place");
-                if (place.get("x").type != Value::Number || place.get("z").type != Value::Number) continue;
-                const float x = float(place.get("x").number), z = float(place.get("z").number);
-                const int room = sea_room(x, z);
-                if (!room) continue;
+                story_notebook::QuestDestination destination;std::string place_why;
+                if(!story_notebook::parse_quest_destination(place,destination,place_why))continue;
                 Location l;
                 const int n = int(s.get("n").number);
                 l.id = "step:" + mod + ":" + q.get("id").string() + ":" + std::to_string(n);
-                l.label = q.get("id").string() + " step " + std::to_string(n) + "  (" + island_name(room) + ")";
+                l.label = q.get("id").string() + " step " + std::to_string(n) + "  (" + destination.stage + " room " + std::to_string(destination.room) + ")";
                 l.group = "Quest";
-                l.stage = "sea";
-                l.room = room;
-                l.point = kAtPosition;
-                l.position = {x, 2000, z};  // a step's place has no height: Link drops onto the ground
+                l.stage = destination.stage;
+                l.room = int(destination.room);
+                l.point = destination.point;
+                l.position = destination.position;
                 out.push_back(l);
             }
     }
@@ -453,12 +451,14 @@ std::vector<Record> mod_records(const std::string& mod, const Value& manifest) {
     for (const auto& a : manifest.get("actors").array) {
         flag(a.get("flag").string());
         actions(a.get("then"));
+        for (const auto& talk : a.get("talks").array) actions(talk.get("then"));
     }
     for (const auto& s : manifest.get("scenes").array)
         for (const auto& st : s.get("steps").array) actions(st.get("then"));
     for (const auto& q : manifest.get("quests").array) {
         const uint16_t key = letter_key(mod, q.get("id").string());  // story_notebook_list.h quest_key
-        for (uint8_t kind : {kRecordQuest, kRecordTracked, kRecordCarried, kRecordQuestFlags, kRecordSailLine, kRecordQuestOrder}) add(kind, key);
+        for (uint8_t kind : {kRecordQuest, kRecordTracked, kRecordCarried, kRecordQuestFlags, kRecordSailLine, kRecordQuestOrder,
+                             kRecordQuestActionReward}) add(kind, key);
         if (q.get("letter").get("id").type == Value::String) {
             add(kRecordLetter, letter_key(mod, q.get("letter").get("id").text));
             add(kRecordLetterEnclosures, letter_key(mod, q.get("letter").get("id").text));
@@ -582,6 +582,7 @@ Value Session::progress(const std::string& mod, const Value& manifest) {
     for (const auto& a : manifest.get("actors").array) {
         flag(a.get("flag").string());
         actions(a.get("then"));
+        for (const auto& talk : a.get("talks").array) actions(talk.get("then"));
     }
     for (const auto& sc : manifest.get("scenes").array)
         for (const auto& st : sc.get("steps").array) actions(st.get("then"));

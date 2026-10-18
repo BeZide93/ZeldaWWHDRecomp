@@ -9,6 +9,66 @@ static Value example() {
 }
 int main() {
     std::string why;std::vector<ManifestActor> actors;std::vector<ManifestScene> scenes;
+    { // Completion actions share the same strict parser in actor and scene lists.
+        auto m=mods::json::parse(R"({"quests":[{"id":"delivery"}]})");
+        auto action=mods::json::parse(R"([{"action":"quest_done","id":"delivery"}])");
+        std::vector<StoryAction> parsed;
+        assert(world_manifest::actions(m,action,parsed,why));
+        assert(parsed.size()==1&&parsed[0].kind==StoryAction::Kind::QuestDone);
+        action.array[0]["id"]="foreign:delivery";parsed.clear();
+        assert(!world_manifest::actions(m,action,parsed,why));
+        action.array[0]["id"]="missing";
+        assert(!world_manifest::actions(m,action,parsed,why));
+        action.array[0]["id"]="delivery";action.array[0]["step"]=1;
+        assert(!world_manifest::actions(m,action,parsed,why));
+    }
+    {
+        auto m=example();m["quests"]=mods::json::parse(R"([{"id":"a","steps":[{"n":1}]},{"id":"b","steps":[{"n":2}]}])");
+        m["actors"].array[0]["when"]=mods::json::parse(R"({"flag":"read","not_flag":"seen","quests":[{"quest":"a","step":1},{"quest":"b","step":2}]})");
+        assert(parse_actors(m,actors,why));assert(actors[0].when_flag=="read"&&actors[0].when_not_flag=="seen"&&actors[0].quests.size()==2);
+        m["actors"].array[0]["when"]["flag"]="unknown";assert(!parse_actors(m,actors,why));
+        m["actors"].array[0]["when"]["flag"]="other:read";assert(!parse_actors(m,actors,why));
+        m["actors"].array[0]["when"]["flag"]="0x2D01";assert(!parse_actors(m,actors,why));
+        m["actors"].array[0]["when"]["flag"]="read";
+        m["actors"].array[0]["when"]["quests"].array[1]["step"]=3;assert(!parse_actors(m,actors,why));
+    }
+    {
+        auto m=example();m["actors"].array[0].object.erase("lines");m["actors"].array[0].object.erase("then");
+        m["actors"].array[0]["talks"]=mods::json::parse(R"([{"when":{"flag":"read"},"lines":"Read first","then":[{"action":"flag","id":"seen"}]},{"lines":"Fallback"}])");
+        assert(parse_actors(m,actors,why));assert(actors[0].talks.size()==2&&actors[0].talks[0].lines=="Read first");
+        auto t=actors[0].talks[0];t.quests={{"a",2},{"b",1}};
+        auto quest=[](const std::string&q){return q=="a"?2:1;};auto item=[](const std::string&){return 1;};
+        assert(condition_matches(t,quest,item,[](const std::string&){return true;},true));
+        assert(!condition_matches(t,quest,item,[](const std::string&){return false;},true));
+        t.quests[1].step=2;assert(!condition_matches(t,quest,item,[](const std::string&){return true;},true));
+        m["actors"].array[0]["lines"]="Ambiguous";assert(!parse_actors(m,actors,why));m["actors"].array[0].object.erase("lines");
+        auto sign=m;sign["actors"].array[0]["actor"]="kanban";sign["actors"].array[0]["flag"]="notice.read";
+        assert(parse_actors(sign,actors,why)&&actors[0].actor=="sign"&&actors[0].talks.size()==2);
+        auto&talks=m["actors"].array[0]["talks"].array;while(talks.size()<9)talks.push_back(talks.back());assert(!parse_actors(m,actors,why));
+    }
+    { // Conditions recognize every existing flag-producing actor spelling.
+        for(const char*type:{"sign","kanban","PROC_KANBAN","chest","Tbox","takara","PROC_TBOX"}){
+            auto m=example();m["actors"].array[1]["actor"]=type;
+            m["actors"].array[0]["when"]=mods::json::parse(R"({"flag":"read"})");
+            assert(parse_actors(m,actors,why)&&actors[0].when_flag=="read");
+        }
+        for(const char*type:{"pot","barrel","crate","chuchu","bokoblin","moblin","keese"}){
+            auto m=example();auto&producer=m["actors"].array[1];producer["actor"]=type;producer.object.erase("flag");
+            const bool prop=std::string(type)=="pot"||std::string(type)=="barrel"||std::string(type)=="crate";
+            producer[prop?"broken_flag":"defeated_flag"]="produced";producer["drops"]=mods::json::parse("[]");
+            m["actors"].array[0]["when"]=mods::json::parse(R"({"flag":"produced"})");
+            assert(parse_actors(m,actors,why)&&actors[0].when_flag=="produced");
+        }
+        auto m=mods::json::parse(R"({"actors":[{"kind":"mod","flag":"custom"},{"kind":"mod","combat":{},"defeated_flag":"won"},{"actor":"switch","switch_flag":"pressed"}]})");
+        for(const char*name:{"custom","won","pressed"})assert(world_manifest::known_flag(m,name));
+        assert(!world_manifest::known_flag(m,"missing"));
+        m=mods::json::parse(R"({"actors":[{"actor":"resident","when":{"flag":"read"}}]})");
+        assert(!world_manifest::known_flag(m,"read")); // references never declare flags
+        m["actors"].array[0]["then"]=mods::json::parse(R"([{"action":"flag","id":"read","value":"yes"}])");
+        assert(!world_manifest::known_flag(m,"read"));
+        m["actors"].array[0]["then"].array[0]["value"]=false;
+        assert(world_manifest::known_flag(m,"read")); // clearing is an owned producer too
+    }
     { // A captured native PID must never be rebound to a different declared reward/config.
         using namespace story_actors::identity;ManifestActor a;a.id="a";a.actor="pot";a.stage="sea";a.room=11;a.broken_flag="a.broken";a.drops={{"shard",1}};
         const auto expected=fingerprint("test",a);const auto saved=record(expected);assert(matches(saved.data(),expected));
@@ -152,6 +212,13 @@ int main() {
     auto mod=mods::json::parse(R"({"models":[{"id":"post","source":"models/post.glb"}],"actors":[{"id":"post","kind":"mod","model":"post","stage":"town","room":0,"position":{"x":0,"y":0,"z":0},"collision":{"radius":30,"height":120,"mode":"solid"},"attention":{"prompt":"check"},"lines":"Hello"}]})");
     assert(parse_actors(mod,actors,why)&&actors[0].kind=="mod"&&actors[0].model=="post"&&actors[0].collision_height==120&&!actors[0].pushable);
     auto valid_mod=mod;mod["actors"].array[0]["collision"]["mode"]="pushable";assert(parse_actors(mod,actors,why)&&actors[0].pushable);
+    {auto talks=valid_mod;auto&a=talks["actors"].array[0];a.object.erase("lines");
+        a["talks"]=mods::json::parse(R"([{"when":{"not_flag":"met"},"lines":"First meeting","then":[{"action":"flag","id":"met"}]},{"lines":"Welcome back"}])");
+        assert(parse_actors(talks,actors,why)&&actors[0].talks.size()==2&&actors[0].flag.empty());
+        a["lines"]="Ambiguous";assert(!parse_actors(talks,actors,why));a.object.erase("lines");
+        a["then"]=mods::json::parse("[]");assert(!parse_actors(talks,actors,why));
+    }
+
     std::vector<ManifestModel> models;assert(parse_models(valid_mod,models,why)&&models[0].kind=="static");
     mod=valid_mod;mod["models"].array[0]["kind"]="skinned";assert(parse_models(mod,models,why)&&models[0].kind=="skinned");
     mod["models"].array[0]["kind"]="static";assert(parse_models(mod,models,why)&&models[0].kind=="static");
@@ -237,7 +304,7 @@ int main() {
         const auto rejects=[&](const Value& data){std::vector<ManifestActor> rejected;assert(!parse_actors(data,rejected,why));};
         auto data=combat_fixture();assert(parse_actors(data,actors,why)&&actors.size()==1&&actors[0].kind=="mod");
         for(const char* field:{"defeated_flag","drops"}){auto bad=data;bad["actors"].array[0].object.erase(field);rejects(bad);}
-        for(const char* field:{"flag","lines","then","attention","params","parameters"}){auto bad=data;bad["actors"].array[0][field]=Value{};rejects(bad);}
+        for(const char* field:{"flag","lines","then","talks","attention","params","parameters"}){auto bad=data;bad["actors"].array[0][field]=Value{};rejects(bad);}
         for(const char* kind:{"chuchu","bokoblin","resident","pot","switch","door"}){auto bad=data;auto& a=bad["actors"].array[0];a.object.erase("kind");a.object.erase("model");a["actor"]=kind;rejects(bad);}
         {auto bad=data;bad["models"].array[0]["kind"]="static";rejects(bad);}
         for(const char* reaction:{"stun","death"}){auto bad=data;bad["actors"].array[0]["combat"][reaction].object.erase("clip");rejects(bad);bad=data;bad["actors"].array[0]["combat"][reaction]["clip"]="";rejects(bad);}
@@ -254,7 +321,7 @@ int main() {
     { // Carry opts into native Link procedures; raw flags and native actors are excluded.
         auto data=mods::json::parse(R"({"items":[{"id":"token"}],"models":[{"id":"box","source":"assets/box.glb"}],"actors":[{"id":"box","kind":"mod","model":"box","stage":"sea","room":11,"position":{"x":0,"y":0,"z":0},"collision":{"radius":25,"height":60,"mode":"solid"},"carry":{}}]})");
         const auto rejects=[&](const Value&d){assert(!parse_actors(d,actors,why));};assert(parse_actors(data,actors,why)&&actors[0].carry_enabled&&!actors[0].carry_break_on_impact);
-        for(const char*f:{"lines","then","attention","flag","combat"}){auto bad=data;bad["actors"].array[0][f]=Value{};rejects(bad);}
+        for(const char*f:{"lines","then","talks","attention","flag","combat"}){auto bad=data;bad["actors"].array[0][f]=Value{};rejects(bad);}
         {auto bad=data;bad["actors"].array[0]["carry"]["native_flags"]=16;rejects(bad);}
         {auto bad=data;bad["actors"].array[0]["carry"]["break_on_impact"]=1;rejects(bad);}
         {auto bad=data;bad["actors"].array[0].object.erase("collision");rejects(bad);}
@@ -264,6 +331,7 @@ int main() {
         {auto bad=data;bad["actors"].array[0]["scale"]=mods::json::parse(R"({"x":2,"y":2,"z":2})");rejects(bad);}
         {auto bad=data;auto&a=bad["actors"].array[0];a.object.erase("kind");a.object.erase("model");a["actor"]="pot";rejects(bad);}
         data["actors"].array[0]["carry"]["break_on_impact"]=true;rejects(data);data["actors"].array[0]["broken_flag"]="box.broken";rejects(data);data["actors"].array[0]["drops"]=mods::json::parse(R"([{"item":"item:token","quantity":1}])");assert(parse_actors(data,actors,why)&&actors[0].carry_break_on_impact&&actors[0].drops.size()==1);
+        assert(world_manifest::known_flag(data,"box.broken"));
         {auto bad=data;bad["actors"].array[0]["drops"].array[0]["item"]="item:foreign";rejects(bad);}
         {auto bad=data;auto second=bad["actors"].array[0];second["id"]="other";bad["actors"].array.push_back(second);rejects(bad);}
     }

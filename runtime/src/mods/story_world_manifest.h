@@ -16,7 +16,7 @@
 namespace story_notebook {
 struct WorldPoint { float x=0,y=0,z=0; bool operator==(const WorldPoint&)const=default; };
 struct StoryAction {
-    enum class Kind { Give,Take,QuestStep,Flag,StartScene };
+    enum class Kind { Give,Take,QuestStep,Flag,StartScene,QuestDone };
     Kind kind=Kind::Flag; std::string id; unsigned value=1;
     bool operator==(const StoryAction&)const=default;
 };
@@ -27,6 +27,11 @@ struct ManifestLookAt {
 };
 struct ManifestPath {std::vector<WorldPoint> points;float speed=100;bool loop=false;};
 struct ManifestPropDrop {std::string item;unsigned quantity=1;};
+struct QuestCondition {std::string quest;unsigned step=0;bool operator==(const QuestCondition&)const=default;};
+struct ManifestTalk {
+    std::string quest,item,time,when_flag,when_not_flag,lines;unsigned quest_step=0;
+    std::vector<QuestCondition> quests;std::vector<StoryAction> then;
+};
 struct ManifestActor {
     std::string id,actor,stage,kind,model,animation,prompt="check",texture,texture_digest; unsigned room=0,texture_token=0;
     float collision_radius=30,collision_height=100; bool pushable=false;
@@ -38,7 +43,17 @@ struct ManifestActor {
     std::string broken_flag,switch_flag,switch_actor,defeated_flag;std::vector<ManifestPropDrop> drops;
     std::string flag,quest,item,time,lines; unsigned quest_step=0;
     std::vector<StoryAction> then;
+    std::string when_flag,when_not_flag;std::vector<QuestCondition> quests;std::vector<ManifestTalk> talks;
 };
+template<class Condition,class Quest,class Item,class Flag>
+inline bool condition_matches(const Condition&c,Quest quest,Item item,Flag flag,bool day){
+    if(!c.quest.empty()&&quest(c.quest)!=int32_t(c.quest_step))return false;
+    for(const auto&q:c.quests)if(quest(q.quest)!=int32_t(q.step))return false;
+    if(!c.item.empty()&&item(c.item.substr(5))<=0)return false;
+    if(!c.when_flag.empty()&&!flag(c.when_flag))return false;
+    if(!c.when_not_flag.empty()&&flag(c.when_not_flag))return false;
+    return c.time.empty()||day==(c.time=="day");
+}
 struct SceneCameraKey {WorldPoint eye,target;unsigned frames=0;bool operator==(const SceneCameraKey&)const=default;};
 struct SceneChoiceOption {std::string text,next;size_t next_step=0;bool operator==(const SceneChoiceOption&)const=default;};
 struct SceneStep {
@@ -79,6 +94,37 @@ inline bool texture_path(const Value&v){
     size_t start=0;while(start<v.text.size()){const size_t end=v.text.find('/',start);const auto part=v.text.substr(start,end==std::string::npos?end:end-start);if(part.empty()||part=="."||part=="..")return false;for(unsigned char c:part)if(c<32||c==127||c=='\\'||c==':')return false;if(end==std::string::npos)break;start=end+1;}return true;
 }
 inline bool flag_id(const Value& v) {return id(v)&&v.text.rfind("0x",0)!=0;}
+// A readable flag must have a same-manifest producer. References cannot declare flags.
+inline bool known_flag(const Value& m,const std::string& name) {
+    const auto produces=[&](const Value&v){return flag_id(v)&&v.text==name;};
+    auto writes=[&](const Value& list){
+        if(list.type!=Value::Array||list.array.size()>8)return false;
+        for(const auto&a:list.array)if(keys(a,{"action","id","value"})&&a.get("action").string()=="flag"&&
+            produces(a.get("id"))&&(!a.object.contains("value")||a.get("value").type==Value::Bool))return true;
+        return false;
+    };
+    for(const auto&a:m.get("actors").array){
+        const auto type=a.get("actor").string();
+        const bool sign=type=="sign"||type=="kanban"||type=="PROC_KANBAN";
+        const bool chest=type=="chest"||type=="Tbox"||type=="takara"||type=="PROC_TBOX";
+        const bool mod=a.get("kind").string()=="mod"&&!a.object.contains("actor");
+        if((sign||chest||(mod&&!a.object.contains("combat")))&&produces(a.get("flag")))return true;
+        if(type=="switch"&&produces(a.get("switch_flag")))return true;
+        if((type=="pot"||type=="barrel"||type=="crate"||(mod&&a.get("carry").get("break_on_impact").type==Value::Bool&&a.get("carry").get("break_on_impact").boolean))&&produces(a.get("broken_flag")))return true;
+        if((type=="chuchu"||type=="bokoblin"||type=="moblin"||type=="keese"||
+            (mod&&a.get("combat").type==Value::Object))&&produces(a.get("defeated_flag")))return true;
+        if(writes(a.get("then")))return true;
+        for(const auto&t:a.get("talks").array)if(writes(t.get("then")))return true;
+    }
+    for(const auto&scene:m.get("scenes").array)for(const auto&step:scene.get("steps").array)
+        if(step.get("type").string()=="end"&&writes(step.get("then")))return true;
+    return false;
+}
+inline bool read_flag(const Value&m,const Value&v,std::string&out,std::string&why){
+    if(v.type==Value::Null)return true;
+    if(!flag_id(v)||!known_flag(m,v.text))return why="flag condition requires a same-manifest flag producer",false;
+    out=v.text;return true;
+}
 inline bool point(const Value& v,WorldPoint& p,float limit=350000) {
     if(v.type!=Value::Object) return false;
     for(auto key:{"x","y","z"}) if(v.get(key).type!=Value::Number||!std::isfinite(v.get(key).number)||std::fabs(v.get(key).number)>limit) return false;
@@ -124,12 +170,29 @@ inline bool actions(const Value& m,const Value& v,std::vector<StoryAction>& out,
         } else if(kind=="quest_step") {s.kind=StoryAction::Kind::QuestStep;if(!keys(a,{"action","id","step"}))return why="unknown quest action field",false;
             if(!integer(a.get("step"),1,254)||!quest_step(m,s.id,unsigned(a.get("step").number))) return why="action names an undeclared quest step",false;
             s.value=unsigned(a.get("step").number);
+        } else if(kind=="quest_done") {s.kind=StoryAction::Kind::QuestDone;
+            if(!keys(a,{"action","id"})||!id(a.get("id"))||!declared(m,"quests",s.id))return why="quest_done names an undeclared same-mod quest",false;
         } else if(kind=="flag") {s.kind=StoryAction::Kind::Flag;if(!keys(a,{"action","id","value"}))return why="unknown flag action field",false;
             if(a.object.contains("value")){if(a.get("value").type!=Value::Bool)return why="flag value must be boolean",false;s.value=a.get("value").boolean?1:0;}if(!flag_id(a.get("id"))) return why="flag must be a mod-owned id",false;
         } else if(kind=="scene") {s.kind=StoryAction::Kind::StartScene;if(!keys(a,{"action","id"}))return why="unknown scene action field",false;if(!declared(m,"scenes",s.id)) return why="action names an undeclared scene",false;
         } else return why="unknown then action",false;
         out.push_back(s);
     } return true;
+}
+template<class Condition> inline bool actor_condition(const Value&m,const Value&when,Condition&out,std::string&why){
+    if(when.type!=Value::Null&&!keys(when,{"quest","step","item","time","flag","not_flag","quests"}))return why="actor when must be an object",false;
+        if(when.get("quest").type!=Value::Null){out.quest=when.get("quest").string();if(!integer(when.get("step"),1,254)||!quest_step(m,out.quest,unsigned(when.get("step").number)))return why="actor condition names an undeclared quest step",false;out.quest_step=unsigned(when.get("step").number);}
+        if(!read_flag(m,when.get("flag"),out.when_flag,why)||!read_flag(m,when.get("not_flag"),out.when_not_flag,why))return false;
+        if(when.get("step").type!=Value::Null&&when.get("quest").type==Value::Null)return why="actor step requires quest",false;
+        const auto& multiple=when.get("quests");
+        if(multiple.type!=Value::Null){
+            if(multiple.type!=Value::Array||multiple.array.empty()||multiple.array.size()>8)return why="quests condition needs 1..8 quest steps",false;
+            for(const auto&q:multiple.array){if(!keys(q,{"quest","step"})||!integer(q.get("step"),1,254)||!quest_step(m,q.get("quest").string(),unsigned(q.get("step").number)))return why="quests condition names an undeclared quest step",false;
+                out.quests.push_back({q.get("quest").text,unsigned(q.get("step").number)});}
+        }
+        if(when.get("item").type!=Value::Null){out.item=when.get("item").string();if(out.item.rfind("item:",0)!=0||!declared(m,"items",out.item.substr(5)))return why="actor condition names an undeclared mod item",false;}
+        if(when.get("time").type!=Value::Null){out.time=when.get("time").string();if(out.time!="day"&&out.time!="night")return why="actor time must be day or night",false;}
+    return true;
 }
 inline bool place(const Value& v,std::string& stage,unsigned& room) {
     if(v.get("stage").type!=Value::String||v.get("stage").text.empty()||v.get("stage").text.size()>8||!integer(v.get("room"),0,63)) return false;
@@ -184,7 +247,7 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
     if(list.type==Value::Null)return true;
     if(list.type!=Value::Array||list.array.size()>kMaxActorsPerMod)return why="actors must be a list of up to 64",false;
     for(const auto& v:list.array){ManifestActor a;
-        if(!keys(v,{"id","actor","kind","model","animation","look_at","path","collision","attention","stage","room","position","rotation","scale","params","parameters","flag","broken_flag","defeated_flag","drops","carry","combat","native_drops","switch_flag","switch","when","lines","then","texture"}))return why="unknown actor field",false;
+        if(!keys(v,{"id","actor","kind","model","animation","look_at","path","collision","attention","stage","room","position","rotation","scale","params","parameters","flag","broken_flag","defeated_flag","drops","carry","combat","native_drops","switch_flag","switch","when","lines","then","texture","talks"}))return why="unknown actor field",false;
         if(!id(v.get("id")))return why="invalid actor id",false;a.id=v.get("id").text;a.actor=v.get("actor").string();
         if(v.object.contains("kind")) {
             if(v.get("kind").string()!="mod"||v.object.contains("actor"))return why="mod actor kind cannot name a native actor",false;
@@ -222,7 +285,7 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
             if(v.object.contains("combat")){
                 if(!skinned_model||!story_mod_combat::parse(v.get("combat"),a.combat,why))return why=why.empty()?"combat requires a skinned model":why,false;
                 if(a.combat.stun.clip.empty()||a.combat.death.clip.empty())return why="combat requires named stun and death animation clips",false;
-                for(const char* forbidden:{"flag","lines","then","attention"})if(v.object.contains(forbidden))return why="combat actors cannot declare dialogue, prompts or generic flags",false;
+                for(const char* forbidden:{"flag","lines","then","talks","attention"})if(v.object.contains(forbidden))return why="combat actors cannot declare dialogue, prompts or generic flags",false;
                 if(!flag_id(v.get("defeated_flag")))return why="combat requires a mod-owned defeated_flag",false;
                 if(a.pushable||a.collision_radius>200||a.collision_height>400)return why="combat requires solid collision with radius up to 200 and height up to 400",false;
                 a.combat_enabled=true;a.defeated_flag=v.get("defeated_flag").text;
@@ -238,7 +301,7 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
         if(v.object.contains("carry")){
             const auto& carry=v.get("carry");if(a.kind!="mod"||a.combat_enabled||!keys(carry,{"break_on_impact"})||(carry.object.contains("break_on_impact")&&carry.get("break_on_impact").type!=Value::Bool))return why="carry requires a noncombat mod actor and boolean break_on_impact",false;
             a.carry_enabled=true;a.carry_break_on_impact=carry.get("break_on_impact").boolean;
-            if(!v.object.contains("collision")||v.object.contains("attention")||v.object.contains("lines")||v.object.contains("then")||v.object.contains("flag")||a.look_at.enabled||a.pushable||a.collision_radius>100||a.collision_height>200)return why="carry actors require a bounded solid body and no talk, look_at or pushable mode",false;
+            if(!v.object.contains("collision")||v.object.contains("attention")||v.object.contains("lines")||v.object.contains("then")||v.object.contains("talks")||v.object.contains("flag")||a.look_at.enabled||a.pushable||a.collision_radius>100||a.collision_height>200)return why="carry actors require a bounded solid body and no talk, look_at or pushable mode",false;
         }
         if((v.object.contains("combat")||v.object.contains("native_drops"))&&!a.combat_enabled)return why="combat and native_drops require a combat mod actor",false;
         if(a.actor=="kanban"||a.actor=="PROC_KANBAN")a.actor="sign";
@@ -295,13 +358,20 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
         }
         if(a.actor=="resident"&&a.resident==19&&std::fabs(a.position.x+202066.f)<10&&std::fabs(a.position.z-320123.f)<10)return why="ym1 position intersects native relocation area",false;
         if(a.actor=="sign"||a.actor=="chest"){if(!flag_id(v.get("flag")))return why="chests and signs require a mod-owned flag id",false;a.flag=v.get("flag").text;}
-        const auto& when=v.get("when");if(when.type!=Value::Null&&!keys(when,{"quest","step","item","time"}))return why="actor when must be an object",false;
-        if(when.get("quest").type!=Value::Null){a.quest=when.get("quest").string();if(!integer(when.get("step"),1,254)||!quest_step(m,a.quest,unsigned(when.get("step").number)))return why="actor condition names an undeclared quest step",false;a.quest_step=unsigned(when.get("step").number);}
-        if(when.get("item").type!=Value::Null){a.item=when.get("item").string();if(a.item.rfind("item:",0)!=0||!declared(m,"items",a.item.substr(5)))return why="actor condition names an undeclared mod item",false;}
-        if(when.get("time").type!=Value::Null){a.time=when.get("time").string();if(a.time!="day"&&a.time!="night")return why="actor time must be day or night",false;}
+        if(!actor_condition(m,v.get("when"),a,why))return false;
         if(v.get("lines").type!=Value::Null&&!lines(v.get("lines"),a.lines))return why="invalid actor dialogue",false;
         if(!actions(m,v.get("then"),a.then,why))return false;
         if(!a.then.empty()&&a.lines.empty())return why="actor then requires dialogue lines",false;
+        if(v.object.contains("talks")){
+            const auto&talks=v.get("talks");
+            const bool dialogue=a.actor=="resident"||a.actor=="sign"||(a.actor=="mod"&&!a.combat_enabled&&!a.carry_enabled);
+            if(!dialogue||v.object.contains("lines")||v.object.contains("then"))return why="talks requires a dialogue actor and replaces its lines/then",false;
+            if(talks.type!=Value::Array||talks.array.empty()||talks.array.size()>8)return why="talks must contain 1..8 ordered talks",false;
+            for(const auto&t:talks.array){ManifestTalk talk;
+                if(!keys(t,{"when","lines","then"})||!actor_condition(m,t.get("when"),talk,why)||!lines(t.get("lines"),talk.lines)||!actions(m,t.get("then"),talk.then,why))return why=why.empty()?"invalid actor talk":why,false;
+                a.talks.push_back(std::move(talk));
+            }
+        }
         unsigned count=1;for(const auto& old:out){if(old.id==a.id)return why="duplicate actor id",false;if(old.stage==a.stage&&old.room==a.room)++count;}
         if(count>kMaxActorsPerRoom)return why="actors exceed the 16 per room limit",false;
         out.push_back(std::move(a));

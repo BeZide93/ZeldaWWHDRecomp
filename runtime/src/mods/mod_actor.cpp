@@ -27,14 +27,14 @@
 namespace mod_actor { namespace {
 // The extension is guest memory: model, resource phase and collision survive full states.
 constexpr uint32_t Phase=0x3AC,Model=0x3B4,Stts=0x3B8,Cyl=0x3F4,Name=0x524,Safe=0x564,Matrix=0x56C,Source=0x59C,Talk=0x5E0,TalkStatus=0x5E4,HeapBaseline=0x630,HeapStarted=0x650,Morf=0x654,LookObject=0x658,LookVtable=0x660,LookAngles=0x670,Motion=0x67C,SavedMotion=0x74C,SceneLease=0x81C,SavedClip=0x820,SavedFrame=0x824,SavedLoop=0x828,ClipIndex=0x82C,ClipLoop=0x830,Radius=0x834,Height=0x838,CollisionFlags=0x83C,BehaviorHandle=0x840,Userdata=0x850,HitSequence=0x950,Ground=0x954,GroundReady=0x9A8,BehaviorCreated=0x9AC,HitPacket=0x9B0,PostObject=0x9F0,PostVtable=0x9F8,HeadAnchor=0xA08,UpperAnchor=0xA14,Combat=0xA20,AttackStts=0xA48,AttackCyl=0xA84,AttackSource=0xBB4,Heart=0xBF8,Knockback=0xC18,KnockbackLeft=0xC24,Quarantined=0xC28,CombatIdentity=0xC40,Acch=0xC80,AcchCircles=0xE44,AcchOld=0xF04,AcchSpeed=0xF10,AcchReady=0xF1C,Carry=0xF40,CarryMotion=0xF70,Size=kInstanceBytes;
-struct Decl {std::string mod,archive;story_notebook::ManifestActor spec;int index;std::function<void()> talked;story_notebook::WorldPoint minimum,maximum;bool skinned=false;std::vector<std::string> clips;ModelRig rig;int head=-1,upper=-1;bool hits=false;CombatRewardSink reward;story_actors::identity::Fingerprint fingerprint{};std::function<bool()> carry_break;};
+struct Decl {std::string mod,archive;story_notebook::ManifestActor spec;int index;std::function<void()> talked;story_notebook::WorldPoint minimum,maximum;bool skinned=false;std::vector<std::string> clips;ModelRig rig;int head=-1,upper=-1;bool hits=false;CombatRewardSink reward;story_actors::identity::Fingerprint fingerprint{};std::function<bool()> carry_break;TalkProvider talk_provider;};
 std::vector<Decl> declarations;
 struct ArchiveMeasurement {const Decl* declaration=nullptr;uint32_t heap=0,info=0;};
 thread_local ArchiveMeasurement* archive_measurement=nullptr;
 uint32_t scratch=0,heap_callback=0,look_callback=0,post_callback=0;BehaviorSink behavior_sink;std::set<std::pair<uint32_t,uint32_t>> restored;bool installed=false;
 void(*original)(Cpu*,uint32_t)=nullptr;
 uint32_t(*invoke)(Cpu*,uint32_t,std::initializer_list<uint32_t>)=nullptr;
-uint32_t talk_actor=0;std::u16string text;
+uint32_t talk_actor=0;std::u16string text;std::function<void()> talk_completed;bool custom_talk=false;
 uint32_t call(Cpu*c,uint32_t f,std::initializer_list<uint32_t> a){return invoke(c,f,a);}
 struct KeepCpu{Cpu* cpu;Cpu saved;explicit KeepCpu(Cpu*c):cpu(c),saved(*c){}~KeepCpu(){*cpu=saved;}};
 uint32_t heap_size(Cpu*c,uint32_t h){if(!h)return 0;uint32_t vt=ld32(h+0xC);if(!vt)return 0;uint32_t fn=ld32(vt+0x6C);return fn?invoke(c,fn,{h}):0;}
@@ -291,7 +291,7 @@ call(c,GC(0x02515F14),{a+Stts,d->spec.pushable?100u:255u,0,a});for(unsigned i=0;
     call(c,GC(0x02515FB8),{a+AttackCyl});st32(a+AttackCyl+0x114,GD(0x100015A8));st32(a+AttackCyl+0x110,GD(0x1001251C));call(c,GC(0x02018590),{a+AttackCyl+0x118});st32(a+AttackCyl+0x3C,GD(0x1004B108));st32(a+AttackCyl+0x114,GD(0x1004B160));st32(a+AttackCyl+0x12C,GD(0x1004B150));
     const auto&at=d->spec.combat.attack;if(!mod_actor_native_combat::write_attack_source(a+AttackSource,{at.radius,at.height,at.forward_offset,at.y_offset,at.damage})){fail_create(a);result(c,5);return;}call(c,GC(0x02516518),{a+AttackCyl,a+AttackSource});st32(a+AttackCyl+0x44,a+AttackStts);st32(a+0x39C,4);st8(a+0x38A,3);
 }if(d->spec.carry_enabled){st32(a+0x39C,0x10);st8(a+0x38C,8);}if(!ld32(a+BehaviorCreated)){st32(a+BehaviorCreated,1);emit(c,a,BehaviorEvent::CreateNew);}result(c,4);}
-void destroy(Cpu*c){uint32_t a=c->r[3];if(!valid_actor(a)){const uint32_t play=call(c,GC(0x025200D4),{}),link=play?ld32(play+0x5B34):0;if(clear_invalid_carry_keep(c,link,a)){Cpu reset=*c;reset.r[3]=link;original(&reset,GC(0x023DCF8C));}}if(valid_actor(a)&&declaration(a)->spec.carry_enabled){const uint32_t play=call(c,GC(0x025200D4),{}),link=play?ld32(play+0x5B34):0;if(carry_link(c,link,a))call(c,GC(0x023DCF8C),{link});if(ld32(a+AcchReady)){mod_actor_knockback::destroy(c,knockback_context(a));st32(a+AcchReady,0);}}for(auto&entry:heading_proofs)if(entry.actor==a)entry={};restored.erase({a,ld32(a+4)});emit(c,a,BehaviorEvent::Destroy);if(ld32(a+GroundReady)){call(c,GC(0x0237A940),{a+Ground,0});st32(a+GroundReady,0);}if(auto*d=declaration(a);d&&d->spec.combat_enabled){if(ld32(a+AcchReady)){mod_actor_knockback::destroy(c,knockback_context(a));st32(a+AcchReady,0);}call(c,GC(0x02515A70),{a+AttackCyl,2});call(c,GC(0x02515860),{a+AttackStts,2});}mod_actor_shadow_proof::forget_model(ld32(a+Model));const uint32_t token=ld32(a+0xB0);if(token&&token<=declarations.size()&&ld32(record(token-1))==a)st32(record(token-1),0);const auto before=heap_trace()?heaps(c):HeapSnapshot{};if(talk_actor==a){story_mail::unsay();talk_actor=0;text.clear();}call(c,GC(0x02515A70),{a+Cyl,2});call(c,GC(0x02515860),{a+Stts,2});call(c,GC(0x025204C8),{a+Phase,a+Name});if(heap_trace())report_heaps(a,"resource_delete",before,heaps(c));result(c,1);}
+void destroy(Cpu*c){uint32_t a=c->r[3];if(!valid_actor(a)){const uint32_t play=call(c,GC(0x025200D4),{}),link=play?ld32(play+0x5B34):0;if(clear_invalid_carry_keep(c,link,a)){Cpu reset=*c;reset.r[3]=link;original(&reset,GC(0x023DCF8C));}}if(valid_actor(a)&&declaration(a)->spec.carry_enabled){const uint32_t play=call(c,GC(0x025200D4),{}),link=play?ld32(play+0x5B34):0;if(carry_link(c,link,a))call(c,GC(0x023DCF8C),{link});if(ld32(a+AcchReady)){mod_actor_knockback::destroy(c,knockback_context(a));st32(a+AcchReady,0);}}for(auto&entry:heading_proofs)if(entry.actor==a)entry={};restored.erase({a,ld32(a+4)});emit(c,a,BehaviorEvent::Destroy);if(ld32(a+GroundReady)){call(c,GC(0x0237A940),{a+Ground,0});st32(a+GroundReady,0);}if(auto*d=declaration(a);d&&d->spec.combat_enabled){if(ld32(a+AcchReady)){mod_actor_knockback::destroy(c,knockback_context(a));st32(a+AcchReady,0);}call(c,GC(0x02515A70),{a+AttackCyl,2});call(c,GC(0x02515860),{a+AttackStts,2});}mod_actor_shadow_proof::forget_model(ld32(a+Model));const uint32_t token=ld32(a+0xB0);if(token&&token<=declarations.size()&&ld32(record(token-1))==a)st32(record(token-1),0);const auto before=heap_trace()?heaps(c):HeapSnapshot{};if(talk_actor==a){story_mail::unsay();talk_actor=0;text.clear();talk_completed={};custom_talk=false;}call(c,GC(0x02515A70),{a+Cyl,2});call(c,GC(0x02515860),{a+Stts,2});call(c,GC(0x025204C8),{a+Phase,a+Name});if(heap_trace())report_heaps(a,"resource_delete",before,heaps(c));result(c,1);}
 void is_delete(Cpu*c){result(c,1);}
 motion::Blocker link_blocker(uint32_t player){
     motion::Blocker blocker;const uint32_t shape=player+0x765C+0x118;
@@ -418,12 +418,20 @@ if(ld16(a+0xF8)==1){
     // Guest talk state is independent of native message IDs: zero is a successful messageSet result.
     // 0 = inactive, 1 = native message started, 2 = closed, waiting for event reset.
     if(!talk_actor&&ld32(a+Talk)!=2&&story_mail::can_say()){
-        const bool resumed=ld32(a+Talk)==1;talk_actor=a;
-        if(!resumed){animate(c,a,"talk",6,true);if(!emit(c,a,BehaviorEvent::TalkBegin)){result(c,1);return;}}story_mail::append_utf16(d->spec.lines,true,text);story_mail::say(0x2CF3,&text);
+        const bool resumed=ld32(a+Talk)==1;TalkSelection selection;
+        if(d->talk_provider){bool accepted=false;try{accepted=d->talk_provider(a,resumed,selection);}catch(...){}
+            if(!accepted){story_mail::unsay();talk_completed={};custom_talk=false;talk_actor=0;text.clear();st32(a+Talk,2);
+                // Cancel only our actual native talk owner; passive cached IDs
+                // alone never permit resetting a foreign or idle event.
+                const uint32_t control=play+0x51D0,pid=ld32(a+4);
+                if(ld8(control+0xC2)==1&&(ld32(control+0xC4)==pid||ld32(control+0xC8)==pid||ld32(control+0xCC)==pid))st16(control+0xE8,ld16(control+0xE8)|8);
+                if(!emit(c,a,BehaviorEvent::TalkCancel)){result(c,1);return;}result(c,1);return;}}
+        talk_actor=a;custom_talk=bool(d->talk_provider);talk_completed=std::move(selection.completed);
+        if(!resumed){animate(c,a,"talk",6,true);if(!emit(c,a,BehaviorEvent::TalkBegin)){result(c,1);return;}}story_mail::append_utf16(custom_talk?selection.lines:d->spec.lines,true,text);story_mail::say(0x2CF3,&text);
         uint32_t message=0;
         if(!resumed){message=call(c,GC(0x025F7DB0),{ld32(GD(0x101F4B5C)),0x2CF3,a+0x37C});
             if(message!=0xFFFFFFFFu)st32(a+Talk,1);
-            else {story_mail::unsay();talk_actor=0;text.clear();st32(a+Talk,2);animate(c,a,"idle",6,true);if(!emit(c,a,BehaviorEvent::TalkCancel)){result(c,1);return;}}}
+            else {story_mail::unsay();talk_actor=0;text.clear();talk_completed={};custom_talk=false;st32(a+Talk,2);animate(c,a,"idle",6,true);if(!emit(c,a,BehaviorEvent::TalkCancel)){result(c,1);return;}}}
         if(talk_trace())LOG("[mod_actor_talk] %s actor=%08X message=%08X state=%u",resumed?"resume":"start",a,message,ld32(a+Talk));
     }else if(talk_actor==a){
         const uint32_t status=call(c,GC(0x025F795C),{ld32(GD(0x101F4B5C))});
@@ -436,11 +444,12 @@ if(ld16(a+0xF8)==1){
             st16(play+0x51D0+0xE8,ld16(play+0x51D0+0xE8)|8);
             story_mail::unsay();talk_actor=0;text.clear();st32(a+Talk,2);
             if(talk_trace())LOG("[mod_actor_talk] finish actor=%08X command=%u event_flags=%04X",a,unsigned(ld16(a+0xF8)),unsigned(ld16(play+0x51D0+0xE8)));
-            animate(c,a,"idle",6,true);if(!emit(c,a,BehaviorEvent::TalkEnd)){result(c,1);return;}if(d->talked)d->talked();
+            auto completed=std::move(talk_completed);const bool custom=custom_talk;custom_talk=false;
+            animate(c,a,"idle",6,true);if(!emit(c,a,BehaviorEvent::TalkEnd)){result(c,1);return;}if(custom){if(completed)completed();}else if(d->talked)d->talked();
         }
     }
 }else {
-    if(talk_actor==a){if(talk_trace())LOG("[mod_actor_talk] cancel actor=%08X",a);story_mail::unsay();talk_actor=0;text.clear();animate(c,a,"idle",6,true);if(!emit(c,a,BehaviorEvent::TalkCancel)){result(c,1);return;}}
+    if(talk_actor==a){if(talk_trace())LOG("[mod_actor_talk] cancel actor=%08X",a);story_mail::unsay();talk_actor=0;text.clear();talk_completed={};custom_talk=false;animate(c,a,"idle",6,true);if(!emit(c,a,BehaviorEvent::TalkCancel)){result(c,1);return;}}
     st32(a+Talk,0);st32(a+TalkStatus,0);st16(a+0xFA,ld16(a+0xFA)|1);
 }
 transform(a);heading_scope.complete=true;result(c,1);}
@@ -528,6 +537,9 @@ bool checked(const story_notebook::ManifestActor&spec,const std::string&archive,
     return true;
 }
 }
+bool set_talk_provider(const std::string&mod,const std::string&id,TalkProvider provider){
+    for(auto&d:declarations)if(d.mod==mod&&d.spec.id==id){if(d.spec.combat_enabled||d.spec.carry_enabled)return false;d.talk_provider=std::move(provider);return true;}return false;
+}
 uint32_t declare(const std::string&mod,const story_notebook::ManifestActor&spec,const std::string&archive,int index,std::function<void()> talked,story_notebook::WorldPoint minimum,story_notebook::WorldPoint maximum,bool skinned,std::vector<std::string> clips,ModelRig rig){
     int head=-1,upper=-1;
     if(!checked(spec,archive,index,minimum,maximum,skinned,clips,rig,head,upper)||declarations.size()>=128)return 0;
@@ -589,7 +601,7 @@ bool end_scene(Cpu*c,const Identity&id,uint32_t lease){const uint32_t a=resolve(
 bool scene_path(Cpu*c,const Identity&id,uint32_t lease,const std::vector<story_notebook::WorldPoint>&points,float speed){const uint32_t a=resolve(c,id);return a&&lease&&ld32(a+SceneLease)==lease&&path_impl(a,points,speed,false);}
 bool scene_rotation(Cpu*c,const Identity&id,uint32_t lease,story_notebook::WorldPoint degrees){const uint32_t a=resolve(c,id);return a&&lease&&ld32(a+SceneLease)==lease&&rotation_impl(a,degrees);}
 bool scene_animation(Cpu*c,const Identity&id,uint32_t lease,const std::string&clip,float blend,bool loop){const uint32_t a=resolve(c,id);return a&&lease&&ld32(a+SceneLease)==lease&&animate(c,a,clip,blend,loop);}
-void state_loaded(){restored.clear();if(scratch)for(size_t i=0;i<declarations.size();++i){const uint32_t a=ld32(record(i));if(valid_actor(a)){restored.insert({a,ld32(a+4)});st32(a+BehaviorHandle,0);if(declaration(a)->spec.combat_enabled){auto state=read_combat(a);if(combat::abandon_inflight_reward(state))write_combat(a,state);}}}mod_actor_shadow_proof::state_loaded();if(talk_actor)story_mail::unsay();talk_actor=0;text.clear();}
+void state_loaded(){restored.clear();if(scratch)for(size_t i=0;i<declarations.size();++i){const uint32_t a=ld32(record(i));if(valid_actor(a)){restored.insert({a,ld32(a+4)});st32(a+BehaviorHandle,0);if(declaration(a)->spec.combat_enabled){auto state=read_combat(a);if(combat::abandon_inflight_reward(state))write_combat(a,state);}}}mod_actor_shadow_proof::state_loaded();if(talk_actor)story_mail::unsay();talk_actor=0;text.clear();talk_completed={};custom_talk=false;}
 bool talking(uint32_t actor){return actor&&talk_actor==actor;}
 bool failed(uint32_t token){return scratch&&token&&token<=128&&ld8(scratch+256+token-1)!=0;}
 void retry(uint32_t token){if(scratch&&token&&token<=128)st8(scratch+256+token-1,0);}

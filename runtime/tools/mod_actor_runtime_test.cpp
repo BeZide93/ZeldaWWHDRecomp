@@ -191,6 +191,23 @@ st32(Play+0x5B34,Arena+0xF400);st32(A+4,42);st16(A+0xE,mod_actor::kProfile);st32
     assert(previous==90);assert(mod_actor::stop_path(&c,identity));
     assert(mod_actor::set_rotation(&c,identity,{0,-90,0})&&ld16(A+0x32A)==0xC000); // explicit Face remains immediate
     assert(mod_actor::set_hit_notifications("test","post",true));st32(Arena+0xF400+4,77);st32(A+0x3F4+0xA0,77);st32(Attack+0x44,AttackStatus);st32(AttackStatus+0xC,Arena+0xF400);st32(AttackStatus+0x10,77);st32(Attack+0x10,2);st8(Attack+0x14,3);target_hit=true;const auto clears=hit_clears;method(c,2);assert(notifications==1&&hit_clears==clears+1);method(c,2);assert(notifications==1);st32(AttackStatus+0x10,78);target_hit=true;method(c,2);assert(notifications==1&&!target_hit);
+    // The dynamic provider is entered only at the genuine native start/resume
+    // boundary. Its latched completion is used once, never the legacy callback.
+    unsigned selected=1,saved_selection=0,begins=0,resumes=0;std::array<unsigned,3>custom_completions{};bool reject_resume=false;
+    const auto legacy_completions=talk_completions;
+    assert(mod_actor::set_talk_provider("test","post",[&](uint32_t actor,bool resumed,mod_actor::TalkSelection&out){
+        assert(actor==A&&ld32(actor+4)==42);if(resumed){++resumes;if(reject_resume)return false;}else{++begins;saved_selection=selected;}
+        out.lines=saved_selection==1?"First":"Second";out.completed=[&,choice=saved_selection]{++custom_completions[choice];};return true;
+    }));
+    allow_talk=true;st16(A+0xF8,0);method(c,2);const auto starts_before_provider=message_starts;
+    message_status=0x11;st16(A+0xF8,1);method(c,2);assert(begins==1&&resumes==0&&message_starts==starts_before_provider+1);
+    selected=2;method(c,2);assert(begins==1);mod_actor::state_loaded();method(c,2);assert(resumes==1&&message_starts==starts_before_provider+1);
+    message_status=0x12;method(c,2);assert(custom_completions[1]==1&&!custom_completions[2]&&talk_completions==legacy_completions);
+    method(c,2);mod_actor::state_loaded();method(c,2);assert(custom_completions[1]==1);
+    st16(A+0xF8,0);method(c,2);st16(A+0xF8,1);method(c,2);assert(begins==2);
+    reject_resume=true;mod_actor::state_loaded();method(c,2);assert(!mod_actor::talking(A)&&ld32(A+0x5E0)==2&&custom_completions[2]==0&&talk_completions==legacy_completions);
+    method(c,2);assert(custom_completions[2]==0);st16(A+0xF8,0);method(c,2);allow_talk=false;
+    assert(mod_actor::set_talk_provider("test","post",{}));
     // Failed callback identity revalidation must not read a now-invalid Morf in
     // the execute diagnostic destructor, even with tracing explicitly enabled.
     const uint32_t saved_process=ld32(A+4),saved_morf=ld32(A+0x654);const auto logs_before_invalidation=heading_exec_logs;

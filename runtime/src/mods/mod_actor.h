@@ -33,6 +33,12 @@ bool attack_cancel(Cpu*,const Identity&);
 void quarantine_combat(Cpu*,const Identity&);
 enum class CombatReward {Committed,AlreadyDone,Failed};
 using CombatRewardSink=std::function<CombatReward()>;
+// Called only by the actor's existing owned native talk start/resume branch.
+// The returned text and completion are latched until its genuine native END.
+struct TalkSelection {std::string lines;std::function<void()> completed;};
+using TalkProvider=std::function<bool(uint32_t actor,bool resumed,TalkSelection&)>;
+bool set_talk_provider(const std::string&mod,const std::string&id,TalkProvider);
+
 bool set_combat_reward(const std::string& mod,const std::string& id,CombatRewardSink);
 bool set_carry_break(const std::string& mod,const std::string& id,std::function<bool()>);
 using BehaviorSink=std::function<void(Cpu*,uint32_t,BehaviorEvent,const Hit*)>;
