@@ -3285,3 +3285,11 @@ target_compile_options(story_world_placement_test PRIVATE -UNDEBUG)
 add_test(NAME story_world_placement COMMAND story_world_placement_test)
 
 add_test(NAME story_world_static_contract COMMAND mod_actor_runtime_test --world-static)
+
+ target_sources(mod_actor_runtime_test PRIVATE runtime/src/mods/story_world_motion.cpp)
+ target_sources(story_actors_runtime_test PRIVATE runtime/src/mods/story_world_motion.cpp)
+ add_executable(story_world_motion_test runtime/tools/story_world_motion_test.cpp runtime/src/mods/story_world_motion.cpp)
+ target_include_directories(story_world_motion_test PRIVATE runtime/src)
+ target_compile_options(story_world_motion_test PRIVATE -UNDEBUG)
+ add_test(NAME story_world_motion COMMAND story_world_motion_test)
+ add_test(NAME story_world_floating_contract COMMAND mod_actor_runtime_test --world-floating)

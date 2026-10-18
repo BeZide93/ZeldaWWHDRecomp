@@ -538,6 +538,35 @@ void world_object_commands() {
 
 }
 
+void floating_world_object_commands() {
+    FakeHost host;editor::Session session(&host);auto manifest=json(kManifest);
+    manifest["models"]=json(R"([{"id":"raft","source":"assets/raft.glb"}])");session.add_package("editor-test","Editor test","",manifest);
+    auto place=json(R"({"id":"raft-a","model":"raft","collision":{"shape":"box","size":{"x":100,"y":20,"z":200},"surface":"wood"},"behaviour":"floating","buoyancy":{"draft":-20,"damping":0.3,"max_tilt":10},"stage":"sea","room":12,"position":{"x":75000,"y":0,"z":-201500}})");
+    CHECK(ok(session.run("place_world_object",place)));
+    CHECK(actor_of(session,"raft-a")->get("buoyancy").get("draft").number==-20);
+    auto drift=json(R"({"id":"raft-a","behaviour":"drifting","drift":{"wind_speed":4,"current":{"x":3,"z":-2},"max_speed":8},"anchor":{"point":{"x":75000,"y":0,"z":-201500},"radius":500}})");
+    CHECK(ok(session.run("set_world_object",drift)));
+    auto actor=*actor_of(session,"raft-a");CHECK(actor.get("behaviour").string()=="drifting"&&actor.get("collision").get("shape").string()=="box"&&actor.get("anchor").get("radius").number==500);
+    CHECK(ok(session.run("set_world_object",json(R"({"id":"raft-a","buoyancy":{"draft":-30,"damping":0.5,"max_tilt":15}})"))));
+    CHECK(actor_of(session,"raft-a")->get("behaviour").string()=="drifting"&&actor_of(session,"raft-a")->get("drift").get("wind_speed").number==4&&actor_of(session,"raft-a")->get("buoyancy").get("draft").number==-30);
+    CHECK(ok(session.run("set_actor",json(R"({"id":"raft-a","property":"anchor","value":null})"))));CHECK(actor_of(session,"raft-a")->get("anchor").type==Value::Null);
+    CHECK(ok(session.run("undo"))&&actor_of(session,"raft-a")->get("anchor").get("radius").number==500);
+    CHECK(ok(session.run("set_actor",json(R"({"id":"raft-a","property":"drift","value":{"wind_speed":2,"max_speed":5}})"))));
+    CHECK(ok(session.run("set_actor",json(R"({"id":"raft-a","property":"buoyancy","value":{"damping":1}})"))));
+    CHECK(ok(session.run("set_world_object",json(R"({"id":"raft-a","anchor":null})"))));CHECK(actor_of(session,"raft-a")->get("anchor").type==Value::Null);
+    CHECK(ok(session.run("undo"))&&actor_of(session,"raft-a")->get("anchor").get("radius").number==500);
+    CHECK(ok(session.run("set_world_object",json(R"({"id":"raft-a","behaviour":"floating"})"))));
+    CHECK(actor_of(session,"raft-a")->get("drift").type==Value::Null&&actor_of(session,"raft-a")->get("anchor").type==Value::Null&&actor_of(session,"raft-a")->get("buoyancy").get("damping").number==1);
+    CHECK(ok(session.run("undo"))&&actor_of(session,"raft-a")->get("behaviour").string()=="drifting");
+    CHECK(ok(session.run("redo"))&&actor_of(session,"raft-a")->get("behaviour").string()=="floating");
+    CHECK(ok(session.run("set_world_object",json(R"({"id":"raft-a","behaviour":"static"})"))));CHECK(actor_of(session,"raft-a")->get("buoyancy").type==Value::Null);
+    auto before=*session.manifest("editor-test");auto depth=session.undo_depth();
+    CHECK(!ok(session.run("set_world_object",json(R"({"id":"raft-a","behaviour":"drifting","drift":{"wind_speed":0,"max_speed":5}})")))&&*session.manifest("editor-test")==before&&session.undo_depth()==depth);
+    CHECK(!ok(session.run("set_world_object",json(R"({"id":"raft-a","behaviour":"floating","drift":{"wind_speed":1,"max_speed":5}})")))&&*session.manifest("editor-test")==before);
+    CHECK(!ok(session.run("set_actor",json(R"({"id":"raft-a","property":"buoyancy","value":{"draft":2}})")))&&*session.manifest("editor-test")==before);
+    host.query_clear=false;CHECK(!ok(session.run("set_world_object",json(R"({"id":"raft-a","behaviour":"floating"})")))&&*session.manifest("editor-test")==before&&session.undo_depth()==depth);
+}
+
 void building(const fs::path& examples) {
     FakeHost host;
     editor::Session s(&host);
@@ -777,6 +806,7 @@ int main(int argc, char** argv) {
         return 2;
     }
     world_object_commands();
+    floating_world_object_commands();
     command_layer();
     handle_drag();
     locations();

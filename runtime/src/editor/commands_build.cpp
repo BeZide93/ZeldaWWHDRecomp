@@ -499,7 +499,7 @@ Value Session::dispatch_build(const std::string& command, const Value& p, std::s
         actor["id"] = id;
         actor["kind"] = "mod";
         actor["behaviour"] = p.get("behaviour").string("static");
-        for (const char* key : {"model", "collision", "stage", "room", "position", "rotation", "scale"})
+        for (const char* key : {"model", "collision", "stage", "room", "position", "rotation", "scale", "buoyancy", "drift", "anchor"})
             if (p.get(key).type != Value::Null) actor[key] = p.get(key);
         ok = change(*pkg, "Place world object " + id, [&](Value& manifest, std::string&) {
             if (manifest.get("actors").type != Value::Array) manifest["actors"] = array();
@@ -512,8 +512,19 @@ Value Session::dispatch_build(const std::string& command, const Value& p, std::s
     if (command == "set_world_object") {
         actor_change("Set world object " + text(p, "id"), [&](Value& actor, std::string& error) {
             if (actor.get("kind").string() != "mod") return error = "world objects require a mod model actor", false;
-            actor["behaviour"] = p.get("behaviour").string("static");
-            actor["collision"] = p.get("collision");
+            if (p.object.contains("behaviour")) actor["behaviour"] = p.get("behaviour");
+            else if (actor.get("behaviour").type == Value::Null) actor["behaviour"] = "static";
+            for (const char* key : {"collision", "buoyancy", "drift", "anchor"}) {
+                if (!p.object.contains(key)) continue;
+                if (p.get(key).type == Value::Null) actor.object.erase(key);
+                else actor[key] = p.get(key);
+            }
+            const auto behaviour = actor.get("behaviour").string();
+            // Drop inherited incompatible settings on a behaviour change. Explicit
+            // incompatible parameters still reach the validator and are refused.
+            for (const char* key : {"buoyancy", "drift", "anchor"})
+                if ((behaviour == "static" || (behaviour == "floating" && std::string(key) != "buoyancy")) && !p.object.contains(key))
+                    actor.object.erase(key);
             return true;
         });
         return r;

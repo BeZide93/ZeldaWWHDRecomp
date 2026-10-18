@@ -14,7 +14,7 @@ namespace mod_actor {
 inline constexpr uint16_t kProfile=0x7FFE,kWorldProfile=0x7FF6;
 inline constexpr bool own_profile(uint16_t profile){return profile==kProfile||profile==kWorldProfile;}
 inline constexpr uint32_t kScratchBytes=4096;
-inline constexpr uint32_t kInstanceBytes=0x10C0;
+inline constexpr uint32_t kInstanceBytes=0x1120;
 using PlacementProvider=std::function<story_world_placement::Index(const std::string&,int)>;
 void configure_world_objects(const std::string& game_directory,PlacementProvider={});
 bool world_object_query(const std::string& mod,const story_notebook::ManifestActor&,bool wireframe,mods::json::Value&,std::string& why);

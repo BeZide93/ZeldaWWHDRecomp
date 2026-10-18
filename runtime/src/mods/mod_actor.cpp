@@ -4,6 +4,7 @@
 #include <map>
 #include <mutex>
 #include "story_world_placement.h"
+#include "story_world_motion.h"
 #include "mod_actor_carry.h"
 #include "native_actor_carry.h"
 #include "mod_actor_combat_core.h"
@@ -274,13 +275,59 @@ bool animate(Cpu*c,uint32_t a,const std::string&clip,float blend,bool loop){
     PoseScope scope(morf);c->f[1].ps0=blend;c->f[2].ps0=1;c->f[3].ps0=0;c->f[4].ps0=-1;
     call(c,GC(0x025E4A98),{morf,animation,loop?2u:0u,0});st32(a+ClipIndex,index);st32(a+ClipLoop,loop);return true;
 }
+constexpr uint32_t WorldMotion=0x10C0,WorldMotionMagic=0x574D5431;
+using WaterState=story_world_motion::State;
+float water_radius(const Decl&d){float radius=0;for(const auto&p:d.collision->vertices)radius=std::max(radius,std::sqrt(p.x*p.x+p.y*p.y+p.z*p.z));return radius;}
+WaterState water_state(uint32_t actor){WaterState state;state.initialized=ld32(actor+WorldMotion)==WorldMotionMagic&&ld32(actor+WorldMotion+4)==ld32(actor+4)&&ld32(actor+WorldMotion+8)==1;auto read=[&](uint32_t offset){const auto p=point(actor+WorldMotion+offset);return story_world_motion::Point{p.x,p.y,p.z};};state.position=read(12);state.rotation=read(24);state.velocity=read(36);state.residual=read(48);return state;}
+void water_state(uint32_t actor,const WaterState&state){st32(actor+WorldMotion,WorldMotionMagic);st32(actor+WorldMotion+4,ld32(actor+4));st32(actor+WorldMotion+8,state.initialized?1:0);auto write=[&](uint32_t offset,story_world_motion::Point p){point(actor+WorldMotion+offset,{p.x,p.y,p.z});};write(12,state.position);write(24,state.rotation);write(36,state.velocity);write(48,state.residual);}
+// This bound encloses every allowed wave/tilt pose, so horizontal sweeps cannot
+// miss a protruding corner when the native wave changes during movement.
+bool world_bounds(const Decl&d,story_notebook::WorldPoint center,story_world_placement::Bounds&bounds){
+    using namespace story_world_placement;const auto&g=*d.collision;
+    if(d.spec.water_object()){const float radius=water_radius(d),y=d.spec.position.y-d.spec.buoyancy.draft;bounds={{center.x-radius,y-2048-radius,center.z-radius},{center.x+radius,y+2048+radius,center.z+radius}};return valid(bounds);}
+    return transform_bounds({{g.minimum.x,g.minimum.y,g.minimum.z},{g.maximum.x,g.maximum.y,g.maximum.z}},{center.x,center.y,center.z},{d.spec.rotation.x,d.spec.rotation.y,d.spec.rotation.z},{1,1,1},bounds);
+}
+story_world_placement::Index world_environment(Cpu*c,uint32_t actor,const Decl&d){
+    using namespace story_world_placement;const auto key=std::make_pair(d.spec.stage,int(d.spec.room));auto found=placement_indexes.find(key);if(found==placement_indexes.end())found=placement_indexes.emplace(key,placement_provider?placement_provider(d.spec.stage,int(d.spec.room)):load_native_room(world_game_directory,d.spec.stage,int(d.spec.room))).first;
+    Index index=found->second;
+    for(size_t i=0;i<declarations.size();++i){const auto&other=declarations[i];if(&other==&d||!other.collision||other.spec.stage!=d.spec.stage||other.spec.room!=d.spec.room)continue;auto pos=other.spec.position;const uint32_t a=ld32(record(i));if(valid_actor(a)&&story_world_collision::native::stored(a,other.fingerprint))pos=point(a+0x314);Bounds bounds;if(world_bounds(other,pos,bounds))index.bounds.push_back({d.spec.stage,int(d.spec.room),"world_object",other.mod+":"+other.spec.id,bounds});}
+    const uint32_t ship=ld32(GD(0x10474BEC));if(story_world_collision::proof::address(ship,0x1500)&&ld8(ship+0x3AA)==1&&int8_t(ld8(ship+0x326))==int(d.spec.room)){const auto p=point(ship+0x314);index.bounds.push_back({d.spec.stage,int(d.spec.room),"ship","ship",{{p.x-250,-1000000,p.z-250},{p.x+250,1000000,p.z+250}}});}
+    (void)c;(void)actor;return index;
+}
+bool water_step(Cpu*c,uint32_t actor,Decl&d,bool initialize){
+    std::lock_guard guard(world_mutex);using namespace story_world_motion;using story_world_placement::Bounds;
+    if(!d.spec.water_object())return true;if(!d.collision||water_radius(d)>2000)return false;
+    WaterState state=initialize?WaterState{}:water_state(actor);if(!initialize&&!state.initialized)return false;
+    Config config;const auto&spec=d.spec;config.origin={spec.position.x,spec.position.y,spec.position.z};config.base_rotation={spec.rotation.x,spec.rotation.y,spec.rotation.z};config.draft=spec.buoyancy.draft;config.damping=spec.buoyancy.damping;config.max_tilt=spec.buoyancy.max_tilt;config.drifting=spec.behaviour=="drifting";config.wind_speed=spec.drift.wind_speed;config.current_x=spec.drift.current.x;config.current_z=spec.drift.current.z;config.max_speed=spec.drift.max_speed;config.anchored=spec.anchor.enabled;config.anchor={spec.anchor.point.x,spec.anchor.point.y,spec.anchor.point.z};config.anchor_radius=spec.anchor.radius;
+    std::string why;if(!story_world_motion::valid(config,why)||(!initialize&&!valid_state(config,state,why)))return false;
+    const Point previous=initialize?config.origin:state.position;
+    Bounds envelope;if(!world_bounds(d,{previous.x,previous.y,previous.z},envelope))return false;
+    const auto environment=world_environment(c,actor,d);
+    const auto initial=story_world_placement::check(spec.stage,int(spec.room),envelope,environment);
+    if(std::any_of(initial.begin(),initial.end(),[](const auto&conflict){return conflict.kind=="coverage"||conflict.kind=="invalid";}))return false;
+    const float radius=std::max(100.f,water_radius(d));
+    auto sample=[&](float x,float z){Cpu probe=*c;probe.f[1].ps0=x;probe.f[2].ps0=z;call(&probe,GC(0x0246BA0C),{});return float(probe.f[1].ps0);};
+    Samples samples{sample(previous.x,previous.z),sample(previous.x-radius,previous.z),sample(previous.x+radius,previous.z),sample(previous.x,previous.z-radius),sample(previous.x,previous.z+radius),radius};
+    for(float height:{samples.center,samples.left,samples.right,samples.front,samples.back})if(!std::isfinite(height)||std::fabs(height)>2048)return false;
+    Point wind{};if(config.drifting&&config.wind_speed>0){call(c,GC(0x0257DB28),{actor+WorldMotion+60});auto p=point(actor+WorldMotion+60);wind={p.x,p.y,p.z};}
+    if(!step(config,samples,wind,1.f/30.f,state,why))return false;
+    const auto swept=story_world_placement::sweep(spec.stage,int(spec.room),envelope,{state.position.x-previous.x,0,state.position.z-previous.z},environment);
+    // A nearby ship is transient. Recreate the body at its validated authored
+    // placement and hold drift until the ship clears its conservative envelope.
+    if(initialize&&swept.blocked&&std::any_of(swept.conflicts.begin(),swept.conflicts.end(),[](const auto&conflict){return conflict.kind!="ship";}))return false;
+    if(swept.blocked){state.position.x=previous.x+swept.allowed_delta.x;state.position.z=previous.z+swept.allowed_delta.z;state.velocity.x=swept.allowed_delta.x*30;state.velocity.z=swept.allowed_delta.z*30;state.residual.x=state.residual.z=0;}
+    if(config.anchored&&std::hypot(double(state.position.x)-config.anchor.x,double(state.position.z)-config.anchor.z)>config.anchor_radius){state.position.x=previous.x;state.position.z=previous.z;state.velocity.x=state.velocity.z=0;state.residual.x=state.residual.z=0;}
+    water_state(actor,state);point(actor+0x314,{state.position.x,state.position.y,state.position.z});for(unsigned i=0;i<3;++i){const float degrees=i==0?state.rotation.x:i==1?state.rotation.y:state.rotation.z;st16(actor+0x328+i*2,uint16_t(int32_t(degrees*32768.f/180.f)));}
+    const char*trace=std::getenv("WWHD_WORLD_COLLISION_TRACE");if(trace&&std::strcmp(trace,"1")==0&&ld32(actor+story_world_collision::native::State+12)%30==0)LOG("[world_motion] actor=%08X id=%s x=%.4f y=%.4f z=%.4f pitch=%.4f roll=%.4f vx=%.4f vz=%.4f wave=%.4f wind_x=%.4f wind_z=%.4f blocked=%u",actor,spec.id.c_str(),double(state.position.x),double(state.position.y),double(state.position.z),double(state.rotation.x),double(state.rotation.z),double(state.velocity.x),double(state.velocity.z),double(samples.center),double(wind.x),double(wind.z),unsigned(swept.blocked));
+    return true;
+}
 void heap(Cpu*c){uint32_t a=c->r[3];auto*d=declaration(a);if(!d){result(c,0);return;}st32(a+Safe,a+Name);st32(a+Safe+4,GD(0x10012504));const std::string filename=d->archive+".bmd";uint32_t data=call(c,GC(0x026066C4),{ld32(GD(0x101F4F28)),a+Safe,uint32_t(d->index)});LOG("[mod_actor] %s:%s archive=%s named_resource=%s data=%08X",d->mod.c_str(),d->spec.id.c_str(),d->archive.c_str(),filename.c_str(),data);uint32_t current=call(c,GC(0x027EC230),{}),before=heap_free(c,current);uint32_t model=0;
 if(data&&d->skinned){
     auto idle=std::find(d->clips.begin(),d->clips.end(),d->spec.animation.empty()?"idle":d->spec.animation);const size_t clip=idle==d->clips.end()?0:size_t(idle-d->clips.begin());
     const uint32_t animation=d->clips.empty()?0:call(c,GC(0x026066C4),{ld32(GD(0x101F4F28)),a+Safe,uint32_t(d->index)+1+uint32_t(clip)});
     const uint32_t morf=(animation||d->clips.empty())?create_morf(c,data,animation):0;st32(a+Morf,morf);st32(a+ClipIndex,d->clips.empty()?0xFFFFFFFFu:uint32_t(clip));st32(a+ClipLoop,1);if(morf&&d->head>=0){st32(morf+0xC0,a+LookObject);st32(morf+0xC4,a+PostObject);}
     if(morf&&ld32(morf+0xA8)&&ld32(morf+0xAC)&&!ld32(morf+0xBC))model=ld32(morf+0x90);
-}else if(data)model=call(c,GC(0x025E38E0),{data,0x80000});uint32_t after=heap_free(c,current);LOG("[mod_actor] %s:%s model heap=%08X free_before=%u free_after=%u model_bytes=%u",d->mod.c_str(),d->spec.model.c_str(),current,before,after,before>=after?before-after:0);st32(a+Model,model);st32(a+0x368,model);st32(a+0x348,model?model+0xC8:0);transform(a);const auto proof_kind=story_world_collision::proof::selected(d->mod,d->spec);const bool proof_ok=model&&story_world_collision::proof::heap_create(c,a,proof_kind,call)&&(!d->spec.world_object()||(d->collision&&story_world_collision::native::heap_create(c,a,*d->collision,d->fingerprint,call)));result(c,proof_ok);}
+}else if(data)model=call(c,GC(0x025E38E0),{data,0x80000});uint32_t after=heap_free(c,current);LOG("[mod_actor] %s:%s model heap=%08X free_before=%u free_after=%u model_bytes=%u",d->mod.c_str(),d->spec.model.c_str(),current,before,after,before>=after?before-after:0);st32(a+Model,model);st32(a+0x368,model);st32(a+0x348,model?model+0xC8:0);if(d->spec.water_object()&&!water_step(c,a,*d,true)){result(c,0);return;}transform(a);const auto proof_kind=story_world_collision::proof::selected(d->mod,d->spec);const bool proof_ok=model&&story_world_collision::proof::heap_create(c,a,proof_kind,call)&&(!d->spec.world_object()||(d->collision&&story_world_collision::native::heap_create(c,a,*d->collision,d->fingerprint,call)));result(c,proof_ok);}
 void create(Cpu*c){uint32_t a=c->r[3];auto*d=declaration(a);if(!d){result(c,5);return;}if(!ld8(a+0x3AA)){call(c,GC(0x025D4ED0),{a});std::memset(mem::ptr(a+Phase),0,Size-Phase);if(d->spec.combat_enabled){combat::State state;if(!combat::initialize(state,combat_config(*d))){result(c,5);return;}write_combat(a,state);const auto captured=story_actors::identity::record(d->fingerprint);std::memcpy(mem::ptr(a+CombatIdentity),captured.data(),captured.size());}if(d->spec.carry_enabled){carry::State state;state.pid=ld32(a+4);write_carry(a,state);const auto captured=story_actors::identity::record(d->fingerprint);std::memcpy(mem::ptr(a+CombatIdentity),captured.data(),captured.size());}number(a+Radius,d->spec.collision_radius);number(a+Height,d->spec.collision_height);st32(a+CollisionFlags,1|(d->spec.pushable?2:0));st32(a+LookObject,a+LookVtable);st32(a+LookObject+4,a);st32(a+LookVtable+0xC,look_callback);st32(a+PostObject,a+PostVtable);st32(a+PostObject+4,a);st32(a+PostVtable+0xC,post_callback);MotionState motion_;motion_.count=unsigned(d->spec.path.points.size());motion_.speed=d->spec.path.speed;motion_.loop=d->spec.path.loop;motion_.enabled=motion_.count>=2;for(unsigned i=0;i<motion_.count;++i)motion_.points[i]=d->spec.path.points[i];write_motion(a+Motion,motion_);std::memcpy(mem::ptr(a+Name),d->archive.c_str(),d->archive.size()+1);call(c,GC(0x0200BD2C),{a+Stts});call(c,GC(0x02515DA0),{a+Stts+0x1C});st32(a+Stts+0x18,GD(0x1004AE88));st32(a+Stts+0x1C,GD(0x1004AEC0));call(c,GC(0x02515FB8),{a+Cyl});st32(a+Cyl+0x114,GD(0x100015A8));st32(a+Cyl+0x110,GD(0x1001251C));call(c,GC(0x02018590),{a+Cyl+0x118});st32(a+Cyl+0x3C,GD(0x1004B108));st32(a+Cyl+0x114,GD(0x1004B160));st32(a+Cyl+0x12C,GD(0x1004B150));}
 if(heap_trace()&&!ld32(a+HeapStarted)){const auto before=heaps(c);for(unsigned i=0;i<4;++i){st32(a+HeapBaseline+i*8,before[i].first);st32(a+HeapBaseline+i*8+4,before[i].second);}st32(a+HeapStarted,1);}
 uint32_t phase=call(c,GC(0x02520460),{a+Phase,a+Name});if(phase!=4){if(phase>=5)fail_create(a);result(c,phase);return;}if(!ld32(a+Model)){
@@ -421,8 +468,10 @@ bool carry_step(Cpu*c,uint32_t a,uint32_t play,uint32_t player){
     else write_carry(a,state);return true;
 }
 void execute(Cpu*c){uint32_t a=c->r[3];auto*d=declaration(a);if(!d){result(c,1);return;}if(d->spec.world_object()){
-    bool unchanged=true;const float position[]={d->spec.position.x,d->spec.position.y,d->spec.position.z},rotation[]={d->spec.rotation.x,d->spec.rotation.y,d->spec.rotation.z},scale[]={d->spec.scale.x,d->spec.scale.y,d->spec.scale.z};
-    for(unsigned i=0;i<3;++i){const float p=number(a+0x314+i*4);unchanged&=std::isfinite(p)&&std::fabs(p-position[i])<=.01f;unchanged&=ld16(a+0x328+i*2)==uint16_t(int32_t(rotation[i]*32768.f/180.f));unchanged&=number(a+0x330+i*4)==scale[i];}
+    bool unchanged=true;auto expected=d->spec.position;auto rotation=d->spec.rotation;
+    if(d->spec.water_object()){const auto state=water_state(a);unchanged=state.initialized;expected={state.position.x,state.position.y,state.position.z};rotation={state.rotation.x,state.rotation.y,state.rotation.z};}
+    const float position[]={expected.x,expected.y,expected.z},angles[]={rotation.x,rotation.y,rotation.z},scale[]={d->spec.scale.x,d->spec.scale.y,d->spec.scale.z};
+    for(unsigned i=0;i<3;++i){const float p=number(a+0x314+i*4);unchanged&=std::isfinite(p)&&std::fabs(p-position[i])<=.01f;unchanged&=std::isfinite(angles[i])&&std::fabs(angles[i])<=360.f&&ld16(a+0x328+i*2)==uint16_t(int32_t(angles[i]*32768.f/180.f));unchanged&=number(a+0x330+i*4)==scale[i];}
     unchanged&=!read_motion(a+Motion).enabled&&ld32(a+CollisionFlags)==0;
     if(!unchanged){story_world_collision::native::destroy(c,a,call);fail_create(a);result(c,1);return;}
 }if(d->spec.world_object()&&!story_world_collision::native::stored(a,d->fingerprint)){story_world_collision::native::destroy(c,a,call);fail_create(a);result(c,1);return;}HeadingExecuteScope heading_scope(a);uint32_t play=call(c,GC(0x025200D4),{});if(!play||!ld32(play+0x5B34)){result(c,1);return;}const uint32_t player=ld32(play+0x5B34);if(restored.erase({a,ld32(a+4)})){call(c,GC(0x0251621C),{a+Cyl});if(!emit(c,a,BehaviorEvent::CreateRestored)){result(c,1);return;}}if(!combat_step(c,a)||!emit(c,a,BehaviorEvent::Execute)||!consume_hit(c,a,player)){result(c,1);return;}const bool carry_motion=carry_step(c,a,play,player);knockback_movement(c,a,play,player);if(!carry_motion&&(!d->spec.combat_enabled||read_combat(a).phase==uint32_t(combat::Phase::Alive)))movement(c,a,play,player);look(c,a,player);if(const uint32_t morf=ld32(a+Morf))call(c,GC(0x025E535C),{morf,a+0x314,0,0});if(ld32(a+CollisionFlags)&2)for(unsigned i=0;i<3;++i)st32(a+0x314+i*4,f32_as_u32(u32_as_f32(ld32(a+0x314+i*4))+u32_as_f32(ld32(a+Stts+i*4))));call(c,GC(0x02515E50),{a+Stts+0x1C});for(unsigned i=0;i<3;++i){float v=u32_as_f32(ld32(a+0x314+i*4))+(i==1?(d->spec.carry_enabled?30.f:number(a+Height)*0.7f):0);st32(a+0x37C+i*4,f32_as_u32(v));st32(a+0x390+i*4,f32_as_u32(v));}call(c,GC(0x020182E0),{a+Cyl+0x118,a+0x314});c->f[1].ps0=number(a+Radius);call(c,GC(0x020184DC),{a+Cyl+0x118});c->f[1].ps0=number(a+Height);call(c,GC(0x02018428),{a+Cyl+0x118});st32(a+Cyl+0x18,d->hits?0x1F:0);st32(a+Cyl+0x28,d->spec.combat_enabled?0xFFFFFFFFu:d->hits?2u:0u);st32(a+Cyl+0x94,d->hits?6:0);if(!carry_busy(a)&&(ld32(a+CollisionFlags)&1)&&(!d->spec.combat_enabled||combat::alive(read_combat(a))))call(c,GC(0x0200E240),{play+0x26A4,a+Cyl});attack_collision(c,a,play);
@@ -466,7 +515,7 @@ if(ld16(a+0xF8)==1){
     if(talk_actor==a){if(talk_trace())LOG("[mod_actor_talk] cancel actor=%08X",a);story_mail::unsay();talk_actor=0;text.clear();talk_completed={};custom_talk=false;animate(c,a,"idle",6,true);if(!emit(c,a,BehaviorEvent::TalkCancel)){result(c,1);return;}}
     st32(a+Talk,0);st32(a+TalkStatus,0);st16(a+0xFA,ld16(a+0xFA)|1);
 }
-if(d->mod=="world-objects-w0"){story_world_collision::proof::pose(c,a,call);transform(a);if(!story_world_collision::proof::move(c,a,call)){result(c,1);return;}}else{transform(a);if(d->spec.world_object()&&!story_world_collision::native::move(c,a,d->fingerprint,call)){fail_create(a);result(c,1);return;}}heading_scope.complete=true;result(c,1);}
+if(d->mod=="world-objects-w0"){story_world_collision::proof::pose(c,a,call);transform(a);if(!story_world_collision::proof::move(c,a,call)){result(c,1);return;}}else{if(d->spec.water_object()&&!water_step(c,a,*d,false)){story_world_collision::native::destroy(c,a,call);fail_create(a);result(c,1);return;}transform(a);if(d->spec.world_object()&&!story_world_collision::native::move(c,a,d->fingerprint,call)){fail_create(a);result(c,1);return;}}heading_scope.complete=true;result(c,1);}
 void trace_pose(uint32_t actor,uint32_t model,uint32_t morf){
     static int remaining=[](){const char* value=std::getenv("WWHD_MOD_ACTOR_POSE_TRACE");return value?std::clamp(std::atoi(value),0,120):0;}();
     if(!remaining||!morf)return;const uint32_t joints=ld32(model+0x2C),matrix=joints?ld32(joints+0x10):0;const unsigned count=joints?ld16(joints+0x2C):0;
@@ -538,7 +587,7 @@ namespace {
 // declare's checks, shared with redeclare so both validate identically: false for a spec the
 // model can't serve; head/upper are the look_at joints
 bool checked(const story_notebook::ManifestActor&spec,const std::string&archive,int index,story_notebook::WorldPoint minimum,story_notebook::WorldPoint maximum,bool skinned,const std::vector<std::string>&clips,const ModelRig&rig,int&head,int&upper){
-    if(spec.world_object()&&(spec.behaviour!="static"||skinned||spec.carry_enabled||spec.combat_enabled||spec.pushable||spec.look_at.enabled||!spec.path.points.empty()||!spec.animation.empty()))return false;
+    if(spec.world_object()&&((spec.behaviour!="static"&&!spec.water_object())||skinned||spec.carry_enabled||spec.combat_enabled||spec.pushable||spec.look_at.enabled||!spec.path.points.empty()||!spec.animation.empty()))return false;
     if(clips.size()>8||(!skinned&&!clips.empty())||(!spec.animation.empty()&&std::find(clips.begin(),clips.end(),spec.animation)==clips.end()))return false;
     for(size_t i=0;i<clips.size();++i)if(!story_mail::valid_id(clips[i])||std::find(clips.begin(),clips.begin()+i,clips[i])!=clips.begin()+i)return false;
     if(rig.joint_names.size()!=rig.joint_parents.size()||rig.joint_names.size()>32)return false;
@@ -564,11 +613,12 @@ bool collision_geometry(const std::string&mod,const story_notebook::ManifestActo
     geometry.minimum={INFINITY,INFINITY,INFINITY};geometry.maximum={-INFINITY,-INFINITY,-INFINITY};
     for(auto&p:geometry.vertices){p.x*=spec.scale.x;p.y*=spec.scale.y;p.z*=spec.scale.z;geometry.minimum.x=std::min(geometry.minimum.x,p.x);geometry.minimum.y=std::min(geometry.minimum.y,p.y);geometry.minimum.z=std::min(geometry.minimum.z,p.z);geometry.maximum.x=std::max(geometry.maximum.x,p.x);geometry.maximum.y=std::max(geometry.maximum.y,p.y);geometry.maximum.z=std::max(geometry.maximum.z,p.z);}
     if(!mesh::validate(geometry,why)||mesh::allocation_bytes(geometry)>512*1024)return false;
+    if(spec.water_object())for(const auto&p:geometry.vertices)if(std::sqrt(p.x*p.x+p.y*p.y+p.z*p.z)>2000)return false;
     out=std::make_shared<const mesh::Mesh>(std::move(geometry));return true;
 }
 story_actors::identity::Fingerprint declaration_fingerprint(const Decl&d){
     std::string identity=d.mod+std::string(1,'\0')+d.archive;
-    if(d.collision){std::vector<uint8_t> bytes;std::string why;std::array<uint8_t,6> raw{0,1,2,3,4,5};if(story_world_collision::mesh::build_native(*d.collision,raw,uint16_t(d.spec.room),bytes,why))identity+=mods::hash::sha256_text(std::string(bytes.begin(),bytes.end()));}
+    if(d.collision){std::vector<uint8_t> bytes;std::string why;std::array<uint8_t,7> raw{0,1,2,3,4,5,6};if(story_world_collision::mesh::build_native(*d.collision,raw,uint16_t(d.spec.room),bytes,why))identity+=mods::hash::sha256_text(std::string(bytes.begin(),bytes.end()));}
     return story_actors::identity::fingerprint(identity,d.spec);
 }
 }
@@ -580,6 +630,7 @@ bool world_object_query(const std::string&mod,const story_notebook::ManifestActo
     if(!spec.world_object()||!collision_geometry(mod,spec,geometry))return why="collision mesh is unavailable or exceeds its limits; prepare it before placing",false;
     Bounds local{{geometry->minimum.x,geometry->minimum.y,geometry->minimum.z},{geometry->maximum.x,geometry->maximum.y,geometry->maximum.z}},bounds;
     if(!transform_bounds(local,{spec.position.x,spec.position.y,spec.position.z},{spec.rotation.x,spec.rotation.y,spec.rotation.z},{1,1,1},bounds))return why="invalid collision transform",false;
+    if(spec.water_object()){float radius=0;for(const auto&p:geometry->vertices)radius=std::max(radius,std::sqrt(p.x*p.x+p.y*p.y+p.z*p.z));const float y=spec.position.y-spec.buoyancy.draft;bounds={{spec.position.x-radius,y-2048-radius,spec.position.z-radius},{spec.position.x+radius,y+2048+radius,spec.position.z+radius}};}
     const auto key=std::make_pair(spec.stage,int(spec.room));
     auto found=placement_indexes.find(key);if(found==placement_indexes.end())found=placement_indexes.emplace(key,placement_provider?placement_provider(spec.stage,int(spec.room)):load_native_room(world_game_directory,spec.stage,int(spec.room))).first;
     auto conflicts=check(spec.stage,int(spec.room),bounds,found->second);
@@ -587,8 +638,8 @@ bool world_object_query(const std::string&mod,const story_notebook::ManifestActo
     for(const auto&d:declarations){
         if(!d.collision||d.spec.stage!=spec.stage||d.spec.room!=spec.room||(d.mod==mod&&d.spec.id==spec.id))continue;
         allocation+=story_world_collision::mesh::allocation_bytes(*d.collision);
-        Bounds other;const auto&g=*d.collision;
-        if(!transform_bounds({{g.minimum.x,g.minimum.y,g.minimum.z},{g.maximum.x,g.maximum.y,g.maximum.z}},{d.spec.position.x,d.spec.position.y,d.spec.position.z},{d.spec.rotation.x,d.spec.rotation.y,d.spec.rotation.z},{1,1,1},other))return why="invalid existing object bounds",false;
+        Bounds other;
+        if(!world_bounds(d,d.spec.position,other))return why="invalid existing object bounds",false;
         Index placed;placed.coverage.push_back({spec.stage,int(spec.room),true,true,true,{}});placed.bounds.push_back({spec.stage,int(spec.room),"world_object",d.mod+":"+d.spec.id,other});
         auto overlapping=check(spec.stage,int(spec.room),bounds,placed);conflicts.insert(conflicts.end(),overlapping.begin(),overlapping.end());
     }

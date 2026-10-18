@@ -223,7 +223,7 @@ int main() {
         auto island=valid_mod;auto&a=island["actors"].array[0];a.object.erase("attention");a.object.erase("lines");a["behaviour"]="static";a["collision"]=mods::json::parse(R"({"mesh":"post"})");
         assert(parse_actors(island,actors,why)&&actors[0].world_object()&&actors[0].collision_mesh=="post"&&actors[0].collision_shape.empty());
         auto rejected=[&](Value data){assert(!parse_actors(data,actors,why));};
-        for(const char*behaviour:{"floating","drifting","STATIC",""}){auto bad=island;bad["actors"].array[0]["behaviour"]=behaviour;rejected(bad);}
+        for(const char*behaviour:{"STATIC","unknown",""}){auto bad=island;bad["actors"].array[0]["behaviour"]=behaviour;rejected(bad);}
         for(const char*id:{"missing","other:post","../post"}){auto bad=island;bad["actors"].array[0]["collision"]["mesh"]=id;rejected(bad);}
         {auto bad=island;bad["models"].array[0]["kind"]="skinned";rejected(bad);}
         {auto bad=island;auto other=bad["models"].array[0];other["id"]="skin";other["kind"]="skinned";bad["models"].array.push_back(other);bad["actors"].array[0]["collision"]["mesh"]="skin";rejected(bad);}
@@ -239,6 +239,30 @@ int main() {
             {auto bad=simple;auto&bc=bad["actors"].array[0]["collision"];if(std::string(shape)=="box")bc["radius"]=1;else bc["size"]=mods::json::parse(R"({"x":1,"y":1,"z":1})");rejected(bad);}
             if(std::string(shape)=="sphere"){auto bad=simple;bad["actors"].array[0]["collision"]["height"]=1;rejected(bad);}
         }
+    }
+
+    { // Floating and drifting use bounded own-format parameters, never native save bits.
+        auto floating=mods::json::parse(R"({"models":[{"id":"raft","source":"assets/raft.glb"}],"actors":[{"id":"raft","kind":"mod","model":"raft","behaviour":"floating","stage":"sea","room":12,"position":{"x":100,"y":0,"z":200},"collision":{"shape":"box","size":{"x":100,"y":20,"z":200},"surface":"wood"}}]})");
+        assert(parse_actors(floating,actors,why)&&actors[0].behaviour=="floating");
+        auto rejected=[&](Value data){assert(!parse_actors(data,actors,why));};
+        auto&fa=floating["actors"].array[0];fa["buoyancy"]=mods::json::parse(R"({"draft":-20,"damping":0.5,"max_tilt":12})");
+        assert(parse_actors(floating,actors,why)&&actors[0].buoyancy.draft==-20&&actors[0].buoyancy.damping==0.5f&&actors[0].buoyancy.max_tilt==12);
+        for(const char*setting:{R"({"draft":-1000,"damping":0,"max_tilt":0})",R"({"draft":1000,"damping":10,"max_tilt":30})","{}"}){auto data=floating;data["actors"].array[0]["buoyancy"]=mods::json::parse(setting);assert(parse_actors(data,actors,why));}
+        for(const char*setting:{R"({"draft":-1001})",R"({"draft":1001})",R"({"damping":-0.1})",R"({"damping":10.1})",R"({"max_tilt":-1})",R"({"max_tilt":31})",R"({"damping":false})",R"({"max_tilt":"10"})",R"({"event_bit":1})"}){auto data=floating;data["actors"].array[0]["buoyancy"]=mods::json::parse(setting);rejected(data);}
+        {auto data=floating;data["actors"].array[0]["stage"]="town";rejected(data);}
+        for(const char*rotation:{R"({"x":1,"y":0,"z":0})",R"({"x":0,"y":0,"z":1})"}){auto data=floating;data["actors"].array[0]["rotation"]=mods::json::parse(rotation);rejected(data);}
+        {auto data=floating;data["actors"].array[0]["rotation"]=mods::json::parse(R"({"x":0,"y":90,"z":0})");assert(parse_actors(data,actors,why));}
+        {auto data=floating;data["actors"].array[0]["drift"]=mods::json::parse(R"({"wind_speed":1,"max_speed":1})");rejected(data);}
+        auto drifting=floating;auto&da=drifting["actors"].array[0];da["behaviour"]="drifting";rejected(drifting);
+        da["drift"]=mods::json::parse(R"({"wind_speed":4,"current":{"x":-3,"z":2},"max_speed":8})");da["anchor"]=mods::json::parse(R"({"point":{"x":100,"y":0,"z":200},"radius":10000})");
+        assert(parse_actors(drifting,actors,why)&&actors[0].drift.wind_speed==4&&actors[0].drift.current.x==-3&&actors[0].drift.current.z==2&&actors[0].drift.max_speed==8&&actors[0].anchor.enabled&&actors[0].anchor.radius==10000);
+        {auto data=floating;data["actors"].array[0]["anchor"]=da.get("anchor");rejected(data);}
+        {auto data=drifting;data["actors"].array[0].object.erase("anchor");assert(parse_actors(data,actors,why)&&!actors[0].anchor.enabled);}
+        for(const char*setting:{R"({"wind_speed":100,"max_speed":100})",R"({"current":{"x":-100,"z":100},"max_speed":100})"}){auto data=drifting;data["actors"].array[0]["drift"]=mods::json::parse(setting);assert(parse_actors(data,actors,why));}
+        for(const char*setting:{"{}",R"({"wind_speed":0,"current":{"x":0,"z":0},"max_speed":10})",R"({"wind_speed":-1,"max_speed":10})",R"({"wind_speed":101,"max_speed":10})",R"({"wind_speed":1,"max_speed":0})",R"({"wind_speed":1,"max_speed":101})",R"({"current":{"x":101,"z":0},"max_speed":10})",R"({"current":{"x":0,"z":-101},"max_speed":10})",R"({"current":{"x":1,"y":0,"z":0},"max_speed":10})",R"({"wind_speed":1,"max_speed":10,"event_bit":1})"}){auto data=drifting;data["actors"].array[0]["drift"]=mods::json::parse(setting);rejected(data);}
+        for(const char*setting:{R"({"point":{"x":100,"y":0,"z":200},"radius":0})",R"({"point":{"x":100,"y":0,"z":200},"radius":10001})",R"({"point":{"x":100,"z":200},"radius":100})",R"({"point":{"x":100,"y":0,"z":200},"radius":100,"event_bit":1})"}){auto data=drifting;data["actors"].array[0]["anchor"]=mods::json::parse(setting);rejected(data);}
+        for(const char*field:{"buoyancy","drift","anchor"}){auto data=drifting;auto&a=data["actors"].array[0];a["behaviour"]="static";for(const char*other:{"buoyancy","drift","anchor"})if(std::string(other)!=field)a.object.erase(other);rejected(data);}
+        for(const char*field:{"carry","combat","path","animation","attention","talks","lines","then"}){auto data=drifting;data["actors"].array[0][field]=Value{};rejected(data);}
     }
 
     std::vector<ManifestModel> models;assert(parse_models(valid_mod,models,why)&&models[0].kind=="static");

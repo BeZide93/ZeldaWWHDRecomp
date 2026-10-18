@@ -240,6 +240,33 @@ class CollisionMeshTests(unittest.TestCase):
         semantics=[struct.unpack_from('>4H',data,40+24*12+i*8)[3] for i in range(40)]
         self.assertEqual({v:semantics.count(v) for v in set(semantics)},{1:10,2:12,3:18})
 
+    def test_floating_assets_and_object_envelope_semantic(self):
+        path=ROOT/'examples/guest-mods/world-objects-w2/assets/make_fixtures.py'
+        spec=importlib.util.spec_from_file_location('floating_assets',path)
+        fixture=importlib.util.module_from_spec(spec);spec.loader.exec_module(fixture)
+        for name,counts in (('raft',(16,20)),('buoy',(18,32)),('flotsam',(16,20))):
+            source=path.with_name(name+'.glb')
+            self.assertEqual(fixture.make(name),source.read_bytes())
+            _,info,data=collision_mesh.read_static(source,True)
+            self.assertEqual((info['collision_vertices'],info['collision_triangles']),counts)
+            points=[struct.unpack_from('>3f',data,40+i*12) for i in range(counts[0])]
+            triangles=[struct.unpack_from('>4H',data,40+counts[0]*12+i*8) for i in range(counts[1])]
+            envelope=[t for t in triangles if t[3]==6]
+            if name=='buoy':
+                self.assertFalse(envelope)
+                self.assertEqual({t[3] for t in triangles},{4})
+            else:
+                self.assertEqual(len(envelope),8)
+                # Every object-envelope face is vertical; no extra standable cap.
+                for a,b,c,_ in envelope:
+                    p,q,r=points[a],points[b],points[c]
+                    u=[q[k]-p[k] for k in range(3)];v=[r[k]-p[k] for k in range(3)]
+                    self.assertEqual(u[2]*v[0]-u[0]*v[2],0)
+                self.assertEqual({t[3] for t in triangles},{2,6})
+        doc,binary=self.original();doc['materials'][1]['name']='col_objects'
+        _,_,data=self.parse(doc,binary)
+        self.assertEqual(struct.unpack_from('>H',data,40+8*12+6)[0],6)
+
     def test_collision_cache_rebuilds_damaged_or_missing_sidecar(self):
         from unittest.mock import patch
         with tempfile.TemporaryDirectory() as directory:

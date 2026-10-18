@@ -23,7 +23,7 @@ bool validate(const Mesh&m,std::string&why){
     Mesh actual;actual.vertices=m.vertices;bounds(actual);
     for(auto p:m.vertices)if(!finite(p)||std::max({std::abs(p.x),std::abs(p.y),std::abs(p.z)})>MaxExtent){why="non-finite or out-of-range collision-local vertex";return false;}
     for(unsigned k=0;k<3;++k){const float lo=component(m.minimum,k),hi=component(m.maximum,k);if(lo!=component(actual.minimum,k)||hi!=component(actual.maximum,k)||double(hi)-lo>MaxExtent){why="collision bounds mismatch or extent exceeds limit";return false;}}
-    for(const auto&t:m.triangles){if(t.semantic>=6||t.indices[0]>=m.vertices.size()||t.indices[1]>=m.vertices.size()||t.indices[2]>=m.vertices.size()){why="invalid collision triangle index or surface";return false;}
+    for(const auto&t:m.triangles){if(t.semantic>=7||t.indices[0]>=m.vertices.size()||t.indices[1]>=m.vertices.size()||t.indices[2]>=m.vertices.size()){why="invalid collision triangle index or surface";return false;}
         const auto a=m.vertices[t.indices[0]],b=m.vertices[t.indices[1]],c=m.vertices[t.indices[2]];
         const double x=double(b.x)-a.x,y=double(b.y)-a.y,z=double(b.z)-a.z,xx=double(c.x)-a.x,yy=double(c.y)-a.y,zz=double(c.z)-a.z;
         const double nx=y*zz-z*yy,ny=z*xx-x*zz,nz=x*yy-y*xx,norm=nx*nx+ny*ny+nz*nz;
@@ -60,9 +60,9 @@ bool decode(std::span<const uint8_t>b,Mesh&out,std::string&why){
     for(uint32_t i=0;i<t;++i){const size_t p=40+12*v+8*i;m.triangles.push_back({{u16(b,p),u16(b,p+2),u16(b,p+4)},u16(b,p+6)});}
     if(!validate(m,why))return false;out=std::move(m);return true;
 }
-Counts counts(const Mesh&m){if(m.vertices.empty()||m.vertices.size()>MaxVertices||m.triangles.empty()||m.triangles.size()>MaxTriangles)return {};const uint32_t b=leaves(uint32_t(m.triangles.size()));return {uint32_t(m.vertices.size()),uint32_t(m.triangles.size()),b,b?2*b-1:0,1,6};}
+Counts counts(const Mesh&m){if(m.vertices.empty()||m.vertices.size()>MaxVertices||m.triangles.empty()||m.triangles.size()>MaxTriangles)return {};const uint32_t b=leaves(uint32_t(m.triangles.size()));return {uint32_t(m.vertices.size()),uint32_t(m.triangles.size()),b,b?2*b-1:0,1,7};}
 uint64_t allocation_bytes(const Mesh&m){const auto c=counts(m);if(!c.vertices)return 0;const auto s=storage(c);return s.payload()+32+((4-(c.blocks*2)%4)%4)+4;}
-bool build_native(const Mesh&m,const std::array<uint8_t,6>&raw,uint16_t room,std::vector<uint8_t>&out,std::string&why){
+bool build_native(const Mesh&m,const std::array<uint8_t,7>&raw,uint16_t room,std::vector<uint8_t>&out,std::string&why){
     out.clear();if(!validate(m,why))return false;for(auto a:raw)if(a>31){why="invalid native surface attribute";return false;}
     struct Node{uint16_t parent=0xFFFF,block=0xFFFF;std::array<uint16_t,8> children;Node(){children.fill(0xFFFF);}};
     auto ordered=m.triangles;std::vector<Node> nodes;std::vector<uint16_t> blocks;
@@ -74,15 +74,15 @@ bool build_native(const Mesh&m,const std::array<uint8_t,6>&raw,uint16_t room,std
         std::stable_sort(ordered.begin()+first,ordered.begin()+end,[&](const Triangle&a,const Triangle&b){return center(a)<center(b);});
         const size_t middle=first+(end-first)/2;const auto left=split(first,middle,id),right=split(middle,end,id);nodes[id].children[0]=left;nodes[id].children[1]=right;return id;};
     split(0,ordered.size(),0xFFFF);
-    const uint32_t vertex=0x34,tri=vertex+uint32_t(m.vertices.size())*12,block=tri+uint32_t(ordered.size())*10,node=(block+uint32_t(blocks.size())*2+3)&~3u,group=node+uint32_t(nodes.size())*20,attribute=group+52,name=attribute+96;
-    out.resize(name+4);const uint32_t n[]={uint32_t(m.vertices.size()),uint32_t(ordered.size()),uint32_t(blocks.size()),uint32_t(nodes.size()),1,6},offset[]={vertex,tri,block,node,group,attribute};
+    const uint32_t vertex=0x34,tri=vertex+uint32_t(m.vertices.size())*12,block=tri+uint32_t(ordered.size())*10,node=(block+uint32_t(blocks.size())*2+3)&~3u,group=node+uint32_t(nodes.size())*20,attribute=group+52,name=attribute+112;
+    out.resize(name+4);const uint32_t n[]={uint32_t(m.vertices.size()),uint32_t(ordered.size()),uint32_t(blocks.size()),uint32_t(nodes.size()),1,7},offset[]={vertex,tri,block,node,group,attribute};
     for(unsigned i=0;i<6;++i){put32(out,i*8,n[i]);put32(out,i*8+4,offset[i]);}
     for(size_t i=0;i<m.vertices.size();++i)for(unsigned k=0;k<3;++k)putf(out,vertex+i*12+k*4,component(m.vertices[i],k));
     for(size_t i=0;i<ordered.size();++i){for(unsigned k=0;k<3;++k)put16(out,tri+i*10+k*2,ordered[i].indices[k]);put16(out,tri+i*10+6,ordered[i].semantic);}
     for(size_t i=0;i<blocks.size();++i)put16(out,block+i*2,blocks[i]);
     for(size_t i=0;i<nodes.size();++i){const auto&n=nodes[i];put16(out,node+i*20,n.block==0xFFFF?0:1);put16(out,node+i*20+2,n.parent);for(unsigned k=0;k<8;++k)put16(out,node+i*20+4+k*2,n.block!=0xFFFF&&k==0?n.block:n.children[k]);}
     put32(out,group,name);for(unsigned k=0;k<3;++k)putf(out,group+4+k*4,1);for(unsigned k:{0x24,0x26,0x28})put16(out,group+k,0xFFFF);put16(out,group+0x2A,room);
-    for(unsigned i=0;i<6;++i){put32(out,attribute+i*16,0x07FFE0FF);put32(out,attribute+i*16+4,0xFFu|(uint32_t(raw[i])<<16));put32(out,attribute+i*16+8,0xFFFFFFFF);}
+    for(unsigned i=0;i<7;++i){put32(out,attribute+i*16,0x07FFE0FF);put32(out,attribute+i*16+4,0xFFu|(uint32_t(raw[i])<<16));put32(out,attribute+i*16+8,0xFFFFFFFF);if(i==6)put32(out,attribute+i*16+12,0xED);}
     out[name]='w';out[name+1]='1';return true;
 }
 bool relocate(std::vector<uint8_t>&b,uint32_t base,std::string&why){
@@ -90,8 +90,8 @@ bool relocate(std::vector<uint8_t>&b,uint32_t base,std::string&why){
     const uint32_t v=u32(b,0),t=u32(b,8);
     if(!v||v>MaxVertices||!t||t>MaxTriangles){why="invalid native collision counts";return false;}
     const uint32_t blocks=leaves(t),nodes=2*blocks-1;
-    if(u32(b,16)!=blocks||u32(b,24)!=nodes||u32(b,32)!=1||u32(b,40)!=6){why="invalid native collision counts";return false;}
-    const uint32_t vertex=0x34,tri=vertex+v*12,block=tri+t*10,node=(block+blocks*2+3)&~3u,grp=node+nodes*20,attribute=grp+52,name=attribute+96;
+    if(u32(b,16)!=blocks||u32(b,24)!=nodes||u32(b,32)!=1||u32(b,40)!=7){why="invalid native collision counts";return false;}
+    const uint32_t vertex=0x34,tri=vertex+v*12,block=tri+t*10,node=(block+blocks*2+3)&~3u,grp=node+nodes*20,attribute=grp+52,name=attribute+112;
     const uint32_t expected[]={vertex,tri,block,node,grp,attribute};
     if(b.size()!=name+4||u32(b,grp)!=name||b[name]!='w'||b[name+1]!='1'||b[name+2]||b[name+3]){why="invalid native collision layout";return false;}
     for(unsigned i=0;i<6;++i)if(u32(b,i*8+4)!=expected[i]){why="invalid native collision table";return false;}

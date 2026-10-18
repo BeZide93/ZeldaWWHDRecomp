@@ -32,11 +32,16 @@ struct ManifestTalk {
     std::string quest,item,time,when_flag,when_not_flag,lines;unsigned quest_step=0;
     std::vector<QuestCondition> quests;std::vector<StoryAction> then;
 };
+struct ManifestBuoyancy {float draft=0,damping=.25f,max_tilt=10;};
+struct ManifestDrift {float wind_speed=0,max_speed=30;WorldPoint current;};
+struct ManifestAnchor {bool enabled=false;WorldPoint point;float radius=0;};
 struct ManifestActor {
     std::string id,actor,stage,kind,model,animation,prompt="check",texture,texture_digest; unsigned room=0,texture_token=0;
     float collision_radius=30,collision_height=100; bool pushable=false;
     std::string behaviour,collision_mesh,collision_shape,collision_surface="stone";WorldPoint collision_size{};
+    ManifestBuoyancy buoyancy;ManifestDrift drift;ManifestAnchor anchor;
     bool world_object()const{return !behaviour.empty();}
+    bool water_object()const{return behaviour=="floating"||behaviour=="drifting";}
     ManifestLookAt look_at;ManifestPath path;
     bool carry_enabled=false,carry_break_on_impact=false;
     bool combat_enabled=false,native_heart_drop=false;story_mod_combat::Config combat;
@@ -249,7 +254,7 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
     if(list.type==Value::Null)return true;
     if(list.type!=Value::Array||list.array.size()>kMaxActorsPerMod)return why="actors must be a list of up to 64",false;
     for(const auto& v:list.array){ManifestActor a;
-        if(!keys(v,{"id","actor","kind","model","animation","look_at","path","collision","behaviour","attention","stage","room","position","rotation","scale","params","parameters","flag","broken_flag","defeated_flag","drops","carry","combat","native_drops","switch_flag","switch","when","lines","then","texture","talks"}))return why="unknown actor field",false;
+        if(!keys(v,{"id","actor","kind","model","animation","look_at","path","collision","behaviour","buoyancy","drift","anchor","attention","stage","room","position","rotation","scale","params","parameters","flag","broken_flag","defeated_flag","drops","carry","combat","native_drops","switch_flag","switch","when","lines","then","texture","talks"}))return why="unknown actor field",false;
         if(!id(v.get("id")))return why="invalid actor id",false;a.id=v.get("id").text;a.actor=v.get("actor").string();
         if(v.object.contains("kind")) {
             if(v.get("kind").string()!="mod"||v.object.contains("actor"))return why="mod actor kind cannot name a native actor",false;
@@ -279,8 +284,19 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
             const auto& collision=v.get("collision");
             if(v.object.contains("behaviour")){
                 a.behaviour=v.get("behaviour").string();
-                if(a.behaviour!="static")return why="world object behaviour must be static; floating and drifting are not available yet",false;
-                if(skinned_model||v.object.contains("carry")||v.object.contains("combat")||v.object.contains("path")||v.object.contains("animation")||v.object.contains("attention")||v.object.contains("talks")||v.object.contains("lines")||v.object.contains("then"))return why="static world objects require a rigid model without actor interaction or motion",false;
+                if(a.behaviour!="static"&&!a.water_object())return why="world object behaviour must be static, floating or drifting",false;
+                if(!a.water_object()&&(v.object.contains("buoyancy")||v.object.contains("drift")||v.object.contains("anchor")))return why="buoyancy, drift and anchor require a water object",false;
+                if(a.water_object()){
+                    const auto& b=v.get("buoyancy");if(b.type!=Value::Null){if(!keys(b,{"draft","damping","max_tilt"}))return why="invalid buoyancy settings",false;
+                    if((b.object.contains("draft")&&!number(b.get("draft"),-1000,1000,a.buoyancy.draft))||(b.object.contains("damping")&&!number(b.get("damping"),0,10,a.buoyancy.damping))||(b.object.contains("max_tilt")&&!number(b.get("max_tilt"),0,30,a.buoyancy.max_tilt)))return why="buoyancy settings exceed their bounds",false;}
+                    if(a.behaviour=="drifting"){const auto& d=v.get("drift");if(!keys(d,{"wind_speed","current","max_speed"}))return why="drifting requires bounded drift settings",false;
+                        if((d.object.contains("wind_speed")&&!number(d.get("wind_speed"),0,100,a.drift.wind_speed))||(d.object.contains("max_speed")&&!number(d.get("max_speed"),0,100,a.drift.max_speed,true)))return why="invalid drift speed",false;
+                        if(d.object.contains("current")){const auto& q=d.get("current");if(!keys(q,{"x","z"})||!number(q.get("x"),-100,100,a.drift.current.x)||!number(q.get("z"),-100,100,a.drift.current.z))return why="current needs bounded x and z velocities",false;}
+                        if(a.drift.wind_speed==0&&a.drift.current.x==0&&a.drift.current.z==0)return why="drifting requires wind or current",false;
+                        if(v.object.contains("anchor")){const auto& q=v.get("anchor");if(!keys(q,{"point","radius"})||!keys(q.get("point"),{"x","y","z"})||!point(q.get("point"),a.anchor.point)||!number(q.get("radius"),0,10000,a.anchor.radius,true))return why="anchor needs a world point and positive radius up to 10000",false;a.anchor.enabled=true;}
+                    }else if(v.object.contains("drift")||v.object.contains("anchor"))return why="drift and anchor require drifting behaviour",false;
+                }
+                if(skinned_model||v.object.contains("carry")||v.object.contains("combat")||v.object.contains("path")||v.object.contains("animation")||v.object.contains("attention")||v.object.contains("talks")||v.object.contains("lines")||v.object.contains("then"))return why="world objects require a rigid model without actor interaction, animation or paths",false;
                 if(collision.get("mesh").type!=Value::Null){
                     if(!keys(collision,{"mesh"})||!id(collision.get("mesh")))return why="invalid collision mesh reference",false;
                     a.collision_mesh=collision.get("mesh").text;
@@ -323,7 +339,7 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
                 }
                 if(v.object.contains("native_drops")&&!story_mod_combat::parse_native_drops(v.get("native_drops"),a.native_heart_drop,why))return false;
             }
-        }else if(v.object.contains("model")||v.object.contains("animation")||v.object.contains("look_at")||v.object.contains("path")||v.object.contains("collision")||v.object.contains("attention")||v.object.contains("behaviour"))return why="model, animation, look_at, path, collision and attention require kind mod",false;
+        }else if(v.object.contains("model")||v.object.contains("animation")||v.object.contains("look_at")||v.object.contains("path")||v.object.contains("collision")||v.object.contains("attention")||v.object.contains("behaviour")||v.object.contains("buoyancy")||v.object.contains("drift")||v.object.contains("anchor"))return why="model, animation, look_at, path, collision and attention require kind mod",false;
         if(v.object.contains("carry")){
             const auto& carry=v.get("carry");if(a.kind!="mod"||a.combat_enabled||!keys(carry,{"break_on_impact"})||(carry.object.contains("break_on_impact")&&carry.get("break_on_impact").type!=Value::Bool))return why="carry requires a noncombat mod actor and boolean break_on_impact",false;
             a.carry_enabled=true;a.carry_break_on_impact=carry.get("break_on_impact").boolean;
@@ -341,6 +357,9 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
         if(!place(v,a.stage,a.room)||!point(v.get("position"),a.position))return why="actor "+a.id+": invalid stage, room or position",false;
         if(v.get("rotation").type!=Value::Null&&!point(v.get("rotation"),a.rotation,360))return why="invalid actor rotation",false;
         if(v.get("scale").type!=Value::Null&&(!point(v.get("scale"),a.scale,10)||a.scale.x<=0||a.scale.y<=0||a.scale.z<=0))return why="invalid actor scale",false;
+        if((v.object.contains("buoyancy")||v.object.contains("drift")||v.object.contains("anchor"))&&!a.water_object())return why="motion settings require floating or drifting behaviour",false;
+        if(a.water_object()&&(a.stage!="sea"||a.rotation.x!=0||a.rotation.z!=0))return why="water objects require sea placement and yaw-only base rotation",false;
+        if(a.anchor.enabled&&std::hypot(double(a.position.x)-a.anchor.point.x,double(a.position.z)-a.anchor.point.z)>a.anchor.radius)return why="object position lies outside its anchor radius",false;
         if(enemy){
             if(!native_enemy_fields(m,v,a,why))return false;
             for(const auto& old:out)if(old.defeated_flag==a.defeated_flag)return why="enemies require distinct defeated_flag IDs",false;

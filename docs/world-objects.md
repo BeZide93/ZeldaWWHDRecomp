@@ -1,12 +1,12 @@
-# Static world objects
+# World objects
 
-Static world objects let a mod add walkable ground and solid obstacles using its
+World objects let a mod add walkable ground, solid obstacles and floating bodies using its
 own models. Link and the ship use the game's background collision. Ground
 materials select the game's footstep sounds and surface effects.
 
-This page covers static objects. Floating, drifting, climbable walls, hookshot
-and grapple targets, distant island models, shore foam and sea-chart markers are
-later additions.
+Static objects stay in place. Floating bodies follow the sea, and drifting bodies
+also move with wind or a current. Climbable walls, hookshot and grapple targets,
+distant island models, shore foam and sea-chart markers are later additions.
 
 ## Place a model with collision
 
@@ -34,8 +34,10 @@ Declare an original static `.glb` model, then refer to it from an actor:
 
 `model` selects the visible model. `collision.mesh` names a declared static model
 whose geometry supplies collision; it can name the same model. `behaviour` is
-currently `static`. A world object uses a rigid model and has no carry, combat,
-path, animation or dialogue behavior.
+`static`, `floating` or `drifting`. A world object uses a rigid model and has no
+carry, combat, path, animation or dialogue behavior. Floating and drifting
+objects currently require the `sea` stage, with no base pitch or roll; yaw is
+allowed.
 
 GLB coordinates are metres. Conversion uses 100 game units per metre and keeps
 the authored origin. Manifest positions and shape dimensions use game units;
@@ -62,6 +64,7 @@ are optional; they do not control collision. Assign one of these material names:
 | `col_sand` | Sand |
 | `col_metal` | Metal |
 | `col_wall` | Ordinary wall surface |
+| `col_objects` | Object collision, including the ship; Link and camera pass through |
 
 Use separate material slots for different ground types. Triangle direction
 matters: orient ground faces upward and obstacle faces outward. The converter
@@ -76,8 +79,15 @@ selects the fallback surface; other visible material names use stone. Use a
 separate, simpler `_col` mesh when the render mesh exceeds the collision limits.
 
 Names such as `col_climb`, `col_hookshot`, `col_noship` and `col_shiponly` are not
-available in this phase. The native collision filter groups the ship with other
-objects; it has no separate ship-only category.
+available. The native collision filter groups the ship with other objects; it
+has no separate ship-only category.
+
+Use `col_objects` on vertical collision-envelope faces when the visible hull is
+too thin for reliable ship collision. It blocks all object-class queries,
+including the ship. Link, the camera, arrows, bombs, boomerangs and rope pass
+through those faces. Keep the ordinary wood or metal deck faces for Link. Do
+not cap an object envelope with additional ground faces. This material is
+available on GLB collision geometry, not as a simple shape's `surface`.
 
 Ship collision samples several heights rather than treating every thin floating
 surface as a solid hull. Give static coasts and obstacles sufficient vertical
@@ -109,6 +119,85 @@ Y=-50 to Y=50. To rest it on ground height 0, place its origin at Y=50.
 Put one of these objects inside the actor's `collision` field, alongside
 `behaviour: "static"`. Cylinder and sphere collision use bounded triangle
 approximations. A shape cannot also specify `mesh`.
+
+## Floating and drifting
+
+A floating object's target height is the native wave height plus its manifest
+`position.y`, minus `buoyancy.draft`. The object's local origin matters: a raft
+with its deck at local Y=0 and `position.y: 45`, `draft: 0` aims to keep the deck
+45 units above the wave. A positive draft lowers the body.
+
+```json
+{
+  "id": "floating-raft",
+  "kind": "mod",
+  "model": "raft",
+  "behaviour": "floating",
+  "stage": "sea",
+  "room": 12,
+  "position": {"x": 75000, "y": 45, "z": -204500},
+  "collision": {"mesh": "raft"},
+  "buoyancy": {"draft": 0, "damping": 0.3, "max_tilt": 10}
+}
+```
+
+| Buoyancy field | Units and range | Default |
+| --- | --- | --- |
+| `draft` | Game units, −1,000 to 1,000 | 0 |
+| `damping` | Seconds, 0 to 10 | 0.25 |
+| `max_tilt` | Degrees, 0 to 30 | 10 |
+
+The body samples the game's sea height and nearby wave slope. Damping controls
+how quickly it follows the height and tilt targets; a larger value responds
+more slowly. Link rides the moving collision through the game's riding system.
+The model and collision move together.
+
+For drifting, change `behaviour` to `drifting` and add `drift`:
+
+```json
+{
+  "drift": {
+    "wind_speed": 8,
+    "current": {"x": -12, "z": 8},
+    "max_speed": 30
+  },
+  "anchor": {
+    "point": {"x": 75000, "y": 0, "z": -204500},
+    "radius": 600
+  }
+}
+```
+
+Drift speeds use game units per second. `wind_speed` follows the native wind
+direction and accepts 0 to 100. The optional current gives world-space X/Z
+components, each from −100 to 100. `max_speed` caps the combined horizontal
+speed, from above zero to 100; its default is 30. A drifting body needs nonzero
+wind or current movement. Drifting collision respects islands, protected areas,
+other mod objects and the ship; a blocked move does not move through them.
+
+An optional anchor confines the object's origin to a horizontal circle. `point`
+is a world-space `{x,y,z}`; its Y value does not change the floating height.
+`radius` is above zero and at most 10,000 game units. The initial position must
+lie inside the circle. The anchor is a movement limit, with no rendered rope.
+
+Every scaled collision vertex on a floating or drifting object must lie within
+2,000 units of its origin. This bounds its footprint through all allowed tilts.
+Native wave heights outside the supported ±2,048-unit range are refused;
+an unavailable wave or placement query does not authorize unverified movement.
+Keep floating objects small and leave enough space for their whole motion.
+
+Full save states preserve the object's current motion state. Portable states,
+Last session and automatic portable saves reconstruct actors from their
+manifest placements: drift starts again from the authored position. They do not
+promise an exact snapshot of each drifting object's location.
+
+The original
+[`world-objects-w2` example](../examples/guest-mods/world-objects-w2) contains a
+floating raft, a tall metal buoy, an anchored drifting raft and anchored
+flotsam. Its
+[`assets/make_fixtures.py`](../examples/guest-mods/world-objects-w2/assets/make_fixtures.py)
+reproduces the three models. The thin wooden decks and separate `col_objects`
+side walls illustrate collision for both Link and the ship.
 
 ## Limits and placement
 
@@ -169,6 +258,8 @@ place_world_object {"id":"island-a","model":"island","behaviour":"static","stage
 ```
 
 Optional `rotation` and `scale` use `{x,y,z}`. `behaviour` defaults to `static`.
+Floating and drifting declarations also use `buoyancy`, `drift` and `anchor` as
+described above; their editor command parameters follow the same manifest fields.
 The actor id must be unused. The command creates one undo step.
 
 Change collision and behavior together:
@@ -178,8 +269,13 @@ set_world_object {"id":"island-a","behaviour":"static","collision":{"shape":"box
 ```
 
 This also creates one undo step. A rejected change leaves the package untouched.
-The ordinary `set_actor` command accepts `behaviour`, but coordinated changes
-should use `set_world_object` so the actor remains valid.
+Omitted `collision` and `behaviour` keep their current values, so this command
+also supports parameter-only edits. Set `buoyancy`, `drift` or `anchor` to `null`
+to remove that block. Switching to `static` removes inherited motion settings;
+switching to `floating` removes inherited drift and anchor settings. Explicit
+incompatible settings are rejected. The ordinary `set_actor` command also
+accepts `behaviour`, `buoyancy`, `drift` and `anchor`; use `set_world_object` for
+coordinated changes so the actor remains valid.
 
 Inspect the prepared geometry or placement:
 

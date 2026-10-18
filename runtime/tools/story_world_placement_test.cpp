@@ -34,6 +34,22 @@ int main(){
  Index parsed;std::string why;assert(add_native_collision(parsed,"test",0,mesh(),{100,20,0},90,&why));assert(parsed.bounds.size()==1);assert(near(parsed.bounds[0].bounds.minimum.x,90));auto bad=mesh();u16(bad,0x34+36,3);size_t count=parsed.bounds.size();assert(!add_native_collision(parsed,"test",0,bad,{},0,&why));assert(parsed.bounds.size()==count);
  assert(add_native_layout(parsed,"test",0,layout(),{},0,&why));assert(parsed.routes.size()==1&&parsed.routes[0].points.size()==2);assert(near(parsed.routes[0].points[0].x,-100));assert(check("test",0,local,parsed,0).size()==1);
  bad=layout();u32(bad,80,1);assert(!add_native_layout(parsed,"test",0,bad,{},0,&why));assert(parsed.routes.size()==1);
+ { // Continuous drift cannot tunnel through thin walls or a moving ship footprint.
+  Index motion;motion.coverage.push_back({"test",0,true,true,true,{}});const Bounds body{{-1,0,-1},{1,2,1}};
+  auto free=sweep("test",0,body,{1000,0,400},motion,0);assert(!free.blocked&&free.allowed_delta.x==1000&&free.allowed_delta.z==400);
+  motion.bounds.push_back({"test",0,"ship","live-ship",{{20,-100,-1000},{20.01f,100,1000}}});
+  auto hit=sweep("test",0,body,{1000,0,0},motion,0);assert(hit.blocked&&hit.allowed_delta.x>18&&hit.allowed_delta.x<19&&hit.allowed_delta.z==0&&hit.conflicts[0].kind=="ship");
+  auto slide=sweep("test",0,body,{100,0,100},motion,0);assert(slide.blocked&&slide.allowed_delta.x<19&&slide.allowed_delta.x>18&&near(slide.allowed_delta.z,100));
+  motion.bounds.push_back({"test",0,"object","other-raft",{{-1000,-100,20},{1000,100,20.01f}}});
+  auto corner=sweep("test",0,body,{100,0,100},motion,0);assert(corner.blocked&&corner.allowed_delta.x<19&&corner.allowed_delta.z<19&&corner.conflicts.size()==2);
+  auto below=motion;below.bounds[0].kind="collision";below.bounds[0].bounds.maximum.y=0;below.bounds.resize(1);assert(!sweep("test",0,body,{100,0,0},below,0).blocked);
+  assert(sweep("test",0,body,{1,1,0},motion,0).conflicts[0].kind=="invalid");assert(sweep("test",1,body,{100,0,0},motion,0).allowed_delta.x==0);
+  motion.bounds.clear();motion.regions.push_back({"test",0,{{-10,-10,-10},{10,10,10}}});auto edge=sweep("test",0,body,{100,0,2},motion,0);assert(edge.blocked&&edge.allowed_delta.x<9&&edge.allowed_delta.x>8&&near(edge.allowed_delta.z,2));
+  motion.regions.clear();motion.routes.push_back({"test",0,"diagonal",{{20,0,-100},{120,0,100}},1,false});auto route=sweep("test",0,body,{1000,0,0},motion,0);assert(route.blocked&&route.allowed_delta.x>60&&route.allowed_delta.x<70&&route.conflicts[0].kind=="route");
+  motion.routes[0].points={{-100,0,30},{100,0,30}};assert(!sweep("test",0,body,{100,0,0},motion,0).blocked);
+  motion.routes.clear();motion.bounds.push_back({"test",0,"object","left",{{-20.01f,-100,-1000},{-20,100,1000}}});auto left=sweep("test",0,body,{-1000,0,100},motion,0);assert(left.blocked&&left.allowed_delta.x>-19&&left.allowed_delta.x<-18&&near(left.allowed_delta.z,100));
+  motion.bounds[0].bounds={{-.5f,0,-.5f},{.5f,1,.5f}};auto overlap=sweep("test",0,body,{100,0,100},motion,0);assert(overlap.blocked&&overlap.allowed_delta.x==0&&overlap.allowed_delta.z==0);
+ }
  // Only original synthetic archives; no native resource fixtures are redistributed.
  const auto temporary=std::filesystem::temp_directory_path()/("world-placement-"+std::to_string(reinterpret_cast<uintptr_t>(&i)));std::filesystem::create_directories(temporary/"content/Common/Stage");auto write=[&](const char*name,const Bytes&b){std::ofstream f(temporary/"content/Common/Stage"/name,std::ios::binary);f.write(reinterpret_cast<const char*>(b.data()),std::streamsize(b.size()));};
  Bytes stage(4+12+12);u32(stage,0,1);tag(stage,4,"MULT");u32(stage,8,1);u32(stage,12,16);f32(stage,16,100);f32(stage,20,200);stage[26]=0;

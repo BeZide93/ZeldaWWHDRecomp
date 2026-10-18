@@ -430,7 +430,7 @@ changing the player template invalidates its cache key. Packages and this
 repository must never include game-derived material or shader templates.
 
 For walkable meshes and solid shapes that also block the ship, see
-[Static world objects](world-objects.md). The following cylinder form remains
+[World objects](world-objects.md). The following cylinder form remains
 available for ordinary model actors.
 
 `collision` specifies an upright cylinder with explicit game-unit dimensions:

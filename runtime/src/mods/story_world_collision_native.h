@@ -9,7 +9,7 @@ inline bool stored(uint32_t actor,const story_actors::identity::Fingerprint& ide
     return proof::address(actor,0x10C0)&&ld32(actor+State)==Magic&&ld32(actor+State+8)==ld32(actor+4)&&proof::address(ld32(actor+State+4),0xBC)&&story_actors::identity::matches(mem::ptr(actor+Identity),identity);
 }
 template<class Call> bool heap_create(Cpu*c,uint32_t actor,const mesh::Mesh& geometry,const story_actors::identity::Fingerprint& identity,Call call){
-    std::array<uint8_t,6> raw{};
+    std::array<uint8_t,7> raw{};
     for(size_t i=0;i<raw.size();++i){bool found=false;for(unsigned code=0;code<32;++code)if(ld32(GD(0x101D51CC)+code*4)==mesh::NativeResultIds[i]){raw[i]=uint8_t(code);found=true;break;}if(!found)return false;}
     std::string why;std::vector<uint8_t> bytes;
     if(!mesh::build_native(geometry,raw,uint16_t(ld8(actor+0x326)),bytes,why))return false;

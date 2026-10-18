@@ -55,6 +55,75 @@ std::vector<Conflict> check(const std::string&s,int room,const Bounds&b,const In
   if(hit)out.push_back({"route",v.id,"Placement intersects a protected route corridor"});
  }return out;
 }
+namespace {
+struct SweepHit {double time=2;bool x=false,z=false;Conflict conflict;};
+Bounds shifted(Bounds b,Point p){b.minimum.x+=p.x;b.maximum.x+=p.x;b.minimum.z+=p.z;b.maximum.z+=p.z;return b;}
+// Continuous separating-axis intervals. For a route, use the segment normal as
+// well as X/Z, so a diagonal corridor does not become its entire bounding box.
+SweepHit projected_hit(const Bounds& b,Point delta,Point a,Point end,double radius,bool route,Conflict conflict,double extra_x=0,double extra_z=0){
+ const double cx=(double(b.minimum.x)+b.maximum.x)/2,cz=(double(b.minimum.z)+b.maximum.z)/2;
+ const double hx=(double(b.maximum.x)-b.minimum.x)/2+extra_x,hz=(double(b.maximum.z)-b.minimum.z)/2+extra_z;
+ double entry=0,exit=1;bool hit_x=false,hit_z=false;
+ auto axis=[&](double nx,double nz){
+  const double center=cx*nx+cz*nz,velocity=delta.x*nx+delta.z*nz;
+  const double extent=hx*std::fabs(nx)+hz*std::fabs(nz)+radius*(std::fabs(nx)+std::fabs(nz));
+  const double p=a.x*nx+a.z*nz,q=end.x*nx+end.z*nz;
+  const double low=std::min(p,q)-extent,high=std::max(p,q)+extent;
+  // Touching and moving away/tangentially cannot enter this obstacle.
+  if((center<=low&&velocity<=0)||(center>=high&&velocity>=0))return false;
+  if(velocity==0)return center>=low&&center<=high;
+  double near=(low-center)/velocity,far=(high-center)/velocity;if(near>far)std::swap(near,far);
+  if(near>entry+1e-12){entry=near;hit_x=nx!=0;hit_z=nz!=0;}
+  else if(std::fabs(near-entry)<=1e-12){hit_x|=nx!=0;hit_z|=nz!=0;}
+  exit=std::min(exit,far);return entry<=exit;
+ };
+ if(!axis(1,0)||!axis(0,1))return {};
+ if(route){const double nx=double(end.z)-a.z,nz=double(a.x)-end.x;if((nx!=0||nz!=0)&&!axis(nx,nz))return {};}
+ if(entry<0||entry>1||exit<0||(!hit_x&&!hit_z))return {};
+ return {entry,hit_x,hit_z,std::move(conflict)};
+}
+void add_conflict(std::vector<Conflict>&out,const Conflict&c){for(const auto&old:out)if(old.kind==c.kind&&old.id==c.id)return;out.push_back(c);}
+}
+SweepResult sweep(const std::string&s,int room,const Bounds&start,Point desired,const Index&i,float pad){
+ SweepResult out;
+ if(!finite(desired)||desired.y!=0){out.blocked=true;out.conflicts.push_back({"invalid","","Swept placement requires a finite horizontal delta"});return out;}
+ out.conflicts=check(s,room,start,i,pad);if(!out.conflicts.empty()){out.blocked=true;return out;}
+ Point remaining=desired;
+ for(unsigned pass=0;pass<3&&(remaining.x!=0||remaining.z!=0);++pass){
+  const Bounds current=shifted(start,out.allowed_delta);SweepHit first;std::vector<Conflict> contacts;
+  auto consider=[&](const SweepHit&hit){if(hit.time<first.time-1e-12){first=hit;contacts={hit.conflict};}else if(hit.time<=1&&std::fabs(hit.time-first.time)<=1e-12){first.x|=hit.x;first.z|=hit.z;add_conflict(contacts,hit.conflict);}};
+  for(const auto&v:i.bounds)if(v.stage==s&&(v.room<0||v.room==room)){
+   if(v.kind=="collision"&&v.bounds.maximum.y<=start.minimum.y+.01f)continue;
+   if(double(current.minimum.y)>double(v.bounds.maximum.y)+pad||double(current.maximum.y)<double(v.bounds.minimum.y)-pad)continue;
+   // Reject distant triangles before constructing diagnostics or solving intervals.
+   if(double(current.minimum.x)+std::min(0.0,double(remaining.x))>double(v.bounds.maximum.x)+pad||double(current.maximum.x)+std::max(0.0,double(remaining.x))<double(v.bounds.minimum.x)-pad||double(current.minimum.z)+std::min(0.0,double(remaining.z))>double(v.bounds.maximum.z)+pad||double(current.maximum.z)+std::max(0.0,double(remaining.z))<double(v.bounds.minimum.z)-pad)continue;
+   // A rectangle is a degenerate segment expanded by independent X/Z extents.
+   const double cx=(double(v.bounds.minimum.x)+v.bounds.maximum.x)/2,cz=(double(v.bounds.minimum.z)+v.bounds.maximum.z)/2;
+   const double hx=(double(v.bounds.maximum.x)-v.bounds.minimum.x)/2,hz=(double(v.bounds.maximum.z)-v.bounds.minimum.z)/2;
+   consider(projected_hit(current,remaining,{float(cx),0,float(cz)},{float(cx),0,float(cz)},0,false,{v.kind,v.id,"Drift reached protected "+v.kind+" bounds"},hx+pad,hz+pad));
+  }
+  for(const auto&v:i.routes)if(v.stage==s&&(v.room<0||v.room==room))for(size_t k=0;k<v.points.size();++k){
+   if(k+1==v.points.size()&&!v.closed&&v.points.size()!=1)break;
+   consider(projected_hit(current,remaining,v.points[k],v.points[(k+1)%v.points.size()],double(pad)+v.radius,true,{"route",v.id,"Drift reached a protected route corridor"}));
+  }
+  for(const auto&v:i.regions)if(v.stage==s&&v.room==room){
+   auto boundary=[&](float d,double low,double high,bool x){if(d==0)return;const double time=d>0?high/d:low/d;if(time>=0&&time<=1)consider({time,x,!x,{"coverage","room-boundary","Drift reached the indexed room boundary"}});};
+   boundary(remaining.x,double(v.bounds.minimum.x)-current.minimum.x,double(v.bounds.maximum.x)-current.maximum.x,true);
+   boundary(remaining.z,double(v.bounds.minimum.z)-current.minimum.z,double(v.bounds.maximum.z)-current.maximum.z,false);
+  }
+  if(first.time>1){out.allowed_delta.x+=remaining.x;out.allowed_delta.z+=remaining.z;remaining={};break;}
+  out.blocked=true;for(const auto&contact:contacts)add_conflict(out.conflicts,contact);
+  const double magnitude=std::max(std::fabs(double(remaining.x)),std::fabs(double(remaining.z)));
+  const double coordinate=std::max({std::fabs(double(current.minimum.x)),std::fabs(double(current.maximum.x)),std::fabs(double(current.minimum.z)),std::fabs(double(current.maximum.z)),1.0});
+  const double skin=std::max(.1,coordinate*4*std::numeric_limits<float>::epsilon());
+  const double advance=std::max(0.0,first.time-skin/magnitude);
+  out.allowed_delta.x+=float(remaining.x*advance);out.allowed_delta.z+=float(remaining.z*advance);
+  remaining.x=first.x?0:float(remaining.x*(1-advance));remaining.z=first.z?0:float(remaining.z*(1-advance));
+ }
+ auto final=check(s,room,shifted(start,out.allowed_delta),i,pad);
+ if(!final.empty()){out.allowed_delta={};out.blocked=true;for(const auto&c:final)add_conflict(out.conflicts,c);}
+ return out;
+}
 bool add_native_collision(Index&i,const std::string&s,int room,const Bytes&b,Point t,float yaw,std::string*w){
  if(!range(b,0,0x34)||!finite(t)||!std::isfinite(yaw))return fail(w,"Invalid native collision header or room transform");
  const uint32_t nv=u32(b,0),vp=u32(b,4),nt=u32(b,8),tp=u32(b,12);

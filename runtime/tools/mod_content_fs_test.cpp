@@ -51,6 +51,9 @@ int main(int argc,char** argv){
  fs::create_directories(original.parent_path());fs::create_directories(replacement.parent_path());fs::create_directories(root/"game"/"code");fs::create_directories(root/"game"/"meta");fs::create_directories(root/"save"/"user");
  std::ofstream(original)<<"original";std::ofstream(replacement)<<"replacement bytes";
  std::ofstream(original.parent_path()/"other.bin")<<"fallback";std::ofstream(root/"game"/"code"/"model.bin")<<"code";std::ofstream(root/"game"/"meta"/"model.bin")<<"meta";std::ofstream(root/"save"/"user"/"model.bin")<<"save";
+ // Two world-only packages may both retain empty source-control markers.
+ for(auto name:{"world-a","world-b"}){auto folder=root/name;fs::create_directories(folder);std::ofstream(folder/".gitkeep");assert(mods::content::index(folder,true).empty());}
+ std::ofstream(root/"world-a"/"own.bin")<<"owned";auto world_files=mods::content::index(root/"world-a",true);assert(world_files.size()==1&&world_files.contains("own.bin"));
  if(on)mods::content::activate(mods::content::index(root/"mod"));
  // guest module startup activates the combined set a second time (issue #109: that used to abort the start)
  if(on)mods::content::activate(mods::content::index(root/"mod"));

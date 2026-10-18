@@ -28,7 +28,7 @@ uint32_t invoke(Cpu*,uint32_t fn,std::initializer_list<uint32_t> args){const std
     case 0x02000014:assert(a.at(1)==32);return a.at(0)==Parent?parent_largest:largest;
     case 0x0273AD10:{assert(solid_context);++allocations;const auto p=cursor;cursor=(cursor+a.at(0)+15)&~15u;return p;}
     case 0x024F23F4:assert(solid_context&&a.at(0)==0);body=cursor;cursor+=0xC0;st32(body,256);return body;
-    case 0x0200A030:assert(solid_context&&a.at(0)==body&&a.at(2)==1&&a.at(3)==Actor+native::Matrix);assert(ld32(a.at(1)+0x30)==0x80000000);for(unsigned i=0;i<6;++i)assert(((ld32(ld32(a.at(1)+0x2C)+i*16+4)>>16)&31)==31-i);st32(body+0x94,a.at(1));++sets;return fail_set?1:0;
+    case 0x0200A030:assert(solid_context&&a.at(0)==body&&a.at(2)==1&&a.at(3)==Actor+native::Matrix);assert(ld32(a.at(1)+0x30)==0x80000000);for(unsigned i=0;i<7;++i)assert(((ld32(ld32(a.at(1)+0x2C)+i*16+4)>>16)&31)==(i<5?31-i:26));assert(ld32(ld32(a.at(1)+0x2C)+6*16+12)==0xED);st32(body+0x94,a.at(1));++sets;return fail_set?1:0;
     case 0x025200D4:return Play;
     case 0x024EEA6C:{assert(!solid_context&&a.at(0)==Play+0x12A0&&a.at(1)==body&&a.at(2)==Actor);if(fail_register)return 1;st32(body,0);const uint32_t e=Play+0x12A0;st32(e,body);st32(e+4,1);st32(e+8,ld32(Actor+4));st32(e+12,Actor);++registrations;return 0;}
     case 0x020087EC:{assert(a.at(0)==Play+0x12A0&&a.at(1)==body);st32(Play+0x12A0+4,0);st32(body,256);++releases;return 0;}
