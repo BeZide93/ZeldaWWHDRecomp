@@ -17,8 +17,10 @@
 #include "gfx/renderer.h"
 #include "gx2/gx2_cmd.h"
 #include "runtime.h"
+#include "savestate.h"
 
 extern "C" void f_02575B6C_orig(Cpu* c);  // drawVrkumo
+namespace interp { uint64_t logic_steps(); }
 
 namespace cloud_proto {
 
@@ -141,11 +143,24 @@ static bool take(Snapshot& s) {
 
 using namespace cloud_proto;
 
-// research: WWHD_CLOUDS_STATELOG=1 logs a digest of the game's sky-cloud state every 30 calls (read-only)
+// research / parity gate: WWHD_CLOUDS_STATELOG=1 logs a digest of the game's sky-cloud state (read-only)
+// every 30 logic steps counted from the last full save-state load (so two runs line up even when the
+// load lands at a different frame), and every 30 calls before any load
 static void state_log() {
     static const bool on = getenv("WWHD_CLOUDS_STATELOG") != nullptr;
-    static uint64_t calls = 0;
-    if (!on || calls++ % 30) return;
+    if (!on) return;
+    static uint64_t calls = 0, lastStep = ~0ull;
+    calls++;
+    const uint64_t loadStep = ss::last_load_step(), step = interp::logic_steps();
+    uint64_t at;
+    if (loadStep) {
+        if (step == lastStep || step < loadStep || (step - loadStep) % 30) return;
+        at = step - loadStep;
+    } else {
+        if (calls % 30) return;
+        at = calls;
+    }
+    lastStep = step;
     const uint32_t packet = ld32(GD(0x10475A68) + 0xA94);
     if (!packet) return;
     uint64_t h = 1469598103934665603ull;
@@ -153,9 +168,9 @@ static void state_log() {
     for (uint32_t a = packet + 0xA4; a < packet + 0xA4 + 0x2C * 100; a += 4) h = (h ^ ld32(a)) * 1099511628211ull;
     for (int i = 0; i < 100; i++) alive += u32_as_f32(ld32(packet + 0xA4 + 0x2C * i + 0x20)) > 0.0001f;
     const uint32_t play = GD(0x1046F0B0), cam = ld32(play + 0x5AF8);
-    LOG("[cloudstate] call %llu: digest %016llx, %d visible, time %.4f, eye %.3f %.3f %.3f", (unsigned long long)calls, (unsigned long long)h,
-        alive, u32_as_f32(ld32(GD(0x10475A68) + 0x1020)), cam ? u32_as_f32(ld32(cam + 0xDC)) : 0.f, cam ? u32_as_f32(ld32(cam + 0xE0)) : 0.f,
-        cam ? u32_as_f32(ld32(cam + 0xE4)) : 0.f);
+    LOG("[cloudstate] %s %llu: digest %016llx, %d visible, time %.4f, eye %.3f %.3f %.3f", loadStep ? "load+step" : "call",
+        (unsigned long long)at, (unsigned long long)h, alive, u32_as_f32(ld32(GD(0x10475A68) + 0x1020)),
+        cam ? u32_as_f32(ld32(cam + 0xDC)) : 0.f, cam ? u32_as_f32(ld32(cam + 0xE0)) : 0.f, cam ? u32_as_f32(ld32(cam + 0xE4)) : 0.f);
 }
 
 extern "C" void hook_02575B6C(Cpu* c) {
