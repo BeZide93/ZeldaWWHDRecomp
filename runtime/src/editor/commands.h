@@ -13,6 +13,7 @@
 //
 // This file has no game dependencies: plain C++ on the mod JSON helpers and the manifest parsers.
 #pragma once
+#include <cstddef>
 #include <cstdint>
 #include <deque>
 #include <functional>
@@ -99,6 +100,14 @@ public:
                                unsigned& erased, std::string& why) = 0;
     // Test mode only: the editor's own state slots (1..kTestSlots); a test state keeps the mod's records.
     virtual bool test_state(bool save, int slot, const std::string& mod, const std::vector<Record>& own, std::string& why) = 0;
+
+    virtual bool test_state_format(bool save,int slot,const std::string&mod,const std::vector<Record>&own,bool full,std::string&why){
+        if(full)return why="full test states are unavailable",false;
+        return test_state(save,slot,mod,own,why);
+    }
+
+    // Latest asynchronous test-load result, including request ID and refusal reason.
+    virtual Value load_state_result() { return Value(); }
 
     // ---- building new content (each optional: the defaults say the game is not there) ----
     // The ground under `above` (the game's own collision check): its height. False: no ground below.

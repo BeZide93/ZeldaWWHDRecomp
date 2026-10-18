@@ -16,6 +16,22 @@
 // World editor command layer (runtime/src/editor/commands.h): apply / undo / redo, refused changes,
 // JSON round trips, the warp list, the test-mode record reset and saving into the package.
 // Usage: editor_test <examples/guest-mods>
+#include <algorithm>
+#include <cassert>
+#include <chrono>
+#include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <iostream>
+#include <sstream>
+#include <string>
+#include <utility>
+#include <vector>
 #include "editor/commands.h"
 #include "editor/stage_files.h"
 #include "mods/story_mail_book.h"
@@ -41,6 +57,12 @@ struct FakeHost : editor::Host {
     bool is_busy = false, flying = false, testing = false;
     uint8_t area[4 + 4 * 32] = {};
     std::string last_state;
+    Value load_result;
+    Value load_state_result() override {return load_result;}
+    bool last_full=false;
+    bool test_state_format(bool save,int slot,const std::string&mod,const std::vector<editor::Record>&own,bool full,std::string&why) override {
+        last_full=full;return test_state(save,slot,mod,own,why);
+    }
     std::vector<std::string> last_changed;
     bool apply_actors(const std::string&, const std::vector<story_notebook::ManifestActor>& actors, const std::vector<std::string>& changed,
                       std::string& note, std::string&) override {
@@ -278,6 +300,17 @@ void command_layer() {
     CHECK(ok(s.run("test_mode", json(R"({"on": true})"))));
     CHECK(ok(s.run("save_state", json(R"({"slot": 2})"))) && host.last_state == "save 2 editor-test");
     CHECK(!ok(s.run("load_state", json(R"({"slot": 4})"))));
+    CHECK(ok(s.run("save_state",json(R"({"slot":2,"kind":"full"})")))&&host.last_full);
+    CHECK(!ok(s.run("save_state",json(R"({"slot":2,"kind":"unknown"})"))));
+    host.load_result=json(R"({"request":"1","slot":2,"pending":true})");
+    r=s.run("load_state",json(R"({"slot":2,"confirm":true})"));
+    CHECK(ok(r)&&r.get("result").get("state_load").get("pending").boolean);
+    // An accepted request can later be refused; read_state exposes its result
+    // to command/MCP callers without claiming the load succeeded.
+    host.load_result=json(R"({"request":"1","slot":2,"pending":false,"ok":false,"reason":"native event transaction"})");
+    r=s.run("read_state");
+    CHECK(ok(r)&&!r.get("result").get("state_load").get("ok").boolean);
+    CHECK(r.get("result").get("state_load").get("reason").string()=="native event transaction");
 }
 
 void locations() {

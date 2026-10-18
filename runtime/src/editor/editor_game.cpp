@@ -1,23 +1,32 @@
 // World editor: the game's side (editor_game.h).
-#include "editor_game.h"
-
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <chrono>
 #include <cmath>
+#include <condition_variable>
+#include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
+#include <exception>
 #include <filesystem>
 #include <fstream>
+#include <functional>
+#include <initializer_list>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <set>
 #include <sstream>
-#include <chrono>
-#include <condition_variable>
-#include <deque>
-#include <memory>
+#include <string>
+#include <system_error>
 #include <thread>
+#include <utility>
+#include <vector>
+#include "editor_game.h"
+
 
 #include "../gfx/renderer.h"
 #include "../hle/save_root.h"
@@ -65,6 +74,8 @@ void records_tick(bool now = false);   // game thread
 // ---------------------------------------------------------------- status and game-thread jobs
 std::mutex g_status_mu;
 std::string g_status;
+uint64_t g_test_load_serial=0;
+Value g_test_load_result; // protected by g_status_mu; read_state/MCP may poll it
 void set_status(const std::string& s) {
     LOG("[editor] %s", s.c_str());
     std::lock_guard<std::mutex> lk(g_status_mu);
@@ -714,9 +725,11 @@ public:
                 std::memcpy(block, g_story_before.data(), g_story_before.size());
             std::error_code ec;
             if (fs::exists(start, ec)) {
-                ss::request_load_portable_file(start);
+                set_status("Restoring the world...");
+                ss::request_load_portable_file(start,[](bool ok,const std::string&why){
+                    set_status(ok?"Test mode off: the world was restored":"The world could not be restored: "+why);
+                });
                 g_retry = 450;
-                set_status("Test mode off: back to the progress and place from before the test");
             } else
                 set_status("Test mode off: story progress restored (no return state)");
         });
@@ -736,52 +749,72 @@ public:
         });
         return true;
     }
-    bool test_state(bool save, int slot, const std::string& mod, const std::vector<Record>& own, std::string& why) override {
+    bool test_state(bool save,int slot,const std::string&mod,const std::vector<Record>&own,std::string&why) override {
+        return test_state_format(save,slot,mod,own,false,why);
+    }
+    bool test_state_format(bool save,int slot,const std::string&mod,const std::vector<Record>&own,bool full,std::string&why) override {
         std::error_code ec;
-        const fs::path dir = editor_dir() / safe(mod);
-        fs::create_directories(dir, ec);
-        const std::string state = (dir / ("test" + std::to_string(slot) + ".wwstate")).string();
-        const std::string records = (dir / ("test" + std::to_string(slot) + ".records")).string();
-        if (save) {
-            when_free([state, records, own, slot](Cpu*) {
-                // the mod's own records with the state: a portable state holds no story progress
-                story_mail::Book book = story_store::book();
-                Value list;
-                list.type = Value::Array;
-                for (const auto& r : own)
-                    if (book.has(r.kind, r.key)) {
-                        Value v;
-                        v["kind"] = int(r.kind);
-                        v["key"] = int(r.key);
-                        v["value"] = int(book.get(r.kind, r.key));
+        const fs::path dir=editor_dir()/safe(mod);
+        fs::create_directories(dir,ec);
+        const std::string state=(dir/("test"+std::to_string(slot)+(full?".bin":".wwstate"))).string();
+        const std::string records=(dir/("test"+std::to_string(slot)+".records")).string();
+        if(save){
+            when_free([state,records,own,slot,full](Cpu*){
+                if(!full){
+                    story_mail::Book book=story_store::book();
+                    Value list;list.type=Value::Array;
+                    for(const auto&r:own)if(book.has(r.kind,r.key)){
+                        Value v;v["kind"]=int(r.kind);v["key"]=int(r.key);v["value"]=int(book.get(r.kind,r.key));
                         list.array.push_back(v);
                     }
-                std::ofstream(records, std::ios::binary | std::ios::trunc) << mods::json::dump(list);
-                ss::request_save_portable_file(state, [slot](bool ok, const std::string& why) {
-                    set_status(ok ? "Test state " + std::to_string(slot) + " saved" : "Test state not saved: " + why);
-                });
+                    std::ofstream(records,std::ios::binary|std::ios::trunc)<<mods::json::dump(list);
+                }
+                auto done=[slot](bool ok,const std::string&why){set_status(ok?"Test state "+std::to_string(slot)+" saved":"Test state not saved: "+why);};
+                if(full)ss::request_save_full_file(state,done);else ss::request_save_portable_file(state,done);
             });
             return true;
         }
-        if (!fs::exists(state, ec)) return why = "test slot " + std::to_string(slot) + " is empty", false;
-        when_free([state, records, own, slot](Cpu*) {
-            std::ifstream f(records, std::ios::binary);
-            std::stringstream text;
-            text << f.rdbuf();
-            story_mail::Book book = story_store::book();
-            for (const auto& r : own) book.erase(r.kind, r.key);
-            try {
-                for (const auto& v : mods::json::parse(text.str()).array) {
-                    const Record r{uint8_t(v.get("kind").number), uint16_t(v.get("key").number)};
-                    if (std::find(own.begin(), own.end(), r) != own.end()) book.set(r.kind, r.key, uint8_t(v.get("value").number));
+        if(!fs::exists(state,ec))return why="test slot "+std::to_string(slot)+" is empty",false;
+        uint64_t request=0;
+        {
+            std::lock_guard lock(g_status_mu);
+            if(g_test_load_serial==UINT64_MAX)return why="state request IDs exhausted",false;
+            request=++g_test_load_serial;
+            g_test_load_result=Value();g_test_load_result["request"]=std::to_string(request);
+            g_test_load_result["slot"]=slot;g_test_load_result["pending"]=true;
+            g_test_load_result["kind"]=full?"full":"portable";
+        }
+        when_free([state,records,own,slot,request,full](Cpu*){
+            set_status("Loading test state "+std::to_string(slot));
+                if(!full){
+                    std::ifstream file(records,std::ios::binary);std::stringstream text;text<<file.rdbuf();
+                    try{
+                        const auto list=mods::json::parse(text.str());
+                        story_mail::Book book=story_store::book();
+                        for(const auto&r:own)book.erase(r.kind,r.key);
+                        for(const auto&v:list.array){
+                            const Record r{uint8_t(v.get("kind").number),uint16_t(v.get("key").number)};
+                            if(std::find(own.begin(),own.end(),r)!=own.end())book.set(r.kind,r.key,uint8_t(v.get("value").number));
+                        }
+                    }catch(const std::exception&){}
                 }
-            } catch (const std::exception&) {
-            }
-            ss::request_load_portable_file(state);
-            g_retry = 450;
-            set_status("Loading test state " + std::to_string(slot));
+            auto done=[slot,request](bool ok,const std::string&why){
+                {
+                    std::lock_guard lock(g_status_mu);
+                    if(request!=g_test_load_serial)return;
+                    g_test_load_result["pending"]=false;g_test_load_result["ok"]=ok;g_test_load_result["reason"]=why;
+                }
+                set_status(ok?"Test state "+std::to_string(slot)+" loaded":"The world could not be restored: "+why);
+            };
+            if(full)ss::request_load_full_file(state,done);else ss::request_load_portable_file(state,done);
+            g_retry=450;
         });
         return true;
+    }
+
+    Value load_state_result() override {
+        std::lock_guard lock(g_status_mu);
+        return g_test_load_result;
     }
 
     // ---- building new content ----
@@ -1110,13 +1143,20 @@ void drag_tick(Cpu* c) {
 }
 
 // ---------------------------------------------------------------- scene preview (game thread)
+// A queued load is not a completed restore. Keep both the status line and log
+// honest on parse errors, gate refusals and failed arrival as well as success.
+void restore_world(const std::string&path,const std::string&success,const std::vector<uint8_t>&story){
+    // Portable states deliberately exclude mod records. Restore these before
+    // the stage changes, so actors/triggers see the pre-preview progress.
+    if(uint8_t*block=story_store::memory_block();block&&story.size()==story_store::kMemoryBytes)
+        std::memcpy(block,story.data(),story.size());
+    set_status("Restoring the world...");
+    ss::request_load_portable_file(path,[success](bool ok,const std::string&why){
+        set_status(ok?success:"The world could not be restored: "+why);
+    });
+}
 void scene_preview_end(const std::string& status) {
     const bool restore = g_scene.restore && g_scene.snapshot;
-    if (restore) {
-        if (uint8_t* block = story_store::memory_block(); block && g_scene.story.size() == story_store::kMemoryBytes)
-            std::memcpy(block, g_scene.story.data(), g_scene.story.size());
-        ss::request_load_portable_file(preview_file());
-    }
     g_resume = g_scene.view;
     g_scene.phase = 4;
     g_previewing = false;
@@ -1124,7 +1164,8 @@ void scene_preview_end(const std::string& status) {
     g_retry = 450;
     if (!launch_mode()) g_fly_want = 1;  // the launch mode's editor view comes back by itself once Link is free
     publish_scene("", 0);
-    set_status(status + (restore ? ": the world goes back to how it was before" : ""));
+    if(restore)restore_world(preview_file(),status+": the world was restored",g_scene.story);
+    else set_status(status);
 }
 void scene_preview_tick() {
     if (!g_previewing || g_scene.phase < 2 || g_scene.phase > 3) return;
@@ -1200,10 +1241,7 @@ bool GameHost::stop(std::string& why) {
     post([](Cpu*) {
         g_resume = g_play.view;
         if (g_play.restore && g_play.snapshot) {
-            if (uint8_t* block = story_store::memory_block(); block && g_play.story.size() == story_store::kMemoryBytes)
-                std::memcpy(block, g_play.story.data(), g_play.story.size());
-            ss::request_load_portable_file(play_state_file());
-            set_status("Stopped: the world is back as it was before Play");
+            restore_world(play_state_file(),"Stopped: the world was restored to before Play",g_play.story);
         } else
             set_status("Stopped");
         g_playing = false;

@@ -325,6 +325,14 @@ and the mod's flags.
   - **Save test 1–3** / **Load test 1–3** keep test states: the game's progress, Link's place and the
     open mod's flags;
   - turning test mode off takes you back to your progress and place from before the test.
+
+Preview and Play report a completed restore only after the load finishes. If it is refused, the
+status line and log show **The world could not be restored: …**, followed by the reason.
+Test-state commands use portable states by default. Use `"kind":"full"` with `save_state` and
+`load_state` for a full snapshot in the editor's test folder; it stays separate from regular player
+state slots and the portable file for that test slot. A queued `load_state` returns a `state_load`
+request ID with `pending:true`. Poll `read_state.state_load` for `pending:false`, `ok` and `reason`.
+
 - **Log** shows the last commands the editor ran, with their parameters and results.
 
 ## Using Claude or another MCP client
@@ -444,8 +452,8 @@ separated by `;`, or `@file` with one such line per row. Results go to the log.
 | `stop` | | back to the editor view |
 | `test_mode` | `on` | test mode |
 | `reset_quest` | `confirm`, `mod`? | test mode: reset the mod's quest progress and flags |
-| `save_state` | `slot` (1–3) | test mode: save a test state |
-| `load_state` | `slot` (1–3), `confirm` | test mode: load a test state (replaces the current progress) |
+| `save_state` | `slot` (1–3), `kind`? (`portable`, `full`) | test mode: save a test state |
+| `load_state` | `slot` (1–3), `kind`? (`portable`, `full`), `confirm` | test mode: load a test state (replaces the current progress) |
 | `command_log` | `count`? | the last commands |
 | `get_quest` | `quest`, `mod`? | one quest as the manifest declares it |
 | `quest_graph` | `quest`, `mod`? | the quest's nodes and edges, each node's problems, the graph's places, and the step the game is at |

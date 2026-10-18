@@ -1,17 +1,24 @@
 // World editor command layer (commands.h). No game dependencies.
-#include "commands.h"
-
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <exception>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <map>
 #include <set>
 #include <sstream>
+#include <string>
 #include <system_error>
+#include <utility>
+#include <vector>
+#include "commands.h"
+
 
 #include "../mods/story_mail_book.h"
 #include "../mods/story_manifest.h"
@@ -61,9 +68,9 @@ const std::vector<CommandInfo> kCommands = {
      {{"on", "boolean", "", true}, {"place_link", "boolean", "when turning it off: Link moves to the camera's position"}}},
     {"test_mode", "Test mode: in-game saves go to a separate test save, and the test commands are allowed.", {{"on", "boolean", "", true}}},
     {"reset_quest", "Test mode: erases the open mod's quest progress and flags from the loaded Quest Log (never another mod's).", {{"mod", "string", ""}, {"confirm", "boolean", "must be true", true}}, false, true},
-    {"save_state", "Test mode: saves a test state (the game's progress, Link's place and the open mod's flags).", {{"slot", "integer", "1..3", true}}},
+    {"save_state", "Test mode: saves a test state (the game's progress, Link's place and the open mod's flags).", {{"slot", "integer", "1..3", true}, {"kind", "string", "portable (default) or full"}}},
     {"load_state", "Test mode: loads a test state (the game's current progress is replaced).",
-     {{"slot", "integer", "1..3", true}, {"confirm", "boolean", "must be true: the current progress is replaced", true}}, false, true},
+     {{"slot", "integer", "1..3", true}, {"kind", "string", "portable (default) or full"}, {"confirm", "boolean", "must be true: the current progress is replaced", true}}, false, true},
     {"command_log", "The last commands with their parameters and results.", {{"count", "integer", "how many (default 20)"}}},
     // building new content
     {"list_actor_types", "The kinds of actor add_actor places, and which appear without a restart.", {}},
@@ -1201,6 +1208,8 @@ Value Session::dispatch(const std::string& command, const Value& p, std::string&
             r["link"] = place_value(host_->link());
             r["fly"] = host_->fly_state();
             r["test_mode"] = host_->test_mode();
+            const auto loaded=host_->load_state_result();
+            if(loaded.type!=Value::Null)r["state_load"]=loaded;
             std::string busy;
             if (host_->busy(busy)) r["busy"] = busy;
             if (const Package* pkg = find(open_)) r["progress"] = progress(pkg->mod, pkg->manifest);
@@ -1243,9 +1252,15 @@ Value Session::dispatch(const std::string& command, const Value& p, std::string&
         }
         const int slot = int(p.get("slot").number);
         if (slot < 1 || slot > kTestSlots) return why = "test slots are 1.." + std::to_string(kTestSlots), r;
-        if (!host_->test_state(command == "save_state", slot, pkg->mod, own, why)) return r;
+        const auto&kind=p.get("kind");
+        if(kind.type!=Value::Null&&(kind.type!=Value::String||(kind.string()!="portable"&&kind.string()!="full")))return why="kind must be portable or full",r;
+        if (!host_->test_state_format(command == "save_state", slot, pkg->mod, own, kind.string()=="full", why)) return r;
         r["requested"] = true;
         r["slot"] = slot;
+        if(command=="load_state"){
+            const auto loaded=host_->load_state_result();
+            if(loaded.type!=Value::Null)r["state_load"]=loaded;
+        }
         ok = true;
         return r;
     }
