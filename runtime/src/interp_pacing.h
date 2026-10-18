@@ -147,5 +147,56 @@ inline StepPlan slot_step_start(int64_t now, int64_t slot, int64_t frame, int64_
     return {now, StepStart::kLate};
 }
 
+// Even frame delivery (WWHD_INTERP_EVEN_PACING=1). The passes of a step take different times: a
+// logic pass runs the game, an in-between pass only draws. When the game thread is the bottleneck
+// (a Xiaomi 14 with the record worker on: logic pass 19-20 ms, in-between pass 12-14 ms) frames
+// were ready 20 and 13 ms apart, and its 120 Hz screen showed a third of the 60 fps frames for 1 or
+// 3 refreshes instead of 2. Here a frame that is ready early is held on the CPU side (its present
+// call waits; the game and the renderer go on) until one frame interval after the previous frame;
+// a frame that is late goes out at once. Nothing feeds back into the game's timing.
+// - interval: the frame's intended distance to the previous frame (the step's length over its
+//   frames: 16.68 ms at 60 fps); 0 turns the schedule off (30 fps, uncapped, no interpolation).
+// - Each slot is the previous frame's time plus the interval less a small leak (1/128 interval):
+//   the late kind of frame (the logic frame) then anchors the schedule, and a schedule pushed late
+//   by one slow frame comes back to the frames' own times within about a hundred frames instead of
+//   keeping that delay for good. In the steady state the intervals alternate between interval -
+//   leak and interval + leak (16.55 / 16.81 ms at 60 fps: both two 120 Hz refreshes). A smaller leak
+//   keeps the schedule nearer the latest the logic frames come (less jitter on screen, a little
+//   more latency); a simulation with a 120 Hz display: 1/32 92%, 1/64 94%, 1/128 95% of the frames
+//   on screen for two refreshes (without the schedule 56%).
+// - A frame is never held longer than one interval (no more than one frame of added latency): one
+//   that would wait longer goes out at once and starts the schedule anew.
+struct EvenSchedule {
+    int64_t last = 0;      // the previous frame's present time
+    int64_t interval = 0;  // its interval
+    bool valid = false;
+    void reset() { valid = false; }
+    int64_t leakDivisor = 128;  // the leak per frame: interval / leakDivisor
+    int64_t leak(int64_t frameInterval) const { return frameInterval / std::max<int64_t>(1, leakDivisor); }
+    // the present time of a frame ready at `ready`
+    int64_t plan(int64_t ready, int64_t frameInterval) {
+        interval = frameInterval;
+        if (frameInterval <= 0) {
+            valid = false;
+            return ready;
+        }
+        int64_t t = ready;
+        if (valid) {
+            const int64_t slot = last + frameInterval - leak(frameInterval);
+            if (slot > ready && slot - ready <= frameInterval) t = slot;
+        }
+        last = t;
+        valid = true;
+        return t;
+    }
+    // the frame planned for `due` went out at `at`. A little late (the presenting thread was busy, a
+    // timer woke late) keeps the schedule: counted from the late time, every late wake-up would push
+    // the following frames later for good (measured: holds grew to a whole interval). Much later
+    // (more than 1/8 interval) or early (the next frame forced it out) counts from `at`.
+    void presented(int64_t due, int64_t at) {
+        if (valid && (at < due || at - due > interval / 8)) last = at;
+    }
+};
+
 }  // namespace pacing
 }  // namespace interp
