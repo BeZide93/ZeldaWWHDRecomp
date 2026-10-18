@@ -7,6 +7,17 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **World editor: New mod…** starts a new, empty mod of your own from inside the editor (also `new_mod` over MCP):
+  its own package, turned on in your mod profile and opened at once.
+- **World editor: quest talks for the game's villagers.** The game's own villagers show their names in the picture;
+  click one to give it a quest talk in your mod, as a new quest, a new step or a step's talk (also `list_villagers`,
+  `pick_villager` and `add_villager_talk`). The villager's own dialogue and save flags are never changed.
+- **World editor: placing and dragging fixed.** Clicks find the ground under the mouse again (piers, roofs and grass
+  were missed or hit the sea floor); residents, enemies and props appear at once also in a mod that had no actors at
+  start-up; a dragged enemy or resident now moves with the drag instead of staying at its old spot; and a resident's
+  type is chosen in Add and in the Inspector.
+- **Story mods: Bokoblins see Link.** Bokoblins placed by a mod stood blind and never attacked; they now notice Link
+  at the game's usual range and fight. (A save state with such a Bokoblin from before puts it aside.)
 - **World editor: the docked panels react to the mouse again.** Since the dockable panels arrived, the full-screen
   picture could sit in front of the docked panels, so they got no hover or clicks on any renderer; the picture now
   always stays behind them.
