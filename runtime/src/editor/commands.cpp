@@ -234,6 +234,44 @@ const std::vector<CommandInfo> kCommands = {
     {"skip_scene", "Skips the scene that plays (as Plus / Start does): its end actions don't run.", {}},
     {"stop_scene", "Stops the scene preview at once and goes back to the editor's view.", {}},
     {"scene_state", "Whether a scene preview plays, which scene and step.", {}},
+    // ---- letters on their own, treasure charts, items (commands_story.cpp)
+    {"list_letters", "The open mod's letters on their own (not a quest's letter): id, sender, text, encloses. The Rito postbox hands each out while the mod is on; once read, Link has what it encloses.",
+     {{"mod", "string", ""}}},
+    {"add_letter", "Adds a letter on its own: no quest, no notebook entry. The Rito postbox hands it out while the mod is on (once Link has the Delivery Bag); once it is read, Link gets what it encloses, once. Up to 8 per mod; for a letter that starts a quest use set_quest letter.",
+     {{"id", "string", "1..32 of a-z 0-9 - _ . (default: letter, letter-2...); not a quest letter's id"}, {"sender", "string", "one line, up to 48 bytes: the signature", true},
+      {"text", "string", "up to 1200 bytes; \\n breaks a line (keep to about ten lines of 40 characters)", true},
+      {"encloses", "array", "[\"chart:<id>\", \"item:<id>\"]: the mod's charts and items it gives"}, {"mod", "string", ""}},
+     true},
+    {"set_letter", "Sets fields of a letter on its own: sender, text, encloses (null removes encloses).",
+     {{"id", "string", "the letter's id", true}, {"fields", "object", "{field: value}", true}, {"mod", "string", ""}}, true},
+    {"remove_letter", "Removes a letter on its own (saves that got it keep it).", {{"id", "string", "", true}, {"confirm", "boolean", "must be true", true}, {"mod", "string", ""}}, true, true},
+    {"list_charts", "The open mod's treasure charts: name, description, place (the X), what the chest holds, the sea square, and what gives, finds or salvages each (used_by).",
+     {{"mod", "string", ""}}},
+    {"add_chart", "Adds a treasure chart: while Link owns it the MAP screen's chart list shows it with an X at its place; salvaging there opens its chest. Up to 8 per mod. A letter (encloses chart:<id>), a resident's talk (then give), a quest reward or the mod's code gives it; a quest step's find: chart:<id> or a scene's salvage trigger uses it.",
+     {{"id", "string", "1..32 of a-z 0-9 - _ . (default: from the name)"}, {"name", "string", "up to 40 bytes: the chart list's caption", true},
+      {"description", "string", "up to 200 bytes"}, {"place", "object", "{x, z}: the X on the Great Sea (world units)"},
+      {"at", "string", "link or camera: the X where Link or the fly camera is at sea (instead of place)"},
+      {"item", "string", "what its chest holds: item:<id> (one of the mod's items) or game:purple_rupee, game:orange_rupee, game:silver_rupee, game:heart_piece, game:heart_container (default: an orange rupee)"},
+      {"mod", "string", ""}},
+     true},
+    {"set_chart", "Sets fields of a chart: name, description, place {x, z}, item (null removes description or item); at = link or camera moves the X there.",
+     {{"id", "string", "the chart's id", true}, {"fields", "object", "{field: value}"}, {"at", "string", "link or camera"}, {"mod", "string", ""}}, true},
+    {"remove_chart", "Removes a chart; refused while a letter, quest, talk or scene names it (the error lists them).",
+     {{"id", "string", "", true}, {"confirm", "boolean", "must be true", true}, {"mod", "string", ""}}, true, true},
+    {"list_items", "The open mod's items (kept in the Delivery Bag's extra pages) and what gives, takes, drops or needs each (used_by).", {{"mod", "string", ""}}},
+    {"add_item", "Adds an item: when Link gets one, its name and description show with the get jingle; it is kept in the Delivery Bag. Up to 32 per mod. Actors give or take it (set_then), enemies and props drop it (set_drops), a letter or chart can hold it, an actor can need it (when item).",
+     {{"id", "string", "1..32 of a-z 0-9 - _ . (default: from the name)"}, {"name", "string", "up to 40 bytes", true},
+      {"description", "string", "up to 200 bytes, \\n allowed: its Info box", true}, {"icon", "string", "a PNG in the package (its path inside it, e.g. icons/key.png)"},
+      {"icon_file", "string", "a PNG file copied into the package's icons folder instead (best 128 x 128 with transparency; up to 2048 x 2048)"},
+      {"stack", "integer", "how many Link can carry, 1..254 (default 1)"},
+      {"use", "object", "what using it on X, Y or R does: {action: show} (its Info box), {action: open_notebook}, {action: quest_step, quest, step}, {action: event} (the mod's code is told); without it, it can't go on a button"},
+      {"held_model", "string", "a static model of the mod Link holds up when using it (needs use)"},
+      {"held_frames", "integer", "how long he holds it up, 1..300 frames at 30 a second (default 90; needs held_model)"}, {"mod", "string", ""}},
+     true},
+    {"set_item", "Sets fields of an item: name, description, icon, stack, use, held_model, held_frames (null removes the optional ones); icon_file copies a new PNG in.",
+     {{"id", "string", "the item's id", true}, {"fields", "object", "{field: value}"}, {"icon_file", "string", "a PNG file to copy in as its icon"}, {"mod", "string", ""}}, true},
+    {"remove_item", "Removes an item; refused while an actor, drop, letter, chart, quest or scene names it (the error lists them).",
+     {{"id", "string", "", true}, {"confirm", "boolean", "must be true", true}, {"mod", "string", ""}}, true, true},
 };
 
 // ---------------------------------------------------------------- JSON helpers
@@ -448,9 +486,12 @@ bool validate_package(const std::string& mod, const Value& manifest, const std::
     std::vector<story_notebook::ManifestScene> scenes;
     std::vector<story_notebook::ManifestQuest> quests;
     std::vector<story_notebook::ManifestItem> items;
+    std::vector<story_notebook::ManifestChart> charts;
+    std::vector<story_notebook::ManifestLetter> letters;
     if (!story_notebook::parse_models(manifest, models, why) || !story_notebook::parse_actors(manifest, actors, why) ||
         !story_notebook::parse_scenes(manifest, scenes, why) || !story_notebook::parse_items(manifest, items, why) ||
-        !story_notebook::parse_quests(manifest, quests, why))
+        !story_notebook::parse_quests(manifest, quests, why) || !story_notebook::parse_charts(manifest, charts, why) ||
+        !story_notebook::parse_letters(manifest, letters, why))
         return false;
     std::vector<std::pair<std::string, Value>> world;
     for (const auto& [id, m] : all)
@@ -841,7 +882,8 @@ bool Session::change(Package& p, const std::string& label, const std::function<b
     auto all = all_manifests();
     if (!validate_package(p.mod, next, all, why) || !model_files(p.dir, next, why) || !world_placements(host_, p.mod, p.manifest, next, false, why)) return false;
     const bool actors_changed = !(next.get("actors") == p.manifest.get("actors")) || !(next.get("models") == p.manifest.get("models"));
-    const bool other_changed = !(next.get("scenes") == p.manifest.get("scenes")) || !(next.get("quests") == p.manifest.get("quests"));
+    bool other_changed = false;  // read when the game starts
+    for (const char* k : {"scenes", "quests", "letters", "charts", "items"}) other_changed = other_changed || !(next.get(k) == p.manifest.get(k));
     undo_.push_back({p.mod, label, p.manifest, next});
     if (undo_.size() > kUndoSize) undo_.erase(undo_.begin());
     redo_.clear();
@@ -851,7 +893,7 @@ bool Session::change(Package& p, const std::string& label, const std::function<b
     if (actors_changed) apply_live(p, before, result);
     if (other_changed) {
         result["live"] = false;
-        result["note"] = "Scene and quest changes take effect when the game starts again (save the package first).";
+        result["note"] = "Scene, quest, letter, chart and item changes take effect when the game starts again (save the package first).";
     }
     return true;
 }
@@ -932,7 +974,7 @@ Value Session::dispatch(const std::string& command, const Value& p, std::string&
             v["name"] = pk.name;
             v["open"] = pk.mod == open_;
             v["dirty"] = !(pk.manifest == pk.saved);
-            for (const char* k : {"actors", "models", "scenes", "quests"}) v[k] = int(pk.manifest.get(k).array.size());
+            for (const char* k : {"actors", "models", "scenes", "quests", "letters", "charts", "items"}) v[k] = int(pk.manifest.get(k).array.size());
             r.array.push_back(v);
         }
         ok = true;
@@ -1285,6 +1327,8 @@ Value Session::dispatch(const std::string& command, const Value& p, std::string&
     r = dispatch_scene(command, p, why, ok, handled);
     if (handled) return r;
     r = dispatch_quest(command, p, why, ok, handled);
+    if (handled) return r;
+    r = dispatch_story(command, p, why, ok, handled);
     if (handled) return r;
     why = "command \"" + command + "\" is not implemented";
     return r;

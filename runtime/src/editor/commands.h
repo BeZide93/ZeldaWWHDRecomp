@@ -289,12 +289,14 @@ private:
     Value clipboard_;  // copy / paste: {"kind": "actors" | "quest_steps" | "scenes" | "scene_steps", "items": [...]}
     // scenes: steps, camera keys, timeline, preview (commands_scene.cpp)
     Value dispatch_scene(const std::string& command, const Value& params, std::string& why, bool& ok, bool& handled);
+    // letters on their own, charts and items (commands_story.cpp)
+    Value dispatch_story(const std::string& command, const Value& params, std::string& why, bool& ok, bool& handled);
 };
 
 // One problem of a package, with what it is about (for the editor's problem list: a click selects it).
 struct Problem {
     std::string message;
-    std::string kind;   // "actor", "model", "scene", "quest", "item", "file" or "package"
+    std::string kind;   // "actor", "model", "scene", "quest", "item", "chart", "letter", "file" or "package"
     std::string id;     // the actor's (model's...) id; empty for the whole package
     std::string field;  // the field when known ("position", "model", ...)
     std::string severity;  // "" an error (the mod manager refuses the package), "warning" or "info" (the editor's own checks)
@@ -344,6 +346,14 @@ std::vector<Location> build_locations(const std::vector<std::pair<std::string, s
 std::vector<Record> mod_records(const std::string& mod, const Value& manifest);
 // Erases `own` from a story area, except records that another mod's names also map to (`shared`).
 unsigned reset_records(story_mail::Book& book, const std::vector<Record>& own, const std::vector<Record>& shared, unsigned& skipped);
+// Where the package names one of its charts, items or letters (`kind`: "chart", "item" or "letter"),
+// each said for people ("actor keeper > then > 1", "scene treasure > trigger (salvage)"). The entry
+// itself is left out. Empty: nothing names it. (A letter on its own is named by nothing in the
+// manifest; only the mod's code may ask for it.)
+std::vector<std::string> story_references(const Value& manifest, const std::string& kind, const std::string& id);
+// A PNG an item can use as its icon: the file's signature and size (1..2048 pixels a side, up to 16 MiB),
+// as the game reads it. `width` / `height` get its size.
+bool check_icon_file(const std::string& path, unsigned& width, unsigned& height, std::string& why);
 // The manifest as package text: two-space indent, numbers in their shortest exact form.
 std::string pretty(const Value& v);
 // A point object {"x","y","z"}.

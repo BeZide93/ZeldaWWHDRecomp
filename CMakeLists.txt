@@ -380,7 +380,7 @@ target_compile_options(mod_package_test PRIVATE -UNDEBUG)
 target_link_libraries(mod_package_test PRIVATE ZLIB::ZLIB Threads::Threads ${CMAKE_DL_LIBS})
 # World editor command layer (runtime/src/editor): commands, warp list, test-mode record reset, saving.
 add_executable(editor_test runtime/tools/editor_test.cpp runtime/src/editor/commands.cpp runtime/src/editor/commands_build.cpp runtime/src/editor/stage_files.cpp
-                           runtime/src/editor/commands_quest.cpp runtime/src/editor/quests.cpp runtime/src/editor/commands_scene.cpp runtime/src/editor/scenes.cpp runtime/src/mods/story_native_scene_coverage.cpp ${WWHD_NPC_CATALOGUE})
+                           runtime/src/editor/commands_quest.cpp runtime/src/editor/commands_story.cpp runtime/src/editor/quests.cpp runtime/src/editor/commands_scene.cpp runtime/src/editor/scenes.cpp runtime/src/mods/story_native_scene_coverage.cpp ${WWHD_NPC_CATALOGUE})
 target_include_directories(editor_test PRIVATE runtime/src)
 target_compile_options(editor_test PRIVATE -UNDEBUG)
 add_test(NAME editor COMMAND editor_test "${CMAKE_SOURCE_DIR}/examples/guest-mods")
@@ -388,7 +388,7 @@ add_test(NAME editor COMMAND editor_test "${CMAKE_SOURCE_DIR}/examples/guest-mod
 # size limit, confirm and path rules, and the loopback listener
 add_executable(editor_mcp_test runtime/tools/editor_mcp_test.cpp runtime/src/editor/mcp.cpp runtime/src/editor/mcp_server.cpp
                runtime/src/editor/commands.cpp runtime/src/editor/commands_build.cpp runtime/src/editor/stage_files.cpp
-               runtime/src/editor/commands_quest.cpp runtime/src/editor/quests.cpp runtime/src/editor/commands_scene.cpp runtime/src/editor/scenes.cpp runtime/src/mods/story_native_scene_coverage.cpp ${WWHD_NPC_CATALOGUE})
+               runtime/src/editor/commands_quest.cpp runtime/src/editor/commands_story.cpp runtime/src/editor/quests.cpp runtime/src/editor/commands_scene.cpp runtime/src/editor/scenes.cpp runtime/src/mods/story_native_scene_coverage.cpp ${WWHD_NPC_CATALOGUE})
 target_include_directories(editor_mcp_test PRIVATE runtime/src)
 target_compile_options(editor_mcp_test PRIVATE -UNDEBUG)
 if(WIN32)
@@ -398,14 +398,22 @@ target_link_libraries(editor_mcp_test PRIVATE Threads::Threads)
 add_test(NAME editor_mcp COMMAND editor_mcp_test)
 # The quest editor (runtime/src/editor/quests.cpp, commands_quest.cpp): graph, steps, start-at-step, flags, search, copy and paste.
 add_executable(editor_quest_test runtime/tools/editor_quest_test.cpp runtime/src/editor/commands.cpp runtime/src/editor/commands_build.cpp
-                                 runtime/src/editor/stage_files.cpp runtime/src/editor/commands_quest.cpp runtime/src/editor/quests.cpp runtime/src/editor/commands_scene.cpp runtime/src/editor/scenes.cpp runtime/src/mods/story_native_scene_coverage.cpp ${WWHD_NPC_CATALOGUE})
+                                 runtime/src/editor/stage_files.cpp runtime/src/editor/commands_quest.cpp runtime/src/editor/commands_story.cpp runtime/src/editor/quests.cpp runtime/src/editor/commands_scene.cpp runtime/src/editor/scenes.cpp runtime/src/mods/story_native_scene_coverage.cpp ${WWHD_NPC_CATALOGUE})
 target_include_directories(editor_quest_test PRIVATE runtime/src)
 target_compile_options(editor_quest_test PRIVATE -UNDEBUG)
 add_test(NAME editor_quests COMMAND editor_quest_test)
+# Letters on their own, treasure charts and items (runtime/src/editor/commands_story.cpp): add, set, remove and
+# list with undo, the validator's refusals, removing what is still used, icons, search and the quest graph.
+add_executable(editor_story_test runtime/tools/editor_story_test.cpp runtime/src/editor/commands.cpp runtime/src/editor/commands_build.cpp
+                                 runtime/src/editor/stage_files.cpp runtime/src/editor/commands_quest.cpp runtime/src/editor/commands_story.cpp runtime/src/editor/quests.cpp
+                                 runtime/src/editor/commands_scene.cpp runtime/src/editor/scenes.cpp runtime/src/mods/story_native_scene_coverage.cpp ${WWHD_NPC_CATALOGUE})
+target_include_directories(editor_story_test PRIVATE runtime/src)
+target_compile_options(editor_story_test PRIVATE -UNDEBUG)
+add_test(NAME editor_story COMMAND editor_story_test)
 # The scene editor (runtime/src/editor/scenes.cpp, commands_scene.cpp): steps, camera keys, timeline and retiming, choices,
 # walking paths, triggers, the native version, previews, copy and paste, and a handle drag as one undo step.
 add_executable(editor_scene_test runtime/tools/editor_scene_test.cpp runtime/src/editor/commands.cpp runtime/src/editor/commands_build.cpp
-                                 runtime/src/editor/stage_files.cpp runtime/src/editor/commands_quest.cpp runtime/src/editor/quests.cpp
+                                 runtime/src/editor/stage_files.cpp runtime/src/editor/commands_quest.cpp runtime/src/editor/commands_story.cpp runtime/src/editor/quests.cpp
                                  runtime/src/editor/commands_scene.cpp runtime/src/editor/scenes.cpp runtime/src/mods/story_native_scene_coverage.cpp ${WWHD_NPC_CATALOGUE})
 target_include_directories(editor_scene_test PRIVATE runtime/src)
 target_compile_options(editor_scene_test PRIVATE -UNDEBUG)

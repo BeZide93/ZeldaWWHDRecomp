@@ -1312,9 +1312,9 @@ void set_launch_mode(bool on) {
 }
 
 void register_package(const std::string& mod, const std::string& name, const std::string& dir, const Value& manifest) {
-    if (manifest.get("actors").type == Value::Null && manifest.get("models").type == Value::Null && manifest.get("scenes").type == Value::Null &&
-        manifest.get("quests").type == Value::Null)
-        return;
+    bool content = false;  // world content, quests, letters, charts or items
+    for (const char* k : {"actors", "models", "scenes", "quests", "letters", "charts", "items"}) content = content || manifest.get(k).type != Value::Null;
+    if (!content) return;
     std::lock_guard<std::recursive_mutex> lk(g_mu);
     g_session.add_package(mod, name, dir, manifest);
     LOG("[editor] package %s registered (%zu actors)", mod.c_str(), manifest.get("actors").array.size());

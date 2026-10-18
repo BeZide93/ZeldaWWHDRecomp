@@ -5,6 +5,7 @@
 #include <cctype>
 #include <cmath>
 #include <deque>
+#include <functional>
 #include <map>
 #include <set>
 
@@ -136,6 +137,7 @@ std::vector<Edge> edges_of(const Value& m, const Value& q) {
                 e.items.push_back({item_id(id), 1});
                 e.rewards.array.push_back(badge("give", "encloses " + item_id(id)));
             }
+            if (id.rfind("chart:", 0) == 0) e.rewards.array.push_back(badge("chart", "encloses " + id));
         }
         out.push_back(std::move(e));
     }
@@ -216,10 +218,14 @@ std::vector<Edge> edges_of(const Value& m, const Value& q) {
     // scenes whose actions set a step: from the step that starts them
     for (const auto& sc : m.get("scenes").array) {
         const Value& trig = sc.get("trigger");
-        std::string from = "start";
+        std::string from = "start", salvage;
         if (trig.get("type").string() == "quest_step" && trig.get("quest").string() == quest && whole(trig.get("step")))
             from = node_of(unsigned(trig.get("step").number));
-        else  // an actor gated at a step of this quest that plays it
+        else if (trig.get("type").string() == "salvage") {  // salvaging a chart's treasure: from the step that finds it
+            salvage = trig.get("chart").string();
+            for (const auto& s : q.get("steps").array)
+                if (s.get("find").string() == "chart:" + salvage && step_n(s)) from = node_of(step_n(s));
+        } else  // an actor gated at a step of this quest that plays it
             for (const auto& a : m.get("actors").array) {
                 std::vector<const Value*> ds = {&a};
                 for (const auto& t : a.get("talks").array) ds.push_back(&t);
@@ -240,7 +246,7 @@ std::vector<Edge> edges_of(const Value& m, const Value& q) {
                 e.to = action == "quest_done" ? std::string("end") : node_of(whole(t.get("step")) ? unsigned(t.get("step").number) : 0);
                 e.via_kind = "scene";
                 e.via = sc.get("id").string();
-                e.label = "scene " + e.via + " ends";
+                e.label = (salvage.empty() ? std::string() : "salvage chart " + salvage + ": ") + "scene " + e.via + " ends";
                 actions_of(st.get("then"), quest, e);
                 out.push_back(std::move(e));
             }
@@ -335,6 +341,9 @@ bool quest_graph(const std::string& mod, const Value& m, const std::string& ques
     start["text"] = q->get("start").get("text").string(q->get("letter").type == Value::Object ? "the letter arrives" : "the mod is on");
     start["badges"] = arr();
     if (q->get("letter").type == Value::Object) start["badges"].array.push_back(badge("letter", "letter " + q->get("letter").get("id").string()));
+    for (const auto& enc : q->get("letter").get("encloses").array)
+        if (enc.type == Value::String && (enc.text.rfind("chart:", 0) == 0 || enc.text.rfind("item:", 0) == 0))
+            start["badges"].array.push_back(badge(enc.text[0] == 'c' ? "chart" : "give", "encloses " + enc.text));
     start["problems"] = problems["start"].type == Value::Array ? problems["start"] : arr();
     out["nodes"].array.push_back(start);
     for (const auto& s : q->get("steps").array) {
@@ -375,6 +384,7 @@ bool quest_graph(const std::string& mod, const Value& m, const std::string& ques
     end["badges"] = arr();
     if (q->get("reward").get("text").type == Value::String) end["badges"].array.push_back(badge("reward", q->get("reward").get("text").text));
     if (q->get("reward").get("item").type == Value::String) end["badges"].array.push_back(badge("reward", "gives " + q->get("reward").get("item").text));
+    if (q->get("reward").get("chart").type == Value::String) end["badges"].array.push_back(badge("chart", "gives " + q->get("reward").get("chart").text));
     end["problems"] = arr();
     out["nodes"].array.push_back(end);
     std::map<std::string, int> outs;
@@ -624,12 +634,26 @@ Value search_package(const std::string& mod, const Value& m, const std::string& 
         for (const auto& l : v.array) s += (s.empty() ? "" : " / ") + l.string();
         return s;
     };
+    // the charts and items a part of the package names ("item:lamp", "chart:old-map", a salvage trigger's chart)
+    std::function<void(const Value&, std::string&)> named = [&](const Value& v, std::string& to) {
+        if (v.type == Value::String && (v.text.rfind("item:", 0) == 0 || v.text.rfind("chart:", 0) == 0)) to += (to.empty() ? "" : ", ") + v.text;
+        if (v.type == Value::Object && v.get("type").string() == "salvage" && v.get("chart").type == Value::String)
+            to += (to.empty() ? "" : ", ") + std::string("chart:") + v.get("chart").text;
+        for (const auto& x : v.array) named(x, to);
+        for (const auto& [k, x] : v.object) named(x, to);
+    };
+    auto names = [&](const Value& v) {
+        std::string s;
+        named(v, s);
+        return s;
+    };
     for (const auto& a : m.get("actors").array) {
         const std::string id = a.get("id").string();
         if (hit(id)) add("actor", id, "id", id);
         else if (hit(a.get("actor").string())) add("actor", id, "actor", a.get("actor").string());
         else if (hit(a.get("model").string())) add("actor", id, "model", a.get("model").string());
         else if (hit(lines(a.get("lines")))) add("actor", id, "lines", lines(a.get("lines")));
+        else if (const std::string uses = names(a); hit(uses)) add("actor", id, "then", uses);  // gives, takes, needs or drops it
         else
             for (const auto& tk : a.get("talks").array)
                 if (hit(lines(tk.get("lines")))) {
@@ -640,8 +664,9 @@ Value search_package(const std::string& mod, const Value& m, const std::string& 
     for (const auto& q : m.get("quests").array) {
         const std::string id = q.get("id").string();
         if (hit(id) || hit(q.get("title").string())) add("quest", id, "title", q.get("title").string());
+        else if (const std::string uses = names(q.get("letter")) + " " + names(q.get("reward")); hit(uses)) add("quest", id, "letter", uses);
         for (const auto& s : q.get("steps").array) {
-            const std::string t = s.get("text").string() + " " + s.get("where").string() + " " + lines(s.get("npc").get("lines"));
+            const std::string t = s.get("text").string() + " " + s.get("where").string() + " " + lines(s.get("npc").get("lines")) + " " + names(s);
             if (!hit(t)) continue;
             Value* v = add("quest_step", id, "text", s.get("text").string());
             (*v)["quest"] = id;
@@ -660,6 +685,7 @@ Value search_package(const std::string& mod, const Value& m, const std::string& 
             if (say.empty() && hit(t)) say = lines(st.get("text")).empty() ? st.get("id").string() : lines(st.get("text")), at = n;
         }
         if (hit(id)) add("scene", id, "id", id);
+        else if (const std::string uses = names(sc); hit(uses)) add("scene", id, "trigger", uses);  // salvages a chart, gives an item
         else if (!say.empty()) {
             Value* v = add("scene", id, "text", say);
             (*v)["step"] = at;
@@ -668,6 +694,19 @@ Value search_package(const std::string& mod, const Value& m, const std::string& 
     for (const auto& it : m.get("items").array) {
         const std::string id = it.get("id").string();
         if (hit(id) || hit(it.get("name").string())) add("item", id, "name", it.get("name").string());
+        else if (hit(it.get("description").string())) add("item", id, "description", it.get("description").string());
+    }
+    for (const auto& c : m.get("charts").array) {
+        const std::string id = c.get("id").string();
+        if (hit(id) || hit(c.get("name").string())) add("chart", id, "name", c.get("name").string());
+        else if (hit(c.get("description").string())) add("chart", id, "description", c.get("description").string());
+        else if (const std::string uses = names(c); hit(uses)) add("chart", id, "item", uses);
+    }
+    for (const auto& l : m.get("letters").array) {
+        const std::string id = l.get("id").string();
+        if (hit(id) || hit(l.get("sender").string())) add("letter", id, "sender", l.get("sender").string());
+        else if (hit(l.get("text").string())) add("letter", id, "text", l.get("text").string());
+        else if (const std::string uses = names(l); hit(uses)) add("letter", id, "encloses", uses);
     }
     for (const auto& f : mod_flags(mod, m))
         if (hit(f.id)) {

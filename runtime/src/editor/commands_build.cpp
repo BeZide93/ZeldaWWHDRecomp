@@ -327,6 +327,17 @@ std::vector<Problem> package_problems(const std::string& mod, const Value& manif
         else if (m.get("kind").string("static") != info.get("kind").string())
             add({"model " + id + ": the file is a " + info.get("kind").string() + " model, the package says " + m.get("kind").string("static"), "model", id, "kind"});
     }
+    // the items' icons: a PNG in the package each (the game reads them when it starts)
+    for (const auto& it : manifest.get("items").array) {
+        const std::string id = it.get("id").string(), icon = it.get("icon").string();
+        if (dir.empty() || icon.empty() || icon.find("..") != std::string::npos) continue;
+        const fs::path file = fs::weakly_canonical(utf8_path(dir) / utf8_path(icon), ec);
+        const auto rel = file.lexically_relative(root);
+        unsigned w = 0, h = 0;
+        if (ec || rel.empty() || rel.begin()->string() == "..") add({"item " + id + ": its icon is outside the package", "item", id, "icon"});
+        else if (!fs::is_regular_file(file, ec)) add({"item " + id + ": " + icon + " is not in the package", "item", id, "icon"});
+        else if (!check_icon_file(file.string(), w, h, why)) add({"item " + id + ": " + icon + ": " + why, "item", id, "icon"});
+    }
     why.clear();
     if (validate_package(mod, manifest, all, why)) return out;
     const std::string whole = why;
@@ -335,8 +346,24 @@ std::vector<Problem> package_problems(const std::string& mod, const Value& manif
     auto known = [&](const std::string& message) {
         return std::any_of(out.begin(), out.end(), [&](const Problem& p) { return p.message == message; });
     };
-    // the package is refused: find what it is about. Each actor on its own (with the switch a door
+    // the package is refused: find what it is about. The items, charts and letters each on their own
+    // (with the items a chart or letter names), then each actor on its own (with the switch a door
     // names, without scenes), each scene with the actors, each quest on its own.
+    for (const char* section : {"items", "charts", "letters"})
+        for (const auto& e : manifest.get(section).array) {
+            Value one = manifest;
+            one[section] = array();
+            one[section].array.push_back(e);
+            why.clear();
+            std::vector<story_notebook::ManifestItem> items;
+            std::vector<story_notebook::ManifestChart> charts;
+            std::vector<story_notebook::ManifestLetter> letters;
+            const bool fine = std::string(section) == "items" ? story_notebook::parse_items(one, items, why)
+                              : std::string(section) == "charts" ? story_notebook::parse_charts(one, charts, why)
+                                                                 : story_notebook::parse_letters(one, letters, why);
+            const std::string kind = std::string(section).substr(0, std::string(section).size() - 1);
+            if (!fine && !known(why)) add({why, kind, e.get("id").string(), ""});
+        }
     for (const auto& a : manifest.get("actors").array) {
         Value one = manifest;
         one.object.erase("scenes");

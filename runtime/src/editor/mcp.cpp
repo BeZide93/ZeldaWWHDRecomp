@@ -369,6 +369,8 @@ const std::vector<PathParam>& path_params() {
     static const std::vector<PathParam> v = {
         {"check_model", "file", false},
         {"import_model", "file", false},
+        {"add_item", "icon_file", false},
+        {"set_item", "icon_file", false},
         {"export_package", "path", true},
     };
     return v;

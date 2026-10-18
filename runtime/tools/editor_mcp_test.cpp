@@ -660,6 +660,60 @@ void quest_format_tools() {
     CHECK(be.asked == 0);
 }
 
+// A small story package built through tools/call: an item an actor gives, a treasure chart whose chest
+// holds it, a scene its salvage starts, a quest step that finds it and a letter on its own that brings it.
+void story_tools() {
+    FakeBackend be;
+    be.session.add_package("editor-test", "Editor test", "", json(kManifest));
+    Handler h(be, kToken, 47615);
+    bool reply = false;
+    Value r = h.message(json(R"({"jsonrpc":"2.0","id":3,"method":"tools/list"})"), reply);
+    std::set<std::string> names;
+    std::string all;
+    for (const auto& t : r.get("result").get("tools").array) {
+        const std::string n = t.get("name").string();
+        names.insert(n);
+        all += mods::json::dump(t) + "\n";  // the description and the parameters' (what a client sees)
+        if (n == "remove_letter" || n == "remove_chart" || n == "remove_item") CHECK(t.get("annotations").get("destructiveHint").boolean);
+        if (n == "add_chart" || n == "set_item" || n == "add_letter") CHECK(!t.get("annotations").get("destructiveHint").boolean);
+    }
+    for (const char* kind : {"letter", "chart", "item"})
+        for (const char* verb : {"list_", "add_", "set_", "remove_"})
+            CHECK(names.count(std::string(verb) + kind + (std::string(verb) == "list_" ? "s" : "")) == 1);
+    // the descriptions teach the fields
+    for (const char* form : {"chart:<id>", "game:heart_piece", "{action: quest_step, quest, step}", "icon_file", "Delivery Bag", "Rito postbox"})
+        if (all.find(form) == std::string::npos) {
+            std::fprintf(stderr, "  no %s in the tool descriptions\n", form);
+            CHECK(false);
+        }
+    CHECK(path_params().size() >= 5);
+    Value v = call(h, "add_item", json(R"({"id":"lamp","name":"Storm lamp","description":"Shows the way.","icon":"icons/lamp.png","use":{"action":"show"}})"));
+    CHECK(!is_error(v));
+    v = call(h, "add_chart", json(R"({"id":"old-map","name":"Old map","description":"An X marks the spot.","at":"link","item":"item:lamp"})"));
+    CHECK(!is_error(v) && text_of(v).find("\"z\":-201500") != std::string::npos);
+    CHECK(!is_error(call(h, "add_scene", json(R"({"id":"dive"})"))));
+    CHECK(!is_error(call(h, "set_scene_trigger", json(R"({"scene":"dive","type":"salvage","chart":"old-map"})"))));
+    CHECK(!is_error(call(h, "add_quest", json(R"({"id":"hunt","title":"The old map","text":"Find the treasure."})"))));
+    CHECK(!is_error(call(h, "edit_quest_step", json(R"({"quest":"hunt","step":1,"fields":{"find":"chart:old-map"}})"))));
+    CHECK(!is_error(call(h, "set_then", json(R"({"id":"sign-a","actions":[{"action":"give","id":"item:lamp","count":1}]})"))));
+    v = call(h, "add_letter", json(R"({"id":"bottle","sender":"A sailor","text":"Dear Link,\nI found this map in a bottle.","encloses":["chart:old-map"]})"));
+    CHECK(!is_error(v));
+    // a bad letter comes back as the validator's reason
+    v = call(h, "add_letter", json(R"({"id":"bad","sender":"A sailor","text":"Hi.","encloses":["chart:nowhere"]})"));
+    CHECK(is_error(v) && text_of(v).find("nowhere") != std::string::npos);
+    v = call(h, "list_charts", Value());
+    CHECK(!is_error(v) && text_of(v).find("scene dive > trigger (salvage)") != std::string::npos);
+    CHECK(be.asked == 0);
+    // removing the chart: the player is asked (destructive), then the command lists what still uses it
+    be.allow = true;
+    v = call(h, "remove_chart", json(R"({"id":"old-map","confirm":true})"));
+    CHECK(is_error(v) && be.asked == 1 && text_of(v).find("letter bottle") != std::string::npos);
+    v = call(h, "check_package", Value());
+    CHECK(!is_error(v) && text_of(v).find("\"valid\":true") != std::string::npos);
+    const Value* m = be.session.manifest("editor-test");
+    CHECK(m->get("items").array.size() == 1 && m->get("charts").array.size() == 1 && m->get("letters").array.size() == 1);
+}
+
 int main() {
     http_parsing();
     checks();
@@ -668,6 +722,7 @@ int main() {
     safety();
     quest_tools();
     quest_format_tools();
+    story_tools();
     listener();
     if (g_failures) {
         std::fprintf(stderr, "%d check(s) failed\n", g_failures);
