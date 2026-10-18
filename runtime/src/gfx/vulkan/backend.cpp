@@ -1408,7 +1408,7 @@ void flush() {
 static void wait_secondary_present();
 #endif
 // ---------------------------------------------------------------- even frame delivery
-// WWHD_INTERP_EVEN_PACING=1 (interp_pacing.h EvenSchedule): the GX2 swap carries the frame's
+// Android by default, WWHD_INTERP_EVEN_PACING=0/1 (interp_pacing.h EvenSchedule): the GX2 swap carries the frame's
 // intended distance to the previous one (set_present_interval); present() submits the TV frame's
 // work as always but holds the present call of a frame that is ready before its slot. The render
 // thread goes on with the next frame's commands and presents the held frame at an op boundary or
@@ -2769,7 +2769,7 @@ static bool present(Screen &s) {
     return false;
   }
 #endif
-  // Even frame delivery (interp_pacing.h EvenSchedule, WWHD_INTERP_EVEN_PACING=1): a TV frame of a
+  // Even frame delivery (interp_pacing.h EvenSchedule; interp.cpp: on by default on Android): a TV frame of a
   // swap that is ready before its slot is held (its work is submitted; only the present call waits)
   if (&s == &R.tv && async && evenPresentSwap && !secondary && !present_capture_requested() &&
       (evenPresentInterval || even_trace_file())) {

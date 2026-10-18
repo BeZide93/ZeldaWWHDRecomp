@@ -158,8 +158,8 @@ inline StepPlan slot_step_start(int64_t now, int64_t slot, int64_t frame, int64_
     return {now, StepStart::kLate};
 }
 
-// Even frame delivery (WWHD_INTERP_EVEN_PACING=1). The passes of a step take different times: a
-// logic pass runs the game, an in-between pass only draws. When the game thread is the bottleneck
+// Even frame delivery (on by default on Android; WWHD_INTERP_EVEN_PACING=0/1). The passes of a step
+// take different times: a logic pass runs the game, an in-between pass only draws. When the game thread is the bottleneck
 // (a Xiaomi 14 with the record worker on: logic pass 19-20 ms, in-between pass 12-14 ms) frames
 // were ready 20 and 13 ms apart, and its 120 Hz screen showed a third of the 60 fps frames for 1 or
 // 3 refreshes instead of 2. Here a frame that is ready early is held on the CPU side (its present

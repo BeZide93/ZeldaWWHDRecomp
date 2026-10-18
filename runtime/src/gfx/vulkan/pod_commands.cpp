@@ -5,6 +5,7 @@
 #include <array>
 #include <cstring>
 #include <limits>
+#include <mutex>
 #include <new>
 #include <stdexcept>
 #include <type_traits>

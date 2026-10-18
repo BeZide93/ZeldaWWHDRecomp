@@ -15,6 +15,8 @@
 // copies and presentation.
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>
+#include <cstring>
 #include <atomic>
 #include <mutex>
 #include <thread>

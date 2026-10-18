@@ -833,23 +833,30 @@ static uint64_t g_paced_possible = 0, g_paced_holds = 0, g_paced_steps = 0, g_pa
 constexpr auto kPacedStep = std::chrono::nanoseconds(2 * 16'683'333);
 // the passes of a step wait for the grid's vsyncs and together take the whole step: 2 ms of slack
 constexpr auto kPacedBudget = std::chrono::nanoseconds(kPacedStep + std::chrono::milliseconds(2));
-// Even frame delivery (interp_pacing.h EvenSchedule; WWHD_INTERP_EVEN_PACING=1, off by default):
-// the renderer holds a frame that is ready early until one frame interval after the previous one.
-// The interval of the frame being swapped: the step's length over its planned frames (60 fps:
-// 16.68 ms; paced 120/240 fps: over the frames this step plans); 0 (frames go out as they come)
-// without interpolation or true 60, as at 30 fps.
-static const bool g_even_pacing = [] {
-    const char* e = getenv("WWHD_INTERP_EVEN_PACING");
-    return e && atoi(e) != 0;
-}();
+// Even frame delivery (interp_pacing.h EvenSchedule): the renderer holds a frame that is ready
+// early until one frame interval after the previous one. On by default on Android (phones whose
+// game thread is the bottleneck: logic and in-between passes of different lengths showed a third of
+// the 60 fps frames for 1 or 3 refreshes of a 120 Hz screen); off elsewhere until measured there.
+// WWHD_INTERP_EVEN_PACING=0/1 wins. The interval of the frame being swapped: the step's length over
+// its planned frames (60 fps and true 60: 16.68 ms; paced 120/240 fps: over the frames this step
+// plans); 0 (frames go out as they come) at 30 fps.
+#ifdef __ANDROID__
+constexpr bool kEvenPacingDefault = true;
+#else
+constexpr bool kEvenPacingDefault = false;
+#endif
+static const char* const g_env_even = getenv("WWHD_INTERP_EVEN_PACING");
+static const bool g_even_pacing = g_env_even ? atoi(g_env_even) != 0 : kEvenPacingDefault;
 bool even_pacing() { return g_even_pacing; }
 int64_t frame_interval_ns() {
-    if (!g_even_pacing) return 0;
     static bool logged = false;
     if (!logged) {
         logged = true;
-        LOG("[interp] even frame pacing on (WWHD_INTERP_EVEN_PACING): a frame ready early waits for its slot before it is presented");
+        LOG("[interp] even frame pacing %s (%s): %s", g_even_pacing ? "on" : "off",
+            g_env_even ? "WWHD_INTERP_EVEN_PACING" : "default on this platform",
+            g_even_pacing ? "a frame ready early waits for its slot before it is presented" : "frames are presented when ready");
     }
+    if (!g_even_pacing) return 0;
     if (!enabled() || frames_per_step() < 2) return 0;
     return int64_t(kPacedStep.count()) / (std::max(1, g_step_n) + 1);
 }
