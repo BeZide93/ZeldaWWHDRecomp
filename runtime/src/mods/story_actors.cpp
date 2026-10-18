@@ -1080,7 +1080,7 @@ bool people_execute(Cpu* c,bool before){Actor* a=people(c->r[3]);if(!a||a->spec.
 }
 
 void install(const std::function<std::string(uint32_t)>& replaced_by,const std::function<void(uint32_t,void(*)(Cpu*))>& replace) {
-    if(g_installed||!declared()||!g_original||!g_call||!g_scratch)return;
+    if(g_installed||(!declared()&&!g_live_kinds)||!g_original||!g_call||!g_scratch)return;  // --editor: also without declarations
     std::vector<std::pair<uint32_t,void(*)(Cpu*)>> hooks={{kChestCheck,chest_check},{kChestOpen,chest_open},{kOnBox,chest_on},{kSignExecute,sign_execute},{kSignDelete,sign_delete},{kPeopleCheckOrder,people_check_order},{kPeopleEventMove,people_event_move},{kPeopleEventOrder,people_event_order}};
     if(g_live_kinds||std::any_of(g_actors.begin(),g_actors.end(),[](const Actor& a){return a.spec.actor=="resident";})){
         const std::pair<uint32_t,void(*)(Cpu*)> resident_hooks[]={

@@ -26,6 +26,7 @@
 #include <utility>
 #include <vector>
 #include "editor_game.h"
+#include "ray_ground.h"
 
 
 #include "../gfx/renderer.h"
@@ -409,34 +410,9 @@ bool ground_below(Cpu* c, double x, double y, double z, float& h) {
     h = float(r);
     return true;
 }
-// the first ground a ray meets: steps along it and narrows the step where it passes below the ground
+// the first ground a ray meets (ray_ground.h: steps along it, looks up the ground below each step's top)
 bool ray_hit(Cpu* c, const WorldPoint& from, const WorldPoint& d, float range, WorldPoint& hit) {
-    const double step = 60;
-    double prev_t = 0;
-    float h = 0;
-    if (ground_below(c, from.x, from.y, from.z, h) && from.y < h - 1) return false;  // starts below the ground
-    for (double t = step; t <= range + step; t += step) {
-        const double tt = std::min<double>(t, range);
-        const double x = from.x + d.x * tt, y = from.y + d.y * tt, z = from.z + d.z * tt;
-        if (ground_below(c, x, y + 1, z, h) && y <= h) {
-            double lo = prev_t, hi = tt;
-            for (int i = 0; i < 12; i++) {
-                const double mid = (lo + hi) / 2;
-                float hm = 0;
-                const double mx = from.x + d.x * mid, my = from.y + d.y * mid, mz = from.z + d.z * mid;
-                if (ground_below(c, mx, my + 1, mz, hm) && my <= hm) hi = mid;
-                else lo = mid;
-            }
-            const double hx = from.x + d.x * hi, hz = from.z + d.z * hi;
-            float hy = 0;
-            if (!ground_below(c, hx, from.y + d.y * hi + 1, hz, hy)) hy = float(from.y + d.y * hi);
-            hit = {float(hx), hy, float(hz)};
-            return true;
-        }
-        prev_t = tt;
-        if (tt >= range) break;
-    }
-    return false;
+    return ray_ground(from, d, range, [c](double x, double y, double z, float& h) { return ground_below(c, x, y, z, h); }, hit);
 }
 
 // ---------------------------------------------------------------- dialogue preview (the game's message box)

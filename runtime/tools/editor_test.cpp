@@ -33,6 +33,7 @@
 #include <utility>
 #include <vector>
 #include "editor/commands.h"
+#include "editor/ray_ground.h"
 #include "editor/stage_files.h"
 #include "mods/story_mail_book.h"
 
@@ -867,6 +868,41 @@ void handle_drag() {
     CHECK(s.log().size() == logged + 3);  // move_actor, undo, move_actors: the drag steps never show in the log
 }
 
+// the pick (ray_ground.h) against a made-up world with the game ground check's contract: the highest
+// ground at x/z at or below the asked height. A pier slab at 89.4 over the sea floor at -5100 (the
+// Windfall pier), and a grass hill rising to 301 with no ground under its surface but the sea floor.
+void ray_pick() {
+    using story_notebook::WorldPoint;
+    auto world = [](double x, double y, double z, float& h) {
+        (void)z;
+        float best = -1e30f;
+        bool any = false;
+        auto offer = [&](float g) { if (g <= y && g > best) best = g, any = true; };
+        offer(-5100);                                                 // the sea floor
+        if (x > 800 && x < 1100) offer(89.4f);                        // the pier, a thin slab
+        if (x < -1500) offer(float(std::min(301.0, 301 + (x + 2000) * 0.1)));  // the hill
+        h = best;
+        return any;
+    };
+    WorldPoint hit;
+    // straight down onto the pier: its top, not the sea floor below
+    CHECK(editor::ray_ground({927.8f, 600, -197972.2f}, {0, -1, 0}, 20000, world, hit));
+    CHECK(std::fabs(hit.y - 89.4f) < 0.2f && std::fabs(hit.x - 927.8f) < 0.01f);
+    // straight down onto the grass
+    CHECK(editor::ray_ground({-2244.1f, 805, -199433.7f}, {0, -1, 0}, 20000, world, hit));
+    CHECK(std::fabs(hit.y - 276.59f) < 0.5f);
+    // slanted down from the camera: the hill where the ray first reaches it
+    const float n = std::sqrt(0.6f * 0.6f * 2 + 0.25f);
+    CHECK(editor::ray_ground({-2244.1f, 805, -199433.7f}, {0.6f / n, -0.6f / n, -0.5f / n}, 20000, world, hit));
+    CHECK(hit.x < -1500 && hit.y > 250 && hit.y < 302);
+    // slanted down across the pier from the side: the pier's top
+    CHECK(editor::ray_ground({700, 300, 0}, {0.7071f, -0.7071f, 0}, 20000, world, hit));
+    CHECK(std::fabs(hit.y - 89.4f) < 0.2f && hit.x > 800 && hit.x < 1100);
+    // nothing below within range, or a ray up into the sky: no hit
+    CHECK(!editor::ray_ground({0, 600, 0}, {0, -1, 0}, 1000, world, hit));
+    CHECK(!editor::ray_ground({0, 600, 0}, {0, 1, 0}, 20000, world, hit));
+}
+
 int main(int argc, char** argv) {
     // editor_test --game <game dir> [stage room]: what the editor reads from a game folder (manual check)
     if (argc >= 3 && std::string(argv[1]) == "--game") {
@@ -894,6 +930,7 @@ int main(int argc, char** argv) {
     package_files(argv[1]);
     building(argv[1]);
     stage_tables();
+    ray_pick();
     if (g_failures) {
         std::fprintf(stderr, "editor_test: %d failure(s)\n", g_failures);
         return 1;

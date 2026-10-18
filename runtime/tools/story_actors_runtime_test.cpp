@@ -357,6 +357,24 @@ int main(int argc,char** argv){
         story_actors::native_room_loaded(&c,2);assert(created==3&&story_actors::actor_address(&c,"test","notice"));
         std::puts("editor live creation, pending kinds, refusal and removal passed");return 0;
     }
+    if(argc==2&&std::strcmp(argv[1],"--editor-empty")==0){
+        // --editor with no package declaring actors at start-up: the machinery installs anyway, so
+        // residents, props, switches and doors are live (no "after a restart") and a new resident appears
+        assert(!story_actors::declared());
+        map_guest(0x101D0000,0x10000);st32(0x101D2B1C+0x10,story_props::kClassBytes);  // the native prop and switch/door classes
+        map_guest(0x101C0000,0x10000);map_guest(0x10180000,0x20000);st32(0x101CD034+0x10,story_switches::kSwitchClassBytes);st32(0x1018FFE8+0x10,story_switches::kDoorClassBytes);
+        story_actors::editor_live_kinds();
+        story_actors::install([](uint32_t){return std::string{};},[](uint32_t a,void(*h)(Cpu*)){hooks[a]=h;});
+        assert(!hooks.empty()&&hooks.contains(0x0218B234));
+        for(const char* type:{"resident","pot","barrel","crate","switch","door"})assert(story_actors::editor_kind_live(type,false));
+        assert(story_actors::editor_kind_live("sign",true));
+        story_notebook::ManifestActor resident;resident.id="guide";resident.actor="resident";resident.stage="sea";resident.room=1;resident.resident=1;resident.rotation.y=90;
+        std::string why;assert(story_actors::editor_live_capable("late",resident,why));
+        auto seated=resident;seated.id="seated";seated.resident=19;assert(story_actors::editor_live_capable("late",seated,why));
+        assert(story_actors::editor_update("late",{resident},{"guide"},why));
+        Cpu c{};story_actors::native_room_loaded(&c,1);assert(created==1);
+        std::puts("editor with no declared actors: live kinds installed, a new resident appears at once");return 0;
+    }
     if(argc==2&&std::strcmp(argv[1],"--no-resident")==0){
         story_notebook::ManifestActor sign;sign.id="notice";sign.actor="sign";sign.stage="sea";sign.room=2;sign.flag="read";
         std::string why;assert(story_actors::load("sign-only",{sign},why));

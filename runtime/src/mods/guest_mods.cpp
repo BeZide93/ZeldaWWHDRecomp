@@ -1250,7 +1250,11 @@ void init() {
         if(addr==native_wait_addresses()[0])native_wait_known_notebook_people=fn;
         g_mod_hook_flags[ordinal]=1;
     });
-    if(story_actors::declared()) {
+    // World actors: with declared actors, and in the --editor launch mode always (the editor places
+    // residents, props, switches, doors and enemies live even when no package declares one at start-up).
+    // Without --editor and without declarations nothing here runs or allocates.
+    const bool world_actors=story_actors::declared()||editor::launch_mode();
+    if(world_actors) {
         if(story_actor_textures::declared()){
             if(!story_actor_textures::configure([](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);},
                  [](const story_actor_textures::Texture&){return false;},prop_texture_binding_valid)||
@@ -1292,7 +1296,7 @@ void init() {
     const bool door_probe=std::getenv("WWHD_TEST_PARTICLE_DOOR_DEBRIS_TICK")!=nullptr;
     const bool particle_probe=door_probe||std::getenv("WWHD_TEST_PARTICLE_AUCTION_SPARKLE_TICK")||
         std::getenv("WWHD_TEST_PARTICLE_BEACON_SPARKLE_TICK");
-    if(g_particle_import||story_actors::declared()||g_world_scenes||particle_probe) {
+    if(g_particle_import||world_actors||g_world_scenes||particle_probe) {
         const uint32_t particle_scratch=mem::runtime_alloc(story_particles::kScratchBytes,16);
         const uint32_t particle_mask=story_particles::kAuctionSparkleMask|story_particles::kBeaconSparkleMask|
             (door_probe?story_particles::kDoorDebrisMask:0);

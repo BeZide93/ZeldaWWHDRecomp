@@ -201,6 +201,7 @@ std::vector<std::string> clips_for(const std::string&){return {};}
 bool bounds_for(const std::string&,story_notebook::WorldPoint&,story_notebook::WorldPoint&){return false;}
 std::string prepare(const std::string&,const story_notebook::ManifestModel&,const std::string&,const std::string&,const std::vector<std::string>&,const std::string&,const std::string&,bool,bool){return {}; }
 }
+namespace editor { bool launch_mode(){return false;} }  // a start without --editor
 namespace story_actors {
 bool placed_chest_item(uint32_t,std::string&,std::string&){return false;}
 bool resident_event_declaration(const std::string&,const std::string&,ResidentEventDeclaration&){return false;}
@@ -211,6 +212,7 @@ void service(Cpu*){}
 bool load(const std::string&,const std::vector<story_notebook::ManifestActor>&,std::string&){return true;}
 bool load(const std::string&,const std::vector<story_notebook::ManifestActor>&,std::string&,const std::vector<std::string>&){return true;}
 bool declared(){return false;}
+unsigned live_kinds=0;void editor_live_kinds(){++live_kinds;}
 void set_game_calls(void (*)(Cpu*,uint32_t),uint32_t (*)(Cpu*,uint32_t,std::initializer_list<uint32_t>)){}
 void set_scratch_memory(uint32_t){}
 void set_scene_start(std::function<bool(const std::string&,const std::string&)>){}
@@ -742,6 +744,7 @@ int main() {
     // particle or held-model setup, no native scene startup, no game-thread binding and no package observer.
     assert(mem::fixture_runtime_allocs==0&&story_particles::configured==0&&story_item_models::configured==0);
     assert(story_native_wait_runtime::startups==0&&!guestmods::g_native_scenes&&!guestmods::g_package_observer);
+    assert(story_actors::live_kinds==0);  // the editor's live kinds only with --editor
     Cpu c{};
     c.r[3] = 5; port(&c);
     assert((calls == std::vector<int>{1, 3, 6})); assert(c.r[3] == 11);
