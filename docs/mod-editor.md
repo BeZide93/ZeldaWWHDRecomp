@@ -137,11 +137,25 @@ more of the same; **Stop placing** in the toolbar or Esc ends it.
   Moblin, Keese, Miniblin. The Inspector's **Variant** changes a placed one.
 - **Your models:** one of the mod's models (static or skinned), your own enemy (a skinned model with
   flinch, stun, death and idle clips), a prop Link can carry.
+- **Game objects:** the game's own palm trees, trees, tables and more (see below).
 
 Each new actor gets the flags it needs, named after it (for example `sign-read`, `pot-broken`,
 `guard-defeated`). In the Inspector, **To Link**, **To camera** and **Snap to ground** move the selected
 actor, **Duplicate** places a copy next to it with flags of its own, and **Remove…** takes it out (after
 a confirmation; Undo brings it back).
+
+### Game objects
+
+**Add > Game objects** lists the game's own objects you can place: palm trees, large trees, tables
+and stools (docs/mod-sdk-v3.md, "The game's own objects"). Type in the search field or pick a
+category, then click an object and click into the picture. An object your game files don't have is
+greyed out with "not available in your game files". The first game object adds
+`"requires": {"game_objects": 1}` to the manifest for you.
+
+A placed game object appears in the game at once. In the Inspector you choose its **Variant** (for
+the table: table, stool, or a stool Link walks through), its **Turn** and, where the object allows
+it, its **Scale**. Each change makes the object again in its place (one undo step). A game object
+has no flags, drops or dialogue.
 
 ### What shows at once, and what after a restart
 
@@ -556,7 +570,8 @@ separated by `;`, or `@file` with one such line per row. Results go to the log.
 | `list_actors`, `list_models`, `list_scenes`, `list_quests` | `mod`? | the open mod's content |
 | `get_actor`, `get_scene` | `id`, `mod`? | one entry as the manifest declares it |
 | `list_actor_types` | | what `add_actor` places, and what appears without a restart |
-| `add_actor` | `type`, `id`?, `at`? (`link`, `camera`, `position`), `position`?, `stage`?, `room`?, `angle`?, `snap`?, `model`?, `options`?, `mod`? | place a new actor (on the ground unless `snap` is false) |
+| `list_game_objects` | `category`?, `query`? | the game's own objects `add_actor` places as `game:<id>`, with variants, limits and whether your game files have them |
+| `add_actor` | `type`, `id`?, `at`? (`link`, `camera`, `position`), `position`?, `stage`?, `room`?, `angle`?, `snap`?, `model`?, `options`?, `mod`? | place a new actor (on the ground unless `snap` is false); `type` `game:<id>` places a game object (`options.variant`) |
 | `remove_actor` | `id`, `confirm`, `mod`? | remove an actor (needs `"confirm": true`) |
 | `duplicate_actor` | `id`, `new_id`?, `offset`?, `mod`? | a copy next to it, with flags of its own |
 | `place_actor` | `id`, `at` (`link`, `camera`, `ground`, `position`), `position`?, `snap`?, `mod`? | move an actor to Link, the camera, the ground below it or a position |

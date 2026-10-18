@@ -117,6 +117,57 @@ is populated and reconciled in the current room on game logic steps. Pending
 creation/deletion retains its identity; an active conversation finishes before
 its partner is removed. Actors belong to the native room layer and unload with it.
 
+## The game's own objects (game objects)
+
+A mod can place the game's own static objects, such as palm trees, large trees and tables, by
+naming them: `"actor": "game:palm"`. Nothing of the game goes into your package: the object
+loads from the player's own game files, exactly as the game draws and handles it, with its
+wind sway and its collision (Link and the boat bump into a palm's trunk).
+
+```json
+{
+  "requires": {"game_objects": 1},
+  "actors": [
+    {"id": "palm-1", "actor": "game:palm", "stage": "sea", "room": 11,
+     "position": {"x": -1500, "y": 322, "z": -199700}, "rotation": {"x": 0, "y": 45, "z": 0}},
+    {"id": "seat", "actor": "game:table", "variant": "stool", "stage": "sea", "room": 11,
+     "position": {"x": -1850, "y": 303, "z": -200200}}
+  ]
+}
+```
+
+A manifest that uses game objects says which version of the port's game objects catalogue it
+needs: `"requires": {"game_objects": 1}`. A port with an older catalogue refuses the mod with
+"update the port"; an object added in a later version can't be named with an older number.
+
+A game object takes only `id`, `actor`, `variant`, `stage`, `room`, `position`, `rotation` and
+`scale`. It turns about the vertical axis only (`rotation` x and z stay 0), and its `scale` is the
+same on all three axes and within the object's limits below. `variant` picks one of its forms (the
+first is the default). Parameters, flags, `then`, paths, conditions and dialogue are refused: the
+port gives each object the game's ordinary settings with no switch, save bit or event, so a game
+object never changes the player's progress. A package that places game objects must not contain
+game files (`.bfres`, `.szs`, `.sarc`, `.pack`, `.dzb`, `.ftex` and the like, under any name);
+the mod manager refuses it.
+
+| Id | What it is | Variants | Scale |
+| --- | --- | --- | --- |
+| `game:palm` | A tall palm tree whose leaves sway in the wind | `palm` | 1 |
+| `game:tree-large` | A large leafy tree | `tree` | 0.5–1.5 |
+| `game:table` | A wooden table, or the small stool that goes with it | `table`, `stool`, `stool-open` (Link walks through it) | 1 |
+
+Objects whose collision keeps the game's size stay at scale 1, so what you see and what Link
+bumps into always match.
+
+Game objects count toward the 16 actors per room (all packages together). The game objects of a
+room also share a memory budget of 3 MiB (each object about 15–20 KiB; their archives are already
+in memory). A game object returns when its room loads again, and full and portable save states
+keep it. If the player's game doesn't have an object (another game version), it is left out with a
+line in the log, and the rest of the mod works.
+
+To see which objects your game has, run
+`python3 tools/story_mods/game_objects.py --game <game folder> --list` (add `--placements` to see
+how often the game itself places each one). It reads your game files and prints no game data.
+
 ## Breakable native props
 
 The experimental prop adapter uses the player's native models, ground physics,
