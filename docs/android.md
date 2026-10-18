@@ -20,6 +20,12 @@ game; this project never provides game files.
 
 Android requests a 60 Hz display mode for 30 fps, interpolated 60 fps and true 60 fps, or the selected 120/240 Hz cadence for faster interpolation. Android may choose another supported rate. The request is reapplied after returning to the game. To leave refresh-rate selection entirely to Android, set `WWHD_NO_60HZ=1` in a developer build (`0` keeps the request enabled).
 
+With 60 fps or faster on, frames are spaced evenly: a frame that is ready early waits a few
+milliseconds so that each one stays on screen for the same time. On a 120 Hz phone screen a third
+of the frames used to stay for one or three refreshes instead of two, which looked like a slight
+judder; now almost all stay for two. The game itself never waits for this, so its speed does not
+change. To turn it off, set `WWHD_INTERP_EVEN_PACING=0` in a developer build.
+
 ## Tested phones
 
 Measured with the game's own profiler in the busiest part of Outset Island (about 3,900 draws per
