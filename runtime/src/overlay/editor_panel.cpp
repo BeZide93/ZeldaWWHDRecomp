@@ -13,6 +13,7 @@
 #include <map>
 #include <mutex>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "../editor/editor_game.h"
@@ -319,6 +320,35 @@ void then_form(const Value& m, const Value& a, const Value& p) {
     }
     if (a.get("lines").type == Value::Null && !rows.empty()) muted("Actions run after dialogue: give the actor lines first.");
 }
+// what a placed chest holds (parameters.item: story_world_manifest.h chest_game_item, or item:<id>)
+void chest_form(const Value& m, const Value& a, const Value& p) {
+    static const std::pair<const char*, const char*> kGame[] = {
+        {"rupee_green", "Green rupee (1)"},   {"rupee_blue", "Blue rupee (5)"},       {"rupee_yellow", "Yellow rupee (10)"},
+        {"rupee_red", "Red rupee (20)"},      {"rupee_purple", "Purple rupee (50)"},  {"rupee_orange", "Orange rupee (100)"},
+        {"rupee_silver", "Silver rupee (200)"}, {"heart_piece", "Piece of heart"},    {"heart_container", "Heart container"}};
+    std::vector<std::pair<std::string, std::string>> choices;
+    for (const auto& [v, label] : kGame) choices.push_back({v, label});
+    for (const auto& i : m.get("items").array) choices.push_back({"item:" + i.get("id").string(), i.get("name").string(i.get("id").string()) + " (your item)"});
+    const std::string now = a.get("parameters").get("item").string();
+    std::string shown = "Orange rupee (100), the default";
+    for (const auto& [v, label] : choices)
+        if (v == now) shown = label;
+    ImGui::TextColored(kHead, "Chest holds");
+    mark("parameters");
+    ImGui::SetNextItemWidth(-FLT_MIN);
+    if (ImGui::BeginCombo("##chest_item", shown.c_str())) {
+        for (const auto& [v, label] : choices)
+            if (ImGui::Selectable(label.c_str(), v == now)) {
+                Value params = a.get("parameters").type == Value::Object ? a.get("parameters") : Value();
+                params["item"] = v;
+                Value q = p;
+                q["property"] = "parameters";
+                q["value"] = params;
+                command("set_actor", q);
+            }
+        ImGui::EndCombo();
+    }
+}
 // drops of props and enemies
 void drops_form(const Value& m, const Value& a, const Value& p) {
     static std::string form_for, form_json;
@@ -578,6 +608,7 @@ void actor_inspector(const Value& m) {
     if (actor == "switch") edit_property(p, *a, "Switch flag (set when pressed)", "switch_flag");
     if (actor == "door") edit_property(p, *a, "Switch (the id of the switch that opens it)", "switch");
     if (is_enemy(actor) || is_prop(actor) || combat || (carry && a->get("carry").get("break_on_impact").boolean)) drops_form(m, *a, p);
+    if (actor == "chest") chest_form(m, *a, p);
     const bool talks = actor == "sign" || actor == "chest" || actor == "resident" || (is_mod && !combat && !carry);
     if (!talks) return;
     ImGui::Separator();

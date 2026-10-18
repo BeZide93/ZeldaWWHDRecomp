@@ -29,7 +29,7 @@ The initial allowlist is deliberately small:
 | --- | --- | --- |
 | Sign | `sign`, `kanban`, `PROC_KANBAN` | A mod-owned `flag`; optional dialogue |
 | Resident | `resident`, `NpcPeople`, `PROC_NPC_PEOPLE` | `parameters: {"resident": "uo2"}`, `"um1"` or seated `"ym1"`; default and legacy numeric `9` select Um1 |
-| Chest | `chest`, `Tbox`, `takara`, `PROC_TBOX` | A mod-owned `flag`; safe rupee `parameters.item` |
+| Chest | `chest`, `Tbox`, `takara`, `PROC_TBOX` | A mod-owned `flag`; what it holds in `parameters.item` (below) |
 | Breakable prop | `pot`, `barrel`, `crate` | Required mod-owned `broken_flag` and `drops` list |
 | Latched floor switch | `switch` | Required mod-owned `switch_flag`; fixed yellow switch |
 | Rotating gate | `door` | Required `switch` naming a switch actor in the same mod |
@@ -52,6 +52,26 @@ remain available. Other Ym1/Ym2 staff variants are unsupported.
 Other actor names and unsafe parameters are validator errors. Only ordinary chest
 raw `params: 0` is accepted at present. The port owns the remaining chest/sign
 parameters so a package cannot select a game switch or opened bit.
+
+**What a chest holds.** `"parameters": {"item": ...}` says what Link gets when he opens
+the chest: the game's item-get pose with the item and its message, as with the game's
+own chests.
+
+| Value | Link gets |
+| --- | --- |
+| `rupee_green`, `rupee_blue`, `rupee_yellow`, `rupee_red` | a green (1), blue (5), yellow (10) or red (20) rupee |
+| `rupee_purple`, `rupee_orange`, `rupee_silver` | a purple (50), orange (100) or silver (200) rupee |
+| `heart_piece`, `heart_container` | a piece of heart or a heart container |
+| `item:<id>` | one of your mod's items (declared in `items`); with `hold_up` and a `held_model`, Link holds your model up |
+| (none) | an orange rupee |
+
+These are the items a treasure chart's chest can hold, and for the same reason: they
+change only Link's rupees and hearts. No story or key item can be chosen, and the
+chest never sets one of the game's save bits: whether it is open is its mod `flag`.
+A piece of heart or a heart container changes Link's hearts for good (turning the mod off
+doesn't take them back), as one from a chart's chest does, so use them sparingly. A chest that holds one of your items needs the
+story system's chest hook: one added in the editor while the game runs appears after a
+restart.
 
 `flag` is a symbolic ID in the declaring mod's story records. It is not a game
 save-bit number. Chest opening and sign reading use this namespace. The runtime

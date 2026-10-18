@@ -25,6 +25,7 @@
 #include "story_store.h"
 #include "story_scenes.h"
 #include "story_treasure.h"
+#include "story_treasure_chest.h"
 #include "guest_addr.h"
 #include "runtime.h"
 #include <algorithm>
@@ -461,7 +462,14 @@ bool load(const std::string& mod,const std::vector<ManifestActor>& actors,std::s
         a.fingerprint=identity::fingerprint(mod,a.spec);a.switch_source=source->switch_token;a.switch_token=story_switches::declare_door(mod,a.spec.id,a.switch_source,why);if(!a.switch_token)return false;
     }
     if(!sync_visuals(mod,actors,true,why))return false;for(const auto&a:actors)if(a.chart_marker.enabled)story_chart::note_import();
+    for(const auto&a:actors)if(a.actor=="chest"&&!a.item_mod.empty())story_treasure_chest::note_placed_chests();  // the chest's item hook (story_treasure_chest.h)
     for(auto& a:staged)g_actors.push_back(std::move(a));rollback.committed=true;return true;
+}
+// A placed chest that holds one of its mod's items: the chest actor at `address` (story_treasure_chest's
+// question when the chest creates its get-item demo item)
+bool placed_chest_item(uint32_t address,std::string& mod,std::string& item){
+    const Actor* a=find(address);if(!a||a->spec.actor!="chest"||a->spec.item_mod.empty())return false;
+    mod=a->mod;item=a->spec.item_mod;return true;
 }
 bool register_flags(const std::string& mod,const std::vector<std::string>& flags,std::string& why){
     auto names=g_flag_names;
@@ -547,6 +555,9 @@ void room_loaded(Cpu* c,int room) {
         if(a.enemy_token&&(!story_enemies::available(a.enemy_token)||!story_enemy_ownership::can_spawn(a.enemy_token)))continue;
         story_enemies::Kind enemy{};(void)enemy_kind(a.spec,enemy);
         uint32_t proc=a.enemy_token?story_enemy_ownership::descriptor(enemy).profile:a.switch_token?(a.spec.actor=="switch"?story_switches::kSwitchProfile:story_switches::kDoorProfile):a.prop_token?story_props::kProfile:a.spec.kind=="mod"?(a.spec.world_object()?mod_actor::kWorldProfile:mod_actor::kProfile):a.spec.actor=="sign"?0xB6u:a.spec.resident==kYm1?0x13Bu:0x175u;
+        if(a.spec.actor=="chest"&&!a.spec.item_mod.empty()&&!story_treasure_chest::item_hook_ready()){
+            static bool told=false;if(!told)LOG("[actors] %s:%s holds a mod item: it appears after a restart",a.mod.c_str(),a.spec.id.c_str());told=true;continue;
+        }
         if(a.spec.actor=="chest") {
             std::memcpy(mem::ptr(g_scratch+0x50),"takara",7);Cpu probe=*c;
             const uint32_t entry=g_call(&probe,kSearchName,{g_scratch+0x50});

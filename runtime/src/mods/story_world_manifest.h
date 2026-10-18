@@ -53,7 +53,8 @@ struct ManifestActor {
     bool carry_enabled=false,carry_break_on_impact=false;
     bool combat_enabled=false,native_heart_drop=false;story_mod_combat::Config combat;
     WorldPoint position,rotation,scale{1,1,1}; uint32_t params=0; unsigned resident=9; // 19 is the seated Ym1 adapter, not a People subtype.
-    uint8_t item_game=6;
+    uint8_t item_game=6;  // a chest's game item number ("parameters": {"item"}); kChestModItem with item_mod
+    std::string item_mod; // a chest's "item:<id>": one of the mod's items (the id)
     std::string broken_flag,switch_flag,switch_actor,defeated_flag;std::vector<ManifestPropDrop> drops;
     std::string flag,quest,item,time,lines; unsigned quest_step=0;
     std::vector<StoryAction> then;
@@ -88,6 +89,18 @@ struct ManifestScene {
     WorldPoint position; float radius=0;
     bool operator==(const ManifestScene&)const=default;
 };
+// What a placed chest can hold ("parameters": {"item": ...}): the game items a treasure chart's chest can hold
+// (story_manifest.h chart_game_item: rupees and heart pieces/containers, no story or key item, nothing that sets
+// a save bit; the chest's own item bit is 255, none) and the mod's items. A mod item travels as the port's
+// chest marker (story_treasure_chest.h kChestMarker, a pool number no game data names) and is swapped for the
+// item-get stand-in when the chest opens.
+inline constexpr uint8_t kChestModItem=0x1B;
+inline uint8_t chest_game_item(const std::string& name){
+    static const std::pair<const char*,uint8_t> kItems[]={{"rupee_green",0x01},{"rupee_blue",0x02},{"rupee_yellow",0x03},{"rupee_red",0x04},
+        {"rupee_purple",0x05},{"rupee_orange",0x06},{"rupee_silver",0x0F},{"heart_piece",0x07},{"heart_container",0x08}};
+    for(const auto&[n,v]:kItems)if(name==n)return v;
+    return 0;
+}
 inline constexpr unsigned kMaxActorsPerRoom=16,kMaxActorsPerMod=64,kMaxScenesPerMod=16,kMaxSceneSteps=64,kMaxSceneFrames=18000;
 namespace world_manifest {
 using mods::json::Value;
@@ -444,7 +457,13 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
         if(named.type!=Value::Null&&named.type!=Value::Object)return why="actor parameters must be an object",false;
         for(const auto& [key,value]:named.object) {
             if(key=="resident"&&a.actor=="resident") {if(value.type==Value::String&&(value.text=="uo2"||value.text=="um1"||value.text=="ym1"))a.resident=value.text=="uo2"?1:value.text=="ym1"?19:9;else if(integer(value,9,9))a.resident=9;else return why="resident must be uo2, um1 or seated ym1 (legacy numeric 9)",false;}
-            else if(key=="item"&&a.actor=="chest") {static const char* names[]={"rupee_green","rupee_blue","rupee_yellow","rupee_red","rupee_purple","rupee_orange"};bool found=false;for(unsigned i=0;i<6;++i)if(value.type==Value::String&&value.text==names[i]){a.item_game=uint8_t(i+1);found=true;}if(!found)return why="chest item must be a rupee",false;}
+            else if(key=="item"&&a.actor=="chest") {
+                if(value.type==Value::String&&value.text.rfind("item:",0)==0){
+                    if(!declared(m,"items",value.text.substr(5)))return why="chest item names an undeclared mod item (item:<id> of \"items\")",false;
+                    a.item_mod=value.text.substr(5);a.item_game=kChestModItem;
+                }else if(!(value.type==Value::String&&(a.item_game=chest_game_item(value.text))))
+                    return why="chest item must be rupee_green, rupee_blue, rupee_yellow, rupee_red, rupee_purple, rupee_orange, rupee_silver, heart_piece, heart_container or item:<id>",false;
+            }
             else return why="unsupported named actor parameter: "+key,false;
         }
         if(a.actor=="resident"&&a.resident==19&&std::fabs(a.position.x+202066.f)<10&&std::fabs(a.position.z-320123.f)<10)return why="ym1 position intersects native relocation area",false;

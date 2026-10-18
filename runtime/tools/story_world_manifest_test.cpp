@@ -169,7 +169,7 @@ int main() {
     v=example();v["scenes"].array[0]["trigger"]["actor"]="missing";assert(!parse_scenes(v,scenes,why));
     v=example();v["scenes"].array[0]["steps"].array[3]["then"].array[0]["id"]="0x1234";assert(!parse_scenes(v,scenes,why));
     v=example();v["actors"].array[1]["actor"]="Tbox";v["actors"].array[1]["params"]=0;v["actors"].array[1]["parameters"]["item"]="rupee_blue";assert(parse_actors(v,actors,why)&&actors[1].item_game==2);
-    v["actors"].array[1]["parameters"]["item"]="heart_piece";assert(!parse_actors(v,actors,why)&&actors.empty());
+    v["actors"].array[1]["parameters"]["item"]="triforce";assert(!parse_actors(v,actors,why)&&actors.empty());
     v=example();v["actors"].array[0]["parameters"]["resident"]=10;assert(!parse_actors(v,actors,why)&&actors.empty());
     for(const auto& name:{"uo2","um1","ym1"}){v=example();v["actors"].array[0]["parameters"]["resident"]=name;assert(parse_actors(v,actors,why));assert(actors[0].resident==(std::string(name)=="uo2"?1u:std::string(name)=="ym1"?19u:9u));}
     for(const auto& name:{"Uo2","uo1","ug1","1",""}){v=example();v["actors"].array[0]["parameters"]["resident"]=name;assert(!parse_actors(v,actors,why));}
@@ -207,6 +207,19 @@ int main() {
      a["talks"]=mods::json::parse(R"([{"lines":["Take my map."],"then":[{"action":"give","id":"chart:keeper-map"}]}])");
      assert(parse_actors(v,actors,why)&&actors[0].talks[0].then[0].kind==StoryAction::Kind::GiveChart);}
     v.object.erase("charts");assert(!parse_actors(v,actors,why));
+    // what a placed chest holds: the chart chests' game items, or one of the mod's items
+    {auto w=example();w["items"]=mods::json::parse(R"([{"id":"crystal","name":"Crystal","description":"It glows.","icon":"c.png"}])");
+     auto chest=mods::json::parse(R"({"id":"box","actor":"chest","stage":"sea","room":11,"position":{"x":0,"y":0,"z":0},"flag":"box-open"})");
+     auto with=[&](const char* item){auto x=w;auto c=chest;if(item)c["parameters"]["item"]=item;x["actors"].array.push_back(c);return x;};
+     auto holds=[&](const char* item,uint8_t game,const char* mod){if(!parse_actors(with(item),actors,why))return false;const auto& c=actors.back();return c.item_game==game&&c.item_mod==mod;};
+     assert(holds(nullptr,0x06,""));  // as before: an orange rupee
+     assert(holds("rupee_green",0x01,"")&&holds("rupee_red",0x04,"")&&holds("rupee_orange",0x06,""));
+     assert(holds("rupee_silver",0x0F,"")&&holds("heart_piece",0x07,"")&&holds("heart_container",0x08,""));
+     assert(holds("item:crystal",kChestModItem,"crystal"));
+     for(const char* bad:{"item:nothing","triforce","game:heart_piece","rupee_gold","",})
+         {assert(!parse_actors(with(bad),actors,why));}
+     auto n=with(nullptr);n["actors"].array.back()["parameters"]["item"]=4;assert(!parse_actors(n,actors,why)&&why.find("chest item must be")!=std::string::npos);
+     auto sign=with("rupee_red");sign["actors"].array.back()["actor"]="sign";assert(!parse_actors(sign,actors,why));}
     v=example();v["actors"].array[0]["switch"]=1;assert(!parse_actors(v,actors,why));
     v=example();v["actors"].array[0]["parameters"]["switch"]=1;assert(!parse_actors(v,actors,why));
     v=example();v["scenes"].array[0]["kind"]="mod";assert(!parse_scenes(v,scenes,why));

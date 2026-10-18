@@ -157,6 +157,10 @@ For signs, residents, chests and your own models, the Inspector has:
 - **Dialogue:** up to three lines. **Preview in the game** shows them in the game's own message box, as
   players will see them; **Close preview** hides it.
 - **Flag:** set when the actor was talked to or opened.
+- **Chest holds** (chests only): a green, blue, yellow, red, purple, orange or silver rupee, a piece of
+  heart, a heart container, or one of your items (an orange rupee when nothing is chosen). Link gets it
+  with the game's item-get pose when he opens the chest; an item with **hold_up** shows your model.
+  `set_actor` with `parameters` (`{"item": "rupee_red"}`, `{"item": "item:crystal"}`) does the same.
 - **After the dialogue:** a list of actions: give or take one of the mod's items, set a quest step, set or
   clear a flag, start a scene. **Apply actions** checks and keeps them.
 

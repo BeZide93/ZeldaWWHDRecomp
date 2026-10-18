@@ -1215,6 +1215,27 @@ void init() {
             g_mod_hook_flags[ordinal]=1;
         });
     }
+    // Placed chests (SDK v3 "chest") that hold a mod's item: the chest item hook of the treasure charts, on its
+    // own when no chart needs it (story_treasure_chest.h). Without such a chest nothing is installed.
+    story_treasure_chest::set_placed_chest(story_actors::placed_chest_item);
+    if(story_treasure_chest::placed_chests()){
+        bool ready=story_treasure::installed();
+        if(!ready){
+            story_treasure::set_game_calls(call_original,[](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);});
+            ready=true;
+            for(const auto& [addr,fn]:story_treasure::chest_hooks()){
+                auto it=g_chains.find(addr);
+                if(it!=g_chains.end()&&!it->second.replace_mod.empty()){LOG("[treasure] %s replaces %08X: chests of mod items are left out",it->second.replace_mod.c_str(),addr);ready=false;continue;}
+                int ordinal=ordinal_of(addr);
+                if(ordinal<0)fatal("[guestmods] placed chests: %08X is not a game function",addr);
+                Chain& ch=g_chains[addr];
+                ch.addr=addr;ch.ordinal=uint32_t(ordinal);ch.replace=fn;ch.replace_mod="the port's placed chests";
+                g_mod_hook_flags[ordinal]=1;
+            }
+        }
+        story_treasure_chest::set_item_hook_ready(ready);
+        if(ready)LOG("[treasure] placed chests can hold mod items");
+    }
     // The story notebook: the item menu's Delivery Bag shows it and opens its page, only when a loaded
     // mod uses the quest services (story_notebook.h).
     story_notebook::set_game_ui(&story_notebook::game_ui());

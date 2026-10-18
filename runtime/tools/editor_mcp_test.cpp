@@ -772,6 +772,27 @@ void story_gap_tools() {
     CHECK(m->get("content_dir").type == Value::Null && m->get("letters").array.size() == 1 && m->get("items").array[0].get("hold_up").boolean);
 }
 
+// A placed chest's contents through tools/call: the description teaches the values; a red rupee, one of the
+// mod's items, a value the format doesn't have
+void chest_tools() {
+    FakeBackend be;
+    be.session.add_package("editor-test", "Editor test", "", json(R"({"format_version": 1, "id": "editor-test", "name": "Editor test", "version": "1.0.0", "kind": "content",
+      "items": [{"id": "crystal", "name": "Lamp crystal", "description": "It glows.", "icon": "icons/crystal.png"}],
+      "actors": [{"id": "box", "actor": "chest", "stage": "sea", "room": 11, "position": {"x": 0, "y": 1040, "z": -201000}, "flag": "box-open"}]})"));
+    Handler h(be, kToken, 47615);
+    bool reply = false;
+    Value r = h.message(json(R"({"jsonrpc":"2.0","id":3,"method":"tools/list"})"), reply);
+    std::string set_actor;
+    for (const auto& t : r.get("result").get("tools").array)
+        if (t.get("name").string() == "set_actor") set_actor = mods::json::dump(t);
+    for (const char* form : {"rupee_red (20)", "heart_piece", "item:<id>"}) CHECK(set_actor.find(form) != std::string::npos);
+    CHECK(!is_error(call(h, "set_actor", json(R"({"id":"box","property":"parameters","value":{"item":"rupee_red"}})"))));
+    CHECK(!is_error(call(h, "set_actor", json(R"({"id":"box","property":"parameters","value":{"item":"item:crystal"}})"))));
+    Value v = call(h, "set_actor", json(R"({"id":"box","property":"parameters","value":{"item":"master_sword"}})"));
+    CHECK(is_error(v) && text_of(v).find("chest item must be") != std::string::npos);
+    CHECK(be.session.manifest("editor-test")->get("actors").array[0].get("parameters").get("item").string() == "item:crystal");
+}
+
 int main() {
     http_parsing();
     checks();
@@ -782,6 +803,7 @@ int main() {
     quest_format_tools();
     story_tools();
     story_gap_tools();
+    chest_tools();
     listener();
     if (g_failures) {
         std::fprintf(stderr, "%d check(s) failed\n", g_failures);

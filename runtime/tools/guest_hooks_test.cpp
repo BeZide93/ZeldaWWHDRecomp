@@ -180,9 +180,13 @@ std::vector<Hook> chest_hooks() {return {};}
 void set_game_calls(void (*)(Cpu*,uint32_t),uint32_t (*)(Cpu*,uint32_t,std::initializer_list<uint32_t>)) {}
 void set_scratch_memory(uint32_t) {}
 void install(const std::function<std::string(uint32_t)>&,const std::function<void(uint32_t,void (*)(Cpu*))>&) {}
+bool installed() {return false;}
 }
 namespace story_treasure_chest {
 void state_loaded() {}
+bool placed_chests() {return false;}
+void set_placed_chest(bool (*)(uint32_t,std::string&,std::string&)) {}
+void set_item_hook_ready(bool) {}
 void set_item_get_next(void (*)(Cpu*),void (*)(Cpu*,uint32_t)) {}
 namespace hooks { void exec_item_get(Cpu*) {} }
 }
@@ -198,6 +202,7 @@ bool bounds_for(const std::string&,story_notebook::WorldPoint&,story_notebook::W
 std::string prepare(const std::string&,const story_notebook::ManifestModel&,const std::string&,const std::string&,const std::vector<std::string>&,const std::string&,const std::string&,bool,bool){return {}; }
 }
 namespace story_actors {
+bool placed_chest_item(uint32_t,std::string&,std::string&){return false;}
 bool resident_event_declaration(const std::string&,const std::string&,ResidentEventDeclaration&){return false;}
 bool prop_texture_identity(uint32_t,uint32_t,uint32_t&,uint32_t&,uint32_t&){return false;}
 bool register_model(const std::string&,const std::string&,const std::string&,int,std::string&,story_notebook::WorldPoint,story_notebook::WorldPoint,bool,std::vector<std::string>,mod_actor::ModelRig){return true;}

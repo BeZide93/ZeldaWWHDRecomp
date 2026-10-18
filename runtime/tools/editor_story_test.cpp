@@ -476,6 +476,39 @@ void format_gaps(const fs::path& tmp) {
     fs::remove_all(tmp, ec);
 }
 
+// What a placed chest holds (set_actor parameters.item): the game items a chart chest can hold, or one of the
+// mod's items; undo; an item a chest holds can't be removed.
+void chest_contents() {
+    FakeHost host;
+    editor::Session s(&host);
+    Value start = json(kManifest);
+    start["items"] = json(R"([{"id": "crystal", "name": "Lamp crystal", "description": "It glows.", "icon": "icons/crystal.png"}])");
+    start["actors"].array.push_back(json(R"({"id": "box", "actor": "chest", "stage": "sea", "room": 11, "position": {"x": 0, "y": 1040, "z": -201000}, "flag": "box-open"})"));
+    s.add_package("story-test", "Story test", "", start);
+    auto m = [&]() { return *s.manifest("story-test"); };
+    auto box = [&]() { return m().get("actors").array[1]; };
+    auto run = [&](const char* params) { return s.run("set_actor", json(params)); };
+    Value r = run(R"({"id": "box", "property": "parameters", "value": {"item": "rupee_red"}})");
+    CHECK(ok(r) && box().get("parameters").get("item").string() == "rupee_red");
+    for (const char* item : {"rupee_silver", "heart_piece", "heart_container", "item:crystal"}) {
+        r = s.run("set_actor", json((std::string(R"({"id": "box", "property": "parameters", "value": {"item": ")") + item + "\"}}").c_str()));
+        CHECK(ok(r) && box().get("parameters").get("item").string() == item);
+    }
+    for (const char* bad : {"item:nothing", "triforce", "game:heart_piece"}) {
+        r = s.run("set_actor", json((std::string(R"({"id": "box", "property": "parameters", "value": {"item": ")") + bad + "\"}}").c_str()));
+        CHECK(!ok(r) && box().get("parameters").get("item").string() == "item:crystal");
+    }
+    CHECK(has(error(r), "chest item must be"));
+    r = s.run("remove_item", json(R"({"id": "crystal", "confirm": true})"));
+    CHECK(!ok(r) && has(error(r), "actor box > parameters > item"));
+    // the sign can't hold anything
+    r = run(R"({"id": "keeper", "property": "parameters", "value": {"item": "rupee_red"}})");
+    CHECK(!ok(r));
+    while (s.undo_depth()) CHECK(ok(s.run("undo")));
+    CHECK(m() == start && box().get("parameters").type == Value::Null);
+    CHECK(ok(s.run("redo")) && box().get("parameters").get("item").string() == "rupee_red");
+}
+
 }  // namespace
 
 int main() {
@@ -483,6 +516,7 @@ int main() {
     problems();
     search_and_graph();
     format_gaps(fs::temp_directory_path() / "wwhd-editor-story-gaps-test");
+    chest_contents();
     if (g_failures) {
         std::fprintf(stderr, "editor_story_test: %d failure(s)\n", g_failures);
         return 1;

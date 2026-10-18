@@ -130,6 +130,8 @@ bool resident_event_identity_quiet(const std::string& mod,const std::string& id,
  uint32_t actor,uint32_t pid,ResidentEventIdentity&);
 bool prop_texture_identity(uint32_t actor,uint32_t pid,uint32_t& token,uint32_t& epoch,uint32_t& generation);
 bool actions(const std::string& mod,const std::vector<story_notebook::StoryAction>& actions);
+// A placed chest holding one of its mod's items ("parameters": {"item": "item:<id>"}): the chest actor at `address`.
+bool placed_chest_item(uint32_t address,std::string& mod,std::string& item);
 // Notebook hooks delegate only actors created by this service. Returns true when handled.
 bool people_message(Cpu*);
 bool people_next_message(Cpu*);

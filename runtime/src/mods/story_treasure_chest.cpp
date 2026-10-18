@@ -20,6 +20,7 @@
 #include "story_items.h"
 #include "story_mail.h"
 #include "story_treasure.h"
+#include "story_world_manifest.h"
 
 namespace story_treasure_chest {
 namespace {
@@ -37,6 +38,10 @@ std::mutex g_mu;
 Pending g_pending;
 std::u16string g_text;  // the armed get message (kept alive while armed)
 void (*g_next)(Cpu*) = nullptr;
+bool g_placed_chests = false;
+bool (*g_placed)(uint32_t, std::string&, std::string&) = nullptr;
+constexpr uint32_t kActorPos = 0x314;  // fopAc_ac_c::current.pos: the chest passes its address
+static_assert(story_notebook::kChestModItem == kChestMarker, "the placed chest's mod item marker is the chart chest's");
 void (*g_original)(Cpu*, uint32_t) = nullptr;
 
 constexpr uint8_t kDefaultGameItem = 0x06;  // story_notebook::kChartDefaultItem (an orange rupee)
@@ -66,6 +71,12 @@ void disarm_locked() {
 }  // namespace
 
 void set_item_get_next(void (*next)(Cpu*), void (*original)(Cpu*, uint32_t)) { g_next = next, g_original = original; }
+void note_placed_chests() { g_placed_chests = true; }
+bool placed_chests() { return g_placed_chests; }
+void set_placed_chest(bool (*placed)(uint32_t, std::string&, std::string&)) { g_placed = placed; }
+namespace { bool g_hook_ready = false; }
+void set_item_hook_ready(bool ready) { g_hook_ready = ready; }
+bool item_hook_ready() { return g_hook_ready; }
 
 void state_loaded() {
     std::lock_guard lock(g_mu);
@@ -89,7 +100,11 @@ void create_item(Cpu* c) {
         return story_treasure::original(c, kCreateItemForTrBoxDemo);
     }
     const uint32_t save_no = story_treasure::active_save_no();
-    const std::optional<Chest> chest = story_treasure::is_mod_save_no(save_no) ? chest_of(save_no) : std::nullopt;
+    std::optional<Chest> chest = story_treasure::is_mod_save_no(save_no) ? chest_of(save_no) : std::nullopt;
+    if (!chest && g_placed && c->r[3] >= kActorPos) {  // a placed chest of the mod's item
+        Chest placed;
+        if (g_placed(c->r[3] - kActorPos, placed.mod, placed.item_mod)) placed.chart = "(placed chest)", chest = placed;
+    }
     const std::optional<story_items::Item> item =
         chest && !chest->item_mod.empty() ? story_items::find(chest->mod, chest->item_mod) : std::nullopt;
     if (!item) {
@@ -165,7 +180,7 @@ std::vector<Hook> chest_hooks() {
     // only when a chart's chest holds a mod item: game items take the game's own path
     bool mod_item = false;
     for (const story_chart::ChartView& v : story_chart::charts()) mod_item |= !v.item_mod.empty();
-    if (!mod_item) return {};
+    if (!mod_item && !story_treasure_chest::placed_chests()) return {};
     return {{story_treasure_chest::kCreateItemForTrBoxDemo, story_treasure_chest::hooks::create_item}};
 }
 
