@@ -5,6 +5,7 @@
 #include "deferred_dispatch.h"
 #include "pass.h"
 #include "shaders.h"
+#include "stereo.h"
 #include "../../cloud_proto.h"
 #include "../../cloud_noise.h"
 #include "../../cloud_scene.h"
@@ -175,7 +176,7 @@ void sky_clouds_begin(const uint32_t* regs, uint32_t seq) {
     if (begins % 300 == 0 && render::cloud_shadows())
         LOG("[shadows] Vulkan: sky begins %llu, with an open pass %llu", (unsigned long long)begins, (unsigned long long)open);
     const float reduce = 1.0f - render::horizon_haze();
-    if (reduce <= 0.0f) return;
+    if (reduce <= 0.0f || stereo::frame.mode != stereo::Off) return;  // stereo 3D: the original sky (limitation)
     static uint64_t missed = 0;
     if (!R.rendering || !R.passTracked || !R.passColors[0] || !R.passWidth || !R.passHeight) {
         if (missed++ % 600 == 0) LOG("[sky] horizon haze: no open sky pass (%llu times)", (unsigned long long)missed);
@@ -726,8 +727,8 @@ void cloud_resources() {
 }
 
 // a pipeline for the open pass's attachments (the composite's picture, its other targets, its depth)
-VkPipeline cloud_pipeline() {
-    std::string key = "c";
+VkPipeline cloud_pipeline(bool depthTested) {
+    std::string key = depthTested ? "c" : "cs";
     uint32_t ncolor = 0;
     VkFormat colorFormats[8]{};
     for (uint32_t i = 0; i < 8; i++)
@@ -756,7 +757,7 @@ VkPipeline cloud_pipeline() {
     VkPipelineMultisampleStateCreateInfo ms{VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
     ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
     VkPipelineDepthStencilStateCreateInfo dss{VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
-    dss.depthTestEnable = depth ? VK_TRUE : VK_FALSE;
+    dss.depthTestEnable = depth && depthTested ? VK_TRUE : VK_FALSE;
     dss.depthWriteEnable = VK_FALSE;
     dss.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
     VkPipelineColorBlendAttachmentState blend[8]{};
@@ -806,19 +807,21 @@ VkPipeline cloud_pipeline() {
 }
 
 // into the open pass (the composite's), then a fresh pass for the game's next draw
-void draw_clouds(uint32_t seq) {
+// `target`: the address the open pass must be drawing to; `depthTested`: the full-resolution picture
+// (sky-only test) rather than the half-resolution sky buffer (Lite)
+void draw_clouds(uint32_t seq, uint32_t target, bool depthTested) {
     cloud_resources();  // may end the pass for the one-time noise upload
-    if (!R.rendering || !R.passTracked || !R.passColors[0] || R.passColors[0]->addr != g_cloudsPicture) {
+    if (!R.rendering || !R.passTracked || !R.passColors[0] || R.passColors[0]->addr != target) {
         static uint64_t missed = 0;
         if (missed++ % 600 == 0) LOG("[clouds] Vulkan: the composite pass is closed (%llu times)", (unsigned long long)missed);
         return;
     }
-    VkPipeline pipe = cloud_pipeline();
+    VkPipeline pipe = cloud_pipeline(depthTested);
     if (!pipe) return;
     const uint32_t w = R.passWidth, h = R.passHeight;
     cloud_scene::Globals g;
     std::vector<cloud_scene::Inst> inst;
-    cloud_scene::build(*cloud_proto::snapshot(seq), float(w) / float(h), cloud_proto::mode(), R.passDepth != nullptr, R.frame, g, inst);
+    cloud_scene::build(*cloud_proto::snapshot(seq), float(w) / float(h), cloud_proto::mode(), depthTested && R.passDepth, R.frame, g, inst);
     if (inst.empty()) return;
     if (inst.size() > kMaxInstances) inst.erase(inst.begin(), inst.end() - kMaxInstances);  // keep the nearest
     UploadSlice gu = allocate_upload(sizeof g, 256), iu = allocate_upload(sizeof(cloud_scene::Inst) * kMaxInstances, 256);
@@ -853,8 +856,17 @@ void draw_clouds(uint32_t seq) {
 
 // draw.cpp, first thing: the game's own cloud cards are skipped while toon clouds replace them
 bool clouds_skip_card() {
+    if (stereo::frame.mode != stereo::Off) return false;  // stereo 3D keeps the game's cards (see clouds_before_draw)
     const int m = cloud_proto::mode();
-    return cloud_proto::g_active_seq && (m == cloud_proto::kSdf || m == cloud_proto::kHide);
+    if (!cloud_proto::g_active_seq || (m != cloud_proto::kSdf && m != cloud_proto::kHide)) return false;
+    // Lite: the clouds go into the half-resolution sky buffer in place of the cards (a quarter of the pixels);
+    // High: into the full-resolution picture after the composite (clouds_before_draw)
+    if (m == cloud_proto::kSdf && cloud_proto::tier() == 1 && g_cloudsWanted && R.passColors[0] && R.passColors[0]->addr == g_skyAddr) {
+        const uint32_t seq = g_cloudsWanted;
+        g_cloudsWanted = 0;
+        draw_clouds(seq, g_skyAddr, false);
+    }
+    return true;
 }
 
 
@@ -862,11 +874,12 @@ bool clouds_skip_card() {
 // composite (it samples the sky buffer), draws the toon clouds right after it, and applies the pending
 // cloud shadows before the picture is read
 void clouds_before_draw(const uint32_t* r, const vk::Shader* ps, Surface* color0, uint32_t slice0, Surface* depth) {
-    if (g_skyFrame != R.frame) return;
+    // stereo 3D draws every pass once per eye; the toon clouds and shadows are mono for now (limitation)
+    if (g_skyFrame != R.frame || stereo::frame.mode != stereo::Off) return;
     if (g_cloudsSeq) {  // the previous draw was the composite: its pass is still open
         uint32_t seq = g_cloudsSeq;
         g_cloudsSeq = 0;
-        draw_clouds(seq);
+        draw_clouds(seq, g_cloudsPicture, true);
     }
     const bool shadows = render::cloud_shadows();
     if ((!shadows && !g_cloudsWanted) || !ps || !ps->dec) return;

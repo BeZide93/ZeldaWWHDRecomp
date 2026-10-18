@@ -23,6 +23,17 @@ For a vivid sky, try **Bloom strength 0%** with **Horizon haze 30%**.
 Environment variable for tests: `WWHD_HORIZON_HAZE=0.3` (0 = no haze, 1 = original). It
 overrides the saved setting.
 
+## Cloud style
+
+- **Original** (the default) keeps the game's own painted clouds.
+- **Toon clouds** draws the clouds as puffy, cel-shaded cumulus: bright sunlit tops, cooler shaded
+  undersides, crisp slightly frayed edges, and banks of clouds along the horizon.
+  - They come from the same clouds the game places, so they drift with the wind, fade in and out,
+    and follow the time of day and the weather: golden edges at dusk, dark clouds at night, flatter
+    and greyer clouds in stormy weather.
+  - **Lite** is lighter on the graphics chip, for phones and handhelds.
+  - **High** adds puffs that shadow each other and finer detail.
+
 ## Cloud shadows
 
 Cloud shadows add the soft shadows of drifting clouds on the sea, the islands, the boat and the
@@ -32,4 +43,5 @@ night, and paler in stormy weather. Off is the original game.
 The shadows come from the same clouds the game puts in the sky. Those clouds are painted far away
 in the sky, so a shadow won't always sit right under the cloud you see.
 
-Environment variable for tests: `WWHD_CLOUD_SHADOWS=1`.
+Environment variables for tests: `WWHD_CLOUD_STYLE=0|1|2` (Original, Lite, High) and
+`WWHD_CLOUD_SHADOWS=1`.

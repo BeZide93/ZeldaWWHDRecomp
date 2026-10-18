@@ -101,12 +101,13 @@ void build(const cloud_proto::Snapshot& s, float aspect, int mode, bool depthTes
         float tall = ang * (1 + c.height) * k[6] * (1 + qc * k[5]);
         // overhead clouds: keep them from filling the sky (the game's cards grow toward the zenith)
         static const float maxAng = envf("WWHD_CLOUDS_MAXANG", 0.16f);
-        float rw = D * std::tan(std::min(side, 1.2f)) * sizeK;
+        // stormy weather (the game's cloud strength): wider, flatter, merged into one overcast layer
+        float rw = D * std::tan(std::min(side, 1.2f)) * sizeK * (1.0f + 0.5f * strength);
         rw = std::min(rw, D * maxAng) * (1.0f - 0.45f * std::clamp(pitch / 0.6f, 0.0f, 1.0f));
         float rh = D * std::tan(std::min(tall, 1.2f));
         if (rw < 1) continue;
         bool isFar = hor > bankDist;
-        float tower = h01(c.index * 7 + 1) < 0.3f ? 1.45f : 1.0f;  // some clouds grow into towers
+        float tower = h01(c.index * 7 + 1) < 0.3f * (1.0f - strength) ? 1.45f : 1.0f;  // some clouds grow into towers (not in storms)
         float hs = std::clamp(rh / rw * hsK * tower * (1.0f - 0.4f * strength), 0.55f, 1.6f);
         auto add = [&](float cx, float cy, float cz, float r, float shp, float seed, float a) {
             Inst it{};
@@ -124,7 +125,7 @@ void build(const cloud_proto::Snapshot& s, float aspect, int mode, bool depthTes
             dist.push_back(std::sqrt(cx * cx + cy * cy + cz * cz));
         };
         add(x, y, z, rw, hs, (float)c.index * 7.31f + 3.0f, c.alpha);
-        if (isFar && bankK > 0) {
+        if ((isFar || strength > 0.5f) && bankK > 0) {
             // satellites along the horizon (perpendicular to the view direction), lower and a bit smaller
             float tx = -z / hor, tz = x / hor;
             int ns = 2 + (h01(c.index * 13 + 5) < 0.5f ? 1 : 0);

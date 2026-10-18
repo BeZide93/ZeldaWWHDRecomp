@@ -919,7 +919,10 @@ bool clouds_draw(id<MTLRenderCommandEncoder> enc, const MTLViewport& vp, Surface
         if (!ensure(colors, colorSlices, depth, depthSlice)) return true;
         enc = R.enc;
     }
-    static const bool fullres = [] { const char* e = getenv("WWHD_CLOUDS_FULLRES"); return !e || strcmp(e, "0"); }();  // default on
+    // High: the full-resolution picture; Lite: the half-resolution sky buffer (a quarter of the pixels).
+    // WWHD_CLOUDS_FULLRES=0|1 overrides.
+    static const char* fullresEnv = getenv("WWHD_CLOUDS_FULLRES");
+    const bool fullres = fullresEnv ? strcmp(fullresEnv, "0") != 0 : cloud_proto::tier() != 1;
     encode(enc, *cloud_proto::snapshot(cloud_proto::g_active_seq), vp, fullres ? 0 : kClouds);
     if (fullres) {  // the clouds go into the full-resolution picture where the sky buffer is composited
         g_sky = R.passColor[0], g_skyFrame = R.frame, g_pendingSeq = cloud_proto::g_active_seq;
