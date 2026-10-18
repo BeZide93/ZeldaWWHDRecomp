@@ -850,7 +850,7 @@ void problems_area() {
             U.message = U.message_ok ? "No problems: the package is valid." : std::to_string(U.problems.array.size()) + " problem(s)";
         });
     if (U.problems.type != Value::Array) {
-        muted("Checks every actor, model, scene and quest as the mod manager does.");
+        muted("Checks every actor, model, scene, quest, letter, chart and item as the mod manager does.");
         return;
     }
     if (U.problems.array.empty()) ImGui::TextColored(kGood, "No problems.");
@@ -881,6 +881,10 @@ void problems_area() {
                 show_quest(U.quest, pr.get("field").string());
             } else if (pr.get("kind").string() == "model")
                 U.select_area = 1;
+            else if (pr.get("kind").string() == "item" || pr.get("kind").string() == "chart" || pr.get("kind").string() == "letter") {
+                U.select_area = 4;
+                show_story(pr.get("kind").string(), pr.get("id").string());
+            }
         }
         ImGui::PopStyleColor();
         ImGui::PopID();
@@ -1052,7 +1056,7 @@ void register_tab() {
 }
 
 void draw() {
-    // test aids: WWHD_TEST_EDITOR_AREA=<0..8> and WWHD_TEST_EDITOR_ACTOR=<id> preselect (screenshots)
+    // test aids: WWHD_TEST_EDITOR_AREA=<0..10> and WWHD_TEST_EDITOR_ACTOR=<id> preselect (screenshots)
     static bool test_aids = [] {
         if (const char* a = std::getenv("WWHD_TEST_EDITOR_AREA")) U.select_area = std::atoi(a);
         if (const char* a = std::getenv("WWHD_TEST_EDITOR_ACTOR")) U.actor = a;
@@ -1073,7 +1077,7 @@ void draw() {
     if (!U.message.empty()) wrapped(U.message_ok ? kGood : kBad, U.message);
     if (!status.empty()) wrapped(kMuted, status);
     mcp_prompt();
-    static const char* const kAreas[] = {"Actors", "Models", "Scenes", "Quests", "Warp", "Camera & test", "Problems", "Export", "Log", "Claude / MCP"};
+    static const char* const kAreas[] = {"Actors", "Models", "Scenes", "Quests", "Story", "Warp", "Camera & test", "Problems", "Export", "Log", "Claude / MCP"};
     const int areas = int(sizeof kAreas / sizeof kAreas[0]) - (editor_mcp::available() ? 0 : 1);
     if (ImGui::BeginTabBar("editor_areas", ImGuiTabBarFlags_FittingPolicyShrink)) {
         for (int i = 0; i < areas; i++) {
@@ -1103,11 +1107,12 @@ void draw() {
     case 1: models_area(m); break;
     case 2: scenes_area(m); break;
     case 3: quests_area(m); break;
-    case 4: warp_area(); break;
-    case 5: camera_test_area(); break;
-    case 6: problems_area(); break;
-    case 7: export_area(); break;
-    case 9: mcp_area(); break;
+    case 4: story_area(m); break;
+    case 5: warp_area(); break;
+    case 6: camera_test_area(); break;
+    case 7: problems_area(); break;
+    case 8: export_area(); break;
+    case 10: mcp_area(); break;
     default: log_area(); break;
     }
     ImGui::EndChild();

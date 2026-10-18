@@ -65,6 +65,10 @@ std::string quest_status();             // "Lighthouse quest: step 3 of 6" for t
 void show_quest(const std::string& quest, const std::string& field);  // a problem was clicked: open that quest and step
 std::vector<std::string>& multi_selection();  // the selected actors (Ctrl or Shift adds); selected() is the main one
 
+// ---- letters on their own, treasure charts and items (editor_story.cpp) ----
+void story_area(const Value& m);        // the Story tab: list, add, edit and remove the mod's letters, charts and items
+void show_story(const std::string& kind, const std::string& id);  // a problem or search result: select it there
+
 // ---- the scene editor (editor_scenes.cpp) ----
 void scene_editor(const Value& m);      // the Scenes window: steps, timeline, inspector, trigger, native version, previews
 void show_scene(const std::string& scene, int step);  // open the Scenes window at that scene and step (0: none)

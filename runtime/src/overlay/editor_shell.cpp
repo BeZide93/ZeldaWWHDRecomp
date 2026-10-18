@@ -34,6 +34,7 @@ constexpr double kPi = 3.14159265358979323846;
 
 struct ShellState {
     bool outliner = true, inspector = true, problems = false, test = false, log = false;
+    bool story_tab = false;  // show the Outliner's Story tab once
     bool focus_inspector = false, focus_problems = false;
     bool quests = false, flags = false, search = false, focus_quests = false;  // the quest editor's windows
     bool quests_focused = false;  // Ctrl+C / Ctrl+V are the quest editor's there
@@ -848,6 +849,11 @@ void panels(float w, float h) {
                     editor_ui::quests_area(snap.manifest);
                     ImGui::EndTabItem();
                 }
+                if (ImGui::BeginTabItem("Story", nullptr, S.story_tab ? ImGuiTabItemFlags_SetSelected : 0)) {
+                    editor_ui::story_area(snap.manifest);
+                    ImGui::EndTabItem();
+                }
+                S.story_tab = false;
                 if (ImGui::BeginTabItem("Warp")) {
                     editor_ui::warp_area();
                     ImGui::EndTabItem();
@@ -1147,6 +1153,10 @@ void register_layers() {
     if (const char* e = std::getenv("WWHD_TEST_EDITOR_PLACING")) S.placing = e;
     if (const char* e = std::getenv("WWHD_TEST_EDITOR_ACTOR")) editor_ui::selected() = e;
     if (const char* e = std::getenv("WWHD_TEST_EDITOR_FIELD")) editor_ui::focus_field() = e;
+    if (const char* e = std::getenv("WWHD_TEST_EDITOR_STORY")) {  // kind:id, the Story tab with that entry
+        const std::string story = e;
+        editor_ui::show_story(story.substr(0, story.find(':')), story.find(':') == std::string::npos ? std::string() : story.substr(story.find(':') + 1));
+    }
 }
 void show_inspector() {
     S.inspector = true;
@@ -1163,6 +1173,10 @@ void show_quests() {
 void show_scenes() {
     S.scenes = true;
     S.focus_scenes = true;
+}
+void show_story() {
+    S.outliner = true;
+    S.story_tab = true;
 }
 
 }  // namespace editor_shell
