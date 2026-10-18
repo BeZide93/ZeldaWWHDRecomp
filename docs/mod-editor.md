@@ -8,7 +8,8 @@ and export the finished package.
 It works with mods that use [actors and scenes](mod-sdk-v3.md) (placed game actors and your own models),
 scenes and quests ([SDK v2](mod-sdk-v2.md)). The examples
 [sdk-v3-windfall](../examples/guest-mods/sdk-v3-windfall/manifest.json) and
-[sdk-v3-creature](../examples/guest-mods/sdk-v3-creature/manifest.json) are good packages to try it on.
+[sdk-v3-creature](../examples/guest-mods/sdk-v3-creature/manifest.json) are good packages to try it on, or
+[start a new mod](#starting-a-new-mod) of your own in the editor.
 
 ## Starting it
 
@@ -22,11 +23,36 @@ panels for quick changes. While you place a new actor, drag a handle or connect 
 Esc cancels that instead (as the first Esc frees a captured mouse); Esc with nothing to cancel opens
 Settings.
 
+## Starting a new mod
+
+Press **New mod…** next to the mod list in the toolbar (or in the Editor tab of Settings). Fill in:
+
+- **Id**: the mod's short name for the game and the mod manager, for example `harbor-quest`. Lower-case
+  letters, digits, `-`, `_` and `.`; it can't be changed later and no other mod may use it.
+- **Name**: what players see in the mod manager, for example "Harbor quest".
+- **Author** (optional): you.
+
+Press **Create**. If something is wrong (the id is taken, or has a character that isn't allowed), the
+form says so under the fields and nothing is created. Otherwise the editor:
+
+- makes a new, empty package for the mod in the mod manager's mods folder (only its `manifest.json`),
+- turns it on in your current mod profile, so it also loads the next time you start the game,
+- and opens it: everything you add (actors, models, quests, scenes, letters, charts and items) goes into it.
+
+Nothing else changes: no other mod, no game file and no save. The new mod uses the Story Notebook, like
+every mod with actors or quests; the game installs it with the story system.
+
+Your work is in the package once you press **Save…**. After that it is a package like any other: export it
+under **Export** to share it. Creating a mod is not an Undo step. To get rid of a mod you don't want, turn
+it off in **Settings > Mods** and press **Remove** there (a mod the game has loaded since needs a restart
+first).
+
 ## What it changes, and what it never changes
 
 - It changes **only the mod you open**, in that mod's own folder: its `manifest.json` (only when you press
   **Save…** and confirm) and, when you import a model or an item's icon, the file it copies into the
   mod's `models` or `icons` folder.
+- **New mod…** adds a new package folder of its own and turns that mod on; it never replaces a package.
 - It never changes the game's files, your save, or another mod. An export never includes game files.
 - Every change is checked by the same rules the mod manager uses. A change that breaks a rule is refused
   with the reason, and nothing changes.
@@ -40,7 +66,7 @@ Settings.
 
 | | |
 | --- | --- |
-| **Toolbar** | the open mod, Undo, Redo, Check, Save…, Revert…, **Add**, Move / Turn, grid and angle snapping, **Play**, Play from Link, Restore at Stop, Test mode, which panels show (also **Quests**, **Scenes**, **Flags** and **Search**), and **Reset layout** |
+| **Toolbar** | the open mod, **New mod…**, Undo, Redo, Check, Save…, Revert…, **Add**, Move / Turn, grid and angle snapping, **Play**, Play from Link, Restore at Stop, Test mode, which panels show (also **Quests**, **Scenes**, **Flags** and **Search**), and **Reset layout** |
 | **Outliner** | the open mod's actors, models, scenes and quests, its letters, charts and items (**Story**), and the warp destinations |
 | **Inspector** | the selected actor: place, properties, dialogue and actions |
 | **Problems & export** | the check's problem list, and the export |
@@ -418,7 +444,7 @@ The editor's status bar shows **MCP: off**, **MCP: on, port N** or **MCP: connec
 
 ### Allow / Deny
 
-Some commands remove or replace things: `remove_actor`, `remove_letter`, `remove_chart`, `remove_item`,
+Some commands remove or replace things, or write outside the open mod: `new_mod`, `remove_actor`, `remove_letter`, `remove_chart`, `remove_item`,
 `revert_package`, `save_package`, `export_package`, `reset_quest`, `load_state`, and `import_model` when it
 replaces a file. The client
 must ask for them with `"confirm": true`, and then the game asks **you**: a window "Claude wants to: …"
@@ -457,6 +483,7 @@ separated by `;`, or `@file` with one such line per row. Results go to the log.
 | `help` | `command`? | the commands and their parameters |
 | `list_mods` | | the active mods the editor can open |
 | `open_mod` | `mod` | open another mod |
+| `new_mod` | `id`, `name`, `author`?, `description`?, `confirm` | create a new, empty mod, turn it on in the current mod profile and open it (needs `"confirm": true`; refused when the id is taken) |
 | `list_actors`, `list_models`, `list_scenes`, `list_quests` | `mod`? | the open mod's content |
 | `get_actor`, `get_scene` | `id`, `mod`? | one entry as the manifest declares it |
 | `list_actor_types` | | what `add_actor` places, and what appears without a restart |
