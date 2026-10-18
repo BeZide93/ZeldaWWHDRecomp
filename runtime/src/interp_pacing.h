@@ -80,6 +80,17 @@ inline int plan_in_between(int n_max, int64_t budget, int64_t logic_pass, int64_
     return int(std::clamp<int64_t>(fit, 1, n_max));
 }
 
+// Even frame delivery: the in-between frames a step may have so that its frames divide the display's
+// refreshes per step evenly (refreshes: whole refreshes in a 33.37 ms step, 4 at 120 Hz, 2 at 60 Hz,
+// 8 at 240 Hz; 0: unknown). On a 120 Hz screen 3 frames a step (90 fps) would stay 1, 1 and 2
+// refreshes: uneven by construction. The most of at most n that divide evenly, at least 1.
+inline int even_in_between(int n, int refreshes) {
+    if (refreshes <= 0) return std::max(1, n);
+    for (int k = std::max(1, n); k > 1; --k)
+        if (refreshes % (k + 1) == 0) return k;
+    return 1;
+}
+
 // The running average of a pass duration (3/4 old, 1/4 new). A single sample counts at most twice
 // the average: one hitch (a shader compiled, a scene loaded) would otherwise make in-between passes
 // look unaffordable, and while none are drawn none are measured (measured: one 76 ms pass kept

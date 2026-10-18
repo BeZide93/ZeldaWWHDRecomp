@@ -567,6 +567,24 @@ static void test_steps_on_vsync() {
 // Even frame delivery (EvenSchedule): frames ready unevenly (logic pass 20 ms, in-between pass 13.4
 // ms, a step of 33.37 ms) go out evenly; late frames at once; a hitch does not leave lasting delay;
 // a frame is never held longer than one interval; interval 0 passes every frame through.
+static void test_even_in_between() {
+    // 120 Hz: 4 refreshes a step: 1 or 3 in-between frames, never 2 (90 fps: 1, 1, 2 refreshes)
+    CHECK(even_in_between(3, 4) == 3);
+    CHECK(even_in_between(2, 4) == 1);
+    CHECK(even_in_between(1, 4) == 1);
+    // 240 Hz: 8 refreshes: 7, 3 or 1
+    CHECK(even_in_between(7, 8) == 7);
+    CHECK(even_in_between(6, 8) == 3);
+    CHECK(even_in_between(4, 8) == 3);
+    // 60 Hz: 2 refreshes: 1; 144 Hz (4.8 -> 5 refreshes): only 1 (5 is prime)
+    CHECK(even_in_between(1, 2) == 1);
+    CHECK(even_in_between(3, 5) == 1);
+    // 180 Hz: 6 refreshes: 5, 2 or 1
+    CHECK(even_in_between(3, 6) == 2);
+    // unknown display: as planned
+    CHECK(even_in_between(2, 0) == 2);
+    CHECK(even_in_between(0, 0) == 1);
+}
 static void test_even_schedule() {
     constexpr int64_t kMs = 1'000'000;
     const int64_t step = 2 * 16'683'333, interval = step / 2;
@@ -680,6 +698,7 @@ int main() {
     test_simulation();
     test_steps_on_vsync();
     test_even_schedule();
+    test_even_in_between();
     if (g_failed) {
         std::fprintf(stderr, "interp_pacing_test: %d check(s) failed\n", g_failed);
         return 1;

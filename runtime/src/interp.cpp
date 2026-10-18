@@ -951,6 +951,9 @@ static int plan_step() {
     if (n > 1 && paced() && interp_on()) {
         n = pacing::plan_in_between(n, kPacedBudget.count(), std::chrono::duration_cast<std::chrono::nanoseconds>(g_logic_avg).count(),
                                     std::chrono::duration_cast<std::chrono::nanoseconds>(g_hold_avg).count());
+        // even frame delivery: only counts that divide the display's refreshes per step evenly
+        if (g_even_pacing && present_vsync() && display_hz() > 0)
+            n = pacing::even_in_between(n, int(std::lround(display_hz() * std::chrono::duration<double>(kPacedStep).count())));
         g_paced_planned += n;
     }
     if (g_exact_step) n = 1;  // drawn exactly; its record pass makes the next step blend again
