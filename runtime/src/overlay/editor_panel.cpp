@@ -416,7 +416,7 @@ void refresh() {
     static int frame = -1;
     if (frame == ImGui::GetFrameCount()) return;
     frame = ImGui::GetFrameCount();
-    static int locations_at = -100;
+    static int locations_at = -100, villagers_at = -100;
     const bool want_locations = frame - locations_at >= 60;
     editor::try_with_session([&](editor::Session& s) {
         g_snap.valid = true;
@@ -431,6 +431,10 @@ void refresh() {
         if (want_locations) {
             g_snap.locations = s.run("list_locations", Value(), false).get("result");
             locations_at = frame;
+        }
+        if (frame - villagers_at >= 30) {
+            g_snap.villagers = s.run("list_villagers", Value(), false).get("result");
+            villagers_at = frame;
         }
         g_snap.log.assign(s.log().begin(), s.log().end());
     });

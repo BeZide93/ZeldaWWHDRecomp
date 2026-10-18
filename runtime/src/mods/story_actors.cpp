@@ -1110,6 +1110,7 @@ bool people_message(Cpu* c){Actor* a=people(c->r[3]);if(!a||a->spec.actor!="resi
     st32(c->r[3]+0x8A8,0);st32(c->r[3]+0x8AC,0);c->r[3]=kCarrier;return true;
 }
 bool people_next_message(Cpu* c){Actor* a=people(c->r[3]);if(!a||a->spec.actor!="resident")return false;c->r[3]=0x10;return true;}
+bool owns_resident(uint32_t actor){return people(actor)!=nullptr||find(actor)!=nullptr;}
 bool people_execute(Cpu* c,bool before){Actor* a=people(c->r[3]);if(!a||a->spec.actor!="resident")return false;
     if(before){
         const uint32_t npc=c->r[3],layer=ld32(npc+0x2C);

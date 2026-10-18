@@ -236,6 +236,31 @@ their broken or defeated flag.
 Problems show on the steps themselves: a red mark (hover over it to read them) and a red frame on a step
 nothing leads to.
 
+### A quest talk for one of the game's villagers
+
+The game's own townspeople that quests can name (the NPC catalogue, for example the lighthouse keeper on
+Windfall) have a teal name label in the picture while they are near. They are not part of your mod, so
+you can't move or change them, but you can give them a line for your quest: hover over the label to see
+who it is, then click it. **Add a quest talk for this villager…** offers:
+
+- **New quest…**: a new quest (its title) whose first step is this villager's talk;
+- **New step of a quest**: a new last step of one of your quests, with the talk;
+- **A step of a quest**: the talk for a step you already have (one it had is replaced).
+
+Write what the villager says (one message box) and press **Add the talk**. It is one change (one Undo
+step), and the quest editor opens at that step, where you can change the line, add conditions or what the
+talk hands out. While that step is the quest's current one, talking to the villager gives your line once
+and finishes the quest (see Talking to residents in the [SDK v2 guide](mod-sdk-v2.md)); at any other time
+the villager talks as in the game.
+
+**The villager itself is never changed:** its own dialogue, its quests and the game's save flags stay as
+they are. Your mod only adds a talk that the port plays while your step is current.
+
+Like every quest change, the talk works in the game once you have saved and started the game again.
+Something has to bring the quest to that step: its letter, an actor's action, an item, or, while testing,
+**Start at this step**. The villager may first say a short greeting of its own; your line follows in
+the same talk.
+
 ## Testing a quest step by step
 
 - **Start at this step** (right-click a step, or its Inspector) turns test mode on, sets the quest to that
@@ -545,6 +570,9 @@ separated by `;`, or `@file` with one such line per row. Results go to the log.
 | `set_quest_layout` | `quest`, `positions`, `mod`? | the graph's places (`start`, `end`, `step:N`: `{x, y}`) |
 | `start_at_step` | `quest`, `step`, `warp`? (`next`, `place`, `none`), `play`?, `mod`? | test mode: start the quest at a step |
 | `quest_state` | `mod`? | the step each quest is at in the game |
+| `list_villagers` | | the game's own villagers loaded now that quest talks can name: catalogue id, name, place, position |
+| `pick_villager` | `origin`, `direction`, `range`? | the villager a ray meets first (clicking into the picture) |
+| `add_villager_talk` | `who`, `lines`, `quest`?, `step`?, `title`?, `id`?, `text`?, `mod`? | a villager's quest talk: a new quest with `title`, a new last step of `quest`, or the talk of `step` (one undo step; the villager itself is not changed) |
 | `list_flags` | `mod`? | the mod's flags, who uses them, their values |
 | `set_flag` | `id`, `value`, `mod`? | test mode: set one of the mod's flags |
 | `search` | `text`, `mod`? | find actors, quests and steps, scenes, items and flags |

@@ -843,6 +843,13 @@ void new_mod_tools() {
     std::stringstream text;
     text << f.rdbuf();
     CHECK(text.str().find("\"greeter\"") != std::string::npos);
+    // a game villager's quest talk in the new mod: no question, one undo step
+    CHECK(!needs_allow("add_villager_talk", Value()) && !needs_allow("list_villagers", Value()) && !needs_allow("pick_villager", Value()));
+    const int asked_before = be.asked;
+    v = call(h, "add_villager_talk", json(R"({"who":"windfall-um1","lines":"Up here!","title":"The windmill"})"));
+    CHECK(!is_error(v) && be.asked == asked_before && be.session.manifest("mcp-mod")->get("quests").array.size() == 1);
+    v = call(h, "list_villagers", Value());
+    CHECK(is_error(v));  // the fake game has no villagers to list
     // a duplicate is an error
     v = call(h, "new_mod", json(R"({"id":"mcp-mod","name":"Again","confirm":true})"));
     CHECK(is_error(v) && text_of(v).find("exists") != std::string::npos);

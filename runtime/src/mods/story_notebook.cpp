@@ -228,6 +228,16 @@ bool stage_is(uint32_t addr, const std::string& name) {
     }
     return name.size() == 8;
 }
+// the guest stage name at addr (up to 8 bytes)
+std::string stage_name(uint32_t addr) {
+    std::string name;
+    for (uint32_t i = 0; i < 8; i++) {
+        const char ch = char(ld8(addr + i));
+        if (!ch) break;
+        name += ch;
+    }
+    return name;
+}
 story_mail::Book book() { return story_store::book(); }
 
 bool one_line(const std::string& s, size_t max) {
@@ -1796,9 +1806,7 @@ void note_live_place(Cpu* c, uint32_t npc) {
     const uint32_t stage = g_call(&probe, kPlay, {}) + kPlayStartStage;
     const uint8_t number = ld8(npc + kPeopleNumber);
     const int room = int8_t(ld8(npc + kActorRoom));
-    bool here = false;
-    for (const NpcActor& a : e->actors)
-        here |= a.actor_class == "people" && a.people_number == number && (a.room < 0 || a.room == room) && stage_is(stage, a.stage);
+    const bool here = e->people_at(stage_name(stage), room, number);
     if (!here || !stage_is(stage, "sea")) return;  // the chart's coordinates are the sea's
     g_live = {tracked, step, u32_as_f32(ld32(npc + kActorPos)), u32_as_f32(ld32(npc + kActorPos + 8)), g_step.load()};
 }
@@ -1823,11 +1831,10 @@ void people_message(Cpu* c) {
         const uint8_t number = ld8(npc + kPeopleNumber);
         const int room = int8_t(ld8(npc + kActorRoom));
         const NpcCatalogue& catalogue = npc_catalogue();
+        const std::string stage_text = stage_name(stage);
         for (size_t i = 0; i < catalogue.entries.size() && !live; i++) {
-            bool here = false;  // one of this character's people actors, where the table says it stands
-            for (const NpcActor& a : catalogue.entries[i].actors)
-                here |= a.actor_class == "people" && a.people_number == number && (a.room < 0 || a.room == room) && stage_is(stage, a.stage);
-            if (!here) continue;
+            // one of this character's people actors, where the table says it stands
+            if (!catalogue.entries[i].people_at(stage_text, room, number)) continue;
             if (g_skip_once == Resident(i + 1) && live_takeover(g_takeovers, b, Resident(i + 1), event_flags(), hour_now())) {
                 g_skip_once = kResidentNone;  // after "Never mind": this talk is the game's
                 LOG("[notebook] %s: after \"Never mind\", this talk is the game's", catalogue.entries[i].name.c_str());
@@ -2143,6 +2150,28 @@ void install(const std::function<std::string(uint32_t)>& replaced_by, const std:
     story_chart::set_tracked_source(tracked_marker);
     g_installed = true;
     LOG("[notebook] the story notebook is in the Delivery Bag");
+}
+
+// the game's actor list (fopAcIt_Executor's queue): its "people" residents the catalogue knows, where they
+// stand. Read-only; on the game thread (the list changes while the game runs).
+std::vector<LiveVillager> scan_villagers(const std::string& stage) {
+    const uint32_t kActorQueue = GD(0x101F3328);  // g_fopAcTg_Queue (turbo.cpp)
+    constexpr uint32_t kSubMethod = 0xF0;             // fopAc_ac_c::sub_method: its execute at +8
+    std::vector<LiveVillager> out;
+    const NpcCatalogue& catalogue = npc_catalogue();
+    uint32_t n = ld32(kActorQueue);
+    for (int k = 0; n && k < 2048; k++, n = ld32(n + 8)) {
+        if (n < 0x10000000 || n >= 0x50000000) break;
+        const uint32_t a = ld32(n + 0xC);
+        if (a < 0x10000000 || a >= 0x50000000) continue;
+        const uint32_t sub = ld32(a + kSubMethod);
+        if (sub < 0x10000000 || sub >= 0x50000000 || ld32(sub + 8) != kPeopleExecute) continue;
+        const int room = int8_t(ld8(a + kActorRoom));
+        const Resident who = catalogue.people_at(stage, room, ld8(a + kPeopleNumber));
+        if (who == kResidentNone || story_actors::owns_resident(a)) continue;  // the mods' own residents are not the game's
+        out.push_back({who, a, stage, room, u32_as_f32(ld32(a + kActorPos)), u32_as_f32(ld32(a + kActorPos + 4)), u32_as_f32(ld32(a + kActorPos + 8))});
+    }
+    return out;
 }
 
 void state_loaded() {

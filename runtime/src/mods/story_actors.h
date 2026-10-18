@@ -136,4 +136,6 @@ bool placed_chest_item(uint32_t address,std::string& mod,std::string& item);
 bool people_message(Cpu*);
 bool people_next_message(Cpu*);
 bool people_execute(Cpu*,bool before);
+// The resident at `actor` is one this service created for a mod (not one of the game's own).
+bool owns_resident(uint32_t actor);
 }

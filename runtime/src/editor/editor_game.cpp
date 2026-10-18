@@ -41,6 +41,7 @@
 #include "../mods/story_mail.h"
 #include "../mods/story_mail_book.h"
 #include "../mods/story_manifest.h"
+#include "../mods/story_notebook.h"
 #include "../mods/story_notebook_list.h"
 #include "../mods/story_scenes.h"
 #include "../mods/story_store.h"
@@ -541,6 +542,10 @@ void test_start(std::function<void(bool ok)> then) {
 
 // ---------------------------------------------------------------- the host
 void reapply_mod(const std::string& mod);  // below: the live actors again (a model became ready)
+// the game's villagers the NPC catalogue knows (list_villagers): read from the actor list on the game
+// thread (villagers_tick), for the host on any thread
+std::mutex g_villagers_mu;
+std::vector<story_notebook::LiveVillager> g_villagers;
 class GameHost final : public Host {
 public:
     bool apply_actors(const std::string& mod, const std::vector<story_notebook::ManifestActor>& actors, const std::vector<std::string>& changed,
@@ -604,6 +609,34 @@ public:
         return true;
     }
     bool live_kind(const std::string& type, bool fallback) override { return story_actors::editor_kind_live(type, fallback); }
+    // the game's residents the NPC catalogue knows, as the story notebook sees them in their process step
+    bool villagers(Value& out, std::string& why) override {
+        if (!story_notebook::installed()) return why = "the story notebook is not loaded (the Story Notebook package is needed for quest talks)", false;
+        out = Value();
+        out.type = Value::Array;
+        const story_notebook::NpcCatalogue& catalogue = story_notebook::npc_catalogue();
+        std::vector<story_notebook::LiveVillager> seen;
+        {
+            std::lock_guard<std::mutex> lk(g_villagers_mu);
+            seen = g_villagers;
+        }
+        for (const auto& v : seen) {
+            const story_notebook::NpcEntry* e = catalogue.entry(v.resident);
+            if (!e) continue;
+            Value x, pos;
+            x["id"] = e->name;
+            x["name"] = e->display();
+            x["description"] = e->description;
+            x["where"] = e->where;
+            x["stage"] = v.stage;
+            x["room"] = v.room;
+            pos["x"] = double(v.x), pos["y"] = double(v.y), pos["z"] = double(v.z);
+            x["position"] = pos;
+            x["talks"] = e->talks();
+            out.array.push_back(x);
+        }
+        return true;
+    }
     // new_mod: the package goes through the mod manager's own install (checked as any package is, refused
     // for an installed ID) from a staging folder of its own, then is turned on in the current profile
     bool create_package(const Value& manifest, std::string& dir, std::string& why) override {
@@ -1457,10 +1490,24 @@ void records_tick(bool now) {
 }
 }  // namespace
 
+namespace {
+// the game thread, twice a second: the villagers in the actor list (see g_villagers)
+void villagers_tick() {
+    static unsigned n = 0;
+    if (n++ % 15) return;
+    const ss::LinkPlace at = ss::link_place();
+    std::vector<story_notebook::LiveVillager> seen;
+    if (at.valid) seen = story_notebook::scan_villagers(at.stage);
+    std::lock_guard<std::mutex> lk(g_villagers_mu);
+    g_villagers = std::move(seen);
+}
+}  // namespace
+
 void logic_service(Cpu* c) {
     if (!enabled()) return;
     t_game = c;
     records_tick();
+    villagers_tick();
     // the jobs first: a command waiting on the game thread (a ground check) never waits for a script
     std::vector<std::function<void(Cpu*)>> jobs;
     {

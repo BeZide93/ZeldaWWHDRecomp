@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "story_notebook_list.h"
+#include "story_npc_catalogue.h"
 #include "mod_json.h"
 #include "story_notebook_bag.h"
 
@@ -62,6 +63,16 @@ bool load_local_npc_catalogue(const std::string& file);
 // the compiled-in recipes, for the generator (place -> recipe text)
 std::vector<std::pair<std::string, std::string>> npc_recipes();
 void declared_tick();  // what pad() runs a few times a second (tests)
+// The game's residents the NPC catalogue knows that are in the game's actor list now (Link's stage
+// `stage`), with where they stand: for the world editor. Read-only; on the game thread.
+struct LiveVillager {
+    Resident resident = kResidentNone;  // npc_catalogue().entry(resident)
+    uint32_t actor = 0;
+    std::string stage;
+    int room = -1;
+    float x = 0, y = 0, z = 0;
+};
+std::vector<LiveVillager> scan_villagers(const std::string& stage);
 // wwhd_quest_carry: Link carries (or no longer carries) the quest's letter, shown in the Delivery Bag
 int32_t carry(const std::string& mod, const std::string& quest, bool carried);
 // wwhd_quest_talk: at that step, while the quest is tracked and its letter carried, the resident says

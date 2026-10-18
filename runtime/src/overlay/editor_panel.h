@@ -25,6 +25,7 @@ struct Snapshot {
     Value manifest;   // the open mod's
     Value state;      // read_state
     Value locations;  // list_locations (refreshed every second)
+    Value villagers;  // list_villagers: the game's villagers the NPC catalogue knows, loaded now (twice a second)
     std::vector<editor::LogEntry> log;
 };
 void refresh();               // once per frame, before drawing: the snapshot and finished commands

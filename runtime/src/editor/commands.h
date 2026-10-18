@@ -169,6 +169,14 @@ public:
     // default, when the game doesn't know). Native props, switches, doors and enemies do in --editor.
     virtual bool live_kind(const std::string& type, bool fallback) { return fallback; }
 
+    // ---- the game's own villagers (optional) ----
+    // The game's residents the NPC catalogue knows that are loaded now, read-only: [{"id" (catalogue id),
+    // "name", "description", "where", "stage", "room", "position", "talks"}].
+    virtual bool villagers(Value& out, std::string& why) {
+        (void)out;
+        return why = "the game is not running", false;
+    }
+
     // ---- new mods (optional) ----
     // A new, empty mod package (new_mod): the mod manager installs `manifest` as a new package in its
     // mods folder (refused when a package or folder of that id exists) and turns it on in the current
@@ -371,6 +379,10 @@ std::vector<std::string> story_references(const Value& manifest, const std::stri
 // A PNG an item can use as its icon: the file's signature and size (1..2048 pixels a side, up to 16 MiB),
 // as the game reads it. `width` / `height` get its size.
 bool check_icon_file(const std::string& path, unsigned& width, unsigned& height, std::string& why);
+// The villager of `villagers` (list_villagers) that a ray from `origin` along `direction` (unit length)
+// meets first within `range`: the one whose body (a 70-unit cylinder, 160 high, at its position) it
+// passes through nearest. -1: none.
+int pick_villager(const Value& villagers, const WorldPoint& origin, const WorldPoint& direction, float range);
 // A mod id as the mod manager takes it: 1..64 of a-z, 0-9, '_', '-' and '.', not starting with '.'.
 bool package_id_valid(const std::string& id);
 // The manifest of a new, empty mod (new_mod's parameters: id, name, author?, description?): a content

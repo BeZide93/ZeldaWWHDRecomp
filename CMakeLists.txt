@@ -418,6 +418,14 @@ add_executable(editor_new_mod_test runtime/tools/editor_new_mod_test.cpp runtime
 target_include_directories(editor_new_mod_test PRIVATE runtime/src)
 target_compile_options(editor_new_mod_test PRIVATE -UNDEBUG)
 add_test(NAME editor_new_mod COMMAND editor_new_mod_test)
+# The game's own villagers in the editor: the NPC catalogue's mapping of a loaded resident, list_villagers,
+# pick_villager and add_villager_talk (a new quest, a new step, a step's talk; one undo step each).
+add_executable(editor_villager_test runtime/tools/editor_villager_test.cpp runtime/src/editor/commands.cpp runtime/src/editor/commands_build.cpp
+                                    runtime/src/editor/stage_files.cpp runtime/src/editor/commands_quest.cpp runtime/src/editor/commands_story.cpp runtime/src/editor/quests.cpp
+                                    runtime/src/editor/commands_scene.cpp runtime/src/editor/scenes.cpp runtime/src/mods/story_native_scene_coverage.cpp ${WWHD_NPC_CATALOGUE})
+target_include_directories(editor_villager_test PRIVATE runtime/src)
+target_compile_options(editor_villager_test PRIVATE -UNDEBUG)
+add_test(NAME editor_villagers COMMAND editor_villager_test)
 # The scene editor (runtime/src/editor/scenes.cpp, commands_scene.cpp): steps, camera keys, timeline and retiming, choices,
 # walking paths, triggers, the native version, previews, copy and paste, and a handle drag as one undo step.
 add_executable(editor_scene_test runtime/tools/editor_scene_test.cpp runtime/src/editor/commands.cpp runtime/src/editor/commands_build.cpp

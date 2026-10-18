@@ -23,6 +23,7 @@
 #include "hostui.h"
 #include "imgui.h"
 #include "imgui_internal.h"
+#include "text_entry.h"
 #include "layer_escape.h"
 #include "overlay.h"
 // ImGuizmo needs Dear ImGui declared first
@@ -62,6 +63,16 @@ struct ShellState {
     bool reset_layout = false;  // Reset layout: the default docked layout again
     float status_h = 52;        // the status bar's height at the last frame (the dockspace ends above it)
 } S;
+// "Add a quest talk for this villager...": a game villager clicked in the picture
+struct VillagerTalk {
+    Value who;               // the list_villagers entry
+    int target = 0;          // 0 a new quest, 1 a new step of a quest, 2 a step of a quest
+    std::string quest;
+    int step = 0;
+    char title[96] = {}, line[241] = {};
+    std::string error;
+    bool running = false, open = false;
+} g_villager;
 editor_escape::Gate g_escape;  // Esc: the placing, the handle drag or the quest connection first
 const float kGrid[] = {0, 10, 50, 100};
 const char* const kGridNames[] = {"Grid off", "Grid 10", "Grid 50", "Grid 100"};
@@ -415,6 +426,100 @@ bool scene_overlay(ImDrawList* dl, const View& v, const Value& m, bool& handle_b
     return true;
 }
 
+// ---------------------------------------------------------------- a game villager's quest talk
+// "Add a quest talk for this villager...": a new quest with the talk as its first step, a new step of a
+// quest, or a step's talk; one command (add_villager_talk), one undo step; then the quest editor opens at
+// that step. The villager itself (its own dialogue, quests, save flags) is never changed.
+void villager_popup(const editor_ui::Snapshot& snap) {
+    auto& V = g_villager;
+    const ImGuiViewport* vp = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x * 0.5f, vp->WorkPos.y + vp->WorkSize.y * 0.5f), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(std::min(520.0f, vp->WorkSize.x - 32), 0));
+    if (!ImGui::BeginPopupModal("Add a quest talk", nullptr, ImGuiWindowFlags_NoSavedSettings)) return;
+    ImGui::TextColored(kHead, "%s", V.who.get("name").string().c_str());
+    ImGui::SameLine();
+    ImGui::TextDisabled("(%s, %s)", V.who.get("id").string().c_str(), V.who.get("where").string().c_str());
+    ImGui::PushStyleColor(ImGuiCol_Text, kMuted);
+    ImGui::TextWrapped("Adds a quest talk to %s: while that quest step is current, this villager says your line once. "
+                       "The villager's own dialogue, quests and save flags stay as they are.",
+                       snap.open.c_str());
+    ImGui::PopStyleColor();
+    const Value& quests = snap.manifest.get("quests");
+    if (quests.array.empty()) V.target = 0;
+    ImGui::RadioButton("New quest...", &V.target, 0);
+    ImGui::BeginDisabled(quests.array.empty());
+    ImGui::SameLine();
+    ImGui::RadioButton("New step of a quest", &V.target, 1);
+    ImGui::SameLine();
+    ImGui::RadioButton("A step of a quest", &V.target, 2);
+    ImGui::EndDisabled();
+    if (V.target == 0) {
+        ImGui::TextUnformatted("Title");
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        text_entry::field("##villager_title", V.title, sizeof V.title, 0, "the quest's title");
+    } else {
+        if (V.quest.empty() || !std::any_of(quests.array.begin(), quests.array.end(), [&](const Value& q) { return q.get("id").string() == V.quest; }))
+            V.quest = quests.array.empty() ? std::string() : quests.array[0].get("id").string(), V.step = 0;
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        if (ImGui::BeginCombo("##villager_quest", V.quest.c_str())) {
+            for (const auto& q : quests.array)
+                if (ImGui::Selectable((q.get("title").string() + "  (" + q.get("id").string() + ")").c_str(), q.get("id").string() == V.quest))
+                    V.quest = q.get("id").string(), V.step = 0;
+            ImGui::EndCombo();
+        }
+        if (V.target == 2) {
+            const Value* q = nullptr;
+            for (const auto& qq : quests.array)
+                if (qq.get("id").string() == V.quest) q = &qq;
+            std::string shown = V.step ? "step " + std::to_string(V.step) : "(choose a step)";
+            ImGui::SetNextItemWidth(-FLT_MIN);
+            if (q && ImGui::BeginCombo("##villager_step", shown.c_str())) {
+                for (const auto& st : q->get("steps").array) {
+                    const int n = int(num(st, "n"));
+                    const std::string label = "step " + std::to_string(n) + ": " + st.get("text").string() +
+                                              (st.get("npc").type == Value::Object ? "  (has a talk: replaced)" : "");
+                    if (ImGui::Selectable(label.c_str(), n == V.step)) V.step = n;
+                }
+                ImGui::EndCombo();
+            }
+        }
+    }
+    ImGui::TextUnformatted("What the villager says");
+    ImGui::SetNextItemWidth(-FLT_MIN);
+    text_entry::field("##villager_line", V.line, sizeof V.line, 0, "one message box, up to 240 bytes");
+    if (!V.error.empty()) {
+        ImGui::PushStyleColor(ImGuiCol_Text, kBad);
+        ImGui::TextWrapped("%s", V.error.c_str());
+        ImGui::PopStyleColor();
+    }
+    const bool ready = !V.running && V.line[0] && (V.target == 0 ? V.title[0] != 0 : !V.quest.empty() && (V.target == 1 || V.step > 0));
+    ImGui::BeginDisabled(!ready);
+    if (ImGui::Button(V.running ? "Adding..." : "Add the talk")) {
+        Value p;
+        p["who"] = V.who.get("id");
+        p["lines"] = std::string(V.line);
+        if (V.target == 0) p["title"] = std::string(V.title);
+        else p["quest"] = V.quest;
+        if (V.target == 2) p["step"] = V.step;
+        V.running = true;
+        V.error.clear();
+        editor_ui::command("add_villager_talk", p, [](const Value& r) {
+            g_villager.running = false;
+            if (!r.get("ok").boolean) {
+                g_villager.error = r.get("error").string();
+                return;
+            }
+            g_villager.open = false;
+            editor_ui::show_quest(r.get("result").get("quest").string(), "step:" + std::to_string(int(r.get("result").get("step").number)));
+        });
+    }
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel")) V.open = false;
+    if (!V.open) ImGui::CloseCurrentPopup();
+    ImGui::EndPopup();
+}
+
 // ---------------------------------------------------------------- the picture: labels, cylinders, handles, clicks
 void world(float w, float h) {
     const editor_ui::Snapshot& snap = editor_ui::snapshot();
@@ -452,6 +557,20 @@ void world(float w, float h) {
         const std::string id = a.get("id").string();
         labels.push_back({id, at, std::sqrt(d2)});
         if (id == selected) sel = &a;
+    }
+    // the game's own villagers the NPC catalogue knows (not the mod's): their names, a click offers a quest talk
+    std::vector<Label> villagers;
+    std::vector<const Value*> villager_of;
+    for (const auto& vg : snap.villagers.array) {
+        float p[3];
+        if (vg.get("stage").string() != stage || !position_of(vg, p)) continue;
+        const float d2 = (p[0] - v.eye[0]) * (p[0] - v.eye[0]) + (p[1] - v.eye[1]) * (p[1] - v.eye[1]) + (p[2] - v.eye[2]) * (p[2] - v.eye[2]);
+        if (d2 > 8000.0f * 8000.0f) continue;
+        const float top[3] = {p[0], p[1] + 170, p[2]};
+        ImVec2 at;
+        if (!project(v, top, at)) continue;
+        villagers.push_back({vg.get("name").string(), at, std::sqrt(d2)});
+        villager_of.push_back(&vg);
     }
     // the other selected actors: their cylinders
     for (const auto& a : snap.manifest.get("actors").array) {
@@ -548,6 +667,25 @@ void world(float w, float h) {
         dl->AddText(ImVec2(a.x + 4, a.y + 1), me ? IM_COL32(255, 230, 160, 255) : IM_COL32(220, 225, 235, 255), l.id.c_str());
         dl->AddCircleFilled(l.at, 3, me ? IM_COL32(255, 210, 90, 255) : IM_COL32(200, 210, 225, 220));
     }
+    // the game's villagers: a teal label with the catalogue's name; hovering says what a click does
+    const ImVec2 mouse = io.MousePos;
+    int villager_hit = -1;
+    float villager_d = 26 * 26;
+    for (size_t i = 0; i < villagers.size(); i++) {
+        const auto& l = villagers[i];
+        const ImVec2 sz = ImGui::CalcTextSize(l.id.c_str());
+        const ImVec2 a(l.at.x - sz.x / 2 - 4, l.at.y - sz.y - 8), b(l.at.x + sz.x / 2 + 4, l.at.y - 6);
+        dl->AddRectFilled(a, b, IM_COL32(16, 70, 74, l.depth > 5000 ? 120 : 200), 4);
+        dl->AddText(ImVec2(a.x + 4, a.y + 1), IM_COL32(170, 240, 235, 255), l.id.c_str());
+        dl->AddCircleFilled(l.at, 3, IM_COL32(120, 220, 210, 220));
+        const float dx = l.at.x - mouse.x, dy = l.at.y - 12 - mouse.y, d = dx * dx + dy * dy;
+        if (d < villager_d) villager_d = d, villager_hit = int(i);
+    }
+    if (hovered && villager_hit >= 0 && S.placing.empty()) {
+        const Value& vg = *villager_of[size_t(villager_hit)];
+        ImGui::SetTooltip("%s (%s): one of the game's villagers\nClick: Add a quest talk for this villager...", vg.get("name").string().c_str(),
+                          vg.get("id").string().c_str());
+    }
     // a click: place the chosen type on the ground there, or select the nearest label (or nothing)
     const bool over_gizmo = (gizmo && (ImGuizmo::IsOver() || ImGuizmo::IsUsing())) || point_handle_busy;
     if (hovered && !over_gizmo && ImGui::IsMouseClicked(0)) {
@@ -583,8 +721,12 @@ void world(float w, float h) {
                 const float dx = l.at.x - m.x, dy = l.at.y - 12 - m.y, d = dx * dx + dy * dy;
                 if (d < best_d) best_d = d, best = &l;
             }
-            auto& many = editor_ui::multi_selection();
-            if ((io.KeyCtrl || io.KeySuper || io.KeyShift) && best) {  // more than one: Ctrl (Cmd) or Shift adds or takes away
+            if (villager_hit >= 0 && villager_d < best_d && !snap.open.empty()) {  // a game villager: offer a quest talk
+                g_villager = VillagerTalk();
+                g_villager.who = *villager_of[size_t(villager_hit)];
+                g_villager.open = true;
+                ImGui::OpenPopup("Add a quest talk");
+            } else if (auto& many = editor_ui::multi_selection(); (io.KeyCtrl || io.KeySuper || io.KeyShift) && best) {  // more than one: Ctrl (Cmd) or Shift adds or takes away
                 if (many.empty() && !editor_ui::selected().empty()) many.push_back(editor_ui::selected());
                 const auto it = std::find(many.begin(), many.end(), best->id);
                 if (it != many.end()) many.erase(it);
@@ -601,6 +743,7 @@ void world(float w, float h) {
     if (!S.placing.empty()) {
         dl->AddText(ImVec2(io.MousePos.x + 14, io.MousePos.y + 10), IM_COL32(255, 230, 160, 255), ("place " + S.placing).c_str());
     }
+    villager_popup(snap);
     ImGui::End();
 }
 
