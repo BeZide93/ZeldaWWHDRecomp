@@ -3236,3 +3236,8 @@ add_test(NAME story_native_wait_cancel_rearm_contract COMMAND story_native_wait_
 # Camera capture uses the canonical MEM2 boundary from runtime.h.
 # Standalone data-only fixtures need its public PPC declaration include path.
 target_include_directories(story_native_camera_capture_test PRIVATE runtime/include)
+# Native collision W0: distinguish source/working payload from live heap measurements.
+add_executable(story_world_collision_budget_test runtime/tools/story_world_collision_budget_test.cpp)
+target_include_directories(story_world_collision_budget_test PRIVATE runtime/src)
+target_compile_options(story_world_collision_budget_test PRIVATE -UNDEBUG)
+add_test(NAME story_world_collision_budget COMMAND story_world_collision_budget_test)
