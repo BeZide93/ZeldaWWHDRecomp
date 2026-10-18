@@ -420,6 +420,11 @@ separated by `;`, or `@file` with one such line per row. Results go to the log.
 | `focus` | `id`, `mod`? | fly the camera to an actor |
 | `check_model` | `file` | check a `.glb` file |
 | `import_model` | `file`, `id`?, `confirm`?, `mod`? | copy a `.glb` into the mod and add the model |
+| `prepare_collision` | `model`, `mod`? | prepare a static model's collision for live world-object placement |
+| `place_world_object` | `id`, `model`, `collision`, `behaviour`?, `buoyancy`?, `drift`?, … , `mod`? | place a static, floating or drifting object with collision in one step (see [World objects](world-objects.md)) |
+| `set_world_object` | `id`, `collision`?, `behaviour`?, `buoyancy`?, `drift`?, … , `mod`? | change a world object's collision, behaviour and motion together |
+| `preview_collision` | `id`, `mod`? | a world object's collision as a wireframe, with placement findings |
+| `placement_conflicts` | `id`, `mod`? | placement conflicts and collision budget findings for a world object |
 | `set_scene` | `id`, `property` (`trigger`, `steps`, `native`), `value`, `mod`? | (`null` removes a trigger or the native version) |
 | `set_quest_step` | `quest`, `step`, `property`, `value`, `mod`? | `place` is `{x, z}` at sea, or inside a building `{stage, room, sea: {x, z}, point}` (or `x`, `y`, `z` instead of `point`); `available` may use `flag` and `not_flag` (a flag id or a list) with its `text` |
 | `undo`, `redo`, `history` | | |
