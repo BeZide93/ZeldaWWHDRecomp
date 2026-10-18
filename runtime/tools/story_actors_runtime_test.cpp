@@ -158,6 +158,7 @@ PropMarkerCheckpoint prop_marker_checkpoint(){return marker_fixture.checkpoint()
 bool rollback_prop_markers(PropMarkerCheckpoint p){return marker_fixture.rollback(p);}
 PropMarkerHandle register_prop_marker(const std::string&mod,const std::string&actor,const std::string&flag,std::string&why){if(flag=="throw.broken")throw std::runtime_error("injected startup allocation failure");return marker_fixture.add(mod,actor,flag,why);}
 EnemyMarkerHandle register_enemy_marker(const std::string&mod,const std::string&actor,const std::string&flag,std::string&why){if(flag=="throw.dead")throw std::runtime_error("injected enemy declaration failure");return {marker_fixture.add(mod,actor,flag,why,prop_rewards::kDefeated)};}
+bool forget_prop_marker(PropMarkerHandle h){return marker_fixture.remove(h);}
 bool enemy_defeated(EnemyMarkerHandle handle){const auto*m=marker_fixture.get(handle.value,prop_rewards::kDefeated);return m&&story_store::book().get(prop_rewards::kDefeated,m->key)!=0;}
 EnemyClaimStatus claim_enemy_drops(EnemyMarkerHandle handle,const std::string&,const std::vector<PropDrop>&drops,bool){const auto*m=marker_fixture.get(handle.value,prop_rewards::kDefeated);if(!m||!drops.empty())return EnemyClaimStatus::InvalidDefinition;if(enemy_defeated(handle))return EnemyClaimStatus::AlreadyDefeated;++enemy_claim_calls;return story_store::book().set(prop_rewards::kDefeated,m->key,1)?EnemyClaimStatus::Committed:EnemyClaimStatus::StoreUnavailable;}
 bool prop_broken(PropMarkerHandle){return prop_broken_fixture;}

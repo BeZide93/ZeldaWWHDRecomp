@@ -168,10 +168,21 @@ std::string kind_label(const Value& a) {
     if (is_prop(actor)) return actor + " (prop)";
     return actor;
 }
+// whether the running game shows changes to this actor's kind at once (list_actor_types, asked once)
 bool restart_only(const Value& a) {
+    static std::map<std::string, bool> live;
+    static int asked = -1000;
+    const int frame = ImGui::GetFrameCount();
+    if (live.empty() || frame - asked > 120)  // the game installs its kinds after the overlay starts: asked again now and then
+        asked = frame, editor::try_with_session([&](editor::Session& s) {
+            for (const auto& t : s.run("list_actor_types", Value(), false).get("result").array) live[t.get("type").string()] = t.get("live").boolean;
+        });
     const std::string actor = a.get("actor").string();
-    return is_enemy(actor) || is_prop(actor) || actor == "switch" || actor == "door" ||
-           (a.get("kind").string() == "mod" && (a.get("combat").type != Value::Null || a.get("carry").type != Value::Null));
+    std::string type = actor;
+    if (a.get("kind").string() == "mod") type = a.get("combat").type != Value::Null ? "model_enemy" : a.get("carry").type != Value::Null ? "model_carry" : "model";
+    const auto it = live.find(type);
+    if (it != live.end()) return !it->second;
+    return is_enemy(actor) || is_prop(actor) || actor == "switch" || actor == "door" || type == "model_enemy" || type == "model_carry";
 }
 // a text field for one string property (empty removes it)
 void edit_property(const Value& p, const Value& a, const char* label, const char* property, size_t max = 32) {

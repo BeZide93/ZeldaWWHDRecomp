@@ -56,10 +56,22 @@ uint32_t actor_address(Cpu*,const std::string& mod,const std::string& id);
 // actors missing from the list are removed (kept for an undo). Kinds whose state is declared at start-up
 // (editor_restart_only) and models not prepared yet keep their old state: `pending` lists them with the
 // reason, for a restart. False with a reason (a list the start-up checks refuse) leaves everything unchanged.
+// With `cpu`, an actor a handle drag moved in place (editor_pose) whose change is only that move keeps its
+// copy in the game: the drag's end checks it exists, is ours and stands at the new place (solid kinds,
+// switches, doors and chests, are always created again).
 bool editor_update(const std::string& mod,const std::vector<story_notebook::ManifestActor>& actors,const std::vector<std::string>& changed,std::string& why,
-                   std::vector<std::string>* pending=nullptr);
-// true for kinds whose changes take effect only after a restart (native props, switches, doors and
-// enemies, mod enemies and carried props)
+                   std::vector<std::string>* pending=nullptr,Cpu* cpu=nullptr);
+// World editor, a handle drag (main game thread): the actor's copy in the game moves to `position` and
+// turns to `rotation` (degrees) in place, without being created again. False when it has no copy now.
+bool editor_pose(Cpu*,const std::string& mod,const std::string& id,const story_notebook::WorldPoint& position,const story_notebook::WorldPoint& rotation);
+// --editor, before install: native props, switches, doors, enemies and residents are installed even
+// without declarations, so the editor places them while the game runs.
+void editor_live_kinds();
+// Whether actors of a world-editor type ("pot", "door", "bokoblin", "model_enemy"...) appear while the
+// game runs (`fallback` for the others).
+bool editor_kind_live(const std::string& type,bool fallback);
+// true for kinds whose changes take effect only after a restart (mod enemies and carried props; native
+// props, switches, doors and enemies unless the editor installed them for live placement)
 bool editor_restart_only(const story_notebook::ManifestActor&);
 // whether a new actor of this spec can be created while the game runs (else `why` says what waits)
 bool editor_live_capable(const std::string& mod,const story_notebook::ManifestActor&,std::string& why);

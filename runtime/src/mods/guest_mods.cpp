@@ -4,6 +4,7 @@
 // start of every game function body (PPC_MOD_HOOK in ppc.h).
 //
 // The mod manager builds and loads its frozen, trusted guest set before guest code runs.
+#include "../editor/editor_game.h"
 #include "story_native_canonical_code_id.h"
 #include "../exception_report.h"
 #include "guest_mods.h"
@@ -1224,6 +1225,7 @@ void init() {
         story_actors::set_game_calls(call_original,[](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);});
         story_actors::set_scratch_memory(mem::runtime_alloc(story_actors::kScratchBytes,16));
         story_actors::set_scene_start(story_scenes::request);
+        if(editor::launch_mode())story_actors::editor_live_kinds();  // --editor: native props, switches, doors and enemies placed live
         story_actors::install([](uint32_t addr) {
             auto it=g_chains.find(addr);return it==g_chains.end()?std::string():it->second.replace_mod;
         },[](uint32_t addr,PpcFunc fn) {

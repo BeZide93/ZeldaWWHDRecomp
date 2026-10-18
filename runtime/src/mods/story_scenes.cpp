@@ -38,7 +38,7 @@ uint32_t g_scratch=0,g_buttons=0;
 unsigned g_frame_units=1;
 void (*g_original)(Cpu*,uint32_t)=nullptr;
 bool g_trim_installed=false,g_choice_installed=false;
-std::atomic<bool> g_active_input{false},g_swallow_plus{false};
+std::atomic<bool> g_active_input{false},g_swallow_plus{false},g_editor_skip{false};
 std::atomic<bool>g_native_restore_reserved{false},g_reserved_abort{false},g_reserved_load{false};
 uint64_t g_generation=0;
 bool g_loaded=false,g_suppress_loaded_room=false,g_cleanup_pending=false,g_cleanup_loaded=false,g_abort_pending=false,g_starting=false;
@@ -423,6 +423,7 @@ void install(void (*original_fn)(Cpu*,uint32_t),const std::function<std::string(
 }
 void tick(Cpu* cpu,bool skip,unsigned frames){
     if(!cpu||g_cpu||!g_call||!g_scratch||g_entries.empty()||g_native_restore_reserved.load(std::memory_order_acquire))return;
+    if(g_editor_skip.exchange(false,std::memory_order_acq_rel))skip=true;  // the world editor's Skip
     if(g_reserved_load.exchange(false,std::memory_order_acq_rel))state_loaded();
     if(g_reserved_abort.exchange(false,std::memory_order_acq_rel))abort();
     g_cpu=cpu;g_frame_units=std::min(2u,std::max(1u,frames));
@@ -599,4 +600,29 @@ std::optional<story_native_scene_checkpoint::PreparedRetire>prepare_native_retir
  return NativeCheckpointIssuer::prepare_retire(std::move(revoked));
 }
 size_t current_step(){return g_native_player.active()?0:g_player.step();}
+bool editor_preview(const std::string& mod,const ManifestScene& scene,bool declared,std::string& why){
+    if(!g_scratch||!g_call||g_entries.empty())return why="the game started without mod scenes: scene previews work after a restart with a scene saved in the package",false;
+    if(g_native_restore_reserved.load(std::memory_order_acquire)||g_cpu||g_player.active()||g_native_player.active()||g_cleanup_pending||g_starting)return why="a scene is running",false;
+    const bool choice=std::any_of(scene.steps.begin(),scene.steps.end(),[](const SceneStep& s){return s.kind==SceneStep::Kind::Choice;});
+    if(choice&&!g_choice_installed)return why="choices play after a restart (the game started without a scene that has one)",false;
+    if(declared){for(const auto& e:g_entries)if(e.mod==mod&&e.scene.id==scene.id)return request(mod,scene.id)||(why="the scene can't be queued now",false);return why="the game has no scene "+scene.id+" of "+mod,false;}
+    std::vector<ManifestScene> one{scene};one[0].id="editor-preview";one[0].trigger.clear();one[0].native.reset();
+    if(!validate(one,why))return false;
+    for(size_t i=0;i<g_entries.size();++i)if(g_entries[i].mod==mod&&g_entries[i].scene.id=="editor-preview"){
+        if(g_pending.count(i))return why="the previous preview still waits to start",false;
+        g_entries[i].scene=one[0];return request(mod,"editor-preview")||(why="the scene can't be queued now",false);
+    }
+    g_entries.push_back({mod,one[0]});
+    return request(mod,"editor-preview")||(why="the scene can't be queued now",false);
+}
+void editor_skip(){g_editor_skip.store(true,std::memory_order_release);}
+bool editor_state(const std::string& mod,const std::string& id,bool& waiting,bool& playing,bool& native,size_t& step){
+    waiting=playing=native=false;step=0;
+    for(size_t i=0;i<g_entries.size();++i)if(g_entries[i].mod==mod&&g_entries[i].scene.id==id){
+        waiting=g_pending.count(i)!=0||(g_starting&&g_current==i);
+        playing=(g_player.active()||g_native_player.active()||g_cleanup_pending)&&g_current==i;
+        native=playing&&g_native_player.active();step=playing?current_step():0;return true;
+    }
+    return false;
+}
 } // namespace story_scenes

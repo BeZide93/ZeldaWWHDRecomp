@@ -55,4 +55,14 @@ bool active();
 bool native_owner(const story_native_scene_playback::Activation&) noexcept;
 bool fallback_active() noexcept;
 size_t current_step();
+// World editor (main game thread, outside tick): plays `scene` of `mod` as a preview. `declared`: the
+// declared scene of that id is requested (its native version may play). Otherwise the steps play from an
+// editor-only entry "editor-preview" (no trigger, never native) that replaces the mod's previous one.
+// False with why when no scene can start (none declared at start-up, a scene running, a choice without
+// the choice hooks).
+bool editor_preview(const std::string& mod,const story_notebook::ManifestScene& scene,bool declared,std::string& why);
+// The next tick skips the current scene (as Plus/Start does).
+void editor_skip();
+// Whether `mod`'s scene `id` waits in the queue or plays; `step` the fallback step it is at.
+bool editor_state(const std::string& mod,const std::string& id,bool& waiting,bool& playing,bool& native,size_t& step);
 } // namespace story_scenes

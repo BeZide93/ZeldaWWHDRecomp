@@ -484,7 +484,7 @@ Value Session::dispatch_build(const std::string& command, const Value& p, std::s
             v["help"] = t.help;
             v["needs_model"] = t.needs_model;
             if (t.skinned) v["skinned"] = true;
-            v["live"] = t.live;
+            v["live"] = host_ ? host_->live_kind(t.type, t.live) : t.live;
             r.array.push_back(v);
         }
         ok = true;

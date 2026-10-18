@@ -33,8 +33,9 @@ std::function<void()> mod_talked(const std::string& mod,const std::string& id);
 mod_actor::TalkProvider mod_talk_provider(const std::string&,const std::string&);
 namespace {
 using story_notebook::ManifestActor;
-struct Actor {std::string mod; ManifestActor spec; uint32_t process=0xFFFFFFFFu; bool deleting=false; uint32_t mod_token=0; bool restore_talk=false;uint32_t prop_token=0,switch_token=0,switch_source=0,enemy_token=0;story_items::EnemyMarkerHandle combat_marker{};story_items::PropMarkerHandle carry_marker=0;identity::Fingerprint fingerprint{};bool restore_quarantined=false;bool respawn=false;bool removed=false;uint32_t resident_event_token=0;};
+struct Actor {std::string mod; ManifestActor spec; uint32_t process=0xFFFFFFFFu; bool deleting=false; uint32_t mod_token=0; bool restore_talk=false;uint32_t prop_token=0,switch_token=0,switch_source=0,enemy_token=0;story_items::EnemyMarkerHandle combat_marker{};story_items::PropMarkerHandle carry_marker=0;identity::Fingerprint fingerprint{};bool restore_quarantined=false;bool respawn=false;bool removed=false;uint32_t resident_event_token=0;bool redeclare=false;};
 std::vector<Actor> g_actors;
+void native_redeclare(Actor& a);  // the editor: a changed native declaration, once its old copy is gone
 uint32_t g_next_resident_event_token=1;
 struct ModelResource {std::string archive;int index;story_notebook::WorldPoint minimum,maximum;bool skinned=false;std::vector<std::string> clips;mod_actor::ModelRig rig;};
 std::map<std::pair<std::string,std::string>,ModelResource> g_models;
@@ -544,13 +545,13 @@ void service(Cpu* c){
     // (not while a mod scene runs: a native scene's residents stay its own until it ends)
     for(auto& a:g_actors){
         if(!a.respawn||story_scenes::active())continue;
-        if(a.process==0xFFFFFFFFu){a.respawn=false;continue;}
+        if(a.process==0xFFFFFFFFu){a.respawn=false;native_redeclare(a);continue;}
         if(g_talk.actor==&a)continue;
         st32(g_scratch+0x40,0);probe=*c;const uint32_t exists=g_call(&probe,kSearch,{a.process,g_scratch+0x40});
         const uint32_t actor=ld32(g_scratch+0x40);
         if(mod_actor::talking(actor))continue;
         if(actor&&!a.deleting){probe=*c;if(g_call(&probe,kDelete,{actor}))a.deleting=true;}
-        if(!exists){a.process=0xFFFFFFFFu;st32(g_scratch+128+uint32_t(&a-g_actors.data())*4,a.process);a.respawn=false;a.deleting=false;
+        if(!exists){a.process=0xFFFFFFFFu;st32(g_scratch+128+uint32_t(&a-g_actors.data())*4,a.process);a.respawn=false;a.deleting=false;native_redeclare(a);
             if(a.mod_token)mod_actor::retry(a.mod_token);LOG("[actors] %s:%s removed for the editor; created again from its new spec",a.mod.c_str(),a.spec.id.c_str());}
     }
     const int room=int8_t(ld8(player+0x326));if(room<0||room>63)return;
@@ -611,14 +612,16 @@ uint32_t actor_address(Cpu* c,const std::string& mod,const std::string& id) {
     for(auto& a:g_actors)if(a.mod==mod&&a.spec.id==id&&a.process!=0xFFFFFFFFu){Cpu call=*c;st32(g_scratch+0x40,0);g_call(&call,kSearch,{a.process,g_scratch+0x40});return ld32(g_scratch+0x40);}return 0;
 }
 namespace {
-// Actors whose game-side state is declared once at start-up (native props, switches, doors and enemies,
-// mod enemies and carried props): their markers, reward/break sinks and saved identities follow the
-// declaration, so a new or changed one takes effect after a restart.
+bool g_live_kinds=false;  // --editor: native props, switches, doors, enemies and residents are installed for live placement
+// Actors whose game-side state is declared at start-up and that the running game can't take while it
+// runs: mod enemies and carried props always; native props, switches, doors and enemies unless their
+// profiles were installed for the editor (story_*::live()).
 const char* restart_kind(const ManifestActor& a){
     story_enemies::Kind enemy;
-    if(enemy_kind(a,enemy))return "an enemy";
-    if(story_props::is_prop(a))return "a pot, barrel or crate";
-    if(a.actor=="switch"||a.actor=="door")return "a switch or door";
+    if(enemy_kind(a,enemy))return story_enemies::live()?nullptr:"an enemy";
+    if(story_props::is_prop(a))return story_props::live()?nullptr:"a pot, barrel or crate";
+    if(a.actor=="switch")return story_switches::live(story_switches::Kind::Switch)?nullptr:"a switch or door";
+    if(a.actor=="door")return story_switches::live(story_switches::Kind::Door)?nullptr:"a switch or door";
     if(a.kind=="mod"&&a.combat_enabled)return "a mod enemy (combat)";
     if(a.kind=="mod"&&a.carry_enabled)return "a carried prop";
     return nullptr;
@@ -636,10 +639,82 @@ bool live_capable(const std::string& mod,const ManifestActor& a,std::string& why
     return true;
 }
 bool same_spec(const std::string& mod,const ManifestActor& a,const ManifestActor& b){return identity::fingerprint(mod,a)==identity::fingerprint(mod,b);}
+bool native_kind(const ManifestActor& a){story_enemies::Kind e;return enemy_kind(a,e)||story_props::is_prop(a)||a.actor=="switch"||a.actor=="door";}
+// Kinds with a solid background collision of their own: after a move they are created again (the
+// collision follows exactly), never only moved in place.
+bool solid_kind(const ManifestActor& a){return a.actor=="switch"||a.actor=="door"||a.actor=="chest";}
+uint32_t pid_slot(const Actor& a){return g_scratch+128+uint32_t(&a-g_actors.data())*4;}
+uint32_t identity_row(const Actor& a){return g_scratch+kIdentityScratchOffset+uint32_t(&a-g_actors.data())*identity::kRecordBytes;}
+// The fingerprint and the saved identity row follow a changed spec (state loads compare them).
+void refingerprint(const std::string& mod,Actor& a){
+    if(a.resident_event_token||a.prop_token||a.switch_token||a.enemy_token||a.combat_marker.value||a.carry_marker)a.fingerprint=identity::fingerprint(mod,a.spec);
+    if(!g_scratch||a.process==0xFFFFFFFFu)return;
+    const uint32_t row=identity_row(a);
+    if(a.resident_event_token){st32(row,0x52455631);st32(row+4,a.resident_event_token);std::memcpy(mem::ptr(row+8),a.fingerprint.data(),a.fingerprint.size());}
+    else if(a.prop_token||a.switch_token||a.enemy_token){const auto record=identity::record(a.fingerprint);std::memcpy(mem::ptr(row),record.data(),record.size());}
+}
+story_enemies::Spec enemy_spec(const std::string& mod,const ManifestActor& a,const identity::Fingerprint& fp,uint32_t epoch){
+    story_enemies::Kind kind{};enemy_kind(a,kind);story_enemies::Spec spec{kind,mod,a.id,a.defeated_flag,{},fp,epoch};
+    for(const auto&drop:a.drops)spec.drops.push_back({drop.item,drop.quantity});return spec;
+}
+// A new copy of an enemy needs a new epoch of its ownership record (the old copy retired it).
+void enemy_epoch(Actor& a){
+    if(!a.enemy_token||!g_scratch)return;
+    const uint32_t counter=g_scratch+kEnemyEpochScratchOffset+uint32_t(&a-g_actors.data())*4;uint32_t epoch=ld32(counter)+1;if(!epoch)epoch=1;
+    if(story_enemies::begin_epoch(a.enemy_token,epoch)){st32(counter,epoch);a.restore_quarantined=false;}
+}
+// After the old copy is gone: the native declaration takes the changed spec (props, enemies, doors).
+void native_redeclare(Actor& a){
+    if(!a.redeclare)return;
+    a.redeclare=false;std::string why;
+    if(a.prop_token&&!story_props::editor_redeclare(a.prop_token,a.mod,a.spec,why)){LOG("[actors] %s:%s: %s (it appears after a restart)",a.mod.c_str(),a.spec.id.c_str(),why.c_str());story_props::quarantine(a.prop_token);return;}
+    if(a.spec.actor=="door"&&a.switch_token){for(const auto& sw:g_actors)if(sw.mod==a.mod&&sw.spec.actor=="switch"&&sw.spec.id==a.spec.switch_actor&&sw.switch_token&&story_switches::editor_set_source(a.switch_token,sw.switch_token,why))a.switch_source=sw.switch_token;}
+    if(a.enemy_token){
+        story_enemies::Kind kind{};enemy_kind(a.spec,kind);a.fingerprint=identity::fingerprint(a.mod,a.spec);
+        if(!story_enemies::editor_redeclare(a.enemy_token,enemy_spec(a.mod,a.spec,a.fingerprint,1),why)){
+            // another kind (or a refused change): a declaration of its own
+            const uint32_t token=story_enemies::editor_declare(enemy_spec(a.mod,a.spec,a.fingerprint,1),why);
+            if(!token){LOG("[actors] %s:%s: %s (it appears after a restart)",a.mod.c_str(),a.spec.id.c_str(),why.c_str());story_enemies::quarantine(a.enemy_token);a.restore_quarantined=true;return;}
+            story_enemies::quarantine(a.enemy_token);a.enemy_token=token;
+            if(g_scratch)st32(g_scratch+kEnemyEpochScratchOffset+uint32_t(&a-g_actors.data())*4,1);
+            return;
+        }
+        enemy_epoch(a);
+    }
+    a.fingerprint=identity::fingerprint(a.mod,a.spec);
+}
+// A drag moved the actor in place and the change is that move only: the live copy takes the spec
+// without being created again (the drag's end check: it exists, is ours and stands where the spec
+// says; solid kinds are always created again).
+bool settle_in_place(Cpu* c,const std::string& mod,Actor& a,const ManifestActor& spec){
+    if(!c||a.removed||a.respawn||a.deleting||a.process==0xFFFFFFFFu||solid_kind(spec)||a.spec.actor!=spec.actor||a.spec.kind!=spec.kind)return false;
+    ManifestActor moved=a.spec;moved.position=spec.position;moved.rotation=spec.rotation;
+    if(!same_spec(mod,moved,spec))return false;  // more than the place changed
+    const uint32_t at=actor_address(c,mod,spec.id);if(!at||find(at)!=&a||ld8(at+0xC)==3)return false;
+    const float x=u32_as_f32(ld32(at+0x314)),y=u32_as_f32(ld32(at+0x318)),z=u32_as_f32(ld32(at+0x31C));
+    if(!(std::hypot(double(x)-spec.position.x,double(z)-spec.position.z)<=30&&std::fabs(double(y)-spec.position.y)<=300))return false;
+    const int yaw=int16_t(ld16(at+0x32A)),want=int16_t(uint16_t(int32_t(spec.rotation.y*65536.0f/360.0f)));
+    if(std::abs(int16_t(uint16_t(yaw-want)))>200)return false;
+    if(a.spec.kind=="mod"){const auto r=g_models.find({mod,spec.model});if(r==g_models.end()||!a.mod_token||!mod_actor::redeclare(a.mod_token,spec,r->second.archive,r->second.index,r->second.minimum,r->second.maximum,r->second.skinned,r->second.clips,r->second.rig,true))return false;}
+    a.spec=spec;refingerprint(mod,a);
+    if(a.enemy_token)story_enemies::editor_refingerprint(a.enemy_token,a.fingerprint);
+    LOG("[actors] %s:%s moved in place by the editor (%.1f %.1f %.1f)",mod.c_str(),spec.id.c_str(),x,y,z);
+    return true;
+}
 }
 bool editor_restart_only(const ManifestActor& a){return restart_kind(a)!=nullptr;}
 bool editor_live_capable(const std::string& mod,const ManifestActor& a,std::string& why){return live_capable(mod,a,why);}
-bool editor_update(const std::string& mod,const std::vector<ManifestActor>& actors,const std::vector<std::string>& changed,std::string& why,std::vector<std::string>* pending){
+void editor_live_kinds(){if(!g_installed)g_live_kinds=true;}
+bool editor_kind_live(const std::string& type,bool fallback){
+    if(type=="pot"||type=="barrel"||type=="crate")return g_installed&&story_props::live();
+    if(type=="switch")return g_installed&&story_switches::live(story_switches::Kind::Switch);
+    if(type=="door")return g_installed&&story_switches::live(story_switches::Kind::Door);
+    if(type=="chuchu"||type=="bokoblin"||type=="moblin"||type=="keese")return g_installed&&story_enemies::live();
+    if(type=="model_enemy"||type=="model_carry")return false;
+    if(type=="resident")return g_installed&&g_resident_hooks;
+    return fallback&&g_installed;
+}
+bool editor_update(const std::string& mod,const std::vector<ManifestActor>& actors,const std::vector<std::string>& changed,std::string& why,std::vector<std::string>* pending,Cpu* cpu){
     std::map<std::string,Actor*> own;for(auto& a:g_actors)if(a.mod==mod)own[a.spec.id]=&a;
     struct Step {const ManifestActor* spec=nullptr;Actor* actor=nullptr;bool create=false,update=false;};
     std::vector<Step> plan;std::vector<std::string> later;std::vector<Actor*> remove;
@@ -659,7 +734,8 @@ bool editor_update(const std::string& mod,const std::vector<ManifestActor>& acto
         if(a->removed&&same_spec(mod,a->spec,spec)){plan.push_back({&spec,a,false,false});effective.push_back(spec);continue;}  // a removal undone
         const char* kind=restart_kind(a->spec);if(!kind)kind=restart_kind(spec);
         if(kind||(a->spec.kind=="mod")!=(spec.kind=="mod")||(spec.kind=="mod"&&!g_models.contains({mod,spec.model}))||
-           (spec.actor=="resident"&&!live_capable(mod,spec,reason))){
+           (spec.actor=="resident"&&!live_capable(mod,spec,reason))||(native_kind(a->spec)!=native_kind(spec))||(story_props::is_prop(spec)&&spec.texture_token!=a->spec.texture_token)){
+            if(!kind&&native_kind(a->spec)!=native_kind(spec))reason="switching between a native prop, switch, door or enemy and another kind takes effect after a restart";
             later.push_back(spec.id+": "+(kind?std::string(kind)+" takes changes after a restart":reason.empty()?std::string("takes this change after a restart"):reason));
             if(!a->removed)effective.push_back(a->spec);
             continue;
@@ -678,29 +754,69 @@ bool editor_update(const std::string& mod,const std::vector<ManifestActor>& acto
         if(!step.actor->mod_token||!mod_actor::redeclare(step.actor->mod_token,*step.spec,r.archive,r.index,r.minimum,r.maximum,r.skinned,r.clips,r.rig,apply)){
             g_flag_names=saved_flags;return why="actor "+step.spec->id+": the model can't serve this spec (animation, look_at, rotation or scale)",false;}
     }
-    for(const auto& step:plan){
-        if(step.create){
-            Actor added{mod,*step.spec};
-            if(step.spec->kind=="mod"){
-                const auto& r=g_models.at({mod,step.spec->model});
-                added.mod_token=mod_actor::declare(mod,added.spec,r.archive,r.index,mod_talked(mod,added.spec.id),r.minimum,r.maximum,r.skinned,r.clips,r.rig);
-                if(added.mod_token&&!added.spec.talks.empty())mod_actor::set_talk_provider(mod,added.spec.id,mod_talk_provider(mod,added.spec.id));
-                if(!added.mod_token){LOG("[actors] %s:%s: the model can't serve this spec; it appears after a restart",mod.c_str(),added.spec.id.c_str());later.push_back(added.spec.id+": the model can't serve this spec");continue;}
-            }
-            g_actors.push_back(std::move(added));
-            const uint32_t i=uint32_t(g_actors.size()-1);
-            if(g_scratch){st32(g_scratch+128+i*4,0xFFFFFFFFu);st8(g_scratch+kTalkLatchOffset+i,0);std::memset(mem::ptr(g_scratch+kIdentityScratchOffset+i*identity::kRecordBytes),0,identity::kRecordBytes);}
-            LOG("[actors] %s:%s added by the editor",mod.c_str(),g_actors.back().spec.id.c_str());
-            continue;
+    // new actors: switches before doors (a door names its switch's declaration)
+    for(const int pass:{0,1})for(const auto& step:plan){
+        if(!step.create||(pass==0)==(step.spec->actor=="door"))continue;
+        Actor added{mod,*step.spec};std::string w;
+        if(step.spec->kind=="mod"){
+            const auto& r=g_models.at({mod,step.spec->model});
+            added.mod_token=mod_actor::declare(mod,added.spec,r.archive,r.index,mod_talked(mod,added.spec.id),r.minimum,r.maximum,r.skinned,r.clips,r.rig);
+            if(added.mod_token&&!added.spec.talks.empty())mod_actor::set_talk_provider(mod,added.spec.id,mod_talk_provider(mod,added.spec.id));
+            if(!added.mod_token){LOG("[actors] %s:%s: the model can't serve this spec; it appears after a restart",mod.c_str(),added.spec.id.c_str());later.push_back(added.spec.id+": the model can't serve this spec");continue;}
         }
+        if(native_kind(added.spec)||(added.spec.actor=="resident"&&(added.spec.resident==1||added.spec.resident==9)))added.fingerprint=identity::fingerprint(mod,added.spec);
+        if(added.spec.actor=="resident"&&(added.spec.resident==1||added.spec.resident==9)&&g_next_resident_event_token&&g_next_resident_event_token!=0xFFFFFFFFu)added.resident_event_token=g_next_resident_event_token++;
+        story_enemies::Kind enemy{};
+        if(story_props::is_prop(added.spec)){added.prop_token=story_props::editor_declare(mod,added.spec,w);if(!added.prop_token){later.push_back(added.spec.id+": "+w);continue;}}
+        else if(enemy_kind(added.spec,enemy)){added.enemy_token=story_enemies::editor_declare(enemy_spec(mod,added.spec,added.fingerprint,1),w);if(!added.enemy_token){later.push_back(added.spec.id+": "+w);continue;}}
+        else if(added.spec.actor=="switch"){added.switch_token=story_switches::editor_declare_switch(mod,added.spec.id,w);added.switch_source=added.switch_token;if(!added.switch_token){later.push_back(added.spec.id+": "+w);continue;}}
+        else if(added.spec.actor=="door"){
+            const Actor* source=nullptr;for(const auto& c:g_actors)if(c.mod==mod&&c.spec.actor=="switch"&&c.spec.id==added.spec.switch_actor&&c.switch_token&&!c.removed)source=&c;
+            if(!source){later.push_back(added.spec.id+": its switch is not in the game yet");continue;}
+            added.switch_source=source->switch_token;added.switch_token=story_switches::editor_declare_door(mod,added.spec.id,added.switch_source,w);if(!added.switch_token){later.push_back(added.spec.id+": "+w);continue;}
+        }
+        g_actors.push_back(std::move(added));
+        const uint32_t i=uint32_t(g_actors.size()-1);
+        if(g_scratch){st32(g_scratch+128+i*4,0xFFFFFFFFu);st8(g_scratch+kTalkLatchOffset+i,0);std::memset(mem::ptr(g_scratch+kIdentityScratchOffset+i*identity::kRecordBytes),0,identity::kRecordBytes);st32(g_scratch+kEnemyEpochScratchOffset+i*4,g_actors.back().enemy_token?1u:0u);}
+        LOG("[actors] %s:%s added by the editor",mod.c_str(),g_actors.back().spec.id.c_str());
+    }
+    for(const auto& step:plan){
+        if(step.create)continue;
         Actor* a=step.actor;
         const bool was_removed=a->removed;
         a->removed=false;
-        if(step.update){a->spec=*step.spec;a->respawn=true;if(a->mod_token)mod_actor::set_talk_provider(mod,a->spec.id,a->spec.talks.empty()?mod_actor::TalkProvider{}:mod_talk_provider(mod,a->spec.id));}
+        if(was_removed&&!step.update){
+            // a removal undone: a deleted enemy's next copy needs a new ownership epoch
+            if(a->enemy_token&&a->process==0xFFFFFFFFu)enemy_epoch(*a);
+            if(a->prop_token)story_props::retry(a->prop_token);
+            if(a->switch_token)story_switches::retry(a->switch_token);
+        }
+        if(step.update){
+            if(!was_removed&&settle_in_place(cpu,mod,*a,*step.spec))continue;
+            a->spec=*step.spec;a->respawn=true;a->redeclare=native_kind(a->spec);
+            if(a->mod_token)mod_actor::set_talk_provider(mod,a->spec.id,a->spec.talks.empty()?mod_actor::TalkProvider{}:mod_talk_provider(mod,a->spec.id));
+            if(!a->redeclare)refingerprint(mod,*a);
+        }
         LOG("[actors] %s:%s %s by the editor",mod.c_str(),a->spec.id.c_str(),was_removed?"restored":"changed");
     }
     for(Actor* a:remove){a->removed=true;a->respawn=false;LOG("[actors] %s:%s removed by the editor",mod.c_str(),a->spec.id.c_str());}
     if(pending)*pending=std::move(later);
+    return true;
+}
+bool editor_pose(Cpu* c,const std::string& mod,const std::string& id,const story_notebook::WorldPoint& p,const story_notebook::WorldPoint& r){
+    if(!c||!g_call||!g_scratch)return false;
+    Actor* a=nullptr;for(auto& x:g_actors)if(x.mod==mod&&x.spec.id==id)a=&x;
+    if(!a||a->removed||a->respawn||a->deleting||a->process==0xFFFFFFFFu)return false;
+    if(!std::isfinite(p.x)||!std::isfinite(p.y)||!std::isfinite(p.z)||!std::isfinite(r.y))return false;
+    const uint32_t at=actor_address(c,mod,id);if(!at||find(at)!=a||ld8(at+0xC)==3)return false;
+    if(a->spec.kind=="mod"){
+        mod_actor::Identity who;if(!mod_actor::identify(c,at,who))return false;
+        mod_actor::set_rotation(c,who,r);return mod_actor::set_position(c,who,p);
+    }
+    // home, old and current place; the turn about the vertical axis only (native kinds keep their own X/Z)
+    for(uint32_t off:{0x2ECu,0x300u,0x314u}){st32(at+off,f32_as_u32(p.x));st32(at+off+4,f32_as_u32(p.y));st32(at+off+8,f32_as_u32(p.z));}
+    const uint16_t yaw=uint16_t(int32_t(r.y*65536.0f/360.0f));
+    for(uint32_t off:{0x2FAu,0x30Eu,0x322u,0x32Au})st16(at+off,yaw);
     return true;
 }
 unsigned editor_pending(){unsigned n=0;for(const auto& a:g_actors)n+=a.respawn;return n;}
@@ -902,7 +1018,7 @@ bool people_execute(Cpu* c,bool before){Actor* a=people(c->r[3]);if(!a||a->spec.
 void install(const std::function<std::string(uint32_t)>& replaced_by,const std::function<void(uint32_t,void(*)(Cpu*))>& replace) {
     if(g_installed||!declared()||!g_original||!g_call||!g_scratch)return;
     std::vector<std::pair<uint32_t,void(*)(Cpu*)>> hooks={{kChestCheck,chest_check},{kChestOpen,chest_open},{kOnBox,chest_on},{kSignExecute,sign_execute},{kSignDelete,sign_delete},{kPeopleCheckOrder,people_check_order},{kPeopleEventMove,people_event_move},{kPeopleEventOrder,people_event_order}};
-    if(std::any_of(g_actors.begin(),g_actors.end(),[](const Actor& a){return a.spec.actor=="resident";})){
+    if(g_live_kinds||std::any_of(g_actors.begin(),g_actors.end(),[](const Actor& a){return a.spec.actor=="resident";})){
         const std::pair<uint32_t,void(*)(Cpu*)> resident_hooks[]={
             {kPeopleDelete,people_delete},{kPeopleTalk,people_talk},
             {kPhotoActor,photo_actor},{kPhotoPosition,photo_position},{kPhotoSnapshot,photo_snapshot},
@@ -910,7 +1026,7 @@ void install(const std::function<std::string(uint32_t)>& replaced_by,const std::
         hooks.insert(hooks.end(),std::begin(resident_hooks),std::end(resident_hooks));
         g_resident_hooks=true;
     }
-    if(std::any_of(g_actors.begin(),g_actors.end(),[](const Actor& a){return a.spec.actor=="resident"&&a.spec.resident==kYm1;})){
+    if(g_live_kinds||std::any_of(g_actors.begin(),g_actors.end(),[](const Actor& a){return a.spec.actor=="resident"&&a.spec.resident==kYm1;})){
         const std::pair<uint32_t,void(*)(Cpu*)> seated_hooks[]={{kYm1Init,ym1_init},{kYm1Msg,ym1_message},{kYm1Next,ym1_next},{kYm1Talk,ym1_talk},{kYm1Execute,ym1_execute},{kYm1Delete,ym1_delete},{kYm1Demo,ym1_demo},{kYm1Staff,ym1_staff},{kYm1CheckTalk,ym1_check_talk}};
         hooks.insert(hooks.end(),std::begin(seated_hooks),std::end(seated_hooks));
         g_ym1_hooks=true;
@@ -918,6 +1034,8 @@ void install(const std::function<std::string(uint32_t)>& replaced_by,const std::
     if(!story_treasure::installed())hooks.push_back({kRoom,room_hook});
     if(replaced_by(kPeopleMsg).empty()) {hooks.push_back({kPeopleMsg,people_msg_hook});hooks.push_back({kPeopleNext,people_next_hook});hooks.push_back({kPeopleExecute,people_execute_hook});}
     for(const auto& h:hooks)if(!replaced_by(h.first).empty()){LOG("[actors] hook conflict %08X; world actors disabled",h.first);return;}
+    // --editor: the native kinds are set up for live placement before they are configured (shared guards)
+    if(g_live_kinds){story_props::editor_enable();story_switches::editor_enable();story_enemies::editor_enable();}
     mod_actor::configure(g_original,g_call,g_scratch+kModScratchOffset);
     story_props::configure(g_original,g_call,g_scratch+kPropsScratchOffset,[](uint32_t token,uint32_t pid){
         if(!g_scratch)return;for(size_t i=0;i<g_actors.size();++i){auto&a=g_actors[i];const uint32_t slot=g_scratch+128+uint32_t(i)*4;if(a.prop_token==token&&a.process==pid&&ld32(slot)==pid){a.process=0xFFFFFFFFu;a.deleting=false;st32(slot,0xFFFFFFFFu);std::memset(mem::ptr(g_scratch+kIdentityScratchOffset+uint32_t(i)*identity::kRecordBytes),0,identity::kRecordBytes);return;}}
@@ -927,6 +1045,21 @@ void install(const std::function<std::string(uint32_t)>& replaced_by,const std::
         [](uint32_t token,bool on){for(const auto& a:g_actors)if(a.spec.actor=="switch"&&a.switch_token==token)return set_flag(story_store::book(),a.mod,a.spec.switch_flag,on);return false;},
         [](uint32_t token,uint32_t pid){if(!g_scratch)return;for(size_t i=0;i<g_actors.size();++i){auto&a=g_actors[i];const uint32_t slot=g_scratch+128+uint32_t(i)*4;if(a.switch_token==token&&a.process==pid&&ld32(slot)==pid){a.process=0xFFFFFFFFu;a.deleting=false;st32(slot,0xFFFFFFFFu);std::memset(mem::ptr(g_scratch+kIdentityScratchOffset+uint32_t(i)*identity::kRecordBytes),0,identity::kRecordBytes);return;}}});
     const bool has_enemies=enemies_declared(),has_combat=combat_declared();
+    // --editor without declared enemies: their profiles install anyway so the editor can place them live;
+    // a failure here only means they appear after a restart
+    bool live_enemies=false;
+    if(g_live_kinds&&!has_combat){
+        const std::array<uint32_t,4> profiles={g_scratch+kEnemyProfilesScratchOffset,g_scratch+kEnemyProfilesScratchOffset+0x30,g_scratch+kEnemyProfilesScratchOffset+0x60,g_scratch+kEnemyProfilesScratchOffset+0x90};
+        live_enemies=configure_enemy_declarations()&&story_enemy_ownership::configure(g_scratch+kEnemyOwnershipScratchOffset,story_enemy_ownership::kStorageBytes,g_original,story_enemies::verify_actor);
+        if(live_enemies){
+            story_enemy_ownership::initialize_storage();
+            story_enemies::configure(g_original,g_call,profiles,[](uint32_t token,uint32_t pid){if(!g_scratch)return;for(size_t i=0;i<g_actors.size();++i){auto&a=g_actors[i];const uint32_t slot=g_scratch+128+uint32_t(i)*4;if(a.enemy_token==token&&a.process==pid&&ld32(slot)==pid){a.process=0xFFFFFFFFu;a.deleting=false;st32(slot,0xFFFFFFFFu);return;}}});
+            live_enemies=story_enemy_projectiles::configure(g_original,pure_link,true)&&story_enemy_children::configure(g_original,g_call,story_enemies::child_retired)&&native_actor_carry::configure(g_original,g_call)&&
+                         native_actor_carry::register_guard("enemies",story_enemies::deny_carry)&&story_enemy_ownership::install(replaced_by,replace)&&story_enemy_projectiles::install(replaced_by,replace)&&
+                         story_enemy_children::install(replaced_by,replace)&&story_enemies::install(replaced_by,replace);
+        }
+        LOG("[actors] the editor's live enemies: %s",live_enemies?"ready":"not available (they appear after a restart)");
+    }
     if(has_combat){
         if(!story_enemy_ownership::configure(g_scratch+kEnemyOwnershipScratchOffset,story_enemy_ownership::kStorageBytes,g_original,story_enemies::verify_actor))exception_report::raise("Cannot configure combat snapshot ownership");
         story_enemy_ownership::initialize_storage();
@@ -950,8 +1083,13 @@ void install(const std::function<std::string(uint32_t)>& replaced_by,const std::
     }
     if(has_mod&&!mod_actor::install(replaced_by,replace))exception_report::raise("Cannot install generic mod actor profile");
     if(has_mod){mod_actor_shadow_proof::configure(g_original,g_call);mod_actor_shadow_proof::install(replaced_by,replace);}
-    if(std::any_of(g_actors.begin(),g_actors.end(),[](const Actor&a){return a.prop_token!=0;})&&!story_props::install(replaced_by,replace))exception_report::raise("Cannot install isolated native prop profile");
-    if(std::any_of(g_actors.begin(),g_actors.end(),[](const Actor&a){return a.switch_token!=0;})&&!story_switches::install(replaced_by,replace))exception_report::raise("Cannot install isolated native switch/door profiles");
+    const bool props=std::any_of(g_actors.begin(),g_actors.end(),[](const Actor&a){return a.prop_token!=0;});
+    const bool switches=std::any_of(g_actors.begin(),g_actors.end(),[](const Actor&a){return a.switch_token!=0;});
+    if(props&&!story_props::install(replaced_by,replace))exception_report::raise("Cannot install isolated native prop profile");
+    if(switches&&!story_switches::install(replaced_by,replace))exception_report::raise("Cannot install isolated native switch/door profiles");
+    // --editor: installed without declarations too (live placement); a failure means "after a restart"
+    if(g_live_kinds&&!props&&!story_props::install(replaced_by,replace))LOG("[actors] the editor's live props are not available (they appear after a restart)");
+    if(g_live_kinds&&!switches&&!story_switches::install(replaced_by,replace))LOG("[actors] the editor's live switches and doors are not available (they appear after a restart)");
     if(has_enemies&&!story_enemies::install(replaced_by,replace))exception_report::raise("Cannot install isolated native enemy profiles");
     for(const auto& h:hooks)replace(h.first,h.second);g_installed=true;
 }

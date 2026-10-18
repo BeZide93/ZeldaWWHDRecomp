@@ -735,8 +735,10 @@ void Session::apply_live(const Package& p, const Value& before, Value& result) {
     else if (!note.empty()) result["note"] = note;
 }
 
-bool Session::drag_preview(const std::string& mod, const Value& poses, std::vector<std::string>& later, std::string& why) {
+bool Session::drag_preview(const std::string& mod, const Value& poses, std::vector<std::string>& later, std::string& why,
+                           std::vector<std::string>* in_place) {
     later.clear();
+    if (in_place) in_place->clear();
     const Package* p = find(mod);
     if (!p) return why = "no active mod \"" + mod + "\"", false;
     if (!host_) return why = "the game is not running", false;
@@ -760,6 +762,7 @@ bool Session::drag_preview(const std::string& mod, const Value& poses, std::vect
     std::vector<std::string> moved;
     std::string ignore;
     host_->pose_actors(mod, placed, moved, ignore);
+    if (in_place) *in_place = moved;
     std::vector<std::string> changed;
     for (const auto& pose : placed.array)
         if (std::find(moved.begin(), moved.end(), pose.get("id").string()) == moved.end()) changed.push_back(pose.get("id").string());

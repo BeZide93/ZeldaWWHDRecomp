@@ -77,6 +77,9 @@ FlyView fly_view();  // any thread
 bool playing();      // Play is on: the editor's overlays hide (any thread)
 bool editor_view();  // the editor's overlays show: launch mode, the fly camera on, not playing (any thread)
 void toggle_play();  // Tab / the controller's View button: Play from the camera, or Stop
+// A scene preview runs (preview_scene): the editor's overlays hide but for its Skip / Stop bar (any thread).
+bool previewing();
+std::string preview_label();  // "harbor: step 3" while previewing
 // The game camera as camera_draw last drew it (eye, center, up, fovy in degrees, aspect, near/far and
 // the projection it built): what the overlays project the world with.
 struct CameraView {

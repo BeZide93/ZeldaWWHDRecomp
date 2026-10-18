@@ -143,6 +143,10 @@ public:
         return why = "the game is not running", false;
     }
 
+    // Whether actors of a list_actor_types type appear while the game runs (`fallback`: the type's own
+    // default, when the game doesn't know). Native props, switches, doors and enemies do in --editor.
+    virtual bool live_kind(const std::string& type, bool fallback) { return fallback; }
+
     // ---- scenes (each optional) ----
     // The fly camera looks from `eye` at `target` (scrubbing a scene's camera; turns it on if needed).
     virtual bool look(const WorldPoint& eye, const WorldPoint& target, std::string& why) {
@@ -206,8 +210,11 @@ public:
     // where the drag has them, through the host's live update (Host::preview_actors). Nothing changes in
     // the package: no command, no undo step, no log entry; letting go runs the one command that keeps the
     // change. A pose without position and rotation puts that actor back at the package's place (a drag
-    // cancelled). `later`: the ids that can't move while the game runs. False with `why`: nothing shown.
-    bool drag_preview(const std::string& mod, const Value& poses, std::vector<std::string>& later, std::string& why);
+    // cancelled). The actors that exist in the game move in place (Host::pose_actors, `in_place` gets
+    // them); the others are created again at the new place. `later`: the ids that can't move while the
+    // game runs. False with `why`: nothing shown.
+    bool drag_preview(const std::string& mod, const Value& poses, std::vector<std::string>& later, std::string& why,
+                      std::vector<std::string>* in_place = nullptr);
 
     const std::deque<LogEntry>& log() const { return log_; }
     std::string open_mod() const { return open_; }
