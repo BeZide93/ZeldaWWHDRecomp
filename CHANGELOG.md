@@ -10,6 +10,10 @@ what is on `devel` and not released yet (also in the
 - **Android: heat guard for handhelds with a fan** (#247). AYANEO, KONKR, AYN and Retroid handhelds now keep 60 fps
   until they are much hotter than phones, and the new **Settings → Graphics → Heat guard** (Normal / Relaxed / Off)
   sets how early 60 fps pauses when the device gets hot. Phones keep their current limit by default.
+- **Android: even frame pacing at 60 fps.** A frame that is ready early now waits a few milliseconds, so each frame
+  stays on screen equally long. With **Record graphics on a second thread** on, a third of the frames on a 120 Hz phone
+  screen used to stay for one or three refreshes instead of two (a slight judder); now almost all stay for two. The
+  game's speed is unchanged. On by default on Android.
 - **Mod quests: finishing, flags and places inside buildings** (for mod makers). A character's dialogue or a scene's end
   can now finish a quest (the reward is given once), characters and quest steps can react to the mod's own flags or to
   several quests at once, a character can offer step-specific conversations, and a quest step can point into a
