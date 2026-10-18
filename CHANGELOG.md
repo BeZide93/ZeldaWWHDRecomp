@@ -7,6 +7,9 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **World editor: the docked panels react to the mouse again.** Since the dockable panels arrived, the full-screen
+  picture could sit in front of the docked panels, so they got no hover or clicks on any renderer; the picture now
+  always stays behind them.
 - **World editor: native scene previews after loading a save state.** A scene's native version now also plays in the
   preview after a save state was loaded or after a preview fell back to the scene's steps, and the editor says why
   when it can't restore the world after a preview.
