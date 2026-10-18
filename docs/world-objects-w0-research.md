@@ -62,3 +62,45 @@ passing a null check is not safe.
 
 The standalone collision-sizing test passes on macOS. No in-game acceptance,
 full CTest result, cross-platform build result or memory safety limit is claimed.
+
+## First live diagnostic
+
+The first hidden, silent macOS run registered all three original bodies through
+the native registry. The log recorded Link's native ground check identifying
+the platform. Shared occupancy reached 25 bodies, including the game's bodies;
+the three mod bodies used three slots.
+
+| Handmade mesh | Vertices | Triangles | Measured allocation delta inside its heap callback |
+| --- | ---: | ---: | ---: |
+| Platform and ramp | 16 | 24 | 1,828 bytes |
+| Buoy | 8 | 12 | 1,132 bytes |
+| Raft | 8 | 12 | 1,132 bytes |
+
+These deltas include the fixture input and the native collision body/arrays, not
+render models or the actor's base allocation. Each native actor base allocation
+was separately measured as 4,176 bytes. The existing actor allocation accounting
+accepted the three actors with approximately 0.98 MB charged in that room. This
+is a diagnostic sample, not a certified room capacity or a final mod limit.
+
+The initial collision attributes were zero-filled. In this format, zero is a
+valid native exit reference: landing on the platform selected exit 0 and caused
+a room reload. The bodies released cleanly during that transition and were
+recreated, with the same allocation deltas, but this is not acceptance of the
+intended static-platform behavior. The builder now writes explicit no-exit,
+no-camera, no-Link-reference and no-path sentinels. Regression tests check those
+fields. Wall, special-ground, through and hookshot attributes remain ordinary.
+
+The sheltered Windfall square returned a constant native wave height. The next
+proof site is in sea room 12, east of Windfall, around x=75,000 and z=-201,500,
+away from the neighbouring island's centre. The native sea function samples its
+rendered height table and returns the base height outside its active area, so
+observing stationary distant fixtures does not establish wave following. A live
+run near the bodies remains necessary.
+
+Current checks: three new native sizing/mesh/lifecycle tests, two original-asset
+tests, and the four existing static/skinned/combat/carry actor contracts pass on
+macOS. The executable builds from freshly generated game code for the current
+branch. An earlier attempt using older SDK-generated code failed at link time;
+that generated-code mismatch was corrected. Compile-only Linux, Windows and
+Android checks passed for the actor unit before the neutral-attribute fix and
+must be refreshed against the final proof sources.

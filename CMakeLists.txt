@@ -3241,3 +3241,17 @@ add_executable(story_world_collision_budget_test runtime/tools/story_world_colli
 target_include_directories(story_world_collision_budget_test PRIVATE runtime/src)
 target_compile_options(story_world_collision_budget_test PRIVATE -UNDEBUG)
 add_test(NAME story_world_collision_budget COMMAND story_world_collision_budget_test)
+
+add_executable(story_world_collision_proof_mesh_test runtime/tools/story_world_collision_proof_mesh_test.cpp)
+target_include_directories(story_world_collision_proof_mesh_test PRIVATE runtime/src)
+target_compile_options(story_world_collision_proof_mesh_test PRIVATE -UNDEBUG)
+add_test(NAME story_world_collision_proof_mesh COMMAND story_world_collision_proof_mesh_test)
+
+add_executable(story_world_collision_proof_runtime_test runtime/tools/story_world_collision_proof_runtime_test.cpp runtime/src/guest_addr_identity.c)
+target_include_directories(story_world_collision_proof_runtime_test PRIVATE runtime/src runtime/include)
+target_compile_options(story_world_collision_proof_runtime_test PRIVATE -UNDEBUG)
+add_test(NAME story_world_collision_proof_runtime COMMAND story_world_collision_proof_runtime_test ${CMAKE_SOURCE_DIR}/examples/guest-mods/world-objects-w0/manifest.json)
+
+if(Python3_Interpreter_FOUND)
+  add_test(NAME story_world_objects_w0_assets COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/story_mods/test_world_objects_w0.py)
+endif()
