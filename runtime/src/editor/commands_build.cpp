@@ -90,8 +90,12 @@ std::string model_message(const std::string& why) {
         {"oversized", "Size: the file is larger than a model may be (8 MB) or is not a GLB 2.0 file."},
         {"texture exceeds", "Texture: the texture is larger than 512 x 512 pixels."},
         {"PNG", "Texture: the texture must be an embedded PNG (RGB or RGBA, not interlaced)."},
-        {"base colour", "Material: the model needs one material with an embedded base colour PNG on UV0."},
-        {"material", "Material: one simple material with a base colour texture, no extensions."},
+        {"1 MiB", "Texture: all textures of one model together take at most 1 MiB (one 512 x 512, four 256 x 256 or sixteen 128 x 128)."},
+        {"alphaMode BLEND", "Material: blended transparency is not supported; use MASK (cut-out) or OPAQUE."},
+        {"skinned model has one", "Material: a skinned model has one opaque, single-sided material with one texture."},
+        {"base colour", "Material: every material needs an embedded base colour PNG on UV0."},
+        {"material", "Material: up to 16 simple materials, each with one base colour texture (opaque or MASK cut-out), no extensions."},
+        {"primitives", "Mesh: the visible mesh has 1 to 32 triangle primitives."},
         {"skin joints", "Bones: a skinned model has 1 to 32 bones."},
         {"bone", "Bones: bone names are letters, digits and _ (up to 31), each once."},
         {"joint", "Bones: the skeleton must be one connected hierarchy with unit-scale joints."},
@@ -295,6 +299,9 @@ bool check_model_file(const std::string& path, Value& info, std::string& why) {
         info["vertices"] = double(s.vertex_count);
         info["triangles"] = double(s.triangle_count);
         info["texture"] = std::to_string(s.texture_width) + "x" + std::to_string(s.texture_height);
+        info["materials"] = double(s.material_count);
+        info["cutout_materials"] = double(s.cutout_count);
+        info["texture_bytes"] = double(s.texture_bytes);
         info["bones"] = 0;
         info["clips"] = array();
         return true;

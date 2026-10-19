@@ -23,6 +23,10 @@ int main(){skinned_models::ModelInfo info;std::string why;Fixture f;auto valid=[
     rotated=f;rotated.doc["nodes"].array[2]["rotation"]=mods::json::parse("[0,0,0,-1]");assert(valid(rotated)&&info.joint_look_compatible[1]); // sign-equivalent identity
     auto x=f;x.doc["skins"].array[0]["joints"]=mods::json::parse("[1,1]");bad(x);x=f;x.doc["skins"].array[0]["joints"]=mods::json::parse("[2,1]");bad(x);x=f;x.doc["nodes"].array[2]["name"]="Root";bad(x);x=f;x.doc["nodes"].array[2]["scale"]=mods::json::parse("[2,1,1]");bad(x);x=f;x.doc["nodes"].array[0]["translation"]=mods::json::parse("[1,0,0]");bad(x);x=f;x.doc["nodes"].array[1].object.erase("children");bad(x);
     x=f;x.bin[x.offset(4)]=2;bad(x);x=f;x.put(x.offset(5),-.5);bad(x);x=f;x.put(x.offset(5),.25);bad(x);x=f;x.put(x.offset(5)+8,.1);bad(x);x=f;x.put(x.offset(6)+4,1);bad(x);x=f;x.doc["accessors"].array[6]["count"]=1;bad(x);
+    // several materials, cut-outs and double-sided faces are for rigid models only
+    x=f;x.doc["materials"].array[0]["alphaMode"]="MASK";bad(x);assert(why.find("skinned model has one")!=std::string::npos);
+    x=f;x.doc["materials"].array[0]["doubleSided"]=true;bad(x);
+    x=f;assert(valid(x)&&info.images.size()==1&&x.glb()[info.images[0].offset]==137&&info.images[0].offset==info.image_offset);
     x=f;x.clip();assert(valid(x)&&info.clips.size()==1&&info.clips[0].name=="idle"&&info.clips[0].frames==31&&info.maximum[0]>299);x.doc["animations"].array[0]["samplers"].array[0]["interpolation"]="CUBICSPLINE";bad(x);
     x=f;x.clip();x.doc["animations"].array[0]["channels"].array[0]["target"]["path"]="scale";bad(x);x=f;x.clip("Bad Name");bad(x);x=f;x.clip("idle",31);bad(x);x=f;x.clip("idle",30);assert(valid(x)&&info.clips[0].frames==901);x=f;x.clip();x.doc["animations"].array.push_back(x.doc["animations"].array[0]);bad(x);x=f;x.clip();x.doc["animations"].array[0]["extensions"]=mods::json::parse("{\"ignored\":{}}");bad(x);
     x=f;x.clip();const auto time=size_t(x.doc.get("animations").array[0].get("samplers").array[0].get("input").number);x.put(x.offset(time)+4,0);bad(x);x=f;x.clip();x.doc["animations"].array[0]["channels"].array[0]["target"]["node"]=0;bad(x);

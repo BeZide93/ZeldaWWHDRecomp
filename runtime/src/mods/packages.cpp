@@ -189,8 +189,10 @@ Manifest manifest(const fs::path& path){
         static_models::ModelInfo info;
         if(model.kind=="skinned"){skinned_models::ModelInfo skin;require(skinned_models::validate_glb(bytes,skin,model_error),"Model "+model.id+": "+model_error);info=skin;}
         else require(static_models::validate_glb(bytes,info,model_error,std::any_of(v.get("actors").array.begin(),v.get("actors").array.end(),[&](const auto& actor){return actor.get("collision").get("mesh").string()==model.id;})),"Model "+model.id+": "+model_error);
-        const auto pixels=guestmods::hud::decode_png(std::span<const uint8_t>(bytes).subspan(info.image_offset,info.image_size));
-        require(pixels.width==info.texture_width&&pixels.height==info.texture_height,"Invalid model PNG");
+        // every colour texture (a model may have up to 16 materials, one PNG each)
+        auto images=info.images;if(images.empty())images.push_back({info.image_offset,info.image_size,info.texture_width,info.texture_height});
+        for(const auto& image:images){const auto pixels=guestmods::hud::decode_png(std::span<const uint8_t>(bytes).subspan(image.offset,image.size));
+            require(pixels.width==image.width&&pixels.height==image.height,"Model "+model.id+": invalid model PNG");}
     }
     if(m.kind=="native") {
         require(v.get("abi_version").type==Value::Number&&v.get("abi_version").number==1,"Unsupported native mod ABI");

@@ -76,7 +76,10 @@ inline bool validate_glb(std::span<const uint8_t>b,ModelInfo&info,std::string&wh
     // Validate every static field using the existing strict parser. Skin/clip fields
     // are removed only after independent checks; the original BIN remains unchanged.
     auto clean=doc;clean.object.erase("skins");clean.object.erase("animations");for(auto&node:clean["nodes"].array)node.object.erase("skin");auto&ca=clean["meshes"].array[0]["primitives"].array[0]["attributes"];ca.object.erase("JOINTS_0");ca.object.erase("WEIGHTS_0");auto text=mods::json::dump(clean);while(text.size()%4)text+=' ';std::vector<uint8_t> projection;word(projection,0x46546C67);word(projection,2);word(projection,uint32_t(28+text.size()+bl));word(projection,uint32_t(text.size()));word(projection,0x4E4F534A);projection.insert(projection.end(),text.begin(),text.end());word(projection,uint32_t(bl));word(projection,0x004E4942);projection.insert(projection.end(),b.begin()+base,b.end());
-    static_models::ModelInfo geometry;if(!static_models::validate_glb(projection,geometry,why))return false;geometry.image_offset=base+(geometry.image_offset-(28+text.size()));
+    static_models::ModelInfo geometry;if(!static_models::validate_glb(projection,geometry,why))return false;
+    // several materials, cut-outs and double-sided faces are for rigid models; a skinned model keeps one plain material
+    if(geometry.material_count!=1||geometry.images.size()!=1||geometry.cutout_count||geometry.double_sided_count)return fail("a skinned model has one opaque, single-sided material with one texture");
+    geometry.image_offset=base+(geometry.image_offset-(28+text.size()));geometry.images[0].offset=geometry.image_offset;
     // Unit-scale skeleton rotations (including future look-at) preserve norm. Sum
     // maximal authored translation lengths along each chain and bound each inverse
     // bound vertex; normalized nonnegative skinning is a convex combination.
