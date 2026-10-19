@@ -29,6 +29,11 @@ const uint32_t kResidentWalk = GD(0x101C31BA), kResidentWait = GD(0x101C31B4);  
 const uint32_t kDemoActor = GC(0x02526E70), kDemoPool = GD(0x101D5FFC), kResidentMtx = GC(0x022BF3A0), kDemoFrame = GD(0x101D6008);
 const uint32_t kFindDemoMessage = GC(0x025F60EC);  // message resources: demo message code -> message label (the demo window's lookup)
 const uint32_t kDemoMessageOn = GC(0x025DB58C), kDemoMessageOff = GC(0x025DB59C);  // fopMsgM_demoMsgFlagOn / Off
+// the demo message window (HD parts object): its idle state's execute (it polls the demo's message code),
+// the parts state change, and the window's own states Wait (idle) and Close (out animation, then the
+// window's cleanup: message status 0, the demo's suspend count back, back to Wait)
+const uint32_t kDemoWindowWait = GC(0x026AEEB8), kStateChange = GC(0x020063C0), kCurrentState = GC(0x02006478);
+const uint32_t kDemoWindowIdle = GD(0x10497F80), kDemoWindowClose = GD(0x104980A0);
 // game data
 const uint32_t kDemoMode = GD(0x101D6010), kDemoFile = GD(0x101D6004), kDemoControl = GD(0x101D5FE8), kResControl = GD(0x101F4F28);
 const uint32_t kDemoArcName = GD(0x1047E6B8);  // dStage_roomControl_c::mDemoArcName, char[12]; mProcID follows at +0xC
@@ -57,7 +62,8 @@ enum : uint32_t {
     MessageNumbers = 0x068, // 2 x the message each demo message code shows (resolved when the demo starts)
     DemoFlagSet = 0x070,    // the port turned the game's demo message flag on
     MessageShown = 0x074,   // index + 1 of the message whose point the demo waits at
-    MessageClosing = 0x078, // release asked an open demo message to close; tick() finishes it
+    WindowAt = 0x078,       // the demo message window (noted while it waits for a message code)
+    WindowClosing = 0x07C,  // 1: released with the window open; 2: and skipped (end poses after the close)
     Image = 0xC80,          // event image (<= 0x300)
     Stb = 0xF80,            // STB (<= 0xC000)
 };
@@ -137,6 +143,11 @@ void search_name(Cpu* c) {
     g_original(c, GC(0x025D9F38));
 }
 void apply_characters(Cpu* c);
+// The demo message window's idle execute: the window is noted for a release with a message open.
+void demo_window_wait(Cpu* c) {
+    if (recorded()) st32(g_arena + WindowAt, c->r[3]);
+    g_original(c, kDemoWindowWait);
+}
 // dDemo_manager_c::update, then the demo's values go to actors whose own code doesn't read a demo slot
 void manager_update(Cpu* c) {
     g_original(c, kManagerUpdate);
@@ -180,12 +191,13 @@ bool configured() { return g_arena && g_call && g_original; }
 
 void install(const std::function<std::string(uint32_t)>& replaced_by, const std::function<void(uint32_t, void (*)(Cpu*))>& replace) {
     if (g_installed || !configured()) return;
-    for (uint32_t fn : {kLookupId, kLookupName, kManagerUpdate, kSearchFromName})
+    for (uint32_t fn : {kLookupId, kLookupName, kManagerUpdate, kSearchFromName, kDemoWindowWait})
         if (!replaced_by(fn).empty()) { LOG("[demo] %s owns %08X; demo steps disabled", replaced_by(fn).c_str(), fn); return; }
     replace(kLookupId, lookup_id);
     replace(kLookupName, lookup_name);
     replace(kManagerUpdate, manager_update);
     replace(kSearchFromName, search_name);
+    replace(kDemoWindowWait, demo_window_wait);
     g_installed = true;
     LOG("[demo] installed: virtual demo archive %s", kVirtualArchive);
 }
@@ -599,13 +611,35 @@ void end_poses(Cpu* c) {
         LOG("[demo] skip: %s takes its end pose %.0f,%.0f,%.0f", d.id.c_str(), p.x, p.y, p.z);
     }
 }
+
+// The demo message window with a message open (any state but its idle Wait).
+uint32_t open_window(Cpu* c) {
+    const uint32_t window = ld32(g_arena + WindowAt);
+    if (!window || !ld32(g_arena + MessageShown)) return 0;
+    return call(c, kCurrentState, {window + 0x18}) != kDemoWindowIdle ? window : 0;
+}
+// The game removes the demo; a skipped demo's actors then take their end poses, and the game actors
+// created for it go.
+void remove_demo(Cpu* c, bool skipped) {
+    if (ld32(kDemoFile) == g_arena + Stb && ld32(kDemoMode)) call(c, kDemoRemove, {});
+    if (skipped && !g_demo.actors.empty()) end_poses(c);
+    remove_spawned(c);
+}
 }  // namespace
 
 void release(Cpu* c, const char* reason) {
     if (!recorded() || ld32(g_arena + Phase) == kDraining) return;
     const bool ours = ld32(kDemoFile) == g_arena + Stb && ld32(g_arena + StbBytes);
-    if (ours && ld32(kDemoMode)) call(c, kDemoRemove, {});
-    if (std::strcmp(reason, "skipped") == 0 && ld32(g_arena + Phase) >= 2 && !g_demo.actors.empty()) end_poses(c);
+    const bool skipped = std::strcmp(reason, "skipped") == 0 && ld32(g_arena + Phase) >= 2;
+    // A message still open (skip or abort at a message point): the window closes through its own Close
+    // state (out animation, its cleanup, which also gives the demo's suspend count back) and the demo is
+    // removed once the window is idle again (tick()), the order the game itself closes a demo message in.
+    st32(g_arena + WindowClosing, 0);
+    if (const uint32_t window = ours && ld32(kDemoMode) ? open_window(c) : 0) {
+        call(c, kStateChange, {window + 0x18, kDemoWindowClose});
+        st32(g_arena + WindowClosing, skipped ? 2 : 1);
+        LOG("[demo] open demo message: the window closes before the demo is removed");
+    } else remove_demo(c, skipped);
     if (ld32(g_arena + Phase) >= 1) {
         restore_manager(c);
         std::memcpy(mem::ptr(kDemoArcName), mem::ptr(g_arena + SavedArc), 12);
@@ -623,17 +657,9 @@ void release(Cpu* c, const char* reason) {
     }
     st32(g_arena + CharacterCount, 0);
     g_character_refs.clear();
-    remove_spawned(c);
-    // a demo message still open (skip or abort at a message point): asked to finish now; tick()
-    // completes the window's own close (FINISH 16 -> CLOSED 18 -> DELETE 19) while the demo drains
-    st32(g_arena + MessageClosing, 0);
-    if (ld32(g_arena + MessageCount)) {
-        const uint32_t manager = ld32(GD(0x101F4B5C)), status = call(c, GC(0x025F795C), {});
-        if (manager && status != 0 && status < 16) { call(c, GC(0x025F74D0), {manager, 16}); st32(g_arena + MessageClosing, 1); LOG("[demo] open demo message asked to close (message status %u)", status); }
-    }
     if (ld32(g_arena + DemoFlagSet) && ld8(kDemoMessageFlag)) { call(c, kDemoMessageOff, {}); LOG("[demo] demo message flag off (was on at release; now %u)", ld8(kDemoMessageFlag)); }
     st32(g_arena + DemoFlagSet, 0);
-    LOG("[demo] released (%s)%s", reason, ours ? ": demo data removed" : "");
+    LOG("[demo] released (%s)%s", reason, ours ? (ld32(g_arena + WindowClosing) ? ": demo data removed after the message window" : ": demo data removed") : "");
     // the demo's model actors delete themselves on their next execute; the archives they draw from
     // are given back a few frames later (tick())
     st32(g_arena + Phase, kDraining);
@@ -647,12 +673,14 @@ void tick(Cpu* c) {
     if (!recorded() || ld32(g_arena + Phase) != kDraining) return;
     const uint32_t ticks = ld32(g_arena + Ticks) + 1;
     st32(g_arena + Ticks, ticks);
-    if (ld32(g_arena + MessageClosing)) {
-        const uint32_t manager = ld32(GD(0x101F4B5C)), status = call(c, GC(0x025F795C), {});
-        if (status == 18) { call(c, GC(0x025F74D0), {manager, 19}); st32(g_arena + MessageClosing, 0); LOG("[demo] open demo message closed"); }
-        else if (status == 0 || status == 19) st32(g_arena + MessageClosing, 0);
-        else if (ticks > 60) { call(c, GC(0x025F78C4), {manager}); st32(g_arena + MessageClosing, 0); LOG("[demo] open demo message: core reset (status %u)", status); }
-        else return;
+    if (const uint32_t closing = ld32(g_arena + WindowClosing)) {
+        if (open_window(c) && ticks <= 120) return;  // the window's out animation and cleanup run
+        if (open_window(c)) LOG("[demo] the message window did not close in time");
+        remove_demo(c, closing == 2);
+        st32(g_arena + WindowClosing, 0);
+        st32(g_arena + Ticks, 0);
+        LOG("[demo] message window closed after %u ticks: demo data removed", ticks);
+        return;
     }
     if (ticks < 10) return;
     drop_archives(c);

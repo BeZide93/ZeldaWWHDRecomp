@@ -1250,7 +1250,7 @@ the demo and ends it.
 - **Sounds.** `sounds` play a game sound id at a `position` or following an actor, with `volume` and `pan` (0–1).
 - **Particles.** `particles` start a game particle id at a `position`, or on an actor, optionally on one of its joints (`joint`).
 - **Skip and save states.**
-  - Plus skips the scene; the demo stops where it is.
+  - Plus skips the scene; the demo stops where it is. An open message window closes first (a short out animation).
   - Loading a state saved during a demo ends the demo and gives control back. It is never resumed.
 
 The step's deadline is its length plus a margin. A demo that the game does not
