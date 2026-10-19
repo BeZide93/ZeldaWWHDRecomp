@@ -28,11 +28,12 @@ const uint32_t Queue=GC(0x025D5834),Create=GC(0x020C25A4),Execute=GC(0x020C1D0C)
 const uint32_t TnSearch=GC(0x024BAFAC),TnCandidate=GC(0x024BAA8C),CapeCreate=GC(0x021BE134),CapeExecute=GC(0x021BC3C4);
 constexpr uint16_t Sword=0x1CF,Cape=own::kCapeProfile,Bomb=0x126;
 bool memory(uint32_t a,uint32_t n){return !(a&3)&&a>=0x10000000u&&a<=0x50000000u-n;}
-// a Stalfos is a parent kind too: its club is a Boko child (parameter 2) like a Bokoblin's weapon
+// a Stalfos is a parent kind too: its club is a Boko child (parameter 2) like a Bokoblin's weapon; a
+// Wizzrobe's children are its fireballs (queue_fireball)
 // a bomb rat (d_a_nz type 1, hole-born arg0 1): the one rat that creates a child (its bomb)
 bool bomb_rat(uint32_t params){return (params&0xFF)==1&&((params>>8)&0xFF)==1;}
 bool parent(const Source&s){if(s.kind==Kind::Rat){auto&d=own::descriptor(s.kind);return s.token&&s.epoch==own::source_epoch(s.token)&&memory(s.actor,d.bytes)&&ld32(s.actor+4)==s.pid&&s.pid&&s.pid!=0xFFFFFFFFu&&ld16(s.actor+0xE)==d.profile&&bomb_rat(ld32(s.actor+0xB0))&&ld8(s.actor+0x2DD)==0xFF;}
- if(s.kind!=Kind::Bokoblin&&s.kind!=Kind::Moblin&&s.kind!=Kind::Darknut&&s.kind!=Kind::Stalfos)return false;auto&d=own::descriptor(s.kind);return s.token&&s.epoch==own::source_epoch(s.token)&&memory(s.actor,d.bytes)&&ld32(s.actor+4)==s.pid&&s.pid&&s.pid!=0xFFFFFFFFu&&ld16(s.actor+0xE)==d.profile&&(s.kind==Kind::Bokoblin?story_enemy_variants::declared_params("bokoblin",ld32(s.actor+0xB0)):s.kind==Kind::Darknut?story_enemy_variants::declared_params("darknut",ld32(s.actor+0xB0)):s.kind==Kind::Stalfos?ld32(s.actor+0xB0)==story_enemies_more::params(Kind::Stalfos):(ld32(s.actor+0xB0)==0xFFFF0000u||ld32(s.actor+0xB0)==story_enemy_variants::moblin_patrol(0xFFFF0000u)))&&ld8(s.actor+0x2DD)==0xFF;}
+ if(s.kind!=Kind::Bokoblin&&s.kind!=Kind::Moblin&&s.kind!=Kind::Darknut&&s.kind!=Kind::Stalfos&&s.kind!=Kind::Wizzrobe)return false;auto&d=own::descriptor(s.kind);return s.token&&s.epoch==own::source_epoch(s.token)&&memory(s.actor,d.bytes)&&ld32(s.actor+4)==s.pid&&s.pid&&s.pid!=0xFFFFFFFFu&&ld16(s.actor+0xE)==d.profile&&(s.kind==Kind::Bokoblin?story_enemy_variants::declared_params("bokoblin",ld32(s.actor+0xB0)):s.kind==Kind::Darknut?story_enemy_variants::declared_params("darknut",ld32(s.actor+0xB0)):s.kind==Kind::Stalfos||s.kind==Kind::Wizzrobe?ld32(s.actor+0xB0)==story_enemies_more::params(s.kind):(ld32(s.actor+0xB0)==0xFFFF0000u||ld32(s.actor+0xB0)==story_enemy_variants::moblin_patrol(0xFFFF0000u)))&&ld8(s.actor+0x2DD)==0xFF;}
 // the child kinds: daBoko weapons (the Bokoblin's stick 0 or machete 1, the Stalfos's club 2, the Moblin's
 // spear 4, the Darknut's sword 3) and the Darknut's cape (d_a_mant type 0)
 uint32_t child_bytes(uint16_t profile){return profile==Sword?0xA34:profile==Cape?own::kCapeBytes:0;}
@@ -50,7 +51,16 @@ bool expected(const Source&s,uint16_t profile,uint32_t params){
  if(s.kind==Kind::Darknut)return profile==Sword?params==3:profile==Cape&&params==0&&((story_enemy_variants::angle_x("darknut",ld32(s.actor+0xB0))>>5)&7)>=4;
  return profile==Sword&&params==(s.kind==Kind::Bokoblin?story_enemy_variants::bokoblin_weapon(ld32(s.actor+0xB0)):s.kind==Kind::Stalfos?story_enemies_more::kStalfosClubParams:4u);}
 std::function<bool(uint32_t,uint32_t)> create_filter;
+// A Wizzrobe's fireball (its own WZ class, the game's profile 0xD0, story_enemies_more.h): queued in its
+// owned parent's scope, it becomes an owned child (ownership lineage)
+void queue_fireball(Cpu*c,const Source&s){if(!parent(s)||c->r[4]!=story_enemies_more::kWizzrobeFireParams){c->r[3]=0xFFFFFFFFu;return;}
+ const uint32_t ticket=own::reserve_child_pending(s.token,s.actor,s.pid,story_enemies_more::kWizzrobeFire,c->r[4],s.epoch);if(!ticket){c->r[3]=0xFFFFFFFFu;return;}
+ try{original(c,Queue);}catch(...){own::cancel_child_pending(ticket);throw;}
+ const uint32_t pid=c->r[3];if(!pid||pid==0xFFFFFFFFu){own::cancel_child_pending(ticket);return;}
+ if(!own::commit_child_pending(ticket,pid))throw std::runtime_error("Native enemy fireball PID could not bind its reserved ownership record");
+}
 void queue(Cpu*c){
+ if(depth&&scopes[depth-1].kind==Kind::Wizzrobe){if(c->r[3]==story_enemies_more::kWizzrobeFire){queue_fireball(c,scopes[depth-1]);return;}original(c,Queue);return;}
  // an owned Stalfos's split (a second native Stalfos, the upper body) is refused: story_enemies turns it into the ordinary collapse
  if(depth&&scopes[depth-1].kind==Kind::Stalfos&&c->r[3]==story_enemies_more::kStalfosUpperBody){c->r[3]=0xFFFFFFFFu;return;}
  if(create_filter&&create_filter(c->r[3],c->r[4])){c->r[3]=0xFFFFFFFFu;return;}if(!depth||(c->r[3]!=Sword&&!(c->r[3]==Cape&&scopes[depth-1].kind==Kind::Darknut)&&!(c->r[3]==Bomb&&scopes[depth-1].kind==Kind::Rat))){original(c,Queue);return;}const auto s=scopes[depth-1];const uint16_t profile=uint16_t(c->r[3]);const uint32_t params=c->r[4];if(!parent(s)||!expected(s,profile,params)){c->r[3]=0xFFFFFFFFu;return;}
@@ -69,11 +79,11 @@ void cape_execute(Cpu*c){const uint32_t a=c->r[3];own::LineageInfo info{};if(!ch
 void execute(Cpu*c){const uint32_t a=c->r[3];own::LineageInfo info{};if(!child(a,info,false)){if(claimed(a)){c->r[3]=1;return;}original(c,Execute);return;}if(info.address!=a){c->r[3]=1;return;}mask(a);original(c,Execute);const Cpu result=*c;own::LineageInfo live{};if(own::lineage_info(info.pid,live)&&live.address==a&&live.source_valid&&child(a,live,true))mask(a);*c=result;}
 void wait(Cpu*c){const uint32_t a=c->r[3];own::LineageInfo info{};const bool mine=child(a,info,false);if(!mine&&claimed(a)){c->r[3]=1;return;}original(c,Wait);const Cpu result=*c;own::LineageInfo live{};if(mine&&own::lineage_info(info.pid,live)&&live.address==a&&live.source_valid&&child(a,live,true))mask(a);*c=result;}
 void before_delete(uint32_t a,uint32_t pid,uint16_t profile) noexcept {
- if((child_bytes(profile)||profile==Bomb)&&own::lineage_claimed(pid,own::Lineage::EnemyChild)){
+ if((child_bytes(profile)||profile==Bomb||profile==story_enemies_more::kWizzrobeFire)&&own::lineage_claimed(pid,own::Lineage::EnemyChild)){
   own::LineageInfo info{};const bool exact=own::lineage_info(pid,info)&&(!info.address||info.address==a);
   if(exact){own::retire_lineage(pid);static const bool trace=[]{const char*v=std::getenv("WWHD_ENEMY_TRACE");return v&&*v=='1';}();if(trace)LOG("[native_enemy] child retired pid=%08X profile=%04X params=%u source=%u",pid,unsigned(profile),info.parameters,info.source);if(info.source_valid&&retired)try{retired(info);}catch(...){}}
  }
- if(profile==0x7FF9||profile==0x7FF8||profile==0x7FF1||profile==0x7FF2||profile==own::descriptor(Kind::Stalfos).profile){for(unsigned i=0;i<depth;++i)if(scopes[i].actor==a&&scopes[i].pid==pid)scopes[i]={};if(search.actor==a&&search.pid==pid)search={};}
+ if(profile==0x7FF9||profile==0x7FF8||profile==0x7FF1||profile==0x7FF2||profile==own::descriptor(Kind::Stalfos).profile||profile==own::descriptor(Kind::Wizzrobe).profile){for(unsigned i=0;i<depth;++i)if(scopes[i].actor==a&&scopes[i].pid==pid)scopes[i]={};if(search.actor==a&&search.pid==pid)search={};}
 }
 // a rat's bomb: admitted at construction like a weapon; a claimed bomb whose record does not match is never built
 void bomb_create(Cpu*c){const uint32_t a=c->r[3];own::LineageInfo info{};const bool mine=memory(a,0xB50)&&own::lineage_info(ld32(a+4),info)&&info.role==own::Lineage::EnemyChild&&info.profile==0x126&&info.source_valid;

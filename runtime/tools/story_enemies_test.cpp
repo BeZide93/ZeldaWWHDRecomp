@@ -158,7 +158,7 @@ int main(int argc,char**argv){using namespace story_enemies;const bool drowning_
  Spec bo{Kind::BokoBaba,"m","bo","bo.dead",{}, {},1},bo2{Kind::BokoBaba,"m","bo2","bo2.dead",{}, {},1};const Token baba=declare(bo,why),baba2=declare(bo2,why);assert(baba&&baba2);
  Spec bl{Kind::Bubble,"m","bl","bl.dead",{}, {},1,0xFFFFFF01u};const Token bubble=declare(bl,why);assert(bubble);
  Spec oq{Kind::Octorok,"m","oq","oq.dead",{}, {},1};const Token octo=declare(oq,why);assert(octo);
- std::map<Kind,Token> table;for(const auto&n:story_enemies_more::kNatives){if(n.kind==Kind::Stalfos&&!weapons){Spec t{n.kind,"m",n.name,"st.dead",{}, {},1};assert(!declare(t,why));continue;}  // its club is an owned child: only with the child routes
+ std::map<Kind,Token> table;for(const auto&n:story_enemies_more::kNatives){if((n.kind==Kind::Stalfos||n.kind==Kind::Wizzrobe)&&!weapons){Spec t{n.kind,"m",n.name,"st.dead",{}, {},1};assert(!declare(t,why));continue;}  // its club is an owned child: only with the child routes
   Spec t{n.kind,"m",n.name,std::string(n.name)+".dead",{}, {},1};table[n.kind]=declare(t,why);assert(table[n.kind]&&supported(n.kind)==n.offered);}
  {std::array<uint32_t,story_enemy_ownership::kKindCount> storage{Arena+0xB000,Arena+0xB030,Arena+0xB060,Arena+0xB090,Arena+0xB0C0,Arena+0xB0F0,Arena+0xB120,Arena+0xB150,Arena+0xB180,Arena+0xB1B0,Arena+0xB1E0,Arena+0xB210};uint32_t slot=0;for(const auto&n:story_enemies_more::kNatives){storage[unsigned(n.kind)]=Arena+0xB240+0x30*slot;st32(GD(0x101F3EE0)+n.descriptor.native_profile*4,Actor+0x9000+0x100*slot);st32(Actor+0x9010+0x100*slot,n.descriptor.bytes);++slot;}configure(original,invoke,storage);}assert(install([](uint32_t){return std::string();},[](uint32_t f,void(*fn)(Cpu*)){const uint32_t canonical=f-STORY_ENEMIES_TEST_CODE_DELTA;assert(known_address(canonical)&&!hooks.count(canonical));hooks[canonical]=fn;}));assert(hooks.size()==66+4*std::size(story_enemies_more::kNatives));
  fire_keese_test(fire_keese);
@@ -204,6 +204,14 @@ int main(int argc,char**argv){using namespace story_enemies;const bool drowning_
   bind(bb,pid);run(story_enemies_more::find(Kind::Kargaroc)->create,at);assert(owns_actor(at));
   assert(!story_enemies_more::kargaroc_terminal(at));
   {const unsigned c0=claims;st8(at+0xDF2,1);Cpu probe{};probe.r[3]=at;hooks.at(0x025D99E8)(&probe);assert(claims==c0+1&&is_defeated(bb));}
+  // Wizzrobe (with the child routes: its fireballs are owned children): the red type 0, no switches,
+  // no path, never the summoner or the mini-boss; ITAI mode 0x2A's drop is its defeat
+  if(weapons){at+=0x2000;make(Kind::Wizzrobe);st8(at+0x466,0xFF);st8(at+0x467,0xFF);st8(at+0x53D,0xFF);const Token wz=table[Kind::Wizzrobe];assert(verify_actor(wz,Kind::Wizzrobe,at));
+   for(uint32_t off:{0x464u,0x465u,0x466u,0x467u,0x53Du,0x46Cu,0x46Du,0xBF1u})expect_field(wz,Kind::Wizzrobe,off);
+   st8(at+0x468,2);assert(!verify_actor(wz,Kind::Wizzrobe,at));st8(at+0x468,0);
+   bind(wz,pid);run(story_enemies_more::find(Kind::Wizzrobe)->create,at);assert(owns_actor(at));
+   st8(at+0x468,1);st8(at+0x469,0x29);assert(!story_enemies_more::wizzrobe_terminal(at));st8(at+0x469,0x2A);
+   {const unsigned c0=claims;Cpu probe{};probe.r[3]=at;hooks.at(0x025D99E8)(&probe);assert(claims==c0+1&&is_defeated(wz));}}
   // Mothula (ground): type 1, body, no switches; its moths refused while it runs; terminal state 101; a
   // winged one diving far from home turns back
   at+=0x2000;make(Kind::Mothula);st8(at+0x3EA,1);st8(at+0x3EB,0xFF);st8(at+0x3EC,10);const Token gm=table[Kind::Mothula];assert(verify_actor(gm,Kind::Mothula,at));

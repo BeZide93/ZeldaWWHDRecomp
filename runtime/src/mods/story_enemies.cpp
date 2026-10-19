@@ -133,18 +133,35 @@ void release_bomb(Cpu*c,const Entry&e,uint32_t a){if(e.spec.kind!=Kind::ArmosKni
  Cpu probe=*c;const uint32_t bomb=invoke(&probe,GC(0x025D5218),{GC(0x025E1234),a+0x400});
  if(!memory(bomb,0x10)||ld32(bomb+4)!=pid||(ld16(bomb+0xE)!=0x126&&ld16(bomb+0xE)!=0x127))return;probe=*c;invoke(&probe,GC(0x025D57E0),{bomb});trace(e,a,"held-bomb-deleted",pid);}
 // what an owned enemy holds goes with it when it is deleted
-void release_held(Cpu*c,const Entry&e,uint32_t a){release_bomb(c,e,a);release_club(c,e,a);release_morth(e,a);release_link(c,e.spec.kind,a,"removed");release_lantern(c,e,a);}
+// A Wizzrobe's fireballs (its owned children, by their lineage) go with it.
+void release_fireballs(Cpu*c,const Entry&e,uint32_t a){if(e.spec.kind!=Kind::Wizzrobe||!invoke)return;std::vector<uint32_t> balls;
+ story_enemy_ownership::visit_lineage([&](const story_enemy_ownership::LineageInfo&info){if(info.role==story_enemy_ownership::Lineage::EnemyChild&&info.source==e.token&&info.source_actor==a&&info.profile==more::kWizzrobeFire&&info.address)balls.push_back(info.address);});
+ for(uint32_t ball:balls){if(!memory(ball,more::kWizzrobeBytes)||ld16(ball+0xE)!=more::kWizzrobeFire)continue;Cpu probe=*c;invoke(&probe,GC(0x025D57E0),{ball});trace(e,a,"fireball-deleted",ld32(ball+4));}}
+void release_held(Cpu*c,const Entry&e,uint32_t a){release_fireballs(c,e,a);release_bomb(c,e,a);release_club(c,e,a);release_morth(e,a);release_link(c,e.spec.kind,a,"removed");release_lantern(c,e,a);}
+// A Wizzrobe's fireball: the WZ class's own methods with the game's profile. An owned one (its exact
+// child lineage) is admitted when its create completes and runs as an owned child (never in the area
+// manager); one whose Wizzrobe is gone (a state load, a quarantine) deletes itself. Others are the game's.
+thread_local uint32_t fireball_executing=0;
+bool owned_fireball(uint32_t a,story_enemy_ownership::LineageInfo&info){return memory(a,more::kWizzrobeBytes)&&ld16(a+0xE)==more::kWizzrobeFire&&ld32(a+0xB0)==more::kWizzrobeFireParams&&story_enemy_ownership::lineage_claimed(ld32(a+4),story_enemy_ownership::Lineage::EnemyChild)&&story_enemy_ownership::lineage_info(ld32(a+4),info)&&info.profile==more::kWizzrobeFire;}
+bool fireball(Cpu*c,uint32_t fn,uint32_t a,bool create,bool draw,bool destroy){
+ const auto*wz=more::find(Kind::Wizzrobe);if(destroy||!wz||(fn!=GC(wz->create)&&fn!=GC(wz->execute)&&fn!=GC(wz->draw)))return false;story_enemy_ownership::LineageInfo info{};if(!owned_fireball(a,info))return false;
+ if(create){original(c,fn);const Cpu result=*c;if(result.r[3]==4){const bool admitted=story_enemy_ownership::admit_lineage(info.pid,a);if(!admitted){Cpu probe=*c;invoke(&probe,GC(0x025D57E0),{a});}if(enemy_trace())LOG("[native_enemy] wizzrobe fireball actor=%08X pid=%08X %s",a,info.pid,admitted?"admitted":"refused");}*c=result;return true;}
+ if(!info.source_valid||(info.address&&info.address!=a)){if(!draw&&ld8(a+0xC)!=3){Cpu probe=*c;invoke(&probe,GC(0x025D57E0),{a});}c->r[3]=1;return true;}
+ if(draw){original(c,fn);return true;}
+ const uint32_t prior=fireball_executing;fireball_executing=a;try{original(c,fn);}catch(...){fireball_executing=prior;throw;}fireball_executing=prior;return true;}
 void lifecycle(Cpu*c,uint32_t fn,bool create,bool draw,bool destroy){const uint32_t a=c->r[3];
  // daTn_Create runs daTn_Execute itself (three steps that place the armour pieces): inside its own create
  // the native code runs as it is, under the create's scopes
  if(!create&&!destroy){Entry*n=find(a,false);if(n&&n->creating&&n->spec.kind==Kind::Darknut){original(c,fn);return;}}
  Entry*e=find(a,!create&&!destroy);
+ if(!e&&fireball(c,fn,a,create,draw,destroy))return;
  if(!create&&!draw&&!destroy&&enemy_trace()){if(!e)exec_trace(a,find(a,false)?"unverified-original":"not-owned");}if(!e){if(destroy&&cleanup_identity(a,fn)){story_enemy_ownership::retire_before_delete(a);native_delete(c,fn);return;}if(reserved(a)){if(!create&&!draw&&!destroy)release_orphan(c,a);refuse_or_skip(c,a,create);return;}original(c,fn);return;}
  if(destroy){release_held(c,*e,a);if(e->spec.kind==Kind::Bokoblin)st8(a+0x137D,0);if(e->spec.kind==Kind::Moblin)st8(a+0x2E0E,0);if(children.retire&&has_children(e->spec.kind))children.retire(e->token,a);const auto kids=live_children(*e);const uint32_t pid=e->pid;story_enemy_ownership::retire_before_delete(a);e->address=0;e->pid=0xFFFFFFFFu;trace(*e,a,"delete");SaveWatch watch(e,e->spec.kind==Kind::Darknut);native_delete(c,fn);const Cpu result=*c;watch.check("delete");if(watch.base)LOG("[native_enemy] %s save info watched over %u Darknut steps: %u changed bytes",e->spec.id.c_str(),SaveWatch::steps,SaveWatch::changed);if(retired)retired(e->token,pid);
   for(uint32_t kid:kids)if(kid){Cpu probe=result;const uint32_t ok=invoke(&probe,GC(0x025D57E0),{kid});trace(*e,a,"child-removed",ok);}
   *c=result;return;}
  if(!supported(e->spec.kind)||e->quarantine){if(!create&&!draw){exec_trace(a,"quarantined");release_link(c,e->spec.kind,a,"stopped");}refuse_or_skip(c,a,create);return;}
  // a Redead only where the stage has its scream and bite events
+ if(create&&e->spec.kind==Kind::Wizzrobe){const char*stage=reinterpret_cast<const char*>(mem::ptr(play_base()+0x5134));for(const char*no:more::kNoWizzrobeStages)if(std::strncmp(stage,no,8)==0){trace(*e,a,"no-wizzrobe-on-this-stage");refuse_or_skip(c,a,create);return;}}
  if(create&&e->spec.kind==Kind::Redead){const char*stage=reinterpret_cast<const char*>(mem::ptr(play_base()+0x5134));for(const char*no:more::kNoRedeadStages)if(std::strncmp(stage,no,8)==0){trace(*e,a,"no-redead-events-on-this-stage");refuse_or_skip(c,a,create);return;}}
  if(!create&&story_items::enemy_defeated(e->marker)){if(!draw&&ld8(a+0xC)!=3){Cpu probe=*c;const uint32_t result=invoke(&probe,GC(0x025D57E0),{a});static unsigned reported=0;if(reported++<128)trace(*e,a,"terminal-delete-retry",result);}c->r[3]=1;return;}
  if(!create&&!draw){if(!story_enemy_ownership::lookup_actor(a)){if(!story_enemy_ownership::admit_created(e->token,a)){disable(*e,a);c->r[3]=1;return;}e->address=a;}e->address=a;
@@ -153,8 +170,8 @@ void lifecycle(Cpu*c,uint32_t fn,bool create,bool draw,bool destroy){const uint3
  }
  struct ChildScope {bool active=false;~ChildScope(){if(active)children.leave();}} child_scope;
  if((create||!draw)&&(has_children(e->spec.kind)||(e->spec.kind==Kind::Rat&&(params_of(e->spec)&0x100u)))){  // a bomb rat's bomb is its child
- if(!create&&e->spec.kind!=Kind::Stalfos&&!children.ready(e->token,a)){if(!draw)exec_trace(a,"children-not-ready");c->r[3]=1;return;}if(!children.enter(e->token,e->spec.kind,a,story_enemy_ownership::source_epoch(e->token))){disable(*e,a);refuse_or_skip(c,a,create);return;}child_scope.active=true;}
- struct HioScope{uint32_t address=0;uint8_t old=0;HioScope(bool active,Kind k){if(active){address=k==Kind::Bokoblin?GD(0x10191468):k==Kind::Moblin?GD(0x101BA690):TNhioSet;old=ld8(address);st8(address,1);}}~HioScope(){if(address)st8(address,old);}} hio(create&&has_children(e->spec.kind)&&e->spec.kind!=Kind::Stalfos,e->spec.kind);
+ if(!create&&e->spec.kind!=Kind::Stalfos&&e->spec.kind!=Kind::Wizzrobe&&!children.ready(e->token,a)){if(!draw)exec_trace(a,"children-not-ready");c->r[3]=1;return;}if(!children.enter(e->token,e->spec.kind,a,story_enemy_ownership::source_epoch(e->token))){disable(*e,a);refuse_or_skip(c,a,create);return;}child_scope.active=true;}
+ struct HioScope{uint32_t address=0;uint8_t old=0;HioScope(bool active,Kind k){if(active){address=k==Kind::Bokoblin?GD(0x10191468):k==Kind::Moblin?GD(0x101BA690):TNhioSet;old=ld8(address);st8(address,1);}}~HioScope(){if(address)st8(address,old);}} hio(create&&(e->spec.kind==Kind::Bokoblin||e->spec.kind==Kind::Moblin||e->spec.kind==Kind::Darknut),e->spec.kind);
  // daTn_Create rewrites two statics every Darknut shares: search_sp (from the stage name, or 1 for a boss)
  // and s_check (the native boss-Darknut event counter). A mod Darknut leaves both as they were.
  struct TnStatics{bool active;uint8_t sp=0,check=0;TnStatics(bool on):active(on){if(on){sp=ld8(TNsearchSp);check=ld8(TNsCheck);}}~TnStatics(){if(active){st8(TNsearchSp,sp);st8(TNsCheck,check);}}} tn_statics(create&&e->spec.kind==Kind::Darknut);
@@ -195,7 +212,7 @@ std::vector<Kind> all_kinds(){std::vector<Kind> out(std::begin(kKinds),std::end(
 // An owned Mothula's moths (the game's own Morths) are refused; it fights alone.
 void create_child(Cpu*c){if(executing&&executing->spec.kind==Kind::Mothula&&c->r[3]==more::kMothulaMoth){static unsigned told=0;if(told++<8)trace(*executing,executing->address,"moth-release-refused");c->r[3]=0xFFFFFFFFu;return;}original(c,GC(more::kCreateChild));}
 // An owned enemy's colliders never join the area manager (grass and the like): only the pair policy reaches them.
-void area_set(Cpu*c){const uint32_t o=c->r[4];if(executing&&more::find(executing->spec.kind)&&executing->address&&o>=executing->address&&o<executing->address+story_enemy_ownership::descriptor(executing->spec.kind).bytes)return;original(c,GC(more::kAreaManagerSet));}
+void area_set(Cpu*c){const uint32_t o=c->r[4];if(fireball_executing&&o>=fireball_executing&&o<fireball_executing+more::kWizzrobeBytes)return;if(executing&&more::find(executing->spec.kind)&&executing->address&&o>=executing->address&&o<executing->address+story_enemy_ownership::descriptor(executing->spec.kind).bytes)return;original(c,GC(more::kAreaManagerSet));}
 // A Morth's death effect (no drop outside Ganon's Tower) is its defeat; the game then deletes it.
 void morth_death(Cpu*c){const uint32_t a=c->r[3];Entry*e=find(a);if(!e){if(reserved(a))return;original(c,GC(more::kMorthDeathEffect));return;}
  if(e->spec.kind!=Kind::Morth||executing!=e||!more::morth_dying(a)){disable(*e,a);trace(*e,a,"unexpected-death-effect");return;}claim(*e,a);original(c,GC(more::kMorthDeathEffect));}
@@ -244,11 +261,12 @@ uint16_t home_x(Token t){const auto*e=get(t);return e&&e->spec.kind==Kind::Darkn
 bool configure_children(ChildBridge b,bool verified){if(installed)return false;if(verified&&(!b.enter||!b.leave||!b.ready||!b.retire))return false;children=std::move(b);weapon_admission=verified;return true;}
 void child_retired(const story_enemy_ownership::LineageInfo&info){if(!info.source_valid||info.role!=story_enemy_ownership::Lineage::EnemyChild)return;auto*e=get(info.source);if(!e||!has_children(e->spec.kind)||e->pid!=info.source_pid||!info.source_actor||find(info.source_actor)!=e||story_enemy_ownership::lookup_actor(info.source_actor)!=e->token||story_enemy_ownership::source_epoch(e->token)!=info.epoch)return;const uint32_t a=info.source_actor;
  // a Darknut's sword (mBokoPcId 0x1560, with m0C34/m0C38/m140C its holding state) or cape (mMantPcId 0x1598)
+ if(e->spec.kind==Kind::Wizzrobe)return;  // its fireballs refer to nothing in it
  if(e->spec.kind==Kind::Darknut){if(ld32(a+0x1560)==info.pid){st32(a+0x1560,0xFFFFFFFFu);st32(a+0xD84,0);st32(a+0xD88,0);st8(a+0x155C,0);}else if(ld32(a+0x1598)==info.pid)st32(a+0x1598,0xFFFFu);else return;trace(*e,a,"child-retired-native-loss",info.pid);return;}
  const uint32_t reference=e->spec.kind==Kind::Bokoblin?0x1360:0x2D60;if(ld32(a+reference)!=info.pid)return;
  if(e->spec.kind==Kind::Bokoblin){st32(a+0xC90,0);st32(a+0xC94,0);st8(a+0x1374,0);}else{st8(a+0x10B3,0);}
  st32(a+reference,0xFFFFFFFFu);trace(*e,a,"child-retired-native-loss",info.pid);}
-bool supported(Kind k){if(const auto*n=more::find(k))return n->offered&&(k!=Kind::Stalfos||weapon_admission);return k==Kind::ChuChu||k==Kind::Keese||k==Kind::Miniblin||k==Kind::Peahat||k==Kind::Rat||k==Kind::Octorok||k==Kind::Bubble||k==Kind::BokoBaba||k==Kind::RatHole||(weapon_admission&&has_children(k));}
+bool supported(Kind k){if(const auto*n=more::find(k))return n->offered&&((k!=Kind::Stalfos&&k!=Kind::Wizzrobe)||weapon_admission);return k==Kind::ChuChu||k==Kind::Keese||k==Kind::Miniblin||k==Kind::Peahat||k==Kind::Rat||k==Kind::Octorok||k==Kind::Bubble||k==Kind::BokoBaba||k==Kind::RatHole||(weapon_admission&&has_children(k));}
 bool verify_actor(Token t,Kind kind,uint32_t a){const auto*e=get(t);const auto&d=story_enemy_ownership::descriptor(kind);if(!e||kind!=e->spec.kind||!supported(kind)||!memory(a,d.bytes)||ld16(a+0xE)!=d.profile||ld32(a+0xB4)!=native_vtable(kind)||ld32(a+0xB0)!=params_of(e->spec)||ld8(a+0x2DD)!=0xFF||ld16(a+0x2D8)!=0xFFFF||ld16(a+0x2FC)!=home_z(kind))return false;
  if(const auto*n=more::find(kind))return n->verify(a,params_of(e->spec))&&(!n->ice||ld8(a+n->ice+0x1B1)==0);
  if(kind==Kind::ChuChu)return ld8(a+0x3F8)==0&&ld8(a+0x3F9)==((params_of(e->spec)>>8)&0xFF)&&ld8(a+0x3FA)==0&&ld8(a+0x3FB)==0xFF&&(ld8(a+0x3FC)<=4||(black_chuchu(e->spec)&&ld8(a+0x3FC)==6))&&ld8(a+0x924+0x1B1)==0;

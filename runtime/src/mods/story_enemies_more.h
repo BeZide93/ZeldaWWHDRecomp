@@ -249,6 +249,30 @@ inline bool kargaroc_verify(uint32_t a, uint32_t p) {
 }
 inline bool kargaroc_terminal(uint32_t a) { return ld8(a + 0xDF2) != 0; }
 
+// ---------------------------------------------------------------- Wizzrobe (d_a_wz)
+// Parameter 0xFFFFFF00: type 0 (the red one: it teleports around where it was placed and casts fire),
+// death switch byte 1 0xFF (written in its delete and when hurt only behind a 0xFF guard), enable switch
+// byte 2 0xFF (read only), no room path (0xFF; without one it teleports within 200 of home). Angle z 0:
+// summon table row 0 (the summoner only). Never the summoner 1 (up to 20 enemies of other kinds, plain
+// creates without a parent; without a path it also reads a missing path), the Wind Temple mini-boss 2
+// (its cutscene, camera and music), 3, or the ball/door/fireball types 10..13; nor on the stage kazeMB,
+// where it waits for the mini-boss demo. It never holds Link. Its fireballs are WZ actors of the game's
+// profile (parameter 0xFFFFFF0A, created with fopAcM_create, three per volley, no parent): created in the
+// owned Wizzrobe's execute they are its owned children (story_enemy_children), hit Link only (the
+// ownership pair policy), never join the area manager, and go when it goes. No save writes (setID 0xFFFF).
+// Death: action 1 (ITAI) mode 0x2A makes the one drop. Colliders on mStts 0x784: body 0x7C0 (no attack),
+// ball sphere 0x8F0 (the fireball types only); enemyice 0xA40 (0xAAC on 0xA70), enemyfire 0xDF8 (0xED4 on 0xE98).
+inline constexpr Collider kWizzrobeColliders[] = {{0x7C0, 0x784, 0}, {0x8F0, 0x784, 0}, {0xAAC, 0xA70, 0xA40}, {0xED4, 0xE98, 0xDF8}};
+inline bool wizzrobe_verify(uint32_t a, uint32_t) {
+    return ld8(a + 0x464) == 0 && ld8(a + 0x465) == 0 && ld8(a + 0x466) == 0xFF && ld8(a + 0x467) == 0xFF && ld8(a + 0x53D) == 0xFF &&
+           ld8(a + 0x46C) == 0 && ld8(a + 0x46D) == 0 && ld8(a + 0x468) <= 1;
+}
+inline bool wizzrobe_terminal(uint32_t a) { return ld8(a + 0x468) == 1 && ld8(a + 0x469) == 0x2A && ld8(a + 0x46C) == 0; }
+inline constexpr uint16_t kWizzrobeFire = 0xD0;            // the fireball: the Wizzrobe's own class and profile
+inline constexpr uint32_t kWizzrobeFireParams = 0xFFFFFF0Au;
+inline constexpr uint32_t kWizzrobeBytes = 0x10B0, kWizzrobeFireSphere = 0x8F0, kWizzrobeStts = 0x784;
+inline constexpr const char* kNoWizzrobeStages[] = {"kazeMB"};
+
 inline constexpr Native kNatives[] = {
     {Kind::Stalfos, "stalfos", {0x7FE0, 0xBE, 0x25B0, kStalfosColliders, std::size(kStalfosColliders)},
      CANONICAL_CODE_ID(0x02495C70).value(), CANONICAL_CODE_ID(0x02493FB0).value(), CANONICAL_CODE_ID(0x02491F34).value(),
@@ -286,6 +310,10 @@ inline constexpr Native kNatives[] = {
      CANONICAL_CODE_ID(0x02061DEC).value(), CANONICAL_CODE_ID(0x0205EA58).value(), CANONICAL_CODE_ID(0x0205E420).value(),
      CANONICAL_CODE_ID(0x02061964).value(), [] { return GD(0x10007C8C); }, 0xFFFFFF00u, 0, 0xDF4, {0x11AC, 0}, true,
      kargaroc_verify, kargaroc_terminal, nullptr, 0x465, false},
+    {Kind::Wizzrobe, "wizzrobe", {kWizzrobeProfile, 0xD0, 0x10B0, kWizzrobeColliders, std::size(kWizzrobeColliders)},
+     CANONICAL_CODE_ID(0x024E6BEC).value(), CANONICAL_CODE_ID(0x024E398C).value(), CANONICAL_CODE_ID(0x024E2468).value(),
+     CANONICAL_CODE_ID(0x024E61E0).value(), [] { return GD(0x10042D90); }, 0xFFFFFF00u, 0, 0xA40, {0xDF8, 0}, true,
+     wizzrobe_verify, wizzrobe_terminal, nullptr, 0x468, false},
 };
 
 inline const Native* find(Kind k) {

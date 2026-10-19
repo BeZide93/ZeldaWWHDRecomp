@@ -38,7 +38,7 @@ constexpr uint16_t home_z(Kind k){return k==Kind::Bokoblin||k==Kind::Moblin||k==
 // The x rotation word a declared enemy is placed with: the Darknut's equipment, 0 for the other kinds.
 uint16_t home_x(Token);
 // The kinds whose weapons (and the Darknut's cape; the Stalfos's club) are owned children (story_enemy_children).
-constexpr bool has_children(Kind k){return k==Kind::Bokoblin||k==Kind::Moblin||k==Kind::Darknut||k==Kind::Stalfos;}
+constexpr bool has_children(Kind k){return k==Kind::Bokoblin||k==Kind::Moblin||k==Kind::Darknut||k==Kind::Stalfos||k==Kind::Wizzrobe;}
 struct ChildBridge {
  std::function<bool(Token,Kind,uint32_t parent,uint32_t epoch)> enter;
  std::function<void()> leave;

@@ -136,7 +136,7 @@ more of the same; **Stop placing** in the toolbar or Esc ends it.
 - **Enemies:** ChuChu (green, red, blue, yellow or black), Bokoblin (with a stick, a shield or a machete),
   Moblin, Keese (or a Fire Keese), Miniblin, Peahat (or a Seahat), Darknut (with a shield, a helmet, or the Mighty Darknut), Rat hole (rats,
   bomb rats or both), Boko Baba, Bubble (red or blue), Octorok, Stalfos, Redead,
-  Mothula (on the ground or winged), Morth, Magtail, Poe, Armos, Armos Knight, Kargaroc. The Inspector's **Variant** changes a placed one, and **Sets switch when defeated**
+  Mothula (on the ground or winged), Morth, Magtail, Poe, Armos, Armos Knight, Kargaroc, Wizzrobe. The Inspector's **Variant** changes a placed one, and **Sets switch when defeated**
   picks one of the mod's switches to set once every enemy naming it is defeated.
 - **Your models:** one of the mod's models (static or skinned), your own enemy (a skinned model with
   flinch, stun, death and idle clips), a prop Link can carry.

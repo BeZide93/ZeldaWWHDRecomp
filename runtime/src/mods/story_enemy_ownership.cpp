@@ -71,14 +71,25 @@ bool suspected_owned(uint32_t o){
 }
 // a Darknut cape's colliders: the wind sphere and nine mesh spheres on its mStts 0x365C
 bool cape_object(uint32_t a,uint32_t object){if(object==a+0x3698)return true;for(uint32_t i=0;i<9;++i)if(object==a+0x37C4+i*0x12C)return true;return false;}
+// the class extent of a table kind's child of its own class (story_enemies_more.h)
+uint32_t table_child_bytes(uint16_t profile){return profile==story_enemies_more::kWizzrobeFire?story_enemies_more::kWizzrobeBytes:0u;}
 bool owned_child_object(uint32_t object){
  if(arena)for(size_t n=0;n<kChildCapacity;++n){uint32_t r=arena+LineageOffset+uint32_t(n)*64;if(ld32(r)!=Magic||ld32(r+8)!=unsigned(Lineage::EnemyChild))continue;uint32_t a=ld32(r+40),pid=ld32(r+20);if(pid&&pid!=0xFFFFFFFFu&&memory(a,0xA34)&&ld32(a+4)==pid&&ld16(a+0xE)==0x1CF&&object>=a&&object<a+0xA34)return true;if(pid&&pid!=0xFFFFFFFFu&&memory(a,kCapeBytes)&&ld32(a+4)==pid&&ld16(a+0xE)==kCapeProfile&&object>=a&&object<a+kCapeBytes)return true;}
  // a rat's bomb (daBomb_c, 0x126): its explosion sphere 0x920 on mStts 0x8E4
  if(arena)for(size_t n=0;n<kChildCapacity;++n){uint32_t r=arena+LineageOffset+uint32_t(n)*64;if(ld32(r)!=Magic||ld32(r+8)!=unsigned(Lineage::EnemyChild)||ld32(r+28)!=0x126)continue;uint32_t a=ld32(r+40),pid=ld32(r+20);if(pid&&pid!=0xFFFFFFFFu&&memory(a,0xB50)&&ld32(a+4)==pid&&ld16(a+0xE)==0x126&&object==a+0x920&&ld32(object+0x44)==a+0x8E4)return true;}
+ // the table kinds' children of their own classes (a Wizzrobe's fireballs): the whole class extent
+ if(arena)for(size_t n=0;n<kChildCapacity;++n){uint32_t r=arena+LineageOffset+uint32_t(n)*64;if(ld32(r)!=Magic||ld32(r+8)!=unsigned(Lineage::EnemyChild))continue;const uint32_t bytes=table_child_bytes(uint16_t(ld32(r+28)));uint32_t a=ld32(r+40),pid=ld32(r+20);if(bytes&&pid&&pid!=0xFFFFFFFFu&&memory(a,bytes)&&ld32(a+4)==pid&&uint32_t(ld16(a+0xE))==ld32(r+28)&&object>=a&&object<a+bytes)return true;}
  // A damaged saved address must not erase a claimed child. The actual native
  // Stts owner and PID confer denial only; a recycled actor with a new PID passes.
- if(memory(object,0x48)){uint32_t stts=ld32(object+0x44);if(memory(stts,0x14)){uint32_t a=ld32(stts+0xC);if(memory(a,0xA34)&&ld16(a+0xE)==0x1CF&&stts==a+0x6C4&&(object==a+0x700||object==a+0x82C)&&ld32(stts+0x10)==ld32(a+4)&&lineage_claimed(ld32(a+4),Lineage::EnemyChild))return true;if(memory(a,kCapeBytes)&&ld16(a+0xE)==kCapeProfile&&stts==a+0x365C&&cape_object(a,object)&&ld32(stts+0x10)==ld32(a+4)&&lineage_claimed(ld32(a+4),Lineage::EnemyChild))return true;}}
+ if(memory(object,0x48)){uint32_t stts=ld32(object+0x44);if(memory(stts,0x14)){uint32_t a=ld32(stts+0xC);if(memory(a,story_enemies_more::kWizzrobeBytes)&&ld16(a+0xE)==story_enemies_more::kWizzrobeFire&&stts==a+story_enemies_more::kWizzrobeStts&&ld32(stts+0x10)==ld32(a+4)&&lineage_claimed(ld32(a+4),Lineage::EnemyChild))return true;if(memory(a,0xA34)&&ld16(a+0xE)==0x1CF&&stts==a+0x6C4&&(object==a+0x700||object==a+0x82C)&&ld32(stts+0x10)==ld32(a+4)&&lineage_claimed(ld32(a+4),Lineage::EnemyChild))return true;if(memory(a,kCapeBytes)&&ld16(a+0xE)==kCapeProfile&&stts==a+0x365C&&cape_object(a,object)&&ld32(stts+0x10)==ld32(a+4)&&lineage_claimed(ld32(a+4),Lineage::EnemyChild))return true;}}
  return false;
+}
+// A Wizzrobe's fireball sphere: an owned child of a live owned Wizzrobe (its exact lineage, parameters,
+// class and collider), which may hit Link and nothing else.
+bool wizzrobe_fire(uint32_t object){
+ namespace more=story_enemies_more;if(!memory(object,0x48))return false;const uint32_t stts=ld32(object+0x44);if(!memory(stts,0x14))return false;const uint32_t a=ld32(stts+0xC);LineageInfo info{};
+ if(!memory(a,more::kWizzrobeBytes)||object!=a+more::kWizzrobeFireSphere||stts!=a+more::kWizzrobeStts||!lookup_lineage_actor(a,Lineage::EnemyChild,info)||!info.source_valid||info.profile!=more::kWizzrobeFire||info.parameters!=more::kWizzrobeFireParams||ld32(stts+0x10)!=info.pid||ld32(a+0xB4)!=GD(0x10042D90)||ld8(a+0x464)!=10)return false;
+ auto*source=get(info.source);return source&&source->kind==Kind::Wizzrobe&&valid(*source)&&source->address==info.source_actor&&source->pid==info.source_pid&&source->epoch==info.epoch;
 }
 bool fire_child(uint32_t object,int16_t& timer){
  if(!memory(object,0x48))return false;uint32_t stts=ld32(object+0x44);if(!memory(stts,0x14))return false;uint32_t a=ld32(stts+0xC);LineageInfo info{};
@@ -146,6 +157,8 @@ PairPolicy pair_policy(uint32_t at,uint32_t tg){
   }
  }
 const bool child_at=owned_child_object(at),child_tg=owned_child_object(tg);if(child_at||child_tg){if(child_at&&child_tg)return PairPolicy::Reject;
+  // a Wizzrobe's fireball hits Link only
+  if(child_at&&wizzrobe_fire(at))return link_object(tg)?PairPolicy::Delegate:PairPolicy::Reject;
   // an owned rat bomb's blast reaches Link and the mod's own enemies only; Link may hit (push) the bomb
   if(child_at&&bomb_object(at)){const bool hits=link_object(tg)||lookup_collider(tg);trace_blast(tg,hits);return hits?PairPolicy::Delegate:PairPolicy::Reject;}
   if(child_tg&&bomb_object(tg))return link_object(at)?PairPolicy::Delegate:PairPolicy::Reject;int16_t timer=0;if(child_tg&&fire_child(tg,timer)&&timer==0&&ignition_source(at)&&(ld32(at+0x10)&0x20200u))return PairPolicy::Delegate;if(child_at&&fire_child(at,timer)&&timer>0&&(ld32(at)&1u)&&link_object(tg))return PairPolicy::Delegate;if(child_tg&&!child_at&&live_cape(tg)&&link_object(at))return PairPolicy::Delegate;return PairPolicy::Reject;}Token a=lookup_collider(at),t=lookup_collider(tg);if(t&&!a&&get(t)&&get(t)->kind==Kind::Octorok&&tg==get(t)->address+0x6EC&&octorok_rock(at)){if(pair_trace())LOG("[enemy_pair] rock at=%08X hits the owned Octorok",at);return PairPolicy::Delegate;}bool ao=a||suspected_owned(at),to=t||suspected_owned(tg);if(!ao&&!to)return PairPolicy::Delegate;if(ao&&to)return PairPolicy::Reject;if(a&&link_object(tg))return PairPolicy::Delegate;if(t&&link_object(at))return PairPolicy::Delegate;if(t&&projectile_enabled&&projectile_verifier){try{if(projectile_verifier(at))return PairPolicy::Delegate;}catch(...){}}return PairPolicy::Reject;}
