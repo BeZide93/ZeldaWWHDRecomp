@@ -75,6 +75,41 @@ ReadBack read_back(uint32_t actor, const Native& n) {
     return ld16(actor + 0xE) == n.process && ld32(actor + 0xB0) == n.params && ld8(actor + 0x2DD) == n.subtype ? ReadBack::Match : ReadBack::Mismatch;
 }
 
+std::map<uint32_t, unsigned> g_room_ages;
+void note_room(uint32_t room_process) {
+    if (!room_process) return;
+    if (g_room_ages.size() > 64 && !g_room_ages.contains(room_process)) g_room_ages.clear();
+    unsigned& age = g_room_ages[room_process];
+    if (age < 1000000) ++age;
+}
+unsigned room_age(uint32_t room_process) {
+    const auto it = g_room_ages.find(room_process);
+    return it == g_room_ages.end() ? 0 : it->second;
+}
+
+int batch_free(const std::string& kind) {
+    struct Layout {
+        const char* kind;
+        uint32_t pointer, data, count, stride;
+        bool (*used)(uint32_t);
+    };
+    static const Layout layouts[] = {
+        {"grass", 0x5AB8, 0x9C, 1500, 0x44, [](uint32_t d) { return ld8(d) != 0; }},
+        {"tree", 0x5ABC, 0x9C, 64, 0xA8, [](uint32_t d) { return ld8(d) != 0; }},
+        {"wood", 0x5AC0, 0x98, 200, 0x248, [](uint32_t d) { return (ld32(d + 0x10) & 1) != 0; }},
+        {"flower", 0x5AC4, 0x9C, 200, 0x44, [](uint32_t d) { return (ld8(d) & 2) != 0; }},
+    };
+    for (const auto& l : layouts) {
+        if (kind != l.kind) continue;
+        const uint32_t packet = ld32(GD(0x1046F0B0) + l.pointer);  // dComIfGp_get{Grass,Tree,Wood,Flower}
+        if (!packet || (packet & 3) || packet < mem::kMem2Start || uint64_t(packet) + l.data + uint64_t(l.count) * l.stride > mem::kMem2End) return -1;
+        int free = 0;
+        for (uint32_t i = 0; i < l.count; ++i) free += !l.used(packet + l.data + i * l.stride);
+        return free;
+    }
+    return -1;
+}
+
 bool heap_trace() {
     const char* v = std::getenv("WWHD_MOD_ACTOR_HEAPS");
     return v && std::strcmp(v, "1") == 0;
@@ -102,6 +137,7 @@ void trace_created(Cpu* c, Call call, const std::string& mod, const std::string&
 }
 
 void forget_resolved() {
+    g_room_ages.clear();
     g_names.clear();
     g_before.clear();
 }

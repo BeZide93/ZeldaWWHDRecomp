@@ -38,6 +38,19 @@ bool heap_trace();
 void trace_before_create(Cpu* c, Call call, const std::string& mod, const std::string& id);
 void trace_created(Cpu* c, Call call, const std::string& mod, const std::string& id, uint32_t actor);
 
+// Shared batches (grass, flowers, small and bushy trees): the free units of the stage's batch of `kind`
+// ("grass", "flower", "tree", "wood"), counted in the game's own batch; -1 when the stage has none (the
+// game makes a stage's batch with its first own placement; a mod never makes one).
+int batch_free(const std::string& kind);
+// How many logic steps a room (by its process id) has been ready: a batch is planted once the room's own
+// placements are done (kBatchSettleSteps).
+inline constexpr unsigned kBatchSettleSteps = 30;
+void note_room(uint32_t room_process);
+unsigned room_age(uint32_t room_process);
+// A batch placement's planted mark for the pid slot: the room process it was planted in (a room visit).
+inline uint32_t planted_mark(uint32_t room_process) { return 0xFE000000u | (room_process & 0x00FFFFFFu); }
+inline bool is_planted_mark(uint32_t slot) { return (slot >> 24) == 0xFE; }
+
 // the native name lookups seen so far (tests)
 void forget_resolved();
 

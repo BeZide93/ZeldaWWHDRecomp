@@ -674,9 +674,10 @@ public:
             std::vector<std::string> pending;
             if (!story_actors::editor_update(mod, actors, changed, w, &pending, c)) set_status("Live update refused: " + w);
             else if (!pending.empty()) {
-                std::string list;
-                for (const auto& p : pending) list += (list.empty() ? "" : "; ") + p;
-                set_status("Saved in the package; after a restart: " + list);
+                // grass, flowers and small trees (game objects in the stage's shared batch) wait for the room, not a restart
+                std::string list, room;
+                for (const auto& p : pending) (p.find("(Reload room)") != std::string::npos ? room : list) += ((p.find("(Reload room)") != std::string::npos ? room : list).empty() ? "" : "; ") + p;
+                set_status(list.empty() ? "Saved in the package; " + room : "Saved in the package; after a restart: " + list + (room.empty() ? "" : "; " + room));
             } else if (!changed.empty())
                 set_status("Updated " + std::to_string(changed.size()) + " actor(s) in the game");
         });

@@ -48,7 +48,7 @@ namespace {
 using story_notebook::ManifestActor;
 struct Actor {std::string mod; ManifestActor spec; uint32_t process=0xFFFFFFFFu; bool deleting=false; uint32_t mod_token=0; bool restore_talk=false;uint32_t prop_token=0,switch_token=0,switch_source=0,enemy_token=0;story_items::EnemyMarkerHandle combat_marker{};story_items::PropMarkerHandle carry_marker=0;identity::Fingerprint fingerprint{};bool restore_quarantined=false;bool respawn=false;bool removed=false;uint32_t resident_event_token=0;bool redeclare=false;uint32_t held_started=0xFFFFFFFFu;/* editor: the process whose first Execute a held pose ran */
     // a game object (story_game_objects.h): created on the retail profile, tracked by process id, read back once made
-    bool game=false,game_checked=false,game_mismatch=false;uint8_t game_attempts=0;story_game_objects::Native game_native{};};
+    bool game=false,game_batch=false,game_checked=false,game_mismatch=false;uint8_t game_attempts=0;uint32_t game_planted=0;story_game_objects::Native game_native{};};
 std::vector<Actor> g_actors;
 void native_redeclare(Actor& a);  // the editor: a changed native declaration, once its old copy is gone
 uint32_t g_next_resident_event_token=1;
@@ -472,7 +472,7 @@ bool load(const std::string& mod,const std::vector<ManifestActor>& actors,std::s
     std::vector<Actor> staged;staged.reserve(actors.size());g_actors.reserve(g_actors.size()+actors.size());
     struct LoadRollback {decltype(g_island_mods) island_mods=g_island_mods;size_t visuals=g_visual_bindings.size();size_t props=story_props::checkpoint(),models=mod_actor::checkpoint(),switches=story_switches::checkpoint(),enemies=story_enemies::checkpoint(),ownership=story_enemy_ownership::checkpoint();story_items::PropMarkerCheckpoint markers=story_items::prop_marker_checkpoint();decltype(g_flag_names) flags=g_flag_names;bool committed=false;~LoadRollback(){if(!committed){g_island_mods=std::move(island_mods);g_visual_bindings.resize(visuals);story_props::rollback(props);mod_actor::rollback(models);story_switches::rollback(switches);story_enemies::rollback(enemies);story_enemy_ownership::rollback(ownership);story_items::rollback_prop_markers(markers);g_flag_names=std::move(flags);}}} rollback;
     if(!register_flags(mod,flags,why))return false;
-    for(const auto& a:actors){Actor added{mod,a};if(a.game_object()){added.game=true;added.fingerprint=identity::fingerprint(mod,a);}if(a.actor=="resident"&&people_type(a.resident)){if(!g_next_resident_event_token||g_next_resident_event_token==0xFFFFFFFFu)return why="resident event token exhausted",false;added.resident_event_token=g_next_resident_event_token++;added.fingerprint=identity::fingerprint(mod,a);}if(a.kind=="mod"&&a.combat_enabled){added.combat_marker=story_items::register_enemy_marker(mod,a.id,a.defeated_flag,why);if(!added.combat_marker.value)return false;added.fingerprint=identity::fingerprint(mod,a);}if(a.kind=="mod"&&a.carry_break_on_impact){added.carry_marker=story_items::register_prop_marker(mod,a.id,a.broken_flag,why);if(!added.carry_marker)return false;added.fingerprint=identity::fingerprint(mod,a);}story_enemies::Kind enemy;if(enemy_kind(a,enemy)){added.fingerprint=identity::fingerprint(mod,a);story_enemies::Spec spec{enemy,mod,a.id,a.defeated_flag,{},added.fingerprint,1,story_enemies::parameters(enemy,a.variant)};for(const auto&drop:a.drops)spec.drops.push_back({drop.item,drop.quantity});added.enemy_token=story_enemies::declare(spec,why);if(!added.enemy_token)return false;}if(story_props::is_prop(a)){added.fingerprint=identity::fingerprint(mod,a);added.prop_token=story_props::declare(mod,a,why);if(!added.prop_token)return false;}if(a.actor=="switch"){if(a.switch_flag.empty())return why="switch requires an own flag",false;added.fingerprint=identity::fingerprint(mod,a);added.switch_token=story_switches::declare_switch(mod,a.id,why);added.switch_source=added.switch_token;if(!added.switch_token)return false;}staged.push_back(std::move(added));}
+    for(const auto& a:actors){Actor added{mod,a};if(a.game_object()){added.game=true;const auto*e=story_game_objects::catalogue().find(story_game_objects::reference(a.actor));added.game_batch=e&&e->batch();added.fingerprint=identity::fingerprint(mod,a);}if(a.actor=="resident"&&people_type(a.resident)){if(!g_next_resident_event_token||g_next_resident_event_token==0xFFFFFFFFu)return why="resident event token exhausted",false;added.resident_event_token=g_next_resident_event_token++;added.fingerprint=identity::fingerprint(mod,a);}if(a.kind=="mod"&&a.combat_enabled){added.combat_marker=story_items::register_enemy_marker(mod,a.id,a.defeated_flag,why);if(!added.combat_marker.value)return false;added.fingerprint=identity::fingerprint(mod,a);}if(a.kind=="mod"&&a.carry_break_on_impact){added.carry_marker=story_items::register_prop_marker(mod,a.id,a.broken_flag,why);if(!added.carry_marker)return false;added.fingerprint=identity::fingerprint(mod,a);}story_enemies::Kind enemy;if(enemy_kind(a,enemy)){added.fingerprint=identity::fingerprint(mod,a);story_enemies::Spec spec{enemy,mod,a.id,a.defeated_flag,{},added.fingerprint,1,story_enemies::parameters(enemy,a.variant)};for(const auto&drop:a.drops)spec.drops.push_back({drop.item,drop.quantity});added.enemy_token=story_enemies::declare(spec,why);if(!added.enemy_token)return false;}if(story_props::is_prop(a)){added.fingerprint=identity::fingerprint(mod,a);added.prop_token=story_props::declare(mod,a,why);if(!added.prop_token)return false;}if(a.actor=="switch"){if(a.switch_flag.empty())return why="switch requires an own flag",false;added.fingerprint=identity::fingerprint(mod,a);added.switch_token=story_switches::declare_switch(mod,a.id,why);added.switch_source=added.switch_token;if(!added.switch_token)return false;}staged.push_back(std::move(added));}
     for(auto& a:staged)if(a.spec.actor=="door"){
         const Actor* source=nullptr;for(const auto& candidate:staged)if(candidate.spec.actor=="switch"&&candidate.spec.id==a.spec.switch_actor)source=&candidate;
         if(!source)for(const auto& candidate:g_actors)if(candidate.mod==mod&&candidate.spec.actor=="switch"&&candidate.spec.id==a.spec.switch_actor)source=&candidate;
@@ -541,6 +541,7 @@ void native_room_loaded(Cpu* c,int room){
         if(a.game&&new_prop_epoch&&std::strncmp(reinterpret_cast<const char*>(mem::ptr(kStage)),a.spec.stage.c_str(),8)==0){a.game_attempts=0;a.restore_quarantined=a.game_mismatch;}}room_loaded(c,room);}
 void room_loaded(Cpu* c,int room) {
     if(!g_installed||!g_scratch)return;
+    if(room>=0&&room<=63)story_game_objects::note_room(ld32(GD(0x1047E8F0)+uint32_t(room)*0x22C));
     refresh_link();
     const char* stage=reinterpret_cast<const char*>(mem::ptr(kStage));
     if(room<0||room>63)return;
@@ -576,8 +577,17 @@ void room_loaded(Cpu* c,int room) {
             // the game's own object by name, like its stage loader; three creations the game gives up on in one room visit quarantine it
             const auto*e=story_game_objects::catalogue().find(story_game_objects::reference(a.spec.actor));std::string why;
             if(!e||!story_game_objects::resolve(c,g_call,g_scratch+0x50,*e,a.spec.variant,a.game_native,why)){LOG("[game_objects] %s:%s omitted: %s",a.mod.c_str(),a.spec.id.c_str(),e?why.c_str():"not in the catalogue");a.restore_quarantined=true;a.game_mismatch=true;continue;}
-            if(a.game_attempts>=3){LOG("[game_objects] %s:%s omitted until the room loads again: the game did not make it (3 tries)",a.mod.c_str(),a.spec.id.c_str());a.restore_quarantined=true;continue;}
-            ++a.game_attempts;a.game_checked=false;story_game_objects::trace_before_create(c,g_call,a.mod,a.spec.id);
+            if(a.game_batch){
+                // grass, flowers, small trees: once per room visit, into the stage's own batch while it has room
+                // after the room's own placements (they plant in their first frames), and leaving a quarter of
+                // the stage's batch free for the rooms that load next
+                const uint32_t room_pid=ld32(GD(0x1047E8F0)+uint32_t(room)*0x22C),mark=story_game_objects::planted_mark(room_pid);
+                if(a.game_planted==mark||story_game_objects::room_age(room_pid)<story_game_objects::kBatchSettleSteps)continue;
+                const auto*v=e->variant(a.spec.variant);const int units=int(v?v->units:1),free=story_game_objects::batch_free(e->packet.kind);
+                if(free<units+int(e->packet.capacity/4)){a.game_planted=mark;LOG("[game_objects] %s:%s omitted this room visit: %s",a.mod.c_str(),a.spec.id.c_str(),free<0?("this stage has no "+e->packet.kind+" of its own").c_str():("the stage's "+e->packet.kind+" has "+std::to_string(free)+" units free, a quarter stays for the game").c_str());continue;}
+            }
+            else if(a.game_attempts>=3){LOG("[game_objects] %s:%s omitted until the room loads again: the game did not make it (3 tries)",a.mod.c_str(),a.spec.id.c_str());a.restore_quarantined=true;continue;}
+            if(!a.game_batch){++a.game_attempts;a.game_checked=false;story_game_objects::trace_before_create(c,g_call,a.mod,a.spec.id);}
         }
         story_enemies::Kind enemy{};(void)enemy_kind(a.spec,enemy);
         uint32_t proc=a.game?uint32_t(a.game_native.process):a.enemy_token?story_enemy_ownership::descriptor(enemy).profile:a.switch_token?(a.spec.actor=="switch"?story_switches::kSwitchProfile:story_switches::kDoorProfile):a.prop_token?story_props::kProfile:a.spec.kind=="mod"?(a.spec.world_object()?mod_actor::kWorldProfile:mod_actor::kProfile):a.spec.actor=="sign"?0xB6u:a.spec.resident==kYm1?0x13Bu:0x175u;
@@ -606,6 +616,11 @@ void room_loaded(Cpu* c,int room) {
         if(a.enemy_token&&a.process&&a.process!=0xFFFFFFFFu)story_enemies::bind(a.enemy_token,a.process);
         if(a.prop_token)story_props::bind(a.prop_token,a.process);
         if(a.switch_token)story_switches::bind(a.switch_token,a.process);
+        if(a.game_batch&&a.process&&a.process!=0xFFFFFFFFu){
+            // the placement actor adds its units and is gone at once: the mark (this room visit) is all that is kept
+            a.game_planted=story_game_objects::planted_mark(ld32(GD(0x1047E8F0)+uint32_t(room)*0x22C));a.process=0xFFFFFFFFu;a.game_checked=true;
+            st32(g_scratch+128+uint32_t(&a-g_actors.data())*4,a.game_planted);LOG("[game_objects] %s:%s planted into the stage's batch (%s)",a.mod.c_str(),a.spec.id.c_str(),a.spec.variant.c_str());continue;
+        }
         st32(g_scratch+128+uint32_t(&a-g_actors.data())*4,a.process);
         // Residents reuse their previously unused existing 40-byte identity row.
         // Distinct magic/token format: never interpret this as a prop record.
@@ -693,7 +708,8 @@ void state_loaded(){if(combat_declared())story_enemy_ownership::state_loaded();i
             }else if(queued)story_enemies::bind(a.enemy_token,a.process,true);
             else {a.process=0xFFFFFFFFu;a.restore_quarantined=retired;}
         }
-        if(a.game){
+        if(a.game_batch){a.game_planted=story_game_objects::is_planted_mark(id)?id:0;a.process=0xFFFFFFFFu;a.restore_quarantined=a.game_mismatch;}
+        else if(a.game){
             a.game_checked=false;a.restore_quarantined=a.game_mismatch;const bool live=a.process!=0xFFFFFFFFu;
             if(live&&(!g_scratch||!identity::matches(mem::ptr(g_scratch+kIdentityScratchOffset+uint32_t(i)*identity::kRecordBytes),a.fingerprint))){a.process=0xFFFFFFFFu;a.restore_quarantined=true;if(slot)st32(slot,0xFFFFFFFFu);LOG("[game_objects] %s:%s restored declaration fingerprint rejected",a.mod.c_str(),a.spec.id.c_str());}
         }
@@ -883,7 +899,7 @@ bool editor_update(const std::string& mod,const std::vector<ManifestActor>& acto
             if(!added.mod_token){LOG("[actors] %s:%s: the model can't serve this spec; it appears after a restart",mod.c_str(),added.spec.id.c_str());later.push_back(added.spec.id+": the model can't serve this spec");continue;}
         }
         if(native_kind(added.spec)||added.spec.game_object()||(added.spec.actor=="resident"&&people_type(added.spec.resident)))added.fingerprint=identity::fingerprint(mod,added.spec);
-        added.game=added.spec.game_object();
+        added.game=added.spec.game_object();if(added.game){const auto*e=story_game_objects::catalogue().find(story_game_objects::reference(added.spec.actor));added.game_batch=e&&e->batch();}
         if(added.spec.actor=="resident"&&people_type(added.spec.resident)&&g_next_resident_event_token&&g_next_resident_event_token!=0xFFFFFFFFu)added.resident_event_token=g_next_resident_event_token++;
         story_enemies::Kind enemy{};
         if(story_props::is_prop(added.spec)){added.prop_token=story_props::editor_declare(mod,added.spec,w);if(!added.prop_token){later.push_back(added.spec.id+": "+w);continue;}}
@@ -913,12 +929,13 @@ bool editor_update(const std::string& mod,const std::vector<ManifestActor>& acto
         if(step.update){
             if(!was_removed&&settle_in_place(cpu,mod,*a,*step.spec))continue;
             a->spec=*step.spec;a->respawn=true;a->redeclare=native_kind(a->spec);
+            if(a->game_batch&&a->game_planted)later.push_back(a->spec.id+": grass, flowers and small trees change when the room loads again (Reload room)");
             if(a->mod_token)mod_actor::set_talk_provider(mod,a->spec.id,a->spec.talks.empty()?mod_actor::TalkProvider{}:mod_talk_provider(mod,a->spec.id));
             if(!a->redeclare)refingerprint(mod,*a);
         }
         LOG("[actors] %s:%s %s by the editor",mod.c_str(),a->spec.id.c_str(),was_removed?"restored":"changed");
     }
-    for(Actor* a:remove){a->removed=true;a->respawn=false;LOG("[actors] %s:%s removed by the editor",mod.c_str(),a->spec.id.c_str());}
+    for(Actor* a:remove){a->removed=true;a->respawn=false;if(a->game_batch&&a->game_planted)later.push_back(a->spec.id+": grass, flowers and small trees go when the room loads again (Reload room)");LOG("[actors] %s:%s removed by the editor",mod.c_str(),a->spec.id.c_str());}
     if(!sync_visuals(mod,effective,true,why))return false;story_world_arrival::state_loaded();
     if(pending)*pending=std::move(later);
     return true;
