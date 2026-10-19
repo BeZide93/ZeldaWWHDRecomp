@@ -74,6 +74,27 @@ class Recipes(unittest.TestCase):
                     self.assertNotIn('/', text)
         self.assertIn('outset-house-small', seen)
 
+    def test_every_part_pins_its_source_textures(self):
+        # each part names the room textures its materials sample; the build refuses another look
+        pinned = {}
+        for name, r in recipes():
+            for p in r['pieces']:
+                t = p['expect'].get('textures')
+                self.assertIsInstance(t, list, p['id'])
+                self.assertEqual(len(t), len(p['parts']), p['id'])
+                self.assertTrue(all(x for x in t), p['id'])
+                pinned[p['id']] = t
+        # the sea rocks are Dragon Roost's cliff stone (its streaked look is the original's), the torii its own wood
+        for rock in ('sea-rock-spire', 'sea-rock-pillar', 'sea-rock-stack'):
+            self.assertEqual(pinned[rock], [['Txe_Edragon_gake']])
+        self.assertIn('Txe_Edragon_tesuri', pinned['dragon-roost-torii'][0])
+        self.assertEqual(pinned['shipwreck-hull'], [['wood0313_22']])
+        r = next(r for _, r in recipes())
+        bad = json.loads(json.dumps(r))
+        bad['pieces'][0]['expect']['textures'] = [['../x']]
+        with self.assertRaises(gp.BuildError):
+            gp.check_recipe(bad)
+
     def test_bad_recipes_refused(self):
         _, good = next(recipes())
         for change in (lambda r: r.update(game_pieces_format=2), lambda r: r['source'].update(archive='../x.szs'),

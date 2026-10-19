@@ -89,6 +89,10 @@ def check_recipe(r):
         require(isinstance(e.get('triangles'), list) and len(e['triangles']) == len(parts) and all(type(t) is int and t > 0 for t in e['triangles']),
                 p['id'] + ': expect.triangles must give each part\'s count')
         require(type(e.get('collision_triangles')) is int and e['collision_triangles'] >= 0, p['id'] + ': invalid expect.collision_triangles')
+        # each part's source textures (the room's own texture names its materials sample): pins the look
+        t = e.get('textures')
+        require(t is None or (isinstance(t, list) and len(t) == len(parts) and all(isinstance(x, list) and x and all(isinstance(n, str) and re.fullmatch(r'[A-Za-z0-9_]{1,63}', n) for n in x) for x in t)),
+                p['id'] + ': expect.textures must give each part\'s texture names')
 
 
 # ---- the player's files ---------------------------------------------------------------------------
@@ -682,9 +686,14 @@ def build_set(game, recipe, identity, check_expect=True):
                         for j in range(3):
                             piece_lo[j] = min(piece_lo[j], p[j] - center[j])
                             piece_hi[j] = max(piece_hi[j], p[j] - center[j])
-            meta_parts.append({'model': name, 'light': LIGHTS[part['light']], 'triangles': tris, 'materials': used, 'crossing_left_out': crossing})
+            mat_at = dict(materials)
+            sampled = sorted({src.cstr(src.rel(src.rel(mat_at[shapes[si].material] + 0x28) + 8 * i)) for si in taken for i in range(src.b[mat_at[shapes[si].material] + 0x10])})
+            meta_parts.append({'model': name, 'light': LIGHTS[part['light']], 'triangles': tris, 'materials': used, 'textures': sampled, 'crossing_left_out': crossing})
         expect = piece['expect']
         require(not check_expect or counts == expect['triangles'], '%s: the parts have %s triangles, the recipe expects %s (another game version?)' % (piece['id'], counts, expect['triangles']))
+        if check_expect and 'textures' in expect:
+            got = [m['textures'] for m in meta_parts]
+            require(got == [sorted(t) for t in expect['textures']], '%s: the parts sample %s, the recipe expects %s (another game version?)' % (piece['id'], got, expect['textures']))
         col, col_info, col_tris = (None, {}, 0)
         if dzb:
             col, col_info, col_tris = piece_collision(dzb, piece, room_origin, center)

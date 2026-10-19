@@ -57,7 +57,19 @@
         "triangles": [
           623
         ],
-        "collision_triangles": 112
+        "collision_triangles": 112,
+        "textures": [
+          [
+            "k_taru04",
+            "m_ki12",
+            "m_komono11",
+            "m_siba04",
+            "m_yane08",
+            "wood01",
+            "wood04",
+            "wood06"
+          ]
+        ]
       },
       "memory": {
         "instance_bytes": 32768

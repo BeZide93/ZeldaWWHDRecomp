@@ -52,7 +52,13 @@
         "triangles": [
           304
         ],
-        "collision_triangles": 204
+        "collision_triangles": 204,
+        "textures": [
+          [
+            "Txe_Edragon_tesuri",
+            "Txe_Edragon_yasiro_isi"
+          ]
+        ]
       },
       "memory": {
         "instance_bytes": 32768
@@ -94,7 +100,15 @@
         "triangles": [
           558
         ],
-        "collision_triangles": 372
+        "collision_triangles": 372,
+        "textures": [
+          [
+            "Txe_Edragon_gake_hai",
+            "Txe_Edragon_hai",
+            "Txe_Edragon_tesuri",
+            "Txe_Edragon_yasiro_isi"
+          ]
+        ]
       },
       "memory": {
         "instance_bytes": 32768
@@ -133,7 +147,12 @@
         "triangles": [
           84
         ],
-        "collision_triangles": 3
+        "collision_triangles": 3,
+        "textures": [
+          [
+            "Txe_Edragon_ita"
+          ]
+        ]
       },
       "memory": {
         "instance_bytes": 32768
@@ -172,7 +191,12 @@
         "triangles": [
           68
         ],
-        "collision_triangles": 3
+        "collision_triangles": 3,
+        "textures": [
+          [
+            "Txe_Edragon_ita"
+          ]
+        ]
       },
       "memory": {
         "instance_bytes": 32768
@@ -210,7 +234,12 @@
         "triangles": [
           208
         ],
-        "collision_triangles": 42
+        "collision_triangles": 42,
+        "textures": [
+          [
+            "Txe_Edragon_rope_kui"
+          ]
+        ]
       },
       "memory": {
         "instance_bytes": 32768
@@ -248,7 +277,12 @@
         "triangles": [
           49
         ],
-        "collision_triangles": 35
+        "collision_triangles": 35,
+        "textures": [
+          [
+            "Txe_Edragon_gake"
+          ]
+        ]
       },
       "memory": {
         "instance_bytes": 32768
@@ -287,7 +321,12 @@
         "triangles": [
           54
         ],
-        "collision_triangles": 38
+        "collision_triangles": 38,
+        "textures": [
+          [
+            "Txe_Edragon_gake"
+          ]
+        ]
       },
       "memory": {
         "instance_bytes": 32768
@@ -325,7 +364,12 @@
         "triangles": [
           59
         ],
-        "collision_triangles": 41
+        "collision_triangles": 41,
+        "textures": [
+          [
+            "Txe_Edragon_gake"
+          ]
+        ]
       },
       "memory": {
         "instance_bytes": 32768

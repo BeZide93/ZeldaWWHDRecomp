@@ -46,7 +46,12 @@
         "triangles": [
           615
         ],
-        "collision_triangles": 252
+        "collision_triangles": 252,
+        "textures": [
+          [
+            "wood0313_22"
+          ]
+        ]
       },
       "memory": {
         "instance_bytes": 32768
@@ -86,7 +91,12 @@
         "triangles": [
           608
         ],
-        "collision_triangles": 236
+        "collision_triangles": 236,
+        "textures": [
+          [
+            "wood0313_22"
+          ]
+        ]
       },
       "memory": {
         "instance_bytes": 32768

@@ -59,7 +59,18 @@
         "triangles": [
           3048
         ],
-        "collision_triangles": 392
+        "collision_triangles": 392,
+        "textures": [
+          [
+            "Txa_beso_hasira",
+            "Txa_beso_itaba",
+            "Txa_beso_kabe_b",
+            "Txa_beso_yane",
+            "Txq_besso_jinkouyuka_kiwakiwa",
+            "Txq_besso_kasa",
+            "Txq_besso_lamp"
+          ]
+        ]
       },
       "memory": {
         "instance_bytes": 65536

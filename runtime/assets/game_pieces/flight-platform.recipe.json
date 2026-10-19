@@ -80,7 +80,14 @@
         "triangles": [
           3070
         ],
-        "collision_triangles": 345
+        "collision_triangles": 345,
+        "textures": [
+          [
+            "Txa_hune_a",
+            "Txa_ie_a",
+            "Txa_ita3mai_a"
+          ]
+        ]
       },
       "memory": {
         "instance_bytes": 65536

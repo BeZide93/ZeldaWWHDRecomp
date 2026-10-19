@@ -58,7 +58,17 @@
           989,
           10
         ],
-        "collision_triangles": 278
+        "collision_triangles": 278,
+        "textures": [
+          [
+            "Txa_hune_a",
+            "Txa_ie_a",
+            "Txa_ita3mai_a"
+          ],
+          [
+            "Txa_akari_a"
+          ]
+        ]
       },
       "memory": {
         "instance_bytes": 53248
@@ -112,7 +122,17 @@
           927,
           10
         ],
-        "collision_triangles": 247
+        "collision_triangles": 247,
+        "textures": [
+          [
+            "Txa_hune_a",
+            "Txa_ie_a",
+            "Txa_ita3mai_a"
+          ],
+          [
+            "Txa_akari_a"
+          ]
+        ]
       },
       "memory": {
         "instance_bytes": 50176
@@ -164,7 +184,17 @@
           923,
           10
         ],
-        "collision_triangles": 226
+        "collision_triangles": 226,
+        "textures": [
+          [
+            "Txa_hune_a",
+            "Txa_ie_a",
+            "Txa_ita3mai_a"
+          ],
+          [
+            "Txa_akari_a"
+          ]
+        ]
       },
       "memory": {
         "instance_bytes": 49152
@@ -216,7 +246,17 @@
           692,
           10
         ],
-        "collision_triangles": 213
+        "collision_triangles": 213,
+        "textures": [
+          [
+            "Txa_hune_a",
+            "Txa_ie_a",
+            "Txa_ita3mai_a"
+          ],
+          [
+            "Txa_akari_a"
+          ]
+        ]
       },
       "memory": {
         "instance_bytes": 48128
@@ -258,7 +298,14 @@
         "triangles": [
           927
         ],
-        "collision_triangles": 50
+        "collision_triangles": 50,
+        "textures": [
+          [
+            "Txa_hune_a",
+            "Txa_ie_a",
+            "Txa_ita3mai_a"
+          ]
+        ]
       },
       "memory": {
         "instance_bytes": 26624
@@ -299,7 +346,13 @@
         "triangles": [
           158
         ],
-        "collision_triangles": 58
+        "collision_triangles": 58,
+        "textures": [
+          [
+            "Txa_hune_a",
+            "Txa_ita3mai_a"
+          ]
+        ]
       },
       "memory": {
         "instance_bytes": 24576
