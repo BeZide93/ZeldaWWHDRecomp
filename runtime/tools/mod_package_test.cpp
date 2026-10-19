@@ -595,6 +595,9 @@ int main(int argc, char** argv) {
         int inspected=0,loaded=0;std::map<std::string,uint32_t> bases;
         auto inspect=[&](const GuestPackage& pkg){++inspected;assert(pkg.options.get("amount").number==3);return uint32_t(65536);};
         auto load=[&](const GuestPackage& pkg,uint32_t base){++loaded;bases[pkg.id]=base;
+            // the guests' start-up code asks for the story cache folder while start_guests holds the manager
+            // mutex (the NPC catalogue): it must answer, not wait on that mutex
+            assert(fs::path(mods::packages::story_cache_directory())==storage/"story");
             if(pkg.id=="guest-c")throw std::runtime_error("synthetic compiler failure");};
         start_guests(inspect,load);
         assert(inspected==3&&loaded==3);

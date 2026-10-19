@@ -66,6 +66,9 @@ std::mutex mutex;
 std::map<std::string,Record> records;
 Value database;
 fs::path root;
+// the story cache folder (story_cache_directory), set with root; its own mutex, not the manager's
+std::mutex story_mutex;
+std::string story_dir;
 bool ready=false,guests_started=false,code_mod_support=false;
 std::vector<std::string> guest_startup_ids;
 GuestInspect guest_inspect;
@@ -618,7 +621,7 @@ std::string platform_key(){
 }
 void initialize(){
     std::lock_guard guard(mutex);if(ready)return;const char* override=std::getenv("WWHD_MOD_MANAGER_DIR");if(std::getenv("WWHD_NO_HOST_INPUT")&&!override)return;
-    root=override?fs::path(override):fs::path(host::config_dir())/"ModManager";ready=true;defaults();
+    root=override?fs::path(override):fs::path(host::config_dir())/"ModManager";ready=true;{std::lock_guard story(story_mutex);story_dir=(root/"story").string();}defaults();
     try{fs::create_directories(root);if(fs::exists(root/"profiles.json")){auto saved=json::parse(read_text(root/"profiles.json"));require(saved.get("format_version").type==Value::Number&&saved.get("format_version").number==1,"Unsupported profile format");require(saved.get("profiles").type==Value::Object&&!saved.get("profiles").object.empty(),"Invalid profiles");require(saved.get("active").type==Value::String&&saved.get("profiles").object.contains(saved.get("active").text),"Invalid active profile");database=std::move(saved);}scan();
         {auto messages=repair_graphics();if(!messages.empty()){save();notices.insert(notices.end(),messages.begin(),messages.end());}}
         for(const auto& e:manager::entries()){const auto& v=profile().get("builtins").get(e.id);if(!std::getenv(e.startup_env)&&v.type==Value::Bool)e.apply(v.boolean);}
@@ -679,7 +682,10 @@ void initialize(){
     }catch(const std::exception& e){last_problem=e.what();ready=false;records.clear();fprintf(stderr,"[mod-manager] %s\n",e.what());}
 }
 std::string directory(){std::lock_guard guard(mutex);return ready?(root/"Mods").string():"";}
-std::string story_cache_directory(){std::lock_guard guard(mutex);return ready?(root/"story").string():"";}
+// The story cache folder is fixed once the manager knows its root, so reading it never takes the manager
+// mutex: start_guests holds that mutex while it calls the guests' start-up code, which asks for this folder
+// (the NPC catalogue), and the mutex is not re-entrant (a start with the Story Notebook hung there).
+std::string story_cache_directory(){std::lock_guard guard(story_mutex);return story_dir;}
 std::string package_data_directory(const std::string& id){std::lock_guard guard(mutex);return ready&&records.contains(id)?(root/"Data"/id).string():"";}
 std::vector<SetupView> setup_steps(const std::string& id) {
     std::lock_guard guard(mutex);std::vector<SetupView> out;
