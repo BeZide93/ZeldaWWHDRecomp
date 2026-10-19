@@ -212,8 +212,8 @@ void draw_cylinder(ImDrawList* dl, const View& v, const float p[3], float radius
         if (i % 7 == 0) dl->AddLine(lo[i], hi[i], colour, 1.0f);
     }
 }
-// An island building's footprint (its world bounds from placement_conflicts at the pose shown, also during a
-// handle drag): green when the place is clear, red with what is in the way, in plain words, when not.
+// A world object's or island building's footprint (its world bounds from placement_conflicts at the pose shown,
+// also during a handle drag): green when the place is clear, red with what is in the way, in plain words, when not.
 struct Footprint {
     std::string key;
     double asked = -1;
@@ -752,7 +752,8 @@ void world(float w, float h) {
         const float c = float(std::cos(yaw)), s = float(std::sin(yaw));
         const float m[16] = {c, 0, -s, 0, 0, 1, 0, 0, s, 0, c, 0, p[0], p[1], p[2], 1};
         std::memcpy(model, S.dragging && S.drag_actor == selected ? S.drag : m, sizeof model);
-        if (sel->get("actor").string().rfind("piece:", 0) == 0) {  // an island building: its footprint where it is shown
+        // an island building or another world object (a behaviour): its footprint where it is shown
+        if (sel->get("actor").string().rfind("piece:", 0) == 0 || !sel->get("behaviour").string().empty()) {
             const float at[3] = {model[12], model[13], model[14]};
             building_footprint(dl, v, snap.open, selected, at, std::round(std::atan2(model[8], model[0]) * 180 / kPi * 10) / 10);
         }

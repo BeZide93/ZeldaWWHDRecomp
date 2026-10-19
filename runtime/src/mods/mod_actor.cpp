@@ -327,7 +327,7 @@ story_world_placement::Index world_environment(Cpu*c,uint32_t actor,const Decl&d
     using namespace story_world_placement;const auto key=std::make_pair(d.spec.stage,int(d.spec.room));auto found=placement_indexes.find(key);if(found==placement_indexes.end())found=placement_indexes.emplace(key,placement_provider?placement_provider(d.spec.stage,int(d.spec.room)):load_native_room(world_game_directory,d.spec.stage,int(d.spec.room))).first;
     Index index=found->second;
     for(size_t i=0;i<declarations.size();++i){const auto&other=declarations[i];if(&other==&d||!other.collision||other.spec.stage!=d.spec.stage||other.spec.room!=d.spec.room)continue;auto pos=other.spec.position;const uint32_t a=ld32(record(i));if(valid_actor(a)&&story_world_collision::native::stored(a,other.fingerprint))pos=point(a+0x314);Bounds bounds;if(world_bounds(other,pos,bounds))index.bounds.push_back({d.spec.stage,int(d.spec.room),"world_object",other.mod+":"+other.spec.id,bounds});}
-    const uint32_t ship=ld32(GD(0x10474BEC));if(story_world_collision::proof::address(ship,0x1500)&&ld8(ship+0x3AA)==1&&int8_t(ld8(ship+0x326))==int(d.spec.room)){const auto p=point(ship+0x314);index.bounds.push_back({d.spec.stage,int(d.spec.room),"ship","ship",{{p.x-250,-1000000,p.z-250},{p.x+250,1000000,p.z+250}}});}
+    const uint32_t ship=ld32(GD(0x10474BEC));if(story_world_collision::proof::address(ship,0x1500)&&ld8(ship+0x3AA)==1&&int8_t(ld8(ship+0x326))==int(d.spec.room)){const auto p=point(ship+0x314);index.bounds.push_back({d.spec.stage,int(d.spec.room),"ship","ship",{{p.x-300,-1000000,p.z-300},{p.x+300,1000000,p.z+300}}});} // the moving ship: 300 units plus the clearance (kept at its old 350)
     (void)c;(void)actor;return index;
 }
 bool water_step(Cpu*c,uint32_t actor,Decl&d,bool initialize){
@@ -743,12 +743,11 @@ bool world_object_query(const std::string&mod,const story_notebook::ManifestActo
     const auto key=std::make_pair(spec.stage,int(spec.room));
     auto found=placement_indexes.find(key);if(found==placement_indexes.end())found=placement_indexes.emplace(key,placement_provider?placement_provider(spec.stage,int(spec.room)):load_native_room(world_game_directory,spec.stage,int(spec.room))).first;
     auto conflicts=check(spec.stage,int(spec.room),bounds,found->second);
-    // A game piece is an island's own building: instead of the world objects' wide event columns it keeps
-    // clear of what the room's layout really needs (story_world_placement.h check_building: villagers and
-    // their routes, chests, doors, items, switches, cutscene areas, other objects), with its real footprint;
-    // the room's square and coverage, the collision memory limit and other world objects as for any world object.
-    if(spec.game_piece()){conflicts.erase(std::remove_if(conflicts.begin(),conflicts.end(),[](const Conflict&x){return x.kind!="coverage"&&x.kind!="invalid";}),conflicts.end());
-        const auto layout=check_building(spec.stage,int(spec.room),bounds,found->second);conflicts.insert(conflicts.end(),layout.begin(),layout.end());}
+    // A game piece is an island's own building: it stands on the island's ground and against its slopes the
+    // way its original did, so the room's walls and ground don't count; everything else (the layout's
+    // villagers, routes, doors, chests, cutscene areas and start points, the room's square, other world
+    // objects) as for any world object.
+    if(spec.game_piece())conflicts.erase(std::remove_if(conflicts.begin(),conflicts.end(),[](const Conflict&x){return x.kind=="collision";}),conflicts.end());
     const uint64_t own_allocation=story_world_collision::mesh::allocation_bytes(*geometry)+spec.grapple_points.size()*(story_world_grapple::kProxyBytes+64);
     uint64_t allocation=own_allocation;size_t grapple_count=spec.grapple_points.size();
     for(const auto&d:declarations){

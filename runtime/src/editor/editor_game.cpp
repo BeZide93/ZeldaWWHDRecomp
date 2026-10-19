@@ -1146,8 +1146,8 @@ public:
     }
     bool world_object_query(const std::string& mod, const story_notebook::ManifestActor& actor, bool wireframe, Value& result, std::string& why) override {
         if (!mod_actor::world_object_query(mod, actor, wireframe, result, why)) return false;
-        // an island building's conflicts name the game's characters as the NPC catalogue does
-        if (actor.game_piece()) name_layout_conflicts(actor, result);
+        // what is in the way names the game's characters and objects as the catalogues do
+        name_layout_conflicts(actor, result);
         return true;
     }
     bool preview_text(const std::string& text, bool close, std::string& why) override {

@@ -157,7 +157,7 @@ int main() {
         r[1].room = 13, r[1].active = false, r[1].loaded = false;
         assert(check(r, 12, u, why));
     }
-    // ---- where a building may stand (story_world_placement.h check_building): an Outset-sized house
+    // ---- where a building may stand (story_world_placement.h check_building, also part of check()): an Outset-sized house
     // (1340 x 1430 x 1390) on open ground is accepted; over a villager's route, a chest or a door it is
     // refused with that reason; grass, flowers and trees under it don't count; a tag area by its own size
     {
@@ -195,26 +195,26 @@ int main() {
         f32(b, at + 4, -198000), f32(b, at + 8, 150), f32(b, at + 12, 324000);
         f32(b, at + 20, -198000), f32(b, at + 24, 150), f32(b, at + 28, 328000);
         Index sea;
-        // the room's MULT placement (-200000, 0, 300000) is not applied again to a sea room's own layout
-        assert(add_native_layout(sea, "sea", 44, b, {-200000, 0, 300000}, 0, &why));
-        assert(sea.layout.size() == 6 && sea.layout_routes.size() == 1);
-        assert(sea.layout[0].position.x == -205000 && sea.layout_routes[0].points[0].z == 324000);
+        // the layout is world space as stored: nothing is moved
+        assert(add_native_layout(sea, "sea", 44, b, &why));
+        assert(sea.layout.size() == 6 && sea.routes.size() == 1);
+        assert(sea.layout[0].position.x == -205000 && sea.routes[0].points[0].z == 324000);
         auto house = [](float x, float y, float z) { return Bounds{{x - 670, y, z - 695}, {x + 670, y + 1430, z + 695}}; };
         // open ground (over grass and a palm): accepted
         assert(check_building("sea", 44, house(-200000, 178, 316300), sea).empty());
         auto reason = [&](Bounds where) { auto c = check_building("sea", 44, where, sea); return c.size() == 1 ? c[0].kind + ": " + c[0].message + " [" + c[0].native + "]" : std::to_string(c.size()); };
         assert(reason(house(-205200, 400, 316200)) == "door: a door of the island [KNOB00D]");
         assert(reason(house(-195300, 200, 320300)) == "chest: a chest of the island [takara3]");
-        assert(reason(house(-198300, 100, 326000)) == "villager route: a villager route of the island [" + sea.layout_routes[0].id + "]");
+        assert(reason(house(-198300, 100, 326000)) == "villager route: a villager route of the island [" + sea.routes[0].id + "]");
         assert(reason(house(-210000, 0, 330400)) == "villager: a villager of the island [Ko1]");
         // the tag area's radius 300: 1000 units off is clear, 900 is not (its edge plus the margin)
         assert(check_building("sea", 44, house(-190000 + 670 + 400, 0, 310000), sea).empty());
         assert(reason(house(-190000 + 670 + 300, 0, 310000)) == "cutscene area: a cutscene area of the island [TagMsg2]");
         // another room's layout and another stage don't count
         assert(check_building("sea", 45, house(-205200, 400, 316200), sea).empty());
-        // a dungeon room's layout is room-local: it is moved by the room's placement
+        // a dungeon room's layout is world space too
         Index dungeon;
-        assert(add_native_layout(dungeon, "M_NewD2", 2, b, {1000, 0, 0}, 0, &why) && dungeon.layout[0].position.x == -204000);
+        assert(add_native_layout(dungeon, "M_NewD2", 2, b, &why) && dungeon.layout[0].position.x == -205000);
         // what the kinds are and what a building may cover
         LayoutEntry e;
         e.name = "kusax7";
