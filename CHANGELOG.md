@@ -12,6 +12,18 @@ what is on `devel` and not released yet (also in the
   rope; bombs are readied and thrown, and equipping the hammer completes one strike. A **Quick-use animation speed**
   of 1x, 1.25x or 1.5x speeds up the supported equip animations.
 
+- **Keep game speed now holds the game's speed at 60 fps when the graphics can't keep up** (#178, e.g. Steam Deck):
+  in-between frames that don't fit are skipped instead of slowing the game to 21–25 logic steps a second. The
+  performance overlay's slow-motion warning now appears below 29 logic steps a second (was 26) and no longer flickers.
+- **Mod SDK v3: more enemies and enemy switches** (for mod makers). The Peahat and a black ChuChu can be placed;
+  enemies can open doors through a mod switch once all of them are defeated (`defeat_switch`, also in the editor's
+  Inspector); Bokoblins can patrol a route of the mod's own.
+- **World objects: island protection now works on the sea** (for mod makers). Placement used to read sea rooms at the
+  wrong coordinates and protected nothing there, and dungeon rooms with a turned map were checked turned. World objects
+  now keep clear of what the island needs (villagers and their routes, doors, chests, items, switches, cutscene areas
+  and the places where Link arrives) by their real size instead of wide 100 m zones, and may stand over grass and trees.
+  A world object that can't stand where it is placed is left out with a log line instead of stopping the game; the
+  editor shows its footprint in red with the reasons.
 - **Mod SDK v3 and the world editor: island buildings** (for mod makers). Mods can place some of the islands' own
   buildings as `"actor": "piece:<id>"`: four Outset houses (their windows light up at night), Outset's lookout tower
   and well shelter, the Flight Control Platform, the Private Oasis cabana and Tingle's tower. They are made once from
