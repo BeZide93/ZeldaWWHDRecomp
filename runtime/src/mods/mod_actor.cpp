@@ -29,6 +29,7 @@
 #include "mod_actor_motion.h"
 #include "mod_actor_look_bounds.h"
 #include "story_mail.h"
+#include "guest_heap_query.h"
 #include "runtime.h"
 #include "guest_addr.h"
 #include <cmath>
@@ -57,8 +58,8 @@ uint32_t(*invoke)(Cpu*,uint32_t,std::initializer_list<uint32_t>)=nullptr;
 uint32_t talk_actor=0;std::u16string text;std::function<void()> talk_completed;bool custom_talk=false;
 uint32_t call(Cpu*c,uint32_t f,std::initializer_list<uint32_t> a){return invoke(c,f,a);}
 struct KeepCpu{Cpu* cpu;Cpu saved;explicit KeepCpu(Cpu*c):cpu(c),saved(*c){}~KeepCpu(){*cpu=saved;}};
-uint32_t heap_size(Cpu*c,uint32_t h){if(!h)return 0;uint32_t vt=ld32(h+0xC);if(!vt)return 0;uint32_t fn=ld32(vt+0x6C);return fn?invoke(c,fn,{h}):0;}
-uint32_t heap_free(Cpu*c,uint32_t h){if(!h)return 0;uint32_t vt=ld32(h+0xC);if(!vt)return 0;uint32_t fn=ld32(vt+0x74);return fn?invoke(c,fn,{h}):0;}
+uint32_t heap_size(Cpu*c,uint32_t h){return guest_heap::size(c,h,invoke);}
+uint32_t heap_free(Cpu*c,uint32_t h){return guest_heap::free_size(c,h,invoke);}
 
 bool talk_trace(){const char* value=std::getenv("WWHD_MOD_ACTOR_TALK_TRACE");return value&&std::strcmp(value,"1")==0;}
 bool heap_trace(){const char* value=std::getenv("WWHD_MOD_ACTOR_HEAPS");return value&&std::strcmp(value,"1")==0;}
@@ -70,7 +71,7 @@ HeapSnapshot heaps(Cpu*c){HeapSnapshot out{};const uint32_t getter[]={GC(0x025E3
 // the game hands them over (a stage's heap may be gone later), the lowest free per stage and room
 struct SeenHeap{uint32_t pointer=0;std::string name;uint32_t size=0,free=0,low=~0u,total=0;};
 std::vector<SeenHeap> seen_heaps;
-void seen_heap(Cpu*c,uint32_t h,const char* use){if(!h)return;KeepCpu keep(c);SeenHeap* s=nullptr;for(auto&x:seen_heaps)if(x.pointer==h)s=&x;
+void seen_heap(Cpu*c,uint32_t h,const char* use){if(!guest_heap::readable(h,0x10))return;KeepCpu keep(c);SeenHeap* s=nullptr;for(auto&x:seen_heaps)if(x.pointer==h)s=&x;
     if(!s){if(seen_heaps.size()>=24)return;seen_heaps.push_back({h,std::string(use)+std::to_string(seen_heaps.size())});s=&seen_heaps.back();LOG("[heap_sample] new heap %08X used for %s",h,use);}
     s->size=heap_size(c,h);s->free=heap_free(c,h);s->total=call(c,GC(0x027EC1FC),{h});s->low=std::min(s->low,s->free);}
 void heap_sample_now(Cpu*c){
@@ -641,7 +642,7 @@ void resource_table(Cpu*c){
 }
 void backing_archive_wrapper(Cpu*c){
     const uint32_t manager=c->r[3],key=c->r[4],allocation_heap=c->r[6],chars=key?ld32(key):0;const Decl* own=nullptr;
-    if(heap_trace()){const Cpu keep=*c;LOG("[heap_sample] load %.32s heap=%08X free=%u total_free=%u size=%u",chars?reinterpret_cast<const char*>(mem::ptr(chars)):"",allocation_heap,heap_free(c,allocation_heap),allocation_heap?call(c,GC(0x027EC1FC),{allocation_heap}):0,heap_size(c,allocation_heap));seen_heap(c,allocation_heap,"backing");*c=keep;}
+    if(heap_trace()){const Cpu keep=*c;LOG("[heap_sample] load %.32s heap=%08X free=%u total_free=%u size=%u",chars?reinterpret_cast<const char*>(mem::ptr(chars)):"",allocation_heap,heap_free(c,allocation_heap),guest_heap::readable(allocation_heap,0x10)?call(c,GC(0x027EC1FC),{allocation_heap}):0,heap_size(c,allocation_heap));seen_heap(c,allocation_heap,"backing");*c=keep;}
     if(chars)for(const auto& d:declarations)if(std::strncmp(reinterpret_cast<const char*>(mem::ptr(chars)),d.archive.c_str(),64)==0){own=&d;break;}
     if(!own){if(!story_item_models::backing_archive_wrapper(c))original(c,GC(0x02612E64));return;}
     const Cpu incoming=*c;const uint32_t before=heap_free(c,allocation_heap);
