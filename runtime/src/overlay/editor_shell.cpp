@@ -19,6 +19,7 @@
 #include "editor_panel.h"
 #include "editor_dock.h"
 #include "editor_resident.h"
+#include "../mods/story_enemy_variants.h"
 #include "extensions.h"
 #include "hostui.h"
 #include "imgui.h"
@@ -50,6 +51,7 @@ struct ShellState {
     std::string placing;      // a type from list_actor_types while placing by click
     std::string place_model;  // its model
     std::string place_resident;  // a resident's type (uo2, um1, ym1) while placing one
+    std::string place_variant;   // an enemy's declared variant (story_enemy_variants.h) while placing one
     bool play_restore = true;
     bool dragging = false;    // the gizmo was used last frame
     float drag[16] = {};
@@ -698,8 +700,8 @@ void world(float w, float h) {
             d["x"] = dir[0], d["y"] = dir[1], d["z"] = dir[2];
             prm["origin"] = o;
             prm["direction"] = d;
-            const std::string type = S.placing, model_id = S.place_model, resident = S.place_resident;
-            editor_ui::command("pick", prm, [type, model_id, resident](const Value& r) {
+            const std::string type = S.placing, model_id = S.place_model, resident = S.place_resident, variant = S.place_variant;
+            editor_ui::command("pick", prm, [type, model_id, resident, variant](const Value& r) {
                 if (!r.get("ok").boolean) return;
                 Value add;
                 add["type"] = type;
@@ -709,6 +711,7 @@ void world(float w, float h) {
                 if (r.get("result").get("room").type == Value::Number) add["room"] = r.get("result").get("room");
                 if (!model_id.empty()) add["model"] = model_id;
                 if (type == "resident" && !resident.empty()) add["options"]["resident"] = resident;
+                if (!variant.empty()) add["options"]["variant"] = variant;
                 editor_ui::command("add_actor", add, [](const Value& a) {
                     if (a.get("ok").boolean) editor_ui::selected() = a.get("result").get("id").string();
                 });
@@ -772,17 +775,28 @@ void add_menu() {
         }
         if (S.types[i] == "resident") {  // a submenu of its types (what each looks like)
             std::string code;
-            if (editor_resident::menu(S.type_labels[i].c_str(), code)) S.placing = S.types[i], S.place_model.clear(), S.place_resident = code;
+            if (editor_resident::menu(S.type_labels[i].c_str(), code)) S.placing = S.types[i], S.place_model.clear(), S.place_resident = code, S.place_variant.clear();
+            continue;
+        }
+        if (story_enemy_variants::has_variants(S.types[i])) {  // a submenu of its declared variants
+            if (ImGui::BeginMenu(S.type_labels[i].c_str())) {
+                for (const auto& v : story_enemy_variants::kVariants) {
+                    if (S.types[i] != v.kind) continue;
+                    if (ImGui::MenuItem(v.label)) S.placing = S.types[i], S.place_model.clear(), S.place_resident.clear(), S.place_variant = v.name;
+                    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", v.help);
+                }
+                ImGui::EndMenu();
+            }
             continue;
         }
         if (!S.type_model[i]) {
-            if (ImGui::MenuItem(S.type_labels[i].c_str())) S.placing = S.types[i], S.place_model.clear(), S.place_resident.clear();
+            if (ImGui::MenuItem(S.type_labels[i].c_str())) S.placing = S.types[i], S.place_model.clear(), S.place_resident.clear(), S.place_variant.clear();
             continue;
         }
         if (ImGui::BeginMenu(S.type_labels[i].c_str())) {
             for (const auto& md : m.get("models").array) {
                 const std::string id = md.get("id").string();
-                if (ImGui::MenuItem((id + "  (" + md.get("kind").string("static") + ")").c_str())) S.placing = S.types[i], S.place_model = id, S.place_resident.clear();
+                if (ImGui::MenuItem((id + "  (" + md.get("kind").string("static") + ")").c_str())) S.placing = S.types[i], S.place_model = id, S.place_resident.clear(), S.place_variant.clear();
             }
             if (m.get("models").array.empty()) ImGui::TextDisabled("no models yet: import one (Outliner > Models)");
             ImGui::EndMenu();

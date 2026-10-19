@@ -1,6 +1,6 @@
 // The world editor's resident type (overlay/editor_resident.h) with the real Dear ImGui code and no game:
 // the Inspector's Type field shows a placed resident's type in words and a click picks another, and the
-// Add menu's Resident submenu offers the three types and gives the clicked one.
+// Add menu's Resident submenu offers every villager type and gives the clicked one.
 #include "../src/overlay/editor_resident.h"
 
 #include <cassert>
@@ -123,7 +123,9 @@ int main() {
         if (w->Active && (w->Flags & ImGuiWindowFlags_ChildMenu)) sub = w;
     assert(sub && "the Resident submenu is open");
     const float line = ImGui::GetTextLineHeightWithSpacing();
-    const ImVec2 ym1(sub->ContentRegionRect.Min.x + 30, sub->ContentRegionRect.Min.y + line * 2 + line * 0.5f);
+    size_t ym1_row = 0;
+    while (std::strcmp(editor_resident::types()[ym1_row].code, "ym1") != 0) ym1_row++;
+    const ImVec2 ym1(sub->ContentRegionRect.Min.x + 30, sub->ContentRegionRect.Min.y + line * float(ym1_row) + line * 0.5f);
     // move along the submenu's row first (as a person does), then click
     io.AddMousePosEvent(sub->ContentRegionRect.Min.x + 30, sub->ContentRegionRect.Min.y + line * 0.5f);
     frame(false);

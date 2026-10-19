@@ -49,7 +49,7 @@ inline constexpr Type kTypes[] = {
     {"sa2", 13, 0x00FF0000u, "Lookout sailor", "The sailor on the Windfall high lookout."},
     {"sa3", 14, 0x00FF0000u, "Sailor from the dock", "The sailor on the Windfall stone dock."},
     {"sa4", 15, 0x00FF0000u, "Sailor from the pier", "The sailor at the end of the Windfall wooden pier."},
-    {"ym1", kSeatedYm1, 1u, "Seated man (ym1)", "A seated man; author his height, he doesn't walk or turn in scenes."},
+    {"ym1", kSeatedYm1, 1u, "Seated man", "A seated man; author his height, he doesn't walk or turn in scenes."},
 };
 
 struct Refused {const char* code;const char* why;};

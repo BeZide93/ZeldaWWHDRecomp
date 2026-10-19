@@ -1,15 +1,29 @@
 #include "editor_resident.h"
 
 #include "imgui.h"
+#include "../mods/story_resident_types.h"
 
 namespace editor_resident {
 
-const std::array<Type, 3>& types() {
-    static const std::array<Type, 3> list = {{
-        {"uo2", "Uo2: the man who sits at Windfall's bar"},
-        {"um1", "Um1: the man on Windfall's windmill"},
-        {"ym1", "Ym1: a seated villager"},
-    }};
+const std::vector<Type>& types() {
+    // the shared villager table: "Code: name" (the code as the manifest writes it, capitalised)
+    static const std::vector<std::string> labels = [] {
+        std::vector<std::string> out;
+        for (const auto& t : story_resident_types::kTypes) {
+            std::string code = t.code;
+            code[0] = char(code[0] - 'a' + 'A');
+            std::string name = t.label;
+            if (!name.empty()) name[0] = char(name[0] >= 'A' && name[0] <= 'Z' ? name[0] - 'A' + 'a' : name[0]);
+            out.push_back(code + ": " + name);
+        }
+        return out;
+    }();
+    static const std::vector<Type> list = [] {
+        std::vector<Type> out;
+        size_t i = 0;
+        for (const auto& t : story_resident_types::kTypes) out.push_back({t.code, labels[i++].c_str(), t.help});
+        return out;
+    }();
     return list;
 }
 
@@ -26,6 +40,7 @@ bool combo(const char* id, const std::string& current, std::string& chosen) {
         for (const auto& t : types()) {
             const bool selected = current == t.code;
             if (ImGui::Selectable(t.label, selected) && !selected) chosen = t.code, picked = true;
+            if (ImGui::IsItemHovered() && t.help) ImGui::SetTooltip("%s", t.help);
             if (selected) ImGui::SetItemDefaultFocus();
         }
         ImGui::EndCombo();
@@ -37,7 +52,10 @@ bool menu(const char* label, std::string& chosen) {
     bool picked = false;
     if (ImGui::BeginMenu(label)) {
         for (const auto& t : types())
+        {
             if (ImGui::MenuItem(t.label)) chosen = t.code, picked = true;
+            if (ImGui::IsItemHovered() && t.help) ImGui::SetTooltip("%s", t.help);
+        }
         ImGui::EndMenu();
     }
     return picked;

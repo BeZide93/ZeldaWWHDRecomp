@@ -1,18 +1,20 @@
-// The world editor's choice of a resident's type (the manifest's parameters.resident: uo2, um1 or the
-// seated ym1): the Add menu's Resident submenu and the Inspector's Type field.
+// The world editor's choice of a resident's type (the manifest's parameters.resident: one of the
+// villagers of mods/story_resident_types.h): the Add menu's Resident submenu and the Inspector's Type field.
 #pragma once
 
-#include <array>
+#include <string>
+#include <vector>
 #include <string>
 
 namespace editor_resident {
 
 struct Type {
     const char* code;   // parameters.resident
-    const char* label;  // what it looks like, in words
+    const char* label;  // what it looks like, in words ("Uo2: the man from the Windfall bar")
+    const char* help;   // more about it (a hover tip)
 };
 // the types a resident can have, in the order the menus show them
-const std::array<Type, 3>& types();
+const std::vector<Type>& types();
 // the label of `code` (the code itself for one the editor does not know)
 std::string label_of(const std::string& code);
 // a placed resident's type from its manifest entry's parameters.resident: a code, the legacy number 9

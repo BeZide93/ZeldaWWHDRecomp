@@ -19,6 +19,7 @@
 #include "../editor/editor_game.h"
 #include "../editor/mcp_game.h"
 #include "editor_resident.h"
+#include "../mods/story_enemy_variants.h"
 #include "editor_shell.h"
 #include "extensions.h"
 #include "hostui.h"
@@ -622,6 +623,32 @@ void actor_inspector(const Value& m) {
             s["property"] = "parameters";
             s["value"] = params;
             command("set_actor", s);
+        }
+    }
+    if (story_enemy_variants::has_variants(actor)) {  // its declared variant (parameters.variant): changing it creates it again
+        ImGui::TextUnformatted("Variant");
+        mark("parameters");
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        const std::string current = a->get("parameters").get("variant").string();
+        const auto* shown = story_enemy_variants::find(actor, current);
+        if (ImGui::BeginCombo("##enemy_variant", shown ? shown->label : current.c_str())) {
+            for (const auto& v : story_enemy_variants::kVariants) {
+                if (actor != v.kind) continue;
+                const bool selected = shown == &v;
+                if (ImGui::Selectable(v.label, selected) && !selected) {
+                    Value s = p;
+                    s["property"] = "parameters";
+                    if (&v == story_enemy_variants::find(actor, "")) s["value"] = Value();  // the ordinary one: no parameter
+                    else {
+                        Value params;
+                        params["variant"] = std::string(v.name);
+                        s["value"] = params;
+                    }
+                    command("set_actor", s);
+                }
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", v.help);
+            }
+            ImGui::EndCombo();
         }
     }
     if (is_enemy(actor) || combat) edit_property(p, *a, "Defeated flag (set when it is beaten)", "defeated_flag");
