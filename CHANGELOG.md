@@ -21,6 +21,9 @@ what is on `devel` and not released yet (also in the
   they are in the Game objects palette.
 - **Performance report: it says whether Keep game speed is on** (and at which interpolation rate), and the log records
   its value and where it came from at start and on every change.
+- **Controller rumble no longer stops by mistake:** the safety stop for a stalled game could switch off a rumble that had
+  just been started. The game's list of villager names (for mod makers) is now kept in the mod manager's folder; it is
+  built once more after the update.
 - **Mod SDK v3: placed villagers can walk a route.** Uo1, Uo2, Uo3, Um1 and Um2 walk up to 15 points with their own
   walk: once, in a loop or back and forth, at their own pace or yours, with optional strolling pauses. They still stop
   to look at Link and talk as usual, and a walker that runs into a wall or walks off an edge is caught. Your own
