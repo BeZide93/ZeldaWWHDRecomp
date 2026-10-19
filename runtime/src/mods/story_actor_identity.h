@@ -21,6 +21,7 @@ inline Fingerprint fingerprint(const std::string&mod,const story_notebook::Manif
     number(a.collision_radius);number(a.collision_height);word(a.pushable);
     const auto&look=a.look_at;word(look.enabled);text(look.head);text(look.upper_bone);number(look.yaw_degrees);number(look.pitch_degrees);number(look.rate_degrees);number(look.radius);number(look.upper_yaw_degrees);number(look.upper_fraction);
     number(a.path.speed);word(a.path.loop);word(uint32_t(a.path.points.size()));for(const auto&p:a.path.points)point(p);
+    if(a.path.back_and_forth||a.path.pauses||!a.path.speed_given||!a.path.walk_clip.empty()||!a.path.idle_clip.empty()){text("wwhd.actor-path.v2");word(a.path.back_and_forth);word(a.path.pauses);word(a.path.speed_given);text(a.path.walk_clip);text(a.path.idle_clip);}
     word(uint32_t(a.drops.size()));for(const auto&d:a.drops){text(d.item);word(d.quantity);}
     word(uint32_t(a.then.size()));for(const auto&action:a.then){word(uint32_t(action.kind));text(action.id);word(action.value);}
     if(!a.when_flag.empty()||!a.when_not_flag.empty()||!a.quests.empty()){text("wwhd.actor-conditions.v1");text(a.when_flag);text(a.when_not_flag);word(uint32_t(a.quests.size()));for(const auto&q:a.quests){text(q.quest);word(q.step);}}
@@ -34,6 +35,7 @@ inline Fingerprint fingerprint(const std::string&mod,const story_notebook::Manif
         for(const auto*r:{&c.flinch,&c.stun,&c.death}){text(r->clip);word(r->frames);number(r->knockback_speed);word(r->knockback_frames);}
         const auto&at=c.attack;word(at.damage);word(at.active_frames);word(at.cooldown_frames);number(at.radius);number(at.height);number(at.forward_offset);number(at.y_offset);
     }
+    if(!a.variant.empty()){text("wwhd.actor-variant.v1");text(a.variant);}
     if(a.world_object()){text("wwhd.world-object.v1");text(a.behaviour);text(a.collision_mesh);text(a.collision_shape);text(a.collision_surface);point(a.collision_size);}
     if(a.water_object()){text("wwhd.world-motion.v1");number(a.buoyancy.draft);number(a.buoyancy.damping);number(a.buoyancy.max_tilt);number(a.drift.wind_speed);number(a.drift.max_speed);point(a.drift.current);word(a.anchor.enabled);point(a.anchor.point);number(a.anchor.radius);}
     if(!a.grapple_points.empty()){text("wwhd.world-grapple.v1");word(uint32_t(a.grapple_points.size()));for(const auto&p:a.grapple_points){text(p.id);point(p.position);number(p.yaw);}}

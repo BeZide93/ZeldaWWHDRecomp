@@ -1,7 +1,9 @@
 // SDK v3 preview: bounded declarative world content. No game save bits are accepted here.
 #pragma once
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <initializer_list>
 #include <map>
 #include <optional>
@@ -13,10 +15,14 @@
 #include "story_scenes_core.h"
 #include "story_mod_combat_manifest.h"
 #include "story_native_scene_manifest.h"
+#include "story_resident_types.h"
+#include "story_enemy_variants.h"
+#include "story_game_objects_catalogue.h"
 namespace story_notebook {
 struct WorldPoint { float x=0,y=0,z=0; bool operator==(const WorldPoint&)const=default; };
 struct StoryAction {
-    enum class Kind { Give,Take,QuestStep,Flag,StartScene,QuestDone };
+    // GiveChart: {"action": "give", "id": "chart:<id>"}, one of the mod's charts (once; never taken)
+    enum class Kind { Give,Take,QuestStep,Flag,StartScene,QuestDone,GiveChart };
     Kind kind=Kind::Flag; std::string id; unsigned value=1;
     bool operator==(const StoryAction&)const=default;
 };
@@ -25,7 +31,14 @@ struct ManifestLookAt {
     bool enabled=false;std::string head,upper_bone;
     float yaw_degrees=0,pitch_degrees=0,rate_degrees=0,radius=0,upper_yaw_degrees=0,upper_fraction=0;
 };
-struct ManifestPath {std::vector<WorldPoint> points;float speed=100;bool loop=false;};
+// A route ("path"): a mod's skinned actor walks `points` (2..16); a placed resident starts at its
+// position and walks 1..15 further `points` with its own walk. Modes: once, loop (back to the start),
+// back_and_forth (reverse at the ends). `pauses`: short strolling pauses on the way (the game's own
+// walkers' rhythm). A resident's speed is optional (speed_given false: the character's own pace);
+// a mod actor may name its walk and idle clips (empty: "walk" and "idle").
+struct ManifestPath {std::vector<WorldPoint> points;float speed=100;bool loop=false;bool back_and_forth=false,pauses=false,speed_given=true;std::string walk_clip,idle_clip;
+    const char* mode()const{return loop?"loop":back_and_forth?"back_and_forth":"once";}
+    bool operator==(const ManifestPath&)const=default;};
 struct ManifestPropDrop {std::string item;unsigned quantity=1;};
 struct QuestCondition {std::string quest;unsigned step=0;bool operator==(const QuestCondition&)const=default;};
 struct ManifestTalk {
@@ -51,12 +64,15 @@ struct ManifestActor {
     ManifestLookAt look_at;ManifestPath path;
     bool carry_enabled=false,carry_break_on_impact=false;
     bool combat_enabled=false,native_heart_drop=false;story_mod_combat::Config combat;
-    WorldPoint position,rotation,scale{1,1,1}; uint32_t params=0; unsigned resident=9; // 19 is the seated Ym1 adapter, not a People subtype.
-    uint8_t item_game=6;
+    WorldPoint position,rotation,scale{1,1,1}; uint32_t params=0; std::string variant; unsigned resident=9; // 19 is the seated Ym1 adapter, not a People subtype.
+    uint8_t item_game=6;  // a chest's game item number ("parameters": {"item"}); kChestModItem with item_mod
+    std::string item_mod; // a chest's "item:<id>": one of the mod's items (the id)
     std::string broken_flag,switch_flag,switch_actor,defeated_flag;std::vector<ManifestPropDrop> drops;
     std::string flag,quest,item,time,lines; unsigned quest_step=0;
     std::vector<StoryAction> then;
     std::string when_flag,when_not_flag;std::vector<QuestCondition> quests;std::vector<ManifestTalk> talks;
+    // `variant` above is also a game object's catalogue variant ("actor": "game:<id>", story_game_objects_catalogue.h)
+    bool game_object()const{return story_game_objects::is_reference(actor);}
 };
 template<class Condition,class Quest,class Item,class Flag>
 inline bool condition_matches(const Condition&c,Quest quest,Item item,Flag flag,bool day){
@@ -87,6 +103,18 @@ struct ManifestScene {
     WorldPoint position; float radius=0;
     bool operator==(const ManifestScene&)const=default;
 };
+// What a placed chest can hold ("parameters": {"item": ...}): the game items a treasure chart's chest can hold
+// (story_manifest.h chart_game_item: rupees and heart pieces/containers, no story or key item, nothing that sets
+// a save bit; the chest's own item bit is 255, none) and the mod's items. A mod item travels as the port's
+// chest marker (story_treasure_chest.h kChestMarker, a pool number no game data names) and is swapped for the
+// item-get stand-in when the chest opens.
+inline constexpr uint8_t kChestModItem=0x1B;
+inline uint8_t chest_game_item(const std::string& name){
+    static const std::pair<const char*,uint8_t> kItems[]={{"rupee_green",0x01},{"rupee_blue",0x02},{"rupee_yellow",0x03},{"rupee_red",0x04},
+        {"rupee_purple",0x05},{"rupee_orange",0x06},{"rupee_silver",0x0F},{"heart_piece",0x07},{"heart_container",0x08}};
+    for(const auto&[n,v]:kItems)if(name==n)return v;
+    return 0;
+}
 inline constexpr unsigned kMaxActorsPerRoom=16,kMaxActorsPerMod=64,kMaxScenesPerMod=16,kMaxSceneSteps=64,kMaxSceneFrames=18000;
 namespace world_manifest {
 using mods::json::Value;
@@ -125,7 +153,7 @@ inline bool known_flag(const Value& m,const std::string& name) {
         if(mod&&a.get("behaviour").string()=="static"&&a.get("stage").string()=="sea"&&produces(a.get("arrival").get("flag")))return true;
         if(type=="switch"&&produces(a.get("switch_flag")))return true;
         if((type=="pot"||type=="barrel"||type=="crate"||(mod&&a.get("carry").get("break_on_impact").type==Value::Bool&&a.get("carry").get("break_on_impact").boolean))&&produces(a.get("broken_flag")))return true;
-        if((type=="chuchu"||type=="bokoblin"||type=="moblin"||type=="keese"||
+        if((type=="chuchu"||type=="bokoblin"||type=="moblin"||type=="keese"||type=="miniblin"||
             (mod&&a.get("combat").type==Value::Object))&&produces(a.get("defeated_flag")))return true;
         if(writes(a.get("then")))return true;
         for(const auto&t:a.get("talks").array)if(writes(t.get("then")))return true;
@@ -177,10 +205,14 @@ inline bool actions(const Value& m,const Value& v,std::vector<StoryAction>& out,
     if(v.type!=Value::Array||v.array.size()>8) return why="then must be a list of up to 8 actions",false;
     for(const auto& a:v.array) {
         StoryAction s; const auto kind=a.get("action").string(); s.id=a.get("id").string();
-        if(kind=="give"||kind=="take") {s.kind=kind=="give"?StoryAction::Kind::Give:StoryAction::Kind::Take;
+        if(kind=="give"&&s.id.rfind("chart:",0)==0) {s.kind=StoryAction::Kind::GiveChart;
+            if(!keys(a,{"action","id"}))return why="a chart is given once: give chart:<id> takes no count",false;
+            if(!declared(m,"charts",s.id.substr(6)))return why="action names an undeclared mod chart (chart:<id> of \"charts\")",false;
+        } else if(kind=="take"&&s.id.rfind("chart:",0)==0) {return why="a chart can't be taken: take names an item (item:<id>)",false;
+        } else if(kind=="give"||kind=="take") {s.kind=kind=="give"?StoryAction::Kind::Give:StoryAction::Kind::Take;
             if(!keys(a,{"action","id","count"}))return why="unknown give/take action field",false;
             if(a.object.contains("count")){if(!integer(a.get("count"),1,254))return why="action count must be 1..254",false;s.value=unsigned(a.get("count").number);}
-            if(s.id.rfind("item:",0)!=0||!declared(m,"items",s.id.substr(5))) return why="action names an undeclared mod item",false;
+            if(s.id.rfind("item:",0)!=0||!declared(m,"items",s.id.substr(5))) return why="action names an undeclared mod item (give and take name item:<id>; give also chart:<id>)",false;
         } else if(kind=="quest_step") {s.kind=StoryAction::Kind::QuestStep;if(!keys(a,{"action","id","step"}))return why="unknown quest action field",false;
             if(!integer(a.get("step"),1,254)||!quest_step(m,s.id,unsigned(a.get("step").number))) return why="action names an undeclared quest step",false;
             s.value=unsigned(a.get("step").number);
@@ -214,12 +246,56 @@ inline bool place(const Value& v,std::string& stage,unsigned& room) {
     for(char c:stage) if(!((c>='a'&&c<='z')||(c>='A'&&c<='Z')||(c>='0'&&c<='9')||c=='_')) return false;
     room=unsigned(v.get("room").number);return true;
 }
+// A game object ("actor": "game:<id>", story_game_objects_catalogue.h): a catalogued id, its variant,
+// stage, room, position, a turn and a uniform scale inside the entry's limits, and nothing else (no
+// params, flags, then, paths or dialogue). `need`: the manifest's requires.game_objects (0: none).
+inline bool game_object_fields(const Value& v,unsigned need,ManifestActor& a,std::string& why,const story_game_objects::Catalogue& c=story_game_objects::catalogue()) {
+    for(const auto&[key,value]:v.object){bool allowed=false;for(const char*name:{"id","actor","variant","stage","room","position","rotation","scale"})allowed|=key==name;
+        if(!allowed)return why="actor "+a.id+": a game object takes only id, actor, variant, stage, room, position, rotation and scale (not \""+key+"\": no params, flags, then, paths or dialogue)",false;}
+    const std::string ref=story_game_objects::reference(a.actor);const auto* e=c.find(ref);
+    if(!e)return why="actor "+a.id+": \""+a.actor+"\" is not in the game objects catalogue",false;
+    if(!need)return why="actor "+a.id+": a manifest with game objects names the catalogue version it needs (\"requires\": {\"game_objects\": "+std::to_string(e->since)+"})",false;
+    if(e->since>need)return why="actor "+a.id+": \""+a.actor+"\" needs game objects catalogue version "+std::to_string(e->since)+" (the manifest requires "+std::to_string(need)+")",false;
+    if(v.object.contains("variant")){if(v.get("variant").type!=Value::String||!e->variant(v.get("variant").text)){std::string names;for(const auto&x:e->variants)names+=(names.empty()?"":", ")+x.id;return why="actor "+a.id+": \""+a.actor+"\" has the variants "+names,false;}a.variant=v.get("variant").text;}
+    else a.variant=e->variants.front().id;
+    if(!place(v,a.stage,a.room)||!point(v.get("position"),a.position))return why="actor "+a.id+": invalid stage, room or position",false;
+    if(v.get("rotation").type!=Value::Null&&!point(v.get("rotation"),a.rotation,360))return why="invalid actor rotation",false;
+    if(e->yaw_only&&(a.rotation.x!=0||a.rotation.z!=0))return why="actor "+a.id+": a game object turns about the vertical axis only (rotation x and z are 0)",false;
+    if(v.get("scale").type!=Value::Null&&!point(v.get("scale"),a.scale,10))return why="invalid actor scale",false;
+    if(a.scale.x!=a.scale.y||a.scale.x!=a.scale.z||a.scale.x<e->scale_min||a.scale.x>e->scale_max){
+        char limits[64];if(e->scale_min==e->scale_max)std::snprintf(limits,sizeof limits,"scale %g only",double(e->scale_min));else std::snprintf(limits,sizeof limits,"a uniform scale from %g to %g",double(e->scale_min),double(e->scale_max));
+        return why="actor "+a.id+": \""+a.actor+"\" takes "+limits,false;}
+    return true;
+}
+// The game objects of a list, room by room, against the catalogue's room budget (instances, each archive once).
+inline bool game_object_budget(const std::vector<ManifestActor>& actors,std::string& why,const story_game_objects::Catalogue& c) {
+    std::map<std::pair<std::string,unsigned>,story_game_objects::RoomUse> rooms;std::map<std::pair<std::string,std::string>,unsigned> batches;
+    for(const auto&a:actors){if(!a.game_object())continue;const auto* e=c.find(story_game_objects::reference(a.actor));if(!e)continue;
+        if(e->batch()){const auto*v=e->variant(a.variant);auto&n=batches[{a.stage,e->packet.kind}];n+=v?v->units:0;
+            if(n>e->packet.mod_share)return why=e->packet.kind+" in stage "+a.stage+": mods may plant "+std::to_string(e->packet.mod_share)+" units per stage (the game's own use shares the rest)",false;}
+        auto&use=rooms[{a.stage,a.room}];use.add(*e);
+        if(use.bytes>story_game_objects::kRoomBudgetBytes)return why="game objects in "+a.stage+" room "+std::to_string(a.room)+" exceed the room's memory budget ("+std::to_string(story_game_objects::kRoomBudgetBytes/1024)+" KiB)",false;}
+    return true;
+}
+// (the port's catalogue, built only when the list has game objects)
+inline bool game_object_budget(const std::vector<ManifestActor>& actors,std::string& why) {
+    return std::none_of(actors.begin(),actors.end(),[](const ManifestActor&a){return a.game_object();})||game_object_budget(actors,why,story_game_objects::catalogue());
+}
 // Per-type fields after common placement validation. Native enemy names stay
 // outside parse_actors' allowlist until their runtime adapters are integrated.
 inline bool native_enemy_fields(const Value& m,const Value& v,ManifestActor& a,std::string& why) {
-    if(a.actor!="chuchu"&&a.actor!="bokoblin"&&a.actor!="moblin"&&a.actor!="keese")return why="unsupported native enemy",false;
-    for(const char* key:{"kind","params","parameters","flag","broken_flag","switch_flag","switch","lines","then","model","animation","look_at","path","collision","attention"})
+    if(a.actor!="chuchu"&&a.actor!="bokoblin"&&a.actor!="moblin"&&a.actor!="keese"&&a.actor!="miniblin")return why="unsupported native enemy",false;
+    for(const char* key:{"kind","params","flag","broken_flag","switch_flag","switch","lines","then","model","animation","look_at","path","collision","attention"})
         if(v.object.contains(key))return why="native enemies cannot override parameters, behavior, dialogue or models",false;
+    // a declared variant only (story_enemy_variants.h), never raw parameters
+    if(v.object.contains("parameters")){
+        const auto& named=v.get("parameters");
+        if(named.type!=Value::Object||!keys(named,{"variant"})||named.get("variant").type!=Value::String)return why="native enemy parameters take only a variant",false;
+        const std::string& name=named.get("variant").text;
+        if(!story_enemy_variants::has_variants(a.actor))return why="a "+a.actor+" has no variants",false;
+        if(name.empty()||!story_enemy_variants::find(a.actor,name))return why="a "+a.actor+" variant is "+story_enemy_variants::names(a.actor),false;
+        a.variant=name;
+    }
     if(a.rotation.x!=0||a.rotation.z!=0||a.scale.x!=1||a.scale.y!=1||a.scale.z!=1)return why="native enemies require yaw-only rotation and scale 1",false;
     if(!flag_id(v.get("defeated_flag")))return why="native enemies require a mod-owned defeated_flag",false;
     const auto& drops=v.get("drops");if(drops.type!=Value::Array||drops.array.size()>8)return why="native enemies require up to eight mod-item drops",false;
@@ -256,14 +332,44 @@ inline bool parse_models(const mods::json::Value& m,std::vector<ManifestModel>& 
         parsed.push_back({v.get("id").text,source,kind});
     }out=std::move(parsed);return true;
 }
+// a "path" object (ManifestPath); `resident`: a placed resident's route (1..15 points after its
+// position, optional speed, no clips), else a mod actor's (2..16 points, speed, optional clips)
+inline bool parse_path(const mods::json::Value& path,const WorldPoint& start,bool resident,ManifestPath& out,std::string& why){
+    using namespace world_manifest;out=ManifestPath{};
+    const std::initializer_list<const char*> fields=resident?std::initializer_list<const char*>{"points","speed","mode","pauses"}:std::initializer_list<const char*>{"points","speed","mode","pauses","walk","idle"};
+    const size_t lo=resident?1:2,hi=resident?15:16;
+    if(path.type!=Value::Object||!keys(path,fields)||path.get("points").type!=Value::Array||path.get("points").array.size()<lo||path.get("points").array.size()>hi)
+        return why=resident?"a resident's path has 1 to 15 points after its position":"invalid bounded actor path",false;
+    if(resident){out.speed_given=path.object.contains("speed");out.speed=0;if(out.speed_given&&!number(path.get("speed"),0,1500,out.speed,true))return why="path speed must be a number of game units per second",false;}
+    else if(!number(path.get("speed"),0,1500,out.speed,true))return why="invalid bounded actor path",false;
+    const auto mode=path.get("mode").string("once");
+    if(mode!="once"&&mode!="loop"&&mode!="back_and_forth")return why="path mode must be once, loop or back_and_forth",false;
+    out.loop=mode=="loop";out.back_and_forth=mode=="back_and_forth";
+    if(path.object.contains("pauses")){if(path.get("pauses").type!=Value::Bool)return why="path pauses must be true or false",false;out.pauses=path.get("pauses").boolean;}
+    for(const char* clip:{"walk","idle"})if(path.object.contains(clip)){if(!id(path.get(clip)))return why=std::string("path ")+clip+" must name a clip",false;(std::string(clip)=="walk"?out.walk_clip:out.idle_clip)=path.get(clip).text;}
+    for(const auto& p:path.get("points").array){WorldPoint point_;if(!keys(p,{"x","y","z"})||!point(p,point_))return why="invalid path point",false;out.points.push_back(point_);}
+    auto apart=[](const WorldPoint& p,const WorldPoint& q){return std::hypot(double(p.x)-q.x,double(p.z)-q.z)>1;};
+    if(resident&&!apart(start,out.points.front()))return why="the first path point must be more than one unit from the position",false;
+    for(size_t n=1;n<out.points.size();++n)if(!apart(out.points[n-1],out.points[n]))return why="path points must be separated horizontally by more than one unit",false;
+    if(out.loop&&!apart(resident?start:out.points.front(),out.points.back()))return why="loop closing edge is too short",false;
+    return true;
+}
 inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestActor>& out,std::string& why) {
     using namespace world_manifest;out.clear();std::vector<ManifestModel> models;if(!parse_models(m,models,why))return false;const auto& list=m.get("actors");
     if(list.type==Value::Null)return true;
     if(list.type!=Value::Array||list.array.size()>kMaxActorsPerMod)return why="actors must be a list of up to 64",false;
+    unsigned need=0;if(m.get("requires").type==Value::Object&&!story_game_objects::required_version(m,story_game_objects::catalogue(),need,why))return false;
     unsigned chart_marker_count=0;
     for(const auto& v:list.array){ManifestActor a;
-        if(!keys(v,{"id","actor","kind","model","animation","look_at","path","collision","behaviour","buoyancy","drift","anchor","grapple_points","distant","shoreline","chart_marker","arrival","attention","stage","room","position","rotation","scale","params","parameters","flag","broken_flag","defeated_flag","drops","carry","combat","native_drops","switch_flag","switch","when","lines","then","texture","talks"}))return why="unknown actor field",false;
+        if(!keys(v,{"id","actor","kind","model","animation","look_at","path","collision","behaviour","buoyancy","drift","anchor","grapple_points","distant","shoreline","chart_marker","arrival","attention","stage","room","position","rotation","scale","params","parameters","flag","broken_flag","defeated_flag","drops","carry","combat","native_drops","switch_flag","switch","when","lines","then","texture","talks","variant"}))return why="unknown actor field",false;
         if(!id(v.get("id")))return why="invalid actor id",false;a.id=v.get("id").text;a.actor=v.get("actor").string();
+        if(a.game_object()){
+            if(!game_object_fields(v,need,a,why))return false;
+            unsigned count=1;for(const auto& old:out){if(old.id==a.id)return why="duplicate actor id",false;if(old.stage==a.stage&&old.room==a.room)++count;}
+            if(count>kMaxActorsPerRoom)return why="actors exceed the 16 per room limit",false;
+            out.push_back(std::move(a));continue;
+        }
+        if(v.object.contains("variant"))return why="actor "+a.id+": variant is for game objects (\"actor\": \"game:<id>\")",false;
         if(v.object.contains("kind")) {
             if(v.get("kind").string()!="mod"||v.object.contains("actor"))return why="mod actor kind cannot name a native actor",false;
             a.kind="mod";a.actor="mod";a.model=v.get("model").string();
@@ -276,12 +382,8 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
                 if(look.object.contains("upper_body")){const auto& upper=look.get("upper_body");if(!keys(upper,{"bone","yaw_degrees","fraction"})||!bone_name(upper.get("bone"))||upper.get("bone").text==a.look_at.head||!number(upper.get("yaw_degrees"),0,180,a.look_at.upper_yaw_degrees)||!number(upper.get("fraction"),0,1,a.look_at.upper_fraction))return why="invalid upper_body look_at settings",false;a.look_at.upper_bone=upper.get("bone").text;}
             }
             if(v.object.contains("path")){
-                const auto& path=v.get("path");if(!skinned_model)return why="path requires a skinned model",false;
-                if(!keys(path,{"points","speed","mode"})||path.get("points").type!=Value::Array||path.get("points").array.size()<2||path.get("points").array.size()>16||!number(path.get("speed"),0,1500,a.path.speed,true))return why="invalid bounded actor path",false;
-                const auto mode=path.get("mode").string();if(mode!="once"&&mode!="loop")return why="path mode must be once or loop",false;a.path.loop=mode=="loop";
-                for(const auto& p:path.get("points").array){WorldPoint point_;if(!keys(p,{"x","y","z"})||!point(p,point_))return why="invalid path point",false;a.path.points.push_back(point_);}
-                for(size_t n=1;n<a.path.points.size();++n){const auto& p=a.path.points[n-1];const auto& q=a.path.points[n];if(std::hypot(double(p.x)-q.x,double(p.z)-q.z)<=1)return why="path points must be separated horizontally by more than one unit",false;}
-                if(a.path.loop){const auto& p=a.path.points.front();const auto& q=a.path.points.back();if(std::hypot(double(p.x)-q.x,double(p.z)-q.z)<=1)return why="loop closing edge is too short",false;}
+                if(!skinned_model)return why="path requires a skinned model",false;
+                if(!parse_path(v.get("path"),a.position,false,a.path,why))return false;
             }
             if(v.object.contains("animation")){
                 if(!id(v.get("animation")))return why="invalid initial animation name",false;
@@ -347,7 +449,7 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
                 }
                 if(v.object.contains("native_drops")&&!story_mod_combat::parse_native_drops(v.get("native_drops"),a.native_heart_drop,why))return false;
             }
-        }else if(v.object.contains("model")||v.object.contains("animation")||v.object.contains("look_at")||v.object.contains("path")||v.object.contains("collision")||v.object.contains("attention")||v.object.contains("behaviour")||v.object.contains("buoyancy")||v.object.contains("drift")||v.object.contains("anchor"))return why="model, animation, look_at, path, collision and attention require kind mod",false;
+        }else if(v.object.contains("model")||v.object.contains("animation")||v.object.contains("look_at")||(v.object.contains("path")&&a.actor!="resident")||v.object.contains("collision")||v.object.contains("attention")||v.object.contains("behaviour")||v.object.contains("buoyancy")||v.object.contains("drift")||v.object.contains("anchor"))return why="model, animation, look_at, path, collision and attention require kind mod",false;
         if(v.object.contains("carry")){
             const auto& carry=v.get("carry");if(a.kind!="mod"||a.combat_enabled||!keys(carry,{"break_on_impact"})||(carry.object.contains("break_on_impact")&&carry.get("break_on_impact").type!=Value::Bool))return why="carry requires a noncombat mod actor and boolean break_on_impact",false;
             a.carry_enabled=true;a.carry_break_on_impact=carry.get("break_on_impact").boolean;
@@ -360,7 +462,7 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
         const bool prop=a.actor=="pot"||a.actor=="barrel"||a.actor=="crate";
         if(v.object.contains("texture")){if(!prop||!texture_path(v.get("texture")))return why="texture requires a placed pot, barrel or crate and a package PNG in textures/ or assets/",false;a.texture=v.get("texture").text;}
         const bool switch_actor=a.actor=="switch",door=a.actor=="door";
-        const bool enemy=a.actor=="chuchu"||a.actor=="bokoblin"||a.actor=="moblin"||a.actor=="keese";
+        const bool enemy=a.actor=="chuchu"||a.actor=="bokoblin"||a.actor=="moblin"||a.actor=="keese"||a.actor=="miniblin";
         if(a.actor!="sign"&&a.actor!="resident"&&a.actor!="chest"&&!prop&&!switch_actor&&!door&&!enemy&&!(a.actor=="mod"&&a.kind=="mod"))return why="unknown or unsupported flag-setting actor: "+a.actor,false;
         if(!place(v,a.stage,a.room)||!point(v.get("position"),a.position))return why="actor "+a.id+": invalid stage, room or position",false;
         if(v.get("rotation").type!=Value::Null&&!point(v.get("rotation"),a.rotation,360))return why="invalid actor rotation",false;
@@ -438,11 +540,25 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
         const auto& named=v.get("parameters");
         if(named.type!=Value::Null&&named.type!=Value::Object)return why="actor parameters must be an object",false;
         for(const auto& [key,value]:named.object) {
-            if(key=="resident"&&a.actor=="resident") {if(value.type==Value::String&&(value.text=="uo2"||value.text=="um1"||value.text=="ym1"))a.resident=value.text=="uo2"?1:value.text=="ym1"?19:9;else if(integer(value,9,9))a.resident=9;else return why="resident must be uo2, um1 or seated ym1 (legacy numeric 9)",false;}
-            else if(key=="item"&&a.actor=="chest") {static const char* names[]={"rupee_green","rupee_blue","rupee_yellow","rupee_red","rupee_purple","rupee_orange"};bool found=false;for(unsigned i=0;i<6;++i)if(value.type==Value::String&&value.text==names[i]){a.item_game=uint8_t(i+1);found=true;}if(!found)return why="chest item must be a rupee",false;}
+            if(key=="resident"&&a.actor=="resident") {const auto* type=value.type==Value::String?story_resident_types::find(value.text):nullptr;if(type)a.resident=type->subtype;else if(integer(value,9,9))a.resident=9;else if(const char* no=value.type==Value::String?story_resident_types::refused(value.text):nullptr)return why=no,false;else return why="resident must be one of "+story_resident_types::codes()+" (legacy numeric 9)",false;}
+            else if(key=="variant"&&enemy){}  // read by native_enemy_fields
+            else if(key=="item"&&a.actor=="chest") {
+                if(value.type==Value::String&&value.text.rfind("item:",0)==0){
+                    if(!declared(m,"items",value.text.substr(5)))return why="chest item names an undeclared mod item (item:<id> of \"items\")",false;
+                    a.item_mod=value.text.substr(5);a.item_game=kChestModItem;
+                }else if(!(value.type==Value::String&&(a.item_game=chest_game_item(value.text))))
+                    return why="chest item must be rupee_green, rupee_blue, rupee_yellow, rupee_red, rupee_purple, rupee_orange, rupee_silver, heart_piece, heart_container or item:<id>",false;
+            }
             else return why="unsupported named actor parameter: "+key,false;
         }
-        if(a.actor=="resident"&&a.resident==19&&std::fabs(a.position.x+202066.f)<10&&std::fabs(a.position.z-320123.f)<10)return why="ym1 position intersects native relocation area",false;
+        if(a.actor=="resident")if(const char* no=story_resident_types::place_problem(uint8_t(a.resident),a.stage,a.position.x,a.position.z))return why=no,false;
+        if(a.actor=="resident"&&v.object.contains("path")){
+            if(const char* no=story_resident_types::no_walk(uint8_t(a.resident)))return why=no,false;
+            if(!parse_path(v.get("path"),a.position,true,a.path,why))return false;
+            const float pace=story_resident_types::walker(uint8_t(a.resident))->pace;
+            if(a.path.speed_given&&(a.path.speed<pace*story_resident_types::kMinPaceFactor-0.001f||a.path.speed>pace*story_resident_types::kMaxPaceFactor+0.001f)){
+                char text[160];std::snprintf(text,sizeof text,"path speed for this villager must be %.0f to %.0f units per second (own pace %.0f)",pace*story_resident_types::kMinPaceFactor,pace*story_resident_types::kMaxPaceFactor,pace);return why=text,false;}
+        }
         if(a.actor=="sign"||a.actor=="chest"){if(!flag_id(v.get("flag")))return why="chests and signs require a mod-owned flag id",false;a.flag=v.get("flag").text;}
         if(!actor_condition(m,v.get("when"),a,why))return false;
         if(v.get("lines").type!=Value::Null&&!lines(v.get("lines"),a.lines))return why="invalid actor dialogue",false;
@@ -466,7 +582,7 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
         const auto source=std::find_if(out.begin(),out.end(),[&](const ManifestActor& candidate){return candidate.id==a.switch_actor;});
         if(source==out.end()||source->actor!="switch")return why="door source must name a same-mod switch actor",false;
     }
-    return true;
+    return game_object_budget(out,why);
 }
 inline bool parse_scenes_impl(const mods::json::Value& m,std::vector<ManifestScene>& out,std::string& why) {
     using namespace world_manifest;out.clear();const auto& list=m.get("scenes");
@@ -602,10 +718,12 @@ namespace world_manifest {
 // Validate the selected package graph before any actor or scene registry is mutated.
 inline bool validate_world_packages(const std::vector<std::pair<std::string,mods::json::Value>>& packages,std::string& why) {
     unsigned total=0,chart_markers=0;std::map<std::pair<std::string,unsigned>,unsigned> rooms;
-    std::map<uint16_t,std::pair<std::string,std::string>> flags;
+    std::map<uint16_t,std::pair<std::string,std::string>> flags;std::vector<ManifestActor> game_objects;
     for(const auto& [mod,manifest]:packages){
         std::vector<ManifestActor> actors;std::vector<ManifestScene> scenes;
         if(!parse_actors(manifest,actors,why)||!parse_scenes(manifest,scenes,why)){why=mod+": "+why;return false;}
+        for(const auto&actor:actors)if(actor.game_object())game_objects.push_back(actor);
+        if(!game_object_budget(game_objects,why)){why="enabled packages: "+why;return false;}
         total+=unsigned(actors.size());if(total>128)return why="enabled packages exceed 128 actors overall",false;
         for(const auto&actor:actors)if(actor.chart_marker.enabled&&++chart_markers>32)return why="enabled packages exceed 32 island chart markers",false;
         std::vector<std::string> names;

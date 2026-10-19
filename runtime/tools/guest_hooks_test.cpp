@@ -26,7 +26,8 @@
 // This entire harness constructs synthetic startup registries; production has no unseal.
 #include "mods/guest_mods.cpp"
 namespace story_native_wait_runtime {
-void startup(bool,LogicStep) {assert(story_native_scene_request::startup_window_current());}
+static unsigned startups=0;
+void startup(bool,LogicStep) {++startups;assert(story_native_scene_request::startup_window_current());}
 void logic(Cpu*) {}
 void state_loaded() {}
 }
@@ -119,7 +120,7 @@ std::optional<Value> read(const std::string& key) {
 }
 namespace input {PadState read() {return {};}}
 namespace true60 {float dt() {return 0.5f;}}
-namespace mem { std::string read_cstr(uint32_t) { return "option"; } uint32_t host_alloc(uint32_t,uint32_t) { return 0; } uint32_t runtime_alloc(uint32_t,uint32_t) {return 0;} uint32_t runtime_top(){return 0;} }
+namespace mem { std::string read_cstr(uint32_t) { return "option"; } uint32_t host_alloc(uint32_t,uint32_t) { return 0; } unsigned fixture_runtime_allocs=0; uint32_t runtime_alloc(uint32_t,uint32_t) {++fixture_runtime_allocs;return 0;} uint32_t runtime_top(){return 0;} }
 namespace dispatch { bool fixture_text_sealed=false,fixture_dispatch_tampered=false;void set(uint32_t, PpcFunc) {} PpcFunc lookup(uint32_t a){if(fixture_dispatch_tampered)return nullptr;for(unsigned n=0;n<g_recomp_func_count;++n)if(g_recomp_funcs[n].addr==a)return g_recomp_funcs[n].fn;return nullptr;} bool seal_native_text()noexcept{return false;} bool native_text_sealed()noexcept{return fixture_text_sealed;} }
 namespace model_probe {bool native_refresh_quiescent()noexcept{return true;}}
 // The hook runner fixture has no guest scheduler. Its logic-service thread
@@ -179,9 +180,13 @@ std::vector<Hook> chest_hooks() {return {};}
 void set_game_calls(void (*)(Cpu*,uint32_t),uint32_t (*)(Cpu*,uint32_t,std::initializer_list<uint32_t>)) {}
 void set_scratch_memory(uint32_t) {}
 void install(const std::function<std::string(uint32_t)>&,const std::function<void(uint32_t,void (*)(Cpu*))>&) {}
+bool installed() {return false;}
 }
 namespace story_treasure_chest {
 void state_loaded() {}
+bool placed_chests() {return false;}
+void set_placed_chest(bool (*)(uint32_t,std::string&,std::string&)) {}
+void set_item_hook_ready(bool) {}
 void set_item_get_next(void (*)(Cpu*),void (*)(Cpu*,uint32_t)) {}
 namespace hooks { void exec_item_get(Cpu*) {} }
 }
@@ -196,7 +201,9 @@ std::vector<std::string> clips_for(const std::string&){return {};}
 bool bounds_for(const std::string&,story_notebook::WorldPoint&,story_notebook::WorldPoint&){return false;}
 std::string prepare(const std::string&,const story_notebook::ManifestModel&,const std::string&,const std::string&,const std::vector<std::string>&,const std::string&,const std::string&,bool,bool){return {}; }
 }
+namespace editor { bool launch_mode(){return false;} }  // a start without --editor
 namespace story_actors {
+bool placed_chest_item(uint32_t,std::string&,std::string&){return false;}
 bool resident_event_declaration(const std::string&,const std::string&,ResidentEventDeclaration&){return false;}
 bool prop_texture_identity(uint32_t,uint32_t,uint32_t&,uint32_t&,uint32_t&){return false;}
 bool register_model(const std::string&,const std::string&,const std::string&,int,std::string&,story_notebook::WorldPoint,story_notebook::WorldPoint,bool,std::vector<std::string>,mod_actor::ModelRig){return true;}
@@ -205,6 +212,7 @@ void service(Cpu*){}
 bool load(const std::string&,const std::vector<story_notebook::ManifestActor>&,std::string&){return true;}
 bool load(const std::string&,const std::vector<story_notebook::ManifestActor>&,std::string&,const std::vector<std::string>&){return true;}
 bool declared(){return false;}
+unsigned live_kinds=0;void editor_live_kinds(){++live_kinds;}
 void set_game_calls(void (*)(Cpu*,uint32_t),uint32_t (*)(Cpu*,uint32_t,std::initializer_list<uint32_t>)){}
 void set_scratch_memory(uint32_t){}
 void set_scene_start(std::function<bool(const std::string&,const std::string&)>){}
@@ -250,7 +258,8 @@ void set_texture_apply(TextureApply){}
 bool texture_heap(uint32_t,uint32_t&,uint32_t&){return false;}
 }
 namespace story_particles {
-bool configure(Invoke,uint32_t,uint32_t,uint32_t){return true;}
+static unsigned configured=0;
+bool configure(Invoke,uint32_t,uint32_t,uint32_t){++configured;return true;}
 bool burst(Cpu*,const Burst&){return false;}
 static unsigned calls=0;static bool accept=true;static std::string effect;static Placement placement;static Options options;
 bool burst_named(Cpu*,std::string_view e,const Placement&p,Options o){++calls;effect=e;placement=p;options=o;return accept;}
@@ -377,15 +386,26 @@ void install(const std::function<std::string(uint32_t)>&,const std::function<voi
 // Item presentation has its own native-routing/lifetime tests; this fixture isolates guest hooks.
 namespace story_item_models {
 bool declare(uint16_t,const std::string&,unsigned,std::string&,const std::string&) {return true;}
+bool declared() {return false;}
+static unsigned configured=0;
 size_t checkpoint() {return 0;}
 void rollback(size_t) noexcept {}
-void configure(uint32_t,void(*)(Cpu*,uint32_t),Invoke) {}
+void configure(uint32_t,void(*)(Cpu*,uint32_t),Invoke) {++configured;}
 bool install(const std::function<std::string(uint32_t)>&,const std::function<void(uint32_t,void(*)(Cpu*))>&) {return true;}
 void request(uint16_t) {}
 void tick(Cpu*) {}
 void state_loaded() {}
 void progress_loaded() {}
+bool hold_up(uint16_t) {return false;}
+void chest_hold_up(uint16_t,bool) {}
+void set_text(bool(*)(uint16_t,bool)) {}
 }
+namespace story_items {
+void set_hold_up_presenter(bool(*)(uint16_t),void(*)(uint16_t,bool)) {}
+void set_get_text(bool(*)(uint32_t,const std::u16string*)) {}
+bool arm_get_text(uint16_t,bool) {return false;}
+}
+namespace story_mail { bool item_get_text(uint32_t,const std::u16string*) {return false;} }
 // and so has the story progress store (story_notebook_test)
 namespace story_store {
 void set_progress_loaded(void(*)()) {}
@@ -720,6 +740,12 @@ int main() {
     guestmods::init();
     assert(!story_native_scene_request::startup_window_current());
     assert(mods::packages::inspected);
+    // Inert without mods: no guest runtime memory (the save-state layout of a start without mods), no
+    // particle or held-model setup, no native scene startup, no game-thread binding and no package observer.
+    assert(mem::fixture_runtime_allocs==0&&story_particles::configured==0&&story_item_models::configured==0);
+    assert(story_native_wait_runtime::startups==0&&!guestmods::g_native_scenes&&!guestmods::g_package_observer);
+    assert(story_actors::live_kinds==0);  // the editor's live kinds only with --editor
+    assert(!story_game_objects::built());  // the game objects catalogue only with a mod that names one, or --editor
     Cpu c{};
     c.r[3] = 5; port(&c);
     assert((calls == std::vector<int>{1, 3, 6})); assert(c.r[3] == 11);

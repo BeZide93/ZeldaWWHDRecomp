@@ -28,15 +28,40 @@ The initial allowlist is deliberately small:
 | Actor | Names accepted | Parameters |
 | --- | --- | --- |
 | Sign | `sign`, `kanban`, `PROC_KANBAN` | A mod-owned `flag`; optional dialogue |
-| Resident | `resident`, `NpcPeople`, `PROC_NPC_PEOPLE` | `parameters: {"resident": "uo2"}`, `"um1"` or seated `"ym1"`; default and legacy numeric `9` select Um1 |
-| Chest | `chest`, `Tbox`, `takara`, `PROC_TBOX` | A mod-owned `flag`; safe rupee `parameters.item` |
+| Resident | `resident`, `NpcPeople`, `PROC_NPC_PEOPLE` | `parameters: {"resident": "uo2"}`: one of the villagers below; default and legacy numeric `9` select Um1 |
+| Chest | `chest`, `Tbox`, `takara`, `PROC_TBOX` | A mod-owned `flag`; what it holds in `parameters.item` (below) |
 | Breakable prop | `pot`, `barrel`, `crate` | Required mod-owned `broken_flag` and `drops` list |
 | Latched floor switch | `switch` | Required mod-owned `switch_flag`; fixed yellow switch |
 | Rotating gate | `door` | Required `switch` naming a switch actor in the same mod |
-| Native enemies (preview) | `chuchu`, `bokoblin`, `moblin`, `keese` | Required mod-owned `defeated_flag` and `drops`; fixed ordinary variants |
+| Native enemies (preview) | `chuchu`, `bokoblin`, `moblin`, `keese`, `miniblin` | Required mod-owned `defeated_flag` and `drops`; fixed ordinary variants |
 
-Resident names are exact native object codes. This preview supports only `uo2`, `um1` and seated `ym1`, with fixed ordinary parameters and no native rail or quest variants.
-Other names and numeric values are rejected. Each placed copy uses mod dialogue
+Resident names are exact native object codes in lower case. Each placed copy uses fixed ordinary
+parameters: it stands where you put it (unless you give it a route, below) and has none of the
+character's quest or story variants.
+
+| Code | Who it looks like | Notes |
+| --- | --- | --- |
+| `uo2` | The man from the Windfall bar | |
+| `um1` | The windmill keeper | |
+| `uo1` | The old man on the sea-view bench | |
+| `uo3` | The well-dressed man walking through town | A placed copy stands still unless it has a route |
+| `ub1`, `ub2` | The two women chatting on the steps | Each is placed on its own |
+| `ub3` | The woman on the harbour pier | |
+| `ub4` | The woman by the town gate | Not in the photo studio (`Ocmera`) |
+| `uw1` | The young woman working in the bar | |
+| `uw2`, `um2` | The young woman and young man of the town square | A placed copy is there whatever their story |
+| `sa1` | The sailor who drinks in the bar at night | |
+| `sa2` | The sailor on the high lookout | |
+| `sa3` | The sailor on the stone dock | |
+| `sa4` | The sailor at the end of the wooden pier | |
+| `ym1` | A seated man | See below |
+
+Day and night: a copy looks like the character at the time of day it was created.
+Other names and numeric values are rejected. These Windfall people are not placeable, because
+their ordinary behaviour changes the game: `um3` (his telescope talk sets the game's progress at
+night), `sa5` (he moves the game's pigs), `ug1` and `ug2` (they follow the game's week and its
+hide-and-seek event). The other characters of the NPC catalogue are separate actor classes with
+their own quests and are not placeable yet. Each placed copy uses mod dialogue
 and flags; retail originals keep their own dialogue and quests. Placed copies
 are excluded from retail named cohorts and figurine registration, while normal
 world freezing, attention and collision remain native. Restored open dialogue
@@ -49,9 +74,70 @@ not ground-correct, walk, or support scene `move`/`face`. Its narrow native
 relocation area near x=-202066, z=320123 is rejected. Camera following and dialogue
 remain available. Other Ym1/Ym2 staff variants are unsupported.
 
+### Residents walking a route
+
+A placed resident with a walking animation of its own can walk a route with the game's own walking:
+`uo1`, `uo2`, `uo3`, `um1` and `um2`. It starts at its `position` and walks to the route's points:
+
+```json
+{
+  "id": "baker", "actor": "resident", "parameters": {"resident": "um1"},
+  "stage": "sea", "room": 11, "position": {"x": 600, "y": 95, "z": -199000},
+  "lines": ["Fresh bread at the market!"],
+  "path": {
+    "points": [{"x": 820, "y": 95, "z": -199100}, {"x": 700, "y": 95, "z": -199250}],
+    "mode": "loop", "speed": 70, "pauses": true
+  }
+}
+```
+
+| Field | |
+| --- | --- |
+| `points` | 1 to 15 points after the position; each more than one unit (across) from the one before |
+| `mode` | `once` (default: it walks to the last point and stands there), `loop` (back to its position and round again) or `back_and_forth` (it turns at each end) |
+| `speed` | game units per second, from half to twice the character's own pace; without it, its own pace (`uo1`, `uo2` 30, `uo3` 60, `um1` 63, `um2` 72) |
+| `pauses` | `true`: after walking for some seconds it stands for a moment, in the character's own rhythm as the game's walkers do; default `false` |
+
+It walks as the game's own walkers do: with its own walk and idle, turning on the spot at corners,
+following the ground, stopping to look at Link when he is close in front of it (and walking on when he
+leaves), and talking as usual (your lines). `uo2` still startles at a roll or a loud noise nearby. It has
+no ledge check of its own, so the port watches it: when it gets no closer to its next point for about a
+second and a half (a wall), it goes on to the point after; when the same point stays out of reach three
+times, or it gets nowhere over three such skips, it stops where it is. When it drops far below
+its route (an edge), it is put back where it last stood on its route and stops. Check the route in the
+world editor: segments over no ground, a drop or a step too high are drawn red.
+
+A route walks in the room where the resident is placed; when the room loads again, it starts again at
+its position (a `once` route too). Full save states keep where it is on its route. At most 32 residents
+of all enabled mods have a route.
+
+The other villagers have no walking animation of their own and are refused with
+"this villager has no walking animation of its own"; the seated `ym1` does not walk. Each placed resident
+may have a route or none; `um3`, `sa5`, `ug1` and `ug2` stay unplaceable (see above).
+
 Other actor names and unsafe parameters are validator errors. Only ordinary chest
 raw `params: 0` is accepted at present. The port owns the remaining chest/sign
 parameters so a package cannot select a game switch or opened bit.
+
+**What a chest holds.** `"parameters": {"item": ...}` says what Link gets when he opens
+the chest: the game's item-get pose with the item and its message, as with the game's
+own chests.
+
+| Value | Link gets |
+| --- | --- |
+| `rupee_green`, `rupee_blue`, `rupee_yellow`, `rupee_red` | a green (1), blue (5), yellow (10) or red (20) rupee |
+| `rupee_purple`, `rupee_orange`, `rupee_silver` | a purple (50), orange (100) or silver (200) rupee |
+| `heart_piece`, `heart_container` | a piece of heart or a heart container |
+| `item:<id>` | one of your mod's items (declared in `items`); with `hold_up` and a `held_model`, Link holds your model up |
+| (none) | an orange rupee |
+
+These are the items a treasure chart's chest can hold, and for the same reason: they
+change only Link's rupees and hearts. No story or key item can be chosen, and the
+chest never sets one of the game's save bits: whether it is open is its mod `flag`.
+A piece of heart or a heart container changes Link's hearts for good (turning the mod off
+doesn't take them back), as one from a chart's chest does, so use them sparingly. A chest that holds one of your items needs the
+story system's chest hook: one added in the editor while the game runs appears after a
+restart.
 
 `flag` is a symbolic ID in the declaring mod's story records. It is not a game
 save-bit number. Chest opening and sign reading use this namespace. The runtime
@@ -71,6 +157,83 @@ match too. Conditions are checked when the room
 is populated and reconciled in the current room on game logic steps. Pending
 creation/deletion retains its identity; an active conversation finishes before
 its partner is removed. Actors belong to the native room layer and unload with it.
+
+## The game's own objects (game objects)
+
+A mod can place the game's own static objects, such as palm trees, large trees and tables, by
+naming them: `"actor": "game:palm"`. Nothing of the game goes into your package: the object
+loads from the player's own game files, exactly as the game draws and handles it, with its
+wind sway and its collision (Link and the boat bump into a palm's trunk).
+
+```json
+{
+  "requires": {"game_objects": 1},
+  "actors": [
+    {"id": "palm-1", "actor": "game:palm", "stage": "sea", "room": 11,
+     "position": {"x": -1500, "y": 322, "z": -199700}, "rotation": {"x": 0, "y": 45, "z": 0}},
+    {"id": "seat", "actor": "game:table", "variant": "stool", "stage": "sea", "room": 11,
+     "position": {"x": -1850, "y": 303, "z": -200200}}
+  ]
+}
+```
+
+A manifest that uses game objects says which version of the port's game objects catalogue it
+needs: `"requires": {"game_objects": 1}`. A port with an older catalogue refuses the mod with
+"update the port"; an object added in a later version can't be named with an older number.
+
+A game object takes only `id`, `actor`, `variant`, `stage`, `room`, `position`, `rotation` and
+`scale`. It turns about the vertical axis only (`rotation` x and z stay 0), and its `scale` is the
+same on all three axes and within the object's limits below. `variant` picks one of its forms (the
+first is the default). Parameters, flags, `then`, paths, conditions and dialogue are refused: the
+port gives each object the game's ordinary settings with no switch, save bit or event, so a game
+object never changes the player's progress. A package that places game objects must not contain
+game files (`.bfres`, `.szs`, `.sarc`, `.pack`, `.dzb`, `.ftex` and the like, under any name);
+the mod manager refuses it.
+
+| Id | What it is | Variants | Scale |
+| --- | --- | --- | --- |
+| `game:palm` | A tall palm tree whose leaves sway in the wind | `palm` | 1 |
+| `game:tree-large` | A large leafy tree | `tree` | 0.5–1.5 |
+| `game:plant-pot` | A leafy potted plant that sways when Link brushes past | `plant-pot` | 0.5–1.5 |
+| `game:flower-red` | A tall red flower (drops nothing) | `flower-red` | 0.5–1.5 |
+| `game:table` | A wooden table, or the small stool that goes with it | `table`, `stool`, `stool-open` (Link walks through it) | 1 |
+| `game:table-small`, `game:table-long` | Wooden tables that settle onto the ground below them | one each | 1 |
+| `game:shelf` | A tall shelf with pots and books | `shelf` | 1 |
+| `game:lamp-cafe` | A ceiling lamp that turns slowly (no collision) | `lamp-cafe` | 0.5–2 |
+| `game:lamp` | A small lamp with a flame that lights its surroundings | `lamp` | 1 |
+| `game:nest` | A large bird's nest Link can stand in | `nest` | 1 |
+| `game:flag-rito`, `game:flag-sea` | Flags on poles that flutter in the wind | one each | 1 |
+| `game:lookout-tower` | A tall wooden lookout platform that stands in the sea | `tower-ladder` (Link climbs its ladder), `tower` | 1 |
+
+Grass, flowers and small trees are the game's shared batches rather than single objects. Each variant
+plants a group of a given size; none of them drops anything when cut.
+
+| Id | Variants (units) | Mods' share per stage |
+| --- | --- | --- |
+| `game:grass` | `grass-1` (1), `grass-7` (7), `grass-21` (21) | 300 of the stage's 1500 |
+| `game:flower-white` | `flowers-1` (1), `flowers-7` (7), `flowers-17` (17) | 60 of 200 (with pink) |
+| `game:flower-pink` | `flowers-1` (1), `flowers-7` (7) | 60 of 200 (with white) |
+| `game:tree-small` | `trees-1` (1), `trees-3` (3), `trees-5` (5) | 16 of 64 |
+| `game:tree-bushy` | `tree-bushy` (1) | 40 of 200 |
+
+A batch is planted once per visit of its room, a moment after the room's own grass, and only on a
+stage that has that kind of batch itself (most islands do; Windfall has flowers but no grass). It
+leaves a quarter of the stage's batch free for the rooms that load next; when there isn't enough
+room it is left out for that visit (with a line in the log). Cut grass grows back, and a removed or
+moved batch goes from the game only when its room loads again.
+
+Objects whose collision keeps the game's size stay at scale 1, so what you see and what Link
+bumps into always match.
+
+Game objects count toward the 16 actors per room (all packages together). The game objects of a
+room also share a memory budget of 3 MiB (each object about 15–20 KiB; their archives are already
+in memory). A game object returns when its room loads again, and full and portable save states
+keep it. If the player's game doesn't have an object (another game version), it is left out with a
+line in the log, and the rest of the mod works.
+
+To see which objects your game has, run
+`python3 tools/story_mods/game_objects.py --game <game folder> --list` (add `--placements` to see
+how often the game itself places each one). It reads your game files and prints no game data.
 
 ## Breakable native props
 
@@ -151,10 +314,11 @@ The allowlist below defines the supported variants.
 
 | `actor` | Fixed variant |
 | --- | --- |
-| `chuchu` | Ordinary green ChuChu |
-| `bokoblin` | Ordinary type-4 Bokoblin |
+| `chuchu` | Ordinary green ChuChu, or a declared colour (below) |
+| `bokoblin` | Ordinary type-4 Bokoblin, or a declared weapon variant (below) |
 | `moblin` | Ordinary Moblin |
 | `keese` | Ordinary Keese, the native KI bat; not Morth |
+| `miniblin` | Ordinary Miniblin: hidden until Link comes near and looks its way; never respawns |
 
 All four use the same declaration fields:
 
@@ -169,7 +333,7 @@ All four use the same declaration fields:
 }
 ```
 
-Use `"actor": "chuchu"`, `"moblin"` or `"keese"` for the other fixed variants,
+Use `"actor": "chuchu"`, `"moblin"`, `"keese"` or `"miniblin"` for the other fixed variants,
 with a distinct actor ID and defeat flag for each copy. Declare reward items in
 the same package. `drops` is required and may be empty or contain up to eight
 distinct same-mod items, each with quantity 1–254. Only yaw rotation is accepted;
@@ -198,9 +362,38 @@ drops are replaced by the declared Bag rewards. Some native disappearance effect
 are omitted because their native effect actor also creates retail drops; identical
 retail defeat effects are not promised.
 
+### Variants
+
+Some enemies have declared variants: name one with `"parameters": {"variant": "..."}`.
+Without it the enemy is its ordinary kind. A variant is a fixed choice the port has
+checked; packages still cannot give raw parameters.
+
+| `actor` | `variant` | What it does |
+| --- | --- | --- |
+| `chuchu` | `green` | The ordinary ChuChu (the same as no variant) |
+| `chuchu` | `red` | Jumps at Link when he comes close |
+| `chuchu` | `blue` | Sparks with electricity: a sword hit shocks Link; bombs or a stun first |
+| `chuchu` | `yellow` | Jumps at Link and sparks with electricity |
+| `bokoblin` | `stick` | The ordinary Bokoblin with a stick (the same as no variant) |
+| `bokoblin` | `shield` | Carries a shield as well: it blocks and takes more hits |
+| `bokoblin` | `machete` | Fights with a machete instead of the stick |
+
+```json
+{"id": "pier-chu", "actor": "chuchu", "parameters": {"variant": "blue"},
+ "stage": "sea", "room": 11, "position": {"x": 100, "y": 1040, "z": -201500},
+ "defeated_flag": "pier-chu.defeated", "drops": []}
+```
+
+Every colour uses the ordinary ground ChuChu with no game switch; defeat, drops and
+saves work as for the green one. Every Bokoblin variant is the ordinary waiting and
+searching Bokoblin without a path or game switch; its weapon stays the placed copy's
+own and cannot be taken. Patrolling Bokoblins need the game's room paths and are
+not offered. Other names, and variants for an enemy that has
+none, are validator errors.
+
 Packages ship no game models, weapons, animations, shaders or global resource
 replacements for these declarations. Retail originals retain their own behavior
-and progress. The fixed variants are the entire preview allowlist; elemental,
+and progress. The variants above are the entire preview allowlist; other elemental,
 quest and alternate weapon variants are unsupported.
 
 ## Original mod enemies (combat preview)
@@ -365,7 +558,7 @@ static-model validation and player-local conversion requirements below apply.
 Skinned item models and item-model animation are currently unsupported.
 `held_frames` is an integer from 1 to 300, default 90, measured in game logic
 frames at 30 Hz. Loading uses this same bounded interval. Rendering does not
-advance it. An item needs a `use` action; failed Use and Info do not request a
+advance it. An item needs a `use` action (or `hold_up`, below); failed Use and Info do not request a
 presentation. An event action is suitable when no modal information page is
 wanted. At most eight item model declarations are accepted per session.
 
@@ -376,9 +569,25 @@ when its item/model fingerprint still matches; it does not replay Use. Resource
 loading may delay replacement while an outstanding native load finishes.
 Original retail equipment and resource tables remain separate.
 
-`held_model` does **not** replace a chest's get-item model. Custom chest get-item
-presentation is unsupported in this preview; existing chest rewards retain
-their existing stand-in presentation.
+**Holding it up when Link gets it.** With `"hold_up": true` the item is shown the
+way the game shows its own items: when Link gets it (a `give` action, a letter that
+encloses it, a quest reward, the chest of one of your treasure charts or your code),
+he plays the game's item-get pose and holds `held_model` up over his head, with the
+game's get message ("You got Lamp crystal!" and the item's description). The model
+takes the place of the item the game would hold up, turning the same way. The pose
+waits for a free moment (no talk, scene or other event running) and then plays once
+per get; when the Delivery Bag's pages are full, the caption says so instead. A full
+save state taken during the pose ends it the same way after loading. `hold_up` needs
+`held_model`; such an item needs no `use` action (with one, it is also shown in
+Link's hand when used).
+
+```json
+{"id": "crystal", "name": "Lamp crystal", "description": "It still glows faintly.",
+ "icon": "assets/crystal.png", "held_model": "crystal", "hold_up": true}
+```
+
+Without `hold_up`, a get shows the item's caption with a small jingle, and a chest of
+one of your charts holds up a stand-in of the game's.
 
 ## Static mod actors
 
@@ -500,7 +709,10 @@ that chain. Look-at actors must remain upright: X/Z rotation is zero modulo
 The angle limits constrain the local joint pose, not exact world-space targeting
 under arbitrary animated ancestor roll. Paths have 2–16
 points, speed greater than zero and at most 1500 game units/second, and mode
-`"once"` or `"loop"`. Adjacent points, including a loop's closing edge, need more
+`"once"`, `"loop"` or `"back_and_forth"` (it walks back to the first point and out again).
+`"pauses": true` makes it stand for a moment now and then (it walks for about 7 to 10 seconds,
+stands for 2 to 3, with its idle clip). `"walk"` and `"idle"` name the clips it walks and stands
+with (default `walk` and `idle`; both must be in the model). Adjacent points, including a loop's closing edge, need more
 than one game unit of horizontal separation. Native ground and collision checks
 can refuse movement; the path advances from accepted positions. Actors stop at
 Link's capsule rather than walking through it. Path-driven body facing turns
@@ -565,6 +777,14 @@ array contains at most eight actions:
 `value`. Referenced items, quests, quest steps and scenes must be declared in the
 same manifest. Actions run in order after the talk closes; a failing action stops
 the sequence. Skipping or aborting a scene does not apply its end actions.
+
+`{"action": "give", "id": "chart:keeper-map"}` gives Link one of your treasure charts
+(declared in the same manifest's `charts`, see
+[Charts and markers](mod-sdk-v2.md#charts-and-markers)). It works like a chart a letter
+encloses: the MAP screen's chart list shows it and the story notebook knows it. A chart is
+given once; giving it again (or after it is finished) changes nothing. It takes no `count`,
+and `take` can't take a chart. This action works in an actor's `then`, a talk's `then` and a
+scene's final `end.then`.
 
 `{"action":"quest_done","id":"lantern"}` completes a quest declared in the
 same manifest. It gives the declared reward once, marks the quest done in the

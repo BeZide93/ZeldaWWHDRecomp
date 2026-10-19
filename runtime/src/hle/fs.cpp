@@ -10,6 +10,7 @@
 #include "../mods/story_store.h"
 #include "../platform/filesystem.h"
 
+#include <atomic>
 #include <cstdio>
 #ifndef _WIN32
 #include <strings.h>
@@ -31,12 +32,15 @@ namespace hle_fs {
 namespace {
 std::mutex g_save_root_mutex;
 std::string g_save_root;
+std::atomic<bool> g_save_root_set{false};  // an override is set (the world editor's test mode): only then the lock
 }  // namespace
 void set_save_root(const std::string& dir) {
     std::lock_guard<std::mutex> lk(g_save_root_mutex);
     g_save_root = dir;
+    g_save_root_set.store(!dir.empty(), std::memory_order_release);
 }
 std::string save_root() {
+    if (!g_save_root_set.load(std::memory_order_acquire)) return config::save_dir;
     std::lock_guard<std::mutex> lk(g_save_root_mutex);
     return g_save_root.empty() ? config::save_dir : g_save_root;
 }

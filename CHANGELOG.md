@@ -7,9 +7,61 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Mod SDK v3: placed villagers can walk a route.** Uo1, Uo2, Uo3, Um1 and Um2 walk up to 15 points with their own
+  walk: once, in a loop or back and forth, at their own pace or yours, with optional strolling pauses. They still stop
+  to look at Link and talk as usual, and a walker that runs into a wall or walks off an edge is caught. Your own
+  models' routes can also go back and forth, pause now and then, and name their walk and idle clips.
+- **World editor: a Route section in the Inspector** for walking villagers and your skinned models. Add points at Link
+  or the camera, drag them in the picture, reorder or remove them, and set speed, mode and pauses; the route shows in
+  green, and stretches without walkable ground in red. New route commands for MCP clients.
+- **Mods and the world editor can place the game's own objects by name** (`game:palm`, trees, tables, shelves, lamps,
+  plant pots, flowers, nests, the Rito and sea flags, the sea lookout tower, grass, flowers and small trees): they load
+  from your own game files, never from the mod. In the editor: Add > Game objects, with Variant, Turn and Scale in the
+  Inspector; `list_game_objects` over MCP.
+- **Mod SDK v3: thirteen more Windfall villagers can be placed** (residents uo1, uo3, ub1–ub4, uw1, uw2, um2,
+  sa1–sa4); um3, sa5, ug1 and ug2 are refused with the reason.
+- **Mod SDK v3: more enemies** — red, blue and yellow ChuChus (`parameters.variant`), the Miniblin, and Bokoblins with
+  a shield or a machete, each with the mod's defeat flag and drops. The editor picks a villager or an enemy variant
+  from a list in Add and in the Inspector.
+- **World editor: the Inspector no longer says an enemy's changes wait for a restart** when they apply at once.
+- **World editor: story changes while the game runs.** Quests, quest talks (also those for the game's villagers),
+  letters and charts change in the running game at the next calm moment, with every edit, Undo and Redo; an item's
+  name, description, amount and use change at once. A new item, its icon, held model and hold_up, and removed charts
+  still wait for a restart, and the status bar says which. The Quest Log is never touched: saves and save states
+  always play with the current story, and the status bar says when a renumbered step moved a loaded quest.
+- **World editor: New mod…** starts a new, empty mod of your own from inside the editor (also `new_mod` over MCP):
+  its own package, turned on in your mod profile and opened at once.
+- **World editor: quest talks for the game's villagers.** The game's own villagers show their names in the picture;
+  click one to give it a quest talk in your mod, as a new quest, a new step or a step's talk (also `list_villagers`,
+  `pick_villager` and `add_villager_talk`). The villager's own dialogue and save flags are never changed.
+- **World editor: placing and dragging fixed.** Clicks find the ground under the mouse again (piers, roofs and grass
+  were missed or hit the sea floor); residents, enemies and props appear at once also in a mod that had no actors at
+  start-up; a dragged enemy or resident now moves with the drag instead of staying at its old spot; and a resident's
+  type is chosen in Add and in the Inspector.
+- **Story mods: Bokoblins see Link.** Bokoblins placed by a mod stood blind and never attacked; they now notice Link
+  at the game's usual range and fight. (A save state with such a Bokoblin from before puts it aside.)
+- **World editor: the docked panels react to the mouse again.** Since the dockable panels arrived, the full-screen
+  picture could sit in front of the docked panels, so they got no hover or clicks on any renderer; the picture now
+  always stays behind them.
+- **Android: handhelds with a fan keep 60 fps longer** (#247). Their heat guard now pauses 60 fps at a thermal headroom of
+  1.00 instead of 0.90 (Relaxed: 1.10); the AYANEO EVO and KONKR Pocket FIT Elite ran 60 fps well around 0.90-0.96.
+  Phones keep their limit.
 - **World editor: native scene previews after loading a save state.** A scene's native version now also plays in the
   preview after a save state was loaded or after a preview fell back to the scene's steps, and the editor says why
   when it can't restore the world after a preview.
+
+- **Without mods and without `--editor`, the world editor and the Mod SDK v3 stay completely off.** Nothing of
+  theirs runs or reserves game memory then, so full save states made without mods by builds from before 17 October
+  load again.
+
+- **Story mods: more of a quest without code** (for mod makers). Content packages may hold only letters, charts,
+  items or quests; letters can wait for a quest or flag and a number of game days (`when`, `after_days`); characters and
+  scenes can give a treasure chart; items with `hold_up` are held over Link's head when he gets them; placed chests can
+  hold more rupees, a heart piece or container, or the mod's own items (with a "Chest holds" picker in the editor); and
+  `reset_quest` also clears the quest's charts and items.
+- **World editor: letters, treasure charts and items** (`--editor` and its MCP tools, for mod makers). A new Story tab
+  and commands create, change and remove letters on their own, treasure charts (with the X placed at Link or the
+  camera) and items (with icon import). Removing something still in use is refused with the list of its uses.
 - **Android: heat guard for handhelds with a fan** (#247). AYANEO, KONKR, AYN and Retroid handhelds now keep 60 fps
   until they are much hotter than phones, and the new **Settings → Graphics → Heat guard** (Normal / Relaxed / Off)
   sets how early 60 fps pauses when the device gets hot. Phones keep their current limit by default.

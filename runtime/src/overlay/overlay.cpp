@@ -126,6 +126,8 @@ const bool g_no_host = getenv("WWHD_NO_HOST_INPUT") != nullptr;  // test runs ig
 // ... except keys a test posts itself (WWHD_TEST_POST_KEYS, gfx/input.mm; the hidden test window never
 // has the user's keyboard)
 const bool g_no_host_keys = g_no_host && !getenv("WWHD_TEST_POST_KEYS");
+// ... and the mouse events a test posts (WWHD_TEST_POST_MOUSE, gfx/overlay_appkit.mm: only those reach here then)
+const bool g_no_host_mouse = g_no_host && !getenv("WWHD_TEST_POST_MOUSE");
 bool g_pad_b_used = false;  // B answered a dialog this frame: it does not also close the menu
 // a dialog (or a list) is open in Settings: Esc and Android's Back close it, not the menu (popup.h)
 std::atomic<bool> g_dialog_open{false};
@@ -2727,7 +2729,7 @@ bool wants_text() { return (is_open() || layer_mode() != 0) && g_wants_text.load
 void set_stereo_pointer_visible(bool visible) { g_stereo_pointer_visible=visible; }
 bool mouse_move(float nx, float ny, bool touch) {
     const int layer = layer_mode();
-    if (g_no_host || (!captures() && stereo::requestedMode==stereo::Off && !layer)) return false;
+    if (g_no_host_mouse || (!captures() && stereo::requestedMode==stereo::Off && !layer)) return false;
     push({Event::MousePos, 0, false, nx, ny, 0, touch});
     return captures() || layer_takes_pointer();
 }
@@ -2748,18 +2750,18 @@ void prepare_menu_input(ImGuiIO& io, bool open, bool mouse_used) {
     U.gamepad_navigation.feed(io, U.nav_values.data(), U.nav_prev.data(), open && U.cap_action < 0 && !capturing_at_start, mouse_used, face);  // the text prompt reads the controller itself
 }
 bool pointer_shortcut(int code, bool down) {
-    if (g_no_host || captures()) return false;
+    if (g_no_host_mouse || captures()) return false;
     const int action = input_map::shortcut_for_key(input_map::current(), code, 0);
     if (action < 0) return false;
     if (down) activate_shortcut(action);
     return true;
 }
 bool mouse_button(int button, bool down, bool touch) {
-    if (!captures() && layer_takes_pointer() && !g_no_host) {
+    if (!captures() && layer_takes_pointer() && !g_no_host_mouse) {
         if (button >= 0 && button < 5) push({Event::MouseButton, button, down, 0, 0, 0, touch});
         return true;
     }
-    if (!captures() || g_no_host) return false;
+    if (!captures() || g_no_host_mouse) return false;
     if (button < 0 || button >= 5) return true;
     if (!touch && g_capturing_keys.load() && down) {
         g_capture_mods = 0; g_capture_key = input_map::kMouse1 + button;
@@ -2769,11 +2771,11 @@ bool mouse_button(int button, bool down, bool touch) {
     return true;
 }
 bool mouse_wheel(float dx, float dy) {
-    if (!captures() && layer_takes_pointer() && !g_no_host) {
+    if (!captures() && layer_takes_pointer() && !g_no_host_mouse) {
         push({Event::Wheel, 0, false, dx, dy, 0});
         return true;
     }
-    if (!captures() || g_no_host) return false;
+    if (!captures() || g_no_host_mouse) return false;
     if (g_capturing_keys.load() && dy != 0) {
         g_capture_mods = 0; g_capture_key = dy > 0 ? input_map::kWheelUp : input_map::kWheelDown;
         return true;
@@ -2997,6 +2999,25 @@ ImDrawData* frame(float pw, float ph, void (*renderer_init)()) {
         ImGui::End();
     }
     g_layer_mouse = !open && layer && io.WantCaptureMouse;
+    // test aid: WWHD_TEST_LOG_HOVER=1 logs the window under the pointer when it changes, and each click
+    static const bool log_hover = getenv("WWHD_TEST_LOG_HOVER") != nullptr;
+    if (log_hover) {
+        static std::string last;
+        const ImGuiWindow* hw = ImGui::GetCurrentContext()->HoveredWindow;
+        std::string now = hw ? hw->Name : "(none)";
+        const ImGuiID hid = ImGui::GetHoveredID();
+        if (now != last || io.MouseClicked[0] || io.MouseClicked[1])
+            LOG("[overlay] hover: %s id %08x at %.0f %.0f (layer %d, clicked %d/%d, open %d)", now.c_str(), hid, io.MousePos.x,
+                io.MousePos.y, layer, io.MouseClicked[0], io.MouseClicked[1], open);
+        if (io.MouseClicked[0]) {  // the windows under the pointer's reach, back to front
+            std::string order;
+            for (ImGuiWindow* w : ImGui::GetCurrentContext()->Windows)
+                if (w->Active && (!(w->Flags & ImGuiWindowFlags_ChildWindow) || w->DockNode))
+                    order += std::string(w->Name) + (w->DockNode ? " (docked)" : "") + " | ";
+            LOG("[overlay] windows back to front: %s", order.c_str());
+        }
+        last = std::move(now);
+    }
     ImGui::Render();
     overlay_trace::state();
     return ImGui::GetDrawData();

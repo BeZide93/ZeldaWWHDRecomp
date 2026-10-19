@@ -8,7 +8,8 @@ and export the finished package.
 It works with mods that use [actors and scenes](mod-sdk-v3.md) (placed game actors and your own models),
 scenes and quests ([SDK v2](mod-sdk-v2.md)). The examples
 [sdk-v3-windfall](../examples/guest-mods/sdk-v3-windfall/manifest.json) and
-[sdk-v3-creature](../examples/guest-mods/sdk-v3-creature/manifest.json) are good packages to try it on.
+[sdk-v3-creature](../examples/guest-mods/sdk-v3-creature/manifest.json) are good packages to try it on, or
+[start a new mod](#starting-a-new-mod) of your own in the editor.
 
 ## Starting it
 
@@ -22,11 +23,36 @@ panels for quick changes. While you place a new actor, drag a handle or connect 
 Esc cancels that instead (as the first Esc frees a captured mouse); Esc with nothing to cancel opens
 Settings.
 
+## Starting a new mod
+
+Press **New mod…** next to the mod list in the toolbar (or in the Editor tab of Settings). Fill in:
+
+- **Id**: the mod's short name for the game and the mod manager, for example `harbor-quest`. Lower-case
+  letters, digits, `-`, `_` and `.`; it can't be changed later and no other mod may use it.
+- **Name**: what players see in the mod manager, for example "Harbor quest".
+- **Author** (optional): you.
+
+Press **Create**. If something is wrong (the id is taken, or has a character that isn't allowed), the
+form says so under the fields and nothing is created. Otherwise the editor:
+
+- makes a new, empty package for the mod in the mod manager's mods folder (only its `manifest.json`),
+- turns it on in your current mod profile, so it also loads the next time you start the game,
+- and opens it: everything you add (actors, models, quests, scenes, letters, charts and items) goes into it.
+
+Nothing else changes: no other mod, no game file and no save. The new mod uses the Story Notebook, like
+every mod with actors or quests; the game installs it with the story system.
+
+Your work is in the package once you press **Save…**. After that it is a package like any other: export it
+under **Export** to share it. Creating a mod is not an Undo step. To get rid of a mod you don't want, turn
+it off in **Settings > Mods** and press **Remove** there (a mod the game has loaded since needs a restart
+first).
+
 ## What it changes, and what it never changes
 
 - It changes **only the mod you open**, in that mod's own folder: its `manifest.json` (only when you press
-  **Save…** and confirm) and, when you import a model, the model file it copies into the mod's `models`
-  folder.
+  **Save…** and confirm) and, when you import a model or an item's icon, the file it copies into the
+  mod's `models` or `icons` folder.
+- **New mod…** adds a new package folder of its own and turns that mod on; it never replaces a package.
 - It never changes the game's files, your save, or another mod. An export never includes game files.
 - Every change is checked by the same rules the mod manager uses. A change that breaks a rule is refused
   with the reason, and nothing changes.
@@ -40,9 +66,9 @@ Settings.
 
 | | |
 | --- | --- |
-| **Toolbar** | the open mod, Undo, Redo, Check, Save…, Revert…, **Add**, Move / Turn, grid and angle snapping, **Play**, Play from Link, Restore at Stop, Test mode, which panels show (also **Quests**, **Scenes**, **Flags** and **Search**), and **Reset layout** |
-| **Outliner** | the open mod's actors, models, scenes and quests, and the warp destinations |
-| **Inspector** | the selected actor: place, properties, dialogue and actions |
+| **Toolbar** | the open mod, **New mod…**, Undo, Redo, Check, Save…, Revert…, **Add**, Move / Turn, grid and angle snapping, **Play**, Play from Link, Restore at Stop, Test mode, which panels show (also **Quests**, **Scenes**, **Flags** and **Search**), and **Reset layout** |
+| **Outliner** | the open mod's actors, models, scenes and quests, its letters, charts and items (**Story**), and the warp destinations |
+| **Inspector** | the selected actor: place, properties, its route, dialogue and actions |
 | **Problems & export** | the check's problem list, and the export |
 | **Camera & test** | reload the room, test mode, test states |
 | **Status bar** | the stage and room, the camera's position and speed, Link's position, the last result, and the quest step the game is at ("Lighthouse quest: step 3 of 6") |
@@ -101,22 +127,72 @@ Press **Add** and choose what to place, then click into the picture: the actor s
 you clicked (the game's own collision decides where the ground is). Hold Shift while clicking to place
 more of the same; **Stop placing** in the toolbar or Esc ends it.
 
-- **Game actors:** sign, resident (uo2, um1 or the seated ym1), chest.
+- **Game actors:** sign, resident, chest. **Resident** opens a list of who it is: one of the game's
+  villagers (the man from the bar, the windmill keeper, the lookout sailor, a seated man and more; the
+  list is in [Actors and scenes](mod-sdk-v3.md)). A placed resident's **Type** in the Inspector
+  changes it; the resident is then created again in its room.
 - **Props:** pot, barrel, crate.
 - **Switches:** switch, door (it opens with one of the mod's switches).
-- **Enemies:** ChuChu, Bokoblin, Moblin, Keese.
+- **Enemies:** ChuChu (green, red, blue or yellow), Bokoblin (with a stick, a shield or a machete),
+  Moblin, Keese, Miniblin. The Inspector's **Variant** changes a placed one.
 - **Your models:** one of the mod's models (static or skinned), your own enemy (a skinned model with
   flinch, stun, death and idle clips), a prop Link can carry.
+- **Game objects:** the game's own palm trees, trees, tables and more (see below).
 
 Each new actor gets the flags it needs, named after it (for example `sign-read`, `pot-broken`,
 `guard-defeated`). In the Inspector, **To Link**, **To camera** and **Snap to ground** move the selected
 actor, **Duplicate** places a copy next to it with flags of its own, and **Remove…** takes it out (after
 a confirmation; Undo brings it back).
 
+### Game objects
+
+**Add > Game objects** lists the game's own objects you can place: palm trees and other trees, tables, a shelf,
+lamps, plants, a nest, flags, a sea lookout tower, grass and flowers (docs/mod-sdk-v3.md, "The game's own objects"). Type in the search field or pick a
+category, then click an object and click into the picture. An object your game files don't have is
+greyed out with "not available in your game files". The first game object adds
+`"requires": {"game_objects": 1}` to the manifest for you.
+
+Grass, flowers and small trees appear at once too, but when you remove or move them they go only
+when the room loads again: the status bar says so; **Reload room** (Camera & test) enters the room
+again. A placed game object appears in the game at once. In the Inspector you choose its **Variant** (for
+the table: table, stool, or a stool Link walks through), its **Turn** and, where the object allows
+it, its **Scale**. Each change makes the object again in its place (one undo step). A game object
+has no flags, drops or dialogue.
+
+### Routes: actors that walk
+
+A resident that walks (the old man on the bench `uo1`, the man from the bar `uo2`, the well-dressed man
+`uo3`, the windmill keeper `um1` or the young man `um2`) and an actor with one of your skinned models can
+walk a route. Select it; the Inspector's **Route** section has:
+
+- **Add point at Link** and **Add point at camera**: a new point on the ground there (after the selected
+  point, or at the end). A resident starts where it stands, so its position is the route's start; to move
+  the start, move the resident.
+- The points, numbered as the picture shows them. Click one to select it: its handle in the picture moves
+  it (letting go is one change). **Up**, **Down** and **Remove point** change the order or take it out;
+  every change is one Undo step.
+- **Speed** in game units per second. A resident walks at its own pace unless you set one (from half to
+  twice its own pace). **Mode**: once (it stops at the end), loop (back to the start and round again) or
+  back and forth. **Strolling pauses**: now and then it stands for a moment, as the game's own walkers do.
+- For your models: the **Walk** and **Idle** clips and **Look at Link** (it turns its head bone to Link).
+  A resident walks with its own walk and stands with its own idle; it stops and looks at Link when he is
+  close in front of it, turns on the spot at corners and talks as usual, so its **Look at Link** is
+  always on.
+
+In the picture the selected actor's route shows as a green line with numbered points. The editor checks
+the ground under every segment with the game's collision: a segment over no ground, a drop or a step too
+high (a wall) is drawn red, and the Inspector says where. A walking resident's state in the game shows
+under its route: walking, skipped a blocked point, stopped (blocked, or it left the ground of its route)
+or finished. Route changes go to the game at once: the actor keeps walking, on the new route. Adding the
+first point or removing the route creates a resident again in its room.
+
+Residents that have no walking animation of their own (the women on the steps and the pier, the young
+women, the sailors) and the seated villager can't walk a route; the Inspector says so.
+
 ### What shows at once, and what after a restart
 
-Signs, residents, chests, pots, barrels and crates, switches and doors, ChuChus, Bokoblins, Moblins and
-Keese, and actors with your models appear, change and disappear in the game at once, in the room you are
+Signs, residents, chests, pots, barrels and crates, switches and doors, ChuChus, Bokoblins, Moblins,
+Keese and Miniblins, and actors with your models appear, change and disappear in the game at once, in the room you are
 in. Their drops and broken or defeated flags count from then on, as they do after a start. A change to
 one of them (another place, other drops, another flag) creates it again in the game.
 
@@ -157,6 +233,10 @@ For signs, residents, chests and your own models, the Inspector has:
 - **Dialogue:** up to three lines. **Preview in the game** shows them in the game's own message box, as
   players will see them; **Close preview** hides it.
 - **Flag:** set when the actor was talked to or opened.
+- **Chest holds** (chests only): a green, blue, yellow, red, purple, orange or silver rupee, a piece of
+  heart, a heart container, or one of your items (an orange rupee when nothing is chosen). Link gets it
+  with the game's item-get pose when he opens the chest; an item with **hold_up** shows your model.
+  `set_actor` with `parameters` (`{"item": "rupee_red"}`, `{"item": "item:crystal"}`) does the same.
 - **After the dialogue:** a list of actions: give or take one of the mod's items, set a quest step, set or
   clear a flag, start a scene. **Apply actions** checks and keeps them.
 
@@ -204,6 +284,33 @@ their broken or defeated flag.
 Problems show on the steps themselves: a red mark (hover over it to read them) and a red frame on a step
 nothing leads to.
 
+### A quest talk for one of the game's villagers
+
+The game's own townspeople that quests can name (the NPC catalogue, for example the lighthouse keeper on
+Windfall) have a teal name label in the picture while they are near. They are not part of your mod, so
+you can't move or change them, but you can give them a line for your quest: hover over the label to see
+who it is, then click it. **Add a quest talk for this villager…** offers:
+
+- **New quest…**: a new quest (its title) whose first step is this villager's talk;
+- **New step of a quest**: a new last step of one of your quests, with the talk;
+- **A step of a quest**: the talk for a step you already have (one it had is replaced).
+
+Write what the villager says (one message box) and press **Add the talk**. It is one change (one Undo
+step), and the quest editor opens at that step, where you can change the line, add conditions or what the
+talk hands out. While that step is the quest's current one, talking to the villager gives your line once
+and finishes the quest (see Talking to residents in the [SDK v2 guide](mod-sdk-v2.md)); at any other time
+the villager talks as in the game.
+
+**The villager itself is never changed:** its own dialogue, its quests and the game's save flags stay as
+they are. Your mod only adds a talk that the port plays while your step is current.
+
+The talk works in the game at once, like every quest change (see [Story changes while the game
+runs](#story-changes-while-the-game-runs)); change its line and the villager says the new one in the next
+talk, remove it (or Undo) and the villager talks as in the game again. Save the package to keep it.
+Something has to bring the quest to that step: its letter, an actor's action, an item, or, while testing,
+**Start at this step**. The villager may first say a short greeting of its own; your line follows in
+the same talk.
+
 ## Testing a quest step by step
 
 - **Start at this step** (right-click a step, or its Inspector) turns test mode on, sets the quest to that
@@ -218,8 +325,85 @@ nothing leads to.
 - **Flags** (toolbar) lists the open mod's flags (signs read, chests opened, switches, flag actions, broken
   props and defeated enemies), who uses each, and their values in the game. In test mode you can switch a
   flag on or off to try a later part of the quest; broken and defeated only show.
-- Stop, change the quest, **Save…** and start the game again to try the new version: quest changes take
-  effect after a restart.
+- Change the quest while you test: the game takes each change at the next calm moment (see [Story
+  changes while the game runs](#story-changes-while-the-game-runs)), so there is no need to restart.
+
+## Letters, charts and items
+
+The Outliner's **Story** tab (also **Story** in the settings' Editor tab) holds the mod's letters on their
+own, its treasure charts and its items, one tab each. Each tab lists them; click one to edit it, and the
+form below adds a new one. Every change is one command, so Undo and Redo work for all of them.
+
+- **Letters** are letters on their own: no quest and no notebook entry. Any Rito postbox hands them out
+  while your mod is on (once Link has the Delivery Bag); once Link has read one, he gets what it encloses,
+  once. Give it a sender (one line, the signature) and a text (about ten lines of 40 characters), and tick
+  the charts and items it encloses. A letter can also wait: for a quest step, a done quest or one of
+  your flags (`when`), and then some days of the game's calendar (`after_days`), for example a thank-you
+  letter two days after the quest is done (set them in **JSON** or with `set_letter`; `advance_days`
+  moves the calendar on in test mode). A letter that starts a quest is the quest's own letter (the quest's
+  Inspector), not one of these. Up to 8 per mod.
+- **Charts** are treasure charts. While Link owns one, the MAP screen's chart list shows it with an X at
+  its place; salvaging the treasure there opens its chest. **Add with the X at Link** (or **at the
+  camera**) puts the X where Link or the fly camera is on the Great Sea; **X at Link** / **X at the camera**
+  moves it later. Choose what the chest holds: one of your items, a game item (purple, orange or silver
+  rupee, a piece of heart, a heart container) or, by default, an orange rupee. A letter, a resident's talk,
+  an actor's dialogue or a scene's end (**After the dialogue**: give `chart:<id>`) or a quest's reward
+  gives the chart; a quest step's **find** or a scene's **salvage** trigger uses it. Up to 8 per mod.
+- **Items** are kept in the Delivery Bag's extra pages. When Link gets one, its name and description show
+  with the game's small get jingle. An item needs an icon: **Choose...** picks a `.png` (best 128 x 128
+  with transparency, at most 2048 x 2048), which is copied into the package's `icons` folder. **How many
+  Link can carry** is 1 to 254. **Use** says what using it on X, Y or R does: show its Info box, open the
+  story notebook, move one of your quests to a step, or tell your mod's code; without a use it stays in
+  the bag. With a model of your own as its held model and **hold_up** on (in **JSON**, or `set_item`), Link
+  holds the model up over his head with the game's get message when he gets it, as he does with the
+  game's items. Actors give or take items in their actions (**After the dialogue**), enemies and props drop
+  them, and letters and charts can hold them. Up to 32 per mod.
+
+Under each entry, **Used by** lists everything that names it. A chart or item that is still used can't be
+removed: change or remove those first (**Remove…** says so). **JSON** shows the whole entry to edit by hand
+(a field you take out is removed). Letters and charts change in the game at once, as quests do; of an item,
+its name, description, how many and use do, while a new item, its icon, held model and **hold_up** wait
+for a restart (see [Story changes while the game runs](#story-changes-while-the-game-runs)).
+
+## Story changes while the game runs
+
+Quests (their steps, places, conditions and texts), quest talks (also those for the game's villagers),
+the quests' letters, letters on their own and charts change in the running game. Every change, and every
+Undo and Redo, hands the open mod's new story to the game, which takes it at the next calm moment: at once
+in the editor view, and while playing as soon as no talk, letter, message, menu, scene or stage change is
+running (a talk that is running ends as it began). The status bar says when the game took it ("Story of
+... updated in the game") or what it waits for. Only the open mod's story changes: other mods and the
+game's own villagers, dialogue and quests stay as they are. A villager whose talk you remove talks as in
+the game again. Save the package to keep your changes: the next start reads the package.
+
+These wait for a restart (save, then start the game again); the status bar names them after the change:
+
+- a new item and a removed item, and an item's icon, held model and **hold_up** (the game builds them
+  into its menus when it starts); its name, description, how many and use change at once;
+- a removed chart: the chart list keeps it until a restart. A new or changed chart shows in the chart
+  list at once; its treasure's salvage point is set up when Link enters the sea room, so it follows
+  there after **Reload room** or the next visit;
+- what the game did not run at start-up: the King of Red Lions' lines when no quest had one, items when
+  no mod had any, a chart's treasure when no mod had a chart, and all of the story when the Story
+  Notebook package was not on;
+- scenes (see [Scenes](#scenes)).
+
+**Progress stays as it is.** A change never writes to the Quest Log: the step each quest is at, done
+quests, quest flags, the letters Link got and the charts and items he has stay. A quest's progress is its
+step number: editing a step keeps its number; adding, moving or removing steps gives the later steps new
+numbers (every actor, item and letter that names them follows), and a Quest Log is then at the step
+that has its number now, exactly as after a restart. When that is not the step it was at, the status bar
+says so ("quest lamp is at step 3, which is step 4 now", or "which was removed"). A step number that no
+step has any more shows no next step and no talk until something moves the quest on (in test mode,
+**Start at this step**) or the step comes back (Undo). A removed quest or letter keeps its records in the
+save, so Undo brings it back where it was.
+
+**Save files and save states hold progress, never the story.** A save file, a full save state and the
+editor's test states play with the story as the editor has it now, whenever they were made: a state taken
+before an edit comes back with its old progress under the new quests, as a save of an earlier version of
+a mod does after an update. Nothing of an older story comes back with it.
+
+Without `--editor` none of this runs.
 
 ## Scenes
 
@@ -277,21 +461,23 @@ and the mod's flags), and the editor's view returns. **Play step** plays only th
 steps from the selected one to the one selected with Shift, as a short scene of its own. An edited scene
 plays its steps; its native version plays once the package is saved and the game starts again.
 
-Scenes take effect for players after a restart, as quest changes do: **Save…**, then start the game
-again. Ctrl+C and Ctrl+V in the Scenes window copy the selected steps and paste them after the selected
+Scenes take effect for players after a restart: **Save…**, then start the game again. Ctrl+C and Ctrl+V in the Scenes window copy the selected steps and paste them after the selected
 step, also into another scene; whole scenes are copied with the command `copy`.
 
 ## Search
 
 **Search** (toolbar) finds the open mod's actors, quests and steps, scenes (also by their steps' text),
-items and flags by their id or text. Clicking a result selects that actor (and flies the camera to it), or
+letters, charts, items and flags by their id or text. Searching for a chart or an item (`old-map`,
+`item:lamp`) also finds what uses it: the actors that give, take, need or drop it, the quests and steps
+that name it, the scenes its salvage starts, the letters and charts that hold it. Clicking a result selects that actor (and flies the camera to it), or
 opens that quest step or scene step.
 
 ## Checking and exporting
 
-**Check** (toolbar) checks every actor, model, scene and quest as the mod manager does and lists the
-problems in **Problems & export**, each with what it is about. Clicking a problem selects that actor,
-flies the camera to it and marks the field in the Inspector.
+**Check** (toolbar) checks every actor, model, scene, quest, letter, chart and item as the mod manager
+does (and that each item's icon is a PNG in the package) and lists the problems in **Problems & export**,
+each with what it is about. Clicking a problem selects that actor, flies the camera to it and marks the
+field in the Inspector; for a letter, chart or item it opens it in the **Story** tab.
 
 For quests it also warns (in yellow) about steps nothing leads to, steps nothing moves on from, steps
 without a place on the sea chart, arrows that point backwards, items a condition needs that nothing in
@@ -320,8 +506,9 @@ and the mod's flags.
   at the destination.
 - **Test mode** (toolbar or Camera & test) protects your progress while you try your quest:
   - while it is on, saving in the game writes a separate test save, never your own;
-  - **Reset this mod's quest…** erases the open mod's quest progress and flags from the loaded game, so
-    you can play the quest from the start. Other mods and the game's own progress are not touched;
+  - **Reset this mod's quest…** erases the open mod's quest progress and flags from the loaded game, its
+    letters, and the charts and items Link got from it, so you can play the quest from the start. Other
+    mods and the game's own progress and items are not touched;
   - **Save test 1–3** / **Load test 1–3** keep test states: the game's progress, Link's place and the
     open mod's flags;
   - turning test mode off takes you back to your progress and place from before the test.
@@ -372,8 +559,9 @@ The editor's status bar shows **MCP: off**, **MCP: on, port N** or **MCP: connec
 
 ### Allow / Deny
 
-Some commands remove or replace things: `remove_actor`, `revert_package`, `save_package`,
-`export_package`, `reset_quest`, `load_state`, and `import_model` when it replaces a file. The client
+Some commands remove or replace things, or write outside the open mod: `new_mod`, `remove_actor`, `remove_letter`, `remove_chart`, `remove_item`,
+`revert_package`, `save_package`, `export_package`, `reset_quest`, `load_state`, and `import_model` when it
+replaces a file. The client
 must ask for them with `"confirm": true`, and then the game asks **you**: a window "Claude wants to: …"
 with **Allow** and **Deny**. Nothing happens until you press **Allow**; without an answer within two
 minutes the request is refused. Undo works for these changes as in the editor.
@@ -385,8 +573,8 @@ minutes the request is refused. Undo works for these changes as in the editor.
 - It exists only when the game was started with `--editor` and you turned it on. It is not available on
   Android.
 - Files: the client can read files inside the open mod's package and files you picked yourself in the
-  editor (**Choose…** under Import or Export). For any other file the game asks you first and shows the
-  full path.
+  editor (**Choose…** under Import or Export, or for an item's icon). For any other file (a model to
+  import, an icon to copy in) the game asks you first and shows the full path.
 - Exports over MCP go only into the `editor-exports` folder of the game's user data (the panel shows
   where), or into a folder you picked under **Export**. Nothing is ever written anywhere else, and game files are never
   included.
@@ -410,17 +598,28 @@ separated by `;`, or `@file` with one such line per row. Results go to the log.
 | `help` | `command`? | the commands and their parameters |
 | `list_mods` | | the active mods the editor can open |
 | `open_mod` | `mod` | open another mod |
+| `new_mod` | `id`, `name`, `author`?, `description`?, `confirm` | create a new, empty mod, turn it on in the current mod profile and open it (needs `"confirm": true`; refused when the id is taken) |
 | `list_actors`, `list_models`, `list_scenes`, `list_quests` | `mod`? | the open mod's content |
 | `get_actor`, `get_scene` | `id`, `mod`? | one entry as the manifest declares it |
 | `list_actor_types` | | what `add_actor` places, and what appears without a restart |
-| `add_actor` | `type`, `id`?, `at`? (`link`, `camera`, `position`), `position`?, `stage`?, `room`?, `angle`?, `snap`?, `model`?, `options`?, `mod`? | place a new actor (on the ground unless `snap` is false) |
+| `list_game_objects` | `category`?, `query`? | the game's own objects `add_actor` places as `game:<id>`, with variants, limits and whether your game files have them |
+| `add_actor` | `type`, `id`?, `at`? (`link`, `camera`, `position`), `position`?, `stage`?, `room`?, `angle`?, `snap`?, `model`?, `options`?, `mod`? | place a new actor (on the ground unless `snap` is false); `type` `game:<id>` places a game object (`options.variant`) |
 | `remove_actor` | `id`, `confirm`, `mod`? | remove an actor (needs `"confirm": true`) |
 | `duplicate_actor` | `id`, `new_id`?, `offset`?, `mod`? | a copy next to it, with flags of its own |
 | `place_actor` | `id`, `at` (`link`, `camera`, `ground`, `position`), `position`?, `snap`?, `mod`? | move an actor to Link, the camera, the ground below it or a position |
 | `set_actor` | `id`, `property`, `value`, `mod`? | set one actor property (`null` removes it); `when` may name `quest` and `step`, `quests` (`[{quest, step}]`, all must hold), `item`, `time`, `flag` and `not_flag` (a flag id); `talks` is up to eight `{when, lines, then}`, the first that matches is said (one without `when` last; not together with `lines` or `then`) |
 | `move_actor`, `rotate_actor`, `scale_actor` | `id`, `position` / `rotation` / `scale`, `mod`? | `{x, y, z}` |
 | `set_dialogue` | `id`, `lines`, `mod`? | one to three lines |
-| `set_then` | `id`, `actions`, `mod`? | what happens after the dialogue (an empty list removes it): `give`, `take`, `quest_step`, `quest_done` (finishes a quest), `flag`, `scene` |
+| `add_route_point` | `id`, `at`? (`link`, `camera`, `position`), `position`?, `after`?, `snap`?, `mod`? | add a point to an actor's route (the first starts the route); `after` is the point it follows (0: first) |
+| `move_route_point` | `id`, `point`, `position` or `at` (`link`, `camera`), `snap`?, `mod`? | move one route point (numbered from 1) |
+| `remove_route_point` | `id`, `point`, `mod`? | take one point out (the route goes when too few are left) |
+| `reorder_route_point` | `id`, `point`, `to`, `mod`? | give a route point another place in the order |
+| `set_route` | `id`, `speed`?, `mode`? (`once`, `loop`, `back_and_forth`), `pauses`?, `walk`?, `idle`?, `mod`? | route settings; a resident's `speed` `null` is its own pace; `walk` and `idle` are a model's clips |
+| `remove_route` | `id`, `mod`? | the actor stands where it is placed |
+| `check_route` | `id`, `mod`? | the ground under each segment: no ground, a drop or a step too high marks it |
+| `route_status` | `id`, `mod`? | a walking resident in the game: walking, skipped a blocked point, stopped or finished |
+| `model_clips` | `model`, `mod`? | a model's animation clips |
+| `set_then` | `id`, `actions`, `mod`? | what happens after the dialogue (an empty list removes it): `give`, `take`, `quest_step`, `quest_done` (finishes a quest), `flag`, `scene`; `{"action": "give", "id": "chart:<id>"}` gives one of the mod's charts |
 | `set_drops` | `id`, `drops`, `mod`? | what a prop or enemy drops |
 | `preview_dialogue` | `id`?, `lines`?, `close`?, `mod`? | show lines in the game's message box (or hide it) |
 | `pick` | `origin`, `direction`, `range`? | the first ground a ray meets |
@@ -428,11 +627,10 @@ separated by `;`, or `@file` with one such line per row. Results go to the log.
 | `focus` | `id`, `mod`? | fly the camera to an actor |
 | `check_model` | `file` | check a `.glb` file |
 | `import_model` | `file`, `id`?, `confirm`?, `mod`? | copy a `.glb` into the mod and add the model |
-| `prepare_collision` | `model`, `mod`? | prepare a static model's collision for live world-object placement |
-| `place_world_object` | `id`, `model`, `collision`, `behaviour`?, `buoyancy`?, `drift`?, … , `mod`? | place a static, floating or drifting object with collision in one step (see [World objects](world-objects.md)) |
-| `set_world_object` | `id`, `collision`?, `behaviour`?, `buoyancy`?, `drift`?, … , `mod`? | change a world object's collision, behaviour and motion together |
-| `preview_collision` | `id`, `mod`? | a world object's collision as a wireframe, with placement findings |
-| `placement_conflicts` | `id`, `mod`? | placement conflicts and collision budget findings for a world object |
+| `place_world_object` | `id`, `model`, `collision`, `stage`, `room`, `position`, `behaviour`?, `buoyancy`?, `drift`?, `anchor`?, `grapple_points`?, `distant`?, `shoreline`?, `chart_marker`?, `arrival`?, `rotation`?, `scale`?, `mod`? | place a static, floating or drifting object of the mod with collision (one Undo step) |
+| `set_world_object` | `id`, `collision`?, `behaviour`?, `buoyancy`?, `drift`?, `anchor`?, `grapple_points`?, `distant`?, `shoreline`?, `chart_marker`?, `arrival`?, `mod`? | change a world object's collision, behaviour and motion together (`null` removes one) |
+| `preview_collision`, `placement_conflicts` | `id`, `mod`? | a world object's collision as a wireframe, and what its place conflicts with |
+| `prepare_collision` | `model`, `mod`? | prepare a static model's collision for placing world objects while the game runs |
 | `set_scene` | `id`, `property` (`trigger`, `steps`, `native`), `value`, `mod`? | (`null` removes a trigger or the native version) |
 | `set_quest_step` | `quest`, `step`, `property`, `value`, `mod`? | `place` is `{x, z}` at sea, or inside a building `{stage, room, sea: {x, z}, point}` (or `x`, `y`, `z` instead of `point`); `available` may use `flag` and `not_flag` (a flag id or a list) with its `text` |
 | `undo`, `redo`, `history` | | |
@@ -451,7 +649,8 @@ separated by `;`, or `@file` with one such line per row. Results go to the log.
 | `play` | `from`? (`camera`, `link`), `restore`? | play as Link (test mode on) |
 | `stop` | | back to the editor view |
 | `test_mode` | `on` | test mode |
-| `reset_quest` | `confirm`, `mod`? | test mode: reset the mod's quest progress and flags |
+| `reset_quest` | `confirm`, `mod`? | test mode: reset the mod's quest progress and flags, its letters, and the charts and items Link got from it |
+| `advance_days` | `days` (1–255) | test mode: move the game's calendar on, to try letters that wait some days |
 | `save_state` | `slot` (1–3), `kind`? (`portable`, `full`) | test mode: save a test state |
 | `load_state` | `slot` (1–3), `kind`? (`portable`, `full`), `confirm` | test mode: load a test state (replaces the current progress) |
 | `command_log` | `count`? | the last commands |
@@ -471,6 +670,9 @@ separated by `;`, or `@file` with one such line per row. Results go to the log.
 | `set_quest_layout` | `quest`, `positions`, `mod`? | the graph's places (`start`, `end`, `step:N`: `{x, y}`) |
 | `start_at_step` | `quest`, `step`, `warp`? (`next`, `place`, `none`), `play`?, `mod`? | test mode: start the quest at a step |
 | `quest_state` | `mod`? | the step each quest is at in the game |
+| `list_villagers` | | the game's own villagers loaded now that quest talks can name: catalogue id, name, place, position |
+| `pick_villager` | `origin`, `direction`, `range`? | the villager a ray meets first (clicking into the picture) |
+| `add_villager_talk` | `who`, `lines`, `quest`?, `step`?, `title`?, `id`?, `text`?, `mod`? | a villager's quest talk: a new quest with `title`, a new last step of `quest`, or the talk of `step` (one undo step; the villager itself is not changed) |
 | `list_flags` | `mod`? | the mod's flags, who uses them, their values |
 | `set_flag` | `id`, `value`, `mod`? | test mode: set one of the mod's flags |
 | `search` | `text`, `mod`? | find actors, quests and steps, scenes, items and flags |
@@ -499,3 +701,11 @@ separated by `;`, or `@file` with one such line per row. Results go to the log.
 | `preview_scene` | `scene`, `from`?, `to`?, `restore`?, `mod`? | test mode: play the scene (or some of its steps) in the game |
 | `skip_scene`, `stop_scene` | | skip the scene that plays; stop the preview and go back to the editor |
 | `scene_state` | | whether a preview plays, which scene and step |
+| `list_letters`, `list_charts`, `list_items` | `mod`? | the mod's letters on their own, charts or items, each with what uses it (`used_by`) |
+| `add_letter` | `sender`, `text`, `id`?, `encloses`?, `when`?, `after_days`?, `mod`? | a letter on its own; `encloses` lists `"chart:<id>"` and `"item:<id>"`; `when` waits for `{quest, step}`, `{quest, done: true}`, `quests`, `flag`, `not_flag`; `after_days` waits that many game days more |
+| `set_letter` | `id`, `fields`, `mod`? | its `sender`, `text`, `encloses`, `when` or `after_days` (`null` removes `encloses`, `when` or `after_days`) |
+| `add_chart` | `name`, `place`? or `at`? (`link`, `camera`), `id`?, `description`?, `item`?, `mod`? | a treasure chart; `place` is `{x, z}` at sea; `item` is `"item:<id>"` or `game:purple_rupee`, `game:orange_rupee`, `game:silver_rupee`, `game:heart_piece`, `game:heart_container` |
+| `set_chart` | `id`, `fields`?, `at`?, `mod`? | its `name`, `description`, `place`, `item` (`null` removes `description` or `item`); `at` moves the X to Link or the camera |
+| `add_item` | `name`, `description`, `icon`? or `icon_file`?, `id`?, `stack`?, `use`?, `held_model`?, `held_frames`?, `hold_up`?, `mod`? | an item; `icon` is a PNG in the package, `icon_file` a PNG copied into its `icons` folder; `use` is `{action: show}`, `{action: open_notebook}`, `{action: quest_step, quest, step}` or `{action: event}`; `hold_up: true` shows `held_model` over Link's head when he gets it |
+| `set_item` | `id`, `fields`?, `icon_file`?, `mod`? | its fields (`null` removes the optional ones); `icon_file` copies a new icon in |
+| `remove_letter`, `remove_chart`, `remove_item` | `id`, `confirm`, `mod`? | remove one (needs `"confirm": true`; a chart or item still in use is refused, with the list of uses) |

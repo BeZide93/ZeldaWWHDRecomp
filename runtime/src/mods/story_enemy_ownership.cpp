@@ -11,8 +11,10 @@ namespace story_enemy_ownership { namespace {
 constexpr Collider cc[]={{0x7C4,0x788,0},{0x990,0x954,0x924},{0xDB8,0xD7C,0xCDC}};
 constexpr Collider bk[]={{0xCE8,0xBF4,0},{0xE18,0xBF4,0},{0xF48,0xBF4,0},{0x1074,0xBF4,0},{0x11A0,0xBF4,0},{0x1428,0x13EC,0x13BC},{0x1850,0x1814,0x1774}};
 constexpr Collider mo[]={{0x2494,0x1014,0},{0x25C4,0x1014,0},{0x26F4,0x1014,0},{0x2820,0x1014,0},{0x294C,0x1014,0},{0x2A78,0x1014,0},{0x2EC0,0x2E84,0x2E54},{0x32E8,0x32AC,0x320C}};
+// d_a_pt (Miniblin): body and attack spheres share mStts 0x644; enemyice 0x8FC, enemyfire 0xCB4.
+constexpr Collider pt[]={{0x680,0x644,0},{0x7AC,0x644,0},{0x968,0x92C,0x8FC},{0xD90,0xD54,0xCB4}};
 constexpr Collider ki[]={{0x734,0x6F8,0},{0x860,0x6F8,0},{0x98C,0x6F8,0},{0xB44,0xB08,0xAD8},{0xF6C,0xF30,0xE90}};
-constexpr Descriptor descriptors[]={{0x7FFA,0xCE,0xF10,cc,3},{0x7FF9,0xBD,0x19A4,bk,7},{0x7FF8,0xBC,0x343C,mo,8},{0x7FF7,0xD7,0x10BC,ki,5}};
+constexpr Descriptor descriptors[]={{0x7FFA,0xCE,0xF10,cc,3},{0x7FF9,0xBD,0x19A4,bk,7},{0x7FF8,0xBC,0x343C,mo,8},{0x7FF7,0xD7,0x10BC,ki,5},{0x7FF4,0xF7,0xEE4,pt,4}};
 struct Entry {Kind kind;uint32_t params,epoch;Fingerprint fingerprint;Token token;uint32_t pid=0,address=0;bool active=false,quarantined=false;};
 std::vector<Entry> entries;Token next_token=1;uint32_t arena=0,link=0,link_pid=0;void(*original)(Cpu*,uint32_t)=nullptr;bool installed=false;VerifyActor verify_actor;ProjectileVerifier projectile_verifier;bool projectile_enabled=false;ModColliderVerifier mod_collider_verifier;
 constexpr uint32_t Magic=0x454F5731,RetiredMagic=0x454F5752,PendingMagic=0x454F5750,Version=2,ActorOffset=256,LineageOffset=ActorOffset+128*128;
@@ -23,7 +25,7 @@ Entry* get(Token t){for(auto& e:entries)if(e.token==t)return &e;return nullptr;}
 size_t index(const Entry& e){return size_t(&e-entries.data());}
 uint32_t record(const Entry& e){return arena+ActorOffset+uint32_t(index(e))*128;}
 uint32_t checksum(uint32_t a,uint32_t n){uint32_t h=2166136261u;for(uint32_t i=0;i<n;++i)h=(h^ld8(a+i))*16777619u;return h;}
-bool reserved(uint16_t p){return p>=0x7FF7&&p<=0x7FFA;}
+bool reserved(uint16_t p){return (p>=0x7FF7&&p<=0x7FFA)||p==0x7FF4;}
 bool identity(const Entry& e,uint32_t a){auto& d=descriptors[unsigned(e.kind)];return memory(a,d.bytes)&&e.pid&&e.pid!=0xFFFFFFFFu&&ld32(a+4)==e.pid&&ld16(a+0xE)==d.profile&&ld32(a+0xB0)==e.params&&ld8(a+0x2DD)==0xFF;}
 bool checked(Entry&e,uint32_t a){if(!identity(e,a)||!verify_actor){if(e.active)e.quarantined=true;return false;}try{if(verify_actor(e.token,e.kind,a))return true;}catch(...){}e.quarantined=true;return false;}
 bool valid(Entry& e){return e.active&&!e.quarantined&&e.address&&checked(e,e.address);}
@@ -55,18 +57,19 @@ bool owned_child_object(uint32_t object){
 bool fire_child(uint32_t object,int16_t& timer){
  if(!memory(object,0x48))return false;uint32_t stts=ld32(object+0x44);if(!memory(stts,0x14))return false;uint32_t a=ld32(stts+0xC);LineageInfo info{};
  if(!memory(a,0xA34)||object!=a+0x700||stts!=a+0x6C4||!lookup_lineage_actor(a,Lineage::EnemyChild,info)||!info.source_valid||info.profile!=0x1CF||info.parameters!=0||ld32(stts+0x10)!=info.pid||ld8(a+0x2DD)!=0xFF||ld32(a+0x2E8)!=0xFFFFFFFFu||ld32(a+0xB4)!=GD(0x1000A478)||ld8(a+0x430)>2||ld8(a+0x431)||ld8(a+0x432)||ld32(object+0x10)!=0x20000||ld8(object+0x14)!=0)return false;
- auto*source=get(info.source);if(!source||source->kind!=Kind::Bokoblin||source->params!=0xFFFF0004u||!valid(*source)||source->address!=info.source_actor||source->pid!=info.source_pid||source->epoch!=info.epoch)return false;
+ auto*source=get(info.source);if(!source||source->kind!=Kind::Bokoblin||(source->params&~0x20u)!=0xFFFFFF04u||!valid(*source)||source->address!=info.source_actor||source->pid!=info.source_pid||source->epoch!=info.epoch)return false;
  timer=int16_t(ld16(a+0x43C));return timer>=0&&timer<=900;
 }
 bool ignition_source(uint32_t object){if(!memory(object,0x48))return false;if(link_object(object))return true;if(projectile_enabled&&projectile_verifier)try{return projectile_verifier(object);}catch(...){}return false;}
 void hook(Cpu*c){if(pair_policy(c->r[4],c->r[5])==PairPolicy::Reject)c->r[3]=1;else original(c,NoAtTg);}
 }
-const Descriptor& descriptor(Kind k){static constexpr Descriptor invalid={0,0,0,nullptr,0};return unsigned(k)<4?descriptors[unsigned(k)]:invalid;}
+const Descriptor& descriptor(Kind k){static constexpr Descriptor invalid={0,0,0,nullptr,0};return unsigned(k)<kKindCount?descriptors[unsigned(k)]:invalid;}
 bool configure(uint32_t a,uint32_t bytes,void(*fn)(Cpu*,uint32_t),VerifyActor verify){if(bytes<kStorageBytes||!runtime_memory(a,kStorageBytes)||!fn||!verify)return false;arena=a;original=fn;verify_actor=std::move(verify);return true;}
 void initialize_storage(){if(!arena)return;for(uint32_t i=0;i<kStorageBytes;++i)st8(arena+i,0);st32(arena,Magic);st32(arena+4,Version);for(const auto&e:entries)write_pending(e);}
-Token declare_actor(Kind k,uint32_t params,const Fingerprint& fp,uint32_t epoch,std::string& why){if(unsigned(k)>=4||entries.size()>=kActorCapacity||!epoch||!next_token){why="Invalid or full enemy ownership declaration";return 0;}Token t=next_token++;entries.push_back({k,params,epoch,fp,t});if(arena&&ld32(arena)==Magic&&ld32(arena+4)==Version)write_pending(entries.back());return t;}
+Token declare_actor(Kind k,uint32_t params,const Fingerprint& fp,uint32_t epoch,std::string& why){if(unsigned(k)>=kKindCount||entries.size()>=kActorCapacity||!epoch||!next_token){why="Invalid or full enemy ownership declaration";return 0;}Token t=next_token++;entries.push_back({k,params,epoch,fp,t});if(arena&&ld32(arena)==Magic&&ld32(arena+4)==Version)write_pending(entries.back());return t;}
 size_t checkpoint(){return entries.size();}
 bool editor_refingerprint(Token t,const Fingerprint& fp){auto*e=get(t);if(!e)return false;e->fingerprint=fp;if(arena&&ld32(arena)==Magic&&ld32(arena+4)==Version){const uint32_t r=record(*e);const uint32_t magic=ld32(r);write_record(*e);if(magic==RetiredMagic||magic==PendingMagic){st32(r,magic);st32(r+124,checksum(r,124));}}return true;}
+bool editor_reparameter(Token t,uint32_t params){auto*e=get(t);if(!e||e->active||e->address||!params)return false;e->params=params;if(arena&&ld32(arena)==Magic&&ld32(arena+4)==Version){const uint32_t r=record(*e);const uint32_t magic=ld32(r);write_record(*e);if(magic==RetiredMagic||magic==PendingMagic){st32(r,magic);st32(r+124,checksum(r,124));}}return true;}
 void rollback(size_t n)noexcept{if(n<=entries.size())entries.resize(n);}
 bool binding_state(Token token,Binding& out){out={};auto*e=get(token);if(!e)return false;out.epoch=e->epoch;if(!arena||ld32(arena)!=Magic||ld32(arena+4)!=Version)return true;out.state=BindingState::Quarantined;if(!definition_matches(*e,true))return true;uint32_t r=record(*e);if(ld32(r)==RetiredMagic){out.state=BindingState::Retired;return true;}if(e->quarantined)return true;out.pid=e->pid;out.actor=e->address;if(e->active){if(valid(*e))out.state=BindingState::Active;return true;}if(ld32(r)==PendingMagic){if(!e->pid&&!e->address)out.state=BindingState::Fresh;else if(e->pid&&e->pid!=0xFFFFFFFFu)out.state=BindingState::Queued;}return true;}
 bool can_spawn(Token token){Binding state;return binding_state(token,state)&&state.state==BindingState::Fresh;}

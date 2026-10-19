@@ -28,6 +28,9 @@ std::vector<Spawn> find_spawns(const std::vector<uint8_t>& data);
 // ---- the game's files (any thread; reads only) ----
 // game_dir: the folder with code/, content/, meta/
 std::vector<std::pair<std::string, std::vector<int>>> game_stage_rooms(const std::string& game_dir);
+// Where the player's game has an object archive ("Oyashi"): "Pack/<pack>" (a member of one of the packs,
+// read from their headers only) or "Object" (content/Common/Object/<name>.szs); empty when it has none.
+std::string game_archive(const std::string& game_dir, const std::string& archive);
 // The spawn points of a stage's room from its room archive; empty when the file is missing or unreadable.
 std::vector<Spawn> room_spawns(const std::string& game_dir, const std::string& stage, int room);
 

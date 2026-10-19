@@ -17,10 +17,15 @@
 #include "../input_map.h"
 #include "../platform/keycodes.h"
 #include "editor_panel.h"
+#include "editor_dock.h"
+#include "editor_resident.h"
+#include "../mods/story_enemy_variants.h"
 #include "extensions.h"
 #include "hostui.h"
 #include "imgui.h"
 #include "imgui_internal.h"
+#include "text_entry.h"
+#include "game_objects_palette.h"
 #include "layer_escape.h"
 #include "overlay.h"
 // ImGuizmo needs Dear ImGui declared first
@@ -34,6 +39,7 @@ constexpr double kPi = 3.14159265358979323846;
 
 struct ShellState {
     bool outliner = true, inspector = true, problems = false, test = false, log = false;
+    bool story_tab = false;  // show the Outliner's Story tab once
     bool focus_inspector = false, focus_problems = false;
     bool quests = false, flags = false, search = false, focus_quests = false;  // the quest editor's windows
     bool quests_focused = false;  // Ctrl+C / Ctrl+V are the quest editor's there
@@ -41,10 +47,14 @@ struct ShellState {
     // a walk point dragged with its handle in the picture
     bool point_dragging = false;
     float point_drag[16] = {};
+    bool route_dragging = false;  // a route point's handle (route_overlay)
+    float route_drag[16] = {};
     int gizmo = 0;           // 0 move, 1 turn
     int grid = 0, angle = 1;  // snapping: indexes into kGrid / kAngle
     std::string placing;      // a type from list_actor_types while placing by click
     std::string place_model;  // its model
+    std::string place_resident;  // a resident's type (uo2, um1, ym1) while placing one
+    std::string place_variant;   // an enemy's declared variant (story_enemy_variants.h) while placing one
     bool play_restore = true;
     bool dragging = false;    // the gizmo was used last frame
     float drag[16] = {};
@@ -54,10 +64,23 @@ struct ShellState {
     bool drag_cancelled = false;         // Esc during the drag: the handle rests until the mouse is let go
     std::vector<std::string> types, type_labels, type_groups;
     std::vector<bool> type_model;
+    overlay::game_objects::Palette game_objects;  // the Game objects palette (Add > Game objects)
+    Value game_object_list;                       // list_game_objects, asked when the palette opens
+    int game_object_asked = -100000;
     bool layout_loaded = false;
     bool reset_layout = false;  // Reset layout: the default docked layout again
     float status_h = 52;        // the status bar's height at the last frame (the dockspace ends above it)
 } S;
+// "Add a quest talk for this villager...": a game villager clicked in the picture
+struct VillagerTalk {
+    Value who;               // the list_villagers entry
+    int target = 0;          // 0 a new quest, 1 a new step of a quest, 2 a step of a quest
+    std::string quest;
+    int step = 0;
+    char title[96] = {}, line[241] = {};
+    std::string error;
+    bool running = false, open = false;
+} g_villager;
 editor_escape::Gate g_escape;  // Esc: the placing, the handle drag or the quest connection first
 const float kGrid[] = {0, 10, 50, 100};
 const char* const kGridNames[] = {"Grid off", "Grid 10", "Grid 50", "Grid 100"};
@@ -195,60 +218,10 @@ std::string current_stage(const Value& state) {
     return state.get("link").get("stage").string();
 }
 
-// ---------------------------------------------------------------- docking (the launch mode only)
-// The editor's panels dock to the screen's edges and into each other as tabs (Dear ImGui's docking
-// branch, turned on in the launch mode only: Settings and every other overlay never dock). The middle
-// of the dockspace stays open: the picture, its labels and handles take the clicks there.
-const ImGuiWindowClass& panel_class() {
-    static const ImGuiWindowClass c = [] {
-        ImGuiWindowClass k;
-        k.ClassId = ImHashStr("wwhd-editor-panel");
-        k.DockingAllowUnclassed = false;  // only the editor's panels dock here
-        return k;
-    }();
-    return c;
-}
-// Before each panel's Begin: it may dock with the other panels
-void panel() { ImGui::SetNextWindowClass(&panel_class()); }
-// The default layout: the toolbar along the top, the Outliner at the left, the Inspector (with Flags and
-// Search as tabs) at the right, Quests, Scenes, Problems & export, Camera & test and Log as tabs along the bottom.
-void default_layout(ImGuiID id, ImVec2 size) {
-    ImGui::DockBuilderRemoveNode(id);
-    ImGui::DockBuilderAddNode(id, ImGuiDockNodeFlags_DockSpace);
-    ImGui::DockBuilderSetNodeSize(id, size);
-    ImGuiID rest = id;
-    const float bar = ImGui::GetFrameHeightWithSpacing() * 2 + ImGui::GetStyle().WindowPadding.y * 2 + 4;
-    const ImGuiID top = ImGui::DockBuilderSplitNode(rest, ImGuiDir_Up, std::clamp(bar / std::max(1.0f, size.y), 0.05f, 0.4f), nullptr, &rest);
-    const ImGuiID left = ImGui::DockBuilderSplitNode(rest, ImGuiDir_Left, 0.22f, nullptr, &rest);
-    const ImGuiID right = ImGui::DockBuilderSplitNode(rest, ImGuiDir_Right, 0.3f, nullptr, &rest);
-    const ImGuiID bottom = ImGui::DockBuilderSplitNode(rest, ImGuiDir_Down, 0.4f, nullptr, &rest);
-    if (ImGuiDockNode* n = ImGui::DockBuilderGetNode(top)) n->LocalFlags |= ImGuiDockNodeFlags_AutoHideTabBar;
-    ImGui::DockBuilderDockWindow("Editor", top);
-    ImGui::DockBuilderDockWindow("Outliner", left);
-    for (const char* name : {"Inspector", "Flags", "Search"}) ImGui::DockBuilderDockWindow(name, right);
-    for (const char* name : {"Quests", "Scenes", "Problems & export", "Camera & test", "Log"}) ImGui::DockBuilderDockWindow(name, bottom);
-    ImGui::DockBuilderFinish(id);
-}
+// ---------------------------------------------------------------- docking (the launch mode only): editor_dock.h
+using editor_dock::panel;
 // The dockspace over the picture (above the status bar), before the panels each frame
-void dockspace(float w, float h) {
-    const ImVec2 size(w, std::max(100.0f, h - S.status_h));
-    ImGui::SetNextWindowPos(ImVec2(0, 0));
-    ImGui::SetNextWindowSize(size);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
-    ImGui::Begin("##editor_dock", nullptr,
-                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoDocking |
-                     ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus | ImGuiWindowFlags_NoMove);
-    ImGui::PopStyleVar(3);
-    const ImGuiID id = ImGui::GetID("editor_dockspace");
-    if (S.reset_layout || !ImGui::DockBuilderGetNode(id)) {  // first start, an old layout without docking, or Reset layout
-        S.reset_layout = false;
-        default_layout(id, size);
-    }
-    ImGui::DockSpace(id, ImVec2(0, 0), ImGuiDockNodeFlags_PassthruCentralNode, &panel_class());
-    ImGui::End();
-}
+void dockspace(float w, float h) { editor_dock::dockspace(ImVec2(w, std::max(100.0f, h - S.status_h)), S.reset_layout); }
 
 // ---------------------------------------------------------------- the handle drag, live in the game
 double rounded(double v) { return std::round(v * 10) / 10; }
@@ -461,15 +434,186 @@ bool scene_overlay(ImDrawList* dl, const View& v, const Value& m, bool& handle_b
     return true;
 }
 
+// ---------------------------------------------------------------- the selected actor's route in the picture
+// Its line (green; segments the ground check marked in red), its points (numbered; a resident starts at
+// its position), and the selected point's move handle: letting go is one command (move_route_point).
+// A click on a point selects it. True while that handle shows (the actor's handle waits).
+bool route_overlay(ImDrawList* dl, const View& v, const Value* sel, bool& handle_busy) {
+    handle_busy = false;
+    std::string id;
+    int point = 0;
+    std::vector<std::pair<int, int>> bad;
+    if (!sel || !editor_ui::route_picture(id, point, bad) || sel->get("id").string() != id) return false;
+    const Value& path = sel->get("path");
+    if (path.type != Value::Object) return false;
+    const bool resident = sel->get("actor").string() == "resident";
+    // the numbered points: a resident's 0 is its position
+    std::vector<std::array<float, 3>> pts;
+    std::vector<int> numbers;
+    float q[3];
+    if (resident && position_of(*sel, q)) pts.push_back({q[0], q[1], q[2]}), numbers.push_back(0);
+    int n = 0;
+    for (const auto& pt : path.get("points").array) {
+        ++n;
+        if (point3(pt, q)) pts.push_back({q[0], q[1], q[2]}), numbers.push_back(n);
+    }
+    const std::string mode = path.get("mode").string("once");
+    auto marked = [&](int a, int b) {
+        for (const auto& [f, t] : bad)
+            if (f == a && t == b) return true;
+        return false;
+    };
+    const ImU32 green = IM_COL32(110, 230, 120, 230), red = IM_COL32(245, 90, 80, 240);
+    auto segment = [&](size_t i, size_t j) {
+        const float lift = 8;  // a little above the ground, so the line shows
+        const float a[3] = {pts[i][0], pts[i][1] + lift, pts[i][2]}, b[3] = {pts[j][0], pts[j][1] + lift, pts[j][2]};
+        line3(dl, v, a, b, marked(numbers[i], numbers[j]) ? red : green, 3);
+    };
+    for (size_t i = 1; i < pts.size(); i++) segment(i - 1, i);
+    if (mode == "loop" && pts.size() > 2) segment(pts.size() - 1, 0);
+    // points: dots, numbers; a click selects one
+    const ImVec2 mouse = ImGui::GetIO().MousePos;
+    int clicked = -1;
+    for (size_t i = 0; i < pts.size(); i++) {
+        ImVec2 at;
+        if (!project(v, pts[i].data(), at)) continue;
+        const bool me = numbers[i] == point && numbers[i] > 0;
+        dl->AddCircleFilled(at, me ? 8.0f : 6.0f, me ? IM_COL32(255, 230, 120, 255) : numbers[i] == 0 ? IM_COL32(200, 200, 200, 230) : green);
+        char label[24];
+        std::snprintf(label, sizeof label, numbers[i] == 0 ? "start" : "%d", numbers[i]);
+        dl->AddText(ImVec2(at.x + 9, at.y - 9), IM_COL32(240, 240, 240, 230), label);
+        if (numbers[i] > 0 && ImGui::IsMouseClicked(0) && ImGui::IsWindowHovered() && std::hypot(mouse.x - at.x, mouse.y - at.y) < 10) clicked = numbers[i];
+    }
+    if (clicked > 0 && !ImGuizmo::IsOver()) editor_ui::route_select_point(clicked), point = clicked;
+    if (point < 1 || point > n) return false;
+    const auto& sp = path.get("points").array[size_t(point - 1)];
+    if (!point3(sp, q)) return false;
+    float model[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, q[0], q[1], q[2], 1};
+    if (S.route_dragging) std::memcpy(model, S.route_drag, sizeof model);
+    float view[16], proj[16];
+    gl_view(v, view);
+    gl_projection(v, proj);
+    ImGuizmo::SetDrawlist(dl);
+    ImGuizmo::SetOrthographic(false);
+    ImGuizmo::SetRect(v.pos.x, v.pos.y, v.size.x, v.size.y);
+    float snap_values[3] = {kGrid[S.grid], kGrid[S.grid], kGrid[S.grid]};
+    ImGuizmo::PushID(0x52545054);  // its own handle, apart from the actor's
+    ImGuizmo::Manipulate(view, proj, ImGuizmo::TRANSLATE, ImGuizmo::WORLD, model, nullptr, S.grid > 0 ? snap_values : nullptr);
+    handle_busy = ImGuizmo::IsOver() || ImGuizmo::IsUsing();
+    if (ImGuizmo::IsUsing()) {
+        S.route_dragging = true;
+        std::memcpy(S.route_drag, model, sizeof model);
+    } else if (S.route_dragging) {
+        S.route_dragging = false;
+        Value prm;
+        prm["id"] = id;
+        prm["point"] = point;
+        prm["position"] = point_of(S.route_drag[12], S.route_drag[13], S.route_drag[14]);
+        editor_ui::command("move_route_point", prm);
+    }
+    ImGuizmo::PopID();
+    return true;
+}
+
+// ---------------------------------------------------------------- a game villager's quest talk
+// "Add a quest talk for this villager...": a new quest with the talk as its first step, a new step of a
+// quest, or a step's talk; one command (add_villager_talk), one undo step; then the quest editor opens at
+// that step. The villager itself (its own dialogue, quests, save flags) is never changed.
+void villager_popup(const editor_ui::Snapshot& snap) {
+    auto& V = g_villager;
+    const ImGuiViewport* vp = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x * 0.5f, vp->WorkPos.y + vp->WorkSize.y * 0.5f), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(std::min(520.0f, vp->WorkSize.x - 32), 0));
+    if (!ImGui::BeginPopupModal("Add a quest talk", nullptr, ImGuiWindowFlags_NoSavedSettings)) return;
+    ImGui::TextColored(kHead, "%s", V.who.get("name").string().c_str());
+    ImGui::SameLine();
+    ImGui::TextDisabled("(%s, %s)", V.who.get("id").string().c_str(), V.who.get("where").string().c_str());
+    ImGui::PushStyleColor(ImGuiCol_Text, kMuted);
+    ImGui::TextWrapped("Adds a quest talk to %s: while that quest step is current, this villager says your line once. "
+                       "The villager's own dialogue, quests and save flags stay as they are.",
+                       snap.open.c_str());
+    ImGui::PopStyleColor();
+    const Value& quests = snap.manifest.get("quests");
+    if (quests.array.empty()) V.target = 0;
+    ImGui::RadioButton("New quest...", &V.target, 0);
+    ImGui::BeginDisabled(quests.array.empty());
+    ImGui::SameLine();
+    ImGui::RadioButton("New step of a quest", &V.target, 1);
+    ImGui::SameLine();
+    ImGui::RadioButton("A step of a quest", &V.target, 2);
+    ImGui::EndDisabled();
+    if (V.target == 0) {
+        ImGui::TextUnformatted("Title");
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        text_entry::field("##villager_title", V.title, sizeof V.title, 0, "the quest's title");
+    } else {
+        if (V.quest.empty() || !std::any_of(quests.array.begin(), quests.array.end(), [&](const Value& q) { return q.get("id").string() == V.quest; }))
+            V.quest = quests.array.empty() ? std::string() : quests.array[0].get("id").string(), V.step = 0;
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        if (ImGui::BeginCombo("##villager_quest", V.quest.c_str())) {
+            for (const auto& q : quests.array)
+                if (ImGui::Selectable((q.get("title").string() + "  (" + q.get("id").string() + ")").c_str(), q.get("id").string() == V.quest))
+                    V.quest = q.get("id").string(), V.step = 0;
+            ImGui::EndCombo();
+        }
+        if (V.target == 2) {
+            const Value* q = nullptr;
+            for (const auto& qq : quests.array)
+                if (qq.get("id").string() == V.quest) q = &qq;
+            std::string shown = V.step ? "step " + std::to_string(V.step) : "(choose a step)";
+            ImGui::SetNextItemWidth(-FLT_MIN);
+            if (q && ImGui::BeginCombo("##villager_step", shown.c_str())) {
+                for (const auto& st : q->get("steps").array) {
+                    const int n = int(num(st, "n"));
+                    const std::string label = "step " + std::to_string(n) + ": " + st.get("text").string() +
+                                              (st.get("npc").type == Value::Object ? "  (has a talk: replaced)" : "");
+                    if (ImGui::Selectable(label.c_str(), n == V.step)) V.step = n;
+                }
+                ImGui::EndCombo();
+            }
+        }
+    }
+    ImGui::TextUnformatted("What the villager says");
+    ImGui::SetNextItemWidth(-FLT_MIN);
+    text_entry::field("##villager_line", V.line, sizeof V.line, 0, "one message box, up to 240 bytes");
+    if (!V.error.empty()) {
+        ImGui::PushStyleColor(ImGuiCol_Text, kBad);
+        ImGui::TextWrapped("%s", V.error.c_str());
+        ImGui::PopStyleColor();
+    }
+    const bool ready = !V.running && V.line[0] && (V.target == 0 ? V.title[0] != 0 : !V.quest.empty() && (V.target == 1 || V.step > 0));
+    ImGui::BeginDisabled(!ready);
+    if (ImGui::Button(V.running ? "Adding..." : "Add the talk")) {
+        Value p;
+        p["who"] = V.who.get("id");
+        p["lines"] = std::string(V.line);
+        if (V.target == 0) p["title"] = std::string(V.title);
+        else p["quest"] = V.quest;
+        if (V.target == 2) p["step"] = V.step;
+        V.running = true;
+        V.error.clear();
+        editor_ui::command("add_villager_talk", p, [](const Value& r) {
+            g_villager.running = false;
+            if (!r.get("ok").boolean) {
+                g_villager.error = r.get("error").string();
+                return;
+            }
+            g_villager.open = false;
+            editor_ui::show_quest(r.get("result").get("quest").string(), "step:" + std::to_string(int(r.get("result").get("step").number)));
+        });
+    }
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel")) V.open = false;
+    if (!V.open) ImGui::CloseCurrentPopup();
+    ImGui::EndPopup();
+}
+
 // ---------------------------------------------------------------- the picture: labels, cylinders, handles, clicks
 void world(float w, float h) {
     const editor_ui::Snapshot& snap = editor_ui::snapshot();
     const View v = view_of(w, h);
-    ImGui::SetNextWindowPos(ImVec2(0, 0));
-    ImGui::SetNextWindowSize(ImVec2(w, h));
-    ImGui::Begin("##editor_world", nullptr,
-                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoSavedSettings |
-                     ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoDocking);
+    editor_dock::begin_picture(w, h);  // at the back: the dockspace and the panels stay in front of it
     ImDrawList* dl = ImGui::GetWindowDrawList();
     ImGuiIO& io = ImGui::GetIO();
     const bool hovered = ImGui::IsWindowHovered();
@@ -503,6 +647,20 @@ void world(float w, float h) {
         labels.push_back({id, at, std::sqrt(d2)});
         if (id == selected) sel = &a;
     }
+    // the game's own villagers the NPC catalogue knows (not the mod's): their names, a click offers a quest talk
+    std::vector<Label> villagers;
+    std::vector<const Value*> villager_of;
+    for (const auto& vg : snap.villagers.array) {
+        float p[3];
+        if (vg.get("stage").string() != stage || !position_of(vg, p)) continue;
+        const float d2 = (p[0] - v.eye[0]) * (p[0] - v.eye[0]) + (p[1] - v.eye[1]) * (p[1] - v.eye[1]) + (p[2] - v.eye[2]) * (p[2] - v.eye[2]);
+        if (d2 > 8000.0f * 8000.0f) continue;
+        const float top[3] = {p[0], p[1] + 170, p[2]};
+        ImVec2 at;
+        if (!project(v, top, at)) continue;
+        villagers.push_back({vg.get("name").string(), at, std::sqrt(d2)});
+        villager_of.push_back(&vg);
+    }
     // the other selected actors: their cylinders
     for (const auto& a : snap.manifest.get("actors").array) {
         const auto& group = editor_ui::multi_selection();
@@ -514,7 +672,10 @@ void world(float w, float h) {
     }
     // the scene editor's cameras and walking paths; a walk point's handle comes before the actor's
     bool point_handle_busy = false;
-    const bool point_handle = scene_overlay(dl, v, snap.manifest, point_handle_busy);
+    bool point_handle = scene_overlay(dl, v, snap.manifest, point_handle_busy);
+    // the selected actor's route: its line, points and the selected point's handle (before the actor's handle)
+    bool route_handle_busy = false;
+    if (!point_handle && route_overlay(dl, v, sel, route_handle_busy)) point_handle = true, point_handle_busy = point_handle_busy || route_handle_busy;
     // the selected actor: its cylinder and handles
     float model[16] = {};
     bool gizmo = false;
@@ -598,6 +759,25 @@ void world(float w, float h) {
         dl->AddText(ImVec2(a.x + 4, a.y + 1), me ? IM_COL32(255, 230, 160, 255) : IM_COL32(220, 225, 235, 255), l.id.c_str());
         dl->AddCircleFilled(l.at, 3, me ? IM_COL32(255, 210, 90, 255) : IM_COL32(200, 210, 225, 220));
     }
+    // the game's villagers: a teal label with the catalogue's name; hovering says what a click does
+    const ImVec2 mouse = io.MousePos;
+    int villager_hit = -1;
+    float villager_d = 26 * 26;
+    for (size_t i = 0; i < villagers.size(); i++) {
+        const auto& l = villagers[i];
+        const ImVec2 sz = ImGui::CalcTextSize(l.id.c_str());
+        const ImVec2 a(l.at.x - sz.x / 2 - 4, l.at.y - sz.y - 8), b(l.at.x + sz.x / 2 + 4, l.at.y - 6);
+        dl->AddRectFilled(a, b, IM_COL32(16, 70, 74, l.depth > 5000 ? 120 : 200), 4);
+        dl->AddText(ImVec2(a.x + 4, a.y + 1), IM_COL32(170, 240, 235, 255), l.id.c_str());
+        dl->AddCircleFilled(l.at, 3, IM_COL32(120, 220, 210, 220));
+        const float dx = l.at.x - mouse.x, dy = l.at.y - 12 - mouse.y, d = dx * dx + dy * dy;
+        if (d < villager_d) villager_d = d, villager_hit = int(i);
+    }
+    if (hovered && villager_hit >= 0 && S.placing.empty()) {
+        const Value& vg = *villager_of[size_t(villager_hit)];
+        ImGui::SetTooltip("%s (%s): one of the game's villagers\nClick: Add a quest talk for this villager...", vg.get("name").string().c_str(),
+                          vg.get("id").string().c_str());
+    }
     // a click: place the chosen type on the ground there, or select the nearest label (or nothing)
     const bool over_gizmo = (gizmo && (ImGuizmo::IsOver() || ImGuizmo::IsUsing())) || point_handle_busy;
     if (hovered && !over_gizmo && ImGui::IsMouseClicked(0)) {
@@ -610,8 +790,8 @@ void world(float w, float h) {
             d["x"] = dir[0], d["y"] = dir[1], d["z"] = dir[2];
             prm["origin"] = o;
             prm["direction"] = d;
-            const std::string type = S.placing, model_id = S.place_model;
-            editor_ui::command("pick", prm, [type, model_id](const Value& r) {
+            const std::string type = S.placing, model_id = S.place_model, resident = S.place_resident, variant = S.place_variant;
+            editor_ui::command("pick", prm, [type, model_id, resident, variant](const Value& r) {
                 if (!r.get("ok").boolean) return;
                 Value add;
                 add["type"] = type;
@@ -620,6 +800,8 @@ void world(float w, float h) {
                 if (r.get("result").get("stage").type == Value::String) add["stage"] = r.get("result").get("stage");
                 if (r.get("result").get("room").type == Value::Number) add["room"] = r.get("result").get("room");
                 if (!model_id.empty()) add["model"] = model_id;
+                if (type == "resident" && !resident.empty()) add["options"]["resident"] = resident;
+                if (!variant.empty()) add["options"]["variant"] = variant;
                 editor_ui::command("add_actor", add, [](const Value& a) {
                     if (a.get("ok").boolean) editor_ui::selected() = a.get("result").get("id").string();
                 });
@@ -632,8 +814,12 @@ void world(float w, float h) {
                 const float dx = l.at.x - m.x, dy = l.at.y - 12 - m.y, d = dx * dx + dy * dy;
                 if (d < best_d) best_d = d, best = &l;
             }
-            auto& many = editor_ui::multi_selection();
-            if ((io.KeyCtrl || io.KeySuper || io.KeyShift) && best) {  // more than one: Ctrl (Cmd) or Shift adds or takes away
+            if (villager_hit >= 0 && villager_d < best_d && !snap.open.empty()) {  // a game villager: offer a quest talk
+                g_villager = VillagerTalk();
+                g_villager.who = *villager_of[size_t(villager_hit)];
+                g_villager.open = true;
+                ImGui::OpenPopup("Add a quest talk");
+            } else if (auto& many = editor_ui::multi_selection(); (io.KeyCtrl || io.KeySuper || io.KeyShift) && best) {  // more than one: Ctrl (Cmd) or Shift adds or takes away
                 if (many.empty() && !editor_ui::selected().empty()) many.push_back(editor_ui::selected());
                 const auto it = std::find(many.begin(), many.end(), best->id);
                 if (it != many.end()) many.erase(it);
@@ -650,6 +836,7 @@ void world(float w, float h) {
     if (!S.placing.empty()) {
         dl->AddText(ImVec2(io.MousePos.x + 14, io.MousePos.y + 10), IM_COL32(255, 230, 160, 255), ("place " + S.placing).c_str());
     }
+    villager_popup(snap);
     ImGui::End();
 }
 
@@ -676,18 +863,50 @@ void add_menu() {
             group = S.type_groups[i];
             ImGui::SeparatorText(group.c_str());
         }
+        if (S.types[i] == "resident") {  // a submenu of its types (what each looks like)
+            std::string code;
+            if (editor_resident::menu(S.type_labels[i].c_str(), code)) S.placing = S.types[i], S.place_model.clear(), S.place_resident = code, S.place_variant.clear();
+            continue;
+        }
+        if (story_enemy_variants::has_variants(S.types[i])) {  // a submenu of its declared variants
+            if (ImGui::BeginMenu(S.type_labels[i].c_str())) {
+                for (const auto& v : story_enemy_variants::kVariants) {
+                    if (S.types[i] != v.kind) continue;
+                    if (ImGui::MenuItem(v.label)) S.placing = S.types[i], S.place_model.clear(), S.place_resident.clear(), S.place_variant = v.name;
+                    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", v.help);
+                }
+                ImGui::EndMenu();
+            }
+            continue;
+        }
         if (!S.type_model[i]) {
-            if (ImGui::MenuItem(S.type_labels[i].c_str())) S.placing = S.types[i], S.place_model.clear();
+            if (ImGui::MenuItem(S.type_labels[i].c_str())) S.placing = S.types[i], S.place_model.clear(), S.place_resident.clear(), S.place_variant.clear();
             continue;
         }
         if (ImGui::BeginMenu(S.type_labels[i].c_str())) {
             for (const auto& md : m.get("models").array) {
                 const std::string id = md.get("id").string();
-                if (ImGui::MenuItem((id + "  (" + md.get("kind").string("static") + ")").c_str())) S.placing = S.types[i], S.place_model = id;
+                if (ImGui::MenuItem((id + "  (" + md.get("kind").string("static") + ")").c_str())) S.placing = S.types[i], S.place_model = id, S.place_resident.clear(), S.place_variant.clear();
             }
             if (m.get("models").array.empty()) ImGui::TextDisabled("no models yet: import one (Outliner > Models)");
             ImGui::EndMenu();
         }
+    }
+    // the game's own objects, by reference (the player's game files have them)
+    ImGui::SeparatorText("Game objects");
+    if (ImGui::BeginMenu("Game objects")) {
+        if (ImGui::GetFrameCount() - S.game_object_asked > 300) {  // asked when opened (the game installs its kinds after start-up)
+            S.game_object_asked = ImGui::GetFrameCount();
+            editor_ui::command("list_game_objects", Value(), [](const Value& r) {
+                if (r.get("ok").boolean) S.game_object_list = r.get("result");
+            });
+        }
+        const std::string type = overlay::game_objects::draw(S.game_objects, S.game_object_list);
+        if (!type.empty()) {
+            S.placing = type, S.place_model.clear(), S.place_resident.clear(), S.place_variant.clear();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndMenu();
     }
     ImGui::Separator();
     ImGui::TextDisabled("then click into the picture (Shift: more than one)");
@@ -848,6 +1067,11 @@ void panels(float w, float h) {
                     editor_ui::quests_area(snap.manifest);
                     ImGui::EndTabItem();
                 }
+                if (ImGui::BeginTabItem("Story", nullptr, S.story_tab ? ImGuiTabItemFlags_SetSelected : 0)) {
+                    editor_ui::story_area(snap.manifest);
+                    ImGui::EndTabItem();
+                }
+                S.story_tab = false;
                 if (ImGui::BeginTabItem("Warp")) {
                     editor_ui::warp_area();
                     ImGui::EndTabItem();
@@ -1147,6 +1371,10 @@ void register_layers() {
     if (const char* e = std::getenv("WWHD_TEST_EDITOR_PLACING")) S.placing = e;
     if (const char* e = std::getenv("WWHD_TEST_EDITOR_ACTOR")) editor_ui::selected() = e;
     if (const char* e = std::getenv("WWHD_TEST_EDITOR_FIELD")) editor_ui::focus_field() = e;
+    if (const char* e = std::getenv("WWHD_TEST_EDITOR_STORY")) {  // kind:id, the Story tab with that entry
+        const std::string story = e;
+        editor_ui::show_story(story.substr(0, story.find(':')), story.find(':') == std::string::npos ? std::string() : story.substr(story.find(':') + 1));
+    }
 }
 void show_inspector() {
     S.inspector = true;
@@ -1163,6 +1391,10 @@ void show_quests() {
 void show_scenes() {
     S.scenes = true;
     S.focus_scenes = true;
+}
+void show_story() {
+    S.outliner = true;
+    S.story_tab = true;
 }
 
 }  // namespace editor_shell

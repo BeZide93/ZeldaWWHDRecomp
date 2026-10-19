@@ -25,6 +25,7 @@ struct Snapshot {
     Value manifest;   // the open mod's
     Value state;      // read_state
     Value locations;  // list_locations (refreshed every second)
+    Value villagers;  // list_villagers: the game's villagers the NPC catalogue knows, loaded now (twice a second)
     std::vector<editor::LogEntry> log;
 };
 void refresh();               // once per frame, before drawing: the snapshot and finished commands
@@ -65,6 +66,10 @@ std::string quest_status();             // "Lighthouse quest: step 3 of 6" for t
 void show_quest(const std::string& quest, const std::string& field);  // a problem was clicked: open that quest and step
 std::vector<std::string>& multi_selection();  // the selected actors (Ctrl or Shift adds); selected() is the main one
 
+// ---- letters on their own, treasure charts and items (editor_story.cpp) ----
+void story_area(const Value& m);        // the Story tab: list, add, edit and remove the mod's letters, charts and items
+void show_story(const std::string& kind, const std::string& id);  // a problem or search result: select it there
+
 // ---- the scene editor (editor_scenes.cpp) ----
 void scene_editor(const Value& m);      // the Scenes window: steps, timeline, inspector, trigger, native version, previews
 void show_scene(const std::string& scene, int step);  // open the Scenes window at that scene and step (0: none)
@@ -72,4 +77,11 @@ bool scenes_focused();                  // the Scenes window has the keyboard (C
 // What the picture shows of the scene editor: the shown scene, its selected step and walk point (1-based,
 // 0 none) and the timeline's cursor (frames, < 0 none). False without a scene.
 bool scene_picture(std::string& scene, int& step, int& point, double& scrub);
+
+// ---- an actor's route (editor_route.cpp) ----
+void route_section(const Value& m, const Value& actor);  // the Inspector's Route section
+// What the picture shows of the selected actor's route: its id, the selected point (1-based, 0 none)
+// and the segments the ground check marked (from, to; a resident's 0 is its position). False: none.
+bool route_picture(std::string& actor, int& point, std::vector<std::pair<int, int>>& bad);
+void route_select_point(int point);  // a click on a point in the picture
 }  // namespace editor_ui

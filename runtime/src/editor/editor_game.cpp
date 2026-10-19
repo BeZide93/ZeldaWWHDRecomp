@@ -26,6 +26,7 @@
 #include <utility>
 #include <vector>
 #include "editor_game.h"
+#include "ray_ground.h"
 
 
 #include "../gfx/renderer.h"
@@ -39,7 +40,12 @@
 #include "../mods/story_items.h"
 #include "../mods/story_mail.h"
 #include "../mods/story_mail_book.h"
+#include "../mods/story_manifest.h"
+#include "../mods/story_notebook.h"
 #include "../mods/story_notebook_list.h"
+#include "../mods/story_reload.h"
+#include "../mods/story_chart.h"
+#include "../mods/story_treasure.h"
 #include "../mods/story_scenes.h"
 #include "../mods/story_store.h"
 #include "../overlay/hostui.h"
@@ -408,34 +414,9 @@ bool ground_below(Cpu* c, double x, double y, double z, float& h) {
     h = float(r);
     return true;
 }
-// the first ground a ray meets: steps along it and narrows the step where it passes below the ground
+// the first ground a ray meets (ray_ground.h: steps along it, looks up the ground below each step's top)
 bool ray_hit(Cpu* c, const WorldPoint& from, const WorldPoint& d, float range, WorldPoint& hit) {
-    const double step = 60;
-    double prev_t = 0;
-    float h = 0;
-    if (ground_below(c, from.x, from.y, from.z, h) && from.y < h - 1) return false;  // starts below the ground
-    for (double t = step; t <= range + step; t += step) {
-        const double tt = std::min<double>(t, range);
-        const double x = from.x + d.x * tt, y = from.y + d.y * tt, z = from.z + d.z * tt;
-        if (ground_below(c, x, y + 1, z, h) && y <= h) {
-            double lo = prev_t, hi = tt;
-            for (int i = 0; i < 12; i++) {
-                const double mid = (lo + hi) / 2;
-                float hm = 0;
-                const double mx = from.x + d.x * mid, my = from.y + d.y * mid, mz = from.z + d.z * mid;
-                if (ground_below(c, mx, my + 1, mz, hm) && my <= hm) hi = mid;
-                else lo = mid;
-            }
-            const double hx = from.x + d.x * hi, hz = from.z + d.z * hi;
-            float hy = 0;
-            if (!ground_below(c, hx, from.y + d.y * hi + 1, hz, hy)) hy = float(from.y + d.y * hi);
-            hit = {float(hx), hy, float(hz)};
-            return true;
-        }
-        prev_t = tt;
-        if (tt >= range) break;
-    }
-    return false;
+    return ray_ground(from, d, range, [c](double x, double y, double z, float& h) { return ground_below(c, x, y, z, h); }, hit);
 }
 
 // ---------------------------------------------------------------- dialogue preview (the game's message box)
@@ -562,8 +543,122 @@ void test_start(std::function<void(bool ok)> then) {
     });
 }
 
+// ---------------------------------------------------------------- the story tables while the game runs
+// apply_story (any thread) keeps the latest manifest of each mod whose quests, letters, charts or items
+// changed; the game thread takes it at a calm moment (story_tick): the mod's tables again
+// (story_notebook::redeclare), its items' texts (story_items::define), never a record of the save file.
+struct StoryChange {
+    std::string name, dir;
+    Value started, manifest;
+};
+std::mutex g_story_mu;
+std::map<std::string, StoryChange> g_story_pending;  // under g_story_mu
+std::map<std::string, Value> g_story_applied;        // game thread: the manifest whose tables the game has now
+std::string g_story_wait;                            // game thread: why the pending change waits (said once)
+
+std::string joined(const std::vector<std::string>& list) {
+    std::string s;
+    for (const auto& x : list) s += (s.empty() ? "" : ", ") + x;
+    return s;
+}
+// What of a story change waits for a restart (the note of apply_story)
+std::vector<std::string> story_later(const Value& started, const Value& manifest) {
+    std::vector<std::string> later;
+    const bool items_changed = !(started.get("items") == manifest.get("items"));
+    if (items_changed && !story_items::installed_hooks()) later.push_back("the items (the game had no mod items at start-up)");
+    else
+        for (const auto& i : story_reload::restart_items(started, manifest)) later.push_back("item " + i);
+    for (const auto& id : story_reload::gone(
+             [&] {
+                 std::vector<std::string> ids;
+                 for (const auto& c : started.get("charts").array) ids.push_back(c.get("id").string());
+                 return ids;
+             }(),
+             [&] {
+                 std::vector<std::string> ids;
+                 for (const auto& c : manifest.get("charts").array) ids.push_back(c.get("id").string());
+                 return ids;
+             }()))
+        later.push_back("chart " + id + " (removed)");
+    if (!manifest.get("charts").array.empty() && !story_treasure::installed() && !(started.get("charts") == manifest.get("charts")))
+        later.push_back("salvaging the treasure of a chart (the game had no chart at start-up)");
+    bool sail = false;
+    for (const auto& q : manifest.get("quests").array)
+        for (const auto& st : q.get("steps").array) sail |= st.get("sail_line").type != Value::Null;
+    if (sail && !story_notebook::sail_installed()) later.push_back("the King of Red Lions' sail lines (no quest had one at start-up)");
+    return later;
+}
+// game thread: no story talk, letter, scene, menu or stage change running
+bool story_calm(std::string& why) {
+    if (!story_notebook::story_idle(why)) return false;
+    if (story_scenes::active() || g_previewing) return why = "a scene is playing", false;
+    if (g_flying) return true;  // the editor view: the fly camera holds Link, nothing else runs
+    const std::string problem = ss::control_problem();
+    if (problem.empty() || problem == "no game in progress") return true;
+    return why = problem, false;
+}
+void story_tick() {
+    {
+        std::lock_guard<std::mutex> lk(g_story_mu);
+        if (g_story_pending.empty()) return;
+    }
+    std::string why;
+    if (!story_calm(why)) {
+        if (why != g_story_wait) set_status("The story change waits for a calm moment (" + why + ")");
+        g_story_wait = why;
+        return;
+    }
+    g_story_wait.clear();
+    std::map<std::string, StoryChange> pending;
+    {
+        std::lock_guard<std::mutex> lk(g_story_mu);
+        pending.swap(g_story_pending);
+    }
+    for (auto& [mod, ch] : pending) {
+        story_notebook::Redeclared r;
+        if (!story_notebook::redeclare(mod, ch.name, ch.manifest, r, why)) {
+            set_status("The story of " + mod + " is not changed in the game: " + why + " (it is in the package)");
+            continue;
+        }
+        // the items that change at once: their name, description, stack and use
+        unsigned items = 0;
+        if (story_items::installed_hooks()) {
+            std::vector<story_notebook::ManifestItem> list;
+            std::string w;
+            if (story_notebook::parse_items(ch.manifest, list, w)) {
+                const auto live = story_reload::live_items(ch.started, ch.manifest);
+                for (const auto& item : list)
+                    if (std::find(live.begin(), live.end(), item.id) != live.end() && story_items::define(mod, ch.dir, item, w)) items++;
+            }
+        }
+        // the loaded Quest Log keeps its step numbers: say where one now names another step
+        const auto applied = g_story_applied.find(mod);
+        const Value& before = applied != g_story_applied.end() ? applied->second : ch.started;
+        std::vector<std::string> moved;
+        if (story_store::ready()) {
+            story_mail::Book b = story_store::book();
+            for (const auto& m : story_reload::step_moves(before, ch.manifest))
+                if (b.usable() && story_notebook::saved_step(b, story_notebook::quest_key(mod, m.quest)) == m.saved)
+                    moved.push_back("quest " + m.quest + " is at step " + std::to_string(m.saved) +
+                                    (m.now ? ", which is step " + std::to_string(m.now) + " now" : ", which was removed"));
+        }
+        g_story_applied[mod] = ch.manifest;
+        std::string s = "Story of " + mod + " updated in the game: " + std::to_string(r.quests) + " quest(s), " + std::to_string(r.talks) +
+                        " quest talk(s), " + std::to_string(r.letters) + " letter(s), " + std::to_string(r.charts) + " chart(s), " +
+                        std::to_string(items) + " item(s)";
+        if (!moved.empty()) s += ". The loaded Quest Log keeps its steps: " + joined(moved);
+        if (!r.charts_kept.empty()) s += ". Until a restart the game keeps chart(s) " + joined(r.charts_kept);
+        set_status(s);
+    }
+    records_tick(true);
+}
+
 // ---------------------------------------------------------------- the host
 void reapply_mod(const std::string& mod);  // below: the live actors again (a model became ready)
+// the game's villagers the NPC catalogue knows (list_villagers): read from the actor list on the game
+// thread (villagers_tick), for the host on any thread
+std::mutex g_villagers_mu;
+std::vector<story_notebook::LiveVillager> g_villagers;
 class GameHost final : public Host {
 public:
     bool apply_actors(const std::string& mod, const std::vector<story_notebook::ManifestActor>& actors, const std::vector<std::string>& changed,
@@ -579,9 +674,10 @@ public:
             std::vector<std::string> pending;
             if (!story_actors::editor_update(mod, actors, changed, w, &pending, c)) set_status("Live update refused: " + w);
             else if (!pending.empty()) {
-                std::string list;
-                for (const auto& p : pending) list += (list.empty() ? "" : "; ") + p;
-                set_status("Saved in the package; after a restart: " + list);
+                // grass, flowers and small trees (game objects in the stage's shared batch) wait for the room, not a restart
+                std::string list, room;
+                for (const auto& p : pending) (p.find("(Reload room)") != std::string::npos ? room : list) += ((p.find("(Reload room)") != std::string::npos ? room : list).empty() ? "" : "; ") + p;
+                set_status(list.empty() ? "Saved in the package; " + room : "Saved in the package; after a restart: " + list + (room.empty() ? "" : "; " + room));
             } else if (!changed.empty())
                 set_status("Updated " + std::to_string(changed.size()) + " actor(s) in the game");
         });
@@ -626,7 +722,76 @@ public:
         (void)why;
         return true;
     }
+    bool apply_story(const std::string& mod, const std::string& name, const std::string& dir, const Value& started, const Value& manifest,
+                     std::string& note, std::string& why) override {
+        if (!story_notebook::installed())
+            return why = "the story system was not running at start-up (it runs with the Story Notebook package on)", false;
+        {
+            std::lock_guard<std::mutex> lk(g_story_mu);
+            g_story_pending[mod] = {name, dir, started, manifest};
+        }
+        const auto later = story_later(started, manifest);
+        note = "Quests, quest talks, letters and charts change in the game at the next calm moment (after a talk, a letter or a scene).";
+        if (!later.empty()) note += " After a restart (save, then start the game again): " + joined(later) + ".";
+        return true;
+    }
     bool live_kind(const std::string& type, bool fallback) override { return story_actors::editor_kind_live(type, fallback); }
+    // the game's residents the NPC catalogue knows, as the story notebook sees them in their process step
+    bool villagers(Value& out, std::string& why) override {
+        if (!story_notebook::installed()) return why = "the story notebook is not loaded (the Story Notebook package is needed for quest talks)", false;
+        out = Value();
+        out.type = Value::Array;
+        const story_notebook::NpcCatalogue& catalogue = story_notebook::npc_catalogue();
+        std::vector<story_notebook::LiveVillager> seen;
+        {
+            std::lock_guard<std::mutex> lk(g_villagers_mu);
+            seen = g_villagers;
+        }
+        for (const auto& v : seen) {
+            const story_notebook::NpcEntry* e = catalogue.entry(v.resident);
+            if (!e) continue;
+            Value x, pos;
+            x["id"] = e->name;
+            x["name"] = e->display();
+            x["description"] = e->description;
+            x["where"] = e->where;
+            x["stage"] = v.stage;
+            x["room"] = v.room;
+            pos["x"] = double(v.x), pos["y"] = double(v.y), pos["z"] = double(v.z);
+            x["position"] = pos;
+            x["talks"] = e->talks();
+            out.array.push_back(x);
+        }
+        return true;
+    }
+    // new_mod: the package goes through the mod manager's own install (checked as any package is, refused
+    // for an installed ID) from a staging folder of its own, then is turned on in the current profile
+    bool create_package(const Value& manifest, std::string& dir, std::string& why) override {
+        const std::string mods_dir = mods::packages::directory();
+        if (mods_dir.empty()) return why = "the mod manager's storage is unavailable", false;
+        const std::string id = manifest.get("id").string();
+        for (const auto& v : mods::packages::list())
+            if (v.id == id) return why = "a mod with the id \"" + id + "\" is installed already", false;
+        std::error_code ec;
+        const fs::path stage = fs::temp_directory_path(ec) /
+                               ("wwhd-new-mod-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        if (ec || !fs::create_directory(stage, ec)) return why = "cannot create a staging folder for the new mod", false;
+        std::string staged, error;
+        bool ok = write_package_folder(stage.string(), manifest, staged, why);
+        if (ok && !mods::packages::install_new(staged, error)) ok = false, why = "the mod manager refused the new mod: " + error;
+        fs::remove_all(stage, ec);  // the staging copy only
+        if (!ok) return false;
+        if (!mods::packages::enable(id, true, error)) {
+            // the package this call just installed (still empty, never turned on) goes again
+            std::string ignored;
+            mods::packages::remove(id, ignored);
+            return why = "the new mod could not be turned on: " + error, false;
+        }
+        dir = (fs::path(mods_dir) / id).string();
+        set_status("New mod " + id + " created and turned on");
+        return true;
+    }
+    std::string game_archive(const std::string& archive) override { return editor::game_archive(config::game_dir, archive); }
     bool reload_room(std::string& why) override {
         (void)why;
         when_free([](Cpu*) {
@@ -741,6 +906,14 @@ public:
         if (!story_store::ready()) return why = "no story progress in this game (no story mod is loaded)", false;
         erased = 0;
         post([mod, own, shared](Cpu*) {
+            // the mod's items first, as taking them does (an item that waited for a place gets the freed one)
+            for (const auto& item : story_items::installed()) {
+                const Record count{story_items::kRecordItemCount, item.key};
+                if (item.mod != mod || std::find(own.begin(), own.end(), count) == own.end() ||
+                    std::find(shared.begin(), shared.end(), count) != shared.end())
+                    continue;
+                if (const int32_t n = story_items::count(mod, item.id); n > 0) story_items::take(mod, item.id, uint32_t(n));
+            }
             story_mail::Book book = story_store::book();
             unsigned skipped = 0;
             const unsigned n = editor::reset_records(book, own, shared, skipped);
@@ -822,6 +995,27 @@ public:
         bool found = false;
         if (!on_game([&](Cpu* c) { found = ground_below(c, above.x, above.y, above.z, height); }, why)) return false;
         return found || (why = "no ground below (outside the loaded rooms?)", false);
+    }
+    bool grounds(const std::vector<WorldPoint>& above, std::vector<float>& heights, std::vector<bool>& found, std::string& why) override {
+        heights.assign(above.size(), 0);
+        found.assign(above.size(), false);
+        return on_game([&](Cpu* c) {
+            for (size_t i = 0; i < above.size(); i++) {
+                float h = 0;
+                if (ground_below(c, above[i].x, above[i].y, above[i].z, h)) heights[i] = h, found[i] = true;
+            }
+        }, why, 3000);
+    }
+    Value route_state(const std::string& mod, const std::string& id) override {
+        Value v;
+        std::string why;
+        story_actors::ResidentRoute route;
+        bool known = false;
+        if (!on_game([&](Cpu*) { known = story_actors::resident_route(mod, id, route); }, why) || !known || !route.declared) return v;
+        v["declared"] = true;
+        v["live"] = route.live;
+        v["status"] = route.live ? route.status : std::string("not in the game (another room, or it appears after a reload)");
+        return v;
     }
     bool ray(const WorldPoint& from, const WorldPoint& direction, float range, WorldPoint& hit, std::string& why) override {
         bool found = false;
@@ -1005,6 +1199,17 @@ public:
             for (const auto& v : values) n += v.value < 0 ? book.erase(v.record.kind, v.record.key) : book.set(v.record.kind, v.record.key, uint8_t(v.value));
             set_status("Set " + std::to_string(n) + " flag(s) of " + mod + " (test mode)");
             records_tick(true);
+        });
+        return true;
+    }
+    bool advance_days(int days, std::string& why) override {
+        if (!g_test) return why = "test mode only", false;
+        post([days](Cpu*) {
+            const uint32_t save = ld32(GD(0x101F84DC));  // the save base (d_com_inf_game)
+            if (!save) return set_status("No save file loaded: the calendar stays");
+            const uint16_t today = uint16_t(ld16(save + story_notebook::kSaveDay) + days);
+            st16(save + story_notebook::kSaveDay, today);
+            set_status("The game's calendar is at day " + std::to_string(today) + " (test mode)");
         });
         return true;
     }
@@ -1312,9 +1517,9 @@ void set_launch_mode(bool on) {
 }
 
 void register_package(const std::string& mod, const std::string& name, const std::string& dir, const Value& manifest) {
-    if (manifest.get("actors").type == Value::Null && manifest.get("models").type == Value::Null && manifest.get("scenes").type == Value::Null &&
-        manifest.get("quests").type == Value::Null)
-        return;
+    bool content = false;  // world content, quests, letters, charts or items
+    for (const char* k : {"actors", "models", "scenes", "quests", "letters", "charts", "items"}) content = content || manifest.get(k).type != Value::Null;
+    if (!content) return;
     std::lock_guard<std::recursive_mutex> lk(g_mu);
     g_session.add_package(mod, name, dir, manifest);
     LOG("[editor] package %s registered (%zu actors)", mod.c_str(), manifest.get("actors").array.size());
@@ -1434,10 +1639,24 @@ void records_tick(bool now) {
 }
 }  // namespace
 
+namespace {
+// the game thread, twice a second: the villagers in the actor list (see g_villagers)
+void villagers_tick() {
+    static unsigned n = 0;
+    if (n++ % 15) return;
+    const ss::LinkPlace at = ss::link_place();
+    std::vector<story_notebook::LiveVillager> seen;
+    if (at.valid) seen = story_notebook::scan_villagers(at.stage);
+    std::lock_guard<std::mutex> lk(g_villagers_mu);
+    g_villagers = std::move(seen);
+}
+}  // namespace
+
 void logic_service(Cpu* c) {
     if (!enabled()) return;
     t_game = c;
     records_tick();
+    villagers_tick();
     // the jobs first: a command waiting on the game thread (a ground check) never waits for a script
     std::vector<std::function<void(Cpu*)>> jobs;
     {
@@ -1446,6 +1665,7 @@ void logic_service(Cpu* c) {
     }
     for (auto& job : jobs) job(c);
     run_free_jobs(c);
+    story_tick();  // a story change at a calm moment
     // start at a step: Play from Link once the editor's view is back (after the warp), half a second calm
     if (g_play_after > 0) {
         if (g_playing) g_play_after = 0;

@@ -7,7 +7,8 @@
 #include <string>
 struct Cpu;
 namespace story_enemy_ownership {
-enum class Kind:uint32_t { ChuChu,Bokoblin,Moblin,Keese };
+enum class Kind:uint32_t { ChuChu,Bokoblin,Moblin,Keese,Miniblin };
+inline constexpr unsigned kKindCount=5;
 struct Collider {uint32_t object,stts,helper;};
 struct Descriptor {uint16_t profile,native_profile;uint32_t bytes;const Collider* colliders;size_t collider_count;};
 const Descriptor& descriptor(Kind);
@@ -26,6 +27,8 @@ size_t checkpoint();void rollback(size_t) noexcept;
 // World editor: a declaration's spec changed (or its copy moved in place): its fingerprint follows, and
 // its record keeps its state (active, pending, retired) with the new fingerprint.
 bool editor_refingerprint(Token,const Fingerprint&);
+// World editor: a declaration's variant changed while no copy of it exists: its parameters follow.
+bool editor_reparameter(Token,uint32_t parameters);
 enum class BindingState { Uninitialized,Fresh,Queued,Active,Retired,Quarantined };
 struct Binding {BindingState state=BindingState::Uninitialized;uint32_t pid=0,actor=0,epoch=0;};
 bool binding_state(Token,Binding&);

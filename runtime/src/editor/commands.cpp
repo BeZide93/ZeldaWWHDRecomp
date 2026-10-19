@@ -20,8 +20,10 @@
 #include "commands.h"
 
 
+#include "../mods/story_items_core.h"
 #include "../mods/story_mail_book.h"
 #include "../mods/story_manifest.h"
+#include "../mods/story_reload.h"
 
 namespace editor {
 namespace {
@@ -33,9 +35,14 @@ const std::vector<CommandInfo> kCommands = {
     {"help", "The command list with each command's parameters, or one command.", {{"command", "string", "a command name"}}},
     {"list_mods", "The active mods the editor can open (each with placed actors, models, scenes or quests).", {}},
     {"open_mod", "Opens a mod: later commands without \"mod\" act on it.", {{"mod", "string", "the mod's id", true}}},
+    {"new_mod", "Creates a new, empty mod (a package of its own in the mod manager's mods folder), turns it on in the current mod profile and opens it. Refused when a mod with that id exists; other mods are not touched. Not an undo step: remove a mod you don't want in Settings > Mods (turn it off, then Remove).",
+     {{"id", "string", "the new mod's id: up to 64 of a-z, 0-9, '-', '_' and '.' (not starting with '.')", true}, {"name", "string", "the name players see (up to 128 characters)", true},
+      {"author", "string", "who made it"}, {"description", "string", "one or two sentences about it"},
+      {"confirm", "boolean", "must be true: a new package folder is written and the mod is turned on", true}},
+     false, true},
     {"list_actors", "The open mod's placed actors (game actors and mod models).", {{"mod", "string", "another mod than the open one"}}},
     {"get_actor", "One placed actor as the manifest declares it.", {{"id", "string", "the actor's id", true}, {"mod", "string", ""}}},
-    {"set_actor", "Sets one property of a placed actor (null removes it): position, rotation, scale, model, lines, collision, behaviour, buoyancy, drift, anchor, grapple_points, distant, shoreline, chart_marker, arrival, attention, animation, flag, stage, room, when, then, talks, look_at, path, parameters, defeated_flag, broken_flag, drops, native_drops, combat, carry, switch_flag, switch, texture. when: {quest, step, quests: [{quest, step}] (all must hold), item, time, flag, not_flag (a flag id)}. talks: up to 8 [{when?, lines, then?}], the first that matches is said (one without when last; not with lines or then).",
+    {"set_actor", "Sets one property of a placed actor (null removes it): position, rotation, scale, model, lines, collision, behaviour, buoyancy, drift, anchor, grapple_points, distant, shoreline, chart_marker, arrival, attention, animation, flag, stage, room, when, then, talks, look_at, path, parameters, defeated_flag, broken_flag, drops, native_drops, combat, carry, switch_flag, switch, texture, variant (a game object's). when: {quest, step, quests: [{quest, step}] (all must hold), item, time, flag, not_flag (a flag id)}. talks: up to 8 [{when?, lines, then?}], the first that matches is said (one without when last; not with lines or then). A chest's parameters: {item: rupee_green (1), rupee_blue (5), rupee_yellow (10), rupee_red (20), rupee_purple (50), rupee_orange (100, the default), rupee_silver (200), heart_piece, heart_container, or item:<id> (one of the mod's items; with hold_up Link holds its model up)}.",
      {{"id", "string", "the actor's id", true}, {"property", "string", "the manifest field", true}, {"value", "any", "the new value; null removes the field", true}, {"mod", "string", ""}},
      true},
     {"move_actor", "Moves a placed actor.", {{"id", "string", "", true}, {"position", "point", "{x, y, z} in world units", true}, {"mod", "string", ""}}, true},
@@ -67,20 +74,44 @@ const std::vector<CommandInfo> kCommands = {
     {"fly_camera", "The free camera: Link stays where he is and gets no input; fly with the mouse, WASD, Q/E, Shift (faster), or the controller's sticks and shoulder buttons.",
      {{"on", "boolean", "", true}, {"place_link", "boolean", "when turning it off: Link moves to the camera's position"}}},
     {"test_mode", "Test mode: in-game saves go to a separate test save, and the test commands are allowed.", {{"on", "boolean", "", true}}},
-    {"reset_quest", "Test mode: erases the open mod's quest progress and flags from the loaded Quest Log (never another mod's).", {{"mod", "string", ""}, {"confirm", "boolean", "must be true", true}}, false, true},
+    {"reset_quest", "Test mode: erases the open mod's story progress from the loaded Quest Log: its quests, flags, letters, the charts and items Link got from it (never another mod's, never the game's own).", {{"mod", "string", ""}, {"confirm", "boolean", "must be true", true}}, false, true},
     {"save_state", "Test mode: saves a test state (the game's progress, Link's place and the open mod's flags).", {{"slot", "integer", "1..3", true}, {"kind", "string", "portable (default) or full"}}},
     {"load_state", "Test mode: loads a test state (the game's current progress is replaced).",
      {{"slot", "integer", "1..3", true}, {"kind", "string", "portable (default) or full"}, {"confirm", "boolean", "must be true: the current progress is replaced", true}}, false, true},
     {"command_log", "The last commands with their parameters and results.", {{"count", "integer", "how many (default 20)"}}},
     // building new content
-    {"list_actor_types", "The kinds of actor add_actor places, and which appear without a restart.", {}},
+    {"list_actor_types", "The kinds of actor add_actor places, and which appear without a restart; a kind's variants are the choices of its option (who a resident is).", {}},
     {"add_actor", "Places a new actor of the open mod at Link, at the fly camera or at a position (snapped to the ground).",
-     {{"type", "string", "a list_actor_types type: sign, resident, chest, pot, barrel, crate, switch, door, chuchu, bokoblin, moblin, keese, model, model_enemy, model_carry", true},
+     {{"type", "string", "a list_actor_types type: sign, resident, chest, pot, barrel, crate, switch, door, chuchu, bokoblin, moblin, keese, miniblin, model, model_enemy, model_carry; or a game object \"game:<id>\" (list_game_objects)", true},
       {"id", "string", "the new id (default: from the type)"}, {"at", "string", "link (default), camera or position"},
       {"position", "point", "with at = position"}, {"stage", "string", "with at = position (default: Link's)"}, {"room", "integer", "with at = position (default: Link's or the sea square's)"},
       {"angle", "number", "heading in degrees (default: facing like Link or the camera)"}, {"snap", "boolean", "onto the ground below (default true)"},
-      {"model", "string", "the model for model types"}, {"options", "object", "resident (uo2, um1, ym1), switch (a door's switch id), lines"}, {"mod", "string", ""}},
+      {"model", "string", "the model for model types"}, {"options", "object", "resident (who: a list_actor_types variant such as uo2, um1, sa2 or the seated ym1), variant (an enemy's: chuchu green, red, blue or yellow; bokoblin stick, shield or machete), switch (a door's switch id), lines; variant also for a game object (list_game_objects)"}, {"mod", "string", ""}},
      true},
+    {"list_game_objects", "The game's own objects a mod places by reference (add_actor type \"game:<id>\"), by category, with their variants, turn and scale limits and whether the player's game files have them.",
+     {{"category", "string", "only this category"}, {"query", "string", "only those whose id, label or description contains this"}}},
+    // ---- an actor's route (commands_route.cpp): a placed resident who walks (uo1, uo2, uo3, um1, um2) or a skinned model
+    {"add_route_point", "Adds a point to an actor's route (its first point starts the route) at Link, the fly camera or a position, snapped to the ground. A resident starts at its position and walks to its points with its own walk; a model's route lists every point, its position first.",
+     {{"id", "string", "the actor", true}, {"at", "string", "link (default), camera or position"}, {"position", "point", "with at = position"},
+      {"after", "integer", "insert after this point number (0: first; default: at the end)"}, {"snap", "boolean", "onto the ground (default true)"}, {"mod", "string", ""}},
+     true},
+    {"move_route_point", "Moves one point of an actor's route.",
+     {{"id", "string", "", true}, {"point", "integer", "the point number (1 = the first after a resident's position)", true}, {"position", "point", "where to"},
+      {"at", "string", "link or camera instead of position"}, {"snap", "boolean", "with at: onto the ground (default true)"}, {"mod", "string", ""}},
+     true},
+    {"remove_route_point", "Removes one point of an actor's route (the route goes when too few points are left).",
+     {{"id", "string", "", true}, {"point", "integer", "the point number", true}, {"mod", "string", ""}}, true},
+    {"reorder_route_point", "Moves a route point to another place in the order.",
+     {{"id", "string", "", true}, {"point", "integer", "the point number", true}, {"to", "integer", "its new number", true}, {"mod", "string", ""}}, true},
+    {"set_route", "Sets an actor's route settings: speed (game units per second; a resident: 0.5 to 2 times its own pace, null for its own), mode (once, loop or back_and_forth), pauses (short strolling pauses), and for a model its walk and idle clips.",
+     {{"id", "string", "", true}, {"speed", "number|null", "units per second"}, {"mode", "string", "once, loop or back_and_forth"}, {"pauses", "boolean", "short strolling pauses on the way"},
+      {"walk", "string|null", "a model's walk clip (default walk)"}, {"idle", "string|null", "a model's idle clip (default idle)"}, {"mod", "string", ""}},
+     true},
+    {"remove_route", "Removes an actor's route: it stands where it is placed.", {{"id", "string", "", true}, {"mod", "string", ""}}, true},
+    {"check_route", "Checks the ground under each segment of an actor's route (the game's collision): no ground, a drop or a step too high (a wall) marks it.",
+     {{"id", "string", "", true}, {"mod", "string", ""}}},
+    {"route_status", "A walking resident's route in the game: whether its copy follows it, and walking, skipped a blocked point, stopped (blocked or off its ground) or finished.",
+     {{"id", "string", "", true}, {"mod", "string", ""}}},
     {"remove_actor", "Removes a placed actor (an undo step).", {{"id", "string", "", true}, {"confirm", "boolean", "must be true", true}, {"mod", "string", ""}}, true, true},
     {"duplicate_actor", "Copies a placed actor next to it under a new id, with flags of its own.",
      {{"id", "string", "", true}, {"new_id", "string", "default: from the id"}, {"offset", "point", "default {x: 100, y: 0, z: 0}"}, {"mod", "string", ""}}, true},
@@ -109,8 +140,8 @@ const std::vector<CommandInfo> kCommands = {
     {"pick", "The first ground a ray meets (the game's collision), for placing by clicking into the picture.",
      {{"origin", "point", "where the ray starts", true}, {"direction", "point", "its direction", true}, {"range", "number", "default 20000"}}},
     {"ground", "The ground height below a point (the game's collision).", {{"position", "point", "", true}}},
-    {"set_then", "Sets what happens after an actor's dialogue: give / take an item, a quest step, finish a quest (quest_done), a flag, a scene.",
-     {{"id", "string", "", true}, {"actions", "array", "[{action: give|take, id: item:<id>, count}, {action: quest_step, id, step}, {action: quest_done, id}, {action: flag, id, value}, {action: scene, id}]", true}, {"mod", "string", ""}},
+    {"set_then", "Sets what happens after an actor's dialogue: give / take an item, give a chart (once; it shows in the MAP screen's chart list as a letter's chart does), a quest step, finish a quest (quest_done), a flag, a scene. The same actions work in talks' then and a scene's end step.",
+     {{"id", "string", "", true}, {"actions", "array", "[{action: give|take, id: item:<id>, count}, {action: give, id: chart:<id>}, {action: quest_step, id, step}, {action: quest_done, id}, {action: flag, id, value}, {action: scene, id}]", true}, {"mod", "string", ""}},
      true},
     {"set_drops", "Sets what an enemy or prop drops: up to eight of the mod's items.", {{"id", "string", "", true}, {"drops", "array", "[{item: item:<id>, quantity}]", true}, {"mod", "string", ""}}, true},
     {"preview_dialogue", "Shows an actor's dialogue (or given lines) in the game's own message box; close hides it.",
@@ -119,6 +150,7 @@ const std::vector<CommandInfo> kCommands = {
     {"import_model", "Copies a .glb file into the open mod's models folder, adds it to the package and prepares it for the game.",
      {{"file", "string", "the .glb file", true}, {"id", "string", "the model's id (default: the file name)"}, {"confirm", "boolean", "replace a different file of the same name"}, {"mod", "string", ""}},
      true},
+    {"model_clips", "A model's animation clips (for a route's walk and idle clips).", {{"model", "string", "the model's id", true}, {"mod", "string", ""}}},
     {"check_package", "Every problem of the open mod's package, each with the actor, model, scene or quest it is about.", {{"mod", "string", ""}}},
     {"export_package", "Checks the open mod and writes its package (manifest and its own files) into a new or empty folder.",
      {{"path", "string", "the folder", true}, {"confirm", "boolean", "must be true", true}, {"mod", "string", ""}}, false, true},
@@ -162,10 +194,21 @@ const std::vector<CommandInfo> kCommands = {
     {"start_at_step", "Test mode (turned on first): starts the quest at a step. Sets this mod's quest step and the mod flags and items the earlier steps hand out, warps there and plays from Link. Never sets the game's own event or save bits.",
      {{"quest", "string", "", true}, {"step", "integer", "", true}, {"warp", "string", "next (in front of the actor that moves it on, the default), place or none"},
       {"play", "boolean", "play from Link afterwards (default true)"}, {"mod", "string", ""}}},
+    {"list_villagers", "The game's own villagers the NPC catalogue knows that are loaded now, each with its catalogue id (for a quest step's npc talk), name and place. Read-only.", {}},
+    {"pick_villager", "The game villager a ray meets first (for clicking into the picture): its catalogue id, name and place.",
+     {{"origin", "point", "where the ray starts", true}, {"direction", "point", "its direction", true}, {"range", "number", "default 20000"}}},
+    {"add_villager_talk", "Gives one of the game's villagers a quest talk in the open mod (one undo step): a new quest (title) with this talk as its first step, a new last step of a quest, or a step's talk (step). The villager's own dialogue, quests and save flags are not changed.",
+     {{"who", "string", "the villager's catalogue id (list_villagers)", true}, {"lines", "any", "what the villager says: a string or up to three strings", true},
+      {"quest", "string", "an existing quest of the open mod (without it: a new quest)"}, {"step", "integer", "with quest: that step gets the talk (without it: a new last step)"},
+      {"title", "string", "a new quest's title"}, {"id", "string", "a new quest's id (default: from the title)"}, {"text", "string", "a new step's text (default: Talk to <name>.)"},
+      {"mod", "string", ""}},
+     true},
     {"quest_state", "The step each of the open mod's quests is at in the loaded game, as the status bar says it (\"Lighthouse quest: step 3 of 6\").", {{"mod", "string", ""}}},
     {"list_flags", "The open mod's flags (actors, switches, flag actions, props, enemies), who uses each, and their values in the loaded game.", {{"mod", "string", ""}}},
     {"set_flag", "Test mode: sets one of the open mod's flags in the loaded game (never a game flag).",
      {{"id", "string", "the flag's id", true}, {"value", "boolean", "", true}, {"mod", "string", ""}}},
+    {"advance_days", "Test mode: moves the game's calendar on by some days (as the clock passing midnight does), to test letters that wait (after_days).",
+     {{"days", "integer", "1..255", true}}},
     {"search", "Everything of the open mod whose id or text contains the text: actors, quests and steps, scenes, items, flags.", {{"text", "string", "", true}, {"mod", "string", ""}}},
     {"copy", "Copies actors, quest steps, scenes or scene steps for paste.",
      {{"ids", "array", "actor ids"}, {"quest", "string", "with steps: the quest"}, {"steps", "array", "step numbers of that quest (or of the scene)"},
@@ -234,6 +277,49 @@ const std::vector<CommandInfo> kCommands = {
     {"skip_scene", "Skips the scene that plays (as Plus / Start does): its end actions don't run.", {}},
     {"stop_scene", "Stops the scene preview at once and goes back to the editor's view.", {}},
     {"scene_state", "Whether a scene preview plays, which scene and step.", {}},
+    // ---- letters on their own, treasure charts, items (commands_story.cpp)
+    {"list_letters", "The open mod's letters on their own (not a quest's letter): id, sender, text, encloses, when, after_days. The Rito postbox hands each out while the mod is on; once read, Link has what it encloses.",
+     {{"mod", "string", ""}}},
+    {"add_letter", "Adds a letter on its own: no quest, no notebook entry. The Rito postbox hands it out while the mod is on (once Link has the Delivery Bag), or only once its when holds and after_days days have passed; once it is read, Link gets what it encloses, once. Up to 8 per mod; for a letter that starts a quest use set_quest letter.",
+     {{"id", "string", "1..32 of a-z 0-9 - _ . (default: letter, letter-2...); not a quest letter's id"}, {"sender", "string", "one line, up to 48 bytes: the signature", true},
+      {"text", "string", "up to 1200 bytes; \\n breaks a line (keep to about ten lines of 40 characters)", true},
+      {"encloses", "array", "[\"chart:<id>\", \"item:<id>\"]: the mod's charts and items it gives"},
+      {"when", "object", "send it only once all hold: {quest, step} (the quest reached the step or went past it), {quest, done: true}, quests: [{quest, step} or {quest, done: true}], flag, not_flag (the mod's flags). E.g. {quest: lighthouse, done: true}"},
+      {"after_days", "integer", "1..255: game days (the game's clock passing midnight) after when first holds, or after the mod is on without when"},
+      {"mod", "string", ""}},
+     true},
+    {"set_letter", "Sets fields of a letter on its own: sender, text, encloses, when, after_days (null removes encloses, when or after_days).",
+     {{"id", "string", "the letter's id", true}, {"fields", "object", "{field: value}", true}, {"mod", "string", ""}}, true},
+    {"remove_letter", "Removes a letter on its own (saves that got it keep it).", {{"id", "string", "", true}, {"confirm", "boolean", "must be true", true}, {"mod", "string", ""}}, true, true},
+    {"list_charts", "The open mod's treasure charts: name, description, place (the X), what the chest holds, the sea square, and what gives, finds or salvages each (used_by).",
+     {{"mod", "string", ""}}},
+    {"add_chart", "Adds a treasure chart: while Link owns it the MAP screen's chart list shows it with an X at its place; salvaging there opens its chest. Up to 8 per mod. A letter (encloses chart:<id>), a resident's talk (then give), a quest reward or the mod's code gives it; a quest step's find: chart:<id> or a scene's salvage trigger uses it.",
+     {{"id", "string", "1..32 of a-z 0-9 - _ . (default: from the name)"}, {"name", "string", "up to 40 bytes: the chart list's caption", true},
+      {"description", "string", "up to 200 bytes"}, {"place", "object", "{x, z}: the X on the Great Sea (world units)"},
+      {"at", "string", "link or camera: the X where Link or the fly camera is at sea (instead of place)"},
+      {"item", "string", "what its chest holds: item:<id> (one of the mod's items) or game:purple_rupee, game:orange_rupee, game:silver_rupee, game:heart_piece, game:heart_container (default: an orange rupee)"},
+      {"mod", "string", ""}},
+     true},
+    {"set_chart", "Sets fields of a chart: name, description, place {x, z}, item (null removes description or item); at = link or camera moves the X there.",
+     {{"id", "string", "the chart's id", true}, {"fields", "object", "{field: value}"}, {"at", "string", "link or camera"}, {"mod", "string", ""}}, true},
+    {"remove_chart", "Removes a chart; refused while a letter, quest, talk or scene names it (the error lists them).",
+     {{"id", "string", "", true}, {"confirm", "boolean", "must be true", true}, {"mod", "string", ""}}, true, true},
+    {"list_items", "The open mod's items (kept in the Delivery Bag's extra pages) and what gives, takes, drops or needs each (used_by).", {{"mod", "string", ""}}},
+    {"add_item", "Adds an item: when Link gets one, its name and description show with the get jingle; it is kept in the Delivery Bag. Up to 32 per mod. Actors give or take it (set_then), enemies and props drop it (set_drops), a letter or chart can hold it, an actor can need it (when item).",
+     {{"id", "string", "1..32 of a-z 0-9 - _ . (default: from the name)"}, {"name", "string", "up to 40 bytes", true},
+      {"description", "string", "up to 200 bytes, \\n allowed: its Info box", true}, {"icon", "string", "a PNG in the package (its path inside it, e.g. icons/key.png)"},
+      {"icon_file", "string", "a PNG file copied into the package's icons folder instead (best 128 x 128 with transparency; up to 2048 x 2048)"},
+      {"stack", "integer", "how many Link can carry, 1..254 (default 1)"},
+      {"use", "object", "what using it on X, Y or R does: {action: show} (its Info box), {action: open_notebook}, {action: quest_step, quest, step}, {action: event} (the mod's code is told); without it, it can't go on a button"},
+      {"held_model", "string", "a static model of the mod Link holds in his hand when using it (needs use, or hold_up)"},
+      {"held_frames", "integer", "how long he holds it when using it, 1..300 frames at 30 a second (default 90; needs held_model)"},
+      {"hold_up", "boolean", "true: getting the item (a give, a letter, a chest, a quest reward) plays the game's item-get pose: Link holds held_model up over his head with the get message (\"You got <name>!\" and the description); needs held_model"},
+      {"mod", "string", ""}},
+     true},
+    {"set_item", "Sets fields of an item: name, description, icon, stack, use, held_model, held_frames, hold_up (null removes the optional ones); icon_file copies a new PNG in.",
+     {{"id", "string", "the item's id", true}, {"fields", "object", "{field: value}"}, {"icon_file", "string", "a PNG file to copy in as its icon"}, {"mod", "string", ""}}, true},
+    {"remove_item", "Removes an item; refused while an actor, drop, letter, chart, quest or scene names it (the error lists them).",
+     {{"id", "string", "", true}, {"confirm", "boolean", "must be true", true}, {"mod", "string", ""}}, true, true},
 };
 
 // ---------------------------------------------------------------- JSON helpers
@@ -254,6 +340,8 @@ bool type_ok(const std::string& type, const Value& v) {
     if (type == "object|null") return v.type == Value::Object || v.type == Value::Null;
     if (type == "array") return v.type == Value::Array;
     if (type == "array|null") return v.type == Value::Array || v.type == Value::Null;
+    if (type == "number|null") return v.type == Value::Number || v.type == Value::Null;
+    if (type == "string|null") return v.type == Value::String || v.type == Value::Null;
     return false;
 }
 bool check_params(const CommandInfo& c, const Value& p, std::string& why) {
@@ -439,6 +527,76 @@ std::string pretty(const Value& v) {
     return out + '\n';
 }
 
+// ---------------------------------------------------------------- new mods
+bool package_id_valid(const std::string& id) {
+    return !id.empty() && id.size() <= 64 && id[0] != '.' && std::all_of(id.begin(), id.end(), [](unsigned char c) {
+        return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '-' || c == '.';
+    });
+}
+
+bool new_package_manifest(const Value& params, Value& out, std::string& why) {
+    const std::string id = params.get("id").string(), name = params.get("name").string();
+    const std::string author = params.get("author").string(), description = params.get("description").string();
+    if (!package_id_valid(id))
+        return why = "the id \"" + id + "\" is not a valid mod id: use 1 to 64 of a-z, 0-9, '-', '_' and '.' (not starting with '.')", false;
+    if (id == story_notebook::kNotebookPackage) return why = "the id \"" + id + "\" belongs to the Story Notebook", false;
+    auto has_nul = [](const std::string& s) { return s.find('\0') != std::string::npos; };
+    if (name.find_first_not_of(" \t") == std::string::npos) return why = "the new mod needs a name", false;
+    if (name.size() > 128 || has_nul(name)) return why = "the name is longer than 128 characters", false;
+    if (author.size() > 256 || has_nul(author)) return why = "the author is longer than 256 characters", false;
+    if (description.size() > 8192 || has_nul(description)) return why = "the description is longer than 8192 characters", false;
+    Value m;
+    m["format_version"] = 1;
+    m["id"] = id;
+    m["name"] = name;
+    m["version"] = "0.1.0";
+    if (!author.empty()) m["author"] = author;
+    if (!description.empty()) m["description"] = description;
+    m["game_id"] = "wwhd";
+    m["minimum_manager_version"] = "1.5.0";
+    m["kind"] = "content";
+    // the story content (actors, quests, letters...) runs on the Story Notebook package
+    Value dep;
+    dep["id"] = story_notebook::kNotebookPackage;
+    dep["minimum_version"] = "0.0.0";
+    m["dependencies"].type = Value::Array;
+    m["dependencies"].array.push_back(dep);
+    m["actors"].type = Value::Array;  // a story section, empty: the editor fills it
+    out = m;
+    return true;
+}
+
+bool write_package_folder(const std::string& parent, const Value& manifest, std::string& dir, std::string& why) {
+    const std::string id = manifest.get("id").string();
+    if (!package_id_valid(id)) return why = "the manifest has no valid id", false;
+    std::error_code ec;
+    const fs::path root(parent), target = root / id;
+    if (parent.empty() || !fs::is_directory(root, ec) || fs::is_symlink(root, ec)) return why = "the mods folder is not there", false;
+    if (fs::exists(fs::symlink_status(target, ec))) return why = "a folder \"" + id + "\" exists in the mods folder already", false;
+    // the folder first: creating it is the claim (false when someone else made it in the meantime)
+    if (!fs::create_directory(target, ec) || ec) return why = "cannot create the folder \"" + id + "\" in the mods folder", false;
+    const fs::path tmp = target / "manifest.json.editor-tmp", file = target / "manifest.json";
+    bool written = false;
+    {
+        std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
+        f << pretty(manifest);
+        f.close();
+        written = f.good();
+    }
+    if (written) {
+        fs::rename(tmp, file, ec);
+        written = !ec;
+    }
+    if (!written) {  // only what this call made: the file and the (still otherwise empty) folder
+        fs::remove(tmp, ec);
+        fs::remove(file, ec);
+        fs::remove(target, ec);
+        return why = "cannot write the new package's manifest.json", false;
+    }
+    dir = target.string();
+    return true;
+}
+
 // ---------------------------------------------------------------- validation
 bool validate_package(const std::string& mod, const Value& manifest, const std::vector<std::pair<std::string, Value>>& all,
                       std::string& why) {
@@ -448,9 +606,12 @@ bool validate_package(const std::string& mod, const Value& manifest, const std::
     std::vector<story_notebook::ManifestScene> scenes;
     std::vector<story_notebook::ManifestQuest> quests;
     std::vector<story_notebook::ManifestItem> items;
+    std::vector<story_notebook::ManifestChart> charts;
+    std::vector<story_notebook::ManifestLetter> letters;
     if (!story_notebook::parse_models(manifest, models, why) || !story_notebook::parse_actors(manifest, actors, why) ||
         !story_notebook::parse_scenes(manifest, scenes, why) || !story_notebook::parse_items(manifest, items, why) ||
-        !story_notebook::parse_quests(manifest, quests, why))
+        !story_notebook::parse_quests(manifest, quests, why) || !story_notebook::parse_charts(manifest, charts, why) ||
+        !story_notebook::parse_letters(manifest, letters, why))
         return false;
     std::vector<std::pair<std::string, Value>> world;
     for (const auto& [id, m] : all)
@@ -573,16 +734,20 @@ std::vector<Record> mod_records(const std::string& mod, const Value& manifest) {
     for (const auto& q : manifest.get("quests").array) {
         const uint16_t key = letter_key(mod, q.get("id").string());  // story_notebook_list.h quest_key
         for (uint8_t kind : {kRecordQuest, kRecordTracked, kRecordCarried, kRecordQuestFlags, kRecordSailLine, kRecordQuestOrder,
-                             kRecordQuestActionReward}) add(kind, key);
+                             kRecordQuestActionReward, story_items::kRecordQuestRewardItem}) add(kind, key);
         if (q.get("letter").get("id").type == Value::String) {
             add(kRecordLetter, letter_key(mod, q.get("letter").get("id").text));
             add(kRecordLetterEnclosures, letter_key(mod, q.get("letter").get("id").text));
         }
     }
-    for (const auto& l : manifest.get("letters").array) {
-        add(kRecordLetter, letter_key(mod, l.get("id").string()));
-        add(kRecordLetterEnclosures, letter_key(mod, l.get("id").string()));
-    }
+    for (const auto& l : manifest.get("letters").array)
+        for (uint8_t kind : {kRecordLetter, kRecordLetterEnclosures, kRecordLetterDayLow, kRecordLetterDayHigh}) add(kind, letter_key(mod, l.get("id").string()));
+    // the mod's charts (owned, opened, finished: story_chart.h) and items (how many, their place in the bag,
+    // the game number lent to them, their buttons: story_items_core.h)
+    for (const auto& c : manifest.get("charts").array) add(kRecordMarker, letter_key(mod, c.get("id").string()));
+    for (const auto& it : manifest.get("items").array)
+        for (uint8_t kind : {story_items::kRecordItemCount, story_items::kRecordItemPlace, story_items::kRecordItemNumber, story_items::kRecordItemButtons})
+            add(kind, story_items::item_key(mod, it.get("id").string()));
     return out;
 }
 
@@ -761,6 +926,14 @@ std::string Session::run_json(const std::string& request) {
     return mods::json::dump(out);
 }
 
+namespace {
+// a result's note: one more sentence after what it says already
+void add_note(Value& result, const std::string& text) {
+    const std::string had = result.get("note").type == Value::String ? result.get("note").text : std::string();
+    result["note"] = had.empty() ? text : had + " " + text;
+}
+}  // namespace
+
 void Session::apply_live(const Package& p, const Value& before, Value& result) {
     std::vector<std::string> changed;
     for (const auto& a : p.manifest.get("actors").array) {
@@ -841,7 +1014,8 @@ bool Session::change(Package& p, const std::string& label, const std::function<b
     auto all = all_manifests();
     if (!validate_package(p.mod, next, all, why) || !model_files(p.dir, next, why) || !world_placements(host_, p.mod, p.manifest, next, false, why)) return false;
     const bool actors_changed = !(next.get("actors") == p.manifest.get("actors")) || !(next.get("models") == p.manifest.get("models"));
-    const bool other_changed = !(next.get("scenes") == p.manifest.get("scenes")) || !(next.get("quests") == p.manifest.get("quests"));
+    const bool story_changed = story_reload::story_changed(p.manifest, next);
+    const bool scenes_changed = !(next.get("scenes") == p.manifest.get("scenes"));  // read when the game starts
     undo_.push_back({p.mod, label, p.manifest, next});
     if (undo_.size() > kUndoSize) undo_.erase(undo_.begin());
     redo_.clear();
@@ -849,11 +1023,24 @@ bool Session::change(Package& p, const std::string& label, const std::function<b
     p.manifest = std::move(next);
     result["changed"] = true;
     if (actors_changed) apply_live(p, before, result);
-    if (other_changed) {
+    if (story_changed) apply_story(p, result);
+    if (scenes_changed) {
         result["live"] = false;
-        result["note"] = "Scene and quest changes take effect when the game starts again (save the package first).";
+        add_note(result, "Scene changes take effect when the game starts again (save the package first).");
     }
     return true;
+}
+
+void Session::apply_story(const Package& p, Value& result) {
+    std::string note, why;
+    const bool live = host_ && host_->apply_story(p.mod, p.name, p.dir, p.started, p.manifest, note, why);
+    result["story_live"] = live;
+    if (!live) {
+        result["live"] = false;
+        add_note(result, "Quest, letter, chart and item changes take effect when the game starts again (save the package first)" +
+                             (why.empty() ? std::string(".") : ": " + why + "."));
+    } else if (!note.empty())
+        add_note(result, note);
 }
 
 bool Session::restore(const std::string& mod, const Value& manifest, Value& result, std::string& why) {
@@ -861,10 +1048,12 @@ bool Session::restore(const std::string& mod, const Value& manifest, Value& resu
     if (!p) return why = "the mod of this step is gone", false;
     if (!world_placements(host_, mod, p->manifest, manifest, false, why)) return false;
     const bool actors_changed = !(manifest.get("actors") == p->manifest.get("actors")) || !(manifest.get("models") == p->manifest.get("models"));
+    const bool story_changed = story_reload::story_changed(p->manifest, manifest);
     const Value before = p->manifest;
     p->manifest = manifest;
     result["mod"] = mod;
     if (actors_changed) apply_live(*p, before, result);
+    if (story_changed) apply_story(*p, result);  // undo and redo: the same live update
     return true;
 }
 
@@ -932,7 +1121,7 @@ Value Session::dispatch(const std::string& command, const Value& p, std::string&
             v["name"] = pk.name;
             v["open"] = pk.mod == open_;
             v["dirty"] = !(pk.manifest == pk.saved);
-            for (const char* k : {"actors", "models", "scenes", "quests"}) v[k] = int(pk.manifest.get(k).array.size());
+            for (const char* k : {"actors", "models", "scenes", "quests", "letters", "charts", "items"}) v[k] = int(pk.manifest.get(k).array.size());
             r.array.push_back(v);
         }
         ok = true;
@@ -942,6 +1131,26 @@ Value Session::dispatch(const std::string& command, const Value& p, std::string&
         if (!find(text(p, "mod"))) return why = "no active mod \"" + text(p, "mod") + "\"", r;
         open_ = text(p, "mod");
         r["mod"] = open_;
+        ok = true;
+        return r;
+    }
+    if (command == "new_mod") {
+        Value m;
+        if (!new_package_manifest(p, m, why)) return r;
+        const std::string id = m.get("id").text;
+        if (find(id)) return why = "a mod with the id \"" + id + "\" exists already", r;
+        std::string problem;
+        if (!validate_package(id, m, all_manifests(), problem)) return why = "the new manifest is not valid: " + problem, r;
+        if (!host_) return why = "the game is not running", r;
+        std::string dir;
+        if (!host_->create_package(m, dir, why)) return r;
+        add_package(id, m.get("name").text, dir, m);
+        open_ = id;
+        r["mod"] = id;
+        r["name"] = m.get("name");
+        r["dir"] = dir;
+        r["open"] = true;
+        r["note"] = "Created " + id + ", turned on in the current mod profile and opened. Add actors, quests or story items, then save.";
         ok = true;
         return r;
     }
@@ -1007,7 +1216,7 @@ Value Session::dispatch(const std::string& command, const Value& p, std::string&
         static const std::set<std::string> allowed = {"actor", "kind", "model", "animation", "look_at", "path", "collision", "attention",
                                                       "stage", "room", "position", "rotation", "scale", "params", "parameters", "flag",
                                                       "when", "lines", "then", "talks", "defeated_flag", "broken_flag", "drops",
-                                                      "native_drops", "combat", "carry", "switch_flag", "switch", "texture", "behaviour", "buoyancy", "drift", "anchor", "grapple_points", "distant", "shoreline", "chart_marker", "arrival"};
+                                                      "native_drops", "combat", "carry", "switch_flag", "switch", "texture", "variant", "behaviour", "buoyancy", "drift", "anchor", "grapple_points", "distant", "shoreline", "chart_marker", "arrival"};
         const std::string property = text(p, "property");
         if (!allowed.contains(property)) return why = "\"" + property + "\" is not an actor property the editor sets", r;
         return actor_edit("Set " + property + " of " + text(p, "id"), [&](Value& a, std::string&) {
@@ -1284,7 +1493,13 @@ Value Session::dispatch(const std::string& command, const Value& p, std::string&
     if (handled) return r;
     r = dispatch_scene(command, p, why, ok, handled);
     if (handled) return r;
+    r = dispatch_game_objects(command, p, why, ok, handled);
+    if (handled) return r;
     r = dispatch_quest(command, p, why, ok, handled);
+    if (handled) return r;
+    r = dispatch_story(command, p, why, ok, handled);
+    if (handled) return r;
+    r = dispatch_route(command, p, why, ok, handled);
     if (handled) return r;
     why = "command \"" + command + "\" is not implemented";
     return r;

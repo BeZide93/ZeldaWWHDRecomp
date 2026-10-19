@@ -65,6 +65,8 @@ uint32_t move_speed_button() { return move_button; } void set_move_speed_button(
 static bool move_bar = true;
 bool move_speed_bar() { return move_bar; } void set_move_speed_bar(bool on) { move_bar = on; }
 
+static bool camera_items = false;
+bool camera_directed_items() { return camera_items; } void set_camera_directed_items(bool b) { camera_items=b; }
 bool direct_camera() { return state[0]; } void set_direct_camera(bool b) { state[0]=b; }
 bool mouse_camera() { return state[1]; } void set_mouse_camera(bool b) { state[1]=b; }
 bool first_person_wheel() { return state[2]; } void set_first_person_wheel(bool b) { state[2]=b; }

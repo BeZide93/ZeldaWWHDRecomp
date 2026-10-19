@@ -327,7 +327,10 @@ Value input_schema(const editor::CommandInfo& c) {
         } else if (p.type == "string" || p.type == "integer" || p.type == "number" || p.type == "boolean" || p.type == "object" ||
                    p.type == "array")
             v["type"] = p.type;
-        else
+        else if (p.type.size() > 5 && p.type.compare(p.type.size() - 5, 5, "|null") == 0) {
+            v["type"].type = Value::Array;  // the value, or null to remove it
+            v["type"].array = {Value(p.type.substr(0, p.type.size() - 5)), Value("null")};
+        } else
             v.type = Value::Object;  // any
         std::string help = p.help;
         if (p.type == "point" && help.empty()) help = "a point {x, y, z} in world units";
@@ -369,6 +372,8 @@ const std::vector<PathParam>& path_params() {
     static const std::vector<PathParam> v = {
         {"check_model", "file", false},
         {"import_model", "file", false},
+        {"add_item", "icon_file", false},
+        {"set_item", "icon_file", false},
         {"export_package", "path", true},
     };
     return v;

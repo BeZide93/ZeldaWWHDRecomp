@@ -1,5 +1,6 @@
 #include "../exception_report.h"
 #include "packages.h"
+#include "story_game_objects_package.h"
 #include "manager.h"
 #include "mods.h"
 #include "traversal.h"
@@ -28,6 +29,7 @@
 #include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <memory>
 #include <mutex>
 #include <set>
@@ -85,6 +87,8 @@ std::array<unsigned,3> version(const std::string& s) {
 }
 std::string string_field(const Value& v,const char* key,bool optional=false,size_t limit=8192){const auto& f=v.get(key);if(optional&&f.type==Value::Null)return {};require(f.type==Value::String&&f.text.size()<=limit&&f.text.find('\0')==std::string::npos,"Invalid field: "+std::string(key));return f.text;}
 using hash::sha256_file;
+// The manifest sections the story system reads (story_manifest.h, story_world_manifest.h)
+constexpr const char* kStorySections[]={"quests","charts","letters","items","models","actors","scenes"};
 // The Story Notebook package's "notebook" block: {"icon": png, "model": glb, "layout": json}. Only that
 // package has one. Its files are its own: a PNG icon (up to 1024 x 1024), a binary glTF model (up to
 // 8 MiB) and a layout description whose folder holds the page's art (up to 64 PNGs, 64 MiB decoded);
@@ -155,9 +159,11 @@ Manifest manifest(const fs::path& path){
     auto minimum=string_field(v,"minimum_manager_version",true,64);
     if(!minimum.empty()&&version(minimum)>version(kManagerVersion))m.problem="Requires mod manager "+minimum;
     bool world_declarations = false;
+    // The manifest's story sections (story_manifest.h, story_world_manifest.h): present, even as an empty list
+    const bool story_sections=std::any_of(std::begin(kStorySections),std::end(kStorySections),[&](const char* key){return v.get(key).type!=Value::Null;});
     // story quests (story_manifest.h): an NPC this port's catalogue doesn't know, or a newer catalogue
     // version, keeps the mod from being enabled with the reason, never a silent no-op
-    if(m.problem.empty()&&(v.get("quests").type!=Value::Null||v.get("npc_catalogue").type!=Value::Null||v.get("charts").type!=Value::Null||v.get("letters").type!=Value::Null||v.get("items").type!=Value::Null||v.get("models").type!=Value::Null||v.get("actors").type!=Value::Null||v.get("scenes").type!=Value::Null)){
+    if(m.problem.empty()&&(story_sections||v.get("npc_catalogue").type!=Value::Null)){
         std::vector<story_notebook::ManifestQuest> quests;std::vector<story_notebook::ManifestChart> charts;
         std::vector<story_notebook::ManifestActor> actors;std::vector<story_notebook::ManifestScene> scenes;
         std::vector<story_notebook::ManifestLetter> letters;std::vector<story_notebook::ManifestItem> items;std::string why;
@@ -165,6 +171,10 @@ Manifest manifest(const fs::path& path){
            !story_notebook::parse_items(v,items,why)||!story_notebook::parse_actors(v,actors,why)||!story_notebook::parse_scenes(v,scenes,why))m.problem="Story quests: "+why;
         else world_declarations = !quests.empty() || !charts.empty() || !letters.empty() ||
                                   !items.empty() || !actors.empty() || !scenes.empty();
+        // the game's own objects by reference: the package holds no game data (they load from the player's game files)
+        if(m.problem.empty()&&std::any_of(actors.begin(),actors.end(),[](const story_notebook::ManifestActor& a){return a.game_object();}))
+            if(const auto found=story_game_objects::game_data_file(path);!found.empty())
+                m.problem="Game objects: the package holds game data ("+found+"); game objects load from the player's own game files";
     }
     std::vector<story_notebook::ManifestModel> models;std::string model_error;
     require(story_notebook::parse_models(v,models,model_error),"Models: "+model_error);
@@ -209,18 +219,24 @@ Manifest manifest(const fs::path& path){
         m.graphics=std::make_shared<cemu::Pack>(cemu::parse(path/folder));
         auto schema=cemu::options(*m.graphics);if(v.get("options").type==Value::Null)v["options"]=schema;else require(v.get("options")==schema,"Cemu preset options do not match rules.txt");
     } else if(m.kind=="content") {
-        auto folder=string_field(v,"content_dir",false,512);
-        require(archive::relative_path(folder),"Invalid content directory");
-        auto checked=path;for(const auto& part:fs::path(folder)){checked/=part;require(!fs::is_symlink(checked),"Content paths may not use symlinks");}
-        m.files=content::index(path/folder, world_declarations && m.problem.empty());
+        // A content package that only declares story content (a chart and its letter, say) needs no
+        // content folder: without "content_dir" it replaces no game files.
+        const bool story_only=story_sections&&v.get("content_dir").type==Value::Null;
+        if(!story_only){
+            auto folder=string_field(v,"content_dir",false,512);
+            require(archive::relative_path(folder),"Invalid content directory");
+            auto checked=path;for(const auto& part:fs::path(folder)){checked/=part;require(!fs::is_symlink(checked),"Content paths may not use symlinks");}
+            m.files=content::index(path/folder, world_declarations && m.problem.empty());
+        }
     } else {
         const auto& settings=v.get("settings");require(settings.type==Value::Object&&!settings.object.empty(),"Settings mod has no settings");
         for(const auto& [id,b]:settings.object){require(manager::find(id)&&b.type==Value::Bool,"Unknown built-in setting: "+id);m.settings[id]=b.boolean;}
     }
     const auto& deps=v.get("dependencies");require(deps.type==Value::Null||deps.type==Value::Array,"Dependencies must be an array");
     for(const auto& dep:deps.array){Requirement r;r.id=string_field(dep,"id",false,80);r.version=string_field(dep,"minimum_version",true,64);if(r.version.empty())r.version="0.0.0";version(r.version);require(id_ok(r.id)||(r.id.starts_with("builtin:")&&manager::find(r.id.substr(8))),"Invalid dependency ID");m.dependencies.push_back(r);}
-    // every quest mod depends on the story system's required package (required.h), declared or not
-    if(m.id!=story_notebook::kNotebookPackage&&(v.get("quests").type!=Value::Null||v.get("charts").type!=Value::Null||v.get("models").type!=Value::Null||v.get("actors").type!=Value::Null||v.get("scenes").type!=Value::Null)&&
+    // every story mod depends on the story system's required package (required.h), declared or not:
+    // without it the story system stays off, and its letters, charts, items, quests and actors with it
+    if(m.id!=story_notebook::kNotebookPackage&&story_sections&&
        std::none_of(m.dependencies.begin(),m.dependencies.end(),[](const Requirement& r){return r.id==story_notebook::kNotebookPackage;}))
         m.dependencies.push_back({story_notebook::kNotebookPackage,"0.0.0"});
     const auto& conflicts=v.get("conflicts");require(conflicts.type==Value::Null||conflicts.type==Value::Array,"Conflicts must be an array");
@@ -274,11 +290,13 @@ Manifest manifest(const fs::path& path){
     if(m.kind=="native"||m.kind=="guest"||!m.setup_tools.empty())m.trust_fingerprint=package_fingerprint(path);
     if(m.trust_fingerprint.empty())m.trust_fingerprint=m.fingerprint;
     if(m.kind=="content") {
-        // Declarative world content uses the story service without carrying executable guest code.
-        // Keep the existing dependency restriction for all other content and dependencies.
-        const bool world_content=!v.get("models").array.empty()||!v.get("actors").array.empty()||!v.get("scenes").array.empty();
-        require(m.dependencies.empty()||(world_content&&std::all_of(m.dependencies.begin(),m.dependencies.end(),[](const Requirement& r){return r.id==story_notebook::kNotebookPackage;})),
-                "Content packages only support the Story Notebook dependency for actors or scenes");
+        // Content packages are switched on at startup, before any code package loads, so they can't wait
+        // for a dependency to load or be confirmed: they declare none. The one exception is the Story
+        // Notebook for story content (letters, charts, items, quests, models, actors, scenes): it carries
+        // no game files, and the story system checks itself that the notebook is there (without it the
+        // story content stays off).
+        require(m.dependencies.empty()||(story_sections&&std::all_of(m.dependencies.begin(),m.dependencies.end(),[](const Requirement& r){return r.id==story_notebook::kNotebookPackage;})),
+                "Content packages can only depend on the Story Notebook, and only for story content (letters, charts, items, quests, models, actors, scenes)");
     }
     return m;
 }
@@ -863,7 +881,8 @@ bool run_setup_tool(const std::string& id,const std::string& step_id,std::string
 }
 std::vector<View> list(){std::lock_guard guard(mutex);std::vector<View> out;for(const auto& [id,r]:records){const auto& m=r.manifest;View v;v.id=id;v.name=m.name;v.version=m.version;v.author=m.author;v.description=m.description;v.kind=m.kind;v.restart_required=m.kind=="content"||m.kind=="cemu"||m.kind=="guest";v.enabled=wanted(id);v.active=r.active;v.compatible=m.problem.empty();v.native_confirmed=confirmed(r);v.experimental=experimental(r);v.reason=m.problem.empty()?r.error:m.problem;v.status=r.status;v.game_source_warning=source_warning(m);if(m.graphics){auto diagnostics=cemu::runtime_status(id);if(!diagnostics.empty())v.status+=". "+diagnostics;}if(m.kind=="guest"){auto hud_error=guestmods::hud::store().error(id);if(!hud_error.empty())v.status+=". "+hud_error;}v.options=m.options;v.setup_tools=m.setup_tools;v.content_hashes=m.content_hashes;auto cfg=config(m);v.pending_restart=v.restart_required&&(v.enabled!=v.active||((m.graphics||m.kind=="guest")&&v.active&&!(r.startup_config==cfg)));if(m.graphics&&!m.graphics->shaders.empty()&&!cemu::vulkan()){v.active=false;v.compatible=false;v.reason="GLSL shader packs require Vulkan; choose it in Graphics and restart";}for(auto& o:v.options)o.value=cfg.get(o.id);for(const auto& dep:m.dependencies)v.dependencies.push_back(dep.id+">="+dep.version);v.conflicts=m.conflicts;if(m.graphics)for(const auto& other:enabled_set())if(other!=id){try{auto reason=graphics_conflict(id,other);if(!reason.empty())v.graphics_conflicts.push_back({other,records.at(other).manifest.name,reason});}catch(const std::exception& e){v.reason=e.what();}}out.push_back(std::move(v));}return out;}
 static bool content_name(std::string n){for(char& c:n)if(c>='A'&&c<='Z')c+='a'-'A';return n=="content";}
-bool install(const std::string& source,std::string& error,std::string* installed_id_out){return operation(error,[&]{
+// fresh: a new package only (install_new): refused when the ID is installed or its folder exists
+static bool install_package(const std::string& source,std::string& error,std::string* installed_id_out,bool fresh){return operation(error,[&]{
     auto nonce=std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());auto stage=root/(".stage-"+nonce),backup=root/(".backup-"+nonce);fs::path target;bool backed=false,moved=false;
     try{if(fs::is_regular_file(source)&&content::known_pack(fs::path(source).filename().string())){
         require(!fs::is_symlink(source)&&fs::file_size(source)<=128ull*1024*1024,"Invalid or oversized replacement pack");
@@ -878,9 +897,11 @@ bool install(const std::string& source,std::string& error,std::string* installed
         auto named=fs::path(source).lexically_normal();if(named.filename().empty())named=named.parent_path();
         if(content_name(named.filename().string())&&!named.parent_path().filename().empty())named=named.parent_path();
         if(graphics)cemu::import_legacy(stage,named.filename().string());else content::import_legacy(stage,named.filename().string());
-    }auto m=manifest(stage);require(m.problem.empty()||m.problem.starts_with("No binary for")||m.problem.starts_with("GLSL shader packs require Vulkan"),m.problem);target=root/"Mods"/m.id;auto it=records.find(m.id);require(it==records.end()||(!wanted(m.id)&&!it->second.active&&!it->second.loading),it!=records.end()&&(it->second.manifest.kind=="content"||it->second.manifest.kind=="cemu"||it->second.manifest.kind=="guest")?"Disable this content mod and restart before updating":"Disable this mod and wait for it to unload before updating");fs::create_directories(target.parent_path());if(fs::exists(target)){fs::rename(target,backup);backed=true;}fs::rename(stage,target);moved=true;m=manifest(target);Record r;r.path=target;r.manifest=std::move(m);auto installed_id=r.manifest.id;records[installed_id]=std::move(r);if(installed_id_out)*installed_id_out=installed_id;if(backed){std::error_code cleanup;fs::remove_all(backup,cleanup);}dirty=true;
+    }auto m=manifest(stage);require(m.problem.empty()||m.problem.starts_with("No binary for")||m.problem.starts_with("GLSL shader packs require Vulkan"),m.problem);target=root/"Mods"/m.id;auto it=records.find(m.id);if(fresh){std::error_code exists_error;require(it==records.end()&&!fs::exists(fs::symlink_status(target,exists_error)),"A mod with the ID "+m.id+" is installed already");}require(it==records.end()||(!wanted(m.id)&&!it->second.active&&!it->second.loading),it!=records.end()&&(it->second.manifest.kind=="content"||it->second.manifest.kind=="cemu"||it->second.manifest.kind=="guest")?"Disable this content mod and restart before updating":"Disable this mod and wait for it to unload before updating");fs::create_directories(target.parent_path());if(fs::exists(target)){fs::rename(target,backup);backed=true;}fs::rename(stage,target);moved=true;m=manifest(target);Record r;r.path=target;r.manifest=std::move(m);auto installed_id=r.manifest.id;records[installed_id]=std::move(r);if(installed_id_out)*installed_id_out=installed_id;if(backed){std::error_code cleanup;fs::remove_all(backup,cleanup);}dirty=true;
     }catch(...){if(moved)fs::remove_all(target);if(backed)fs::rename(backup,target);if(fs::exists(stage))fs::remove_all(stage);throw;}
 });}
+bool install(const std::string& source,std::string& error,std::string* installed_id_out){return install_package(source,error,installed_id_out,false);}
+bool install_new(const std::string& source,std::string& error,std::string* installed_id_out){return install_package(source,error,installed_id_out,true);}
 bool remove(const std::string& id,std::string& error){return operation(error,[&]{auto it=records.find(id);require(it!=records.end(),"Mod not found");require(!(id==story_notebook::kNotebookPackage&&story_system()),"The Story Notebook is part of the story system: turn off the story system to remove it");require(!wanted(id)&&!it->second.active&&!it->second.loading,(it->second.manifest.kind=="content"||it->second.manifest.kind=="cemu"||it->second.manifest.kind=="guest")?"Disable this content mod and restart before removing":"Disable this mod and wait for it to unload before removing");for(const auto& [other,r]:records)if(wanted(other))for(const auto& d:r.manifest.dependencies)require(d.id!=id,r.manifest.name+" depends on this mod");auto previous=database;for(auto& [name,p]:database["profiles"].object){p["enabled"].object.erase(id);p["config"].object.erase(id);p["setup_pending"].object.erase(id);}database["native_trust"].object.erase(id);database["experimental_ack"].object.erase(id);database["catalogue_experimental"].object.erase(id);database["guest_regions"].object.erase(id);database["guest_prepared"].object.erase(id);database["setup_receipts"].object.erase(id);try{save();}catch(...){database=previous;throw;}fs::remove_all(it->second.path);std::error_code ignored;fs::remove_all(root/"Data"/id,ignored);records.erase(it);dirty=true;});}
 uint64_t disk_use(const std::string& id){
     // the package files and the files its setup prepared (Data/<id>); Remove deletes both

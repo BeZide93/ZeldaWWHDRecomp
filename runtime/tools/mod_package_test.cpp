@@ -1,3 +1,4 @@
+#include <cctype>
 #include "mods/setup_run.h"
 #include "mod_test_host.h"
 #include "mods/packages.h"
@@ -10,6 +11,8 @@
 #include <fstream>
 #include <iostream>
 #include <chrono>
+#include <iterator>
+#include <string>
 namespace {
 mods::packages::View view(const std::string& id) {for(auto v:mods::packages::list())if(v.id==id)return v;return {};}
 // Second process on the same storage: a confirmed native package loads after a restart without asking.
@@ -205,6 +208,43 @@ int main(int argc, char** argv) {
         assert(view(id).compatible);
         fs::remove_all(root);
         std::cout<<"Game IDs: wwhd and wwhd-usa accepted, others refused, old and new imports load\n";return 0;
+    }
+    if(argc==2&&std::string(argv[1])=="--new-package") {
+        // install_new (the world editor's new mod): a new package only, never one that is installed or whose
+        // folder exists; the new mod's manifest (an empty actor list, the notebook dependency) installs and enables
+        namespace fs=std::filesystem;
+        auto root=fs::temp_directory_path()/("wwhd-new-package-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        env("WWHD_NO_HOST_INPUT","1");env("WWHD_MOD_MANAGER_DIR",(root/"manager").string().c_str());
+        initialize();std::string error,id;
+        auto source=[&](const std::string& name,const std::string& text){auto dir=root/"sources"/name;fs::create_directories(dir);std::ofstream(dir/"manifest.json",std::ios::binary)<<text;return dir.string();};
+        auto settings=[&](const std::string& pkg,const std::string& label,const std::string& builtin="wall-climb"){return R"({"format_version":1,"id":")"+pkg+R"(","name":")"+label+R"(","version":"1.0.0","game_id":"wwhd","kind":"settings","settings":{")"+builtin+R"(":true}})";};
+        assert(install(source("notebook",settings("story-notebook","Notebook stand-in")),error)&&enable("story-notebook",true,error));
+        assert(install(source("other",settings("other","Other","quick-doors")),error));if(!enable("other",true,error)){std::cerr<<error<<"\n";return 1;}
+        auto slurp=[&](const fs::path& p){std::ifstream f(p,std::ios::binary);return std::string{std::istreambuf_iterator<char>(f),{}};};
+        const auto other_before=slurp(fs::path(directory())/"other"/"manifest.json");
+        // an installed ID: refused, the package stays as it was (install() would replace a disabled one)
+        assert(!install_new(source("other-again",settings("other","Replaced","quick-doors")),error)&&error.find("installed already")!=std::string::npos);
+        assert(enable("other",false,error));
+        assert(!install_new(source("other-again",settings("other","Replaced","quick-doors")),error)&&view("other").name=="Other");
+        assert(slurp(fs::path(directory())/"other"/"manifest.json")==other_before);
+        // a folder of that ID in the mods folder without a package: refused, left alone
+        fs::create_directories(fs::path(directory())/"stray");std::ofstream(fs::path(directory())/"stray"/"note.txt")<<"keep";
+        assert(!install_new(source("stray",settings("stray","Stray")),error)&&slurp(fs::path(directory())/"stray"/"note.txt")=="keep");
+        assert(enable("other",true,error));
+        auto enabled_before=mods::json::parse(slurp(root/"manager"/"profiles.json")).get("profiles").get("Default").get("enabled");
+        // the new mod: installed, enabled in the active profile, nothing else changed
+        const std::string fresh=R"({"format_version":1,"id":"my-mod","name":"My mod","version":"0.1.0","author":"Me","game_id":"wwhd","minimum_manager_version":"1.5.0","kind":"content","dependencies":[{"id":"story-notebook","minimum_version":"0.0.0"}],"actors":[]})";
+        if(!install_new(source("my-mod",fresh),error,&id)){std::cerr<<"new mod refused: "<<error<<"\n";return 1;}
+        assert(id=="my-mod"&&view("my-mod").compatible&&!view("my-mod").enabled);
+        assert(slurp(fs::path(directory())/"my-mod"/"manifest.json")==fresh);
+        assert(enable("my-mod",true,error)&&view("my-mod").enabled&&view("other").enabled&&view("story-notebook").enabled);
+        auto saved=mods::json::parse(slurp(root/"manager"/"profiles.json"));
+        auto enabled_after=saved.get("profiles").get("Default").get("enabled");
+        assert(enabled_after.get("my-mod").boolean);enabled_after.object.erase("my-mod");assert(enabled_after==enabled_before);
+        assert(slurp(fs::path(directory())/"other"/"manifest.json")==other_before);
+        assert(!install_new(source("my-mod",fresh),error));
+        fs::remove_all(root);
+        std::cout<<"New packages: installed IDs and existing folders refused, the editor's new mod installs and enables\n";return 0;
     }
     if(argc==2&&std::string(argv[1])=="--game-source") {
         namespace fs=std::filesystem;
@@ -756,6 +796,42 @@ int main(int argc, char** argv) {
         bad["id"]="world-content-other-dependency";bad["actors"]=mods::json::parse(R"([{"id":"notice","actor":"sign","stage":"sea","room":11,"flag":"read","position":{"x":0,"y":0,"z":0}}])");
         bad["dependencies"].array.push_back(mods::json::parse(R"({"id":"other-content"})"));
         std::ofstream(invalid/"manifest.json")<<mods::json::dump(bad);assert(!install(invalid.string(),error));
+        assert(error.find("only depend on the Story Notebook")!=std::string::npos);
+        {   // story content without actors or scenes: a chart and its letter, no content folder, the notebook added
+            auto chart=root/"chart-letter";fs::create_directories(chart);
+            std::ofstream(chart/"manifest.json")<<R"({"format_version":1,"id":"chart-letter","name":"Old map","version":"1.0.0","game_id":"wwhd","kind":"content",
+              "charts":[{"id":"old-map","name":"Old map","place":{"x":1759,"z":-202572}}],
+              "letters":[{"id":"map-letter","sender":"A sailor","text":"Dear Link,\nan old map.","encloses":["chart:old-map"]}]})";
+            assert(install(chart.string(),error)&&view("chart-letter").compatible);
+            auto deps=view("chart-letter").dependencies;
+            assert(deps.size()==1&&deps[0]=="story-notebook>=0.0.0");
+            assert(enable("chart-letter",true,error)&&view("chart-letter").enabled);
+            assert(enable("chart-letter",false,error));
+            // an item on its own, and a quest on its own, the same way
+            for(const char* section:{R"("items":[{"id":"key","name":"Key","description":"A key.","icon":"icons/key.png"}])",
+                                     R"("quests_format":1,"quests":[{"id":"q","title":"Q","steps":[{"n":1,"text":"Go."}]}])"}){
+                auto one=root/"story-one";fs::remove_all(one);fs::create_directories(one/"icons");
+                std::ofstream(one/"manifest.json")<<R"({"format_version":1,"id":"story-one","name":"One","version":"1.0.0","game_id":"wwhd","kind":"content",)"<<section<<"}";
+                assert(install(one.string(),error)&&view("story-one").compatible);
+                assert(view("story-one").dependencies.size()==1);
+                assert(remove("story-one",error));
+            }
+            // an empty actor list next to game files: the notebook dependency is accepted too
+            auto empty=root/"empty-actors";fs::create_directories(empty/"content");std::ofstream(empty/"content"/"fixture.marker")<<"original fixture";
+            std::ofstream(empty/"manifest.json")<<R"({"format_version":1,"id":"empty-actors","name":"Empty","version":"1.0.0","game_id":"wwhd","kind":"content","content_dir":"content","actors":[]})";
+            assert(install(empty.string(),error)&&view("empty-actors").compatible);
+            // the protection stays: plain game files can't depend on anything, story content on nothing but the notebook
+            std::ofstream(empty/"manifest.json")<<R"({"format_version":1,"id":"plain-notebook","name":"Plain","version":"1.0.0","game_id":"wwhd","kind":"content","content_dir":"content","dependencies":[{"id":"story-notebook"}]})";
+            assert(!install(empty.string(),error)&&error.find("only depend on the Story Notebook")!=std::string::npos);
+            std::ofstream(chart/"manifest.json")<<R"({"format_version":1,"id":"chart-other","name":"Old map","version":"1.0.0","game_id":"wwhd","kind":"content","dependencies":[{"id":"guest-code"}],
+              "charts":[{"id":"old-map","name":"Old map","place":{"x":1759,"z":-202572}}]})";
+            assert(!install(chart.string(),error)&&error.find("only depend on the Story Notebook")!=std::string::npos);
+            // a named content folder must still be there
+            std::ofstream(chart/"manifest.json")<<R"({"format_version":1,"id":"chart-folder","name":"Old map","version":"1.0.0","game_id":"wwhd","kind":"content","content_dir":"missing",
+              "charts":[{"id":"old-map","name":"Old map","place":{"x":1759,"z":-202572}}]})";
+            assert(!install(chart.string(),error)&&error.find("Content folder is missing")!=std::string::npos);
+            assert(remove("chart-letter",error)&&remove("empty-actors",error));
+        }
         // Manifest-only owners must not install fake game replacements to carry scenes.
         auto scene_only=root/"scene-only";fs::create_directories(scene_only/"content");
         auto scene_manifest=mods::json::parse(R"({"format_version":1,"id":"scene-only","name":"Scene only","version":"1.0.0","game_id":"wwhd","kind":"content","content_dir":"content","scenes":[{"id":"test","trigger":{"type":"area","stage":"sea","room":11,"position":{"x":0,"y":0,"z":0},"radius":80},"steps":[{"type":"wait","frames":1},{"type":"end"}]}]})");
@@ -772,6 +848,24 @@ int main(int argc, char** argv) {
         scene_manifest["id"]="malformed-scene";scene_manifest["scenes"]=mods::json::parse(R"([{"id":"bad"}])");
         std::ofstream(scene_only/"manifest.json")<<mods::json::dump(scene_manifest);
         assert(!install(scene_only.string(),error));
+        // The game's own objects by reference: the package carries no game data (by name or by content).
+        {
+            auto objects=root/"objects";fs::create_directories(objects/"content");std::ofstream(objects/"content"/"objects.marker")<<"original fixture";
+            auto om=mods::json::parse(R"({"format_version":1,"id":"objects","name":"Game objects","version":"1.0.0","game_id":"wwhd","kind":"content","content_dir":"content","requires":{"game_objects":1},"actors":[{"id":"palm","actor":"game:palm","stage":"sea","room":11,"position":{"x":0,"y":0,"z":0}}]})");
+            std::ofstream(objects/"manifest.json")<<mods::json::dump(om);
+            assert(install(objects.string(),error)&&view("objects").compatible);
+            fs::create_directories(objects/"assets");
+            for(const auto& [name,bytes]:std::vector<std::pair<std::string,std::string>>{{"Oyashi.bfres","x"},{"room.dzb","x"},{"tex.ftex","x"},{"Lwood.szs","x"},{"renamed.bin","Yaz0...."},{"data.dat","SARC...."},{"model.png","FRES...."}}){
+                om["id"]="objects-"+std::to_string(name.size())+name.substr(0,3);for(char& ch:om["id"].text)if(ch=='.')ch='-';for(char& ch:om["id"].text)ch=char(std::tolower((unsigned char)ch));
+                std::ofstream(objects/"manifest.json")<<mods::json::dump(om);
+                {std::ofstream f(objects/"assets"/name,std::ios::binary);f<<bytes;}
+                assert(!install(objects.string(),error)&&error.find("game data")!=std::string::npos&&error.find(name)!=std::string::npos);
+                fs::remove(objects/"assets"/name);
+            }
+            // a package without game objects keeps its own rules (a content mod may replace game files)
+            std::ofstream(objects/"assets"/"Lwood.szs")<<"x";om["id"]="objects-none";om.object.erase("actors");om.object.erase("requires");
+            std::ofstream(objects/"manifest.json")<<mods::json::dump(om);assert(install(objects.string(),error));
+        }
         auto world_fixture=[&](const std::string& id,unsigned count){
             auto source=root/id;fs::create_directories(source/"content");std::ofstream(source/"content"/(id+".marker"))<<"original fixture";
             auto m=mods::json::parse(R"({"format_version":1,"id":"fixture","name":"World graph fixture","version":"1.0.0","game_id":"wwhd","kind":"content","content_dir":"content","actors":[]})");m["id"]=id;
@@ -852,7 +946,9 @@ int main(int argc, char** argv) {
     assert(mods::manager::set_enabled("target-letterbox",false));
     remember_option("lock-on.range",2.5);remember_option("lock-on.cycling",0);
     mods::set_move_speed_bar(false);remember_option("move-speed.bar",0);  // "Show boost bar" off
+    assert(mods::manager::set_enabled("camera-directed-items",true));
     assert(create_profile("Adventure",error));
+    assert(mods::manager::set_enabled("camera-directed-items",false));
     assert(mods::manager::set_enabled("target-letterbox",true));
     mods::set_lock_on_range(1.f);mods::set_lock_on_cycling(true);
     assert(mods::manager::set_enabled("lock-on",false));
@@ -864,6 +960,7 @@ int main(int argc, char** argv) {
     assert(select_profile("Adventure",error));frame(21);assert(!state[3]);
     assert(!mods::letterbox_while_targeting());
     assert(mods::fast_forward_rate()==3 && mods::fast_forward_button()==0x20 && !mods::fast_forward_mute());
+    assert(mods::camera_directed_items());
     assert(mods::extended_lock_on() && mods::lock_on_range()==2.5f && !mods::lock_on_cycling());
     assert(!mods::move_speed_bar());
     {std::ifstream saved_file(root/"storage/profiles.json");
@@ -876,6 +973,7 @@ int main(int argc, char** argv) {
     assert(select_profile("Default",error));assert(mods::fast_forward_rate()==4 && mods::fast_forward_button()==0x80 && mods::fast_forward_mute());assert(mods::move_speed_bar());assert(delete_profile("Adventure",error));
     assert(!mods::extended_lock_on() && mods::lock_on_range()==1.f && mods::lock_on_cycling());
     assert(mods::letterbox_while_targeting());
+    assert(!mods::camera_directed_items()); // Default profile preserves its independent off value.
     assert(install(package("missing-dep",",\"dependencies\":[{\"id\":\"absent\"}]"),error));
     assert(!enable("missing-dep",true,error));
     assert(remove("missing-dep",error));

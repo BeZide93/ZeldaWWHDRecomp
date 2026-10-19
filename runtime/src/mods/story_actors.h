@@ -20,6 +20,10 @@ inline constexpr uint32_t kTalkProofScratchOffset=kDoorScratchOffset+0x30;
 inline constexpr uint32_t kTalkProofBytes=64;
 static_assert(kTalkProofScratchOffset>=kDoorScratchOffset+0x30);
 static_assert(kTalkProofScratchOffset+kTalkProofBytes<=kIdentityScratchOffset);
+// The Miniblin's private profile (added after the first four enemy kinds): the free 0x30 bytes
+// between the talk proof and the identity rows, so no other offset moves.
+inline constexpr uint32_t kMiniblinProfileScratchOffset=kTalkProofScratchOffset+kTalkProofBytes;
+static_assert(kMiniblinProfileScratchOffset+0x30<=kIdentityScratchOffset&&(kMiniblinProfileScratchOffset&3)==0);
 // Preserve existing resident/prop/switch snapshot offsets when adding enemies.
 inline constexpr uint32_t kEnemyProfilesScratchOffset=10752;
 inline constexpr uint32_t kEnemyOwnershipScratchOffset=kEnemyProfilesScratchOffset+4*0x30;
@@ -75,6 +79,12 @@ bool editor_kind_live(const std::string& type,bool fallback);
 // true for kinds whose changes take effect only after a restart (mod enemies and carried props; native
 // props, switches, doors and enemies unless the editor installed them for live placement)
 bool editor_restart_only(const story_notebook::ManifestActor&);
+// placed residents walking a mod route ("path"): whether any is declared (their record memory is
+// needed), and one's state for the editor (declared: it has a route; live: its copy in the game
+// follows it; status: walking, skipped a blocked point, stopped, finished)
+bool resident_routes_declared();
+struct ResidentRoute {bool declared=false,live=false;std::string status;};
+bool resident_route(const std::string& mod,const std::string& id,ResidentRoute& out);
 // whether a new actor of this spec can be created while the game runs (else `why` says what waits)
 bool editor_live_capable(const std::string& mod,const story_notebook::ManifestActor&,std::string& why);
 // World editor (main game thread): a model imported while the game runs, prepared as `archive`
@@ -130,8 +140,12 @@ bool resident_event_identity_quiet(const std::string& mod,const std::string& id,
  uint32_t actor,uint32_t pid,ResidentEventIdentity&);
 bool prop_texture_identity(uint32_t actor,uint32_t pid,uint32_t& token,uint32_t& epoch,uint32_t& generation);
 bool actions(const std::string& mod,const std::vector<story_notebook::StoryAction>& actions);
+// A placed chest holding one of its mod's items ("parameters": {"item": "item:<id>"}): the chest actor at `address`.
+bool placed_chest_item(uint32_t address,std::string& mod,std::string& item);
 // Notebook hooks delegate only actors created by this service. Returns true when handled.
 bool people_message(Cpu*);
 bool people_next_message(Cpu*);
 bool people_execute(Cpu*,bool before);
+// The resident at `actor` is one this service created for a mod (not one of the game's own).
+bool owns_resident(uint32_t actor);
 }

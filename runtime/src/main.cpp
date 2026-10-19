@@ -457,7 +457,6 @@ int main(int argc, char** argv) {
 #endif
     }
     crash_context::initialize();
-    story_world_arrival::register_overlay();
     editor_ui::register_tab();  // the world editor's Editor tab (only with --editor)
     index_game_functions();
     install_crash_handler();
@@ -585,8 +584,17 @@ int main(int argc, char** argv) {
         _exit(ok ? 0 : 1);
     }
     if (mods::packages::has_code_mod_support() && mods::required::check_local()) mods::packages::refresh_guest_startup();
-    guestmods::set_package_observer(editor::register_package);  // the world editor's inspector
+    // the world editor's inspector: only with --editor (or WWHD_EDITOR=1), so a normal start copies no manifest
+    // into an editor session; set_launch_mode ran in the argument loop above, before any package loads
+    if (editor::enabled()) guestmods::set_package_observer(editor::register_package);
     guestmods::init();  // trusted manager packages, before guest threads start
+    // the island arrival notice (story_world_arrival.h): an overlay layer only when a loaded package
+    // declares an arrival, or with --editor (a live edit can add one); the overlay seals at its first
+    // frame, after this point
+    if (story_world_arrival::declared() || editor::enabled()) {
+        story_world_arrival::register_overlay();
+        LOG("[world_island] arrival notices %s", story_world_arrival::registered() ? "on" : "unavailable (the overlay started already)");
+    }
 #ifdef WWHD_DECOMP
     decomp::init();  // decomp build: which functions run decompiled (runtime/src/decomp), after the mods
 #endif

@@ -107,7 +107,8 @@ std::string model_message(const std::string& why) {
 }
 bool game_file(const fs::path& p) {
     static const std::set<std::string> kinds = {".szs", ".arc", ".rarc", ".bfres", ".rpx", ".rpl", ".pack", ".bflim", ".bntx", ".sarc",
-                                                ".yaz0", ".wux", ".wud", ".iso", ".rvz", ".gcm", ".bfsar", ".bars", ".bfstm", ".msbt"};
+                                                ".yaz0", ".wux", ".wud", ".iso", ".rvz", ".gcm", ".bfsar", ".bars", ".bfstm", ".msbt",
+                                                ".dzb", ".dzr", ".dzs", ".ftex"};
     std::string ext = p.extension().string();
     for (char& c : ext) c = char(std::tolower((unsigned char)c));
     return kinds.contains(ext);
@@ -118,22 +119,33 @@ bool game_file(const fs::path& p) {
 const std::vector<ActorType>& actor_types() {
     static const std::vector<ActorType> types = {
         {"sign", "Sign", "Game actors", "A sign with up to three lines; its flag is set when read."},
-        {"resident", "Resident", "Game actors", "A villager who talks: uo2, um1 or the seated ym1 (options.resident)."},
+        {"resident", "Resident", "Game actors", "A villager of the game who talks with the mod's lines: options.resident picks who (the variants list them)."},
         {"chest", "Chest", "Game actors", "A treasure chest; its flag is set when opened."},
         {"pot", "Pot", "Props", "A pot to lift and break; its broken flag and drops.", false, false, false},
         {"barrel", "Barrel", "Props", "A barrel to lift and break.", false, false, false},
         {"crate", "Crate", "Props", "A crate to break.", false, false, false},
         {"switch", "Switch", "Switches", "A floor switch; sets its switch flag when pressed.", false, false, false},
         {"door", "Door", "Switches", "A door opened by one of the mod's switches (options.switch).", false, false, false},
-        {"chuchu", "ChuChu", "Enemies", "The game's ChuChu; its defeated flag and drops.", false, false, false},
-        {"bokoblin", "Bokoblin", "Enemies", "The game's Bokoblin.", false, false, false},
+        {"chuchu", "ChuChu", "Enemies", "The game's ChuChu (green, red, blue or yellow: options.variant); its defeated flag and drops.", false, false, false},
+        {"bokoblin", "Bokoblin", "Enemies", "The game's Bokoblin (a stick, a shield or a machete: options.variant).", false, false, false},
         {"moblin", "Moblin", "Enemies", "The game's Moblin.", false, false, false},
         {"keese", "Keese", "Enemies", "The game's Keese.", false, false, false},
+        {"miniblin", "Miniblin", "Enemies", "The game's Miniblin: it pops up when Link comes near and is defeated for good.", false, false, false},
         {"model", "Your model", "Your models", "One of the mod's models (static or skinned), with collision.", true, false, true},
         {"model_enemy", "Your enemy", "Your models", "A skinned model that fights (needs flinch, stun, death and idle clips).", true, true, false},
         {"model_carry", "Carried prop", "Your models", "A model Link can lift and carry.", true, false, false},
     };
     return types;
+}
+
+std::vector<TypeVariant> type_variants(const std::string& type) {
+    std::vector<TypeVariant> out;
+    if (type == "resident")
+        for (const auto& t : story_resident_types::kTypes) out.push_back({"resident", t.code, t.label, t.help});
+    else if (story_enemy_variants::has_variants(type))
+        for (const auto& v : story_enemy_variants::kVariants)
+            if (type == v.kind) out.push_back({"variant", v.name, v.label, v.help});
+    return out;
 }
 
 std::string free_id(const Value& list, const std::string& base) {
@@ -198,7 +210,14 @@ bool new_actor(const std::string& type, const std::string& id, const Place& plac
         lines("A new sign.");
     } else if (type == "resident") {
         Value params;
-        params["resident"] = options.get("resident").type == Value::String ? options.get("resident").text : std::string("uo2");
+        const std::string who = options.get("resident").type == Value::String ? options.get("resident").text : std::string("uo2");
+        if (!story_resident_types::find(who)) {
+            if (const char* no = story_resident_types::refused(who)) return why = no, false;
+            return why = "options.resident is one of " + story_resident_types::codes(), false;
+        }
+        if (const char* no = story_resident_types::place_problem(story_resident_types::find(who)->subtype, place.stage, place.position.x, place.position.z))
+            return why = no, false;
+        params["resident"] = who;
         a["parameters"] = params;
         lines("Hello!");
     } else if (type == "chest")
@@ -221,6 +240,17 @@ bool new_actor(const std::string& type, const std::string& id, const Place& plac
     } else {  // the enemies
         a["defeated_flag"] = id + "-defeated";
         a["drops"] = array();
+        if (options.get("variant").type != Value::Null) {
+            const std::string v = options.get("variant").string();
+            if (!story_enemy_variants::has_variants(type)) return why = "a " + t->label + " has no variants", false;
+            if (v.empty() || !story_enemy_variants::find(type, v)) return why = "options.variant is " + story_enemy_variants::names(type), false;
+            const auto* chosen = story_enemy_variants::find(type, v);
+            if (chosen != story_enemy_variants::find(type, "")) {  // the default variant is no parameter at all
+                Value params;
+                params["variant"] = v;
+                a["parameters"] = params;
+            }
+        }
     }
     return true;
 }
@@ -327,6 +357,17 @@ std::vector<Problem> package_problems(const std::string& mod, const Value& manif
         else if (m.get("kind").string("static") != info.get("kind").string())
             add({"model " + id + ": the file is a " + info.get("kind").string() + " model, the package says " + m.get("kind").string("static"), "model", id, "kind"});
     }
+    // the items' icons: a PNG in the package each (the game reads them when it starts)
+    for (const auto& it : manifest.get("items").array) {
+        const std::string id = it.get("id").string(), icon = it.get("icon").string();
+        if (dir.empty() || icon.empty() || icon.find("..") != std::string::npos) continue;
+        const fs::path file = fs::weakly_canonical(utf8_path(dir) / utf8_path(icon), ec);
+        const auto rel = file.lexically_relative(root);
+        unsigned w = 0, h = 0;
+        if (ec || rel.empty() || rel.begin()->string() == "..") add({"item " + id + ": its icon is outside the package", "item", id, "icon"});
+        else if (!fs::is_regular_file(file, ec)) add({"item " + id + ": " + icon + " is not in the package", "item", id, "icon"});
+        else if (!check_icon_file(file.string(), w, h, why)) add({"item " + id + ": " + icon + ": " + why, "item", id, "icon"});
+    }
     why.clear();
     if (validate_package(mod, manifest, all, why)) return out;
     const std::string whole = why;
@@ -335,8 +376,24 @@ std::vector<Problem> package_problems(const std::string& mod, const Value& manif
     auto known = [&](const std::string& message) {
         return std::any_of(out.begin(), out.end(), [&](const Problem& p) { return p.message == message; });
     };
-    // the package is refused: find what it is about. Each actor on its own (with the switch a door
+    // the package is refused: find what it is about. The items, charts and letters each on their own
+    // (with the items a chart or letter names), then each actor on its own (with the switch a door
     // names, without scenes), each scene with the actors, each quest on its own.
+    for (const char* section : {"items", "charts", "letters"})
+        for (const auto& e : manifest.get(section).array) {
+            Value one = manifest;
+            one[section] = array();
+            one[section].array.push_back(e);
+            why.clear();
+            std::vector<story_notebook::ManifestItem> items;
+            std::vector<story_notebook::ManifestChart> charts;
+            std::vector<story_notebook::ManifestLetter> letters;
+            const bool fine = std::string(section) == "items" ? story_notebook::parse_items(one, items, why)
+                              : std::string(section) == "charts" ? story_notebook::parse_charts(one, charts, why)
+                                                                 : story_notebook::parse_letters(one, letters, why);
+            const std::string kind = std::string(section).substr(0, std::string(section).size() - 1);
+            if (!fine && !known(why)) add({why, kind, e.get("id").string(), ""});
+        }
     for (const auto& a : manifest.get("actors").array) {
         Value one = manifest;
         one.object.erase("scenes");
@@ -485,6 +542,18 @@ Value Session::dispatch_build(const std::string& command, const Value& p, std::s
             v["needs_model"] = t.needs_model;
             if (t.skinned) v["skinned"] = true;
             v["live"] = host_ ? host_->live_kind(t.type, t.live) : t.live;
+            const auto variants = type_variants(t.type);
+            if (!variants.empty()) {
+                v["option"] = variants.front().option;
+                v["variants"] = array();
+                for (const auto& x : variants) {
+                    Value e;
+                    e["value"] = x.value;
+                    e["label"] = x.label;
+                    e["help"] = x.help;
+                    v["variants"].array.push_back(e);
+                }
+            }
             r.array.push_back(v);
         }
         ok = true;
@@ -561,11 +630,14 @@ Value Session::dispatch_build(const std::string& command, const Value& p, std::s
         Value info;
         snap(place.position, info);
         const std::string type = text(p, "type");
-        const std::string id = p.get("id").type == Value::String ? p.get("id").text : free_id(pkg->manifest.get("actors"), type == "model" || type == "model_enemy" || type == "model_carry" ? text(p, "model").empty() ? type : text(p, "model") : type);
+        const bool game = story_game_objects::is_reference(type);
+        const std::string id = p.get("id").type == Value::String ? p.get("id").text : free_id(pkg->manifest.get("actors"), game ? story_game_objects::reference(type) : type == "model" || type == "model_enemy" || type == "model_carry" ? text(p, "model").empty() ? type : text(p, "model") : type);
         Value a;
-        if (!new_actor(type, id, place, text(p, "model"), pkg->manifest, p.get("options"), a, why)) return r;
+        if (game && !id_ok(id)) return why = "an actor id is 1 to 32 lower-case letters, digits, '-', '_' or '.'", r;
+        if (game ? !new_game_object(type, id, place, p.get("options"), a, why) : !new_actor(type, id, place, text(p, "model"), pkg->manifest, p.get("options"), a, why)) return r;
         if (by_id(pkg->manifest.get("actors"), id)) return why = "the mod has an actor \"" + id + "\" already", r;
         ok = change(*pkg, "Add " + id, [&](Value& m, std::string&) {
+            if (game) require_game_objects(m, type);  // "requires": {"game_objects": N}
             if (m.get("actors").type != Value::Array) m["actors"] = array();
             m["actors"].array.push_back(a);
             return true;
@@ -706,6 +778,20 @@ Value Session::dispatch_build(const std::string& command, const Value& p, std::s
     }
     if (command == "check_model") {
         if (!check_model_file(text(p, "file"), r, why)) return r;
+        ok = true;
+        return r;
+    }
+    if (command == "model_clips") {
+        // a model of the open mod: its animation clips (the Inspector's walk and idle pickers)
+        Package* pkg = package(p, why);
+        if (!pkg) return r;
+        const Value* md = by_id(pkg->manifest.get("models"), text(p, "model"));
+        if (!md) return why = "no model \"" + text(p, "model") + "\"", r;
+        if (pkg->dir.empty()) return why = "the mod has no package folder", r;
+        Value info;
+        if (!check_model_file((fs::path(utf8_path(pkg->dir)) / utf8_path(md->get("source").string())).string(), info, why)) return r;
+        r["clips"] = info.get("clips");
+        r["skinned"] = info.get("kind").string() == "skinned";
         ok = true;
         return r;
     }

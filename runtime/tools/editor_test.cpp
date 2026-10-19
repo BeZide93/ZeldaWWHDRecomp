@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <set>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -30,10 +31,13 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <iterator>
 #include <utility>
 #include <vector>
 #include "editor/commands.h"
+#include "editor/ray_ground.h"
 #include "editor/stage_files.h"
+#include "overlay/editor_live_kinds.h"
 #include "mods/story_mail_book.h"
 
 
@@ -52,6 +56,8 @@ int g_failures = 0;
 
 struct FakeHost : editor::Host {
     int applied = 0, warps = 0, reloads = 0;
+    int live_kinds = -1;  // -1: the type's own default; 0 / 1: the game has (not) installed the live kinds
+    bool live_kind(const std::string&, bool fallback) override { return live_kinds < 0 ? fallback : live_kinds == 1; }
     std::vector<story_notebook::ManifestActor> last_actors;
     editor::Location last_warp;
     bool is_busy = false, flying = false, testing = false;
@@ -645,12 +651,43 @@ void island_world_object_commands() {
     auto empty=place;empty["id"]="island-b";for(const char*key:{"distant","shoreline","chart_marker","arrival"})empty[key]=Value{};CHECK(ok(session.run("place_world_object",empty))&&actor_of(session,"island-b")->get("arrival").type==Value::Null);
 }
 
+// The Inspector's restart note: enemies (with variants), the Miniblin and residents count as live when the
+// game installed its live kinds; the answer is read from a reply kept alive (a destroyed temporary read all
+// types as unknown and showed the note on every live enemy).
+void live_kinds_note() {
+    FakeHost host;
+    editor::Session s(&host);
+    s.add_package("editor-test", "Editor test", "", json(kManifest));
+    auto note = [&](const char* actor_json) {
+        const Value reply = s.run("list_actor_types");
+        const auto live = editor_live_kinds::read(reply);
+        const Value a = json(actor_json);
+        const std::string actor = a.get("actor").string();
+        const bool enemy = actor == "chuchu" || actor == "bokoblin" || actor == "moblin" || actor == "keese" || actor == "miniblin";
+        const bool prop = actor == "pot" || actor == "barrel" || actor == "crate";
+        CHECK(!live.empty());
+        return editor_live_kinds::restart_only(a, live, enemy, prop);
+    };
+    const char* live_ones[] = {R"({"actor": "chuchu", "parameters": {"variant": "blue"}})", R"({"actor": "bokoblin", "parameters": {"variant": "shield"}})",
+                               R"({"actor": "miniblin"})", R"({"actor": "keese"})", R"({"actor": "pot"})", R"({"actor": "switch"})",
+                               R"({"actor": "resident", "parameters": {"resident": "sa2"}})", R"({"actor": "sign"})"};
+    host.live_kinds = 1;
+    for (const char* a : live_ones) CHECK(!note(a));
+    host.live_kinds = 0;  // the game has not installed them (no --editor live kinds): the note shows
+    for (const char* a : {R"({"actor": "chuchu"})", R"({"actor": "miniblin"})", R"({"actor": "bokoblin", "parameters": {"variant": "machete"}})"}) CHECK(note(a));
+    CHECK(note(R"({"kind": "mod", "model": "m", "combat": {}})"));
+    // no answer yet: the start-up-only kinds are assumed
+    const editor_live_kinds::Live none;
+    CHECK(editor_live_kinds::restart_only(json(R"({"actor": "miniblin"})"), none, true, false));
+    CHECK(!editor_live_kinds::restart_only(json(R"({"actor": "sign"})"), none, false, false));
+}
+
 void building(const fs::path& examples) {
     FakeHost host;
     editor::Session s(&host);
     s.add_package("editor-test", "Editor test", "", json(kManifest));
     Value r = s.run("list_actor_types");
-    CHECK(ok(r) && r.get("result").array.size() == 15);
+    CHECK(ok(r) && r.get("result").array.size() == 16);
 
     // add: at Link (sea room 44, heading 100 of 65536), snapped onto the ground (y 5); one undo step
     r = s.run("add_actor", json(R"({"type": "sign"})"));
@@ -670,6 +707,27 @@ void building(const fs::path& examples) {
     CHECK(ok(r) && actor_of(s, "box")->get("position").get("x").number == 100 && actor_of(s, "box")->get("rotation").get("y").number == 90);
     r = s.run("add_actor", json(R"({"type": "resident", "at": "position", "position": {"x": 0, "y": 900, "z": -201500}, "stage": "sea", "options": {"resident": "um1"}})"));
     CHECK(ok(r) && actor_of(s, "resident")->get("room").number == 11 && actor_of(s, "resident")->get("parameters").get("resident").string() == "um1");
+    // who a resident is: the declared variants (list_actor_types), each one placeable; unsafe ones refused with the reason
+    {
+        const Value types = s.run("list_actor_types").get("result");
+        const Value* resident = nullptr;
+        for (const auto& t : types.array)
+            if (t.get("type").string() == "resident") resident = &t;
+        CHECK(resident && resident->get("option").string() == "resident" && resident->get("variants").array.size() == std::size(story_resident_types::kTypes));
+        bool sailor = false;
+        for (const auto& v : resident->get("variants").array) {
+            CHECK(!v.get("label").string().empty() && !v.get("help").string().empty());
+            sailor = sailor || v.get("value").string() == "sa2";
+        }
+        CHECK(sailor);
+        r = s.run("add_actor", json(R"({"type": "resident", "id": "lookout", "at": "position", "position": {"x": 0, "y": 900, "z": -201500}, "stage": "sea", "options": {"resident": "sa2"}})"));
+        CHECK(ok(r) && actor_of(s, "lookout")->get("parameters").get("resident").string() == "sa2");
+        r = s.run("add_actor", json(R"({"type": "resident", "id": "stargazer", "options": {"resident": "um3"}})"));
+        CHECK(!ok(r) && r.get("error").string().find("telescope") != std::string::npos && !actor_of(s, "stargazer"));
+        CHECK(!ok(s.run("add_actor", json(R"({"type": "resident", "id": "nobody", "options": {"resident": "zz9"}})"))));
+        CHECK(!ok(s.run("add_actor", json(R"({"type": "resident", "id": "studio", "at": "position", "position": {"x": 0, "y": 0, "z": 0}, "stage": "Ocmera", "room": 0, "options": {"resident": "ub4"}})"))));
+        CHECK(ok(s.run("remove_actor", json(R"({"id": "lookout", "confirm": true})"))));
+    }
     // no ground below: placed where asked, with a note
     host.has_ground = false;
     r = s.run("add_actor", json(R"({"type": "crate"})"));
@@ -681,6 +739,21 @@ void building(const fs::path& examples) {
     r = s.run("add_actor", json(R"({"type": "door"})"));
     CHECK(ok(r) && actor_of(s, "door")->get("switch").string() == "switch");
     CHECK(ok(s.run("add_actor", json(R"({"type": "bokoblin"})"))) && actor_of(s, "bokoblin")->get("defeated_flag").string() == "bokoblin-defeated");
+    // an enemy's variant: declared choices only; the default needs no parameter
+    CHECK(ok(s.run("add_actor", json(R"({"type": "chuchu", "id": "red-chu", "options": {"variant": "red"}})"))) &&
+          actor_of(s, "red-chu")->get("parameters").get("variant").string() == "red");
+    CHECK(ok(s.run("add_actor", json(R"({"type": "chuchu", "id": "green-chu", "options": {"variant": "green"}})"))) &&
+          actor_of(s, "green-chu")->get("parameters").type == Value::Null);
+    CHECK(!ok(s.run("add_actor", json(R"({"type": "chuchu", "id": "odd-chu", "options": {"variant": "purple"}})"))) && !actor_of(s, "odd-chu"));
+    CHECK(!ok(s.run("add_actor", json(R"({"type": "keese", "id": "odd-keese", "options": {"variant": "red"}})"))) && !actor_of(s, "odd-keese"));
+    {
+        bool listed = false;
+        const Value types = s.run("list_actor_types");
+        for (const auto& t : types.get("result").array)
+            if (t.get("type").string() == "chuchu") listed = t.get("option").string() == "variant" && t.get("variants").array.size() == 4;
+        CHECK(listed);
+    }
+    CHECK(ok(s.run("remove_actor", json(R"({"id": "red-chu", "confirm": true})"))) && ok(s.run("remove_actor", json(R"({"id": "green-chu", "confirm": true})"))));
     CHECK(!ok(s.run("add_actor", json(R"({"type": "model"})"))));
     CHECK(!ok(s.run("add_actor", json(R"({"type": "dragon"})"))));
     CHECK(!ok(s.run("add_actor", json(R"({"type": "sign", "id": "Bad Id"})"))));
@@ -867,6 +940,208 @@ void handle_drag() {
     CHECK(s.log().size() == logged + 3);  // move_actor, undo, move_actors: the drag steps never show in the log
 }
 
+// the pick (ray_ground.h) against a made-up world with the game ground check's contract: the highest
+// ground at x/z at or below the asked height. A pier slab at 89.4 over the sea floor at -5100 (the
+// Windfall pier), and a grass hill rising to 301 with no ground under its surface but the sea floor.
+void ray_pick() {
+    using story_notebook::WorldPoint;
+    auto world = [](double x, double y, double z, float& h) {
+        (void)z;
+        float best = -1e30f;
+        bool any = false;
+        auto offer = [&](float g) { if (g <= y && g > best) best = g, any = true; };
+        offer(-5100);                                                 // the sea floor
+        if (x > 800 && x < 1100) offer(89.4f);                        // the pier, a thin slab
+        if (x < -1500) offer(float(std::min(301.0, 301 + (x + 2000) * 0.1)));  // the hill
+        h = best;
+        return any;
+    };
+    WorldPoint hit;
+    // straight down onto the pier: its top, not the sea floor below
+    CHECK(editor::ray_ground({927.8f, 600, -197972.2f}, {0, -1, 0}, 20000, world, hit));
+    CHECK(std::fabs(hit.y - 89.4f) < 0.2f && std::fabs(hit.x - 927.8f) < 0.01f);
+    // straight down onto the grass
+    CHECK(editor::ray_ground({-2244.1f, 805, -199433.7f}, {0, -1, 0}, 20000, world, hit));
+    CHECK(std::fabs(hit.y - 276.59f) < 0.5f);
+    // slanted down from the camera: the hill where the ray first reaches it
+    const float n = std::sqrt(0.6f * 0.6f * 2 + 0.25f);
+    CHECK(editor::ray_ground({-2244.1f, 805, -199433.7f}, {0.6f / n, -0.6f / n, -0.5f / n}, 20000, world, hit));
+    CHECK(hit.x < -1500 && hit.y > 250 && hit.y < 302);
+    // slanted down across the pier from the side: the pier's top
+    CHECK(editor::ray_ground({700, 300, 0}, {0.7071f, -0.7071f, 0}, 20000, world, hit));
+    CHECK(std::fabs(hit.y - 89.4f) < 0.2f && hit.x > 800 && hit.x < 1100);
+    // nothing below within range, or a ray up into the sky: no hit
+    CHECK(!editor::ray_ground({0, 600, 0}, {0, -1, 0}, 1000, world, hit));
+    CHECK(!editor::ray_ground({0, 600, 0}, {0, 1, 0}, 20000, world, hit));
+}
+
+
+// The game objects palette (commands_game_objects.cpp): list_game_objects with the player's game files, add_actor
+// "game:<id>" (the manifest's requires), variants, the transform limits, undo; game_archive on a game folder.
+struct GameObjectHost : FakeHost {
+    std::string game_archive(const std::string& archive) override { return archive == "Oyashi" || archive == "Lwood" ? "Pack/first_szs_permanent.pack" : ""; }
+    bool live_kind(const std::string& type, bool fallback) override { return type.rfind("game:", 0) == 0 ? true : fallback; }
+};
+void game_objects() {
+    GameObjectHost host;
+    editor::Session s(&host);
+    s.add_package("editor-test", "Editor test", "", json(kManifest));
+    Value r = s.run("list_game_objects");
+    const auto& catalogue = story_game_objects::catalogue();
+    CHECK(ok(r) && r.get("result").get("catalogue").number == catalogue.version && r.get("result").get("objects").array.size() == catalogue.entries.size());
+    for (const auto& o : r.get("result").get("objects").array) {
+        if (o.get("id").string() == "palm") CHECK(o.get("available").boolean && o.get("type").string() == "game:palm" && o.get("live").boolean && o.get("scale").get("max").number == 1);
+        if (o.get("id").string() == "table") CHECK(!o.get("available").boolean && o.get("why").string() == "not available in your game files" && o.get("variants").array.size() == 3);
+    }
+    r = s.run("list_game_objects", json(R"({"query": "STOOL"})"));
+    CHECK(ok(r) && r.get("result").get("objects").array.size() == 1 && r.get("result").get("objects").array[0].get("id").string() == "table");
+    r = s.run("list_game_objects", json(R"({"category": "trees and plants"})"));
+    {
+        std::set<std::string> categories;
+        size_t trees = 0;
+        for (const auto& e : catalogue.entries) categories.insert(e.category), trees += e.category == "Trees and plants";
+        CHECK(ok(r) && r.get("result").get("objects").array.size() == trees && r.get("result").get("categories").array.size() == categories.size());
+    }
+    // a shared batch (grass) says that it changes when the room loads again; its variants name their units
+    r = s.run("list_game_objects", json(R"({"query": "grass"})"));
+    for (const auto& o : r.get("result").get("objects").array)
+        if (o.get("id").string() == "grass") CHECK(o.get("batch").string() == "grass" && o.get("note").string().find("room loads again") != std::string::npos && o.get("variants").array[2].get("units").number == 21);
+    // without the game: availability unknown
+    editor::Session offline;
+    offline.add_package("editor-test", "Editor test", "", json(kManifest));
+    r = offline.run("list_game_objects");
+    CHECK(ok(r) && r.get("result").get("objects").array[0].get("available").type == Value::Null);
+
+    // add: at Link, snapped, the manifest names the catalogue version it needs; one undo step
+    CHECK(!s.manifest("editor-test")->get("requires").object.count("game_objects"));
+    r = s.run("add_actor", json(R"({"type": "game:palm"})"));
+    CHECK(ok(r) && r.get("result").get("id").string() == "palm");
+    const Value* a = actor_of(s, "palm");
+    CHECK(a && a->get("actor").string() == "game:palm" && a->get("position").get("y").number == 5 && a->get("rotation").get("y").number == 0.5);
+    CHECK(a && a->get("variant").type == Value::Null && a->get("flag").type == Value::Null && a->get("params").type == Value::Null);
+    CHECK(s.manifest("editor-test")->get("requires").get("game_objects").number == 1);
+    CHECK(host.last_changed.size() == 1 && host.last_changed[0] == "palm");
+    r = s.run("add_actor", json(R"({"type": "game:table", "options": {"variant": "stool"}})"));
+    CHECK(ok(r) && r.get("result").get("id").string() == "table" && actor_of(s, "table")->get("variant").string() == "stool");
+    CHECK(!ok(s.run("add_actor", json(R"({"type": "game:table", "options": {"variant": "throne"}})"))));
+    CHECK(!ok(s.run("add_actor", json(R"({"type": "game:castle"})"))));
+    CHECK(!ok(s.run("add_actor", json(R"({"type": "game:palm", "id": "Bad Id"})"))));
+    // the Inspector's picker: variant, turn, scale within the limits; everything else refused
+    CHECK(ok(s.run("set_actor", json(R"({"id": "table", "property": "variant", "value": "stool-open"})"))) && actor_of(s, "table")->get("variant").string() == "stool-open");
+    CHECK(!ok(s.run("set_actor", json(R"({"id": "table", "property": "variant", "value": "nope"})"))) && actor_of(s, "table")->get("variant").string() == "stool-open");
+    CHECK(ok(s.run("set_actor", json(R"({"id": "table", "property": "variant", "value": null})"))) && actor_of(s, "table")->get("variant").type == Value::Null);
+    CHECK(!ok(s.run("set_actor", json(R"({"id": "table", "property": "params", "value": 1})"))));
+    CHECK(!ok(s.run("set_actor", json(R"({"id": "table", "property": "flag", "value": "f"})"))));
+    CHECK(ok(s.run("rotate_actor", json(R"({"id": "palm", "rotation": {"x": 0, "y": 45, "z": 0}})"))));
+    CHECK(!ok(s.run("rotate_actor", json(R"({"id": "palm", "rotation": {"x": 10, "y": 45, "z": 0}})"))));
+    CHECK(!ok(s.run("scale_actor", json(R"({"id": "palm", "scale": {"x": 1.5, "y": 1.5, "z": 1.5}})"))));
+    CHECK(ok(s.run("add_actor", json(R"({"type": "game:tree-large"})"))));
+    CHECK(ok(s.run("scale_actor", json(R"({"id": "tree-large", "scale": {"x": 1.5, "y": 1.5, "z": 1.5}})"))));
+    CHECK(!ok(s.run("scale_actor", json(R"({"id": "tree-large", "scale": {"x": 2, "y": 2, "z": 2}})"))));
+    // duplicate and remove with undo
+    CHECK(ok(s.run("duplicate_actor", json(R"({"id": "palm"})"))) && actor_of(s, "palm-2") && actor_of(s, "palm-2")->get("actor").string() == "game:palm");
+    CHECK(ok(s.run("remove_actor", json(R"({"id": "palm-2", "confirm": true})"))) && !actor_of(s, "palm-2"));
+    CHECK(ok(s.run("undo")) && actor_of(s, "palm-2"));
+    CHECK(ok(s.run("validate")));
+    // undo back to before the first game object: the requirement goes with it
+    while (actor_of(s, "palm")) CHECK(ok(s.run("undo")));
+    CHECK(s.manifest("editor-test")->get("requires").get("game_objects").type == Value::Null);
+
+    // game_archive: a pack member (read from the pack's header) or content/Common/Object/<name>.szs
+    const fs::path dir = fs::temp_directory_path() / "wwhd-editor-game-objects";
+    fs::remove_all(dir);
+    fs::create_directories(dir / "content" / "Common" / "Pack");
+    fs::create_directories(dir / "content" / "Common" / "Object");
+    std::ofstream(dir / "content" / "Common" / "Object" / "Rock.szs") << "Yaz0";
+    {
+        std::vector<uint8_t> d(0x14 + 0xC + 16 + 8 + 16, 0);
+        auto be32 = [&](size_t at, uint32_t v) { for (int i = 0; i < 4; i++) d[at + i] = uint8_t(v >> (24 - 8 * i)); };
+        auto be16 = [&](size_t at, uint16_t v) { d[at] = uint8_t(v >> 8), d[at + 1] = uint8_t(v); };
+        std::memcpy(&d[0], "SARC", 4); be16(4, 0x14); be16(6, 0xFEFF); be32(8, uint32_t(d.size())); be32(0xC, uint32_t(d.size()));
+        std::memcpy(&d[0x14], "SFAT", 4); be16(0x18, 0xC); be16(0x1A, 1);
+        be32(0x20 + 4, 0x01000000); be32(0x20 + 8, 0); be32(0x20 + 12, 0);
+        std::memcpy(&d[0x30], "SFNT", 4); be16(0x34, 8);
+        std::memcpy(&d[0x38], "Palm.szs", 8);
+        std::ofstream(dir / "content" / "Common" / "Pack" / "test.pack", std::ios::binary).write(reinterpret_cast<const char*>(d.data()), std::streamsize(d.size()));
+    }
+    CHECK(editor::game_archive(dir.string(), "Palm") == "Pack/test.pack");
+    CHECK(editor::game_archive(dir.string(), "Rock") == "Object");
+    CHECK(editor::game_archive(dir.string(), "Castle").empty());
+    CHECK(editor::game_archive(dir.string(), "../Rock").empty());
+    fs::remove_all(dir);
+}
+
+void route_commands() {
+    // an actor's route: points at Link, the camera or a position (on the ground), moved, reordered and
+    // removed, the settings; one undo step each; the villagers without a walk are refused with the reason
+    FakeHost host;
+    editor::Session s(&host);
+    s.add_package("editor-test", "Editor test", "", json(kManifest));
+    Value r = s.run("add_actor", json(R"({"type": "resident", "id": "walker", "at": "position", "position": {"x": 0, "y": 5, "z": 0}, "stage": "sea", "room": 44, "options": {"resident": "uo2"}})"));
+    CHECK(ok(r));
+    const auto path = [&]() { return actor_of(s, "walker")->get("path"); };
+    r = s.run("add_route_point", json(R"({"id": "walker", "at": "position", "position": {"x": 100, "y": 50, "z": 0}})"));
+    CHECK(ok(r) && r.get("result").get("point").number == 1);
+    CHECK(path().get("points").array.size() == 1 && path().get("points").array[0].get("y").number == 5 && path().get("mode").string() == "once");
+    CHECK(path().get("speed").type == Value::Null);  // a resident: its own pace
+    CHECK(host.last_changed.size() == 1 && host.last_changed[0] == "walker" && !host.last_actors.empty());
+    bool walks = false;
+    for (const auto& a : host.last_actors)
+        if (a.id == "walker") walks = a.path.points.size() == 1 && !a.path.speed_given;
+    CHECK(walks);
+    // at Link (1, 2, 3 -> ground 5), at the camera (off: refused), after point 0 (first)
+    CHECK(ok(s.run("add_route_point", json(R"({"id": "walker"})"))) && path().get("points").array.size() == 2 && path().get("points").array[1].get("x").number == 1);
+    CHECK(!ok(s.run("add_route_point", json(R"({"id": "walker", "at": "camera"})"))));
+    host.camera_on = true;
+    r = s.run("add_route_point", json(R"({"id": "walker", "at": "camera", "after": 0})"));
+    CHECK(ok(r) && r.get("result").get("point").number == 1 && path().get("points").array[0].get("x").number == 100 && path().get("points").array.size() == 3);
+    // move, reorder, remove
+    CHECK(ok(s.run("move_route_point", json(R"({"id": "walker", "point": 2, "position": {"x": 200, "y": 5, "z": 50}})"))) && path().get("points").array[1].get("x").number == 200);
+    CHECK(!ok(s.run("move_route_point", json(R"({"id": "walker", "point": 4, "position": {"x": 200, "y": 5, "z": 50}})"))));
+    CHECK(ok(s.run("reorder_route_point", json(R"({"id": "walker", "point": 3, "to": 1})"))) && path().get("points").array[0].get("x").number == 1 && path().get("points").array[2].get("x").number == 200);
+    CHECK(ok(s.run("remove_route_point", json(R"({"id": "walker", "point": 1})"))) && path().get("points").array.size() == 2);
+    // settings: speed within half to twice its own pace (uo2: 30 units a second), mode, pauses; null: its own pace
+    CHECK(ok(s.run("set_route", json(R"({"id": "walker", "speed": 45, "mode": "back_and_forth", "pauses": true})"))));
+    CHECK(path().get("speed").number == 45 && path().get("mode").string() == "back_and_forth" && path().get("pauses").boolean);
+    CHECK(!ok(s.run("set_route", json(R"({"id": "walker", "speed": 90})"))) && path().get("speed").number == 45);  // refused: twice is 60
+    CHECK(!ok(s.run("set_route", json(R"({"id": "walker", "mode": "circle"})"))));
+    CHECK(!ok(s.run("set_route", json(R"({"id": "walker", "walk": "run"})"))));  // a resident walks with its own walk
+    CHECK(ok(s.run("set_route", json(R"({"id": "walker", "speed": null, "pauses": false})"))) && path().get("speed").type == Value::Null && path().get("pauses").type == Value::Null);
+    // undo: one step each
+    CHECK(ok(s.run("undo")) && path().get("speed").number == 45);
+    CHECK(ok(s.run("redo")) && path().get("speed").type == Value::Null);
+    // the ground under each segment: start -> 1 -> 2 (once): two segments on the ground at y 5
+    r = s.run("check_route", json(R"({"id": "walker"})"));
+    CHECK(ok(r) && r.get("result").get("segments").array.size() == 2 && r.get("result").get("segments").array[0].get("ok").boolean);
+    CHECK(r.get("result").get("segments").array[0].get("from").number == 0 && r.get("result").get("segments").array[1].get("to").number == 2);
+    host.has_ground = false;
+    r = s.run("check_route", json(R"({"id": "walker"})"));
+    CHECK(ok(r) && !r.get("result").get("segments").array[0].get("ok").boolean && r.get("result").get("segments").array[0].get("problem").string() == "no ground");
+    host.has_ground = true;
+    CHECK(ok(s.run("set_route", json(R"({"id": "walker", "mode": "loop"})"))));
+    r = s.run("check_route", json(R"({"id": "walker"})"));
+    CHECK(ok(r) && r.get("result").get("segments").array.size() == 3 && r.get("result").get("segments").array[2].get("to").number == 0);
+    CHECK(!ok(s.run("route_status", json(R"({"id": "walker"})"))));  // this host has no game: no live route
+    // the last point removed: no route; remove_route
+    CHECK(ok(s.run("remove_route_point", json(R"({"id": "walker", "point": 1})"))) && path().get("points").array.size() == 1);
+    r = s.run("remove_route_point", json(R"({"id": "walker", "point": 1})"));
+    CHECK(ok(r) && r.get("result").get("route_removed").boolean && path().type == Value::Null);
+    CHECK(!ok(s.run("set_route", json(R"({"id": "walker", "speed": 30})"))));  // no route yet
+    CHECK(ok(s.run("undo")) && path().type == Value::Object);
+    CHECK(ok(s.run("remove_route", json(R"({"id": "walker"})"))) && path().type == Value::Null);
+    // a villager without a walk of its own, the seated man and a sign: refused with the reason
+    CHECK(ok(s.run("add_actor", json(R"({"type": "resident", "id": "chatter", "options": {"resident": "ub1"}})"))));
+    r = s.run("add_route_point", json(R"({"id": "chatter"})"));
+    CHECK(!ok(r) && r.get("error").string().find("no walking animation of its own") != std::string::npos && actor_of(s, "chatter")->get("path").type == Value::Null);
+    CHECK(ok(s.run("add_actor", json(R"({"type": "resident", "id": "seated", "options": {"resident": "ym1"}})"))));
+    CHECK(!ok(s.run("add_route_point", json(R"({"id": "seated"})"))));
+    CHECK(ok(s.run("add_actor", json(R"({"type": "sign", "id": "board"})"))));
+    r = s.run("add_route_point", json(R"({"id": "board"})"));
+    CHECK(!ok(r) && r.get("error").string().find("only residents") != std::string::npos);
+    // the pure helpers the Inspector uses
+    CHECK(editor::resident_pace(*actor_of(s, "walker")) == 30 && editor::resident_pace(*actor_of(s, "chatter")) == 0 && editor::route_refusal(*actor_of(s, "walker")).empty());
+}
+
 int main(int argc, char** argv) {
     // editor_test --game <game dir> [stage room]: what the editor reads from a game folder (manual check)
     if (argc >= 3 && std::string(argv[1]) == "--game") {
@@ -892,8 +1167,12 @@ int main(int argc, char** argv) {
     locations();
     records();
     package_files(argv[1]);
+    live_kinds_note();
     building(argv[1]);
+    game_objects();
+    route_commands();
     stage_tables();
+    ray_pick();
     if (g_failures) {
         std::fprintf(stderr, "editor_test: %d failure(s)\n", g_failures);
         return 1;

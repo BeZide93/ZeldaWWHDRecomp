@@ -17,6 +17,9 @@ namespace input { struct PadState; }
 namespace mods {
 
 // ---- switches (menu + env) ----
+// Experimental partial coverage: Leaf gust yaw/pitch plus supported initial item facing.
+bool camera_directed_items();
+void set_camera_directed_items(bool on);
 bool direct_camera();
 bool letterbox_while_targeting();
 void set_letterbox_while_targeting(bool on);
