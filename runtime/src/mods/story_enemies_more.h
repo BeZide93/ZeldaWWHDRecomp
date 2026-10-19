@@ -72,6 +72,36 @@ inline constexpr uint16_t kStalfosClub = 0x1CF;     // the club's profile (Boko)
 inline constexpr uint32_t kStalfosClubParams = 2;   // Type_STALFOS_MACE
 inline constexpr uint16_t kStalfosUpperBody = 0xBE; // the split's second Stalfos (refused)
 
+// ---------------------------------------------------------------- Mothula (d_a_gm)
+// Parameters (story_enemy_variants "mothula"): 0xFF01FFFF ground (type 1, no wings), 0xFF02FFFF winged
+// (type 2); never type 0 (the Forbidden Woods mini-boss with its cutscene, Link and camera writes).
+// Byte 3 0xFF: no switch; angle z 0: no save switch; setID 0xFFFF: onActor is a no-op.
+// Children: its moths are the game's own Morths (fopAcM_createChild 0xCD, parameters 4/5) with their
+// native drops and their own cling statics: an owned Mothula's release is refused (story_enemies), so it
+// fights alone (place Morths beside it instead). A winged one's lost wings are falling wing pieces
+// (0xCC, no colliders, no save writes) that delete themselves. Its dive and wind cylinders are also given
+// to the area manager (grass); that is skipped for an owned one, so they reach Link only through the
+// pair policy. A winged one that dives far from where it was placed (2000) turns back home (dive state
+// 37, the game's own retreat). Colliders on mStts 0x788; enemyice 0xCA4, enemyfire 0x105C.
+inline constexpr Collider kMothulaColliders[] = {
+    {0x7C4, 0x788, 0}, {0x8F4, 0x788, 0}, {0xA24, 0x788, 0}, {0xB54, 0x788, 0}, {0xD10, 0xCD4, 0xCA4}, {0x1138, 0x10FC, 0x105C}};
+inline bool mothula_verify(uint32_t a, uint32_t p) {
+    const unsigned action = ld8(a + 0x3EC);
+    return ld8(a + 0x3E9) == 0 && ld8(a + 0x3EA) == ((p >> 16) & 0xFF) && ld8(a + 0x3EB) == 0xFF && ld8(a + 0x3F2) == 0 &&
+           (action <= 5 || action == 10);
+}
+inline bool mothula_terminal(uint32_t a) { return ld8(a + 0x3EC) == 10 && ld16(a + 0x3F8) == 101; }
+inline constexpr uint32_t kCreateChild = CANONICAL_CODE_ID(0x025D5A20).value(), kAreaManagerSet = CANONICAL_CODE_ID(0x02516C14).value();
+inline constexpr uint16_t kMothulaMoth = 0xCD;
+// a winged Mothula diving (dive action 3, states 34..36) farther than 2000 from its home (mHomePos 0x470)
+inline bool mothula_strayed(uint32_t a) {
+    const unsigned state = ld16(a + 0x3F8);
+    if (ld8(a + 0x3EC) != 3 || state < 34 || state > 36) return false;
+    const float dx = u32_as_f32(ld32(a + 0x314)) - u32_as_f32(ld32(a + 0x470)), dz = u32_as_f32(ld32(a + 0x31C)) - u32_as_f32(ld32(a + 0x478));
+    return dx * dx + dz * dz > 2000.0f * 2000.0f;
+}
+inline void mothula_return(uint32_t a) { st16(a + 0x3F8, 37); }
+
 // ---------------------------------------------------------------- Morth (d_a_ks)
 // Parameter 0xFFFFFF03: type 3, the ordinary single Morth (never the spawners 0/1/6, which create
 // unowned Morths, nor the Mothula child 4/5, which needs a parent). No switches, save bits or paths.
@@ -166,6 +196,10 @@ inline constexpr Native kNatives[] = {
      CANONICAL_CODE_ID(0x021AA4C8).value(), CANONICAL_CODE_ID(0x021A7F94).value(), CANONICAL_CODE_ID(0x021A71EC).value(),
      CANONICAL_CODE_ID(0x021A9EC8).value(), [] { return GD(0x100136C0); }, 0xFFFFFF03u, 0, 0x924, {0xCDC, 0}, true,
      morth_verify, morth_dying, nullptr, 0x547, false},
+    {Kind::Mothula, "mothula", {0x7FE2, 0xCC, 0x1290, kMothulaColliders, std::size(kMothulaColliders)},
+     CANONICAL_CODE_ID(0x021507C4).value(), CANONICAL_CODE_ID(0x0214D128).value(), CANONICAL_CODE_ID(0x0214BF60).value(),
+     CANONICAL_CODE_ID(0x0214FFD8).value(), [] { return GD(0x1000FDD4); }, 0xFF01FFFFu, 0, 0xCA4, {0x105C, 0}, true,
+     mothula_verify, mothula_terminal, nullptr, 0x3EC, false},
     {Kind::Armos, "armos", {0x7FE6, 0xCB, 0xF60, kArmosColliders, std::size(kArmosColliders)},
      CANONICAL_CODE_ID(0x0204FE84).value(), CANONICAL_CODE_ID(0x0204D3A4).value(), CANONICAL_CODE_ID(0x0204C5F8).value(),
      CANONICAL_CODE_ID(0x0204F9D0).value(), [] { return GD(0x1000702C); }, 0xFF00FF00u, 0, 0xBA8, {0, 0}, true,

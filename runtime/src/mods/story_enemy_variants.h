@@ -65,11 +65,14 @@ inline constexpr Variant kVariants[] = {
     // byte 2 no path, byte 3 on the ground (it stays at the ground's height).
     {"bubble", "red", 0xFFFFFF00u, "Red Bubble", "A Red Bubble: a flaming skull; its flames set Link on fire. Strike it, or first put its fire out with the Deku Leaf's wind or a bomb."},
     {"bubble", "blue", 0xFFFFFF01u, "Blue Bubble", "A Blue Bubble: its touch curses Link (no sword or items for a moment). Put its fire out with the Deku Leaf's wind or a bomb, then strike the skull."},
+    // Mothula (d_a_gm): type 1 on the ground or type 2 with wings; no switches (story_enemies_more.h)
+    {"mothula", "ground", 0xFF01FFFFu, "Mothula", "A Mothula on the ground, without wings.", 0x0000},
+    {"mothula", "winged", 0xFF02FFFFu, "Winged Mothula", "A Mothula that flies and dives at Link; strike its wings off first.", 0x0000},
 };
 
 // The native enemies of the table-driven adapter (story_enemies_more.h) that mods may place: the
 // manifest, the validator and the editor accept these names like the ones they list themselves.
-inline constexpr const char* kMoreEnemies[] = {"stalfos", "morth", "magtail", "armos", "armos_knight"};
+inline constexpr const char* kMoreEnemies[] = {"stalfos", "mothula", "morth", "magtail", "armos", "armos_knight"};
 inline bool more_enemy(const std::string& actor) {
     for (const char* name : kMoreEnemies)
         if (actor == name) return true;
