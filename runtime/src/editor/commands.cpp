@@ -132,7 +132,7 @@ const std::vector<CommandInfo> kCommands = {
       {"distant", "object|null", "low-detail model; null removes it"}, {"shoreline", "object|null", "coast foam model; null removes it"},
       {"chart_marker", "object|null", "island marker; null removes it"}, {"arrival", "object|null", "arrival notice; null removes it"}, {"mod", "string", ""}}, true},
     {"preview_collision", "Returns world-space collision vertices and edges for a wireframe preview, with placement findings.",
-     {{"id", "string", "placed world object", true}, {"mod", "string", ""}}},
+     {{"id", "string", "placed world object", true}, {"position", "point", "a trial position (default: its own)"}, {"yaw", "number", "a trial turn in degrees"}, {"mod", "string", ""}}},
     {"placement_conflicts", "Returns placement conflicts and collision budget findings for a world object.",
      {{"id", "string", "placed world object", true}, {"position", "point", "a trial position (default: its own)"}, {"yaw", "number", "a trial turn in degrees"}, {"mod", "string", ""}}},
     {"prepare_collision", "Prepares a static model's collision for live world-object placement.",
@@ -465,7 +465,21 @@ bool model_files(const std::string& dir, const Value& manifest, std::string& why
     return true;
 }
 
-bool world_placements(Host* host, const std::string& mod, const Value& before, const Value& next, bool all, std::string& why) {
+// What the change left out of the game: listed in the result (MCP) and said in its note.
+void note_held(const std::vector<std::string>& held, Value& result) {
+    if (held.empty()) return;
+    result["not_active"].type = Value::Array;
+    for (const auto& h : held) result["not_active"].array.push_back(Value(h));
+    std::string text;
+    for (const auto& h : held) text += (text.empty() ? "" : " ") + h + ".";
+    const std::string note = text + " It isn't in the game until it stands where it fits; Check lists it.";
+    result["note"] = result.get("note").string().empty() ? note : result.get("note").string() + " " + note;
+}
+// A world object (or island building) where it can't stand: with `held`, it is listed there ("house-a can't stand here:
+// in the way: ...") and the change goes ahead (the editor keeps it as a preview, the game leaves it out until it is
+// moved where it fits); without, it is the refusal. A query that can't be made is always a refusal.
+bool world_placements(Host* host, const std::string& mod, const Value& before, const Value& next, bool all, std::string& why,
+                      std::vector<std::string>* held = nullptr) {
     if (!host) return true;
     std::vector<ManifestActor> actors;
     if (!story_notebook::parse_actors(next, actors, why)) return false;
@@ -498,7 +512,14 @@ bool world_placements(Host* host, const std::string& mod, const Value& before, c
                 if (!c.get("native").string().empty()) one += " [" + c.get("native").string() + "]";
                 list += (list.empty() ? "" : "; ") + one;
             }
-            why = "world object " + actor.id + ": " + (list.empty() ? std::string("placement could not be cleared") : "in the way: " + list);
+            // a single small thing: how far to move
+            if (conflicts.size() == 1 && conflicts[0].get("move").number > 0) list += " (move it about " + std::to_string(int(conflicts[0].get("move").number)) + " units away)";
+            const std::string problem = actor.id + " can't stand here: " + (list.empty() ? std::string("placement could not be cleared") : "in the way: " + list);
+            if (held) {
+                held->push_back(problem);
+                continue;
+            }
+            why = "world object " + problem;
             return false;
         }
     }
@@ -515,6 +536,20 @@ const std::map<std::string, std::string>& stage_names() {
 }
 
 }  // namespace
+
+std::vector<Problem> placement_problems(Host* host, const std::string& mod, const Value& manifest) {
+    std::vector<Problem> out;
+    std::vector<std::string> held;
+    std::string why;
+    std::vector<ManifestActor> actors;
+    if (!story_notebook::parse_actors(manifest, actors, why)) return out;  // package_problems names that
+    if (!world_placements(host, mod, manifest, manifest, true, why, &held)) {
+        out.push_back({why, "package", "", "", ""});
+        return out;
+    }
+    for (const auto& h : held) out.push_back({h, "actor", h.substr(0, h.find(" can't stand here")), "position", ""});
+    return out;
+}
 
 const std::vector<CommandInfo>& command_list() { return kCommands; }
 const CommandInfo* find_command(const std::string& name) {
@@ -1022,7 +1057,8 @@ bool Session::change(Package& p, const std::string& label, const std::function<b
         return true;
     }
     auto all = all_manifests();
-    if (!validate_package(p.mod, next, all, why) || !model_files(p.dir, next, why) || !world_placements(host_, p.mod, p.manifest, next, false, why)) return false;
+    std::vector<std::string> held;
+    if (!validate_package(p.mod, next, all, why) || !model_files(p.dir, next, why) || !world_placements(host_, p.mod, p.manifest, next, false, why, &held)) return false;
     const bool actors_changed = !(next.get("actors") == p.manifest.get("actors")) || !(next.get("models") == p.manifest.get("models"));
     const bool story_changed = story_reload::story_changed(p.manifest, next);
     const bool scenes_changed = !(next.get("scenes") == p.manifest.get("scenes"));  // read when the game starts
@@ -1033,6 +1069,7 @@ bool Session::change(Package& p, const std::string& label, const std::function<b
     p.manifest = std::move(next);
     result["changed"] = true;
     if (actors_changed) apply_live(p, before, result);
+    note_held(held, result);
     if (story_changed) apply_story(p, result);
     if (scenes_changed) {
         result["live"] = false;
@@ -1056,13 +1093,15 @@ void Session::apply_story(const Package& p, Value& result) {
 bool Session::restore(const std::string& mod, const Value& manifest, Value& result, std::string& why) {
     auto* p = const_cast<Package*>(find(mod));
     if (!p) return why = "the mod of this step is gone", false;
-    if (!world_placements(host_, mod, p->manifest, manifest, false, why)) return false;
+    std::vector<std::string> held;
+    if (!world_placements(host_, mod, p->manifest, manifest, false, why, &held)) return false;
     const bool actors_changed = !(manifest.get("actors") == p->manifest.get("actors")) || !(manifest.get("models") == p->manifest.get("models"));
     const bool story_changed = story_reload::story_changed(p->manifest, manifest);
     const Value before = p->manifest;
     p->manifest = manifest;
     result["mod"] = mod;
     if (actors_changed) apply_live(*p, before, result);
+    note_held(held, result);
     if (story_changed) apply_story(*p, result);  // undo and redo: the same live update
     return true;
 }
@@ -1323,8 +1362,11 @@ Value Session::dispatch(const std::string& command, const Value& p, std::string&
         Package* pkg = package(p, why);
         if (!pkg) return r;
         std::string problem;
-        if (!validate_package(pkg->mod, pkg->manifest, all_manifests(), problem) || !model_files(pkg->dir, pkg->manifest, problem) || !world_placements(host_, pkg->mod, pkg->manifest, pkg->manifest, true, problem))
+        // a placement where it can't stand is saved (the work is kept) and listed as a problem (Check and export refuse it)
+        std::vector<std::string> held;
+        if (!validate_package(pkg->mod, pkg->manifest, all_manifests(), problem) || !model_files(pkg->dir, pkg->manifest, problem) || !world_placements(host_, pkg->mod, pkg->manifest, pkg->manifest, true, problem, &held))
             return why = "not saved: " + problem, r;
+        note_held(held, r);
         const fs::path file = fs::path(pkg->dir) / "manifest.json";
         std::error_code ec;
         if (pkg->dir.empty() || !fs::is_regular_file(file, ec) || fs::is_symlink(file, ec)) return why = "the package has no manifest.json to replace", r;

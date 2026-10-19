@@ -866,7 +866,9 @@ Value Session::dispatch_build(const std::string& command, const Value& p, std::s
         Package* pkg = package(p, why);
         if (!pkg) return r;
         r["problems"] = array();
-        for (const auto& pr : package_problems(pkg->mod, pkg->manifest, all_manifests(), pkg->dir)) {
+        auto problems = package_problems(pkg->mod, pkg->manifest, all_manifests(), pkg->dir);
+        for (auto& pr : placement_problems(host_, pkg->mod, pkg->manifest)) problems.push_back(std::move(pr));
+        for (const auto& pr : problems) {
             Value v;
             v["message"] = pr.message;
             v["kind"] = pr.kind;
@@ -891,7 +893,8 @@ Value Session::dispatch_build(const std::string& command, const Value& p, std::s
     if (command == "export_package") {
         Package* pkg = package(p, why);
         if (!pkg) return r;
-        const auto problems = package_problems(pkg->mod, pkg->manifest, all_manifests(), pkg->dir);
+        auto problems = package_problems(pkg->mod, pkg->manifest, all_manifests(), pkg->dir);
+        for (auto& pr : placement_problems(host_, pkg->mod, pkg->manifest)) problems.push_back(std::move(pr));
         if (!problems.empty()) {
             why = "not exported: " + std::to_string(problems.size()) + " problem(s), the first: " + problems.front().message + " (check_package lists them)";
             return r;

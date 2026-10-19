@@ -705,9 +705,16 @@ public:
             if (!story_actors::editor_update(mod, actors, changed, w, &pending, c)) set_status("Live update refused: " + w);
             else if (!pending.empty()) {
                 // grass, flowers and small trees (game objects in the stage's shared batch) wait for the room, not a restart
-                std::string list, room;
-                for (const auto& p : pending) (p.find("(Reload room)") != std::string::npos ? room : list) += ((p.find("(Reload room)") != std::string::npos ? room : list).empty() ? "" : "; ") + p;
-                set_status(list.empty() ? "Saved in the package; " + room : "Saved in the package; after a restart: " + list + (room.empty() ? "" : "; " + room));
+                // a world object where it can't stand: not in the game until it is moved (said as such, not as a restart)
+                std::string list, room, held;
+                for (const auto& p : pending) {
+                    std::string& to = p.find("(Reload room)") != std::string::npos ? room : p.find(": can't stand here") != std::string::npos ? held : list;
+                    to += (to.empty() ? "" : "; ") + p;
+                }
+                std::string status = held.empty() ? "" : "Not in the game: " + held;
+                if (!list.empty() || !room.empty())
+                    status += (status.empty() ? "" : ". ") + (list.empty() ? "Saved in the package; " + room : "Saved in the package; after a restart: " + list + (room.empty() ? "" : "; " + room));
+                set_status(status);
             } else if (!changed.empty())
                 set_status("Updated " + std::to_string(changed.size()) + " actor(s) in the game");
         });

@@ -281,11 +281,12 @@ loads again, and full and portable save states keep them. A building may stand o
 in the way of what the island needs, by the same rule as every world object (world-objects.md): its
 footprint (with 50 units around it) must keep clear of the island's villagers and their walking routes,
 chests, doors, items, switches, the places where Link arrives, cutscene and message areas and other objects
-(an object whose size isn't known counts with a radius of 150 units). Grass, flowers, trees, palms and
+(an object whose size isn't known counts with a radius of 120 units; pots, signs, rupees, message and hint areas don't count, see world-objects.md). Grass, flowers, trees, palms and
 birds may be under it, and unlike other world objects it may stand against the island's slopes and walls
 as its original did. It also stays in its room's square and clear of other world
-objects. A place that isn't clear is refused with what is in the way (in the editor, the footprint turns
-red and says so; an MCP `add_actor` or move lists every reason, with the game's own names); a building that is refused when the game starts is left out with a line in the log.
+objects. A place that isn't clear is kept but not in the game: in the editor the footprint turns red and says what
+is in the way, an MCP `add_actor` or move returns `not_active` with every reason (with the game's own
+names), Check and export list it, and when the game starts it is left out with a line in the log.
 
 The buildings of one set share their materials: copies of one set in neighbouring rooms that are seen
 at once may share the light of one room.

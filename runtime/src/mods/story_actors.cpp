@@ -960,6 +960,15 @@ bool editor_update(const std::string& mod,const std::vector<ManifestActor>& acto
     std::set<std::string> listed;
     const auto is_changed=[&](const std::string& id){return std::find(changed.begin(),changed.end(),id)!=changed.end();};
     for(const auto& spec:actors){
+        // a world object (or island building) placed where it can't stand stays in the package but not in the game:
+        // the editor shows it as a preview until it is moved where it fits (an active copy leaves the game)
+        if(spec.world_object()&&spec.kind=="mod"&&g_models.contains({mod,spec.model})){
+            mods::json::Value status;std::string w;
+            if(mod_actor::world_object_query(mod,spec,false,status,w)&&!status.get("clear").boolean){
+                const auto& c=status.get("conflicts").array;
+                later.push_back(spec.id+": can't stand here"+(c.empty()?std::string():" ("+c.front().get("message").string()+")")+"; it isn't in the game until it stands where it fits");
+                continue;}
+        }
         listed.insert(spec.id);
         const auto it=own.find(spec.id);
         std::string reason;

@@ -224,11 +224,12 @@ void building_footprint(ImDrawList* dl, const View& v, const std::string& mod, c
     char key[192];
     std::snprintf(key, sizeof key, "%s/%s/%.0f/%.0f/%.0f/%.1f", mod.c_str(), id.c_str(), p[0], p[1], p[2], yaw);
     const double now = ImGui::GetTime();
-    if (g_footprint.key != key && now - g_footprint.asked > 0.15) {
+    // every move while dragging (a few times a second at most; the room's index is cached by the game)
+    if (g_footprint.key != key && now - g_footprint.asked > 0.08) {
         Value q, at;
         at["x"] = p[0], at["y"] = p[1], at["z"] = p[2];
         q["id"] = id, q["mod"] = mod, q["position"] = at, q["yaw"] = yaw;
-        const Value r = editor::query("placement_conflicts", q);
+        const Value r = editor::query("preview_collision", q);
         g_footprint = {key, now, r.get("ok").boolean ? r.get("result") : Value()};
     }
     const Value& r = g_footprint.result;
@@ -247,13 +248,67 @@ void building_footprint(ImDrawList* dl, const View& v, const std::string& mod, c
         static const int edges[12][2] = {{0, 1}, {2, 3}, {4, 5}, {6, 7}, {0, 2}, {1, 3}, {4, 6}, {5, 7}, {0, 4}, {1, 5}, {2, 6}, {3, 7}};
         for (const auto& e : edges) dl->AddLine(c[e[0]], c[e[1]], colour, clear ? 1.5f : 2.5f);
     }
+    // the footprint's grid on its base: green where it fits, red where it can't stand
+    for (int axis = 0; axis < 2; ++axis) {
+        const float from = axis ? lo[2] : lo[0], to = axis ? hi[2] : hi[0];
+        const int lines = std::clamp(int((to - from) / 200), 1, 24);
+        for (int k = 1; k < lines; ++k) {
+            const float t = from + (to - from) * k / lines;
+            const float a3[3] = {axis ? lo[0] : t, lo[1] + 2, axis ? t : lo[2]}, b3[3] = {axis ? hi[0] : t, lo[1] + 2, axis ? t : hi[2]};
+            ImVec2 a2, b2;
+            if (project(v, a3, a2) && project(v, b3, b2)) dl->AddLine(a2, b2, (colour & 0x00FFFFFF) | 0x90000000, 1.0f);
+        }
+    }
     if (clear) return;
+    // not in the game while it can't stand here: its shape as a ghost (the collision mesh's edges)
+    const auto& points = r.get("points").array;
+    std::vector<ImVec2> screen(points.size());
+    std::vector<bool> seen(points.size());
+    for (size_t k = 0; k < points.size(); ++k) {
+        const float q[3] = {float(num(points[k], "x")), float(num(points[k], "y")), float(num(points[k], "z"))};
+        seen[k] = project(v, q, screen[k]);
+    }
+    for (const auto& e : r.get("edges").array) {
+        if (e.array.size() != 2) continue;
+        const size_t a1 = size_t(e.array[0].number), b1 = size_t(e.array[1].number);
+        if (a1 < screen.size() && b1 < screen.size() && seen[a1] && seen[b1]) dl->AddLine(screen[a1], screen[b1], IM_COL32(255, 120, 110, 110), 1.0f);
+    }
     const auto& conflicts = r.get("conflicts").array;
     if (conflicts.empty()) return;
+    // what is in the way, made visible: a place as a ring of its reach, a route as its line
+    const ImU32 marks = IM_COL32(255, 190, 60, 230);
+    for (const auto& k : conflicts) {
+        if (k.get("path").type == Value::Array) {
+            ImVec2 prev;
+            bool have = false;
+            for (const auto& q : k.get("path").array) {
+                const float w[3] = {float(num(q, "x")), float(num(q, "y")) + 10, float(num(q, "z"))};
+                ImVec2 here;
+                const bool in = project(v, w, here);
+                if (in && have) dl->AddLine(prev, here, marks, 3.0f);
+                prev = here, have = in;
+            }
+        } else if (k.get("at").type == Value::Object) {
+            const float ax = float(num(k.get("at"), "x")), ay = float(num(k.get("at"), "y")) + 10, az = float(num(k.get("at"), "z"));
+            const float radius = float(k.get("reach").number);
+            ImVec2 prev;
+            bool have = false;
+            for (int j = 0; j <= 24; ++j) {
+                const float angle = float(j) / 24 * 6.2831853f, w[3] = {ax + radius * std::cos(angle), ay, az + radius * std::sin(angle)};
+                ImVec2 here;
+                const bool in = project(v, w, here);
+                if (in && have) dl->AddLine(prev, here, marks, 2.5f);
+                prev = here, have = in;
+            }
+        }
+    }
     // plain words first ("In the way: a door of the island (and 8 more)"); hovering lists every reason with the
     // game's own names, as the MCP error does
     std::string text = "In the way: " + conflicts.front().get("message").string();
     if (conflicts.size() > 1) text += " (and " + std::to_string(conflicts.size() - 1) + " more)";
+    // a single small thing: how far to move (100 units are about a metre, Link is about 150 tall)
+    else if (conflicts.front().get("move").number > 0)
+        text += " - move it about " + std::to_string(int(conflicts.front().get("move").number)) + " units away";
     // under the building's base, where the handle is (its top is often out of the picture)
     const float base[3] = {(lo[0] + hi[0]) / 2, lo[1], (lo[2] + hi[2]) / 2};
     ImVec2 at;

@@ -163,7 +163,7 @@ int main() {
     {
         using namespace story_world_placement;
         // a sea room's layout as the game stores it (world space): TGDR door, TRES chest, ACTR grass and a
-        // villager, SCOB tag area (scale 30 -> radius and height 300), RPAT route of two points
+        // villager, SCOB event trigger (scale 30 -> radius and height 300), RPAT route of two points
         using Bytes = std::vector<uint8_t>;
         Bytes b(4 + 6 * 12, 0);
         auto u16 = [](Bytes& d, size_t p, uint16_t v) { d[p] = uint8_t(v >> 8), d[p + 1] = uint8_t(v); };
@@ -188,7 +188,7 @@ int main() {
         at = chunk(2, "ACTR", 3, 32);
         entry(at, "kusax21", -200000, 180, 316300), entry(at + 32, "Oyashi", -200100, 180, 316400), entry(at + 64, "Ko1", -210000, 100, 330000);
         at = chunk(3, "SCOB", 1, 36);
-        entry(at, "TagMsg2", -190000, 100, 310000), b[at + 32] = 30, b[at + 33] = 30, b[at + 34] = 30;
+        entry(at, "TagEv", -190000, 100, 310000), b[at + 32] = 30, b[at + 33] = 30, b[at + 34] = 30;
         at = chunk(4, "RPAT", 1, 12);
         u16(b, at, 2), u32(b, at + 8, 0);
         at = chunk(5, "RPPN", 2, 16);
@@ -209,7 +209,7 @@ int main() {
         assert(reason(house(-210000, 0, 330400)) == "villager: a villager of the island [Ko1]");
         // the tag area's radius 300: 1000 units off is clear, 900 is not (its edge plus the margin)
         assert(check_building("sea", 44, house(-190000 + 670 + 400, 0, 310000), sea).empty());
-        assert(reason(house(-190000 + 670 + 300, 0, 310000)) == "cutscene area: a cutscene area of the island [TagMsg2]");
+        assert(reason(house(-190000 + 670 + 300, 0, 310000)) == "cutscene area: a cutscene area of the island [TagEv]");
         // another room's layout and another stage don't count
         assert(check_building("sea", 45, house(-205200, 400, 316200), sea).empty());
         // a dungeon room's layout is world space too
@@ -221,10 +221,54 @@ int main() {
         assert(building_extent(e).keep == Keep::None);
         e.name = "kytag05", e.scaled = true;
         assert(building_extent(e).keep == Keep::None);
-        e.name = "item";
+        e.name = "item", e.params = 0x07;  // a piece of heart
         assert(building_extent(e).keep == Keep::Item);
-        e.name = "Unknown", e.scaled = false;
-        assert(building_extent(e).keep == Keep::Object && building_extent(e).radius == 150);
+        e.name = "Unknown", e.scaled = false, e.params = 0;
+        assert(building_extent(e).keep == Keep::Object && building_extent(e).radius == 120);
+        // things that need no place of their own (they refused most open ground before): message, hint, sound,
+        // attention, pig and island-name tags, the sea stage's island LOD markers, GBA switches (HD: bomb switches
+        // only), invisible walls, pots, barrels and signs
+        for (const char* free : {"TagMsg2", "TagHt", "TagSo", "AttTagB", "TagKb", "TagIsl", "LOD44", "agbMARK", "agbF", "Akabe", "kotubo", "Ktaru", "Kanban", "Salvage", "ITat00", "ky_tag1"}) {
+            e.name = free, e.scaled = true;
+            assert(building_extent(e).keep == Keep::None);
+        }
+        // rupees and hearts lying about may be covered; a piece of heart (item 07) or a heart container (08) not
+        e.name = "item", e.scaled = false, e.params = 0x00000001;
+        assert(building_extent(e).keep == Keep::None);
+        e.params = 0x0000FF07;
+        assert(building_extent(e).keep == Keep::Item);
+        // a wide event trigger counts by its core of 300 units; a small one whole
+        e.name = "TagEv", e.scaled = true, e.scale[0] = e.scale[2] = 190, e.scale[1] = 20;
+        assert(building_extent(e).keep == Keep::Event && building_extent(e).radius == 300);
+        e.scale[0] = e.scale[2] = 15;
+        assert(building_extent(e).radius == 150);
+        // start points keep 100 units, props 60
+        e.tag = "PLYR", e.name = "Link", e.scaled = false;
+        assert(building_extent(e).keep == Keep::Start && building_extent(e).radius == 100);
+        e.tag = "ACTR", e.name = "bonbori";
+        assert(building_extent(e).keep == Keep::Object && building_extent(e).radius == 60);
+        // a single small thing says how far to move: the chest (radius 120, margin 50) 100 units inside its reach
+        {
+            Index one;
+            LayoutEntry chest{"sea", 44, "TRES", "takara3", {0, 0, 0}, {}, false, 0, 0};
+            one.layout.push_back(chest);
+            auto c = check_building("sea", 44, Bounds{{70, 0, -100}, {370, 100, 100}}, one);
+            assert(c.size() == 1 && c[0].kind == "chest" && c[0].move == 101 && c[0].reach == 120 && c[0].at.x == 0);
+            // its centre under the bounds: past the nearest side (70) and its reach (170)
+            c = check_building("sea", 44, Bounds{{-70, 0, -100}, {370, 100, 100}}, one);
+            assert(c.size() == 1 && c[0].move == 241);
+        }
+        // a route at sea level is the sea's (boats, swimmers): not in the way of a building on the island, in the
+        // way of what reaches down to the water
+        {
+            Index sea_routes;
+            sea_routes.routes.push_back({"sea", 44, "RPAT:9", {{-1000, 0, 0}, {1000, 0, 0}}, kRouteHalfWidth, false});
+            assert(check_building("sea", 44, Bounds{{-100, 30, -100}, {100, 500, 100}}, sea_routes).empty());
+            assert(check_building("sea", 44, Bounds{{-100, -50, -100}, {100, 500, 100}}, sea_routes).size() == 1);
+            sea_routes.routes[0].points = {{-1000, 150, 0}, {1000, 170, 0}};  // on the island: a villager's walk
+            auto c = check_building("sea", 44, Bounds{{-100, 150, -100}, {100, 500, 100}}, sea_routes);
+            assert(c.size() == 1 && c[0].kind == "villager route" && c[0].path.size() == 2);
+        }
     }
     std::puts("story_game_pieces_test: ok");
     return 0;

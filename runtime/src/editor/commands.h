@@ -375,6 +375,9 @@ std::string route_refusal(const Value& actor);
 // manager checks the whole), the model files, then the whole package. Empty: it is valid.
 std::vector<Problem> package_problems(const std::string& mod, const Value& manifest, const std::vector<std::pair<std::string, Value>>& all,
                                       const std::string& dir);
+// World objects and island buildings placed where they can't stand ("house-a can't stand here: in the way: ..."),
+// checked against the running game's placement index (commands.cpp); empty without a game.
+std::vector<Problem> placement_problems(Host* host, const std::string& mod, const Value& manifest);
 // The types `add_actor` places, with what each needs.
 struct ActorType {
     std::string type, label, group, help;

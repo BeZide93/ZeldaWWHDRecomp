@@ -166,9 +166,13 @@ your game files: the list says "(preparing...)" and the building appears in the 
 later, when it is ready. A building turns about the vertical axis only and keeps its size; it has no variants. While
 a building (or any world object) is selected or dragged, its footprint shows in the picture: green where it may stand, red
 with what is in the way (a villager, a villager route, a chest, a door, a cutscene area...) where it
-may not. The label names the first thing ("In the way: a door of the island (and 2 more)"); hover it
-to see them all, with the game's own names. Moving it there is refused with the same reasons. If your
-game files can't make it, the list shows the reason.
+may not, with a grid on its base. The label names the first thing ("In the way: a door of the island (and 2
+more)"); hover it to see them all, with the game's own names, and when a single small thing is in the way it
+says how far to move. What is in the way is drawn in the picture: a ring around a door, chest, villager or
+start point, a line along a villager's route. You can place it anywhere: on a red spot it is kept (and saved)
+as a see-through outline but isn't in the game; drag it until the grid turns green and it appears. The status
+bar, Check and export say which placements aren't in the game yet. If your game files can't make it, the list
+shows the reason.
 
 ### Routes: actors that walk
 

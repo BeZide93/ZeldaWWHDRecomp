@@ -42,6 +42,12 @@ int main(){
  assert(add_native_layout(parsed,"test",0,layout(),&why));assert(parsed.routes.size()==1&&parsed.routes[0].points.size()==2&&parsed.routes[0].radius==kRouteHalfWidth);assert(near(parsed.routes[0].points[0].x,-100));assert(parsed.layout.size()==1&&parsed.layout[0].name=="orig"&&near(parsed.layout[0].position.x,30000));
  {auto c=check("test",0,local,parsed,0);assert(c.size()==1&&c[0].kind=="collision"&&c[0].message=="the island's walls or ground (1 triangle)");} // the floor triangle it goes into
  bad=layout();u32(bad,80,1);assert(!add_native_layout(parsed,"test",0,bad,&why));assert(parsed.routes.size()==1);
+ { // a water (or lava) group's triangles are not ground or walls: the sea plane every island square carries
+  Bytes water=mesh();const size_t groups=water.size();water.resize(groups+0x34);u32(water,0x20,1);u32(water,0x24,uint32_t(groups));u32(water,groups+0x30,0x12C);u16(water,0x34+36+8,0);
+  Index sea;assert(add_native_collision(sea,"test",0,water,&why)&&sea.bounds.empty());
+  u32(water,groups+0x30,0x02C);Index ground;assert(add_native_collision(ground,"test",0,water,&why)&&ground.bounds.size()==1);
+  u32(water,groups+0x30,0x22C);Index lava;assert(add_native_collision(lava,"test",0,water,&why)&&lava.bounds.empty());
+ }
  // the table strides of the game's chunk handlers (dStage: actor 0x20, tgsc and door 0x24, treasure 0x20)
  for(const char*t:{"ACTR","ACT0","ACT9","ACTa","ACTb","TGOB","TRES","TRE3","PLYR"})assert(table_stride(t)==32);
  for(const char*t:{"SCOB","SCO0","SCOb","TGSC","TGDR","DOOR"})assert(table_stride(t)==36);

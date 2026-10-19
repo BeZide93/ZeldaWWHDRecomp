@@ -40,6 +40,8 @@ std::string lower(std::string v){for(char&c:v)c=char(std::tolower((unsigned char
 std::string article(const char*w){return std::string(std::strchr("aeiou",w[0])?"an ":"a ")+w;}
 bool starts(const std::string&v,std::initializer_list<const char*> prefixes){for(const char*p:prefixes)if(v.rfind(p,0)==0)return true;return false;}
 // a walking route of the room's layout: RPAT (the room's) and PATH (the stage's) carry villagers and animals
+constexpr float kSeaLevel=20;
+bool sea_route(const ProtectedRoute&r){for(const auto&p:r.points)if(p.y>kSeaLevel)return false;return !r.points.empty();}
 const char* route_words(const std::string&id){return id.rfind("PATH",0)==0||id.rfind("RPAT",0)==0?"villager route":"route";}
 bool chunks(const Bytes&b,std::vector<Chunk>&out){if(!range(b,0,4))return false;uint32_t n=u32(b,0);if(!n||n>256||!range(b,4,uint64_t(n)*12))return false;for(unsigned j=0;j<n;++j){size_t p=4+j*12;std::string tag(reinterpret_cast<const char*>(b.data()+p),4);for(unsigned char c:tag)if(!std::isalnum(c))return false;uint32_t at=u32(b,p+8);if(at<4+n*12||at>b.size())return false;out.push_back({tag,u32(b,p+4),at});}return true;}
 }
@@ -161,7 +163,11 @@ bool add_native_collision(Index&i,const std::string&s,int room,const Bytes&b,std
  const uint32_t nv=u32(b,0),vp=u32(b,4),nt=u32(b,8),tp=u32(b,12);
  if(nv>65535||nt>1000000||!range(b,vp,uint64_t(nv)*12)||!range(b,tp,uint64_t(nt)*10)||((nv==0)!=(nt==0)))return fail(w,"Invalid native collision tables");
  std::vector<Point> vertices;vertices.reserve(nv);for(uint32_t j=0;j<nv;++j){auto p=point(b,vp+j*12);if(!finite(p))return fail(w,"Non-finite native collision vertex");vertices.push_back(p);}
- std::vector<ProtectedBounds> added;added.reserve(nt);for(uint32_t j=0;j<nt;++j){Bounds box=empty();for(unsigned k=0;k<3;++k){uint16_t index=u16(b,tp+j*10+k*2);if(index>=nv)return fail(w,"Invalid native triangle vertex");include(box,vertices[index]);}added.push_back({s,room,"collision","native-triangle-"+std::to_string(j),box});}
+ // water and lava surfaces (a group whose info has 0x100 water or 0x200 lava: the sea plane every island square carries,
+ // "umi"/"mizuba" under Water_00) are not ground or walls: a floating object or a pier may reach into them
+ std::vector<bool> liquid;
+ if(range(b,0x20,8)){const uint32_t ng=u32(b,0x20),gp=u32(b,0x24);if(ng&&ng<=65535&&range(b,gp,uint64_t(ng)*0x34)){liquid.resize(ng);for(uint32_t g=0;g<ng;++g)liquid[g]=(u32(b,gp+g*0x34+0x30)&0x300)!=0;}}
+ std::vector<ProtectedBounds> added;added.reserve(nt);for(uint32_t j=0;j<nt;++j){const uint16_t group=u16(b,tp+j*10+8);if(group<liquid.size()&&liquid[group])continue;Bounds box=empty();for(unsigned k=0;k<3;++k){uint16_t index=u16(b,tp+j*10+k*2);if(index>=nv)return fail(w,"Invalid native triangle vertex");include(box,vertices[index]);}added.push_back({s,room,"collision","native-triangle-"+std::to_string(j),box});}
  i.bounds.insert(i.bounds.end(),added.begin(),added.end());coverage(i,s,room).collision=true;return true;
 }
 bool add_native_layout(Index&i,const std::string&s,int room,const Bytes&b,std::string*w){
@@ -171,7 +177,7 @@ bool add_native_layout(Index&i,const std::string&s,int room,const Bytes&b,std::s
   if(const unsigned stride=table_stride(c.tag)){
    if(c.count>65535||!range(b,c.offset,uint64_t(c.count)*stride))return fail(w,"Invalid native actor table");
    for(uint32_t j=0;j<c.count;++j){const size_t at=c.offset+j*stride;LayoutEntry e{s,room,c.tag,std::string(reinterpret_cast<const char*>(b.data()+at),strnlen(reinterpret_cast<const char*>(b.data()+at),8)),point(b,at+12),{},stride==36,j};
-    if(!finite(e.position))return fail(w,"Invalid native layout position");if(e.scaled)for(unsigned k=0;k<3;++k)e.scale[k]=b[at+32+k];layout.push_back(std::move(e));}}
+    e.params=u32(b,at+8);if(!finite(e.position))return fail(w,"Invalid native layout position");if(e.scaled)for(unsigned k=0;k<3;++k)e.scale[k]=b[at+32+k];layout.push_back(std::move(e));}}
   if(c.tag=="RPAT"||c.tag=="PATH"){
    if(c.count>65535||!range(b,c.offset,uint64_t(c.count)*12))return fail(w,"Invalid native path table");for(uint32_t j=0;j<c.count;++j){size_t at=c.offset+j*12;uint16_t count=u16(b,at);uint32_t point_offset=u32(b,at+8),points=0;bool in_points=false;for(const auto& pc:cs)if(((c.tag=="RPAT"&&pc.tag=="RPPN")||(c.tag=="PATH"&&pc.tag=="PPNT"))&&range(b,pc.offset,uint64_t(pc.count)*16)&&point_offset%16==0&&uint64_t(point_offset)+uint64_t(count)*16<=uint64_t(pc.count)*16){points=pc.offset+point_offset;in_points=true;}if(count>4096||!range(b,points,uint64_t(count)*16)||(count&&!in_points))return fail(w,"Invalid native path points");ProtectedRoute route{s,room,c.tag+":"+std::to_string(j),{},kRouteHalfWidth,b[at+5]!=0};for(unsigned k=0;k<count;++k){auto p=point(b,points+k*16+4);if(!finite(p))return fail(w,"Invalid native path coordinate");route.points.push_back(p);}if(!route.points.empty())routes.push_back(std::move(route));}
   }
@@ -220,22 +226,39 @@ Index load_native_room(const std::string&dir,const std::string&s,int room){
 
 Extent building_extent(const LayoutEntry&e){
  const std::string n=lower(e.name);
- // things a building may cover: grass, flowers, trees and palms, birds, crabs, small stones; light and weather areas
- if(starts(n,{"kusa","flwr","flower","pflower","pflwr","swood","lwood","woodb","oyashi","kamome","kani","koisi","kytag"}))return {Keep::None,0,0,0};
+ // things a building may cover: grass, flowers, trees and palms, birds, crabs, small stones, pigs
+ if(starts(n,{"kusa","flwr","flower","pflower","pflwr","bflower","swood","lwood","woodb","oyashi","kamome","kani","koisi","pig"}))return {Keep::None,0,0,0};
+ // pots, barrels and signs: a building may stand where they were (nothing needs them there)
+ if(starts(n,{"kotubo","ootubo","ktaru","kanban"}))return {Keep::None,0,0,0};
+ // tags that need no place of their own (measured on Outset, Windfall, Dragon Roost and the Private Oasis, where
+ // they refused most open ground): the island LOD markers of the sea stage (LODnn), light and weather areas
+ // (kytag, ky_tag), sound and music (TagSo, TagMSo, NpcSo), wind, the seagull possession and restart tags (WindTag,
+ // HyoiKam, ReTag), the island name (TagIsl), attention, hint and message areas (AttTag, TagHt, TagMsg: text when
+ // Link walks in, nothing he has to reach), the pigs' digging spots (TagKb), salvage points at sea (Salvag, SwSlvg),
+ // item attention marks (ITat), invisible walls (Akabe), the sea's corner markers (Com_A), and the GBA (Tingle Tuner)
+ // switches, which HD reduces to bomb-hit switches nothing walks to (d_a_agbsw0)
+ if(starts(n,{"lod","kytag","ky_tag","tagso","tagmso","npcso","windtag","hyoikam","retag","tagisl","atttag","taght","tagmsg","tagkb","tagmk","salvag","swslvg","itat","akabe","com_a","agb"})||n=="sea"||n=="ship")return {Keep::None,0,0,0};
  // where Link arrives (a door's or a warp's start point): room for him to stand and step away
- if(e.tag=="PLYR")return {Keep::Start,150,50,300};
+ if(e.tag=="PLYR")return {Keep::Start,100,50,250};
  if(e.tag.rfind("TRE",0)==0||starts(n,{"takara"}))return {Keep::Chest,120,50,250};
  if(e.tag=="TGDR"||e.tag=="DOOR"||starts(n,{"knob","door"}))return {Keep::Door,250,50,450};
- if(e.scaled&&starts(n,{"tag","salvag","agb","evsw","ev"})){
-  // a tag area: horizontal radius scale x (or z) x 10, height scale y x 10 above and below (d_a_tag_event huntRange)
-  const float r=std::max(100.f,10.f*std::max(e.scale[0],e.scale[2])),h=std::max(100.f,10.f*e.scale[1]);return {Keep::Event,r,h,h};}
+ // event triggers Link walks into (d_a_tag_event, d_a_tag_evsw, the area switch SW_C00): a small one whole, a large
+ // one by its core of 300 units (a building over part of a wide area leaves the rest of it to walk into); its height
+ // from the scale (d_a_tag_event huntRange: radius scale x * 10, height scale y * 10)
+ if(starts(n,{"tagev","evsw","sw_c0"})){
+  const float r=e.scaled?std::max(100.f,10.f*std::max(e.scale[0],e.scale[2])):150,h=e.scaled?std::max(100.f,10.f*e.scale[1]):300;return {Keep::Event,std::min(r,300.f),h,h};}
+ // a loose item: only what a player would miss under a building (a piece of heart, a heart container; the item
+ // number is the low byte of its params); rupees and hearts lying about may be covered
+ if(n=="item"){const unsigned number=e.params&0xFF;if(number!=0x07&&number!=0x08)return {Keep::None,0,0,0};return {Keep::Item,80,50,200};}
  if(starts(n,{"item"}))return {Keep::Item,80,50,200};
- if(starts(n,{"swhit","kbota","osw","hsw","swtact","swc0"}))return {Keep::Switch,150,50,250};
+ if(starts(n,{"swhit","kbota","osw","hsw","swtact"}))return {Keep::Switch,150,50,250};
  // the game's villagers and other characters: a capital, a small letter and a digit ("Uo1", "Ko1", "Ls1")
  if(e.name.size()==3&&std::isupper((unsigned char)e.name[0])&&std::islower((unsigned char)e.name[1])&&std::isdigit((unsigned char)e.name[2]))return {Keep::Villager,100,50,300};
- // anything else: an object of unknown size (a conservative default; scaled objects by their scale)
- if(e.scaled){const float k=std::max({e.scale[0],e.scale[1],e.scale[2]})/10.f;if(k>0)return {Keep::Object,std::min(1500.f,150*k),50,std::min(3000.f,400*k)};}
- return {Keep::Object,150,50,400};
+ // small props a building would swallow (pots, barrels, signs, stakes, posts, lanterns, buckets, flags, enemies)
+ if(starts(n,{"kui","tpost","bonbori","lamp","okioke","piwa","puti","ksaku","mtflag","trflag","c_green","c_red","c_blue","bbaba","keeth","p_hat","fdai"}))return {Keep::Object,60,50,250};
+ // anything else: an object of unknown size (a default; a scaled one by its scale, up to 600)
+ if(e.scaled){const float k=std::max({e.scale[0],e.scale[1],e.scale[2]})/10.f;if(k>0)return {Keep::Object,std::clamp(120*k,60.f,600.f),50,std::clamp(400*k,200.f,2000.f)};}
+ return {Keep::Object,120,50,400};
 }
 const char* keep_words(Keep k){switch(k){case Keep::Villager:return "villager";case Keep::Chest:return "chest";case Keep::Door:return "door";case Keep::Item:return "item";case Keep::Switch:return "switch";case Keep::Event:return "cutscene area";case Keep::Object:return "object";case Keep::Start:return "start point";default:return "";}}
 std::vector<Conflict> check_building(const std::string&s,int room,const Bounds&b,const Index&i,float margin){
@@ -245,14 +268,21 @@ std::vector<Conflict> check_building(const std::string&s,int room,const Bounds&b
   if(!overlap(b,area,margin))continue;
   // a column's corners: keep the real circle (the box corners of a round area are not in the way)
   const float cx=std::clamp(e.position.x,b.minimum.x,b.maximum.x),cz=std::clamp(e.position.z,b.minimum.z,b.maximum.z);
-  if(std::hypot(double(cx)-e.position.x,double(cz)-e.position.z)>double(x.radius)+margin)continue;
-  out.push_back({keep_words(x.keep),e.tag+":"+e.name+":"+std::to_string(e.index),article(keep_words(x.keep))+" of the island",e.name});}
+  const double distance=std::hypot(double(cx)-e.position.x,double(cz)-e.position.z),reach=double(x.radius)+margin;
+  if(distance>reach)continue;
+  // how far to move: out of its reach, or (its centre under the bounds) past the nearest side and then its reach
+  const double inside=std::min({double(e.position.x)-b.minimum.x,double(b.maximum.x)-e.position.x,double(e.position.z)-b.minimum.z,double(b.maximum.z)-e.position.z});
+  const float move=float(std::ceil(distance>0?reach-distance+1:inside+reach+1));
+  out.push_back({keep_words(x.keep),e.tag+":"+e.name+":"+std::to_string(e.index),article(keep_words(x.keep))+" of the island",e.name,move,e.position,float(reach)-margin,{}});}
  for(const auto&r:i.routes){if(r.stage!=s||(r.room>=0&&r.room!=room))continue;
   bool invalid=!std::isfinite(r.radius)||r.radius<0||r.points.empty();for(auto p:r.points)invalid|=!finite(p);
   if(invalid){out.push_back({"coverage",r.id,"Protected route data is invalid"});continue;}
+  // a route all at or below sea level (boats, swimmers, seagulls' base line) is the sea's: only what reaches down
+  // to the water is in its way, not a building on the island
+  if(sea_route(r)&&b.minimum.y>kSeaLevel)continue;
   const char* words=route_words(r.id);bool hit=false;
   for(size_t j=0;j<r.points.size()&&!hit;++j){if(j+1<r.points.size())hit=segment_box(r.points[j],r.points[j+1],b,margin+r.radius);else if(r.closed||r.points.size()==1)hit=segment_box(r.points[j],r.points[0],b,margin+r.radius);}
-  if(hit)out.push_back({words,r.id,article(words)+" of the island",r.id});}
+  if(hit)out.push_back({words,r.id,article(words)+" of the island",r.id,0,r.points.front(),r.radius,r.points});}
  return out;
 }
 }

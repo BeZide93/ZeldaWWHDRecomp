@@ -221,13 +221,20 @@ allocation in every room.
 Placement checks use the player's installed game resources: the room's collision and its layout, read
 where the game stores them (world coordinates, on the sea as in dungeons). An object keeps 50 units clear of:
 
-- the room's walls and ground. Ground wholly below the object may touch its base; going into it is refused;
-- what the island needs, each by its real size: villagers (a radius of 100 units), their walking routes
-  (a corridor 120 units to each side), chests (120), doors (250), items (80), switches (150), the places
-  where Link arrives (150), and cutscene and message areas by their own radius and height. Any other
-  object counts with a radius of 150 units (more when the layout scales it up);
-- grass, flowers, trees, palms, birds, crabs and the light and weather areas don't count: an object may
-  stand over them;
+- the room's walls and ground. Ground wholly below the object may touch its base; going into it is refused.
+  The sea's surface (the water plane of an island's square) and lava are not ground: a floating object or a
+  pier may reach into them;
+- what the island needs, each by its real size: villagers where they stand (a radius of 100 units, in every
+  story stage), their walking routes (a corridor 60 units to each side), chests (120), doors (250), a piece
+  of heart or heart container lying about (80), switches (150), the places where Link arrives (100), and
+  event triggers Link walks into (TagEv, Evsw, SW_C00: a small one whole, a wide one by its core of 300
+  units). Small props (lanterns, posts, stakes, enemies) count with 60 units, any other object with 120
+  (more when the layout scales it up, up to 600);
+- these don't count, an object may stand over them: grass, flowers, trees, palms, birds, crabs, pigs, pots,
+  barrels, signs, rupees and hearts, message, hint, sound, attention and island-name areas, the pigs'
+  digging spots, salvage points, invisible walls, light and weather areas, the sea chart's island markers
+  and the old Tingle Tuner switches. Routes at sea level (boats, swimmers) only count for what reaches down
+  to the water;
 - other mods' world objects and the King of Red Lions.
 
 An object must stay inside the indexed room. A sea object that crosses into a neighbouring square is
@@ -235,7 +242,9 @@ refused until coverage for that placement is available. Missing, malformed or un
 or route data prevents placement rather than treating the room as empty. Drifting objects stop at the same
 things as they move.
 
-A place that isn't clear is refused with what is in the way, in plain words with the game's own name
+A place that isn't clear is still placed in the editor (and saved), but the object isn't in the game until it
+is moved where it fits; Check and export list it as a problem, and at game start it is left out with a line in
+the log. The editor and MCP give what is in the way, in plain words with the game's own name
 ("a door of the island", KNOB00D); `placement_conflicts` lists every finding. In the editor the selected
 object's footprint shows green or red with the first reason, and hovering it lists them all. Conflicts
 between mod objects and collision-memory budgets are reported alongside native placement findings.

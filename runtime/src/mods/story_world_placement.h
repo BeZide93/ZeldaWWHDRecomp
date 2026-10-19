@@ -12,13 +12,17 @@ struct Coverage {std::string stage;int room=-1;bool collision=false,routes=false
 struct CoverageRegion {std::string stage;int room=-1;Bounds bounds;};
 // One entry of the room's own layout (add_native_layout): what world objects and island buildings keep clear of
 // (check_building). The position is in world space; scale is the layout's three bytes (scaled tags only).
-struct LayoutEntry {std::string stage;int room=-1;std::string tag,name;Point position;uint8_t scale[3]{};bool scaled=false;unsigned index=0;};
+struct LayoutEntry {std::string stage;int room=-1;std::string tag,name;Point position;uint8_t scale[3]{};bool scaled=false;unsigned index=0;uint32_t params=0;};
 // Everything is in world space, as the game stores it: bounds (the room's collision triangles, and what the
 // caller adds: other world objects, the ship), routes (the layout's walking routes, kRouteHalfWidth wide),
 // layout (actors, tags, doors, chests, start points). One index serves world objects and island buildings.
 struct Index {std::vector<ProtectedBounds> bounds;std::vector<ProtectedRoute> routes;std::vector<Coverage> coverage;std::vector<CoverageRegion> regions;std::vector<LayoutEntry> layout;};
 // message: plain words for mod makers ("a door of the island"); native: the game's own name when known ("KNOB00D")
-struct Conflict {std::string kind,id,message,native;};
+// move: for a single small thing, how far (game units, horizontally) the bounds must move away from it to be clear;
+// 0 when it can't be said (a route crossing it, collision, coverage)
+// at/reach/path: where the thing in the way is, for the editor to draw it (a layout entry: its place and reach;
+// a route: its points)
+struct Conflict {std::string kind,id,message,native;float move=0;Point at{};float reach=0;std::vector<Point> path;};
 bool valid(const Bounds&);
 // Degrees, with the native actor's RY * RX * RZ rotation order.
 bool transform_bounds(const Bounds&,Point position,Point rotation,Point scale,Bounds&);
@@ -50,7 +54,7 @@ Index load_native_room(const std::string& game_directory,const std::string& stag
 // tags (kytag) are ignored: a world object or a building may stand over them.
 enum class Keep {None,Villager,Chest,Door,Item,Switch,Event,Object,Start};
 struct Extent {Keep keep=Keep::Object;float radius=150,below=50,above=400;};
-inline constexpr float kRouteHalfWidth=120;   // a walking route's corridor half width (Link-sized walkers)
+inline constexpr float kRouteHalfWidth=60;    // a walking route's corridor half width (a villager follows its line; ~35 units wide)
 inline constexpr float kBuildingMargin=50;    // added around the footprint (the same as kClearance)
 Extent building_extent(const LayoutEntry&);
 const char* keep_words(Keep);
