@@ -693,7 +693,7 @@ void building(const fs::path& examples) {
     editor::Session s(&host);
     s.add_package("editor-test", "Editor test", "", json(kManifest));
     Value r = s.run("list_actor_types");
-    CHECK(ok(r) && r.get("result").array.size() == 18);
+    CHECK(ok(r) && r.get("result").array.size() == 19);
 
     // add: at Link (sea room 44, heading 100 of 65536), snapped onto the ground (y 5); one undo step
     r = s.run("add_actor", json(R"({"type": "sign"})"));

@@ -65,7 +65,7 @@ struct ManifestActor {
     ManifestLookAt look_at;ManifestPath path;
     bool carry_enabled=false,carry_break_on_impact=false;
     bool combat_enabled=false,native_heart_drop=false;story_mod_combat::Config combat;
-    WorldPoint position,rotation,scale{1,1,1}; uint32_t params=0; std::string variant; unsigned resident=9; // 19 is the seated Ym1 adapter, not a People subtype.
+    WorldPoint position,rotation,scale{1,1,1}; uint32_t params=0; std::string variant; std::string hole; bool rat_bomb=false; /* a rat of a rat hole (runtime only) */ unsigned resident=9; // 19 is the seated Ym1 adapter, not a People subtype.
     uint8_t item_game=6;  // a chest's game item number ("parameters": {"item"}); kChestModItem with item_mod
     std::string item_mod; // a chest's "item:<id>": one of the mod's items (the id)
     std::string defeat_switch;  // an enemy's: the same-mod switch actor whose flag is set when every enemy naming it is defeated
@@ -121,7 +121,13 @@ inline uint8_t chest_game_item(const std::string& name){
     for(const auto&[n,v]:kItems)if(name==n)return v;
     return 0;
 }
+// actors one declaration places: a rat hole is the hole and its three rats
+inline unsigned placed_actors(const ManifestActor& a){return a.actor=="rat_hole"&&a.kind.empty()?1+story_enemy_variants::kRatsPerHole:1;}
 inline constexpr unsigned kMaxActorsPerRoom=16,kMaxActorsPerMod=64,kMaxScenesPerMod=16,kMaxSceneSteps=64,kMaxSceneFrames=18000;
+// rat holes in one room: each places 1 + 3 actors (the hole and its rats)
+inline constexpr unsigned kMaxRatHolesPerRoom=2;
+// a rat's marker and flag: its hole's, with ".rat1".."rat3" added (ids are at most 32 bytes)
+inline constexpr size_t kRatHoleIdBytes=story_mail::kMaxIdBytes-5;
 namespace world_manifest {
 using mods::json::Value;
 inline bool integer(const Value& v,double lo,double hi) {return v.type==Value::Number&&std::isfinite(v.number)&&v.number>=lo&&v.number<=hi&&std::floor(v.number)==v.number;}
@@ -159,7 +165,7 @@ inline bool known_flag(const Value& m,const std::string& name) {
         if(mod&&a.get("behaviour").string()=="static"&&a.get("stage").string()=="sea"&&produces(a.get("arrival").get("flag")))return true;
         if(type=="switch"&&produces(a.get("switch_flag")))return true;
         if((type=="pot"||type=="barrel"||type=="crate"||(mod&&a.get("carry").get("break_on_impact").type==Value::Bool&&a.get("carry").get("break_on_impact").boolean))&&produces(a.get("broken_flag")))return true;
-        if((type=="chuchu"||type=="bokoblin"||type=="moblin"||type=="keese"||type=="miniblin"||type=="peahat"||type=="darknut"||
+        if((type=="chuchu"||type=="bokoblin"||type=="moblin"||type=="keese"||type=="miniblin"||type=="peahat"||type=="darknut"||type=="rat_hole"||
             (mod&&a.get("combat").type==Value::Object))&&produces(a.get("defeated_flag")))return true;
         if(writes(a.get("then")))return true;
         for(const auto&t:a.get("talks").array)if(writes(t.get("then")))return true;
@@ -316,7 +322,7 @@ inline bool game_piece_budget(const std::vector<ManifestActor>& actors,std::stri
 // Per-type fields after common placement validation. Native enemy names stay
 // outside parse_actors' allowlist until their runtime adapters are integrated.
 inline bool native_enemy_fields(const Value& m,const Value& v,ManifestActor& a,std::string& why) {
-    if(a.actor!="chuchu"&&a.actor!="bokoblin"&&a.actor!="moblin"&&a.actor!="keese"&&a.actor!="miniblin"&&a.actor!="peahat"&&a.actor!="darknut")return why="unsupported native enemy",false;
+    if(a.actor!="chuchu"&&a.actor!="bokoblin"&&a.actor!="moblin"&&a.actor!="keese"&&a.actor!="miniblin"&&a.actor!="peahat"&&a.actor!="darknut"&&a.actor!="rat_hole")return why="unsupported native enemy",false;
     for(const char* key:{"kind","params","flag","broken_flag","switch_flag","switch","lines","then","model","animation","look_at","path","collision","attention"})
         if(v.object.contains(key)&&!((a.actor=="bokoblin"||a.actor=="moblin")&&std::string(key)=="path"))return why="native enemies cannot override parameters, behavior, dialogue or models",false;
     // a declared variant only (story_enemy_variants.h), never raw parameters
@@ -397,13 +403,13 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
         if(!id(v.get("id")))return why="invalid actor id",false;a.id=v.get("id").text;a.actor=v.get("actor").string();
         if(story_game_pieces::is_reference(a.actor)){
             if(!game_piece_fields(v,need,a,why))return false;
-            unsigned count=1;for(const auto& old:out){if(old.id==a.id)return why="duplicate actor id",false;if(old.stage==a.stage&&old.room==a.room)++count;}
+            unsigned count=placed_actors(a);for(const auto& old:out){if(old.id==a.id)return why="duplicate actor id",false;if(old.stage==a.stage&&old.room==a.room)count+=placed_actors(old);}
             if(count>kMaxActorsPerRoom)return why="actors exceed the 16 per room limit",false;
             out.push_back(std::move(a));continue;
         }
         if(a.game_object()){
             if(!game_object_fields(v,need,a,why))return false;
-            unsigned count=1;for(const auto& old:out){if(old.id==a.id)return why="duplicate actor id",false;if(old.stage==a.stage&&old.room==a.room)++count;}
+            unsigned count=placed_actors(a);for(const auto& old:out){if(old.id==a.id)return why="duplicate actor id",false;if(old.stage==a.stage&&old.room==a.room)count+=placed_actors(old);}
             if(count>kMaxActorsPerRoom)return why="actors exceed the 16 per room limit",false;
             out.push_back(std::move(a));continue;
         }
@@ -500,7 +506,7 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
         const bool prop=a.actor=="pot"||a.actor=="barrel"||a.actor=="crate";
         if(v.object.contains("texture")){if(!prop||!texture_path(v.get("texture")))return why="texture requires a placed pot, barrel or crate and a package PNG in textures/ or assets/",false;a.texture=v.get("texture").text;}
         const bool switch_actor=a.actor=="switch",door=a.actor=="door";
-        const bool enemy=a.actor=="chuchu"||a.actor=="bokoblin"||a.actor=="moblin"||a.actor=="keese"||a.actor=="miniblin"||a.actor=="peahat"||a.actor=="darknut";
+        const bool enemy=a.actor=="chuchu"||a.actor=="bokoblin"||a.actor=="moblin"||a.actor=="keese"||a.actor=="miniblin"||a.actor=="peahat"||a.actor=="darknut"||a.actor=="rat_hole";
         if(a.actor!="sign"&&a.actor!="resident"&&a.actor!="chest"&&!prop&&!switch_actor&&!door&&!enemy&&!(a.actor=="mod"&&a.kind=="mod"))return why="unknown or unsupported flag-setting actor: "+a.actor,false;
         if(!place(v,a.stage,a.room)||!point(v.get("position"),a.position))return why="actor "+a.id+": invalid stage, room or position",false;
         if(v.get("rotation").type!=Value::Null&&!point(v.get("rotation"),a.rotation,360))return why="invalid actor rotation",false;
@@ -625,13 +631,23 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
                 a.talks.push_back(std::move(talk));
             }
         }
-        unsigned count=1;for(const auto& old:out){if(old.id==a.id)return why="duplicate actor id",false;if(old.stage==a.stage&&old.room==a.room)++count;}
+        unsigned count=placed_actors(a);for(const auto& old:out){if(old.id==a.id)return why="duplicate actor id",false;if(old.stage==a.stage&&old.room==a.room)count+=placed_actors(old);}
         if(count>kMaxActorsPerRoom)return why="actors exceed the 16 per room limit",false;
         out.push_back(std::move(a));
     }
     for(const auto& a:out)if(!a.defeat_switch.empty()){
         const auto source=std::find_if(out.begin(),out.end(),[&](const ManifestActor& candidate){return candidate.id==a.defeat_switch;});
         if(source==out.end()||source->actor!="switch")return why="actor "+a.id+": defeat_switch must name a same-mod switch actor",false;
+    }
+    // a rat hole's rats are actors and enemies of their own: "<id>.ratN" with the defeated flag "<flag>.ratN"
+    unsigned placed=0;for(const auto& a:out)placed+=placed_actors(a);
+    if(placed>kMaxActorsPerMod)return why="actors exceed the 64 per mod limit (a rat hole counts 4: the hole and its three rats)",false;
+    for(const auto& a:out)if(a.actor=="rat_hole"){
+        if(a.id.size()>kRatHoleIdBytes||a.defeated_flag.size()>kRatHoleIdBytes)return why="rat hole "+a.id+": its id and defeated_flag are at most 27 characters (its rats add .rat1 to .rat3)",false;
+        unsigned holes=0;for(const auto& b:out)if(b.actor=="rat_hole"&&b.stage==a.stage&&b.room==a.room)++holes;
+        if(holes>kMaxRatHolesPerRoom)return why="at most two rat holes per room",false;
+        for(unsigned n=1;n<=story_enemy_variants::kRatsPerHole;++n)for(const auto& b:out)
+            if(b.id==a.id+".rat"+std::to_string(n)||(!b.defeated_flag.empty()&&b.defeated_flag==a.defeated_flag+".rat"+std::to_string(n)))return why="actor "+b.id+": the id or defeated_flag of rat hole "+a.id+"'s rats",false;
     }
     for(const auto& a:out)if(a.actor=="door"){
         const auto source=std::find_if(out.begin(),out.end(),[&](const ManifestActor& candidate){return candidate.id==a.switch_actor;});
@@ -779,11 +795,11 @@ inline bool validate_world_packages(const std::vector<std::pair<std::string,mods
         if(!parse_actors(manifest,actors,why)||!parse_scenes(manifest,scenes,why)){why=mod+": "+why;return false;}
         for(const auto&actor:actors)if(actor.game_object()||actor.game_piece())game_objects.push_back(actor);
         if(!game_object_budget(game_objects,why)||!game_piece_budget(game_objects,why)){why="enabled packages: "+why;return false;}
-        total+=unsigned(actors.size());if(total>128)return why="enabled packages exceed 128 actors overall",false;
+        for(const auto&actor:actors)total+=placed_actors(actor);if(total>128)return why="enabled packages exceed 128 actors overall",false;
         for(const auto&actor:actors)if(actor.chart_marker.enabled&&++chart_markers>32)return why="enabled packages exceed 32 island chart markers",false;
         std::vector<std::string> names;
         for(const auto& actor:actors){
-            if(++rooms[{actor.stage,actor.room}]>kMaxActorsPerRoom)return why="enabled packages exceed 16 actors in "+actor.stage+" room "+std::to_string(actor.room),false;
+            if((rooms[{actor.stage,actor.room}]+=placed_actors(actor))>kMaxActorsPerRoom)return why="enabled packages exceed 16 actors in "+actor.stage+" room "+std::to_string(actor.room),false;
             if(!actor.flag.empty())names.push_back(actor.flag);
             if(actor.arrival.enabled)names.push_back(actor.arrival.flag);
             if(actor.chart_marker.enabled&&!actor.chart_marker.when_flag.empty())names.push_back(actor.chart_marker.when_flag);

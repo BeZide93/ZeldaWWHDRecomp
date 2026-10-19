@@ -35,6 +35,7 @@ inline constexpr uint32_t kVisualScratchOffset=kGrappleScratchOffset+0x4000;
 inline constexpr uint32_t kExtraEnemyProfilesScratchOffset=kVisualScratchOffset+0x3000;
 inline constexpr uint32_t kExtraEnemyProfiles=4;
 inline constexpr uint32_t kDarknutProfileScratchOffset=kExtraEnemyProfilesScratchOffset+2*0x30;
+inline constexpr uint32_t kRatHoleProfileScratchOffset=kExtraEnemyProfilesScratchOffset+3*0x30;
 inline constexpr uint32_t kScratchBytes=kExtraEnemyProfilesScratchOffset+kExtraEnemyProfiles*0x30;
 static_assert(kEnemyProfilesScratchOffset>=kIdentityScratchOffset+128*40);
 static_assert((kEnemyOwnershipScratchOffset&15)==0);

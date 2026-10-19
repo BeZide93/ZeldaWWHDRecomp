@@ -3,6 +3,7 @@
 #include "runtime.h"
 #include "guest_addr.h"
 #include <algorithm>
+#include <cstdlib>
 #include <vector>
 #include <utility>
 namespace story_enemy_ownership { namespace {
@@ -23,8 +24,10 @@ constexpr Collider nz[]={{0xA9C,0xA60,0},{0xC4C,0xC10,0xBE0},{0x1074,0x1038,0xF9
 // d_a_tn (Darknut): co/tg cylinders, head, defence and the two weapon spheres on the damage reaction's
 // mStts 0xCE8 (0x590+0x758); enemyice 0x1674, enemyfire 0x1A2C.
 constexpr Collider tn[]={{0xDC4,0xCE8,0},{0xEF4,0xCE8,0},{0x1024,0xCE8,0},{0x1150,0xCE8,0},{0x127C,0xCE8,0},{0x13A8,0xCE8,0},{0x16E0,0x16A4,0x1674},{0x1B08,0x1ACC,0x1A2C}};
+// d_a_nzg (rat hole): its body cylinder on mStts 0x408 (only pushes; it has no attack).
+constexpr Collider nzg[]={{0x444,0x408,0}};
 constexpr Collider ki[]={{0x734,0x6F8,0},{0x860,0x6F8,0},{0x98C,0x6F8,0},{0xB44,0xB08,0xAD8},{0xF6C,0xF30,0xE90}};
-constexpr Descriptor descriptors[]={{0x7FFA,0xCE,0xF10,cc,3},{0x7FF9,0xBD,0x19A4,bk,7},{0x7FF8,0xBC,0x343C,mo,8},{0x7FF7,0xD7,0x10BC,ki,5},{0x7FF4,0xF7,0xEE4,pt,4},{0x7FF3,0xD1,0x12D8,ph,6},{0x7FF2,0xC6,0x11CC,nz,3},{0x7FF1,0xBF,0x1C5C,tn,8}};
+constexpr Descriptor descriptors[]={{0x7FFA,0xCE,0xF10,cc,3},{0x7FF9,0xBD,0x19A4,bk,7},{0x7FF8,0xBC,0x343C,mo,8},{0x7FF7,0xD7,0x10BC,ki,5},{0x7FF4,0xF7,0xEE4,pt,4},{0x7FF3,0xD1,0x12D8,ph,6},{0x7FF2,0xC6,0x11CC,nz,3},{0x7FF1,0xBF,0x1C5C,tn,8},{0x7FF0,0xC7,0x574,nzg,1}};
 struct Entry {Kind kind;uint32_t params,epoch;Fingerprint fingerprint;Token token;uint32_t pid=0,address=0;bool active=false,quarantined=false;};
 std::vector<Entry> entries;Token next_token=1;uint32_t arena=0,link=0,link_pid=0;void(*original)(Cpu*,uint32_t)=nullptr;bool installed=false;VerifyActor verify_actor;ProjectileVerifier projectile_verifier;bool projectile_enabled=false;ModColliderVerifier mod_collider_verifier;
 constexpr uint32_t Magic=0x454F5731,RetiredMagic=0x454F5752,PendingMagic=0x454F5750,Version=2,ActorOffset=256,LineageOffset=ActorOffset+128*128;
@@ -35,7 +38,7 @@ Entry* get(Token t){for(auto& e:entries)if(e.token==t)return &e;return nullptr;}
 size_t index(const Entry& e){return size_t(&e-entries.data());}
 uint32_t record(const Entry& e){return arena+ActorOffset+uint32_t(index(e))*128;}
 uint32_t checksum(uint32_t a,uint32_t n){uint32_t h=2166136261u;for(uint32_t i=0;i<n;++i)h=(h^ld8(a+i))*16777619u;return h;}
-bool reserved(uint16_t p){return (p>=0x7FF7&&p<=0x7FFA)||(p>=0x7FF1&&p<=0x7FF4);}
+bool reserved(uint16_t p){return (p>=0x7FF7&&p<=0x7FFA)||(p>=0x7FF0&&p<=0x7FF4);}
 bool identity(const Entry& e,uint32_t a){auto& d=descriptors[unsigned(e.kind)];return memory(a,d.bytes)&&e.pid&&e.pid!=0xFFFFFFFFu&&ld32(a+4)==e.pid&&ld16(a+0xE)==d.profile&&ld32(a+0xB0)==e.params&&ld8(a+0x2DD)==0xFF;}
 bool checked(Entry&e,uint32_t a){if(!identity(e,a)||!verify_actor){if(e.active)e.quarantined=true;return false;}try{if(verify_actor(e.token,e.kind,a))return true;}catch(...){}e.quarantined=true;return false;}
 bool valid(Entry& e){return e.active&&!e.quarantined&&e.address&&checked(e,e.address);}
@@ -61,6 +64,8 @@ bool suspected_owned(uint32_t o){
 bool cape_object(uint32_t a,uint32_t object){if(object==a+0x3698)return true;for(uint32_t i=0;i<9;++i)if(object==a+0x37C4+i*0x12C)return true;return false;}
 bool owned_child_object(uint32_t object){
  if(arena)for(size_t n=0;n<kChildCapacity;++n){uint32_t r=arena+LineageOffset+uint32_t(n)*64;if(ld32(r)!=Magic||ld32(r+8)!=unsigned(Lineage::EnemyChild))continue;uint32_t a=ld32(r+40),pid=ld32(r+20);if(pid&&pid!=0xFFFFFFFFu&&memory(a,0xA34)&&ld32(a+4)==pid&&ld16(a+0xE)==0x1CF&&object>=a&&object<a+0xA34)return true;if(pid&&pid!=0xFFFFFFFFu&&memory(a,kCapeBytes)&&ld32(a+4)==pid&&ld16(a+0xE)==kCapeProfile&&object>=a&&object<a+kCapeBytes)return true;}
+ // a rat's bomb (daBomb_c, 0x126): its explosion sphere 0x920 on mStts 0x8E4
+ if(arena)for(size_t n=0;n<kChildCapacity;++n){uint32_t r=arena+LineageOffset+uint32_t(n)*64;if(ld32(r)!=Magic||ld32(r+8)!=unsigned(Lineage::EnemyChild)||ld32(r+28)!=0x126)continue;uint32_t a=ld32(r+40),pid=ld32(r+20);if(pid&&pid!=0xFFFFFFFFu&&memory(a,0xB50)&&ld32(a+4)==pid&&ld16(a+0xE)==0x126&&object==a+0x920&&ld32(object+0x44)==a+0x8E4)return true;}
  // A damaged saved address must not erase a claimed child. The actual native
  // Stts owner and PID confer denial only; a recycled actor with a new PID passes.
  if(memory(object,0x48)){uint32_t stts=ld32(object+0x44);if(memory(stts,0x14)){uint32_t a=ld32(stts+0xC);if(memory(a,0xA34)&&ld16(a+0xE)==0x1CF&&stts==a+0x6C4&&(object==a+0x700||object==a+0x82C)&&ld32(stts+0x10)==ld32(a+4)&&lineage_claimed(ld32(a+4),Lineage::EnemyChild))return true;if(memory(a,kCapeBytes)&&ld16(a+0xE)==kCapeProfile&&stts==a+0x365C&&cape_object(a,object)&&ld32(stts+0x10)==ld32(a+4)&&lineage_claimed(ld32(a+4),Lineage::EnemyChild))return true;}}
@@ -78,7 +83,12 @@ bool live_cape(uint32_t object){
  if(!memory(object,0x48))return false;uint32_t stts=ld32(object+0x44);if(!memory(stts,0x14))return false;uint32_t a=ld32(stts+0xC);LineageInfo info{};
  return memory(a,kCapeBytes)&&stts==a+0x365C&&cape_object(a,object)&&lookup_lineage_actor(a,Lineage::EnemyChild,info)&&info.source_valid&&info.profile==kCapeProfile&&info.parameters==0&&ld32(stts+0x10)==info.pid&&get(info.source)&&get(info.source)->kind==Kind::Darknut;
 }
+bool bomb_object(uint32_t object){if(!memory(object,0x48))return false;const uint32_t stts=ld32(object+0x44);if(!memory(stts,0x14))return false;const uint32_t a=ld32(stts+0xC);return memory(a,0xB50)&&ld16(a+0xE)==0x126&&object==a+0x920&&stts==a+0x8E4;}
 bool ignition_source(uint32_t object){if(!memory(object,0x48))return false;if(link_object(object))return true;if(projectile_enabled&&projectile_verifier)try{return projectile_verifier(object);}catch(...){}return false;}
+// test aid: WWHD_ENEMY_TRACE=1 logs what a rat's bomb blast meets (the first 64): the actor's
+// profile and whether the game handles the hit (Link, the mod's enemies) or it is refused
+void trace_blast(uint32_t other,bool hits){static const bool on=[]{const char*v=std::getenv("WWHD_ENEMY_TRACE");return v&&*v=='1';}();static unsigned n=0;if(!on||n>=64)return;++n;
+ const uint32_t stts=memory(other,0x48)?ld32(other+0x44):0,a=memory(stts,0x14)?ld32(stts+0xC):0;LOG("[native_enemy] bomb blast meets actor %08X profile %04X: %s",a,memory(a,0x10)?unsigned(ld16(a+0xE)):0xFFFFu,hits?"hit":"refused");}
 void hook(Cpu*c){if(pair_policy(c->r[4],c->r[5])==PairPolicy::Reject)c->r[3]=1;else original(c,NoAtTg);}
 }
 const Descriptor& descriptor(Kind k){static constexpr Descriptor invalid={0,0,0,nullptr,0};return unsigned(k)<kKindCount?descriptors[unsigned(k)]:invalid;}
@@ -118,7 +128,10 @@ PairPolicy pair_policy(uint32_t at,uint32_t tg){
    return PairPolicy::Reject;
   }
  }
-const bool child_at=owned_child_object(at),child_tg=owned_child_object(tg);if(child_at||child_tg){if(child_at&&child_tg)return PairPolicy::Reject;int16_t timer=0;if(child_tg&&fire_child(tg,timer)&&timer==0&&ignition_source(at)&&(ld32(at+0x10)&0x20200u))return PairPolicy::Delegate;if(child_at&&fire_child(at,timer)&&timer>0&&(ld32(at)&1u)&&link_object(tg))return PairPolicy::Delegate;if(child_tg&&!child_at&&live_cape(tg)&&link_object(at))return PairPolicy::Delegate;return PairPolicy::Reject;}Token a=lookup_collider(at),t=lookup_collider(tg);bool ao=a||suspected_owned(at),to=t||suspected_owned(tg);if(!ao&&!to)return PairPolicy::Delegate;if(ao&&to)return PairPolicy::Reject;if(a&&link_object(tg))return PairPolicy::Delegate;if(t&&link_object(at))return PairPolicy::Delegate;if(t&&projectile_enabled&&projectile_verifier){try{if(projectile_verifier(at))return PairPolicy::Delegate;}catch(...){}}return PairPolicy::Reject;}
+const bool child_at=owned_child_object(at),child_tg=owned_child_object(tg);if(child_at||child_tg){if(child_at&&child_tg)return PairPolicy::Reject;
+  // an owned rat bomb's blast reaches Link and the mod's own enemies only; Link may hit (push) the bomb
+  if(child_at&&bomb_object(at)){const bool hits=link_object(tg)||lookup_collider(tg);trace_blast(tg,hits);return hits?PairPolicy::Delegate:PairPolicy::Reject;}
+  if(child_tg&&bomb_object(tg))return link_object(at)?PairPolicy::Delegate:PairPolicy::Reject;int16_t timer=0;if(child_tg&&fire_child(tg,timer)&&timer==0&&ignition_source(at)&&(ld32(at+0x10)&0x20200u))return PairPolicy::Delegate;if(child_at&&fire_child(at,timer)&&timer>0&&(ld32(at)&1u)&&link_object(tg))return PairPolicy::Delegate;if(child_tg&&!child_at&&live_cape(tg)&&link_object(at))return PairPolicy::Delegate;return PairPolicy::Reject;}Token a=lookup_collider(at),t=lookup_collider(tg);bool ao=a||suspected_owned(at),to=t||suspected_owned(tg);if(!ao&&!to)return PairPolicy::Delegate;if(ao&&to)return PairPolicy::Reject;if(a&&link_object(tg))return PairPolicy::Delegate;if(t&&link_object(at))return PairPolicy::Delegate;if(t&&projectile_enabled&&projectile_verifier){try{if(projectile_verifier(at))return PairPolicy::Delegate;}catch(...){}}return PairPolicy::Reject;}
 bool install(const std::function<std::string(uint32_t)>& owner,const std::function<void(uint32_t,void(*)(Cpu*))>& replace){if(installed)return true;if(!arena||!original||!owner(NoAtTg).empty())return false;replace(NoAtTg,hook);installed=true;return true;}
 bool queue_impl(bool pending,Lineage role,Token source,uint32_t a,uint32_t pid,uint32_t queued,uint16_t profile,uint32_t params,uint32_t epoch){if(!arena||(!queued&&!pending)||queued==0xFFFFFFFFu||!epoch||!profile)return false;bool child=role==Lineage::EnemyChild;if(child){auto*e=get(source);if(!e||e->quarantined||e->pid!=pid||e->epoch!=epoch||!identity(*e,a)||(e->address&&e->address!=a)||(!pending&&!valid(*e)))return false;if(!definition_matches(*e,true)){uint32_t saved=e->address;e->address=a;write_record(*e);e->address=saved;uint32_t r=record(*e);st32(r,PendingMagic);st32(r+124,checksum(r,124));}}else if(role!=Lineage::LinkProjectile||a!=link||pid!=link_pid||!set_link(a,pid))return false;size_t begin=child?0:kChildCapacity,end=child?kChildCapacity:kChildCapacity+kProjectileCapacity;uint32_t free=0;for(size_t i=0;i<kChildCapacity+kProjectileCapacity;++i){uint32_t r=arena+LineageOffset+uint32_t(i)*64;if(queued&&ld32(r)==Magic&&ld32(r+20)==queued)return false;if(i>=begin&&i<end&&!free&&ld32(r)!=Magic)free=r;}if(!free)return false;for(unsigned i=0;i<64;++i)st8(free+i,0);st32(free,Magic);st32(free+4,Version);st32(free+8,unsigned(role));st32(free+12,source);st32(free+16,pid);st32(free+20,queued);st32(free+24,a);st32(free+28,profile);st32(free+32,params);st32(free+36,epoch);uint32_t generation=ld32(arena+24)+1;if(!generation){st32(free,0);return false;}st32(arena+24,generation);st32(free+44,generation);st32(free+52,child?0:link_generation());st32(free+56,1);st32(free+60,checksum(free,60));return true;}
 uint32_t source_epoch(Token token){auto*e=get(token);return e?e->epoch:0;}

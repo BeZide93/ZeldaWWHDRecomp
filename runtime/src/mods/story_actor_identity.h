@@ -36,6 +36,7 @@ inline Fingerprint fingerprint(const std::string&mod,const story_notebook::Manif
         const auto&at=c.attack;word(at.damage);word(at.active_frames);word(at.cooldown_frames);number(at.radius);number(at.height);number(at.forward_offset);number(at.y_offset);
     }
     if(!a.variant.empty()){text("wwhd.actor-variant.v1");text(a.variant);}
+    if(!a.hole.empty()){text("wwhd.actor-rat-hole.v1");text(a.hole);word(a.rat_bomb);}
     if(!a.defeat_switch.empty()){text("wwhd.actor-defeat-switch.v1");text(a.defeat_switch);}
     if(a.world_object()){text("wwhd.world-object.v1");text(a.behaviour);text(a.collision_mesh);text(a.collision_shape);text(a.collision_surface);point(a.collision_size);}
     if(a.water_object()){text("wwhd.world-motion.v1");number(a.buoyancy.draft);number(a.buoyancy.damping);number(a.buoyancy.max_tilt);number(a.drift.wind_speed);number(a.drift.max_speed);point(a.drift.current);word(a.anchor.enabled);point(a.anchor.point);number(a.anchor.radius);}

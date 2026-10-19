@@ -64,7 +64,7 @@ assert(VirtualAlloc(mem::ptr(Parent),0x10000,MEM_RESERVE|MEM_COMMIT,PAGE_READWRI
 assert(mmap(mem::ptr(Parent),0x10000,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED,-1,0)!=MAP_FAILED);assert(mmap(mem::ptr(0x10460000),0x10000,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED,-1,0)!=MAP_FAILED);
 #endif
 using namespace story_enemy_children;assert(configure(original,invoke,[](const o::LineageInfo&i){assert((i.source==1&&i.source_pid==10)||(i.source==2&&i.source_pid==20));++notices;}));
-auto owner=[](uint32_t){return std::string();};auto conflict=[](uint32_t){return std::string("foreign");};auto replace=[](uint32_t f,void(*fn)(Cpu*)){hooks[f]=fn;};assert(!install(conflict,replace)&&hooks.empty());assert(install(owner,replace)&&hooks.size()==13);assert(install(owner,replace));
+auto owner=[](uint32_t){return std::string();};auto conflict=[](uint32_t){return std::string("foreign");};auto replace=[](uint32_t f,void(*fn)(Cpu*)){hooks[f]=fn;};assert(!install(conflict,replace)&&hooks.empty());assert(install(owner,replace)&&hooks.size()==15);assert(install(owner,replace));
 actor(Parent,10,0x7FF9,0xFFFFFF04);actor(Child,50,0x1CF,0);actor(Other,51,0x1CF,0);assert(!enter(1,o::Kind::Bokoblin,Parent,2));assert(enter(1,o::Kind::Bokoblin,Parent,3));
 capacity=false;Cpu q{};q.r[3]=0x1CF;q.r[4]=0;hooks.at(0x025D5834)(&q);assert(q.r[3]==0xFFFFFFFF&&queues==0&&rows.empty());capacity=true;
 q.r[3]=0x1CF;q.r[4]=4;hooks.at(0x025D5834)(&q);assert(queues==0);q.r[3]=0x1CF;q.r[4]=0;hooks.at(0x025D5834)(&q);assert(queues==1&&rows.count(50));leave();

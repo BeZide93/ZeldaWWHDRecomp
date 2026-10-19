@@ -94,7 +94,7 @@ int main() {
     const auto prop_example=[](){return mods::json::parse(R"({"items":[{"id":"shard"}],"actors":[{"id":"vase","actor":"pot","stage":"town","room":0,"position":{"x":0,"y":0,"z":0},"broken_flag":"vase.broken","drops":[{"item":"item:shard","quantity":2}]}]})");};
     { // Validate all four curated native enemy declarations through the public parser.
         const auto fixture=[](){return mods::json::parse(R"({"items":[{"id":"shard"}],"actors":[{"id":"enemy","actor":"chuchu","stage":"sea","room":11,"position":{"x":0,"y":0,"z":0},"defeated_flag":"enemy.defeated","drops":[{"item":"item:shard","quantity":2}]}]})");};
-        for(const char* type:{"chuchu","bokoblin","moblin","keese","miniblin","peahat","darknut"}){
+        for(const char* type:{"chuchu","bokoblin","moblin","keese","miniblin","peahat","darknut","rat_hole"}){
             auto data=fixture();auto& value=data["actors"].array[0];value["actor"]=type;ManifestActor candidate;candidate.actor=type;
             assert(world_manifest::native_enemy_fields(data,value,candidate,why)&&candidate.defeated_flag=="enemy.defeated"&&candidate.drops.size()==1&&candidate.drops[0].quantity==2);
             assert(parse_actors(data,actors,why)&&actors.size()==1&&actors[0].actor==type&&actors[0].defeated_flag=="enemy.defeated"&&actors[0].drops[0].item=="shard");
@@ -132,6 +132,27 @@ int main() {
          a["actor"]="moblin";a.object.erase("parameters");assert(parse_actors(data,actors,why)&&actors[0].path.loop);
          assert(story_enemy_variants::moblin_patrol(0xFFFF0000u)==0xFFFE0000u&&story_enemy_variants::patrol_word(0xFFFE0000u));
          a["actor"]="chuchu";assert(!parse_actors(data,actors,why));}
+        // a rat hole: the hole and three rats (four actors), its rats named "<id>.ratN" / "<flag>.ratN";
+        // ids and flags at most 27 characters, no other actor with its rats' names, two holes per room
+        {auto data=fixture();auto& a=data["actors"].array[0];a["actor"]="rat_hole";a["parameters"]=mods::json::parse(R"({"variant":"mixed"})");
+         assert(parse_actors(data,actors,why)&&actors[0].variant=="mixed"&&placed_actors(actors[0])==4&&story_enemy_variants::kRatsPerHole==3);
+         assert(!story_enemy_variants::rat_bomb("mixed",0)&&story_enemy_variants::rat_bomb("mixed",1)&&!story_enemy_variants::rat_bomb("mixed",2)&&story_enemy_variants::rat_bomb("bomb_rats",0)&&story_enemy_variants::rat_bomb("bomb_rats",2)&&!story_enemy_variants::rat_bomb("rats",1)&&!story_enemy_variants::rat_bomb("",1));
+         for(const char* name:{"rats","bomb_rats","mixed"})assert(story_enemy_variants::find("rat_hole",name)&&story_enemy_variants::find("rat_hole",name)->params==0xFF010100u);
+         assert(story_enemy_variants::find("rat_hole","")==story_enemy_variants::find("rat_hole","rats"));
+         {auto bad=data;bad["actors"].array[0]["path"]=mods::json::parse(R"({"points":[{"x":300,"y":0,"z":0}],"mode":"loop"})");assert(!parse_actors(bad,actors,why));}
+         {auto bad=data;bad["actors"].array[0]["id"]=std::string(28,'h');assert(!parse_actors(bad,actors,why)&&why.find("27")!=std::string::npos);}
+         {auto ok=data;ok["actors"].array[0]["id"]=std::string(27,'h');ok["actors"].array[0]["defeated_flag"]=std::string(27,'f');assert(parse_actors(ok,actors,why));}
+         {auto bad=data;bad["actors"].array[0]["defeated_flag"]=std::string(28,'f');assert(!parse_actors(bad,actors,why)&&why.find("27")!=std::string::npos);}
+         const auto chu=[](const std::string& id,const std::string& flag){auto v=mods::json::parse(R"({"actor":"chuchu","stage":"sea","room":11,"position":{"x":0,"y":0,"z":0},"drops":[]})");v["id"]=id;v["defeated_flag"]=flag;return v;};
+         {auto bad=data;bad["actors"].array.push_back(chu("enemy.rat2","other.defeated"));assert(!parse_actors(bad,actors,why)&&why.find("rats")!=std::string::npos);}
+         {auto bad=data;bad["actors"].array.push_back(chu("other","enemy.defeated.rat3"));assert(!parse_actors(bad,actors,why)&&why.find("rats")!=std::string::npos);}
+         {auto ok=data;ok["actors"].array.push_back(chu("enemy.rat4","enemy.defeated.rat4"));assert(parse_actors(ok,actors,why));}
+         {auto two=data;auto hole=two["actors"].array[0];hole["id"]="h2";hole["defeated_flag"]="h2.closed";two["actors"].array.push_back(hole);assert(parse_actors(two,actors,why));
+          hole["id"]="h3";hole["defeated_flag"]="h3.closed";two["actors"].array.push_back(hole);assert(!parse_actors(two,actors,why)&&why.find("two rat holes")!=std::string::npos);
+          two["actors"].array.back()["room"]=12;assert(parse_actors(two,actors,why));}
+         {auto full=data;for(int i=0;i<12;++i)full["actors"].array.push_back(chu("c"+std::to_string(i),"c"+std::to_string(i)+".d"));assert(parse_actors(full,actors,why));
+          full["actors"].array.push_back(chu("c12","c12.d"));assert(!parse_actors(full,actors,why)&&why.find("16 per room")!=std::string::npos);}
+         ManifestActor rat=actors.empty()?ManifestActor{}:actors[0];rat.actor="rat";rat.hole="enemy";const auto plain=story_actors::identity::fingerprint("m",rat);rat.rat_bomb=true;assert(plain!=story_actors::identity::fingerprint("m",rat));rat.hole="other";rat.rat_bomb=false;assert(plain!=story_actors::identity::fingerprint("m",rat));}
         // defeat_switch: an enemy names one of the mod's switch actors; anything else is refused
         {auto data=fixture();data["actors"].array.push_back(mods::json::parse(R"({"id":"gate-switch","actor":"switch","stage":"sea","room":11,"position":{"x":5,"y":0,"z":0},"switch_flag":"gate.open"})"));
          data["actors"].array[0]["defeat_switch"]="gate-switch";assert(parse_actors(data,actors,why)&&actors[0].defeat_switch=="gate-switch");
