@@ -234,6 +234,10 @@ bool particle_position(Cpu*,const std::string&,const std::string&,unsigned,story
 bool actions(const std::string&,const std::vector<story_notebook::StoryAction>&){return true;}
 }
 namespace story_scenes {
+bool has_demo_steps(){return false;}
+uint32_t demo_arena_bytes(){return 0;}
+void configure_demo(uint32_t,uint32_t (*)(Cpu*,uint32_t,std::initializer_list<uint32_t>),void (*)(Cpu*,uint32_t)){}
+void demo_tick(Cpu*){}
 bool declared_scene(const std::string&,const std::string&,story_notebook::ManifestScene&){return false;}
 static MusicHook music_hook;
 size_t checkpoint(){return 0;}

@@ -1,5 +1,4 @@
 #include "story_scenes.h"
-#include "story_demo.h"
 #include "story_mail.h"
 #include "story_scene_choice.h"
 #include "story_scene_motion.h"
@@ -24,6 +23,7 @@
 
 namespace story_scenes {
 namespace {
+DemoBackend& demo_backend(){static DemoBackend backend;return backend;}
 using namespace story_notebook;
 const uint32_t kPlay=GC(0x025200D4),kOrder=GC(0x0253EC0C),kCheckStart=GC(0x0253FD1C),kEnd=GC(0x0253EFA8);
 const uint32_t kCamera=GC(0x024F8044),kStopCamera=GC(0x02514F2C),kStartCamera=GC(0x02514F38),kSetCamera=GC(0x02514F50),kResetCamera=GC(0x02515048),kTrim=GC(0x02515280);
@@ -148,7 +148,7 @@ void restore(bool loaded,bool immediate=false) {
             guest?guest->mod.c_str():"invalid",guest?guest->scene.id.c_str():"invalid",guest_index,ld32(g_scratch+LeaseID),
             host?host->mod.c_str():"invalid",host?host->scene.id.c_str():"invalid",unsigned(g_restore_reason),unsigned(ours));
     }
-    if(g_cpu)story_demo::release(g_cpu,loaded?"state load":"scene ended");
+    if(g_cpu&&demo_backend().release)demo_backend().release(g_cpu,loaded?"state load":"scene ended");
     finish_move();release_actors();restore_music();story_scene_choice::close(g_cpu);g_camera_follow.reset();
     if(ours) {
         const uint32_t manager=ld32(kMessageManager);
@@ -247,7 +247,7 @@ public:
         }else if(step.kind==SceneStep::Kind::Demo){
             // the game's demo system plays the tracks; this scene's compulsory event stays ours
             std::string why;
-            if(!step.demo||!story_demo::start(g_cpu,*step.demo,true,why)){LOG("[scenes] %s:%s demo refused: %s",g_entries[g_current].mod.c_str(),g_entries[g_current].scene.id.c_str(),why.c_str());return false;}
+            if(!step.demo||!demo_backend().start||!demo_backend().start(g_cpu,*step.demo,true,why)){LOG("[scenes] %s:%s demo refused: %s",g_entries[g_current].mod.c_str(),g_entries[g_current].scene.id.c_str(),why.c_str());return false;}
             return true;
         }else if(step.kind==SceneStep::Kind::Particle){
             if(!g_cpu||!owns(call(kPlay))||!same_room(call(kPlay)))return false;
@@ -294,10 +294,10 @@ public:
         if(step.kind==SceneStep::Kind::CameraPath){motion::Camera view;if(!g_camera_path.sample(elapsed,view)||!submit_camera(view))return StepResult::Failed;
         }else if(step.kind==SceneStep::Kind::CameraFollow){const uint32_t actor=resolve(step.actor);if(!actor||actor!=ld32(g_scratch+176)||ld32(actor+4)!=ld32(g_scratch+180))return StepResult::Failed;motion::Camera view;if(!g_camera_follow.update((uint64_t(ld32(actor+4))<<32)|actor,motion_point(position(actor)),1./60,view)||!submit_camera(view))return StepResult::Failed;
         }else if(step.kind==SceneStep::Kind::Demo){
-            const auto poll=story_demo::poll(g_cpu);
-            if(poll.state==story_demo::Poll::State::Done)return StepResult::Complete;
-            if(poll.state==story_demo::Poll::State::Failed){LOG("[scenes] demo failed: %s",poll.why.c_str());return StepResult::Failed;}
-            if(poll.state==story_demo::Poll::State::Idle)return StepResult::Failed;
+            std::string why;const int poll=demo_backend().poll?demo_backend().poll(g_cpu,why):0;
+            if(poll==2)return StepResult::Complete;
+            if(poll==3){LOG("[scenes] demo failed: %s",why.c_str());return StepResult::Failed;}
+            if(poll==0)return StepResult::Failed;
             return StepResult::Running;
         }else if(step.kind==SceneStep::Kind::Choice){
             if(!g_message_phase){const uint32_t manager=ld32(kMessageManager);if(!manager)return StepResult::Failed;const uint32_t status=call(kMessageStatus,{manager});if(status!=0&&status!=15)return StepResult::Running;if(!story_scene_choice::begin(g_cpu,g_choice_labels,step.default_choice))return StepResult::Failed;g_message_phase=1;return StepResult::Running;}
@@ -348,6 +348,10 @@ public:
 } g_driver;
 }
 void set_game_calls(uint32_t (*fn)(Cpu*,uint32_t,std::initializer_list<uint32_t>)){g_call=fn;}
+void register_demo_backend(const DemoBackend& backend){demo_backend()=backend;}
+uint32_t demo_arena_bytes(){return demo_backend().configure?demo_backend().arena_bytes:0;}
+void configure_demo(uint32_t arena,uint32_t (*call)(Cpu*,uint32_t,std::initializer_list<uint32_t>),void (*original)(Cpu*,uint32_t)){if(demo_backend().configure)demo_backend().configure(arena,call,original);}
+void demo_tick(Cpu* c){if(demo_backend().configured&&demo_backend().configured())demo_backend().tick(c);}
 bool has_demo_steps(){return std::any_of(g_entries.begin(),g_entries.end(),[](const Entry& e){return std::any_of(e.scene.steps.begin(),e.scene.steps.end(),[](const SceneStep& s){return s.kind==SceneStep::Kind::Demo;});});}
 void set_scratch_memory(uint32_t guest){g_scratch=guest;}
 void set_callbacks(Resolve resolve_fn,Actions actions_fn){g_resolve=std::move(resolve_fn);g_actions=std::move(actions_fn);}
@@ -417,7 +421,7 @@ void trigger(const std::string& kind,const std::string& mod,const std::string& i
 void install(void (*original_fn)(Cpu*,uint32_t),const std::function<std::string(uint32_t)>& replaced_by,const std::function<void(uint32_t,void(*)(Cpu*))>& replace) {
     if(g_entries.empty()||!original_fn)return;
     g_original=original_fn;
-    if(has_demo_steps()&&story_demo::configured())story_demo::install(replaced_by,replace);
+    if(has_demo_steps()&&demo_backend().configured&&demo_backend().configured())demo_backend().install(replaced_by,replace);
     const bool needs_choice=std::any_of(g_entries.begin(),g_entries.end(),[](const Entry& entry){return std::any_of(entry.scene.steps.begin(),entry.scene.steps.end(),[](const SceneStep& step){return step.kind==SceneStep::Kind::Choice;});});
     if(needs_choice&&!g_choice_installed){story_scene_choice::configure(original_fn,g_call,g_scratch+ChoiceScratch,scene_lease);g_choice_installed=story_scene_choice::install(replaced_by,replace);}
     if(g_trim_installed)return;

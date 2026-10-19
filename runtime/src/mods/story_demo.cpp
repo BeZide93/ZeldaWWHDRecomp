@@ -4,6 +4,7 @@
 #include "demo_event_image.h"
 #include "guest_addr.h"
 #include "runtime.h"
+#include "story_scenes.h"
 #include "story_mail.h"
 #include "story_mail_book.h"
 
@@ -317,3 +318,24 @@ void tick(Cpu* c) {
 }
 bool active() { return recorded() && ld32(g_arena + Phase) != kDraining; }
 }  // namespace story_demo
+
+namespace {
+// registers the demo-step backend with the scene player at startup (story_scenes.h DemoBackend)
+const bool g_registered = [] {
+    story_scenes::DemoBackend b;
+    b.arena_bytes = story_demo::kArenaBytes;
+    b.configure = story_demo::configure;
+    b.configured = story_demo::configured;
+    b.install = story_demo::install;
+    b.start = story_demo::start;
+    b.poll = [](Cpu* c, std::string& why) {
+        const auto p = story_demo::poll(c);
+        why = p.why;
+        return p.state == story_demo::Poll::State::Running ? 1 : p.state == story_demo::Poll::State::Done ? 2 : p.state == story_demo::Poll::State::Failed ? 3 : 0;
+    };
+    b.release = story_demo::release;
+    b.tick = story_demo::tick;
+    story_scenes::register_demo_backend(b);
+    return true;
+}();
+}  // namespace

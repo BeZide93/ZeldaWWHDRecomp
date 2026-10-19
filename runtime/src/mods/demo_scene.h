@@ -60,7 +60,7 @@ struct Demo {
     std::vector<Message> messages;
     bool operator==(const Demo&) const = default;
 };
-bool parse(const mods::json::Value& step, Demo& out, std::string& why);
+inline bool parse(const mods::json::Value& step, Demo& out, std::string& why);  // demo_scene_parse.h
 
 // The game's id of a file in one of its archives (the archive's resource id table), or -1.
 using Resolver = std::function<int32_t(const Resource&)>;
@@ -74,3 +74,4 @@ struct Compiled {
 // message point); the demo waits one frame later until the player closes it (the game's own unsuspend).
 bool compile(const Demo& demo, const Resolver& resolve, Compiled& out, std::string& why, uint32_t message_number = 0x2CF3);
 }  // namespace demo_scene
+#include "demo_scene_parse.h"

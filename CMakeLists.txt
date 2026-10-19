@@ -3106,7 +3106,7 @@ target_link_libraries(story_native_wait_saved_rebind_test PRIVATE Threads::Threa
 add_test(NAME story_native_wait_saved_rebind_contract COMMAND story_native_wait_saved_rebind_test)
 
 # Native frontend shares the actual StoryScenes FIFO but never bypasses its fallback.
-set(STORY_NATIVE_PLAYBACK_DEPS runtime/src/mods/story_native_scene_retire.cpp runtime/src/mods/story_native_scene_checkpoint_data.cpp runtime/src/mods/story_native_scene_checkpoint.cpp runtime/src/mods/story_native_scene_playback.cpp runtime/src/mods/story_native_scene_run_owner.cpp runtime/src/mods/story_native_scene_coverage.cpp runtime/src/mods/story_native_scene_completion.cpp runtime/src/mods/story_demo.cpp runtime/src/mods/demo_scene.cpp runtime/src/mods/demo_stb.cpp runtime/src/mods/demo_event_image.cpp)
+set(STORY_NATIVE_PLAYBACK_DEPS runtime/src/mods/story_native_scene_retire.cpp runtime/src/mods/story_native_scene_checkpoint_data.cpp runtime/src/mods/story_native_scene_checkpoint.cpp runtime/src/mods/story_native_scene_playback.cpp runtime/src/mods/story_native_scene_run_owner.cpp runtime/src/mods/story_native_scene_coverage.cpp runtime/src/mods/story_native_scene_completion.cpp)
 get_property(STORY_NATIVE_SCENE_LINK_TARGETS DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
 foreach(STORY_NATIVE_SCENE_LINK_TARGET IN LISTS STORY_NATIVE_SCENE_LINK_TARGETS)
  get_target_property(STORY_NATIVE_SCENE_LINK_SOURCES ${STORY_NATIVE_SCENE_LINK_TARGET} SOURCES)
