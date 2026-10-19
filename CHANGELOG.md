@@ -15,6 +15,12 @@ what is on `devel` and not released yet (also in the
 - **Mod SDK v3 and the editor: the Darknut** (for mod makers), plain, with a shield, with a helmet, or the Mighty Darknut
   with its cape. Its sword and cape stay its own and go with it, it writes no game switch, and its defeat can open a
   mod door (`defeat_switch`).
+
+- **Mod models can have up to 16 materials** (for mod makers), each with its own texture, so mod islands can mix sand,
+  grass, rock and wood like the game's own islands; cut-out materials (glTF alpha clip) for leaves, fences and foliage
+  cards, and double-sided faces lit correctly on both sides. New example `world-objects-w5`.
+- **Fixed: island buildings in released builds.** The release packages lacked the converter the island buildings
+  need.
 - **Quick-use locked items** (Mods > Built-in, off by default; #196, thanks mhbxyz): while locked onto an enemy, one
   item-button press equips and uses the bow (including fire, ice and light arrows), boomerang, hookshot or grappling
   rope; bombs are readied and thrown, and equipping the hammer completes one strike. A **Quick-use animation speed**
