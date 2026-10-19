@@ -781,6 +781,20 @@ Value Session::dispatch_build(const std::string& command, const Value& p, std::s
         ok = true;
         return r;
     }
+    if (command == "model_clips") {
+        // a model of the open mod: its animation clips (the Inspector's walk and idle pickers)
+        Package* pkg = package(p, why);
+        if (!pkg) return r;
+        const Value* md = by_id(pkg->manifest.get("models"), text(p, "model"));
+        if (!md) return why = "no model \"" + text(p, "model") + "\"", r;
+        if (pkg->dir.empty()) return why = "the mod has no package folder", r;
+        Value info;
+        if (!check_model_file((fs::path(utf8_path(pkg->dir)) / utf8_path(md->get("source").string())).string(), info, why)) return r;
+        r["clips"] = info.get("clips");
+        r["skinned"] = info.get("kind").string() == "skinned";
+        ok = true;
+        return r;
+    }
     if (command == "import_model") {
         Package* pkg = package(p, why);
         if (!pkg) return r;

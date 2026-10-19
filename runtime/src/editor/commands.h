@@ -112,12 +112,27 @@ public:
     // ---- building new content (each optional: the defaults say the game is not there) ----
     // The ground under `above` (the game's own collision check): its height. False: no ground below.
     virtual bool ground(const WorldPoint& above, float& height, std::string& why) { return why = "the game is not running", false; }
+    // The ground under each of `above` at once (heights[i] valid where found[i]); false: no game.
+    virtual bool grounds(const std::vector<WorldPoint>& above, std::vector<float>& heights, std::vector<bool>& found, std::string& why) {
+        heights.assign(above.size(), 0);
+        found.assign(above.size(), false);
+        for (size_t i = 0; i < above.size(); i++) {
+            float h = 0;
+            std::string w;
+            if (ground(above[i], h, w)) heights[i] = h, found[i] = true;
+            else if (w == "the game is not running") return why = w, false;
+        }
+        return true;
+    }
     // The first ground the ray from `from` along `direction` (unit length) meets within `range` units.
     virtual bool ray(const WorldPoint& from, const WorldPoint& direction, float range, WorldPoint& hit, std::string& why) {
         return why = "the game is not running", false;
     }
     // The fly camera's place: its position, heading and the room under it (invalid while it is off).
     virtual Place camera() { return {}; }
+    // A placed actor's route in the game: {"declared", "live", "status"} for a walking resident (its copy
+    // follows its route; walking, skipped a blocked point, stopped, finished); null when the game has none.
+    virtual Value route_state(const std::string& mod, const std::string& id) { (void)mod, (void)id; return Value(); }
     // Points the fly camera at `target` from a short distance (turns it on first if needed).
     virtual bool focus(const WorldPoint& target, std::string& why) { return why = "the game is not running", false; }
     // A model of `mod` was added or changed (its manifest entry; the file is in the package `dir`):
@@ -331,6 +346,8 @@ private:
     Value dispatch_scene(const std::string& command, const Value& params, std::string& why, bool& ok, bool& handled);
     // letters on their own, charts and items (commands_story.cpp)
     Value dispatch_story(const std::string& command, const Value& params, std::string& why, bool& ok, bool& handled);
+    // an actor's route: points, settings, ground check, live state (commands_route.cpp)
+    Value dispatch_route(const std::string& command, const Value& params, std::string& why, bool& ok, bool& handled);
 };
 
 // One problem of a package, with what it is about (for the editor's problem list: a click selects it).
@@ -343,6 +360,10 @@ struct Problem {
 };
 
 // ---- pure helpers (unit-tested) ----
+// A placed resident's own walking pace (game units per second; 0: it does not walk) and why an actor
+// can't have a route (empty: it can) (commands_route.cpp).
+double resident_pace(const Value& actor);
+std::string route_refusal(const Value& actor);
 // Every problem of the package: each actor, model, scene and quest checked on its own (as the mod
 // manager checks the whole), the model files, then the whole package. Empty: it is valid.
 std::vector<Problem> package_problems(const std::string& mod, const Value& manifest, const std::vector<std::pair<std::string, Value>>& all,

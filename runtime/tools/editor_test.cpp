@@ -1071,6 +1071,77 @@ void game_objects() {
     fs::remove_all(dir);
 }
 
+void route_commands() {
+    // an actor's route: points at Link, the camera or a position (on the ground), moved, reordered and
+    // removed, the settings; one undo step each; the villagers without a walk are refused with the reason
+    FakeHost host;
+    editor::Session s(&host);
+    s.add_package("editor-test", "Editor test", "", json(kManifest));
+    Value r = s.run("add_actor", json(R"({"type": "resident", "id": "walker", "at": "position", "position": {"x": 0, "y": 5, "z": 0}, "stage": "sea", "room": 44, "options": {"resident": "uo2"}})"));
+    CHECK(ok(r));
+    const auto path = [&]() { return actor_of(s, "walker")->get("path"); };
+    r = s.run("add_route_point", json(R"({"id": "walker", "at": "position", "position": {"x": 100, "y": 50, "z": 0}})"));
+    CHECK(ok(r) && r.get("result").get("point").number == 1);
+    CHECK(path().get("points").array.size() == 1 && path().get("points").array[0].get("y").number == 5 && path().get("mode").string() == "once");
+    CHECK(path().get("speed").type == Value::Null);  // a resident: its own pace
+    CHECK(host.last_changed.size() == 1 && host.last_changed[0] == "walker" && !host.last_actors.empty());
+    bool walks = false;
+    for (const auto& a : host.last_actors)
+        if (a.id == "walker") walks = a.path.points.size() == 1 && !a.path.speed_given;
+    CHECK(walks);
+    // at Link (1, 2, 3 -> ground 5), at the camera (off: refused), after point 0 (first)
+    CHECK(ok(s.run("add_route_point", json(R"({"id": "walker"})"))) && path().get("points").array.size() == 2 && path().get("points").array[1].get("x").number == 1);
+    CHECK(!ok(s.run("add_route_point", json(R"({"id": "walker", "at": "camera"})"))));
+    host.camera_on = true;
+    r = s.run("add_route_point", json(R"({"id": "walker", "at": "camera", "after": 0})"));
+    CHECK(ok(r) && r.get("result").get("point").number == 1 && path().get("points").array[0].get("x").number == 100 && path().get("points").array.size() == 3);
+    // move, reorder, remove
+    CHECK(ok(s.run("move_route_point", json(R"({"id": "walker", "point": 2, "position": {"x": 200, "y": 5, "z": 50}})"))) && path().get("points").array[1].get("x").number == 200);
+    CHECK(!ok(s.run("move_route_point", json(R"({"id": "walker", "point": 4, "position": {"x": 200, "y": 5, "z": 50}})"))));
+    CHECK(ok(s.run("reorder_route_point", json(R"({"id": "walker", "point": 3, "to": 1})"))) && path().get("points").array[0].get("x").number == 1 && path().get("points").array[2].get("x").number == 200);
+    CHECK(ok(s.run("remove_route_point", json(R"({"id": "walker", "point": 1})"))) && path().get("points").array.size() == 2);
+    // settings: speed within half to twice its own pace (uo2: 30 units a second), mode, pauses; null: its own pace
+    CHECK(ok(s.run("set_route", json(R"({"id": "walker", "speed": 45, "mode": "back_and_forth", "pauses": true})"))));
+    CHECK(path().get("speed").number == 45 && path().get("mode").string() == "back_and_forth" && path().get("pauses").boolean);
+    CHECK(!ok(s.run("set_route", json(R"({"id": "walker", "speed": 90})"))) && path().get("speed").number == 45);  // refused: twice is 60
+    CHECK(!ok(s.run("set_route", json(R"({"id": "walker", "mode": "circle"})"))));
+    CHECK(!ok(s.run("set_route", json(R"({"id": "walker", "walk": "run"})"))));  // a resident walks with its own walk
+    CHECK(ok(s.run("set_route", json(R"({"id": "walker", "speed": null, "pauses": false})"))) && path().get("speed").type == Value::Null && path().get("pauses").type == Value::Null);
+    // undo: one step each
+    CHECK(ok(s.run("undo")) && path().get("speed").number == 45);
+    CHECK(ok(s.run("redo")) && path().get("speed").type == Value::Null);
+    // the ground under each segment: start -> 1 -> 2 (once): two segments on the ground at y 5
+    r = s.run("check_route", json(R"({"id": "walker"})"));
+    CHECK(ok(r) && r.get("result").get("segments").array.size() == 2 && r.get("result").get("segments").array[0].get("ok").boolean);
+    CHECK(r.get("result").get("segments").array[0].get("from").number == 0 && r.get("result").get("segments").array[1].get("to").number == 2);
+    host.has_ground = false;
+    r = s.run("check_route", json(R"({"id": "walker"})"));
+    CHECK(ok(r) && !r.get("result").get("segments").array[0].get("ok").boolean && r.get("result").get("segments").array[0].get("problem").string() == "no ground");
+    host.has_ground = true;
+    CHECK(ok(s.run("set_route", json(R"({"id": "walker", "mode": "loop"})"))));
+    r = s.run("check_route", json(R"({"id": "walker"})"));
+    CHECK(ok(r) && r.get("result").get("segments").array.size() == 3 && r.get("result").get("segments").array[2].get("to").number == 0);
+    CHECK(!ok(s.run("route_status", json(R"({"id": "walker"})"))));  // this host has no game: no live route
+    // the last point removed: no route; remove_route
+    CHECK(ok(s.run("remove_route_point", json(R"({"id": "walker", "point": 1})"))) && path().get("points").array.size() == 1);
+    r = s.run("remove_route_point", json(R"({"id": "walker", "point": 1})"));
+    CHECK(ok(r) && r.get("result").get("route_removed").boolean && path().type == Value::Null);
+    CHECK(!ok(s.run("set_route", json(R"({"id": "walker", "speed": 30})"))));  // no route yet
+    CHECK(ok(s.run("undo")) && path().type == Value::Object);
+    CHECK(ok(s.run("remove_route", json(R"({"id": "walker"})"))) && path().type == Value::Null);
+    // a villager without a walk of its own, the seated man and a sign: refused with the reason
+    CHECK(ok(s.run("add_actor", json(R"({"type": "resident", "id": "chatter", "options": {"resident": "ub1"}})"))));
+    r = s.run("add_route_point", json(R"({"id": "chatter"})"));
+    CHECK(!ok(r) && r.get("error").string().find("no walking animation of its own") != std::string::npos && actor_of(s, "chatter")->get("path").type == Value::Null);
+    CHECK(ok(s.run("add_actor", json(R"({"type": "resident", "id": "seated", "options": {"resident": "ym1"}})"))));
+    CHECK(!ok(s.run("add_route_point", json(R"({"id": "seated"})"))));
+    CHECK(ok(s.run("add_actor", json(R"({"type": "sign", "id": "board"})"))));
+    r = s.run("add_route_point", json(R"({"id": "board"})"));
+    CHECK(!ok(r) && r.get("error").string().find("only residents") != std::string::npos);
+    // the pure helpers the Inspector uses
+    CHECK(editor::resident_pace(*actor_of(s, "walker")) == 30 && editor::resident_pace(*actor_of(s, "chatter")) == 0 && editor::route_refusal(*actor_of(s, "walker")).empty());
+}
+
 int main(int argc, char** argv) {
     // editor_test --game <game dir> [stage room]: what the editor reads from a game folder (manual check)
     if (argc >= 3 && std::string(argv[1]) == "--game") {
@@ -1099,6 +1170,7 @@ int main(int argc, char** argv) {
     live_kinds_note();
     building(argv[1]);
     game_objects();
+    route_commands();
     stage_tables();
     ray_pick();
     if (g_failures) {

@@ -90,6 +90,28 @@ const std::vector<CommandInfo> kCommands = {
      true},
     {"list_game_objects", "The game's own objects a mod places by reference (add_actor type \"game:<id>\"), by category, with their variants, turn and scale limits and whether the player's game files have them.",
      {{"category", "string", "only this category"}, {"query", "string", "only those whose id, label or description contains this"}}},
+    // ---- an actor's route (commands_route.cpp): a placed resident who walks (uo1, uo2, uo3, um1, um2) or a skinned model
+    {"add_route_point", "Adds a point to an actor's route (its first point starts the route) at Link, the fly camera or a position, snapped to the ground. A resident starts at its position and walks to its points with its own walk; a model's route lists every point, its position first.",
+     {{"id", "string", "the actor", true}, {"at", "string", "link (default), camera or position"}, {"position", "point", "with at = position"},
+      {"after", "integer", "insert after this point number (0: first; default: at the end)"}, {"snap", "boolean", "onto the ground (default true)"}, {"mod", "string", ""}},
+     true},
+    {"move_route_point", "Moves one point of an actor's route.",
+     {{"id", "string", "", true}, {"point", "integer", "the point number (1 = the first after a resident's position)", true}, {"position", "point", "where to"},
+      {"at", "string", "link or camera instead of position"}, {"snap", "boolean", "with at: onto the ground (default true)"}, {"mod", "string", ""}},
+     true},
+    {"remove_route_point", "Removes one point of an actor's route (the route goes when too few points are left).",
+     {{"id", "string", "", true}, {"point", "integer", "the point number", true}, {"mod", "string", ""}}, true},
+    {"reorder_route_point", "Moves a route point to another place in the order.",
+     {{"id", "string", "", true}, {"point", "integer", "the point number", true}, {"to", "integer", "its new number", true}, {"mod", "string", ""}}, true},
+    {"set_route", "Sets an actor's route settings: speed (game units per second; a resident: 0.5 to 2 times its own pace, null for its own), mode (once, loop or back_and_forth), pauses (short strolling pauses), and for a model its walk and idle clips.",
+     {{"id", "string", "", true}, {"speed", "number|null", "units per second"}, {"mode", "string", "once, loop or back_and_forth"}, {"pauses", "boolean", "short strolling pauses on the way"},
+      {"walk", "string|null", "a model's walk clip (default walk)"}, {"idle", "string|null", "a model's idle clip (default idle)"}, {"mod", "string", ""}},
+     true},
+    {"remove_route", "Removes an actor's route: it stands where it is placed.", {{"id", "string", "", true}, {"mod", "string", ""}}, true},
+    {"check_route", "Checks the ground under each segment of an actor's route (the game's collision): no ground, a drop or a step too high (a wall) marks it.",
+     {{"id", "string", "", true}, {"mod", "string", ""}}},
+    {"route_status", "A walking resident's route in the game: whether its copy follows it, and walking, skipped a blocked point, stopped (blocked or off its ground) or finished.",
+     {{"id", "string", "", true}, {"mod", "string", ""}}},
     {"remove_actor", "Removes a placed actor (an undo step).", {{"id", "string", "", true}, {"confirm", "boolean", "must be true", true}, {"mod", "string", ""}}, true, true},
     {"duplicate_actor", "Copies a placed actor next to it under a new id, with flags of its own.",
      {{"id", "string", "", true}, {"new_id", "string", "default: from the id"}, {"offset", "point", "default {x: 100, y: 0, z: 0}"}, {"mod", "string", ""}}, true},
@@ -128,6 +150,7 @@ const std::vector<CommandInfo> kCommands = {
     {"import_model", "Copies a .glb file into the open mod's models folder, adds it to the package and prepares it for the game.",
      {{"file", "string", "the .glb file", true}, {"id", "string", "the model's id (default: the file name)"}, {"confirm", "boolean", "replace a different file of the same name"}, {"mod", "string", ""}},
      true},
+    {"model_clips", "A model's animation clips (for a route's walk and idle clips).", {{"model", "string", "the model's id", true}, {"mod", "string", ""}}},
     {"check_package", "Every problem of the open mod's package, each with the actor, model, scene or quest it is about.", {{"mod", "string", ""}}},
     {"export_package", "Checks the open mod and writes its package (manifest and its own files) into a new or empty folder.",
      {{"path", "string", "the folder", true}, {"confirm", "boolean", "must be true", true}, {"mod", "string", ""}}, false, true},
@@ -317,6 +340,8 @@ bool type_ok(const std::string& type, const Value& v) {
     if (type == "object|null") return v.type == Value::Object || v.type == Value::Null;
     if (type == "array") return v.type == Value::Array;
     if (type == "array|null") return v.type == Value::Array || v.type == Value::Null;
+    if (type == "number|null") return v.type == Value::Number || v.type == Value::Null;
+    if (type == "string|null") return v.type == Value::String || v.type == Value::Null;
     return false;
 }
 bool check_params(const CommandInfo& c, const Value& p, std::string& why) {
@@ -1473,6 +1498,8 @@ Value Session::dispatch(const std::string& command, const Value& p, std::string&
     r = dispatch_quest(command, p, why, ok, handled);
     if (handled) return r;
     r = dispatch_story(command, p, why, ok, handled);
+    if (handled) return r;
+    r = dispatch_route(command, p, why, ok, handled);
     if (handled) return r;
     why = "command \"" + command + "\" is not implemented";
     return r;

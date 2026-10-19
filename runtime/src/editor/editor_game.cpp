@@ -996,6 +996,27 @@ public:
         if (!on_game([&](Cpu* c) { found = ground_below(c, above.x, above.y, above.z, height); }, why)) return false;
         return found || (why = "no ground below (outside the loaded rooms?)", false);
     }
+    bool grounds(const std::vector<WorldPoint>& above, std::vector<float>& heights, std::vector<bool>& found, std::string& why) override {
+        heights.assign(above.size(), 0);
+        found.assign(above.size(), false);
+        return on_game([&](Cpu* c) {
+            for (size_t i = 0; i < above.size(); i++) {
+                float h = 0;
+                if (ground_below(c, above[i].x, above[i].y, above[i].z, h)) heights[i] = h, found[i] = true;
+            }
+        }, why, 3000);
+    }
+    Value route_state(const std::string& mod, const std::string& id) override {
+        Value v;
+        std::string why;
+        story_actors::ResidentRoute route;
+        bool known = false;
+        if (!on_game([&](Cpu*) { known = story_actors::resident_route(mod, id, route); }, why) || !known || !route.declared) return v;
+        v["declared"] = true;
+        v["live"] = route.live;
+        v["status"] = route.live ? route.status : std::string("not in the game (another room, or it appears after a reload)");
+        return v;
+    }
     bool ray(const WorldPoint& from, const WorldPoint& direction, float range, WorldPoint& hit, std::string& why) override {
         bool found = false;
         if (!on_game([&](Cpu* c) { found = ray_hit(c, from, direction, range, hit); }, why, 3000)) return false;

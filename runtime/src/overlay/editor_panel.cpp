@@ -662,6 +662,7 @@ void actor_inspector(const Value& m) {
             ImGui::EndCombo();
         }
     }
+    if (actor == "resident" || (is_mod && !combat && !carry && a->get("behaviour").type == Value::Null)) route_section(m, *a);
     if (is_enemy(actor) || combat) edit_property(p, *a, "Defeated flag (set when it is beaten)", "defeated_flag");
     if (is_prop(actor) || (carry && a->get("carry").get("break_on_impact").boolean)) edit_property(p, *a, "Broken flag (set when it breaks)", "broken_flag");
     if (is_prop(actor)) edit_property(p, *a, "Texture (a PNG in textures/ or assets/, empty: the game's)", "texture", 120);
