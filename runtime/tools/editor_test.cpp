@@ -79,6 +79,13 @@ struct FakeHost : editor::Host {
         note = "";
         return true;
     }
+    std::vector<story_room_path::Path> last_paths;
+    int path_applies = 0;
+    bool apply_paths(const std::string&, const std::vector<story_room_path::Path>& paths, std::string&) override {
+        ++path_applies;
+        last_paths = paths;
+        return true;
+    }
     bool reload_room(std::string&) override { return ++reloads, true; }
     std::vector<std::pair<std::string, std::vector<int>>> stage_rooms() override { return {{"M_NewD2", {0, 1, 2}}, {"sea", {11}}}; }
     bool warp(const editor::Location& to, std::string&) override {
@@ -1194,6 +1201,64 @@ void game_objects() {
     fs::remove_all(dir);
 }
 
+void path_commands() {
+    // the mod's room paths: an area or a line around Link or a position, points added, moved and removed,
+    // closed or open, renamed and removed; each one undo step and given to the game at once
+    FakeHost host;
+    editor::Session s(&host);
+    s.add_package("editor-test", "Editor test", "", json(kManifest));
+    auto path_of = [&](const std::string& id) -> Value {
+        Value r = s.run("list_paths", json("{}"));
+        for (const auto& v : r.get("result").get("paths").array)
+            if (v.get("id").string() == id) return v;
+        return Value();
+    };
+    // an area around Link (sea room 44, at 1, 2, 3 on the ground at 5): a square of 800
+    Value r = s.run("add_path", json("{}"));
+    CHECK(ok(r) && r.get("result").get("id").string() == "area");
+    Value a = path_of("area");
+    CHECK(a.get("closed").boolean && a.get("stage").string() == "sea" && a.get("room").number == 44 && a.get("points").array.size() == 4);
+    CHECK(a.get("points").array[0].get("x").number == -399 && a.get("points").array[0].get("y").number == 5 && a.get("points").array[2].get("z").number == 403);
+    CHECK(host.path_applies == 1 && host.last_paths.size() == 1 && host.last_paths[0].id == "area" && host.last_paths[0].closed);
+    CHECK(a.get("used_by").array.empty());
+    // a second one gets its own id; a line from given points; a duplicate id is refused
+    CHECK(ok(s.run("add_path", json("{}"))) && path_of("area-2").type == Value::Object);
+    r = s.run("add_path", json(R"({"id": "walk", "closed": false, "points": [{"x": 0, "y": 0, "z": 0}, {"x": 300, "y": 0, "z": 0}]})"));
+    CHECK(ok(r) && !path_of("walk").get("closed").boolean && path_of("walk").get("points").array.size() == 2);
+    CHECK(!ok(s.run("add_path", json(R"({"id": "walk"})"))));
+    // a position in another room (said with stage and room)
+    CHECK(ok(s.run("add_path", json(R"({"id": "dungeon", "at": "position", "position": {"x": 0, "y": 0, "z": 0}, "stage": "M_NewD2", "room": 2, "size": 400})"))));
+    CHECK(path_of("dungeon").get("stage").string() == "M_NewD2" && path_of("dungeon").get("room").number == 2 && path_of("dungeon").get("points").array[1].get("x").number == 200);
+    // points: added after point 1, moved, removed; an area keeps three points
+    r = s.run("add_path_point", json(R"({"id": "area", "at": "position", "position": {"x": 500, "y": 9, "z": -500}, "after": 1})"));
+    CHECK(ok(r) && r.get("result").get("point").number == 2 && path_of("area").get("points").array.size() == 5 && path_of("area").get("points").array[1].get("x").number == 500);
+    CHECK(!ok(s.run("add_path_point", json(R"({"id": "area", "after": 9})"))));
+    CHECK(ok(s.run("move_path_point", json(R"({"id": "area", "point": 2, "position": {"x": 450, "y": 9, "z": -600}})"))) && path_of("area").get("points").array[1].get("z").number == -600);
+    CHECK(!ok(s.run("move_path_point", json(R"({"id": "area", "point": 6, "position": {"x": 0, "y": 0, "z": 0}})"))));
+    // a moved point that makes the area's edges cross is refused by the validator; nothing changes
+    r = s.run("move_path_point", json(R"({"id": "area", "point": 2, "position": {"x": 0, "y": 5, "z": 2000}})"));
+    CHECK(!ok(r) && r.get("error").string().find("cross") != std::string::npos && path_of("area").get("points").array[1].get("z").number == -600);
+    CHECK(ok(s.run("remove_path_point", json(R"({"id": "area", "point": 2})"))) && path_of("area").get("points").array.size() == 4);
+    CHECK(ok(s.run("remove_path_point", json(R"({"id": "area", "point": 1})"))));
+    r = s.run("remove_path_point", json(R"({"id": "area", "point": 1})"));
+    CHECK(!ok(r) && r.get("error").string().find("at least 3") != std::string::npos);
+    // open and closed; a line of two points can't be an area
+    CHECK(ok(s.run("set_path", json(R"({"id": "area", "closed": false})"))) && !path_of("area").get("closed").boolean);
+    CHECK(!ok(s.run("set_path", json(R"({"id": "walk", "closed": true})"))));
+    // the game's own area test
+    r = s.run("path_inside", json(R"({"id": "area-2", "at": "position", "position": {"x": 100, "y": 0, "z": 100}, "stage": "sea", "room": 44})"));
+    CHECK(ok(r) && r.get("result").get("inside").boolean);
+    r = s.run("path_inside", json(R"({"id": "area-2", "at": "position", "position": {"x": 900, "y": 0, "z": 100}, "stage": "sea", "room": 44})"));
+    CHECK(ok(r) && !r.get("result").get("inside").boolean);
+    CHECK(!ok(s.run("path_inside", json(R"({"id": "walk"})"))));
+    // renamed, removed, undone
+    CHECK(ok(s.run("set_path", json(R"({"id": "area-2", "new_id": "yard"})"))) && path_of("yard").type == Value::Object && path_of("area-2").type == Value::Null);
+    CHECK(ok(s.run("remove_path", json(R"({"id": "yard"})"))) && path_of("yard").type == Value::Null);
+    const int before = host.path_applies;
+    CHECK(ok(s.run("undo", json("{}"))) && path_of("yard").type == Value::Object && host.path_applies == before + 1);
+    CHECK(!ok(s.run("remove_path", json(R"({"id": "nothing"})"))));
+}
+
 void route_commands() {
     // an actor's route: points at Link, the camera or a position (on the ground), moved, reordered and
     // removed, the settings; one undo step each; the villagers without a walk are refused with the reason
@@ -1386,6 +1451,7 @@ int main(int argc, char** argv) {
     building(argv[1]);
     game_objects();
     route_commands();
+    path_commands();
     game_pieces();
     island_and_sea_placement();
     stage_tables();

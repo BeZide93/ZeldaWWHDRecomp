@@ -404,7 +404,7 @@ target_compile_options(mod_package_test PRIVATE -UNDEBUG)
 target_link_libraries(mod_package_test PRIVATE ZLIB::ZLIB Threads::Threads ${CMAKE_DL_LIBS})
 # World editor command layer (runtime/src/editor): commands, warp list, test-mode record reset, saving.
 add_executable(editor_test runtime/tools/editor_test.cpp runtime/src/editor/commands.cpp runtime/src/editor/commands_build.cpp runtime/src/editor/commands_game_objects.cpp runtime/src/editor/commands_game_pieces.cpp runtime/src/editor/stage_files.cpp
-                           runtime/src/editor/commands_quest.cpp runtime/src/editor/commands_story.cpp runtime/src/editor/quests.cpp runtime/src/editor/commands_scene.cpp runtime/src/editor/commands_route.cpp runtime/src/editor/scenes.cpp runtime/src/editor/demo_tracks.cpp runtime/src/mods/story_native_scene_coverage.cpp ${WWHD_NPC_CATALOGUE})
+                           runtime/src/editor/commands_quest.cpp runtime/src/editor/commands_story.cpp runtime/src/editor/quests.cpp runtime/src/editor/commands_scene.cpp runtime/src/editor/commands_route.cpp runtime/src/editor/commands_paths.cpp runtime/src/editor/scenes.cpp runtime/src/editor/demo_tracks.cpp runtime/src/mods/story_native_scene_coverage.cpp ${WWHD_NPC_CATALOGUE})
 target_include_directories(editor_test PRIVATE runtime/src)
 target_compile_options(editor_test PRIVATE -UNDEBUG)
 add_test(NAME editor COMMAND editor_test "${CMAKE_SOURCE_DIR}/examples/guest-mods")
@@ -412,7 +412,7 @@ add_test(NAME editor COMMAND editor_test "${CMAKE_SOURCE_DIR}/examples/guest-mod
 # size limit, confirm and path rules, and the loopback listener
 add_executable(editor_mcp_test runtime/tools/editor_mcp_test.cpp runtime/src/editor/mcp.cpp runtime/src/editor/mcp_server.cpp
                runtime/src/editor/commands.cpp runtime/src/editor/commands_build.cpp runtime/src/editor/commands_game_objects.cpp runtime/src/editor/commands_game_pieces.cpp runtime/src/editor/stage_files.cpp
-               runtime/src/editor/commands_quest.cpp runtime/src/editor/commands_story.cpp runtime/src/editor/quests.cpp runtime/src/editor/commands_scene.cpp runtime/src/editor/commands_route.cpp runtime/src/editor/scenes.cpp runtime/src/editor/demo_tracks.cpp runtime/src/mods/story_native_scene_coverage.cpp ${WWHD_NPC_CATALOGUE})
+               runtime/src/editor/commands_quest.cpp runtime/src/editor/commands_story.cpp runtime/src/editor/quests.cpp runtime/src/editor/commands_scene.cpp runtime/src/editor/commands_route.cpp runtime/src/editor/commands_paths.cpp runtime/src/editor/scenes.cpp runtime/src/editor/demo_tracks.cpp runtime/src/mods/story_native_scene_coverage.cpp ${WWHD_NPC_CATALOGUE})
 target_include_directories(editor_mcp_test PRIVATE runtime/src)
 target_compile_options(editor_mcp_test PRIVATE -UNDEBUG)
 if(WIN32)
@@ -422,7 +422,7 @@ target_link_libraries(editor_mcp_test PRIVATE Threads::Threads)
 add_test(NAME editor_mcp COMMAND editor_mcp_test)
 # The quest editor (runtime/src/editor/quests.cpp, commands_quest.cpp): graph, steps, start-at-step, flags, search, copy and paste.
 add_executable(editor_quest_test runtime/tools/editor_quest_test.cpp runtime/src/editor/commands.cpp runtime/src/editor/commands_build.cpp runtime/src/editor/commands_game_objects.cpp runtime/src/editor/commands_game_pieces.cpp
-                                 runtime/src/editor/stage_files.cpp runtime/src/editor/commands_quest.cpp runtime/src/editor/commands_story.cpp runtime/src/editor/quests.cpp runtime/src/editor/commands_scene.cpp runtime/src/editor/commands_route.cpp runtime/src/editor/scenes.cpp runtime/src/editor/demo_tracks.cpp runtime/src/mods/story_native_scene_coverage.cpp ${WWHD_NPC_CATALOGUE})
+                                 runtime/src/editor/stage_files.cpp runtime/src/editor/commands_quest.cpp runtime/src/editor/commands_story.cpp runtime/src/editor/quests.cpp runtime/src/editor/commands_scene.cpp runtime/src/editor/commands_route.cpp runtime/src/editor/commands_paths.cpp runtime/src/editor/scenes.cpp runtime/src/editor/demo_tracks.cpp runtime/src/mods/story_native_scene_coverage.cpp ${WWHD_NPC_CATALOGUE})
 target_include_directories(editor_quest_test PRIVATE runtime/src)
 target_compile_options(editor_quest_test PRIVATE -UNDEBUG)
 add_test(NAME editor_quests COMMAND editor_quest_test)
@@ -430,7 +430,7 @@ add_test(NAME editor_quests COMMAND editor_quest_test)
 # list with undo, the validator's refusals, removing what is still used, icons, search and the quest graph.
 add_executable(editor_story_test runtime/tools/editor_story_test.cpp runtime/src/editor/commands.cpp runtime/src/editor/commands_build.cpp runtime/src/editor/commands_game_objects.cpp runtime/src/editor/commands_game_pieces.cpp
                                  runtime/src/editor/stage_files.cpp runtime/src/editor/commands_quest.cpp runtime/src/editor/commands_story.cpp runtime/src/editor/quests.cpp
-                                 runtime/src/editor/commands_scene.cpp runtime/src/editor/commands_route.cpp runtime/src/editor/scenes.cpp runtime/src/editor/demo_tracks.cpp runtime/src/mods/story_native_scene_coverage.cpp ${WWHD_NPC_CATALOGUE})
+                                 runtime/src/editor/commands_scene.cpp runtime/src/editor/commands_route.cpp runtime/src/editor/commands_paths.cpp runtime/src/editor/scenes.cpp runtime/src/editor/demo_tracks.cpp runtime/src/mods/story_native_scene_coverage.cpp ${WWHD_NPC_CATALOGUE})
 target_include_directories(editor_story_test PRIVATE runtime/src)
 target_compile_options(editor_story_test PRIVATE -UNDEBUG)
 add_test(NAME editor_story COMMAND editor_story_test)
@@ -438,7 +438,7 @@ add_test(NAME editor_story COMMAND editor_story_test)
 # and nothing outside the new package folder changes.
 add_executable(editor_new_mod_test runtime/tools/editor_new_mod_test.cpp runtime/src/editor/commands.cpp runtime/src/editor/commands_build.cpp runtime/src/editor/commands_game_objects.cpp runtime/src/editor/commands_game_pieces.cpp
                                    runtime/src/editor/stage_files.cpp runtime/src/editor/commands_quest.cpp runtime/src/editor/commands_story.cpp runtime/src/editor/quests.cpp
-                                   runtime/src/editor/commands_scene.cpp runtime/src/editor/commands_route.cpp runtime/src/editor/scenes.cpp runtime/src/editor/demo_tracks.cpp runtime/src/mods/story_native_scene_coverage.cpp ${WWHD_NPC_CATALOGUE})
+                                   runtime/src/editor/commands_scene.cpp runtime/src/editor/commands_route.cpp runtime/src/editor/commands_paths.cpp runtime/src/editor/scenes.cpp runtime/src/editor/demo_tracks.cpp runtime/src/mods/story_native_scene_coverage.cpp ${WWHD_NPC_CATALOGUE})
 target_include_directories(editor_new_mod_test PRIVATE runtime/src)
 target_compile_options(editor_new_mod_test PRIVATE -UNDEBUG)
 add_test(NAME editor_new_mod COMMAND editor_new_mod_test)
@@ -446,7 +446,7 @@ add_test(NAME editor_new_mod COMMAND editor_new_mod_test)
 # pick_villager and add_villager_talk (a new quest, a new step, a step's talk; one undo step each).
 add_executable(editor_villager_test runtime/tools/editor_villager_test.cpp runtime/src/editor/commands.cpp runtime/src/editor/commands_build.cpp runtime/src/editor/commands_game_objects.cpp runtime/src/editor/commands_game_pieces.cpp
                                     runtime/src/editor/stage_files.cpp runtime/src/editor/commands_quest.cpp runtime/src/editor/commands_story.cpp runtime/src/editor/quests.cpp
-                                    runtime/src/editor/commands_scene.cpp runtime/src/editor/commands_route.cpp runtime/src/editor/scenes.cpp runtime/src/editor/demo_tracks.cpp runtime/src/mods/story_native_scene_coverage.cpp ${WWHD_NPC_CATALOGUE})
+                                    runtime/src/editor/commands_scene.cpp runtime/src/editor/commands_route.cpp runtime/src/editor/commands_paths.cpp runtime/src/editor/scenes.cpp runtime/src/editor/demo_tracks.cpp runtime/src/mods/story_native_scene_coverage.cpp ${WWHD_NPC_CATALOGUE})
 target_include_directories(editor_villager_test PRIVATE runtime/src)
 target_compile_options(editor_villager_test PRIVATE -UNDEBUG)
 add_test(NAME editor_villagers COMMAND editor_villager_test)
@@ -454,7 +454,7 @@ add_test(NAME editor_villagers COMMAND editor_villager_test)
 # edit, item changes that wait for a restart, and that story changes, undo and redo hand the game that mod's manifest.
 add_executable(editor_live_story_test runtime/tools/editor_live_story_test.cpp runtime/src/editor/commands.cpp runtime/src/editor/commands_build.cpp runtime/src/editor/commands_game_objects.cpp runtime/src/editor/commands_game_pieces.cpp
                                       runtime/src/editor/stage_files.cpp runtime/src/editor/commands_quest.cpp runtime/src/editor/commands_story.cpp runtime/src/editor/quests.cpp
-                                      runtime/src/editor/commands_scene.cpp runtime/src/editor/commands_route.cpp runtime/src/editor/scenes.cpp runtime/src/editor/demo_tracks.cpp runtime/src/mods/story_native_scene_coverage.cpp ${WWHD_NPC_CATALOGUE})
+                                      runtime/src/editor/commands_scene.cpp runtime/src/editor/commands_route.cpp runtime/src/editor/commands_paths.cpp runtime/src/editor/scenes.cpp runtime/src/editor/demo_tracks.cpp runtime/src/mods/story_native_scene_coverage.cpp ${WWHD_NPC_CATALOGUE})
 target_include_directories(editor_live_story_test PRIVATE runtime/src)
 target_compile_options(editor_live_story_test PRIVATE -UNDEBUG)
 add_test(NAME editor_live_story COMMAND editor_live_story_test)
@@ -462,7 +462,7 @@ add_test(NAME editor_live_story COMMAND editor_live_story_test)
 # walking paths, triggers, the native version, previews, copy and paste, and a handle drag as one undo step.
 add_executable(editor_scene_test runtime/tools/editor_scene_test.cpp runtime/src/editor/commands.cpp runtime/src/editor/commands_build.cpp runtime/src/editor/commands_game_objects.cpp runtime/src/editor/commands_game_pieces.cpp
                                  runtime/src/editor/stage_files.cpp runtime/src/editor/commands_quest.cpp runtime/src/editor/commands_story.cpp runtime/src/editor/quests.cpp
-                                 runtime/src/editor/commands_scene.cpp runtime/src/editor/commands_route.cpp runtime/src/editor/scenes.cpp runtime/src/editor/demo_tracks.cpp runtime/src/mods/story_native_scene_coverage.cpp ${WWHD_NPC_CATALOGUE})
+                                 runtime/src/editor/commands_scene.cpp runtime/src/editor/commands_route.cpp runtime/src/editor/commands_paths.cpp runtime/src/editor/scenes.cpp runtime/src/editor/demo_tracks.cpp runtime/src/mods/story_native_scene_coverage.cpp ${WWHD_NPC_CATALOGUE})
 target_include_directories(editor_scene_test PRIVATE runtime/src)
 target_compile_options(editor_scene_test PRIVATE -UNDEBUG)
 add_test(NAME editor_scenes COMMAND editor_scene_test "${CMAKE_SOURCE_DIR}/docs/mod-editor.md")
@@ -1428,6 +1428,11 @@ add_test(NAME story_world_collision_profile_isolation COMMAND mod_actor_runtime_
 add_test(NAME mod_actor_skinned_native_contract COMMAND mod_actor_runtime_test --skinned)
 add_test(NAME mod_actor_combat_native_contract COMMAND mod_actor_runtime_test --combat)
 add_test(NAME mod_actor_carry_native_contract COMMAND mod_actor_runtime_test --carry)
+# Mod room paths (story_room_path.h, story_room_paths.cpp): the manifest's paths, the record, the game's area test, numbers and records
+add_executable(story_room_paths_test runtime/tools/story_room_paths_test.cpp runtime/src/mods/story_room_paths.cpp runtime/src/guest_addr_identity.c)
+target_include_directories(story_room_paths_test PRIVATE runtime/include runtime/src)
+target_compile_options(story_room_paths_test PRIVATE -UNDEBUG)
+add_test(NAME story_room_paths COMMAND story_room_paths_test)
 add_executable(story_resident_routes_test runtime/tools/story_resident_routes_test.cpp runtime/src/mods/story_resident_routes.cpp runtime/src/guest_addr_identity.c)
 target_include_directories(story_resident_routes_test PRIVATE runtime/include runtime/src)
 target_compile_options(story_resident_routes_test PRIVATE -UNDEBUG)
@@ -1436,7 +1441,7 @@ add_executable(story_actors_test runtime/tools/story_actors_test.cpp)
 target_include_directories(story_actors_test PRIVATE runtime/src)
 target_compile_options(story_actors_test PRIVATE -UNDEBUG)
 add_test(NAME story_actor_flags COMMAND story_actors_test)
-add_executable(story_actors_runtime_test runtime/tools/story_actors_runtime_test.cpp runtime/src/mods/story_actors.cpp runtime/src/mods/story_game_objects.cpp runtime/src/mods/story_resident_routes.cpp runtime/src/mods/mod_actor.cpp runtime/src/mods/mod_actor_shadow_proof.cpp
+add_executable(story_actors_runtime_test runtime/tools/story_actors_runtime_test.cpp runtime/src/mods/story_actors.cpp runtime/src/mods/story_room_paths.cpp runtime/src/mods/story_game_objects.cpp runtime/src/mods/story_resident_routes.cpp runtime/src/mods/mod_actor.cpp runtime/src/mods/mod_actor_shadow_proof.cpp
   runtime/src/mods/story_props.cpp runtime/src/mods/story_switches.cpp runtime/src/mods/native_actor_carry.cpp runtime/src/mods/native_actor_profiles.cpp
   runtime/src/mods/story_enemies.cpp runtime/src/mods/story_enemy_ownership.cpp runtime/src/mods/story_enemy_projectiles.cpp runtime/src/mods/story_enemy_children.cpp runtime/src/guest_addr_identity.c)
 target_include_directories(story_actors_runtime_test PRIVATE runtime/include runtime/src)

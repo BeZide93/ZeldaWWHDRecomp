@@ -533,6 +533,38 @@ The route is the port's own record (the one walking residents use), handed to th
 code in place of a room path; the game's room data is never read for it. A route has up to 15
 points. In the editor, a Bokoblin's or Moblin's Inspector has the Route section.
 
+### Room paths
+
+Some of the game's actors take their path from the room they stand in: a line to follow or an area
+to watch. A mod declares its own such paths in a top-level `paths` list, and its actors name one by
+id (`"path": "<id>"`, a string; the route objects above stay the way residents, Bokoblins and Moblins
+walk):
+
+```json
+"paths": [
+  {"id": "fort-yard", "stage": "sea", "room": 11, "closed": true,
+   "points": [{"x": -800, "y": 0, "z": -197200}, {"x": 800, "y": 0, "z": -197200},
+              {"x": 800, "y": 0, "z": -195600}, {"x": -800, "y": 0, "z": -195600}]}
+]
+```
+
+| Field | |
+| --- | --- |
+| `id` | the path's id, unique in the mod |
+| `stage`, `room` | where it is; an actor uses only a path of its own stage and room |
+| `points` | 2 to 32 points, each more than one unit (across) from the one before |
+| `closed` | `true`: an area (the last point joins the first; at least 3 points, enclosing an area, its edges not crossing); default `false`: a line |
+
+The game's room data is never changed or read for these. Each path gets a number the room's own
+paths never use (the game's largest room has 56 paths; mod paths are numbered from 192), and when one
+of the mod's own actors asks its room for that number, the port answers with the path's record, in
+the game's own layout. The game's own lookup always runs first: a number the room has stays the room's,
+and the game's own actors never see a mod path. An area may be drawn either way round. The game's
+area test takes the point of the area nearest to what it tests and looks at the corner there, so keep
+areas convex (no corners pointing inwards); the editor's `path_inside` command uses the same test.
+A mod has up to 16 paths; the enabled mods together up to 64, and 24 in one room. Full save states
+keep the paths' records; after a load they are written again from the manifest.
+
 ### Rat holes
 
 `"actor": "rat_hole"` places a rat hole. Three rats come out of it, one after the other: the next

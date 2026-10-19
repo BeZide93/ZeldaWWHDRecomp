@@ -46,6 +46,7 @@
 #include "../mods/story_notebook.h"
 #include "../mods/story_notebook_list.h"
 #include "../mods/story_reload.h"
+#include "../mods/story_room_paths.h"
 #include "../mods/story_chart.h"
 #include "../mods/story_treasure.h"
 #include "../mods/story_scenes.h"
@@ -1054,6 +1055,31 @@ public:
         v["status"] = route.live ? route.status : std::string("not in the game (another room, or it appears after a reload)");
         return v;
     }
+    bool apply_paths(const std::string& mod, const std::vector<story_room_path::Path>& paths, std::string& why) override {
+        if (!story_room_paths::memory()) return why = "the game has no memory for mod paths in this session", false;
+        post([mod, paths](Cpu*) {
+            std::string w;
+            if (!story_room_paths::declare(mod, paths, w)) set_status("Paths not updated in the game: " + w);
+        });
+        return true;
+    }
+    Value path_state() override {
+        Value v;
+        v.type = Value::Array;
+        for (const auto& i : story_room_paths::list()) {
+            Value e;
+            e["mod"] = i.mod;
+            e["id"] = i.id;
+            e["stage"] = i.stage;
+            e["room"] = double(i.room);
+            e["number"] = double(i.number);
+            e["points"] = double(i.points);
+            e["closed"] = i.closed;
+            e["valid"] = i.valid;
+            v.array.push_back(e);
+        }
+        return v;
+    }
     bool ray(const WorldPoint& from, const WorldPoint& direction, float range, WorldPoint& hit, std::string& why) override {
         bool found = false;
         if (!on_game([&](Cpu* c) { found = ray_hit(c, from, direction, range, hit); }, why, 3000)) return false;
@@ -1625,7 +1651,7 @@ void set_launch_mode(bool on) {
 
 void register_package(const std::string& mod, const std::string& name, const std::string& dir, const Value& manifest) {
     bool content = false;  // world content, quests, letters, charts or items
-    for (const char* k : {"actors", "models", "scenes", "quests", "letters", "charts", "items"}) content = content || manifest.get(k).type != Value::Null;
+    for (const char* k : {"actors", "models", "scenes", "quests", "letters", "charts", "items", "paths"}) content = content || manifest.get(k).type != Value::Null;
     if (!content) return;
     std::lock_guard<std::recursive_mutex> lk(g_mu);
     g_session.add_package(mod, name, dir, manifest);

@@ -87,4 +87,11 @@ void route_section(const Value& m, const Value& actor);  // the Inspector's Rout
 // and the segments the ground check marked (from, to; a resident's 0 is its position). False: none.
 bool route_picture(std::string& actor, int& point, std::vector<std::pair<int, int>>& bad);
 void route_select_point(int point);  // a click on a point in the picture
+
+// ---- the mod's room paths (editor_paths.cpp) ----
+void path_section(const Value& m, const Value& actor);  // the Inspector's Path section (an actor that uses a room path)
+// The path the picture shows with its points and handle (the selected actor's) and its selected point
+// (1-based, 0 none). False: none.
+bool path_picture(std::string& path, int& point);
+void path_select_point(int point);  // a click on a point in the picture
 }  // namespace editor_ui

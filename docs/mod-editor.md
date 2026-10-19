@@ -211,6 +211,16 @@ first point or removing the route creates a resident again in its room.
 Residents that have no walking animation of their own (the women on the steps and the pier, the young
 women, the sailors) and the seated villager can't walk a route; the Inspector says so.
 
+### Paths: lines and areas in a room
+
+An actor that uses one of the mod's room paths (see "Room paths" in the SDK) has a **Path** section in
+the Inspector: the mod's paths in its room to choose from, **New area in front** (a square area in front
+of it, which it then uses), **Area (closed)**, the points (click one to select it, then drag its handle
+in the picture), **Remove point** and **Add point at Link** / **at camera**. In the picture every path
+of the mod on this stage shows as a thin blue line with its id; the selected actor's path is drawn
+thicker with its numbered points. Path changes go to the game at once: an actor on the path uses the
+changed points straight away. A path an actor uses can't be removed; the refusal names the actor.
+
 ### What shows at once, and what after a restart
 
 Signs, residents, chests, pots, barrels and crates, switches and doors, ChuChus, Bokoblins, Moblins,
@@ -665,6 +675,14 @@ separated by `;`, or `@file` with one such line per row. Results go to the log.
 | `remove_route` | `id`, `mod`? | the actor stands where it is placed |
 | `check_route` | `id`, `mod`? | the ground under each segment: no ground, a drop or a step too high marks it |
 | `route_status` | `id`, `mod`? | a walking resident in the game: walking, skipped a blocked point, stopped or finished |
+| `list_paths` | `mod`? | the mod's room paths, the actors that use each, and each one's state in the game (its number, whether its record is written) |
+| `add_path` | `id`?, `closed`? (default `true`), `at`? (`link`, `camera`, `position`), `position`?, `stage`?, `room`?, `size`?, `points`?, `snap`?, `mod`? | a new room path: an area (a square of `size` units around the place, default 800) or a line (from the place ahead), or the `points` given |
+| `add_path_point` | `id`, `at`?, `position`?, `stage`?, `room`?, `after`?, `snap`?, `mod`? | add a point to a path (after point `after`; 0: first; default: at the end) |
+| `move_path_point` | `id`, `point`, `position` or `at`, `snap`?, `mod`? | move one point (numbered from 1) |
+| `remove_path_point` | `id`, `point`, `mod`? | take one point out (an area keeps 3, a line 2) |
+| `set_path` | `id`, `closed`?, `new_id`?, `mod`? | an area or a line; a new id (the actors that use it follow) |
+| `remove_path` | `id`, `mod`? | remove a path; refused while an actor uses it |
+| `path_inside` | `id`, `at`?, `position`?, `stage`?, `room`?, `mod`? | whether Link, the camera or a position is inside an area, by the game's own test |
 | `model_clips` | `model`, `mod`? | a model's animation clips |
 | `set_then` | `id`, `actions`, `mod`? | what happens after the dialogue (an empty list removes it): `give`, `take`, `quest_step`, `quest_done` (finishes a quest), `flag`, `scene`; `{"action": "give", "id": "chart:<id>"}` gives one of the mod's charts |
 | `set_drops` | `id`, `drops`, `mod`? | what a prop or enemy drops |

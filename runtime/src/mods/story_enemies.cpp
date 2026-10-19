@@ -393,8 +393,14 @@ bool editor_redeclare(Token t,const Spec&s,std::string&why){auto*e=get(t);if(!li
 bool editor_refingerprint(Token t,const story_enemy_ownership::Fingerprint&fp){auto*e=get(t);if(!e||!story_enemy_ownership::editor_refingerprint(t,fp))return false;e->spec.fingerprint=fp;return true;}
 void bind(Token t,uint32_t pid,bool restored){if(auto*e=get(t)){if(!restored&&!story_enemy_ownership::bind_pending(t,pid)){disable(*e,e->address);return;}e->pid=pid;e->address=0;e->quarantine=false;}}
 namespace {bool routes_installed=false;const uint32_t RoomPath=GC(0x025AAF88);
-void room_path(Cpu*c){Entry*e=executing;if(e&&(e->spec.kind==Kind::Bokoblin||e->spec.kind==Kind::Moblin)&&story_enemy_variants::patrol_word(params_of(e->spec))&&c->r[3]==story_enemy_variants::kPatrolRoute&&route_provider){const uint32_t rec=route_provider(e->token);if(rec){c->r[3]=rec;return;}c->r[3]=0;return;}original(c,RoomPath);}}
+std::function<uint32_t(Token,uint32_t,int)> room_path_provider;
+// dPath_GetRoomPath(number, room): the game's own lookup first, always; only when it finds no path does
+// an owned enemy that is running get its patrol route (the route number) or its mod path (its number)
+void room_path(Cpu*c){const uint32_t number=c->r[3];const int room=int(int32_t(c->r[4]));original(c,RoomPath);if(c->r[3])return;Entry*e=executing;if(!e)return;
+ if((e->spec.kind==Kind::Bokoblin||e->spec.kind==Kind::Moblin)&&story_enemy_variants::patrol_word(params_of(e->spec))&&number==story_enemy_variants::kPatrolRoute){if(route_provider)c->r[3]=route_provider(e->token);return;}
+ if(room_path_provider)c->r[3]=room_path_provider(e->token,number,room);}}
 void set_route_provider(std::function<uint32_t(Token)> route){route_provider=std::move(route);}
+void set_room_path_provider(std::function<uint32_t(Token,uint32_t,int)> provider){room_path_provider=std::move(provider);}
 uint32_t room_path_function(){return RoomPath;}
 bool install_routes(const std::function<std::string(uint32_t)>&owner,const std::function<void(uint32_t,void(*)(Cpu*))>&replace){if(routes_installed)return true;if(!original||!owner(RoomPath).empty())return false;replace(RoomPath,room_path);routes_installed=true;return true;}
 bool is_defeated(Token t){auto*e=get(t);return e&&story_items::enemy_defeated(e->marker);}

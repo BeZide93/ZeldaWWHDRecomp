@@ -50,6 +50,8 @@ struct ShellState {
     float point_drag[16] = {};
     bool route_dragging = false;  // a route point's handle (route_overlay)
     float route_drag[16] = {};
+    bool path_dragging = false;  // a room path point's handle (paths_overlay)
+    float path_drag[16] = {};
     int gizmo = 0;           // 0 move, 1 turn
     int grid = 0, angle = 1;  // snapping: indexes into kGrid / kAngle
     std::string placing;      // a type from list_actor_types while placing by click
@@ -744,6 +746,78 @@ bool route_overlay(ImDrawList* dl, const View& v, const Value* sel, bool& handle
     return true;
 }
 
+// ---------------------------------------------------------------- the mod's room paths in the picture
+// Every path of the open mod in this stage: a thin blue line (an area closes on its first point). The
+// selected actor's path: a thicker line, its numbered points and the selected point's move handle
+// (letting go is one command, move_path_point); a click on a point selects it. True while that handle shows.
+bool paths_overlay(ImDrawList* dl, const View& v, const Value& m, const std::string& stage, bool& handle_busy) {
+    handle_busy = false;
+    std::string chosen;
+    int point = 0;
+    const bool shown = editor_ui::path_picture(chosen, point);
+    const Value* active = nullptr;
+    const ImU32 thin = IM_COL32(90, 170, 255, 170), thick = IM_COL32(110, 200, 255, 240);
+    for (const auto& path : m.get("paths").array) {
+        if (path.get("stage").string() != stage) continue;
+        const bool me = shown && path.get("id").string() == chosen;
+        if (me) active = &path;
+        std::vector<std::array<float, 3>> pts;
+        float q[3];
+        for (const auto& pt : path.get("points").array)
+            if (point3(pt, q)) pts.push_back({q[0], q[1] + 8, q[2]});  // a little above the ground, so the line shows
+        for (size_t i = 1; i < pts.size(); i++) line3(dl, v, pts[i - 1].data(), pts[i].data(), me ? thick : thin, me ? 3.f : 1.5f);
+        if (path.get("closed").boolean && pts.size() > 2) line3(dl, v, pts.back().data(), pts.front().data(), me ? thick : thin, me ? 3.f : 1.5f);
+        if (!me && !pts.empty()) {
+            ImVec2 at;
+            if (project(v, pts[0].data(), at)) dl->AddText(ImVec2(at.x + 6, at.y - 14), IM_COL32(170, 210, 255, 220), path.get("id").string().c_str());
+        }
+    }
+    if (!active) return false;
+    const auto& list = active->get("points").array;
+    const ImVec2 mouse = ImGui::GetIO().MousePos;
+    int clicked = -1;
+    for (size_t i = 0; i < list.size(); i++) {
+        float q[3];
+        ImVec2 at;
+        if (!point3(list[i], q) || !project(v, q, at)) continue;
+        const int n = int(i + 1);
+        dl->AddCircleFilled(at, n == point ? 8.0f : 6.0f, n == point ? IM_COL32(255, 230, 120, 255) : thick);
+        char label[24];
+        std::snprintf(label, sizeof label, "%d", n);
+        dl->AddText(ImVec2(at.x + 9, at.y - 9), IM_COL32(240, 240, 240, 230), label);
+        if (ImGui::IsMouseClicked(0) && ImGui::IsWindowHovered() && std::hypot(mouse.x - at.x, mouse.y - at.y) < 10) clicked = n;
+    }
+    if (clicked > 0 && !ImGuizmo::IsOver()) editor_ui::path_select_point(clicked), point = clicked;
+    if (point < 1 || point > int(list.size())) return false;
+    float q[3];
+    if (!point3(list[size_t(point - 1)], q)) return false;
+    float model[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, q[0], q[1], q[2], 1};
+    if (S.path_dragging) std::memcpy(model, S.path_drag, sizeof model);
+    float view[16], proj[16];
+    gl_view(v, view);
+    gl_projection(v, proj);
+    ImGuizmo::SetDrawlist(dl);
+    ImGuizmo::SetOrthographic(false);
+    ImGuizmo::SetRect(v.pos.x, v.pos.y, v.size.x, v.size.y);
+    float snap_values[3] = {kGrid[S.grid], kGrid[S.grid], kGrid[S.grid]};
+    ImGuizmo::PushID(0x50415448);  // its own handle, apart from the actor's
+    ImGuizmo::Manipulate(view, proj, ImGuizmo::TRANSLATE, ImGuizmo::WORLD, model, nullptr, S.grid > 0 ? snap_values : nullptr);
+    handle_busy = ImGuizmo::IsOver() || ImGuizmo::IsUsing();
+    if (ImGuizmo::IsUsing()) {
+        S.path_dragging = true;
+        std::memcpy(S.path_drag, model, sizeof model);
+    } else if (S.path_dragging) {
+        S.path_dragging = false;
+        Value prm;
+        prm["id"] = chosen;
+        prm["point"] = point;
+        prm["position"] = point_of(S.path_drag[12], S.path_drag[13], S.path_drag[14]);
+        editor_ui::command("move_path_point", prm);
+    }
+    ImGuizmo::PopID();
+    return true;
+}
+
 // ---------------------------------------------------------------- a game villager's quest talk
 // "Add a quest talk for this villager...": a new quest with the talk as its first step, a new step of a
 // quest, or a step's talk; one command (add_villager_talk), one undo step; then the quest editor opens at
@@ -905,6 +979,9 @@ void world(float w, float h) {
     // the selected actor's route: its line, points and the selected point's handle (before the actor's handle)
     bool route_handle_busy = false;
     if (!point_handle && route_overlay(dl, v, sel, route_handle_busy)) point_handle = true, point_handle_busy = point_handle_busy || route_handle_busy;
+    // the mod's room paths; the selected actor's path: its points and the selected point's handle
+    bool path_handle_busy = false;
+    if (paths_overlay(dl, v, snap.manifest, stage, path_handle_busy) && !point_handle) point_handle = true, point_handle_busy = point_handle_busy || path_handle_busy;
     // the selected actor: its cylinder and handles
     float model[16] = {};
     bool gizmo = false;

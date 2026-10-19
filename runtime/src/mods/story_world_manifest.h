@@ -17,6 +17,7 @@
 #include "story_native_scene_manifest.h"
 #include "story_resident_types.h"
 #include "story_enemy_variants.h"
+#include "story_room_path.h"
 #include "story_game_objects_catalogue.h"
 #include "story_game_pieces_catalogue.h"
 #include "demo_scene.h"
@@ -71,6 +72,7 @@ struct ManifestActor {
     WorldPoint position,rotation,scale{1,1,1}; uint32_t params=0; std::string variant; std::string hole; bool rat_bomb=false; /* a rat of a rat hole (runtime only) */ unsigned resident=9; // 19 is the seated Ym1 adapter, not a People subtype.
     uint8_t item_game=6;  // a chest's game item number ("parameters": {"item"}); kChestModItem with item_mod
     std::string item_mod; // a chest's "item:<id>": one of the mod's items (the id)
+    std::string room_path;      // the id of one of the mod's room paths ("paths") that this actor uses ("path": "<id>")
     std::string defeat_switch;  // an enemy's: the same-mod switch actor whose flag is set when every enemy naming it is defeated
     std::string broken_flag,switch_flag,switch_actor,defeated_flag;std::vector<ManifestPropDrop> drops;
     std::string flag,quest,item,time,lines; unsigned quest_step=0;
@@ -398,8 +400,33 @@ inline bool parse_path(const mods::json::Value& path,const WorldPoint& start,boo
     if(out.loop&&!apart(resident?start:out.points.front(),out.points.back()))return why="loop closing edge is too short",false;
     return true;
 }
+// The mod's room paths ("paths", story_room_path.h): lines and areas in a room that the mod's own actors
+// name by id ("path": "<id>"), e.g. a wall cannon's firing area. Up to 16 per mod, 2..32 points each.
+inline bool parse_room_paths(const mods::json::Value& m,std::vector<story_room_path::Path>& out,std::string& why){
+    using namespace world_manifest;out.clear();const auto& list=m.get("paths");
+    if(list.type==Value::Null)return true;
+    if(list.type!=Value::Array||list.array.size()>story_room_path::kMaxPerMod)return why="paths must be a list of up to 16",false;
+    for(const auto& v:list.array){story_room_path::Path p;
+        if(!keys(v,{"id","stage","room","points","closed"}))return why="a path takes id, stage, room, points and closed",false;
+        if(!id(v.get("id")))return why="invalid path id",false;p.id=v.get("id").text;
+        for(const auto& old:out)if(old.id==p.id)return why="duplicate path id "+p.id,false;
+        if(!place(v,p.stage,p.room))return why="path "+p.id+": stage and room (0..63) are required",false;
+        if(v.object.contains("closed")){if(v.get("closed").type!=Value::Bool)return why="path "+p.id+": closed must be true or false",false;p.closed=v.get("closed").boolean;}
+        const auto& pts=v.get("points");
+        if(pts.type!=Value::Array)return why="path "+p.id+": points must be a list",false;
+        for(const auto& q:pts.array){WorldPoint w;if(!keys(q,{"x","y","z"})||!point(q,w))return why="path "+p.id+": invalid path point",false;p.points.push_back({w.x,w.y,w.z});}
+        if(const auto no=story_room_path::shape_problem(p);!no.empty())return why="path "+p.id+": "+no,false;
+        out.push_back(std::move(p));
+    }
+    return true;
+}
+inline const story_room_path::Path* find_room_path(const std::vector<story_room_path::Path>& paths,const std::string& id){
+    for(const auto& p:paths)if(p.id==id)return &p;
+    return nullptr;
+}
 inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestActor>& out,std::string& why) {
     using namespace world_manifest;out.clear();std::vector<ManifestModel> models;if(!parse_models(m,models,why))return false;const auto& list=m.get("actors");
+    std::vector<story_room_path::Path> room_paths;if(!parse_room_paths(m,room_paths,why))return false;
     if(list.type==Value::Null)return true;
     if(list.type!=Value::Array||list.array.size()>kMaxActorsPerMod)return why="actors must be a list of up to 64",false;
     unsigned need=0;if(m.get("requires").type==Value::Object&&!story_game_objects::required_version(m,std::max(story_game_objects::catalogue().version,story_game_pieces::catalogue().version),need,why))return false;
@@ -806,11 +833,16 @@ inline bool parse_scenes(const mods::json::Value& m,std::vector<ManifestScene>& 
 namespace world_manifest {
 // Validate the selected package graph before any actor or scene registry is mutated.
 inline bool validate_world_packages(const std::vector<std::pair<std::string,mods::json::Value>>& packages,std::string& why) {
-    unsigned total=0,chart_markers=0;std::map<std::pair<std::string,unsigned>,unsigned> rooms;
+    unsigned total=0,chart_markers=0;std::map<std::pair<std::string,unsigned>,unsigned> rooms;unsigned path_total=0;std::map<std::pair<std::string,unsigned>,unsigned> path_rooms;
     std::map<uint16_t,std::pair<std::string,std::string>> flags;std::vector<ManifestActor> game_objects;
     for(const auto& [mod,manifest]:packages){
         std::vector<ManifestActor> actors;std::vector<ManifestScene> scenes;
         if(!parse_actors(manifest,actors,why)||!parse_scenes(manifest,scenes,why)){why=mod+": "+why;return false;}
+        std::vector<story_room_path::Path> paths;if(!parse_room_paths(manifest,paths,why)){why=mod+": "+why;return false;}
+        for(const auto&p:paths){
+            if(++path_total>story_room_path::kSlots)return why="enabled packages exceed 64 paths overall",false;
+            if(++path_rooms[{p.stage,p.room}]>story_room_path::kMaxPerRoom)return why="enabled packages exceed 24 paths in "+p.stage+" room "+std::to_string(p.room),false;
+        }
         for(const auto&actor:actors)if(actor.game_object()||actor.game_piece())game_objects.push_back(actor);
         if(!game_object_budget(game_objects,why)||!game_piece_budget(game_objects,why)){why="enabled packages: "+why;return false;}
         for(const auto&actor:actors)total+=placed_actors(actor);if(total>128)return why="enabled packages exceed 128 actors overall",false;

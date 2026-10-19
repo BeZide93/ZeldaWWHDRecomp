@@ -55,6 +55,7 @@
 #include "story_chart.h"
 #include "story_treasure.h"
 #include "story_actors.h"
+#include "story_room_paths.h"
 #include "story_resident_routes.h"
 #include "story_game_pieces.h"
 #include "mod_actor.h"
@@ -469,6 +470,9 @@ void load_world(const std::string& mod,const mods::json::Value& manifest,const s
     std::string why;
     if(!story_notebook::parse_actors(manifest,actors,why)||!story_notebook::parse_scenes(manifest,scenes,why))
         exception_report::raise("World manifest "+mod+": "+why);
+    // the mod's room paths: declared now, written to their records once the record memory is there
+    {std::vector<story_room_path::Path> paths;
+     if(!story_notebook::parse_room_paths(manifest,paths,why)||!story_room_paths::declare(mod,paths,why))exception_report::raise("World paths "+mod+": "+why);}
     for(auto& actor:actors)if(!actor.texture.empty()) {
         namespace fs=std::filesystem;
         if(!mods::archive::relative_path(actor.texture))exception_report::raise("World texture "+mod+":"+actor.id+": invalid path");
@@ -1298,6 +1302,8 @@ void init() {
         story_actors::set_scratch_memory(mem::runtime_alloc(story_actors::kScratchBytes,16));
         // walking residents' route records: only with a declared route (or the editor, which adds them live)
         if(story_actors::resident_routes_declared()||editor::launch_mode())story_resident_routes::set_memory(mem::runtime_alloc(story_resident_route::kMemoryBytes,16));
+        // the mod paths' records: only with a declared path (or the editor, which adds them live)
+        if(story_room_paths::declared()||editor::launch_mode())story_room_paths::set_memory(mem::runtime_alloc(story_room_path::kMemoryBytes,16));
         story_actors::set_scene_start(story_scenes::request);
         if(editor::launch_mode())story_actors::editor_live_kinds();  // --editor: native props, switches, doors and enemies placed live
         story_actors::install([](uint32_t addr) {

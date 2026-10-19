@@ -91,7 +91,7 @@ std::array<unsigned,3> version(const std::string& s) {
 std::string string_field(const Value& v,const char* key,bool optional=false,size_t limit=8192){const auto& f=v.get(key);if(optional&&f.type==Value::Null)return {};require(f.type==Value::String&&f.text.size()<=limit&&f.text.find('\0')==std::string::npos,"Invalid field: "+std::string(key));return f.text;}
 using hash::sha256_file;
 // The manifest sections the story system reads (story_manifest.h, story_world_manifest.h)
-constexpr const char* kStorySections[]={"quests","charts","letters","items","models","actors","scenes"};
+constexpr const char* kStorySections[]={"quests","charts","letters","items","models","actors","scenes","paths"};
 // The Story Notebook package's "notebook" block: {"icon": png, "model": glb, "layout": json}. Only that
 // package has one. Its files are its own: a PNG icon (up to 1024 x 1024), a binary glTF model (up to
 // 8 MiB) and a layout description whose folder holds the page's art (up to 64 PNGs, 64 MiB decoded);

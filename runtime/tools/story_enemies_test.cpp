@@ -39,7 +39,7 @@ void map_memory(uint32_t a,uint32_t n){assert(!(a&0xFFFFu)&&n&&!(n&0xFFFFu));
  }
 }
 void call_hook(Cpu*c,uint32_t f,uint32_t a){Cpu nested=*c;nested.r[3]=a;hooks.at(f)(&nested);}
-bool known_address(uint32_t fn){const uint32_t known[]={0x02110D4C,0x0210DD3C,0x0210BFEC,0x021104B4,0x0219D568,0x0219AAE8,0x02199748,0x0219CE98,0x0209F918,0x0209BD1C,0x0209971C,0x0209F164,0x021CCB00,0x021C9B1C,0x021C7344,0x021CC44C,0x02446E54,0x02446374,0x02445EE4,0x024468E4,0x023CF600,0x023CC070,0x023C9994,0x023CEF04,0x0230F32C,0x0230BEF4,0x0230AE30,0x0230EDD0,0x0231175C,0x02311240,0x023111D8,0x023115BC,0x024C0B0C,0x024BD170,0x024BA238,0x024C0194,0x025D99E8,0x020402C8,0x025D9154,0x021992DC,0x025D9898,0x021C9AA0,0x025D7B24,0x020A47B4,0x021D0294,0x020A3B18,0x02041570,0x02041F94,0x02043F34,0x025D57E0,0x020BFC50,0x020BCEC8,0x020BBAEC,0x020BF574,0x020ADA5C,0x020AB020,0x020A8BDC,0x020AD59C,0x023C3EC8,0x023C1380,0x023C039C,0x023C38AC,0x021A7B4C,0x025D537C,0x025D5A20,0x02516C14,0x025D5928,0x02167FE0,0x02167F30,0x021412BC,0x02140D04,0x0211889C,0x0211BF44};bool child_method=false;for(const auto&k:story_enemies_more::kChildClasses)child_method|=fn==k.create||fn==k.execute||fn==k.draw||fn==k.destroy;bool accepted=child_method;for(uint32_t expected:known)accepted|=fn==expected;for(const auto&n:story_enemies_more::kNatives)accepted|=fn==n.create||fn==n.execute||fn==n.draw||fn==n.destroy;return accepted;}
+bool known_address(uint32_t fn){const uint32_t known[]={0x025AAF88,0x02110D4C,0x0210DD3C,0x0210BFEC,0x021104B4,0x0219D568,0x0219AAE8,0x02199748,0x0219CE98,0x0209F918,0x0209BD1C,0x0209971C,0x0209F164,0x021CCB00,0x021C9B1C,0x021C7344,0x021CC44C,0x02446E54,0x02446374,0x02445EE4,0x024468E4,0x023CF600,0x023CC070,0x023C9994,0x023CEF04,0x0230F32C,0x0230BEF4,0x0230AE30,0x0230EDD0,0x0231175C,0x02311240,0x023111D8,0x023115BC,0x024C0B0C,0x024BD170,0x024BA238,0x024C0194,0x025D99E8,0x020402C8,0x025D9154,0x021992DC,0x025D9898,0x021C9AA0,0x025D7B24,0x020A47B4,0x021D0294,0x020A3B18,0x02041570,0x02041F94,0x02043F34,0x025D57E0,0x020BFC50,0x020BCEC8,0x020BBAEC,0x020BF574,0x020ADA5C,0x020AB020,0x020A8BDC,0x020AD59C,0x023C3EC8,0x023C1380,0x023C039C,0x023C38AC,0x021A7B4C,0x025D537C,0x025D5A20,0x02516C14,0x025D5928,0x02167FE0,0x02167F30,0x021412BC,0x02140D04,0x0211889C,0x0211BF44};bool child_method=false;for(const auto&k:story_enemies_more::kChildClasses)child_method|=fn==k.create||fn==k.execute||fn==k.draw||fn==k.destroy;bool accepted=child_method;for(uint32_t expected:known)accepted|=fn==expected;for(const auto&n:story_enemies_more::kNatives)accepted|=fn==n.create||fn==n.execute||fn==n.draw||fn==n.destroy;return accepted;}
 unsigned layer_calls=0;bool morth_dies=false;
 // Gyorg: the controller's execute creates a shark (and a refused other child) and may delete itself
 uint32_t fm_mode_seen=0xFFFFFFFFu,octo_mode_seen=0xFFFFFFFFu,octo_eye_pid=0,octo_actor=0;unsigned fm_releases=0,music_stops=0;bool octo_die=false;bool has_boomerang=true,gy_spawn=false,gy_self_delete=false;unsigned sea_kills=0;uint32_t gy_child_pid=0,gy_ctrl=0,last_deleted=0;
@@ -406,6 +406,23 @@ int main(int argc,char**argv){using namespace story_enemies;const bool drowning_
  st32(GD(0x10462CF0),7);st32(GD(0x10464B28),9);run(0x0210DD3C,Actor);assert(ld32(GD(0x10462CF0))==7&&ld32(GD(0x10464B28))==9&&claims==0);
  throw_execute=true;try{run(0x0210DD3C,Actor);assert(false);}catch(const std::runtime_error&){}throw_execute=false;assert(ld32(GD(0x10462CF0))==7&&ld32(GD(0x10464B28))==9);
  run(0x0219AAE8,Second);assert(ld32(GD(0x10464B28))==9);
+ { // mod paths: the game's own room-path lookup (dPath_GetRoomPath) runs first for every caller and number;
+   // only when it finds nothing does an owned enemy that is running get the path its provider names
+  assert(install_routes([](uint32_t){return std::string();},[](uint32_t f,void(*fn)(Cpu*)){const uint32_t canonical=f-STORY_ENEMIES_TEST_CODE_DELTA;assert(canonical==0x025AAF88&&!hooks.count(canonical));hooks[canonical]=fn;}));
+  uint32_t game_path=0,answer=0;unsigned asked=0,game_lookups=0;uint32_t number=0xC0;int room=3;
+  set_room_path_provider([&](Token t,uint32_t n,int r)->uint32_t{++asked;return t==first&&n==0xC0&&r==3?0x20070000u:0;});
+  auto lookup=[&](){Cpu c{};c.r[3]=number;c.r[4]=uint32_t(room);hooks.at(0x025AAF88)(&c);return c.r[3];};
+  probe=[&](Cpu*c,uint32_t fn){if(fn==0x025AAF88){++game_lookups;assert(c->r[3]==number&&c->r[4]==uint32_t(room));c->r[3]=game_path;return true;}
+   if(fn==0x0210DD3C){answer=lookup();c->r[3]=1;return true;}return false;};
+  // outside an owned enemy: the game's answer only, nothing asked
+  assert(lookup()==0&&game_lookups==1&&asked==0);game_path=0x20060000;assert(lookup()==0x20060000&&asked==0);
+  // an owned enemy: a game path of that number wins (never shadowed, even in the mod numbers' range)
+  run(0x0210DD3C,Actor);assert(answer==0x20060000&&game_lookups==3&&asked==0);
+  // none in the game: its own path; another number or room: none
+  game_path=0;run(0x0210DD3C,Actor);assert(answer==0x20070000&&game_lookups==4&&asked==1);
+  number=0xC1;run(0x0210DD3C,Actor);assert(answer==0&&asked==2);number=0xC0;room=4;run(0x0210DD3C,Actor);assert(answer==0&&asked==3);room=3;
+  probe=nullptr;set_room_path_provider({});hooks.erase(0x025AAF88);
+ }
  // Drawing and ordinary deletion cannot award defeat rewards.
  run(0x0210BFEC,Actor);run(0x02199748,Second);assert(claims==0);run(0x0219CE98,Second);assert(claims==0&&deletes==1);
  terminal=true;run(0x0210DD3C,Actor);assert(claims==1&&drops==0&&!available(first));run(0x0210DD3C,Actor);assert(claims==1);terminal=false;

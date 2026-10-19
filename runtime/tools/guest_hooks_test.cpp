@@ -205,6 +205,7 @@ std::string prepare(const std::string&,const story_notebook::ManifestModel&,cons
 bool water_for(const std::string&){return false;}
 }
 namespace editor { bool launch_mode(){return false;} }  // a start without --editor
+namespace story_room_paths { bool declare(const std::string&,const std::vector<story_room_path::Path>&,std::string&){return true;} bool declared(){return false;} void set_memory(uint32_t){} }  // the mod paths' records (none here)
 // Island buildings: the loader asks for the pieces its actors use (none here) and builds nothing.
 namespace story_game_pieces {
 std::vector<std::string> used(const std::vector<story_notebook::ManifestActor>& actors){std::vector<std::string> out;for(const auto&a:actors)if(a.game_piece())out.push_back(a.piece);return out;}

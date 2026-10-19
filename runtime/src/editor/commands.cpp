@@ -108,6 +108,29 @@ const std::vector<CommandInfo> kCommands = {
       {"walk", "string|null", "a model's walk clip (default walk)"}, {"idle", "string|null", "a model's idle clip (default idle)"}, {"mod", "string", ""}},
      true},
     {"remove_route", "Removes an actor's route: it stands where it is placed.", {{"id", "string", "", true}, {"mod", "string", ""}}, true},
+    // ---- the mod's room paths (commands_paths.cpp): lines and areas its actors name by id ("path": "<id>")
+    {"list_paths", "The mod's room paths: id, stage, room, closed, points, the actors that use each and its state in the game (its number and whether its record is written).",
+     {{"mod", "string", ""}}},
+    {"add_path", "Adds a room path in the room of Link, the fly camera or a position: an area (closed, the default: a square of \"size\" units around the place) or a line (closed false: from the place ahead along the heading), or the given points. A wall cannon's firing area is an area.",
+     {{"id", "string", "the new id (default area or path)"}, {"closed", "boolean", "an area (default true) or a line"}, {"at", "string", "link (default), camera or position"},
+      {"position", "point", "with at = position"}, {"stage", "string", "with at = position"}, {"room", "integer", "with at = position"}, {"size", "number", "the default shape's size (50..20000, default 800)"},
+      {"points", "array", "the points instead of the default shape ({x, y, z}, 2 to 32)"}, {"snap", "boolean", "the place onto the ground (default true)"}, {"mod", "string", ""}},
+     true},
+    {"add_path_point", "Adds a point to a room path at Link, the fly camera or a position (snapped to the ground).",
+     {{"id", "string", "the path", true}, {"at", "string", "link (default), camera or position"}, {"position", "point", "with at = position"},
+      {"after", "integer", "insert after this point number (0: first; default: at the end)"}, {"snap", "boolean", "onto the ground (default true)"}, {"mod", "string", ""}},
+     true},
+    {"move_path_point", "Moves one point of a room path.",
+     {{"id", "string", "", true}, {"point", "integer", "the point number (1 = the first)", true}, {"position", "point", "where to"},
+      {"at", "string", "link or camera instead of position"}, {"snap", "boolean", "with at: onto the ground (default true)"}, {"mod", "string", ""}},
+     true},
+    {"remove_path_point", "Removes one point of a room path (an area keeps 3, a line 2).", {{"id", "string", "", true}, {"point", "integer", "the point number", true}, {"mod", "string", ""}}, true},
+    {"set_path", "Changes a room path: closed (an area) or open (a line), or its id (the actors that use it follow).",
+     {{"id", "string", "", true}, {"closed", "boolean", ""}, {"new_id", "string", "a new id"}, {"mod", "string", ""}}, true},
+    {"remove_path", "Removes a room path; refused while an actor uses it (the reason names them).", {{"id", "string", "", true}, {"mod", "string", ""}}, true},
+    {"path_inside", "Whether Link, the fly camera or a position is inside an area path, by the game's own area test (the one a wall cannon uses).",
+     {{"id", "string", "", true}, {"at", "string", "link (default), camera or position"}, {"position", "point", "with at = position"},
+      {"stage", "string", "with at = position (default: Link's)"}, {"room", "integer", "with at = position (default: Link's)"}, {"snap", "boolean", "default true"}, {"mod", "string", ""}}},
     {"check_route", "Checks the ground under each segment of an actor's route (the game's collision): no ground, a drop or a step too high (a wall) marks it.",
      {{"id", "string", "", true}, {"mod", "string", ""}}},
     {"route_status", "A walking resident's route in the game: whether its copy follows it, and walking, skipped a blocked point, stopped (blocked or off its ground) or finished.",
@@ -1034,6 +1057,18 @@ void Session::apply_live(const Package& p, const Value& before, Value& result) {
     else if (!note.empty()) result["note"] = note;
 }
 
+void Session::apply_paths(const Package& p, Value& result) {
+    std::vector<story_room_path::Path> paths;
+    std::string why;
+    if (!story_notebook::parse_room_paths(p.manifest, paths, why) || !host_) {
+        result["paths_live"] = false;
+        return;
+    }
+    const bool live = host_->apply_paths(p.mod, paths, why);
+    result["paths_live"] = live;
+    if (!live) add_note(result, "Path changes take effect when the game starts again (save the package first)" + (why.empty() ? std::string(".") : ": " + why + "."));
+}
+
 bool Session::drag_preview(const std::string& mod, const Value& poses, std::vector<std::string>& later, std::string& why,
                            std::vector<std::string>* in_place) {
     later.clear();
@@ -1085,6 +1120,7 @@ bool Session::change(Package& p, const std::string& label, const std::function<b
     if (!validate_package(p.mod, next, all, why) || !model_files(p.dir, next, why) || !world_placements(host_, p.mod, p.manifest, next, false, why, &held)) return false;
     const bool actors_changed = !(next.get("actors") == p.manifest.get("actors")) || !(next.get("models") == p.manifest.get("models"));
     const bool story_changed = story_reload::story_changed(p.manifest, next);
+    const bool paths_changed = !(next.get("paths") == p.manifest.get("paths"));
     const bool scenes_changed = !(next.get("scenes") == p.manifest.get("scenes"));  // read when the game starts
     undo_.push_back({p.mod, label, p.manifest, next});
     if (undo_.size() > kUndoSize) undo_.erase(undo_.begin());
@@ -1092,6 +1128,7 @@ bool Session::change(Package& p, const std::string& label, const std::function<b
     const Value before = std::move(p.manifest);
     p.manifest = std::move(next);
     result["changed"] = true;
+    if (paths_changed) apply_paths(p, result);  // before the actors: an actor on a new path finds it
     if (actors_changed) apply_live(p, before, result);
     note_held(held, result);
     if (story_changed) apply_story(p, result);
@@ -1120,10 +1157,12 @@ bool Session::restore(const std::string& mod, const Value& manifest, Value& resu
     std::vector<std::string> held;
     if (!world_placements(host_, mod, p->manifest, manifest, false, why, &held)) return false;
     const bool actors_changed = !(manifest.get("actors") == p->manifest.get("actors")) || !(manifest.get("models") == p->manifest.get("models"));
+    const bool paths_changed = !(manifest.get("paths") == p->manifest.get("paths"));
     const bool story_changed = story_reload::story_changed(p->manifest, manifest);
     const Value before = p->manifest;
     p->manifest = manifest;
     result["mod"] = mod;
+    if (paths_changed) apply_paths(*p, result);
     if (actors_changed) apply_live(*p, before, result);
     note_held(held, result);
     if (story_changed) apply_story(*p, result);  // undo and redo: the same live update
@@ -1577,6 +1616,8 @@ Value Session::dispatch(const std::string& command, const Value& p, std::string&
     r = dispatch_story(command, p, why, ok, handled);
     if (handled) return r;
     r = dispatch_route(command, p, why, ok, handled);
+    if (handled) return r;
+    r = dispatch_paths(command, p, why, ok, handled);
     if (handled) return r;
     why = "command \"" + command + "\" is not implemented";
     return r;

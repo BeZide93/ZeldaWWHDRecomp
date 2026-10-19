@@ -38,6 +38,8 @@ constexpr uint16_t home_z(Kind k){return k==Kind::Bokoblin||k==Kind::Moblin||k==
 // The x rotation word a declared enemy is placed with: the Darknut's equipment, 0 for the other kinds.
 uint16_t home_x(Token);
 constexpr uint16_t home_x(Kind k){return story_enemies_more::home_x(k);}
+// Where a kind's parameters hold its room path number (the bit shift), -1 for kinds that take no room path.
+constexpr int room_path_shift(Kind){return -1;}
 // The kinds whose weapons (and the Darknut's cape; the Stalfos's club) are owned children (story_enemy_children).
 constexpr bool has_children(Kind k){return k==Kind::Bokoblin||k==Kind::Moblin||k==Kind::Darknut||k==Kind::Stalfos||k==Kind::Wizzrobe||k==Kind::BigOcto;}
 struct ChildBridge {
@@ -75,6 +77,10 @@ bool install(const std::function<std::string(uint32_t)>& owner,const std::functi
 // room path lookup (dPath_GetRoomPath) for the port's route number answers with that enemy's route record
 // (`route` gives it, 0: none); every other lookup is untouched. Installed only with patrols or the editor.
 void set_route_provider(std::function<uint32_t(Token)> route);
+// Mod room paths (story_room_paths.h): when the game's own lookup finds no path, an owned enemy that is
+// running gets `provider(token, number, room)` (0: none), the record of the mod path it names.
+// The lookup runs the game's own first for every caller and every number (patrols too).
+void set_room_path_provider(std::function<uint32_t(Token,uint32_t,int)> provider);
 bool install_routes(const std::function<std::string(uint32_t)>& owner,const std::function<void(uint32_t,void(*)(Cpu*))>& replace);
 uint32_t room_path_function();
 // World editor (--editor only, main game thread). editor_enable before install: the profiles install

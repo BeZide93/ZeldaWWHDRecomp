@@ -133,6 +133,14 @@ public:
     // A placed actor's route in the game: {"declared", "live", "status"} for a walking resident (its copy
     // follows its route; walking, skipped a blocked point, stopped, finished); null when the game has none.
     virtual Value route_state(const std::string& mod, const std::string& id) { (void)mod, (void)id; return Value(); }
+    // The mod's room paths changed (`paths` all of them, parsed): the game writes their records again (a
+    // kept path keeps its place, so an actor on it sees the change at once). False: after a restart.
+    virtual bool apply_paths(const std::string& mod, const std::vector<story_room_path::Path>& paths, std::string& why) {
+        (void)mod, (void)paths;
+        return why = "the game is not running", false;
+    }
+    // The mod paths in the game: [{"mod", "id", "stage", "room", "number", "points", "closed", "valid"}]; null without a game.
+    virtual Value path_state() { return Value(); }
     // Points the fly camera at `target` from a short distance (turns it on first if needed).
     virtual bool focus(const WorldPoint& target, std::string& why) { return why = "the game is not running", false; }
     // A model of `mod` was added or changed (its manifest entry; the file is in the package `dir`):
@@ -336,6 +344,7 @@ private:
     bool restore(const std::string& mod, const Value& manifest, Value& result, std::string& why);
     void apply_live(const Package& p, const Value& before, Value& result);
     void apply_story(const Package& p, Value& result);  // the story tables in the game (Host::apply_story)
+    void apply_paths(const Package& p, Value& result);  // the mod's room paths in the game (Host::apply_paths)
     std::vector<std::pair<std::string, Value>> all_manifests() const;
     std::vector<Location> locations() const;
     bool warp_to(const Location& to, std::string& why);
@@ -355,6 +364,8 @@ private:
     Value dispatch_story(const std::string& command, const Value& params, std::string& why, bool& ok, bool& handled);
     // an actor's route: points, settings, ground check, live state (commands_route.cpp)
     Value dispatch_route(const std::string& command, const Value& params, std::string& why, bool& ok, bool& handled);
+    // the mod's room paths: lines and areas its actors name (commands_paths.cpp)
+    Value dispatch_paths(const std::string& command, const Value& params, std::string& why, bool& ok, bool& handled);
 };
 
 // One problem of a package, with what it is about (for the editor's problem list: a click selects it).
@@ -371,6 +382,9 @@ struct Problem {
 // can't have a route (empty: it can) (commands_route.cpp).
 double resident_pace(const Value& actor);
 std::string route_refusal(const Value& actor);
+// What a placed actor uses one of the mod's room paths for (the Inspector's Path section; empty: it uses
+// none) (commands_paths.cpp).
+std::string room_path_use(const Value& actor);
 // Every problem of the package: each actor, model, scene and quest checked on its own (as the mod
 // manager checks the whole), the model files, then the whole package. Empty: it is valid.
 std::vector<Problem> package_problems(const std::string& mod, const Value& manifest, const std::vector<std::pair<std::string, Value>>& all,

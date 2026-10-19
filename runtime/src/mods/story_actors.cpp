@@ -28,6 +28,7 @@
 #include "story_treasure_chest.h"
 #include "story_resident_types.h"
 #include "story_game_objects.h"
+#include "story_room_paths.h"
 #include "story_resident_routes.h"
 #include "guest_addr.h"
 #include "runtime.h"
@@ -694,6 +695,11 @@ void room_loaded(Cpu* c,int room) {
         // Bokoblin's word already names the port's route (it is never created without its record)
         if(route_record(a,true)){if(!patrols(a.spec))params=(params&~0x00FF0000u)|(uint32_t(story_resident_route::kRouteMarker)<<16);}
         else if(patrols(a.spec)){LOG("[actors] %s:%s: no route record for its patrol; it waits",a.mod.c_str(),a.spec.id.c_str());continue;}
+        // an enemy that names one of the mod's room paths: that path's number as its path number (the
+        // room-path lookup answers it with the path's record, story_room_paths)
+        if(a.enemy_token&&!a.spec.room_path.empty()){const int shift=story_enemies::room_path_shift(enemy);const uint8_t number=story_room_paths::number(a.mod,a.spec.room_path);
+            if(shift<0||!number||!story_room_paths::record(a.mod,a.spec.room_path)){LOG("[actors] %s:%s: its path %s is not in the game; it is not placed",a.mod.c_str(),a.spec.id.c_str(),a.spec.room_path.c_str());continue;}
+            params=(params&~(0xFFu<<shift))|(uint32_t(number)<<shift);}
         Cpu call=*c;a.deleting=false;
         const uint32_t previous_layer=g_call(&call,GC(0x025DED64),{});
         g_call(&call,GC(0x025DEAB4),{room_layer});
@@ -837,6 +843,7 @@ void state_loaded(){if(combat_declared())story_enemy_ownership::state_loaded();i
                 a.route_slot=s;break;}}
         for(auto& a:g_actors)if(walks(a.spec)&&a.route_slot>=0){const uint32_t pid=story_resident_routes::owner(unsigned(a.route_slot));route_record(a,false);if(pid!=a.process)story_resident_routes::set_owner(unsigned(a.route_slot),a.process==0xFFFFFFFFu?0:a.process);}
     }
+    story_room_paths::state_loaded();  // the mod paths' records again from their declarations
     if(combat_declared())story_enemy_projectiles::state_loaded();
 }
 void restore_talk_text(){
@@ -1443,6 +1450,15 @@ void install(const std::function<std::string(uint32_t)>& replaced_by,const std::
     if(patrol&&story_resident_routes::installed()&&true){
         story_enemies::set_route_provider([](story_enemies::Token t)->uint32_t{for(const auto&a:g_actors)if(a.enemy_token==t&&patrols(a.spec)&&a.route_slot>=0)return story_resident_routes::route_address(unsigned(a.route_slot));return 0;});
         if(!story_enemies::install_routes(replaced_by,replace))LOG("[actors] Bokoblin patrols unavailable: patrolling Bokoblins wait");
+    }
+    // enemies on a mod path (or the editor, which adds them live): the room-path lookup answers an owned
+    // enemy's own path after the game's lookup found none
+    if((g_live_kinds||std::any_of(g_actors.begin(),g_actors.end(),[](const Actor&a){return a.enemy_token&&!a.spec.room_path.empty();}))&&story_room_paths::memory()){
+        story_enemies::set_room_path_provider([](story_enemies::Token t,uint32_t number,int room)->uint32_t{
+            for(const auto&a:g_actors)if(a.enemy_token==t&&!a.spec.room_path.empty())
+                return story_room_paths::answer(a.mod,a.spec.room_path,number,room,std::string(reinterpret_cast<const char*>(mem::ptr(kStage)),strnlen(reinterpret_cast<const char*>(mem::ptr(kStage)),8)));
+            return 0;});
+        if(!story_enemies::install_routes(replaced_by,replace))LOG("[actors] mod paths unavailable: enemies on a mod path are not placed");
     }
     for(const auto& h:hooks)replace(h.first,h.second);g_installed=true;
 }
