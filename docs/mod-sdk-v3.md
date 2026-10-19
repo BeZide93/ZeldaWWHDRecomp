@@ -424,6 +424,24 @@ drops are replaced by the declared Bag rewards. Some native disappearance effect
 are omitted because their native effect actor also creates retail drops; identical
 retail defeat effects are not promised.
 
+### Patrolling Bokoblins and Moblins
+
+A Bokoblin (any variant) or a Moblin with a `path` patrols it with the game's own patrol: it
+walks from its position through the points and turns round at the ends (`"mode": "back_and_forth"`)
+or goes round (`"mode": "loop"`). When it sees Link it fights him, then goes back to its route. Its
+pace and pauses are its own, so `speed` and `pauses` are refused, and so is `once`.
+
+```json
+{"id": "beach-patrol", "actor": "moblin", "stage": "sea", "room": 11,
+ "position": {"x": 0, "y": 1040, "z": -201500},
+ "path": {"points": [{"x": 0, "y": 1040, "z": -201000}, {"x": 500, "y": 1040, "z": -201000}], "mode": "loop"},
+ "defeated_flag": "beach-patrol.defeated", "drops": []}
+```
+
+The route is the port's own record (the one walking residents use), handed to the game's patrol
+code in place of a room path; the game's room data is never read for it. A route has up to 15
+points. In the editor, a Bokoblin's or Moblin's Inspector has the Route section.
+
 ### Opening a door when enemies are defeated
 
 `"defeat_switch": "<switch actor id>"` on an enemy (a native one or your own combat model) names one of
@@ -478,11 +496,10 @@ saves work as for the green one. A blue or yellow ChuChu can only be cut while i
 sparking: stun it first (the boomerang or a bomb), then use the sword. The stone black
 ChuChu is the one placed enemy Link may lift; breaking it counts as its defeat. Every Bokoblin variant is the ordinary waiting and
 searching Bokoblin without a path or game switch; its weapon stays the placed copy's
-own and cannot be taken. Patrolling Bokoblins need the game's room paths and are
-not offered. The Moblin has no safe variant beyond the ordinary one: its lantern mode is the
+own and cannot be taken. A Bokoblin can also patrol (above). The Moblin has no safe variant beyond the ordinary one: its lantern mode is the
 Forsaken Fortress searchlight guard (it raises the fortress alarm and reads the game's collection
 state), its flying mode needs a Kargaroc carrying it, its statue mode reads the game's Hyrule
-state, and its patrol needs a room path. Other names, and variants for an enemy that has
+state. Its patrol is offered (above). Other names, and variants for an enemy that has
 none, are validator errors.
 
 Every Darknut guards the place you put it and fights Link when he comes near; it has no path and

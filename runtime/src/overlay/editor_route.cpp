@@ -67,7 +67,7 @@ bool clip_combo(const char* label, const std::string& current, const char* fallb
 
 void route_section(const Value& m, const Value& a) {
     const std::string id = a.get("id").string();
-    const bool patrol = a.get("actor").string() == "bokoblin" && a.get("kind").type == Value::Null;
+    const bool patrol = (a.get("actor").string() == "bokoblin" || a.get("actor").string() == "moblin") && a.get("kind").type == Value::Null;
     const bool resident = a.get("actor").string() == "resident" || patrol, model = a.get("kind").string() == "mod";
     if (!resident && !model) return;
     if (R.actor != id) R = RouteUi(), R.actor = id;

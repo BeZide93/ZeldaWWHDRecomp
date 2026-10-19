@@ -318,7 +318,7 @@ inline bool game_piece_budget(const std::vector<ManifestActor>& actors,std::stri
 inline bool native_enemy_fields(const Value& m,const Value& v,ManifestActor& a,std::string& why) {
     if(a.actor!="chuchu"&&a.actor!="bokoblin"&&a.actor!="moblin"&&a.actor!="keese"&&a.actor!="miniblin"&&a.actor!="peahat"&&a.actor!="darknut")return why="unsupported native enemy",false;
     for(const char* key:{"kind","params","flag","broken_flag","switch_flag","switch","lines","then","model","animation","look_at","path","collision","attention"})
-        if(v.object.contains(key)&&!(a.actor=="bokoblin"&&std::string(key)=="path"))return why="native enemies cannot override parameters, behavior, dialogue or models",false;
+        if(v.object.contains(key)&&!((a.actor=="bokoblin"||a.actor=="moblin")&&std::string(key)=="path"))return why="native enemies cannot override parameters, behavior, dialogue or models",false;
     // a declared variant only (story_enemy_variants.h), never raw parameters
     if(v.object.contains("parameters")){
         const auto& named=v.get("parameters");
@@ -487,7 +487,7 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
                 }
                 if(v.object.contains("native_drops")&&!story_mod_combat::parse_native_drops(v.get("native_drops"),a.native_heart_drop,why))return false;
             }
-        }else if(v.object.contains("model")||v.object.contains("animation")||v.object.contains("look_at")||(v.object.contains("path")&&a.actor!="resident"&&a.actor!="bokoblin")||v.object.contains("collision")||v.object.contains("attention")||v.object.contains("behaviour")||v.object.contains("buoyancy")||v.object.contains("drift")||v.object.contains("anchor"))return why="model, animation, look_at, path, collision and attention require kind mod",false;
+        }else if(v.object.contains("model")||v.object.contains("animation")||v.object.contains("look_at")||(v.object.contains("path")&&a.actor!="resident"&&a.actor!="bokoblin"&&a.actor!="moblin")||v.object.contains("collision")||v.object.contains("attention")||v.object.contains("behaviour")||v.object.contains("buoyancy")||v.object.contains("drift")||v.object.contains("anchor"))return why="model, animation, look_at, path, collision and attention require kind mod",false;
         if(v.object.contains("carry")){
             const auto& carry=v.get("carry");if(a.kind!="mod"||a.combat_enabled||!keys(carry,{"break_on_impact"})||(carry.object.contains("break_on_impact")&&carry.get("break_on_impact").type!=Value::Bool))return why="carry requires a noncombat mod actor and boolean break_on_impact",false;
             a.carry_enabled=true;a.carry_break_on_impact=carry.get("break_on_impact").boolean;
@@ -546,11 +546,11 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
             for(const auto& old:out)if(old.defeated_flag==a.defeated_flag)return why="enemies require distinct defeated_flag IDs",false;
             // a patrolling Bokoblin: its own route (1..15 points after its position), walked with the game's
             // patrol code: round (loop) or there and back (back_and_forth); its pace and pauses are its own
-            if(a.actor=="bokoblin"&&v.object.contains("path")){
+            if((a.actor=="bokoblin"||a.actor=="moblin")&&v.object.contains("path")){
                 const auto& path=v.get("path");
-                if(path.type==Value::Object&&(path.object.contains("speed")||path.object.contains("pauses")))return why="a Bokoblin's path takes points and mode (its pace and pauses are its own)",false;
+                if(path.type==Value::Object&&(path.object.contains("speed")||path.object.contains("pauses")))return why="a Bokoblin's or Moblin's path takes points and mode (its pace and pauses are its own)",false;
                 if(!parse_path(path,a.position,true,a.path,why))return false;
-                if(!a.path.loop&&!a.path.back_and_forth)return why="a Bokoblin's path mode is loop or back_and_forth",false;
+                if(!a.path.loop&&!a.path.back_and_forth)return why="a Bokoblin's or Moblin's path mode is loop or back_and_forth",false;
             }
         }else if(a.combat_enabled){
             if(a.rotation.x!=0||a.rotation.z!=0||a.scale.x!=1||a.scale.y!=1||a.scale.z!=1)return why="combat actors require yaw-only rotation and scale 1",false;

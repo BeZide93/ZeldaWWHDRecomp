@@ -80,7 +80,7 @@ constexpr uint32_t kCarrier=0x2CF3,kYm1=story_resident_types::kSeatedYm1,kTalkLa
 bool people_type(unsigned resident){return resident<256&&story_resident_types::people(uint8_t(resident));}
 // a placed resident walking a mod route (manifest "path")
 // a patrolling Bokoblin: a native Bokoblin with its own route (d_a_bk walks it as its patrol path)
-bool patrols(const ManifestActor& a){return a.actor=="bokoblin"&&a.kind.empty()&&!a.path.points.empty();}
+bool patrols(const ManifestActor& a){return (a.actor=="bokoblin"||a.actor=="moblin")&&a.kind.empty()&&!a.path.points.empty();}
 // an actor following a port-owned route record: a walking resident or a patrolling Bokoblin
 bool walks(const ManifestActor& a){return (a.actor=="resident"&&!a.path.points.empty()&&a.resident<256&&story_resident_types::walker(uint8_t(a.resident)))||patrols(a);}
 static_assert(kTalkLatchOffset+128<=0x300); // Native PID slots precede this; room readiness follows it.
@@ -92,7 +92,7 @@ struct Talk {uint32_t npc=0; Actor* actor=nullptr;std::u16string text;bool start
 Talk g_talk;
 bool enemy_kind(const ManifestActor& a,story_enemies::Kind& kind){if(a.actor=="chuchu")kind=story_enemies::Kind::ChuChu;else if(a.actor=="bokoblin")kind=story_enemies::Kind::Bokoblin;else if(a.actor=="moblin")kind=story_enemies::Kind::Moblin;else if(a.actor=="keese")kind=story_enemies::Kind::Keese;else if(a.actor=="miniblin")kind=story_enemies::Kind::Miniblin;else if(a.actor=="peahat")kind=story_enemies::Kind::Peahat;else if(a.actor=="darknut")kind=story_enemies::Kind::Darknut;else return false;return true;}
 // a declaration's actor parameters: its variant's, as a patrol when it walks a route
-uint32_t enemy_params(story_enemies::Kind kind,const ManifestActor& a){const uint32_t p=story_enemies::parameters(kind,a.variant);return patrols(a)&&p?story_enemy_variants::bokoblin_patrol(p):p;}
+uint32_t enemy_params(story_enemies::Kind kind,const ManifestActor& a){const uint32_t p=story_enemies::parameters(kind,a.variant);return patrols(a)&&p?(a.actor=="moblin"?story_enemy_variants::moblin_patrol(p):story_enemy_variants::bokoblin_patrol(p)):p;}
 bool enemies_declared(){return std::any_of(g_actors.begin(),g_actors.end(),[](const Actor&a){return a.enemy_token!=0;});}
 bool combat_declared(){return enemies_declared()||std::any_of(g_actors.begin(),g_actors.end(),[](const Actor&a){return a.spec.kind=="mod"&&a.spec.combat_enabled;});}
 bool pure_link(uint32_t& actor,uint32_t& pid){actor=ld32(GD(0x1046F0B0)+0x5B34);if(actor<mem::kMem2Start||actor>mem::kMem2End-0x8260u||(actor&3)||ld16(actor+0xE)!=0xA8)return false;pid=ld32(actor+4);return pid&&pid!=0xFFFFFFFFu;}

@@ -662,7 +662,7 @@ void actor_inspector(const Value& m) {
             ImGui::EndCombo();
         }
     }
-    if (actor == "resident" || (actor == "bokoblin" && !is_mod) || (is_mod && !combat && !carry && a->get("behaviour").type == Value::Null)) route_section(m, *a);
+    if (actor == "resident" || ((actor == "bokoblin" || actor == "moblin") && !is_mod) || (is_mod && !combat && !carry && a->get("behaviour").type == Value::Null)) route_section(m, *a);
     if (is_enemy(actor) || combat) edit_property(p, *a, "Defeated flag (set when it is beaten)", "defeated_flag");
     if (is_enemy(actor) || combat) {  // a mod switch set when every enemy naming it is defeated (doors follow it)
         ImGui::TextUnformatted("Sets switch when defeated");

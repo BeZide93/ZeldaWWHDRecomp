@@ -24,7 +24,7 @@ const uint32_t Queue=GC(0x025D5834),Create=GC(0x020C25A4),Execute=GC(0x020C1D0C)
 const uint32_t TnSearch=GC(0x024BAFAC),TnCandidate=GC(0x024BAA8C),CapeCreate=GC(0x021BE134),CapeExecute=GC(0x021BC3C4);
 constexpr uint16_t Sword=0x1CF,Cape=own::kCapeProfile;
 bool memory(uint32_t a,uint32_t n){return !(a&3)&&a>=0x10000000u&&a<=0x50000000u-n;}
-bool parent(const Source&s){if(s.kind!=Kind::Bokoblin&&s.kind!=Kind::Moblin&&s.kind!=Kind::Darknut)return false;auto&d=own::descriptor(s.kind);return s.token&&s.epoch==own::source_epoch(s.token)&&memory(s.actor,d.bytes)&&ld32(s.actor+4)==s.pid&&s.pid&&s.pid!=0xFFFFFFFFu&&ld16(s.actor+0xE)==d.profile&&(s.kind==Kind::Bokoblin?story_enemy_variants::declared_params("bokoblin",ld32(s.actor+0xB0)):s.kind==Kind::Darknut?story_enemy_variants::declared_params("darknut",ld32(s.actor+0xB0)):ld32(s.actor+0xB0)==0xFFFF0000u)&&ld8(s.actor+0x2DD)==0xFF;}
+bool parent(const Source&s){if(s.kind!=Kind::Bokoblin&&s.kind!=Kind::Moblin&&s.kind!=Kind::Darknut)return false;auto&d=own::descriptor(s.kind);return s.token&&s.epoch==own::source_epoch(s.token)&&memory(s.actor,d.bytes)&&ld32(s.actor+4)==s.pid&&s.pid&&s.pid!=0xFFFFFFFFu&&ld16(s.actor+0xE)==d.profile&&(s.kind==Kind::Bokoblin?story_enemy_variants::declared_params("bokoblin",ld32(s.actor+0xB0)):s.kind==Kind::Darknut?story_enemy_variants::declared_params("darknut",ld32(s.actor+0xB0)):(ld32(s.actor+0xB0)==0xFFFF0000u||ld32(s.actor+0xB0)==story_enemy_variants::moblin_patrol(0xFFFF0000u)))&&ld8(s.actor+0x2DD)==0xFF;}
 // the child kinds: daBoko weapons (the Bokoblin's stick 0 or machete 1, the Moblin's spear 4, the Darknut's
 // sword 3) and the Darknut's cape (d_a_mant type 0)
 uint32_t child_bytes(uint16_t profile){return profile==Sword?0xA34:profile==Cape?own::kCapeBytes:0;}

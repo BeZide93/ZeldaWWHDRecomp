@@ -37,7 +37,7 @@ Value* by_id(Value& list, const std::string& id) {
     return nullptr;
 }
 // a Bokoblin patrols its route with the game's patrol code: it starts at its position like a resident
-bool patroller(const Value& a) { return a.get("actor").string() == "bokoblin" && a.get("kind").type == Value::Null; }
+bool patroller(const Value& a) { return (a.get("actor").string() == "bokoblin" || a.get("actor").string() == "moblin") && a.get("kind").type == Value::Null; }
 // starts at its position (residents, Bokoblins); a mod model's route lists every point
 bool resident(const Value& a) { return a.get("actor").string() == "resident" || patroller(a); }
 // a resident's own pace (game units per second), 0 when it can't walk
@@ -59,7 +59,7 @@ std::string no_route(const Value& a) {
     }
     if (a.get("kind").string() == "mod") return {};  // the manifest check says when its model isn't skinned
     if (patroller(a)) return {};
-    return "only residents, Bokoblins and the mod's own models walk routes";
+    return "only residents, Bokoblins, Moblins and the mod's own models walk routes";
 }
 }  // namespace
 
@@ -177,7 +177,7 @@ Value Session::dispatch_route(const std::string& command, const Value& p, std::s
             Value& path = a["path"];
             if (path.type != Value::Object) return w = "the actor has no route yet: add_route_point adds its first point", false;
             if (patroller(a) && (p.object.contains("speed") || p.object.contains("pauses")))
-                return w = "a Bokoblin patrols at its own pace, without pauses: only the mode (loop or back_and_forth)", false;
+                return w = "a Bokoblin or Moblin patrols at its own pace, without pauses: only the mode (loop or back_and_forth)", false;
             if (p.object.contains("speed")) {
                 if (p.get("speed").type == Value::Null) {
                     if (!resident(a)) return w = "a model's route needs a speed", false;

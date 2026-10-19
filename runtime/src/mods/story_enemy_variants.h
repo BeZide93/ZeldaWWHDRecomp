@@ -87,6 +87,10 @@ inline uint16_t angle_x(const std::string& kind, uint32_t params) {
 inline constexpr uint32_t kPatrolRoute = 0xFE;
 inline constexpr uint32_t bokoblin_patrol(uint32_t params) { return (params & ~0x00FF000Fu) | (kPatrolRoute << 16); }
 inline constexpr bool bokoblin_patrols(uint32_t params) { return ((params >> 16) & 0xFF) == kPatrolRoute; }
+// A patrolling Moblin: its ordinary word (mode 0) with the route number kPatrolRoute (d_a_mo2 mPathIndex).
+inline constexpr uint32_t moblin_patrol(uint32_t params) { return (params & ~0x00FF0000u) | (kPatrolRoute << 16); }
+// whether a Bokoblin's or Moblin's word names the port's route
+inline constexpr bool patrol_word(uint32_t params) { return ((params >> 16) & 0xFF) == kPatrolRoute; }
 // whether `params` is one of the kind's declared parameter words (a Bokoblin's also as a patrol)
 inline bool declared_params(const std::string& kind, uint32_t params) {
     for (const Variant& v : kVariants)
