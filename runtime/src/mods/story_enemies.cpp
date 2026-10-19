@@ -97,6 +97,10 @@ struct SaveWatch{const Entry*e;uint32_t base=0;std::vector<uint8_t> before;stati
 // a refused create fails like a retail one (constructed first); a base-only actor skips its own delete
 void refuse_or_skip(Cpu*c,uint32_t a,bool create){if(create)native_actor_refusal::refuse(c,a,invoke);else c->r[3]=1;}
 void native_delete(Cpu*c,uint32_t fn){if(native_actor_refusal::base_only(c->r[3])){c->r[3]=1;return;}original(c,fn);}
+// A Stalfos's club is left lying by the game when it dies; owned, Link could never take it: it goes with it.
+void release_club(Cpu*c,const Entry&e,uint32_t a){if(e.spec.kind!=Kind::Stalfos||!invoke)return;const uint32_t pid=ld32(a+0x2014);story_enemy_ownership::LineageInfo info{};
+ if(!pid||pid==0xFFFFFFFFu||!story_enemy_ownership::lineage_info(pid,info)||info.role!=story_enemy_ownership::Lineage::EnemyChild||info.source!=e.token||info.profile!=more::kStalfosClub)return;
+ Cpu probe=*c;const uint32_t club=invoke(&probe,GC(0x025D5218),{GC(0x025E1234),a+0x2014});if(!memory(club,0x10)||ld32(club+4)!=pid||ld16(club+0xE)!=more::kStalfosClub)return;probe=*c;invoke(&probe,GC(0x025D57E0),{club});trace(e,a,"club-deleted",pid);}
 // An Armos Knight removed while it swallows Link's bomb (modes 44..46): the game sets the bomb off only in
 // its own death (mode 47), so the held bomb (no-hit, invisible, in its carry state) is deleted with it.
 // The PID key is the Knight's own field (fpcSch_JudgeByID takes the id by address); bombs only.
@@ -104,7 +108,7 @@ void release_bomb(Cpu*c,const Entry&e,uint32_t a){if(e.spec.kind!=Kind::ArmosKni
  Cpu probe=*c;const uint32_t bomb=invoke(&probe,GC(0x025D5218),{GC(0x025E1234),a+0x400});
  if(!memory(bomb,0x10)||ld32(bomb+4)!=pid||(ld16(bomb+0xE)!=0x126&&ld16(bomb+0xE)!=0x127))return;probe=*c;invoke(&probe,GC(0x025D57E0),{bomb});trace(e,a,"held-bomb-deleted",pid);}
 // what an owned enemy holds goes with it when it is deleted
-void release_held(Cpu*c,const Entry&e,uint32_t a){release_bomb(c,e,a);}
+void release_held(Cpu*c,const Entry&e,uint32_t a){release_bomb(c,e,a);release_club(c,e,a);}
 void lifecycle(Cpu*c,uint32_t fn,bool create,bool draw,bool destroy){const uint32_t a=c->r[3];
  // daTn_Create runs daTn_Execute itself (three steps that place the armour pieces): inside its own create
  // the native code runs as it is, under the create's scopes
@@ -122,8 +126,8 @@ void lifecycle(Cpu*c,uint32_t fn,bool create,bool draw,bool destroy){const uint3
  }
  struct ChildScope {bool active=false;~ChildScope(){if(active)children.leave();}} child_scope;
  if((create||!draw)&&(has_children(e->spec.kind)||(e->spec.kind==Kind::Rat&&(params_of(e->spec)&0x100u)))){  // a bomb rat's bomb is its child
- if(!create&&!children.ready(e->token,a)){if(!draw)exec_trace(a,"children-not-ready");c->r[3]=1;return;}if(!children.enter(e->token,e->spec.kind,a,story_enemy_ownership::source_epoch(e->token))){disable(*e,a);refuse_or_skip(c,a,create);return;}child_scope.active=true;}
- struct HioScope{uint32_t address=0;uint8_t old=0;HioScope(bool active,Kind k){if(active){address=k==Kind::Bokoblin?GD(0x10191468):k==Kind::Moblin?GD(0x101BA690):TNhioSet;old=ld8(address);st8(address,1);}}~HioScope(){if(address)st8(address,old);}} hio(create&&has_children(e->spec.kind),e->spec.kind);
+ if(!create&&e->spec.kind!=Kind::Stalfos&&!children.ready(e->token,a)){if(!draw)exec_trace(a,"children-not-ready");c->r[3]=1;return;}if(!children.enter(e->token,e->spec.kind,a,story_enemy_ownership::source_epoch(e->token))){disable(*e,a);refuse_or_skip(c,a,create);return;}child_scope.active=true;}
+ struct HioScope{uint32_t address=0;uint8_t old=0;HioScope(bool active,Kind k){if(active){address=k==Kind::Bokoblin?GD(0x10191468):k==Kind::Moblin?GD(0x101BA690):TNhioSet;old=ld8(address);st8(address,1);}}~HioScope(){if(address)st8(address,old);}} hio(create&&has_children(e->spec.kind)&&e->spec.kind!=Kind::Stalfos,e->spec.kind);
  // daTn_Create rewrites two statics every Darknut shares: search_sp (from the stage name, or 1 for a boss)
  // and s_check (the native boss-Darknut event counter). A mod Darknut leaves both as they were.
  struct TnStatics{bool active;uint8_t sp=0,check=0;TnStatics(bool on):active(on){if(on){sp=ld8(TNsearchSp);check=ld8(TNsCheck);}}~TnStatics(){if(active){st8(TNsearchSp,sp);st8(TNsCheck,check);}}} tn_statics(create&&e->spec.kind==Kind::Darknut);
@@ -134,6 +138,7 @@ void lifecycle(Cpu*c,uint32_t fn,bool create,bool draw,bool destroy){const uint3
  watch.check(create?"create":"execute");
  // a Bubble's grapple steal (stolenItemCount 0x406, copied into the steal count on a hookshot hit) is off
  if(create&&result.r[3]==4&&e->spec.kind==Kind::Bubble)st8(a+0x406,0);
+ if(e->spec.kind==Kind::Stalfos&&!draw&&more::stalfos_refused_split(a)){more::stalfos_collapse(a);trace(*e,a,"split-refused-collapse");}
  if(create&&result.r[3]==4){if(!verify_actor(e->token,e->spec.kind,a)||(!story_enemy_ownership::lookup_actor(a)&&!story_enemy_ownership::admit_created(e->token,a))){disable(*e,a);c->r[3]=5;return;}e->address=a;if(e->spec.kind==Kind::Bokoblin||e->spec.kind==Kind::Moblin){e->search_mode=ld8(GD(e->spec.kind==Kind::Bokoblin?0x1046232D:0x104654A4));e->search_known=true;}no_carry(a);trace(*e,a,"created");}
  else if(create&&result.r[3]==5){disable(*e,a);trace(*e,a,"create-failed");}
  if(!draw&&verify_actor(e->token,e->spec.kind,a))keep_owned(e->spec,a);*c=result;
@@ -205,7 +210,7 @@ void child_retired(const story_enemy_ownership::LineageInfo&info){if(!info.sourc
  const uint32_t reference=e->spec.kind==Kind::Bokoblin?0x1360:0x2D60;if(ld32(a+reference)!=info.pid)return;
  if(e->spec.kind==Kind::Bokoblin){st32(a+0xC90,0);st32(a+0xC94,0);st8(a+0x1374,0);}else{st8(a+0x10B3,0);}
  st32(a+reference,0xFFFFFFFFu);trace(*e,a,"child-retired-native-loss",info.pid);}
-bool supported(Kind k){if(const auto*n=more::find(k))return n->offered;return k==Kind::ChuChu||k==Kind::Keese||k==Kind::Miniblin||k==Kind::Peahat||k==Kind::Rat||k==Kind::Octorok||k==Kind::Bubble||k==Kind::BokoBaba||k==Kind::RatHole||(weapon_admission&&has_children(k));}
+bool supported(Kind k){if(const auto*n=more::find(k))return n->offered&&(k!=Kind::Stalfos||weapon_admission);return k==Kind::ChuChu||k==Kind::Keese||k==Kind::Miniblin||k==Kind::Peahat||k==Kind::Rat||k==Kind::Octorok||k==Kind::Bubble||k==Kind::BokoBaba||k==Kind::RatHole||(weapon_admission&&has_children(k));}
 bool verify_actor(Token t,Kind kind,uint32_t a){const auto*e=get(t);const auto&d=story_enemy_ownership::descriptor(kind);if(!e||kind!=e->spec.kind||!supported(kind)||!memory(a,d.bytes)||ld16(a+0xE)!=d.profile||ld32(a+0xB4)!=native_vtable(kind)||ld32(a+0xB0)!=params_of(e->spec)||ld8(a+0x2DD)!=0xFF||ld16(a+0x2D8)!=0xFFFF||ld16(a+0x2FC)!=home_z(kind))return false;
  if(const auto*n=more::find(kind))return n->verify(a,params_of(e->spec))&&(!n->ice||ld8(a+n->ice+0x1B1)==0);
  if(kind==Kind::ChuChu)return ld8(a+0x3F8)==0&&ld8(a+0x3F9)==((params_of(e->spec)>>8)&0xFF)&&ld8(a+0x3FA)==0&&ld8(a+0x3FB)==0xFF&&(ld8(a+0x3FC)<=4||(black_chuchu(e->spec)&&ld8(a+0x3FC)==6))&&ld8(a+0x924+0x1B1)==0;

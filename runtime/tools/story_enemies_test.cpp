@@ -146,7 +146,8 @@ int main(int argc,char**argv){using namespace story_enemies;const bool drowning_
  Spec bo{Kind::BokoBaba,"m","bo","bo.dead",{}, {},1},bo2{Kind::BokoBaba,"m","bo2","bo2.dead",{}, {},1};const Token baba=declare(bo,why),baba2=declare(bo2,why);assert(baba&&baba2);
  Spec bl{Kind::Bubble,"m","bl","bl.dead",{}, {},1,0xFFFFFF01u};const Token bubble=declare(bl,why);assert(bubble);
  Spec oq{Kind::Octorok,"m","oq","oq.dead",{}, {},1};const Token octo=declare(oq,why);assert(octo);
- std::map<Kind,Token> table;for(const auto&n:story_enemies_more::kNatives){Spec t{n.kind,"m",n.name,std::string(n.name)+".dead",{}, {},1};table[n.kind]=declare(t,why);assert(table[n.kind]&&supported(n.kind)==n.offered);}
+ std::map<Kind,Token> table;for(const auto&n:story_enemies_more::kNatives){if(n.kind==Kind::Stalfos&&!weapons){Spec t{n.kind,"m",n.name,"st.dead",{}, {},1};assert(!declare(t,why));continue;}  // its club is an owned child: only with the child routes
+  Spec t{n.kind,"m",n.name,std::string(n.name)+".dead",{}, {},1};table[n.kind]=declare(t,why);assert(table[n.kind]&&supported(n.kind)==n.offered);}
  {std::array<uint32_t,story_enemy_ownership::kKindCount> storage{Arena+0xB000,Arena+0xB030,Arena+0xB060,Arena+0xB090,Arena+0xB0C0,Arena+0xB0F0,Arena+0xB120,Arena+0xB150,Arena+0xB180,Arena+0xB1B0,Arena+0xB1E0,Arena+0xB210};uint32_t slot=0;for(const auto&n:story_enemies_more::kNatives){storage[unsigned(n.kind)]=Arena+0xB240+0x30*slot;st32(GD(0x101F3EE0)+n.descriptor.native_profile*4,Actor+0x9000+0x100*slot);st32(Actor+0x9010+0x100*slot,n.descriptor.bytes);++slot;}configure(original,invoke,storage);}assert(install([](uint32_t){return std::string();},[](uint32_t f,void(*fn)(Cpu*)){const uint32_t canonical=f-STORY_ENEMIES_TEST_CODE_DELTA;assert(known_address(canonical)&&!hooks.count(canonical));hooks[canonical]=fn;}));assert(hooks.size()==62+4*std::size(story_enemies_more::kNatives));
  fire_keese_test(fire_keese);
  seahat_test(seahat);

@@ -141,6 +141,7 @@ const std::vector<ActorType>& actor_types() {
         {"miniblin", "Miniblin", "Enemies", "The game's Miniblin: it pops up when Link comes near and is defeated for good.", false, false, false},
         {"darknut", "Darknut", "Enemies", "The game's Darknut, with its sword (with a shield, a helmet, or the Mighty Darknut's cape: options.variant).", false, false, false},
         {"rat_hole", "Rat hole", "Enemies", "A rat hole three rats come out of, one after the other (rats, bomb rats or both: options.variant); each defeated rat drops the hole's drops, and the hole closes when all three are defeated.", false, false, false},
+        {"stalfos", "Stalfos", "Enemies", "The game's Stalfos with its club: break it apart, then strike its head before it pulls itself together.", false, false, false},
         {"magtail", "Magtail", "Enemies", "The game's Magtail: strike its head to curl it into a ball, then strike the ball (or lift and throw it).", false, false, false},
         {"armos", "Armos", "Enemies", "The game's Armos statue: it wakes when Link comes near; strike its back.", false, false, false},
         {"armos_knight", "Armos Knight", "Enemies", "The game's Armos Knight: only a bomb in its open mouth (or a Light Arrow) defeats it.", false, false, false},

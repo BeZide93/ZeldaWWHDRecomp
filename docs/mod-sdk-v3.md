@@ -33,7 +33,7 @@ The initial allowlist is deliberately small:
 | Breakable prop | `pot`, `barrel`, `crate` | Required mod-owned `broken_flag` and `drops` list |
 | Latched floor switch | `switch` | Required mod-owned `switch_flag`; fixed yellow switch |
 | Rotating gate | `door` | Required `switch` naming a switch actor in the same mod |
-| Native enemies (preview) | `chuchu`, `bokoblin`, `moblin`, `keese`, `miniblin`, `peahat`, `darknut`, `rat_hole`, `bokobaba`, `bubble`, `octorok`, `magtail`, `armos`, `armos_knight` | Required mod-owned `defeated_flag` and `drops`; fixed ordinary variants |
+| Native enemies (preview) | `chuchu`, `bokoblin`, `moblin`, `keese`, `miniblin`, `peahat`, `darknut`, `rat_hole`, `bokobaba`, `bubble`, `octorok`, `stalfos`, `magtail`, `armos`, `armos_knight` | Required mod-owned `defeated_flag` and `drops`; fixed ordinary variants |
 
 Resident names are exact native object codes in lower case. Each placed copy uses fixed ordinary
 parameters: it stands where you put it (unless you give it a route, below) and has none of the
@@ -453,6 +453,7 @@ The allowlist below defines the supported variants.
 | `bokobaba` | Ordinary Boko Baba: a biting plant that stays where it is placed (put it on the ground). Strike its head to stun it, then cut its stem. It bites, but never grabs and chews Link. When it dies its head doesn't fly off and leave a Boko stick |
 | `bubble` | A red Bubble, or a blue one (below): a flaming skull that stays near the ground below it |
 | `octorok` | The small Octorok: it rises out of water and spits rocks at Link. Reflect a rock with the shield, or use arrows or the boomerang. Never the big Octorok that fires bombs |
+| `stalfos` | Ordinary Stalfos with its club: strike it until it falls apart, then hit its head before it pulls itself together (bombs and the Skull Hammer finish the head at once) |
 | `magtail` | Ordinary Magtail: strike its head to curl it into a ball, then strike the ball (or lift and throw it) |
 | `armos` | Armos statue: it wakes when Link comes near; strike its back |
 | `armos_knight` | Armos Knight: only a bomb in its open mouth (or a Light Arrow) defeats it |
@@ -563,6 +564,10 @@ Each of these is the game's own enemy with its native movement and attacks; the 
 owns its defeat flag and drops, as above. Some parts of the original are left out where they would
 reach outside the mod:
 
+- **Stalfos:** its club belongs to it and leaves with it; Link cannot take it. A spin attack that
+  breaks it does not split it into a walking upper body and kicking legs (the upper body would be an
+  enemy of the game with its own drops): it falls apart as from any other finishing blow, and the
+  head must still be hit.
 - **Magtail:** Link can lift the curled ball and throw it; a thrown ball only hurts Link and the
   mod's own enemies, not the world's objects.
 - **Armos:** Link cannot carry a stunned Armos (carried away from its room it would vanish without a

@@ -41,6 +41,37 @@ struct Native {
 
 inline int8_t s8(uint32_t a) { return int8_t(ld8(a)); }
 
+// ---------------------------------------------------------------- Stalfos (d_a_st)
+// Parameter 0xFFFFFF00: behaviour 0 (stands and fights; never the ambush or coffin ones, which read the
+// ambush switch), sight byte 0xFF, ambush switch 0xFF; angle z 0: no death switch (never isSwitch,
+// onSwitch or the boss status). setID 0xFFFF makes its onActor a no-op. It never writes Link.
+// Children: its club (Boko 0x1CF, parameter 2) is an owned child (story_enemy_children) and is deleted
+// with it (the game leaves it lying; owned, Link could never take it). A spin attack that empties its
+// body would split it, creating a second native Stalfos (0xBE, 0xE: the upper body) with the game's own
+// profile, drops and colliders; that create is refused and the Stalfos collapses as from any other
+// finishing blow instead (the head must still be hit). Colliders on mStts 0x62C: head 0x668, body
+// 0x794..0xD70, attack 0xE9C (Link and "other"; the pair policy keeps Link only); enemyice 0x21F0.
+inline constexpr Collider kStalfosColliders[] = {
+    {0x668, 0x62C, 0}, {0x794, 0x62C, 0}, {0x8C0, 0x62C, 0}, {0x9EC, 0x62C, 0}, {0xB18, 0x62C, 0},
+    {0xC44, 0x62C, 0}, {0xD70, 0x62C, 0}, {0xE9C, 0x62C, 0}, {0x225C, 0x2220, 0x21F0}};
+inline bool stalfos_verify(uint32_t a, uint32_t p) {
+    const unsigned action = ld16(a + 0x3E2);
+    return ld8(a + 0x3D0) == (p & 0xF) && ld8(a + 0x3D1) == ((p >> 8) & 0xFF) && ld8(a + 0x3D2) == ((p >> 16) & 0xFF) &&
+           ld8(a + 0x3D3) == (p >> 24) && ld8(a + 0x3D4) == 0 && ld8(a + 0x25AD) == 0 &&
+           (action == 0 || action == 5 || action == 29 || action == 30 || action == 31);
+}
+// the head knocked off after the collapse (head part state 8), or the collapse that timed out
+inline bool stalfos_terminal(uint32_t a) { return ld8(a + 0x1648) == 8 || (ld16(a + 0x3E2) == 30 && ld16(a + 0x414) == 0); }
+// the refused split: the body is down (LOWER_BODY with no upper body); it becomes the ordinary collapse
+// (BREAK_WAIT 30, sub-state 0, parts command 1, lifetime 0, body health 0), like the other finishing blows
+inline bool stalfos_refused_split(uint32_t a) { return ld16(a + 0x3E2) == 33 && ld32(a + 0x201C) == 0xFFFFFFFFu; }
+inline void stalfos_collapse(uint32_t a) {
+    st16(a + 0x3E2, 30); st16(a + 0x3E0, 0); st8(a + 0xFEF, 1); st16(a + 0x414, 0); st8(a + 0x20CC, 0);
+}
+inline constexpr uint16_t kStalfosClub = 0x1CF;     // the club's profile (Boko)
+inline constexpr uint32_t kStalfosClubParams = 2;   // Type_STALFOS_MACE
+inline constexpr uint16_t kStalfosUpperBody = 0xBE; // the split's second Stalfos (refused)
+
 // ---------------------------------------------------------------- Magtail (d_a_mt)
 // Parameter 0xFFFF0001: type 1 (goes for Link; odd: no per-frame lava drip particles), no snap turn,
 // bit 15 clear (angle z is the death switch, and z is 0: no switch; never the respawn switch, whose
@@ -104,6 +135,10 @@ inline uint32_t armos_knight_held_bomb(uint32_t a) {
 }
 
 inline constexpr Native kNatives[] = {
+    {Kind::Stalfos, "stalfos", {0x7FE0, 0xBE, 0x25B0, kStalfosColliders, std::size(kStalfosColliders)},
+     CANONICAL_CODE_ID(0x02495C70).value(), CANONICAL_CODE_ID(0x02493FB0).value(), CANONICAL_CODE_ID(0x02491F34).value(),
+     CANONICAL_CODE_ID(0x024957B4).value(), [] { return GD(0x1003D5BC); }, 0xFFFFFF00u, 0, 0x21F0, {0, 0}, true,
+     stalfos_verify, stalfos_terminal, nullptr, 0x3E2, true},
     {Kind::Magtail, "magtail", {0x7FE4, 0xD8, 0x1DD8, kMagtailColliders, std::size(kMagtailColliders)},
      CANONICAL_CODE_ID(0x021DCE84).value(), CANONICAL_CODE_ID(0x021D87A0).value(), CANONICAL_CODE_ID(0x021D7FFC).value(),
      CANONICAL_CODE_ID(0x021DC634).value(), [] { return GD(0x1001565C); }, 0xFFFF0001u, 0, 0x1A1C, {0, 0}, true,
