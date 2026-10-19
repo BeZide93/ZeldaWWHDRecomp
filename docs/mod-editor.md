@@ -235,8 +235,8 @@ it breaks:
 | | static model | skinned model |
 | --- | --- | --- |
 | file | glTF 2.0 binary (`.glb`), up to 8 MB | the same |
-| mesh | one mesh, plain triangles in up to 32 primitives, up to 8192 triangles and 4096 vertices | one primitive, one skin |
-| material | up to 16 materials, each with an embedded PNG base colour on UV0 (opaque or `MASK` cut-out), up to 512 × 512 pixels each and 1 MiB for all textures | one opaque material |
+| mesh | one mesh, plain triangles in up to 32 primitives, up to 8192 triangles and 4096 vertices | the same, every primitive skinned by one skin |
+| material | up to 16 materials, each with an embedded PNG base colour on UV0 (opaque or `MASK` cut-out), up to 512 × 512 pixels each and 1 MiB for all textures | the same |
 | bones | none | 1 to 32, unit scale, one connected hierarchy |
 | clips | none | up to 8, each up to 900 frames, distinct lower-case names |
 

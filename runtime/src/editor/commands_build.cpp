@@ -92,7 +92,6 @@ std::string model_message(const std::string& why) {
         {"PNG", "Texture: the texture must be an embedded PNG (RGB or RGBA, not interlaced)."},
         {"1 MiB", "Texture: all textures of one model together take at most 1 MiB (one 512 x 512, four 256 x 256 or sixteen 128 x 128)."},
         {"alphaMode BLEND", "Material: blended transparency is not supported; use MASK (cut-out) or OPAQUE."},
-        {"skinned model has one", "Material: a skinned model has one opaque, single-sided material with one texture."},
         {"base colour", "Material: every material needs an embedded base colour PNG on UV0."},
         {"material", "Material: up to 16 simple materials, each with one base colour texture (opaque or MASK cut-out), no extensions."},
         {"primitives", "Mesh: the visible mesh has 1 to 32 triangle primitives."},
@@ -331,6 +330,9 @@ bool check_model_file(const std::string& path, Value& info, std::string& why) {
     info["vertices"] = double(k.vertex_count);
     info["triangles"] = double(k.triangle_count);
     info["texture"] = std::to_string(k.texture_width) + "x" + std::to_string(k.texture_height);
+    info["materials"] = double(k.material_count);
+    info["cutout_materials"] = double(k.cutout_count);
+    info["texture_bytes"] = double(k.texture_bytes);
     info["bones"] = double(k.joints);
     info["clips"] = array();
     for (const auto& c : k.clips) info["clips"].array.push_back(Value(c.name));
