@@ -7,6 +7,13 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Mod SDK v3: placed villagers can walk a route.** Uo1, Uo2, Uo3, Um1 and Um2 walk up to 15 points with their own
+  walk: once, in a loop or back and forth, at their own pace or yours, with optional strolling pauses. They still stop
+  to look at Link and talk as usual, and a walker that runs into a wall or walks off an edge is caught. Your own
+  models' routes can also go back and forth, pause now and then, and name their walk and idle clips.
+- **World editor: a Route section in the Inspector** for walking villagers and your skinned models. Add points at Link
+  or the camera, drag them in the picture, reorder or remove them, and set speed, mode and pauses; the route shows in
+  green, and stretches without walkable ground in red. New route commands for MCP clients.
 - **Mods and the world editor can place the game's own objects by name** (`game:palm`, trees, tables, shelves, lamps,
   plant pots, flowers, nests, the Rito and sea flags, the sea lookout tower, grass, flowers and small trees): they load
   from your own game files, never from the mod. In the editor: Add > Game objects, with Variant, Turn and Scale in the
