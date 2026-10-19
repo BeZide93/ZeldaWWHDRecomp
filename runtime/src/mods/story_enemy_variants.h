@@ -67,6 +67,14 @@ inline constexpr Variant kVariants[] = {
     {"bubble", "blue", 0xFFFFFF01u, "Blue Bubble", "A Blue Bubble: its touch curses Link (no sword or items for a moment). Put its fire out with the Deku Leaf's wind or a bomb, then strike the skull."},
 };
 
+// The native enemies of the table-driven adapter (story_enemies_more.h) that mods may place: the
+// manifest, the validator and the editor accept these names like the ones they list themselves.
+inline constexpr const char* kMoreEnemies[] = {"magtail"};
+inline bool more_enemy(const std::string& actor) {
+    for (const char* name : kMoreEnemies)
+        if (actor == name) return true;
+    return false;
+}
 // the kind's variant `name` ("" is the default, the kind's first)
 inline const Variant* find(const std::string& kind, const std::string& name) {
     for (const Variant& v : kVariants)

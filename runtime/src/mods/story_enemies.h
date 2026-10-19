@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 #pragma once
 #include "story_enemy_ownership.h"
+#include "story_enemies_more.h"
 #include "story_items.h"
 #include <array>
 #include <functional>
@@ -25,7 +26,7 @@ struct Spec {Kind kind;std::string mod,id,defeated_flag;std::vector<story_items:
 // Miniblin 0xFFFF0A01: behaviour 1 (never respawns), notice range 10 (1000 units), no spawn switches
 // Darknut 0xFFFF9604: behaviour 4 (guards its place), sight 150, no path, no spawn switch; its variants
 // (story_enemy_variants.h) add a shield, a helmet or a cape through the x rotation word (home_x)
-constexpr uint32_t parameters(Kind k){return k==Kind::ChuChu?0xFF000000u:k==Kind::Bokoblin?0xFFFFFF04u:(k==Kind::Keese||k==Kind::Moblin)?0xFFFF0000u:k==Kind::Miniblin?0xFFFF0A01u:k==Kind::Peahat?0xFFFFFF00u:k==Kind::Rat?0xFFFF0001u:k==Kind::Darknut?0xFFFF9604u:k==Kind::RatHole?0xFF010100u:k==Kind::BokoBaba?0xFFFFFF00u:k==Kind::Bubble?0xFFFFFF00u:k==Kind::Octorok?0xFFFFFF00u:0u;}
+constexpr uint32_t parameters(Kind k){return k==Kind::ChuChu?0xFF000000u:k==Kind::Bokoblin?0xFFFFFF04u:(k==Kind::Keese||k==Kind::Moblin)?0xFFFF0000u:k==Kind::Miniblin?0xFFFF0A01u:k==Kind::Peahat?0xFFFFFF00u:k==Kind::Rat?0xFFFF0001u:k==Kind::Darknut?0xFFFF9604u:k==Kind::RatHole?0xFF010100u:k==Kind::BokoBaba?0xFFFFFF00u:k==Kind::Bubble?0xFFFFFF00u:k==Kind::Octorok?0xFFFFFF00u:story_enemies_more::params(k);}
 // the manifest's actor name of a kind ("chuchu", ...)
 const char* kind_name(Kind);
 // the parameters of a kind's variant ("" the default); 0 for a variant the kind doesn't declare
@@ -33,7 +34,7 @@ uint32_t parameters(Kind,const std::string& variant);
 // a declared enemy's parameters (its variant's), 0 for an unknown token
 uint32_t parameters(Token);
 // The z rotation word: 0xFF for the kinds that read a switch from it (Bokoblin, Moblin, Darknut: none).
-constexpr uint16_t home_z(Kind k){return k==Kind::Bokoblin||k==Kind::Moblin||k==Kind::Darknut?0xFF:0;}
+constexpr uint16_t home_z(Kind k){return k==Kind::Bokoblin||k==Kind::Moblin||k==Kind::Darknut?0xFF:story_enemies_more::home_z(k);}
 // The x rotation word a declared enemy is placed with: the Darknut's equipment, 0 for the other kinds.
 uint16_t home_x(Token);
 // The kinds whose weapons (and the Darknut's cape) are owned children (story_enemy_children).

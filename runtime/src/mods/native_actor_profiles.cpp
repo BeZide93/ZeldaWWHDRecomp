@@ -8,7 +8,7 @@
 #include <cstring>
 namespace native_actor_profiles { namespace {
 struct Entry {uint16_t id=0;uint32_t address=0;BaseAllocated allocated=nullptr;};
-std::array<Entry,31> entries{};
+std::array<Entry,32> entries{};
 struct Listener {std::string name;BeforeDelete callback=nullptr;};
 std::array<Listener,8> listeners{};
 void(*original)(Cpu*,uint32_t)=nullptr;uint32_t(*invoke)(Cpu*,uint32_t,std::initializer_list<uint32_t>)=nullptr;bool installed=false;

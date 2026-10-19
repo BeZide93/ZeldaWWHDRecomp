@@ -33,7 +33,7 @@ The initial allowlist is deliberately small:
 | Breakable prop | `pot`, `barrel`, `crate` | Required mod-owned `broken_flag` and `drops` list |
 | Latched floor switch | `switch` | Required mod-owned `switch_flag`; fixed yellow switch |
 | Rotating gate | `door` | Required `switch` naming a switch actor in the same mod |
-| Native enemies (preview) | `chuchu`, `bokoblin`, `moblin`, `keese`, `miniblin`, `peahat`, `darknut`, `rat_hole`, `bokobaba`, `bubble`, `octorok` | Required mod-owned `defeated_flag` and `drops`; fixed ordinary variants |
+| Native enemies (preview) | `chuchu`, `bokoblin`, `moblin`, `keese`, `miniblin`, `peahat`, `darknut`, `rat_hole`, `bokobaba`, `bubble`, `octorok`, `magtail` | Required mod-owned `defeated_flag` and `drops`; fixed ordinary variants |
 
 Resident names are exact native object codes in lower case. Each placed copy uses fixed ordinary
 parameters: it stands where you put it (unless you give it a route, below) and has none of the
@@ -453,6 +453,7 @@ The allowlist below defines the supported variants.
 | `bokobaba` | Ordinary Boko Baba: a biting plant that stays where it is placed (put it on the ground). Strike its head to stun it, then cut its stem. It bites, but never grabs and chews Link. When it dies its head doesn't fly off and leave a Boko stick |
 | `bubble` | A red Bubble, or a blue one (below): a flaming skull that stays near the ground below it |
 | `octorok` | The small Octorok: it rises out of water and spits rocks at Link. Reflect a rock with the shield, or use arrows or the boomerang. Never the big Octorok that fires bombs |
+| `magtail` | Ordinary Magtail: strike its head to curl it into a ball, then strike the ball (or lift and throw it) |
 
 All of them use the same declaration fields:
 
@@ -467,7 +468,7 @@ All of them use the same declaration fields:
 }
 ```
 
-Use `"actor": "chuchu"`, `"moblin"`, `"keese"`, `"miniblin"`, `"peahat"`, `"darknut"`, `"bokobaba"`, `"bubble"` or `"octorok"` for the other fixed variants,
+Use any other `actor` name of the table for the other fixed variants,
 with a distinct actor ID and defeat flag for each copy. Declare reward items in
 the same package. `drops` is required and may be empty or contain up to eight
 distinct same-mod items, each with quantity 1–254. Only yaw rotation is accepted;
@@ -553,6 +554,19 @@ rat shop keeper. The hole's `id` and `defeated_flag` are at most 27 characters (
 to `.rat3`), and no other actor may use those rat names. A hole counts as four actors (itself and its
 rats) toward the 16 per room and 64 per mod; a room has at most two rat holes. In the editor, a
 placed hole's Inspector has **Variant**; removing the hole removes its rats too.
+
+### What the other enemies do, and what they leave out
+
+Each of these is the game's own enemy with its native movement and attacks; the declaring mod
+owns its defeat flag and drops, as above. Some parts of the original are left out where they would
+reach outside the mod:
+
+- **Magtail:** Link can lift the curled ball and throw it; a thrown ball only hurts Link and the
+  mod's own enemies, not the world's objects.
+
+None of them reads or writes the game's switches, and none sets the game's own enemy records; a
+fall out of the world (into deep water, or off the island) removes the copy without a defeat, and
+it comes back with its room.
 
 ### Opening a door when enemies are defeated
 

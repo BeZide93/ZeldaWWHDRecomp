@@ -32,9 +32,10 @@ void map_memory(uint32_t a,uint32_t n){
 #endif
 }
 void call_hook(Cpu*c,uint32_t f,uint32_t a){Cpu nested=*c;nested.r[3]=a;hooks.at(f)(&nested);}
-bool known_address(uint32_t fn){const uint32_t known[]={0x02110D4C,0x0210DD3C,0x0210BFEC,0x021104B4,0x0219D568,0x0219AAE8,0x02199748,0x0219CE98,0x0209F918,0x0209BD1C,0x0209971C,0x0209F164,0x021CCB00,0x021C9B1C,0x021C7344,0x021CC44C,0x02446E54,0x02446374,0x02445EE4,0x024468E4,0x023CF600,0x023CC070,0x023C9994,0x023CEF04,0x0230F32C,0x0230BEF4,0x0230AE30,0x0230EDD0,0x0231175C,0x02311240,0x023111D8,0x023115BC,0x024C0B0C,0x024BD170,0x024BA238,0x024C0194,0x025D99E8,0x020402C8,0x025D9154,0x021992DC,0x025D9898,0x021C9AA0,0x025D7B24,0x020A47B4,0x021D0294,0x020A3B18,0x02041570,0x02041F94,0x02043F34,0x025D57E0,0x020BFC50,0x020BCEC8,0x020BBAEC,0x020BF574,0x020ADA5C,0x020AB020,0x020A8BDC,0x020AD59C,0x023C3EC8,0x023C1380,0x023C039C,0x023C38AC};bool accepted=false;for(uint32_t expected:known)accepted|=fn==expected;return accepted;}
+bool known_address(uint32_t fn){const uint32_t known[]={0x02110D4C,0x0210DD3C,0x0210BFEC,0x021104B4,0x0219D568,0x0219AAE8,0x02199748,0x0219CE98,0x0209F918,0x0209BD1C,0x0209971C,0x0209F164,0x021CCB00,0x021C9B1C,0x021C7344,0x021CC44C,0x02446E54,0x02446374,0x02445EE4,0x024468E4,0x023CF600,0x023CC070,0x023C9994,0x023CEF04,0x0230F32C,0x0230BEF4,0x0230AE30,0x0230EDD0,0x0231175C,0x02311240,0x023111D8,0x023115BC,0x024C0B0C,0x024BD170,0x024BA238,0x024C0194,0x025D99E8,0x020402C8,0x025D9154,0x021992DC,0x025D9898,0x021C9AA0,0x025D7B24,0x020A47B4,0x021D0294,0x020A3B18,0x02041570,0x02041F94,0x02043F34,0x025D57E0,0x020BFC50,0x020BCEC8,0x020BBAEC,0x020BF574,0x020ADA5C,0x020AB020,0x020A8BDC,0x020AD59C,0x023C3EC8,0x023C1380,0x023C039C,0x023C38AC};bool accepted=false;for(uint32_t expected:known)accepted|=fn==expected;for(const auto&n:story_enemies_more::kNatives)accepted|=fn==n.create||fn==n.execute||fn==n.draw||fn==n.destroy;return accepted;}
 std::function<bool(Cpu*,uint32_t)> probe;  // batch-3 kinds: a test's stand-in for the native step
 void original(Cpu*c,uint32_t fn){fn-=STORY_ENEMIES_TEST_CODE_DELTA;assert(known_address(fn));++calls;const uint32_t a=c->r[3];if(probe&&probe(c,fn))return;
+
  if(fn==0x02110D4C||fn==0x0219D568||fn==0x0209F918||fn==0x021CCB00){if(fn==0x0209F918||fn==0x021CCB00){const uint32_t flag=GD(fn==0x0209F918?0x10191468:0x101BA690);if(a!=Retail)assert(ld8(flag)==1);else assert(ld8(flag)==0);if(throw_create)throw std::runtime_error("synthetic create unwind");}++creates;c->r[3]=4;return;}
  // Darknut: its create sets the HIO latch only when it may own it, rewrites the shared search_sp/s_check
  // statics and runs its own execute three times; its execute fills the shared weapon search scratch
@@ -83,6 +84,7 @@ EnemyClaimStatus claim_enemy_drops(EnemyMarkerHandle h,const std::string&,const 
 }
 // Batch-3 enemies: each test keeps the claim counter as it found it.
 constexpr uint32_t B3=0x20020000;  // the batch-3 test actors: a region of their own
+constexpr uint32_t More=0x20050000;  // the table kinds' test actors (story_enemies_more.h): a region of their own
 struct KeepClaims{unsigned v=claims;~KeepClaims(){claims=v;}};
 void toggles(story_enemies::Token t,story_enemies::Kind k,uint32_t a,std::initializer_list<uint32_t> offsets){for(uint32_t off:offsets){const uint8_t old=ld8(a+off);st8(a+off,uint8_t(old^1));assert(!story_enemies::verify_actor(t,k,a));st8(a+off,old);}assert(story_enemies::verify_actor(t,k,a));}
 void create(uint32_t fn,uint32_t a,void(*init)(uint32_t)=nullptr){static void(*setup)(uint32_t);setup=init;probe=[a](Cpu*c,uint32_t){if(c->r[3]!=a)return false;if(setup)setup(a);c->r[3]=4;return true;};run(fn,a);probe=nullptr;}
@@ -127,7 +129,7 @@ void octorok_test(story_enemies::Token t){using namespace story_enemies;KeepClai
  probe=[](Cpu*c,uint32_t f){if(f!=0x023C1380u)return false;assert(!deny_create(0xE3,6));st8(Oq+0x3DF,0x14);st8(Oq+0x3E0,0x20);Cpu d=*c;d.r[3]=Oq;hooks.at(0x025D99E8)(&d);c->r[3]=1;return true;};run(0x023C1380,Oq);probe=nullptr;assert(!available(t)&&!is_defeated(t));
  std::memset(mem::ptr(Retail),0,0x1200);st16(Retail+0xE,0xE3);const unsigned c0=calls;run(0x023C1380,Retail);assert(calls==c0+1);}
 int main(int argc,char**argv){using namespace story_enemies;const bool drowning_test=argc==2&&std::strcmp(argv[1],"--drowning")==0;const bool weapons=drowning_test||(argc==2&&std::strcmp(argv[1],"--weapons")==0);
- map_memory(Actor,0x20000);map_memory(B3,0x20000);map_memory(Arena,0x20000);map_memory(GD(0x101F0000),0x10000);map_memory(GD(0x10460000),0x10000);
+ map_memory(Actor,0x20000);map_memory(B3,0x20000);map_memory(More,0x20000);map_memory(Arena,0x20000);map_memory(GD(0x101F0000),0x10000);map_memory(GD(0x10460000),0x10000);
 #if STORY_ENEMIES_TEST_CODE_DELTA
  for(uint32_t canonical:{0x101F0000u,0x10460000u,0x10190000u,0x101B0000u}){map_memory(canonical,0x10000);std::memset(mem::ptr(canonical),0xA5,0x10000);}
 #endif
@@ -143,12 +145,32 @@ int main(int argc,char**argv){using namespace story_enemies;const bool drowning_
  Spec bo{Kind::BokoBaba,"m","bo","bo.dead",{}, {},1},bo2{Kind::BokoBaba,"m","bo2","bo2.dead",{}, {},1};const Token baba=declare(bo,why),baba2=declare(bo2,why);assert(baba&&baba2);
  Spec bl{Kind::Bubble,"m","bl","bl.dead",{}, {},1,0xFFFFFF01u};const Token bubble=declare(bl,why);assert(bubble);
  Spec oq{Kind::Octorok,"m","oq","oq.dead",{}, {},1};const Token octo=declare(oq,why);assert(octo);
- configure(original,invoke,{Arena+0xB000,Arena+0xB030,Arena+0xB060,Arena+0xB090,Arena+0xB0C0,Arena+0xB0F0,Arena+0xB120,Arena+0xB150,Arena+0xB180,Arena+0xB1B0,Arena+0xB1E0,Arena+0xB210});assert(install([](uint32_t){return std::string();},[](uint32_t f,void(*fn)(Cpu*)){const uint32_t canonical=f-STORY_ENEMIES_TEST_CODE_DELTA;assert(known_address(canonical)&&!hooks.count(canonical));hooks[canonical]=fn;}));assert(hooks.size()==62);
+ std::map<Kind,Token> table;for(const auto&n:story_enemies_more::kNatives){Spec t{n.kind,"m",n.name,std::string(n.name)+".dead",{}, {},1};table[n.kind]=declare(t,why);assert(table[n.kind]&&supported(n.kind)==n.offered);}
+ {std::array<uint32_t,story_enemy_ownership::kKindCount> storage{Arena+0xB000,Arena+0xB030,Arena+0xB060,Arena+0xB090,Arena+0xB0C0,Arena+0xB0F0,Arena+0xB120,Arena+0xB150,Arena+0xB180,Arena+0xB1B0,Arena+0xB1E0,Arena+0xB210};uint32_t slot=0;for(const auto&n:story_enemies_more::kNatives){storage[unsigned(n.kind)]=Arena+0xB240+0x30*slot;st32(GD(0x101F3EE0)+n.descriptor.native_profile*4,Actor+0x9000+0x100*slot);st32(Actor+0x9010+0x100*slot,n.descriptor.bytes);++slot;}configure(original,invoke,storage);}assert(install([](uint32_t){return std::string();},[](uint32_t f,void(*fn)(Cpu*)){const uint32_t canonical=f-STORY_ENEMIES_TEST_CODE_DELTA;assert(known_address(canonical)&&!hooks.count(canonical));hooks[canonical]=fn;}));assert(hooks.size()==62+4*std::size(story_enemies_more::kNatives));
  fire_keese_test(fire_keese);
  seahat_test(seahat);
  boko_baba_test(baba);boko_baba_hold_test(baba2);
  bubble_test(bubble);
  octorok_test(octo);
+ { // the table kinds: a placed copy with its fixed word verifies; each parameter-derived field, its ice
+  // helper's death switch and a forged parameter word fail; only its terminal state's drop is its defeat
+  uint32_t pid=40,at=More;
+  auto make=[&](Kind k){const auto*n=story_enemies_more::find(k);const auto&d=n->descriptor;std::memset(mem::ptr(at),0,d.bytes);st32(at+4,++pid);st16(at+0xE,d.profile);st32(at+0xB4,n->vtable());st32(at+0xB0,n->params);st8(at+0x2DD,0xFF);st16(at+0x2D8,0xFFFF);
+   for(size_t i=0;i<d.collider_count;++i){const auto&x=d.colliders[i];st32(at+x.object+0x44,at+x.stts);st32(at+x.stts+0xC,at);st32(at+x.stts+0x10,pid);if(x.helper)st32(at+x.helper,at);}};
+  auto expect_field=[&](Token t,Kind k,uint32_t off){const uint8_t old=ld8(at+off);st8(at+off,uint8_t(old^0x21));assert(!verify_actor(t,k,at));st8(at+off,old);assert(verify_actor(t,k,at));};
+  // Magtail: type 1, no switches, no path
+  make(Kind::Magtail);st8(at+0x3D0,1);st8(at+0x3D3,0xFF);st8(at+0x3D4,0xFF);const Token mt=table[Kind::Magtail];assert(verify_actor(mt,Kind::Magtail,at));
+  for(uint32_t off:{0x3D0u,0x3D1u,0x3D2u,0x3D3u,0x3D4u,0x3D5u,0x3D6u,0x3D7u,0x3D8u,0x1BCDu})expect_field(mt,Kind::Magtail,off);
+  st32(at+0x3DC,0x10001000);assert(!verify_actor(mt,Kind::Magtail,at));st32(at+0x3DC,0);st32(at+0xB0,0xFFFF0000u);assert(!verify_actor(mt,Kind::Magtail,at));st32(at+0xB0,0xFFFF0001u);
+  st8(at+0x570,4);assert(!verify_actor(mt,Kind::Magtail,at));st8(at+0x570,2);assert(verify_actor(mt,Kind::Magtail,at));
+  // the curled Magtail is the game's own carry; carried while it crawls again it is not (the release follows)
+  bind(mt,pid);run(story_enemies_more::find(Kind::Magtail)->create,at);assert(owns_actor(at)&&!deny_carry(at));st8(at+0x570,0);assert(deny_carry(at));st8(at+0x570,1);st32(at+0x2E0,0x2000);assert(!deny_carry(at));st32(at+0x2E0,0);assert(deny_carry(at));
+  // a fall out of the world is no defeat; the drop of a damage mode >= 2 is
+  {const unsigned c0=claims,d0=drops;st8(at+0x570,1);st8(at+0x1A14,0xFF);Cpu probe{};probe.r[3]=at;hooks.at(0x025D99E8)(&probe);assert(claims==c0&&drops==d0&&!available(mt));}
+  assert(begin_epoch(mt,2));make(Kind::Magtail);st8(at+0x3D0,1);st8(at+0x3D3,0xFF);st8(at+0x3D4,0xFF);bind(mt,pid);run(story_enemies_more::find(Kind::Magtail)->create,at);
+  {const unsigned c0=claims,d0=drops;st8(at+0x570,2);st8(at+0x1A14,2);Cpu probe{};probe.r[3]=at;hooks.at(0x025D99E8)(&probe);assert(claims==c0+1&&drops==d0&&probe.r[3]==0xFFFFFFFFu&&is_defeated(mt));}
+  claims=drops=0;
+ }
  { // Rat: a rat of a rat hole (arg0 1), its own type (ordinary or bomb rat), unfrozen
   constexpr uint32_t Rat=Actor+0x12000;actor(Rat,16,Kind::Rat);assert(parameters(Kind::Rat)==0xFFFF0001u);
   assert(verify_actor(rat,Kind::Rat,Rat));st8(Rat+0x3D1,1);assert(!verify_actor(rat,Kind::Rat,Rat));st32(Rat+0xB0,0xFFFF0101u);assert(verify_actor(bomb_rat,Kind::Rat,Rat));st8(Rat+0x3D1,0);assert(!verify_actor(bomb_rat,Kind::Rat,Rat));st32(Rat+0xB0,0xFFFF0001u);assert(verify_actor(rat,Kind::Rat,Rat));

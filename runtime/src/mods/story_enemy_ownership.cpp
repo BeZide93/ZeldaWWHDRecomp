@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 #include "story_enemy_ownership.h"
+#include "story_enemies_more.h"
 #include "runtime.h"
 #include "guest_addr.h"
 #include <algorithm>
@@ -46,8 +47,8 @@ Entry* get(Token t){for(auto& e:entries)if(e.token==t)return &e;return nullptr;}
 size_t index(const Entry& e){return size_t(&e-entries.data());}
 uint32_t record(const Entry& e){return arena+ActorOffset+uint32_t(index(e))*128;}
 uint32_t checksum(uint32_t a,uint32_t n){uint32_t h=2166136261u;for(uint32_t i=0;i<n;++i)h=(h^ld8(a+i))*16777619u;return h;}
-bool reserved(uint16_t p){return (p>=0x7FF7&&p<=0x7FFA)||(p>=0x7FF0&&p<=0x7FF4)||p==0x7FEA||p==0x7FE9||p==0x7FE8;}
-bool identity(const Entry& e,uint32_t a){auto& d=descriptors[unsigned(e.kind)];return memory(a,d.bytes)&&e.pid&&e.pid!=0xFFFFFFFFu&&ld32(a+4)==e.pid&&ld16(a+0xE)==d.profile&&ld32(a+0xB0)==e.params&&ld8(a+0x2DD)==0xFF;}
+bool reserved(uint16_t p){return (p>=0x7FF7&&p<=0x7FFA)||(p>=0x7FF0&&p<=0x7FF4)||p==0x7FEA||p==0x7FE9||p==0x7FE8||story_enemies_more::reserved(p);}
+bool identity(const Entry& e,uint32_t a){auto& d=descriptor(e.kind);return memory(a,d.bytes)&&e.pid&&e.pid!=0xFFFFFFFFu&&ld32(a+4)==e.pid&&ld16(a+0xE)==d.profile&&ld32(a+0xB0)==e.params&&ld8(a+0x2DD)==0xFF;}
 bool checked(Entry&e,uint32_t a){if(!identity(e,a)||!verify_actor){if(e.active)e.quarantined=true;return false;}try{if(verify_actor(e.token,e.kind,a))return true;}catch(...){}e.quarantined=true;return false;}
 bool valid(Entry& e){return e.active&&!e.quarantined&&e.address&&checked(e,e.address);}
 void write_record(const Entry& e){uint32_t r=record(e);for(uint32_t i=0;i<128;++i)st8(r+i,0);st32(r,Magic);st32(r+4,Version);st32(r+8,e.token);st32(r+12,unsigned(e.kind));st32(r+16,e.params);st32(r+20,e.epoch);st32(r+24,e.pid);st32(r+28,e.address);for(unsigned i=0;i<32;++i)st8(r+32+i,e.fingerprint[i]);st32(r+124,checksum(r,124));}
@@ -107,10 +108,10 @@ void trace_refused(uint32_t at,uint32_t tg){if(!pair_trace()||!lookup_collider(t
 void trace_projectile(uint32_t at,uint32_t tg){if(!pair_trace()||!projectile_verifier||!lookup_collider(tg))return;bool own=false;try{own=projectile_verifier(at);}catch(...){}static unsigned n=0;if(own&&n++<400){const uint32_t a=ld32(ld32(at+0x44)+0xC);LOG("[enemy_pair] link projectile hits at=%08X profile=%04X params=%08X target=%08X",at,unsigned(ld16(a+0xE)),ld32(a+0xB0),tg);}}
 void hook(Cpu*c){if(pair_policy(c->r[4],c->r[5])==PairPolicy::Reject){trace_refused(c->r[4],c->r[5]);c->r[3]=1;}else{trace_projectile(c->r[4],c->r[5]);original(c,NoAtTg);}}
 }
-const Descriptor& descriptor(Kind k){static constexpr Descriptor invalid={0,0,0,nullptr,0};return unsigned(k)<kKindCount?descriptors[unsigned(k)]:invalid;}
+const Descriptor& descriptor(Kind k){static constexpr Descriptor invalid={0,0,0,nullptr,0};if(const auto*n=story_enemies_more::find(k))return n->descriptor;return unsigned(k)<std::size(descriptors)?descriptors[unsigned(k)]:invalid;}
 bool configure(uint32_t a,uint32_t bytes,void(*fn)(Cpu*,uint32_t),VerifyActor verify){if(bytes<kStorageBytes||!runtime_memory(a,kStorageBytes)||!fn||!verify)return false;arena=a;original=fn;verify_actor=std::move(verify);return true;}
 void initialize_storage(){if(!arena)return;for(uint32_t i=0;i<kStorageBytes;++i)st8(arena+i,0);st32(arena,Magic);st32(arena+4,Version);for(const auto&e:entries)write_pending(e);}
-Token declare_actor(Kind k,uint32_t params,const Fingerprint& fp,uint32_t epoch,std::string& why){if(unsigned(k)>=kKindCount||entries.size()>=kActorCapacity||!epoch||!next_token){why="Invalid or full enemy ownership declaration";return 0;}Token t=next_token++;entries.push_back({k,params,epoch,fp,t});if(arena&&ld32(arena)==Magic&&ld32(arena+4)==Version)write_pending(entries.back());return t;}
+Token declare_actor(Kind k,uint32_t params,const Fingerprint& fp,uint32_t epoch,std::string& why){if(unsigned(k)>=kKindCount||!descriptor(k).bytes||entries.size()>=kActorCapacity||!epoch||!next_token){why="Invalid or full enemy ownership declaration";return 0;}Token t=next_token++;entries.push_back({k,params,epoch,fp,t});if(arena&&ld32(arena)==Magic&&ld32(arena+4)==Version)write_pending(entries.back());return t;}
 size_t checkpoint(){return entries.size();}
 bool editor_refingerprint(Token t,const Fingerprint& fp){auto*e=get(t);if(!e)return false;e->fingerprint=fp;if(arena&&ld32(arena)==Magic&&ld32(arena+4)==Version){const uint32_t r=record(*e);const uint32_t magic=ld32(r);write_record(*e);if(magic==RetiredMagic||magic==PendingMagic){st32(r,magic);st32(r+124,checksum(r,124));}}return true;}
 bool editor_reparameter(Token t,uint32_t params){auto*e=get(t);if(!e||e->active||e->address||!params)return false;e->params=params;if(arena&&ld32(arena)==Magic&&ld32(arena+4)==Version){const uint32_t r=record(*e);const uint32_t magic=ld32(r);write_record(*e);if(magic==RetiredMagic||magic==PendingMagic){st32(r,magic);st32(r+124,checksum(r,124));}}return true;}

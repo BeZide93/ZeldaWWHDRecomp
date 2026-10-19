@@ -39,7 +39,10 @@ inline constexpr uint32_t kRatHoleProfileScratchOffset=kExtraEnemyProfilesScratc
 // Batch 3: slot 6 the Octorok's.
 // Batch 3: slot 5 the Bubble's.
 // Batch 3: slot 4 the Boko Baba's.
-inline constexpr uint32_t kScratchBytes=kExtraEnemyProfilesScratchOffset+kExtraEnemyProfiles*0x30;
+// the table-driven enemies' private profiles (story_enemies_more.h, ids 0x7FE0..0x7FE7), after the extra ones
+inline constexpr uint32_t kMoreEnemyProfilesScratchOffset=kExtraEnemyProfilesScratchOffset+kExtraEnemyProfiles*0x30;
+inline constexpr uint32_t kMoreEnemyProfiles=8;
+inline constexpr uint32_t kScratchBytes=kMoreEnemyProfilesScratchOffset+kMoreEnemyProfiles*0x30;
 static_assert(kEnemyProfilesScratchOffset>=kIdentityScratchOffset+128*40);
 static_assert((kEnemyOwnershipScratchOffset&15)==0);
 static_assert(kTalkProofScratchOffset+kTalkProofBytes<=kScratchBytes);

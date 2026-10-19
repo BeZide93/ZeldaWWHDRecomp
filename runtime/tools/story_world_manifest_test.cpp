@@ -94,7 +94,8 @@ int main() {
     const auto prop_example=[](){return mods::json::parse(R"({"items":[{"id":"shard"}],"actors":[{"id":"vase","actor":"pot","stage":"town","room":0,"position":{"x":0,"y":0,"z":0},"broken_flag":"vase.broken","drops":[{"item":"item:shard","quantity":2}]}]})");};
     { // Validate all four curated native enemy declarations through the public parser.
         const auto fixture=[](){return mods::json::parse(R"({"items":[{"id":"shard"}],"actors":[{"id":"enemy","actor":"chuchu","stage":"sea","room":11,"position":{"x":0,"y":0,"z":0},"defeated_flag":"enemy.defeated","drops":[{"item":"item:shard","quantity":2}]}]})");};
-        for(const char* type:{"chuchu","bokoblin","moblin","keese","miniblin","peahat","darknut","rat_hole","bokobaba","bubble","octorok"}){
+        std::vector<std::string> enemy_types{"chuchu","bokoblin","moblin","keese","miniblin","peahat","darknut","rat_hole","bokobaba","bubble","octorok"};for(const char* more:story_enemy_variants::kMoreEnemies)enemy_types.push_back(more);
+        for(const std::string& type_name:enemy_types){const char* type=type_name.c_str();
             auto data=fixture();auto& value=data["actors"].array[0];value["actor"]=type;ManifestActor candidate;candidate.actor=type;
             assert(world_manifest::native_enemy_fields(data,value,candidate,why)&&candidate.defeated_flag=="enemy.defeated"&&candidate.drops.size()==1&&candidate.drops[0].quantity==2);
             assert(parse_actors(data,actors,why)&&actors.size()==1&&actors[0].actor==type&&actors[0].defeated_flag=="enemy.defeated"&&actors[0].drops[0].item=="shard");
@@ -116,7 +117,8 @@ int main() {
             const auto fp=story_actors::identity::fingerprint("m",actors[0]);auto plain=actors[0];plain.variant.clear();assert(fp!=story_actors::identity::fingerprint("m",plain));}
         {auto data=fixture();assert(parse_actors(data,actors,why)&&actors[0].variant.empty()&&story_enemy_variants::find("chuchu","")->params==0xFF000000u);}
         for(const char* bad_variant:{R"({"variant":"purple"})",R"({"variant":""})",R"({"variant":3})",R"({"variant":"red","colour":1})",R"({"colour":"red"})",R"("red")"}){auto data=fixture();data["actors"].array[0]["parameters"]=mods::json::parse(bad_variant);assert(!parse_actors(data,actors,why)&&actors.empty());}
-        for(const char* plain_kind:{"moblin","miniblin","bokobaba","octorok"}){auto data=fixture();data["actors"].array[0]["actor"]=plain_kind;data["actors"].array[0]["parameters"]=mods::json::parse(R"({"variant":"red"})");assert(!parse_actors(data,actors,why)&&why.find("no variants")!=std::string::npos);}
+        std::vector<std::string> plain_kinds{"moblin","miniblin","bokobaba","octorok"};for(const char* more:story_enemy_variants::kMoreEnemies)if(!story_enemy_variants::has_variants(more))plain_kinds.push_back(more);
+        for(const std::string& plain_name:plain_kinds){const char* plain_kind=plain_name.c_str();auto data=fixture();data["actors"].array[0]["actor"]=plain_kind;data["actors"].array[0]["parameters"]=mods::json::parse(R"({"variant":"red"})");assert(!parse_actors(data,actors,why)&&why.find("no variants")!=std::string::npos);}
         {auto data=fixture();data["actors"].array[0]["parameters"]=mods::json::parse(R"({"variant":"purple"})");assert(!parse_actors(data,actors,why)&&why.find("green, red, blue, yellow or black")!=std::string::npos);}
         for(const char* colour:{"red","blue","yellow"}){const auto*v=story_enemy_variants::find("chuchu",colour);assert(v&&(v->params&0xFFFF00FFu)==0xFF000000u&&((v->params>>8)&0xFF)>=1&&((v->params>>8)&0xFF)<=4);}
         assert(story_enemy_variants::find("chuchu","black")->params==0xFF000300u);

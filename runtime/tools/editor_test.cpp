@@ -39,6 +39,7 @@
 #include "editor/stage_files.h"
 #include "overlay/editor_live_kinds.h"
 #include "mods/story_mail_book.h"
+#include "mods/story_enemy_variants.h"
 
 
 namespace fs = std::filesystem;
@@ -693,7 +694,7 @@ void building(const fs::path& examples) {
     editor::Session s(&host);
     s.add_package("editor-test", "Editor test", "", json(kManifest));
     Value r = s.run("list_actor_types");
-    CHECK(ok(r) && r.get("result").array.size() == 22);
+    CHECK(ok(r) && r.get("result").array.size() == 22 + std::size(story_enemy_variants::kMoreEnemies));
 
     // add: at Link (sea room 44, heading 100 of 65536), snapped onto the ground (y 5); one undo step
     r = s.run("add_actor", json(R"({"type": "sign"})"));
@@ -769,6 +770,17 @@ void building(const fs::path& examples) {
     CHECK(!ok(s.run("add_actor", json(R"({"type": "octorok", "id": "big-octo", "options": {"variant": "big"}})"))) && !actor_of(s, "big-octo"));
     CHECK(ok(s.run("set_actor", json(R"({"id": "baba", "property": "defeat_switch", "value": "switch"})"))) && actor_of(s, "baba")->get("defeat_switch").string() == "switch");
     CHECK(ok(s.run("validate")));
+    // the table-driven enemies: listed, placed with their own defeat flag, removed again
+    for (const char* more : story_enemy_variants::kMoreEnemies) {
+        const std::string type = more, id = "more-" + type;
+        bool listed = false;
+        const Value types = s.run("list_actor_types");
+        for (const auto& t : types.get("result").array) listed |= t.get("type").string() == type && t.get("group").string() == "Enemies";
+        CHECK(listed);
+        CHECK(ok(s.run("add_actor", json(("{\"type\": \"" + type + "\", \"id\": \"" + id + "\"}").c_str()))) && actor_of(s, id) &&
+              actor_of(s, id)->get("defeated_flag").string() == id + "-defeated" && actor_of(s, id)->get("drops").type == Value::Array);
+        CHECK(ok(s.run("remove_actor", json(("{\"id\": \"" + id + "\", \"confirm\": true}").c_str()))) && !actor_of(s, id));
+    }
     {
         bool listed = false;
         const Value types = s.run("list_actor_types");
