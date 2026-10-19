@@ -49,11 +49,11 @@ at sea-map coordinates in Blender.
 
 ## Author collision in the GLB
 
-Keep one visible mesh with one indexed triangle primitive, one opaque material
-and one embedded PNG texture, as for existing static mod models. Additional
-collision meshes may have multiple triangle primitives. Name each collision
-mesh or its scene node with an `_col` suffix, for example `island_col` or
-`pier_col`. These meshes are omitted from rendering.
+Keep one visible mesh. It can have several materials, each with its own
+embedded PNG texture (see [Several materials](#several-materials)). Collision
+meshes may have multiple triangle primitives. Name each collision mesh or its
+scene node with an `_col` suffix, for example `island_col` or `pier_col`. These
+meshes are omitted from rendering.
 
 A collision primitive needs indexed triangles and `POSITION`. Normals and UVs
 are optional; they do not control collision. Assign one of these material names:
@@ -78,9 +78,10 @@ material names.
 
 When no `_col` mesh exists, collision can be derived from the visible triangles.
 Equivalent positions are welded, but the converter does not reduce a detailed
-model to an arbitrary triangle budget. The visible material’s `col_*` name
-selects the fallback surface; other visible material names use stone. Use a
-separate, simpler `_col` mesh when the render mesh exceeds the collision limits.
+model to an arbitrary triangle budget. Each visible material’s `col_*` name
+selects the fallback surface of its triangles; other visible material names use
+stone. Use a separate, simpler `_col` mesh when the render mesh exceeds the
+collision limits, or when cut-out cards such as bushes should not be solid.
 
 Names such as `col_noship` and `col_shiponly` are not available. The native collision filter groups the ship with other objects; it
 has no separate ship-only category.
@@ -96,6 +97,54 @@ Ship collision samples several heights rather than treating every thin floating
 surface as a solid hull. Give static coasts and obstacles sufficient vertical
 sides. A shallow horizontal sheet alone is not a reliable obstacle to the ship.
 The original island example extends its coast below sea level.
+
+## Several materials
+
+A visible model can use up to 16 materials, so an island can have sand, grass,
+rock and wood that each repeat their own texture, like the game's own islands.
+Give each material one embedded PNG base colour texture. The mesh can have up to
+32 triangle primitives; each primitive uses one material, and several primitives
+may share a material. Blender exports one primitive per material slot.
+
+Two material kinds are available:
+
+| glTF material | Draws as |
+| --- | --- |
+| `alphaMode` `OPAQUE` (the default) | Opaque |
+| `alphaMode` `MASK` | Cut-out: texels with alpha below `alphaCutoff` (default 0.5) are left out. Use it for leaves, fences, grass and bush cards. |
+
+`doubleSided: true` draws both faces of either kind, each lit from its own side;
+use it for cut-out cards. The converter adds a mirrored copy of those faces, so
+they count twice toward the vertex and triangle limits.
+Blended transparency (`alphaMode` `BLEND`) isn't supported: the model is refused
+with a message. Paint a cut-out's soft edges hard, or use `MASK`.
+
+Every material is lit the same way, by the game's own lighting for objects, so
+the materials of one model match at every time of day. The converter takes the
+materials' shading from a get-item model with an opaque and a cut-out material
+in the player's own game; a mod contains only its own model and textures.
+
+| Limit | Value |
+| --- | --- |
+| Materials per model | 16, each used by at least one primitive |
+| Triangle primitives in the visible mesh | 32 |
+| Vertices and triangles | 4,096 and 8,192 for all primitives together; double-sided faces count twice |
+| One texture | at most 512 × 512 pixels; width a multiple of 64, height a multiple of 8 |
+| All textures of one model | 1 MiB as decoded RGBA: one 512 × 512, four 256 × 256 or sixteen 128 × 128 textures |
+
+Several materials sharing one image use one texture. The game's memory budgets
+for mod models still apply to the converted model: 2 MiB per model, 8 MiB per
+mod and 32 MiB per room. Each material adds one draw, so merge materials that
+share a texture and keep small repeating textures where they suffice.
+
+A model with one opaque, single-sided material converts exactly as before.
+Skinned models keep one opaque material.
+
+`examples/guest-mods/world-objects-w5` contains an island with six materials:
+sand, grass, rock and wood, and cut-out fences and bushes. Its
+[`assets/make_fixtures.py`](../examples/guest-mods/world-objects-w5/assets/make_fixtures.py)
+reproduces the model and textures. It occupies the same sea area as the other
+island examples, so enable it on its own.
 
 ## Simple collision shapes
 
@@ -308,8 +357,16 @@ no model-collision preparation.
 ## Make a small island in Blender
 
 1. Model a low-poly hill with a beach and a pier near the origin. Use metre
-   coordinates. Keep one visible mesh and one opaque textured material; use a
-   texture atlas for several visible colors.
+   coordinates. Keep one visible mesh. Give it one material slot per surface
+   (sand, grass, rock, wood), each with an Image Texture node feeding Base Color
+   and nothing else. Leave Base Color's tint white and the material's other
+   inputs at their defaults. For leaves or a fence, use a PNG with transparency
+   and connect its Alpha to the Principled BSDF's Alpha. The material must
+   export as alpha clip (`alphaMode` `MASK`): in Blender 4.1 and earlier set
+   Blend Mode to Alpha Clip; in later versions put a Math node set to Greater
+   Than (threshold 0.5) between the image's Alpha and the BSDF's Alpha, as the
+   Blender manual's glTF page describes. Turn off Backface Culling for cards
+   seen from both sides (exported as `doubleSided`).
 2. Duplicate or rebuild the terrain as simple collision geometry. Delete visual
    details that Link cannot walk on. Name the collision object `island_col`.
 3. Assign `col_sand` to beach faces, `col_grass` to hill faces and `col_wood` to
@@ -317,7 +374,10 @@ no model-collision preparation.
    between ramps and platforms. Extend coast walls below the sea.
 4. Triangulate the visible and collision meshes. Check that collision has no
    collapsed faces and stays within the vertex, triangle and size limits.
-5. Export the visible mesh and `_col` mesh into one GLB with its PNG embedded.
+5. Export the visible mesh and `_col` mesh into one GLB with the PNGs embedded
+   (glTF Binary; Images: Automatic or PNG; no compression or extensions).
+   Each image must be 512 × 512 pixels or smaller, with a width that is a
+   multiple of 64 and a height that is a multiple of 8.
    Do not hide collision by excluding it from the export: the converter removes
    `_col` meshes from the visible output.
 6. Add the model and static actor declarations to the package. Choose an empty,

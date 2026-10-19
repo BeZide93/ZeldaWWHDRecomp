@@ -720,25 +720,34 @@ other placed actors. It must not specify `actor`, `params` or `parameters`.
 
 `source` is a package-relative `.glb` path with no parent components. Up to eight
 models may be declared per package. Source files are limited to 8 MiB, 4096
-vertices and 8192 triangles per model. Models contain one mesh, one indexed
-triangle primitive, one opaque material and one embedded RGB/RGBA PNG. Texture
-width and height are at most 512; width must be a multiple of 64 and height a
-multiple of eight. The original example and its reproducible source are listed
-in [ASSETS.md](../examples/guest-mods/sdk-v3-windfall/ASSETS.md).
+vertices and 8192 triangles per model. A model contains one mesh with up to 32
+indexed triangle primitives and up to 16 materials. Each material has one
+embedded RGB/RGBA PNG base colour texture and is opaque or a cut-out
+(`alphaMode` `MASK`); several primitives may share a material. Texture width and
+height are at most 512; width must be a multiple of 64 and height a multiple of
+eight. All textures of one model together take at most 1 MiB as decoded RGBA
+(one 512 × 512, four 256 × 256 or sixteen 128 × 128 textures). See
+[Several materials](world-objects.md#several-materials) for the material kinds.
+The original example and its reproducible source are listed in
+[ASSETS.md](../examples/guest-mods/sdk-v3-windfall/ASSETS.md).
 
 In Blender, model in metres with positive Y as the exported up axis. Put the
-object origin at its foot for ground placement, triangulate the mesh, assign a
-single material with a PNG base-colour texture, and export **glTF 2.0 Binary
-(.glb)** with normals and UVs. Export only the selected model and disable
-animations, skinning, morph targets and optional compression/extensions. The
-converter accepts a single instance in the active scene and bakes rigid node
-transforms, including scale; one exported metre becomes 100 game units. The
-manifest's position and collision dimensions use game units. The converter
-preserves the authored origin. Use opaque base colour with no tint; additional
-PBR texture inputs, transparency and double-sided materials are unsupported.
+object origin at its foot for ground placement, triangulate the mesh, give each
+surface its own material slot with one PNG base-colour texture (an Image Texture
+node feeding Base Color), and export **glTF 2.0 Binary (.glb)** with normals and
+UVs. Export only the selected model and disable animations, skinning, morph
+targets and optional compression/extensions. The converter accepts a single
+instance in the active scene and bakes rigid node transforms, including scale;
+one exported metre becomes 100 game units. The manifest's position and
+collision dimensions use game units. The converter preserves the authored
+origin. Use base colour textures with no tint. Alpha clip (`MASK`) cut-outs and
+double-sided materials are supported; blended transparency and additional PBR
+texture inputs (metallic-roughness, normal, occlusion, emissive) are refused.
 
 The player's machine converts the original GLB to Wii U BFRES using a static
-material, toon texture and shader from the player's own game. Each model receives
+material, toon texture and shader from the player's own game (for several
+materials or a cut-out, the opaque and cut-out materials of another get-item
+model, so all materials are lit alike). Each model receives
 its own archive and model identity. Generated BFRES and shaders belong in the
 package's local data cache; do not ship them in packages. Editing the model or
 changing the player template invalidates its cache key. Packages and this
