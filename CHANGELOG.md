@@ -11,6 +11,14 @@ what is on `devel` and not released yet (also in the
   item-button press equips and uses the bow (including fire, ice and light arrows), boomerang, hookshot or grappling
   rope; bombs are readied and thrown, and equipping the hammer completes one strike. A **Quick-use animation speed**
   of 1x, 1.25x or 1.5x speeds up the supported equip animations.
+
+- **Mod SDK v3 and the world editor: island buildings** (for mod makers). Mods can place some of the islands' own
+  buildings as `"actor": "piece:<id>"`: four Outset houses (their windows light up at night), Outset's lookout tower
+  and well shelter, the Flight Control Platform, the Private Oasis cabana and Tingle's tower. They are made once from
+  your own game files, lit by the island's light at every time of day and in all weather, and Link can walk on them;
+  their doors lead nowhere. A building must keep clear of the island's villagers and their routes, chests, doors,
+  items and cutscene areas (the editor shows what is in the way), and a room's buildings share 24 MiB. In the editor
+  they are in the Game objects palette.
 - **Performance report: it says whether Keep game speed is on** (and at which interpolation rate), and the log records
   its value and where it came from at start and on every change.
 - **Mod SDK v3: placed villagers can walk a route.** Uo1, Uo2, Uo3, Um1 and Um2 walk up to 15 points with their own
