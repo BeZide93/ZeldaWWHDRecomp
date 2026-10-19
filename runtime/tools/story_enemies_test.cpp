@@ -12,6 +12,7 @@
 #include <cstring>
 #include <functional>
 #include <map>
+#include <set>
 #include <stdexcept>
 #include <vector>
 #ifdef _WIN32
@@ -24,12 +25,18 @@ namespace {
 constexpr uint32_t Actor=0x20000000,Second=Actor+0x2000,Retail=Actor+0x4000,Arena=0x60000000,Bokoblin=Actor+0x6000,Moblin=Actor+0xA000;
 std::map<uint32_t,void(*)(Cpu*)> hooks;std::map<uint32_t,bool> defeated;
 unsigned calls=0,claims=0,creates=0,deletes=0,drops=0,marker_sequence=0;bool terminal=false,freeze_terminal=false,fail_claim=false,throw_execute=false,children_ready=false;unsigned child_scopes=0,child_retires=0;unsigned tn_execs=0,tn_nested=0,kid_deletes=0;bool drown_mode=false,bad_helper=false,bad_type=false,foreign_helper=false,request_ok=true,request_queued=true,throw_create=false,nested_weapon=false;uint32_t drown_lr=0x02044FCC;
-void map_memory(uint32_t a,uint32_t n){
+// Fixture memory in whole 64 KiB blocks, Windows' allocation granularity: a second VirtualAlloc
+// reservation of a block fails there (mmap would quietly map it again and clear it). Each block is
+// mapped once; a later request that covers a block already mapped keeps that block as it is.
+std::set<uint32_t> mapped_blocks;
+void map_memory(uint32_t a,uint32_t n){assert(!(a&0xFFFFu)&&n&&!(n&0xFFFFu));
+ for(uint32_t b=a;b-a<n;b+=0x10000u){if(!mapped_blocks.insert(b).second)continue;
 #ifdef _WIN32
- assert(VirtualAlloc(mem::ptr(a),n,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE));
+  assert(VirtualAlloc(mem::ptr(b),0x10000u,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE));
 #else
- assert(mmap(mem::ptr(a),n,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED,-1,0)!=MAP_FAILED);
+  assert(mmap(mem::ptr(b),0x10000u,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED,-1,0)!=MAP_FAILED);
 #endif
+ }
 }
 void call_hook(Cpu*c,uint32_t f,uint32_t a){Cpu nested=*c;nested.r[3]=a;hooks.at(f)(&nested);}
 bool known_address(uint32_t fn){const uint32_t known[]={0x02110D4C,0x0210DD3C,0x0210BFEC,0x021104B4,0x0219D568,0x0219AAE8,0x02199748,0x0219CE98,0x0209F918,0x0209BD1C,0x0209971C,0x0209F164,0x021CCB00,0x021C9B1C,0x021C7344,0x021CC44C,0x02446E54,0x02446374,0x02445EE4,0x024468E4,0x023CF600,0x023CC070,0x023C9994,0x023CEF04,0x0230F32C,0x0230BEF4,0x0230AE30,0x0230EDD0,0x0231175C,0x02311240,0x023111D8,0x023115BC,0x024C0B0C,0x024BD170,0x024BA238,0x024C0194,0x025D99E8,0x020402C8,0x025D9154,0x021992DC,0x025D9898,0x021C9AA0,0x025D7B24,0x020A47B4,0x021D0294,0x020A3B18,0x02041570,0x02041F94,0x02043F34,0x025D57E0,0x020BFC50,0x020BCEC8,0x020BBAEC,0x020BF574,0x020ADA5C,0x020AB020,0x020A8BDC,0x020AD59C,0x023C3EC8,0x023C1380,0x023C039C,0x023C38AC,0x021A7B4C,0x025D537C,0x025D5A20,0x02516C14};bool accepted=false;for(uint32_t expected:known)accepted|=fn==expected;for(const auto&n:story_enemies_more::kNatives)accepted|=fn==n.create||fn==n.execute||fn==n.draw||fn==n.destroy;return accepted;}
@@ -89,6 +96,8 @@ EnemyClaimStatus claim_enemy_drops(EnemyMarkerHandle h,const std::string&,const 
 // Batch-3 enemies: each test keeps the claim counter as it found it.
 constexpr uint32_t B3=0x20020000;  // the batch-3 test actors: a region of their own
 constexpr uint32_t More=0x20050000;  // the table kinds' test actors (story_enemies_more.h): a region of their own
+constexpr uint32_t MoreLink=0x20070000;  // the table kinds' stand-in Link: a 64 KiB block of its own (the Darknut test uses 0x20040000)
+static_assert(More%0x10000==0&&MoreLink%0x10000==0&&More>=B3+0x20000&&MoreLink>=More+0x20000);
 struct KeepClaims{unsigned v=claims;~KeepClaims(){claims=v;}};
 void toggles(story_enemies::Token t,story_enemies::Kind k,uint32_t a,std::initializer_list<uint32_t> offsets){for(uint32_t off:offsets){const uint8_t old=ld8(a+off);st8(a+off,uint8_t(old^1));assert(!story_enemies::verify_actor(t,k,a));st8(a+off,old);}assert(story_enemies::verify_actor(t,k,a));}
 void create(uint32_t fn,uint32_t a,void(*init)(uint32_t)=nullptr){static void(*setup)(uint32_t);setup=init;probe=[a](Cpu*c,uint32_t){if(c->r[3]!=a)return false;if(setup)setup(a);c->r[3]=4;return true;};run(fn,a);probe=nullptr;}
@@ -133,7 +142,7 @@ void octorok_test(story_enemies::Token t){using namespace story_enemies;KeepClai
  probe=[](Cpu*c,uint32_t f){if(f!=0x023C1380u)return false;assert(!deny_create(0xE3,6));st8(Oq+0x3DF,0x14);st8(Oq+0x3E0,0x20);Cpu d=*c;d.r[3]=Oq;hooks.at(0x025D99E8)(&d);c->r[3]=1;return true;};run(0x023C1380,Oq);probe=nullptr;assert(!available(t)&&!is_defeated(t));
  std::memset(mem::ptr(Retail),0,0x1200);st16(Retail+0xE,0xE3);const unsigned c0=calls;run(0x023C1380,Retail);assert(calls==c0+1);}
 int main(int argc,char**argv){using namespace story_enemies;const bool drowning_test=argc==2&&std::strcmp(argv[1],"--drowning")==0;const bool weapons=drowning_test||(argc==2&&std::strcmp(argv[1],"--weapons")==0);
- map_memory(Actor,0x20000);map_memory(B3,0x20000);map_memory(More,0x20000);map_memory(0x20040000,0x10000);map_memory(GD(0x10470000),0x10000);map_memory(GD(0x101B0000),0x10000);map_memory(GD(0x101C0000),0x10000);map_memory(Arena,0x20000);map_memory(GD(0x101F0000),0x10000);map_memory(GD(0x10460000),0x10000);
+ map_memory(Actor,0x20000);map_memory(B3,0x20000);map_memory(More,0x20000);map_memory(MoreLink,0x10000);map_memory(GD(0x10470000),0x10000);map_memory(GD(0x101B0000),0x10000);map_memory(GD(0x101C0000),0x10000);map_memory(Arena,0x20000);map_memory(GD(0x101F0000),0x10000);map_memory(GD(0x10460000),0x10000);
 #if STORY_ENEMIES_TEST_CODE_DELTA
  for(uint32_t canonical:{0x101F0000u,0x10460000u,0x10190000u,0x101B0000u}){map_memory(canonical,0x10000);std::memset(mem::ptr(canonical),0xA5,0x10000);}
 #endif
@@ -216,7 +225,7 @@ int main(int argc,char**argv){using namespace story_enemies;const bool drowning_
   // Poe: removed while it possesses Link: his confusion flag, TORITUKI_ON and its demo event end; its lantern goes with it
   at+=0x2000;make(Kind::Poe);st8(at+0x456,0xFF);st8(at+0x475,0xFF);st32(at+0x488,0xFFFFFFFFu);const Token pw=table[Kind::Poe];assert(verify_actor(pw,Kind::Poe,at));
   for(uint32_t off:{0x454u,0x455u,0x456u,0x457u,0x475u,0xB51u})expect_field(pw,Kind::Poe,off);
-  {constexpr uint32_t Link=0x20040000;st32(play+0x5B34,Link);st16(Link+0xE,0xA8);st32(Link+0x3BC,0x101);bind(pw,pid);st16(at+0x482,4);st16(at+0x484,0x51);st8(at+0x45F,1);st8(story_enemies_more::poe_possessing(),1);
+  {constexpr uint32_t Link=MoreLink;st32(play+0x5B34,Link);st16(Link+0xE,0xA8);st32(Link+0x3BC,0x101);bind(pw,pid);st16(at+0x482,4);st16(at+0x484,0x51);st8(at+0x45F,1);st8(story_enemies_more::poe_possessing(),1);
    const uint32_t lantern=at+0x1000;std::memset(mem::ptr(lantern),0,0x890);st32(lantern+4,888);st16(lantern+0xE,0xC1);st32(at+0x48C,888);held_bomb=lantern;const unsigned d0=bomb_deletes;
    run(story_enemies_more::find(Kind::Poe)->destroy,at);assert(ld32(Link+0x3BC)==1&&ld8(story_enemies_more::poe_possessing())==0&&!ld8(at+0x45F)&&bomb_deletes==d0+1);held_bomb=0;
    // its demo: the event it holds ends and the camera starts again; an owned Poe's own possession event is admitted
