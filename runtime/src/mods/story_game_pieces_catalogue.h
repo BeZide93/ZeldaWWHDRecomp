@@ -25,13 +25,12 @@
 #include <vector>
 
 #include "mod_json.h"
+#include "story_game_pieces_budget.h"
 
 namespace story_game_pieces {
 
 inline constexpr unsigned kFormat = 1;
-// what the game pieces of one room may cost in all, every mod's (game heap bytes: each set's archive
-// once while the room uses it, and each placement's instance)
-inline constexpr uint64_t kRoomBudgetBytes = 8u * 1024 * 1024;
+// kRoomBudgetBytes (story_game_pieces_budget.h): what the game pieces of one room may cost in all
 inline constexpr unsigned kMaxPiecesPerSet = 16;
 
 // The light set a part is drawn with: the island's background light of BG model 0..3 (the game's

@@ -306,7 +306,7 @@ inline bool game_piece_fields(const Value& v,unsigned need,ManifestActor& a,std:
 inline bool game_piece_budget(const std::vector<ManifestActor>& actors,std::string& why,const story_game_pieces::Catalogue& c) {
     std::map<std::pair<std::string,unsigned>,story_game_pieces::RoomUse> rooms;
     for(const auto&a:actors){if(!a.game_piece())continue;const auto* p=c.find(a.piece);if(!p)continue;auto&use=rooms[{a.stage,a.room}];use.add(c,*p);
-        if(use.bytes>story_game_pieces::kRoomBudgetBytes)return why="game pieces in "+a.stage+" room "+std::to_string(a.room)+" exceed the room's memory budget for buildings ("+std::to_string(story_game_pieces::kRoomBudgetBytes/1024)+" KiB: each set's archive once and each placement)",false;}
+        if(use.bytes>story_game_pieces::kRoomBudgetBytes)return why="game pieces in "+a.stage+" room "+std::to_string(a.room)+" exceed the room's memory budget for buildings ("+std::to_string(story_game_pieces::kRoomBudgetBytes/(1024*1024))+" MiB: each set's archive once and each placement)",false;}
     return true;
 }
 inline bool game_piece_budget(const std::vector<ManifestActor>& actors,std::string& why) {
