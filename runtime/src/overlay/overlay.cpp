@@ -749,7 +749,8 @@ std::string performance_report() {
     h.gpu = performance_device();
     h.renderer = render::api_name(render::active());
     h.host = hostui::name();
-    h.fps = interp::mode() == 2 ? "true 60 fps" : interp::mode() == 1 ? "60 fps interpolation" : "30 fps";
+    h.fps = interp::mode() == 2 ? "true 60 fps" : interp::mode() == 1 ? std::to_string(interp::fps()) + " fps interpolation" : "30 fps";
+    if (interp::mode() == 1) h.keepGameSpeed = interp::paced_interpolation();  // at that rate
     h.scale = hostui::res_scale();
 #ifdef WWHD_HAS_VULKAN
     if (render::vulkan()) {

@@ -22,6 +22,7 @@ bool paced_interpolation();  // at the current rate
 void set_paced_interpolation(bool on);
 bool paced_interpolation_at(int fps);
 void set_paced_interpolation_at(int fps, bool on);
+void load_paced_interpolation_at(int fps, bool on);  // the saved setting (hosts, at start; logged as such)
 float paced_drawn_share();  // share of in-between frames drawn lately (paced and on), -1 otherwise
 
 // the display (hosts and renderers): refresh rate of the TV window's screen (0: unknown), and

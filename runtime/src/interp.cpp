@@ -800,10 +800,35 @@ static std::atomic<bool>& paced_flag(int f) { return f > 60 ? g_paced_hi : g_pac
 static bool paced() { return paced_flag(fps()).load(std::memory_order_relaxed); }
 bool paced_interpolation() { return paced(); }  // at the current frame rate
 bool paced_interpolation_at(int f) { return paced_flag(f).load(std::memory_order_relaxed); }
-void set_paced_interpolation_at(int f, bool on) {
-    if (paced_flag(f).exchange(on) != on)
-        LOG("[interp] paced interpolation at %s %s", f > 60 ? "120/240 fps" : "60 fps", on ? "on (keeps the game's speed)" : "off");
+// Where each value came from, for the log (players' logs show which one they play with): the
+// platform's default, WWHD_INTERP_PACED, the saved setting or a change in the settings overlay.
+enum PacedSource : int { kPacedDefault, kPacedEnv, kPacedSaved, kPacedChanged };
+static std::atomic<int> g_paced_src{g_env_paced ? kPacedEnv : kPacedDefault}, g_paced_hi_src{g_env_paced ? kPacedEnv : kPacedDefault};
+static std::atomic<int>& paced_src(int f) { return f > 60 ? g_paced_hi_src : g_paced_src; }
+static const char* paced_src_name(int src) {
+    switch (src) {
+    case kPacedEnv: return "WWHD_INTERP_PACED";
+    case kPacedSaved: return "saved setting";
+    case kPacedChanged: return "changed in the settings";
+    default: return "default on this platform";
+    }
 }
+static std::atomic<bool> g_paced_start_logged{false};
+// the start values, once (the first frame, after the hosts loaded the saved settings)
+static void log_paced_start() {
+    if (g_paced_start_logged.exchange(true)) return;
+    LOG("[interp] keep game speed at 60 fps %s (%s), at 120/240 fps %s (%s)", g_paced.load() ? "on" : "off",
+        paced_src_name(g_paced_src.load()), g_paced_hi.load() ? "on" : "off", paced_src_name(g_paced_hi_src.load()));
+}
+static void set_paced(int f, bool on, int src) {
+    const bool changed = paced_flag(f).exchange(on) != on;
+    paced_src(f) = src;
+    // a saved value that equals the default is logged with the start values; any other change now
+    if (changed || (src != kPacedSaved && g_paced_start_logged.load()))
+        LOG("[interp] keep game speed at %s %s (%s)", f > 60 ? "120/240 fps" : "60 fps", on ? "on" : "off", paced_src_name(src));
+}
+void set_paced_interpolation_at(int f, bool on) { set_paced(f, on, kPacedChanged); }
+void load_paced_interpolation_at(int f, bool on) { set_paced(f, on, kPacedSaved); }
 void set_paced_interpolation(bool on) { set_paced_interpolation_at(fps(), on); }
 // share of in-between frames drawn over the last 60 steps (performance overlay), -1 before any
 static std::atomic<float> g_paced_share{-1};
@@ -1128,6 +1153,7 @@ extern "C" void hook_0203593C(Cpu* c) {
     static uint64_t at60 = getenv("WWHD_TRUE60_AT_STEP") ? strtoull(getenv("WWHD_TRUE60_AT_STEP"), nullptr, 10) : 0;
     static uint64_t passes60 = 0;
     if (at60 && ++passes60 == at60) set_mode(2);
+    log_paced_start();
     paced_pass_start();
     true60::new_pass();
     true60::pass_begin(ff_transition || !enabled() || !g_hold_next);  // full pass: take back Link's half-pass preview
