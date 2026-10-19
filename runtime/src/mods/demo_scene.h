@@ -53,6 +53,17 @@ struct Actor {
 struct Sound { uint32_t frame = 0, id = 0; std::string actor; std::optional<Vec> position; float volume = 1, pan = 0.5f; bool operator==(const Sound&) const = default; };
 struct Particle { uint32_t frame = 0, id = 0; std::string actor, joint; std::optional<Vec> position; bool operator==(const Particle&) const = default; };
 struct Message { uint32_t frame = 0; std::string text; bool operator==(const Message&) const = default; };
+// One demo actor carried on a joint of another from `frame` until `release` (a detach's frame, or
+// kNoRelease: to the end). Its pose is the carrier joint's matrix times offset/rotation (degrees, ZXY).
+inline constexpr uint32_t kNoRelease = 0xFFFFFFFFu, kMaxAttach = 8;
+struct Attach {
+    uint32_t frame = 0, release = kNoRelease;
+    std::string actor, to, joint;
+    Vec offset, rotation;
+    bool upright = false;
+    bool fall = false;     // detach: the released actor falls to the ground (else it stays where it was let go)  // keep only the joint's heading (the carried actor stays upright, as in the game's Demo07)
+    bool operator==(const Attach&) const = default;
+};
 // Time and weather at a frame: hour 0..24, rain 0..1 (0 no rain, 1 the game's full rain).
 struct TimeKey { uint32_t frame = 0; float hour = 0; bool operator==(const TimeKey&) const = default; };
 struct WeatherKey { uint32_t frame = 0; float rain = 0; bool operator==(const WeatherKey&) const = default; };
@@ -66,6 +77,7 @@ struct Demo {
     std::vector<Sound> sounds;
     std::vector<Particle> particles;
     std::vector<Message> messages;
+    std::vector<Attach> attach;
     std::vector<TimeKey> time;
     std::vector<WeatherKey> weather;
     bool keep_time = false, keep_weather = false;  // otherwise both come back when the demo ends

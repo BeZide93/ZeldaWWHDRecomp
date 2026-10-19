@@ -80,6 +80,8 @@ bool scene_rotation(Cpu*,const Identity&,uint32_t lease,story_notebook::WorldPoi
 bool scene_animation(Cpu*,const Identity&,uint32_t lease,const std::string&,float blend_frames=6,bool loop=true);
 // a demo track's pose for this frame (position, rotation in degrees) under the scene lease
 bool scene_pose(Cpu*,const Identity&,uint32_t lease,story_notebook::WorldPoint position,story_notebook::WorldPoint degrees);
+// the actor's J3D model (its joints carry other demo actors), or 0
+uint32_t model_address(Cpu*,const Identity&);
 // Startup-private provisional declarations cannot escape through installed services.
 size_t checkpoint();
 void rollback(size_t) noexcept;

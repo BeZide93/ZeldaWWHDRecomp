@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // Parts of a running mod demo (story_demo.h) that act on the game while the demo plays:
+//  - attach: one demo actor carried on a joint of another (the general form of the game's own
+//    Demo07 case, where the Helmaroc King writes its jaw matrix into Link's demo pose);
 //  - light: the demo's time and weather changes, played by a LIGHT staff in the demo's event (the
 //    game's own dKy_instant_timechg / dKy_instant_rainchg), held while the demo runs and restored
 //    at its end, skip or state load.
@@ -22,6 +24,18 @@ struct Context {
     Call call = nullptr;
     Call raw = nullptr;    // the same call without restoring the CPU (for f1 results)
 };
+
+namespace attach {
+inline constexpr uint32_t kRecordBytes = 0x100;  // 8 x 0x20
+// A demo actor's game actor (0 when it is not there); Model actors are never asked for.
+using ActorOf = std::function<uint32_t(const std::string& demo_id)>;
+void begin(const Context&);
+// Each demo frame, after dDemo_manager_c::update and before the demo's values go to mod-placed actors:
+// carried actors' demo slots take the carrier's joint matrix times the attachment's offset.
+void update(Cpu*, const Context&, const demo_scene::Demo&, uint32_t frame, const ActorOf&);
+// The demo ends (its slots are already gone): Link's held mode is cleared, the record emptied.
+void release(Cpu*, const Context&);
+}  // namespace attach
 
 namespace light {
 inline constexpr uint32_t kRecordBytes = 0x80;

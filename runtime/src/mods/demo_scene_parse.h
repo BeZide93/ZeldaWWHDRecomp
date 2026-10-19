@@ -82,6 +82,63 @@ inline bool track(const Value& v, bool scalar, uint32_t frames, Track& out, std:
     return true;
 }
 template <class T> inline bool frame_order(const std::vector<T>& v) { return std::is_sorted(v.begin(), v.end(), [](const T& a, const T& b) { return a.frame < b.frame; }); }
+// "attach": [{"frame","actor","to","joint","offset","rotation"}], "detach": [{"frame","actor"}]
+inline bool attachments(const Value& st, Demo& d, std::string& why) {
+    const auto& attach = st.get("attach");
+    const auto& detach = st.get("detach");
+    if (attach.type == Value::Null) return detach.type == Value::Null || fail(why, "detach needs an attach");
+    if (attach.type != Value::Array || attach.array.empty() || attach.array.size() > kMaxAttach) return fail(why, "demo attach must be a list of up to 8");
+    if (detach.type != Value::Null && (detach.type != Value::Array || detach.array.size() > kMaxAttach)) return fail(why, "demo detach must be a list of up to 8");
+    auto actor = [&](const std::string& id) -> const Actor* { for (const auto& a : d.actors) if (a.id == id) return &a; return nullptr; };
+    for (const auto& v : attach.array) {
+        Attach a;
+        if (!keys_only(v, {"frame", "actor", "to", "joint", "offset", "rotation", "upright"}) || !integer(v.get("frame"), 0, d.frames, a.frame)) return fail(why, "attach needs a frame inside the demo");
+        a.actor = v.get("actor").string(); a.to = v.get("to").string(); a.joint = v.get("joint").string();
+        const Actor* carried = actor(a.actor);
+        const Actor* carrier = actor(a.to);
+        if (!carried || !carrier) return fail(why, "attach: actor and to must be demo actors");
+        if (carried == carrier) return fail(why, "attach: an actor can't carry itself");
+        if (carried->kind == Actor::Kind::Model || carrier->kind == Actor::Kind::Model) return fail(why, "attach: models from the game's archives can't carry or be carried");
+        if (!plain(a.joint, 31)) return fail(why, "attach needs the carrier's joint name");
+        if (v.object.contains("offset") && !vec(v.get("offset"), a.offset)) return fail(why, "attach offset must be {x,y,z}");
+        if (v.object.contains("rotation") && !vec(v.get("rotation"), a.rotation)) return fail(why, "attach rotation must be {x,y,z} degrees");
+        if (v.object.contains("upright")) { if (v.get("upright").type != Value::Bool) return fail(why, "attach upright must be true or false"); a.upright = v.get("upright").boolean; }
+        d.attach.push_back(a);
+    }
+    if (!frame_order(d.attach)) return fail(why, "attach entries must be in frame order");
+    for (const auto& v : detach.type == Value::Array ? detach.array : std::vector<Value>{}) {
+        uint32_t frame = 0;
+        if (!keys_only(v, {"frame", "actor", "fall"}) || !integer(v.get("frame"), 0, d.frames, frame)) return fail(why, "detach needs a frame inside the demo");
+        if (v.object.contains("fall") && v.get("fall").type != Value::Bool) return fail(why, "detach fall must be true or false");
+        const std::string id = v.get("actor").string();
+        Attach* open = nullptr;  // the actor's last attach before this frame
+        for (auto& a : d.attach) if (a.actor == id && a.frame < frame) open = &a;
+        if (!open || open->release != kNoRelease) return fail(why, "detach of " + id + " at frame " + std::to_string(frame) + " without an attach before it");
+        open->release = frame;
+        open->fall = v.get("fall").boolean;
+    }
+    // one carrier per actor at a time; no chains (a carried actor doesn't carry); Link only in his demo clips
+    for (size_t i = 0; i < d.attach.size(); ++i) {
+        const auto& a = d.attach[i];
+        for (size_t k = 0; k < d.attach.size(); ++k) {
+            const auto& b = d.attach[k];
+            if (k == i || !(a.frame < b.release && b.frame < a.release)) continue;
+            if (a.actor == b.actor) return fail(why, "attach: " + a.actor + " is carried twice at once (detach it first)");
+            if (a.actor == b.to) return fail(why, "attach: " + a.actor + " carries while it is carried");
+        }
+        if (actor(a.actor)->kind == Actor::Kind::Link) {
+            const auto& modes = actor(a.actor)->modes;
+            const Mode* current = nullptr;
+            bool ok = true;
+            for (const auto& m : modes) {
+                if (m.frame <= a.frame) current = &m;
+                else if (m.frame < a.release && m.mode < 512) ok = false;
+            }
+            if (!current || current->mode < 512 || !ok) return fail(why, "a carried Link plays one of his demo clips (mode \"clip\") while he is carried");
+        }
+    }
+    return true;
+}
 // "time": [{"frame","hour"}], "weather": [{"frame","rain"}], "keep_time", "keep_weather"
 inline bool light(const Value& st, Demo& d, std::string& why) {
     const auto& time = st.get("time");
@@ -120,7 +177,7 @@ inline bool parse(const mods::json::Value& st, Demo& d, std::string& why) {
     using namespace parse_detail;
     using mods::json::Value;
     d = {};
-    if (!keys_only(st, {"type", "frames", "origin", "angle", "camera", "actors", "sounds", "particles", "messages", "time", "weather", "keep_time", "keep_weather"}) || st.get("type").string() != "demo")
+    if (!keys_only(st, {"type", "frames", "origin", "angle", "camera", "actors", "sounds", "particles", "messages", "attach", "detach", "time", "weather", "keep_time", "keep_weather"}) || st.get("type").string() != "demo")
         return fail(why, "unknown demo field");
     if (!integer(st.get("frames"), 1, kMaxFrames, d.frames)) return fail(why, "demo needs frames 1..9000");
     const auto& origin = st.get("origin");
@@ -284,7 +341,7 @@ inline bool parse(const mods::json::Value& st, Demo& d, std::string& why) {
             d.messages.push_back(x);
         }
     }
-    if (!parse_detail::light(st, d, why)) return false;
+    if (!parse_detail::attachments(st, d, why) || !parse_detail::light(st, d, why)) return false;
     if (d.actors.empty() && d.eye.keys.empty()) return fail(why, "demo needs a camera or actors");
     return true;
 }
