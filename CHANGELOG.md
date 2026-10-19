@@ -7,6 +7,8 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Fixed: the mod actor heap diagnostic** (`WWHD_MOD_ACTOR_HEAPS`) no longer crashes when a game heap isn't set up.
+
 - **Island buildings and world objects: only real conflicts refuse a place now** (doors, start points, villagers and
   their walks, chests, event triggers); pots, signs, rupees, message and hint areas and the sea's surface no longer
   count. In the editor a building can be placed anywhere: on a red spot it shows as an outline with what is in the way
