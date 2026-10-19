@@ -69,6 +69,11 @@ are optional; they do not control collision. Assign one of these material names:
 | `col_objects` | Object collision, including the ship; Link and camera pass through |
 | `col_climb` | Native vine-style climbable wall |
 | `col_hookshot` | Hookshot attachment surface with wooden ground sounds |
+| `col_water` | Water to swim in: Link swims below its surface (see "Water") |
+| `col_shallow` | Shallow water: Link wades through it |
+| `col_waterfall` | The ground of a waterfall, as the game's own waterfalls |
+| `col_ice` | Ice: Link slides on it |
+| `col_void` | A drop: landing on it sends Link back to the room's restart point, as a bottomless pit does |
 
 Use separate material slots for different ground types. Triangle direction
 matters: orient ground faces upward and obstacle faces outward. The converter
@@ -421,6 +426,24 @@ side. The right-side gold patch is the hookshot target. Grapple anchors require
 separate object settings; a wooden collision material alone does not create
 a rope target.
 
+## Water
+
+A `col_water` surface is water Link can swim in. Author it as upward-facing faces at the water's level,
+covering the pond or pool; the faces need no thickness. Link passes through the surface (it is no ground): give
+the pond its own floor and banks with the ground materials (for example `col_sand` under the water and
+`col_stone` for the banks). Below the surface Link swims as in the sea, and he climbs out at a bank that
+is low enough, as on the islands. `col_shallow` is for water too shallow to swim in: Link wades.
+
+The surface is invisible by itself. Show it with a water surface model: a separate model declared as
+the actor's `shoreline` with `"material": "water"` (see "Island presentation"); the game's own still
+water moves on it.
+
+The game looks for a pond only within the height range of the room's own ground (the highest point of
+the island, its houses and cliffs in that square). A pond whose surface is higher than that is not
+found: Link walks on its floor as if it were dry. In a square of open sea the highest point can be
+low (about 1,200 units in the square of the examples below), so keep raised ponds below the top of the
+square's island. A pond at sea level is always found.
+
 ## Grapple points
 
 A grapple point marks the attachment position on a visible beam or post. Add it
@@ -481,6 +504,14 @@ neighboring squares, with no distant collision. Shoreline decoration draws in
 the home square. Actors and their visual variants share 128 declaration slots;
 a sea square accepts at most 16 active visual variants. Removing objects in the
 editor retains their identities for undo and state restoration until restart.
+
+A shoreline can also be still water instead of foam: with `"shoreline": {"model": "pond-surface",
+"material": "water"}` the model gets the game's still-water surface with its moving ripples (the
+default `"material"` is `"foam"`). Model the water surface as a flat mesh at the water's level with a
+few rows of triangles; it fades out towards its open edges, so the water blends into the bank. Repeat
+U and V about once per three metres. An actor has one shoreline: an island with foam and a pond gives
+the pond its own static object (its basin as the model, with the `col_water` surface in its collision,
+and the water surface as its shoreline).
 
 Author the shoreline model as strips along the model's coast, just above the
 water. The game supplies the foam material, texture and animation from the

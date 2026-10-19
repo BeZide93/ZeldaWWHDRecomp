@@ -7,7 +7,8 @@ import shoreline_model as coast
 import test_actor_model
 
 
-def template():
+def template(material_name=None):
+    material_name = material_name or coast.MATERIAL
     f = coast.base.Bfres(test_actor_model.static_template())
     model, vertex, shape = 0x200, 0x300, 0x400
     dictionary, name_at = coast.single_dictionary(f, 'model1', model)
@@ -38,7 +39,7 @@ def template():
     f.set_rel(material+0x34,params)
     f.set_rel(material+0x38,coast.append_dictionary(f,entries))
     f.set_rel(material+0x3C,f.append(bytes(80),4))
-    dictionary, _ = coast.single_dictionary(f, coast.MATERIAL, material)
+    dictionary, _ = coast.single_dictionary(f, material_name, material)
     f.set_rel(model + 0x18, dictionary)
     texture=f.append(b'FTEX'+bytes(188),4)
     f.put('I',texture+0x24,8)
@@ -59,7 +60,7 @@ def template():
     f.put('H', animation+0x14,1)
     row=f.append(bytes(32),4)
     f.put('HHH',row,4,1,1)
-    f.set_rel(row+0x10,coast.append_string(f,coast.MATERIAL))
+    f.set_rel(row+0x10,coast.append_string(f,material_name))
     param_infos=f.append(bytes(64),4)
     for i,name in enumerate(names):f.set_rel(param_infos+i*16+12,coast.append_string(f,name))
     f.set_rel(row+0x14,param_infos)
@@ -111,6 +112,41 @@ class ShorelineTests(unittest.TestCase):
             self.assertEqual(struct.unpack_from('>2f',data,start+i*64+48),tuple(self.geometry()[2][i]))
         bone=f.rel(f.rel(model+0xC)+0x14)
         self.assertEqual(struct.unpack_from('>3f',data,bone+0x30),(0,0,0))
+
+    def test_water_surface_fades_at_its_open_edges(self):
+        # a 2x2 grid of quads: the eight border points are on open edges (alpha 0), the middle point is inside (1)
+        pts = [(x * 100.0, 5.0, z * 100.0) for z in range(3) for x in range(3)]
+        idx = []
+        for z in range(2):
+            for x in range(2):
+                a = z * 3 + x
+                idx += [a, a + 3, a + 1, a + 1, a + 3, a + 4]
+        self.assertEqual(coast.edge_alpha(pts, idx), [0, 0, 0, 0, 1, 0, 0, 0, 0])
+        original, _, _ = template(coast.MATERIALS['water'])
+        geometry = (pts, [(0, 1, 0)] * 9, [(p[0] / 100, p[2] / 100) for p in pts], idx, b'')
+        data = coast.build_bfres(original, geometry, 'mod_pond', coast.MATERIALS['water'])
+        f = coast.base.Bfres(data)
+        model = f.dict(f.rel(0x20))[0][1]
+        self.assertEqual(f.dict(f.rel(model + 0x18))[0][0], coast.MATERIALS['water'])
+        start = f.rel(f.rel(f.rel(f.dict(f.rel(model + 0x14))[0][1] + 0x20) + 0x18) + 0x14)
+        self.assertEqual([struct.unpack_from('>4f', data, start + i * 64)[3] for i in range(9)], [0, 0, 0, 0, 1, 0, 0, 0, 0])
+        # the foam keeps full alpha; the water template needs its own material in the player's island
+        with self.assertRaises(actor_model.BuildError):
+            coast.build_bfres(template()[0], geometry, 'mod_pond', coast.MATERIALS['water'])
+
+    @unittest.skipUnless(__import__('os').environ.get('WWHD_GAME_DIR'), 'set WWHD_GAME_DIR to read the templates from a game folder')
+    def test_both_templates_from_the_players_game(self):
+        import os
+        tpl, _ = coast.player_template(os.environ['WWHD_GAME_DIR'])
+        pts = [(x * 100.0, 5.0, z * 100.0) for z in range(3) for x in range(3)]
+        idx = [0, 3, 1, 1, 3, 4, 1, 4, 2, 2, 4, 5, 3, 6, 4, 4, 6, 7, 4, 7, 5, 5, 7, 8]
+        geometry = (pts, [(0, 1, 0)] * 9, [(p[0] / 100, p[2] / 100) for p in pts], idx, b'')
+        for kind, ntex in (('foam', 1), ('water', 2)):
+            data = coast.build_bfres(tpl, geometry, 'mod_' + kind, coast.MATERIALS[kind])
+            f = coast.base.Bfres(data)
+            self.assertEqual(f.u16(0x52), ntex)
+            self.assertEqual(f.dict(f.rel(0x34))[0][0], 'mod_' + kind)
+            self.assertLess(len(data), 1024 * 1024)
 
     def test_missing_or_unsupported_player_template_refused(self):
         source,_,animation=template()

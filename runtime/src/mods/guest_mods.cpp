@@ -509,6 +509,8 @@ void load_world(const std::string& mod,const mods::json::Value& manifest,const s
         const bool collision_uses=std::any_of(actors.begin(),actors.end(),[&](const auto& actor){return actor.collision_mesh==model.id;});
         const bool visual_uses=std::any_of(actors.begin(),actors.end(),[&](const auto& actor){return actor.distant.model==model.id||actor.shoreline.model==model.id;});
         const bool shoreline_uses=std::any_of(actors.begin(),actors.end(),[&](const auto& actor){return actor.shoreline.model==model.id;});
+        const bool water_uses=std::any_of(actors.begin(),actors.end(),[&](const auto& actor){return actor.shoreline.model==model.id&&actor.shoreline.material=="water";});
+        if(water_uses&&std::any_of(actors.begin(),actors.end(),[&](const auto& actor){return actor.shoreline.model==model.id&&actor.shoreline.material!="water";}))exception_report::raise("A shoreline model is either coast foam or a water surface");
         const bool distant_uses=std::any_of(actors.begin(),actors.end(),[&](const auto& actor){return actor.distant.model==model.id;});
         if(shoreline_uses&&(actor_uses||item_uses||collision_uses||distant_uses))exception_report::raise("A shoreline model must be dedicated to shoreline use");
         if(!actor_uses&&!item_uses&&!collision_uses&&!visual_uses)continue;
@@ -517,7 +519,7 @@ void load_world(const std::string& mod,const mods::json::Value& manifest,const s
         try {
             const auto bridge=BuildBridge::installed(std::string());
             const auto tool=std::filesystem::path(bridge.builder).parent_path().parent_path()/"story_mods"/(model.kind=="skinned"?"skinned_actor_model.py":"actor_model.py");
-            const auto archive=actor_model_cache::prepare(mod,model,package_dir,data_dir,bridge.python,tool.string(),config::game_dir,collision_uses,shoreline_uses);
+            const auto archive=actor_model_cache::prepare(mod,model,package_dir,data_dir,bridge.python,tool.string(),config::game_dir,collision_uses,shoreline_uses,water_uses);
             if(visual_uses&&(actor_model_cache::triangles_for(archive)==0||actor_model_cache::triangles_for(archive)>1024))exception_report::raise("Distant and shoreline models must contain 1..1024 render triangles");
             if(collision_uses&&!mod_actor::register_collision(mod,model.id,actor_model_cache::collision_for(archive)))exception_report::raise("Prepared collision unavailable");
             story_notebook::WorldPoint minimum,maximum;

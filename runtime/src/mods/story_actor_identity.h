@@ -41,7 +41,7 @@ inline Fingerprint fingerprint(const std::string&mod,const story_notebook::Manif
     if(a.water_object()){text("wwhd.world-motion.v1");number(a.buoyancy.draft);number(a.buoyancy.damping);number(a.buoyancy.max_tilt);number(a.drift.wind_speed);number(a.drift.max_speed);point(a.drift.current);word(a.anchor.enabled);point(a.anchor.point);number(a.anchor.radius);}
     if(!a.grapple_points.empty()){text("wwhd.world-grapple.v1");word(uint32_t(a.grapple_points.size()));for(const auto&p:a.grapple_points){text(p.id);point(p.position);number(p.yaw);}}
     if(!a.distant.model.empty()||!a.shoreline.model.empty()||a.chart_marker.enabled||a.arrival.enabled){
-        text("wwhd.world-island.v1");text(a.distant.model);text(a.shoreline.model);word(a.chart_marker.enabled);text(a.chart_marker.label);text(a.chart_marker.when_flag);word(a.arrival.enabled);text(a.arrival.name);text(a.arrival.flag);number(a.arrival.radius);
+        text("wwhd.world-island.v1");text(a.distant.model);text(a.shoreline.model);if(a.shoreline.material=="water")text("shoreline-water");word(a.chart_marker.enabled);text(a.chart_marker.label);text(a.chart_marker.when_flag);word(a.arrival.enabled);text(a.arrival.name);text(a.arrival.flag);number(a.arrival.radius);
     }
     if(a.carry_enabled){text("wwhd.mod-carry.v1");word(a.carry_break_on_impact);}
     if(!a.texture.empty()){text("wwhd.actor-texture.v1");text(a.texture);text(a.texture_digest);}

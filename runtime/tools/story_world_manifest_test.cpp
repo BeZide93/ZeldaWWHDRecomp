@@ -427,6 +427,12 @@ int main() {
         auto bare=island;for(const char*key:{"distant","shoreline","chart_marker","arrival"})bare["actors"].array[0].object.erase(key);assert(parse_actors(bare,actors,why)&&visual_variant_count(actors[0])==0);auto cleared=original;cleared.distant={};cleared.shoreline={};cleared.chart_marker={};cleared.arrival={};assert(story_actors::identity::fingerprint("own",actors[0])==story_actors::identity::fingerprint("own",cleared));
         for(const char*key:{"distant","shoreline"})for(const char*id:{"missing","other:low","../low","skin"}){auto bad=island;bad["actors"].array[0][key]["model"]=id;rejected(bad);}
         for(const char*key:{"distant","shoreline","chart_marker","arrival"}){auto bad=island;bad["actors"].array[0][key]=Value{};rejected(bad);bad=island;bad["actors"].array[0][key]["native_params"]=1;rejected(bad);}
+        // a shoreline may use the still-water material (a pond's surface); only foam or water, and only on the shoreline
+        {auto water=island;water["actors"].array[0]["shoreline"]["material"]="water";assert(parse_actors(water,actors,why)&&actors[0].shoreline.material=="water"&&actors[0].shoreline.model=="coast");
+         const auto foam_identity=story_actors::identity::fingerprint("m",original);auto water_spec=actors[0];assert(story_actors::identity::fingerprint("m",water_spec)!=foam_identity);
+         water["actors"].array[0]["shoreline"]["material"]="foam";assert(parse_actors(water,actors,why)&&actors[0].shoreline.material.empty());
+         for(const char*bad_material:{"lava","Water",""}){auto bad=island;bad["actors"].array[0]["shoreline"]["material"]=bad_material;rejected(bad);}
+         auto bad=island;bad["actors"].array[0]["distant"]["material"]="water";rejected(bad);assert(parse_actors(island,actors,why));}
         for(const char*behaviour:{"floating","drifting"}){auto bad=island;bad["actors"].array[0]["behaviour"]=behaviour;if(std::string(behaviour)=="drifting")bad["actors"].array[0]["drift"]=mods::json::parse(R"({"wind_speed":1})");rejected(bad);}
         {auto bad=island;bad["actors"].array[0]["stage"]="town";rejected(bad);}
         {auto bad=island;auto&a=bad["actors"].array[0];a.object.erase("behaviour");a["collision"]=mods::json::parse(R"({"radius":30,"height":100,"mode":"solid"})");rejected(bad);}

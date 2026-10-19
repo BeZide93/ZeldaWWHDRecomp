@@ -201,7 +201,8 @@ std::string archive_for(const std::string&){return {};}
 mod_actor::ModelRig rig_for(const std::string&){return {};}
 std::vector<std::string> clips_for(const std::string&){return {};}
 bool bounds_for(const std::string&,story_notebook::WorldPoint&,story_notebook::WorldPoint&){return false;}
-std::string prepare(const std::string&,const story_notebook::ManifestModel&,const std::string&,const std::string&,const std::vector<std::string>&,const std::string&,const std::string&,bool,bool){return {}; }
+std::string prepare(const std::string&,const story_notebook::ManifestModel&,const std::string&,const std::string&,const std::vector<std::string>&,const std::string&,const std::string&,bool,bool,bool){return {}; }
+bool water_for(const std::string&){return false;}
 }
 namespace editor { bool launch_mode(){return false;} }  // a start without --editor
 // Island buildings: the loader asks for the pieces its actors use (none here) and builds nothing.

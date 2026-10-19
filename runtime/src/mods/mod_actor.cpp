@@ -727,7 +727,7 @@ bool collision_geometry(const std::string&mod,const story_notebook::ManifestActo
 }
 story_actors::identity::Fingerprint declaration_fingerprint(const Decl&d){
     std::string identity=d.mod+std::string(1,'\0')+d.archive;if(d.visual_role)identity+=std::string(d.visual_role==2?"native-coast.v1":"world-visual.v1")+char(d.visual_role);
-    if(d.collision){std::vector<uint8_t> bytes;std::string why;std::array<uint8_t,9> raw{0,1,2,3,4,5,6,7,8};if(story_world_collision::mesh::build_native(*d.collision,raw,uint16_t(d.spec.room),bytes,why))identity+=mods::hash::sha256_text(std::string(bytes.begin(),bytes.end()));}
+    if(d.collision){std::vector<uint8_t> bytes;std::string why;std::array<uint8_t,story_world_collision::mesh::Surfaces> raw{0,1,2,3,4,5,6,7,8,9,10,11,12,13};if(story_world_collision::mesh::build_native(*d.collision,raw,uint16_t(d.spec.room),bytes,why))identity+=mods::hash::sha256_text(std::string(bytes.begin(),bytes.end()));}
     return story_actors::identity::fingerprint(identity,d.spec);
 }
 }

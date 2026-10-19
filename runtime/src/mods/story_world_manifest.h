@@ -46,7 +46,8 @@ struct ManifestTalk {
     std::string quest,item,time,when_flag,when_not_flag,lines;unsigned quest_step=0;
     std::vector<QuestCondition> quests;std::vector<StoryAction> then;
 };
-struct ManifestVisualModel {std::string model;};
+// material (shoreline only): "foam" (the coast foam, the default) or "water" (a still-water surface: a pond, a pool)
+struct ManifestVisualModel {std::string model,material;};
 struct ManifestChartMarker {bool enabled=false;std::string label,when_flag;};
 struct ManifestArrival {bool enabled=false;std::string name,flag;float radius=0;};
 struct ManifestGrapplePoint {std::string id;WorldPoint position;float yaw=0;};
@@ -510,11 +511,13 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
         if(island_fields&&(!a.world_object()||a.behaviour!="static"||a.stage!="sea"))return why="distant, shoreline, chart_marker and arrival require a static sea world object",false;
         auto visual_model=[&](const char*key,ManifestVisualModel&out){
             if(!v.object.contains(key))return true;const auto&value=v.get(key);
-            if(!keys(value,{"model"})||!id(value.get("model")))return false;
+            const bool shore=std::string(key)=="shoreline";
+            if(!(shore?keys(value,{"model","material"}):keys(value,{"model"}))||!id(value.get("model")))return false;
+            if(shore&&value.object.contains("material")){const auto&m=value.get("material");if(m.type!=Value::String||(m.text!="foam"&&m.text!="water"))return false;if(m.text=="water")out.material="water";}
             out.model=value.get("model").text;
             return std::any_of(models.begin(),models.end(),[&](const auto&model){return model.id==out.model&&model.kind=="static";});
         };
-        if(!visual_model("distant",a.distant)||!visual_model("shoreline",a.shoreline))return why="distant and shoreline must name declared same-package rigid static models",false;
+        if(!visual_model("distant",a.distant)||!visual_model("shoreline",a.shoreline))return why="distant and shoreline must name declared same-package rigid static models (a shoreline's material is foam or water)",false;
         auto island_text=[](const Value&value,std::string&out){std::u16string decoded;if(value.type!=Value::String||value.text.empty()||value.text.size()>96||!story_mail::append_utf16(value.text,false,decoded))return false;out=value.text;return true;};
         if(v.object.contains("arrival")){
             const auto&value=v.get("arrival");

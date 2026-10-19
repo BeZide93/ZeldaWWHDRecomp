@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Player-local coast material and animation on original mod geometry.
 
+Two materials of the same island (Outset's water model) serve as templates: "foam", the animated coast foam, and
+"water", the island's still-water surface with its moving ripples. A water surface fades out towards its open edges
+(vertex alpha 0 on the mesh's boundary, 1 inside), as the island's own water does.
+
 No game data is shipped: the native material, textures and animation are read
 from the player's installation and the output stays in their model cache.
 """
@@ -15,8 +19,9 @@ import tempfile
 import notebook_model as base
 from skinned_actor_model import append_dictionary, append_string
 
-VERSION = 1
-MATERIAL = 'SC_01_mizu_v_x'
+VERSION = 2
+MATERIALS = {'foam': 'SC_01_mizu_v_x', 'water': 'SC_01_mizuB_v_x'}
+MATERIAL = MATERIALS['foam']
 
 
 def require(ok, message):
@@ -36,15 +41,28 @@ def single_dictionary(f, name, target):
     return at, text
 
 
-def build_bfres(template, geometry, identity):
+def edge_alpha(positions, indices):
+    """per vertex: 0 on the mesh's open edges (an edge of one triangle; welded by position), 1 inside"""
+    key = lambda i: tuple(round(v, 4) for v in positions[i])
+    edges = {}
+    for t in range(0, len(indices) - 2, 3):
+        tri = [key(indices[t + k]) for k in range(3)]
+        for k in range(3):
+            e = tuple(sorted((tri[k], tri[(k + 1) % 3])))
+            edges[e] = edges.get(e, 0) + 1
+    open_points = {p for e, n in edges.items() if n == 1 for p in e}
+    return [0.0 if key(i) in open_points else 1.0 for i in range(len(positions))]
+
+
+def build_bfres(template, geometry, identity, material_name=MATERIAL):
     require(re.fullmatch(r'[a-z][a-z0-9_]{0,30}', identity) is not None, 'invalid coast identity')
     f = base.Bfres(template)
     models = dict(f.dict(f.rel(0x20)))
     require('model1' in models, 'player coast model unavailable')
     model = models['model1']
     materials = f.dict(f.rel(model + 0x18))
-    require(MATERIAL in dict(materials), 'player coast material unavailable')
-    material_index = [name for name, _ in materials].index(MATERIAL)
+    require(material_name in dict(materials), 'player coast material unavailable')
+    material_index = [name for name, _ in materials].index(material_name)
     shapes = f.dict(f.rel(model + 0x14))
     selected = [at for _, at in shapes if f.u16(at + 0xE) == material_index]
     require(len(selected) == 1, 'ambiguous player coast shape')
@@ -71,7 +89,8 @@ def build_bfres(template, geometry, identity):
     f.put('H', vertex + 6, 0)
     f.put('I', vertex + 8, len(positions))
     f.b[vertex + 0xC] = 0
-    vertex_bytes = b''.join(struct.pack('>4f3f4x3f4x2f8x', 1,1,1,1, *p, *n, *t) for p,n,t in zip(positions,normals,uv))
+    alpha = edge_alpha(positions, indices) if material_name == MATERIALS['water'] else [1.0] * len(positions)
+    vertex_bytes = b''.join(struct.pack('>4f3f4x3f4x2f8x', 1,1,1,a, *p, *n, *t) for p,n,t,a in zip(positions,normals,uv,alpha))
     buffer = f.rel(vertex + 0x18)
     f.put('I', buffer + 4, len(vertex_bytes))
     f.put('H', buffer + 0xC, 64)
@@ -121,10 +140,11 @@ def build_bfres(template, geometry, identity):
     f.set_rel(animation + 0x24, model)
     f.append(b'',0x1000)
     f.put('I', 0xC, len(f.b))
-    return compact(bytes(f.b), identity)
+    return compact(bytes(f.b), identity, material_name)
 
 
-def compact(data, identity):
+def compact(data, identity, material_name=MATERIAL):
+    MATERIAL = material_name
     """Keep only the coast's reachable resource graph, within the model budget."""
     source = base.Bfres(data)
     out = base.Bfres(data[:0x70])
@@ -225,14 +245,16 @@ def compact(data, identity):
         out.set_rel(dst_shader+offset,strings(target)) if target else out.put('i',dst_shader+offset,0)
     out.set_rel(dst_material+0x24,dst_shader)
     textures=source.rel(material+0x28)
-    require(data[material+0x11]==2,'unsupported coast samplers')
-    dst_textures=block(textures,16)
-    for i in range(2):
+    ntex,nsamp=data[material+0x10],data[material+0x11]
+    require(1<=ntex<=4 and nsamp==ntex,'unsupported coast samplers')
+    dst_textures=block(textures,8*ntex)
+    texture_names=[source.cstr(source.rel(textures+8*i)) for i in range(ntex)]
+    for i in range(ntex):
         out.set_rel(dst_textures+8*i,text(source.rel(textures+8*i)))
         out.put('I',dst_textures+8*i+4,0)
     out.set_rel(dst_material+0x28,dst_textures)
     samplers=source.rel(material+0x2C)
-    dst_samplers=block(samplers,48)
+    dst_samplers=block(samplers,24*nsamp)
     sampler_entries=[]
     for name,value in source.dict(source.rel(material+0x30)):
         dst=dst_samplers+value-samplers
@@ -256,21 +278,30 @@ def compact(data, identity):
     out.put('H',dst_material+0x1A,0)
     out.put('I',dst_material+0x48,0)
     out.set_rel(dst_model+0x18,append_dictionary(out,[(MATERIAL,dst_material)]))
-    texture=dict(source.dict(source.rel(0x24)))['Txa_umi_kiwa_01']
-    dst_texture=block(texture,0xC0)
-    for offset in (0xA8,0xAC):
-        target=source.rel(texture+offset)
-        out.set_rel(dst_texture+offset,text(target)) if target else out.put('i',dst_texture+offset,0)
-    for offset,size in [(0xB0,source.u32(texture+0x24)),(0xB4,source.u32(texture+0x2C))]:
-        if size:
-            out.set_rel(dst_texture+offset,block(source.rel(texture+offset),size,0x2000))
-        else:
-            out.put('i',dst_texture+offset,0)
-    out.put('II',dst_texture+0xB8,0,0)
-    for i in range(2):
-        out.set_rel(dst_textures+8*i+4,dst_texture)
-    out.set_rel(0x24,append_dictionary(out,[('Txa_umi_kiwa_01',dst_texture)]))
-    out.put('H',0x52,1)
+    all_textures=dict(source.dict(source.rel(0x24)))
+    unique=[]
+    for name in texture_names:
+        if name not in unique:
+            unique.append(name)
+    copied={}
+    for name in unique:
+        require(name in all_textures,'player coast texture unavailable')
+        texture=all_textures[name]
+        dst_texture=block(texture,0xC0)
+        for offset in (0xA8,0xAC):
+            target=source.rel(texture+offset)
+            out.set_rel(dst_texture+offset,text(target)) if target else out.put('i',dst_texture+offset,0)
+        for offset,size in [(0xB0,source.u32(texture+0x24)),(0xB4,source.u32(texture+0x2C))]:
+            if size:
+                out.set_rel(dst_texture+offset,block(source.rel(texture+offset),size,0x2000))
+            else:
+                out.put('i',dst_texture+offset,0)
+        out.put('II',dst_texture+0xB8,0,0)
+        copied[name]=dst_texture
+    for i,name in enumerate(texture_names):
+        out.set_rel(dst_textures+8*i+4,copied[name])
+    out.set_rel(0x24,append_dictionary(out,[(name,copied[name]) for name in unique]))
+    out.put('H',0x52,len(unique))
     animation=source.dict(source.rel(0x34))[0][1]
     dst_animation=block(animation,0x34)
     out.set_rel(dst_animation+4,append_string(out,identity))
@@ -326,7 +357,8 @@ def player_template(game):
     return files['Room44.bfres'], files['model1.sharcfb']
 
 
-def build(game, glb_path, identity, out):
+def build(game, glb_path, identity, out, kind='foam'):
+    require(kind in MATERIALS, 'unknown shoreline material')
     import collision_mesh
     with open(glb_path,'rb') as source:
         source_bytes=source.read(8*1024*1024+1)
@@ -338,16 +370,16 @@ def build(game, glb_path, identity, out):
         geometry, info, _ = collision_mesh.read_static(snapshot)
     require(isinstance(geometry, tuple), 'a shoreline model has one opaque material (the game supplies the foam)')
     template, shader = player_template(game)
-    result = build_bfres(template, geometry, identity)
+    result = build_bfres(template, geometry, identity, MATERIALS[kind])
     packed = base.yaz0_stored(base.sarc({identity+'.bfres':result,identity+'.sharcfb':shader}))
     digest = hashlib.sha256()
     for path in (__file__, collision_mesh.__file__, base.__file__, os.path.join(os.path.dirname(__file__),'actor_model.py'), os.path.join(os.path.dirname(__file__),'skinned_actor_model.py')):
         with open(path,'rb') as source:
             digest.update(source.read())
     digest.update(source_bytes)
-    for body in (identity.encode(), template, shader):
+    for body in (identity.encode(), kind.encode(), template, shader):
         digest.update(body)
-    info.update(identity=identity, cache_key=digest.hexdigest(), converter_version=VERSION, shoreline=True, archive_bytes=len(packed), archive_sha256=hashlib.sha256(packed).hexdigest())
+    info.update(identity=identity, cache_key=digest.hexdigest(), converter_version=VERSION, shoreline=True, shoreline_material=kind, archive_bytes=len(packed), archive_sha256=hashlib.sha256(packed).hexdigest())
     os.makedirs(os.path.dirname(os.path.abspath(out)),exist_ok=True)
     for path, body in [(out,packed),(out+'.json',(json.dumps(info,sort_keys=True)+'\n').encode())]:
         temporary = None

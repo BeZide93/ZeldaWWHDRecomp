@@ -27,6 +27,12 @@ struct ModelInfo {unsigned vertex_count=0,triangle_count=0,texture_width=0,textu
     unsigned material_count=0,cutout_count=0,double_sided_count=0;size_t texture_bytes=0;std::vector<Image> images;};
 inline uint32_t le32(const uint8_t* p){return uint32_t(p[0])|(uint32_t(p[1])<<8)|(uint32_t(p[2])<<16)|(uint32_t(p[3])<<24);}
 inline uint32_t be32(const uint8_t* p){return uint32_t(p[3])|(uint32_t(p[2])<<8)|(uint32_t(p[1])<<16)|(uint32_t(p[0])<<24);}
+// The collision material names a GLB may use (tools/story_mods/collision_mesh.py SEMANTICS; docs/world-objects.md).
+inline bool collision_material(const std::string& name){
+    for(const char* m:{"col_stone","col_grass","col_wood","col_sand","col_metal","col_wall","col_objects","col_climb","col_hookshot",
+                       "col_water","col_shallow","col_waterfall","col_ice","col_void"})if(name==m)return true;
+    return false;
+}
 inline bool integer(const mods::json::Value& v,size_t lo,size_t hi){return v.type==mods::json::Value::Number&&std::isfinite(v.number)&&v.number>=double(lo)&&v.number<=double(hi)&&std::floor(v.number)==v.number;}
 inline bool validate_glb_strict(std::span<const uint8_t> b,ModelInfo& info,std::string& why,bool collision=false){
     using mods::json::Value;info={};auto fail=[&](const std::string& s){why=s;return false;};
@@ -200,7 +206,7 @@ inline bool validate_glb(std::span<const uint8_t> b,ModelInfo& info,std::string&
     if(collision.empty()){
         if(!validate_glb_strict(b,info,why))return false;
         // collision from the visible triangles: each visible material's col_* name selects its surface
-        if(collision_requested){ModelInfo geometry;if(!validate_glb_strict(b,geometry,why,true)){info={};return false;}for(const auto& material:doc.get("materials").array){const auto name=material.get("name").string();if(name.starts_with("col_")&&name!="col_stone"&&name!="col_grass"&&name!="col_wood"&&name!="col_sand"&&name!="col_metal"&&name!="col_wall"&&name!="col_objects"&&name!="col_climb"&&name!="col_hookshot"){info={};return fail("unknown or unsupported collision material");}}}
+        if(collision_requested){ModelInfo geometry;if(!validate_glb_strict(b,geometry,why,true)){info={};return false;}for(const auto& material:doc.get("materials").array){const auto name=material.get("name").string();if(name.starts_with("col_")&&!collision_material(name)){info={};return fail("unknown or unsupported collision material");}}}
         return true;
     }
     if(render.size()!=1||used.size()!=meshes.array.size())return fail("one render mesh instance and no unused meshes required");
@@ -220,7 +226,7 @@ inline bool validate_glb(std::span<const uint8_t> b,ModelInfo& info,std::string&
     result.image_offset=result.images.front().offset;
     size_t vertices=0,triangles=0;std::array<float,3> low,high;low.fill(std::numeric_limits<float>::infinity());high.fill(-std::numeric_limits<float>::infinity());
     for(auto [ni,mi]:collision){const auto& mesh=meshes.array[mi];const auto& ps=mesh.get("primitives");if(mesh.get("weights").type!=Value::Null||ps.type!=Value::Array||ps.array.empty()||ps.array.size()>64)return fail("invalid collision mesh");
-        for(const auto& p:ps.array){const auto& material_index=p.get("material");if(!integer(material_index,0,materials.array.size()-1))return fail("collision material outside input");const auto name=materials.array[size_t(material_index.number)].get("name").string();if(name!="col_stone"&&name!="col_grass"&&name!="col_wood"&&name!="col_sand"&&name!="col_metal"&&name!="col_wall"&&name!="col_objects"&&name!="col_climb"&&name!="col_hookshot")return fail("unknown or unsupported collision material");
+        for(const auto& p:ps.array){const auto& material_index=p.get("material");if(!integer(material_index,0,materials.array.size()-1))return fail("collision material outside input");const auto name=materials.array[size_t(material_index.number)].get("name").string();if(!collision_material(name))return fail("unknown or unsupported collision material");
             auto one=mesh;one["primitives"].array={p};const auto geometry=packed(project(ni,one));ModelInfo part;if(!validate_glb_strict(geometry,part,why,true))return false;vertices+=part.vertex_count;triangles+=part.triangle_count;if(vertices>4096||triangles>4096)return fail("collision exceeds vertex/triangle limits");for(size_t k=0;k<3;++k){low[k]=std::min(low[k],part.minimum[k]);high[k]=std::max(high[k],part.maximum[k]);}}
     }
     for(size_t k=0;k<3;++k)if(double(high[k])-low[k]>20000)return fail("collision extent exceeds 20000 game units");info=result;return true;
