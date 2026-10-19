@@ -21,6 +21,11 @@ using story_enemy_ownership::Descriptor;
 using story_enemy_ownership::Kind;
 using story_native_code_identity::CANONICAL_CODE_ID;
 
+// The private profile ids of the kinds added from the Kargaroc on, in one place: from 0x7FDF downward
+// (the reserved range reaches down to 0x7FD0). Earlier rows keep the ids written in their rows.
+inline constexpr uint16_t kKargarocProfile = 0x7FDF, kWizzrobeProfile = 0x7FDE, kWarshipProfile = 0x7FDD,
+                          kGyorgProfile = 0x7FDC, kFloormasterProfile = 0x7FDB, kBigOctoProfile = 0x7FDA;
+
 struct Native {
     Kind kind;
     const char* name;           // the manifest's actor
@@ -278,6 +283,6 @@ inline constexpr uint16_t home_z(Kind k) {
         if (n.kind == k) return n.home_z;
     return 0;
 }
-// the private profile ids of this table (0x7FE0..0x7FE7)
-inline constexpr bool reserved(uint16_t profile) { return profile >= 0x7FE0 && profile <= 0x7FE7; }
+// the private profile ids of this table (0x7FD0..0x7FE7)
+inline constexpr bool reserved(uint16_t profile) { return profile >= 0x7FD0 && profile <= 0x7FE7; }
 }  // namespace story_enemies_more

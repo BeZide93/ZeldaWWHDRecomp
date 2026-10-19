@@ -13,7 +13,7 @@ struct Listener {std::string name;BeforeDelete callback=nullptr;};
 std::array<Listener,8> listeners{};
 void(*original)(Cpu*,uint32_t)=nullptr;uint32_t(*invoke)(Cpu*,uint32_t,std::initializer_list<uint32_t>)=nullptr;bool installed=false;
 bool tracing(){const char*v=std::getenv("WWHD_MOD_ACTOR_HEAPS");return v&&std::strcmp(v,"1")==0;}
-bool reserved(uint32_t id){return id>=0x7FE0&&id<=0x7FFE;}
+bool reserved(uint32_t id){return id>=0x7FD0&&id<=0x7FFE;}
 const Entry* entry(uint32_t id){for(const auto&e:entries)if(e.address&&id==e.id)return &e;return nullptr;}
 uint32_t free(Cpu*c,uint32_t heap){return guest_heap::free_size(c,heap,invoke);}
 using Heaps=std::array<std::pair<uint32_t,uint32_t>,4>;
