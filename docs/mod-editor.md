@@ -68,7 +68,7 @@ first).
 | --- | --- |
 | **Toolbar** | the open mod, **New mod…**, Undo, Redo, Check, Save…, Revert…, **Add**, Move / Turn, grid and angle snapping, **Play**, Play from Link, Restore at Stop, Test mode, which panels show (also **Quests**, **Scenes**, **Flags** and **Search**), and **Reset layout** |
 | **Outliner** | the open mod's actors, models, scenes and quests, its letters, charts and items (**Story**), and the warp destinations |
-| **Inspector** | the selected actor: place, properties, dialogue and actions |
+| **Inspector** | the selected actor: place, properties, its route, dialogue and actions |
 | **Problems & export** | the check's problem list, and the export |
 | **Camera & test** | reload the room, test mode, test states |
 | **Status bar** | the stage and room, the camera's position and speed, Link's position, the last result, and the quest step the game is at ("Lighthouse quest: step 3 of 6") |
@@ -158,6 +158,36 @@ again. A placed game object appears in the game at once. In the Inspector you ch
 the table: table, stool, or a stool Link walks through), its **Turn** and, where the object allows
 it, its **Scale**. Each change makes the object again in its place (one undo step). A game object
 has no flags, drops or dialogue.
+
+### Routes: actors that walk
+
+A resident that walks (the old man on the bench `uo1`, the man from the bar `uo2`, the well-dressed man
+`uo3`, the windmill keeper `um1` or the young man `um2`) and an actor with one of your skinned models can
+walk a route. Select it; the Inspector's **Route** section has:
+
+- **Add point at Link** and **Add point at camera**: a new point on the ground there (after the selected
+  point, or at the end). A resident starts where it stands, so its position is the route's start; to move
+  the start, move the resident.
+- The points, numbered as the picture shows them. Click one to select it: its handle in the picture moves
+  it (letting go is one change). **Up**, **Down** and **Remove** change the order or take a point out;
+  every change is one Undo step.
+- **Speed** in game units per second. A resident walks at its own pace unless you set one (from half to
+  twice its own pace). **Mode**: once (it stops at the end), loop (back to the start and round again) or
+  back and forth. **Strolling pauses**: now and then it stands for a moment, as the game's own walkers do.
+- For your models: the **Walk** and **Idle** clips and **Look at Link** (it turns its head bone to Link).
+  A resident walks with its own walk and stands with its own idle; it stops and looks at Link when he is
+  close in front of it, turns on the spot at corners and talks as usual, so its **Look at Link** is
+  always on.
+
+In the picture the selected actor's route shows as a green line with numbered points. The editor checks
+the ground under every segment with the game's collision: a segment over no ground, a drop or a step too
+high (a wall) is drawn red, and the Inspector says where. A walking resident's state in the game shows
+under its route: walking, skipped a blocked point, stopped (blocked, or it left the ground of its route)
+or finished. Route changes go to the game at once: the actor keeps walking, on the new route. Adding the
+first point or removing the route creates a resident again in its room.
+
+Residents that have no walking animation of their own (the women on the steps and the pier, the young
+women, the sailors) and the seated villager can't walk a route; the Inspector says so.
 
 ### What shows at once, and what after a restart
 
@@ -580,6 +610,15 @@ separated by `;`, or `@file` with one such line per row. Results go to the log.
 | `set_actor` | `id`, `property`, `value`, `mod`? | set one actor property (`null` removes it); `when` may name `quest` and `step`, `quests` (`[{quest, step}]`, all must hold), `item`, `time`, `flag` and `not_flag` (a flag id); `talks` is up to eight `{when, lines, then}`, the first that matches is said (one without `when` last; not together with `lines` or `then`) |
 | `move_actor`, `rotate_actor`, `scale_actor` | `id`, `position` / `rotation` / `scale`, `mod`? | `{x, y, z}` |
 | `set_dialogue` | `id`, `lines`, `mod`? | one to three lines |
+| `add_route_point` | `id`, `at`? (`link`, `camera`, `position`), `position`?, `after`?, `snap`?, `mod`? | add a point to an actor's route (the first starts the route); `after` is the point it follows (0: first) |
+| `move_route_point` | `id`, `point`, `position` or `at` (`link`, `camera`), `snap`?, `mod`? | move one route point (numbered from 1) |
+| `remove_route_point` | `id`, `point`, `mod`? | take one point out (the route goes when too few are left) |
+| `reorder_route_point` | `id`, `point`, `to`, `mod`? | give a route point another place in the order |
+| `set_route` | `id`, `speed`?, `mode`? (`once`, `loop`, `back_and_forth`), `pauses`?, `walk`?, `idle`?, `mod`? | route settings; a resident's `speed` `null` is its own pace; `walk` and `idle` are a model's clips |
+| `remove_route` | `id`, `mod`? | the actor stands where it is placed |
+| `check_route` | `id`, `mod`? | the ground under each segment: no ground, a drop or a step too high marks it |
+| `route_status` | `id`, `mod`? | a walking resident in the game: walking, skipped a blocked point, stopped or finished |
+| `model_clips` | `model`, `mod`? | a model's animation clips |
 | `set_then` | `id`, `actions`, `mod`? | what happens after the dialogue (an empty list removes it): `give`, `take`, `quest_step`, `quest_done` (finishes a quest), `flag`, `scene`; `{"action": "give", "id": "chart:<id>"}` gives one of the mod's charts |
 | `set_drops` | `id`, `drops`, `mod`? | what a prop or enemy drops |
 | `preview_dialogue` | `id`?, `lines`?, `close`?, `mod`? | show lines in the game's message box (or hide it) |

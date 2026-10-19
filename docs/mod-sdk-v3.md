@@ -36,15 +36,15 @@ The initial allowlist is deliberately small:
 | Native enemies (preview) | `chuchu`, `bokoblin`, `moblin`, `keese`, `miniblin` | Required mod-owned `defeated_flag` and `drops`; fixed ordinary variants |
 
 Resident names are exact native object codes in lower case. Each placed copy uses fixed ordinary
-parameters: it stands where you put it (no native walking route) and has none of the character's
-quest or story variants.
+parameters: it stands where you put it (unless you give it a route, below) and has none of the
+character's quest or story variants.
 
 | Code | Who it looks like | Notes |
 | --- | --- | --- |
 | `uo2` | The man from the Windfall bar | |
 | `um1` | The windmill keeper | |
 | `uo1` | The old man on the sea-view bench | |
-| `uo3` | The well-dressed man walking through town | A placed copy stands still |
+| `uo3` | The well-dressed man walking through town | A placed copy stands still unless it has a route |
 | `ub1`, `ub2` | The two women chatting on the steps | Each is placed on its own |
 | `ub3` | The woman on the harbour pier | |
 | `ub4` | The woman by the town gate | Not in the photo studio (`Ocmera`) |
@@ -73,6 +73,46 @@ save flags. Author the seated character's height and location; this adapter does
 not ground-correct, walk, or support scene `move`/`face`. Its narrow native
 relocation area near x=-202066, z=320123 is rejected. Camera following and dialogue
 remain available. Other Ym1/Ym2 staff variants are unsupported.
+
+### Residents walking a route
+
+A placed resident with a walking animation of its own can walk a route with the game's own walking:
+`uo1`, `uo2`, `uo3`, `um1` and `um2`. It starts at its `position` and walks to the route's points:
+
+```json
+{
+  "id": "baker", "actor": "resident", "parameters": {"resident": "um1"},
+  "stage": "sea", "room": 11, "position": {"x": 600, "y": 95, "z": -199000},
+  "lines": ["Fresh bread at the market!"],
+  "path": {
+    "points": [{"x": 820, "y": 95, "z": -199100}, {"x": 700, "y": 95, "z": -199250}],
+    "mode": "loop", "speed": 70, "pauses": true
+  }
+}
+```
+
+| Field | |
+| --- | --- |
+| `points` | 1 to 15 points after the position; each more than one unit (across) from the one before |
+| `mode` | `once` (default: it walks to the last point and stands there), `loop` (back to its position and round again) or `back_and_forth` (it turns at each end) |
+| `speed` | game units per second, from half to twice the character's own pace; without it, its own pace (`uo1`, `uo2` 30, `uo3` 60, `um1` 63, `um2` 72) |
+| `pauses` | `true`: after walking for some seconds it stands for a moment, in the character's own rhythm as the game's walkers do; default `false` |
+
+It walks as the game's own walkers do: with its own walk and idle, turning on the spot at corners,
+following the ground, stopping to look at Link when he is close in front of it (and walking on when he
+leaves), and talking as usual (your lines). `uo2` still startles at a roll or a loud noise nearby. It has
+no ledge check of its own, so the port watches it: when it makes no progress for about a second and a half
+(a wall), it goes on to its next point; after three such skips in a row it stops. When it drops far below
+its route (an edge), it is put back where it last stood on its route and stops. Check the route in the
+world editor: segments over no ground, a drop or a step too high are drawn red.
+
+A route walks in the room where the resident is placed; when the room loads again, it starts again at
+its position (a `once` route too). Full save states keep where it is on its route. At most 32 residents
+of all enabled mods have a route.
+
+The other villagers have no walking animation of their own and are refused with
+"this villager has no walking animation of its own"; the seated `ym1` does not walk. Each placed resident
+may have a route or none; `um3`, `sa5`, `ug1` and `ug2` stay unplaceable (see above).
 
 Other actor names and unsafe parameters are validator errors. Only ordinary chest
 raw `params: 0` is accepted at present. The port owns the remaining chest/sign
@@ -668,7 +708,10 @@ that chain. Look-at actors must remain upright: X/Z rotation is zero modulo
 The angle limits constrain the local joint pose, not exact world-space targeting
 under arbitrary animated ancestor roll. Paths have 2–16
 points, speed greater than zero and at most 1500 game units/second, and mode
-`"once"` or `"loop"`. Adjacent points, including a loop's closing edge, need more
+`"once"`, `"loop"` or `"back_and_forth"` (it walks back to the first point and out again).
+`"pauses": true` makes it stand for a moment now and then (it walks for about 7 to 10 seconds,
+stands for 2 to 3, with its idle clip). `"walk"` and `"idle"` name the clips it walks and stands
+with (default `walk` and `idle`; both must be in the model). Adjacent points, including a loop's closing edge, need more
 than one game unit of horizontal separation. Native ground and collision checks
 can refuse movement; the path advances from accepted positions. Actors stop at
 Link's capsule rather than walking through it. Path-driven body facing turns
