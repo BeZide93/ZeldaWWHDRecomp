@@ -404,7 +404,7 @@ bool check_specs(const std::string& mod,const std::vector<ManifestActor>& actors
     for(const auto&old:g_actors)if(!replacing||old.mod!=mod){++logical;count_visual(old.spec);}for(const auto&a:actors)count_visual(a);
     if(logical+visual>128)return why="actors and distant/shoreline variants exceed 128 declarations",false;
     if(*std::max_element(views.begin(),views.end())>16)return why="distant/shoreline variants exceed 16 active views in a sea square",false;
-    for(const auto& a:actors){story_enemies::Kind kind;if(!a.variant.empty()&&!enemy_kind(a,kind))return why="only native enemies have variants",false;}
+    for(const auto& a:actors){story_enemies::Kind kind;if(!a.variant.empty()&&!enemy_kind(a,kind)&&!a.game_object())return why="only native enemies and game objects have variants",false;}
     for(const auto& a:actors)if(a.actor=="resident"&&(a.resident>255||!story_resident_types::supported(uint8_t(a.resident))))return why="unsupported resident subtype",false;
     for(const auto& a:actors)if(a.actor=="resident")if(const char* no=story_resident_types::place_problem(uint8_t(a.resident),a.stage,a.position.x,a.position.z))return why=no,false;
     for(const auto&a:actors)if(a.kind=="mod"){
