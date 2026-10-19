@@ -1208,6 +1208,55 @@ end rewards. Stop reasons are 0 Finished, 1 Skipped, 2 Aborted, 3 StateLoaded,
 the actual lease exit reason. A data-only scene without
 a registered hook must not declare music steps.
 
+### Demo steps (preview)
+
+A `demo` step plays keyframe tracks through the game's own cutscene system, the
+one its story cutscenes use. The port turns the tracks into the game's demo data
+when the step starts. The data never comes from a package file. The game then plays
+the demo and ends it.
+
+```json
+{"type": "demo", "frames": 240, "origin": "link",
+ "camera": {"eye": {"keys": [{"frame": 0, "value": {"x": 0, "y": 700, "z": -1200}}]},
+            "target": {"curve": "linear", "keys": [{"frame": 0, "value": {"x": -2500, "y": 1800, "z": 3000}},
+                                                   {"frame": 240, "value": {"x": 2500, "y": 900, "z": 3000}}]},
+            "fovy": {"keys": [{"frame": 0, "value": 55}]}},
+ "actors": [{"id": "bird", "model": {"archive": "Dk", "file": "dk.bdl"},
+             "position": {"curve": "linear", "keys": [{"frame": 0, "value": {"x": -2500, "y": 1800, "z": 3000}},
+                                                      {"frame": 240, "value": {"x": 2500, "y": 900, "z": 3000}}]},
+             "rotation": {"keys": [{"frame": 0, "value": {"x": 0, "y": 90, "z": 0}}]},
+             "clips": [{"frame": 0, "archive": "Dk", "file": "fly1.bck"}]}],
+ "sounds": [{"frame": 20, "id": 22820, "actor": "bird"}]}
+```
+
+- **Frames and timing.** `frames` (1–9000) is the demo's length in the game's 30 Hz cutscene frames. Every key, clip, sound and particle has a `frame` inside it.
+- **Origin.** `"origin": "link"` makes every position relative to where Link stands when the step starts. An `{x,y,z}` origin uses that point instead, and `angle` turns the whole demo around the vertical axis. Without an origin, positions are world positions.
+- **Tracks.** A track is `{"curve": ..., "keys": [{"frame": n, "value": ...}]}` with 1–64 keys in increasing frame order. A value is `{x,y,z}`, or a number for `fovy` (5–120) and `roll` (degrees).
+  - `curve` is `linear` (the default), `smooth` (passes through every key), `bspline` (rounder, does not pass through inner keys) or `step` (jumps at each key).
+  - After its last key, a track holds its final value.
+- **Camera.** `eye` and `target` come together. `fovy` and `roll` are optional. Without a camera track, the camera keeps its gameplay view.
+- **Actors.** An actor names one of three things:
+  - a game actor by its stage name, with `"actor": "Ls1"`, for example. The actor must be in the room when the step starts; otherwise the step fails with a reason in the log and the scene ends cleanly.
+  - Link, with `"actor": "Link"`.
+  - a model from the player's game, with `"model": {"archive", "file"}`.
+- **Actor tracks.** Every actor can have `position`, `rotation` (degrees) and `scale` tracks.
+- **Clips.** `clips` play a `.bck` from any archive at `speed` (default 1). The game's actors only follow demo tracks where their own code supports cutscenes; story characters do, villagers and enemies don't yet.
+- **Link.** Link takes demo `modes` instead of clips:
+  - `{"frame": 0, "mode": 2}` makes him walk along his position track.
+  - `"mode": 512` with `"data"` (hex) plays one of his cutscene clips, the way the game's own cutscenes do.
+- **Archives.** Archive and file names refer to the player's own game. The port looks up their ids and loads the archives before the demo starts. Game demo archive names that the game treats specially are refused: Demo04, Demo08, Demo29, Demo37, Demo45 and Demo46.
+- **Sounds.** `sounds` play a game sound id at a `position` or following an actor, with `volume` and `pan` (0–1).
+- **Particles.** `particles` start a game particle id at a `position`, or on an actor, optionally on one of its joints (`joint`).
+- **Skip and save states.**
+  - Plus skips the scene; the demo stops where it is.
+  - Loading a state saved during a demo ends the demo and gives control back. It is never resumed.
+
+The step's deadline is its length plus a margin. A demo that the game does not
+start within a few seconds fails the scene instead of keeping control.
+`messages` (`{"frame", "text"}`, at least two frames before the end) are accepted,
+but in this preview the text does not appear yet. The demo then waits at the
+message point until the step's deadline ends the scene.
+
 
 ## Native particles (preview)
 

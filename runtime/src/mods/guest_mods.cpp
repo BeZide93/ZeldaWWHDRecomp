@@ -19,6 +19,7 @@
 #include "story_native_canonical_code_id.h"
 #include "../exception_report.h"
 #include "guest_mods.h"
+#include "story_demo.h"
 #include "../model_probe.h"
 #include "story_native_refresh_dispatch_audit.h"
 #include "story_native_manager_cancel_dispatch_audit.h"
@@ -1331,6 +1332,8 @@ void init() {
     }
     story_scenes::set_game_calls([](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);});
     if(g_world_scenes)story_scenes::set_scratch_memory(mem::runtime_alloc(story_scenes::kScratchBytes,16));
+    // Mod demos (story_demo.h): their guest record and data, only when a declared scene has a demo step.
+    if(g_world_scenes&&story_scenes::has_demo_steps())story_demo::configure(mem::runtime_alloc(story_demo::kArenaBytes,32),[](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);},call_original);
     story_scenes::set_callbacks(story_actors::actor_address,story_actors::actions);
     story_scenes::set_particle_resolver(story_actors::particle_position);
     story_scenes::set_place_resolver([](Cpu*,const std::string& mod,const std::string& quest)->std::optional<story_notebook::WorldPoint>{
@@ -1586,6 +1589,7 @@ void logic_service(Cpu* c) {
     }
     story_item_models::tick(c);mod_actor::heap_sample(c);actor_sweep(c);story_scenes::tick(c,false,2);story_actors::service(c);
     story_native_wait_runtime::logic(c);
+    if(story_demo::configured())story_demo::tick(c);
 }
 void service(Cpu* c) { story_lyt_screen::service(c); }
 void state_loaded() {

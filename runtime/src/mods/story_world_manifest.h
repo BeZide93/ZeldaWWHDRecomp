@@ -19,6 +19,7 @@
 #include "story_enemy_variants.h"
 #include "story_game_objects_catalogue.h"
 #include "story_game_pieces_catalogue.h"
+#include "demo_scene.h"
 namespace story_notebook {
 struct WorldPoint { float x=0,y=0,z=0; bool operator==(const WorldPoint&)const=default; };
 struct StoryAction {
@@ -93,7 +94,7 @@ inline bool condition_matches(const Condition&c,Quest quest,Item item,Flag flag,
 struct SceneCameraKey {WorldPoint eye,target;unsigned frames=0;bool operator==(const SceneCameraKey&)const=default;};
 struct SceneChoiceOption {std::string text,next;size_t next_step=0;bool operator==(const SceneChoiceOption&)const=default;};
 struct SceneStep {
-    enum class Kind { Camera,Say,Move,Face,Wait,Sound,Fade,End,CameraPath,CameraFollow,Animation,Walk,Choice,Music,Particle };
+    enum class Kind { Camera,Say,Move,Face,Wait,Sound,Fade,End,CameraPath,CameraFollow,Animation,Walk,Choice,Music,Particle,Demo };
     Kind kind=Kind::Wait; std::string actor,target_actor,text,sound;
     std::string id,next,clip,quest_place,cue,music_action,particle,easing="linear";
     std::vector<size_t> successors;std::vector<SceneCameraKey> camera_keys;
@@ -101,6 +102,7 @@ struct SceneStep {
     std::vector<WorldPoint> walk_points;std::vector<SceneChoiceOption> choices;unsigned default_choice=0,fade_frames=0;
     WorldPoint eye,target,position,eye_to,target_to; unsigned frames=0,particle_alpha=255; float particle_scale=1; bool pan=false,fade_in=false,particle_has_position=false;
     std::vector<StoryAction> then;
+    std::optional<demo_scene::Demo> demo;  // Kind::Demo: tracks played by the game's demo system (demo_scene.h)
     bool operator==(const SceneStep&)const=default;
 };
 struct ManifestScene {
@@ -714,6 +716,7 @@ inline bool parse_scenes_impl(const mods::json::Value& m,std::vector<ManifestSce
             else if(type=="choice")step_keys=keys(fields,{"type","text","options","default","frames","seconds"});
             else if(type=="music")step_keys=keys(fields,{"type","cue","action","fade_frames"});
             else if(type=="particle")step_keys=keys(fields,{"type","effect","actor","position","scale","alpha"});
+            else if(type=="demo")step_keys=true;  // demo_scene::parse checks its own fields
             if(!step_keys)return why="unknown scene step or field",false;
             if(type=="camera"){p.kind=SceneStep::Kind::Camera;timed=true;if(!point(st.get("eye"),p.eye))return why="camera needs an eye",false;if(st.get("target_actor").type!=Value::Null){p.target_actor=st.get("target_actor").string();if(!character(m,p.target_actor))return why="unknown camera character",false;}else if(!point(st.get("target"),p.target))return why="camera needs a target",false;if(st.get("pan").type!=Value::Null){if(st.get("pan").type!=Value::Bool)return why="pan must be boolean",false;p.pan=st.get("pan").boolean;if(p.pan&&(!point(st.get("eye_to"),p.eye_to)||!point(st.get("target_to"),p.target_to)))return why="pan needs eye_to and target_to",false;}}
             else if(type=="say"){p.kind=SceneStep::Kind::Say;timed=true;p.actor=st.get("actor").string();if(!character(m,p.actor)||!lines(st.get("text"),p.text))return why="say needs a known character and text",false;}
@@ -765,6 +768,13 @@ inline bool parse_scenes_impl(const mods::json::Value& m,std::vector<ManifestSce
                 else p.particle_has_position=true;
                 if(st.object.contains("scale")&&!number(st.get("scale"),0.1,4,p.particle_scale))return why="particle scale must be 0.1..4",false;
                 if(st.object.contains("alpha")){if(!integer(st.get("alpha"),0,255))return why="particle alpha must be 0..255",false;p.particle_alpha=unsigned(st.get("alpha").number);}
+            }
+            else if(type=="demo"){
+                p.kind=SceneStep::Kind::Demo;demo_scene::Demo demo;
+                if(!demo_scene::parse(fields,demo,why))return why="demo step: "+why,false;
+                // the step's deadline: the demo (30 Hz frames, scene units are 60 Hz) plus reading time for each message
+                p.frames=std::min<unsigned>(kMaxSceneFrames,demo.frames*2+120+unsigned(demo.messages.size())*1200);
+                p.demo=std::move(demo);
             }
             else return why="unknown scene step",false;
             if(timed&&!scene_duration(st,p.frames,why))return false;

@@ -2310,6 +2310,16 @@ add_executable(story_native_camera_image_test runtime/tools/story_native_camera_
 target_include_directories(story_native_camera_image_test PRIVATE runtime/src)
 target_compile_options(story_native_camera_image_test PRIVATE -UNDEBUG)
 add_test(NAME story_native_camera_image_contract COMMAND story_native_camera_image_test)
+# Mod demos (story_demo.h): JStudio STB writer/parser, demo step compiler and its event image.
+# WWHD_TEST_RETAIL_STB_DIR (a folder of STBs from the player's own game) adds the retail round trip.
+add_executable(demo_stb_test runtime/tools/demo_stb_test.cpp runtime/src/mods/demo_stb.cpp)
+target_include_directories(demo_stb_test PRIVATE runtime/src)
+target_compile_options(demo_stb_test PRIVATE -UNDEBUG)
+add_test(NAME demo_stb_contract COMMAND demo_stb_test)
+add_executable(demo_scene_test runtime/tools/demo_scene_test.cpp runtime/src/mods/demo_scene.cpp runtime/src/mods/demo_stb.cpp runtime/src/mods/demo_event_image.cpp)
+target_include_directories(demo_scene_test PRIVATE runtime/src runtime/src/mods)
+target_compile_options(demo_scene_test PRIVATE -UNDEBUG)
+add_test(NAME demo_scene_contract COMMAND demo_scene_test)
 
 # Typed camera transition guard; no image release or native writes.
 add_executable(story_native_camera_guard_test runtime/tools/story_native_camera_guard_test.cpp runtime/src/mods/story_native_camera_guard.cpp)
@@ -3096,7 +3106,7 @@ target_link_libraries(story_native_wait_saved_rebind_test PRIVATE Threads::Threa
 add_test(NAME story_native_wait_saved_rebind_contract COMMAND story_native_wait_saved_rebind_test)
 
 # Native frontend shares the actual StoryScenes FIFO but never bypasses its fallback.
-set(STORY_NATIVE_PLAYBACK_DEPS runtime/src/mods/story_native_scene_retire.cpp runtime/src/mods/story_native_scene_checkpoint_data.cpp runtime/src/mods/story_native_scene_checkpoint.cpp runtime/src/mods/story_native_scene_playback.cpp runtime/src/mods/story_native_scene_run_owner.cpp runtime/src/mods/story_native_scene_coverage.cpp runtime/src/mods/story_native_scene_completion.cpp)
+set(STORY_NATIVE_PLAYBACK_DEPS runtime/src/mods/story_native_scene_retire.cpp runtime/src/mods/story_native_scene_checkpoint_data.cpp runtime/src/mods/story_native_scene_checkpoint.cpp runtime/src/mods/story_native_scene_playback.cpp runtime/src/mods/story_native_scene_run_owner.cpp runtime/src/mods/story_native_scene_coverage.cpp runtime/src/mods/story_native_scene_completion.cpp runtime/src/mods/story_demo.cpp runtime/src/mods/demo_scene.cpp runtime/src/mods/demo_stb.cpp runtime/src/mods/demo_event_image.cpp)
 get_property(STORY_NATIVE_SCENE_LINK_TARGETS DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
 foreach(STORY_NATIVE_SCENE_LINK_TARGET IN LISTS STORY_NATIVE_SCENE_LINK_TARGETS)
  get_target_property(STORY_NATIVE_SCENE_LINK_SOURCES ${STORY_NATIVE_SCENE_LINK_TARGET} SOURCES)

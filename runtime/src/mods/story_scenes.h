@@ -26,6 +26,7 @@ void set_place_resolver(ResolvePlace);
 void set_particle_resolver(ResolveParticle);
 using Actions = std::function<bool(const std::string&,const std::vector<story_notebook::StoryAction>&)>;
 void set_game_calls(uint32_t (*call)(Cpu*,uint32_t,std::initializer_list<uint32_t>));
+bool has_demo_steps();  // a declared scene has a "demo" step (story_demo.h installs only then)
 void set_scratch_memory(uint32_t guest);
 void set_callbacks(Resolve resolve, Actions actions);
 // False with a precise reason when a scene uses a currently unsupported effect.
