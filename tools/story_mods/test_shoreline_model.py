@@ -137,21 +137,28 @@ class ShorelineTests(unittest.TestCase):
     @unittest.skipUnless(__import__('os').environ.get('WWHD_GAME_DIR'), 'set WWHD_GAME_DIR to read the templates from a game folder')
     def test_both_templates_from_the_players_game(self):
         import os
-        tpl, _ = coast.player_template(os.environ['WWHD_GAME_DIR'])
         pts = [(x * 100.0, 5.0, z * 100.0) for z in range(3) for x in range(3)]
         idx = [0, 3, 1, 1, 3, 4, 1, 4, 2, 2, 4, 5, 3, 6, 4, 4, 6, 7, 4, 7, 5, 5, 7, 8]
         geometry = (pts, [(0, 1, 0)] * 9, [(p[0] / 100, p[2] / 100) for p in pts], idx, b'')
-        for kind, ntex in (('foam', 1), ('water', 2)):
+        # foam: Outset's coast (one texture, normals); water: the spring pool's surface (three textures, no normals)
+        for kind, ntex in (('foam', 1), ('water', 3)):
+            tpl, _ = coast.player_template(os.environ['WWHD_GAME_DIR'], kind)
             data = coast.build_bfres(tpl, geometry, 'mod_' + kind, coast.MATERIALS[kind])
             f = coast.base.Bfres(data)
             self.assertEqual(f.u16(0x52), ntex)
             self.assertEqual(f.dict(f.rel(0x34))[0][0], 'mod_' + kind)
             self.assertLess(len(data), 1024 * 1024)
+            model = f.dict(f.rel(0x20))[0][1]
+            vertex = f.rel(f.dict(f.rel(model + 0x14))[0][1] + 0x20)
+            buffer = f.rel(vertex + 0x18)
+            stride, start = f.u16(buffer + 0xC), f.rel(buffer + 0x14)
+            alphas = [struct.unpack_from('>f', data, start + i * stride + 12)[0] for i in range(9)]
+            self.assertEqual(alphas, [0, 0, 0, 0, 1, 0, 0, 0, 0] if kind == 'water' else [1] * 9)
 
     def test_missing_or_unsupported_player_template_refused(self):
         source,_,animation=template()
         f=coast.base.Bfres(source)
-        f.put('I',animation+0x10,102)
+        f.put('I',animation+0x10,1001)
         with self.assertRaises(actor_model.BuildError):
             coast.build_bfres(bytes(f.b),self.geometry(),'mod_coast')
         with self.assertRaises(actor_model.BuildError):

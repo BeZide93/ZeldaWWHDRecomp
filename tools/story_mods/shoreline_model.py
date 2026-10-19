@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Player-local coast material and animation on original mod geometry.
 
-Two materials of the same island (Outset's water model) serve as templates: "foam", the animated coast foam, and
-"water", the island's still-water surface with its moving ripples. A water surface fades out towards its open edges
-(vertex alpha 0 on the mesh's boundary, 1 inside), as the island's own water does.
+Two island materials serve as templates: "foam", Outset's animated coast foam, and "water", the spring pool's
+surface of Mother & Child Isles with its moving ripples (a pond standing above the sea). A water surface fades out
+towards its open edges (vertex alpha 0 on the mesh's boundary, 1 inside), as the island's own water does.
 
 No game data is shipped: the native material, textures and animation are read
 from the player's installation and the output stays in their model cache.
@@ -19,9 +19,12 @@ import tempfile
 import notebook_model as base
 from skinned_actor_model import append_dictionary, append_string
 
-VERSION = 2
-MATERIALS = {'foam': 'SC_01_mizu_v_x', 'water': 'SC_01_mizuB_v_x'}
+VERSION = 3
+MATERIALS = {'foam': 'SC_01_mizu_v_x', 'water': 'Txe_water_v_3_'}
 MATERIAL = MATERIALS['foam']
+# the room archive whose water model (model1) holds each template material
+TEMPLATE_ROOMS = {'foam': 44, 'water': 9}
+PACKS = ('first_szs_permanent.pack', 'szs_permanent0.pack', 'szs_permanent1.pack', 'szs_permanent2.pack')
 
 
 def require(ok, message):
@@ -70,7 +73,18 @@ def build_bfres(template, geometry, identity, material_name=MATERIAL):
     vertex = f.rel(shape + 0x20)
     attrs = f.rel(vertex + 0x10)
     layout = {f.cstr(f.rel(attrs + i*12)): (f.b[attrs+i*12+4], f.u16(attrs+i*12+6), f.u32(attrs+i*12+8)) for i in range(f.b[vertex+4])}
-    require(layout == {'_p0': (0,16,0x811), '_n0': (0,32,0x811), '_c0': (0,0,0x813), '_u0': (0,48,0x80D)} and f.b[vertex+5] == 1, 'unsupported player coast vertex layout')
+    # one interleaved buffer: colour (4 floats), position, an optional normal (3 floats each), texture coordinates
+    stride = f.u16(f.rel(vertex + 0x18) + 0xC) if f.rel(vertex + 0x18) else 0
+    want = {'_p0': 0x811, '_c0': 0x813, '_u0': 0x80D}
+    if '_n0' in layout:
+        want['_n0'] = 0x811
+    sizes = {0x811: 12, 0x813: 16, 0x80D: 8}
+    require(set(layout) == set(want) and all(layout[k][0] == 0 and layout[k][2] == want[k] for k in want) and f.b[vertex+5] == 1,
+            'unsupported player coast vertex layout')
+    extent = max(layout[k][1] + sizes[want[k]] for k in want)
+    if not (extent <= stride <= 64 and stride % 4 == 0):  # the template's own stride, else the records' extent
+        stride = -(-extent // 16) * 16
+    require(stride <= 64, 'unsupported player coast vertex layout')
     positions, normals, uv, indices, _ = geometry
     require(0 < len(indices)//3 <= 1024, 'coast must have 1..1024 triangles')
     require(len(positions) == len(normals) == len(uv), 'coast attribute counts differ')
@@ -90,10 +104,19 @@ def build_bfres(template, geometry, identity, material_name=MATERIAL):
     f.put('I', vertex + 8, len(positions))
     f.b[vertex + 0xC] = 0
     alpha = edge_alpha(positions, indices) if material_name == MATERIALS['water'] else [1.0] * len(positions)
-    vertex_bytes = b''.join(struct.pack('>4f3f4x3f4x2f8x', 1,1,1,a, *p, *n, *t) for p,n,t,a in zip(positions,normals,uv,alpha))
+    records = []
+    for p, n, t, a in zip(positions, normals, uv, alpha):
+        r = bytearray(stride)
+        struct.pack_into('>4f', r, layout['_c0'][1], 1, 1, 1, a)
+        struct.pack_into('>3f', r, layout['_p0'][1], *p)
+        if '_n0' in layout:
+            struct.pack_into('>3f', r, layout['_n0'][1], *n)
+        struct.pack_into('>2f', r, layout['_u0'][1], *t)
+        records.append(bytes(r))
+    vertex_bytes = b''.join(records)
     buffer = f.rel(vertex + 0x18)
     f.put('I', buffer + 4, len(vertex_bytes))
-    f.put('H', buffer + 0xC, 64)
+    f.put('H', buffer + 0xC, stride)
     f.set_rel(buffer + 0x14, f.append(vertex_bytes, 0x1000))
     f.put('HHHH', shape + 0xC, 0, material_index, 0, 0)
     f.put('H', shape + 0x14, 0)
@@ -133,7 +156,7 @@ def build_bfres(template, geometry, identity, material_name=MATERIAL):
     animation_entries = f.dict(f.rel(0x34))
     require(len(animation_entries) == 1 and animation_entries[0][0] == 'model1', 'player coast animation unavailable')
     animation = animation_entries[0][1]
-    require(f.b[animation:animation+4] == b'FSHU' and f.u32(animation + 0x10) == 101, 'unsupported player coast animation')
+    require(f.b[animation:animation+4] == b'FSHU' and 1 < f.u32(animation + 0x10) <= 1000, 'unsupported player coast animation')
     animation_dictionary, _ = single_dictionary(f, identity, animation)
     f.set_rel(0x34, animation_dictionary)
     f.set_rel(animation + 4, name_at)
@@ -200,9 +223,10 @@ def compact(data, identity, material_name=MATERIAL):
     vertex = source.rel(shape+0x20)
     dst_vertex = block(vertex,0x20)
     attributes = source.rel(vertex+0x10)
-    dst_attributes = block(attributes,48)
+    nattr = source.b[vertex+4]
+    dst_attributes = block(attributes,12*nattr)
     attr_entries = []
-    for i in range(4):
+    for i in range(nattr):
         name = source.cstr(source.rel(attributes+i*12))
         out.set_rel(dst_attributes+i*12,append_string(out,name))
         attr_entries.append((name,dst_attributes+i*12))
@@ -348,13 +372,23 @@ def compact(data, identity, material_name=MATERIAL):
     return bytes(out.b)
 
 
-def player_template(game):
-    path = os.path.join(game, 'content/Common/Pack/szs_permanent2.pack')
-    with open(path,'rb') as source:
-        packed = dict(base.shaderprep.sarc(source.read()))
-    require('sea_Room44.szs' in packed, 'player Outset coast unavailable')
-    files = dict(base.shaderprep.sarc(base.shaderprep.yaz0(packed['sea_Room44.szs'])))
-    return files['Room44.bfres'], files['model1.sharcfb']
+def player_template(game, kind='foam'):
+    room = TEMPLATE_ROOMS[kind]
+    archive = 'sea_Room%d.szs' % room
+    raw = None
+    for pack in PACKS:
+        path = os.path.join(game, 'content/Common/Pack', pack)
+        if not os.path.isfile(path):
+            continue
+        with open(path,'rb') as source:
+            packed = dict(base.shaderprep.sarc(source.read()))
+        if archive in packed:
+            raw = packed[archive]
+            break
+    require(raw is not None, 'player coast template unavailable')
+    files = dict(base.shaderprep.sarc(base.shaderprep.yaz0(raw)))
+    require('Room%d.bfres' % room in files and 'model1.sharcfb' in files, 'player coast template unavailable')
+    return files['Room%d.bfres' % room], files['model1.sharcfb']
 
 
 def build(game, glb_path, identity, out, kind='foam'):
@@ -368,8 +402,8 @@ def build(game, glb_path, identity, out, kind='foam'):
         with open(snapshot,'wb') as target:
             target.write(source_bytes)
         geometry, info, _ = collision_mesh.read_static(snapshot)
-    require(isinstance(geometry, tuple), 'a shoreline model has one opaque material (the game supplies the foam)')
-    template, shader = player_template(game)
+    require(isinstance(geometry, tuple), 'a shoreline model has one opaque material (the game supplies the foam or water)')
+    template, shader = player_template(game, kind)
     result = build_bfres(template, geometry, identity, MATERIALS[kind])
     packed = base.yaz0_stored(base.sarc({identity+'.bfres':result,identity+'.sharcfb':shader}))
     digest = hashlib.sha256()

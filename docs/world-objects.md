@@ -435,8 +435,8 @@ the pond its own floor and banks with the ground materials (for example `col_san
 is low enough, as on the islands. `col_shallow` is for water too shallow to swim in: Link wades.
 
 The surface is invisible by itself. Show it with a water surface model: a separate model declared as
-the actor's `shoreline` with `"material": "water"` (see "Island presentation"); the game's own still
-water moves on it.
+the actor's `shoreline` with `"material": "water"` (see "Island presentation"); the water of the
+game's spring pools moves on it.
 
 The game looks for a pond only within the height range of the room's own ground (the highest point of
 the island, its houses and cliffs in that square). A pond whose surface is higher than that is not
@@ -505,11 +505,12 @@ the home square. Actors and their visual variants share 128 declaration slots;
 a sea square accepts at most 16 active visual variants. Removing objects in the
 editor retains their identities for undo and state restoration until restart.
 
-A shoreline can also be still water instead of foam: with `"shoreline": {"model": "pond-surface",
-"material": "water"}` the model gets the game's still-water surface with its moving ripples (the
-default `"material"` is `"foam"`). Model the water surface as a flat mesh at the water's level with a
-few rows of triangles; it fades out towards its open edges, so the water blends into the bank. Repeat
-U and V about once per three metres. An actor has one shoreline: an island with foam and a pond gives
+A shoreline can also be a water surface instead of foam: with `"shoreline": {"model": "pond-surface",
+"material": "water"}` the model gets the water of the game's spring pools, clear water with moving,
+bubbling ripples (the default `"material"` is `"foam"`). Model the water surface as a flat mesh at the
+water's level with a few rows of triangles; it fades out towards its open edges, so the water blends
+into the bank. Repeat U and V about once per metre. The surface is clear: the pond's colour comes from
+its floor and banks below it. An actor has one shoreline: an island with foam and a pond gives
 the pond its own static object (its basin as the model, with the `col_water` surface in its collision,
 and the water surface as its shoreline).
 
