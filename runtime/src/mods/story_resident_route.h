@@ -18,9 +18,10 @@
 //   0x010 16 points of 16 bytes: 4 argument bytes (all 0xFF: no stop to look), x, y, z
 //   0x110 owner process id; 0x114 last good position (x, y, z); 0x120 closest distance to its point since progress, unused
 //   0x128 steps without progress u16; 0x12A skips in a row u8; 0x12B status u8 (Status)
-//   0x12C pause random state u32; 0x130 walk timer armed u8; 0x131 configuration u8 (Config bits);
+//   0x12C pause random state u32; 0x130 unused u8; 0x131 configuration u8 (Config bits);
 //   0x132 the point skipped last u8 (0xFF none); 0x133 skips since the last progress u8
 //   0x134 speed per logic step f32 (0: the character's own); 0x138 route hash u32; 0x13C lowest point y f32
+//   0x140 strolling: walk steps left before its next pause u16
 #pragma once
 #include <array>
 #include <cmath>
@@ -31,7 +32,7 @@
 
 namespace story_resident_route {
 
-inline constexpr uint32_t kSlotBytes = 0x140, kSlots = 32, kMemoryBytes = kSlotBytes * kSlots;
+inline constexpr uint32_t kSlotBytes = 0x150, kSlots = 32, kMemoryBytes = kSlotBytes * kSlots;
 inline constexpr uint32_t kMagic = 0x52525431;  // 'RRT1'
 inline constexpr uint8_t kRouteMarker = 0xFE;   // a placed resident's route number: "the port's route"
 inline constexpr uint8_t kNoPoint = 0xFF;       // no point (the guards' blocked point)
@@ -42,7 +43,7 @@ inline constexpr unsigned kMaxPoints = 16;       // the position and up to 15 po
 enum : uint32_t {
     kHeader = 0x000, kMagicAt = 0x00C, kPoints = 0x010, kOwner = 0x110, kGood = 0x114, kAnchor = 0x120,
     kStuck = 0x128, kSkips = 0x12A, kStatus = 0x12B, kRandom = 0x12C, kArmed = 0x130, kConfig = 0x131, kBlocked = 0x132, kInRow = 0x133,
-    kSpeed = 0x134, kHash = 0x138, kLowest = 0x13C,
+    kSpeed = 0x134, kHash = 0x138, kLowest = 0x13C, kWalkLeft = 0x140,
 };
 enum Config : uint8_t { kLoop = 1, kBackAndForth = 2, kPauses = 4 };
 enum class Status : uint8_t { Walking = 0, Skipped = 1, Stuck = 2, Fell = 3, Finished = 4 };

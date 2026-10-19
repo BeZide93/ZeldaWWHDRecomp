@@ -334,7 +334,8 @@ int main() {
         assert(ld32(kActor + 0x870) == routes::route_address(3) && ld8(kActor + 0x903) == 3 && routes::view(3).status == route::Status::Walking && routes::view(3).points == 4);
     }
 
-    // pauses on: a character with its own rhythm keeps it; one without gets 200..300 steps
+    // pauses: the game's own walk time never runs; the port walks it in the character's rhythm (200..300
+    // steps here), then a pause (the game's Wait), then a new walk time
     {
         auto p = path_of({{5000, 0, 0}}, "loop");
         p.points.push_back({5000, 0, 100});
@@ -344,19 +345,28 @@ int main() {
         assert(routes::write(4, p, {0, 0, 0}, false));
         routes::set_owner(4, 505);
         create(kActor, 4);
-        st16(kDat + 0x54, 0), st16(kDat + 0x56, 0);  // no rhythm of its own
-        step(kActor);
-        step(kActor);
-        const unsigned timer = ld16(kActor + 0x8E2);
-        assert(timer >= 199 && timer <= 299);
-        st16(kDat + 0x54, 200), st16(kDat + 0x56, 300);
+        set_modes.clear();
+        step(kActor);  // the turn
+        unsigned walked = 0;
+        while (ld8(kActor + 0x903) == 2 && walked < 1000) step(kActor), ++walked, assert(ld16(kActor + 0x8E2) == 0);
+        assert(walked >= 200 && walked <= 300 && ld8(kActor + 0x903) == 0 && !set_modes.empty() && set_modes.back().second == 0);
+        // a character with a rhythm of its own (here 200..300 too) gets its own; without pauses: never
+        auto q = path_of({{5000, 0, 0}}, "loop");
+        q.points.push_back({5000, 0, 100});
+        actor(kActor, 506, 2);
+        place(kActor, 0, 0, 0);
+        assert(routes::write(4, q, {0, 0, 0}, false));
+        routes::set_owner(4, 506);
+        create(kActor, 4);
+        for (int n = 0; n < 900; n++) step(kActor);
+        assert(ld8(kActor + 0x903) == 2);
     }
 
     // turning: a character whose own turning speed is 0 gets the port's
     {
-        actor(kActor, 506, 9);
+        actor(kActor, 516, 9);
         assert(routes::write(5, path_of({{100, 0, 0}}), {0, 0, 0}, false));
-        routes::set_owner(5, 506);
+        routes::set_owner(5, 516);
         st16(kActor + 0x8F6, 0);
         Cpu c{};
         c.r[3] = kActor;

@@ -101,21 +101,30 @@ void walk(Cpu* c) {
     const uint32_t rec = slot_address(unsigned(slot));
     const uint8_t config = ld8(rec + route::kConfig);
     const uint8_t index0 = ld8(actor + kPathIndex), forward0 = ld8(actor + kPathForward);
-    if (!(config & route::kPauses)) st16(actor + kTimer, 0);  // no strolling pauses: its walk timer never runs
-    else if (ld16(actor + kTimer) == 0 && !ld8(rec + route::kArmed)) {
+    // the game's own walk time never runs (it is set again at points, so short segments would never
+    // pause); with pauses the port keeps the stroll: walk steps left in the record, then a pause (the
+    // game's own Wait, its own wait time), then a new walk time in the character's rhythm
+    st16(actor + kTimer, 0);
+    if ((config & route::kPauses) && !ld16(rec + route::kWalkLeft)) {
         const uint32_t dat = ld32(actor + kNpcDat);
-        if (dat && ld16(dat + 0x54) == 0 && ld16(dat + 0x56) == 0) {  // a character without its own rhythm
-            uint32_t state = ld32(rec + route::kRandom);
-            st16(actor + kTimer, route::pause_walk(state));
-            st32(rec + route::kRandom, state);
-        }
-        st8(rec + route::kArmed, 1);
+        const uint16_t lo = dat ? ld16(dat + 0x54) : 0, hi = dat ? ld16(dat + 0x56) : 0;
+        uint32_t state = ld32(rec + route::kRandom);
+        st16(rec + route::kWalkLeft, lo && hi >= lo && hi < 2000 ? uint16_t(lo + route::pause_walk(state) % (hi - lo + 1)) : route::pause_walk(state));
+        st32(rec + route::kRandom, state);
     }
     g_original(c, kWalk);
     const uint8_t mode = ld8(actor + kMode);
-    if (mode != kWalkMode) st8(rec + route::kArmed, 0);
     if (trace() && mode != kWalkMode)
         LOG("[resident_route] slot %d: stops walking (mode %u, link %u/%u, at point %u)", slot, mode, ld8(actor + kSeesLink), ld8(actor + kLinkClose), ld8(actor + kPathIndex));
+    if ((config & route::kPauses) && mode == kWalkMode && ld32(actor + kPathRun)) {
+        const uint16_t left = uint16_t(ld16(rec + route::kWalkLeft) - 1);
+        st16(rec + route::kWalkLeft, left);
+        if (!left) {
+            if (trace()) LOG("[resident_route] slot %d: a strolling pause", slot);
+            set_mode(c, actor, kWaitMode);
+            return;
+        }
+    }
     const float speed = f(rec + route::kSpeed);
     if (mode == kWalkMode && speed > 0) sf(actor + kTargetSpeed, speed);
     const bool once = !(config & (route::kLoop | route::kBackAndForth));
@@ -132,8 +141,9 @@ void walk(Cpu* c) {
         static unsigned steps[route::kSlots];
         static const unsigned every = std::getenv("WWHD_RESIDENT_ROUTE_TRACE")[0] == '2' ? 1 : 30;
         if (++steps[slot] % every == 1 || every == 1)
-            LOG("[resident_route] slot %d: at %.1f,%.1f,%.1f point %u %s speed %.2f/%.2f mode %u link %u/%u", slot, f(actor + kCurrent), f(actor + kCurrent + 4), f(actor + kCurrent + 8),
-                ld8(actor + kPathIndex), ld8(actor + kPathForward) ? "forward" : "back", f(actor + kSpeedF), f(actor + kTargetSpeed), mode, ld8(actor + kSeesLink), ld8(actor + kLinkClose));
+            LOG("[resident_route] slot %d: at %.1f,%.1f,%.1f point %u %s speed %.2f/%.2f mode %u link %u/%u timer %d", slot, f(actor + kCurrent), f(actor + kCurrent + 4), f(actor + kCurrent + 8),
+                ld8(actor + kPathIndex), ld8(actor + kPathForward) ? "forward" : "back", f(actor + kSpeedF), f(actor + kTargetSpeed), mode, ld8(actor + kSeesLink), ld8(actor + kLinkClose),
+                int(int16_t(ld16(actor + kTimer))));
     }
     route::Guard g = read_guard(rec);
     const bool walking = mode == kWalkMode && !ld8(actor + kSeesLink) && !ld8(actor + kLinkClose);
