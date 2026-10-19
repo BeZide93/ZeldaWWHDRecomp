@@ -49,8 +49,13 @@ void release(Cpu*, const Context&);
 // dKy_Execute (the environment's execute) is replaced only when a declared demo changes the weather;
 // it is the game's own unless a demo holds the weather. On the Great Sea the held weather replaces
 // the dice weather for that time; everything else the execute does still runs.
+// With time: dKy_instant_timechg and dKankyo_DayProc too, so a demo's time change (even backwards
+// past midnight) never runs the game's day change (letters, daily counters, per-day event bits) and
+// never moves the date.
 void install(const Context&, void (*original)(Cpu*, uint32_t), const std::function<std::string(uint32_t)>& replaced_by,
-             const std::function<void(uint32_t, void (*)(Cpu*))>& replace);
-bool holding();
+             const std::function<void(uint32_t, void (*)(Cpu*))>& replace, bool weather, bool time);
+bool holding();     // a demo holds the weather
+bool time_held();   // a demo with time or weather changes runs (its record is there)
+bool time_ready();  // time changes are installed
 }  // namespace light
 }  // namespace story_demo_parts

@@ -1312,6 +1312,9 @@ use).
 ```
 
 - `hour` is 0–24 (fractions are minutes: 22.5 is 22:30).
+- A time change never starts a new day, even when it goes back past midnight
+  (22:00 to 06:00): the day of the week, letters and the game's daily events
+  stay as they were.
 - `rain` is 0–1: 1 is the game's full rain, 0 stops the rain, and values in
   between give lighter rain. Rain also turns the sky and colours rainy. On the
   Great Sea the port holds the demo's rain while the demo runs, so the game's

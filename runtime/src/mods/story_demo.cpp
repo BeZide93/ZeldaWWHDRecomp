@@ -212,7 +212,9 @@ void install(const std::function<std::string(uint32_t)>& replaced_by, const std:
     replace(kDemoWindowWait, demo_window_wait);
     g_installed = true;
     // the environment's execute only when a declared demo changes the weather (holds it on the Great Sea)
-    if (story_scenes::any_demo_step([](const demo_scene::Demo& d) { return !d.weather.empty(); })) story_demo_parts::light::install(parts(LightRecord), g_original, replaced_by, replace);
+    const bool weather = story_scenes::any_demo_step([](const demo_scene::Demo& d) { return !d.weather.empty(); });
+    const bool time = story_scenes::any_demo_step([](const demo_scene::Demo& d) { return !d.time.empty(); });
+    if (weather || time) story_demo_parts::light::install(parts(LightRecord), g_original, replaced_by, replace, weather, time);
     LOG("[demo] installed: virtual demo archive %s", kVirtualArchive);
 }
 
@@ -379,6 +381,7 @@ bool begin(Cpu* c, std::string& why) {
     demo_event_image::Spec spec;
     if (g_demo.origin_link) spec.origin = demo_event_image::Origin{u32_as_f32(ld32(link + 0x314)), u32_as_f32(ld32(link + 0x318)), u32_as_f32(ld32(link + 0x31C)), g_demo.angle};
     else if (g_demo.origin) spec.origin = demo_event_image::Origin{g_demo.origin->x, g_demo.origin->y, g_demo.origin->z, g_demo.angle};
+    if (!g_demo.time.empty() && !story_demo_parts::light::time_ready()) return why = "demo time changes are not installed (another hook owns the game's time change)", false;
     const auto light = demo_scene::light_points(g_demo);
     for (uint32_t i = 0; i < light.size(); ++i)
         spec.light.push_back({demo_scene::kLightStartFlag0 + i, demo_scene::kLightEndFlag0 + i, light[i].hour, light[i].rain && *light[i].rain > 0});

@@ -22,12 +22,16 @@
 #include "runtime.h"
 
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <vector>
 
 namespace story_demo_parts::light {
 namespace {
 const uint32_t kPlay = GC(0x025200D4), kEnvLight = GC(0x02555D0C), kRainSet = GC(0x0257E7C0), kFlagSet = GC(0x02540848);
 const uint32_t kKyExecute = GC(0x0255D128), kExeKankyo = GC(0x0255C85C), kWindSet = GC(0x0257D398), kAddCalc = GC(0x0200ECD4);
+const uint32_t kTimeChange = GC(0x0256076C), kDayProc = GC(0x025542BC);  // dKy_instant_timechg, dKankyo_DayProc
 const uint32_t kSave = GD(0x101F84DC);
 const uint32_t kZero = GD(0x1004F0B0), kOne = GD(0x1004F0A4), kDarkSky = GD(0x1004F2BC), kFlash = GD(0x1004F214), kSkyStep = GD(0x1004F0BC), kSkyMin = GD(0x1004F178);
 constexpr uint32_t kMarker = 0x4C475431;  // 'LGT1'
@@ -39,8 +43,10 @@ enum : uint32_t {
     Dice = 0x3C,      // env +0xFC0, +0xFC4, +0x1068, +0x1093..+0x1095
 };
 Context g_ctx;
+std::vector<uint8_t> g_save_copy;  // WWHD_DEMO_SAVE_DIFF: the save data at the demo's start (a test aid)
+constexpr uint32_t kSaveDiffBytes = 0x2000;
 void (*g_original)(Cpu*, uint32_t) = nullptr;
-bool g_installed = false;
+bool g_installed = false, g_weather = false, g_time = false;
 
 float fl(uint32_t a) { return u32_as_f32(ld32(a)); }
 void stf(uint32_t a, float v) { st32(a, f32_as_u32(v)); }
@@ -83,6 +89,19 @@ void execute_held(Cpu* c, const Context& x, uint32_t e) {
     const float step = fl(kSkyStep);
     callf(c, x, kAddCalc, {e + 0x103C}, {target, step, step, fl(kSkyMin)});
 }
+// dKy_instant_timechg(t): with t before the current time the game counts a new day and runs
+// dKankyo_DayProc (letters delivered or stocked, daily counters, per-day event bits cleared). A mod
+// demo's time change only sets the time: its date stays, and the time and date come back at its end.
+void instant_timechg(Cpu* c) {
+    if (!time_held()) { g_original(c, kTimeChange); return; }
+    const uint32_t save = ld32(kSave);
+    if (save) st32(save + 0x44, f32_as_u32(float(c->f[1].ps0)));
+}
+// The day change itself never runs while a mod demo holds time (whatever calls it)
+void day_proc(Cpu* c) {
+    if (!time_held()) { g_original(c, kDayProc); return; }
+    LOG("[demo] light: the game's day change is not run during a mod demo");
+}
 void ky_execute(Cpu* c) {
     if (!holding()) { g_original(c, kKyExecute); return; }
     const uint32_t e = env(c, g_ctx);
@@ -94,14 +113,25 @@ void ky_execute(Cpu* c) {
 }  // namespace
 
 void install(const Context& x, void (*original)(Cpu*, uint32_t), const std::function<std::string(uint32_t)>& replaced_by,
-             const std::function<void(uint32_t, void (*)(Cpu*))>& replace) {
+             const std::function<void(uint32_t, void (*)(Cpu*))>& replace, bool weather, bool time) {
     if (g_installed || !original) return;
     g_ctx = x; g_original = original;
-    if (!replaced_by(kKyExecute).empty()) { LOG("[demo] %s owns %08X; demo weather is not held on the Great Sea", replaced_by(kKyExecute).c_str(), kKyExecute); return; }
-    replace(kKyExecute, ky_execute);
+    if (time) {
+        for (uint32_t fn : {kTimeChange, kDayProc})
+            if (!replaced_by(fn).empty()) { LOG("[demo] %s owns %08X; demo time changes are disabled", replaced_by(fn).c_str(), fn); g_installed = true; return; }
+        replace(kTimeChange, instant_timechg);
+        replace(kDayProc, day_proc);
+        g_time = true;
+    }
+    if (weather) {
+        if (!replaced_by(kKyExecute).empty()) LOG("[demo] %s owns %08X; demo weather is not held on the Great Sea", replaced_by(kKyExecute).c_str(), kKyExecute);
+        else { replace(kKyExecute, ky_execute); g_weather = true; }
+    }
     g_installed = true;
 }
-bool holding() { return g_installed && recorded(g_ctx) && ld32(g_ctx.record + Hold); }
+bool holding() { return g_weather && recorded(g_ctx) && ld32(g_ctx.record + Hold); }
+bool time_held() { return g_time && recorded(g_ctx); }
+bool time_ready() { return g_time; }
 
 void begin(Cpu* c, const Context& x, const demo_scene::Demo& d) {
     std::memset(mem::ptr(x.record), 0, kRecordBytes);
@@ -122,6 +152,7 @@ void begin(Cpu* c, const Context& x, const demo_scene::Demo& d) {
     st32(x.record + Dice + 12, uint32_t(ld8(e + 0x1093)) << 16 | uint32_t(ld8(e + 0x1094)) << 8 | ld8(e + 0x1095));
     st32(x.record + Keep, (d.keep_time ? 1u : 0u) | (d.keep_weather ? 2u : 0u));
     st32(x.record + Marker, kMarker);
+    if (std::getenv("WWHD_DEMO_SAVE_DIFF")) g_save_copy.assign(mem::ptr(save), mem::ptr(save) + kSaveDiffBytes);
     LOG("[demo] light: time %.2f h, rain %u, pattern %u saved (%zu changes)", fl(save + 0x44) / 15.f, ld32(e + 0xA40), ld8(e + 0x1092), demo_scene::light_points(d).size());
 }
 
@@ -164,6 +195,14 @@ void release(Cpu* c, const Context& x) {
             st32(e + 0xFC0, ld32(x.record + Dice)); st32(e + 0xFC4, ld32(x.record + Dice + 4)); st32(e + 0x1068, ld32(x.record + Dice + 8));
             const uint32_t dice = ld32(x.record + Dice + 12);
             st8(e + 0x1093, uint8_t(dice >> 16)); st8(e + 0x1094, uint8_t(dice >> 8)); st8(e + 0x1095, uint8_t(dice));
+        }
+        if (g_save_copy.size() == kSaveDiffBytes) {
+            std::string diff;
+            unsigned count = 0;
+            for (uint32_t k = 0; k < kSaveDiffBytes; ++k)
+                if (ld8(save + k) != g_save_copy[k] && count++ < 32) { char t[32]; std::snprintf(t, sizeof t, " +%X:%02X>%02X", k, g_save_copy[k], ld8(save + k)); diff += t; }
+            LOG("[demo] light: save data 0..0x%X after the demo: %u bytes differ%s", kSaveDiffBytes, count, diff.c_str());
+            g_save_copy.clear();
         }
         LOG("[demo] light: %s%s", keep & 1 ? "time kept" : "time restored", keep & 2 ? ", weather kept" : ", weather restored");
     }
