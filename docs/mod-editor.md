@@ -137,7 +137,7 @@ more of the same; **Stop placing** in the toolbar or Esc ends it.
   Moblin, Keese, Miniblin. The Inspector's **Variant** changes a placed one.
 - **Your models:** one of the mod's models (static or skinned), your own enemy (a skinned model with
   flinch, stun, death and idle clips), a prop Link can carry.
-- **Game objects:** the game's own palm trees, trees, tables and more (see below).
+- **Game objects:** the game's own palm trees, trees, tables and more, and island buildings (see below).
 
 Each new actor gets the flags it needs, named after it (for example `sign-read`, `pot-broken`,
 `guard-defeated`). In the Inspector, **To Link**, **To camera** and **Snap to ground** move the selected
@@ -158,6 +158,13 @@ again. A placed game object appears in the game at once. In the Inspector you ch
 the table: table, stool, or a stool Link walks through), its **Turn** and, where the object allows
 it, its **Scale**. Each change makes the object again in its place (one undo step). A game object
 has no flags, drops or dialogue.
+
+**Buildings** in the same list are the islands' own houses, towers and shelters
+(docs/mod-sdk-v3.md, "Island buildings"). The first time a mod places one, the editor makes it from
+your game files: the list says "(preparing...)" and the building appears in the picture a moment
+later, when it is ready (in a mod that has no actor with a model yet, after a restart, as for your own
+models). A building turns about the vertical axis only and keeps its size; it has no variants. If your
+game files can't make it, the list shows the reason.
 
 ### Routes: actors that walk
 
@@ -602,8 +609,8 @@ separated by `;`, or `@file` with one such line per row. Results go to the log.
 | `list_actors`, `list_models`, `list_scenes`, `list_quests` | `mod`? | the open mod's content |
 | `get_actor`, `get_scene` | `id`, `mod`? | one entry as the manifest declares it |
 | `list_actor_types` | | what `add_actor` places, and what appears without a restart |
-| `list_game_objects` | `category`?, `query`? | the game's own objects `add_actor` places as `game:<id>`, with variants, limits and whether your game files have them |
-| `add_actor` | `type`, `id`?, `at`? (`link`, `camera`, `position`), `position`?, `stage`?, `room`?, `angle`?, `snap`?, `model`?, `options`?, `mod`? | place a new actor (on the ground unless `snap` is false); `type` `game:<id>` places a game object (`options.variant`) |
+| `list_game_objects` | `category`?, `query`? | the game's own objects `add_actor` places as `game:<id>`, with variants, limits and whether your game files have them, and island buildings it places as `piece:<id>` (`state`: preparing, ready or the reason it failed) |
+| `add_actor` | `type`, `id`?, `at`? (`link`, `camera`, `position`), `position`?, `stage`?, `room`?, `angle`?, `snap`?, `model`?, `options`?, `mod`? | place a new actor (on the ground unless `snap` is false); `type` `game:<id>` places a game object (`options.variant`), `piece:<id>` an island building (made from your game files first: `state`, `note`) |
 | `remove_actor` | `id`, `confirm`, `mod`? | remove an actor (needs `"confirm": true`) |
 | `duplicate_actor` | `id`, `new_id`?, `offset`?, `mod`? | a copy next to it, with flags of its own |
 | `place_actor` | `id`, `at` (`link`, `camera`, `ground`, `position`), `position`?, `snap`?, `mod`? | move an actor to Link, the camera, the ground below it or a position |

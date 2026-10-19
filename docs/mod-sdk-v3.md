@@ -235,6 +235,52 @@ To see which objects your game has, run
 `python3 tools/story_mods/game_objects.py --game <game folder> --list` (add `--placements` to see
 how often the game itself places each one). It reads your game files and prints no game data.
 
+## Island buildings (game pieces)
+
+A mod can also place some of the islands' own buildings: `"actor": "piece:outset-house-small"`.
+These are parts of an island's model that stand on their own there (whole buildings, never a cut
+through a larger mesh). When the game starts with such a mod, or when you place one in the editor,
+the port builds the building once from the player's own game files into the player's model cache;
+nothing of the game goes into your package. A building looks as it does on its own island: it is
+drawn with the island's light (day, dusk, night, weather and fog), its windows light up at night,
+and it keeps the island's collision, so Link walks on its floors and balconies and bumps into its
+walls. Its doors lead nowhere: the doorways are solid.
+
+```json
+{
+  "requires": {"game_objects": 2},
+  "actors": [
+    {"id": "house", "actor": "piece:outset-house-small", "stage": "sea", "room": 12,
+     "position": {"x": 1200, "y": 140, "z": -199000}, "rotation": {"x": 0, "y": 90, "z": 0}}
+  ]
+}
+```
+
+Buildings share the game objects catalogue version and need version 2 or later. A building takes
+only `id`, `actor`, `stage`, `room`, `position` and `rotation` (about the vertical axis): no scale,
+because its light is baked for its size and its collision is the island's own. The position is the
+middle of the building at its lowest point.
+
+| Id | What it is | Window at night |
+| --- | --- | --- |
+| `piece:outset-house-ladder` | A two-storey island house with a balcony and a side ladder | yes |
+| `piece:outset-house-lookout` | A family house on posts with a rooftop lookout and a crawl hole | yes |
+| `piece:outset-house-terrace` | A tall island house with a steep roof and a wooden terrace | yes |
+| `piece:outset-house-small` | A small island house on posts with a pointed roof | yes |
+| `piece:outset-lookout-tower` | A tall wooden watchtower on a single post with a boardwalk | |
+| `piece:outset-well-shelter` | A small open wooden shelter with a slanted roof | |
+
+The buildings of one island share their textures and are built together (about 5.1 MiB of game
+memory for the Outset set while a room uses it). All the buildings of a room, every package's,
+share a budget of 8 MiB: each set once, and each building about 50 KiB. A mod that goes over it is
+refused with the reason. Buildings count toward the 16 actors per room, return when their room
+loads again, and full and portable save states keep them. A building may stand anywhere in its
+room, also on an island among the island's own objects; it stays clear of other world objects.
+
+If the player's game files can't make a building (another game version, or the island's model
+differs from what the port expects), its placements are left out with a line in the log, and the
+rest of the mod works. The package must not contain game files, as for game objects.
+
 ## Breakable native props
 
 The experimental prop adapter uses the player's native models, ground physics,
