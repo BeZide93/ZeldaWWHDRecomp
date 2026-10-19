@@ -7,6 +7,10 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Island buildings and world objects: only real conflicts refuse a place now** (doors, start points, villagers and
+  their walks, chests, event triggers); pots, signs, rupees, message and hint areas and the sea's surface no longer
+  count. In the editor a building can be placed anywhere: on a red spot it shows as an outline with what is in the way
+  drawn in, and it appears in the game once dragged to a green spot.
 - **Quick-use locked items** (Mods > Built-in, off by default; #196, thanks mhbxyz): while locked onto an enemy, one
   item-button press equips and uses the bow (including fire, ice and light arrows), boomerang, hookshot or grappling
   rope; bombs are readied and thrown, and equipping the hammer completes one strike. A **Quick-use animation speed**
