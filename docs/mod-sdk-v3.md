@@ -1253,7 +1253,9 @@ the demo and ends it.
   - Plus skips the scene; the demo stops where it is. An open message window closes first (a short out animation).
   - Loading a state saved during a demo ends the demo and gives control back. It is never resumed.
 
-The step's deadline is its length plus a margin. A demo that the game does not
+A demo step can follow another demo step directly: it starts as soon as the
+previous demo has been cleared (about a third of a second, longer while a message
+window closes). The step's deadline is its length plus a margin. A demo that the game does not
 start within a few seconds fails the scene instead of keeping control.
 `messages` (`{"frame", "text"}`, at least two frames before the end, up to 16)
 show their text in the game's message window at their frame. The demo then

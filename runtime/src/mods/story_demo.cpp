@@ -9,6 +9,9 @@
 #include "story_mail_book.h"
 #include "mod_actor.h"
 #include "story_demo_parts.h"
+#include "demo_start_gate.h"
+
+#include <optional>
 
 #include <algorithm>
 #include <cctype>
@@ -23,6 +26,7 @@ const uint32_t kPlay = GC(0x025200D4), kCamera = GC(0x024F8044), kStartCamera = 
 const uint32_t kClearBase = GC(0x0254273C), kSetData = GC(0x025443B4), kOrderEvent = GC(0x02544534);
 const uint32_t kResLoad = GC(0x02520460), kResDelete = GC(0x025204C8);
 const uint32_t kDemoRemove = GC(0x02528AC4), kSearchFromName = GC(0x025D9F38), kGetArchive = GC(0x026065A8);
+const uint32_t kManagerCreate = GC(0x02528CEC);  // dDemo_manager_c::create
 const uint32_t kLookupId = GC(0x026067F4), kLookupName = GC(0x02606900), kManagerUpdate = GC(0x025291C8);
 const uint32_t kSearchName = GC(0x025C109C), kActorCreate = GC(0x025D5834), kSearchById = GC(0x025D54C4), kActorDelete = GC(0x025D57E0);
 const uint32_t kResidentAnm = GC(0x022BED70), kResidentPlayAnm = GC(0x022C2D6C), kResidentPlayTex = GC(0x022C2CC0);
@@ -68,6 +72,7 @@ enum : uint32_t {
     Image = 0xC80,          // event image (<= 0x300)
     Stb = 0xF80,            // STB (<= 0xC000)
     // phases 3 and 5 (story_demo_parts.h)
+    TransformSaved = 0x5D4, // 0x10000 | the demo control's transform flags (+0x74, +0x75) before this demo
     ImageAt = 0x5D0,        // where this demo's event image is (Image, or ImageLarge with a LIGHT staff)
     LightRecord = Stb + 0xC000,                                     // 0x80: saved time and weather, held rain
     AttachRecord = LightRecord + story_demo_parts::light::kRecordBytes,  // 0x100: 8 attachments
@@ -160,6 +165,7 @@ void parts_update(Cpu* c);
 uint32_t image_at() { const uint32_t at = ld32(g_arena + ImageAt); return at ? at : g_arena + Image; }
 story_demo_parts::Context parts(uint32_t record) { return {g_arena + record, g_arena + PartsScratch, call, g_call}; }
 // dDemo_manager_c::update, then the demo's values go to actors whose own code doesn't read a demo slot
+void manager_create(Cpu* c);
 void manager_update(Cpu* c) {
     g_original(c, kManagerUpdate);
     const uint32_t result = c->r[3];
@@ -203,11 +209,12 @@ bool configured() { return g_arena && g_call && g_original; }
 
 void install(const std::function<std::string(uint32_t)>& replaced_by, const std::function<void(uint32_t, void (*)(Cpu*))>& replace) {
     if (g_installed || !configured()) return;
-    for (uint32_t fn : {kLookupId, kLookupName, kManagerUpdate, kSearchFromName, kDemoWindowWait})
+    for (uint32_t fn : {kLookupId, kLookupName, kManagerUpdate, kManagerCreate, kSearchFromName, kDemoWindowWait})
         if (!replaced_by(fn).empty()) { LOG("[demo] %s owns %08X; demo steps disabled", replaced_by(fn).c_str(), fn); return; }
     replace(kLookupId, lookup_id);
     replace(kLookupName, lookup_name);
     replace(kManagerUpdate, manager_update);
+    replace(kManagerCreate, manager_create);
     replace(kSearchFromName, search_name);
     replace(kDemoWindowWait, demo_window_wait);
     g_installed = true;
@@ -439,16 +446,35 @@ bool begin(Cpu* c, std::string& why) {
 }
 }  // namespace
 
-bool start(Cpu* c, const demo_scene::Demo& demo, bool camera_stopped, CharacterResolver characters, std::string& why) {
-    if (!g_installed || !configured()) return why = "demo steps are not installed", false;
-    if (recorded()) return why = ld32(g_arena + Phase) == kDraining ? "the previous demo is still being cleared" : "another demo is running", false;
+namespace {
+// a demo step requested while the previous demo is still being cleared (host side: a state load ends
+// the scene, and release() drops it)
+struct Waiting { demo_scene::Demo demo; bool camera_stopped = false; CharacterResolver characters; };
+std::optional<Waiting> g_waiting;
+demo_start_gate::Gate g_gate;
+bool archives_of(const demo_scene::Demo& demo, std::vector<std::string>& archives, std::string& why) {
     // resolve every file now (static tables): a wrong archive or file name refuses before anything changes
     demo_scene::Compiled compiled;
     if (!demo_scene::compile(demo, resolver(nullptr), compiled, why)) return false;
-    std::vector<std::string> archives;
     for (const auto& [r, id] : compiled.virtual_ids)
         if (std::find(archives.begin(), archives.end(), r.archive) == archives.end()) archives.push_back(r.archive);
     if (archives.size() > 16) return why = "demo uses more than 16 archives", false;
+    return true;
+}
+}  // namespace
+
+bool start(Cpu* c, const demo_scene::Demo& demo, bool camera_stopped, CharacterResolver characters, std::string& why) {
+    if (!g_installed || !configured()) return why = "demo steps are not installed", false;
+    if (recorded() && ld32(g_arena + Phase) != kDraining) return why = "another demo is running", false;
+    std::vector<std::string> archives;
+    if (!archives_of(demo, archives, why)) return false;
+    if (recorded()) {
+        // right after another demo: this one starts once that one is cleared (poll())
+        g_waiting = Waiting{demo, camera_stopped, std::move(characters)};
+        g_gate.arm();
+        LOG("[demo] requested while the previous demo is being cleared: it starts when that is done");
+        return true;
+    }
     std::memset(mem::ptr(g_arena), 0, Stb);
     for (size_t i = 0; i < archives.size(); ++i) text(g_arena + Archives + uint32_t(i) * 24, archives[i]);
     st32(g_arena + ArchiveCount, uint32_t(archives.size()));
@@ -464,6 +490,27 @@ bool start(Cpu* c, const demo_scene::Demo& demo, bool camera_stopped, CharacterR
 
 Poll poll(Cpu* c) {
     Poll out;
+    if (g_waiting) {
+        const bool cleaning = recorded() && ld32(g_arena + Phase) == kDraining;
+        switch (g_gate.step(cleaning, recorded())) {
+        case demo_start_gate::Step::Wait: out.state = Poll::State::Running; return out;
+        case demo_start_gate::Step::GiveUp:
+            out.why = cleaning ? "the previous demo was not cleared in time" : "another demo is running";
+            LOG("[demo] waiting demo not started: %s", out.why.c_str());
+            g_waiting.reset();
+            out.state = Poll::State::Failed;
+            return out;
+        case demo_start_gate::Step::Start: {
+            Waiting w = std::move(*g_waiting);
+            g_waiting.reset();
+            LOG("[demo] previous demo cleared after %u ticks: the waiting demo starts", g_gate.ticks);
+            std::string why;
+            if (!start(c, w.demo, w.camera_stopped, std::move(w.characters), why)) { out.state = Poll::State::Failed; out.why = why; return out; }
+            out.state = Poll::State::Running;
+            return out;
+        }
+        }
+    }
     if (!recorded() || ld32(g_arena + Phase) == kDraining) return out;
     const uint32_t ticks = ld32(g_arena + Ticks) + 1;
     st32(g_arena + Ticks, ticks);
@@ -597,6 +644,41 @@ void apply_characters(Cpu* c) {
 }  // namespace
 
 namespace {
+// dDemo_manager_c::create for a mod demo starts from a fresh control's transform state. create applies
+// frame 0 (TControl::forward(0)) before it sets the demo's origin (control +0x74/+0x75 and the origin
+// transform); with the flags still on from the previous demo, actors without a position track got
+// (0,0,0) instead of the origin, and Link, who takes his slot's place in his demo clips, stood at the
+// world origin and fell out of his room (the scene was interrupted). The game's own values come back
+// once the demo is cleared (tick()).
+void manager_create(Cpu* c) {
+    if (recorded() && c->r[3] == g_arena + Stb) {
+        const uint32_t control = ld32(kDemoControl);
+        if (control) {
+            if (!(ld32(g_arena + TransformSaved) >> 16)) st32(g_arena + TransformSaved, 0x10000u | uint32_t(ld8(control + 0x74)) << 8 | ld8(control + 0x75));
+            st8(control + 0x74, 0); st8(control + 0x75, 0);
+        }
+    }
+    g_original(c, kManagerCreate);
+    if (!recorded() || ld32(kDemoFile) != g_arena + Stb) return;
+    // create also applied frame 0 to the slots before the origin was set: a slot says "translation
+    // set" at (0,0,0) until the first update, and an actor that executes in between and takes its slot's
+    // place every frame (Link in his demo clips, once he has been in a demo before) would stand there
+    // for a frame. The participants' slots wait for the first update, which sets them with the origin.
+    const Cpu saved = *c;
+    const uint32_t pool = ld32(kDemoPool), play = call(c, kPlay, {});
+    unsigned cleared = 0, characters = 0;
+    for (const auto& d : g_demo.actors) {
+        uint32_t actor = 0;
+        if (d.kind == demo_scene::Actor::Kind::Link) actor = play ? ld32(play + kPlayer) : 0;
+        else if (d.kind == demo_scene::Actor::Kind::Character) actor = character(characters++);
+        else if (d.kind == demo_scene::Actor::Kind::Game) actor = find_actor(c, d.actor);
+        const uint32_t id = actor ? ld8(actor + 0x2DC) : 0;
+        const uint32_t slot = pool && id && id <= 32 ? call(c, kDemoActor, {pool, id}) : 0;
+        if (slot && (ld16(slot + 4) & 0x0E)) { st16(slot + 4, uint16_t(ld16(slot + 4) & ~0x0Eu)); ++cleared; }
+    }
+    *c = saved;
+    if (cleared) LOG("[demo] created: %u actor slots wait for the first update", cleared);
+}
 // Phases 3 and 5: carried actors and the demo's time/weather changes, each demo frame
 void parts_update(Cpu* c) {
     if (g_demo.attach.empty() && g_demo.time.empty() && g_demo.weather.empty()) return;
@@ -675,6 +757,7 @@ void remove_demo(Cpu* c, bool skipped) {
 }  // namespace
 
 void release(Cpu* c, const char* reason) {
+    if (g_waiting) { g_waiting.reset(); g_gate.reset(); LOG("[demo] the waiting demo is dropped (%s)", reason); }
     if (!recorded() || ld32(g_arena + Phase) == kDraining) return;
     const bool ours = ld32(kDemoFile) == g_arena + Stb && ld32(g_arena + StbBytes);
     const bool skipped = std::strcmp(reason, "skipped") == 0 && ld32(g_arena + Phase) >= 2;
@@ -733,6 +816,9 @@ void tick(Cpu* c) {
     }
     if (ticks < 10) return;
     drop_archives(c);
+    if (const uint32_t t = ld32(g_arena + TransformSaved); (t >> 16) && !ld32(kDemoFile))
+        if (const uint32_t control = ld32(kDemoControl)) { st8(control + 0x74, uint8_t(t >> 8)); st8(control + 0x75, uint8_t(t)); }
+    st32(g_arena + TransformSaved, 0);
     st32(g_arena + Marker, 0);
     st32(g_arena + Phase, 0);
 }

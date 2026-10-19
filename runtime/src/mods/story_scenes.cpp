@@ -476,7 +476,12 @@ void tick(Cpu* cpu,bool skip,unsigned frames){
         // Requests belong to this uninterrupted native event/room generation.
         // A reload may retain the same textual room key, so discard immediately
         // rather than allowing a stale later owner to start in the new generation.
-        if(interrupted){g_queue.clear();g_pending.clear();}
+        if(interrupted){
+            const uint32_t link=ld32(play+kPlayer);
+            LOG("[scenes] interrupted: owns %d (play %d mode %u control d8 %04X c4 %08X c8 %08X) room %d (link room %d/%d) camera %d",int(owns(play)),int(play==ld32(g_scratch+4)),ld8(play+kMode),ld16(play+kControl+0xD8),ld32(play+kControl+0xC4),ld32(play+kControl+0xC8),
+                int(same_room(play)),link?int(int8_t(ld8(link+kRoom))):-1,int(int8_t(ld8(g_scratch+24))),int(call(kCamera)==ld32(g_scratch+8)));
+            g_queue.clear();g_pending.clear();
+        }
         if(skip_edge)g_swallow_plus.store(true,std::memory_order_relaxed);
         for(unsigned i=0;i<g_frame_units&&g_player.active();++i)g_player.tick(g_generation,interrupted,skip||skip_edge);
         g_cpu=nullptr;return;

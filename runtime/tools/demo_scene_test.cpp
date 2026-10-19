@@ -4,6 +4,7 @@
 #include "mods/demo_scene.h"
 #include "mods/demo_stb.h"
 #include "mods/demo_attach_math.h"
+#include "mods/demo_start_gate.h"
 
 #include <cmath>
 
@@ -220,6 +221,20 @@ int main() {
     clash = lit;
     clash.light[0].hour = 24.f;
     assert(!demo_event_image::make(clash, lit_image, why));
+    // a demo step right after another waits for the previous demo's cleanup, bounded
+    {
+        namespace G = demo_start_gate;
+        G::Gate g;
+        assert(g.step(false, false) == G::Step::GiveUp);  // nothing waiting
+        g.arm();
+        for (int i = 0; i < 10; ++i) assert(g.step(true, true) == G::Step::Wait);  // cleanup takes 10 ticks
+        assert(g.step(false, false) == G::Step::Start && !g.armed && g.ticks == 10);
+        g.arm();
+        for (uint32_t i = 0; i < G::kLimitTicks; ++i) assert(g.step(true, true) == G::Step::Wait);
+        assert(g.step(true, true) == G::Step::GiveUp && !g.armed);  // never cleared: gives up
+        g.arm();
+        assert(g.step(false, true) == G::Step::GiveUp);  // another demo took over meanwhile
+    }
     std::puts("demo_scene: ok");
     return 0;
 }

@@ -20,6 +20,7 @@
 #include "story_game_objects_catalogue.h"
 #include "story_game_pieces_catalogue.h"
 #include "demo_scene.h"
+#include "demo_start_gate.h"
 namespace story_notebook {
 struct WorldPoint { float x=0,y=0,z=0; bool operator==(const WorldPoint&)const=default; };
 struct StoryAction {
@@ -773,8 +774,9 @@ inline bool parse_scenes_impl(const mods::json::Value& m,std::vector<ManifestSce
                 p.kind=SceneStep::Kind::Demo;demo_scene::Demo demo;
                 if(!demo_scene::parse(fields,demo,why))return why="demo step: "+why,false;
                 for(const auto&a:demo.actors)if(a.kind==demo_scene::Actor::Kind::Character&&!character(m,a.character))return why="demo step: unknown character "+a.character,false;
-                // the step's deadline: the demo (30 Hz frames, scene units are 60 Hz) plus reading time for each message
-                p.frames=std::min<unsigned>(kMaxSceneFrames,demo.frames*2+120+unsigned(demo.messages.size())*1200);
+                // the step's deadline: the demo (30 Hz frames, scene units are 60 Hz), the wait for a previous demo's
+                // cleanup (demo_start_gate.h) and reading time for each message
+                p.frames=std::min<unsigned>(kMaxSceneFrames,demo.frames*2+120+2*demo_start_gate::kLimitTicks+unsigned(demo.messages.size())*1200);
                 p.demo=std::move(demo);
             }
             else return why="unknown scene step",false;

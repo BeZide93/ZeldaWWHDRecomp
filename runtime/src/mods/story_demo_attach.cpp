@@ -28,7 +28,7 @@ namespace {
 const uint32_t kPlay = GC(0x025200D4), kDemoActor = GC(0x02526E70), kJointTree = GC(0x027F68FC), kNameIndex = GC(0x027DF9B0);
 const uint32_t kDemoPool = GD(0x101D5FFC);
 const uint32_t kGroundCross = GC(0x02008974);  // dBgS::GroundCross(bgs, gndchk) -> f1
-constexpr uint32_t kBgs = 0x12A0, kLinkGndChk = 0xB14;  // dComIfG_Bgsp(); daPy_lk_c::mGndChk (probe point +0x24)
+constexpr uint32_t kBgs = 0x12A0, kLinkGndChk = 0xB14, kGndChkBytes = 0x54;  // dComIfG_Bgsp(); daPy_lk_c::mGndChk (probe point +0x24)
 constexpr float kGravity = -3.f, kTerminal = -50.f;
 constexpr uint32_t kPlayer = 0x5B34, kLinkModel = 0x448, kLinkHeldMode = 0x68DE, kHeld = 0xC;
 // record entry (0x20 each)
@@ -116,20 +116,21 @@ uint32_t follow_until(const demo_scene::Demo& d, size_t i) {
     for (size_t k = i + 1; k < d.attach.size(); ++k) if (d.attach[k].actor == a.actor && d.attach[k].frame < until) until = d.attach[k].frame;
     return until;
 }
-// The ground under a point (dBgS::GroundCross with Link's own ground check, as climb.cpp uses it;
-// Link's code sets its probe point again in his next execute); -1e30 without ground.
+// The ground under a point: dBgS::GroundCross with Link's own ground check (as climb.cpp uses it).
+// The whole check (cBgS_GndChk, 0x54 bytes: probe point, the polygon found and its room) is put back
+// afterwards: Link takes his room from that polygon, so a stale one would move him to another room.
 float ground(Cpu* c, const Context& x, float px, float py, float pz) {
     const uint32_t play = x.call(c, kPlay, {}), link = play ? ld32(play + kPlayer) : 0;
     if (!link || !x.raw) return -1e30f;
-    const uint32_t probe = link + kLinkGndChk + 0x24;
-    float saved[3];
-    for (int k = 0; k < 3; ++k) saved[k] = fl(probe + uint32_t(k) * 4);
+    const uint32_t check = link + kLinkGndChk, probe = check + 0x24;
+    uint8_t saved[kGndChkBytes];
+    std::memcpy(saved, mem::ptr(check), kGndChkBytes);
     st32(probe, f32_as_u32(px)); st32(probe + 4, f32_as_u32(py)); st32(probe + 8, f32_as_u32(pz));
     const Cpu cpu = *c;
-    x.raw(c, kGroundCross, {play + kBgs, link + kLinkGndChk});
+    x.raw(c, kGroundCross, {play + kBgs, check});
     const float g = float(c->f[1].ps0);
     *c = cpu;
-    for (int k = 0; k < 3; ++k) st32(probe + uint32_t(k) * 4, f32_as_u32(saved[k]));
+    std::memcpy(mem::ptr(check), saved, kGndChkBytes);
     return std::isfinite(g) ? g : -1e30f;
 }
 // a released actor with "fall": gravity until the ground under it
