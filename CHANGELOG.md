@@ -17,6 +17,13 @@ what is on `devel` and not released yet (also in the
   preview at the cursor and curve handles in the picture; the same is available as MCP commands. Nothing changes for
   players or mods that don't use demo steps.
 
+- **Mod SDK v3 and the editor: more native enemies** (for mod makers). Boko Babas, red and blue Bubbles, Fire Keese,
+  Octoroks and Seahats can be placed, each with the mod's own defeat flag, drops and defeat switch. A Boko Baba bites but
+  never grabs Link and leaves no flying head behind; a Seahat or Octorok defeated by a mod does not count toward the
+  game's sea kills. (The game has no Ice Keese.)
+- **Fixed: Link's boomerang, arrows and bombs now hit mod enemies.** Thrown, fired and exploding ones were ignored
+  before, also by the Bokoblins, Moblins, Peahats and ChuChus placed by mods.
+
 - **Mod SDK v3 and the editor: island grounds** (for mod makers). Six islands without their buildings can be placed as
   ground for a mod's own island: Crescent Moon, Triangle, Five-Star, Star, Bomb and a fairy island, in the editor's new
   **Islands** list. Each is made from your own game files the first time a mod uses it, has its own collision, shows on
