@@ -7,6 +7,13 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Mod SDK v3 and the editor: sea and dungeon enemies** (for mod makers). The Kargaroc (flying or perched, without
+  riders), the red Wizzrobe with its fireballs, the enemy warship (at sea only; its cannonballs hit only Link and his
+  boat), groups of one to five Gyorgs (they appear once Link has the boomerang), the Floormaster (it grabs Link and lets
+  go again, it never takes him away) and the Big Octo as a target whose eyes are shot out (no swallowing, no whirlpool)
+  can be placed, each with the mod's own defeat flag, drops and defeat switch. Defeating them by a mod doesn't count
+  toward the game's sea kills.
+
 - **Mod SDK v3 and the editor: more native enemies** (for mod makers). Stalfos, Redead, Mothula (on the ground or
   winged), Morth, Magtail, Poe, Armos and Armos Knight can be placed, each with the mod's own defeat flag, drops and
   defeat switch, live in the editor. What holds Link (a Redead's scream and bite, a Poe's possession, clinging Morths)
