@@ -201,7 +201,11 @@ void release(Cpu* c, const Context& x) {
             unsigned count = 0;
             for (uint32_t k = 0; k < kSaveDiffBytes; ++k)
                 if (ld8(save + k) != g_save_copy[k] && count++ < 32) { char t[32]; std::snprintf(t, sizeof t, " +%X:%02X>%02X", k, g_save_copy[k], ld8(save + k)); diff += t; }
-            LOG("[demo] light: save data 0..0x%X after the demo: %u bytes differ%s", kSaveDiffBytes, count, diff.c_str());
+            // the mailbox (letter states are event registers) and the event bits/registers: +0x644..+0x744;
+            // the temp event bits: +0x1178..+0x1278 (dKankyo_DayProc's ev_l / tmp_l); the save data ends below 0x1300
+            auto changed = [&](uint32_t from, uint32_t to) { unsigned n = 0; for (uint32_t k = from; k < to; ++k) n += ld8(save + k) != g_save_copy[k]; return n; };
+            LOG("[demo] light: after the demo: events/mailbox +644..+744: %u bytes differ, temp bits +1178..+1278: %u, save +0..+1300: %u, all 0..0x%X: %u%s",
+                changed(0x644, 0x744), changed(0x1178, 0x1278), changed(0, 0x1300), kSaveDiffBytes, count, diff.c_str());
             g_save_copy.clear();
         }
         LOG("[demo] light: %s%s", keep & 1 ? "time kept" : "time restored", keep & 2 ? ", weather kept" : ", weather restored");
