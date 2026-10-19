@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <set>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -986,7 +987,8 @@ void game_objects() {
     editor::Session s(&host);
     s.add_package("editor-test", "Editor test", "", json(kManifest));
     Value r = s.run("list_game_objects");
-    CHECK(ok(r) && r.get("result").get("catalogue").number == 1 && r.get("result").get("objects").array.size() == 3);
+    const auto& catalogue = story_game_objects::catalogue();
+    CHECK(ok(r) && r.get("result").get("catalogue").number == catalogue.version && r.get("result").get("objects").array.size() == catalogue.entries.size());
     for (const auto& o : r.get("result").get("objects").array) {
         if (o.get("id").string() == "palm") CHECK(o.get("available").boolean && o.get("type").string() == "game:palm" && o.get("live").boolean && o.get("scale").get("max").number == 1);
         if (o.get("id").string() == "table") CHECK(!o.get("available").boolean && o.get("why").string() == "not available in your game files" && o.get("variants").array.size() == 3);
@@ -994,7 +996,16 @@ void game_objects() {
     r = s.run("list_game_objects", json(R"({"query": "STOOL"})"));
     CHECK(ok(r) && r.get("result").get("objects").array.size() == 1 && r.get("result").get("objects").array[0].get("id").string() == "table");
     r = s.run("list_game_objects", json(R"({"category": "trees and plants"})"));
-    CHECK(ok(r) && r.get("result").get("objects").array.size() == 2 && r.get("result").get("categories").array.size() == 2);
+    {
+        std::set<std::string> categories;
+        size_t trees = 0;
+        for (const auto& e : catalogue.entries) categories.insert(e.category), trees += e.category == "Trees and plants";
+        CHECK(ok(r) && r.get("result").get("objects").array.size() == trees && r.get("result").get("categories").array.size() == categories.size());
+    }
+    // a shared batch (grass) says that it changes when the room loads again; its variants name their units
+    r = s.run("list_game_objects", json(R"({"query": "grass"})"));
+    for (const auto& o : r.get("result").get("objects").array)
+        if (o.get("id").string() == "grass") CHECK(o.get("batch").string() == "grass" && o.get("note").string().find("room loads again") != std::string::npos && o.get("variants").array[2].get("units").number == 21);
     // without the game: availability unknown
     editor::Session offline;
     offline.add_package("editor-test", "Editor test", "", json(kManifest));

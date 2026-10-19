@@ -20,6 +20,7 @@
 #include "mods/story_world_arrival.h"
 #include "mods/mod_actor.h"
 #include "mods/story_props.h"
+#include "mods/story_game_objects.h"
 #include "mods/story_switches.h"
 #include "mods/story_enemies.h"
 #include "mods/story_enemy_children.h"
@@ -62,7 +63,9 @@ bool prop_broken_fixture=false;unsigned prop_claim_calls=0,enemy_claim_calls=0;b
 bool pending=false,nested_chest=false,throw_search=false;
 // game objects: the object name table knows these stage actor names (process, subtype); a made object's
 // parameter word can be falsified (read-back) and its create phase can fail (the game gives up)
-std::map<std::string,std::pair<uint16_t,uint8_t>> object_names={{"takara",{0x125,0xFF}},{"Oyashi",{0x49,0xFF}},{"Table",{0x116,0xFF}}};
+std::map<std::string,std::pair<uint16_t,uint8_t>> object_names={{"takara",{0x125,0xFF}},{"Oyashi",{0x49,0xFF}},{"Table",{0x116,0xFF}},{"kusax1",{0x1B3,0xFF}}};
+// the stage's grass batch (dGrass_packet_c: 1500 units of 0x44 bytes from +0x9C, a unit is taken while its first byte is set)
+constexpr uint32_t kGrassPacket=kArena+0xA0000;unsigned grass_plants=0;
 bool game_object_falsify=false,game_object_fail=false;std::vector<std::array<uint32_t,8>> game_object_creates;int32_t quest_state=1,item_count=1;unsigned deleted=0,native_calls=0;
 std::map<uint32_t,uint32_t> live;
 
@@ -132,6 +135,10 @@ uint32_t call(Cpu*,uint32_t fn,std::initializer_list<uint32_t> args) {
     if(fn==0x025D57E0){++deleted;assert(a[0]>=kActor&&a[0]<=kActor+0x40000);st8(a[0]+0xC,3);if(a[0]>=kActor+0x30000)live.erase(ld32(a[0]+4));return 1;}
     if(fn==0x025C109C){const auto found=object_names.find(reinterpret_cast<char*>(mem::ptr(a[0])));if(found==object_names.end())return 0;const uint32_t entry=kArena+0x10*uint32_t(std::distance(object_names.begin(),found));st16(entry+8,found->second.first);st8(entry+0xA,found->second.second);return entry;}
     if(fn==0x025D5834){++created;assert(args.size()==8);assert(current_layer==kArena+0x6000+a[3]*0x200+0xC0);
+        if(a[0]==0x1B3){  // the grass placement actor: adds its units to the batch and is gone (never live)
+            assert(a[1]==2&&a[6]==0xFFFFFFFFu&&ld16(a[4]+4)==0);++grass_plants;unsigned left=21;
+            for(uint32_t i=0;i<1500&&left;++i)if(!ld8(kGrassPacket+0x9C+i*0x44)){st8(kGrassPacket+0x9C+i*0x44,1);--left;}
+            return actor_id+900+grass_plants;}
         if(a[0]==0x49||a[0]==0x116){std::array<uint32_t,8> args_copy{};std::copy(args.begin(),args.end(),args_copy.begin());args_copy[4]=ld16(a[4]+2)|(uint32_t(ld16(a[4]+4))<<16);assert(ld16(a[4])==0);game_object_creates.push_back(args_copy);
             const uint32_t id=actor_id+60+uint32_t(game_object_creates.size()),address=kActor+0x30000+uint32_t(game_object_creates.size())*0x800;std::memset(mem::ptr(address),0,0x800);
             if(game_object_fail)return id;  // the request was taken; the game gives up in the create phase (never live)
@@ -313,6 +320,29 @@ int main(int argc,char** argv){
         assert(story_actors::editor_update("test",{palm,stool,tree,palm2},{"palm2"},why,&pending_list)&&pending_list.empty());
         story_actors::room_loaded(&c,0);assert(game_object_creates.size()==made+9&&game_object_creates.back()[0]==0x49);
         assert(!story_actors::editor_pose(&c,"test","palm2",{1,2,3},{0,45,0}));
+        // a shared batch (grass): once per room visit, after the room's own placements, into the stage's own batch with a quarter left
+        auto grass=palm;grass.id="grass";grass.actor="game:grass";grass.variant="grass-21";grass.rotation={};
+        st32(0x1046F0B0+0x5AB8,0);  // the stage has no grass of its own
+        assert(story_actors::editor_update("test",{palm,stool,tree,palm2,grass},{"grass"},why,&pending_list)&&pending_list.empty());
+        for(int i=0;i<40;++i)story_actors::room_loaded(&c,0);
+        assert(grass_plants==0);
+        st32(0x1046F0B0+0x5AB8,kGrassPacket);std::memset(mem::ptr(kGrassPacket),0,0x9C+1500*0x44);
+        for(uint32_t i=0;i<1110;++i)st8(kGrassPacket+0x9C+i*0x44,1);  // the game's own use: 390 free, 375 must stay
+        st32(0x1047E8F0,1000);story_actors::native_room_loaded(&c,0);for(int i=0;i<40;++i)story_actors::room_loaded(&c,0);
+        assert(grass_plants==0);
+        for(uint32_t i=900;i<1110;++i)st8(kGrassPacket+0x9C+i*0x44,0);  // 600 free
+        story_game_objects::forget_resolved();  // the fixture reuses room process ids; the game never does
+        st32(0x1047E8F0,2000);story_actors::native_room_loaded(&c,0);
+        for(int i=0;i<20;++i)story_actors::room_loaded(&c,0);
+        assert(grass_plants==0);  // the room's own placements first
+        for(int i=0;i<20;++i)story_actors::room_loaded(&c,0);
+        assert(grass_plants==1);  // once this visit
+        const uint32_t grass_slot=kScratch+128+4*4;assert((ld32(grass_slot)>>24)==0xFE&&!story_actors::actor_address(&c,"test","grass"));
+        story_actors::state_loaded();for(int i=0;i<40;++i)story_actors::room_loaded(&c,0);assert(grass_plants==1);  // a full state keeps the mark
+        st32(0x1047E8F0,1000);story_actors::native_room_loaded(&c,0);for(int i=0;i<40;++i)story_actors::room_loaded(&c,0);assert(grass_plants==2);  // the next visit plants again
+        // the editor: a removed batch goes when the room loads again (said so), and is not planted again
+        assert(story_actors::editor_update("test",{palm,stool,tree,palm2},{},why,&pending_list)&&pending_list.size()==1&&pending_list[0].find("(Reload room)")!=std::string::npos);
+        st32(0x1047E8F0,2000);story_actors::native_room_loaded(&c,0);for(int i=0;i<40;++i)story_actors::room_loaded(&c,0);assert(grass_plants==2);
         assert(std::memcmp(before.data(),mem::ptr(kSave),before.size())==0);return 0;
     }
     if(argc==2&&std::strcmp(argv[1],"--props")==0){

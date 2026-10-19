@@ -4,6 +4,7 @@
 // gate; the per-room count and memory budget, also across packages; the variant in the fingerprint).
 #include <cassert>
 #include <cstdio>
+#include <cstring>
 #include <iostream>
 #include <string>
 #include <utility>
@@ -147,6 +148,26 @@ int main() {
         assert(!world_manifest::validate_world_packages(packages, why) && why.find("16 actors") != std::string::npos);
         packages.pop_back();
         assert(world_manifest::validate_world_packages(packages, why));
+    }
+    // shared batches (grass, flowers, small trees): units per variant, scale 1, mods' share per stage
+    {
+        const auto* grass = c.find("grass");
+        assert(grass && grass->batch() && grass->packet.kind == "grass" && grass->packet.capacity == 1500 && grass->packet.mod_share == 300);
+        assert(grass->variant("grass-21")->units == 21 && grass->variant("")->params == 0 && (grass->variant("grass-7")->params & 0xFC0) == 0);  // item field 0: no drops
+        for (const auto& e : c.entries)
+            for (const auto& v : e.variants)
+                if (e.batch()) assert(v.units > 0 && ((v.params >> 6) & 0x3F) < 0x20);  // no batch variant has a drop
+        assert(!parses(manifest(R"({"id": "g", "actor": "game:grass", "variant": "grass-7", "stage": "sea", "room": 44, "position": {"x": 0, "y": 0, "z": 0}, "scale": {"x": 2, "y": 2, "z": 2}})"), why));
+        std::string list;  // 15 patches of 21 over several rooms of one stage: 315 > 300
+        for (int i = 0; i < 15; i++)
+            list += std::string(i ? "," : "") + R"({"id": "g)" + std::to_string(i) + R"(", "actor": "game:grass", "variant": "grass-21", "stage": "sea", "room": )" + std::to_string(40 + i / 8) + R"(, "position": {"x": 0, "y": 0, "z": 0}})";
+        assert(!parses(manifest(list), why) && why.find("mods may plant 300") != std::string::npos);
+        list = list.substr(0, list.rfind(",{"));
+        assert(parses(manifest(list), why));
+        story_game_objects::Catalogue t;
+        std::string bad = good;
+        bad.replace(bad.find(R"("params": "0x00000000"})"), std::strlen(R"("params": "0x00000000"})"), R"("params": "0x00000000", "units": 3})");
+        assert(!t.add_table(bad, why) && why.find("units") != std::string::npos);  // units only on a batch
     }
     // a manifest without game objects never builds anything new: "requires" stays optional
     assert(parses(mods::json::parse(R"({"actors": [{"id": "s", "actor": "sign", "flag": "read", "stage": "sea", "room": 1, "position": {"x": 0, "y": 0, "z": 0}}]})"), why));
