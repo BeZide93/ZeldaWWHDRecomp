@@ -79,7 +79,7 @@ void cape_execute(Cpu*c){const uint32_t a=c->r[3];own::LineageInfo info{};if(!ch
 void execute(Cpu*c){const uint32_t a=c->r[3];own::LineageInfo info{};if(!child(a,info,false)){if(claimed(a)){c->r[3]=1;return;}original(c,Execute);return;}if(info.address!=a){c->r[3]=1;return;}mask(a);original(c,Execute);const Cpu result=*c;own::LineageInfo live{};if(own::lineage_info(info.pid,live)&&live.address==a&&live.source_valid&&child(a,live,true))mask(a);*c=result;}
 void wait(Cpu*c){const uint32_t a=c->r[3];own::LineageInfo info{};const bool mine=child(a,info,false);if(!mine&&claimed(a)){c->r[3]=1;return;}original(c,Wait);const Cpu result=*c;own::LineageInfo live{};if(mine&&own::lineage_info(info.pid,live)&&live.address==a&&live.source_valid&&child(a,live,true))mask(a);*c=result;}
 void before_delete(uint32_t a,uint32_t pid,uint16_t profile) noexcept {
- if((child_bytes(profile)||profile==Bomb||profile==story_enemies_more::kWizzrobeFire)&&own::lineage_claimed(pid,own::Lineage::EnemyChild)){
+ if((child_bytes(profile)||profile==Bomb||profile==story_enemies_more::kWizzrobeFire||profile==story_enemies_more::kGy)&&own::lineage_claimed(pid,own::Lineage::EnemyChild)){
   own::LineageInfo info{};const bool exact=own::lineage_info(pid,info)&&(!info.address||info.address==a);
   if(exact){own::retire_lineage(pid);static const bool trace=[]{const char*v=std::getenv("WWHD_ENEMY_TRACE");return v&&*v=='1';}();if(trace)LOG("[native_enemy] child retired pid=%08X profile=%04X params=%u source=%u",pid,unsigned(profile),info.parameters,info.source);if(info.source_valid&&retired)try{retired(info);}catch(...){}}
  }

@@ -16,7 +16,7 @@ struct Entry {Spec spec;Token token=0;story_items::EnemyMarkerHandle marker{};ui
 std::vector<Entry> entries;std::array<uint32_t,story_enemy_ownership::kKindCount> profiles{};
 void(*original)(Cpu*,uint32_t)=nullptr;uint32_t(*invoke)(Cpu*,uint32_t,std::initializer_list<uint32_t>)=nullptr;
 std::function<void(Token,uint32_t)> retired;bool installed=false,editor_allowed=false;ChildBridge children;bool weapon_admission=false;
-thread_local Entry* executing=nullptr;thread_local Entry* ice_owner=nullptr;
+thread_local Entry* executing=nullptr;thread_local Entry* ice_owner=nullptr;thread_local uint32_t executing_actor=0;  // the actor `executing` runs on (also during its create)
 struct DrowningScope {Entry*entry=nullptr;uint32_t helper=0;bool queued=false;};thread_local DrowningScope* drowning=nullptr;
 const uint32_t CCcreate=GC(0x02110D4C),CCexec=GC(0x0210DD3C),CCdraw=GC(0x0210BFEC),CCdelete=GC(0x021104B4);
 const uint32_t KIcreate=GC(0x0219D568),KIexec=GC(0x0219AAE8),KIdraw=GC(0x02199748),KIdelete=GC(0x0219CE98);
@@ -144,7 +144,42 @@ void release_warship(Cpu*c,const Entry&e,uint32_t a){if(e.spec.kind!=Kind::Warsh
   if(memory(flag,0x10)&&ld32(flag+4)==pid&&ld16(flag+0xE)==more::kWarshipFlag){probe=*c;invoke(&probe,GC(0x025D57E0),{flag});trace(e,a,"flag-deleted",pid);}}
  std::vector<uint32_t> balls;story_enemy_ownership::visit_lineage([&](const story_enemy_ownership::LineageInfo&info){if(info.role==story_enemy_ownership::Lineage::EnemyChild&&info.source==e.token&&info.source_actor==a&&info.profile==more::kCannonball&&info.address)balls.push_back(info.address);});
  for(uint32_t ball:balls){if(!memory(ball,more::kCannonballBytes)||ld16(ball+0xE)!=more::kCannonball)continue;Cpu probe=*c;invoke(&probe,GC(0x025D57E0),{ball});trace(e,a,"cannonball-deleted",ld32(ball+4));}}
-void release_held(Cpu*c,const Entry&e,uint32_t a){release_warship(c,e,a);release_fireballs(c,e,a);release_bomb(c,e,a);release_club(c,e,a);release_morth(e,a);release_link(c,e.spec.kind,a,"removed");release_lantern(c,e,a);}
+// The native children of a table kind that are its owned children by their exact lineage (Gyorg sharks,
+// Big Octo eyes, story_enemies_more::kChildClasses). While one runs its parent's name reads the game's
+// (the child checks its parent by name); one whose parent is gone deletes itself.
+thread_local uint32_t child_executing=0,child_executing_bytes=0;
+const more::ChildClass* owned_child(uint32_t a,story_enemy_ownership::LineageInfo&info){if(!memory(a,0x10))return nullptr;const auto*k=more::child_class(ld16(a+0xE));
+ if(!k||!memory(a,k->bytes)||!story_enemy_ownership::lineage_claimed(ld32(a+4),story_enemy_ownership::Lineage::EnemyChild)||!story_enemy_ownership::lineage_info(ld32(a+4),info)||info.profile!=k->profile)return nullptr;return k;}
+// (a parent that creates its children in its own create, the Big Octo, has no bound address until it first runs:
+// its lineage's source actor then stands for it, with the same process id and profile)
+Entry* child_source(const story_enemy_ownership::LineageInfo&info,const more::ChildClass&k){if(!info.source_valid)return nullptr;Entry*e=get(info.source);const uint32_t p=info.source_actor;
+ if(!e||e->spec.kind!=k.parent||e->pid!=info.source_pid||(e->address&&e->address!=p)||!memory(p,story_enemy_ownership::descriptor(k.parent).bytes)||ld32(p+4)!=e->pid||ld16(p+0xE)!=story_enemy_ownership::descriptor(k.parent).profile)return nullptr;return e;}
+struct ParentName{uint32_t parent=0;uint16_t old=0;ParentName(uint32_t p,uint16_t name):parent(p){old=ld16(p+8);st16(p+8,name);}~ParentName(){st16(parent+8,old);}};
+void child_lifecycle(Cpu*c,const more::ChildClass&k,uint32_t fn,bool create,bool draw,bool destroy){const uint32_t a=c->r[3];story_enemy_ownership::LineageInfo info{};
+ if(destroy||owned_child(a,info)!=&k){original(c,fn);return;}
+ Entry*e=child_source(info,k);
+ if(!e||(info.address&&info.address!=a)){if(create){c->r[3]=5;return;}if(!draw&&ld8(a+0xC)!=3){Cpu probe=*c;invoke(&probe,GC(0x025D57E0),{a});}c->r[3]=1;return;}
+ const uint32_t prior=child_executing,prior_bytes=child_executing_bytes;child_executing=a;child_executing_bytes=k.bytes;
+ try{ParentName name(info.source_actor,k.parent_name);original(c,fn);}catch(...){child_executing=prior;child_executing_bytes=prior_bytes;throw;}child_executing=prior;child_executing_bytes=prior_bytes;
+ if(create){const Cpu result=*c;if(result.r[3]==4){const bool admitted=story_enemy_ownership::admit_lineage(info.pid,a);if(!admitted){Cpu probe=*c;invoke(&probe,GC(0x025D57E0),{a});}trace(*e,info.source_actor,admitted?"child":"child-refused",info.pid);}*c=result;}}
+template<size_t I> void child_create(Cpu*c){const auto&k=more::kChildClasses[I];child_lifecycle(c,k,GC(k.create),true,false,false);}
+template<size_t I> void child_exec(Cpu*c){const auto&k=more::kChildClasses[I];child_lifecycle(c,k,GC(k.execute),false,false,false);}
+template<size_t I> void child_draw(Cpu*c){const auto&k=more::kChildClasses[I];child_lifecycle(c,k,GC(k.draw),false,true,false);}
+template<size_t I> void child_delete(Cpu*c){const auto&k=more::kChildClasses[I];child_lifecycle(c,k,GC(k.destroy),false,false,true);}
+template<size_t... I> std::vector<std::pair<uint32_t,void(*)(Cpu*)>> child_hooks(std::index_sequence<I...>){std::vector<std::pair<uint32_t,void(*)(Cpu*)>> out;((out.push_back({GC(more::kChildClasses[I].create),child_create<I>}),out.push_back({GC(more::kChildClasses[I].execute),child_exec<I>}),out.push_back({GC(more::kChildClasses[I].draw),child_draw<I>}),out.push_back({GC(more::kChildClasses[I].destroy),child_delete<I>})),...);return out;}
+// a shark's death: counted once in its controller; the game's sea-kill counter (modeDeleteInit) is kept
+void gy_death(Cpu*c,uint32_t fn,bool sea_kill){const uint32_t a=c->r[3];story_enemy_ownership::LineageInfo info{};const auto*k=owned_child(a,info);Entry*e=k&&k->profile==more::kGy?child_source(info,*k):nullptr;if(!e){original(c,fn);return;}
+ const uint32_t event=ld32(GD(0x101F84DC))+0x644,mode=ld32(a+0x3CC);uint32_t before=0;if(sea_kill){Cpu probe=*c;before=invoke(&probe,GC(more::kGetEventReg),{event,more::kSeaKillRegister})&0xFFu;}
+ original(c,fn);const Cpu result=*c;
+ if(sea_kill){Cpu probe=*c;invoke(&probe,GC(more::kSetEventReg),{event,more::kSeaKillRegister,before});}
+ if(ld32(a+0x3CC)!=mode){const uint32_t ctrl=info.source_actor,deaths=std::min(ld8(ctrl+more::kGyorgDeaths)+1u,255u);st8(ctrl+more::kGyorgDeaths,uint8_t(deaths));trace(*e,ctrl,"shark-down",deaths);}
+ *c=result;}
+void gy_death_init(Cpu*c){gy_death(c,GC(more::kGyDeathInit),true);}void gy_bomb_death_init(Cpu*c){gy_death(c,GC(more::kGyBombDeathInit),false);}
+// an owned Gyorg's sharks (a table kind's children of their own class) go with it
+void release_gyorg(Cpu*c,const Entry&e,uint32_t a){const auto*k=more::child_class_of(e.spec.kind);if(!k||!invoke)return;std::vector<uint32_t> sharks;
+ story_enemy_ownership::visit_lineage([&](const story_enemy_ownership::LineageInfo&info){if(info.role==story_enemy_ownership::Lineage::EnemyChild&&info.source==e.token&&info.source_actor==a&&info.profile==k->profile&&info.address)sharks.push_back(info.address);});
+ for(uint32_t shark:sharks){if(!memory(shark,k->bytes)||ld16(shark+0xE)!=k->profile)continue;Cpu probe=*c;invoke(&probe,GC(0x025D57E0),{shark});trace(e,a,"child-deleted",ld32(shark+4));}}
+void release_held(Cpu*c,const Entry&e,uint32_t a){release_gyorg(c,e,a);release_warship(c,e,a);release_fireballs(c,e,a);release_bomb(c,e,a);release_club(c,e,a);release_morth(e,a);release_link(c,e.spec.kind,a,"removed");release_lantern(c,e,a);}
 // A Wizzrobe's fireball: the WZ class's own methods with the game's profile. An owned one (its exact
 // child lineage) is admitted when its create completes and runs as an owned child (never in the area
 // manager); one whose Wizzrobe is gone (a state load, a quarantine) deletes itself. Others are the game's.
@@ -168,6 +203,9 @@ void lifecycle(Cpu*c,uint32_t fn,bool create,bool draw,bool destroy){const uint3
   *c=result;return;}
  if(!supported(e->spec.kind)||e->quarantine){if(!create&&!draw){exec_trace(a,"quarantined");release_link(c,e->spec.kind,a,"stopped");}refuse_or_skip(c,a,create);return;}
  // a Redead only where the stage has its scream and bite events
+ if(create&&e->spec.kind==Kind::Gyorg&&std::strncmp(reinterpret_cast<const char*>(mem::ptr(play_base()+0x5134)),"sea",8)!=0){trace(*e,a,"gyorg-only-on-the-sea");refuse_or_skip(c,a,create);return;}
+ // (the game's own create refuses a Gyorg until Link has the boomerang: the reason is logged)
+ if(create&&e->spec.kind==Kind::Gyorg){Cpu probe=*c;if(!(invoke(&probe,GC(more::kCheckGetItem),{more::kBoomerang})&0xFFu)){static unsigned told=0;if(told++<8)trace(*e,a,"gyorg-needs-the-boomerang");}}
  if(create&&e->spec.kind==Kind::Warship&&std::strncmp(reinterpret_cast<const char*>(mem::ptr(play_base()+0x5134)),"sea",8)!=0){trace(*e,a,"warship-only-on-the-sea");refuse_or_skip(c,a,create);return;}
  if(create&&e->spec.kind==Kind::Wizzrobe){const char*stage=reinterpret_cast<const char*>(mem::ptr(play_base()+0x5134));for(const char*no:more::kNoWizzrobeStages)if(std::strncmp(stage,no,8)==0){trace(*e,a,"no-wizzrobe-on-this-stage");refuse_or_skip(c,a,create);return;}}
  if(create&&e->spec.kind==Kind::Redead){const char*stage=reinterpret_cast<const char*>(mem::ptr(play_base()+0x5134));for(const char*no:more::kNoRedeadStages)if(std::strncmp(stage,no,8)==0){trace(*e,a,"no-redead-events-on-this-stage");refuse_or_skip(c,a,create);return;}}
@@ -186,12 +224,14 @@ void lifecycle(Cpu*c,uint32_t fn,bool create,bool draw,bool destroy){const uint3
  struct Creating{Entry*entry;Creating(Entry*e,bool on):entry(on?e:nullptr){if(entry)entry->creating=true;}~Creating(){if(entry)entry->creating=false;}} creating(e,create);
  if(!create&&!draw){exec_trace(a,"execute");test_health(*e,a);}
  SaveWatch watch(e,e->spec.kind==Kind::Darknut&&!draw);
+ struct ActorScope{uint32_t prior;explicit ActorScope(uint32_t a):prior(executing_actor){executing_actor=a;}~ActorScope(){executing_actor=prior;}} actor_scope(a);
  Scope scope(*e);if(fn==NGexec)c->r[3]=1;else original(c,fn);const Cpu result=*c;  // an owned rat hole never spawns on its own
  watch.check(create?"create":"execute");
  // a Bubble's grapple steal (stolenItemCount 0x406, copied into the steal count on a hookshot hit) is off
  if(create&&result.r[3]==4&&e->spec.kind==Kind::Bubble)st8(a+0x406,0);
  if(e->spec.kind==Kind::Stalfos&&!draw&&more::stalfos_refused_split(a)){more::stalfos_collapse(a);trace(*e,a,"split-refused-collapse");}
  if(e->spec.kind==Kind::Mothula&&!create&&!draw&&more::mothula_strayed(a)){more::mothula_return(a);trace(*e,a,"strayed-turns-home");}
+ if(create&&result.r[3]==4&&e->spec.kind==Kind::Gyorg)st32(a+more::kGyorgDeaths,0);
  if(create&&result.r[3]==4){if(!verify_actor(e->token,e->spec.kind,a)||(!story_enemy_ownership::lookup_actor(a)&&!story_enemy_ownership::admit_created(e->token,a))){disable(*e,a);c->r[3]=5;return;}e->address=a;if(e->spec.kind==Kind::Bokoblin||e->spec.kind==Kind::Moblin){e->search_mode=ld8(GD(e->spec.kind==Kind::Bokoblin?0x1046232D:0x104654A4));e->search_known=true;}no_carry(a);trace(*e,a,"created");}
  else if(create&&result.r[3]==5){disable(*e,a);trace(*e,a,"create-failed");}
  if(!draw&&verify_actor(e->token,e->spec.kind,a))keep_owned(e->spec,a);*c=result;
@@ -227,15 +267,20 @@ void fast_create(Cpu*c){if(!executing||executing->spec.kind!=Kind::Warship){orig
   if(!story_enemy_ownership::queue_child_pending(e.token,e.address,e.pid,pid,more::kCannonball,more::kCannonballParams,story_enemy_ownership::source_epoch(e.token))||!story_enemy_ownership::admit_lineage(pid,ball)){Cpu probe=*c;invoke(&probe,GC(0x025D57E0),{ball});trace(e,e.address,"cannonball-refused",pid);*c=result;c->r[3]=0;return;}
   if(enemy_trace())trace(e,e.address,"cannonball",pid);}
  *c=result;}
-void create_child(Cpu*c){if(executing&&executing->spec.kind==Kind::Mothula&&c->r[3]==more::kMothulaMoth){static unsigned told=0;if(told++<8)trace(*executing,executing->address,"moth-release-refused");c->r[3]=0xFFFFFFFFu;return;}original(c,GC(more::kCreateChild));}
+// An owned Gyorg's sharks become its owned children; anything else it would create this way is refused.
+void owned_child_create(Cpu*c,Entry&e,const more::ChildClass&k){const uint32_t actor=e.address?e.address:executing_actor;if(!actor){c->r[3]=0xFFFFFFFFu;return;}if(c->r[3]!=k.profile){trace(e,actor,"child-refused",c->r[3]);c->r[3]=0xFFFFFFFFu;return;}
+ const uint32_t ticket=story_enemy_ownership::reserve_child_pending(e.token,actor,e.pid,k.profile,c->r[5],story_enemy_ownership::source_epoch(e.token));if(!ticket){trace(e,actor,"child-not-reserved");c->r[3]=0xFFFFFFFFu;return;}
+ try{original(c,GC(more::kCreateChild));}catch(...){story_enemy_ownership::cancel_child_pending(ticket);throw;}
+ const uint32_t pid=c->r[3];if(!pid||pid==0xFFFFFFFFu||!story_enemy_ownership::commit_child_pending(ticket,pid)){story_enemy_ownership::cancel_child_pending(ticket);c->r[3]=0xFFFFFFFFu;}}
+void create_child(Cpu*c){if(executing){if(const auto*k=more::child_class_of(executing->spec.kind)){owned_child_create(c,*executing,*k);return;}}if(executing&&executing->spec.kind==Kind::Mothula&&c->r[3]==more::kMothulaMoth){static unsigned told=0;if(told++<8)trace(*executing,executing->address,"moth-release-refused");c->r[3]=0xFFFFFFFFu;return;}original(c,GC(more::kCreateChild));}
 // An owned enemy's colliders never join the area manager (grass and the like): only the pair policy reaches them.
-void area_set(Cpu*c){const uint32_t o=c->r[4];if(fireball_executing&&o>=fireball_executing&&o<fireball_executing+more::kWizzrobeBytes)return;if(executing&&more::find(executing->spec.kind)&&executing->address&&o>=executing->address&&o<executing->address+story_enemy_ownership::descriptor(executing->spec.kind).bytes)return;original(c,GC(more::kAreaManagerSet));}
+void area_set(Cpu*c){const uint32_t o=c->r[4];if(child_executing&&o>=child_executing&&o<child_executing+child_executing_bytes)return;if(fireball_executing&&o>=fireball_executing&&o<fireball_executing+more::kWizzrobeBytes)return;if(executing&&more::find(executing->spec.kind)&&executing->address&&o>=executing->address&&o<executing->address+story_enemy_ownership::descriptor(executing->spec.kind).bytes)return;original(c,GC(more::kAreaManagerSet));}
 // A Morth's death effect (no drop outside Ganon's Tower) is its defeat; the game then deletes it.
 void morth_death(Cpu*c){const uint32_t a=c->r[3];Entry*e=find(a);if(!e){if(reserved(a))return;original(c,GC(more::kMorthDeathEffect));return;}
  if(e->spec.kind!=Kind::Morth||executing!=e||!more::morth_dying(a)){disable(*e,a);trace(*e,a,"unexpected-death-effect");return;}claim(*e,a);original(c,GC(more::kMorthDeathEffect));}
 // An owned Morth that clings stays in its room's layer (the game moves it to the stage's): it leaves with its room.
 void stage_layer(Cpu*c){if(executing&&executing->spec.kind==Kind::Morth&&c->r[3]==executing->address){trace(*executing,c->r[3],"stage-layer-kept-room");return;}if(auto*e=find(c->r[3],false)){if(e->spec.kind==Kind::Morth)return;}original(c,GC(more::kStageLayer));}
-void disappear(Cpu*c){const uint32_t a=c->r[3];Entry*e=find(a);if(!e){if(reserved(a)){c->r[3]=0xFFFFFFFFu;return;}original(c,Disappear);return;}
+void disappear(Cpu*c){const uint32_t a=c->r[3];{story_enemy_ownership::LineageInfo info{};if(owned_child(a,info)){c->r[3]=0xFFFFFFFFu;return;}}Entry*e=find(a);if(!e){if(reserved(a)){c->r[3]=0xFFFFFFFFu;return;}original(c,Disappear);return;}
  const auto*table=more::find(e->spec.kind);
  const bool terminal=table?table->terminal(a):e->spec.kind==Kind::ChuChu?((ld8(a+0x3FC)==4&&(ld8(a+0x3FD)==51||ld8(a+0x3FD)==53))||(liftable_stone(e->spec,a)&&ld8(a+0x3FD)>=0x52&&ld8(a+0x3FD)<=0x54)):e->spec.kind==Kind::Bokoblin?ld16(a+0x49C+6)==20:e->spec.kind==Kind::Moblin?ld16(a+0x8BC+6)==20:e->spec.kind==Kind::Darknut?ld16(a+0x590+6)==20:e->spec.kind==Kind::Miniblin?(int8_t(ld8(a+0x3A1))<=0||ld16(a+0x3EE)==4||ld16(a+0x3EE)==5):e->spec.kind==Kind::Peahat?int8_t(ld8(a+0x3A1))<=0:e->spec.kind==Kind::Rat?ld8(a+0x3D9)==57:
   // Boko Baba: action 2 (dying), mode 21, the stem left (kind byte 1) at the drop frame
@@ -254,7 +299,7 @@ void ice(Cpu*c){const uint32_t helper=c->r[3];if(!memory(helper,4)){original(c,I
  struct Guard{Entry*old;Guard(Entry*e):old(ice_owner){ice_owner=e;}~Guard(){ice_owner=old;}} guard(e);
  original(c,Ice);const Cpu result=*c;no_carry(a);*c=result;
 }
-void table_item(Cpu*c){Entry*e=ice_owner;if(e&&e==executing&&e->address&&verify_actor(e->token,e->spec.kind,e->address)&&c->r[6]==e->address+0x320&&c->r[4]==ld32(e->address+0x3A4)){claim(*e,e->address);c->r[3]=0xFFFFFFFFu;return;}if(e){disable(*e,e->address);c->r[3]=0xFFFFFFFFu;return;}original(c,TableItem);}
+void table_item(Cpu*c){if(child_executing){c->r[3]=0xFFFFFFFFu;return;}Entry*e=ice_owner;if(e&&e==executing&&e->address&&verify_actor(e->token,e->spec.kind,e->address)&&c->r[6]==e->address+0x320&&c->r[4]==ld32(e->address+0x3A4)){claim(*e,e->address);c->r[3]=0xFFFFFFFFu;return;}if(e){disable(*e,e->address);c->r[3]=0xFFFFFFFFu;return;}original(c,TableItem);}
 void ki_search(Cpu*c){const uint32_t a=c->r[3];if(executing&&executing->spec.kind==Kind::Keese){Entry*e=find(a);if(e&&!e->quarantine&&e->spec.kind==Kind::Keese&&e->spec.mod==executing->spec.mod&&story_enemy_ownership::lookup_actor(a)){st32(GD(0x10464B28),ld32(GD(0x10464B28))+1);if(ld8(a+0x489)==10&&int8_t(ld8(a+0x48B))<10)st32(GD(0x10464B2C),ld32(GD(0x10464B2C))+1);}c->r[3]=0;return;}original(c,KiSearch);}
 void mo_capture(Cpu*c){if(auto*e=find(c->r[3])){if(e->spec.kind==Kind::Moblin){trace(*e,c->r[3],"capture-denied");return;}}if(reserved(c->r[3]))return;original(c,GC(0x021C9AA0));}
 // The Boko Baba's bite asks for an event to grab and chew Link (Link held in a demo, an event camera, both ended
@@ -267,7 +312,10 @@ void bk_carry_drop(Cpu*c){carry_drop(c,GC(0x020A47B4));}void mo_carry_drop(Cpu*c
 void water_fail(Cpu*c){const uint32_t a=c->r[3];auto*e=find(a);if(!e){if(reserved(a))return;original(c,GC(0x020A3B18));return;}if(e->spec.kind!=Kind::Bokoblin||executing!=e||ld16(a+0x49C+6)!=22){disable(*e,a);return;}if(ld16(a+0x49C+4)==1&&ld16(a+0x418+6)==0)claim(*e,a);original(c,GC(0x020A3B18));}
 void fire(Cpu*c){const uint32_t h=c->r[3];if(!memory(h,4)){original(c,GC(0x02041570));return;}const uint32_t a=ld32(h);auto*e=find(a);if(!e){if(reserved(a))return;original(c,GC(0x02041570));return;}if(const auto*n=more::find(e->spec.kind)){if(executing!=e||!h||(h!=a+n->fire[0]&&h!=a+n->fire[1])||(!n->fire[0]&&!n->fire[1])){disable(*e,a);return;}original(c,GC(0x02041570));return;}const uint32_t offset=e->spec.kind==Kind::ChuChu?0xCDC:e->spec.kind==Kind::Bokoblin?0x1774:e->spec.kind==Kind::Moblin?0x320C:e->spec.kind==Kind::Miniblin?0xCB4:e->spec.kind==Kind::Peahat?0xE6C:e->spec.kind==Kind::Rat?0xF98:e->spec.kind==Kind::Darknut?0x1A2C:e->spec.kind==Kind::BokoBaba?0xED0:e->spec.kind==Kind::Bubble?0xBE4:e->spec.kind==Kind::Octorok?0xF5C:0xE90;if(executing!=e||(h!=a+offset&&!(e->spec.kind==Kind::Peahat&&h==a+0x1098))){disable(*e,a);return;}original(c,GC(0x02041570));}
 void reaction(Cpu*c,uint32_t fn){const uint32_t h=c->r[3];if(!memory(h,4)){original(c,fn);return;}const uint32_t a=ld32(h);auto*e=find(a);if(!e){if(reserved(a)){c->r[3]=0;return;}original(c,fn);return;}const uint32_t offset=e->spec.kind==Kind::Bokoblin?0x49C:e->spec.kind==Kind::Moblin?0x8BC:e->spec.kind==Kind::Darknut?0x590:0;const unsigned type=e->spec.kind==Kind::Bokoblin?2:e->spec.kind==Kind::Darknut?3:1;if(!offset||h!=a+offset||executing!=e||ld16(h+8)!=type){disable(*e,a);c->r[3]=0;return;}if(fn==GC(0x02043F34)){DrowningScope current{e,h,false};struct Guard{DrowningScope*prior;Guard(DrowningScope*p):prior(drowning){drowning=p;}~Guard(){drowning=prior;}}guard(&current);original(c,fn);const Cpu result=*c;if(current.queued&&find(a)==e&&ld8(a+0xC)==3)claim(*e,a);*c=result;}else original(c,fn);}
-void delete_request(Cpu*c){const uint32_t a=c->r[3],lr=c->lr;auto*context=drowning;Entry*e=context?context->entry:nullptr;const bool exact=e&&e==executing&&e->spec.kind==Kind::Bokoblin&&context->helper==a+0x49C&&find(a)==e&&ld32(context->helper)==a&&ld16(context->helper+8)==2&&ld8(a+0x3D4)==0&&lr==GC(0x02044FCC)&&story_enemy_ownership::lookup_actor(a)==e->token;original(c,GC(0x025D57E0));if(exact&&c->r[3]==1&&ld8(a+0xC)==3)context->queued=true;}
+void delete_request(Cpu*c){const uint32_t a=c->r[3],lr=c->lr;
+ // an owned Gyorg deleting itself (deadCheckGy) once every shark died: its defeat
+ if(Entry*g=executing;g&&g->spec.kind==Kind::Gyorg&&g->address==a&&find(a)==g&&ld8(a+more::kGyorgDeaths)>=more::gyorg_count(a)&&!story_items::enemy_defeated(g->marker))claim(*g,a);
+auto*context=drowning;Entry*e=context?context->entry:nullptr;const bool exact=e&&e==executing&&e->spec.kind==Kind::Bokoblin&&context->helper==a+0x49C&&find(a)==e&&ld32(context->helper)==a&&ld16(context->helper+8)==2&&ld8(a+0x3D4)==0&&lr==GC(0x02044FCC)&&story_enemy_ownership::lookup_actor(a)==e->token;original(c,GC(0x025D57E0));if(exact&&c->r[3]==1&&ld8(a+0xC)==3)context->queued=true;}
 void damage_reaction(Cpu*c){reaction(c,GC(0x02041F94));}void damage_set(Cpu*c){reaction(c,GC(0x02043F34));}
 void room_search(Cpu*c){if(executing){auto*e=find(c->r[3]);c->r[3]=e&&!e->quarantine&&e->spec.mod==executing->spec.mod?c->r[3]:0;return;}if(reserved(c->r[3])){c->r[3]=0;return;}original(c,RoomSearch);}
 }
@@ -343,7 +391,8 @@ bool deny_create(uint32_t,uint32_t){return executing&&executing->spec.kind==Kind
 bool deny_carry(uint32_t a){const Entry*e=find(a,false);return e&&!liftable(e->spec,a);}
 void configure(void(*o)(Cpu*,uint32_t),uint32_t(*call)(Cpu*,uint32_t,std::initializer_list<uint32_t>),const std::array<uint32_t,story_enemy_ownership::kKindCount>&storage,std::function<void(Token,uint32_t)>notify){original=o;invoke=call;profiles=storage;retired=std::move(notify);native_actor_profiles::configure(o,call);}
 bool install(const std::function<std::string(uint32_t)>&owner,const std::function<void(uint32_t,void(*)(Cpu*))>&replace){if(installed)return true;if((entries.empty()&&!editor_allowed)||!original||!invoke||!native_actor_profiles::available(owner))return false;
- std::vector<std::pair<uint32_t,void(*)(Cpu*)>> hooks={{BKcreate,bk_create},{BKexec,bk_exec},{BKdraw,bk_draw},{BKdelete,bk_delete},{MOcreate,mo_create},{MOexec,mo_exec},{MOdraw,mo_draw},{MOdelete,mo_delete},{CCcreate,cc_create},{CCexec,cc_exec},{CCdraw,cc_draw},{CCdelete,cc_delete},{KIcreate,ki_create},{KIexec,ki_exec},{KIdraw,ki_draw},{KIdelete,ki_delete},{PTcreate,pt_create},{PTexec,pt_exec},{PTdraw,pt_draw},{PTdelete,pt_delete},{TNcreate,tn_create},{TNexec,tn_exec},{TNdraw,tn_draw},{TNdelete,tn_delete},{PHcreate,ph_create},{PHexec,ph_exec},{PHdraw,ph_draw},{PHdelete,ph_delete},{NZcreate,nz_create},{NZexec,nz_exec},{NZdraw,nz_draw},{NZdelete,nz_delete},{NGcreate,ng_create},{NGexec,ng_exec},{NGdraw,ng_draw},{NGdelete,ng_delete},{BOcreate,bo_create},{BOexec,bo_exec},{BOdraw,bo_draw},{BOdelete,bo_delete},{BLcreate,bl_create},{BLexec,bl_exec},{BLdraw,bl_draw},{BLdelete,bl_delete},{OQcreate,oq_create},{OQexec,oq_exec},{OQdraw,oq_draw},{OQdelete,oq_delete},{Disappear,disappear},{Ice,ice},{TableItem,table_item},{KiSearch,ki_search},{RoomSearch,room_search},{GC(0x021C9AA0),mo_capture},{GC(0x025D7B24),potential_event},{GC(0x020A47B4),bk_carry_drop},{GC(0x021D0294),mo_carry_drop},{GC(0x020A3B18),water_fail},{GC(0x02041570),fire},{GC(0x02041F94),damage_reaction},{GC(0x02043F34),damage_set},{GC(0x025D57E0),delete_request},{GC(more::kMorthDeathEffect),morth_death},{GC(more::kStageLayer),stage_layer},{GC(more::kCreateChild),create_child},{GC(more::kAreaManagerSet),area_set},{GC(more::kFastCreate),fast_create}};
+ std::vector<std::pair<uint32_t,void(*)(Cpu*)>> hooks={{BKcreate,bk_create},{BKexec,bk_exec},{BKdraw,bk_draw},{BKdelete,bk_delete},{MOcreate,mo_create},{MOexec,mo_exec},{MOdraw,mo_draw},{MOdelete,mo_delete},{CCcreate,cc_create},{CCexec,cc_exec},{CCdraw,cc_draw},{CCdelete,cc_delete},{KIcreate,ki_create},{KIexec,ki_exec},{KIdraw,ki_draw},{KIdelete,ki_delete},{PTcreate,pt_create},{PTexec,pt_exec},{PTdraw,pt_draw},{PTdelete,pt_delete},{TNcreate,tn_create},{TNexec,tn_exec},{TNdraw,tn_draw},{TNdelete,tn_delete},{PHcreate,ph_create},{PHexec,ph_exec},{PHdraw,ph_draw},{PHdelete,ph_delete},{NZcreate,nz_create},{NZexec,nz_exec},{NZdraw,nz_draw},{NZdelete,nz_delete},{NGcreate,ng_create},{NGexec,ng_exec},{NGdraw,ng_draw},{NGdelete,ng_delete},{BOcreate,bo_create},{BOexec,bo_exec},{BOdraw,bo_draw},{BOdelete,bo_delete},{BLcreate,bl_create},{BLexec,bl_exec},{BLdraw,bl_draw},{BLdelete,bl_delete},{OQcreate,oq_create},{OQexec,oq_exec},{OQdraw,oq_draw},{OQdelete,oq_delete},{Disappear,disappear},{Ice,ice},{TableItem,table_item},{KiSearch,ki_search},{RoomSearch,room_search},{GC(0x021C9AA0),mo_capture},{GC(0x025D7B24),potential_event},{GC(0x020A47B4),bk_carry_drop},{GC(0x021D0294),mo_carry_drop},{GC(0x020A3B18),water_fail},{GC(0x02041570),fire},{GC(0x02041F94),damage_reaction},{GC(0x02043F34),damage_set},{GC(0x025D57E0),delete_request},{GC(more::kMorthDeathEffect),morth_death},{GC(more::kStageLayer),stage_layer},{GC(more::kCreateChild),create_child},{GC(more::kAreaManagerSet),area_set},{GC(more::kFastCreate),fast_create},{GC(more::kGyDeathInit),gy_death_init},{GC(more::kGyBombDeathInit),gy_bomb_death_init}};
+ for(const auto&h:child_hooks(std::make_index_sequence<std::size(more::kChildClasses)>{}))hooks.push_back(h);  // their owned children's classes
  for(const auto&h:more_hooks(std::make_index_sequence<std::size(more::kNatives)>{}))hooks.push_back(h);  // the table kinds' methods (a retail copy passes through)
  for(const auto&h:hooks)if(!owner(h.first).empty())return false;
  for(Kind k:all_kinds()){if(!supported(k))continue;const auto&d=story_enemy_ownership::descriptor(k);uint32_t storage=profiles[unsigned(k)],native=ld32(GD(0x101F3EE0)+4*d.native_profile);if(!native_actor_profiles::valid_storage(storage)||!memory(native,0x30)||ld32(native+0x10)!=d.bytes)return false;}

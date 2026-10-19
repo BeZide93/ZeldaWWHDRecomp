@@ -302,6 +302,60 @@ inline constexpr uint32_t kBoatCannonballParams = 0x80020004u; // the one Link's
 inline constexpr uint32_t kCannonballBytes = 0xB50, kCannonballSphere = 0x920, kCannonballStts = 0x8E4;
 inline constexpr uint32_t kFastCreate = CANONICAL_CODE_ID(0x025D5928).value();
 
+// ---------------------------------------------------------------- Gyorg (d_a_gy_ctrl + d_a_gy)
+// A group of one to five Gyorgs is one enemy: the game's controller (GY_CTRL 0xE5, size 0x5D0) placed
+// with parameter 0xFFFF05n1: type 1 (an area: its sharks come out while Link is within 5000 of where it
+// was placed), n sharks, no switch (0xFF; with one it waits for it). Never type 0 or 15 (the stage-wide
+// ones without an area). Its create needs Link to have the boomerang (item 0x2D), as in the game; without
+// it nothing appears (the reason is logged). Only on the sea stage. It creates its sharks (GY 0xE4, size
+// 0xFAC, fopAcM_createChild in its execute) one by one; they become its owned children: they bite only
+// Link and his boat, only Link's weapons, his projectiles and the boat's cannonball hurt them, and they go
+// with it. A shark checks that its parent is a GY_CTRL by name: the controller's name reads 0xE5 while an
+// owned shark runs. A shark's death (modeDeleteInit, or modeDeleteBombInit after a bomb) is counted in the
+// controller's unused 0x470; the game's sea-kill counter (event register 0x7EFF) is left as it was, and
+// the shark's own drop is suppressed. When the last shark is gone the controller deletes itself
+// (deadCheckGy): with every shark dead that is its defeat, and the one drop. Sharks that dive away (Link
+// leaves) without dying leave it undefeated. No colliders of its own; no switch or save writes.
+inline bool gyorg_verify(uint32_t a, uint32_t p) {
+    const uint8_t count = (p >> 4) & 0xF;
+    return ld8(a + 0x444) == 1 && count >= 1 && count <= 5 && ld8(a + 0x445) == count && ld32(a + 0x448) == 0x459C4000u &&
+           ld8(a + 0x44C) == 0xFF && ld8(a + 0x470) <= count && ld32(a + 0x440) <= 3;
+}
+inline bool gyorg_terminal(uint32_t) { return false; }  // the controller makes no drop of its own
+inline uint8_t gyorg_count(uint32_t a) { return ld8(a + 0x445); }
+inline constexpr uint32_t kGyorgDeaths = 0x470;
+inline constexpr uint16_t kGyorgName = 0xE5, kGy = 0xE4;
+inline constexpr uint32_t kGyBytes = 0xFAC, kGyStts = 0x9C4, kGyIceStts = 0xA78;
+inline constexpr uint32_t kGyCreate = CANONICAL_CODE_ID(0x02167B60).value(), kGyExecute = CANONICAL_CODE_ID(0x02169264).value(),
+                          kGyDraw = CANONICAL_CODE_ID(0x021695BC).value(), kGyDelete = CANONICAL_CODE_ID(0x02167BB8).value();
+inline constexpr uint32_t kGyDeathInit = CANONICAL_CODE_ID(0x02167FE0).value(), kGyBombDeathInit = CANONICAL_CODE_ID(0x02167F30).value();
+inline constexpr uint32_t kCheckGetItem = CANONICAL_CODE_ID(0x02520C0C).value(), kGetEventReg = CANONICAL_CODE_ID(0x025B8BB0).value(),
+                          kSetEventReg = CANONICAL_CODE_ID(0x025B8AF4).value();
+inline constexpr uint8_t kBoomerang = 0x2D;
+inline constexpr uint16_t kSeaKillRegister = 0x7EFF;
+
+// The native children that are a table kind's owned children by their lineage (Gyorg sharks): their
+// class, and the name their parent must read while one runs (they check it by name).
+struct ChildClass {
+    Kind parent;
+    uint16_t profile;
+    uint32_t bytes;
+    uint16_t parent_name;
+    uint32_t create, execute, draw, destroy;
+};
+inline constexpr ChildClass kChildClasses[] = {
+    {Kind::Gyorg, kGy, kGyBytes, kGyorgName, kGyCreate, kGyExecute, kGyDraw, kGyDelete}};
+inline const ChildClass* child_class(uint16_t profile) {
+    for (const ChildClass& k : kChildClasses)
+        if (k.profile == profile) return &k;
+    return nullptr;
+}
+inline const ChildClass* child_class_of(Kind parent) {
+    for (const ChildClass& k : kChildClasses)
+        if (k.parent == parent) return &k;
+    return nullptr;
+}
+
 inline constexpr Native kNatives[] = {
     {Kind::Stalfos, "stalfos", {0x7FE0, 0xBE, 0x25B0, kStalfosColliders, std::size(kStalfosColliders)},
      CANONICAL_CODE_ID(0x02495C70).value(), CANONICAL_CODE_ID(0x02493FB0).value(), CANONICAL_CODE_ID(0x02491F34).value(),
@@ -347,6 +401,10 @@ inline constexpr Native kNatives[] = {
      CANONICAL_CODE_ID(0x023C637C).value(), CANONICAL_CODE_ID(0x023C6D38).value(), CANONICAL_CODE_ID(0x023C6DAC).value(),
      CANONICAL_CODE_ID(0x023C6418).value(), [] { return GD(0x10034084); }, 0xFFFFFF00u, 0, 0, {0, 0}, true,
      warship_verify, warship_terminal, nullptr, 0x3CB, false, 0xFFFF},
+    {Kind::Gyorg, "gyorg", {kGyorgProfile, 0xE5, 0x5D0, nullptr, 0},
+     CANONICAL_CODE_ID(0x0216BBB0).value(), CANONICAL_CODE_ID(0x0216C1A0).value(), CANONICAL_CODE_ID(0x0216C1DC).value(),
+     CANONICAL_CODE_ID(0x0216BBB4).value(), [] { return GD(0x10010D78); }, 0xFFFF0531u, 0, 0, {0, 0}, true,
+     gyorg_verify, gyorg_terminal, nullptr, 0x443, false},
 };
 
 inline const Native* find(Kind k) {

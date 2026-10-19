@@ -33,7 +33,7 @@ The initial allowlist is deliberately small:
 | Breakable prop | `pot`, `barrel`, `crate` | Required mod-owned `broken_flag` and `drops` list |
 | Latched floor switch | `switch` | Required mod-owned `switch_flag`; fixed yellow switch |
 | Rotating gate | `door` | Required `switch` naming a switch actor in the same mod |
-| Native enemies (preview) | `chuchu`, `bokoblin`, `moblin`, `keese`, `miniblin`, `peahat`, `darknut`, `rat_hole`, `bokobaba`, `bubble`, `octorok`, `stalfos`, `redead`, `mothula`, `morth`, `magtail`, `poe`, `armos`, `armos_knight`, `kargaroc`, `wizzrobe`, `warship` | Required mod-owned `defeated_flag` and `drops`; fixed ordinary variants |
+| Native enemies (preview) | `chuchu`, `bokoblin`, `moblin`, `keese`, `miniblin`, `peahat`, `darknut`, `rat_hole`, `bokobaba`, `bubble`, `octorok`, `stalfos`, `redead`, `mothula`, `morth`, `magtail`, `poe`, `armos`, `armos_knight`, `kargaroc`, `wizzrobe`, `warship`, `gyorg` | Required mod-owned `defeated_flag` and `drops`; fixed ordinary variants |
 
 Resident names are exact native object codes in lower case. Each placed copy uses fixed ordinary
 parameters: it stands where you put it (unless you give it a route, below) and has none of the
@@ -463,6 +463,7 @@ The allowlist below defines the supported variants.
 | `armos_knight` | Armos Knight: only a bomb in its open mouth (or a Light Arrow) defeats it |
 | `wizzrobe` | Red Wizzrobe: it appears and vanishes around where it was placed and casts fire at Link |
 | `warship` | The enemy warship (sea stage only): it fires its cannon at Link; three hits from the boat's cannon sink it |
+| `gyorg` | A group of Gyorgs (sea stage only): variants `one` to `five` (default `three`); they come out of the sea when Link is near and bite him |
 | `kargaroc` | Kargaroc: it circles where it was placed and swoops at Link (variant `perched`: it sits until Link comes near) |
 
 All of them use the same declaration fields:
@@ -602,6 +603,13 @@ reach outside the mod:
   his boat and go with the ship when it is removed. As in the game, its aim is loose: many of its
   shots miss. The other "ship" pieces of the sea (the lookout
   platforms, the Forsaken Fortress searchlights and wall cannons) are not offered.
+- **Gyorgs:** only on the sea, and, as in the game, only once Link has the boomerang (until then
+  nothing appears; the log says why). The whole group is one enemy with one `defeated_flag` and one
+  set of `drops`: it is defeated when every Gyorg of the group has been killed. Gyorgs that dive away
+  because Link left leave it undefeated, and the group comes back with the room. They only bite Link
+  and his boat, and killing them does not count towards the game's own Gyorg tally.
+  As in the game, they only come out in open water: not close to an island, a pier or one of the
+  sea's ships (Beedle's shop, rafts, the salvage ship), so place them well out at sea.
 - **Kargaroc:** it never carries Link or another enemy (the game's riders are not offered). It eats
   bait Link throws near it, as in the game, and goes back to where it was placed when he leaves.
 
