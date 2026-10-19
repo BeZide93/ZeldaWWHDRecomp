@@ -46,7 +46,7 @@ void emit(S::Builder& b, size_t o, const Track& t, uint32_t code3, uint32_t code
 }
 }  // namespace
 
-bool compile(const Demo& d, const Resolver& resolve, Compiled& out, std::string& why, uint32_t message_number) {
+bool compile(const Demo& d, const Resolver& resolve, Compiled& out, std::string& why) {
     out = {};
     S::Builder b;
     std::vector<Resource> virtual_table;
@@ -153,7 +153,7 @@ bool compile(const Demo& d, const Resolver& resolve, Compiled& out, std::string&
     }
     if (!d.messages.empty()) {
         const size_t o = b.object(S::kMessage, "message");
-        for (const auto& m : d.messages) { b.value(o, m.frame, S::message::Message, message_number); b.suspend(m.frame + 1); out.messages.push_back(m); }
+        for (const auto& m : d.messages) { b.value(o, m.frame, S::message::Message, demo_message_code(out.messages.size())); b.suspend(m.frame + 1); out.messages.push_back(m); }
         b.end(o, d.frames);
     }
     out.stb = b.finish();

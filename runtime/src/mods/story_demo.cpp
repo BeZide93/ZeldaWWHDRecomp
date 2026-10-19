@@ -25,11 +25,15 @@ const uint32_t kDemoRemove = GC(0x02528AC4), kSearchFromName = GC(0x025D9F38), k
 const uint32_t kLookupId = GC(0x026067F4), kLookupName = GC(0x02606900), kManagerUpdate = GC(0x025291C8);
 const uint32_t kSearchName = GC(0x025C109C), kActorCreate = GC(0x025D5834), kSearchById = GC(0x025D54C4), kActorDelete = GC(0x025D57E0);
 const uint32_t kDemoActor = GC(0x02526E70), kDemoPool = GD(0x101D5FFC), kResidentMtx = GC(0x022BF3A0), kDemoFrame = GD(0x101D6008);
+const uint32_t kFindDemoMessage = GC(0x025F60EC);  // message resources: demo message code -> message label (the demo window's lookup)
+const uint32_t kDemoMessageOn = GC(0x025DB58C), kDemoMessageOff = GC(0x025DB59C);  // fopMsgM_demoMsgFlagOn / Off
 // game data
 const uint32_t kDemoMode = GD(0x101D6010), kDemoFile = GD(0x101D6004), kDemoControl = GD(0x101D5FE8), kResControl = GD(0x101F4F28);
 const uint32_t kDemoArcName = GD(0x1047E6B8);  // dStage_roomControl_c::mDemoArcName, char[12]; mProcID follows at +0xC
 const uint32_t kLiteralVtable = GD(0x1004BDC8);  // the literal-string vtable set_demo_data uses for its archive names
 const uint32_t kIdTable = GD(0x100DE8F4), kIdTableCount = GD(0x100C45C0);  // archive CRC32 -> resource id order
+const uint32_t kMessageResources = GD(0x101F4AE8), kLabelVtable = GD(0x100E0A68);  // message resources; a label string's vtable
+const uint32_t kDemoMessageFlag = GD(0x101F3480);  // fopMsgM_demoMsgFlagCheck's byte
 constexpr uint32_t kManager = 0x52C4, kPlayer = 0x5B34, kFlagBytes = 1280;
 // guest record (arena)
 constexpr uint32_t kMarker = 0x444D4F31;  // 'DMO1'
@@ -38,7 +42,7 @@ constexpr uint32_t kSpawning = 5;  // archives loaded; missing game actors are b
 enum : uint32_t {
     Marker = 0x000, Phase = 0x004, ManagerAt = 0x008, RetailWords = 0x00C, RetailCameraPlay = 0x02C, RetailCurrent = 0x030, Ticks = 0x034,
     SavedArc = 0x040, VirtualCount = 0x050, MessageIndex = 0x054, StbBytes = 0x058, CameraStarted = 0x05C, MessageCount = 0x060,
-    SpawnCount = 0x068, CharacterCount = 0x06C, Lease = 0x070,
+    SpawnCount = 0x038, CharacterCount = 0x03C, Lease = 0x04C,
     Virtual = 0x080,        // 48 x {archive[12], id}
     Spawned = 0x380,        // 8 x {process id, stage name[12]} game actors created for the demo
     Characters = 0x400,     // 16 x {actor, process id} mod-placed actors behind the stand-in names MA00..
@@ -47,6 +51,9 @@ enum : uint32_t {
     RetailFlags = 0x600,    // manager+0x3C, 1280 bytes
     Archives = 0xB00,       // 16 x {name[12], phase request[8], held} archives this demo loads
     ArchiveCount = 0x064,
+    MessageNumbers = 0x068, // 2 x the message each demo message code shows (resolved when the demo starts)
+    DemoFlagSet = 0x070,    // the port turned the game's demo message flag on
+    MessageShown = 0x074,   // index + 1 of the message whose point the demo waits at
     Stb = 0xC80,            // STB (<= 0xC000)
 };
 uint32_t g_arena = 0;
@@ -55,8 +62,7 @@ void (*g_original)(Cpu*, uint32_t) = nullptr;
 bool g_installed = false;
 std::vector<demo_scene::Message> g_messages;  // host copy of the running demo's messages (the record keeps the index)
 std::vector<std::u16string> g_texts;           // their text, kept alive while armed
-uint32_t message_number() { static const uint32_t n = [] { const char* v = std::getenv("WWHD_DEMO_MESSAGE_NUMBER"); return v ? uint32_t(std::strtoul(v, nullptr, 0)) : 0x2CF3u; }(); return n; }
-void arm(uint32_t index) { if (index < g_texts.size()) story_mail::say(message_number(), &g_texts[index]); }
+void arm(uint32_t index) { if (index < g_texts.size()) story_mail::say(ld32(g_arena + MessageNumbers + (index % 2) * 4), &g_texts[index]); }
 
 uint32_t call(Cpu* c, uint32_t fn, std::initializer_list<uint32_t> args) { Cpu saved = *c; const uint32_t r = g_call(c, fn, args); *c = saved; return r; }
 std::string cstr(uint32_t p, size_t max = 64) { std::string s; if (!p) return s; for (size_t i = 0; i < max; ++i) { const char ch = char(ld8(p + uint32_t(i))); if (!ch) break; s += ch; } return s; }
@@ -137,6 +143,18 @@ void manager_update(Cpu* c) {
     }
     c->r[3] = result;
 }
+// The message the demo message window shows for a demo message code, found with the window's own
+// lookup (the code is one of the message data's demo codes); 0xFFFFFFFF when the game has none.
+// Uses the STB area as scratch (a label string needs a buffer of at least 256 bytes), so it runs
+// before the demo data is copied there.
+uint32_t resolve_message(Cpu* c, uint32_t code) {
+    const uint32_t out = g_arena + Stb, label = out + 4, buffer = label + 12;
+    std::memset(mem::ptr(out), 0, 0x120);
+    st32(label, buffer); st32(label + 4, kLabelVtable); st32(label + 8, 0x100);  // {data, vtable, capacity}
+    st32(out, 0xFFFFFFFFu);
+    if (!call(c, kFindDemoMessage, {ld32(kMessageResources), label, out, code})) return 0xFFFFFFFFu;
+    return ld32(out);
+}
 
 void restore_manager(Cpu* c) {
     const uint32_t manager = ld32(g_arena + ManagerAt);
@@ -199,7 +217,7 @@ bool spawn_missing(Cpu* c, std::string& why) {
     const uint32_t play = call(c, kPlay, {}), link = play ? ld32(play + kPlayer) : 0;
     if (!link) return why = "no game play scene", false;
     demo_scene::Compiled compiled;
-    if (!demo_scene::compile(g_demo, resolver(c), compiled, why, message_number())) return false;
+    if (!demo_scene::compile(g_demo, resolver(c), compiled, why)) return false;
     uint32_t count = 0;
     for (const auto& cast : compiled.cast) {
         if (find_actor(c, cast.name)) continue;
@@ -236,7 +254,7 @@ bool spawn_missing(Cpu* c, std::string& why) {
 bool cast_ready(Cpu* c) {
     demo_scene::Compiled compiled;
     std::string why;
-    if (!demo_scene::compile(g_demo, resolver(c), compiled, why, message_number())) return false;
+    if (!demo_scene::compile(g_demo, resolver(c), compiled, why)) return false;
     for (const auto& cast : compiled.cast) if (!find_actor(c, cast.name)) return false;
     return true;
 }
@@ -280,7 +298,7 @@ bool begin(Cpu* c, std::string& why) {
     if (!play || !link) return why = "no game play scene", false;
     if (ld32(kDemoMode) || ld32(kDemoFile)) return why = "a game demo is running", false;
     demo_scene::Compiled compiled;
-    if (!demo_scene::compile(g_demo, resolver(c), compiled, why, message_number())) return false;
+    if (!demo_scene::compile(g_demo, resolver(c), compiled, why)) return false;
     // the mod-placed actors behind MA00..: present now, mod actors leased from their own motion
     if (compiled.characters.size() > 16) return why = "a demo drives at most 16 characters", false;
     for (size_t i = 0; i < compiled.characters.size(); ++i) {
@@ -306,6 +324,9 @@ bool begin(Cpu* c, std::string& why) {
         if (!call(c, kSearchFromName, {g_arena + Scratch, 0, 0})) return why = "actor " + name + " is not in this room", false;
     }
     if (compiled.stb.size() > kArenaBytes - Stb) return why = "demo data too large", false;
+    uint32_t numbers[2] = {0, 0};
+    for (size_t i = 0; i < 2 && i < compiled.messages.size(); ++i)
+        if ((numbers[i] = resolve_message(c, demo_scene::demo_message_code(i))) > 0xFFFF) return why = "the game has no message for a demo message code", false;
     demo_event_image::Spec spec;
     if (g_demo.origin_link) spec.origin = demo_event_image::Origin{u32_as_f32(ld32(link + 0x314)), u32_as_f32(ld32(link + 0x318)), u32_as_f32(ld32(link + 0x31C)), g_demo.angle};
     else if (g_demo.origin) spec.origin = demo_event_image::Origin{g_demo.origin->x, g_demo.origin->y, g_demo.origin->z, g_demo.angle};
@@ -337,6 +358,10 @@ bool begin(Cpu* c, std::string& why) {
         g_texts.push_back(std::move(t));
     }
     st32(g_arena + MessageIndex, 0);
+    st32(g_arena + DemoFlagSet, 0);
+    st32(g_arena + MessageShown, 0);
+    for (unsigned i = 0; i < 2; ++i) st32(g_arena + MessageNumbers + i * 4, numbers[i]);
+    if (!g_messages.empty()) LOG("[demo] messages show as messages %u and %u (demo message codes %u, %u)", numbers[0], numbers[1], demo_scene::kDemoMessageCodes[0], demo_scene::kDemoMessageCodes[1]);
     arm(0);
     std::memset(mem::ptr(kDemoArcName), 0, 12);
     std::memcpy(mem::ptr(kDemoArcName), kVirtualArchive, sizeof kVirtualArchive - 1);
@@ -414,10 +439,19 @@ Poll poll(Cpu* c) {
     if (ticks % 30 == 0 && std::getenv("WWHD_DEMO_TRACE"))
         LOG("[demo] trace tick %u mode %u frame %u ours %d state %u control %08X +38 %08X +50 %08X msgstatus %u msgctl %08X", ticks, mode, ld32(GD(0x101D6008)), int(ours), state, control,
             control ? ld32(control + 0x38) : 0, control ? ld32(control + 0x50) : 0, call(c, GC(0x025F795C), {ld32(GD(0x101F4B5C))}), ld32(GD(0x104756C8)));
-    // a message point passed and the game resumed the demo (its close decrements the suspend count):
-    // the next message's text is armed before its point
-    if (ours && mode == 1 && control && index < ld32(g_arena + MessageCount) && index < g_messages.size() &&
-        ld32(GD(0x101D6008)) > g_messages[index].frame + 1 && int32_t(ld32(control + 0x38)) <= 0) {
+    // Message points: only messages suspend the demo, so a suspension is the next message's point.
+    // The demo message window has the message then but waits for the talk camera, which a demo has
+    // none of (retail demo events pause the camera with their own CAMERA staff); the game's demo
+    // message flag opens it, as the game's own demo actors do. The window turns the flag off when the
+    // player closes the message, and the game resumes the demo; the next message's text is armed then.
+    const bool suspended = ours && mode == 1 && control && int32_t(ld32(control + 0x38)) > 0;
+    const bool waiting = index < ld32(g_arena + MessageCount) && index < g_messages.size();
+    if (suspended && waiting && ld32(g_arena + MessageShown) != index + 1) {
+        if (!ld8(kDemoMessageFlag)) call(c, kDemoMessageOn, {});
+        st32(g_arena + DemoFlagSet, 1);
+        st32(g_arena + MessageShown, index + 1);
+        LOG("[demo] message %u shown", index);
+    } else if (!suspended && waiting && ld32(g_arena + MessageShown) == index + 1) {
         story_mail::unsay();
         st32(g_arena + MessageIndex, index + 1);
         arm(index + 1);
@@ -497,6 +531,8 @@ void release(Cpu* c, const char* reason) {
     st32(g_arena + CharacterCount, 0);
     g_character_refs.clear();
     remove_spawned(c);
+    if (ld32(g_arena + DemoFlagSet) && ld8(kDemoMessageFlag)) call(c, kDemoMessageOff, {});
+    st32(g_arena + DemoFlagSet, 0);
     LOG("[demo] released (%s)%s", reason, ours ? ": demo data removed" : "");
     // the demo's model actors delete themselves on their next execute; the archives they draw from
     // are given back a few frames later (tick())

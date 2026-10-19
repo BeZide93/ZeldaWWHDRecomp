@@ -35,7 +35,8 @@ struct Poll {
     std::string why;  // State::Failed
 };
 // Messages are the game's own demo messages (JMSG, then a suspend point): the port arms each
-// message's text before its point; the game shows it and resumes the demo when the player closes it.
+// message's text before its point and opens the game's demo message window there (the game's demo
+// message flag); the game shows it and resumes the demo when the player closes it.
 Poll poll(Cpu* c);
 // Ends a demo early (skip, abort, state load) and restores the stage's event list. Safe to call
 // any time; does nothing without a demo record in guest memory.

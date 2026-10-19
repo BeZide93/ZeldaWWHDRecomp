@@ -66,7 +66,7 @@ int main() {
     assert(has(t, "== JACT \"Link\"\n  f0 ANIMATION = u32 2\n  f100 ANIMATION = u32 512\n  f100 ANIM_MODE = int 1\n  f100 ANIM_FRAME = rate 30\n  f100 reserved 129 00000004000000013a03008f002a003439030000\n  f240 end\n"));
     assert(has(t, "== JSND \"se0\"\n  f0 XYZ = curves 9,10,11\n  f30 SOUND = u32 22820\n  f30 VOLUME = 0.8\n  f30 PAN = 0.5\n  f240 XYZ = 2500,900,3000\n"));
     assert(has(t, "== JPTC \"efx0\"\n  f50 PARENT = name Dk\n  f50 PARENT_NODE = name j_dk_ashi_r3\n  f50 PARENT_ENABLE = int 1\n  f50 PARTICLE = u32 33059\n"));
-    assert(has(t, "== JMSG \"message\"\n  f60 MESSAGE = u32 11507\n  f150 MESSAGE = u32 11507\n  f240 end\n"));
+    assert(has(t, "== JMSG \"message\"\n  f60 MESSAGE = u32 889\n  f150 MESSAGE = u32 891\n  f240 end\n"));
     assert(has(t, "== CTRL \"control\"\n  f61 seq 4 1\n  f151 seq 4 1\n  f151 end\n"));  // waits one frame after each message
 
     // a file the game doesn't have stops the build with a reason

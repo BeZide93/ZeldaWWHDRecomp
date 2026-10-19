@@ -1255,9 +1255,13 @@ the demo and ends it.
 
 The step's deadline is its length plus a margin. A demo that the game does not
 start within a few seconds fails the scene instead of keeping control.
-`messages` (`{"frame", "text"}`, at least two frames before the end) are accepted,
-but in this preview the text does not appear yet. The demo then waits at the
-message point until the step's deadline ends the scene.
+`messages` (`{"frame", "text"}`, at least two frames before the end, up to 16)
+show their text in the game's message window at their frame. The demo then
+waits there until the player closes the message with A, and continues. Tracks
+that are moving along a curve keep moving while a message is open; the demo's
+next keys wait. Each message adds 20 seconds of reading time to the step's
+deadline. Messages are plain text; choices are not available inside a demo
+(use a `choice` step before or after it).
 
 
 ## Native particles (preview)

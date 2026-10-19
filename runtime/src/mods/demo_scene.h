@@ -87,8 +87,15 @@ struct Compiled {
     std::vector<CharacterRef> characters;                    // mod-placed actors, by their stand-in names
     std::vector<Message> messages;                           // in frame order; one suspend point each
 };
-// message_number: the game message the demo's JMSG track shows (the port arms its text before each
-// message point); the demo waits one frame later until the player closes it (the game's own unsuspend).
-bool compile(const Demo& demo, const Resolver& resolve, Compiled& out, std::string& why, uint32_t message_number = 0x2CF3);
+// The demo message codes the JMSG track carries. The game's demo message window looks a code up in
+// the message data's demo codes (not by message number) and takes a message only when the code
+// differs from the last one, so messages alternate between two retail demo codes whose messages
+// start without text codes (no size or colour carried over); the port resolves their message
+// numbers at run time and gives them the mod's text.
+inline constexpr uint32_t kDemoMessageCodes[2] = {889, 891};
+inline constexpr uint32_t demo_message_code(size_t index) { return kDemoMessageCodes[index % 2]; }
+// Each message: its demo message code at its frame (the port arms its text before the point); the
+// demo waits one frame later until the player closes it (the game's own unsuspend).
+bool compile(const Demo& demo, const Resolver& resolve, Compiled& out, std::string& why);
 }  // namespace demo_scene
 #include "demo_scene_parse.h"
