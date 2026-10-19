@@ -162,6 +162,7 @@ the mod manager refuses it.
 | `game:lamp` | A small lamp with a flame that lights its surroundings | `lamp` | 1 |
 | `game:nest` | A large bird's nest Link can stand in | `nest` | 1 |
 | `game:flag-rito`, `game:flag-sea` | Flags on poles that flutter in the wind | one each | 1 |
+| `game:lookout-tower` | A tall wooden lookout platform that stands in the sea | `tower-ladder` (Link climbs its ladder), `tower` | 1 |
 
 Grass, flowers and small trees are the game's shared batches rather than single objects. Each variant
 plants a group of a given size; none of them drops anything when cut.
