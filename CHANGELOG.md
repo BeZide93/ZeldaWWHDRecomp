@@ -20,6 +20,10 @@ what is on `devel` and not released yet (also in the
   lets go when the enemy is removed, its room changes or a state is loaded. A placed Stalfos does not split in two under
   a spin attack, and a placed Mothula does not release Morths; place Morths next to it instead.
 
+- **Animated mod models can have several materials too** (for mod makers): up to 16 per model, each with its own
+  texture, opaque or cut-out (for leaves, fences, hair) and optionally double-sided, with the same texture budget as
+  static models. They work in scenes and demo steps, with save states and in the editor. An example walker is included.
+
 - **Mod SDK v3 and the editor: demo steps, cutscenes played by the game's own cutscene system** (for mod makers, preview).
   A scene can now play a demo: keyframed camera, actors flying or walking along curves (game characters, villagers the
   mod placed, the mod's own actors, and Link in his cutscene poses), messages that wait for A, sounds and effects, one
