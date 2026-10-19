@@ -684,7 +684,7 @@ using namespace gx2;
 static uint64_t g_swap_count = 0, g_flip_count = 0;
 namespace gx2 { uint64_t flips_presented() { return __atomic_load_n(&g_flip_count, __ATOMIC_RELAXED); } }  // live fps in the title
 static uint32 g_swap_interval = 1;  // as set by the game (frame interpolation halves it)
-namespace interp { uint32_t effective_swap_interval(uint32_t game); uint64_t logic_steps(); int vsync_rate(); int frames_per_step(); bool paced_interpolation(); int64_t frame_interval_ns(); }
+namespace interp { uint32_t effective_swap_interval(uint32_t game); uint64_t logic_steps(); int vsync_rate(); int frames_per_step(); bool paced_step_schedule(); int64_t frame_interval_ns(); }
 static std::mutex g_flip_mutex;
 static const auto g_vsync_epoch = std::chrono::steady_clock::now();
 static constexpr std::chrono::nanoseconds kVsyncPeriod(16683333);  // 59.94 Hz
@@ -722,11 +722,11 @@ static std::chrono::steady_clock::time_point tick_time(uint64_t tick) {
     const auto left = std::chrono::duration_cast<std::chrono::nanoseconds>(target.time_since_epoch()).count() - sample.guest;
     return std::chrono::steady_clock::time_point(std::chrono::nanoseconds(sample.host + std::max<int64_t>(0, (left + sample.rate - 1) / sample.rate)));
 }
-// Step slots (vsync_pacing.h): with paced frame interpolation at 120/240 fps a logic step's first
-// frame is due on its step's slot (ns on the vsync's clock, -1: none), two vsyncs after the previous
-// step's
+// Step slots (vsync_pacing.h): with paced frame interpolation (60, 120 and 240 fps) a logic step's
+// first frame is due on its step's slot (ns on the vsync's clock, -1: none), two vsyncs after the
+// previous step's
 static int64_t g_step_slot = -1;  // g_flip_mutex held
-static bool step_slots() { return interp::frames_per_step() > 2 && interp::paced_interpolation(); }
+static bool step_slots() { return interp::paced_step_schedule(); }
 static int64_t step_ns() {  // the frames of a step, one (virtual) vsync each: the game's swap interval, two vsyncs
     return kVsyncClock.granule_ns(uint64_t(interp::frames_per_step()) * interp::effective_swap_interval(g_swap_interval) * vsync_granule());
 }

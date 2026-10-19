@@ -100,6 +100,24 @@ inline int64_t update_average(int64_t avg, int64_t sample) {
     return (avg * 3 + sample) / 4;
 }
 
+// The in-between decision of a step at 60 fps (one in-between frame), taken after the logic pass
+// (phase 0). The decision comes when the game has issued the logic frame, before the pass waits for its vsync and for the renderer to show it: a render thread that
+// delays the flips (issue #178: 15 ms a frame on top) makes the logic pass last longer than the
+// decision sees, and counted from the decision every in-between frame "fitted" and each step took
+// two render frames (24 instead of 29.97 steps a second). So the step's elapsed time counts the
+// logic pass at least at its recent duration (from one pass start to the next), and the in-between
+// frame is drawn when the next step then starts at most one drawn frame late (`frame`): that step
+// counts its lateness from the step schedule and skips its own in-between frame if it would not
+// make up for it. A computer that draws two frames a step a little too slowly so draws as many as
+// keep the game at its speed (a third of them skipped at 20 ms a frame) instead of none.
+// All times in one unit; pass_start: the logic pass's start (after any wait for its time),
+// step_start: the step's start on the schedule. On time and fast, the step's passes take one vsync
+// each and the frame is drawn.
+inline int64_t logic_pass_elapsed(int64_t now, int64_t pass_start, int64_t step_start, int64_t logic_pass) {
+    return std::max(now, pass_start + std::max<int64_t>(logic_pass, 0)) - step_start;
+}
+inline int64_t one_frame_budget(int64_t step, int64_t frame) { return step + frame; }
+
 // What follows a pass of a step (paced): phase just ended (0 = logic pass), n = the step's planned
 // in-between frames, elapsed = time since the logic pass started, pass = recent duration of a hold
 // pass.

@@ -48,7 +48,7 @@ inline uint64_t flip_executed(const Clock& c, int64_t& shift, uint64_t due, int6
     return at;
 }
 
-// Step slots (paced frame interpolation at 120/240 fps, issue #164). The game advances one logic
+// Step slots (paced frame interpolation at 60, 120 and 240 fps, issue #164). The game advances one logic
 // step every two 59.94 Hz vsyncs (its swap interval) and draws in-between frames between steps. A
 // step's first frame (its logic frame) is due on the step's slot, two vsyncs after the previous
 // step's slot, whatever the in-between frames did: the step schedule is the vsync grid itself.

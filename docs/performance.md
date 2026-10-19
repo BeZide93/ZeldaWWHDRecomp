@@ -290,6 +290,45 @@ Uneven/s is left out where every interval exceeds 1.4 frames. v0.2.12 is tag 5c3
 each with only the trace and load aids added.
 
 
+## Keep game speed at 60 fps (issue #178, 2026-10-19)
+
+With 60 fps frame interpolation and "Keep game speed" on, a computer whose render thread cannot draw
+60 frames a second still ran the game slower than real time: a Steam Deck reported 45 fps and 22.8
+logic steps/s (render thread ~21 ms a frame). Two causes, both at 60 fps only:
+
+- The in-between decision is taken when the logic pass has issued its frame, before the pass waits
+  for its flip. With the render thread behind, that wait is most of the pass, so every in-between
+  frame seemed to fit and every step took two render frames (here 24-25.5 steps/s at ~50 fps).
+- 60 fps had no step schedule: a step that ran late (by up to the 2 ms planning slack, or more) was
+  never made up for. 120/240 fps have used the step slots on the vsync grid since issue #164.
+
+Now 60 fps uses the same step slots and late-step rule as 120/240 fps (`gx2/vsync_pacing.h`; a logic
+pass less than a step late keeps the schedule), and the in-between decision of a 60 fps step counts
+the logic pass at least at its recent duration and lets the next step start at most one frame late
+(`interp_pacing.h` `logic_pass_elapsed`): that step then skips its own in-between frame if needed,
+so the game keeps 29.97 steps a second and the computer draws as many frames as it can. Without the
+load nothing changes.
+
+Apple M3 Max, Outset (the pier, standing), Vulkan, hidden windows (`WWHD_DISPLAY_HZ=0` at 120/240
+fps), "Keep game speed" on, three runs per build interleaved, ~60 s each after interpolation is
+switched on, 1-minute load 4-9. Cells: logic steps/s, fps (flips/s), flip interval p50 / p99,
+in-between frames drawn (median of the runs).
+
+| Case | before | after |
+|---|---|---|
+| 60 fps, render +15 ms | 25.52, 51.0, 19.58 / 20.23 ms, 100% | 29.96, 50.0, 19.86 / 22.09 ms, 67% |
+| 60 fps, render +19 ms (one run each; a Steam Deck's frame time) | 21.12, 42.3, 23.64 / 24.37 ms, 100% | 29.95, 42.0, 23.64 / 26.75 ms, 40% |
+| 60 fps, no load | 30.00, 59.9, 16.69 / 17.63 ms, 100% | 30.00, 59.9, 16.68 / 18.60 ms, 100% |
+| 120 fps, render +15 ms | 30.00, 50.7, 19.70 / 20.34 ms, 23% | 29.98, 50.7, 19.71 / 20.39 ms, 23% |
+| 240 fps, no load (~110 fps) | 30.00, 109.1, 8.93 / 15.38 ms, 38% | 30.00, 112.9, 8.29 / 14.02 ms, 39% |
+
+Logic steps/s here are the game's own 300-step averages (30.0 = 29.97 within their rounding). The
+60 fps p99 without load varies between runs of the same build (17.6-18.6 ms before, 17.6-20.6 ms
+after; one run of each build had a single interval over 25 ms). The simulation in
+`runtime/tools/interp_pacing_test.cpp` covers render loads of 15, 18 and 21 ms a frame and game
+passes a little over a vsync (before: 21-29 steps/s; after: 29.97, with the frames the renderer
+draws).
+
 ## Even frame pacing (2026-10-18)
 
 With frame interpolation the passes of a logic step take different times: the logic pass runs the

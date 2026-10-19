@@ -19,6 +19,7 @@ int frames_per_step();      // frames drawn per 30 Hz logic step: 1, 2, 4 or 8
 // "Keep game speed": in-between frames that do not fit are skipped instead of slowing the game down;
 // one setting for 60 fps and one for 120/240 fps
 bool paced_interpolation();  // at the current rate
+bool paced_step_schedule();  // paced and frame interpolation on: the step schedule (gx2 step slots) is in use
 void set_paced_interpolation(bool on);
 bool paced_interpolation_at(int fps);
 void set_paced_interpolation_at(int fps, bool on);

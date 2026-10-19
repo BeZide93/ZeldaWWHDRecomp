@@ -799,6 +799,9 @@ static std::atomic<bool> g_paced_hi{!g_env_paced || atoi(g_env_paced) != 0};  //
 static std::atomic<bool>& paced_flag(int f) { return f > 60 ? g_paced_hi : g_paced; }
 static bool paced() { return paced_flag(fps()).load(std::memory_order_relaxed); }
 bool paced_interpolation() { return paced(); }  // at the current frame rate
+// the step schedule of paced interpolation is in use (gx2_core.cpp step slots): Keep game speed on
+// at the current rate and frame interpolation on (not true 60, whose passes are not dropped)
+bool paced_step_schedule() { return paced() && interp_on(); }
 bool paced_interpolation_at(int f) { return paced_flag(f).load(std::memory_order_relaxed); }
 // Where each value came from, for the log (players' logs show which one they play with): the
 // platform's default, WWHD_INTERP_PACED, the saved setting or a change in the settings overlay.
@@ -928,14 +931,18 @@ static void paced_pass_start() {
     g_last_entry = now;
     g_slept = {};
     if (g_hold_next) return;
-    // 120/240 fps: the virtual vsync's step slots are the schedule (gx2/vsync_pacing.h): a step's
-    // logic frame is due two vsyncs after the previous one's, so the logic pass starts one drawn frame
-    // before its slot, as it does after a record pass. (Paced on a clock of its own, the logic pass
+    // The virtual vsync's step slots are the schedule (gx2/vsync_pacing.h; at 60, 120 and 240 fps): a
+    // step's logic frame is due two vsyncs after the previous one's, so the logic pass starts one drawn
+    // frame before its slot, as it does after a record pass. (Paced on a clock of its own, the logic pass
     // could sleep past its frame's vsync, which bunched up the step's frames: issue #164.) The slot
     // keeps the schedule for a logic frame that was less than a step late, and the elapsed time
-    // counted from it makes the step after a late one plan fewer in-between frames.
+    // counted from it makes the step after a late one plan fewer in-between frames (at 60 fps: skip
+    // its in-between frame), so the game catches up. (60 fps had no slots and no catch-up before:
+    // a step whose in-between frame was drawn could end up to 2 ms late, a render thread that
+    // delays the flips made it later still, and the lost time was never recovered: 24 logic steps a
+    // second with a 15 ms render load, slow motion with Keep game speed on.)
     pace_clock::time_point slot;
-    if (in_between() > 1 && gx2::next_step_time(slot)) {
+    if (gx2::next_step_time(slot)) {
         using ns = std::chrono::nanoseconds;
         const auto plan = pacing::slot_step_start(ns(now.time_since_epoch()).count(), ns(slot.time_since_epoch()).count(),
                                                   ns(vsync_tick()).count(), ns(kPacedStep).count(), g_wait_step);
@@ -963,12 +970,12 @@ static void paced_pass_start() {
         trace_step(now, due - kPacedStep, 'W');
         return;
     }
-    // 120/240 fps before there is a step slot (every step waits for its time): a step that starts
-    // late, because its in-between passes took longer than planned, keeps the schedule if it is less
-    // than a step late, so this step plans fewer in-between frames and the game catches up (counted
-    // from its own start, a late step was lost: 29.4 logic steps a second at 240 fps on a computer
-    // that draws ~150 fps)
-    const bool keep = g_wait_step && in_between() > 1 && g_last_logic != pace_clock::time_point{} &&
+    // Before there is a step slot (every step waits for its time): a step that starts late, because
+    // its in-between passes took longer than planned, keeps the schedule if it is less than a step
+    // late, so this step plans fewer in-between frames and the game catches up (counted from its own
+    // start, a late step was lost: 29.4 logic steps a second at 240 fps on a computer that draws ~150
+    // fps)
+    const bool keep = g_wait_step && g_last_logic != pace_clock::time_point{} &&
                       now - (g_last_logic + kPacedStep) < kPacedStep;
     const auto before = g_last_logic;
     g_wait_step = false;
@@ -1018,8 +1025,8 @@ static void paced_step_done(int holds) {
 }
 // end of every pass with a 60 fps mode on (phase 0: the logic pass): g_hold_next = another hold
 // pass of this step follows (always, unless paced and it does not fit before the next step is due;
-// pacing::next_pass). At 60 fps (one in-between pass, the record pass) it is the original rule:
-// the in-between pass is drawn when it fits, otherwise dropped.
+// pacing::next_pass). At 60 fps (one in-between pass, the record pass) it is drawn when it fits,
+// otherwise dropped.
 static void after_pass(int phase) {
     const bool pacing = paced() && interp_on();
     if (phase > 0) g_step_holds++;
@@ -1027,19 +1034,30 @@ static void after_pass(int phase) {
         g_hold_next = false;
         if (pacing) {
             paced_step_done(g_step_holds);
-            if (in_between() > 1) g_wait_step = true;  // fewer passes than planned would make the step short
+            g_wait_step = true;  // the next step waits for its time (fewer passes than planned would make the step short)
         }
         return;
     }
     if (!pacing) { g_hold_next = true; g_wait_step = false; return; }
     if (phase > 0) g_last_hold = pace_clock::now();
     const auto now = pace_clock::now();
-    const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(now - g_last_logic).count();
+    using ns = std::chrono::nanoseconds;
+    auto elapsed = std::chrono::duration_cast<ns>(now - g_last_logic).count();
+    // 60 fps (one in-between frame, its record pass ends the step): the logic pass is not over at this
+    // point, and the next step may start up to a frame late (pacing::logic_pass_elapsed). (At 120/240
+    // fps the later passes of a step see the time the earlier ones took, and a step planned with one
+    // in-between frame there keeps the rule it was measured with.)
+    auto budget = kPacedBudget.count();
+    if (phase == 0 && g_step_n == 1 && in_between() == 1) {
+        elapsed = pacing::logic_pass_elapsed(ns(now.time_since_epoch()).count(), ns((g_last_entry + g_slept).time_since_epoch()).count(),
+                                             ns(g_last_logic.time_since_epoch()).count(), std::chrono::duration_cast<ns>(g_logic_avg).count());
+        budget = pacing::one_frame_budget(ns(kPacedStep).count(), ns(vsync_tick()).count());
+    }
     // After a long time without in-between passes their cost is stale (the scene may be lighter
     // now): one probe, if one vsync tick fits; its duration replaces the estimate.
     const bool probe = phase == 0 && (now - g_last_hold >= kProbeAfter || (g_probe_retry != pace_clock::time_point{} && now >= g_probe_retry));
     const auto pass = std::chrono::duration_cast<std::chrono::nanoseconds>(probe ? vsync_tick() : g_hold_avg).count();
-    switch (pacing::next_pass(phase, g_step_n, elapsed, pass, kPacedBudget.count())) {
+    switch (pacing::next_pass(phase, g_step_n, elapsed, pass, budget)) {
     case pacing::Next::kHold:
         g_hold_next = true;
         g_probe = probe;
@@ -1049,7 +1067,7 @@ static void after_pass(int phase) {
     case pacing::Next::kRecord:  // blended hold passes that do not fit are skipped (the next hold pass increments g_phase)
         trace_step(now, g_last_logic, char('0' + std::min(phase, 9)));
         g_hold_next = true;
-        g_phase = pacing::skip_to(phase, g_step_n, elapsed, pass, kPacedBudget.count());
+        g_phase = pacing::skip_to(phase, g_step_n, elapsed, pass, budget);
         g_last_hold = now;
         break;
     default:  // the rest of the step's in-between passes (and its record pass) are dropped
