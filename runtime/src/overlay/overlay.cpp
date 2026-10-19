@@ -2302,11 +2302,20 @@ void perf_window(bool menu_open) {
         ImGui::Text("Average %.1f fps   %.1f logic steps/s", g_average.fps, g_average.logic);
         {
             // slow motion: frame interpolation without Keep game speed below its frame target
+            // Shown from the second 2-second window in a row below 29 logic steps/s (the game's rate is
+            // 29.97; a single hitch or load does not show it), hidden again from a window at 29.5: a game
+            // a few percent slow is noticeable over time, and the gap keeps it from flickering.
             static double t0 = 0; static uint64_t s0 = 0; static double rate = 30;
+            static int slowWindows = 0;
+            static bool slow = false;
             if (t0 == 0 || t - t0 < 0) { t0 = t; s0 = interp::executed_steps(); }
-            else if (t - t0 >= 2.0) { rate = (double)(interp::executed_steps() - s0) / (t - t0); t0 = t; s0 = interp::executed_steps(); }
-            if (interp::mode() == 1 && !interp::paced_interpolation() && rate > 1 && rate < 26)
-                ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "Slow motion: %.0f of 30 logic steps/s. Turn on Keep game speed", rate);
+            else if (t - t0 >= 2.0) {
+                rate = (double)(interp::executed_steps() - s0) / (t - t0); t0 = t; s0 = interp::executed_steps();
+                slowWindows = rate > 1 && rate < 29.0 ? slowWindows + 1 : 0;
+                slow = slow ? rate > 1 && rate < 29.5 : slowWindows >= 2;
+            }
+            if (slow && interp::mode() == 1 && !interp::paced_interpolation())
+                ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "Slow motion: %.1f of 30 logic steps/s. Turn on Keep game speed", rate);
         }
 #ifdef __ANDROID__
         ImGui::TextUnformatted(android_telemetry().c_str());
