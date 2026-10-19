@@ -7,6 +7,12 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Mod SDK v3 and the editor: island parts** (for mod makers). Smaller pieces of other islands can be placed like the
+  island buildings: Dragon Roost's shrine, torii, walkways, rope posts and sea rocks, Windfall's windmill cap, and two
+  Forsaken Fortress shipwrecks. They are made from your own game files the first time a mod uses them, have their own
+  collision and take the light of the room they stand in. Island pieces now check the textures they are built from, so
+  existing piece caches are rebuilt once.
+
 - **Island buildings and world objects: only real conflicts refuse a place now** (doors, start points, villagers and
   their walks, chests, event triggers); pots, signs, rupees, message and hint areas and the sea's surface no longer
   count. In the editor a building can be placed anywhere: on a red spot it shows as an outline with what is in the way
