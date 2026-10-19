@@ -356,6 +356,27 @@ inline const ChildClass* child_class_of(Kind parent) {
     return nullptr;
 }
 
+// ---------------------------------------------------------------- Floormaster (d_a_fm)
+// Parameter 0xFFFF04FF: no exit (0xFF; with one, being dragged down changes the stage), type 0, base
+// target 1 (Link only, never Medli or Makar), no path, no switch (0xFF). Home angle x 0xFFFF: no gone
+// switch and no restart point. Its grab of Link lasts the game's sink timer, then it lets go and sinks away
+// (MODE_DISAPPEAR):
+// it never drags Link down (GRAB_DEMO, the event DEFAULT_FM_GRAB and its stage change) and never grabs his
+// feet (GRAB_FOOT_DEMO becomes APPEAR, as the game's own no-demo switch does). It never prepares a skull
+// pot (PREPARE_ITEM, a retail TSUBO) and never targets bombs or pots (searchNearOtherActor). No NPC demo.
+// Death: MODE_DEATH (12) with the hole closed (animation 8) makes the one drop; its onActor uses the
+// placed setID 0xFFFF (no save bit). Colliders: body cylinder 0xA10 on mStts 0x86C, hand sphere 0x8E4 on
+// mStts2 0x8A8; enemyice 0xC64 (0xCD0 on 0xC94). No enemyfire.
+inline constexpr Collider kFloormasterColliders[] = {{0xA10, 0x86C, 0}, {0x8E4, 0x8A8, 0}, {0xCD0, 0xC94, 0xC64}};
+inline bool floormaster_verify(uint32_t a, uint32_t) {
+    return ld8(a + 0x3E3) == 0xFF && ld16(a + 0x3E4) == 0xFF && ld32(a + 0x3E8) == 0xFF && ld32(a + 0x3EC) == 0 &&
+           ld32(a + 0x3F0) == 0xFF && ld32(a + 0x3F4) == 0xFF && ld32(a + 0x3F8) == 1 && ld8(a + 0x400) == 0 &&
+           ld32(a + 0x3C8) <= 20 && ld32(a + 0x3C8) != 14 && ld32(a + 0x3C8) != 15 && ld32(a + 0x3C8) != 16 && ld32(a + 0x3C8) != 17;
+}
+inline bool floormaster_terminal(uint32_t a) { return ld32(a + 0x3C8) == 12 && s8(a + 0x3E1) == 8; }
+inline constexpr uint32_t kFmModeProc = CANONICAL_CODE_ID(0x021412BC).value(), kFmCancelGrab = CANONICAL_CODE_ID(0x02142028).value(),
+                          kFmSetAnm = CANONICAL_CODE_ID(0x021418D0).value(), kFmSearchOther = CANONICAL_CODE_ID(0x02140D04).value();
+
 inline constexpr Native kNatives[] = {
     {Kind::Stalfos, "stalfos", {0x7FE0, 0xBE, 0x25B0, kStalfosColliders, std::size(kStalfosColliders)},
      CANONICAL_CODE_ID(0x02495C70).value(), CANONICAL_CODE_ID(0x02493FB0).value(), CANONICAL_CODE_ID(0x02491F34).value(),
@@ -405,6 +426,10 @@ inline constexpr Native kNatives[] = {
      CANONICAL_CODE_ID(0x0216BBB0).value(), CANONICAL_CODE_ID(0x0216C1A0).value(), CANONICAL_CODE_ID(0x0216C1DC).value(),
      CANONICAL_CODE_ID(0x0216BBB4).value(), [] { return GD(0x10010D78); }, 0xFFFF0531u, 0, 0, {0, 0}, true,
      gyorg_verify, gyorg_terminal, nullptr, 0x443, false},
+    {Kind::Floormaster, "floormaster", {kFloormasterProfile, 0x77, 0x101C, kFloormasterColliders, std::size(kFloormasterColliders)},
+     CANONICAL_CODE_ID(0x02141FD4).value(), CANONICAL_CODE_ID(0x0214399C).value(), CANONICAL_CODE_ID(0x0214418C).value(),
+     CANONICAL_CODE_ID(0x02142154).value(), [] { return GD(0x1000F350); }, 0xFFFF04FFu, 0, 0xC64, {0, 0}, true,
+     floormaster_verify, floormaster_terminal, nullptr, 0x3CB, false, 0xFFFF},
 };
 
 inline const Native* find(Kind k) {

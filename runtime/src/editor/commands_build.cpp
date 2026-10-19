@@ -150,6 +150,7 @@ const std::vector<ActorType>& actor_types() {
         {"armos", "Armos", "Enemies", "The game's Armos statue: it wakes when Link comes near; strike its back.", false, false, false},
         {"armos_knight", "Armos Knight", "Enemies", "The game's Armos Knight: only a bomb in its open mouth (or a Light Arrow) defeats it.", false, false, false},
         {"wizzrobe", "Wizzrobe", "Enemies", "The game's red Wizzrobe: it appears and vanishes around where it was placed and casts fire at Link.", false, false, false},
+        {"floormaster", "Floormaster", "Enemies", "The game's Floormaster: a hand that rises from its dark hole and grabs Link for a moment (it never drags him away).", false, false, false},
         {"gyorg", "Gyorgs", "Enemies", "A group of the game's Gyorgs (on the sea only, once Link has the boomerang): they come out when Link is near and bite him; defeated when every one is.", false, false, false},
         {"warship", "Warship", "Enemies", "The game's enemy warship (on the sea only): it fires its cannon at Link; three hits from the boat's cannon sink it.", false, false, false},
         {"kargaroc", "Kargaroc", "Enemies", "The game's Kargaroc: a big bird that circles and swoops at Link (or perches until he comes near).", false, false, false},

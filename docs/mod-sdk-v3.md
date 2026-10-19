@@ -33,7 +33,7 @@ The initial allowlist is deliberately small:
 | Breakable prop | `pot`, `barrel`, `crate` | Required mod-owned `broken_flag` and `drops` list |
 | Latched floor switch | `switch` | Required mod-owned `switch_flag`; fixed yellow switch |
 | Rotating gate | `door` | Required `switch` naming a switch actor in the same mod |
-| Native enemies (preview) | `chuchu`, `bokoblin`, `moblin`, `keese`, `miniblin`, `peahat`, `darknut`, `rat_hole`, `bokobaba`, `bubble`, `octorok`, `stalfos`, `redead`, `mothula`, `morth`, `magtail`, `poe`, `armos`, `armos_knight`, `kargaroc`, `wizzrobe`, `warship`, `gyorg` | Required mod-owned `defeated_flag` and `drops`; fixed ordinary variants |
+| Native enemies (preview) | `chuchu`, `bokoblin`, `moblin`, `keese`, `miniblin`, `peahat`, `darknut`, `rat_hole`, `bokobaba`, `bubble`, `octorok`, `stalfos`, `redead`, `mothula`, `morth`, `magtail`, `poe`, `armos`, `armos_knight`, `kargaroc`, `wizzrobe`, `warship`, `gyorg`, `floormaster` | Required mod-owned `defeated_flag` and `drops`; fixed ordinary variants |
 
 Resident names are exact native object codes in lower case. Each placed copy uses fixed ordinary
 parameters: it stands where you put it (unless you give it a route, below) and has none of the
@@ -463,6 +463,7 @@ The allowlist below defines the supported variants.
 | `armos_knight` | Armos Knight: only a bomb in its open mouth (or a Light Arrow) defeats it |
 | `wizzrobe` | Red Wizzrobe: it appears and vanishes around where it was placed and casts fire at Link |
 | `warship` | The enemy warship (sea stage only): it fires its cannon at Link; three hits from the boat's cannon sink it |
+| `floormaster` | Floormaster: a hand that rises from its hole, grabs Link for a moment and lets go |
 | `gyorg` | A group of Gyorgs (sea stage only): variants `one` to `five` (default `three`); they come out of the sea when Link is near and bite him |
 | `kargaroc` | Kargaroc: it circles where it was placed and swoops at Link (variant `perched`: it sits until Link comes near) |
 
@@ -603,6 +604,10 @@ reach outside the mod:
   his boat and go with the ship when it is removed. As in the game, its aim is loose: many of its
   shots miss. The other "ship" pieces of the sea (the lookout
   platforms, the Forsaken Fortress searchlights and wall cannons) are not offered.
+- **Floormaster:** it grabs only Link (never bombs, pots or other characters), and only for a moment:
+  it lets go instead of dragging him down, so it never sends him anywhere. It never makes a skull pot.
+  As in the game it only comes up on flat floor (all round its hole): on slopes, stairs or a narrow
+  pier it stays below.
 - **Gyorgs:** only on the sea, and, as in the game, only once Link has the boomerang (until then
   nothing appears; the log says why). The whole group is one enemy with one `defeated_flag` and one
   set of `drops`: it is defeated when every Gyorg of the group has been killed. Gyorgs that dive away
