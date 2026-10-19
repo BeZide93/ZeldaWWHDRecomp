@@ -7,6 +7,12 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Mod SDK v3 and the editor: rat holes and patrolling Moblins** (for mod makers). A rat hole lets out three rats (or
+  bomb rats, or a mix) one after another while Link is near; each defeated rat gives the hole's drops, and the hole
+  closes once all three are beaten (its `defeat_switch` is set then). A bomb rat's bomb only hurts Link and the mod's own
+  enemies. Placed Moblins can patrol a route like Bokoblins.
+- **Fixed: a mod enemy, prop, switch or door that the game refuses to create no longer stops the game** later.
+
 - **Island buildings and world objects: only real conflicts refuse a place now** (doors, start points, villagers and
   their walks, chests, event triggers); pots, signs, rupees, message and hint areas and the sea's surface no longer
   count. In the editor a building can be placed anywhere: on a red spot it shows as an outline with what is in the way
