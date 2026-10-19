@@ -10,6 +10,7 @@
 #endif
 #include <cassert>
 #include <cstring>
+#include <functional>
 #include <map>
 #include <stdexcept>
 #include <vector>
@@ -32,7 +33,8 @@ void map_memory(uint32_t a,uint32_t n){
 }
 void call_hook(Cpu*c,uint32_t f,uint32_t a){Cpu nested=*c;nested.r[3]=a;hooks.at(f)(&nested);}
 bool known_address(uint32_t fn){const uint32_t known[]={0x02110D4C,0x0210DD3C,0x0210BFEC,0x021104B4,0x0219D568,0x0219AAE8,0x02199748,0x0219CE98,0x0209F918,0x0209BD1C,0x0209971C,0x0209F164,0x021CCB00,0x021C9B1C,0x021C7344,0x021CC44C,0x02446E54,0x02446374,0x02445EE4,0x024468E4,0x023CF600,0x023CC070,0x023C9994,0x023CEF04,0x0230F32C,0x0230BEF4,0x0230AE30,0x0230EDD0,0x0231175C,0x02311240,0x023111D8,0x023115BC,0x024C0B0C,0x024BD170,0x024BA238,0x024C0194,0x025D99E8,0x020402C8,0x025D9154,0x021992DC,0x025D9898,0x021C9AA0,0x025D7B24,0x020A47B4,0x021D0294,0x020A3B18,0x02041570,0x02041F94,0x02043F34,0x025D57E0};bool accepted=false;for(uint32_t expected:known)accepted|=fn==expected;return accepted;}
-void original(Cpu*c,uint32_t fn){fn-=STORY_ENEMIES_TEST_CODE_DELTA;assert(known_address(fn));++calls;const uint32_t a=c->r[3];
+std::function<bool(Cpu*,uint32_t)> probe;  // batch-3 kinds: a test's stand-in for the native step
+void original(Cpu*c,uint32_t fn){fn-=STORY_ENEMIES_TEST_CODE_DELTA;assert(known_address(fn));++calls;const uint32_t a=c->r[3];if(probe&&probe(c,fn))return;
  if(fn==0x02110D4C||fn==0x0219D568||fn==0x0209F918||fn==0x021CCB00){if(fn==0x0209F918||fn==0x021CCB00){const uint32_t flag=GD(fn==0x0209F918?0x10191468:0x101BA690);if(a!=Retail)assert(ld8(flag)==1);else assert(ld8(flag)==0);if(throw_create)throw std::runtime_error("synthetic create unwind");}++creates;c->r[3]=4;return;}
  // Darknut: its create sets the HIO latch only when it may own it, rewrites the shared search_sp/s_check
  // statics and runs its own execute three times; its execute fills the shared weapon search scratch
@@ -79,6 +81,16 @@ bool forget_prop_marker(PropMarkerHandle){return true;}
 bool enemy_defeated(EnemyMarkerHandle h){return defeated[h.value];}
 EnemyClaimStatus claim_enemy_drops(EnemyMarkerHandle h,const std::string&,const std::vector<PropDrop>&,bool){++claims;if(fail_claim)return EnemyClaimStatus::InvalidDefinition;if(defeated[h.value])return EnemyClaimStatus::AlreadyDefeated;defeated[h.value]=true;return EnemyClaimStatus::Committed;}
 }
+// Batch-3 enemies: each test keeps the claim counter as it found it.
+struct KeepClaims{unsigned v=claims;~KeepClaims(){claims=v;}};
+void toggles(story_enemies::Token t,story_enemies::Kind k,uint32_t a,std::initializer_list<uint32_t> offsets){for(uint32_t off:offsets){const uint8_t old=ld8(a+off);st8(a+off,uint8_t(old^1));assert(!story_enemies::verify_actor(t,k,a));st8(a+off,old);}assert(story_enemies::verify_actor(t,k,a));}
+void create(uint32_t fn,uint32_t a,void(*init)(uint32_t)=nullptr){static void(*setup)(uint32_t);setup=init;probe=[a](Cpu*c,uint32_t){if(c->r[3]!=a)return false;if(setup)setup(a);c->r[3]=4;return true;};run(fn,a);probe=nullptr;}
+// Fire Keese: bit 15 of the Keese word; mDamageType 0x80 (0 for the ordinary one); no Ice Keese in the game
+void fire_keese_test(story_enemies::Token t){using namespace story_enemies;KeepClaims keep;constexpr uint32_t Fk=Actor+0x1C000;
+ assert(parameters(Kind::Keese,"fire")==0xFFFF8000u&&parameters(Kind::Keese,"")==0xFFFF0000u&&!parameters(Kind::Keese,"ice"));
+ actor(Fk,24,Kind::Keese);st32(Fk+0xB0,0xFFFF8000u);st8(Fk+0xAB9,0x80);assert(verify_actor(t,Kind::Keese,Fk));toggles(t,Kind::Keese,Fk,{0xAB9});
+ bind(t,24);create(0x0219D568,Fk);assert(owns_actor(Fk));
+ probe=[](Cpu*c,uint32_t f){if(f!=0x0219AAE8u)return false;st8(Fk+0x489,30);Cpu d=*c;d.r[3]=Fk;hooks.at(0x025D99E8)(&d);assert(d.r[3]==0xFFFFFFFFu);c->r[3]=1;return true;};run(0x0219AAE8,Fk);probe=nullptr;assert(is_defeated(t));}
 int main(int argc,char**argv){using namespace story_enemies;const bool drowning_test=argc==2&&std::strcmp(argv[1],"--drowning")==0;const bool weapons=drowning_test||(argc==2&&std::strcmp(argv[1],"--weapons")==0);
  map_memory(Actor,0x20000);map_memory(Arena,0x20000);map_memory(GD(0x101F0000),0x10000);map_memory(GD(0x10460000),0x10000);
 #if STORY_ENEMIES_TEST_CODE_DELTA
@@ -91,7 +103,9 @@ int main(int argc,char**argv){using namespace story_enemies;const bool drowning_
  Token bk=0,mo=0;if(weapons){assert(configure_children({[](Token,Kind,uint32_t,uint32_t epoch){assert(epoch>=1);++child_scopes;return true;},[]{assert(child_scopes);--child_scopes;},[](Token,uint32_t){return children_ready;},[](Token,uint32_t){++child_retires;}},true));Spec b{Kind::Bokoblin,"m","bk","bk.dead",{}, {},1},m{Kind::Moblin,"m","mo","mo.dead",{}, {},1};bk=declare(b,why);mo=declare(m,why);assert(bk&&mo);st32(GD(0x101F3EE0)+0xBD*4,Actor+0x8200);st32(Actor+0x8210,0x19A4);st32(GD(0x101F3EE0)+0xBC*4,Actor+0x8300);st32(Actor+0x8310,0x343C);map_memory(GD(0x101B0000),0x10000);map_memory(GD(0x10190000),0x10000);}
  Spec pt{Kind::Miniblin,"m","pt","pt.dead",{}, {},1};const Token mini=declare(pt,why);assert(mini);Spec ph{Kind::Peahat,"m","ph","ph.dead",{}, {},1};const Token hat=declare(ph,why);assert(hat);Spec nz{Kind::Rat,"m","nz","nz.dead",{}, {},1};const Token rat=declare(nz,why);assert(rat);Spec nb{Kind::Rat,"m","nb","nb.dead",{}, {},1,0xFFFF0101u};const Token bomb_rat=declare(nb,why);assert(bomb_rat);Spec ng{Kind::RatHole,"m","ng","ng.dead",{}, {},1};const Token hole=declare(ng,why);assert(hole);
  Token tn=0;if(weapons){Spec d{Kind::Darknut,"m","tn","tn.dead",{}, {},1,parameters(Kind::Darknut,"mighty")};assert(d.params==0xFFFFFA54u&&!parameters(Kind::Darknut,"frozen"));tn=declare(d,why);assert(tn&&home_x(tn)==0xA0&&home_x(first)==0);st32(GD(0x101F3EE0)+0xBF*4,Actor+0x8900);st32(Actor+0x8910,0x1C5C);}
+ Spec fk{Kind::Keese,"m","fk","fk.dead",{}, {},1,0xFFFF8000u};const Token fire_keese=declare(fk,why);assert(fire_keese);
  configure(original,invoke,{Arena+0xB000,Arena+0xB030,Arena+0xB060,Arena+0xB090,Arena+0xB0C0,Arena+0xB0F0,Arena+0xB120,Arena+0xB150,Arena+0xB180});assert(install([](uint32_t){return std::string();},[](uint32_t f,void(*fn)(Cpu*)){const uint32_t canonical=f-STORY_ENEMIES_TEST_CODE_DELTA;assert(known_address(canonical)&&!hooks.count(canonical));hooks[canonical]=fn;}));assert(hooks.size()==50);
+ fire_keese_test(fire_keese);
  { // Rat: a rat of a rat hole (arg0 1), its own type (ordinary or bomb rat), unfrozen
   constexpr uint32_t Rat=Actor+0x12000;actor(Rat,16,Kind::Rat);assert(parameters(Kind::Rat)==0xFFFF0001u);
   assert(verify_actor(rat,Kind::Rat,Rat));st8(Rat+0x3D1,1);assert(!verify_actor(rat,Kind::Rat,Rat));st32(Rat+0xB0,0xFFFF0101u);assert(verify_actor(bomb_rat,Kind::Rat,Rat));st8(Rat+0x3D1,0);assert(!verify_actor(bomb_rat,Kind::Rat,Rat));st32(Rat+0xB0,0xFFFF0001u);assert(verify_actor(rat,Kind::Rat,Rat));

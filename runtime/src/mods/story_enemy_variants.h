@@ -53,6 +53,10 @@ inline constexpr Variant kVariants[] = {
     {"darknut", "shield", 0xFFFF9614u, "Darknut with a shield", "A Darknut with a shield: it blocks Link's sword.", 0x0040},
     {"darknut", "helmet", 0xFFFF9654u, "Darknut with a helmet", "A Darknut with a helmet and a shield: it takes twice the hits.", 0x0060},
     {"darknut", "mighty", 0xFFFFFA54u, "Mighty Darknut", "The Mighty Darknut: helmet, shield and cape, and it notices Link from further away.", 0x00A0},
+    // Keese (d_a_ki): action 0 (waits, then attacks), the nearest notice range, no path, no switch; bit 15 is
+    // the Fire Keese (its own model, a burning attack, 2 damage, immune to fire). The game has no Ice Keese.
+    {"keese", "normal", 0xFFFF0000u, "Keese", "The ordinary Keese."},
+    {"keese", "fire", 0xFFFF8000u, "Fire Keese", "A Fire Keese: its bite sets Link on fire for a moment; fire doesn't hurt it."},
 };
 
 // the kind's variant `name` ("" is the default, the kind's first)

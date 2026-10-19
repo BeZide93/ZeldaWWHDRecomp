@@ -116,10 +116,13 @@ int main() {
             const auto fp=story_actors::identity::fingerprint("m",actors[0]);auto plain=actors[0];plain.variant.clear();assert(fp!=story_actors::identity::fingerprint("m",plain));}
         {auto data=fixture();assert(parse_actors(data,actors,why)&&actors[0].variant.empty()&&story_enemy_variants::find("chuchu","")->params==0xFF000000u);}
         for(const char* bad_variant:{R"({"variant":"purple"})",R"({"variant":""})",R"({"variant":3})",R"({"variant":"red","colour":1})",R"({"colour":"red"})",R"("red")"}){auto data=fixture();data["actors"].array[0]["parameters"]=mods::json::parse(bad_variant);assert(!parse_actors(data,actors,why)&&actors.empty());}
-        for(const char* plain_kind:{"moblin","keese","miniblin","peahat"}){auto data=fixture();data["actors"].array[0]["actor"]=plain_kind;data["actors"].array[0]["parameters"]=mods::json::parse(R"({"variant":"red"})");assert(!parse_actors(data,actors,why)&&why.find("no variants")!=std::string::npos);}
+        for(const char* plain_kind:{"moblin","miniblin","peahat"}){auto data=fixture();data["actors"].array[0]["actor"]=plain_kind;data["actors"].array[0]["parameters"]=mods::json::parse(R"({"variant":"red"})");assert(!parse_actors(data,actors,why)&&why.find("no variants")!=std::string::npos);}
         {auto data=fixture();data["actors"].array[0]["parameters"]=mods::json::parse(R"({"variant":"purple"})");assert(!parse_actors(data,actors,why)&&why.find("green, red, blue, yellow or black")!=std::string::npos);}
         for(const char* colour:{"red","blue","yellow"}){const auto*v=story_enemy_variants::find("chuchu",colour);assert(v&&(v->params&0xFFFF00FFu)==0xFF000000u&&((v->params>>8)&0xFF)>=1&&((v->params>>8)&0xFF)<=4);}
         assert(story_enemy_variants::find("chuchu","black")->params==0xFF000300u);
+        // Fire Keese; the game has no Ice Keese
+        assert(story_enemy_variants::find("keese","")->params==0xFFFF0000u&&story_enemy_variants::find("keese","fire")->params==0xFFFF8000u&&!story_enemy_variants::find("keese","ice"));
+        {auto data=fixture();data["actors"].array[0]["actor"]="keese";data["actors"].array[0]["parameters"]=mods::json::parse(R"({"variant":"ice"})");assert(!parse_actors(data,actors,why)&&why.find("normal or fire")!=std::string::npos);}
         // a patrolling Bokoblin: points and mode (loop or back_and_forth), never speed or pauses; other enemies never take a path
         {auto data=fixture();auto& a=data["actors"].array[0];a["actor"]="bokoblin";a["path"]=mods::json::parse(R"({"points":[{"x":300,"y":0,"z":0},{"x":300,"y":0,"z":300}],"mode":"back_and_forth"})");
          assert(parse_actors(data,actors,why)&&actors[0].path.points.size()==2&&actors[0].path.back_and_forth);

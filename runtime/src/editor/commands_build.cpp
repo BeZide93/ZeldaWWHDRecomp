@@ -133,7 +133,7 @@ const std::vector<ActorType>& actor_types() {
         {"chuchu", "ChuChu", "Enemies", "The game's ChuChu (green, red, blue, yellow or black: options.variant); its defeated flag and drops.", false, false, false},
         {"bokoblin", "Bokoblin", "Enemies", "The game's Bokoblin (a stick, a shield or a machete: options.variant).", false, false, false},
         {"moblin", "Moblin", "Enemies", "The game's Moblin.", false, false, false},
-        {"keese", "Keese", "Enemies", "The game's Keese.", false, false, false},
+        {"keese", "Keese", "Enemies", "The game's Keese (normal or fire: options.variant).", false, false, false},
         {"peahat", "Peahat", "Enemies", "The game's Peahat: it flies; knock it down (the boomerang or the Deku Leaf's wind), then strike.", false, false, false},
         {"miniblin", "Miniblin", "Enemies", "The game's Miniblin: it pops up when Link comes near and is defeated for good.", false, false, false},
         {"darknut", "Darknut", "Enemies", "The game's Darknut, with its sword (with a shield, a helmet, or the Mighty Darknut's cape: options.variant).", false, false, false},

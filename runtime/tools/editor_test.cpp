@@ -669,13 +669,13 @@ void live_kinds_note() {
         const auto live = editor_live_kinds::read(reply);
         const Value a = json(actor_json);
         const std::string actor = a.get("actor").string();
-        const bool enemy = actor == "chuchu" || actor == "bokoblin" || actor == "moblin" || actor == "keese" || actor == "miniblin" || actor == "darknut";
+        const bool enemy = actor == "chuchu" || actor == "bokoblin" || actor == "moblin" || actor == "keese" || actor == "miniblin" || actor == "darknut" || actor == "peahat";
         const bool prop = actor == "pot" || actor == "barrel" || actor == "crate";
         CHECK(!live.empty());
         return editor_live_kinds::restart_only(a, live, enemy, prop);
     };
     const char* live_ones[] = {R"({"actor": "chuchu", "parameters": {"variant": "blue"}})", R"({"actor": "bokoblin", "parameters": {"variant": "shield"}})",
-                               R"({"actor": "miniblin"})", R"({"actor": "darknut", "parameters": {"variant": "mighty"}})", R"({"actor": "keese"})", R"({"actor": "pot"})", R"({"actor": "switch"})",
+                               R"({"actor": "miniblin"})", R"({"actor": "darknut", "parameters": {"variant": "mighty"}})", R"({"actor": "keese"})", R"({"actor": "keese", "parameters": {"variant": "fire"}})", R"({"actor": "pot"})", R"({"actor": "switch"})",
                                R"({"actor": "resident", "parameters": {"resident": "sa2"}})", R"({"actor": "sign"})"};
     host.live_kinds = 1;
     for (const char* a : live_ones) CHECK(!note(a));
@@ -757,6 +757,10 @@ void building(const fs::path& examples) {
     CHECK(!ok(s.run("add_actor", json(R"({"type": "darknut", "id": "statue", "options": {"variant": "frozen"}})"))) && !actor_of(s, "statue"));
     CHECK(ok(s.run("set_actor", json(R"({"id": "knight", "property": "defeat_switch", "value": "switch"})"))) && actor_of(s, "knight")->get("defeat_switch").string() == "switch");
     CHECK(ok(s.run("remove_actor", json(R"({"id": "knight", "confirm": true})"))));
+    // batch 3: Fire Keese; no Ice Keese, no Bubble skull
+    CHECK(ok(s.run("add_actor", json(R"({"type": "keese", "id": "fire-keese", "options": {"variant": "fire"}})"))) && actor_of(s, "fire-keese")->get("parameters").get("variant").string() == "fire");
+    CHECK(!ok(s.run("add_actor", json(R"({"type": "keese", "id": "ice-keese", "options": {"variant": "ice"}})"))) && !actor_of(s, "ice-keese"));
+    CHECK(ok(s.run("validate")));
     {
         bool listed = false;
         const Value types = s.run("list_actor_types");

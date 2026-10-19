@@ -134,7 +134,7 @@ more of the same; **Stop placing** in the toolbar or Esc ends it.
 - **Props:** pot, barrel, crate.
 - **Switches:** switch, door (it opens with one of the mod's switches).
 - **Enemies:** ChuChu (green, red, blue, yellow or black), Bokoblin (with a stick, a shield or a machete),
-  Moblin, Keese, Miniblin, Peahat, Darknut (with a shield, a helmet, or the Mighty Darknut), Rat hole (rats,
+  Moblin, Keese (or a Fire Keese), Miniblin, Peahat, Darknut (with a shield, a helmet, or the Mighty Darknut), Rat hole (rats,
   bomb rats or both). The Inspector's **Variant** changes a placed one, and **Sets switch when defeated**
   picks one of the mod's switches to set once every enemy naming it is defeated.
 - **Your models:** one of the mod's models (static or skinned), your own enemy (a skinned model with
@@ -210,7 +210,7 @@ women, the sailors) and the seated villager can't walk a route; the Inspector sa
 ### What shows at once, and what after a restart
 
 Signs, residents, chests, pots, barrels and crates, switches and doors, ChuChus, Bokoblins, Moblins,
-Keese, Miniblins and Darknuts, and actors with your models appear, change and disappear in the game at once, in the room you are
+Keese, Miniblins, Peahats and Darknuts, and actors with your models appear, change and disappear in the game at once, in the room you are
 in. Their drops and broken or defeated flags count from then on, as they do after a start. A change to
 one of them (another place, other drops, another flag) creates it again in the game.
 

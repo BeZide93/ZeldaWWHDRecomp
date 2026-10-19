@@ -445,7 +445,7 @@ The allowlist below defines the supported variants.
 | `chuchu` | Ordinary green ChuChu, or a declared colour (below) |
 | `bokoblin` | Ordinary type-4 Bokoblin, or a declared weapon variant (below) |
 | `moblin` | Ordinary Moblin |
-| `keese` | Ordinary Keese, the native KI bat; not Morth |
+| `keese` | Ordinary Keese, the native KI bat, or the Fire Keese (below); not Morth |
 | `miniblin` | Ordinary Miniblin: hidden until Link comes near and looks its way; never respawns |
 | `peahat` | Ordinary Peahat: it flies; knock it down (the boomerang, the Deku Leaf's wind, the hookshot), then strike. Never the Seahat |
 | `darknut` | Darknut guarding its place with its sword, or a declared variant (below) |
@@ -492,6 +492,9 @@ weapons must not damage retail actors or join retail enemy cohorts. Native item
 drops are replaced by the declared Bag rewards. Some native disappearance effects
 are omitted because their native effect actor also creates retail drops; identical
 retail defeat effects are not promised.
+
+What these enemies do to Link stays the game's own and ends on its own: a Fire Keese's burn wears off
+as it does in the game.
 
 ### Patrolling Bokoblins and Moblins
 
@@ -588,6 +591,8 @@ checked; packages still cannot give raw parameters.
 | `darknut` | `shield` | Carries a shield as well: it blocks Link's sword |
 | `darknut` | `helmet` | Wears a helmet and carries a shield: it takes twice the hits |
 | `darknut` | `mighty` | The Mighty Darknut: helmet, shield and cape, and it notices Link from further away |
+| `keese` | `normal` | The ordinary Keese (the same as no variant) |
+| `keese` | `fire` | The Fire Keese: its bite sets Link on fire for a moment; fire doesn't hurt it. (The game has no Ice Keese.) |
 
 ```json
 {"id": "pier-chu", "actor": "chuchu", "parameters": {"variant": "blue"},
