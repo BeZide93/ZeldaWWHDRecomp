@@ -447,7 +447,7 @@ The allowlist below defines the supported variants.
 | `moblin` | Ordinary Moblin |
 | `keese` | Ordinary Keese, the native KI bat, or the Fire Keese (below); not Morth |
 | `miniblin` | Ordinary Miniblin: hidden until Link comes near and looks its way; never respawns |
-| `peahat` | Ordinary Peahat: it flies; knock it down (the boomerang, the Deku Leaf's wind, the hookshot), then strike. Never the Seahat |
+| `peahat` | Ordinary Peahat: it flies; knock it down (the boomerang, the Deku Leaf's wind, the hookshot), then strike. Or the Seahat (below) |
 | `darknut` | Darknut guarding its place with its sword, or a declared variant (below) |
 | `rat_hole` | A rat hole three rats come out of (see [Rat holes](#rat-holes)) |
 
@@ -494,7 +494,7 @@ are omitted because their native effect actor also creates retail drops; identic
 retail defeat effects are not promised.
 
 What these enemies do to Link stays the game's own and ends on its own: a Fire Keese's burn wears off
-as it does in the game.
+as it does in the game. A Seahat of a mod never counts towards the game's own tally of sea enemies.
 
 ### Patrolling Bokoblins and Moblins
 
@@ -593,6 +593,8 @@ checked; packages still cannot give raw parameters.
 | `darknut` | `mighty` | The Mighty Darknut: helmet, shield and cape, and it notices Link from further away |
 | `keese` | `normal` | The ordinary Keese (the same as no variant) |
 | `keese` | `fire` | The Fire Keese: its bite sets Link on fire for a moment; fire doesn't hurt it. (The game has no Ice Keese.) |
+| `peahat` | `peahat` | The ordinary Peahat (the same as no variant) |
+| `peahat` | `seahat` | The Seahat: bigger, it hovers over the water and dives at Link only while he sails the boat. Place it over the sea |
 
 ```json
 {"id": "pier-chu", "actor": "chuchu", "parameters": {"variant": "blue"},

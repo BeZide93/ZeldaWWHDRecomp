@@ -675,7 +675,7 @@ void live_kinds_note() {
         return editor_live_kinds::restart_only(a, live, enemy, prop);
     };
     const char* live_ones[] = {R"({"actor": "chuchu", "parameters": {"variant": "blue"}})", R"({"actor": "bokoblin", "parameters": {"variant": "shield"}})",
-                               R"({"actor": "miniblin"})", R"({"actor": "darknut", "parameters": {"variant": "mighty"}})", R"({"actor": "keese"})", R"({"actor": "keese", "parameters": {"variant": "fire"}})", R"({"actor": "pot"})", R"({"actor": "switch"})",
+                               R"({"actor": "miniblin"})", R"({"actor": "darknut", "parameters": {"variant": "mighty"}})", R"({"actor": "keese"})", R"({"actor": "keese", "parameters": {"variant": "fire"}})", R"({"actor": "peahat", "parameters": {"variant": "seahat"}})", R"({"actor": "pot"})", R"({"actor": "switch"})",
                                R"({"actor": "resident", "parameters": {"resident": "sa2"}})", R"({"actor": "sign"})"};
     host.live_kinds = 1;
     for (const char* a : live_ones) CHECK(!note(a));
@@ -757,8 +757,9 @@ void building(const fs::path& examples) {
     CHECK(!ok(s.run("add_actor", json(R"({"type": "darknut", "id": "statue", "options": {"variant": "frozen"}})"))) && !actor_of(s, "statue"));
     CHECK(ok(s.run("set_actor", json(R"({"id": "knight", "property": "defeat_switch", "value": "switch"})"))) && actor_of(s, "knight")->get("defeat_switch").string() == "switch");
     CHECK(ok(s.run("remove_actor", json(R"({"id": "knight", "confirm": true})"))));
-    // batch 3: Fire Keese; no Ice Keese, no Bubble skull
+    // batch 3: Fire Keese and the Seahat; no Ice Keese, no Bubble skull
     CHECK(ok(s.run("add_actor", json(R"({"type": "keese", "id": "fire-keese", "options": {"variant": "fire"}})"))) && actor_of(s, "fire-keese")->get("parameters").get("variant").string() == "fire");
+    CHECK(ok(s.run("add_actor", json(R"({"type": "peahat", "id": "seahat", "options": {"variant": "seahat"}})"))) && actor_of(s, "seahat")->get("parameters").get("variant").string() == "seahat");
     CHECK(!ok(s.run("add_actor", json(R"({"type": "keese", "id": "ice-keese", "options": {"variant": "ice"}})"))) && !actor_of(s, "ice-keese"));
     CHECK(ok(s.run("validate")));
     {

@@ -91,6 +91,14 @@ void fire_keese_test(story_enemies::Token t){using namespace story_enemies;KeepC
  actor(Fk,24,Kind::Keese);st32(Fk+0xB0,0xFFFF8000u);st8(Fk+0xAB9,0x80);assert(verify_actor(t,Kind::Keese,Fk));toggles(t,Kind::Keese,Fk,{0xAB9});
  bind(t,24);create(0x0219D568,Fk);assert(owns_actor(Fk));
  probe=[](Cpu*c,uint32_t f){if(f!=0x0219AAE8u)return false;st8(Fk+0x489,30);Cpu d=*c;d.r[3]=Fk;hooks.at(0x025D99E8)(&d);assert(d.r[3]==0xFFFFFFFFu);c->r[3]=1;return true;};run(0x0219AAE8,Fk);probe=nullptr;assert(is_defeated(t));}
+// Seahat: Peahat type 1; the kill counter (event register 0x7EFF) written during its step is restored
+void seahat_test(story_enemies::Token t){using namespace story_enemies;KeepClaims keep;constexpr uint32_t Sh=Actor+0x1A000,Info=Actor+0x1E000;
+ assert(parameters(Kind::Peahat,"seahat")==0xFFFFFF01u&&parameters(Kind::Peahat,"")==0xFFFFFF00u);
+ actor(Sh,23,Kind::Peahat);st32(Sh+0xB0,0xFFFFFF01u);st8(Sh+0x45A,1);assert(verify_actor(t,Kind::Peahat,Sh));toggles(t,Kind::Peahat,Sh,{0x45A,0xAB4+0x1B1});
+ bind(t,23);create(0x023CF600,Sh);assert(owns_actor(Sh));
+ st32(GD(0x101F84DC),Info);st8(Info+0x644+0x7E,5);
+ probe=[](Cpu*c,uint32_t f){if(f!=0x023CC070u)return false;st8(Info+0x644+0x7E,6);st8(Sh+0x3A1,0);Cpu d=*c;d.r[3]=Sh;hooks.at(0x025D99E8)(&d);assert(d.r[3]==0xFFFFFFFFu);c->r[3]=1;return true;};run(0x023CC070,Sh);probe=nullptr;
+ assert(ld8(Info+0x644+0x7E)==5&&is_defeated(t));st32(GD(0x101F84DC),0);}
 int main(int argc,char**argv){using namespace story_enemies;const bool drowning_test=argc==2&&std::strcmp(argv[1],"--drowning")==0;const bool weapons=drowning_test||(argc==2&&std::strcmp(argv[1],"--weapons")==0);
  map_memory(Actor,0x20000);map_memory(Arena,0x20000);map_memory(GD(0x101F0000),0x10000);map_memory(GD(0x10460000),0x10000);
 #if STORY_ENEMIES_TEST_CODE_DELTA
@@ -104,8 +112,10 @@ int main(int argc,char**argv){using namespace story_enemies;const bool drowning_
  Spec pt{Kind::Miniblin,"m","pt","pt.dead",{}, {},1};const Token mini=declare(pt,why);assert(mini);Spec ph{Kind::Peahat,"m","ph","ph.dead",{}, {},1};const Token hat=declare(ph,why);assert(hat);Spec nz{Kind::Rat,"m","nz","nz.dead",{}, {},1};const Token rat=declare(nz,why);assert(rat);Spec nb{Kind::Rat,"m","nb","nb.dead",{}, {},1,0xFFFF0101u};const Token bomb_rat=declare(nb,why);assert(bomb_rat);Spec ng{Kind::RatHole,"m","ng","ng.dead",{}, {},1};const Token hole=declare(ng,why);assert(hole);
  Token tn=0;if(weapons){Spec d{Kind::Darknut,"m","tn","tn.dead",{}, {},1,parameters(Kind::Darknut,"mighty")};assert(d.params==0xFFFFFA54u&&!parameters(Kind::Darknut,"frozen"));tn=declare(d,why);assert(tn&&home_x(tn)==0xA0&&home_x(first)==0);st32(GD(0x101F3EE0)+0xBF*4,Actor+0x8900);st32(Actor+0x8910,0x1C5C);}
  Spec fk{Kind::Keese,"m","fk","fk.dead",{}, {},1,0xFFFF8000u};const Token fire_keese=declare(fk,why);assert(fire_keese);
+ Spec sh{Kind::Peahat,"m","sh","sh.dead",{}, {},1,0xFFFFFF01u};const Token seahat=declare(sh,why);assert(seahat);
  configure(original,invoke,{Arena+0xB000,Arena+0xB030,Arena+0xB060,Arena+0xB090,Arena+0xB0C0,Arena+0xB0F0,Arena+0xB120,Arena+0xB150,Arena+0xB180});assert(install([](uint32_t){return std::string();},[](uint32_t f,void(*fn)(Cpu*)){const uint32_t canonical=f-STORY_ENEMIES_TEST_CODE_DELTA;assert(known_address(canonical)&&!hooks.count(canonical));hooks[canonical]=fn;}));assert(hooks.size()==50);
  fire_keese_test(fire_keese);
+ seahat_test(seahat);
  { // Rat: a rat of a rat hole (arg0 1), its own type (ordinary or bomb rat), unfrozen
   constexpr uint32_t Rat=Actor+0x12000;actor(Rat,16,Kind::Rat);assert(parameters(Kind::Rat)==0xFFFF0001u);
   assert(verify_actor(rat,Kind::Rat,Rat));st8(Rat+0x3D1,1);assert(!verify_actor(rat,Kind::Rat,Rat));st32(Rat+0xB0,0xFFFF0101u);assert(verify_actor(bomb_rat,Kind::Rat,Rat));st8(Rat+0x3D1,0);assert(!verify_actor(bomb_rat,Kind::Rat,Rat));st32(Rat+0xB0,0xFFFF0001u);assert(verify_actor(rat,Kind::Rat,Rat));

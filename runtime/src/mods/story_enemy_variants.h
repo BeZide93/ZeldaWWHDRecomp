@@ -57,6 +57,10 @@ inline constexpr Variant kVariants[] = {
     // the Fire Keese (its own model, a burning attack, 2 damage, immune to fire). The game has no Ice Keese.
     {"keese", "normal", 0xFFFF0000u, "Keese", "The ordinary Keese."},
     {"keese", "fire", 0xFFFF8000u, "Fire Keese", "A Fire Keese: its bite sets Link on fire for a moment; fire doesn't hurt it."},
+    // Peahat (d_a_ph): type 0 the Peahat, type 1 the Seahat (bigger, over the sea; it attacks only while Link
+    // sails; its kill counter, event register 0x7EFF, is kept unchanged by the adapter); default ranges.
+    {"peahat", "peahat", 0xFFFFFF00u, "Peahat", "The ordinary Peahat."},
+    {"peahat", "seahat", 0xFFFFFF01u, "Seahat", "A Seahat: it hovers over water and dives at Link while he sails the boat."},
 };
 
 // the kind's variant `name` ("" is the default, the kind's first)
