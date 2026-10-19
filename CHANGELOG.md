@@ -7,6 +7,16 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Mods and the world editor can place the game's own objects by name** (`game:palm`, trees, tables, shelves, lamps,
+  plant pots, flowers, nests, the Rito and sea flags, the sea lookout tower, grass, flowers and small trees): they load
+  from your own game files, never from the mod. In the editor: Add > Game objects, with Variant, Turn and Scale in the
+  Inspector; `list_game_objects` over MCP.
+- **Mod SDK v3: thirteen more Windfall villagers can be placed** (residents uo1, uo3, ub1–ub4, uw1, uw2, um2,
+  sa1–sa4); um3, sa5, ug1 and ug2 are refused with the reason.
+- **Mod SDK v3: more enemies** — red, blue and yellow ChuChus (`parameters.variant`), the Miniblin, and Bokoblins with
+  a shield or a machete, each with the mod's defeat flag and drops. The editor picks a villager or an enemy variant
+  from a list in Add and in the Inspector.
+- **World editor: the Inspector no longer says an enemy's changes wait for a restart** when they apply at once.
 - **World editor: story changes while the game runs.** Quests, quest talks (also those for the game's villagers),
   letters and charts change in the running game at the next calm moment, with every edit, Undo and Redo; an item's
   name, description, amount and use change at once. A new item, its icon, held model and hold_up, and removed charts
