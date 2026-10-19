@@ -16,8 +16,10 @@ struct Spec {Kind kind;std::string mod,id,defeated_flag;std::vector<story_items:
 // The fixed native parameters. Bokoblin: type 4 (stands, then fights); byte 1 is its sight and
 // territory range in tens of units, 0xFF the game's own (500 to notice Link, 750 to give up); 0 made
 // it blind (it never noticed Link). Byte 2 no path, byte 3 no switch.
+// Rat 0xFFFFFF00: arg0 0 (no hole parent), type 0xFF read as 0 (no bomb: the bomb rat creates a free bomb actor).
+// Peahat 0xFFFFFF00: type 0 (Peahat, never the Seahat and its kill-counter register), default ranges.
 // Miniblin 0xFFFF0A01: behaviour 1 (never respawns), notice range 10 (1000 units), no spawn switches
-constexpr uint32_t parameters(Kind k){return k==Kind::ChuChu?0xFF000000u:k==Kind::Bokoblin?0xFFFFFF04u:(k==Kind::Keese||k==Kind::Moblin)?0xFFFF0000u:k==Kind::Miniblin?0xFFFF0A01u:0u;}
+constexpr uint32_t parameters(Kind k){return k==Kind::ChuChu?0xFF000000u:k==Kind::Bokoblin?0xFFFFFF04u:(k==Kind::Keese||k==Kind::Moblin)?0xFFFF0000u:k==Kind::Miniblin?0xFFFF0A01u:k==Kind::Peahat?0xFFFFFF00u:k==Kind::Rat?0xFFFFFF00u:0u;}
 // the manifest's actor name of a kind ("chuchu", ...)
 const char* kind_name(Kind);
 // the parameters of a kind's variant ("" the default); 0 for a variant the kind doesn't declare
@@ -42,7 +44,9 @@ bool supported(Kind);
 Token declare(const Spec&,std::string& why);
 size_t checkpoint();void rollback(size_t) noexcept;
 void bind(Token,uint32_t pid,bool restored=false);
-bool available(Token);void quarantine(Token);bool begin_epoch(Token,uint32_t epoch);
+bool available(Token);void quarantine(Token);
+// the declaration's defeat marker is committed (its defeat counted)
+bool is_defeated(Token);bool begin_epoch(Token,uint32_t epoch);
 void state_loaded();
 // Pure bounded native reads: suitable for the ownership core's mandatory callback.
 bool verify_actor(Token,Kind,uint32_t actor);
@@ -51,6 +55,12 @@ bool owns_actor(uint32_t actor);
 bool deny_carry(uint32_t actor);
 void configure(void(*original)(Cpu*,uint32_t),uint32_t(*call)(Cpu*,uint32_t,std::initializer_list<uint32_t>),const std::array<uint32_t,story_enemy_ownership::kKindCount>& profile_storage,std::function<void(Token,uint32_t)> retired={});
 bool install(const std::function<std::string(uint32_t)>& owner,const std::function<void(uint32_t,void(*)(Cpu*))>& replace);
+// Patrolling Bokoblins (story_enemy_variants::bokoblin_patrol): while an owned Bokoblin runs, the game's
+// room path lookup (dPath_GetRoomPath) for the port's route number answers with that enemy's route record
+// (`route` gives it, 0: none); every other lookup is untouched. Installed only with patrols or the editor.
+void set_route_provider(std::function<uint32_t(Token)> route);
+bool install_routes(const std::function<std::string(uint32_t)>& owner,const std::function<void(uint32_t,void(*)(Cpu*))>& replace);
+uint32_t room_path_function();
 // World editor (--editor only, main game thread). editor_enable before install: the profiles install
 // even without declarations, so enemies placed while the game runs appear at once (live()).
 // editor_declare adds a declaration then (same checks as declare). editor_redeclare gives a declaration

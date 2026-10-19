@@ -159,7 +159,7 @@ void mark(const char* field) {
 }
 
 // What an actor is, for the list and the inspector.
-bool is_enemy(const std::string& actor) { return actor == "chuchu" || actor == "bokoblin" || actor == "moblin" || actor == "keese" || actor == "miniblin"; }
+bool is_enemy(const std::string& actor) { return actor == "chuchu" || actor == "bokoblin" || actor == "moblin" || actor == "keese" || actor == "miniblin" || actor == "peahat"; }
 bool is_prop(const std::string& actor) { return actor == "pot" || actor == "barrel" || actor == "crate"; }
 std::string kind_label(const Value& a) {
     const std::string actor = a.get("actor").string();
@@ -662,8 +662,36 @@ void actor_inspector(const Value& m) {
             ImGui::EndCombo();
         }
     }
-    if (actor == "resident" || (is_mod && !combat && !carry && a->get("behaviour").type == Value::Null)) route_section(m, *a);
+    if (actor == "resident" || (actor == "bokoblin" && !is_mod) || (is_mod && !combat && !carry && a->get("behaviour").type == Value::Null)) route_section(m, *a);
     if (is_enemy(actor) || combat) edit_property(p, *a, "Defeated flag (set when it is beaten)", "defeated_flag");
+    if (is_enemy(actor) || combat) {  // a mod switch set when every enemy naming it is defeated (doors follow it)
+        ImGui::TextUnformatted("Sets switch when defeated");
+        mark("defeat_switch");
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        const std::string current = a->get("defeat_switch").string();
+        if (ImGui::BeginCombo("##defeat_switch", current.empty() ? "(none)" : current.c_str())) {
+            auto pick = [&](const std::string& id) {
+                Value s = p;
+                s["property"] = "defeat_switch";
+                s["value"] = id.empty() ? Value() : Value(id);
+                command("set_actor", s);
+            };
+            if (ImGui::Selectable("(none)", current.empty()) && !current.empty()) pick("");
+            for (const auto& other : m.get("actors").array)
+                if (other.get("actor").string() == "switch") {
+                    const std::string id = other.get("id").string();
+                    if (ImGui::Selectable(id.c_str(), id == current) && id != current) pick(id);
+                }
+            ImGui::EndCombo();
+        }
+    }
+    if (actor == "switch" || actor == "door") {  // the enemies whose defeat sets this switch (or the door's)
+        const std::string sw = actor == "switch" ? U.actor : a->get("switch").string();
+        std::string who;
+        for (const auto& other : m.get("actors").array)
+            if (!sw.empty() && other.get("defeat_switch").string() == sw) who += (who.empty() ? "" : ", ") + other.get("id").string();
+        if (!who.empty()) wrapped(kMuted, ("Set when all of these are defeated: " + who).c_str());
+    }
     if (is_prop(actor) || (carry && a->get("carry").get("break_on_impact").boolean)) edit_property(p, *a, "Broken flag (set when it breaks)", "broken_flag");
     if (is_prop(actor)) edit_property(p, *a, "Texture (a PNG in textures/ or assets/, empty: the game's)", "texture", 120);
     if (actor == "switch") edit_property(p, *a, "Switch flag (set when pressed)", "switch_flag");

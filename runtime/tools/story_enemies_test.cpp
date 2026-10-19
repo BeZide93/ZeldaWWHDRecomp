@@ -30,7 +30,7 @@ void map_memory(uint32_t a,uint32_t n){
 #endif
 }
 void call_hook(Cpu*c,uint32_t f,uint32_t a){Cpu nested=*c;nested.r[3]=a;hooks.at(f)(&nested);}
-bool known_address(uint32_t fn){const uint32_t known[]={0x02110D4C,0x0210DD3C,0x0210BFEC,0x021104B4,0x0219D568,0x0219AAE8,0x02199748,0x0219CE98,0x0209F918,0x0209BD1C,0x0209971C,0x0209F164,0x021CCB00,0x021C9B1C,0x021C7344,0x021CC44C,0x02446E54,0x02446374,0x02445EE4,0x024468E4,0x025D99E8,0x020402C8,0x025D9154,0x021992DC,0x025D9898,0x021C9AA0,0x025D7B24,0x020A47B4,0x021D0294,0x020A3B18,0x02041570,0x02041F94,0x02043F34,0x025D57E0};bool accepted=false;for(uint32_t expected:known)accepted|=fn==expected;return accepted;}
+bool known_address(uint32_t fn){const uint32_t known[]={0x02110D4C,0x0210DD3C,0x0210BFEC,0x021104B4,0x0219D568,0x0219AAE8,0x02199748,0x0219CE98,0x0209F918,0x0209BD1C,0x0209971C,0x0209F164,0x021CCB00,0x021C9B1C,0x021C7344,0x021CC44C,0x02446E54,0x02446374,0x02445EE4,0x024468E4,0x023CF600,0x023CC070,0x023C9994,0x023CEF04,0x0230F32C,0x0230BEF4,0x0230AE30,0x0230EDD0,0x025D99E8,0x020402C8,0x025D9154,0x021992DC,0x025D9898,0x021C9AA0,0x025D7B24,0x020A47B4,0x021D0294,0x020A3B18,0x02041570,0x02041F94,0x02043F34,0x025D57E0};bool accepted=false;for(uint32_t expected:known)accepted|=fn==expected;return accepted;}
 void original(Cpu*c,uint32_t fn){fn-=STORY_ENEMIES_TEST_CODE_DELTA;assert(known_address(fn));++calls;const uint32_t a=c->r[3];
  if(fn==0x02110D4C||fn==0x0219D568||fn==0x0209F918||fn==0x021CCB00){if(fn==0x0209F918||fn==0x021CCB00){const uint32_t flag=GD(fn==0x0209F918?0x10191468:0x101BA690);if(a!=Retail)assert(ld8(flag)==1);else assert(ld8(flag)==0);if(throw_create)throw std::runtime_error("synthetic create unwind");}++creates;c->r[3]=4;return;}
  if(fn==0x021104B4||fn==0x0219CE98||fn==0x0209F164||fn==0x021CC44C){++deletes;return;}
@@ -52,7 +52,7 @@ void original(Cpu*c,uint32_t fn){fn-=STORY_ENEMIES_TEST_CODE_DELTA;assert(known_
 }
 uint32_t invoke(Cpu*c,uint32_t fn,std::initializer_list<uint32_t>args){assert(fn==GC(0x025D57E0)&&args.size()==1);c->r[3]=*args.begin();original(c,fn);c->r[4]=999;c->pc=999;return c->r[3];}
 void actor(uint32_t a,uint32_t pid,story_enemies::Kind k){const auto&d=story_enemy_ownership::descriptor(k);std::memset(mem::ptr(a),0,d.bytes);st32(a+4,pid);st16(a+0xE,d.profile);st32(a+0xB4,GD(k==story_enemies::Kind::ChuChu?0x1000C5A0:k==story_enemies::Kind::Bokoblin?0x1000957C:k==story_enemies::Kind::Moblin?0x10014E9C:0x10012C24));st32(a+0xB0,story_enemies::parameters(k));st8(a+0x2DD,0xFF);st16(a+0x2D8,0xFFFF);st16(a+0x2FC,story_enemies::home_z(k));
- if(k==story_enemies::Kind::ChuChu){st8(a+0x3FB,0xFF);st32(a+0x924,a);}else if(k==story_enemies::Kind::Bokoblin){st8(a+0x3D0,4);st8(a+0x3D1,0xFF);st8(a+0x3D2,0xFF);st8(a+0x3D3,0xFF);st32(a+0x49C,a);st16(a+0x49C+8,2);st32(a+0x13BC,a);}else if(k==story_enemies::Kind::Moblin){st8(a+0x3DA,0xFF);st8(a+0x3DB,0xFF);st32(a+0x8BC,a);st16(a+0x8BC+8,1);st32(a+0x2E54,a);}else if(k==story_enemies::Kind::Miniblin){st32(a+0xB4,GD(0x10038234));st8(a+0x3D0,1);st8(a+0x3D1,10);st8(a+0x3D3,0xFF);st8(a+0x3D4,0xFF);st32(a+0x8FC,a);}else{st8(a+0x486,0xFF);st8(a+0x487,0xFF);st32(a+0xAD8,a);}
+ if(k==story_enemies::Kind::ChuChu){st8(a+0x3FB,0xFF);st32(a+0x924,a);}else if(k==story_enemies::Kind::Bokoblin){st8(a+0x3D0,4);st8(a+0x3D1,0xFF);st8(a+0x3D2,0xFF);st8(a+0x3D3,0xFF);st32(a+0x49C,a);st16(a+0x49C+8,2);st32(a+0x13BC,a);}else if(k==story_enemies::Kind::Moblin){st8(a+0x3DA,0xFF);st8(a+0x3DB,0xFF);st32(a+0x8BC,a);st16(a+0x8BC+8,1);st32(a+0x2E54,a);}else if(k==story_enemies::Kind::Rat){st32(a+0xB4,GD(0x1002442C));st32(a+0xBE0,a);st32(a+0xF98,a);}else if(k==story_enemies::Kind::Peahat){st32(a+0xB4,GD(0x10034494));st32(a+0xAB4,a);st32(a+0xE6C,a);st32(a+0x1098,a);}else if(k==story_enemies::Kind::Miniblin){st32(a+0xB4,GD(0x10038234));st8(a+0x3D0,1);st8(a+0x3D1,10);st8(a+0x3D3,0xFF);st8(a+0x3D4,0xFF);st32(a+0x8FC,a);}else{st8(a+0x486,0xFF);st8(a+0x487,0xFF);st32(a+0xAD8,a);}
  for(size_t i=0;i<d.collider_count;++i){const auto&x=d.colliders[i];st32(a+x.object+0x44,a+x.stts);st32(a+x.stts+0xC,a);st32(a+x.stts+0x10,pid);if(x.helper)st32(a+x.helper,a);}
 }
 const std::pair<uint32_t,size_t> scratch_ranges[]={{0x10462320,4},{0x10462330,40},{0x1046231C,4},{0x1046232C,4},{0x10465498,4},{0x104654A8,40},{0x104654A4,1},{0x101BA692,1},{0x104654E0+0x28,0x24},{0x10462474,2}};
@@ -73,17 +73,27 @@ bool enemy_defeated(EnemyMarkerHandle h){return defeated[h.value];}
 EnemyClaimStatus claim_enemy_drops(EnemyMarkerHandle h,const std::string&,const std::vector<PropDrop>&,bool){++claims;if(fail_claim)return EnemyClaimStatus::InvalidDefinition;if(defeated[h.value])return EnemyClaimStatus::AlreadyDefeated;defeated[h.value]=true;return EnemyClaimStatus::Committed;}
 }
 int main(int argc,char**argv){using namespace story_enemies;const bool drowning_test=argc==2&&std::strcmp(argv[1],"--drowning")==0;const bool weapons=drowning_test||(argc==2&&std::strcmp(argv[1],"--weapons")==0);
- map_memory(Actor,0x10000);map_memory(Arena,0x20000);map_memory(GD(0x101F0000),0x10000);map_memory(GD(0x10460000),0x10000);
+ map_memory(Actor,0x20000);map_memory(Arena,0x20000);map_memory(GD(0x101F0000),0x10000);map_memory(GD(0x10460000),0x10000);
 #if STORY_ENEMIES_TEST_CODE_DELTA
  for(uint32_t canonical:{0x101F0000u,0x10460000u,0x10190000u,0x101B0000u}){map_memory(canonical,0x10000);std::memset(mem::ptr(canonical),0xA5,0x10000);}
 #endif
- st32(GD(0x101F3EE0)+0xCE*4,Actor+0x8000);st32(Actor+0x8010,0xF10);st32(GD(0x101F3EE0)+0xD7*4,Actor+0x8100);st32(Actor+0x8110,0x10BC);st32(GD(0x101F3EE0)+0xF7*4,Actor+0x8600);st32(Actor+0x8610,0xEE4);
+ st32(GD(0x101F3EE0)+0xCE*4,Actor+0x8000);st32(Actor+0x8010,0xF10);st32(GD(0x101F3EE0)+0xD7*4,Actor+0x8100);st32(Actor+0x8110,0x10BC);st32(GD(0x101F3EE0)+0xF7*4,Actor+0x8600);st32(Actor+0x8610,0xEE4);st32(GD(0x101F3EE0)+0xD1*4,Actor+0x8700);st32(Actor+0x8710,0x12D8);st32(GD(0x101F3EE0)+0xC6*4,Actor+0x8800);st32(Actor+0x8810,0x11CC);
  assert(story_enemy_ownership::configure(Arena,story_enemy_ownership::kStorageBytes,original,verify_actor));story_enemy_ownership::initialize_storage();
  std::string why;Spec cc{Kind::ChuChu,"m","cc","cc.dead",{}, {},1},ki{Kind::Keese,"m","ki","ki.dead",{}, {},1};
  const Token first=declare(cc,why),second=declare(ki,why);assert(first&&second&&first!=second);Spec unsupported=cc;unsupported.kind=Kind::Moblin;assert(!declare(unsupported,why));
  Token bk=0,mo=0;if(weapons){assert(configure_children({[](Token,Kind,uint32_t,uint32_t epoch){assert(epoch>=1);++child_scopes;return true;},[]{assert(child_scopes);--child_scopes;},[](Token,uint32_t){return children_ready;},[](Token,uint32_t){++child_retires;}},true));Spec b{Kind::Bokoblin,"m","bk","bk.dead",{}, {},1},m{Kind::Moblin,"m","mo","mo.dead",{}, {},1};bk=declare(b,why);mo=declare(m,why);assert(bk&&mo);st32(GD(0x101F3EE0)+0xBD*4,Actor+0x8200);st32(Actor+0x8210,0x19A4);st32(GD(0x101F3EE0)+0xBC*4,Actor+0x8300);st32(Actor+0x8310,0x343C);map_memory(GD(0x101B0000),0x10000);map_memory(GD(0x10190000),0x10000);}
- Spec pt{Kind::Miniblin,"m","pt","pt.dead",{}, {},1};const Token mini=declare(pt,why);assert(mini);
- configure(original,invoke,{Arena+0xB000,Arena+0xB030,Arena+0xB060,Arena+0xB090,Arena+0xB0C0});assert(install([](uint32_t){return std::string();},[](uint32_t f,void(*fn)(Cpu*)){const uint32_t canonical=f-STORY_ENEMIES_TEST_CODE_DELTA;assert(known_address(canonical)&&!hooks.count(canonical));hooks[canonical]=fn;}));assert(hooks.size()==34);
+ Spec pt{Kind::Miniblin,"m","pt","pt.dead",{}, {},1};const Token mini=declare(pt,why);assert(mini);Spec ph{Kind::Peahat,"m","ph","ph.dead",{}, {},1};const Token hat=declare(ph,why);assert(hat);Spec nz{Kind::Rat,"m","nz","nz.dead",{}, {},1};const Token rat=declare(nz,why);assert(rat);
+ configure(original,invoke,{Arena+0xB000,Arena+0xB030,Arena+0xB060,Arena+0xB090,Arena+0xB0C0,Arena+0xB0F0,Arena+0xB120});assert(install([](uint32_t){return std::string();},[](uint32_t f,void(*fn)(Cpu*)){const uint32_t canonical=f-STORY_ENEMIES_TEST_CODE_DELTA;assert(known_address(canonical)&&!hooks.count(canonical));hooks[canonical]=fn;}));assert(hooks.size()==42);
+ { // Rat: a free rat only (no hole parent, never the bomb rat), unfrozen
+  constexpr uint32_t Rat=Actor+0x12000;actor(Rat,16,Kind::Rat);assert(parameters(Kind::Rat)==0xFFFFFF00u);
+  assert(verify_actor(rat,Kind::Rat,Rat));st8(Rat+0x3D1,1);assert(!verify_actor(rat,Kind::Rat,Rat));st8(Rat+0x3D1,0);
+  st8(Rat+0x3D0,2);assert(!verify_actor(rat,Kind::Rat,Rat));st8(Rat+0x3D0,0);st8(Rat+0xBE0+0x1B1,1);assert(!verify_actor(rat,Kind::Rat,Rat));st8(Rat+0xBE0+0x1B1,0);
+ }
+ { // Peahat: the Peahat type only (never the Seahat with its kill-counter register), unfrozen
+  constexpr uint32_t Hat=Actor+0x10000;actor(Hat,15,Kind::Peahat);assert(parameters(Kind::Peahat)==0xFFFFFF00u&&ld32(Hat+0xB0)==0xFFFFFF00u);
+  assert(verify_actor(hat,Kind::Peahat,Hat));st8(Hat+0x45A,1);assert(!verify_actor(hat,Kind::Peahat,Hat));st8(Hat+0x45A,0);
+  st8(Hat+0xAB4+0x1B1,1);assert(!verify_actor(hat,Kind::Peahat,Hat));st8(Hat+0xAB4+0x1B1,0);assert(verify_actor(hat,Kind::Peahat,Hat));
+ }
  { // Miniblin: fixed ordinary parameters (never respawns, no switches) and an unfrozen ice helper
   constexpr uint32_t Mini=Actor+0xE000;actor(Mini,14,Kind::Miniblin);assert(parameters(Kind::Miniblin)==0xFFFF0A01u&&ld32(Mini+0xB0)==0xFFFF0A01u);
   assert(verify_actor(mini,Kind::Miniblin,Mini));

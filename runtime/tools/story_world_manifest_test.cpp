@@ -94,11 +94,11 @@ int main() {
     const auto prop_example=[](){return mods::json::parse(R"({"items":[{"id":"shard"}],"actors":[{"id":"vase","actor":"pot","stage":"town","room":0,"position":{"x":0,"y":0,"z":0},"broken_flag":"vase.broken","drops":[{"item":"item:shard","quantity":2}]}]})");};
     { // Validate all four curated native enemy declarations through the public parser.
         const auto fixture=[](){return mods::json::parse(R"({"items":[{"id":"shard"}],"actors":[{"id":"enemy","actor":"chuchu","stage":"sea","room":11,"position":{"x":0,"y":0,"z":0},"defeated_flag":"enemy.defeated","drops":[{"item":"item:shard","quantity":2}]}]})");};
-        for(const char* type:{"chuchu","bokoblin","moblin","keese","miniblin"}){
+        for(const char* type:{"chuchu","bokoblin","moblin","keese","miniblin","peahat"}){
             auto data=fixture();auto& value=data["actors"].array[0];value["actor"]=type;ManifestActor candidate;candidate.actor=type;
             assert(world_manifest::native_enemy_fields(data,value,candidate,why)&&candidate.defeated_flag=="enemy.defeated"&&candidate.drops.size()==1&&candidate.drops[0].quantity==2);
             assert(parse_actors(data,actors,why)&&actors.size()==1&&actors[0].actor==type&&actors[0].defeated_flag=="enemy.defeated"&&actors[0].drops[0].item=="shard");
-            for(const char* field:{"params","parameters","flag","broken_flag","switch_flag","switch","lines","then","model","animation","look_at","path","collision","attention","kind"}){auto bad=value;bad[field]=Value{};assert(!world_manifest::native_enemy_fields(data,bad,candidate,why));}
+            for(const char* field:{"params","parameters","flag","broken_flag","switch_flag","switch","lines","then","model","animation","look_at","path","collision","attention","kind"}){if(std::string(type)=="bokoblin"&&std::string(field)=="path")continue;auto bad=value;bad[field]=Value{};assert(!world_manifest::native_enemy_fields(data,bad,candidate,why));}
             for(int quantity:{0,255}){auto bad=value;bad["drops"].array[0]["quantity"]=quantity;assert(!world_manifest::native_enemy_fields(data,bad,candidate,why));}
             auto bad=value;bad["drops"].array[0]["item"]="item:foreign";assert(!world_manifest::native_enemy_fields(data,bad,candidate,why));
             bad=value;bad["defeated_flag"]="0x80";assert(!world_manifest::native_enemy_fields(data,bad,candidate,why));
@@ -116,10 +116,28 @@ int main() {
             const auto fp=story_actors::identity::fingerprint("m",actors[0]);auto plain=actors[0];plain.variant.clear();assert(fp!=story_actors::identity::fingerprint("m",plain));}
         {auto data=fixture();assert(parse_actors(data,actors,why)&&actors[0].variant.empty()&&story_enemy_variants::find("chuchu","")->params==0xFF000000u);}
         for(const char* bad_variant:{R"({"variant":"purple"})",R"({"variant":""})",R"({"variant":3})",R"({"variant":"red","colour":1})",R"({"colour":"red"})",R"("red")"}){auto data=fixture();data["actors"].array[0]["parameters"]=mods::json::parse(bad_variant);assert(!parse_actors(data,actors,why)&&actors.empty());}
-        for(const char* plain_kind:{"moblin","keese","miniblin"}){auto data=fixture();data["actors"].array[0]["actor"]=plain_kind;data["actors"].array[0]["parameters"]=mods::json::parse(R"({"variant":"red"})");assert(!parse_actors(data,actors,why)&&why.find("no variants")!=std::string::npos);}
-        {auto data=fixture();data["actors"].array[0]["parameters"]=mods::json::parse(R"({"variant":"purple"})");assert(!parse_actors(data,actors,why)&&why.find("green, red, blue or yellow")!=std::string::npos);}
+        for(const char* plain_kind:{"moblin","keese","miniblin","peahat"}){auto data=fixture();data["actors"].array[0]["actor"]=plain_kind;data["actors"].array[0]["parameters"]=mods::json::parse(R"({"variant":"red"})");assert(!parse_actors(data,actors,why)&&why.find("no variants")!=std::string::npos);}
+        {auto data=fixture();data["actors"].array[0]["parameters"]=mods::json::parse(R"({"variant":"purple"})");assert(!parse_actors(data,actors,why)&&why.find("green, red, blue, yellow or black")!=std::string::npos);}
         for(const char* colour:{"red","blue","yellow"}){const auto*v=story_enemy_variants::find("chuchu",colour);assert(v&&(v->params&0xFFFF00FFu)==0xFF000000u&&((v->params>>8)&0xFF)>=1&&((v->params>>8)&0xFF)<=4);}
-        assert(!story_enemy_variants::find("chuchu","black"));
+        assert(story_enemy_variants::find("chuchu","black")->params==0xFF000300u);
+        // a patrolling Bokoblin: points and mode (loop or back_and_forth), never speed or pauses; other enemies never take a path
+        {auto data=fixture();auto& a=data["actors"].array[0];a["actor"]="bokoblin";a["path"]=mods::json::parse(R"({"points":[{"x":300,"y":0,"z":0},{"x":300,"y":0,"z":300}],"mode":"back_and_forth"})");
+         assert(parse_actors(data,actors,why)&&actors[0].path.points.size()==2&&actors[0].path.back_and_forth);
+         a["path"]["mode"]="loop";assert(parse_actors(data,actors,why)&&actors[0].path.loop);
+         a["path"]["mode"]="once";assert(!parse_actors(data,actors,why));
+         a["path"]["mode"]="loop";a["path"]["speed"]=100;assert(!parse_actors(data,actors,why));a["path"].object.erase("speed");
+         a["path"]["pauses"]=true;assert(!parse_actors(data,actors,why));a["path"].object.erase("pauses");
+         a["parameters"]=mods::json::parse(R"({"variant":"shield"})");assert(parse_actors(data,actors,why));
+         assert(story_enemy_variants::bokoblin_patrol(0xFFFFFF24u)==0xFFFEFF20u&&story_enemy_variants::declared_params("bokoblin",0xFFFEFF20u)&&story_enemy_variants::bokoblin_patrols(0xFFFEFF20u)&&!story_enemy_variants::bokoblin_patrols(0xFFFFFF24u));
+         a["actor"]="chuchu";a.object.erase("parameters");assert(!parse_actors(data,actors,why));}
+        // defeat_switch: an enemy names one of the mod's switch actors; anything else is refused
+        {auto data=fixture();data["actors"].array.push_back(mods::json::parse(R"({"id":"gate-switch","actor":"switch","stage":"sea","room":11,"position":{"x":5,"y":0,"z":0},"switch_flag":"gate.open"})"));
+         data["actors"].array[0]["defeat_switch"]="gate-switch";assert(parse_actors(data,actors,why)&&actors[0].defeat_switch=="gate-switch");
+         auto plain=actors[0];plain.defeat_switch.clear();assert(story_actors::identity::fingerprint("m",actors[0])!=story_actors::identity::fingerprint("m",plain));
+         data["actors"].array[0]["defeat_switch"]="missing";assert(!parse_actors(data,actors,why)&&why.find("defeat_switch")!=std::string::npos);
+         data["actors"].array[0]["defeat_switch"]="enemy";assert(!parse_actors(data,actors,why));
+         data["actors"].array[0]["defeat_switch"]=3;assert(!parse_actors(data,actors,why));
+         data["actors"].array[0].object.erase("defeat_switch");data["actors"].array[1]["defeat_switch"]="gate-switch";assert(!parse_actors(data,actors,why)&&why.find("requires an enemy")!=std::string::npos);}
         // Bokoblin: the stick is the default; the shield sets bit 0x20, the machete bit 0x40 (weapon 1)
         assert(story_enemy_variants::find("bokoblin","")->params==0xFFFFFF04u&&story_enemy_variants::bokoblin_weapon(0xFFFFFF04u)==0);
         assert(story_enemy_variants::find("bokoblin","shield")->params==0xFFFFFF24u&&story_enemy_variants::bokoblin_weapon(0xFFFFFF24u)==0);

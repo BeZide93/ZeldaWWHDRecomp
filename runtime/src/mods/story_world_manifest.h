@@ -68,6 +68,7 @@ struct ManifestActor {
     WorldPoint position,rotation,scale{1,1,1}; uint32_t params=0; std::string variant; unsigned resident=9; // 19 is the seated Ym1 adapter, not a People subtype.
     uint8_t item_game=6;  // a chest's game item number ("parameters": {"item"}); kChestModItem with item_mod
     std::string item_mod; // a chest's "item:<id>": one of the mod's items (the id)
+    std::string defeat_switch;  // an enemy's: the same-mod switch actor whose flag is set when every enemy naming it is defeated
     std::string broken_flag,switch_flag,switch_actor,defeated_flag;std::vector<ManifestPropDrop> drops;
     std::string flag,quest,item,time,lines; unsigned quest_step=0;
     std::vector<StoryAction> then;
@@ -158,7 +159,7 @@ inline bool known_flag(const Value& m,const std::string& name) {
         if(mod&&a.get("behaviour").string()=="static"&&a.get("stage").string()=="sea"&&produces(a.get("arrival").get("flag")))return true;
         if(type=="switch"&&produces(a.get("switch_flag")))return true;
         if((type=="pot"||type=="barrel"||type=="crate"||(mod&&a.get("carry").get("break_on_impact").type==Value::Bool&&a.get("carry").get("break_on_impact").boolean))&&produces(a.get("broken_flag")))return true;
-        if((type=="chuchu"||type=="bokoblin"||type=="moblin"||type=="keese"||type=="miniblin"||
+        if((type=="chuchu"||type=="bokoblin"||type=="moblin"||type=="keese"||type=="miniblin"||type=="peahat"||
             (mod&&a.get("combat").type==Value::Object))&&produces(a.get("defeated_flag")))return true;
         if(writes(a.get("then")))return true;
         for(const auto&t:a.get("talks").array)if(writes(t.get("then")))return true;
@@ -315,9 +316,9 @@ inline bool game_piece_budget(const std::vector<ManifestActor>& actors,std::stri
 // Per-type fields after common placement validation. Native enemy names stay
 // outside parse_actors' allowlist until their runtime adapters are integrated.
 inline bool native_enemy_fields(const Value& m,const Value& v,ManifestActor& a,std::string& why) {
-    if(a.actor!="chuchu"&&a.actor!="bokoblin"&&a.actor!="moblin"&&a.actor!="keese"&&a.actor!="miniblin")return why="unsupported native enemy",false;
+    if(a.actor!="chuchu"&&a.actor!="bokoblin"&&a.actor!="moblin"&&a.actor!="keese"&&a.actor!="miniblin"&&a.actor!="peahat")return why="unsupported native enemy",false;
     for(const char* key:{"kind","params","flag","broken_flag","switch_flag","switch","lines","then","model","animation","look_at","path","collision","attention"})
-        if(v.object.contains(key))return why="native enemies cannot override parameters, behavior, dialogue or models",false;
+        if(v.object.contains(key)&&!(a.actor=="bokoblin"&&std::string(key)=="path"))return why="native enemies cannot override parameters, behavior, dialogue or models",false;
     // a declared variant only (story_enemy_variants.h), never raw parameters
     if(v.object.contains("parameters")){
         const auto& named=v.get("parameters");
@@ -392,7 +393,7 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
     unsigned need=0;if(m.get("requires").type==Value::Object&&!story_game_objects::required_version(m,std::max(story_game_objects::catalogue().version,story_game_pieces::catalogue().version),need,why))return false;
     unsigned chart_marker_count=0;
     for(const auto& v:list.array){ManifestActor a;
-        if(!keys(v,{"id","actor","kind","model","animation","look_at","path","collision","behaviour","buoyancy","drift","anchor","grapple_points","distant","shoreline","chart_marker","arrival","attention","stage","room","position","rotation","scale","params","parameters","flag","broken_flag","defeated_flag","drops","carry","combat","native_drops","switch_flag","switch","when","lines","then","texture","talks","variant"}))return why="unknown actor field",false;
+        if(!keys(v,{"id","actor","kind","model","animation","look_at","path","collision","behaviour","buoyancy","drift","anchor","grapple_points","distant","shoreline","chart_marker","arrival","attention","stage","room","position","rotation","scale","params","parameters","flag","broken_flag","defeated_flag","drops","carry","combat","native_drops","switch_flag","switch","defeat_switch","when","lines","then","texture","talks","variant"}))return why="unknown actor field",false;
         if(!id(v.get("id")))return why="invalid actor id",false;a.id=v.get("id").text;a.actor=v.get("actor").string();
         if(story_game_pieces::is_reference(a.actor)){
             if(!game_piece_fields(v,need,a,why))return false;
@@ -486,7 +487,7 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
                 }
                 if(v.object.contains("native_drops")&&!story_mod_combat::parse_native_drops(v.get("native_drops"),a.native_heart_drop,why))return false;
             }
-        }else if(v.object.contains("model")||v.object.contains("animation")||v.object.contains("look_at")||(v.object.contains("path")&&a.actor!="resident")||v.object.contains("collision")||v.object.contains("attention")||v.object.contains("behaviour")||v.object.contains("buoyancy")||v.object.contains("drift")||v.object.contains("anchor"))return why="model, animation, look_at, path, collision and attention require kind mod",false;
+        }else if(v.object.contains("model")||v.object.contains("animation")||v.object.contains("look_at")||(v.object.contains("path")&&a.actor!="resident"&&a.actor!="bokoblin")||v.object.contains("collision")||v.object.contains("attention")||v.object.contains("behaviour")||v.object.contains("buoyancy")||v.object.contains("drift")||v.object.contains("anchor"))return why="model, animation, look_at, path, collision and attention require kind mod",false;
         if(v.object.contains("carry")){
             const auto& carry=v.get("carry");if(a.kind!="mod"||a.combat_enabled||!keys(carry,{"break_on_impact"})||(carry.object.contains("break_on_impact")&&carry.get("break_on_impact").type!=Value::Bool))return why="carry requires a noncombat mod actor and boolean break_on_impact",false;
             a.carry_enabled=true;a.carry_break_on_impact=carry.get("break_on_impact").boolean;
@@ -499,7 +500,7 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
         const bool prop=a.actor=="pot"||a.actor=="barrel"||a.actor=="crate";
         if(v.object.contains("texture")){if(!prop||!texture_path(v.get("texture")))return why="texture requires a placed pot, barrel or crate and a package PNG in textures/ or assets/",false;a.texture=v.get("texture").text;}
         const bool switch_actor=a.actor=="switch",door=a.actor=="door";
-        const bool enemy=a.actor=="chuchu"||a.actor=="bokoblin"||a.actor=="moblin"||a.actor=="keese"||a.actor=="miniblin";
+        const bool enemy=a.actor=="chuchu"||a.actor=="bokoblin"||a.actor=="moblin"||a.actor=="keese"||a.actor=="miniblin"||a.actor=="peahat";
         if(a.actor!="sign"&&a.actor!="resident"&&a.actor!="chest"&&!prop&&!switch_actor&&!door&&!enemy&&!(a.actor=="mod"&&a.kind=="mod"))return why="unknown or unsupported flag-setting actor: "+a.actor,false;
         if(!place(v,a.stage,a.room)||!point(v.get("position"),a.position))return why="actor "+a.id+": invalid stage, room or position",false;
         if(v.get("rotation").type!=Value::Null&&!point(v.get("rotation"),a.rotation,360))return why="invalid actor rotation",false;
@@ -543,10 +544,23 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
         if(enemy){
             if(!native_enemy_fields(m,v,a,why))return false;
             for(const auto& old:out)if(old.defeated_flag==a.defeated_flag)return why="enemies require distinct defeated_flag IDs",false;
+            // a patrolling Bokoblin: its own route (1..15 points after its position), walked with the game's
+            // patrol code: round (loop) or there and back (back_and_forth); its pace and pauses are its own
+            if(a.actor=="bokoblin"&&v.object.contains("path")){
+                const auto& path=v.get("path");
+                if(path.type==Value::Object&&(path.object.contains("speed")||path.object.contains("pauses")))return why="a Bokoblin's path takes points and mode (its pace and pauses are its own)",false;
+                if(!parse_path(path,a.position,true,a.path,why))return false;
+                if(!a.path.loop&&!a.path.back_and_forth)return why="a Bokoblin's path mode is loop or back_and_forth",false;
+            }
         }else if(a.combat_enabled){
             if(a.rotation.x!=0||a.rotation.z!=0||a.scale.x!=1||a.scale.y!=1||a.scale.z!=1)return why="combat actors require yaw-only rotation and scale 1",false;
             for(const auto& old:out)if(old.defeated_flag==a.defeated_flag)return why="combat actors require distinct defeated_flag IDs",false;
         }else if(v.object.contains("defeated_flag"))return why="defeated_flag requires an enemy",false;
+        if(v.object.contains("defeat_switch")){
+            if(!enemy&&!a.combat_enabled)return why="defeat_switch requires an enemy",false;
+            if(v.get("defeat_switch").type!=Value::String||!id(v.get("defeat_switch")))return why="defeat_switch must name a same-mod switch actor",false;
+            a.defeat_switch=v.get("defeat_switch").text;
+        }
         if(a.carry_enabled&&(a.rotation.x!=0||a.rotation.z!=0||a.scale.x!=1||a.scale.y!=1||a.scale.z!=1))return why="carry actors require yaw-only rotation and scale 1",false;
         if(switch_actor||door){
             if(v.object.contains("params")||v.object.contains("parameters")||v.object.contains("flag")||v.object.contains("lines")||v.object.contains("then")||v.object.contains("broken_flag")||v.object.contains("drops"))return why="switches and doors cannot use native parameters, dialogue, drops or generic flags",false;
@@ -614,6 +628,10 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
         unsigned count=1;for(const auto& old:out){if(old.id==a.id)return why="duplicate actor id",false;if(old.stage==a.stage&&old.room==a.room)++count;}
         if(count>kMaxActorsPerRoom)return why="actors exceed the 16 per room limit",false;
         out.push_back(std::move(a));
+    }
+    for(const auto& a:out)if(!a.defeat_switch.empty()){
+        const auto source=std::find_if(out.begin(),out.end(),[&](const ManifestActor& candidate){return candidate.id==a.defeat_switch;});
+        if(source==out.end()||source->actor!="switch")return why="actor "+a.id+": defeat_switch must name a same-mod switch actor",false;
     }
     for(const auto& a:out)if(a.actor=="door"){
         const auto source=std::find_if(out.begin(),out.end(),[&](const ManifestActor& candidate){return candidate.id==a.switch_actor;});

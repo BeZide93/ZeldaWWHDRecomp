@@ -82,11 +82,11 @@ const std::vector<CommandInfo> kCommands = {
     // building new content
     {"list_actor_types", "The kinds of actor add_actor places, and which appear without a restart; a kind's variants are the choices of its option (who a resident is).", {}},
     {"add_actor", "Places a new actor of the open mod at Link, at the fly camera or at a position (snapped to the ground).",
-     {{"type", "string", "a list_actor_types type: sign, resident, chest, pot, barrel, crate, switch, door, chuchu, bokoblin, moblin, keese, miniblin, model, model_enemy, model_carry; or a game object \"game:<id>\" or an island building \"piece:<id>\" (list_game_objects)", true},
+     {{"type", "string", "a list_actor_types type: sign, resident, chest, pot, barrel, crate, switch, door, chuchu, bokoblin, moblin, keese, miniblin, peahat, model, model_enemy, model_carry; or a game object \"game:<id>\" or an island building \"piece:<id>\" (list_game_objects)", true},
       {"id", "string", "the new id (default: from the type)"}, {"at", "string", "link (default), camera or position"},
       {"position", "point", "with at = position"}, {"stage", "string", "with at = position (default: Link's)"}, {"room", "integer", "with at = position (default: Link's or the sea square's)"},
       {"angle", "number", "heading in degrees (default: facing like Link or the camera)"}, {"snap", "boolean", "onto the ground below (default true)"},
-      {"model", "string", "the model for model types"}, {"options", "object", "resident (who: a list_actor_types variant such as uo2, um1, sa2 or the seated ym1), variant (an enemy's: chuchu green, red, blue or yellow; bokoblin stick, shield or machete), switch (a door's switch id), lines; variant also for a game object (list_game_objects)"}, {"mod", "string", ""}},
+      {"model", "string", "the model for model types"}, {"options", "object", "resident (who: a list_actor_types variant such as uo2, um1, sa2 or the seated ym1), variant (an enemy's: chuchu green, red, blue, yellow or black; bokoblin stick, shield or machete), switch (a door's switch id), lines; variant also for a game object (list_game_objects)"}, {"mod", "string", ""}},
      true},
     {"list_game_objects", "The game's own objects and island buildings a mod places by reference (add_actor type \"game:<id>\" or \"piece:<id>\"; a building is prepared from the player's game files when first placed: state preparing, ready or failed), by category, with their variants, turn and scale limits and whether the player's game files have them.",
      {{"category", "string", "only this category"}, {"query", "string", "only those whose id, label or description contains this"}}},
@@ -1226,7 +1226,7 @@ Value Session::dispatch(const std::string& command, const Value& p, std::string&
         static const std::set<std::string> allowed = {"actor", "kind", "model", "animation", "look_at", "path", "collision", "attention",
                                                       "stage", "room", "position", "rotation", "scale", "params", "parameters", "flag",
                                                       "when", "lines", "then", "talks", "defeated_flag", "broken_flag", "drops",
-                                                      "native_drops", "combat", "carry", "switch_flag", "switch", "texture", "variant", "behaviour", "buoyancy", "drift", "anchor", "grapple_points", "distant", "shoreline", "chart_marker", "arrival"};
+                                                      "native_drops", "combat", "carry", "switch_flag", "switch", "defeat_switch", "texture", "variant", "behaviour", "buoyancy", "drift", "anchor", "grapple_points", "distant", "shoreline", "chart_marker", "arrival"};
         const std::string property = text(p, "property");
         if (!allowed.contains(property)) return why = "\"" + property + "\" is not an actor property the editor sets", r;
         return actor_edit("Set " + property + " of " + text(p, "id"), [&](Value& a, std::string&) {

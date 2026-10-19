@@ -687,7 +687,7 @@ void building(const fs::path& examples) {
     editor::Session s(&host);
     s.add_package("editor-test", "Editor test", "", json(kManifest));
     Value r = s.run("list_actor_types");
-    CHECK(ok(r) && r.get("result").array.size() == 16);
+    CHECK(ok(r) && r.get("result").array.size() == 17);
 
     // add: at Link (sea room 44, heading 100 of 65536), snapped onto the ground (y 5); one undo step
     r = s.run("add_actor", json(R"({"type": "sign"})"));
@@ -750,9 +750,13 @@ void building(const fs::path& examples) {
         bool listed = false;
         const Value types = s.run("list_actor_types");
         for (const auto& t : types.get("result").array)
-            if (t.get("type").string() == "chuchu") listed = t.get("option").string() == "variant" && t.get("variants").array.size() == 4;
+            if (t.get("type").string() == "chuchu") listed = t.get("option").string() == "variant" && t.get("variants").array.size() == 5;
         CHECK(listed);
     }
+    // defeat_switch over set_actor: one of the mod's switches; a door's Inspector names the enemies
+    CHECK(ok(s.run("set_actor", json(R"({"id": "red-chu", "property": "defeat_switch", "value": "switch"})"))) && actor_of(s, "red-chu")->get("defeat_switch").string() == "switch");
+    CHECK(!ok(s.run("set_actor", json(R"({"id": "red-chu", "property": "defeat_switch", "value": "door"})"))) && actor_of(s, "red-chu")->get("defeat_switch").string() == "switch");
+    CHECK(ok(s.run("set_actor", json(R"({"id": "red-chu", "property": "defeat_switch", "value": null})"))) && actor_of(s, "red-chu")->get("defeat_switch").type == Value::Null);
     CHECK(ok(s.run("remove_actor", json(R"({"id": "red-chu", "confirm": true})"))) && ok(s.run("remove_actor", json(R"({"id": "green-chu", "confirm": true})"))));
     CHECK(!ok(s.run("add_actor", json(R"({"type": "model"})"))));
     CHECK(!ok(s.run("add_actor", json(R"({"type": "dragon"})"))));
@@ -1140,7 +1144,17 @@ void route_commands() {
     CHECK(!ok(s.run("add_route_point", json(R"({"id": "seated"})"))));
     CHECK(ok(s.run("add_actor", json(R"({"type": "sign", "id": "board"})"))));
     r = s.run("add_route_point", json(R"({"id": "board"})"));
-    CHECK(!ok(r) && r.get("error").string().find("only residents") != std::string::npos);
+    CHECK(!ok(r) && r.get("error").string().find("only residents, Bokoblins") != std::string::npos);
+    // a Bokoblin patrols: its route starts at its position, back and forth by default, loop allowed,
+    // never its own speed or pauses
+    CHECK(ok(s.run("add_actor", json(R"({"type": "bokoblin", "id": "patrol", "options": {"variant": "shield"}})"))));
+    CHECK(ok(s.run("add_route_point", json(R"({"id": "patrol", "at": "position", "position": {"x": 400, "y": 50, "z": 0}})"))));
+    CHECK(actor_of(s, "patrol")->get("path").get("mode").string() == "back_and_forth" && actor_of(s, "patrol")->get("path").get("points").array.size() == 1);
+    CHECK(ok(s.run("set_route", json(R"({"id": "patrol", "mode": "loop"})"))) && actor_of(s, "patrol")->get("path").get("mode").string() == "loop");
+    CHECK(!ok(s.run("set_route", json(R"({"id": "patrol", "mode": "once"})"))) && actor_of(s, "patrol")->get("path").get("mode").string() == "loop");
+    CHECK(!ok(s.run("set_route", json(R"({"id": "patrol", "speed": 100})"))) && !ok(s.run("set_route", json(R"({"id": "patrol", "pauses": true})"))));
+    CHECK(editor::route_refusal(*actor_of(s, "patrol")).empty());
+    CHECK(ok(s.run("add_actor", json(R"({"type": "moblin", "id": "brute"})"))) && !ok(s.run("add_route_point", json(R"({"id": "brute"})"))));
     // the pure helpers the Inspector uses
     CHECK(editor::resident_pace(*actor_of(s, "walker")) == 30 && editor::resident_pace(*actor_of(s, "chatter")) == 0 && editor::route_refusal(*actor_of(s, "walker")).empty());
 }

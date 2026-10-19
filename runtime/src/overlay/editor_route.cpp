@@ -67,7 +67,8 @@ bool clip_combo(const char* label, const std::string& current, const char* fallb
 
 void route_section(const Value& m, const Value& a) {
     const std::string id = a.get("id").string();
-    const bool resident = a.get("actor").string() == "resident", model = a.get("kind").string() == "mod";
+    const bool patrol = a.get("actor").string() == "bokoblin" && a.get("kind").type == Value::Null;
+    const bool resident = a.get("actor").string() == "resident" || patrol, model = a.get("kind").string() == "mod";
     if (!resident && !model) return;
     if (R.actor != id) R = RouteUi(), R.actor = id;
     ImGui::Separator();
@@ -103,7 +104,10 @@ void route_section(const Value& m, const Value& a) {
     Value p = with_id(id);
 
     // how it walks and looks
-    if (resident) {
+    if (patrol) {
+        muted("Patrols its route with the game's own patrol: it walks from point to point, turns at the ends (back and forth) "
+              "or goes round (loop), and fights Link when it sees him.");
+    } else if (resident) {
         muted("Walks with its own walk and stands with its own idle. Like the game's own walkers it stops and looks at Link "
               "when he is close in front of it, turns on the spot at corners and talks as usual.");
         ImGui::BeginDisabled();
@@ -205,8 +209,10 @@ void route_section(const Value& m, const Value& a) {
     if (!has) return;
 
     // speed, mode, pauses
-    const double pace = resident ? editor::resident_pace(a) : 0;
-    if (resident) {
+    const double pace = resident && !patrol ? editor::resident_pace(a) : 0;
+    if (patrol) {
+        ImGui::TextDisabled("It patrols at its own pace; when it sees Link it fights, then goes back to its route.");
+    } else if (resident) {
         bool own = path.get("speed").type != Value::Number;
         char label[64];
         std::snprintf(label, sizeof label, "Own pace (%.0f units/s)", pace);
@@ -249,7 +255,7 @@ void route_section(const Value& m, const Value& a) {
     ImGui::SameLine(110);
     ImGui::SetNextItemWidth(220);
     if (ImGui::BeginCombo("##route_mode", kModeLabels[current])) {
-        for (int i = 0; i < 3; i++)
+        for (int i = patrol ? 1 : 0; i < 3; i++)
             if (ImGui::Selectable(kModeLabels[i], i == current) && i != current) {
                 Value q = p;
                 q["mode"] = kModes[i];
@@ -257,14 +263,16 @@ void route_section(const Value& m, const Value& a) {
             }
         ImGui::EndCombo();
     }
-    bool pauses = path.get("pauses").boolean;
-    if (ImGui::Checkbox("Strolling pauses", &pauses)) {
-        Value q = p;
-        q["pauses"] = pauses;
-        command("set_route", q);
+    if (!patrol) {
+        bool pauses = path.get("pauses").boolean;
+        if (ImGui::Checkbox("Strolling pauses", &pauses)) {
+            Value q = p;
+            q["pauses"] = pauses;
+            command("set_route", q);
+        }
+        ImGui::SameLine();
+        ImGui::TextDisabled("(now and then it stands for a moment)");
     }
-    ImGui::SameLine();
-    ImGui::TextDisabled("(now and then it stands for a moment)");
 
     // the ground under it (checked again when the route or the place changes)
     const std::string key = mods::json::dump(path) + mods::json::dump(a.get("position")) + a.get("stage").string();
@@ -291,7 +299,7 @@ void route_section(const Value& m, const Value& a) {
     if (all_good && R.check.get("segments").type == Value::Array) ImGui::TextColored(kGood, "Ground: every segment has walkable ground.");
 
     // a walking resident in the game: walking, skipped, stopped, finished
-    if (resident) {
+    if (resident && !patrol) {
         if (now() - R.status_at > 1.0) {
             R.status_at = now();
             command("route_status", p, [id](const Value& r) {

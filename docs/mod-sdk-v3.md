@@ -33,7 +33,7 @@ The initial allowlist is deliberately small:
 | Breakable prop | `pot`, `barrel`, `crate` | Required mod-owned `broken_flag` and `drops` list |
 | Latched floor switch | `switch` | Required mod-owned `switch_flag`; fixed yellow switch |
 | Rotating gate | `door` | Required `switch` naming a switch actor in the same mod |
-| Native enemies (preview) | `chuchu`, `bokoblin`, `moblin`, `keese`, `miniblin` | Required mod-owned `defeated_flag` and `drops`; fixed ordinary variants |
+| Native enemies (preview) | `chuchu`, `bokoblin`, `moblin`, `keese`, `miniblin`, `peahat` | Required mod-owned `defeated_flag` and `drops`; fixed ordinary variants |
 
 Resident names are exact native object codes in lower case. Each placed copy uses fixed ordinary
 parameters: it stands where you put it (unless you give it a route, below) and has none of the
@@ -378,6 +378,7 @@ The allowlist below defines the supported variants.
 | `moblin` | Ordinary Moblin |
 | `keese` | Ordinary Keese, the native KI bat; not Morth |
 | `miniblin` | Ordinary Miniblin: hidden until Link comes near and looks its way; never respawns |
+| `peahat` | Ordinary Peahat: it flies; knock it down (the boomerang, the Deku Leaf's wind, the hookshot), then strike. Never the Seahat |
 
 All four use the same declaration fields:
 
@@ -392,7 +393,7 @@ All four use the same declaration fields:
 }
 ```
 
-Use `"actor": "chuchu"`, `"moblin"`, `"keese"` or `"miniblin"` for the other fixed variants,
+Use `"actor": "chuchu"`, `"moblin"`, `"keese"`, `"miniblin"` or `"peahat"` for the other fixed variants,
 with a distinct actor ID and defeat flag for each copy. Declare reward items in
 the same package. `drops` is required and may be empty or contain up to eight
 distinct same-mod items, each with quantity 1–254. Only yaw rotation is accepted;
@@ -421,6 +422,28 @@ drops are replaced by the declared Bag rewards. Some native disappearance effect
 are omitted because their native effect actor also creates retail drops; identical
 retail defeat effects are not promised.
 
+### Opening a door when enemies are defeated
+
+`"defeat_switch": "<switch actor id>"` on an enemy (a native one or your own combat model) names one of
+the mod's switch actors. When every enemy of the mod naming that switch is defeated, the switch's
+`switch_flag` is set, so the doors that follow it open. The game's own switches are never used. The
+defeat markers and the switch flag are mod story records, so a save state or a progress load restores
+them together; a defeat that happened just before is applied on the next game step.
+
+```json
+{"id": "gate-switch", "actor": "switch", "stage": "sea", "room": 11,
+ "position": {"x": 0, "y": 1040, "z": -201500}, "switch_flag": "gate.open"},
+{"id": "gate", "actor": "door", "stage": "sea", "room": 11,
+ "position": {"x": 300, "y": 1040, "z": -201500}, "switch": "gate-switch"},
+{"id": "guard-1", "actor": "bokoblin", "stage": "sea", "room": 11, "position": {"x": 100, "y": 1040, "z": -201200},
+ "defeated_flag": "guard-1.defeated", "drops": [], "defeat_switch": "gate-switch"},
+{"id": "guard-2", "actor": "miniblin", "stage": "sea", "room": 11, "position": {"x": -100, "y": 1040, "z": -201200},
+ "defeated_flag": "guard-2.defeated", "drops": [], "defeat_switch": "gate-switch"}
+```
+
+Stepping on the switch still sets it as well. In the editor, an enemy's Inspector has
+**Sets switch when defeated**, and a switch's or door's Inspector lists the enemies that set it.
+
 ### Variants
 
 Some enemies have declared variants: name one with `"parameters": {"variant": "..."}`.
@@ -433,6 +456,7 @@ checked; packages still cannot give raw parameters.
 | `chuchu` | `red` | Jumps at Link when he comes close |
 | `chuchu` | `blue` | Sparks with electricity: a sword hit shocks Link; bombs or a stun first |
 | `chuchu` | `yellow` | Jumps at Link and sparks with electricity |
+| `chuchu` | `black` | Swords bounce off. Light (the Mirror Shield's reflection, the game's light beams) turns it to stone for a while: Link can lift and throw it to break it, or break it with the Skull Hammer |
 | `bokoblin` | `stick` | The ordinary Bokoblin with a stick (the same as no variant) |
 | `bokoblin` | `shield` | Carries a shield as well: it blocks and takes more hits |
 | `bokoblin` | `machete` | Fights with a machete instead of the stick |
@@ -444,10 +468,15 @@ checked; packages still cannot give raw parameters.
 ```
 
 Every colour uses the ordinary ground ChuChu with no game switch; defeat, drops and
-saves work as for the green one. Every Bokoblin variant is the ordinary waiting and
+saves work as for the green one. A blue or yellow ChuChu can only be cut while it is not
+sparking: stun it first (the boomerang or a bomb), then use the sword. The stone black
+ChuChu is the one placed enemy Link may lift; breaking it counts as its defeat. Every Bokoblin variant is the ordinary waiting and
 searching Bokoblin without a path or game switch; its weapon stays the placed copy's
 own and cannot be taken. Patrolling Bokoblins need the game's room paths and are
-not offered. Other names, and variants for an enemy that has
+not offered. The Moblin has no safe variant beyond the ordinary one: its lantern mode is the
+Forsaken Fortress searchlight guard (it raises the fortress alarm and reads the game's collection
+state), its flying mode needs a Kargaroc carrying it, its statue mode reads the game's Hyrule
+state, and its patrol needs a room path. Other names, and variants for an enemy that has
 none, are validator errors.
 
 Packages ship no game models, weapons, animations, shaders or global resource

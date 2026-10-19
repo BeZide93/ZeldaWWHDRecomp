@@ -32,6 +32,7 @@ inline constexpr Variant kVariants[] = {
     {"chuchu", "red", 0xFF000100u, "Red ChuChu", "A red ChuChu: it jumps at Link when he comes close."},
     {"chuchu", "blue", 0xFF000200u, "Blue ChuChu", "A blue ChuChu: it sparks with electricity, so a sword hit shocks Link."},
     {"chuchu", "yellow", 0xFF000400u, "Yellow ChuChu", "A yellow ChuChu: it jumps at Link and sparks with electricity."},
+    {"chuchu", "black", 0xFF000300u, "Black ChuChu", "A black ChuChu: swords bounce off; light turns it to stone, then Link can lift and throw it to break it (or use the hammer)."},
     // Bokoblin (d_a_bk): type 4 (the ordinary one that waits and searches), no path, no switches; bit 0x20
     // gives it a shield and 7 health instead of 5, bit 0x40 a machete (daBoko type 1) instead of the stick.
     {"bokoblin", "stick", 0xFFFFFF04u, "Bokoblin", "The ordinary Bokoblin with a stick."},
@@ -50,7 +51,7 @@ inline bool has_variants(const std::string& kind) {
     for (const Variant& v : kVariants) n += kind == v.kind;
     return n > 1;
 }
-// the variant names of a kind, for messages: "green, red, blue or yellow"
+// the variant names of a kind, for messages: "green, red, blue, yellow or black"
 inline std::string names(const std::string& kind) {
     std::string out;
     unsigned total = 0, at = 0;
@@ -65,10 +66,15 @@ inline std::string names(const std::string& kind) {
 }
 // the weapon (daBoko parameter) a Bokoblin variant's parameter word creates: 1 the machete, 0 the stick
 inline constexpr uint32_t bokoblin_weapon(uint32_t params) { return (params & 0x40u) ? 1u : 0u; }
-// whether `params` is one of the kind's declared parameter words
+// A patrolling Bokoblin: the variant's word with type 0 (it walks its route, d_a_bk jyunkai) and the route
+// number kPatrolRoute (the port's route record, never a room path).
+inline constexpr uint32_t kPatrolRoute = 0xFE;
+inline constexpr uint32_t bokoblin_patrol(uint32_t params) { return (params & ~0x00FF000Fu) | (kPatrolRoute << 16); }
+inline constexpr bool bokoblin_patrols(uint32_t params) { return ((params >> 16) & 0xFF) == kPatrolRoute; }
+// whether `params` is one of the kind's declared parameter words (a Bokoblin's also as a patrol)
 inline bool declared_params(const std::string& kind, uint32_t params) {
     for (const Variant& v : kVariants)
-        if (kind == v.kind && v.params == params) return true;
+        if (kind == v.kind && (v.params == params || (kind == "bokoblin" && bokoblin_patrol(v.params) == params))) return true;
     return false;
 }
 

@@ -36,7 +36,10 @@ Value* by_id(Value& list, const std::string& id) {
         if (v.get("id").type == Value::String && v.get("id").text == id) return &v;
     return nullptr;
 }
-bool resident(const Value& a) { return a.get("actor").string() == "resident"; }
+// a Bokoblin patrols its route with the game's patrol code: it starts at its position like a resident
+bool patroller(const Value& a) { return a.get("actor").string() == "bokoblin" && a.get("kind").type == Value::Null; }
+// starts at its position (residents, Bokoblins); a mod model's route lists every point
+bool resident(const Value& a) { return a.get("actor").string() == "resident" || patroller(a); }
 // a resident's own pace (game units per second), 0 when it can't walk
 double pace_of(const Value& a) {
     const auto& r = a.get("parameters").get("resident");
@@ -55,7 +58,8 @@ std::string no_route(const Value& a) {
         return {};
     }
     if (a.get("kind").string() == "mod") return {};  // the manifest check says when its model isn't skinned
-    return "only residents and the mod's own models walk routes";
+    if (patroller(a)) return {};
+    return "only residents, Bokoblins and the mod's own models walk routes";
 }
 }  // namespace
 
@@ -107,7 +111,7 @@ Value Session::dispatch_route(const std::string& command, const Value& p, std::s
             if (path.type != Value::Object) {
                 path = Value();
                 path["points"].type = Value::Array;
-                path["mode"] = "once";
+                path["mode"] = patroller(a) ? "back_and_forth" : "once";  // a patrol goes round or back and forth
                 // a mod actor's route lists every point: it starts where the actor stands
                 if (!resident(a)) {
                     WorldPoint start;
@@ -172,6 +176,8 @@ Value Session::dispatch_route(const std::string& command, const Value& p, std::s
         route_edit("Route settings of " + text(p, "id"), [&](Value& a, std::string& w) {
             Value& path = a["path"];
             if (path.type != Value::Object) return w = "the actor has no route yet: add_route_point adds its first point", false;
+            if (patroller(a) && (p.object.contains("speed") || p.object.contains("pauses")))
+                return w = "a Bokoblin patrols at its own pace, without pauses: only the mode (loop or back_and_forth)", false;
             if (p.object.contains("speed")) {
                 if (p.get("speed").type == Value::Null) {
                     if (!resident(a)) return w = "a model's route needs a speed", false;

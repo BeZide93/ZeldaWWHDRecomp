@@ -30,7 +30,11 @@ inline constexpr uint32_t kEnemyOwnershipScratchOffset=kEnemyProfilesScratchOffs
 inline constexpr uint32_t kEnemyEpochScratchOffset=kEnemyOwnershipScratchOffset+story_enemy_ownership::kStorageBytes;
 inline constexpr uint32_t kGrappleScratchOffset=(kEnemyEpochScratchOffset+128*4+15)&~15u;
 inline constexpr uint32_t kVisualScratchOffset=kGrappleScratchOffset+0x4000;
-inline constexpr uint32_t kScratchBytes=kVisualScratchOffset+0x3000;
+// Private profiles of the enemy kinds added after the Miniblin (Peahat, Rat, ...): appended at the end,
+// so no earlier offset moves; one 0x30 profile each.
+inline constexpr uint32_t kExtraEnemyProfilesScratchOffset=kVisualScratchOffset+0x3000;
+inline constexpr uint32_t kExtraEnemyProfiles=4;
+inline constexpr uint32_t kScratchBytes=kExtraEnemyProfilesScratchOffset+kExtraEnemyProfiles*0x30;
 static_assert(kEnemyProfilesScratchOffset>=kIdentityScratchOffset+128*40);
 static_assert((kEnemyOwnershipScratchOffset&15)==0);
 static_assert(kTalkProofScratchOffset+kTalkProofBytes<=kScratchBytes);
