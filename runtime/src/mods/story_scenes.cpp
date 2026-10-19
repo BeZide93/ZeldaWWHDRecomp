@@ -354,6 +354,7 @@ uint32_t demo_arena_bytes(){return demo_backend().configure?demo_backend().arena
 void configure_demo(uint32_t arena,uint32_t (*call)(Cpu*,uint32_t,std::initializer_list<uint32_t>),void (*original)(Cpu*,uint32_t)){if(demo_backend().configure)demo_backend().configure(arena,call,original);}
 void demo_tick(Cpu* c){if(demo_backend().configured&&demo_backend().configured())demo_backend().tick(c);}
 bool has_demo_steps(){return std::any_of(g_entries.begin(),g_entries.end(),[](const Entry& e){return std::any_of(e.scene.steps.begin(),e.scene.steps.end(),[](const SceneStep& s){return s.kind==SceneStep::Kind::Demo;});});}
+bool any_demo_step(const std::function<bool(const demo_scene::Demo&)>& test){for(const auto& e:g_entries)for(const auto& st:e.scene.steps)if(st.kind==SceneStep::Kind::Demo&&st.demo&&test(*st.demo))return true;return false;}
 void set_scratch_memory(uint32_t guest){g_scratch=guest;}
 void set_callbacks(Resolve resolve_fn,Actions actions_fn){g_resolve=std::move(resolve_fn);g_actions=std::move(actions_fn);}
 void set_place_resolver(ResolvePlace resolver){g_places=std::move(resolver);}

@@ -27,7 +27,8 @@ void set_place_resolver(ResolvePlace);
 void set_particle_resolver(ResolveParticle);
 using Actions = std::function<bool(const std::string&,const std::vector<story_notebook::StoryAction>&)>;
 void set_game_calls(uint32_t (*call)(Cpu*,uint32_t,std::initializer_list<uint32_t>));
-bool has_demo_steps();  // a declared scene has a "demo" step (story_demo.h installs only then)
+bool has_demo_steps();
+bool any_demo_step(const std::function<bool(const demo_scene::Demo&)>& test);  // a declared demo step passes the test  // a declared scene has a "demo" step (story_demo.h installs only then)
 // The demo-step backend (story_demo.cpp registers itself at startup), so targets that link the scene
 // player without it still build: a demo step then refuses to start.
 struct DemoBackend {

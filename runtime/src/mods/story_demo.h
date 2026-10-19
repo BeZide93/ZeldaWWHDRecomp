@@ -19,7 +19,7 @@
 
 struct Cpu;
 namespace story_demo {
-inline constexpr uint32_t kArenaBytes = 0xF80 + 0xC000;
+inline constexpr uint32_t kArenaBytes = 0xF80 + 0xC000 + 0x80 + 0x100 + 0x40 + 0xC00;  // ... + light, attach, scratch, large event image
 inline constexpr char kVirtualArchive[] = "ModDemo";  // <= 11 characters: mDemoArcName is char[12]
 using Call = uint32_t (*)(Cpu*, uint32_t, std::initializer_list<uint32_t>);
 void configure(uint32_t arena, Call call, void (*original)(Cpu*, uint32_t));

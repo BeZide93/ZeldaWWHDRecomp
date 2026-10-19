@@ -53,6 +53,9 @@ struct Actor {
 struct Sound { uint32_t frame = 0, id = 0; std::string actor; std::optional<Vec> position; float volume = 1, pan = 0.5f; bool operator==(const Sound&) const = default; };
 struct Particle { uint32_t frame = 0, id = 0; std::string actor, joint; std::optional<Vec> position; bool operator==(const Particle&) const = default; };
 struct Message { uint32_t frame = 0; std::string text; bool operator==(const Message&) const = default; };
+// Time and weather at a frame: hour 0..24, rain 0..1 (0 no rain, 1 the game's full rain).
+struct TimeKey { uint32_t frame = 0; float hour = 0; bool operator==(const TimeKey&) const = default; };
+struct WeatherKey { uint32_t frame = 0; float rain = 0; bool operator==(const WeatherKey&) const = default; };
 struct Demo {
     uint32_t frames = 0;
     bool origin_link = false;
@@ -63,8 +66,28 @@ struct Demo {
     std::vector<Sound> sounds;
     std::vector<Particle> particles;
     std::vector<Message> messages;
+    std::vector<TimeKey> time;
+    std::vector<WeatherKey> weather;
+    bool keep_time = false, keep_weather = false;  // otherwise both come back when the demo ends
     bool operator==(const Demo&) const = default;
 };
+// The demo's time and weather changes merged per frame, in frame order: each is one CHANGE cut of the
+// LIGHT staff in the demo's event (demo_event_image.h), started by the port with flag
+// kLightStartFlag0 + index at its frame; the cut sets kLightEndFlag0 + index when it ends.
+inline constexpr uint32_t kMaxLightPoints = 8, kLightWaitFlag = 20, kLightEndFlag0 = 21, kLightStartFlag0 = 40;
+struct LightPoint { uint32_t frame = 0; std::optional<float> hour, rain; };
+inline std::vector<LightPoint> light_points(const Demo& d) {
+    std::vector<LightPoint> out;
+    auto at = [&](uint32_t frame) -> LightPoint& {
+        for (auto& p : out) if (p.frame == frame) return p;
+        auto it = out.begin();
+        while (it != out.end() && it->frame < frame) ++it;
+        return *out.insert(it, LightPoint{frame, {}, {}});
+    };
+    for (const auto& t : d.time) at(t.frame).hour = t.hour;
+    for (const auto& w : d.weather) at(w.frame).rain = w.rain;
+    return out;
+}
 inline bool parse(const mods::json::Value& step, Demo& out, std::string& why);  // demo_scene_parse.h
 
 // The game's id of a file in one of its archives (the archive's resource id table), or -1.

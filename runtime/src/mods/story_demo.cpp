@@ -8,6 +8,7 @@
 #include "story_mail.h"
 #include "story_mail_book.h"
 #include "mod_actor.h"
+#include "story_demo_parts.h"
 
 #include <algorithm>
 #include <cctype>
@@ -66,7 +67,14 @@ enum : uint32_t {
     WindowClosing = 0x07C,  // 1: released with the window open; 2: and skipped (end poses after the close)
     Image = 0xC80,          // event image (<= 0x300)
     Stb = 0xF80,            // STB (<= 0xC000)
+    // phases 3 and 5 (story_demo_parts.h)
+    ImageAt = 0x5D0,        // where this demo's event image is (Image, or ImageLarge with a LIGHT staff)
+    LightRecord = Stb + 0xC000,                                     // 0x80: saved time and weather, held rain
+    AttachRecord = LightRecord + story_demo_parts::light::kRecordBytes,  // 0x100: reserved
+    PartsScratch = AttachRecord + 0x100,                            // 0x40
+    ImageLarge = PartsScratch + 0x40,                               // <= 0xC00
 };
+static_assert(ImageLarge + demo_event_image::kMaxImageBytes == kArenaBytes, "story_demo.h kArenaBytes");
 uint32_t g_arena = 0;
 Call g_call = nullptr;
 void (*g_original)(Cpu*, uint32_t) = nullptr;
@@ -148,13 +156,17 @@ void demo_window_wait(Cpu* c) {
     if (recorded()) st32(g_arena + WindowAt, c->r[3]);
     g_original(c, kDemoWindowWait);
 }
+void parts_update(Cpu* c);
+uint32_t image_at() { const uint32_t at = ld32(g_arena + ImageAt); return at ? at : g_arena + Image; }
+story_demo_parts::Context parts(uint32_t record) { return {g_arena + record, g_arena + PartsScratch, call, g_call}; }
 // dDemo_manager_c::update, then the demo's values go to actors whose own code doesn't read a demo slot
 void manager_update(Cpu* c) {
     g_original(c, kManagerUpdate);
     const uint32_t result = c->r[3];
-    if (recorded() && ld32(g_arena + Phase) == 2 && ld32(g_arena + CharacterCount)) {
+    if (recorded() && ld32(g_arena + Phase) == 2) {
         const Cpu saved = *c;
-        apply_characters(c);
+        parts_update(c);
+        if (ld32(g_arena + CharacterCount)) apply_characters(c);
         *c = saved;
     }
     c->r[3] = result;
@@ -199,6 +211,8 @@ void install(const std::function<std::string(uint32_t)>& replaced_by, const std:
     replace(kSearchFromName, search_name);
     replace(kDemoWindowWait, demo_window_wait);
     g_installed = true;
+    // the environment's execute only when a declared demo changes the weather (holds it on the Great Sea)
+    if (story_scenes::any_demo_step([](const demo_scene::Demo& d) { return !d.weather.empty(); })) story_demo_parts::light::install(parts(LightRecord), g_original, replaced_by, replace);
     LOG("[demo] installed: virtual demo archive %s", kVirtualArchive);
 }
 
@@ -365,9 +379,14 @@ bool begin(Cpu* c, std::string& why) {
     demo_event_image::Spec spec;
     if (g_demo.origin_link) spec.origin = demo_event_image::Origin{u32_as_f32(ld32(link + 0x314)), u32_as_f32(ld32(link + 0x318)), u32_as_f32(ld32(link + 0x31C)), g_demo.angle};
     else if (g_demo.origin) spec.origin = demo_event_image::Origin{g_demo.origin->x, g_demo.origin->y, g_demo.origin->z, g_demo.angle};
+    const auto light = demo_scene::light_points(g_demo);
+    for (uint32_t i = 0; i < light.size(); ++i)
+        spec.light.push_back({demo_scene::kLightStartFlag0 + i, demo_scene::kLightEndFlag0 + i, light[i].hour, light[i].rain && *light[i].rain > 0});
+    spec.light_wait_flag = demo_scene::kLightWaitFlag;
     std::vector<uint8_t> image;
     if (!demo_event_image::make(spec, image, why)) return false;
-    if (image.size() > Stb - Image) return why = "demo event image too large", false;
+    const uint32_t image_address = image.size() <= Stb - Image ? g_arena + Image : g_arena + ImageLarge;
+    if (image.size() > demo_event_image::kMaxImageBytes) return why = "demo event image too large", false;
     if (spec.origin) { st32(g_arena + Origin, f32_as_u32(spec.origin->x)); st32(g_arena + Origin + 4, f32_as_u32(spec.origin->y)); st32(g_arena + Origin + 8, f32_as_u32(spec.origin->z)); st32(g_arena + Origin + 12, f32_as_u32(spec.origin->angle_y)); }
     const uint32_t manager = play + kManager;
     (void)origin_now;
@@ -383,7 +402,9 @@ bool begin(Cpu* c, std::string& why) {
         text(entry, compiled.virtual_ids[i].first.archive);
         st32(entry + 12, compiled.virtual_ids[i].second);
     }
-    std::memcpy(mem::ptr(g_arena + Image), image.data(), image.size());
+    std::memcpy(mem::ptr(image_address), image.data(), image.size());
+    st32(g_arena + ImageAt, image_address);
+    story_demo_parts::light::begin(c, parts(LightRecord), g_demo);
     std::memcpy(mem::ptr(g_arena + Stb), compiled.stb.data(), compiled.stb.size());
     st32(g_arena + StbBytes, uint32_t(compiled.stb.size()));
     st32(g_arena + MessageCount, uint32_t(compiled.messages.size()));
@@ -405,7 +426,7 @@ bool begin(Cpu* c, std::string& why) {
     st32(g_arena + Phase, 1);
     st32(g_arena + Ticks, 0);
     call(c, kClearBase, {manager});
-    call(c, kSetData, {manager, g_arena + Image});
+    call(c, kSetData, {manager, image_address});
     if (!call(c, kOrderEvent, {manager, 0})) return why = "the game refused the demo event", false;
     if (g_camera_stopped) { const uint32_t camera = call(c, kCamera, {}); if (camera) { call(c, kStartCamera, {camera}); st32(g_arena + CameraStarted, 1); } }
     LOG("[demo] started: %zu bytes STB, %zu archive files, %zu participants, %zu messages, origin %s", compiled.stb.size(), compiled.virtual_ids.size(), compiled.participants.size(),
@@ -459,7 +480,7 @@ Poll poll(Cpu* c) {
         out.state = Poll::State::Running;
         return out;
     }
-    const uint32_t mode = ld32(kDemoMode), file = ld32(kDemoFile), state = ld32(g_arena + Image + demo_event_image::kEventStateOffset);
+    const uint32_t mode = ld32(kDemoMode), file = ld32(kDemoFile), state = ld32(image_at() + demo_event_image::kEventStateOffset);
     const bool ours = file == g_arena + Stb;
     if (ld32(g_arena + Phase) == 1) {
         if (ours && mode == 1) { st32(g_arena + Phase, 2); LOG("[demo] playing (event state %u)", state); }
@@ -572,6 +593,12 @@ void apply_characters(Cpu* c) {
 }  // namespace
 
 namespace {
+// Phase 5: the demo's time/weather changes, each demo frame
+void parts_update(Cpu* c) {
+    if (g_demo.time.empty() && g_demo.weather.empty()) return;
+    const uint32_t frame = ld32(kDemoFrame);
+    story_demo_parts::light::update(c, parts(LightRecord), g_demo, frame, ld32(g_arena + ManagerAt));
+}
 // Skip: every participant takes the pose of its tracks' last keys (relative to the demo's origin).
 void end_poses(Cpu* c) {
     const float ox = u32_as_f32(ld32(g_arena + Origin)), oy = u32_as_f32(ld32(g_arena + Origin + 4)), oz = u32_as_f32(ld32(g_arena + Origin + 8));
@@ -644,6 +671,7 @@ void release(Cpu* c, const char* reason) {
         restore_manager(c);
         std::memcpy(mem::ptr(kDemoArcName), mem::ptr(g_arena + SavedArc), 12);
     }
+    story_demo_parts::light::release(c, parts(LightRecord));
     if (ld32(g_arena + CameraStarted)) { const uint32_t camera = call(c, kCamera, {}); if (camera) call(c, kStopCamera, {camera}); }
     if (ld32(g_arena + MessageCount)) story_mail::unsay();
     for (uint32_t i = 0; i < ld32(g_arena + CharacterCount) && i < 16; ++i) {

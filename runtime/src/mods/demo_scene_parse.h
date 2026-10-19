@@ -82,13 +82,45 @@ inline bool track(const Value& v, bool scalar, uint32_t frames, Track& out, std:
     return true;
 }
 template <class T> inline bool frame_order(const std::vector<T>& v) { return std::is_sorted(v.begin(), v.end(), [](const T& a, const T& b) { return a.frame < b.frame; }); }
+// "time": [{"frame","hour"}], "weather": [{"frame","rain"}], "keep_time", "keep_weather"
+inline bool light(const Value& st, Demo& d, std::string& why) {
+    const auto& time = st.get("time");
+    const auto& weather = st.get("weather");
+    if (time.type != Value::Null) {
+        if (time.type != Value::Array || time.array.empty() || time.array.size() > kMaxLightPoints) return fail(why, "demo time must be a list of up to 8");
+        for (const auto& v : time.array) {
+            TimeKey k;
+            if (!keys_only(v, {"frame", "hour"}) || !integer(v.get("frame"), 0, d.frames, k.frame) || !real(v.get("hour"), 0, 23.99, k.hour)) return fail(why, "time needs a frame inside the demo and an hour 0..24");
+            if (!d.time.empty() && k.frame <= d.time.back().frame) return fail(why, "time frames must increase");
+            d.time.push_back(k);
+        }
+    }
+    if (weather.type != Value::Null) {
+        if (weather.type != Value::Array || weather.array.empty() || weather.array.size() > kMaxLightPoints) return fail(why, "demo weather must be a list of up to 8");
+        for (const auto& v : weather.array) {
+            WeatherKey k;
+            if (!keys_only(v, {"frame", "rain"}) || !integer(v.get("frame"), 0, d.frames, k.frame) || !real(v.get("rain"), 0, 1, k.rain)) return fail(why, "weather needs a frame inside the demo and rain 0..1");
+            if (!d.weather.empty() && k.frame <= d.weather.back().frame) return fail(why, "weather frames must increase");
+            d.weather.push_back(k);
+        }
+    }
+    for (const char* key : {"keep_time", "keep_weather"}) {
+        if (!st.object.contains(key)) continue;
+        if (st.get(key).type != Value::Bool) return fail(why, std::string(key) + " must be true or false");
+        (std::string(key) == "keep_time" ? d.keep_time : d.keep_weather) = st.get(key).boolean;
+    }
+    if (d.keep_time && d.time.empty()) return fail(why, "keep_time needs a time change");
+    if (d.keep_weather && d.weather.empty()) return fail(why, "keep_weather needs a weather change");
+    if (light_points(d).size() > kMaxLightPoints) return fail(why, "a demo changes time and weather at most at 8 frames");
+    return true;
+}
 }  // namespace parse_detail
 
 inline bool parse(const mods::json::Value& st, Demo& d, std::string& why) {
     using namespace parse_detail;
     using mods::json::Value;
     d = {};
-    if (!keys_only(st, {"type", "frames", "origin", "angle", "camera", "actors", "sounds", "particles", "messages"}) || st.get("type").string() != "demo")
+    if (!keys_only(st, {"type", "frames", "origin", "angle", "camera", "actors", "sounds", "particles", "messages", "time", "weather", "keep_time", "keep_weather"}) || st.get("type").string() != "demo")
         return fail(why, "unknown demo field");
     if (!integer(st.get("frames"), 1, kMaxFrames, d.frames)) return fail(why, "demo needs frames 1..9000");
     const auto& origin = st.get("origin");
@@ -252,6 +284,7 @@ inline bool parse(const mods::json::Value& st, Demo& d, std::string& why) {
             d.messages.push_back(x);
         }
     }
+    if (!parse_detail::light(st, d, why)) return false;
     if (d.actors.empty() && d.eye.keys.empty()) return fail(why, "demo needs a camera or actors");
     return true;
 }
