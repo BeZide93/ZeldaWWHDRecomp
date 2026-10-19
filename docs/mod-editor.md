@@ -162,8 +162,11 @@ has no flags, drops or dialogue.
 **Buildings** in the same list are the islands' own houses, towers and shelters
 (docs/mod-sdk-v3.md, "Island buildings"). The first time a mod places one, the editor makes it from
 your game files: the list says "(preparing...)" and the building appears in the picture a moment
-later, when it is ready (in a mod that has no actor with a model yet, after a restart, as for your own
-models). A building turns about the vertical axis only and keeps its size; it has no variants. If your
+later, when it is ready. A building turns about the vertical axis only and keeps its size; it has no variants. While
+a building is selected or dragged, its footprint shows in the picture: green where it may stand, red
+with what is in the way (a villager, a villager route, a chest, a door, a cutscene area...) where it
+may not. The label names the first thing ("In the way: a door of the island (and 2 more)"); hover it
+to see them all, with the game's own names. Moving it there is refused with the same reasons. If your
 game files can't make it, the list shows the reason.
 
 ### Routes: actors that walk
@@ -206,8 +209,7 @@ one of them (another place, other drops, another flag) creates it again in the g
 These wait until the game starts again (the change is in the package; save it first):
 
 - your own enemies and carried props, and a pot, barrel or crate with a texture of its own;
-- the first actor with one of your models when the game had none at start-up, and the actors of a mod
-  that had no actors at start-up;
+- the actors of a mod that had no actors at start-up;
 - switching an actor between a game actor and one of your models, or between a pot, switch, door or
   enemy and another kind.
 

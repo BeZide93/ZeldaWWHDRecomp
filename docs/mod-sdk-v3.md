@@ -269,13 +269,24 @@ middle of the building at its lowest point.
 | `piece:outset-house-small` | A small island house on posts with a pointed roof | yes |
 | `piece:outset-lookout-tower` | A tall wooden watchtower on a single post with a boardwalk | |
 | `piece:outset-well-shelter` | A small open wooden shelter with a slanted roof | |
+| `piece:flight-platform` | The tall two-level wooden flight platform on stilts, with its ramp, ladder and roof (without the goal posts) | |
+| `piece:oasis-cabana` | The Private Oasis holiday cabana with its thatched roof, veranda and lamps | |
+| `piece:tingle-tower` | Tingle's painted wooden tower with its ladder and fenced lookout (without the head on top) | |
 
 The buildings of one island share their textures and are built together (about 5.1 MiB of game
 memory for the Outset set while a room uses it). All the buildings of a room, every package's,
-share a budget of 8 MiB: each set once, and each building about 50 KiB. A mod that goes over it is
-refused with the reason. Buildings count toward the 16 actors per room, return when their room
-loads again, and full and portable save states keep them. A building may stand anywhere in its
-room, also on an island among the island's own objects; it stays clear of other world objects.
+share a budget of 24 MiB: each set once, and each building about 50 KiB (all four sets of today
+together take about 17 MiB). A mod that goes over it is refused with the reason. Buildings count toward the 16 actors per room, return when their room
+loads again, and full and portable save states keep them. A building may stand on an island, but not
+in the way of what the island needs: its footprint (with 50 units around it) must keep clear of the
+island's villagers and their walking routes, chests, doors, items, switches, cutscene and message areas
+and other objects (an object whose size isn't known counts with a radius of 150 units). Grass, flowers,
+trees, palms and birds may be under it. It also stays in its room's square and clear of other world
+objects. A place that isn't clear is refused with what is in the way (in the editor, the footprint turns
+red and says so; an MCP `add_actor` or move lists every reason, with the game's own names); a building that is refused when the game starts is left out with a line in the log.
+
+The buildings of one set share their materials: copies of one set in neighbouring rooms that are seen
+at once may share the light of one room.
 
 If the player's game files can't make a building (another game version, or the island's model
 differs from what the port expects), its placements are left out with a line in the log, and the
@@ -696,7 +707,8 @@ or `"pushable"`. `attention.prompt` chooses `"check"` (the default) or `"talk"`.
 Dialogue uses the existing message and action system; static actors face Link by
 turning their whole body. Skinned models add the bounded features described below. Model counts and geometry caps bound input
 size. The runtime also measures native game heap allocations and enforces
-2 MiB per model, 8 MiB per mod and 16 MiB per room. Shared model resources count
+2 MiB per model, 8 MiB per mod and 32 MiB per room (island buildings count toward the room's
+32 MiB and have their own 24 MiB within it, not the mod's 8 MiB). Shared model resources count
 once; actor instances count separately. Cached model resources remain charged
 until the game unloads them. Loading preserves at least 8 MiB in the backing
 archive heap and 1 MiB in the actor heap's parent. A model that cannot fit fails
