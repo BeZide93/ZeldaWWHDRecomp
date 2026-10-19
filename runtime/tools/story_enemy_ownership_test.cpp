@@ -46,6 +46,14 @@ int main(){using namespace story_enemy_ownership;map(Arena,0x10000);map(Base,0x1
  st32(player+4,901);assert(pair_policy(generic_attack,player+0x765C)==PairPolicy::Reject);st32(player+4,900);
  set_mod_collider_verifier([](uint32_t)->ModCollider{throw 1;});assert(pair_policy(retail,retail+0x100)==PairPolicy::Reject);
  set_mod_collider_verifier({});assert(pair_policy(retail,retail+0x100)==PairPolicy::Delegate);
+ { // An Octorok's rock (a game actor: d_a_oq type 6) reaches only an owned Octorok's body, through the game's own rules
+  const uint32_t octo=Base+0xE0000,rock=Base+0xF0000;fixture(Kind::Octorok,octo,700,0xFFFFFF00u);std::string w;const Token t=declare_actor(Kind::Octorok,0xFFFFFF00u,fp,1,w);assert(t&&bind_pending(t,700)&&admit_created(t,octo)&&lookup_collider(octo+0x6EC)==t);
+  st32(rock+4,701);st16(rock+0xE,0xE3);st32(rock+0xB0,6);st8(rock+0x3DC,6);st32(rock+0xB4,0x10033E10);st32(rock+0x94C+0x44,rock+0x6B0);st32(rock+0x6B0+0xC,rock);st32(rock+0x6B0+0x10,701);
+  assert(pair_policy(rock+0x94C,octo+0x6EC)==PairPolicy::Delegate);assert(pair_policy(rock+0x94C,octo+0x81C)==PairPolicy::Reject);assert(pair_policy(rock+0x94C,Base+0x7C4)==PairPolicy::Reject);assert(pair_policy(octo+0x81C,rock+0xA78)==PairPolicy::Reject);st32(rock+0xA78+0x44,rock+0x6B0);assert(pair_policy(rock+0xA78,octo+0x6EC)==PairPolicy::Delegate);
+  st32(rock+0xB0,0);assert(pair_policy(rock+0x94C,octo+0x6EC)==PairPolicy::Reject);st32(rock+0xB0,6);st32(rock+0x6B0+0x10,702);assert(pair_policy(rock+0x94C,octo+0x6EC)==PairPolicy::Reject);st32(rock+0x6B0+0x10,701);
+  st32(rock+0xB4,0x12345678);assert(pair_policy(rock+0x94C,octo+0x6EC)==PairPolicy::Reject);
+  retire_before_delete(octo);
+ }
  // Known object ownership cannot be erased by replacing its Stts pointer.
  st32(Base+0x7C4+0x44,retail);assert(!lookup_collider(Base+0x7C4));assert(pair_policy(Base+0x7C4,retail)==PairPolicy::Reject);fixture(Kind::ChuChu,Base,100,0xFFFF0000);
  st32(Base+0x924,retail);assert(!lookup_collider(Base+0x990));fixture(Kind::ChuChu,Base,100,0xFFFF0000);

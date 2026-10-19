@@ -137,6 +137,7 @@ const std::vector<ActorType>& actor_types() {
         {"peahat", "Peahat", "Enemies", "The game's Peahat (options.variant seahat: the Seahat over the sea): it flies; knock it down (the boomerang or the Deku Leaf's wind), then strike.", false, false, false},
         {"bokobaba", "Boko Baba", "Enemies", "The game's Boko Baba: a biting plant rooted in the ground; strike its head, then its stem. It never grabs Link.", false, false, false},
         {"bubble", "Bubble", "Enemies", "The game's Bubble (red or blue: options.variant): put out its fire, then strike the skull.", false, false, false},
+        {"octorok", "Octorok", "Enemies", "The game's Octorok (the small one): it rises from water and spits rocks; reflect one with the shield, or use arrows or the boomerang.", false, false, false},
         {"miniblin", "Miniblin", "Enemies", "The game's Miniblin: it pops up when Link comes near and is defeated for good.", false, false, false},
         {"darknut", "Darknut", "Enemies", "The game's Darknut, with its sword (with a shield, a helmet, or the Mighty Darknut's cape: options.variant).", false, false, false},
         {"rat_hole", "Rat hole", "Enemies", "A rat hole three rats come out of, one after the other (rats, bomb rats or both: options.variant); each defeated rat drops the hole's drops, and the hole closes when all three are defeated.", false, false, false},

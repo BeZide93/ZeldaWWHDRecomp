@@ -159,7 +159,7 @@ void mark(const char* field) {
 }
 
 // What an actor is, for the list and the inspector.
-bool is_enemy(const std::string& actor) { return actor == "chuchu" || actor == "bokoblin" || actor == "moblin" || actor == "keese" || actor == "miniblin" || actor == "peahat" || actor == "darknut" || actor == "rat_hole" || actor == "bokobaba" || actor == "bubble"; }
+bool is_enemy(const std::string& actor) { return actor == "chuchu" || actor == "bokoblin" || actor == "moblin" || actor == "keese" || actor == "miniblin" || actor == "peahat" || actor == "darknut" || actor == "rat_hole" || actor == "bokobaba" || actor == "bubble" || actor == "octorok"; }
 bool is_prop(const std::string& actor) { return actor == "pot" || actor == "barrel" || actor == "crate"; }
 std::string kind_label(const Value& a) {
     const std::string actor = a.get("actor").string();

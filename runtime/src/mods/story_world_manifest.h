@@ -169,7 +169,7 @@ inline bool known_flag(const Value& m,const std::string& name) {
         if(mod&&a.get("behaviour").string()=="static"&&a.get("stage").string()=="sea"&&produces(a.get("arrival").get("flag")))return true;
         if(type=="switch"&&produces(a.get("switch_flag")))return true;
         if((type=="pot"||type=="barrel"||type=="crate"||(mod&&a.get("carry").get("break_on_impact").type==Value::Bool&&a.get("carry").get("break_on_impact").boolean))&&produces(a.get("broken_flag")))return true;
-        if((type=="chuchu"||type=="bokoblin"||type=="moblin"||type=="keese"||type=="miniblin"||type=="peahat"||type=="darknut"||type=="rat_hole"||type=="bokobaba"||type=="bubble"||
+        if((type=="chuchu"||type=="bokoblin"||type=="moblin"||type=="keese"||type=="miniblin"||type=="peahat"||type=="darknut"||type=="rat_hole"||type=="bokobaba"||type=="bubble"||type=="octorok"||
             (mod&&a.get("combat").type==Value::Object))&&produces(a.get("defeated_flag")))return true;
         if(writes(a.get("then")))return true;
         for(const auto&t:a.get("talks").array)if(writes(t.get("then")))return true;
@@ -328,7 +328,7 @@ inline bool game_piece_budget(const std::vector<ManifestActor>& actors,std::stri
 // Per-type fields after common placement validation. Native enemy names stay
 // outside parse_actors' allowlist until their runtime adapters are integrated.
 inline bool native_enemy_fields(const Value& m,const Value& v,ManifestActor& a,std::string& why) {
-    if(a.actor!="chuchu"&&a.actor!="bokoblin"&&a.actor!="moblin"&&a.actor!="keese"&&a.actor!="miniblin"&&a.actor!="peahat"&&a.actor!="darknut"&&a.actor!="rat_hole"&&a.actor!="bokobaba"&&a.actor!="bubble")return why="unsupported native enemy",false;
+    if(a.actor!="chuchu"&&a.actor!="bokoblin"&&a.actor!="moblin"&&a.actor!="keese"&&a.actor!="miniblin"&&a.actor!="peahat"&&a.actor!="darknut"&&a.actor!="rat_hole"&&a.actor!="bokobaba"&&a.actor!="bubble"&&a.actor!="octorok")return why="unsupported native enemy",false;
     for(const char* key:{"kind","params","flag","broken_flag","switch_flag","switch","lines","then","model","animation","look_at","path","collision","attention"})
         if(v.object.contains(key)&&!((a.actor=="bokoblin"||a.actor=="moblin")&&std::string(key)=="path"))return why="native enemies cannot override parameters, behavior, dialogue or models",false;
     // a declared variant only (story_enemy_variants.h), never raw parameters
@@ -512,7 +512,7 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
         const bool prop=a.actor=="pot"||a.actor=="barrel"||a.actor=="crate";
         if(v.object.contains("texture")){if(!prop||!texture_path(v.get("texture")))return why="texture requires a placed pot, barrel or crate and a package PNG in textures/ or assets/",false;a.texture=v.get("texture").text;}
         const bool switch_actor=a.actor=="switch",door=a.actor=="door";
-        const bool enemy=a.actor=="chuchu"||a.actor=="bokoblin"||a.actor=="moblin"||a.actor=="keese"||a.actor=="miniblin"||a.actor=="peahat"||a.actor=="darknut"||a.actor=="rat_hole"||a.actor=="bokobaba"||a.actor=="bubble";
+        const bool enemy=a.actor=="chuchu"||a.actor=="bokoblin"||a.actor=="moblin"||a.actor=="keese"||a.actor=="miniblin"||a.actor=="peahat"||a.actor=="darknut"||a.actor=="rat_hole"||a.actor=="bokobaba"||a.actor=="bubble"||a.actor=="octorok";
         if(a.actor!="sign"&&a.actor!="resident"&&a.actor!="chest"&&!prop&&!switch_actor&&!door&&!enemy&&!(a.actor=="mod"&&a.kind=="mod"))return why="unknown or unsupported flag-setting actor: "+a.actor,false;
         if(!place(v,a.stage,a.room)||!point(v.get("position"),a.position))return why="actor "+a.id+": invalid stage, room or position",false;
         if(v.get("rotation").type!=Value::Null&&!point(v.get("rotation"),a.rotation,360))return why="invalid actor rotation",false;
