@@ -194,10 +194,10 @@ bool register_for_mod(const std::string& mod, const BuiltSet& set, const std::st
         // the distant model, in its own small archive, draws like the island's own distant view: background light
         if (!actor_model_cache::register_external(b->distant_archive, b->distant_path)) return why = "the island's distant archive could not be registered", false;
         if (!mod_actor::register_piece_set(b->distant_archive, {b->distant_model})) return why = "the island's distant model could not be registered", false;
-        mod_actor::PieceDraw far;
-        far.second_index = -1;
-        far.light[0] = far.light[1] = 1;
-        if (!mod_actor::set_piece_draw(b->distant_archive, 1, far)) return why = "the island's distant model could not be registered", false;
+        mod_actor::PieceDraw distant_draw;
+        distant_draw.second_index = -1;
+        distant_draw.light[0] = distant_draw.light[1] = 1;
+        if (!mod_actor::set_piece_draw(b->distant_archive, 1, distant_draw)) return why = "the island's distant model could not be registered", false;
         if (!story_actors::register_piece_model(mod, distant_key(id), b->distant_archive, 1, b->distant_minimum, b->distant_maximum, editor, why))
             return false;
     }
