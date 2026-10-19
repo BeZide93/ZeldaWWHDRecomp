@@ -169,7 +169,7 @@ walk a route. Select it; the Inspector's **Route** section has:
   point, or at the end). A resident starts where it stands, so its position is the route's start; to move
   the start, move the resident.
 - The points, numbered as the picture shows them. Click one to select it: its handle in the picture moves
-  it (letting go is one change). **Up**, **Down** and **Remove** change the order or take a point out;
+  it (letting go is one change). **Up**, **Down** and **Remove point** change the order or take it out;
   every change is one Undo step.
 - **Speed** in game units per second. A resident walks at its own pace unless you set one (from half to
   twice its own pace). **Mode**: once (it stops at the end), loop (back to the start and round again) or

@@ -150,40 +150,41 @@ void route_section(const Value& m, const Value& a) {
 
     // the points
     if (resident) muted(has ? "Start: its position (move the actor to move it)" : "It starts at its position; add the points it walks to.");
+    if (!pts.empty()) muted("Click a point to select it, then drag its handle in the picture.");
     for (size_t i = 0; i < pts.size(); i++) {
         const int n = int(i + 1);
         char label[96];
         std::snprintf(label, sizeof label, "%d   %.0f, %.0f, %.0f##route_point%d", n, num(pts[i], "x"), num(pts[i], "y"), num(pts[i], "z"), n);
-        ImGui::PushID(n);
-        if (ImGui::Selectable(label, R.point == n, 0, ImVec2(ImGui::GetContentRegionAvail().x - 150, 0))) R.point = R.point == n ? 0 : n;
-        ImGui::SameLine();
-        ImGui::BeginDisabled(i == 0);
+        if (ImGui::Selectable(label, R.point == n)) R.point = R.point == n ? 0 : n;
+    }
+    if (R.point > 0 && R.point <= int(pts.size())) {  // the selected point: its order and removal
+        const int n = R.point;
+        ImGui::BeginDisabled(n == 1);
         if (ImGui::SmallButton("Up")) {
             Value q = p;
             q["point"] = n;
             q["to"] = n - 1;
             command("reorder_route_point", q);
-            if (R.point == n) R.point = n - 1;
+            R.point = n - 1;
         }
         ImGui::EndDisabled();
         ImGui::SameLine();
-        ImGui::BeginDisabled(i + 1 == pts.size());
+        ImGui::BeginDisabled(n == int(pts.size()));
         if (ImGui::SmallButton("Down")) {
             Value q = p;
             q["point"] = n;
             q["to"] = n + 1;
             command("reorder_route_point", q);
-            if (R.point == n) R.point = n + 1;
+            R.point = n + 1;
         }
         ImGui::EndDisabled();
         ImGui::SameLine();
-        if (ImGui::SmallButton("Remove")) {
+        if (ImGui::SmallButton("Remove point")) {
             Value q = p;
             q["point"] = n;
             command("remove_route_point", q);
-            if (R.point >= n) R.point = R.point == n ? 0 : R.point - 1;
+            R.point = 0;
         }
-        ImGui::PopID();
     }
     if (R.point > int(pts.size())) R.point = 0;
     auto add = [&](const char* at) {
@@ -199,7 +200,7 @@ void route_section(const Value& m, const Value& a) {
     if (ImGui::SmallButton("Add point at camera")) add("camera");
     if (R.point > 0) {
         ImGui::SameLine();
-        ImGui::TextDisabled("(after point %d; drag its handle in the picture)", R.point);
+        ImGui::TextDisabled("(after point %d)", R.point);
     }
     if (!has) return;
 
