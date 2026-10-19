@@ -669,18 +669,18 @@ void live_kinds_note() {
         const auto live = editor_live_kinds::read(reply);
         const Value a = json(actor_json);
         const std::string actor = a.get("actor").string();
-        const bool enemy = actor == "chuchu" || actor == "bokoblin" || actor == "moblin" || actor == "keese" || actor == "miniblin";
+        const bool enemy = actor == "chuchu" || actor == "bokoblin" || actor == "moblin" || actor == "keese" || actor == "miniblin" || actor == "darknut";
         const bool prop = actor == "pot" || actor == "barrel" || actor == "crate";
         CHECK(!live.empty());
         return editor_live_kinds::restart_only(a, live, enemy, prop);
     };
     const char* live_ones[] = {R"({"actor": "chuchu", "parameters": {"variant": "blue"}})", R"({"actor": "bokoblin", "parameters": {"variant": "shield"}})",
-                               R"({"actor": "miniblin"})", R"({"actor": "keese"})", R"({"actor": "pot"})", R"({"actor": "switch"})",
+                               R"({"actor": "miniblin"})", R"({"actor": "darknut", "parameters": {"variant": "mighty"}})", R"({"actor": "keese"})", R"({"actor": "pot"})", R"({"actor": "switch"})",
                                R"({"actor": "resident", "parameters": {"resident": "sa2"}})", R"({"actor": "sign"})"};
     host.live_kinds = 1;
     for (const char* a : live_ones) CHECK(!note(a));
     host.live_kinds = 0;  // the game has not installed them (no --editor live kinds): the note shows
-    for (const char* a : {R"({"actor": "chuchu"})", R"({"actor": "miniblin"})", R"({"actor": "bokoblin", "parameters": {"variant": "machete"}})"}) CHECK(note(a));
+    for (const char* a : {R"({"actor": "chuchu"})", R"({"actor": "miniblin"})", R"({"actor": "darknut"})", R"({"actor": "bokoblin", "parameters": {"variant": "machete"}})"}) CHECK(note(a));
     CHECK(note(R"({"kind": "mod", "model": "m", "combat": {}})"));
     // no answer yet: the start-up-only kinds are assumed
     const editor_live_kinds::Live none;
@@ -752,6 +752,10 @@ void building(const fs::path& examples) {
           actor_of(s, "green-chu")->get("parameters").type == Value::Null);
     CHECK(!ok(s.run("add_actor", json(R"({"type": "chuchu", "id": "odd-chu", "options": {"variant": "purple"}})"))) && !actor_of(s, "odd-chu"));
     CHECK(!ok(s.run("add_actor", json(R"({"type": "keese", "id": "odd-keese", "options": {"variant": "red"}})"))) && !actor_of(s, "odd-keese"));
+    CHECK(ok(s.run("add_actor", json(R"({"type": "darknut", "id": "knight", "options": {"variant": "mighty"}})"))) &&
+          actor_of(s, "knight")->get("parameters").get("variant").string() == "mighty" && actor_of(s, "knight")->get("defeated_flag").string() == "knight-defeated");
+    CHECK(!ok(s.run("add_actor", json(R"({"type": "darknut", "id": "statue", "options": {"variant": "frozen"}})"))) && !actor_of(s, "statue"));
+    CHECK(ok(s.run("remove_actor", json(R"({"id": "knight", "confirm": true})"))));
     {
         bool listed = false;
         const Value types = s.run("list_actor_types");

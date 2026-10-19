@@ -94,7 +94,7 @@ int main() {
     const auto prop_example=[](){return mods::json::parse(R"({"items":[{"id":"shard"}],"actors":[{"id":"vase","actor":"pot","stage":"town","room":0,"position":{"x":0,"y":0,"z":0},"broken_flag":"vase.broken","drops":[{"item":"item:shard","quantity":2}]}]})");};
     { // Validate all four curated native enemy declarations through the public parser.
         const auto fixture=[](){return mods::json::parse(R"({"items":[{"id":"shard"}],"actors":[{"id":"enemy","actor":"chuchu","stage":"sea","room":11,"position":{"x":0,"y":0,"z":0},"defeated_flag":"enemy.defeated","drops":[{"item":"item:shard","quantity":2}]}]})");};
-        for(const char* type:{"chuchu","bokoblin","moblin","keese","miniblin","peahat"}){
+        for(const char* type:{"chuchu","bokoblin","moblin","keese","miniblin","peahat","darknut"}){
             auto data=fixture();auto& value=data["actors"].array[0];value["actor"]=type;ManifestActor candidate;candidate.actor=type;
             assert(world_manifest::native_enemy_fields(data,value,candidate,why)&&candidate.defeated_flag=="enemy.defeated"&&candidate.drops.size()==1&&candidate.drops[0].quantity==2);
             assert(parse_actors(data,actors,why)&&actors.size()==1&&actors[0].actor==type&&actors[0].defeated_flag=="enemy.defeated"&&actors[0].drops[0].item=="shard");
@@ -143,6 +143,13 @@ int main() {
         assert(story_enemy_variants::find("bokoblin","shield")->params==0xFFFFFF24u&&story_enemy_variants::bokoblin_weapon(0xFFFFFF24u)==0);
         assert(story_enemy_variants::find("bokoblin","machete")->params==0xFFFFFF44u&&story_enemy_variants::bokoblin_weapon(0xFFFFFF44u)==1);
         {auto data=fixture();data["actors"].array[0]["actor"]="bokoblin";data["actors"].array[0]["parameters"]=mods::json::parse(R"({"variant":"red"})");assert(!parse_actors(data,actors,why)&&why.find("stick, shield or machete")!=std::string::npos);}
+        // Darknut: guard behaviour 4, no path and no spawn switch in every variant; the equipment (x rotation
+        // word bits 5..7) is the game's own pairing: none, shield, helmet and shield, helmet, shield and cape
+        assert(story_enemy_variants::find("darknut","")->params==0xFFFF9604u&&story_enemy_variants::find("darknut","")->angle_x==0);
+        for(const auto& v:story_enemy_variants::kVariants){if(std::string(v.kind)!="darknut")continue;assert((v.params&0xFFFF000Fu)==0xFFFF0004u&&!(v.angle_x&~0xE0u)&&story_enemy_variants::angle_x("darknut",v.params)==v.angle_x);}
+        assert(story_enemy_variants::find("darknut","shield")->angle_x==2u<<5&&story_enemy_variants::find("darknut","helmet")->angle_x==3u<<5&&story_enemy_variants::find("darknut","mighty")->angle_x==5u<<5);
+        for(const char* refused:{"frozen","patrol","boss","red"}){auto data=fixture();data["actors"].array[0]["actor"]="darknut";data["actors"].array[0]["parameters"]=mods::json::parse(std::string(R"({"variant":")")+refused+"\"}");assert(!parse_actors(data,actors,why)&&why.find("darknut, shield, helmet or mighty")!=std::string::npos);}
+        {auto data=fixture();data["actors"].array[0]["actor"]="darknut";data["actors"].array[0]["rotation"]=mods::json::parse(R"({"x":45,"y":0,"z":0})");assert(!parse_actors(data,actors,why));}
     }
     for(const auto& name:{"pot","barrel","crate"}){auto p=prop_example();p["actors"].array[0]["actor"]=name;assert(parse_actors(p,actors,why)&&actors[0].broken_flag=="vase.broken"&&actors[0].drops[0].item=="shard"&&actors[0].drops[0].quantity==2);}
     for(const auto& name:{"pot","barrel","crate"}){auto p=prop_example();p["actors"].array[0]["actor"]=name;p["actors"].array[0]["texture"]="textures/blue.png";assert(parse_actors(p,actors,why)&&actors[0].texture=="textures/blue.png");const auto initial=story_actors::identity::fingerprint("test",actors[0]);actors[0].texture_digest="different";assert(story_actors::identity::fingerprint("test",actors[0])!=initial);}

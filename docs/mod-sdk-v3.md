@@ -33,7 +33,7 @@ The initial allowlist is deliberately small:
 | Breakable prop | `pot`, `barrel`, `crate` | Required mod-owned `broken_flag` and `drops` list |
 | Latched floor switch | `switch` | Required mod-owned `switch_flag`; fixed yellow switch |
 | Rotating gate | `door` | Required `switch` naming a switch actor in the same mod |
-| Native enemies (preview) | `chuchu`, `bokoblin`, `moblin`, `keese`, `miniblin`, `peahat` | Required mod-owned `defeated_flag` and `drops`; fixed ordinary variants |
+| Native enemies (preview) | `chuchu`, `bokoblin`, `moblin`, `keese`, `miniblin`, `peahat`, `darknut` | Required mod-owned `defeated_flag` and `drops`; fixed ordinary variants |
 
 Resident names are exact native object codes in lower case. Each placed copy uses fixed ordinary
 parameters: it stands where you put it (unless you give it a route, below) and has none of the
@@ -380,8 +380,9 @@ The allowlist below defines the supported variants.
 | `keese` | Ordinary Keese, the native KI bat; not Morth |
 | `miniblin` | Ordinary Miniblin: hidden until Link comes near and looks its way; never respawns |
 | `peahat` | Ordinary Peahat: it flies; knock it down (the boomerang, the Deku Leaf's wind, the hookshot), then strike. Never the Seahat |
+| `darknut` | Darknut guarding its place with its sword, or a declared variant (below) |
 
-All four use the same declaration fields:
+All of them use the same declaration fields:
 
 ```json
 {
@@ -394,7 +395,7 @@ All four use the same declaration fields:
 }
 ```
 
-Use `"actor": "chuchu"`, `"moblin"`, `"keese"`, `"miniblin"` or `"peahat"` for the other fixed variants,
+Use `"actor": "chuchu"`, `"moblin"`, `"keese"`, `"miniblin"`, `"peahat"` or `"darknut"` for the other fixed variants,
 with a distinct actor ID and defeat flag for each copy. Declare reward items in
 the same package. `drops` is required and may be empty or contain up to eight
 distinct same-mod items, each with quantity 1–254. Only yaw rotation is accepted;
@@ -416,7 +417,7 @@ and ownership generation; compatibility after editing manifests is not promised.
 The adapter fixes native parameters and persistence sentinels. Packages cannot
 supply raw parameters, retail save bits or item tables, health overrides, capture
 or prison variants, dialogue, `then`, paths or custom models for these enemies.
-Own Bokoblin/Moblin weapon copies cannot be lifted or taken by Link in this
+Own Bokoblin/Moblin weapon copies and a Darknut's sword cannot be lifted or taken by Link in this
 preview. Combat is restricted to verified Link interactions; owned enemies and
 weapons must not damage retail actors or join retail enemy cohorts. Native item
 drops are replaced by the declared Bag rewards. Some native disappearance effects
@@ -461,6 +462,10 @@ checked; packages still cannot give raw parameters.
 | `bokoblin` | `stick` | The ordinary Bokoblin with a stick (the same as no variant) |
 | `bokoblin` | `shield` | Carries a shield as well: it blocks and takes more hits |
 | `bokoblin` | `machete` | Fights with a machete instead of the stick |
+| `darknut` | `darknut` | The ordinary Darknut in armour with its sword (the same as no variant) |
+| `darknut` | `shield` | Carries a shield as well: it blocks Link's sword |
+| `darknut` | `helmet` | Wears a helmet and carries a shield: it takes twice the hits |
+| `darknut` | `mighty` | The Mighty Darknut: helmet, shield and cape, and it notices Link from further away |
 
 ```json
 {"id": "pier-chu", "actor": "chuchu", "parameters": {"variant": "blue"},
@@ -479,6 +484,18 @@ Forsaken Fortress searchlight guard (it raises the fortress alarm and reads the 
 state), its flying mode needs a Kargaroc carrying it, its statue mode reads the game's Hyrule
 state, and its patrol needs a room path. Other names, and variants for an enemy that has
 none, are validator errors.
+
+Every Darknut guards the place you put it and fights Link when he comes near; it has no path and
+no game switch (defeating it opens no gate and makes no chest appear in the game; use your own
+`defeated_flag`). Its armour, helmet and shield come off as in the game, and its sword can be
+knocked out of its hands; then it lies on the ground until the Darknut picks it up again. A Darknut
+picks up only its own sword, and Link cannot take it. The Mighty Darknut's cape tears under Link's
+sword (other attacks pass through it) and falls away with the armour. When the Darknut
+is defeated, removed in the editor or its room unloads, its sword and cape go with it. A full save
+state keeps it as it was (pieces off, sword on the ground); a portable one, like a room change,
+brings it back whole unless it was defeated. The game's frozen Darknuts (Hyrule Castle), the
+patrolling ones and the event Darknuts (the Master Sword chamber, the mini-boss ones) read game
+switches, paths or events and are not offered.
 
 Packages ship no game models, weapons, animations, shaders or global resource
 replacements for these declarations. Retail originals retain their own behavior

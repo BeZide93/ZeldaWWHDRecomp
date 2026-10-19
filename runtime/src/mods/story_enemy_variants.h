@@ -20,11 +20,12 @@
 namespace story_enemy_variants {
 
 struct Variant {
-    const char* kind;     // the manifest's actor: chuchu, bokoblin, moblin, keese
+    const char* kind;     // the manifest's actor: chuchu, bokoblin, darknut, ...
     const char* name;     // parameters.variant
     uint32_t params;      // the fixed actor parameters
     const char* label;    // the editor's name for it
     const char* help;     // plain words
+    uint16_t angle_x = 0; // the placement's x rotation word, which some kinds read as a parameter
 };
 
 inline constexpr Variant kVariants[] = {
@@ -38,6 +39,15 @@ inline constexpr Variant kVariants[] = {
     {"bokoblin", "stick", 0xFFFFFF04u, "Bokoblin", "The ordinary Bokoblin with a stick."},
     {"bokoblin", "shield", 0xFFFFFF24u, "Bokoblin with a shield", "A Bokoblin with a stick and a shield: it blocks, and takes more hits."},
     {"bokoblin", "machete", 0xFFFFFF44u, "Bokoblin with a machete", "A Bokoblin with a machete instead of the stick."},
+    // Darknut (d_a_tn): behaviour 4 (guards its place, then fights), sight range 150 or 250 (byte 1, tens of
+    // units), no path (byte 2 0xFF), no spawn switch (byte 3 0xFF); bits 4..7 the armour colour. Its
+    // equipment is the x rotation word's bits 5..7 (0 armour only, 2 a shield, 3 a helmet and a shield,
+    // 5 a helmet, a shield and a cape: the Mighty Darknut); a helmet doubles its health (30 instead of
+    // 15). The z rotation stays 0xFF: no defeat switch. Each pair is one the game itself places.
+    {"darknut", "darknut", 0xFFFF9604u, "Darknut", "The armoured knight with a big sword.", 0x0000},
+    {"darknut", "shield", 0xFFFF9614u, "Darknut with a shield", "A Darknut with a shield: it blocks Link's sword.", 0x0040},
+    {"darknut", "helmet", 0xFFFF9654u, "Darknut with a helmet", "A Darknut with a helmet and a shield: it takes twice the hits.", 0x0060},
+    {"darknut", "mighty", 0xFFFFFA54u, "Mighty Darknut", "The Mighty Darknut: helmet, shield and cape, and it notices Link from further away.", 0x00A0},
 };
 
 // the kind's variant `name` ("" is the default, the kind's first)
@@ -66,6 +76,12 @@ inline std::string names(const std::string& kind) {
 }
 // the weapon (daBoko parameter) a Bokoblin variant's parameter word creates: 1 the machete, 0 the stick
 inline constexpr uint32_t bokoblin_weapon(uint32_t params) { return (params & 0x40u) ? 1u : 0u; }
+// the x rotation word of the kind's variant with parameter word `params` (0 for none)
+inline uint16_t angle_x(const std::string& kind, uint32_t params) {
+    for (const Variant& v : kVariants)
+        if (kind == v.kind && v.params == params) return v.angle_x;
+    return 0;
+}
 // A patrolling Bokoblin: the variant's word with type 0 (it walks its route, d_a_bk jyunkai) and the route
 // number kPatrolRoute (the port's route record, never a room path).
 inline constexpr uint32_t kPatrolRoute = 0xFE;
