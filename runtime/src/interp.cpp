@@ -948,7 +948,8 @@ static void paced_pass_start() {
     if (gx2::next_step_time(slot)) {
         using ns = std::chrono::nanoseconds;
         const auto plan = pacing::slot_step_start(ns(now.time_since_epoch()).count(), ns(slot.time_since_epoch()).count(),
-                                                  ns(vsync_tick()).count(), ns(kPacedStep).count(), g_wait_step);
+                                                  ns(vsync_tick()).count(), ns(kPacedStep).count(), g_wait_step,
+                                                  pacing::keep_window(ns(kPacedStep).count(), ns(vsync_tick()).count(), in_between() == 1));
         const auto before = g_last_logic;
         g_last_logic = pace_clock::time_point(std::chrono::duration_cast<pace_clock::duration>(ns(plan.start)));
         if (plan.how == pacing::StepStart::kWait) {

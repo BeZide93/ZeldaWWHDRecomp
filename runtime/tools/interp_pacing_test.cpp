@@ -357,7 +357,7 @@ struct StepSim {
 // taken at the swap, as in interp.cpp, and so do not see it)
 static StepSim simulate_steps(int fps, const std::function<int64_t(int)>& logicCost, const std::function<int64_t(int)>& holdCost,
                               double seconds, bool slots = true, int64_t render = 0, bool probeRetry = true, bool old60 = false,
-                              bool waitAfterDrop = false) {
+                              bool waitAfterDrop = false, bool oneStepWindow = false) {
     using namespace vsync_pacing;
     constexpr Clock kClock{16'683'333, 4};
     const uint64_t g = fps >= 240 ? 1 : fps >= 120 ? 2 : 4;  // granule: ticks per drawn frame
@@ -399,7 +399,8 @@ static StepSim simulate_steps(int fps, const std::function<int64_t(int)>& logicC
         if (!(slots && slot >= 0) && dropLead) wait = true;  // (no slot: it waits, as interp.cpp)
         dropLead = false;
         if (slots && slot >= 0) {
-            const StepPlan p = slot_step_start(t, kClock.time(slot_tick(kClock, slot, shift, g), shift), tick, step, wait);
+            const StepPlan p = slot_step_start(t, kClock.time(slot_tick(kClock, slot, shift, g), shift), tick, step, wait,
+                                               keep_window(step, tick, nMax == 1 && !oneStepWindow));
             lastLogic = p.start;
             if (p.how == StepStart::kWait) start = p.start + wakeDist(rng);
             if (p.how == StepStart::kLate) slot = -1;  // (gx2::drop_step_slot)
@@ -807,22 +808,19 @@ static void test_steps_60_skips() {
         const double f = a.frame_ms(from), step = kStep / 1e6;
         return std::clamp(1 - (2 * f - step) / f, 0.0, 1.0);
     };
-    // (with jitter the hitches leave a step more than a step late now and then, which starts a new
-    // schedule: the time is lost)
-    struct Case { const char* name; std::function<int64_t(int)> cost; double minSteps; };
-    for (const Case& c : {Case{"17.2 ms passes", ms(17.2), 29.96}, Case{"17.2 ms passes, jitter", jitter(17.2), 29.88},
-                          Case{"20 ms passes", ms(20), 29.96}, Case{"25 ms passes", ms(25), 29.96},
-                          Case{"25 ms passes, jitter", jitter(25), 29.95}}) {
+    struct Case { const char* name; std::function<int64_t(int)> cost; };
+    for (const Case& c : {Case{"17.2 ms passes", ms(17.2)}, Case{"17.2 ms passes, jitter", jitter(17.2)}, Case{"20 ms passes", ms(20)},
+                          Case{"25 ms passes", ms(25)}, Case{"25 ms passes, jitter", jitter(25)}}) {
         const StepSim a = simulate_steps(60, c.cost, c.cost, 120);
-        const StepSim old = simulate_steps(60, c.cost, c.cost, 120, true, 0, true, false, true);
+        const StepSim old = simulate_steps(60, c.cost, c.cost, 120, true, 0, true, false, true, true);
         const auto g = a.skip_gaps(from), og = old.skip_gaps(from);
         const double drawn = a.drawn_share(from, a.steps.back(), 1), oldDrawn = old.drawn_share(from, old.steps.back(), 1);
         std::printf("60 fps, %s (%.2f ms a frame): %.3f steps/s, %.1f%% in-between skipped (%.1f%% keep the speed), a skip every "
                     "%d/%d/%d steps (p10/50/90), %d waits after a skip; before: %.3f steps/s, %.1f%% skipped, every %d/%d/%d, %d waits\n",
                     c.name, a.frame_ms(from), a.steps_per_s(from), 100 * (1 - drawn), 100 * (1 - ideal(a)), g[0], g[1], g[2], a.waitsAfterDrop,
                     old.steps_per_s(from), 100 * (1 - oldDrawn), og[0], og[1], og[2], old.waitsAfterDrop);
-        CHECK(a.steps_per_s(from) > c.minSteps);             // the game's speed (29.97)
-        CHECK(a.max_steps_per_second(from) <= 32);  // (a catch-up after a hitch)
+        CHECK(a.steps_per_s(from) > 29.96);                  // the game's speed (29.97)
+        CHECK(a.max_steps_per_second(from) <= 32);  // (a catch-up after a hitch: at most the two steps' window)
         CHECK(std::fabs(drawn - ideal(a)) < 0.006);           // as many in-between frames as keep it
         CHECK(a.waitsAfterDrop == 0);                         // no wait after a skip
         CHECK(old.waitsAfterDrop > 0);                        // (before: waited)
@@ -846,6 +844,18 @@ static void test_steps_60_skips() {
     // a device that draws 60 fps (16 ms passes, with jitter up to 17.5 ms) skips none
     a = simulate_steps(60, ms(16), ms(16), 120);
     CHECK(std::lower_bound(a.skipSteps.begin(), a.skipSteps.end(), from) == a.skipSteps.end());
+    // hitches (25 / 40 ms on top of one pass in 300) are made up for by skipping, and the schedule is
+    // kept: 29.97 steps a second; the window of one step lost the time
+    for (double hitch : {25.0, 40.0}) {
+        const auto hitches = [hitch](int i) { return int64_t((i % 300 == 150 ? 17.2 + hitch : 17.2) * 1e6); };
+        a = simulate_steps(60, hitches, hitches, 120);
+        const StepSim old = simulate_steps(60, hitches, hitches, 120, true, 0, true, false, false, true);
+        std::printf("60 fps, 17.2 ms passes, a %.0f ms hitch every 300 passes: %.3f steps/s (window of one step: %.3f)\n", hitch,
+                    a.steps_per_s(from), old.steps_per_s(from));
+        CHECK(a.steps_per_s(from) > (hitch < 30 ? 29.965 : 29.935));
+        CHECK(old.steps_per_s(from) < a.steps_per_s(from) - 0.05);
+        CHECK(a.max_steps_per_second(from) <= 32);
+    }
     // a scene load (300 ms) starts a new schedule: no catch-up of nine steps
     const auto load = [](int i) { return int64_t(i == 3000 ? 300e6 : 17.2e6); };
     a = simulate_steps(60, load, load, 120);

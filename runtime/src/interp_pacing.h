@@ -179,17 +179,28 @@ inline int skip_to(int phase, int n, int64_t elapsed, int64_t pass, int64_t budg
 // (the step's passes are done), keeps it if less than a step late (the elapsed time counted from it
 // makes the step plan fewer in-between frames, and the game catches up), and starts its own schedule
 // when later than that (the caller then drops the slot). `start`: the step's start, which its elapsed time counts from.
+// window: how late a step may start and keep the schedule (0: one step; keep_window).
 enum class StepStart { kWait, kKeep, kLate };
 struct StepPlan {
     int64_t start;
     StepStart how;
 };
-inline StepPlan slot_step_start(int64_t now, int64_t slot, int64_t frame, int64_t step, bool wait) {
+inline StepPlan slot_step_start(int64_t now, int64_t slot, int64_t frame, int64_t step, bool wait, int64_t window = 0) {
     const int64_t start = slot - frame;
     if (wait && now < start) return {start, StepStart::kWait};
-    if (now - start < step) return {start, StepStart::kKeep};
+    if (now - start < (window > 0 ? window : step)) return {start, StepStart::kKeep};
     return {now, StepStart::kLate};
 }
+// How late a logic step may start and keep the step schedule. At 60 fps (one_frame: one in-between
+// frame a step) two steps: a step that one slow pass (a hitch of 20-40 ms, a few a minute on a
+// phone) left more than a step late catches up by skipping the in-between frames of the next steps,
+// as it does from a smaller lateness (each skip makes up a step less a logic pass). With one step
+// such a step started a new schedule and the time was lost: the game ran slower (issue #254: a
+// phone with 17.2 ms passes held 29.85-29.95 instead of 29.97 steps a second; simulated with a
+// 15 ms hitch every 200 passes 29.90, now 29.97). Later than that (a scene load) still starts a new
+// schedule: catching up would skip many frames in a row. (Two steps is also where the flip side,
+// vsync_pacing.h next_slot, starts a new schedule.) `frame` is unused: 120/240 fps keep one step.
+inline int64_t keep_window(int64_t step, int64_t /*frame*/, bool one_frame) { return one_frame ? 2 * step : step; }
 
 // Even frame delivery (on by default on Android; WWHD_INTERP_EVEN_PACING=0/1). The passes of a step
 // take different times: a logic pass runs the game, an in-between pass only draws. When the game thread is the bottleneck
