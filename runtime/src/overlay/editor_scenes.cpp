@@ -193,6 +193,16 @@ unsigned demo_cursor() {
     if (C.d_start < 0 || C.scrub < C.d_start) return 0;
     return unsigned(std::lround(std::min(C.scrub - C.d_start, C.d_len) / 2));
 }
+// the cursor while a demo step is selected: its time and the demo's own frame (30 a second), never a
+// scene frame next to it (the same label on the timeline and in the inspector)
+std::string demo_cursor_label() {
+    char b[96];
+    if (C.scrub >= C.d_start && C.scrub <= C.d_start + C.d_len)
+        std::snprintf(b, sizeof b, "cursor %s \xC2\xB7 demo frame %u", seconds(C.scrub).c_str(), demo_cursor());
+    else
+        std::snprintf(b, sizeof b, "cursor %s \xC2\xB7 outside this demo (new keys go to demo frame %u)", seconds(C.scrub).c_str(), demo_cursor());
+    return b;
+}
 // a lane's track in a demo step ("camera.eye", "<actor>.position")
 const Value* demo_track(const Value& st, const std::string& lane) {
     const size_t dot = lane.rfind('.');
@@ -336,7 +346,8 @@ void timeline_view(const Value& m, const Value& sc, const Value& timeline) {
     ImGui::SameLine();
     ImGui::Checkbox("Camera follows the cursor", &C.follow);
     ImGui::SameLine();
-    if (C.scrub >= 0) ImGui::TextColored(kHead, "cursor %s (frame %d)", seconds(C.scrub).c_str(), int(std::lround(C.scrub)));
+    if (C.scrub >= 0 && demo) ImGui::TextColored(kHead, "%s", demo_cursor_label().c_str());
+    else if (C.scrub >= 0) ImGui::TextColored(kHead, "cursor %s (frame %d)", seconds(C.scrub).c_str(), int(std::lround(C.scrub)));
     else ImGui::TextColored(kMuted, "click the ruler to put the cursor");
     if (demo) {
         if (lanes.get("problem").type == Value::String) ImGui::TextColored(kBad, "The game would refuse this demo: %s", lanes.get("problem").text.c_str());
@@ -775,7 +786,8 @@ void demo_inspector(int n, const Value& m, const Value& st) {
     }
     ImGui::TextColored(kMuted, "origin: %s", st.get("origin").type == Value::String ? "at Link" : st.get("origin").type == Value::Object ? "a fixed point" : "the world");
     const unsigned at = demo_cursor();
-    ImGui::TextColored(kHead, "cursor: demo frame %u", at);
+    if (C.scrub >= 0) ImGui::TextColored(kHead, "%s", demo_cursor_label().c_str());
+    else ImGui::TextColored(kMuted, "no cursor: keys and events go to demo frame 0");
     muted("Its lanes are under the steps on the timeline (30 frames a second): click a key or an event to select it, drag a key to another frame, Delete removes it.");
     // actors
     if (ImGui::CollapsingHeader("Actors", ImGuiTreeNodeFlags_DefaultOpen)) {

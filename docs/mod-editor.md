@@ -469,7 +469,7 @@ at the cursor: for the camera from the fly camera's view, for an actor where the
 or at Link. The inspector shows the selected key's value, the lane's curve (linear, smooth, bspline,
 step) and the selected event's fields. Every change is one Undo step.
 
-Moving the cursor previews the demo at that frame without starting it: with **Camera follows the cursor**
+With a demo step selected, the cursor reads as its time and the demo's own frame (for example "cursor 4.00s · demo frame 120"); new keys and events go to that frame. Moving the cursor previews the demo at that frame without starting it: with **Camera follows the cursor**
 on, the fly camera shows the demo camera, and in the picture each actor appears as a marker at its place,
 its position track as a curve with its keys as points. The selected position key has a handle to drag in
 the picture.
