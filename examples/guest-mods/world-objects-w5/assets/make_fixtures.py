@@ -81,8 +81,14 @@ def png(px):
     rows = b''.join(b'\0' + b''.join(bytes(p) for p in row) for row in px)
     def chunk(kind, body):
         return struct.pack('>I', len(body)) + kind + body + struct.pack('>I', zlib.crc32(kind + body) & 0xffffffff)
+    # Stored DEFLATE blocks give the same bytes with every zlib version (zlib.compress differs between platforms).
+    packed = b'\x78\x01'
+    for i in range(0, len(rows), 65535):
+        block = rows[i:i + 65535]
+        packed += bytes([i + 65535 >= len(rows)]) + struct.pack('<HH', len(block), len(block) ^ 0xffff) + block
+    packed += struct.pack('>I', zlib.adler32(rows) & 0xffffffff)
     return (b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', w, h, 8, 6, 0, 0, 0)) +
-            chunk(b'IDAT', zlib.compress(rows, 9)) + chunk(b'IEND', b''))
+            chunk(b'IDAT', packed) + chunk(b'IEND', b''))
 
 
 # ---- geometry (centimetres while building, metres in the GLB) ----------------------------------------
@@ -176,6 +182,8 @@ def make(atlas=False):
         binary.extend(b'\0' * (-len(binary) % 4)); views.append({'buffer': 0, 'byteOffset': len(binary), 'byteLength': len(body)})
         binary.extend(body); return len(views) - 1
     def floats(rows, width):
+        # rounded to 6 decimals, then to float32: the last-digit differences of sin/cos between C libraries vanish
+        rows = [tuple(struct.unpack('<f', struct.pack('<f', round(x, 6)))[0] for x in row) for row in rows]
         vi = part(struct.pack('<%df' % (len(rows) * width), *(x for row in rows for x in row)))
         lo = [min(r[k] for r in rows) for k in range(width)]; hi = [max(r[k] for r in rows) for k in range(width)]
         accessors.append({'bufferView': vi, 'componentType': 5126, 'count': len(rows), 'type': 'VEC%d' % width, 'min': lo, 'max': hi})
