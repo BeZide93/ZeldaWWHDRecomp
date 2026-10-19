@@ -96,10 +96,14 @@ int main() {
         const auto fixture=[](){return mods::json::parse(R"({"items":[{"id":"shard"}],"actors":[{"id":"enemy","actor":"chuchu","stage":"sea","room":11,"position":{"x":0,"y":0,"z":0},"defeated_flag":"enemy.defeated","drops":[{"item":"item:shard","quantity":2}]}]})");};
         std::vector<std::string> enemy_types{"chuchu","bokoblin","moblin","keese","miniblin","peahat","darknut","rat_hole","bokobaba","bubble","octorok"};for(const char* more:story_enemy_variants::kMoreEnemies)enemy_types.push_back(more);
         for(const std::string& type_name:enemy_types){const char* type=type_name.c_str();
-            auto data=fixture();auto& value=data["actors"].array[0];value["actor"]=type;ManifestActor candidate;candidate.actor=type;
+            auto data=fixture();
+            if(story_enemy_variants::takes_room_path(type)){  // a wall cannon names its firing area (a mod room path)
+                data["paths"]=mods::json::parse(R"([{"id":"area","stage":"sea","room":11,"closed":true,"points":[{"x":0,"y":0,"z":0},{"x":500,"y":0,"z":0},{"x":250,"y":0,"z":400}]}])");
+                data["actors"].array[0]["path"]="area";}
+            auto& value=data["actors"].array[0];value["actor"]=type;ManifestActor candidate;candidate.actor=type;
             assert(world_manifest::native_enemy_fields(data,value,candidate,why)&&candidate.defeated_flag=="enemy.defeated"&&candidate.drops.size()==1&&candidate.drops[0].quantity==2);
             assert(parse_actors(data,actors,why)&&actors.size()==1&&actors[0].actor==type&&actors[0].defeated_flag=="enemy.defeated"&&actors[0].drops[0].item=="shard");
-            for(const char* field:{"params","parameters","flag","broken_flag","switch_flag","switch","lines","then","model","animation","look_at","path","collision","attention","kind"}){if((std::string(type)=="bokoblin"||std::string(type)=="moblin")&&std::string(field)=="path")continue;auto bad=value;bad[field]=Value{};assert(!world_manifest::native_enemy_fields(data,bad,candidate,why));}
+            for(const char* field:{"params","parameters","flag","broken_flag","switch_flag","switch","lines","then","model","animation","look_at","path","collision","attention","kind"}){if((std::string(type)=="bokoblin"||std::string(type)=="moblin"||story_enemy_variants::takes_room_path(type))&&std::string(field)=="path")continue;auto bad=value;bad[field]=Value{};assert(!world_manifest::native_enemy_fields(data,bad,candidate,why));}
             for(int quantity:{0,255}){auto bad=value;bad["drops"].array[0]["quantity"]=quantity;assert(!world_manifest::native_enemy_fields(data,bad,candidate,why));}
             auto bad=value;bad["drops"].array[0]["item"]="item:foreign";assert(!world_manifest::native_enemy_fields(data,bad,candidate,why));
             bad=value;bad["defeated_flag"]="0x80";assert(!world_manifest::native_enemy_fields(data,bad,candidate,why));

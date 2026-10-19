@@ -93,14 +93,15 @@ bool ship_object(uint32_t object){if(!memory(object,0x48))return false;const uin
 bool cannonball(uint32_t object,uint32_t params,uint32_t& actor){
  namespace more=story_enemies_more;if(!memory(object,0x48))return false;const uint32_t stts=ld32(object+0x44);if(!memory(stts,0x14))return false;const uint32_t a=ld32(stts+0xC);
  if(!memory(a,more::kCannonballBytes)||object!=a+more::kCannonballSphere||stts!=a+more::kCannonballStts||ld16(a+0xE)!=more::kCannonball||(ld32(a+0xB0)&0xFFFFFF00u)!=(params&0xFFFFFF00u)||ld32(stts+0x10)!=ld32(a+4))return false;actor=a;return true;}
-// An owned warship's cannonball: its exact lineage child of a live owned warship; it may hit Link and his boat only.
+// An owned warship's (or wall cannon's) cannonball: its exact lineage child of a live owned warship or wall
+// cannon; it may hit Link and his boat only.
 bool warship_cannonball(uint32_t object){
  namespace more=story_enemies_more;uint32_t a=0;LineageInfo info{};if(!cannonball(object,more::kCannonballParams,a)||!lineage_info(ld32(a+4),info)||info.role!=Lineage::EnemyChild||info.address!=a||!info.source_valid||info.profile!=more::kCannonball||info.parameters!=more::kCannonballParams)return false;
- auto*source=get(info.source);return source&&source->kind==Kind::Warship&&valid(*source)&&source->address==info.source_actor&&source->pid==info.source_pid&&source->epoch==info.epoch;
+ auto*source=get(info.source);return source&&(source->kind==Kind::Warship||source->kind==Kind::WallCannon)&&valid(*source)&&source->address==info.source_actor&&source->pid==info.source_pid&&source->epoch==info.epoch;
 }
 bool bomb_object(uint32_t object);
 // any bomb whose lineage names a warship as its source: only the warship's rule applies to it
-bool warship_bomb(uint32_t object){if(!bomb_object(object))return false;const uint32_t a=ld32(ld32(object+0x44)+0xC);LineageInfo info{};if(!lineage_info(ld32(a+4),info)||info.role!=Lineage::EnemyChild)return false;auto*source=get(info.source);return source&&source->kind==Kind::Warship;}
+bool warship_bomb(uint32_t object){if(!bomb_object(object))return false;const uint32_t a=ld32(ld32(object+0x44)+0xC);LineageInfo info{};if(!lineage_info(ld32(a+4),info)||info.role!=Lineage::EnemyChild)return false;auto*source=get(info.source);return source&&(source->kind==Kind::Warship||source->kind==Kind::WallCannon);}
 // The cannonball Link's boat fires (never a claimed child): like Link's own weapons it may hit an owned enemy.
 bool boat_cannonball(uint32_t object){uint32_t a=0;return cannonball(object,story_enemies_more::kBoatCannonballParams,a)&&!lineage_claimed(ld32(a+4),Lineage::EnemyChild);}
 // A collider of a table kind's owned child (a Gyorg shark, a Big Octo eye): its exact lineage child of a

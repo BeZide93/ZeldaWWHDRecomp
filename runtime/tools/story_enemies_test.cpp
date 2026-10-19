@@ -39,7 +39,7 @@ void map_memory(uint32_t a,uint32_t n){assert(!(a&0xFFFFu)&&n&&!(n&0xFFFFu));
  }
 }
 void call_hook(Cpu*c,uint32_t f,uint32_t a){Cpu nested=*c;nested.r[3]=a;hooks.at(f)(&nested);}
-bool known_address(uint32_t fn){const uint32_t known[]={0x025AAF88,0x02110D4C,0x0210DD3C,0x0210BFEC,0x021104B4,0x0219D568,0x0219AAE8,0x02199748,0x0219CE98,0x0209F918,0x0209BD1C,0x0209971C,0x0209F164,0x021CCB00,0x021C9B1C,0x021C7344,0x021CC44C,0x02446E54,0x02446374,0x02445EE4,0x024468E4,0x023CF600,0x023CC070,0x023C9994,0x023CEF04,0x0230F32C,0x0230BEF4,0x0230AE30,0x0230EDD0,0x0231175C,0x02311240,0x023111D8,0x023115BC,0x024C0B0C,0x024BD170,0x024BA238,0x024C0194,0x025D99E8,0x020402C8,0x025D9154,0x021992DC,0x025D9898,0x021C9AA0,0x025D7B24,0x020A47B4,0x021D0294,0x020A3B18,0x02041570,0x02041F94,0x02043F34,0x025D57E0,0x020BFC50,0x020BCEC8,0x020BBAEC,0x020BF574,0x020ADA5C,0x020AB020,0x020A8BDC,0x020AD59C,0x023C3EC8,0x023C1380,0x023C039C,0x023C38AC,0x021A7B4C,0x025D537C,0x025D5A20,0x02516C14,0x025D5928,0x02167FE0,0x02167F30,0x021412BC,0x02140D04,0x0211889C,0x0211BF44};bool child_method=false;for(const auto&k:story_enemies_more::kChildClasses)child_method|=fn==k.create||fn==k.execute||fn==k.draw||fn==k.destroy;bool accepted=child_method;for(uint32_t expected:known)accepted|=fn==expected;for(const auto&n:story_enemies_more::kNatives)accepted|=fn==n.create||fn==n.execute||fn==n.draw||fn==n.destroy;return accepted;}
+bool known_address(uint32_t fn){const uint32_t known[]={0x02331558,0x025AAF88,0x02110D4C,0x0210DD3C,0x0210BFEC,0x021104B4,0x0219D568,0x0219AAE8,0x02199748,0x0219CE98,0x0209F918,0x0209BD1C,0x0209971C,0x0209F164,0x021CCB00,0x021C9B1C,0x021C7344,0x021CC44C,0x02446E54,0x02446374,0x02445EE4,0x024468E4,0x023CF600,0x023CC070,0x023C9994,0x023CEF04,0x0230F32C,0x0230BEF4,0x0230AE30,0x0230EDD0,0x0231175C,0x02311240,0x023111D8,0x023115BC,0x024C0B0C,0x024BD170,0x024BA238,0x024C0194,0x025D99E8,0x020402C8,0x025D9154,0x021992DC,0x025D9898,0x021C9AA0,0x025D7B24,0x020A47B4,0x021D0294,0x020A3B18,0x02041570,0x02041F94,0x02043F34,0x025D57E0,0x020BFC50,0x020BCEC8,0x020BBAEC,0x020BF574,0x020ADA5C,0x020AB020,0x020A8BDC,0x020AD59C,0x023C3EC8,0x023C1380,0x023C039C,0x023C38AC,0x021A7B4C,0x025D537C,0x025D5A20,0x02516C14,0x025D5928,0x02167FE0,0x02167F30,0x021412BC,0x02140D04,0x0211889C,0x0211BF44};bool child_method=false;for(const auto&k:story_enemies_more::kChildClasses)child_method|=fn==k.create||fn==k.execute||fn==k.draw||fn==k.destroy;bool accepted=child_method;for(uint32_t expected:known)accepted|=fn==expected;for(const auto&n:story_enemies_more::kNatives)accepted|=fn==n.create||fn==n.execute||fn==n.draw||fn==n.destroy;return accepted;}
 unsigned layer_calls=0;bool morth_dies=false;
 // Gyorg: the controller's execute creates a shark (and a refused other child) and may delete itself
 uint32_t fm_mode_seen=0xFFFFFFFFu,octo_mode_seen=0xFFFFFFFFu,octo_eye_pid=0,octo_actor=0;unsigned fm_releases=0,music_stops=0;bool octo_die=false;bool has_boomerang=true,gy_spawn=false,gy_self_delete=false;unsigned sea_kills=0;uint32_t gy_child_pid=0,gy_ctrl=0,last_deleted=0;
@@ -174,8 +174,8 @@ int main(int argc,char**argv){using namespace story_enemies;const bool drowning_
  Spec bl{Kind::Bubble,"m","bl","bl.dead",{}, {},1,0xFFFFFF01u};const Token bubble=declare(bl,why);assert(bubble);
  Spec oq{Kind::Octorok,"m","oq","oq.dead",{}, {},1};const Token octo=declare(oq,why);assert(octo);
  std::map<Kind,Token> table;for(const auto&n:story_enemies_more::kNatives){if((n.kind==Kind::Stalfos||n.kind==Kind::Wizzrobe||n.kind==Kind::BigOcto)&&!weapons){Spec t{n.kind,"m",n.name,"st.dead",{}, {},1};assert(!declare(t,why));continue;}  // its club is an owned child: only with the child routes
-  Spec t{n.kind,"m",n.name,std::string(n.name)+".dead",{}, {},1};table[n.kind]=declare(t,why);assert(table[n.kind]&&supported(n.kind)==n.offered);}
- {std::array<uint32_t,story_enemy_ownership::kKindCount> storage{Arena+0xB000,Arena+0xB030,Arena+0xB060,Arena+0xB090,Arena+0xB0C0,Arena+0xB0F0,Arena+0xB120,Arena+0xB150,Arena+0xB180,Arena+0xB1B0,Arena+0xB1E0,Arena+0xB210};uint32_t slot=0;for(const auto&n:story_enemies_more::kNatives){storage[unsigned(n.kind)]=Arena+0xB240+0x30*slot;st32(GD(0x101F3EE0)+n.descriptor.native_profile*4,Actor+0x9000+0x100*slot);st32(Actor+0x9010+0x100*slot,n.descriptor.bytes);++slot;}configure(original,invoke,storage);}assert(install([](uint32_t){return std::string();},[](uint32_t f,void(*fn)(Cpu*)){const uint32_t canonical=f-STORY_ENEMIES_TEST_CODE_DELTA;assert(known_address(canonical)&&!hooks.count(canonical));hooks[canonical]=fn;}));assert(hooks.size()==73+4*std::size(story_enemies_more::kNatives)+4*std::size(story_enemies_more::kChildClasses));
+  Spec t{n.kind,"m",n.name,std::string(n.name)+".dead",{}, {},1,n.kind==Kind::WallCannon?0xFFC0FFFFu:0u};table[n.kind]=declare(t,why);/* a wall cannon on mod path 0xC0 */assert(table[n.kind]&&supported(n.kind)==n.offered);}
+ {std::array<uint32_t,story_enemy_ownership::kKindCount> storage{Arena+0xB000,Arena+0xB030,Arena+0xB060,Arena+0xB090,Arena+0xB0C0,Arena+0xB0F0,Arena+0xB120,Arena+0xB150,Arena+0xB180,Arena+0xB1B0,Arena+0xB1E0,Arena+0xB210};uint32_t slot=0;for(const auto&n:story_enemies_more::kNatives){storage[unsigned(n.kind)]=Arena+0xB240+0x30*slot;st32(GD(0x101F3EE0)+n.descriptor.native_profile*4,Actor+0x9000+0x100*slot);st32(Actor+0x9010+0x100*slot,n.descriptor.bytes);++slot;}configure(original,invoke,storage);}assert(install([](uint32_t){return std::string();},[](uint32_t f,void(*fn)(Cpu*)){const uint32_t canonical=f-STORY_ENEMIES_TEST_CODE_DELTA;assert(known_address(canonical)&&!hooks.count(canonical));hooks[canonical]=fn;}));assert(hooks.size()==74+4*std::size(story_enemies_more::kNatives)+4*std::size(story_enemies_more::kChildClasses));
  fire_keese_test(fire_keese);
  seahat_test(seahat);
  boko_baba_test(baba);boko_baba_hold_test(baba2);
@@ -239,6 +239,30 @@ int main(int argc,char**argv){using namespace story_enemies;const bool drowning_
   {const unsigned c0=calls;std::memcpy(mem::ptr(GD(0x1046F0B0)+0x5134),"sea\0\0\0\0",8);run(story_enemies_more::find(Kind::Warship)->create,at);std::memset(mem::ptr(GD(0x1046F0B0)+0x5134),0,8);assert(calls==c0+1&&owns_actor(at));}
   st32(at+0x3C8,2);assert(!story_enemies_more::warship_terminal(at));st32(at+0x3C8,3);
   {const unsigned c0=claims;Cpu probe{};probe.r[3]=at;hooks.at(0x025D99E8)(&probe);assert(claims==c0+1&&is_defeated(ws));}
+  // Wall cannon: on its mod path (the path byte is the path's number, its path run holds the record),
+  // no scale, appear or death switch, never the switch modes; its cannonballs are owned children made
+  // in its execute (any other fastCreate is refused); its delete mode's init with its health gone is its
+  // defeat (no native drop)
+  {at+=0x2000;make(Kind::WallCannon);st32(at+0xB0,0xFFC0FFFFu);st8(at+0x3B0,0xC0);st8(at+0x3B1,0xFF);st8(at+0x3B2,0xFF);st8(at+0x3B3,0xFF);st32(at+0x3B4,0x20070000);st32(at+0x3CC,0x20070000);st8(at+0x3A1,2);
+   const Token wc=table[Kind::WallCannon];assert(verify_actor(wc,Kind::WallCannon,at));
+   for(uint32_t off:{0x3B0u,0x3B1u,0x3B2u,0x3B3u})expect_field(wc,Kind::WallCannon,off);
+   st32(at+0x3AC,3);assert(!verify_actor(wc,Kind::WallCannon,at));st32(at+0x3AC,2);assert(verify_actor(wc,Kind::WallCannon,at));st32(at+0x3AC,0);
+   st32(at+0x3CC,0);assert(!verify_actor(wc,Kind::WallCannon,at));st32(at+0x3CC,0x20070000);
+   assert(story_enemies::room_path_shift(Kind::WallCannon)==16&&story_enemies::room_path_shift(Kind::Warship)<0&&story_enemies_more::path_mask(Kind::WallCannon)==0x00FF0000u&&story_enemies_more::path_mask(Kind::Warship)==0);
+   assert(parameters(wc)==0xFFC0FFFFu&&!story_enemies_more::wall_cannon_terminal(at));
+   const auto*row=story_enemies_more::find(Kind::WallCannon);bind(wc,pid);run(row->create,at);assert(owns_actor(at));
+   // its cannonball (BOMB 0x126, the warship's parameters) becomes its owned child; anything else is refused
+   const uint32_t ball=at+0x1000;uint32_t made=0,refused=0;const uint32_t ball_pid=pid+500;
+   probe=[&](Cpu*c,uint32_t fn){if(fn==row->execute){Cpu q=*c;q.r[3]=0x126;q.r[4]=story_enemies_more::kCannonballParams;hooks.at(0x025D5928)(&q);made=q.r[3];q=*c;q.r[3]=0x10;q.r[4]=0;hooks.at(0x025D5928)(&q);refused=q.r[3];c->r[3]=1;return true;}
+    if(fn==0x025D5928){std::memset(mem::ptr(ball),0,0x10);st32(ball+4,ball_pid);st16(ball+0xE,0x126);st32(ball+0xB0,c->r[4]);c->r[3]=ball;return true;}return false;};
+   run(row->execute,at);probe=nullptr;
+   {story_enemy_ownership::LineageInfo li{};assert(made==ball&&refused==0&&story_enemy_ownership::lineage_info(ball_pid,li)&&li.source==wc&&li.profile==0x126);}
+   // a hit that empties its health puts it in its delete mode: that is its defeat, once
+   unsigned wrecks=0;st8(at+0x3A1,0);
+   probe=[&](Cpu*c,uint32_t fn){if(fn==row->execute){Cpu q=*c;q.r[3]=at;hooks.at(0x02331558)(&q);c->r[3]=1;return true;}if(fn==0x02331558){++wrecks;return true;}return false;};
+   {const unsigned c0=claims,d0=drops;run(row->execute,at);assert(claims==c0+1&&drops==d0&&wrecks==1&&is_defeated(wc));}probe=nullptr;
+   // a delete mode of a retail cannon is the game's own
+   {const uint32_t retail=at+0x1800;std::memset(mem::ptr(retail),0,0x10);st16(retail+0xE,0x3F);probe=[&](Cpu*,uint32_t fn){if(fn==0x02331558){++wrecks;return true;}return false;};Cpu q{};q.r[3]=retail;hooks.at(0x02331558)(&q);probe=nullptr;assert(wrecks==2);}}
   // Gyorg: an area controller of three sharks, no switch; only with the boomerang. Its sharks are its
   // owned children (its parent reads GY_CTRL while one runs); a death is counted once, the sea-kill
   // register stays, the shark's drop is suppressed; deleting itself with every shark dead is its defeat

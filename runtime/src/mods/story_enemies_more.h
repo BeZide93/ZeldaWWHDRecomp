@@ -26,7 +26,8 @@ using story_native_code_identity::CANONICAL_CODE_ID;
 // The private profile ids of the kinds added from the Kargaroc on, in one place: from 0x7FDF downward
 // (the reserved range reaches down to 0x7FD0). Earlier rows keep the ids written in their rows.
 inline constexpr uint16_t kKargarocProfile = 0x7FDF, kWizzrobeProfile = 0x7FDE, kWarshipProfile = 0x7FDD,
-                          kGyorgProfile = 0x7FDC, kFloormasterProfile = 0x7FDB, kBigOctoProfile = 0x7FDA;
+                          kGyorgProfile = 0x7FDC, kFloormasterProfile = 0x7FDB, kBigOctoProfile = 0x7FDA,
+                          kWallCannonProfile = 0x7FD9;
 
 struct Native {
     Kind kind;
@@ -45,6 +46,7 @@ struct Native {
     uint32_t action;            // its action field, for traces (u8; u16 when action16)
     bool action16;
     uint16_t home_x = 0;        // home angle x (0: the default)
+    int8_t path_shift = -1;     // where its parameter word holds a room path number (a mod path, story_room_paths); -1: none
 };
 
 inline int8_t s8(uint32_t a) { return int8_t(ld8(a)); }
@@ -419,6 +421,29 @@ inline const ChildClass* child_class_of(Kind parent) {
     return nullptr;
 }
 
+// ---------------------------------------------------------------- Wall cannon (d_a_obj_canon)
+// The cannon set in walls and on forts: it turns towards Link and fires cannonballs while he (and the
+// spot it aims at) is inside its room path, an area (dNpc_PathRun_c::chkInside); without its path the
+// game refuses its create. Parameter 0xFF <path> 0xFF 0xFF: scale byte 0xFF (its own size), appear switch
+// 0xFF (never waits hidden for a switch, modes 3/4), the path number (a mod path, story_room_paths: the
+// room-path lookup answers it with the mod's area only for this cannon), death switch 0xFF (its wreck
+// writes no switch; a set one would make it start as a wreck). It reads Link's position and the boat's
+// state, writes no save bits, events or holds. Health 2: a bomb-type hit (type 0x20) takes 2, a 0x40 hit
+// 1; at 0 its delete mode's init (deleteInit, mode 2) plays the explosion: that is its defeat (it has no
+// native drop). Children: the cannonballs (BOMB 0x126, the warship's cannonball parameters, created with
+// fopAcM_fastCreate in its attack): owned children that hit only Link and his boat, as the warship's.
+// Collider: the sphere 0x3F4 on mStts 0x520 (target and attack: the pair policy keeps Link only).
+inline constexpr Collider kWallCannonColliders[] = {{0x3F4, 0x520, 0}};
+inline constexpr uint32_t kWallCannonParams = 0xFFFFFFFFu;  // the path byte (16) is the mod path's number
+inline bool wall_cannon_verify(uint32_t a, uint32_t p) {
+    const uint32_t mode = ld32(a + 0x3AC);
+    return ld8(a + 0x3B0) == ((p >> 16) & 0xFF) && ld8(a + 0x3B1) == 0xFF && ld8(a + 0x3B2) == 0xFF && ld8(a + 0x3B3) == 0xFF && mode <= 2 &&
+           ld32(a + 0x3B4) != 0 && ld32(a + 0x3B4) == ld32(a + 0x3CC);
+}
+inline bool wall_cannon_terminal(uint32_t) { return false; }  // no native drop: its defeat is its delete mode
+inline constexpr uint32_t kWallCannonDeleteInit = CANONICAL_CODE_ID(0x02331558).value();  // daObj_Canon_c::deleteInit
+inline bool wall_cannon_destroyed(uint32_t a) { return int8_t(ld8(a + 0x3A1)) <= 0; }
+
 inline constexpr Native kNatives[] = {
     {Kind::Stalfos, "stalfos", {0x7FE0, 0xBE, 0x25B0, kStalfosColliders, std::size(kStalfosColliders)},
      CANONICAL_CODE_ID(0x02495C70).value(), CANONICAL_CODE_ID(0x02493FB0).value(), CANONICAL_CODE_ID(0x02491F34).value(),
@@ -476,6 +501,10 @@ inline constexpr Native kNatives[] = {
      CANONICAL_CODE_ID(0x02119EE8).value(), CANONICAL_CODE_ID(0x0211B058).value(), CANONICAL_CODE_ID(0x0211B52C).value(),
      CANONICAL_CODE_ID(0x02119F80).value(), [] { return GD(0x1000D034); }, 0xFFFFFF00u, 0, 0, {0, 0}, true,
      big_octo_verify, big_octo_terminal, nullptr, 0x68B, false},
+    {Kind::WallCannon, "wall_cannon", {kWallCannonProfile, 0x3F, 0x5A8, kWallCannonColliders, std::size(kWallCannonColliders)},
+     CANONICAL_CODE_ID(0x0233063C).value(), CANONICAL_CODE_ID(0x023308E8).value(), CANONICAL_CODE_ID(0x02330A84).value(),
+     CANONICAL_CODE_ID(0x02330698).value(), [] { return GD(0x10026A90); }, kWallCannonParams, 0, 0, {0, 0}, true,
+     wall_cannon_verify, wall_cannon_terminal, nullptr, 0x3AF, false, 0, 16},
 };
 
 inline const Native* find(Kind k) {
@@ -498,6 +527,13 @@ inline constexpr uint16_t home_x(Kind k) {
         if (n.kind == k) return n.home_x;
     return 0;
 }
+inline constexpr int path_shift(Kind k) {
+    for (const Native& n : kNatives)
+        if (n.kind == k) return n.path_shift;
+    return -1;
+}
+// the parameter bits a kind's room path number takes (0: none)
+inline constexpr uint32_t path_mask(Kind k) { return path_shift(k) < 0 ? 0u : 0xFFu << path_shift(k); }
 inline constexpr uint16_t home_z(Kind k) {
     for (const Native& n : kNatives)
         if (n.kind == k) return n.home_z;

@@ -90,6 +90,26 @@ int main() {
         assert(!story_notebook::world_manifest::validate_world_packages(packages, why) && why.find("24 paths") != std::string::npos);
     }
 
+    // ---- a wall cannon names its firing area: a closed path of its own stage and room, required
+    {
+        const std::string paths_part = R"("paths":[{"id":"yard","stage":"sea","room":11,"closed":true,"points":[{"x":0,"y":0,"z":0},{"x":900,"y":0,"z":0},{"x":450,"y":0,"z":800}]},
+                                                 {"id":"line","stage":"sea","room":11,"points":[{"x":0,"y":0,"z":0},{"x":900,"y":0,"z":0}]},
+                                                 {"id":"far","stage":"sea","room":12,"closed":true,"points":[{"x":0,"y":0,"z":0},{"x":900,"y":0,"z":0},{"x":450,"y":0,"z":800}]}])";
+        auto cannon = [&](const std::string& path) {
+            return manifest("{" + paths_part + R"(,"actors":[{"id":"wc","actor":"wall_cannon","stage":"sea","room":11,"position":{"x":450,"y":0,"z":-500},"defeated_flag":"wc.dead","drops":[])" +
+                            (path.empty() ? std::string() : ",\"path\":" + path) + "}]}");
+        };
+        std::vector<story_notebook::ManifestActor> actors;
+        assert(story_notebook::parse_actors(cannon("\"yard\""), actors, why) && actors.size() == 1 && actors[0].room_path == "yard");
+        assert(!story_notebook::parse_actors(cannon(""), actors, why) && why.find("needs \"path\"") != std::string::npos);
+        assert(!story_notebook::parse_actors(cannon("\"nowhere\""), actors, why) && why.find("no path") != std::string::npos);
+        assert(!story_notebook::parse_actors(cannon("\"far\""), actors, why) && why.find("another stage or room") != std::string::npos);
+        assert(!story_notebook::parse_actors(cannon("\"line\""), actors, why) && why.find("must be an area") != std::string::npos);
+        assert(!story_notebook::parse_actors(cannon(R"({"points":[{"x":1,"y":0,"z":1}]})"), actors, why));
+        // other enemies take no room path
+        assert(!story_notebook::parse_actors(manifest("{" + paths_part + R"(,"actors":[{"id":"cc","actor":"chuchu","stage":"sea","room":11,"position":{"x":0,"y":0,"z":0},"defeated_flag":"cc.dead","drops":[],"path":"yard"}]})"), actors, why));
+    }
+
     // ---- the game's area test: the inside of either winding once in game order; outside stays out
     for (bool ccw : {true, false}) {
         const auto sq = square("s", 1, ccw);

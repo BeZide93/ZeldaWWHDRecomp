@@ -1257,6 +1257,33 @@ void path_commands() {
     const int before = host.path_applies;
     CHECK(ok(s.run("undo", json("{}"))) && path_of("yard").type == Value::Object && host.path_applies == before + 1);
     CHECK(!ok(s.run("remove_path", json(R"({"id": "nothing"})"))));
+    // a wall cannon: placed with a new firing area in front of it (Link faces angle 100: ahead is +z),
+    // or on an area the mod has (options.path); its path follows a rename; removing a path it uses is
+    // refused with its name; a line or a missing path is refused
+    r = s.run("add_actor", json(R"({"type": "wall_cannon", "id": "cannon"})"));
+    CHECK(ok(r) && actor_of(s, "cannon")->get("path").string() == "cannon-area");
+    Value area = path_of("cannon-area");
+    CHECK(area.get("closed").boolean && area.get("room").number == 44 && area.get("points").array.size() == 4 && area.get("used_by").array.size() == 1 &&
+          area.get("used_by").array[0].string() == "cannon");
+    CHECK(area.get("points").array[0].get("z").number > 3 && area.get("points").array[2].get("z").number > 1000);  // in front of it
+    r = s.run("remove_path", json(R"({"id": "cannon-area"})"));
+    CHECK(!ok(r) && r.get("error").string().find("used by cannon") != std::string::npos && path_of("cannon-area").type == Value::Object);
+    CHECK(ok(s.run("set_path", json(R"({"id": "cannon-area", "new_id": "fort"})"))) && actor_of(s, "cannon")->get("path").string() == "fort");
+    CHECK(!ok(s.run("set_path", json(R"({"id": "fort", "closed": false})"))));  // a cannon's path stays an area
+    CHECK(ok(s.run("add_actor", json(R"({"type": "wall_cannon", "id": "cannon2", "options": {"path": "fort"}})"))) && actor_of(s, "cannon2")->get("path").string() == "fort");
+    CHECK(path_of("fort").get("used_by").array.size() == 2 && path_of("cannon2-area").type == Value::Null);
+    CHECK(!ok(s.run("add_actor", json(R"({"type": "wall_cannon", "id": "cannon3", "options": {"path": "walk"}})"))));  // a line
+    CHECK(!ok(s.run("add_actor", json(R"({"type": "wall_cannon", "id": "cannon4", "options": {"path": "dungeon"}})"))));  // another room
+    CHECK(!ok(s.run("add_actor", json(R"({"type": "chuchu", "id": "cc", "options": {"path": "fort"}})"))));
+    CHECK(!ok(s.run("set_actor", json(R"({"id": "cannon", "property": "path", "value": null})"))));
+    CHECK(host.last_paths.size() >= 1);
+    bool declared = false;
+    for (const auto& a : host.last_actors)
+        if (a.id == "cannon") declared = a.room_path == "fort";
+    CHECK(declared);
+    CHECK(ok(s.run("remove_actor", json(R"({"id": "cannon", "confirm": true})"))) && ok(s.run("remove_actor", json(R"({"id": "cannon2", "confirm": true})"))));
+    CHECK(ok(s.run("remove_path", json(R"({"id": "fort"})"))));
+    CHECK(editor::room_path_use(json(R"({"actor": "wall_cannon"})")).find("firing area") != std::string::npos && editor::room_path_use(json(R"({"actor": "chuchu"})")).empty());
 }
 
 void route_commands() {

@@ -91,6 +91,18 @@ int main(){using namespace story_enemy_ownership;map(Arena,0x10000);map(Base,0x1
   const uint32_t boat=Base+0xF2000,boat_sphere=boat+0x920;std::memset(mem::ptr(boat),0,0xC00);st32(boat+4,1620);st16(boat+0xE,0x126);st32(boat+0xB0,0x80020004u);st32(boat_sphere+0x44,boat+0x8E4);st32(boat+0x8E4+0xC,boat);st32(boat+0x8E4+0x10,1620);
   assert(pair_policy(boat_sphere,ws+0x60C)==PairPolicy::Delegate);st32(boat+0xB0,0x80020000u);assert(pair_policy(boat_sphere,ws+0x60C)==PairPolicy::Delegate);st32(boat+0xB0,0x80030004u);assert(pair_policy(boat_sphere,ws+0x60C)==PairPolicy::Reject);
   retire_lineage(1610);retire_before_delete(ws);rollback(ws_cp);}
+ // A wall cannon's cannonball: the same BOMB and parameters as the warship's; it hits Link and his boat only,
+ // never the cannon, another enemy or a retail actor; the boat's cannonball may hit the owned cannon.
+ {auto wc_cp=checkpoint();const uint32_t wc=Base+0xE0000,ball=Base+0xF0000,sphere=ball+0x920,ship=Base+0xF4000;std::memset(mem::ptr(wc),0,0x10000);std::memset(mem::ptr(ball),0,0xC00);
+  fixture(Kind::WallCannon,wc,640,0xFFC0FFFFu);Token tc=declare_actor(Kind::WallCannon,0xFFC0FFFFu,fp,1,why);assert(tc&&bind_pending(tc,640)&&admit_created(tc,wc)&&enroll_colliders(tc));
+  assert(queue_child_pending(tc,wc,640,1640,0x126,0x80030004u,1));st32(ball+4,1640);st16(ball+0xE,0x126);st32(ball+0xB0,0x80030004u);st32(sphere+0x44,ball+0x8E4);st32(ball+0x8E4+0xC,ball);st32(ball+0x8E4+0x10,1640);assert(admit_lineage(1640,ball));
+  assert(pair_policy(sphere,player+0x765C)==PairPolicy::Delegate);assert(pair_policy(sphere,retail)==PairPolicy::Reject);assert(pair_policy(sphere,wc+0x3F4)==PairPolicy::Reject);
+  const uint32_t ship_tg=ship+0x100;std::memset(mem::ptr(ship),0,0x200);st32(ship+4,650);st32(ship_tg+0x44,ship+0x40);st32(ship+0x40+0xC,ship);st32(0x1046F0B0+0x5B3C,ship);assert(pair_policy(sphere,ship_tg)==PairPolicy::Delegate);st32(0x1046F0B0+0x5B3C,0);
+  const uint32_t boat=Base+0xF2000,boat_sphere=boat+0x920;std::memset(mem::ptr(boat),0,0xC00);st32(boat+4,1650);st16(boat+0xE,0x126);st32(boat+0xB0,0x80020004u);st32(boat_sphere+0x44,boat+0x8E4);st32(boat+0x8E4+0xC,boat);st32(boat+0x8E4+0x10,1650);
+  assert(pair_policy(boat_sphere,wc+0x3F4)==PairPolicy::Delegate);
+  // a cannon that is gone: its cannonball hits nothing
+  retire_before_delete(wc);assert(pair_policy(sphere,player+0x765C)==PairPolicy::Reject);
+  retire_lineage(1640);rollback(wc_cp);}
  // A Gyorg shark: an owned child of a live owned Gyorg controller; it bites Link and his boat only, and only
  // Link's weapons and the boat's cannonball hit it.
  {auto gy_cp=checkpoint();const uint32_t gc=Base+0xE0000,shark=Base+0xF0000,head=shark+0x628,body=shark+0x754,ship=Base+0xF4000,boat=Base+0xF2000;std::memset(mem::ptr(gc),0,0x10000);std::memset(mem::ptr(shark),0,0x1000);

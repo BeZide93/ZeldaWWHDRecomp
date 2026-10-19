@@ -154,6 +154,7 @@ const std::vector<ActorType>& actor_types() {
         {"floormaster", "Floormaster", "Enemies", "The game's Floormaster: a hand that rises from its dark hole and grabs Link for a moment (it never drags him away).", false, false, false},
         {"gyorg", "Gyorgs", "Enemies", "A group of the game's Gyorgs (on the sea only, once Link has the boomerang): they come out when Link is near and bite him; defeated when every one is.", false, false, false},
         {"warship", "Warship", "Enemies", "The game's enemy warship (on the sea only): it fires its cannon at Link; three hits from the boat's cannon sink it.", false, false, false},
+        {"wall_cannon", "Wall cannon", "Enemies", "The game's wall cannon: it turns to Link and fires cannonballs while he is inside its firing area (one of the mod's paths, an area; a new one in front is added with it, or options.path names one); a bomb destroys it.", false, false, false},
         {"kargaroc", "Kargaroc", "Enemies", "The game's Kargaroc: a big bird that circles and swoops at Link (or perches until he comes near).", false, false, false},
         {"model", "Your model", "Your models", "One of the mod's models (static or skinned), with collision.", true, false, true},
         {"model_enemy", "Your enemy", "Your models", "A skinned model that fights (needs flinch, stun, death and idle clips).", true, true, false},
@@ -264,6 +265,10 @@ bool new_actor(const std::string& type, const std::string& id, const Place& plac
     } else {  // the enemies
         a["defeated_flag"] = id + "-defeated";
         a["drops"] = array();
+        if (options.get("path").type == Value::String) {
+            if (room_path_use(a).empty()) return why = "a " + t->label + " takes no path", false;
+            a["path"] = options.get("path").text;
+        }
         if (options.get("variant").type != Value::Null) {
             const std::string v = options.get("variant").string();
             if (!story_enemy_variants::has_variants(type)) return why = "a " + t->label + " has no variants", false;
@@ -680,7 +685,26 @@ Value Session::dispatch_build(const std::string& command, const Value& p, std::s
         if ((game || piece) && !id_ok(id)) return why = "an actor id is 1 to 32 lower-case letters, digits, '-', '_' or '.'", r;
         if (piece ? !new_game_piece(type, id, place, a, why) : game ? !new_game_object(type, id, place, p.get("options"), a, why) : !new_actor(type, id, place, text(p, "model"), pkg->manifest, p.get("options"), a, why)) return r;
         if (by_id(pkg->manifest.get("actors"), id)) return why = "the mod has an actor \"" + id + "\" already", r;
-        ok = change(*pkg, "Add " + id, [&](Value& m, std::string&) {
+        ok = change(*pkg, "Add " + id, [&](Value& m, std::string& w) {
+            // an actor that needs one of the mod's room paths (a wall cannon's firing area): the one
+            // options.path names, or a new square area of 1600 units in front of it
+            if (!room_path_use(a).empty() && a.get("path").type == Value::Null) {
+                std::string pid = id + "-area";
+                for (int n = 2; [&] { for (const auto& v : m.get("paths").array) if (v.get("id").string() == pid) return true; return false; }(); n++) pid = id + "-area-" + std::to_string(n);
+                const double yaw = place.angle * 3.14159265358979323846 / 32768.0, ahead = 1200, half = 800;
+                const double cx = place.position.x + std::sin(yaw) * ahead, cz = place.position.z + std::cos(yaw) * ahead;
+                Value path;
+                path["id"] = pid;
+                path["stage"] = place.stage;
+                path["room"] = double(place.room);
+                path["closed"] = true;
+                path["points"] = array();
+                for (const auto& c : {std::pair{-1, -1}, {1, -1}, {1, 1}, {-1, 1}}) path["points"].array.push_back(rounded({float(cx + c.first * half), place.position.y, float(cz + c.second * half)}));
+                if (m.get("paths").type != Value::Array) m["paths"] = array();
+                m["paths"].array.push_back(path);
+                a["path"] = pid;
+            }
+            (void)w;
             if (game) require_game_objects(m, type);  // "requires": {"game_objects": N}
             if (piece) require_game_piece(m, type);
             if (m.get("actors").type != Value::Array) m["actors"] = array();

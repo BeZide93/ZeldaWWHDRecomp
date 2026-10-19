@@ -213,7 +213,8 @@ women, the sailors) and the seated villager can't walk a route; the Inspector sa
 
 ### Paths: lines and areas in a room
 
-An actor that uses one of the mod's room paths (see "Room paths" in the SDK) has a **Path** section in
+A wall cannon is placed with a new firing area in front of it (a square of 1600 units, its id the
+cannon's with `-area`), or on an area the mod has (`add_actor` `options.path`). An actor that uses one of the mod's room paths (see "Room paths" in the SDK) has a **Path** section in
 the Inspector: the mod's paths in its room to choose from, **New area in front** (a square area in front
 of it, which it then uses), **Area (closed)**, the points (click one to select it, then drag its handle
 in the picture), **Remove point** and **Add point at Link** / **at camera**. In the picture every path

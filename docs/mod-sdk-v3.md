@@ -33,7 +33,7 @@ The initial allowlist is deliberately small:
 | Breakable prop | `pot`, `barrel`, `crate` | Required mod-owned `broken_flag` and `drops` list |
 | Latched floor switch | `switch` | Required mod-owned `switch_flag`; fixed yellow switch |
 | Rotating gate | `door` | Required `switch` naming a switch actor in the same mod |
-| Native enemies (preview) | `chuchu`, `bokoblin`, `moblin`, `keese`, `miniblin`, `peahat`, `darknut`, `rat_hole`, `bokobaba`, `bubble`, `octorok`, `stalfos`, `redead`, `mothula`, `morth`, `magtail`, `poe`, `armos`, `armos_knight`, `kargaroc`, `wizzrobe`, `warship`, `gyorg`, `floormaster`, `big_octo` | Required mod-owned `defeated_flag` and `drops`; fixed ordinary variants |
+| Native enemies (preview) | `chuchu`, `bokoblin`, `moblin`, `keese`, `miniblin`, `peahat`, `darknut`, `rat_hole`, `bokobaba`, `bubble`, `octorok`, `stalfos`, `redead`, `mothula`, `morth`, `magtail`, `poe`, `armos`, `armos_knight`, `kargaroc`, `wizzrobe`, `warship`, `gyorg`, `floormaster`, `big_octo`, `wall_cannon` | Required mod-owned `defeated_flag` and `drops`; fixed ordinary variants |
 
 Resident names are exact native object codes in lower case. Each placed copy uses fixed ordinary
 parameters: it stands where you put it (unless you give it a route, below) and has none of the
@@ -467,6 +467,7 @@ The allowlist below defines the supported variants.
 | `floormaster` | Floormaster: a hand that rises from its hole, grabs Link for a moment and lets go |
 | `gyorg` | A group of Gyorgs (sea stage only): variants `one` to `five` (default `three`); they come out of the sea when Link is near and bite him |
 | `kargaroc` | Kargaroc: it circles where it was placed and swoops at Link (variant `perched`: it sits until Link comes near) |
+| `wall_cannon` | The wall cannon: it turns to Link and fires cannonballs while he is inside its firing area, one of the mod's [room paths](#room-paths) (`"path": "<id>"`, an area, required); a bomb destroys it |
 
 All of them use the same declaration fields:
 
@@ -564,6 +565,24 @@ area test takes the point of the area nearest to what it tests and looks at the 
 areas convex (no corners pointing inwards); the editor's `path_inside` command uses the same test.
 A mod has up to 16 paths; the enabled mods together up to 64, and 24 in one room. Full save states
 keep the paths' records; after a load they are written again from the manifest.
+
+### Wall cannons
+
+A wall cannon needs its firing area: one of the mod's [room paths](#room-paths), closed, in its own
+stage and room, named by `"path"`:
+
+```json
+{"id": "fort-cannon", "actor": "wall_cannon", "stage": "sea", "room": 11,
+ "position": {"x": 0, "y": 900, "z": -196000}, "rotation": {"x": 0, "y": 180, "z": 0},
+ "path": "fort-yard", "defeated_flag": "fort-cannon.defeated", "drops": []}
+```
+
+It is the game's own cannon: it turns towards Link (about 50 degrees to either side of where it faces)
+and fires while he, and the spot it aims at, are inside the area; it leads its shots when he is far.
+Its cannonballs hit only Link and his boat. A bomb (or the boat's cannon) destroys it in one hit; its
+defeat sets `defeated_flag` and gives the `drops`, and the destroyed cannon goes from the room. It sets
+no switch, never waits hidden for one and has no native drop. Keep its area convex and in front of it.
+Several cannons may share one area.
 
 ### Rat holes
 

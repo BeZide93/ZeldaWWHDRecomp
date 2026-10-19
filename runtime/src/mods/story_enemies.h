@@ -39,7 +39,7 @@ constexpr uint16_t home_z(Kind k){return k==Kind::Bokoblin||k==Kind::Moblin||k==
 uint16_t home_x(Token);
 constexpr uint16_t home_x(Kind k){return story_enemies_more::home_x(k);}
 // Where a kind's parameters hold its room path number (the bit shift), -1 for kinds that take no room path.
-constexpr int room_path_shift(Kind){return -1;}
+constexpr int room_path_shift(Kind k){return story_enemies_more::path_shift(k);}
 // The kinds whose weapons (and the Darknut's cape; the Stalfos's club) are owned children (story_enemy_children).
 constexpr bool has_children(Kind k){return k==Kind::Bokoblin||k==Kind::Moblin||k==Kind::Darknut||k==Kind::Stalfos||k==Kind::Wizzrobe||k==Kind::BigOcto;}
 struct ChildBridge {
