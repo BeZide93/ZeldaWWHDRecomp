@@ -2,6 +2,7 @@
 #include "story_resident_routes.h"
 #include "guest_addr.h"
 #include "runtime.h"
+#include <cmath>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -35,13 +36,13 @@ route::Guard read_guard(uint32_t rec) {
     route::Guard g;
     for (int i = 0; i < 3; i++) g.good[i] = f(rec + route::kGood + 4 * i);
     g.anchor[0] = f(rec + route::kAnchor), g.anchor[1] = f(rec + route::kAnchor + 4);
-    g.stuck = ld16(rec + route::kStuck), g.skips = ld8(rec + route::kSkips), g.status = route::Status(ld8(rec + route::kStatus));
+    g.stuck = ld16(rec + route::kStuck), g.skips = ld8(rec + route::kSkips), g.status = route::Status(ld8(rec + route::kStatus)), g.blocked = ld8(rec + route::kBlocked), g.in_row = ld8(rec + route::kInRow);
     return g;
 }
 void write_guard(uint32_t rec, const route::Guard& g) {
     for (int i = 0; i < 3; i++) sf(rec + route::kGood + 4 * i, g.good[i]);
     sf(rec + route::kAnchor, g.anchor[0]), sf(rec + route::kAnchor + 4, g.anchor[1]);
-    st16(rec + route::kStuck, g.stuck), st8(rec + route::kSkips, g.skips), st8(rec + route::kStatus, uint8_t(g.status));
+    st16(rec + route::kStuck, g.stuck), st8(rec + route::kSkips, g.skips), st8(rec + route::kStatus, uint8_t(g.status)), st8(rec + route::kBlocked, g.blocked), st8(rec + route::kInRow, g.in_row);
 }
 void stop(Cpu* c, uint32_t actor) {
     st32(actor + kPathRun, 0);  // no route: it stands (its Wait counts nothing down without one)
@@ -113,6 +114,8 @@ void walk(Cpu* c) {
     g_original(c, kWalk);
     const uint8_t mode = ld8(actor + kMode);
     if (mode != kWalkMode) st8(rec + route::kArmed, 0);
+    if (trace() && mode != kWalkMode)
+        LOG("[resident_route] slot %d: stops walking (mode %u, link %u/%u, at point %u)", slot, mode, ld8(actor + kSeesLink), ld8(actor + kLinkClose), ld8(actor + kPathIndex));
     const float speed = f(rec + route::kSpeed);
     if (mode == kWalkMode && speed > 0) sf(actor + kTargetSpeed, speed);
     const bool once = !(config & (route::kLoop | route::kBackAndForth));
@@ -134,9 +137,12 @@ void walk(Cpu* c) {
     }
     route::Guard g = read_guard(rec);
     const bool walking = mode == kWalkMode && !ld8(actor + kSeesLink) && !ld8(actor + kLinkClose);
-    const bool reached = ld8(actor + kPathIndex) != index0;
+    const bool passed = ld8(actor + kPathIndex) != index0 || ld8(actor + kPathForward) != forward0;  // the game moved it on
     const float x = f(actor + kCurrent), y = f(actor + kCurrent + 4), z = f(actor + kCurrent + 8);
-    const auto act = route::guard_step(g, x, y, z, walking, reached, f(rec + route::kLowest));
+    const unsigned index = ld8(actor + kPathIndex);
+    const uint32_t target = ld32(route_address(unsigned(slot)) + 8) + index * 16;
+    const float distance = float(std::hypot(double(f(target + 4)) - x, double(f(target + 12)) - z));
+    const auto act = route::guard_step(g, x, y, z, walking, index, distance, passed ? index0 : route::kNoPoint, f(rec + route::kLowest));
     write_guard(rec, g);
     switch (act) {
     case route::Act::None: break;
@@ -155,7 +161,7 @@ void walk(Cpu* c) {
         break;
     }
     case route::Act::Stop:
-        LOG("[resident_route] slot %d: blocked three times at %.0f,%.0f,%.0f: stops", slot, x, y, z);
+        LOG("[resident_route] slot %d: blocked three times (point %u, at %.0f,%.0f,%.0f): stops", slot, index, x, y, z);
         stop(c, actor);
         break;
     case route::Act::ReturnToGood:
@@ -172,7 +178,14 @@ void walk(Cpu* c) {
 // daNpcPeople_c::executeTurn(this)
 void turn(Cpu* c) {
     const uint32_t actor = c->r[3];
-    if (slot_of(actor) >= 0 && ld16(actor + kTurnSpeed) == 0) st16(actor + kTurnSpeed, uint16_t(route::kTurnFallback));
+    const int slot = slot_of(actor);
+    if (slot >= 0 && ld16(actor + kTurnSpeed) == 0) st16(actor + kTurnSpeed, uint16_t(route::kTurnFallback));
+    if (slot >= 0 && trace()) {
+        static unsigned steps[route::kSlots];
+        if (++steps[slot] % 30 == 1)
+            LOG("[resident_route] slot %d: turning at %.0f,%.0f,%.0f yaw %04X to point %u (turn speed %d)", slot, f(actor + kCurrent), f(actor + kCurrent + 4), f(actor + kCurrent + 8),
+                ld16(actor + 0x322), ld8(actor + kPathIndex), int(int16_t(ld16(actor + kTurnSpeed))));
+    }
     g_original(c, kTurn);
 }
 }  // namespace
@@ -245,8 +258,8 @@ void edited(Cpu* c, uint32_t actor, unsigned slot) {
     if (!ld32(actor + kPathRun)) {  // it had stopped (finished, blocked, fallen): the new route starts it again
         st32(actor + kPathRun, route_address(slot));
         route::Guard g = read_guard(rec);
-        g.status = route::Status::Walking, g.skips = 0, g.stuck = 0;
-        g.anchor[0] = f(actor + kCurrent), g.anchor[1] = f(actor + kCurrent + 8);
+        g.status = route::Status::Walking, g.skips = 0, g.stuck = 0, g.blocked = route::kNoPoint, g.in_row = 0;
+        g.anchor[0] = 1e9f, g.anchor[1] = 0;
         write_guard(rec, g);
         set_mode(c, actor, kTurnMode);
     } else if (ld32(actor + kPathRun) != route_address(slot)) {

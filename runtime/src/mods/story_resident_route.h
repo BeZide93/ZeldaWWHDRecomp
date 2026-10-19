@@ -16,9 +16,10 @@
 //         flags u8 (bit 0: loop), switch u8 (none), padding, points pointer u32 (record + 0x10)
 //   0x00C magic 'RRT1'
 //   0x010 16 points of 16 bytes: 4 argument bytes (all 0xFF: no stop to look), x, y, z
-//   0x110 owner process id; 0x114 last good position (x, y, z); 0x120 progress anchor (x, z)
+//   0x110 owner process id; 0x114 last good position (x, y, z); 0x120 closest distance to its point since progress, unused
 //   0x128 steps without progress u16; 0x12A skips in a row u8; 0x12B status u8 (Status)
-//   0x12C pause random state u32; 0x130 walk timer armed u8; 0x131 configuration u8 (Config bits)
+//   0x12C pause random state u32; 0x130 walk timer armed u8; 0x131 configuration u8 (Config bits);
+//   0x132 the point skipped last u8 (0xFF none); 0x133 skips since the last progress u8
 //   0x134 speed per logic step f32 (0: the character's own); 0x138 route hash u32; 0x13C lowest point y f32
 #pragma once
 #include <array>
@@ -33,13 +34,14 @@ namespace story_resident_route {
 inline constexpr uint32_t kSlotBytes = 0x140, kSlots = 32, kMemoryBytes = kSlotBytes * kSlots;
 inline constexpr uint32_t kMagic = 0x52525431;  // 'RRT1'
 inline constexpr uint8_t kRouteMarker = 0xFE;   // a placed resident's route number: "the port's route"
+inline constexpr uint8_t kNoPoint = 0xFF;       // no point (the guards' blocked point)
 inline constexpr float kLogicRate = 30.f;        // logic steps per second (speeds are authored per second)
 inline constexpr int16_t kTurnFallback = 1500;   // turning speed for a character whose own is 0
 inline constexpr unsigned kMaxPoints = 16;       // the position and up to 15 points
 
 enum : uint32_t {
     kHeader = 0x000, kMagicAt = 0x00C, kPoints = 0x010, kOwner = 0x110, kGood = 0x114, kAnchor = 0x120,
-    kStuck = 0x128, kSkips = 0x12A, kStatus = 0x12B, kRandom = 0x12C, kArmed = 0x130, kConfig = 0x131,
+    kStuck = 0x128, kSkips = 0x12A, kStatus = 0x12B, kRandom = 0x12C, kArmed = 0x130, kConfig = 0x131, kBlocked = 0x132, kInRow = 0x133,
     kSpeed = 0x134, kHash = 0x138, kLowest = 0x13C,
 };
 enum Config : uint8_t { kLoop = 1, kBackAndForth = 2, kPauses = 4 };
@@ -58,7 +60,7 @@ inline const char* status_name(Status s) {
 // the guards' limits
 inline constexpr float kProgress = 8.f;          // units of horizontal progress that count as moving
 inline constexpr uint16_t kStuckSteps = 45;      // logic steps without progress before a skip
-inline constexpr uint8_t kMaxSkips = 3;          // skips in a row before it stops
+inline constexpr uint8_t kMaxSkips = 3;          // skips of the same point before it stops
 inline constexpr float kFallBelow = 100.f;       // this far below the route's lowest point: fallen
 inline constexpr float kGoodBelow = 50.f;        // a place counts as good down to this far below it
 inline constexpr uint16_t kPauseWalkMin = 200, kPauseWalkMax = 300;  // the game's strolling rhythm
@@ -103,8 +105,9 @@ inline std::array<uint8_t, kSlotBytes> encode(const story_notebook::ManifestPath
         lowest = std::min(lowest, q.y);
     }
     putf(b.data(), kGood, start.x); putf(b.data(), kGood + 4, start.y); putf(b.data(), kGood + 8, start.z);
-    putf(b.data(), kAnchor, start.x); putf(b.data(), kAnchor + 4, start.z);
+    putf(b.data(), kAnchor, 1e9f); putf(b.data(), kAnchor + 4, 0);
     put32(b.data(), kRandom, route_hash(p, start) | 1u);
+    b[kBlocked] = kNoPoint;
     b[kConfig] = uint8_t((p.loop ? kLoop : 0) | (p.back_and_forth ? kBackAndForth : 0) | (p.pauses ? kPauses : 0));
     putf(b.data(), kSpeed, step_speed(p));
     put32(b.data(), kHash, route_hash(p, start));
@@ -112,37 +115,52 @@ inline std::array<uint8_t, kSlotBytes> encode(const story_notebook::ManifestPath
     return b;
 }
 
-// The guards, one logic step of a walking resident.
+// The guards, one logic step of a walking resident. Progress is getting closer to the point it walks to
+// (sliding along a wall is no progress; `anchor[0]` is the closest it got since). A point it can't
+// reach is skipped; the third skip of the same point (with no pass of it between), or three skips in a
+// row with no progress between them, stops the walker.
 struct Guard {
-    float good[3]{}, anchor[2]{};
+    float good[3]{}, anchor[2]{1e9f, 0};
     uint16_t stuck = 0;
     uint8_t skips = 0;
     Status status = Status::Walking;
+    uint8_t blocked = kNoPoint;  // the point it skipped last
+    uint8_t in_row = 0;          // skips since its last progress
 };
 enum class Act { None, NextPoint, Stop, ReturnToGood };
-// `walking`: it is in its walk and nothing (Link, a talk) holds it; `reached`: it passed a point
-// this step (not progress by itself); `lowest`: the route's lowest point. Skips in a row count until
-// it makes progress again.
-inline Act guard_step(Guard& g, float x, float y, float z, bool walking, bool reached, float lowest) {
-    if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) return Act::None;
+// `walking`: it is in its walk and nothing (Link, a talk) holds it; `target`, `distance`: the point it
+// walks to and how far (across) it is from it; `passed`: the point it passed this step, or kNoPoint;
+// `lowest`: the route's lowest point.
+inline Act guard_step(Guard& g, float x, float y, float z, bool walking, unsigned target, float distance, unsigned passed, float lowest) {
+    if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z) || !std::isfinite(distance)) return Act::None;
     if (y < lowest - kFallBelow) {
         g.status = Status::Fell;
         return Act::ReturnToGood;
     }
     if (y >= lowest - kGoodBelow) g.good[0] = x, g.good[1] = y, g.good[2] = z;
-    (void)reached;  // reaching a point is no progress of its own (a skip can land on the point it stands on)
-    if (!walking) {
-        g.anchor[0] = x, g.anchor[1] = z, g.stuck = 0;
+    if (passed != kNoPoint) {
+        g.anchor[0] = 1e9f, g.stuck = 0;
+        if (passed == g.blocked) g.blocked = kNoPoint, g.skips = 0;
+        if (g.status == Status::Skipped && g.blocked == kNoPoint) g.status = Status::Walking;
         return Act::None;
     }
-    if (std::hypot(double(x) - g.anchor[0], double(z) - g.anchor[1]) >= kProgress) {
-        g.anchor[0] = x, g.anchor[1] = z, g.stuck = 0, g.skips = 0;
-        if (g.status == Status::Skipped) g.status = Status::Walking;
+    if (!walking) {
+        g.anchor[0] = 1e9f, g.stuck = 0;
+        return Act::None;
+    }
+    if (g.anchor[0] >= 1e8f) {  // a new point to walk to: the distance to beat
+        g.anchor[0] = distance, g.stuck = 0;
+        return Act::None;
+    }
+    if (distance <= g.anchor[0] - kProgress) {
+        g.anchor[0] = distance, g.stuck = 0, g.in_row = 0;
         return Act::None;
     }
     if (++g.stuck < kStuckSteps) return Act::None;
-    g.stuck = 0, g.anchor[0] = x, g.anchor[1] = z;
-    if (++g.skips >= kMaxSkips) {
+    g.stuck = 0, g.anchor[0] = 1e9f;
+    if (target == g.blocked) ++g.skips;
+    else g.blocked = uint8_t(target), g.skips = 1;
+    if (g.skips >= kMaxSkips || ++g.in_row >= kMaxSkips) {
         g.status = Status::Stuck;
         return Act::Stop;
     }

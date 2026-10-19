@@ -204,24 +204,43 @@ int main() {
         const auto l = route::next_point(2, 3, true, true);
         assert(l.index == 0 && l.forward && !l.end);
     }
-    // the guards in short: no progress for 45 steps: a skip; three in a row: stop; far below: back
+    // the guards in short: no progress toward its point for 45 steps: a skip; the third skip of the same
+    // point: stop; far below its route: back where it last stood on it
     {
+        const unsigned none = route::kNoPoint;
         route::Guard g;
-        g.anchor[0] = 0, g.anchor[1] = 0;
-        route::Act act = route::Act::None;
-        for (int n = 0; n < 44; n++) assert(route::guard_step(g, 1, 0, 1, true, false, 0) == route::Act::None);
-        act = route::guard_step(g, 1, 0, 1, true, false, 0);
-        assert(act == route::Act::NextPoint && g.status == route::Status::Skipped && g.skips == 1);
-        for (int n = 0; n < 45; n++) act = route::guard_step(g, 1, 0, 1, true, false, 0);
-        assert(act == route::Act::NextPoint && g.skips == 2);
-        for (int n = 0; n < 45; n++) act = route::guard_step(g, 1, 0, 1, true, false, 0);
+        g.anchor[0] = 1e9f;
+        route::Act act = route::guard_step(g, 1, 0, 1, true, 1, 100, none, 0);
+        for (int n = 0; n < 44; n++) assert(route::guard_step(g, 1, 0, 1, true, 1, 100, none, 0) == route::Act::None);
+        act = route::guard_step(g, 1, 0, 1, true, 1, 100, none, 0);
+        assert(act == route::Act::NextPoint && g.status == route::Status::Skipped && g.skips == 1 && g.blocked == 1);
+        // it walks on to another point and reaches it: the blocked point stays counted
+        for (int n = 0; n < 20; n++) assert(route::guard_step(g, float(n * 2), 0, 1, true, 2, 100.f - n * 2, none, 0) == route::Act::None);
+        assert(route::guard_step(g, 40, 0, 1, true, 1, 300, 2, 0) == route::Act::None && g.skips == 1);
+        for (int n = 0; n < 46; n++) act = route::guard_step(g, 1, 0, 1, true, 1, 300, none, 0);
+        assert(g.skips == 2);
+        for (int n = 0; n < 46; n++) act = route::guard_step(g, 1, 0, 1, true, 1, 300, none, 0);
         assert(act == route::Act::Stop && g.status == route::Status::Stuck);
+        // three skips in a row of different points with no progress between them: stop too
+        route::Guard r3;
+        for (unsigned pt = 1; pt <= 3; pt++)
+            for (int n = 0; n < 46; n++) act = route::guard_step(r3, 0, 0, 0, true, pt, 100, none, 0);
+        assert(act == route::Act::Stop && r3.status == route::Status::Stuck);
+        // passing the blocked point clears it
+        route::Guard p2;
+        for (int n = 0; n < 46; n++) act = route::guard_step(p2, 0, 0, 0, true, 3, 50, none, 0);
+        assert(act == route::Act::NextPoint && p2.blocked == 3);
+        assert(route::guard_step(p2, 0, 0, 0, true, 4, 80, 3, 0) == route::Act::None && p2.blocked == none && p2.skips == 0 && p2.status == route::Status::Walking);
+        // sliding along a wall (moving, but no closer to its point) is no progress
+        route::Guard w;
+        for (int n = 0; n < 45; n++) assert(route::guard_step(w, float(n), 0, 0, true, 1, 99.9f, none, 0) == route::Act::None);
+        assert(route::guard_step(w, 45, 0, 0, true, 1, 99.9f, none, 0) == route::Act::NextPoint);
         route::Guard h;
-        for (int n = 0; n < 200; n++) assert(route::guard_step(h, float(n * 2), 0, 0, true, false, 0) == route::Act::None);  // walking: no skips
-        for (int n = 0; n < 100; n++) assert(route::guard_step(h, 0, 0, 0, false, false, 0) == route::Act::None);       // held (Link, a talk): no skips
-        assert(route::guard_step(h, 5, -40, 5, true, false, 0) == route::Act::None && h.good[1] == -40);
-        assert(route::guard_step(h, 6, -80, 6, true, false, 0) == route::Act::None && h.good[1] == -40);  // not good, not fallen
-        assert(route::guard_step(h, 7, -101, 7, true, false, 0) == route::Act::ReturnToGood && h.status == route::Status::Fell && h.good[0] == 5);
+        for (int n = 0; n < 200; n++) assert(route::guard_step(h, float(n * 2), 0, 0, true, 1, 500.f - n * 2, none, 0) == route::Act::None);  // closing in
+        for (int n = 0; n < 100; n++) assert(route::guard_step(h, 0, 0, 0, false, 1, 100, none, 0) == route::Act::None);                     // held (Link, a talk)
+        assert(route::guard_step(h, 5, -40, 5, true, 1, 100, none, 0) == route::Act::None && h.good[1] == -40);
+        assert(route::guard_step(h, 6, -80, 6, true, 1, 100, none, 0) == route::Act::None && h.good[1] == -40);  // not good, not fallen
+        assert(route::guard_step(h, 7, -101, 7, true, 1, 100, none, 0) == route::Act::ReturnToGood && h.status == route::Status::Fell && h.good[0] == 5);
         uint32_t seed = 99;
         for (int n = 0; n < 50; n++) {
             const auto t = route::pause_walk(seed);

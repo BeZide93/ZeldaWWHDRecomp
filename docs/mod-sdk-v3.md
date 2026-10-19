@@ -101,8 +101,9 @@ A placed resident with a walking animation of its own can walk a route with the 
 It walks as the game's own walkers do: with its own walk and idle, turning on the spot at corners,
 following the ground, stopping to look at Link when he is close in front of it (and walking on when he
 leaves), and talking as usual (your lines). `uo2` still startles at a roll or a loud noise nearby. It has
-no ledge check of its own, so the port watches it: when it makes no progress for about a second and a half
-(a wall), it goes on to its next point; after three such skips in a row it stops. When it drops far below
+no ledge check of its own, so the port watches it: when it gets no closer to its next point for about a
+second and a half (a wall), it goes on to the point after; when the same point stays out of reach three
+times, or it gets nowhere over three such skips, it stops where it is. When it drops far below
 its route (an edge), it is put back where it last stood on its route and stops. Check the route in the
 world editor: segments over no ground, a drop or a step too high are drawn red.
 
