@@ -21,6 +21,7 @@ what is on `devel` and not released yet (also in the
   Forsaken Fortress shipwrecks. They are made from your own game files the first time a mod uses them, have their own
   collision and take the light of the room they stand in. Island pieces now check the textures they are built from, so
   existing piece caches are rebuilt once.
+- **Fixed: the mod actor heap diagnostic** (`WWHD_MOD_ACTOR_HEAPS`) no longer crashes when a game heap isn't set up.
 
 - **Island buildings and world objects: only real conflicts refuse a place now** (doors, start points, villagers and
   their walks, chests, event triggers); pots, signs, rupees, message and hint areas and the sea's surface no longer
