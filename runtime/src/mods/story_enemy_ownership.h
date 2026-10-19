@@ -7,8 +7,8 @@
 #include <string>
 struct Cpu;
 namespace story_enemy_ownership {
-enum class Kind:uint32_t { ChuChu,Bokoblin,Moblin,Keese,Miniblin,Peahat,Rat,Darknut,RatHole,BokoBaba };
-inline constexpr unsigned kKindCount=10;
+enum class Kind:uint32_t { ChuChu,Bokoblin,Moblin,Keese,Miniblin,Peahat,Rat,Darknut,RatHole,BokoBaba,Bubble };
+inline constexpr unsigned kKindCount=11;
 // The Darknut's owned children: its sword (daBoko type 3, profile 0x1CF) and, for the caped variants,
 // its cape (d_a_mant type 0, profile 0xC0, 0x4288 bytes).
 inline constexpr uint16_t kCapeProfile=0xC0;inline constexpr uint32_t kCapeBytes=0x4288;

@@ -36,6 +36,7 @@ inline constexpr uint32_t kExtraEnemyProfilesScratchOffset=kVisualScratchOffset+
 inline constexpr uint32_t kExtraEnemyProfiles=8;
 inline constexpr uint32_t kDarknutProfileScratchOffset=kExtraEnemyProfilesScratchOffset+2*0x30;
 inline constexpr uint32_t kRatHoleProfileScratchOffset=kExtraEnemyProfilesScratchOffset+3*0x30;
+// Batch 3: slot 5 the Bubble's.
 // Batch 3: slot 4 the Boko Baba's.
 inline constexpr uint32_t kScratchBytes=kExtraEnemyProfilesScratchOffset+kExtraEnemyProfiles*0x30;
 static_assert(kEnemyProfilesScratchOffset>=kIdentityScratchOffset+128*40);

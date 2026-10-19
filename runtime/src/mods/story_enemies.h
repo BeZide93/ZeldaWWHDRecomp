@@ -24,7 +24,7 @@ struct Spec {Kind kind;std::string mod,id,defeated_flag;std::vector<story_items:
 // Miniblin 0xFFFF0A01: behaviour 1 (never respawns), notice range 10 (1000 units), no spawn switches
 // Darknut 0xFFFF9604: behaviour 4 (guards its place), sight 150, no path, no spawn switch; its variants
 // (story_enemy_variants.h) add a shield, a helmet or a cape through the x rotation word (home_x)
-constexpr uint32_t parameters(Kind k){return k==Kind::ChuChu?0xFF000000u:k==Kind::Bokoblin?0xFFFFFF04u:(k==Kind::Keese||k==Kind::Moblin)?0xFFFF0000u:k==Kind::Miniblin?0xFFFF0A01u:k==Kind::Peahat?0xFFFFFF00u:k==Kind::Rat?0xFFFF0001u:k==Kind::Darknut?0xFFFF9604u:k==Kind::RatHole?0xFF010100u:k==Kind::BokoBaba?0xFFFFFF00u:0u;}
+constexpr uint32_t parameters(Kind k){return k==Kind::ChuChu?0xFF000000u:k==Kind::Bokoblin?0xFFFFFF04u:(k==Kind::Keese||k==Kind::Moblin)?0xFFFF0000u:k==Kind::Miniblin?0xFFFF0A01u:k==Kind::Peahat?0xFFFFFF00u:k==Kind::Rat?0xFFFF0001u:k==Kind::Darknut?0xFFFF9604u:k==Kind::RatHole?0xFF010100u:k==Kind::BokoBaba?0xFFFFFF00u:k==Kind::Bubble?0xFFFFFF00u:0u;}
 // the manifest's actor name of a kind ("chuchu", ...)
 const char* kind_name(Kind);
 // the parameters of a kind's variant ("" the default); 0 for a variant the kind doesn't declare

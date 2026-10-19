@@ -33,7 +33,7 @@ The initial allowlist is deliberately small:
 | Breakable prop | `pot`, `barrel`, `crate` | Required mod-owned `broken_flag` and `drops` list |
 | Latched floor switch | `switch` | Required mod-owned `switch_flag`; fixed yellow switch |
 | Rotating gate | `door` | Required `switch` naming a switch actor in the same mod |
-| Native enemies (preview) | `chuchu`, `bokoblin`, `moblin`, `keese`, `miniblin`, `peahat`, `darknut`, `rat_hole`, `bokobaba` | Required mod-owned `defeated_flag` and `drops`; fixed ordinary variants |
+| Native enemies (preview) | `chuchu`, `bokoblin`, `moblin`, `keese`, `miniblin`, `peahat`, `darknut`, `rat_hole`, `bokobaba`, `bubble` | Required mod-owned `defeated_flag` and `drops`; fixed ordinary variants |
 
 Resident names are exact native object codes in lower case. Each placed copy uses fixed ordinary
 parameters: it stands where you put it (unless you give it a route, below) and has none of the
@@ -451,6 +451,7 @@ The allowlist below defines the supported variants.
 | `darknut` | Darknut guarding its place with its sword, or a declared variant (below) |
 | `rat_hole` | A rat hole three rats come out of (see [Rat holes](#rat-holes)) |
 | `bokobaba` | Ordinary Boko Baba: a biting plant that stays where it is placed (put it on the ground). Strike its head to stun it, then cut its stem. It bites, but never grabs and chews Link. When it dies its head doesn't fly off and leave a Boko stick |
+| `bubble` | A red Bubble, or a blue one (below): a flaming skull that stays near the ground below it |
 
 All of them use the same declaration fields:
 
@@ -465,7 +466,7 @@ All of them use the same declaration fields:
 }
 ```
 
-Use `"actor": "chuchu"`, `"moblin"`, `"keese"`, `"miniblin"`, `"peahat"`, `"darknut"` or `"bokobaba"` for the other fixed variants,
+Use `"actor": "chuchu"`, `"moblin"`, `"keese"`, `"miniblin"`, `"peahat"`, `"darknut"`, `"bokobaba"` or `"bubble"` for the other fixed variants,
 with a distinct actor ID and defeat flag for each copy. Declare reward items in
 the same package. `drops` is required and may be empty or contain up to eight
 distinct same-mod items, each with quantity 1–254. Only yaw rotation is accepted;
@@ -494,8 +495,9 @@ drops are replaced by the declared Bag rewards. Some native disappearance effect
 are omitted because their native effect actor also creates retail drops; identical
 retail defeat effects are not promised.
 
-What these enemies do to Link stays the game's own and ends on its own: a Fire Keese's burn wears off
-as it does in the game. A Seahat of a mod never counts towards the game's own tally of sea enemies.
+What these enemies do to Link stays the game's own and ends on its own: a Bubble's curse or flames,
+a Fire Keese's burn wear off as they do in the game. A Seahat of a mod never counts towards the game's
+own tally of sea enemies.
 
 ### Patrolling Bokoblins and Moblins
 
@@ -596,6 +598,8 @@ checked; packages still cannot give raw parameters.
 | `keese` | `fire` | The Fire Keese: its bite sets Link on fire for a moment; fire doesn't hurt it. (The game has no Ice Keese.) |
 | `peahat` | `peahat` | The ordinary Peahat (the same as no variant) |
 | `peahat` | `seahat` | The Seahat: bigger, it hovers over the water and dives at Link only while he sails the boat. Place it over the sea |
+| `bubble` | `red` | The Red Bubble (the same as no variant): its flames set Link on fire. Strike it, or first put its fire out with the Deku Leaf's wind or a bomb |
+| `bubble` | `blue` | The Blue Bubble: its touch curses Link, who can't use his sword or items until the curse wears off. Put its fire out with the Deku Leaf's wind or a bomb (a sword or the boomerang only bounce it off while it burns), then strike the skull |
 
 ```json
 {"id": "pier-chu", "actor": "chuchu", "parameters": {"variant": "blue"},

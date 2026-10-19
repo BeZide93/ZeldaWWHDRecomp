@@ -30,7 +30,9 @@ constexpr Collider ki[]={{0x734,0x6F8,0},{0x860,0x6F8,0},{0x98C,0x6F8,0},{0xB44,
 // d_a_bo (Boko Baba): head sphere (the bite), base sphere and stem cylinder (the killing hurtbox) on mStts 0x754;
 // enemyice 0xB18, enemyfire 0xED0.
 constexpr Collider bo[]={{0x790,0x754,0},{0x8BC,0x754,0},{0x9E8,0x754,0},{0xB84,0xB48,0xB18},{0xFAC,0xF70,0xED0}};
-constexpr Descriptor descriptors[]={{0x7FFA,0xCE,0xF10,cc,3},{0x7FF9,0xBD,0x19A4,bk,7},{0x7FF8,0xBC,0x343C,mo,8},{0x7FF7,0xD7,0x10BC,ki,5},{0x7FF4,0xF7,0xEE4,pt,4},{0x7FF3,0xD1,0x12D8,ph,6},{0x7FF2,0xC6,0x11CC,nz,3},{0x7FF1,0xBF,0x1C5C,tn,8},{0x7FF0,0xC7,0x574,nzg,1},{0x7FEA,0xD6,0x1104,bo,5}};
+// d_a_bl (Bubble): one body sphere (attack, target and contact) on mStts 0x64C; enemyice 0x82C, enemyfire 0xBE4.
+constexpr Collider bl[]={{0x688,0x64C,0},{0x898,0x85C,0x82C},{0xCC0,0xC84,0xBE4}};
+constexpr Descriptor descriptors[]={{0x7FFA,0xCE,0xF10,cc,3},{0x7FF9,0xBD,0x19A4,bk,7},{0x7FF8,0xBC,0x343C,mo,8},{0x7FF7,0xD7,0x10BC,ki,5},{0x7FF4,0xF7,0xEE4,pt,4},{0x7FF3,0xD1,0x12D8,ph,6},{0x7FF2,0xC6,0x11CC,nz,3},{0x7FF1,0xBF,0x1C5C,tn,8},{0x7FF0,0xC7,0x574,nzg,1},{0x7FEA,0xD6,0x1104,bo,5},{0x7FE9,0xCF,0xE18,bl,3}};
 struct Entry {Kind kind;uint32_t params,epoch;Fingerprint fingerprint;Token token;uint32_t pid=0,address=0;bool active=false,quarantined=false;};
 std::vector<Entry> entries;Token next_token=1;uint32_t arena=0,link=0,link_pid=0;void(*original)(Cpu*,uint32_t)=nullptr;bool installed=false;VerifyActor verify_actor;ProjectileVerifier projectile_verifier;bool projectile_enabled=false;ModColliderVerifier mod_collider_verifier;
 constexpr uint32_t Magic=0x454F5731,RetiredMagic=0x454F5752,PendingMagic=0x454F5750,Version=2,ActorOffset=256,LineageOffset=ActorOffset+128*128;
@@ -41,7 +43,7 @@ Entry* get(Token t){for(auto& e:entries)if(e.token==t)return &e;return nullptr;}
 size_t index(const Entry& e){return size_t(&e-entries.data());}
 uint32_t record(const Entry& e){return arena+ActorOffset+uint32_t(index(e))*128;}
 uint32_t checksum(uint32_t a,uint32_t n){uint32_t h=2166136261u;for(uint32_t i=0;i<n;++i)h=(h^ld8(a+i))*16777619u;return h;}
-bool reserved(uint16_t p){return (p>=0x7FF7&&p<=0x7FFA)||(p>=0x7FF0&&p<=0x7FF4)||p==0x7FEA;}
+bool reserved(uint16_t p){return (p>=0x7FF7&&p<=0x7FFA)||(p>=0x7FF0&&p<=0x7FF4)||p==0x7FEA||p==0x7FE9;}
 bool identity(const Entry& e,uint32_t a){auto& d=descriptors[unsigned(e.kind)];return memory(a,d.bytes)&&e.pid&&e.pid!=0xFFFFFFFFu&&ld32(a+4)==e.pid&&ld16(a+0xE)==d.profile&&ld32(a+0xB0)==e.params&&ld8(a+0x2DD)==0xFF;}
 bool checked(Entry&e,uint32_t a){if(!identity(e,a)||!verify_actor){if(e.active)e.quarantined=true;return false;}try{if(verify_actor(e.token,e.kind,a))return true;}catch(...){}e.quarantined=true;return false;}
 bool valid(Entry& e){return e.active&&!e.quarantined&&e.address&&checked(e,e.address);}

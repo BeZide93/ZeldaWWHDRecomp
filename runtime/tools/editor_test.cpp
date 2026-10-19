@@ -669,18 +669,18 @@ void live_kinds_note() {
         const auto live = editor_live_kinds::read(reply);
         const Value a = json(actor_json);
         const std::string actor = a.get("actor").string();
-        const bool enemy = actor == "chuchu" || actor == "bokoblin" || actor == "moblin" || actor == "keese" || actor == "miniblin" || actor == "darknut" || actor == "peahat" || actor == "bokobaba";
+        const bool enemy = actor == "chuchu" || actor == "bokoblin" || actor == "moblin" || actor == "keese" || actor == "miniblin" || actor == "darknut" || actor == "peahat" || actor == "bokobaba" || actor == "bubble";
         const bool prop = actor == "pot" || actor == "barrel" || actor == "crate";
         CHECK(!live.empty());
         return editor_live_kinds::restart_only(a, live, enemy, prop);
     };
     const char* live_ones[] = {R"({"actor": "chuchu", "parameters": {"variant": "blue"}})", R"({"actor": "bokoblin", "parameters": {"variant": "shield"}})",
-                               R"({"actor": "miniblin"})", R"({"actor": "darknut", "parameters": {"variant": "mighty"}})", R"({"actor": "keese"})", R"({"actor": "keese", "parameters": {"variant": "fire"}})", R"({"actor": "bokobaba"})", R"({"actor": "peahat", "parameters": {"variant": "seahat"}})", R"({"actor": "pot"})", R"({"actor": "switch"})",
+                               R"({"actor": "miniblin"})", R"({"actor": "darknut", "parameters": {"variant": "mighty"}})", R"({"actor": "keese"})", R"({"actor": "keese", "parameters": {"variant": "fire"}})", R"({"actor": "bokobaba"})", R"({"actor": "bubble", "parameters": {"variant": "blue"}})", R"({"actor": "peahat", "parameters": {"variant": "seahat"}})", R"({"actor": "pot"})", R"({"actor": "switch"})",
                                R"({"actor": "resident", "parameters": {"resident": "sa2"}})", R"({"actor": "sign"})"};
     host.live_kinds = 1;
     for (const char* a : live_ones) CHECK(!note(a));
     host.live_kinds = 0;  // the game has not installed them (no --editor live kinds): the note shows
-    for (const char* a : {R"({"actor": "chuchu"})", R"({"actor": "miniblin"})", R"({"actor": "darknut"})", R"({"actor": "bokoblin", "parameters": {"variant": "machete"}})", R"({"actor": "bokobaba"})"}) CHECK(note(a));
+    for (const char* a : {R"({"actor": "chuchu"})", R"({"actor": "miniblin"})", R"({"actor": "darknut"})", R"({"actor": "bokoblin", "parameters": {"variant": "machete"}})", R"({"actor": "bokobaba"})", R"({"actor": "bubble"})"}) CHECK(note(a));
     CHECK(note(R"({"kind": "mod", "model": "m", "combat": {}})"));
     // no answer yet: the start-up-only kinds are assumed
     const editor_live_kinds::Live none;
@@ -693,7 +693,7 @@ void building(const fs::path& examples) {
     editor::Session s(&host);
     s.add_package("editor-test", "Editor test", "", json(kManifest));
     Value r = s.run("list_actor_types");
-    CHECK(ok(r) && r.get("result").array.size() == 20);
+    CHECK(ok(r) && r.get("result").array.size() == 21);
 
     // add: at Link (sea room 44, heading 100 of 65536), snapped onto the ground (y 5); one undo step
     r = s.run("add_actor", json(R"({"type": "sign"})"));
@@ -757,11 +757,14 @@ void building(const fs::path& examples) {
     CHECK(!ok(s.run("add_actor", json(R"({"type": "darknut", "id": "statue", "options": {"variant": "frozen"}})"))) && !actor_of(s, "statue"));
     CHECK(ok(s.run("set_actor", json(R"({"id": "knight", "property": "defeat_switch", "value": "switch"})"))) && actor_of(s, "knight")->get("defeat_switch").string() == "switch");
     CHECK(ok(s.run("remove_actor", json(R"({"id": "knight", "confirm": true})"))));
-    // batch 3: Boko Baba, Fire Keese and the Seahat; no Ice Keese, no Bubble skull
+    // batch 3: Boko Baba, Bubbles (red, blue), Fire Keese and the Seahat; no Ice Keese, no Bubble skull
     CHECK(ok(s.run("add_actor", json(R"({"type": "bokobaba", "id": "baba"})"))) && actor_of(s, "baba")->get("defeated_flag").string() == "baba-defeated" && actor_of(s, "baba")->get("parameters").type == Value::Null);
+    CHECK(ok(s.run("add_actor", json(R"({"type": "bubble", "id": "blue-bubble", "options": {"variant": "blue"}})"))) && actor_of(s, "blue-bubble")->get("parameters").get("variant").string() == "blue");
+    CHECK(ok(s.run("add_actor", json(R"({"type": "bubble", "id": "red-bubble"})"))) && actor_of(s, "red-bubble")->get("parameters").type == Value::Null);
     CHECK(ok(s.run("add_actor", json(R"({"type": "keese", "id": "fire-keese", "options": {"variant": "fire"}})"))) && actor_of(s, "fire-keese")->get("parameters").get("variant").string() == "fire");
     CHECK(ok(s.run("add_actor", json(R"({"type": "peahat", "id": "seahat", "options": {"variant": "seahat"}})"))) && actor_of(s, "seahat")->get("parameters").get("variant").string() == "seahat");
     CHECK(!ok(s.run("add_actor", json(R"({"type": "keese", "id": "ice-keese", "options": {"variant": "ice"}})"))) && !actor_of(s, "ice-keese"));
+    CHECK(!ok(s.run("add_actor", json(R"({"type": "bubble", "id": "skull", "options": {"variant": "skull"}})"))) && !actor_of(s, "skull"));
     CHECK(ok(s.run("set_actor", json(R"({"id": "baba", "property": "defeat_switch", "value": "switch"})"))) && actor_of(s, "baba")->get("defeat_switch").string() == "switch");
     CHECK(ok(s.run("validate")));
     {

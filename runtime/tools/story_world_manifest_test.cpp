@@ -94,7 +94,7 @@ int main() {
     const auto prop_example=[](){return mods::json::parse(R"({"items":[{"id":"shard"}],"actors":[{"id":"vase","actor":"pot","stage":"town","room":0,"position":{"x":0,"y":0,"z":0},"broken_flag":"vase.broken","drops":[{"item":"item:shard","quantity":2}]}]})");};
     { // Validate all four curated native enemy declarations through the public parser.
         const auto fixture=[](){return mods::json::parse(R"({"items":[{"id":"shard"}],"actors":[{"id":"enemy","actor":"chuchu","stage":"sea","room":11,"position":{"x":0,"y":0,"z":0},"defeated_flag":"enemy.defeated","drops":[{"item":"item:shard","quantity":2}]}]})");};
-        for(const char* type:{"chuchu","bokoblin","moblin","keese","miniblin","peahat","darknut","rat_hole","bokobaba"}){
+        for(const char* type:{"chuchu","bokoblin","moblin","keese","miniblin","peahat","darknut","rat_hole","bokobaba","bubble"}){
             auto data=fixture();auto& value=data["actors"].array[0];value["actor"]=type;ManifestActor candidate;candidate.actor=type;
             assert(world_manifest::native_enemy_fields(data,value,candidate,why)&&candidate.defeated_flag=="enemy.defeated"&&candidate.drops.size()==1&&candidate.drops[0].quantity==2);
             assert(parse_actors(data,actors,why)&&actors.size()==1&&actors[0].actor==type&&actors[0].defeated_flag=="enemy.defeated"&&actors[0].drops[0].item=="shard");
@@ -120,9 +120,11 @@ int main() {
         {auto data=fixture();data["actors"].array[0]["parameters"]=mods::json::parse(R"({"variant":"purple"})");assert(!parse_actors(data,actors,why)&&why.find("green, red, blue, yellow or black")!=std::string::npos);}
         for(const char* colour:{"red","blue","yellow"}){const auto*v=story_enemy_variants::find("chuchu",colour);assert(v&&(v->params&0xFFFF00FFu)==0xFF000000u&&((v->params>>8)&0xFF)>=1&&((v->params>>8)&0xFF)<=4);}
         assert(story_enemy_variants::find("chuchu","black")->params==0xFF000300u);
-        // Fire Keese and the Seahat; the game has no Ice Keese
+        // Fire Keese, the Seahat and the Bubble colours; the game has no Ice Keese and the bare-skull or path Bubble is never offered
         assert(story_enemy_variants::find("keese","")->params==0xFFFF0000u&&story_enemy_variants::find("keese","fire")->params==0xFFFF8000u&&!story_enemy_variants::find("keese","ice"));
         assert(story_enemy_variants::find("peahat","")->params==0xFFFFFF00u&&story_enemy_variants::find("peahat","seahat")->params==0xFFFFFF01u);
+        assert(story_enemy_variants::find("bubble","")->params==0xFFFFFF00u&&story_enemy_variants::find("bubble","blue")->params==0xFFFFFF01u&&!story_enemy_variants::find("bubble","skull"));
+        for(const auto& v:story_enemy_variants::kVariants)if(std::string(v.kind)=="bubble")assert((v.params&0xFEu)==0&&(v.params>>8)==0xFFFFFFu);
         {auto data=fixture();data["actors"].array[0]["actor"]="keese";data["actors"].array[0]["parameters"]=mods::json::parse(R"({"variant":"ice"})");assert(!parse_actors(data,actors,why)&&why.find("normal or fire")!=std::string::npos);}
         // a patrolling Bokoblin: points and mode (loop or back_and_forth), never speed or pauses; other enemies never take a path
         {auto data=fixture();auto& a=data["actors"].array[0];a["actor"]="bokoblin";a["path"]=mods::json::parse(R"({"points":[{"x":300,"y":0,"z":0},{"x":300,"y":0,"z":300}],"mode":"back_and_forth"})");

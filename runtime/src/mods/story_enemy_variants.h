@@ -61,6 +61,10 @@ inline constexpr Variant kVariants[] = {
     // sails; its kill counter, event register 0x7EFF, is kept unchanged by the adapter); default ranges.
     {"peahat", "peahat", 0xFFFFFF00u, "Peahat", "The ordinary Peahat."},
     {"peahat", "seahat", 0xFFFFFF01u, "Seahat", "A Seahat: it hovers over water and dives at Link while he sails the boat."},
+    // Bubble (d_a_bl): byte 0 the colour (0 red, 1 blue; never a path or the bare skull), byte 1 no switch,
+    // byte 2 no path, byte 3 on the ground (it stays at the ground's height).
+    {"bubble", "red", 0xFFFFFF00u, "Red Bubble", "A Red Bubble: a flaming skull; its flames set Link on fire. Strike it, or first put its fire out with the Deku Leaf's wind or a bomb."},
+    {"bubble", "blue", 0xFFFFFF01u, "Blue Bubble", "A Blue Bubble: its touch curses Link (no sword or items for a moment). Put its fire out with the Deku Leaf's wind or a bomb, then strike the skull."},
 };
 
 // the kind's variant `name` ("" is the default, the kind's first)
