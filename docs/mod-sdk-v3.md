@@ -487,7 +487,7 @@ none, are validator errors.
 
 Every Darknut guards the place you put it and fights Link when he comes near; it has no path and
 no game switch (defeating it opens no gate and makes no chest appear in the game; use your own
-`defeated_flag`). Its armour, helmet and shield come off as in the game, and its sword can be
+`defeated_flag`, or `defeat_switch` to open one of your doors). Its armour, helmet and shield come off as in the game, and its sword can be
 knocked out of its hands; then it lies on the ground until the Darknut picks it up again. A Darknut
 picks up only its own sword, and Link cannot take it. The Mighty Darknut's cape tears under Link's
 sword (other attacks pass through it) and falls away with the armour. When the Darknut

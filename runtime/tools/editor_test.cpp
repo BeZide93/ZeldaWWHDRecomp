@@ -693,7 +693,7 @@ void building(const fs::path& examples) {
     editor::Session s(&host);
     s.add_package("editor-test", "Editor test", "", json(kManifest));
     Value r = s.run("list_actor_types");
-    CHECK(ok(r) && r.get("result").array.size() == 17);
+    CHECK(ok(r) && r.get("result").array.size() == 18);
 
     // add: at Link (sea room 44, heading 100 of 65536), snapped onto the ground (y 5); one undo step
     r = s.run("add_actor", json(R"({"type": "sign"})"));
@@ -755,6 +755,7 @@ void building(const fs::path& examples) {
     CHECK(ok(s.run("add_actor", json(R"({"type": "darknut", "id": "knight", "options": {"variant": "mighty"}})"))) &&
           actor_of(s, "knight")->get("parameters").get("variant").string() == "mighty" && actor_of(s, "knight")->get("defeated_flag").string() == "knight-defeated");
     CHECK(!ok(s.run("add_actor", json(R"({"type": "darknut", "id": "statue", "options": {"variant": "frozen"}})"))) && !actor_of(s, "statue"));
+    CHECK(ok(s.run("set_actor", json(R"({"id": "knight", "property": "defeat_switch", "value": "switch"})"))) && actor_of(s, "knight")->get("defeat_switch").string() == "switch");
     CHECK(ok(s.run("remove_actor", json(R"({"id": "knight", "confirm": true})"))));
     {
         bool listed = false;

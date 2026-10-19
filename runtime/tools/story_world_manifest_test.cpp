@@ -138,6 +138,11 @@ int main() {
          data["actors"].array[0]["defeat_switch"]="enemy";assert(!parse_actors(data,actors,why));
          data["actors"].array[0]["defeat_switch"]=3;assert(!parse_actors(data,actors,why));
          data["actors"].array[0].object.erase("defeat_switch");data["actors"].array[1]["defeat_switch"]="gate-switch";assert(!parse_actors(data,actors,why)&&why.find("requires an enemy")!=std::string::npos);}
+        // a Mighty Darknut and a Bokoblin naming the same switch: both are enemies for defeat_switch
+        {auto data=fixture();data["actors"].array.push_back(mods::json::parse(R"({"id":"gate-switch","actor":"switch","stage":"sea","room":11,"position":{"x":5,"y":0,"z":0},"switch_flag":"gate.open"})"));
+         auto& knight=data["actors"].array[0];knight["actor"]="darknut";knight["parameters"]=mods::json::parse(R"({"variant":"mighty"})");knight["defeat_switch"]="gate-switch";
+         auto second=knight;second["id"]="guard";second["actor"]="bokoblin";second.object.erase("parameters");second["defeated_flag"]="guard.defeated";data["actors"].array.push_back(second);
+         assert(parse_actors(data,actors,why)&&actors.size()==3&&actors[0].actor=="darknut"&&actors[0].variant=="mighty"&&actors[0].defeat_switch=="gate-switch"&&actors[2].defeat_switch=="gate-switch");}
         // Bokoblin: the stick is the default; the shield sets bit 0x20, the machete bit 0x40 (weapon 1)
         assert(story_enemy_variants::find("bokoblin","")->params==0xFFFFFF04u&&story_enemy_variants::bokoblin_weapon(0xFFFFFF04u)==0);
         assert(story_enemy_variants::find("bokoblin","shield")->params==0xFFFFFF24u&&story_enemy_variants::bokoblin_weapon(0xFFFFFF24u)==0);
