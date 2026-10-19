@@ -18,6 +18,7 @@
 
 #include "../editor/editor_game.h"
 #include "../editor/mcp_game.h"
+#include "editor_live_kinds.h"
 #include "editor_resident.h"
 #include "../mods/story_enemy_variants.h"
 #include "editor_shell.h"
@@ -171,24 +172,21 @@ std::string kind_label(const Value& a) {
     if (is_prop(actor)) return actor + " (prop)";
     return actor;
 }
-// whether the running game shows changes to this actor's kind at once (list_actor_types, asked once)
+// whether the running game shows changes to this actor's kind at once (list_actor_types, asked again now
+// and then: the game installs its kinds after the overlay starts; while the session is busy the next
+// frame asks again, so an early or missed answer never sticks)
 bool restart_only(const Value& a) {
-    static std::map<std::string, bool> live;
+    static editor_live_kinds::Live live;
     static int asked = -1000;
     const int frame = ImGui::GetFrameCount();
-    // the game installs its kinds after the overlay starts: asked again now and then; while the session is
-    // busy (a command running) the next frame asks again, so an early or missed answer never sticks
     if (live.empty() || frame - asked > 120)
         if (editor::try_with_session([&](editor::Session& s) {
-                for (const auto& t : s.run("list_actor_types", Value(), false).get("result").array) live[t.get("type").string()] = t.get("live").boolean;
+                const Value reply = s.run("list_actor_types", Value(), false);  // kept: the answers live in it
+                live = editor_live_kinds::read(reply);
             }))
             asked = frame;
     const std::string actor = a.get("actor").string();
-    std::string type = actor;
-    if (a.get("kind").string() == "mod") type = a.get("combat").type != Value::Null ? "model_enemy" : a.get("carry").type != Value::Null ? "model_carry" : "model";
-    const auto it = live.find(type);
-    if (it != live.end()) return !it->second;
-    return is_enemy(actor) || is_prop(actor) || actor == "switch" || actor == "door" || type == "model_enemy" || type == "model_carry";
+    return editor_live_kinds::restart_only(a, live, is_enemy(actor), is_prop(actor));
 }
 // a text field for one string property (empty removes it)
 void edit_property(const Value& p, const Value& a, const char* label, const char* property, size_t max = 32) {

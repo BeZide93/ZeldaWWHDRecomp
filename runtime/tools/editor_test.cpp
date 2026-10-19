@@ -36,6 +36,7 @@
 #include "editor/commands.h"
 #include "editor/ray_ground.h"
 #include "editor/stage_files.h"
+#include "overlay/editor_live_kinds.h"
 #include "mods/story_mail_book.h"
 
 
@@ -54,6 +55,8 @@ int g_failures = 0;
 
 struct FakeHost : editor::Host {
     int applied = 0, warps = 0, reloads = 0;
+    int live_kinds = -1;  // -1: the type's own default; 0 / 1: the game has (not) installed the live kinds
+    bool live_kind(const std::string&, bool fallback) override { return live_kinds < 0 ? fallback : live_kinds == 1; }
     std::vector<story_notebook::ManifestActor> last_actors;
     editor::Location last_warp;
     bool is_busy = false, flying = false, testing = false;
@@ -647,6 +650,37 @@ void island_world_object_commands() {
     auto empty=place;empty["id"]="island-b";for(const char*key:{"distant","shoreline","chart_marker","arrival"})empty[key]=Value{};CHECK(ok(session.run("place_world_object",empty))&&actor_of(session,"island-b")->get("arrival").type==Value::Null);
 }
 
+// The Inspector's restart note: enemies (with variants), the Miniblin and residents count as live when the
+// game installed its live kinds; the answer is read from a reply kept alive (a destroyed temporary read all
+// types as unknown and showed the note on every live enemy).
+void live_kinds_note() {
+    FakeHost host;
+    editor::Session s(&host);
+    s.add_package("editor-test", "Editor test", "", json(kManifest));
+    auto note = [&](const char* actor_json) {
+        const Value reply = s.run("list_actor_types");
+        const auto live = editor_live_kinds::read(reply);
+        const Value a = json(actor_json);
+        const std::string actor = a.get("actor").string();
+        const bool enemy = actor == "chuchu" || actor == "bokoblin" || actor == "moblin" || actor == "keese" || actor == "miniblin";
+        const bool prop = actor == "pot" || actor == "barrel" || actor == "crate";
+        CHECK(!live.empty());
+        return editor_live_kinds::restart_only(a, live, enemy, prop);
+    };
+    const char* live_ones[] = {R"({"actor": "chuchu", "parameters": {"variant": "blue"}})", R"({"actor": "bokoblin", "parameters": {"variant": "shield"}})",
+                               R"({"actor": "miniblin"})", R"({"actor": "keese"})", R"({"actor": "pot"})", R"({"actor": "switch"})",
+                               R"({"actor": "resident", "parameters": {"resident": "sa2"}})", R"({"actor": "sign"})"};
+    host.live_kinds = 1;
+    for (const char* a : live_ones) CHECK(!note(a));
+    host.live_kinds = 0;  // the game has not installed them (no --editor live kinds): the note shows
+    for (const char* a : {R"({"actor": "chuchu"})", R"({"actor": "miniblin"})", R"({"actor": "bokoblin", "parameters": {"variant": "machete"}})"}) CHECK(note(a));
+    CHECK(note(R"({"kind": "mod", "model": "m", "combat": {}})"));
+    // no answer yet: the start-up-only kinds are assumed
+    const editor_live_kinds::Live none;
+    CHECK(editor_live_kinds::restart_only(json(R"({"actor": "miniblin"})"), none, true, false));
+    CHECK(!editor_live_kinds::restart_only(json(R"({"actor": "sign"})"), none, false, false));
+}
+
 void building(const fs::path& examples) {
     FakeHost host;
     editor::Session s(&host);
@@ -965,6 +999,7 @@ int main(int argc, char** argv) {
     locations();
     records();
     package_files(argv[1]);
+    live_kinds_note();
     building(argv[1]);
     stage_tables();
     ray_pick();
