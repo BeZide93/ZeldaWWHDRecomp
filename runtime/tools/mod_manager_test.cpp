@@ -61,6 +61,8 @@ uint32_t move_speed_button() { return move_button; } void set_move_speed_button(
 static bool move_bar = true;
 bool move_speed_bar() { return move_bar; } void set_move_speed_bar(bool on) { move_bar = on; }
 
+static bool camera_items = false;
+bool camera_directed_items() { return camera_items; } void set_camera_directed_items(bool b) { camera_items=b; }
 bool direct_camera() { return state[0]; } void set_direct_camera(bool b) { state[0]=b; }
 bool mouse_camera() { return state[1]; } void set_mouse_camera(bool b) { state[1]=b; }
 bool first_person_wheel() { return state[2]; } void set_first_person_wheel(bool b) { state[2]=b; }
@@ -90,7 +92,7 @@ int main() {
     for(const auto& entry:entries()) env(entry.startup_env,nullptr);
     env("WWHD_MOD_CAMERA_SPEED",nullptr);env("WWHD_MOD_MOUSE_SENS",nullptr);
     env("WWHD_MOD_MOVE_FACTOR",nullptr);env("WWHD_MOD_MOVE_SWIM",nullptr);env("WWHD_MOD_MOVE_STAMINA",nullptr);
-    assert(entries().size()==18);
+    assert(entries().size()==19);
     for(const auto& option:traversal_options()) env(option.startup_env,nullptr);
     env("WWHD_MOD_LOCK_ON_RANGE",nullptr);env("WWHD_MOD_LOCK_ON_CYCLING",nullptr);
     assert(find("target-letterbox") && find("target-letterbox")->default_enabled);
@@ -107,6 +109,15 @@ int main() {
     assert(find("lock-on") && std::string(find("lock-on")->name)=="Extended enemy lock-on");
     assert(std::string(find("lock-on")->category)=="Gameplay");
     assert(!mods::extended_lock_on() && mods::lock_on_range()==1.f && mods::lock_on_cycling());
+    assert(find("camera-directed-items") && !mods::camera_directed_items());
+    preferences["mod.camera-directed-items.enabled"]="1";
+    load_saved(); assert(mods::camera_directed_items());
+    mods::set_camera_directed_items(false); env("WWHD_MOD_CAMERA_DIRECTED_ITEMS","0");
+    load_saved(); assert(!mods::camera_directed_items());
+    env("WWHD_MOD_CAMERA_DIRECTED_ITEMS",nullptr);
+    preferences.erase("mod.camera-directed-items.enabled");
+    assert(set_enabled("camera-directed-items",true)); assert(mods::camera_directed_items());
+    disable_all(); assert(!mods::camera_directed_items());
     load_saved(); for(bool on:state) assert(!on); // stock defaults stay off
     assert(!mods::ladder_speed() && !mods::sidle_speed() && !mods::sail_speed() && !mods::auto_wind());
     preferences["mod.wall-climb.enabled"]="1";
