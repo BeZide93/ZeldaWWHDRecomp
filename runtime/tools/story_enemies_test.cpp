@@ -169,6 +169,11 @@ int main(int argc,char**argv){using namespace story_enemies;const bool drowning_
   {const unsigned c0=claims,d0=drops;st8(at+0x570,1);st8(at+0x1A14,0xFF);Cpu probe{};probe.r[3]=at;hooks.at(0x025D99E8)(&probe);assert(claims==c0&&drops==d0&&!available(mt));}
   assert(begin_epoch(mt,2));make(Kind::Magtail);st8(at+0x3D0,1);st8(at+0x3D3,0xFF);st8(at+0x3D4,0xFF);bind(mt,pid);run(story_enemies_more::find(Kind::Magtail)->create,at);
   {const unsigned c0=claims,d0=drops;st8(at+0x570,2);st8(at+0x1A14,2);Cpu probe{};probe.r[3]=at;hooks.at(0x025D99E8)(&probe);assert(claims==c0+1&&drops==d0&&probe.r[3]==0xFFFFFFFFu&&is_defeated(mt));}
+  // Armos: radius 600 (0xFF), active, no switch
+  at+=0x2000;make(Kind::Armos);st8(at+0x3E5,0xFF);st8(at+0x3E7,0xFF);const Token am2=table[Kind::Armos];assert(verify_actor(am2,Kind::Armos,at));
+  for(uint32_t off:{0x3E4u,0x3E5u,0x3E6u,0x3E7u,0x3ECu,0xD59u})expect_field(am2,Kind::Armos,off);
+  bind(am2,pid);run(story_enemies_more::find(Kind::Armos)->create,at);assert(owns_actor(at)&&deny_carry(at));
+  {const unsigned c0=claims;st8(at+0x3E8,2);st8(at+0x3E9,25);st8(at+0x3A1,1);assert(!story_enemies_more::armos_terminal(at));st8(at+0x3A1,0);Cpu probe{};probe.r[3]=at;hooks.at(0x025D99E8)(&probe);assert(claims==c0+1&&is_defeated(am2));}
   claims=drops=0;
  }
  { // Rat: a rat of a rat hole (arg0 1), its own type (ordinary or bomb rat), unfrozen

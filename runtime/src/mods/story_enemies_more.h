@@ -68,11 +68,30 @@ inline bool magtail_liftable(uint32_t a) {
     return action == 2 || ((ld32(a + 0x2E0) & 0x2000u) && action == 1);
 }
 
+// ---------------------------------------------------------------- Armos (d_a_am2)
+// Parameter 0xFF00FF00: wake radius 600 (0xFF), active, no switch (0xFF: every isSwitch read is behind a
+// 0xFF guard, and it never writes a switch). No children (the drop and a water pillar only), never
+// writes Link. A paralysed Armos is the game's carry; it stays off (keep_owned clears the attention
+// bit), so it never leaves its room (carried out, it would delete itself without a drop). In water or
+// over an abyss it returns to its spawn point by itself. Defeated from behind; health 2.
+inline constexpr Collider kArmosColliders[] = {
+    {0x6BC, 0x680, 0}, {0x7EC, 0x680, 0}, {0x91C, 0x680, 0}, {0xA48, 0x680, 0}, {0xC14, 0xBD8, 0xBA8}};
+inline bool armos_verify(uint32_t a, uint32_t p) {
+    return ld8(a + 0x3E4) == (p & 0xFF) && ld8(a + 0x3E5) == ((p >> 8) & 0xFF) && ld8(a + 0x3E6) == 0 && ld8(a + 0x3E7) == 0xFF &&
+           ld8(a + 0x3EC) == 0 && ld8(a + 0x3E8) <= 4;
+}
+// DEAD3 (ITAI mode 25) after its health ran out: the one createDisappear of daAM2_Execute
+inline bool armos_terminal(uint32_t a) { return ld8(a + 0x3E8) == 2 && ld8(a + 0x3E9) == 25 && s8(a + 0x3A1) <= 0; }
+
 inline constexpr Native kNatives[] = {
     {Kind::Magtail, "magtail", {0x7FE4, 0xD8, 0x1DD8, kMagtailColliders, std::size(kMagtailColliders)},
      CANONICAL_CODE_ID(0x021DCE84).value(), CANONICAL_CODE_ID(0x021D87A0).value(), CANONICAL_CODE_ID(0x021D7FFC).value(),
      CANONICAL_CODE_ID(0x021DC634).value(), [] { return GD(0x1001565C); }, 0xFFFF0001u, 0, 0x1A1C, {0, 0}, true,
      magtail_verify, magtail_terminal, magtail_liftable, 0x570, false},
+    {Kind::Armos, "armos", {0x7FE6, 0xCB, 0xF60, kArmosColliders, std::size(kArmosColliders)},
+     CANONICAL_CODE_ID(0x0204FE84).value(), CANONICAL_CODE_ID(0x0204D3A4).value(), CANONICAL_CODE_ID(0x0204C5F8).value(),
+     CANONICAL_CODE_ID(0x0204F9D0).value(), [] { return GD(0x1000702C); }, 0xFF00FF00u, 0, 0xBA8, {0, 0}, true,
+     armos_verify, armos_terminal, nullptr, 0x3E8, false},
 };
 
 inline const Native* find(Kind k) {
