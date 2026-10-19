@@ -112,7 +112,7 @@ int main() {
             return manifest("{" + paths_part + R"(,"actors":[{"id":"e","actor":")" + type + R"(","stage":"sea","room":11,"position":{"x":450,"y":0,"z":-500},"defeated_flag":"e.dead","drops":[])" +
                             (variant.empty() ? std::string() : R"(,"parameters":{"variant":")" + variant + "\"}") + (path.empty() ? std::string() : ",\"path\":" + path) + "}]}");
         };
-        for (const char* type : {"warship"}) {
+        for (const char* type : {"warship", "floormaster"}) {
             const std::string variant = std::string(type) == "warship" ? "route" : "wandering";
             assert(story_notebook::parse_actors(enemy(type, variant, "\"line\""), actors, why) && actors[0].room_path == "line");
             assert(story_notebook::parse_actors(enemy(type, variant, "\"yard\""), actors, why) && actors[0].room_path == "yard");

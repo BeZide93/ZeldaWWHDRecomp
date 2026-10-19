@@ -354,8 +354,12 @@ inline constexpr uint16_t kSeaKillRegister = 0x7EFF;
 // placed setID 0xFFFF (no save bit). Colliders: body cylinder 0xA10 on mStts 0x86C, hand sphere 0x8E4 on
 // mStts2 0x8A8; enemyice 0xC64 (0xCD0 on 0xC94). No enemyfire.
 inline constexpr Collider kFloormasterColliders[] = {{0xA10, 0x86C, 0}, {0x8E4, 0x8A8, 0}, {0xCD0, 0xC94, 0xC64}};
-inline bool floormaster_verify(uint32_t a, uint32_t) {
-    return ld8(a + 0x3E3) == 0xFF && ld16(a + 0x3E4) == 0xFF && ld32(a + 0x3E8) == 0xFF && ld32(a + 0x3EC) == 0 &&
+// The wandering variant (story_enemy_variants "wandering"): type 1 (0x3EC) on a mod path (its number in
+// m_path_no 0x3E8, the record in mpPath 0x4DC).
+inline bool floormaster_verify(uint32_t a, uint32_t p) {
+    const uint32_t type = (p >> 8) & 3, path = (p >> 16) & 0xFF;
+    return ld8(a + 0x3E3) == 0xFF && ld16(a + 0x3E4) == 0xFF && ld32(a + 0x3E8) == path && ld32(a + 0x3EC) == type && (type == 1) == (path != 0xFF) &&
+           (path == 0xFF || ld32(a + 0x4DC) != 0) &&
            ld32(a + 0x3F0) == 0xFF && ld32(a + 0x3F4) == 0xFF && ld32(a + 0x3F8) == 1 && ld8(a + 0x400) == 0 &&
            ld32(a + 0x3C8) <= 20 && ld32(a + 0x3C8) != 14 && ld32(a + 0x3C8) != 15 && ld32(a + 0x3C8) != 16 && ld32(a + 0x3C8) != 17;
 }
@@ -500,7 +504,7 @@ inline constexpr Native kNatives[] = {
     {Kind::Floormaster, "floormaster", {kFloormasterProfile, 0x77, 0x101C, kFloormasterColliders, std::size(kFloormasterColliders)},
      CANONICAL_CODE_ID(0x02141FD4).value(), CANONICAL_CODE_ID(0x0214399C).value(), CANONICAL_CODE_ID(0x0214418C).value(),
      CANONICAL_CODE_ID(0x02142154).value(), [] { return GD(0x1000F350); }, 0xFFFF04FFu, 0, 0xC64, {0, 0}, true,
-     floormaster_verify, floormaster_terminal, nullptr, 0x3CB, false, 0xFFFF},
+     floormaster_verify, floormaster_terminal, nullptr, 0x3CB, false, 0xFFFF, 16},
     {Kind::BigOcto, "big_octo", {kBigOctoProfile, 0xE1, 0x5910, kBigOctoColliders, std::size(kBigOctoColliders)},
      CANONICAL_CODE_ID(0x02119EE8).value(), CANONICAL_CODE_ID(0x0211B058).value(), CANONICAL_CODE_ID(0x0211B52C).value(),
      CANONICAL_CODE_ID(0x02119F80).value(), [] { return GD(0x1000D034); }, 0xFFFFFF00u, 0, 0, {0, 0}, true,

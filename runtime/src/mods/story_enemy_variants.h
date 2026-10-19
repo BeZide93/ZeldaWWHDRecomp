@@ -82,6 +82,10 @@ inline constexpr Variant kVariants[] = {
     // anchored one (story_enemies_more.h).
     {"warship", "anchored", 0xFFFFFF00u, "Warship", "The enemy warship: it stays where it was placed and fires its cannon at Link."},
     {"warship", "route", 0xFFFFFF02u, "Warship on a route", "The enemy warship sailing one of the mod's paths round and round (a line is sailed as a loop too), firing at Link.", 0, kPath},
+    // Floormaster (d_a_fm): type 0 the hole that stays, type 1 the hole that wanders along its room path
+    // (mode 3, round and round) and rises when Link is near; Link the only target, no exit or switches.
+    {"floormaster", "hole", 0xFFFF04FFu, "Floormaster", "A Floormaster in its dark hole: it rises when Link is near and grabs him for a moment."},
+    {"floormaster", "wandering", 0xFFFF05FFu, "Wandering Floormaster", "A Floormaster whose hole glides along one of the mod's paths, round and round, and rises when Link is near.", 0, kPath},
     {"gyorg", "three", 0xFFFF0531u, "Gyorgs (three)", "Three Gyorgs that come out of the sea when Link is near and bite him; defeated when all three are."},
     {"gyorg", "one", 0xFFFF0511u, "Gyorg (one)", "One Gyorg that comes out of the sea when Link is near and bites him."},
     {"gyorg", "two", 0xFFFF0521u, "Gyorgs (two)", "Two Gyorgs that come out of the sea when Link is near; defeated when both are."},

@@ -296,6 +296,11 @@ int main(int argc,char**argv){using namespace story_enemies;const bool drowning_
   // searched; the death with the hole closed (mode 12, animation 8) is its defeat
   at+=0x2000;make(Kind::Floormaster);st8(at+0x3E3,0xFF);st16(at+0x3E4,0xFF);st32(at+0x3E8,0xFF);st32(at+0x3F0,0xFF);st32(at+0x3F4,0xFF);st32(at+0x3F8,1);
   const Token fm=table[Kind::Floormaster];assert(verify_actor(fm,Kind::Floormaster,at));
+  // the wandering variant: type 1 on a mod path (m_path_no and mpPath)
+  {using namespace story_enemies_more;assert(floormaster_verify(at,0xFFFF04FFu)&&!floormaster_verify(at,0xFFC205FFu));
+   st32(at+0x3EC,1);st32(at+0x3E8,0xC2);assert(!floormaster_verify(at,0xFFC205FFu));st32(at+0x4DC,0x20070000);assert(floormaster_verify(at,0xFFC205FFu)&&!floormaster_verify(at,0xFFC204FFu)&&!floormaster_verify(at,0xFFFF05FFu));
+   st32(at+0x3EC,0);st32(at+0x3E8,0xFF);st32(at+0x4DC,0);assert(floormaster_verify(at,0xFFFF04FFu));
+   assert(story_enemy_variants::declared_params("floormaster",0xFFC205FFu)&&story_enemy_variants::room_path_rule("floormaster","wandering")==story_enemy_variants::kPath);}
   for(uint32_t off:{0x3E3u,0x3E5u,0x3EBu,0x3EFu,0x3F3u,0x3F7u,0x3FBu,0x400u})expect_field(fm,Kind::Floormaster,off);
   st32(at+0x3C8,14);assert(!verify_actor(fm,Kind::Floormaster,at));st32(at+0x3C8,13);assert(verify_actor(fm,Kind::Floormaster,at));st32(at+0x3C8,0);
   assert(story_enemies::home_x(Kind::Floormaster)==0xFFFF);

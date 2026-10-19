@@ -1288,13 +1288,17 @@ void path_commands() {
     CHECK(ok(r) && actor_of(s, "ship")->get("path").string() == "ship-route" && path_of("ship-route").get("points").array.size() == 4 &&
           path_of("ship-route").get("points").array[0].get("x").number == -1499);
     CHECK(ok(s.run("add_actor", json(R"({"type": "warship", "id": "ship2"})"))) && actor_of(s, "ship2")->get("path").type == Value::Null);
+    r = s.run("add_actor", json(R"({"type": "floormaster", "id": "hand", "options": {"variant": "wandering", "path": "walk"}})"));
+    CHECK(ok(r) && actor_of(s, "hand")->get("path").string() == "walk");
     CHECK(editor::room_path_use(*actor_of(s, "ship")).find("round and round") != std::string::npos && editor::room_path_use(*actor_of(s, "ship2")).empty());
     // the warning checks: a Floormaster's route on the floor or off it, a warship's route over land or sea
     host.has_ground = true;
     host.ground_height = 5;
-    r = s.run("check_path", json(R"({"id": "walk", "for": "floormaster"})"));
-    CHECK(ok(r) && r.get("result").get("segments").array[0].get("ok").boolean);
+    r = s.run("check_path", json(R"({"id": "walk"})"));
+    CHECK(ok(r) && r.get("result").get("for").string() == "floormaster" && r.get("result").get("segments").array.size() == 2 && r.get("result").get("segments").array[0].get("ok").boolean);
     host.ground_height = 300;
+    r = s.run("check_path", json(R"({"id": "walk"})"));
+    CHECK(ok(r) && !r.get("result").get("segments").array[0].get("ok").boolean && r.get("result").get("segments").array[0].get("problem").string().find("floor") != std::string::npos);
     r = s.run("check_path", json(R"({"id": "ship-route"})"));
     CHECK(ok(r) && r.get("result").get("for").string() == "warship" && r.get("result").get("segments").array[0].get("problem").string() == "land");
     host.has_ground = false;

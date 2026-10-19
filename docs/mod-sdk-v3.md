@@ -464,7 +464,7 @@ The allowlist below defines the supported variants.
 | `wizzrobe` | Red Wizzrobe: it appears and vanishes around where it was placed and casts fire at Link |
 | `warship` | The enemy warship (sea stage only): it fires its cannon at Link; three hits from the boat's cannon sink it. Variant `route`: it sails one of the mod's paths (below) |
 | `big_octo` | **A target only:** the Big Octo (sea stage only), variants `four`, `eight` or `twelve` eyes (default `four`); it never attacks |
-| `floormaster` | Floormaster: a hand that rises from its hole, grabs Link for a moment and lets go. |
+| `floormaster` | Floormaster: a hand that rises from its hole, grabs Link for a moment and lets go. Variant `wandering`: its hole glides along one of the mod's paths (below) |
 | `gyorg` | A group of Gyorgs (sea stage only): variants `one` to `five` (default `three`); they come out of the sea when Link is near and bite him |
 | `kargaroc` | Kargaroc: it circles where it was placed and swoops at Link (variant `perched`: it sits until Link comes near) |
 | `wall_cannon` | The wall cannon: it turns to Link and fires cannonballs while he is inside its firing area, one of the mod's [room paths](#room-paths) (`"path": "<id>"`, an area, required); a bomb destroys it |
@@ -566,10 +566,10 @@ areas convex (no corners pointing inwards); the editor's `path_inside` command u
 A mod has up to 16 paths; the enabled mods together up to 64, and 24 in one room. Full save states
 keep the paths' records; after a load they are written again from the manifest.
 
-### Warships on a route
+### Routes on room paths: warships and wandering Floormasters
 
-A warship with `"parameters": {"variant": "route"}` needs `"path"`: one of the mod's
-[room paths](#room-paths) in its own room, a line or an area.
+A warship with `"parameters": {"variant": "route"}` and a Floormaster with `"variant": "wandering"` need
+`"path"`: one of the mod's [room paths](#room-paths) in their own room, a line or an area.
 
 ```json
 {"id": "patrol-ship", "actor": "warship", "parameters": {"variant": "route"}, "stage": "sea", "room": 11,
@@ -577,12 +577,14 @@ A warship with `"parameters": {"variant": "route"}` needs `"path"`: one of the m
  "defeated_flag": "patrol-ship.defeated", "drops": []}
 ```
 
-It moves with the game's own path movement, which always goes round: after the last point it heads
-back to the first, so a line of two points is sailed there and back as a loop (it turns in its own wide
-circle, so it may turn before reaching an end). It sails at the sea's height (the points' heights don't
-matter), slows to a stop to fire at Link and sails on. It has no wall check of its own: the editor warns
-(it never refuses) when its route crosses land (`check_path`, and the Inspector's Path section), and a
-route over land holds it at the shore. The anchored warship takes no path.
+Both move with the game's own path movement, which always goes round: after the last point they head
+back to the first, so a line of two points is sailed (or glided) there and back as a loop. The warship
+turns in its own wide circle, so it may turn before reaching an end; it sails at the sea's height (the
+points' heights don't matter), slows to a stop to fire at Link and sails on. The Floormaster's hole
+glides along the points and rises when Link comes near, then sinks and glides on. Neither has a wall
+check of its own: the editor warns (it never refuses) when a warship's route crosses land (a route over
+land holds the ship at the shore) or a Floormaster's route leaves the floor (`check_path`, and the
+Inspector's Path section). The anchored warship and the ordinary Floormaster take no path.
 
 ### Wall cannons
 
