@@ -13,7 +13,27 @@
 #include <chrono>
 #include <iterator>
 #include <string>
+#ifdef _WIN32
+#include <process.h>
+#define wwhd_test_pid _getpid
+#else
+#include <unistd.h>
+#define wwhd_test_pid getpid
+#endif
 namespace {
+// A temporary folder that belongs to this process alone. ctest starts the --move-anim-startup cases (and
+// others) at the same moment, and a steady_clock count is no unique name across processes: two of them
+// shared one folder, and one read the other's profile (mod_move_anim_unset_missing found "sprint").
+// The process ID tells processes apart; create_directory() claims the name, or a next one is tried.
+std::filesystem::path unique_temp(const std::string& prefix) {
+    namespace fs=std::filesystem;
+    static unsigned serial=0;
+    for(;;) {
+        auto path=fs::temp_directory_path()/(prefix+std::to_string(wwhd_test_pid())+"-"+
+            std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+"-"+std::to_string(++serial));
+        if(fs::create_directory(path))return path;
+    }
+}
 mods::packages::View view(const std::string& id) {for(auto v:mods::packages::list())if(v.id==id)return v;return {};}
 // Second process on the same storage: a confirmed native package loads after a restart without asking.
 int restart_check(const char* storage) {
@@ -117,7 +137,7 @@ int main(int argc, char** argv) {
         return 0;
     }
     if(argc==2&&std::string(argv[1])=="--setup-acceptance") {
-        auto root=fs::temp_directory_path()/("wwhd-acceptance-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        auto root=unique_temp("wwhd-acceptance-");
         fs::create_directories(root/"source");env("WWHD_MOD_MANAGER_DIR",(root/"manager").string().c_str());env("WWHD_TEST_TRUST_NATIVE_MODS",nullptr);
         set_code_mod_support(true);initialize();std::string error;
         auto manifest=mods::json::parse(R"({"format_version":1,"id":"acceptance","name":"Acceptance fixture","version":"1.0.0","game_id":"wwhd-usa","kind":"guest","guest":{"api_version":1,"heap_size":0},"options":[{"id":"consent","name":"Consent","type":"bool","default":false},{"id":"colour","name":"Colour","type":"enum","default":"green","choices":["green","blue"]}],"setup":[{"id":"consent","title":"Prepare the fixture","type":"confirm","option":"consent"},{"id":"colour","title":"Choose a colour","type":"choice","option":"colour","choices":["green","blue"]},{"id":"build","title":"Build fixture","type":"build_guest_mod"}]})");
@@ -179,7 +199,7 @@ int main(int argc, char** argv) {
     // manifest game IDs: "wwhd" (any region, manager 1.5) and "wwhd-usa" (older manifests) are this game
     if(argc==2&&std::string(argv[1])=="--game-id") {
         namespace fs=std::filesystem;
-        auto root=fs::temp_directory_path()/("wwhd-game-id-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        auto root=unique_temp("wwhd-game-id-");
         env("WWHD_NO_HOST_INPUT","1");env("WWHD_MOD_MANAGER_DIR",(root/"manager").string().c_str());
         initialize();std::string error;
         assert(mods::packages::game_id_supported("wwhd")&&mods::packages::game_id_supported("wwhd-usa"));
@@ -213,7 +233,7 @@ int main(int argc, char** argv) {
         // install_new (the world editor's new mod): a new package only, never one that is installed or whose
         // folder exists; the new mod's manifest (an empty actor list, the notebook dependency) installs and enables
         namespace fs=std::filesystem;
-        auto root=fs::temp_directory_path()/("wwhd-new-package-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        auto root=unique_temp("wwhd-new-package-");
         env("WWHD_NO_HOST_INPUT","1");env("WWHD_MOD_MANAGER_DIR",(root/"manager").string().c_str());
         initialize();std::string error,id;
         auto source=[&](const std::string& name,const std::string& text){auto dir=root/"sources"/name;fs::create_directories(dir);std::ofstream(dir/"manifest.json",std::ios::binary)<<text;return dir.string();};
@@ -248,7 +268,7 @@ int main(int argc, char** argv) {
     }
     if(argc==2&&std::string(argv[1])=="--game-source") {
         namespace fs=std::filesystem;
-        auto root=fs::temp_directory_path()/("wwhd-gc-source-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        auto root=unique_temp("wwhd-gc-source-");
         fs::create_directories(root/"source");
         env("WWHD_NO_HOST_INPUT","1");env("WWHD_MOD_MANAGER_DIR",(root/"manager").string().c_str());
         initialize();std::string error;
@@ -349,7 +369,7 @@ int main(int argc, char** argv) {
     namespace fs=std::filesystem;
     using namespace mods::packages;
     if(argc==3&&std::string(argv[1])=="--lock-on-startup") {
-        auto root=fs::temp_directory_path()/("wwhd-lock-on-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        auto root=unique_temp("wwhd-lock-on-");
         fs::create_directories(root);
         env("WWHD_NO_HOST_INPUT",nullptr);env("WWHD_MOD_MANAGER_DIR",root.string().c_str());
         const std::string mode=argv[2];
@@ -381,7 +401,7 @@ int main(int argc, char** argv) {
         fs::remove_all(root);return 0;
     }
     if(argc==4&&std::string(argv[1])=="--move-anim-startup") {
-        auto root=fs::temp_directory_path()/("wwhd-move-anim-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        auto root=unique_temp("wwhd-move-anim-");
         fs::create_directories(root);
         env("WWHD_NO_HOST_INPUT",nullptr);
         env("WWHD_MOD_MANAGER_DIR",root.string().c_str());
@@ -486,7 +506,7 @@ int main(int argc, char** argv) {
         assert(view("guest-fixture").enabled==supported);return 0;
     }
     if(argc==2&&std::string(argv[1])=="--guest-prepare") {
-        auto root=fs::temp_directory_path()/("wwhd-guest-prepare-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        auto root=unique_temp("wwhd-guest-prepare-");
         fs::create_directories(root/"source");auto storage=root/"manager";
         env("WWHD_MOD_MANAGER_DIR",storage.string().c_str());env("WWHD_TEST_TRUST_NATIVE_MODS",nullptr);
         auto manifest=mods::json::parse(R"({"format_version":1,"id":"prepare-guest","name":"Prepared guest","version":"1.0.0","game_id":"wwhd-usa","kind":"guest","guest":{"api_version":1,"heap_size":0},"setup":[{"id":"build","type":"build_guest_mod","title":"Build guest module"}]})");
@@ -528,7 +548,7 @@ int main(int argc, char** argv) {
         fs::remove_all(root);std::cout<<"guest preparation preserves assignments/trust/restart gate passed\n";return 0;
     }
     if(argc==2&&std::string(argv[1])=="--guest-startup") {
-        auto root=fs::temp_directory_path()/("wwhd-guest-startup-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        auto root=unique_temp("wwhd-guest-startup-");
         auto storage=root/"manager";
         env("WWHD_NO_HOST_INPUT","1");env("WWHD_MOD_MANAGER_DIR",storage.string().c_str());
         env("WWHD_TEST_TRUST_NATIVE_MODS","guest-a,guest-b,guest-c");
@@ -570,7 +590,7 @@ int main(int argc, char** argv) {
         fs::remove_all(root);std::cout << "guest startup allocation/lifecycle passed\n";return 0;
     }
     if(argc==2&&std::string(argv[1])=="--guest-metadata") {
-        auto root=fs::temp_directory_path()/("wwhd-guest-metadata-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        auto root=unique_temp("wwhd-guest-metadata-");
         fs::create_directories(root/"source/content/Common");
         std::ofstream(root/"source/content/Common/fixture.txt")<<"original fixture content";
         env("WWHD_NO_HOST_INPUT","1");env("WWHD_MOD_MANAGER_DIR",(root/"manager").string().c_str());
@@ -694,7 +714,7 @@ int main(int argc, char** argv) {
         return 0;
     }
     if(argc==2&&std::string(argv[1])=="--cemu-conflicts"){
-        auto root=fs::temp_directory_path()/("wwhd-cemu-conflicts-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        auto root=unique_temp("wwhd-cemu-conflicts-");
         auto storage=root/"storage";
         auto make=[&](const std::string& id,const std::string& rules,int shader){
             auto folder=storage/"Mods"/id;fs::create_directories(folder);
@@ -746,7 +766,7 @@ int main(int argc, char** argv) {
     }
     if(argc==2&&(std::string(argv[1])=="--cemu-startup"||std::string(argv[1])=="--cemu-backend")){
         bool backend=std::string(argv[1])=="--cemu-backend";
-        auto root=fs::temp_directory_path()/("wwhd-cemu-startup-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        auto root=unique_temp("wwhd-cemu-startup-");
         auto storage=root/"storage",pack=storage/"Mods"/"cemu.test";fs::create_directories(pack);
         std::ofstream(pack/"manifest.json")<<R"({"format_version":1,"id":"cemu.test","name":"Test","version":"1.0.0","game_id":"wwhd-usa","kind":"cemu","cemu_dir":""})";
         std::ofstream(pack/"rules.txt")<<"[Definition]\nname=Test\ntitleIds=0005000010143500\nversion=4\n[Preset]\nname=Normal\n$scale=1\n[Preset]\nname=Double\n$scale=2\n[TextureRedefine]\nwidth=1280\nheight=720\noverwriteWidth=1280*$scale\n";
@@ -775,7 +795,7 @@ int main(int argc, char** argv) {
         std::cout<<"Cemu startup presets and restart-only immutable lifecycle passed\n";return 0;
     }
     if(argc==3&&std::string(argv[1])=="--world-content-startup") {
-        auto root=fs::temp_directory_path()/("wwhd-world-content-test-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        auto root=unique_temp("wwhd-world-content-test-");
         auto storage=root/"storage";auto pack=storage/"Mods"/"sdk-v3-windfall";
         fs::create_directories(pack.parent_path());fs::copy(fs::absolute(argv[2]),pack,fs::copy_options::recursive);
         auto notebook=storage/"Mods"/"story-notebook";fs::create_directories(notebook);
@@ -892,7 +912,7 @@ int main(int argc, char** argv) {
         {std::error_code ignored;fs::remove_all(root,ignored);}std::cout<<"Real world-content example starts with notebook dependency; content dependency policy and aggregate actor graph validated\n";return 0;
     }
     if(argc==2&&std::string(argv[1])=="--content-startup"){
-        auto root=fs::temp_directory_path()/("wwhd-content-test-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        auto root=unique_temp("wwhd-content-test-");
         auto storage=root/"storage";auto pack=storage/"Mods"/"content.test";
         fs::create_directories(pack/"content"/"Common");
         std::ofstream(pack/"content"/"Common"/"fixture.bin")<<"synthetic replacement";
