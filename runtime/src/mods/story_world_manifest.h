@@ -302,6 +302,8 @@ inline bool game_piece_fields(const Value& v,unsigned need,ManifestActor& a,std:
     if(v.get("rotation").type!=Value::Null&&!point(v.get("rotation"),a.rotation,360))return why="invalid actor rotation",false;
     if(a.rotation.x!=0||a.rotation.z!=0)return why="actor "+a.id+": a game piece turns about the vertical axis only (rotation x and z are 0)",false;
     a.piece=p->id;a.kind="mod";a.model=a.collision_mesh=story_game_pieces::model_key(p->id);a.behaviour="static";a.scale={1,1,1};
+    // an island ground on the sea brings its own distant model, seen from the neighbouring squares
+    if(p->distant_triangles&&a.stage=="sea")a.distant.model=story_game_pieces::distant_key(p->id);
     return true;
 }
 // The game pieces of a list, room by room, against the room budget (each set's archive once, each placement).

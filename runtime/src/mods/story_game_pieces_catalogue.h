@@ -54,6 +54,10 @@ struct Piece {
     std::vector<std::string> collision_groups;
     unsigned collision_triangles = 0;
     uint64_t instance_bytes = 0;
+    // an island ground's distant model (the room's own sea_LODNN.szs, drawn in the neighbouring squares):
+    // its triangle count, 0 when the piece has none
+    unsigned distant_triangles = 0;
+    std::string distant_archive;
 };
 struct Set {
     std::string id, label, archive;  // archive: the room archive, "sea_RoomNN.szs"
@@ -181,6 +185,15 @@ inline bool Catalogue::add_set(const std::string& recipe, std::string& why) {
         p.collision_triangles = unsigned(expect.get("collision_triangles").number);
         if (p.collision_groups.empty() != (p.collision_triangles == 0)) return why = p.id + ": collision groups and their count go together", false;
         if (!whole(o.get("memory").get("instance_bytes"), 1, 1 << 20)) return why = p.id + ": memory.instance_bytes is needed", false;
+        const Value& distant = o.get("distant");
+        if (distant.type != Value::Null) {
+            char lod[16];
+            std::snprintf(lod, sizeof lod, "sea_LOD%02u.szs", s.room);
+            if (text(distant.get("archive")) != lod || !whole(distant.get("triangles"), 1, 1024))
+                return why = p.id + ": distant names the room's own distant-view archive and its 1 to 1024 triangles", false;
+            p.distant_archive = lod;
+            p.distant_triangles = unsigned(distant.get("triangles").number);
+        }
         p.instance_bytes = uint64_t(o.get("memory").get("instance_bytes").number);
         newest = std::max(newest, p.since);
         s.pieces.push_back(p.id);
@@ -221,6 +234,8 @@ inline std::string reference(const std::string& actor) { return actor.rfind("pie
 inline bool is_reference(const std::string& actor) { return actor.rfind("piece:", 0) == 0; }
 // the manifest model and collision key a placement uses inside the runtime (not a manifest model id)
 inline std::string model_key(const std::string& id) { return "piece:" + id; }
+// the key of a piece's distant model (an island ground's view from the neighbouring squares)
+inline std::string distant_key(const std::string& id) { return "piece:" + id + ".distant"; }
 
 // What the pieces of one room cost: each placement's instance, and each set's archive once.
 struct RoomUse {

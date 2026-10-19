@@ -27,6 +27,9 @@ struct Built {
     story_notebook::WorldPoint minimum, maximum;
     unsigned triangles = 0;
     std::shared_ptr<const story_world_collision::mesh::Mesh> collision;
+    // an island ground's distant model: an archive of its own (resource identity, cache file, its one model)
+    std::string distant_archive, distant_path, distant_model;
+    story_notebook::WorldPoint distant_minimum, distant_maximum;
 };
 struct BuiltSet {
     std::string set, archive, path;  // archive: the 31-character resource identity; path: the cache file
@@ -53,7 +56,8 @@ std::shared_ptr<const BuiltSet> build(const std::string& id, const std::string& 
 std::shared_ptr<const BuiltSet> built(const std::string& id);
 
 // Makes piece `id` usable by `mod`'s placements: the archive's resource path, its model slots and part
-// lights (mod_actor), the model resource (story_actors, key model_key(id)) and the collision. At start-up
+// lights (mod_actor), the model resource (story_actors, key model_key(id)) and the collision; an island
+// ground's distant archive too (key distant_key(id)). At start-up
 // before hooks, or (editor) on the game thread. False with a reason.
 bool register_for_mod(const std::string& mod, const BuiltSet& set, const std::string& id, bool editor, std::string& why);
 

@@ -1193,8 +1193,8 @@ void game_pieces() {
     s.add_package("editor-test", "Editor test", "", json(kManifest));
     Value r = s.run("list_game_objects", json(R"({"category": "buildings"})"));
     const auto& pieces = story_game_pieces::catalogue();
-    size_t buildings = 0, parts = 0;
-    for (const auto& p : pieces.pieces) (p.category == "Buildings" ? buildings : parts) += 1;
+    size_t buildings = 0, parts = 0, islands = 0;
+    for (const auto& p : pieces.pieces) buildings += p.category == "Buildings", parts += p.category == "Island parts", islands += p.category == "Islands";
     CHECK(ok(r) && r.get("result").get("objects").array.size() == buildings && buildings > 0);
     // island parts (rocks, a torii, walkways, a windmill cap, shipwrecks) are their own category
     Value kit = s.run("list_game_objects", json(R"({"category": "island parts"})"));
@@ -1228,6 +1228,21 @@ void game_pieces() {
     CHECK(ok(s.run("validate")));
     while (actor_of(s, "outset-house-small")) CHECK(ok(s.run("undo")));
     CHECK(s.manifest("editor-test")->get("requires").get("game_objects").type == Value::Null);
+    // island grounds: their own category, each with a distant view; placed at the sea's level under Link (y 0)
+    Value isles = s.run("list_game_objects", json(R"({"category": "islands"})"));
+    CHECK(ok(isles) && isles.get("result").get("objects").array.size() == islands && islands == 6);
+    bool isles_listed = false;
+    for (const auto& c : isles.get("result").get("categories").array) isles_listed |= c.string() == "Islands";
+    CHECK(isles_listed);
+    for (const auto& o : isles.get("result").get("objects").array)
+        CHECK(o.get("island").boolean && o.get("building").boolean && o.get("collision").boolean && pieces.find(o.get("id").string())->distant_triangles > 0);
+    r = s.run("add_actor", json(R"({"type": "piece:crescent-moon-island"})"));
+    CHECK(ok(r) && r.get("result").get("state").string() == "preparing");
+    a = actor_of(s, "crescent-moon-island");
+    CHECK(a && a->get("position").get("y").number == 0 && a->get("position").get("x").number == 1 && a->get("stage").string() == "sea");
+    CHECK(s.manifest("editor-test")->get("requires").get("game_objects").number == pieces.find("crescent-moon-island")->since);
+    CHECK(ok(s.run("validate")));
+    while (actor_of(s, "crescent-moon-island")) CHECK(ok(s.run("undo")));
     // a failed preparation shows the reason and the building as unavailable
     host.states["editor-test/outset-well-shelter"] = "failed: the room archive is not in your game files";
     r = s.run("list_game_objects", json(R"({"query": "well shelter"})"));

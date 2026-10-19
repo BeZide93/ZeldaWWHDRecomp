@@ -121,6 +121,32 @@ std::shared_ptr<const BuiltSet> build(const std::string& id, const std::string& 
             need(unsigned(parts[k].get("triangles").number) == known->parts[k].triangles, "the built piece has another triangle count");
             b.triangles += known->parts[k].triangles;
         }
+        if (known->distant_triangles) {
+            const auto& d = p.get("distant");
+            const std::string file = d.get("file").string(), model = d.get("model").string();
+            b.distant_archive = d.get("archive").string();
+            const fs::path path = dir / file;
+            need(b.distant_archive.size() == 31 && b.distant_archive.rfind("gd", 0) == 0 && b.distant_archive != archive && !model.empty() &&
+                     model.size() <= 31 && unsigned(d.get("triangles").number) == known->distant_triangles,
+                 "the built island has another distant model");
+            need(!file.empty() && file == fs::path(file).filename().string() && file.rfind(archive + ".szs.", 0) == 0 && fs::is_regular_file(path) &&
+                     !fs::is_symlink(path) && fs::file_size(path) <= 1024 * 1024,
+                 "the built island has no distant archive");
+            {
+                std::ifstream f(path, std::ios::binary);
+                std::vector<uint8_t> bytes{std::istreambuf_iterator<char>(f), {}};
+                need(bytes.size() >= 4 && std::string(bytes.begin(), bytes.begin() + 4) == "Yaz0" &&
+                         mods::hash::sha256_text(std::string(bytes.begin(), bytes.end())) == d.get("archive_sha256").string(),
+                     "the built island's distant archive changed on disk");
+            }
+            b.distant_path = path.string();
+            b.distant_model = model;
+            const auto& dl = d.get("minimum").array;
+            const auto& dh = d.get("maximum").array;
+            need(dl.size() == 3 && dh.size() == 3, "the built distant model has no bounds");
+            b.distant_minimum = {number(dl[0]), number(dl[1]), number(dl[2])};
+            b.distant_maximum = {number(dh[0]), number(dh[1]), number(dh[2])};
+        }
         const auto& lo = p.get("minimum").array;
         const auto& hi = p.get("maximum").array;
         need(lo.size() == 3 && hi.size() == 3, "the built piece has no bounds");
@@ -164,6 +190,17 @@ bool register_for_mod(const std::string& mod, const BuiltSet& set, const std::st
     if (!mod_actor::set_piece_draw(set.archive, b->body_index, draw)) return why = "the piece's parts could not be registered", false;
     const std::string key = model_key(id);
     if (b->collision && !mod_actor::register_collision(mod, key, b->collision)) return why = "the piece's collision could not be registered", false;
+    if (!b->distant_archive.empty()) {
+        // the distant model, in its own small archive, draws like the island's own distant view: background light
+        if (!actor_model_cache::register_external(b->distant_archive, b->distant_path)) return why = "the island's distant archive could not be registered", false;
+        if (!mod_actor::register_piece_set(b->distant_archive, {b->distant_model})) return why = "the island's distant model could not be registered", false;
+        mod_actor::PieceDraw far;
+        far.second_index = -1;
+        far.light[0] = far.light[1] = 1;
+        if (!mod_actor::set_piece_draw(b->distant_archive, 1, far)) return why = "the island's distant model could not be registered", false;
+        if (!story_actors::register_piece_model(mod, distant_key(id), b->distant_archive, 1, b->distant_minimum, b->distant_maximum, editor, why))
+            return false;
+    }
     return story_actors::register_piece_model(mod, key, set.archive, b->body_index, b->minimum, b->maximum, editor, why);
 }
 

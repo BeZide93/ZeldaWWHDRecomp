@@ -18,10 +18,18 @@ the volume are taken and every component crossing it is left out; the recipe's e
 counts guard against another game version. Collision: the listed room collision groups, triangles
 wholly inside the volume; exit, camera, path, special and shadow fields are dropped (door polygons
 stay as plain walls), and the ground type maps to the world-object surfaces.
+
+Island grounds (category Islands) use three more recipe fields: collision.void (groups whose triangles become
+a void: a hole's floor that led into a cave sends Link back to the restart point instead), collision.strip_exits
+(any other triangle with an exit is left out) and distant ({"archive": "sea_LODNN.szs", "triangles": n}: the
+island's own distant model from the game's distant-view archive of the same room, drawn in the neighbouring
+squares; written as an archive of its own, <out>.<piece>.distant.szs, so a neighbouring square loads only it). origin_y puts the piece's origin at that room-local height (0: the island's sea level) instead of its
+lowest point. Water groups (the game's water bit) become swimmable water.
 """
 import argparse
 import hashlib
 import json
+import math
 import os
 import re
 import struct
@@ -44,7 +52,9 @@ FORMATS = {0x811: 12, 0x813: 16, 0x80D: 8, 0x00A: 4, 0x80F: 8, 0x808: 4, 0x007: 
 # game treats it as (footsteps, effects, damage). Several raw codes share a class (12, 13, 14, 16 and 26 are wood;
 # 17, 20 and 24 metal); 9 is damage, not metal. A fact about the format, like the runtime's NativeResultIds.
 ATTRIBUTE_CLASS = (0, 1, 2, 3, 4, 5, 6, 1, 8, 9, 10, 11, 2, 2, 2, 15, 2, 20, 1, 19, 20, 21, 22, 23, 20, 10, 2, 0, 0, 0, 0, 0)
-CLASS_SURFACES = {2: 'col_wood', 3: 'col_stone', 4: 'col_grass', 11: 'col_sand', 20: 'col_metal'}
+CLASS_SURFACES = {2: 'col_wood', 3: 'col_stone', 4: 'col_grass', 11: 'col_sand', 20: 'col_metal', 15: 'col_ice', 19: 'col_shallow',
+                  23: 'col_waterfall'}
+WATER_GROUP = 0x100  # a collision group's info bit: the game's swimmable water
 # raw attribute code -> WCOL surface (codes of other classes: stone on floors, a plain wall otherwise)
 SURFACES = {code: CLASS_SURFACES[c] for code, c in enumerate(ATTRIBUTE_CLASS) if c in CLASS_SURFACES}
 MAX_ARCHIVE = 12 * 1024 * 1024
@@ -90,6 +100,13 @@ def check_recipe(r):
             require(isinstance(without, list) and all(isinstance(n, str) and n for n in without), p['id'] + ': invalid without_materials')
         groups = p.get('collision', {}).get('groups', [])
         require(isinstance(groups, list) and all(isinstance(g, str) and g for g in groups), p['id'] + ': invalid collision groups')
+        void = p.get('collision', {}).get('void', [])
+        require(isinstance(void, list) and all(isinstance(g, str) and g in groups for g in void), p['id'] + ': collision.void names listed groups')
+        require(p.get('collision', {}).get('strip_exits', False) in (True, False), p['id'] + ': invalid collision.strip_exits')
+        require('origin_y' not in p or (type(p['origin_y']) in (int, float) and v[1] <= p['origin_y'] <= v[4]), p['id'] + ': origin_y lies in the volume')
+        d = p.get('distant')
+        require(d is None or (isinstance(d, dict) and d.get('archive') == 'sea_LOD%02d.szs' % src['room'] and type(d.get('triangles')) is int and 0 < d['triangles'] <= 1024),
+                p['id'] + ': distant names the room\'s own sea_LODNN.szs and its triangle count (1..1024)')
         e = p.get('expect', {})
         require(isinstance(e.get('triangles'), list) and len(e['triangles']) == len(parts) and all(type(t) is int and t > 0 for t in e['triangles']),
                 p['id'] + ': expect.triangles must give each part\'s count')
@@ -142,16 +159,38 @@ def read_model(src, name):
     skeleton = src.rel(model + 0xC)
     bones = src.rel(skeleton + 0x14)
     nbones = src.u16(skeleton + 8)
-    world = {}
+    euler = (src.u32(skeleton + 4) >> 12) & 7 == 1
+    # each bone's world transform (3x3 and translation); a shape is taken when its bone's world rotation and scale
+    # come out as none (a parent's turn undone by the child's, as Five-Star's pillars): only its position moves
+    matrices = {}
     for i in range(nbones):
         b = bones + 0x40 * i
         parent = src.u16(b + 6)
         scale = struct.unpack_from('>3f', src.b, b + 0x14)
         rot = struct.unpack_from('>4f', src.b, b + 0x20)
         tr = struct.unpack_from('>3f', src.b, b + 0x30)
-        plain = scale == (1, 1, 1) and rot[:3] == (0, 0, 0) and rot[3] in (0, 1) and (parent == 0xFFFF or world.get(parent) is not None)
-        up = world.get(parent, (0, 0, 0)) if parent != 0xFFFF else (0, 0, 0)
-        world[i] = tuple(up[k] + tr[k] for k in range(3)) if plain and up is not None else None
+        if euler:
+            cx, sx, cy, sy, cz, sz = math.cos(rot[0]), math.sin(rot[0]), math.cos(rot[1]), math.sin(rot[1]), math.cos(rot[2]), math.sin(rot[2])
+            r = [[cy * cz, sx * sy * cz - cx * sz, cx * sy * cz + sx * sz],
+                 [cy * sz, sx * sy * sz + cx * cz, cx * sy * sz - sx * cz],
+                 [-sy, sx * cy, cx * cy]]
+        else:
+            x, y, z, w = rot
+            r = [[1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+                 [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+                 [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)]]
+        local = [[r[j][k] * scale[k] for k in range(3)] for j in range(3)]
+        if parent == 0xFFFF:
+            matrices[i] = (local, tr)
+        else:
+            pm, pt = matrices[parent]
+            m = [[sum(pm[j][q] * local[q][k] for q in range(3)) for k in range(3)] for j in range(3)]
+            t = tuple(pt[j] + sum(pm[j][q] * tr[q] for q in range(3)) for j in range(3))
+            matrices[i] = (m, t)
+    world = {}
+    for i, (m, t) in matrices.items():
+        plain = all(abs(m[j][k] - (1 if j == k else 0)) < 1e-5 for j in range(3) for k in range(3))
+        world[i] = tuple(t) if plain else None
     materials = src.dict(src.rel(model + 0x18))
     vertex_array = src.rel(model + 0x10)
     out = []
@@ -552,18 +591,21 @@ def read_dzb(d):
     require(nv <= 65535 and nt <= 200000 and ng <= 4096 and ni <= 65535, 'room collision too large')
     verts = [struct.unpack_from('>3f', d, ov + 12 * i) for i in range(nv)]
     tris = [struct.unpack_from('>5H', d, ot + 10 * i) for i in range(nt)]
-    names = []
+    names, group_info = [], []
     for i in range(ng):
         no = struct.unpack_from('>I', d, og + 0x34 * i)[0]
         names.append(d[no:d.index(b'\0', no)].decode('ascii', 'replace'))
+        group_info.append(struct.unpack_from('>I', d, og + 0x34 * i + 0x30)[0])
     infos = [struct.unpack_from('>4I', d, oi + 16 * i) for i in range(ni)]
-    return verts, tris, names, infos
+    return verts, tris, names, infos, group_info
 
 
 def piece_collision(dzb, piece, room_origin, center):
     """WCOL bytes, metadata and the kept triangle count of one piece."""
-    verts, tris, names, infos = dzb
+    verts, tris, names, infos, group_info = dzb
     groups = set(piece.get('collision', {}).get('groups', []))
+    void = set(piece.get('collision', {}).get('void', []))
+    strip_exits = piece.get('collision', {}).get('strip_exits', False)
     if not groups:
         return None, {}, 0
     x0, y0, z0, x1, y1, z1 = piece['volume']
@@ -576,8 +618,11 @@ def piece_collision(dzb, piece, room_origin, center):
         pts = [local(verts[k]) for k in (a, b, c)]
         if not all(inside(p) for p in pts):
             continue
-        i1 = infos[info][1]
+        i0, i1 = infos[info][0], infos[info][1]
         code = (i1 >> 16) & 0x1F
+        exit_id = (i0 >> 13) & 0x3F
+        if strip_exits and exit_id != 0x3F and names[group] not in void:
+            continue
         u = [pts[1][k] - pts[0][k] for k in range(3)]
         v = [pts[2][k] - pts[0][k] for k in range(3)]
         n = (u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0])
@@ -588,6 +633,10 @@ def piece_collision(dzb, piece, room_origin, center):
         surface = SURFACES.get(code, 'col_stone' if floor else 'col_wall')
         if not floor and surface != 'col_wall':
             surface = 'col_wood' if surface == 'col_wood' else 'col_wall'
+        if group_info[group] & WATER_GROUP:
+            surface = 'col_water'
+        elif names[group] in void:
+            surface = 'col_void' if floor else 'col_wall'
         row = []
         for k, p in zip((a, b, c), pts):
             if k not in remap:
@@ -665,14 +714,14 @@ def build_set(game, recipe, identity, check_expect=True):
         per_texture[t] = size
     out.set_rel(0x24, append_dictionary(out, [(t, textures[t]) for t in texture_names]))
     out.put('H', 0x52, len(texture_names))
-    models, shaders, pieces_meta, collisions = [], {}, [], {}
+    models, shaders, pieces_meta, collisions, distant_archives = [], {}, [], {}, {}
     for pi, (piece, parts) in enumerate(plan):
         body = parts[0]
         # the piece's origin: the middle of its first part, at its lowest point
         pts = [body[3][si].pos[k] for si, tris in body[5].items() for t in tris for k in t]
         lo = [min(p[k] for p in pts) for k in range(3)]
         hi = [max(p[k] for p in pts) for k in range(3)]
-        center = [(lo[0] + hi[0]) / 2, lo[1], (lo[2] + hi[2]) / 2]
+        center = [(lo[0] + hi[0]) / 2, piece.get('origin_y', lo[1]), (lo[2] + hi[2]) / 2]
         meta_parts, counts = [], []
         piece_lo, piece_hi = [1e30] * 3, [-1e30] * 3
         for k, (part, mname, model_at, shapes, materials, taken, crossing) in enumerate(parts):
@@ -705,8 +754,13 @@ def build_set(game, recipe, identity, check_expect=True):
         require(not check_expect or col_tris == expect['collision_triangles'], '%s: %d collision triangles, the recipe expects %d' % (piece['id'], col_tris, expect['collision_triangles']))
         if col:
             collisions[piece['id']] = col
-        pieces_meta.append({'id': piece['id'], 'parts': meta_parts, 'origin': center, 'minimum': piece_lo, 'maximum': piece_hi,
-                            'collision': col_info})
+        entry = {'id': piece['id'], 'parts': meta_parts, 'origin': center, 'minimum': piece_lo, 'maximum': piece_hi, 'collision': col_info}
+        if piece.get('distant'):
+            # the distant model in an archive of its own (as the game keeps it), so a neighbouring square
+            # loads only the small distant view, not the whole island
+            d_identity = distant_identity(identity, pi)
+            distant_archives[piece['id']], entry['distant'] = build_distant(game, piece, d_identity, center, check_expect)
+        pieces_meta.append(entry)
     out.set_rel(0x20, append_dictionary(out, models))
     out.put('H', 0x50, len(models))
     out.set_rel(0x14, append_string(out, identity))
@@ -720,7 +774,58 @@ def build_set(game, recipe, identity, check_expect=True):
     meta = {'set': recipe['set'], 'identity': identity, 'pieces': pieces_meta, 'models': [m for m, _ in models],
             'texture_bytes': texture_bytes, 'textures': per_texture, 'shader_bytes': sum(len(v) for v in shaders.values()),
             'bfres_bytes': len(bfres), 'archive_bytes': len(packed)}
-    return packed, collisions, meta
+    return packed, collisions, meta, distant_archives
+
+
+def distant_identity(identity, index):
+    """the resource identity of a set's piece's distant archive: "gd", the set's digits, the piece's number"""
+    return 'gd' + identity[2:29] + '%02x' % index
+
+
+def build_distant(game, piece, identity, center, check_expect=True):
+    """(packed archive, metadata) of a piece's distant model: the island's whole model in the room's distant-view
+    archive (sea_LODNN.szs), positions relative to the piece's origin, with its own textures and shader archive"""
+    d = piece['distant']
+    lod_files = room_files(game, d['archive'])
+    bfres = [n for n in lod_files if n.endswith('.bfres')]
+    require(len(bfres) == 1 and 'model.sharcfb' in lod_files, piece['id'] + ': the distant-view archive has no model')
+    data = lod_files[bfres[0]]
+    out = base.Bfres(data[:0x70])
+    out.b[0x18:0x68] = bytes(0x50)
+    w = Writer(data, out)
+    model_at, shapes, materials = read_model(w.src, 'model')
+    taken = {si: list(sh.tris) for si, sh in enumerate(shapes) if sh.tris}
+    require(taken, piece['id'] + ': the distant model is empty')
+    all_textures = dict(w.src.dict(w.src.rel(0x24)))
+    mat_at = dict(materials)
+    names, textures, texture_bytes = [], {}, 0
+    for si in taken:
+        m = mat_at[shapes[si].material]
+        refs = w.src.rel(m + 0x28)
+        for i in range(w.src.b[m + 0x10]):
+            t = w.src.cstr(w.src.rel(refs + 8 * i))
+            if t not in textures:
+                require(t in all_textures, 'a distant material names a missing texture')
+                textures[t], size = copy_texture(w, all_textures[t])
+                names.append(t)
+                texture_bytes += size
+    out.set_rel(0x24, append_dictionary(out, [(t, textures[t]) for t in names]))
+    out.put('H', 0x52, len(names))
+    name = identity[:2] + identity[-2:] + 'd'
+    dst, tris, used = write_model(w, model_at, name, shapes, taken, materials, textures, center)
+    require(not check_expect or tris == d['triangles'], '%s: the distant model has %d triangles, the recipe expects %d' % (piece['id'], tris, d['triangles']))
+    out.set_rel(0x20, append_dictionary(out, [(name, dst)]))
+    out.put('H', 0x50, 1)
+    out.set_rel(0x14, append_string(out, identity))
+    out.append(b'', 0x1000)
+    out.put('I', 0xC, len(out.b))
+    packed = base.sarc({identity + '.bfres': bytes(out.b), name + '.sharcfb': lod_files['model.sharcfb']})
+    pts = [shapes[si].pos[k] for si, ts in taken.items() for t in ts for k in t]
+    meta = {'archive': identity, 'model': name, 'light': LIGHTS['bg0'], 'triangles': tris, 'materials': used, 'texture_bytes': texture_bytes,
+            'archive_bytes': len(packed),
+            'minimum': [min(q[j] for q in pts) - center[j] for j in range(3)],
+            'maximum': [max(q[j] for q in pts) - center[j] for j in range(3)]}
+    return packed, meta
 
 
 def cached_meta(out, key):
@@ -740,6 +845,11 @@ def cached_meta(out, key):
             if name:
                 with open(os.path.join(os.path.dirname(os.path.abspath(out)), name), 'rb') as f:
                     if hashlib.sha256(f.read()).hexdigest() != piece['collision'].get('collision_sha256'):
+                        return None
+            d = piece.get('distant')
+            if d:
+                with open(os.path.join(os.path.dirname(os.path.abspath(out)), d['file']), 'rb') as f:
+                    if hashlib.sha256(f.read()).hexdigest() != d.get('archive_sha256'):
                         return None
         return meta
     except (OSError, ValueError, TypeError, AttributeError, KeyError):
@@ -762,11 +872,16 @@ def build(game, recipe_path, identity, out, check_expect=True):
     room = room_files(game, recipe.get('source', {}).get('archive', ''))
     for name in sorted(room):
         digest.update(name.encode() + b'\0' + hashlib.sha256(room[name]).digest())
+    for archive in sorted({p['distant']['archive'] for p in recipe.get('pieces', []) if isinstance(p, dict) and isinstance(p.get('distant'), dict) and
+                           isinstance(p['distant'].get('archive'), str) and re.fullmatch(r'sea_LOD[0-9]{2}\.szs', p['distant']['archive'])}):
+        lod = room_files(game, archive)
+        for name in sorted(lod):
+            digest.update(archive.encode() + b'/' + name.encode() + b'\0' + hashlib.sha256(lod[name]).digest())
     if check_expect:
         cached = cached_meta(out, digest.hexdigest())
         if cached:
             return cached
-    packed, collisions, meta = build_set(game, recipe, identity, check_expect)
+    packed, collisions, meta, distant_archives = build_set(game, recipe, identity, check_expect)
     archive = base.yaz0_stored(packed)
     meta.update(converter_version=VERSION, cache_key=digest.hexdigest(), archive_sha256=hashlib.sha256(archive).hexdigest())
     directory = os.path.dirname(os.path.abspath(out))
@@ -790,6 +905,11 @@ def build(game, recipe_path, identity, out, check_expect=True):
             path = '%s.%s.wcol' % (out, piece['id'])
             publish(path, col)
             piece['collision_file'] = os.path.basename(path)  # next to the archive (the cache may move)
+        if piece['id'] in distant_archives:
+            body = base.yaz0_stored(distant_archives[piece['id']])
+            path = '%s.%s.distant.szs' % (out, piece['id'])
+            publish(path, body)
+            piece['distant'].update(file=os.path.basename(path), archive_sha256=hashlib.sha256(body).hexdigest())
     # the metadata commits the generation last
     publish(out + '.json', (json.dumps(meta, sort_keys=True) + '\n').encode())
     return meta

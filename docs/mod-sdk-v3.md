@@ -318,6 +318,51 @@ If the player's game files can't make a building (another game version, or the i
 differs from what the port expects), its placements are left out with a line in the log, and the
 rest of the mod works. The package must not contain game files, as for game objects.
 
+## Island grounds
+
+The ground of some small islands can be placed too, in the palette's **Islands** category: the
+island's rock and turf with its cliffs and its base under the sea, bare (no grass, flowers, trees or
+other objects, which are the game's actors, not part of the ground). Like the buildings, an island is
+built once from the player's own game files; nothing of the game goes into your package.
+
+```json
+{
+  "requires": {"game_objects": 4},
+  "actors": [
+    {"id": "crescent", "actor": "piece:crescent-moon-island", "stage": "sea", "room": 44,
+     "position": {"x": -174600, "y": 0, "z": 301125}, "rotation": {"x": 0, "y": 30, "z": 0}}
+  ]
+}
+```
+
+Island grounds need catalogue version 4. The position is the island's middle at its sea level: place it
+at `"y": 0` on the sea (the editor does this for you). Like a building, an island takes only `id`,
+`actor`, `stage`, `room`, `position` and `rotation` about the vertical axis.
+
+| Id | What it is |
+| --- | --- |
+| `piece:crescent-moon-island` | Crescent Moon Island: a low crescent of rock around a sheltered cove |
+| `piece:triangle-island` | Triangle Island: a small grassy islet with a shallow cliff and a rock beside it |
+| `piece:five-star-isles` | Five-Star Isles: five rocky pillars in a row with flat tops |
+| `piece:star-island` | Star Island: star-shaped, with grassy slopes and a pit in the middle |
+| `piece:bomb-island` | Bomb Island: a long island of grassy cliffs with a small pit |
+| `piece:fairy-island` | Northern Fairy Island: a heart-shaped grassy island with the fountain's spiked stone hut; its doorway leads to a hole |
+
+An island keeps its own collision: Link climbs out of the sea onto its shores, walks its slopes
+and bumps into its cliffs and walls, as on the island itself. Its paths into
+caves and fountains lead nowhere: the pits of Star and Bomb Island and the hole of the Fairy Island
+are drops that send Link back to the room's restart point, as a bottomless pit does.
+An island also brings its own distant view: from the eight squares around its own, the island's
+low-detail model (the one the game shows for it from afar) stands where you placed it. Only Link's own
+square has the island's collision.
+
+An island is large (up to about 9,400 units across): choose a stretch of open sea in the square, away
+from the square's own island and its reefs, routes and objects. The usual placement rules apply
+(world-objects.md): what is in the way is listed in plain words, and an island that doesn't fit is kept
+in the editor but not in the game. The sea's surface around an island is not ground and doesn't count.
+An island costs about 0.5 MiB (Triangle Island) to 2.3 MiB (the Fairy Island) of its room's 24 MiB budget
+for buildings and island grounds, and its distant view about 0.12 MiB in a neighbouring square.
+
 ## Breakable native props
 
 The experimental prop adapter uses the player's native models, ground physics,

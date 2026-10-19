@@ -3,6 +3,7 @@
 and the collision rules (listed groups inside the volume; exits and other native fields dropped; ground
 types mapped to world-object surfaces), on synthetic data. With WWHD_GAME_DIR set to a game folder, it
 also builds every recipe from the player's files into a temporary folder and checks the counts."""
+import hashlib
 import json
 import os
 import struct
@@ -30,6 +31,34 @@ def shape(node, pos, tris, material='m'):
     s = gp.Shape()
     s.node, s.pos, s.tris, s.material = node, pos, tris, material
     return s
+
+
+def dzb_groups(verts, tris, names, group_info, infos):
+    """dzb() bytes with each group's info word (the water bit 0x100)"""
+    head = 0x34
+    ov = head
+    ot = ov + 12 * len(verts)
+    og = ot + 10 * len(tris)
+    names_at = og + 0x34 * len(names)
+    name_bytes, name_offsets = b'', []
+    for n in names:
+        name_offsets.append(names_at + len(name_bytes))
+        name_bytes += n.encode() + b'\0'
+    oi = names_at + len(name_bytes)
+    oi += -oi % 4
+    out = bytearray(oi + 16 * len(infos))
+    struct.pack_into('>12I', out, 0, len(verts), ov, len(tris), ot, 0, 0, 0, 0, len(names), og, len(infos), oi)
+    for i, v in enumerate(verts):
+        struct.pack_into('>3f', out, ov + 12 * i, *v)
+    for i, t in enumerate(tris):
+        struct.pack_into('>5H', out, ot + 10 * i, *t)
+    for i, at in enumerate(name_offsets):
+        struct.pack_into('>I', out, og + 0x34 * i, at)
+        struct.pack_into('>I', out, og + 0x34 * i + 0x30, group_info[i])
+    out[names_at:names_at + len(name_bytes)] = name_bytes
+    for i, info in enumerate(infos):
+        struct.pack_into('>4I', out, oi + 16 * i, *info)
+    return bytes(out)
 
 
 def dzb(verts, tris, names, infos):
@@ -163,6 +192,35 @@ class Collision(unittest.TestCase):
             body, _, _ = gp.piece_collision(col, {'volume': [-1, -1, -1, 200, 200, 200], 'collision': {'groups': ['g']}}, o, o)
             self.assertEqual(struct.unpack_from('>4H', body, 40 + 12 * 3)[3], collision_mesh.SEMANTICS[want])
 
+    def test_island_rules_void_exits_water(self):
+        # a hole's floor with an exit (void group) becomes a void, a wall of it stays a wall; another exit triangle
+        # is left out when the recipe strips exits; a water group's triangles become swimmable water
+        v = [(0, 0, 0), (0, 0, 100), (100, 0, 0), (0, 100, 0), (500, 0, 0), (500, 0, 100), (600, 0, 0), (900, 50, 0), (900, 50, 100), (1000, 50, 0)]
+        exit_floor = (0x07FFE0FF & ~(0x3F << 13) | (0 << 13), (1 << 16) | (5 << 21) | 0xFF, 0xFFFFFFFF, 0)
+        plain = (0x07FFE0FF, (3 << 16) | 0xFF, 0xFFFFFFFF, 0)
+        tris = [(0, 1, 2, 0, 0), (0, 2, 3, 1, 1), (4, 5, 6, 0, 2), (7, 8, 9, 1, 3)]
+        names = ['Hole_soko', 'Hole_kabe', 'door', 'pond']
+        col = gp.read_dzb(dzb_groups(v, tris, names, [0, 0, 0, 0x100], [exit_floor, plain]))
+        piece = {'volume': [-10, -10, -10, 1100, 500, 500], 'collision': {'groups': names, 'void': ['Hole_soko', 'Hole_kabe'], 'strip_exits': True}}
+        body, info, count = gp.piece_collision(col, piece, (0, 0, 0), (0, 0, 0))
+        nv, nt = struct.unpack_from('>II', body, 8)
+        got = sorted(struct.unpack_from('>4H', body, 40 + 12 * nv + 8 * i)[3] for i in range(nt))
+        sem = collision_mesh.SEMANTICS
+        self.assertEqual(got, sorted([sem['col_void'], sem['col_wall'], sem['col_water']]))  # the door's exit floor is left out
+        self.assertEqual(gp.distant_identity('gp' + 'a' * 29, 3), 'gd' + 'a' * 27 + '03')
+        recipe = {'game_pieces_format': 1, 'set': 'isle', 'source': {'archive': 'sea_Room5.szs', 'room': 5},
+                  'pieces': [{'id': 'isle', 'volume': [-10, -10, -10, 10, 10, 10], 'origin_y': 0, 'parts': [{'model': 0, 'nodes': ['a'], 'light': 'bg0'}],
+                              'collision': {'groups': ['a'], 'void': ['a'], 'strip_exits': True}, 'distant': {'archive': 'sea_LOD05.szs', 'triangles': 120},
+                              'expect': {'triangles': [1], 'collision_triangles': 1}}]}
+        gp.check_recipe(recipe)
+        for change in (lambda r: r['pieces'][0]['distant'].update(archive='sea_LOD06.szs'), lambda r: r['pieces'][0]['distant'].update(triangles=2000),
+                       lambda r: r['pieces'][0]['collision'].update(void=['b']), lambda r: r['pieces'][0].update(origin_y=50),
+                       lambda r: r['pieces'][0]['collision'].update(strip_exits='yes')):
+            bad = json.loads(json.dumps(recipe))
+            change(bad)
+            with self.assertRaises(gp.BuildError):
+                gp.check_recipe(bad)
+
 
 @unittest.skipUnless(os.environ.get('WWHD_GAME_DIR'), 'set WWHD_GAME_DIR to build the recipes from a game folder')
 class FromGame(unittest.TestCase):
@@ -176,6 +234,27 @@ class FromGame(unittest.TestCase):
                 self.assertLessEqual(meta['archive_bytes'], r['memory']['archive_bytes'])
                 again = gp.build(game, path, 'gp' + '0' * 29, os.path.join(d, r['set'] + '.szs'))
                 self.assertEqual(again['archive_sha256'], meta['archive_sha256'])
+                for piece, recipe_piece in zip(meta['pieces'], r['pieces']):
+                    if 'distant' not in recipe_piece:
+                        self.assertNotIn('distant', piece)
+                        continue
+                    # an island's distant view: its own small archive next to the set's, the recipe's triangle count
+                    dd = piece['distant']
+                    self.assertTrue(dd['archive'].startswith('gd') and len(dd['archive']) == 31)
+                    self.assertEqual(dd['triangles'], recipe_piece['distant']['triangles'])
+                    with open(os.path.join(d, dd['file']), 'rb') as f:
+                        body = f.read()
+                    self.assertEqual(body[:4], b'Yaz0')
+                    self.assertLess(len(body), 256 * 1024)
+                    self.assertEqual(hashlib.sha256(body).hexdigest(), dd['archive_sha256'])
+                    # the island's origin is its sea level; its distant view stands in the same place
+                    self.assertEqual(piece['origin'][1], 0)
+                    for k in range(3):
+                        self.assertLess(abs(dd['minimum'][k] - piece['minimum'][k]), 600)
+                        self.assertLess(abs(dd['maximum'][k] - piece['maximum'][k]), 600)
+                    # holes lead nowhere: their floors are drops, no exit is kept
+                    if recipe_piece['collision'].get('void'):
+                        self.assertGreater(piece['collision']['collision_triangles'], 0)
 
 
 if __name__ == '__main__':

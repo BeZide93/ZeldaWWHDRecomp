@@ -78,6 +78,45 @@ int main() {
     assert(story_game_pieces::light_type("bg0") == 1 && story_game_pieces::light_type("bg3") == 4 && !story_game_pieces::light_type("bg4") &&
            !story_game_pieces::light_type("actor"));
 
+    // ---- island grounds: six sets in the Islands category, each with the room's own distant view
+    {
+        const char* isles[][2] = {{"crescent-moon-island", "5"}, {"triangle-island", "18"}, {"five-star-isles", "49"},
+                                  {"star-island", "2"}, {"bomb-island", "34"}, {"fairy-island", "3"}};
+        for (const auto& [id, room] : isles) {
+            const auto* p = c.find(id);
+            assert(p && p->category == "Islands" && p->since >= 4 && p->set == id && p->parts.size() == 1 && p->parts[0].light == 1);
+            char lod[16];
+            std::snprintf(lod, sizeof lod, "sea_LOD%02d.szs", std::stoi(room));
+            assert(p->distant_triangles > 0 && p->distant_triangles <= 1024 && p->distant_archive == lod && c.set(id)->room == unsigned(std::stoi(room)));
+            assert(p->collision_triangles > 0 && p->collision_triangles <= 4096 && p->instance_bytes > 0);
+            for (unsigned k = 0; k < 3; ++k) assert(p->volume[k + 3] - p->volume[k] <= 20000);
+        }
+        assert(story_game_pieces::distant_key("star-island") == "piece:star-island.distant");
+        for (const auto& p : c.pieces) assert((p.category == "Islands") == (p.distant_triangles > 0));
+        // a recipe's distant view must be the room's own archive with a sane count
+        const std::string isle = R"({"game_pieces_format": 1, "set": "isle", "label": "Isle", "source": {"archive": "sea_Room5.szs", "room": 5},
+            "memory": {"archive_bytes": 1000000}, "pieces": [{"id": "isle", "since": 4, "category": "Islands", "label": "Isle", "description": "an isle",
+              "volume": [-100, -100, -100, 100, 200, 100], "origin_y": 0, "parts": [{"model": 0, "nodes": ["a"], "light": "bg0"}],
+              "collision": {"groups": ["a", "h"], "void": ["h"], "strip_exits": true}, "distant": {"archive": "sea_LOD05.szs", "triangles": 120},
+              "expect": {"triangles": [12], "collision_triangles": 4}, "memory": {"instance_bytes": 40000}}]})";
+        story_game_pieces::Catalogue t;
+        assert(t.add_set(isle, why) && t.find("isle")->distant_triangles == 120);
+        for (const auto& [from, to] : std::vector<std::pair<std::string, std::string>>{{"sea_LOD05.szs", "sea_LOD06.szs"}, {"sea_LOD05.szs", "../LOD05.szs"},
+                                                                                       {R"("triangles": 120)", R"("triangles": 1025)"}, {R"("triangles": 120)", R"("triangles": 0)"}}) {
+            std::string text = isle;
+            text.replace(text.find(from), from.size(), to);
+            story_game_pieces::Catalogue u;
+            assert(!u.add_set(text, why) && u.pieces.empty() && why.find("distant") != std::string::npos);
+        }
+        // a placed island ground on the sea gets its distant view; elsewhere it has none
+        std::vector<ManifestActor> got;
+        assert(parses(manifest(house("i", "star-island"), R"({"game_objects": 4})"), why, &got));
+        assert(got[0].distant.model == "piece:star-island.distant" && got[0].model == "piece:star-island" && got[0].shoreline.model.empty());
+        assert(visual_variant_count(got[0]) == 1);
+        assert(!parses(manifest(house("i", "star-island"), R"({"game_objects": 3})"), why) && why.find("version 4") != std::string::npos);
+        assert(parses(manifest(house("o", "outset-house-small"), R"({"game_objects": 4})"), why, &got) && got[0].distant.model.empty());
+    }
+
     // ---- recipe rules: all or nothing per set
     const std::string good = R"({"game_pieces_format": 1, "set": "test", "label": "Test", "source": {"archive": "sea_Room12.szs", "room": 12},
         "memory": {"archive_bytes": 3000000},
