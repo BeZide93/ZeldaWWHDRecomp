@@ -77,4 +77,12 @@ int main(){std::string why;Mesh m,out;std::array<uint8_t,Surfaces> raw{2,4,1,11,
      // no water: two groups as before
      assert(build_native(ground,raw,3,native,why)&&word(native,32)==2);group_trees(native);assert(relocate(native,0x20000000,why));
      auto bad=pond;bad.triangles[0].semantic=Surfaces;assert(!validate(bad,why));}
+    // The first native layout, byte for byte as written before water and the later surfaces (a full save state of
+    // that time keeps collision built this way, recognised by its digest): a fixture's size and FNV-1a digest from
+    // that build, and a mesh using a later surface is refused.
+    {Mesh old;assert(make_shape("box",{100,80,120},0,0,1,old,why));old.triangles[3].semantic=4;old.triangles[5].semantic=7;
+     std::array<uint8_t,9> v1raw{0,1,2,3,4,5,6,7,8};std::vector<uint8_t> v1;assert(build_native_v1(old,v1raw,12,v1,why));
+     unsigned long long h=1469598103934665603ull;for(auto c:v1){h^=c;h*=1099511628211ull;}assert(v1.size()==544&&h==0x6826a7b239b63809ull);
+     assert(word(v1,32)==2&&word(v1,40)==9);std::vector<uint8_t> now;std::array<uint8_t,Surfaces> nraw{0,1,2,3,4,5,6,7,8,9,10,11,12,13};assert(build_native(old,nraw,12,now,why)&&now!=v1);
+     old.triangles[0].semantic=SurfaceWater;assert(!build_native_v1(old,v1raw,12,v1,why));}
 }

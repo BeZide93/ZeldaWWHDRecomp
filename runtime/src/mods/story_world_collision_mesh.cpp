@@ -95,6 +95,34 @@ bool build_native(const Mesh&m,const std::array<uint8_t,Surfaces>&raw,uint16_t r
     for(unsigned i=0;i<Surfaces;++i){put32(out,attribute+i*16,0x07FFE0FF);put32(out,attribute+i*16+4,0xFFu|(i==7?0x100u:0)|(uint32_t(raw[i])<<16)|(i==SurfaceVoid?4u<<21:0));put32(out,attribute+i*16+8,0xFFFFFFFF);if(i==6)put32(out,attribute+i*16+12,0xED);if(i==8)put32(out,attribute+i*16+12,0x10);}
     out[name]='w';out[name+1]='1';return true;
 }
+// The first native layout (two groups, nine attributes), byte for byte as it was written before water and the
+// other surfaces: only its digest is used, to recognise collision a full save state of that time keeps.
+bool build_native_v1(const Mesh&m,const std::array<uint8_t,9>&raw,uint16_t room,std::vector<uint8_t>&out,std::string&why){
+    out.clear();if(!validate(m,why))return false;for(const auto&t:m.triangles)if(t.semantic>=9){why="the surface did not exist in the first native layout";return false;}for(auto a:raw)if(a>31){why="invalid native surface attribute";return false;}
+    struct Node{uint16_t parent=0xFFFF,block=0xFFFF;std::array<uint16_t,8> children;Node(){children.fill(0xFFFF);}};
+    auto ordered=m.triangles;std::vector<Node> nodes;std::vector<uint16_t> blocks;
+    std::function<uint16_t(size_t,size_t,uint16_t)> split=[&](size_t first,size_t end,uint16_t parent){const auto id=uint16_t(nodes.size());nodes.emplace_back();nodes[id].parent=parent;
+        if(end-first<=LeafTriangles){nodes[id].block=uint16_t(blocks.size());blocks.push_back(uint16_t(first));return id;}
+        Point low=m.vertices[ordered[first].indices[0]],high=low;for(size_t i=first;i<end;++i)for(auto v:ordered[i].indices){auto p=m.vertices[v];low={std::min(low.x,p.x),std::min(low.y,p.y),std::min(low.z,p.z)};high={std::max(high.x,p.x),std::max(high.y,p.y),std::max(high.z,p.z)};}
+        unsigned axis=0;for(unsigned k=1;k<3;++k)if(component(high,k)-component(low,k)>component(high,axis)-component(low,axis))axis=k;
+        auto center=[&](const Triangle&t){return (double(component(m.vertices[t.indices[0]],axis))+component(m.vertices[t.indices[1]],axis)+component(m.vertices[t.indices[2]],axis))/3;};
+        std::stable_sort(ordered.begin()+first,ordered.begin()+end,[&](const Triangle&a,const Triangle&b){return center(a)<center(b);});
+        const size_t middle=first+(end-first)/2;const auto left=split(first,middle,id),right=split(middle,end,id);nodes[id].children[0]=left;nodes[id].children[1]=right;return id;};
+    split(0,ordered.size(),0xFFFF);
+    const uint32_t vertex=0x34,tri=vertex+uint32_t(m.vertices.size())*12,block=tri+uint32_t(ordered.size())*10,node=(block+uint32_t(blocks.size())*2+3)&~3u,group=node+uint32_t(nodes.size())*20,attribute=group+104,name=attribute+144;
+    out.resize(name+4);const uint32_t n[]={uint32_t(m.vertices.size()),uint32_t(ordered.size()),uint32_t(blocks.size()),uint32_t(nodes.size()),2,9},offset[]={vertex,tri,block,node,group,attribute};
+    for(unsigned i=0;i<6;++i){put32(out,i*8,n[i]);put32(out,i*8+4,offset[i]);}
+    for(size_t i=0;i<m.vertices.size();++i)for(unsigned k=0;k<3;++k)putf(out,vertex+i*12+k*4,component(m.vertices[i],k));
+    for(size_t i=0;i<ordered.size();++i){for(unsigned k=0;k<3;++k)put16(out,tri+i*10+k*2,ordered[i].indices[k]);put16(out,tri+i*10+6,ordered[i].semantic);put16(out,tri+i*10+8,1);}
+    for(size_t i=0;i<blocks.size();++i)put16(out,block+i*2,blocks[i]);
+    for(size_t i=0;i<nodes.size();++i){const auto&n=nodes[i];put16(out,node+i*20,n.block==0xFFFF?0:1);put16(out,node+i*20+2,n.parent);for(unsigned k=0;k<8;++k)put16(out,node+i*20+4+k*2,n.block!=0xFFFF&&k==0?n.block:n.children[k]);}
+    // Native special-group filters run at depth two. Keep the root empty and
+    // place the normal collision tree in its child; otherwise lava/water-only
+    // queries incorrectly return ordinary walkable ground.
+    for(unsigned i=0;i<2;++i){const uint32_t g=group+i*52;put32(out,g,name);for(unsigned k=0;k<3;++k)putf(out,g+4+k*4,1);put16(out,g+0x24,i?0:0xFFFF);put16(out,g+0x26,0xFFFF);put16(out,g+0x28,i?0xFFFF:1);put16(out,g+0x2A,room);put16(out,g+0x2E,i?0:0xFFFF);}
+    for(unsigned i=0;i<9;++i){put32(out,attribute+i*16,0x07FFE0FF);put32(out,attribute+i*16+4,0xFFu|(i==7?0x100u:0)|(uint32_t(raw[i])<<16));put32(out,attribute+i*16+8,0xFFFFFFFF);if(i==6)put32(out,attribute+i*16+12,0xED);if(i==8)put32(out,attribute+i*16+12,0x10);}
+    out[name]='w';out[name+1]='1';return true;
+}
 bool relocate(std::vector<uint8_t>&b,uint32_t base,std::string&why){
     if(b.size()<0x34||u32(b,0x30)!=0||!base||uint64_t(base)+b.size()>uint64_t(UINT32_MAX)+1){why="invalid native collision relocation";return false;}
     const uint32_t v=u32(b,0),t=u32(b,8),groups=u32(b,32);

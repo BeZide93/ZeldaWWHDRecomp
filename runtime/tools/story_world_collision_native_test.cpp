@@ -44,7 +44,9 @@ int main(){using namespace story_world_collision;map(Arena,Bytes);map(0x101D0000
     story_actors::identity::Fingerprint identity{};identity[0]=42;auto other=identity;other[0]=43;Cpu cpu{};mesh::Mesh geometry;std::string why;assert(mesh::make_shape("box",{100,100,100},0,0,0,geometry,why));
     heap_free=1;assert(!native::heap_create(&cpu,Actor,geometry,identity,invoke)&&allocations==0);heap_free=8*1024*1024;largest=1;assert(!native::heap_create(&cpu,Actor,geometry,identity,invoke)&&allocations==0);largest=8*1024*1024;
     st32(0x101D51CC+31*4,0xFFFFFFFF);assert(!native::heap_create(&cpu,Actor,geometry,identity,invoke)&&allocations==0);st32(0x101D51CC+31*4,mesh::NativeResultIds[0]);
-    assert(native::heap_create(&cpu,Actor,geometry,identity,invoke)&&sets==1&&native::stored(Actor,identity));assert(!native::stored(Actor,other));solid_context=false;
+    assert(native::heap_create(&cpu,Actor,geometry,identity,invoke)&&sets==1&&native::stored(Actor,identity));assert(!native::stored(Actor,other));
+    // a body from an older full save state (the first layout's identity) is accepted only by that identity
+    assert(&native::accepted(Actor,other,&identity)==&identity&&&native::accepted(Actor,identity,&other)==&identity&&&native::accepted(Actor,other,nullptr)==&other);{auto third=identity;third[1]=7;assert(&native::accepted(Actor,other,&third)==&other);}solid_context=false;
     parent_free=1;assert(!native::created(&cpu,Actor,identity,invoke)&&registrations==0);parent_free=8*1024*1024;parent_largest=1;assert(!native::created(&cpu,Actor,identity,invoke)&&registrations==0);parent_largest=8*1024*1024;
     fail_register=true;assert(!native::created(&cpu,Actor,identity,invoke)&&registrations==0);fail_register=false;
     for(unsigned i=0;i<240;++i)st32(Play+0x12A0+i*20+4,1);assert(!native::created(&cpu,Actor,identity,invoke)&&registrations==0);for(unsigned i=0;i<240;++i)st32(Play+0x12A0+i*20+4,0);

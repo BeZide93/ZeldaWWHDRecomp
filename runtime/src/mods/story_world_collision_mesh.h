@@ -39,4 +39,7 @@ Counts counts(const Mesh&);
 uint64_t allocation_bytes(const Mesh&); // source + native arrays/body, cookies/padding
 bool build_native(const Mesh&,const std::array<uint8_t,Surfaces>& raw_attributes,uint16_t room,std::vector<uint8_t>& relative_dzb,std::string& why);
 bool relocate(std::vector<uint8_t>& relative_dzb,uint32_t guest_base,std::string& why);
+// The first native layout (nine attributes, no water group), byte for byte: a full save state made before the
+// surfaces water to void holds collision built this way. False for a mesh using a later surface.
+bool build_native_v1(const Mesh&,const std::array<uint8_t,9>& raw_attributes,uint16_t room,std::vector<uint8_t>& relative_dzb,std::string& why);
 }

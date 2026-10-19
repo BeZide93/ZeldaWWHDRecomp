@@ -348,8 +348,8 @@ at `"y": 0` on the sea (the editor does this for you). Like a building, an islan
 | `piece:bomb-island` | Bomb Island: a long island of grassy cliffs with a small pit |
 | `piece:fairy-island` | Northern Fairy Island: a heart-shaped grassy island with the fountain's spiked stone hut; its doorway leads to a hole |
 
-An island keeps its own collision: Link climbs out of the sea onto its shores, walks its slopes
-and bumps into its cliffs and walls, as on the island itself. Its paths into
+An island keeps its own collision: the ship stops at its shore, Link gets out and climbs onto it,
+walks its slopes and bumps into its cliffs and walls, as on the island itself. Its paths into
 caves and fountains lead nowhere: the pits of Star and Bomb Island and the hole of the Fairy Island
 are drops that send Link back to the room's restart point, as a bottomless pit does.
 An island also brings its own distant view: from the eight squares around its own, the island's

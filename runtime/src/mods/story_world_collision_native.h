@@ -8,6 +8,13 @@ inline constexpr uint32_t State=0x1040,Magic=0x57434C31,Matrix=0x1050,Identity=0
 inline bool stored(uint32_t actor,const story_actors::identity::Fingerprint& identity){
     return proof::address(actor,0x10C0)&&ld32(actor+State)==Magic&&ld32(actor+State+8)==ld32(actor+4)&&proof::address(ld32(actor+State+4),0xBC)&&story_actors::identity::matches(mem::ptr(actor+Identity),identity);
 }
+// The identity an actor's stored collision is checked against: the current one, or, when the actor holds a body
+// built with the first native layout (a full save state made before water and the later surfaces), that layout's
+// identity; such a body keeps working until the room loads again and builds it anew.
+inline const story_actors::identity::Fingerprint& accepted(uint32_t actor,const story_actors::identity::Fingerprint& current,const story_actors::identity::Fingerprint* first_layout){
+    if(!first_layout||stored(actor,current)||!stored(actor,*first_layout))return current;
+    return *first_layout;
+}
 template<class Call> bool heap_create(Cpu*c,uint32_t actor,const mesh::Mesh& geometry,const story_actors::identity::Fingerprint& identity,Call call){
     std::array<uint8_t,mesh::NativeResultIds.size()> raw{};uint32_t conversion[32];
     for(unsigned code=0;code<32;++code)conversion[code]=ld32(GD(0x101D51CC)+code*4);

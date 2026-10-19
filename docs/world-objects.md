@@ -444,6 +444,10 @@ found: Link walks on its floor as if it were dry. In a square of open sea the hi
 low (about 1,200 units in the square of the examples below), so keep raised ponds below the top of the
 square's island. A pond at sea level is always found.
 
+A full save state made with an earlier version keeps its world objects' collision as it was then
+(before the water, ice and void materials, and with `col_metal` still hurting Link) until the room
+loads again; then the objects get their collision anew.
+
 ## Grapple points
 
 A grapple point marks the attachment position on a visible beam or post. Add it
