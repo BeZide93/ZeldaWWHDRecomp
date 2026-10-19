@@ -34,6 +34,10 @@ Value game_object_info(const story_game_objects::Entry& e) {
     v["description"] = e.description;
     v["since"] = double(e.since);
     v["collision"] = e.collision;
+    if (e.batch()) {
+        v["batch"] = e.packet.kind;  // a shared batch: removed or changed when the room loads again
+        v["note"] = "grass, flowers and small trees go or change when their room loads again (Reload room)";
+    }
     v["rotation"] = "yaw";
     Value scale;
     scale["min"] = double(e.scale_min), scale["max"] = double(e.scale_max);
@@ -43,6 +47,7 @@ Value game_object_info(const story_game_objects::Entry& e) {
     for (const auto& x : e.variants) {
         Value w;
         w["id"] = x.id, w["label"] = x.label;
+        if (x.units) w["units"] = double(x.units);
         variants.array.push_back(w);
     }
     v["variants"] = variants;
@@ -92,7 +97,9 @@ Value Session::dispatch_game_objects(const std::string& command, const Value& p,
             if (!category.empty() && lower(e.category) != lower(category)) continue;
             if (!query.empty() && lower(e.id + " " + e.label + " " + e.description + " " + e.category).find(query) == std::string::npos) continue;
             Value v = game_object_info(e);
-            const std::string where = host_ ? host_->game_archive(e.archive) : std::string("?");
+            std::string where = host_ ? host_->game_archive(e.archive) : std::string("?");
+            for (const auto& more : e.also_archives)
+                if (!where.empty() && where != "?" && host_->game_archive(more).empty()) where.clear();
             if (where == "?") v["available"] = Value();  // unknown: the game is not running
             else {
                 v["available"] = !where.empty();

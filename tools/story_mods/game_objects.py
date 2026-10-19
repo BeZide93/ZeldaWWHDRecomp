@@ -158,7 +158,10 @@ def build(game, entries, with_placements=False):
     out = {}
     for e in entries:
         where = index.get(e['native']['archive'])
-        item = {'available': where is not None}
+        missing = [a for a in e['native'].get('also_archives', []) if a not in index]
+        item = {'available': where is not None and not missing}
+        if missing:
+            item['missing'] = missing
         if where:
             item['archive'] = where
         if with_placements:

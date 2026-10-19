@@ -262,8 +262,11 @@ inline bool game_object_fields(const Value& v,unsigned need,ManifestActor& a,std
 }
 // The game objects of a list, room by room, against the catalogue's room budget (instances, each archive once).
 inline bool game_object_budget(const std::vector<ManifestActor>& actors,std::string& why,const story_game_objects::Catalogue& c) {
-    std::map<std::pair<std::string,unsigned>,story_game_objects::RoomUse> rooms;
-    for(const auto&a:actors){if(!a.game_object())continue;const auto* e=c.find(story_game_objects::reference(a.actor));if(!e)continue;auto&use=rooms[{a.stage,a.room}];use.add(*e);
+    std::map<std::pair<std::string,unsigned>,story_game_objects::RoomUse> rooms;std::map<std::pair<std::string,std::string>,unsigned> batches;
+    for(const auto&a:actors){if(!a.game_object())continue;const auto* e=c.find(story_game_objects::reference(a.actor));if(!e)continue;
+        if(e->batch()){const auto*v=e->variant(a.variant);auto&n=batches[{a.stage,e->packet.kind}];n+=v?v->units:0;
+            if(n>e->packet.mod_share)return why=e->packet.kind+" in stage "+a.stage+": mods may plant "+std::to_string(e->packet.mod_share)+" units per stage (the game's own use shares the rest)",false;}
+        auto&use=rooms[{a.stage,a.room}];use.add(*e);
         if(use.bytes>story_game_objects::kRoomBudgetBytes)return why="game objects in "+a.stage+" room "+std::to_string(a.room)+" exceed the room's memory budget ("+std::to_string(story_game_objects::kRoomBudgetBytes/1024)+" KiB)",false;}
     return true;
 }

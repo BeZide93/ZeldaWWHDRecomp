@@ -37,7 +37,18 @@ inline constexpr uint64_t kRoomBudgetBytes = 3u * 1024 * 1024;
 struct Variant {
     std::string id, label;
     uint32_t params = 0;  // the fixed parameter word written at creation and read back
+    unsigned units = 0;   // a shared batch: how many units of the stage's batch it takes
 };
+// Grass, flowers and small trees are shared batches ("packets"), not actors: the game's placement actor
+// adds units to the stage's batch and is gone at once; the units go when their room unloads. A batch has
+// a fixed capacity per stage, shared with the game's own placements; mods together may use `mod_share`
+// units of one kind per stage (the validator), and the game checks the free units before planting.
+struct Packet {
+    std::string kind;        // "grass", "flower", "tree", "wood" ("" an ordinary actor)
+    unsigned capacity = 0;   // the stage's batch capacity (the game's own use included)
+    unsigned mod_share = 0;  // what all mods together may plant per stage
+};
+inline bool packet_kind(const std::string& k) { return k == "grass" || k == "flower" || k == "tree" || k == "wood"; }
 struct Entry {
     std::string id, group, category, label, description;
     unsigned since = 1;
@@ -45,12 +56,15 @@ struct Entry {
     std::string native_name;  // the stage actor name in the game's object name table ("Oyashi")
     std::string process;      // the process it is (documentation; the game's table resolves the name)
     std::string archive;      // the object archive the game loads for it
+    std::vector<std::string> also_archives;  // more archives it loads (a flag's shared cloth)
     int subtype = 255;        // the object name table's argument for this name (checked at creation)
     std::vector<Variant> variants;
     bool yaw_only = true;     // rotation: a turn about the vertical axis only
     float scale_min = 1, scale_max = 1;  // uniform scale
     bool collision = false;
     uint64_t instance_bytes = 0, archive_bytes = 0;
+    Packet packet;
+    bool batch() const { return !packet.kind.empty(); }
     const Variant* variant(const std::string& name) const {
         if (name.empty()) return variants.empty() ? nullptr : &variants.front();
         for (const Variant& v : variants)
@@ -124,6 +138,13 @@ inline bool Catalogue::add_table(const std::string& table, std::string& why) {
         e.archive = text(n.get("archive"));
         if (!native_name_ok(e.native_name)) return why = e.id + ": invalid native name", false;
         if (!native_name_ok(e.archive)) return why = e.id + ": invalid archive", false;
+        if (n.get("also_archives").type != Value::Null) {
+            if (n.get("also_archives").type != Value::Array || n.get("also_archives").array.size() > 4) return why = e.id + ": also_archives must be a list of up to 4", false;
+            for (const Value& a : n.get("also_archives").array) {
+                if (a.type != Value::String || !native_name_ok(a.text)) return why = e.id + ": invalid archive in also_archives", false;
+                e.also_archives.push_back(a.text);
+            }
+        }
         if (e.process.empty() || e.process.size() > 48) return why = e.id + ": invalid process", false;
         if (!whole(n.get("subtype"), 0, 255)) return why = e.id + ": invalid subtype", false;
         e.subtype = int(n.get("subtype").number);
@@ -139,6 +160,10 @@ inline bool Catalogue::add_table(const std::string& table, std::string& why) {
             if (!neutral_id(x.id) || x.label.empty() || x.label.size() > 48) return why = e.id + ": invalid variant", false;
             if (word > 0xFFFFFFFFull || !end || *end) return why = e.id + ": a variant's params must be 0x and 8 hex digits", false;
             x.params = uint32_t(word);
+            if (v.get("units").type != Value::Null) {
+                if (!whole(v.get("units"), 1, 64)) return why = e.id + ": a variant's units must be 1..64", false;
+                x.units = unsigned(v.get("units").number);
+            }
             for (const Variant& old : e.variants)
                 if (old.id == x.id) return why = e.id + ": duplicate variant " + x.id, false;
             e.variants.push_back(std::move(x));
@@ -161,6 +186,18 @@ inline bool Catalogue::add_table(const std::string& table, std::string& why) {
             return why = e.id + ": memory needs instance_bytes and archive_bytes", false;
         e.instance_bytes = uint64_t(mem.get("instance_bytes").number);
         e.archive_bytes = uint64_t(mem.get("archive_bytes").number);
+        const Value& pk = o.get("packet");
+        if (pk.type != Value::Null) {
+            e.packet.kind = text(pk.get("kind"));
+            if (!packet_kind(e.packet.kind)) return why = e.id + ": packet kind must be grass, flower, tree or wood", false;
+            if (!whole(pk.get("capacity"), 1, 5000) || !whole(pk.get("mod_share"), 1, 5000) || pk.get("mod_share").number > pk.get("capacity").number)
+                return why = e.id + ": a packet needs its capacity and a mod_share within it", false;
+            e.packet.capacity = unsigned(pk.get("capacity").number);
+            e.packet.mod_share = unsigned(pk.get("mod_share").number);
+            if (e.scale_min != 1 || e.scale_max != 1) return why = e.id + ": a packet keeps scale 1", false;
+        }
+        for (const Variant& x : e.variants)
+            if (e.batch() != (x.units > 0)) return why = e.id + ": every variant of a packet names its units (and only a packet's)", false;
         newest = std::max(newest, e.since);
         added.push_back(std::move(e));
     }
