@@ -7,6 +7,12 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Mod SDK v3 and the editor: more native enemies** (for mod makers). Stalfos, Redead, Mothula (on the ground or
+  winged), Morth, Magtail, Poe, Armos and Armos Knight can be placed, each with the mod's own defeat flag, drops and
+  defeat switch, live in the editor. What holds Link (a Redead's scream and bite, a Poe's possession, clinging Morths)
+  lets go when the enemy is removed, its room changes or a state is loaded. A placed Stalfos does not split in two under
+  a spin attack, and a placed Mothula does not release Morths; place Morths next to it instead.
+
 - **Mod SDK v3 and the editor: demo steps, cutscenes played by the game's own cutscene system** (for mod makers, preview).
   A scene can now play a demo: keyframed camera, actors flying or walking along curves (game characters, villagers the
   mod placed, the mod's own actors, and Link in his cutscene poses), messages that wait for A, sounds and effects, one
