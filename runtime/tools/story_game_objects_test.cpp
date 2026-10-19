@@ -89,7 +89,8 @@ int main() {
     }
     // the catalogue version gate
     assert(!parses(manifest(palm("p"), "null"), why) && why.find("requires") != std::string::npos);
-    assert(!parses(manifest(palm("p"), R"({"game_objects": 2})"), why) && why.find("update the port") != std::string::npos);
+    // (game pieces share the version: story_game_pieces_catalogue.h)
+    assert(!parses(manifest(palm("p"), R"({"game_objects": 99})"), why) && why.find("update the port") != std::string::npos);
     assert(!parses(manifest(palm("p"), R"({"game_objects": "1"})"), why));
     assert(!parses(manifest(palm("p"), R"({"game_objects": 1, "other": 1})"), why) && why.find("unknown requirement") != std::string::npos);
     // only catalogued ids, and nothing but a placement

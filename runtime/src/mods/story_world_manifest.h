@@ -18,6 +18,7 @@
 #include "story_resident_types.h"
 #include "story_enemy_variants.h"
 #include "story_game_objects_catalogue.h"
+#include "story_game_pieces_catalogue.h"
 namespace story_notebook {
 struct WorldPoint { float x=0,y=0,z=0; bool operator==(const WorldPoint&)const=default; };
 struct StoryAction {
@@ -73,6 +74,10 @@ struct ManifestActor {
     std::string when_flag,when_not_flag;std::vector<QuestCondition> quests;std::vector<ManifestTalk> talks;
     // `variant` above is also a game object's catalogue variant ("actor": "game:<id>", story_game_objects_catalogue.h)
     bool game_object()const{return story_game_objects::is_reference(actor);}
+    // game pieces ("actor": "piece:<id>", story_game_pieces_catalogue.h): the piece's neutral id; the placement
+    // is a static world object whose model and collision are the piece's (model and collision_mesh "piece:<id>")
+    std::string piece;
+    bool game_piece()const{return !piece.empty();}
 };
 template<class Condition,class Quest,class Item,class Flag>
 inline bool condition_matches(const Condition&c,Quest quest,Item item,Flag flag,bool day){
@@ -281,6 +286,32 @@ inline bool game_object_budget(const std::vector<ManifestActor>& actors,std::str
 inline bool game_object_budget(const std::vector<ManifestActor>& actors,std::string& why) {
     return std::none_of(actors.begin(),actors.end(),[](const ManifestActor&a){return a.game_object();})||game_object_budget(actors,why,story_game_objects::catalogue());
 }
+// A game piece ("actor": "piece:<id>", story_game_pieces_catalogue.h): a catalogued id, stage, room, position
+// and a turn about the vertical axis, nothing else (no scale: the island's baked light and collision stay as
+// they are; no params, flags, then, paths or dialogue). It becomes a static world object drawing the piece.
+inline bool game_piece_fields(const Value& v,unsigned need,ManifestActor& a,std::string& why,const story_game_pieces::Catalogue& c=story_game_pieces::catalogue()) {
+    for(const auto&[key,value]:v.object){bool allowed=false;for(const char*name:{"id","actor","stage","room","position","rotation"})allowed|=key==name;
+        if(!allowed)return why="actor "+a.id+": a game piece takes only id, actor, stage, room, position and rotation (not \""+key+"\")",false;}
+    const std::string ref=story_game_pieces::reference(a.actor);const auto* p=c.find(ref);
+    if(!p)return why="actor "+a.id+": \""+a.actor+"\" is not in the game pieces catalogue",false;
+    if(!need)return why="actor "+a.id+": a manifest with game pieces names the catalogue version it needs (\"requires\": {\"game_objects\": "+std::to_string(p->since)+"})",false;
+    if(p->since>need)return why="actor "+a.id+": \""+a.actor+"\" needs game objects catalogue version "+std::to_string(p->since)+" (the manifest requires "+std::to_string(need)+")",false;
+    if(!place(v,a.stage,a.room)||!point(v.get("position"),a.position))return why="actor "+a.id+": invalid stage, room or position",false;
+    if(v.get("rotation").type!=Value::Null&&!point(v.get("rotation"),a.rotation,360))return why="invalid actor rotation",false;
+    if(a.rotation.x!=0||a.rotation.z!=0)return why="actor "+a.id+": a game piece turns about the vertical axis only (rotation x and z are 0)",false;
+    a.piece=p->id;a.kind="mod";a.model=a.collision_mesh=story_game_pieces::model_key(p->id);a.behaviour="static";a.scale={1,1,1};
+    return true;
+}
+// The game pieces of a list, room by room, against the room budget (each set's archive once, each placement).
+inline bool game_piece_budget(const std::vector<ManifestActor>& actors,std::string& why,const story_game_pieces::Catalogue& c) {
+    std::map<std::pair<std::string,unsigned>,story_game_pieces::RoomUse> rooms;
+    for(const auto&a:actors){if(!a.game_piece())continue;const auto* p=c.find(a.piece);if(!p)continue;auto&use=rooms[{a.stage,a.room}];use.add(c,*p);
+        if(use.bytes>story_game_pieces::kRoomBudgetBytes)return why="game pieces in "+a.stage+" room "+std::to_string(a.room)+" exceed the room's memory budget for buildings ("+std::to_string(story_game_pieces::kRoomBudgetBytes/1024)+" KiB: each set's archive once and each placement)",false;}
+    return true;
+}
+inline bool game_piece_budget(const std::vector<ManifestActor>& actors,std::string& why) {
+    return std::none_of(actors.begin(),actors.end(),[](const ManifestActor&a){return a.game_piece();})||game_piece_budget(actors,why,story_game_pieces::catalogue());
+}
 // Per-type fields after common placement validation. Native enemy names stay
 // outside parse_actors' allowlist until their runtime adapters are integrated.
 inline bool native_enemy_fields(const Value& m,const Value& v,ManifestActor& a,std::string& why) {
@@ -358,11 +389,17 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
     using namespace world_manifest;out.clear();std::vector<ManifestModel> models;if(!parse_models(m,models,why))return false;const auto& list=m.get("actors");
     if(list.type==Value::Null)return true;
     if(list.type!=Value::Array||list.array.size()>kMaxActorsPerMod)return why="actors must be a list of up to 64",false;
-    unsigned need=0;if(m.get("requires").type==Value::Object&&!story_game_objects::required_version(m,story_game_objects::catalogue(),need,why))return false;
+    unsigned need=0;if(m.get("requires").type==Value::Object&&!story_game_objects::required_version(m,std::max(story_game_objects::catalogue().version,story_game_pieces::catalogue().version),need,why))return false;
     unsigned chart_marker_count=0;
     for(const auto& v:list.array){ManifestActor a;
         if(!keys(v,{"id","actor","kind","model","animation","look_at","path","collision","behaviour","buoyancy","drift","anchor","grapple_points","distant","shoreline","chart_marker","arrival","attention","stage","room","position","rotation","scale","params","parameters","flag","broken_flag","defeated_flag","drops","carry","combat","native_drops","switch_flag","switch","when","lines","then","texture","talks","variant"}))return why="unknown actor field",false;
         if(!id(v.get("id")))return why="invalid actor id",false;a.id=v.get("id").text;a.actor=v.get("actor").string();
+        if(story_game_pieces::is_reference(a.actor)){
+            if(!game_piece_fields(v,need,a,why))return false;
+            unsigned count=1;for(const auto& old:out){if(old.id==a.id)return why="duplicate actor id",false;if(old.stage==a.stage&&old.room==a.room)++count;}
+            if(count>kMaxActorsPerRoom)return why="actors exceed the 16 per room limit",false;
+            out.push_back(std::move(a));continue;
+        }
         if(a.game_object()){
             if(!game_object_fields(v,need,a,why))return false;
             unsigned count=1;for(const auto& old:out){if(old.id==a.id)return why="duplicate actor id",false;if(old.stage==a.stage&&old.room==a.room)++count;}
@@ -582,7 +619,7 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
         const auto source=std::find_if(out.begin(),out.end(),[&](const ManifestActor& candidate){return candidate.id==a.switch_actor;});
         if(source==out.end()||source->actor!="switch")return why="door source must name a same-mod switch actor",false;
     }
-    return game_object_budget(out,why);
+    return game_object_budget(out,why)&&game_piece_budget(out,why);
 }
 inline bool parse_scenes_impl(const mods::json::Value& m,std::vector<ManifestScene>& out,std::string& why) {
     using namespace world_manifest;out.clear();const auto& list=m.get("scenes");
@@ -722,8 +759,8 @@ inline bool validate_world_packages(const std::vector<std::pair<std::string,mods
     for(const auto& [mod,manifest]:packages){
         std::vector<ManifestActor> actors;std::vector<ManifestScene> scenes;
         if(!parse_actors(manifest,actors,why)||!parse_scenes(manifest,scenes,why)){why=mod+": "+why;return false;}
-        for(const auto&actor:actors)if(actor.game_object())game_objects.push_back(actor);
-        if(!game_object_budget(game_objects,why)){why="enabled packages: "+why;return false;}
+        for(const auto&actor:actors)if(actor.game_object()||actor.game_piece())game_objects.push_back(actor);
+        if(!game_object_budget(game_objects,why)||!game_piece_budget(game_objects,why)){why="enabled packages: "+why;return false;}
         total+=unsigned(actors.size());if(total>128)return why="enabled packages exceed 128 actors overall",false;
         for(const auto&actor:actors)if(actor.chart_marker.enabled&&++chart_markers>32)return why="enabled packages exceed 32 island chart markers",false;
         std::vector<std::string> names;

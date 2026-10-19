@@ -250,7 +250,12 @@ struct RoomUse {
 
 // The manifest's catalogue version gate: 0 when it names none. False with a reason when it is not a
 // version number or newer than `c`.
+inline bool required_version(const mods::json::Value& manifest, unsigned have, unsigned& need, std::string& why);
 inline bool required_version(const mods::json::Value& manifest, const Catalogue& c, unsigned& need, std::string& why) {
+    return required_version(manifest, c.version, need, why);
+}
+// (`have`: the port's catalogue version; game pieces share it, story_game_pieces_catalogue.h)
+inline bool required_version(const mods::json::Value& manifest, unsigned have, unsigned& need, std::string& why) {
     using mods::json::Value;
     need = 0;
     const Value& req = manifest.get("requires");
@@ -263,8 +268,8 @@ inline bool required_version(const mods::json::Value& manifest, const Catalogue&
     if (g.type != Value::Number || !std::isfinite(g.number) || g.number < 1 || g.number > 1000 || std::floor(g.number) != g.number)
         return why = "requires.game_objects must be a version number", false;
     need = unsigned(g.number);
-    if (need > c.version)
-        return why = "needs game objects catalogue version " + std::to_string(need) + "; this port has version " + std::to_string(c.version) +
+    if (need > have)
+        return why = "needs game objects catalogue version " + std::to_string(need) + "; this port has version " + std::to_string(have) +
                      " (update the port)",
                false;
     return true;

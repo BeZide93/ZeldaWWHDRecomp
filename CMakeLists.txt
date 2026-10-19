@@ -170,6 +170,15 @@ execute_process(COMMAND ${CMAKE_COMMAND} -DDIR=${CMAKE_SOURCE_DIR}/runtime/asset
 if(NOT WWHD_GAME_OBJECT_RECIPES_RESULT EQUAL 0)
   message(FATAL_ERROR "game object recipes: ${WWHD_GAME_OBJECT_RECIPES_RESULT}")
 endif()
+# ---- the game pieces catalogue's recipes (story_game_pieces_catalogue.h): one per set of island
+# buildings sharing their textures, in runtime/assets/game_pieces; references into the game only
+file(GLOB WWHD_GAME_PIECE_RECIPE_FILES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/runtime/assets/game_pieces/*.recipe.json)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${WWHD_GAME_PIECE_RECIPE_FILES} ${CMAKE_SOURCE_DIR}/cmake/EmbedGamePieceRecipes.cmake)
+execute_process(COMMAND ${CMAKE_COMMAND} -DDIR=${CMAKE_SOURCE_DIR}/runtime/assets/game_pieces -DOUT=${CMAKE_BINARY_DIR}/generated/game_piece_recipes.inc
+                        -P ${CMAKE_SOURCE_DIR}/cmake/EmbedGamePieceRecipes.cmake RESULT_VARIABLE WWHD_GAME_PIECE_RECIPES_RESULT)
+if(NOT WWHD_GAME_PIECE_RECIPES_RESULT EQUAL 0)
+  message(FATAL_ERROR "game piece recipes: ${WWHD_GAME_PIECE_RECIPES_RESULT}")
+endif()
 # Only targets created from here on get the generated headers: the game code (gamecode, above) must keep
 # exactly runtime/include and the generated game code as its include paths, because code mods compile
 # against its flags on the player's machine (tools/release/package.py refuses anything else).
@@ -3393,6 +3402,7 @@ add_test(NAME story_world_collision_proof_runtime COMMAND story_world_collision_
 if(Python3_Interpreter_FOUND)
   add_test(NAME story_world_objects_w0_assets COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/story_mods/test_world_objects_w0.py)
   add_test(NAME story_game_objects_tool COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/story_mods/test_game_objects.py)
+  add_test(NAME story_game_pieces_tool COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/story_mods/test_game_piece_model.py)
 endif()
 
 target_sources(mod_content_fs_test PRIVATE runtime/src/mods/story_world_collision_mesh.cpp)
