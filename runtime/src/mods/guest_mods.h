@@ -1,5 +1,7 @@
 // Mod SDK v2 runtime. Guest modules load only at startup, through the mod manager's trust flow.
 #pragma once
+#include <memory>
+namespace story_game_pieces {struct BuiltSet;}
 #include <cstdint>
 #include <array>
 #include <functional>
@@ -60,6 +62,9 @@ using PackageObserver=void(*)(const std::string& mod,const std::string& name,con
 void set_package_observer(PackageObserver observer);
 // World editor: prepares an imported model of `mod` (its manifest entry) for the game; `archive` names it.
 bool editor_prepare_model(const std::string& mod,const std::string& package_dir,const std::string& data_dir,const mods::json::Value& model,std::string& archive,std::string& why);
+// The world editor's island building (any thread but the game's: it runs the building converter): the
+// set of piece `id` built into `cache_dir` (story_game_pieces::build); throws with a player-facing reason.
+std::shared_ptr<const story_game_pieces::BuiltSet> editor_build_piece(const std::string& id,const std::string& cache_dir);
 void logic_service(Cpu* cpu); // once per game logic pass, never interpolation-only
 void frame(uint64_t step); // original full-step clock
 void draw_frame(Cpu* cpu,uint64_t executed_step); // once per actual logic pass, including true60

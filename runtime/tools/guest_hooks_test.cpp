@@ -1,3 +1,4 @@
+#include "mods/story_game_pieces.h"
 #include <algorithm>
 #include <array>
 #include <cassert>
@@ -202,6 +203,13 @@ bool bounds_for(const std::string&,story_notebook::WorldPoint&,story_notebook::W
 std::string prepare(const std::string&,const story_notebook::ManifestModel&,const std::string&,const std::string&,const std::vector<std::string>&,const std::string&,const std::string&,bool,bool){return {}; }
 }
 namespace editor { bool launch_mode(){return false;} }  // a start without --editor
+// Island buildings: the loader asks for the pieces its actors use (none here) and builds nothing.
+namespace story_game_pieces {
+std::vector<std::string> used(const std::vector<story_notebook::ManifestActor>& actors){std::vector<std::string> out;for(const auto&a:actors)if(a.game_piece())out.push_back(a.piece);return out;}
+std::string cache_directory(const std::string&){return {};}
+std::shared_ptr<const BuiltSet> build(const std::string&,const std::string&,const std::vector<std::string>&,const std::string&,const std::string&){throw std::runtime_error("no buildings in loader tests");}
+bool register_for_mod(const std::string&,const BuiltSet&,const std::string&,bool,std::string& why){return why="no buildings in loader tests",false;}
+}
 namespace story_actors {
 bool placed_chest_item(uint32_t,std::string&,std::string&){return false;}
 bool resident_event_declaration(const std::string&,const std::string&,ResidentEventDeclaration&){return false;}

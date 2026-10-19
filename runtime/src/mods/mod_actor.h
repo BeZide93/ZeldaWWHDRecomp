@@ -93,6 +93,12 @@ bool redeclare(uint32_t token,const story_notebook::ManifestActor&,const std::st
                story_notebook::WorldPoint minimum,story_notebook::WorldPoint maximum,bool skinned,std::vector<std::string> clips,ModelRig rig,bool apply=true);
 // Internal collision-free distant/coast variants; never exposed as behaviour callbacks.
 bool visual_role(uint32_t token,bool distant);
+// Game pieces (story_game_pieces.h): a set archive holds one model per piece part (resource slot i+1 is
+// models[i]); a piece's declaration names its first model's slot, and its second model and the light set
+// of each part (settingTevStruct BG types 1..4) are registered here. Before install or on the game thread.
+struct PieceDraw {int second_index=-1;int light[2]={1,4};};
+bool register_piece_set(const std::string& archive,std::vector<std::string> models);
+bool set_piece_draw(const std::string& archive,int index,PieceDraw);
 bool owns_visual(uint32_t actor,uint32_t token);
 // World editor: the profile is installed, so declare() may add actors while the game runs (their
 // records are in place for all 128 declarations).

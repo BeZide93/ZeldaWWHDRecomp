@@ -532,6 +532,16 @@ bool editor_register_model(const std::string& mod,const std::string& model,const
     LOG("[actors] %s:%s model prepared for the editor (%s)",mod.c_str(),model.c_str(),archive.c_str());
     return true;
 }
+bool has_model(const std::string& mod,const std::string& model){return g_models.contains({mod,model});}
+bool register_piece_model(const std::string& mod,const std::string& model,const std::string& archive,int index,story_notebook::WorldPoint minimum,story_notebook::WorldPoint maximum,bool editor,std::string& why){
+    if(g_installed&&!editor)return why="actor models must be registered before hooks are installed",false;
+    if(mod.empty()||model.rfind("piece:",0)!=0||archive.size()!=31||index<1||index>16)return why="invalid game piece model resource",false;
+    const float lo[]={minimum.x,minimum.y,minimum.z},hi[]={maximum.x,maximum.y,maximum.z};for(unsigned i=0;i<3;++i)if(!std::isfinite(lo[i])||!std::isfinite(hi[i])||lo[i]>hi[i])return why="invalid game piece bounds",false;
+    // a set's pieces share its archive; no mod model may use it
+    for(const auto& [key,entry]:g_models)if(entry.archive==archive&&key.second.rfind("piece:",0)!=0)return why="actor model archive identity collision",false;
+    if(auto found=g_models.find({mod,model});found!=g_models.end())return found->second.archive==archive&&found->second.index==index?true:(why="the game piece changed; restart",false);
+    g_models.emplace(std::make_pair(mod,model),ModelResource{archive,index,minimum,maximum,false,{},{}});return true;
+}
 void set_game_calls(void(*original)(Cpu*,uint32_t),uint32_t(*call)(Cpu*,uint32_t,std::initializer_list<uint32_t>)){g_original=original;g_call=call;}
 void set_scratch_memory(uint32_t guest){g_scratch=guest;story_mail::set_say_restore_record(guest?guest+0x320:0,128);for(size_t i=0;i<g_actors.size();++i)st32(g_scratch+128+uint32_t(i)*4,0xFFFFFFFFu);std::memset(mem::ptr(g_scratch+0x300),0,28);std::memset(mem::ptr(g_scratch+0x400),0,256);std::memset(mem::ptr(g_scratch+kIdentityScratchOffset),0,128*identity::kRecordBytes);std::memset(mem::ptr(g_scratch+kEnemyProfilesScratchOffset),0,kScratchBytes-kEnemyProfilesScratchOffset);for(size_t i=0;i<g_actors.size();++i)if(g_actors[i].enemy_token)st32(g_scratch+kEnemyEpochScratchOffset+uint32_t(i)*4,1);}
 void set_scene_start(std::function<bool(const std::string&,const std::string&)> start){g_scene=std::move(start);}

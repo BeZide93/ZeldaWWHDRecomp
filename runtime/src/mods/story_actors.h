@@ -90,6 +90,12 @@ bool editor_live_capable(const std::string& mod,const story_notebook::ManifestAc
 // World editor (main game thread): a model imported while the game runs, prepared as `archive`
 // (actor_model_cache): actors can use it from now on.
 bool editor_register_model(const std::string& mod,const std::string& model,const std::string& archive,bool skinned,std::string& why);
+// Game pieces (story_game_pieces.h): piece `model` ("piece:<id>") of `mod` is resource slot `index` of a
+// set archive that its other pieces share. Before install, or (editor) on the game thread.
+// whether `mod` has the prepared model `model`
+bool has_model(const std::string& mod,const std::string& model);
+bool register_piece_model(const std::string& mod,const std::string& model,const std::string& archive,int index,
+                          story_notebook::WorldPoint minimum,story_notebook::WorldPoint maximum,bool editor,std::string& why);
 // actors removed for the editor and not created again yet
 unsigned editor_pending();
 bool position(Cpu*,const std::string& mod,const std::string& id,story_notebook::WorldPoint& out);

@@ -56,6 +56,7 @@
 #include "story_treasure.h"
 #include "story_actors.h"
 #include "story_resident_routes.h"
+#include "story_game_pieces.h"
 #include "mod_actor.h"
 #include "mod_actor_behavior_core.h"
 #include "actor_model_cache.h"
@@ -486,6 +487,22 @@ void load_world(const std::string& mod,const mods::json::Value& manifest,const s
     std::vector<story_notebook::ManifestItem> model_items;
     if(!story_notebook::parse_items(manifest,model_items,why))exception_report::raise("Item models "+mod+": "+why);
     for(const auto& item:model_items)if(!item.held_model.empty()&&std::none_of(models.begin(),models.end(),[&](const auto&m){return m.id==item.held_model;}))exception_report::raise("Unknown held model "+mod+":"+item.held_model);
+    // Game pieces ("actor": "piece:<id>"): each set is built once from the player's room archive into the
+    // player's model cache, then each piece becomes a model and collision of this mod's placements. A piece
+    // the player's game files can't make (another game version) is left out with a line in the log, like a
+    // game object the game doesn't have; the rest of the mod works.
+    for(const auto& id:story_game_pieces::used(actors)) {
+        std::string failure;
+        try {
+            const auto bridge=BuildBridge::installed(std::string());
+            const auto tool=std::filesystem::path(bridge.builder).parent_path().parent_path()/"story_mods"/"game_piece_model.py";
+            const auto set=story_game_pieces::build(id,story_game_pieces::cache_directory(data_dir),bridge.python,tool.string(),config::game_dir);
+            if(!story_game_pieces::register_for_mod(mod,*set,id,false,why))failure=why;
+        } catch(const std::exception& e) {failure=e.what();}
+        if(failure.empty())continue;
+        LOG("[game_pieces] %s: piece:%s is left out: %s",mod.c_str(),id.c_str(),failure.c_str());
+        actors.erase(std::remove_if(actors.begin(),actors.end(),[&](const auto& a){return a.piece==id;}),actors.end());
+    }
     for(const auto& model:models) {
         const bool actor_uses=std::any_of(actors.begin(),actors.end(),[&](const auto& actor){return actor.kind=="mod"&&actor.model==model.id;});
         const bool item_uses=std::any_of(model_items.begin(),model_items.end(),[&](const auto& item){return item.held_model==model.id;});
@@ -1437,6 +1454,12 @@ bool editor_prepare_model(const std::string& mod,const std::string& package_dir,
         archive=actor_model_cache::prepare(mod,model,package_dir,data_dir,bridge.python,tool.string(),config::game_dir,collision);
         return true;
     } catch(const std::exception& e) {return why=e.what(),false;}
+}
+
+std::shared_ptr<const story_game_pieces::BuiltSet> editor_build_piece(const std::string& id,const std::string& cache_dir){
+    const auto bridge=BuildBridge::installed(std::string());
+    const auto tool=std::filesystem::path(bridge.builder).parent_path().parent_path()/"story_mods"/"game_piece_model.py";
+    return story_game_pieces::build(id,cache_dir,bridge.python,tool.string(),config::game_dir);
 }
 
 std::vector<ModIdentity> enabled_mods() {

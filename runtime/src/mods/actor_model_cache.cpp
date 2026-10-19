@@ -79,6 +79,12 @@ std::string prepare(const std::string& mod,const story_notebook::ManifestModel& 
     {std::lock_guard guard(mutex);entries.emplace(identity,Entry{mod,model.id,destination.string(),info.triangle_count,minimum,maximum,std::move(clips),std::move(rig),std::move(collision_data),shoreline});}
     return identity;
 }
+bool register_external(const std::string& identity,const std::string& path){
+    if(identity.size()!=31||path.empty())return false;
+    std::lock_guard guard(mutex);auto found=entries.find(identity);
+    if(found!=entries.end())return found->second.path==path&&found->second.mod.empty();
+    entries.emplace(identity,Entry{"","",path});return true;
+}
 bool shoreline_for(const std::string& archive){std::lock_guard guard(mutex);auto found=entries.find(archive);return found!=entries.end()&&found->second.shoreline;}
 unsigned triangles_for(const std::string& archive){std::lock_guard guard(mutex);auto found=entries.find(archive);return found==entries.end()?0:found->second.triangles;}
 std::shared_ptr<const story_world_collision::mesh::Mesh> collision_for(const std::string& archive){std::lock_guard guard(mutex);auto found=entries.find(archive);return found==entries.end()?nullptr:found->second.collision;}
