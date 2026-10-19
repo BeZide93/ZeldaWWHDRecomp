@@ -175,7 +175,7 @@ Drift speeds use game units per second. `wind_speed` follows the native wind
 direction and accepts 0 to 100. The optional current gives world-space X/Z
 components, each from −100 to 100. `max_speed` caps the combined horizontal
 speed, from above zero to 100; its default is 30. A drifting body needs nonzero
-wind or current movement. Drifting collision respects islands, protected areas,
+wind or current movement. Drifting collision respects islands, protected places,
 other mod objects and the ship; a blocked move does not move through them.
 
 An optional anchor confines the object's origin to a horizontal circle. `point`
@@ -218,24 +218,27 @@ least 16 free slots. Registration also requires native heap headroom: at least
 actor heap is finalized. Passing the mesh limits does not guarantee an
 allocation in every room.
 
-Placement checks use the player's installed game resources. They protect native
-collision bounds, authored actors and fixed events, and routes. The current
-index is deliberately conservative:
+Placement checks use the player's installed game resources: the room's collision and its layout, read
+where the game stores them (world coordinates, on the sea as in dungeons). An object keeps 50 units clear of:
 
-- Every authored native actor or tag, across layers, reserves 10,000 units around
-  its position in X/Z.
-- Native routes reserve a 2,000-unit corridor.
-- Protected geometry and routes receive an additional 100-unit placement clearance.
-  Native ground wholly below the object may touch its base; penetrating it is refused.
-- An object must stay inside the indexed room. A sea object that crosses into a
-  neighbouring square is refused until coverage for that placement is available.
-- Missing, malformed or unsupported collision, event or route data prevents
-  placement rather than treating the room as empty.
+- the room's walls and ground. Ground wholly below the object may touch its base; going into it is refused;
+- what the island needs, each by its real size: villagers (a radius of 100 units), their walking routes
+  (a corridor 120 units to each side), chests (120), doors (250), items (80), switches (150), the places
+  where Link arrives (150), and cutscene and message areas by their own radius and height. Any other
+  object counts with a radius of 150 units (more when the layout scales it up);
+- grass, flowers, trees, palms, birds, crabs and the light and weather areas don't count: an object may
+  stand over them;
+- other mods' world objects and the King of Red Lions.
 
-A conflict can therefore reserve more space than the visible island or event.
-Move or shrink the object and query again. Do not bypass a coverage error to
-place an island beside an unknown event. Conflicts between mod objects and
-collision-memory budgets are reported alongside native placement findings.
+An object must stay inside the indexed room. A sea object that crosses into a neighbouring square is
+refused until coverage for that placement is available. Missing, malformed or unsupported collision, event
+or route data prevents placement rather than treating the room as empty. Drifting objects stop at the same
+things as they move.
+
+A place that isn't clear is refused with what is in the way, in plain words with the game's own name
+("a door of the island", KNOB00D); `placement_conflicts` lists every finding. In the editor the selected
+object's footprint shows green or red with the first reason, and hovering it lists them all. Conflicts
+between mod objects and collision-memory budgets are reported alongside native placement findings.
 
 ## Editor commands
 

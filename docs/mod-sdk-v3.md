@@ -278,10 +278,12 @@ memory for the Outset set while a room uses it). All the buildings of a room, ev
 share a budget of 24 MiB: each set once, and each building about 50 KiB (all four sets of today
 together take about 17 MiB). A mod that goes over it is refused with the reason. Buildings count toward the 16 actors per room, return when their room
 loads again, and full and portable save states keep them. A building may stand on an island, but not
-in the way of what the island needs: its footprint (with 50 units around it) must keep clear of the
-island's villagers and their walking routes, chests, doors, items, switches, cutscene and message areas
-and other objects (an object whose size isn't known counts with a radius of 150 units). Grass, flowers,
-trees, palms and birds may be under it. It also stays in its room's square and clear of other world
+in the way of what the island needs, by the same rule as every world object (world-objects.md): its
+footprint (with 50 units around it) must keep clear of the island's villagers and their walking routes,
+chests, doors, items, switches, the places where Link arrives, cutscene and message areas and other objects
+(an object whose size isn't known counts with a radius of 150 units). Grass, flowers, trees, palms and
+birds may be under it, and unlike other world objects it may stand against the island's slopes and walls
+as its original did. It also stays in its room's square and clear of other world
 objects. A place that isn't clear is refused with what is in the way (in the editor, the footprint turns
 red and says so; an MCP `add_actor` or move lists every reason, with the game's own names); a building that is refused when the game starts is left out with a line in the log.
 

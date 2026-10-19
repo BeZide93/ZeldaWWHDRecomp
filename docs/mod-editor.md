@@ -163,7 +163,7 @@ has no flags, drops or dialogue.
 (docs/mod-sdk-v3.md, "Island buildings"). The first time a mod places one, the editor makes it from
 your game files: the list says "(preparing...)" and the building appears in the picture a moment
 later, when it is ready. A building turns about the vertical axis only and keeps its size; it has no variants. While
-a building is selected or dragged, its footprint shows in the picture: green where it may stand, red
+a building (or any world object) is selected or dragged, its footprint shows in the picture: green where it may stand, red
 with what is in the way (a villager, a villager route, a chest, a door, a cutscene area...) where it
 may not. The label names the first thing ("In the way: a door of the island (and 2 more)"); hover it
 to see them all, with the game's own names. Moving it there is refused with the same reasons. If your
