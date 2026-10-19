@@ -1327,6 +1327,12 @@ add_executable(story_game_objects_test runtime/tools/story_game_objects_test.cpp
 target_include_directories(story_game_objects_test PRIVATE runtime/src)
 target_compile_options(story_game_objects_test PRIVATE -UNDEBUG)
 add_test(NAME story_game_objects COMMAND story_game_objects_test)
+# Game pieces (story_game_pieces_catalogue.h): the port's building recipes, the recipe rules, what a manifest may say
+# about a piece, and the 8 MiB room budget for buildings (manifests, packages and run time)
+add_executable(story_game_pieces_test runtime/tools/story_game_pieces_test.cpp)
+target_include_directories(story_game_pieces_test PRIVATE runtime/src)
+target_compile_options(story_game_pieces_test PRIVATE -UNDEBUG)
+add_test(NAME story_game_pieces COMMAND story_game_pieces_test)
 add_executable(skinned_model_validation_test runtime/tools/skinned_model_validation_test.cpp)
 target_include_directories(skinned_model_validation_test PRIVATE runtime/src)
 target_compile_options(skinned_model_validation_test PRIVATE -UNDEBUG)

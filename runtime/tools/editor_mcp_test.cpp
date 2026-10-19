@@ -45,6 +45,11 @@ int g_failures = 0;
 Value json(const char* text) { return mods::json::parse(text); }
 
 struct FakeHost : editor::Host {
+    // world objects (island buildings): the game would check the room; here every place is clear
+    bool world_object_query(const std::string&, const story_notebook::ManifestActor& actor, bool, Value& result, std::string&) override {
+        result["clear"] = true, result["id"] = actor.id, result["conflicts"].type = Value::Array;
+        return true;
+    }
     bool apply_actors(const std::string&, const std::vector<story_notebook::ManifestActor>&, const std::vector<std::string>&, std::string& note,
                       std::string&) override {
         note = "";
@@ -656,6 +661,18 @@ void game_object_tools() {
     CHECK(!is_error(v) && text_of(v).find("\"actor\":\"game:palm\"") != std::string::npos);
     v = call(h, "set_actor", json(R"({"id":"palm-1","property":"params","value":5})"));
     CHECK(is_error(v) && text_of(v).find("game object") != std::string::npos);
+    v = call(h, "check_package", Value());
+    CHECK(!is_error(v) && text_of(v).find("\"valid\":true") != std::string::npos);
+    // island buildings through the same path: "piece:<id>", no native names (room archive, nodes, groups)
+    v = call(h, "list_game_objects", json(R"({"category":"Buildings"})"));
+    CHECK(!is_error(v) && text_of(v).find("piece:outset-house-small") != std::string::npos && text_of(v).find("sea_Room") == std::string::npos &&
+          text_of(v).find("KIRI") == std::string::npos);
+    v = call(h, "add_actor", json(R"({"type":"piece:outset-well-shelter","id":"well-1","at":"position","position":{"x":100,"y":1040,"z":-201300},"stage":"sea","room":11,"snap":false})"));
+    CHECK(!is_error(v));
+    v = call(h, "get_actor", json(R"({"id":"well-1"})"));
+    CHECK(!is_error(v) && text_of(v).find("\"actor\":\"piece:outset-well-shelter\"") != std::string::npos);
+    v = call(h, "set_actor", json(R"({"id":"well-1","property":"lines","value":"hi"})"));
+    CHECK(is_error(v));
     v = call(h, "check_package", Value());
     CHECK(!is_error(v) && text_of(v).find("\"valid\":true") != std::string::npos);
     CHECK(be.asked == 0);

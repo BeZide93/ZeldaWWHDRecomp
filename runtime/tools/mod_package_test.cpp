@@ -862,6 +862,20 @@ int main(int argc, char** argv) {
                 assert(!install(objects.string(),error)&&error.find("game data")!=std::string::npos&&error.find(name)!=std::string::npos);
                 fs::remove(objects/"assets"/name);
             }
+            // island buildings by reference: the same rule (no BFRES, SZS, DZB or other game data in the package)
+            {
+                auto pm=mods::json::parse(R"({"format_version":1,"id":"buildings","name":"Buildings","version":"1.0.0","game_id":"wwhd","kind":"content","content_dir":"content","requires":{"game_objects":2},"actors":[{"id":"house","actor":"piece:outset-house-small","stage":"sea","room":12,"position":{"x":0,"y":0,"z":0},"rotation":{"x":0,"y":90,"z":0}}]})");
+                auto buildings=root/"buildings";fs::create_directories(buildings/"content");std::ofstream(buildings/"content"/"buildings.marker")<<"original fixture";
+                std::ofstream(buildings/"manifest.json")<<mods::json::dump(pm);
+                assert(install(buildings.string(),error)&&view("buildings").compatible);
+                fs::create_directories(buildings/"assets");
+                for(const auto& [name,bytes]:std::vector<std::pair<std::string,std::string>>{{"room.dzb","x"},{"Room44.bfres","x"},{"house.bin","FRES...."},{"sea_Room44.szs","x"}}){
+                    pm["id"]="buildings-"+std::to_string(name.size());std::ofstream(buildings/"manifest.json")<<mods::json::dump(pm);
+                    {std::ofstream f(buildings/"assets"/name,std::ios::binary);f<<bytes;}
+                    assert(!install(buildings.string(),error)&&error.find("game data")!=std::string::npos&&error.find(name)!=std::string::npos);
+                    fs::remove(buildings/"assets"/name);
+                }
+            }
             // a package without game objects keeps its own rules (a content mod may replace game files)
             std::ofstream(objects/"assets"/"Lwood.szs")<<"x";om["id"]="objects-none";om.object.erase("actors");om.object.erase("requires");
             std::ofstream(objects/"manifest.json")<<mods::json::dump(om);assert(install(objects.string(),error));

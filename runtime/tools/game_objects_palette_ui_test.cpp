@@ -19,10 +19,11 @@ int main(int argc, char** argv) {
     ImGui::CreateContext(); auto& io = ImGui::GetIO(); io.IniFilename = nullptr;
     io.DisplaySize = ImVec2(960, 640); io.DeltaTime = 1.f / 60;
     assert(ImGui_ImplSDLRenderer3_Init(renderer));
-    const Value list = mods::json::parse(R"({"catalogue": 1, "categories": ["Furniture", "Trees and plants"], "objects": [
+    const Value list = mods::json::parse(R"({"catalogue": 1, "categories": ["Furniture", "Trees and plants", "Buildings"], "objects": [
         {"type": "game:table", "id": "table", "label": "Wooden table", "category": "Furniture", "description": "a table or a stool", "available": false, "why": "not available in your game files", "live": true},
         {"type": "game:palm", "id": "palm", "label": "Palm tree", "category": "Trees and plants", "description": "a palm that sways", "available": true, "live": true},
-        {"type": "game:tree-large", "id": "tree-large", "label": "Large tree", "category": "Trees and plants", "description": "a leafy tree", "available": true, "live": false}]})");
+        {"type": "game:tree-large", "id": "tree-large", "label": "Large tree", "category": "Trees and plants", "description": "a leafy tree", "available": true, "live": false},
+        {"type": "piece:outset-house-small", "id": "outset-house-small", "label": "Small Outset house", "category": "Buildings", "description": "a small island house", "available": null, "live": true, "building": true, "preparing": true}]})");
     overlay::game_objects::Palette palette;
     std::string picked;
     auto frame = [&](const char* name = nullptr) {
@@ -46,7 +47,9 @@ int main(int argc, char** argv) {
     for (int i = 0; i < 3; i++) frame();
     frame("game-objects-palette");
     // every object, by category
-    assert(palette.shown.size() == 3 && palette.shown.count("game:palm") && palette.shown.count("game:table"));
+    assert(palette.shown.size() == 4 && palette.shown.count("game:palm") && palette.shown.count("game:table"));
+    // an island building being prepared stays listed (and can be picked) under Buildings
+    assert(palette.shown.count("piece:outset-house-small") && palette.shown["game:tree-large"].y < palette.shown["piece:outset-house-small"].y);
     assert(palette.shown["game:table"].y < palette.shown["game:palm"].y && palette.shown["game:palm"].y < palette.shown["game:tree-large"].y);
     // a click picks it
     click(palette.shown["game:palm"]);

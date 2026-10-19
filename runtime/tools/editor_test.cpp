@@ -988,7 +988,9 @@ void game_objects() {
     s.add_package("editor-test", "Editor test", "", json(kManifest));
     Value r = s.run("list_game_objects");
     const auto& catalogue = story_game_objects::catalogue();
-    CHECK(ok(r) && r.get("result").get("catalogue").number == catalogue.version && r.get("result").get("objects").array.size() == catalogue.entries.size());
+    const auto& pieces = story_game_pieces::catalogue();  // island buildings are listed too (game_pieces below)
+    CHECK(ok(r) && r.get("result").get("catalogue").number == std::max(catalogue.version, pieces.version) &&
+          r.get("result").get("objects").array.size() == catalogue.entries.size() + pieces.pieces.size());
     for (const auto& o : r.get("result").get("objects").array) {
         if (o.get("id").string() == "palm") CHECK(o.get("available").boolean && o.get("type").string() == "game:palm" && o.get("live").boolean && o.get("scale").get("max").number == 1);
         if (o.get("id").string() == "table") CHECK(!o.get("available").boolean && o.get("why").string() == "not available in your game files" && o.get("variants").array.size() == 3);
@@ -1000,6 +1002,7 @@ void game_objects() {
         std::set<std::string> categories;
         size_t trees = 0;
         for (const auto& e : catalogue.entries) categories.insert(e.category), trees += e.category == "Trees and plants";
+        for (const auto& p : pieces.pieces) categories.insert(p.category);
         CHECK(ok(r) && r.get("result").get("objects").array.size() == trees && r.get("result").get("categories").array.size() == categories.size());
     }
     // a shared batch (grass) says that it changes when the room loads again; its variants name their units
@@ -1142,6 +1145,63 @@ void route_commands() {
     CHECK(editor::resident_pace(*actor_of(s, "walker")) == 30 && editor::resident_pace(*actor_of(s, "chatter")) == 0 && editor::route_refusal(*actor_of(s, "walker")).empty());
 }
 
+// Island buildings (commands_game_pieces.cpp): listed under Buildings with this mod's state, add_actor "piece:<id>"
+// (requires, yaw only, scale 1, no other field), preparation started once ("preparing…"), validation and undo.
+struct PieceHost : FakeHost {
+    std::map<std::string, std::string> states;
+    int prepared = 0;
+    bool prepare_piece(const std::string& mod, const std::string& id, std::string& note, std::string& why) override {
+        (void)why;
+        ++prepared;
+        states[mod + "/" + id] = "preparing";
+        note = "preparing";
+        return true;
+    }
+    std::string piece_state(const std::string& mod, const std::string& id) override {
+        auto found = states.find(mod + "/" + id);
+        return found == states.end() ? "" : found->second;
+    }
+};
+void game_pieces() {
+    PieceHost host;
+    editor::Session s(&host);
+    s.add_package("editor-test", "Editor test", "", json(kManifest));
+    Value r = s.run("list_game_objects", json(R"({"category": "buildings"})"));
+    const auto& pieces = story_game_pieces::catalogue();
+    CHECK(ok(r) && r.get("result").get("objects").array.size() == pieces.pieces.size());
+    for (const auto& o : r.get("result").get("objects").array) {
+        CHECK(o.get("type").string().rfind("piece:", 0) == 0 && o.get("building").boolean && o.get("state").string().empty() && !o.get("preparing").boolean);
+        CHECK(o.get("scale").get("min").number == 1 && o.get("scale").get("max").number == 1 && o.get("variants").array.empty() && o.get("memory_bytes").number > 0);
+    }
+    r = s.run("list_game_objects", json(R"({"query": "lookout tower"})"));
+    CHECK(ok(r) && r.get("result").get("objects").array.size() >= 1);
+    // add: the manifest names the version it needs; preparation starts once
+    r = s.run("add_actor", json(R"({"type": "piece:outset-house-small"})"));
+    CHECK(ok(r) && r.get("result").get("id").string() == "outset-house-small" && r.get("result").get("state").string() == "preparing" && host.prepared == 1);
+    const Value* a = actor_of(s, "outset-house-small");
+    CHECK(a && a->get("actor").string() == "piece:outset-house-small" && a->get("scale").type == Value::Null && a->get("variant").type == Value::Null);
+    CHECK(s.manifest("editor-test")->get("requires").get("game_objects").number == pieces.find("outset-house-small")->since);
+    r = s.run("add_actor", json(R"({"type": "piece:outset-house-small", "id": "house-2"})"));
+    CHECK(ok(r) && host.prepared == 1 && r.get("result").get("note").string().find("preparing") != std::string::npos);
+    r = s.run("list_game_objects", json(R"({"query": "small outset house"})"));
+    CHECK(ok(r) && r.get("result").get("objects").array.size() == 1 && r.get("result").get("objects").array[0].get("preparing").boolean);
+    CHECK(!ok(s.run("add_actor", json(R"({"type": "piece:outset-castle"})"))));
+    CHECK(!ok(s.run("add_actor", json(R"({"type": "piece:outset-house-small", "id": "Bad Id"})"))));
+    // a turn about the vertical axis only, no scale, no other field
+    CHECK(ok(s.run("rotate_actor", json(R"({"id": "house-2", "rotation": {"x": 0, "y": 90, "z": 0}})"))));
+    CHECK(!ok(s.run("rotate_actor", json(R"({"id": "house-2", "rotation": {"x": 10, "y": 90, "z": 0}})"))));
+    CHECK(!ok(s.run("scale_actor", json(R"({"id": "house-2", "scale": {"x": 1.5, "y": 1.5, "z": 1.5}})"))));
+    CHECK(!ok(s.run("set_actor", json(R"({"id": "house-2", "property": "lines", "value": "hello"})"))));
+    CHECK(ok(s.run("validate")));
+    while (actor_of(s, "outset-house-small")) CHECK(ok(s.run("undo")));
+    CHECK(s.manifest("editor-test")->get("requires").get("game_objects").type == Value::Null);
+    // a failed preparation shows the reason and the building as unavailable
+    host.states["editor-test/outset-well-shelter"] = "failed: the room archive is not in your game files";
+    r = s.run("list_game_objects", json(R"({"query": "well shelter"})"));
+    CHECK(ok(r) && !r.get("result").get("objects").array[0].get("available").boolean &&
+          r.get("result").get("objects").array[0].get("why").string().find("not in your game files") != std::string::npos);
+}
+
 int main(int argc, char** argv) {
     // editor_test --game <game dir> [stage room]: what the editor reads from a game folder (manual check)
     if (argc >= 3 && std::string(argv[1]) == "--game") {
@@ -1171,6 +1231,7 @@ int main(int argc, char** argv) {
     building(argv[1]);
     game_objects();
     route_commands();
+    game_pieces();
     stage_tables();
     ray_pick();
     if (g_failures) {
