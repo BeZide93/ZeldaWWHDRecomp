@@ -130,6 +130,7 @@ namespace threads { Cpu* current() { return nullptr; } uint32_t current_thread()
 namespace mods::packages {
 std::vector<View> list(){return {};}
 std::string package_data_directory(const std::string&){return {};}
+std::string story_cache_directory(){return {};}
 static bool in_startup_callback=false, inspected=false;
 std::string directory() { assert(!in_startup_callback); return {}; }
 void set_guest_builder(GuestInspect, GuestBuild, GuestCacheCheck) {}

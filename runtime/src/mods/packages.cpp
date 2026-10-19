@@ -679,6 +679,7 @@ void initialize(){
     }catch(const std::exception& e){last_problem=e.what();ready=false;records.clear();fprintf(stderr,"[mod-manager] %s\n",e.what());}
 }
 std::string directory(){std::lock_guard guard(mutex);return ready?(root/"Mods").string():"";}
+std::string story_cache_directory(){std::lock_guard guard(mutex);return ready?(root/"story").string():"";}
 std::string package_data_directory(const std::string& id){std::lock_guard guard(mutex);return ready&&records.contains(id)?(root/"Data"/id).string():"";}
 std::vector<SetupView> setup_steps(const std::string& id) {
     std::lock_guard guard(mutex);std::vector<SetupView> out;

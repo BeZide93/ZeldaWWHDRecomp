@@ -958,6 +958,22 @@ add_executable(wua_test tools/wudextract/wua_test.cpp)
 target_link_libraries(wua_test PRIVATE wudcrypto wwhd_zstd)
 
 enable_testing()
+# Every test runs with a user folder of its own (WWHD_USER_DIR: host::config_dir and all that follows it,
+# controls.json, settings.ini, the mod manager and its story caches, and on macOS also the states,
+# screenshots and display.plist, main.cpp apply_portable_mode), so no test writes into the player's
+# folder (button_glyphs saved the Automatic face buttons to the real controls.json). A test that names
+# its own WWHD_USER_DIR keeps it; one that sets it in code overrides this. Deferred to the end of this
+# file so it reaches every test; user_folder_isolation checks it with HOME pointed elsewhere.
+function(wwhd_isolate_test_user_folders)
+  get_property(tests DIRECTORY PROPERTY TESTS)
+  foreach(test IN LISTS tests)
+    get_test_property(${test} ENVIRONMENT environment)
+    if(NOT environment MATCHES "(^|;)WWHD_USER_DIR=")
+      set_property(TEST ${test} APPEND PROPERTY ENVIRONMENT "WWHD_USER_DIR=${CMAKE_BINARY_DIR}/test-users/${test}")
+    endif()
+  endforeach()
+endfunction()
+cmake_language(DEFER CALL wwhd_isolate_test_user_folders)
 add_executable(presentation_queue_test runtime/tools/presentation_queue_test.cpp)
 target_include_directories(presentation_queue_test PRIVATE runtime/src)
 target_compile_options(presentation_queue_test PRIVATE -UNDEBUG)
@@ -1096,6 +1112,8 @@ foreach(move_anim_override IN ITEMS unset native dash sprint)
     endforeach()
 endforeach()
 add_test(NAME mod_move_anim_legacy_startup COMMAND mod_package_test --move-anim-startup unset legacy-dash)
+add_test(NAME mod_story_cache_dir_manager COMMAND mod_package_test --story-cache-dir manager)
+add_test(NAME mod_story_cache_dir_user COMMAND mod_package_test --story-cache-dir user)
 add_test(NAME mod_content_fs_off COMMAND mod_content_fs_test off)
 add_test(NAME mod_content_fs_on COMMAND mod_content_fs_test on)
 add_test(NAME mod_game_source COMMAND mod_package_test --game-source)
@@ -1140,6 +1158,8 @@ add_test(NAME headless_compose COMMAND headless_compose_test)
 add_test(NAME input_mapping COMMAND input_map_test)
 add_test(NAME overlay_release_gate COMMAND release_gate_test)
 add_test(NAME button_glyphs COMMAND button_glyphs_test)
+add_test(NAME user_folder_isolation COMMAND ${CMAKE_COMMAND} -DWORK=${CMAKE_BINARY_DIR}/user_folder_isolation_work
+         -DBUTTON_GLYPHS=$<TARGET_FILE:button_glyphs_test> -P ${CMAKE_SOURCE_DIR}/runtime/tools/user_folder_isolation_test.cmake)
 add_test(NAME screenshot COMMAND screenshot_test)
 add_test(NAME game_font COMMAND game_font_test)
 add_test(NAME rtl_text COMMAND rtl_text_test)

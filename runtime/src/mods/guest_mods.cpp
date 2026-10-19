@@ -876,8 +876,10 @@ const WWHDGuestHostV1 kHost = {
 };
 
 // The NPC catalogue's names and spots come from the player's own game files: generated once by
-// tools/story_mods/npc_catalogue.py (next to the guest builder) into the port's data folder, for the
-// compiled-in recipes (story_npc_catalogue.h); generated again when the recipes change.
+// tools/story_mods/npc_catalogue.py (next to the guest builder) into the mod manager's story folder
+// (packages::story_cache_directory: it follows WWHD_MOD_MANAGER_DIR and WWHD_USER_DIR, so a test run that
+// isolates its manager never writes into the player's folder), for the compiled-in recipes
+// (story_npc_catalogue.h); generated again when the recipes change.
 bool g_story_package=false;
 std::string g_notebook_icon,g_icon_cache;  // the notebook's icon and the built archives' cache (item_icons)
 std::string g_story_data;  // the Story Notebook package's data folder
@@ -888,7 +890,9 @@ void prepare_npc_catalogue() {
     std::string recipes;for(const auto& r:story_notebook::npc_recipes())recipes+=r.second;
     char tag[17];snprintf(tag,sizeof tag,"%016llx",(unsigned long long)std::hash<std::string>{}(recipes));
     const char* forced=getenv("WWHD_NPC_CATALOGUE");
-    const std::filesystem::path dir=std::filesystem::path(host::config_dir())/"story";
+    const std::string cache=mods::packages::story_cache_directory();
+    if(cache.empty()&&!(forced&&*forced)){LOG("[notebook] NPC catalogue: the mod manager has no folder (no names from the game)");return;}
+    const std::filesystem::path dir=cache.empty()?std::filesystem::path(forced).parent_path():std::filesystem::path(cache);
     const std::filesystem::path file=forced&&*forced?std::filesystem::path(forced):dir/("npc_catalogue-"+std::string(tag)+".json");
     std::error_code ec;
     if(!std::filesystem::is_regular_file(file,ec)) {

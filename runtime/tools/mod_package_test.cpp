@@ -400,6 +400,30 @@ int main(int argc, char** argv) {
         assert(mods::lock_on_cycling());
         fs::remove_all(root);return 0;
     }
+    // The NPC catalogue's cache (guest_mods.cpp prepare_npc_catalogue) goes to the configured manager's folder:
+    // a hidden test run that sets WWHD_MOD_MANAGER_DIR (or only WWHD_USER_DIR) never writes into the player's
+    // folder. HOME points into the test folder too, so a wrong path cannot reach the real one.
+    if(argc==3&&std::string(argv[1])=="--story-cache-dir") {
+        const std::string how=argv[2];
+        const auto root=fs::weakly_canonical(unique_temp("wwhd-story-cache-"));
+        env("HOME",(root/"home").string().c_str());env("XDG_CONFIG_HOME",nullptr);env("APPDATA",(root/"appdata").string().c_str());
+        fs::path expected;
+        if(how=="manager") {  // the run scripts: a manager folder of their own, with or without WWHD_USER_DIR
+            env("WWHD_NO_HOST_INPUT","1");env("WWHD_USER_DIR",nullptr);env("WWHD_MOD_MANAGER_DIR",(root/"manager").string().c_str());
+            expected=root/"manager"/"story";
+        } else {  // the player's game with --user-dir / WWHD_USER_DIR: the user folder's ModManager
+            assert(how=="user");
+            env("WWHD_NO_HOST_INPUT",nullptr);env("WWHD_MOD_MANAGER_DIR",nullptr);env("WWHD_USER_DIR",(root/"user").string().c_str());
+            expected=root/"user"/"ModManager"/"story";
+        }
+        assert(mods::packages::story_cache_directory().empty());  // nothing before the manager is set up
+        initialize();
+        const fs::path cache=mods::packages::story_cache_directory();
+        std::cout<<"NPC catalogue cache ("<<how<<"): "<<cache.string()<<"\n";
+        assert(cache==expected);
+        assert(!fs::exists(root/"home")&&!fs::exists(root/"appdata"));  // no default user folder was made
+        fs::remove_all(root);return 0;
+    }
     if(argc==4&&std::string(argv[1])=="--move-anim-startup") {
         auto root=unique_temp("wwhd-move-anim-");
         fs::create_directories(root);
