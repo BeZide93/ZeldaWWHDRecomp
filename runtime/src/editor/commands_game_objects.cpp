@@ -9,6 +9,7 @@
 #include <string>
 
 #include "../mods/story_game_objects_catalogue.h"
+#include "../mods/story_game_pieces_catalogue.h"
 #include "commands.h"
 
 namespace editor {
@@ -108,7 +109,27 @@ Value Session::dispatch_game_objects(const std::string& command, const Value& p,
             v["live"] = host_ ? host_->live_kind(v.get("type").string(), true) : false;
             list.array.push_back(v);
         }
-        r["catalogue"] = double(c.version);
+        // island buildings (commands_game_pieces.cpp): built from the player's room archive when placed
+        const auto& pieces = story_game_pieces::catalogue();
+        const std::string mod = p.get("mod").string().empty() ? open_ : p.get("mod").string();
+        for (const auto& piece : pieces.pieces) {
+            if (seen.insert(piece.category).second) categories.array.push_back(piece.category);
+            if (!category.empty() && lower(piece.category) != lower(category)) continue;
+            if (!query.empty() && lower(piece.id + " " + piece.label + " " + piece.description + " " + piece.category).find(query) == std::string::npos) continue;
+            Value v = game_piece_info(piece);
+            const std::string state = host_ ? host_->piece_state(mod, piece.id) : std::string();
+            v["state"] = state;  // "" not prepared, "preparing", "ready", "failed: ..."
+            v["preparing"] = state == "preparing";
+            if (state.rfind("failed", 0) == 0) {
+                v["available"] = false;
+                v["why"] = state;
+            } else {
+                v["available"] = Value();  // known once it is built (the player's room archive)
+            }
+            v["live"] = host_ ? host_->live_kind("model", true) : false;
+            list.array.push_back(v);
+        }
+        r["catalogue"] = double(std::max(c.version, pieces.version));
         r["categories"] = categories;
         r["objects"] = list;
         ok = true;

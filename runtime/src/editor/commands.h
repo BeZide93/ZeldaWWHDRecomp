@@ -185,6 +185,13 @@ public:
     virtual bool live_kind(const std::string& type, bool fallback) { return fallback; }
     // where the player's game has an object archive (stage_files.h game_archive); "" none, "?" unknown (no game)
     virtual std::string game_archive(const std::string& archive) { return "?"; }
+    // Game pieces (story_game_pieces.h): building piece `id` for `mod` from the player's room archive (the
+    // converter runs on a thread of its own; placements appear once it is ready). The state is "" (not
+    // prepared), "preparing", "ready" or "failed: <reason>".
+    virtual bool prepare_piece(const std::string& mod, const std::string& id, std::string& note, std::string& why) {
+        return why = "the game is not running", false;
+    }
+    virtual std::string piece_state(const std::string& mod, const std::string& id) { return ""; }
 
     // ---- the story tables (optional) ----
     // The mod's quests, quest talks, letters, charts or items changed (`manifest` the whole new manifest,
@@ -392,6 +399,12 @@ bool new_actor(const std::string& type, const std::string& id, const Place& plac
 Value game_object_info(const story_game_objects::Entry& e);
 bool new_game_object(const std::string& type, const std::string& id, const Place& place, const Value& options, Value& out, std::string& why);
 void require_game_objects(Value& manifest, const std::string& type);
+// Game pieces (commands_game_pieces.cpp): one catalogue piece as list_game_objects shows it (type
+// "piece:<id>", category Buildings); a new placed piece at `place` (yaw only, scale 1); the manifest's
+// "requires" raised to what it needs.
+Value game_piece_info(const story_game_pieces::Piece& p);
+bool new_game_piece(const std::string& type, const std::string& id, const Place& place, Value& out, std::string& why);
+void require_game_piece(Value& manifest, const std::string& type);
 // A free actor id from `base` ("sign", "sign-2", ...).
 std::string free_id(const Value& list, const std::string& base);
 // A copy of the actor `a` under id `id`, with its own flags (each flag id gets the new id).

@@ -631,13 +631,15 @@ Value Session::dispatch_build(const std::string& command, const Value& p, std::s
         snap(place.position, info);
         const std::string type = text(p, "type");
         const bool game = story_game_objects::is_reference(type);
-        const std::string id = p.get("id").type == Value::String ? p.get("id").text : free_id(pkg->manifest.get("actors"), game ? story_game_objects::reference(type) : type == "model" || type == "model_enemy" || type == "model_carry" ? text(p, "model").empty() ? type : text(p, "model") : type);
+        const bool piece = story_game_pieces::is_reference(type);  // an island building (commands_game_pieces.cpp)
+        const std::string id = p.get("id").type == Value::String ? p.get("id").text : free_id(pkg->manifest.get("actors"), game ? story_game_objects::reference(type) : piece ? story_game_pieces::reference(type) : type == "model" || type == "model_enemy" || type == "model_carry" ? text(p, "model").empty() ? type : text(p, "model") : type);
         Value a;
-        if (game && !id_ok(id)) return why = "an actor id is 1 to 32 lower-case letters, digits, '-', '_' or '.'", r;
-        if (game ? !new_game_object(type, id, place, p.get("options"), a, why) : !new_actor(type, id, place, text(p, "model"), pkg->manifest, p.get("options"), a, why)) return r;
+        if ((game || piece) && !id_ok(id)) return why = "an actor id is 1 to 32 lower-case letters, digits, '-', '_' or '.'", r;
+        if (piece ? !new_game_piece(type, id, place, a, why) : game ? !new_game_object(type, id, place, p.get("options"), a, why) : !new_actor(type, id, place, text(p, "model"), pkg->manifest, p.get("options"), a, why)) return r;
         if (by_id(pkg->manifest.get("actors"), id)) return why = "the mod has an actor \"" + id + "\" already", r;
         ok = change(*pkg, "Add " + id, [&](Value& m, std::string&) {
             if (game) require_game_objects(m, type);  // "requires": {"game_objects": N}
+            if (piece) require_game_piece(m, type);
             if (m.get("actors").type != Value::Array) m["actors"] = array();
             m["actors"].array.push_back(a);
             return true;
@@ -646,6 +648,15 @@ Value Session::dispatch_build(const std::string& command, const Value& p, std::s
         r["id"] = id;
         r["actor"] = a;
         for (const auto& [k, v] : info.object) r[k] = v;
+        if (piece && host_) {
+            // the piece's set is built from the player's room archive if this mod has no copy yet
+            const std::string ref = story_game_pieces::reference(type), state = host_->piece_state(pkg->mod, ref);
+            std::string note, w;
+            if (state != "ready" && state != "preparing" && !host_->prepare_piece(pkg->mod, ref, note, w)) note = "the building could not be prepared: " + w;
+            if (state == "preparing") note = "preparing... the building appears when it is ready";
+            if (!note.empty()) r["note"] = note;
+            r["state"] = host_->piece_state(pkg->mod, ref);
+        }
         return r;
     }
     if (command == "remove_actor") {

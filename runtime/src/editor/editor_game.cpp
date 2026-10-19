@@ -37,6 +37,7 @@
 #include "../mods/actor_model_cache.h"
 #include "../mods/packages.h"
 #include "../mods/story_actors.h"
+#include "../mods/story_game_pieces.h"
 #include "../mods/story_items.h"
 #include "../mods/story_mail.h"
 #include "../mods/story_mail_book.h"
@@ -80,6 +81,9 @@ void records_tick(bool now = false);   // game thread
 // ---------------------------------------------------------------- status and game-thread jobs
 std::mutex g_status_mu;
 std::string g_status;
+// island buildings being prepared for a mod (prepare_piece): "preparing", "ready", "failed: ..."
+std::mutex g_piece_mutex;
+std::map<std::pair<std::string, std::string>, std::string> g_piece_states;
 uint64_t g_test_load_serial=0;
 Value g_test_load_result; // protected by g_status_mu; read_state/MCP may poll it
 void set_status(const std::string& s) {
@@ -1066,6 +1070,50 @@ public:
         note = "The model is being prepared for the game; actors using it appear when it is ready (a restart is needed for the first model "
                "actor of a game that had none).";
         return true;
+    }
+    bool prepare_piece(const std::string& mod, const std::string& id, std::string& note, std::string& why) override {
+        if (!story_game_pieces::catalogue().find(id)) return why = "no such building", false;
+        {
+            std::lock_guard guard(g_piece_mutex);
+            auto& state = g_piece_states[{mod, id}];
+            if (state == "preparing" || state == "ready") return true;
+            state = "preparing";
+        }
+        const std::string cache = story_game_pieces::cache_directory(mods::packages::package_data_directory(mod));
+        // the converter runs on a thread of its own; the game takes the result at its next pass
+        std::thread([mod, id, cache] {
+            auto finish = [mod, id](const std::string& state) {
+                std::lock_guard guard(g_piece_mutex);
+                g_piece_states[{mod, id}] = state;
+            };
+            std::shared_ptr<const story_game_pieces::BuiltSet> set;
+            try {
+                set = guestmods::editor_build_piece(id, cache);
+            } catch (const std::exception& e) {
+                finish(std::string("failed: ") + e.what());
+                return set_status("Building " + id + ": " + e.what());
+            }
+            post([mod, id, set, finish](Cpu*) {
+                std::string w;
+                if (!story_game_pieces::register_for_mod(mod, *set, id, true, w)) {
+                    finish("failed: " + w);
+                    return set_status("Building " + id + ": " + w);
+                }
+                finish("ready");
+                set_status("Building " + id + " is ready");
+                reapply_mod(mod);
+            });
+        }).detach();
+        note = "preparing... the building is made from your game files and appears when it is ready";
+        return true;
+    }
+    std::string piece_state(const std::string& mod, const std::string& id) override {
+        {
+            std::lock_guard guard(g_piece_mutex);
+            auto found = g_piece_states.find({mod, id});
+            if (found != g_piece_states.end()) return found->second;
+        }
+        return story_actors::has_model(mod, story_game_pieces::model_key(id)) ? "ready" : "";
     }
     bool world_object_query(const std::string& mod, const story_notebook::ManifestActor& actor, bool wireframe, Value& result, std::string& why) override {
         return mod_actor::world_object_query(mod, actor, wireframe, result, why);

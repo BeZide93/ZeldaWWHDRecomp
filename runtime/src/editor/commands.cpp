@@ -82,13 +82,13 @@ const std::vector<CommandInfo> kCommands = {
     // building new content
     {"list_actor_types", "The kinds of actor add_actor places, and which appear without a restart; a kind's variants are the choices of its option (who a resident is).", {}},
     {"add_actor", "Places a new actor of the open mod at Link, at the fly camera or at a position (snapped to the ground).",
-     {{"type", "string", "a list_actor_types type: sign, resident, chest, pot, barrel, crate, switch, door, chuchu, bokoblin, moblin, keese, miniblin, model, model_enemy, model_carry; or a game object \"game:<id>\" (list_game_objects)", true},
+     {{"type", "string", "a list_actor_types type: sign, resident, chest, pot, barrel, crate, switch, door, chuchu, bokoblin, moblin, keese, miniblin, model, model_enemy, model_carry; or a game object \"game:<id>\" or an island building \"piece:<id>\" (list_game_objects)", true},
       {"id", "string", "the new id (default: from the type)"}, {"at", "string", "link (default), camera or position"},
       {"position", "point", "with at = position"}, {"stage", "string", "with at = position (default: Link's)"}, {"room", "integer", "with at = position (default: Link's or the sea square's)"},
       {"angle", "number", "heading in degrees (default: facing like Link or the camera)"}, {"snap", "boolean", "onto the ground below (default true)"},
       {"model", "string", "the model for model types"}, {"options", "object", "resident (who: a list_actor_types variant such as uo2, um1, sa2 or the seated ym1), variant (an enemy's: chuchu green, red, blue or yellow; bokoblin stick, shield or machete), switch (a door's switch id), lines; variant also for a game object (list_game_objects)"}, {"mod", "string", ""}},
      true},
-    {"list_game_objects", "The game's own objects a mod places by reference (add_actor type \"game:<id>\"), by category, with their variants, turn and scale limits and whether the player's game files have them.",
+    {"list_game_objects", "The game's own objects and island buildings a mod places by reference (add_actor type \"game:<id>\" or \"piece:<id>\"; a building is prepared from the player's game files when first placed: state preparing, ready or failed), by category, with their variants, turn and scale limits and whether the player's game files have them.",
      {{"category", "string", "only this category"}, {"query", "string", "only those whose id, label or description contains this"}}},
     // ---- an actor's route (commands_route.cpp): a placed resident who walks (uo1, uo2, uo3, um1, um2) or a skinned model
     {"add_route_point", "Adds a point to an actor's route (its first point starts the route) at Link, the fly camera or a position, snapped to the ground. A resident starts at its position and walks to its points with its own walk; a model's route lists every point, its position first.",
@@ -481,6 +481,9 @@ bool world_placements(Host* host, const std::string& mod, const Value& before, c
             changed = changed || !previous || !current || !(*previous == *current);
         }
         if (!all && !changed) continue;
+        // an island building that is still being made from the game files: the game checks its place when
+        // it is ready (mod_actor::declare runs the same query), and the placement appears then
+        if (actor.game_piece() && host->piece_state(mod, actor.piece) != "ready") continue;
         Value query;
         if (!host->world_object_query(mod, actor, false, query, why)) {
             why = "world object " + actor.id + ": " + (why.empty() ? "placement coverage or collision is unavailable" : why);

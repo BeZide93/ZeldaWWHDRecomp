@@ -64,6 +64,8 @@ inline std::string draw(Palette& p, const Value& list) {
             const std::string type = o.get("type").string();
             std::string label = o.get("label").string();
             if (o.get("live").type == Value::Bool && !o.get("live").boolean && !missing) label += "  (after a restart)";
+            // an island building is made from the player's game files when first placed (story_game_pieces.h)
+            if (o.get("preparing").boolean) label += "  (preparing...)";
             ImGui::PushID(type.c_str());
             ImGui::BeginDisabled(missing);
             if (ImGui::Selectable(label.c_str(), false) && !missing) chosen = type;
@@ -71,7 +73,8 @@ inline std::string draw(Palette& p, const Value& list) {
             const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
             p.shown[type] = ImVec2((a.x + b.x) / 2, (a.y + b.y) / 2);
             if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-                ImGui::SetTooltip("%s%s", o.get("description").string().c_str(), missing ? "\nnot available in your game files" : "");
+                ImGui::SetTooltip("%s%s%s", o.get("description").string().c_str(), missing ? "\nnot available in your game files" : "",
+                                  o.get("building").boolean ? "\nmade from your game files when you place it" : "");
             if (missing) {
                 ImGui::SameLine();
                 ImGui::TextDisabled("not available in your game files");
