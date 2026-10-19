@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 // World editor: island buildings ("piece:<id>", story_game_pieces_catalogue.h) in the Game objects palette.
-// list_game_objects lists them under "Buildings" with whether this mod's copy is prepared; add_actor takes
+// list_game_objects lists them under their category ("Buildings", "Island parts") with whether this mod's copy is prepared; add_actor takes
 // "piece:<id>" as its type and starts building the piece's set from the player's room archive when it is
 // not ready yet ("preparing…"): the placement appears once the converter is done. No game data passes
 // through here: the manifest holds the neutral id and the placement only.
@@ -46,7 +46,7 @@ Value game_piece_info(const story_game_pieces::Piece& p) {
 
 bool new_game_piece(const std::string& type, const std::string& id, const Place& place, Value& a, std::string& why) {
     const auto* p = story_game_pieces::catalogue().find(story_game_pieces::reference(type));
-    if (!p) return why = "\"" + type + "\" is not in the game pieces catalogue (list_game_objects, category Buildings)", false;
+    if (!p) return why = "\"" + type + "\" is not in the game pieces catalogue (list_game_objects, categories Buildings and Island parts)", false;
     if (!place.valid) return why = "no place to put it (Link is not in the scene)", false;
     a = Value();
     a["id"] = id;

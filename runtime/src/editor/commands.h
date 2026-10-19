@@ -403,7 +403,7 @@ Value game_object_info(const story_game_objects::Entry& e);
 bool new_game_object(const std::string& type, const std::string& id, const Place& place, const Value& options, Value& out, std::string& why);
 void require_game_objects(Value& manifest, const std::string& type);
 // Game pieces (commands_game_pieces.cpp): one catalogue piece as list_game_objects shows it (type
-// "piece:<id>", category Buildings); a new placed piece at `place` (yaw only, scale 1); the manifest's
+// "piece:<id>", categories Buildings and Island parts); a new placed piece at `place` (yaw only, scale 1); the manifest's
 // "requires" raised to what it needs.
 Value game_piece_info(const story_game_pieces::Piece& p);
 bool new_game_piece(const std::string& type, const std::string& id, const Place& place, Value& out, std::string& why);

@@ -53,6 +53,26 @@ int main() {
     assert(set && set->archive == "sea_Room44.szs" && set->room == 44 && set->pieces.size() == 6);
     assert(set->archive_bytes > 1000000 && set->archive_bytes < story_game_pieces::kRoomBudgetBytes);
     for (const auto& p : c.pieces) assert(story_game_pieces::neutral_id(p.id) && c.set(p.set));
+    // the island parts: Dragon Roost's shrine, torii, walkways, rope posts and sea rocks, Windfall's windmill cap and
+    // the Forsaken Fortress shipwrecks, each with collision of its own, BG0 light, since catalogue version 3
+    {
+        const std::pair<const char*, const char*> parts[] = {
+            {"dragon-roost-torii", "dragon-roost-kit"}, {"dragon-roost-shrine", "dragon-roost-kit"}, {"dragon-roost-walkway", "dragon-roost-kit"},
+            {"dragon-roost-walkway-turn", "dragon-roost-kit"}, {"dragon-roost-rope-posts", "dragon-roost-kit"}, {"sea-rock-spire", "dragon-roost-kit"},
+            {"sea-rock-pillar", "dragon-roost-kit"}, {"sea-rock-stack", "dragon-roost-kit"}, {"windfall-windmill-cap", "windfall-kit"},
+            {"shipwreck-hull", "fortress-kit"}, {"shipwreck-bow", "fortress-kit"}};
+        uint64_t all_sets = 0;
+        for (const auto& [id, set_id] : parts) {
+            const auto* p = c.find(id);
+            assert(p && p->set == set_id && p->category == "Island parts" && p->since == 3 && p->parts.size() == 1 && p->parts[0].light == 1);
+            assert(p->collision_triangles > 0 && !p->collision_groups.empty() && p->instance_bytes > 0);
+        }
+        assert(c.set("dragon-roost-kit")->room == 13 && c.set("windfall-kit")->room == 11 && c.set("fortress-kit")->room == 1);
+        for (const char* set_id : {"dragon-roost-kit", "windfall-kit", "fortress-kit"}) all_sets += c.set(set_id)->archive_bytes;
+        // every island part of the three sets fits one room together
+        assert(all_sets < story_game_pieces::kRoomBudgetBytes);
+        assert(c.version >= 3);
+    }
     assert(story_game_pieces::reference("piece:outset-house-small") == "outset-house-small" && story_game_pieces::reference("game:palm").empty());
     assert(story_game_pieces::model_key("x") == "piece:x");
     assert(story_game_pieces::light_type("bg0") == 1 && story_game_pieces::light_type("bg3") == 4 && !story_game_pieces::light_type("bg4") &&

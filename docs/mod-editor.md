@@ -162,7 +162,8 @@ it, its **Scale**. Each change makes the object again in its place (one undo ste
 has no flags, drops or dialogue.
 
 **Buildings** in the same list are the islands' own houses, towers and shelters
-(docs/mod-sdk-v3.md, "Island buildings"). The first time a mod places one, the editor makes it from
+(docs/mod-sdk-v3.md, "Island buildings"); **Island parts** are smaller pieces of other islands made the
+same way (Dragon Roost's shrine, torii, walkways and sea rocks, Windfall's windmill cap, shipwrecks). The first time a mod places one, the editor makes it from
 your game files: the list says "(preparing...)" and the building appears in the picture a moment
 later, when it is ready. A building turns about the vertical axis only and keeps its size; it has no variants. While
 a building (or any world object) is selected or dragged, its footprint shows in the picture: green where it may stand, red

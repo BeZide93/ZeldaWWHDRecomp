@@ -1193,7 +1193,15 @@ void game_pieces() {
     s.add_package("editor-test", "Editor test", "", json(kManifest));
     Value r = s.run("list_game_objects", json(R"({"category": "buildings"})"));
     const auto& pieces = story_game_pieces::catalogue();
-    CHECK(ok(r) && r.get("result").get("objects").array.size() == pieces.pieces.size());
+    size_t buildings = 0, parts = 0;
+    for (const auto& p : pieces.pieces) (p.category == "Buildings" ? buildings : parts) += 1;
+    CHECK(ok(r) && r.get("result").get("objects").array.size() == buildings && buildings > 0);
+    // island parts (rocks, a torii, walkways, a windmill cap, shipwrecks) are their own category
+    Value kit = s.run("list_game_objects", json(R"({"category": "island parts"})"));
+    CHECK(ok(kit) && kit.get("result").get("objects").array.size() == parts && parts >= 10);
+    bool listed = false;
+    for (const auto& c : kit.get("result").get("categories").array) listed |= c.string() == "Island parts";
+    CHECK(listed);
     for (const auto& o : r.get("result").get("objects").array) {
         CHECK(o.get("type").string().rfind("piece:", 0) == 0 && o.get("building").boolean && o.get("state").string().empty() && !o.get("preparing").boolean);
         CHECK(o.get("scale").get("min").number == 1 && o.get("scale").get("max").number == 1 && o.get("variants").array.empty() && o.get("memory_bytes").number > 0);

@@ -273,6 +273,29 @@ middle of the building at its lowest point.
 | `piece:oasis-cabana` | The Private Oasis holiday cabana with its thatched roof, veranda and lamps | |
 | `piece:tingle-tower` | Tingle's painted wooden tower with its ladder and fenced lookout (without the head on top) | |
 
+**Island parts** (the palette's "Island parts", catalogue version 3) are made the same way from other
+islands' room models: Dragon Roost's shrine pieces and walkways and its sea rocks, Windfall's windmill
+cap, and the Forsaken Fortress shipwrecks. Each has collision of its own and takes the light of the
+room it stands in.
+
+| Piece | What it is | Its base |
+|---|---|---|
+| `piece:dragon-roost-shrine` | Dragon Roost's round stone shrine platform with its steps and torii | 1000 units under its walkable top: place it at ground height minus 1000 |
+| `piece:dragon-roost-torii` | the shrine gate alone: two pillars and their cross beams | at the ground |
+| `piece:dragon-roost-walkway` | a straight wooden plank walkway | at the ground |
+| `piece:dragon-roost-walkway-turn` | a wooden plank walkway with a bend | at the ground |
+| `piece:dragon-roost-rope-posts` | two wooden posts joined by a rope | at the ground |
+| `piece:sea-rock-spire` | a tall, slim rock standing in the sea | 1000 units under the sea: place it at y -1000 |
+| `piece:sea-rock-pillar` | a rock pillar rising from the sea | 1000 units under the sea |
+| `piece:sea-rock-stack` | a narrow rock stack in the sea | 1000 units under the sea |
+| `piece:windfall-windmill-cap` | the top of Windfall's windmill: its pointed roof, the gallery ring and posts | at its gallery floor |
+| `piece:shipwreck-hull` | the hull of a wrecked ship, upright in the sea with its broken mast | about 370 units under the sea |
+| `piece:shipwreck-bow` | the bow of a wrecked ship lying in the sea | about 1050 units under the sea |
+
+A piece's position is its lowest point; the rocks, the shrine and the wrecks reach under the sea in their
+own islands, so their position is that far below the sea or ground. The island's water surface is not
+ground for the placement check, so they may stand in the sea.
+
 The buildings of one island share their textures and are built together (about 5.1 MiB of game
 memory for the Outset set while a room uses it). All the buildings of a room, every package's,
 share a budget of 24 MiB: each set once, and each building about 50 KiB (all four sets of today
