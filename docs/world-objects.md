@@ -143,13 +143,27 @@ mod and 32 MiB per room. Each material adds one draw, so merge materials that
 share a texture and keep small repeating textures where they suffice.
 
 A model with one opaque, single-sided material converts exactly as before.
-Skinned models keep one opaque material.
+
+Animated (skinned) models can use several materials too, with the same kinds and
+limits. Every primitive is bound to the model's one skin, so all parts of the
+model follow the same bones. Where two materials meet, the border vertices
+belong to both primitives; give them the same joints and weights in both (Blender
+does this when one mesh has several material slots) and the parts stay joined in
+every pose. An animated model with one opaque, single-sided material also converts
+exactly as before. See [Skinned models and motion](mod-sdk-v3.md#skinned-models-and-motion).
 
 `examples/guest-mods/world-objects-w5` contains an island with six materials:
 sand, grass, rock and wood, and cut-out fences and bushes. Its
 [`assets/make_fixtures.py`](../examples/guest-mods/world-objects-w5/assets/make_fixtures.py)
 reproduces the model and textures. It occupies the same sea area as the other
 island examples, so enable it on its own.
+
+`examples/guest-mods/sdk-v3-skinned-materials` contains an animated creature with
+three materials: cloth and bark for its body and head, and cut-out, double-sided
+leaves on its head and arms. Its body is cut into the cloth and bark materials at
+the waist, where its idle clip bends it. Its
+[`assets/make_reed_walker.py`](../examples/guest-mods/sdk-v3-skinned-materials/assets/make_reed_walker.py)
+reproduces the model, its textures and its idle and walk clips.
 
 ## Simple collision shapes
 

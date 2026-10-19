@@ -990,7 +990,18 @@ These budgets cover game heaps; they do not describe GPU memory usage.
 ## Skinned models and motion
 
 Set a model declaration's `kind` to `"skinned"`; omitted `kind` means `"static"`.
-The geometry, material and embedded PNG limits above also apply to skinned GLBs.
+The geometry, material and embedded PNG limits above also apply to skinned GLBs:
+up to 16 materials (opaque or `MASK` cut-out, optionally double-sided) in up to 32
+triangle primitives, and 1 MiB of decoded textures per model. Every primitive
+needs `JOINTS_0` and `WEIGHTS_0` and is bound to the same skin, so the parts of a
+model with several materials move together. A vertex on the border between two
+materials is exported once per material; give both copies the same joints and
+weights (Blender does) and the border stays closed in every pose. Every material
+copies the animated material of an object in the player's own game, so all of
+them are lit alike. The example in
+`examples/guest-mods/sdk-v3-skinned-materials` is an animated creature with cloth,
+bark and cut-out leaf materials that walks a route and plays its clips in a demo
+step; see [Several materials](world-objects.md#several-materials).
 Export one identity mesh node with one skin, and a connected, parent-first skeleton
 of at most 32 uniquely named bones. Bone names use ASCII letters followed by
 letters, digits or underscores, at most 31 characters. Bones use translation and
