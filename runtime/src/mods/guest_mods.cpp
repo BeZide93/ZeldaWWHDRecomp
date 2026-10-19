@@ -55,6 +55,7 @@
 #include "story_chart.h"
 #include "story_treasure.h"
 #include "story_actors.h"
+#include "story_resident_routes.h"
 #include "mod_actor.h"
 #include "mod_actor_behavior_core.h"
 #include "actor_model_cache.h"
@@ -1272,6 +1273,8 @@ void init() {
         mod_actor::set_behavior_sink(behavior_sink);
         story_actors::set_game_calls(call_original,[](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);});
         story_actors::set_scratch_memory(mem::runtime_alloc(story_actors::kScratchBytes,16));
+        // walking residents' route records: only with a declared route (or the editor, which adds them live)
+        if(story_actors::resident_routes_declared()||editor::launch_mode())story_resident_routes::set_memory(mem::runtime_alloc(story_resident_route::kMemoryBytes,16));
         story_actors::set_scene_start(story_scenes::request);
         if(editor::launch_mode())story_actors::editor_live_kinds();  // --editor: native props, switches, doors and enemies placed live
         story_actors::install([](uint32_t addr) {

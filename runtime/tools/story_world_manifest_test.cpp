@@ -209,6 +209,42 @@ int main() {
     v=example();v["actors"].array[0]["parameters"]["resident"]=19;assert(!parse_actors(v,actors,why));
     v=example();v["actors"].array[0]["parameters"]["resident"]=1;assert(!parse_actors(v,actors,why));
     v=example();v["actors"].array[0]["parameters"]["resident"]=9;assert(parse_actors(v,actors,why)&&actors[0].resident==9);
+    // a resident's route ("path"): 1..15 points after its position, the walking characters only
+    {auto route=[&](const char* code,const char* path_json){auto m=example();auto& a=m["actors"].array[0];a["parameters"]["resident"]=std::string(code);a["path"]=mods::json::parse(path_json);return m;};
+     v=route("uo2",R"({"points":[{"x":100,"y":0,"z":0}]})");assert(parse_actors(v,actors,why));
+     assert(actors[0].path.points.size()==1&&!actors[0].path.speed_given&&!actors[0].path.loop&&!actors[0].path.back_and_forth&&!actors[0].path.pauses&&std::string(actors[0].path.mode())=="once");
+     v=route("um1",R"({"points":[{"x":100,"y":0,"z":0},{"x":100,"y":0,"z":100}],"mode":"loop","speed":90,"pauses":true})");assert(parse_actors(v,actors,why));
+     assert(actors[0].path.loop&&actors[0].path.speed_given&&actors[0].path.speed==90&&actors[0].path.pauses);
+     v=route("uo3",R"({"points":[{"x":100,"y":0,"z":0}],"mode":"back_and_forth"})");assert(parse_actors(v,actors,why)&&actors[0].path.back_and_forth);
+     for(const char* walker:{"uo1","uo2","uo3","um1","um2"}){v=route(walker,R"({"points":[{"x":50,"y":0,"z":0}]})");assert(parse_actors(v,actors,why));}
+     // the others are refused with the reason
+     for(const char* still:{"ub1","ub2","ub3","ub4","uw1","uw2","sa1","sa2","sa3","sa4"}){v=route(still,R"({"points":[{"x":50,"y":0,"z":0}]})");assert(!parse_actors(v,actors,why)&&why=="this villager has no walking animation of its own");}
+     v=route("ym1",R"({"points":[{"x":50,"y":0,"z":0}]})");assert(!parse_actors(v,actors,why)&&why.find("seated")!=std::string::npos);
+     // speed: 0.5..2 times the character's own pace (uo2: 30 units a second)
+     v=route("uo2",R"({"points":[{"x":50,"y":0,"z":0}],"speed":15})");assert(parse_actors(v,actors,why));
+     v=route("uo2",R"({"points":[{"x":50,"y":0,"z":0}],"speed":60})");assert(parse_actors(v,actors,why));
+     v=route("uo2",R"({"points":[{"x":50,"y":0,"z":0}],"speed":14})");assert(!parse_actors(v,actors,why)&&why.find("15 to 60")!=std::string::npos);
+     v=route("uo2",R"({"points":[{"x":50,"y":0,"z":0}],"speed":61})");assert(!parse_actors(v,actors,why));
+     v=route("um1",R"({"points":[{"x":50,"y":0,"z":0}],"speed":127})");assert(!parse_actors(v,actors,why));
+     // bounds and shapes
+     v=route("uo2",R"({"points":[]})");assert(!parse_actors(v,actors,why));
+     {std::string many=R"({"points":[)";for(int i=0;i<16;i++)many+=std::string(i?",":"")+"{\"x\":"+std::to_string(10*(i+1))+",\"y\":0,\"z\":0}";v=route("uo2",(many+"]}").c_str());assert(!parse_actors(v,actors,why));}
+     {std::string most=R"({"points":[)";for(int i=0;i<15;i++)most+=std::string(i?",":"")+"{\"x\":"+std::to_string(10*(i+1))+",\"y\":0,\"z\":0}";v=route("uo2",(most+"]}").c_str());assert(parse_actors(v,actors,why)&&actors[0].path.points.size()==15);}
+     v=route("uo2",R"({"points":[{"x":0.5,"y":0,"z":0}]})");assert(!parse_actors(v,actors,why)&&why.find("position")!=std::string::npos);
+     v=route("uo2",R"({"points":[{"x":50,"y":0,"z":0},{"x":50,"y":9,"z":0.5}]})");assert(!parse_actors(v,actors,why));
+     v=route("uo2",R"({"points":[{"x":50,"y":0,"z":0},{"x":0.5,"y":0,"z":0}],"mode":"loop"})");assert(!parse_actors(v,actors,why)&&why.find("loop")!=std::string::npos);
+     v=route("uo2",R"({"points":[{"x":50,"y":0,"z":0}],"mode":"circle"})");assert(!parse_actors(v,actors,why)&&why.find("back_and_forth")!=std::string::npos);
+     v=route("uo2",R"({"points":[{"x":50,"y":0,"z":0}],"pauses":1})");assert(!parse_actors(v,actors,why));
+     v=route("uo2",R"({"points":[{"x":50,"y":0,"z":0}],"walk":"walk"})");assert(!parse_actors(v,actors,why));  // a resident walks with its own walk
+     v=route("uo2",R"({"points":[{"x":50,"y":0,"z":0}],"gait":"run"})");assert(!parse_actors(v,actors,why));
+     // a sign has no route
+     {auto m=example();m["actors"].array[1]["path"]=mods::json::parse(R"({"points":[{"x":50,"y":0,"z":0}]})");assert(!parse_actors(m,actors,why));}
+     // the fingerprint follows every route field
+     v=route("uo2",R"({"points":[{"x":50,"y":0,"z":0}]})");assert(parse_actors(v,actors,why));const auto base=story_actors::identity::fingerprint("m",actors[0]);
+     for(const char* other:{R"({"points":[{"x":51,"y":0,"z":0}]})",R"({"points":[{"x":50,"y":0,"z":0}],"mode":"back_and_forth"})",R"({"points":[{"x":50,"y":0,"z":0}],"mode":"loop"})",
+                            R"({"points":[{"x":50,"y":0,"z":0}],"pauses":true})",R"({"points":[{"x":50,"y":0,"z":0}],"speed":30})"}){
+         v=route("uo2",other);assert(parse_actors(v,actors,why));assert(story_actors::identity::fingerprint("m",actors[0])!=base);}
+    }
     v=example();v["actors"].array[0]["parameters"]["resident"]="ym1";v["actors"].array[0]["position"]["x"]=-202066;v["actors"].array[0]["position"]["z"]=320123;assert(!parse_actors(v,actors,why));
     v["actors"].array[0]["position"]["x"]=-202056;assert(parse_actors(v,actors,why));
     v=example();v["actors"].array[0]["parameters"]["resident"]="ym1";assert(!story_notebook::world_manifest::resident_character(v,"guide"));

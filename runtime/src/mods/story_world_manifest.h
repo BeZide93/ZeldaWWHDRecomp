@@ -31,7 +31,14 @@ struct ManifestLookAt {
     bool enabled=false;std::string head,upper_bone;
     float yaw_degrees=0,pitch_degrees=0,rate_degrees=0,radius=0,upper_yaw_degrees=0,upper_fraction=0;
 };
-struct ManifestPath {std::vector<WorldPoint> points;float speed=100;bool loop=false;};
+// A route ("path"): a mod's skinned actor walks `points` (2..16); a placed resident starts at its
+// position and walks 1..15 further `points` with its own walk. Modes: once, loop (back to the start),
+// back_and_forth (reverse at the ends). `pauses`: short strolling pauses on the way (the game's own
+// walkers' rhythm). A resident's speed is optional (speed_given false: the character's own pace);
+// a mod actor may name its walk and idle clips (empty: "walk" and "idle").
+struct ManifestPath {std::vector<WorldPoint> points;float speed=100;bool loop=false;bool back_and_forth=false,pauses=false,speed_given=true;std::string walk_clip,idle_clip;
+    const char* mode()const{return loop?"loop":back_and_forth?"back_and_forth":"once";}
+    bool operator==(const ManifestPath&)const=default;};
 struct ManifestPropDrop {std::string item;unsigned quantity=1;};
 struct QuestCondition {std::string quest;unsigned step=0;bool operator==(const QuestCondition&)const=default;};
 struct ManifestTalk {
@@ -325,6 +332,28 @@ inline bool parse_models(const mods::json::Value& m,std::vector<ManifestModel>& 
         parsed.push_back({v.get("id").text,source,kind});
     }out=std::move(parsed);return true;
 }
+// a "path" object (ManifestPath); `resident`: a placed resident's route (1..15 points after its
+// position, optional speed, no clips), else a mod actor's (2..16 points, speed, optional clips)
+inline bool parse_path(const mods::json::Value& path,const WorldPoint& start,bool resident,ManifestPath& out,std::string& why){
+    using namespace world_manifest;out=ManifestPath{};
+    const std::initializer_list<const char*> fields=resident?std::initializer_list<const char*>{"points","speed","mode","pauses"}:std::initializer_list<const char*>{"points","speed","mode","pauses","walk","idle"};
+    const size_t lo=resident?1:2,hi=resident?15:16;
+    if(path.type!=Value::Object||!keys(path,fields)||path.get("points").type!=Value::Array||path.get("points").array.size()<lo||path.get("points").array.size()>hi)
+        return why=resident?"a resident's path has 1 to 15 points after its position":"invalid bounded actor path",false;
+    if(resident){out.speed_given=path.object.contains("speed");out.speed=0;if(out.speed_given&&!number(path.get("speed"),0,1500,out.speed,true))return why="path speed must be a number of game units per second",false;}
+    else if(!number(path.get("speed"),0,1500,out.speed,true))return why="invalid bounded actor path",false;
+    const auto mode=path.get("mode").string("once");
+    if(mode!="once"&&mode!="loop"&&mode!="back_and_forth")return why="path mode must be once, loop or back_and_forth",false;
+    out.loop=mode=="loop";out.back_and_forth=mode=="back_and_forth";
+    if(path.object.contains("pauses")){if(path.get("pauses").type!=Value::Bool)return why="path pauses must be true or false",false;out.pauses=path.get("pauses").boolean;}
+    for(const char* clip:{"walk","idle"})if(path.object.contains(clip)){if(!id(path.get(clip)))return why=std::string("path ")+clip+" must name a clip",false;(std::string(clip)=="walk"?out.walk_clip:out.idle_clip)=path.get(clip).text;}
+    for(const auto& p:path.get("points").array){WorldPoint point_;if(!keys(p,{"x","y","z"})||!point(p,point_))return why="invalid path point",false;out.points.push_back(point_);}
+    auto apart=[](const WorldPoint& p,const WorldPoint& q){return std::hypot(double(p.x)-q.x,double(p.z)-q.z)>1;};
+    if(resident&&!apart(start,out.points.front()))return why="the first path point must be more than one unit from the position",false;
+    for(size_t n=1;n<out.points.size();++n)if(!apart(out.points[n-1],out.points[n]))return why="path points must be separated horizontally by more than one unit",false;
+    if(out.loop&&!apart(resident?start:out.points.front(),out.points.back()))return why="loop closing edge is too short",false;
+    return true;
+}
 inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestActor>& out,std::string& why) {
     using namespace world_manifest;out.clear();std::vector<ManifestModel> models;if(!parse_models(m,models,why))return false;const auto& list=m.get("actors");
     if(list.type==Value::Null)return true;
@@ -353,12 +382,8 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
                 if(look.object.contains("upper_body")){const auto& upper=look.get("upper_body");if(!keys(upper,{"bone","yaw_degrees","fraction"})||!bone_name(upper.get("bone"))||upper.get("bone").text==a.look_at.head||!number(upper.get("yaw_degrees"),0,180,a.look_at.upper_yaw_degrees)||!number(upper.get("fraction"),0,1,a.look_at.upper_fraction))return why="invalid upper_body look_at settings",false;a.look_at.upper_bone=upper.get("bone").text;}
             }
             if(v.object.contains("path")){
-                const auto& path=v.get("path");if(!skinned_model)return why="path requires a skinned model",false;
-                if(!keys(path,{"points","speed","mode"})||path.get("points").type!=Value::Array||path.get("points").array.size()<2||path.get("points").array.size()>16||!number(path.get("speed"),0,1500,a.path.speed,true))return why="invalid bounded actor path",false;
-                const auto mode=path.get("mode").string();if(mode!="once"&&mode!="loop")return why="path mode must be once or loop",false;a.path.loop=mode=="loop";
-                for(const auto& p:path.get("points").array){WorldPoint point_;if(!keys(p,{"x","y","z"})||!point(p,point_))return why="invalid path point",false;a.path.points.push_back(point_);}
-                for(size_t n=1;n<a.path.points.size();++n){const auto& p=a.path.points[n-1];const auto& q=a.path.points[n];if(std::hypot(double(p.x)-q.x,double(p.z)-q.z)<=1)return why="path points must be separated horizontally by more than one unit",false;}
-                if(a.path.loop){const auto& p=a.path.points.front();const auto& q=a.path.points.back();if(std::hypot(double(p.x)-q.x,double(p.z)-q.z)<=1)return why="loop closing edge is too short",false;}
+                if(!skinned_model)return why="path requires a skinned model",false;
+                if(!parse_path(v.get("path"),a.position,false,a.path,why))return false;
             }
             if(v.object.contains("animation")){
                 if(!id(v.get("animation")))return why="invalid initial animation name",false;
@@ -424,7 +449,7 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
                 }
                 if(v.object.contains("native_drops")&&!story_mod_combat::parse_native_drops(v.get("native_drops"),a.native_heart_drop,why))return false;
             }
-        }else if(v.object.contains("model")||v.object.contains("animation")||v.object.contains("look_at")||v.object.contains("path")||v.object.contains("collision")||v.object.contains("attention")||v.object.contains("behaviour")||v.object.contains("buoyancy")||v.object.contains("drift")||v.object.contains("anchor"))return why="model, animation, look_at, path, collision and attention require kind mod",false;
+        }else if(v.object.contains("model")||v.object.contains("animation")||v.object.contains("look_at")||(v.object.contains("path")&&a.actor!="resident")||v.object.contains("collision")||v.object.contains("attention")||v.object.contains("behaviour")||v.object.contains("buoyancy")||v.object.contains("drift")||v.object.contains("anchor"))return why="model, animation, look_at, path, collision and attention require kind mod",false;
         if(v.object.contains("carry")){
             const auto& carry=v.get("carry");if(a.kind!="mod"||a.combat_enabled||!keys(carry,{"break_on_impact"})||(carry.object.contains("break_on_impact")&&carry.get("break_on_impact").type!=Value::Bool))return why="carry requires a noncombat mod actor and boolean break_on_impact",false;
             a.carry_enabled=true;a.carry_break_on_impact=carry.get("break_on_impact").boolean;
@@ -527,6 +552,13 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
             else return why="unsupported named actor parameter: "+key,false;
         }
         if(a.actor=="resident")if(const char* no=story_resident_types::place_problem(uint8_t(a.resident),a.stage,a.position.x,a.position.z))return why=no,false;
+        if(a.actor=="resident"&&v.object.contains("path")){
+            if(const char* no=story_resident_types::no_walk(uint8_t(a.resident)))return why=no,false;
+            if(!parse_path(v.get("path"),a.position,true,a.path,why))return false;
+            const float pace=story_resident_types::walker(uint8_t(a.resident))->pace;
+            if(a.path.speed_given&&(a.path.speed<pace*story_resident_types::kMinPaceFactor-0.001f||a.path.speed>pace*story_resident_types::kMaxPaceFactor+0.001f)){
+                char text[160];std::snprintf(text,sizeof text,"path speed for this villager must be %.0f to %.0f units per second (own pace %.0f)",pace*story_resident_types::kMinPaceFactor,pace*story_resident_types::kMaxPaceFactor,pace);return why=text,false;}
+        }
         if(a.actor=="sign"||a.actor=="chest"){if(!flag_id(v.get("flag")))return why="chests and signs require a mod-owned flag id",false;a.flag=v.get("flag").text;}
         if(!actor_condition(m,v.get("when"),a,why))return false;
         if(v.get("lines").type!=Value::Null&&!lines(v.get("lines"),a.lines))return why="invalid actor dialogue",false;

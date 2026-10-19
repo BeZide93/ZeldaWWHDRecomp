@@ -100,4 +100,25 @@ inline const char* place_problem(uint8_t subtype, const std::string& stage, floa
     return nullptr;
 }
 
+// Walking a mod route ("path" on a placed resident, story_resident_route.h): only the characters
+// with a walking animation of their own walk; the rest are refused with the reason. `pace` is the
+// character's own walking speed by day in game units per second (its native route speed per logic
+// step at 30 steps a second); an authored speed may be 0.5 to 2 times it.
+struct Walker {const char* code;uint8_t subtype;float pace;};
+inline constexpr Walker kWalkers[] = {
+    {"uo1", 0, 30.f}, {"uo2", 1, 30.f}, {"uo3", 2, 60.f}, {"um1", 9, 63.f}, {"um2", 10, 72.f},
+};
+inline constexpr float kMinPaceFactor = 0.5f, kMaxPaceFactor = 2.f;
+inline const Walker* walker(uint8_t subtype) {
+    for (const Walker& w : kWalkers)
+        if (w.subtype == subtype) return &w;
+    return nullptr;
+}
+// why a placed resident of this type cannot walk a route (nullptr: it can)
+inline const char* no_walk(uint8_t subtype) {
+    if (walker(subtype)) return nullptr;
+    if (subtype == kSeatedYm1) return "this villager is seated and does not walk";
+    return "this villager has no walking animation of its own";
+}
+
 }  // namespace story_resident_types

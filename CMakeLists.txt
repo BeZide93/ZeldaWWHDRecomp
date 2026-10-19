@@ -1389,11 +1389,15 @@ add_test(NAME story_world_collision_profile_isolation COMMAND mod_actor_runtime_
 add_test(NAME mod_actor_skinned_native_contract COMMAND mod_actor_runtime_test --skinned)
 add_test(NAME mod_actor_combat_native_contract COMMAND mod_actor_runtime_test --combat)
 add_test(NAME mod_actor_carry_native_contract COMMAND mod_actor_runtime_test --carry)
+add_executable(story_resident_routes_test runtime/tools/story_resident_routes_test.cpp runtime/src/mods/story_resident_routes.cpp runtime/src/guest_addr_identity.c)
+target_include_directories(story_resident_routes_test PRIVATE runtime/include runtime/src)
+target_compile_options(story_resident_routes_test PRIVATE -UNDEBUG)
+add_test(NAME story_resident_routes COMMAND story_resident_routes_test)
 add_executable(story_actors_test runtime/tools/story_actors_test.cpp)
 target_include_directories(story_actors_test PRIVATE runtime/src)
 target_compile_options(story_actors_test PRIVATE -UNDEBUG)
 add_test(NAME story_actor_flags COMMAND story_actors_test)
-add_executable(story_actors_runtime_test runtime/tools/story_actors_runtime_test.cpp runtime/src/mods/story_actors.cpp runtime/src/mods/story_game_objects.cpp runtime/src/mods/mod_actor.cpp runtime/src/mods/mod_actor_shadow_proof.cpp
+add_executable(story_actors_runtime_test runtime/tools/story_actors_runtime_test.cpp runtime/src/mods/story_actors.cpp runtime/src/mods/story_game_objects.cpp runtime/src/mods/story_resident_routes.cpp runtime/src/mods/mod_actor.cpp runtime/src/mods/mod_actor_shadow_proof.cpp
   runtime/src/mods/story_props.cpp runtime/src/mods/story_switches.cpp runtime/src/mods/native_actor_carry.cpp runtime/src/mods/native_actor_profiles.cpp
   runtime/src/mods/story_enemies.cpp runtime/src/mods/story_enemy_ownership.cpp runtime/src/mods/story_enemy_projectiles.cpp runtime/src/mods/story_enemy_children.cpp runtime/src/guest_addr_identity.c)
 target_include_directories(story_actors_runtime_test PRIVATE runtime/include runtime/src)
@@ -1405,6 +1409,7 @@ add_test(NAME story_actor_editor_without_declarations COMMAND story_actors_runti
 add_test(NAME story_actor_sign_ordered_talks COMMAND story_actors_runtime_test --talks-sign)
 add_test(NAME story_actor_nonresident_hook_scope COMMAND story_actors_runtime_test --no-resident)
 add_test(NAME story_actor_villager_catalogue COMMAND story_actors_runtime_test --catalogue)
+add_test(NAME story_actor_resident_routes COMMAND story_actors_runtime_test --routes)
 add_test(NAME story_actor_editor_live COMMAND story_actors_runtime_test --editor)
 add_test(NAME story_actor_seated_resident_contract COMMAND story_actors_runtime_test --ym1)
 add_test(NAME story_actor_prop_spawn_contract COMMAND story_actors_runtime_test --props)

@@ -21,6 +21,7 @@ inline Fingerprint fingerprint(const std::string&mod,const story_notebook::Manif
     number(a.collision_radius);number(a.collision_height);word(a.pushable);
     const auto&look=a.look_at;word(look.enabled);text(look.head);text(look.upper_bone);number(look.yaw_degrees);number(look.pitch_degrees);number(look.rate_degrees);number(look.radius);number(look.upper_yaw_degrees);number(look.upper_fraction);
     number(a.path.speed);word(a.path.loop);word(uint32_t(a.path.points.size()));for(const auto&p:a.path.points)point(p);
+    if(a.path.back_and_forth||a.path.pauses||!a.path.speed_given||!a.path.walk_clip.empty()||!a.path.idle_clip.empty()){text("wwhd.actor-path.v2");word(a.path.back_and_forth);word(a.path.pauses);word(a.path.speed_given);text(a.path.walk_clip);text(a.path.idle_clip);}
     word(uint32_t(a.drops.size()));for(const auto&d:a.drops){text(d.item);word(d.quantity);}
     word(uint32_t(a.then.size()));for(const auto&action:a.then){word(uint32_t(action.kind));text(action.id);word(action.value);}
     if(!a.when_flag.empty()||!a.when_not_flag.empty()||!a.quests.empty()){text("wwhd.actor-conditions.v1");text(a.when_flag);text(a.when_not_flag);word(uint32_t(a.quests.size()));for(const auto&q:a.quests){text(q.quest);word(q.step);}}

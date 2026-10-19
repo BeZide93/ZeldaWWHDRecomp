@@ -28,6 +28,7 @@
 #include "story_treasure_chest.h"
 #include "story_resident_types.h"
 #include "story_game_objects.h"
+#include "story_resident_routes.h"
 #include "guest_addr.h"
 #include "runtime.h"
 #include <algorithm>
@@ -48,7 +49,8 @@ namespace {
 using story_notebook::ManifestActor;
 struct Actor {std::string mod; ManifestActor spec; uint32_t process=0xFFFFFFFFu; bool deleting=false; uint32_t mod_token=0; bool restore_talk=false;uint32_t prop_token=0,switch_token=0,switch_source=0,enemy_token=0;story_items::EnemyMarkerHandle combat_marker{};story_items::PropMarkerHandle carry_marker=0;identity::Fingerprint fingerprint{};bool restore_quarantined=false;bool respawn=false;bool removed=false;uint32_t resident_event_token=0;bool redeclare=false;uint32_t held_started=0xFFFFFFFFu;/* editor: the process whose first Execute a held pose ran */
     // a game object (story_game_objects.h): created on the retail profile, tracked by process id, read back once made
-    bool game=false,game_batch=false,game_checked=false,game_mismatch=false;uint8_t game_attempts=0;uint32_t game_planted=0;story_game_objects::Native game_native{};};
+    bool game=false,game_batch=false,game_checked=false,game_mismatch=false;uint8_t game_attempts=0;uint32_t game_planted=0;story_game_objects::Native game_native{};
+    int route_slot=-1;/* a walking resident's route record (story_resident_routes) */};
 std::vector<Actor> g_actors;
 void native_redeclare(Actor& a);  // the editor: a changed native declaration, once its old copy is gone
 uint32_t g_next_resident_event_token=1;
@@ -76,6 +78,8 @@ const uint32_t kPeopleCheckOrder=GC(0x022C045C),kPeopleEventMove=GC(0x022C2958),
 constexpr uint32_t kCarrier=0x2CF3,kYm1=story_resident_types::kSeatedYm1,kTalkLatchOffset=0x280;
 // a daNpcPeople_c character from the shared table (every resident but the seated ym1)
 bool people_type(unsigned resident){return resident<256&&story_resident_types::people(uint8_t(resident));}
+// a placed resident walking a mod route (manifest "path")
+bool walks(const ManifestActor& a){return a.actor=="resident"&&!a.path.points.empty()&&a.resident<256&&story_resident_types::walker(uint8_t(a.resident));}
 static_assert(kTalkLatchOffset+128<=0x300); // Native PID slots precede this; room readiness follows it.
 const uint32_t kYm1Init=GC(0x022F75E4),kYm1SetAction=GC(0x022F7388),kYm1Pmf=GD(0x10023418);
 const uint32_t kYm1Msg=GC(0x022F9A48),kYm1Next=GC(0x022F9464),kYm1Talk=GC(0x022FA288),kYm1Execute=GC(0x022F8F2C),kYm1Delete=GC(0x022F82AC);
@@ -268,7 +272,7 @@ void people_event_order(Cpu* c) {
 void people_msg_hook(Cpu* c){if(!people_message(c))g_original(c,kPeopleMsg);}
 void people_next_hook(Cpu* c){if(!people_next_message(c))g_original(c,kPeopleNext);}
 void people_execute_hook(Cpu* c){const uint32_t actor=c->r[3];if(people(actor)&&!player_present(c)){if(g_talk.npc==actor)cancel_talk("no-player");c->r[3]=1;return;}people_execute(c,true);g_original(c,kPeopleExecute);Cpu keep=*c;c->r[3]=actor;people_execute(c,false);*c=keep;}
-void people_delete(Cpu* c){const uint32_t actor=c->r[3];Actor* a=find(actor);if(a&&a->spec.actor=="resident"){if(g_talk.actor==a)cancel_talk("delete");native_trace(a,actor,"native-delete");a->process=0xFFFFFFFFu;a->restore_talk=false;if(g_scratch)st32(g_scratch+128+uint32_t(a-g_actors.data())*4,0xFFFFFFFFu);}g_original(c,kPeopleDelete);}
+void people_delete(Cpu* c){const uint32_t actor=c->r[3];Actor* a=find(actor);if(a&&a->spec.actor=="resident"){if(a->route_slot>=0&&story_resident_routes::owner(unsigned(a->route_slot))==a->process)story_resident_routes::set_owner(unsigned(a->route_slot),0);if(g_talk.actor==a)cancel_talk("delete");native_trace(a,actor,"native-delete");a->process=0xFFFFFFFFu;a->restore_talk=false;if(g_scratch)st32(g_scratch+128+uint32_t(a-g_actors.data())*4,0xFFFFFFFFu);}g_original(c,kPeopleDelete);}
 void people_talk(Cpu* c){const uint32_t actor=c->r[3];Actor* a=people(actor);g_original(c,kPeopleTalk);if(a&&g_talk.npc==actor&&c->r[3]==0x12&&ld32(actor+0x7C0)==kCarrier&&ld32(actor+0x7C8)==0xFFFFFFFFu){g_talk.terminal=true;native_trace(a,actor,"terminal-12");}}
 void photo_actor(Cpu* c){if(owned_resident(c->r[4]))native_trace(find(c->r[4]),c->r[4],"blocked-photo-actor",0);else g_original(c,kPhotoActor);}
 void photo_position(Cpu* c){if(owned_resident(c->r[4]))native_trace(find(c->r[4]),c->r[4],"blocked-photo-position",0);else g_original(c,kPhotoPosition);}
@@ -407,6 +411,9 @@ bool check_specs(const std::string& mod,const std::vector<ManifestActor>& actors
     for(const auto& a:actors){story_enemies::Kind kind;if(!a.variant.empty()&&!enemy_kind(a,kind)&&!a.game_object())return why="only native enemies and game objects have variants",false;}
     for(const auto& a:actors)if(a.actor=="resident"&&(a.resident>255||!story_resident_types::supported(uint8_t(a.resident))))return why="unsupported resident subtype",false;
     for(const auto& a:actors)if(a.actor=="resident")if(const char* no=story_resident_types::place_problem(uint8_t(a.resident),a.stage,a.position.x,a.position.z))return why=no,false;
+    for(const auto& a:actors)if(a.actor=="resident"&&!a.path.points.empty())if(const char* no=story_resident_types::no_walk(uint8_t(a.resident)))return why=no,false;
+    {size_t walkers=0;for(const auto&old:g_actors)if((!replacing||old.mod!=mod)&&!old.removed&&walks(old.spec))++walkers;for(const auto&a:actors)if(walks(a))++walkers;
+     if(walkers>story_resident_route::kSlots)return why="enabled mods give more than 32 residents a route",false;}
     for(const auto&a:actors)if(a.kind=="mod"){
         const auto resource=g_models.find({mod,a.model});if(resource==g_models.end())return why="prepared actor model missing",false;if(!visual_ready(mod,a,why))return false;
         if(a.combat_enabled){
@@ -417,7 +424,8 @@ bool check_specs(const std::string& mod,const std::vector<ManifestActor>& actors
         const auto& rig=resource->second.rig;
         if(a.look_at.enabled){const auto head=std::find(rig.joint_names.begin(),rig.joint_names.end(),a.look_at.head);if(head==rig.joint_names.end())return why="look_at head is not a model joint",false;if(rig.joint_look_compatible.size()!=rig.joint_names.size()||!rig.joint_look_compatible[size_t(head-rig.joint_names.begin())])return why="look_at requires identity bind rotation along the joint chain",false;if(std::fabs(std::remainder(a.rotation.x,360.f))>1e-4||std::fabs(std::remainder(a.rotation.z,360.f))>1e-4||a.scale.x<=0||std::fabs(a.scale.x-a.scale.y)>1e-4||std::fabs(a.scale.x-a.scale.z)>1e-4)return why="look_at requires upright actor and uniform positive scale",false;
             if(!a.look_at.upper_bone.empty()){const auto upper=std::find(rig.joint_names.begin(),rig.joint_names.end(),a.look_at.upper_bone);if(upper==rig.joint_names.end())return why="look_at upper_body is not a model joint",false;if(!rig.joint_look_compatible[size_t(upper-rig.joint_names.begin())])return why="look_at upper_body has incompatible bind rotation",false;int parent=rig.joint_parents[size_t(head-rig.joint_names.begin())];const int target=int(upper-rig.joint_names.begin());while(parent>=0&&parent!=target)parent=rig.joint_parents[size_t(parent)];if(parent!=target)return why="look_at upper_body must be an ancestor of head",false;}}
-        if(!a.path.points.empty()&&(std::find(resource->second.clips.begin(),resource->second.clips.end(),"idle")==resource->second.clips.end()||std::find(resource->second.clips.begin(),resource->second.clips.end(),"walk")==resource->second.clips.end()))return why="authored paths require idle and walk clips",false;
+        if(!a.path.points.empty()){const auto has=[&](const std::string& clip){return std::find(resource->second.clips.begin(),resource->second.clips.end(),clip)!=resource->second.clips.end();};
+            if(!has(a.path.idle_clip.empty()?"idle":a.path.idle_clip)||!has(a.path.walk_clip.empty()?"walk":a.path.walk_clip))return why=a.path.walk_clip.empty()&&a.path.idle_clip.empty()?"authored paths require idle and walk clips":"the path's walk or idle clip is not in the model",false;}
     }
     for(size_t i=0;i<actors.size();++i){const auto&a=actors[i];if(a.actor!="switch"&&a.actor!="door")continue;
         if(a.params||a.rotation.x!=0||a.rotation.z!=0||a.scale.x!=1||a.scale.y!=1||a.scale.z!=1||!a.flag.empty()||!a.lines.empty()||!a.then.empty()||!a.drops.empty()||!a.broken_flag.empty())return why="unsupported native switch/door configuration",false;
@@ -539,6 +547,20 @@ void native_room_loaded(Cpu* c,int room){
     refresh_link();
     for(auto& a:g_actors)if(a.spec.room==unsigned(room)){if(a.spec.kind=="mod"&&(!a.spec.combat_enabled||(new_prop_epoch&&std::strncmp(reinterpret_cast<const char*>(mem::ptr(kStage)),a.spec.stage.c_str(),8)==0)))mod_actor::retry(a.mod_token);if(a.prop_token&&new_prop_epoch&&std::strncmp(reinterpret_cast<const char*>(mem::ptr(kStage)),a.spec.stage.c_str(),8)==0){a.restore_quarantined=false;story_props::retry(a.prop_token);}if(a.switch_token&&new_prop_epoch&&std::strncmp(reinterpret_cast<const char*>(mem::ptr(kStage)),a.spec.stage.c_str(),8)==0){a.restore_quarantined=false;story_switches::retry(a.switch_token);}
         if(a.game&&new_prop_epoch&&std::strncmp(reinterpret_cast<const char*>(mem::ptr(kStage)),a.spec.stage.c_str(),8)==0){a.game_attempts=0;a.restore_quarantined=a.game_mismatch;}}room_loaded(c,room);}
+// A walking resident's route record: a free one is taken the first time; `fresh` writes the route
+// with its guard state cleared (a new copy starts at its position). False: no route (it stands).
+bool route_record(Actor& a,bool fresh){
+    if(!walks(a.spec)){if(a.route_slot>=0)story_resident_routes::clear(unsigned(a.route_slot));a.route_slot=-1;return false;}
+    if(!story_resident_routes::installed()){static bool told=false;if(!told)LOG("[actors] resident routes are not available in this session: residents with a path stand until a restart");told=true;return false;}
+    if(a.route_slot<0){
+        std::set<int> used;for(const auto& other:g_actors)if(other.route_slot>=0)used.insert(other.route_slot);
+        for(int s=0;s<int(story_resident_route::kSlots);++s)if(!used.contains(s)){a.route_slot=s;break;}
+        if(a.route_slot<0){LOG("[actors] %s:%s: no free route record; it stands",a.mod.c_str(),a.spec.id.c_str());return false;}
+    }
+    if(!story_resident_routes::write(unsigned(a.route_slot),a.spec.path,a.spec.position,!fresh))return false;
+    if(fresh)story_resident_routes::set_owner(unsigned(a.route_slot),0);
+    return true;
+}
 void room_loaded(Cpu* c,int room) {
     if(!g_installed||!g_scratch)return;
     if(room>=0&&room<=63)story_game_objects::note_room(ld32(GD(0x1047E8F0)+uint32_t(room)*0x22C));
@@ -606,7 +628,9 @@ void room_loaded(Cpu* c,int room) {
         if(a.prop_token||a.switch_token)st16(g_scratch+0x10,255);
         if(a.enemy_token)st16(g_scratch+0x10,story_enemies::home_z(enemy));
         if(a.spec.actor=="chest")st16(g_scratch+0x10,uint16_t((uint32_t(a.spec.item_game)<<8)|255));
-        const uint32_t params=a.game?a.game_native.params:a.enemy_token?story_enemies::parameters(a.enemy_token):a.switch_token?story_switches::parameters(a.spec.actor=="switch"?story_switches::Kind::Switch:story_switches::Kind::Door):a.prop_token?story_props::parameters(a.spec):a.spec.kind=="mod"?a.mod_token:a.spec.actor=="sign"?kCarrier:a.spec.actor=="resident"?story_resident_types::params(uint8_t(a.spec.resident)):0;
+        uint32_t params=a.game?a.game_native.params:a.enemy_token?story_enemies::parameters(a.enemy_token):a.switch_token?story_switches::parameters(a.spec.actor=="switch"?story_switches::Kind::Switch:story_switches::Kind::Door):a.prop_token?story_props::parameters(a.spec):a.spec.kind=="mod"?a.mod_token:a.spec.actor=="sign"?kCarrier:a.spec.actor=="resident"?story_resident_types::params(uint8_t(a.spec.resident)):0;
+        // a walking resident: its route record, and the route marker as its route number
+        if(route_record(a,true))params=(params&~0x00FF0000u)|(uint32_t(story_resident_route::kRouteMarker)<<16);
         Cpu call=*c;a.deleting=false;
         const uint32_t previous_layer=g_call(&call,GC(0x025DED64),{});
         g_call(&call,GC(0x025DEAB4),{room_layer});
@@ -616,6 +640,7 @@ void room_loaded(Cpu* c,int room) {
         if(a.enemy_token&&a.process&&a.process!=0xFFFFFFFFu)story_enemies::bind(a.enemy_token,a.process);
         if(a.prop_token)story_props::bind(a.prop_token,a.process);
         if(a.switch_token)story_switches::bind(a.switch_token,a.process);
+        if(a.route_slot>=0&&walks(a.spec)&&a.process&&a.process!=0xFFFFFFFFu)story_resident_routes::set_owner(unsigned(a.route_slot),a.process);
         if(a.game_batch&&a.process&&a.process!=0xFFFFFFFFu){
             // the placement actor adds its units and is gone at once: the mark (this room visit) is all that is kept
             a.game_planted=story_game_objects::planted_mark(ld32(GD(0x1047E8F0)+uint32_t(room)*0x22C));a.process=0xFFFFFFFFu;a.game_checked=true;
@@ -718,6 +743,15 @@ void state_loaded(){if(combat_declared())story_enemy_ownership::state_loaded();i
             if(live&&(!g_scratch||!identity::matches(mem::ptr(g_scratch+kIdentityScratchOffset+uint32_t(i)*identity::kRecordBytes),a.fingerprint))){a.process=0xFFFFFFFFu;a.restore_quarantined=true;if(slot)st32(slot,0xFFFFFFFFu);if(a.prop_token)story_props::quarantine(a.prop_token);if(a.switch_token)story_switches::quarantine(a.switch_token);LOG("[native_prop] %s:%s restored declaration fingerprint rejected",a.mod.c_str(),a.spec.id.c_str());}
             else {if(a.prop_token)story_props::bind(a.prop_token,a.process);if(a.switch_token)story_switches::bind(a.switch_token,a.process,live);}
         }
+    }
+    // walking residents: a restored copy keeps following the record that names it as its owner (the
+    // record's route is written again from the declaration; an unchanged route keeps its guard state)
+    if(story_resident_routes::installed()){
+        for(auto& a:g_actors){if(!walks(a.spec)||a.process==0xFFFFFFFFu)continue;
+            for(int s=0;s<int(story_resident_route::kSlots);++s)if(story_resident_routes::owner(unsigned(s))==a.process){
+                for(auto& other:g_actors)if(&other!=&a&&other.route_slot==s)other.route_slot=-1;
+                a.route_slot=s;break;}}
+        for(auto& a:g_actors)if(walks(a.spec)&&a.route_slot>=0){const uint32_t pid=story_resident_routes::owner(unsigned(a.route_slot));route_record(a,false);if(pid!=a.process)story_resident_routes::set_owner(unsigned(a.route_slot),a.process==0xFFFFFFFFu?0:a.process);}
     }
     if(combat_declared())story_enemy_projectiles::state_loaded();
 }
@@ -831,11 +865,44 @@ bool settle_in_place(Cpu* c,const std::string& mod,Actor& a,const ManifestActor&
     if(a.spec.kind=="mod"){const auto r=g_models.find({mod,spec.model});if(r==g_models.end()||!a.mod_token||!mod_actor::redeclare(a.mod_token,spec,r->second.archive,r->second.index,r->second.minimum,r->second.maximum,r->second.skinned,r->second.clips,r->second.rig,true))return false;}
     a.spec=spec;refingerprint(mod,a);
     if(a.enemy_token)story_enemies::editor_refingerprint(a.enemy_token,a.fingerprint);
+    if(a.route_slot>=0&&route_record(a,false))story_resident_routes::edited(c,at,unsigned(a.route_slot));  // its route starts where it now stands
     LOG("[actors] %s:%s moved in place by the editor (%.1f %.1f %.1f)",mod.c_str(),spec.id.c_str(),x,y,z);
     return true;
 }
 }
+// The editor changed a walking resident's route only (points, speed, mode, pauses): the live copy
+// takes the new route in place, no new copy (a route added or taken away creates it again: its route
+// number is part of its creation).
+bool route_in_place(Cpu* c,const std::string& mod,Actor& a,const ManifestActor& spec){
+    if(c&&!a.removed&&!a.respawn&&!a.deleting&&a.process!=0xFFFFFFFFu&&a.spec.kind=="mod"&&spec.kind=="mod"&&a.mod_token&&!a.spec.path.points.empty()&&!spec.path.points.empty()){
+        // a mod actor: the declaration takes the new path and its live copy walks it at once
+        ManifestActor same=a.spec;same.path=spec.path;if(!same_spec(mod,same,spec))return false;
+        const uint32_t at=actor_address(c,mod,spec.id);if(!at||find(at)!=&a)return false;
+        const auto r=g_models.find({mod,spec.model});if(r==g_models.end()||!mod_actor::redeclare(a.mod_token,spec,r->second.archive,r->second.index,r->second.minimum,r->second.maximum,r->second.skinned,r->second.clips,r->second.rig,true))return false;
+        a.spec=spec;refingerprint(mod,a);
+        if(!mod_actor::reload_path(at,a.mod_token))return false;
+        LOG("[actors] %s:%s route changed in place by the editor (%zu points, %s)",mod.c_str(),spec.id.c_str(),spec.path.points.size(),spec.path.mode());
+        return true;
+    }
+    if(!c||a.removed||a.respawn||a.deleting||a.process==0xFFFFFFFFu||!walks(a.spec)||!walks(spec)||a.route_slot<0)return false;
+    ManifestActor same=a.spec;same.path=spec.path;if(!same_spec(mod,same,spec))return false;
+    const uint32_t at=actor_address(c,mod,spec.id);if(!at||find(at)!=&a||ld8(at+0xC)==3||story_resident_routes::slot_of(at)!=a.route_slot)return false;
+    a.spec=spec;refingerprint(mod,a);
+    if(!story_resident_routes::write(unsigned(a.route_slot),a.spec.path,a.spec.position,false))return false;
+    story_resident_routes::set_owner(unsigned(a.route_slot),a.process);
+    story_resident_routes::edited(c,at,unsigned(a.route_slot));
+    LOG("[actors] %s:%s route changed in place by the editor (%zu points, %s)",mod.c_str(),spec.id.c_str(),spec.path.points.size(),spec.path.mode());
+    return true;
+}
 bool editor_restart_only(const ManifestActor& a){return restart_kind(a)!=nullptr;}
+bool resident_routes_declared(){return std::any_of(g_actors.begin(),g_actors.end(),[](const Actor& a){return walks(a.spec);});}
+bool resident_route(const std::string& mod,const std::string& id,ResidentRoute& out){
+    out={};for(const auto& a:g_actors)if(a.mod==mod&&a.spec.id==id&&!a.removed){
+        out.declared=walks(a.spec);if(!out.declared||a.route_slot<0)return true;
+        const auto v=story_resident_routes::view(unsigned(a.route_slot));out.live=v.valid&&a.process!=0xFFFFFFFFu&&story_resident_routes::owner(unsigned(a.route_slot))==a.process;
+        out.status=story_resident_route::status_name(v.status);return true;}
+    return false;
+}
 bool editor_live_capable(const std::string& mod,const ManifestActor& a,std::string& why){return live_capable(mod,a,why);}
 void editor_live_kinds(){if(!g_installed)g_live_kinds=true;}
 bool editor_kind_live(const std::string& type,bool fallback){
@@ -927,7 +994,7 @@ bool editor_update(const std::string& mod,const std::vector<ManifestActor>& acto
             if(a->switch_token)story_switches::retry(a->switch_token);
         }
         if(step.update){
-            if(!was_removed&&settle_in_place(cpu,mod,*a,*step.spec))continue;
+            if(!was_removed&&(settle_in_place(cpu,mod,*a,*step.spec)||route_in_place(cpu,mod,*a,*step.spec)))continue;
             a->spec=*step.spec;a->respawn=true;a->redeclare=native_kind(a->spec);
             if(a->game_batch&&a->game_planted)later.push_back(a->spec.id+": grass, flowers and small trees change when the room loads again (Reload room)");
             if(a->mod_token)mod_actor::set_talk_provider(mod,a->spec.id,a->spec.talks.empty()?mod_actor::TalkProvider{}:mod_talk_provider(mod,a->spec.id));
@@ -1272,6 +1339,8 @@ void install(const std::function<std::string(uint32_t)>& replaced_by,const std::
     if(g_live_kinds&&!props&&!story_props::install(replaced_by,replace))LOG("[actors] the editor's live props are not available (they appear after a restart)");
     if(g_live_kinds&&!switches&&!story_switches::install(replaced_by,replace))LOG("[actors] the editor's live switches and doors are not available (they appear after a restart)");
     if(has_enemies&&!story_enemies::install(replaced_by,replace))exception_report::raise("Cannot install isolated native enemy profiles");
+    // walking residents (only with their record memory: a declared route, or the editor)
+    if(g_resident_hooks&&story_resident_routes::memory()){story_resident_routes::configure(g_original,g_call);if(!story_resident_routes::install(replaced_by,replace))LOG("[actors] resident routes unavailable: residents with a path stand");}
     for(const auto& h:hooks)replace(h.first,h.second);g_installed=true;
 }
 }

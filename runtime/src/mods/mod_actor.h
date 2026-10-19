@@ -28,6 +28,7 @@ struct State {
 struct MotionState {
     std::array<story_notebook::WorldPoint,16> points{};unsigned count=0,next=0;
     float speed=100;bool loop=false,finished=false,enabled=false;
+    bool bounce=false,reverse=false,pauses=false,waiting=false;unsigned timer=0;  // back and forth; strolling pauses (mod_actor_motion.h Pauses)
 };
 enum class BehaviorEvent:uint32_t {CreateNew,CreateRestored,Execute,Draw,TalkBegin,TalkEnd,TalkCancel,Hit,Destroy};
 struct Hit {uint32_t sequence=0,attack_type=0,attack_power=0,source_kind=0,source_process_id=0;story_notebook::WorldPoint position,reaction;};
@@ -69,6 +70,9 @@ bool get_motion(Cpu*,const Identity&,MotionState&);
 bool set_motion(Cpu*,const Identity&,const MotionState&);
 bool start_path(Cpu*,const Identity&,const std::vector<story_notebook::WorldPoint>&,float speed,bool loop=false);
 bool stop_path(Cpu*,const Identity&);
+// the editor changed a live actor's declared path only: its walk takes the new route in place (the next
+// point kept in range); false when the actor is busy (a scene, carried) or not this declaration's
+bool reload_path(uint32_t actor,uint32_t token);
 bool begin_scene(Cpu*,const Identity&,uint32_t lease);
 bool end_scene(Cpu*,const Identity&,uint32_t lease);
 bool scene_path(Cpu*,const Identity&,uint32_t lease,const std::vector<story_notebook::WorldPoint>&,float speed);

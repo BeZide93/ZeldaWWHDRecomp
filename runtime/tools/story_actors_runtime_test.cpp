@@ -31,6 +31,7 @@
 #include "mods/story_items.h"
 #include "mods/story_notebook.h"
 #include "mods/story_treasure.h"
+#include "mods/story_resident_routes.h"
 #include "runtime.h"
 #ifdef _WIN32
 #include <windows.h>
@@ -502,6 +503,33 @@ int main(int argc,char** argv){
         // no readable record: refused (the drag then creates it again)
         st32(at+0x10,0);assert(!story_actors::editor_pose(&c,"late","guide",{710,20,800},{0,90,0})&&held_executes==2);st32(at+0x10,profile);
         std::puts("editor with no declared actors: live kinds installed, a new resident appears at once");return 0;
+    }
+    if(argc==2&&std::strcmp(argv[1],"--routes")==0){
+        // a walking resident: created with the route marker as its route number and given its record;
+        // the record names its copy; a deleted copy lets go; a restored copy keeps its record; a resident
+        // without a route keeps its fixed parameters
+        constexpr uint32_t kRoutes=0x60100000;map_guest(kRoutes,story_resident_route::kMemoryBytes);
+        story_resident_routes::set_memory(kRoutes);
+        story_notebook::ManifestActor walker;walker.id="walker";walker.actor="resident";walker.stage="sea";walker.room=1;walker.resident=1;walker.position={10,5,20};
+        walker.path.points={{200,5,20},{200,5,200}};walker.path.loop=true;walker.path.speed_given=false;walker.path.speed=0;
+        std::string why;assert(story_actors::resident_routes_declared()==false);
+        assert(story_actors::load("routes",{walker},why));assert(story_actors::resident_routes_declared());
+        story_actors::install([](uint32_t){return std::string{};},[](uint32_t a,void(*h)(Cpu*)){hooks[a]=h;});
+        assert(story_resident_routes::installed()&&hooks.contains(story_resident_routes::set_route_function())&&hooks.contains(story_resident_routes::walk_function())&&hooks.contains(story_resident_routes::turn_function())&&hooks.contains(story_resident_routes::passed_function()));
+        expect_people_subtype=1;expect_people_params=0x00FE0000;expect_people_yaw=0;
+        Cpu c{};story_actors::native_room_loaded(&c,1);assert(created==1);
+        const uint32_t npc=kActor+0x1000;assert(story_actors::actor_address(&c,"routes","walker")==npc);
+        const uint32_t pid=ld32(npc+4);assert(story_resident_routes::owner(0)==pid&&story_resident_routes::slot_of(npc)==0);
+        // its creation asks for the marker: it gets its record
+        Cpu set{};set.r[3]=npc+0x870;set.r[4]=story_resident_route::kRouteMarker;set.r[5]=1;set.r[6]=1;hooks.at(story_resident_routes::set_route_function())(&set);
+        assert(set.r[3]==1&&ld32(npc+0x870)==story_resident_routes::route_address(0)&&ld16(story_resident_routes::route_address(0))==3);
+        story_actors::ResidentRoute state;assert(story_actors::resident_route("routes","walker",state)&&state.declared&&state.live&&state.status=="walking");
+        // a full state: the record keeps its owner; a changed declaration's record is written again
+        story_actors::state_loaded();assert(story_resident_routes::owner(0)==pid&&story_resident_routes::slot_of(npc)==0);
+        // the copy goes (room teardown): the record lets go of it
+        Cpu del{};del.r[3]=npc;hooks.at(0x022BFF00)(&del);assert(story_resident_routes::owner(0)==0&&story_resident_routes::slot_of(npc)==-1);
+        assert(story_actors::resident_route("routes","walker",state)&&state.declared&&!state.live);
+        std::puts("resident routes: marker, record, owner, restore and delete passed");return 0;
     }
     if(argc==2&&std::strcmp(argv[1],"--catalogue")==0){
         // the villager catalogue: a non-uo2/um1 character is created with its own subtype and fixed

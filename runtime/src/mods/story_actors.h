@@ -79,6 +79,12 @@ bool editor_kind_live(const std::string& type,bool fallback);
 // true for kinds whose changes take effect only after a restart (mod enemies and carried props; native
 // props, switches, doors and enemies unless the editor installed them for live placement)
 bool editor_restart_only(const story_notebook::ManifestActor&);
+// placed residents walking a mod route ("path"): whether any is declared (their record memory is
+// needed), and one's state for the editor (declared: it has a route; live: its copy in the game
+// follows it; status: walking, skipped a blocked point, stopped, finished)
+bool resident_routes_declared();
+struct ResidentRoute {bool declared=false,live=false;std::string status;};
+bool resident_route(const std::string& mod,const std::string& id,ResidentRoute& out);
 // whether a new actor of this spec can be created while the game runs (else `why` says what waits)
 bool editor_live_capable(const std::string& mod,const story_notebook::ManifestActor&,std::string& why);
 // World editor (main game thread): a model imported while the game runs, prepared as `archive`

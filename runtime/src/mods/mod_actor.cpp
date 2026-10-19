@@ -205,8 +205,10 @@ void heading_draw(uint32_t actor,int before,uint32_t model){static unsigned rema
     const uint32_t joints=ld32(model+0x2C),matrix=joints?ld32(joints+0x10):0;const double yaw=matrix?std::atan2(double(number(matrix+8)),double(number(matrix+40))):0.;
     LOG("[mod_actor_heading] phase=draw actor=%08X process=%u serial=%llu before=%d after=%d rootyaw=%.9f rootvalid=%u",actor,p->process,static_cast<unsigned long long>(p->serial),before,int(int16_t(ld16(actor+0x32A))),yaw,unsigned(matrix!=0));
 }
-MotionState read_motion(uint32_t at){MotionState m;m.count=ld32(at);m.next=ld32(at+4);m.speed=number(at+8);const auto flags=ld32(at+12);m.loop=flags&1;m.finished=flags&2;m.enabled=flags&4;for(unsigned i=0;i<16;++i)m.points[i]=point(at+16+12*i);return m;}
-void write_motion(uint32_t at,const MotionState&m){st32(at,m.count);st32(at+4,m.next);number(at+8,m.speed);st32(at+12,(m.loop?1:0)|(m.finished?2:0)|(m.enabled?4:0));for(unsigned i=0;i<16;++i)point(at+16+12*i,m.points[i]);}
+// flags: 1 loop, 2 finished, 4 enabled, 0x100 back and forth, 0x200 walking back, 0x400 pauses,
+// 0x800 standing in a pause; bits 16..31 the pause timer
+MotionState read_motion(uint32_t at){MotionState m;m.count=ld32(at);m.next=ld32(at+4);m.speed=number(at+8);const auto flags=ld32(at+12);m.loop=flags&1;m.finished=flags&2;m.enabled=flags&4;m.bounce=flags&0x100;m.reverse=flags&0x200;m.pauses=flags&0x400;m.waiting=flags&0x800;m.timer=flags>>16;for(unsigned i=0;i<16;++i)m.points[i]=point(at+16+12*i);return m;}
+void write_motion(uint32_t at,const MotionState&m){st32(at,m.count);st32(at+4,m.next);number(at+8,m.speed);st32(at+12,(m.loop?1:0)|(m.finished?2:0)|(m.enabled?4:0)|(m.bounce?0x100:0)|(m.reverse?0x200:0)|(m.pauses?0x400:0)|(m.waiting?0x800:0)|(std::min(m.timer,0xFFFFu)<<16));for(unsigned i=0;i<16;++i)point(at+16+12*i,m.points[i]);}
 bool emit(Cpu*c,uint32_t a,BehaviorEvent event,const Hit*hit=nullptr){
     if(!valid_actor(a))return false;Identity id;const auto*d=declaration(a);id={d->mod,d->spec.id,ld32(a+0xB0),ld32(a+4)};
     if(d->visual_role||!behavior_sink)return true;behavior_sink(c,a,event,hit);return resolve(c,id)==a&&(!(d->spec.combat_enabled||d->spec.carry_enabled)||!ld32(a+Quarantined));
@@ -346,7 +348,7 @@ if(data&&d->skinned){
     if(morf&&ld32(morf+0xA8)&&ld32(morf+0xAC)&&!ld32(morf+0xBC))model=ld32(morf+0x90);
 }else if(data)model=call(c,GC(0x025E38E0),{data,0x80000});uint32_t after=heap_free(c,current);LOG("[mod_actor] %s:%s model heap=%08X free_before=%u free_after=%u model_bytes=%u",d->mod.c_str(),d->spec.model.c_str(),current,before,after,before>=after?before-after:0);st32(a+Model,model);st32(a+0x368,model);st32(a+0x348,model?model+0xC8:0);if(d->visual_role==2&&model){const uint32_t animation=call(c,GC(0x026066C4),{ld32(GD(0x101F4F28)),a+Safe,uint32_t(d->index)+1});const uint32_t btk=animation?call(c,GC(0x025E7C6C),{0}):0;st32(a+0x854,btk);c->f[1].ps0=1;if(!btk||!call(c,GC(0x025E7CE0),{btk,data,animation,1,2,0,0xFFFFFFFFu,0})){result(c,0);return;}const uint32_t play=call(c,GC(0x025200D4),{});number(btk+4,play?float(ld16(play+0x5D00)%100):0.f);}if(d->spec.water_object()&&!water_step(c,a,*d,true)){result(c,0);return;}transform(a);const auto proof_kind=story_world_collision::proof::selected(d->mod,d->spec);const bool proof_ok=model&&story_world_collision::proof::heap_create(c,a,proof_kind,call)&&(!d->spec.world_object()||(d->collision&&story_world_collision::native::heap_create(c,a,*d->collision,d->fingerprint,call)));result(c,proof_ok);}
 void create(Cpu*c){uint32_t a=c->r[3];auto*d=declaration(a);if(!d){result(c,5);return;}if(!ld8(a+0x3AA)){call(c,GC(0x025D4ED0),{a});std::memset(mem::ptr(a+Phase),0,Size-Phase);if(d->spec.combat_enabled){combat::State state;if(!combat::initialize(state,combat_config(*d))){result(c,5);return;}write_combat(a,state);const auto captured=story_actors::identity::record(d->fingerprint);std::memcpy(mem::ptr(a+CombatIdentity),captured.data(),captured.size());}if(d->spec.carry_enabled){carry::State state;state.pid=ld32(a+4);write_carry(a,state);const auto captured=story_actors::identity::record(d->fingerprint);std::memcpy(mem::ptr(a+CombatIdentity),captured.data(),captured.size());}if(d->visual_role){const auto captured=story_actors::identity::record(d->fingerprint);std::memcpy(mem::ptr(a+CombatIdentity),captured.data(),captured.size());const float scale[]={d->spec.scale.x,d->spec.scale.y,d->spec.scale.z};for(unsigned i=0;i<3;++i)number(a+0x330+i*4,scale[i]);if(d->visual_role==1)number(a+0x364,10.f);}
-number(a+Radius,d->spec.collision_radius);number(a+Height,d->spec.collision_height);st32(a+CollisionFlags,d->visual_role?0:1|(d->spec.pushable?2:0));st32(a+LookObject,a+LookVtable);st32(a+LookObject+4,a);st32(a+LookVtable+0xC,look_callback);st32(a+PostObject,a+PostVtable);st32(a+PostObject+4,a);st32(a+PostVtable+0xC,post_callback);MotionState motion_;motion_.count=unsigned(d->spec.path.points.size());motion_.speed=d->spec.path.speed;motion_.loop=d->spec.path.loop;motion_.enabled=motion_.count>=2;for(unsigned i=0;i<motion_.count;++i)motion_.points[i]=d->spec.path.points[i];write_motion(a+Motion,motion_);std::memcpy(mem::ptr(a+Name),d->archive.c_str(),d->archive.size()+1);call(c,GC(0x0200BD2C),{a+Stts});call(c,GC(0x02515DA0),{a+Stts+0x1C});st32(a+Stts+0x18,GD(0x1004AE88));st32(a+Stts+0x1C,GD(0x1004AEC0));call(c,GC(0x02515FB8),{a+Cyl});st32(a+Cyl+0x114,GD(0x100015A8));st32(a+Cyl+0x110,GD(0x1001251C));call(c,GC(0x02018590),{a+Cyl+0x118});st32(a+Cyl+0x3C,GD(0x1004B108));st32(a+Cyl+0x114,GD(0x1004B160));st32(a+Cyl+0x12C,GD(0x1004B150));}
+number(a+Radius,d->spec.collision_radius);number(a+Height,d->spec.collision_height);st32(a+CollisionFlags,d->visual_role?0:1|(d->spec.pushable?2:0));st32(a+LookObject,a+LookVtable);st32(a+LookObject+4,a);st32(a+LookVtable+0xC,look_callback);st32(a+PostObject,a+PostVtable);st32(a+PostObject+4,a);st32(a+PostVtable+0xC,post_callback);MotionState motion_;motion_.count=unsigned(d->spec.path.points.size());motion_.speed=d->spec.path.speed;motion_.loop=d->spec.path.loop;motion_.bounce=d->spec.path.back_and_forth;motion_.pauses=d->spec.path.pauses;motion_.enabled=motion_.count>=2;for(unsigned i=0;i<motion_.count;++i)motion_.points[i]=d->spec.path.points[i];write_motion(a+Motion,motion_);std::memcpy(mem::ptr(a+Name),d->archive.c_str(),d->archive.size()+1);call(c,GC(0x0200BD2C),{a+Stts});call(c,GC(0x02515DA0),{a+Stts+0x1C});st32(a+Stts+0x18,GD(0x1004AE88));st32(a+Stts+0x1C,GD(0x1004AEC0));call(c,GC(0x02515FB8),{a+Cyl});st32(a+Cyl+0x114,GD(0x100015A8));st32(a+Cyl+0x110,GD(0x1001251C));call(c,GC(0x02018590),{a+Cyl+0x118});st32(a+Cyl+0x3C,GD(0x1004B108));st32(a+Cyl+0x114,GD(0x1004B160));st32(a+Cyl+0x12C,GD(0x1004B150));}
 if(heap_trace()&&!ld32(a+HeapStarted)){const auto before=heaps(c);for(unsigned i=0;i<4;++i){st32(a+HeapBaseline+i*8,before[i].first);st32(a+HeapBaseline+i*8+4,before[i].second);}st32(a+HeapStarted,1);}
 uint32_t phase=call(c,GC(0x02520460),{a+Phase,a+Name});if(phase!=4){if(phase>=5)fail_create(a);result(c,phase);return;}if(!ld32(a+Model)){
     if(heap_trace()){HeapSnapshot before{};for(unsigned i=0;i<4;++i)before[i]={ld32(a+HeapBaseline+i*8),ld32(a+HeapBaseline+i*8+4)};report_heaps(a,"archive_load",before,heaps(c));}
@@ -385,8 +387,14 @@ void knockback_movement(Cpu*c,uint32_t a,uint32_t play,uint32_t player){
 }
 void movement(Cpu*c,uint32_t a,uint32_t play,uint32_t player){
     auto state=read_motion(a+Motion);if(!state.enabled||ld16(a+0xF8)==1)return;
-    motion::Path path;path.count=state.count;path.speed=state.speed;path.loop=state.loop;for(unsigned i=0;i<16;++i)path.points[i]=motion_point(state.points[i]);
-    motion::PathState cursor{state.next,state.finished};const auto from=motion_point(point(a+0x314));
+    motion::Path path;path.count=state.count;path.speed=state.speed;path.loop=state.loop;path.bounce=state.bounce;for(unsigned i=0;i<16;++i)path.points[i]=motion_point(state.points[i]);
+    motion::PathState cursor{state.next,state.finished,state.reverse};
+    auto*own=declaration(a);
+    if(state.pauses&&!state.finished){  // strolling pauses: it stands for a while now and then
+        motion::Pauses p{state.waiting,state.timer,uint32_t(state.next*2654435761u)^ld32(a+0x314)^1u};
+        const bool walking=motion::pause_step(p);state.waiting=p.waiting;state.timer=p.timer;write_motion(a+Motion,state);
+        if(!walking){const std::string idle=own->spec.path.idle_clip.empty()?"idle":own->spec.path.idle_clip;if(std::find(own->clips.begin(),own->clips.end(),idle)!=own->clips.end())animate(c,a,idle,6,true);return;}
+    }const auto from=motion_point(point(a+0x314));
     const auto blocker=link_blocker(player);
     // A malformed native Link cylinder is an admission failure, never a guessed
     // radius that could permit passing through Link.
@@ -401,7 +409,7 @@ void movement(Cpu*c,uint32_t a,uint32_t play,uint32_t player){
         const int room=int(call(c,GC(0x024EF130),{play+0x12A0,a+Ground+0x14}));if(room!=int(int8_t(ld8(a+0x326))))return old;
         return motion::Point{proposed.x,y,proposed.z};
     });
-    state.next=cursor.next;state.finished=cursor.finished;write_motion(a+Motion,state);
+    state.next=cursor.next;state.finished=cursor.finished;state.reverse=cursor.reverse;write_motion(a+Motion,state);
     if(moved.status!=motion::Status::Invalid){
         point(a+0x314,{moved.position.x,moved.position.y,moved.position.z});
         if(moved.has_direction&&moved.traveled>0){
@@ -415,7 +423,8 @@ void movement(Cpu*c,uint32_t a,uint32_t play,uint32_t player){
         }
     }
     heading_movement(a,heading_before,moved);
-    auto*d=declaration(a);const std::string clip=moved.traveled>0.001f?"walk":"idle";
+    auto*d=own;const auto& walk_clip=d->spec.path.walk_clip,&idle_clip=d->spec.path.idle_clip;
+    const std::string clip=moved.traveled>0.001f?(walk_clip.empty()?"walk":walk_clip):(idle_clip.empty()?"idle":idle_clip);
     if(std::find(d->clips.begin(),d->clips.end(),clip)!=d->clips.end())animate(c,a,clip,6,true);
 }
 void look(Cpu*c,uint32_t a,uint32_t player){
@@ -778,6 +787,12 @@ bool apply_motion(uint32_t a,const MotionState&m){
 bool set_motion(Cpu*c,const Identity&id,const MotionState&m){const uint32_t a=resolve(c,id);return a&&!declaration(a)->spec.world_object()&&!carry_busy(a)&&!ld32(a+SceneLease)&&apply_motion(a,m);}
 bool path_impl(uint32_t a,const std::vector<story_notebook::WorldPoint>&points,float speed,bool loop){if(points.size()<2||points.size()>16)return false;MotionState m;m.count=unsigned(points.size());m.speed=speed;m.loop=loop;m.enabled=true;for(unsigned i=0;i<m.count;++i)m.points[i]=points[i];return apply_motion(a,m);}
 bool start_path(Cpu*c,const Identity&id,const std::vector<story_notebook::WorldPoint>&points,float speed,bool loop){const uint32_t a=resolve(c,id);return a&&!declaration(a)->spec.world_object()&&!carry_busy(a)&&!ld32(a+SceneLease)&&path_impl(a,points,speed,loop);}
+bool reload_path(uint32_t a,uint32_t token){
+    if(!a||!token||token>declarations.size()||!valid_actor(a)||declaration(a)!=&declarations[token-1]||carry_busy(a)||ld32(a+SceneLease))return false;
+    const auto&spec=declarations[token-1].spec;auto old=read_motion(a+Motion);MotionState m;m.count=unsigned(spec.path.points.size());m.speed=spec.path.speed;m.loop=spec.path.loop;m.bounce=spec.path.back_and_forth;m.pauses=spec.path.pauses;m.enabled=m.count>=2;
+    for(unsigned i=0;i<m.count&&i<16;++i)m.points[i]=spec.path.points[i];m.next=m.count?std::min(old.next,m.count-1):0;m.reverse=m.bounce&&old.reverse&&m.next>0;
+    write_motion(a+Motion,m);return true;
+}
 bool stop_path(Cpu*c,const Identity&id){const uint32_t a=resolve(c,id);if(!a||carry_busy(a)||ld32(a+SceneLease))return false;auto state=read_motion(a+Motion);state.enabled=false;write_motion(a+Motion,state);if(!declaration(a)->spec.combat_enabled||read_combat(a).phase==uint32_t(combat::Phase::Alive))animate(c,a,"idle",6,true);return true;}
 bool begin_scene(Cpu*c,const Identity&id,uint32_t lease){const uint32_t a=resolve(c,id);if(!a||declaration(a)->spec.world_object()||!lease||carry_busy(a)||ld32(a+SceneLease))return false;write_motion(a+SavedMotion,read_motion(a+Motion));st32(a+SavedClip,ld32(a+ClipIndex));st32(a+SavedLoop,ld32(a+ClipLoop));number(a+SavedFrame,ld32(a+Morf)?number(ld32(a+Morf)+0x9C):0);st32(a+SceneLease,lease);if(declaration(a)->spec.combat_enabled){auto state=read_combat(a);combat::cancel_attack(state);write_combat(a,state);st32(a+0x39C,0);}auto stopped=read_motion(a+Motion);stopped.enabled=false;write_motion(a+Motion,stopped);return true;}
 bool end_scene(Cpu*c,const Identity&id,uint32_t lease){const uint32_t a=resolve(c,id);if(!a||!lease||carry_busy(a)||ld32(a+SceneLease)!=lease)return false;write_motion(a+Motion,read_motion(a+SavedMotion));const auto*d=declaration(a);const uint32_t clip=ld32(a+SavedClip);if(clip<d->clips.size()){const float frame=number(a+SavedFrame);if(!std::isfinite(frame)||frame<0||frame>900)return false;st32(a+ClipIndex,0xFFFFFFFFu);if(!animate(c,a,d->clips[clip],0,ld32(a+SavedLoop)!=0))return false;if(ld32(a+Morf))number(ld32(a+Morf)+0x9C,frame);}st32(a+SceneLease,0);return true;}
