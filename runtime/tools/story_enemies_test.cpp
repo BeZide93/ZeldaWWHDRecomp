@@ -63,8 +63,8 @@ void original(Cpu*c,uint32_t fn){fn-=STORY_ENEMIES_TEST_CODE_DELTA;assert(known_
  c->r[3]=1;
 }
 unsigned base_constructs=0;
-uint32_t held_bomb=0;unsigned bomb_deletes=0;
-uint32_t invoke(Cpu*c,uint32_t fn,std::initializer_list<uint32_t>args){if(fn==GC(0x025D5218)){assert(args.size()==2&&*args.begin()==GC(0x025E1234));const uint32_t key=*(args.begin()+1);return held_bomb&&ld32(held_bomb+4)==ld32(key)?held_bomb:0;}if(fn==GC(0x025D57E0)&&held_bomb&&*args.begin()==held_bomb){++bomb_deletes;return 1;}if(fn==GC(0x025D4ED0)){const uint32_t a=*args.begin();assert(args.size()==1&&ld8(a+0x3AA)==0);st8(a+0x3AA,1);st32(a+0xB4,GD(0x10057138));++base_constructs;return a;}assert(fn==GC(0x025D57E0)&&args.size()==1);c->r[3]=*args.begin();original(c,fn);c->r[4]=999;c->pc=999;return c->r[3];}
+uint32_t held_bomb=0,event_owner=0;unsigned bomb_deletes=0,camera_calls=0;
+uint32_t invoke(Cpu*c,uint32_t fn,std::initializer_list<uint32_t>args){if(fn==GC(0x0253EE04))return event_owner;if(fn==GC(0x02514F38)||fn==GC(0x02515280)){++camera_calls;return 0;}if(fn==GC(0x025D5218)){assert(args.size()==2&&*args.begin()==GC(0x025E1234));const uint32_t key=*(args.begin()+1);return held_bomb&&ld32(held_bomb+4)==ld32(key)?held_bomb:0;}if(fn==GC(0x025D57E0)&&held_bomb&&*args.begin()==held_bomb){++bomb_deletes;return 1;}if(fn==GC(0x025D4ED0)){const uint32_t a=*args.begin();assert(args.size()==1&&ld8(a+0x3AA)==0);st8(a+0x3AA,1);st32(a+0xB4,GD(0x10057138));++base_constructs;return a;}assert(fn==GC(0x025D57E0)&&args.size()==1);c->r[3]=*args.begin();original(c,fn);c->r[4]=999;c->pc=999;return c->r[3];}
 void actor(uint32_t a,uint32_t pid,story_enemies::Kind k){const auto&d=story_enemy_ownership::descriptor(k);std::memset(mem::ptr(a),0,d.bytes);st32(a+4,pid);st16(a+0xE,d.profile);st32(a+0xB4,GD(k==story_enemies::Kind::ChuChu?0x1000C5A0:k==story_enemies::Kind::Bokoblin?0x1000957C:k==story_enemies::Kind::Moblin?0x10014E9C:k==story_enemies::Kind::Darknut?0x10040490:0x10012C24));st32(a+0xB0,story_enemies::parameters(k));st8(a+0x2DD,0xFF);st16(a+0x2D8,0xFFFF);st16(a+0x2FC,story_enemies::home_z(k));
  if(k==story_enemies::Kind::ChuChu){st8(a+0x3FB,0xFF);st32(a+0x924,a);}else if(k==story_enemies::Kind::Bokoblin){st8(a+0x3D0,4);st8(a+0x3D1,0xFF);st8(a+0x3D2,0xFF);st8(a+0x3D3,0xFF);st32(a+0x49C,a);st16(a+0x49C+8,2);st32(a+0x13BC,a);}else if(k==story_enemies::Kind::Moblin){st8(a+0x3DA,0xFF);st8(a+0x3DB,0xFF);st32(a+0x8BC,a);st16(a+0x8BC+8,1);st32(a+0x2E54,a);}else if(k==story_enemies::Kind::Darknut){const uint32_t p=ld32(a+0xB0);st8(a+0x3D8,4);st8(a+0x3D9,uint8_t(p>>8));st8(a+0x3DA,0xFF);st8(a+0x3DB,0xFF);st8(a+0x4DC,uint8_t((p>>4)&0xF));st32(a+0x590,a);st16(a+0x590+8,3);st32(a+0x1674,a);}else if(k==story_enemies::Kind::Rat){st32(a+0xB4,GD(0x1002442C));st8(a+0x3D0,1);st32(a+0xBE0,a);st32(a+0xF98,a);}else if(k==story_enemies::Kind::RatHole){st32(a+0xB4,GD(0x10024598));st8(a+0x3D5,1);st8(a+0x3D6,1);st8(a+0x405,0xFF);}else if(k==story_enemies::Kind::Peahat){st32(a+0xB4,GD(0x10034494));st32(a+0xAB4,a);st32(a+0xE6C,a);st32(a+0x1098,a);}else if(k==story_enemies::Kind::BokoBaba){st32(a+0xB4,GD(0x1000A184));}else if(k==story_enemies::Kind::Bubble){st32(a+0xB4,GD(0x10009964));st8(a+0x3EC,uint8_t(ld32(a+0xB0)&0xFF));st8(a+0x3F1,0xFF);st8(a+0x405,0xFF);}else if(k==story_enemies::Kind::Octorok){st32(a+0xB4,GD(0x10033E10));}else if(k==story_enemies::Kind::Miniblin){st32(a+0xB4,GD(0x10038234));st8(a+0x3D0,1);st8(a+0x3D1,10);st8(a+0x3D3,0xFF);st8(a+0x3D4,0xFF);st32(a+0x8FC,a);}else{st8(a+0x486,0xFF);st8(a+0x487,0xFF);st32(a+0xAD8,a);}
  for(size_t i=0;i<d.collider_count;++i){const auto&x=d.colliders[i];st32(a+x.object+0x44,a+x.stts);st32(a+x.stts+0xC,a);st32(a+x.stts+0x10,pid);if(x.helper)st32(a+x.helper,a);}
@@ -133,7 +133,7 @@ void octorok_test(story_enemies::Token t){using namespace story_enemies;KeepClai
  probe=[](Cpu*c,uint32_t f){if(f!=0x023C1380u)return false;assert(!deny_create(0xE3,6));st8(Oq+0x3DF,0x14);st8(Oq+0x3E0,0x20);Cpu d=*c;d.r[3]=Oq;hooks.at(0x025D99E8)(&d);c->r[3]=1;return true;};run(0x023C1380,Oq);probe=nullptr;assert(!available(t)&&!is_defeated(t));
  std::memset(mem::ptr(Retail),0,0x1200);st16(Retail+0xE,0xE3);const unsigned c0=calls;run(0x023C1380,Retail);assert(calls==c0+1);}
 int main(int argc,char**argv){using namespace story_enemies;const bool drowning_test=argc==2&&std::strcmp(argv[1],"--drowning")==0;const bool weapons=drowning_test||(argc==2&&std::strcmp(argv[1],"--weapons")==0);
- map_memory(Actor,0x20000);map_memory(B3,0x20000);map_memory(More,0x20000);map_memory(GD(0x101B0000),0x10000);map_memory(GD(0x101C0000),0x10000);map_memory(Arena,0x20000);map_memory(GD(0x101F0000),0x10000);map_memory(GD(0x10460000),0x10000);
+ map_memory(Actor,0x20000);map_memory(B3,0x20000);map_memory(More,0x20000);map_memory(0x20040000,0x10000);map_memory(GD(0x10470000),0x10000);map_memory(GD(0x101B0000),0x10000);map_memory(GD(0x101C0000),0x10000);map_memory(Arena,0x20000);map_memory(GD(0x101F0000),0x10000);map_memory(GD(0x10460000),0x10000);
 #if STORY_ENEMIES_TEST_CODE_DELTA
  for(uint32_t canonical:{0x101F0000u,0x10460000u,0x10190000u,0x101B0000u}){map_memory(canonical,0x10000);std::memset(mem::ptr(canonical),0xA5,0x10000);}
 #endif
@@ -204,6 +204,16 @@ int main(int argc,char**argv){using namespace story_enemies;const bool drowning_
    Spec extra{Kind::Morth,"m","ks2","ks2.dead",{}, {},1};(void)extra;
    assert(begin_epoch(ks,2));cling(false);bind(ks,pid);st32(count,3);st32(shake,3);run(story_enemies_more::find(Kind::Morth)->destroy,at);assert(ld32(count)==2&&ld32(shake)==2&&!(ld32(at+0x2E0)&0x4000));
    assert(begin_epoch(ks,3));cling(true);bind(ks,pid);run(story_enemies_more::find(Kind::Morth)->destroy,at);assert(ld32(count)==0&&ld32(shake)==0);}
+  // Redead: standing, ordinary mode, switch 0xFF; removed or stopped while its scream or bite holds Link, the event ends
+  const uint32_t play=GD(0x1046F0B0),flag=play+0x51D0+0xE8;
+  at+=0x2000;make(Kind::Redead);st32(at+0x3D8,0xFF);st32(at+0x3DC,0xFF);const Token rd=table[Kind::Redead];assert(verify_actor(rd,Kind::Redead,at));
+  for(uint32_t off:{0x3D3u,0x3DBu,0x3DFu,0xA65u})expect_field(rd,Kind::Redead,off);st32(at+0x3C8,11);assert(!verify_actor(rd,Kind::Redead,at));st32(at+0x3C8,7);
+  bind(rd,pid);st8(play+0x51D0+0xC2,1);event_owner=at;st16(flag,0);run(story_enemies_more::find(Kind::Redead)->destroy,at);assert(ld16(flag)==8);
+  st16(flag,0);event_owner=Actor;make(Kind::Redead);run(story_enemies_more::find(Kind::Redead)->execute,at);assert(ld16(flag)==0);  // another's event stays
+  event_owner=at;run(story_enemies_more::find(Kind::Redead)->execute,at);assert(ld16(flag)==8);st16(flag,0);  // left over (unowned): its event ends
+  std::memcpy(mem::ptr(play+0x5134),"kazan\0\0",8);assert(begin_epoch(rd,2));make(Kind::Redead);st32(at+0x3D8,0xFF);st32(at+0x3DC,0xFF);bind(rd,pid);{const unsigned bc=base_constructs;Cpu q{};q.r[3]=at;hooks.at(story_enemies_more::find(Kind::Redead)->create)(&q);assert(q.r[3]==5&&base_constructs==bc+1);base_constructs=bc;}  // refused like a retail createstd::memset(mem::ptr(play+0x5134),0,8);
+  st32(at+0x3C8,3);st32(at+0x4EC,0);st8(at+0x2DA,3);assert(story_enemies_more::redead_terminal(at));st32(at+0x4EC,1);assert(!story_enemies_more::redead_terminal(at));
+  event_owner=0;st8(play+0x51D0+0xC2,0);
   claims=drops=0;
  }
  { // Rat: a rat of a rat hole (arg0 1), its own type (ordinary or bomb rat), unfrozen

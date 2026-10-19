@@ -72,6 +72,25 @@ inline constexpr uint16_t kStalfosClub = 0x1CF;     // the club's profile (Boko)
 inline constexpr uint32_t kStalfosClubParams = 2;   // Type_STALFOS_MACE
 inline constexpr uint16_t kStalfosUpperBody = 0xBE; // the split's second Stalfos (refused)
 
+// ---------------------------------------------------------------- Redead (d_a_rd)
+// Parameter 0xFFFFFFFE: standing (bit 0 clear), its own radius (0x7F: 650), the ordinary mode (byte 1
+// non-zero: never the coffin, whose wait reads switch byte 3), switch 0xFF. No children, no save writes
+// (setID 0xFFFF). Its scream and its bite are the stage's events DEFAULT_RD_CRY / DEFAULT_RD_ATTACK:
+// while one runs Link is held in his demo state until the event ends. The game ends them only from the
+// Redead's own execute, so story_enemies ends the event it holds when it is removed, stopped or left
+// over (release_link). Every stage has both events except four (kNoRedeadStages): a Redead there is
+// not created (it would scream without effect and wait in its attack forever). Light (the Mirror Shield
+// beam, light volumes) paralyses it; Light Arrows destroy it. Colliders: body cylinder 0x738 on mStts
+// 0x6FC (no attack), enemyice 0x8B4, enemyfire 0xC6C.
+inline constexpr Collider kRedeadColliders[] = {{0x738, 0x6FC, 0}, {0x920, 0x8E4, 0x8B4}, {0xD48, 0xD0C, 0xC6C}};
+inline bool redead_verify(uint32_t a, uint32_t p) {
+    return ld32(a + 0x3D0) == (p & 1) && ld32(a + 0x3D8) == ((p >> 8) & 0xFF) && ld32(a + 0x3DC) == (p >> 24) && ld32(a + 0x3C8) <= 9;
+}
+// DEATH (mode 3) once its last timer ran out (the group already ENV): the one createDisappear
+inline bool redead_terminal(uint32_t a) { return ld32(a + 0x3C8) == 3 && ld32(a + 0x4EC) == 0 && ld8(a + 0x2DA) == 3; }
+inline bool redead_holds_link(uint32_t a) { return ld32(a + 0x3C8) == 5 || ld32(a + 0x3C8) == 7; }
+inline constexpr const char* kNoRedeadStages[] = {"Ebesso", "kazan", "Msmoke", "tincle"};
+
 // ---------------------------------------------------------------- Mothula (d_a_gm)
 // Parameters (story_enemy_variants "mothula"): 0xFF01FFFF ground (type 1, no wings), 0xFF02FFFF winged
 // (type 2); never type 0 (the Forbidden Woods mini-boss with its cutscene, Link and camera writes).
@@ -200,6 +219,10 @@ inline constexpr Native kNatives[] = {
      CANONICAL_CODE_ID(0x021507C4).value(), CANONICAL_CODE_ID(0x0214D128).value(), CANONICAL_CODE_ID(0x0214BF60).value(),
      CANONICAL_CODE_ID(0x0214FFD8).value(), [] { return GD(0x1000FDD4); }, 0xFF01FFFFu, 0, 0xCA4, {0x105C, 0}, true,
      mothula_verify, mothula_terminal, nullptr, 0x3EC, false},
+    {Kind::Redead, "redead", {0x7FE1, 0xE0, 0xF1C, kRedeadColliders, std::size(kRedeadColliders)},
+     CANONICAL_CODE_ID(0x0245B7B8).value(), CANONICAL_CODE_ID(0x0245C498).value(), CANONICAL_CODE_ID(0x0245C728).value(),
+     CANONICAL_CODE_ID(0x0245B814).value(), [] { return GD(0x10038EE4); }, 0xFFFFFFFEu, 0, 0x8B4, {0xC6C, 0}, true,
+     redead_verify, redead_terminal, nullptr, 0x3CB, false},
     {Kind::Armos, "armos", {0x7FE6, 0xCB, 0xF60, kArmosColliders, std::size(kArmosColliders)},
      CANONICAL_CODE_ID(0x0204FE84).value(), CANONICAL_CODE_ID(0x0204D3A4).value(), CANONICAL_CODE_ID(0x0204C5F8).value(),
      CANONICAL_CODE_ID(0x0204F9D0).value(), [] { return GD(0x1000702C); }, 0xFF00FF00u, 0, 0xBA8, {0, 0}, true,

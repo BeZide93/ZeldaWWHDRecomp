@@ -72,7 +72,7 @@ inline constexpr Variant kVariants[] = {
 
 // The native enemies of the table-driven adapter (story_enemies_more.h) that mods may place: the
 // manifest, the validator and the editor accept these names like the ones they list themselves.
-inline constexpr const char* kMoreEnemies[] = {"stalfos", "mothula", "morth", "magtail", "armos", "armos_knight"};
+inline constexpr const char* kMoreEnemies[] = {"stalfos", "redead", "mothula", "morth", "magtail", "armos", "armos_knight"};
 inline bool more_enemy(const std::string& actor) {
     for (const char* name : kMoreEnemies)
         if (actor == name) return true;

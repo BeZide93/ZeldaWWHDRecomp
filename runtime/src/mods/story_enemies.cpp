@@ -106,6 +106,18 @@ void release_club(Cpu*c,const Entry&e,uint32_t a){if(e.spec.kind!=Kind::Stalfos|
 void release_morth(const Entry&e,uint32_t a){if(e.spec.kind!=Kind::Morth||!more::morth_attached(a))return;const uint32_t count=more::morth_clinging(),shake=more::morth_shake_off();
  if(ld8(a+0x54A)){st32(count,0);st32(shake,0);}else{const int32_t n=std::max<int32_t>(0,int32_t(ld32(count))-1);st32(count,uint32_t(n));if(int32_t(ld32(shake))>n)st32(shake,uint32_t(n));}
  st32(a+0x2E0,ld32(a+0x2E0)&~0x4000u);st32(a+0x7A4,0);trace(e,a,"clinging-released",ld32(count));}
+// The Redead's scream and bite hold Link through the game (an event that keeps him in his demo state)
+// and only the Redead's own execute lets go. release_link lets go for it when it is removed, stopped
+// (quarantined) or left over after a state load: the event it holds ends (the game's own event reset,
+// dComIfGp_event_reset). Bounded reads; native calls only with invoke.
+uint32_t play_base(){return GD(0x1046F0B0);}
+constexpr uint32_t kEventControl=0x51D0;
+bool holds_event(Cpu*c,uint32_t a){const uint32_t p=play_base();if(!invoke||!ld8(p+kEventControl+0xC2))return false;Cpu probe=*c;return invoke(&probe,GC(0x0253EE04),{p+kEventControl,ld32(p+kEventControl+0xC4)})==a;}
+void end_event(){const uint32_t f=play_base()+kEventControl+0xE8;st16(f,uint16_t(ld16(f)|8u));}
+void release_link(Cpu*c,Kind k,uint32_t a,const char*why){
+ if(k==Kind::Redead&&holds_event(c,a)){end_event();LOG("[native_enemy] redead actor=%08X: its event ended (%s)",a,why);}}
+// a reserved Redead the adapter no longer owns (after a state load or a quarantine): its hold on Link ends too
+void release_orphan(Cpu*c,uint32_t a){const uint16_t prof=ld16(a+0xE);for(Kind k:{Kind::Redead}){const auto*n=more::find(k);if(prof==n->descriptor.profile&&memory(a,n->descriptor.bytes)&&ld32(a+0xB4)==n->vtable())release_link(c,k,a,"left over");}}
 // An Armos Knight removed while it swallows Link's bomb (modes 44..46): the game sets the bomb off only in
 // its own death (mode 47), so the held bomb (no-hit, invisible, in its carry state) is deleted with it.
 // The PID key is the Knight's own field (fpcSch_JudgeByID takes the id by address); bombs only.
@@ -113,17 +125,19 @@ void release_bomb(Cpu*c,const Entry&e,uint32_t a){if(e.spec.kind!=Kind::ArmosKni
  Cpu probe=*c;const uint32_t bomb=invoke(&probe,GC(0x025D5218),{GC(0x025E1234),a+0x400});
  if(!memory(bomb,0x10)||ld32(bomb+4)!=pid||(ld16(bomb+0xE)!=0x126&&ld16(bomb+0xE)!=0x127))return;probe=*c;invoke(&probe,GC(0x025D57E0),{bomb});trace(e,a,"held-bomb-deleted",pid);}
 // what an owned enemy holds goes with it when it is deleted
-void release_held(Cpu*c,const Entry&e,uint32_t a){release_bomb(c,e,a);release_club(c,e,a);release_morth(e,a);}
+void release_held(Cpu*c,const Entry&e,uint32_t a){release_bomb(c,e,a);release_club(c,e,a);release_morth(e,a);release_link(c,e.spec.kind,a,"removed");}
 void lifecycle(Cpu*c,uint32_t fn,bool create,bool draw,bool destroy){const uint32_t a=c->r[3];
  // daTn_Create runs daTn_Execute itself (three steps that place the armour pieces): inside its own create
  // the native code runs as it is, under the create's scopes
  if(!create&&!destroy){Entry*n=find(a,false);if(n&&n->creating&&n->spec.kind==Kind::Darknut){original(c,fn);return;}}
  Entry*e=find(a,!create&&!destroy);
- if(!create&&!draw&&!destroy&&enemy_trace()){if(!e)exec_trace(a,find(a,false)?"unverified-original":"not-owned");}if(!e){if(destroy&&cleanup_identity(a,fn)){story_enemy_ownership::retire_before_delete(a);native_delete(c,fn);return;}if(reserved(a)){refuse_or_skip(c,a,create);return;}original(c,fn);return;}
+ if(!create&&!draw&&!destroy&&enemy_trace()){if(!e)exec_trace(a,find(a,false)?"unverified-original":"not-owned");}if(!e){if(destroy&&cleanup_identity(a,fn)){story_enemy_ownership::retire_before_delete(a);native_delete(c,fn);return;}if(reserved(a)){if(!create&&!draw&&!destroy)release_orphan(c,a);refuse_or_skip(c,a,create);return;}original(c,fn);return;}
  if(destroy){release_held(c,*e,a);if(e->spec.kind==Kind::Bokoblin)st8(a+0x137D,0);if(e->spec.kind==Kind::Moblin)st8(a+0x2E0E,0);if(children.retire&&has_children(e->spec.kind))children.retire(e->token,a);const auto kids=live_children(*e);const uint32_t pid=e->pid;story_enemy_ownership::retire_before_delete(a);e->address=0;e->pid=0xFFFFFFFFu;trace(*e,a,"delete");SaveWatch watch(e,e->spec.kind==Kind::Darknut);native_delete(c,fn);const Cpu result=*c;watch.check("delete");if(watch.base)LOG("[native_enemy] %s save info watched over %u Darknut steps: %u changed bytes",e->spec.id.c_str(),SaveWatch::steps,SaveWatch::changed);if(retired)retired(e->token,pid);
   for(uint32_t kid:kids)if(kid){Cpu probe=result;const uint32_t ok=invoke(&probe,GC(0x025D57E0),{kid});trace(*e,a,"child-removed",ok);}
   *c=result;return;}
- if(!supported(e->spec.kind)||e->quarantine){if(!create&&!draw)exec_trace(a,"quarantined");refuse_or_skip(c,a,create);return;}
+ if(!supported(e->spec.kind)||e->quarantine){if(!create&&!draw){exec_trace(a,"quarantined");release_link(c,e->spec.kind,a,"stopped");}refuse_or_skip(c,a,create);return;}
+ // a Redead only where the stage has its scream and bite events
+ if(create&&e->spec.kind==Kind::Redead){const char*stage=reinterpret_cast<const char*>(mem::ptr(play_base()+0x5134));for(const char*no:more::kNoRedeadStages)if(std::strncmp(stage,no,8)==0){trace(*e,a,"no-redead-events-on-this-stage");refuse_or_skip(c,a,create);return;}}
  if(!create&&story_items::enemy_defeated(e->marker)){if(!draw&&ld8(a+0xC)!=3){Cpu probe=*c;const uint32_t result=invoke(&probe,GC(0x025D57E0),{a});static unsigned reported=0;if(reported++<128)trace(*e,a,"terminal-delete-retry",result);}c->r[3]=1;return;}
  if(!create&&!draw){if(!story_enemy_ownership::lookup_actor(a)){if(!story_enemy_ownership::admit_created(e->token,a)){disable(*e,a);c->r[3]=1;return;}e->address=a;}e->address=a;
   // Carry is refused by the shared player admission hook, never undone here.

@@ -33,7 +33,7 @@ The initial allowlist is deliberately small:
 | Breakable prop | `pot`, `barrel`, `crate` | Required mod-owned `broken_flag` and `drops` list |
 | Latched floor switch | `switch` | Required mod-owned `switch_flag`; fixed yellow switch |
 | Rotating gate | `door` | Required `switch` naming a switch actor in the same mod |
-| Native enemies (preview) | `chuchu`, `bokoblin`, `moblin`, `keese`, `miniblin`, `peahat`, `darknut`, `rat_hole`, `bokobaba`, `bubble`, `octorok`, `stalfos`, `mothula`, `morth`, `magtail`, `armos`, `armos_knight` | Required mod-owned `defeated_flag` and `drops`; fixed ordinary variants |
+| Native enemies (preview) | `chuchu`, `bokoblin`, `moblin`, `keese`, `miniblin`, `peahat`, `darknut`, `rat_hole`, `bokobaba`, `bubble`, `octorok`, `stalfos`, `redead`, `mothula`, `morth`, `magtail`, `armos`, `armos_knight` | Required mod-owned `defeated_flag` and `drops`; fixed ordinary variants |
 
 Resident names are exact native object codes in lower case. Each placed copy uses fixed ordinary
 parameters: it stands where you put it (unless you give it a route, below) and has none of the
@@ -454,6 +454,7 @@ The allowlist below defines the supported variants.
 | `bubble` | A red Bubble, or a blue one (below): a flaming skull that stays near the ground below it |
 | `octorok` | The small Octorok: it rises out of water and spits rocks at Link. Reflect a rock with the shield, or use arrows or the boomerang. Never the big Octorok that fires bombs |
 | `stalfos` | Ordinary Stalfos with its club: strike it until it falls apart, then hit its head before it pulls itself together (bombs and the Skull Hammer finish the head at once) |
+| `redead` | Ordinary standing Redead: its scream freezes Link, then it grabs and bites him; light stops it |
 | `mothula` | Mothula on the ground, or the winged one (below) |
 | `morth` | A single Morth: it clings to Link and slows him; a spin attack or rolling throws it off |
 | `magtail` | Ordinary Magtail: strike its head to curl it into a ball, then strike the ball (or lift and throw it) |
@@ -570,6 +571,12 @@ reach outside the mod:
   breaks it does not split it into a walking upper body and kicking legs (the upper body would be an
   enemy of the game with its own drops): it falls apart as from any other finishing blow, and the
   head must still be hit.
+- **Redead:** its scream and its bite hold Link the way the game does. If the Redead is removed (by
+  the editor, a room change or a state load) while it holds him, Link is free at once. It is not
+  created on the four stages whose game events have no Redead scream (`Ebesso`, `kazan`, `Msmoke`,
+  `tincle`).
+  Outdoors it can be stopped with reflected light only where the game has light; Light Arrows
+  destroy it.
 - **Mothula:** it fights alone; it does not release Morths (they would be the game's own Morths with
   their drops). Place Morths next to it instead. A winged one that dives far from where it was
   placed turns back. Its wings fly off as in the game.

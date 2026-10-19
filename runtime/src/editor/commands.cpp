@@ -82,7 +82,7 @@ const std::vector<CommandInfo> kCommands = {
     // building new content
     {"list_actor_types", "The kinds of actor add_actor places, and which appear without a restart; a kind's variants are the choices of its option (who a resident is).", {}},
     {"add_actor", "Places a new actor of the open mod at Link, at the fly camera or at a position (snapped to the ground).",
-     {{"type", "string", "a list_actor_types type: sign, resident, chest, pot, barrel, crate, switch, door, chuchu, bokoblin, moblin, keese, miniblin, peahat, darknut, rat_hole, bokobaba, bubble, octorok, stalfos, mothula, morth, magtail, armos, armos_knight, model, model_enemy, model_carry; or a game object \"game:<id>\" or an island building \"piece:<id>\" (list_game_objects)", true},
+     {{"type", "string", "a list_actor_types type: sign, resident, chest, pot, barrel, crate, switch, door, chuchu, bokoblin, moblin, keese, miniblin, peahat, darknut, rat_hole, bokobaba, bubble, octorok, stalfos, redead, mothula, morth, magtail, armos, armos_knight, model, model_enemy, model_carry; or a game object \"game:<id>\" or an island building \"piece:<id>\" (list_game_objects)", true},
       {"id", "string", "the new id (default: from the type)"}, {"at", "string", "link (default), camera or position"},
       {"position", "point", "with at = position"}, {"stage", "string", "with at = position (default: Link's)"}, {"room", "integer", "with at = position (default: Link's or the sea square's)"},
       {"angle", "number", "heading in degrees (default: facing like Link or the camera)"}, {"snap", "boolean", "onto the ground below (default true)"},

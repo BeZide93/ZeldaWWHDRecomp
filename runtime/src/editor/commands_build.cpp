@@ -142,6 +142,7 @@ const std::vector<ActorType>& actor_types() {
         {"darknut", "Darknut", "Enemies", "The game's Darknut, with its sword (with a shield, a helmet, or the Mighty Darknut's cape: options.variant).", false, false, false},
         {"rat_hole", "Rat hole", "Enemies", "A rat hole three rats come out of, one after the other (rats, bomb rats or both: options.variant); each defeated rat drops the hole's drops, and the hole closes when all three are defeated.", false, false, false},
         {"stalfos", "Stalfos", "Enemies", "The game's Stalfos with its club: break it apart, then strike its head before it pulls itself together.", false, false, false},
+        {"redead", "Redead", "Enemies", "The game's Redead: its scream freezes Link, then it grabs him; light stops it.", false, false, false},
         {"mothula", "Mothula", "Enemies", "The game's Mothula, on the ground or with wings (options.variant).", false, false, false},
         {"morth", "Morth", "Enemies", "The game's Morth: it clings to Link and slows him down; a spin attack or a roll throws it off.", false, false, false},
         {"magtail", "Magtail", "Enemies", "The game's Magtail: strike its head to curl it into a ball, then strike the ball (or lift and throw it).", false, false, false},
