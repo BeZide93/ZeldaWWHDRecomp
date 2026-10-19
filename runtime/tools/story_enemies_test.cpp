@@ -39,7 +39,7 @@ void map_memory(uint32_t a,uint32_t n){assert(!(a&0xFFFFu)&&n&&!(n&0xFFFFu));
  }
 }
 void call_hook(Cpu*c,uint32_t f,uint32_t a){Cpu nested=*c;nested.r[3]=a;hooks.at(f)(&nested);}
-bool known_address(uint32_t fn){const uint32_t known[]={0x02110D4C,0x0210DD3C,0x0210BFEC,0x021104B4,0x0219D568,0x0219AAE8,0x02199748,0x0219CE98,0x0209F918,0x0209BD1C,0x0209971C,0x0209F164,0x021CCB00,0x021C9B1C,0x021C7344,0x021CC44C,0x02446E54,0x02446374,0x02445EE4,0x024468E4,0x023CF600,0x023CC070,0x023C9994,0x023CEF04,0x0230F32C,0x0230BEF4,0x0230AE30,0x0230EDD0,0x0231175C,0x02311240,0x023111D8,0x023115BC,0x024C0B0C,0x024BD170,0x024BA238,0x024C0194,0x025D99E8,0x020402C8,0x025D9154,0x021992DC,0x025D9898,0x021C9AA0,0x025D7B24,0x020A47B4,0x021D0294,0x020A3B18,0x02041570,0x02041F94,0x02043F34,0x025D57E0,0x020BFC50,0x020BCEC8,0x020BBAEC,0x020BF574,0x020ADA5C,0x020AB020,0x020A8BDC,0x020AD59C,0x023C3EC8,0x023C1380,0x023C039C,0x023C38AC,0x021A7B4C,0x025D537C,0x025D5A20,0x02516C14};bool accepted=false;for(uint32_t expected:known)accepted|=fn==expected;for(const auto&n:story_enemies_more::kNatives)accepted|=fn==n.create||fn==n.execute||fn==n.draw||fn==n.destroy;return accepted;}
+bool known_address(uint32_t fn){const uint32_t known[]={0x02110D4C,0x0210DD3C,0x0210BFEC,0x021104B4,0x0219D568,0x0219AAE8,0x02199748,0x0219CE98,0x0209F918,0x0209BD1C,0x0209971C,0x0209F164,0x021CCB00,0x021C9B1C,0x021C7344,0x021CC44C,0x02446E54,0x02446374,0x02445EE4,0x024468E4,0x023CF600,0x023CC070,0x023C9994,0x023CEF04,0x0230F32C,0x0230BEF4,0x0230AE30,0x0230EDD0,0x0231175C,0x02311240,0x023111D8,0x023115BC,0x024C0B0C,0x024BD170,0x024BA238,0x024C0194,0x025D99E8,0x020402C8,0x025D9154,0x021992DC,0x025D9898,0x021C9AA0,0x025D7B24,0x020A47B4,0x021D0294,0x020A3B18,0x02041570,0x02041F94,0x02043F34,0x025D57E0,0x020BFC50,0x020BCEC8,0x020BBAEC,0x020BF574,0x020ADA5C,0x020AB020,0x020A8BDC,0x020AD59C,0x023C3EC8,0x023C1380,0x023C039C,0x023C38AC,0x021A7B4C,0x025D537C,0x025D5A20,0x02516C14,0x025D5928};bool accepted=false;for(uint32_t expected:known)accepted|=fn==expected;for(const auto&n:story_enemies_more::kNatives)accepted|=fn==n.create||fn==n.execute||fn==n.draw||fn==n.destroy;return accepted;}
 unsigned layer_calls=0;bool morth_dies=false;
 std::function<bool(Cpu*,uint32_t)> probe;  // batch-3 kinds: a test's stand-in for the native step
 void original(Cpu*c,uint32_t fn){fn-=STORY_ENEMIES_TEST_CODE_DELTA;assert(known_address(fn));++calls;const uint32_t a=c->r[3];if(probe&&probe(c,fn))return;
@@ -160,7 +160,7 @@ int main(int argc,char**argv){using namespace story_enemies;const bool drowning_
  Spec oq{Kind::Octorok,"m","oq","oq.dead",{}, {},1};const Token octo=declare(oq,why);assert(octo);
  std::map<Kind,Token> table;for(const auto&n:story_enemies_more::kNatives){if((n.kind==Kind::Stalfos||n.kind==Kind::Wizzrobe)&&!weapons){Spec t{n.kind,"m",n.name,"st.dead",{}, {},1};assert(!declare(t,why));continue;}  // its club is an owned child: only with the child routes
   Spec t{n.kind,"m",n.name,std::string(n.name)+".dead",{}, {},1};table[n.kind]=declare(t,why);assert(table[n.kind]&&supported(n.kind)==n.offered);}
- {std::array<uint32_t,story_enemy_ownership::kKindCount> storage{Arena+0xB000,Arena+0xB030,Arena+0xB060,Arena+0xB090,Arena+0xB0C0,Arena+0xB0F0,Arena+0xB120,Arena+0xB150,Arena+0xB180,Arena+0xB1B0,Arena+0xB1E0,Arena+0xB210};uint32_t slot=0;for(const auto&n:story_enemies_more::kNatives){storage[unsigned(n.kind)]=Arena+0xB240+0x30*slot;st32(GD(0x101F3EE0)+n.descriptor.native_profile*4,Actor+0x9000+0x100*slot);st32(Actor+0x9010+0x100*slot,n.descriptor.bytes);++slot;}configure(original,invoke,storage);}assert(install([](uint32_t){return std::string();},[](uint32_t f,void(*fn)(Cpu*)){const uint32_t canonical=f-STORY_ENEMIES_TEST_CODE_DELTA;assert(known_address(canonical)&&!hooks.count(canonical));hooks[canonical]=fn;}));assert(hooks.size()==66+4*std::size(story_enemies_more::kNatives));
+ {std::array<uint32_t,story_enemy_ownership::kKindCount> storage{Arena+0xB000,Arena+0xB030,Arena+0xB060,Arena+0xB090,Arena+0xB0C0,Arena+0xB0F0,Arena+0xB120,Arena+0xB150,Arena+0xB180,Arena+0xB1B0,Arena+0xB1E0,Arena+0xB210};uint32_t slot=0;for(const auto&n:story_enemies_more::kNatives){storage[unsigned(n.kind)]=Arena+0xB240+0x30*slot;st32(GD(0x101F3EE0)+n.descriptor.native_profile*4,Actor+0x9000+0x100*slot);st32(Actor+0x9010+0x100*slot,n.descriptor.bytes);++slot;}configure(original,invoke,storage);}assert(install([](uint32_t){return std::string();},[](uint32_t f,void(*fn)(Cpu*)){const uint32_t canonical=f-STORY_ENEMIES_TEST_CODE_DELTA;assert(known_address(canonical)&&!hooks.count(canonical));hooks[canonical]=fn;}));assert(hooks.size()==67+4*std::size(story_enemies_more::kNatives));
  fire_keese_test(fire_keese);
  seahat_test(seahat);
  boko_baba_test(baba);boko_baba_hold_test(baba2);
@@ -212,6 +212,18 @@ int main(int argc,char**argv){using namespace story_enemies;const bool drowning_
    bind(wz,pid);run(story_enemies_more::find(Kind::Wizzrobe)->create,at);assert(owns_actor(at));
    st8(at+0x468,1);st8(at+0x469,0x29);assert(!story_enemies_more::wizzrobe_terminal(at));st8(at+0x469,0x2A);
    {const unsigned c0=claims;Cpu probe{};probe.r[3]=at;hooks.at(0x025D99E8)(&probe);assert(claims==c0+1&&is_defeated(wz));}}
+  // Warship: stays where it was placed, no Triforce chart, salvage point, path or switches, the ordinary
+  // ship (home angle x 0xFFFF); its delete mode's drop (proc 3) is its defeat; refused off the sea (as a
+  // retail create fails: constructed first)
+  at+=0x2000;make(Kind::Warship);st8(at+0x3CD,0xFF);st8(at+0x3CE,0xFF);st8(at+0x3CF,0xFF);st8(at+0x3D0,0xF);st8(at+0x3D1,0xF);st8(at+0x3D2,0xFF);const Token ws=table[Kind::Warship];assert(verify_actor(ws,Kind::Warship,at));
+  for(uint32_t off:{0x3CCu,0x3CDu,0x3CEu,0x3CFu,0x3D0u,0x3D1u,0x3D2u})expect_field(ws,Kind::Warship,off);
+  st32(at+0x3C8,5);assert(verify_actor(ws,Kind::Warship,at));st32(at+0x3C8,8);assert(!verify_actor(ws,Kind::Warship,at));st32(at+0x3C8,0);  // its idle modes by distance, never MODE_NULL
+  assert(story_enemies::home_x(Kind::Warship)==0xFFFF&&story_enemies::home_x(Kind::Kargaroc)==0&&home_x(ws)==0xFFFF);
+  bind(ws,pid);{Cpu q{};q.r[3]=at;const unsigned c0=calls,b0=base_constructs;hooks.at(story_enemies_more::find(Kind::Warship)->create)(&q);assert(q.r[3]==5&&calls==c0&&base_constructs==b0+1);base_constructs=b0;}  // only on the sea (the count is the later refusal test's)
+  st8(at+0x3AA,0);st32(at+0xB4,story_enemies_more::find(Kind::Warship)->vtable());
+  {const unsigned c0=calls;std::memcpy(mem::ptr(GD(0x1046F0B0)+0x5134),"sea\0\0\0\0",8);run(story_enemies_more::find(Kind::Warship)->create,at);std::memset(mem::ptr(GD(0x1046F0B0)+0x5134),0,8);assert(calls==c0+1&&owns_actor(at));}
+  st32(at+0x3C8,2);assert(!story_enemies_more::warship_terminal(at));st32(at+0x3C8,3);
+  {const unsigned c0=claims;Cpu probe{};probe.r[3]=at;hooks.at(0x025D99E8)(&probe);assert(claims==c0+1&&is_defeated(ws));}
   // Mothula (ground): type 1, body, no switches; its moths refused while it runs; terminal state 101; a
   // winged one diving far from home turns back
   at+=0x2000;make(Kind::Mothula);st8(at+0x3EA,1);st8(at+0x3EB,0xFF);st8(at+0x3EC,10);const Token gm=table[Kind::Mothula];assert(verify_actor(gm,Kind::Mothula,at));

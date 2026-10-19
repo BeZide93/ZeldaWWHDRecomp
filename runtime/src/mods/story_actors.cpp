@@ -687,7 +687,7 @@ void room_loaded(Cpu* c,int room) {
         for(unsigned i=0;i<3;++i){st32(g_scratch+i*4,f32_as_u32(p[i]));st32(g_scratch+0x14+i*4,f32_as_u32(s[i]));st16(g_scratch+0xC+i*2,uint16_t(int32_t(r[i]*65536.0f/360.0f)));}
         if(a.prop_token||a.switch_token)st16(g_scratch+0x10,255);
         if(a.enemy_token)st16(g_scratch+0x10,story_enemies::home_z(enemy));
-        if(a.enemy_token&&enemy==story_enemies::Kind::Darknut)st16(g_scratch+0xC,story_enemies::home_x(a.enemy_token));  // its equipment
+        if(a.enemy_token&&(enemy==story_enemies::Kind::Darknut||story_enemies::home_x(a.enemy_token)))st16(g_scratch+0xC,story_enemies::home_x(a.enemy_token));  // its equipment; a table kind's home x (the warship's)
         if(a.spec.actor=="chest")st16(g_scratch+0x10,uint16_t((uint32_t(a.spec.item_game)<<8)|255));
         uint32_t params=a.game?a.game_native.params:a.enemy_token?story_enemies::parameters(a.enemy_token):a.switch_token?story_switches::parameters(a.spec.actor=="switch"?story_switches::Kind::Switch:story_switches::Kind::Door):a.prop_token?story_props::parameters(a.spec):a.spec.kind=="mod"?a.mod_token:a.spec.actor=="sign"?kCarrier:a.spec.actor=="resident"?story_resident_types::params(uint8_t(a.spec.resident)):0;
         // a walking resident: its route record, and the route marker as its route number; a patrolling

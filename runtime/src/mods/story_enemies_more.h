@@ -42,6 +42,7 @@ struct Native {
     bool (*liftable)(uint32_t actor);                 // Link may lift it now (nullptr: never)
     uint32_t action;            // its action field, for traces (u8; u16 when action16)
     bool action16;
+    uint16_t home_x = 0;        // home angle x (0: the default)
 };
 
 inline int8_t s8(uint32_t a) { return int8_t(ld8(a)); }
@@ -273,6 +274,34 @@ inline constexpr uint32_t kWizzrobeFireParams = 0xFFFFFF0Au;
 inline constexpr uint32_t kWizzrobeBytes = 0x10B0, kWizzrobeFireSphere = 0x8F0, kWizzrobeStts = 0x784;
 inline constexpr const char* kNoWizzrobeStages[] = {"kazeMB"};
 
+// ---------------------------------------------------------------- Warship (d_a_oship)
+// The Great Sea's enemy ship: it sails where it was placed and fires its cannon at Link. Parameter
+// 0xFFFFFF00: sub-mode 0 (stays where it was placed; 1/2 follow a room path), no Triforce chart (0xF),
+// no salvage point (0xF), no path (0xFF), no sunk switch (0xFF; with one it writes the switch and the
+// salvage record). Home angle x 0xFFFF: no appear switch (low byte) and the ordinary ship (high byte;
+// anything else is the golden treasure ship with its event GOLD_SHIP_DELETE and save bit 0x3E80). Only on
+// the sea stage (its height is the sea's). Children: its flag (MAJUU_FLAG 0xAE, created by the game and
+// left floating when the ship is deleted early: deleted with it, by its PID 0xE6C) and up to five
+// cannonballs (BOMB 0x126, cannonball state, created with fopAcM_fastCreate during its execute): owned
+// children (story_enemies) that hit only Link and his boat (the ownership pair policy) and go with it.
+// No events, holds or switch/save writes. Health 3: only bomb-type hits count (the boat's cannon);
+// at 0 its delete mode (proc 3) makes the one drop, then it sinks and deletes itself and its flag. Modes
+// 4..7 are its idle modes by Link's distance (set already in its create).
+// Colliders on mStts 0x5D0: five cylinders 0x60C + 0x130*i (targets only).
+inline constexpr Collider kWarshipColliders[] = {
+    {0x60C, 0x5D0, 0}, {0x73C, 0x5D0, 0}, {0x86C, 0x5D0, 0}, {0x99C, 0x5D0, 0}, {0xACC, 0x5D0, 0}};
+inline bool warship_verify(uint32_t a, uint32_t) {
+    return ld8(a + 0x3CC) == 0 && ld8(a + 0x3CD) == 0xFF && ld8(a + 0x3CE) == 0xFF && ld8(a + 0x3CF) == 0xFF && ld8(a + 0x3D0) == 0xF &&
+           ld8(a + 0x3D1) == 0xF && ld8(a + 0x3D2) == 0xFF && ld32(a + 0x3C8) <= 7;
+}
+inline bool warship_terminal(uint32_t a) { return ld32(a + 0x3C8) == 3; }
+inline constexpr uint16_t kWarshipFlag = 0xAE, kCannonball = 0x126;
+inline constexpr uint32_t kWarshipFlagPid = 0xE6C;
+inline constexpr uint32_t kCannonballParams = 0x80030004u;     // daBomb prm_make(cannonball, enemy, 1)
+inline constexpr uint32_t kBoatCannonballParams = 0x80020004u; // the one Link's boat fires
+inline constexpr uint32_t kCannonballBytes = 0xB50, kCannonballSphere = 0x920, kCannonballStts = 0x8E4;
+inline constexpr uint32_t kFastCreate = CANONICAL_CODE_ID(0x025D5928).value();
+
 inline constexpr Native kNatives[] = {
     {Kind::Stalfos, "stalfos", {0x7FE0, 0xBE, 0x25B0, kStalfosColliders, std::size(kStalfosColliders)},
      CANONICAL_CODE_ID(0x02495C70).value(), CANONICAL_CODE_ID(0x02493FB0).value(), CANONICAL_CODE_ID(0x02491F34).value(),
@@ -314,6 +343,10 @@ inline constexpr Native kNatives[] = {
      CANONICAL_CODE_ID(0x024E6BEC).value(), CANONICAL_CODE_ID(0x024E398C).value(), CANONICAL_CODE_ID(0x024E2468).value(),
      CANONICAL_CODE_ID(0x024E61E0).value(), [] { return GD(0x10042D90); }, 0xFFFFFF00u, 0, 0xA40, {0xDF8, 0}, true,
      wizzrobe_verify, wizzrobe_terminal, nullptr, 0x468, false},
+    {Kind::Warship, "warship", {kWarshipProfile, 0xB3, 0xF1C, kWarshipColliders, std::size(kWarshipColliders)},
+     CANONICAL_CODE_ID(0x023C637C).value(), CANONICAL_CODE_ID(0x023C6D38).value(), CANONICAL_CODE_ID(0x023C6DAC).value(),
+     CANONICAL_CODE_ID(0x023C6418).value(), [] { return GD(0x10034084); }, 0xFFFFFF00u, 0, 0, {0, 0}, true,
+     warship_verify, warship_terminal, nullptr, 0x3CB, false, 0xFFFF},
 };
 
 inline const Native* find(Kind k) {
@@ -329,6 +362,11 @@ inline const Native* by_name(const std::string& name) {
 inline constexpr uint32_t params(Kind k) {
     for (const Native& n : kNatives)
         if (n.kind == k) return n.params;
+    return 0;
+}
+inline constexpr uint16_t home_x(Kind k) {
+    for (const Native& n : kNatives)
+        if (n.kind == k) return n.home_x;
     return 0;
 }
 inline constexpr uint16_t home_z(Kind k) {

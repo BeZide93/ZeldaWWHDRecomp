@@ -33,7 +33,7 @@ The initial allowlist is deliberately small:
 | Breakable prop | `pot`, `barrel`, `crate` | Required mod-owned `broken_flag` and `drops` list |
 | Latched floor switch | `switch` | Required mod-owned `switch_flag`; fixed yellow switch |
 | Rotating gate | `door` | Required `switch` naming a switch actor in the same mod |
-| Native enemies (preview) | `chuchu`, `bokoblin`, `moblin`, `keese`, `miniblin`, `peahat`, `darknut`, `rat_hole`, `bokobaba`, `bubble`, `octorok`, `stalfos`, `redead`, `mothula`, `morth`, `magtail`, `poe`, `armos`, `armos_knight`, `kargaroc`, `wizzrobe` | Required mod-owned `defeated_flag` and `drops`; fixed ordinary variants |
+| Native enemies (preview) | `chuchu`, `bokoblin`, `moblin`, `keese`, `miniblin`, `peahat`, `darknut`, `rat_hole`, `bokobaba`, `bubble`, `octorok`, `stalfos`, `redead`, `mothula`, `morth`, `magtail`, `poe`, `armos`, `armos_knight`, `kargaroc`, `wizzrobe`, `warship` | Required mod-owned `defeated_flag` and `drops`; fixed ordinary variants |
 
 Resident names are exact native object codes in lower case. Each placed copy uses fixed ordinary
 parameters: it stands where you put it (unless you give it a route, below) and has none of the
@@ -462,6 +462,7 @@ The allowlist below defines the supported variants.
 | `armos` | Armos statue: it wakes when Link comes near; strike its back |
 | `armos_knight` | Armos Knight: only a bomb in its open mouth (or a Light Arrow) defeats it |
 | `wizzrobe` | Red Wizzrobe: it appears and vanishes around where it was placed and casts fire at Link |
+| `warship` | The enemy warship (sea stage only): it fires its cannon at Link; three hits from the boat's cannon sink it |
 | `kargaroc` | Kargaroc: it circles where it was placed and swoops at Link (variant `perched`: it sits until Link comes near) |
 
 All of them use the same declaration fields:
@@ -596,6 +597,11 @@ reach outside the mod:
   swallowed bomb, the bomb goes with it. Its spikes only hurt Link and the mod's own enemies.
 - **Wizzrobe:** only the red one; the summoner (it calls other enemies) is not offered. Its fireballs
   belong to it: they only hurt Link (they never light the world's torches) and vanish with it.
+- **Warship:** only on the sea; it stays where it was placed (never the ones that sail a route or the
+  golden treasure ship). Its flag and its cannonballs belong to it: the cannonballs only hurt Link and
+  his boat and go with the ship when it is removed. As in the game, its aim is loose: many of its
+  shots miss. The other "ship" pieces of the sea (the lookout
+  platforms, the Forsaken Fortress searchlights and wall cannons) are not offered.
 - **Kargaroc:** it never carries Link or another enemy (the game's riders are not offered). It eats
   bait Link throws near it, as in the game, and goes back to where it was placed when he leaves.
 
