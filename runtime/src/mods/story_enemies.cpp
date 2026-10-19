@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
+#include "native_actor_refusal.h"
 #include "story_enemies.h"
 #include "story_enemy_variants.h"
 #include "native_actor_profiles.h"
@@ -77,16 +78,19 @@ void test_health(const Entry&e,uint32_t a){static const std::vector<std::pair<un
 struct SaveWatch{const Entry*e;uint32_t base=0;std::vector<uint8_t> before;static inline unsigned steps=0,changed=0;
  SaveWatch(const Entry*entry,bool on):e(entry){if(!on||!enemy_trace())return;base=ld32(GD(0x101F84DC));if(!memory(base,0x12A0)){base=0;return;}before.assign(static_cast<const uint8_t*>(mem::ptr(base)),static_cast<const uint8_t*>(mem::ptr(base))+0x12A0);}
  void check(const char*what){if(!base)return;++steps;const auto*now=static_cast<const uint8_t*>(mem::ptr(base));for(uint32_t i=0;i<0x12A0;++i)if(now[i]!=before[i]){++changed;LOG("[native_enemy] %s save info changed during %s at +%03X: %02X -> %02X",e->spec.id.c_str(),what,i,unsigned(before[i]),unsigned(now[i]));}}};
+// a refused create fails like a retail one (constructed first); a base-only actor skips its own delete
+void refuse_or_skip(Cpu*c,uint32_t a,bool create){if(create)native_actor_refusal::refuse(c,a,invoke);else c->r[3]=1;}
+void native_delete(Cpu*c,uint32_t fn){if(native_actor_refusal::base_only(c->r[3])){c->r[3]=1;return;}original(c,fn);}
 void lifecycle(Cpu*c,uint32_t fn,bool create,bool draw,bool destroy){const uint32_t a=c->r[3];
  // daTn_Create runs daTn_Execute itself (three steps that place the armour pieces): inside its own create
  // the native code runs as it is, under the create's scopes
  if(!create&&!destroy){Entry*n=find(a,false);if(n&&n->creating&&n->spec.kind==Kind::Darknut){original(c,fn);return;}}
  Entry*e=find(a,!create&&!destroy);
- if(!create&&!draw&&!destroy&&enemy_trace()){if(!e)exec_trace(a,find(a,false)?"unverified-original":"not-owned");}if(!e){if(destroy&&cleanup_identity(a,fn)){story_enemy_ownership::retire_before_delete(a);original(c,fn);return;}if(reserved(a)){c->r[3]=create?5:1;return;}original(c,fn);return;}
- if(destroy){if(e->spec.kind==Kind::Bokoblin)st8(a+0x137D,0);if(e->spec.kind==Kind::Moblin)st8(a+0x2E0E,0);if(children.retire&&has_children(e->spec.kind))children.retire(e->token,a);const auto kids=live_children(*e);const uint32_t pid=e->pid;story_enemy_ownership::retire_before_delete(a);e->address=0;e->pid=0xFFFFFFFFu;trace(*e,a,"delete");SaveWatch watch(e,e->spec.kind==Kind::Darknut);original(c,fn);const Cpu result=*c;watch.check("delete");if(watch.base)LOG("[native_enemy] %s save info watched over %u Darknut steps: %u changed bytes",e->spec.id.c_str(),SaveWatch::steps,SaveWatch::changed);if(retired)retired(e->token,pid);
+ if(!create&&!draw&&!destroy&&enemy_trace()){if(!e)exec_trace(a,find(a,false)?"unverified-original":"not-owned");}if(!e){if(destroy&&cleanup_identity(a,fn)){story_enemy_ownership::retire_before_delete(a);native_delete(c,fn);return;}if(reserved(a)){refuse_or_skip(c,a,create);return;}original(c,fn);return;}
+ if(destroy){if(e->spec.kind==Kind::Bokoblin)st8(a+0x137D,0);if(e->spec.kind==Kind::Moblin)st8(a+0x2E0E,0);if(children.retire&&has_children(e->spec.kind))children.retire(e->token,a);const auto kids=live_children(*e);const uint32_t pid=e->pid;story_enemy_ownership::retire_before_delete(a);e->address=0;e->pid=0xFFFFFFFFu;trace(*e,a,"delete");SaveWatch watch(e,e->spec.kind==Kind::Darknut);native_delete(c,fn);const Cpu result=*c;watch.check("delete");if(watch.base)LOG("[native_enemy] %s save info watched over %u Darknut steps: %u changed bytes",e->spec.id.c_str(),SaveWatch::steps,SaveWatch::changed);if(retired)retired(e->token,pid);
   for(uint32_t kid:kids)if(kid){Cpu probe=result;const uint32_t ok=invoke(&probe,GC(0x025D57E0),{kid});trace(*e,a,"child-removed",ok);}
   *c=result;return;}
- if(!supported(e->spec.kind)||e->quarantine){if(!create&&!draw)exec_trace(a,"quarantined");c->r[3]=create?5:1;return;}
+ if(!supported(e->spec.kind)||e->quarantine){if(!create&&!draw)exec_trace(a,"quarantined");refuse_or_skip(c,a,create);return;}
  if(!create&&story_items::enemy_defeated(e->marker)){if(!draw&&ld8(a+0xC)!=3){Cpu probe=*c;const uint32_t result=invoke(&probe,GC(0x025D57E0),{a});static unsigned reported=0;if(reported++<128)trace(*e,a,"terminal-delete-retry",result);}c->r[3]=1;return;}
  if(!create&&!draw){if(!story_enemy_ownership::lookup_actor(a)){if(!story_enemy_ownership::admit_created(e->token,a)){disable(*e,a);c->r[3]=1;return;}e->address=a;}e->address=a;
   // Carry is refused by the shared player admission hook, never undone here.
@@ -94,7 +98,7 @@ void lifecycle(Cpu*c,uint32_t fn,bool create,bool draw,bool destroy){const uint3
  }
  struct ChildScope {bool active=false;~ChildScope(){if(active)children.leave();}} child_scope;
  if((create||!draw)&&(has_children(e->spec.kind)||(e->spec.kind==Kind::Rat&&(params_of(e->spec)&0x100u)))){  // a bomb rat's bomb is its child
- if(!create&&!children.ready(e->token,a)){if(!draw)exec_trace(a,"children-not-ready");c->r[3]=1;return;}if(!children.enter(e->token,e->spec.kind,a,story_enemy_ownership::source_epoch(e->token))){disable(*e,a);c->r[3]=create?5:1;return;}child_scope.active=true;}
+ if(!create&&!children.ready(e->token,a)){if(!draw)exec_trace(a,"children-not-ready");c->r[3]=1;return;}if(!children.enter(e->token,e->spec.kind,a,story_enemy_ownership::source_epoch(e->token))){disable(*e,a);refuse_or_skip(c,a,create);return;}child_scope.active=true;}
  struct HioScope{uint32_t address=0;uint8_t old=0;HioScope(bool active,Kind k){if(active){address=k==Kind::Bokoblin?GD(0x10191468):k==Kind::Moblin?GD(0x101BA690):TNhioSet;old=ld8(address);st8(address,1);}}~HioScope(){if(address)st8(address,old);}} hio(create&&has_children(e->spec.kind),e->spec.kind);
  // daTn_Create rewrites two statics every Darknut shares: search_sp (from the stage name, or 1 for a boss)
  // and s_check (the native boss-Darknut event counter). A mod Darknut leaves both as they were.

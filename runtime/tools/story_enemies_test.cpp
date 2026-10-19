@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 // Synthetic native boundary tests; no game physics/render acceptance claim.
+#include "mods/native_actor_refusal.h"
 #include "mods/story_enemies.h"
 #include "mods/native_actor_profiles.h"
 #include "runtime.h"
@@ -55,7 +56,8 @@ void original(Cpu*c,uint32_t fn){fn-=STORY_ENEMIES_TEST_CODE_DELTA;assert(known_
  if(fn==0x020402C8){const uint32_t owner=ld32(a);Cpu item=*c;item.r[3]=owner+0x314;item.r[4]=ld32(owner+0x3A4);item.r[6]=owner+0x320;hooks.at(0x025D9154)(&item);st32(owner+0x39C,ld32(owner+0x39C)|0x10);c->r[3]=1;return;}
  c->r[3]=1;
 }
-uint32_t invoke(Cpu*c,uint32_t fn,std::initializer_list<uint32_t>args){assert(fn==GC(0x025D57E0)&&args.size()==1);c->r[3]=*args.begin();original(c,fn);c->r[4]=999;c->pc=999;return c->r[3];}
+unsigned base_constructs=0;
+uint32_t invoke(Cpu*c,uint32_t fn,std::initializer_list<uint32_t>args){if(fn==GC(0x025D4ED0)){const uint32_t a=*args.begin();assert(args.size()==1&&ld8(a+0x3AA)==0);st8(a+0x3AA,1);st32(a+0xB4,GD(0x10057138));++base_constructs;return a;}assert(fn==GC(0x025D57E0)&&args.size()==1);c->r[3]=*args.begin();original(c,fn);c->r[4]=999;c->pc=999;return c->r[3];}
 void actor(uint32_t a,uint32_t pid,story_enemies::Kind k){const auto&d=story_enemy_ownership::descriptor(k);std::memset(mem::ptr(a),0,d.bytes);st32(a+4,pid);st16(a+0xE,d.profile);st32(a+0xB4,GD(k==story_enemies::Kind::ChuChu?0x1000C5A0:k==story_enemies::Kind::Bokoblin?0x1000957C:k==story_enemies::Kind::Moblin?0x10014E9C:k==story_enemies::Kind::Darknut?0x10040490:0x10012C24));st32(a+0xB0,story_enemies::parameters(k));st8(a+0x2DD,0xFF);st16(a+0x2D8,0xFFFF);st16(a+0x2FC,story_enemies::home_z(k));
  if(k==story_enemies::Kind::ChuChu){st8(a+0x3FB,0xFF);st32(a+0x924,a);}else if(k==story_enemies::Kind::Bokoblin){st8(a+0x3D0,4);st8(a+0x3D1,0xFF);st8(a+0x3D2,0xFF);st8(a+0x3D3,0xFF);st32(a+0x49C,a);st16(a+0x49C+8,2);st32(a+0x13BC,a);}else if(k==story_enemies::Kind::Moblin){st8(a+0x3DA,0xFF);st8(a+0x3DB,0xFF);st32(a+0x8BC,a);st16(a+0x8BC+8,1);st32(a+0x2E54,a);}else if(k==story_enemies::Kind::Darknut){const uint32_t p=ld32(a+0xB0);st8(a+0x3D8,4);st8(a+0x3D9,uint8_t(p>>8));st8(a+0x3DA,0xFF);st8(a+0x3DB,0xFF);st8(a+0x4DC,uint8_t((p>>4)&0xF));st32(a+0x590,a);st16(a+0x590+8,3);st32(a+0x1674,a);}else if(k==story_enemies::Kind::Rat){st32(a+0xB4,GD(0x1002442C));st8(a+0x3D0,1);st32(a+0xBE0,a);st32(a+0xF98,a);}else if(k==story_enemies::Kind::RatHole){st32(a+0xB4,GD(0x10024598));st8(a+0x3D5,1);st8(a+0x3D6,1);st8(a+0x405,0xFF);}else if(k==story_enemies::Kind::Peahat){st32(a+0xB4,GD(0x10034494));st32(a+0xAB4,a);st32(a+0xE6C,a);st32(a+0x1098,a);}else if(k==story_enemies::Kind::Miniblin){st32(a+0xB4,GD(0x10038234));st8(a+0x3D0,1);st8(a+0x3D1,10);st8(a+0x3D3,0xFF);st8(a+0x3D4,0xFF);st32(a+0x8FC,a);}else{st8(a+0x486,0xFF);st8(a+0x487,0xFF);st32(a+0xAD8,a);}
  for(size_t i=0;i<d.collider_count;++i){const auto&x=d.colliders[i];st32(a+x.object+0x44,a+x.stts);st32(a+x.stts+0xC,a);st32(a+x.stts+0x10,pid);if(x.helper)st32(a+x.helper,a);}
@@ -100,6 +102,11 @@ int main(int argc,char**argv){using namespace story_enemies;const bool drowning_
   assert(verify_actor(hole,Kind::RatHole,Hole));
   for(uint32_t off:{0x3D4u,0x3D5u,0x3D6u,0x405u}){const uint8_t old=ld8(Hole+off);st8(Hole+off,uint8_t(old^1));assert(!verify_actor(hole,Kind::RatHole,Hole));st8(Hole+off,old);}
   st32(Hole+0x3F4,1);assert(!verify_actor(hole,Kind::RatHole,Hole));st32(Hole+0x3F4,0);assert(verify_actor(hole,Kind::RatHole,Hole));
+  { // a refused create (a private-profile actor nothing owns) fails like a retail create: constructed first,
+    // so fopAc_Delete can take it; its own delete is skipped (nothing of it was built)
+   constexpr uint32_t Stray=Actor+0x16000;std::memset(mem::ptr(Stray),0,0x574);st32(Stray+4,77);st16(Stray+0xE,0x7FF1);
+   const unsigned before=calls;Cpu c{};c.r[3]=Stray;hooks.at(0x0231175C)(&c);assert(c.r[3]==5&&base_constructs==1&&calls==before&&native_actor_refusal::base_only(Stray));
+   c={};c.r[3]=Stray;hooks.at(0x023115BC)(&c);assert(c.r[3]==1&&calls==before);}
   const auto claims_before=claims;assert(!is_defeated(hole)&&settle(hole)&&is_defeated(hole)&&!settle(hole)&&!available(hole));claims=claims_before;  // the hole's marker only: later checks count enemy claims
  }
  { // Peahat: the Peahat type only (never the Seahat with its kill-counter register), unfrozen

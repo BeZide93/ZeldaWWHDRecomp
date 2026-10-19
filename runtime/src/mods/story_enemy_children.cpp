@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
+#include "native_actor_refusal.h"
 #include "story_enemy_children.h"
 #include "story_enemy_variants.h"
 #include "native_actor_carry.h"
@@ -52,8 +53,8 @@ void queue(Cpu*c){if(!depth||(c->r[3]!=Sword&&!(c->r[3]==Cape&&scopes[depth-1].k
  const uint32_t pid=c->r[3];if(!pid||pid==0xFFFFFFFFu){own::cancel_child_pending(ticket);return;}
  if(!own::commit_child_pending(ticket,pid))throw std::runtime_error("Native enemy child PID could not bind its reserved ownership record");
 }
-void make(Cpu*c,uint32_t fn){const uint32_t a=c->r[3];own::LineageInfo info{};if(!child(a,info,false)){if(claimed(a)){c->r[3]=5;return;}original(c,fn);return;}
- if(darknut_child(info)&&!info.address&&!source_live(info)){c->r[3]=5;return;}
+void make(Cpu*c,uint32_t fn){const uint32_t a=c->r[3];own::LineageInfo info{};if(!child(a,info,false)){if(claimed(a)){native_actor_refusal::refuse(c,a,invoke);return;}original(c,fn);return;}
+ if(darknut_child(info)&&!info.address&&!source_live(info)){native_actor_refusal::refuse(c,a,invoke);return;}
  original(c,fn);const Cpu result=*c;if(result.r[3]==4){if(!own::admit_lineage(info.pid,a))throw std::runtime_error("Native enemy child constructor ownership mismatch");if(info.profile==Sword)mask(a);}*c=result;}
 void create(Cpu*c){make(c,Create);}
 void cape_create(Cpu*c){make(c,CapeCreate);}
@@ -70,11 +71,11 @@ void before_delete(uint32_t a,uint32_t pid,uint16_t profile) noexcept {
 }
 // a rat's bomb: admitted at construction like a weapon; a claimed bomb whose record does not match is never built
 void bomb_create(Cpu*c){const uint32_t a=c->r[3];own::LineageInfo info{};const bool mine=memory(a,0xB50)&&own::lineage_info(ld32(a+4),info)&&info.role==own::Lineage::EnemyChild&&info.profile==0x126&&info.source_valid;
- if(!mine){if(memory(a,0x10)&&own::lineage_claimed(ld32(a+4),own::Lineage::EnemyChild)){c->r[3]=5;return;}original(c,BombCreate);return;}
+ if(!mine){if(memory(a,0x10)&&own::lineage_claimed(ld32(a+4),own::Lineage::EnemyChild)){native_actor_refusal::refuse(c,a,invoke);return;}original(c,BombCreate);return;}
  original(c,BombCreate);const Cpu result=*c;if(result.r[3]==4&&!own::admit_lineage(info.pid,a))throw std::runtime_error("Native enemy bomb ownership mismatch");*c=result;}
-void destroy(Cpu*c){const uint32_t a=c->r[3];if(memory(a,0xA34))before_delete(a,ld32(a+4),ld16(a+0xE));original(c,Delete);}
+void destroy(Cpu*c){const uint32_t a=c->r[3];if(memory(a,0xA34))before_delete(a,ld32(a+4),ld16(a+0xE));if(native_actor_refusal::base_only(a)){c->r[3]=1;return;}original(c,Delete);}
 // a rat's bomb leaves its lineage record when it is deleted (its blast is over, or its room unloads)
-void bomb_destroy(Cpu*c){const uint32_t a=c->r[3];if(memory(a,0xB50)&&ld16(a+0xE)==0x126)before_delete(a,ld32(a+4),0x126);original(c,BombDelete);}
+void bomb_destroy(Cpu*c){const uint32_t a=c->r[3];if(memory(a,0xB50)&&ld16(a+0xE)==0x126)before_delete(a,ld32(a+4),0x126);if(native_actor_refusal::base_only(a)){c->r[3]=1;return;}original(c,BombDelete);}
 void candidate(Cpu*c,uint32_t fn,Kind kind){const uint32_t a=c->r[3];own::LineageInfo info{};const bool mine=child(a,info,true);if(search.token){if(search.kind!=kind||!parent(search)||!mine||info.source!=search.token||info.source_actor!=search.actor||info.source_pid!=search.pid||info.epoch!=search.epoch){c->r[3]=0;return;}}else if(mine||claimed(a)){c->r[3]=0;return;}original(c,fn);}
 void bk_candidate(Cpu*c){candidate(c,BkCandidate,Kind::Bokoblin);}void mo_candidate(Cpu*c){candidate(c,MoCandidate,Kind::Moblin);}void tn_candidate(Cpu*c){candidate(c,TnCandidate,Kind::Darknut);}
 void search_weapon(Cpu*c,uint32_t fn,Kind kind){const uint32_t a=c->r[3];Source source{};source.token=own::lookup_actor(a);source.kind=kind;source.actor=a;if(source.token){source.pid=ld32(a+4);source.epoch=own::source_epoch(source.token);if(!parent(source)){c->r[3]=0;return;}}
