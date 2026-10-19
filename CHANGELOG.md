@@ -7,6 +7,16 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Mod SDK v3 and the editor: demo steps, cutscenes played by the game's own cutscene system** (for mod makers, preview).
+  A scene can now play a demo: keyframed camera, actors flying or walking along curves (game characters, villagers the
+  mod placed, the mod's own actors, and Link in his cutscene poses), messages that wait for A, sounds and effects, one
+  actor carried on another's joint (for example the Helmaroc King carrying someone), and time of day and rain that come
+  back afterwards. Characters a demo needs but the room lacks are created for it. Demos can be skipped, follow each other
+  directly, and a choice between two demo steps picks which one plays. A time change in a demo never starts a new day.
+  In the editor, a demo step's lanes appear on the Scenes timeline with keys, clips, messages and carry markers, a
+  preview at the cursor and curve handles in the picture; the same is available as MCP commands. Nothing changes for
+  players or mods that don't use demo steps.
+
 - **Mod SDK v3 and the editor: island grounds** (for mod makers). Six islands without their buildings can be placed as
   ground for a mod's own island: Crescent Moon, Triangle, Five-Star, Star, Bomb and a fairy island, in the editor's new
   **Islands** list. Each is made from your own game files the first time a mod uses it, has its own collision, shows on
