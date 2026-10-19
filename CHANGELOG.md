@@ -14,6 +14,11 @@ what is on `devel` and not released yet (also in the
   can be placed, each with the mod's own defeat flag, drops and defeat switch. Defeating them by a mod doesn't count
   toward the game's sea kills.
 
+- **Fixed: things can now be placed on top of a mod's island** (houses, signs, villagers, enemies and other world
+  objects); the island no longer counts as "in the way". Objects only block each other where their shapes really
+  overlap, so turned buildings next to each other are no longer refused. In the editor, clicking the open sea now
+  places an island (or anything else) on the water surface.
+
 - **Mod SDK v3 and the editor: more native enemies** (for mod makers). Stalfos, Redead, Mothula (on the ground or
   winged), Morth, Magtail, Poe, Armos and Armos Knight can be placed, each with the mod's own defeat flag, drops and
   defeat switch, live in the editor. What holds Link (a Redead's scream and bite, a Poe's possession, clinging Morths)
