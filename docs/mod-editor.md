@@ -146,13 +146,15 @@ a confirmation; Undo brings it back).
 
 ### Game objects
 
-**Add > Game objects** lists the game's own objects you can place: palm trees, large trees, tables
-and stools (docs/mod-sdk-v3.md, "The game's own objects"). Type in the search field or pick a
+**Add > Game objects** lists the game's own objects you can place: palm trees and other trees, tables, a shelf,
+lamps, plants, a nest, flags, grass and flowers (docs/mod-sdk-v3.md, "The game's own objects"). Type in the search field or pick a
 category, then click an object and click into the picture. An object your game files don't have is
 greyed out with "not available in your game files". The first game object adds
 `"requires": {"game_objects": 1}` to the manifest for you.
 
-A placed game object appears in the game at once. In the Inspector you choose its **Variant** (for
+Grass, flowers and small trees appear at once too, but when you remove or move them they go only
+when the room loads again: the status bar says so; **Reload room** (Camera & test) enters the room
+again. A placed game object appears in the game at once. In the Inspector you choose its **Variant** (for
 the table: table, stool, or a stool Link walks through), its **Turn** and, where the object allows
 it, its **Scale**. Each change makes the object again in its place (one undo step). A game object
 has no flags, drops or dialogue.

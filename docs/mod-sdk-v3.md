@@ -153,7 +153,32 @@ the mod manager refuses it.
 | --- | --- | --- | --- |
 | `game:palm` | A tall palm tree whose leaves sway in the wind | `palm` | 1 |
 | `game:tree-large` | A large leafy tree | `tree` | 0.5–1.5 |
+| `game:plant-pot` | A leafy potted plant that sways when Link brushes past | `plant-pot` | 0.5–1.5 |
+| `game:flower-red` | A tall red flower (drops nothing) | `flower-red` | 0.5–1.5 |
 | `game:table` | A wooden table, or the small stool that goes with it | `table`, `stool`, `stool-open` (Link walks through it) | 1 |
+| `game:table-small`, `game:table-long` | Wooden tables that settle onto the ground below them | one each | 1 |
+| `game:shelf` | A tall shelf with pots and books | `shelf` | 1 |
+| `game:lamp-cafe` | A ceiling lamp that turns slowly (no collision) | `lamp-cafe` | 0.5–2 |
+| `game:lamp` | A small lamp with a flame that lights its surroundings | `lamp` | 1 |
+| `game:nest` | A large bird's nest Link can stand in | `nest` | 1 |
+| `game:flag-rito`, `game:flag-sea` | Flags on poles that flutter in the wind | one each | 1 |
+
+Grass, flowers and small trees are the game's shared batches rather than single objects. Each variant
+plants a group of a given size; none of them drops anything when cut.
+
+| Id | Variants (units) | Mods' share per stage |
+| --- | --- | --- |
+| `game:grass` | `grass-1` (1), `grass-7` (7), `grass-21` (21) | 300 of the stage's 1500 |
+| `game:flower-white` | `flowers-1` (1), `flowers-7` (7), `flowers-17` (17) | 60 of 200 (with pink) |
+| `game:flower-pink` | `flowers-1` (1), `flowers-7` (7) | 60 of 200 (with white) |
+| `game:tree-small` | `trees-1` (1), `trees-3` (3), `trees-5` (5) | 16 of 64 |
+| `game:tree-bushy` | `tree-bushy` (1) | 40 of 200 |
+
+A batch is planted once per visit of its room, a moment after the room's own grass, and only on a
+stage that has that kind of batch itself (most islands do; Windfall has flowers but no grass). It
+leaves a quarter of the stage's batch free for the rooms that load next; when there isn't enough
+room it is left out for that visit (with a line in the log). Cut grass grows back, and a removed or
+moved batch goes from the game only when its room loads again.
 
 Objects whose collision keeps the game's size stay at scale 1, so what you see and what Link
 bumps into always match.
