@@ -117,6 +117,20 @@ inline int64_t logic_pass_elapsed(int64_t now, int64_t pass_start, int64_t step_
     return std::max(now, pass_start + std::max<int64_t>(logic_pass, 0)) - step_start;
 }
 inline int64_t one_frame_budget(int64_t step, int64_t frame) { return step + frame; }
+// After a dropped in-between frame at 60 fps the next logic pass starts at once instead of waiting
+// for its step's time (one_frame: a step with one in-between frame at 60 fps). Its lateness on the
+// step schedule goes below zero by what the skip saved beyond the deficit so far (a lead:
+// slot_step_start kKeep with wait = false), and the following steps count it. The step lateness so
+// is the accumulated deficit of the drawn steps (logic pass + in-between pass - step), each skip
+// takes a whole in-between pass off it, and the skips come at the deficit rate (deficit / in-between
+// pass), one whenever the accumulated deficit reaches a frame: as few as keep the game's speed, and
+// evenly spaced. (Waiting threw away the part of a skip the deficit had not used up: a skip that
+// one slow pass brought forward saved less than a frame and the next skip came sooner, and a device
+// whose passes take longer than a vsync, where the lead after a skip is what lets the next step's
+// in-between frame fit, drew almost none.) The lead never moves a logic frame before its slot
+// (gx2_core.cpp: the step slot gates its flip). At 120/240 fps a dropped step (not even its record
+// pass fitted) still waits.
+inline bool wait_after_drop(bool one_frame) { return !one_frame; }
 
 // What follows a pass of a step (paced): phase just ended (0 = logic pass), n = the step's planned
 // in-between frames, elapsed = time since the logic pass started, pass = recent duration of a hold
@@ -126,6 +140,7 @@ enum class Next {
     kHold,        // the next hold pass of the step
     kRecord,      // skip the remaining blended hold passes: the next pass is the record pass
     kDrop,        // no pass fits: the rest of the step is dropped, the next logic pass waits for its time
+                  // (at 60 fps it starts at once: wait_after_drop)
 };
 inline Next next_pass(int phase, int n, int64_t elapsed, int64_t pass, int64_t budget) {
     if (phase >= n) return Next::kStepDone;

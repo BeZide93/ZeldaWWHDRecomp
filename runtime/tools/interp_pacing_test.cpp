@@ -296,6 +296,24 @@ static void test_simulation() {
 struct StepSim {
     std::vector<int64_t> flips, steps, holds;  // flip times; logic pass starts; in-between flips (ns)
     int skips = 0;                       // steps that skipped or dropped in-between frames
+    std::vector<int64_t> skipSteps;      // the logic pass starts of those steps
+    int waitsAfterDrop = 0;              // logic passes after a dropped step that waited for their time
+    // skip spacing after `from`, in steps: the 10th, 50th and 90th percentile gap between two skips
+    std::vector<int> skip_gaps(int64_t from) const {
+        std::vector<int> g;
+        int64_t prev = -1;
+        for (int64_t s : skipSteps) {
+            if (s < from) continue;
+            const int64_t i = std::lower_bound(steps.begin(), steps.end(), s) - steps.begin();
+            if (prev >= 0) g.push_back(int(i - prev));
+            prev = i;
+        }
+        std::sort(g.begin(), g.end());
+        if (g.empty()) return {0, 0, 0};
+        return {g[g.size() / 10], g[g.size() / 2], g[g.size() * 9 / 10]};
+    }
+    // the mean flip interval after `from` (the device's frame time)
+    double frame_ms(int64_t from) const { return 1000.0 / flips_per_s(from); }
     double steps_per_s(int64_t from) const {
         const auto a = std::lower_bound(steps.begin(), steps.end(), from);
         return double(steps.end() - a - 1) * 1e9 / double(steps.back() - *a);
@@ -338,7 +356,8 @@ struct StepSim {
 // render: GPU time per frame after the game's swap (the flip waits for it; the pacing decisions are
 // taken at the swap, as in interp.cpp, and so do not see it)
 static StepSim simulate_steps(int fps, const std::function<int64_t(int)>& logicCost, const std::function<int64_t(int)>& holdCost,
-                              double seconds, bool slots = true, int64_t render = 0, bool probeRetry = true, bool old60 = false) {
+                              double seconds, bool slots = true, int64_t render = 0, bool probeRetry = true, bool old60 = false,
+                              bool waitAfterDrop = false) {
     using namespace vsync_pacing;
     constexpr Clock kClock{16'683'333, 4};
     const uint64_t g = fps >= 240 ? 1 : fps >= 120 ? 2 : 4;  // granule: ticks per drawn frame
@@ -353,7 +372,7 @@ static StepSim simulate_steps(int fps, const std::function<int64_t(int)>& logicC
     StepSim r;
     int64_t shift = 0, slot = -1, t = kClock.time(64, 0), lastLogic = 0, logicAvg = 16'000'000, holdAvg = 16'000'000;
     uint64_t last = 64;
-    bool wait = false, haveLogic = false, prevRecord = false;
+    bool wait = false, haveLogic = false, prevRecord = false, dropLead = false;
     int logicN = 0, holdN = 0;
     // the probe of the in-between pass cost (interp.cpp): after 10 s without in-between passes (the
     // first one of all is a probe), or a second after a probe that met a hitch
@@ -376,6 +395,9 @@ static StepSim simulate_steps(int fps, const std::function<int64_t(int)>& logicC
     while (t < int64_t(seconds * 1e9)) {
         // logic pass (paced_pass_start)
         int64_t start = t;
+        const bool afterDrop = dropLead || (wait && !prevRecord);
+        if (!(slots && slot >= 0) && dropLead) wait = true;  // (no slot: it waits, as interp.cpp)
+        dropLead = false;
         if (slots && slot >= 0) {
             const StepPlan p = slot_step_start(t, kClock.time(slot_tick(kClock, slot, shift, g), shift), tick, step, wait);
             lastLogic = p.start;
@@ -390,6 +412,7 @@ static StepSim simulate_steps(int fps, const std::function<int64_t(int)>& logicC
         }
         wait = false;
         haveLogic = true;
+        if (afterDrop && start > t) r.waitsAfterDrop++;
         r.steps.push_back(start);
         int n = plan_in_between(nMax, budget, logicAvg, holdAvg);
         if (!prevRecord) n = 1;  // an exact step (interp.cpp: blends only after a record pass)
@@ -412,9 +435,14 @@ static StepSim simulate_steps(int fps, const std::function<int64_t(int)>& logicC
                 wait = !old60;
                 break;
             }
-            if (next != Next::kHold) r.skips++;
+            if (next != Next::kHold) {
+                r.skips++;
+                r.skipSteps.push_back(start);
+            }
             if (next == Next::kDrop) {
-                wait = true;
+                // 60 fps: the next logic pass starts at once (a lead; not before the fix)
+                wait = old60 || waitAfterDrop || wait_after_drop(one);
+                dropLead = !wait;
                 break;
             }
             // (v0.2.13 skipped every blended pass up to the record pass)
@@ -757,6 +785,96 @@ static void test_steps_60() {
     CHECK(a.steps_per_s(from) > 29.9);
 }
 
+// Keep game speed at 60 fps (issue #254): after a dropped in-between frame the next logic pass
+// starts at once (pacing::wait_after_drop) and keeps what the skip saved as a lead. The skips then
+// come at the deficit rate (deficit / in-between pass: as few as keep the game's speed) and evenly
+// spaced, and the game holds 29.97 steps a second. Before (wait = true), for reference.
+static void test_steps_60_skips() {
+    constexpr int64_t kMs = 1'000'000, kStep = 2 * 16'683'333;
+    const auto ms = [](double v) { return [v](int) { return int64_t(v * 1e6); }; };
+    // passes a little longer than a vsync, as measured on a phone (17.2 ms each, issue #254), with
+    // jitter (+-1.5 ms) and a hitch (+15 ms) one pass in 200 (deterministic on every platform)
+    const auto jitter = [](double v) {
+        return [v](int i) {
+            const uint32_t h = uint32_t(i) * 2654435761u;
+            return int64_t((v + ((h >> 8) % 3001) / 1000.0 - 1.5 + ((h >> 4) % 200 == 0 ? 15 : 0)) * 1e6);
+        };
+    };
+    const int64_t from = 3'000 * kMs;
+    // the share of in-between frames that keeps the speed at the device's mean frame time f: a step
+    // drawn with its in-between frame takes 2f, one without it f
+    const auto ideal = [&](const StepSim& a) {
+        const double f = a.frame_ms(from), step = kStep / 1e6;
+        return std::clamp(1 - (2 * f - step) / f, 0.0, 1.0);
+    };
+    // (with jitter the hitches leave a step more than a step late now and then, which starts a new
+    // schedule: the time is lost)
+    struct Case { const char* name; std::function<int64_t(int)> cost; double minSteps; };
+    for (const Case& c : {Case{"17.2 ms passes", ms(17.2), 29.96}, Case{"17.2 ms passes, jitter", jitter(17.2), 29.88},
+                          Case{"20 ms passes", ms(20), 29.96}, Case{"25 ms passes", ms(25), 29.96},
+                          Case{"25 ms passes, jitter", jitter(25), 29.95}}) {
+        const StepSim a = simulate_steps(60, c.cost, c.cost, 120);
+        const StepSim old = simulate_steps(60, c.cost, c.cost, 120, true, 0, true, false, true);
+        const auto g = a.skip_gaps(from), og = old.skip_gaps(from);
+        const double drawn = a.drawn_share(from, a.steps.back(), 1), oldDrawn = old.drawn_share(from, old.steps.back(), 1);
+        std::printf("60 fps, %s (%.2f ms a frame): %.3f steps/s, %.1f%% in-between skipped (%.1f%% keep the speed), a skip every "
+                    "%d/%d/%d steps (p10/50/90), %d waits after a skip; before: %.3f steps/s, %.1f%% skipped, every %d/%d/%d, %d waits\n",
+                    c.name, a.frame_ms(from), a.steps_per_s(from), 100 * (1 - drawn), 100 * (1 - ideal(a)), g[0], g[1], g[2], a.waitsAfterDrop,
+                    old.steps_per_s(from), 100 * (1 - oldDrawn), og[0], og[1], og[2], old.waitsAfterDrop);
+        CHECK(a.steps_per_s(from) > c.minSteps);             // the game's speed (29.97)
+        CHECK(a.max_steps_per_second(from) <= 32);  // (a catch-up after a hitch)
+        CHECK(std::fabs(drawn - ideal(a)) < 0.006);           // as many in-between frames as keep it
+        CHECK(a.waitsAfterDrop == 0);                         // no wait after a skip
+        CHECK(old.waitsAfterDrop > 0);                        // (before: waited)
+        CHECK(drawn >= oldDrawn - 0.006);
+    }
+    // evenly spaced: a device just under 60 fps (passes of 17.2 ms) skips one in-between frame every
+    // 13-14 steps, and one whose mean frame is 17.2 ms (passes of 17.075 ms + the flip's wake-up)
+    // about 6 % of them
+    StepSim a = simulate_steps(60, ms(17.2), ms(17.2), 120);
+    auto g = a.skip_gaps(from);
+    CHECK(g[0] >= 13 && g[2] <= 14);
+    a = simulate_steps(60, ms(17.075), ms(17.075), 120);
+    g = a.skip_gaps(from);
+    const double skipped = 1 - a.drawn_share(from, a.steps.back(), 1);
+    std::printf("60 fps, %.2f ms a frame: %.2f%% in-between skipped, a skip every %d/%d/%d steps, %.3f steps/s\n", a.frame_ms(from),
+                100 * skipped, g[0], g[1], g[2], a.steps_per_s(from));
+    CHECK_NEAR(a.frame_ms(from), 17.2, 0.02);
+    CHECK_NEAR(skipped, 0.06, 0.005);
+    CHECK(g[0] >= 15 && g[2] <= 17);
+    CHECK_NEAR(a.steps_per_s(from), 29.97, 0.005);
+    // a device that draws 60 fps (16 ms passes, with jitter up to 17.5 ms) skips none
+    a = simulate_steps(60, ms(16), ms(16), 120);
+    CHECK(std::lower_bound(a.skipSteps.begin(), a.skipSteps.end(), from) == a.skipSteps.end());
+    // a scene load (300 ms) starts a new schedule: no catch-up of nine steps
+    const auto load = [](int i) { return int64_t(i == 3000 ? 300e6 : 17.2e6); };
+    a = simulate_steps(60, load, load, 120);
+    CHECK(a.max_steps_per_second(from) <= 31);
+    // the #178 render-bound cases (2.5 ms game pass, +18 / +21 ms render): the speed, and as many
+    // in-between frames as keep it
+    for (double render : {18.0, 21.0}) {
+        a = simulate_steps(60, ms(2.5), ms(2.5), 120, true, int64_t(render * kMs));
+        std::printf("60 fps, 2.5 ms passes + %.0f ms render: %.3f steps/s, %.1f%% in-between (%.1f%% keep the speed)\n", render,
+                    a.steps_per_s(from), 100 * a.drawn_share(from, a.steps.back(), 1), 100 * ideal(a));
+        CHECK(a.steps_per_s(from) > 29.95);
+        CHECK(std::fabs(a.drawn_share(from, a.steps.back(), 1) - ideal(a)) < 0.02);
+    }
+}
+
+// Keep game speed off at 60 fps: every step draws its in-between frame (a device too slow for 60
+// fps runs the game slower; Android's automatic 60 fps then switches frame interpolation off,
+// platform/perf_hint.cpp adapt_60)
+static void test_unpaced_60() {
+    const SimResult r = simulate(60, 20, 20, 30, false);
+    std::printf("60 fps unpaced, 20 ms passes: %.2f steps/s, %.1f frames/s, %.2f in-between frames per step\n", r.steps_per_s,
+                r.frames_per_s, r.holds_per_step);
+    CHECK(r.holds_per_step == 1.0);
+    CHECK(r.steps_per_s < 25);  // (slower than the game: why Keep game speed exists)
+    const SimResult fast = simulate(60, 5, 3, 30, false);
+    CHECK(fast.holds_per_step == 1.0);
+    CHECK_NEAR(fast.frames_per_s, 59.94, 0.1);
+}
+
 int main() {
     test_fractions();
     test_blends();
@@ -766,6 +884,8 @@ int main() {
     test_simulation();
     test_steps_on_vsync();
     test_steps_60();
+    test_steps_60_skips();
+    test_unpaced_60();
     test_even_schedule();
     test_even_in_between();
     if (g_failed) {

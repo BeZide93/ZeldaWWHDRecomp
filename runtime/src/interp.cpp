@@ -855,6 +855,9 @@ static pace_clock::duration vsync_tick() {
 // (the hold-pass estimate after a pass of the previous kind: logic or hold)
 static bool g_pass_was_hold = false;
 static bool g_wait_step = false;  // the next logic pass waits for its time
+// 60 fps: the step before the next logic pass dropped its in-between frame, and the next logic pass
+// starts at once on the step slots (pacing::wait_after_drop; without a slot it waits as before)
+static bool g_drop_lead = false;
 static uint64_t g_paced_possible = 0, g_paced_holds = 0, g_paced_steps = 0, g_paced_planned = 0;
 // a logic step: two vsyncs of the 59.94 Hz grid (the game's swap interval; 29.97 steps a second, as
 // on the console). (It was 33.333 ms, which drifted against the grid's 33.367 ms: issue #164.)
@@ -904,7 +907,7 @@ static void trace_step(pace_clock::time_point now, pace_clock::time_point before
 static void paced_pass_start() {
     static bool previousRecord = false;
     if (!paced() || !interp_on()) { g_exact_step = false; previousRecord = false;
-        if (mods::fast_forward_active()) { g_wait_step = false; g_last_entry = {}; g_last_logic = {}; }
+        if (mods::fast_forward_active()) { g_wait_step = g_drop_lead = false; g_last_entry = {}; g_last_logic = {}; }
         return; }
     if (!g_hold_next) g_exact_step = !previousRecord;  // this logic pass: blend only after a record pass
     previousRecord = g_hold_next && g_phase + 1 >= g_step_n;  // this pass is the step's record pass
@@ -954,10 +957,13 @@ static void paced_pass_start() {
         } else if (plan.how == pacing::StepStart::kLate) {
             gx2::drop_step_slot();
         }
-        g_wait_step = false;
+        g_wait_step = g_drop_lead = false;
         trace_step(now, before, plan.how == pacing::StepStart::kWait ? 'W' : plan.how == pacing::StepStart::kKeep ? 'K' : 'N');
         return;
     }
+    // (no slot: a step after a dropped in-between frame waits at 60 fps too)
+    if (g_drop_lead) g_wait_step = true;
+    g_drop_lead = false;
     if (g_wait_step && now < g_last_logic + kPacedStep) {
         const auto due = g_last_logic + kPacedStep;
         threads::park_sleep_until(due);  // the game keeps 30 steps a second
@@ -1038,7 +1044,7 @@ static void after_pass(int phase) {
         }
         return;
     }
-    if (!pacing) { g_hold_next = true; g_wait_step = false; return; }
+    if (!pacing) { g_hold_next = true; g_wait_step = g_drop_lead = false; return; }
     if (phase > 0) g_last_hold = pace_clock::now();
     const auto now = pace_clock::now();
     using ns = std::chrono::nanoseconds;
@@ -1048,7 +1054,8 @@ static void after_pass(int phase) {
     // fps the later passes of a step see the time the earlier ones took, and a step planned with one
     // in-between frame there keeps the rule it was measured with.)
     auto budget = kPacedBudget.count();
-    if (phase == 0 && g_step_n == 1 && in_between() == 1) {
+    const bool oneFrame = phase == 0 && g_step_n == 1 && in_between() == 1;
+    if (oneFrame) {
         elapsed = pacing::logic_pass_elapsed(ns(now.time_since_epoch()).count(), ns((g_last_entry + g_slept).time_since_epoch()).count(),
                                              ns(g_last_logic.time_since_epoch()).count(), std::chrono::duration_cast<ns>(g_logic_avg).count());
         budget = pacing::one_frame_budget(ns(kPacedStep).count(), ns(vsync_tick()).count());
@@ -1073,7 +1080,9 @@ static void after_pass(int phase) {
     default:  // the rest of the step's in-between passes (and its record pass) are dropped
         trace_step(now, g_last_logic, 'D');
         g_hold_next = false;
-        g_wait_step = true;
+        // (60 fps: the next logic pass starts at once and keeps what the skip saved as a lead)
+        g_wait_step = pacing::wait_after_drop(oneFrame);
+        g_drop_lead = !g_wait_step;
         paced_step_done(g_step_holds);
         break;
     }
