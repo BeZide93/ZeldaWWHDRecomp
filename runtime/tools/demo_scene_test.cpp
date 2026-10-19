@@ -221,6 +221,24 @@ int main() {
     clash = lit;
     clash.light[0].hour = 24.f;
     assert(!demo_event_image::make(clash, lit_image, why));
+    // messages across demos: the window keeps the last code it took, so the next demo continues the
+    // alternation (a demo after one that ended on 889 starts on 891)
+    {
+        assert(D::first_message_code(0) == 0 && D::first_message_code(889) == 1 && D::first_message_code(891) == 0 && D::first_message_code(1234) == 0);
+        D::Compiled shifted;
+        assert(D::compile(d, ids, shifted, why, D::first_message_code(889)));
+        demo_stb::File sf;
+        assert(demo_stb::parse(shifted.stb, sf, why));
+        const std::string st = demo_stb::dump(sf);
+        assert(has(st, "== JMSG \"message\"\n  f60 MESSAGE = u32 891\n  f150 MESSAGE = u32 889\n"));
+        // two demos in a row with one message each never repeat a code
+        uint32_t last = 0;
+        for (int demo = 0; demo < 4; ++demo) {
+            const uint32_t code = D::demo_message_code(0, D::first_message_code(last));
+            assert(code != last);
+            last = code;
+        }
+    }
     // a demo step right after another waits for the previous demo's cleanup, bounded
     {
         namespace G = demo_start_gate;

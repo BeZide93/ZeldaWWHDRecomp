@@ -37,6 +37,7 @@ const uint32_t kDemoMessageOn = GC(0x025DB58C), kDemoMessageOff = GC(0x025DB59C)
 // the demo message window (HD parts object): its idle state's execute (it polls the demo's message code),
 // the parts state change, and the window's own states Wait (idle) and Close (out animation, then the
 // window's cleanup: message status 0, the demo's suspend count back, back to Wait)
+const uint32_t kSetCamera = GC(0x02514F50);  // the stopped camera's place (target, eye)
 const uint32_t kDemoWindowWait = GC(0x026AEEB8), kStateChange = GC(0x020063C0), kCurrentState = GC(0x02006478);
 const uint32_t kDemoWindowIdle = GD(0x10497F80), kDemoWindowClose = GD(0x104980A0);
 // game data
@@ -78,15 +79,17 @@ enum : uint32_t {
     AttachRecord = LightRecord + story_demo_parts::light::kRecordBytes,  // 0x100: 8 attachments
     PartsScratch = AttachRecord + story_demo_parts::attach::kRecordBytes, // 0x40
     ImageLarge = PartsScratch + 0x40,                               // <= 0xC00
+    Kept = ImageLarge + 0xC00,                                      // 0x10, never cleared by a demo: +0 the demo message window
+    MessageCodeFirst = 0x5D8,  // the demo's message code alternation starts at kDemoMessageCodes[this]
 };
-static_assert(ImageLarge + demo_event_image::kMaxImageBytes == kArenaBytes, "story_demo.h kArenaBytes");
+static_assert(Kept + 0x10 == kArenaBytes, "story_demo.h kArenaBytes");
 uint32_t g_arena = 0;
 Call g_call = nullptr;
 void (*g_original)(Cpu*, uint32_t) = nullptr;
 bool g_installed = false;
 std::vector<demo_scene::Message> g_messages;  // host copy of the running demo's messages (the record keeps the index)
 std::vector<std::u16string> g_texts;           // their text, kept alive while armed
-void arm(uint32_t index) { if (index < g_texts.size()) story_mail::say(ld32(g_arena + MessageNumbers + (index % 2) * 4), &g_texts[index]); }
+void arm(uint32_t index) { if (index < g_texts.size()) story_mail::say(ld32(g_arena + MessageNumbers + ((index + ld32(g_arena + MessageCodeFirst)) % 2) * 4), &g_texts[index]); }
 
 uint32_t call(Cpu* c, uint32_t fn, std::initializer_list<uint32_t> args) { Cpu saved = *c; const uint32_t r = g_call(c, fn, args); *c = saved; return r; }
 std::string cstr(uint32_t p, size_t max = 64) { std::string s; if (!p) return s; for (size_t i = 0; i < max; ++i) { const char ch = char(ld8(p + uint32_t(i))); if (!ch) break; s += ch; } return s; }
@@ -159,6 +162,7 @@ void apply_characters(Cpu* c);
 // The demo message window's idle execute: the window is noted for a release with a message open.
 void demo_window_wait(Cpu* c) {
     if (recorded()) st32(g_arena + WindowAt, c->r[3]);
+    if (g_arena) st32(g_arena + Kept, c->r[3]);  // the window outlives a demo: the next demo reads its last code
     g_original(c, kDemoWindowWait);
 }
 void parts_update(Cpu* c);
@@ -354,8 +358,13 @@ bool begin(Cpu* c, std::string& why) {
     const uint32_t play = call(c, kPlay, {}), link = play ? ld32(play + kPlayer) : 0;
     if (!play || !link) return why = "no game play scene", false;
     if (ld32(kDemoMode) || ld32(kDemoFile)) return why = "a game demo is running", false;
+    // The demo message window takes a code only when it differs from the last one it took (window
+    // +0x154), and keeps that across demos: this demo's messages continue the alternation from there.
+    const uint32_t window = ld32(g_arena + Kept), window_code = window ? ld32(window + 0x154) : 0;
+    const uint32_t first_code = demo_scene::first_message_code(window_code);
+    st32(g_arena + MessageCodeFirst, first_code);
     demo_scene::Compiled compiled;
-    if (!demo_scene::compile(g_demo, resolver(c), compiled, why)) return false;
+    if (!demo_scene::compile(g_demo, resolver(c), compiled, why, first_code)) return false;
     // the mod-placed actors behind MA00..: present now, mod actors leased from their own motion
     if (compiled.characters.size() > 12) return why = "a demo drives at most 12 characters", false;
     for (size_t i = 0; i < compiled.characters.size(); ++i) {
@@ -383,8 +392,9 @@ bool begin(Cpu* c, std::string& why) {
     }
     if (compiled.stb.size() > kArenaBytes - Stb) return why = "demo data too large", false;
     uint32_t numbers[2] = {0, 0};
-    for (size_t i = 0; i < 2 && i < compiled.messages.size(); ++i)
-        if ((numbers[i] = resolve_message(c, demo_scene::demo_message_code(i))) > 0xFFFF) return why = "the game has no message for a demo message code", false;
+    // both codes when there are messages: the alternation may start on either (first_code)
+    for (size_t i = 0; i < 2 && !compiled.messages.empty(); ++i)
+        if ((numbers[i] = resolve_message(c, demo_scene::kDemoMessageCodes[i])) > 0xFFFF) return why = "the game has no message for a demo message code", false;
     demo_event_image::Spec spec;
     if (g_demo.origin_link) spec.origin = demo_event_image::Origin{u32_as_f32(ld32(link + 0x314)), u32_as_f32(ld32(link + 0x318)), u32_as_f32(ld32(link + 0x31C)), g_demo.angle};
     else if (g_demo.origin) spec.origin = demo_event_image::Origin{g_demo.origin->x, g_demo.origin->y, g_demo.origin->z, g_demo.angle};
@@ -430,7 +440,8 @@ bool begin(Cpu* c, std::string& why) {
     st32(g_arena + DemoFlagSet, 0);
     st32(g_arena + MessageShown, 0);
     for (unsigned i = 0; i < 2; ++i) st32(g_arena + MessageNumbers + i * 4, numbers[i]);
-    if (!g_messages.empty()) LOG("[demo] messages show as messages %u and %u (demo message codes %u, %u)", numbers[0], numbers[1], demo_scene::kDemoMessageCodes[0], demo_scene::kDemoMessageCodes[1]);
+    if (!g_messages.empty()) LOG("[demo] messages show as messages %u and %u (demo message codes %u, %u); the first message uses %u (the window's last code %u)", numbers[0], numbers[1],
+        demo_scene::kDemoMessageCodes[0], demo_scene::kDemoMessageCodes[1], demo_scene::demo_message_code(0, first_code), window_code);
     arm(0);
     std::memset(mem::ptr(kDemoArcName), 0, 12);
     std::memcpy(mem::ptr(kDemoArcName), kVirtualArchive, sizeof kVirtualArchive - 1);
@@ -776,7 +787,27 @@ void release(Cpu* c, const char* reason) {
     }
     story_demo_parts::attach::release(c, parts(AttachRecord));
     story_demo_parts::light::release(c, parts(LightRecord));
-    if (ld32(g_arena + CameraStarted)) { const uint32_t camera = call(c, kCamera, {}); if (camera) call(c, kStopCamera, {camera}); }
+    if (ld32(g_arena + CameraStarted)) {
+        const uint32_t camera = call(c, kCamera, {});
+        if (camera) {
+            call(c, kStopCamera, {camera});
+            // A demo that played to its end leaves the scene's held camera on its last framing (not the
+            // view from before the demo), so a following step (another demo, which waits for this one's
+            // cleanup, a say or camera step) continues from it.
+            if (std::strcmp(reason, "finished") == 0 && !g_demo.eye.keys.empty()) {
+                const float ox = u32_as_f32(ld32(g_arena + Origin)), oy = u32_as_f32(ld32(g_arena + Origin + 4)), oz = u32_as_f32(ld32(g_arena + Origin + 8));
+                const float a = u32_as_f32(ld32(g_arena + Origin + 12)) * 3.14159265f / 180.f, cs = std::cos(a), sn = std::sin(a);
+                const uint32_t at = g_arena + PartsScratch + 0x20;  // target, eye
+                unsigned k = 0;
+                for (const auto* t : {&g_demo.target, &g_demo.eye}) {
+                    const auto& v = t->keys.back().value;
+                    st32(at + k, f32_as_u32(ox + v.x * cs + v.z * sn)); st32(at + k + 4, f32_as_u32(oy + v.y)); st32(at + k + 8, f32_as_u32(oz - v.x * sn + v.z * cs));
+                    k += 12;
+                }
+                call(c, kSetCamera, {camera, at, at + 12});
+            }
+        }
+    }
     if (ld32(g_arena + MessageCount)) story_mail::unsay();
     for (uint32_t i = 0; i < ld32(g_arena + CharacterCount) && i < 16; ++i) {
         mod_actor::Identity id;

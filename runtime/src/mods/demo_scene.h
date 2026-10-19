@@ -128,9 +128,12 @@ struct Compiled {
 // start without text codes (no size or colour carried over); the port resolves their message
 // numbers at run time and gives them the mod's text.
 inline constexpr uint32_t kDemoMessageCodes[2] = {889, 891};
-inline constexpr uint32_t demo_message_code(size_t index) { return kDemoMessageCodes[index % 2]; }
+inline constexpr uint32_t demo_message_code(size_t index, uint32_t first = 0) { return kDemoMessageCodes[(index + first) % 2]; }
+// The alternation continues across demos: the window still holds the code it took last (a demo right
+// after another one starts where that left off), so a demo's first message never repeats it.
+inline constexpr uint32_t first_message_code(uint32_t window_last_code) { return window_last_code == kDemoMessageCodes[0] ? 1 : 0; }
 // Each message: its demo message code at its frame (the port arms its text before the point); the
 // demo waits one frame later until the player closes it (the game's own unsuspend).
-bool compile(const Demo& demo, const Resolver& resolve, Compiled& out, std::string& why);
+bool compile(const Demo& demo, const Resolver& resolve, Compiled& out, std::string& why, uint32_t first_code = 0);  // first_code: first_message_code()
 }  // namespace demo_scene
 #include "demo_scene_parse.h"
