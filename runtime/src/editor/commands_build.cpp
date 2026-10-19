@@ -266,7 +266,9 @@ bool new_actor(const std::string& type, const std::string& id, const Place& plac
         a["defeated_flag"] = id + "-defeated";
         a["drops"] = array();
         if (options.get("path").type == Value::String) {
-            if (room_path_use(a).empty()) return why = "a " + t->label + " takes no path", false;
+            Value probe = a;  // the variant chosen below decides whether it takes a path
+            if (options.get("variant").type == Value::String) probe["parameters"]["variant"] = options.get("variant").text;
+            if (room_path_use(probe).empty()) return why = "a " + t->label + " takes no path", false;
             a["path"] = options.get("path").text;
         }
         if (options.get("variant").type != Value::Null) {
@@ -689,9 +691,12 @@ Value Session::dispatch_build(const std::string& command, const Value& p, std::s
             // an actor that needs one of the mod's room paths (a wall cannon's firing area): the one
             // options.path names, or a new square area of 1600 units in front of it
             if (!room_path_use(a).empty() && a.get("path").type == Value::Null) {
-                std::string pid = id + "-area";
-                for (int n = 2; [&] { for (const auto& v : m.get("paths").array) if (v.get("id").string() == pid) return true; return false; }(); n++) pid = id + "-area-" + std::to_string(n);
-                const double yaw = place.angle * 3.14159265358979323846 / 32768.0, ahead = 1200, half = 800;
+                const std::string base = id + (type == "wall_cannon" ? "-area" : "-route");
+                std::string pid = base;
+                for (int n = 2; [&] { for (const auto& v : m.get("paths").array) if (v.get("id").string() == pid) return true; return false; }(); n++) pid = base + "-" + std::to_string(n);
+                // a cannon's firing area in front of it; a route around the place (a warship's wider)
+                const bool cannon = type == "wall_cannon";
+                const double yaw = place.angle * 3.14159265358979323846 / 32768.0, ahead = cannon ? 1200 : 0, half = cannon ? 800 : type == "warship" ? 1500 : 400;
                 const double cx = place.position.x + std::sin(yaw) * ahead, cz = place.position.z + std::cos(yaw) * ahead;
                 Value path;
                 path["id"] = pid;

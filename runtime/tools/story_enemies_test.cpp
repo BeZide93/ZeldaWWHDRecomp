@@ -233,6 +233,12 @@ int main(int argc,char**argv){using namespace story_enemies;const bool drowning_
   at+=0x2000;make(Kind::Warship);st8(at+0x3CD,0xFF);st8(at+0x3CE,0xFF);st8(at+0x3CF,0xFF);st8(at+0x3D0,0xF);st8(at+0x3D1,0xF);st8(at+0x3D2,0xFF);const Token ws=table[Kind::Warship];assert(verify_actor(ws,Kind::Warship,at));
   for(uint32_t off:{0x3CCu,0x3CDu,0x3CEu,0x3CFu,0x3D0u,0x3D1u,0x3D2u})expect_field(ws,Kind::Warship,off);
   st32(at+0x3C8,5);assert(verify_actor(ws,Kind::Warship,at));st32(at+0x3C8,8);assert(!verify_actor(ws,Kind::Warship,at));st32(at+0x3C8,0);  // its idle modes by distance, never MODE_NULL
+  // the route variant: sub-mode 2 on a mod path (its number in the path byte, its record in the path pointer)
+  {using namespace story_enemies_more;assert(warship_verify(at,0xFFFFFF00u)&&!warship_verify(at,0xFFC0FF02u));
+   st8(at+0x3CC,2);st8(at+0x3CF,0xC0);assert(!warship_verify(at,0xFFC0FF02u));st32(at+0x3F4,0x20070000);assert(warship_verify(at,0xFFC0FF02u)&&!warship_verify(at,0xFFC1FF02u)&&!warship_verify(at,0xFFFFFF02u));
+   st8(at+0x3CC,0);assert(!warship_verify(at,0xFFC0FF00u));st8(at+0x3CF,0xFF);st32(at+0x3F4,0);assert(warship_verify(at,0xFFFFFF00u));
+   assert(story_enemy_variants::declared_params("warship",0xFFC0FF02u)&&story_enemy_variants::declared_params("warship",0xFFFFFF00u)&&!story_enemy_variants::declared_params("warship",0xFFC0FF00u));
+   assert(story_enemies::room_path_shift(Kind::Warship)==16&&story_enemy_variants::room_path_rule("warship","route")==story_enemy_variants::kPath&&!story_enemy_variants::room_path_rule("warship",""));}
   assert(story_enemies::home_x(Kind::Warship)==0xFFFF&&story_enemies::home_x(Kind::Kargaroc)==0&&home_x(ws)==0xFFFF);
   bind(ws,pid);{Cpu q{};q.r[3]=at;const unsigned c0=calls,b0=base_constructs;hooks.at(story_enemies_more::find(Kind::Warship)->create)(&q);assert(q.r[3]==5&&calls==c0&&base_constructs==b0+1);base_constructs=b0;}  // only on the sea (the count is the later refusal test's)
   st8(at+0x3AA,0);st32(at+0xB4,story_enemies_more::find(Kind::Warship)->vtable());
@@ -248,7 +254,7 @@ int main(int argc,char**argv){using namespace story_enemies;const bool drowning_
    for(uint32_t off:{0x3B0u,0x3B1u,0x3B2u,0x3B3u})expect_field(wc,Kind::WallCannon,off);
    st32(at+0x3AC,3);assert(!verify_actor(wc,Kind::WallCannon,at));st32(at+0x3AC,2);assert(verify_actor(wc,Kind::WallCannon,at));st32(at+0x3AC,0);
    st32(at+0x3CC,0);assert(!verify_actor(wc,Kind::WallCannon,at));st32(at+0x3CC,0x20070000);
-   assert(story_enemies::room_path_shift(Kind::WallCannon)==16&&story_enemies::room_path_shift(Kind::Warship)<0&&story_enemies_more::path_mask(Kind::WallCannon)==0x00FF0000u&&story_enemies_more::path_mask(Kind::Warship)==0);
+   assert(story_enemies::room_path_shift(Kind::WallCannon)==16&&story_enemies::room_path_shift(Kind::Stalfos)<0&&story_enemies_more::path_mask(Kind::WallCannon)==0x00FF0000u&&story_enemies_more::path_mask(Kind::Stalfos)==0);
    assert(parameters(wc)==0xFFC0FFFFu&&!story_enemies_more::wall_cannon_terminal(at));
    const auto*row=story_enemies_more::find(Kind::WallCannon);bind(wc,pid);run(row->create,at);assert(owns_actor(at));
    // its cannonball (BOMB 0x126, the warship's parameters) becomes its owned child; anything else is refused

@@ -128,6 +128,8 @@ const std::vector<CommandInfo> kCommands = {
     {"set_path", "Changes a room path: closed (an area) or open (a line), or its id (the actors that use it follow).",
      {{"id", "string", "", true}, {"closed", "boolean", ""}, {"new_id", "string", "a new id"}, {"mod", "string", ""}}, true},
     {"remove_path", "Removes a room path; refused while an actor uses it (the reason names them).", {{"id", "string", "", true}, {"mod", "string", ""}}, true},
+    {"check_path", "A warning check of a route (never a refusal): for a warship, segments over land; for a Floormaster, segments off the floor. Sampled along the route, closed as they move it.",
+     {{"id", "string", "", true}, {"for", "string", "warship or floormaster (default: the actor that uses the path)"}, {"mod", "string", ""}}},
     {"path_inside", "Whether Link, the fly camera or a position is inside an area path, by the game's own area test (the one a wall cannon uses).",
      {{"id", "string", "", true}, {"at", "string", "link (default), camera or position"}, {"position", "point", "with at = position"},
       {"stage", "string", "with at = position (default: Link's)"}, {"room", "integer", "with at = position (default: Link's)"}, {"snap", "boolean", "default true"}, {"mod", "string", ""}}},

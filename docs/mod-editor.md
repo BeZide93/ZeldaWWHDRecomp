@@ -683,6 +683,7 @@ separated by `;`, or `@file` with one such line per row. Results go to the log.
 | `remove_path_point` | `id`, `point`, `mod`? | take one point out (an area keeps 3, a line 2) |
 | `set_path` | `id`, `closed`?, `new_id`?, `mod`? | an area or a line; a new id (the actors that use it follow) |
 | `remove_path` | `id`, `mod`? | remove a path; refused while an actor uses it |
+| `check_path` | `id`, `for`? (`warship`, `floormaster`), `mod`? | a warning check of a route: a warship's segments over land, a Floormaster's off the floor (never a refusal) |
 | `path_inside` | `id`, `at`?, `position`?, `stage`?, `room`?, `mod`? | whether Link, the camera or a position is inside an area, by the game's own test |
 | `model_clips` | `model`, `mod`? | a model's animation clips |
 | `set_then` | `id`, `actions`, `mod`? | what happens after the dialogue (an empty list removes it): `give`, `take`, `quest_step`, `quest_done` (finishes a quest), `flag`, `scene`; `{"action": "give", "id": "chart:<id>"}` gives one of the mod's charts |

@@ -294,8 +294,12 @@ inline constexpr const char* kNoWizzrobeStages[] = {"kazeMB"};
 // Colliders on mStts 0x5D0: five cylinders 0x60C + 0x130*i (targets only).
 inline constexpr Collider kWarshipColliders[] = {
     {0x60C, 0x5D0, 0}, {0x73C, 0x5D0, 0}, {0x86C, 0x5D0, 0}, {0x99C, 0x5D0, 0}, {0xACC, 0x5D0, 0}};
-inline bool warship_verify(uint32_t a, uint32_t) {
-    return ld8(a + 0x3CC) == 0 && ld8(a + 0x3CD) == 0xFF && ld8(a + 0x3CE) == 0xFF && ld8(a + 0x3CF) == 0xFF && ld8(a + 0x3D0) == 0xF &&
+// The route variant (story_enemy_variants "route"): sub-mode 2 and a mod path's number (byte 2); its path
+// pointer (0x3F4) is the path's record, looked up once in its create.
+inline bool warship_verify(uint32_t a, uint32_t p) {
+    const uint8_t sub = uint8_t(p), path = uint8_t(p >> 16);
+    return (sub == 0 || sub == 2) && ld8(a + 0x3CC) == sub && ld8(a + 0x3CD) == 0xFF && ld8(a + 0x3CE) == 0xFF && ld8(a + 0x3CF) == path &&
+           (sub == 0) == (path == 0xFF) && (path == 0xFF || ld32(a + 0x3F4) != 0) && ld8(a + 0x3D0) == 0xF &&
            ld8(a + 0x3D1) == 0xF && ld8(a + 0x3D2) == 0xFF && ld32(a + 0x3C8) <= 7;
 }
 inline bool warship_terminal(uint32_t a) { return ld32(a + 0x3C8) == 3; }
@@ -488,7 +492,7 @@ inline constexpr Native kNatives[] = {
     {Kind::Warship, "warship", {kWarshipProfile, 0xB3, 0xF1C, kWarshipColliders, std::size(kWarshipColliders)},
      CANONICAL_CODE_ID(0x023C637C).value(), CANONICAL_CODE_ID(0x023C6D38).value(), CANONICAL_CODE_ID(0x023C6DAC).value(),
      CANONICAL_CODE_ID(0x023C6418).value(), [] { return GD(0x10034084); }, 0xFFFFFF00u, 0, 0, {0, 0}, true,
-     warship_verify, warship_terminal, nullptr, 0x3CB, false, 0xFFFF},
+     warship_verify, warship_terminal, nullptr, 0x3CB, false, 0xFFFF, 16},
     {Kind::Gyorg, "gyorg", {kGyorgProfile, 0xE5, 0x5D0, nullptr, 0},
      CANONICAL_CODE_ID(0x0216BBB0).value(), CANONICAL_CODE_ID(0x0216C1A0).value(), CANONICAL_CODE_ID(0x0216C1DC).value(),
      CANONICAL_CODE_ID(0x0216BBB4).value(), [] { return GD(0x10010D78); }, 0xFFFF0531u, 0, 0, {0, 0}, true,

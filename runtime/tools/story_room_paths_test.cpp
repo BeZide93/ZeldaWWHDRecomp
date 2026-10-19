@@ -106,6 +106,21 @@ int main() {
         assert(!story_notebook::parse_actors(cannon("\"far\""), actors, why) && why.find("another stage or room") != std::string::npos);
         assert(!story_notebook::parse_actors(cannon("\"line\""), actors, why) && why.find("must be an area") != std::string::npos);
         assert(!story_notebook::parse_actors(cannon(R"({"points":[{"x":1,"y":0,"z":1}]})"), actors, why));
+        // a warship on a route and a wandering Floormaster: a path (a line or an area) of their room, required;
+        // the anchored warship and the ordinary Floormaster take none
+        auto enemy = [&](const std::string& type, const std::string& variant, const std::string& path) {
+            return manifest("{" + paths_part + R"(,"actors":[{"id":"e","actor":")" + type + R"(","stage":"sea","room":11,"position":{"x":450,"y":0,"z":-500},"defeated_flag":"e.dead","drops":[])" +
+                            (variant.empty() ? std::string() : R"(,"parameters":{"variant":")" + variant + "\"}") + (path.empty() ? std::string() : ",\"path\":" + path) + "}]}");
+        };
+        for (const char* type : {"warship"}) {
+            const std::string variant = std::string(type) == "warship" ? "route" : "wandering";
+            assert(story_notebook::parse_actors(enemy(type, variant, "\"line\""), actors, why) && actors[0].room_path == "line");
+            assert(story_notebook::parse_actors(enemy(type, variant, "\"yard\""), actors, why) && actors[0].room_path == "yard");
+            assert(!story_notebook::parse_actors(enemy(type, variant, ""), actors, why) && why.find("needs \"path\"") != std::string::npos);
+            assert(!story_notebook::parse_actors(enemy(type, variant, "\"far\""), actors, why));
+            assert(story_notebook::parse_actors(enemy(type, "", ""), actors, why) && actors[0].room_path.empty());
+            assert(!story_notebook::parse_actors(enemy(type, "", "\"line\""), actors, why) && why.find("takes no path") != std::string::npos);
+        }
         // other enemies take no room path
         assert(!story_notebook::parse_actors(manifest("{" + paths_part + R"(,"actors":[{"id":"cc","actor":"chuchu","stage":"sea","room":11,"position":{"x":0,"y":0,"z":0},"defeated_flag":"cc.dead","drops":[],"path":"yard"}]})"), actors, why));
     }

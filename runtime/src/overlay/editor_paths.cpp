@@ -12,12 +12,15 @@
 
 namespace editor_ui {
 namespace {
-const ImVec4 kMuted(0.62f, 0.66f, 0.72f, 1), kHead(0.95f, 0.85f, 0.55f, 1);
+const ImVec4 kMuted(0.62f, 0.66f, 0.72f, 1), kHead(0.95f, 0.85f, 0.55f, 1), kWarn(0.95f, 0.75f, 0.35f, 1);
 
 struct PathUi {
     std::string actor;  // the actor the section is about
     std::string path;   // the path whose points are shown (the actor's)
     int point = 0;      // the selected point (1-based; 0 none)
+    std::string checked;  // the route the warning check is for
+    Value check;          // check_path's result
+    bool checking = false;
 } P;
 
 void muted(const std::string& s) {
@@ -129,6 +132,30 @@ void path_section(const Value& m, const Value& a) {
     if (P.point > 0) {
         ImGui::SameLine();
         ImGui::TextDisabled("(after point %d)", P.point);
+    }
+    // a warship's or a Floormaster's route: the warning check (over land, off the floor), again when it changes
+    const std::string type = a.get("actor").string();
+    if (type == "warship" || type == "floormaster") {
+        const std::string key = mods::json::dump(*path) + type;
+        if (key != P.checked && !P.checking) {
+            P.checked = key;
+            P.checking = true;
+            Value q;
+            q["id"] = current;
+            q["for"] = type;
+            command("check_path", q, [id](const Value& r) {
+                if (P.actor != id) return;
+                P.checking = false;
+                P.check = r.get("ok").boolean ? r.get("result") : Value();
+            });
+        }
+        for (const auto& sg : P.check.get("segments").array)
+            if (!sg.get("ok").boolean) {
+                ImGui::PushStyleColor(ImGuiCol_Text, kWarn);
+                ImGui::TextWrapped("Point %.0f to %.0f: %s near %.0f, %.0f (a warning: it is kept)", num(sg, "from"), num(sg, "to"), sg.get("problem").string().c_str(),
+                                   num(sg.get("at"), "x"), num(sg.get("at"), "z"));
+                ImGui::PopStyleColor();
+            }
     }
 }
 

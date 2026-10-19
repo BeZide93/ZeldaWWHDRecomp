@@ -67,9 +67,13 @@ story_room_path::Path parsed(const Value& v) {
 }  // namespace
 
 std::string room_path_use(const Value& actor) {
-    if (actor.get("actor").string() == "wall_cannon" && actor.get("kind").type == Value::Null)
-        return "Its firing area: it turns to Link and fires only while he (and where it aims) is inside this area, by the game's own test.";
-    return {};
+    if (actor.get("kind").type != Value::Null) return {};
+    const std::string type = actor.get("actor").string(), variant = actor.get("parameters").get("variant").string();
+    if (!story_enemy_variants::room_path_rule(type, variant)) return {};
+    if (type == "wall_cannon") return "Its firing area: it turns to Link and fires only while he (and where it aims) is inside this area, by the game's own test.";
+    if (type == "warship") return "Its route: it sails the path round and round at the sea's height (a line too: from the last point back to the first), slowing to fire at Link.";
+    if (type == "floormaster") return "Its route: its hole glides along the path round and round and rises when Link comes near. Keep the points on the floor.";
+    return "The path it uses.";
 }
 
 Value Session::dispatch_paths(const std::string& command, const Value& p, std::string& why, bool& ok, bool& handled) {
@@ -255,6 +259,69 @@ Value Session::dispatch_paths(const std::string& command, const Value& p, std::s
             return true;
         }, r, why);
         if (ok) r["id"] = id;
+        return r;
+    }
+    if (command == "check_path") {
+        // a warning check for the actors that use the path (never a refusal): a warship's route over land
+        // (ground above the sea's height under it), a Floormaster's route off the floor (no ground just
+        // below a point of it, or a step of more than 50 units); sampled every 50 units, the route closed
+        // (both sail or glide it round)
+        Package* pkg = package(p, why);
+        if (!pkg) return r;
+        const std::string id = text(p, "id");
+        Value* path = path_by_id(pkg->manifest, id);
+        if (!path) return why = "no path \"" + id + "\" in " + pkg->mod, r;
+        std::string kind = text(p, "for");
+        if (kind.empty())
+            for (const auto& a : pkg->manifest.get("actors").array)
+                if (a.get("path").type == Value::String && a.get("path").text == id) kind = a.get("actor").string();
+        if (kind != "warship" && kind != "floormaster") return why = "check_path checks a warship's or a Floormaster's route (\"for\")", r;
+        if (!host_) return why = "the game is not running", r;
+        const auto rp = parsed(*path);
+        std::vector<WorldPoint> pts;
+        for (const auto& q : rp.points) pts.push_back({q.x, q.y, q.z});
+        if (pts.size() > 1) pts.push_back(pts.front());
+        struct Sample { size_t segment; WorldPoint at; };
+        std::vector<Sample> samples;
+        for (size_t i = 1; i < pts.size(); i++) {
+            const auto &f = pts[i - 1], &t = pts[i];
+            const int n = std::max(1, int(std::ceil(std::hypot(double(t.x) - f.x, double(t.z) - f.z) / 50)));
+            for (int k = 0; k <= n; k++) {
+                const double u = double(k) / n;
+                samples.push_back({i - 1, {float(f.x + (t.x - f.x) * u), float(f.y + (t.y - f.y) * u), float(f.z + (t.z - f.z) * u)}});
+            }
+        }
+        const bool ship = kind == "warship";
+        std::vector<WorldPoint> above;
+        for (const auto& sm : samples) above.push_back({sm.at.x, ship ? 5000.f : sm.at.y + 100, sm.at.z});
+        std::vector<float> heights;
+        std::vector<bool> found;
+        if (!host_->grounds(above, heights, found, why)) return r;
+        r["for"] = kind;
+        r["segments"].type = Value::Array;
+        size_t k = 0;
+        for (size_t i = 1; i < pts.size(); i++) {
+            Value seg;
+            seg["from"] = double(i);
+            seg["to"] = double(i + 1 == pts.size() ? 1 : i + 1);
+            bool good = true;
+            for (; k < samples.size() && samples[k].segment == i - 1; k++) {
+                if (!good) continue;
+                const auto& at = samples[k].at;
+                std::string problem;
+                if (ship) {
+                    if (found[k] && heights[k] > 0.f) problem = "land";
+                } else if (!found[k] || std::fabs(heights[k] - at.y) > 50.f) problem = found[k] ? "off the floor (a step or a drop)" : "no floor";
+                if (!problem.empty()) {
+                    good = false;
+                    seg["problem"] = problem;
+                    seg["at"] = rounded_point(at);
+                }
+            }
+            seg["ok"] = good;
+            r["segments"].array.push_back(seg);
+        }
+        ok = true;
         return r;
     }
     if (command == "path_inside") {

@@ -594,15 +594,20 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
                 if(!a.path.loop&&!a.path.back_and_forth)return why="a Bokoblin's or Moblin's path mode is loop or back_and_forth",false;
             }
             // an enemy on one of the mod's room paths ("paths"): its id, a path of its own stage and room
-            // (an area where the kind needs one: a wall cannon's firing area); required
+            // (an area where the kind needs one: a wall cannon's firing area); required by the kinds and
+            // variants that take one (story_enemy_variants::room_path_rule), refused by the others
             if(story_enemy_variants::takes_room_path(a.actor)){
+                const uint8_t rule=story_enemy_variants::room_path_rule(a.actor,a.variant);
                 const auto& path=v.get("path");
-                if(path.type!=Value::String)return why="a "+a.actor+" needs \"path\": the id of one of the mod's paths (an area: its firing area)",false;
-                const auto* rp=find_room_path(room_paths,path.text);
-                if(!rp)return why="actor "+a.id+": no path \""+path.text+"\" in the mod's paths",false;
-                if(rp->stage!=a.stage||rp->room!=a.room)return why="actor "+a.id+": path \""+path.text+"\" is in another stage or room",false;
-                if(story_enemy_variants::room_path_area(a.actor)&&!rp->closed)return why="actor "+a.id+": path \""+path.text+"\" must be an area (closed)",false;
-                a.room_path=path.text;
+                if(!rule){if(v.object.contains("path"))return why="actor "+a.id+": this "+a.actor+" takes no path (a variant that does: "+story_enemy_variants::names(a.actor)+")",false;}
+                else{
+                    if(path.type!=Value::String)return why=std::string("a ")+(a.variant.empty()?a.actor:a.variant+" "+a.actor)+" needs \"path\": the id of one of the mod's paths"+(rule==story_enemy_variants::kAreaPath?" (an area: its firing area)":""),false;
+                    const auto* rp=find_room_path(room_paths,path.text);
+                    if(!rp)return why="actor "+a.id+": no path \""+path.text+"\" in the mod's paths",false;
+                    if(rp->stage!=a.stage||rp->room!=a.room)return why="actor "+a.id+": path \""+path.text+"\" is in another stage or room",false;
+                    if(rule==story_enemy_variants::kAreaPath&&!rp->closed)return why="actor "+a.id+": path \""+path.text+"\" must be an area (closed)",false;
+                    a.room_path=path.text;
+                }
             }
         }else if(a.combat_enabled){
             if(a.rotation.x!=0||a.rotation.z!=0||a.scale.x!=1||a.scale.y!=1||a.scale.z!=1)return why="combat actors require yaw-only rotation and scale 1",false;

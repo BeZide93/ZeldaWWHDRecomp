@@ -26,7 +26,9 @@ struct Variant {
     const char* label;    // the editor's name for it
     const char* help;     // plain words
     uint16_t angle_x = 0; // the placement's x rotation word, which some kinds read as a parameter
+    uint8_t path = 0;     // the mod room path it takes ("path": "<id>"): 0 none, 1 required (a line or an area), 2 required area
 };
+inline constexpr uint8_t kNoPath = 0, kPath = 1, kAreaPath = 2;
 
 inline constexpr Variant kVariants[] = {
     {"chuchu", "green", 0xFF000000u, "Green ChuChu", "The ordinary green ChuChu."},
@@ -74,6 +76,12 @@ inline constexpr Variant kVariants[] = {
     {"big_octo", "four", 0xFFFFFF00u, "Big Octo (four eyes)", "A Big Octo to shoot from the boat: hit all four eyes. It never swallows the boat and makes no whirlpool."},
     {"big_octo", "eight", 0xFFFFFF01u, "Big Octo (eight eyes)", "A Big Octo with eight eyes to shoot from the boat. It never swallows the boat and makes no whirlpool."},
     {"big_octo", "twelve", 0xFFFFFF02u, "Big Octo (twelve eyes)", "A Big Octo with twelve eyes to shoot from the boat. It never swallows the boat and makes no whirlpool."},
+    // Warship (d_a_oship): sub-mode 0 stays where it was placed; sub-mode 2 sails its room path in every idle
+    // range (dLib_pathMove: always round, the last point back to the first; the sea's height), slowing to a
+    // stop to fire. The path byte (16) is the mod path's number; Triforce chart, salvage and switches as the
+    // anchored one (story_enemies_more.h).
+    {"warship", "anchored", 0xFFFFFF00u, "Warship", "The enemy warship: it stays where it was placed and fires its cannon at Link."},
+    {"warship", "route", 0xFFFFFF02u, "Warship on a route", "The enemy warship sailing one of the mod's paths round and round (a line is sailed as a loop too), firing at Link.", 0, kPath},
     {"gyorg", "three", 0xFFFF0531u, "Gyorgs (three)", "Three Gyorgs that come out of the sea when Link is near and bite him; defeated when all three are."},
     {"gyorg", "one", 0xFFFF0511u, "Gyorg (one)", "One Gyorg that comes out of the sea when Link is near and bites him."},
     {"gyorg", "two", 0xFFFF0521u, "Gyorgs (two)", "Two Gyorgs that come out of the sea when Link is near; defeated when both are."},
@@ -84,10 +92,6 @@ inline constexpr Variant kVariants[] = {
 // The native enemies of the table-driven adapter (story_enemies_more.h) that mods may place: the
 // manifest, the validator and the editor accept these names like the ones they list themselves.
 inline constexpr const char* kMoreEnemies[] = {"stalfos", "redead", "mothula", "morth", "magtail", "poe", "armos", "armos_knight", "kargaroc", "wizzrobe", "warship", "gyorg", "floormaster", "big_octo", "wall_cannon"};
-// The native enemies that take one of the mod's room paths ("path": "<id>", story_room_path.h), and
-// whether it must be an area (closed).
-inline bool takes_room_path(const std::string& actor) { return actor == "wall_cannon"; }
-inline bool room_path_area(const std::string& actor) { return actor == "wall_cannon"; }
 inline bool more_enemy(const std::string& actor) {
     for (const char* name : kMoreEnemies)
         if (actor == name) return true;
@@ -117,6 +121,21 @@ inline std::string names(const std::string& kind) {
     }
     return out;
 }
+// The mod room path a native enemy takes ("path": "<id>", story_room_path.h): kNoPath, kPath (required, a
+// line or an area) or kAreaPath (required, an area); by its variant ("" the default), the wall cannon always
+// an area (its firing area).
+inline uint8_t room_path_rule(const std::string& actor, const std::string& variant) {
+    if (actor == "wall_cannon") return kAreaPath;
+    const Variant* v = find(actor, variant);
+    return v ? v->path : kNoPath;
+}
+// whether any variant of the kind takes a room path
+inline bool takes_room_path(const std::string& actor) {
+    if (actor == "wall_cannon") return true;
+    for (const Variant& v : kVariants)
+        if (actor == v.kind && v.path) return true;
+    return false;
+}
 // how many rats a rat hole has, and whether its rat `n` (0-based) carries a bomb
 inline constexpr unsigned kRatsPerHole = 3;
 inline bool rat_bomb(const std::string& variant, unsigned n) { return variant == "bomb_rats" || (variant == "mixed" && n == 1); }
@@ -140,7 +159,8 @@ inline constexpr bool patrol_word(uint32_t params) { return ((params >> 16) & 0x
 // whether `params` is one of the kind's declared parameter words (a Bokoblin's also as a patrol)
 inline bool declared_params(const std::string& kind, uint32_t params) {
     for (const Variant& v : kVariants)
-        if (kind == v.kind && (v.params == params || (kind == "bokoblin" && bokoblin_patrol(v.params) == params))) return true;
+        if (kind == v.kind && (v.params == params || (kind == "bokoblin" && bokoblin_patrol(v.params) == params) ||
+                               (v.path && (params | 0x00FF0000u) == v.params))) return true;  // a path variant with its path's number
     return false;
 }
 
