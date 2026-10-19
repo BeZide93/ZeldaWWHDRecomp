@@ -7,6 +7,10 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Quick-use locked items** (Mods > Built-in, off by default; #196, thanks mhbxyz): while locked onto an enemy, one
+  item-button press equips and uses the bow (including fire, ice and light arrows), boomerang, hookshot or grappling
+  rope; bombs are readied and thrown, and equipping the hammer completes one strike. A **Quick-use animation speed**
+  of 1x, 1.25x or 1.5x speeds up the supported equip animations.
 - **Performance report: it says whether Keep game speed is on** (and at which interpolation rate), and the log records
   its value and where it came from at start and on every change.
 - **Mod SDK v3: placed villagers can walk a route.** Uo1, Uo2, Uo3, Um1 and Um2 walk up to 15 points with their own
