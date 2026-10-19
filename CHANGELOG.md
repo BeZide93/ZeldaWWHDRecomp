@@ -7,6 +7,11 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **World editor: story changes while the game runs.** Quests, quest talks (also those for the game's villagers),
+  letters and charts change in the running game at the next calm moment, with every edit, Undo and Redo; an item's
+  name, description, amount and use change at once. A new item, its icon, held model and hold_up, and removed charts
+  still wait for a restart, and the status bar says which. The Quest Log is never touched: saves and save states
+  always play with the current story, and the status bar says when a renumbered step moved a loaded quest.
 - **World editor: New mod…** starts a new, empty mod of your own from inside the editor (also `new_mod` over MCP):
   its own package, turned on in your mod profile and opened at once.
 - **World editor: quest talks for the game's villagers.** The game's own villagers show their names in the picture;
