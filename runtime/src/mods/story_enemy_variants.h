@@ -68,11 +68,14 @@ inline constexpr Variant kVariants[] = {
     // Mothula (d_a_gm): type 1 on the ground or type 2 with wings; no switches (story_enemies_more.h)
     {"mothula", "ground", 0xFF01FFFFu, "Mothula", "A Mothula on the ground, without wings.", 0x0000},
     {"mothula", "winged", 0xFF02FFFFu, "Winged Mothula", "A Mothula that flies and dives at Link; strike its wings off first.", 0x0000},
+    // Kargaroc (d_a_bb): behaviour 0 wanders and attacks, 4 perches until Link comes near; no path, switch or rider
+    {"kargaroc", "flying", 0xFFFFFF00u, "Kargaroc", "A Kargaroc that circles where it was placed and swoops at Link."},
+    {"kargaroc", "perched", 0xFFFFFF04u, "Perched Kargaroc", "A Kargaroc that sits where it was placed until Link comes near."},
 };
 
 // The native enemies of the table-driven adapter (story_enemies_more.h) that mods may place: the
 // manifest, the validator and the editor accept these names like the ones they list themselves.
-inline constexpr const char* kMoreEnemies[] = {"stalfos", "redead", "mothula", "morth", "magtail", "poe", "armos", "armos_knight"};
+inline constexpr const char* kMoreEnemies[] = {"stalfos", "redead", "mothula", "morth", "magtail", "poe", "armos", "armos_knight", "kargaroc"};
 inline bool more_enemy(const std::string& actor) {
     for (const char* name : kMoreEnemies)
         if (actor == name) return true;

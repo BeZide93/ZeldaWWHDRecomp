@@ -9,8 +9,9 @@ struct Cpu;
 namespace story_enemy_ownership {
 enum class Kind:uint32_t { ChuChu,Bokoblin,Moblin,Keese,Miniblin,Peahat,Rat,Darknut,RatHole,BokoBaba,Bubble,Octorok,
  // the table-driven kinds (story_enemies_more.h) from 24, so kinds added before them keep their numbers
- Stalfos=24,Redead,Mothula,Morth,Magtail,Poe,Armos,ArmosKnight };
-inline constexpr unsigned kKindCount=32;
+ Stalfos=24,Redead,Mothula,Morth,Magtail,Poe,Armos,ArmosKnight,
+ Kargaroc=32 };
+inline constexpr unsigned kKindCount=40;
 // The Darknut's owned children: its sword (daBoko type 3, profile 0x1CF) and, for the caped variants,
 // its cape (d_a_mant type 0, profile 0xC0, 0x4288 bytes).
 inline constexpr uint16_t kCapeProfile=0xC0;inline constexpr uint32_t kCapeBytes=0x4288;

@@ -149,6 +149,7 @@ const std::vector<ActorType>& actor_types() {
         {"poe", "Poe", "Enemies", "The game's Poe with its lantern: without it, it possesses Link for a while; outdoors only Light Arrows defeat it.", false, false, false},
         {"armos", "Armos", "Enemies", "The game's Armos statue: it wakes when Link comes near; strike its back.", false, false, false},
         {"armos_knight", "Armos Knight", "Enemies", "The game's Armos Knight: only a bomb in its open mouth (or a Light Arrow) defeats it.", false, false, false},
+        {"kargaroc", "Kargaroc", "Enemies", "The game's Kargaroc: a big bird that circles and swoops at Link (or perches until he comes near).", false, false, false},
         {"model", "Your model", "Your models", "One of the mod's models (static or skinned), with collision.", true, false, true},
         {"model_enemy", "Your enemy", "Your models", "A skinned model that fights (needs flinch, stun, death and idle clips).", true, true, false},
         {"model_carry", "Carried prop", "Your models", "A model Link can lift and carry.", true, false, false},

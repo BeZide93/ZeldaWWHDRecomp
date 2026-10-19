@@ -228,6 +228,27 @@ inline uint32_t armos_knight_held_bomb(uint32_t a) {
     return ld8(a + 0x3E0) == 3 && mode >= 44 && mode <= 46 && ld32(a + 0x400) != 0xFFFFFFFFu ? ld32(a + 0x400) : 0;
 }
 
+// ---------------------------------------------------------------- Kargaroc (d_a_bb)
+// Parameter byte 0 is the behaviour: 0 wanders around where it was placed and attacks Link on sight
+// (back home when he leaves its range), 4 perches at home and wakes when he comes near. Byte 1 0xFF:
+// the class's own sight range; byte 2 0xFF: no room path (a path point may delete it without a drop or
+// drop its rider); byte 3 0xFF: no wait switch (read only); angle z 0: no existence switch (create reads
+// event bit 0x1101 with it, read only). Never the riders 5/6 (a Moblin or Bokoblin it creates through
+// fpcSCtRq_Request itself, which it never deletes and only a path releases) nor 3 (always attacking, no
+// way home). It never holds Link: it only reads his position and his guard. No children, projectiles,
+// events, camera or switch/save writes. Native behaviour kept: it eats bait Link throws (deletes it).
+// Death: a fatal hit sets the dead byte 0xDF2; after its knock-back bb_fail_move makes the one drop.
+// Colliders on mStts 0x6F4: peck 0x730 (Link only), head 0x85C, body 0x988, push 0xAB4; enemyice 0xDF4
+// (cylinder 0xE60 on 0xE24), enemyfire 0x11AC (sphere 0x1288 on 0x124C).
+inline constexpr Collider kKargarocColliders[] = {
+    {0x730, 0x6F4, 0}, {0x85C, 0x6F4, 0}, {0x988, 0x6F4, 0}, {0xAB4, 0x6F4, 0}, {0xE60, 0xE24, 0xDF4}, {0x1288, 0x124C, 0x11AC}};
+inline bool kargaroc_verify(uint32_t a, uint32_t p) {
+    const unsigned behaviour = p & 0xFF;
+    return (behaviour == 0 || behaviour == 4) && ld8(a + 0x44E) == behaviour && ld8(a + 0x44F) == ((p >> 8) & 0xFF) &&
+           ld8(a + 0x450) == 0xFF && ld8(a + 0x451) == 0xFF && ld8(a + 0x452) == 0 && ld8(a + 0x455) == 0;
+}
+inline bool kargaroc_terminal(uint32_t a) { return ld8(a + 0xDF2) != 0; }
+
 inline constexpr Native kNatives[] = {
     {Kind::Stalfos, "stalfos", {0x7FE0, 0xBE, 0x25B0, kStalfosColliders, std::size(kStalfosColliders)},
      CANONICAL_CODE_ID(0x02495C70).value(), CANONICAL_CODE_ID(0x02493FB0).value(), CANONICAL_CODE_ID(0x02491F34).value(),
@@ -261,6 +282,10 @@ inline constexpr Native kNatives[] = {
      CANONICAL_CODE_ID(0x0204B8E0).value(), CANONICAL_CODE_ID(0x0204938C).value(), CANONICAL_CODE_ID(0x02048B3C).value(),
      CANONICAL_CODE_ID(0x0204B430).value(), [] { return GD(0x10006EA4); }, 0xFF00FF01u, 0, 0xBD8, {0, 0}, true,
      armos_knight_verify, armos_knight_terminal, nullptr, 0x3E0, false},
+    {Kind::Kargaroc, "kargaroc", {kKargarocProfile, 0xB5, 0x13D8, kKargarocColliders, std::size(kKargarocColliders)},
+     CANONICAL_CODE_ID(0x02061DEC).value(), CANONICAL_CODE_ID(0x0205EA58).value(), CANONICAL_CODE_ID(0x0205E420).value(),
+     CANONICAL_CODE_ID(0x02061964).value(), [] { return GD(0x10007C8C); }, 0xFFFFFF00u, 0, 0xDF4, {0x11AC, 0}, true,
+     kargaroc_verify, kargaroc_terminal, nullptr, 0x465, false},
 };
 
 inline const Native* find(Kind k) {

@@ -196,6 +196,14 @@ int main(int argc,char**argv){using namespace story_enemies;const bool drowning_
   bind(am,pid);run(story_enemies_more::find(Kind::ArmosKnight)->create,at);const uint32_t bomb=at+0x1800;std::memset(mem::ptr(bomb),0,0x20);st32(bomb+4,777);st16(bomb+0xE,0x126);held_bomb=bomb;st32(at+0x400,777);st8(at+0x3E1,45);
   run(story_enemies_more::find(Kind::ArmosKnight)->destroy,at);assert(bomb_deletes==1);
   st16(bomb+0xE,0x125);make(Kind::ArmosKnight);st8(at+0x3DC,1);st8(at+0x3DD,0xFF);st8(at+0x3DF,0xFF);st8(at+0x3E0,3);st8(at+0x3E1,45);st32(at+0x400,777);run(story_enemies_more::find(Kind::ArmosKnight)->destroy,at);assert(bomb_deletes==1);held_bomb=0;
+  // Kargaroc: behaviour 0 (flying) or 4 (perched), own sight range, no path, switch or rider; the dead byte's drop is its defeat
+  at+=0x2000;make(Kind::Kargaroc);st8(at+0x44F,0xFF);st8(at+0x450,0xFF);st8(at+0x451,0xFF);const Token bb=table[Kind::Kargaroc];assert(verify_actor(bb,Kind::Kargaroc,at));
+  for(uint32_t off:{0x44Eu,0x44Fu,0x450u,0x451u,0x452u,0x455u,0xFA5u})expect_field(bb,Kind::Kargaroc,off);
+  st8(at+0x44E,4);assert(story_enemies_more::kargaroc_verify(at,0xFFFFFF04u)&&!story_enemies_more::kargaroc_verify(at,0xFFFFFF00u));
+  st8(at+0x44E,5);assert(!story_enemies_more::kargaroc_verify(at,0xFFFFFF05u));st8(at+0x44E,0);
+  bind(bb,pid);run(story_enemies_more::find(Kind::Kargaroc)->create,at);assert(owns_actor(at));
+  assert(!story_enemies_more::kargaroc_terminal(at));
+  {const unsigned c0=claims;st8(at+0xDF2,1);Cpu probe{};probe.r[3]=at;hooks.at(0x025D99E8)(&probe);assert(claims==c0+1&&is_defeated(bb));}
   // Mothula (ground): type 1, body, no switches; its moths refused while it runs; terminal state 101; a
   // winged one diving far from home turns back
   at+=0x2000;make(Kind::Mothula);st8(at+0x3EA,1);st8(at+0x3EB,0xFF);st8(at+0x3EC,10);const Token gm=table[Kind::Mothula];assert(verify_actor(gm,Kind::Mothula,at));
