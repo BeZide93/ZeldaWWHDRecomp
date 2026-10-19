@@ -17,7 +17,7 @@ bool available(const Owner&);
 // Reserved IDs: 7FFE generic, 7FFD props, 7FFC switch, 7FFB door.
 // World objects: 7FF6; owned grapple target proxies: 7FF5.
 // Planned enemy IDs: 7FFA ChuChu, 7FF9 Bokoblin, 7FF8 Moblin, 7FF7 KeeseKI, 7FF4 Miniblin, 7FF3 Peahat, 7FF2 Rat,
-// 7FF1 Darknut, 7FF0 rat hole; 7FE0..7FEF for later kinds.
+// 7FF1 Darknut, 7FF0 rat hole; 7FE0..7FEF for later kinds: 7FEA Boko Baba.
 // Reserving an ID does not admit an enemy or install its native adapter.
 // Once installed, unregistered reserved profiles fail closed at lookup/base-create.
 bool add(uint16_t id,uint32_t guest_profile,BaseAllocated=nullptr);

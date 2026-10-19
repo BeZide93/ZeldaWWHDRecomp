@@ -33,7 +33,7 @@ The initial allowlist is deliberately small:
 | Breakable prop | `pot`, `barrel`, `crate` | Required mod-owned `broken_flag` and `drops` list |
 | Latched floor switch | `switch` | Required mod-owned `switch_flag`; fixed yellow switch |
 | Rotating gate | `door` | Required `switch` naming a switch actor in the same mod |
-| Native enemies (preview) | `chuchu`, `bokoblin`, `moblin`, `keese`, `miniblin`, `peahat`, `darknut`, `rat_hole` | Required mod-owned `defeated_flag` and `drops`; fixed ordinary variants |
+| Native enemies (preview) | `chuchu`, `bokoblin`, `moblin`, `keese`, `miniblin`, `peahat`, `darknut`, `rat_hole`, `bokobaba` | Required mod-owned `defeated_flag` and `drops`; fixed ordinary variants |
 
 Resident names are exact native object codes in lower case. Each placed copy uses fixed ordinary
 parameters: it stands where you put it (unless you give it a route, below) and has none of the
@@ -450,6 +450,7 @@ The allowlist below defines the supported variants.
 | `peahat` | Ordinary Peahat: it flies; knock it down (the boomerang, the Deku Leaf's wind, the hookshot), then strike. Or the Seahat (below) |
 | `darknut` | Darknut guarding its place with its sword, or a declared variant (below) |
 | `rat_hole` | A rat hole three rats come out of (see [Rat holes](#rat-holes)) |
+| `bokobaba` | Ordinary Boko Baba: a biting plant that stays where it is placed (put it on the ground). Strike its head to stun it, then cut its stem. It bites, but never grabs and chews Link. When it dies its head doesn't fly off and leave a Boko stick |
 
 All of them use the same declaration fields:
 
@@ -464,7 +465,7 @@ All of them use the same declaration fields:
 }
 ```
 
-Use `"actor": "chuchu"`, `"moblin"`, `"keese"`, `"miniblin"`, `"peahat"` or `"darknut"` for the other fixed variants,
+Use `"actor": "chuchu"`, `"moblin"`, `"keese"`, `"miniblin"`, `"peahat"`, `"darknut"` or `"bokobaba"` for the other fixed variants,
 with a distinct actor ID and defeat flag for each copy. Declare reward items in
 the same package. `drops` is required and may be empty or contain up to eight
 distinct same-mod items, each with quantity 1–254. Only yaw rotation is accepted;

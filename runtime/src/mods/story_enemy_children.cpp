@@ -47,7 +47,8 @@ bool expected(const Source&s,uint16_t profile,uint32_t params){
  if(s.kind==Kind::Rat)return profile==Bomb;
  if(s.kind==Kind::Darknut)return profile==Sword?params==3:profile==Cape&&params==0&&((story_enemy_variants::angle_x("darknut",ld32(s.actor+0xB0))>>5)&7)>=4;
  return profile==Sword&&params==(s.kind==Kind::Bokoblin?story_enemy_variants::bokoblin_weapon(ld32(s.actor+0xB0)):4u);}
-void queue(Cpu*c){if(!depth||(c->r[3]!=Sword&&!(c->r[3]==Cape&&scopes[depth-1].kind==Kind::Darknut)&&!(c->r[3]==Bomb&&scopes[depth-1].kind==Kind::Rat))){original(c,Queue);return;}const auto s=scopes[depth-1];const uint16_t profile=uint16_t(c->r[3]);const uint32_t params=c->r[4];if(!parent(s)||!expected(s,profile,params)){c->r[3]=0xFFFFFFFFu;return;}
+std::function<bool(uint32_t,uint32_t)> create_filter;
+void queue(Cpu*c){if(create_filter&&create_filter(c->r[3],c->r[4])){c->r[3]=0xFFFFFFFFu;return;}if(!depth||(c->r[3]!=Sword&&!(c->r[3]==Cape&&scopes[depth-1].kind==Kind::Darknut)&&!(c->r[3]==Bomb&&scopes[depth-1].kind==Kind::Rat))){original(c,Queue);return;}const auto s=scopes[depth-1];const uint16_t profile=uint16_t(c->r[3]);const uint32_t params=c->r[4];if(!parent(s)||!expected(s,profile,params)){c->r[3]=0xFFFFFFFFu;return;}
  const uint32_t ticket=own::reserve_child_pending(s.token,s.actor,s.pid,profile,params,s.epoch);if(!ticket){c->r[3]=0xFFFFFFFFu;return;}
  try{original(c,Queue);}catch(...){own::cancel_child_pending(ticket);throw;}
  const uint32_t pid=c->r[3];if(!pid||pid==0xFFFFFFFFu){own::cancel_child_pending(ticket);return;}
@@ -104,4 +105,5 @@ bool configure(void(*o)(Cpu*,uint32_t),uint32_t(*call)(Cpu*,uint32_t,std::initia
 bool available(const std::function<std::string(uint32_t)>&owner){if(!original||!invoke||!native_actor_carry::available(owner))return false;if(installed)return true;for(uint32_t f:{Queue,Create,Execute,Delete,Wait,BkSearch,MoSearch,BkCandidate,MoCandidate,TnSearch,TnCandidate,CapeCreate,CapeExecute,BombCreate,BombDelete})if(!owner(f).empty())return false;return true;}
 bool install(const std::function<std::string(uint32_t)>&owner,const std::function<void(uint32_t,void(*)(Cpu*))>&replace){if(installed)return true;if(!available(owner))return false;const std::pair<uint32_t,void(*)(Cpu*)> hooks[]={{Queue,queue},{Create,create},{Execute,execute},{Delete,destroy},{Wait,wait},{BkSearch,bk_search},{MoSearch,mo_search},{BkCandidate,bk_candidate},{MoCandidate,mo_candidate},{TnSearch,tn_search},{TnCandidate,tn_candidate},{CapeCreate,cape_create},{CapeExecute,cape_execute},{BombCreate,bomb_create},{BombDelete,bomb_destroy}};if(!native_actor_carry::install(owner,replace))return false;for(const auto&h:hooks)replace(h.first,h.second);installed=true;return true;}
 void state_loaded(){depth=0;search={};}
+void set_create_filter(std::function<bool(uint32_t,uint32_t)> deny){create_filter=std::move(deny);}
 }

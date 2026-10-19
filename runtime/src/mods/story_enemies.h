@@ -20,10 +20,11 @@ struct Spec {Kind kind;std::string mod,id,defeated_flag;std::vector<story_items:
 // its variant 0xFFFF0101 (type 1). Rat hole 0xFF010100: no player range, one rat, bomb mode 1 (so the hole
 // never creates the rat shop keeper NpcNz), no path: the port spawns its rats (story_actors).
 // Peahat 0xFFFFFF00: type 0 (Peahat, never the Seahat and its kill-counter register), default ranges.
+// Boko Baba 0xFFFFFF00: kind 0 (head and stem), variant 0 (never a Baba Bud); no switch, path or range fields.
 // Miniblin 0xFFFF0A01: behaviour 1 (never respawns), notice range 10 (1000 units), no spawn switches
 // Darknut 0xFFFF9604: behaviour 4 (guards its place), sight 150, no path, no spawn switch; its variants
 // (story_enemy_variants.h) add a shield, a helmet or a cape through the x rotation word (home_x)
-constexpr uint32_t parameters(Kind k){return k==Kind::ChuChu?0xFF000000u:k==Kind::Bokoblin?0xFFFFFF04u:(k==Kind::Keese||k==Kind::Moblin)?0xFFFF0000u:k==Kind::Miniblin?0xFFFF0A01u:k==Kind::Peahat?0xFFFFFF00u:k==Kind::Rat?0xFFFF0001u:k==Kind::Darknut?0xFFFF9604u:k==Kind::RatHole?0xFF010100u:0u;}
+constexpr uint32_t parameters(Kind k){return k==Kind::ChuChu?0xFF000000u:k==Kind::Bokoblin?0xFFFFFF04u:(k==Kind::Keese||k==Kind::Moblin)?0xFFFF0000u:k==Kind::Miniblin?0xFFFF0A01u:k==Kind::Peahat?0xFFFFFF00u:k==Kind::Rat?0xFFFF0001u:k==Kind::Darknut?0xFFFF9604u:k==Kind::RatHole?0xFF010100u:k==Kind::BokoBaba?0xFFFFFF00u:0u;}
 // the manifest's actor name of a kind ("chuchu", ...)
 const char* kind_name(Kind);
 // the parameters of a kind's variant ("" the default); 0 for a variant the kind doesn't declare
@@ -61,6 +62,9 @@ void state_loaded();
 bool verify_actor(Token,Kind,uint32_t actor);
 // Compose with the shared player lift dispatcher; no competing player hook.
 bool owns_actor(uint32_t actor);
+// fopAcM_create filter (story_enemy_children::set_create_filter): an owned Boko Baba creates no actors (its flying
+// head, which drops a Boko stick, the stem left by a light arrow, a Baba Bud); every other create passes.
+bool deny_create(uint32_t profile,uint32_t parameters);
 bool deny_carry(uint32_t actor);
 void configure(void(*original)(Cpu*,uint32_t),uint32_t(*call)(Cpu*,uint32_t,std::initializer_list<uint32_t>),const std::array<uint32_t,story_enemy_ownership::kKindCount>& profile_storage,std::function<void(Token,uint32_t)> retired={});
 bool install(const std::function<std::string(uint32_t)>& owner,const std::function<void(uint32_t,void(*)(Cpu*))>& replace);
