@@ -170,7 +170,11 @@ execute_process(COMMAND ${CMAKE_COMMAND} -DDIR=${CMAKE_SOURCE_DIR}/runtime/asset
 if(NOT WWHD_GAME_OBJECT_RECIPES_RESULT EQUAL 0)
   message(FATAL_ERROR "game object recipes: ${WWHD_GAME_OBJECT_RECIPES_RESULT}")
 endif()
-include_directories(${CMAKE_BINARY_DIR}/generated)
+# Only targets created from here on get the generated headers: the game code (gamecode, above) must keep
+# exactly runtime/include and the generated game code as its include paths, because code mods compile
+# against its flags on the player's machine (tools/release/package.py refuses anything else).
+# include_directories() would also add it to the targets created before this line.
+set_property(DIRECTORY APPEND PROPERTY INCLUDE_DIRECTORIES ${CMAKE_BINARY_DIR}/generated)
 # Windows: VERSIONINFO + application manifest (wwhd_windows_resources); release builds strip the shipped
 # programs' debug information (WWHD_STRIP_RELEASE: -s for GNU-style linkers in Release/MinSizeRel)
 include(cmake/WindowsResources.cmake)
@@ -1570,6 +1574,7 @@ target_compile_options(story_treasure_chest_test PRIVATE -UNDEBUG)
 add_test(NAME story_treasure_chest COMMAND story_treasure_chest_test)
 if(Python3_Interpreter_FOUND)
   add_test(NAME release_sdk_package COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/release/test_sdk_package.py")
+  add_test(NAME release_gamecode_flags COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/release/test_gamecode_flags.py" "${CMAKE_BINARY_DIR}")
   add_test(NAME shoreline_actor_model COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/story_mods/test_shoreline_model.py")
   add_test(NAME static_actor_model COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/story_mods/test_actor_model.py")
   add_test(NAME skinned_actor_model COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/story_mods/test_skinned_actor_model.py")
