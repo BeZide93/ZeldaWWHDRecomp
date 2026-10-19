@@ -7,6 +7,15 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Mod SDK v3 and the editor: island grounds** (for mod makers). Six islands without their buildings can be placed as
+  ground for a mod's own island: Crescent Moon, Triangle, Five-Star, Star, Bomb and a fairy island, in the editor's new
+  **Islands** list. Each is made from your own game files the first time a mod uses it, has its own collision, shows on
+  the horizon from the neighbouring squares, and the ship stops at its shore. Holes drop Link back to the room's start.
+- **Mod collision: water to swim in, shallow water, waterfalls, ice and void surfaces**, and a water material for ponds
+  (`"material": "water"`). A pond placed above the room's height range is not found as water; the docs explain this.
+- **Fixed: mod collision marked as metal hurt Link** (it was read as a damage surface, e.g. on the buoy example). Full
+  save states made before this update keep their objects; their old collision is used until the room is next loaded.
+
 - **Mod SDK v3 and the editor: island parts** (for mod makers). Smaller pieces of other islands can be placed like the
   island buildings: Dragon Roost's shrine, torii, walkways, rope posts and sea rocks, Windfall's windmill cap, and two
   Forsaken Fortress shipwrecks. They are made from your own game files the first time a mod uses them, have their own
