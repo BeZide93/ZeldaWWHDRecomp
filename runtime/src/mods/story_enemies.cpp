@@ -97,8 +97,14 @@ struct SaveWatch{const Entry*e;uint32_t base=0;std::vector<uint8_t> before;stati
 // a refused create fails like a retail one (constructed first); a base-only actor skips its own delete
 void refuse_or_skip(Cpu*c,uint32_t a,bool create){if(create)native_actor_refusal::refuse(c,a,invoke);else c->r[3]=1;}
 void native_delete(Cpu*c,uint32_t fn){if(native_actor_refusal::base_only(c->r[3])){c->r[3]=1;return;}original(c,fn);}
+// An Armos Knight removed while it swallows Link's bomb (modes 44..46): the game sets the bomb off only in
+// its own death (mode 47), so the held bomb (no-hit, invisible, in its carry state) is deleted with it.
+// The PID key is the Knight's own field (fpcSch_JudgeByID takes the id by address); bombs only.
+void release_bomb(Cpu*c,const Entry&e,uint32_t a){if(e.spec.kind!=Kind::ArmosKnight||!invoke)return;const uint32_t pid=more::armos_knight_held_bomb(a);if(!pid)return;
+ Cpu probe=*c;const uint32_t bomb=invoke(&probe,GC(0x025D5218),{GC(0x025E1234),a+0x400});
+ if(!memory(bomb,0x10)||ld32(bomb+4)!=pid||(ld16(bomb+0xE)!=0x126&&ld16(bomb+0xE)!=0x127))return;probe=*c;invoke(&probe,GC(0x025D57E0),{bomb});trace(e,a,"held-bomb-deleted",pid);}
 // what an owned enemy holds goes with it when it is deleted
-void release_held(Cpu*c,const Entry&e,uint32_t a){}
+void release_held(Cpu*c,const Entry&e,uint32_t a){release_bomb(c,e,a);}
 void lifecycle(Cpu*c,uint32_t fn,bool create,bool draw,bool destroy){const uint32_t a=c->r[3];
  // daTn_Create runs daTn_Execute itself (three steps that place the armour pieces): inside its own create
  // the native code runs as it is, under the create's scopes

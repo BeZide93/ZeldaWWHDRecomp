@@ -83,6 +83,26 @@ inline bool armos_verify(uint32_t a, uint32_t p) {
 // DEAD3 (ITAI mode 25) after its health ran out: the one createDisappear of daAM2_Execute
 inline bool armos_terminal(uint32_t a) { return ld8(a + 0x3E8) == 2 && ld8(a + 0x3E9) == 25 && s8(a + 0x3A1) <= 0; }
 
+// ---------------------------------------------------------------- Armos Knight (d_a_am)
+// Parameter 0xFF00FF01: type 1 (it hops back to where it was placed beyond its radius), radius 400,
+// active, no switch (0xFF; read only, never written). Only a bomb in its open mouth defeats it (or a
+// Light Arrow): it holds Link's bomb by PID (0x400) while it swallows it and sets it off as it dies.
+// Removed while it swallows (modes 44..46), the held bomb is deleted with it (story_enemies). Its spikes
+// hit every group natively; the ownership pair policy limits them to Link. A fall far below its spawn
+// point runs the death without a bomb: no defeat. No fire helper (never set by the game).
+inline constexpr Collider kArmosKnightColliders[] = {
+    {0x720, 0x6E4, 0}, {0x84C, 0x6E4, 0}, {0x978, 0x6E4, 0}, {0xAA8, 0x6E4, 0}, {0xC44, 0xC08, 0xBD8}};
+inline bool armos_knight_verify(uint32_t a, uint32_t p) {
+    return ld8(a + 0x3DC) == (p & 0xFF) && ld8(a + 0x3DD) == ((p >> 8) & 0xFF) && ld8(a + 0x3DE) == 0 && ld8(a + 0x3DF) == 0xFF &&
+           ld8(a + 0x3E0) <= 3;
+}
+inline bool armos_knight_terminal(uint32_t a) { return ld8(a + 0x3E0) == 3 && ld8(a + 0x3E1) == 47 && ld32(a + 0x400) != 0xFFFFFFFFu; }
+// the swallowed bomb's PID while its native death has not set it off yet (0: none)
+inline uint32_t armos_knight_held_bomb(uint32_t a) {
+    const unsigned mode = ld8(a + 0x3E1);
+    return ld8(a + 0x3E0) == 3 && mode >= 44 && mode <= 46 && ld32(a + 0x400) != 0xFFFFFFFFu ? ld32(a + 0x400) : 0;
+}
+
 inline constexpr Native kNatives[] = {
     {Kind::Magtail, "magtail", {0x7FE4, 0xD8, 0x1DD8, kMagtailColliders, std::size(kMagtailColliders)},
      CANONICAL_CODE_ID(0x021DCE84).value(), CANONICAL_CODE_ID(0x021D87A0).value(), CANONICAL_CODE_ID(0x021D7FFC).value(),
@@ -92,6 +112,10 @@ inline constexpr Native kNatives[] = {
      CANONICAL_CODE_ID(0x0204FE84).value(), CANONICAL_CODE_ID(0x0204D3A4).value(), CANONICAL_CODE_ID(0x0204C5F8).value(),
      CANONICAL_CODE_ID(0x0204F9D0).value(), [] { return GD(0x1000702C); }, 0xFF00FF00u, 0, 0xBA8, {0, 0}, true,
      armos_verify, armos_terminal, nullptr, 0x3E8, false},
+    {Kind::ArmosKnight, "armos_knight", {0x7FE7, 0xCA, 0x11BC, kArmosKnightColliders, std::size(kArmosKnightColliders)},
+     CANONICAL_CODE_ID(0x0204B8E0).value(), CANONICAL_CODE_ID(0x0204938C).value(), CANONICAL_CODE_ID(0x02048B3C).value(),
+     CANONICAL_CODE_ID(0x0204B430).value(), [] { return GD(0x10006EA4); }, 0xFF00FF01u, 0, 0xBD8, {0, 0}, true,
+     armos_knight_verify, armos_knight_terminal, nullptr, 0x3E0, false},
 };
 
 inline const Native* find(Kind k) {

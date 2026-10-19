@@ -33,7 +33,7 @@ The initial allowlist is deliberately small:
 | Breakable prop | `pot`, `barrel`, `crate` | Required mod-owned `broken_flag` and `drops` list |
 | Latched floor switch | `switch` | Required mod-owned `switch_flag`; fixed yellow switch |
 | Rotating gate | `door` | Required `switch` naming a switch actor in the same mod |
-| Native enemies (preview) | `chuchu`, `bokoblin`, `moblin`, `keese`, `miniblin`, `peahat`, `darknut`, `rat_hole`, `bokobaba`, `bubble`, `octorok`, `magtail`, `armos` | Required mod-owned `defeated_flag` and `drops`; fixed ordinary variants |
+| Native enemies (preview) | `chuchu`, `bokoblin`, `moblin`, `keese`, `miniblin`, `peahat`, `darknut`, `rat_hole`, `bokobaba`, `bubble`, `octorok`, `magtail`, `armos`, `armos_knight` | Required mod-owned `defeated_flag` and `drops`; fixed ordinary variants |
 
 Resident names are exact native object codes in lower case. Each placed copy uses fixed ordinary
 parameters: it stands where you put it (unless you give it a route, below) and has none of the
@@ -455,6 +455,7 @@ The allowlist below defines the supported variants.
 | `octorok` | The small Octorok: it rises out of water and spits rocks at Link. Reflect a rock with the shield, or use arrows or the boomerang. Never the big Octorok that fires bombs |
 | `magtail` | Ordinary Magtail: strike its head to curl it into a ball, then strike the ball (or lift and throw it) |
 | `armos` | Armos statue: it wakes when Link comes near; strike its back |
+| `armos_knight` | Armos Knight: only a bomb in its open mouth (or a Light Arrow) defeats it |
 
 All of them use the same declaration fields:
 
@@ -566,6 +567,8 @@ reach outside the mod:
   mod's own enemies, not the world's objects.
 - **Armos:** Link cannot carry a stunned Armos (carried away from its room it would vanish without a
   defeat). In water it returns to where it was placed.
+- **Armos Knight:** it needs Link to have bombs (or Light Arrows). If it is removed while it holds a
+  swallowed bomb, the bomb goes with it. Its spikes only hurt Link and the mod's own enemies.
 
 None of them reads or writes the game's switches, and none sets the game's own enemy records; a
 fall out of the world (into deep water, or off the island) removes the copy without a defeat, and

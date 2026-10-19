@@ -143,6 +143,7 @@ const std::vector<ActorType>& actor_types() {
         {"rat_hole", "Rat hole", "Enemies", "A rat hole three rats come out of, one after the other (rats, bomb rats or both: options.variant); each defeated rat drops the hole's drops, and the hole closes when all three are defeated.", false, false, false},
         {"magtail", "Magtail", "Enemies", "The game's Magtail: strike its head to curl it into a ball, then strike the ball (or lift and throw it).", false, false, false},
         {"armos", "Armos", "Enemies", "The game's Armos statue: it wakes when Link comes near; strike its back.", false, false, false},
+        {"armos_knight", "Armos Knight", "Enemies", "The game's Armos Knight: only a bomb in its open mouth (or a Light Arrow) defeats it.", false, false, false},
         {"model", "Your model", "Your models", "One of the mod's models (static or skinned), with collision.", true, false, true},
         {"model_enemy", "Your enemy", "Your models", "A skinned model that fights (needs flinch, stun, death and idle clips).", true, true, false},
         {"model_carry", "Carried prop", "Your models", "A model Link can lift and carry.", true, false, false},
