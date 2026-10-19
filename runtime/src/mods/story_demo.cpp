@@ -57,6 +57,7 @@ enum : uint32_t {
     MessageNumbers = 0x068, // 2 x the message each demo message code shows (resolved when the demo starts)
     DemoFlagSet = 0x070,    // the port turned the game's demo message flag on
     MessageShown = 0x074,   // index + 1 of the message whose point the demo waits at
+    MessageClosing = 0x078, // release asked an open demo message to close; tick() finishes it
     Image = 0xC80,          // event image (<= 0x300)
     Stb = 0xF80,            // STB (<= 0xC000)
 };
@@ -201,7 +202,14 @@ std::function<int32_t(const demo_scene::Resource&)> resolver(Cpu* c) {
     return [c](const demo_scene::Resource& r) -> int32_t {
         if (r.archive != "@Link") return resource_id(r);
         for (const char* a : demo_scene::kLinkClipArchives)
-            if (!c || archive_loaded(c, a)) { const int32_t id = resource_id({a, r.file}); if (id >= 0) return id; }
+            if (!c || archive_loaded(c, a)) {
+                const int32_t id = resource_id({a, r.file});
+                if (id >= 0) {
+                    static std::string logged;
+                    if (c && logged != r.file + a) { logged = r.file + a; LOG("[demo] Link clip %s is id 0x%X in %s", r.file.c_str(), unsigned(id), a); }
+                    return id;
+                }
+            }
         return -1;
     };
 }
@@ -481,7 +489,10 @@ Poll poll(Cpu* c) {
             while (g_clip_cursor[i] < clips.size() && clips[g_clip_cursor[i]].frame <= frame) {
                 mod_actor::Identity id;
                 const auto& clip = clips[g_clip_cursor[i]++];
-                if (mod_actor::identify(c, character(uint32_t(i)), id)) mod_actor::scene_animation(c, id, ld32(g_arena + Lease), clip.clip, 6, clip.loop);
+                if (mod_actor::identify(c, character(uint32_t(i)), id)) {
+                    const bool ok = mod_actor::scene_animation(c, id, ld32(g_arena + Lease), clip.clip, 6, clip.loop);
+                    LOG("[demo] %s plays its clip %s at demo frame %u%s", g_character_refs[i].character.c_str(), clip.clip.c_str(), frame, ok ? "" : " (refused)");
+                }
             }
         }
     }
@@ -576,7 +587,11 @@ void end_poses(Cpu* c) {
         story_notebook::WorldPoint r{int16_t(ld16(actor + 0x328)) * 180.f / 32768.f, int16_t(ld16(actor + 0x32A)) * 180.f / 32768.f, int16_t(ld16(actor + 0x32C)) * 180.f / 32768.f};
         if (!d.rotation.keys.empty()) { const auto& v = d.rotation.keys.back().value; r = {v.x, std::remainder(v.y + angle, 360.f), v.z}; }
         mod_actor::Identity id;
-        if (is_character && mod_actor::identify(c, actor, id)) { mod_actor::scene_pose(c, id, ld32(g_arena + Lease), p, r); continue; }
+        if (is_character && mod_actor::identify(c, actor, id)) {
+            const bool ok = mod_actor::scene_pose(c, id, ld32(g_arena + Lease), p, r);
+            LOG("[demo] skip: %s (mod actor) takes its end pose %.0f,%.0f,%.0f angle %.0f%s", d.id.c_str(), p.x, p.y, p.z, r.y, ok ? "" : " (refused)");
+            continue;
+        }
         for (uint32_t off : {0x314u, 0x300u}) { st32(actor + off, f32_as_u32(p.x)); st32(actor + off + 4, f32_as_u32(p.y)); st32(actor + off + 8, f32_as_u32(p.z)); }
         const uint16_t rx = uint16_t(int32_t(r.x * 32768.f / 180.f)), ry = uint16_t(int32_t(r.y * 32768.f / 180.f)), rz = uint16_t(int32_t(r.z * 32768.f / 180.f));
         for (uint32_t off : {0x320u, 0x328u}) { st16(actor + off, rx); st16(actor + off + 2, ry); st16(actor + off + 4, rz); }
@@ -609,7 +624,14 @@ void release(Cpu* c, const char* reason) {
     st32(g_arena + CharacterCount, 0);
     g_character_refs.clear();
     remove_spawned(c);
-    if (ld32(g_arena + DemoFlagSet) && ld8(kDemoMessageFlag)) call(c, kDemoMessageOff, {});
+    // a demo message still open (skip or abort at a message point): asked to finish now; tick()
+    // completes the window's own close (FINISH 16 -> CLOSED 18 -> DELETE 19) while the demo drains
+    st32(g_arena + MessageClosing, 0);
+    if (ld32(g_arena + MessageCount)) {
+        const uint32_t manager = ld32(GD(0x101F4B5C)), status = call(c, GC(0x025F795C), {});
+        if (manager && status != 0 && status < 16) { call(c, GC(0x025F74D0), {manager, 16}); st32(g_arena + MessageClosing, 1); LOG("[demo] open demo message asked to close (message status %u)", status); }
+    }
+    if (ld32(g_arena + DemoFlagSet) && ld8(kDemoMessageFlag)) { call(c, kDemoMessageOff, {}); LOG("[demo] demo message flag off (was on at release; now %u)", ld8(kDemoMessageFlag)); }
     st32(g_arena + DemoFlagSet, 0);
     LOG("[demo] released (%s)%s", reason, ours ? ": demo data removed" : "");
     // the demo's model actors delete themselves on their next execute; the archives they draw from
@@ -625,6 +647,13 @@ void tick(Cpu* c) {
     if (!recorded() || ld32(g_arena + Phase) != kDraining) return;
     const uint32_t ticks = ld32(g_arena + Ticks) + 1;
     st32(g_arena + Ticks, ticks);
+    if (ld32(g_arena + MessageClosing)) {
+        const uint32_t manager = ld32(GD(0x101F4B5C)), status = call(c, GC(0x025F795C), {});
+        if (status == 18) { call(c, GC(0x025F74D0), {manager, 19}); st32(g_arena + MessageClosing, 0); LOG("[demo] open demo message closed"); }
+        else if (status == 0 || status == 19) st32(g_arena + MessageClosing, 0);
+        else if (ticks > 60) { call(c, GC(0x025F78C4), {manager}); st32(g_arena + MessageClosing, 0); LOG("[demo] open demo message: core reset (status %u)", status); }
+        else return;
+    }
     if (ticks < 10) return;
     drop_archives(c);
     st32(g_arena + Marker, 0);
