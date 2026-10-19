@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "../editor/demo_tracks.h"
 #include "../editor/editor_game.h"
 #include "../editor/mcp_game.h"
 #include "../editor/scenes.h"
@@ -507,8 +508,79 @@ bool scene_overlay(ImDrawList* dl, const View& v, const Value& m, bool& handle_b
             }
         }
     }
+    // the selected demo step: each actor's position curve with its keys, the actors and the camera at the
+    // cursor's frame (as the game would place them), and the selected key's handle
+    double demo_frame = -1;
+    std::string demo_lane;
+    int demo_key = -1;
+    const Value* demo = step >= 1 && step <= int(steps.size()) && steps[size_t(step - 1)].get("type").string() == "demo" ? &steps[size_t(step - 1)] : nullptr;
+    if (demo && !editor_ui::demo_picture(demo_frame, demo_lane, demo_key)) demo = nullptr;
+    const Value& link_state = editor_ui::snapshot().state.get("link");
+    const editor::WorldPoint link_at{num(link_state.get("position"), "x"), num(link_state.get("position"), "y"), num(link_state.get("position"), "z")};
+    if (demo) {
+        const double frames = demo->get("frames").number;
+        std::string why;
+        Value pose;
+        auto pose_at = [&](double f, Value& out) { return editor::demo_pose(*demo, f, link_at, num(link_state, "angle"), out, why); };
+        // the curves: actors' positions (green, the selected lane yellow) and the camera's eye (blue)
+        for (const auto& a : demo->get("actors").array) {
+            if (a.get("position").get("keys").array.empty()) continue;
+            const std::string id = a.get("id").string();
+            const bool sel_lane = demo_lane == id + ".position";
+            const ImU32 c = sel_lane ? IM_COL32(255, 220, 90, 230) : IM_COL32(140, 230, 150, 200);
+            float prev[3] = {};
+            for (double f = 0; f <= frames + 0.5; f += std::max(1.0, frames / 120)) {
+                Value p;
+                float cur[3];
+                if (!pose_at(f, p)) break;
+                for (const auto& x : p.get("actors").array)
+                    if (x.get("id").string() == id && point3(x.get("position"), cur)) {
+                        if (f > 0) line3(dl, v, prev, cur, c, 2.5f);
+                        std::memcpy(prev, cur, sizeof prev);
+                    }
+            }
+            for (const auto& k : a.get("position").get("keys").array) {
+                const editor::WorldPoint w = editor::demo_world(*demo, {num(k.get("value"), "x"), num(k.get("value"), "y"), num(k.get("value"), "z")}, link_at);
+                const float kp[3] = {w.x, w.y, w.z};
+                ImVec2 pp;
+                if (!project(v, kp, pp)) continue;
+                const bool me = sel_lane && int(k.get("frame").number) == demo_key;
+                dl->AddCircleFilled(pp, me ? 7.0f : 5.0f, me ? IM_COL32(255, 230, 120, 255) : c);
+                char label[48];
+                std::snprintf(label, sizeof label, "%s %d", id.c_str(), int(k.get("frame").number));
+                dl->AddText(ImVec2(pp.x + 8, pp.y - 8), c, label);
+            }
+        }
+        if (demo->get("camera").get("eye").get("keys").array.size() > 1) {
+            float prev[3] = {};
+            for (double f = 0; f <= frames + 0.5; f += std::max(1.0, frames / 120)) {
+                Value p;
+                float cur[3];
+                if (!pose_at(f, p) || !point3(p.get("camera").get("eye"), cur)) break;
+                if (f > 0) line3(dl, v, prev, cur, IM_COL32(110, 175, 245, 200), 2);
+                std::memcpy(prev, cur, sizeof prev);
+            }
+        }
+        // the pose at the cursor: each actor as a marker with its id, the demo camera in orange
+        if (pose_at(demo_frame >= 0 ? demo_frame : 0, pose)) {
+            for (const auto& x : pose.get("actors").array) {
+                float p[3];
+                ImVec2 pp;
+                if (!point3(x.get("position"), p) || !project(v, p, pp)) continue;
+                dl->AddCircle(pp, 11, IM_COL32(255, 140, 90, 255), 16, 3);
+                dl->AddCircleFilled(pp, 4, IM_COL32(255, 140, 90, 255));
+                dl->AddText(ImVec2(pp.x + 13, pp.y + 6), IM_COL32(255, 160, 110, 255), x.get("id").string().c_str());
+            }
+            float e[3], g[3];
+            if (point3(pose.get("camera").get("eye"), e) && point3(pose.get("camera").get("target"), g)) {
+                char label[48];
+                std::snprintf(label, sizeof label, "demo %d", int(std::lround(demo_frame >= 0 ? demo_frame : 0)));
+                camera_mark(dl, v, e, g, IM_COL32(255, 120, 80, 255), label);
+            }
+        }
+    }
     // the camera at the timeline's cursor
-    if (scrub >= 0) {
+    if (scrub >= 0 && !(demo && demo_frame >= 0)) {
         editor::WorldPoint eye, target;
         size_t at = 0;
         std::string why;
@@ -517,6 +589,47 @@ bool scene_overlay(ImDrawList* dl, const View& v, const Value& m, bool& handle_b
             char label[48];
             std::snprintf(label, sizeof label, "%.2fs", scrub / 60);
             camera_mark(dl, v, e, g, IM_COL32(255, 120, 80, 255), label);
+        }
+    }
+    // the selected demo key's handle (a position or camera eye/target key): letting go is set_demo_key
+    if (demo && demo_key >= 0 && (demo_lane == "camera.eye" || demo_lane == "camera.target" || demo_lane.find(".position") != std::string::npos)) {
+        const std::string owner = demo_lane.substr(0, demo_lane.rfind('.')), what = demo_lane.substr(demo_lane.rfind('.') + 1);
+        const Value* track = nullptr;
+        if (owner == "camera") track = &demo->get("camera").get(what);
+        for (const auto& a : demo->get("actors").array)
+            if (a.get("id").string() == owner) track = &a.get(what);
+        const Value* key = nullptr;
+        if (track)
+            for (const auto& k : track->get("keys").array)
+                if (int(k.get("frame").number) == demo_key) key = &k;
+        if (key && key->get("value").type == Value::Object) {
+            const editor::WorldPoint w = editor::demo_world(*demo, {num(key->get("value"), "x"), num(key->get("value"), "y"), num(key->get("value"), "z")}, link_at);
+            float model[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, w.x, w.y, w.z, 1};
+            if (S.point_dragging) std::memcpy(model, S.point_drag, sizeof model);
+            float view[16], proj[16];
+            gl_view(v, view);
+            gl_projection(v, proj);
+            ImGuizmo::SetDrawlist(dl);
+            ImGuizmo::SetOrthographic(false);
+            ImGuizmo::SetRect(v.pos.x, v.pos.y, v.size.x, v.size.y);
+            float snap_values[3] = {kGrid[S.grid], kGrid[S.grid], kGrid[S.grid]};
+            ImGuizmo::Manipulate(view, proj, ImGuizmo::TRANSLATE, ImGuizmo::WORLD, model, nullptr, S.grid > 0 ? snap_values : nullptr);
+            handle_busy = ImGuizmo::IsOver() || ImGuizmo::IsUsing();
+            if (ImGuizmo::IsUsing()) {
+                S.point_dragging = true;
+                std::memcpy(S.point_drag, model, sizeof model);
+            } else if (S.point_dragging) {
+                S.point_dragging = false;
+                const editor::WorldPoint l = editor::demo_local(*demo, {S.point_drag[12], S.point_drag[13], S.point_drag[14]}, link_at);
+                Value prm;
+                prm["scene"] = scene;
+                prm["step"] = step;
+                prm["lane"] = demo_lane;
+                prm["frame"] = demo_key;
+                prm["value"] = point_of(std::round(l.x * 10) / 10, std::round(l.y * 10) / 10, std::round(l.z * 10) / 10);
+                editor_ui::command("set_demo_key", prm);
+            }
+            return true;
         }
     }
     // the selected walk point's handle

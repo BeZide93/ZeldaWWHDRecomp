@@ -430,7 +430,7 @@ Without `--editor` none of this runs.
 - **The steps** of the scene, in order. Steps that only one answer of a choice reaches are indented and
   say which choice and answer lead there. **Add step** adds one after the selected step (before the end):
   camera, camera path, a camera that follows an actor, say, choice, move, face, walk, animation, wait,
-  fade, sound, music, particle or end. New steps come with values that fit: a camera takes the fly
+  fade, sound, music, particle, demo or end. New steps come with values that fit: a camera takes the fly
   camera's view, a say step the first resident, a walk two points by the actor. The arrows move a step,
   **Duplicate** copies it, **Remove** takes it out (not while another step leads to it).
 - **The timeline**: each step as a bar on a time axis (60 frames a second), the way the scene plays when
@@ -451,6 +451,32 @@ Without `--editor` none of this runs.
   - **walk**: the speed and the points. Select a point to move it with the handle in the picture;
     **Add where the camera looks** and **Add at Link** add points;
   - **Fields (JSON)** shows the step as the package writes it, to change any field.
+
+### Demo steps on the timeline
+
+A **demo** step (Add step, then **demo**) plays keyframe tracks through the game's own cutscene system
+(see "Demo steps" in [the SDK reference](mod-sdk-v3.md)). With a demo step selected, the timeline shows
+its lanes under the step bars, on the demo's own frames (30 a second; the ruler stays in scene time):
+
+- **Camera**: `eye`, `target`, `fovy` and `roll`, each key a diamond.
+- **Each actor**: its `position`, `rotation` and `scale` keys, then a row of its **clips** as blocks
+  (from their frame to the next clip), and for Link his **modes** the same way.
+- **Events**: messages as points with their text, sounds, particles, attach and detach markers, and the
+  time and weather keys.
+
+Click a key to select it; drag it to another frame; **Delete** removes it. **Add key** on a lane adds a key
+at the cursor: for the camera from the fly camera's view, for an actor where the selected key's handle is
+or at Link. The inspector shows the selected key's value, the lane's curve (linear, smooth, bspline,
+step) and the selected event's fields. Every change is one Undo step.
+
+Moving the cursor previews the demo at that frame without starting it: with **Camera follows the cursor**
+on, the fly camera shows the demo camera, and in the picture each actor appears as a marker at its place,
+its position track as a curve with its keys as points. The selected position key has a handle to drag in
+the picture.
+
+What the game would refuse (a key past the end, rain above 1, an actor an attachment needs) is refused
+when you make the change, with the reason in the status line; a step that is wrong already (for example
+after editing its JSON) shows the reason in red above its lanes.
 
 **Camera key** (at the top) is the quickest way to film a scene: fly to a view, press it, fly on, press it
 again. The first press adds a camera step; with that step selected, each further press adds a key to its
@@ -712,6 +738,17 @@ separated by `;`, or `@file` with one such line per row. Results go to the log.
 | `retime_scene_step` | `scene`, `step`, `frames`, `key`?, `mod`? | a step's duration, a path key's time to the next, or a whole path (scaled) |
 | `scene_timeline` | `scene`, `mod`? | each step's start and duration on the default path, the branches, the camera keys |
 | `scrub_scene` | `scene`, `time`, `move`?, `mod`? | the scene's camera at a time; the fly camera shows it |
+| `demo_lanes` | `scene`, `step`, `mod`? | a demo step's lanes and their key frames, its events, its actors, and why the game would refuse it (`problem`) |
+| `demo_pose` | `scene`, `step`, `frame`, `move`?, `mod`? | the demo at a frame (30 a second) without playing it: the camera and each actor's position, rotation and scale in the world; the fly camera shows the demo camera |
+| `set_demo_key` | `scene`, `step`, `lane`, `frame`, `value`? or `from`? (`camera`, `link`), `curve`?, `mod`? | a key of a lane (`camera.eye`, `camera.target`, `camera.fovy`, `camera.roll`, `<actor>.position`, `<actor>.rotation`, `<actor>.scale`); added when none is at that frame |
+| `move_demo_key` | `scene`, `step`, `lane`, `frame`, `to`, `mod`? | move a key to another frame |
+| `remove_demo_key` | `scene`, `step`, `lane`, `frame`, `mod`? | remove a key (the lane goes with its last key) |
+| `set_demo_curve` | `scene`, `step`, `lane`, `curve`, `mod`? | a lane's curve: `linear`, `smooth`, `bspline` or `step` |
+| `add_demo_event` | `scene`, `step`, `list`, `actor`?, `event`, `mod`? | an event in frame order: `clips`, `modes`, `data` (an actor's), `messages`, `sounds`, `particles`, `attach`, `detach`, `time`, `weather` |
+| `edit_demo_event` | `scene`, `step`, `list`, `actor`?, `index`, `fields`, `mod`? | fields of an event (`null` removes one) |
+| `remove_demo_event` | `scene`, `step`, `list`, `actor`?, `index`, `mod`? | remove an event |
+| `add_demo_actor` | `scene`, `step`, `actor`, `mod`? | an actor of the demo: `{"id", and "actor" (a game actor or Link), "model" {archive, file} or "character" (one of the mod's placed actors)}` |
+| `remove_demo_actor` | `scene`, `step`, `id`, `mod`? | remove an actor (refused while a sound, particle or attachment names it) |
 | `set_scene_choice` | `scene`, `step`, `option`?, `label`?, `next`?, `default`?, `mod`? | a choice's labels, where each option leads, the default answer |
 | `add_walk_point`, `set_walk_point`, `remove_walk_point` | `scene`, `step`, `at`? / `point`, `from`? (`camera`, `link`, `position`), `position`?, `mod`? | the points of a walk |
 | `native_scene` | `scene`, `from_steps`?, `value`?, `mod`? | the scene's native version: made from its steps, set or removed; whether it would play |

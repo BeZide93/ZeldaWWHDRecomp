@@ -77,6 +77,9 @@ bool scenes_focused();                  // the Scenes window has the keyboard (C
 // What the picture shows of the scene editor: the shown scene, its selected step and walk point (1-based,
 // 0 none) and the timeline's cursor (frames, < 0 none). False without a scene.
 bool scene_picture(std::string& scene, int& step, int& point, double& scrub);
+// A demo step's part of it: the demo frame at the cursor (< 0 outside the step) and the selected key
+// (lane and frame; frame < 0 none).
+bool demo_picture(double& frame, std::string& lane, int& key);
 
 // ---- an actor's route (editor_route.cpp) ----
 void route_section(const Value& m, const Value& actor);  // the Inspector's Route section

@@ -2,6 +2,8 @@
 #include "editor_dock.h"
 
 #include <algorithm>
+#include <cstdlib>
+#include <cstring>
 
 #include "imgui_internal.h"
 
@@ -30,7 +32,10 @@ void default_layout(ImGuiID id, ImVec2 size) {
     const ImGuiID top = ImGui::DockBuilderSplitNode(rest, ImGuiDir_Up, std::clamp(bar / std::max(1.0f, size.y), 0.05f, 0.4f), nullptr, &rest);
     const ImGuiID left = ImGui::DockBuilderSplitNode(rest, ImGuiDir_Left, 0.22f, nullptr, &rest);
     const ImGuiID right = ImGui::DockBuilderSplitNode(rest, ImGuiDir_Right, 0.3f, nullptr, &rest);
-    const ImGuiID bottom = ImGui::DockBuilderSplitNode(rest, ImGuiDir_Down, 0.4f, nullptr, &rest);
+    // test aid: WWHD_TEST_EDITOR_WINDOWS=...,tallbottom gives the bottom windows (Scenes, Quests) more room (pictures)
+    const char* test_windows = std::getenv("WWHD_TEST_EDITOR_WINDOWS");
+    const float bottom_share = test_windows && std::strstr(test_windows, "tallbottom") ? 0.75f : 0.4f;
+    const ImGuiID bottom = ImGui::DockBuilderSplitNode(rest, ImGuiDir_Down, bottom_share, nullptr, &rest);
     if (ImGuiDockNode* n = ImGui::DockBuilderGetNode(top)) n->LocalFlags |= ImGuiDockNodeFlags_AutoHideTabBar;
     ImGui::DockBuilderDockWindow("Editor", top);
     ImGui::DockBuilderDockWindow("Outliner", left);

@@ -902,6 +902,56 @@ void new_mod_tools() {
     fs::remove_all(root, ec);  // this test's own folder
 }
 
+// A demo step built through tools/call, as the Scenes timeline does it: the step, an actor, a flight
+// (position keys, a curve), the camera, a message and rain; the lanes and the pose at a frame; what the
+// game refuses comes back as a tool error and changes nothing; undo takes back one key.
+void demo_tools() {
+    FakeBackend be;
+    be.session.add_package("editor-test", "Editor test", "", json(kManifest));
+    Handler h(be, kToken, 47615);
+    bool reply = false;
+    Value r = h.message(json(R"({"jsonrpc":"2.0","id":3,"method":"tools/list"})"), reply);
+    std::set<std::string> names;
+    for (const auto& t : r.get("result").get("tools").array) names.insert(t.get("name").string());
+    for (const char* n : {"demo_lanes", "demo_pose", "set_demo_key", "move_demo_key", "remove_demo_key", "set_demo_curve", "add_demo_event", "edit_demo_event",
+                          "remove_demo_event", "add_demo_actor", "remove_demo_actor"})
+        CHECK(names.count(n) == 1);
+    CHECK(!is_error(call(h, "add_scene", json(R"({"id":"flight"})"))));
+    Value v = call(h, "add_scene_step", json(R"({"scene":"flight","type":"demo","fields":{"frames":90}})"));
+    CHECK(!is_error(v));
+    CHECK(!is_error(call(h, "add_demo_actor", json(R"({"scene":"flight","step":1,"actor":{"id":"bird","actor":"Dk"}})"))));
+    for (const char* key : {R"({"scene":"flight","step":1,"lane":"bird.position","frame":0,"value":{"x":-800,"y":600,"z":900}})",
+                            R"({"scene":"flight","step":1,"lane":"bird.position","frame":45,"value":{"x":0,"y":800,"z":1100}})",
+                            R"({"scene":"flight","step":1,"lane":"bird.position","frame":90,"value":{"x":800,"y":600,"z":900},"curve":"smooth"})",
+                            R"({"scene":"flight","step":1,"lane":"camera.eye","frame":0,"value":{"x":0,"y":300,"z":-600}})",
+                            R"({"scene":"flight","step":1,"lane":"camera.target","frame":0,"value":{"x":0,"y":700,"z":1000}})"}) {
+        v = call(h, "set_demo_key", json(key));
+        if (is_error(v)) std::fprintf(stderr, "  %s\n", text_of(v).c_str());
+        CHECK(!is_error(v));
+    }
+    CHECK(!is_error(call(h, "add_demo_event", json(R"({"scene":"flight","step":1,"list":"messages","event":{"frame":40,"text":"Up there!"}})"))));
+    CHECK(!is_error(call(h, "add_demo_event", json(R"({"scene":"flight","step":1,"list":"weather","event":{"frame":10,"rain":1}})"))));
+    // refused by the game's check: a key past the end, rain above 1; the tool says why
+    v = call(h, "set_demo_key", json(R"({"scene":"flight","step":1,"lane":"bird.position","frame":91,"value":{"x":0,"y":0,"z":0}})"));
+    CHECK(is_error(v) && !text_of(v).empty());
+    v = call(h, "add_demo_event", json(R"({"scene":"flight","step":1,"list":"weather","event":{"frame":20,"rain":3}})"));
+    CHECK(is_error(v) && !text_of(v).empty());
+    // the lanes and the pose
+    v = call(h, "demo_lanes", json(R"({"scene":"flight","step":1})"));
+    const std::string lanes = text_of(v);
+    CHECK(!is_error(v) && lanes.find("\"bird.position\"") != std::string::npos && lanes.find("Up there!") != std::string::npos && lanes.find("problem") == std::string::npos);
+    v = call(h, "demo_pose", json(R"({"scene":"flight","step":1,"frame":45,"move":false})"));
+    CHECK(!is_error(v) && text_of(v).find("\"y\":800") != std::string::npos);
+    // one key edit, one undo step
+    CHECK(!is_error(call(h, "remove_demo_key", json(R"({"scene":"flight","step":1,"lane":"bird.position","frame":45})"))));
+    CHECK(text_of(call(h, "demo_lanes", json(R"({"scene":"flight","step":1})"))).find("\"keys\":[0,90]") != std::string::npos);
+    CHECK(!is_error(call(h, "undo", Value())));
+    CHECK(text_of(call(h, "demo_lanes", json(R"({"scene":"flight","step":1})"))).find("\"keys\":[0,45,90]") != std::string::npos);
+    v = call(h, "check_package", Value());
+    CHECK(!is_error(v) && text_of(v).find("\"valid\":true") != std::string::npos);
+    CHECK(be.asked == 0);
+}
+
 int main() {
     http_parsing();
     checks();
@@ -915,6 +965,7 @@ int main() {
     chest_tools();
     new_mod_tools();
     game_object_tools();
+    demo_tools();
     listener();
     if (g_failures) {
         std::fprintf(stderr, "%d check(s) failed\n", g_failures);

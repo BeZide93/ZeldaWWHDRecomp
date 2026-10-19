@@ -6,6 +6,7 @@
 // Usage: editor_scene_test [docs/mod-editor.md]
 #include "editor/commands.h"
 #include "editor/scenes.h"
+#include "editor/demo_tracks.h"
 #include "mods/story_world_manifest.h"
 
 #include <algorithm>
@@ -543,6 +544,99 @@ void drag_is_one_undo_step() {
     CHECK(!s.drag_preview("scene-test", params(R"([{"id": "nobody"}])"), later, why));
 }
 
+
+// A demo step built and edited key by key: lanes, poses at a frame (the preview), events, actors, curves,
+// the game's own check, and undo / redo.
+void demo_steps() {
+    FakeHost host;
+    editor::Session s(&host);
+    s.add_package("scene-test", "Scene test", "", json(kManifest));
+    CHECK(ok(s.run("add_scene", params(R"({"id": "flight"})"))));
+    // a new demo step: the fly camera's view as its first camera key, 120 frames (240 on the timeline)
+    Value r = s.run("add_scene_step", params(R"({"scene": "flight", "type": "demo"})"));
+    CHECK(ok(r));
+    const size_t n = r.get("result").get("step").number;
+    CHECK(step_at(s, "flight", n).get("type").string() == "demo" && valid(s));
+    const std::string at = std::to_string(n);
+    auto run = [&](const std::string& cmd, const std::string& extra) { return s.run(cmd, params(("{\"scene\": \"flight\", \"step\": " + at + ", " + extra + "}").c_str())); };
+    Value t = s.run("scene_timeline", params(R"({"scene": "flight"})")).get("result");
+    CHECK(t.get("duration").number == 240);
+    // actors: a model from the game's archives, a mod character (the placed uo2), Link
+    CHECK(ok(run("add_demo_actor", R"("actor": {"id": "bird", "actor": "Dk"})")));
+    CHECK(ok(run("add_demo_actor", R"("actor": {"id": "guide", "character": "guide"})")));
+    CHECK(!ok(run("add_demo_actor", R"("actor": {"id": "bird", "model": {"archive": "Dk", "file": "dk.bdl"}})")));  // ids are unique
+    // the bird's flight: three keys, smooth; a key replaced; one moved; the lane's curve
+    CHECK(ok(run("set_demo_key", R"("lane": "bird.position", "frame": 0, "value": {"x": -2500, "y": 1800, "z": 3000})")));
+    CHECK(ok(run("set_demo_key", R"("lane": "bird.position", "frame": 120, "value": {"x": 2500, "y": 900, "z": 3000}, "curve": "smooth")")));
+    CHECK(ok(run("set_demo_key", R"("lane": "bird.position", "frame": 60, "value": {"x": 0, "y": 1500, "z": 3200})")));
+    CHECK(ok(run("set_demo_key", R"("lane": "bird.position", "frame": 60, "value": {"x": 0, "y": 1400, "z": 3200})")));
+    CHECK(ok(run("move_demo_key", R"("lane": "bird.position", "frame": 60, "to": 50)")));
+    CHECK(!ok(run("move_demo_key", R"("lane": "bird.position", "frame": 50, "to": 120)")));  // a key is there
+    CHECK(!ok(run("set_demo_key", R"("lane": "bird.position", "frame": 121, "value": {"x": 0, "y": 0, "z": 0})")));  // past the end
+    CHECK(!ok(run("set_demo_key", R"("lane": "camera.fovy", "frame": 0, "value": {"x": 0, "y": 0, "z": 0})")));  // a number lane
+    CHECK(ok(run("set_demo_key", R"("lane": "camera.fovy", "frame": 0, "value": 55)")));
+    CHECK(ok(run("set_demo_curve", R"("lane": "bird.position", "curve": "bspline")")));
+    CHECK(!ok(run("set_demo_curve", R"("lane": "bird.position", "curve": "wobbly")")));
+    // the camera's target from the fly camera
+    host.target = {100, 1200, -201300};
+    CHECK(ok(run("set_demo_key", R"("lane": "camera.target", "frame": 120, "from": "camera")")));
+    // events: a clip on the bird, a message, rain, the hour, the guide carried by the bird and let go
+    CHECK(ok(run("add_demo_event", R"("list": "clips", "actor": "bird", "event": {"frame": 0, "archive": "Dk", "file": "fly1.bck"})")));
+    CHECK(ok(run("add_demo_event", R"("list": "messages", "event": {"frame": 40, "text": "The Helmaroc King!"})")));
+    CHECK(ok(run("add_demo_event", R"("list": "weather", "event": {"frame": 20, "rain": 1})")));
+    CHECK(ok(run("add_demo_event", R"("list": "time", "event": {"frame": 10, "hour": 22})")));
+    { Value a = run("add_demo_event", R"("list": "attach", "event": {"frame": 60, "actor": "guide", "to": "bird", "joint": "j_dk_ashi_r3"})"); if (!ok(a)) std::fprintf(stderr, "  attach: %s\n", err(a).c_str()); CHECK(ok(a)); }
+    CHECK(ok(run("add_demo_event", R"("list": "detach", "event": {"frame": 100, "actor": "guide"})")));
+    CHECK(!ok(run("add_demo_event", R"("list": "clips", "event": {"frame": 0, "archive": "Dk", "file": "fly1.bck"})")));  // whose clip?
+    CHECK(!ok(run("add_demo_event", R"("list": "weather", "event": {"frame": 30, "rain": 5})")));  // the game's check: rain is 0..1
+    CHECK(ok(run("edit_demo_event", R"("list": "messages", "index": 0, "fields": {"text": "Look up!"})")));
+    CHECK(valid(s));
+    // the lanes as the timeline draws them
+    Value lanes = run("demo_lanes", "\"mod\": \"scene-test\"").get("result");
+    if (lanes.object.contains("problem")) std::fprintf(stderr, "  problem: %s\n", lanes.get("problem").string().c_str());
+    CHECK(lanes.get("frames").number == 120 && !lanes.object.contains("problem"));
+    bool bird = false, fovy = false;
+    for (const auto& l : lanes.get("lanes").array) {
+        if (l.get("lane").string() == "bird.position") bird = l.get("keys").array.size() == 3 && l.get("keys").array[1].number == 50 && l.get("curve").string() == "bspline";
+        if (l.get("lane").string() == "camera.fovy") fovy = l.get("kind").string() == "number";
+    }
+    CHECK(bird && fovy);
+    int lists = 0;
+    for (const auto& e : lanes.get("events").array) {
+        const std::string l = e.get("list").string();
+        if (l == "messages") lists += e.get("items").array[0].get("label").string() == "Look up!";
+        if (l == "weather" || l == "time" || l == "attach" || l == "detach") ++lists;
+        if (l == "clips") lists += e.get("actor").string() == "bird" && e.get("items").array[0].get("label").string() == "Dk/fly1.bck";
+    }
+    CHECK(lists == 6 && lanes.get("actors").array.size() == 2);
+    // the pose at a frame: on the curve, in the world (no origin), the fly camera moved there
+    Value pose = run("demo_pose", "\"frame\": 120").get("result");
+    CHECK(near(pose.get("actors").array[0].get("position").get("x").number, 2500) && near(pose.get("camera").get("target").get("x").number, 100));
+    CHECK(pose.get("camera").get("fovy").number == 55 && !host.looks.empty());
+    pose = run("demo_pose", "\"frame\": 0, \"move\": false").get("result");
+    CHECK(near(pose.get("actors").array[0].get("position").get("y").number, (5 * 1800 + 1400) / 6.0));  // bspline at the first key: (P0 + 4 P0 + P1) / 6
+    // an origin at Link: keys from Link's place are relative to it, the pose is placed back at Link
+    CHECK(ok(s.run("edit_scene_step", params(("{\"scene\": \"flight\", \"step\": " + at + ", \"fields\": {\"origin\": \"link\"}}").c_str()))));
+    CHECK(ok(run("set_demo_key", R"("lane": "guide.position", "frame": 0, "from": "link")")));
+    CHECK(near(step_at(s, "flight", n).get("actors").array[1].get("position").get("keys").array[0].get("value").get("x").number, 0));
+    pose = run("demo_pose", "\"frame\": 0, \"move\": false").get("result");
+    CHECK(near(pose.get("actors").array[1].get("position").get("x").number, 200) && near(pose.get("actors").array[1].get("position").get("z").number, -201400));
+    // what the game refuses shows as the step's problem, and a refused edit changes nothing
+    CHECK(!ok(run("remove_demo_actor", R"("id": "guide")")));  // the attachment names it
+    CHECK(ok(run("remove_demo_event", R"("list": "detach", "index": 0)")));
+    CHECK(ok(run("remove_demo_event", R"("list": "attach", "index": 0)")));
+    CHECK(ok(run("remove_demo_actor", R"("id": "guide")")));
+    // undo and redo of key edits
+    CHECK(ok(run("remove_demo_key", R"("lane": "bird.position", "frame": 50)")));
+    CHECK(step_at(s, "flight", n).get("actors").array[0].get("position").get("keys").array.size() == 2);
+    CHECK(ok(s.run("undo")) && step_at(s, "flight", n).get("actors").array[0].get("position").get("keys").array.size() == 3);
+    CHECK(ok(s.run("redo")) && step_at(s, "flight", n).get("actors").array[0].get("position").get("keys").array.size() == 2);
+    // a lane goes with its last key
+    CHECK(ok(run("remove_demo_key", R"("lane": "camera.fovy", "frame": 0)")) && !step_at(s, "flight", n).get("camera").object.contains("fovy"));
+    CHECK(!ok(s.run("set_demo_key", params(R"({"scene": "flight", "step": 1, "lane": "camera.eye", "frame": 0, "value": {"x": 0, "y": 0, "z": 0}})"))) || step_at(s, "flight", 1).get("type").string() == "demo");
+    CHECK(valid(s));
+}
+
 void docs_table(const char* path) {
     std::ifstream f(path);
     std::stringstream text;
@@ -567,6 +661,7 @@ int main(int argc, char** argv) {
     previews();
     copy_paste_remove();
     drag_is_one_undo_step();
+    demo_steps();
     if (argc > 1) docs_table(argv[1]);
     if (g_failures) {
         std::fprintf(stderr, "%d check(s) failed\n", g_failures);

@@ -12,6 +12,7 @@
 #include "../mods/story_world_manifest.h"
 #include "commands.h"
 #include "scenes.h"
+#include "demo_tracks.h"
 
 namespace editor {
 namespace {
@@ -330,6 +331,127 @@ Value Session::dispatch_scene(const std::string& command, const Value& p, std::s
         r["scene"] = scene;
         ok = true;
         return r;
+    }
+    // ---- demo steps (demo_tracks.h)
+    if (command.rfind("demo_", 0) == 0 || command.find("_demo_") != std::string::npos) {
+        // the demo step of the request, read-only (lanes, pose)
+        auto demo_step = [&](const Value*& st) {
+            Package* pkg = package(p, why);
+            if (!pkg) return (const Value*)nullptr;
+            const Value* s = by_id(pkg->manifest.get("scenes"), scene);
+            if (!s) return why = "no scene \"" + scene + "\"", (const Value*)nullptr;
+            size_t i = 0;
+            if (!scene_step_index(*s, p.get("step"), i, why)) return (const Value*)nullptr;
+            st = &s->get("steps").array[i];
+            if (st->get("type").string() != "demo") return why = "step " + label_step + " is not a demo step", (const Value*)nullptr;
+            return s;
+        };
+        // a change to the demo step of the request
+        auto demo_change = [&](const std::string& label, const std::function<bool(Value& st, std::string&)>& edit) {
+            step_change(label + " (" + scene + " step " + label_step + ")", [&](Value&, Value& s, size_t i, std::string& w) {
+                Value& st = s["steps"].array[i];
+                if (st.get("type").string() != "demo") return w = "step " + std::to_string(i + 1) + " is not a demo step", false;
+                return edit(st, w);
+            });
+        };
+        const Place link = host_ ? host_->link() : Place{};
+        if (command == "demo_lanes") {
+            const Value* st = nullptr;
+            Package* pkg = package(p, why);
+            if (!pkg || !demo_step(st)) return r;
+            r = demo_lanes(pkg->manifest, *st);
+            r["scene"] = scene;
+            ok = true;
+            return r;
+        }
+        if (command == "demo_pose") {
+            const Value* st = nullptr;
+            if (!demo_step(st)) return r;
+            if (p.get("frame").type != Value::Number) return why = "\"frame\" is a number (30 a second)", r;
+            if (st->get("origin").type == Value::String && !link.valid) return why = "an origin \"link\" demo is placed at Link: the game is not running", r;
+            if (!demo_pose(*st, p.get("frame").number, link.position, link.angle, r, why)) return r;
+            const bool move = p.get("move").type == Value::Bool ? p.get("move").boolean : true;
+            if (move && r.get("camera").type == Value::Object) {
+                WorldPoint eye, target;
+                point_of(r.get("camera").get("eye"), eye);
+                point_of(r.get("camera").get("target"), target);
+                if (!host_) return why = "the game is not running", r;
+                if (!host_->look(eye, target, why)) return r;
+                r["moved"] = true;
+            }
+            ok = true;
+            return r;
+        }
+        const std::string lane = text(p, "lane");
+        const unsigned frame = p.get("frame").type == Value::Number ? unsigned(std::max(0.0, p.get("frame").number)) : 0;
+        if (command == "set_demo_key") {
+            Value value = p.get("value");
+            const std::string from = text(p, "from");
+            if (value.type == Value::Null) {
+                if (from.empty()) return why = "give \"value\" or \"from\" (camera or link)", r;
+                WorldPoint w;
+                if (from == "camera") {
+                    if (!host_) return why = "the game is not running", r;
+                    const Value fly = host_->fly_state();
+                    if (!fly.get("on").boolean) return why = "the fly camera is off", r;
+                    if (lane == "camera.eye") point_of(fly.get("position"), w);
+                    else point_of(fly.get("target"), w);
+                } else if (from == "link") {
+                    if (!link.valid) return why = "the game is not running", r;
+                    w = link.position;
+                } else return why = "\"from\" is camera or link", r;
+                const Value* st = nullptr;
+                if (!demo_step(st)) return r;
+                const WorldPoint l = demo_local(*st, w, link.position);
+                value = Value();
+                value["x"] = std::round(l.x * 10) / 10;
+                value["y"] = std::round(l.y * 10) / 10;
+                value["z"] = std::round(l.z * 10) / 10;
+            }
+            demo_change("Demo key " + lane + " at " + std::to_string(frame), [&](Value& st, std::string& w) {
+                if (!demo_set_key(st, lane, frame, value, w)) return false;
+                return p.get("curve").type != Value::String || demo_set_curve(st, lane, p.get("curve").text, w);
+            });
+            if (ok) { r["lane"] = lane; r["frame"] = int(frame); r["value"] = value; }
+            return r;
+        }
+        if (command == "move_demo_key") {
+            const unsigned to = unsigned(std::max(0.0, p.get("to").number));
+            demo_change("Move demo key " + lane, [&](Value& st, std::string& w) { return demo_move_key(st, lane, frame, to, w); });
+            return r;
+        }
+        if (command == "remove_demo_key") {
+            demo_change("Remove demo key " + lane, [&](Value& st, std::string& w) { return demo_remove_key(st, lane, frame, w); });
+            return r;
+        }
+        if (command == "set_demo_curve") {
+            demo_change("Demo curve " + lane, [&](Value& st, std::string& w) { return demo_set_curve(st, lane, text(p, "curve"), w); });
+            return r;
+        }
+        const std::string list = text(p, "list"), actor = text(p, "actor");
+        const size_t index = p.get("index").type == Value::Number ? size_t(std::max(0.0, p.get("index").number)) : 0;
+        if (command == "add_demo_event") {
+            size_t at = 0;
+            demo_change("Demo " + list, [&](Value& st, std::string& w) { return demo_add_event(st, list, actor, p.get("event"), at, w); });
+            if (ok) r["index"] = int(at);
+            return r;
+        }
+        if (command == "edit_demo_event") {
+            demo_change("Edit demo " + list, [&](Value& st, std::string& w) { return demo_edit_event(st, list, actor, index, p.get("fields"), w); });
+            return r;
+        }
+        if (command == "remove_demo_event") {
+            demo_change("Remove demo " + list, [&](Value& st, std::string& w) { return demo_remove_event(st, list, actor, index, w); });
+            return r;
+        }
+        if (command == "add_demo_actor") {
+            demo_change("Demo actor " + p.get("actor").get("id").string(), [&](Value& st, std::string& w) { return demo_add_actor(st, p.get("actor"), w); });
+            return r;
+        }
+        if (command == "remove_demo_actor") {
+            demo_change("Remove demo actor " + text(p, "id"), [&](Value& st, std::string& w) { return demo_remove_actor(st, text(p, "id"), w); });
+            return r;
+        }
     }
     if (command == "scrub_scene") {
         Package* pkg = package(p, why);
