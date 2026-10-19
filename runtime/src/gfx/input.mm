@@ -211,6 +211,7 @@ void held_keys(bool* keys) {
 void release_keys() {
     mods::fast_forward_reset();
     mods::lock_on_reset();
+    mods::quick_use_reset();
     std::lock_guard<std::mutex> lk(g_mu);
     g_mouse_bindings.consume();
     memset(g_keys, 0, sizeof(g_keys));
@@ -432,9 +433,7 @@ void init() {
     // drop held keys when the window loses focus
     [[NSNotificationCenter defaultCenter] addObserverForName:NSApplicationDidResignActiveNotification
                                                       object:nil queue:nil usingBlock:^(NSNotification*) {
-        std::lock_guard<std::mutex> lk(g_mu);
-        g_mouse_bindings.consume();
-        memset(g_keys, 0, sizeof(g_keys));
+        release_keys();
     }];
     [GCController startWirelessControllerDiscoveryWithCompletionHandler:nil];
     // the Automatic face preset follows the pad that was plugged in first (issue #78 follow-up)
@@ -752,7 +751,12 @@ PadState read() {
         last_buttons = s.buttons;
     }
     mods::filter_pad(s);  // gameplay mods: mouse camera, wheel -> R3
-    if (overlay::blocks_input()) s = PadState{};  // the settings overlay has the input
+    if (overlay::blocks_input()) {
+        mods::quick_use_reset();  // no pending item press survives menu/text capture
+        s = PadState{};
+    } else {
+        mods::quick_use_filter_pad(s);  // final merged/polled pad, never overlay-owned input
+    }
     return s;
 }
 
