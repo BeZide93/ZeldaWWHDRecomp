@@ -1263,6 +1263,67 @@ next keys wait. Each message adds 20 seconds of reading time to the step's
 deadline. Messages are plain text; choices are not available inside a demo
 (use a `choice` step before or after it).
 
+#### Carrying an actor on another's joint
+
+`attach` puts one demo actor on a joint of another from a frame on; `detach`
+lets it go. This is how the game's own cutscenes have the Helmaroc King hold
+someone in its beak or claws.
+
+```json
+"attach": [{"frame": 0, "actor": "baker", "to": "bird", "joint": "j_dk_ashi_r3",
+            "offset": {"x": 150, "y": 0, "z": 0}, "upright": true}],
+"detach": [{"frame": 150, "actor": "baker", "fall": true}]
+```
+
+- `actor` and `to` are ids from the step's `actors`. The carried actor can be a
+  game actor, Link or one of your mod's characters (a villager or a mod actor).
+  The carrier can be a game actor that plays cutscene animation (the Helmaroc
+  King, story characters), Link or a mod actor. Models from the game's archives
+  (`"model"`) can't carry or be carried, and villagers can't carry.
+- `joint` is the carrier's joint name, as its model names it. When the name is
+  wrong, the log lists the model's joints and the actor is not carried.
+- `offset` (in the joint's own axes and scale) and `rotation` (degrees) place the
+  carried actor relative to the joint. A joint's axes rarely point the way the
+  world does, so try a few offsets. `"upright": true` keeps only the joint's
+  heading, so the carried actor stays upright.
+- While it is carried, an actor ignores its own position and rotation tracks.
+  After `detach` it stays where it was let go. With `"fall": true` it falls
+  from there to the ground below it. It stays there until its next position
+  key or its next `attach`, so leave out position keys between the detach and
+  where you want it to move again. Its own code may still turn it (a villager
+  goes back to its waiting pose).
+- Link can only be carried while he plays one of his demo animations (`"clip"`),
+  from the attach frame until the detach.
+- An actor has one carrier at a time, and a carried actor can't carry another.
+  A demo has up to 8 attachments.
+- Villagers only turn around their vertical axis, so they hang upright whatever
+  the rotation.
+
+#### Time and weather
+
+`time` and `weather` change the time of day and the rain at a frame. The
+game's own event system does this (the same instant change its story events
+use).
+
+```json
+"time": [{"frame": 40, "hour": 22}],
+"weather": [{"frame": 80, "rain": 1}],
+"keep_time": false, "keep_weather": false
+```
+
+- `hour` is 0–24 (fractions are minutes: 22.5 is 22:30).
+- `rain` is 0–1: 1 is the game's full rain, 0 stops the rain, and values in
+  between give lighter rain. Rain also turns the sky and colours rainy. On the
+  Great Sea the port holds the demo's rain while the demo runs, so the game's
+  own changing weather doesn't take it away.
+- When the demo ends, is skipped, or a state is loaded, the time and weather
+  from before the demo come back. `"keep_time": true` or `"keep_weather": true`
+  keeps the demo's values instead. On the Great Sea the game's own weather
+  takes over again after a kept weather change.
+- A demo changes time and weather at up to 8 different frames. Each list is in
+  frame order.
+- Thunder and wind can't be set.
+
 
 ## Native particles (preview)
 
