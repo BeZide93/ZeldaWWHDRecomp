@@ -212,6 +212,67 @@ void draw_cylinder(ImDrawList* dl, const View& v, const float p[3], float radius
         if (i % 7 == 0) dl->AddLine(lo[i], hi[i], colour, 1.0f);
     }
 }
+// An island building's footprint (its world bounds from placement_conflicts at the pose shown, also during a
+// handle drag): green when the place is clear, red with what is in the way, in plain words, when not.
+struct Footprint {
+    std::string key;
+    double asked = -1;
+    Value result;
+};
+Footprint g_footprint;
+void building_footprint(ImDrawList* dl, const View& v, const std::string& mod, const std::string& id, const float p[3], double yaw) {
+    char key[192];
+    std::snprintf(key, sizeof key, "%s/%s/%.0f/%.0f/%.0f/%.1f", mod.c_str(), id.c_str(), p[0], p[1], p[2], yaw);
+    const double now = ImGui::GetTime();
+    if (g_footprint.key != key && now - g_footprint.asked > 0.15) {
+        Value q, at;
+        at["x"] = p[0], at["y"] = p[1], at["z"] = p[2];
+        q["id"] = id, q["mod"] = mod, q["position"] = at, q["yaw"] = yaw;
+        const Value r = editor::query("placement_conflicts", q);
+        g_footprint = {key, now, r.get("ok").boolean ? r.get("result") : Value()};
+    }
+    const Value& r = g_footprint.result;
+    if (r.get("minimum").get("x").type != Value::Number) return;
+    const float lo[3] = {float(num(r.get("minimum"), "x")), float(num(r.get("minimum"), "y")), float(num(r.get("minimum"), "z"))};
+    const float hi[3] = {float(num(r.get("maximum"), "x")), float(num(r.get("maximum"), "y")), float(num(r.get("maximum"), "z"))};
+    const bool clear = r.get("clear").boolean;
+    const ImU32 colour = clear ? IM_COL32(110, 230, 120, 220) : IM_COL32(255, 70, 60, 240);
+    ImVec2 c[8];
+    bool ok = true;
+    for (int k = 0; k < 8; k++) {
+        const float q[3] = {k & 1 ? hi[0] : lo[0], k & 2 ? hi[1] : lo[1], k & 4 ? hi[2] : lo[2]};
+        ok = ok && project(v, q, c[k]);
+    }
+    if (ok) {
+        static const int edges[12][2] = {{0, 1}, {2, 3}, {4, 5}, {6, 7}, {0, 2}, {1, 3}, {4, 6}, {5, 7}, {0, 4}, {1, 5}, {2, 6}, {3, 7}};
+        for (const auto& e : edges) dl->AddLine(c[e[0]], c[e[1]], colour, clear ? 1.5f : 2.5f);
+    }
+    if (clear) return;
+    const auto& conflicts = r.get("conflicts").array;
+    if (conflicts.empty()) return;
+    // plain words first ("In the way: a door of the island (and 8 more)"); hovering lists every reason with the
+    // game's own names, as the MCP error does
+    std::string text = "In the way: " + conflicts.front().get("message").string();
+    if (conflicts.size() > 1) text += " (and " + std::to_string(conflicts.size() - 1) + " more)";
+    // under the building's base, where the handle is (its top is often out of the picture)
+    const float base[3] = {(lo[0] + hi[0]) / 2, lo[1], (lo[2] + hi[2]) / 2};
+    ImVec2 at;
+    if (!project(v, base, at)) return;
+    const ImVec2 size = ImGui::CalcTextSize(text.c_str());
+    at.x = std::clamp(at.x - size.x / 2, v.pos.x + 4, v.pos.x + std::max(4.0f, v.size.x - size.x - 4));
+    at.y = std::clamp(at.y + 24, v.pos.y + 4, v.pos.y + std::max(4.0f, v.size.y - size.y - 4));
+    const ImVec2 from(at.x - 4, at.y - 2), to(at.x + size.x + 4, at.y + size.y + 2);
+    dl->AddRectFilled(from, to, IM_COL32(40, 0, 0, 200), 3);
+    dl->AddText(at, IM_COL32(255, 200, 190, 255), text.c_str());
+    if (ImGui::IsMouseHoveringRect(from, to, false)) {
+        std::string all = "In the way here:";
+        for (const auto& c : conflicts) {
+            all += "\n- " + c.get("message").string();
+            if (!c.get("native").string().empty()) all += "  (game name: " + c.get("native").string() + ")";
+        }
+        ImGui::SetTooltip("%s", all.c_str());
+    }
+}
 std::string current_stage(const Value& state) {
     const Value& fly = state.get("fly");
     if (fly.get("on").boolean) return fly.get("stage").string();
@@ -691,6 +752,10 @@ void world(float w, float h) {
         const float c = float(std::cos(yaw)), s = float(std::sin(yaw));
         const float m[16] = {c, 0, -s, 0, 0, 1, 0, 0, s, 0, c, 0, p[0], p[1], p[2], 1};
         std::memcpy(model, S.dragging && S.drag_actor == selected ? S.drag : m, sizeof model);
+        if (sel->get("actor").string().rfind("piece:", 0) == 0) {  // an island building: its footprint where it is shown
+            const float at[3] = {model[12], model[13], model[14]};
+            building_footprint(dl, v, snap.open, selected, at, std::round(std::atan2(model[8], model[0]) * 180 / kPi * 10) / 10);
+        }
         float view[16], proj[16];
         gl_view(v, view);
         gl_projection(v, proj);

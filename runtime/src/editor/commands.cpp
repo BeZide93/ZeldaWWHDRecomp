@@ -134,7 +134,7 @@ const std::vector<CommandInfo> kCommands = {
     {"preview_collision", "Returns world-space collision vertices and edges for a wireframe preview, with placement findings.",
      {{"id", "string", "placed world object", true}, {"mod", "string", ""}}},
     {"placement_conflicts", "Returns placement conflicts and collision budget findings for a world object.",
-     {{"id", "string", "placed world object", true}, {"mod", "string", ""}}},
+     {{"id", "string", "placed world object", true}, {"position", "point", "a trial position (default: its own)"}, {"yaw", "number", "a trial turn in degrees"}, {"mod", "string", ""}}},
     {"prepare_collision", "Prepares a static model's collision for live world-object placement.",
      {{"model", "string", "declared static model id", true}, {"mod", "string", ""}}},
     {"pick", "The first ground a ray meets (the game's collision), for placing by clicking into the picture.",
@@ -491,7 +491,14 @@ bool world_placements(Host* host, const std::string& mod, const Value& before, c
         }
         if (query.get("clear").type != Value::Bool || !query.get("clear").boolean) {
             const auto& conflicts = query.get("conflicts").array;
-            why = "world object " + actor.id + ": " + (conflicts.empty() ? std::string("placement could not be cleared") : conflicts.front().get("message").string("placement conflicts with protected space"));
+            // every reason, with the game's own names (MCP errors carry the whole list; the editor shows the first)
+            std::string list;
+            for (const auto& c : conflicts) {
+                std::string one = c.get("message").string("placement conflicts with protected space");
+                if (!c.get("native").string().empty()) one += " [" + c.get("native").string() + "]";
+                list += (list.empty() ? "" : "; ") + one;
+            }
+            why = "world object " + actor.id + ": " + (list.empty() ? std::string("placement could not be cleared") : "in the way: " + list);
             return false;
         }
     }

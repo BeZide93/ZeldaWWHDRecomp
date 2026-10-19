@@ -7,6 +7,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
 #include <limits>
 #include <map>
 namespace story_world_placement { namespace {
@@ -134,15 +135,28 @@ bool add_native_collision(Index&i,const std::string&s,int room,const Bytes&b,Poi
 }
 bool add_native_layout(Index&i,const std::string&s,int room,const Bytes&b,Point t,float yaw,std::string*w){
  std::vector<Chunk> cs;if(!chunks(b,cs)||!finite(t)||!std::isfinite(yaw))return fail(w,"Invalid native room layout");
- std::vector<ProtectedBounds> actors;std::vector<ProtectedRoute> routes;
+ std::vector<ProtectedBounds> actors;std::vector<ProtectedRoute> routes,raw_routes;
  for(const auto&c:cs){const bool actor=c.tag=="ACTR"||c.tag=="SCOB"||c.tag=="TGOB"||c.tag=="TGSC"||c.tag=="TRES"||c.tag=="DOOR"||c.tag=="TGDR"||c.tag.rfind("ACT",0)==0||c.tag.rfind("SCO",0)==0||c.tag.rfind("TRE",0)==0;
   if(actor){const unsigned stride=(c.tag=="SCOB"||c.tag=="TGSC"||c.tag.rfind("SCO",0)==0)?36:32;if(c.count>65535||!range(b,c.offset,uint64_t(c.count)*stride))return fail(w,"Invalid native actor table");for(uint32_t j=0;j<c.count;++j){size_t at=c.offset+j*stride;Point p=point(b,at+12);if(!finite(p))return fail(w,"Invalid native event position");p=transformed(p,t,{0,yaw,0},{1,1,1});float radius=10000; // All authored actors/tags, all layers: fixed-event exclusion.
 
    std::string name(reinterpret_cast<const char*>(b.data()+at),strnlen(reinterpret_cast<const char*>(b.data()+at),8));actors.push_back({s,room,"event",c.tag+":"+name+":"+std::to_string(j),{{p.x-radius,-1000000,p.z-radius},{p.x+radius,1000000,p.z+radius}}});}}
   if(c.tag=="RPAT"||c.tag=="PATH"){
-   if(c.count>65535||!range(b,c.offset,uint64_t(c.count)*12))return fail(w,"Invalid native path table");for(uint32_t j=0;j<c.count;++j){size_t at=c.offset+j*12;uint16_t count=u16(b,at);uint32_t point_offset=u32(b,at+8),points=0;bool in_points=false;for(const auto& pc:cs)if(((c.tag=="RPAT"&&pc.tag=="RPPN")||(c.tag=="PATH"&&pc.tag=="PPNT"))&&range(b,pc.offset,uint64_t(pc.count)*16)&&point_offset%16==0&&uint64_t(point_offset)+uint64_t(count)*16<=uint64_t(pc.count)*16){points=pc.offset+point_offset;in_points=true;}if(count>4096||!range(b,points,uint64_t(count)*16)||(count&&!in_points))return fail(w,"Invalid native path points");ProtectedRoute route{s,room,c.tag+":"+std::to_string(j),{},2000,b[at+5]!=0};for(unsigned k=0;k<count;++k){auto p=point(b,points+k*16+4);if(!finite(p))return fail(w,"Invalid native path coordinate");p=transformed(p,t,{0,yaw,0},{1,1,1});route.points.push_back(p);}if(!route.points.empty())routes.push_back(std::move(route));}
+   if(c.count>65535||!range(b,c.offset,uint64_t(c.count)*12))return fail(w,"Invalid native path table");for(uint32_t j=0;j<c.count;++j){size_t at=c.offset+j*12;uint16_t count=u16(b,at);uint32_t point_offset=u32(b,at+8),points=0;bool in_points=false;for(const auto& pc:cs)if(((c.tag=="RPAT"&&pc.tag=="RPPN")||(c.tag=="PATH"&&pc.tag=="PPNT"))&&range(b,pc.offset,uint64_t(pc.count)*16)&&point_offset%16==0&&uint64_t(point_offset)+uint64_t(count)*16<=uint64_t(pc.count)*16){points=pc.offset+point_offset;in_points=true;}if(count>4096||!range(b,points,uint64_t(count)*16)||(count&&!in_points))return fail(w,"Invalid native path points");ProtectedRoute route{s,room,c.tag+":"+std::to_string(j),{},2000,b[at+5]!=0},raw=route;for(unsigned k=0;k<count;++k){auto p=point(b,points+k*16+4);if(!finite(p))return fail(w,"Invalid native path coordinate");raw.points.push_back(p);p=transformed(p,t,{0,yaw,0},{1,1,1});route.points.push_back(p);}if(!route.points.empty()){routes.push_back(std::move(route));raw_routes.push_back(std::move(raw));}}
   }
  }
+
+ // the layout entries one by one, for island buildings (check_building): scaled tags and doors are 36 bytes.
+ // A sea room's layout is in world space already (its doors and villagers stand at their sea coordinates):
+ // only other stages' rooms are moved by their MULT placement.
+ const bool world_space=s=="sea"&&room>=0;
+ std::vector<LayoutEntry> layout;
+ const auto& building_routes=world_space?raw_routes:routes;i.layout_routes.insert(i.layout_routes.end(),building_routes.begin(),building_routes.end());
+ for(const auto&c:cs){const bool scaled=c.tag.rfind("SCO",0)==0||c.tag.rfind("TGS",0)==0||c.tag=="TGDR"||c.tag=="DOOR";
+  const bool actor=scaled||c.tag.rfind("ACT",0)==0||c.tag.rfind("TRE",0)==0||c.tag=="TGOB";if(!actor)continue;const unsigned stride=scaled?36:32;
+  if(c.count>65535||!range(b,c.offset,uint64_t(c.count)*stride))return fail(w,"Invalid native actor table");
+  for(uint32_t j=0;j<c.count;++j){const size_t at=c.offset+j*stride;LayoutEntry e{s,room,c.tag,std::string(reinterpret_cast<const char*>(b.data()+at),strnlen(reinterpret_cast<const char*>(b.data()+at),8)),point(b,at+12),{},scaled,j};
+   if(!finite(e.position))return fail(w,"Invalid native layout position");if(!world_space)e.position=transformed(e.position,t,{0,yaw,0},{1,1,1});if(scaled)for(unsigned k=0;k<3;++k)e.scale[k]=b[at+32+k];layout.push_back(std::move(e));}}
+ i.layout.insert(i.layout.end(),layout.begin(),layout.end());
  i.bounds.insert(i.bounds.end(),actors.begin(),actors.end());i.routes.insert(i.routes.end(),routes.begin(),routes.end());auto&c=coverage(i,s,room);c.routes=true;c.events=true;return true;
 }
 namespace {
@@ -182,5 +196,45 @@ Index load_native_room(const std::string&dir,const std::string&s,int room){
  for(const auto&[name,b]:local){auto ext=std::filesystem::path(name).extension();if(ext==".dzb"){if(!add_native_collision(out,s,room,b,translation,yaw,&why))return unknown(why);room_collision=true;}if(ext==".dzr"||ext==".dzs"){if(!add_native_layout(out,s,room,b,translation,yaw,&why))return unknown(why);room_layout=true;}}
  auto&c=coverage(out,s,room);c.collision=room_collision;c.routes=room_layout&&stage_layout;c.events=room_layout&&stage_layout;if(!room_collision||!room_layout||!stage_layout)c.reason="Native collision or stage/room layouts are absent";
  }catch(const std::exception&){return unknown("Unable to read native placement resources");}return out;
+}
+
+// ---- island buildings
+namespace {
+std::string lower(std::string v){for(char&c:v)c=char(std::tolower((unsigned char)c));return v;}
+std::string article(const char*w){return std::string(std::strchr("aeiou",w[0])?"an ":"a ")+w;}
+bool starts(const std::string&v,std::initializer_list<const char*> prefixes){for(const char*p:prefixes)if(v.rfind(p,0)==0)return true;return false;}
+}
+Extent building_extent(const LayoutEntry&e){
+ const std::string n=lower(e.name);
+ // things a building may cover: grass, flowers, trees and palms, birds, crabs, small stones; light and weather areas
+ if(starts(n,{"kusa","flwr","flower","pflower","pflwr","swood","lwood","woodb","oyashi","kamome","kani","koisi","kytag"}))return {Keep::None,0,0,0};
+ if(e.tag.rfind("TRE",0)==0||starts(n,{"takara"}))return {Keep::Chest,120,50,250};
+ if(e.tag=="TGDR"||e.tag=="DOOR"||starts(n,{"knob","door"}))return {Keep::Door,250,50,450};
+ if(e.scaled&&starts(n,{"tag","salvag","agb","evsw","ev"})){
+  // a tag area: horizontal radius scale x (or z) x 10, height scale y x 10 above and below (d_a_tag_event huntRange)
+  const float r=std::max(100.f,10.f*std::max(e.scale[0],e.scale[2])),h=std::max(100.f,10.f*e.scale[1]);return {Keep::Event,r,h,h};}
+ if(starts(n,{"item"}))return {Keep::Item,80,50,200};
+ if(starts(n,{"swhit","kbota","osw","hsw","swtact","swc0"}))return {Keep::Switch,150,50,250};
+ // the game's villagers and other characters: a capital, a small letter and a digit ("Uo1", "Ko1", "Ls1")
+ if(e.name.size()==3&&std::isupper((unsigned char)e.name[0])&&std::islower((unsigned char)e.name[1])&&std::isdigit((unsigned char)e.name[2]))return {Keep::Villager,100,50,300};
+ // anything else: an object of unknown size (a conservative default; scaled objects by their scale)
+ if(e.scaled){const float k=std::max({e.scale[0],e.scale[1],e.scale[2]})/10.f;if(k>0)return {Keep::Object,std::min(1500.f,150*k),50,std::min(3000.f,400*k)};}
+ return {Keep::Object,150,50,400};
+}
+const char* keep_words(Keep k){switch(k){case Keep::Villager:return "villager";case Keep::Chest:return "chest";case Keep::Door:return "door";case Keep::Item:return "item";case Keep::Switch:return "switch";case Keep::Event:return "cutscene area";case Keep::Object:return "object";default:return "";}}
+std::vector<Conflict> check_building(const std::string&s,int room,const Bounds&b,const Index&i,float margin){
+ std::vector<Conflict> out;if(!valid(b)||!std::isfinite(margin)||margin<0){out.push_back({"invalid","","Invalid building bounds"});return out;}
+ for(const auto&e:i.layout){if(e.stage!=s||(e.room>=0&&e.room!=room))continue;const Extent x=building_extent(e);if(x.keep==Keep::None)continue;
+  const Bounds area{{e.position.x-x.radius,e.position.y-x.below,e.position.z-x.radius},{e.position.x+x.radius,e.position.y+x.above,e.position.z+x.radius}};
+  if(!overlap(b,area,margin))continue;
+  // a column's corners: keep the real circle (the box corners of a round area are not in the way)
+  const float cx=std::clamp(e.position.x,b.minimum.x,b.maximum.x),cz=std::clamp(e.position.z,b.minimum.z,b.maximum.z);
+  if(std::hypot(double(cx)-e.position.x,double(cz)-e.position.z)>double(x.radius)+margin)continue;
+  out.push_back({keep_words(x.keep),e.tag+":"+e.name+":"+std::to_string(e.index),article(keep_words(x.keep))+" of the island",e.name});}
+ for(const auto&r:i.layout_routes){if(r.stage!=s||(r.room>=0&&r.room!=room))continue;
+  const char* words=r.id.rfind("PATH",0)==0||r.id.rfind("RPAT",0)==0?"villager route":"route";bool hit=false;
+  for(size_t j=0;j<r.points.size()&&!hit;++j){if(j+1<r.points.size())hit=segment_box(r.points[j],r.points[j+1],b,margin+kRouteHalfWidth);else if(r.closed||r.points.size()==1)hit=segment_box(r.points[j],r.points[0],b,margin+kRouteHalfWidth);}
+  if(hit)out.push_back({words,r.id,article(words)+" of the island",r.id});}
+ return out;
 }
 }

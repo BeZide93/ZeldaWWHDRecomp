@@ -103,6 +103,10 @@ bool owns_visual(uint32_t actor,uint32_t token);
 // World editor: the profile is installed, so declare() may add actors while the game runs (their
 // records are in place for all 128 declarations).
 bool live_ready();
+// --editor: the profile is installed even when no package declares a model actor, so the first model
+// actor or island building placed in the editor appears at once. Call before install(); never without --editor.
+void editor_enable();
+void heap_sample(Cpu*); // WWHD_MOD_ACTOR_HEAPS=1 only: logs the game heaps' free bytes per stage and room
 bool install(const std::function<std::string(uint32_t)>& replaced_by,const std::function<void(uint32_t,void(*)(Cpu*))>& replace);
 void state_loaded();
 bool talking(uint32_t actor);

@@ -1578,7 +1578,7 @@ void logic_service(Cpu* c) {
             }
         }
     }
-    story_item_models::tick(c);actor_sweep(c);story_scenes::tick(c,false,2);story_actors::service(c);
+    story_item_models::tick(c);mod_actor::heap_sample(c);actor_sweep(c);story_scenes::tick(c,false,2);story_actors::service(c);
     story_native_wait_runtime::logic(c);
 }
 void service(Cpu* c) { story_lyt_screen::service(c); }

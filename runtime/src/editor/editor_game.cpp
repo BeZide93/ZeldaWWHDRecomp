@@ -38,6 +38,7 @@
 #include "../mods/packages.h"
 #include "../mods/story_actors.h"
 #include "../mods/story_game_pieces.h"
+#include "../mods/story_npc_catalogue.h"
 #include "../mods/story_items.h"
 #include "../mods/story_mail.h"
 #include "../mods/story_mail_book.h"
@@ -84,6 +85,30 @@ std::string g_status;
 // island buildings being prepared for a mod (prepare_piece): "preparing", "ready", "failed: ..."
 std::mutex g_piece_mutex;
 std::map<std::pair<std::string, std::string>, std::string> g_piece_states;
+// "a villager of the island (Grandma)": the character's name when the NPC catalogue knows the code
+void name_layout_conflicts(const story_notebook::ManifestActor& actor, Value& result) {
+    for (auto& c : result["conflicts"].array) {
+        const std::string id = c.get("id").string();
+        const auto first = id.find(':'), second = id.find(':', first + 1);
+        if (first == std::string::npos || second == std::string::npos) continue;
+        const std::string code = id.substr(first + 1, second - first - 1);
+        auto same = [](std::string a, std::string b) {
+            for (char& ch : a) ch = char(std::tolower((unsigned char)ch));
+            for (char& ch : b) ch = char(std::tolower((unsigned char)ch));
+            return a == b;
+        };
+        std::string name;
+        for (const auto& e : story_notebook::npc_catalogue().entries)
+            for (const auto& a : e.actors)
+                if (name.empty() && same(a.code, code) && a.stage == actor.stage && (a.room < 0 || a.room == int(actor.room))) name = e.display();
+        if (name.empty())
+            for (const auto& e : story_game_objects::catalogue().entries)
+                if (name.empty() && same(e.native_name, code)) name = e.label;
+        if (name.empty()) continue;
+        c["message"] = c.get("message").string() + " (" + name + ")";
+        c["name"] = name;
+    }
+}
 uint64_t g_test_load_serial=0;
 Value g_test_load_result; // protected by g_status_mu; read_state/MCP may poll it
 void set_status(const std::string& s) {
@@ -659,6 +684,7 @@ void story_tick() {
 
 // ---------------------------------------------------------------- the host
 void reapply_mod(const std::string& mod);  // below: the live actors again (a model became ready)
+std::string refused_pieces(const std::string& mod, const std::string& piece);  // below: placements of a building that can't stand there
 // the game's villagers the NPC catalogue knows (list_villagers): read from the actor list on the game
 // thread (villagers_tick), for the host on any thread
 std::mutex g_villagers_mu;
@@ -1067,8 +1093,7 @@ public:
                 reapply_mod(mod);
             });
         }).detach();
-        note = "The model is being prepared for the game; actors using it appear when it is ready (a restart is needed for the first model "
-               "actor of a game that had none).";
+        note = "The model is being prepared for the game; actors using it appear when it is ready.";
         return true;
     }
     bool prepare_piece(const std::string& mod, const std::string& id, std::string& note, std::string& why) override {
@@ -1100,7 +1125,11 @@ public:
                     return set_status("Building " + id + ": " + w);
                 }
                 finish("ready");
-                set_status("Building " + id + " is ready");
+                // a building placed while it was being made: its place is checked now (as the game does when
+                // it creates it), and one that can't stand there is said here instead of just staying away
+                const std::string refused = refused_pieces(mod, id);
+                set_status(refused.empty() ? "Building " + id + " is ready"
+                                           : "Building " + id + " is ready, but can't stand where it is placed: " + refused + ". Move it; selecting it shows what is in the way.");
                 reapply_mod(mod);
             });
         }).detach();
@@ -1116,7 +1145,10 @@ public:
         return story_actors::has_model(mod, story_game_pieces::model_key(id)) ? "ready" : "";
     }
     bool world_object_query(const std::string& mod, const story_notebook::ManifestActor& actor, bool wireframe, Value& result, std::string& why) override {
-        return mod_actor::world_object_query(mod, actor, wireframe, result, why);
+        if (!mod_actor::world_object_query(mod, actor, wireframe, result, why)) return false;
+        // an island building's conflicts name the game's characters as the NPC catalogue does
+        if (actor.game_piece()) name_layout_conflicts(actor, result);
+        return true;
     }
     bool preview_text(const std::string& text, bool close, std::string& why) override {
         if (close) {
@@ -1325,6 +1357,26 @@ Session g_session(&g_host);
 
 // The mod's actors as the session has them, applied again (a model became ready, a restart-only change
 // is not involved): what waited for the model is created now.
+std::string refused_pieces(const std::string& mod, const std::string& piece) {
+    std::vector<story_notebook::ManifestActor> actors;
+    {
+        std::lock_guard<std::recursive_mutex> lk(g_mu);
+        const Value* m = g_session.manifest(mod);
+        std::string ignored;
+        if (!m || !story_notebook::parse_actors(*m, actors, ignored)) return "";
+    }
+    std::string refused;
+    for (const auto& a : actors) {
+        if (!a.game_piece() || a.piece != piece) continue;
+        Value r;
+        std::string w;
+        if (!mod_actor::world_object_query(mod, a, false, r, w)) continue;
+        name_layout_conflicts(a, r);
+        if (r.get("clear").boolean || r.get("conflicts").array.empty()) continue;
+        refused += (refused.empty() ? "" : "; ") + a.id + " (in the way: " + r.get("conflicts").array.front().get("message").string() + ")";
+    }
+    return refused;
+}
 void reapply_mod(const std::string& mod) {
     std::vector<story_notebook::ManifestActor> actors;
     {

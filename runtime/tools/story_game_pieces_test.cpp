@@ -2,15 +2,18 @@
 // Game pieces (story_game_pieces_catalogue.h, story_world_manifest.h, mod_actor_budget.h): the port's
 // recipes, the recipe rules, what a manifest may say about a piece (catalogued ids only; id, stage,
 // room, position and a turn only; the catalogue version gate), what a piece becomes (a static world
-// object with the piece's model and collision), and the 8 MiB room budget for buildings, in manifests,
+// object with the piece's model and collision), and the room budget for buildings (story_game_pieces_budget.h), in manifests,
 // across packages and at run time.
 #include <cassert>
 #include <cstdio>
 #include <iostream>
 #include <string>
+#include <bit>
+#include <cstring>
 #include <vector>
 
 #include "mods/mod_actor_budget.h"
+#include "mods/story_world_placement.h"
 #include "mods/story_world_manifest.h"
 
 using namespace story_notebook;
@@ -79,7 +82,7 @@ int main() {
         bad(R"("archive": "sea_Room12.szs")", R"("archive": "sea_Room13.szs")");  // not the room's archive
         bad(R"("archive": "sea_Room12.szs")", R"("archive": "../sea_Room12.szs")");
         bad(R"("room": 12})", R"("room": 50})");
-        bad(R"("archive_bytes": 3000000)", R"("archive_bytes": 9000000)");  // over the room budget alone
+        bad(R"("archive_bytes": 3000000)", "\"archive_bytes\": " + std::to_string(story_game_pieces::kRoomBudgetBytes + 1));  // over the room budget alone
         bad(R"("id": "hut")", R"("id": "Hut")");
         bad(R"("volume": [-100, 0, -100, 100, 200, 100])", R"("volume": [100, 0, -100, -100, 200, 100])");
         bad(R"("volume": [-100, 0, -100, 100, 200, 100])", R"("volume": [-100, 0, -100, 100, 200])");
@@ -117,10 +120,10 @@ int main() {
         assert(parses(manifest(many), why));
     }
     {
-        // a second set in the same room goes over 8 MiB
+        // a second set in the same room goes over the budget
         story_game_pieces::Catalogue t = c;
         std::string other = good;
-        other.replace(other.find("3000000"), 7, "3500000");
+        other.replace(other.find("3000000"), 7, std::to_string(story_game_pieces::kRoomBudgetBytes - 5000000));
         assert(t.add_set(other, why));
         std::vector<ManifestActor> list(2);
         list[0].piece = "outset-house-small", list[0].stage = "sea", list[0].room = 12;
@@ -137,7 +140,8 @@ int main() {
         assert(world_manifest::validate_world_packages(packages, why));
     }
 
-    // ---- the run-time budget (mod_actor_budget.h): a piece set may take up to 8 MiB, a model 2 MiB
+    // ---- the run-time budget (mod_actor_budget.h): a piece set may take up to the buildings' budget, a model 2 MiB;
+    // buildings don't count against a mod's own 8 MiB for its models
     {
         using namespace mod_actor::budget;
         Usage u;
@@ -146,10 +150,81 @@ int main() {
         r[0].piece = false;
         assert(!check(r, 12, u, why) && why.find("2 MiB") != std::string::npos);
         r[0].piece = true;
-        r.push_back({"m", "gp-other", 12, 2600000, 200000, 30000, 4400, true, true, true});
-        assert(!check(r, 12, u, why) && why.find("game pieces in this room exceed 8 MiB") != std::string::npos);
+        r.push_back({"m", "gp-other", 12, uint32_t(PieceRoomLimit - 5700000), 200000, 30000, 4400, true, true, true});
+        assert(!check(r, 12, u, why) && why.find("game pieces in this room exceed " + mib(PieceRoomLimit)) != std::string::npos);
+        r[1].backing = 2600000;
+        assert(check(r, 12, u, why) && !u.mods.count("m"));
         r[1].room = 13, r[1].active = false, r[1].loaded = false;
         assert(check(r, 12, u, why));
+    }
+    // ---- where a building may stand (story_world_placement.h check_building): an Outset-sized house
+    // (1340 x 1430 x 1390) on open ground is accepted; over a villager's route, a chest or a door it is
+    // refused with that reason; grass, flowers and trees under it don't count; a tag area by its own size
+    {
+        using namespace story_world_placement;
+        // a sea room's layout as the game stores it (world space): TGDR door, TRES chest, ACTR grass and a
+        // villager, SCOB tag area (scale 30 -> radius and height 300), RPAT route of two points
+        using Bytes = std::vector<uint8_t>;
+        Bytes b(4 + 6 * 12, 0);
+        auto u16 = [](Bytes& d, size_t p, uint16_t v) { d[p] = uint8_t(v >> 8), d[p + 1] = uint8_t(v); };
+        auto u32 = [](Bytes& d, size_t p, uint32_t v) { for (unsigned k = 0; k < 4; ++k) d[p + k] = uint8_t(v >> (24 - k * 8)); };
+        auto f32 = [&](Bytes& d, size_t p, float v) { u32(d, p, std::bit_cast<uint32_t>(v)); };
+        auto chunk = [&](unsigned j, const char* tag, unsigned count, size_t size) {
+            const size_t at = b.size();
+            std::memcpy(&b[4 + j * 12], tag, 4);
+            u32(b, 4 + j * 12 + 4, count), u32(b, 4 + j * 12 + 8, uint32_t(at));
+            b.resize(at + count * size, 0);
+            return at;
+        };
+        u32(b, 0, 6);
+        auto entry = [&](size_t at, const char* name, float x, float y, float z) {
+            std::memcpy(&b[at], name, std::strlen(name));
+            f32(b, at + 12, x), f32(b, at + 16, y), f32(b, at + 20, z);
+        };
+        size_t at = chunk(0, "TGDR", 1, 36);
+        entry(at, "KNOB00D", -205000, 500, 316000), b[at + 32] = b[at + 33] = b[at + 34] = 10;
+        at = chunk(1, "TRES", 1, 32);
+        entry(at, "takara3", -195000, 300, 320000);
+        at = chunk(2, "ACTR", 3, 32);
+        entry(at, "kusax21", -200000, 180, 316300), entry(at + 32, "Oyashi", -200100, 180, 316400), entry(at + 64, "Ko1", -210000, 100, 330000);
+        at = chunk(3, "SCOB", 1, 36);
+        entry(at, "TagMsg2", -190000, 100, 310000), b[at + 32] = 30, b[at + 33] = 30, b[at + 34] = 30;
+        at = chunk(4, "RPAT", 1, 12);
+        u16(b, at, 2), u32(b, at + 8, 0);
+        at = chunk(5, "RPPN", 2, 16);
+        f32(b, at + 4, -198000), f32(b, at + 8, 150), f32(b, at + 12, 324000);
+        f32(b, at + 20, -198000), f32(b, at + 24, 150), f32(b, at + 28, 328000);
+        Index sea;
+        // the room's MULT placement (-200000, 0, 300000) is not applied again to a sea room's own layout
+        assert(add_native_layout(sea, "sea", 44, b, {-200000, 0, 300000}, 0, &why));
+        assert(sea.layout.size() == 6 && sea.layout_routes.size() == 1);
+        assert(sea.layout[0].position.x == -205000 && sea.layout_routes[0].points[0].z == 324000);
+        auto house = [](float x, float y, float z) { return Bounds{{x - 670, y, z - 695}, {x + 670, y + 1430, z + 695}}; };
+        // open ground (over grass and a palm): accepted
+        assert(check_building("sea", 44, house(-200000, 178, 316300), sea).empty());
+        auto reason = [&](Bounds where) { auto c = check_building("sea", 44, where, sea); return c.size() == 1 ? c[0].kind + ": " + c[0].message + " [" + c[0].native + "]" : std::to_string(c.size()); };
+        assert(reason(house(-205200, 400, 316200)) == "door: a door of the island [KNOB00D]");
+        assert(reason(house(-195300, 200, 320300)) == "chest: a chest of the island [takara3]");
+        assert(reason(house(-198300, 100, 326000)) == "villager route: a villager route of the island [" + sea.layout_routes[0].id + "]");
+        assert(reason(house(-210000, 0, 330400)) == "villager: a villager of the island [Ko1]");
+        // the tag area's radius 300: 1000 units off is clear, 900 is not (its edge plus the margin)
+        assert(check_building("sea", 44, house(-190000 + 670 + 400, 0, 310000), sea).empty());
+        assert(reason(house(-190000 + 670 + 300, 0, 310000)) == "cutscene area: a cutscene area of the island [TagMsg2]");
+        // another room's layout and another stage don't count
+        assert(check_building("sea", 45, house(-205200, 400, 316200), sea).empty());
+        // a dungeon room's layout is room-local: it is moved by the room's placement
+        Index dungeon;
+        assert(add_native_layout(dungeon, "M_NewD2", 2, b, {1000, 0, 0}, 0, &why) && dungeon.layout[0].position.x == -204000);
+        // what the kinds are and what a building may cover
+        LayoutEntry e;
+        e.name = "kusax7";
+        assert(building_extent(e).keep == Keep::None);
+        e.name = "kytag05", e.scaled = true;
+        assert(building_extent(e).keep == Keep::None);
+        e.name = "item";
+        assert(building_extent(e).keep == Keep::Item);
+        e.name = "Unknown", e.scaled = false;
+        assert(building_extent(e).keep == Keep::Object && building_extent(e).radius == 150);
     }
     std::puts("story_game_pieces_test: ok");
     return 0;

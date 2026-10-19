@@ -1328,8 +1328,8 @@ target_include_directories(story_game_objects_test PRIVATE runtime/src)
 target_compile_options(story_game_objects_test PRIVATE -UNDEBUG)
 add_test(NAME story_game_objects COMMAND story_game_objects_test)
 # Game pieces (story_game_pieces_catalogue.h): the port's building recipes, the recipe rules, what a manifest may say
-# about a piece, and the 8 MiB room budget for buildings (manifests, packages and run time)
-add_executable(story_game_pieces_test runtime/tools/story_game_pieces_test.cpp)
+# about a piece, the room budget for buildings (manifests, packages and run time) and where a building may stand
+add_executable(story_game_pieces_test runtime/tools/story_game_pieces_test.cpp runtime/src/mods/story_world_placement.cpp)
 target_include_directories(story_game_pieces_test PRIVATE runtime/src)
 target_compile_options(story_game_pieces_test PRIVATE -UNDEBUG)
 add_test(NAME story_game_pieces COMMAND story_game_pieces_test)

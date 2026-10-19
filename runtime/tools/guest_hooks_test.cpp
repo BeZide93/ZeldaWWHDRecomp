@@ -275,6 +275,7 @@ bool burst_named(Cpu*,std::string_view e,const Placement&p,Options o){++calls;ef
 // Synthetic actor bridge: identities belong to one declared mod actor, and
 // process changes invalidate previously captured identities.
 namespace mod_actor {
+void heap_sample(Cpu*){}
 void configure_world_objects(const std::string&,PlacementProvider){}
 bool register_collision(const std::string&,const std::string&,std::shared_ptr<const story_world_collision::mesh::Mesh>){return true;}
 static BehaviorSink sink;
@@ -754,6 +755,7 @@ int main() {
     assert(story_native_wait_runtime::startups==0&&!guestmods::g_native_scenes&&!guestmods::g_package_observer);
     assert(story_actors::live_kinds==0);  // the editor's live kinds only with --editor
     assert(!story_game_objects::built());  // the game objects catalogue only with a mod that names one, or --editor
+    assert(!story_game_pieces::built());   // the buildings catalogue too
     Cpu c{};
     c.r[3] = 5; port(&c);
     assert((calls == std::vector<int>{1, 3, 6})); assert(c.r[3] == 11);

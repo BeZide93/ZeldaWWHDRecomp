@@ -606,6 +606,14 @@ Value Session::dispatch_build(const std::string& command, const Value& p, std::s
         if (!story_notebook::parse_actors(pkg->manifest, actors, why)) return r;
         const auto found = std::find_if(actors.begin(), actors.end(), [&](const auto& actor) { return actor.id == text(p, "id"); });
         if (found == actors.end() || !found->world_object()) return why = "no placed world object with that id", r;
+        // a trial pose (the editor's handle drag): where it would be, before anything changes
+        if (p.get("position").type == Value::Object) {
+            const Value& q = p.get("position");
+            for (const char* k : {"x", "y", "z"})
+                if (q.get(k).type != Value::Number || !std::isfinite(q.get(k).number)) return why = "invalid position", r;
+            found->position = {float(q.get("x").number), float(q.get("y").number), float(q.get("z").number)};
+        }
+        if (p.get("yaw").type == Value::Number && std::isfinite(p.get("yaw").number)) found->rotation.y = float(p.get("yaw").number);
         ok = host_->world_object_query(pkg->mod, *found, command == "preview_collision", r, why);
         return r;
     }
