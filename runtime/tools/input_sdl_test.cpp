@@ -317,7 +317,10 @@ int main(int argc,char** argv){
   SDL_HideWindow(game);for(SDL_Event e;SDL_PollEvent(&e);)input::handle_event(e);
   if(!SDL_GetKeyboardFocus()){input::update();assert(motorLow==0);SDL_ShowWindow(game);for(SDL_Event e;SDL_PollEvent(&e);)input::handle_event(e);}
   input::update();assert(motorLow==0xFFFF);
-  SDL_Delay(600);assert(motorLow==0);  // no update for a while (main loop stalled): the watchdog stops it
+  // no update for a while (main loop stalled): the watchdog stops it, after kRumbleStallMs (300 ms) on its
+  // 100 ms tick; waited for with a bound, not a fixed sleep, so a busy runner that delays the thread can't fail it
+  {const Uint64 stalled=SDL_GetTicks();while(motorLow!=0&&SDL_GetTicks()-stalled<5000)SDL_Delay(10);
+   assert(motorLow==0&&SDL_GetTicks()-stalled>=250);}
   rumble::pro_motor(0,true);input::update();assert(motorLow==0xFFFF);  // (the game sends it every frame)
   SDL_Event quit{};quit.type=SDL_EVENT_QUIT;SDL_PushEvent(&quit);assert(motorLow==0);  // the app ends now
   input::update();assert(motorLow==0);

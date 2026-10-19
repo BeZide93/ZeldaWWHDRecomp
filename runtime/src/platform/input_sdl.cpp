@@ -336,6 +336,7 @@ static void apply_rumble(){
  if(phone)phone_rumble_level((Uint16)(std::clamp(level,0.f,1.f)*0xFFFFu));
 #endif
  std::lock_guard lk(g_pads_mu);
+ g_rumble_update_ms=SDL_GetTicks();  // with the motors, under the lock: the watchdog decides on both at once
  rumble_all_locked((Uint16)(std::clamp(level,0.f,1.f)*0xFFFFu),kRumbleRefreshMs);
 }
 static void rumble_watchdog(){
@@ -343,6 +344,9 @@ static void rumble_watchdog(){
   SDL_Delay(100);
   if(SDL_GetTicks()-g_rumble_update_ms<kRumbleStallMs)continue;
   std::lock_guard lk(g_pads_mu);
+  // again under the lock: an update may have run between the check above and here, and the level it
+  // just sent must stand (stopping it raced the update: input_sdl_test on a busy Windows runner)
+  if(SDL_GetTicks()-g_rumble_update_ms<kRumbleStallMs)continue;
   if(std::any_of(g_rumble_sent.begin(),g_rumble_sent.end(),[](auto& s){return s.second!=0;})){
    LOG("[rumble] the main loop stalls: motors stopped");
    rumble_all_locked(0,0);  // the next update runs them again
