@@ -40,8 +40,13 @@ LIGHTS = {'bg0': 1, 'bg1': 2, 'bg2': 3, 'bg3': 4}
 # vertex attribute formats a BG vertex may use (GX2: float 32x3/32x4/32x2, unorm 8x4, 16-bit float); records are
 # copied as they are and only the float position is moved
 FORMATS = {0x811: 12, 0x813: 16, 0x80D: 8, 0x00A: 4, 0x80F: 8, 0x808: 4, 0x007: 4, 0x20A: 4, 0x00B: 4, 0x20B: 4}
-# native ground type (the collision attribute code) -> WCOL surface
-SURFACES = {2: 'col_wood', 3: 'col_stone', 4: 'col_grass', 9: 'col_metal', 11: 'col_sand', 16: 'col_grass'}
+# The game's attribute conversion (dBgS::GetAttributeCode): a triangle's raw attribute code -> the class the
+# game treats it as (footsteps, effects, damage). Several raw codes share a class (12, 13, 14, 16 and 26 are wood;
+# 17, 20 and 24 metal); 9 is damage, not metal. A fact about the format, like the runtime's NativeResultIds.
+ATTRIBUTE_CLASS = (0, 1, 2, 3, 4, 5, 6, 1, 8, 9, 10, 11, 2, 2, 2, 15, 2, 20, 1, 19, 20, 21, 22, 23, 20, 10, 2, 0, 0, 0, 0, 0)
+CLASS_SURFACES = {2: 'col_wood', 3: 'col_stone', 4: 'col_grass', 11: 'col_sand', 20: 'col_metal'}
+# raw attribute code -> WCOL surface (codes of other classes: stone on floors, a plain wall otherwise)
+SURFACES = {code: CLASS_SURFACES[c] for code, c in enumerate(ATTRIBUTE_CLASS) if c in CLASS_SURFACES}
 MAX_ARCHIVE = 12 * 1024 * 1024
 PACKS = ('first_szs_permanent.pack', 'szs_permanent0.pack', 'szs_permanent1.pack', 'szs_permanent2.pack')
 
@@ -582,7 +587,7 @@ def piece_collision(dzb, piece, room_origin, center):
         floor = n[1] / length > 0.5
         surface = SURFACES.get(code, 'col_stone' if floor else 'col_wall')
         if not floor and surface != 'col_wall':
-            surface = 'col_wall' if code not in (2,) else 'col_wood'
+            surface = 'col_wood' if surface == 'col_wood' else 'col_wall'
         row = []
         for k, p in zip((a, b, c), pts):
             if k not in remap:

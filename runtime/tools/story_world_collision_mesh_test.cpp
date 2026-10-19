@@ -23,7 +23,7 @@ void hierarchy(const std::vector<uint8_t>&b){const auto triangles=word(b,8),bloc
 bool normal_group_visible(const std::vector<uint8_t>&b,unsigned mask){const auto group=word(b,0x24);unsigned hits=0;std::function<void(unsigned,unsigned)> visit=[&](unsigned id,unsigned depth){const auto g=group+52*id;if(depth==2&&!(mask&1))return;if(half(b,g+0x2E)!=0xFFFF)++hits;for(unsigned child=half(b,g+0x28);child!=0xFFFF;child=half(b,group+52*child+0x26))visit(child,depth+1);};visit(0,1);return hits!=0;}
 
 }
-int main(){std::string why;Mesh m,out;std::array<uint8_t,9> raw{2,4,1,11,9,0,0,0,1};
+int main(){std::string why;Mesh m,out;std::array<uint8_t,9> raw{2,4,1,11,20,0,0,0,1};
     for(const auto*shape:{"box","cylinder","sphere"}){
         assert(make_shape(shape,{100,80,120},50,80,1,m,why));assert(validate(m,why));
         double volume=0;for(auto&t:m.triangles){auto a=m.vertices[t.indices[0]],b=m.vertices[t.indices[1]],c=m.vertices[t.indices[2]];volume+=(double(a.x)*(double(b.y)*c.z-double(b.z)*c.y)+double(a.y)*(double(b.z)*c.x-double(b.x)*c.z)+double(a.z)*(double(b.x)*c.y-double(b.y)*c.x))/6;}assert(volume>0);
@@ -38,4 +38,11 @@ int main(){std::string why;Mesh m,out;std::array<uint8_t,9> raw{2,4,1,11,9,0,0,0
     assert(make_shape("box",{100,100,100},0,0,0,m,why));m.triangles[0].semantic=6;assert(decode(wcol(m),out,why)&&out.triangles[0].semantic==6);assert(!make_shape("box",{100,100,100},0,0,6,out,why));
     for(uint16_t semantic:{7,8}){m.triangles[0].semantic=semantic;assert(decode(wcol(m),out,why)&&out.triangles[0].semantic==semantic);assert(!make_shape("box",{100,100,100},0,0,semantic,out,why));}
     assert(!make_shape("box",{0,1,1},1,1,0,out,why));assert(!make_shape("sphere",{},10001,0,0,out,why));assert(!make_shape("capsule",{},1,1,0,out,why));
+    // Metal is the game's metal class (20, as Islet of Steel), never damage (9): with a conversion where two
+    // raw codes give class 20 (17 and 20) and code 9 stays damage, metal writes 20 (its own class), stone 3.
+    {uint32_t conversion[32];for(unsigned c=0;c<32;++c)conversion[c]=c;conversion[17]=20;conversion[7]=1;conversion[12]=2;
+     std::array<uint8_t,9> got{};assert(native_attributes(conversion,NativeResultIds,got));assert(NativeResultIds[4]==20&&got[4]==20&&got[4]!=9);
+     assert(got[0]==3&&got[1]==4&&got[2]==2&&got[3]==11&&got[5]==0&&got[8]==2);
+     conversion[20]=21;assert(native_attributes(conversion,NativeResultIds,got)&&got[4]==17); // no own code: the first code of the class
+     conversion[17]=9;assert(!native_attributes(conversion,NativeResultIds,got));} // no metal code at all: refused
 }

@@ -150,6 +150,19 @@ class Collision(unittest.TestCase):
         self.assertEqual(info['collision_triangles'], 3)
         self.assertEqual(gp.piece_collision(col, {'volume': piece['volume'], 'collision': {'groups': []}}, o, (0, 0, 0))[2], 0)
 
+    def test_surfaces_follow_the_game_classes(self):
+        # metal is the game's metal class (raw 17, 20, 24), never raw 9 (damage); the wood class has several codes
+        self.assertEqual({c for c, s in gp.SURFACES.items() if s == 'col_metal'}, {17, 20, 24})
+        self.assertNotIn(9, gp.SURFACES)
+        self.assertEqual({c for c, s in gp.SURFACES.items() if s == 'col_wood'}, {2, 12, 13, 14, 16, 26})
+        self.assertEqual((gp.SURFACES[3], gp.SURFACES[4], gp.SURFACES[11]), ('col_stone', 'col_grass', 'col_sand'))
+        o = (0.0, 0.0, 0.0)
+        v = [(0, 0, 0), (0, 0, 100), (100, 0, 0)]
+        for code, want in ((20, 'col_metal'), (9, 'col_stone'), (16, 'col_wood')):
+            col = dzb(v, [(0, 1, 2, 0, 0)], ['g'], [(0x07FFE0FF, (code << 16) | 0xFF, 0xFFFFFFFF, 0)])
+            body, _, _ = gp.piece_collision(col, {'volume': [-1, -1, -1, 200, 200, 200], 'collision': {'groups': ['g']}}, o, o)
+            self.assertEqual(struct.unpack_from('>4H', body, 40 + 12 * 3)[3], collision_mesh.SEMANTICS[want])
+
 
 @unittest.skipUnless(os.environ.get('WWHD_GAME_DIR'), 'set WWHD_GAME_DIR to build the recipes from a game folder')
 class FromGame(unittest.TestCase):
