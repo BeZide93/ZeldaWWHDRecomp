@@ -137,6 +137,7 @@ const std::vector<ActorType>& actor_types() {
         {"peahat", "Peahat", "Enemies", "The game's Peahat: it flies; knock it down (the boomerang or the Deku Leaf's wind), then strike.", false, false, false},
         {"miniblin", "Miniblin", "Enemies", "The game's Miniblin: it pops up when Link comes near and is defeated for good.", false, false, false},
         {"darknut", "Darknut", "Enemies", "The game's Darknut, with its sword (with a shield, a helmet, or the Mighty Darknut's cape: options.variant).", false, false, false},
+        {"rat_hole", "Rat hole", "Enemies", "A rat hole three rats come out of, one after the other (rats, bomb rats or both: options.variant); each defeated rat drops the hole's drops, and the hole closes when all three are defeated.", false, false, false},
         {"model", "Your model", "Your models", "One of the mod's models (static or skinned), with collision.", true, false, true},
         {"model_enemy", "Your enemy", "Your models", "A skinned model that fights (needs flinch, stun, death and idle clips).", true, true, false},
         {"model_carry", "Carried prop", "Your models", "A model Link can lift and carry.", true, false, false},

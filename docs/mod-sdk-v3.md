@@ -33,7 +33,7 @@ The initial allowlist is deliberately small:
 | Breakable prop | `pot`, `barrel`, `crate` | Required mod-owned `broken_flag` and `drops` list |
 | Latched floor switch | `switch` | Required mod-owned `switch_flag`; fixed yellow switch |
 | Rotating gate | `door` | Required `switch` naming a switch actor in the same mod |
-| Native enemies (preview) | `chuchu`, `bokoblin`, `moblin`, `keese`, `miniblin`, `peahat`, `darknut` | Required mod-owned `defeated_flag` and `drops`; fixed ordinary variants |
+| Native enemies (preview) | `chuchu`, `bokoblin`, `moblin`, `keese`, `miniblin`, `peahat`, `darknut`, `rat_hole` | Required mod-owned `defeated_flag` and `drops`; fixed ordinary variants |
 
 Resident names are exact native object codes in lower case. Each placed copy uses fixed ordinary
 parameters: it stands where you put it (unless you give it a route, below) and has none of the
@@ -449,6 +449,7 @@ The allowlist below defines the supported variants.
 | `miniblin` | Ordinary Miniblin: hidden until Link comes near and looks its way; never respawns |
 | `peahat` | Ordinary Peahat: it flies; knock it down (the boomerang, the Deku Leaf's wind, the hookshot), then strike. Never the Seahat |
 | `darknut` | Darknut guarding its place with its sword, or a declared variant (below) |
+| `rat_hole` | A rat hole three rats come out of (see [Rat holes](#rat-holes)) |
 
 All of them use the same declaration fields:
 
@@ -491,6 +492,59 @@ weapons must not damage retail actors or join retail enemy cohorts. Native item
 drops are replaced by the declared Bag rewards. Some native disappearance effects
 are omitted because their native effect actor also creates retail drops; identical
 retail defeat effects are not promised.
+
+### Patrolling Bokoblins and Moblins
+
+A Bokoblin (any variant) or a Moblin with a `path` patrols it with the game's own patrol: it
+walks from its position through the points and turns round at the ends (`"mode": "back_and_forth"`)
+or goes round (`"mode": "loop"`). When it sees Link it fights him, then goes back to its route. Its
+pace and pauses are its own, so `speed` and `pauses` are refused, and so is `once`.
+
+```json
+{"id": "beach-patrol", "actor": "moblin", "stage": "sea", "room": 11,
+ "position": {"x": 0, "y": 1040, "z": -201500},
+ "path": {"points": [{"x": 0, "y": 1040, "z": -201000}, {"x": 500, "y": 1040, "z": -201000}], "mode": "loop"},
+ "defeated_flag": "beach-patrol.defeated", "drops": []}
+```
+
+The route is the port's own record (the one walking residents use), handed to the game's patrol
+code in place of a room path; the game's room data is never read for it. A route has up to 15
+points. In the editor, a Bokoblin's or Moblin's Inspector has the Route section.
+
+### Rat holes
+
+`"actor": "rat_hole"` places a rat hole. Three rats come out of it, one after the other: the next
+one when the one before is defeated, while Link is near the hole (within about 13 metres, not right
+on top of it). They are the game's own rats: they climb out of the hole, run at Link when he has his
+back to them, jump on him and steal rupees, which they drop again as ordinary rupees when they are
+hit. The variant picks the rats:
+
+| `variant` | Rats |
+| --- | --- |
+| `rats` (the default) | Three ordinary rats |
+| `bomb_rats` | Three bomb rats: each lights a bomb, carries it to Link, throws it and runs back into the hole |
+| `mixed` | An ordinary rat, a bomb rat, then an ordinary rat |
+
+```json
+{"id": "cellar-hole", "actor": "rat_hole", "parameters": {"variant": "mixed"},
+ "stage": "sea", "room": 11, "position": {"x": 0, "y": 1040, "z": -201500},
+ "defeated_flag": "cellar-hole.closed", "drops": [{"item": "item:coral-shard", "quantity": 1}]}
+```
+
+Every rat is an enemy of its own: defeating it records `<defeated_flag>.rat1` (`.rat2`, `.rat3`)
+and gives the hole's `drops`, so `drops` are given once per rat. When all three are defeated the
+hole closes: its `defeated_flag` is set and the hole is gone for good; a `defeat_switch` on the hole
+is set at that moment. A rat that gets away comes out again later: a bomb rat throws its bomb at Link and
+runs back into the hole, and a rat that falls into deep water or carries something off is gone for now
+too. Only a rat Link defeats counts.
+
+A bomb rat's bomb belongs to the mod: its blast hurts Link and the mod's own enemies, but never the
+game's pots, barrels, switches, enemies or anything else of the game, and Link cannot pick it up.
+The hole is not blocked by objects set on it, as the game's own holes are, and it never calls the
+rat shop keeper. The hole's `id` and `defeated_flag` are at most 27 characters (the rats add `.rat1`
+to `.rat3`), and no other actor may use those rat names. A hole counts as four actors (itself and its
+rats) toward the 16 per room and 64 per mod; a room has at most two rat holes. In the editor, a
+placed hole's Inspector has **Variant**; removing the hole removes its rats too.
 
 ### Opening a door when enemies are defeated
 
@@ -546,11 +600,10 @@ saves work as for the green one. A blue or yellow ChuChu can only be cut while i
 sparking: stun it first (the boomerang or a bomb), then use the sword. The stone black
 ChuChu is the one placed enemy Link may lift; breaking it counts as its defeat. Every Bokoblin variant is the ordinary waiting and
 searching Bokoblin without a path or game switch; its weapon stays the placed copy's
-own and cannot be taken. Patrolling Bokoblins need the game's room paths and are
-not offered. The Moblin has no safe variant beyond the ordinary one: its lantern mode is the
+own and cannot be taken. A Bokoblin can also patrol (above). The Moblin has no safe variant beyond the ordinary one: its lantern mode is the
 Forsaken Fortress searchlight guard (it raises the fortress alarm and reads the game's collection
 state), its flying mode needs a Kargaroc carrying it, its statue mode reads the game's Hyrule
-state, and its patrol needs a room path. Other names, and variants for an enemy that has
+state. Its patrol is offered (above). Other names, and variants for an enemy that has
 none, are validator errors.
 
 Every Darknut guards the place you put it and fights Link when he comes near; it has no path and

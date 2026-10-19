@@ -66,7 +66,7 @@ uint32_t(*g_call)(Cpu*,uint32_t,std::initializer_list<uint32_t>)=nullptr;
 uint32_t g_scratch=0; bool g_installed=false,g_resident_hooks=false,g_ym1_hooks=false;
 std::function<bool(const std::string&,const std::string&)> g_scene;
 const uint32_t kRoom=GC(0x025C2E8C),kCreate=GC(0x025D5834),kSearch=GC(0x025D54C4),kSearchName=GC(0x025C109C);
-const uint32_t kPlay=GC(0x025200D4),kDelete=GC(0x025D57E0);
+const uint32_t kPlay=GC(0x025200D4),kDelete=GC(0x025D57E0),kCreateChild=GC(0x025D5A20);
 const uint32_t kStage=GD(0x1046F0B0)+0x5134,kSave=GD(0x101F84DC);
 const uint32_t kChestCheck=GC(0x024B4AB4),kChestOpen=GC(0x024B63A8),kOnBox=GC(0x025B8C0C);
 const uint32_t kSignExecute=GC(0x0218B234),kSignDelete=GC(0x0218C824);
@@ -80,7 +80,7 @@ constexpr uint32_t kCarrier=0x2CF3,kYm1=story_resident_types::kSeatedYm1,kTalkLa
 bool people_type(unsigned resident){return resident<256&&story_resident_types::people(uint8_t(resident));}
 // a placed resident walking a mod route (manifest "path")
 // a patrolling Bokoblin: a native Bokoblin with its own route (d_a_bk walks it as its patrol path)
-bool patrols(const ManifestActor& a){return a.actor=="bokoblin"&&a.kind.empty()&&!a.path.points.empty();}
+bool patrols(const ManifestActor& a){return (a.actor=="bokoblin"||a.actor=="moblin")&&a.kind.empty()&&!a.path.points.empty();}
 // an actor following a port-owned route record: a walking resident or a patrolling Bokoblin
 bool walks(const ManifestActor& a){return (a.actor=="resident"&&!a.path.points.empty()&&a.resident<256&&story_resident_types::walker(uint8_t(a.resident)))||patrols(a);}
 static_assert(kTalkLatchOffset+128<=0x300); // Native PID slots precede this; room readiness follows it.
@@ -90,9 +90,18 @@ const uint32_t kYm1Demo=GC(0x022F8344),kYm1Staff=GC(0x022F8504),kYm1CheckTalk=GC
 Actor* g_opening=nullptr;
 struct Talk {uint32_t npc=0; Actor* actor=nullptr;std::u16string text;bool started=false;bool terminal=false;std::vector<story_notebook::StoryAction> then;std::string flag;};
 Talk g_talk;
-bool enemy_kind(const ManifestActor& a,story_enemies::Kind& kind){if(a.actor=="chuchu")kind=story_enemies::Kind::ChuChu;else if(a.actor=="bokoblin")kind=story_enemies::Kind::Bokoblin;else if(a.actor=="moblin")kind=story_enemies::Kind::Moblin;else if(a.actor=="keese")kind=story_enemies::Kind::Keese;else if(a.actor=="miniblin")kind=story_enemies::Kind::Miniblin;else if(a.actor=="peahat")kind=story_enemies::Kind::Peahat;else if(a.actor=="darknut")kind=story_enemies::Kind::Darknut;else return false;return true;}
+bool enemy_kind(const ManifestActor& a,story_enemies::Kind& kind){if(a.actor=="chuchu")kind=story_enemies::Kind::ChuChu;else if(a.actor=="bokoblin")kind=story_enemies::Kind::Bokoblin;else if(a.actor=="moblin")kind=story_enemies::Kind::Moblin;else if(a.actor=="keese")kind=story_enemies::Kind::Keese;else if(a.actor=="miniblin")kind=story_enemies::Kind::Miniblin;else if(a.actor=="peahat")kind=story_enemies::Kind::Peahat;else if(a.actor=="darknut")kind=story_enemies::Kind::Darknut;else if(a.actor=="rat"&&!a.hole.empty())kind=story_enemies::Kind::Rat;else if(a.actor=="rat_hole")kind=story_enemies::Kind::RatHole;else return false;return true;}
 // a declaration's actor parameters: its variant's, as a patrol when it walks a route
-uint32_t enemy_params(story_enemies::Kind kind,const ManifestActor& a){const uint32_t p=story_enemies::parameters(kind,a.variant);return patrols(a)&&p?story_enemy_variants::bokoblin_patrol(p):p;}
+uint32_t enemy_params(story_enemies::Kind kind,const ManifestActor& a){if(kind==story_enemies::Kind::Rat)return story_enemies::parameters(kind)|(a.rat_bomb?0x100u:0u);const uint32_t p=story_enemies::parameters(kind,a.variant);return patrols(a)&&p?(a.actor=="moblin"?story_enemy_variants::moblin_patrol(p):story_enemy_variants::bokoblin_patrol(p)):p;}
+// A rat hole is one declaration in the manifest and 1 + 3 actors here: the owned hole and its three rats,
+// each an owned enemy of its own (its marker, the hole's drops), created as the hole's children.
+std::vector<ManifestActor> expand_rat_holes(const std::vector<ManifestActor>& declared){
+    std::vector<ManifestActor> out;out.reserve(declared.size());
+    for(const auto& a:declared){out.push_back(a);if(a.actor!="rat_hole"||!a.kind.empty())continue;
+        for(unsigned n=0;n<story_enemy_variants::kRatsPerHole;++n){ManifestActor r=a;r.actor="rat";r.variant.clear();r.defeat_switch.clear();
+            r.id=a.id+".rat"+std::to_string(n+1);r.defeated_flag=a.defeated_flag+".rat"+std::to_string(n+1);r.hole=a.id;r.rat_bomb=story_enemy_variants::rat_bomb(a.variant,n);out.push_back(r);}}
+    return out;
+}
 bool enemies_declared(){return std::any_of(g_actors.begin(),g_actors.end(),[](const Actor&a){return a.enemy_token!=0;});}
 bool combat_declared(){return enemies_declared()||std::any_of(g_actors.begin(),g_actors.end(),[](const Actor&a){return a.spec.kind=="mod"&&a.spec.combat_enabled;});}
 bool pure_link(uint32_t& actor,uint32_t& pid){actor=ld32(GD(0x1046F0B0)+0x5B34);if(actor<mem::kMem2Start||actor>mem::kMem2End-0x8260u||(actor&3)||ld16(actor+0xE)!=0xA8)return false;pid=ld32(actor+4);return pid&&pid!=0xFFFFFFFFu;}
@@ -479,7 +488,8 @@ mod_actor::TalkProvider mod_talk_provider(const std::string&mod,const std::strin
  };
 }
 bool load(const std::string& mod,const std::vector<ManifestActor>& actors,std::string& why) {return load(mod,actors,why,{});}
-bool load(const std::string& mod,const std::vector<ManifestActor>& actors,std::string& why,const std::vector<std::string>& scene_flags) {
+bool load(const std::string& mod,const std::vector<ManifestActor>& declared,std::string& why,const std::vector<std::string>& scene_flags) {
+    const std::vector<ManifestActor> actors=expand_rat_holes(declared);
     if(g_installed)return why="world actors require startup declaration",false;
     if(!check_specs(mod,actors,false,why))return false;
     if(g_actors.capacity()<128)g_actors.reserve(128);  // the world editor adds actors later: their addresses stay put
@@ -579,6 +589,34 @@ bool route_record(Actor& a,bool fresh){
     if(fresh)story_resident_routes::set_owner(unsigned(a.route_slot),0);
     return true;
 }
+// A rat hole's rats come out one at a time, as the hole's children (the game's own rat-hole rats: they
+// climb out of it), while the hole stands, the rats before them are defeated and Link is in the hole's
+// reach but not on top of it (d_a_nzg: within its range, farther than 200). The hole closes (its marker
+// is set, no drops) once its three rats are defeated.
+constexpr float kRatHoleReach=1275.0f,kRatHoleNear=200.0f;
+const Actor* rat_hole_of(const Actor& rat){for(const auto&h:g_actors)if(h.mod==rat.mod&&h.spec.id==rat.spec.hole&&h.spec.actor=="rat_hole")return &h;return nullptr;}
+uint32_t rat_hole_ready(Cpu* c,const Actor& rat){
+    const Actor* h=rat_hole_of(rat);if(!h||h->removed||!h->enemy_token||h->process==0xFFFFFFFFu||h->deleting||!story_enemies::available(h->enemy_token))return 0xFFFFFFFFu;
+    for(const auto&b:g_actors){if(&b==&rat)break;if(b.mod==rat.mod&&b.spec.hole==rat.spec.hole&&!b.removed&&b.enemy_token&&!story_enemies::is_defeated(b.enemy_token))return 0xFFFFFFFFu;}
+    Cpu probe=*c;st32(g_scratch+0x40,0);if(!g_call(&probe,kSearch,{h->process,g_scratch+0x40}))return 0xFFFFFFFFu;
+    const uint32_t hole=ld32(g_scratch+0x40);if(!hole||ld32(hole+4)!=h->process||!story_enemies::verify_actor(h->enemy_token,story_enemies::Kind::RatHole,hole))return 0xFFFFFFFFu;
+    probe=*c;const uint32_t play=g_call(&probe,kPlay,{});const uint32_t player=play?ld32(play+0x5B34):0;if(!player)return 0xFFFFFFFFu;
+    const float dx=ldf32(player+0x314)-ldf32(hole+0x314),dz=ldf32(player+0x31C)-ldf32(hole+0x31C),d=dx*dx+dz*dz;
+    if(!(d<kRatHoleReach*kRatHoleReach)||!(d>kRatHoleNear*kRatHoleNear))return 0xFFFFFFFFu;
+    return h->process;
+}
+// fopAcM_createChild(proc, parent, params, pos, room, angle, scale, subtype, createFunc): its ninth
+// argument (createFunc, none) is passed on the stack, at 8(r1) of the frame the call opens (guest_call
+// opens 0x40 bytes below the caller's r1); the place, angle and scale are in the scratch like kCreate's
+uint32_t create_child(Cpu& call,uint32_t proc,uint32_t parent,uint32_t params,uint32_t room){
+    st32(call.r[1]-0x40+8,0);
+    return g_call(&call,kCreateChild,{proc,parent,params,g_scratch,room,g_scratch+0xC,g_scratch+0x14,0xFFFFFFFFu});
+}
+void close_rat_holes(){
+    for(auto&h:g_actors){if(h.removed||h.spec.actor!="rat_hole"||!h.enemy_token||!story_enemies::available(h.enemy_token))continue;
+        bool rats=false,all=true;for(const auto&r:g_actors)if(r.mod==h.mod&&r.spec.hole==h.spec.id&&!r.removed&&r.enemy_token){rats=true;if(!story_enemies::is_defeated(r.enemy_token)){all=false;break;}}
+        if(rats&&all&&story_enemies::settle(h.enemy_token))LOG("[actors] %s:%s closed: its rats are defeated",h.mod.c_str(),h.spec.id.c_str());}
+}
 void room_loaded(Cpu* c,int room) {
     if(!g_installed||!g_scratch)return;
     if(room>=0&&room<=63)story_game_objects::note_room(ld32(GD(0x1047E8F0)+uint32_t(room)*0x22C));
@@ -613,6 +651,7 @@ void room_loaded(Cpu* c,int room) {
         if(a.prop_token&&!story_props::available(a.prop_token))continue;
         if(a.switch_token&&!story_switches::available(a.switch_token))continue;
         if(a.enemy_token&&(!story_enemies::available(a.enemy_token)||!story_enemy_ownership::can_spawn(a.enemy_token)))continue;
+        const uint32_t hole_pid=a.spec.hole.empty()?0xFFFFFFFFu:rat_hole_ready(c,a);if(!a.spec.hole.empty()&&hole_pid==0xFFFFFFFFu)continue;
         if(a.game){
             // the game's own object by name, like its stage loader; three creations the game gives up on in one room visit quarantine it
             const auto*e=story_game_objects::catalogue().find(story_game_objects::reference(a.spec.actor));std::string why;
@@ -655,7 +694,7 @@ void room_loaded(Cpu* c,int room) {
         Cpu call=*c;a.deleting=false;
         const uint32_t previous_layer=g_call(&call,GC(0x025DED64),{});
         g_call(&call,GC(0x025DEAB4),{room_layer});
-        try{talk_latch(&a,0);a.process=g_call(&call,kCreate,{proc,params,g_scratch,uint32_t(room),g_scratch+0xC,g_scratch+0x14,a.game?(a.game_native.subtype==0xFF?0xFFFFFFFFu:uint32_t(a.game_native.subtype)):a.spec.actor=="resident"&&a.spec.resident!=kYm1?a.spec.resident:0xFFFFFFFFu,0});}
+        try{talk_latch(&a,0);a.process=hole_pid!=0xFFFFFFFFu?create_child(call,proc,hole_pid,params,uint32_t(room)):g_call(&call,kCreate,{proc,params,g_scratch,uint32_t(room),g_scratch+0xC,g_scratch+0x14,a.game?(a.game_native.subtype==0xFF?0xFFFFFFFFu:uint32_t(a.game_native.subtype)):a.spec.actor=="resident"&&a.spec.resident!=kYm1?a.spec.resident:0xFFFFFFFFu,0});}
         catch(...){g_call(&call,GC(0x025DEAB4),{previous_layer});throw;}
         g_call(&call,GC(0x025DEAB4),{previous_layer});
         if(a.enemy_token&&a.process&&a.process!=0xFFFFFFFFu)story_enemies::bind(a.enemy_token,a.process);
@@ -707,7 +746,7 @@ void apply_defeat_switches(){
 }
 void service(Cpu* c){
     if(!g_installed||!g_scratch)return;
-    apply_defeat_switches();
+    close_rat_holes();apply_defeat_switches();
     if(pose_trace()){static unsigned n=0;if(n++%20==0)for(const auto& a:g_actors)if(!a.removed&&a.process!=0xFFFFFFFFu)trace_drawn(c,a,"step");}
     refresh_link();
     if(g_talk.actor&&g_talk.actor->spec.actor=="resident"){
@@ -951,12 +990,14 @@ bool editor_kind_live(const std::string& type,bool fallback){
     if(type=="pot"||type=="barrel"||type=="crate")return g_installed&&story_props::live();
     if(type=="switch")return g_installed&&story_switches::live(story_switches::Kind::Switch);
     if(type=="door")return g_installed&&story_switches::live(story_switches::Kind::Door);
-    if(type=="chuchu"||type=="bokoblin"||type=="moblin"||type=="keese"||type=="miniblin"||type=="peahat"||type=="darknut")return g_installed&&story_enemies::live();
+    if(type=="chuchu"||type=="bokoblin"||type=="moblin"||type=="keese"||type=="miniblin"||type=="peahat"||type=="darknut"||type=="rat_hole")return g_installed&&story_enemies::live();
     if(type=="model_enemy"||type=="model_carry")return false;
     if(type=="resident")return g_installed&&g_resident_hooks;
     return fallback&&g_installed;
 }
-bool editor_update(const std::string& mod,const std::vector<ManifestActor>& actors,const std::vector<std::string>& changed,std::string& why,std::vector<std::string>* pending,Cpu* cpu){
+bool editor_update(const std::string& mod,const std::vector<ManifestActor>& declared,const std::vector<std::string>& changed_declared,std::string& why,std::vector<std::string>* pending,Cpu* cpu){
+    const std::vector<ManifestActor> actors=expand_rat_holes(declared);std::vector<std::string> changed=changed_declared;
+    for(const auto& a:actors)if(!a.hole.empty()&&std::find(changed.begin(),changed.end(),a.hole)!=changed.end())changed.push_back(a.id);  // a changed hole: its rats too
     std::map<std::string,Actor*> own;for(auto& a:g_actors)if(a.mod==mod)own[a.spec.id]=&a;
     struct Step {const ManifestActor* spec=nullptr;Actor* actor=nullptr;bool create=false,update=false;};
     std::vector<Step> plan;std::vector<std::string> later;std::vector<Actor*> remove;
@@ -1346,7 +1387,7 @@ void install(const std::function<std::string(uint32_t)>& replaced_by,const std::
     // a failure here only means they appear after a restart
     bool live_enemies=false;
     if(g_live_kinds&&!has_combat){
-        const std::array<uint32_t,story_enemy_ownership::kKindCount> profiles={g_scratch+kEnemyProfilesScratchOffset,g_scratch+kEnemyProfilesScratchOffset+0x30,g_scratch+kEnemyProfilesScratchOffset+0x60,g_scratch+kEnemyProfilesScratchOffset+0x90,g_scratch+kMiniblinProfileScratchOffset,g_scratch+kExtraEnemyProfilesScratchOffset,g_scratch+kExtraEnemyProfilesScratchOffset+0x30,g_scratch+kDarknutProfileScratchOffset};
+        const std::array<uint32_t,story_enemy_ownership::kKindCount> profiles={g_scratch+kEnemyProfilesScratchOffset,g_scratch+kEnemyProfilesScratchOffset+0x30,g_scratch+kEnemyProfilesScratchOffset+0x60,g_scratch+kEnemyProfilesScratchOffset+0x90,g_scratch+kMiniblinProfileScratchOffset,g_scratch+kExtraEnemyProfilesScratchOffset,g_scratch+kExtraEnemyProfilesScratchOffset+0x30,g_scratch+kDarknutProfileScratchOffset,g_scratch+kRatHoleProfileScratchOffset};
         live_enemies=configure_enemy_declarations()&&story_enemy_ownership::configure(g_scratch+kEnemyOwnershipScratchOffset,story_enemy_ownership::kStorageBytes,g_original,story_enemies::verify_actor);
         if(live_enemies){
             story_enemy_ownership::initialize_storage();
@@ -1362,7 +1403,7 @@ void install(const std::function<std::string(uint32_t)>& replaced_by,const std::
         story_enemy_ownership::initialize_storage();
         if(!story_enemy_projectiles::configure(g_original,pure_link,true))exception_report::raise("Cannot configure combat projectile ownership");
         if(has_enemies){
-            const std::array<uint32_t,story_enemy_ownership::kKindCount> profiles={g_scratch+kEnemyProfilesScratchOffset,g_scratch+kEnemyProfilesScratchOffset+0x30,g_scratch+kEnemyProfilesScratchOffset+0x60,g_scratch+kEnemyProfilesScratchOffset+0x90,g_scratch+kMiniblinProfileScratchOffset,g_scratch+kExtraEnemyProfilesScratchOffset,g_scratch+kExtraEnemyProfilesScratchOffset+0x30,g_scratch+kDarknutProfileScratchOffset};
+            const std::array<uint32_t,story_enemy_ownership::kKindCount> profiles={g_scratch+kEnemyProfilesScratchOffset,g_scratch+kEnemyProfilesScratchOffset+0x30,g_scratch+kEnemyProfilesScratchOffset+0x60,g_scratch+kEnemyProfilesScratchOffset+0x90,g_scratch+kMiniblinProfileScratchOffset,g_scratch+kExtraEnemyProfilesScratchOffset,g_scratch+kExtraEnemyProfilesScratchOffset+0x30,g_scratch+kDarknutProfileScratchOffset,g_scratch+kRatHoleProfileScratchOffset};
             story_enemies::configure(g_original,g_call,profiles,[](uint32_t token,uint32_t pid){if(!g_scratch)return;for(size_t i=0;i<g_actors.size();++i){auto&a=g_actors[i];const uint32_t slot=g_scratch+128+uint32_t(i)*4;if(a.enemy_token==token&&a.process==pid&&ld32(slot)==pid){a.process=0xFFFFFFFFu;a.deleting=false;st32(slot,0xFFFFFFFFu);return;}}});
             if(!story_enemy_children::configure(g_original,g_call,story_enemies::child_retired)||!native_actor_carry::configure(g_original,g_call)||!native_actor_carry::register_guard("enemies",story_enemies::deny_carry))exception_report::raise("Cannot configure native enemy isolation bridges");
         }

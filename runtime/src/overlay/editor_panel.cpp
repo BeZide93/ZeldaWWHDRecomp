@@ -159,7 +159,7 @@ void mark(const char* field) {
 }
 
 // What an actor is, for the list and the inspector.
-bool is_enemy(const std::string& actor) { return actor == "chuchu" || actor == "bokoblin" || actor == "moblin" || actor == "keese" || actor == "miniblin" || actor == "peahat" || actor == "darknut"; }
+bool is_enemy(const std::string& actor) { return actor == "chuchu" || actor == "bokoblin" || actor == "moblin" || actor == "keese" || actor == "miniblin" || actor == "peahat" || actor == "darknut" || actor == "rat_hole"; }
 bool is_prop(const std::string& actor) { return actor == "pot" || actor == "barrel" || actor == "crate"; }
 std::string kind_label(const Value& a) {
     const std::string actor = a.get("actor").string();
@@ -662,7 +662,7 @@ void actor_inspector(const Value& m) {
             ImGui::EndCombo();
         }
     }
-    if (actor == "resident" || (actor == "bokoblin" && !is_mod) || (is_mod && !combat && !carry && a->get("behaviour").type == Value::Null)) route_section(m, *a);
+    if (actor == "resident" || ((actor == "bokoblin" || actor == "moblin") && !is_mod) || (is_mod && !combat && !carry && a->get("behaviour").type == Value::Null)) route_section(m, *a);
     if (is_enemy(actor) || combat) edit_property(p, *a, "Defeated flag (set when it is beaten)", "defeated_flag");
     if (is_enemy(actor) || combat) {  // a mod switch set when every enemy naming it is defeated (doors follow it)
         ImGui::TextUnformatted("Sets switch when defeated");

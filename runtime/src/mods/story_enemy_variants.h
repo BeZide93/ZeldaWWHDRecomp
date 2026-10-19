@@ -36,6 +36,11 @@ inline constexpr Variant kVariants[] = {
     {"chuchu", "black", 0xFF000300u, "Black ChuChu", "A black ChuChu: swords bounce off; light turns it to stone, then Link can lift and throw it to break it (or use the hammer)."},
     // Bokoblin (d_a_bk): type 4 (the ordinary one that waits and searches), no path, no switches; bit 0x20
     // gives it a shield and 7 health instead of 5, bit 0x40 a machete (daBoko type 1) instead of the stick.
+    // Rat hole (d_a_nzg): the hole itself is always the same; its three rats are ordinary rats, bomb
+    // rats (each lights a bomb and chases Link) or both, one after the other.
+    {"rat_hole", "rats", 0xFF010100u, "Rat hole", "A hole three rats come out of; they run at Link from behind and steal rupees."},
+    {"rat_hole", "bomb_rats", 0xFF010100u, "Rat hole (bomb rats)", "A hole three bomb rats come out of: each lights a bomb, throws it at Link and runs back."},
+    {"rat_hole", "mixed", 0xFF010100u, "Rat hole (mixed)", "A hole an ordinary rat, a bomb rat and another ordinary rat come out of."},
     {"bokoblin", "stick", 0xFFFFFF04u, "Bokoblin", "The ordinary Bokoblin with a stick."},
     {"bokoblin", "shield", 0xFFFFFF24u, "Bokoblin with a shield", "A Bokoblin with a stick and a shield: it blocks, and takes more hits."},
     {"bokoblin", "machete", 0xFFFFFF44u, "Bokoblin with a machete", "A Bokoblin with a machete instead of the stick."},
@@ -74,6 +79,9 @@ inline std::string names(const std::string& kind) {
     }
     return out;
 }
+// how many rats a rat hole has, and whether its rat `n` (0-based) carries a bomb
+inline constexpr unsigned kRatsPerHole = 3;
+inline bool rat_bomb(const std::string& variant, unsigned n) { return variant == "bomb_rats" || (variant == "mixed" && n == 1); }
 // the weapon (daBoko parameter) a Bokoblin variant's parameter word creates: 1 the machete, 0 the stick
 inline constexpr uint32_t bokoblin_weapon(uint32_t params) { return (params & 0x40u) ? 1u : 0u; }
 // the x rotation word of the kind's variant with parameter word `params` (0 for none)
@@ -87,6 +95,10 @@ inline uint16_t angle_x(const std::string& kind, uint32_t params) {
 inline constexpr uint32_t kPatrolRoute = 0xFE;
 inline constexpr uint32_t bokoblin_patrol(uint32_t params) { return (params & ~0x00FF000Fu) | (kPatrolRoute << 16); }
 inline constexpr bool bokoblin_patrols(uint32_t params) { return ((params >> 16) & 0xFF) == kPatrolRoute; }
+// A patrolling Moblin: its ordinary word (mode 0) with the route number kPatrolRoute (d_a_mo2 mPathIndex).
+inline constexpr uint32_t moblin_patrol(uint32_t params) { return (params & ~0x00FF0000u) | (kPatrolRoute << 16); }
+// whether a Bokoblin's or Moblin's word names the port's route
+inline constexpr bool patrol_word(uint32_t params) { return ((params >> 16) & 0xFF) == kPatrolRoute; }
 // whether `params` is one of the kind's declared parameter words (a Bokoblin's also as a patrol)
 inline bool declared_params(const std::string& kind, uint32_t params) {
     for (const Variant& v : kVariants)

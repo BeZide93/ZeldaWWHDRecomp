@@ -8,12 +8,12 @@
 #include <cstring>
 namespace native_actor_profiles { namespace {
 struct Entry {uint16_t id=0;uint32_t address=0;BaseAllocated allocated=nullptr;};
-std::array<Entry,14> entries{};
+std::array<Entry,16> entries{};
 struct Listener {std::string name;BeforeDelete callback=nullptr;};
 std::array<Listener,8> listeners{};
 void(*original)(Cpu*,uint32_t)=nullptr;uint32_t(*invoke)(Cpu*,uint32_t,std::initializer_list<uint32_t>)=nullptr;bool installed=false;
 bool tracing(){const char*v=std::getenv("WWHD_MOD_ACTOR_HEAPS");return v&&std::strcmp(v,"1")==0;}
-bool reserved(uint32_t id){return id>=0x7FF1&&id<=0x7FFE;}
+bool reserved(uint32_t id){return id>=0x7FF0&&id<=0x7FFE;}
 const Entry* entry(uint32_t id){for(const auto&e:entries)if(e.address&&id==e.id)return &e;return nullptr;}
 uint32_t free(Cpu*c,uint32_t heap){return guest_heap::free_size(c,heap,invoke);}
 using Heaps=std::array<std::pair<uint32_t,uint32_t>,4>;

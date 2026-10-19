@@ -693,7 +693,7 @@ void building(const fs::path& examples) {
     editor::Session s(&host);
     s.add_package("editor-test", "Editor test", "", json(kManifest));
     Value r = s.run("list_actor_types");
-    CHECK(ok(r) && r.get("result").array.size() == 18);
+    CHECK(ok(r) && r.get("result").array.size() == 19);
 
     // add: at Link (sea room 44, heading 100 of 65536), snapped onto the ground (y 5); one undo step
     r = s.run("add_actor", json(R"({"type": "sign"})"));
@@ -1165,7 +1165,9 @@ void route_commands() {
     CHECK(!ok(s.run("set_route", json(R"({"id": "patrol", "mode": "once"})"))) && actor_of(s, "patrol")->get("path").get("mode").string() == "loop");
     CHECK(!ok(s.run("set_route", json(R"({"id": "patrol", "speed": 100})"))) && !ok(s.run("set_route", json(R"({"id": "patrol", "pauses": true})"))));
     CHECK(editor::route_refusal(*actor_of(s, "patrol")).empty());
-    CHECK(ok(s.run("add_actor", json(R"({"type": "moblin", "id": "brute"})"))) && !ok(s.run("add_route_point", json(R"({"id": "brute"})"))));
+    CHECK(ok(s.run("add_actor", json(R"({"type": "moblin", "id": "brute"})"))) && ok(s.run("add_route_point", json(R"({"id": "brute", "at": "position", "position": {"x": 500, "y": 50, "z": 0}})"))));
+    CHECK(actor_of(s, "brute")->get("path").get("mode").string() == "back_and_forth" && !ok(s.run("set_route", json(R"({"id": "brute", "speed": 50})"))));
+    CHECK(ok(s.run("add_actor", json(R"({"type": "keese", "id": "bat"})"))) && !ok(s.run("add_route_point", json(R"({"id": "bat"})"))));
     // the pure helpers the Inspector uses
     CHECK(editor::resident_pace(*actor_of(s, "walker")) == 30 && editor::resident_pace(*actor_of(s, "chatter")) == 0 && editor::route_refusal(*actor_of(s, "walker")).empty());
 }

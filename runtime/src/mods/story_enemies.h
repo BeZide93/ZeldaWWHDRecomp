@@ -16,12 +16,14 @@ struct Spec {Kind kind;std::string mod,id,defeated_flag;std::vector<story_items:
 // The fixed native parameters. Bokoblin: type 4 (stands, then fights); byte 1 is its sight and
 // territory range in tens of units, 0xFF the game's own (500 to notice Link, 750 to give up); 0 made
 // it blind (it never noticed Link). Byte 2 no path, byte 3 no switch.
-// Rat 0xFFFFFF00: arg0 0 (no hole parent), type 0xFF read as 0 (no bomb: the bomb rat creates a free bomb actor).
+// Rat 0xFFFF0001: a hole-born rat (arg0 1, created as the child of its owned hole), type 0; the bomb rat is
+// its variant 0xFFFF0101 (type 1). Rat hole 0xFF010100: no player range, one rat, bomb mode 1 (so the hole
+// never creates the rat shop keeper NpcNz), no path: the port spawns its rats (story_actors).
 // Peahat 0xFFFFFF00: type 0 (Peahat, never the Seahat and its kill-counter register), default ranges.
 // Miniblin 0xFFFF0A01: behaviour 1 (never respawns), notice range 10 (1000 units), no spawn switches
 // Darknut 0xFFFF9604: behaviour 4 (guards its place), sight 150, no path, no spawn switch; its variants
 // (story_enemy_variants.h) add a shield, a helmet or a cape through the x rotation word (home_x)
-constexpr uint32_t parameters(Kind k){return k==Kind::ChuChu?0xFF000000u:k==Kind::Bokoblin?0xFFFFFF04u:(k==Kind::Keese||k==Kind::Moblin)?0xFFFF0000u:k==Kind::Miniblin?0xFFFF0A01u:k==Kind::Peahat?0xFFFFFF00u:k==Kind::Rat?0xFFFFFF00u:k==Kind::Darknut?0xFFFF9604u:0u;}
+constexpr uint32_t parameters(Kind k){return k==Kind::ChuChu?0xFF000000u:k==Kind::Bokoblin?0xFFFFFF04u:(k==Kind::Keese||k==Kind::Moblin)?0xFFFF0000u:k==Kind::Miniblin?0xFFFF0A01u:k==Kind::Peahat?0xFFFFFF00u:k==Kind::Rat?0xFFFF0001u:k==Kind::Darknut?0xFFFF9604u:k==Kind::RatHole?0xFF010100u:0u;}
 // the manifest's actor name of a kind ("chuchu", ...)
 const char* kind_name(Kind);
 // the parameters of a kind's variant ("" the default); 0 for a variant the kind doesn't declare
@@ -53,7 +55,7 @@ size_t checkpoint();void rollback(size_t) noexcept;
 void bind(Token,uint32_t pid,bool restored=false);
 bool available(Token);void quarantine(Token);
 // the declaration's defeat marker is committed (its defeat counted)
-bool is_defeated(Token);bool begin_epoch(Token,uint32_t epoch);
+bool is_defeated(Token);bool settle(Token);bool begin_epoch(Token,uint32_t epoch);
 void state_loaded();
 // Pure bounded native reads: suitable for the ownership core's mandatory callback.
 bool verify_actor(Token,Kind,uint32_t actor);

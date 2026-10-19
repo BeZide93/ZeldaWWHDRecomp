@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
+#include "native_actor_refusal.h"
 #include "story_enemy_children.h"
 #include "story_enemy_variants.h"
 #include "native_actor_carry.h"
@@ -18,13 +19,18 @@ thread_local Source search{};
 void(*original)(Cpu*,uint32_t)=nullptr;
 uint32_t(*invoke)(Cpu*,uint32_t,std::initializer_list<uint32_t>)=nullptr;
 Retired retired;bool installed=false;
+// a rat's bomb (d_a_bomb daBomb_Create): admitted as the rat's child when it is constructed
+const uint32_t BombCreate=GC(0x020C685C),BombDelete=GC(0x020C51BC);
 const uint32_t Queue=GC(0x025D5834),Create=GC(0x020C25A4),Execute=GC(0x020C1D0C),Delete=GC(0x020C1D84),Wait=GC(0x020C25A8),BkSearch=GC(0x0209AB64),MoSearch=GC(0x021C872C),BkCandidate=GC(0x0209A624),MoCandidate=GC(0x021C826C);
 // The Darknut: search_wepon (its weapon view check) and s_w_sub (its candidate filter); its cape, d_a_mant:
 // daMant_Create and daMant_Execute.
 const uint32_t TnSearch=GC(0x024BAFAC),TnCandidate=GC(0x024BAA8C),CapeCreate=GC(0x021BE134),CapeExecute=GC(0x021BC3C4);
-constexpr uint16_t Sword=0x1CF,Cape=own::kCapeProfile;
+constexpr uint16_t Sword=0x1CF,Cape=own::kCapeProfile,Bomb=0x126;
 bool memory(uint32_t a,uint32_t n){return !(a&3)&&a>=0x10000000u&&a<=0x50000000u-n;}
-bool parent(const Source&s){if(s.kind!=Kind::Bokoblin&&s.kind!=Kind::Moblin&&s.kind!=Kind::Darknut)return false;auto&d=own::descriptor(s.kind);return s.token&&s.epoch==own::source_epoch(s.token)&&memory(s.actor,d.bytes)&&ld32(s.actor+4)==s.pid&&s.pid&&s.pid!=0xFFFFFFFFu&&ld16(s.actor+0xE)==d.profile&&(s.kind==Kind::Bokoblin?story_enemy_variants::declared_params("bokoblin",ld32(s.actor+0xB0)):s.kind==Kind::Darknut?story_enemy_variants::declared_params("darknut",ld32(s.actor+0xB0)):ld32(s.actor+0xB0)==0xFFFF0000u)&&ld8(s.actor+0x2DD)==0xFF;}
+// a bomb rat (d_a_nz type 1, hole-born arg0 1): the one rat that creates a child (its bomb)
+bool bomb_rat(uint32_t params){return (params&0xFF)==1&&((params>>8)&0xFF)==1;}
+bool parent(const Source&s){if(s.kind==Kind::Rat){auto&d=own::descriptor(s.kind);return s.token&&s.epoch==own::source_epoch(s.token)&&memory(s.actor,d.bytes)&&ld32(s.actor+4)==s.pid&&s.pid&&s.pid!=0xFFFFFFFFu&&ld16(s.actor+0xE)==d.profile&&bomb_rat(ld32(s.actor+0xB0))&&ld8(s.actor+0x2DD)==0xFF;}
+ if(s.kind!=Kind::Bokoblin&&s.kind!=Kind::Moblin&&s.kind!=Kind::Darknut)return false;auto&d=own::descriptor(s.kind);return s.token&&s.epoch==own::source_epoch(s.token)&&memory(s.actor,d.bytes)&&ld32(s.actor+4)==s.pid&&s.pid&&s.pid!=0xFFFFFFFFu&&ld16(s.actor+0xE)==d.profile&&(s.kind==Kind::Bokoblin?story_enemy_variants::declared_params("bokoblin",ld32(s.actor+0xB0)):s.kind==Kind::Darknut?story_enemy_variants::declared_params("darknut",ld32(s.actor+0xB0)):(ld32(s.actor+0xB0)==0xFFFF0000u||ld32(s.actor+0xB0)==story_enemy_variants::moblin_patrol(0xFFFF0000u)))&&ld8(s.actor+0x2DD)==0xFF;}
 // the child kinds: daBoko weapons (the Bokoblin's stick 0 or machete 1, the Moblin's spear 4, the Darknut's
 // sword 3) and the Darknut's cape (d_a_mant type 0)
 uint32_t child_bytes(uint16_t profile){return profile==Sword?0xA34:profile==Cape?own::kCapeBytes:0;}
@@ -36,18 +42,19 @@ bool child(uint32_t a,own::LineageInfo& info,bool admitted){if(!memory(a,0x10))r
 bool source_live(const own::LineageInfo& info){own::Binding b{};return own::binding_state(info.source,b)&&b.state==own::BindingState::Active&&b.actor==info.source_actor&&b.pid==info.source_pid;}
 bool darknut_child(const own::LineageInfo& info){return info.profile==Cape||(info.profile==Sword&&info.parameters==3);}
 void mask(uint32_t a){st32(a+0x39C,ld32(a+0x39C)&~0x10u);st32(a+0x2E0,ld32(a+0x2E0)&~(0x400u|0x80000u|0x200000u));}
-// the child a parent may ask for: its variant's weapon, and a caped Darknut's cape
+// the child a parent may ask for: its variant's weapon, a caped Darknut's cape, a bomb rat's bomb
 bool expected(const Source&s,uint16_t profile,uint32_t params){
+ if(s.kind==Kind::Rat)return profile==Bomb;
  if(s.kind==Kind::Darknut)return profile==Sword?params==3:profile==Cape&&params==0&&((story_enemy_variants::angle_x("darknut",ld32(s.actor+0xB0))>>5)&7)>=4;
  return profile==Sword&&params==(s.kind==Kind::Bokoblin?story_enemy_variants::bokoblin_weapon(ld32(s.actor+0xB0)):4u);}
-void queue(Cpu*c){if(!depth||(c->r[3]!=Sword&&!(c->r[3]==Cape&&scopes[depth-1].kind==Kind::Darknut))){original(c,Queue);return;}const auto s=scopes[depth-1];const uint16_t profile=uint16_t(c->r[3]);const uint32_t params=c->r[4];if(!parent(s)||!expected(s,profile,params)){c->r[3]=0xFFFFFFFFu;return;}
+void queue(Cpu*c){if(!depth||(c->r[3]!=Sword&&!(c->r[3]==Cape&&scopes[depth-1].kind==Kind::Darknut)&&!(c->r[3]==Bomb&&scopes[depth-1].kind==Kind::Rat))){original(c,Queue);return;}const auto s=scopes[depth-1];const uint16_t profile=uint16_t(c->r[3]);const uint32_t params=c->r[4];if(!parent(s)||!expected(s,profile,params)){c->r[3]=0xFFFFFFFFu;return;}
  const uint32_t ticket=own::reserve_child_pending(s.token,s.actor,s.pid,profile,params,s.epoch);if(!ticket){c->r[3]=0xFFFFFFFFu;return;}
  try{original(c,Queue);}catch(...){own::cancel_child_pending(ticket);throw;}
  const uint32_t pid=c->r[3];if(!pid||pid==0xFFFFFFFFu){own::cancel_child_pending(ticket);return;}
  if(!own::commit_child_pending(ticket,pid))throw std::runtime_error("Native enemy child PID could not bind its reserved ownership record");
 }
-void make(Cpu*c,uint32_t fn){const uint32_t a=c->r[3];own::LineageInfo info{};if(!child(a,info,false)){if(claimed(a)){c->r[3]=5;return;}original(c,fn);return;}
- if(darknut_child(info)&&!info.address&&!source_live(info)){c->r[3]=5;return;}
+void make(Cpu*c,uint32_t fn){const uint32_t a=c->r[3];own::LineageInfo info{};if(!child(a,info,false)){if(claimed(a)){native_actor_refusal::refuse(c,a,invoke);return;}original(c,fn);return;}
+ if(darknut_child(info)&&!info.address&&!source_live(info)){native_actor_refusal::refuse(c,a,invoke);return;}
  original(c,fn);const Cpu result=*c;if(result.r[3]==4){if(!own::admit_lineage(info.pid,a))throw std::runtime_error("Native enemy child constructor ownership mismatch");if(info.profile==Sword)mask(a);}*c=result;}
 void create(Cpu*c){make(c,Create);}
 void cape_create(Cpu*c){make(c,CapeCreate);}
@@ -56,13 +63,19 @@ void cape_execute(Cpu*c){const uint32_t a=c->r[3];own::LineageInfo info{};if(!ch
 void execute(Cpu*c){const uint32_t a=c->r[3];own::LineageInfo info{};if(!child(a,info,false)){if(claimed(a)){c->r[3]=1;return;}original(c,Execute);return;}if(info.address!=a){c->r[3]=1;return;}mask(a);original(c,Execute);const Cpu result=*c;own::LineageInfo live{};if(own::lineage_info(info.pid,live)&&live.address==a&&live.source_valid&&child(a,live,true))mask(a);*c=result;}
 void wait(Cpu*c){const uint32_t a=c->r[3];own::LineageInfo info{};const bool mine=child(a,info,false);if(!mine&&claimed(a)){c->r[3]=1;return;}original(c,Wait);const Cpu result=*c;own::LineageInfo live{};if(mine&&own::lineage_info(info.pid,live)&&live.address==a&&live.source_valid&&child(a,live,true))mask(a);*c=result;}
 void before_delete(uint32_t a,uint32_t pid,uint16_t profile) noexcept {
- if(child_bytes(profile)&&own::lineage_claimed(pid,own::Lineage::EnemyChild)){
+ if((child_bytes(profile)||profile==Bomb)&&own::lineage_claimed(pid,own::Lineage::EnemyChild)){
   own::LineageInfo info{};const bool exact=own::lineage_info(pid,info)&&(!info.address||info.address==a);
   if(exact){own::retire_lineage(pid);static const bool trace=[]{const char*v=std::getenv("WWHD_ENEMY_TRACE");return v&&*v=='1';}();if(trace)LOG("[native_enemy] child retired pid=%08X profile=%04X params=%u source=%u",pid,unsigned(profile),info.parameters,info.source);if(info.source_valid&&retired)try{retired(info);}catch(...){}}
  }
- if(profile==0x7FF9||profile==0x7FF8||profile==0x7FF1){for(unsigned i=0;i<depth;++i)if(scopes[i].actor==a&&scopes[i].pid==pid)scopes[i]={};if(search.actor==a&&search.pid==pid)search={};}
+ if(profile==0x7FF9||profile==0x7FF8||profile==0x7FF1||profile==0x7FF2){for(unsigned i=0;i<depth;++i)if(scopes[i].actor==a&&scopes[i].pid==pid)scopes[i]={};if(search.actor==a&&search.pid==pid)search={};}
 }
-void destroy(Cpu*c){const uint32_t a=c->r[3];if(memory(a,0xA34))before_delete(a,ld32(a+4),ld16(a+0xE));original(c,Delete);}
+// a rat's bomb: admitted at construction like a weapon; a claimed bomb whose record does not match is never built
+void bomb_create(Cpu*c){const uint32_t a=c->r[3];own::LineageInfo info{};const bool mine=memory(a,0xB50)&&own::lineage_info(ld32(a+4),info)&&info.role==own::Lineage::EnemyChild&&info.profile==0x126&&info.source_valid;
+ if(!mine){if(memory(a,0x10)&&own::lineage_claimed(ld32(a+4),own::Lineage::EnemyChild)){native_actor_refusal::refuse(c,a,invoke);return;}original(c,BombCreate);return;}
+ original(c,BombCreate);const Cpu result=*c;if(result.r[3]==4&&!own::admit_lineage(info.pid,a))throw std::runtime_error("Native enemy bomb ownership mismatch");*c=result;}
+void destroy(Cpu*c){const uint32_t a=c->r[3];if(memory(a,0xA34))before_delete(a,ld32(a+4),ld16(a+0xE));if(native_actor_refusal::base_only(a)){c->r[3]=1;return;}original(c,Delete);}
+// a rat's bomb leaves its lineage record when it is deleted (its blast is over, or its room unloads)
+void bomb_destroy(Cpu*c){const uint32_t a=c->r[3];if(memory(a,0xB50)&&ld16(a+0xE)==0x126)before_delete(a,ld32(a+4),0x126);if(native_actor_refusal::base_only(a)){c->r[3]=1;return;}original(c,BombDelete);}
 void candidate(Cpu*c,uint32_t fn,Kind kind){const uint32_t a=c->r[3];own::LineageInfo info{};const bool mine=child(a,info,true);if(search.token){if(search.kind!=kind||!parent(search)||!mine||info.source!=search.token||info.source_actor!=search.actor||info.source_pid!=search.pid||info.epoch!=search.epoch){c->r[3]=0;return;}}else if(mine||claimed(a)){c->r[3]=0;return;}original(c,fn);}
 void bk_candidate(Cpu*c){candidate(c,BkCandidate,Kind::Bokoblin);}void mo_candidate(Cpu*c){candidate(c,MoCandidate,Kind::Moblin);}void tn_candidate(Cpu*c){candidate(c,TnCandidate,Kind::Darknut);}
 void search_weapon(Cpu*c,uint32_t fn,Kind kind){const uint32_t a=c->r[3];Source source{};source.token=own::lookup_actor(a);source.kind=kind;source.actor=a;if(source.token){source.pid=ld32(a+4);source.epoch=own::source_epoch(source.token);if(!parent(source)){c->r[3]=0;return;}}
@@ -76,8 +89,8 @@ void bk_search(Cpu*c){search_weapon(c,BkSearch,Kind::Bokoblin);}void mo_search(C
 }
 bool enter(Token t,Kind kind,uint32_t a,uint32_t epoch){if(depth==scopes.size()||!memory(a,0x10))return false;Source s{t,kind,a,ld32(a+4),epoch};if(!parent(s))return false;scopes[depth++]=s;return true;}
 void leave(){if(depth)scopes[--depth]={};}
-bool owned(uint32_t a){own::LineageInfo info{};return child(a,info,true)||claimed(a);}
-bool ready(Token token,uint32_t a){if(!installed||own::lookup_actor(a)!=token)return false;const uint16_t profile=ld16(a+0xE);
+bool owned(uint32_t a){own::LineageInfo info{};if(memory(a,0x10)&&ld16(a+0xE)==Bomb&&own::lineage_claimed(ld32(a+4),own::Lineage::EnemyChild))return true;return child(a,info,true)||claimed(a);}
+bool ready(Token token,uint32_t a){if(!installed||own::lookup_actor(a)!=token)return false;const uint16_t profile=ld16(a+0xE);if(profile==0x7FF2)return true;  // a rat's bomb is looked after by its lineage
  // a Darknut runs once the sword it refers to (mBokoPcId, -1: none) and its cape (mMantPcId, 0xFFFF: none)
  // are its own admitted children
  if(profile==0x7FF1){auto admitted=[&](uint32_t pid,uint16_t want){own::LineageInfo info{};return own::lineage_info(pid,info)&&info.role==own::Lineage::EnemyChild&&info.source_valid&&info.source==token&&info.source_actor==a&&info.source_pid==ld32(a+4)&&info.epoch==own::source_epoch(token)&&info.address&&info.profile==want&&child(info.address,info,true);};
@@ -88,7 +101,7 @@ bool ready(Token token,uint32_t a){if(!installed||own::lookup_actor(a)!=token)re
 }
 void retire(Token token,uint32_t a){for(unsigned i=0;i<depth;++i)if(scopes[i].token==token&&scopes[i].actor==a)scopes[i]={};if(search.token==token&&search.actor==a)search={};}
 bool configure(void(*o)(Cpu*,uint32_t),uint32_t(*call)(Cpu*,uint32_t,std::initializer_list<uint32_t>),Retired notify){if(!o||!call||(original&&(original!=o||invoke!=call)))return false;original=o;invoke=call;retired=std::move(notify);return native_actor_carry::configure(o,call)&&native_actor_carry::register_guard("enemy-children",owned)&&native_actor_profiles::add_before_delete_listener("enemy-children",before_delete);}
-bool available(const std::function<std::string(uint32_t)>&owner){if(!original||!invoke||!native_actor_carry::available(owner))return false;if(installed)return true;for(uint32_t f:{Queue,Create,Execute,Delete,Wait,BkSearch,MoSearch,BkCandidate,MoCandidate,TnSearch,TnCandidate,CapeCreate,CapeExecute})if(!owner(f).empty())return false;return true;}
-bool install(const std::function<std::string(uint32_t)>&owner,const std::function<void(uint32_t,void(*)(Cpu*))>&replace){if(installed)return true;if(!available(owner))return false;const std::pair<uint32_t,void(*)(Cpu*)> hooks[]={{Queue,queue},{Create,create},{Execute,execute},{Delete,destroy},{Wait,wait},{BkSearch,bk_search},{MoSearch,mo_search},{BkCandidate,bk_candidate},{MoCandidate,mo_candidate},{TnSearch,tn_search},{TnCandidate,tn_candidate},{CapeCreate,cape_create},{CapeExecute,cape_execute}};if(!native_actor_carry::install(owner,replace))return false;for(const auto&h:hooks)replace(h.first,h.second);installed=true;return true;}
+bool available(const std::function<std::string(uint32_t)>&owner){if(!original||!invoke||!native_actor_carry::available(owner))return false;if(installed)return true;for(uint32_t f:{Queue,Create,Execute,Delete,Wait,BkSearch,MoSearch,BkCandidate,MoCandidate,TnSearch,TnCandidate,CapeCreate,CapeExecute,BombCreate,BombDelete})if(!owner(f).empty())return false;return true;}
+bool install(const std::function<std::string(uint32_t)>&owner,const std::function<void(uint32_t,void(*)(Cpu*))>&replace){if(installed)return true;if(!available(owner))return false;const std::pair<uint32_t,void(*)(Cpu*)> hooks[]={{Queue,queue},{Create,create},{Execute,execute},{Delete,destroy},{Wait,wait},{BkSearch,bk_search},{MoSearch,mo_search},{BkCandidate,bk_candidate},{MoCandidate,mo_candidate},{TnSearch,tn_search},{TnCandidate,tn_candidate},{CapeCreate,cape_create},{CapeExecute,cape_execute},{BombCreate,bomb_create},{BombDelete,bomb_destroy}};if(!native_actor_carry::install(owner,replace))return false;for(const auto&h:hooks)replace(h.first,h.second);installed=true;return true;}
 void state_loaded(){depth=0;search={};}
 }
