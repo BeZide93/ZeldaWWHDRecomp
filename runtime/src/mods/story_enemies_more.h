@@ -72,6 +72,25 @@ inline constexpr uint16_t kStalfosClub = 0x1CF;     // the club's profile (Boko)
 inline constexpr uint32_t kStalfosClubParams = 2;   // Type_STALFOS_MACE
 inline constexpr uint16_t kStalfosUpperBody = 0xBE; // the split's second Stalfos (refused)
 
+// ---------------------------------------------------------------- Morth (d_a_ks)
+// Parameter 0xFFFFFF03: type 3, the ordinary single Morth (never the spawners 0/1/6, which create
+// unowned Morths, nor the Mothula child 4/5, which needs a parent). No switches, save bits or paths.
+// Its death outside Ganon's Tower makes no drop: dead_eff_set (hooked in story_enemies) is its defeat.
+// Clinging: an attached Morth (action 4, modes 40..41, joint matrix 0x7A4) counts itself in the shared
+// statics KUTTUKU_ALL_COUNT / GORON_COUNT and bumps Link's per-frame counter (Link clears the heavy
+// state himself once fewer than 5 cling). It never moves to the stage layer when owned (so it leaves
+// with its room), and removed while attached it takes itself out of the statics as the game's own spin
+// detach does (story_enemies). Colliders on mStts 0x7BC: body 0x7F8 (Link only); enemyice 0x924, enemyfire 0xCDC.
+inline constexpr Collider kMorthColliders[] = {{0x7F8, 0x7BC, 0}, {0x990, 0x954, 0x924}, {0xDB8, 0xD7C, 0xCDC}};
+inline bool morth_verify(uint32_t a, uint32_t p) {
+    return ld8(a + 0x544) == (p & 0xFF) && ld8(a + 0x545) == ((p >> 8) & 0xFF) && ld8(a + 0x546) == 0 && ld32(a + 0x550) == 0 && ld8(a + 0x547) <= 4;
+}
+inline bool morth_dying(uint32_t a) { return ld8(a + 0x547) == 3 && (ld8(a + 0x548) == 31 || ld8(a + 0x548) == 32); }
+inline bool morth_attached(uint32_t a) { return ld8(a + 0x547) == 4 && (ld8(a + 0x548) == 40 || ld8(a + 0x548) == 41) && ld32(a + 0x7A4) != 0; }
+inline uint32_t morth_clinging() { return GD(0x101B8840); }   // KUTTUKU_ALL_COUNT
+inline uint32_t morth_shake_off() { return GD(0x101B8848); }  // GORON_COUNT
+inline constexpr uint32_t kMorthDeathEffect = CANONICAL_CODE_ID(0x021A7B4C).value(), kStageLayer = CANONICAL_CODE_ID(0x025D537C).value();
+
 // ---------------------------------------------------------------- Magtail (d_a_mt)
 // Parameter 0xFFFF0001: type 1 (goes for Link; odd: no per-frame lava drip particles), no snap turn,
 // bit 15 clear (angle z is the death switch, and z is 0: no switch; never the respawn switch, whose
@@ -143,6 +162,10 @@ inline constexpr Native kNatives[] = {
      CANONICAL_CODE_ID(0x021DCE84).value(), CANONICAL_CODE_ID(0x021D87A0).value(), CANONICAL_CODE_ID(0x021D7FFC).value(),
      CANONICAL_CODE_ID(0x021DC634).value(), [] { return GD(0x1001565C); }, 0xFFFF0001u, 0, 0x1A1C, {0, 0}, true,
      magtail_verify, magtail_terminal, magtail_liftable, 0x570, false},
+    {Kind::Morth, "morth", {0x7FE3, 0xCD, 0xF08, kMorthColliders, std::size(kMorthColliders)},
+     CANONICAL_CODE_ID(0x021AA4C8).value(), CANONICAL_CODE_ID(0x021A7F94).value(), CANONICAL_CODE_ID(0x021A71EC).value(),
+     CANONICAL_CODE_ID(0x021A9EC8).value(), [] { return GD(0x100136C0); }, 0xFFFFFF03u, 0, 0x924, {0xCDC, 0}, true,
+     morth_verify, morth_dying, nullptr, 0x547, false},
     {Kind::Armos, "armos", {0x7FE6, 0xCB, 0xF60, kArmosColliders, std::size(kArmosColliders)},
      CANONICAL_CODE_ID(0x0204FE84).value(), CANONICAL_CODE_ID(0x0204D3A4).value(), CANONICAL_CODE_ID(0x0204C5F8).value(),
      CANONICAL_CODE_ID(0x0204F9D0).value(), [] { return GD(0x1000702C); }, 0xFF00FF00u, 0, 0xBA8, {0, 0}, true,
