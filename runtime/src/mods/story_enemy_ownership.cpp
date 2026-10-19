@@ -72,7 +72,7 @@ bool suspected_owned(uint32_t o){
 // a Darknut cape's colliders: the wind sphere and nine mesh spheres on its mStts 0x365C
 bool cape_object(uint32_t a,uint32_t object){if(object==a+0x3698)return true;for(uint32_t i=0;i<9;++i)if(object==a+0x37C4+i*0x12C)return true;return false;}
 // the class extent of a table kind's child of its own class (story_enemies_more.h)
-uint32_t table_child_bytes(uint16_t profile){return profile==story_enemies_more::kWizzrobeFire?story_enemies_more::kWizzrobeBytes:profile==story_enemies_more::kGy?story_enemies_more::kGyBytes:0u;}
+uint32_t table_child_bytes(uint16_t profile){return profile==story_enemies_more::kWizzrobeFire?story_enemies_more::kWizzrobeBytes:profile==story_enemies_more::kGy?story_enemies_more::kGyBytes:profile==story_enemies_more::kOctoEye?story_enemies_more::kOctoEyeBytes:0u;}
 bool owned_child_object(uint32_t object){
  if(arena)for(size_t n=0;n<kChildCapacity;++n){uint32_t r=arena+LineageOffset+uint32_t(n)*64;if(ld32(r)!=Magic||ld32(r+8)!=unsigned(Lineage::EnemyChild))continue;uint32_t a=ld32(r+40),pid=ld32(r+20);if(pid&&pid!=0xFFFFFFFFu&&memory(a,0xA34)&&ld32(a+4)==pid&&ld16(a+0xE)==0x1CF&&object>=a&&object<a+0xA34)return true;if(pid&&pid!=0xFFFFFFFFu&&memory(a,kCapeBytes)&&ld32(a+4)==pid&&ld16(a+0xE)==kCapeProfile&&object>=a&&object<a+kCapeBytes)return true;}
  // a rat's bomb (daBomb_c, 0x126): its explosion sphere 0x920 on mStts 0x8E4
@@ -81,7 +81,7 @@ bool owned_child_object(uint32_t object){
  if(arena)for(size_t n=0;n<kChildCapacity;++n){uint32_t r=arena+LineageOffset+uint32_t(n)*64;if(ld32(r)!=Magic||ld32(r+8)!=unsigned(Lineage::EnemyChild))continue;const uint32_t bytes=table_child_bytes(uint16_t(ld32(r+28)));uint32_t a=ld32(r+40),pid=ld32(r+20);if(bytes&&pid&&pid!=0xFFFFFFFFu&&memory(a,bytes)&&ld32(a+4)==pid&&uint32_t(ld16(a+0xE))==ld32(r+28)&&object>=a&&object<a+bytes)return true;}
  // A damaged saved address must not erase a claimed child. The actual native
  // Stts owner and PID confer denial only; a recycled actor with a new PID passes.
- if(memory(object,0x48)){uint32_t stts=ld32(object+0x44);if(memory(stts,0x14)){uint32_t a=ld32(stts+0xC);if(memory(a,story_enemies_more::kWizzrobeBytes)&&ld16(a+0xE)==story_enemies_more::kWizzrobeFire&&stts==a+story_enemies_more::kWizzrobeStts&&ld32(stts+0x10)==ld32(a+4)&&lineage_claimed(ld32(a+4),Lineage::EnemyChild))return true;if(memory(a,story_enemies_more::kGyBytes)&&ld16(a+0xE)==story_enemies_more::kGy&&(stts==a+story_enemies_more::kGyStts||stts==a+story_enemies_more::kGyIceStts)&&lineage_claimed(ld32(a+4),Lineage::EnemyChild))return true;if(memory(a,0xA34)&&ld16(a+0xE)==0x1CF&&stts==a+0x6C4&&(object==a+0x700||object==a+0x82C)&&ld32(stts+0x10)==ld32(a+4)&&lineage_claimed(ld32(a+4),Lineage::EnemyChild))return true;if(memory(a,kCapeBytes)&&ld16(a+0xE)==kCapeProfile&&stts==a+0x365C&&cape_object(a,object)&&ld32(stts+0x10)==ld32(a+4)&&lineage_claimed(ld32(a+4),Lineage::EnemyChild))return true;}}
+ if(memory(object,0x48)){uint32_t stts=ld32(object+0x44);if(memory(stts,0x14)){uint32_t a=ld32(stts+0xC);if(memory(a,story_enemies_more::kWizzrobeBytes)&&ld16(a+0xE)==story_enemies_more::kWizzrobeFire&&stts==a+story_enemies_more::kWizzrobeStts&&ld32(stts+0x10)==ld32(a+4)&&lineage_claimed(ld32(a+4),Lineage::EnemyChild))return true;if(memory(a,story_enemies_more::kGyBytes)&&ld16(a+0xE)==story_enemies_more::kGy&&(stts==a+story_enemies_more::kGyStts||stts==a+story_enemies_more::kGyIceStts)&&lineage_claimed(ld32(a+4),Lineage::EnemyChild))return true;if(memory(a,story_enemies_more::kOctoEyeBytes)&&ld16(a+0xE)==story_enemies_more::kOctoEye&&stts==a+story_enemies_more::kOctoEyeStts&&lineage_claimed(ld32(a+4),Lineage::EnemyChild))return true;if(memory(a,0xA34)&&ld16(a+0xE)==0x1CF&&stts==a+0x6C4&&(object==a+0x700||object==a+0x82C)&&ld32(stts+0x10)==ld32(a+4)&&lineage_claimed(ld32(a+4),Lineage::EnemyChild))return true;if(memory(a,kCapeBytes)&&ld16(a+0xE)==kCapeProfile&&stts==a+0x365C&&cape_object(a,object)&&ld32(stts+0x10)==ld32(a+4)&&lineage_claimed(ld32(a+4),Lineage::EnemyChild))return true;}}
  return false;
 }
 // Link's boat (the play's third player pointer): a collider whose Stts owner is that actor.
@@ -103,7 +103,7 @@ bool bomb_object(uint32_t object);
 bool warship_bomb(uint32_t object){if(!bomb_object(object))return false;const uint32_t a=ld32(ld32(object+0x44)+0xC);LineageInfo info{};if(!lineage_info(ld32(a+4),info)||info.role!=Lineage::EnemyChild)return false;auto*source=get(info.source);return source&&source->kind==Kind::Warship;}
 // The cannonball Link's boat fires (never a claimed child): like Link's own weapons it may hit an owned enemy.
 bool boat_cannonball(uint32_t object){uint32_t a=0;return cannonball(object,story_enemies_more::kBoatCannonballParams,a)&&!lineage_claimed(ld32(a+4),Lineage::EnemyChild);}
-// A collider of a table kind's owned child (a Gyorg shark): its exact lineage child of a
+// A collider of a table kind's owned child (a Gyorg shark, a Big Octo eye): its exact lineage child of a
 // live owned parent of that kind.
 const story_enemies_more::ChildClass* table_child(uint32_t object){
  namespace more=story_enemies_more;if(!memory(object,0x48))return nullptr;const uint32_t stts=ld32(object+0x44);if(!memory(stts,0x14))return nullptr;const uint32_t a=ld32(stts+0xC);LineageInfo info{};

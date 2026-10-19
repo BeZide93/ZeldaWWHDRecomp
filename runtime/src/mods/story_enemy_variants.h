@@ -71,6 +71,9 @@ inline constexpr Variant kVariants[] = {
     // Kargaroc (d_a_bb): behaviour 0 wanders and attacks, 4 perches until Link comes near; no path, switch or rider
     {"kargaroc", "flying", 0xFFFFFF00u, "Kargaroc", "A Kargaroc that circles where it was placed and swoops at Link."},
     {"kargaroc", "perched", 0xFFFFFF04u, "Perched Kargaroc", "A Kargaroc that sits where it was placed until Link comes near."},
+    {"big_octo", "four", 0xFFFFFF00u, "Big Octo (four eyes)", "A Big Octo to shoot from the boat: hit all four eyes. It never swallows the boat and makes no whirlpool."},
+    {"big_octo", "eight", 0xFFFFFF01u, "Big Octo (eight eyes)", "A Big Octo with eight eyes to shoot from the boat. It never swallows the boat and makes no whirlpool."},
+    {"big_octo", "twelve", 0xFFFFFF02u, "Big Octo (twelve eyes)", "A Big Octo with twelve eyes to shoot from the boat. It never swallows the boat and makes no whirlpool."},
     {"gyorg", "three", 0xFFFF0531u, "Gyorgs (three)", "Three Gyorgs that come out of the sea when Link is near and bite him; defeated when all three are."},
     {"gyorg", "one", 0xFFFF0511u, "Gyorg (one)", "One Gyorg that comes out of the sea when Link is near and bites him."},
     {"gyorg", "two", 0xFFFF0521u, "Gyorgs (two)", "Two Gyorgs that come out of the sea when Link is near; defeated when both are."},
@@ -80,7 +83,7 @@ inline constexpr Variant kVariants[] = {
 
 // The native enemies of the table-driven adapter (story_enemies_more.h) that mods may place: the
 // manifest, the validator and the editor accept these names like the ones they list themselves.
-inline constexpr const char* kMoreEnemies[] = {"stalfos", "redead", "mothula", "morth", "magtail", "poe", "armos", "armos_knight", "kargaroc", "wizzrobe", "warship", "gyorg", "floormaster"};
+inline constexpr const char* kMoreEnemies[] = {"stalfos", "redead", "mothula", "morth", "magtail", "poe", "armos", "armos_knight", "kargaroc", "wizzrobe", "warship", "gyorg", "floormaster", "big_octo"};
 inline bool more_enemy(const std::string& actor) {
     for (const char* name : kMoreEnemies)
         if (actor == name) return true;

@@ -10,6 +10,8 @@
 #include "ppc.h"
 #include "guest_addr.h"
 #include "story_native_canonical_code_id.h"
+#include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
@@ -334,28 +336,6 @@ inline constexpr uint32_t kCheckGetItem = CANONICAL_CODE_ID(0x02520C0C).value(),
 inline constexpr uint8_t kBoomerang = 0x2D;
 inline constexpr uint16_t kSeaKillRegister = 0x7EFF;
 
-// The native children that are a table kind's owned children by their lineage (Gyorg sharks): their
-// class, and the name their parent must read while one runs (they check it by name).
-struct ChildClass {
-    Kind parent;
-    uint16_t profile;
-    uint32_t bytes;
-    uint16_t parent_name;
-    uint32_t create, execute, draw, destroy;
-};
-inline constexpr ChildClass kChildClasses[] = {
-    {Kind::Gyorg, kGy, kGyBytes, kGyorgName, kGyCreate, kGyExecute, kGyDraw, kGyDelete}};
-inline const ChildClass* child_class(uint16_t profile) {
-    for (const ChildClass& k : kChildClasses)
-        if (k.profile == profile) return &k;
-    return nullptr;
-}
-inline const ChildClass* child_class_of(Kind parent) {
-    for (const ChildClass& k : kChildClasses)
-        if (k.parent == parent) return &k;
-    return nullptr;
-}
-
 // ---------------------------------------------------------------- Floormaster (d_a_fm)
 // Parameter 0xFFFF04FF: no exit (0xFF; with one, being dragged down changes the stage), type 0, base
 // target 1 (Link only, never Medli or Makar), no path, no switch (0xFF). Home angle x 0xFFFF: no gone
@@ -376,6 +356,68 @@ inline bool floormaster_verify(uint32_t a, uint32_t) {
 inline bool floormaster_terminal(uint32_t a) { return ld32(a + 0x3C8) == 12 && s8(a + 0x3E1) == 8; }
 inline constexpr uint32_t kFmModeProc = CANONICAL_CODE_ID(0x021412BC).value(), kFmCancelGrab = CANONICAL_CODE_ID(0x02142028).value(),
                           kFmSetAnm = CANONICAL_CODE_ID(0x021418D0).value(), kFmSearchOther = CANONICAL_CODE_ID(0x02140D04).value();
+
+// ---------------------------------------------------------------- Big Octo (d_a_daiocta + d_a_daiocta_eye)
+// Offered only as a target: Link shoots its eyes; it never swallows the boat and makes no whirlpool.
+// Parameter 0xFFFFFFtt: type tt (0: 4 eyes, 1: 8, 2: 12), the default appear radius (5000), no exit
+// after the swallow (0xFF), no switch (0xFF; the game sets it at the end of its death event); home
+// angle z 0 (never the fairy-island one). Only on the sea stage; as in the game it rises only while Link
+// rides his boat within its radius. Its eyes (DAIOCTA_EYE 0xE2, size 0x67C, fopAcM_createChild in its
+// create) are its owned children; an eye checks its parent by name in its create, so the octo's name
+// reads DAIOCTA while an owned eye is created. Only Link's weapons, his projectiles and the boat's
+// cannonball hurt them. Its whirlpool (Obj_Auzu 0x11B, fopAcM_create in its create, which would pull
+// the boat and make the weather tag KYTAG01) is refused, and so is its swallow (MODE_DEMO 6, the event
+// DAIOCTA_SUIKOMI and its stage restart). Without the whirlpool it rises by itself (big_octo_rise). Defeat: modeDeleteInit (every eye dead) is the one drop; the
+// octo is then removed at once, so its death event (DAIOCTA_DEAD, the quake, the switch) never runs.
+// Its battle music (sub-BGM, latched in 0x2840) is stopped when it goes. No enemyice or enemyfire.
+// Colliders on mStts 0x22E4: six spheres 0x724 + 0x12C*i and seventeen capsules 0xE2C + 0x138*i.
+inline constexpr Collider kBigOctoColliders[] = {
+    {0x724, 0x22E4, 0}, {0x850, 0x22E4, 0}, {0x97C, 0x22E4, 0}, {0xAA8, 0x22E4, 0}, {0xBD4, 0x22E4, 0}, {0xD00, 0x22E4, 0},
+    {0xE2C, 0x22E4, 0}, {0xF64, 0x22E4, 0}, {0x109C, 0x22E4, 0}, {0x11D4, 0x22E4, 0}, {0x130C, 0x22E4, 0}, {0x1444, 0x22E4, 0},
+    {0x157C, 0x22E4, 0}, {0x16B4, 0x22E4, 0}, {0x17EC, 0x22E4, 0}, {0x1924, 0x22E4, 0}, {0x1A5C, 0x22E4, 0}, {0x1B94, 0x22E4, 0},
+    {0x1CCC, 0x22E4, 0}, {0x1E04, 0x22E4, 0}, {0x1F3C, 0x22E4, 0}, {0x2074, 0x22E4, 0}, {0x21AC, 0x22E4, 0}};
+inline bool big_octo_verify(uint32_t a, uint32_t p) {
+    return ld8(a + 0x68F) == (p & 0xFF) && (p & 0xFF) <= 2 && ld8(a + 0x690) == 0xFF && ld8(a + 0x691) == 0xFF && ld8(a + 0x698) == 0 &&
+           ld32(a + 0x688) <= 5;
+}
+inline bool big_octo_terminal(uint32_t) { return false; }  // its defeat is modeDeleteInit (story_enemies)
+// The game's APPEAR raises it only together with its whirlpool (once the Obj_Auzu has fully appeared);
+// without one an owned octo rises to the water by itself, and is then ready for MODE_WAIT (true).
+inline bool big_octo_rise(uint32_t a) {
+    if (ld32(a + 0x688) != 1) return false;
+    const float water = u32_as_f32(ld32(a + 0x25B0)), y = u32_as_f32(ld32(a + 0x318)), step = 30.0f;
+    const float next = y + std::max(-step, std::min(step, water - y));
+    st32(a + 0x318, f32_as_u32(next));
+    return std::fabs(water - next) < 0.5f;
+}
+inline constexpr uint16_t kBigOctoName = 0xE1, kOctoEye = 0xE2;
+inline constexpr uint32_t kOctoEyeBytes = 0x67C, kOctoEyeSphere = 0x4D4, kOctoEyeStts = 0x600, kOctoMusic = 0x2840;
+inline constexpr uint32_t kOctoModeProc = CANONICAL_CODE_ID(0x0211889C).value(), kOctoDeathInit = CANONICAL_CODE_ID(0x0211BF44).value(),
+                          kSubBgmStop = CANONICAL_CODE_ID(0x025E1928).value();
+
+// The native children that are a table kind's owned children by their lineage (Gyorg sharks, Big Octo
+// eyes): their class, and the name their parent must read while one runs (they check it by name).
+struct ChildClass {
+    Kind parent;
+    uint16_t profile;
+    uint32_t bytes;
+    uint16_t parent_name;
+    uint32_t create, execute, draw, destroy;
+};
+inline constexpr ChildClass kChildClasses[] = {
+    {Kind::Gyorg, kGy, kGyBytes, kGyorgName, kGyCreate, kGyExecute, kGyDraw, kGyDelete},
+    {Kind::BigOcto, kOctoEye, kOctoEyeBytes, kBigOctoName, CANONICAL_CODE_ID(0x0211DAD0).value(), CANONICAL_CODE_ID(0x0211DEEC).value(),
+     CANONICAL_CODE_ID(0x0211DFB4).value(), CANONICAL_CODE_ID(0x0211DB24).value()}};
+inline const ChildClass* child_class(uint16_t profile) {
+    for (const ChildClass& k : kChildClasses)
+        if (k.profile == profile) return &k;
+    return nullptr;
+}
+inline const ChildClass* child_class_of(Kind parent) {
+    for (const ChildClass& k : kChildClasses)
+        if (k.parent == parent) return &k;
+    return nullptr;
+}
 
 inline constexpr Native kNatives[] = {
     {Kind::Stalfos, "stalfos", {0x7FE0, 0xBE, 0x25B0, kStalfosColliders, std::size(kStalfosColliders)},
@@ -430,6 +472,10 @@ inline constexpr Native kNatives[] = {
      CANONICAL_CODE_ID(0x02141FD4).value(), CANONICAL_CODE_ID(0x0214399C).value(), CANONICAL_CODE_ID(0x0214418C).value(),
      CANONICAL_CODE_ID(0x02142154).value(), [] { return GD(0x1000F350); }, 0xFFFF04FFu, 0, 0xC64, {0, 0}, true,
      floormaster_verify, floormaster_terminal, nullptr, 0x3CB, false, 0xFFFF},
+    {Kind::BigOcto, "big_octo", {kBigOctoProfile, 0xE1, 0x5910, kBigOctoColliders, std::size(kBigOctoColliders)},
+     CANONICAL_CODE_ID(0x02119EE8).value(), CANONICAL_CODE_ID(0x0211B058).value(), CANONICAL_CODE_ID(0x0211B52C).value(),
+     CANONICAL_CODE_ID(0x02119F80).value(), [] { return GD(0x1000D034); }, 0xFFFFFF00u, 0, 0, {0, 0}, true,
+     big_octo_verify, big_octo_terminal, nullptr, 0x68B, false},
 };
 
 inline const Native* find(Kind k) {
