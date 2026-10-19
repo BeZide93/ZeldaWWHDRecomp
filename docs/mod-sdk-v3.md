@@ -1235,15 +1235,17 @@ the demo and ends it.
   - `curve` is `linear` (the default), `smooth` (passes through every key), `bspline` (rounder, does not pass through inner keys) or `step` (jumps at each key).
   - After its last key, a track holds its final value.
 - **Camera.** `eye` and `target` come together. `fovy` and `roll` are optional. Without a camera track, the camera keeps its gameplay view.
-- **Actors.** An actor names one of three things:
-  - a game actor by its stage name, with `"actor": "Ls1"`, for example. The actor must be in the room when the step starts; otherwise the step fails with a reason in the log and the scene ends cleanly.
+- **Actors.** An actor names one of four things:
+  - a game actor by its stage name, with `"actor": "Dk"`, for example. When the room has none, the port creates one for the demo at the first key of its position track (or beside Link) and removes it afterwards; `"params"` (a number or `"0x..."`) are its creation parameters. `"spawn": false` requires the room's own actor instead; without it the step fails with a reason in the log and the scene ends cleanly.
   - Link, with `"actor": "Link"`.
   - a model from the player's game, with `"model": {"archive", "file"}`.
+  - an actor this mod placed (a resident villager, a mod actor, an enemy), with `"character": "<its id>"`. It follows the tracks even where its own code doesn't know cutscenes; a mod actor plays its own clips by name, as `"clips": [{"frame": 0, "clip": "walk", "loop": true}]`.
 - **Actor tracks.** Every actor can have `position`, `rotation` (degrees) and `scale` tracks.
-- **Clips.** `clips` play a `.bck` from any archive at `speed` (default 1). The game's actors only follow demo tracks where their own code supports cutscenes; story characters do, villagers and enemies don't yet.
+- **Clips.** `clips` play a `.bck` from any archive at `speed` (default 1) on game actors whose code supports cutscenes (story characters, the Helmaroc King and other cutscene actors).
 - **Link.** Link takes demo `modes` instead of clips:
-  - `{"frame": 0, "mode": 2}` makes him walk along his position track.
-  - `"mode": 512` with `"data"` (hex) plays one of his cutscene clips, the way the game's own cutscenes do.
+  - `{"frame": 0, "mode": "walk"}` makes him walk along his position track. The names are `wait`, `walk`, `dash`, `turn`, `talk`, `holdup`, `keep`, `look_around`, `salute`, `surprised`, `lookup`, `nod`, `present` and `smile`; the game's own mode numbers work too.
+  - `{"frame": 60, "clip": "udeage_onetime.bck"}` plays one of his own cutscene animations (from the game's Link demo animation archive that is loaded at the time).
+  - `"data"` (hex) passes a raw cutscene data block, for modes the list doesn't cover.
 - **Archives.** Archive and file names refer to the player's own game. The port looks up their ids and loads the archives before the demo starts. Game demo archive names that the game treats specially are refused: Demo04, Demo08, Demo29, Demo37, Demo45 and Demo46.
 - **Sounds.** `sounds` play a game sound id at a `position` or following an actor, with `volume` and `pan` (0–1).
 - **Particles.** `particles` start a game particle id at a `position`, or on an actor, optionally on one of its joints (`joint`).

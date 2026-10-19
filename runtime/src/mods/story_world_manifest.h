@@ -772,6 +772,7 @@ inline bool parse_scenes_impl(const mods::json::Value& m,std::vector<ManifestSce
             else if(type=="demo"){
                 p.kind=SceneStep::Kind::Demo;demo_scene::Demo demo;
                 if(!demo_scene::parse(fields,demo,why))return why="demo step: "+why,false;
+                for(const auto&a:demo.actors)if(a.kind==demo_scene::Actor::Kind::Character&&!character(m,a.character))return why="demo step: unknown character "+a.character,false;
                 // the step's deadline: the demo (30 Hz frames, scene units are 60 Hz) plus reading time for each message
                 p.frames=std::min<unsigned>(kMaxSceneFrames,demo.frames*2+120+unsigned(demo.messages.size())*1200);
                 p.demo=std::move(demo);

@@ -28,7 +28,8 @@ void install(const std::function<std::string(uint32_t)>& replaced_by, const std:
 
 // Start a demo step. The caller (the scene player) already owns a compulsory event. Checks every
 // participant and archive file first and touches nothing when it refuses (why says what is missing).
-bool start(Cpu* c, const demo_scene::Demo& demo, bool camera_stopped, std::string& why);
+using CharacterResolver = std::function<uint32_t(const std::string&)>;  // a mod-placed actor by its id, or 0
+bool start(Cpu* c, const demo_scene::Demo& demo, bool camera_stopped, CharacterResolver characters, std::string& why);
 struct Poll {
     enum class State { Idle, Running, Done, Failed } state = State::Idle;
     std::string why;  // State::Failed

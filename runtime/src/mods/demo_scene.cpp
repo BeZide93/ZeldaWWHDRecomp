@@ -4,6 +4,7 @@
 #include "demo_stb.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <cmath>
 #include <map>
 #include <set>
@@ -52,7 +53,7 @@ bool compile(const Demo& d, const Resolver& resolve, Compiled& out, std::string&
     auto virtual_id = [&](const Resource& r, uint32_t& id) {
         auto it = std::find(virtual_table.begin(), virtual_table.end(), r);
         if (it == virtual_table.end()) {
-            if (virtual_table.size() >= 64) return fail(why, "demo uses more than 64 archive files");
+            if (virtual_table.size() >= 48) return fail(why, "demo uses more than 48 archive files");
             const int32_t real = resolve ? resolve(r) : -1;
             if (real < 0) return fail(why, "the game has no " + r.file + " in archive " + r.archive);
             virtual_table.push_back(r);
@@ -71,11 +72,23 @@ bool compile(const Demo& d, const Resolver& resolve, Compiled& out, std::string&
         b.end(cam, d.frames);
     }
     std::map<std::string, std::pair<size_t, const Actor*>> objects;  // demo id -> builder object
-    unsigned models = 0;
+    unsigned models = 0, characters = 0;
     for (const auto& a : d.actors) {
         std::string name = a.actor;
         if (a.kind == Actor::Kind::Model) name = "d_act" + std::to_string(models++);
-        else out.participants.push_back(a.actor);
+        else if (a.kind == Actor::Kind::Character) {
+            char stand_in[8];
+            std::snprintf(stand_in, sizeof stand_in, "MA%02u", characters++);
+            name = stand_in;
+            out.characters.push_back({name, a.character, a.named_clips});
+        } else {
+            out.participants.push_back(a.actor);
+            if (a.kind == Actor::Kind::Game) {
+                Cast cast{a.actor, a.spawn, a.params, !a.position.keys.empty(), {}};
+                if (cast.placed) cast.position = a.position.keys.front().value;
+                out.cast.push_back(cast);
+            }
+        }
         const size_t o = b.object(S::kActor, name);
         objects[a.id] = {o, &a};
         if (a.kind == Actor::Kind::Model) {
@@ -95,7 +108,14 @@ bool compile(const Demo& d, const Resolver& resolve, Compiled& out, std::string&
         }
         for (const auto& m : a.modes) {
             b.value(o, m.frame, S::actor::Animation, m.mode);
-            if (!m.data.empty()) {
+            if (!m.clip.empty()) {
+                // one of Link's demo animations: data id 0 = {u16 animation id, u8 hands}
+                const int32_t id = resolve ? resolve({"@Link", m.clip}) : -1;
+                if (id < 0) return fail(why, "Link has no demo animation " + m.clip);
+                b.immediate_word(o, m.frame, S::actor::AnimationMode, 1);
+                b.time(o, m.frame, S::actor::AnimationFrame, 30.f);
+                b.data(o, m.frame, 0, S::Bytes{0x32, uint8_t(id >> 8), uint8_t(id), 0x39, 0x02, 0x00, 0x00});
+            } else if (!m.data.empty()) {
                 b.immediate_word(o, m.frame, S::actor::AnimationMode, 1);
                 b.time(o, m.frame, S::actor::AnimationFrame, 30.f);
                 b.data(o, m.frame, 1, m.data);

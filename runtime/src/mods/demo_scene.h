@@ -33,12 +33,17 @@ struct Key { uint32_t frame = 0; Vec value; bool operator==(const Key&) const = 
 struct Track { Curve curve = Curve::Linear; std::vector<Key> keys; bool operator==(const Track&) const = default; };  // scalars use value.x
 struct Resource { std::string archive, file; bool operator==(const Resource&) const = default; };
 struct Clip { uint32_t frame = 0; Resource resource; float speed = 1; bool operator==(const Clip&) const = default; };
-struct Mode { uint32_t frame = 0, mode = 0; std::vector<uint8_t> data; bool operator==(const Mode&) const = default; };
+struct Mode { uint32_t frame = 0, mode = 0; std::vector<uint8_t> data; std::string clip; bool operator==(const Mode&) const = default; };  // clip: Link's own demo animation (.bck)
+struct NamedClip { uint32_t frame = 0; std::string clip; bool loop = true; bool operator==(const NamedClip&) const = default; };  // a mod character's own clip
 struct Data { uint32_t frame = 0, id = 0; std::vector<uint8_t> bytes; bool operator==(const Data&) const = default; };
 struct Actor {
-    enum class Kind { Game, Link, Model } kind = Kind::Game;
+    enum class Kind { Game, Link, Model, Character } kind = Kind::Game;
     std::string id, actor;  // demo-local id; the game's stage actor name (Game, Link)
     Resource model;         // Model
+    std::string character;  // Character: an actor this mod placed (resident villager, mod actor, enemy) by its id
+    bool spawn = true;      // Game: created for the demo when the room doesn't have one (and removed after)
+    uint32_t params = 0;    // Game: the spawned actor's parameters
+    std::vector<NamedClip> named_clips;  // Character: the mod actor's own clips
     Track position, rotation, scale;
     std::vector<Clip> clips;
     std::vector<Mode> modes;
@@ -64,10 +69,22 @@ inline bool parse(const mods::json::Value& step, Demo& out, std::string& why);  
 
 // The game's id of a file in one of its archives (the archive's resource id table), or -1.
 using Resolver = std::function<int32_t(const Resource&)>;
+// Link's demo modes by name (the game's daPy_demo_c modes); "clip" plays one of his demo animations.
+inline uint32_t link_mode(const std::string& name) {
+    static const std::pair<const char*, uint32_t> kModes[] = {{"wait", 1}, {"walk", 2}, {"dash", 3}, {"turn", 5}, {"talk", 6}, {"holdup", 13}, {"keep", 14},
+        {"look_around", 15}, {"salute", 19}, {"surprised", 24}, {"lookup", 26}, {"nod", 36}, {"present", 37}, {"smile", 50}, {"clip", 512}};
+    for (const auto& [n, v] : kModes) if (name == n) return v;
+    return 0;
+}
+inline constexpr const char* kLinkClipArchives[] = {"LkD00", "LkD01"};  // Link's demo animations (one is loaded at a time)
+struct Cast { std::string name; bool spawn = true; uint32_t params = 0; bool placed = false; Vec position; };  // a game actor the demo names
+struct CharacterRef { std::string name, character; std::vector<NamedClip> clips; };                       // "MA00".. -> a mod-placed actor
 struct Compiled {
     std::vector<uint8_t> stb;
     std::vector<std::pair<Resource, uint32_t>> virtual_ids;  // virtual id n (0x10000|n in the STB) -> archive file and its id
     std::vector<std::string> participants;                   // stage actor names that must exist when the demo starts
+    std::vector<Cast> cast;                                  // the same, with how to spawn them
+    std::vector<CharacterRef> characters;                    // mod-placed actors, by their stand-in names
     std::vector<Message> messages;                           // in frame order; one suspend point each
 };
 // message_number: the game message the demo's JMSG track shows (the port arms its text before each

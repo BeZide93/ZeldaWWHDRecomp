@@ -78,6 +78,8 @@ bool end_scene(Cpu*,const Identity&,uint32_t lease);
 bool scene_path(Cpu*,const Identity&,uint32_t lease,const std::vector<story_notebook::WorldPoint>&,float speed);
 bool scene_rotation(Cpu*,const Identity&,uint32_t lease,story_notebook::WorldPoint degrees);
 bool scene_animation(Cpu*,const Identity&,uint32_t lease,const std::string&,float blend_frames=6,bool loop=true);
+// a demo track's pose for this frame (position, rotation in degrees) under the scene lease
+bool scene_pose(Cpu*,const Identity&,uint32_t lease,story_notebook::WorldPoint position,story_notebook::WorldPoint degrees);
 // Startup-private provisional declarations cannot escape through installed services.
 size_t checkpoint();
 void rollback(size_t) noexcept;

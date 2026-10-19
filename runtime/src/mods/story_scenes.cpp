@@ -247,7 +247,8 @@ public:
         }else if(step.kind==SceneStep::Kind::Demo){
             // the game's demo system plays the tracks; this scene's compulsory event stays ours
             std::string why;
-            if(!step.demo||!demo_backend().start||!demo_backend().start(g_cpu,*step.demo,true,why)){LOG("[scenes] %s:%s demo refused: %s",g_entries[g_current].mod.c_str(),g_entries[g_current].scene.id.c_str(),why.c_str());return false;}
+            const std::string mod=g_entries[g_current].mod;
+            if(!step.demo||!demo_backend().start||!demo_backend().start(g_cpu,*step.demo,true,[mod](const std::string& id)->uint32_t{return g_resolve&&g_cpu?g_resolve(g_cpu,mod,id):0;},why)){LOG("[scenes] %s:%s demo refused: %s",g_entries[g_current].mod.c_str(),g_entries[g_current].scene.id.c_str(),why.c_str());return false;}
             return true;
         }else if(step.kind==SceneStep::Kind::Particle){
             if(!g_cpu||!owns(call(kPlay))||!same_room(call(kPlay)))return false;

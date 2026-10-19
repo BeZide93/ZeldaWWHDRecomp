@@ -84,6 +84,27 @@ int main() {
     assert(has(refused(R"({"type":"demo","frames":30,"messages":[{"frame":30,"text":"late"}]})"), "frame before the end"));
     assert(has(refused(R"({"type":"demo","frames":30,"sounds":[{"frame":0,"id":5,"actor":"nobody"}],"actors":[{"id":"a","actor":"Dk"}]})"), "unknown actor nobody"));
 
+    // phase 2: game actors created when missing, mod-placed characters, Link's modes by name and clip
+    const D::Demo cast = parsed(R"({"type":"demo","frames":90,"origin":"link",
+      "actors":[{"id":"bird","actor":"Dk","params":"0x00000000","position":{"keys":[{"frame":0,"value":{"x":0,"y":1500,"z":2000}}]}},
+                {"id":"baker","character":"baker","position":{"curve":"linear","keys":[{"frame":0,"value":{"x":0,"y":0,"z":300}},{"frame":90,"value":{"x":200,"y":0,"z":300}}]},
+                 "clips":[{"frame":0,"clip":"walk"},{"frame":60,"clip":"idle","loop":true}]},
+                {"id":"hero","actor":"Link","modes":[{"frame":0,"mode":"walk"},{"frame":45,"clip":"udeage_onetime.bck"}]}]})");
+    assert(cast.actors[0].spawn && cast.actors[1].kind == D::Actor::Kind::Character && cast.actors[1].named_clips.size() == 2);
+    assert(cast.actors[2].modes[0].mode == 2 && cast.actors[2].modes[1].mode == 512 && cast.actors[2].modes[1].clip == "udeage_onetime.bck");
+    D::Compiled cc;
+    assert(D::compile(cast, [](const D::Resource& r) -> int32_t { return r.archive == "@Link" && r.file == "udeage_onetime.bck" ? 0x8f : -1; }, cc, why));
+    assert(cc.cast.size() == 1 && cc.cast[0].name == "Dk" && cc.cast[0].placed && cc.cast[0].position.y == 1500);
+    assert(cc.characters.size() == 1 && cc.characters[0].name == "MA00" && cc.characters[0].character == "baker" && cc.characters[0].clips.size() == 2);
+    demo_stb::File cf;
+    assert(demo_stb::parse(cc.stb, cf, why));
+    const std::string ct = demo_stb::dump(cf);
+    assert(has(ct, "== JACT \"MA00\"\n  f0 TXYZ = curves 0,1,2\n"));
+    assert(has(ct, "  f45 ANIMATION = u32 512\n  f45 ANIM_MODE = int 1\n  f45 ANIM_FRAME = rate 30\n  f45 reserved 129 000000040000000032008f39020000\n"));
+    assert(has(refused(R"({"type":"demo","frames":30,"actors":[{"id":"a","actor":"Link","modes":[{"frame":0,"mode":"fly"}]}]})"), "unknown Link mode"));
+    assert(has(refused(R"({"type":"demo","frames":30,"actors":[{"id":"a","character":"x","spawn":false}]})"), "spawn and params are for game actors"));
+    assert(has(refused(R"({"type":"demo","frames":30,"actors":[{"id":"a","actor":"Dk","model":{"archive":"Dk","file":"dk.bdl"}}]})"), "one of actor, model or character"));
+
     // the event image that plays it: one PACKAGE staff, PLAY cut naming the STB file
     demo_event_image::Spec spec;
     spec.origin = demo_event_image::Origin{668, 95, -197304, 0};

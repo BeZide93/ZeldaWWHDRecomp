@@ -35,7 +35,7 @@ struct DemoBackend {
     void (*configure)(uint32_t arena, uint32_t (*call)(Cpu*, uint32_t, std::initializer_list<uint32_t>), void (*original)(Cpu*, uint32_t)) = nullptr;
     bool (*configured)() = nullptr;
     void (*install)(const std::function<std::string(uint32_t)>&, const std::function<void(uint32_t, void (*)(Cpu*))>&) = nullptr;
-    bool (*start)(Cpu*, const demo_scene::Demo&, bool camera_stopped, std::string& why) = nullptr;
+    bool (*start)(Cpu*, const demo_scene::Demo&, bool camera_stopped, std::function<uint32_t(const std::string&)> characters, std::string& why) = nullptr;
     int (*poll)(Cpu*, std::string& why) = nullptr;  // 0 idle, 1 running, 2 done, 3 failed
     void (*release)(Cpu*, const char* reason) = nullptr;
     void (*tick)(Cpu*) = nullptr;
