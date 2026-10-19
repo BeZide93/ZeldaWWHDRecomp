@@ -148,7 +148,7 @@ void restore(bool loaded,bool immediate=false) {
             guest?guest->mod.c_str():"invalid",guest?guest->scene.id.c_str():"invalid",guest_index,ld32(g_scratch+LeaseID),
             host?host->mod.c_str():"invalid",host?host->scene.id.c_str():"invalid",unsigned(g_restore_reason),unsigned(ours));
     }
-    if(g_cpu&&demo_backend().release)demo_backend().release(g_cpu,loaded?"state load":"scene ended");
+    if(g_cpu&&demo_backend().release)demo_backend().release(g_cpu,loaded?"state load":g_restore_reason==StopReason::Skipped?"skipped":"scene ended");
     finish_move();release_actors();restore_music();story_scene_choice::close(g_cpu);g_camera_follow.reset();
     if(ours) {
         const uint32_t manager=ld32(kMessageManager);

@@ -24,6 +24,8 @@ const uint32_t kResLoad = GC(0x02520460), kResDelete = GC(0x025204C8);
 const uint32_t kDemoRemove = GC(0x02528AC4), kSearchFromName = GC(0x025D9F38), kGetArchive = GC(0x026065A8);
 const uint32_t kLookupId = GC(0x026067F4), kLookupName = GC(0x02606900), kManagerUpdate = GC(0x025291C8);
 const uint32_t kSearchName = GC(0x025C109C), kActorCreate = GC(0x025D5834), kSearchById = GC(0x025D54C4), kActorDelete = GC(0x025D57E0);
+const uint32_t kResidentAnm = GC(0x022BED70), kResidentPlayAnm = GC(0x022C2D6C), kResidentPlayTex = GC(0x022C2CC0);
+const uint32_t kResidentWalk = GD(0x101C31BA), kResidentWait = GD(0x101C31B4);  // daNpcPeople_c walk/wait animation tables (as the routes use)
 const uint32_t kDemoActor = GC(0x02526E70), kDemoPool = GD(0x101D5FFC), kResidentMtx = GC(0x022BF3A0), kDemoFrame = GD(0x101D6008);
 const uint32_t kFindDemoMessage = GC(0x025F60EC);  // message resources: demo message code -> message label (the demo window's lookup)
 const uint32_t kDemoMessageOn = GC(0x025DB58C), kDemoMessageOff = GC(0x025DB59C);  // fopMsgM_demoMsgFlagOn / Off
@@ -47,14 +49,16 @@ enum : uint32_t {
     Spawned = 0x380,        // 8 x {process id, stage name[12]} game actors created for the demo
     Characters = 0x400,     // 16 x {actor, process id} mod-placed actors behind the stand-in names MA00..
     Scratch = 0x480,        // request struct + names for the bridge
-    Image = 0x500,          // event image (<= 0x100)
+    CharacterState = 0x500, // 12 x {last x, last z, animation, own table} resident villagers' walk/wait choice
+    Origin = 0x5C0,         // x, y, z, angle the demo's tracks are relative to (end poses on skip)
     RetailFlags = 0x600,    // manager+0x3C, 1280 bytes
     Archives = 0xB00,       // 16 x {name[12], phase request[8], held} archives this demo loads
     ArchiveCount = 0x064,
     MessageNumbers = 0x068, // 2 x the message each demo message code shows (resolved when the demo starts)
     DemoFlagSet = 0x070,    // the port turned the game's demo message flag on
     MessageShown = 0x074,   // index + 1 of the message whose point the demo waits at
-    Stb = 0xC80,            // STB (<= 0xC000)
+    Image = 0xC80,          // event image (<= 0x300)
+    Stb = 0xF80,            // STB (<= 0xC000)
 };
 uint32_t g_arena = 0;
 Call g_call = nullptr;
@@ -256,7 +260,17 @@ bool cast_ready(Cpu* c) {
     std::string why;
     if (!demo_scene::compile(g_demo, resolver(c), compiled, why)) return false;
     for (const auto& cast : compiled.cast) if (!find_actor(c, cast.name)) return false;
+    // the mod's own placed actors may still be on their way in (a scene can start as the room loads)
+    for (const auto& ch : compiled.characters) { const uint32_t a = g_characters ? g_characters(ch.character) : 0; if (!a || !ld32(a + 4) || ld32(a + 4) == 0xFFFFFFFFu) return false; }
     return true;
+}
+std::string missing_cast(Cpu* c) {
+    demo_scene::Compiled compiled;
+    std::string why, out;
+    if (!demo_scene::compile(g_demo, resolver(c), compiled, why)) return why;
+    for (const auto& cast : compiled.cast) if (!find_actor(c, cast.name)) out += (out.empty() ? "" : ", ") + cast.name;
+    for (const auto& ch : compiled.characters) if (!(g_characters ? g_characters(ch.character) : 0)) out += (out.empty() ? "" : ", ") + ch.character;
+    return out;
 }
 void remove_spawned(Cpu* c) {
     const uint32_t count = ld32(g_arena + SpawnCount);
@@ -300,12 +314,13 @@ bool begin(Cpu* c, std::string& why) {
     demo_scene::Compiled compiled;
     if (!demo_scene::compile(g_demo, resolver(c), compiled, why)) return false;
     // the mod-placed actors behind MA00..: present now, mod actors leased from their own motion
-    if (compiled.characters.size() > 16) return why = "a demo drives at most 16 characters", false;
+    if (compiled.characters.size() > 12) return why = "a demo drives at most 12 characters", false;
     for (size_t i = 0; i < compiled.characters.size(); ++i) {
         const uint32_t actor = g_characters ? g_characters(compiled.characters[i].character) : 0;
         if (!actor || !ld32(actor + 4) || ld32(actor + 4) == 0xFFFFFFFFu) return why = "character " + compiled.characters[i].character + " is not here", false;
         st32(g_arena + Characters + uint32_t(i) * 8, actor);
         st32(g_arena + Characters + uint32_t(i) * 8 + 4, ld32(actor + 4));
+        if (ld16(actor + 8) == 0x175) st32(g_arena + CharacterState + uint32_t(i) * 16 + 12, ld32(actor + 0x89C));  // its own animation table, back after the demo
     }
     if (!++g_lease_serial) ++g_lease_serial;
     st32(g_arena + Lease, 0x444D0000u | (g_lease_serial & 0xFFFF));
@@ -332,6 +347,8 @@ bool begin(Cpu* c, std::string& why) {
     else if (g_demo.origin) spec.origin = demo_event_image::Origin{g_demo.origin->x, g_demo.origin->y, g_demo.origin->z, g_demo.angle};
     std::vector<uint8_t> image;
     if (!demo_event_image::make(spec, image, why)) return false;
+    if (image.size() > Stb - Image) return why = "demo event image too large", false;
+    if (spec.origin) { st32(g_arena + Origin, f32_as_u32(spec.origin->x)); st32(g_arena + Origin + 4, f32_as_u32(spec.origin->y)); st32(g_arena + Origin + 8, f32_as_u32(spec.origin->z)); st32(g_arena + Origin + 12, f32_as_u32(spec.origin->angle_y)); }
     const uint32_t manager = play + kManager;
     (void)origin_now;
     st32(g_arena + ManagerAt, manager);
@@ -416,7 +433,7 @@ Poll poll(Cpu* c) {
     }
     if (ld32(g_arena + Phase) == kSpawning) {
         std::string why;
-        if (ticks > 300) why = "the demo's actors were not ready in 10 seconds";
+        if (ticks > 300) why = "the demo's actors were not ready in 10 seconds (" + missing_cast(c) + ")";
         else if (cast_ready(c) && !begin(c, why) && why.empty()) why = "demo could not start";
         if (!why.empty()) { release(c, why.c_str()); out.state = Poll::State::Failed; out.why = why; return out; }
         out.state = Poll::State::Running;
@@ -506,10 +523,65 @@ void apply_characters(Cpu* c) {
         if (flags & 2) for (uint32_t off : {0x314u, 0x300u}) for (unsigned k = 0; k < 12; k += 4) st32(actor + off + k, ld32(demo + 8 + k));
         if (flags & 8) for (uint32_t off : {0x320u, 0x328u}) { st16(actor + off, uint16_t(rx)); st16(actor + off + 2, uint16_t(ry)); st16(actor + off + 4, uint16_t(rz)); }
         if (flags & 4) for (unsigned k = 0; k < 12; k += 4) st32(actor + 0x330 + k, ld32(demo + 0x14 + k));
-        if (ld16(actor + 8) == 0x175) call(c, kResidentMtx, {actor});  // daNpcPeople_c::setMtx
+        if (ld16(actor + 8) == 0x175) {
+            // a villager walks while its track moves it and waits when it stands, with its own clips
+            const uint32_t state = g_arena + CharacterState + i * 16;
+            const float x = u32_as_f32(ld32(actor + 0x314)), z = u32_as_f32(ld32(actor + 0x31C));
+            const float dx = x - u32_as_f32(ld32(state)), dz = z - u32_as_f32(ld32(state + 4));
+            const uint32_t previous = ld32(state + 8), now = previous >> 16;
+            const bool moving = now != 0 && dx * dx + dz * dz > 0.25f;  // more than half a unit a frame
+            const uint32_t settled = moving ? 0 : std::min<uint32_t>((previous & 0xFFFF) + 1, 0xFFFF);
+            uint32_t target = now;
+            if (!now) target = 2;
+            else if (moving && now != 1) target = 1;
+            else if (!moving && now != 2 && settled >= 4) target = 2;
+            if (target != now) call(c, kResidentAnm, {actor, target == 1 ? kResidentWalk : kResidentWait, 1});
+            st32(state, f32_as_u32(x)); st32(state + 4, f32_as_u32(z));
+            st32(state + 8, target << 16 | settled);
+            call(c, kResidentPlayTex, {actor}); call(c, kResidentPlayAnm, {actor});
+            call(c, kResidentMtx, {actor});  // daNpcPeople_c::setMtx
+        }
         if (std::getenv("WWHD_DEMO_TRACE") && ld32(kDemoFrame) % 30 == 0)
             LOG("[demo] character %u profile %04X at %.0f,%.0f,%.0f angle %d (frame %u)", i, ld16(actor + 8), u32_as_f32(ld32(actor + 0x314)), u32_as_f32(ld32(actor + 0x318)),
                 u32_as_f32(ld32(actor + 0x31C)), int(int16_t(ld16(actor + 0x32A))), ld32(kDemoFrame));
+    }
+}
+}  // namespace
+
+namespace {
+// Skip: every participant takes the pose of its tracks' last keys (relative to the demo's origin).
+void end_poses(Cpu* c) {
+    const float ox = u32_as_f32(ld32(g_arena + Origin)), oy = u32_as_f32(ld32(g_arena + Origin + 4)), oz = u32_as_f32(ld32(g_arena + Origin + 8));
+    const float angle = u32_as_f32(ld32(g_arena + Origin + 12)), a = angle * 3.14159265f / 180.f, cs = std::cos(a), sn = std::sin(a);
+    const uint32_t play = call(c, kPlay, {});
+    uint32_t character_index = 0;
+    for (const auto& d : g_demo.actors) {
+        const bool is_character = d.kind == demo_scene::Actor::Kind::Character;
+        const uint32_t index = is_character ? character_index++ : 0;
+        if (d.kind == demo_scene::Actor::Kind::Model || (d.position.keys.empty() && d.rotation.keys.empty())) continue;
+        uint32_t actor = 0;
+        if (d.kind == demo_scene::Actor::Kind::Link) actor = play ? ld32(play + kPlayer) : 0;
+        else if (is_character) actor = character(index);
+        else {
+            bool spawned = false;
+            for (uint32_t k = 0; k < ld32(g_arena + SpawnCount) && k < 8; ++k) spawned |= cstr(g_arena + Spawned + k * 16 + 4, 12) == d.actor;
+            if (!spawned) actor = find_actor(c, d.actor);
+        }
+        if (!actor) continue;
+        story_notebook::WorldPoint p{u32_as_f32(ld32(actor + 0x314)), u32_as_f32(ld32(actor + 0x318)), u32_as_f32(ld32(actor + 0x31C))};
+        if (!d.position.keys.empty()) {
+            const auto& v = d.position.keys.back().value;
+            p = {ox + v.x * cs + v.z * sn, oy + v.y, oz - v.x * sn + v.z * cs};
+        }
+        story_notebook::WorldPoint r{int16_t(ld16(actor + 0x328)) * 180.f / 32768.f, int16_t(ld16(actor + 0x32A)) * 180.f / 32768.f, int16_t(ld16(actor + 0x32C)) * 180.f / 32768.f};
+        if (!d.rotation.keys.empty()) { const auto& v = d.rotation.keys.back().value; r = {v.x, std::remainder(v.y + angle, 360.f), v.z}; }
+        mod_actor::Identity id;
+        if (is_character && mod_actor::identify(c, actor, id)) { mod_actor::scene_pose(c, id, ld32(g_arena + Lease), p, r); continue; }
+        for (uint32_t off : {0x314u, 0x300u}) { st32(actor + off, f32_as_u32(p.x)); st32(actor + off + 4, f32_as_u32(p.y)); st32(actor + off + 8, f32_as_u32(p.z)); }
+        const uint16_t rx = uint16_t(int32_t(r.x * 32768.f / 180.f)), ry = uint16_t(int32_t(r.y * 32768.f / 180.f)), rz = uint16_t(int32_t(r.z * 32768.f / 180.f));
+        for (uint32_t off : {0x320u, 0x328u}) { st16(actor + off, rx); st16(actor + off + 2, ry); st16(actor + off + 4, rz); }
+        if (ld16(actor + 8) == 0x175) call(c, kResidentMtx, {actor});
+        LOG("[demo] skip: %s takes its end pose %.0f,%.0f,%.0f", d.id.c_str(), p.x, p.y, p.z);
     }
 }
 }  // namespace
@@ -518,6 +590,7 @@ void release(Cpu* c, const char* reason) {
     if (!recorded() || ld32(g_arena + Phase) == kDraining) return;
     const bool ours = ld32(kDemoFile) == g_arena + Stb && ld32(g_arena + StbBytes);
     if (ours && ld32(kDemoMode)) call(c, kDemoRemove, {});
+    if (std::strcmp(reason, "skipped") == 0 && ld32(g_arena + Phase) >= 2 && !g_demo.actors.empty()) end_poses(c);
     if (ld32(g_arena + Phase) >= 1) {
         restore_manager(c);
         std::memcpy(mem::ptr(kDemoArcName), mem::ptr(g_arena + SavedArc), 12);
@@ -526,7 +599,12 @@ void release(Cpu* c, const char* reason) {
     if (ld32(g_arena + MessageCount)) story_mail::unsay();
     for (uint32_t i = 0; i < ld32(g_arena + CharacterCount) && i < 16; ++i) {
         mod_actor::Identity id;
-        if (mod_actor::identify(c, character(i), id)) mod_actor::end_scene(c, id, ld32(g_arena + Lease));
+        const uint32_t actor = character(i);
+        if (mod_actor::identify(c, actor, id)) mod_actor::end_scene(c, id, ld32(g_arena + Lease));
+        else if (actor && ld16(actor + 8) == 0x175 && i < 12 && ld32(g_arena + CharacterState + i * 16 + 8)) {
+            const uint32_t own = ld32(g_arena + CharacterState + i * 16 + 12);
+            call(c, kResidentAnm, {actor, own ? own : kResidentWait, 1});
+        }
     }
     st32(g_arena + CharacterCount, 0);
     g_character_refs.clear();
