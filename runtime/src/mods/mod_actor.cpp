@@ -776,8 +776,19 @@ bool world_object_query(const std::string&mod,const story_notebook::ManifestActo
         allocation+=story_world_collision::mesh::allocation_bytes(*d.collision)+d.spec.grapple_points.size()*(story_world_grapple::kProxyBytes+64);grapple_count+=d.spec.grapple_points.size();
         Bounds other;
         if(!world_bounds(d,d.spec.position,other))return why="invalid existing object bounds",false;
-        Index placed;placed.coverage.push_back({spec.stage,int(spec.room),true,true,true,{}});placed.bounds.push_back({spec.stage,int(spec.room),"world_object",d.mod+":"+d.spec.id,other});
-        auto overlapping=check(spec.stage,int(spec.room),bounds,placed);conflicts.insert(conflicts.end(),overlapping.begin(),overlapping.end());
+        const std::string other_id=d.mod+":"+d.spec.id;const char* whose=d.mod==mod?"this mod's world object":"another mod's world object";
+        if(spec.water_object()||d.spec.water_object()){
+            // a floating or drifting body: its whole motion envelope keeps clear
+            Index placed;placed.coverage.push_back({spec.stage,int(spec.room),true,true,true,{}});placed.bounds.push_back({spec.stage,int(spec.room),"world_object",other_id,other});
+            auto overlapping=check(spec.stage,int(spec.room),bounds,placed);for(auto&x:overlapping)if(x.kind=="world_object")x.message=whose;conflicts.insert(conflicts.end(),overlapping.begin(),overlapping.end());
+        }else{
+            // two static objects: their own collision, so one may stand on the other's walkable top (an island
+            // ground, a platform) and only a real overlap of their solid geometry is in the way
+            auto solid_of=[](const story_world_collision::mesh::Mesh&g,const story_notebook::ManifestActor&a){std::vector<Point> v;v.reserve(g.vertices.size());for(const auto&p:g.vertices)v.push_back({p.x,p.y,p.z});
+                std::vector<std::array<uint16_t,3>> t;t.reserve(g.triangles.size());for(const auto&x:g.triangles)t.push_back(x.indices);
+                return place_solid(v,t,{a.position.x,a.position.y,a.position.z},{a.rotation.x,a.rotation.y,a.rotation.z},{a.scale.x,a.scale.y,a.scale.z});};
+            if(solids_overlap(solid_of(*geometry,spec),solid_of(*d.collision,d.spec)))conflicts.push_back({"world_object",other_id,whose,other_id});
+        }
     }
     if(grapple_count>16)conflicts.push_back({"grapple","room","Room grapple targets exceed the limit of 16"});
     if(allocation>2*1024*1024)conflicts.push_back({"memory","room","Room collision allocation exceeds 2 MiB"});

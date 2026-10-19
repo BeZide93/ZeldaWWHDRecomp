@@ -303,7 +303,13 @@ where the game stores them (world coordinates, on the sea as in dungeons). An ob
   digging spots, salvage points, invisible walls, light and weather areas, the sea chart's island markers
   and the old Tingle Tuner switches. Routes at sea level (boats, swimmers) only count for what reaches down
   to the water;
-- other mods' world objects and the King of Red Lions.
+- other world objects (this mod's and other mods') and the King of Red Lions.
+
+Two static world objects are compared by their own collision, not by boxes around them: an object may
+stand on another's walkable top (an island ground, a platform, a pier) and reach up to 150 units into it
+where the ground slopes under it, as the islands' own buildings do; only a real overlap of their solid
+geometry is in the way (a cliff, a pillar, a wall, the ground higher up the object). Floating and drifting
+objects keep their whole motion range clear.
 
 An object must stay inside the indexed room. A sea object that crosses into a neighbouring square is
 refused until coverage for that placement is available. Missing, malformed or unsupported collision, event

@@ -703,11 +703,13 @@ Value Session::dispatch_quest(const std::string& command, const Value& p, std::s
                 const std::string id = free_id(list, a.get("id").string());
                 Value copy = duplicate_actor(a, id);
                 WorldPoint pos;
-                if (point_of(copy.get("position"), pos)) copy["position"] = rounded({pos.x + offset.x, pos.y + offset.y, pos.z + offset.z});
+                const bool has_position = point_of(copy.get("position"), pos);
                 if (place.valid) {  // into the room Link (or the camera) is in
                     copy["stage"] = place.stage;
                     copy["room"] = place.stage == "sea" ? sea_room(pos.x + offset.x, pos.z + offset.z) : place.room;
                 }
+                // an island ground on the sea stays at the sea's level
+                if (has_position) copy["position"] = rounded({pos.x + offset.x, sea_level_piece(copy) ? 0.0f : pos.y + offset.y, pos.z + offset.z});
                 list.array.push_back(copy);
                 added.push_back(copy);
                 r["ids"].array.push_back(Value(id));
@@ -759,7 +761,7 @@ Value Session::dispatch_quest(const std::string& command, const Value& p, std::s
             for (auto& a : list) {
                 WorldPoint pos;
                 if (std::find(ids.begin(), ids.end(), a.get("id").string()) == ids.end() || !point_of(a.get("position"), pos)) continue;
-                a["position"] = rounded({pos.x + offset.x, pos.y + offset.y, pos.z + offset.z});
+                a["position"] = rounded({pos.x + offset.x, sea_level_piece(a) ? 0.0f : pos.y + offset.y, pos.z + offset.z});
             }
             return true;
         }, r, why);

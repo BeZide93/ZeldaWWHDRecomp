@@ -735,10 +735,14 @@ void building(const fs::path& examples) {
         CHECK(!ok(s.run("add_actor", json(R"({"type": "resident", "id": "studio", "at": "position", "position": {"x": 0, "y": 0, "z": 0}, "stage": "Ocmera", "room": 0, "options": {"resident": "ub4"}})"))));
         CHECK(ok(s.run("remove_actor", json(R"({"id": "lookout", "confirm": true})"))));
     }
-    // no ground below: placed where asked, with a note
+    // no ground below on the sea: the water's surface (y 0); elsewhere placed where asked, with a note
     host.has_ground = false;
     r = s.run("add_actor", json(R"({"type": "crate"})"));
-    CHECK(ok(r) && r.get("result").get("snap_note").type == Value::String && actor_of(s, "crate")->get("broken_flag").string() == "crate-broken");
+    CHECK(ok(r) && r.get("result").get("snapped").boolean && actor_of(s, "crate")->get("position").get("y").number == 0 &&
+          actor_of(s, "crate")->get("broken_flag").string() == "crate-broken");
+    r = s.run("add_actor", json(R"({"type": "crate", "id": "crate-in", "at": "position", "position": {"x": 10, "y": 300, "z": 20}, "stage": "M_NewD2", "room": 1})"));
+    CHECK(ok(r) && r.get("result").get("snap_note").type == Value::String && actor_of(s, "crate-in")->get("position").get("y").number == 300);
+    CHECK(ok(s.run("remove_actor", json(R"({"id": "crate-in", "confirm": true})"))));
     host.has_ground = true;
     // a door needs a switch; enemies; a model type needs a model
     CHECK(!ok(s.run("add_actor", json(R"({"type": "door"})"))));
@@ -1012,6 +1016,83 @@ void ray_pick() {
     // nothing below within range, or a ray up into the sky: no hit
     CHECK(!editor::ray_ground({0, 600, 0}, {0, -1, 0}, 1000, world, hit));
     CHECK(!editor::ray_ground({0, 600, 0}, {0, 1, 0}, 20000, world, hit));
+    // the sea's surface: a ray over open sea gives the point where it meets y 0; ground nearer than the water wins
+    WorldPoint sea;
+    const float m = std::sqrt(0.6f * 0.6f + 0.8f * 0.8f);
+    CHECK(editor::sea_pick({1000, 800, 5000}, {0.6f / m, -0.8f / m, 0}, 20000, false, sea));
+    CHECK(sea.y == 0 && std::fabs(sea.x - 1600) < 0.5f && sea.z == 5000);
+    sea = {1200, 650, 5000};  // an island top met first
+    CHECK(!editor::sea_pick({1000, 800, 5000}, {0.6f / m, -0.8f / m, 0}, 20000, true, sea) && sea.y == 650);
+    sea = {9000, -5000, 5000};  // the deep sea floor far beyond the water's surface
+    CHECK(editor::sea_pick({1000, 800, 5000}, {0.6f / m, -0.8f / m, 0}, 20000, true, sea) && sea.y == 0);
+    CHECK(!editor::sea_pick({1000, 800, 5000}, {0, 1, 0}, 20000, false, sea));       // up into the sky
+    CHECK(!editor::sea_pick({1000, -50, 5000}, {0, -1, 0}, 20000, false, sea));      // from below the water
+    CHECK(!editor::sea_pick({1000, 800, 5000}, {0.6f / m, -0.8f / m, 0}, 900, false, sea));  // beyond the range
+}
+
+// Placing on an island ground and on the open sea: an island (here a plateau whose top is at 650, around x 0,
+// z -201500 in sea room 11) is ground like any other, every kind stands on its top; over open sea (no ground the
+// game's check finds) a pick gives the water's surface and things placed there stay at sea level.
+struct IslandHost : FakeHost {
+    std::map<std::string, std::string> states;
+    static bool on_island(double x, double z) { return std::fabs(x) < 3000 && std::fabs(z + 201500) < 3000; }
+    editor::Place link() override {
+        editor::Place p;
+        p.valid = true, p.stage = "sea", p.room = 11, p.position = {0, 650, -201500};
+        return p;
+    }
+    bool ground(const editor::WorldPoint& at, float& h, std::string& why) override {
+        if (on_island(at.x, at.z) && at.y >= 650) return h = 650, true;
+        return why = "no ground below", false;  // the open sea: nothing the game's ground check finds
+    }
+    bool ray(const editor::WorldPoint& from, const editor::WorldPoint& d, float range, editor::WorldPoint& hit, std::string& why) override {
+        if (d.y >= 0) return why = "the ray meets no ground", false;
+        const float t = (from.y - 650) / -d.y;
+        const editor::WorldPoint at{from.x + d.x * t, 650, from.z + d.z * t};
+        if (t > range || !on_island(at.x, at.z)) return why = "the ray meets no ground", false;
+        return hit = at, true;
+    }
+    bool prepare_piece(const std::string& mod, const std::string& id, std::string& note, std::string&) override {
+        states[mod + "/" + id] = "preparing";
+        return note = "preparing", true;
+    }
+    std::string piece_state(const std::string& mod, const std::string& id) override {
+        auto found = states.find(mod + "/" + id);
+        return found == states.end() ? "" : found->second;
+    }
+};
+void island_and_sea_placement() {
+    IslandHost host;
+    editor::Session s(&host);
+    s.add_package("editor-test", "Editor test", "", json(kManifest));
+    // the pick: over the island its top, over open sea the water's surface (with its sea room)
+    Value r = s.run("pick", json(R"({"origin": {"x": 0, "y": 3000, "z": -201500}, "direction": {"x": 0, "y": -1, "z": 0}})"));
+    CHECK(ok(r) && r.get("result").get("position").get("y").number == 650 && r.get("result").get("surface").type == Value::Null);
+    r = s.run("pick", json(R"({"origin": {"x": 20000, "y": 3000, "z": -201500}, "direction": {"x": 0.6, "y": -0.8, "z": 0}})"));
+    CHECK(ok(r) && r.get("result").get("position").get("y").number == 0 && r.get("result").get("surface").string() == "sea");
+    CHECK(std::fabs(r.get("result").get("position").get("x").number - 22250) < 1 && r.get("result").get("room").number == 11);
+    // an island ground clicked onto the open sea: at the water's level, and it stays there when moved
+    r = s.run("add_actor", json(R"({"type": "piece:star-island", "id": "isle", "at": "position", "position": {"x": 22250, "y": 0, "z": -201500}, "stage": "sea"})"));
+    CHECK(ok(r) && actor_of(s, "isle") && actor_of(s, "isle")->get("position").get("y").number == 0);
+    CHECK(ok(s.run("move_actor", json(R"({"id": "isle", "position": {"x": 23000, "y": 640, "z": -201000}})"))));
+    CHECK(actor_of(s, "isle")->get("position").get("y").number == 0 && actor_of(s, "isle")->get("position").get("x").number == 23000);
+    CHECK(ok(s.run("move_actors", json(R"({"ids": ["isle"], "offset": {"x": 10, "y": 300, "z": 0}})"))) && actor_of(s, "isle")->get("position").get("y").number == 0);
+    // every kind placed over the island stands on its top: a mod actor (a sign), a resident, an enemy, a prop, a building
+    struct Kind { const char* json; const char* id; };
+    for (const Kind& k : {Kind{R"({"type": "sign", "id": "k-sign"})", "k-sign"}, Kind{R"({"type": "resident", "id": "k-resident", "options": {"resident": "um1"}})", "k-resident"},
+                          Kind{R"({"type": "chuchu", "id": "k-enemy"})", "k-enemy"}, Kind{R"({"type": "pot", "id": "k-prop"})", "k-prop"},
+                          Kind{R"({"type": "piece:outset-house-small", "id": "k-house"})", "k-house"}}) {
+        std::string req = k.json;
+        req.insert(req.size() - 1, R"(, "at": "position", "position": {"x": 400, "y": 1400, "z": -201300}, "stage": "sea")");
+        r = s.run("add_actor", json(req.c_str()));
+        CHECK(ok(r));
+        const Value* a = actor_of(s, k.id);
+        CHECK(a && a->get("position").get("y").number == 650 && a->get("room").number == 11);
+        if (!ok(r) || !a) std::fprintf(stderr, "kind %s: %s\n", k.id, r.get("error").string().c_str());
+    }
+    // dropped on open water: the sea's surface (whether it may stand there is the usual validation's matter)
+    r = s.run("add_actor", json(R"({"type": "chuchu", "id": "k-sea", "at": "position", "position": {"x": 15000, "y": 300, "z": -201500}, "stage": "sea"})"));
+    CHECK(ok(r) && actor_of(s, "k-sea") && actor_of(s, "k-sea")->get("position").get("y").number == 0);
 }
 
 
@@ -1306,6 +1387,7 @@ int main(int argc, char** argv) {
     game_objects();
     route_commands();
     game_pieces();
+    island_and_sea_placement();
     stage_tables();
     ray_pick();
     if (g_failures) {

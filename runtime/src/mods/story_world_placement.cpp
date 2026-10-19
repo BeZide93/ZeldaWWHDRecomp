@@ -285,4 +285,50 @@ std::vector<Conflict> check_building(const std::string&s,int room,const Bounds&b
   if(hit)out.push_back({words,r.id,article(words)+" of the island",r.id,0,r.points.front(),r.radius,r.points});}
  return out;
 }
+// ---- solids against each other
+namespace {
+using Poly=std::vector<Point>;
+// the part of a triangle at or above height h (0 to 4 points)
+Poly clip_above(const Point (&t)[3],double h){
+ Poly out;for(unsigned k=0;k<3;++k){const Point&a=t[k],&b=t[(k+1)%3];const bool ia=a.y>=h,ib=b.y>=h;if(ia)out.push_back(a);
+  if(ia!=ib){const double f=(h-a.y)/(double(b.y)-a.y);out.push_back({float(a.x+(b.x-a.x)*f),float(h),float(a.z+(b.z-a.z)*f)});}}
+ return out;
+}
+// does segment p-q cross triangle (a,b,c) (Moeller-Trumbore with the segment's ends; parallel never counts)
+bool segment_triangle(Point p,Point q,Point a,Point b,Point c){
+ const double d[3]={double(q.x)-p.x,double(q.y)-p.y,double(q.z)-p.z},e1[3]={double(b.x)-a.x,double(b.y)-a.y,double(b.z)-a.z},e2[3]={double(c.x)-a.x,double(c.y)-a.y,double(c.z)-a.z};
+ const double h[3]={d[1]*e2[2]-d[2]*e2[1],d[2]*e2[0]-d[0]*e2[2],d[0]*e2[1]-d[1]*e2[0]};const double det=e1[0]*h[0]+e1[1]*h[1]+e1[2]*h[2];
+ const double scale=std::sqrt(d[0]*d[0]+d[1]*d[1]+d[2]*d[2])*std::sqrt(e1[0]*e1[0]+e1[1]*e1[1]+e1[2]*e1[2])*std::sqrt(e2[0]*e2[0]+e2[1]*e2[1]+e2[2]*e2[2]);
+ if(!(std::fabs(det)>1e-9*scale))return false;const double f=1/det,sv[3]={double(p.x)-a.x,double(p.y)-a.y,double(p.z)-a.z};
+ const double u=f*(sv[0]*h[0]+sv[1]*h[1]+sv[2]*h[2]);if(u<0||u>1)return false;
+ const double qv[3]={sv[1]*e1[2]-sv[2]*e1[1],sv[2]*e1[0]-sv[0]*e1[2],sv[0]*e1[1]-sv[1]*e1[0]};const double v=f*(d[0]*qv[0]+d[1]*qv[1]+d[2]*qv[2]);if(v<0||u+v>1)return false;
+ const double t=f*(e2[0]*qv[0]+e2[1]*qv[1]+e2[2]*qv[2]);return t>=0&&t<=1;
+}
+// do two convex polygons (fans) cross: an edge of one through the other
+bool polys_cross(const Poly&a,const Poly&b){
+ if(a.size()<3||b.size()<3)return false;
+ for(int pass=0;pass<2;++pass){const Poly&e=pass?b:a,&f=pass?a:b;
+  for(size_t i=0;i<e.size();++i){const Point p=e[i],q=e[(i+1)%e.size()];for(size_t k=1;k+1<f.size();++k)if(segment_triangle(p,q,f[0],f[k],f[k+1]))return true;}}
+ return false;
+}
+Bounds poly_bounds(const Poly&p){Bounds b=empty();for(auto q:p)include(b,q);return b;}
+}
+Solid place_solid(const std::vector<Point>&local,const std::vector<std::array<uint16_t,3>>&triangles,Point t,Point r,Point sc){
+ Solid out;out.bounds=empty();out.vertices.reserve(local.size());for(auto p:local){out.vertices.push_back(transformed(p,t,r,sc));include(out.bounds,out.vertices.back());}
+ for(const auto&tri:triangles)if(tri[0]<local.size()&&tri[1]<local.size()&&tri[2]<local.size())out.triangles.push_back(tri);
+ return out;
+}
+bool solids_overlap(const Solid&a,const Solid&b,float step){
+ if(a.triangles.empty()||b.triangles.empty()||!valid(a.bounds)||!valid(b.bounds)||!overlap(a.bounds,b.bounds,0))return false;
+ // where both stand: the higher base; below it plus the step, contact is standing on (or leaning against) the other
+ const double h=double(std::max(a.bounds.minimum.y,b.bounds.minimum.y))+step;
+ Bounds common{{std::max(a.bounds.minimum.x,b.bounds.minimum.x),float(h),std::max(a.bounds.minimum.z,b.bounds.minimum.z)},
+               {std::min(a.bounds.maximum.x,b.bounds.maximum.x),std::min(a.bounds.maximum.y,b.bounds.maximum.y),std::min(a.bounds.maximum.z,b.bounds.maximum.z)}};
+ if(!valid(common))return false;
+ auto clipped=[&](const Solid&s){std::vector<std::pair<Poly,Bounds>> out;for(const auto&t:s.triangles){const Point tri[3]={s.vertices[t[0]],s.vertices[t[1]],s.vertices[t[2]]};
+  Bounds tb=empty();for(auto p:tri)include(tb,p);if(!overlap(tb,common,0))continue;Poly p=clip_above(tri,h);if(p.size()<3)continue;out.push_back({p,poly_bounds(p)});}return out;};
+ const auto pa=clipped(a),pb=clipped(b);
+ for(const auto&[x,xb]:pa)for(const auto&[y,yb]:pb)if(overlap(xb,yb,0)&&polys_cross(x,y))return true;
+ return false;
+}
 }

@@ -46,4 +46,21 @@ bool ray_ground(const story_notebook::WorldPoint& from, const story_notebook::Wo
     }
 }
 
+// The sea's surface as a place to put things: on the sea stage the water at y 0 is no ground the game's check
+// finds (the open sea has none, or only the deep sea floor), so a ray that meets y 0 before any ground (or meets
+// no ground at all within `range`) gives the point where it meets the water. `d` is a unit direction; `hit` is
+// the ground hit when `has_hit`. True when `hit` became the sea point.
+inline bool sea_pick(const story_notebook::WorldPoint& from, const story_notebook::WorldPoint& d, float range, bool has_hit,
+                     story_notebook::WorldPoint& hit, float sea_level = 0) {
+    if (!(d.y < 0) || !(from.y > sea_level)) return false;
+    const double t = (double(sea_level) - from.y) / d.y;
+    if (!(t >= 0) || t > range) return false;
+    if (has_hit) {
+        const double dx = double(hit.x) - from.x, dy = double(hit.y) - from.y, dz = double(hit.z) - from.z;
+        if (std::sqrt(dx * dx + dy * dy + dz * dz) <= t) return false;  // the ground is nearer (an island above the water)
+    }
+    hit = {float(from.x + d.x * t), sea_level, float(from.z + d.z * t)};
+    return true;
+}
+
 }  // namespace editor

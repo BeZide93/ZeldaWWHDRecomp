@@ -1303,6 +1303,7 @@ Value Session::dispatch(const std::string& command, const Value& p, std::string&
         const char* verb = command == "move_actor" ? "Move " : command == "rotate_actor" ? "Turn " : "Scale ";
         return actor_edit(verb + text(p, "id"), [&](Value& a, std::string&) {
             a[field] = p.get(field);
+            if (command == "move_actor" && sea_level_piece(a) && a[field].type == Value::Object) a[field]["y"] = 0.0;
             return true;
         });
     }

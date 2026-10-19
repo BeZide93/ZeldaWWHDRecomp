@@ -102,4 +102,25 @@ int main(){
   assert(check("sea",2,{{149000,0,0},{151000,100,100}},sea).front().id=="room-boundary");
  }
  write_fixture("test_Room0.szs",{0,1,2});loaded=load_native_room(temporary.string(),"test",0);assert(check("test",0,local,loaded,0).front().kind=="coverage");assert(check("../test",0,local,load_native_room(temporary.string(),"../test",0)).front().kind=="coverage");std::filesystem::remove_all(temporary);
+ // ---- solids: an island ground (a sloped hill with a cliff wall) and houses (closed boxes) on and against it
+ {
+  auto box=[](Point lo,Point hi){std::vector<Point> v{{lo.x,lo.y,lo.z},{hi.x,lo.y,lo.z},{hi.x,lo.y,hi.z},{lo.x,lo.y,hi.z},{lo.x,hi.y,lo.z},{hi.x,hi.y,lo.z},{hi.x,hi.y,hi.z},{lo.x,hi.y,hi.z}};
+   std::vector<std::array<uint16_t,3>> t{{0,1,2},{0,2,3},{4,6,5},{4,7,6},{0,5,1},{0,4,5},{1,6,2},{1,5,6},{2,7,3},{2,6,7},{3,4,0},{3,7,4}};return std::make_pair(v,t);};
+  // the hill: its top rises 100 units over 2000 (a slope), a cliff stands at x 1500..1600 up to 900
+  std::vector<Point> hv{{-2000,0,-2000},{2000,100,-2000},{2000,100,2000},{-2000,0,2000},{1500,100,-500},{1600,100,-500},{1600,900,-500},{1500,900,-500},{1500,100,500},{1600,100,500},{1600,900,500},{1500,900,500},{-2000,-1000,-2000},{2000,-1000,-2000},{2000,-1000,2000},{-2000,-1000,2000}};
+  std::vector<std::array<uint16_t,3>> ht{{0,2,1},{0,3,2},{4,7,11},{4,11,8},{5,9,10},{5,10,6},{4,5,6},{4,6,7},{8,10,9},{8,11,10},{7,6,10},{7,10,11},{12,13,14},{12,14,15}};  // and its base under the sea, as an island's
+  const Solid hill=place_solid(hv,ht,{0,0,0},{0,0,0},{1,1,1});
+  auto [bv,bt]=box({-200,0,-200},{200,500,200});
+  assert(!solids_overlap(hill,place_solid(bv,bt,{0,60,0},{0,222.5f,0},{1,1,1})));     // on the slope, its floor a little in it
+  assert(!solids_overlap(hill,place_solid(bv,bt,{-1000,10,0},{0,0,0},{1,1,1})));     // a house on the low side
+  assert(solids_overlap(hill,place_solid(bv,bt,{0,-300,0},{0,0,0},{1,1,1})));        // sunk 300: the top goes through its walls
+  assert(solids_overlap(hill,place_solid(bv,bt,{1500,100,0},{0,0,0},{1,1,1})));      // into the cliff
+  assert(!solids_overlap(hill,place_solid(bv,bt,{1250,100,0},{0,0,0},{1,1,1})));     // right beside the cliff (its bounds touch, the solids don't)
+  // two houses: apart, touching corners after a turn, overlapping
+  const Solid a=place_solid(bv,bt,{0,100,0},{0,0,0},{1,1,1});
+  assert(!solids_overlap(a,place_solid(bv,bt,{450,100,0},{0,0,0},{1,1,1})));
+  assert(!solids_overlap(a,place_solid(bv,bt,{520,100,0},{0,45,0},{1,1,1})));        // its turned bounds overlap, it doesn't
+  assert(solids_overlap(a,place_solid(bv,bt,{300,100,100},{0,30,0},{1,1,1})));
+  assert(!solids_overlap(a,Solid{}));
+ }
 }

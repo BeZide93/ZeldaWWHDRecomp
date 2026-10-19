@@ -63,6 +63,11 @@ bool new_game_piece(const std::string& type, const std::string& id, const Place&
     return true;
 }
 
+bool sea_level_piece(const Value& a) {
+    const auto* p = story_game_pieces::catalogue().find(story_game_pieces::reference(a.get("actor").string()));
+    return p && p->distant_triangles && a.get("stage").string() == "sea";
+}
+
 void require_game_piece(Value& manifest, const std::string& type) {
     const auto* p = story_game_pieces::catalogue().find(story_game_pieces::reference(type));
     if (!p) return;

@@ -13,6 +13,7 @@
 #include "../mods/static_model_validation.h"
 #include "../mods/story_manifest.h"
 #include "commands.h"
+#include "ray_ground.h"
 #include "quests.h"
 
 namespace editor {
@@ -542,8 +543,13 @@ Value Session::dispatch_build(const std::string& command, const Value& p, std::s
         if (!host_) return;
         float h = 0;
         std::string w;
+        // on the sea nothing goes below the water's surface: a point on the open sea stays at sea level (y 0)
+        const bool sea = p.get("stage").string(host_->link().stage) == "sea" && pos.y >= 0;
         if (host_->ground({pos.x, pos.y + 50, pos.z}, h, w)) {
-            pos.y = h;
+            pos.y = sea ? std::max(h, 0.0f) : h;
+            result["snapped"] = true;
+        } else if (sea) {
+            pos.y = 0;
             result["snapped"] = true;
         } else
             result["snap_note"] = "not on the ground: " + w;
@@ -778,9 +784,15 @@ Value Session::dispatch_build(const std::string& command, const Value& p, std::s
         if (!(len > 1e-6)) return why = "the direction has no length", r;
         dir = {float(dir.x / len), float(dir.y / len), float(dir.z / len)};
         const float range = p.get("range").type == Value::Number ? float(std::clamp(p.get("range").number, 1.0, 200000.0)) : 20000.0f;
-        if (!host_->ray(from, dir, range, hit, why)) return r;
+        const bool ground_hit = host_->ray(from, dir, range, hit, why);
+        // on the sea the water's surface is a place too: an island ground or a buoy goes onto the open sea
+        const Place here = host_->link();
+        const bool sea = here.valid && here.stage == "sea" && sea_pick(from, dir, range, ground_hit, hit);
+        if (!ground_hit && !sea) return r;
+        why.clear();
+        if (sea) r["surface"] = "sea";
         r["position"] = rounded(hit);
-        if (const Place link = host_->link(); link.valid) {
+        if (const Place link = here; link.valid) {
             r["stage"] = link.stage;
             r["room"] = link.stage == "sea" ? sea_room(hit.x, hit.z) : link.room;
         }

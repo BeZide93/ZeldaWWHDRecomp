@@ -124,7 +124,8 @@ field, the camera does not move.
 ## Placing new actors
 
 Press **Add** and choose what to place, then click into the picture: the actor stands on the ground where
-you clicked (the game's own collision decides where the ground is). Hold Shift while clicking to place
+you clicked (the game's own collision decides where the ground is; a placed island ground or another world
+object is ground too). On the sea, a click on open water places at the sea's surface. Hold Shift while clicking to place
 more of the same; **Stop placing** in the toolbar or Esc ends it.
 
 - **Game actors:** sign, resident, chest. **Resident** opens a list of who it is: one of the game's
@@ -165,7 +166,9 @@ has no flags, drops or dialogue.
 **Buildings** in the same list are the islands' own houses, towers and shelters
 (docs/mod-sdk-v3.md, "Island buildings"); **Island parts** are smaller pieces of other islands made the
 same way (Dragon Roost's shrine, torii, walkways and sea rocks, Windfall's windmill cap, shipwrecks); **Islands** are
-the ground of small islands, bare, placed at the sea's level below Link (docs/mod-sdk-v3.md, "Island grounds"). The first time a mod places one, the editor makes it from
+the ground of small islands, bare, always at the sea's level: click the open sea where it goes, and it stays at
+sea level when you move it (docs/mod-sdk-v3.md, "Island grounds"). Houses, villagers, enemies and other actors can be
+placed on an island ground like on any island. The first time a mod places one, the editor makes it from
 your game files: the list says "(preparing...)" and the building appears in the picture a moment
 later, when it is ready. A building turns about the vertical axis only and keeps its size; it has no variants. While
 a building (or any world object) is selected or dragged, its footprint shows in the picture: green where it may stand, red

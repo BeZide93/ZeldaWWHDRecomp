@@ -408,6 +408,8 @@ void require_game_objects(Value& manifest, const std::string& type);
 // "requires" raised to what it needs.
 Value game_piece_info(const story_game_pieces::Piece& p);
 bool new_game_piece(const std::string& type, const std::string& id, const Place& place, Value& out, std::string& why);
+// An island ground on the sea: it always stands at the sea's level (y 0), wherever it is moved to.
+bool sea_level_piece(const Value& actor);
 void require_game_piece(Value& manifest, const std::string& type);
 // A free actor id from `base` ("sign", "sign-2", ...).
 std::string free_id(const Value& list, const std::string& base);

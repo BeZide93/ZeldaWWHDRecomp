@@ -1,5 +1,6 @@
 // Conservative placement queries. Native resource data stays on the player's machine.
 #pragma once
+#include <array>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -37,6 +38,18 @@ struct SweepResult {Point allowed_delta;std::vector<Conflict> conflicts;bool blo
 // a second continuous query permits sliding along an unblocked axis. Unknown
 // coverage, initial overlap and malformed dynamic obstacles stop all movement.
 SweepResult sweep(const std::string& stage,int room,const Bounds& start,Point desired_delta,const Index&,float clearance=kClearance);
+// ---- two world objects' own collision against each other (mod_actor's placement query): an object may stand on
+// another's walkable top (an island ground, a platform, a pier) and lean against its slopes as the islands' own
+// buildings do; only a real overlap of their solid geometry counts. Triangles in world space.
+struct Solid {std::vector<Point> vertices;std::vector<std::array<uint16_t,3>> triangles;Bounds bounds;};
+// how far an object may reach into the ground it stands on (a slope under a house's floor, a step)
+inline constexpr float kGroundStep=150;
+// true when a triangle of one crosses a triangle of the other above the higher of the two bases plus `step`:
+// resting on (or slightly into) the other's top doesn't count, a cliff, pillar, wall or roof through it does.
+// A solid wholly inside the other without any crossing is not found (the caller's bounds rules still apply).
+bool solids_overlap(const Solid& a,const Solid& b,float step=kGroundStep);
+// a local collision mesh placed in the world (position, rotation in degrees as transform_bounds, scale)
+Solid place_solid(const std::vector<Point>& local,const std::vector<std::array<uint16_t,3>>& triangles,Point position,Point rotation,Point scale);
 // Bounded readers of original stage resources. Invalid or unsupported input never grants coverage.
 // The data is world space as stored (a stage's MULT entries place rooms on the sea chart and turn the
 // minimap; they do not move a room's collision or layout), so the readers move nothing.

@@ -121,6 +121,41 @@ if(argc==2&&(std::strcmp(argv[1],"--world-proof")==0||std::strcmp(argv[1],"--wor
     assert(ld16(Scratch+4)==3&&ld16(Scratch+6)==0xFFFD&&ld16(Scratch+0x20)==432);
     assert(hooks.count(0x024EE708)==1&&hooks.size()==7);return 0;
 }
+// Placing on another world object: an island ground (a plateau with its top at y 500 and a pillar up to 1500) is
+// ground; a box (a house) stands on its top, may reach a little into it, and only a real overlap with its solid
+// geometry (the pillar, the plateau's top above the step) is in the way; the same mod's object says so.
+if(argc==2&&std::strcmp(argv[1],"--world-ground")==0){
+    world_mode=true;mod_actor::configure_world_objects("synthetic",[](const std::string&stage,int room){story_world_placement::Index index;index.coverage.push_back({stage,room,true,true,true,{}});return index;});
+    namespace mesh=story_world_collision::mesh;std::string why;mesh::Mesh plateau,pillar,ground;
+    assert(mesh::make_shape("box",{4000,700,4000},0,0,1,plateau,why)&&mesh::make_shape("box",{300,1100,300},0,0,0,pillar,why));
+    for(auto&v:plateau.vertices)v.y+=150;           // -200 .. 500
+    for(auto&v:pillar.vertices)v.x+=1200,v.y+=950;  // 400 .. 1500 at x 1200
+    ground=plateau;const auto base=uint16_t(ground.vertices.size());ground.vertices.insert(ground.vertices.end(),pillar.vertices.begin(),pillar.vertices.end());
+    for(auto t:pillar.triangles){for(auto&i:t.indices)i=uint16_t(i+base);ground.triangles.push_back(t);}
+    ground.minimum=ground.maximum=ground.vertices[0];for(auto p:ground.vertices){ground.minimum={std::min(ground.minimum.x,p.x),std::min(ground.minimum.y,p.y),std::min(ground.minimum.z,p.z)};ground.maximum={std::max(ground.maximum.x,p.x),std::max(ground.maximum.y,p.y),std::max(ground.maximum.z,p.z)};}
+    assert(mesh::validate(ground,why));assert(mod_actor::register_collision("test","ground",std::make_shared<const mesh::Mesh>(ground)));
+    story_notebook::ManifestActor isle;isle.kind="mod";isle.id="isle";isle.stage="sea";isle.room=12;isle.behaviour="static";isle.collision_mesh="ground";isle.position={1000,0,2000};
+    assert(mod_actor::declare("test",isle,"mod_unique",1,{})==1);
+    auto house=isle;house.id="house";house.collision_mesh.clear();house.collision_shape="box";house.collision_size={400,600,400};house.collision_surface="wood";
+    auto query=[&](const std::string&mod,story_notebook::WorldPoint at,float yaw){house.position=at;house.rotation={0,yaw,0};mods::json::Value r;assert(mod_actor::world_object_query(mod,house,false,r,why));return r;};
+    // on the plateau's top (box centred: its base at 500), turned
+    auto r=query("test",{1000-800,800,2000+600},222.5f);if(!r.get("clear").boolean)std::puts(mods::json::dump(r.get("conflicts")).c_str());assert(r.get("clear").boolean);
+    // sunk 100 into the top (a slope under its floor): still standing on it
+    r=query("test",{1000-800,700,2000+600},0);assert(r.get("clear").boolean);
+    // sunk 400: the top goes through the walls above the step
+    r=query("test",{1000-800,400,2000+600},0);assert(!r.get("clear").boolean&&r.get("conflicts").array[0].get("id").string()=="test:isle");
+    assert(r.get("conflicts").array[0].get("message").string()=="this mod's world object");
+    // into the pillar: in the way; another mod sees "another mod's"
+    r=query("test",{1000+1200,800,2000},0);assert(!r.get("clear").boolean&&r.get("conflicts").array[0].get("message").string()=="this mod's world object");
+    r=query("other",{1000+1200,800,2000},0);assert(!r.get("clear").boolean&&r.get("conflicts").array[0].get("message").string()=="another mod's world object");
+    // beside the pillar (its own box would touch the pillar's turned bounds, the solids don't): clear
+    r=query("test",{1780,800,2330},45);assert(r.get("clear").boolean);
+    // two houses side by side (the terrace case): only touching collision blocks
+    assert(mod_actor::declare("test",house,"mod_unique",1,{})==2);
+    house.id="house-2";r=query("test",{2400,800,2950},30);for(const auto&c:r.get("conflicts").array)assert(c.get("id").string()!="test:house");
+    r=query("test",{1880,800,2330},0);bool hit=false;for(const auto&c:r.get("conflicts").array)hit|=c.get("id").string()=="test:house";assert(hit);
+    std::puts("world ground placement ok");return 0;
+}
 if(argc==2&&(std::strcmp(argv[1],"--world-static")==0||std::strcmp(argv[1],"--world-floating")==0)){
     floating_mode=std::strcmp(argv[1],"--world-floating")==0;
     world_mode=true;st32(Play+0x5B34,Arena+0xF400);mod_actor::configure_world_objects("synthetic",[](const std::string&stage,int room){story_world_placement::Index index;index.coverage.push_back({stage,room,true,true,true,{}});return index;});map(Arena+0x20000,0x20000);map(0x101D0000,0x10000);if(floating_mode)map(0x10470000,0x10000);st32(Arena+0xA000+0x7C,0xF2000008);
