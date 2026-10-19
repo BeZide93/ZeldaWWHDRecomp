@@ -54,6 +54,11 @@
         "triangles": [
           360
         ],
+        "textures": [
+          [
+            "Txe_Ebshima_gakeshiba_2"
+          ]
+        ],
         "collision_triangles": 360
       },
       "memory": {

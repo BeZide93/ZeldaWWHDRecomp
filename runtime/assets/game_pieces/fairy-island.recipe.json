@@ -61,6 +61,18 @@
         "triangles": [
           815
         ],
+        "textures": [
+          [
+            "Txq_0fentranaka",
+            "Txq_enter3",
+            "Txq_jimennana",
+            "Txq_moraikusa_1031",
+            "Txq_teppen",
+            "Txq_togepi",
+            "Txq_youseimoya",
+            "Txy_kai4"
+          ]
+        ],
         "collision_triangles": 740
       },
       "memory": {

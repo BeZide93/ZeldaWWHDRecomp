@@ -52,6 +52,11 @@
         "triangles": [
           265
         ],
+        "textures": [
+          [
+            "test_iwakabe_b"
+          ]
+        ],
         "collision_triangles": 265
       },
       "memory": {

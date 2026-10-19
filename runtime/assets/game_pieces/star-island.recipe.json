@@ -57,6 +57,13 @@
         "triangles": [
           447
         ],
+        "textures": [
+          [
+            "Txo_grass",
+            "Txo_iwakabe_d",
+            "Txo_tuti"
+          ]
+        ],
         "collision_triangles": 509
       },
       "memory": {
