@@ -415,7 +415,7 @@ target_compile_options(editor_quest_test PRIVATE -UNDEBUG)
 add_test(NAME editor_quests COMMAND editor_quest_test)
 # Letters on their own, treasure charts and items (runtime/src/editor/commands_story.cpp): add, set, remove and
 # list with undo, the validator's refusals, removing what is still used, icons, search and the quest graph.
-add_executable(editor_story_test runtime/tools/editor_story_test.cpp runtime/src/editor/commands.cpp runtime/src/editor/commands_build.cpp
+add_executable(editor_story_test runtime/tools/editor_story_test.cpp runtime/src/editor/commands.cpp runtime/src/editor/commands_build.cpp runtime/src/editor/commands_game_objects.cpp
                                  runtime/src/editor/stage_files.cpp runtime/src/editor/commands_quest.cpp runtime/src/editor/commands_story.cpp runtime/src/editor/quests.cpp
                                  runtime/src/editor/commands_scene.cpp runtime/src/editor/scenes.cpp runtime/src/mods/story_native_scene_coverage.cpp ${WWHD_NPC_CATALOGUE})
 target_include_directories(editor_story_test PRIVATE runtime/src)
@@ -423,7 +423,7 @@ target_compile_options(editor_story_test PRIVATE -UNDEBUG)
 add_test(NAME editor_story COMMAND editor_story_test)
 # A new, empty mod from the editor (new_mod): ids, duplicates, registration, opening, saving and exporting,
 # and nothing outside the new package folder changes.
-add_executable(editor_new_mod_test runtime/tools/editor_new_mod_test.cpp runtime/src/editor/commands.cpp runtime/src/editor/commands_build.cpp
+add_executable(editor_new_mod_test runtime/tools/editor_new_mod_test.cpp runtime/src/editor/commands.cpp runtime/src/editor/commands_build.cpp runtime/src/editor/commands_game_objects.cpp
                                    runtime/src/editor/stage_files.cpp runtime/src/editor/commands_quest.cpp runtime/src/editor/commands_story.cpp runtime/src/editor/quests.cpp
                                    runtime/src/editor/commands_scene.cpp runtime/src/editor/scenes.cpp runtime/src/mods/story_native_scene_coverage.cpp ${WWHD_NPC_CATALOGUE})
 target_include_directories(editor_new_mod_test PRIVATE runtime/src)
@@ -431,7 +431,7 @@ target_compile_options(editor_new_mod_test PRIVATE -UNDEBUG)
 add_test(NAME editor_new_mod COMMAND editor_new_mod_test)
 # The game's own villagers in the editor: the NPC catalogue's mapping of a loaded resident, list_villagers,
 # pick_villager and add_villager_talk (a new quest, a new step, a step's talk; one undo step each).
-add_executable(editor_villager_test runtime/tools/editor_villager_test.cpp runtime/src/editor/commands.cpp runtime/src/editor/commands_build.cpp
+add_executable(editor_villager_test runtime/tools/editor_villager_test.cpp runtime/src/editor/commands.cpp runtime/src/editor/commands_build.cpp runtime/src/editor/commands_game_objects.cpp
                                     runtime/src/editor/stage_files.cpp runtime/src/editor/commands_quest.cpp runtime/src/editor/commands_story.cpp runtime/src/editor/quests.cpp
                                     runtime/src/editor/commands_scene.cpp runtime/src/editor/scenes.cpp runtime/src/mods/story_native_scene_coverage.cpp ${WWHD_NPC_CATALOGUE})
 target_include_directories(editor_villager_test PRIVATE runtime/src)
@@ -439,7 +439,7 @@ target_compile_options(editor_villager_test PRIVATE -UNDEBUG)
 add_test(NAME editor_villagers COMMAND editor_villager_test)
 # The story tables while the game runs (story_reload.h, Session::apply_story): saved step numbers after an
 # edit, item changes that wait for a restart, and that story changes, undo and redo hand the game that mod's manifest.
-add_executable(editor_live_story_test runtime/tools/editor_live_story_test.cpp runtime/src/editor/commands.cpp runtime/src/editor/commands_build.cpp
+add_executable(editor_live_story_test runtime/tools/editor_live_story_test.cpp runtime/src/editor/commands.cpp runtime/src/editor/commands_build.cpp runtime/src/editor/commands_game_objects.cpp
                                       runtime/src/editor/stage_files.cpp runtime/src/editor/commands_quest.cpp runtime/src/editor/commands_story.cpp runtime/src/editor/quests.cpp
                                       runtime/src/editor/commands_scene.cpp runtime/src/editor/scenes.cpp runtime/src/mods/story_native_scene_coverage.cpp ${WWHD_NPC_CATALOGUE})
 target_include_directories(editor_live_story_test PRIVATE runtime/src)
