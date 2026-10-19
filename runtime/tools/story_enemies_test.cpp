@@ -213,6 +213,14 @@ int main(int argc,char**argv){using namespace story_enemies;const bool drowning_
   event_owner=at;run(story_enemies_more::find(Kind::Redead)->execute,at);assert(ld16(flag)==8);st16(flag,0);  // left over (unowned): its event ends
   std::memcpy(mem::ptr(play+0x5134),"kazan\0\0",8);assert(begin_epoch(rd,2));make(Kind::Redead);st32(at+0x3D8,0xFF);st32(at+0x3DC,0xFF);bind(rd,pid);{const unsigned bc=base_constructs;Cpu q{};q.r[3]=at;hooks.at(story_enemies_more::find(Kind::Redead)->create)(&q);assert(q.r[3]==5&&base_constructs==bc+1);base_constructs=bc;}  // refused like a retail createstd::memset(mem::ptr(play+0x5134),0,8);
   st32(at+0x3C8,3);st32(at+0x4EC,0);st8(at+0x2DA,3);assert(story_enemies_more::redead_terminal(at));st32(at+0x4EC,1);assert(!story_enemies_more::redead_terminal(at));
+  // Poe: removed while it possesses Link: his confusion flag, TORITUKI_ON and its demo event end; its lantern goes with it
+  at+=0x2000;make(Kind::Poe);st8(at+0x456,0xFF);st8(at+0x475,0xFF);st32(at+0x488,0xFFFFFFFFu);const Token pw=table[Kind::Poe];assert(verify_actor(pw,Kind::Poe,at));
+  for(uint32_t off:{0x454u,0x455u,0x456u,0x457u,0x475u,0xB51u})expect_field(pw,Kind::Poe,off);
+  {constexpr uint32_t Link=0x20040000;st32(play+0x5B34,Link);st16(Link+0xE,0xA8);st32(Link+0x3BC,0x101);bind(pw,pid);st16(at+0x482,4);st16(at+0x484,0x51);st8(at+0x45F,1);st8(story_enemies_more::poe_possessing(),1);
+   const uint32_t lantern=at+0x1000;std::memset(mem::ptr(lantern),0,0x890);st32(lantern+4,888);st16(lantern+0xE,0xC1);st32(at+0x48C,888);held_bomb=lantern;const unsigned d0=bomb_deletes;
+   run(story_enemies_more::find(Kind::Poe)->destroy,at);assert(ld32(Link+0x3BC)==1&&ld8(story_enemies_more::poe_possessing())==0&&!ld8(at+0x45F)&&bomb_deletes==d0+1);held_bomb=0;
+   // its demo: the event it holds ends and the camera starts again; an owned Poe's own possession event is admitted
+   make(Kind::Poe);st8(at+0x456,0xFF);st8(at+0x475,0xFF);st32(at+0x488,0xFFFFFFFFu);st16(at+0x482,3);event_owner=at;st16(flag,0);st32(play+0x5AF8,Actor+0x1000);const unsigned cam0=camera_calls;run(story_enemies_more::find(Kind::Poe)->execute,at);assert(ld16(flag)==8&&camera_calls==cam0+2);}
   event_owner=0;st8(play+0x51D0+0xC2,0);
   claims=drops=0;
  }

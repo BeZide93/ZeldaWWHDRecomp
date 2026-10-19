@@ -91,6 +91,27 @@ inline bool redead_terminal(uint32_t a) { return ld32(a + 0x3C8) == 3 && ld32(a 
 inline bool redead_holds_link(uint32_t a) { return ld32(a + 0x3C8) == 5 || ld32(a + 0x3C8) == 7; }
 inline constexpr const char* kNoRedeadStages[] = {"Ebesso", "kazan", "Msmoke", "tincle"};
 
+// ---------------------------------------------------------------- Poe (d_a_pw)
+// Parameter 0xFFFFFE00: behaviour 0 (seen, with its lantern), follows the ground, colour 0x7F (0),
+// notice range 0xFF (1000), no room path (0xFF). Never the Jalhalla parts (3/4). No switches or save
+// bits. Its lantern (Kantera 0xC1, a held lantern without switch) is created by the game and deleted
+// with the Poe by story_enemies (the game leaves it floating). Without its lantern it possesses Link:
+// a short event (its own potential event, admitted for an owned Poe; the camera stops), then Link's
+// confusion flag (mNoResetFlg1 0x100) and the shared TORITUKI_ON. The game ends all of that only from
+// the Poe; story_enemies ends it when the Poe is removed, stopped or left over (release_link).
+// Outdoors (no light volumes) only Light Arrows defeat it. Colliders on mStts 0x708: body cylinder
+// 0x744 (Link only), lantern sphere 0x874 (Link only); enemyice 0x9A0, enemyfire 0xD58.
+inline constexpr Collider kPoeColliders[] = {{0x744, 0x708, 0}, {0x874, 0x708, 0}, {0xA0C, 0x9D0, 0x9A0}, {0xE34, 0xDF8, 0xD58}};
+inline bool poe_verify(uint32_t a, uint32_t p) {
+    return ld8(a + 0x454) == (p & 0xFF) && ld8(a + 0x455) == ((p >> 8) & 1) && ld8(a + 0x456) == ((p >> 16) & 0xFF) && ld8(a + 0x457) == 0 &&
+           ld8(a + 0x475) == 0xFF && ld32(a + 0x464) == 0 && ld32(a + 0x488) == 0xFFFFFFFFu && ld16(a + 0x482) <= 4;
+}
+// mode 61 faded out without fleeing (m38A 0): the one createDisappear; a Poe that fled after its
+// possession deletes itself without a drop (no defeat)
+inline bool poe_terminal(uint32_t a) { return ld16(a + 0x482) == 2 && ld16(a + 0x484) == 61 && ld16(a + 0x4B6) == 0 && ld16(a + 0x4A6) == 0; }
+inline uint32_t poe_possessing() { return GD(0x101CF0A4); }  // TORITUKI_ON (u8)
+inline constexpr uint16_t kPoeLantern = 0xC1;
+
 // ---------------------------------------------------------------- Mothula (d_a_gm)
 // Parameters (story_enemy_variants "mothula"): 0xFF01FFFF ground (type 1, no wings), 0xFF02FFFF winged
 // (type 2); never type 0 (the Forbidden Woods mini-boss with its cutscene, Link and camera writes).
@@ -223,6 +244,10 @@ inline constexpr Native kNatives[] = {
      CANONICAL_CODE_ID(0x0245B7B8).value(), CANONICAL_CODE_ID(0x0245C498).value(), CANONICAL_CODE_ID(0x0245C728).value(),
      CANONICAL_CODE_ID(0x0245B814).value(), [] { return GD(0x10038EE4); }, 0xFFFFFFFEu, 0, 0x8B4, {0xC6C, 0}, true,
      redead_verify, redead_terminal, nullptr, 0x3CB, false},
+    {Kind::Poe, "poe", {0x7FE5, 0xD4, 0xF8C, kPoeColliders, std::size(kPoeColliders)},
+     CANONICAL_CODE_ID(0x0244E398).value(), CANONICAL_CODE_ID(0x0244B3E4).value(), CANONICAL_CODE_ID(0x02449F80).value(),
+     CANONICAL_CODE_ID(0x0244DD6C).value(), [] { return GD(0x1003841C); }, 0xFFFFFE00u, 0, 0x9A0, {0xD58, 0}, true,
+     poe_verify, poe_terminal, nullptr, 0x482, true},
     {Kind::Armos, "armos", {0x7FE6, 0xCB, 0xF60, kArmosColliders, std::size(kArmosColliders)},
      CANONICAL_CODE_ID(0x0204FE84).value(), CANONICAL_CODE_ID(0x0204D3A4).value(), CANONICAL_CODE_ID(0x0204C5F8).value(),
      CANONICAL_CODE_ID(0x0204F9D0).value(), [] { return GD(0x1000702C); }, 0xFF00FF00u, 0, 0xBA8, {0, 0}, true,

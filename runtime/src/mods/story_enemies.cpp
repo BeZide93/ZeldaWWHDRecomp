@@ -106,18 +106,26 @@ void release_club(Cpu*c,const Entry&e,uint32_t a){if(e.spec.kind!=Kind::Stalfos|
 void release_morth(const Entry&e,uint32_t a){if(e.spec.kind!=Kind::Morth||!more::morth_attached(a))return;const uint32_t count=more::morth_clinging(),shake=more::morth_shake_off();
  if(ld8(a+0x54A)){st32(count,0);st32(shake,0);}else{const int32_t n=std::max<int32_t>(0,int32_t(ld32(count))-1);st32(count,uint32_t(n));if(int32_t(ld32(shake))>n)st32(shake,uint32_t(n));}
  st32(a+0x2E0,ld32(a+0x2E0)&~0x4000u);st32(a+0x7A4,0);trace(e,a,"clinging-released",ld32(count));}
-// The Redead's scream and bite hold Link through the game (an event that keeps him in his demo state)
-// and only the Redead's own execute lets go. release_link lets go for it when it is removed, stopped
-// (quarantined) or left over after a state load: the event it holds ends (the game's own event reset,
-// dComIfGp_event_reset). Bounded reads; native calls only with invoke.
+// The Redead's scream and bite and the Poe's possession hold Link through the game (an event that keeps
+// him in his demo state, his confusion flag, the shared TORITUKI_ON) and only the actor's own execute
+// lets go. release_link lets go for it when it is removed, stopped (quarantined) or left over after a
+// state load: the event it holds ends (the game's own event reset, dComIfGp_event_reset), the camera the
+// Poe stopped starts again, and the possession flags clear. Bounded reads; native calls only with invoke.
 uint32_t play_base(){return GD(0x1046F0B0);}
 constexpr uint32_t kEventControl=0x51D0;
 bool holds_event(Cpu*c,uint32_t a){const uint32_t p=play_base();if(!invoke||!ld8(p+kEventControl+0xC2))return false;Cpu probe=*c;return invoke(&probe,GC(0x0253EE04),{p+kEventControl,ld32(p+kEventControl+0xC4)})==a;}
 void end_event(){const uint32_t f=play_base()+kEventControl+0xE8;st16(f,uint16_t(ld16(f)|8u));}
 void release_link(Cpu*c,Kind k,uint32_t a,const char*why){
- if(k==Kind::Redead&&holds_event(c,a)){end_event();LOG("[native_enemy] redead actor=%08X: its event ended (%s)",a,why);}}
-// a reserved Redead the adapter no longer owns (after a state load or a quarantine): its hold on Link ends too
-void release_orphan(Cpu*c,uint32_t a){const uint16_t prof=ld16(a+0xE);for(Kind k:{Kind::Redead}){const auto*n=more::find(k);if(prof==n->descriptor.profile&&memory(a,n->descriptor.bytes)&&ld32(a+0xB4)==n->vtable())release_link(c,k,a,"left over");}}
+ if(k==Kind::Redead){if(holds_event(c,a)){end_event();LOG("[native_enemy] redead actor=%08X: its event ended (%s)",a,why);}return;}
+ if(k!=Kind::Poe)return;const uint32_t p=play_base();
+ if(int16_t(ld16(a+0x482))==3&&holds_event(c,a)){end_event();const uint32_t cam=ld32(p+0x5AF8+uint32_t(int32_t(int8_t(ld8(p+0x5B30))))*0x34);
+  if(memory(cam,0x400)){Cpu probe=*c;invoke(&probe,GC(0x02514F38),{cam+0x248});probe=*c;invoke(&probe,GC(0x02515280),{cam+0x248,0});}LOG("[native_enemy] poe actor=%08X: its possession event ended (%s)",a,why);}
+ if(ld8(a+0x45F)){st8(a+0x45F,0);st8(more::poe_possessing(),0);const uint32_t link=ld32(p+0x5B34);if(int16_t(ld16(a+0x484))==0x51&&memory(link,0x8260)&&ld16(link+0xE)==0xA8)st32(link+0x3BC,ld32(link+0x3BC)&~0x100u);LOG("[native_enemy] poe actor=%08X: its possession ended (%s)",a,why);}}
+// a reserved Redead or Poe the adapter no longer owns (after a state load or a quarantine): its hold on Link ends too
+void release_orphan(Cpu*c,uint32_t a){const uint16_t prof=ld16(a+0xE);for(Kind k:{Kind::Redead,Kind::Poe}){const auto*n=more::find(k);if(prof==n->descriptor.profile&&memory(a,n->descriptor.bytes)&&ld32(a+0xB4)==n->vtable())release_link(c,k,a,"left over");}}
+// the Poe's lantern (the game's, by its PID 0x48C) goes with the Poe while it still holds it
+void release_lantern(Cpu*c,const Entry&e,uint32_t a){if(e.spec.kind!=Kind::Poe||!invoke)return;const uint32_t pid=ld32(a+0x48C);if(!pid||pid==0xFFFFFFFFu)return;Cpu probe=*c;const uint32_t lantern=invoke(&probe,GC(0x025D5218),{GC(0x025E1234),a+0x48C});
+ if(!memory(lantern,0x890)||ld32(lantern+4)!=pid||ld16(lantern+0xE)!=more::kPoeLantern||ld8(lantern+0x484)>=5)return;probe=*c;invoke(&probe,GC(0x025D57E0),{lantern});trace(e,a,"lantern-deleted",pid);}
 // An Armos Knight removed while it swallows Link's bomb (modes 44..46): the game sets the bomb off only in
 // its own death (mode 47), so the held bomb (no-hit, invisible, in its carry state) is deleted with it.
 // The PID key is the Knight's own field (fpcSch_JudgeByID takes the id by address); bombs only.
@@ -125,7 +133,7 @@ void release_bomb(Cpu*c,const Entry&e,uint32_t a){if(e.spec.kind!=Kind::ArmosKni
  Cpu probe=*c;const uint32_t bomb=invoke(&probe,GC(0x025D5218),{GC(0x025E1234),a+0x400});
  if(!memory(bomb,0x10)||ld32(bomb+4)!=pid||(ld16(bomb+0xE)!=0x126&&ld16(bomb+0xE)!=0x127))return;probe=*c;invoke(&probe,GC(0x025D57E0),{bomb});trace(e,a,"held-bomb-deleted",pid);}
 // what an owned enemy holds goes with it when it is deleted
-void release_held(Cpu*c,const Entry&e,uint32_t a){release_bomb(c,e,a);release_club(c,e,a);release_morth(e,a);release_link(c,e.spec.kind,a,"removed");}
+void release_held(Cpu*c,const Entry&e,uint32_t a){release_bomb(c,e,a);release_club(c,e,a);release_morth(e,a);release_link(c,e.spec.kind,a,"removed");release_lantern(c,e,a);}
 void lifecycle(Cpu*c,uint32_t fn,bool create,bool draw,bool destroy){const uint32_t a=c->r[3];
  // daTn_Create runs daTn_Execute itself (three steps that place the armour pieces): inside its own create
  // the native code runs as it is, under the create's scopes
@@ -217,8 +225,9 @@ void ki_search(Cpu*c){const uint32_t a=c->r[3];if(executing&&executing->spec.kin
 void mo_capture(Cpu*c){if(auto*e=find(c->r[3])){if(e->spec.kind==Kind::Moblin){trace(*e,c->r[3],"capture-denied");return;}}if(reserved(c->r[3]))return;original(c,GC(0x021C9AA0));}
 // The Boko Baba's bite asks for an event to grab and chew Link (Link held in a demo, an event camera, both ended
 // only by its own later steps). An owned one never grabs: the request is refused and its grab latch (0x3E7) cleared,
-// so it goes on biting (the bite's damage stays). Any other owned request quarantines the enemy.
-void potential_event(Cpu*c){if(auto*e=find(c->r[3])){if(e->spec.kind==Kind::BokoBaba&&executing==e&&!ld8(c->r[3]+0x3E8)){st8(c->r[3]+0x3E7,0);c->r[3]=0;return;}disable(*e,c->r[3]);trace(*e,c->r[3],"event-denied");c->r[3]=0;return;}if(reserved(c->r[3])){c->r[3]=0;return;}original(c,GC(0x025D7B24));}
+// so it goes on biting (the bite's damage stays). An owned Poe's own possession event (its demo action) is
+// admitted (release_link ends it when the Poe goes). Any other owned request quarantines the enemy.
+void potential_event(Cpu*c){if(auto*e=find(c->r[3])){if(e->spec.kind==Kind::Poe&&executing==e&&ld16(c->r[3]+0x482)==3){trace(*e,c->r[3],"possession-event");original(c,GC(0x025D7B24));return;}if(e->spec.kind==Kind::BokoBaba&&executing==e&&!ld8(c->r[3]+0x3E8)){st8(c->r[3]+0x3E7,0);c->r[3]=0;return;}disable(*e,c->r[3]);trace(*e,c->r[3],"event-denied");c->r[3]=0;return;}if(reserved(c->r[3])){c->r[3]=0;return;}original(c,GC(0x025D7B24));}
 void carry_drop(Cpu*c,uint32_t fn){if(auto*e=find(c->r[3])){disable(*e,c->r[3]);trace(*e,c->r[3],"carry-drop-denied");return;}if(reserved(c->r[3]))return;original(c,fn);}
 void bk_carry_drop(Cpu*c){carry_drop(c,GC(0x020A47B4));}void mo_carry_drop(Cpu*c){carry_drop(c,GC(0x021D0294));}
 void water_fail(Cpu*c){const uint32_t a=c->r[3];auto*e=find(a);if(!e){if(reserved(a))return;original(c,GC(0x020A3B18));return;}if(e->spec.kind!=Kind::Bokoblin||executing!=e||ld16(a+0x49C+6)!=22){disable(*e,a);return;}if(ld16(a+0x49C+4)==1&&ld16(a+0x418+6)==0)claim(*e,a);original(c,GC(0x020A3B18));}

@@ -33,7 +33,7 @@ The initial allowlist is deliberately small:
 | Breakable prop | `pot`, `barrel`, `crate` | Required mod-owned `broken_flag` and `drops` list |
 | Latched floor switch | `switch` | Required mod-owned `switch_flag`; fixed yellow switch |
 | Rotating gate | `door` | Required `switch` naming a switch actor in the same mod |
-| Native enemies (preview) | `chuchu`, `bokoblin`, `moblin`, `keese`, `miniblin`, `peahat`, `darknut`, `rat_hole`, `bokobaba`, `bubble`, `octorok`, `stalfos`, `redead`, `mothula`, `morth`, `magtail`, `armos`, `armos_knight` | Required mod-owned `defeated_flag` and `drops`; fixed ordinary variants |
+| Native enemies (preview) | `chuchu`, `bokoblin`, `moblin`, `keese`, `miniblin`, `peahat`, `darknut`, `rat_hole`, `bokobaba`, `bubble`, `octorok`, `stalfos`, `redead`, `mothula`, `morth`, `magtail`, `poe`, `armos`, `armos_knight` | Required mod-owned `defeated_flag` and `drops`; fixed ordinary variants |
 
 Resident names are exact native object codes in lower case. Each placed copy uses fixed ordinary
 parameters: it stands where you put it (unless you give it a route, below) and has none of the
@@ -458,6 +458,7 @@ The allowlist below defines the supported variants.
 | `mothula` | Mothula on the ground, or the winged one (below) |
 | `morth` | A single Morth: it clings to Link and slows him; a spin attack or rolling throws it off |
 | `magtail` | Ordinary Magtail: strike its head to curl it into a ball, then strike the ball (or lift and throw it) |
+| `poe` | Ordinary Poe with its lantern: without the lantern it possesses Link for a while |
 | `armos` | Armos statue: it wakes when Link comes near; strike its back |
 | `armos_knight` | Armos Knight: only a bomb in its open mouth (or a Light Arrow) defeats it |
 
@@ -584,6 +585,9 @@ reach outside the mod:
   changes, or the Morth is removed, it lets go of Link.
 - **Magtail:** Link can lift the curled ball and throw it; a thrown ball only hurts Link and the
   mod's own enemies, not the world's objects.
+- **Poe:** its lantern belongs to it and leaves with it. Without the lantern it possesses Link (the
+  stick turns around for a while); removing the Poe ends the possession at once. Outdoors, where the
+  game has no light, only Light Arrows defeat it.
 - **Armos:** Link cannot carry a stunned Armos (carried away from its room it would vanish without a
   defeat). In water it returns to where it was placed.
 - **Armos Knight:** it needs Link to have bombs (or Light Arrows). If it is removed while it holds a
