@@ -336,6 +336,7 @@ def build(game, glb_path, identity, out):
         with open(snapshot,'wb') as target:
             target.write(source_bytes)
         geometry, info, _ = collision_mesh.read_static(snapshot)
+    require(isinstance(geometry, tuple), 'a shoreline model has one opaque material (the game supplies the foam)')
     template, shader = player_template(game)
     result = build_bfres(template, geometry, identity)
     packed = base.yaz0_stored(base.sarc({identity+'.bfres':result,identity+'.sharcfb':shader}))

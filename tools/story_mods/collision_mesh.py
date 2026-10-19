@@ -40,14 +40,6 @@ def _pack(doc, binary):
     return b'glTF'+struct.pack('<II', 2, 12+len(body))+body
 
 
-def _strict(doc, binary, api):
-    with tempfile.TemporaryDirectory() as directory:
-        path = os.path.join(directory, 'render.glb')
-        with open(path, 'wb') as target:
-            target.write(_pack(doc, binary))
-        return api.read_glb(path)
-
-
 def _accessor(doc, binary, index, position, api):
     require = api.require
     index = api.integer(index)
@@ -134,14 +126,30 @@ def read_static(path, collision=False):
         require(len(render) == 1 and used_meshes == set(range(len(meshes))), 'one render mesh instance and no unused meshes required')
         ri, rm = render[0]
         render_mesh = copy.deepcopy(meshes[rm])
-        require(len(render_mesh.get('primitives', [])) == 1, 'one render primitive required')
-        material = api.integer(render_mesh['primitives'][0]['material'])
-        require(material < len(doc.get('materials', [])), 'render material outside input')
-        render_mesh['primitives'][0]['material'] = 0
+        primitives = render_mesh.get('primitives', [])
+        require(isinstance(primitives, list) and 1 <= len(primitives) <= api.MAX_PRIMITIVES, 'the visible mesh needs 1 to %d primitives' % api.MAX_PRIMITIVES)
+        # The visible materials, in first-use order; collision-only materials are left out.
+        used = []
+        for prim in primitives:
+            material = api.integer(prim['material'])
+            require(material < len(doc.get('materials', [])), 'render material outside input')
+            if material not in used: used.append(material)
+            prim['material'] = used.index(material)
+        material = used[0]
         clean['nodes'][ri]['mesh'] = 0
         clean['meshes'] = [render_mesh]
-        clean['materials'] = [doc['materials'][material]]
-        geometry, info = _strict(clean, binary, api) if sources else api.read_glb(path)
+        clean['materials'] = [doc['materials'][m] for m in used]
+        # One plain opaque material keeps the original single-material conversion byte for byte.
+        legacy = len(primitives) == 1 and api.plain_material(doc['materials'][material])
+        reader = api.read_glb if legacy else api.read_parts
+        if not sources:
+            geometry, info = reader(path)
+        else:
+            with tempfile.TemporaryDirectory() as directory:
+                projected = os.path.join(directory, 'render.glb')
+                with open(projected, 'wb') as target:
+                    target.write(_pack(clean, binary))
+                geometry, info = reader(projected)
         # Obtain every collision node world matrix using the same hierarchy.
         world, visited = {}, set()
         def visit(index, parent):
@@ -197,9 +205,13 @@ def read_static(path, collision=False):
                     indices = [x for at in range(0, len(indices), 3) for x in (indices[at], indices[at+2], indices[at+1])]
                 append(placed, indices, SEMANTICS[name])
         if not sources and collision:
-            matname = doc['materials'][material].get('name', '')
-            require(isinstance(matname, str) and (not matname.startswith('col_') or matname in SEMANTICS), 'unknown or unsupported collision material: '+matname)
-            append(geometry[0], geometry[3], SEMANTICS.get(matname, 0))
+            # Collision from the visible triangles: each visible material's col_* name selects its surface.
+            pieces = [(geometry[0], geometry[3], doc['materials'][material])] if legacy else \
+                [(part.pos, part.indices, doc['materials'][used[part.material]]) for part in geometry.parts]
+            for points, indices, source_material in pieces:
+                matname = source_material.get('name', '')
+                require(isinstance(matname, str) and (not matname.startswith('col_') or matname in SEMANTICS), 'unknown or unsupported collision material: '+matname)
+                append(points, indices, SEMANTICS.get(matname, 0))
         data = None
         if sources or collision:
             data, metadata = encode(vertices, triangles, api)
