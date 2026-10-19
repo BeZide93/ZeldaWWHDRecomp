@@ -133,7 +133,8 @@ more of the same; **Stop placing** in the toolbar or Esc ends it.
   changes it; the resident is then created again in its room.
 - **Props:** pot, barrel, crate.
 - **Switches:** switch, door (it opens with one of the mod's switches).
-- **Enemies:** ChuChu (green, red, blue or yellow), Bokoblin, Moblin, Keese, Miniblin.
+- **Enemies:** ChuChu (green, red, blue or yellow), Bokoblin (with a stick, a shield or a machete),
+  Moblin, Keese, Miniblin. The Inspector's **Variant** changes a placed one.
 - **Your models:** one of the mod's models (static or skinned), your own enemy (a skinned model with
   flinch, stun, death and idle clips), a prop Link can carry.
 

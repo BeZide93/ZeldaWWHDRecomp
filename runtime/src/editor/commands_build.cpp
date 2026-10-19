@@ -126,7 +126,7 @@ const std::vector<ActorType>& actor_types() {
         {"switch", "Switch", "Switches", "A floor switch; sets its switch flag when pressed.", false, false, false},
         {"door", "Door", "Switches", "A door opened by one of the mod's switches (options.switch).", false, false, false},
         {"chuchu", "ChuChu", "Enemies", "The game's ChuChu (green, red, blue or yellow: options.variant); its defeated flag and drops.", false, false, false},
-        {"bokoblin", "Bokoblin", "Enemies", "The game's Bokoblin.", false, false, false},
+        {"bokoblin", "Bokoblin", "Enemies", "The game's Bokoblin (a stick, a shield or a machete: options.variant).", false, false, false},
         {"moblin", "Moblin", "Enemies", "The game's Moblin.", false, false, false},
         {"keese", "Keese", "Enemies", "The game's Keese.", false, false, false},
         {"miniblin", "Miniblin", "Enemies", "The game's Miniblin: it pops up when Link comes near and is defeated for good.", false, false, false},

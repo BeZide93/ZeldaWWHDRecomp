@@ -57,7 +57,7 @@ bool owned_child_object(uint32_t object){
 bool fire_child(uint32_t object,int16_t& timer){
  if(!memory(object,0x48))return false;uint32_t stts=ld32(object+0x44);if(!memory(stts,0x14))return false;uint32_t a=ld32(stts+0xC);LineageInfo info{};
  if(!memory(a,0xA34)||object!=a+0x700||stts!=a+0x6C4||!lookup_lineage_actor(a,Lineage::EnemyChild,info)||!info.source_valid||info.profile!=0x1CF||info.parameters!=0||ld32(stts+0x10)!=info.pid||ld8(a+0x2DD)!=0xFF||ld32(a+0x2E8)!=0xFFFFFFFFu||ld32(a+0xB4)!=GD(0x1000A478)||ld8(a+0x430)>2||ld8(a+0x431)||ld8(a+0x432)||ld32(object+0x10)!=0x20000||ld8(object+0x14)!=0)return false;
- auto*source=get(info.source);if(!source||source->kind!=Kind::Bokoblin||source->params!=0xFFFFFF04u||!valid(*source)||source->address!=info.source_actor||source->pid!=info.source_pid||source->epoch!=info.epoch)return false;
+ auto*source=get(info.source);if(!source||source->kind!=Kind::Bokoblin||(source->params&~0x20u)!=0xFFFFFF04u||!valid(*source)||source->address!=info.source_actor||source->pid!=info.source_pid||source->epoch!=info.epoch)return false;
  timer=int16_t(ld16(a+0x43C));return timer>=0&&timer<=900;
 }
 bool ignition_source(uint32_t object){if(!memory(object,0x48))return false;if(link_object(object))return true;if(projectile_enabled&&projectile_verifier)try{return projectile_verifier(object);}catch(...){}return false;}

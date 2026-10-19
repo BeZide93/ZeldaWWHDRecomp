@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 #include "story_enemy_children.h"
+#include "story_enemy_variants.h"
 #include "native_actor_carry.h"
 #include "native_actor_profiles.h"
 #include "guest_addr.h"
@@ -18,11 +19,11 @@ uint32_t(*invoke)(Cpu*,uint32_t,std::initializer_list<uint32_t>)=nullptr;
 Retired retired;bool installed=false;
 const uint32_t Queue=GC(0x025D5834),Create=GC(0x020C25A4),Execute=GC(0x020C1D0C),Delete=GC(0x020C1D84),Wait=GC(0x020C25A8),BkSearch=GC(0x0209AB64),MoSearch=GC(0x021C872C),BkCandidate=GC(0x0209A624),MoCandidate=GC(0x021C826C);
 bool memory(uint32_t a,uint32_t n){return !(a&3)&&a>=0x10000000u&&a<=0x50000000u-n;}
-bool parent(const Source&s){if(s.kind!=Kind::Bokoblin&&s.kind!=Kind::Moblin)return false;auto&d=own::descriptor(s.kind);return s.token&&s.epoch==own::source_epoch(s.token)&&memory(s.actor,d.bytes)&&ld32(s.actor+4)==s.pid&&s.pid&&s.pid!=0xFFFFFFFFu&&ld16(s.actor+0xE)==d.profile&&ld32(s.actor+0xB0)==(s.kind==Kind::Bokoblin?0xFFFFFF04u:0xFFFF0000u)&&ld8(s.actor+0x2DD)==0xFF;}
+bool parent(const Source&s){if(s.kind!=Kind::Bokoblin&&s.kind!=Kind::Moblin)return false;auto&d=own::descriptor(s.kind);return s.token&&s.epoch==own::source_epoch(s.token)&&memory(s.actor,d.bytes)&&ld32(s.actor+4)==s.pid&&s.pid&&s.pid!=0xFFFFFFFFu&&ld16(s.actor+0xE)==d.profile&&(s.kind==Kind::Bokoblin?story_enemy_variants::declared_params("bokoblin",ld32(s.actor+0xB0)):ld32(s.actor+0xB0)==0xFFFF0000u)&&ld8(s.actor+0x2DD)==0xFF;}
 bool claimed(uint32_t a){return memory(a,0xA34)&&ld16(a+0xE)==0x1CF&&own::lineage_claimed(ld32(a+4),own::Lineage::EnemyChild);}
-bool child(uint32_t a,own::LineageInfo& info,bool admitted){if(!memory(a,0xA34)||ld16(a+0xE)!=0x1CF||!own::lineage_info(ld32(a+4),info)||info.role!=own::Lineage::EnemyChild||!info.source_valid||info.epoch!=own::source_epoch(info.source)||info.profile!=0x1CF||(info.parameters!=0&&info.parameters!=4)||ld32(a+0xB0)!=info.parameters||ld8(a+0x2DD)!=0xFF||ld32(a+0x2E8)!=0xFFFFFFFFu)return false;return admitted?info.address==a:(!info.address||info.address==a);}
+bool child(uint32_t a,own::LineageInfo& info,bool admitted){if(!memory(a,0xA34)||ld16(a+0xE)!=0x1CF||!own::lineage_info(ld32(a+4),info)||info.role!=own::Lineage::EnemyChild||!info.source_valid||info.epoch!=own::source_epoch(info.source)||info.profile!=0x1CF||(info.parameters!=0&&info.parameters!=1&&info.parameters!=4)||ld32(a+0xB0)!=info.parameters||ld8(a+0x2DD)!=0xFF||ld32(a+0x2E8)!=0xFFFFFFFFu)return false;return admitted?info.address==a:(!info.address||info.address==a);}
 void mask(uint32_t a){st32(a+0x39C,ld32(a+0x39C)&~0x10u);st32(a+0x2E0,ld32(a+0x2E0)&~(0x400u|0x80000u|0x200000u));}
-void queue(Cpu*c){if(!depth||c->r[3]!=0x1CF){original(c,Queue);return;}const auto s=scopes[depth-1];const uint32_t params=c->r[4];if(!parent(s)||params!=(s.kind==Kind::Bokoblin?0u:4u)){c->r[3]=0xFFFFFFFFu;return;}
+void queue(Cpu*c){if(!depth||c->r[3]!=0x1CF){original(c,Queue);return;}const auto s=scopes[depth-1];const uint32_t params=c->r[4];if(!parent(s)||params!=(s.kind==Kind::Bokoblin?story_enemy_variants::bokoblin_weapon(ld32(s.actor+0xB0)):4u)){c->r[3]=0xFFFFFFFFu;return;}
  const uint32_t ticket=own::reserve_child_pending(s.token,s.actor,s.pid,0x1CF,params,s.epoch);if(!ticket){c->r[3]=0xFFFFFFFFu;return;}
  try{original(c,Queue);}catch(...){own::cancel_child_pending(ticket);throw;}
  const uint32_t pid=c->r[3];if(!pid||pid==0xFFFFFFFFu){own::cancel_child_pending(ticket);return;}

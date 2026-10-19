@@ -86,7 +86,7 @@ const std::vector<CommandInfo> kCommands = {
       {"id", "string", "the new id (default: from the type)"}, {"at", "string", "link (default), camera or position"},
       {"position", "point", "with at = position"}, {"stage", "string", "with at = position (default: Link's)"}, {"room", "integer", "with at = position (default: Link's or the sea square's)"},
       {"angle", "number", "heading in degrees (default: facing like Link or the camera)"}, {"snap", "boolean", "onto the ground below (default true)"},
-      {"model", "string", "the model for model types"}, {"options", "object", "resident (who: a list_actor_types variant such as uo2, um1, sa2 or the seated ym1), variant (an enemy's: chuchu green, red, blue or yellow), switch (a door's switch id), lines"}, {"mod", "string", ""}},
+      {"model", "string", "the model for model types"}, {"options", "object", "resident (who: a list_actor_types variant such as uo2, um1, sa2 or the seated ym1), variant (an enemy's: chuchu green, red, blue or yellow; bokoblin stick, shield or machete), switch (a door's switch id), lines"}, {"mod", "string", ""}},
      true},
     {"remove_actor", "Removes a placed actor (an undo step).", {{"id", "string", "", true}, {"confirm", "boolean", "must be true", true}, {"mod", "string", ""}}, true, true},
     {"duplicate_actor", "Copies a placed actor next to it under a new id, with flags of its own.",

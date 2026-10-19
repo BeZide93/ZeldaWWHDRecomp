@@ -197,7 +197,7 @@ The allowlist below defines the supported variants.
 | `actor` | Fixed variant |
 | --- | --- |
 | `chuchu` | Ordinary green ChuChu, or a declared colour (below) |
-| `bokoblin` | Ordinary type-4 Bokoblin |
+| `bokoblin` | Ordinary type-4 Bokoblin, or a declared weapon variant (below) |
 | `moblin` | Ordinary Moblin |
 | `keese` | Ordinary Keese, the native KI bat; not Morth |
 | `miniblin` | Ordinary Miniblin: hidden until Link comes near and looks its way; never respawns |
@@ -256,6 +256,9 @@ checked; packages still cannot give raw parameters.
 | `chuchu` | `red` | Jumps at Link when he comes close |
 | `chuchu` | `blue` | Sparks with electricity: a sword hit shocks Link; bombs or a stun first |
 | `chuchu` | `yellow` | Jumps at Link and sparks with electricity |
+| `bokoblin` | `stick` | The ordinary Bokoblin with a stick (the same as no variant) |
+| `bokoblin` | `shield` | Carries a shield as well: it blocks and takes more hits |
+| `bokoblin` | `machete` | Fights with a machete instead of the stick |
 
 ```json
 {"id": "pier-chu", "actor": "chuchu", "parameters": {"variant": "blue"},
@@ -264,7 +267,10 @@ checked; packages still cannot give raw parameters.
 ```
 
 Every colour uses the ordinary ground ChuChu with no game switch; defeat, drops and
-saves work as for the green one. Other names, and variants for an enemy that has
+saves work as for the green one. Every Bokoblin variant is the ordinary waiting and
+searching Bokoblin without a path or game switch; its weapon stays the placed copy's
+own and cannot be taken. Patrolling Bokoblins need the game's room paths and are
+not offered. Other names, and variants for an enemy that has
 none, are validator errors.
 
 Packages ship no game models, weapons, animations, shaders or global resource

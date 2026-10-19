@@ -4,6 +4,9 @@
 // parameters: each variant is a fixed, audited parameter word. The first variant of a kind is its
 // default (no "variant" in the manifest), so manifests from before keep their meaning.
 //
+// Bokoblin variants keep their weapon an owned child of the placed copy (story_enemy_children):
+// the weapon a variant creates is the only one its child route admits.
+//
 // ChuChu (d_a_cc): parameters are behaviour (bits 0..7), colour (8..15), notice range (16..23) and
 // the spawn switch (24..31). Every variant is the ground behaviour, the default notice range and no
 // switch (0xFF: the game's switch bits are never read); only the colour differs. Colour logic is local
@@ -29,6 +32,11 @@ inline constexpr Variant kVariants[] = {
     {"chuchu", "red", 0xFF000100u, "Red ChuChu", "A red ChuChu: it jumps at Link when he comes close."},
     {"chuchu", "blue", 0xFF000200u, "Blue ChuChu", "A blue ChuChu: it sparks with electricity, so a sword hit shocks Link."},
     {"chuchu", "yellow", 0xFF000400u, "Yellow ChuChu", "A yellow ChuChu: it jumps at Link and sparks with electricity."},
+    // Bokoblin (d_a_bk): type 4 (the ordinary one that waits and searches), no path, no switches; bit 0x20
+    // gives it a shield and 7 health instead of 5, bit 0x40 a machete (daBoko type 1) instead of the stick.
+    {"bokoblin", "stick", 0xFFFFFF04u, "Bokoblin", "The ordinary Bokoblin with a stick."},
+    {"bokoblin", "shield", 0xFFFFFF24u, "Bokoblin with a shield", "A Bokoblin with a stick and a shield: it blocks, and takes more hits."},
+    {"bokoblin", "machete", 0xFFFFFF44u, "Bokoblin with a machete", "A Bokoblin with a machete instead of the stick."},
 };
 
 // the kind's variant `name` ("" is the default, the kind's first)
@@ -55,6 +63,8 @@ inline std::string names(const std::string& kind) {
     }
     return out;
 }
+// the weapon (daBoko parameter) a Bokoblin variant's parameter word creates: 1 the machete, 0 the stick
+inline constexpr uint32_t bokoblin_weapon(uint32_t params) { return (params & 0x40u) ? 1u : 0u; }
 // whether `params` is one of the kind's declared parameter words
 inline bool declared_params(const std::string& kind, uint32_t params) {
     for (const Variant& v : kVariants)

@@ -71,4 +71,10 @@ listener(Child,50,0x1CF);assert(rows.empty()&&notices==1);listener(Child,50,0x1C
 active=true;st32(Parent+0x1360,0xFFFFFFFF);st32(Parent+0xC90,0);st32(Parent+0xC94,0);st8(Parent+0x1374,0);assert(ready(1,Parent));st32(Parent+0xC90,1);assert(!ready(1,Parent));st32(Parent+0xC90,0);assert(ready(1,Parent));st32(Parent+0xC94,2);assert(!ready(1,Parent));st32(Parent+0xC94,0);assert(ready(1,Parent));st8(Parent+0x1374,1);assert(!ready(1,Parent));st8(Parent+0x1374,0);assert(ready(1,Parent));
 actor(Parent,10,0x7FF8,0xFFFF0000);st32(Parent+0x2D60,0xFFFFFFFF);for(unsigned innate=0;innate<2;++innate)for(unsigned pending=0;pending<3;++pending){st8(Parent+0x10B0,innate);st8(Parent+0x10B1,pending);st8(Parent+0x10B3,0);assert(ready(1,Parent));}st8(Parent+0x10B3,1);assert(!ready(1,Parent));st8(Parent+0x10B3,0);st8(Parent+0x10B1,3);assert(!ready(1,Parent));st8(Parent+0x10B1,0);st8(Parent+0x10B0,2);assert(!ready(1,Parent));actor(Parent,10,0x7FF9,0xFFFFFF04);
 active=true;nextPID=0xFFFFFFFF;assert(enter(1,o::Kind::Bokoblin,Parent,3));q.r[3]=0x1CF;q.r[4]=0;hooks.at(0x025D5834)(&q);leave();assert(rows.empty());
+// declared Bokoblin variants: the machete Bokoblin's route admits only the machete (daBoko 1), the
+// shield Bokoblin's only the stick; an undeclared parameter word is no parent at all
+nextPID=60;actor(Parent,10,0x7FF9,0xFFFFFF44);assert(enter(1,o::Kind::Bokoblin,Parent,3));const unsigned before=queues;
+q.r[3]=0x1CF;q.r[4]=0;hooks.at(0x025D5834)(&q);assert(q.r[3]==0xFFFFFFFF&&queues==before);q.r[3]=0x1CF;q.r[4]=1;hooks.at(0x025D5834)(&q);assert(queues==before+1&&rows.count(60));leave();
+nextPID=61;actor(Parent,10,0x7FF9,0xFFFFFF24);assert(enter(1,o::Kind::Bokoblin,Parent,3));q.r[3]=0x1CF;q.r[4]=1;hooks.at(0x025D5834)(&q);assert(q.r[3]==0xFFFFFFFF&&queues==before+1);q.r[3]=0x1CF;q.r[4]=0;hooks.at(0x025D5834)(&q);assert(queues==before+2&&rows.count(61));leave();
+actor(Parent,10,0x7FF9,0xFFFFFF14);assert(!enter(1,o::Kind::Bokoblin,Parent,3)||(leave(),false));
 }
