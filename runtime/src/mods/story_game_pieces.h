@@ -24,6 +24,7 @@ struct Built {
     int body_index = 0;               // its first model's resource slot in the set archive
     int second_index = -1;            // its second model's slot (-1: none)
     int light[2] = {1, 4};            // settingTevStruct type of each part
+    int animation_index = -1;         // its second model's texture animation slot (-1: none)
     story_notebook::WorldPoint minimum, maximum;
     unsigned triangles = 0;
     std::shared_ptr<const story_world_collision::mesh::Mesh> collision;
@@ -34,6 +35,7 @@ struct Built {
 struct BuiltSet {
     std::string set, archive, path;  // archive: the 31-character resource identity; path: the cache file
     std::vector<std::string> models;  // resource slot i+1 is models[i]
+    std::vector<std::string> animations;  // slot models.size()+1+j is animations[j] (an animated part's model name)
     std::vector<Built> pieces;
     uint64_t archive_bytes = 0, texture_bytes = 0;
     const Built* piece(const std::string& id) const {

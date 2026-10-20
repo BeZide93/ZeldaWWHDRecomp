@@ -166,7 +166,7 @@ has no flags, drops or dialogue.
 **Buildings** in the same list are the islands' own houses, towers and shelters
 (docs/mod-sdk-v3.md, "Island buildings"); **Island parts** are smaller pieces of other islands made the
 same way (Dragon Roost's shrine, torii, walkways and sea rocks, Windfall's windmill cap, shipwrecks); **Islands** are
-the ground of small islands, bare, always at the sea's level: click the open sea where it goes, and it stays at
+the ground of islands, bare (Diamond Steppe and Mother & Child with their water), always at the sea's level: click the open sea where it goes, and it stays at
 sea level when you move it (docs/mod-sdk-v3.md, "Island grounds"). Houses, villagers, enemies and other actors can be
 placed on an island ground like on any island. The first time a mod places one, the editor makes it from
 your game files: the list says "(preparing...)" and the building appears in the picture a moment

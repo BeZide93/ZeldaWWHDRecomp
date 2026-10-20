@@ -1477,7 +1477,7 @@ void game_pieces() {
     CHECK(s.manifest("editor-test")->get("requires").get("game_objects").type == Value::Null);
     // island grounds: their own category, each with a distant view; placed at the sea's level under Link (y 0)
     Value isles = s.run("list_game_objects", json(R"({"category": "islands"})"));
-    CHECK(ok(isles) && isles.get("result").get("objects").array.size() == islands && islands == 6);
+    CHECK(ok(isles) && isles.get("result").get("objects").array.size() == islands && islands == 24);
     bool isles_listed = false;
     for (const auto& c : isles.get("result").get("categories").array) isles_listed |= c.string() == "Islands";
     CHECK(isles_listed);

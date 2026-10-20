@@ -335,8 +335,10 @@ rest of the mod works. The package must not contain game files, as for game obje
 
 The ground of some small islands can be placed too, in the palette's **Islands** category: the
 island's rock and turf with its cliffs and its base under the sea, bare (no grass, flowers, trees or
-other objects, which are the game's actors, not part of the ground). Like the buildings, an island is
-built once from the player's own game files; nothing of the game goes into your package.
+other objects, which are the game's actors, not part of the ground). The few trees and rocks that are part
+of an island's ground model itself (Cliff Plateau Isles, Mother & Child Isles) come along. Like the
+buildings, an island is built once from the player's own game files; nothing of the game goes into your
+package.
 
 ```json
 {
@@ -348,7 +350,8 @@ built once from the player's own game files; nothing of the game goes into your 
 }
 ```
 
-Island grounds need catalogue version 4. The position is the island's middle at its sea level: place it
+The first six island grounds need catalogue version 4, the others version 5 (`"requires":
+{"game_objects": 5}`; the editor writes the version an island needs). The position is the island's middle at its sea level: place it
 at `"y": 0` on the sea (the editor does this for you). Like a building, an island takes only `id`,
 `actor`, `stage`, `room`, `position` and `rotation` about the vertical axis.
 
@@ -360,21 +363,52 @@ at `"y": 0` on the sea (the editor does this for you). Like a building, an islan
 | `piece:star-island` | Star Island: star-shaped, with grassy slopes and a pit in the middle |
 | `piece:bomb-island` | Bomb Island: a long island of grassy cliffs with a small pit |
 | `piece:fairy-island` | Northern Fairy Island: a heart-shaped grassy island with the fountain's spiked stone hut; its doorway leads to a hole |
+| `piece:thorned-fairy-island` | Thorned Fairy Island: a fairy island with the fountain's spiked stone hut and a small islet beside it; its doorway leads to a hole |
+| `piece:shark-island` | Shark Island: terraced cliffs with a pit on its top |
+| `piece:horseshoe-island` | Horseshoe Island: a ring of grassy cliffs around a lagoon, with three small hollows |
+| `piece:rock-spire-isle` | Rock Spire Isle: a row of rock arches and spires on a grassy base, with a pit |
+| `piece:seven-star-isles` | Seven-Star Isles: seven rock pillars rising from the sea |
+| `piece:overlook-island` | Overlook Island: tall pillars of grassy rock with steep walls and a pit on top |
+| `piece:stone-watcher-island` | Stone Watcher Island: a grassy island with cracked stone walls and a pit |
+| `piece:cliff-plateau-isles` | Cliff Plateau Isles: flat-topped cliffs in a cluster, with a few trees and two pits |
+| `piece:angular-isles` | Angular Isles: two blocky islands of stepped, angular rock |
+| `piece:boating-course` | Boating Course: two small grassy islets, each with a post |
+| `piece:gale-isle` | Gale Isle: a tall rocky mountain with a sandy beach; its doorway into the rock leads nowhere |
+| `piece:headstone-island` | Headstone Island: a great dome of rock with a sandy beach; its doorway into the rock leads nowhere |
+| `piece:greatfish-isle` | Greatfish Isle: a broken island of rocky slopes, sandy beaches and the ruins of a house |
+| `piece:cyclops-reef` | Cyclops Reef: a ring of stepped orange rock walls around a lagoon with a small islet (no cannons) |
+| `piece:two-eye-reef` | Two-Eye Reef: a ring of stepped grey rock walls around a lagoon with two islets (no cannons) |
+| `piece:diamond-steppe-island` | Diamond Steppe Island: grassy terraces with ponds on three levels, joined by waterfalls, and a pit on top |
+| `piece:mother-and-child-isles` | Mother & Child Isles: a great tree-topped rock with its spring pool, and a small islet beside it |
+| `piece:fire-mountain` | Fire Mountain: a volcano of dark rock, without its lava; its crater is a pit |
+
+Bird's Peak Rock is not available: its textures alone are larger than the 12 MiB an island's archive may
+have. Islands that exist several times in the game (the Triangle Islands, the fairy islands, the reefs,
+Seven-Star Isles and the Star Belt Archipelago) are offered once or twice.
 
 An island keeps its own collision: the ship stops at its shore, Link gets out and climbs onto it,
 walks its slopes and bumps into its cliffs and walls, as on the island itself. Its paths into
-caves and fountains lead nowhere: the pits of Star and Bomb Island and the hole of the Fairy Island
-are drops that send Link back to the room's restart point, as a bottomless pit does.
+caves and fountains lead nowhere: the pits and holes (Star, Bomb, Shark, Rock Spire, Overlook, Stone
+Watcher, Cliff Plateau and Diamond Steppe's pits, the fairy islands' holes, Fire Mountain's crater) and
+the doorways of Gale Isle and Headstone Island are drops that send Link back to the room's restart point,
+as a bottomless pit does.
+
+Diamond Steppe Island and Mother & Child Isles bring their own water: the ponds, the spring pool and the
+waterfalls with the island's own moving water, and the water's collision, so Link wades and swims in it as
+on the island. The splash and spring effects and the sound of the falls are the game's actors and don't come
+along. Fire Mountain comes without its lava and eruption (they are actors and effects of the game, not part
+of the ground); a lava floor may follow later.
 An island also brings its own distant view: from the eight squares around its own, the island's
 low-detail model (the one the game shows for it from afar) stands where you placed it. Only Link's own
 square has the island's collision.
 
-An island is large (up to about 9,400 units across): choose a stretch of open sea in the square, away
+An island is large (up to about 13,000 units across: Greatfish Isle and the reefs): choose a stretch of open sea in the square, away
 from the square's own island and its reefs, routes and objects. The usual placement rules apply
 (world-objects.md): what is in the way is listed in plain words, and an island that doesn't fit is kept
 in the editor but not in the game. The sea's surface around an island is not ground and doesn't count.
-An island costs about 0.5 MiB (Triangle Island) to 2.3 MiB (the Fairy Island) of its room's 24 MiB budget
-for buildings and island grounds, and its distant view about 0.12 MiB in a neighbouring square.
+An island costs about 0.5 MiB (Triangle Island) to 7.2 MiB (Mother & Child Isles; most are 1.2 to 4.3 MiB)
+of its room's 24 MiB budget for buildings and island grounds, and its distant view about 0.05 to 0.2 MiB
+in a neighbouring square.
 
 ## Breakable native props
 
