@@ -396,11 +396,11 @@ extern "C" void hook_025217F8(Cpu* c) {
         auto book = story_store::book();
         clear_resume(book);
         const bool kept = book.set(story_mail::kRecordStageResume, b->key, uint8_t(room)) && book.set(story_mail::kRecordStageResumePoint, b->key, uint8_t(point));
-        LOG("[mod-stages] save in %s (%s): the save file continues at %s room %u point %u; the mod save area %s room %u point %u", b->info.id.c_str(),
+        LOG("[mod-stages] return place in %s (%s): the save file continues at %s room %u point %u; the mod save area %s room %u point %u", b->info.id.c_str(),
             stage.c_str(), b->info.entrance.stage.c_str(), b->info.entrance.room, b->info.entrance.point, kept ? "continues in the stage at" : "is full; not kept:", room,
             point);
     } else {
-        LOG("[mod-stages] save in %s (%s): the save file continues at %s room %u point %u", b->info.id.c_str(), stage.c_str(), b->info.entrance.stage.c_str(),
+        LOG("[mod-stages] return place in %s (%s): the save file continues at %s room %u point %u", b->info.id.c_str(), stage.c_str(), b->info.entrance.stage.c_str(),
             b->info.entrance.room, b->info.entrance.point);
     }
 }
@@ -420,6 +420,10 @@ extern "C" void hook_02522198(Cpu* c) {
             const bool spawn = std::any_of(b.info.spawns.begin(), b.info.spawns.end(), [&](const Info::SpawnPoint& s) { return s.room == room && s.point == point; });
             if (!spawn) break;
             write_next_stage(b.info.name, room, point);
+            static std::string logged;  // the game asks again on following frames while the stage loads
+            const std::string line = b.info.name + "/" + std::to_string(room) + "/" + std::to_string(point);
+            if (logged == line) return;
+            logged = line;
             LOG("[mod-stages] the Quest Log was saved in %s/%s: it continues there (%s room %u point %u)", b.info.mod.c_str(), b.info.id.c_str(), b.info.name.c_str(),
                 room, point);
             return;
