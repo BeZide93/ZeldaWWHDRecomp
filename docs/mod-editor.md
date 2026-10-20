@@ -259,6 +259,49 @@ it breaks:
 prepares it for the game while you work; when the status bar says it is ready, actors can use it without
 a restart.
 
+## Water: ponds, rivers and waterfalls
+
+**Add → Water → Pond, River or Waterfall** (or the toolbar's **Water**) opens the Water window and starts
+drawing: each click on the ground in the picture adds a point (Esc stops drawing; **Add points** goes on).
+The points show in the picture, numbered; click one to select it and drag its handle to move it.
+
+- **Pond:** click the shore's points in order round the pond (3 to 48). The water shows as a light fill at
+  its level with a line down to each picked point; the blue handle in the middle moves the level up and
+  down (or type it under **Level**; until you choose one it is the lowest bank under the outline). Set its
+  **Depth** (the floor below the water), **Banks above the water** (walls from the floor up to that far
+  above the water), **Foam at the shore** and the **Floor colour**.
+- **River:** click its middle from where it starts to where it flows (2 to 32 points): the order is the flow,
+  and white arrows along the band show it (**Reverse flow** turns it round). It follows the ground and steps
+  down where the ground drops; set its **Width**, its **Depth** (the water above its bed where Link swims)
+  and, per section, **shallow** (water to wade through, shown in a lighter colour).
+- **Waterfall:** click the two ends of the edge the water falls over; it falls to the lower side (or choose a
+  side) down to the ground below. A river with a step has **Waterfall here** next to each step when you edit
+  it: the waterfall then fills the step across the river's width.
+
+Until it is made, the water shows in the picture as a light fill (a river's band in two colours: deep and
+shallow water); once it is made the game's own water shows, and **Apply** after a change shows the new
+water as soon as the game has prepared it (a few seconds).
+
+The window checks the drawing as it changes and lists what is wrong in red (warnings in yellow): an
+outline that crosses itself, too few or too many points, a pond whose water is above the highest ground of
+its sea square (the game doesn't find water there; see [Water](world-objects.md#water)), too many
+triangles for the water surface or the collision, a mod that would have more than 8 models (a body of water
+takes two), and what it would be in the way of: the island's people and their routes, doors, chests, event
+areas and other mods' objects (its floor and banks may meet the island's ground). The outline turns red in
+the picture with the first error next to it. **Create** (one Undo step) is possible once nothing is red.
+
+What it makes: two models in the package's `models/water/` folder (the water's ground, banks and
+collision; the water surface, drawn with the game's own pond, river or waterfall water from your game
+files), and a static world object that uses them, placed like any other: move, turn, copy and remove it as
+usual (removing it takes its two models along). The game prepares the models while you work; the water
+appears when the status bar says they are ready. Selecting it shows **Water** in the Inspector: **Edit
+shape…** loads its points and settings into the Water window, where **Apply** builds it again where it
+stands (one Undo step; Undo brings the earlier models back). The generated files are the same on every
+computer for the same drawing.
+
+Bodies of water are made on the sea's islands (the `sea` stage). The same works through the commands
+`check_water`, `add_pond`, `add_river`, `add_waterfall`, `edit_water` and `get_water` (below).
+
 ## Dialogue and actions
 
 For signs, residents, chests and your own models, the Inspector has:
@@ -693,13 +736,19 @@ separated by `;`, or `@file` with one such line per row. Results go to the log.
 | `preview_dialogue` | `id`?, `lines`?, `close`?, `mod`? | show lines in the game's message box (or hide it) |
 | `pick` | `origin`, `direction`, `range`? | the first ground a ray meets |
 | `ground` | `position` | the ground height below a point |
-| `focus` | `id`, `mod`? | fly the camera to an actor |
+| `focus` | `id`, `distance`?, `yaw`?, `mod`? | fly the camera to an actor (a world object: its whole extent in view; `distance` back, looking along `yaw` degrees) |
 | `check_model` | `file` | check a `.glb` file |
 | `import_model` | `file`, `id`?, `confirm`?, `mod`? | copy a `.glb` into the mod and add the model |
 | `place_world_object` | `id`, `model`, `collision`, `stage`, `room`, `position`, `behaviour`?, `buoyancy`?, `drift`?, `anchor`?, `grapple_points`?, `distant`?, `shoreline`?, `chart_marker`?, `arrival`?, `rotation`?, `scale`?, `mod`? | place a static, floating or drifting object of the mod with collision (one Undo step) |
 | `set_world_object` | `id`, `collision`?, `behaviour`?, `buoyancy`?, `drift`?, `anchor`?, `grapple_points`?, `distant`?, `shoreline`?, `chart_marker`?, `arrival`?, `mod`? | change a world object's collision, behaviour and motion together (`null` removes one) |
 | `preview_collision`, `placement_conflicts` | `id`, `mod`? | a world object's collision as a wireframe, and what its place conflicts with |
 | `prepare_collision` | `model`, `mod`? | prepare a static model's collision for placing world objects while the game runs |
+| `check_water` | `kind` (`pond`, `river`, `waterfall`), `points`?, `level`?, `depth`?, `rim`?, `foam`?, `floor`?, `width`?, `shallow`?, `top`?, `bottom`?, `side`?, `river`?, `step`?, `id`?, `mod`? | what a body of water would be and every problem with it (errors and warnings), without changing anything: its place, triangles, file size, a river's levels and steps; `id` a body being changed |
+| `add_pond` | `points`, `level`?, `depth`?, `rim`?, `foam`?, `floor`?, `id`?, `mod`? | a pond: its outline (world `{x, z}` points), its water's height (default: the lowest bank), the floor `depth` below (20–480, default 200), banks `rim` above the water (0–300), a foam ring, the floor colour `"#rrggbb"` (one Undo step) |
+| `add_river` | `points`, `width`?, `depth`?, `shallow`?, `floor`?, `id`?, `mod`? | a river: its centre line in the flow's order, `width` 100–2000 (default 400), deep water `depth` above the bed, `shallow` per section (or one for all) |
+| `add_waterfall` | `points` or `river` and `step`?, `top`?, `bottom`?, `side`?, `floor`?, `id`?, `mod`? | a waterfall: its top edge (two points; or a river's step), the top's and the ground's height (default: the ground there), `side` 1 or -1 (default: the lower side) |
+| `edit_water` | `id`, and what changes of the above, `mod`? | build a body of water made with the tool again with those changes (one Undo step) |
+| `get_water` | `id`, `mod`? | a body of water's parameters in world units, a river's steps and levels |
 | `set_scene` | `id`, `property` (`trigger`, `steps`, `native`), `value`, `mod`? | (`null` removes a trigger or the native version) |
 | `set_quest_step` | `quest`, `step`, `property`, `value`, `mod`? | `place` is `{x, z}` at sea, or inside a building `{stage, room, sea: {x, z}, point}` (or `x`, `y`, `z` instead of `point`); `available` may use `flag` and `not_flag` (a flag id or a list) with its `text` |
 | `undo`, `redo`, `history` | | |

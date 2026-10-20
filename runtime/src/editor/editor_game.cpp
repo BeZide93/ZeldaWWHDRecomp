@@ -204,6 +204,8 @@ ResumeView g_resume;                       // game thread
 std::mutex g_focus_mu;
 bool g_focus_set = false;                  // under g_focus_mu
 double g_focus[3] = {};
+double g_focus_back = 700, g_focus_yaw = 0;  // how far back the camera goes; the direction it looks (radians)
+bool g_focus_turn = false;                  // false: it keeps its own direction
 int g_retry = 0;                           // logic steps a wanted fly start keeps trying (after a load)
 ResumeView current_view() {
     ResumeView v;
@@ -367,7 +369,8 @@ void fly_tick(Cpu* c, double dt) {
         std::lock_guard<std::mutex> lk(g_focus_mu);
         if (g_focus_set) {  // look at the point from a short way back, slightly above
             g_focus_set = false;
-            const double back = 700, up = 350;
+            const double back = g_focus_back, up = g_focus_back / 2;
+            if (g_focus_turn) g_fly.yaw = g_focus_yaw;
             g_fly.eye[0] = g_focus[0] - std::sin(g_fly.yaw) * back;
             g_fly.eye[1] = g_focus[1] + up;
             g_fly.eye[2] = g_focus[2] - std::cos(g_fly.yaw) * back;
@@ -1044,6 +1047,10 @@ public:
             }
         }, why, 3000);
     }
+    // the room's own collision height range, from the player's stage files (cached by the placement index)
+    bool room_height(const std::string& stage, int room, float& low, float& high, std::string& why) override {
+        return mod_actor::room_height_range(stage, room, low, high, why);
+    }
     Value route_state(const std::string& mod, const std::string& id) override {
         Value v;
         std::string why;
@@ -1103,11 +1110,20 @@ public:
             std::lock_guard<std::mutex> lk(g_focus_mu);
             g_focus_set = true;
             g_focus[0] = target.x, g_focus[1] = target.y, g_focus[2] = target.z;
+            g_focus_back = 700, g_focus_turn = false;
         }
         if (!g_flying) {
             g_manual_off = false;
             g_fly_want = 1;
         }
+        return true;
+    }
+    bool focus_view(const WorldPoint& target, float distance, float yaw_degrees, std::string& why) override {
+        if (!focus(target, why)) return false;
+        std::lock_guard<std::mutex> lk(g_focus_mu);
+        g_focus_back = std::clamp(double(distance), 200.0, 20000.0);
+        g_focus_turn = std::isfinite(yaw_degrees);
+        if (g_focus_turn) g_focus_yaw = double(yaw_degrees) * 3.14159265358979323846 / 180;
         return true;
     }
     bool prepare_model(const std::string& mod, const std::string& dir, const Value& model, std::string& note, std::string& why) override {

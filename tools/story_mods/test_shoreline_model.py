@@ -130,6 +130,23 @@ class ShorelineTests(unittest.TestCase):
         self.assertEqual(f.dict(f.rel(model + 0x18))[0][0], coast.MATERIALS['water'])
         start = f.rel(f.rel(f.rel(f.dict(f.rel(model + 0x14))[0][1] + 0x20) + 0x18) + 0x14)
         self.assertEqual([struct.unpack_from('>4f', data, start + i * 64)[3] for i in range(9)], [0, 0, 0, 0, 1, 0, 0, 0, 0])
+        # a river's surface fades the same way; a waterfall gets Forest Haven's colours (blue 1 at the top, 0.3 at the foot)
+        fall = (pts, [(0, 0, 1)] * 9, [(p[0] / 100, p[2] / 100) for p in pts], idx, b'')
+        fall = ([(p[0], 200 - p[2], 0) for p in pts],) + fall[1:]
+        data = coast.build_bfres(template(coast.MATERIALS['waterfall'])[0], fall, 'mod_fall', coast.MATERIALS['waterfall'])
+        f = coast.base.Bfres(data)
+        model = f.dict(f.rel(0x20))[0][1]
+        start = f.rel(f.rel(f.rel(f.dict(f.rel(model + 0x14))[0][1] + 0x20) + 0x18) + 0x14)
+        colours = [tuple(round(v, 4) for v in struct.unpack_from('>4f', data, start + i * 64)) for i in range(9)]
+        self.assertEqual(colours[0], (0.2, 0.0, 1.0, 1.0))
+        self.assertEqual(colours[4], (0.2, 0.0, 0.65, 1.0))
+        self.assertEqual(colours[8], (0.2, 0.0, 0.3, 1.0))
+        for kind in ('river',):
+            data = coast.build_bfres(template(coast.MATERIALS[kind])[0], geometry, 'mod_' + kind, coast.MATERIALS[kind])
+            f = coast.base.Bfres(data)
+            model = f.dict(f.rel(0x20))[0][1]
+            start = f.rel(f.rel(f.rel(f.dict(f.rel(model + 0x14))[0][1] + 0x20) + 0x18) + 0x14)
+            self.assertEqual([struct.unpack_from('>4f', data, start + i * 64)[3] for i in range(9)], [0, 0, 0, 0, 1, 0, 0, 0, 0])
         # the foam keeps full alpha; the water template needs its own material in the player's island
         with self.assertRaises(actor_model.BuildError):
             coast.build_bfres(template()[0], geometry, 'mod_pond', coast.MATERIALS['water'])
@@ -140,8 +157,9 @@ class ShorelineTests(unittest.TestCase):
         pts = [(x * 100.0, 5.0, z * 100.0) for z in range(3) for x in range(3)]
         idx = [0, 3, 1, 1, 3, 4, 1, 4, 2, 2, 4, 5, 3, 6, 4, 4, 6, 7, 4, 7, 5, 5, 7, 8]
         geometry = (pts, [(0, 1, 0)] * 9, [(p[0] / 100, p[2] / 100) for p in pts], idx, b'')
-        # foam: Outset's coast (one texture, normals); water: the spring pool's surface (three textures, no normals)
-        for kind, ntex in (('foam', 1), ('water', 3)):
+        # foam: Outset's coast (one texture, normals); water: the spring pool's surface (three textures, no normals);
+        # river and waterfall: the flowing water of Mother & Child Isles and Forest Haven (one texture each)
+        for kind, ntex in (('foam', 1), ('water', 3), ('river', 1), ('waterfall', 1)):
             tpl, _ = coast.player_template(os.environ['WWHD_GAME_DIR'], kind)
             data = coast.build_bfres(tpl, geometry, 'mod_' + kind, coast.MATERIALS[kind])
             f = coast.base.Bfres(data)
@@ -153,7 +171,7 @@ class ShorelineTests(unittest.TestCase):
             buffer = f.rel(vertex + 0x18)
             stride, start = f.u16(buffer + 0xC), f.rel(buffer + 0x14)
             alphas = [struct.unpack_from('>f', data, start + i * stride + 12)[0] for i in range(9)]
-            self.assertEqual(alphas, [0, 0, 0, 0, 1, 0, 0, 0, 0] if kind == 'water' else [1] * 9)
+            self.assertEqual(alphas, [1] * 9 if kind in ('foam', 'waterfall') else [0, 0, 0, 0, 1, 0, 0, 0, 0])
 
     def test_missing_or_unsupported_player_template_refused(self):
         source,_,animation=template()

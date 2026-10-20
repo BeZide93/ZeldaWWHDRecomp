@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Player-local coast material and animation on original mod geometry.
 
-Two island materials serve as templates: "foam", Outset's animated coast foam, and "water", the spring pool's
-surface of Mother & Child Isles with its moving ripples (a pond standing above the sea). A water surface fades out
-towards its open edges (vertex alpha 0 on the mesh's boundary, 1 inside), as the island's own water does.
+Island materials serve as templates: "foam", Outset's animated coast foam; "water", the spring pool's surface of
+Mother & Child Isles with its moving ripples (a pond standing above the sea); "river", the flowing water of the same
+island's spring outflow (its texture scrolls along V: V grows downstream); "waterfall", Forest Haven's falling water
+(the same flow texture, scrolling three times as fast; V grows downwards). A water or river surface fades out towards
+its open edges (vertex alpha 0 on the mesh's boundary, 1 inside), as the island's own water does; a waterfall gets
+the vertex colours Forest Haven's falls give that material (its blue channel from 1 at the top to 0.3 at the foot).
 
 No game data is shipped: the native material, textures and animation are read
 from the player's installation and the output stays in their model cache.
@@ -20,10 +23,21 @@ import notebook_model as base
 from skinned_actor_model import append_dictionary, append_string
 
 VERSION = 3
-MATERIALS = {'foam': 'SC_01_mizu_v_x', 'water': 'Txe_water_v_3_'}
+MATERIALS = {'foam': 'SC_01_mizu_v_x', 'water': 'Txe_water_v_3_', 'river': 'Txe_water_v_x', 'waterfall': 'SC_00_m_v_x'}
 MATERIAL = MATERIALS['foam']
 # the room archive whose water model (model1) holds each template material
-TEMPLATE_ROOMS = {'foam': 44, 'water': 9}
+TEMPLATE_ROOMS = {'foam': 44, 'water': 9, 'river': 9, 'waterfall': 41}
+# the materials whose surface fades out towards the mesh's open edges
+FADING = {MATERIALS[k] for k in ('water', 'river')}
+
+
+def waterfall_colours(positions):
+    """per vertex: Forest Haven's falls give their material red 0.2, green 0 and blue from 1 at the top to 0.3 at the
+    bottom (the fall's opacity and foam), alpha 1"""
+    top = max(p[1] for p in positions)
+    bottom = min(p[1] for p in positions)
+    span = top - bottom or 1.0
+    return [(0.2, 0.0, 1.0 - 0.7 * (top - p[1]) / span, 1.0) for p in positions]
 PACKS = ('first_szs_permanent.pack', 'szs_permanent0.pack', 'szs_permanent1.pack', 'szs_permanent2.pack')
 
 
@@ -103,11 +117,15 @@ def build_bfres(template, geometry, identity, material_name=MATERIAL):
     f.put('H', vertex + 6, 0)
     f.put('I', vertex + 8, len(positions))
     f.b[vertex + 0xC] = 0
-    alpha = edge_alpha(positions, indices) if material_name == MATERIALS['water'] else [1.0] * len(positions)
+    if material_name == MATERIALS['waterfall']:
+        colours = waterfall_colours(positions)
+    else:
+        alpha = edge_alpha(positions, indices) if material_name in FADING else [1.0] * len(positions)
+        colours = [(1.0, 1.0, 1.0, a) for a in alpha]
     records = []
-    for p, n, t, a in zip(positions, normals, uv, alpha):
+    for p, n, t, c in zip(positions, normals, uv, colours):
         r = bytearray(stride)
-        struct.pack_into('>4f', r, layout['_c0'][1], 1, 1, 1, a)
+        struct.pack_into('>4f', r, layout['_c0'][1], *c)
         struct.pack_into('>3f', r, layout['_p0'][1], *p)
         if '_n0' in layout:
             struct.pack_into('>3f', r, layout['_n0'][1], *n)

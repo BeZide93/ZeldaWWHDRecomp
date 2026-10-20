@@ -751,6 +751,19 @@ Value Session::dispatch_build(const std::string& command, const Value& p, std::s
             const auto it = std::find_if(list.begin(), list.end(), [&](const Value& a) { return a.get("id").string() == id; });
             if (it == list.end()) return w = "no placed actor \"" + id + "\" in " + pkg->mod, false;
             list.erase(it);
+            // a body of water's generated models (the water tool, models/water/) go with it once nothing uses them
+            if (m.get("models").type == Value::Array) {
+                auto& models = m["models"].array;
+                models.erase(std::remove_if(models.begin(), models.end(), [&](const Value& e) {
+                                 if (e.get("source").string().rfind("models/water/", 0) != 0) return false;
+                                 const std::string mid = e.get("id").string();
+                                 return std::none_of(list.begin(), list.end(), [&](const Value& a) {
+                                     return a.get("model").string() == mid || a.get("collision").get("mesh").string() == mid || a.get("shoreline").get("model").string() == mid ||
+                                            a.get("distant").get("model").string() == mid;
+                                 });
+                             }),
+                             models.end());
+            }
             return true;
         }, r, why);
         if (ok) r["id"] = id;
@@ -994,7 +1007,23 @@ Value Session::dispatch_build(const std::string& command, const Value& p, std::s
         WorldPoint at;
         if (!a || !read_point(a->get("position"), at)) return why = "no placed actor \"" + text(p, "id") + "\"", r;
         if (!host_) return why = "the game is not running", r;
-        if (!host_->focus(at, why)) return r;
+        // a world object (a building, a pond, a river): its whole extent in the picture, from its middle
+        float distance = 700;
+        std::vector<story_notebook::ManifestActor> actors;
+        std::string w;
+        if (story_notebook::parse_actors(pkg->manifest, actors, w))
+            for (const auto& actor : actors)
+                if (actor.id == text(p, "id") && actor.world_object()) {
+                    Value q;
+                    if (!host_->world_object_query(pkg->mod, actor, false, q, w)) break;
+                    WorldPoint lo, hi;
+                    if (!read_point(q.get("minimum"), lo) || !read_point(q.get("maximum"), hi)) break;
+                    at = {(lo.x + hi.x) / 2, (lo.y + hi.y) / 2, (lo.z + hi.z) / 2};
+                    distance = std::clamp(std::max({hi.x - lo.x, hi.y - lo.y, hi.z - lo.z}) * 0.9f, 700.0f, 12000.0f);
+                }
+        if (p.get("distance").type == Value::Number) distance = float(std::clamp(p.get("distance").number, 200.0, 20000.0));
+        const float yaw = p.get("yaw").type == Value::Number ? float(p.get("yaw").number) : std::nanf("");
+        if (!host_->focus_view(at, distance, yaw, why)) return r;
         r["requested"] = true;
         ok = true;
         return r;

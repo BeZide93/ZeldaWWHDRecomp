@@ -112,6 +112,11 @@ public:
     // ---- building new content (each optional: the defaults say the game is not there) ----
     // The ground under `above` (the game's own collision check): its height. False: no ground below.
     virtual bool ground(const WorldPoint& above, float& height, std::string& why) { return why = "the game is not running", false; }
+    // The height range of a room's own collision (world space): the game looks for a body of water only within it.
+    virtual bool room_height(const std::string& stage, int room, float& low, float& high, std::string& why) {
+        (void)stage, (void)room, (void)low, (void)high;
+        return why = "the game is not running", false;
+    }
     // The ground under each of `above` at once (heights[i] valid where found[i]); false: no game.
     virtual bool grounds(const std::vector<WorldPoint>& above, std::vector<float>& heights, std::vector<bool>& found, std::string& why) {
         heights.assign(above.size(), 0);
@@ -143,6 +148,11 @@ public:
     virtual Value path_state() { return Value(); }
     // Points the fly camera at `target` from a short distance (turns it on first if needed).
     virtual bool focus(const WorldPoint& target, std::string& why) { return why = "the game is not running", false; }
+    // The same from `distance` units back (and half as high), looking along `yaw_degrees` (NaN: its own direction).
+    virtual bool focus_view(const WorldPoint& target, float distance, float yaw_degrees, std::string& why) {
+        (void)distance, (void)yaw_degrees;
+        return focus(target, why);
+    }
     // A model of `mod` was added or changed (its manifest entry; the file is in the package `dir`):
     // convert and prepare it for the game, so actors can use it without a restart where possible.
     virtual bool prepare_model(const std::string& mod, const std::string& dir, const Value& model, std::string& note, std::string& why) {
@@ -366,6 +376,8 @@ private:
     Value dispatch_route(const std::string& command, const Value& params, std::string& why, bool& ok, bool& handled);
     // the mod's room paths: lines and areas its actors name (commands_paths.cpp)
     Value dispatch_paths(const std::string& command, const Value& params, std::string& why, bool& ok, bool& handled);
+    // the water tool: ponds, rivers, waterfalls (commands_water.cpp)
+    Value dispatch_water(const std::string& command, const Value& params, std::string& why, bool& ok, bool& handled);
 };
 
 // One problem of a package, with what it is about (for the editor's problem list: a click selects it).

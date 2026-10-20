@@ -678,6 +678,48 @@ void game_object_tools() {
     CHECK(be.asked == 0);
 }
 
+// The water tool through tools/call: each command listed with its schema; a pond made, read back, changed and
+// taken back; a refused one (crossing outline) as a tool error; nothing asked of the player.
+void water_tools() {
+    FakeBackend be;
+    const auto dir = std::filesystem::temp_directory_path() / ("wwhd-mcp-water-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    std::filesystem::create_directories(dir);
+    be.session.add_package("editor-test", "Editor test", dir.string(), json(kManifest));
+    Handler h(be, kToken, 47615);
+    bool reply = false;
+    Value r = h.message(json(R"({"jsonrpc":"2.0","id":3,"method":"tools/list"})"), reply);
+    std::set<std::string> found;
+    for (const auto& t : r.get("result").get("tools").array) {
+        const std::string name = t.get("name").string();
+        if (name == "add_pond" || name == "add_river" || name == "add_waterfall" || name == "edit_water" || name == "check_water" || name == "get_water") {
+            found.insert(name);
+            CHECK(t.get("inputSchema").get("properties").type == Value::Object && !t.get("description").string().empty());
+        }
+        if (name == "add_pond") CHECK(t.get("inputSchema").get("properties").get("points").get("type").string() == "array" && t.get("inputSchema").get("properties").get("level").type == Value::Object);
+        if (name == "add_river") CHECK(t.get("inputSchema").get("properties").get("shallow").type == Value::Object && t.get("inputSchema").get("properties").get("width").type == Value::Object);
+    }
+    CHECK(found.size() == 6);
+    Value v = call(h, "check_water", json(R"({"kind":"pond","points":[[100,-201800],[900,-201800],[900,-201100],[100,-201100]],"level":1100})"));
+    CHECK(!is_error(v) && text_of(v).find("\"ok\":true") != std::string::npos && text_of(v).find("\"surface_triangles\":10") != std::string::npos);
+    v = call(h, "add_pond", json(R"({"id":"spring","points":[[100,-201800],[900,-201800],[900,-201100],[100,-201100]],"level":1100,"depth":250,"foam":true})"));
+    CHECK(!is_error(v));
+    v = call(h, "get_water", json(R"({"id":"spring"})"));
+    CHECK(!is_error(v) && text_of(v).find("\"level\":1100") != std::string::npos && text_of(v).find("\"depth\":250") != std::string::npos);
+    v = call(h, "edit_water", json(R"({"id":"spring","level":1050})"));
+    CHECK(!is_error(v));
+    v = call(h, "get_actor", json(R"({"id":"spring"})"));
+    CHECK(!is_error(v) && text_of(v).find("\"y\":1050") != std::string::npos && text_of(v).find("\"material\":\"water\"") != std::string::npos);
+    v = call(h, "undo", Value());
+    CHECK(!is_error(v));
+    v = call(h, "get_water", json(R"({"id":"spring"})"));
+    CHECK(!is_error(v) && text_of(v).find("\"level\":1100") != std::string::npos);
+    v = call(h, "add_pond", json(R"({"points":[[0,-201000],[800,-200200],[800,-201000],[0,-200200]],"level":1100})"));
+    CHECK(is_error(v) && text_of(v).find("crosses") != std::string::npos);
+    CHECK(be.asked == 0);
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+}
+
 // A small quest of the later forms built through tools/call: a quest with an interior place, a
 // resident with ordered talks (a flag condition, quest_done), a sign gated on two quests.
 void quest_format_tools() {
@@ -965,6 +1007,7 @@ int main() {
     chest_tools();
     new_mod_tools();
     game_object_tools();
+    water_tools();
     demo_tools();
     listener();
     if (g_failures) {

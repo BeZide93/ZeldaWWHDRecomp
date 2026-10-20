@@ -464,6 +464,46 @@ found: Link walks on its floor as if it were dry. In a square of open sea the hi
 low (about 1,200 units in the square of the examples below), so keep raised ponds below the top of the
 square's island. A pond at sea level is always found.
 
+### Rivers and waterfalls
+
+A shoreline can also carry flowing water: `"material": "river"` gives the model the flowing water of Mother
+& Child Isles' spring outflow, `"material": "waterfall"` Forest Haven's falling water (the same texture,
+three times as fast). Both scroll along the model's V: map V so that it grows downstream (downwards on a
+waterfall), about every 200 units on a river and every 700 units down a waterfall (as the game's own repeat it); U across,
+about every 200 units on a river and every 500 on a waterfall. A river fades out towards the mesh's open edges like the
+still water, so give it at least one row of inner points; a waterfall is drawn as Forest Haven's falls are, more opaque
+and foamy at the top than at the foot.
+
+`col_shallow` is the ground of shallow water: put it where Link walks (the river's bed), not at the
+water's surface. `col_waterfall` is the ground under a fall: Link standing on it gets the game's splash on
+his head; the falling sheet itself has no collision, so Link drops through it.
+
+### Bodies of water made with the editor
+
+The editor's water tool ([Water](mod-editor.md#water-ponds-rivers-and-waterfalls)) makes ponds, rivers and
+waterfalls from points clicked on an island's ground. Each is one static object with two original models:
+
+| Body | Its model (drawn, and its collision) | Its shoreline |
+| --- | --- | --- |
+| Pond | floor (`col_sand`), banks inside and out (`col_stone`) down to the ground, optional foam ring; `col_water` at the level | `water` |
+| River | its bed, a few units above the ground; `col_water` at the level in deep sections, `col_shallow` on the bed in shallow ones | `river` |
+| Waterfall | rock behind the fall (`col_wall`) and a splash pad below it (`col_waterfall`) | `waterfall` |
+
+A river's level follows the ground sampled every 150 units along its centre line: deep sections hold their
+depth of water above the bed, shallow ones 30 units; it never flows uphill (a rise is reported, its water
+stays level), and where it would drop more than 60 units between two samples it steps down at once, which
+is where a waterfall goes. The models' files are named after their content under `models/water/`, and the
+tool's own parameters ride along in the first model (glTF `asset.extras`), which is how the editor changes
+them later. Because a body of water lies on the island's ground, its floor and banks may reach into the
+island's ground and walls (as island buildings do); everything else an object keeps clear of still counts.
+
+Limits: bodies of water are made on the `sea` stage; a body takes two of a mod's 8 models; a pond has 3 to
+48 points, a river 2 to 32 (turns of at most 120 degrees), a waterfall is 100 to 4,000 units wide and falls 80
+to 6,000; the water surface has at most 1,024 triangles. Each prepared body takes about 0.6 to 1 MiB of
+the room's model memory (the surface's water textures come from your game files). The game's own waterfall
+splash object (Ygstp00), spring (Ygush00) and the ambient water sounds of the islands (their sound emitters)
+are not added: they aren't game objects a mod can place yet.
+
 A full save state made with an earlier version keeps its world objects' collision as it was then
 (before the water, ice and void materials, and with `col_metal` still hurting Link) until the room
 loads again; then the objects get their collision anew.
@@ -533,7 +573,7 @@ A shoreline can also be a water surface instead of foam: with `"shoreline": {"mo
 "material": "water"}` the model gets the water of the game's spring pools, clear water with moving,
 bubbling ripples (the default `"material"` is `"foam"`). Model the water surface as a flat mesh at the
 water's level with a few rows of triangles; it fades out towards its open edges, so the water blends
-into the bank. Repeat U and V about once per metre. The surface is clear: the pond's colour comes from
+into the bank. Repeat U and V about twice per metre (every 50 units, as on the game's own spring). The surface is clear: the pond's colour comes from
 its floor and banks below it. An actor has one shoreline: an island with foam and a pond gives
 the pond its own static object (its basin as the model, with the `col_water` surface in its collision,
 and the water surface as its shoreline).

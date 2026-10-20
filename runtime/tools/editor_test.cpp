@@ -1495,6 +1495,146 @@ void game_pieces() {
           r.get("result").get("objects").array[0].get("why").string().find("not in your game files") != std::string::npos);
 }
 
+// ---------------------------------------------------------------- the water tool (commands_water.cpp)
+// The ground: 100 west of x 1500, a cliff down to -200 east of it; the room's own ground reaches up to 1000.
+struct WaterHost : FakeHost {
+    std::vector<Value> prepared_models;
+    float room_top = 1000;
+    int grounds_asked = 0;
+    bool ground(const editor::WorldPoint& above, float& h, std::string& why) override {
+        if (!has_ground) return why = "no ground below", false;
+        h = above.x < 1500 ? 100.0f : -200.0f;
+        ++grounds_asked;
+        return true;
+    }
+    bool room_height(const std::string& stage, int room, float& low, float& high, std::string& why) override {
+        if (stage != "sea" || room != 11) return why = "unknown room", false;
+        low = -900, high = room_top;
+        return true;
+    }
+    bool prepare_model(const std::string&, const std::string&, const Value& model, std::string& note, std::string&) override {
+        prepared_models.push_back(model);
+        note = "prepared";
+        return true;
+    }
+};
+size_t water_files(const fs::path& dir) {
+    size_t n = 0;
+    std::error_code ec;
+    if (fs::is_directory(dir / "models" / "water", ec))
+        for (const auto& e : fs::directory_iterator(dir / "models" / "water")) n += e.path().extension() == ".glb";
+    return n;
+}
+void water_tool() {
+    WaterHost host;
+    editor::Session s(&host);
+    const fs::path dir = temp_dir("water");
+    fs::create_directories(dir);
+    s.add_package("editor-test", "Editor test", dir.string(), json(kManifest));
+    const char* pond = R"({"points": [{"x": 600, "y": 100, "z": -201800}, {"x": 1400, "z": -201800}, {"x": 1400, "z": -201100}, {"x": 600, "z": -201100}], "level": 400, "depth": 300, "rim": 20, "foam": true})";
+    // check: nothing changes; its place, room, counts; the ground was asked once per outline point
+    Value r = s.run("check_water", [&] { Value v = json(pond); v["kind"] = "pond"; return v; }());
+    CHECK(ok(r) && r.get("result").get("ok").boolean && r.get("result").get("problems").array.empty() && s.undo_depth() == 0 && water_files(dir) == 0);
+    CHECK(r.get("result").get("room").number == 11 && r.get("result").get("position").get("y").number == 400 && r.get("result").get("position").get("x").number == 1000);
+    CHECK(r.get("result").get("surface_triangles").number == 10 && r.get("result").get("material").string() == "water" && r.get("result").get("ground_samples").number == 4);
+    // the known limit: above the room's highest ground the game doesn't find the water (an error, said in red)
+    host.room_top = 350;
+    r = s.run("check_water", [&] { Value v = json(pond); v["kind"] = "pond"; return v; }());
+    CHECK(ok(r) && !r.get("result").get("ok").boolean && r.get("result").get("problems").array[0].get("field").string() == "level" &&
+          r.get("result").get("problems").array[0].get("message").string().find("won't find this water") != std::string::npos);
+    CHECK(!ok(s.run("add_pond", json(pond))) && s.undo_depth() == 0);
+    host.room_top = 1000;
+    // what is in the way (the island's protected places) is an error too
+    host.query_clear = false;
+    r = s.run("check_water", [&] { Value v = json(pond); v["kind"] = "pond"; return v; }());
+    CHECK(ok(r) && !r.get("result").get("ok").boolean && r.get("result").get("problems").array[0].get("message").string() == "in the way: protected event");
+    host.query_clear = true;
+    // a crossing outline, a pond off the sea
+    CHECK(!ok(s.run("add_pond", json(R"({"points": [[0,-201000],[800,-200200],[800,-201000],[0,-200200]], "level": 300})"))));
+    CHECK(!ok(s.run("add_pond", json(R"({"points": [[0,-201000],[800,-201000],[800,-200200]], "level": 300, "stage": "M_NewD2"})"))));
+    // add: two generated models in the package, a static world object with col_water and the water surface; one undo step
+    r = s.run("add_pond", json(pond));
+    CHECK(ok(r) && r.get("result").get("id").string() == "pond" && s.undo_depth() == 1 && water_files(dir) == 2);
+    const Value* a = actor_of(s, "pond");
+    CHECK(a && a->get("behaviour").string() == "static" && a->get("shoreline").get("material").string() == "water" && a->get("collision").get("mesh").string() == a->get("model").string());
+    CHECK(a && a->get("position").get("y").number == 400 && a->get("room").number == 11 && a->get("stage").string() == "sea");
+    const std::string main = a ? a->get("model").string() : "", surface = a ? a->get("shoreline").get("model").string() : "";
+    CHECK(main.rfind("pond-m", 0) == 0 && surface.rfind("pond-s", 0) == 0 && s.manifest("editor-test")->get("models").array.size() == 2);
+    CHECK(fs::is_regular_file(dir / "models" / "water" / (main + ".glb")));
+    // both prepared for the game: the main model with collision, the surface as a water shoreline
+    CHECK(host.prepared_models.size() == 2 && host.prepared_models[0].get("collision").boolean && host.prepared_models[1].get("shoreline").string() == "water");
+    // get_water: the parameters back in world units
+    r = s.run("get_water", json(R"({"id": "pond"})"));
+    CHECK(ok(r) && r.get("result").get("kind").string() == "pond" && r.get("result").get("level").number == 400 && r.get("result").get("depth").number == 300 &&
+          r.get("result").get("points").array.size() == 4 && r.get("result").get("points").array[1].get("x").number == 1400 && r.get("result").get("foam").boolean);
+    // edit: built again where it stands; new models, the old ones leave the manifest (their files stay for undo); unmoved
+    // points keep their ground (not asked again)
+    const int asked = host.grounds_asked;
+    r = s.run("edit_water", json(R"({"id": "pond", "depth": 200, "floor": "#335577"})"));
+    CHECK(ok(r) && s.undo_depth() == 2 && host.grounds_asked == asked && water_files(dir) == 3);  // the surface is the same file
+    a = actor_of(s, "pond");
+    CHECK(a && a->get("model").string() != main && a->get("shoreline").get("model").string() == surface && s.manifest("editor-test")->get("models").array.size() == 2);
+    r = s.run("get_water", json(R"({"id": "pond"})"));
+    CHECK(ok(r) && r.get("result").get("depth").number == 200 && r.get("result").get("floor").string() == "#335577");
+    // a moved actor: its water moves with it (the level is its height)
+    CHECK(ok(s.run("move_actor", json(R"({"id": "pond", "position": {"x": 1100, "y": 380, "z": -201450}})"))));
+    r = s.run("get_water", json(R"({"id": "pond"})"));
+    CHECK(ok(r) && r.get("result").get("level").number == 380 && r.get("result").get("points").array[0].get("x").number == 700);
+    // undo: back to the first build, its models again; redo
+    CHECK(ok(s.run("undo")) && ok(s.run("undo")));
+    a = actor_of(s, "pond");
+    CHECK(a && a->get("model").string() == main);
+    r = s.run("get_water", json(R"({"id": "pond"})"));
+    CHECK(ok(r) && r.get("result").get("depth").number == 300);
+    CHECK(ok(s.run("redo")) && actor_of(s, "pond")->get("model").string() != main);
+    // copy: the copy shares the models until it is edited
+    r = s.run("duplicate_actor", json(R"({"id": "pond", "new_id": "pond-b", "offset": {"x": 0, "y": 0, "z": 1500}})"));
+    CHECK(ok(r) && actor_of(s, "pond-b")->get("model").string() == actor_of(s, "pond")->get("model").string());
+    CHECK(ok(s.run("edit_water", json(R"({"id": "pond-b", "rim": 0})"))) && actor_of(s, "pond-b")->get("model").string() != actor_of(s, "pond")->get("model").string());
+    CHECK(s.manifest("editor-test")->get("models").array.size() == 4);
+    // eight models at most: a third body of water would make ten
+    r = s.run("check_water", json(R"({"kind": "pond", "points": [[600,-200000],[1400,-200000],[1000,-199500]], "level": 300})"));
+    CHECK(ok(r) && r.get("result").get("ok").boolean);
+    CHECK(ok(s.run("add_pond", json(R"({"points": [[600,-200000],[1400,-200000],[1000,-199500]], "level": 300})"))));
+    r = s.run("check_water", json(R"({"kind": "pond", "points": [[600,-199000],[1400,-199000],[1000,-198500]], "level": 300})"));
+    CHECK(ok(r) && r.get("result").get("ok").boolean);  // 6 + 2 = 8
+    CHECK(ok(s.run("add_pond", json(R"({"id": "pond-d", "points": [[600,-199000],[1400,-199000],[1000,-198500]], "level": 300})"))));
+    r = s.run("check_water", json(R"({"kind": "pond", "points": [[600,-198000],[1400,-198000],[1000,-197500]], "level": 300})"));
+    CHECK(ok(r) && !r.get("result").get("ok").boolean && r.get("result").get("problems").array[0].get("field").string() == "models");
+    // removing a body of water takes its models along (once nothing uses them)
+    CHECK(ok(s.run("remove_actor", json(R"({"id": "pond-d", "confirm": true})"))) && s.manifest("editor-test")->get("models").array.size() == 6);
+    CHECK(ok(s.run("remove_actor", json(R"({"id": "pond-b", "confirm": true})"))) && s.manifest("editor-test")->get("models").array.size() == 4);
+    CHECK(ok(s.run("remove_actor", json(R"({"id": "pond-2", "confirm": true})"))) && s.manifest("editor-test")->get("models").array.size() == 2);
+
+    // a river: west of x 1500 the ground is at 100, east of it at -200: a step at the cliff, where a waterfall goes
+    const char* river = R"({"points": [{"x": 300, "z": -200500}, {"x": 1200, "z": -200500}, {"x": 2400, "z": -200500}], "width": 300, "depth": 120, "shallow": [true, false]})";
+    r = s.run("check_water", [&] { Value v = json(river); v["kind"] = "river"; return v; }());
+    CHECK(ok(r) && r.get("result").get("ok").boolean && r.get("result").get("steps").array.size() == 1 && r.get("result").get("material").string() == "river");
+    CHECK(ok(r) && r.get("result").get("levels").array.front().number == 130);  // the shallow section: 30 above its bed
+    r = s.run("add_river", json(river));
+    CHECK(ok(r) && actor_of(s, "river") && actor_of(s, "river")->get("shoreline").get("material").string() == "river");
+    r = s.run("get_water", json(R"({"id": "river"})"));
+    CHECK(ok(r) && r.get("result").get("steps").array.size() == 1 && r.get("result").get("shallow").array[0].boolean && !r.get("result").get("shallow").array[1].boolean);
+    const Value step = r.get("result").get("steps").array[0];
+    CHECK(step.get("top").number == 130 && step.get("bottom").number == -80);
+    // the waterfall at its step: the top edge across the river, falling downstream to the ground below
+    r = s.run("check_water", json(R"({"kind": "waterfall", "river": "river", "step": 1})"));
+    CHECK(ok(r) && r.get("result").get("ok").boolean && r.get("result").get("position").get("y").number == 130 && r.get("result").get("material").string() == "waterfall");
+    CHECK(ok(r) && r.get("result").get("minimum").get("y").number <= -200);
+    CHECK(!ok(s.run("check_water", json(R"({"kind": "waterfall", "river": "river", "step": 2})"))));
+    CHECK(ok(s.run("add_waterfall", json(R"({"river": "river", "step": 1})"))) && actor_of(s, "waterfall"));
+    r = s.run("get_water", json(R"({"id": "waterfall"})"));
+    CHECK(ok(r) && r.get("result").get("side").number == -1 && r.get("result").get("bottom").number == -200 && r.get("result").get("top").number == 130);
+    // a waterfall from two points on a cliff's top edge: it falls to the lower side by itself
+    r = s.run("check_water", json(R"({"kind": "waterfall", "points": [{"x": 1490, "y": 100, "z": -199800}, {"x": 1490, "y": 100, "z": -199300}]})"));
+    CHECK(ok(r) && r.get("result").get("ok").boolean && r.get("result").get("position").get("y").number == 100);
+    CHECK(ok(r) && r.get("result").get("minimum").get("x").number > 1440);  // its splash pad lies east (the lower side)
+    // a body of water that isn't one: edit_water refuses it
+    CHECK(!ok(s.run("edit_water", json(R"({"id": "sign-a", "depth": 100})"))));
+    CHECK(!ok(s.run("get_water", json(R"({"id": "sign-a"})"))));
+    fs::remove_all(dir);
+}
+
 int main(int argc, char** argv) {
     // editor_test --game <game dir> [stage room]: what the editor reads from a game folder (manual check)
     if (argc >= 3 && std::string(argv[1]) == "--game") {
@@ -1529,6 +1669,7 @@ int main(int argc, char** argv) {
     island_and_sea_placement();
     stage_tables();
     ray_pick();
+    water_tool();
     if (g_failures) {
         std::fprintf(stderr, "editor_test: %d failure(s)\n", g_failures);
         return 1;

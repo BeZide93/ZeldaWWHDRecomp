@@ -18,6 +18,9 @@ inline constexpr uint32_t kInstanceBytes=0x1120;
 using PlacementProvider=std::function<story_world_placement::Index(const std::string&,int)>;
 void configure_world_objects(const std::string& game_directory,PlacementProvider={});
 bool world_object_query(const std::string& mod,const story_notebook::ManifestActor&,bool wireframe,mods::json::Value&,std::string& why);
+// The height range of a room's own collision (its triangles' lowest and highest point, world space), from the
+// player's stage files: the game looks for a body of water only within it. False: unknown for that room.
+bool room_height_range(const std::string& stage,int room,float& low,float& high,std::string& why);
 bool register_collision(const std::string& mod,const std::string& model,std::shared_ptr<const story_world_collision::mesh::Mesh>);
 struct ModelRig {std::vector<std::string> joint_names;std::vector<int> joint_parents;std::vector<bool> joint_look_compatible;};
 struct Identity {std::string mod,id;uint32_t token=0,process_id=0;};

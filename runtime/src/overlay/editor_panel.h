@@ -4,6 +4,7 @@
 // a snapshot of the session taken once per frame, so a command that waits for the game never stops a frame.
 // Both exist only in the editor launch mode (--editor).
 #pragma once
+#include <array>
 #include <functional>
 #include <string>
 #include <vector>
@@ -94,4 +95,31 @@ void path_section(const Value& m, const Value& actor);  // the Inspector's Path 
 // (1-based, 0 none). False: none.
 bool path_picture(std::string& path, int& point);
 void path_select_point(int point);  // a click on a point in the picture
+// ---- the water tool (editor_water.cpp): ponds, rivers and waterfalls drawn in the picture
+struct WaterDraft {
+    bool open = false;        // the Water window
+    std::string kind = "pond";  // pond, river or waterfall
+    std::vector<std::array<float, 3>> points;  // world places (as picked; a pond's outline, a river's centre line, a waterfall's edge)
+    int selected = -1;        // the selected point (its move handle in the picture)
+    bool drawing = false;     // clicks into the picture add points
+    bool dragging = false;    // a point's or the level's handle is held (no check meanwhile)
+    float level = 0;          // pond: the water's height (level_set: chosen, else the lowest bank the check found)
+    bool level_set = false;
+    int depth = 200, rim = 0, width = 400, top = 0, bottom = 0, side = 0;  // side 0: the lower side
+    bool top_set = false, bottom_set = false, foam = false;
+    float floor[3] = {0.48f, 0.55f, 0.36f};
+    std::vector<bool> shallow;  // river: per section
+    std::string editing;        // the body of water being changed ("" a new one)
+    Value check;                // check_water's last answer
+    std::string checked;
+    bool checking = false;
+};
+WaterDraft& water_draft();
+void water_window(const Value& m);                      // the Water window
+void water_section(const Value& m, const Value& actor); // the Inspector's Water section (a body made with the tool)
+bool water_actor(const Value& m, const Value& actor);   // made with the water tool (its model is under models/water/)
+void water_start(const std::string& kind);              // a new pond, river or waterfall: the window open, drawing
+void water_edit(const std::string& id);                 // its points and settings into the window
+void water_add_point(float x, float y, float z);        // a click on the ground while drawing
+void water_test_tick();                                 // test aid WWHD_TEST_WATER (editor_water.cpp)
 }  // namespace editor_ui

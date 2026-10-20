@@ -2,6 +2,7 @@
 #include "editor_shell.h"
 
 #include <algorithm>
+#include <array>
 #include <cfloat>
 #include <cmath>
 #include <cstdio>
@@ -14,6 +15,7 @@
 #include "../editor/editor_game.h"
 #include "../editor/mcp_game.h"
 #include "../editor/scenes.h"
+#include "../editor/water.h"
 #include "../gfx/renderer.h"
 #include "../input_map.h"
 #include "../platform/keycodes.h"
@@ -52,6 +54,8 @@ struct ShellState {
     float route_drag[16] = {};
     bool path_dragging = false;  // a room path point's handle (paths_overlay)
     float path_drag[16] = {};
+    bool water_point_drag = false;  // a water draft's point handle (water_overlay)
+    float water_drag[16] = {};
     int gizmo = 0;           // 0 move, 1 turn
     int grid = 0, angle = 1;  // snapping: indexes into kGrid / kAngle
     std::string placing;      // a type from list_actor_types while placing by click
@@ -818,6 +822,178 @@ bool paths_overlay(ImDrawList* dl, const View& v, const Value& m, const std::str
     return true;
 }
 
+// ---------------------------------------------------------------- the water tool in the picture
+// The draft of the Water window (editor_water.cpp): a pond's outline at its level (the water as a light fill, its
+// points down to the ground, the blue height handle in its middle), a river's band (both banks, its centre line and
+// arrows along the flow), a waterfall's edge and sheet. Red where the check found an error. The selected point
+// has the move handle; letting go of a handle checks the draft again. True while the draft shows (the selected
+// actor's handle waits).
+bool water_overlay(ImDrawList* dl, const View& v, bool& handle_busy) {
+    handle_busy = false;
+    auto& d = editor_ui::water_draft();
+    if (!d.open || d.points.empty()) return d.open && d.drawing;
+    const bool bad = d.check.get("ok").type == Value::Bool && !d.check.get("ok").boolean;
+    const ImU32 line = bad ? IM_COL32(245, 90, 80, 240) : IM_COL32(90, 200, 255, 240), fill = bad ? IM_COL32(245, 90, 80, 50) : IM_COL32(70, 160, 255, 70),
+                ground = IM_COL32(200, 200, 200, 150);
+    const size_t n = d.points.size();
+    auto P = [&](size_t i, float y) { return std::array<float, 3>{d.points[i][0], y, d.points[i][2]}; };
+    if (d.kind == "pond") {
+        const float level = d.level;
+        // the water: a light fill (the outline's own triangles) and the outline at the level
+        if (n >= 3) {
+            std::vector<editor::water::XZ> poly;
+            for (const auto& q : d.points) poly.push_back({int(std::lround(q[0])), int(std::lround(q[2]))});
+            std::vector<unsigned> tris;
+            if (editor::water::simple_polygon(poly) && editor::water::triangulate(poly, tris))
+                for (size_t t = 0; t < tris.size(); t += 3) {
+                    ImVec2 a, b, c;
+                    const auto pa = P(tris[t], level), pb = P(tris[t + 1], level), pc = P(tris[t + 2], level);
+                    if (project(v, pa.data(), a) && project(v, pb.data(), b) && project(v, pc.data(), c)) dl->AddTriangleFilled(a, b, c, fill);
+                }
+        }
+        for (size_t i = 0; i < n; i++) {
+            const auto a = P(i, level), b = P((i + 1) % n, level);
+            if (n >= 3 || i + 1 < n) line3(dl, v, a.data(), b.data(), line, 3);
+            line3(dl, v, d.points[i].data(), a.data(), ground, 1);  // down to where it was picked
+        }
+    } else if (d.kind == "river" && n >= 2) {
+        // the band: each point's right (to the flow), with the corners mitred; the water above the ground
+        std::vector<std::array<float, 3>> left(n), right(n);
+        for (size_t i = 0; i < n; i++) {
+            const auto& pr = d.points[i ? i - 1 : 0];
+            const auto& nx = d.points[i + 1 < n ? i + 1 : i];
+            float tx = nx[0] - pr[0], tz = nx[2] - pr[2];
+            const float l = std::sqrt(tx * tx + tz * tz);
+            if (l > 1e-3f) tx /= l, tz /= l;
+            const bool shallow = i < d.shallow.size() ? d.shallow[i] : (i && i - 1 < d.shallow.size() && d.shallow[i - 1]);
+            const float y = d.points[i][1] + (shallow ? 30.f : float(d.depth));
+            const float rx = tz * d.width * 0.5f, rz = -tx * d.width * 0.5f;
+            left[i] = {d.points[i][0] - rx, y, d.points[i][2] - rz};
+            right[i] = {d.points[i][0] + rx, y, d.points[i][2] + rz};
+        }
+        for (size_t i = 0; i + 1 < n; i++) {
+            const bool shallow = i < d.shallow.size() && d.shallow[i];
+            const ImU32 f = bad ? fill : shallow ? IM_COL32(120, 220, 210, 70) : fill;
+            ImVec2 a, b, c, e;
+            if (project(v, left[i].data(), a) && project(v, right[i].data(), b) && project(v, right[i + 1].data(), c) && project(v, left[i + 1].data(), e)) {
+                dl->AddTriangleFilled(a, b, c, f);
+                dl->AddTriangleFilled(a, c, e, f);
+            }
+            line3(dl, v, left[i].data(), left[i + 1].data(), line, 3);
+            line3(dl, v, right[i].data(), right[i + 1].data(), line, 3);
+            // the flow: arrows along the centre line, pointing downstream
+            for (float t : {0.3f, 0.7f}) {
+                const float mid[3] = {(left[i][0] + right[i][0]) * 0.5f * (1 - t) + (left[i + 1][0] + right[i + 1][0]) * 0.5f * t,
+                                      (left[i][1] * (1 - t) + left[i + 1][1] * t) + 2, (left[i][2] + right[i][2]) * 0.5f * (1 - t) + (left[i + 1][2] + right[i + 1][2]) * 0.5f * t};
+                float dir[3] = {d.points[i + 1][0] - d.points[i][0], 0, d.points[i + 1][2] - d.points[i][2]};
+                normalize(dir);
+                const float size = std::min(120.f, d.width * 0.3f);
+                const float tip[3] = {mid[0] + dir[0] * size, mid[1], mid[2] + dir[2] * size};
+                const float l1[3] = {mid[0] - dir[2] * size * 0.5f, mid[1], mid[2] + dir[0] * size * 0.5f}, l2[3] = {mid[0] + dir[2] * size * 0.5f, mid[1], mid[2] - dir[0] * size * 0.5f};
+                line3(dl, v, l1, tip, IM_COL32(255, 255, 255, 230), 3);
+                line3(dl, v, l2, tip, IM_COL32(255, 255, 255, 230), 3);
+            }
+        }
+        for (size_t i = 0; i + 1 < n; i++) line3(dl, v, d.points[i].data(), d.points[i + 1].data(), ground, 1);
+    } else if (d.kind == "waterfall") {
+        if (n == 2) {
+            const float top = d.top_set ? float(d.top) : std::max(d.points[0][1], d.points[1][1]);
+            const float bottom = d.bottom_set ? float(d.bottom) : d.check.get("minimum").type == Value::Object ? num(d.check.get("minimum"), "y") + 20 : top - 600;
+            const auto a = P(0, top), b = P(1, top), c = P(1, bottom), e = P(0, bottom);
+            ImVec2 pa, pb, pc, pe;
+            if (project(v, a.data(), pa) && project(v, b.data(), pb) && project(v, c.data(), pc) && project(v, e.data(), pe)) {
+                dl->AddTriangleFilled(pa, pb, pc, fill);
+                dl->AddTriangleFilled(pa, pc, pe, fill);
+            }
+            line3(dl, v, a.data(), b.data(), line, 3);
+            line3(dl, v, a.data(), e.data(), line, 1.5f);
+            line3(dl, v, b.data(), c.data(), line, 1.5f);
+        }
+    }
+    // the points: dots and numbers; a click selects one
+    const ImVec2 mouse = ImGui::GetIO().MousePos;
+    int clicked = -1;
+    for (size_t i = 0; i < n; i++) {
+        ImVec2 at;
+        if (!project(v, d.points[i].data(), at)) continue;
+        const bool me = int(i) == d.selected;
+        dl->AddCircleFilled(at, me ? 8.0f : 6.0f, me ? IM_COL32(255, 230, 120, 255) : line);
+        char label[16];
+        std::snprintf(label, sizeof label, "%zu", i + 1);
+        dl->AddText(ImVec2(at.x + 9, at.y - 9), IM_COL32(240, 240, 240, 230), label);
+        if (ImGui::IsMouseClicked(0) && ImGui::IsWindowHovered() && std::hypot(mouse.x - at.x, mouse.y - at.y) < 10) clicked = int(i);
+    }
+    if (clicked >= 0 && !ImGuizmo::IsOver()) d.selected = clicked;
+    // what is in the way: a red ring round each place the check named (a villager, a door, a chest...)
+    for (const auto& pr : d.check.get("problems").array) {
+        float at[3];
+        if (!point3(pr.get("at"), at) || pr.get("reach").type != Value::Number) continue;
+        const float reach = num(pr, "reach");
+        for (int i = 0; i < 24; i++) {
+            const float a0 = float(i) * float(kPi) / 12, a1 = float(i + 1) * float(kPi) / 12;
+            const float p0[3] = {at[0] + std::cos(a0) * reach, at[1] + 5, at[2] + std::sin(a0) * reach}, p1[3] = {at[0] + std::cos(a1) * reach, at[1] + 5, at[2] + std::sin(a1) * reach};
+            line3(dl, v, p0, p1, IM_COL32(245, 90, 80, 230), 2.5f);
+        }
+    }
+    // the first error, next to the first point
+    for (const auto& pr : d.check.get("problems").array)
+        if (pr.get("severity").string() != "warning") {
+            ImVec2 at;
+            if (project(v, d.points[0].data(), at)) {
+                const std::string text = pr.get("message").string();
+                const ImVec2 sz = ImGui::CalcTextSize(text.c_str());
+                dl->AddRectFilled(ImVec2(at.x + 12, at.y + 8), ImVec2(at.x + 20 + sz.x, at.y + 12 + sz.y), IM_COL32(60, 10, 10, 210), 4);
+                dl->AddText(ImVec2(at.x + 16, at.y + 10), IM_COL32(255, 150, 140, 255), text.c_str());
+            }
+            break;
+        }
+    float view[16], proj[16];
+    gl_view(v, view);
+    gl_projection(v, proj);
+    ImGuizmo::SetDrawlist(dl);
+    ImGuizmo::SetOrthographic(false);
+    ImGuizmo::SetRect(v.pos.x, v.pos.y, v.size.x, v.size.y);
+    float snap_values[3] = {kGrid[S.grid], kGrid[S.grid], kGrid[S.grid]};
+    bool using_any = false;
+    // the selected point's move handle
+    if (d.selected >= 0 && d.selected < int(n)) {
+        const auto& q = d.points[size_t(d.selected)];
+        float model[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, q[0], q[1], q[2], 1};
+        if (S.water_point_drag) std::memcpy(model, S.water_drag, sizeof model);
+        ImGuizmo::PushID(0x57415452);
+        ImGuizmo::Manipulate(view, proj, ImGuizmo::TRANSLATE, ImGuizmo::WORLD, model, nullptr, S.grid > 0 ? snap_values : nullptr);
+        handle_busy = ImGuizmo::IsOver() || ImGuizmo::IsUsing();
+        if (ImGuizmo::IsUsing()) {
+            S.water_point_drag = true, using_any = true;
+            std::memcpy(S.water_drag, model, sizeof model);
+            d.points[size_t(d.selected)] = {model[12], model[13], model[14]};
+        } else if (S.water_point_drag)
+            S.water_point_drag = false;
+        ImGuizmo::PopID();
+    }
+    // a pond's height handle: up and down only, in the middle of the outline at the level
+    if (d.kind == "pond" && n >= 3) {
+        float cx = 0, cz = 0;
+        for (const auto& q : d.points) cx += q[0], cz += q[2];
+        cx /= float(n), cz /= float(n);
+        float model[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, cx, d.level, cz, 1};
+        ImGuizmo::PushID(0x4C45564C);
+        ImGuizmo::Manipulate(view, proj, ImGuizmo::TRANSLATE_Y, ImGuizmo::WORLD, model, nullptr, S.grid > 0 ? snap_values : nullptr);
+        handle_busy = handle_busy || ImGuizmo::IsOver() || ImGuizmo::IsUsing();
+        if (ImGuizmo::IsUsing()) d.level = model[13], d.level_set = true, using_any = true;
+        ImGuizmo::PopID();
+        ImVec2 at;
+        const float c[3] = {cx, d.level, cz};
+        if (project(v, c, at)) {
+            char label[48];
+            std::snprintf(label, sizeof label, "level %.0f", d.level);
+            dl->AddText(ImVec2(at.x + 12, at.y + 4), IM_COL32(150, 210, 255, 255), label);
+        }
+    }
+    d.dragging = using_any;
+    return true;
+}
+
 // ---------------------------------------------------------------- a game villager's quest talk
 // "Add a quest talk for this villager...": a new quest with the talk as its first step, a new step of a
 // quest, or a step's talk; one command (add_villager_talk), one undo step; then the quest editor opens at
@@ -982,6 +1158,9 @@ void world(float w, float h) {
     // the mod's room paths; the selected actor's path: its points and the selected point's handle
     bool path_handle_busy = false;
     if (paths_overlay(dl, v, snap.manifest, stage, path_handle_busy) && !point_handle) point_handle = true, point_handle_busy = point_handle_busy || path_handle_busy;
+    // the water tool's draft: its outline, band or edge, and its handles (before the actor's handle)
+    bool water_handle_busy = false;
+    if (!point_handle && water_overlay(dl, v, water_handle_busy)) point_handle = true, point_handle_busy = point_handle_busy || water_handle_busy;
     // the selected actor: its cylinder and handles
     float model[16] = {};
     bool gizmo = false;
@@ -1093,7 +1272,21 @@ void world(float w, float h) {
     const bool over_gizmo = (gizmo && (ImGuizmo::IsOver() || ImGuizmo::IsUsing())) || point_handle_busy;
     if (hovered && !over_gizmo && ImGui::IsMouseClicked(0)) {
         const ImVec2 m = io.MousePos;
-        if (!S.placing.empty()) {
+        if (editor_ui::water_draft().open && editor_ui::water_draft().drawing) {
+            // the water tool: a point on the ground there
+            float dir[3];
+            ray(v, m, dir);
+            Value prm, o, d;
+            o["x"] = v.eye[0], o["y"] = v.eye[1], o["z"] = v.eye[2];
+            d["x"] = dir[0], d["y"] = dir[1], d["z"] = dir[2];
+            prm["origin"] = o;
+            prm["direction"] = d;
+            editor_ui::command("pick", prm, [](const Value& r) {
+                if (!r.get("ok").boolean) return;
+                const Value& q = r.get("result").get("position");
+                editor_ui::water_add_point(num(q, "x"), num(q, "y"), num(q, "z"));
+            });
+        } else if (!S.placing.empty()) {
             float dir[3];
             ray(v, m, dir);
             Value prm, o, d;
@@ -1147,6 +1340,8 @@ void world(float w, float h) {
     if (!S.placing.empty()) {
         dl->AddText(ImVec2(io.MousePos.x + 14, io.MousePos.y + 10), IM_COL32(255, 230, 160, 255), ("place " + S.placing).c_str());
     }
+    if (editor_ui::water_draft().open && editor_ui::water_draft().drawing && hovered)
+        dl->AddText(ImVec2(io.MousePos.x + 14, io.MousePos.y + 10), IM_COL32(150, 210, 255, 255), ("add a point of the " + editor_ui::water_draft().kind).c_str());
     villager_popup(snap);
     ImGui::End();
 }
@@ -1219,6 +1414,11 @@ void add_menu() {
         }
         ImGui::EndMenu();
     }
+    // the water tool: drawn point by point in the picture (the Water window)
+    ImGui::SeparatorText("Water");
+    if (ImGui::MenuItem("Pond")) editor_ui::water_start("pond");
+    if (ImGui::MenuItem("River")) editor_ui::water_start("river");
+    if (ImGui::MenuItem("Waterfall")) editor_ui::water_start("waterfall");
     ImGui::Separator();
     ImGui::TextDisabled("then click into the picture (Shift: more than one)");
 }
@@ -1297,6 +1497,8 @@ void toolbar(float w) {
     ImGui::Checkbox("Flags", &S.flags);
     ImGui::SameLine();
     ImGui::Checkbox("Search", &S.search);
+    ImGui::SameLine();
+    ImGui::Checkbox("Water", &editor_ui::water_draft().open);
     ImGui::SameLine();
     if (ImGui::SmallButton("Reset layout")) S.reset_layout = true;
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("The panels back to their default places (docked at the edges)");
@@ -1439,6 +1641,14 @@ void panels(float w, float h) {
         S.quests_focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
         ImGui::End();
     }
+    // the water tool: a pond, river or waterfall being drawn or changed
+    editor_ui::water_test_tick();
+    if (editor_ui::water_draft().open) {
+        ImGui::SetNextWindowPos(ImVec2(w - 400, 110), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowBgAlpha(0.94f);
+        panel();
+        editor_ui::water_window(snap.manifest);
+    }
     // the scene editor: steps, timeline, inspector
     if (S.scenes) {
         ImGui::SetNextWindowPos(ImVec2(316, h * 0.45f), ImGuiCond_FirstUseEver);
@@ -1515,12 +1725,12 @@ void escape_frame() {
     switch (g_escape.requested()) {
     case editor_escape::Cancel::Drag: cancel_drag(); break;
     case editor_escape::Cancel::Connect: editor_ui::cancel_quest_connect(); break;
-    case editor_escape::Cancel::Placing: S.placing.clear(); break;
+    case editor_escape::Cancel::Placing: S.placing.clear(), editor_ui::water_draft().drawing = false; break;
     case editor_escape::Cancel::None: break;
     }
 }
 void publish_escape(bool view) {
-    g_escape.publish(view ? editor_escape::what(S.dragging, S.quests && editor_ui::quest_connecting(), !S.placing.empty()) : editor_escape::Cancel::None);
+    g_escape.publish(view ? editor_escape::what(S.dragging, S.quests && editor_ui::quest_connecting(), !S.placing.empty() || (editor_ui::water_draft().open && editor_ui::water_draft().drawing)) : editor_escape::Cancel::None);
 }
 
 bool wanted(std::string&) { return editor::editor_view() || editor::playing() || editor::previewing() || editor_mcp::prompt_waiting(); }

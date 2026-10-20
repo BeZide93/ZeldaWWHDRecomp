@@ -75,11 +75,14 @@ int main(int argc,char** argv){
     bool wrong_mode=false;try{prepare_coast("wrong_mode");}catch(const std::exception&){wrong_mode=true;}assert(wrong_mode&&!actor_model_cache::shoreline_for(first)&&actor_model_cache::archive_for(guest).empty());
     prepare("owner","ok");assert(!actor_model_cache::shoreline_for(first));
     // a water surface: the shoreline conversion with the still-water material; a converter that answers foam is refused
-    auto prepare_water=[&](const char* tool){return actor_model_cache::prepare("owner",model,(root/"package with spaces").string(),(root/"data").string(),command,tool,"game with spaces",false,true,true);};
+    auto prepare_water=[&](const char* tool){return actor_model_cache::prepare("owner",model,(root/"package with spaces").string(),(root/"data").string(),command,tool,"game with spaces",false,true,"water");};
     assert(prepare_water("ok")==first&&actor_model_cache::shoreline_for(first)&&actor_model_cache::water_for(first));
     bool wrong_material=false;try{prepare_water("wrong_material");}catch(const std::exception&){wrong_material=true;}assert(wrong_material&&!actor_model_cache::water_for(first));
-    assert(prepare_coast("ok")==first&&!actor_model_cache::water_for(first));
-    bool water_without_shoreline=false;try{actor_model_cache::prepare("owner",model,(root/"package with spaces").string(),(root/"data").string(),command,"ok","game with spaces",false,false,true);}catch(const std::exception&){water_without_shoreline=true;}assert(water_without_shoreline);
+    assert(prepare_coast("ok")==first&&!actor_model_cache::water_for(first)&&actor_model_cache::material_for(first).empty());
+    // a river and a waterfall surface (the editor's water tool): their own materials, said back by the converter
+    for(const char* flowing:{"river","waterfall"}){assert(actor_model_cache::prepare("owner",model,(root/"package with spaces").string(),(root/"data").string(),command,"ok","game with spaces",false,true,flowing)==first&&actor_model_cache::material_for(first)==flowing&&!actor_model_cache::water_for(first));}
+    bool unknown_material=false;try{actor_model_cache::prepare("owner",model,(root/"package with spaces").string(),(root/"data").string(),command,"ok","game with spaces",false,true,"lava");}catch(const std::exception&){unknown_material=true;}assert(unknown_material);
+    bool water_without_shoreline=false;try{actor_model_cache::prepare("owner",model,(root/"package with spaces").string(),(root/"data").string(),command,"ok","game with spaces",false,false,"water");}catch(const std::exception&){water_without_shoreline=true;}assert(water_without_shoreline);
     prepare("owner","ok");assert(!actor_model_cache::shoreline_for(first));
     fails("fail");
     assert(prepare(std::string(64,'a'),"ok").size()==31);

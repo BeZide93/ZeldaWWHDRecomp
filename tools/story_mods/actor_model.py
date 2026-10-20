@@ -517,7 +517,7 @@ def build(game, glb_path, identity, out, collision_out=None):
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--glb',required=True); parser.add_argument('--inspect',action='store_true'); parser.add_argument('--game'); parser.add_argument('--identity'); parser.add_argument('--out'); parser.add_argument('--collision-out'); parser.add_argument('--shoreline',action='store_true'); parser.add_argument('--shoreline-material',choices=('foam','water'),default='foam')
+    parser.add_argument('--glb',required=True); parser.add_argument('--inspect',action='store_true'); parser.add_argument('--game'); parser.add_argument('--identity'); parser.add_argument('--out'); parser.add_argument('--collision-out'); parser.add_argument('--shoreline',action='store_true'); parser.add_argument('--shoreline-material',choices=('foam','water','river','waterfall'),default='foam')
     args=parser.parse_args()
     try:
         if args.inspect: result=inspect(args.glb)

@@ -753,6 +753,17 @@ const story_actors::identity::Fingerprint& world_identity(uint32_t a,const Decl&
 }
 }
 void configure_world_objects(const std::string& directory,PlacementProvider provider){std::lock_guard guard(world_mutex);if(world_game_directory!=directory||provider||placement_provider){world_game_directory=directory;placement_indexes.clear();}placement_provider=std::move(provider);}
+bool room_height_range(const std::string&stage,int room,float&low,float&high,std::string&why){
+    std::lock_guard guard(world_mutex);using namespace story_world_placement;
+    if(stage.empty()||room<0||room>63)return why="no such room",false;
+    const auto key=std::make_pair(stage,room);
+    auto found=placement_indexes.find(key);if(found==placement_indexes.end())found=placement_indexes.emplace(key,placement_provider?placement_provider(stage,room):load_native_room(world_game_directory,stage,room)).first;
+    bool any=false;low=0;high=0;
+    for(const auto&v:found->second.bounds){if(v.kind!="collision"||v.stage!=stage||v.room!=room||!valid(v.bounds))continue;
+        if(!any)low=v.bounds.minimum.y,high=v.bounds.maximum.y,any=true;else low=std::min(low,v.bounds.minimum.y),high=std::max(high,v.bounds.maximum.y);}
+    if(!any)return why="the room's collision is not known (no game files, or the room has none)",false;
+    return true;
+}
 bool world_object_query(const std::string&mod,const story_notebook::ManifestActor&spec,bool wireframe,mods::json::Value& result,std::string&why){
     std::lock_guard guard(world_mutex);using namespace story_world_placement;using mods::json::Value;
     result=Value{};result["conflicts"].type=Value::Array;
@@ -768,12 +779,16 @@ bool world_object_query(const std::string&mod,const story_notebook::ManifestActo
     // way its original did, so the room's walls and ground don't count; everything else (the layout's
     // villagers, routes, doors, chests, cutscene areas and start points, the room's square, other world
     // objects) as for any world object.
-    if(spec.game_piece())conflicts.erase(std::remove_if(conflicts.begin(),conflicts.end(),[](const Conflict&x){return x.kind=="collision";}),conflicts.end());
+    // A body of water (the editor's water tool: a pond, a river, a waterfall) lies on the island's ground: its floor
+    // and banks meet the ground and the walls, so they don't count either; everything else does.
+    if(spec.game_piece()||spec.water_body())conflicts.erase(std::remove_if(conflicts.begin(),conflicts.end(),[](const Conflict&x){return x.kind=="collision";}),conflicts.end());
     const uint64_t own_allocation=story_world_collision::mesh::allocation_bytes(*geometry)+spec.grapple_points.size()*(story_world_grapple::kProxyBytes+64);
     uint64_t allocation=own_allocation;size_t grapple_count=spec.grapple_points.size();
     for(const auto&d:declarations){
         if(!d.collision||d.spec.stage!=spec.stage||d.spec.room!=spec.room||(d.mod==mod&&d.spec.id==spec.id))continue;
         allocation+=story_world_collision::mesh::allocation_bytes(*d.collision)+d.spec.grapple_points.size()*(story_world_grapple::kProxyBytes+64);grapple_count+=d.spec.grapple_points.size();
+        // bodies of water of one mod may meet (a waterfall at its river's step, a river running into a pond)
+        if(spec.water_body()&&d.spec.water_body()&&d.mod==mod)continue;
         Bounds other;
         if(!world_bounds(d,d.spec.position,other))return why="invalid existing object bounds",false;
         const std::string other_id=d.mod+":"+d.spec.id;const char* whose=d.mod==mod?"this mod's world object":"another mod's world object";

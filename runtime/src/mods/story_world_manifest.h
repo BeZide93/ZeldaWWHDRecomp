@@ -50,8 +50,10 @@ struct ManifestTalk {
     std::string quest,item,time,when_flag,when_not_flag,lines;unsigned quest_step=0;
     std::vector<QuestCondition> quests;std::vector<StoryAction> then;
 };
-// material (shoreline only): "foam" (the coast foam, the default) or "water" (a still-water surface: a pond, a pool)
+// material (shoreline only): "" (the coast foam, the default; "foam" in a manifest), "water" (a still-water surface: a
+// pond, a pool), "river" (flowing water, scrolling along the model's V) or "waterfall" (falling water, faster)
 struct ManifestVisualModel {std::string model,material;};
+inline bool water_surface_material(const std::string& m){return m=="water"||m=="river"||m=="waterfall";}
 struct ManifestChartMarker {bool enabled=false;std::string label,when_flag;};
 struct ManifestArrival {bool enabled=false;std::string name,flag;float radius=0;};
 struct ManifestGrapplePoint {std::string id;WorldPoint position;float yaw=0;};
@@ -67,6 +69,9 @@ struct ManifestActor {
     ManifestVisualModel distant,shoreline;ManifestChartMarker chart_marker;ManifestArrival arrival;
     bool world_object()const{return !behaviour.empty();}
     bool water_object()const{return behaviour=="floating"||behaviour=="drifting";}
+    // a body of water (the editor's water tool, docs/world-objects.md "Water"): a static object whose shoreline is a
+    // water, river or waterfall surface; it may reach into the island's ground and walls (its floor and banks meet them)
+    bool water_body()const{return behaviour=="static"&&water_surface_material(shoreline.material);}
     ManifestLookAt look_at;ManifestPath path;
     bool carry_enabled=false,carry_break_on_impact=false;
     bool combat_enabled=false,native_heart_drop=false;story_mod_combat::Config combat;
@@ -562,11 +567,11 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
             if(!v.object.contains(key))return true;const auto&value=v.get(key);
             const bool shore=std::string(key)=="shoreline";
             if(!(shore?keys(value,{"model","material"}):keys(value,{"model"}))||!id(value.get("model")))return false;
-            if(shore&&value.object.contains("material")){const auto&m=value.get("material");if(m.type!=Value::String||(m.text!="foam"&&m.text!="water"))return false;if(m.text=="water")out.material="water";}
+            if(shore&&value.object.contains("material")){const auto&m=value.get("material");if(m.type!=Value::String||(m.text!="foam"&&!water_surface_material(m.text)))return false;if(m.text!="foam")out.material=m.text;}
             out.model=value.get("model").text;
             return std::any_of(models.begin(),models.end(),[&](const auto&model){return model.id==out.model&&model.kind=="static";});
         };
-        if(!visual_model("distant",a.distant)||!visual_model("shoreline",a.shoreline))return why="distant and shoreline must name declared same-package rigid static models (a shoreline's material is foam or water)",false;
+        if(!visual_model("distant",a.distant)||!visual_model("shoreline",a.shoreline))return why="distant and shoreline must name declared same-package rigid static models (a shoreline's material is foam, water, river or waterfall)",false;
         auto island_text=[](const Value&value,std::string&out){std::u16string decoded;if(value.type!=Value::String||value.text.empty()||value.text.size()>96||!story_mail::append_utf16(value.text,false,decoded))return false;out=value.text;return true;};
         if(v.object.contains("arrival")){
             const auto&value=v.get("arrival");

@@ -164,6 +164,31 @@ const std::vector<CommandInfo> kCommands = {
      {{"id", "string", "placed world object", true}, {"position", "point", "a trial position (default: its own)"}, {"yaw", "number", "a trial turn in degrees"}, {"mod", "string", ""}}},
     {"prepare_collision", "Prepares a static model's collision for live world-object placement.",
      {{"model", "string", "declared static model id", true}, {"mod", "string", ""}}},
+    {"check_water", "What a pond, river or waterfall would be (the water tool), and every problem with it (errors and warnings), without changing anything: its place, triangles, memory, a river's steps and levels.",
+     {{"kind", "string", "pond, river or waterfall", true}, {"points", "array", "pond: the outline; river: the centre line, in the flow's order; waterfall: the top edge's 2 points (or \"river\" and \"step\"). Each {x, z} (or {x, y, z}) in world units"},
+      {"level", "number", "pond: the water's height (world); default: the lowest ground under the outline"}, {"depth", "number", "pond: floor below the level; river: water above the bed (20 to 480; default 200)"},
+      {"rim", "number", "pond: banks above the water (0 to 300; default 0)"}, {"foam", "boolean", "pond: a foam ring at the shore"}, {"floor", "string", "the floor's (river bed's, rock's) colour \"#rrggbb\""},
+      {"width", "number", "river: 100 to 2000 (default 400)"}, {"shallow", "any", "river: true / false per section (point i to i+1), or one for all: wading water"},
+      {"top", "number", "waterfall: the top edge's height (default: the ground there)"}, {"bottom", "number", "waterfall: the ground below (default: the ground in front of the edge)"},
+      {"side", "integer", "waterfall: 1 or -1, the side it falls to (default: the lower one)"}, {"river", "string", "waterfall: at this river's step (instead of points)"}, {"step", "integer", "waterfall: the river's step (1-based)"},
+      {"id", "string", "a body of water being changed: its own models and place don't count against it"}, {"mod", "string", ""}}},
+    {"add_pond", "Makes a pond (the water tool): its outline at the water's level, with a floor, banks and optional foam; the water surface and swimmable collision as two generated models; one undo step.",
+     {{"id", "string", "the new actor's id (default pond, pond-2...)"}, {"points", "array", "the outline: 3 to 48 world points {x, z}", true}, {"level", "number", "the water's height (default: the lowest ground under the outline)"},
+      {"depth", "number", "floor below the level (20 to 480, default 200)"}, {"rim", "number", "banks above the water (0 to 300)"}, {"foam", "boolean", "a foam ring at the shore"},
+      {"floor", "string", "the floor's colour \"#rrggbb\""}, {"mod", "string", ""}}, true},
+    {"add_river", "Makes a river (the water tool): a centre line (the flow goes from the first point to the last) with a width; it follows the ground and steps down where the ground drops; shallow sections are for wading; one undo step.",
+     {{"id", "string", "the new actor's id (default river...)"}, {"points", "array", "the centre line: 2 to 32 world points {x, z}", true}, {"width", "number", "100 to 2000 (default 400)"},
+      {"depth", "number", "water above the bed in deep sections (default 200)"}, {"shallow", "any", "true / false per section, or one for all"}, {"floor", "string", "the bed's colour \"#rrggbb\""}, {"mod", "string", ""}}, true},
+    {"add_waterfall", "Makes a waterfall (the water tool): a falling sheet from a top edge (two points, or a river's step) down to the ground, with its splash ground below; one undo step.",
+     {{"id", "string", "the new actor's id (default waterfall...)"}, {"points", "array", "the top edge: 2 world points {x, z}"}, {"river", "string", "at this river's step instead"},
+      {"step", "integer", "the river's step (1-based, default 1)"}, {"top", "number", "the top edge's height"}, {"bottom", "number", "the ground below"}, {"side", "integer", "1 or -1: the side it falls to"},
+      {"floor", "string", "the rock's colour \"#rrggbb\""}, {"mod", "string", ""}}, true},
+    {"edit_water", "Changes a pond, river or waterfall made with the water tool: give the parameters that change (as for add_pond, add_river, add_waterfall); it is built again where it stands; one undo step.",
+     {{"id", "string", "the body of water's actor", true}, {"points", "array", "the new outline, centre line or top edge"}, {"level", "number", "pond"}, {"depth", "number", ""}, {"rim", "number", "pond"},
+      {"foam", "boolean", "pond"}, {"floor", "string", "\"#rrggbb\""}, {"width", "number", "river"}, {"shallow", "any", "river"}, {"top", "number", "waterfall"}, {"bottom", "number", "waterfall"},
+      {"side", "integer", "waterfall"}, {"mod", "string", ""}}, true},
+    {"get_water", "A body of water's parameters as the water tool keeps them (world points, level, depth...), and a river's steps and levels.",
+     {{"id", "string", "the body of water's actor", true}, {"mod", "string", ""}}},
     {"pick", "The first ground a ray meets (the game's collision), for placing by clicking into the picture.",
      {{"origin", "point", "where the ray starts", true}, {"direction", "point", "its direction", true}, {"range", "number", "default 20000"}}},
     {"ground", "The ground height below a point (the game's collision).", {{"position", "point", "", true}}},
@@ -181,7 +206,9 @@ const std::vector<CommandInfo> kCommands = {
     {"check_package", "Every problem of the open mod's package, each with the actor, model, scene or quest it is about.", {{"mod", "string", ""}}},
     {"export_package", "Checks the open mod and writes its package (manifest and its own files) into a new or empty folder.",
      {{"path", "string", "the folder", true}, {"confirm", "boolean", "must be true", true}, {"mod", "string", ""}}, false, true},
-    {"focus", "Points the fly camera at a placed actor.", {{"id", "string", "", true}, {"mod", "string", ""}}},
+    {"focus", "Points the fly camera at a placed actor (a world object: its whole extent).",
+     {{"id", "string", "", true}, {"distance", "number", "how far back the camera goes (default: the object's size, at least 700)"},
+      {"yaw", "number", "the direction it looks, degrees (0: towards +z; default: its own)"}, {"mod", "string", ""}}},
     {"play", "Play: the editor hides and Link plays (test mode on: saves go to the test save) from the camera's place or his own.",
      {{"from", "string", "camera (default) or link"}, {"restore", "boolean", "Stop returns to the world as it was before Play (default true)"}}},
     {"stop", "Stop: back to the editor's camera view (restoring the world from before Play when asked).", {}},
@@ -551,6 +578,12 @@ bool world_placements(Host* host, const std::string& mod, const Value& before, c
         if (actor.game_piece() && host->piece_state(mod, actor.piece) != "ready") continue;
         Value query;
         if (!host->world_object_query(mod, actor, false, query, why)) {
+            // a body of water from the water tool whose models are still being prepared: check_water cleared its
+            // place already, and the game checks it again when they are ready (mod_actor::declare)
+            if (actor.water_body()) {
+                why.clear();
+                continue;
+            }
             why = "world object " + actor.id + ": " + (why.empty() ? "placement coverage or collision is unavailable" : why);
             return false;
         }
@@ -1622,6 +1655,8 @@ Value Session::dispatch(const std::string& command, const Value& p, std::string&
     r = dispatch_route(command, p, why, ok, handled);
     if (handled) return r;
     r = dispatch_paths(command, p, why, ok, handled);
+    if (handled) return r;
+    r = dispatch_water(command, p, why, ok, handled);
     if (handled) return r;
     why = "command \"" + command + "\" is not implemented";
     return r;
