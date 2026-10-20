@@ -20,6 +20,10 @@ what is on `devel` and not released yet (also in the
 - **Automatic picture-in-picture shows the Wind Waker's song list** (#256). With the GamePad screen set to Automatic
   picture-in-picture, the GamePad picture now also appears while Link conducts with the Wind Waker, with the song list
   and the conducting guide, and goes away again when he stops.
+- **Fixed: Link's fist no longer flies in from elsewhere with frame interpolation** (#255). When Link's hand pose
+  changed (for example from standing to running, or after targeting), a hand pose could appear for one in-between
+  frame at the spot where it was last used and fly to his hand, most visibly at 120 fps and above. A part of a model
+  that comes back after being hidden is now drawn where it is, without blending; everything else blends as before.
 
 - **Mod SDK v3 and the editor: Kargarocs with riders and Wizzrobe summoners** (for mod makers). A Kargaroc can carry a
   Moblin or Bokoblin along a mod path and drop it at the path's release point. A Wizzrobe summoner teleports between the
