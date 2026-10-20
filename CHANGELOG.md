@@ -7,6 +7,13 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Mod dungeons: sky islands and boss rooms** (for mod makers). A stage can borrow the sky of a game stage (day
+  sky, stars or dusk) over your own models; `list_stage_templates` in the editor and MCP lists which stages have a
+  sky, a boss door and music to borrow, and the Stages tab can filter for skies. New entry style: an updraft that
+  lifts Link into the stage. A big chest can hold a heart container, and a warp can wait until a chest is opened.
+  Talks and scene ends can take Link into a stage. A stage can bring its own shader template so it doesn't stutter
+  on the first visit (installed after setup: run setup's Repair). Game Over in a mod stage restarts at the stage's
+  start. New example: `examples/guest-mods/sky-island`.
 - **World editor: scenes play right away, and easier demo steps** (for mod makers). A new scene can be played with
   Play scene or Play step without saving and restarting first. In the Scenes window the step row no longer hides its
   buttons on narrow panels; the buttons say "Duplicate scene" / "Remove scene…" and "Duplicate step" / "Remove step",
