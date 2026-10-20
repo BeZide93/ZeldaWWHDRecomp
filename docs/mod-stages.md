@@ -270,7 +270,9 @@ The editor's **Stages** tab (in the Outliner and under **Settings → Editor**) 
 - **Where Link stands**: inside the stage, a spawn, a return warp, an exit (to the sea outside the lava cave
   or to a spawn of the stage), a door to another room with its lock, a chest with its item, an enemy or a
   pot. In a room of the game, the stage's entry.
-- In the editor view, the stage's spawns, exits, doors, chests and warps show as boxes with their names.
+- In the editor view, the stage's spawns, exits, doors, chests and warps show as boxes with their names. A
+  click on an item's round mark shows its move handle; letting go of the handle moves it (one undo step).
+  **Rebuild** shows the change in the game.
 
 The same steps are commands, for scripts and MCP clients: `list_stages`, `import_ground`, `add_stage`,
 `add_room`, `set_stage_field`, `place_in_stage`, `remove_stage`, `check_stage`, `rebuild_stage` and

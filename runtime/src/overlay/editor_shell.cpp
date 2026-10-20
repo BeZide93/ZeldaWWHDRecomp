@@ -59,6 +59,9 @@ struct ShellState {
     float path_drag[16] = {};
     bool water_point_drag = false;  // a water draft's point handle (water_overlay)
     float water_drag[16] = {};
+    std::string stage_item_stage, stage_item_field;  // the stage item whose move handle shows (stages_overlay)
+    bool stage_dragging = false;
+    float stage_drag[16] = {};
     int gizmo = 0;           // 0 move, 1 turn
     int grid = 0, angle = 1;  // snapping: indexes into kGrid / kAngle
     std::string placing;      // a type from list_actor_types while placing by click
@@ -757,7 +760,9 @@ bool route_overlay(ImDrawList* dl, const View& v, const Value* sel, bool& handle
 // In a room of one of the mod's stages: its spawns (green posts), exit boxes (blue), return warps (purple),
 // doors (orange frames) and actors (chests yellow, the rest white marks), each labelled. In a room of the
 // game: the stages' entries there (white boxes). The game name of each stage comes from list_stages (the
-// snapshot's, once a second).
+// snapshot's, once a second). Each item has a round mark at its foot: a click selects it and shows its move
+// handle (a click on the mark again lets go); letting go of the handle is one command (set_stage_field) and one
+// undo step. True while a handle shows.
 void box3(ImDrawList* dl, const View& v, const float lo[3], const float hi[3], ImU32 c, float t) {
     ImVec2 q[8];
     bool ok = true;
@@ -773,8 +778,18 @@ void label3(ImDrawList* dl, const View& v, const float p[3], ImU32 c, const std:
     ImVec2 at;
     if (project(v, p, at)) dl->AddText(ImVec2(at.x + 6, at.y - 14), c, text.c_str());
 }
-void stages_overlay(ImDrawList* dl, const View& v, const Value& m, const std::string& stage, int room) {
-    if (m.get("stages").type != Value::Array) return;
+bool stages_overlay(ImDrawList* dl, const View& v, const Value& m, const std::string& stage, int room, bool& handle_busy) {
+    handle_busy = false;
+    if (m.get("stages").type != Value::Array) return false;
+    struct Handle {
+        std::string stage, field;  // set_stage_field's
+        float p[3];
+        Value box;  // an exit's: its box, moved with it
+    };
+    std::vector<Handle> handles;
+    auto handle = [&](const std::string& st, const std::string& field, const float p[3], const Value& box = Value()) {
+        handles.push_back({st, field, {p[0], p[1], p[2]}, box});
+    };
     std::map<std::string, std::string> id_of;  // game name -> stage id
     for (const auto& s : editor_ui::snapshot().stages.get("stages").array)
         if (s.get("game_name").type == Value::String) id_of[s.get("game_name").text] = s.get("id").string();
@@ -789,23 +804,29 @@ void stages_overlay(ImDrawList* dl, const View& v, const Value& m, const std::st
                 const float lo[3] = {p[0] - hx, p[1], p[2] - hz}, hi[3] = {p[0] + hx, p[1] + h, p[2] + hz};
                 box3(dl, v, lo, hi, IM_COL32(240, 240, 240, 220), 2);
                 label3(dl, v, hi, IM_COL32(240, 240, 240, 230), "entry " + e.get("id").string() + " -> " + s.get("id").string());
+                handle(s.get("id").string(), "entries/" + std::to_string(&e - s.get("entries").array.data()) + "/position", p);
             }
             continue;
         }
         if (s.get("id").string() != it->second) continue;
+        const std::string sid = s.get("id").string();
         for (const auto& r : s.get("rooms").array) {
             if (int(num(r, "room")) != room) continue;
+            const std::string rf = "rooms/" + std::to_string(&r - s.get("rooms").array.data()) + "/";
             for (const auto& sp : r.get("spawns").array) {
                 float p[3];
                 if (!point3(sp.get("position"), p)) continue;
                 draw_cylinder(dl, v, p, 30, 120, IM_COL32(120, 230, 120, 220));
                 const float top[3] = {p[0], p[1] + 120, p[2]};
                 label3(dl, v, top, IM_COL32(150, 240, 150, 230), "spawn " + std::to_string(int(num(sp, "point"))));
+                handle(sid, rf + "spawns/" + std::to_string(&sp - r.get("spawns").array.data()) + "/position", p);
             }
             for (const auto& e : r.get("exits").array) {
                 float lo[3], hi[3];
                 if (!point3(e.get("box").get("min"), lo) || !point3(e.get("box").get("max"), hi)) continue;
                 box3(dl, v, lo, hi, IM_COL32(90, 170, 255, 230), 2);
+                const float foot[3] = {(lo[0] + hi[0]) / 2, lo[1], (lo[2] + hi[2]) / 2};
+                handle(sid, rf + "exits/" + std::to_string(&e - r.get("exits").array.data()) + "/box", foot, e.get("box"));
                 const auto& to = e.get("to");
                 label3(dl, v, hi, IM_COL32(150, 200, 255, 230),
                        "exit " + e.get("id").string() + " -> " + (to.get("stage").type == Value::String ? to.get("stage").text + " " : std::string()) + "room " +
@@ -818,6 +839,7 @@ void stages_overlay(ImDrawList* dl, const View& v, const Value& m, const std::st
                 const float lo[3] = {p[0] - 50, p[1], p[2] - 40}, hi[3] = {p[0] + 50, p[1] + 70, p[2] + 40};
                 box3(dl, v, lo, hi, chest ? IM_COL32(255, 210, 80, 230) : IM_COL32(230, 230, 230, 200), 1.5f);
                 label3(dl, v, hi, IM_COL32(240, 220, 150, 230), a.get("id").string() + " (" + a.get("actor").string() + (chest ? " " + a.get("item").string() : std::string()) + ")");
+                handle(sid, rf + "actors/" + std::to_string(&a - r.get("actors").array.data()) + "/position", p);
             }
         }
         for (const auto& d : s.get("doors").array) {
@@ -833,6 +855,7 @@ void stages_overlay(ImDrawList* dl, const View& v, const Value& m, const std::st
             line3(dl, v, l0, l1, c, 2.5f), line3(dl, v, u0, u1, c, 2.5f), line3(dl, v, l0, u0, c, 2.5f), line3(dl, v, l1, u1, c, 2.5f);
             label3(dl, v, u1, IM_COL32(255, 190, 120, 230),
                    "door " + std::to_string(int(rr[0].number)) + "-" + std::to_string(int(rr[1].number)) + (d.get("lock").type == Value::String ? " " + d.get("lock").text : std::string()));
+            handle(sid, "doors/" + std::to_string(&d - s.get("doors").array.data()) + "/position", p);
         }
         for (const auto& w : s.get("warps").array) {
             if (int(num(w, "room")) != room) continue;
@@ -842,8 +865,63 @@ void stages_overlay(ImDrawList* dl, const View& v, const Value& m, const std::st
             const float lo[3] = {p[0] - hx, p[1], p[2] - hz}, hi[3] = {p[0] + hx, p[1] + h, p[2] + hz};
             box3(dl, v, lo, hi, IM_COL32(200, 120, 255, 230), 2);
             label3(dl, v, hi, IM_COL32(220, 170, 255, 230), "warp " + w.get("id").string());
+            handle(sid, "warps/" + std::to_string(&w - s.get("warps").array.data()) + "/position", p);
         }
     }
+    // the marks; a click selects (or lets go of) an item
+    const ImVec2 mouse = ImGui::GetIO().MousePos;
+    const Handle* chosen = nullptr;
+    for (const auto& h : handles) {
+        ImVec2 at;
+        if (!project(v, h.p, at)) continue;
+        const bool me = h.stage == S.stage_item_stage && h.field == S.stage_item_field;
+        if (me) chosen = &h;
+        dl->AddCircleFilled(at, me ? 7.0f : 5.0f, me ? IM_COL32(255, 230, 120, 255) : IM_COL32(230, 230, 230, 200));
+        if (ImGui::IsMouseClicked(0) && ImGui::IsWindowHovered() && !ImGuizmo::IsOver() && std::hypot(mouse.x - at.x, mouse.y - at.y) < 9) {
+            if (me) S.stage_item_stage.clear(), S.stage_item_field.clear(), chosen = nullptr;
+            else S.stage_item_stage = h.stage, S.stage_item_field = h.field, chosen = &h;
+            break;
+        }
+    }
+    if (!chosen) {
+        S.stage_dragging = false;
+        return false;
+    }
+    float model[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, chosen->p[0], chosen->p[1], chosen->p[2], 1};
+    if (S.stage_dragging) std::memcpy(model, S.stage_drag, sizeof model);
+    float view[16], proj[16];
+    gl_view(v, view);
+    gl_projection(v, proj);
+    ImGuizmo::SetDrawlist(dl);
+    ImGuizmo::SetOrthographic(false);
+    ImGuizmo::SetRect(v.pos.x, v.pos.y, v.size.x, v.size.y);
+    float snap_values[3] = {kGrid[S.grid], kGrid[S.grid], kGrid[S.grid]};
+    ImGuizmo::PushID(0x53544147);  // its own handle, apart from the actor's
+    ImGuizmo::Manipulate(view, proj, ImGuizmo::TRANSLATE, ImGuizmo::WORLD, model, nullptr, S.grid > 0 ? snap_values : nullptr);
+    handle_busy = ImGuizmo::IsOver() || ImGuizmo::IsUsing();
+    if (ImGuizmo::IsUsing()) {
+        S.stage_dragging = true;
+        std::memcpy(S.stage_drag, model, sizeof model);
+    } else if (S.stage_dragging) {
+        S.stage_dragging = false;
+        Value prm;
+        prm["stage"] = chosen->stage;
+        prm["field"] = chosen->field;
+        if (chosen->box.type == Value::Object) {  // an exit: its box moves by the handle's way
+            const float d[3] = {S.stage_drag[12] - chosen->p[0], S.stage_drag[13] - chosen->p[1], S.stage_drag[14] - chosen->p[2]};
+            float lo[3], hi[3];
+            if (point3(chosen->box.get("min"), lo) && point3(chosen->box.get("max"), hi)) {
+                prm["value"]["min"] = point_of(lo[0] + d[0], lo[1] + d[1], lo[2] + d[2]);
+                prm["value"]["max"] = point_of(hi[0] + d[0], hi[1] + d[1], hi[2] + d[2]);
+                editor_ui::command("set_stage_field", prm);
+            }
+        } else {
+            prm["value"] = point_of(S.stage_drag[12], S.stage_drag[13], S.stage_drag[14]);
+            editor_ui::command("set_stage_field", prm);
+        }
+    }
+    ImGuizmo::PopID();
+    return true;
 }
 
 // ---------------------------------------------------------------- the mod's room paths in the picture
@@ -1257,7 +1335,10 @@ void world(float w, float h) {
     // the water tool's draft: its outline, band or edge, and its handles (before the actor's handle)
     bool water_handle_busy = false;
     if (!point_handle && water_overlay(dl, v, water_handle_busy)) point_handle = true, point_handle_busy = point_handle_busy || water_handle_busy;
-    stages_overlay(dl, v, snap.manifest, stage, int(num(snap.state.get("link"), "room", -1)));
+    // the open mod's stages: their spawns, exits, doors, actors and warps (or entries); the selected one's handle
+    bool stage_handle_busy = false;
+    if (stages_overlay(dl, v, snap.manifest, stage, int(num(snap.state.get("link"), "room", -1)), stage_handle_busy) && !point_handle)
+        point_handle = true, point_handle_busy = point_handle_busy || stage_handle_busy;
     // the selected actor: its cylinder and handles
     float model[16] = {};
     bool gizmo = false;
@@ -1997,6 +2078,11 @@ void register_layers() {
     }
     if (const char* e = std::getenv("WWHD_TEST_EDITOR_PLACING")) S.placing = e;
     if (const char* e = std::getenv("WWHD_TEST_EDITOR_ACTOR")) editor_ui::selected() = e;
+    if (const char* e = std::getenv("WWHD_TEST_EDITOR_STAGE_ITEM")) {  // stage:field, a stage item's move handle
+        const std::string item = e;
+        S.stage_item_stage = item.substr(0, item.find(':'));
+        S.stage_item_field = item.find(':') == std::string::npos ? std::string() : item.substr(item.find(':') + 1);
+    }
     if (const char* e = std::getenv("WWHD_TEST_EDITOR_FIELD")) editor_ui::focus_field() = e;
     if (const char* e = std::getenv("WWHD_TEST_EDITOR_STORY")) {  // kind:id, the Story tab with that entry
         const std::string story = e;
