@@ -32,8 +32,11 @@ struct Path {
     unsigned room = 0;
     std::vector<Point> points;
     bool closed = false;  // an area (the last point joins the first) rather than a line
+    std::vector<bool> release;  // per point (empty: none): a Kargaroc lets its rider go there (point argument 3 = 5)
     bool operator==(const Path&) const = default;
+    bool releases(size_t i) const { return i < release.size() && release[i]; }
 };
+inline constexpr uint8_t kReleaseRider = 5;  // d_a_bb: a point whose argument 3 is 5 releases the rider (6 would delete it: never written)
 
 inline constexpr unsigned kMinPoints = 2, kMinAreaPoints = 3, kMaxPoints = 32;
 inline constexpr unsigned kMaxPerMod = 16;    // paths one mod declares
@@ -64,9 +67,15 @@ inline double winding(const std::vector<Point>& p) {
 }
 // The points as the record holds them. The game's area test (inside() below) takes an area's inside
 // to lie on one side of its points' order; an area is written in that order whichever way it was drawn.
+inline std::vector<size_t> game_indices(const Path& p) {
+    std::vector<size_t> out(p.points.size());
+    for (size_t i = 0; i < out.size(); i++) out[i] = i;
+    if (p.closed && out.size() >= 3 && winding(p.points) > 0) std::reverse(out.begin() + 1, out.end());
+    return out;
+}
 inline std::vector<Point> game_order(const Path& p) {
-    std::vector<Point> out = p.points;
-    if (p.closed && out.size() >= 3 && winding(out) > 0) std::reverse(out.begin() + 1, out.end());
+    std::vector<Point> out;
+    for (size_t i : game_indices(p)) out.push_back(p.points[i]);
     return out;
 }
 
@@ -74,7 +83,7 @@ inline uint32_t hash(const Path& p, uint8_t number) {
     uint32_t h = 2166136261u;
     auto mix = [&](uint32_t v) { for (int i = 0; i < 4; i++) { h ^= (v >> (8 * i)) & 0xFF; h *= 16777619u; } };
     auto f = [&](float v) { uint32_t u; std::memcpy(&u, &v, 4); mix(u); };
-    for (const auto& q : p.points) { f(q.x); f(q.y); f(q.z); }
+    for (size_t i = 0; i < p.points.size(); i++) { const auto& q = p.points[i]; f(q.x); f(q.y); f(q.z); mix(p.releases(i)); }
     mix(uint32_t(p.points.size())); mix(p.closed); mix(number); mix(p.room);
     for (char c : p.stage) mix(uint8_t(c));
     return h;
@@ -83,8 +92,8 @@ inline uint32_t hash(const Path& p, uint8_t number) {
 // The record of `p` with `number`, at guest address `slot`.
 inline std::array<uint8_t, kSlotBytes> encode(const Path& p, uint8_t number, uint32_t slot) {
     std::array<uint8_t, kSlotBytes> b{};
-    const auto pts = game_order(p);
-    const unsigned count = unsigned(std::min<size_t>(pts.size(), kMaxPoints));
+    const auto order = game_indices(p);
+    const unsigned count = unsigned(std::min<size_t>(order.size(), kMaxPoints));
     put16(b.data(), kHeader + 0, uint16_t(count));
     put16(b.data(), kHeader + 2, 0xFFFF);
     b[kHeader + 4] = 0xFF;
@@ -98,8 +107,9 @@ inline std::array<uint8_t, kSlotBytes> encode(const Path& p, uint8_t number, uin
     std::memcpy(b.data() + kStage, p.stage.c_str(), std::min<size_t>(p.stage.size(), 8));
     for (unsigned i = 0; i < count; i++) {
         const uint32_t at = kPoints + i * 16;
-        put32(b.data(), at, 0xFFFFFFFFu);
-        putf(b.data(), at + 4, pts[i].x); putf(b.data(), at + 8, pts[i].y); putf(b.data(), at + 12, pts[i].z);
+        const auto& q = p.points[order[i]];
+        put32(b.data(), at, p.releases(order[i]) ? 0xFFFFFF00u | kReleaseRider : 0xFFFFFFFFu);
+        putf(b.data(), at + 4, q.x); putf(b.data(), at + 8, q.y); putf(b.data(), at + 12, q.z);
     }
     return b;
 }

@@ -696,7 +696,7 @@ Value Session::dispatch_build(const std::string& command, const Value& p, std::s
                 for (int n = 2; [&] { for (const auto& v : m.get("paths").array) if (v.get("id").string() == pid) return true; return false; }(); n++) pid = base + "-" + std::to_string(n);
                 // a cannon's firing area in front of it; a route around the place (a warship's wider)
                 const bool cannon = type == "wall_cannon";
-                const double yaw = place.angle * 3.14159265358979323846 / 32768.0, ahead = cannon ? 1200 : 0, half = cannon ? 800 : type == "warship" ? 1500 : 400;
+                const double yaw = place.angle * 3.14159265358979323846 / 32768.0, ahead = cannon ? 1200 : 0, half = cannon ? 800 : type == "warship" ? 1500 : type == "kargaroc" ? 1000 : 400;
                 const double cx = place.position.x + std::sin(yaw) * ahead, cz = place.position.z + std::cos(yaw) * ahead;
                 Value path;
                 path["id"] = pid;
@@ -705,6 +705,8 @@ Value Session::dispatch_build(const std::string& command, const Value& p, std::s
                 path["closed"] = true;
                 path["points"] = array();
                 for (const auto& c : {std::pair{-1, -1}, {1, -1}, {1, 1}, {-1, 1}}) path["points"].array.push_back(rounded({float(cx + c.first * half), place.position.y, float(cz + c.second * half)}));
+                // a Kargaroc with a rider lets it go at the third point
+                if (!story_enemy_variants::rider_kind(type, a.get("parameters").get("variant").string()).empty()) path["points"].array[2]["release"] = true;
                 if (m.get("paths").type != Value::Array) m["paths"] = array();
                 m["paths"].array.push_back(path);
                 a["path"] = pid;

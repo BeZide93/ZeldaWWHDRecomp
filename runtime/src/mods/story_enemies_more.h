@@ -247,11 +247,20 @@ inline uint32_t armos_knight_held_bomb(uint32_t a) {
 // (cylinder 0xE60 on 0xE24), enemyfire 0x11AC (sphere 0x1288 on 0x124C).
 inline constexpr Collider kKargarocColliders[] = {
     {0x730, 0x6F4, 0}, {0x85C, 0x6F4, 0}, {0x988, 0x6F4, 0}, {0xAB4, 0x6F4, 0}, {0xE60, 0xE24, 0xDF4}, {0x1288, 0x124C, 0x11AC}};
+// A rider Kargaroc (behaviour 5 a Moblin, 6 a Bokoblin; story_enemy_variants): its mod path's number in
+// byte 2 and its path (ppd 0x4D4) set; its rider state 0x455 (unk_2DF: 1 requested, 2 waiting, 3 carrying,
+// 0 none or let go), the rider at 0x458, released when 0x456 (unk_2E0) is set at a release point.
+inline constexpr uint32_t kKargarocState = 0x453, kKargarocCarry = 0x455, kKargarocLetGo = 0x456, kKargarocRider = 0x458;
 inline bool kargaroc_verify(uint32_t a, uint32_t p) {
-    const unsigned behaviour = p & 0xFF;
+    const unsigned behaviour = p & 0xFF, path = (p >> 16) & 0xFF;
+    if (behaviour == 5 || behaviour == 6)
+        return ld8(a + 0x44E) == behaviour && ld8(a + 0x44F) == ((p >> 8) & 0xFF) && ld8(a + 0x450) == path && path != 0xFF && ld32(a + 0x4D4) != 0 &&
+               ld8(a + 0x451) == 0xFF && ld8(a + 0x452) == 0 && ld8(a + kKargarocCarry) <= 3;
     return (behaviour == 0 || behaviour == 4) && ld8(a + 0x44E) == behaviour && ld8(a + 0x44F) == ((p >> 8) & 0xFF) &&
-           ld8(a + 0x450) == 0xFF && ld8(a + 0x451) == 0xFF && ld8(a + 0x452) == 0 && ld8(a + 0x455) == 0;
+           ld8(a + 0x450) == 0xFF && ld8(a + 0x451) == 0xFF && ld8(a + 0x452) == 0 && ld8(a + kKargarocCarry) == 0;
 }
+inline bool kargaroc_carries(uint32_t a) { return ld8(a + kKargarocCarry) == 3 && ld8(a + kKargarocLetGo) == 0 && ld32(a + kKargarocRider) != 0; }
+inline constexpr uint32_t kSceneRequest = CANONICAL_CODE_ID(0x025E14A8).value();  // fpcSCtRq_Request
 inline bool kargaroc_terminal(uint32_t a) { return ld8(a + 0xDF2) != 0; }
 
 // ---------------------------------------------------------------- Wizzrobe (d_a_wz)
@@ -488,7 +497,7 @@ inline constexpr Native kNatives[] = {
     {Kind::Kargaroc, "kargaroc", {kKargarocProfile, 0xB5, 0x13D8, kKargarocColliders, std::size(kKargarocColliders)},
      CANONICAL_CODE_ID(0x02061DEC).value(), CANONICAL_CODE_ID(0x0205EA58).value(), CANONICAL_CODE_ID(0x0205E420).value(),
      CANONICAL_CODE_ID(0x02061964).value(), [] { return GD(0x10007C8C); }, 0xFFFFFF00u, 0, 0xDF4, {0x11AC, 0}, true,
-     kargaroc_verify, kargaroc_terminal, nullptr, 0x465, false},
+     kargaroc_verify, kargaroc_terminal, nullptr, 0x465, false, 0, 16},
     {Kind::Wizzrobe, "wizzrobe", {kWizzrobeProfile, 0xD0, 0x10B0, kWizzrobeColliders, std::size(kWizzrobeColliders)},
      CANONICAL_CODE_ID(0x024E6BEC).value(), CANONICAL_CODE_ID(0x024E398C).value(), CANONICAL_CODE_ID(0x024E2468).value(),
      CANONICAL_CODE_ID(0x024E61E0).value(), [] { return GD(0x10042D90); }, 0xFFFFFF00u, 0, 0xA40, {0xDF8, 0}, true,

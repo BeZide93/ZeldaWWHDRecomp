@@ -72,6 +72,7 @@ std::string room_path_use(const Value& actor) {
     if (!story_enemy_variants::room_path_rule(type, variant)) return {};
     if (type == "wall_cannon") return "Its firing area: it turns to Link and fires only while he (and where it aims) is inside this area, by the game's own test.";
     if (type == "warship") return "Its route: it sails the path round and round at the sea's height (a line too: from the last point back to the first), slowing to fire at Link.";
+    if (type == "kargaroc") return "Its flight: it flies the path (round if it is an area, else there and back) carrying its rider, and lets the rider go at a point marked \"release\".";
     if (type == "floormaster") return "Its route: its hole glides along the path round and round and rises when Link comes near. Keep the points on the floor.";
     return "The path it uses.";
 }
@@ -156,6 +157,7 @@ Value Session::dispatch_paths(const std::string& command, const Value& p, std::s
                     WorldPoint w2;
                     if (!point_of(q, w2)) return w = "\"points\" are {x, y, z}", false;
                     v["points"].array.push_back(rounded_point(w2));
+                    if (q.get("release").type == Value::Bool && q.get("release").boolean) v["points"].array.back()["release"] = true;
                 }
             } else {
                 // a square around the place (an area), or a line ahead along the heading
@@ -204,7 +206,9 @@ Value Session::dispatch_paths(const std::string& command, const Value& p, std::s
         path_edit("Move a point of path " + text(p, "id"), [&](Value&, Value& path, std::string& w) {
             size_t i = 0;
             if (!index_of(path, "point", i, w)) return false;
+            const Value keep = path["points"].array[i].get("release");
             path["points"].array[i] = rounded_point(pos);
+            if (keep.type == Value::Bool && keep.boolean) path["points"].array[i]["release"] = true;  // a rider's release point stays one
             return true;
         });
         return r;
@@ -217,6 +221,19 @@ Value Session::dispatch_paths(const std::string& command, const Value& p, std::s
             const size_t least = path.get("closed").boolean ? story_room_path::kMinAreaPoints : story_room_path::kMinPoints;
             if (pts.size() <= least) return w = std::string(path.get("closed").boolean ? "an area keeps at least 3 points" : "a path keeps at least 2 points") + " (remove the path instead)", false;
             pts.erase(pts.begin() + std::ptrdiff_t(i));
+            return true;
+        });
+        return r;
+    }
+    if (command == "set_path_point") {
+        // a point's marks: "release" (a Kargaroc lets its rider go there)
+        path_edit("Change a point of path " + text(p, "id"), [&](Value&, Value& path, std::string& w) {
+            size_t i = 0;
+            if (!index_of(path, "point", i, w)) return false;
+            if (p.get("release").type != Value::Bool) return w = "\"release\" is true or false", false;
+            Value& pt = path["points"].array[i];
+            if (p.get("release").boolean) pt["release"] = true;
+            else pt.object.erase("release");
             return true;
         });
         return r;

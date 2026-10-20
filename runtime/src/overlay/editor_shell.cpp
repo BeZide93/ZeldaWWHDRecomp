@@ -783,7 +783,7 @@ bool paths_overlay(ImDrawList* dl, const View& v, const Value& m, const std::str
         const int n = int(i + 1);
         dl->AddCircleFilled(at, n == point ? 8.0f : 6.0f, n == point ? IM_COL32(255, 230, 120, 255) : thick);
         char label[24];
-        std::snprintf(label, sizeof label, "%d", n);
+        std::snprintf(label, sizeof label, list[i].get("release").boolean ? "%d release" : "%d", n);  // a Kargaroc lets its rider go there
         dl->AddText(ImVec2(at.x + 9, at.y - 9), IM_COL32(240, 240, 240, 230), label);
         if (ImGui::IsMouseClicked(0) && ImGui::IsWindowHovered() && std::hypot(mouse.x - at.x, mouse.y - at.y) < 10) clicked = n;
     }

@@ -681,6 +681,7 @@ separated by `;`, or `@file` with one such line per row. Results go to the log.
 | `add_path_point` | `id`, `at`?, `position`?, `stage`?, `room`?, `after`?, `snap`?, `mod`? | add a point to a path (after point `after`; 0: first; default: at the end) |
 | `move_path_point` | `id`, `point`, `position` or `at`, `snap`?, `mod`? | move one point (numbered from 1) |
 | `remove_path_point` | `id`, `point`, `mod`? | take one point out (an area keeps 3, a line 2) |
+| `set_path_point` | `id`, `point`, `release`, `mod`? | mark a point: `release` (a Kargaroc lets its rider go there) |
 | `set_path` | `id`, `closed`?, `new_id`?, `mod`? | an area or a line; a new id (the actors that use it follow) |
 | `remove_path` | `id`, `mod`? | remove a path; refused while an actor uses it |
 | `check_path` | `id`, `for`? (`warship`, `floormaster`), `mod`? | a warning check of a route: a warship's segments over land, a Floormaster's off the floor (never a refusal) |

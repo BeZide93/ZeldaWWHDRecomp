@@ -97,7 +97,7 @@ uint32_t enemy_params(story_enemies::Kind kind,const ManifestActor& a);
 // an enemy on one of the mod's room paths: that path's number in its path byte (0xFF while the path has none)
 uint32_t enemy_params(story_enemies::Kind kind,const ManifestActor& a,const std::string& mod){uint32_t p=enemy_params(kind,a);const int shift=story_enemies::room_path_shift(kind);
  if(shift>=0&&!a.room_path.empty()){const uint8_t n=story_room_paths::number(mod,a.room_path);p=(p&~(0xFFu<<shift))|(uint32_t(n?n:0xFF)<<shift);}return p;}
-uint32_t enemy_params(story_enemies::Kind kind,const ManifestActor& a){if(kind==story_enemies::Kind::Rat)return story_enemies::parameters(kind)|(a.rat_bomb?0x100u:0u);const uint32_t p=story_enemies::parameters(kind,a.variant);return patrols(a)&&p?(a.actor=="moblin"?story_enemy_variants::moblin_patrol(p):story_enemy_variants::bokoblin_patrol(p)):p;}
+uint32_t enemy_params(story_enemies::Kind kind,const ManifestActor& a){if(!a.rider_of.empty())return story_enemy_variants::kRiderParams;if(kind==story_enemies::Kind::Rat)return story_enemies::parameters(kind)|(a.rat_bomb?0x100u:0u);const uint32_t p=story_enemies::parameters(kind,a.variant);return patrols(a)&&p?(a.actor=="moblin"?story_enemy_variants::moblin_patrol(p):story_enemy_variants::bokoblin_patrol(p)):p;}
 // A rat hole is one declaration in the manifest and 1 + 3 actors here: the owned hole and its three rats,
 // each an owned enemy of its own (its marker, the hole's drops), created as the hole's children.
 std::vector<ManifestActor> expand_rat_holes(const std::vector<ManifestActor>& declared){
@@ -105,6 +105,13 @@ std::vector<ManifestActor> expand_rat_holes(const std::vector<ManifestActor>& de
     for(const auto& a:declared){out.push_back(a);if(a.actor!="rat_hole"||!a.kind.empty())continue;
         for(unsigned n=0;n<story_enemy_variants::kRatsPerHole;++n){ManifestActor r=a;r.actor="rat";r.variant.clear();r.defeat_switch.clear();
             r.id=a.id+".rat"+std::to_string(n+1);r.defeated_flag=a.defeated_flag+".rat"+std::to_string(n+1);r.hole=a.id;r.rat_bomb=story_enemy_variants::rat_bomb(a.variant,n);out.push_back(r);}}
+    // a Kargaroc's rider: an owned Moblin or Bokoblin of its own ("<id>.rider", its marker "<flag>.rider", the
+    // Kargaroc's drops), created only by the Kargaroc's own create (the request is redirected to it)
+    std::vector<ManifestActor> riders;
+    for(const auto& a:out){const std::string kind=a.kind.empty()?story_enemy_variants::rider_kind(a.actor,a.variant):std::string();if(kind.empty())continue;
+        ManifestActor r=a;r.actor=kind;r.variant.clear();r.defeat_switch.clear();r.room_path.clear();r.path={};
+        r.id=a.id+story_enemy_variants::kRiderSuffix;r.defeated_flag=a.defeated_flag+story_enemy_variants::kRiderSuffix;r.rider_of=a.id;riders.push_back(r);}
+    out.insert(out.end(),riders.begin(),riders.end());
     return out;
 }
 // each enemy kind's private profile in the scratch (0: a kind without one)
@@ -669,6 +676,10 @@ void room_loaded(Cpu* c,int room) {
         if(a.prop_token&&!story_props::available(a.prop_token))continue;
         if(a.switch_token&&!story_switches::available(a.switch_token))continue;
         if(a.enemy_token&&(!story_enemies::available(a.enemy_token)||!story_enemy_ownership::can_spawn(a.enemy_token)))continue;
+        if(!a.spec.rider_of.empty())continue;  // a Kargaroc's rider: only its Kargaroc's create makes it (rider_request)
+        // a Kargaroc with a rider waits until the rider's last copy is gone (deleted with the Kargaroc's last copy)
+        if(a.enemy_token&&a.spec.kind.empty()&&!story_enemy_variants::rider_kind(a.spec.actor,a.spec.variant).empty()&&
+           std::any_of(g_actors.begin(),g_actors.end(),[&](const Actor&r){return r.mod==a.mod&&r.spec.rider_of==a.spec.id&&!r.removed&&(r.process!=0xFFFFFFFFu||r.deleting);}))continue;
         const uint32_t hole_pid=a.spec.hole.empty()?0xFFFFFFFFu:rat_hole_ready(c,a);if(!a.spec.hole.empty()&&hole_pid==0xFFFFFFFFu)continue;
         if(a.game){
             // the game's own object by name, like its stage loader; three creations the game gives up on in one room visit quarantine it
@@ -1023,6 +1034,7 @@ bool editor_kind_live(const std::string& type,bool fallback){
 bool editor_update(const std::string& mod,const std::vector<ManifestActor>& declared,const std::vector<std::string>& changed_declared,std::string& why,std::vector<std::string>* pending,Cpu* cpu){
     const std::vector<ManifestActor> actors=expand_rat_holes(declared);std::vector<std::string> changed=changed_declared;
     for(const auto& a:actors)if(!a.hole.empty()&&std::find(changed.begin(),changed.end(),a.hole)!=changed.end())changed.push_back(a.id);  // a changed hole: its rats too
+    for(const auto& a:actors)if(!a.rider_of.empty()&&std::find(changed.begin(),changed.end(),a.rider_of)!=changed.end())changed.push_back(a.id);  // a changed Kargaroc: its rider too
     std::map<std::string,Actor*> own;for(auto& a:g_actors)if(a.mod==mod)own[a.spec.id]=&a;
     struct Step {const ManifestActor* spec=nullptr;Actor* actor=nullptr;bool create=false,update=false;};
     std::vector<Step> plan;std::vector<std::string> later;std::vector<Actor*> remove;
@@ -1466,6 +1478,26 @@ void install(const std::function<std::string(uint32_t)>& replaced_by,const std::
         story_enemies::set_route_provider([](story_enemies::Token t)->uint32_t{for(const auto&a:g_actors)if(a.enemy_token==t&&patrols(a.spec)&&a.route_slot>=0)return story_resident_routes::route_address(unsigned(a.route_slot));return 0;});
         if(!story_enemies::install_routes(replaced_by,replace))LOG("[actors] Bokoblin patrols unavailable: patrolling Bokoblins wait");
     }
+    // Kargaroc riders: the Kargaroc's own request for its rider becomes the rider declaration ("<id>.rider"), bound
+    // like a created actor (its process, identity row and ownership binding)
+    story_enemies::set_rider_provider([](story_enemies::Token k)->story_enemies::RiderRequest{
+        const Actor* kargaroc=nullptr;for(const auto&a:g_actors)if(a.enemy_token==k)kargaroc=&a;if(!kargaroc)return {};
+        for(auto&r:g_actors){if(r.mod!=kargaroc->mod||r.spec.rider_of!=kargaroc->spec.id||r.removed||!r.enemy_token)continue;
+            // a rider the editor changed takes its new declaration now that its old copy is gone (the room's
+            // actors do this in their create; a rider is created only here)
+            if(r.redeclare&&r.process==0xFFFFFFFFu&&!r.deleting)native_redeclare(r);
+            if(!story_enemies::available(r.enemy_token)||story_enemies::is_defeated(r.enemy_token)){LOG("[actors] %s:%s: no rider (%s)",r.mod.c_str(),r.spec.id.c_str(),story_enemies::is_defeated(r.enemy_token)?"defeated":"unavailable");return {};}
+            // its last copy is gone (deleted with its Kargaroc, or by the editor): a new copy, as the room's enemies get one
+            if(!story_enemy_ownership::can_spawn(r.enemy_token)){if(r.process!=0xFFFFFFFFu||r.deleting){LOG("[actors] %s:%s: its last copy %08X is still there",r.mod.c_str(),r.spec.id.c_str(),r.process);return {};}native_redeclare(r);enemy_epoch(r);
+                if(!story_enemy_ownership::can_spawn(r.enemy_token)){LOG("[actors] %s:%s: no new copy (ownership)",r.mod.c_str(),r.spec.id.c_str());return {};}}
+            story_enemies::Kind kind{};if(!enemy_kind(r.spec,kind))return {};
+            return {r.enemy_token,story_enemy_ownership::descriptor(kind).profile,story_enemy_variants::kRiderParams};}
+        return {};
+    },[](story_enemies::Token t,uint32_t pid){
+        for(auto&a:g_actors){if(a.enemy_token!=t)continue;a.process=pid;a.deleting=false;story_enemies::bind(t,pid);
+            if(g_scratch){const uint32_t i=uint32_t(&a-g_actors.data());st32(g_scratch+128+i*4,pid);const auto record=identity::record(a.fingerprint);std::memcpy(mem::ptr(g_scratch+kIdentityScratchOffset+i*identity::kRecordBytes),record.data(),record.size());}
+            LOG("[actors] %s:%s carried by its Kargaroc, process %08X",a.mod.c_str(),a.spec.id.c_str(),pid);break;}
+    });
     // enemies on a mod path (or the editor, which adds them live): the room-path lookup answers an owned
     // enemy's own path after the game's lookup found none
     if((g_live_kinds||std::any_of(g_actors.begin(),g_actors.end(),[](const Actor&a){return a.enemy_token&&!a.spec.room_path.empty();}))&&story_room_paths::memory()){

@@ -121,6 +121,17 @@ int main() {
             assert(story_notebook::parse_actors(enemy(type, "", ""), actors, why) && actors[0].room_path.empty());
             assert(!story_notebook::parse_actors(enemy(type, "", "\"line\""), actors, why) && why.find("takes no path") != std::string::npos);
         }
+        // a Kargaroc with a rider: a path of its room with a release point; its rider's id is its own
+        {
+            const std::string with_release = R"("paths":[{"id":"flight","stage":"sea","room":11,"closed":true,"points":[{"x":0,"y":0,"z":0},{"x":900,"y":0,"z":0,"release":true},{"x":450,"y":0,"z":800}]},
+                                                       {"id":"plain","stage":"sea","room":11,"closed":true,"points":[{"x":0,"y":0,"z":0},{"x":900,"y":0,"z":0},{"x":450,"y":0,"z":800}]}])";
+            auto bird = [&](const std::string& path, const std::string& extra) {
+                return manifest("{" + with_release + R"(,"actors":[{"id":"bird","actor":"kargaroc","parameters":{"variant":"moblin_rider"},"stage":"sea","room":11,"position":{"x":450,"y":500,"z":-500},"defeated_flag":"bird.dead","drops":[],"path":")" + path + "\"}" + extra + "]}");
+            };
+            assert(story_notebook::parse_actors(bird("flight", ""), actors, why) && actors.size() == 1 && actors[0].room_path == "flight" && story_notebook::placed_actors(actors[0]) == 2);
+            assert(!story_notebook::parse_actors(bird("plain", ""), actors, why) && why.find("release") != std::string::npos);
+            assert(!story_notebook::parse_actors(bird("flight", R"(,{"id":"bird.rider","actor":"chuchu","stage":"sea","room":11,"position":{"x":0,"y":0,"z":0},"defeated_flag":"x.dead","drops":[]})"), actors, why) && why.find("rider") != std::string::npos);
+        }
         // other enemies take no room path
         assert(!story_notebook::parse_actors(manifest("{" + paths_part + R"(,"actors":[{"id":"cc","actor":"chuchu","stage":"sea","room":11,"position":{"x":0,"y":0,"z":0},"defeated_flag":"cc.dead","drops":[],"path":"yard"}]})"), actors, why));
     }
@@ -153,6 +164,21 @@ int main() {
             std::memcpy(&x, &u, 4);
             assert(x == order[i].x);
         }
+    }
+    // a rider's release point: argument 3 = 5 at that point, kept with its point when an area is turned to game order
+    {
+        auto sq = square("r", 7, true);
+        sq.release = {false, false, true, false};
+        const auto b = path::encode(sq, 0xC0, kRecords);
+        const auto order = path::game_indices(sq);
+        for (unsigned i = 0; i < 4; i++) assert(path::get32(b.data(), path::kPoints + i * 16) == (order[i] == 2 ? 0xFFFFFF05u : 0xFFFFFFFFu));
+        auto plain = sq;
+        plain.release.clear();
+        assert(path::hash(sq, 0xC0) != path::hash(plain, 0xC0));
+        std::vector<path::Path> parsed_release;
+        assert(parse(R"({"paths":[{"id":"p","stage":"sea","room":1,"points":[{"x":0,"y":0,"z":0},{"x":9,"y":0,"z":0,"release":true}]}]})", parsed_release, why) &&
+               parsed_release[0].releases(1) && !parsed_release[0].releases(0));
+        assert(refusal(R"({"paths":[{"id":"p","stage":"sea","room":1,"points":[{"x":0,"y":0,"z":0},{"x":9,"y":0,"z":0,"release":1}]}]})").find("release") != std::string::npos);
     }
     assert(path::free_number({}) == 0xC0 && path::free_number({0xC0, 0xC2}) == 0xC1 && path::is_number(0xFD) && !path::is_number(0xFE) && !path::is_number(0xBF));
 

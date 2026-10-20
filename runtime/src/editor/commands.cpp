@@ -125,6 +125,8 @@ const std::vector<CommandInfo> kCommands = {
       {"at", "string", "link or camera instead of position"}, {"snap", "boolean", "with at: onto the ground (default true)"}, {"mod", "string", ""}},
      true},
     {"remove_path_point", "Removes one point of a room path (an area keeps 3, a line 2).", {{"id", "string", "", true}, {"point", "integer", "the point number", true}, {"mod", "string", ""}}, true},
+    {"set_path_point", "Marks a point of a room path: release (a Kargaroc lets its rider go there).",
+     {{"id", "string", "", true}, {"point", "integer", "the point number", true}, {"release", "boolean", "", true}, {"mod", "string", ""}}, true},
     {"set_path", "Changes a room path: closed (an area) or open (a line), or its id (the actors that use it follow).",
      {{"id", "string", "", true}, {"closed", "boolean", ""}, {"new_id", "string", "a new id"}, {"mod", "string", ""}}, true},
     {"remove_path", "Removes a room path; refused while an actor uses it (the reason names them).", {{"id", "string", "", true}, {"mod", "string", ""}}, true},

@@ -73,6 +73,11 @@ inline constexpr Variant kVariants[] = {
     // Kargaroc (d_a_bb): behaviour 0 wanders and attacks, 4 perches until Link comes near; no path, switch or rider
     {"kargaroc", "flying", 0xFFFFFF00u, "Kargaroc", "A Kargaroc that circles where it was placed and swoops at Link."},
     {"kargaroc", "perched", 0xFFFFFF04u, "Perched Kargaroc", "A Kargaroc that sits where it was placed until Link comes near."},
+    // Kargaroc riders: behaviour 5 carries a Moblin, 6 a Bokoblin (created by the Kargaroc's create, the port's
+    // own rider declaration "<id>.rider"); it flies its room path and lets the rider go at a point marked
+    // "release" (argument 3 = 5); the rider then drops and fights as an owned enemy of its own.
+    {"kargaroc", "moblin_rider", 0xFFFFFF05u, "Kargaroc with a Moblin", "A Kargaroc that flies one of the mod's paths carrying a Moblin and drops it at a release point.", 0, kPath},
+    {"kargaroc", "bokoblin_rider", 0xFFFFFF06u, "Kargaroc with a Bokoblin", "A Kargaroc that flies one of the mod's paths carrying a Bokoblin and drops it at a release point.", 0, kPath},
     {"big_octo", "four", 0xFFFFFF00u, "Big Octo (four eyes)", "A Big Octo to shoot from the boat: hit all four eyes. It never swallows the boat and makes no whirlpool."},
     {"big_octo", "eight", 0xFFFFFF01u, "Big Octo (eight eyes)", "A Big Octo with eight eyes to shoot from the boat. It never swallows the boat and makes no whirlpool."},
     {"big_octo", "twelve", 0xFFFFFF02u, "Big Octo (twelve eyes)", "A Big Octo with twelve eyes to shoot from the boat. It never swallows the boat and makes no whirlpool."},
@@ -140,6 +145,16 @@ inline bool takes_room_path(const std::string& actor) {
         if (actor == v.kind && v.path) return true;
     return false;
 }
+// A Kargaroc rider: the kind a rider variant carries ("" none) and the rider's parameter word (Bokoblin
+// type 5 / Moblin mode 5: carried, then dropped by the Kargaroc), as the Kargaroc's own create makes it
+// ((bb & 0xFF000000) | 0xFFFF05 with the switch byte 0xFF).
+inline constexpr uint32_t kRiderParams = 0xFFFFFF05u;
+inline std::string rider_kind(const std::string& actor, const std::string& variant) {
+    if (actor != "kargaroc") return {};
+    return variant == "moblin_rider" ? "moblin" : variant == "bokoblin_rider" ? "bokoblin" : std::string();
+}
+// the rider's id and flag suffix (ids are at most 32 bytes)
+inline constexpr const char* kRiderSuffix = ".rider";
 // how many rats a rat hole has, and whether its rat `n` (0-based) carries a bomb
 inline constexpr unsigned kRatsPerHole = 3;
 inline bool rat_bomb(const std::string& variant, unsigned n) { return variant == "bomb_rats" || (variant == "mixed" && n == 1); }
@@ -163,7 +178,7 @@ inline constexpr bool patrol_word(uint32_t params) { return ((params >> 16) & 0x
 // whether `params` is one of the kind's declared parameter words (a Bokoblin's also as a patrol)
 inline bool declared_params(const std::string& kind, uint32_t params) {
     for (const Variant& v : kVariants)
-        if (kind == v.kind && (v.params == params || (kind == "bokoblin" && bokoblin_patrol(v.params) == params) ||
+        if (kind == v.kind && (v.params == params || (kind == "bokoblin" && (bokoblin_patrol(v.params) == params || params == kRiderParams)) ||
                                (v.path && (params | 0x00FF0000u) == v.params))) return true;  // a path variant with its path's number
     return false;
 }

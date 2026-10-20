@@ -1226,6 +1226,8 @@ void path_commands() {
     r = s.run("add_path", json(R"({"id": "walk", "closed": false, "points": [{"x": 0, "y": 0, "z": 0}, {"x": 300, "y": 0, "z": 0}]})"));
     CHECK(ok(r) && !path_of("walk").get("closed").boolean && path_of("walk").get("points").array.size() == 2);
     CHECK(!ok(s.run("add_path", json(R"({"id": "walk"})"))));
+    CHECK(ok(s.run("add_path", json(R"({"id": "drop", "closed": false, "points": [{"x": 0, "y": 0, "z": 0}, {"x": 300, "y": 0, "z": 0, "release": true}]})"))) &&
+          path_of("drop").get("points").array[1].get("release").boolean);
     // a position in another room (said with stage and room)
     CHECK(ok(s.run("add_path", json(R"({"id": "dungeon", "at": "position", "position": {"x": 0, "y": 0, "z": 0}, "stage": "M_NewD2", "room": 2, "size": 400})"))));
     CHECK(path_of("dungeon").get("stage").string() == "M_NewD2" && path_of("dungeon").get("room").number == 2 && path_of("dungeon").get("points").array[1].get("x").number == 200);
@@ -1306,6 +1308,15 @@ void path_commands() {
     CHECK(ok(r) && r.get("result").get("segments").array[0].get("ok").boolean);
     host.has_ground = true;
     host.ground_height = 5;
+    // a Kargaroc with a rider: placed with a flight route whose third point lets the rider go; the mark stays
+    // when the point moves; set_path_point moves it
+    r = s.run("add_actor", json(R"({"type": "kargaroc", "id": "bird", "options": {"variant": "moblin_rider"}})"));
+    CHECK(ok(r) && actor_of(s, "bird")->get("path").string() == "bird-route" && path_of("bird-route").get("points").array[2].get("release").boolean);
+    CHECK(ok(s.run("move_path_point", json(R"({"id": "bird-route", "point": 3, "position": {"x": 900, "y": 5, "z": 900}})"))) && path_of("bird-route").get("points").array[2].get("release").boolean);
+    CHECK(ok(s.run("set_path_point", json(R"({"id": "bird-route", "point": 1, "release": true})"))) && path_of("bird-route").get("points").array[0].get("release").boolean);
+    CHECK(ok(s.run("set_path_point", json(R"({"id": "bird-route", "point": 3, "release": false})"))) && path_of("bird-route").get("points").array[2].get("release").type == Value::Null);
+    r = s.run("set_path_point", json(R"({"id": "bird-route", "point": 1, "release": false})"));
+    CHECK(!ok(r) && r.get("error").string().find("release") != std::string::npos);  // its last release point
     CHECK(editor::room_path_use(json(R"({"actor": "wall_cannon"})")).find("firing area") != std::string::npos && editor::room_path_use(json(R"({"actor": "chuchu"})")).empty());
 }
 

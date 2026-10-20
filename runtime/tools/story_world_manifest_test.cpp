@@ -117,7 +117,7 @@ int main() {
         }
         // declared variants only: ChuChu colours; never raw parameters, never another kind's variant
         for(const auto& v:story_enemy_variants::kVariants){auto data=fixture();auto& a=data["actors"].array[0];a["actor"]=v.kind;a["parameters"]=mods::json::parse(std::string(R"({"variant":")")+v.name+"\"}");
-            if(v.path){data["paths"]=mods::json::parse(R"([{"id":"route","stage":"sea","room":11,"closed":true,"points":[{"x":0,"y":0,"z":0},{"x":500,"y":0,"z":0},{"x":250,"y":0,"z":400}]}])");data["actors"].array[0]["path"]="route";}  // a route variant names its path
+            if(v.path){data["paths"]=mods::json::parse(R"([{"id":"route","stage":"sea","room":11,"closed":true,"points":[{"x":0,"y":0,"z":0},{"x":500,"y":0,"z":0},{"x":250,"y":0,"z":400,"release":true}]}])");data["actors"].array[0]["path"]="route";}  // a route variant names its path (a rider's has a release point)
             assert(parse_actors(data,actors,why)&&actors[0].variant==v.name);
             const auto fp=story_actors::identity::fingerprint("m",actors[0]);auto plain=actors[0];plain.variant.clear();assert(fp!=story_actors::identity::fingerprint("m",plain));}
         {auto data=fixture();assert(parse_actors(data,actors,why)&&actors[0].variant.empty()&&story_enemy_variants::find("chuchu","")->params==0xFF000000u);}

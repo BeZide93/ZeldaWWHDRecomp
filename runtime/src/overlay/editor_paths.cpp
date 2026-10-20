@@ -106,10 +106,22 @@ void path_section(const Value& m, const Value& a) {
     for (size_t i = 0; i < pts.size(); i++) {
         const int n = int(i + 1);
         char label[96];
-        std::snprintf(label, sizeof label, "%d   %.0f, %.0f, %.0f##path_point%d", n, num(pts[i], "x"), num(pts[i], "y"), num(pts[i], "z"), n);
+        std::snprintf(label, sizeof label, "%d   %.0f, %.0f, %.0f%s##path_point%d", n, num(pts[i], "x"), num(pts[i], "y"), num(pts[i], "z"), pts[i].get("release").boolean ? "  (release)" : "", n);
         if (ImGui::Selectable(label, P.point == n)) P.point = P.point == n ? 0 : n;
     }
     if (P.point > int(pts.size())) P.point = 0;
+    // a Kargaroc's rider: the selected point may be its release point
+    const std::string kind = a.get("actor").string(), variant = a.get("parameters").get("variant").string();
+    if (P.point > 0 && (variant == "moblin_rider" || variant == "bokoblin_rider") && kind == "kargaroc") {
+        bool release = pts[size_t(P.point - 1)].get("release").boolean;
+        if (ImGui::Checkbox("Lets its rider go here", &release)) {
+            Value q;
+            q["id"] = current;
+            q["point"] = P.point;
+            q["release"] = release;
+            command("set_path_point", q);
+        }
+    }
     if (P.point > 0 && ImGui::SmallButton("Remove point")) {
         Value q;
         q["id"] = current;

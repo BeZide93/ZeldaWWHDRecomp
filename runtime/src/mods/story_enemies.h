@@ -81,6 +81,11 @@ void set_route_provider(std::function<uint32_t(Token)> route);
 // running gets `provider(token, number, room)` (0: none), the record of the mod path it names.
 // The lookup runs the game's own first for every caller and every number (patrols too).
 void set_room_path_provider(std::function<uint32_t(Token,uint32_t,int)> provider);
+// Kargaroc riders (story_enemy_variants "moblin_rider", "bokoblin_rider"): when an owned Kargaroc's create asks
+// for its rider, `request(kargaroc)` names the rider declaration (its token, private profile and parameter
+// word; token 0: none, the request is refused); `created(rider, pid)` binds it to the new process.
+struct RiderRequest {Token rider=0;uint16_t profile=0;uint32_t params=0;};
+void set_rider_provider(std::function<RiderRequest(Token)> request,std::function<void(Token,uint32_t)> created);
 bool install_routes(const std::function<std::string(uint32_t)>& owner,const std::function<void(uint32_t,void(*)(Cpu*))>& replace);
 uint32_t room_path_function();
 // World editor (--editor only, main game thread). editor_enable before install: the profiles install

@@ -73,6 +73,7 @@ struct ManifestActor {
     uint8_t item_game=6;  // a chest's game item number ("parameters": {"item"}); kChestModItem with item_mod
     std::string item_mod; // a chest's "item:<id>": one of the mod's items (the id)
     std::string room_path;      // the id of one of the mod's room paths ("paths") that this actor uses ("path": "<id>")
+    std::string rider_of;       // a Kargaroc's rider (runtime only): the Kargaroc's id
     std::string defeat_switch;  // an enemy's: the same-mod switch actor whose flag is set when every enemy naming it is defeated
     std::string broken_flag,switch_flag,switch_actor,defeated_flag;std::vector<ManifestPropDrop> drops;
     std::string flag,quest,item,time,lines; unsigned quest_step=0;
@@ -128,7 +129,7 @@ inline uint8_t chest_game_item(const std::string& name){
     return 0;
 }
 // actors one declaration places: a rat hole is the hole and its three rats
-inline unsigned placed_actors(const ManifestActor& a){return a.actor=="rat_hole"&&a.kind.empty()?1+story_enemy_variants::kRatsPerHole:1;}
+inline unsigned placed_actors(const ManifestActor& a){return a.actor=="rat_hole"&&a.kind.empty()?1+story_enemy_variants::kRatsPerHole:a.kind.empty()&&!story_enemy_variants::rider_kind(a.actor,a.variant).empty()?2:1;}
 inline constexpr unsigned kMaxActorsPerRoom=16,kMaxActorsPerMod=64,kMaxScenesPerMod=16,kMaxSceneSteps=64,kMaxSceneFrames=18000;
 // rat holes in one room: each places 1 + 3 actors (the hole and its rats)
 inline constexpr unsigned kMaxRatHolesPerRoom=2;
@@ -414,7 +415,9 @@ inline bool parse_room_paths(const mods::json::Value& m,std::vector<story_room_p
         if(v.object.contains("closed")){if(v.get("closed").type!=Value::Bool)return why="path "+p.id+": closed must be true or false",false;p.closed=v.get("closed").boolean;}
         const auto& pts=v.get("points");
         if(pts.type!=Value::Array)return why="path "+p.id+": points must be a list",false;
-        for(const auto& q:pts.array){WorldPoint w;if(!keys(q,{"x","y","z"})||!point(q,w))return why="path "+p.id+": invalid path point",false;p.points.push_back({w.x,w.y,w.z});}
+        for(const auto& q:pts.array){WorldPoint w;if(!keys(q,{"x","y","z","release"})||!point(q,w))return why="path "+p.id+": invalid path point",false;p.points.push_back({w.x,w.y,w.z});
+            if(q.object.contains("release")){if(q.get("release").type!=Value::Bool)return why="path "+p.id+": a point's release must be true or false",false;
+                if(q.get("release").boolean){p.release.resize(pts.array.size(),false);p.release[p.points.size()-1]=true;}}}
         if(const auto no=story_room_path::shape_problem(p);!no.empty())return why="path "+p.id+": "+no,false;
         out.push_back(std::move(p));
     }
@@ -606,6 +609,10 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
                     if(!rp)return why="actor "+a.id+": no path \""+path.text+"\" in the mod's paths",false;
                     if(rp->stage!=a.stage||rp->room!=a.room)return why="actor "+a.id+": path \""+path.text+"\" is in another stage or room",false;
                     if(rule==story_enemy_variants::kAreaPath&&!rp->closed)return why="actor "+a.id+": path \""+path.text+"\" must be an area (closed)",false;
+                    // a Kargaroc with a rider lets it go at a release point of its path: one is required
+                    if(!story_enemy_variants::rider_kind(a.actor,a.variant).empty()){
+                        if(std::none_of(rp->release.begin(),rp->release.end(),[](bool r){return r;}))return why="actor "+a.id+": a Kargaroc with a rider needs a point of its path marked \"release\" (where it lets the rider go)",false;
+                        if(a.id.size()+6>story_mail::kMaxIdBytes||a.defeated_flag.size()+6>story_mail::kMaxIdBytes)return why="actor "+a.id+": its id and defeated_flag are at most 26 characters (its rider adds .rider)",false;}
                     a.room_path=path.text;
                 }
             }
@@ -700,6 +707,8 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
         for(unsigned n=1;n<=story_enemy_variants::kRatsPerHole;++n)for(const auto& b:out)
             if(b.id==a.id+".rat"+std::to_string(n)||(!b.defeated_flag.empty()&&b.defeated_flag==a.defeated_flag+".rat"+std::to_string(n)))return why="actor "+b.id+": the id or defeated_flag of rat hole "+a.id+"'s rats",false;
     }
+    for(const auto& a:out)if(!story_enemy_variants::rider_kind(a.actor,a.variant).empty())for(const auto& b:out)
+        if(b.id==a.id+story_enemy_variants::kRiderSuffix||(!b.defeated_flag.empty()&&b.defeated_flag==a.defeated_flag+story_enemy_variants::kRiderSuffix))return why="actor "+b.id+": the id or defeated_flag of Kargaroc "+a.id+"'s rider",false;
     for(const auto& a:out)if(a.actor=="door"){
         const auto source=std::find_if(out.begin(),out.end(),[&](const ManifestActor& candidate){return candidate.id==a.switch_actor;});
         if(source==out.end()||source->actor!="switch")return why="door source must name a same-mod switch actor",false;

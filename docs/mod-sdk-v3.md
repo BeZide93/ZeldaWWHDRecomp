@@ -479,7 +479,7 @@ The allowlist below defines the supported variants.
 | `big_octo` | **A target only:** the Big Octo (sea stage only), variants `four`, `eight` or `twelve` eyes (default `four`); it never attacks |
 | `floormaster` | Floormaster: a hand that rises from its hole, grabs Link for a moment and lets go. Variant `wandering`: its hole glides along one of the mod's paths (below) |
 | `gyorg` | A group of Gyorgs (sea stage only): variants `one` to `five` (default `three`); they come out of the sea when Link is near and bite him |
-| `kargaroc` | Kargaroc: it circles where it was placed and swoops at Link (variant `perched`: it sits until Link comes near) |
+| `kargaroc` | Kargaroc: it circles where it was placed and swoops at Link (variant `perched`: it sits until Link comes near; `moblin_rider` or `bokoblin_rider`: it carries a rider along one of the mod's paths, below) |
 | `wall_cannon` | The wall cannon: it turns to Link and fires cannonballs while he is inside its firing area, one of the mod's [room paths](#room-paths) (`"path": "<id>"`, an area, required); a bomb destroys it |
 
 All of them use the same declaration fields:
@@ -598,6 +598,28 @@ glides along the points and rises when Link comes near, then sinks and glides on
 check of its own: the editor warns (it never refuses) when a warship's route crosses land (a route over
 land holds the ship at the shore) or a Floormaster's route leaves the floor (`check_path`, and the
 Inspector's Path section). The anchored warship and the ordinary Floormaster take no path.
+
+### Kargarocs with a rider
+
+A Kargaroc with `"parameters": {"variant": "moblin_rider"}` (or `"bokoblin_rider"`) carries a Moblin (or a
+Bokoblin) and flies one of the mod's room paths (`"path"`, its own room): round if the path is an area,
+there and back if it is a line. At a point of the path marked `"release": true` it lets the rider go;
+the rider drops and fights Link. A rider path needs at least one release point:
+
+```json
+"paths": [{"id": "raid", "stage": "sea", "room": 11, "closed": true, "points": [
+  {"x": -800, "y": 900, "z": -197000}, {"x": 800, "y": 900, "z": -197000},
+  {"x": 800, "y": 700, "z": -196200, "release": true}, {"x": -800, "y": 900, "z": -196200}]}]
+```
+
+The rider is an owned enemy of its own: its id is the Kargaroc's with `.rider`, its defeat flag the
+Kargaroc's with `.rider`, and it gives the Kargaroc's `drops` (the Kargaroc gives them too); its native
+drop is replaced like any owned enemy's. A rider still being carried goes with the Kargaroc (removed,
+unloaded or defeated); a released rider fights on until it is defeated or the room unloads. A rider that falls into
+the sea drowns as the game's own do, and that is its defeat (its flag and drops). A defeated rider is
+not made again: the Kargaroc then flies without one. Ids and defeat flags of rider Kargarocs are at most
+26 characters. In the editor, a point of the path is marked in the Path section ("Lets its rider go
+here") or with `set_path_point`.
 
 ### Wall cannons
 
