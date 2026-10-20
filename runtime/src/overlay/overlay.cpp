@@ -1346,7 +1346,7 @@ void tab_display() {
         if (mode == 0)
             note("Gaming Mode shows one window at a time. A separate GamePad window may make the game picture blurry.");
         if (mode == 2)
-            note("Shows GamePad menus while open and follows Off-TV Play.");
+            note("Shows GamePad menus and the Wind Waker song list while open and follows Off-TV Play.");
         if (mode == 4)
             note("Only the GamePad picture. In the game, Minus switches to Off-TV "
                  "Play (the game on the GamePad).");

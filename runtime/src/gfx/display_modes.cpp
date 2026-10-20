@@ -60,7 +60,7 @@ static std::atomic<double> g_plus_at{-1};
 static std::atomic<int> g_pause_restore{-1};
 static GamePadUiState gamepad_ui() {
     const unsigned bits = g_gamepad_ui.load();
-    return {bool(bits & 1), bool(bits & 2), bool(bits & 4), bool(bits & 8)};
+    return {bool(bits & 1), bool(bits & 2), bool(bits & 4), bool(bits & 8), bool(bits & 16)};
 }
 std::atomic<float> g_drc_aspect{854.0f / 480.0f};
 std::atomic<bool> g_has_drc_window{false};
@@ -208,7 +208,7 @@ bool display_gamepad_state_needed() {
 }
 void display_gamepad_ui(GamePadUiState state) {
     g_gamepad_ui = unsigned(state.available) | (unsigned(state.menu) << 1) |
-        (unsigned(state.off_tv) << 2) | (unsigned(state.switching) << 3);
+        (unsigned(state.off_tv) << 2) | (unsigned(state.switching) << 3) | (unsigned(state.baton) << 4);
     const double now = display_now();
     if (g_mode == kDrcAuto) {
         AutoPipDecision decision{g_auto_until.load()};

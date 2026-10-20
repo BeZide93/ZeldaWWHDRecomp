@@ -6,7 +6,7 @@ Choose a mode in Display → GamePad screen (or set `WWHD_DRC_MODE` for one laun
 | --- | --- |
 | `window` | GamePad picture in a separate window. If that display is unavailable, it appears in the TV window. |
 | `pip` | GamePad picture in a corner of the TV window. |
-| `auto` | GamePad menus appear in PiP while open and disappear about 250 ms after closing. The game’s Off-TV Play switches the main picture to the GamePad; returning to TV restores automatic menus. |
+| `auto` | GamePad menus, and the song list while Link conducts with the Wind Waker, appear in PiP while open and disappear about 250 ms after closing. The game’s Off-TV Play switches the main picture to the GamePad; returning to TV restores automatic menus. |
 | `off` | GamePad picture hidden; the game continues drawing it. |
 | `gamepad` | GamePad picture fills the main window. Use the game’s Minus button for Off-TV Play. |
 
@@ -78,6 +78,10 @@ below are canonical USA addresses and are translated through `GD()` for regional
 - Scene descriptors `1049EC84/1049ECB0/1049ECDC` cover menu entry, menu and subwindow, including
   items, collection, map and Delivery Bag. Save/options, song lists, warp map, photo lists, Fishman
   hints and password entry have explicit descriptors listed in `runtime/src/gfx/auto_pip.h`.
+- Wind Waker: play object `1046F0B0` (`dComIfGp_get`) byte `+5BD1` is the metronome flag that
+  `daPy_lk_c::procTactWait_init` (`023E92A0`) sets while Link conducts and the song's end or a
+  cancel clears; scene descriptors `1049EDB8/1049EDE4` are the GamePad song list opening and open
+  (it trails the flag by a few frames on both ends). Either one shows PiP with GamePad routing `1`.
 - `1049F498`, `1049F4C4`, `1049F4F0` identify TV, DRC and Pro mode exchanges. These clear the closing
   delay and suppress PiP while routing changes; the pin survives.
 

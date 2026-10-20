@@ -1095,7 +1095,7 @@ void install_display_menu(NSMenu* bar) {
     add(m, @"    Separate window", @selector(setMode:), kDrcWindow);
     add(m, @"    Picture-in-picture in the TV window", @selector(setMode:), kDrcPip).toolTip = @"Click the overlay to touch";
     add(m, @"    Automatic picture-in-picture", @selector(setMode:), kDrcAuto).toolTip =
-        @"Shows GamePad menus while open; follows Off-TV Play. Cmd+G pins the overlay";
+        @"Shows GamePad menus and the Wind Waker song list while open; follows Off-TV Play. Cmd+G pins the overlay";
     add(m, @"    Off", @selector(setMode:), kDrcOff).toolTip = @"Not shown; the game keeps drawing it";
     add(m, @"    GamePad only", @selector(setMode:), kDrcGamePad).toolTip =
         @"Only the GamePad picture in the TV window (click it to touch); in the game, Minus switches to Off-TV Play";
