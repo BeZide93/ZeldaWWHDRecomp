@@ -5,9 +5,13 @@ walks into from a room of the game and leaves through an exit. Your package desc
 the rooms' ground models; the port builds the stage on the player's machine from the player's own game
 files when the game starts, and the game loads it like any of its own stages.
 
-Mod stages are experimental. This first version has rooms built from your models, spawn points, exits,
-doors between rooms and ways in from the game's rooms. Dungeon maps, keys and their own save flags come
-later.
+Mod stages are experimental. A stage has rooms built from your models or taken from the game's rooms,
+spawn points, exits, doors (plain, small-key, boss and shutter doors), chests with small keys, the map, the
+compass and the boss key, enemies and pots, return warps, ways in from the game's rooms, and save flags of
+its own. The dungeon map screen comes later.
+
+A larger example, a three-room dungeon with a locked door, a key in a chest and an enemy, is
+`examples/guest-mods/mod-stage-dungeon` in the repository.
 
 ## A first stage
 
@@ -75,11 +79,17 @@ A package with stages needs no other package: stages are not story content.
 | `id` | The package's name for the stage (lowercase letters, digits, `-`, `_`, `.`; up to 32). The game gets a name of its own for it from the port; you never need it. |
 | `template` | A stage of the game the new stage takes its lighting, camera, door models and room kits from. Its rooms are not part of the new stage. |
 | `kind` | `cave` (the default) or `dungeon`. |
+| `save_group` | Optional: stages with the same `save_group` share their save flags, keys and dungeon items (a dungeon and its boss stage, say). Default: the stage's own id. |
 | `music_like` | Optional: a stage of the game whose music and ambient sounds the stage plays. The boss rooms' music follows the story and can't be borrowed. Without it the stage is silent apart from battle music. |
 | `entrance` | A place of the game: `stage`, `room` and spawn `point`. A save made in the stage continues here when the package is not installed (see [Saves](#saves)). Usually the spot in front of the way in. |
 | `rooms` | 1 to 16 rooms, numbered 0, 1, 2, ... in order. |
-| `doors` | Optional, up to 16: the game's wooden door between two rooms. |
+| `doors` | Optional, up to 16: the game's doors between two rooms (see [Doors](#doors)). |
+| `joins` | Optional: pairs of rooms joined by an open passage without a door, `[[2, 3]]`. Both rooms are kept loaded while Link is in either. |
 | `entries` | Optional, up to 4: boxes in rooms of the game that take Link into the stage. |
+| `warps` | Optional, up to 4: return warps (see [Return warps](#return-warps)). |
+
+Every room must be reachable: from where Link comes in (the entries' rooms, room 0 without entries) through
+doors, joins and exits. Check names a room that can't be reached.
 
 A package declares up to 4 stages.
 
@@ -88,12 +98,13 @@ A package declares up to 4 stages.
 | Field | |
 |---|---|
 | `room` | The room's number: 0 for the first, then 1, 2, ... |
-| `kit` | A room of the template whose materials, textures and light the room uses. Default: the room's own number. |
-| `ground` | The room's model: a `.glb` file of the package (see [The ground model](#the-ground-model)). |
+| `kit` | A room of the game whose materials, textures and light the room uses: a room number of the template, or `{"stage": "M_NewD2", "room": 3}` for a room of any stage. Default: the template's room of the room's own number. |
+| `ground` | The room's model: a `.glb` file of the package (see [The ground model](#the-ground-model)), or `"kit"`: the kit room itself, its models and its collision, as the game has it. |
 | `material` | Optional: the kit room's material the model is drawn with. Default: the kit room's first. |
 | `materials` | Optional: the model's material names mapped to kit materials, for a model with several materials. A model material that is also a kit material's name is drawn with that one. |
 | `spawns` | 1 to 8 spawn points: `point` (0 to 99, unique in the stage), `position`, `angle` in degrees (0 faces +z, 90 faces +x) and `start`: `stand` (the default) or `fall` (Link drops in from above). |
 | `exits` | Up to 8 exits: an `id`, a `box` (`min` and `max` corners) and the place it leads `to`. |
+| `actors` | Up to 16 of the game's actors (see [Actors](#actors)). |
 
 An exit's box marks floor: the ground's floor triangles whose middle lies in the box take Link to the exit's
 place when he steps on them, the way the game's own caves are left. Walls and ceilings in the box don't
@@ -106,15 +117,59 @@ A place `to` is:
 - a spawn of the same stage: `{"room": 1, "point": 3}` (no `stage`);
 - a spawn of another of the package's stages: `{"stage": "stage:<id>", "room": 0, "point": 0}`.
 
+A kit room used as it is (`"ground": "kit"`) keeps its floors, walls and its surfaces (lava hurts, water
+is swimmable); its own ways out of its stage are removed, and the room's `exits` boxes work on its floor as
+on a model's. Its actors are not taken over: place the ones you want with `actors`. A kit room of another
+stage than the template is lit by the template's first room's light.
+
 ### Doors
 
 ```json
-{"position": {"x": -1000, "y": 0, "z": 0}, "angle": 90, "rooms": [0, 1]}
+{"position": {"x": -1000, "y": 0, "z": 0}, "angle": 90, "rooms": [0, 1], "lock": "small_key"}
 ```
 
-A door stands at `position`, turned by `angle`, between the two `rooms` it joins; the template must have the
-game's wooden door (the lava cave has it). Leave an opening in both rooms' ground models where the door stands.
-The port lists each room's door neighbours in the stage's room table, which the door needs to open.
+A door stands at `position`, turned by `angle`, between the two `rooms` it joins. Leave an opening in both
+rooms' ground models where the door stands (the door is 3 m wide and 3 m high). The port lists each room's
+door neighbours in the stage's room table, which the door needs to open. `lock`:
+
+- `none` (the default): the door opens when Link walks up to it and presses A.
+- `small_key`: the door is locked; a small key opens it for good (the key is used up).
+- `boss`: the boss door; the stage's boss key opens it.
+- `shutter`: bars close the door until switch `switch` (0 to 63) of the stage is on.
+
+The template's stage must have the door's model: Cave01, M_NewD2, kindan and Siren have all four; a stage with a door its template lacks is left out with a message.
+A small-key door needs a small key in a chest of the stage's save group, and a boss door the boss key; Check
+says so when one is missing. The key counter shows in a stage with small keys.
+
+### Actors
+
+```json
+{"id": "key", "actor": "chest", "item": "small_key", "position": {"x": -300, "y": -200, "z": 0}, "angle": 270}
+```
+
+A room's `actors` are the game's own actors, created by the game when the room loads:
+
+| `actor` | |
+|---|---|
+| `chest` | `item`: `small_key` (in a small chest), `map` or `compass` (in a larger one) or `boss_key` (in the big chest). Link opens it from its front (the side `angle` faces). Each chest opens once per save. |
+| `chuchu` | `variant` `green` (default), `red`, `blue`, `yellow` or `black`. |
+| `bokoblin` | `variant` `stick` (default), `shield` or `machete`. |
+| `keese` | `variant` `normal` (default) or `fire`. |
+| `darknut` | `variant` `darknut` (default), `shield`, `helmet` or `mighty`. |
+| `pot`, `big_pot` | A pot Link can lift and throw. |
+
+`id` names the actor in the manifest (unique in the room), `position` and `angle` (degrees about the vertical
+axis) place it. The chests are numbered in the order they appear in the manifest, per save group, and a save
+remembers them by number: when you change a released package, add new chests after the old ones.
+
+### Return warps
+
+```json
+"warps": [{"id": "home", "room": 2, "position": {"x": -2450, "y": -200, "z": 1500}, "size": {"x": 200, "y": 200, "z": 200}}]
+```
+
+A warp is a box in a room of the stage: when Link walks into it, the warp light takes him to `to` (a place,
+as for an exit; by default the stage's `entrance`). Like an entry, it works once Link has been outside it.
 
 ### Entries
 
@@ -156,8 +211,12 @@ Without the package, or when the stage has changed so that spawn is gone, it con
 Continuing inside the stage needs the game built with code-mod support (the same as story progress);
 otherwise the Quest Log continues at the entrance.
 
-The stage keeps no flags of its own yet: it uses the save slot the game keeps for its test stages, which no
-place of the game uses.
+Each save group keeps its own flags, as each of the game's dungeons does: which chests are open and which
+doors unlocked, the switches, the rooms Link has seen, the small keys and the map, compass and boss key. They
+are kept in the port's save area for mods and saved with the game's saves; the save file's own table of
+stage flags is never written for a mod stage. Without code-mod support they are kept until the game is
+closed. A save state made in the stage carries them; a portable save state (the editor's) keeps the stage
+flags the game has when it is loaded.
 
 ## Save states
 
@@ -184,8 +243,8 @@ as `"stage": "stage:<package id>/<stage id>"`, for example
 
 ## Limits
 
-- No dungeon map yet: the map shows the sea chart, as in the game's caves and houses.
-- No small keys, locked doors, boss doors, chests or other actors in the stage yet, and no save flags of
-  its own.
+- No dungeon map yet: the map shows the sea chart, as in the game's caves and houses. The map and compass
+  can be found and are kept, for the map screen that comes later.
+- Only the actors listed under [Actors](#actors); no boss yet, and no actors of a kit room's own.
 - The stage's rooms are lit by the template; a sky only comes with a template that has one.
 - Ballad of Gales and the blue warp don't lead to or from a mod stage.
