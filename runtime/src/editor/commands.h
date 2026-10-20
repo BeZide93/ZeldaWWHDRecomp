@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "../mods/mod_json.h"
+#include "../mods/story_world_collision_mesh.h"
 #include "../mods/story_world_manifest.h"
 
 namespace story_mail { class Book; }
@@ -183,6 +184,13 @@ public:
     virtual bool world_object_query(const std::string& mod, const story_notebook::ManifestActor& actor,
                                     bool wireframe, Value& result, std::string& why) {
         return why = "the game is not running", false;
+    }
+    // The same for an object whose collision is not in the game yet (the water tool's body before it is made):
+    // `collision` is its collision, local to the actor (without it the actor's own shape is checked).
+    virtual bool world_object_query_with(const std::string& mod, const story_notebook::ManifestActor& actor,
+                                         const story_world_collision::mesh::Mesh& collision, Value& result, std::string& why) {
+        (void)collision;
+        return world_object_query(mod, actor, false, result, why);
     }
     // Shows `text` in the game's own message box (close: hides it again).
     virtual bool preview_text(const std::string& text, bool close, std::string& why) { return why = "the game is not running", false; }
@@ -422,6 +430,9 @@ std::string room_path_use(const Value& actor);
 // manager checks the whole), the model files, then the whole package. Empty: it is valid.
 std::vector<Problem> package_problems(const std::string& mod, const Value& manifest, const std::vector<std::pair<std::string, Value>>& all,
                                       const std::string& dir);
+// One placement finding in words: its message, the game's own name and where it is ("a cutscene area of the island
+// [TagEv] at x -671, y 115, z -198464"), so the maker can tell which of the island's places is meant.
+std::string conflict_words(const Value& conflict);
 // World objects and island buildings placed where they can't stand ("house-a can't stand here: in the way: ..."),
 // checked against the running game's placement index (commands.cpp); empty without a game.
 std::vector<Problem> placement_problems(Host* host, const std::string& mod, const Value& manifest);

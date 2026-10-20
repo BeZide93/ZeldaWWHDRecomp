@@ -267,7 +267,7 @@ The points show in the picture, numbered; click one to select it and drag its ha
 
 - **Pond:** click the shore's points in order round the pond (3 to 48). The water shows as a light fill at
   its level with a line down to each picked point; the blue handle in the middle moves the level up and
-  down (or type it under **Level**; until you choose one it is the lowest bank under the outline). Set its
+  down (or type it under **Level**; until you choose one it is the lowest ground along its shore). Set its
   **Depth** (the floor below the water), **Banks above the water** (how high its rim rises above the water
   before it slopes down to the ground), **Foam at the shore** and the **Floor colour** (used where your game
   files don't give the island's own ground texture). The outline's corners are rounded off.
@@ -288,7 +288,8 @@ outline that crosses itself, too few or too many points, a pond whose water is a
 its sea square (the game doesn't find water there; see [Water](world-objects.md#water)), too many
 triangles for the water surface or the collision, a mod that would have more than 8 models (a body of water
 takes two), and what it would be in the way of: the island's people and their routes, doors, chests, event
-areas and other mods' objects (its floor and banks may meet the island's ground). The outline turns red in
+areas and other mods' objects (its floor and banks may meet the island's ground, and the ground of your mod's own
+objects it lies on, such as an island ground or a terrace: of those only what rises through the water counts). The outline turns red in
 the picture with the first error next to it. **Create** (one Undo step) is possible once nothing is red.
 
 What it makes: two models in the package's `models/water/` folder (the water's ground, banks and

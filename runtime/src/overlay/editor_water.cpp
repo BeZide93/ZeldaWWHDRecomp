@@ -148,7 +148,7 @@ void water_check_tick() {
             D.check["problems"].array.push_back(e);
             D.check["ok"] = false;
         }
-        // the level the game's ground gives (a pond without a level of its own: its lowest bank)
+        // the level the ground gives (a pond without a level of its own: the lowest ground at its shore)
         if (D.kind == "pond" && !D.level_set && D.check.get("position").type == Value::Object) D.level = num(D.check.get("position"), "y", D.level);
     });
 }
@@ -229,7 +229,7 @@ void water_window(const Value& m) {
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("The water's height (or drag the blue handle in the picture)");
         if (!D.level_set) {
             ImGui::SameLine();
-            ImGui::TextDisabled("(the lowest bank)");
+            ImGui::TextDisabled("(the lowest ground at its shore)");
         }
         slider("Depth", D.depth, 20, 480, "The floor below the water");
         slider("Banks above the water", D.rim, 0, 300, "How high the rim rises above the water before it slopes down to the ground");
@@ -316,7 +316,8 @@ void water_section(const Value& m, const Value& a) {
 }
 
 // test aid: WWHD_TEST_WATER=<id>[#<point>] opens the Water window on that body of water once it is in the open mod
-// (crops of the outline, the height handle and a river's band; the point selected), or kind:<json> a new draft
+// (crops of the outline, the height handle and a river's band; the point selected), or kind:<json> a new draft (with
+// "after": "<id>" once that actor is in the open mod: drawn on a world object of its own)
 void water_test_tick() {
     static bool done = false;
     if (done) return;
@@ -332,9 +333,10 @@ void water_test_tick() {
         if (s.find('#') != std::string::npos) water_select_after_edit = std::atoi(s.c_str() + s.find('#') + 1) - 1;
         return;
     }
-    done = true;
     try {
         const Value p = mods::json::parse(s.substr(colon + 1));
+        if (p.get("after").type == Value::String && !actor_by_id(snapshot().manifest, p.get("after").text)) return;
+        done = true;
         water_start(s.substr(0, colon));
         D.drawing = false;
         for (const auto& q : p.get("points").array) D.points.push_back({num(q, "x"), num(q, "y"), num(q, "z")});
@@ -345,6 +347,7 @@ void water_test_tick() {
         D.foam = p.get("foam").boolean;
         if (p.get("selected").type == Value::Number) D.selected = int(num(p, "selected"));
     } catch (...) {
+        done = true;
     }
 }
 }  // namespace editor_ui

@@ -135,6 +135,32 @@ void pond() {
     const Value ask = doc_of(island.main).get("materials").array[1].get("extras").get("wwhd_island");
     CHECK(ask.get("room").number == 44 && !ask.get("points").array.empty() && ask.get("points").array.size() <= 64);
     CHECK(doc.get("nodes").array.size() == 2 && doc.get("nodes").array[1].get("name").string() == "pond_col");
+    // the collision the placement check sees: the GLB's collision triangles, each with its material; the open water at
+    // the level (local 0), the floor `depth` below it
+    CHECK(b.collision_faces.size() == b.collision_triangles && b.collision_materials.size() == b.collision_faces.size() && b.collision_points.size() == b.collision_vertices);
+    {
+        size_t water = 0;
+        float lowest = 0;
+        for (size_t t = 0; t < b.collision_faces.size(); t++) {
+            for (auto i : b.collision_faces[t]) {
+                CHECK(i < b.collision_points.size());
+                if (i < b.collision_points.size()) lowest = std::min(lowest, b.collision_points[i][1]);
+            }
+            if (b.collision_materials[t] != "col_water") continue;
+            ++water;
+            for (auto i : b.collision_faces[t]) CHECK(b.collision_points[i][1] == 0);
+        }
+        CHECK(water > 0 && lowest == -float(p.depth));
+    }
+    // the shore: the rounded outline's points (where the level comes from), each the first of its ground places
+    {
+        const auto shore = shore_places(p, {1000, 2000}), places = ground_places(p, {1000, 2000});
+        CHECK(!shore.empty() && places.size() == shore.size() * 6);
+        for (size_t i = 0; i < shore.size(); i++) CHECK(places[i * 6] == shore[i]);
+        Params river_like = p;
+        river_like.kind = "river";
+        CHECK(shore_places(river_like, {}).empty());
+    }
     // the parameters ride along and come back as they were
     Params back;
     CHECK(params_from_glb(b.main, back, why) && params_text(back) == params_text(p));

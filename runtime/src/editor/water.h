@@ -18,6 +18,7 @@
 //
 // Pure code, no game dependencies (runtime/tools/editor_water_test.cpp).
 #pragma once
+#include <array>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -90,6 +91,11 @@ struct Built {
     std::vector<Step> steps;             // river
     std::vector<int> levels;             // river: the water level at each row (local)
     uint64_t texture_bytes = 0;          // decoded RGBA of the main model's textures
+    // the main model's collision as the game gets it (local, game units): what the placement check compares with
+    // the world around it; each triangle's collision material ("col_water", "col_sand", ...)
+    std::vector<std::array<float, 3>> collision_points;
+    std::vector<std::array<uint16_t, 3>> collision_faces;
+    std::vector<std::string> collision_materials;
 };
 
 // ---- parameters
@@ -106,6 +112,9 @@ bool params_from_glb(const std::vector<uint8_t>& glb, Params& out, std::string& 
 // ---- geometry
 // Where the game's ground is needed (world places): pond banks, the river's centre line samples, the waterfall's foot.
 std::vector<XZ> ground_places(const Params& p, const XZ& origin);
+// Of those, a pond's shore (its rounded outline, where the water meets the bank): its level when none is given is the
+// lowest ground there (not where the banks reach out to, which may be down a cliff or out on the sea floor).
+std::vector<XZ> shore_places(const Params& p, const XZ& origin);
 // Problems with the parameters themselves (shape, limits), before anything is built.
 std::vector<Problem> check(const Params& p);
 // Builds the two models. `ground` holds heights (world) for ground_places (missing: none). Problems are added to

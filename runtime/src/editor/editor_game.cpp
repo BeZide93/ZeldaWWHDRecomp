@@ -431,7 +431,7 @@ uint32_t g_gnd = 0;  // a dBgS_ObjGndChk in guest memory, for the editor's groun
 const uint32_t kGndCtor = GC(0x0237AABC), kGroundCross = GC(0x02008974);
 constexpr uint32_t kBgs = 0x12A0;  // dComIfG_Bgsp() in the play
 // the ground height below `p` (the game's own check, as mod actors use it); false: none
-bool ground_below(Cpu* c, double x, double y, double z, float& h) {
+bool game_ground_below(Cpu* c, double x, double y, double z, float& h) {
     const uint32_t play = call(c, kPlayFn);
     if (!play || !ld32(play + kPlayer)) return false;
     if (!g_gnd) {
@@ -446,6 +446,32 @@ bool ground_below(Cpu* c, double x, double y, double z, float& h) {
     const double r = call_f1(c, kGroundCross, {play + kBgs, g_gnd});
     if (!std::isfinite(r) || r < -1e8) return false;
     h = float(r);
+    return true;
+}
+// the ground below each of `above`: the game's own check, and the mod world objects' own collision (an island ground,
+// a terrace, a pier: what the game finds once they stand in the loaded room, also before then or while it is being
+// rebuilt); the higher of the two where both have one
+void grounds_below(Cpu* c, const std::vector<WorldPoint>& above, std::vector<float>& heights, std::vector<bool>& found) {
+    heights.assign(above.size(), 0);
+    found.assign(above.size(), false);
+    for (size_t i = 0; i < above.size(); i++) {
+        float h = 0;
+        if (game_ground_below(c, above[i].x, above[i].y, above[i].z, h)) heights[i] = h, found[i] = true;
+    }
+    const auto here = ss::link_place();
+    if (!here.valid) return;
+    std::vector<float> own;
+    std::vector<bool> has;
+    if (!mod_actor::object_grounds(here.stage, above, own, has)) return;
+    for (size_t i = 0; i < above.size(); i++)
+        if (has[i] && (!found[i] || own[i] > heights[i])) heights[i] = own[i], found[i] = true;
+}
+bool ground_below(Cpu* c, double x, double y, double z, float& h) {
+    std::vector<float> heights;
+    std::vector<bool> found;
+    grounds_below(c, {WorldPoint{float(x), float(y), float(z)}}, heights, found);
+    if (!found[0]) return false;
+    h = heights[0];
     return true;
 }
 // the first ground a ray meets (ray_ground.h: steps along it, looks up the ground below each step's top)
@@ -1100,12 +1126,7 @@ public:
     bool grounds(const std::vector<WorldPoint>& above, std::vector<float>& heights, std::vector<bool>& found, std::string& why) override {
         heights.assign(above.size(), 0);
         found.assign(above.size(), false);
-        return on_game([&](Cpu* c) {
-            for (size_t i = 0; i < above.size(); i++) {
-                float h = 0;
-                if (ground_below(c, above[i].x, above[i].y, above[i].z, h)) heights[i] = h, found[i] = true;
-            }
-        }, why, 3000);
+        return on_game([&](Cpu* c) { grounds_below(c, above, heights, found); }, why, 3000);
     }
     // the room's own collision height range, from the player's stage files (cached by the placement index)
     bool room_height(const std::string& stage, int room, float& low, float& high, std::string& why) override {
@@ -1256,6 +1277,12 @@ public:
     bool world_object_query(const std::string& mod, const story_notebook::ManifestActor& actor, bool wireframe, Value& result, std::string& why) override {
         if (!mod_actor::world_object_query(mod, actor, wireframe, result, why)) return false;
         // what is in the way names the game's characters and objects as the catalogues do
+        name_layout_conflicts(actor, result);
+        return true;
+    }
+    bool world_object_query_with(const std::string& mod, const story_notebook::ManifestActor& actor, const story_world_collision::mesh::Mesh& collision,
+                                 Value& result, std::string& why) override {
+        if (!mod_actor::world_object_query(mod, actor, false, result, why, std::make_shared<const story_world_collision::mesh::Mesh>(collision))) return false;
         name_layout_conflicts(actor, result);
         return true;
     }

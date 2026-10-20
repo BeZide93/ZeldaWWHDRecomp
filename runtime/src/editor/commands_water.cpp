@@ -14,6 +14,7 @@
 #include <string>
 #include <vector>
 
+#include "../mods/static_model_validation.h"
 #include "commands.h"
 #include "water.h"
 
@@ -172,10 +173,11 @@ static bool plan_water(Host* host, const Value& manifest, const std::string& kin
             if (s.x == world.x && s.z == world.z) return h = s.h, true;
         return false;
     };
-    // what the ground decides: a pond's level (the lowest bank), a river's height (its first point), a waterfall's top and foot
+    // what the ground decides: a pond's level (the lowest ground at its shore), a river's height (its first point), a
+    // waterfall's top and foot
     if (kind == "pond" && p.get("level").type != Value::Number) {
         int lowest = INT_MAX;
-        for (const auto& q : places) {
+        for (const auto& q : water::shore_places(out.params, out.origin)) {
             int h;
             if (ground_of(q, h)) lowest = std::min(lowest, h);
         }
@@ -257,10 +259,33 @@ static bool plan_water(Host* host, const Value& manifest, const std::string& kin
         c.collision_size = {float(std::max(1, b.max[0] - b.min[0])), float(std::max(1, b.max[1] - b.min[1])), float(std::max(1, b.max[2] - b.min[2]))};
         c.position = {float(out.origin.x + (b.min[0] + b.max[0]) / 2.0), float(out.origin_y + (b.min[1] + b.max[1]) / 2.0), float(out.origin.z + (b.min[2] + b.max[2]) / 2.0)};
         c.shoreline.material = out.built.material;  // a body of water: the island's ground doesn't count
+        // its own collision as the game will get it (its open water, floor and banks), where the actor will stand: the
+        // world objects it lies on or in (an island ground, a terrace) are in the way only where they rise through its water
+        story_world_collision::mesh::Mesh mesh;
+        mesh.minimum = {INFINITY, INFINITY, INFINITY}, mesh.maximum = {-INFINITY, -INFINITY, -INFINITY};
+        for (const auto& v : b.collision_points) {
+            mesh.vertices.push_back({v[0], v[1], v[2]});
+            mesh.minimum = {std::min(mesh.minimum.x, v[0]), std::min(mesh.minimum.y, v[1]), std::min(mesh.minimum.z, v[2])};
+            mesh.maximum = {std::max(mesh.maximum.x, v[0]), std::max(mesh.maximum.y, v[1]), std::max(mesh.maximum.z, v[2])};
+        }
+        bool known = !b.collision_faces.empty();
+        for (size_t t = 0; t < b.collision_faces.size(); t++) {
+            const int surface = static_models::collision_surface(b.collision_materials[t]);
+            if (surface < 0) known = false;
+            mesh.triangles.push_back({b.collision_faces[t], uint16_t(std::max(surface, 0))});
+        }
         Value r;
-        if (b.main_triangles && host->world_object_query(text(p, "mod"), c, false, r, w))
+        bool asked = false;
+        if (b.main_triangles && known) {
+            auto at = c;
+            at.collision_shape.clear();
+            at.position = {float(out.origin.x), float(out.origin_y), float(out.origin.z)};
+            asked = host->world_object_query_with(text(p, "mod"), at, mesh, r, w);
+        } else if (b.main_triangles)
+            asked = host->world_object_query(text(p, "mod"), c, false, r, w);
+        if (asked)
             for (const auto& x : r.get("conflicts").array) {
-                water::Problem e{"in the way: " + x.get("message").string() + (x.get("native").string().empty() ? "" : " (" + x.get("native").string() + ")"), "points"};
+                water::Problem e{"in the way: " + conflict_words(x), "points"};
                 for (const char* k : {"at", "reach", "path"})
                     if (x.get(k).type != Value::Null) e.where[k] = x.get(k);
                 out.problems.push_back(std::move(e));

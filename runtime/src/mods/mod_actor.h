@@ -17,7 +17,12 @@ inline constexpr uint32_t kScratchBytes=4096;
 inline constexpr uint32_t kInstanceBytes=0x1120;
 using PlacementProvider=std::function<story_world_placement::Index(const std::string&,int)>;
 void configure_world_objects(const std::string& game_directory,PlacementProvider={});
-bool world_object_query(const std::string& mod,const story_notebook::ManifestActor&,bool wireframe,mods::json::Value&,std::string& why);
+// `geometry`: the collision to check instead of the actor's own (the editor's water tool: a body not made yet).
+bool world_object_query(const std::string& mod,const story_notebook::ManifestActor&,bool wireframe,mods::json::Value&,std::string& why,
+                        std::shared_ptr<const story_world_collision::mesh::Mesh> geometry=nullptr);
+// The ground of the declared static world objects of `stage` (their own collision: island grounds, terraces, piers,
+// buildings; not bodies of water) under each of `above`: the highest at or below each point. False: none anywhere.
+bool object_grounds(const std::string& stage,const std::vector<story_notebook::WorldPoint>& above,std::vector<float>& heights,std::vector<bool>& found);
 // The height range of a room's own collision (its triangles' lowest and highest point, world space), from the
 // player's stage files: the game looks for a body of water only within it. False: unknown for that room.
 bool room_height_range(const std::string& stage,int room,float& low,float& high,std::string& why);

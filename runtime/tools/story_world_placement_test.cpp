@@ -123,4 +123,31 @@ int main(){
   assert(solids_overlap(a,place_solid(bv,bt,{300,100,100},{0,30,0},{1,1,1})));
   assert(!solids_overlap(a,Solid{}));
  }
+ // ---- a body of water on a terraced island ground (the mod's own world object): three square terraces, each a closed
+ // block from the sea floor (-1000) up to its top (200, 400, 600; 3000, 2000 and 1000 wide), a pillar on the top one
+ {
+  std::vector<Point> v;std::vector<std::array<uint16_t,3>> t;
+  auto block=[&](Point lo,Point hi){const auto b=uint16_t(v.size());
+   for(Point p:std::initializer_list<Point>{{lo.x,lo.y,lo.z},{hi.x,lo.y,lo.z},{hi.x,lo.y,hi.z},{lo.x,lo.y,hi.z},{lo.x,hi.y,lo.z},{hi.x,hi.y,lo.z},{hi.x,hi.y,hi.z},{lo.x,hi.y,hi.z}})v.push_back(p);
+   for(auto f:std::initializer_list<std::array<uint16_t,3>>{{0,1,2},{0,2,3},{4,6,5},{4,7,6},{0,5,1},{0,4,5},{1,6,2},{1,5,6},{2,7,3},{2,6,7},{3,4,0},{3,7,4}})t.push_back({uint16_t(b+f[0]),uint16_t(b+f[1]),uint16_t(b+f[2])});};
+  block({-1500,-1000,-1500},{1500,200,1500});block({-1000,-1000,-1000},{1000,400,1000});block({-500,-1000,-500},{500,600,500});
+  const Solid isle=place_solid(v,t,{0,0,0},{0,0,0},{1,1,1});
+  block({200,600,-50},{300,900,50});const Solid pillared=place_solid(v,t,{0,0,0},{0,0,0},{1,1,1});
+  // the ground under a point: the top terrace, the middle one, the lowest, nothing beside the island; from below a top
+  float h=0;
+  assert(ground_under(isle,{0,5000,0},h)&&h==600);assert(ground_under(isle,{800,5000,-300},h)&&h==400);assert(ground_under(isle,{1300,5000,1300},h)&&h==200);
+  assert(!ground_under(isle,{1600,5000,0},h));assert(ground_under(isle,{0,500,0},h)&&h==400);assert(ground_under(isle,{500,5000,0},h)&&h==600);  // an edge is the top's
+  assert(ground_under(isle,{0,600,0},h)&&h==600);  // standing on it
+  // a pond's open water: a square (two triangles) at its level
+  auto water=[](float x0,float z0,float x1,float z1,float y){return place_solid({{x0,y,z0},{x1,y,z0},{x1,y,z1},{x0,y,z1}},{{0,2,1},{0,3,2}},{0,0,0},{0,0,0},{1,1,1});};
+  assert(!water_blocked(water(-300,-300,300,300,600),isle));   // on the top terrace, at its height (its floor dug into it)
+  assert(!water_blocked(water(-300,-300,300,300,800),isle));   // raised above it (its banks a mound on it)
+  assert(!water_blocked(water(-300,-300,300,300,630),isle));   // a little over it
+  assert(!water_blocked(water(100,-300,700,300,600),isle));    // over the edge of the top: the terrace below is lower
+  assert(water_blocked(water(100,-300,700,300,400),isle));     // on the middle terrace, cutting into the top one's wall
+  assert(!water_blocked(water(550,-300,900,300,400),isle));    // on the middle terrace, beside the wall
+  assert(water_blocked(water(-300,-300,300,300,600),pillared)); // a pillar standing in it
+  assert(!water_blocked(water(-300,-300,100,300,600),pillared)); // the pillar beside it
+  assert(!water_blocked(Solid{},isle)&&!water_blocked(water(-300,-300,300,300,600),Solid{}));
+ }
 }

@@ -627,11 +627,7 @@ bool world_placements(Host* host, const std::string& mod, const Value& before, c
             const auto& conflicts = query.get("conflicts").array;
             // every reason, with the game's own names (MCP errors carry the whole list; the editor shows the first)
             std::string list;
-            for (const auto& c : conflicts) {
-                std::string one = c.get("message").string("placement conflicts with protected space");
-                if (!c.get("native").string().empty()) one += " [" + c.get("native").string() + "]";
-                list += (list.empty() ? "" : "; ") + one;
-            }
+            for (const auto& c : conflicts) list += (list.empty() ? "" : "; ") + conflict_words(c);
             // a single small thing: how far to move
             if (conflicts.size() == 1 && conflicts[0].get("move").number > 0) list += " (move it about " + std::to_string(int(conflicts[0].get("move").number)) + " units away)";
             const std::string problem = actor.id + " can't stand here: " + (list.empty() ? std::string("placement could not be cleared") : "in the way: " + list);
@@ -795,6 +791,16 @@ bool validate_package(const std::string& mod, const Value& manifest, const std::
 }
 
 // ---------------------------------------------------------------- the sea and locations
+std::string conflict_words(const Value& c) {
+    std::string one = c.get("message").string("placement conflicts with protected space");
+    const std::string native = c.get("native").string();
+    if (!native.empty() && one.find(native) == std::string::npos) one += " [" + native + "]";
+    const Value& at = c.get("at");
+    if (at.type == Value::Object)
+        one += " at x " + std::to_string(int(std::lround(at.get("x").number))) + ", y " + std::to_string(int(std::lround(at.get("y").number))) + ", z " +
+               std::to_string(int(std::lround(at.get("z").number)));
+    return one;
+}
 int sea_room(float x, float z) {
     if (!(std::fabs(x) < 350000 && std::fabs(z) < 350000)) return 0;
     const int col = int(std::floor((double(x) + 350000) / 100000)), row = int(std::floor((double(z) + 350000) / 100000));

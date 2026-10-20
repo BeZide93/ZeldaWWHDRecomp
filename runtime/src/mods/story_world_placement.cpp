@@ -334,4 +334,27 @@ bool solids_overlap(const Solid&a,const Solid&b,float step){
  for(const auto&[x,xb]:pa)for(const auto&[y,yb]:pb)if(overlap(xb,yb,0)&&polys_cross(x,y))return true;
  return false;
 }
+bool water_blocked(const Solid&water,const Solid&other,float step){
+ if(water.triangles.empty()||other.triangles.empty()||!valid(water.bounds)||!valid(other.bounds)||!std::isfinite(step))return false;
+ // the surface raised by the step; only what reaches up through it counts
+ Bounds lifted=water.bounds;lifted.minimum.y+=step;lifted.maximum.y+=step;if(!overlap(lifted,other.bounds,0))return false;
+ std::vector<std::pair<Poly,Bounds>> others;
+ for(const auto&t:other.triangles){Poly p{other.vertices[t[0]],other.vertices[t[1]],other.vertices[t[2]]};const Bounds b=poly_bounds(p);if(overlap(b,lifted,0))others.push_back({std::move(p),b});}
+ for(const auto&t:water.triangles){Poly p{water.vertices[t[0]],water.vertices[t[1]],water.vertices[t[2]]};for(auto&q:p)q.y+=step;const Bounds b=poly_bounds(p);
+  for(const auto&[o,ob]:others)if(overlap(b,ob,0)&&polys_cross(p,o))return true;}
+ return false;
+}
+bool ground_under(const Solid&s,Point above,float&height){
+ bool found=false;if(!valid(s.bounds)||above.x<s.bounds.minimum.x||above.x>s.bounds.maximum.x||above.z<s.bounds.minimum.z||above.z>s.bounds.maximum.z||above.y<s.bounds.minimum.y)return false;
+ for(const auto&t:s.triangles){const Point a=s.vertices[t[0]],b=s.vertices[t[1]],c=s.vertices[t[2]];
+  const double ux=double(b.x)-a.x,uy=double(b.y)-a.y,uz=double(b.z)-a.z,vx=double(c.x)-a.x,vy=double(c.y)-a.y,vz=double(c.z)-a.z;
+  const double nx=uy*vz-uz*vy,ny=uz*vx-ux*vz,nz=ux*vy-uy*vx,len=std::sqrt(nx*nx+ny*ny+nz*nz);
+  if(!(len>0)||ny<kGroundFacing*len)continue;  // a wall, an overhang's underside, a ceiling
+  // (x, z) inside the triangle seen from above (edges included)
+  const double px=double(above.x)-a.x,pz=double(above.z)-a.z,d=ux*vz-uz*vx;if(d==0)continue;
+  const double s1=(px*vz-pz*vx)/d,s2=(ux*pz-uz*px)/d;if(s1<-1e-9||s2<-1e-9||s1+s2>1+1e-9)continue;
+  const double y=a.y+s1*uy+s2*vy;if(y>double(above.y)+1e-3)continue;
+  if(!found||y>height)height=float(y),found=true;}
+ return found;
+}
 }

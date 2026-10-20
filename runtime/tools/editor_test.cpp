@@ -1639,6 +1639,74 @@ void water_tool() {
     fs::remove_all(dir);
 }
 
+// A pond on the top terrace of the mod's own island (its world object, standing in the open sea): three square
+// terraces round (1000, -201000) with tops at 600, 400 and 200 (1000, 2000 and 3000 wide), the sea floor at -3000
+// around them. The banks reach out beyond the top terrace (down to the next one, and beyond the island to the sea
+// floor); the water's level is the ground at its shore, and the check sees the pond's own collision.
+struct TerraceHost : FakeHost {
+    std::vector<story_world_collision::mesh::Mesh> checked;
+    story_notebook::WorldPoint checked_at;
+    bool ground(const editor::WorldPoint& above, float& h, std::string&) override {
+        const float d = std::max(std::fabs(above.x - 1000), std::fabs(above.z + 201000));
+        h = d <= 500 ? 600.0f : d <= 1000 ? 400.0f : d <= 1500 ? 200.0f : -3000.0f;
+        if (h > above.y) h = -3000;  // asked from below a terrace's top: the floor (not reached here)
+        return true;
+    }
+    bool room_height(const std::string&, int, float& low, float& high, std::string&) override { return low = -3000, high = 1200, true; }
+    bool prepare_model(const std::string&, const std::string&, const Value&, std::string& note, std::string&) override { return note = "prepared", true; }
+    bool world_object_query_with(const std::string&, const story_notebook::ManifestActor& actor, const story_world_collision::mesh::Mesh& collision, Value& result,
+                                 std::string&) override {
+        checked.push_back(collision);
+        checked_at = actor.position;
+        result["clear"] = true;
+        result["conflicts"].type = Value::Array;
+        return true;
+    }
+};
+void pond_on_terrace() {
+    TerraceHost host;
+    editor::Session s(&host);
+    const fs::path dir = temp_dir("water-terrace");
+    fs::create_directories(dir);
+    s.add_package("editor-test", "Editor test", dir.string(), json(kManifest));
+    // picked on the top terrace (y 600), no level of its own
+    const char* pond = R"({"points": [{"x": 750, "y": 600, "z": -201250}, {"x": 1250, "y": 600, "z": -201250}, {"x": 1250, "y": 600, "z": -200750}, {"x": 750, "y": 600, "z": -200750}]})";
+    Value r = s.run("check_water", [&] { Value v = json(pond); v["kind"] = "pond"; return v; }());
+    const Value& c = r.get("result");
+    // the level: the top terrace's height (not the lower terraces or the sea floor the banks reach out to)
+    CHECK(ok(r) && c.get("ok").boolean && c.get("position").get("y").number == 600);
+    // its body: the floor 200 below the water, the banks ending at the terrace's edge (not down to the sea floor)
+    CHECK(c.get("minimum").get("y").number >= 395 && c.get("maximum").get("y").number <= 640);
+    // the placement check got the pond's own collision where it will stand: its open water at the level, its floor
+    // and banks in their surfaces
+    CHECK(host.checked.size() == 1 && host.checked_at.x == 1000 && host.checked_at.y == 600 && host.checked_at.z == -201000);
+    if (!host.checked.empty()) {
+        const auto& m = host.checked[0];
+        float lowest = 1e9f;
+        for (const auto& v : m.vertices) lowest = std::min(lowest, v.y);
+        CHECK(!m.vertices.empty() && lowest == m.minimum.y);
+        size_t water = 0, floor = 0;
+        for (const auto& t : m.triangles) {
+            if (t.semantic == story_world_collision::mesh::SurfaceWater) {
+                ++water;
+                for (auto i : t.indices) CHECK(m.vertices[i].y == 0);
+            }
+            floor += t.semantic == 3;
+        }
+        CHECK(water > 4 && floor > 4 && m.minimum.y == -200);
+    }
+    // made: the same level; a raised level (the water deep enough to swim in, its banks a mound on the terrace) too
+    r = s.run("add_pond", json(pond));
+    CHECK(ok(r) && actor_of(s, "pond") && actor_of(s, "pond")->get("position").get("y").number == 600);
+    r = s.run("check_water", [&] { Value v = json(pond); v["kind"] = "pond"; v["level"] = 800; return v; }());
+    CHECK(ok(r) && r.get("result").get("ok").boolean && r.get("result").get("position").get("y").number == 800);
+    // what is in the way says which of the island's places it is: its game name and where it is
+    CHECK(editor::conflict_words(json(R"({"kind": "event", "message": "a cutscene area of the island", "native": "TagEv", "at": {"x": -671.4, "y": 115, "z": -198464}, "reach": 300})")) ==
+          "a cutscene area of the island [TagEv] at x -671, y 115, z -198464");
+    CHECK(editor::conflict_words(json(R"({"kind": "world_object", "message": "this mod's world object"})")) == "this mod's world object");
+    fs::remove_all(dir);
+}
+
 int main(int argc, char** argv) {
     // editor_test --game <game dir> [stage room]: what the editor reads from a game folder (manual check)
     if (argc >= 3 && std::string(argv[1]) == "--game") {
@@ -1656,6 +1724,7 @@ int main(int argc, char** argv) {
         return 2;
     }
     world_object_commands();
+    pond_on_terrace();
     floating_world_object_commands();
     grapple_world_object_commands();
     island_world_object_commands();

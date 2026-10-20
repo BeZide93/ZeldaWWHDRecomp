@@ -525,6 +525,11 @@ is where a waterfall goes. The models' files are named after their content under
 tool's own parameters ride along in the first model (glTF `asset.extras`), which is how the editor changes
 them later. Because a body of water lies on the island's ground, its floor and banks may reach into the
 island's ground and walls (as island buildings do); everything else an object keeps clear of still counts.
+The same goes for world objects it lies on or in (an island ground or a terrace of your own): their ground
+is ground for the tool (its points, level and banks follow it), and of such an object only what rises
+through the water is in the way (a wall or a pillar standing in it, a house reaching into it, ground higher
+than the water inside its shore). A house or another object placed later is checked against the water the
+same way.
 
 Limits: bodies of water are made on the `sea` stage; a body takes two of a mod's 8 models; a pond has 3 to
 48 points, a river 2 to 32 (turns of at most 120 degrees), a waterfall is 100 to 4,000 units wide and falls 80

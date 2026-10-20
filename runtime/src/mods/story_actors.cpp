@@ -1063,7 +1063,13 @@ bool editor_update(const std::string& mod,const std::vector<ManifestActor>& decl
             mods::json::Value status;std::string w;
             if(mod_actor::world_object_query(mod,spec,false,status,w)&&!status.get("clear").boolean){
                 const auto& c=status.get("conflicts").array;
-                later.push_back(spec.id+": can't stand here"+(c.empty()?std::string():" ("+c.front().get("message").string()+")")+"; it isn't in the game until it stands where it fits");
+                // what is in the way, with the game's own name and where it is (which of the island's places is meant)
+                std::string what;
+                if(!c.empty()){const auto& f=c.front();what=f.get("message").string();const std::string native=f.get("native").string();
+                    if(!native.empty()&&what.find(native)==std::string::npos)what+=" ["+native+"]";
+                    if(f.get("at").type==mods::json::Value::Object)what+=" at x "+std::to_string(int(std::lround(f.get("at").get("x").number)))+", y "+std::to_string(int(std::lround(f.get("at").get("y").number)))+", z "+std::to_string(int(std::lround(f.get("at").get("z").number)));
+                    if(c.size()>1)what+=" and "+std::to_string(c.size()-1)+" more";}
+                later.push_back(spec.id+": can't stand here"+(what.empty()?std::string():" ("+what+")")+"; it isn't in the game until it stands where it fits");
                 continue;}
         }
         listed.insert(spec.id);

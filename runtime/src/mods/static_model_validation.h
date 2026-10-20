@@ -28,11 +28,14 @@ struct ModelInfo {unsigned vertex_count=0,triangle_count=0,texture_width=0,textu
 inline uint32_t le32(const uint8_t* p){return uint32_t(p[0])|(uint32_t(p[1])<<8)|(uint32_t(p[2])<<16)|(uint32_t(p[3])<<24);}
 inline uint32_t be32(const uint8_t* p){return uint32_t(p[3])|(uint32_t(p[2])<<8)|(uint32_t(p[1])<<16)|(uint32_t(p[0])<<24);}
 // The collision material names a GLB may use (tools/story_mods/collision_mesh.py SEMANTICS; docs/world-objects.md).
-inline bool collision_material(const std::string& name){
+// Its surface (story_world_collision::mesh semantic: the list's order), -1 for another name.
+inline int collision_surface(const std::string& name){
+    int i=0;
     for(const char* m:{"col_stone","col_grass","col_wood","col_sand","col_metal","col_wall","col_objects","col_climb","col_hookshot",
-                       "col_water","col_shallow","col_waterfall","col_ice","col_void"})if(name==m)return true;
-    return false;
+                       "col_water","col_shallow","col_waterfall","col_ice","col_void"}){if(name==m)return i;++i;}
+    return -1;
 }
+inline bool collision_material(const std::string& name){return collision_surface(name)>=0;}
 inline bool integer(const mods::json::Value& v,size_t lo,size_t hi){return v.type==mods::json::Value::Number&&std::isfinite(v.number)&&v.number>=double(lo)&&v.number<=double(hi)&&std::floor(v.number)==v.number;}
 inline bool validate_glb_strict(std::span<const uint8_t> b,ModelInfo& info,std::string& why,bool collision=false){
     using mods::json::Value;info={};auto fail=[&](const std::string& s){why=s;return false;};

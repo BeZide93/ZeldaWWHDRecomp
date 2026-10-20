@@ -764,11 +764,39 @@ bool room_height_range(const std::string&stage,int room,float&low,float&high,std
     if(!any)return why="the room's collision is not known (no game files, or the room has none)",false;
     return true;
 }
-bool world_object_query(const std::string&mod,const story_notebook::ManifestActor&spec,bool wireframe,mods::json::Value& result,std::string&why){
+namespace {
+// a world object's collision placed in the world; `keep` chooses the triangles by their surface (none: all)
+story_world_placement::Solid placed_solid(const story_world_collision::mesh::Mesh&g,const story_notebook::ManifestActor&a,bool(*keep)(uint16_t)=nullptr){
+    using story_world_placement::Point;std::vector<Point> v;v.reserve(g.vertices.size());for(const auto&p:g.vertices)v.push_back({p.x,p.y,p.z});
+    std::vector<std::array<uint16_t,3>> t;t.reserve(g.triangles.size());for(const auto&x:g.triangles)if(!keep||keep(x.semantic))t.push_back(x.indices);
+    // the geometry is already scaled (collision_geometry): placed with the actor's position and turn only
+    return story_world_placement::place_solid(v,t,{a.position.x,a.position.y,a.position.z},{a.rotation.x,a.rotation.y,a.rotation.z},{1,1,1});
+}
+// a body of water's open water: where Link swims, wades or stands under a fall
+bool open_water(uint16_t s){return s==story_world_collision::mesh::SurfaceWater||s==10||s==11;}
+// ground Link and the game's ground check stand on (not water, which he passes through, nor a void)
+bool standing_ground(uint16_t s){return s!=story_world_collision::mesh::SurfaceWater&&s!=story_world_collision::mesh::SurfaceVoid;}
+}
+bool object_grounds(const std::string&stage,const std::vector<story_notebook::WorldPoint>&above,std::vector<float>&heights,std::vector<bool>&found){
+    std::lock_guard guard(world_mutex);heights.assign(above.size(),0);found.assign(above.size(),false);bool any=false;
+    for(const auto&d:declarations){
+        // a static object's own collision (an island ground, a terrace, a pier, a house); a body of water is no
+        // ground of its own (its banks lie on another's), a floating or drifting object moves
+        if(!d.collision||d.spec.stage!=stage||d.spec.behaviour!="static"||d.spec.water_body())continue;
+        // only an object under one of the points is placed (a ray's many steps ask one or two places at a time)
+        story_world_placement::Bounds b;if(!world_bounds(d,d.spec.position,b))continue;
+        if(std::none_of(above.begin(),above.end(),[&](const story_notebook::WorldPoint&p){return p.x>=b.minimum.x&&p.x<=b.maximum.x&&p.z>=b.minimum.z&&p.z<=b.maximum.z&&p.y>=b.minimum.y;}))continue;
+        const auto solid=placed_solid(*d.collision,d.spec,standing_ground);
+        for(size_t i=0;i<above.size();++i){float h=0;
+            if(story_world_placement::ground_under(solid,{above[i].x,above[i].y,above[i].z},h)&&(!found[i]||h>heights[i]))heights[i]=h,found[i]=true,any=true;}
+    }
+    return any;
+}
+bool world_object_query(const std::string&mod,const story_notebook::ManifestActor&spec,bool wireframe,mods::json::Value& result,std::string&why,std::shared_ptr<const story_world_collision::mesh::Mesh> geometry){
     std::lock_guard guard(world_mutex);using namespace story_world_placement;using mods::json::Value;
     result=Value{};result["conflicts"].type=Value::Array;
-    std::shared_ptr<const story_world_collision::mesh::Mesh> geometry;
-    if(!spec.world_object()||!collision_geometry(mod,spec,geometry))return why="collision mesh is unavailable or exceeds its limits; prepare it before placing",false;
+    if(geometry){std::string w;if(!spec.world_object()||!story_world_collision::mesh::validate(*geometry,w))return why="the collision to check is not valid: "+w,false;}
+    else if(!spec.world_object()||!collision_geometry(mod,spec,geometry))return why="collision mesh is unavailable or exceeds its limits; prepare it before placing",false;
     Bounds local{{geometry->minimum.x,geometry->minimum.y,geometry->minimum.z},{geometry->maximum.x,geometry->maximum.y,geometry->maximum.z}},bounds;
     if(!transform_bounds(local,{spec.position.x,spec.position.y,spec.position.z},{spec.rotation.x,spec.rotation.y,spec.rotation.z},{1,1,1},bounds))return why="invalid collision transform",false;
     if(spec.water_object()){float radius=0;for(const auto&p:geometry->vertices)radius=std::max(radius,std::sqrt(p.x*p.x+p.y*p.y+p.z*p.z));const float y=spec.position.y-spec.buoyancy.draft;bounds={{spec.position.x-radius,y-2048-radius,spec.position.z-radius},{spec.position.x+radius,y+2048+radius,spec.position.z+radius}};}
@@ -798,11 +826,13 @@ bool world_object_query(const std::string&mod,const story_notebook::ManifestActo
             auto overlapping=check(spec.stage,int(spec.room),bounds,placed);for(auto&x:overlapping)if(x.kind=="world_object")x.message=whose;conflicts.insert(conflicts.end(),overlapping.begin(),overlapping.end());
         }else{
             // two static objects: their own collision, so one may stand on the other's walkable top (an island
-            // ground, a platform) and only a real overlap of their solid geometry is in the way
-            auto solid_of=[](const story_world_collision::mesh::Mesh&g,const story_notebook::ManifestActor&a){std::vector<Point> v;v.reserve(g.vertices.size());for(const auto&p:g.vertices)v.push_back({p.x,p.y,p.z});
-                std::vector<std::array<uint16_t,3>> t;t.reserve(g.triangles.size());for(const auto&x:g.triangles)t.push_back(x.indices);
-                return place_solid(v,t,{a.position.x,a.position.y,a.position.z},{a.rotation.x,a.rotation.y,a.rotation.z},{a.scale.x,a.scale.y,a.scale.z});};
-            if(solids_overlap(solid_of(*geometry,spec),solid_of(*d.collision,d.spec)))conflicts.push_back({"world_object",other_id,whose,other_id});
+            // ground, a platform) and only a real overlap of their solid geometry is in the way; a body of water lies
+            // on or in the other (its floor and banks in the ground), so only what rises through its water counts
+            bool hit=false;
+            if(spec.water_body()!=d.spec.water_body()){const bool own=spec.water_body();
+                hit=water_blocked(placed_solid(own?*geometry:*d.collision,own?spec:d.spec,open_water),placed_solid(own?*d.collision:*geometry,own?d.spec:spec));}
+            else hit=solids_overlap(placed_solid(*geometry,spec),placed_solid(*d.collision,d.spec));
+            if(hit)conflicts.push_back({"world_object",other_id,whose,other_id});
         }
     }
     if(grapple_count>16)conflicts.push_back({"grapple","room","Room grapple targets exceed the limit of 16"});

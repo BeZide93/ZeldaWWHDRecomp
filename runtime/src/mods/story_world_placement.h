@@ -49,6 +49,16 @@ inline constexpr float kGroundStep=150;
 // resting on (or slightly into) the other's top doesn't count, a cliff, pillar, wall or roof through it does.
 // A solid wholly inside the other without any crossing is not found (the caller's bounds rules still apply).
 bool solids_overlap(const Solid& a,const Solid& b,float step=kGroundStep);
+// ---- a body of water (the editor's pond, river or waterfall) against an object it lies on or in (an island ground, a
+// terrace): `water` is the body's open water only (its swimming, wading and splash surfaces). The object's ground under
+// the water and its ground and walls where the body's floor and banks meet them are where the water lies, as on an
+// island's own ground; in the way is only what rises through the water (a wall, a pillar, a house, ground higher than
+// the water inside its shore): a crossing of the open water raised by `step`.
+inline constexpr float kWaterStep=50;
+bool water_blocked(const Solid& water,const Solid& other,float step=kWaterStep);
+// The highest ground of a solid under `above` (a triangle facing up, at or below above.y): its height. False: none.
+inline constexpr float kGroundFacing=0.25f;  // the least upward share of a ground triangle's normal (about 75 degrees)
+bool ground_under(const Solid&,Point above,float& height);
 // a local collision mesh placed in the world (position, rotation in degrees as transform_bounds, scale)
 Solid place_solid(const std::vector<Point>& local,const std::vector<std::array<uint16_t,3>>& triangles,Point position,Point rotation,Point scale);
 // Bounded readers of original stage resources. Invalid or unsupported input never grants coverage.

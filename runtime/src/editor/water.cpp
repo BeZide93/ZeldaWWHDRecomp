@@ -1251,6 +1251,13 @@ std::vector<XZ> ground_places(const Params& p, const XZ& origin) {
     return out;
 }
 
+std::vector<XZ> shore_places(const Params& p, const XZ& origin) {
+    std::vector<XZ> out;
+    if (p.kind == "pond" && p.points.size() >= 3)
+        for (const XZ& q : pond_ring(p).q) out.push_back({q.x + origin.x, q.z + origin.z});
+    return out;
+}
+
 std::vector<Problem> check(const Params& p) {
     std::vector<Problem> out;
     auto error = [&](const std::string& m, const char* field) { out.push_back({m, field}); };
@@ -1324,6 +1331,18 @@ bool build(const Params& p, const XZ& origin, int origin_y, Built& b, std::vecto
     if (b.main_vertices > 4096 || b.main_triangles > 8192) problems.push_back({"the model has too many vertices (at most 4,096)", "points"});
     for (const auto& e : problems)
         if (e.severity == "error") return false;
+    // the collision the game gets (the same welded vertices the GLB holds), for the placement check
+    for (const auto& mesh : o.main_meshes)
+        for (const auto& prim : mesh.prims) {
+            if (prim.visible) continue;
+            const auto base = b.collision_points.size();
+            for (size_t i = 0; i + 2 < prim.pos.size(); i += 3)
+                b.collision_points.push_back({float(double(prim.pos[i]) * 100 / 1024), float(double(prim.pos[i + 1]) * 100 / 1024), float(double(prim.pos[i + 2]) * 100 / 1024)});
+            for (size_t t = 0; t + 2 < prim.idx.size(); t += 3) {
+                b.collision_faces.push_back({uint16_t(base + prim.idx[t]), uint16_t(base + prim.idx[t + 1]), uint16_t(base + prim.idx[t + 2])});
+                b.collision_materials.push_back(prim.material);
+            }
+        }
     const std::string extras = params_text(p);
     b.main = write_glb(o.main_meshes, o.main_materials, o.main_images, extras);
     b.surface = write_glb(o.surface_meshes, o.surface_materials, {placeholder_texture()}, "");
