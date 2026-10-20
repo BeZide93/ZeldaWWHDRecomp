@@ -123,7 +123,13 @@ std::optional<Value> read(const std::string& key) {
 }
 namespace input {PadState read() {return {};}}
 namespace true60 {float dt() {return 0.5f;}}
-namespace mem { std::string read_cstr(uint32_t) { return "option"; } uint32_t host_alloc(uint32_t,uint32_t) { return 0; } unsigned fixture_runtime_allocs=0; uint32_t runtime_alloc(uint32_t,uint32_t) {++fixture_runtime_allocs;return 0;} uint32_t runtime_top(){return 0;} }
+namespace mem { std::string read_cstr(uint32_t) { return "option"; } uint32_t host_alloc(uint32_t,uint32_t) { return 0; } unsigned fixture_runtime_allocs=0; std::vector<uint32_t> fixture_alloc_sizes; uint32_t runtime_alloc(uint32_t size,uint32_t) {++fixture_runtime_allocs;fixture_alloc_sizes.push_back(size);
+#ifdef GUEST_HOOKS_TEST_EDITOR
+ return 0x60000000u+0x10000u*fixture_runtime_allocs;  // the editor variant: real-looking guest objects
+#else
+ return 0;
+#endif
+} uint32_t runtime_top(){return 0;} }
 namespace dispatch { bool fixture_text_sealed=false,fixture_dispatch_tampered=false;void set(uint32_t, PpcFunc) {} PpcFunc lookup(uint32_t a){if(fixture_dispatch_tampered)return nullptr;for(unsigned n=0;n<g_recomp_func_count;++n)if(g_recomp_funcs[n].addr==a)return g_recomp_funcs[n].fn;return nullptr;} bool seal_native_text()noexcept{return false;} bool native_text_sealed()noexcept{return fixture_text_sealed;} }
 namespace model_probe {bool native_refresh_quiescent()noexcept{return true;}}
 // The hook runner fixture has no guest scheduler. Its logic-service thread
@@ -211,8 +217,8 @@ std::string prepare(const std::string&,const story_notebook::ManifestModel&,cons
 bool water_for(const std::string&){return false;}
 std::string material_for(const std::string&){return {};}
 }
-#ifdef GUEST_HOOKS_TEST_NO_HOOKS
-namespace editor { bool launch_mode(){return true;} }   // --editor with game code built without --mod-hooks
+#if defined(GUEST_HOOKS_TEST_NO_HOOKS) || defined(GUEST_HOOKS_TEST_EDITOR)
+namespace editor { bool launch_mode(){return true;} }   // --editor (NO_HOOKS: game code built without --mod-hooks)
 #else
 namespace editor { bool launch_mode(){return false;} }  // a start without --editor
 #endif
@@ -269,13 +275,17 @@ bool register_music_hook(const std::string&,MusicHook hook){music_hook=std::move
 void set_place_resolver(ResolvePlace){}
 bool validate(const std::vector<story_notebook::ManifestScene>&,std::string&){return true;}
 void set_game_calls(uint32_t (*)(Cpu*,uint32_t,std::initializer_list<uint32_t>)){}
-void set_scratch_memory(uint32_t){}
+static uint32_t scene_scratch=0;static bool scene_editor=false;static unsigned scene_installs=0;
+void set_scratch_memory(uint32_t a){scene_scratch=a;}
+bool scratch_memory(){return scene_scratch!=0;}
+void enable_editor_previews(){scene_editor=true;}
+bool editor_previews(){return scene_editor;}
 void set_callbacks(Resolve,Actions){}
 void set_particle_resolver(ResolveParticle){}
 bool declare(const std::string&,const std::vector<story_notebook::ManifestScene>&,std::string&){return true;}
 bool request(const std::string&,const std::string&){return false;}
 void tick(Cpu*,bool,unsigned){}
-void install(void (*)(Cpu*,uint32_t),const std::function<std::string(uint32_t)>&,const std::function<void(uint32_t,void(*)(Cpu*))>&){}
+void install(void (*)(Cpu*,uint32_t),const std::function<std::string(uint32_t)>&,const std::function<void(uint32_t,void(*)(Cpu*))>&){++scene_installs;}
 void state_loaded(){}
 }
 namespace story_actor_textures {
@@ -788,7 +798,32 @@ int main() {
     for(const auto& line:logged)if(line.find("no code-mod support")!=std::string::npos&&line.find("--mod-hooks")!=std::string::npos)++notes;
     assert(notes==1);
     assert(!guestmods::install_stage_owner_pass_through());
+    assert(!story_scenes::scene_editor&&!story_scenes::scene_scratch);  // no scene previews without hooks
     std::puts("guest mods start without mod hooks passed");
+}
+#elif defined(GUEST_HOOKS_TEST_EDITOR)
+// An --editor start (game code with --mod-hooks) and no package declaring a scene: the scene player is
+// installed anyway, so a scene made in the editor previews without a restart; its scratch is the last
+// runtime object of the guest-mod start-up.
+int main() {
+    ppc_mod_register(33, test_mod_flags, test_mod_bodies);
+    const char* missing="__wwhd_nonexistent_guest_build_config_for_test__.json";
+#ifdef _WIN32
+    _putenv_s("WWHD_GUEST_BUILD_CONFIG",missing);
+#else
+    setenv("WWHD_GUEST_BUILD_CONFIG",missing,1);
+#endif
+    guestmods::init();
+    assert(story_scenes::scene_editor);                 // editor previews on
+    assert(story_scenes::scene_scratch!=0);             // with the scene player's scratch
+    assert(story_scenes::scene_installs==2);            // the declared-scenes install, then the editor's
+    assert(!mem::fixture_alloc_sizes.empty()&&mem::fixture_alloc_sizes.back()==story_scenes::kScratchBytes);
+    assert(story_scenes::scene_scratch==0x60000000u+0x10000u*mem::fixture_runtime_allocs);  // the last one
+    assert(story_actors::live_kinds==1);                // the editor's other live services as before
+    unsigned ready=0;
+    for(const auto& line:logged)if(line.find("scene previews: ready")!=std::string::npos)++ready;
+    assert(ready==1);
+    std::puts("guest mods editor start: scene previews installed passed");
 }
 #else
 int main() {
@@ -811,6 +846,7 @@ int main() {
     assert(mem::fixture_runtime_allocs==0&&story_particles::configured==0&&story_item_models::configured==0);
     assert(story_native_wait_runtime::startups==0&&!guestmods::g_native_scenes&&!guestmods::g_package_observer);
     assert(story_actors::live_kinds==0);  // the editor's live kinds only with --editor
+    assert(!story_scenes::scene_editor&&!story_scenes::scene_scratch);  // no scene player without --editor or a scene
     assert(!story_game_objects::built());  // the game objects catalogue only with a mod that names one, or --editor
     assert(!story_game_pieces::built());   // the buildings catalogue too
     Cpu c{};

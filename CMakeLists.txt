@@ -3571,3 +3571,17 @@ target_include_directories(guest_mods_no_hooks_test PRIVATE runtime/include runt
 target_compile_options(guest_mods_no_hooks_test PRIVATE -UNDEBUG)
 target_link_libraries(guest_mods_no_hooks_test PRIVATE ZLIB::ZLIB ${CMAKE_DL_LIBS} Threads::Threads)
 add_test(NAME guest_mods_no_hooks COMMAND guest_mods_no_hooks_test)
+# ... and for an --editor start with hooks: the scene player is installed for the editor's previews.
+add_executable(guest_mods_editor_test ${GUEST_HOOKS_TEST_SOURCES})
+target_compile_definitions(guest_mods_editor_test PRIVATE GUEST_HOOKS_TEST_EDITOR=1)
+target_include_directories(guest_mods_editor_test PRIVATE runtime/include runtime/src)
+target_compile_options(guest_mods_editor_test PRIVATE -UNDEBUG)
+target_link_libraries(guest_mods_editor_test PRIVATE ZLIB::ZLIB ${CMAKE_DL_LIBS} Threads::Threads)
+add_test(NAME guest_mods_editor COMMAND guest_mods_editor_test)
+# The scene player's editor previews without a declared scene (the contract test's sources, another main).
+get_target_property(STORY_SCENES_NATIVE_TEST_SOURCES story_scenes_native_test SOURCES)
+add_executable(story_scenes_editor_preview_test ${STORY_SCENES_NATIVE_TEST_SOURCES})
+target_compile_definitions(story_scenes_editor_preview_test PRIVATE STORY_SCENES_EDITOR_PREVIEW_TEST=1)
+target_include_directories(story_scenes_editor_preview_test PRIVATE runtime/include runtime/src runtime/src/mods)
+target_compile_options(story_scenes_editor_preview_test PRIVATE -UNDEBUG)
+add_test(NAME story_scenes_editor_preview COMMAND story_scenes_editor_preview_test)

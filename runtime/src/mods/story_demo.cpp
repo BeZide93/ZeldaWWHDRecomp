@@ -225,7 +225,9 @@ void install(const std::function<std::string(uint32_t)>& replaced_by, const std:
     // the environment's execute only when a declared demo changes the weather (holds it on the Great Sea)
     const bool weather = story_scenes::any_demo_step([](const demo_scene::Demo& d) { return !d.weather.empty(); });
     const bool time = story_scenes::any_demo_step([](const demo_scene::Demo& d) { return !d.time.empty(); });
-    if (weather || time) story_demo_parts::light::install(parts(LightRecord), g_original, replaced_by, replace, weather, time);
+    // (the world editor's previews: both, a scene made in it may change either)
+    const bool editor = story_scenes::editor_previews();
+    if (weather || time || editor) story_demo_parts::light::install(parts(LightRecord), g_original, replaced_by, replace, weather || editor, time || editor);
     LOG("[demo] installed: virtual demo archive %s", kVirtualArchive);
 }
 

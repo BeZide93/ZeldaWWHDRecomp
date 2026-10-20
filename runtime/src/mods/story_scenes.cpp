@@ -39,6 +39,7 @@ uint32_t g_scratch=0,g_buttons=0;
 unsigned g_frame_units=1;
 void (*g_original)(Cpu*,uint32_t)=nullptr;
 bool g_trim_installed=false,g_choice_installed=false;
+bool g_editor_previews=false;  // --editor: installed without a declared scene (enable_editor_previews)
 std::atomic<bool> g_active_input{false},g_swallow_plus{false},g_editor_skip{false};
 std::atomic<bool>g_native_restore_reserved{false},g_reserved_abort{false},g_reserved_load{false};
 uint64_t g_generation=0;
@@ -356,6 +357,9 @@ void demo_tick(Cpu* c){if(demo_backend().configured&&demo_backend().configured()
 bool has_demo_steps(){return std::any_of(g_entries.begin(),g_entries.end(),[](const Entry& e){return std::any_of(e.scene.steps.begin(),e.scene.steps.end(),[](const SceneStep& s){return s.kind==SceneStep::Kind::Demo;});});}
 bool any_demo_step(const std::function<bool(const demo_scene::Demo&)>& test){for(const auto& e:g_entries)for(const auto& st:e.scene.steps)if(st.kind==SceneStep::Kind::Demo&&st.demo&&test(*st.demo))return true;return false;}
 void set_scratch_memory(uint32_t guest){g_scratch=guest;}
+bool scratch_memory(){return g_scratch!=0;}
+void enable_editor_previews(){if(!g_cpu&&!g_player.active()&&!g_native_player.active())g_editor_previews=true;}
+bool editor_previews(){return g_editor_previews;}
 void set_callbacks(Resolve resolve_fn,Actions actions_fn){g_resolve=std::move(resolve_fn);g_actions=std::move(actions_fn);}
 void set_place_resolver(ResolvePlace resolver){g_places=std::move(resolver);}
 void set_particle_resolver(ResolveParticle resolver){g_particle_resolve=std::move(resolver);}
@@ -421,10 +425,10 @@ void trigger(const std::string& kind,const std::string& mod,const std::string& i
     }
 }
 void install(void (*original_fn)(Cpu*,uint32_t),const std::function<std::string(uint32_t)>& replaced_by,const std::function<void(uint32_t,void(*)(Cpu*))>& replace) {
-    if(g_entries.empty()||!original_fn)return;
+    if((g_entries.empty()&&!g_editor_previews)||!original_fn||!g_scratch)return;
     g_original=original_fn;
-    if(has_demo_steps()&&demo_backend().configured&&demo_backend().configured())demo_backend().install(replaced_by,replace);
-    const bool needs_choice=std::any_of(g_entries.begin(),g_entries.end(),[](const Entry& entry){return std::any_of(entry.scene.steps.begin(),entry.scene.steps.end(),[](const SceneStep& step){return step.kind==SceneStep::Kind::Choice;});});
+    if((has_demo_steps()||g_editor_previews)&&demo_backend().configured&&demo_backend().configured())demo_backend().install(replaced_by,replace);
+    const bool needs_choice=g_editor_previews||std::any_of(g_entries.begin(),g_entries.end(),[](const Entry& entry){return std::any_of(entry.scene.steps.begin(),entry.scene.steps.end(),[](const SceneStep& step){return step.kind==SceneStep::Kind::Choice;});});
     if(needs_choice&&!g_choice_installed){story_scene_choice::configure(original_fn,g_call,g_scratch+ChoiceScratch,scene_lease);g_choice_installed=story_scene_choice::install(replaced_by,replace);}
     if(g_trim_installed)return;
     const auto other=replaced_by(kCalcTrim);
@@ -628,7 +632,8 @@ std::optional<story_native_scene_checkpoint::PreparedRetire>prepare_native_retir
 }
 size_t current_step(){return g_native_player.active()?0:g_player.step();}
 bool editor_preview(const std::string& mod,const ManifestScene& scene,bool declared,std::string& why){
-    if(!g_scratch||!g_call||g_entries.empty())return why="the game started without mod scenes: scene previews work after a restart with a scene saved in the package",false;
+    if(!g_scratch||!g_call||(g_entries.empty()&&!g_editor_previews))return why="scene previews are off in this game session: it started without the game's code-mod support (the log at start-up says why)",false;
+    if(!g_trim_installed)return why="scenes are off in this game session: another mod owns the scene camera (the log at start-up says which)",false;
     if(g_native_restore_reserved.load(std::memory_order_acquire)||g_cpu||g_player.active()||g_native_player.active()||g_cleanup_pending||g_starting)return why="a scene is running",false;
     const bool choice=std::any_of(scene.steps.begin(),scene.steps.end(),[](const SceneStep& s){return s.kind==SceneStep::Kind::Choice;});
     if(choice&&!g_choice_installed)return why="choices play after a restart (the game started without a scene that has one)",false;

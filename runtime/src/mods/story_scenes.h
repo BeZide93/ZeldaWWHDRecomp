@@ -46,6 +46,12 @@ uint32_t demo_arena_bytes();  // 0 without a backend
 void configure_demo(uint32_t arena, uint32_t (*call)(Cpu*, uint32_t, std::initializer_list<uint32_t>), void (*original)(Cpu*, uint32_t));
 void demo_tick(Cpu* c);       // once per logic step
 void set_scratch_memory(uint32_t guest);
+bool scratch_memory();  // set_scratch_memory was called
+// The world editor (--editor, before install): the scene player, its camera trim, choice and demo hooks
+// are installed even when no package declares a scene at start-up, so a new, unsaved scene plays as a
+// preview at once (editor_preview). The caller provides the scratch and demo memory as for declared scenes.
+void enable_editor_previews();
+bool editor_previews();
 void set_callbacks(Resolve resolve, Actions actions);
 // False with a precise reason when a scene uses a currently unsupported effect.
 bool validate(const std::vector<story_notebook::ManifestScene>& scenes,std::string& why);
@@ -77,8 +83,8 @@ size_t current_step();
 // World editor (main game thread, outside tick): plays `scene` of `mod` as a preview. `declared`: the
 // declared scene of that id is requested (its native version may play). Otherwise the steps play from an
 // editor-only entry "editor-preview" (no trigger, never native) that replaces the mod's previous one.
-// False with why when no scene can start (none declared at start-up, a scene running, a choice without
-// the choice hooks).
+// False with why when no scene can start (scene support not installed at start-up: no declared scene
+// and not the editor's enable_editor_previews, a scene running, a choice without the choice hooks).
 bool editor_preview(const std::string& mod,const story_notebook::ManifestScene& scene,bool declared,std::string& why);
 // The next tick skips the current scene (as Plus/Start does).
 void editor_skip();

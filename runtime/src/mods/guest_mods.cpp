@@ -1406,14 +1406,16 @@ void init() {
     story_scenes::set_place_resolver([](Cpu*,const std::string& mod,const std::string& quest)->std::optional<story_notebook::WorldPoint>{
         float x=0,z=0;if(!story_notebook::place_position(mod,quest,x,z))return {};return story_notebook::WorldPoint{x,0,z};
     });
-    story_scenes::install(call_original,[](uint32_t addr) {
+    const auto scenes_replaced_by=[](uint32_t addr) {
         auto it=g_chains.find(addr);return it==g_chains.end()?std::string():it->second.replace_mod;
-    },[](uint32_t addr,PpcFunc fn) {
+    };
+    const auto scenes_replace=[](uint32_t addr,PpcFunc fn) {
         int ordinal=ordinal_of(addr);
         if(ordinal<0)fatal("[guestmods] scenes: %08X is not a game function",addr);
         Chain& ch=g_chains[addr];ch.addr=addr;ch.ordinal=uint32_t(ordinal);ch.replace=fn;ch.replace_mod="the port's scene player";
         g_mod_hook_flags[ordinal]=1;
-    });
+    };
+    story_scenes::install(call_original,scenes_replaced_by,scenes_replace);
     // The King of Red Lions' one-time line for the tracked quest (story_sail.h): the boat's execute,
     // checkForceMessage and procTalk_init, only when a declared quest step has a sail_line.
     story_notebook::install_sail([](uint32_t addr) {
@@ -1497,6 +1499,20 @@ void init() {
         g_mod_hook_flags[ordinal]=1;
     });
     if(getenv("WWHD_GUEST_MODS"))LOG("[guestmods] WWHD_GUEST_MODS is retired; install and trust guest packages in the mod manager");
+    // The world editor's scene previews: in the --editor launch mode the scene player (its scratch, the
+    // demo memory, the camera trim, choice and demo hooks) is there even when no package declared a scene
+    // at start-up, so a new, unsaved scene plays at once (Play scene / Play step) instead of after a
+    // restart. Its runtime objects (1 KiB scratch, the demo memory) are part of full save states: a full
+    // state from an --editor start of an older build without them is refused ("laid out differently");
+    // portable states and starts without --editor are not affected. Without --editor nothing here runs
+    // or allocates.
+    if(editor::launch_mode()) {
+        if(!story_scenes::scratch_memory())story_scenes::set_scratch_memory(mem::runtime_alloc(story_scenes::kScratchBytes,16));
+        if(!(g_world_scenes&&story_scenes::has_demo_steps())&&story_scenes::demo_arena_bytes())story_scenes::configure_demo(mem::runtime_alloc(story_scenes::demo_arena_bytes(),32),[](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);},call_original);
+        story_scenes::enable_editor_previews();
+        story_scenes::install(call_original,scenes_replaced_by,scenes_replace);
+        LOG("[editor] scene previews: ready (new scenes play without a restart)");
+    }
     // Native scene playback (story_native_wait_runtime.h): only with declared world scenes or the private
     // native-wait test; otherwise no declaration catalogue, session or log line.
     g_native_scenes=g_world_scenes||std::getenv("WWHD_TEST_NATIVE_WAIT");
