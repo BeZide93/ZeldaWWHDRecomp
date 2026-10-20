@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 #pragma once
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <initializer_list>
@@ -26,5 +27,8 @@ bool add(uint16_t id,uint32_t guest_profile,BaseAllocated=nullptr);
 // Includes retail profiles; callbacks must only retire records and must not throw.
 using BeforeDelete=void(*)(uint32_t actor,uint32_t pid,uint16_t profile) noexcept;
 bool add_before_delete_listener(const std::string& name,BeforeDelete);
+// the free bytes of the archive, game, zelda and command heaps and the actor heap (the one actors' own
+// parts come from) now (diagnostics: a summoner's full wave)
+std::array<uint32_t,5> heap_free(Cpu*);
 bool install(const Owner&,const Replace&);
 }

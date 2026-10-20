@@ -39,7 +39,7 @@ void map_memory(uint32_t a,uint32_t n){assert(!(a&0xFFFFu)&&n&&!(n&0xFFFFu));
  }
 }
 void call_hook(Cpu*c,uint32_t f,uint32_t a){Cpu nested=*c;nested.r[3]=a;hooks.at(f)(&nested);}
-bool known_address(uint32_t fn){const uint32_t known[]={0x025E14A8,0x02331558,0x025AAF88,0x02110D4C,0x0210DD3C,0x0210BFEC,0x021104B4,0x0219D568,0x0219AAE8,0x02199748,0x0219CE98,0x0209F918,0x0209BD1C,0x0209971C,0x0209F164,0x021CCB00,0x021C9B1C,0x021C7344,0x021CC44C,0x02446E54,0x02446374,0x02445EE4,0x024468E4,0x023CF600,0x023CC070,0x023C9994,0x023CEF04,0x0230F32C,0x0230BEF4,0x0230AE30,0x0230EDD0,0x0231175C,0x02311240,0x023111D8,0x023115BC,0x024C0B0C,0x024BD170,0x024BA238,0x024C0194,0x025D99E8,0x020402C8,0x025D9154,0x021992DC,0x025D9898,0x021C9AA0,0x025D7B24,0x020A47B4,0x021D0294,0x020A3B18,0x02041570,0x02041F94,0x02043F34,0x025D57E0,0x020BFC50,0x020BCEC8,0x020BBAEC,0x020BF574,0x020ADA5C,0x020AB020,0x020A8BDC,0x020AD59C,0x023C3EC8,0x023C1380,0x023C039C,0x023C38AC,0x021A7B4C,0x025D537C,0x025D5A20,0x02516C14,0x025D5928,0x02167FE0,0x02167F30,0x021412BC,0x02140D04,0x0211889C,0x0211BF44};bool child_method=false;for(const auto&k:story_enemies_more::kChildClasses)child_method|=fn==k.create||fn==k.execute||fn==k.draw||fn==k.destroy;bool accepted=child_method;for(uint32_t expected:known)accepted|=fn==expected;for(const auto&n:story_enemies_more::kNatives)accepted|=fn==n.create||fn==n.execute||fn==n.draw||fn==n.destroy;return accepted;}
+bool known_address(uint32_t fn){const uint32_t known[]={0x025AB070,0x025E14A8,0x02331558,0x025AAF88,0x02110D4C,0x0210DD3C,0x0210BFEC,0x021104B4,0x0219D568,0x0219AAE8,0x02199748,0x0219CE98,0x0209F918,0x0209BD1C,0x0209971C,0x0209F164,0x021CCB00,0x021C9B1C,0x021C7344,0x021CC44C,0x02446E54,0x02446374,0x02445EE4,0x024468E4,0x023CF600,0x023CC070,0x023C9994,0x023CEF04,0x0230F32C,0x0230BEF4,0x0230AE30,0x0230EDD0,0x0231175C,0x02311240,0x023111D8,0x023115BC,0x024C0B0C,0x024BD170,0x024BA238,0x024C0194,0x025D99E8,0x020402C8,0x025D9154,0x021992DC,0x025D9898,0x021C9AA0,0x025D7B24,0x020A47B4,0x021D0294,0x020A3B18,0x02041570,0x02041F94,0x02043F34,0x025D57E0,0x020BFC50,0x020BCEC8,0x020BBAEC,0x020BF574,0x020ADA5C,0x020AB020,0x020A8BDC,0x020AD59C,0x023C3EC8,0x023C1380,0x023C039C,0x023C38AC,0x021A7B4C,0x025D537C,0x025D5A20,0x02516C14,0x025D5928,0x02167FE0,0x02167F30,0x021412BC,0x02140D04,0x0211889C,0x0211BF44};bool child_method=false;for(const auto&k:story_enemies_more::kChildClasses)child_method|=fn==k.create||fn==k.execute||fn==k.draw||fn==k.destroy;bool accepted=child_method;for(uint32_t expected:known)accepted|=fn==expected;for(const auto&n:story_enemies_more::kNatives)accepted|=fn==n.create||fn==n.execute||fn==n.draw||fn==n.destroy;return accepted;}
 unsigned layer_calls=0;bool morth_dies=false;
 // Gyorg: the controller's execute creates a shark (and a refused other child) and may delete itself
 uint32_t fm_mode_seen=0xFFFFFFFFu,octo_mode_seen=0xFFFFFFFFu,octo_eye_pid=0,octo_actor=0;unsigned fm_releases=0,music_stops=0;bool octo_die=false;bool has_boomerang=true,gy_spawn=false,gy_self_delete=false;unsigned sea_kills=0;uint32_t gy_child_pid=0,gy_ctrl=0,last_deleted=0;
@@ -99,6 +99,7 @@ void run(uint32_t fn,uint32_t a){Cpu c{};c.r[3]=a;c.r[4]=0x12345678;c.f[2].ps0=4
 namespace native_actor_profiles {
 void configure(void(*)(Cpu*,uint32_t),uint32_t(*)(Cpu*,uint32_t,std::initializer_list<uint32_t>)){}
 bool valid_storage(uint32_t a){return a>=Arena&&a<Arena+0x20000;}
+std::array<uint32_t,5> heap_free(Cpu*){return {};}
 bool available(const Owner&){return true;}bool add(uint16_t,uint32_t,BaseAllocated){return true;}bool install(const Owner&,const Replace&){return true;}
 }
 namespace story_items {
@@ -168,6 +169,7 @@ int main(int argc,char**argv){using namespace story_enemies;const bool drowning_
  Token bk=0,mo=0;if(weapons){assert(configure_children({[](Token,Kind,uint32_t,uint32_t epoch){assert(epoch>=1);++child_scopes;return true;},[]{assert(child_scopes);--child_scopes;},[](Token,uint32_t){return children_ready;},[](Token,uint32_t){++child_retires;}},true));Spec b{Kind::Bokoblin,"m","bk","bk.dead",{}, {},1},m{Kind::Moblin,"m","mo","mo.dead",{}, {},1};bk=declare(b,why);mo=declare(m,why);assert(bk&&mo);st32(GD(0x101F3EE0)+0xBD*4,Actor+0x8200);st32(Actor+0x8210,0x19A4);st32(GD(0x101F3EE0)+0xBC*4,Actor+0x8300);st32(Actor+0x8310,0x343C);map_memory(GD(0x101B0000),0x10000);map_memory(GD(0x10190000),0x10000);}
  Spec pt{Kind::Miniblin,"m","pt","pt.dead",{}, {},1};const Token mini=declare(pt,why);assert(mini);Spec ph{Kind::Peahat,"m","ph","ph.dead",{}, {},1};const Token hat=declare(ph,why);assert(hat);Spec nz{Kind::Rat,"m","nz","nz.dead",{}, {},1};const Token rat=declare(nz,why);assert(rat);Spec nb{Kind::Rat,"m","nb","nb.dead",{}, {},1,0xFFFF0101u};const Token bomb_rat=declare(nb,why);assert(bomb_rat);Spec ng{Kind::RatHole,"m","ng","ng.dead",{}, {},1};const Token hole=declare(ng,why);assert(hole);
  Token tn=0;if(weapons){Spec d{Kind::Darknut,"m","tn","tn.dead",{}, {},1,parameters(Kind::Darknut,"mighty")};assert(d.params==0xFFFFFA54u&&!parameters(Kind::Darknut,"frozen"));tn=declare(d,why);assert(tn&&home_x(tn)==0xA0&&home_x(first)==0);st32(GD(0x101F3EE0)+0xBF*4,Actor+0x8900);st32(Actor+0x8910,0x1C5C);}
+ Spec tr{Kind::Keese,"m","tr","tr.dead",{}, {},1,0,true};const Token transient_token=declare(tr,why);assert(transient_token);
  Spec fk{Kind::Keese,"m","fk","fk.dead",{}, {},1,0xFFFF8000u};const Token fire_keese=declare(fk,why);assert(fire_keese);
  Spec sh{Kind::Peahat,"m","sh","sh.dead",{}, {},1,0xFFFFFF01u};const Token seahat=declare(sh,why);assert(seahat);
  Spec bo{Kind::BokoBaba,"m","bo","bo.dead",{}, {},1},bo2{Kind::BokoBaba,"m","bo2","bo2.dead",{}, {},1};const Token baba=declare(bo,why),baba2=declare(bo2,why);assert(baba&&baba2);
@@ -459,9 +461,15 @@ int main(int argc,char**argv){using namespace story_enemies;const bool drowning_
  st32(GD(0x10462CF0),7);st32(GD(0x10464B28),9);run(0x0210DD3C,Actor);assert(ld32(GD(0x10462CF0))==7&&ld32(GD(0x10464B28))==9&&claims==0);
  throw_execute=true;try{run(0x0210DD3C,Actor);assert(false);}catch(const std::runtime_error&){}throw_execute=false;assert(ld32(GD(0x10462CF0))==7&&ld32(GD(0x10464B28))==9);
  run(0x0219AAE8,Second);assert(ld32(GD(0x10464B28))==9);
+ { // a transient declaration (a summoner's pool member): its defeat counts for its copy only (no marker, no
+   // drops, the native drop refused), and its next copy (a new epoch) appears again
+  const uint32_t Tr=0x20060000;map_memory(Tr,0x10000);actor(Tr,30,Kind::Keese);bind(transient_token,30);run(0x0219D568,Tr);assert(owns_actor(Tr)&&available(transient_token));
+  const unsigned c0=claims;st8(Tr+0x489,30);Cpu p{};p.r[3]=Tr;hooks.at(0x025D99E8)(&p);assert(claims==c0&&is_defeated(transient_token)&&p.r[3]==0xFFFFFFFFu);
+  assert(begin_epoch(transient_token,2)&&!is_defeated(transient_token)&&available(transient_token)&&home_z(transient_token)==0);
+ }
  { // mod paths: the game's own room-path lookup (dPath_GetRoomPath) runs first for every caller and number;
    // only when it finds nothing does an owned enemy that is running get the path its provider names
-  assert(install_routes([](uint32_t){return std::string();},[](uint32_t f,void(*fn)(Cpu*)){const uint32_t canonical=f-STORY_ENEMIES_TEST_CODE_DELTA;assert(canonical==0x025AAF88&&!hooks.count(canonical));hooks[canonical]=fn;}));
+  assert(install_routes([](uint32_t){return std::string();},[](uint32_t f,void(*fn)(Cpu*)){const uint32_t canonical=f-STORY_ENEMIES_TEST_CODE_DELTA;assert((canonical==0x025AAF88||canonical==0x025AB070)&&!hooks.count(canonical));hooks[canonical]=fn;}));
   uint32_t game_path=0,answer=0;unsigned asked=0,game_lookups=0;uint32_t number=0xC0;int room=3;
   set_room_path_provider([&](Token t,uint32_t n,int r)->uint32_t{++asked;return t==first&&n==0xC0&&r==3?0x20070000u:0;});
   auto lookup=[&](){Cpu c{};c.r[3]=number;c.r[4]=uint32_t(room);hooks.at(0x025AAF88)(&c);return c.r[3];};
@@ -474,7 +482,13 @@ int main(int argc,char**argv){using namespace story_enemies;const bool drowning_
   // none in the game: its own path; another number or room: none
   game_path=0;run(0x0210DD3C,Actor);assert(answer==0x20070000&&game_lookups==4&&asked==1);
   number=0xC1;run(0x0210DD3C,Actor);assert(answer==0&&asked==2);number=0xC0;room=4;run(0x0210DD3C,Actor);assert(answer==0&&asked==3);room=3;
-  probe=nullptr;set_room_path_provider({});hooks.erase(0x025AAF88);
+  // the next-path lookup: a mod path's record answers its next record; any other path is the game's
+  {unsigned games=0;probe=[&](Cpu*c,uint32_t fn){if(fn==0x025AB070){++games;c->r[3]=0x5555;return true;}return false;};
+   set_next_path_provider([](uint32_t path,int room,uint32_t& out){if(path!=0x20070000u)return false;out=room==3?0x20070220u:0;return true;});
+   Cpu q{};q.r[3]=0x20070000u;q.r[4]=3;hooks.at(0x025AB070)(&q);assert(q.r[3]==0x20070220u&&games==0);
+   q={};q.r[3]=0x20070000u;q.r[4]=4;hooks.at(0x025AB070)(&q);assert(q.r[3]==0&&games==0);
+   q={};q.r[3]=0x20060000u;q.r[4]=3;hooks.at(0x025AB070)(&q);assert(q.r[3]==0x5555&&games==1);set_next_path_provider({});}
+  probe=nullptr;set_room_path_provider({});hooks.erase(0x025AAF88);hooks.erase(0x025AB070);
  }
  // Drawing and ordinary deletion cannot award defeat rewards.
  run(0x0210BFEC,Actor);run(0x02199748,Second);assert(claims==0);run(0x0219CE98,Second);assert(claims==0&&deletes==1);

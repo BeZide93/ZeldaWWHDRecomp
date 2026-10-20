@@ -27,6 +27,7 @@ struct Variant {
     const char* help;     // plain words
     uint16_t angle_x = 0; // the placement's x rotation word, which some kinds read as a parameter
     uint8_t path = 0;     // the mod room path it takes ("path": "<id>"): 0 none, 1 required (a line or an area), 2 required area
+    uint16_t angle_z = 0; // the placement's z rotation word, which some kinds read as a parameter (a summoner's wave)
 };
 inline constexpr uint8_t kNoPath = 0, kPath = 1, kAreaPath = 2;
 
@@ -78,6 +79,18 @@ inline constexpr Variant kVariants[] = {
     // "release" (argument 3 = 5); the rider then drops and fights as an owned enemy of its own.
     {"kargaroc", "moblin_rider", 0xFFFFFF05u, "Kargaroc with a Moblin", "A Kargaroc that flies one of the mod's paths carrying a Moblin and drops it at a release point.", 0, kPath},
     {"kargaroc", "bokoblin_rider", 0xFFFFFF06u, "Kargaroc with a Bokoblin", "A Kargaroc that flies one of the mod's paths carrying a Bokoblin and drops it at a release point.", 0, kPath},
+    // Wizzrobe (d_a_wz): type 0 the red one (story_enemies_more.h); type 1 the summoner: it teleports between the
+    // points of its path and casts at the points of the path's next path (a summon ball, then a summon door that
+    // makes the enemies of a row of the game's summon table, its wave the z rotation word, its slot random);
+    // the summons are the port's own pool declarations (story_enemies_summons.h). Path byte 3 is the mod path's
+    // number; no switches (bytes 1 and 2 0xFF).
+    {"wizzrobe", "red", 0xFFFFFF00u, "Wizzrobe", "The red Wizzrobe: it appears and vanishes around where it was placed and casts fire at Link."},
+    {"wizzrobe", "summoner_keese", 0xFFFFFF01u, "Wizzrobe summoner (Keese and Magtails)", "A Wizzrobe that teleports along one of the mod's paths and summons Keese and Magtails at the points of its next path.", 0, kPath, 0},
+    {"wizzrobe", "summoner_keese_bubbles", 0xFFFFFF01u, "Wizzrobe summoner (Keese and Bubbles)", "A summoner of Keese and Bubbles.", 0, kPath, 1},
+    {"wizzrobe", "summoner_bubbles", 0xFFFFFF01u, "Wizzrobe summoner (Bubbles)", "A summoner of Bubbles.", 0, kPath, 2},
+    {"wizzrobe", "summoner_morths", 0xFFFFFF01u, "Wizzrobe summoner (Morths)", "A summoner of Morths: 15 or 20 at a time, as in the game.", 0, kPath, 3},
+    {"wizzrobe", "summoner_chuchus", 0xFFFFFF01u, "Wizzrobe summoner (ChuChus)", "A summoner of ChuChus: 8 or 10 at a time.", 0, kPath, 4},
+    {"wizzrobe", "summoner_few_morths", 0xFFFFFF01u, "Wizzrobe summoner (fewer Morths)", "A summoner of Morths: 8 or 10 at a time.", 0, kPath, 11},
     {"big_octo", "four", 0xFFFFFF00u, "Big Octo (four eyes)", "A Big Octo to shoot from the boat: hit all four eyes. It never swallows the boat and makes no whirlpool."},
     {"big_octo", "eight", 0xFFFFFF01u, "Big Octo (eight eyes)", "A Big Octo with eight eyes to shoot from the boat. It never swallows the boat and makes no whirlpool."},
     {"big_octo", "twelve", 0xFFFFFF02u, "Big Octo (twelve eyes)", "A Big Octo with twelve eyes to shoot from the boat. It never swallows the boat and makes no whirlpool."},
@@ -160,6 +173,13 @@ inline constexpr unsigned kRatsPerHole = 3;
 inline bool rat_bomb(const std::string& variant, unsigned n) { return variant == "bomb_rats" || (variant == "mixed" && n == 1); }
 // the weapon (daBoko parameter) a Bokoblin variant's parameter word creates: 1 the machete, 0 the stick
 inline constexpr uint32_t bokoblin_weapon(uint32_t params) { return (params & 0x40u) ? 1u : 0u; }
+// the variant of a kind by name ("" the default) with its z rotation word
+inline uint16_t angle_z(const std::string& kind, const std::string& name) {
+    const Variant* v = find(kind, name);
+    return v ? v->angle_z : 0;
+}
+// a Wizzrobe summoner variant (its summons are the port's pool)
+inline bool summoner(const std::string& kind, const std::string& name) { return kind == "wizzrobe" && name.rfind("summoner", 0) == 0; }
 // the x rotation word of the kind's variant with parameter word `params` (0 for none)
 inline uint16_t angle_x(const std::string& kind, uint32_t params) {
     for (const Variant& v : kVariants)
@@ -179,7 +199,7 @@ inline constexpr bool patrol_word(uint32_t params) { return ((params >> 16) & 0x
 inline bool declared_params(const std::string& kind, uint32_t params) {
     for (const Variant& v : kVariants)
         if (kind == v.kind && (v.params == params || (kind == "bokoblin" && (bokoblin_patrol(v.params) == params || params == kRiderParams)) ||
-                               (v.path && (params | 0x00FF0000u) == v.params))) return true;  // a path variant with its path's number
+                               (v.path && (params | (kind == "wizzrobe" ? 0xFF000000u : 0x00FF0000u)) == v.params))) return true;  // a path variant with its path's number (byte 3 for a Wizzrobe, else byte 2)
     return false;
 }
 

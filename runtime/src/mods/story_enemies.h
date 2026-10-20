@@ -13,7 +13,10 @@ namespace story_enemies {
 using Kind=story_enemy_ownership::Kind;
 using Token=story_enemy_ownership::Token;
 // params: the actor parameters of the declared variant (story_enemy_variants.h); 0 is the kind's default
-struct Spec {Kind kind;std::string mod,id,defeated_flag;std::vector<story_items::PropDrop> drops;story_enemy_ownership::Fingerprint fingerprint{};uint32_t epoch=0;uint32_t params=0;};
+// transient: a summoned pool member (a Wizzrobe summoner's): its defeat is counted for its current copy only
+// (no marker, no drops), and its next copy (begin_epoch) appears again. home_z: its z rotation word
+// (0xFFFF: the kind's own, home_z(Kind); a summoner's wave)
+struct Spec {Kind kind;std::string mod,id,defeated_flag;std::vector<story_items::PropDrop> drops;story_enemy_ownership::Fingerprint fingerprint{};uint32_t epoch=0;uint32_t params=0;bool transient=false;uint16_t home_z=0xFFFF;};
 // The fixed native parameters. Bokoblin: type 4 (stands, then fights); byte 1 is its sight and
 // territory range in tens of units, 0xFF the game's own (500 to notice Link, 750 to give up); 0 made
 // it blind (it never noticed Link). Byte 2 no path, byte 3 no switch.
@@ -35,6 +38,8 @@ uint32_t parameters(Kind,const std::string& variant);
 uint32_t parameters(Token);
 // The z rotation word: 0xFF for the kinds that read a switch from it (Bokoblin, Moblin, Darknut: none).
 constexpr uint16_t home_z(Kind k){return k==Kind::Bokoblin||k==Kind::Moblin||k==Kind::Darknut?0xFF:story_enemies_more::home_z(k);}
+// The z rotation word a declared enemy is placed with (its spec's, else its kind's)
+uint16_t home_z(Token);
 // The x rotation word a declared enemy is placed with: the Darknut's equipment, 0 for the other kinds.
 uint16_t home_x(Token);
 constexpr uint16_t home_x(Kind k){return story_enemies_more::home_x(k);}
@@ -85,6 +90,16 @@ void set_room_path_provider(std::function<uint32_t(Token,uint32_t,int)> provider
 // for its rider, `request(kargaroc)` names the rider declaration (its token, private profile and parameter
 // word; token 0: none, the request is refused); `created(rider, pid)` binds it to the new process.
 struct RiderRequest {Token rider=0;uint16_t profile=0;uint32_t params=0;};
+// Mod paths' next paths (story_room_paths): the next-path lookup (dPath_GetNextRoomPath) for a mod path's
+// record answers `provider(path, room, out)` (true: it is one); installed with the room-path lookup.
+void set_next_path_provider(std::function<bool(uint32_t,int,uint32_t&)> provider);
+// Wizzrobe summoners: the summon door's plain creates (fopAcM_create) are redirected to the summoner's pool:
+// `request(summoner, native name, game word)` names a free pool member (token 0: refused); `created` binds
+// it; `pool(summoner)` lists the pool's tokens (deleted with the summoner).
+struct SummonRequest {Token summon=0;uint16_t profile=0;uint32_t params=0;uint16_t home_z=0;};
+void set_summon_provider(std::function<SummonRequest(Token,uint16_t,uint32_t)> request,std::function<void(Token,uint32_t)> created,std::function<std::vector<Token>(Token)> pool);
+// story_enemy_children's fopAcM_create hook asks this first: true when the create was a summon (handled)
+bool summon_create(Cpu*);
 void set_rider_provider(std::function<RiderRequest(Token)> request,std::function<void(Token,uint32_t)> created);
 bool install_routes(const std::function<std::string(uint32_t)>& owner,const std::function<void(uint32_t,void(*)(Cpu*))>& replace);
 uint32_t room_path_function();

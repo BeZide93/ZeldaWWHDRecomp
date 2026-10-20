@@ -31,6 +31,10 @@ uint32_t record(const std::string& mod, const std::string& id);
 // The lookup's answer for `mod`'s path `id` when the game asks for `number` in `room` of the stage
 // named `stage`: its record when the path is that one, else 0.
 uint32_t answer(const std::string& mod, const std::string& id, uint32_t number, int room, const std::string& stage);
+// The game's next-path lookup (dPath_GetNextRoomPath) for one of these records: whether `address` is a
+// record's path header, and the record of its next path in `room` (0: none).
+bool is_record(uint32_t address);
+uint32_t next_record(uint32_t address, int room);
 // After a full state load: every record written again from the declarations.
 void state_loaded();
 

@@ -277,7 +277,14 @@ inline bool kargaroc_terminal(uint32_t a) { return ld8(a + 0xDF2) != 0; }
 // Death: action 1 (ITAI) mode 0x2A makes the one drop. Colliders on mStts 0x784: body 0x7C0 (no attack),
 // ball sphere 0x8F0 (the fireball types only); enemyice 0xA40 (0xAAC on 0xA70), enemyfire 0xDF8 (0xED4 on 0xE98).
 inline constexpr Collider kWizzrobeColliders[] = {{0x7C0, 0x784, 0}, {0x8F0, 0x784, 0}, {0xAAC, 0xA70, 0xA40}, {0xED4, 0xE98, 0xDF8}};
-inline bool wizzrobe_verify(uint32_t a, uint32_t) {
+// The summoner (story_enemy_variants "summoner_*"): type 1 on a mod path (byte 3; its record at 0x52C, the next
+// path's at 0x540: the summon points), its wave (0x465, the z rotation word) one of the table's ordinary rows.
+inline constexpr uint32_t kWizzrobeBallParams = 0xFFFFFF0Bu, kWizzrobeDoorParams = 0xFFFFFF0Cu;  // the summon ball and door
+inline bool wizzrobe_verify(uint32_t a, uint32_t p) {
+    if ((p & 0xFF) == 1)
+        return ld8(a + 0x464) == 1 && ld8(a + 0x465) <= 11 && ld8(a + 0x465) != 7 && ld8(a + 0x466) == 0xFF && ld8(a + 0x467) == 0xFF &&
+               ld8(a + 0x53D) == (p >> 24) && (p >> 24) != 0xFF && ld32(a + 0x52C) != 0 && ld32(a + 0x540) != 0 && ld8(a + 0x46C) == 0 && ld8(a + 0x46D) == 0 &&
+               ld8(a + 0x468) <= 1;
     return ld8(a + 0x464) == 0 && ld8(a + 0x465) == 0 && ld8(a + 0x466) == 0xFF && ld8(a + 0x467) == 0xFF && ld8(a + 0x53D) == 0xFF &&
            ld8(a + 0x46C) == 0 && ld8(a + 0x46D) == 0 && ld8(a + 0x468) <= 1;
 }
@@ -501,7 +508,7 @@ inline constexpr Native kNatives[] = {
     {Kind::Wizzrobe, "wizzrobe", {kWizzrobeProfile, 0xD0, 0x10B0, kWizzrobeColliders, std::size(kWizzrobeColliders)},
      CANONICAL_CODE_ID(0x024E6BEC).value(), CANONICAL_CODE_ID(0x024E398C).value(), CANONICAL_CODE_ID(0x024E2468).value(),
      CANONICAL_CODE_ID(0x024E61E0).value(), [] { return GD(0x10042D90); }, 0xFFFFFF00u, 0, 0xA40, {0xDF8, 0}, true,
-     wizzrobe_verify, wizzrobe_terminal, nullptr, 0x468, false},
+     wizzrobe_verify, wizzrobe_terminal, nullptr, 0x468, false, 0, 24},
     {Kind::Warship, "warship", {kWarshipProfile, 0xB3, 0xF1C, kWarshipColliders, std::size(kWarshipColliders)},
      CANONICAL_CODE_ID(0x023C637C).value(), CANONICAL_CODE_ID(0x023C6D38).value(), CANONICAL_CODE_ID(0x023C6DAC).value(),
      CANONICAL_CODE_ID(0x023C6418).value(), [] { return GD(0x10034084); }, 0xFFFFFF00u, 0, 0, {0, 0}, true,

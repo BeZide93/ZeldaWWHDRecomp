@@ -33,6 +33,7 @@ void destroy(Cpu*c){const uint32_t actor=c->r[3];const bool own=invoke&&tracing(
     *c=returned;
 }
 }
+std::array<uint32_t,5> heap_free(Cpu*c){std::array<uint32_t,5> out{};if(!c||!invoke)return out;const auto h=heaps(c);for(unsigned i=0;i<4;++i)out[i]=h[i].second;Cpu probe=*c;out[4]=free(&probe,ld32(GD(0x1018CA3C)));return out;}
 void configure(void(*fn)(Cpu*,uint32_t),uint32_t(*calls)(Cpu*,uint32_t,std::initializer_list<uint32_t>)){if(!installed){original=fn;invoke=calls;}}
 bool valid_storage(uint32_t a){return a>=mem::kRuntimeStart&&a<=mem::kHostStart-0x30&&!(a&3);}
 bool available(const Owner&owner){return original&&(installed||(owner(GC(0x025E10E0)).empty()&&owner(GC(0x025DD414)).empty()&&owner(GC(0x025D4B4C)).empty()));}

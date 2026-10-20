@@ -474,7 +474,7 @@ The allowlist below defines the supported variants.
 | `poe` | Ordinary Poe with its lantern: without the lantern it possesses Link for a while |
 | `armos` | Armos statue: it wakes when Link comes near; strike its back |
 | `armos_knight` | Armos Knight: only a bomb in its open mouth (or a Light Arrow) defeats it |
-| `wizzrobe` | Red Wizzrobe: it appears and vanishes around where it was placed and casts fire at Link |
+| `wizzrobe` | Red Wizzrobe: it appears and vanishes around where it was placed and casts fire at Link; or a summoner (variants `summoner_*`, below) |
 | `warship` | The enemy warship (sea stage only): it fires its cannon at Link; three hits from the boat's cannon sink it. Variant `route`: it sails one of the mod's paths (below) |
 | `big_octo` | **A target only:** the Big Octo (sea stage only), variants `four`, `eight` or `twelve` eyes (default `four`); it never attacks |
 | `floormaster` | Floormaster: a hand that rises from its hole, grabs Link for a moment and lets go. Variant `wandering`: its hole glides along one of the mod's paths (below) |
@@ -568,6 +568,8 @@ walk):
 | `stage`, `room` | where it is; an actor uses only a path of its own stage and room |
 | `points` | 2 to 32 points, each more than one unit (across) from the one before |
 | `closed` | `true`: an area (the last point joins the first; at least 3 points, enclosing an area, its edges not crossing); default `false`: a line |
+| `next` | optional: the id of another of the mod's paths in the same room that follows this one (a Wizzrobe summoner summons at its points) |
+| a point's `release` | optional `true`: a Kargaroc lets its rider go at that point |
 
 The game's room data is never changed or read for these. Each path gets a number the room's own
 paths never use (the game's largest room has 56 paths; mod paths are numbered from 192), and when one
@@ -620,6 +622,41 @@ the sea drowns as the game's own do, and that is its defeat (its flag and drops)
 not made again: the Kargaroc then flies without one. Ids and defeat flags of rider Kargarocs are at most
 26 characters. In the editor, a point of the path is marked in the Path section ("Lets its rider go
 here") or with `set_path_point`.
+
+### Wizzrobe summoners
+
+A Wizzrobe with a summoner variant appears at the points of one of the mod's paths (`"path"`, its room)
+and summons enemies at the points of that path's next path (the path's `"next"`, another of the mod's
+paths in the same room; both are required). It is the game's own summoner: it throws a summon ball,
+the ball opens a summon door, and the door brings out one group of its wave (the game picks the group
+at random each time); when all of them are gone it summons again.
+
+| `variant` | The wave it summons |
+| --- | --- |
+| `summoner_keese` | Keese (up to 8) or Magtails (1 or 2) |
+| `summoner_keese_bubbles` | Keese (up to 8) or Bubbles (1 or 2) |
+| `summoner_bubbles` | Bubbles (1 or 2) |
+| `summoner_morths` | Morths, 15 or 20 at a time |
+| `summoner_chuchus` | ChuChus, 8 or 10 at a time |
+| `summoner_few_morths` | Morths, 8 or 10 at a time |
+
+```json
+"paths": [
+  {"id": "hall", "stage": "M_NewD2", "room": 0, "closed": true, "next": "spots", "points": [...]},
+  {"id": "spots", "stage": "M_NewD2", "room": 0, "closed": true, "points": [...]}
+],
+"actors": [{"id": "conjurer", "actor": "wizzrobe", "parameters": {"variant": "summoner_morths"},
+  "stage": "M_NewD2", "room": 0, "position": {"x": -1000, "y": 150, "z": 8300}, "path": "hall",
+  "defeated_flag": "conjurer.defeated", "drops": []}]
+```
+
+The summoned enemies are the port's own: owned like any placed enemy (the same rules for what they do
+to Link and to the game), but they have no flag and give no drops; only the summoner's own defeat sets
+its flag and gives its drops. A summon that is defeated is gone for that wave; the next wave brings new
+ones. Summons still there when the summoner goes (defeated, removed or unloaded) go with it. A
+summoner's summons don't count toward a room's 16 actors; they count toward the 128 owned actors of
+all enabled mods (a summoner of Morths counts 21). One summoner per room, two per mod. Its id and
+defeat flag are at most 23 characters (its summons add `.summon20`).
 
 ### Wall cannons
 

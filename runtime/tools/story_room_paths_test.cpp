@@ -132,6 +132,25 @@ int main() {
             assert(!story_notebook::parse_actors(bird("plain", ""), actors, why) && why.find("release") != std::string::npos);
             assert(!story_notebook::parse_actors(bird("flight", R"(,{"id":"bird.rider","actor":"chuchu","stage":"sea","room":11,"position":{"x":0,"y":0,"z":0},"defeated_flag":"x.dead","drops":[]})"), actors, why) && why.find("rider") != std::string::npos);
         }
+        // a Wizzrobe summoner: a path with a next path (its summon points), one per room; its pool is its own allowance
+        {
+            const std::string two = R"("paths":[{"id":"hall","stage":"sea","room":11,"closed":true,"next":"spots","points":[{"x":0,"y":0,"z":0},{"x":900,"y":0,"z":0},{"x":450,"y":0,"z":800}]},
+                                                {"id":"spots","stage":"sea","room":11,"closed":true,"points":[{"x":100,"y":0,"z":100},{"x":800,"y":0,"z":100},{"x":450,"y":0,"z":600}]}])";
+            auto wizard = [&](const std::string& id, const std::string& path, const std::string& extra) {
+                return manifest("{" + two + R"(,"actors":[{"id":")" + id + R"(","actor":"wizzrobe","parameters":{"variant":"summoner_morths"},"stage":"sea","room":11,"position":{"x":450,"y":0,"z":300},"defeated_flag":"w.dead","drops":[],"path":")" + path + "\"}" + extra + "]}");
+            };
+            assert(story_notebook::parse_actors(wizard("wiz", "hall", ""), actors, why) && actors[0].room_path == "hall" && story_notebook::placed_actors(actors[0]) == 1);
+            assert(!story_notebook::parse_actors(wizard("wiz", "spots", ""), actors, why) && why.find("next path") != std::string::npos);
+            assert(!story_notebook::parse_actors(wizard("wiz", "hall", R"(,{"id":"wiz2","actor":"wizzrobe","parameters":{"variant":"summoner_chuchus"},"stage":"sea","room":11,"position":{"x":0,"y":0,"z":0},"defeated_flag":"w2.dead","drops":[],"path":"hall"})"), actors, why) && why.find("one Wizzrobe summoner per room") != std::string::npos);
+            assert(!story_notebook::parse_actors(wizard("a-very-long-wizzrobe-id-here", "hall", ""), actors, why) && why.find("summon") != std::string::npos);
+            assert(story_enemies_summons::size(3) == 20 && story_enemies_summons::size(4) == 10 && story_enemies_summons::size(0) == 10 && !story_enemies_summons::pool(7));
+            assert(story_enemies_summons::variant("chuchu", 5) == "red" && story_enemies_summons::variant("bubble", 1) == "blue" && story_enemies_summons::variant("morth", 3).empty());
+            assert(story_enemies_summons::wanted_variant(0xCE, 0xFFFF0C00u) == "blue" && story_enemies_summons::wanted_variant(0xCF, 0x0100FF01u) == "blue" && story_enemies_summons::wanted_variant(0xCD, 3).empty());
+            assert(story_enemy_variants::declared_params("wizzrobe", 0xC2FFFF01u) && !story_enemy_variants::declared_params("wizzrobe", 0xC2FFFF02u));
+            // the overall capacity counts the pool
+            std::vector<std::pair<std::string, Value>> packages{{"m", wizard("wiz", "hall", "")}};
+            assert(story_notebook::world_manifest::validate_world_packages(packages, why));
+        }
         // other enemies take no room path
         assert(!story_notebook::parse_actors(manifest("{" + paths_part + R"(,"actors":[{"id":"cc","actor":"chuchu","stage":"sea","room":11,"position":{"x":0,"y":0,"z":0},"defeated_flag":"cc.dead","drops":[],"path":"yard"}]})"), actors, why));
     }
@@ -219,6 +238,21 @@ int main() {
             many.push_back(p);
         }
         assert(!paths::declare("m3", many, why) && why.find("24 paths") != std::string::npos && !paths::number("m3", "n0"));
+    }
+    // a next path: its number in the record's header; the next-path lookup finds it in the same room
+    {
+        auto first = square("first", 5, true), second = square("second", 5, true);
+        first.next = "second";
+        assert(paths::declare("m4", {first, second}, why));
+        const uint32_t r1 = paths::record("m4", "first"), r2 = paths::record("m4", "second");
+        assert(ld16(r1 + 2) == paths::number("m4", "second") && ld16(r2 + 2) == 0xFFFF);
+        assert(paths::is_record(r1) && !paths::is_record(r1 + 4) && !paths::is_record(0x20000000));
+        assert(paths::next_record(r1, 5) == r2 && !paths::next_record(r2, 5) && !paths::next_record(r1, 6));
+        assert(paths::declare("m4", {}, why));
+        std::vector<path::Path> bad;
+        assert(!parse(R"({"paths":[{"id":"a","stage":"sea","room":1,"next":"b","points":[{"x":0,"y":0,"z":0},{"x":9,"y":0,"z":0}]},{"id":"b","stage":"sea","room":2,"points":[{"x":0,"y":0,"z":0},{"x":9,"y":0,"z":0}]}]})", bad, why) &&
+               why.find("same stage and room") != std::string::npos);
+        assert(!parse(R"({"paths":[{"id":"a","stage":"sea","room":1,"next":"a","points":[{"x":0,"y":0,"z":0},{"x":9,"y":0,"z":0}]}]})", bad, why));
     }
     // a mod with no paths left: its records go
     const uint32_t rc = paths::record("m2", "c");

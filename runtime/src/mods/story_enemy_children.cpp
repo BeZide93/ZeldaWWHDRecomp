@@ -34,7 +34,7 @@ bool memory(uint32_t a,uint32_t n){return !(a&3)&&a>=0x10000000u&&a<=0x50000000u
 // a bomb rat (d_a_nz type 1, hole-born arg0 1): the one rat that creates a child (its bomb)
 bool bomb_rat(uint32_t params){return (params&0xFF)==1&&((params>>8)&0xFF)==1;}
 bool parent(const Source&s){if(s.kind==Kind::Rat){auto&d=own::descriptor(s.kind);return s.token&&s.epoch==own::source_epoch(s.token)&&memory(s.actor,d.bytes)&&ld32(s.actor+4)==s.pid&&s.pid&&s.pid!=0xFFFFFFFFu&&ld16(s.actor+0xE)==d.profile&&bomb_rat(ld32(s.actor+0xB0))&&ld8(s.actor+0x2DD)==0xFF;}
- if(s.kind!=Kind::Bokoblin&&s.kind!=Kind::Moblin&&s.kind!=Kind::Darknut&&s.kind!=Kind::Stalfos&&s.kind!=Kind::Wizzrobe&&s.kind!=Kind::BigOcto)return false;auto&d=own::descriptor(s.kind);return s.token&&s.epoch==own::source_epoch(s.token)&&memory(s.actor,d.bytes)&&ld32(s.actor+4)==s.pid&&s.pid&&s.pid!=0xFFFFFFFFu&&ld16(s.actor+0xE)==d.profile&&(s.kind==Kind::Bokoblin?story_enemy_variants::declared_params("bokoblin",ld32(s.actor+0xB0)):s.kind==Kind::Darknut?story_enemy_variants::declared_params("darknut",ld32(s.actor+0xB0)):s.kind==Kind::BigOcto?story_enemy_variants::declared_params("big_octo",ld32(s.actor+0xB0)):s.kind==Kind::Stalfos||s.kind==Kind::Wizzrobe?ld32(s.actor+0xB0)==story_enemies_more::params(s.kind):(ld32(s.actor+0xB0)==0xFFFF0000u||ld32(s.actor+0xB0)==story_enemy_variants::moblin_patrol(0xFFFF0000u)||ld32(s.actor+0xB0)==story_enemy_variants::kRiderParams))&&ld8(s.actor+0x2DD)==0xFF;}
+ if(s.kind!=Kind::Bokoblin&&s.kind!=Kind::Moblin&&s.kind!=Kind::Darknut&&s.kind!=Kind::Stalfos&&s.kind!=Kind::Wizzrobe&&s.kind!=Kind::BigOcto)return false;auto&d=own::descriptor(s.kind);return s.token&&s.epoch==own::source_epoch(s.token)&&memory(s.actor,d.bytes)&&ld32(s.actor+4)==s.pid&&s.pid&&s.pid!=0xFFFFFFFFu&&ld16(s.actor+0xE)==d.profile&&(s.kind==Kind::Bokoblin?story_enemy_variants::declared_params("bokoblin",ld32(s.actor+0xB0)):s.kind==Kind::Darknut?story_enemy_variants::declared_params("darknut",ld32(s.actor+0xB0)):s.kind==Kind::BigOcto?story_enemy_variants::declared_params("big_octo",ld32(s.actor+0xB0)):s.kind==Kind::Wizzrobe?story_enemy_variants::declared_params("wizzrobe",ld32(s.actor+0xB0)):s.kind==Kind::Stalfos?ld32(s.actor+0xB0)==story_enemies_more::params(s.kind):(ld32(s.actor+0xB0)==0xFFFF0000u||ld32(s.actor+0xB0)==story_enemy_variants::moblin_patrol(0xFFFF0000u)||ld32(s.actor+0xB0)==story_enemy_variants::kRiderParams))&&ld8(s.actor+0x2DD)==0xFF;}
 // the child kinds: daBoko weapons (the Bokoblin's stick 0 or machete 1, the Stalfos's club 2, the Moblin's
 // spear 4, the Darknut's sword 3) and the Darknut's cape (d_a_mant type 0)
 uint32_t child_bytes(uint16_t profile){return profile==Sword?0xA34:profile==Cape?own::kCapeBytes:0;}
@@ -60,7 +60,9 @@ void queue_fireball(Cpu*c,const Source&s){if(!parent(s)||c->r[4]!=story_enemies_
  const uint32_t pid=c->r[3];if(!pid||pid==0xFFFFFFFFu){own::cancel_child_pending(ticket);return;}
  if(!own::commit_child_pending(ticket,pid))throw std::runtime_error("Native enemy fireball PID could not bind its reserved ownership record");
 }
+std::function<bool(Cpu*)> summon_filter;
 void queue(Cpu*c){
+ if(summon_filter&&summon_filter(c))return;  // a summoner's door: its summons are the summoner's pool
  // an owned Big Octo creates nothing this way but its whirlpool (Obj_Auzu, which pulls the boat): refused
  if(depth&&scopes[depth-1].kind==Kind::BigOcto){c->r[3]=0xFFFFFFFFu;return;}
  if(depth&&scopes[depth-1].kind==Kind::Wizzrobe){if(c->r[3]==story_enemies_more::kWizzrobeFire){queue_fireball(c,scopes[depth-1]);return;}original(c,Queue);return;}
@@ -124,4 +126,5 @@ bool available(const std::function<std::string(uint32_t)>&owner){if(!original||!
 bool install(const std::function<std::string(uint32_t)>&owner,const std::function<void(uint32_t,void(*)(Cpu*))>&replace){if(installed)return true;if(!available(owner))return false;const std::pair<uint32_t,void(*)(Cpu*)> hooks[]={{Queue,queue},{Create,create},{Execute,execute},{Delete,destroy},{Wait,wait},{BkSearch,bk_search},{MoSearch,mo_search},{BkCandidate,bk_candidate},{MoCandidate,mo_candidate},{TnSearch,tn_search},{TnCandidate,tn_candidate},{CapeCreate,cape_create},{CapeExecute,cape_execute},{BombCreate,bomb_create},{BombDelete,bomb_destroy}};if(!native_actor_carry::install(owner,replace))return false;for(const auto&h:hooks)replace(h.first,h.second);installed=true;return true;}
 void state_loaded(){depth=0;search={};}
 void set_create_filter(std::function<bool(uint32_t,uint32_t)> deny){create_filter=std::move(deny);}
+void set_summon_filter(std::function<bool(Cpu*)> summon){summon_filter=std::move(summon);}
 }

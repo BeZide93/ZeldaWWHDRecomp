@@ -18,6 +18,7 @@
 #include "story_resident_types.h"
 #include "story_enemy_variants.h"
 #include "story_room_path.h"
+#include "story_enemies_summons.h"
 #include "story_game_objects_catalogue.h"
 #include "story_game_pieces_catalogue.h"
 #include "demo_scene.h"
@@ -74,6 +75,7 @@ struct ManifestActor {
     std::string item_mod; // a chest's "item:<id>": one of the mod's items (the id)
     std::string room_path;      // the id of one of the mod's room paths ("paths") that this actor uses ("path": "<id>")
     std::string rider_of;       // a Kargaroc's rider (runtime only): the Kargaroc's id
+    std::string summon_of;      // a Wizzrobe summoner's pool member (runtime only): the summoner's id
     std::string defeat_switch;  // an enemy's: the same-mod switch actor whose flag is set when every enemy naming it is defeated
     std::string broken_flag,switch_flag,switch_actor,defeated_flag;std::vector<ManifestPropDrop> drops;
     std::string flag,quest,item,time,lines; unsigned quest_step=0;
@@ -408,7 +410,8 @@ inline bool parse_room_paths(const mods::json::Value& m,std::vector<story_room_p
     if(list.type==Value::Null)return true;
     if(list.type!=Value::Array||list.array.size()>story_room_path::kMaxPerMod)return why="paths must be a list of up to 16",false;
     for(const auto& v:list.array){story_room_path::Path p;
-        if(!keys(v,{"id","stage","room","points","closed"}))return why="a path takes id, stage, room, points and closed",false;
+        if(!keys(v,{"id","stage","room","points","closed","next"}))return why="a path takes id, stage, room, points, closed and next",false;
+        if(v.object.contains("next")){if(!id(v.get("next")))return why="path "+v.get("id").string()+": next must name another of the mod's paths",false;p.next=v.get("next").text;}
         if(!id(v.get("id")))return why="invalid path id",false;p.id=v.get("id").text;
         for(const auto& old:out)if(old.id==p.id)return why="duplicate path id "+p.id,false;
         if(!place(v,p.stage,p.room))return why="path "+p.id+": stage and room (0..63) are required",false;
@@ -421,6 +424,11 @@ inline bool parse_room_paths(const mods::json::Value& m,std::vector<story_room_p
         if(const auto no=story_room_path::shape_problem(p);!no.empty())return why="path "+p.id+": "+no,false;
         out.push_back(std::move(p));
     }
+    // a next path: another of the mod's paths in the same stage and room
+    for(const auto&p:out)if(!p.next.empty()){
+        const story_room_path::Path* n=nullptr;for(const auto&q:out)if(q.id==p.next)n=&q;
+        if(!n||n==&p)return why="path "+p.id+": next must name another of the mod's paths",false;
+        if(n->stage!=p.stage||n->room!=p.room)return why="path "+p.id+": its next path must be in the same stage and room",false;}
     return true;
 }
 inline const story_room_path::Path* find_room_path(const std::vector<story_room_path::Path>& paths,const std::string& id){
@@ -609,6 +617,13 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
                     if(!rp)return why="actor "+a.id+": no path \""+path.text+"\" in the mod's paths",false;
                     if(rp->stage!=a.stage||rp->room!=a.room)return why="actor "+a.id+": path \""+path.text+"\" is in another stage or room",false;
                     if(rule==story_enemy_variants::kAreaPath&&!rp->closed)return why="actor "+a.id+": path \""+path.text+"\" must be an area (closed)",false;
+                    // a Wizzrobe summoner teleports between the points of its path and summons at the points of the
+                    // path's next path: one is required; its pool members add .summon<N> to its id and flag
+                    if(story_enemy_variants::summoner(a.actor,a.variant)){
+                        if(rp->next.empty())return why="actor "+a.id+": a Wizzrobe summoner's path needs a next path (\"next\": the points where it summons)",false;
+                        const unsigned pool=story_enemies_summons::size(story_enemy_variants::angle_z(a.actor,a.variant));
+                        const size_t extra=story_enemies_summons::suffix(pool).size();
+                        if(a.id.size()+extra>story_mail::kMaxIdBytes||a.defeated_flag.size()+extra>story_mail::kMaxIdBytes)return why="actor "+a.id+": its id and defeated_flag are at most "+std::to_string(story_mail::kMaxIdBytes-extra)+" characters (its summons add "+story_enemies_summons::suffix(pool)+")",false;}
                     // a Kargaroc with a rider lets it go at a release point of its path: one is required
                     if(!story_enemy_variants::rider_kind(a.actor,a.variant).empty()){
                         if(std::none_of(rp->release.begin(),rp->release.end(),[](bool r){return r;}))return why="actor "+a.id+": a Kargaroc with a rider needs a point of its path marked \"release\" (where it lets the rider go)",false;
@@ -707,6 +722,10 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
         for(unsigned n=1;n<=story_enemy_variants::kRatsPerHole;++n)for(const auto& b:out)
             if(b.id==a.id+".rat"+std::to_string(n)||(!b.defeated_flag.empty()&&b.defeated_flag==a.defeated_flag+".rat"+std::to_string(n)))return why="actor "+b.id+": the id or defeated_flag of rat hole "+a.id+"'s rats",false;
     }
+    {unsigned summoners_here=0;for(const auto& a:out)if(story_enemy_variants::summoner(a.actor,a.variant)){
+        for(const auto& b:out)if(&b!=&a&&story_enemy_variants::summoner(b.actor,b.variant)&&b.stage==a.stage&&b.room==a.room)return why="actor "+b.id+": at most one Wizzrobe summoner per room",false;
+        if(++summoners_here>2)return why="a mod has at most two Wizzrobe summoners",false;
+        for(const auto& b:out)if(b.id.rfind(a.id+".summon",0)==0)return why="actor "+b.id+": the id of Wizzrobe summoner "+a.id+"'s summons",false;}}
     for(const auto& a:out)if(!story_enemy_variants::rider_kind(a.actor,a.variant).empty())for(const auto& b:out)
         if(b.id==a.id+story_enemy_variants::kRiderSuffix||(!b.defeated_flag.empty()&&b.defeated_flag==a.defeated_flag+story_enemy_variants::kRiderSuffix))return why="actor "+b.id+": the id or defeated_flag of Kargaroc "+a.id+"'s rider",false;
     for(const auto& a:out)if(a.actor=="door"){
@@ -870,7 +889,8 @@ inline bool validate_world_packages(const std::vector<std::pair<std::string,mods
         }
         for(const auto&actor:actors)if(actor.game_object()||actor.game_piece())game_objects.push_back(actor);
         if(!game_object_budget(game_objects,why)||!game_piece_budget(game_objects,why)){why="enabled packages: "+why;return false;}
-        for(const auto&actor:actors)total+=placed_actors(actor);if(total>128)return why="enabled packages exceed 128 actors overall",false;
+        for(const auto&actor:actors)total+=placed_actors(actor)+(story_enemy_variants::summoner(actor.actor,actor.variant)?story_enemies_summons::size(story_enemy_variants::angle_z(actor.actor,actor.variant)):0u);
+        if(total>128)return why="enabled packages exceed 128 actors overall (a Wizzrobe summoner's summons count here, not in a room's 16)",false;
         for(const auto&actor:actors)if(actor.chart_marker.enabled&&++chart_markers>32)return why="enabled packages exceed 32 island chart markers",false;
         std::vector<std::string> names;
         for(const auto& actor:actors){

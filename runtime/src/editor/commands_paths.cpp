@@ -72,6 +72,7 @@ std::string room_path_use(const Value& actor) {
     if (!story_enemy_variants::room_path_rule(type, variant)) return {};
     if (type == "wall_cannon") return "Its firing area: it turns to Link and fires only while he (and where it aims) is inside this area, by the game's own test.";
     if (type == "warship") return "Its route: it sails the path round and round at the sea's height (a line too: from the last point back to the first), slowing to fire at Link.";
+    if (type == "wizzrobe") return "Its path: it appears at the points of this path and summons at the points of its next path (set the next path below).";
     if (type == "kargaroc") return "Its flight: it flies the path (round if it is an area, else there and back) carrying its rider, and lets the rider go at a point marked \"release\".";
     if (type == "floormaster") return "Its route: its hole glides along the path round and round and rises when Link comes near. Keep the points on the floor.";
     return "The path it uses.";
@@ -241,6 +242,10 @@ Value Session::dispatch_paths(const std::string& command, const Value& p, std::s
     if (command == "set_path") {
         path_edit("Change path " + text(p, "id"), [&](Value& m, Value& path, std::string& w) {
             if (p.get("closed").type == Value::Bool) path["closed"] = p.get("closed").boolean;
+            if (p.object.contains("next")) {  // the path that follows it (a summoner's summon points); null: none
+                if (p.get("next").type == Value::String) path["next"] = p.get("next").text;
+                else path.object.erase("next");
+            }
             if (p.get("new_id").type == Value::String) {
                 const std::string to = p.get("new_id").text, from = path.get("id").string();
                 if (to != from) {
@@ -249,6 +254,8 @@ Value Session::dispatch_paths(const std::string& command, const Value& p, std::s
                     path["id"] = to;
                     for (auto& a : m["actors"].array)  // the actors that name it follow
                         if (a.get("path").type == Value::String && a.get("path").text == from) a["path"] = to;
+                    for (auto& q : m["paths"].array)  // and the paths it follows
+                        if (q.get("next").type == Value::String && q.get("next").text == from) q["next"] = to;
                     r["id"] = to;
                 }
             }
@@ -262,6 +269,8 @@ Value Session::dispatch_paths(const std::string& command, const Value& p, std::s
         const std::string id = text(p, "id");
         ok = change(*pkg, "Remove path " + id, [&](Value& m, std::string& w) {
             if (!path_by_id(m, id)) return w = "no path \"" + id + "\" in " + pkg->mod, false;
+            for (const auto& q : m.get("paths").array)
+                if (q.get("next").type == Value::String && q.get("next").text == id) return w = "path \"" + id + "\" follows path \"" + q.get("id").string() + "\" (its next path): change that first", false;
             const auto used = users(m, id);
             if (!used.empty()) {
                 std::string list;

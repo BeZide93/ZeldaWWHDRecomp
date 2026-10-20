@@ -33,6 +33,7 @@ struct Path {
     std::vector<Point> points;
     bool closed = false;  // an area (the last point joins the first) rather than a line
     std::vector<bool> release;  // per point (empty: none): a Kargaroc lets its rider go there (point argument 3 = 5)
+    std::string next;           // the id of the path that follows it (the game's "next path": a Wizzrobe summoner's summon points), "" none
     bool operator==(const Path&) const = default;
     bool releases(size_t i) const { return i < release.size() && release[i]; }
 };
@@ -85,17 +86,18 @@ inline uint32_t hash(const Path& p, uint8_t number) {
     auto f = [&](float v) { uint32_t u; std::memcpy(&u, &v, 4); mix(u); };
     for (size_t i = 0; i < p.points.size(); i++) { const auto& q = p.points[i]; f(q.x); f(q.y); f(q.z); mix(p.releases(i)); }
     mix(uint32_t(p.points.size())); mix(p.closed); mix(number); mix(p.room);
+    for (char c : p.next) mix(uint8_t(c));
     for (char c : p.stage) mix(uint8_t(c));
     return h;
 }
 
 // The record of `p` with `number`, at guest address `slot`.
-inline std::array<uint8_t, kSlotBytes> encode(const Path& p, uint8_t number, uint32_t slot) {
+inline std::array<uint8_t, kSlotBytes> encode(const Path& p, uint8_t number, uint32_t slot, uint16_t next = 0xFFFF) {
     std::array<uint8_t, kSlotBytes> b{};
     const auto order = game_indices(p);
     const unsigned count = unsigned(std::min<size_t>(order.size(), kMaxPoints));
     put16(b.data(), kHeader + 0, uint16_t(count));
-    put16(b.data(), kHeader + 2, 0xFFFF);
+    put16(b.data(), kHeader + 2, next);  // the next path's number (a mod path of the same room), 0xFFFF none
     b[kHeader + 4] = 0xFF;
     b[kHeader + 5] = p.closed ? 1 : 0;
     b[kHeader + 6] = 0xFF;

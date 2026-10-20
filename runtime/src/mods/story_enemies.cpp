@@ -12,7 +12,7 @@
 #include <utility>
 namespace story_enemies {namespace {
 namespace more=story_enemies_more;
-struct Entry {Spec spec;Token token=0;story_items::EnemyMarkerHandle marker{};uint32_t pid=0xFFFFFFFFu,address=0;bool quarantine=false,claiming=false,search_known=false,creating=false;uint8_t search_mode=0;};
+struct Entry {Spec spec;Token token=0;story_items::EnemyMarkerHandle marker{};uint32_t pid=0xFFFFFFFFu,address=0;bool transient_defeated=false;bool quarantine=false,claiming=false,search_known=false,creating=false;uint8_t search_mode=0;};
 std::vector<Entry> entries;std::array<uint32_t,story_enemy_ownership::kKindCount> profiles{};
 void(*original)(Cpu*,uint32_t)=nullptr;uint32_t(*invoke)(Cpu*,uint32_t,std::initializer_list<uint32_t>)=nullptr;
 std::function<void(Token,uint32_t)> retired;bool installed=false,editor_allowed=false;ChildBridge children;bool weapon_admission=false;
@@ -66,7 +66,8 @@ bool liftable_stone(const Spec&s,uint32_t a){return black_chuchu(s)&&ld8(a+0x3FC
 // a table kind Link may lift now (the curled Magtail): the game's own carry and throw
 bool liftable(const Spec&s,uint32_t a){if(liftable_stone(s,a))return true;const auto*n=more::find(s.kind);return n&&n->liftable&&n->liftable(a);}
 void keep_owned(const Spec&s,uint32_t a){if(liftable(s,a)){st8(a+0x3A8,0xFF);st8(a+0x3A9,0);}else no_carry(a);}
-bool claim(Entry&e,uint32_t a){if(e.claiming)return false;e.claiming=true;struct ClaimGuard{bool&flag;~ClaimGuard(){flag=false;}}claim_guard{e.claiming};const auto result=story_items::claim_enemy_drops(e.marker,e.spec.mod,e.spec.drops);e.claiming=false;trace(e,a,"defeat-claim",unsigned(result));if(result==story_items::EnemyClaimStatus::Committed||result==story_items::EnemyClaimStatus::AlreadyDefeated)return true;disable(e,a);return false;}
+bool defeated(const Entry&e){return e.spec.transient?e.transient_defeated:story_items::enemy_defeated(e.marker);}
+bool claim(Entry&e,uint32_t a){if(e.spec.transient){e.transient_defeated=true;trace(e,a,"summon-defeated");return true;}if(e.claiming)return false;e.claiming=true;struct ClaimGuard{bool&flag;~ClaimGuard(){flag=false;}}claim_guard{e.claiming};const auto result=story_items::claim_enemy_drops(e.marker,e.spec.mod,e.spec.drops);e.claiming=false;trace(e,a,"defeat-claim",unsigned(result));if(result==story_items::EnemyClaimStatus::Committed||result==story_items::EnemyClaimStatus::AlreadyDefeated)return true;disable(e,a);return false;}
 // These globals are native temporary search results, not progress. Preserve them
 // through exceptions and nested native execution; owned cohorts cannot leak out.
 // The Seahat (and the big Octoroks, never offered) count kills in event register 0x7EFF (the save's event bytes
@@ -185,12 +186,24 @@ void release_gyorg(Cpu*c,const Entry&e,uint32_t a){const auto*k=more::child_clas
 void release_rider(Cpu*c,const Entry&e,uint32_t a){if(e.spec.kind!=Kind::Kargaroc||!invoke||!more::kargaroc_carries(a))return;const uint32_t rider=ld32(a+more::kKargarocRider);
  Entry*r=find(rider,false);if(!r||(r->spec.kind!=Kind::Bokoblin&&r->spec.kind!=Kind::Moblin)||params_of(r->spec)!=story_enemy_variants::kRiderParams)return;
  Cpu probe=*c;invoke(&probe,GC(0x025D57E0),{rider});trace(e,a,"rider-deleted",ld32(rider+4));}
-void release_held(Cpu*c,const Entry&e,uint32_t a){release_rider(c,e,a);release_gyorg(c,e,a);release_warship(c,e,a);release_fireballs(c,e,a);release_bomb(c,e,a);release_club(c,e,a);release_morth(e,a);release_link(c,e.spec.kind,a,"removed");release_lantern(c,e,a);}
+std::function<SummonRequest(Token,uint16_t,uint32_t)> summon_provider;std::function<void(Token,uint32_t)> summon_created;std::function<std::vector<Token>(Token)> summon_pool;
+bool summoner(const Entry&e){return e.spec.kind==Kind::Wizzrobe&&(params_of(e.spec)&0xFFu)==1;}
+// diagnostics: WWHD_SUMMON_HEAPS=1 logs the heaps' free bytes as each summon is made and created (a full wave's cost)
+bool summon_heaps_on(){static const bool on=[]{const char*v=std::getenv("WWHD_SUMMON_HEAPS");return v&&*v=='1';}();return on;}
+void summon_heaps(Cpu*c,const Entry&e){if(!summon_heaps_on())return;Cpu probe=*c;const auto f=native_actor_profiles::heap_free(&probe);unsigned live=0;
+ for(const auto&m:entries)if(m.spec.transient&&m.spec.mod==e.spec.mod&&m.address&&m.pid!=0xFFFFFFFFu)++live;
+ LOG("[summon_heaps] %s created; live summons=%u free archive=%u game=%u zelda=%u command=%u actor=%u",e.spec.id.c_str(),live,f[0],f[1],f[2],f[3],f[4]);}
+// A summoner's summons still alive go with it (the game's door would wait for them; the summoner is gone).
+void release_summons(Cpu*c,const Entry&e,uint32_t a){if(!summoner(e)||!invoke||!summon_pool)return;for(Token t:summon_pool(e.token)){auto*m=get(t);if(!m||!m->address||m->pid==0xFFFFFFFFu||!memory(m->address,0x10)||ld32(m->address+4)!=m->pid)continue;
+  Cpu probe=*c;invoke(&probe,GC(0x025D57E0),{m->address});trace(e,a,"summon-deleted",m->pid);}}
+void release_held(Cpu*c,const Entry&e,uint32_t a){release_summons(c,e,a);release_rider(c,e,a);release_gyorg(c,e,a);release_warship(c,e,a);release_fireballs(c,e,a);release_bomb(c,e,a);release_club(c,e,a);release_morth(e,a);release_link(c,e.spec.kind,a,"removed");release_lantern(c,e,a);}
 // A Wizzrobe's fireball: the WZ class's own methods with the game's profile. An owned one (its exact
 // child lineage) is admitted when its create completes and runs as an owned child (never in the area
 // manager); one whose Wizzrobe is gone (a state load, a quarantine) deletes itself. Others are the game's.
 thread_local uint32_t fireball_executing=0;
-bool owned_fireball(uint32_t a,story_enemy_ownership::LineageInfo&info){return memory(a,more::kWizzrobeBytes)&&ld16(a+0xE)==more::kWizzrobeFire&&ld32(a+0xB0)==more::kWizzrobeFireParams&&story_enemy_ownership::lineage_claimed(ld32(a+4),story_enemy_ownership::Lineage::EnemyChild)&&story_enemy_ownership::lineage_info(ld32(a+4),info)&&info.profile==more::kWizzrobeFire;}
+// (a summoner's summon ball and door are the same class's children of their own, admitted and run the same way)
+bool wz_child_word(uint32_t w){return w==more::kWizzrobeFireParams||w==more::kWizzrobeBallParams||w==more::kWizzrobeDoorParams;}
+bool owned_fireball(uint32_t a,story_enemy_ownership::LineageInfo&info){return memory(a,more::kWizzrobeBytes)&&ld16(a+0xE)==more::kWizzrobeFire&&wz_child_word(ld32(a+0xB0))&&story_enemy_ownership::lineage_claimed(ld32(a+4),story_enemy_ownership::Lineage::EnemyChild)&&story_enemy_ownership::lineage_info(ld32(a+4),info)&&info.profile==more::kWizzrobeFire;}
 bool fireball(Cpu*c,uint32_t fn,uint32_t a,bool create,bool draw,bool destroy){
  const auto*wz=more::find(Kind::Wizzrobe);if(destroy||!wz||(fn!=GC(wz->create)&&fn!=GC(wz->execute)&&fn!=GC(wz->draw)))return false;story_enemy_ownership::LineageInfo info{};if(!owned_fireball(a,info))return false;
  if(create){original(c,fn);const Cpu result=*c;if(result.r[3]==4){const bool admitted=story_enemy_ownership::admit_lineage(info.pid,a);if(!admitted){Cpu probe=*c;invoke(&probe,GC(0x025D57E0),{a});}if(enemy_trace())LOG("[native_enemy] wizzrobe fireball actor=%08X pid=%08X %s",a,info.pid,admitted?"admitted":"refused");}*c=result;return true;}
@@ -216,7 +229,7 @@ void lifecycle(Cpu*c,uint32_t fn,bool create,bool draw,bool destroy){const uint3
  if(create&&e->spec.kind==Kind::Warship&&std::strncmp(reinterpret_cast<const char*>(mem::ptr(play_base()+0x5134)),"sea",8)!=0){trace(*e,a,"warship-only-on-the-sea");refuse_or_skip(c,a,create);return;}
  if(create&&e->spec.kind==Kind::Wizzrobe){const char*stage=reinterpret_cast<const char*>(mem::ptr(play_base()+0x5134));for(const char*no:more::kNoWizzrobeStages)if(std::strncmp(stage,no,8)==0){trace(*e,a,"no-wizzrobe-on-this-stage");refuse_or_skip(c,a,create);return;}}
  if(create&&e->spec.kind==Kind::Redead){const char*stage=reinterpret_cast<const char*>(mem::ptr(play_base()+0x5134));for(const char*no:more::kNoRedeadStages)if(std::strncmp(stage,no,8)==0){trace(*e,a,"no-redead-events-on-this-stage");refuse_or_skip(c,a,create);return;}}
- if(!create&&story_items::enemy_defeated(e->marker)){if(!draw&&ld8(a+0xC)!=3){Cpu probe=*c;const uint32_t result=invoke(&probe,GC(0x025D57E0),{a});static unsigned reported=0;if(reported++<128)trace(*e,a,"terminal-delete-retry",result);}c->r[3]=1;return;}
+ if(!create&&defeated(*e)){if(!draw&&ld8(a+0xC)!=3){Cpu probe=*c;const uint32_t result=invoke(&probe,GC(0x025D57E0),{a});static unsigned reported=0;if(reported++<128)trace(*e,a,"terminal-delete-retry",result);}c->r[3]=1;return;}
  if(!create&&!draw){if(!story_enemy_ownership::lookup_actor(a)){if(!story_enemy_ownership::admit_created(e->token,a)){disable(*e,a);c->r[3]=1;return;}e->address=a;}e->address=a;
   // Carry is refused by the shared player admission hook, never undone here.
   if((ld32(a+0x2E0)&0x2000u)&&!liftable(e->spec,a)){disable(*e,a);trace(*e,a,"unexpected-carried");c->r[3]=1;return;}keep_owned(e->spec,a);
@@ -240,7 +253,7 @@ void lifecycle(Cpu*c,uint32_t fn,bool create,bool draw,bool destroy){const uint3
  if(e->spec.kind==Kind::BigOcto&&!create&&!draw&&more::big_octo_rise(a)){Cpu probe=*c;invoke(&probe,GC(more::kOctoModeProc),{a,0,2});trace(*e,a,"risen");}
  if(e->spec.kind==Kind::Mothula&&!create&&!draw&&more::mothula_strayed(a)){more::mothula_return(a);trace(*e,a,"strayed-turns-home");}
  if(create&&result.r[3]==4&&e->spec.kind==Kind::Gyorg)st32(a+more::kGyorgDeaths,0);
- if(create&&result.r[3]==4){if(!verify_actor(e->token,e->spec.kind,a)||(!story_enemy_ownership::lookup_actor(a)&&!story_enemy_ownership::admit_created(e->token,a))){disable(*e,a);c->r[3]=5;return;}e->address=a;if(e->spec.kind==Kind::Bokoblin||e->spec.kind==Kind::Moblin){e->search_mode=ld8(GD(e->spec.kind==Kind::Bokoblin?0x1046232D:0x104654A4));e->search_known=true;}no_carry(a);trace(*e,a,"created");}
+ if(create&&result.r[3]==4){if(!verify_actor(e->token,e->spec.kind,a)||(!story_enemy_ownership::lookup_actor(a)&&!story_enemy_ownership::admit_created(e->token,a))){disable(*e,a);c->r[3]=5;return;}e->address=a;if(e->spec.kind==Kind::Bokoblin||e->spec.kind==Kind::Moblin){e->search_mode=ld8(GD(e->spec.kind==Kind::Bokoblin?0x1046232D:0x104654A4));e->search_known=true;}no_carry(a);trace(*e,a,"created");if(e->spec.transient)summon_heaps(c,*e);}
  else if(create&&result.r[3]==5){disable(*e,a);trace(*e,a,"create-failed");}
  if(!draw&&verify_actor(e->token,e->spec.kind,a))keep_owned(e->spec,a);*c=result;
 }
@@ -314,7 +327,24 @@ void scene_request(Cpu*c){Entry*e=executing;if(!e||e->spec.kind!=Kind::Kargaroc)
  // the rider's word, and its z angle (the Moblin's and Bokoblin's death switch: 0xFF, none) as any placed copy's
  c->r[4]=r.profile;st32(append,r.params);st16(append+0x14,home_z(name==0xBC?Kind::Moblin:Kind::Bokoblin));original(c,GC(more::kSceneRequest));const uint32_t pid=c->r[3];
  if(pid!=0xFFFFFFFFu&&rider_created)rider_created(r.rider,pid);trace(*e,actor,"rider-requested",pid);}
-void create_child(Cpu*c){if(executing){if(const auto*k=more::child_class_of(executing->spec.kind)){owned_child_create(c,*executing,*k);return;}}if(executing&&executing->spec.kind==Kind::Mothula&&c->r[3]==more::kMothulaMoth){static unsigned told=0;if(told++<8)trace(*executing,executing->address,"moth-release-refused");c->r[3]=0xFFFFFFFFu;return;}original(c,GC(more::kCreateChild));}
+// ---- Wizzrobe summoners: the summon ball and door are its owned children (the WZ class, game profile 0xD0,
+// fopAcM_createChild: the ball in its execute, the door in the ball's); the door's summons are its pool.
+// the summoner an owned WZ child actor (with word `w`) belongs to, or null
+Entry* wz_child_summoner(uint32_t a,uint32_t w){story_enemy_ownership::LineageInfo info{};if(!a||!owned_fireball(a,info)||ld32(a+0xB0)!=w||!info.source_valid)return nullptr;auto*e=get(info.source);return e&&summoner(*e)&&e->address==info.source_actor&&e->pid==info.source_pid?e:nullptr;}
+void queue_wz_child(Cpu*c,Entry&s,uint32_t word){
+ if(!s.address||s.pid==0xFFFFFFFFu||s.quarantine){c->r[3]=0xFFFFFFFFu;return;}
+ const uint32_t ticket=story_enemy_ownership::reserve_child_pending(s.token,s.address,s.pid,more::kWizzrobeFire,word,story_enemy_ownership::source_epoch(s.token));if(!ticket){trace(s,s.address,"summon-child-refused",word);c->r[3]=0xFFFFFFFFu;return;}
+ try{original(c,GC(more::kCreateChild));}catch(...){story_enemy_ownership::cancel_child_pending(ticket);throw;}
+ const uint32_t pid=c->r[3];if(!pid||pid==0xFFFFFFFFu){story_enemy_ownership::cancel_child_pending(ticket);return;}
+ if(!story_enemy_ownership::commit_child_pending(ticket,pid))throw std::runtime_error("Wizzrobe summon child PID could not bind its reserved ownership record");
+ if(enemy_trace())trace(s,s.address,word==more::kWizzrobeBallParams?"summon-ball":"summon-door",pid);}
+bool summon_child(Cpu*c){if(c->r[3]!=more::kWizzrobeFire)return false;const uint32_t word=c->r[5];
+ if(word==more::kWizzrobeBallParams&&executing&&summoner(*executing)){queue_wz_child(c,*executing,word);return true;}
+ if(word==more::kWizzrobeDoorParams&&fireball_executing){if(Entry*s=wz_child_summoner(fireball_executing,more::kWizzrobeBallParams)){queue_wz_child(c,*s,word);return true;}}
+ // any other WZ child of an owned summoner (or of its ball) is refused
+ if((executing&&summoner(*executing))||(fireball_executing&&wz_child_summoner(fireball_executing,more::kWizzrobeBallParams))){c->r[3]=0xFFFFFFFFu;return true;}
+ return false;}
+void create_child(Cpu*c){if(summon_child(c))return;if(executing){if(const auto*k=more::child_class_of(executing->spec.kind)){owned_child_create(c,*executing,*k);return;}}if(executing&&executing->spec.kind==Kind::Mothula&&c->r[3]==more::kMothulaMoth){static unsigned told=0;if(told++<8)trace(*executing,executing->address,"moth-release-refused");c->r[3]=0xFFFFFFFFu;return;}original(c,GC(more::kCreateChild));}
 // An owned enemy's colliders never join the area manager (grass and the like): only the pair policy reaches them.
 void area_set(Cpu*c){const uint32_t o=c->r[4];if(child_executing&&o>=child_executing&&o<child_executing+child_executing_bytes)return;if(fireball_executing&&o>=fireball_executing&&o<fireball_executing+more::kWizzrobeBytes)return;if(executing&&more::find(executing->spec.kind)&&executing->address&&o>=executing->address&&o<executing->address+story_enemy_ownership::descriptor(executing->spec.kind).bytes)return;original(c,GC(more::kAreaManagerSet));}
 // A Morth's death effect (no drop outside Ganon's Tower) is its defeat; the game then deletes it.
@@ -371,6 +401,7 @@ void room_search(Cpu*c){if(executing){auto*e=find(c->r[3]);c->r[3]=e&&!e->quaran
 const char* kind_name(Kind k){if(const auto*n=more::find(k))return n->name;return k==Kind::ChuChu?"chuchu":k==Kind::Bokoblin?"bokoblin":k==Kind::Moblin?"moblin":k==Kind::Keese?"keese":k==Kind::Miniblin?"miniblin":k==Kind::Peahat?"peahat":k==Kind::Rat?"rat":k==Kind::Darknut?"darknut":k==Kind::RatHole?"rat_hole":k==Kind::BokoBaba?"bokobaba":k==Kind::Bubble?"bubble":k==Kind::Octorok?"octorok":"";}
 uint32_t parameters(Kind k,const std::string& variant){if(!story_enemy_variants::has_variants(kind_name(k)))return variant.empty()?parameters(k):0u;const auto*v=story_enemy_variants::find(kind_name(k),variant);return v?v->params:0u;}
 uint32_t parameters(Token t){const auto*e=get(t);return e?params_of(e->spec):0u;}
+uint16_t home_z(Token t){const auto*e=get(t);return !e?0:e->spec.home_z!=0xFFFF?e->spec.home_z:home_z(e->spec.kind);}
 uint16_t home_x(Token t){const auto*e=get(t);return !e?0:e->spec.kind==Kind::Darknut?story_enemy_variants::angle_x("darknut",params_of(e->spec)):more::home_x(e->spec.kind);}  // a table kind: its row's (the warship's 0xFFFF)
 bool configure_children(ChildBridge b,bool verified){if(installed)return false;if(verified&&(!b.enter||!b.leave||!b.ready||!b.retire))return false;children=std::move(b);weapon_admission=verified;return true;}
 void child_retired(const story_enemy_ownership::LineageInfo&info){if(!info.source_valid||info.role!=story_enemy_ownership::Lineage::EnemyChild)return;auto*e=get(info.source);if(!e||!has_children(e->spec.kind)||e->pid!=info.source_pid||!info.source_actor||find(info.source_actor)!=e||story_enemy_ownership::lookup_actor(info.source_actor)!=e->token||story_enemy_ownership::source_epoch(e->token)!=info.epoch)return;const uint32_t a=info.source_actor;
@@ -381,7 +412,7 @@ void child_retired(const story_enemy_ownership::LineageInfo&info){if(!info.sourc
  if(e->spec.kind==Kind::Bokoblin){st32(a+0xC90,0);st32(a+0xC94,0);st8(a+0x1374,0);}else{st8(a+0x10B3,0);}
  st32(a+reference,0xFFFFFFFFu);trace(*e,a,"child-retired-native-loss",info.pid);}
 bool supported(Kind k){if(const auto*n=more::find(k))return n->offered&&((k!=Kind::Stalfos&&k!=Kind::Wizzrobe&&k!=Kind::BigOcto)||weapon_admission);return k==Kind::ChuChu||k==Kind::Keese||k==Kind::Miniblin||k==Kind::Peahat||k==Kind::Rat||k==Kind::Octorok||k==Kind::Bubble||k==Kind::BokoBaba||k==Kind::RatHole||(weapon_admission&&has_children(k));}
-bool verify_actor(Token t,Kind kind,uint32_t a){const auto*e=get(t);const auto&d=story_enemy_ownership::descriptor(kind);if(!e||kind!=e->spec.kind||!supported(kind)||!memory(a,d.bytes)||ld16(a+0xE)!=d.profile||ld32(a+0xB4)!=native_vtable(kind)||ld32(a+0xB0)!=params_of(e->spec)||ld8(a+0x2DD)!=0xFF||ld16(a+0x2D8)!=0xFFFF||ld16(a+0x2FC)!=home_z(kind))return false;
+bool verify_actor(Token t,Kind kind,uint32_t a){const auto*e=get(t);const auto&d=story_enemy_ownership::descriptor(kind);if(!e||kind!=e->spec.kind||!supported(kind)||!memory(a,d.bytes)||ld16(a+0xE)!=d.profile||ld32(a+0xB4)!=native_vtable(kind)||ld32(a+0xB0)!=params_of(e->spec)||ld8(a+0x2DD)!=0xFF||ld16(a+0x2D8)!=0xFFFF||ld16(a+0x2FC)!=home_z(t))return false;
  if(const auto*n=more::find(kind))return n->verify(a,params_of(e->spec))&&(!n->ice||ld8(a+n->ice+0x1B1)==0);
  if(kind==Kind::ChuChu)return ld8(a+0x3F8)==0&&ld8(a+0x3F9)==((params_of(e->spec)>>8)&0xFF)&&ld8(a+0x3FA)==0&&ld8(a+0x3FB)==0xFF&&(ld8(a+0x3FC)<=4||(black_chuchu(e->spec)&&ld8(a+0x3FC)==6))&&ld8(a+0x924+0x1B1)==0;
  if(kind==Kind::Bokoblin){const unsigned action=ld16(a+0x49C+6);const uint32_t p=params_of(e->spec);return ld8(a+0x3D0)==(p&0xF)&&ld8(a+0x3D1)==0xFF&&ld8(a+0x3D2)==((p>>16)&0xFF)&&ld8(a+0x3D3)==0xFF&&ld8(a+0x3D4)==0&&ld8(a+0x3D5)==0&&ld8(a+0x3D6)==0&&ld8(a+0x3F0)==(params_of(e->spec)&0x20u)&&ld8(a+0x3F1)==(params_of(e->spec)&0x40u)&&ld8(a+0x3F8)==0&&ld32(a+0x1378)==patrol_route(*e)&&(ld8(a+0x1375)==0||(story_enemy_variants::bokoblin_patrols(p)&&ld8(a+0x1375)==((story_enemy_variants::kPatrolRoute+1)&0xFF)))&&ld32(a+0x1380)==0&&ld8(a+0x138D)==0&&ld8(a+0x137D)==0&&((action<=23&&action!=15&&action!=16)||(p==story_enemy_variants::kRiderParams&&(action==30||action==31)))&&ld8(a+0x13BC+0x1B1)==0;}
@@ -429,18 +460,37 @@ std::function<uint32_t(Token,uint32_t,int)> room_path_provider;
 void room_path(Cpu*c){const uint32_t number=c->r[3];const int room=int(int32_t(c->r[4]));original(c,RoomPath);if(c->r[3])return;Entry*e=executing;if(!e)return;
  if((e->spec.kind==Kind::Bokoblin||e->spec.kind==Kind::Moblin)&&story_enemy_variants::patrol_word(params_of(e->spec))&&number==story_enemy_variants::kPatrolRoute){if(route_provider)c->r[3]=route_provider(e->token);return;}
  if(room_path_provider)c->r[3]=room_path_provider(e->token,number,room);}}
+// dPath_GetNextRoomPath(path, room): a mod path's record answers with the record of its next path (the
+// game's own would look the number up in the room's table and assert); every other path is the game's.
+std::function<bool(uint32_t,int,uint32_t&)> next_path_provider;const uint32_t NextRoomPath=GC(0x025AB070);
+void next_room_path(Cpu*c){uint32_t out=0;if(next_path_provider&&next_path_provider(c->r[3],int(int32_t(c->r[4])),out)){c->r[3]=out;return;}original(c,NextRoomPath);}
 void set_route_provider(std::function<uint32_t(Token)> route){route_provider=std::move(route);}
 void set_room_path_provider(std::function<uint32_t(Token,uint32_t,int)> provider){room_path_provider=std::move(provider);}
 void set_rider_provider(std::function<RiderRequest(Token)> request,std::function<void(Token,uint32_t)> created){rider_provider=std::move(request);rider_created=std::move(created);}
 uint32_t room_path_function(){return RoomPath;}
-bool install_routes(const std::function<std::string(uint32_t)>&owner,const std::function<void(uint32_t,void(*)(Cpu*))>&replace){if(routes_installed)return true;if(!original||!owner(RoomPath).empty())return false;replace(RoomPath,room_path);routes_installed=true;return true;}
-bool is_defeated(Token t){auto*e=get(t);return e&&story_items::enemy_defeated(e->marker);}
+bool install_routes(const std::function<std::string(uint32_t)>&owner,const std::function<void(uint32_t,void(*)(Cpu*))>&replace){if(routes_installed)return true;if(!original||!owner(RoomPath).empty()||!owner(NextRoomPath).empty())return false;replace(RoomPath,room_path);replace(NextRoomPath,next_room_path);routes_installed=true;return true;}
+void set_next_path_provider(std::function<bool(uint32_t,int,uint32_t&)> provider){next_path_provider=std::move(provider);}
+void set_summon_provider(std::function<SummonRequest(Token,uint16_t,uint32_t)> request,std::function<void(Token,uint32_t)> created,std::function<std::vector<Token>(Token)> pool){summon_provider=std::move(request);summon_created=std::move(created);summon_pool=std::move(pool);}
+// fopAcM_create(name, word, pos, room, angle, scale, subtype, ...) while an owned summoner's door runs: the
+// summon becomes a free member of the summoner's pool (its private profile, fixed word and z angle), bound
+// to the new process; with no free member (or a kind outside the pool) it is refused, as a full game would.
+bool summon_create(Cpu*c){if(!fireball_executing)return false;Entry*s=wz_child_summoner(fireball_executing,more::kWizzrobeDoorParams);if(!s)return false;
+ const uint16_t name=uint16_t(c->r[3]);const SummonRequest r=summon_provider?summon_provider(s->token,name,c->r[4]):SummonRequest{};
+ if(!r.summon||!r.profile){static unsigned told=0;if(told++<32)trace(*s,s->address,"summon-refused",name);c->r[3]=0xFFFFFFFFu;return true;}
+ c->r[3]=r.profile;c->r[4]=r.params;if(memory(c->r[7],8))st16(c->r[7]+4,r.home_z);original(c,GC(0x025D5834));const uint32_t pid=c->r[3];
+ if(pid!=0xFFFFFFFFu&&summon_created)summon_created(r.summon,pid);if(enemy_trace())trace(*s,s->address,"summoned",pid);
+ // diagnostics: WWHD_SUMMON_HEAPS=1 logs the heaps' free bytes at each summon (a full wave's cost)
+ static const bool heaps=[]{const char*v=std::getenv("WWHD_SUMMON_HEAPS");return v&&*v=='1';}();
+ if(heaps){Cpu probe=*c;const auto f=native_actor_profiles::heap_free(&probe);unsigned live=0;if(summon_pool)for(Token t:summon_pool(s->token)){auto*m=get(t);if(m&&m->pid!=0xFFFFFFFFu)++live;}
+  LOG("[summon_heaps] %s summons=%u free archive=%u game=%u zelda=%u command=%u actor=%u",s->spec.id.c_str(),live,f[0],f[1],f[2],f[3],f[4]);}
+ return true;}
+bool is_defeated(Token t){auto*e=get(t);return e&&defeated(*e);}
 // an enemy the port retires as defeated without its own defeat (a closed rat hole): its marker, no drops;
 // its actor removes itself on its next step like any defeated one
 bool settle(Token t){auto*e=get(t);if(!e||e->quarantine||story_items::enemy_defeated(e->marker))return false;const auto result=story_items::claim_enemy_drops(e->marker,e->spec.mod,{});if(e->address)trace(*e,e->address,"settle",unsigned(result));return result==story_items::EnemyClaimStatus::Committed;}
-bool available(Token t){auto*e=get(t);return e&&!e->quarantine&&!story_items::enemy_defeated(e->marker);}
+bool available(Token t){auto*e=get(t);return e&&!e->quarantine&&(e->spec.transient||!story_items::enemy_defeated(e->marker));}
 void quarantine(Token t){if(auto*e=get(t))disable(*e,e->address);}
-bool begin_epoch(Token t,uint32_t epoch){auto*e=get(t);if(!e||!story_enemy_ownership::begin_epoch(t,epoch))return false;e->spec.epoch=epoch;e->pid=0xFFFFFFFFu;e->address=0;e->quarantine=false;return true;}
+bool begin_epoch(Token t,uint32_t epoch){auto*e=get(t);if(!e||!story_enemy_ownership::begin_epoch(t,epoch))return false;e->spec.epoch=epoch;e->pid=0xFFFFFFFFu;e->address=0;e->quarantine=false;e->transient_defeated=false;return true;}
 void state_loaded(){executing=ice_owner=nullptr;drowning=nullptr;for(auto&e:entries){e.address=0;e.pid=0xFFFFFFFFu;e.quarantine=false;e.claiming=false;}}
 bool owns_actor(uint32_t a){return find(a)!=nullptr;}
 bool deny_create(uint32_t,uint32_t){return executing&&executing->spec.kind==Kind::BokoBaba;}

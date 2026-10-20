@@ -1317,6 +1317,15 @@ void path_commands() {
     CHECK(ok(s.run("set_path_point", json(R"({"id": "bird-route", "point": 3, "release": false})"))) && path_of("bird-route").get("points").array[2].get("release").type == Value::Null);
     r = s.run("set_path_point", json(R"({"id": "bird-route", "point": 1, "release": false})"));
     CHECK(!ok(r) && r.get("error").string().find("release") != std::string::npos);  // its last release point
+    // a Wizzrobe summoner: placed with its path and that path's next path (its summon points); the next path
+    // can't go while a path names it
+    r = s.run("add_actor", json(R"({"type": "wizzrobe", "id": "wiz", "options": {"variant": "summoner_chuchus"}})"));
+    CHECK(ok(r) && actor_of(s, "wiz")->get("path").string() == "wiz-route" && path_of("wiz-route").get("next").string() == "wiz-route-spots");
+    r = s.run("remove_path", json(R"({"id": "wiz-route-spots"})"));
+    CHECK(!ok(r) && r.get("error").string().find("next path") != std::string::npos);
+    CHECK(ok(s.run("set_path", json(R"({"id": "wiz-route-spots", "new_id": "spots"})"))) && path_of("wiz-route").get("next").string() == "spots");
+    CHECK(!ok(s.run("set_path", json(R"({"id": "wiz-route", "next": null})"))));  // a summoner's path keeps its next path
+    CHECK(ok(s.run("remove_actor", json(R"({"id": "wiz", "confirm": true})"))));
     CHECK(editor::room_path_use(json(R"({"actor": "wall_cannon"})")).find("firing area") != std::string::npos && editor::room_path_use(json(R"({"actor": "chuchu"})")).empty());
 }
 

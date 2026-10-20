@@ -20,9 +20,10 @@ std::recursive_mutex g_mu;
 uint32_t g_memory = 0;
 
 uint32_t slot_address(unsigned slot) { return g_memory + slot * path::kSlotBytes; }
+uint16_t next_number(const Entry& e);
 void write(const Entry& e) {
     if (!g_memory) return;
-    const auto bytes = path::encode(e.path, e.number, slot_address(e.slot));
+    const auto bytes = path::encode(e.path, e.number, slot_address(e.slot), next_number(e));
     std::memcpy(mem::ptr(slot_address(e.slot)), bytes.data(), bytes.size());
 }
 void clear(unsigned slot) {
@@ -34,6 +35,11 @@ const Entry* find(const std::string& mod, const std::string& id) {
     return nullptr;
 }
 bool same_room(const path::Path& a, const path::Path& b) { return a.stage == b.stage && a.room == b.room; }
+uint16_t next_number(const Entry& e) {
+    if (e.path.next.empty()) return 0xFFFF;
+    const Entry* n = find(e.mod, e.path.next);
+    return n && same_room(n->path, e.path) ? n->number : 0xFFFF;
+}
 }  // namespace
 
 void set_memory(uint32_t guest) {
@@ -95,6 +101,23 @@ uint32_t record(const std::string& mod, const std::string& id) {
     std::lock_guard<std::recursive_mutex> lock(g_mu);
     const Entry* e = find(mod, id);
     return e && g_memory ? slot_address(e->slot) : 0;
+}
+bool is_record(uint32_t address) {
+    return g_memory && address >= g_memory && address < g_memory + path::kMemoryBytes && (address - g_memory) % path::kSlotBytes == path::kHeader;
+}
+uint32_t next_record(uint32_t address, int room) {
+    std::lock_guard<std::recursive_mutex> lock(g_mu);
+    if (!is_record(address) || ld32(address - path::kHeader + path::kMagicAt) != path::kMagic) return 0;
+    const uint16_t next = ld16(address + 2);
+    if (next == 0xFFFF) return 0;
+    const unsigned slot = (address - g_memory) / path::kSlotBytes;
+    const Entry* from = nullptr;
+    for (const auto& e : g_entries)
+        if (e.slot == slot) from = &e;
+    if (!from || (room >= 0 && unsigned(room) != from->path.room)) return 0;
+    for (const auto& e : g_entries)
+        if (e.mod == from->mod && e.number == next && same_room(e.path, from->path)) return slot_address(e.slot) + path::kHeader;
+    return 0;
 }
 uint32_t answer(const std::string& mod, const std::string& id, uint32_t number, int room, const std::string& stage) {
     std::lock_guard<std::recursive_mutex> lock(g_mu);
