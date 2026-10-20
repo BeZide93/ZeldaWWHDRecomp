@@ -87,6 +87,13 @@ public:
     virtual bool reload_room(std::string& why) = 0;
     // Stages and the rooms each has, from the game's own files (sorted). Empty without game files.
     virtual std::vector<std::pair<std::string, std::vector<int>>> stage_rooms() = 0;
+    // The installed packages' mod stages (mod_stages.h): the package, its id for the stage, the game name and the
+    // rooms. Warp destinations ("Mod stages") and the warp command's "stage:<mod>/<id>".
+    struct ModStage {
+        std::string mod, id, name;
+        std::vector<int> rooms;
+    };
+    virtual std::vector<ModStage> mod_stages() { return {}; }
     virtual bool warp(const Location& to, std::string& why) = 0;
     virtual Place link() = 0;
     // A cutscene, event, dialogue, menu or stage change is running: no warp, no fly camera.
@@ -459,7 +466,8 @@ const char* island_name(int room);  // "Windfall Island"; nullptr outside 1..49
 // Warp destinations: the 49 sea squares, the stages and rooms in `stage_rooms` (the game's files), and
 // for each package its placed actors and quest step places.
 std::vector<Location> build_locations(const std::vector<std::pair<std::string, std::vector<int>>>& stage_rooms,
-                                      const std::vector<std::pair<std::string, Value>>& packages);
+                                      const std::vector<std::pair<std::string, Value>>& packages,
+                                      const std::vector<Host::ModStage>& mod_stages = {});
 // The story records that hold a mod's progress (its actor and scene flags, quests, letters, and the charts and
 // items Link got from it).
 std::vector<Record> mod_records(const std::string& mod, const Value& manifest);

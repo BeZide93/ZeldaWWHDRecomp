@@ -10,6 +10,7 @@
 
 namespace editor {
 namespace {
+std::function<std::string(const std::string&)> g_stage_source;  // set_stage_archive_source
 namespace fs = std::filesystem;
 using Bytes = std::vector<uint8_t>;
 
@@ -212,10 +213,14 @@ std::vector<std::pair<std::string, std::vector<int>>> game_stage_rooms(const std
     return stage_rooms_from_names(names);
 }
 
+void set_stage_archive_source(std::function<std::string(const std::string&)> source) { g_stage_source = std::move(source); }
+
 std::vector<Spawn> room_spawns(const std::string& game_dir, const std::string& stage, int room) {
     const std::string name = stage + "_Room" + std::to_string(room) + ".szs";
     Bytes file;
-    const fs::path loose = fs::path(game_dir) / "content" / "Common" / "Stage" / name;
+    fs::path loose = fs::path(game_dir) / "content" / "Common" / "Stage" / name;
+    if (g_stage_source)
+        if (auto local = g_stage_source(name); !local.empty()) loose = local;
     std::error_code ec;
     if (fs::is_regular_file(loose, ec)) {
         const auto size = fs::file_size(loose, ec);

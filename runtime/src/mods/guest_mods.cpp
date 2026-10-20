@@ -59,6 +59,7 @@
 #include "story_resident_routes.h"
 #include "story_resident_walk_files.h"
 #include "story_game_pieces.h"
+#include "mod_stages.h"
 #include "mod_actor.h"
 #include "mod_actor_behavior_core.h"
 #include "actor_model_cache.h"
@@ -463,6 +464,14 @@ bool prop_texture_binding_valid(const story_actor_textures::Binding& binding){
 }
 void load_world(const std::string& mod,const mods::json::Value& manifest,const std::string& package_dir,const std::string& data_dir) {
     mod_actor::configure_world_objects(config::game_dir);
+    // Mod stages (mod_stages.h): built from the player's game files into the stage cache (or taken from it) and
+    // served to the game; a stage the player's files can't make is left out with a line in the log
+    if(manifest.get("stages").type!=mods::json::Value::Null){
+        std::vector<std::string> python;std::string tool;
+        try{const auto bridge=BuildBridge::installed(std::string());python=bridge.python;tool=(std::filesystem::path(bridge.builder).parent_path().parent_path()/"story_mods"/"stage_builder.py").string();}
+        catch(const std::exception& e){LOG("[mod-stages] %s: the stage builder is unavailable: %s",mod.c_str(),e.what());}
+        mod_stages::declare(mod,manifest,package_dir,data_dir,python,tool,config::game_dir);
+    }
     struct ItemModelBatch {size_t checkpoint=story_item_models::checkpoint();bool committed=false;~ItemModelBatch(){if(!committed)story_item_models::rollback(checkpoint);}} item_model_batch;
     struct TextureBatch {size_t checkpoint=story_actor_textures::checkpoint();bool committed=false;~TextureBatch(){if(!committed)story_actor_textures::rollback(checkpoint);}} texture_batch;
     struct SceneBatch {size_t checkpoint=story_scenes::checkpoint();bool committed=false;~SceneBatch(){if(!committed)story_scenes::rollback(checkpoint);}} scene_batch;
@@ -1224,7 +1233,8 @@ void init() {
     // Story progress (story_store.h): its areas in guest memory, so full save states carry them; saved
     // with the game's saves in the story block of cking.sav. Without a story mod the file's block is
     // still kept as it is.
-    const bool story=story_mail::imported()||story_chart::imported()||story_notebook::imported()||story_items::imported();
+    // (mod stages keep where a Quest Log was saved in one there too: mod_stages.h)
+    const bool story=story_mail::imported()||story_chart::imported()||story_notebook::imported()||story_items::imported()||mod_stages::declared();
     if(story){uint32_t areas=mem::runtime_alloc(story_store::kMemoryBytes,16);memset(mem::ptr(areas),0,story_store::kMemoryBytes);story_store::set_memory(areas);}
     // developer override of the notebook's model archive (the Story Notebook package's setup step builds it)
     if(const char* model=getenv("WWHD_NOTEBOOK_MODEL");model&&*model)story_mail::set_notebook_model(model);
@@ -1622,6 +1632,7 @@ void logic_service(Cpu* c) {
         }
     }
     story_item_models::tick(c);mod_actor::heap_sample(c);actor_sweep(c);story_scenes::tick(c,false,2);story_actors::service(c);
+    mod_stages::logic(c);
     story_native_wait_runtime::logic(c);
     story_scenes::demo_tick(c);
 }

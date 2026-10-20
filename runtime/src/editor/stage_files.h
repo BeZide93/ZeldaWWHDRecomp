@@ -4,6 +4,7 @@
 // change uses: dStage_playerInit picks the entry whose point number matches).
 #pragma once
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -33,5 +34,8 @@ std::vector<std::pair<std::string, std::vector<int>>> game_stage_rooms(const std
 std::string game_archive(const std::string& game_dir, const std::string& archive);
 // The spawn points of a stage's room from its room archive; empty when the file is missing or unreadable.
 std::vector<Spawn> room_spawns(const std::string& game_dir, const std::string& stage, int room);
+// Stage archives that are not in the game's files (the mod stages, mod_stages.h): a stage file name
+// ("<name>_Room0.szs") -> a local file, or "". room_spawns consults it first.
+void set_stage_archive_source(std::function<std::string(const std::string&)> source);
 
 }  // namespace editor

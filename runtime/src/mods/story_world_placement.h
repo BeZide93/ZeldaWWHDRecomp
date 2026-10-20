@@ -1,5 +1,6 @@
 // Conservative placement queries. Native resource data stays on the player's machine.
 #pragma once
+#include <functional>
 #include <array>
 #include <cstdint>
 #include <string>
@@ -61,6 +62,9 @@ unsigned table_stride(const std::string& tag);
 // Load loose or packed stage archives and their BFRES embedded DZB/DZR files.
 // Never writes, exports or caches native bytes. A returned index may have incomplete coverage.
 Index load_native_room(const std::string& game_directory,const std::string& stage,int room);
+// Stage archives that are not in the game's files (the mod stages, mod_stages.h): a stage file name
+// ("<name>_Room0.szs") -> a local file, or "". Consulted before the game's files.
+void set_stage_archive_source(std::function<std::string(const std::string&)> source);
 // ---- what the room's layout needs kept clear, by its real extent where it is known (a tag area's own
 // radius and height from its scale; a door, chest, villager, item, switch or start point by its kind) and a
 // reasonable default for any other object. Grass, flowers, trees, palms, birds, crabs and the light and weather

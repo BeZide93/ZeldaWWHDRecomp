@@ -64,9 +64,9 @@ const std::vector<CommandInfo> kCommands = {
     {"save_package", "Writes the open mod's manifest into its package folder (replaces manifest.json).", {{"mod", "string", ""}, {"confirm", "boolean", "must be true: the file is replaced", true}}, false, true},
     {"revert_package", "Forgets the unsaved changes (an undo step).", {{"mod", "string", ""}, {"confirm", "boolean", "must be true", true}}, true, true},
     {"reload_room", "Leaves and enters the current room again (Link stays where he is): every actor of the room is created again.", {}},
-    {"list_locations", "Warp destinations: the islands, the game's stages and rooms, and the open mod's actors and quest places.", {{"group", "string", "Islands, Rooms or Quest"}}},
+    {"list_locations", "Warp destinations: the islands, the game's stages and rooms, the installed packages' stages, and the open mod's actors and quest places.", {{"group", "string", "Islands, Rooms, Mod stages or Quest"}}},
     {"warp", "Warps Link with the game's own stage change. Not during a cutscene, dialogue or menu.",
-     {{"stage", "string", "the stage name (sea, M_NewD2, ...)", true}, {"room", "integer", "0..63", true}, {"point", "integer", "a spawn point; without it: the room's first spawn point, or \"position\""},
+     {{"stage", "string", "the stage name (sea, M_NewD2, ...), or a package's stage: stage:<mod>/<id>", true}, {"room", "integer", "0..63", true}, {"point", "integer", "a spawn point; without it: the room's first spawn point, or \"position\""},
       {"position", "point", "stand here instead of at a spawn point"}, {"angle", "integer", "heading with position, the game's 16-bit angle"}}},
     {"warp_to", "Warps to an entry of list_locations.", {{"location", "string", "the location's id", true}}},
     {"warp_back", "Back to where Link was before the last warp.", {}},
@@ -775,7 +775,7 @@ const char* island_name(int room) {
 }
 
 std::vector<Location> build_locations(const std::vector<std::pair<std::string, std::vector<int>>>& stage_rooms,
-                                      const std::vector<std::pair<std::string, Value>>& packages) {
+                                      const std::vector<std::pair<std::string, Value>>& packages, const std::vector<Host::ModStage>& mod_stages) {
     std::vector<Location> out;
     for (int room = 1; room <= 49; room++) {
         Location l;
@@ -800,6 +800,17 @@ std::vector<Location> build_locations(const std::vector<std::pair<std::string, s
             out.push_back(l);
         }
     }
+    // the packages' stages, by the package's own id (the game name is the port's)
+    for (const auto& ms : mod_stages)
+        for (int room : ms.rooms) {
+            Location l;
+            l.id = "stage:" + ms.mod + "/" + ms.id + ":" + std::to_string(room);
+            l.label = ms.id + " (" + ms.mod + ")  room " + std::to_string(room);
+            l.group = "Mod stages";
+            l.stage = ms.name;
+            l.room = room;
+            out.push_back(l);
+        }
     for (const auto& [mod, m] : packages) {
         std::vector<ManifestActor> actors;
         std::string why;
@@ -1210,7 +1221,7 @@ std::vector<Location> Session::locations() const {
     if (stage_rooms_.empty() && host_) stage_rooms_ = host_->stage_rooms();
     std::vector<std::pair<std::string, Value>> open;
     if (auto* p = find(open_)) open.push_back({p->mod, p->manifest});
-    return build_locations(stage_rooms_, open);
+    return build_locations(stage_rooms_, open, host_ ? host_->mod_stages() : std::vector<Host::ModStage>{});
 }
 
 bool Session::warp_to(const Location& to, std::string& why) {
@@ -1533,6 +1544,13 @@ Value Session::dispatch(const std::string& command, const Value& p, std::string&
             to.id = "manual";
             to.stage = text(p, "stage");
             to.room = int(p.get("room").number);
+            if (to.stage.rfind("stage:", 0) == 0 && host_) {  // a package's stage: "stage:<mod>/<id>"
+                std::string name;
+                for (const auto& ms : host_->mod_stages())
+                    if ("stage:" + ms.mod + "/" + ms.id == to.stage) name = ms.name;
+                if (name.empty()) return why = "no mod stage \"" + to.stage + "\" is installed (list_locations, group Mod stages)", r;
+                to.stage = name;
+            }
             if (to.stage.empty() || to.stage.size() > 7 || to.room < 0 || to.room > 63) return why = "a stage name of up to 7 characters and a room 0..63", r;
             if (p.get("point").type == Value::Number) to.point = int(p.get("point").number);
             if (p.get("position").type != Value::Null) {

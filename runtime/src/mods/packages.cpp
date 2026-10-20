@@ -1,5 +1,6 @@
 #include "../exception_report.h"
 #include "packages.h"
+#include "mod_stages_manifest.h"
 #include "story_game_objects_package.h"
 #include "manager.h"
 #include "mods.h"
@@ -182,6 +183,17 @@ Manifest manifest(const fs::path& path){
     std::vector<story_notebook::ManifestModel> models;std::string model_error;
     require(story_notebook::parse_models(v,models,model_error),"Models: "+model_error);
     world_declarations = world_declarations || (!models.empty() && m.problem.empty());
+    // mod stages (mod_stages_manifest.h; built at start-up from the player's game files): an invalid "stages"
+    // section or a missing ground model keeps the package from being enabled, with the reason
+    if(m.problem.empty()&&v.get("stages").type!=Value::Null){
+        std::vector<mod_stages::Stage> stages;std::string why;
+        if(!mod_stages::parse(v,stages,why))m.problem="Stages: "+why;
+        for(const auto& stage:stages)for(const auto& room:stage.rooms){
+            auto checked=path;for(const auto& part:fs::path(room.ground)){checked/=part;require(!fs::is_symlink(checked),"Stage ground paths may not use symlinks");}
+            if(m.problem.empty()&&(!fs::is_regular_file(checked)||fs::file_size(checked)>16u*1024*1024))m.problem="Stages: "+stage.id+" room "+std::to_string(room.room)+": the ground model "+room.ground+" is missing or larger than 16 MiB";
+        }
+        world_declarations = world_declarations || (!stages.empty() && m.problem.empty());
+    }
     for(const auto& model:models){
         auto checked=path;for(const auto& part:fs::path(model.source)){checked/=part;require(!fs::is_symlink(checked),"Model source paths may not use symlinks");}
         require(fs::is_regular_file(checked)&&fs::file_size(checked)<=static_models::kMaxSourceBytes,"Missing or oversized model source");

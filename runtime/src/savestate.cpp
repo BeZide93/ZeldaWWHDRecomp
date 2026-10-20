@@ -24,6 +24,7 @@
 #include "state_load_result.h"
 #include "mods/fast_forward.h"
 #include "mods/story_store.h"
+#include "mods/mod_stages.h"
 #include "mods/mods.h"
 // Save states: snapshot the whole running game into one of 5 slots and restore it, also in a new
 // process.
@@ -513,7 +514,9 @@ std::string area_label(const char* stage) {
         {"kindan", "Forbidden Woods"}, {"Siren", "Tower of the Gods"}, {"Asoko", "Tetra's Ship"},
     };
     auto it = names.find(stage);
-    return it == names.end() ? std::string(stage) : it->second;
+    if (it != names.end()) return it->second;
+    mod_stages::Info mod;  // a mod stage: its package's id for it, never the port's name
+    return mod_stages::find(stage, mod) ? mod.id + " (" + mod.mod + ")" : std::string(stage);
 }
 
 // true when done (saved or failed for good); false to retry on the next frame
@@ -752,6 +755,8 @@ bool do_load(const std::shared_ptr<Snapshot>& s) {
     auto refused=[&](const std::string& why){s->load_result.complete(false,why);return true;};
     for(uint32_t tag:{kSecThreads,kSecHeaps,kSecFiles,kSecAudio,kSecGx2,kSecAllocs,kSecDispatch})
         if(!s->sections.count(tag)){message("%s: incomplete state",slot_label(s->slot).c_str());return refused("incomplete state");}
+    // a state made in a mod stage needs the package that makes the stage (its rooms load from the stage cache)
+    if(mod_stages::missing(std::string(s->h.area,strnlen(s->h.area,sizeof s->h.area)))){message("%s: made in a mod stage that no installed package makes",slot_label(s->slot).c_str());return refused("made in a mod stage that no installed package makes");}
     mods::fast_forward_reset();
     mods::quick_use_reset();
     std::string busy, why;
@@ -1109,6 +1114,7 @@ void apply_hd_sections(Cpu* c, const pstate::State& s) {
 // puts a portable state into the running game; false + retry when the game is not ready yet
 bool apply_portable(Cpu* c, const pstate::State& s, std::string& why, bool& retry) {
     mods::quick_use_reset();
+    if (mod_stages::missing(s.stage)) { why = "it was made in a mod stage that no installed package makes"; retry = false; return false; }
     if (!gameplay_ready(why, retry)) return false;
     // Portable states do not overwrite the runtime arena. Prove clean owned
     // unpublished lineage while workers are parked, or revoke/quarantine the

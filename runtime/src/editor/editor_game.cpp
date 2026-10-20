@@ -57,6 +57,7 @@
 #include "../savestate.h"
 #include "../true60.h"
 #include "guest_addr.h"
+#include "../mods/mod_stages.h"
 #include "stage_files.h"
 
 namespace editor {
@@ -849,6 +850,15 @@ public:
         return true;
     }
     std::vector<std::pair<std::string, std::vector<int>>> stage_rooms() override { return game_stage_rooms(config::game_dir); }
+    std::vector<ModStage> mod_stages() override {
+        std::vector<ModStage> out;
+        for (const auto& s : ::mod_stages::stages()) {
+            ModStage m{s.mod, s.id, s.name, {}};
+            for (unsigned r : s.rooms) m.rooms.push_back(int(r));
+            out.push_back(std::move(m));
+        }
+        return out;
+    }
     bool warp(const Location& to, std::string& why) override {
         ss::Warp w;
         w.stage = to.stage;

@@ -1,0 +1,7 @@
+# Mod stages (runtime/src/mods/mod_stages.cpp, docs/mod-stages.md): new-named stages a package declares,
+# built from the player's own files. Each hook calls the game's function unchanged unless the current or
+# requested stage is one of them.
+020277AC  # JAIZelBasic::spotNameToId: a mod stage's music and scene sound banks are its music_like stage's
+025217F8  # dComIfGs_setGameStartStage: saving in a mod stage stores the stage's game entrance, never its name
+02522198  # dComIfGs_gameStart: a Quest Log saved in a mod stage continues there while the mod is installed
+0273AA24  # JUTAssertion: logged with the stage while a mod stage is loaded

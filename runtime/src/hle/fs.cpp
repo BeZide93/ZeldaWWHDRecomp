@@ -24,6 +24,7 @@
 #include "../runtime.h"
 #include "../write_watch.h"
 #include "../mods/content.h"
+#include "../mods/mod_stages.h"
 #include "../game_languages.h"
 #include "../rtl_text.h"
 #include "save_root.h"
@@ -158,6 +159,7 @@ std::string read_path(const std::string& guest,const std::string& mode="rb") {
     if(mode=="r"||mode=="rb")if(auto model=actor_model_cache::archive_for(guest);!model.empty())return model;
     if(mode=="r"||mode=="rb")if(auto model=story_mail::model_override(guest);!model.empty())return model;  // the story notebook's model
     if(mode=="r"||mode=="rb")if(auto lyt=story_lyt_screen::archive_for(guest);!lyt.empty())return lyt;  // a story layout (story_lyt_screen.h)
+    if(mode=="r"||mode=="rb")if(auto stage=mod_stages::archive_for(guest);!stage.empty())return stage;  // a mod stage (mod_stages.h)
     auto override=mods::content::replacement(guest,mode);
     if(!override.empty())if(const char* trace=std::getenv("WWHD_TEST_CONTENT_TRACE");trace&&std::string(trace)=="1")LOG("[content-mod] read %s -> %s",guest.c_str(),override.c_str());
     if(override.empty()&&(mode=="r"||mode=="rb"))override=game_lang::redirect(guest);
