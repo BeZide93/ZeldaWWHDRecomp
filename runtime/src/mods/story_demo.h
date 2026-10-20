@@ -16,6 +16,7 @@
 #include <functional>
 #include <initializer_list>
 #include <string>
+#include <vector>
 
 struct Cpu;
 namespace story_demo {
@@ -24,6 +25,9 @@ inline constexpr char kVirtualArchive[] = "ModDemo";  // <= 11 characters: mDemo
 using Call = uint32_t (*)(Cpu*, uint32_t, std::initializer_list<uint32_t>);
 void configure(uint32_t arena, Call call, void (*original)(Cpu*, uint32_t));
 bool configured();
+// The files of an object archive by the game's resource id table ("dk.bdl", "fly1.bck"; unnamed ids left out):
+// static game data, readable from any thread once the game code is loaded; empty for an unknown archive.
+std::vector<std::string> resource_names(const std::string& archive);
 void install(const std::function<std::string(uint32_t)>& replaced_by, const std::function<void(uint32_t, void (*)(Cpu*))>& replace);
 
 // Start a demo step. The caller (the scene player) already owns a compulsory event. Checks every

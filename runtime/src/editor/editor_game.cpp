@@ -39,6 +39,7 @@
 #include "../mods/story_actors.h"
 #include "../mods/story_game_pieces.h"
 #include "../mods/story_npc_catalogue.h"
+#include "../mods/story_demo.h"
 #include "../mods/story_items.h"
 #include "../mods/story_mail.h"
 #include "../mods/story_mail_book.h"
@@ -153,6 +154,8 @@ bool on_game(const std::function<void(Cpu*)>& f, std::string& why, int ms = 1500
 const uint32_t kPlayFn = GC(0x025200D4), kCameraFn = GC(0x024F8044), kStopCamera = GC(0x02514F2C), kStartCamera = GC(0x02514F38),
                kSetCamera = GC(0x02514F50), kResetCamera = GC(0x02515048), kOrder = GC(0x0253EC0C), kCheckStart = GC(0x0253FD1C),
                kEnd = GC(0x0253EFA8), kHideHud = GC(0x025916C4), kShowHud = GC(0x0259169C);
+const uint32_t kSearchName = GC(0x025C109C);      // dStage_searchName: the object name table entry of a stage actor name
+const uint32_t kSeStartSystem = GC(0x025E1988);   // mDoAud_seStartSystem(id): a sound effect without a place
 constexpr uint32_t kControl = 0x51D0, kMode = 0x5292, kOrderCount = 0x5290, kStage = 0x5134, kPlayer = 0x5B34, kHudShown = 0x5C22;
 constexpr uint32_t kCenter = 0x10, kEye = 0x1C, kActive = 0x4;  // dCamera_c (d_camera.h)
 constexpr uint32_t kPos = 0x314, kRoom = 0x326, kAngleY = 0x32A;  // fopAc_ac_c
@@ -860,6 +863,80 @@ public:
         return true;
     }
     std::string game_archive(const std::string& archive) override { return editor::game_archive(config::game_dir, archive); }
+    // ---- the demo step's pickers
+    bool stage_actor_names(std::vector<std::string>& out, std::string& why) override {
+        // The game's object name table (dStage_searchName's): entries of {name[8], process u16, subtype u8}
+        // (12 bytes). Found through a name the game surely has, then read both ways while entries look
+        // like names. Read once; it is static game data.
+        static std::vector<std::string> cached;
+        static std::mutex mu;
+        {
+            std::lock_guard<std::mutex> lk(mu);
+            if (!cached.empty()) return out = cached, true;
+        }
+        static const uint32_t scratch = mem::host_alloc(16, 16);
+        uint32_t entry = 0;
+        if (!on_game([&](Cpu* c) {
+                for (const char* probe : {"Link", "Oyashi", "bk", "Bk", "kamome"}) {
+                    std::memset(mem::ptr(scratch), 0, 16);
+                    std::memcpy(mem::ptr(scratch), probe, std::strlen(probe));
+                    if ((entry = call(c, kSearchName, {scratch})) != 0) break;
+                }
+            }, why))
+            return false;
+        if (!entry) return why = "the game's object name table was not found", false;
+        auto name_at = [](uint32_t e, std::string& n) {
+            n.clear();
+            for (uint32_t i = 0; i < 8; i++) {
+                const char ch = char(ld8(e + i));
+                if (!ch) {
+                    for (uint32_t k = i; k < 8; k++)
+                        if (ld8(e + k)) return false;
+                    return !n.empty();
+                }
+                if (ch < '!' || ch > '~') return false;
+                n += ch;
+            }
+            return false;  // eight characters and no end
+        };
+        uint32_t first = entry;
+        std::string n;
+        for (int i = 0; i < 4096 && name_at(first - 12, n); i++) first -= 12;
+        std::set<std::string> names;
+        for (uint32_t e = first; names.size() < 4096 && name_at(e, n); e += 12) names.insert(n);
+        std::lock_guard<std::mutex> lk(mu);
+        cached.assign(names.begin(), names.end());
+        LOG("[editor] the game's object name table: %zu stage actor names", cached.size());
+        return out = cached, true;
+    }
+    bool archive_files(const std::string& archive, std::vector<std::string>& out, std::string& why) override {
+        out = story_demo::resource_names(archive);
+        if (out.empty()) return why = "the game has no object archive called " + archive, false;
+        return true;
+    }
+    bool archive_joints(const std::string& archive, std::vector<std::string>& out, std::string& why) override {
+        out = editor::archive_bones(config::game_dir, archive);
+        if (out.empty()) return why = "no joints found in the archive " + archive, false;
+        return true;
+    }
+    std::vector<std::string> game_archives() override {
+        static std::vector<std::string> cached = editor::game_archive_names(config::game_dir);
+        return cached;
+    }
+    std::vector<NamedActor> more_actor_names() override {
+        std::vector<NamedActor> out;
+        for (const auto& e : story_notebook::npc_catalogue().entries)
+            for (const auto& a : e.actors)
+                if (!a.code.empty()) out.push_back({a.code, e.display(), "", e.name, "residents"});
+        for (const auto& e : story_game_objects::catalogue().entries)
+            if (!e.native_name.empty()) out.push_back({e.native_name, e.label, e.archive, e.id, "game objects"});
+        return out;
+    }
+    bool play_sound(uint32_t id, std::string& why) override {
+        if (!id || id > 0xFFFF) return why = "not a sound id", false;
+        post([id](Cpu* c) { call(c, kSeStartSystem, {id}); });
+        return true;
+    }
     bool reload_room(std::string& why) override {
         (void)why;
         when_free([](Cpu*) {

@@ -6,6 +6,7 @@
 #include <functional>
 #include <map>
 #include <set>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -13,6 +14,7 @@
 #include "commands.h"
 #include "scenes.h"
 #include "demo_tracks.h"
+#include "demo_names.h"
 
 namespace editor {
 namespace {
@@ -630,6 +632,77 @@ Value Session::dispatch_scene(const std::string& command, const Value& p, std::s
         r["declared"] = declared;
         if (!declared && s->get("native").type != Value::Null)
             r["note"] = "the edited steps play; the native version plays after the package is saved and the game starts again";
+        ok = true;
+        return r;
+    }
+    // the demo step's pickers (names for sounds, particles and actors; an archive's files and joints)
+    if (command == "demo_choices") {
+        const std::string what = text(p, "what"), q = text(p, "query"), archive = text(p, "archive");
+        Value items = arr();
+        auto named = [&](std::span<const NamedId> list) {
+            for (const auto& n : list) {
+                const std::string label = std::string(n.group) + ": " + n.name;
+                if (!q.empty() && !matches_query(label + " " + n.code + " " + std::to_string(n.id), q)) continue;
+                Value v;
+                v["id"] = double(n.id);
+                v["label"] = label;
+                v["code"] = std::string(n.code);
+                items.array.push_back(v);
+            }
+        };
+        if (what == "sounds") named(sound_names());
+        else if (what == "particles") named(particle_names());
+        else if (what == "link_modes")
+            for (const char* m : link_mode_names()) items.array.push_back(Value(std::string(m)));
+        else if (what == "actors") {
+            // our short list, the residents and game objects the editor knows, then every other stage actor
+            // name of the game's object name table (shown by its name)
+            std::set<std::string> listed;
+            auto add = [&](const std::string& actor, const std::string& label, const std::string& arc, const std::string& id, const std::string& group) {
+                if (actor.empty() || !listed.insert(actor).second) return;
+                if (!q.empty() && !matches_query(label + " " + actor + " " + group, q)) return;
+                Value v;
+                v["actor"] = actor;
+                v["label"] = label;
+                v["archive"] = arc;
+                v["id"] = id;
+                v["group"] = group;
+                items.array.push_back(v);
+            };
+            for (const auto& a : demo_actor_names()) add(a.actor, a.label, a.archive, a.id, a.group);
+            if (host_)
+                for (const auto& a : host_->more_actor_names()) add(a.actor, a.label, a.archive, a.id, a.group);
+            std::vector<std::string> all;
+            std::string ignore;
+            if (host_ && host_->stage_actor_names(all, ignore)) {
+                std::set<std::string> known(all.begin(), all.end());
+                // a listed name the game's table doesn't have can't be a demo actor
+                if (!known.empty())
+                    items.array.erase(std::remove_if(items.array.begin(), items.array.end(), [&](const Value& v) { return !known.count(v.get("actor").string()); }), items.array.end());
+                for (const auto& n : all) add(n, n, "", "", "other");
+            }
+        } else if (what == "archives") {
+            if (host_)
+                for (const auto& a : host_->game_archives())
+                    if (q.empty() || matches_query(a, q)) items.array.push_back(Value(a));
+        } else if (what == "files" || what == "joints") {
+            if (!host_) return why = "the game is not running", r;
+            if (archive.empty()) return why = "\"archive\" names an object archive", r;
+            std::vector<std::string> list;
+            if (!(what == "files" ? host_->archive_files(archive, list, why) : host_->archive_joints(archive, list, why))) return r;
+            for (const auto& f : list)
+                if (q.empty() || matches_query(f, q)) items.array.push_back(Value(f));
+        } else
+            return why = "\"what\" is sounds, particles, actors, link_modes, archives, files or joints", r;
+        r["items"] = items;
+        ok = true;
+        return r;
+    }
+    if (command == "play_sound") {
+        if (!host_) return why = "the game is not running", r;
+        if (p.get("id").type != Value::Number) return why = "\"id\" is a sound effect id", r;
+        if (!host_->play_sound(uint32_t(p.get("id").number), why)) return r;
+        r["played"] = true;
         ok = true;
         return r;
     }

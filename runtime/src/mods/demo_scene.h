@@ -23,6 +23,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace demo_scene {
@@ -105,10 +106,10 @@ inline bool parse(const mods::json::Value& step, Demo& out, std::string& why);  
 // The game's id of a file in one of its archives (the archive's resource id table), or -1.
 using Resolver = std::function<int32_t(const Resource&)>;
 // Link's demo modes by name (the game's daPy_demo_c modes); "clip" plays one of his demo animations.
+inline constexpr std::pair<const char*, uint32_t> kLinkModes[] = {{"wait", 1}, {"walk", 2}, {"dash", 3}, {"turn", 5}, {"talk", 6}, {"holdup", 13}, {"keep", 14},
+    {"look_around", 15}, {"salute", 19}, {"surprised", 24}, {"lookup", 26}, {"nod", 36}, {"present", 37}, {"smile", 50}, {"clip", 512}};
 inline uint32_t link_mode(const std::string& name) {
-    static const std::pair<const char*, uint32_t> kModes[] = {{"wait", 1}, {"walk", 2}, {"dash", 3}, {"turn", 5}, {"talk", 6}, {"holdup", 13}, {"keep", 14},
-        {"look_around", 15}, {"salute", 19}, {"surprised", 24}, {"lookup", 26}, {"nod", 36}, {"present", 37}, {"smile", 50}, {"clip", 512}};
-    for (const auto& [n, v] : kModes) if (name == n) return v;
+    for (const auto& [n, v] : kLinkModes) if (name == n) return v;
     return 0;
 }
 inline constexpr const char* kLinkClipArchives[] = {"LkD00", "LkD01"};  // Link's demo animations (one is loaded at a time)

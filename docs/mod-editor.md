@@ -540,6 +540,30 @@ at the cursor: for the camera from the fly camera's view, for an actor where the
 or at Link. The inspector shows the selected key's value, the lane's curve (linear, smooth, bspline,
 step) and the selected event's fields. Every change is one Undo step.
 
+**Actors** of the demo: under **Add an actor**, **What it is** picks the kind (the **(?)** says what each
+one is):
+
+- **game actor**: search the list by name (for example "helmaroc", "pig" or "pot"): characters, the mod
+  catalogue's residents and game objects with readable names, then every other actor of the game by its
+  own short name;
+- **Link**: nothing more to choose;
+- **model**: one of the game's object archives, then one of its models;
+- **mod character**: one of the mod's placed actors.
+
+**Name in this demo** is the id that keys and events use; the editor suggests one from the choice
+("helmaroc", "link", ...), and you can change it. After **Add actor**, put the cursor on a time, select
+the actor's position lane and press **Add key**.
+
+**Add an event at the cursor**: choose the kind, then fill it in with its own controls. **sounds**: search
+the game's sound effects by name and listen with **Play**, and pick the actor it comes from;
+**particles**: search the particles, pick the actor and one of its joints (or the demo's origin);
+**messages**: the text; **time**: the hour; **weather**: how much rain; **attach** / **detach**: the
+carried actor, the one that carries it and its joint; **clips**: an animation of the actor's archive (or
+another archive), for a mod character one of its model's clips; **modes**: one of Link's demo modes
+(**clip**: one of his demo animations). **Advanced** shows the event as JSON, for fields the controls
+don't cover. Names of sounds and particles come from the decompilation's source code; a sound or particle
+without a name can still be entered by its number in Advanced.
+
 With a demo step selected, the cursor reads as its time and the demo's own frame (for example "cursor 4.00s · demo frame 120"); new keys and events go to that frame. Moving the cursor previews the demo at that frame without starting it: with **Camera follows the cursor**
 on, the fly camera shows the demo camera, and in the picture each actor appears as a marker at its place,
 its position track as a curve with its keys as points. The selected position key has a handle to drag in
@@ -853,6 +877,8 @@ separated by `;`, or `@file` with one such line per row. Results go to the log.
 | `remove_demo_event` | `scene`, `step`, `list`, `actor`?, `index`, `mod`? | remove an event |
 | `add_demo_actor` | `scene`, `step`, `actor`, `mod`? | an actor of the demo: `{"id", and "actor" (a game actor or Link), "model" {archive, file} or "character" (one of the mod's placed actors)}` |
 | `remove_demo_actor` | `scene`, `step`, `id`, `mod`? | remove an actor (refused while a sound, particle or attachment names it) |
+| `demo_choices` | `what` (`sounds`, `particles`, `actors`, `link_modes`, `archives`, `files`, `joints`), `query`?, `archive`? | names for a demo's pickers: sound effects and particles (id and a readable name), actors (the game's name, a readable name, its archive, a suggested id), Link's modes, the game's object archives, an archive's files or its models' joints |
+| `play_sound` | `id` | play a sound effect with the game's own sound playback |
 | `set_scene_choice` | `scene`, `step`, `option`?, `label`?, `next`?, `default`?, `mod`? | a choice's labels, where each option leads, the default answer |
 | `add_walk_point`, `set_walk_point`, `remove_walk_point` | `scene`, `step`, `at`? / `point`, `from`? (`camera`, `link`, `position`), `position`?, `mod`? | the points of a walk |
 | `native_scene` | `scene`, `from_steps`?, `value`?, `mod`? | the scene's native version: made from its steps, set or removed; whether it would play |

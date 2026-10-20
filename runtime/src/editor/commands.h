@@ -230,6 +230,20 @@ public:
     virtual bool live_kind(const std::string& type, bool fallback) { return fallback; }
     // where the player's game has an object archive (stage_files.h game_archive); "" none, "?" unknown (no game)
     virtual std::string game_archive(const std::string& archive) { return "?"; }
+    // The demo step's pickers (command demo_choices): the stage actor names in the game's object name table;
+    // the files of an object archive (the game's resource id table: "dk.bdl", "fly1.bck"); the bones of the
+    // models in an archive (its BFRES in the player's game files); the object archives the player's game
+    // has; more named actors (the NPC catalogue's residents, the game objects). And a sound effect played
+    // with the game's own sound playback (the Play button of the sound picker).
+    virtual bool stage_actor_names(std::vector<std::string>& out, std::string& why) { return out.clear(), why = "the game is not running", false; }
+    virtual bool archive_files(const std::string& archive, std::vector<std::string>& out, std::string& why) { return out.clear(), why = "the game is not running", false; }
+    virtual bool archive_joints(const std::string& archive, std::vector<std::string>& out, std::string& why) { return out.clear(), why = "the game is not running", false; }
+    virtual std::vector<std::string> game_archives() { return {}; }
+    struct NamedActor {
+        std::string actor, label, archive, id, group;
+    };
+    virtual std::vector<NamedActor> more_actor_names() { return {}; }
+    virtual bool play_sound(uint32_t id, std::string& why) { return why = "the game is not running", false; }
     // Game pieces (story_game_pieces.h): building piece `id` for `mod` from the player's room archive (the
     // converter runs on a thread of its own; placements appear once it is ready). The state is "" (not
     // prepared), "preparing", "ready" or "failed: <reason>".

@@ -15,10 +15,12 @@
 #include <string>
 #include <vector>
 
+#include "../editor/demo_names.h"
 #include "../editor/demo_tracks.h"
 #include "../editor/editor_game.h"
 #include "../editor/scenes.h"
 #include "../gfx/renderer.h"
+#include "../runtime.h"
 #include "editor_panel.h"
 #include "editor_shell.h"
 #include "imgui.h"
@@ -69,6 +71,24 @@ struct SceneUi {
     std::string d_new_lane = "camera.eye", d_new_list = "messages", d_new_actor;
     std::string d_actor_id, d_actor_name;
     int d_actor_kind = 0;
+    // the demo pickers: what a new actor is (its name, our label, its archive; a model's archive and file),
+    // whether its id was typed by hand, the hint after Add actor; the new event's picked values
+    std::string d_actor_label, d_actor_archive, d_actor_query, d_model_query, d_model_file;
+    bool d_id_typed = false;
+    int d_kind_shown = 0;  // the kind the fields below were filled for (a change starts them afresh)
+    std::string d_added;  // the actor just added: the hint shows for it
+    std::string e_query, e_actor, e_to, e_joint, e_text = "...", e_archive, e_file, e_mode = "walk", e_clip;
+    uint32_t e_sound = 0, e_particle = 0;
+    int e_hour = 12;
+    float e_rain = 1;
+    std::string e_generated;  // the JSON the pickers made last (the Advanced box follows them until edited)
+    std::string test_scroll;  // test aid (pictures): the inspector keeps "actors" or "event" in view
+    bool test_pick = false;   // test aid: the next search list picks its first match (as a click)
+    bool test_advanced = false;  // test aid: Advanced (the event as JSON) open
+    // demo_choices answers by "what:archive" (asked once each; why when refused)
+    std::map<std::string, Value> lists;
+    std::map<std::string, std::string> list_why;
+    std::set<std::string> asked;
     std::string d_fields, d_fields_for;
 } C;
 
@@ -98,15 +118,29 @@ Value prm_step(int step) {
     p["step"] = step;
     return p;
 }
-bool edit_line(const char* label, const std::string& current, std::string& out, size_t max = 240) {
+bool edit_line(const char* label, const std::string& current, std::string& out, size_t max = 240, const char* hint = nullptr) {
     static std::map<ImGuiID, std::vector<char>> buffers;
     auto& b = buffers[ImGui::GetID(label)];
     b.resize(max + 1);
     if (ImGui::GetActiveID() != ImGui::GetID(label)) std::snprintf(b.data(), b.size(), "%s", current.c_str());
     ImGui::SetNextItemWidth(-FLT_MIN);
-    text_entry::field(label, b.data(), b.size());
+    text_entry::field(label, b.data(), b.size(), 0, hint);
     out = b.data();
     return ImGui::IsItemDeactivatedAfterEdit();
+}
+// a short label in front of the next input (as the step's "id" and "next" rows)
+void field_label(const char* text, float at = 70) {
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted(text);
+    ImGui::SameLine(at);
+}
+// the room a help_mark takes on its line (for the width of the input before it)
+float help_width() { return ImGui::CalcTextSize("(?)").x + ImGui::GetStyle().ItemSpacing.x + 2; }
+// a "(?)" after the last item with a tooltip
+void help_mark(const char* text) {
+    ImGui::SameLine();
+    ImGui::TextDisabled("(?)");
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", text);
 }
 void edit_fields(int step, const Value& fields) {
     Value p = prm_step(step);
@@ -736,7 +770,8 @@ void choice_inspector(int step, const Value& sc, const Value& s) {
             command("set_scene_choice", p);
         }
         std::string label;
-        if (edit_line("##label", options[o].get("text").string(), label, 32)) {
+        field_label("text");
+        if (edit_line("##label", options[o].get("text").string(), label, 32, "the answer's words")) {
             Value p = prm_step(step);
             p["option"] = int(o + 1);
             p["label"] = label;
@@ -801,6 +836,104 @@ std::string demo_event_template(const std::string& list, const Value& st) {
     if (list == "modes") return R"({"mode": "walk"})";
     return R"({"data": ""})";
 }
+bool ends_with(const std::string& s, const char* tail) {
+    const size_t k = std::strlen(tail);
+    return s.size() >= k && s.compare(s.size() - k, k, tail) == 0;
+}
+// a demo_choices answer ("what", for files and joints of an archive), asked once; empty until it comes
+const Value& choices(const std::string& what, const std::string& archive = "") {
+    static const Value empty;
+    const std::string key = what + ":" + archive;
+    auto it = C.lists.find(key);
+    if (it != C.lists.end()) return it->second;
+    if (C.asked.insert(key).second) {
+        Value p;
+        p["what"] = what;
+        if (!archive.empty()) p["archive"] = archive;
+        command("demo_choices", p, [key](const Value& r) {
+            if (r.get("ok").boolean) C.lists[key] = r.get("result").get("items");
+            else C.lists[key] = Value(), C.list_why[key] = r.get("error").string();
+        });
+    }
+    return empty;
+}
+// under a picker: still loading, or why the game gave no list
+void list_state(const std::string& what, const std::string& archive = "") {
+    const std::string key = what + ":" + archive;
+    if (!C.lists.count(key)) muted("loading the list...");
+    else if (C.list_why.count(key)) muted(C.list_why[key]);
+}
+// A search box and a list of `labels` (at most `rows` high, only those matching the search). The row whose
+// value (value_of) is `selected` is highlighted. The index of the clicked row, or -1.
+template <class ValueOf>
+int pick_list(const char* id, std::string& query, const std::vector<std::string>& labels, const std::string& selected, ValueOf value_of, float rows, const char* hint) {
+    ImGui::PushID(id);
+    char buf[96];
+    std::snprintf(buf, sizeof buf, "%s", query.c_str());
+    ImGui::SetNextItemWidth(-FLT_MIN);
+    if (text_entry::field("##search", buf, sizeof buf, 0, hint)) query = buf;
+    query = buf;
+    int picked = -1;
+    if (ImGui::BeginListBox("##list", ImVec2(-FLT_MIN, ImGui::GetTextLineHeightWithSpacing() * rows + 4))) {
+        int shown = 0;
+        for (size_t i = 0; i < labels.size() && shown < 400; i++) {
+            if (!query.empty() && !editor::matches_query(labels[i], query)) continue;
+            shown++;
+            const bool on = !selected.empty() && value_of(i) == selected;
+            if (ImGui::Selectable((labels[i] + "##" + std::to_string(i)).c_str(), on)) picked = int(i);
+            if (on && ImGui::IsWindowAppearing()) ImGui::SetScrollHereY();
+        }
+        if (!shown) ImGui::TextDisabled(labels.empty() ? "(none)" : "(nothing matches)");
+        if (C.test_pick && picked < 0)
+            for (size_t i = 0; i < labels.size(); i++)
+                if (query.empty() || editor::matches_query(labels[i], query)) {
+                    picked = int(i), C.test_pick = false;
+                    break;
+                }
+        ImGui::EndListBox();
+    }
+    ImGui::PopID();
+    return picked;
+}
+// the object archive a demo actor of the step uses (its model's, Link's, a game actor's known one or its
+// own name), "" for a mod character
+std::string actor_archive(const Value& st, const std::string& id) {
+    for (const auto& a : st.get("actors").array) {
+        if (a.get("id").string() != id) continue;
+        if (a.get("model").type == Value::Object) return a.get("model").get("archive").string();
+        if (a.get("character").type == Value::String) return {};
+        const std::string name = a.get("actor").string();
+        if (name == "Link") return "Link";
+        for (const auto& c : choices("actors").array)
+            if (c.get("actor").string() == name && !c.get("archive").string().empty()) return c.get("archive").string();
+        return name;
+    }
+    return {};
+}
+// an actor of the step for an event field: a dropdown of its actors (with `none` as the first entry when given)
+void demo_actor_pick(const char* id, const Value& st, std::string& value, const char* none) {
+    ImGui::SetNextItemWidth(-FLT_MIN);
+    if (ImGui::BeginCombo(id, value.empty() ? (none ? none : "(an actor of the demo)") : value.c_str())) {
+        if (none && ImGui::Selectable(none, value.empty())) value.clear();
+        for (const auto& a : st.get("actors").array) {
+            const std::string aid = a.get("id").string();
+            if (ImGui::Selectable(aid.c_str(), aid == value)) value = aid;
+        }
+        ImGui::EndCombo();
+    }
+}
+// a joint of an archive's models (`none`: the entry for no joint)
+void joint_pick(const char* id, const std::string& archive, std::string& value, const char* none) {
+    ImGui::SetNextItemWidth(-FLT_MIN);
+    const Value& joints = archive.empty() ? Value() : choices("joints", archive);
+    if (ImGui::BeginCombo(id, value.empty() ? none : value.c_str())) {
+        if (ImGui::Selectable(none, value.empty())) value.clear();
+        for (const auto& j : joints.array)
+            if (ImGui::Selectable(j.string().c_str(), j.string() == value)) value = j.string();
+        ImGui::EndCombo();
+    }
+    if (!archive.empty()) list_state("joints", archive);
+}
 void demo_inspector(int n, const Value& m, const Value& st) {
     const Value lanes = editor::demo_lanes(m, st);
     if (lanes.get("problem").type == Value::String) {
@@ -826,27 +959,117 @@ void demo_inspector(int n, const Value& m, const Value& st) {
             }
             ImGui::PopID();
         }
-        ImGui::SetNextItemWidth(70);
-        std::string v;
-        if (edit_line("##demo_actor_id", C.d_actor_id, v, 24) || v != C.d_actor_id) C.d_actor_id = v;
-        ImGui::SetNextItemWidth(-FLT_MIN);
+        if (!C.d_added.empty()) {
+            ImGui::PushStyleColor(ImGuiCol_Text, kGood);
+            ImGui::TextWrapped("%s added. To move it: put the cursor on a time, select its position lane (%s.position), press Add key.", C.d_added.c_str(), C.d_added.c_str());
+            ImGui::PopStyleColor();
+        }
+        if (C.test_scroll == "actors") ImGui::SetScrollHereY(C.d_added.empty() ? 0.0f : 0.25f);
+        ImGui::TextColored(kHead, "Add an actor");
+        std::vector<std::string> taken;
+        for (const auto& a : st.get("actors").array) taken.push_back(a.get("id").string());
+        // what it is
+        field_label("What it is", 110);
+        ImGui::SetNextItemWidth(-help_width());
         ImGui::Combo("##demo_actor_kind", &C.d_actor_kind, kActorKinds, IM_ARRAYSIZE(kActorKinds));
-        if (C.d_actor_kind != 1 && (edit_line("##demo_actor_name", C.d_actor_name, v, 64) || v != C.d_actor_name)) C.d_actor_name = v;
-        if (ImGui::Button("Add actor") && !C.d_actor_id.empty()) {
+        help_mark("game actor: one of the game's characters or objects, by name (it is created for the demo when the room has none).\n"
+                  "Link: Link himself.\n"
+                  "model: a model from one of the game's object archives, without the actor's own behaviour.\n"
+                  "mod character: one of this mod's placed actors.");
+        if (C.d_actor_kind != C.d_kind_shown) {
+            C.d_kind_shown = C.d_actor_kind;
+            C.d_actor_name.clear(), C.d_actor_label.clear(), C.d_actor_archive.clear(), C.d_model_file.clear();
+            if (!C.d_id_typed) C.d_actor_id.clear();
+        }
+        if (C.d_actor_kind == 0) {
+            const Value& all = choices("actors");
+            std::vector<std::string> labels;
+            std::vector<const Value*> rows;
+            for (const auto& a : all.array) {
+                const std::string label = a.get("label").string() == a.get("actor").string() ? a.get("actor").string() : a.get("label").string() + " (" + a.get("actor").string() + ")";
+                labels.push_back(label + "  [" + a.get("group").string() + "]");
+                rows.push_back(&a);
+            }
+            const int picked = pick_list("##demo_actor_list", C.d_actor_query, labels, C.d_actor_name, [&](size_t i) { return rows[i]->get("actor").string(); }, 6, "search: e.g. helmaroc, pig, seagull");
+            if (picked >= 0) {
+                const Value& a = *rows[size_t(picked)];
+                C.d_actor_name = a.get("actor").string(), C.d_actor_label = a.get("label").string(), C.d_actor_archive = a.get("archive").string();
+                if (!C.d_id_typed) C.d_actor_id = editor::suggest_demo_id(a.get("id").string().empty() ? a.get("label").string() : a.get("id").string(), taken);
+            }
+            list_state("actors");
+        } else if (C.d_actor_kind == 1) {
+            muted("Link needs no name.");
+            if (!C.d_id_typed && (C.d_actor_id.empty() || C.d_actor_id.rfind("link", 0) != 0)) C.d_actor_id = editor::suggest_demo_id("link", taken);
+        } else if (C.d_actor_kind == 2) {
+            // the archive, then one of its models
+            const Value& archives = choices("archives");
+            std::vector<std::string> names;
+            for (const auto& a : archives.array) names.push_back(a.string());
+            const int picked = pick_list("##demo_model_archive", C.d_model_query, names, C.d_actor_archive, [&](size_t i) { return names[i]; }, 5, "search the game's archives: e.g. Kamome");
+            if (picked >= 0) C.d_actor_archive = names[size_t(picked)], C.d_model_file.clear();
+            list_state("archives");
+            if (!C.d_actor_archive.empty()) {
+                const Value& files = choices("files", C.d_actor_archive);
+                std::vector<std::string> models;
+                for (const auto& f : files.array)
+                    if (ends_with(f.string(), ".bdl") || ends_with(f.string(), ".bmd")) models.push_back(f.string());
+                field_label("Model", 110);
+                ImGui::SetNextItemWidth(-FLT_MIN);
+                if (ImGui::BeginCombo("##demo_model_file", C.d_model_file.empty() ? "(a model of the archive)" : C.d_model_file.c_str())) {
+                    for (const auto& f : models)
+                        if (ImGui::Selectable(f.c_str(), f == C.d_model_file)) {
+                            C.d_model_file = f;
+                            if (!C.d_id_typed) C.d_actor_id = editor::suggest_demo_id(f.substr(0, f.rfind('.')), taken);
+                        }
+                    ImGui::EndCombo();
+                }
+                list_state("files", C.d_actor_archive);
+                C.d_actor_name = C.d_actor_archive + "/" + C.d_model_file;
+            }
+        } else {
+            field_label("Which", 110);
+            ImGui::SetNextItemWidth(-FLT_MIN);
+            if (ImGui::BeginCombo("##demo_character", C.d_actor_name.empty() ? "(one of the mod's placed actors)" : C.d_actor_name.c_str())) {
+                for (const auto& a : m.get("actors").array) {
+                    const std::string id = a.get("id").string();
+                    if (ImGui::Selectable(id.c_str(), id == C.d_actor_name)) {
+                        C.d_actor_name = id;
+                        if (!C.d_id_typed) C.d_actor_id = editor::suggest_demo_id(id, taken);
+                    }
+                }
+                ImGui::EndCombo();
+            }
+        }
+        ImGui::TextUnformatted("Name in this demo (keys and events use it)");
+        std::string v;
+        if (edit_line("##demo_actor_id", C.d_actor_id, v, 24, "e.g. helmaroc") || v != C.d_actor_id) {
+            if (v != C.d_actor_id) C.d_id_typed = !v.empty();
+            C.d_actor_id = v;
+        }
+        const bool ready = !C.d_actor_id.empty() && (C.d_actor_kind == 1 || (C.d_actor_kind == 2 ? !C.d_model_file.empty() : !C.d_actor_name.empty()));
+        ImGui::BeginDisabled(!ready);
+        if (ImGui::Button("Add actor")) {
             Value a;
             a["id"] = C.d_actor_id;
             if (C.d_actor_kind == 0) a["actor"] = C.d_actor_name;
             else if (C.d_actor_kind == 1) a["actor"] = std::string("Link");
             else if (C.d_actor_kind == 2) {
                 Value md;
-                const size_t slash = C.d_actor_name.find('/');
-                md["archive"] = C.d_actor_name.substr(0, slash);
-                md["file"] = slash == std::string::npos ? std::string() : C.d_actor_name.substr(slash + 1);
+                md["archive"] = C.d_actor_archive;
+                md["file"] = C.d_model_file;
                 a["model"] = md;
             } else a["character"] = C.d_actor_name;
             Value p = prm_step(n);
             p["actor"] = a;
-            command("add_demo_actor", p);
+            command("add_demo_actor", p, [id = C.d_actor_id](const Value& r) {
+                if (!r.get("ok").boolean) return;
+                C.d_added = id, C.d_new_lane = id + ".position", C.d_new_actor = id, C.d_id_typed = false, C.d_actor_id.clear();
+            });
+        }
+        ImGui::EndDisabled();
+        if (!ready) {
+            ImGui::SameLine();
+            ImGui::TextDisabled(C.d_actor_id.empty() ? "give it a name" : "choose what it is");
         }
     }
     // the selected key
@@ -995,37 +1218,197 @@ void demo_inspector(int n, const Value& m, const Value& st) {
             command("set_demo_key", p);
         }
     }
-    // an event at the cursor
+    // an event at the cursor: pickers per kind of event; they write the event's fields, which Advanced
+    // shows as JSON (and takes edits there)
     ImGui::Separator();
+    if (C.test_scroll == "event") ImGui::SetScrollHereY(0);
     ImGui::TextUnformatted("Add an event at the cursor");
+    field_label("Kind", 70);
     ImGui::SetNextItemWidth(120);
     if (ImGui::BeginCombo("##demo_new_list", C.d_new_list.c_str())) {
         for (const char* l : kDemoLists)
-            if (ImGui::Selectable(l, C.d_new_list == l)) C.d_new_list = l, C.d_fields_for.clear();
+            if (ImGui::Selectable(l, C.d_new_list == l)) C.d_new_list = l, C.d_fields_for.clear(), C.e_query.clear();
         ImGui::EndCombo();
     }
     const bool per_actor = C.d_new_list == "clips" || C.d_new_list == "modes" || C.d_new_list == "data";
     if (per_actor) {
         ImGui::SameLine();
         ImGui::SetNextItemWidth(-FLT_MIN);
-        if (ImGui::BeginCombo("##demo_new_actor", C.d_new_actor.empty() ? "(actor)" : C.d_new_actor.c_str())) {
+        if (ImGui::BeginCombo("##demo_new_actor", C.d_new_actor.empty() ? "(whose: an actor)" : C.d_new_actor.c_str())) {
             for (const auto& a : lanes.get("actors").array)
                 if (ImGui::Selectable(a.get("id").string().c_str(), a.get("id").string() == C.d_new_actor)) C.d_new_actor = a.get("id").string();
             ImGui::EndCombo();
         }
     }
+    const std::string& list = C.d_new_list;
+    Value ev;  // what the pickers make (Null: no picker for this kind)
+    ev.type = Value::Object;
+    bool picked = true;
+    if (list == "sounds") {
+        const auto names = editor::sound_names();
+        std::vector<std::string> labels;
+        for (const auto& x : names) labels.push_back(std::string(x.group) + ": " + x.name);
+        char hex[16];
+        std::snprintf(hex, sizeof hex, "%u", unsigned(C.e_sound));
+        const int i = pick_list("##sound_list", C.e_query, labels, C.e_sound ? std::string(hex) : std::string(), [&](size_t k) { return std::to_string(names[k].id); }, 6, "search sounds: e.g. door, voice, splash");
+        if (i >= 0) C.e_sound = names[size_t(i)].id;
+        ImGui::BeginDisabled(!C.e_sound);
+        if (ImGui::Button("Play")) {
+            Value p;
+            p["id"] = double(C.e_sound);
+            command("play_sound", p);
+        }
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        ImGui::TextColored(kMuted, "%s", C.e_sound ? editor::sound_label(C.e_sound).c_str() : "no sound chosen");
+        field_label("From", 70);
+        demo_actor_pick("##sound_actor", st, C.e_actor, "(no actor: everywhere)");
+        if (C.e_sound) ev["id"] = double(C.e_sound);
+        if (!C.e_actor.empty()) ev["actor"] = C.e_actor;
+    } else if (list == "particles") {
+        const auto names = editor::particle_names();
+        std::vector<std::string> labels;
+        for (const auto& x : names) labels.push_back(std::string(x.name) + "  [" + x.group + "]");
+        const int i = pick_list("##particle_list", C.e_query, labels, C.e_particle ? std::to_string(C.e_particle) : std::string(), [&](size_t k) { return std::to_string(names[k].id); }, 6, "search particles: e.g. smoke, flash");
+        if (i >= 0) C.e_particle = names[size_t(i)].id;
+        ImGui::TextColored(kMuted, "%s", C.e_particle ? editor::particle_label(C.e_particle).c_str() : "no particle chosen");
+        help_mark("everywhere: the game always has it. stage: only where the stage loads it.");
+        field_label("On", 70);
+        demo_actor_pick("##particle_actor", st, C.e_actor, "(at the demo's origin)");
+        if (!C.e_actor.empty()) {
+            field_label("Joint", 70);
+            joint_pick("##particle_joint", actor_archive(st, C.e_actor), C.e_joint, "(the actor's position)");
+        }
+        if (C.e_particle) ev["id"] = double(C.e_particle);
+        if (!C.e_actor.empty()) {
+            ev["actor"] = C.e_actor;
+            if (!C.e_joint.empty()) ev["joint"] = C.e_joint;
+        } else {
+            Value o;
+            o["x"] = 0.0, o["y"] = 0.0, o["z"] = 0.0;
+            ev["position"] = o;
+        }
+    } else if (list == "messages") {
+        field_label("Text", 70);
+        std::string v;
+        if (edit_line("##message_text", C.e_text, v, 200, "what the message window says") || v != C.e_text) C.e_text = v;
+        ev["text"] = C.e_text;
+    } else if (list == "time") {
+        field_label("Hour", 70);
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        ImGui::SliderInt("##hour", &C.e_hour, 0, 23, "%d:00");
+        ev["hour"] = double(C.e_hour);
+    } else if (list == "weather") {
+        field_label("Rain", 70);
+        ImGui::SetNextItemWidth(-help_width());
+        ImGui::SliderFloat("##rain", &C.e_rain, 0, 1, "%.2f");
+        help_mark("0: dry, 1: full rain");
+        ev["rain"] = double(std::round(C.e_rain * 100) / 100);
+    } else if (list == "attach" || list == "detach") {
+        field_label(list == "attach" ? "Carried" : "Let go", 70);
+        demo_actor_pick("##attach_actor", st, C.e_actor, nullptr);
+        if (!C.e_actor.empty()) ev["actor"] = C.e_actor;
+        if (list == "attach") {
+            field_label("By", 70);
+            demo_actor_pick("##attach_to", st, C.e_to, nullptr);
+            field_label("Joint", 70);
+            joint_pick("##attach_joint", C.e_to.empty() ? std::string() : actor_archive(st, C.e_to), C.e_joint, "(choose a joint)");
+            ev["to"] = C.e_to;
+            ev["joint"] = C.e_joint;
+        }
+    } else if (list == "clips" && !C.d_new_actor.empty()) {
+        // a game actor or model: an animation of an archive (its own first); a mod character: its model's clips
+        const Value* who = nullptr;
+        for (const auto& a : st.get("actors").array)
+            if (a.get("id").string() == C.d_new_actor) who = &a;
+        if (who && who->get("character").type == Value::String) {
+            const Value* placed = by_id(m.get("actors"), who->get("character").text);
+            const std::string model = placed ? placed->get("model").string() : std::string();
+            static std::map<std::string, Value> clips;
+            if (!model.empty() && !clips.count(model)) {
+                clips[model] = Value();
+                Value p;
+                p["model"] = model;
+                command("model_clips", p, [model](const Value& r) { clips[model] = r.get("result").get("clips"); });
+            }
+            field_label("Clip", 70);
+            ImGui::SetNextItemWidth(-FLT_MIN);
+            if (ImGui::BeginCombo("##character_clip", C.e_clip.empty() ? "(a clip of its model)" : C.e_clip.c_str())) {
+                if (!model.empty())
+                    for (const auto& c : clips[model].array) {
+                        const std::string name = c.type == Value::String ? c.text : c.get("name").string();
+                        if (ImGui::Selectable(name.c_str(), name == C.e_clip)) C.e_clip = name;
+                    }
+                ImGui::EndCombo();
+            }
+            ev["clip"] = C.e_clip;
+        } else if (who && who->get("actor").string() == "Link") {
+            muted("Link plays demo modes: choose the kind \"modes\".");
+            picked = false;
+        } else {
+            const std::string own = actor_archive(st, C.d_new_actor);
+            if (C.e_archive.empty()) C.e_archive = own;
+            field_label("Archive", 70);
+            ImGui::SetNextItemWidth(-FLT_MIN);
+            if (ImGui::BeginCombo("##clip_archive", C.e_archive.empty() ? "(an archive)" : C.e_archive.c_str())) {
+                if (!own.empty() && ImGui::Selectable((own + " (its own)").c_str(), C.e_archive == own)) C.e_archive = own, C.e_file.clear();
+                for (const auto& a : choices("archives").array)
+                    if (a.string() != own && ImGui::Selectable(a.string().c_str(), a.string() == C.e_archive)) C.e_archive = a.string(), C.e_file.clear();
+                ImGui::EndCombo();
+            }
+            std::vector<std::string> anims;
+            if (!C.e_archive.empty())
+                for (const auto& f : choices("files", C.e_archive).array)
+                    if (ends_with(f.string(), ".bck")) anims.push_back(f.string());
+            const int i = pick_list("##clip_files", C.e_query, anims, C.e_file, [&](size_t k) { return anims[k]; }, 5, "search animations");
+            if (i >= 0) C.e_file = anims[size_t(i)];
+            if (!C.e_archive.empty()) list_state("files", C.e_archive);
+            ev["archive"] = C.e_archive;
+            ev["file"] = C.e_file;
+        }
+    } else if (list == "modes") {
+        field_label("Mode", 70);
+        ImGui::SetNextItemWidth(-help_width());
+        if (ImGui::BeginCombo("##link_mode", C.e_mode.c_str())) {
+            for (const char* mode : editor::link_mode_names())
+                if (ImGui::Selectable(mode, C.e_mode == mode)) C.e_mode = mode;
+            ImGui::EndCombo();
+        }
+        help_mark("Link's demo modes (the game's). clip: one of his demo animations.");
+        if (C.e_mode == "clip") {
+            std::vector<std::string> anims;
+            for (const char* archive : {"LkD00", "LkD01"})
+                for (const auto& f : choices("files", archive).array)
+                    if (ends_with(f.string(), ".bck") && std::find(anims.begin(), anims.end(), f.string()) == anims.end()) anims.push_back(f.string());
+            const int i = pick_list("##link_clips", C.e_query, anims, C.e_clip, [&](size_t k) { return anims[k]; }, 5, "search Link's demo animations");
+            if (i >= 0) C.e_clip = anims[size_t(i)];
+            ev["mode"] = std::string("clip");
+            ev["clip"] = C.e_clip;
+        } else
+            ev["mode"] = C.e_mode;
+    } else
+        picked = false;
+    // the JSON of the event: the pickers write it; Advanced shows it for other fields and edits
     static std::string new_fields, new_fields_for;
-    if (new_fields_for != C.d_new_list) new_fields_for = C.d_new_list, new_fields = demo_event_template(C.d_new_list, st);
-    std::string v;
-    if (edit_line("##demo_new_fields", new_fields, v, 400) || v != new_fields) new_fields = v;
+    if (new_fields_for != C.d_new_list) new_fields_for = C.d_new_list, new_fields = demo_event_template(C.d_new_list, st), C.e_generated.clear();
+    if (picked) {
+        const std::string made = mods::json::dump(ev);
+        if (made != C.e_generated) new_fields = C.e_generated = made;
+    }
+    if (C.test_advanced) ImGui::SetNextItemOpen(true);
+    const bool advanced = ImGui::CollapsingHeader(picked ? "Advanced (the event as JSON)" : "The event (JSON)", picked ? 0 : ImGuiTreeNodeFlags_DefaultOpen);
+    if (advanced) {
+        std::string v;
+        if (edit_line("##demo_new_fields", new_fields, v, 400) || v != new_fields) new_fields = v;
+    }
     if (ImGui::Button("Add event")) {
         try {
-            Value ev = mods::json::parse(new_fields);
-            ev["frame"] = int(at);
+            Value e = mods::json::parse(new_fields);
+            e["frame"] = int(at);
             Value p = prm_step(n);
             p["list"] = C.d_new_list;
             if (per_actor) p["actor"] = C.d_new_actor;
-            p["event"] = ev;
+            p["event"] = e;
             command("add_demo_event", p, [list = C.d_new_list, actor = per_actor ? C.d_new_actor : std::string()](const Value& r) {
                 if (r.get("ok").boolean) demo_select_event(list, actor, int(r.get("result").get("index").number));
             });
@@ -1078,23 +1461,29 @@ void step_inspector(const Value& m, const Value& sc, const Value& timeline) {
     ImGui::Separator();
     if (t == "camera" || t == "camera_path") camera_inspector(n, s);
     else if (t == "say") {
+        field_label("who");
         actor_combo("##say_actor", n, m, s.get("actor").string(), true);
         std::string text;
-        if (edit_line("##say_text", lines_of(s.get("text")), text)) edit_field(n, "text", lines_value(text));
+        field_label("text");
+        if (edit_line("##say_text", lines_of(s.get("text")), text, 240, "what they say")) edit_field(n, "text", lines_value(text));
         muted("Lines are separated by \" / \".");
     } else if (t == "move" || t == "face") {
+        field_label("actor");
         actor_combo("##actor", n, m, s.get("actor").string(), false);
         if (s.get("position").type == Value::Object) point_row("to", n, "position", s.get("position"));
     } else if (t == "walk") {
+        field_label("actor");
         actor_combo("##walk_actor", n, m, s.get("actor").string(), false);
         walk_inspector(n, s);
     } else if (t == "choice") {
         std::string text;
-        if (edit_line("##choice_text", lines_of(s.get("text")), text)) edit_field(n, "text", lines_value(text));
+        field_label("question");
+        if (edit_line("##choice_text", lines_of(s.get("text")), text, 240, "what is asked")) edit_field(n, "text", lines_value(text));
         choice_inspector(n, sc, s);
-    } else if (t == "animation" || t == "camera_follow")
+    } else if (t == "animation" || t == "camera_follow") {
+        field_label("actor");
         actor_combo("##anim_actor", n, m, s.get("actor").string(), false);
-    else if (t == "particle" && s.get("position").type == Value::Object)
+    } else if (t == "particle" && s.get("position").type == Value::Object)
         point_row("at", n, "position", s.get("position"));
     else if (t == "demo")
         demo_inspector(n, m, s);
@@ -1115,6 +1504,7 @@ void scene_settings(const Value& m, const Value& sc) {
     if (now == "quest_step") text += " " + trigger.get("quest").string() + " step " + std::to_string(int(num(trigger, "step")));
     if (now == "room" || now == "area") text += " " + trigger.get("stage").string() + " room " + std::to_string(int(num(trigger, "room")));
     ImGui::TextColored(kHead, "%s", text.c_str());
+    field_label("starts by");
     ImGui::SetNextItemWidth(130);
     ImGui::Combo("##trigger_type", &C.trigger_type, types, 6);
     ImGui::SameLine();
@@ -1141,7 +1531,7 @@ void scene_settings(const Value& m, const Value& sc) {
         }
         ImGui::SameLine();
         ImGui::SetNextItemWidth(70);
-        ImGui::InputInt("##trigger_step", &step);
+        ImGui::InputInt("step##trigger_step", &step);
         p["quest"] = quest;
         p["step"] = std::max(1, step);
     } else if (type == "area") {
@@ -1239,6 +1629,55 @@ void scene_editor(const Value& m) {
         return true;
     }();
     (void)test_aids;
+    // test aid (pictures): WWHD_TEST_EDITOR_DEMO_PICKERS=frame:what[=search][@actor][+carried][#joint],... from that TV frame on
+    // shows a picker of the demo inspector: an event kind ("sounds", "attach", ...), "actor0".."actor3"
+    // (What it is) or "added" (the hint after Add actor, for @actor)
+    static std::vector<std::pair<uint64_t, std::string>> pickers = [] {
+        std::vector<std::pair<uint64_t, std::string>> v;
+        if (const char* e = std::getenv("WWHD_TEST_EDITOR_DEMO_PICKERS")) {
+            const std::string all = e;
+            for (size_t a = 0; a < all.size();) {
+                size_t b = all.find(',', a);
+                if (b == std::string::npos) b = all.size();
+                const std::string item = all.substr(a, b - a);
+                const size_t c = item.find(':');
+                if (c != std::string::npos) v.push_back({std::strtoull(item.c_str(), nullptr, 10), item.substr(c + 1)});
+                a = b + 1;
+            }
+        }
+        return v;
+    }();
+    while (!pickers.empty() && render::frame_count() >= pickers.front().first) {
+        std::string what = pickers.front().second, search, actor, joint, carried;
+        pickers.erase(pickers.begin());
+        C.test_advanced = !what.empty() && what.back() == '!';
+        if (C.test_advanced) what.pop_back();
+        if (const size_t at = what.find('#'); at != std::string::npos) joint = what.substr(at + 1), what.erase(at);
+        if (const size_t at = what.find('+'); at != std::string::npos) carried = what.substr(at + 1), what.erase(at);
+        if (const size_t at = what.find('@'); at != std::string::npos) actor = what.substr(at + 1), what.erase(at);
+        if (const size_t eq = what.find('='); eq != std::string::npos) search = what.substr(eq + 1), what.erase(eq);
+        C.test_scroll = what.rfind("actor", 0) == 0 || what == "added" ? "actors" : "event";
+        if (what.rfind("actor", 0) == 0 && what.size() == 6) {
+            C.d_actor_kind = C.d_kind_shown = what[5] - '0';
+            C.d_actor_name.clear(), C.d_actor_label.clear(), C.d_actor_archive.clear(), C.d_model_file.clear(), C.d_actor_id.clear();
+            (C.d_actor_kind == 2 ? C.d_model_query : C.d_actor_query) = search;
+            if (C.d_actor_kind == 2) {
+                const size_t slash = actor.find('/');
+                C.d_actor_archive = actor.substr(0, slash);
+                C.d_model_file = slash == std::string::npos ? std::string() : actor.substr(slash + 1);
+                if (!C.d_model_file.empty()) C.d_actor_id = editor::suggest_demo_id(C.d_model_file.substr(0, C.d_model_file.rfind('.')), {});
+            } else if (!actor.empty())
+                C.d_actor_name = actor;
+            C.test_pick = C.d_actor_kind == 0 && !search.empty();
+        } else if (what == "added")
+            C.d_added = actor;
+        else {
+            C.d_new_list = what, C.e_query = search, C.e_actor = actor, C.e_to = actor, C.d_new_actor = actor, C.e_joint = joint;
+            C.test_pick = !search.empty();
+            if (what == "attach") C.e_actor = carried;
+        }
+        LOG("[editor] test: the demo picker %s (%s, %s)", what.c_str(), search.c_str(), actor.c_str());
+    }
     C.focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
     if (!C.want_scene.empty() && by_id(m.get("scenes"), C.want_scene)) {
         C.scene = C.want_scene, C.step = C.want_step, C.range_end = 0, C.fit = true;

@@ -113,6 +113,24 @@ int32_t resource_id(const demo_scene::Resource& r) {
     }
     return -1;
 }
+}  // namespace
+std::vector<std::string> resource_names(const std::string& archive) {
+    std::vector<std::string> out;
+    const uint32_t hash = crc32(archive), rows = ld32(kIdTableCount);
+    if (archive.empty() || rows > 4096) return out;
+    for (uint32_t i = 0; i < rows; ++i) {
+        const uint32_t row = kIdTable + i * 12;
+        if (ld32(row) != hash) continue;
+        const uint32_t names = ld32(row + 4), count = ld32(row + 8);
+        for (uint32_t k = 0; k < count && k < 0x1000; ++k) {
+            const uint32_t at = ld32(names + k * 8);
+            if (std::string name = at ? cstr(at, 40) : std::string(); !name.empty()) out.push_back(std::move(name));
+        }
+        break;
+    }
+    return out;
+}
+namespace {
 uint32_t text(uint32_t at, const std::string& s) { std::memset(mem::ptr(at), 0, 16); std::memcpy(mem::ptr(at), s.c_str(), std::min<size_t>(s.size(), 15)); return at; }
 bool archive_loaded(Cpu* c, const std::string& archive) {
     const uint32_t req = g_arena + Scratch;

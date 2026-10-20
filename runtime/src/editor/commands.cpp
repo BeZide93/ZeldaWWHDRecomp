@@ -391,6 +391,9 @@ const std::vector<CommandInfo> kCommands = {
     {"skip_scene", "Skips the scene that plays (as Plus / Start does): its end actions don't run.", {}},
     {"stop_scene", "Stops the scene preview at once and goes back to the editor's view.", {}},
     {"scene_state", "Whether a scene preview plays, which scene and step.", {}},
+    {"demo_choices", "Names for a demo step's pickers: sound effects or particles (id and a readable name), actors (stage actor name, a readable name, its archive, a suggested id), Link's demo modes, the game's object archives, an archive's files or its models' joints.",
+     {{"what", "string", "sounds, particles, actors, link_modes, archives, files or joints", true}, {"query", "string", "only those whose name contains these words"}, {"archive", "string", "with files and joints: the object archive"}}},
+    {"play_sound", "Plays a sound effect with the game's own sound playback (a demo sound's preview).", {{"id", "number", "the sound effect id", true}}},
     // ---- letters on their own, treasure charts, items (commands_story.cpp)
     {"list_letters", "The open mod's letters on their own (not a quest's letter): id, sender, text, encloses, when, after_days. The Rito postbox hands each out while the mod is on; once read, Link has what it encloses.",
      {{"mod", "string", ""}}},

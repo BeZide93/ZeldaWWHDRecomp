@@ -7,11 +7,14 @@
 #include "editor/commands.h"
 #include "editor/scenes.h"
 #include "editor/demo_tracks.h"
+#include "editor/demo_names.h"
+#include "editor/stage_files.h"
 #include "mods/story_world_manifest.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -40,6 +43,20 @@ struct FakeHost : editor::Host {
     bool last_declared = false, last_restore = false;
     std::string last_mod;
     std::vector<std::string> in_place;  // the actors pose_actors moves in place (the others are created again)
+    // the demo pickers: a game whose object name table has these names and whose archive "Dk" has files
+    std::vector<uint32_t> played;
+    bool stage_actor_names(std::vector<std::string>& out, std::string&) override { return out = {"Dk", "Ls1", "Tsubo", "Zz9"}, true; }
+    bool archive_files(const std::string& archive, std::vector<std::string>& out, std::string& why) override {
+        if (archive != "Dk") return why = "the game has no object archive called " + archive, false;
+        return out = {"dk.bdl", "fly1.bck", "wait1.bck"}, true;
+    }
+    bool archive_joints(const std::string& archive, std::vector<std::string>& out, std::string& why) override {
+        if (archive != "Dk") return why = "no joints", false;
+        return out = {"dk_allroot", "j_dk_ashi_r3"}, true;
+    }
+    std::vector<std::string> game_archives() override { return {"Dk", "Kamome", "Link"}; }
+    std::vector<NamedActor> more_actor_names() override { return {{"Tsubo", "Pot", "Always", "pot", "game objects"}}; }
+    bool play_sound(uint32_t id, std::string&) override { played.push_back(id); return true; }
     FakeHost() {
         link_place.valid = true;
         link_place.stage = "sea";
@@ -641,6 +658,75 @@ void demo_steps() {
     CHECK(valid(s));
 }
 
+// The demo step's pickers: names for sounds, particles and actors, an archive's files and joints, the
+// suggested ids, the sound preview; and the BFRES bone reader behind the joint lists.
+void demo_pickers() {
+    FakeHost host;
+    editor::Session s(&host);
+    auto items = [&](const char* json) {
+        const Value r = s.run("demo_choices", params(json));
+        CHECK(ok(r));
+        return r.get("result").get("items");
+    };
+    // sounds and particles: ids with readable names, searchable
+    const Value sounds = items(R"({"what": "sounds"})");
+    CHECK(sounds.array.size() == editor::sound_names().size() && sounds.array.size() > 200);
+    const Value splash = items(R"({"what": "sounds", "query": "fall water"})");
+    CHECK(!splash.array.empty() && splash.array[0].get("code").string().find("FALL_WATER") != std::string::npos && splash.array[0].get("id").number > 0);
+    CHECK(items(R"({"what": "particles", "query": "smoke"})").array.size() >= 3);
+    CHECK(editor::sound_label(0x6918).find("fall water") != std::string::npos && editor::sound_label(0x12345) == "0x12345");
+    // actors: ours, the editor's catalogues, then the game's other names; a listed name the game lacks is dropped
+    const Value actors = items(R"({"what": "actors"})");
+    auto actor = [&](const std::string& name) -> const Value* {
+        for (const auto& a : actors.array)
+            if (a.get("actor").string() == name) return &a;
+        return nullptr;
+    };
+    CHECK(actor("Dk") && actor("Dk")->get("id").string() == "helmaroc" && actor("Dk")->get("archive").string() == "Dk");
+    CHECK(actor("Tsubo") && actor("Tsubo")->get("label").string() == "Pot");
+    CHECK(actor("Zz9") && actor("Zz9")->get("group").string() == "other");
+    CHECK(!actor("Cb1"));  // ours, but not in this game's table
+    CHECK(items(R"({"what": "actors", "query": "aryll"})").array.size() == 1);
+    // an archive's files and joints; refused for an unknown one
+    CHECK(items(R"({"what": "files", "archive": "Dk", "query": "bck"})").array.size() == 2);
+    CHECK(items(R"({"what": "joints", "archive": "Dk"})").array.size() == 2);
+    CHECK(!ok(s.run("demo_choices", params(R"({"what": "files", "archive": "Nope"})"))));
+    CHECK(!ok(s.run("demo_choices", params(R"({"what": "colours"})"))));
+    CHECK(items(R"({"what": "link_modes"})").array.size() == editor::link_mode_names().size());
+    CHECK(items(R"({"what": "archives", "query": "kam"})").array.size() == 1);
+    // the sound preview goes to the game
+    CHECK(ok(s.run("play_sound", params(R"({"id": 26904})"))) && host.played == std::vector<uint32_t>{26904});
+    CHECK(!ok(s.run("play_sound", params(R"({})"))));
+    // suggested ids: from the choice, unique in the demo
+    CHECK(editor::suggest_demo_id("helmaroc", {}) == "helmaroc");
+    CHECK(editor::suggest_demo_id("Helmaroc King (the one)", {}) == "helmaroc-king-the");
+    CHECK(editor::suggest_demo_id("link", {"link", "link-2"}) == "link-3");
+    CHECK(editor::suggest_demo_id("!!", {}) == "actor");
+    CHECK(editor::matches_query("voice: pig normal", "PIG voice") && !editor::matches_query("voice: pig normal", "pig turn"));
+    // BFRES bones: a synthetic file with one model of two bones
+    std::vector<uint8_t> b(0x200, 0);
+    auto put32 = [&](size_t at, uint32_t v) { b[at] = uint8_t(v >> 24), b[at + 1] = uint8_t(v >> 16), b[at + 2] = uint8_t(v >> 8), b[at + 3] = uint8_t(v); };
+    auto rel = [&](size_t at, size_t to) { put32(at, uint32_t(int32_t(to) - int32_t(at))); };
+    auto text = [&](size_t at, const char* t) { std::memcpy(&b[at], t, std::strlen(t)); };
+    text(0, "FRES");
+    rel(0x20, 0x40);                       // the model group
+    put32(0x44, 1);                        // one model (after the root entry)
+    rel(0x40 + 8 + 16 + 8, 0x180);         // its name
+    rel(0x40 + 8 + 16 + 12, 0x80);         // its data
+    text(0x80, "FMDL");
+    rel(0x80 + 12, 0xA0);                  // the skeleton
+    text(0xA0, "FSKL");
+    rel(0xA0 + 0x10, 0xC0);                // the bone group
+    put32(0xC4, 2);
+    rel(0xC0 + 8 + 16 + 8, 0x188);
+    rel(0xC0 + 8 + 32 + 8, 0x190);
+    text(0x180, "bird");
+    text(0x188, "root");
+    text(0x190, "j_wing");
+    CHECK((editor::bfres_bones(b) == std::vector<std::string>{"root", "j_wing"}));
+    CHECK(editor::bfres_bones(std::vector<uint8_t>(16, 0)).empty());
+}
+
 void docs_table(const char* path) {
     std::ifstream f(path);
     std::stringstream text;
@@ -666,6 +752,7 @@ int main(int argc, char** argv) {
     copy_paste_remove();
     drag_is_one_undo_step();
     demo_steps();
+    demo_pickers();
     if (argc > 1) docs_table(argv[1]);
     if (g_failures) {
         std::fprintf(stderr, "%d check(s) failed\n", g_failures);

@@ -445,6 +445,11 @@ void refresh() {
         done.swap(g_done);
     }
     for (auto& d : done) {
+        // the pickers' lookups say nothing in the status bar when they work
+        if (d.command == "demo_choices" && d.result.get("ok").boolean) {
+            if (d.then) d.then(d.result);
+            continue;
+        }
         U.message_ok = d.result.get("ok").boolean;
         if (!U.message_ok) U.message = d.result.get("error").string();
         else if (d.result.get("result").get("note").type == Value::String) U.message = d.result.get("result").get("note").text;
