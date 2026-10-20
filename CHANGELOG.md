@@ -7,6 +7,13 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **World editor: building mod levels, also with an AI assistant** (for mod makers, preview). A new Stages tab creates
+  a level from your room models (import, add, build, warp in), adds rooms, places entries, exits, doors with locks,
+  chests, enemies, pots and return warps where Link stands, and moves them with handles in the picture. Check lists
+  unreachable rooms, keys behind their own doors and room models without UVs or named materials. Every step is also an
+  MCP command, so an assistant such as Claude Code can model rooms in Blender and build and look at the level in the
+  game; see the new guide "Building a dungeon with an AI assistant".
+
 - **Mod SDK: a dungeon map for mod dungeons** (for mod makers, preview). A mod dungeon with a map shows it on the
   GamePad's map page (and on the TV's map tab with the Pro Controller): rooms seen from above, made from the rooms'
   floors, the rooms Link has visited, where he stands, and with the dungeon map every room; with the compass also the
