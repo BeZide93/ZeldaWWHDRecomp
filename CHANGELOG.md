@@ -11,6 +11,7 @@ what is on `devel` and not released yet (also in the
   speed. It suits screens that run at 40, 80 or 120 Hz, such as the Steam Deck LCD at 40 Hz or the OLED at 80 Hz, where
   every frame is shown for the same time. On Android the app asks for a matching screen rate; some phones choose the
   rate themselves, and on a 60 Hz screen 40 fps runs unevenly (Settings says so). Keep game speed works as at 60 fps.
+
 - **Mod SDK: dungeons in mod levels** (for mod makers, preview). A mod level can now be a small dungeon: rooms taken
   from any game room or the mod's own models, small-key, boss and shutter doors, chests with a small key, map, compass
   or boss key, enemies (ChuChus, Bokoblins, Keese, Darknuts), pots and a return warp. Each mod dungeon keeps its own
@@ -23,9 +24,11 @@ what is on `devel` and not released yet (also in the
   work. Saving inside it is safe: the game's save always keeps a normal entrance, so the save still loads with the mod
   removed, and with the mod the Quest Log continues inside. Save states made in a mod level ask for its mod. The editor
   lists mod levels for warping. See the example "mod-stage-cave".
+
 - **Automatic picture-in-picture shows the Wind Waker's song list** (#256). With the GamePad screen set to Automatic
   picture-in-picture, the GamePad picture now also appears while Link conducts with the Wind Waker, with the song list
   and the conducting guide, and goes away again when he stops.
+
 - **Fixed: Link's fist no longer flies in from elsewhere with frame interpolation** (#255). When Link's hand pose
   changed (for example from standing to running, or after targeting), a hand pose could appear for one in-between
   frame at the spot where it was last used and fly to his hand, most visibly at 120 fps and above. A part of a model
