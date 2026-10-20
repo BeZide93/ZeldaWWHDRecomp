@@ -7,6 +7,11 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Fixed: the Pirate's Charm shook without ringing at 60 fps and above** (#262). With frame interpolation the
+  game's on-screen interface logic also ran on the in-between frames, where sounds are skipped so nothing plays twice,
+  and the charm's ring always landed there. It now runs once per game step at every frame rate, as at 30 fps; this
+  also brings the interface's other small animations back to their original speed.
+
 - **Mod dungeons: sky islands and boss rooms** (for mod makers). A stage can borrow the sky of a game stage (day
   sky, stars or dusk) over your own models; `list_stage_templates` in the editor and MCP lists which stages have a
   sky, a boss door and music to borrow, and the Stages tab can filter for skies. New entry style: an updraft that
