@@ -87,6 +87,7 @@ namespace gfxvk { bool buffer_cache_enabled(); }  // gfx/vulkan/buffer_cache.h
 #include "../platform/heat_guard.h"
 #endif
 #include "../interp.h"
+#include "../interp_pacing.h"
 #include "../runtime.h"
 #include "../savestate.h"
 #include "../save_convenience.h"
@@ -827,21 +828,27 @@ void tab_graphics() {
     heading("Frame rate");
     int m = interp::mode(), f = interp::fps();
     if (radio("30 fps (original)", m == 0)) post_changed([] { interp::set_mode(0); });
-    for (int r : {60, 120, 240}) {
+    for (int r : {40, 60, 120, 240}) {
         ImGui::SameLine();
         char label[16];
         snprintf(label, sizeof label, "%d fps", r);
         if (radio(label, m == 1 && f == r)) post_changed([r] { interp::set_fps(r); interp::set_mode(1); });
     }
-    help("60, 120 and 240 fps: frame interpolation. The game logic keeps its 30 steps a second, and the\n"
+    help("40, 60, 120 and 240 fps: frame interpolation. The game logic keeps its 30 steps a second, and the\n"
          "frames in between are drawn blended (1 in-between frame per step at 60 fps, 3 at 120 fps,\n"
-         "7 at 240 fps). The display shows at most its refresh rate: higher choices draw that many.");
+         "7 at 240 fps). The display shows at most its refresh rate: higher choices draw that many.\n"
+         "40 fps draws 4 frames for every 3 steps (1 in-between frame per 3 steps), for 40, 80 and\n"
+         "120 Hz screens (a Steam Deck set to 40 Hz or 80 Hz, phones with a 120 Hz panel).");
     if (radio("True 60 (experimental)", m == 2)) post_changed([] { interp::set_mode(2); });
     help("True 60 runs the game logic at 60 steps per second");
     // the display's refresh rate, and what the chosen rate draws on it (interp::output_fps)
     if (const int hz = interp::display_hz(); hz > 0) {
         const int out = interp::output_fps();
-        if (m == 1 && out < f)
+        if (m == 1 && f == 40 && !interp::pacing::even_on_display(40, hz))
+            note("Your display: %d Hz. 40 fps needs a 40, 80 or 120 Hz screen: here each frame stays on\n"
+                 "screen for 1 or 2 refreshes in turn (uneven motion). Choose 30 or 60 fps, or set the\n"
+                 "screen to 40, 80 or 120 Hz.", hz);
+        else if (m == 1 && out < f)
             note("Your display: %d Hz. %d fps needs a %d Hz display; %d fps are drawn (the display cannot show more).", hz, f, f, out);
         else if (m == 1 && f > hz + 2)
             note("Your display: %d Hz. Frames beyond %d a second are drawn but not shown (presentation without vsync).", hz, hz);
@@ -858,7 +865,7 @@ void tab_graphics() {
              "whole game down. The performance overlay shows how many are drawn.\n"
              "Off: every logic step waits for all of its frames, so if the frame target is not reached\n"
              "(e.g. 120/240 fps at a high internal resolution) the whole game runs in slow motion.\n"
-             "Saved separately for 60 fps (off by default; on by default on Android and Windows on ARM)\n"
+             "Saved separately for 40/60 fps (off by default; on by default on Android and Windows on ARM)\n"
              "and 120/240 fps (on by default).");
         if (!interp::paced_interpolation())
             note("Off: if this computer cannot reach %d fps, the whole game slows down (the performance\n"

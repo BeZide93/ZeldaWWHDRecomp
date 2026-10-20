@@ -363,6 +363,39 @@ run's own mean frame time; restarts / waits: step trace N / W per run.
 The skips still come in groups (a median of 5 steps apart, p90 25-31): the scene's cost changes from
 second to second, and the skips follow it.
 
+## 40 fps (2026-10-20)
+
+A frame-rate choice between 30 and 60 fps for 40, 80 and 120 Hz screens (Steam Deck LCD at 40 Hz,
+Steam Deck OLED at 80 Hz, phones with 120 Hz panels): 3 logic steps over 4 frames, a frame every 1.5
+vsyncs of 59.94 Hz (25.03 ms, 39.96 fps; the game keeps 29.97 steps a second, as at every rate).
+
+- The virtual vsync ticks every 6 quarter vsyncs, and a logic step's frame is due on its step slot
+  (every 8 quarter vsyncs) as at 60 fps. So one step in three has two frames before the next step's
+  slot and gets an in-between frame (logic pass halfway, record pass exact, as at 60 fps); the other
+  two are drawn once, their logic pass drawn exactly and recorded as the next step's "before" (a
+  record logic pass). Without slots (Keep game speed off) the first step of every three.
+- Keep game speed (the 60 fps setting) works as at 60 fps: a step with an in-between frame draws it
+  when the next step starts at most a frame late, a skip is followed at once by the next step (a
+  lead), and a step up to two steps late keeps the schedule. A device whose logic passes alone take
+  a step or longer draws no in-between frames (each restart of the schedule would otherwise let one
+  through).
+- On a display whose rate is not a multiple of 40 (60, 90, 144 Hz) the frames still go out every
+  25 ms, and the screen shows them for 1 and 2 refreshes in turn. Settings and the log say so; the
+  choice is left to the player (30 or 60 fps are even there). Android asks for 40 Hz (the system
+  then picks 40, 80 or 120 Hz) and prefers the lowest display mode that is a multiple of 40.
+- Android's automatic frame interpolation (Keep game speed off) pauses below 33.3 frames a second
+  at 40 fps (5/6 of the rate) instead of 50, and resumes at 21 ms of render thread per 30 fps
+  frame instead of 14. 60 fps and up are unchanged.
+- Motion: the in-between frame is drawn halfway, so the picture moves 1/2, 1/2, 1, 1 steps per frame
+  over a group (frames evenly spaced, motion not quite). Even motion (3/4 of a step per frame) would
+  need every frame blended and recorded.
+
+The simulation in `runtime/tools/interp_pacing_test.cpp` (`test_steps_40`): fast passes 39.96
+flips/s, 29.97 steps/s, every interval one frame; on 40/80/120 Hz (multiples of 39.96) every frame
+1/2/3 refreshes, on 60 Hz half 1 and half 2; 26/28/31 ms passes skip 17/44/79 % of the in-between
+frames (as many as keep the speed) at 29.97 steps/s with no wait after a skip; hitches of 25/40 ms
+every 300 passes are made up for.
+
 ## Even frame pacing (2026-10-18)
 
 With frame interpolation the passes of a logic step take different times: the logic pass runs the
