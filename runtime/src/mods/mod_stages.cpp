@@ -3,6 +3,7 @@
 #include "mod_stages.h"
 
 #include <algorithm>
+#include <atomic>
 #include <deque>
 #include <array>
 #include <cstring>
@@ -51,6 +52,7 @@ struct Built {
     std::map<std::string, std::string> names;  // the package's stage ids -> game names (its warps)
     // the dungeon map: each room's picture (the builder's, seen from above) and where it lies
     struct MapRoom {
+        uint32_t revision = 0;
         unsigned room = 0;
         int floor = 1;
         double x = 0, z = 0, units = 1;
@@ -257,6 +259,8 @@ bool build(const std::string& mod, const Stage& s, const std::string& name, cons
             const Value& m = room.get("map");
             if (m.type != Value::Object) continue;
             Built::MapRoom mr;
+            static std::atomic<uint32_t> next_revision{1};
+            mr.revision = next_revision.fetch_add(1);
             mr.room = unsigned(room.get("room").number);
             mr.floor = int(m.get("floor").number);
             mr.x = m.get("x").number, mr.z = m.get("z").number, mr.units = m.get("units").number;
@@ -927,6 +931,27 @@ void hide_map() {
 }  // namespace
 
 void hide_map_for_rebuild() { hide_map(); }
+
+bool corner_map(CornerMap& out) {
+    out = {};
+    const Built* b = by_name(current_stage());
+    const auto p = ss::link_place();
+    if (!b || !b->stage.map || !p.valid) return false;
+    for (const auto& r : b->map_rooms) {
+        if (int(r.room) != p.room || !r.rgba) continue;
+        out.revision = r.revision;
+        out.width = r.width; out.height = r.height; out.floor = r.floor;
+        out.bounds[0] = float(r.x); out.bounds[1] = float(r.z);
+        out.bounds[2] = float(r.x + r.width * r.units);
+        out.bounds[3] = float(r.z + r.height * r.units);
+        out.rgba = r.rgba;
+        const uint32_t save = ld32(kSavePtr);
+        const uint32_t rec = save ? save + 0x798 : 0;
+        out.markers = corner_markers(b->stage, r.room, rec && (ld8(rec + 0x21) & 2), rec ? ld32(rec) : 0);
+        return true;
+    }
+    return false;
+}
 
 void draw_map() {
     namespace hud = guestmods::hud;

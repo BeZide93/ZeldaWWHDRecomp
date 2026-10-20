@@ -226,6 +226,9 @@ namespace story_room_paths { bool declare(const std::string&,const std::vector<s
 // Island buildings: the loader asks for the pieces its actors use (none here) and builds nothing.
 // mod stages (mod_stages.h): none in the loader tests
 namespace mod_stages {
+static bool fixture_has_corner_map = false;
+static CornerMap fixture_corner_map;
+bool corner_map(CornerMap& out) { if (!fixture_has_corner_map) return false; out = fixture_corner_map; return true; }
 void declare(const std::string&,const Value&,const std::string&,const std::string&,const std::vector<std::string>&,const std::string&,const std::string&){}
 bool declared(){return false;}
 void logic(Cpu*){}
@@ -908,6 +911,33 @@ int main() {
     assert(read_setting("input.face_layout",1,data_base+0xFFFF,32)==0);
     assert(read_setting("render.true60",2,target,4)==4&&ld32(target)==1);
     assert(read_setting("display.aspect",4,target,8)==8&&ldf64(target)==21.0/9);
+    // Optional structured map query: exact buffer bounds, ownership, live marker
+    // refresh and image revisions, without importing a new required host service.
+    assert(read_setting("mod-stage.current-room-map",5,0,0)==808);
+    assert(read_setting("mod-stage.current-room-map",4,target,808)==0);
+    assert(read_setting("mod-stage.current-room-map",5,target,808)==0); // no stage map
+    mod_stages::fixture_has_corner_map = true;
+    auto& corner = mod_stages::fixture_corner_map;
+    corner.revision=77;corner.width=corner.height=2;corner.floor=-2;
+    corner.bounds[0]=-10;corner.bounds[1]=-20;corner.bounds[2]=10;corner.bounds[3]=20;
+    corner.rgba=std::make_shared<std::vector<uint8_t>>(16,255);
+    for(unsigned i=0;i<65;++i)corner.markers.push_back({float(i),float(i+1),1});
+    st32(target,0xABCD);st32(target+8,0);st32(target+808,0x12345678);
+    assert(read_setting("mod-stage.current-room-map",5,target,807)==0&&ld32(target)==0xABCD);
+    assert(read_setting("mod-stage.current-room-map",5,data_base+0xFFFF,808)==0);
+    assert(read_setting("mod-stage.current-room-map",5,target,808)==808);
+    const auto first_corner_image=ld32(target+4);
+    assert(ld32(target)==1&&first_corner_image&&ld32(target+8)==77&&int32_t(ld32(target+12))==-2);
+    assert(ldf32(target+16)==-10&&ldf32(target+28)==20&&ld32(target+32)==64);
+    assert(ldf32(target+40+63*12)==63&&ld32(target+36)==0&&ld32(target+808)==0x12345678);
+    assert(!guestmods::hud::store().release("second",first_corner_image));
+    corner.markers.clear();
+    assert(read_setting("mod-stage.current-room-map",5,target,808)==808&&ld32(target+4)==0&&ld32(target+32)==0);
+    ++corner.revision;
+    assert(read_setting("mod-stage.current-room-map",5,target,808)==808&&ld32(target+4)!=first_corner_image);
+    assert(guestmods::hud::store().release("first",first_corner_image));
+    assert(guestmods::hud::store().release("first",ld32(target+4)));
+    mod_stages::fixture_has_corner_map=false;corner={};
     std::strcpy(reinterpret_cast<char*>(mem::ptr(data_base+0x400)),"input.face_layout");
     c.r[3]=data_base+0x400;guestmods::svc_setting_changed(&c);assert(c.r[3]==0&&c.r[4]==7);
     WWHDGuestModuleV1 second{};second.mem_base=0x7F010000;second.mem_size=4096;

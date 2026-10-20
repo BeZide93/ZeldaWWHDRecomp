@@ -399,3 +399,8 @@ prepared yet.
 - The stage's rooms are lit by the template; a sky only comes with a template that has one.
 - A return warp has no light of its own; mark its spot in the ground model.
 - Ballad of Gales and the blue warp don't lead to or from a mod stage.
+
+Corner-map guest mods can reuse a mod dungeon's current-room image, world bounds
+and compass markers through `wwhd_dungeon_room_get`; see
+[the SDK guide](mod-sdk-v2.md#current-room-maps-for-mod-dungeons). It uses the map
+already supplied by the stage, so stage authors need no additional artwork.

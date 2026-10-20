@@ -1,3 +1,4 @@
+#include "../src/mods/mod_stages_corner.h"
 // SPDX-License-Identifier: MPL-2.0
 // Mod stages: the manifest's "stages" section, the stage names and the builder's recipe (mod_stages_manifest.h).
 #include <cassert>
@@ -58,6 +59,22 @@ bool fails(const std::string& from, const std::string& to, const std::string& re
 }  // namespace
 
 int main() {
+    {
+        Stage stage;
+        Room room; room.room = 0;
+        RoomActor chest; chest.actor = "chest"; chest.flag = 31;
+        chest.position.x = 10; chest.position.z = 20;
+        room.actors.push_back(chest); stage.rooms.push_back(room);
+        Door door; door.a = 0; door.b = 1; door.lock = "boss";
+        stage.doors.push_back(door);
+        assert(corner_markers(stage, 0, false, 0).empty());
+        const auto markers = corner_markers(stage, 0, true, 0);
+        assert(markers.size() == 2 && markers[0].kind == 1 && markers[0].x == 10 && markers[0].z == 20);
+        assert(corner_markers(stage, 0, true, 1u << 31).size() == 1);
+        assert(corner_markers(stage, 1, true, 0).size() == 1);
+        assert(corner_markers(stage, 2, true, 0).empty());
+    }
+
     std::vector<Stage> stages;
     std::string why;
     assert(parse(parse_json(kValid), stages, why) && why.empty());

@@ -359,3 +359,27 @@ s32 wwhd_item_count(const char* item_id);
 /* An item with "use": {"action": "event"}: how often the player used it (X, Y or R, or the bag) since
  * the last call (the count is read and cleared; at most 255). */
 s32 wwhd_item_used(const char* item_id);
+
+/* Optional current-room map from a mod stage. Returns 1 with a 808-byte output,
+ * 0 for no map or an older host. Call in a HUD callback. cached_revision is zero
+ * after an epoch change or release. A changed revision creates an owned HUD image;
+ * release the old one. Otherwise image is zero and the caller keeps its image.
+ * Markers are already compass/chest filtered. No game-owned pointers are exposed. */
+typedef struct {
+    u32 version, image, revision;
+    s32 floor;
+    f32 bounds[4];
+    u32 marker_count, reserved;
+    struct { f32 x, z; u32 kind; } markers[64]; /* 1 chest, 2 boss door */
+} wwhd_dungeon_room;
+#ifdef __cplusplus
+static_assert(sizeof(wwhd_dungeon_room) == 808, "wwhd_dungeon_room layout");
+#else
+_Static_assert(sizeof(wwhd_dungeon_room) == 808, "wwhd_dungeon_room layout");
+#endif
+/* Structured query type 5 on the existing optional settings/query transport.
+ * Hosts predating this key/type return zero without touching the output. */
+static inline u32 wwhd_dungeon_room_get(wwhd_dungeon_room* room, u32 cached_revision) {
+    room->revision = cached_revision;
+    return wwhd_setting_get("mod-stage.current-room-map", 5, room, sizeof(*room)) == sizeof(*room);
+}

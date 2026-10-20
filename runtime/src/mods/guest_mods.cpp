@@ -627,9 +627,17 @@ std::string setting_key(const Loaded& mod,uint32_t address) {
     }
     return {};
 }
+void query_dungeon_room(Cpu* c, uint32_t address);
 void svc_setting_get(Cpu* c) {
     auto& mod=owner(c);auto key=setting_key(mod,c->r[3]);
-    auto value=settings::read(key);uint32_t expected=c->r[4],destination=c->r[5],capacity=c->r[6];c->r[3]=0;
+    uint32_t expected=c->r[4],destination=c->r[5],capacity=c->r[6];
+    if (key == "mod-stage.current-room-map" && expected == 5) {
+        c->r[3] = 0;
+        if (!destination && !capacity) { c->r[3] = 808; return; }
+        if (capacity >= 808) query_dungeon_room(c, destination);
+        return;
+    }
+    auto value=settings::read(key);c->r[3]=0;
     if(!value||value->type()!=expected)return;
     uint32_t bytes=value->type()==settings::String?uint32_t(std::get<std::string>(value->data).size()+1):value->type()==settings::Number?8:4;
     if(!destination&&!capacity){c->r[3]=bytes;return;}
@@ -700,6 +708,32 @@ void svc_hud_texture(Cpu* c) {
         c->r[3]=hud::store().create_image(mod.id,pixels.width,pixels.height,pixels.width*4,pixels.rgba.data(),pixels.rgba.size());
         if(!c->r[3])hud::store().note(mod.id,"HUD PNG load failed: per-mod image quota exceeded");
     }catch(const std::exception&){hud::store().note(mod.id,"HUD PNG load failed: missing, invalid or oversized texture");}
+}
+// Optional read-only view of the port's existing mod-stage map.
+void query_dungeon_room(Cpu* c, uint32_t address) {
+    auto& mod = owner(c);
+    c->r[3] = 0;
+    if (!setting_buffer(mod, address, 808)) return;
+    const uint32_t cached = ld32(address + 8);
+    mod_stages::CornerMap room;
+    if (!mod_stages::corner_map(room)) return;
+    uint32_t image = 0;
+    if (cached != room.revision) {
+        image = hud::store().create_image(mod.id, room.width, room.height, room.width * 4,
+                                          room.rgba->data(), room.rgba->size());
+        if (!image) return;
+    }
+    st32(address, 1); st32(address + 4, image); st32(address + 8, room.revision);
+    st32(address + 12, uint32_t(room.floor));
+    for (unsigned i = 0; i < 4; ++i) stf32(address + 16 + i * 4, room.bounds[i]);
+    const uint32_t count = uint32_t(std::min<size_t>(room.markers.size(), 64));
+    st32(address + 32, count); st32(address + 36, 0);
+    for (uint32_t i = 0; i < count; ++i) {
+        stf32(address + 40 + i * 12, room.markers[i].x);
+        stf32(address + 44 + i * 12, room.markers[i].z);
+        st32(address + 48 + i * 12, room.markers[i].kind);
+    }
+    c->r[3] = 808;
 }
 void svc_hud_release(Cpu* c) {c->r[3]=hud::store().release(owner(c).id,c->r[3]);}
 void svc_hud_epoch(Cpu* c) {auto epoch=hud::store().state_generation();c->r[3]=uint32_t(epoch>>32);c->r[4]=uint32_t(epoch);}

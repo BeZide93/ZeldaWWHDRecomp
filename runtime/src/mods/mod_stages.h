@@ -21,6 +21,8 @@
 #include <string>
 #include <vector>
 
+#include <memory>
+#include "mod_stages_corner.h"
 #include "mod_json.h"
 #include "mod_stages_files.h"
 #include "mod_stages_manifest.h"
@@ -85,6 +87,16 @@ void logic(Cpu* c);
 bool enter_stage(const std::string& mod, const std::string& id, unsigned room, unsigned point);
 // daPy_lk_c::execute, before and after the game's own (climb.cpp's hook): an updraft entry lifting Link
 void link_step(Cpu* c, uint32_t link, bool before);
+// Current room's existing map pixels and world bounds, for read-only corner maps.
+// Called on the game thread; shared pixels survive an editor rebuild.
+struct CornerMap {
+    uint32_t revision = 0, width = 0, height = 0;
+    int floor = 1;
+    float bounds[4] = {};
+    std::shared_ptr<std::vector<uint8_t>> rgba;
+    std::vector<CornerMarker> markers;
+};
+bool corner_map(CornerMap& out);
 // whether the chest with that flag of the stage Link is in is open (its working record)
 bool chest_open(unsigned flag);
 

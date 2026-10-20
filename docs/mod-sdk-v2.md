@@ -308,6 +308,32 @@ It draws on Metal and Vulkan, in the TV picture and the GamePad screen (window o
 picture-in-picture); the settings overlay stays on top. Positions are not interpolated
 between logic steps.
 
+### Current-room maps for mod dungeons
+
+`wwhd_dungeon_room_get(&room, cached_revision)` returns the current mod-stage
+room's existing map pixels as an owned HUD image and its world X/Z bounds. Call it
+from a HUD callback. It returns 0 when the stage has no map, the room has no image,
+or the host predates this service. Stock dungeon images remain the mod's responsibility.
+
+`wwhd_dungeon_room` is an 808-byte guest structure: version (1), image handle,
+revision, signed floor, four float bounds (min X/Z, max X/Z), marker count, reserved
+zero, then up to 64 `(float x, float z, u32 kind)` markers. Kinds are 1 (unopened
+chest) and 2 (boss door). The port filters markers by current room and compass
+ownership, using the same save record and map pixels as its map page. This does
+not reveal neighboring rooms or change save flags.
+
+Pass cached revision 0 on first use and after `wwhd_hud_epoch()` changes. A new
+revision supplies a new image; release the preceding handle. An unchanged revision
+returns image 0 and the caller retains its existing handle. Geometry and markers
+are refreshed every call, including chest opening; rebuilding a room changes its
+revision. Never pass a nonzero revision after releasing its image.
+
+The helper uses the existing `wwhd_setting_get` query transport with key
+`mod-stage.current-room-map` and structured type 5. Older hosts return 0 for this
+unknown key/type, so the guest keeps working with no new import or translator
+requirement. Querying a null buffer with zero capacity reports 808 on hosts that
+support the query. The guest module ABI remains unchanged.
+
 ## Letters
 
 A story mod (a mod that adds a quest) can announce itself the way Wind Waker does: with a
