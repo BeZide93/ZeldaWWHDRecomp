@@ -329,6 +329,40 @@ after; one run of each build had a single interval over 25 ms). The simulation i
 passes a little over a vsync (before: 21-29 steps/s; after: 29.97, with the frames the renderer
 draws).
 
+## Keep game speed at 60 fps: skips at the deficit rate (issue #254, 2026-10-20)
+
+A phone whose passes take a little longer than a vsync (Xiaomi 14, ~17.2 ms) still lost game time at
+60 fps with Keep game speed on: 29.84-29.85 logic steps/s while it skipped fewer in-between frames
+than its frame time needs. Two causes, at 60 fps only:
+
+- After a skipped in-between frame the next logic pass slept until its step's time, so a skip that
+  came early saved less than a frame (waits after 3-4 % of the steps).
+- A step that one slow pass (a 20-40 ms hitch) left more than a step late started a new step schedule,
+  and that time was lost (5 restarts a minute).
+
+Now the next logic pass starts at once after a skip and keeps what the skip saved as a lead on the
+step schedule (`interp_pacing.h` `wait_after_drop`): the step lateness is the accumulated deficit,
+and every skip takes a whole in-between pass off it. A step up to two steps late keeps the schedule
+and catches up by skipping (`keep_window`; a scene load still restarts it). 120/240 fps and Keep
+game speed off are unchanged.
+
+Xiaomi 14 (adb), Windfall waters (portable state, scripted stick), 60 fps, Keep game speed on, warm
+shader cache, cool start (battery < 33 C), 60 s measured, runs interleaved C B B C A. A = before
+issue #178's fix, B = with it, C = this change. Steps/s: bench (frame trace) and the step trace;
+skipped: in-between frames skipped in the step trace, and the share that keeps the speed at the
+run's own mean frame time; restarts / waits: step trace N / W per run.
+
+| Run | steps/s | trace steps/s | fps | skipped (needed) | restarts / waits |
+|---|---|---|---|---|---|
+| A | 29.20 | 29.20 | 58.1 | 0 % (5.2 %) | (no schedule) |
+| B 1 | 29.90 | 29.84 | 57.0 | 8.4 % (9.3 %) | 5 / 69 |
+| B 2 | 29.90 | 29.85 | 57.9 | 5.9 % (6.7 %) | 5 / 53 |
+| C 1 | 30.00 | 29.97 | 57.6 | 7.4 % (7.4 %) | 0 / 0 |
+| C 2 | 30.00 | 29.94 | 57.9 | 6.4 % (6.6 %) | 1 / 0 |
+
+The skips still come in groups (a median of 5 steps apart, p90 25-31): the scene's cost changes from
+second to second, and the skips follow it.
+
 ## Even frame pacing (2026-10-18)
 
 With frame interpolation the passes of a logic step take different times: the logic pass runs the
