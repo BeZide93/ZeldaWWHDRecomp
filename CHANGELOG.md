@@ -18,6 +18,12 @@ what is on `devel` and not released yet (also in the
   full-size eyes instead of drawing into a cleared image, and stereo modes reuse their image memory between frames.
   Nothing changes with stereo off.
 
+- **Less render-thread work on graphics register writes** (all platforms; idea from the GreenNaugahyde Android fork).
+  Register writes look up what they affect in a table instead of walking ranges, shader constants take a fast path,
+  and the hot paths no longer use per-thread variables: about 0.3–0.5 ms less render-thread time per frame in our tests.
+- **Shadows on GPUs without depth clamp** (older Mali and PowerVR phones; idea from the GreenNaugahyde Android fork).
+  Such GPUs used to fail on the game's shadow draws; the port now clamps depth in the shader instead.
+
 - **Fixed: the Pirate's Charm shook without ringing at 60 fps and above** (#262). With frame interpolation the
   game's on-screen interface logic also ran on the in-between frames, where sounds are skipped so nothing plays twice,
   and the charm's ring always landed there. It now runs once per game step at every frame rate, as at 30 fps; this
