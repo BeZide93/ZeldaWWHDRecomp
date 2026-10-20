@@ -11,6 +11,12 @@ what is on `devel` and not released yet (also in the
   speed. It suits screens that run at 40, 80 or 120 Hz, such as the Steam Deck LCD at 40 Hz or the OLED at 80 Hz, where
   every frame is shown for the same time. On Android the app asks for a matching screen rate; some phones choose the
   rate themselves, and on a 60 Hz screen 40 fps runs unevenly (Settings says so). Keep game speed works as at 60 fps.
+- **Mod SDK: dungeons in mod levels** (for mod makers, preview). A mod level can now be a small dungeon: rooms taken
+  from any game room or the mod's own models, small-key, boss and shutter doors, chests with a small key, map, compass
+  or boss key, enemies (ChuChus, Bokoblins, Keese, Darknuts), pots and a return warp. Each mod dungeon keeps its own
+  keys, opened chests and switches; the game's save still only stores a normal entrance. See the example
+  "mod-stage-dungeon".
+
 - **Mod SDK: new levels of their own** (for mod makers, preview). A mod can add a new cave or dungeon level with its
   own rooms, reached from a box in a game level and left through a floor exit. The level is built from the player's
   own game files when the game starts, with the look and music of a game level the mod names; doors between its rooms
