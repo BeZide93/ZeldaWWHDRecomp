@@ -966,6 +966,7 @@ VkCommandBuffer command_buffer() {
   fallback_stats::begin_frame(R.frame);
   if (handoff_trace::enabled()) handoff_trace::set_producer_frame(R.frame);
   if (!R.recording) {
+    RendererCommands rendererCommands;  // the submission's timestamps open it, never eye 1's commands
     VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
     bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     if (auto* stream = record_worker_commands()) {
@@ -1078,6 +1079,7 @@ void transition_image(Surface *s, VkImageLayout layout,
                       VkPipelineStageFlags stage, VkAccessFlags access) {
   const bool conservativePassBreak = s->layout != layout ||
       layout != VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL || access != VK_ACCESS_SHADER_READ_BIT;
+  if (conservativePassBreak) stereo_release_texture(s);  // a texture both eyes sample
   if (narrow_barriers() && stage == VK_PIPELINE_STAGE_ALL_COMMANDS_BIT &&
       access == (VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT) &&
       layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
@@ -1289,6 +1291,8 @@ static void publish_or_finish_present_prefix(DeferredCommands& owner) {
 static void submit(VkSemaphore wait = VK_NULL_HANDLE,
                    VkSemaphore signal = VK_NULL_HANDLE, bool asynchronous=false) {
   if (!R.recording)return;
+  stereo_flush(); // stereo eye 1's held commands belong to this submission
+  RendererCommands rendererCommands;
   // Presentation owns externally synchronized semaphores: finish the entire
   // ordered CPU tail before handing those semaphores to Vulkan.
   bool externalSync=wait || signal;
@@ -2809,15 +2813,23 @@ void copy_to_scan(uint32_t cb, uint32_t target) {
     return;
   if (stereoEye && target == 4) return; // GamePad is a shared 2D device.
   Screen &s = stereoEye ? stereoRight : (target == 4 ? R.drc : R.tv);
-  if (!s.buildingScan || s.buildingScan->extent.width != src->extent.width ||
-      s.buildingScan->extent.height != src->extent.height ||
+  const uint32_t width = src->extent.width, height = src->extent.height;
+  s.buildingScanDisplayExtent = {width,height};
+  if (target != 4) {
+    bool halfWidth, halfHeight;  // an eye-sized target (surfaces.cpp), not the full-size fallback
+    stereo_target_halves(src, halfWidth, halfHeight);
+    if (halfWidth) s.buildingScanDisplayExtent.width *= 2;
+    if (halfHeight) s.buildingScanDisplayExtent.height *= 2;
+  }
+  if (!s.buildingScan || s.buildingScan->extent.width != width ||
+      s.buildingScan->extent.height != height ||
       s.buildingScan->fmt.pixel != src->fmt.pixel) {
     if (s.buildingScan)
       destroy_surface_image(s.buildingScan.get());
     s.buildingScan = std::make_unique<Surface>();
     auto *d = s.buildingScan.get();
-    d->width = src->extent.width;
-    d->height = src->extent.height;
+    d->width = width;
+    d->height = height;
     d->format = src->format;
     d->fmt = src->fmt;
     d->scale = 1;
@@ -2825,7 +2837,7 @@ void copy_to_scan(uint32_t cb, uint32_t target) {
   }
   resample(src, s.buildingScan.get(), 1);
   if (target & 1)
-    draw_mod_overlay(*s.buildingScan);  // HUD of gameplay mods (stamina wheel), as the Metal renderer
+    draw_mod_overlay(*s.buildingScan,s.buildingScanDisplayExtent);
   mark_gpu_written(s.buildingScan.get());
   s.buildingScanSrgb = s.srgb.load();
   s.buildingScanDirty = true;
@@ -3113,6 +3125,7 @@ void swap() {
 #endif
   for (Screen* s : {&R.tv, &R.drc, &stereoRight}) if (s->buildingScanDirty) {
     s->scan.swap(s->buildingScan);
+    std::swap(s->scanDisplayExtent,s->buildingScanDisplayExtent);
     s->scanSrgb = s->buildingScanSrgb;
     s->buildingScanDirty = false;
   }
@@ -3157,6 +3170,7 @@ void swap() {
   // comes from gfx/display_modes.cpp, which both window hosts and the Metal renderer share
   Surface *tvScan = R.tv.scan && R.tv.scan->image ? R.tv.scan.get() : nullptr;
   Surface *drcScan = R.drc.scan && R.drc.scan->image ? R.drc.scan.get() : nullptr;
+  const auto tvDisplay = scan_display_extent(R.tv);
 #ifdef WWHD_SDL_HOST
   gfx::g_filter = scale_filter();  // the SDL host keeps the scaling filter with the Vulkan settings
   const float layerW = float(R.tv.width.load()), layerH = float(R.tv.height.load());
@@ -3164,7 +3178,7 @@ void swap() {
   const float layerW = float(R.tv.swapExtent.width), layerH = float(R.tv.swapExtent.height);
 #endif
   gfx::PresentPlan plan = gfx::display_plan(
-      tvScan, tvScan ? float(tvScan->extent.width) : 0, tvScan ? float(tvScan->extent.height) : 0,
+      tvScan, float(tvDisplay.width), float(tvDisplay.height),
       drcScan, drcScan ? float(drcScan->extent.width) : 0, drcScan ? float(drcScan->extent.height) : 0,
       layerW, layerH, R.frame + 1, stereo::frame.mode!=stereo::FullSBS);
 #ifdef __ANDROID__
@@ -3176,8 +3190,8 @@ void swap() {
     plan.pip_wanted = false;
     plan.drc_only = false;
     plan.tv = gfx::display_layout(layerW, layerH,
-        tvScan ? float(tvScan->extent.width) : 1280,
-        tvScan ? float(tvScan->extent.height) : 720);
+        tvScan ? float(tvDisplay.width) : 1280,
+        tvScan ? float(tvDisplay.height) : 720);
     if (drcScan && R.drc.width > 0 && R.drc.height > 0) {
       bool swapped = dual_display::active_swap;
       float w = swapped ? layerW : float(R.drc.width.load());
@@ -3200,7 +3214,7 @@ void swap() {
   gfx::PresentPlan inputPlan=plan;
   if(stereo::frame.mode==stereo::FullSBS) {
     inputPlan=gfx::display_plan_for(plan,layerW*.5f,layerH,
-        tvScan?float(tvScan->extent.width):0,tvScan?float(tvScan->extent.height):0,
+        float(tvDisplay.width),float(tvDisplay.height),
         drcScan?float(drcScan->extent.width):0,drcScan?float(drcScan->extent.height):0);
     gfx::display_input_plan(inputPlan);
   }

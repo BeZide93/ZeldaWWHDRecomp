@@ -218,6 +218,7 @@ struct Recording {
     uint32 start = 0, pos = 0, end = 0;
 };
 static thread_local Recording t_rec;
+bool recording_display_list() { return t_rec.start != 0; }
 
 static void execute_one(Op op, const uint32* p, uint32 n);
 
@@ -606,6 +607,13 @@ static void execute_op(Op op, const uint32* p, uint32 n) {
     }
     case OP_LAYOUT_CONTENT:
         aspect::set_content_clip(n && p[0]);
+        if (n >= 2) stereo::layout_draw(p[1] != 0);
+        // A photo pane samples the canonical captured image. Changing that
+        // policy invalidates continued texture bindings, even with identical registers.
+        if (const bool photo = n >= 3 && p[2]; photo != stereo::layoutPhotograph) {
+            stereo::layoutPhotograph = photo;
+            note_full_state_change();
+        }
         break;
     case OP_CLOUDS_BEGIN:
         cloud_proto::g_active_seq = n ? p[0] : 0;
@@ -1309,6 +1317,7 @@ void gx2_ss_load(ss::Reader& r) {
     g_shader_state_gen++;
     note_full_state_change();
     g_swap_interval = std::max<uint32>(r.u32(), 1);
+    stereo::layoutDrawDepth = 0;
     uint64_t guest_swaps = r.u64();
     {
         std::lock_guard<std::mutex> fl(g_flip_mutex);
