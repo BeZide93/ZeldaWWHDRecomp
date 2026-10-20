@@ -636,6 +636,14 @@ int main(int argc,char** argv){
         assert(!story_actors::flag(b,"test","retarget"));
 
         assert(story_actors::actions("test",{{story_notebook::StoryAction::Kind::QuestDone,"q",1}})&&quest_state==255);
+        // "stage": handed to mod_stages with room and point; without a stage hook (or a refusal) the action fails
+        assert(!story_actors::actions("test",{{story_notebook::StoryAction::Kind::EnterStage,"sky",1u<<8|2u}}));
+        std::string entered;
+        story_actors::set_stage_enter([&](const std::string& mod,const std::string& id,unsigned room,unsigned point){
+            entered=mod+"/"+id+"/"+std::to_string(room)+"/"+std::to_string(point);return id=="sky";});
+        assert(story_actors::actions("test",{{story_notebook::StoryAction::Kind::EnterStage,"sky",1u<<8|2u}})&&entered=="test/sky/1/2");
+        assert(!story_actors::actions("test",{{story_notebook::StoryAction::Kind::EnterStage,"cave",0}}));
+        story_actors::set_stage_enter(nullptr);
         // a chart from dialogue: given once; a second give (or a finished chart) changes nothing
         assert(story_actors::actions("test",{{story_notebook::StoryAction::Kind::GiveChart,"chart:keeper-map",1}})&&story_chart::given_charts.at("test:keeper-map")==story_chart::kResultOwned);
         story_chart::given_charts["test:keeper-map"]=story_chart::kResultDone;

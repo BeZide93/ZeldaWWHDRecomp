@@ -30,6 +30,18 @@ int main() {
         action.array[0]["id"]="delivery";action.array[0]["step"]=1;
         assert(!world_manifest::actions(m,action,parsed,why));
     }
+    { // "stage": into one of the package's own stages (mod_stages), room and point packed into value
+        auto m=mods::json::parse(R"({"stages":[{"id":"sky"}]})");
+        std::vector<StoryAction> parsed;
+        assert(world_manifest::actions(m,mods::json::parse(R"([{"action":"stage","id":"sky","room":1,"point":3}])"),parsed,why));
+        assert(parsed.size()==1&&parsed[0].kind==StoryAction::Kind::EnterStage&&parsed[0].id=="sky"&&parsed[0].value==(1u<<8|3u));
+        parsed.clear();
+        assert(world_manifest::actions(m,mods::json::parse(R"([{"action":"stage","id":"sky"}])"),parsed,why)&&parsed[0].value==0);
+        for(const char* bad:{R"([{"action":"stage","id":"cave"}])",R"([{"action":"stage","id":"sky","room":64}])",
+                             R"([{"action":"stage","id":"sky","point":100}])",R"([{"action":"stage","id":"sky","wipe":1}])"}){
+            parsed.clear();assert(!world_manifest::actions(m,mods::json::parse(bad),parsed,why));
+        }
+    }
     {
         auto m=example();m["quests"]=mods::json::parse(R"([{"id":"a","steps":[{"n":1}]},{"id":"b","steps":[{"n":2}]}])");
         m["actors"].array[0]["when"]=mods::json::parse(R"({"flag":"read","not_flag":"seen","quests":[{"quest":"a","step":1},{"quest":"b","step":2}]})");

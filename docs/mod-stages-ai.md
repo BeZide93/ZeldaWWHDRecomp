@@ -165,6 +165,8 @@ for sharing the mod.
 
 - Ask for one change at a time and a screenshot after each. A short loop finds problems sooner than a long
   plan.
+- For a place in the open (an island in the sky, a mountain top), ask for a template with a sky first:
+  `{"command": "list_stage_templates", "params": {"sky": true, "door": "boss"}}`.
 - Keep a room under 20000 triangles. Blocky shapes with bevelled edges read well with the game's textures.
 - If a rebuild fails, its result says why (a material name, an exit box without floor, a room over budget),
   and the assistant can fix that directly.

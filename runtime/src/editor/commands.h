@@ -102,6 +102,11 @@ public:
         why = "mod stages can't be built here";
         return {};
     }
+    // The player's stages a mod stage can take as its template: [{stage, rooms, sky, doors, music}].
+    virtual Value stage_templates(std::string& why) {
+        why = "the game's stages can't be listed here";
+        return {};
+    }
     // Test mode: the save group's stage record erased from the loaded Quest Log (and the working one).
     virtual bool reset_stage_save(const std::string& mod, const std::string& group, std::string& why) {
         (void)mod, (void)group;

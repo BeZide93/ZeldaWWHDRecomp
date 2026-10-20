@@ -953,6 +953,7 @@ public:
         return true;
     }
     std::vector<std::pair<std::string, std::vector<int>>> stage_rooms() override { return game_stage_rooms(config::game_dir); }
+    Value stage_templates(std::string& why) override { return ::mod_stages::templates(config::game_dir, why); }
     Value rebuild_stages(const std::string& mod, const Value& manifest, const std::string& dir, const std::string& only, std::string& why) override {
         std::string data = mods::packages::package_data_directory(mod);
         if (data.empty() && !mods::packages::directory().empty()) data = (std::filesystem::path(mods::packages::directory()).parent_path() / "Data" / mod).string();

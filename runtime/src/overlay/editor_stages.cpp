@@ -31,11 +31,22 @@ struct StagesUi {
     std::string checked;
     Value built;         // the last rebuild's results
     int exit_target = 0, door_room = 1, door_lock = 0, chest_item = 0, enemy = 0;
+    Value templates;  // list_stage_templates (asked once)
+    bool templates_asked = false, sky_only = false, updraft = false;
 } U;
 const char* const kLocks[] = {"none", "small_key", "boss", "shutter"};
-const char* const kItems[] = {"small_key", "map", "compass", "boss_key"};
+const char* const kItems[] = {"small_key", "map", "compass", "boss_key", "heart_container"};
 const char* const kEnemies[] = {"bokoblin", "chuchu", "keese", "darknut"};
-const char* const kTemplates[] = {"Cave01", "M_NewD2", "kindan", "Siren"};
+// a template's facts for its line in the list: "GTower  (1 room, sky, doors: boss knob)"
+std::string template_line(const Value& t) {
+    std::string out = t.get("stage").string() + "  (" + std::to_string(t.get("rooms").array.size()) + (t.get("rooms").array.size() == 1 ? " room" : " rooms");
+    if (t.get("sky").boolean) out += ", sky";
+    if (!t.get("doors").array.empty()) {
+        out += ", doors:";
+        for (const auto& d : t.get("doors").array) out += " " + d.string();
+    }
+    return out + ")";
+}
 
 // the open mod's stages (list_stages, the snapshot's: refreshed once a second)
 const Value& stage_list() { return snapshot().stages; }
@@ -64,9 +75,18 @@ void stages_area(const Value& m) {
         ImGui::SetNextItemWidth(-FLT_MIN);
         text_entry::field("##new_stage_file", U.new_file, sizeof U.new_file, 0, "the first room's .glb (a full path)");
         ImGui::SetNextItemWidth(160);
-        if (ImGui::BeginCombo("Template##new_stage", U.new_template)) {
-            for (const char* t : kTemplates)
-                if (ImGui::Selectable(t, std::strcmp(t, U.new_template) == 0)) std::snprintf(U.new_template, sizeof U.new_template, "%s", t);
+        if (!U.templates_asked) {
+            U.templates_asked = true;
+            command("list_stage_templates", Value(), [](const Value& r) { U.templates = r.get("result").get("templates"); });
+        }
+        if (ImGui::BeginCombo("Template##new_stage", U.new_template, ImGuiComboFlags_HeightLarge)) {
+            ImGui::Checkbox("Only stages with a sky", &U.sky_only);
+            for (const auto& t : U.templates.array) {
+                if (U.sky_only && !t.get("sky").boolean) continue;
+                const std::string name = t.get("stage").string();
+                if (ImGui::Selectable((template_line(t) + "##" + name).c_str(), name == U.new_template))
+                    std::snprintf(U.new_template, sizeof U.new_template, "%s", name.c_str());
+            }
             ImGui::EndCombo();
         }
         ImGui::SameLine();
@@ -191,7 +211,14 @@ void stages_area(const Value& m) {
         if (x.get("game_name").string() == link.get("stage").string()) here = x.get("id").string();
     if (here != U.stage) {
         muted(here.empty() ? "Link is in a room of the game: the way into the stage goes here." : "Link is in stage " + here + ".");
-        if (here.empty() && link.get("valid").boolean && ImGui::Button("Entry here (the way into room 0)")) place("entry", Value());
+        if (here.empty() && link.get("valid").boolean) {
+            ImGui::Checkbox("An updraft (the wind lifts Link first)", &U.updraft);
+            if (ImGui::Button("Entry here (the way into room 0)")) {
+                Value p;
+                if (U.updraft) p["style"] = "updraft";
+                place("entry", p);
+            }
+        }
         muted("Warp in to place spawns, exits, doors, chests and enemies.");
         return;
     }
@@ -245,7 +272,7 @@ void stages_area(const Value& m) {
         place("door", p);
     }
     ImGui::SetNextItemWidth(120);
-    ImGui::Combo("##chest_item", &U.chest_item, kItems, 4);
+    ImGui::Combo("##chest_item", &U.chest_item, kItems, 5);
     ImGui::SameLine();
     if (ImGui::Button("Chest ahead")) {
         Value p;

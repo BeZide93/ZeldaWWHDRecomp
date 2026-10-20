@@ -2,6 +2,7 @@
 // Mod stages: the manifest's "stages" section, the stage names and the builder's recipe (mod_stages_manifest.h).
 #include <cassert>
 #include <cstdio>
+#include <cstring>
 #include <set>
 #include <string>
 
@@ -273,6 +274,56 @@ int main() {
         const auto one = glb(R"({"meshes":[{"name":"room","primitives":[{"attributes":{"POSITION":0,"TEXCOORD_0":1},"material":0}]}],"nodes":[{"mesh":0}],"materials":[{"name":"Graybox"}]})");
         const auto one_probs = check(parse_json(fixed), [&](const std::string&) { return one; });
         assert(one_probs.size() == 2 && one_probs[0].message.find("one material (Graybox)") != std::string::npos);
+    }
+
+    // phase 5: a sky stage's updraft entry, its boss room (the heart container chest, a warp that waits for it)
+    // and its shader template
+    {
+        const std::string sky = R"({"stages": [{"id": "sky", "template": "GTower", "kind": "dungeon", "shaders": "assets/sky.wwht",
+          "entrance": {"stage": "sea", "room": 44, "point": 0},
+          "rooms": [
+            {"room": 0, "ground": "assets/island.glb", "spawns": [{"point": 0, "position": {"x": 0, "y": 30, "z": -1500}}],
+             "actors": [{"id": "boss-key", "actor": "chest", "item": "boss_key", "position": {"x": -900, "y": 30, "z": 300}}]},
+            {"room": 1, "ground": "assets/arena.glb", "spawns": [{"point": 1, "position": {"x": 0, "y": 200, "z": 2650}}],
+             "actors": [{"id": "heart", "actor": "chest", "item": "heart_container", "position": {"x": 0, "y": 200, "z": 4400}}]}],
+          "doors": [{"position": {"x": 0, "y": 200, "z": 2400}, "angle": 180, "rooms": [0, 1], "lock": "boss"}],
+          "warps": [{"id": "home", "room": 1, "position": {"x": 600, "y": 200, "z": 4300}, "size": {"x": 250, "y": 250, "z": 250}, "after": "heart"}],
+          "entries": [{"id": "updraft", "stage": "sea", "room": 44, "style": "updraft", "height": 1500,
+                       "position": {"x": -194845, "y": 0, "z": 315400}, "size": {"x": 400, "y": 800, "z": 400}, "to": {"room": 0, "point": 0}}]}]})";
+        std::vector<Stage> out;
+        std::string w;
+        assert(parse(parse_json(sky), out, w));
+        const Stage& st = out[0];
+        assert(st.shaders == "assets/sky.wwht");
+        assert(st.entries[0].style == "updraft" && st.entries[0].height == 1500);
+        assert(st.warps[0].after == "heart" && st.warps[0].after_flag == 1);  // the second chest of the save group
+        NativeActor na;
+        assert(native_actor("chest", "", "heart_container", 1, na, w) && na.tag == "TRES" && na.name == "takara4" && (na.angle_z >> 8) == 0x08);
+        auto refuse = [&](const std::string& from, const std::string& to, const std::string& part) {
+            std::string text = sky;
+            const size_t at = text.find(from);
+            assert(at != std::string::npos);
+            text.replace(at, from.size(), to);
+            std::vector<Stage> o;
+            std::string why2;
+            const bool ok = parse(parse_json(text), o, why2);
+            if (ok || why2.find(part) == std::string::npos) fprintf(stderr, "expected \"%s\", got %s \"%s\"\n", part.c_str(), ok ? "success" : "failure", why2.c_str());
+            return !ok && why2.find(part) != std::string::npos;
+        };
+        int bad = 0;
+        bad += !refuse("\"after\": \"heart\"", "\"after\": \"boss-key-x\"", "names a chest of the stage");
+        bad += !refuse("\"style\": \"updraft\"", "\"style\": \"geyser\"", "style is walk or updraft");
+        bad += !refuse("\"height\": 1500", "\"height\": 9000", "height is 200..5000");
+        bad += !refuse("\"style\": \"updraft\", \"height\": 1500", "\"height\": 1500", "only an updraft has a height");
+        bad += !refuse("\"shaders\": \"assets/sky.wwht\"", "\"shaders\": \"../sky.wwht\"", "is a .wwht file in the package");
+        bad += !refuse("\"shaders\": \"assets/sky.wwht\"", "\"shaders\": \"assets/sky.bin\"", "is a .wwht file in the package");
+        bad += !refuse("\"item\": \"heart_container\"", "\"item\": \"heart_piece\"", "heart_container");
+        assert(!bad);
+        // the warp's chest must be one of the stage: "after" naming a pot is refused too
+        std::string pot = sky;
+        pot.replace(pot.find("\"actor\": \"chest\", \"item\": \"heart_container\""), std::strlen("\"actor\": \"chest\", \"item\": \"heart_container\""), "\"actor\": \"pot\"");
+        std::vector<Stage> o;
+        assert(!parse(parse_json(pot), o, w) && w.find("names a chest") != std::string::npos);
     }
 
     printf("mod_stages_test: ok\n");

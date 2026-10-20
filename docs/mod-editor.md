@@ -804,7 +804,8 @@ separated by `;`, or `@file` with one such line per row. Results go to the log.
 | `list_locations` | `group`? | warp destinations (`Islands`, `Rooms`, `Mod stages`, `Quest`) |
 | `warp` | `stage`, `room`, `point`?, `position`?, `angle`? | warp to a room's entry point or a position; a package's stage is `"stage:<mod>/<id>"` |
 | `import_ground` | `file`, `as`?, `confirm`?, `mod`? | copy a room's `.glb` into the package (`assets/<name>.glb`), with its parts, the parts without UVs and its material names |
-| `place_in_stage` | `stage`, `what`, `at`?, `position`?, `room`?, `id`?, `point`?, `to`?, `to_room`?, `to_point`?, `lock`?, `switch`?, `item`?, `actor`?, `variant`?, `size`?, `angle`?, `mod`? | put a spawn, an exit box, a door, a return warp, a chest, an enemy or a pot of a stage where Link stands; standing in a game room, its entry |
+| `place_in_stage` | `stage`, `what`, `at`?, `position`?, `room`?, `id`?, `point`?, `to`?, `to_room`?, `to_point`?, `lock`?, `switch`?, `item`?, `actor`?, `variant`?, `size`?, `style`?, `height`?, `after`?, `angle`?, `mod`? | put a spawn, an exit box, a door, a return warp, a chest, an enemy or a pot of a stage where Link stands; standing in a game room, its entry |
+| `list_stage_templates` | `sky`?, `door`? | the stages of your game files a stage can take as its template: rooms, sky, door kinds, whether their music can be borrowed |
 | `list_stages` | `mod`? | the mod's stages ([mod stages](mod-stages.md)): rooms, grounds, kits, floors, spawn points, doors, entries, whether the game has it built |
 | `add_stage` | `id`, `ground`, `template`?, `kind`?, `kit`?, `materials`?, `material`?, `spawn`?, `angle`?, `title`?, `music_like`?, `entrance`?, `entry`?, `mod`? | a new stage with one room whose ground is a `.glb` in the package |
 | `add_room` | `stage`, `ground` (a `.glb` or `kit`), `kit`?, `floor`?, `materials`?, `material`?, `spawn`?, `angle`?, `mod`? | one more room |

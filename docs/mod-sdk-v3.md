@@ -1261,6 +1261,14 @@ array contains at most eight actions:
 same manifest. Actions run in order after the talk closes; a failing action stops
 the sequence. Skipping or aborting a scene does not apply its end actions.
 
+`{"action": "stage", "id": "sky", "room": 0, "point": 0}` takes Link into one of
+the same package's own stages ([mod stages](mod-stages.md)), at spawn `point` of
+room `room` (both default to 0), with a fade. It works in a talk's `then` and a
+scene's `end.then`; at the end of a demo that carries Link (see
+[Carrying an actor on another's joint](#carrying-an-actor-on-anothers-joint)) it
+makes a ride into the stage. It fails (and stops the sequence) when the stage is
+not built.
+
 `{"action": "give", "id": "chart:keeper-map"}` gives Link one of your treasure charts
 (declared in the same manifest's `charts`, see
 [Charts and markers](mod-sdk-v2.md#charts-and-markers)). It works like a chart a letter

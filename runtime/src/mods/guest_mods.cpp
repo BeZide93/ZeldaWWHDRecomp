@@ -1367,6 +1367,7 @@ void init() {
            else if(!story_resident_routes::set_clip(k,clip.fska))LOG("[actors] the borrowed walk %s does not fit its memory (%zu bytes); those villagers stand",w.name,clip.fska.size());
            else LOG("[actors] borrowed walk %s: %s's %s on %s, %u frames, stride %.1f, %zu bytes",w.name,w.lender,w.clip,w.target,clip.frames,clip.stride,clip.fska.size());}}}
         story_actors::set_scene_start(story_scenes::request);
+        story_actors::set_stage_enter(mod_stages::enter_stage);
         if(editor::launch_mode())story_actors::editor_live_kinds();  // --editor: native props, switches, doors and enemies placed live
         story_actors::install([](uint32_t addr) {
             auto it=g_chains.find(addr);return it==g_chains.end()?std::string():it->second.replace_mod;

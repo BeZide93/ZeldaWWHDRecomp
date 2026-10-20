@@ -18,11 +18,14 @@
 #include "guest_addr.h"
 #include "runtime.h"
 #include "story_store.h"
+#include "mod_hash.h"
+#include "../platform/host.h"
 #include "guest_build.h"
 #include "guest_hud.h"
 #include "guest_png.h"
 #include "../input.h"
 #include "story_world_placement.h"
+#include "../true60.h"
 
 extern "C" void f_020277AC_orig(Cpu* c);
 extern "C" void f_025217F8_orig(Cpu* c);
@@ -224,6 +227,26 @@ bool build(const std::string& mod, const Stage& s, const std::string& name, cons
         register_file(file, b.files[file]);
     }
     if (!b.files.count(name + "_Stage.szs")) return why = "the stage builder wrote no stage archive", false;
+    // the stage's shader template (docs/mod-stages.md, "Shaders"): prepared with the game's own by setup; a
+    // shader cache prepared before the mod came compiles them during play until "Rebuild shader cache"
+    if (!s.shaders.empty()) {
+        const fs::path t = fs::path(package_dir) / s.shaders;
+        std::error_code e;
+        if (!fs::is_regular_file(t, e) || fs::is_symlink(t, e))
+            LOG("[mod-stages] %s: its shader template %s is missing", s.id.c_str(), s.shaders.c_str());
+        else {
+            const std::string digest = mods::hash::sha256_file(t);
+            bool prepared = false;
+            try {
+                std::ifstream f(fs::path(host::config_dir()) / "shader-prebuild" / "active.json");
+                const Value active = mods::json::parse(std::string(std::istreambuf_iterator<char>(f), {}));
+                for (const auto& h : active.get("identity").get("mod_templates").array) prepared |= h.string() == digest;
+            } catch (...) {
+            }
+            LOG("[mod-stages] %s: its shader template %s %s", s.id.c_str(), s.shaders.c_str(),
+                prepared ? "is in the prepared shader cache" : "is not prepared yet: setup's Repair prepares it (until then its shaders compile during play)");
+        }
+    }
     for (const auto& r : s.rooms) {
         if (!b.files.count(name + "_Room" + std::to_string(r.room) + ".szs")) return why = "the stage builder wrote no archive of room " + std::to_string(r.room), false;
         b.info.rooms.push_back(r.room);
@@ -446,6 +469,27 @@ void apply_pending() {
     (void)reload;  // the editor loads the stage again where Link stands (its reload_room, which waits for him to be free)
 }
 
+// An updraft entry: the wind lifts Link (the game's own fall, held up as the moon jump cheat does) until he is
+// `height` above where he stepped in, then the stage takes over with a fade.
+struct Lift {
+    bool on = false;
+    std::string name, id, room_key;  // the stage, the entry, the game room it is in
+    unsigned room = 0, point = 0;
+    float start_y = 0, height = 0;
+    unsigned steps = 0;  // 30 Hz steps since it began
+} g_lift;
+constexpr uint32_t kLinkProc = 0x65F0, kLinkSpeedY = 0x340, kLinkPosY = 0x318, kLinkGroundFlags = 0x834, kLinkFallHeight = 0x6A48;  // cheats.cpp's
+constexpr uint32_t kProcFall = 0x27;
+constexpr float kLiftSpeed = 18.f;      // units a 30 Hz step (the moon jump's is 25)
+constexpr unsigned kLiftMaxSteps = 300;  // ten seconds: a lift that can't rise (a ceiling) still ends
+
+void enter(const std::string& name, unsigned room, unsigned point, uint8_t wipe) {
+    write_next_stage(name, room, point);
+    st8(next_stage() + 11, 0xFF);  // layer: the game's choice
+    st8(next_stage() + 13, wipe);
+    st8(next_stage() + 12, 1);     // enabled
+}
+
 void logic(Cpu*) {
     apply_pending();
     if (g_stages.empty()) return;
@@ -458,6 +502,16 @@ void logic(Cpu*) {
     if (room_key != last_room) {
         last_room = room_key;
         armed.clear();  // arriving inside a box (back from the stage, say) takes nobody anywhere
+        g_lift.on = false;
+    }
+    if (g_lift.on) {
+        if (p.pos[1] >= g_lift.start_y + g_lift.height || g_lift.steps >= kLiftMaxSteps) {
+            g_lift.on = false;
+            enter(g_lift.name, g_lift.room, g_lift.point, 0);
+            LOG("[mod-stages] updraft %s: Link rose %.0f units in %u steps; into %s room %u point %u", g_lift.id.c_str(), p.pos[1] - g_lift.start_y,
+                g_lift.steps, g_lift.name.c_str(), g_lift.room, g_lift.point);
+        }
+        return;
     }
     for (const auto& b : g_stages)
         for (const auto& e : b.stage.entries) {
@@ -469,10 +523,12 @@ void logic(Cpu*) {
             }
             if (!armed.count(key) || !ss::control_problem().empty()) continue;
             armed.erase(key);
-            write_next_stage(b.info.name, e.to_room, e.to_point);
-            st8(next_stage() + 11, 0xFF);  // layer: the game's choice
-            st8(next_stage() + 13, 0);     // wipe: fade
-            st8(next_stage() + 12, 1);     // enabled
+            if (e.style == "updraft") {
+                g_lift = Lift{true, b.info.name, e.id, room_key, e.to_room, e.to_point, p.pos[1], float(e.height), 0};
+                LOG("[mod-stages] updraft %s/%s: the wind lifts Link (%.0f units)", b.info.mod.c_str(), e.id.c_str(), e.height);
+                return;
+            }
+            enter(b.info.name, e.to_room, e.to_point, 0);  // wipe: fade
             LOG("[mod-stages] entry %s/%s: Link goes into %s (%s room %u point %u)", b.info.mod.c_str(), e.id.c_str(), b.info.id.c_str(),
                 b.info.name.c_str(), e.to_room, e.to_point);
             return;
@@ -483,21 +539,88 @@ void logic(Cpu*) {
         for (const auto& w : b.stage.warps) {
             if (int(w.room) != p.room) continue;
             const std::string key = b.info.name + "/warp/" + w.id;
-            if (!inside(w, p.pos[0], p.pos[1], p.pos[2])) {
+            // a warp that waits for a chest (the boss room's heart container): closed counts as outside, so it
+            // takes Link once he steps into it with the chest open
+            const bool in = inside(w, p.pos[0], p.pos[1], p.pos[2]);
+            static std::set<std::string> told;  // a warp that waits: said once each time Link stands in it
+            if (in && w.after_flag >= 0 && !chest_open(unsigned(w.after_flag))) {
+                if (told.insert(key).second) LOG("[mod-stages] warp %s/%s waits for chest %s to be opened", b.info.id.c_str(), w.id.c_str(), w.after.c_str());
+                armed.insert(key);
+                continue;
+            }
+            if (!in) {
+                told.erase(key);
                 armed.insert(key);
                 continue;
             }
             if (!armed.count(key) || !ss::control_problem().empty()) continue;
             armed.erase(key);
             const std::string to = !w.to.own ? w.to.stage : w.to.stage.empty() ? b.info.name : b.names.at(w.to.stage);
-            write_next_stage(to, w.to.room, w.to.point);
-            st8(next_stage() + 11, 0xFF);
-            st8(next_stage() + 13, 9);  // wipe: the warp light (the game's own cave exits and its turn restart use it)
-            st8(next_stage() + 12, 1);
+            enter(to, w.to.room, w.to.point, 9);  // wipe: the warp light (the game's own cave exits and its turn restart use it)
             LOG("[mod-stages] warp %s/%s: Link goes to %s room %u point %u", b.info.id.c_str(), w.id.c_str(), to.c_str(), w.to.room, w.to.point);
             return;
         }
     }
+}
+
+Value templates(const std::string& game_dir, std::string& why) {
+    static Value cached;
+    static std::mutex mu;
+    std::lock_guard lock(mu);
+    if (cached.type == Value::Array) return cached;
+    std::vector<std::string> command;
+    try {
+        const auto bridge = guestmods::BuildBridge::installed(std::string());
+        command = bridge.python;
+        command.push_back((std::filesystem::path(bridge.builder).parent_path().parent_path() / "story_mods" / "stage_builder.py").string());
+    } catch (const std::exception& e) {
+        return why = std::string("the stage builder is unavailable: ") + e.what(), Value();
+    }
+    command.insert(command.end(), {"--game", g_game_dir.empty() ? game_dir : g_game_dir, "--templates"});
+    const auto process = host::run_process(command);
+    Value result;
+    try {
+        result = mods::json::parse(process.output);
+    } catch (...) {
+    }
+    if (!process.error.empty() || process.code || !result.get("ok").boolean || result.get("templates").type != Value::Array)
+        return why = "the stage builder could not list the templates: " + result.get("error").string(process.error.empty() ? "no result" : process.error), Value();
+    cached = result.get("templates");
+    for (auto& t : cached.array) t["music"] = music_allowed(t.get("stage").string());  // its music can be borrowed (music_like)
+    return cached;
+}
+
+bool enter_stage(const std::string& mod, const std::string& id, unsigned room, unsigned point) {
+    for (const auto& b : g_stages) {
+        if (b.info.mod != mod || b.info.id != id) continue;
+        bool spawn = false;
+        for (const auto& sp : b.info.spawns) spawn |= sp.room == room && sp.point == point;
+        if (!spawn) {
+            LOG("[mod-stages] %s: the stage action names room %u point %u, which stage %s has no spawn at", mod.c_str(), room, point, id.c_str());
+            return false;
+        }
+        g_lift.on = false;
+        enter(b.info.name, room, point, 0);
+        LOG("[mod-stages] %s: a stage action takes Link into %s (%s room %u point %u)", mod.c_str(), id.c_str(), b.info.name.c_str(), room, point);
+        return true;
+    }
+    LOG("[mod-stages] %s: the stage action names stage %s, which is not built", mod.c_str(), id.c_str());
+    return false;
+}
+
+void link_step(Cpu* c, uint32_t link, bool before) {
+    if (!g_lift.on || !before || link < 0x10000 || link > 0xFFFF9000) return;
+    if (true60::dt() < 1.f) return;  // an interpolated preview frame: the 30 Hz steps lift him
+    if (ld32(link + kLinkProc) != kProcFall) {
+        const Cpu saved = *c;
+        c->f[1].ps0 = c->f[1].ps1 = 5.;
+        guest_call(c, GC(0x023F6564), {link, 0});  // daPy_lk_c::procFall_init
+        *c = saved;
+    }
+    st32(link + kLinkGroundFlags, ld32(link + kLinkGroundFlags) & ~0xE0u);
+    stf32(link + kLinkSpeedY, kLiftSpeed);
+    st32(link + kLinkFallHeight, ld32(link + kLinkPosY));  // no fall damage from the top
+    ++g_lift.steps;
 }
 
 }  // namespace mod_stages
@@ -561,9 +684,15 @@ extern "C" void hook_025217F8(Cpu* c) {
         auto book = story_store::book();
         clear_resume(book);
         const bool kept = book.set(story_mail::kRecordStageResume, b->key, uint8_t(room)) && book.set(story_mail::kRecordStageResumePoint, b->key, uint8_t(point));
-        LOG("[mod-stages] return place in %s (%s): the save file continues at %s room %u point %u; the mod save area %s room %u point %u", b->info.id.c_str(),
-            stage.c_str(), b->info.entrance.stage.c_str(), b->info.entrance.room, b->info.entrance.point, kept ? "continues in the stage at" : "is full; not kept:", room,
-            point);
+        // the game sets it again on many frames (a Game Over's menus): said when it changes
+        static std::string said;
+        const std::string line = stage + "/" + std::to_string(room) + "/" + std::to_string(point) + (kept ? "" : "/full");
+        if (said != line) {
+            said = line;
+            LOG("[mod-stages] return place in %s (%s): the save file continues at %s room %u point %u; the mod save area %s room %u point %u", b->info.id.c_str(),
+                stage.c_str(), b->info.entrance.stage.c_str(), b->info.entrance.room, b->info.entrance.point, kept ? "continues in the stage at" : "is full; not kept:", room,
+                point);
+        }
     } else {
         LOG("[mod-stages] return place in %s (%s): the save file continues at %s room %u point %u", b->info.id.c_str(), stage.c_str(), b->info.entrance.stage.c_str(),
             b->info.entrance.room, b->info.entrance.point);
@@ -589,7 +718,8 @@ extern "C" void hook_02522198(Cpu* c) {
             const std::string line = b.info.name + "/" + std::to_string(room) + "/" + std::to_string(point);
             if (logged == line) return;
             logged = line;
-            LOG("[mod-stages] the Quest Log was saved in %s/%s: it continues there (%s room %u point %u)", b.info.mod.c_str(), b.info.id.c_str(), b.info.name.c_str(),
+            // a loaded Quest Log saved there, or the game's own restart (Continue after a Game Over)
+            LOG("[mod-stages] the return place is in %s/%s: Link continues there (%s room %u point %u)", b.info.mod.c_str(), b.info.id.c_str(), b.info.name.c_str(),
                 room, point);
             return;
         }
@@ -666,6 +796,11 @@ bool write_record(const Built& b, const std::array<uint8_t, kRecordBytes>& bytes
 }  // namespace
 
 namespace mod_stages {
+bool chest_open(unsigned flag) {
+    const uint32_t save = ld32(kSavePtr);
+    if (!save || flag > 31 || !by_name(current_stage())) return false;
+    return (ld32(save + 0x20 + kWorkingRecord) >> flag) & 1u;  // dSv_memBit_c's chests (u32, bit = flag)
+}
 bool reset_save(const std::string& mod, const std::string& group, std::string& why) {
     const uint16_t key = save_key(mod, "group:" + group);
     g_session_records.erase(key);

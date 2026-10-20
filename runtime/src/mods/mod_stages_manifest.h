@@ -93,6 +93,8 @@ struct Entry {
     unsigned room = 0;
     Point position, size;  // the box: its centre bottom and full size
     unsigned to_room = 0, to_point = 0;
+    std::string style = "walk";  // "walk": the fade as he steps in; "updraft": the wind lifts him first
+    double height = 1500;        // an updraft's lift (units) before the stage takes over
     bool operator==(const Entry&) const = default;
 };
 // A return warp: a box in a room of the stage that takes Link to a place (by default the stage's entrance)
@@ -102,10 +104,13 @@ struct Warp {
     unsigned room = 0;
     Point position, size;
     Place to;  // the entrance when "to" is left out
+    std::string after;    // a chest of the stage (its id) that must be open first ("" always open)
+    int after_flag = -1;  // that chest's flag
     bool operator==(const Warp&) const = default;
 };
 struct Stage {
     std::string id, template_stage, kind = "cave", music_like;
+    std::string shaders;  // a code-free shader template (.wwht) in the package: setup prepares its render states
     std::string save_group;  // stages of one group share their save record and dungeon switches (default: the id)
     Place entrance;
     std::vector<Room> rooms;
@@ -216,7 +221,7 @@ inline bool parse(const Value& m, std::vector<Stage>& out, std::string& why, boo
     if (list.type != Value::Array || list.array.size() > kMaxStagesPerMod) return why = "stages must be a list of up to " + std::to_string(kMaxStagesPerMod), false;
     for (const auto& v : list.array) {
         Stage s;
-        if (!keys(v, {"id", "template", "kind", "music_like", "save_group", "entrance", "rooms", "doors", "joins", "entries", "warps", "map"})) return why = "unknown stage field", false;
+        if (!keys(v, {"id", "template", "kind", "music_like", "save_group", "entrance", "rooms", "doors", "joins", "entries", "warps", "map", "shaders"})) return why = "unknown stage field", false;
         if (!id(v.get("id"))) return why = "invalid stage id", false;
         s.id = v.get("id").text;
         const std::string at = "stage " + s.id + ": ";
@@ -239,6 +244,12 @@ inline bool parse(const Value& m, std::vector<Stage>& out, std::string& why, boo
         if (v.get("kind").type != Value::Null) {
             s.kind = v.get("kind").string();
             if (s.kind != "cave" && s.kind != "dungeon") return why = at + "kind is cave or dungeon", false;
+        }
+        if (v.get("shaders").type != Value::Null) {
+            s.shaders = v.get("shaders").string();
+            const bool ok = s.shaders.size() > 5 && s.shaders.size() <= 200 && s.shaders.substr(s.shaders.size() - 5) == ".wwht" &&
+                            s.shaders.front() != '/' && s.shaders.find('\\') == std::string::npos && s.shaders.find("..") == std::string::npos;
+            if (!ok) return why = at + "\"shaders\" is a .wwht file in the package (assets/stage.wwht)", false;
         }
         if (v.get("music_like").type != Value::Null) {
             s.music_like = v.get("music_like").string();
@@ -368,7 +379,8 @@ inline bool parse(const Value& m, std::vector<Stage>& out, std::string& why, boo
         for (const auto& nv : entries.array) {
             Entry n;
             const Value& to = nv.get("to");
-            if (!keys(nv, {"id", "stage", "room", "position", "size", "to"}) || !id(nv.get("id"))) return why = at + "an entry has an id, a place in the game and the spawn it leads to", false;
+            if (!keys(nv, {"id", "stage", "room", "position", "size", "to", "style", "height"}) || !id(nv.get("id")))
+                return why = at + "an entry has an id, a place in the game and the spawn it leads to", false;
             n.id = nv.get("id").text;
             if (nv.get("stage").type != Value::String || !game_stage_name(nv.get("stage").text) || !integer(nv.get("room"), 0, 63, n.room))
                 return why = at + "entry " + n.id + ": stage and room name a room of the game", false;
@@ -377,6 +389,16 @@ inline bool parse(const Value& m, std::vector<Stage>& out, std::string& why, boo
                 return why = at + "entry " + n.id + ": a position and a size (10..5000 units each way)", false;
             if (!keys(to, {"room", "point"}) || !integer(to.get("room"), 0, 63, n.to_room) || !integer(to.get("point"), 0, 99, n.to_point))
                 return why = at + "entry " + n.id + ": \"to\" is a room and spawn point of the stage", false;
+            if (nv.get("style").type != Value::Null) {
+                n.style = nv.get("style").string();
+                if (n.style != "walk" && n.style != "updraft") return why = at + "entry " + n.id + ": style is walk or updraft", false;
+            }
+            if (nv.get("height").type != Value::Null) {
+                const Value& h = nv.get("height");
+                if (n.style != "updraft") return why = at + "entry " + n.id + ": only an updraft has a height", false;
+                if (h.type != Value::Number || !(h.number >= 200 && h.number <= 5000)) return why = at + "entry " + n.id + ": height is 200..5000 units", false;
+                n.height = h.number;
+            }
             for (const auto& old : s.entries)
                 if (old.id == n.id) return why = at + "duplicate entry id", false;
             s.entries.push_back(n);
@@ -394,13 +416,20 @@ inline bool parse(const Value& m, std::vector<Stage>& out, std::string& why, boo
         if (warps.type != Value::Null && (warps.type != Value::Array || warps.array.size() > kMaxWarps)) return why = at + "warps must be a list of up to " + std::to_string(kMaxWarps), false;
         for (const auto& wv : warps.array) {
             Warp w;
-            if (!keys(wv, {"id", "room", "position", "size", "to"}) || !id(wv.get("id")) || !integer(wv.get("room"), 0, 63, w.room) || w.room >= s.rooms.size())
+            if (!keys(wv, {"id", "room", "position", "size", "to", "after"}) || !id(wv.get("id")) || !integer(wv.get("room"), 0, 63, w.room) || w.room >= s.rooms.size())
                 return why = at + "a warp has an id and a room of the stage", false;
             w.id = wv.get("id").text;
             if (!point(wv.get("position"), kMaxCoordinate, w.position) || !point(wv.get("size"), 5000, w.size) || w.size.x < 10 || w.size.y < 10 || w.size.z < 10)
                 return why = at + "warp " + w.id + ": a position and a size (10..5000 units each way)", false;
             w.to = s.entrance;
             if (wv.get("to").type != Value::Null && !parse_place(wv.get("to"), true, w.to)) return why = at + "warp " + w.id + ": invalid place it leads to", false;
+            if (wv.get("after").type != Value::Null) {
+                w.after = wv.get("after").string();
+                bool chest = false;
+                for (const auto& r : s.rooms)
+                    for (const auto& a : r.actors) chest |= a.id == w.after && a.actor == "chest";
+                if (!chest) return why = at + "warp " + w.id + ": \"after\" names a chest of the stage (its id)", false;
+            }
             for (const auto& old : s.warps)
                 if (old.id == w.id) return why = at + "duplicate warp id", false;
             s.warps.push_back(w);
@@ -420,6 +449,10 @@ inline bool parse(const Value& m, std::vector<Stage>& out, std::string& why, boo
                         if (chest >= kMaxChests) return why = "save group " + s.save_group + ": more than 32 chests", false;
                         a.flag = chest++;
                     }
+            for (auto& w : s.warps)
+                for (const auto& r : s.rooms)
+                    for (const auto& a : r.actors)
+                        if (!w.after.empty() && a.id == w.after) w.after_flag = int(a.flag);
             for (auto& d : s.doors)
                 if (d.lock == "small_key" || d.lock == "boss") {
                     if (sw < kOwnSwitches) return why = "save group " + s.save_group + ": too many locked doors", false;

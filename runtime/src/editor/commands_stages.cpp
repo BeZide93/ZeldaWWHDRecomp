@@ -192,6 +192,7 @@ Value Session::dispatch_stages(const std::string& command, const Value& p, std::
                 wv["position"] = point_value(place.position.x, place.position.y, place.position.z);
                 wv["size"] = point_value(200, 200, 200);
                 if (p.get("to").type == Value::Object) wv["to"] = p.get("to");
+                if (p.get("after").type == Value::String) wv["after"] = p.get("after").text;  // a chest of the stage that opens it
                 list(s, "warps").array.push_back(wv);
                 r["added"] = wv;
             } else if (what == "entry") {
@@ -203,6 +204,10 @@ Value Session::dispatch_stages(const std::string& command, const Value& p, std::
                 e["size"] = point_value(200, 200, 200);
                 e["to"]["room"] = p.get("to_room").type == Value::Number ? p.get("to_room").number : 0.0;
                 e["to"]["point"] = p.get("to_point").type == Value::Number ? p.get("to_point").number : 0.0;
+                if (p.get("style").type == Value::String) e["style"] = p.get("style").text;  // walk or updraft
+                if (p.get("height").type == Value::Number) e["height"] = p.get("height").number;
+                if (p.get("size").type == Value::Object) e["size"] = p.get("size");
+                else if (e.get("style").string() == "updraft") e["size"] = point_value(400, 800, 400);  // a column of wind
                 list(s, "entries").array.push_back(e);
                 r["added"] = e;
             } else if (what == "chest" || what == "enemy" || what == "pot" || what == "big_pot") {
@@ -261,6 +266,25 @@ Value Session::dispatch_stages(const std::string& command, const Value& p, std::
             for (const auto& m : facts.materials) mats.array.push_back(Value(m));
         }
         r["next"] = "add_stage or add_room with \"ground\": \"" + as + "\" (or rebuild_stage when a room uses it already)";
+        ok = true;
+        return r;
+    }
+    if (command == "list_stage_templates") {
+        if (!host_) return why = "the game is not running", r;
+        const Value all = host_->stage_templates(why);
+        if (!why.empty()) return r;
+        const std::string door = text(p, "door");
+        if (!door.empty() && door != "knob" && door != "boss" && door != "small_key" && door != "shutter")
+            return why = "\"door\" is knob, boss, small_key or shutter", r;
+        Value& list = r["templates"];
+        list.type = Value::Array;
+        for (const auto& t : all.array) {
+            if (p.get("sky").type == Value::Bool && t.get("sky").boolean != p.get("sky").boolean) continue;
+            if (!door.empty() && std::none_of(t.get("doors").array.begin(), t.get("doors").array.end(), [&](const Value& d) { return d.string() == door; })) continue;
+            list.array.push_back(t);
+        }
+        r["note"] = "a template gives the stage its light, sky, camera and door models; a room's kit ({stage, room}) can be any room listed here. "
+                    "With a sky, the stage's open-air rooms show it (an enclosed model hides it).";
         ok = true;
         return r;
     }

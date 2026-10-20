@@ -319,6 +319,11 @@ void stage_commands(const fs::path& root) {
     CHECK(keep.get("doors").array.size() == 1);
     // one undo step each
     CHECK(ok(s.run("undo")) && s.manifest("dun")->get("stages").array[0].get("rooms").array[1].get("actors").array.empty());
+    // an updraft entry where Link stands in a game room (a column of wind), and a warp that waits for a chest
+    r = s.run("place_in_stage", json(R"({"stage": "keep", "what": "entry", "style": "updraft", "height": 1200})"));
+    CHECK(ok(r) && r.get("result").get("added").get("style").string() == "updraft" && r.get("result").get("added").get("size").get("y").number == 800);
+    r = s.run("place_in_stage", json(R"({"stage": "keep", "what": "warp", "at": "position", "room": 0, "position": {"x": 0, "y": 0, "z": 0}, "after": "nothing"})"));
+    CHECK(!ok(r) && error_of(r).find("names a chest") != std::string::npos);
 }
 }  // namespace
 

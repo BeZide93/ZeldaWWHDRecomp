@@ -1128,12 +1128,59 @@ def cached_meta(out_dir, meta_path, key):
         return None
 
 
+DOOR_KINDS = {'door10': 'knob', 'door20': 'boss', 'key10': 'small_key', 'stop10': 'shutter'}
+SKY_MODELS = ('vr_sky', 'vr_back_cloud', 'vr_kasumi_mae', 'vr_uso_umi')
+
+
+def templates(game):
+    """the player's stages a mod stage can take as its template: their rooms, whether the stage archive has the
+    sky dome, and which kinds of door it has the models of (names and facts only, nothing of the files)"""
+    folder = os.path.join(game, 'content', 'Common', 'Stage')
+    names = sorted(os.listdir(folder))
+    out = []
+    for fname in names:
+        m = re.fullmatch(r'([A-Za-z0-9_]{1,8})_Stage\.szs', fname)
+        if not m:
+            continue
+        stage = m.group(1)
+        rooms = sorted(int(r.group(1)) for r in (re.fullmatch(re.escape(stage) + r'_Room(\d+)\.szs', n) for n in names) if r)
+        entry = {'stage': stage, 'rooms': rooms, 'sky': False, 'doors': []}
+        try:
+            files = gp.room_files(game, fname)
+            bf = [n for n in files if n.endswith('.bfres')]
+            if len(bf) != 1:
+                continue
+            b = base.Bfres(files[bf[0]])
+            try:
+                models = set(dict(b.dict(b.rel(0x20))))
+            except (UnicodeDecodeError, ValueError, IndexError, struct.error):
+                models = set()  # a stage archive without models of its own
+            if 'stage.dzs' not in embedded_files(b):
+                continue
+        except (BuildError, OSError, KeyError, IndexError, struct.error, ValueError):
+            continue
+        entry['sky'] = all(n in models for n in SKY_MODELS)
+        entry['doors'] = sorted(kind for model, kind in DOOR_KINDS.items() if model in models)
+        out.append(entry)
+    return out
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     parser.add_argument('--game', required=True)
-    parser.add_argument('--recipe', required=True)
-    parser.add_argument('--out', required=True)
+    parser.add_argument('--templates', action='store_true', help='list the stages a mod stage can take as its template')
+    parser.add_argument('--recipe')
+    parser.add_argument('--out')
     args = parser.parse_args()
+    if args.templates:
+        try:
+            print(json.dumps({'ok': True, 'templates': templates(args.game)}, sort_keys=True))
+        except OSError as exc:
+            print(json.dumps({'ok': False, 'error': str(exc)}))
+            sys.exit(1)
+        return
+    if not args.recipe or not args.out:
+        parser.error('--recipe and --out (or --templates)')
     try:
         meta = build(args.game, args.recipe, args.out)
     except (BuildError, OSError, KeyError, IndexError, struct.error, ValueError, TypeError) as exc:

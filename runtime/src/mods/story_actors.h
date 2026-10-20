@@ -60,6 +60,8 @@ void service(Cpu*);
 void set_game_calls(void (*original)(Cpu*,uint32_t),uint32_t (*call)(Cpu*,uint32_t,std::initializer_list<uint32_t>));
 void set_scratch_memory(uint32_t guest);
 void set_scene_start(std::function<bool(const std::string&,const std::string&)> start);
+// the "stage" action: into one of the mod's own stages (mod_stages::enter_stage)
+void set_stage_enter(std::function<bool(const std::string&,const std::string&,unsigned,unsigned)> enter);
 void install(const std::function<std::string(uint32_t)>& replaced_by,const std::function<void(uint32_t,void(*)(Cpu*))>& replace);
 void room_loaded(Cpu*,int room);
 // Call once after native room actor setup (including the shared treasure hook).

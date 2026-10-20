@@ -33,6 +33,7 @@ inline constexpr ChestItem kChestItems[] = {
     {"map", 0x4C, "takara", 1},
     {"compass", 0x4D, "takara", 1},
     {"boss_key", 0x4E, "takara4", 3},
+    {"heart_container", 0x08, "takara4", 3},  // raises Link's hearts for good, in the player's own save
 };
 inline const ChestItem* chest_item(const std::string& item) {
     for (const auto& c : kChestItems)
@@ -50,7 +51,7 @@ inline bool native_actor(const std::string& actor, const std::string& variant, c
     out.tag = "ACTR";
     if (actor == "chest") {
         const ChestItem* c = chest_item(item);
-        if (!c) return why = "a chest holds small_key, map, compass or boss_key", false;
+        if (!c) return why = "a chest holds small_key, map, compass, boss_key or heart_container", false;
         if (flag > 31) return why = "a stage has at most 32 chests", false;
         out.tag = "TRES";
         out.name = c->chest;

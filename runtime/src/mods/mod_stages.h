@@ -72,7 +72,17 @@ bool reset_save(const std::string& mod, const std::string& group, std::string& w
 // installed package makes and the game files don't have.
 bool missing(const std::string& stage);
 
+// The stages of the player's game files a mod stage can take as its template (the stage builder's --templates:
+// {stage, rooms, sky, doors}), read once; empty with `why` when the builder can't run.
+Value templates(const std::string& game_dir, std::string& why);
 // once per game logic pass (guest_mods logic_service): the entries' boxes
 void logic(Cpu* c);
+// The "stage" action of a mod's talk or scene: Link goes into the mod's own stage `id` (room, spawn point) with
+// a fade. False (and logged) when the stage isn't built or has no such spawn.
+bool enter_stage(const std::string& mod, const std::string& id, unsigned room, unsigned point);
+// daPy_lk_c::execute, before and after the game's own (climb.cpp's hook): an updraft entry lifting Link
+void link_step(Cpu* c, uint32_t link, bool before);
+// whether the chest with that flag of the stage Link is in is open (its working record)
+bool chest_open(unsigned flag);
 
 }  // namespace mod_stages

@@ -229,6 +229,7 @@ namespace mod_stages {
 void declare(const std::string&,const Value&,const std::string&,const std::string&,const std::vector<std::string>&,const std::string&,const std::string&){}
 bool declared(){return false;}
 void logic(Cpu*){}
+bool enter_stage(const std::string&,const std::string&,unsigned,unsigned){return false;}
 }
 namespace story_game_pieces {
 std::vector<std::string> used(const std::vector<story_notebook::ManifestActor>& actors){std::vector<std::string> out;for(const auto&a:actors)if(a.game_piece())out.push_back(a.piece);return out;}
@@ -251,6 +252,7 @@ unsigned live_kinds=0;void editor_live_kinds(){++live_kinds;}
 void set_game_calls(void (*)(Cpu*,uint32_t),uint32_t (*)(Cpu*,uint32_t,std::initializer_list<uint32_t>)){}
 void set_scratch_memory(uint32_t){}
 void set_scene_start(std::function<bool(const std::string&,const std::string&)>){}
+void set_stage_enter(std::function<bool(const std::string&,const std::string&,unsigned,unsigned)>){}
 // like the real install: claims a game function, which marks its byte in the hook-flag table
 static unsigned installs=0;
 void install(const std::function<std::string(uint32_t)>&,const std::function<void(uint32_t,void(*)(Cpu*))>& replace){++installs;replace(0x02000000,[](Cpu*){});}
