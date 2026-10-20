@@ -3,6 +3,7 @@
 #include "mod_stages.h"
 
 #include <algorithm>
+#include <array>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -22,6 +23,9 @@ extern "C" void f_020277AC_orig(Cpu* c);
 extern "C" void f_025217F8_orig(Cpu* c);
 extern "C" void f_02522198_orig(Cpu* c);
 extern "C" void f_0273AA24_orig(Cpu* c);
+extern "C" void f_025B9C9C_orig(Cpu* c);
+extern "C" void f_025B9D24_orig(Cpu* c);
+extern "C" void f_025B9174_orig(Cpu* c);
 
 namespace mod_stages {
 namespace {
@@ -33,6 +37,9 @@ struct Built {
     std::string dir;                          // the stage cache folder
     std::map<std::string, std::string> files;  // "<name>_Stage.szs", "<name>_Room<n>.szs" -> path
     uint16_t key = 0;                          // the mod save area key (save_key)
+    uint16_t group_key = 0;                    // its save group's key (save_key of the group)
+    unsigned group_index = 0;                  // the save group's number this session (its dungeon switches)
+    std::map<std::string, std::string> names;  // the package's stage ids -> game names (its warps)
     std::string music_like;
     int music_id = -1;                         // spotNameToId's answer for the stage (-1: not looked up yet)
 };
@@ -120,13 +127,17 @@ bool build(const std::string& mod, const Stage& s, const std::string& name, cons
     // game rooms the exits and entries name (a missing archive stops the game)
     if (!game_stages().count(s.template_stage)) return why = "the game has no stage " + s.template_stage, false;
     for (const auto& r : s.rooms)
-        if (!game_room(s.template_stage, r.kit)) return why = "the template " + s.template_stage + " has no room " + std::to_string(r.kit), false;
+        if (!game_room(r.kit_stage.empty() ? s.template_stage : r.kit_stage, r.kit))
+            return why = "the kit room " + (r.kit_stage.empty() ? s.template_stage : r.kit_stage) + " room " + std::to_string(r.kit) + " is not in the game", false;
     if (!game_room(s.entrance.stage, s.entrance.room))
         return why = "the entrance " + s.entrance.stage + " room " + std::to_string(s.entrance.room) + " is not in the game", false;
     for (const auto& r : s.rooms)
         for (const auto& e : r.exits)
             if (!e.to.own && !game_room(e.to.stage, e.to.room))
                 return why = "exit " + e.id + " leads to " + e.to.stage + " room " + std::to_string(e.to.room) + ", which is not in the game", false;
+    for (const auto& w : s.warps)
+        if (!w.to.own && !game_room(w.to.stage, w.to.room))
+            return why = "warp " + w.id + " leads to " + w.to.stage + " room " + std::to_string(w.to.room) + ", which is not in the game", false;
     for (const auto& e : s.entries)
         if (!game_room(e.stage, e.room)) return why = "entry " + e.id + " is in " + e.stage + " room " + std::to_string(e.room) + ", which is not in the game", false;
     if (python.empty() || tool.empty() || data_dir.empty()) return why = "the stage builder is unavailable", false;
@@ -171,6 +182,16 @@ bool build(const std::string& mod, const Stage& s, const std::string& name, cons
     b.stage = s;
     b.dir = dir.string();
     b.key = save_key(mod, s.id);
+    b.group_key = save_key(mod, "group:" + s.save_group);
+    b.names = names;
+    {
+        std::lock_guard lock(g_mutex);
+        std::set<uint16_t> seen;
+        for (const auto& o : g_stages) seen.insert(o.group_key);
+        b.group_index = unsigned(seen.size());
+        for (const auto& o : g_stages)
+            if (o.group_key == b.group_key) b.group_index = o.group_index;
+    }
     b.music_like = s.music_like;
     for (const auto& [file, digest] : result.get("files").object) {
         const bool ours = file == name + "_Stage.szs" || (file.rfind(name + "_Room", 0) == 0 && file.size() > 4 && file.substr(file.size() - 4) == ".szs");
@@ -333,6 +354,27 @@ void logic(Cpu*) {
                 b.info.name.c_str(), e.to_room, e.to_point);
             return;
         }
+    // the return warps of the stage Link is in
+    for (const auto& b : g_stages) {
+        if (b.info.name != p.stage) continue;
+        for (const auto& w : b.stage.warps) {
+            if (int(w.room) != p.room) continue;
+            const std::string key = b.info.name + "/warp/" + w.id;
+            if (!inside(w, p.pos[0], p.pos[1], p.pos[2])) {
+                armed.insert(key);
+                continue;
+            }
+            if (!armed.count(key) || !ss::control_problem().empty()) continue;
+            armed.erase(key);
+            const std::string to = !w.to.own ? w.to.stage : w.to.stage.empty() ? b.info.name : b.names.at(w.to.stage);
+            write_next_stage(to, w.to.room, w.to.point);
+            st8(next_stage() + 11, 0xFF);
+            st8(next_stage() + 13, 9);  // wipe: the warp light (the game's own cave exits and its turn restart use it)
+            st8(next_stage() + 12, 1);
+            LOG("[mod-stages] warp %s/%s: Link goes to %s room %u point %u", b.info.id.c_str(), w.id.c_str(), to.c_str(), w.to.room, w.to.point);
+            return;
+        }
+    }
 }
 
 }  // namespace mod_stages
@@ -441,4 +483,107 @@ extern "C" void hook_0273AA24(Cpu* c) {
             LOG("[mod-stages] game assertion in %s: %s:%u %s", stage.c_str(), guest_text(c->r[3], 96).c_str(), c->r[4], guest_text(c->r[5], 96).c_str());
     }
     f_0273AA24_orig(c);
+}
+
+// ---- the stage record ---------------------------------------------------------------------------------------
+// A stage's save record (dSv_memBit_c, 0x24 bytes: chests, switches, items, visited rooms, keys, dungeon items)
+// lives in dSv_info_c's working copy (+0x778) while the stage is loaded; the game copies it from and back to the
+// save's table of 16 (getSave, putSave). A mod stage's is its save group's own, kept in the mod save area
+// (story_store; without one, for this session only), and the save file's slot 15 is never written.
+namespace {
+constexpr uint32_t kWorkingRecord = 0x778, kRecordBytes = 0x24;
+std::map<uint16_t, std::array<uint8_t, kRecordBytes>> g_session_records;  // without a mod save area
+const Built* g_loaded_record = nullptr;  // the mod stage whose record is in the working copy
+
+// the stage being set up: the start stage once the game has taken the next stage over, else the next stage
+const Built* loading_stage() {
+    if (const Built* b = by_name(current_stage())) return b;
+    return by_name(guest_text(next_stage(), 8));
+}
+unsigned group_slot(story_mail::Book& book, uint16_t group, bool make) {
+    if (const uint8_t slot = book.get(story_mail::kRecordStageGroup, group)) return slot;
+    if (!make) return 0;
+    std::set<uint8_t> used;
+    for (unsigned r = 0; r < story_block::kAreaRecords; ++r)
+        if (book.record_kind(r) == story_mail::kRecordStageGroup) used.insert(book.record_value(r));
+    for (unsigned slot = 1; slot <= 250; ++slot)
+        if (!used.count(uint8_t(slot))) return book.set(story_mail::kRecordStageGroup, group, uint8_t(slot)) ? slot : 0;
+    return 0;
+}
+std::array<uint8_t, kRecordBytes> read_record(const Built& b) {
+    std::array<uint8_t, kRecordBytes> out{};
+    if (!story_store::ready()) {
+        auto it = g_session_records.find(b.group_key);
+        if (it != g_session_records.end()) out = it->second;
+        return out;
+    }
+    auto book = story_store::book();
+    const unsigned slot = group_slot(book, b.group_key, false);
+    if (slot)
+        for (unsigned i = 0; i < kRecordBytes; ++i) out[i] = book.get(story_mail::kRecordStageMemory, uint16_t(slot << 8 | i));
+    return out;
+}
+bool write_record(const Built& b, const std::array<uint8_t, kRecordBytes>& bytes) {
+    if (!story_store::ready()) {
+        g_session_records[b.group_key] = bytes;
+        return true;
+    }
+    auto book = story_store::book();
+    const bool any = std::any_of(bytes.begin(), bytes.end(), [](uint8_t v) { return v != 0; });
+    const unsigned slot = group_slot(book, b.group_key, any);
+    if (!slot) return !any;
+    bool ok = true;
+    for (unsigned i = 0; i < kRecordBytes; ++i) {
+        const uint16_t key = uint16_t(slot << 8 | i);
+        if (bytes[i]) ok &= book.set(story_mail::kRecordStageMemory, key, bytes[i]);
+        else book.erase(story_mail::kRecordStageMemory, key);
+    }
+    return ok;
+}
+}  // namespace
+
+// dSv_info_c::getSave(info, stage number): the stage's record into the working copy
+extern "C" void hook_025B9C9C(Cpu* c) {
+    const uint32_t info = c->r[3], number = c->r[4];
+    f_025B9C9C_orig(c);
+    if (g_stages.empty() || number != 15) return;
+    const Built* b = loading_stage();
+    g_loaded_record = b;
+    if (!b) return;
+    const auto bytes = read_record(*b);
+    for (unsigned i = 0; i < kRecordBytes; ++i) st8(info + kWorkingRecord + i, bytes[i]);
+    LOG("[mod-stages] %s: record of save group %s loaded (chests %02X%02X%02X%02X, keys %u, dungeon items %02X)%s", b->info.id.c_str(), b->stage.save_group.c_str(),
+        bytes[0], bytes[1], bytes[2], bytes[3], bytes[0x20], bytes[0x21], story_store::ready() ? "" : " (no mod save area: kept for this session only)");
+}
+
+// dSv_info_c::putSave(info, stage number): the working copy back into the stage's record
+extern "C" void hook_025B9D24(Cpu* c) {
+    const uint32_t info = c->r[3], number = c->r[4];
+    const Built* b = g_stages.empty() || number != 15 ? nullptr : by_name(current_stage());
+    if (!b || b != g_loaded_record) {
+        if (b && g_loaded_record && b->group_key == g_loaded_record->group_key) b = g_loaded_record;
+        else if (b) {
+            // the working copy isn't this stage's (a save state loaded elsewhere, say): nothing to keep, and the save
+            // file's slot 15 stays as it is
+            LOG("[mod-stages] %s: the working record is not the stage's; not kept", b->info.id.c_str());
+            return;
+        } else {
+            f_025B9D24_orig(c);
+            return;
+        }
+    }
+    std::array<uint8_t, kRecordBytes> bytes{};
+    for (unsigned i = 0; i < kRecordBytes; ++i) bytes[i] = ld8(info + kWorkingRecord + i);
+    if (!write_record(*b, bytes)) LOG("[mod-stages] %s: the mod save area is full; the stage's record is not kept", b->info.id.c_str());
+    else
+        LOG("[mod-stages] %s: record of save group %s kept (chests %02X%02X%02X%02X, keys %u, dungeon items %02X)", b->info.id.c_str(), b->stage.save_group.c_str(),
+            bytes[0], bytes[1], bytes[2], bytes[3], bytes[0x20], bytes[0x21]);
+}
+
+// dSv_danBit_c::init(dan, stage number): the dungeon switches (0x80..0xBF) start fresh when the stage number
+// changes; each save group of mod stages counts as a stage number of its own (0x20 and up)
+extern "C" void hook_025B9174(Cpu* c) {
+    if (!g_stages.empty() && c->r[4] == 15)
+        if (const Built* b = loading_stage()) c->r[4] = 0x20 + b->group_index;
+    f_025B9174_orig(c);
 }

@@ -115,7 +115,8 @@ int main() {
     assert(r.get("format").number == 1 && r.get("name").string() == "Zaaaaaa" && r.get("template").string() == "Cave01");
     assert(r.get("entrance").get("stage").string() == "sea" && r.get("entrance").get("room").number == 34);
     const auto& rooms = r.get("rooms").array;
-    assert(rooms.size() == 2 && rooms[0].get("ground").string() == "/pkg/assets/room.glb" && rooms[1].get("kit").number == 1);
+    assert(rooms.size() == 2 && rooms[0].get("ground").string() == "/pkg/assets/room.glb" && rooms[1].get("kit").get("room").number == 1 &&
+           rooms[1].get("kit").get("stage").string() == "Cave01");
     assert(rooms[0].get("exits").array[0].get("to").get("stage").string() == "sea");
     assert(rooms[0].get("exits").array[1].get("to").get("stage").string() == "Zaaaaaa");
     assert(rooms[1].get("exits").array[0].get("to").get("stage").string() == "Zbbbbbb");
@@ -124,6 +125,83 @@ int main() {
     assert(rooms[1].get("spawns").array[0].get("start").string() == "fall");
     assert(r.get("doors").array.size() == 1 && r.get("doors").array[0].get("rooms").array[1].number == 1);
     assert(r.get("entries").type == Value::Null);  // the entries are the runtime's, not the builder's
+
+    // phase 2: kits from any stage, a kit room as it is, actors, locked doors, joins, warps, save groups
+    {
+        const char* dungeon = R"({"stages": [{
+          "id": "keep", "template": "Cave01", "kind": "dungeon", "save_group": "keep",
+          "entrance": {"stage": "sea", "room": 34, "point": 1},
+          "rooms": [
+            {"room": 0, "ground": "kit", "kit": {"stage": "M_NewD2", "room": 3},
+             "spawns": [{"point": 0, "position": {"x": 0, "y": 0, "z": 0}}],
+             "actors": [{"id": "key", "actor": "chest", "item": "small_key", "position": {"x": 1, "y": 0, "z": 2}, "angle": 90},
+                        {"id": "boko", "actor": "bokoblin", "variant": "shield", "position": {"x": 3, "y": 0, "z": 0}},
+                        {"id": "pot", "actor": "pot", "position": {"x": 5, "y": 0, "z": 0}}]},
+            {"room": 1, "ground": "assets/b.glb", "spawns": [{"point": 1, "position": {"x": 0, "y": 0, "z": 0}}],
+             "actors": [{"id": "big", "actor": "chest", "item": "boss_key", "position": {"x": 0, "y": 0, "z": 0}}]},
+            {"room": 2, "ground": "assets/c.glb", "spawns": [{"point": 2, "position": {"x": 0, "y": 0, "z": 0}}]},
+            {"room": 3, "ground": "assets/d.glb", "spawns": [{"point": 3, "position": {"x": 0, "y": 0, "z": 0}}]}
+          ],
+          "doors": [{"position": {"x": 0, "y": 0, "z": 0}, "rooms": [0, 1], "lock": "small_key"},
+                    {"position": {"x": 0, "y": 0, "z": 0}, "rooms": [1, 2], "lock": "boss"},
+                    {"position": {"x": 0, "y": 0, "z": 0}, "rooms": [0, 2], "lock": "shutter", "switch": 5}],
+          "joins": [[2, 3]],
+          "warps": [{"id": "home", "room": 3, "position": {"x": 0, "y": 0, "z": 0}, "size": {"x": 100, "y": 100, "z": 100}}]
+        }]})";
+        std::vector<Stage> d;
+        assert(parse(parse_json(dungeon), d, why) && why.empty());
+        const Stage& k = d[0];
+        assert(k.keys && k.rooms[0].kit_ground && k.rooms[0].kit_stage == "M_NewD2" && k.rooms[0].kit == 3);
+        assert(k.rooms[0].actors[0].flag == 0 && k.rooms[1].actors[0].flag == 1);  // chests numbered in order
+        assert(k.doors[0].switch_no == 0x7F && k.doors[1].switch_no == 0x7E && k.doors[2].switch_no == 5);
+        assert(k.warps[0].to == k.entrance && k.joins.size() == 1);
+        const Value kr = recipe(k, "Zkkkkkk", {{"keep", "Zkkkkkk"}}, [](const std::string& p) { return p; });
+        assert(kr.get("keys").boolean);
+        const auto& r0 = kr.get("rooms").array[0];
+        assert(r0.get("kit_ground").boolean && r0.get("ground").string().empty() && r0.get("kit").get("stage").string() == "M_NewD2");
+        const auto& acts = r0.get("actors").array;
+        assert(acts.size() == 3 && acts[0].get("tag").string() == "TRES" && acts[0].get("name").string() == "takara2");
+        assert(uint32_t(acts[0].get("params").number) == 0xFF000000u && uint32_t(acts[0].get("angle_z").number) == 0x15FF);
+        assert(acts[1].get("tag").string() == "ACTR" && acts[1].get("name").string() == "Bk" && uint32_t(acts[1].get("params").number) == 0xFFFFFF24u);
+        assert(acts[2].get("name").string() == "kotubo");
+        const auto& big = kr.get("rooms").array[1].get("actors").array[0];
+        assert(big.get("name").string() == "takara4" && uint32_t(big.get("params").number) == (0xFF000000u | 3u << 20 | 1u << 7) && uint32_t(big.get("angle_z").number) == 0x4EFF);
+        const auto& doors = kr.get("doors").array;
+        assert(uint32_t(doors[0].get("params").number) == 0x0FFFF47Fu && doors[0].get("name").string() == "door10");
+        assert(uint32_t(doors[1].get("params").number) == 0x0FFFF17Eu && doors[1].get("name").string() == "door20");
+        assert(uint32_t(doors[2].get("params").number) == 0x0FFFF005u);
+        assert(kr.get("joins").array.size() == 1);
+        assert(inside(k.warps[0], 0, 50, 0) && !inside(k.warps[0], 0, 150, 0));
+
+        auto refuse = [&](const std::string& from, const std::string& to, const std::string& part) {
+            std::string text = dungeon;
+            const size_t at = text.find(from);
+            assert(at != std::string::npos);
+            text.replace(at, from.size(), to);
+            std::vector<Stage> out;
+            std::string w;
+            const bool ok = parse(parse_json(text), out, w);
+            if (ok || w.find(part) == std::string::npos) {
+                fprintf(stderr, "expected \"%s\" for %s -> %s, got %s \"%s\"\n", part.c_str(), from.c_str(), to.c_str(), ok ? "success" : "failure", w.c_str());
+                return false;
+            }
+            return true;
+        };
+        int bad2 = 0;
+        bad2 += !refuse("\"item\": \"small_key\"", "\"item\": \"map\"", "small-key door needs a small key");
+        bad2 += !refuse("\"item\": \"boss_key\"", "\"item\": \"compass\"", "boss door needs a boss key");
+        bad2 += !refuse("\"actor\": \"bokoblin\", \"variant\": \"shield\"", "\"actor\": \"bokoblin\", \"variant\": \"axe\"", "unknown variant");
+        bad2 += !refuse("\"actor\": \"pot\"", "\"actor\": \"dragon\"", "not an actor a stage's room can hold");
+        bad2 += !refuse("\"lock\": \"shutter\", \"switch\": 5", "\"lock\": \"shutter\"", "shutter opens on a switch");
+        bad2 += !refuse("\"lock\": \"shutter\", \"switch\": 5", "\"lock\": \"shutter\", \"switch\": 100", "shutter opens on a switch");
+        bad2 += !refuse("\"lock\": \"boss\"}", "\"lock\": \"golden\"}", "lock is none");
+        bad2 += !refuse("\"joins\": [[2, 3]]", "\"joins\": []", "room 3 can't be reached");
+        bad2 += !refuse("\"joins\": [[2, 3]]", "\"joins\": [[2, 2]]", "two different rooms");
+        bad2 += !refuse("\"kit\": {\"stage\": \"M_NewD2\", \"room\": 3}", "\"kit\": {\"stage\": \"M_NewD2\"}", "kit is a room");
+        bad2 += !refuse("\"id\": \"pot\", \"actor\": \"pot\"", "\"id\": \"pot\", \"actor\": \"pot\", \"item\": \"map\"", "only a chest holds an item");
+        bad2 += !refuse("\"id\": \"pot\"", "\"id\": \"key\"", "duplicate actor id");
+        assert(!bad2);
+    }
 
     printf("mod_stages_test: ok\n");
     return 0;

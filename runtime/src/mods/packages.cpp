@@ -189,6 +189,7 @@ Manifest manifest(const fs::path& path){
         std::vector<mod_stages::Stage> stages;std::string why;
         if(!mod_stages::parse(v,stages,why))m.problem="Stages: "+why;
         for(const auto& stage:stages)for(const auto& room:stage.rooms){
+            if(room.kit_ground)continue;  // the kit room as it is: no file of the package
             auto checked=path;for(const auto& part:fs::path(room.ground)){checked/=part;require(!fs::is_symlink(checked),"Stage ground paths may not use symlinks");}
             if(m.problem.empty()&&(!fs::is_regular_file(checked)||fs::file_size(checked)>16u*1024*1024))m.problem="Stages: "+stage.id+" room "+std::to_string(room.room)+": the ground model "+room.ground+" is missing or larger than 16 MiB";
         }

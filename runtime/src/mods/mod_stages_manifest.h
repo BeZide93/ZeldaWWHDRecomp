@@ -19,12 +19,16 @@
 #include <vector>
 
 #include "mod_json.h"
+#include "mod_stages_actors.h"
 
 namespace mod_stages {
 
 using mods::json::Value;
 
-inline constexpr unsigned kMaxStagesPerMod = 4, kMaxRooms = 16, kMaxSpawns = 8, kMaxExits = 8, kMaxDoors = 16, kMaxEntries = 4;
+inline constexpr unsigned kMaxStagesPerMod = 4, kMaxRooms = 16, kMaxSpawns = 8, kMaxExits = 8, kMaxDoors = 16, kMaxEntries = 4, kMaxWarps = 4,
+                          kMaxRoomActors = 16, kMaxChests = 32;
+// the dungeon switches doors are given, from the top down (a package's own switch numbers stay below)
+inline constexpr unsigned kFirstDoorSwitch = 0x7F, kOwnSwitches = 0x40;
 inline constexpr double kMaxCoordinate = 100000;  // room coordinates (game units)
 inline constexpr double kMaxWorld = 350000;       // entry positions in the game's rooms (the sea is large)
 
@@ -53,19 +57,33 @@ struct Exit {
     Place to;
     bool operator==(const Exit&) const = default;
 };
+// An actor of the game placed in a room of the stage (mod_stages_actors.h: the kinds a stage may hold). A
+// chest's flag (which of the stage's 32 chest bits it uses) is given by parse, in the order chests are declared.
+struct RoomActor {
+    std::string id, actor, variant, item;
+    Point position;
+    double angle = 0;
+    unsigned flag = 0;  // a chest's flag (0..31)
+    bool operator==(const RoomActor&) const = default;
+};
 struct Room {
     unsigned room = 0, kit = 0;
+    std::string kit_stage;  // the kit room's stage ("" the template)
+    bool kit_ground = false;  // "ground": "kit": the kit room's own models and collision
     std::string ground;    // the package's GLB (a path in the package)
     std::string material;  // the kit material the ground is drawn with ("" the kit's first)
     std::map<std::string, std::string> materials;  // GLB material name -> kit material
     std::vector<Spawn> spawns;
     std::vector<Exit> exits;
+    std::vector<RoomActor> actors;
     bool operator==(const Room&) const = default;
 };
 struct Door {
     Point position;
     double angle = 0;
     unsigned a = 0, b = 0;  // the rooms on its two sides
+    std::string lock = "none";  // none, small_key, boss or shutter
+    unsigned switch_no = 0xFF;  // the switch a locked door keeps unlocked (given by parse) or a shutter opens on
     bool operator==(const Door&) const = default;
 };
 // An entry: a box in a room of the game that takes Link into this stage (the stage's way in).
@@ -76,12 +94,25 @@ struct Entry {
     unsigned to_room = 0, to_point = 0;
     bool operator==(const Entry&) const = default;
 };
+// A return warp: a box in a room of the stage that takes Link to a place (by default the stage's entrance)
+// with the game's warp light.
+struct Warp {
+    std::string id;
+    unsigned room = 0;
+    Point position, size;
+    Place to;  // the entrance when "to" is left out
+    bool operator==(const Warp&) const = default;
+};
 struct Stage {
     std::string id, template_stage, kind = "cave", music_like;
+    std::string save_group;  // stages of one group share their save record and dungeon switches (default: the id)
     Place entrance;
     std::vector<Room> rooms;
     std::vector<Door> doors;
+    std::vector<std::pair<unsigned, unsigned>> joins;  // rooms joined by an open passage (no door)
     std::vector<Entry> entries;
+    std::vector<Warp> warps;
+    bool keys = false;  // the key counter shows (a small-key door or a small key in the stage)
     bool operator==(const Stage&) const = default;
 };
 
@@ -181,7 +212,7 @@ inline bool parse(const Value& m, std::vector<Stage>& out, std::string& why) {
     if (list.type != Value::Array || list.array.size() > kMaxStagesPerMod) return why = "stages must be a list of up to " + std::to_string(kMaxStagesPerMod), false;
     for (const auto& v : list.array) {
         Stage s;
-        if (!keys(v, {"id", "template", "kind", "music_like", "entrance", "rooms", "doors", "entries"})) return why = "unknown stage field", false;
+        if (!keys(v, {"id", "template", "kind", "music_like", "save_group", "entrance", "rooms", "doors", "joins", "entries", "warps"})) return why = "unknown stage field", false;
         if (!id(v.get("id"))) return why = "invalid stage id", false;
         s.id = v.get("id").text;
         const std::string at = "stage " + s.id + ": ";
@@ -189,6 +220,11 @@ inline bool parse(const Value& m, std::vector<Stage>& out, std::string& why) {
             if (old.id == s.id) return why = at + "duplicate stage id", false;
         if (v.get("template").type != Value::String || !game_stage_name(v.get("template").text)) return why = at + "template names a stage of the game", false;
         s.template_stage = v.get("template").text;
+        s.save_group = s.id;
+        if (v.get("save_group").type != Value::Null) {
+            if (!id(v.get("save_group"))) return why = at + "invalid save_group", false;
+            s.save_group = v.get("save_group").text;
+        }
         if (v.get("kind").type != Value::Null) {
             s.kind = v.get("kind").string();
             if (s.kind != "cave" && s.kind != "dungeon") return why = at + "kind is cave or dungeon", false;
@@ -204,13 +240,23 @@ inline bool parse(const Value& m, std::vector<Stage>& out, std::string& why) {
         std::set<unsigned> points;
         for (const auto& rv : rooms.array) {
             Room r;
-            if (!keys(rv, {"room", "kit", "ground", "material", "materials", "spawns", "exits"})) return why = at + "unknown room field", false;
+            if (!keys(rv, {"room", "kit", "ground", "material", "materials", "spawns", "exits", "actors"})) return why = at + "unknown room field", false;
             if (!integer(rv.get("room"), 0, 63, r.room) || r.room != s.rooms.size()) return why = at + "rooms are numbered 0, 1, ... in order", false;
             const std::string rat = at + "room " + std::to_string(r.room) + ": ";
-            if (rv.get("kit").type != Value::Null && !integer(rv.get("kit"), 0, 63, r.kit)) return why = rat + "kit is a room number of the template", false;
-            if (rv.get("kit").type == Value::Null) r.kit = r.room;
-            if (rv.get("ground").type != Value::String || !package_glb(rv.get("ground").text)) return why = rat + "ground is a .glb file of the package", false;
-            r.ground = rv.get("ground").text;
+            const Value& kit = rv.get("kit");
+            if (kit.type == Value::Object) {  // a room of any stage of the game
+                if (!keys(kit, {"stage", "room"}) || kit.get("stage").type != Value::String || !game_stage_name(kit.get("stage").text) || !integer(kit.get("room"), 0, 63, r.kit))
+                    return why = rat + "kit is a room of the template, or {\"stage\", \"room\"} of any stage", false;
+                r.kit_stage = kit.get("stage").text == s.template_stage ? "" : kit.get("stage").text;
+            } else if (kit.type != Value::Null && !integer(kit, 0, 63, r.kit))
+                return why = rat + "kit is a room of the template, or {\"stage\", \"room\"} of any stage", false;
+            if (kit.type == Value::Null) r.kit = r.room;
+            if (rv.get("ground").type == Value::String && rv.get("ground").text == "kit")
+                r.kit_ground = true;  // the kit room as it is: its models and collision
+            else if (rv.get("ground").type != Value::String || !package_glb(rv.get("ground").text))
+                return why = rat + "ground is a .glb file of the package, or \"kit\"", false;
+            else
+                r.ground = rv.get("ground").text;
             if (rv.get("material").type != Value::Null) {
                 if (rv.get("material").type != Value::String || rv.get("material").text.empty() || rv.get("material").text.size() > 64) return why = rat + "invalid material", false;
                 r.material = rv.get("material").text;
@@ -251,6 +297,32 @@ inline bool parse(const Value& m, std::vector<Stage>& out, std::string& why) {
                 if (!parse_place(ev.get("to"), true, e.to)) return why = rat + "exit " + e.id + ": invalid place it leads to", false;
                 r.exits.push_back(e);
             }
+            const Value& actors = rv.get("actors");
+            if (actors.type != Value::Null && (actors.type != Value::Array || actors.array.size() > kMaxRoomActors))
+                return why = rat + "actors must be a list of up to " + std::to_string(kMaxRoomActors), false;
+            for (const auto& av : actors.array) {
+                RoomActor a;
+                if (!keys(av, {"id", "actor", "variant", "item", "position", "angle"}) || !id(av.get("id")) || av.get("actor").type != Value::String ||
+                    !point(av.get("position"), kMaxCoordinate, a.position))
+                    return why = rat + "an actor has an id, an actor kind and a position", false;
+                a.id = av.get("id").text;
+                a.actor = av.get("actor").text;
+                for (const auto& old : r.actors)
+                    if (old.id == a.id) return why = rat + "duplicate actor id " + a.id, false;
+                if (av.get("variant").type != Value::Null) {
+                    if (av.get("variant").type != Value::String) return why = rat + "actor " + a.id + ": invalid variant", false;
+                    a.variant = av.get("variant").text;
+                }
+                if (av.get("item").type != Value::Null) {
+                    if (a.actor != "chest" || av.get("item").type != Value::String) return why = rat + "actor " + a.id + ": only a chest holds an item", false;
+                    a.item = av.get("item").text;
+                }
+                if (av.get("angle").type != Value::Null && !number(av.get("angle"), -360, 360, a.angle)) return why = rat + "actor " + a.id + ": invalid angle", false;
+                NativeActor n;
+                std::string reason;
+                if (!native_actor(a.actor, a.variant, a.item, 0, n, reason)) return why = rat + "actor " + a.id + ": " + reason, false;
+                r.actors.push_back(a);
+            }
             s.rooms.push_back(std::move(r));
         }
         const Value& doors = v.get("doors");
@@ -258,11 +330,20 @@ inline bool parse(const Value& m, std::vector<Stage>& out, std::string& why) {
         for (const auto& dv : doors.array) {
             Door d;
             const Value& rr = dv.get("rooms");
-            if (!keys(dv, {"position", "angle", "rooms"}) || !point(dv.get("position"), kMaxCoordinate, d.position) || rr.type != Value::Array || rr.array.size() != 2 ||
+            if (!keys(dv, {"position", "angle", "rooms", "lock", "switch"}) || !point(dv.get("position"), kMaxCoordinate, d.position) || rr.type != Value::Array || rr.array.size() != 2 ||
                 !integer(rr.array[0], 0, 63, d.a) || !integer(rr.array[1], 0, 63, d.b))
                 return why = at + "a door has a position and the two rooms it joins", false;
             if (dv.get("angle").type != Value::Null && !number(dv.get("angle"), -360, 360, d.angle)) return why = at + "invalid door angle", false;
             if (d.a == d.b || d.a >= s.rooms.size() || d.b >= s.rooms.size()) return why = at + "a door joins two different rooms of the stage", false;
+            if (dv.get("lock").type != Value::Null) {
+                d.lock = dv.get("lock").string();
+                if (d.lock != "none" && d.lock != "small_key" && d.lock != "boss" && d.lock != "shutter") return why = at + "a door's lock is none, small_key, boss or shutter", false;
+            }
+            if (d.lock == "shutter") {
+                if (!integer(dv.get("switch"), 0, kOwnSwitches - 1, d.switch_no))
+                    return why = at + "a shutter opens on a switch: \"switch\" 0.." + std::to_string(kOwnSwitches - 1), false;
+            } else if (dv.get("switch").type != Value::Null)
+                return why = at + "only a shutter takes a switch", false;
             s.doors.push_back(d);
         }
         const Value& entries = v.get("entries");
@@ -283,7 +364,69 @@ inline bool parse(const Value& m, std::vector<Stage>& out, std::string& why) {
                 if (old.id == n.id) return why = at + "duplicate entry id", false;
             s.entries.push_back(n);
         }
+        const Value& joins = v.get("joins");
+        if (joins.type != Value::Null && (joins.type != Value::Array || joins.array.size() > 32)) return why = at + "joins must be a list of up to 32 room pairs", false;
+        for (const auto& jv : joins.array) {
+            unsigned a = 0, b = 0;
+            if (jv.type != Value::Array || jv.array.size() != 2 || !integer(jv.array[0], 0, 63, a) || !integer(jv.array[1], 0, 63, b) || a == b || a >= s.rooms.size() ||
+                b >= s.rooms.size())
+                return why = at + "a join is two different rooms of the stage", false;
+            s.joins.push_back({a, b});
+        }
+        const Value& warps = v.get("warps");
+        if (warps.type != Value::Null && (warps.type != Value::Array || warps.array.size() > kMaxWarps)) return why = at + "warps must be a list of up to " + std::to_string(kMaxWarps), false;
+        for (const auto& wv : warps.array) {
+            Warp w;
+            if (!keys(wv, {"id", "room", "position", "size", "to"}) || !id(wv.get("id")) || !integer(wv.get("room"), 0, 63, w.room) || w.room >= s.rooms.size())
+                return why = at + "a warp has an id and a room of the stage", false;
+            w.id = wv.get("id").text;
+            if (!point(wv.get("position"), kMaxCoordinate, w.position) || !point(wv.get("size"), 5000, w.size) || w.size.x < 10 || w.size.y < 10 || w.size.z < 10)
+                return why = at + "warp " + w.id + ": a position and a size (10..5000 units each way)", false;
+            w.to = s.entrance;
+            if (wv.get("to").type != Value::Null && !parse_place(wv.get("to"), true, w.to)) return why = at + "warp " + w.id + ": invalid place it leads to", false;
+            for (const auto& old : s.warps)
+                if (old.id == w.id) return why = at + "duplicate warp id", false;
+            s.warps.push_back(w);
+        }
         out.push_back(std::move(s));
+    }
+    // chests and doors take their flags and switches per save group, in the order they are declared (a save
+    // keeps them by number: keep the order when a package changes)
+    {
+        std::map<std::string, unsigned> chests, switches;
+        for (auto& s : out) {
+            unsigned& chest = chests[s.save_group];
+            unsigned& sw = switches.emplace(s.save_group, kFirstDoorSwitch).first->second;
+            for (auto& r : s.rooms)
+                for (auto& a : r.actors)
+                    if (a.actor == "chest") {
+                        if (chest >= kMaxChests) return why = "save group " + s.save_group + ": more than 32 chests", false;
+                        a.flag = chest++;
+                    }
+            for (auto& d : s.doors)
+                if (d.lock == "small_key" || d.lock == "boss") {
+                    if (sw < kOwnSwitches) return why = "save group " + s.save_group + ": too many locked doors", false;
+                    d.switch_no = sw--;
+                }
+        }
+    }
+    // keys: a small-key door needs a small key, a boss door the boss key, somewhere in the save group
+    for (auto& s : out) {
+        auto items = [&](const std::string& item) {
+            unsigned n = 0;
+            for (const auto& o : out)
+                if (o.save_group == s.save_group)
+                    for (const auto& r : o.rooms)
+                        for (const auto& a : r.actors) n += a.actor == "chest" && a.item == item;
+            return n;
+        };
+        unsigned small_doors = 0;
+        for (const auto& d : s.doors) {
+            small_doors += d.lock == "small_key";
+            if (d.lock == "boss" && !items("boss_key")) return why = "stage " + s.id + ": a boss door needs a boss key in a chest of the save group", false;
+        }
+        if (small_doors && !items("small_key")) return why = "stage " + s.id + ": a small-key door needs a small key in a chest of the save group", false;
+        s.keys = small_doors || items("small_key");
     }
     // places inside the package: rooms and spawns that exist
     auto spawn_of = [&](const Stage& s, unsigned room, unsigned point) {
@@ -303,6 +446,45 @@ inline bool parse(const Value& m, std::vector<Stage>& out, std::string& why) {
             }
         for (const auto& n : s.entries)
             if (!spawn_of(s, n.to_room, n.to_point)) return why = "stage " + s.id + ": entry " + n.id + " leads to a spawn the stage does not have", false;
+        for (const auto& w : s.warps)
+            if (w.to.own) {
+                const Stage* target = &s;
+                if (!w.to.stage.empty()) {
+                    auto it = std::find_if(out.begin(), out.end(), [&](const Stage& o) { return o.id == w.to.stage; });
+                    if (it == out.end()) return why = "stage " + s.id + ": warp " + w.id + " leads to a stage the package does not declare", false;
+                    target = &*it;
+                }
+                if (!spawn_of(*target, w.to.room, w.to.point)) return why = "stage " + s.id + ": warp " + w.id + " leads to a spawn its stage does not have", false;
+            }
+        // every room can be reached: from where Link comes in (the entries' rooms, room 0 without entries, the
+        // rooms the package's other stages lead to), through doors, joins and exits inside the stage
+        std::vector<bool> reached(s.rooms.size(), false);
+        std::vector<unsigned> todo;
+        auto reach = [&](unsigned room) {
+            if (room < reached.size() && !reached[room]) reached[room] = true, todo.push_back(room);
+        };
+        if (s.entries.empty()) reach(0);
+        for (const auto& n : s.entries) reach(n.to_room);
+        for (const auto& o : out)
+            for (const auto& r : o.rooms)
+                for (const auto& e : r.exits)
+                    if (&o != &s && e.to.own && e.to.stage == s.id) reach(e.to.room);
+        while (!todo.empty()) {
+            const unsigned room = todo.back();
+            todo.pop_back();
+            for (const auto& d : s.doors) {
+                if (d.a == room) reach(d.b);
+                if (d.b == room) reach(d.a);
+            }
+            for (const auto& [a, b] : s.joins) {
+                if (a == room) reach(b);
+                if (b == room) reach(a);
+            }
+            for (const auto& e : s.rooms[room].exits)
+                if (e.to.own && e.to.stage.empty()) reach(e.to.room);
+        }
+        for (unsigned room = 0; room < reached.size(); ++room)
+            if (!reached[room]) return why = "stage " + s.id + ": room " + std::to_string(room) + " can't be reached (no door, join, exit or entry leads to it)", false;
     }
     return true;
 }
@@ -360,13 +542,17 @@ inline Value recipe(const Stage& s, const std::string& name, const std::map<std:
     r["template"] = s.template_stage;
     r["kind"] = s.kind;
     r["entrance"] = place(s.entrance);
+    r["keys"] = Value(s.keys);
     Value& rooms = r["rooms"];
     rooms.type = Value::Array;
     for (const auto& room : s.rooms) {
         Value v;
         v["room"] = Value(double(room.room));
-        v["kit"] = Value(double(room.kit));
-        v["ground"] = ground(room.ground);
+        Value& kit = v["kit"];
+        kit["stage"] = room.kit_stage.empty() ? s.template_stage : room.kit_stage;
+        kit["room"] = Value(double(room.kit));
+        v["ground"] = room.kit_ground ? std::string() : ground(room.ground);
+        v["kit_ground"] = Value(room.kit_ground);
         if (!room.material.empty()) v["material"] = room.material;
         Value& mats = v["materials"];
         mats.type = Value::Object;
@@ -390,6 +576,22 @@ inline Value recipe(const Stage& s, const std::string& name, const std::map<std:
             e["to"] = place(x.to);
             exits.array.push_back(e);
         }
+        Value& actors = v["actors"];
+        actors.type = Value::Array;
+        for (const auto& a : room.actors) {
+            NativeActor n;
+            std::string why;
+            if (!native_actor(a.actor, a.variant, a.item, a.flag, n, why)) continue;  // parse checked it
+            Value e;
+            e["tag"] = n.tag;
+            e["name"] = n.name;
+            e["params"] = Value(double(n.params));
+            e["position"] = vec(a.position);
+            e["angle"] = Value(a.angle);
+            e["angle_x"] = Value(double(n.angle_x));
+            e["angle_z"] = Value(double(n.angle_z));
+            actors.array.push_back(e);
+        }
         rooms.array.push_back(v);
     }
     Value& doors = r["doors"];
@@ -401,14 +603,32 @@ inline Value recipe(const Stage& s, const std::string& name, const std::map<std:
         Value& rr = v["rooms"];
         rr.type = Value::Array;
         rr.array = {Value(double(d.a)), Value(double(d.b))};
+        // the game's knob door (door10): type 4 a small-key lock, type 1 the boss door (its own model, door20),
+        // type 0 with a switch the stop bars of a shutter; the switch keeps a locked door open once unlocked
+        const uint32_t sw = d.switch_no & 0xFF;
+        v["name"] = d.lock == "boss" ? "door20" : "door10";
+        v["params"] = Value(double(d.lock == "small_key" ? 0x0FFFF000u | 4u << 8 | sw
+                                   : d.lock == "boss"    ? 0x0FFFF000u | 1u << 8 | sw
+                                   : d.lock == "shutter" ? 0x0FFFF000u | sw
+                                                         : 0x0FFFF0FFu));
         doors.array.push_back(v);
+    }
+    Value& joins = r["joins"];
+    joins.type = Value::Array;
+    for (const auto& [a, b] : s.joins) {
+        Value j;
+        j.type = Value::Array;
+        j.array = {Value(double(a)), Value(double(b))};
+        joins.array.push_back(j);
     }
     return r;
 }
 
-// An entry's box holds a point (the box's position is its centre bottom).
-inline bool inside(const Entry& e, double x, double y, double z) {
-    return std::fabs(x - e.position.x) <= e.size.x / 2 && std::fabs(z - e.position.z) <= e.size.z / 2 && y >= e.position.y - 1 && y <= e.position.y + e.size.y;
+// A box (its position is its centre bottom) holds a point.
+inline bool inside_box(const Point& position, const Point& size, double x, double y, double z) {
+    return std::fabs(x - position.x) <= size.x / 2 && std::fabs(z - position.z) <= size.z / 2 && y >= position.y - 1 && y <= position.y + size.y;
 }
+inline bool inside(const Entry& e, double x, double y, double z) { return inside_box(e.position, e.size, x, y, z); }
+inline bool inside(const Warp& w, double x, double y, double z) { return inside_box(w.position, w.size, x, y, z); }
 
 }  // namespace mod_stages

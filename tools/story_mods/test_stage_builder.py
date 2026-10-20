@@ -89,7 +89,7 @@ def kit_dzr():
 def recipe(rooms=1, doors=False):
     r = {'format': 1, 'name': 'Zabc123', 'template': 'Cave01', 'kind': 'cave', 'entrance': {'stage': 'sea', 'room': 34, 'point': 1}, 'rooms': [], 'doors': []}
     for k in range(rooms):
-        r['rooms'].append({'room': k, 'kit': k, 'ground': '/x.glb', 'spawns': [{'point': k, 'position': [0, 0, 0], 'angle': 90}],
+        r['rooms'].append({'room': k, 'kit': {'stage': 'Cave01', 'room': k}, 'ground': '/x.glb', 'spawns': [{'point': k, 'position': [0, 0, 0], 'angle': 90}],
                            'exits': [{'min': [100, -100, -500], 'max': [400, 100, 500], 'to': {'stage': 'sea', 'room': 34, 'point': 1}}]})
     if doors:
         r['doors'] = [{'position': [-1000, -200, 0], 'angle': 270, 'rooms': [0, 1]}]
@@ -151,6 +151,50 @@ class ChunkFiles(unittest.TestCase):
         self.assertEqual(struct.unpack_from('>h', e, 0x1A)[0], -32768)
         scls = sb.chunk(chunks, 'SCLS')
         self.assertEqual(scls[2][:12], sb.scls_entry('sea', 1, 34))
+
+
+class Phase2(unittest.TestCase):
+    def test_actors_doors_joins(self):
+        r = recipe(3, doors=True)
+        r['doors'][0].update(name='door10', params=0x0FFFF47F)
+        r['joins'] = [[1, 2]]
+        r['keys'] = True
+        r['rooms'][0]['actors'] = [{'tag': 'TRES', 'name': 'takara2', 'params': 0xFF000080, 'position': [1, 2, 3], 'angle': 90, 'angle_z': 0x15FF},
+                                   {'tag': 'ACTR', 'name': 'Bk', 'params': 0xFFFFFF04, 'position': [4, 5, 6], 'angle': 0, 'angle_x': 0, 'angle_z': 0xFF}]
+        sb.check_recipe(r)
+        d = sb.build_dzs(template_dzs(), r)
+        sb.check_room_table(d, r['doors'], r['joins'])
+        chunks = sb.read_dz(d)
+        self.assertEqual(sb.chunk(chunks, 'STAG')[2][9] & 1, 1)  # the key counter
+        door = sb.chunk(chunks, 'TGDR')[2]
+        self.assertEqual(struct.unpack_from('>I', door, 8)[0], 0x0FFFF47F)
+        t = sb.chunk(chunks, 'RTBL')
+        rows = sb.read_rtbl(d, t[3], t[1])
+        self.assertEqual([[e & 0x3F for e in row[3]] for row in rows], [[0, 1], [1, 0, 2], [2, 1]])
+        dzr = sb.build_dzr(kit_dzr(), 2, r['rooms'][0])
+        rc = sb.read_dz(dzr)
+        tres = sb.chunk(rc, 'TRES')[2]
+        self.assertEqual(tres[:7], b'takara2')
+        self.assertEqual(struct.unpack_from('>HhH', tres, 0x18), (2, 16384, 0x15FF))  # x: the room, y: the heading, z: the item
+        actr = sb.chunk(rc, 'ACTR')[2]
+        self.assertEqual((actr[:2], struct.unpack_from('>I', actr, 8)[0]), (b'Bk', 0xFFFFFF04))
+        with self.assertRaises(sb.BuildError):
+            sb.check_room_table(d, [], [[0, 2]])  # 0 and 2 aren't joined
+
+    def test_kit_collision(self):
+        pos, tris = box_room(-10, 10)
+        prims = [{'collision': False, 'material': 'rock', 'positions': [tuple(100 * x for x in p) for p in pos], 'triangles': tris}]
+        verts, ctris, _ = sb.collision_from(prims, [{'min': [-1000, -10, -500], 'max': [690, 10, 500]}])  # a game exit in the kit
+        kit = sb.build_dzb(verts, ctris, 0)
+        groups0, out0 = sb.read_dzb_summary(kit)
+        self.assertIn(0, [e for _, e in out0])
+        dzb, taken = sb.kit_collision(kit, 5, [{'min': [700, -10, -500], 'max': [1000, 10, 500]}])
+        groups, out = sb.read_dzb_summary(dzb)
+        self.assertEqual(taken, [2])
+        self.assertEqual(groups[0][3], 5)            # the room
+        self.assertEqual(groups[2][4] & 0xFF, 5)     # the room table row
+        self.assertEqual(sorted(e for _, e in out if e != sb.NO_EXIT), [0, 0])  # the kit's own exit is gone
+        self.assertEqual([g[0] for g in groups], [g[0] for g in groups0])
 
 
 class Collision(unittest.TestCase):
@@ -235,11 +279,19 @@ class FromGameFiles(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             for rooms, x in ((1, (-36, -10)), (2, None)):
                 r = recipe(rooms, doors=rooms == 2)
+                if rooms == 2:  # the second room: the template's own room 1 as it is, with a chest and an enemy
+                    r['rooms'][1]['kit_ground'] = True
+                    r['rooms'][1]['actors'] = [{'tag': 'TRES', 'name': 'takara2', 'params': 0xFF000000, 'position': [0, 0, 0], 'angle_z': 0x15FF}]
                 for k, room in enumerate(r['rooms']):
                     x0, x1 = x or ((-36, -10) if k == 0 else (-10, 16))
                     pos, tris = box_room(x0, x1)
                     room['ground'] = os.path.join(d, 'room%d.glb' % k)
                     write_glb(room['ground'], [('room', 0, pos, tris)], ['rock'])
+                    if room.get('kit_ground'):  # an exit on the kit's floor near its spawn
+                        room['ground'] = ''
+                        room['exits'][0]['min'], room['exits'][0]['max'] = [-1100, -300, -300], [-500, -100, 300]
+                        room['spawns'][0]['position'] = [-800, -200, 0]
+                        continue
                     room['spawns'][0]['position'] = [100 * (x0 + 2), 0, 0]
                     room['exits'][0]['min'] = [100 * (x1 - 3), -10, -500]
                     room['exits'][0]['max'] = [100 * x1, 10, 500]
@@ -255,7 +307,8 @@ class FromGameFiles(unittest.TestCase):
                     self.assertIn('Room%d.bfres' % k, files)
                     self.assertIn('model.sharcfb', files)
                     src = base.Bfres(files['Room%d.bfres' % k])
-                    self.assertEqual([n for n, _ in src.dict(src.rel(0x20))], ['model'])
+                    if not r['rooms'][k].get('kit_ground'):
+                        self.assertEqual([n for n, _ in src.dict(src.rel(0x20))], ['model'])
                     emb = sb.embedded_files(src)
                     groups, tris = sb.read_dzb_summary(emb['room.dzb'])
                     self.assertEqual(groups[0][3], k)

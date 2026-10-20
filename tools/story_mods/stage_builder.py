@@ -52,7 +52,7 @@ import notebook_model as base  # noqa: E402  (Bfres, sarc, yaz0_stored, BuildErr
 import game_piece_model as gp  # noqa: E402  (room_files, read_model, Writer, write_model, ATTRIBUTE_CLASS)
 from skinned_actor_model import append_dictionary, append_string  # noqa: E402
 
-VERSION = 1
+VERSION = 2
 FORMAT = 1
 BuildError = base.BuildError
 MAX_ROOMS = 16
@@ -76,6 +76,9 @@ SURFACE_CLASS = (3, 4, 2, 11, 20, 0, 0, 0, 2, 0, 19, 23, 15, 8)
 WATER, VOID, CLIMB, OBJECTS, HOOKSHOT = 9, 13, 7, 6, 8
 NO_EXIT = 0x3F
 DOOR_MODEL = 'door10'
+# the template's Stage.bfres models a door needs: the knob door, the boss door, the small-key lock, the stop bars
+DOOR_MODELS = {'door10': ['door10'], 'door20': ['door20']}
+LOCK_MODELS = {4: 'key10', 0: 'stop10'}
 # stage.dzs chunks the builder writes itself, and template chunks it leaves out (actors, paths, treasure:
 # they belong to the template's own rooms)
 WRITTEN = {'STAG', 'RTBL', 'MULT', 'SCLS', 'TGDR', 'EnvR'}
@@ -168,7 +171,7 @@ def build_dzs(template_dzs, recipe):
     stag = chunk(chunks, 'STAG')
     require(stag and stag[1] == 1 and len(stag[2]) >= 0x14, 'the template stage has no stage settings')
     s = bytearray(stag[2][:0x14])
-    s[9] = (SAVE_SLOT << 1) | (1 if recipe.get('keys') else 0)
+    s[9] = (SAVE_SLOT << 1) | (1 if recipe.get('keys') else 0)  # the key counter
     mm, = struct.unpack_from('>H', s, 0xA)
     struct.pack_into('>H', s, 0xA, mm & ~3)  # map mode 0: the sea chart (the dungeon map comes later)
     t, = struct.unpack_from('>I', s, 0xC)
@@ -178,20 +181,20 @@ def build_dzs(template_dzs, recipe):
     old_rtbl = chunk(chunks, 'RTBL')
     template_rows = read_rtbl(template_dzs, old_rtbl[3], old_rtbl[1]) if old_rtbl else []
     neighbours = {r['room']: [] for r in rooms}
-    for d in recipe.get('doors', []):
-        a, b = d['rooms']
+    for a, b in [d['rooms'] for d in recipe.get('doors', [])] + [tuple(j) for j in recipe.get('joins', [])]:
         neighbours[a].append(b)
         neighbours[b].append(a)
     rows = []
     for r in rooms:
-        kit = r['kit']
-        reverb, b2, b3 = template_rows[kit][:3] if kit < len(template_rows) else (0, 0, 0)
+        kit = r['kit']['room'] if r['kit']['stage'] == recipe['template'] else -1
+        reverb, b2, b3 = template_rows[kit][:3] if 0 <= kit < len(template_rows) else template_rows[0][:3] if template_rows else (0, 0, 0)
         rows.append((reverb, b2, b3, room_entries(r['room'], neighbours[r['room']])))
     mult = b''.join(struct.pack('>ffhBB', 0.0, 0.0, 0, r['room'], 0) for r in rooms)
     envr_old = chunk(chunks, 'EnvR')
     envr = b''
-    for r in rooms:
-        e = envr_old[2][8 * r['kit']:8 * r['kit'] + 8] if envr_old and r['kit'] < envr_old[1] else b''
+    for r in rooms:  # a kit room of another stage is lit by the template's first environment
+        kit = r['kit']['room'] if r['kit']['stage'] == recipe['template'] else 0
+        e = envr_old[2][8 * kit:8 * kit + 8] if envr_old and kit < envr_old[1] else b''
         envr += e if len(e) == 8 else bytes(8)
     e = recipe['entrance']
     scls = scls_entry(e['stage'], e['point'], e['room'])
@@ -199,7 +202,7 @@ def build_dzs(template_dzs, recipe):
     for d in recipe.get('doors', []):
         a, b = d['rooms']
         x, y, z = d['position']
-        doors += struct.pack('>8sI3fhhhH4B', DOOR_MODEL.encode(), 0x0FFFF0FF, x, y, z, a | (b << 6), angle16(d['angle']), -193, 0x00FF,
+        doors += struct.pack('>8sI3fhhhH4B', d.get('name', DOOR_MODEL).encode(), d.get('params', 0x0FFFF0FF), x, y, z, a | (b << 6), angle16(d['angle']), -193, 0x00FF,
                              10, 10, 10, 0xFF)  # z -193 = 0xFF3F: no view room, as the game's knob doors
     out = [('STAG', 1, bytes(s)), ('RTBL', n, rtbl(rows)), ('MULT', n, mult), ('EnvR', n, envr), ('SCLS', 1, scls)]
     if doors:
@@ -238,7 +241,19 @@ def build_dzr(kit_dzr, room, recipe_room):
     lgtv = chunk(kit, 'LGTV')
     if lgtv:
         out.append(('LGTV', lgtv[1], lgtv[2][:0x1C * lgtv[1]]))
+    for tag in ('ACTR', 'TRES'):
+        entries = [a for a in recipe_room.get('actors', []) if a['tag'] == tag]
+        if entries:
+            out.append((tag, len(entries), b''.join(actor_entry(a, room) for a in entries)))
     return write_dz(out)
+
+
+def actor_entry(a, room):
+    """an ACTR or TRES entry (0x20 bytes): name, parameters, position, rotation words; a chest's x word is its room"""
+    x, y, z = a['position']
+    ax = (a.get('angle_x', 0) & ~0x3F | room) if a['tag'] == 'TRES' else a.get('angle_x', 0)
+    return struct.pack('>8sI3fHhHH', a['name'].encode('ascii'), int(a['params']) & 0xFFFFFFFF, x, y, z, ax & 0xFFFF, angle16(a.get('angle', 0)),
+                       a.get('angle_z', 0xFF) & 0xFFFF, 0xFFFF)
 
 
 # ---- collision (room.dzb) ------------------------------------------------------------------------------------
@@ -542,6 +557,70 @@ def collision_from(prims, exits):
     return vertices, triangles, taken
 
 
+# ---- a kit room's own collision ------------------------------------------------------------------------------
+
+def kit_collision(dzb, room, exits):
+    """the kit room's room.dzb for room `room` of the new stage: every group's room number and room table row
+    are the new room's, the game's exits are gone (they lead to the game's places), and the floor triangles in
+    the exit boxes take the stage's exits. Returns (dzb, triangles each exit took)."""
+    nv, ov, nt, ot, nb, ob, nn, on, ng, og, ni, oi = struct.unpack_from('>12I', dzb, 0)
+    verts = [struct.unpack_from('>3f', dzb, ov + 12 * i) for i in range(nv)]
+    tris = [list(struct.unpack_from('>5H', dzb, ot + 10 * i)) for i in range(nt)]
+    infos = [list(struct.unpack_from('>4I', dzb, oi + 16 * i)) for i in range(ni)]
+    for inf in infos:
+        inf[0] = (inf[0] & ~0x7E000) | (NO_EXIT << 13)
+    groups = []
+    for i in range(ng):
+        g = bytearray(dzb[og + 52 * i:og + 52 * i + 52])
+        no, = struct.unpack_from('>I', g, 0)
+        name = dzb[no:dzb.index(b'\0', no) + 1]
+        rm, = struct.unpack_from('>H', g, 0x2A)
+        if rm != 0xFFFF:
+            struct.pack_into('>H', g, 0x2A, room)
+        inf, = struct.unpack_from('>I', g, 0x30)
+        struct.pack_into('>I', g, 0x30, (inf & ~0xFF) | room)
+        groups.append((g, name))
+    taken = [0] * len(exits)
+    extra = {}
+    for t in tris:
+        pa, pb, pc = verts[t[0]], verts[t[1]], verts[t[2]]
+        u = [pb[k] - pa[k] for k in range(3)]
+        v = [pc[k] - pa[k] for k in range(3)]
+        n = (u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0])
+        ln = math.sqrt(sum(x * x for x in n))
+        if ln < 1e-6 or n[1] / ln <= 0.5:
+            continue
+        centre = [(pa[k] + pb[k] + pc[k]) / 3 for k in range(3)]
+        for k, x in enumerate(exits):
+            if all(x['min'][j] <= centre[j] <= x['max'][j] for j in range(3)):
+                key = (t[3], k)
+                if key not in extra:
+                    extra[key] = len(infos)
+                    w = list(infos[t[3]])
+                    w[0] = (w[0] & ~0x7E000) | (k << 13)
+                    infos.append(w)
+                t[3] = extra[key]
+                taken[k] += 1
+                break
+    # the same layout, the info table grown and the names after it
+    head = bytearray(dzb[:og])
+    body = bytearray(head)
+    for i, t in enumerate(tris):
+        struct.pack_into('>5H', body, ot + 10 * i, *t)
+    group_at = len(body)
+    body += bytes(52 * ng)
+    info_at = len(body)
+    for inf in infos:
+        body += struct.pack('>4I', *inf)
+    for i, (g, name) in enumerate(groups):
+        struct.pack_into('>I', g, 0, len(body))
+        body[group_at + 52 * i:group_at + 52 * i + 52] = g
+        body += name
+    body += bytes(-len(body) % 4)
+    struct.pack_into('>12I', body, 0, nv, ov, nt, ot, nb, ob, nn, on, ng, group_at, len(infos), info_at)
+    return bytes(body), taken
+
+
 # ---- the room archive (graft) --------------------------------------------------------------------------------
 
 def mesh_shape(src, template, prim):
@@ -638,6 +717,19 @@ def build_room_archive(kit_files, kit_room, room, prims, recipe_room, dzb, dzr):
     require(bname in kit_files, 'the kit room archive has no ' + bname)
     data = kit_files[bname]
     src = base.Bfres(data)
+    if recipe_room.get('kit_ground'):
+        # the kit room as it is: its models, their shader archives, its own collision (rewritten)
+        out = base.Bfres(data)
+        out.set_rel(0x14, append_string(out, 'Room%d' % room))
+        out.append(b'', 0x1000)
+        out.put('I', 0xC, len(out.b))
+        body = bytes(out.b)
+        for name, b in (('room.dzb', dzb), ('room.dzr', dzr)):
+            body = replace_embedded(body, name, b)
+        members = {n: b for n, b in kit_files.items() if n.endswith('.sharcfb')}
+        members['Room%d.bfres' % room] = body
+        tris = sum(len(sh.tris) for m, _ in src.dict(src.rel(0x20)) for sh in gp.read_model(src, m)[1])
+        return base.yaz0_stored(base.sarc(members)), tris
     mats = kit_materials(src)
     require(mats, 'the kit room has no background model')
     default = recipe_room.get('material') or sorted(mats)[0]
@@ -707,8 +799,15 @@ def check_recipe(r):
     require([x.get('room') for x in rooms] == list(range(len(rooms))), 'rooms are numbered 0, 1, ... in order')
     points = set()
     for x in rooms:
-        require(isinstance(x.get('kit'), int) and 0 <= x['kit'] <= 63, 'room %d: invalid kit room' % x['room'])
-        require(isinstance(x.get('ground'), str) and x['ground'], 'room %d: no ground model' % x['room'])
+        kit = x.get('kit')
+        require(isinstance(kit, dict) and isinstance(kit.get('stage'), str) and STAGE.fullmatch(kit['stage']) and isinstance(kit.get('room'), int) and
+                0 <= kit['room'] <= 63, 'room %d: invalid kit room' % x['room'])
+        require(x.get('kit_ground') or (isinstance(x.get('ground'), str) and x['ground']), 'room %d: no ground model' % x['room'])
+        actors = x.get('actors', [])
+        require(isinstance(actors, list) and len(actors) <= 16, 'room %d: at most 16 actors' % x['room'])
+        for a in actors:
+            require(a.get('tag') in ('ACTR', 'TRES') and isinstance(a.get('name'), str) and 0 < len(a['name']) <= 8 and isinstance(a.get('params'), (int, float))
+                    and _point(a.get('position')), 'room %d: invalid actor' % x['room'])
         spawns = x.get('spawns')
         require(isinstance(spawns, list) and 0 < len(spawns) <= MAX_SPAWNS, 'room %d: 1 to %d spawns' % (x['room'], MAX_SPAWNS))
         for s in spawns:
@@ -731,14 +830,19 @@ def check_recipe(r):
         rr = d.get('rooms')
         require(isinstance(rr, list) and len(rr) == 2 and all(isinstance(v, int) and 0 <= v < len(rooms) for v in rr) and rr[0] != rr[1],
                 'a door joins two different rooms of the stage')
+        require(d.get('name', DOOR_MODEL) in DOOR_MODELS, 'a door is one of the game\'s knob doors')
+    for j in r.get('joins', []):
+        require(isinstance(j, list) and len(j) == 2 and all(isinstance(v, int) and 0 <= v < len(rooms) for v in j) and j[0] != j[1],
+                'a join is two different rooms of the stage')
 
 
-def check_room_table(dzs, doors):
-    """every door's rooms list each other in the room table (else the door event never ends)"""
+def check_room_table(dzs, doors, joins=()):
+    """every door's and join's rooms list each other in the room table (else the door event never ends, and a
+    room behind an open passage is not loaded)"""
     chunks = read_dz(dzs)
     t = chunk(chunks, 'RTBL')
     rows = read_rtbl(dzs, t[3], t[1])
-    for d in doors:
+    for d in list(doors) + [{'rooms': list(j)} for j in joins]:
         a, b = d['rooms']
         require(b in [e & 0x3F for e in rows[a][3]] and a in [e & 0x3F for e in rows[b][3]],
                 'the room table does not list the rooms of a door (%d, %d)' % (a, b))
@@ -762,14 +866,16 @@ def build(game, recipe_path, out_dir):
     stage_files = gp.room_files(game, '%s_Stage.szs' % recipe['template'])
     kits = {}
     for r in recipe['rooms']:
-        if r['kit'] not in kits:
-            kits[r['kit']] = gp.room_files(game, '%s_Room%d.szs' % (recipe['template'], r['kit']))
-    for label, files in [('stage', stage_files)] + [('kit%d' % k, v) for k, v in sorted(kits.items())]:
+        k = (r['kit']['stage'], r['kit']['room'])
+        if k not in kits:
+            kits[k] = gp.room_files(game, '%s_Room%d.szs' % k)
+    for label, files in [('stage', stage_files)] + [('kit/%s/%d' % k, v) for k, v in sorted(kits.items())]:
         for n in sorted(files):
             digest.update(label.encode() + b'/' + n.encode() + b'\0' + hashlib.sha256(files[n]).digest())
     for r in recipe['rooms']:
-        with open(r['ground'], 'rb') as f:
-            digest.update(hashlib.sha256(f.read()).digest())
+        if not r.get('kit_ground'):
+            with open(r['ground'], 'rb') as f:
+                digest.update(hashlib.sha256(f.read()).digest())
     key = digest.hexdigest()
     meta_path = os.path.join(out_dir, 'stage.json')
     cached = cached_meta(out_dir, meta_path, key)
@@ -781,25 +887,36 @@ def build(game, recipe_path, out_dir):
     sb = base.Bfres(stage_files[stage_bfres[0]])
     stage_embedded = embedded_files(sb)
     require('stage.dzs' in stage_embedded, 'the template stage has no stage.dzs')
-    if recipe.get('doors'):
-        require(DOOR_MODEL in dict(sb.dict(sb.rel(0x20))), 'the template stage has no door model; doors need a template with doors')
+    stage_models = dict(sb.dict(sb.rel(0x20)))
+    for d in recipe.get('doors', []):
+        params = d.get('params', 0x0FFFF0FF)
+        need = DOOR_MODELS[d.get('name', DOOR_MODEL)] + ([LOCK_MODELS[(params >> 8) & 0xF]] if d.get('name', DOOR_MODEL) == 'door10' and
+                                                         (params >> 8) & 0xF in LOCK_MODELS and (params & 0xFF) != 0xFF else [])
+        for m in need:
+            require(m in stage_models, 'the template %s has no %s model (%s): pick a template with that kind of door' % (
+                recipe['template'], m, {'door10': 'the knob door', 'door20': 'the boss door', 'key10': 'the small-key lock', 'stop10': 'the shutter bars'}[m]))
     dzs = build_dzs(stage_embedded['stage.dzs'], recipe)
-    check_room_table(dzs, recipe.get('doors', []))
+    check_room_table(dzs, recipe.get('doors', []), recipe.get('joins', []))
     stage_members = dict(stage_files)
     stage_members[stage_bfres[0]] = replace_embedded(stage_files[stage_bfres[0]], 'stage.dzs', dzs)
     outputs = {'%s_Stage.szs' % name: base.yaz0_stored(base.sarc(stage_members))}
     rooms_meta = []
     for r in recipe['rooms']:
-        kit_files = kits[r['kit']]
+        kit_files = kits[(r['kit']['stage'], r['kit']['room'])]
         kb = [n for n in kit_files if n.endswith('.bfres')]
         require(len(kb) == 1, 'the kit room archive has no room model file')
         kit_embedded = embedded_files(base.Bfres(kit_files[kb[0]]))
-        require('room.dzr' in kit_embedded, 'the kit room has no room.dzr')
-        prims = read_glb(r['ground'])
-        vertices, triangles, taken = collision_from(prims, r.get('exits', []))
+        require('room.dzr' in kit_embedded and 'room.dzb' in kit_embedded, 'the kit room has no room.dzr or room.dzb')
+        if r.get('kit_ground'):
+            prims = []
+            dzb, taken = kit_collision(kit_embedded['room.dzb'], r['room'], r.get('exits', []))
+            triangles = range(struct.unpack_from('>I', dzb, 8)[0])
+        else:
+            prims = read_glb(r['ground'])
+            vertices, triangles, taken = collision_from(prims, r.get('exits', []))
+            dzb = build_dzb(vertices, triangles, r['room'])
         for k, n in enumerate(taken):
             require(n > 0, 'room %d: exit %d covers no floor of the ground model' % (r['room'], k))
-        dzb = build_dzb(vertices, triangles, r['room'])
         dzr = build_dzr(kit_embedded['room.dzr'], r['room'], r)
         archive, tris = build_room_archive(kit_files, int(kb[0][4:-6]), r['room'], prims, r, dzb, dzr)
         outputs['%s_Room%d.szs' % (name, r['room'])] = archive
