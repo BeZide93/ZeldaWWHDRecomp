@@ -60,6 +60,9 @@ void init(); // after dispatch::init, before guest threads start
 // Called for each loaded package with world content or quests (the world editor's inspector); set before init.
 using PackageObserver=void(*)(const std::string& mod,const std::string& name,const std::string& dir,const mods::json::Value& manifest);
 void set_package_observer(PackageObserver observer);
+// What a package's start-up couldn't prepare ("Model pond-s1: is not ready: <reason>"): those models' actors are not in the
+// game; the game goes on.
+std::vector<std::string> world_model_notes(const std::string& mod);
 // World editor: prepares an imported model of `mod` (its manifest entry) for the game; `archive` names it.
 bool editor_prepare_model(const std::string& mod,const std::string& package_dir,const std::string& data_dir,const mods::json::Value& model,std::string& archive,std::string& why);
 // The world editor's island building (any thread but the game's: it runs the building converter): the

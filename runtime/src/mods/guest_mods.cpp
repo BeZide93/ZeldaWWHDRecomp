@@ -462,6 +462,9 @@ bool prop_texture_binding_valid(const story_actor_textures::Binding& binding){
         ld32(binding.actor+0x790),binding.private_begin,binding.private_end};
     return prop_texture_context_valid(context)&&binding.no_pattern_animation;
 }
+// models a content package's start-up couldn't prepare (mod, words), for the editor's status
+std::mutex g_world_model_notes_mutex;
+std::vector<std::pair<std::string,std::string>> g_world_model_notes;
 void load_world(const std::string& mod,const mods::json::Value& manifest,const std::string& package_dir,const std::string& data_dir) {
     mod_actor::configure_world_objects(config::game_dir);
     // Mod stages (mod_stages.h): built from the player's game files into the stage cache (or taken from it) and
@@ -517,6 +520,10 @@ void load_world(const std::string& mod,const mods::json::Value& manifest,const s
         LOG("[game_pieces] %s: piece:%s is left out: %s",mod.c_str(),id.c_str(),failure.c_str());
         actors.erase(std::remove_if(actors.begin(),actors.end(),[&](const auto& a){return a.piece==id;}),actors.end());
     }
+    // a model that can't be prepared (its conversion failed: another tools version, a model the converter refuses) is
+    // left out with its reason in the log and the editor's status; its actors stay out of the game ("not ready"), the
+    // rest of the mod and the game go on
+    std::vector<std::string> failed_models;
     for(const auto& model:models) {
         const bool actor_uses=std::any_of(actors.begin(),actors.end(),[&](const auto& actor){return actor.kind=="mod"&&actor.model==model.id;});
         const bool item_uses=std::any_of(model_items.begin(),model_items.end(),[&](const auto& item){return item.held_model==model.id;});
@@ -542,7 +549,18 @@ void load_world(const std::string& mod,const mods::json::Value& manifest,const s
             if(!actor_model_cache::bounds_for(archive,minimum,maximum))exception_report::raise("Prepared model bounds unavailable");
             for(const auto& item:model_items)if(item.held_model==model.id&&!story_item_models::declare(story_items::item_key(mod,item.id),archive,item.held_frames,why,mods::hash::sha256_file(actor_model_cache::archive_for("/vol/content/Common/Object/"+archive+".szs"))))exception_report::raise("Item model "+mod+": "+why);
             if((actor_uses||visual_uses)&&!story_actors::register_model(mod,model.id,archive,1,why,minimum,maximum,model.kind=="skinned",actor_model_cache::clips_for(archive),actor_model_cache::rig_for(archive)))exception_report::raise("World model "+mod+": "+why);
-        } catch(const std::exception& e) {exception_report::raise("World model "+mod+":"+model.id+": "+e.what());}
+        } catch(const std::exception& e) {
+            LOG("[world] %s: model %s is not ready and its actors are left out: %s",mod.c_str(),model.id.c_str(),e.what());
+            {std::lock_guard guard(g_world_model_notes_mutex);g_world_model_notes.push_back({mod,"Model "+model.id+" is not ready: "+e.what()});}
+            failed_models.push_back(model.id);
+        }
+    }
+    if(!failed_models.empty()) {
+        auto failed=[&](const std::string& id){return !id.empty()&&std::find(failed_models.begin(),failed_models.end(),id)!=failed_models.end();};
+        actors.erase(std::remove_if(actors.begin(),actors.end(),[&](const auto& a){
+            const bool out=(a.kind=="mod"&&failed(a.model))||failed(a.collision_mesh)||failed(a.shoreline.model)||failed(a.distant.model);
+            if(out)LOG("[world] %s: %s is left out (its model is not ready)",mod.c_str(),a.id.c_str());
+            return out;}),actors.end());
     }
     std::vector<std::string> flags;
     for(const auto& scene:scenes)for(const auto& step:scene.steps)for(const auto& action:step.then)
@@ -1489,6 +1507,11 @@ void init() {
     seal_startup();
 }
 
+std::vector<std::string> world_model_notes(const std::string& mod){
+    std::lock_guard guard(g_world_model_notes_mutex);std::vector<std::string> out;
+    for(const auto&[m,words]:g_world_model_notes)if(m==mod)out.push_back(words);
+    return out;
+}
 void set_package_observer(PackageObserver observer){g_package_observer=observer;}
 
 // The world editor's model import (any thread but the game's: it runs the model tool). The archive is

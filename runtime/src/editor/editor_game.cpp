@@ -1759,6 +1759,8 @@ void register_package(const std::string& mod, const std::string& name, const std
     std::lock_guard<std::recursive_mutex> lk(g_mu);
     g_session.add_package(mod, name, dir, manifest);
     LOG("[editor] package %s registered (%zu actors)", mod.c_str(), manifest.get("actors").array.size());
+    // a model the start-up couldn't prepare: said in the status bar (its actors wait, the editor can prepare it again)
+    for (const auto& note : guestmods::world_model_notes(mod)) set_status(mod + ": " + note);
 }
 
 Value run(const std::string& command, const Value& params) {
