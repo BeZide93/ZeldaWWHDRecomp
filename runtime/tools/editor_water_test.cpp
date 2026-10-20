@@ -197,6 +197,23 @@ void pond() {
     for (int i = 0; i < 60; i++) bad.points.push_back({int(1000 * std::cos(i * 0.1047)), int(1000 * std::sin(i * 0.1047))});
     problems.clear();
     CHECK(!build(bad, {}, 0, again, problems) && problems[0].message.find("at most 48") != std::string::npos);
+    // a small star-shaped outline (clicked round a little hollow) has no room for wave rings: its surface leaves the empty
+    // "waves" part out with its material (the converter reads each material as a part: an unused one failed it)
+    {
+        Params star = p;
+        star.foam = false;
+        star.rim = 6;
+        star.points = {{210, 40}, {101, 81}, {15, 135}, {-60, 118}, {-64, 36}, {-215, -7}, {-69, -50}, {-39, -162}, {72, -152}, {122, -79}};
+        Built sb;
+        problems.clear();
+        CHECK(build(star, {}, 0, sb, problems) && valid(sb.surface, false, info, why));
+        const Value sd = doc_of(sb.surface);
+        CHECK((material_names(sd) == std::vector<std::string>{"surface"}));
+        std::vector<bool> used(sd.get("materials").array.size(), false);
+        for (const auto& mesh : sd.get("meshes").array)
+            for (const auto& prim : mesh.get("primitives").array) used[size_t(prim.get("material").number)] = true;
+        for (bool u : used) CHECK(u);
+    }
     // a concave outline (a bean) builds, with its shore ring inside
     Params bean = p;
     bean.points = {{-800, -300}, {800, -300}, {800, 300}, {200, 300}, {0, 50}, {-200, 300}, {-800, 300}};

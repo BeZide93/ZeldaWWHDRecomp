@@ -61,7 +61,14 @@ std::string prepare(const std::string& mod,const story_notebook::ManifestModel& 
     check(shoreline||material.empty(),"A water surface is a shoreline model");
     if(shoreline){check(!collision&&model.kind=="static","Shoreline requires a collision-free static model");command.push_back("--shoreline");if(!material.empty())command.insert(command.end(),{"--shoreline-material",material});}
     const auto process=host::run_process(command);
-    check(process.error.empty()&&process.code==0,"Static model conversion failed; check the model and player game resources");
+    if(!process.error.empty()||process.code!=0){
+        // the converter's own reason (its last line, "actor_model: ..."), so the editor says what went wrong
+        std::string reason=process.error;
+        if(reason.empty()){const auto end=process.output.find_last_not_of("\r\n");if(end!=std::string::npos){const auto start=process.output.rfind('\n',end);reason=process.output.substr(start==std::string::npos?0:start+1,end-(start==std::string::npos?0:start+1)+1);}}
+        for(char&c:reason)if((unsigned char)c<0x20)c=' ';
+        if(reason.size()>200)reason=reason.substr(0,200)+"...";
+        exception_report::raise("Static model conversion failed"+(reason.empty()?std::string():" ("+reason+")")+"; check the model and player game resources");
+    }
     const auto end=process.output.find_last_not_of("\r\n");check(end!=std::string::npos,"Static model converter returned no result");
     const auto line=process.output.rfind('\n',end);const auto begin=line==std::string::npos?0:line+1;
     mods::json::Value result;try{result=mods::json::parse(process.output.substr(begin,end-begin+1));}catch(...){exception_report::raise("Static model converter returned invalid metadata");}

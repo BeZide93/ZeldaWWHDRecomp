@@ -1345,7 +1345,14 @@ bool build(const Params& p, const XZ& origin, int origin_y, Built& b, std::vecto
         }
     const std::string extras = params_text(p);
     b.main = write_glb(o.main_meshes, o.main_materials, o.main_images, extras);
-    b.surface = write_glb(o.surface_meshes, o.surface_materials, {placeholder_texture()}, "");
+    // the surface's materials are its parts (surface, waves, edge, splash): a part with no triangles (no wave rings in a
+    // small or narrow pond) is left out with its material, as the converter reads each material as a part it has
+    std::vector<Material> used;
+    for (const auto& m : o.surface_materials)
+        for (const auto& mesh : o.surface_meshes)
+            for (const auto& prim : mesh.prims)
+                if (prim.material == m.name && !prim.idx.empty() && (used.empty() || used.back().name != m.name)) used.push_back(m);
+    b.surface = write_glb(o.surface_meshes, used, {placeholder_texture()}, "");
     return true;
 }
 }  // namespace editor::water
