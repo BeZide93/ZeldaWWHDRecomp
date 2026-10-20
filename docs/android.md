@@ -37,6 +37,16 @@ long. The game asks the phone for 120 Hz, but some phones decide the refresh rat
 which looks like a slight judder. The game still runs it, but Settings shows a note under the frame
 rate. In that case choose 30 or 60 fps.
 
+### Dynamic resolution
+
+**Settings → Graphics → Dynamic resolution** lowers the resolution by itself while the phone's
+graphics chip can't keep up with the frame rate, and raises it again when there is room: **Down to
+75%** or **Down to 50%** of the internal resolution. The picture gets softer while it is lower; the
+layout on the screen stays the same. It only helps when the graphics chip is what slows the game
+down. When the processor is the limit, the resolution stays where it is. It is off by default.
+The current resolution is shown in the performance overlay and in the copied performance report.
+(The idea comes from GreenNaugahyde's Android fork.)
+
 ## Tested phones
 
 Measured with the game's own profiler in the busiest part of Outset Island (about 3,900 draws per

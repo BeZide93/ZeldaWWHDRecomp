@@ -89,6 +89,9 @@ static void set_dock_icon() {
 namespace mods { bool mouse_captured(); }
 
 namespace gfx {
+// the picture's size at the full internal resolution (dynamic resolution renders it smaller; the layout stays)
+static float nominal_w(const Screen& s) { return s.tex ? float(s.tex.width) / s.dyn : 0.0f; }
+static float nominal_h(const Screen& s) { return s.tex ? float(s.tex.height) / s.dyn : 0.0f; }
 extern Renderer R;
 void install_menu(NSWindow* tv);  // menu.mm
 Class tv_window_class();           // quit_prompt.mm: closing the TV window quits (after asking)
@@ -810,7 +813,7 @@ static void compose_drc(id<MTLTexture> target) {
     rp.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 1);
     rp.colorAttachments[0].storeAction = MTLStoreActionStore;
     id<MTLRenderCommandEncoder> e = [command_buffer() renderCommandEncoderWithDescriptor:rp];
-    Layout L = layout(target.width, target.height, R.drc.tex.width, R.drc.tex.height, 0, 0, false);
+    Layout L = layout(target.width, target.height, nominal_w(R.drc), nominal_h(R.drc), 0, 0, false);
     draw_image(e, target.pixelFormat, target.width, target.height, R.drc.tex, R.drc.srgb, L.tv, 1.0f);
     if (auto* draw = overlay::guesthud::gamepad_region(target.width,target.height,L.tv.x,L.tv.y,L.tv.w,L.tv.h,1)) {
         if (is_srgb(target.pixelFormat)) overlay::linearize_colors(draw, true);
@@ -901,7 +904,7 @@ static void take_screenshot(const PresentPlan& P) {
 // Metal, called from swap(): compose and present the TV window (with the GamePad overlay) and the GamePad window
 void present_screens() {
     CGSize ls = R.tv.layer ? R.tv.layer.drawableSize : CGSizeMake(0, 0);
-    PresentPlan P = display_plan(R.tv.tex != nil, R.tv.tex.width, R.tv.tex.height, R.drc.tex != nil, R.drc.tex.width, R.drc.tex.height,
+    PresentPlan P = display_plan(R.tv.tex != nil, nominal_w(R.tv), nominal_h(R.tv), R.drc.tex != nil, nominal_w(R.drc), nominal_h(R.drc),
                                  ls.width, ls.height, R.frame);
     Layout L;
     L.tv = P.tv;
@@ -938,8 +941,7 @@ void present_screens() {
     if (P.sim) {
         present_to_layer(R.tv, ^(id<MTLTexture> t) {
             CGSize ds = R.tv.layer.drawableSize;
-            compose_tv(t, layout(ds.width, ds.height, R.tv.tex.width, R.tv.tex.height, R.drc.tex ? R.drc.tex.width : 0,
-                                 R.drc.tex ? R.drc.tex.height : 0, pip, drc_only));
+            compose_tv(t, layout(ds.width, ds.height, nominal_w(R.tv), nominal_h(R.tv), nominal_w(R.drc), nominal_h(R.drc), pip, drc_only));
         });
     } else {
         present_to_layer(R.tv, ^(id<MTLTexture> t) { compose_tv(t, L); });
@@ -961,7 +963,7 @@ void present_screens() {
             p.insert(dot == std::string::npos ? p.size() : dot, "_drc");
             dump_texture(d, p.c_str(), true, false);
         }
-        display_log_present_dump(path, P, R.tv.tex.width, R.tv.tex.height);
+        display_log_present_dump(path, P, nominal_w(R.tv), nominal_h(R.tv));
     }
 }
 

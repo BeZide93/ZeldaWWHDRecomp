@@ -50,6 +50,10 @@ struct Surface {
  mutable std::shared_ptr<CachedGuestLayout> guestLayout;
  float scale=1,sx=1,sy=1;
  float ax=1,ay=1; // aspect-ratio factors of screen-shaped targets (surfaces.cpp)
+ // dynamic resolution (dynres.h): the factor of the internal resolution this image was made at (1: off), and
+ // images of other recent scales kept for the next change (only their image fields are used; surfaces.cpp)
+ float dyn=1;
+ std::vector<std::shared_ptr<Surface>> spares;
 };
 struct SurfaceDesc { uint32_t addr=0,mipAddr=0,width=0,height=0,slices=1,pitch=0,mips=1,format=0,dim=1,tileMode=0,swizzle=0; bool isDepth=false; };
 struct Screen {
@@ -68,6 +72,8 @@ struct Screen {
  // Never overwrite the published scan while the next guest frame is being
  // built. Publish at swap; reuse the former published allocation next time.
  std::unique_ptr<Surface> buildingScan;
+ // dynamic resolution: scan images of other sizes, kept for the next change (copy_to_scan)
+ std::vector<std::unique_ptr<Surface>> scanSpares;
  bool buildingScanDirty=false,buildingScanSrgb=false,scanSrgb=false;
  // Display shape is separate from storage: Half SBS/TAB scans keep eye-sized
  // pixels until final composition, avoiding an upsample followed by a squeeze.
@@ -197,6 +203,7 @@ struct Renderer {
   VkDescriptorPool descriptorPool=VK_NULL_HANDLE;
   VkQueryPool timestampQueries=VK_NULL_HANDLE;
   bool timestampRecorded=false;
+  bool dynresTiming=false; // the two timestamps were recorded for dynamic resolution (dynres.h)
   uint64_t timestampFrame=0;
   uint32_t perfQuery=UINT32_MAX;
   static constexpr uint32_t maxGpuScopes=256;
@@ -284,6 +291,8 @@ void resample(Surface*,Surface*,uint32_t slices,float uMax=1,float vMax=1,uint32
 enum class DepthCopyOverride { None, Draw, Unsupported };
 extern DepthCopyOverride g_depthCopyOverride;
 float res_scale();void set_res_scale(float);void latch_res_scale();
+// dynamic resolution: the picture size the layout uses (the scan at the full internal resolution)
+float nominal_width(const Surface*);float nominal_height(const Surface*);
 uint64_t next_write_seq();
 // Surface epoch (surfaces.cpp): bumped whenever the result of a texture or render-target lookup
 // (find_or_create_surface, sampled views, sampler choice) or the content of a sampled CPU texture can

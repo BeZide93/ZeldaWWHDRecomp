@@ -545,14 +545,14 @@ std::vector<ComposeQuad> screen_quads_mono(Screen& screen,VkExtent2D target,int&
   filter=currentPlan->filter;
   if(&screen==&R.drc) {
    ComposeQuad q;q.image=R.drc.scan.get();q.sourceLinear=R.drc.scanSrgb;
-   q.box=gfx::display_layout(float(target.width),float(target.height),float(q.image->extent.width),float(q.image->extent.height));
+   q.box=gfx::display_layout(float(target.width),float(target.height),nominal_width(q.image),nominal_height(q.image));
    quads.push_back(q);return quads;
   }
   gfx::PresentPlan p=*currentPlan;
   Surface* drc=R.drc.scan&&R.drc.scan->image?R.drc.scan.get():nullptr;
   if(p.dw!=float(target.width)||p.dh!=float(target.height))
    p=gfx::display_plan_for(p,float(target.width),float(target.height),float(scan_display_extent(screen).width),float(scan_display_extent(screen).height),
-                          drc?float(drc->extent.width):0,drc?float(drc->extent.height):0);
+                          nominal_width(drc),nominal_height(drc));
   ComposeQuad tv;tv.image=screen.scan.get();tv.sourceLinear=screen.scanSrgb;tv.box=p.tv;quads.push_back(tv);
   if(p.pip_on&&drc) {
    const float op=p.pip_opacity,bw=std::max(1.0f,std::round(p.pip.w/200.0f));

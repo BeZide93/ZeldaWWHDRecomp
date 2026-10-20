@@ -107,6 +107,7 @@ namespace gfxvk { bool buffer_cache_enabled(); }  // gfx/vulkan/buffer_cache.h
 #include "binding_capture.h"
 #include "mobile_ui.h"
 #include "../report_header.h"
+#include "../dynres.h"
 
 namespace gx2 { uint64_t flips_presented(); bool uncapped(); void set_uncapped(bool on); }
 
@@ -737,6 +738,7 @@ std::string performance_report() {
              U.fps, g_average.fps, sum / 120.0f, worst, g_average.logic);
     std::string report = std::string(frame) + perf::summary();
     report += render_objects::line() + "\n";  // live shaders/pipelines, memory mappings (render_objects.h)
+    report += dynres::status() + "\n";
 #ifdef __ANDROID__
     report += android_telemetry() + "\n";
 #endif
@@ -907,6 +909,24 @@ void tab_graphics() {
         if (i) ImGui::SameLine();
         float s = scales[i];
         if (radio(names[i], std::fabs(cur - s) < 0.01f)) post_changed([s] { hostui::set_res_scale(s); });
+    }
+
+    heading("Dynamic resolution");
+    {
+        static const float mins[] = {0.0f, 0.75f, 0.5f};
+        static const char* const dnames[] = {"Off##dynres", "Down to 75%##dynres", "Down to 50%##dynres"};
+        const float dm = dynres::min_factor();
+        for (int i = 0; i < 3; i++) {
+            if (i) ImGui::SameLine();
+            const float m = mins[i];
+            if (radio(dnames[i], std::fabs(dm - m) < 0.01f, !dynres::min_from_env()))
+                post_changed([m] { dynres::set_min(m); hostui::set("dynResMin", m > 0 ? std::to_string(m) : "0"); });
+        }
+        help("Lowers the internal resolution while the graphics chip cannot keep up with the frame rate, down to\n"
+             "the chosen share of it, and raises it again when there is room. The picture is softer while it is\n"
+             "lower. Helps where the graphics chip is the limit (phones, older computers at a high resolution);\n"
+             "when the processor is the limit, the resolution stays.");
+        if (dynres::on()) note("%s", dynres::status().c_str());
     }
 
     float fovPercent=aspect::fov_scale()*100.0f;
@@ -2334,6 +2354,7 @@ void perf_window(bool menu_open) {
         ImGui::TextUnformatted(perf::summary().c_str());
         ImGui::PlotLines("##ft", U.frame_ms, 120, U.frame_i, nullptr, 0.0f, 50.0f, ImVec2(220, 36));
         ImGui::TextDisabled("%s  %gx  %s", render::api_name(render::active()), hostui::res_scale(), interp::mode_name());
+        if (dynres::on()) ImGui::TextDisabled("%s", dynres::status().c_str());
         if (float share = interp::paced_drawn_share(); share >= 0)
             ImGui::TextDisabled("in-between frames drawn: %.0f%%", share * 100.0f);
     }
@@ -2822,6 +2843,8 @@ ImDrawData* frame(float pw, float ph, void (*renderer_init)()) {
 #endif
         // the saved aspect ratio (WWHD_ASPECT wins; issue #108: it was not remembered)
         if(hostui::get("gameplayFovScale",v))aspect::set_fov_scale(strtof(v.c_str(),nullptr));
+        // the saved dynamic resolution (WWHD_DYNRES_MIN wins)
+        if (!dynres::min_from_env() && hostui::get("dynResMin", v)) dynres::set_min(strtof(v.c_str(), nullptr));
         if (!getenv("WWHD_ASPECT") && hostui::get("aspectMode", v)) {
             const int m = atoi(v.c_str());
             if (m >= aspect::kOriginal && m <= aspect::k32x9) aspect::set_mode(m);

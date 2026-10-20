@@ -24,6 +24,7 @@
 #include "gx2/gx2.h"
 #include "gx2_texture_regs.h"
 #include "runtime.h"
+#include "dynres.h"
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -96,6 +97,19 @@ static float parse_scale(const char* e) {
 static std::atomic<float> g_res_requested{parse_scale(getenv("WWHD_RES_SCALE"))};
 static float g_res_frame = g_res_requested.load();  // render thread: the factor for this frame
 static void latch_aspect();
+// dynamic resolution (dynres.h): render thread, the factor of the internal resolution for this frame.
+// Exactly 1 while off, so every size comes out as before.
+static float g_dyn_frame = 1.0f;
+static uint64_t g_spare_images = 0;  // images kept in Surface::spares (all surfaces)
+static void release_spares(Surface* s);
+static void warm_dynamic_resolution();
+static void latch_dynamic_resolution() {
+    g_dyn_frame = dynres::latch(R.frame, g_res_frame);
+    if (dynres::on()) warm_dynamic_resolution();
+    // off: the images kept for scale changes go (a target not drawn any more keeps its own until then)
+    if (!dynres::on() && g_spare_images)
+        for (auto& [addr, s] : R.surfaces) release_spares(s.get());
+}
 float res_scale() { return g_res_frame; }
 float requested_res_scale() { return g_res_requested.load(std::memory_order_relaxed); }
 void set_res_scale(float f) {
@@ -119,6 +133,7 @@ void latch_res_scale() {
         if (R.frame == f) set_res_scale(v);
     g_res_frame = g_res_requested.load(std::memory_order_relaxed);
     latch_aspect();
+    latch_dynamic_resolution();
 }
 
 // ---------------------------------------------------------------- aspect ratio
@@ -204,8 +219,20 @@ static float target_scale(const Surface* s) {
     }();
     (void)shadow_logged;
     if (shadow && s->isDepth && s->slices > 1) return shadow;
-    return res_scale();
+    // dynamic resolution: single-layer targets (the screen's buffers and the GamePad's); the shadow
+    // cascades (arrays) keep the internal resolution
+    if (s->slices > 1) return res_scale();
+    return res_scale() * g_dyn_frame;
 }
+// the dynamic resolution factor in target_scale's result (1 where it does not apply)
+static float target_dyn(const Surface* s) {
+    if (g_dyn_frame == 1.0f || s->fmt.compressed || s->mips > 1 || s->slices > 1) return 1.0f;
+    uint32_t width,height;
+    if(mods::cemu::texture_extent(s->width,s->height,s->format,s->slices,s->tileMode,width,height))return 1.0f;
+    return g_dyn_frame;
+}
+float nominal_width(const Surface* s) { return s ? float(s->extent.width) / s->dyn : 0.0f; }
+float nominal_height(const Surface* s) { return s ? float(s->extent.height) / s->dyn : 0.0f; }
 
 
 // ---------------------------------------------------------------- render targets
@@ -680,6 +707,7 @@ void create_surface_image(Surface* s, bool forRendering, VkExtent3D explicitExte
         cube?(s->slices>6?VK_IMAGE_VIEW_TYPE_CUBE_ARRAY:VK_IMAGE_VIEW_TYPE_CUBE):
         (s->slices>1?VK_IMAGE_VIEW_TYPE_2D_ARRAY:VK_IMAGE_VIEW_TYPE_2D);
     s->scale=forRendering&&!oneD&&!threeD&&!cube?target_scale(s):1.0f;
+    s->dyn=forRendering&&!oneD&&!threeD&&!cube?target_dyn(s):1.0f;
     s->ax=s->ay=1.0f;
     if(forRendering&&!oneD&&!threeD&&!cube)target_aspect(s,s->ax,s->ay);
     s->extent={uint32_t(std::ceil(s->width*s->scale*s->ax-0.01f)),oneD?1:uint32_t(std::ceil(s->height*s->scale*s->ay-0.01f)),threeD?s->slices:1};
@@ -751,6 +779,7 @@ void create_surface_image(Surface* s, bool forRendering, VkExtent3D explicitExte
 void destroy_surface_image(Surface* s) {
     if (!s) return;
     if (s->mipChain) { destroy_surface_image(s->mipChain.get()); s->mipChain.reset(); }
+    if (!s->spares.empty()) release_spares(s);
     if(!s->image)return;
     ++g_surface_epoch;
     auto views=std::move(s->layerViews);if(s->view)views.push_back(s->view);
@@ -1055,6 +1084,38 @@ static void clear_unscalable(Surface* dst,uint32_t dstW,uint32_t dstH) {
     }
     transition_image(dst,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 }
+// Dynamic resolution: the first scaled copy of a render-target format can be slow (the driver may make a
+// pipeline for it: MoltenVK draws scaled blits, about 100 ms the first time; a depth format the device
+// cannot blit gets our depth-copy draw, also made on first use). While dynamic resolution is on, one
+// tiny scaled copy per format of the existing render targets is made ahead, so the first scale change
+// does not wait for it.
+static void warm_dynamic_resolution() {
+    static std::vector<VkFormat> warmed;
+    static uint64_t checked = ~0ull;
+    if (checked == R.surfaces.size()) return;  // cheap: look again only when surfaces were added
+    checked = R.surfaces.size();
+    for (auto& [addr, s] : R.surfaces) {
+        const auto attachment = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+        if (!s->image || !(s->usage & attachment) || s->imageType != VK_IMAGE_TYPE_2D || s->fmt.compressed ||
+            std::find(warmed.begin(), warmed.end(), s->fmt.pixel) != warmed.end())
+            continue;
+        warmed.push_back(s->fmt.pixel);
+        Surface a, b;
+        for (Surface* t : {&a, &b}) {
+            t->width = t->height = t == &a ? 8 : 4;
+            t->format = s->format; t->isDepth = s->isDepth; t->fmt = s->fmt;
+        }
+        try {
+            create_surface_image(&a, false);
+            create_surface_image(&b, false);
+            resample(&a, &b, 1, 1, 1, 0, 0);
+        } catch (const std::exception& e) {
+            LOG("[dynres] could not prepare scaled copies of format %d: %s", int(s->fmt.pixel), e.what());
+        }
+        destroy_surface_image(&a);  // retired with the submission
+        destroy_surface_image(&b);
+    }
+}
 void resample(Surface* src,Surface* dst,uint32_t slices,float uMax,float vMax,uint32_t dstW,uint32_t dstH) {
     if(!src||!dst||!src->image||!dst->image)exception_report::raise("Vulkan resample requires allocated surfaces");
     if(src->image==dst->image)exception_report::raise("Vulkan resample source and destination alias");
@@ -1102,6 +1163,39 @@ void resample(Surface* src,Surface* dst,uint32_t slices,float uMax,float vMax,ui
     transition_image(src,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     transition_image(dst,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 }
+// the image of a surface (handle, memory, views, size, layout and the factors it was made at), swapped
+// between a surface and a kept image (dynamic resolution) or a replacement
+static void swap_image(Surface& a,Surface& b) {
+    std::swap(a.image,b.image);std::swap(a.memory,b.memory);std::swap(a.view,b.view);std::swap(a.allocationBytes,b.allocationBytes);
+    std::swap(a.extent,b.extent);std::swap(a.layout,b.layout);std::swap(a.use,b.use);std::swap(a.usage,b.usage);
+    std::swap(a.createFlags,b.createFlags);std::swap(a.layerViews,b.layerViews);std::swap(a.sampledViews,b.sampledViews);
+    std::swap(a.scale,b.scale);std::swap(a.dyn,b.dyn);std::swap(a.ax,b.ax);std::swap(a.ay,b.ay);std::swap(a.sx,b.sx);std::swap(a.sy,b.sy);
+}
+static void release_spares(Surface* s) {
+    auto spares=std::move(s->spares);s->spares.clear();
+    for(auto& k:spares) { destroy_surface_image(k.get());--g_spare_images; }
+}
+// Dynamic resolution: a render target changing scale keeps its previous image (up to dynres::kSpares
+// of them, the most recent first), and a change back to a kept scale takes it again instead of
+// creating an image: no allocation while the scale moves between recent levels. Off: none are kept.
+static bool take_spare(Surface* s,Surface& into,float wanted,float ax,float ay) {
+    for(size_t i=0;i<s->spares.size();++i) {
+        Surface& k=*s->spares[i];
+        if(k.scale!=wanted||k.ax!=ax||k.ay!=ay||!k.image)continue;
+        swap_image(into,k);
+        s->spares.erase(s->spares.begin()+i);--g_spare_images;
+        return true;
+    }
+    return false;
+}
+static void keep_spare(Surface* s,Surface& old) {
+    auto k=std::make_shared<Surface>();
+    k->width=old.width;k->height=old.height;k->slices=old.slices;k->mips=old.mips;k->dim=old.dim;k->format=old.format;
+    k->isDepth=old.isDepth;k->fmt=old.fmt;k->imageType=old.imageType;k->viewType=old.viewType;k->arrayLayers=old.arrayLayers;k->aspect=old.aspect;
+    swap_image(*k,old);
+    s->spares.insert(s->spares.begin(),std::move(k));++g_spare_images;
+    while(s->spares.size()>size_t(dynres::kSpares)) { destroy_surface_image(s->spares.back().get());s->spares.pop_back();--g_spare_images; }
+}
 static Surface* rescale(Surface* s) {
     float wanted=target_scale(s),ax,ay;
     target_aspect(s,ax,ay);
@@ -1112,15 +1206,32 @@ static Surface* rescale(Surface* s) {
         exception_report::raise("Vulkan GX2 surface cannot be a render target");
     }
     if(s->scale==wanted&&s->ax==ax&&s->ay==ay&&(s->usage&attachment))return s;
+    const bool keep=dynres::on()&&(s->usage&attachment);  // a render target already: worth keeping
+    if(!dynres::on()&&!s->spares.empty())release_spares(s);
     Surface replacement;
     replacement.width=s->width;replacement.height=s->height;replacement.slices=s->slices;replacement.mips=s->mips;
     replacement.dim=s->dim;replacement.format=s->format;replacement.isDepth=s->isDepth;replacement.fmt=s->fmt;
-    create_surface_image(&replacement,true);
+    const bool reused=keep&&take_spare(s,replacement,wanted,ax,ay);
+    if(reused) {
+        replacement.imageType=s->imageType;replacement.viewType=s->viewType;replacement.arrayLayers=s->arrayLayers;replacement.aspect=s->aspect;
+        replacement.linearFiltering=s->linearFiltering;
+        dynres::count_reused();
+    } else {
+        create_surface_image(&replacement,true);
+        if(dynres::on())dynres::count_created();
+    }
     try { resample(s,&replacement,s->arrayLayers,1,1,0,0); }
     catch(...) { destroy_surface_image(&replacement);throw; }
-    destroy_surface_image(s);
-    s->image=replacement.image;s->memory=replacement.memory;s->view=replacement.view;
-    s->extent=replacement.extent;s->layout=replacement.layout;s->use=replacement.use;s->usage=replacement.usage;s->createFlags=replacement.createFlags;s->scale=replacement.scale;s->ax=replacement.ax;s->ay=replacement.ay;s->sx=replacement.sx;s->sy=replacement.sy;
+    if(keep) {
+        if(s->mipChain) { destroy_surface_image(s->mipChain.get()); s->mipChain.reset(); }
+        ++g_surface_epoch;  // as destroy_surface_image: the surface's image changes
+        keep_spare(s,*s);
+    } else destroy_surface_image(s);
+    s->image=replacement.image;s->memory=replacement.memory;s->view=replacement.view;s->allocationBytes=replacement.allocationBytes;
+    s->layerViews=std::move(replacement.layerViews);s->sampledViews=std::move(replacement.sampledViews);
+    s->extent=replacement.extent;s->layout=replacement.layout;s->use=replacement.use;s->usage=replacement.usage;s->createFlags=replacement.createFlags;s->scale=replacement.scale;s->dyn=replacement.dyn;s->ax=replacement.ax;s->ay=replacement.ay;s->sx=replacement.sx;s->sy=replacement.sy;
+    if(getenv("WWHD_LOG_RESCALE"))
+        LOG("[gfx] rescaled %08X %ux%u to %ux%u (%s)",s->addr,s->width,s->height,s->extent.width,s->extent.height,reused?"kept image":"new image");
     forget_texture_views();return s;
 }
 // One guest surface can be rendered and sampled through views of different formats with the same

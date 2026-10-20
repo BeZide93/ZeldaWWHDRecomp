@@ -1,4 +1,5 @@
 #include "vertex_cpu_policy.h"
+#include "dynres.h"
 #include "platform/keycodes.h"
 #include "input_map.h"
 #include "atomic_temporary.h"
@@ -871,6 +872,21 @@ static void init_gpu_timestamp_queries() {
 static void collect_gpu_timestamp_queries(Renderer::Submission& slot) {
   if (!slot.timestampRecorded) return;
   slot.timestampRecorded = false; // Consume this submission exactly once.
+  const bool dynresTiming = slot.dynresTiming;
+  slot.dynresTiming = false;
+  if (dynresTiming && !R.gpuTimestampsEnabled) {
+    // dynamic resolution only: the command buffer's GPU interval, without the diagnostics' statistics
+    struct Result { uint64_t ticks, available; } values[2]{};
+    const VkResult result = vkGetQueryPoolResults(R.device, slot.timestampQueries, 0, 2, sizeof(values), values,
+        sizeof(Result), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT);
+    if (result != VK_SUCCESS || !values[0].available || !values[1].available) return;
+    const uint64_t elapsed = timestamp_elapsed_ticks(values[0].ticks, values[1].ticks, R.gpuTimestampValidBits);
+    const double period = double(R.properties.limits.timestampPeriod);
+    const uint64_t mask = R.gpuTimestampValidBits >= 64 ? ~0ull : (1ull << R.gpuTimestampValidBits) - 1;
+    const double start = double(values[0].ticks & mask) * period;
+    dynres::gpu_interval(start, start + double(elapsed) * period);
+    return;
+  }
   if (!R.gpuTimestampsEnabled) return;
   struct Result { uint64_t ticks, available; } values[2]{};
   const VkResult result = vkGetQueryPoolResults(R.device, slot.timestampQueries, 0, 2,
@@ -889,6 +905,11 @@ static void collect_gpu_timestamp_queries(Renderer::Submission& slot) {
   }
   const double ns = double(timestamp_elapsed_ticks(values[0].ticks, values[1].ticks,
       R.gpuTimestampValidBits)) * double(R.properties.limits.timestampPeriod);
+  if (dynresTiming) {
+    const uint64_t mask = R.gpuTimestampValidBits >= 64 ? ~0ull : (1ull << R.gpuTimestampValidBits) - 1;
+    const double start = double(values[0].ticks & mask) * double(R.properties.limits.timestampPeriod);
+    dynres::gpu_interval(start, start + ns);
+  }
   // Reporting resets the rolling window. Acceptance measurements need counters
   // that remain monotonic across those reports and across timing phases.
   for (auto* stats : {&R.gpuTimestampStats, &R.gpuTimestampLifetimeStats}) {
@@ -977,6 +998,25 @@ VkCommandBuffer command_buffer() {
     } else vk_check(vkBeginCommandBuffer(R.cmd, &bi), "begin command buffer");
     R.recording = true;
     begin_overlay_gpu_queries(R.cmd, R.submissions[R.activeSubmission]);
+    // dynamic resolution (dynres.h) times every command buffer on the GPU while it is on
+    bool dynresTiming = false;
+    if (dynres::on() && timestamp_capable(R.gpuTimestampValidBits, R.properties.limits.timestampPeriod)) {
+      auto& slot = R.submissions[R.activeSubmission];
+      if (!slot.timestampQueries) {
+        VkQueryPoolCreateInfo info{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
+        info.queryType = VK_QUERY_TYPE_TIMESTAMP;
+        info.queryCount = 2;
+        if (vkCreateQueryPool(R.device, &info, nullptr, &slot.timestampQueries) != VK_SUCCESS) slot.timestampQueries = VK_NULL_HANDLE;
+      }
+      dynresTiming = slot.timestampQueries != VK_NULL_HANDLE;
+      if (dynresTiming && !R.gpuTimestampsEnabled) {
+        record::vkCmdResetQueryPool(R.cmd, slot.timestampQueries, 0, 2);
+        record::vkCmdWriteTimestamp(R.cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, slot.timestampQueries, 0);
+        slot.timestampRecorded = true;
+        slot.timestampFrame = R.frame;
+      }
+      slot.dynresTiming = dynresTiming;
+    }
     if (R.gpuTimestampsEnabled) {
       auto& slot = R.submissions[R.activeSubmission];
       record::vkCmdResetQueryPool(R.cmd, slot.timestampQueries, 0,
@@ -2813,28 +2853,53 @@ void copy_to_scan(uint32_t cb, uint32_t target) {
     return;
   if (stereoEye && target == 4) return; // GamePad is a shared 2D device.
   Screen &s = stereoEye ? stereoRight : (target == 4 ? R.drc : R.tv);
-  const uint32_t width = src->extent.width, height = src->extent.height;
-  s.buildingScanDisplayExtent = {width,height};
+  auto fits = [src](const Surface *d) {
+    return d->extent.width == src->extent.width && d->extent.height == src->extent.height && d->fmt.pixel == src->fmt.pixel;
+  };
+  // the size the picture stands for (the layout): the source at the full internal resolution (dynamic
+  // resolution, dynres.h, renders it smaller; exactly its size while off); an eye-sized target counts twice
+  s.buildingScanDisplayExtent = {uint32_t(std::lround(src->extent.width / src->dyn)), uint32_t(std::lround(src->extent.height / src->dyn))};
   if (target != 4) {
     bool halfWidth, halfHeight;  // an eye-sized target (surfaces.cpp), not the full-size fallback
     stereo_target_halves(src, halfWidth, halfHeight);
     if (halfWidth) s.buildingScanDisplayExtent.width *= 2;
     if (halfHeight) s.buildingScanDisplayExtent.height *= 2;
   }
-  if (!s.buildingScan || s.buildingScan->extent.width != width ||
-      s.buildingScan->extent.height != height ||
-      s.buildingScan->fmt.pixel != src->fmt.pixel) {
+  if (!s.buildingScan || !fits(s.buildingScan.get())) {
+    // dynamic resolution (dynres.h): the scan images of the previous sizes are kept for the next change
+    std::unique_ptr<Surface> kept;
+    if (dynres::on()) {
+      for (auto it = s.scanSpares.begin(); it != s.scanSpares.end(); ++it)
+        if (fits(it->get())) { kept = std::move(*it); s.scanSpares.erase(it); break; }
+      if (s.buildingScan) {
+        s.scanSpares.insert(s.scanSpares.begin(), std::move(s.buildingScan));
+        while (s.scanSpares.size() > size_t(2 * dynres::kSpares)) {
+          destroy_surface_image(s.scanSpares.back().get());
+          s.scanSpares.pop_back();
+        }
+      }
+    }
     if (s.buildingScan)
       destroy_surface_image(s.buildingScan.get());
-    s.buildingScan = std::make_unique<Surface>();
-    auto *d = s.buildingScan.get();
-    d->width = width;
-    d->height = height;
-    d->format = src->format;
-    d->fmt = src->fmt;
-    d->scale = 1;
-    create_surface_image(d, false);
+    if (kept) {
+      s.buildingScan = std::move(kept);
+    } else {
+      s.buildingScan = std::make_unique<Surface>();
+      auto *d = s.buildingScan.get();
+      d->width = src->extent.width;
+      d->height = src->extent.height;
+      d->format = src->format;
+      d->fmt = src->fmt;
+      d->scale = 1;
+      create_surface_image(d, false);
+    }
   }
+  if (!dynres::on() && !s.scanSpares.empty()) {
+    for (auto &k : s.scanSpares) destroy_surface_image(k.get());
+    s.scanSpares.clear();
+  }
+  // the size the picture stands for (layout, dynres.h): the scan at the full internal resolution
+  s.buildingScan->dyn = src->dyn;
   resample(src, s.buildingScan.get(), 1);
   if (target & 1)
     draw_mod_overlay(*s.buildingScan,s.buildingScanDisplayExtent);
@@ -3177,9 +3242,10 @@ void swap() {
 #else
   const float layerW = float(R.tv.swapExtent.width), layerH = float(R.tv.swapExtent.height);
 #endif
+  // (sizes at the full internal resolution: dynamic resolution keeps the layout)
   gfx::PresentPlan plan = gfx::display_plan(
       tvScan, float(tvDisplay.width), float(tvDisplay.height),
-      drcScan, drcScan ? float(drcScan->extent.width) : 0, drcScan ? float(drcScan->extent.height) : 0,
+      drcScan, nominal_width(drcScan), nominal_height(drcScan),
       layerW, layerH, R.frame + 1, stereo::frame.mode!=stereo::FullSBS);
 #ifdef __ANDROID__
   // A physical second display owns the GamePad picture. Keep the requested
@@ -3196,7 +3262,7 @@ void swap() {
       bool swapped = dual_display::active_swap;
       float w = swapped ? layerW : float(R.drc.width.load());
       float h = swapped ? layerH : float(R.drc.height.load());
-      gfx::Box box = gfx::display_layout(w, h, float(drcScan->extent.width), float(drcScan->extent.height));
+      gfx::Box box = gfx::display_layout(w, h, nominal_width(drcScan), nominal_height(drcScan));
       std::lock_guard<std::mutex> guard(secondaryMutex);
       if (!secondaryChanged) {
         auto& touchBox = swapped ? primaryTouchBox : secondaryTouchBox;
@@ -3215,7 +3281,7 @@ void swap() {
   if(stereo::frame.mode==stereo::FullSBS) {
     inputPlan=gfx::display_plan_for(plan,layerW*.5f,layerH,
         float(tvDisplay.width),float(tvDisplay.height),
-        drcScan?float(drcScan->extent.width):0,drcScan?float(drcScan->extent.height):0);
+        nominal_width(drcScan),nominal_height(drcScan));
     gfx::display_input_plan(inputPlan);
   }
   // Menu and host toasts: built once at the selected window size, including present dumps
@@ -3342,10 +3408,13 @@ void swap() {
     uint64_t imageBytes=0,images=0,uploadBytes=0;
     std::unordered_set<VkImage> seenImages;
     auto countImage=[&](const Surface* surface) {
-      for (;surface;surface=surface->mipChain.get())
+      for (;surface;surface=surface->mipChain.get()) {
         if (surface->image && seenImages.insert(surface->image).second) {
           ++images; imageBytes+=surface->allocationBytes;
         }
+        for (const auto& kept:surface->spares)  // dynamic resolution's kept images
+          if (kept->image && seenImages.insert(kept->image).second) { ++images; imageBytes+=kept->allocationBytes; }
+      }
     };
     for (const auto& [address,surface]:R.surfaces) countImage(surface.get());
     std::unordered_set<VkBuffer> seenUploads;
@@ -4608,8 +4677,9 @@ static bool drc_window_point(float x, float y, float &tx, float &ty) {
   int pw = 0, ph = 0;
   SDL_GetWindowSizeInPixels(R.drc.window, &pw, &ph);
   const float density = SDL_GetWindowPixelDensity(R.drc.window);
-  const float sw = R.drc.scan ? float(R.drc.scan->extent.width) : 854.0f;
-  const float sh = R.drc.scan ? float(R.drc.scan->extent.height) : 480.0f;
+  // the picture's size as the layout sees it (full internal resolution: dynamic resolution, dynres.h)
+  const float sw = R.drc.scan ? nominal_width(R.drc.scan.get()) : 854.0f;
+  const float sh = R.drc.scan ? nominal_height(R.drc.scan.get()) : 480.0f;
   const gfx::Box b = gfx::display_layout(float(pw), float(ph), sw, sh);
   if (b.w <= 0 || b.h <= 0) return false;
   tx = (x * density - b.x) / b.w;

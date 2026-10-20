@@ -14,6 +14,7 @@
 #include "gx2_texture_regs.h"
 #include "metal.h"
 #include "runtime.h"
+#include "dynres.h"
 #include "input.h"
 #include "../fixed_seed.h"
 
@@ -141,7 +142,17 @@ id<MTLCommandBuffer> command_buffer() {
 uint32_t g_draws_since_commit = 0;
 std::atomic<uint64_t> g_gpu_ns{0};  // GPU busy time, for the periodic report
 
+// dynamic resolution (dynres.h): every command buffer's GPU interval while it is on
+static void dynres_time(id<MTLCommandBuffer> cb) {
+    if (!dynres::on()) return;
+    [cb addCompletedHandler:^(id<MTLCommandBuffer> b) {
+        if (b.status == MTLCommandBufferStatusCompleted && b.GPUEndTime > b.GPUStartTime)
+            dynres::gpu_interval(b.GPUStartTime * 1e9, b.GPUEndTime * 1e9);
+    }];
+}
+
 static void track_gpu_time(id<MTLCommandBuffer> cb) {
+    dynres_time(cb);
     const uint64_t frame = commandFrame;
     const uint64_t token = commandToken;
     // Keep explicit profiler diagnostics, but add no timing completion handler while hidden.
@@ -199,6 +210,7 @@ void wait_idle() {
     if (R.cmd) {
         id<MTLCommandBuffer> c = R.cmd;
         pool_retire(c);
+        dynres_time(c);
         [c commit];
         R.cmd = nil;
         [c waitUntilCompleted];
@@ -290,15 +302,29 @@ void copy_to_scan(uint32_t cb, uint32_t target) {
     end_encoder();
     // the image as rendered (internal resolution); the present pass scales it to the window
     NSUInteger w = s->tex.width, h = s->tex.height;
-    if (!scr.tex || scr.tex.width != w || scr.tex.height != h || scr.tex.pixelFormat != s->tex.pixelFormat) {
-        MTLTextureDescriptor* d = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:s->tex.pixelFormat
-                                                                                     width:w
-                                                                                    height:h
-                                                                                 mipmapped:NO];
-        d.usage = MTLTextureUsageShaderRead | MTLTextureUsageRenderTarget;  // render target: mod overlays
-        d.storageMode = MTLStorageModePrivate;
-        scr.tex = [R.device newTextureWithDescriptor:d];
+    auto fits = [&](id<MTLTexture> t) { return t.width == w && t.height == h && t.pixelFormat == s->tex.pixelFormat; };
+    if (!scr.tex || !fits(scr.tex)) {
+        // dynamic resolution (dynres.h): the scan textures of the previous sizes are kept for the next change
+        id<MTLTexture> kept = nil;
+        if (dynres::on()) {
+            for (auto it = scr.scanSpares.begin(); it != scr.scanSpares.end(); ++it)
+                if (fits(*it)) { kept = *it; scr.scanSpares.erase(it); break; }
+            if (scr.tex) scr.scanSpares.insert(scr.scanSpares.begin(), scr.tex);
+            while (scr.scanSpares.size() > size_t(dynres::kSpares)) scr.scanSpares.pop_back();
+        }
+        if (kept) scr.tex = kept;
+        else {
+            MTLTextureDescriptor* d = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:s->tex.pixelFormat
+                                                                                         width:w
+                                                                                        height:h
+                                                                                     mipmapped:NO];
+            d.usage = MTLTextureUsageShaderRead | MTLTextureUsageRenderTarget;  // render target: mod overlays
+            d.storageMode = MTLStorageModePrivate;
+            scr.tex = [R.device newTextureWithDescriptor:d];
+        }
     }
+    if (!dynres::on() && !scr.scanSpares.empty()) scr.scanSpares.clear();
+    scr.dyn = s->dyn;  // the layout uses the size at the full internal resolution
     id<MTLBlitCommandEncoder> b = [command_buffer() blitCommandEncoder];
     [b copyFromTexture:s->tex sourceSlice:0 sourceLevel:0 sourceOrigin:MTLOriginMake(0, 0, 0)
             sourceSize:MTLSizeMake(w, h, 1) toTexture:scr.tex destinationSlice:0 destinationLevel:0
