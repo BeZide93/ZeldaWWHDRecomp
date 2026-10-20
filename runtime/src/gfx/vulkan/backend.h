@@ -28,7 +28,8 @@ struct CachedGuestLayout;
 struct Surface {
  ResourceUse use;
     std::shared_ptr<Surface> mipChain; // sampled companion assembled from GPU-rendered levels
-    uint64_t mipChainSeq = ~0ull;
+    uint64_t mipChainKey[16] = {}; // per level of mipChain: what it was built from (with_mip_chain)
+    uint32_t mipChainLevels = 0;   // ... and how many of its levels are valid
  VkImage image=VK_NULL_HANDLE; VkDeviceMemory memory=VK_NULL_HANDLE; VkImageView view=VK_NULL_HANDLE;
  VkDeviceSize allocationBytes=0; // tracked image allocation, excludes retired/driver memory
  VkImageType imageType=VK_IMAGE_TYPE_2D; VkImageViewType viewType=VK_IMAGE_VIEW_TYPE_2D;
@@ -274,7 +275,8 @@ Surface* color_target(const uint32_t*,int,uint32_t* slice=nullptr);
 Surface* depth_target(const uint32_t*,uint32_t* slice=nullptr);
 Surface* surface_from_color_buffer(uint32_t,uint32_t* firstSlice=nullptr,uint32_t* numSlices=nullptr);
 Surface* surface_from_depth_buffer(uint32_t,uint32_t* firstSlice=nullptr,uint32_t* numSlices=nullptr);
-Surface* sampled_texture(const uint32_t*,bool);
+// maxLevels: the mip levels the sampler can reach; a rendered picture's mip chain is built that far
+Surface* sampled_texture(const uint32_t*,bool,uint32_t maxLevels=16);
 void upload_surface(Surface*);
 void resample(Surface*,Surface*,uint32_t slices,float uMax=1,float vMax=1,uint32_t dstW=0,uint32_t dstH=0);
 // scaled depth copies: blitted where the device can, else drawn (surfaces.cpp, issue #72);

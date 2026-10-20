@@ -309,8 +309,9 @@ static uint64_t sparse_hash(Surface* s);
 uint64_t g_stat_full_checks, g_stat_uploads, g_stat_invalidates, g_stat_invalidated_surfaces;
 uint64_t g_surface_epoch = 1;  // backend.h
 
-// Based on GreenNaugahyde/ZeldaWWHDRecompAndroid, commit 73b54e1 (rendered mip chains).
-static Surface* with_mip_chain(Surface* s, const SurfaceDesc& d) {
+// Based on GreenNaugahyde/ZeldaWWHDRecompAndroid, commit 73b54e1 (rendered mip chains); the
+// sampler-reach limit and the per-level rebuild are from its v0.9.5 (b1993cf).
+static Surface* with_mip_chain(Surface* s, const SurfaceDesc& d, uint32_t maxLevels) {
     static const bool off = getenv("WWHD_NO_RT_MIPS") != nullptr;
     uint32_t mips = d.mips;
     if (off || mips <= 1 || s->fmt.depth || s->fmt.compressed || s->fmt.kind != FormatInfo::FLOAT || s->imageType != VK_IMAGE_TYPE_2D || s->arrayLayers != 1 ||
@@ -321,6 +322,12 @@ static Surface* with_mip_chain(Surface* s, const SurfaceDesc& d) {
     while ((std::max(w, h) >> full) > 0) full++;
     mips = std::min(mips, full);
     if (mips <= 1) return s;
+    // Only the levels the sampler reaches are built (its MAX_LOD plus one: linear mip filtering at a
+    // whole LOD may still fetch the next level at weight 0). Each level is a blit and a barrier; tiled
+    // GPUs drain on every one. The chain image keeps all levels (another sampler may reach further).
+    // WWHD_RT_MIPS_ALL=1: every level, as before.
+    static const bool allLevels = getenv("WWHD_RT_MIPS_ALL") != nullptr;
+    const uint32_t need = allLevels ? mips : std::min(mips, std::max(maxLevels, 1u));
     static std::unordered_map<VkFormat, bool> blittable;
     auto bl = blittable.find(s->fmt.pixel);
     if (bl == blittable.end()) {
@@ -331,12 +338,16 @@ static Surface* with_mip_chain(Surface* s, const SurfaceDesc& d) {
         bl = blittable.emplace(s->fmt.pixel, (fp.optimalTilingFeatures & need) == need).first;
     }
     if (!bl->second) return s;
-    // the game's own levels, and a key of everything the chain is built from
+    // the game's own levels, and per level a key of what it is built from: the picture (level 0),
+    // the game's own level, or the level below. The game renders its own downsampling chain a level
+    // at a time and samples after each: only the levels from the first changed one on are built again.
+    // WWHD_RT_MIPS_WHOLE=1: every chain from level 0, as before.
     Surface* levels[16] = {};
-    uint64_t key = s->writeSeq * 0x9E3779B97F4A7C15ull;
+    uint64_t keys[16] = {};
+    keys[0] = s->writeSeq * 0x9E3779B97F4A7C15ull + 1;
     for (uint32_t l = 1; l < mips && l < 16; l++) {
         levels[l] = ::gfx::render_mips::game_level(d, l, R.surfaces);
-        key = (key ^ (levels[l] ? levels[l]->writeSeq + l : l)) * 0xFF51AFD7ED558CCDull;
+        keys[l] = levels[l] ? (levels[l]->writeSeq + 1) * 0xC2B2AE3D27D4EB4Full ^ l : (keys[l - 1] ^ l) * 0xFF51AFD7ED558CCDull;
     }
     Surface* c = s->mipChain.get();
     if (c && (c->mips != mips || c->extent.width != w || c->extent.height != h || c->fmt.pixel != s->fmt.pixel)) {
@@ -353,19 +364,29 @@ static Surface* with_mip_chain(Surface* s, const SurfaceDesc& d) {
         c->gpuWritten = true;
         create_surface_image(c, false, s->extent);
         s->mipChain = std::move(chain);
-        s->mipChainSeq = ~0ull;
+        s->mipChainLevels = 0;
     }
-    if (s->mipChainSeq == key) return c;
-    transition_image(s, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT);
-    for (uint32_t l = 1; l < mips && l < 16; l++)
+    static const bool whole = getenv("WWHD_RT_MIPS_WHOLE") != nullptr;
+    uint32_t from = 0;  // the first level to build
+    while (from < need && from < s->mipChainLevels && s->mipChainKey[from] == keys[from]) from++;
+    if (from >= need) return c;
+    if (whole) from = 0;
+    for (uint32_t l = from; l < need; l++) s->mipChainKey[l] = keys[l];
+    s->mipChainLevels = need;
+    if (from == 0) transition_image(s, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT);
+    for (uint32_t l = std::max(from, 1u); l < need && l < 16; l++)
         if (levels[l]) transition_image(levels[l], VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT);
-    transition_image(c, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);  // all levels in TRANSFER_DST
+    // all levels in TRANSFER_DST: the image's layout is tracked as one, so the kept levels go from
+    // TRANSFER_SRC to TRANSFER_DST too (a layout transition keeps their contents)
+    transition_image(c, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
     VkCommandBuffer cmd = command_buffer();
-    VkImageCopy cp{};
-    cp.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-    cp.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-    cp.extent = {w, h, 1};
-    record::vkCmdCopyImage(cmd, s->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, c->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &cp);
+    if (from == 0) {
+        VkImageCopy cp{};
+        cp.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+        cp.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+        cp.extent = {w, h, 1};
+        record::vkCmdCopyImage(cmd, s->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, c->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &cp);
+    }
     auto to_src = [&](uint32_t level) {  // a finished level becomes the next blit's source
         VkImageMemoryBarrier b{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
         b.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
@@ -377,8 +398,19 @@ static Surface* with_mip_chain(Surface* s, const SurfaceDesc& d) {
         b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, level, 1, 0, 1};
         record::vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &b);
     };
+    if (from >= 2) {  // the kept levels below the one the first blit reads: back to transfer sources
+        VkImageMemoryBarrier b{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+        b.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        b.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+        b.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        b.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        b.image = c->image;
+        b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, from - 1, 0, 1};
+        record::vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &b);
+    }
     uint32_t fromGame = 0;
-    for (uint32_t l = 1; l < mips; l++) {
+    for (uint32_t l = std::max(from, 1u); l < need; l++) {
         to_src(l - 1);
         VkImageBlit b{};
         b.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, l, 0, 1};
@@ -397,7 +429,18 @@ static Surface* with_mip_chain(Surface* s, const SurfaceDesc& d) {
                            &b, VK_FILTER_LINEAR);
         }
     }
-    to_src(mips - 1);
+    to_src(need - 1);
+    if (need < mips) {  // the levels not built: the same layout as the rest (one layout per image)
+        VkImageMemoryBarrier b{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+        b.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        b.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+        b.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        b.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        b.image = c->image;
+        b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, need, mips - need, 0, 1};
+        record::vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &b);
+    }
     // Per-level transitions above order writes, and the generated levels are
     // also blit sources. Preserve these reads for the next whole-image write.
     derive_dependency(c->use, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT, true);
@@ -405,17 +448,18 @@ static Surface* with_mip_chain(Surface* s, const SurfaceDesc& d) {
     // Another unit (or the vertex stage) may already have bound a source for
     // sampling in this draw. Chain assembly must preserve those read layouts.
     constexpr auto shaderStages = VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
-    transition_image(s, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, shaderStages, VK_ACCESS_SHADER_READ_BIT);
-    for (uint32_t l = 1; l < mips && l < 16; ++l)
+    if (from == 0) transition_image(s, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, shaderStages, VK_ACCESS_SHADER_READ_BIT);
+    for (uint32_t l = std::max(from, 1u); l < need && l < 16; ++l)
         if (levels[l]) transition_image(levels[l], VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                                         shaderStages, VK_ACCESS_SHADER_READ_BIT);
-    s->mipChainSeq = key;
     static int logged = 0;
-    if (logged++ < 8) LOG("[gfx] mip chain for %08X %ux%u: %u levels, %u of them the game's own", s->addr, w, h, mips, fromGame);
+    if (logged++ < 8)
+        LOG("[gfx] mip chain for %08X %ux%u: levels %u-%u of %u built, %u of them the game's own", s->addr, w, h, from, need - 1, mips,
+            fromGame);
     return c;
 }
 
-Surface* sampled_texture(const uint32_t* w, bool isDepthSampler) {
+Surface* sampled_texture(const uint32_t* w, bool isDepthSampler, uint32_t maxLevels) {
     Latte::LATTE_SQ_TEX_RESOURCE_WORD0_N w0;
     Latte::LATTE_SQ_TEX_RESOURCE_WORD1_N w1;
     Latte::LATTE_SQ_TEX_RESOURCE_WORD4_N w4;
@@ -475,7 +519,7 @@ Surface* sampled_texture(const uint32_t* w, bool isDepthSampler) {
     if (Surface* shared = stereo_eye0_texture(d)) return shared;  // already uploaded this frame
     Surface* s = find_or_create_surface(d, false);
     upload_surface(s);
-    return s && s->gpuWritten && d.mips > 1 && !d.isDepth ? with_mip_chain(s, d) : s;
+    return s && s->gpuWritten && d.mips > 1 && !d.isDepth ? with_mip_chain(s, d, maxLevels) : s;
 }
 
 

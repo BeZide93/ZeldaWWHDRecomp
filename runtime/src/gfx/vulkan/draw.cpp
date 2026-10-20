@@ -2103,7 +2103,18 @@ bool resolve_replay_targets(const uint32_t* r, vk::Shader* ps, DrawTargets& targ
 // substituted: the private AO image replaced the guest texture.
 Surface* resolve_texture(const uint32_t* r, vk::Shader* sh, uint32_t unit, bool* substituted = nullptr) {
   const uint32_t texbase = sh->vertex ? REGADDR::SQ_TEX_RESOURCE_WORD0_N_VS : REGADDR::SQ_TEX_RESOURCE_WORD0_N_PS;
-  auto *s = sampled_texture(r + texbase + unit * 7, sh->dec->textureUsesDepthCompare[unit]);
+  // the mip levels its sampler reaches (sampler(): no mip filter -> the base level, else up to MAX_LOD)
+  uint32_t reach = 16;
+  if (uint32_t si = sh->dec->textureUnitSamplerAssignment[unit]; si < 18) {
+    const uint32_t* smp = r + REGADDR::SQ_TEX_SAMPLER_WORD0_0 + ((sh->vertex ? 18 : 0) + si) * 3;
+    Latte::LATTE_SQ_TEX_SAMPLER_WORD0_0 s0;
+    Latte::LATTE_SQ_TEX_SAMPLER_WORD1_0 s1;
+    memcpy(&s0, &smp[0], 4);
+    memcpy(&s1, &smp[1], 4);
+    if (uint32_t(s0.get_MIP_FILTER()) == 0) reach = 1;
+    else reach = std::max(uint32_t(s1.get_MIN_LOD()), uint32_t(s1.get_MAX_LOD())) / 64 + 2;
+  }
+  auto *s = sampled_texture(r + texbase + unit * 7, sh->dec->textureUsesDepthCompare[unit], reach);
   if (!s)
     exception_report::raise("missing sampled texture");
   auto& ao = ao_private();
