@@ -7,6 +7,10 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Less render-thread work on the Vulkan renderer** (#178). Shader programs are fingerprinted again only after the
+  game writes to them, and texture invalidation now looks only at the textures it can reach. On a Snapdragon phone this
+  cut the render thread's CPU time by about 11% in Windfall; the picture is unchanged.
+
 - **World editor: building mod levels, also with an AI assistant** (for mod makers, preview). A new Stages tab creates
   a level from your room models (import, add, build, warp in), adds rooms, places entries, exits, doors with locks,
   chests, enemies, pots and return warps where Link stands, and moves them with handles in the picture. Check lists
