@@ -12,6 +12,13 @@ what is on `devel` and not released yet (also in the
   points of one path and calls waves of enemies at the points of the next, in the game's own wave sizes (up to 20);
   summoned enemies give no drops. The editor sets up both paths when a summoner is placed.
 
+- **World editor: a water tool for ponds, rivers and waterfalls** (for mod makers, preview). Under Add > Water, click
+  points on an island's ground: a pond gets a level handle, a river a band with flow arrows, shallow parts to wade and
+  a reverse button, and a waterfall forms at a river's step or from two points. Link swims, wades and falls as in the
+  game. Banks slope into the island's own grass and sand, the water is the game's own, and foam shows only at the
+  shores. Check marks problems in red in the picture. The same is available as MCP commands. On the sea only; a pond
+  can't be dug into the ground, so on a slope it sits in a grassy mound.
+
 - **Mod SDK v3 and the editor: paths, the wall cannon, warship routes and wandering Floormasters** (for mod makers).
   A mod can draw lines and areas in a room (up to 16 per mod) and its enemies can use them. The game's wall cannon can
   be placed with an area as its firing range: it turns to Link and fires while he is inside, and a bomb destroys it,
