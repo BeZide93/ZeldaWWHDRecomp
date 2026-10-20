@@ -1498,14 +1498,14 @@ void game_pieces() {
 }
 
 // ---------------------------------------------------------------- the water tool (commands_water.cpp)
-// The ground: 100 west of x 1500, a cliff down to -200 east of it; the room's own ground reaches up to 1000.
+// The ground: 400 west of x 1500, a cliff down to 100 east of it (above the sea: ground under it is the sea); the room's own ground reaches up to 1000.
 struct WaterHost : FakeHost {
     std::vector<Value> prepared_models;
     float room_top = 1000;
     int grounds_asked = 0;
     bool ground(const editor::WorldPoint& above, float& h, std::string& why) override {
         if (!has_ground) return why = "no ground below", false;
-        h = above.x < 1500 ? 100.0f : -200.0f;
+        h = above.x < 1500 ? 400.0f : 100.0f;
         ++grounds_asked;
         return true;
     }
@@ -1610,28 +1610,28 @@ void water_tool() {
     CHECK(ok(s.run("remove_actor", json(R"({"id": "pond-b", "confirm": true})"))) && s.manifest("editor-test")->get("models").array.size() == 4);
     CHECK(ok(s.run("remove_actor", json(R"({"id": "pond-2", "confirm": true})"))) && s.manifest("editor-test")->get("models").array.size() == 2);
 
-    // a river: west of x 1500 the ground is at 100, east of it at -200: a step at the cliff, where a waterfall goes
+    // a river: west of x 1500 the ground is at 400, east of it at 100: a step at the cliff, where a waterfall goes
     const char* river = R"({"points": [{"x": 300, "z": -200500}, {"x": 1200, "z": -200500}, {"x": 2400, "z": -200500}], "width": 300, "depth": 120, "shallow": [true, false]})";
     r = s.run("check_water", [&] { Value v = json(river); v["kind"] = "river"; return v; }());
     CHECK(ok(r) && r.get("result").get("ok").boolean && r.get("result").get("steps").array.size() == 1 && r.get("result").get("material").string() == "river");
-    CHECK(ok(r) && r.get("result").get("levels").array.front().number == 130);  // the shallow section: 30 above its bed
+    CHECK(ok(r) && r.get("result").get("levels").array.front().number == 430);  // the shallow section: 30 above its bed
     r = s.run("add_river", json(river));
     CHECK(ok(r) && actor_of(s, "river") && actor_of(s, "river")->get("shoreline").get("material").string() == "river");
     r = s.run("get_water", json(R"({"id": "river"})"));
     CHECK(ok(r) && r.get("result").get("steps").array.size() == 1 && r.get("result").get("shallow").array[0].boolean && !r.get("result").get("shallow").array[1].boolean);
     const Value step = r.get("result").get("steps").array[0];
-    CHECK(step.get("top").number == 130 && step.get("bottom").number == -80);
+    CHECK(step.get("top").number == 430 && step.get("bottom").number == 220);
     // the waterfall at its step: the top edge across the river, falling downstream to the ground below
     r = s.run("check_water", json(R"({"kind": "waterfall", "river": "river", "step": 1})"));
-    CHECK(ok(r) && r.get("result").get("ok").boolean && r.get("result").get("position").get("y").number == 130 && r.get("result").get("material").string() == "waterfall");
-    CHECK(ok(r) && r.get("result").get("minimum").get("y").number <= -200);
+    CHECK(ok(r) && r.get("result").get("ok").boolean && r.get("result").get("position").get("y").number == 430 && r.get("result").get("material").string() == "waterfall");
+    CHECK(ok(r) && r.get("result").get("minimum").get("y").number <= 100);
     CHECK(!ok(s.run("check_water", json(R"({"kind": "waterfall", "river": "river", "step": 2})"))));
     CHECK(ok(s.run("add_waterfall", json(R"({"river": "river", "step": 1})"))) && actor_of(s, "waterfall"));
     r = s.run("get_water", json(R"({"id": "waterfall"})"));
-    CHECK(ok(r) && r.get("result").get("side").number == -1 && r.get("result").get("bottom").number == -200 && r.get("result").get("top").number == 130);
+    CHECK(ok(r) && r.get("result").get("side").number == -1 && r.get("result").get("bottom").number == 100 && r.get("result").get("top").number == 430);
     // a waterfall from two points on a cliff's top edge: it falls to the lower side by itself
-    r = s.run("check_water", json(R"({"kind": "waterfall", "points": [{"x": 1490, "y": 100, "z": -199800}, {"x": 1490, "y": 100, "z": -199300}]})"));
-    CHECK(ok(r) && r.get("result").get("ok").boolean && r.get("result").get("position").get("y").number == 100);
+    r = s.run("check_water", json(R"({"kind": "waterfall", "points": [{"x": 1490, "y": 400, "z": -199800}, {"x": 1490, "y": 400, "z": -199300}]})"));
+    CHECK(ok(r) && r.get("result").get("ok").boolean && r.get("result").get("position").get("y").number == 400);
     CHECK(ok(r) && r.get("result").get("minimum").get("x").number > 1440);  // its splash pad lies east (the lower side)
     // a body of water that isn't one: edit_water refuses it
     CHECK(!ok(s.run("edit_water", json(R"({"id": "sign-a", "depth": 100})"))));
@@ -1673,13 +1673,14 @@ void pond_on_terrace() {
     const char* pond = R"({"points": [{"x": 750, "y": 600, "z": -201250}, {"x": 1250, "y": 600, "z": -201250}, {"x": 1250, "y": 600, "z": -200750}, {"x": 750, "y": 600, "z": -200750}]})";
     Value r = s.run("check_water", [&] { Value v = json(pond); v["kind"] = "pond"; return v; }());
     const Value& c = r.get("result");
-    // the level: the top terrace's height (not the lower terraces or the sea floor the banks reach out to)
-    CHECK(ok(r) && c.get("ok").boolean && c.get("position").get("y").number == 600);
-    // its body: the floor 200 below the water, the banks ending at the terrace's edge (not down to the sea floor)
-    CHECK(c.get("minimum").get("y").number >= 395 && c.get("maximum").get("y").number <= 640);
+    // the level: its depth (200) above the top terrace (not above the lower terraces or the sea floor the banks reach
+    // out to): deep enough to swim in, standing on the terrace
+    CHECK(ok(r) && c.get("ok").boolean && c.get("position").get("y").number == 800);
+    // its body: the floor on the terrace, the banks a mound ending at the terrace's edge (not down to the sea floor)
+    CHECK(c.get("minimum").get("y").number >= 590 && c.get("maximum").get("y").number <= 840);
     // the placement check got the pond's own collision where it will stand: its open water at the level, its floor
     // and banks in their surfaces
-    CHECK(host.checked.size() == 1 && host.checked_at.x == 1000 && host.checked_at.y == 600 && host.checked_at.z == -201000);
+    CHECK(host.checked.size() == 1 && host.checked_at.x == 1000 && host.checked_at.y == 800 && host.checked_at.z == -201000);
     if (!host.checked.empty()) {
         const auto& m = host.checked[0];
         float lowest = 1e9f;
@@ -1693,13 +1694,20 @@ void pond_on_terrace() {
             }
             floor += t.semantic == 3;
         }
-        CHECK(water > 4 && floor > 4 && m.minimum.y == -200);
+        CHECK(water > 4 && floor > 4 && m.minimum.y <= -200 && m.minimum.y >= -215);  // the floor, the banks just into the terrace
     }
     // made: the same level; a raised level (the water deep enough to swim in, its banks a mound on the terrace) too
     r = s.run("add_pond", json(pond));
-    CHECK(ok(r) && actor_of(s, "pond") && actor_of(s, "pond")->get("position").get("y").number == 600);
-    r = s.run("check_water", [&] { Value v = json(pond); v["kind"] = "pond"; v["level"] = 800; return v; }());
-    CHECK(ok(r) && r.get("result").get("ok").boolean && r.get("result").get("position").get("y").number == 800);
+    CHECK(ok(r) && actor_of(s, "pond") && actor_of(s, "pond")->get("position").get("y").number == 800);
+    // a deeper pond stands higher; a level of its own (at the terrace's height) is kept
+    r = s.run("check_water", [&] { Value v = json(pond); v["kind"] = "pond"; v["depth"] = 300; return v; }());
+    CHECK(ok(r) && r.get("result").get("ok").boolean && r.get("result").get("position").get("y").number == 900);
+    r = s.run("check_water", [&] { Value v = json(pond); v["kind"] = "pond"; v["level"] = 600; return v; }());
+    CHECK(ok(r) && r.get("result").get("ok").boolean && r.get("result").get("position").get("y").number == 600);
+    // a shore partly over the sea (the island's edge, a harbour): the sea's surface is its lowest ground there, not the
+    // sea floor, so the pond stands its depth above the water instead of hanging down to the floor
+    r = s.run("check_water", json(R"({"kind": "pond", "points": [{"x": 2300, "z": -201150}, {"x": 2700, "z": -201150}, {"x": 2700, "z": -200850}, {"x": 2300, "z": -200850}]})"));
+    CHECK(ok(r) && r.get("result").get("position").get("y").number == 200 && r.get("result").get("minimum").get("y").number >= -10);
     // what is in the way says which of the island's places it is: its game name and where it is
     CHECK(editor::conflict_words(json(R"({"kind": "event", "message": "a cutscene area of the island", "native": "TagEv", "at": {"x": -671.4, "y": 115, "z": -198464}, "reach": 300})")) ==
           "a cutscene area of the island [TagEv] at x -671, y 115, z -198464");

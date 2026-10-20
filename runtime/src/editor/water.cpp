@@ -418,6 +418,7 @@ V3 river_right(const std::vector<RiverSample>& fine, size_t k) {
 // water, then a slope down to where it meets the island's ground. Its crest and slope wander a little from place to
 // place (a fixed pattern, the same everywhere), and its texture is the island's own ground there (island_texture.py).
 constexpr int kToes = 5;
+constexpr double kBankRun = 240;  // the farthest a bank's slope runs out from its crest to the ground (a raised pond's mound)
 constexpr int kToe[kToes] = {40, 120, 260, 480, 760};  // how far beyond the crest the ground is asked
 uint32_t wander(uint32_t seed, uint32_t i) { return hash(seed * 7919u + i * 104729u + 17u); }
 XZ offset_xz(XZ q, V3 dir, double by) { return {int(std::lround(q.x + dir.x * by)), int(std::lround(q.z + dir.z * by))}; }
@@ -433,7 +434,13 @@ Section bank_section(double rim, double edge_ground, const int toe_ground[kToes]
     Section b;
     const uint32_t w = wander(seed, i);
     b.crest_out = 22 + double(w % 23);
-    const double slope = 0.35 + double((w >> 8) % 18) / 100.0;  // rise over run: 19 to 27 degrees
+    // rise over run: 19 to 27 degrees; a high bank (water standing well above the ground) steepens so that it reaches the
+    // ground within kBankRun of its crest: a raised pond keeps a footprint near its outline (on a crowded island the
+    // bank of a gentle slope would spread far over the ground round it)
+    double slope = 0.35 + double((w >> 8) % 18) / 100.0;
+    bool known = false;
+    for (int k = 0; k < kToes; k++) known = known || toe_ground[k] != kUnknown;
+    if (known && edge_ground > bed - kStepDrop) slope = std::max(slope, (std::max({rim, 8.0, std::min(edge_ground + 3, 30.0)}) - edge_ground) / kBankRun);
     // a little above the ground at the water's edge, but no wall: where the edge runs into a bank higher than that
     // (a cliff beside the water) the ground itself is the bank
     b.crest = std::max({rim, 8.0, std::min(edge_ground + 3, 30.0)});

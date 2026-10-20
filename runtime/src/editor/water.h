@@ -112,8 +112,8 @@ bool params_from_glb(const std::vector<uint8_t>& glb, Params& out, std::string& 
 // ---- geometry
 // Where the game's ground is needed (world places): pond banks, the river's centre line samples, the waterfall's foot.
 std::vector<XZ> ground_places(const Params& p, const XZ& origin);
-// Of those, a pond's shore (its rounded outline, where the water meets the bank): its level when none is given is the
-// lowest ground there (not where the banks reach out to, which may be down a cliff or out on the sea floor).
+// Of those, a pond's shore (its rounded outline, where the water meets the bank): its level when none is given is its
+// depth above the lowest ground there (not where the banks reach out to, which may be down a cliff or the sea floor).
 std::vector<XZ> shore_places(const Params& p, const XZ& origin);
 // Problems with the parameters themselves (shape, limits), before anything is built.
 std::vector<Problem> check(const Params& p);

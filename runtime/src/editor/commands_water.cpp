@@ -157,7 +157,7 @@ static bool plan_water(Host* host, const Value& manifest, const std::string& kin
         const auto found = std::find_if(kept.begin(), kept.end(), [&](const water::Sample& s) { return s.x == places[i].x && s.z == places[i].z; });
         const bool dup = std::any_of(out.params.ground.begin(), out.params.ground.end(), [&](const water::Sample& s) { return s.x == places[i].x && s.z == places[i].z; });
         if (dup) continue;
-        if (found != kept.end()) out.params.ground.push_back(*found);
+        if (found != kept.end()) out.params.ground.push_back({found->x, found->z, std::max(0, found->h)});
         else ask.push_back({float(places[i].x), float(above), float(places[i].z)}), asked.push_back(i);
     }
     if (!ask.empty() && host) {
@@ -166,15 +166,19 @@ static bool plan_water(Host* host, const Value& manifest, const std::string& kin
         std::string w;
         if (host->grounds(ask, heights, found, w))
             for (size_t k = 0; k < ask.size(); k++)
-                if (found[k] && std::isfinite(heights[k])) out.params.ground.push_back({places[asked[k]].x, places[asked[k]].z, int(std::lround(heights[k]))});
+                // on the sea, ground under the water's surface is the sea there (a harbour, a channel, the open sea
+                // beside an island): its surface (y 0) is where the water and the banks meet it, so a pond's level and
+                // banks never reach down to the sea floor
+                if (found[k] && std::isfinite(heights[k])) out.params.ground.push_back({places[asked[k]].x, places[asked[k]].z, std::max(0, int(std::lround(heights[k])))});
     }
     auto ground_of = [&](XZ world, int& h) {
         for (const auto& s : out.params.ground)
             if (s.x == world.x && s.z == world.z) return h = s.h, true;
         return false;
     };
-    // what the ground decides: a pond's level (the lowest ground at its shore), a river's height (its first point), a
-    // waterfall's top and foot
+    // what the ground decides: a pond's level (its depth above the lowest ground at its shore: the island's ground can't
+    // be lowered, so water deep enough to swim in stands on it, its banks a low mound round it), a river's height (its
+    // first point), a waterfall's top and foot
     if (kind == "pond" && p.get("level").type != Value::Number) {
         int lowest = INT_MAX;
         for (const auto& q : water::shore_places(out.params, out.origin)) {
@@ -182,7 +186,7 @@ static bool plan_water(Host* host, const Value& manifest, const std::string& kin
             if (ground_of(q, h)) lowest = std::min(lowest, h);
         }
         if (lowest == INT_MAX) return why = "say the water's height (\"level\"): there is no ground under the outline to take it from", false;
-        out.origin_y = lowest;
+        out.origin_y = lowest + out.params.depth;
     }
     if (kind == "river") {
         int h;

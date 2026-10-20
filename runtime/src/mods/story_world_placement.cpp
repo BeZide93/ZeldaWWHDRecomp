@@ -285,7 +285,10 @@ std::vector<Conflict> check_building(const std::string&s,int room,const Bounds&b
   if(sea_route(r)&&b.minimum.y>kSeaLevel)continue;
   const char* words=route_words(r.id);bool hit=false;
   for(size_t j=0;j<r.points.size()&&!hit;++j){if(j+1<r.points.size())hit=segment_box(r.points[j],r.points[j+1],b,margin+r.radius);else if(r.closed||r.points.size()==1)hit=segment_box(r.points[j],r.points[0],b,margin+r.radius);}
-  if(hit)out.push_back({words,r.id,article(words)+" of the island",r.id,0,r.points.front(),r.radius,r.points});}
+  // where it is: the route's point nearest the bounds (the one to keep clear of, not where the route starts)
+  Point near=r.points.front();double best=1e300;const Point mid{(b.minimum.x+b.maximum.x)/2,(b.minimum.y+b.maximum.y)/2,(b.minimum.z+b.maximum.z)/2};
+  for(auto p:r.points){const double dx=double(p.x)-mid.x,dz=double(p.z)-mid.z,d=dx*dx+dz*dz;if(d<best)best=d,near=p;}
+  if(hit)out.push_back({words,r.id,article(words)+" of the island",r.id,0,near,r.radius,r.points});}
  return out;
 }
 // ---- solids against each other

@@ -267,7 +267,8 @@ The points show in the picture, numbered; click one to select it and drag its ha
 
 - **Pond:** click the shore's points in order round the pond (3 to 48). The water shows as a light fill at
   its level with a line down to each picked point; the blue handle in the middle moves the level up and
-  down (or type it under **Level**; until you choose one it is the lowest ground along its shore). Set its
+  down (or type it under **Level**; until you choose one it is the pond's **Depth** above the lowest ground along
+  its shore, so Link can swim in it and its banks rise as a low mound round it). Set its
   **Depth** (the floor below the water), **Banks above the water** (how high its rim rises above the water
   before it slopes down to the ground), **Foam at the shore** and the **Floor colour** (used where your game
   files don't give the island's own ground texture). The outline's corners are rounded off.
@@ -760,7 +761,7 @@ separated by `;`, or `@file` with one such line per row. Results go to the log.
 | `preview_collision`, `placement_conflicts` | `id`, `mod`? | a world object's collision as a wireframe, and what its place conflicts with |
 | `prepare_collision` | `model`, `mod`? | prepare a static model's collision for placing world objects while the game runs |
 | `check_water` | `kind` (`pond`, `river`, `waterfall`), `points`?, `level`?, `depth`?, `rim`?, `foam`?, `floor`?, `width`?, `shallow`?, `top`?, `bottom`?, `side`?, `river`?, `step`?, `id`?, `mod`? | what a body of water would be and every problem with it (errors and warnings), without changing anything: its place, triangles, file size, a river's levels and steps; `id` a body being changed |
-| `add_pond` | `points`, `level`?, `depth`?, `rim`?, `foam`?, `floor`?, `id`?, `mod`? | a pond: its outline (world `{x, z}` points), its water's height (default: the lowest bank), the floor `depth` below (20–480, default 200), its rim `rim` above the water (0–300), coast foam at the shore, the floor colour `"#rrggbb"` (one Undo step) |
+| `add_pond` | `points`, `level`?, `depth`?, `rim`?, `foam`?, `floor`?, `id`?, `mod`? | a pond: its outline (world `{x, z}` points), its water's height (default: `depth` above the lowest ground along its shore, deep enough to swim in), the floor `depth` below (20–480, default 200), its rim `rim` above the water (0–300), coast foam at the shore, the floor colour `"#rrggbb"` (one Undo step) |
 | `add_river` | `points`, `width`?, `depth`?, `shallow`?, `floor`?, `id`?, `mod`? | a river: its centre line in the flow's order, `width` 100–2000 (default 400), deep water `depth` above the bed, `shallow` per section (or one for all) |
 | `add_waterfall` | `points` or `river` and `step`?, `top`?, `bottom`?, `side`?, `floor`?, `id`?, `mod`? | a waterfall: its top edge (two points; or a river's step), the top's and the ground's height (default: the ground there), `side` 1 or -1 (default: the lower side) |
 | `edit_water` | `id`, and what changes of the above, `mod`? | build a body of water made with the tool again with those changes (one Undo step) |

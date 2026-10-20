@@ -123,7 +123,7 @@ void water_add_point(float x, float y, float z) {
     D.points.insert(D.points.begin() + long(std::min(at, D.points.size())), {x, y, z});
     D.selected = int(std::min(at, D.points.size() - 1));
     if (D.kind == "river" && D.shallow.size() + 1 < D.points.size()) D.shallow.resize(D.points.size() - 1, false);
-    if (D.kind == "pond" && !D.level_set && D.points.size() == 1) D.level = y + 60;  // shown until the check says better
+    if (D.kind == "pond" && !D.level_set && D.points.size() == 1) D.level = y + float(D.depth);  // shown until the check says better
     if (D.kind == "waterfall" && D.points.size() == 2) D.drawing = false;
 }
 
@@ -148,7 +148,7 @@ void water_check_tick() {
             D.check["problems"].array.push_back(e);
             D.check["ok"] = false;
         }
-        // the level the ground gives (a pond without a level of its own: the lowest ground at its shore)
+        // the level the ground gives (a pond without a level of its own: its depth above the lowest ground at its shore)
         if (D.kind == "pond" && !D.level_set && D.check.get("position").type == Value::Object) D.level = num(D.check.get("position"), "y", D.level);
     });
 }
@@ -229,7 +229,7 @@ void water_window(const Value& m) {
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("The water's height (or drag the blue handle in the picture)");
         if (!D.level_set) {
             ImGui::SameLine();
-            ImGui::TextDisabled("(the lowest ground at its shore)");
+            ImGui::TextDisabled("(depth above the shore)");
         }
         slider("Depth", D.depth, 20, 480, "The floor below the water");
         slider("Banks above the water", D.rim, 0, 300, "How high the rim rises above the water before it slopes down to the ground");

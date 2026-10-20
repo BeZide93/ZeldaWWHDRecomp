@@ -28,7 +28,7 @@ int g_failures = 0;
         }                                                                           \
     } while (0)
 
-constexpr uint64_t POND_MAIN = 0xd793489655682debULL, POND_SURFACE = 0xc636fe6488f047e4ULL, RIVER_MAIN = 0x1a7e16e653616448ULL, RIVER_SURFACE = 0x9905f734aeda6bccULL,
+constexpr uint64_t POND_MAIN = 0xd793489655682debULL, POND_SURFACE = 0xc636fe6488f047e4ULL, RIVER_MAIN = 0x05f0c05e04830be9ULL, RIVER_SURFACE = 0x9905f734aeda6bccULL,
                    FALL_MAIN = 0x0ac6154a1354baf7ULL, FALL_SURFACE = 0x59abc62557077e82ULL;  // the digests every platform makes
 uint64_t fnv(const std::vector<uint8_t>& b) {
     uint64_t h = 1469598103934665603ULL;

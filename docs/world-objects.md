@@ -507,11 +507,14 @@ waterfalls from points clicked on an island's ground. Each is one static object 
 | Waterfall | rock behind the fall (`col_wall`) and a splash pad below it (`col_waterfall`) | `waterfall`: a thin sheet curling over the lip, foam over the lip and a ring of foam round its foot |
 
 A pond's outline is rounded off (each corner cut twice), and its rim and a river's banks are natural ones:
-a little above the water, then a slope (about 20 to 27 degrees, wandering a little from place to place) down
-to where it meets the island's ground, asked at five distances up to about 8 m out. Where the ground can't
+a little above the water, then a slope (about 20 to 27 degrees, wandering a little from place to place, steeper
+where the water stands high so that it reaches the ground within about 2.4 m) down to where it meets the island's ground, asked at five distances up to about 8 m out. Where the ground can't
 be reached that way (a cliff edge, the open sea) a short skirt goes down instead, and next to a river's step the
 banks stop at the lip. The game's island ground can't be lowered, so water that must be deep enough to swim
-in (about 200 units) sits that far above the ground: on a slope its rim becomes a mound on the downhill side.
+in (about 200 units) sits that far above the ground: a pond without a level of its own stands its depth above the
+lowest ground along its shore, its banks a low mound round it (higher on the downhill side of a slope). Ground
+under the sea's surface (a harbour, the sea beside an island) counts as the surface there, so no bank or level
+reaches down to the sea floor.
 The banks are painted with the island's own ground: each part of a bank asks for the texture of the ground
 where its slope meets it (glTF material `extras`: `{"wwhd_island": {"room": n, "points": [[x, z], ...]}}`,
 world units), and the converter reads that texture (the band of the ground atlas it uses there) from your

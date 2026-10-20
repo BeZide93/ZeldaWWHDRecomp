@@ -123,6 +123,12 @@ int main(){
   assert(solids_overlap(a,place_solid(bv,bt,{300,100,100},{0,30,0},{1,1,1})));
   assert(!solids_overlap(a,Solid{}));
  }
+ // ---- a route in the way says where: its point nearest the bounds, not its start
+ {
+  Index idx;idx.coverage.push_back({"sea",12,true,true,true,{}});idx.routes.push_back({"sea",12,"RPAT:3",{{0,100,0},{1000,100,0},{2000,100,0},{3000,100,0}},kRouteHalfWidth,false});
+  const auto found=check_building("sea",12,{{1900,50,-100},{2100,300,100}},idx);
+  assert(found.size()==1&&found[0].kind=="villager route"&&found[0].at.x==2000&&found[0].path.size()==4);
+ }
  // ---- a body of water on a terraced island ground (the mod's own world object): three square terraces, each a closed
  // block from the sea floor (-1000) up to its top (200, 400, 600; 3000, 2000 and 1000 wide), a pillar on the top one
  {
