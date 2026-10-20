@@ -14,6 +14,11 @@ what is on `devel` and not released yet (also in the
   MCP command, so an assistant such as Claude Code can model rooms in Blender and build and look at the level in the
   game; see the new guide "Building a dungeon with an AI assistant".
 
+- **Fixed: ponds on a mod's own island** (water tool). A pond drawn on a terrace of the mod's own island model no
+  longer turns into a column down to the sea floor and is no longer refused as "in the way": the water's level follows
+  the ground at its shore, the island's own surfaces count as ground, and only what really rises through the water (a
+  wall, a pillar, a house) blocks it. Messages now name the game place that blocks a spot and where it is.
+
 - **Mod SDK: a dungeon map for mod dungeons** (for mod makers, preview). A mod dungeon with a map shows it on the
   GamePad's map page (and on the TV's map tab with the Pro Controller): rooms seen from above, made from the rooms'
   floors, the rooms Link has visited, where he stands, and with the dungeon map every room; with the compass also the
