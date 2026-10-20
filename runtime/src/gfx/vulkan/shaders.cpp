@@ -1272,7 +1272,8 @@ ShaderMemoryStats shader_memory_stats() {
 
 void pack_uniforms_into(const uint32_t* regs, const Shader& shader,
                         std::vector<uint8_t>& data, float scaleX, float scaleY,
-                        float eyeOffset, float convergence) {
+                        float eyeOffset, float convergence, stereo::EyeRows* eyeRows) {
+    if (stereo::layoutDrawDepth) eyeOffset = 0;
     const auto& offsets = shader.uniforms;
     data.resize((std::max(offsets.offset_endOfBlock, 16) + 15) & ~15);
     // Reused capacity may contain another shader's payload. Define every byte,
@@ -1289,14 +1290,16 @@ void pack_uniforms_into(const uint32_t* regs, const Shader& shader,
     auto projectionRow = [&](int offset, const void* bytes, size_t available) {
         if (!shader.vertex || eyeOffset == 0 || available < 64) return;
         float p[16]; memcpy(p,bytes,64);
-        if (stereo::project_eye(p,eyeOffset,convergence)) copy(offset,p,16);
+        const float unshifted[4] = {p[0],p[1],p[2],p[3]};
+        if (stereo::project_eye(p,eyeOffset,convergence)) {
+            copy(offset,p,16);
+            if (eyeRows && offset >= 0 && size_t(offset) + 16 <= data.size()) eyeRows->add(size_t(offset),unshifted);
+        }
     };
     if (offsets.offset_remapped >= 0) {
         for (const auto& entry : shader.dec->list_remappedUniformEntries_register) {
             copy(offsets.offset_remapped + entry.mappedIndexOffset, regs + aluBase + entry.indexOffset / 4, 16);
-            const bool layoutRow = eyeOffset != 0 && shader.vertex && stereo::is_layout(regs) &&
-                aluBase+entry.indexOffset/4 == stereo::layoutProjectionStart;
-            if (!layoutRow && entry.indexOffset <= 4096-64)
+            if (entry.indexOffset <= 4096-64)
                 projectionRow(offsets.offset_remapped+entry.mappedIndexOffset,
                     regs+aluBase+entry.indexOffset/4,4096-entry.indexOffset);
         }
@@ -1317,7 +1320,8 @@ void pack_uniforms_into(const uint32_t* regs, const Shader& shader,
         if (shader.vertex && eyeOffset != 0)
             stereo::project_uniform_block(data.data()+offsets.offset_uniformRegister,
                 size_t(offsets.count_uniformRegister)*16,eyeOffset,convergence,
-                stereo::is_layout(regs) ? stereo::layoutProjection.data() : nullptr);
+                nullptr,
+                eyeRows,size_t(offsets.offset_uniformRegister));
     }
     put(offsets.offset_alphaTestRef, bitsf(regs[Latte::REGADDR::SX_ALPHA_REF]));
     float point = float(regs[Latte::REGADDR::PA_SU_POINT_SIZE] & 0xFFFF) / 8.0f;
