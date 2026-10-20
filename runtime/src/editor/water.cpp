@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <array>
 #include <map>
 #include <tuple>
 
@@ -45,6 +46,8 @@ int64_t grid_uv(double uv) { return std::llround(uv * 1024.0); }
 struct Prim {
     std::string material;  // the material's name
     bool visible = false;
+    bool smooth = false;   // normals: averaged over the faces meeting at a place (a bank), else each face's own
+    std::map<std::array<int64_t, 3>, V3> normal_sum;
     std::vector<int64_t> pos, nrm, uv;  // grid steps (positions, normals and UV: k / 1024)
     std::vector<uint16_t> idx;
     std::map<std::vector<int64_t>, uint16_t> weld;
@@ -77,12 +80,24 @@ struct Prim {
         const double* t[3] = {ta ? ta : zero, tb ? tb : zero, tc ? tc : zero};
         int64_t* p[3] = {pa, pb, pc};
         if (facing < 0) std::swap(p[1], p[2]), std::swap(t[1], t[2]);
-        // the normal: the face's own, on the grid (k / 1024 of a unit vector)
+        // the normal: the face's own, on the grid (k / 1024 of a unit vector); a smooth prim sums them per place
         const V3 fn = unit({double(facing < 0 ? -n[0] : n[0]), double(facing < 0 ? -n[1] : n[1]), double(facing < 0 ? -n[2] : n[2])});
-        const int64_t qn[3] = {grid_uv(fn.x), grid_uv(fn.y), grid_uv(fn.z)};
+        const int64_t qn[3] = {smooth ? 0 : grid_uv(fn.x), smooth ? 0 : grid_uv(fn.y), smooth ? 0 : grid_uv(fn.z)};
         for (int k = 0; k < 3; k++) {
             const int64_t qt[2] = {grid_uv(t[k][0]), grid_uv(t[k][1])};
             idx.push_back(vertex(p[k], qn, qt));
+            if (smooth) {
+                V3& sum = normal_sum[{p[k][0], p[k][1], p[k][2]}];
+                sum = sum + fn;
+            }
+        }
+    }
+    // a smooth prim's normals from its faces (once every triangle is in)
+    void finish() {
+        if (!smooth || !visible) return;
+        for (size_t i = 0; i < pos.size() / 3; i++) {
+            const V3 n = unit(normal_sum[{pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2]}]);
+            nrm[i * 3] = grid_uv(n.x), nrm[i * 3 + 1] = grid_uv(n.y), nrm[i * 3 + 2] = grid_uv(n.z);
         }
     }
     void quad(V3 a, V3 b, V3 c, V3 d, V3 want, const double ta[2] = nullptr, const double tb[2] = nullptr, const double tc[2] = nullptr,
@@ -95,6 +110,7 @@ struct Material {
     std::string name;
     int image = -1;  // -1: a collision material (no texture)
     bool mask = false;
+    std::string extras;  // the material's glTF extras (JSON), "" none
 };
 struct Mesh {
     std::string name;
@@ -202,6 +218,7 @@ std::vector<uint8_t> write_glb(const std::vector<Mesh>& meshes, const std::vecto
         std::string body = "\"name\":" + quoted(m.name);
         if (m.image >= 0) body += ",\"pbrMetallicRoughness\":{\"baseColorTexture\":{\"index\":" + integer(m.image) + "}}";
         if (m.mask) body += ",\"alphaMode\":\"MASK\",\"alphaCutoff\":0.5";
+        if (!m.extras.empty()) body += ",\"extras\":" + m.extras;
         material_list += std::string(i ? "," : "") + "{" + body + "}";
     }
     const size_t used = bin.size();
@@ -385,94 +402,320 @@ XZ waterfall_foot(const Params& p) {
     return {int(std::lround((a.x + b.x) / 2.0 + d.x * 150)), int(std::lround((a.z + b.z) / 2.0 + d.z * 150))};
 }
 
+// a river sample's sideways direction (to the right of the flow), mitred at the line's corners
+V3 river_right(const std::vector<RiverSample>& fine, size_t k) {
+    const size_t n = fine.size();
+    const XZ prev = fine[k ? k - 1 : 0].at, next = fine[k + 1 < n ? k + 1 : k].at, here = fine[k].at;
+    const V3 e1 = unit({double(here.x - prev.x), 0, double(here.z - prev.z)}), e2 = unit({double(next.x - here.x), 0, double(next.z - here.z)});
+    const V3 r1{e1.z, 0, -e1.x}, r2{e2.z, 0, -e2.x};
+    const V3 r = unit(k == 0 ? r2 : k + 1 == n ? r1 : r1 + r2);
+    const double c = std::max(dot(r, k == 0 ? r2 : r1), 0.5);
+    return r * (1 / c);
+}
+
+// ---------------------------------------------------------------- banks
+// A bank is a natural rim: from the water's edge (under water: down to the floor) up to a crest a little above the
+// water, then a slope down to where it meets the island's ground. Its crest and slope wander a little from place to
+// place (a fixed pattern, the same everywhere), and its texture is the island's own ground there (island_texture.py).
+constexpr int kToes = 5;
+constexpr int kToe[kToes] = {40, 120, 260, 480, 760};  // how far beyond the crest the ground is asked
+uint32_t wander(uint32_t seed, uint32_t i) { return hash(seed * 7919u + i * 104729u + 17u); }
+XZ offset_xz(XZ q, V3 dir, double by) { return {int(std::lround(q.x + dir.x * by)), int(std::lround(q.z + dir.z * by))}; }
+
+// one cross-section of a bank, outwards from the water's edge; heights relative to the water
+struct Section {
+    double crest = 8, crest_out = 25, shoulder_out = 60, shoulder = 4, toe_out = 80, toe = -10, skirt = 0;  // outs: from the edge
+    bool slope = true;  // a slope down to the ground (false: the ground is as high as the crest there)
+};
+// edge_ground: the ground at the water's edge (relative); toe_ground: at crest_out + kToe[k] (kUnknown: not known)
+// bed: the river bed there (relative; a pond: none); the ground at the edge far below it is a drop beside the water
+Section bank_section(double rim, double edge_ground, const int toe_ground[kToes], uint32_t seed, uint32_t i, double bed = -1e9) {
+    Section b;
+    const uint32_t w = wander(seed, i);
+    b.crest_out = 22 + double(w % 23);
+    const double slope = 0.35 + double((w >> 8) % 18) / 100.0;  // rise over run: 19 to 27 degrees
+    // a little above the ground at the water's edge, but no wall: where the edge runs into a bank higher than that
+    // (a cliff beside the water) the ground itself is the bank
+    b.crest = std::max({rim, 8.0, std::min(edge_ground + 3, 30.0)});
+    if (edge_ground < bed - kStepDrop) {
+        // the water's edge hangs over a drop (the lip of a step): a short rounded lip, then straight down to the ground
+        b.toe_out = b.crest_out + 20;
+        b.toe = b.crest - 12;
+        b.shoulder_out = b.crest_out + 6;
+        b.shoulder = b.crest - 2;
+        b.skirt = edge_ground - 8;
+        return b;
+    }
+    // the first ground the slope line meets
+    double prev_t = 0, prev_gap = 1;
+    bool found = false;
+    for (int k = 0; k < kToes; k++) {
+        if (toe_ground[k] == kUnknown) continue;
+        const double t = kToe[k];
+        if (toe_ground[k] < edge_ground - kStepDrop) {
+            // the ground falls away (a cliff): the bank ends before it, where it is, without going down it
+            b.toe_out = b.crest_out + std::max(prev_t, 20.0);
+            b.toe = std::max(b.crest - slope * std::max(prev_t, 20.0), edge_ground) - 4;
+            found = true;
+            break;
+        }
+        const double gap = (b.crest - slope * t) - toe_ground[k];
+        if (gap <= 0) {
+            const double f = prev_gap > 0 ? prev_gap / (prev_gap - gap) : 0;
+            const double at = prev_t + (t - prev_t) * f;
+            b.toe_out = b.crest_out + at;
+            b.toe = b.crest - slope * at - 6;
+            found = true;
+            if (at < 4) b.slope = false;
+            break;
+        }
+        prev_t = t, prev_gap = gap;
+    }
+    if (!found) {
+        // no ground within reach (or none known): the slope runs its full length and a short skirt goes on down
+        double last = kUnknown;
+        for (int k = kToes - 1; k >= 0 && last == kUnknown; k--) last = toe_ground[k];
+        if (last == kUnknown) {
+            // nothing known there (the game found no ground: off a cliff, over the sea): a short slope and a short skirt
+            b.toe_out = b.crest_out + kToe[0];
+            b.toe = b.crest - slope * kToe[0];
+            b.skirt = b.toe - 30;
+        } else {
+            b.toe_out = b.crest_out + kToe[kToes - 1];
+            b.toe = b.crest - slope * kToe[kToes - 1];
+            b.skirt = std::min(b.toe, double(last)) - 8;
+        }
+    }
+    // a rounded top: the shoulder a third of the way down, nearer the crest
+    b.shoulder_out = b.crest_out + (b.toe_out - b.crest_out) * 0.3;
+    b.shoulder = b.crest - (b.crest - b.toe) * 0.18;
+    return b;
+}
+
+// a pond's outline in rows a bank is made of: the outline (turned to negative orientation), each edge cut into pieces
+// of at most 200 units; each point's outward direction (mitred)
+struct Ring {
+    std::vector<XZ> q;
+    std::vector<V3> out;
+    std::vector<double> along;  // the perimeter up to each point
+};
+Ring pond_ring(const Params& p) {
+    std::vector<XZ> poly = p.points;
+    if (area2(poly) > 0) std::reverse(poly.begin(), poly.end());
+    // a pond has no corners: each is cut twice (a quarter of each edge, at most 150 units), the outline rounding off
+    for (int pass = 0; pass < 2 && poly.size() < 64; pass++) {
+        std::vector<XZ> cut;
+        const size_t n = poly.size();
+        for (size_t i = 0; i < n; i++) {
+            const XZ a = poly[i], b = poly[(i + 1) % n];
+            const double len = std::sqrt(double(b.x - a.x) * (b.x - a.x) + double(b.z - a.z) * (b.z - a.z));
+            const double f = len > 0 ? std::min(0.25, 150.0 / len) : 0.25;
+            cut.push_back({int(std::lround(a.x + (b.x - a.x) * f)), int(std::lround(a.z + (b.z - a.z) * f))});
+            cut.push_back({int(std::lround(b.x + (a.x - b.x) * f)), int(std::lround(b.z + (a.z - b.z) * f))});
+        }
+        poly.swap(cut);
+    }
+    Ring r;
+    const size_t n = poly.size();
+    double along = 0;
+    for (size_t i = 0; i < n; i++) {
+        const XZ a = poly[i], b = poly[(i + 1) % n];
+        const double len = std::sqrt(double(b.x - a.x) * (b.x - a.x) + double(b.z - a.z) * (b.z - a.z));
+        const int m = std::max(1, int(std::ceil(len / 150)));
+        for (int j = 0; j < m; j++) {
+            r.q.push_back({int(std::lround(a.x + (b.x - a.x) * double(j) / m)), int(std::lround(a.z + (b.z - a.z) * double(j) / m))});
+            r.along.push_back(along + len * double(j) / m);
+        }
+        along += len;
+    }
+    r.along.push_back(along);  // the closing point's
+    const size_t m = r.q.size();
+    for (size_t i = 0; i < m; i++) {
+        const XZ a = r.q[(i + m - 1) % m], b = r.q[i], c = r.q[(i + 1) % m];
+        const V3 e1 = unit({double(b.x - a.x), 0, double(b.z - a.z)}), e2 = unit({double(c.x - b.x), 0, double(c.z - b.z)});
+        // negative orientation: the inside is on the right of each edge, outward on the left
+        const V3 n1{-e1.z, 0, e1.x}, n2{-e2.z, 0, e2.x};
+        V3 o = unit(n1 + n2);
+        if (dot(n1 + n2, n1 + n2) < 1e-9) o = n1;
+        const double cosine = std::max(dot(o, n1), 0.5);
+        r.out.push_back(o * (1 / cosine));
+    }
+    return r;
+}
+// the places a bank asks the ground at: beyond the crest's furthest wander (crest_out <= 44)
+XZ toe_place(XZ q, V3 out, int k) { return offset_xz(q, out, 44 + kToe[k]); }
+
+XZ river_toe(const std::vector<RiverSample>& fine, size_t k, double width, int side, int t) {
+    return offset_xz(fine[k].at, river_right(fine, k), side * (width / 2 + 44 + kToe[t]));
+}
+
+// the bank's texture: the island's own ground where its slope meets it (the converter reads it; this model's own
+// texture stays for a game without that room)
+std::string island_extras(int room, const std::vector<XZ>& world) {
+    if (room < 1 || room > 49 || world.empty()) return "";
+    std::string pts;
+    const size_t step = std::max<size_t>(1, world.size() / 64);
+    for (size_t i = 0; i < world.size(); i += step) pts += (pts.empty() ? "[" : ",[") + std::to_string(world[i].x) + "," + std::to_string(world[i].z) + "]";
+    return "{\"wwhd_island\":{\"room\":" + std::to_string(room) + ",\"points\":[" + pts + "]}}";
+}
+int ground_rel(const Params& p, const XZ& origin, int origin_y, XZ local) {
+    const int h = ground_at(p.ground, {local.x + origin.x, local.z + origin.z});
+    return h == kUnknown ? kUnknown : h - origin_y;
+}
+
 // ---------------------------------------------------------------- the three bodies
 struct Out {
     std::vector<Mesh> main_meshes, surface_meshes;
-    std::vector<Material> main_materials;
+    std::vector<Material> main_materials, surface_materials;
     std::vector<std::vector<uint8_t>> main_images;
 };
+double planar(double v) { return v / 300; }  // the bank texture: one repeat every 3 m, from above
 
 bool build_pond(const Params& p, const XZ& origin, int origin_y, Out& o, std::vector<Problem>& problems) {
-    std::vector<XZ> poly = p.points;
-    if (area2(poly) > 0) std::reverse(poly.begin(), poly.end());  // negative: upward triangles (see Prim::triangle)
+    const Ring ring = pond_ring(p);
+    const std::vector<XZ>& q = ring.q;
+    const size_t n = q.size();
+    if (!simple_polygon(q)) return problems.push_back({"the outline crosses itself", "points"}), false;
     std::vector<unsigned> tris;
-    if (!triangulate(poly, tris)) return problems.push_back({"the outline can't be filled (it crosses itself)", "points"}), false;
-    const double area = double(-area2(poly)) / 2;
-    double d = std::clamp(std::sqrt(area) * 0.12, 25.0, 120.0);
+    if (!triangulate(q, tris)) return problems.push_back({"the outline can't be filled (it crosses itself)", "points"}), false;
+    const double area = double(-area2(q)) / 2;
+    const double D = p.depth, R = p.rim;
+    // the inner ring of the surface (where it is fully there) and its foam: 50 units in, less for a small pond
+    double d = std::clamp(std::sqrt(area) * 0.1, 15.0, 50.0);
     std::vector<XZ> inner;
-    for (int tries = 0; tries < 4 && inner.empty(); tries++, d /= 2) inner = inset(poly, d);
+    for (int tries = 0; tries < 4 && inner.empty(); tries++, d /= 2) inner = inset(q, d);
     if (inner.empty()) return problems.push_back({"the outline is too narrow or its corners too sharp for a shore", "points"}), false;
     std::vector<unsigned> inner_tris;
     if (!triangulate(inner, inner_tris)) return problems.push_back({"the outline is too narrow for a shore", "points"}), false;
-    const size_t n = poly.size();
-    const double D = p.depth, R = p.rim;
+    // the floor: the outline drawn in by most of the depth (a bowl), less where it is narrow
+    double df = std::clamp(D * 0.9, 20.0, std::sqrt(area) * 0.3);
+    std::vector<XZ> floor_ring;
+    for (int tries = 0; tries < 5 && floor_ring.empty(); tries++, df /= 2) floor_ring = inset(q, df);
+    if (floor_ring.empty()) floor_ring = inner;
+    std::vector<unsigned> floor_tris;
+    if (!triangulate(floor_ring, floor_tris)) floor_ring = inner, floor_tris = inner_tris;
     const V3 up{0, 1, 0};
-    // the surface: the outer ring (fades) and the inside; its texture repeats every 50 units, as on the game's spring
-    Prim surface;
-    surface.material = "water_surface", surface.visible = true;
-    auto uv_xz = [](XZ q, double scale, double out[2]) { out[0] = q.x / scale, out[1] = q.z / scale; };
+    // the sections of the bank, each from its own ground
+    std::vector<Section> sec(n);
+    // the bank in up to four arcs, each painted with the island's ground where its slope meets it (grass on one side,
+    // sand on the other); the bowl under the water with the ground at the shore
+    const size_t arcs = std::min<size_t>(4, n);
+    auto arc_of = [&](size_t i) { return i * arcs / n; };
+    std::vector<std::vector<XZ>> toes(arcs);
+    std::vector<XZ> shore;
+    for (size_t i = 0; i < n; i++) {
+        int toe[kToes];
+        for (int k = 0; k < kToes; k++) toe[k] = ground_rel(p, origin, origin_y, toe_place(q[i], ring.out[i], k));
+        const int edge = ground_rel(p, origin, origin_y, q[i]);
+        sec[i] = bank_section(R, edge == kUnknown ? -D : double(edge), toe, 1, uint32_t(i));
+        const XZ meets = offset_xz(q[i], ring.out[i], sec[i].toe_out + 10);
+        toes[arc_of(i)].push_back({meets.x + origin.x, meets.z + origin.z});
+        shore.push_back({q[i].x + origin.x, q[i].z + origin.z});
+    }
+    auto at_out = [&](size_t i, double out, double y) { return V3{q[i].x + ring.out[i].x * out, y, q[i].z + ring.out[i].z * out}; };
+    auto uv_of = [](V3 v, double t[2]) { t[0] = planar(v.x), t[1] = planar(v.z); };
+    Prim bed, water, sand, grass, stone;
+    std::vector<Prim> banks(arcs);
+    for (size_t k = 0; k < arcs; k++) banks[k].material = "bank" + std::to_string(k + 1), banks[k].visible = true, banks[k].smooth = true;
+    bed.material = "bed", bed.visible = true, bed.smooth = true;
+    water.material = "col_water", sand.material = "col_sand", grass.material = "col_grass", stone.material = "col_stone";
+    auto band = [&](Prim& visible, Prim* col, V3 a, V3 b, V3 c, V3 e) {
+        double ta[2], tb[2], tc[2], te[2];
+        uv_of(a, ta), uv_of(b, tb), uv_of(c, tc), uv_of(e, te);
+        visible.quad(a, b, c, e, up, ta, tb, tc, te);
+        if (col) col->quad(a, b, c, e, up);
+    };
+    for (size_t i = 0; i < n; i++) {
+        const size_t j = (i + 1) % n;
+        const Section &si = sec[i], &sj = sec[j];
+        const V3 fi = at(floor_ring[i], -D), fj = at(floor_ring[j], -D);
+        const V3 ei = at(q[i], 0), ej = at(q[j], 0);
+        Prim& bank = banks[arc_of(i)];
+        // under water: the bowl from the floor's edge up to the water's edge
+        band(bed, &sand, fi, fj, ej, ei);
+        // the lip above the water, the rounded top, the slope down to the island's ground (and a skirt where it can't reach)
+        const V3 ci = at_out(i, si.crest_out, si.crest), cj = at_out(j, sj.crest_out, sj.crest);
+        band(bank, &grass, ei, ej, cj, ci);
+        const V3 hi = at_out(i, si.shoulder_out, si.shoulder), hj = at_out(j, sj.shoulder_out, sj.shoulder);
+        band(bank, &grass, ci, cj, hj, hi);
+        const V3 ti = at_out(i, si.toe_out, si.toe), tj = at_out(j, sj.toe_out, sj.toe);
+        band(bank, &grass, hi, hj, tj, ti);
+        if (si.skirt != 0 || sj.skirt != 0) {
+            const V3 ki = at_out(i, si.toe_out + 6, si.skirt != 0 ? si.skirt : si.toe - 10), kj = at_out(j, sj.toe_out + 6, sj.skirt != 0 ? sj.skirt : sj.toe - 10);
+            band(bank, &stone, ti, tj, kj, ki);
+        }
+    }
+    for (size_t t = 0; t < floor_tris.size(); t += 3) {
+        const V3 a = at(floor_ring[floor_tris[t]], -D), b = at(floor_ring[floor_tris[t + 1]], -D), c = at(floor_ring[floor_tris[t + 2]], -D);
+        double ta[2], tb[2], tc[2];
+        uv_of(a, ta), uv_of(b, tb), uv_of(c, tc);
+        bed.triangle(a, b, c, up, ta, tb, tc);
+        sand.triangle(a, b, c, up);
+    }
+    for (size_t t = 0; t < tris.size(); t += 3) water.triangle(at(q[tris[t]], 0), at(q[tris[t + 1]], 0), at(q[tris[t + 2]], 0), up);
+    // the water (the blue of the island's shallows, a little under the level), the wave lines on it (fading out
+    // towards the shore) and the coast foam along the shore, a little above it
+    Prim surface, waves, foam;
+    surface.material = "surface", surface.visible = true;
+    waves.material = "waves", waves.visible = true;
+    foam.material = "edge", foam.visible = true;
+    auto uv_s = [](XZ v, double t[2]) { t[0] = v.x / 50.0, t[1] = v.z / 50.0; };
     for (size_t i = 0; i < n; i++) {
         const size_t j = (i + 1) % n;
         double a[2], b[2], c[2], e[2];
-        uv_xz(poly[i], 50, a), uv_xz(poly[j], 50, b), uv_xz(inner[j], 50, c), uv_xz(inner[i], 50, e);
-        surface.quad(at(poly[i], 0), at(poly[j], 0), at(inner[j], 0), at(inner[i], 0), up, a, b, c, e);
+        uv_s(q[i], a), uv_s(q[j], b), uv_s(inner[j], c), uv_s(inner[i], e);
+        surface.quad(at(q[i], -2), at(q[j], -2), at(inner[j], -2), at(inner[i], -2), up, a, b, c, e);
     }
+    // the wave lines: rings round the shore (U along it, V the distance from it: the lines lie along the shore and roll
+    // in), and the coast foam on the outermost band; each ring as far in as the outline allows
+    std::vector<std::vector<XZ>> rings{q};
+    std::vector<double> dist{0};
+    for (double want : {60.0, 150.0, 260.0}) {
+        std::vector<XZ> r;
+        for (double dd = want; dd > dist.back() + 10 && r.empty(); dd *= 0.7) {
+            r = inset(q, dd);
+            if (!r.empty()) dist.push_back(dd);
+        }
+        if (r.empty()) break;
+        rings.push_back(std::move(r));
+    }
+    for (size_t k = 0; k + 1 < rings.size(); k++)
+        for (size_t i = 0; i < n; i++) {
+            const size_t j = (i + 1) % n;
+            const double u0 = ring.along[i] / 400, u1 = ring.along[i + 1] / 400, v0 = dist[k] / 100, v1 = dist[k + 1] / 100;
+            const double w0[2] = {u0, v0}, w1[2] = {u1, v0}, w2[2] = {u1, v1}, w3[2] = {u0, v1};
+            waves.quad(at(rings[k][i], 0), at(rings[k][j], 0), at(rings[k + 1][j], 0), at(rings[k + 1][i], 0), up, w0, w1, w2, w3);
+            if (k == 0) {  // the foam: V 0 at the shore, 1 out on the water (as on an island's coast)
+                const double f0[2] = {ring.along[i] / 1000, 0}, f1[2] = {ring.along[i + 1] / 1000, 0}, f2[2] = {ring.along[i + 1] / 1000, 1}, f3[2] = {ring.along[i] / 1000, 1};
+                foam.quad(at(rings[0][i], 0.8), at(rings[0][j], 0.8), at(rings[1][j], 0.8), at(rings[1][i], 0.8), up, f0, f1, f2, f3);
+            }
+        }
     for (size_t t = 0; t < inner_tris.size(); t += 3) {
         double a[2], b[2], c[2];
-        uv_xz(inner[inner_tris[t]], 50, a), uv_xz(inner[inner_tris[t + 1]], 50, b), uv_xz(inner[inner_tris[t + 2]], 50, c);
-        surface.triangle(at(inner[inner_tris[t]], 0), at(inner[inner_tris[t + 1]], 0), at(inner[inner_tris[t + 2]], 0), up, a, b, c);
-    }
-    // the basin: floor, banks (inside from the floor to the rim, outside from the ground below to the rim)
-    Prim floor, foam, water, sand, stone;
-    floor.material = "floor", floor.visible = true;
-    foam.material = "foam", foam.visible = true;
-    water.material = "col_water", sand.material = "col_sand", stone.material = "col_stone";
-    for (size_t t = 0; t < tris.size(); t += 3) {
-        const XZ a = poly[tris[t]], b = poly[tris[t + 1]], c = poly[tris[t + 2]];
-        double ta[2], tb[2], tc[2];
-        uv_xz(a, 200, ta), uv_xz(b, 200, tb), uv_xz(c, 200, tc);
-        floor.triangle(at(a, -D), at(b, -D), at(c, -D), up, ta, tb, tc);
-        sand.triangle(at(a, -D), at(b, -D), at(c, -D), up);
-        water.triangle(at(a, 0), at(b, 0), at(c, 0), up);
-    }
-    const int s = sign(area2(poly));
-    double perimeter = 0;
-    for (size_t i = 0; i < n; i++) {
-        const size_t j = (i + 1) % n;
-        const XZ a = poly[i], b = poly[j];
-        const V3 e = unit({double(b.x - a.x), 0, double(b.z - a.z)});
-        const V3 inward = s > 0 ? V3{-e.z, 0, e.x} : V3{e.z, 0, -e.x}, outward = inward * -1;
-        const double len = std::sqrt(double(b.x - a.x) * (b.x - a.x) + double(b.z - a.z) * (b.z - a.z));
-        const double u0 = perimeter / 200, u1 = (perimeter + len) / 200;
-        perimeter += len;
-        // inside
-        const double t0[2] = {u0, D / 200}, t1[2] = {u1, D / 200}, t2[2] = {u1, -R / 200}, t3[2] = {u0, -R / 200};
-        floor.quad(at(a, -D), at(b, -D), at(b, R), at(a, R), inward, t0, t1, t2, t3);
-        stone.quad(at(a, -D), at(b, -D), at(b, R), at(a, R), inward);
-        // outside: down to the ground the game reported there (or below the floor)
-        const int ga = ground_at(p.ground, {a.x + origin.x, a.z + origin.z}), gb = ground_at(p.ground, {b.x + origin.x, b.z + origin.z});
-        const double ba = std::min(-D, ga == kUnknown ? -D : double(ga - origin_y)) - 20, bb = std::min(-D, gb == kUnknown ? -D : double(gb - origin_y)) - 20;
-        const double o0[2] = {u0, -ba / 200}, o1[2] = {u1, -bb / 200};
-        floor.quad(at(a, ba), at(b, bb), at(b, R), at(a, R), outward, o0, o1, t2, t3);
-        stone.quad(at(a, ba), at(b, bb), at(b, R), at(a, R), outward);
-        // the foam: a ring on the water from the shore to the inner ring (v 0 at the shore)
-        if (p.foam) {
-            const double f0[2] = {u0 * 2, 0}, f1[2] = {u1 * 2, 0}, f2[2] = {u1 * 2, 1}, f3[2] = {u0 * 2, 1};
-            foam.quad(at(a, 1.5), at(b, 1.5), at(inner[j], 1.5), at(inner[i], 1.5), up, f0, f1, f2, f3);
-        }
+        uv_s(inner[inner_tris[t]], a), uv_s(inner[inner_tris[t + 1]], b), uv_s(inner[inner_tris[t + 2]], c);
+        surface.triangle(at(inner[inner_tris[t]], -2), at(inner[inner_tris[t + 1]], -2), at(inner[inner_tris[t + 2]], -2), up, a, b, c);
     }
     o.main_images.push_back(ground_texture(p.floor, 1));
-    o.main_materials.push_back({"floor", 0, false});
-    Mesh visible{"pond", {std::move(floor)}};
-    if (p.foam) {
-        o.main_images.push_back(foam_texture());
-        o.main_materials.push_back({"foam", 1, true});
-        visible.prims.push_back(std::move(foam));
+    Mesh visible{"pond", {}};
+    bed.finish();
+    o.main_materials.push_back({"bed", 0, false, island_extras(p.room, shore)});
+    visible.prims.push_back(std::move(bed));
+    for (size_t k = 0; k < arcs; k++) {
+        if (banks[k].idx.empty()) continue;
+        banks[k].finish();
+        o.main_materials.push_back({banks[k].material, 0, false, island_extras(p.room, toes[k])});
+        visible.prims.push_back(std::move(banks[k]));
     }
-    for (const char* m : {"col_water", "col_sand", "col_stone"}) o.main_materials.push_back({m});
+    for (const char* m : {"col_water", "col_sand", "col_grass", "col_stone"}) o.main_materials.push_back({m});
     o.main_meshes.push_back(std::move(visible));
-    o.main_meshes.push_back({"pond_col", {std::move(water), std::move(sand), std::move(stone)}});
-    o.surface_meshes.push_back({"pond_surface", {std::move(surface)}});
+    Mesh col{"pond_col", {}};
+    for (Prim* c : {&water, &sand, &grass, &stone})
+        if (!c->idx.empty()) col.prims.push_back(std::move(*c));
+    o.main_meshes.push_back(std::move(col));
+    Mesh water_mesh{"pond_surface", {std::move(surface), std::move(waves)}};
+    o.surface_materials = {{"surface", 0}, {"waves", 0}};
+    if (p.foam) water_mesh.prims.push_back(std::move(foam)), o.surface_materials.push_back({"edge", 0});  // the coast foam along the shore
+    o.surface_meshes.push_back(std::move(water_mesh));
     return true;
 }
 
@@ -527,15 +770,7 @@ bool build_river(const Params& p, const XZ& origin, int origin_y, Out& o, Built&
         if (corner || k % every == 0 || step[k] || (k + 1 < n && (step[k + 1] || inside[k + 1]))) rows.push_back(k);
     }
     for (size_t r : rows) b.levels.push_back(int(std::lround(level[r])));
-    // each sample's sideways direction (to the right of the flow), with a miter at the line's corners
-    auto right_of = [&](size_t k) {
-        const XZ prev = fine[k ? k - 1 : 0].at, next = fine[k + 1 < n ? k + 1 : k].at, here = fine[k].at;
-        const V3 e1 = unit({double(here.x - prev.x), 0, double(here.z - prev.z)}), e2 = unit({double(next.x - here.x), 0, double(next.z - here.z)});
-        const V3 r1{e1.z, 0, -e1.x}, r2{e2.z, 0, -e2.x};
-        const V3 r = unit(k == 0 ? r2 : k + 1 == n ? r1 : r1 + r2);
-        const double c = std::max(dot(r, k == 0 ? r2 : r1), 0.5);
-        return r * (1 / c);
-    };
+    auto right_of = [&](size_t k) { return river_right(fine, k); };
     const double W = p.width;
     const double across[4] = {-0.5, -0.3, 0.3, 0.5};
     auto place = [&](size_t k, double f, double y) {
@@ -543,91 +778,195 @@ bool build_river(const Params& p, const XZ& origin, int origin_y, Out& o, Built&
         const V3 r = right_of(k);
         return V3{c.x + r.x * W * f, y, c.z + r.z * W * f};
     };
+    // a bank's section at a row, on one side (+1 right, -1 left of the flow)
+    auto section = [&](size_t k, int side) {
+        int toe[kToes];
+        for (int t = 0; t < kToes; t++) {  // relative to the water there, as the edge
+            toe[t] = ground_rel(p, origin, origin_y, river_toe(fine, k, W, side, t));
+            if (toe[t] != kUnknown) toe[t] -= int(std::lround(level[k]));
+        }
+        const int edge = ground_rel(p, origin, origin_y, offset_xz(fine[k].at, right_of(k), side * W / 2));
+        Section s = bank_section(0, (edge == kUnknown ? g[k] : double(edge)) - level[k], toe, side > 0 ? 2u : 3u, uint32_t(k), g[k] - level[k]);
+        s.crest = std::max(s.crest, 8.0);
+        return s;
+    };
+    auto bank_at = [&](size_t k, int side, double out, double y) {  // `out` beyond the water's edge, y relative to the level
+        const XZ c = fine[k].at;
+        const V3 r = right_of(k);
+        const double f = side * (W / 2 + out);
+        return V3{c.x + r.x * f, level[k] + y, c.z + r.z * f};
+    };
     const V3 up{0, 1, 0};
-    Prim surface, bed, water, wade;
-    surface.material = "water_surface", surface.visible = true;
-    bed.material = "bed", bed.visible = true;
-    water.material = "col_water", wade.material = "col_shallow";
+    Prim surface, foam, water, wade, sand, grass, stone;
+    surface.material = "surface", surface.visible = true;
+    foam.material = "edge", foam.visible = true;
+    water.material = "col_water", wade.material = "col_shallow", sand.material = "col_sand", grass.material = "col_grass", stone.material = "col_stone";
+    // the banks of each section are painted with the island's ground along that section (grass up there, sand on the beach)
+    const size_t sections = p.points.size() - 1;
+    std::vector<Prim> banks(sections);
+    std::vector<std::vector<XZ>> toes(sections);
+    for (size_t i = 0; i < sections; i++) banks[i].material = "bank" + std::to_string(i + 1), banks[i].visible = true, banks[i].smooth = true;
+    auto uv_of = [](V3 v, double t[2]) { t[0] = planar(v.x), t[1] = planar(v.z); };
+    auto band = [&](Prim& visible, Prim* col, V3 a, V3 bb, V3 c, V3 e) {
+        double ta[2], tb[2], tc[2], te[2];
+        uv_of(a, ta), uv_of(bb, tb), uv_of(c, tc), uv_of(e, te);
+        visible.quad(a, bb, c, e, up, ta, tb, tc, te);
+        if (col) col->quad(a, bb, c, e, up);
+    };
     for (size_t j = 1; j < rows.size(); j++) {
         const size_t a = rows[j - 1], k = rows[j];
-        const int section = fine[a].section;
+        const int sect = fine[a].section;
         if (step[k]) {
-            // the drop: no water across it (the waterfall goes there), the step from the upper row's place
+            // the drop: no water across it (the waterfall goes there), foam across the lip; the step from the upper row
             const V3 l = place(a, -0.5, 0), r = place(a, 0.5, 0);
             b.steps.push_back({{int(std::lround(l.x)), int(std::lround(l.z))}, {int(std::lround(r.x)), int(std::lround(r.z))}, int(std::lround(level[a])),
-                               int(std::lround(level[k])), int(std::lround(g[k])), section});
+                               int(std::lround(level[k])), int(std::lround(g[k])), sect});
+            const V3 back = unit({double(fine[a].at.x - fine[k].at.x), 0, double(fine[a].at.z - fine[k].at.z)}) * 45;
+            const double f0[2] = {0, 1}, f1[2] = {W / 300, 1}, f2[2] = {W / 300, 0}, f3[2] = {0, 0};
+            foam.quad(place(a, -0.5, level[a] + 0.8), place(a, 0.5, level[a] + 0.8), place(a, 0.5, level[a] + 0.8) + back, place(a, -0.5, level[a] + 0.8) + back, up, f0, f1, f2, f3);
+            // and where the water lands: foam across the lower water, strongest at the fall, fading downstream
+            const V3 ahead = back * (-50.0 / 45);
+            for (int band = 0; band < 3; band++) {  // three lines of it, one after the other
+                const V3 from = ahead * (band * 0.8);
+                const double g0[2] = {band * 0.37, 0}, g1[2] = {band * 0.37 + W / 300, 0}, g2[2] = {band * 0.37 + W / 300, 1}, g3[2] = {band * 0.37, 1};
+                foam.quad(place(k, -0.5, level[k] + 1.2) + from, place(k, 0.5, level[k] + 1.2) + from, place(k, 0.5, level[k] + 1.2) + from + ahead,
+                          place(k, -0.5, level[k] + 1.2) + from + ahead, up, g0, g1, g2, g3);
+            }
             continue;
         }
         const double y0 = level[a], y1 = level[k];
         for (int c = 0; c < 3; c++) {
-            // every 200 units across and along (V grows downstream), as the game's own spring outflow
+            // every 200 units across and along (V grows downstream), as the game's own streams
             const double ta[2] = {(across[c] + 0.5) * W / 200, fine[a].along / 200}, tb[2] = {(across[c + 1] + 0.5) * W / 200, fine[a].along / 200},
                          tc[2] = {(across[c + 1] + 0.5) * W / 200, fine[k].along / 200}, td[2] = {(across[c] + 0.5) * W / 200, fine[k].along / 200};
             surface.quad(place(a, across[c], y0), place(a, across[c + 1], y0), place(k, across[c + 1], y1), place(k, across[c], y1), up, ta, tb, tc, td);
         }
-        // the bed, a few units above the ground the game reported (Link walks on it between the samples too); its wading
-        // ground in shallow sections, the water to swim in at the level in deep ones
-        const double ba[2] = {0, fine[a].along / 200}, bb[2] = {W / 200, fine[a].along / 200}, bc[2] = {W / 200, fine[k].along / 200}, bd[2] = {0, fine[k].along / 200};
-        // the ground between two rows: its highest fine sample (a bump between them would stand above a straight bed)
+        // foam along both banks, on the water
+        for (int side : {-1, 1}) {
+            const double e = side * 0.5, i = side * (0.5 - std::min(45.0, W * 0.2) / W);
+            const double f0[2] = {fine[a].along / 300, 0}, f1[2] = {fine[k].along / 300, 0}, f2[2] = {fine[k].along / 300, 1}, f3[2] = {fine[a].along / 300, 1};
+            foam.quad(place(a, e, y0 + 0.8), place(k, e, y1 + 0.8), place(k, i, y1 + 0.8), place(a, i, y0 + 0.8), up, f0, f1, f2, f3);
+        }
+        // the bed: the ground the game reported, a few units up (its highest fine sample between the rows: a bump between
+        // them would stand above a straight bed), narrower than the water by its inner banks
         double ga = g[a], gk = g[k];
         for (size_t i = a + 1; i < k; i++) {
             const double t = double(i - a) / double(k - a), lin = ga * (1 - t) + gk * t;
             if (g[i] > lin) ga += g[i] - lin, gk += g[i] - lin;
         }
-        bed.quad(place(a, -0.5, ga + kBedLift + 1), place(a, 0.5, ga + kBedLift + 1), place(k, 0.5, gk + kBedLift + 1), place(k, -0.5, gk + kBedLift + 1), up, ba, bb, bc, bd);
-        if (shallow(section)) wade.quad(place(a, -0.5, ga + kBedLift), place(a, 0.5, ga + kBedLift), place(k, 0.5, gk + kBedLift), place(k, -0.5, gk + kBedLift), up);
-        else water.quad(place(a, -0.5, y0), place(a, 0.5, y0), place(k, 0.5, y1), place(k, -0.5, y1), up);
+        // always under the water (where the ground rises above it the island's own ground shows)
+        ga = std::min(ga, y0 - kBedLift - 6), gk = std::min(gk, y1 - kBedLift - 6);
+        const double ina = std::min((y0 - ga) * 0.8, W * 0.3) / W, ink = std::min((y1 - gk) * 0.8, W * 0.3) / W;
+        Prim& bank = banks[size_t(sect)];
+        // next to a step the banks stop where they are (no skirt down the cliff)
+        const bool near_step = (j + 1 < rows.size() && step[rows[j + 1]]) || (j >= 2 && step[a]);
+        band(bank, shallow(sect) ? &wade : &sand, place(a, -0.5 + ina, ga + kBedLift), place(a, 0.5 - ina, ga + kBedLift), place(k, 0.5 - ink, gk + kBedLift),
+             place(k, -0.5 + ink, gk + kBedLift));
+        if (!shallow(sect)) water.quad(place(a, -0.5, y0), place(a, 0.5, y0), place(k, 0.5, y1), place(k, -0.5, y1), up);
+        // the banks: under water from the bed's edge up to the water's edge, the lip, the slope to the island's ground
+        for (int side : {-1, 1}) {
+            const Section sa = section(a, side), sk = section(k, side);
+            const double fa = side * (0.5 - ina), fk = side * (0.5 - ink);
+            const V3 ba = place(a, fa, ga + kBedLift), bk = place(k, fk, gk + kBedLift);
+            const V3 ea = bank_at(a, side, 0, 0), ek = bank_at(k, side, 0, 0);
+            const V3 ca = bank_at(a, side, sa.crest_out, sa.crest), ck = bank_at(k, side, sk.crest_out, sk.crest);
+            const V3 ha = bank_at(a, side, sa.shoulder_out, sa.shoulder), hk = bank_at(k, side, sk.shoulder_out, sk.shoulder);
+            const V3 ta = bank_at(a, side, sa.toe_out, sa.toe), tk = bank_at(k, side, sk.toe_out, sk.toe);
+            band(bank, &sand, ba, bk, ek, ea);
+            band(bank, &grass, ea, ek, ck, ca);
+            band(bank, &grass, ca, ck, hk, ha);
+            band(bank, &grass, ha, hk, tk, ta);
+            if ((sa.skirt != 0 || sk.skirt != 0) && !near_step) {
+                const V3 ka = bank_at(a, side, sa.toe_out + 6, sa.skirt != 0 ? sa.skirt : sa.toe - 10), kk = bank_at(k, side, sk.toe_out + 6, sk.skirt != 0 ? sk.skirt : sk.toe - 10);
+                band(bank, &stone, ta, tk, kk, ka);
+            }
+            const XZ toe = offset_xz(fine[a].at, right_of(a), side * (W / 2 + sa.toe_out + 10));
+            toes[size_t(sect)].push_back({toe.x + origin.x, toe.z + origin.z});
+        }
     }
     o.main_images.push_back(ground_texture(p.floor, 2));
-    o.main_materials.push_back({"bed", 0, false});
-    for (const char* m : {"col_water", "col_shallow"}) o.main_materials.push_back({m});
-    o.main_meshes.push_back({"river", {std::move(bed)}});
+    Mesh visible{"river", {}};
+    for (size_t i = 0; i < sections; i++) {
+        if (banks[i].idx.empty()) continue;
+        banks[i].finish();
+        o.main_materials.push_back({banks[i].material, 0, false, island_extras(p.room, toes[i])});
+        visible.prims.push_back(std::move(banks[i]));
+    }
+    if (visible.prims.empty()) return problems.push_back({"nothing to build: the river has no length", "points"}), false;
+    for (const char* m : {"col_water", "col_shallow", "col_sand", "col_grass", "col_stone"}) o.main_materials.push_back({m});
+    o.main_meshes.push_back(std::move(visible));
     Mesh col{"river_col", {}};
-    if (!water.idx.empty()) col.prims.push_back(std::move(water));
-    if (!wade.idx.empty()) col.prims.push_back(std::move(wade));
+    for (Prim* c : {&water, &wade, &sand, &grass, &stone})
+        if (!c->idx.empty()) col.prims.push_back(std::move(*c));
     o.main_meshes.push_back(std::move(col));
-    o.surface_meshes.push_back({"river_surface", {std::move(surface)}});
+    Mesh shore{"river_surface", {std::move(surface)}};
+    o.surface_materials = {{"surface", 0}};
+    if (!foam.idx.empty()) shore.prims.push_back(std::move(foam)), o.surface_materials.push_back({"edge", 0});
+    o.surface_meshes.push_back(std::move(shore));
     return true;
 }
 
-bool build_waterfall(const Params& p, Out& o) {
+bool build_waterfall(const Params& p, const XZ& origin, Out& o) {
     const XZ a = p.points[0], bp = p.points[1];
     const V3 u = unit({double(bp.x - a.x), 0, double(bp.z - a.z)});
     const V3 d = V3{u.z, 0, -u.x} * double(p.side);  // downstream: where the water falls to
     const double L = std::sqrt(double(bp.x - a.x) * (bp.x - a.x) + double(bp.z - a.z) * (bp.z - a.z));
-    const double top = p.top + 4, bottom = p.bottom, H = top - bottom;
-    const V3 A = at(a, 0), B = at(bp, 0);
-    // the sheet: 12 units in front of the edge, a grid whose border fades (V grows downwards)
-    const double cols[4] = {0, std::min(0.1, 60 / L), std::max(0.9, 1 - 60 / L), 1};
-    const double rows[4] = {0, std::min(0.08, 50 / H), std::max(0.92, 1 - 50 / H), 1};
-    Prim sheet;
-    sheet.material = "water_surface", sheet.visible = true;
-    auto sheet_at = [&](double f, double r) { return A + (B - A) * f + d * 12 + V3{0, top - H * r, 0}; };
-    for (int c = 0; c < 3; c++)
+    const double top = p.top + 2, bottom = p.bottom, H = top - bottom;
+    const V3 A = at(a, 0), B = at(bp, 0), up{0, 1, 0};
+    // the sheet: thin, leaving the lip a little forward and falling straight; V grows downwards (Forest Haven's falls)
+    Prim sheet, lip;
+    sheet.material = "surface", sheet.visible = true;
+    lip.material = "edge", lip.visible = true;
+    const double cols[3] = {0, 0.5, 1};
+    const double rows[4] = {0, 0.06, 0.5, 1};
+    auto sheet_at = [&](double f, double r) {
+        const double forward = r < 0.06 ? 4 + 14 * (r / 0.06) : 18;  // the water curls over the lip, then falls
+        return A + (B - A) * f + d * forward + V3{0, top - H * r, 0};
+    };
+    for (int c = 0; c < 2; c++)
         for (int r = 0; r < 3; r++) {
-            // U about once per 5 m across, V once per 7 m down (as Forest Haven's falls repeat it)
-            const double ta[2] = {cols[c] * L / 500, rows[r] * H / 700}, tb[2] = {cols[c + 1] * L / 500, rows[r] * H / 700}, tc[2] = {cols[c + 1] * L / 500, rows[r + 1] * H / 700},
-                         td[2] = {cols[c] * L / 500, rows[r + 1] * H / 700};
+            const double ta[2] = {cols[c] * L / 500, rows[r] * H / 700}, tb[2] = {cols[c + 1] * L / 500, rows[r] * H / 700},
+                         tc[2] = {cols[c + 1] * L / 500, rows[r + 1] * H / 700}, td[2] = {cols[c] * L / 500, rows[r + 1] * H / 700};
             sheet.quad(sheet_at(cols[c], rows[r]), sheet_at(cols[c + 1], rows[r]), sheet_at(cols[c + 1], rows[r + 1]), sheet_at(cols[c], rows[r + 1]), d, ta, tb, tc, td);
         }
-    // the rock behind it (left half of the texture) and the splash pad under it (right half)
-    Prim rock, splash, wall;
-    rock.material = "rock", rock.visible = true;
-    splash.material = "col_waterfall", wall.material = "col_wall";
-    const double r0[2] = {0.02, 0.02}, r1[2] = {0.48, 0.02}, r2[2] = {0.48, 0.98}, r3[2] = {0.02, 0.98};
-    const V3 back = d * -6;
+    // foam where the water leaves the lip: a band over it
+    {
+        const double f0[2] = {0, 0}, f1[2] = {L / 300, 0}, f2[2] = {L / 300, 1}, f3[2] = {0, 1};
+        lip.quad(A - d * 30 + V3{0, top + 1, 0}, B - d * 30 + V3{0, top + 1, 0}, B + d * 10 + V3{0, top - 2, 0}, A + d * 10 + V3{0, top - 2, 0}, V3{0, 1, 0} + d * 0.3, f0, f1, f2, f3);
+    }
+    // the splash at its foot: a soft ring of foam on the water round where it lands
+    {
+        const V3 centre = (A + B) * 0.5 + d * 18 + V3{0, bottom + 3, 0};
+        const double rx = L / 2 + 50, rz = 110;
+        const int segments = 12;
+        for (int i = 0; i < segments; i++) {
+            // an ellipse along the sheet, in fixed steps (exact: no trigonometry, a polygon of 12 points)
+            static const double cs[13][2] = {{1, 0}, {0.866, 0.5}, {0.5, 0.866}, {0, 1}, {-0.5, 0.866}, {-0.866, 0.5}, {-1, 0}, {-0.866, -0.5}, {-0.5, -0.866}, {0, -1}, {0.5, -0.866}, {0.866, -0.5}, {1, 0}};
+            auto ring_at = [&](int k, double s) { return centre + u * (cs[k][0] * rx * s) + d * (cs[k][1] * rz * s); };
+            // the coast foam's texture: strongest (V 0) where the water lands, fading outwards
+            const double t0[2] = {i / 12.0 * 4, 0}, t1[2] = {(i + 1) / 12.0 * 4, 0}, t2[2] = {(i + 1) / 12.0 * 4, 1}, t3[2] = {i / 12.0 * 4, 1};
+            lip.quad(ring_at(i, 0.35), ring_at(i + 1, 0.35), ring_at(i + 1, 1), ring_at(i, 1), up, t0, t1, t2, t3);
+        }
+    }
+    // the rock behind it (the island's own ground texture; mostly inside the cliff), its collision a wall; the splash
+    // ground under it has collision only
+    Prim rock, pad, wall;
+    rock.material = "bank", rock.visible = true;
+    pad.material = "col_waterfall", wall.material = "col_wall";
+    const V3 back = d * -8;
+    const double r0[2] = {0, top / 300}, r1[2] = {L / 300, top / 300}, r2[2] = {L / 300, (bottom - 20) / 300}, r3[2] = {0, (bottom - 20) / 300};
     rock.quad(A + back + V3{0, top, 0}, B + back + V3{0, top, 0}, B + back + V3{0, bottom - 20, 0}, A + back + V3{0, bottom - 20, 0}, d, r0, r1, r2, r3);
     wall.quad(A + back + V3{0, top, 0}, B + back + V3{0, top, 0}, B + back + V3{0, bottom - 20, 0}, A + back + V3{0, bottom - 20, 0}, d);
-    const V3 pa = A - u * 40 + V3{0, bottom + 2, 0}, pb = B + u * 40 + V3{0, bottom + 2, 0};
-    const double s0[2] = {0.52, 0.02}, s1[2] = {0.98, 0.02}, s2[2] = {0.98, 0.98}, s3[2] = {0.52, 0.98};
-    rock.quad(pa, pb, pb + d * 220, pa + d * 220, {0, 1, 0}, s0, s1, s2, s3);
-    splash.quad(pa - V3{0, 1, 0}, pb - V3{0, 1, 0}, pb + d * 220 - V3{0, 1, 0}, pa + d * 220 - V3{0, 1, 0}, {0, 1, 0});
-    o.main_images.push_back(waterfall_texture(p.floor));
-    o.main_materials.push_back({"rock", 0, false});
+    const V3 pa = A - u * 40 + V3{0, bottom + 1, 0}, pb = B + u * 40 + V3{0, bottom + 1, 0};
+    pad.quad(pa, pb, pb + d * 220, pa + d * 220, up);
+    const XZ foot = waterfall_foot(p);
+    o.main_images.push_back(ground_texture(p.floor, 3));
+    o.main_materials.push_back({"bank", 0, false, island_extras(p.room, {{a.x + origin.x, a.z + origin.z}, {bp.x + origin.x, bp.z + origin.z}, {foot.x + origin.x, foot.z + origin.z}})});
     for (const char* m : {"col_waterfall", "col_wall"}) o.main_materials.push_back({m});
     o.main_meshes.push_back({"waterfall", {std::move(rock)}});
-    o.main_meshes.push_back({"waterfall_col", {std::move(splash), std::move(wall)}});
-    o.surface_meshes.push_back({"waterfall_surface", {std::move(sheet)}});
+    o.main_meshes.push_back({"waterfall_col", {std::move(pad), std::move(wall)}});
+    o.surface_meshes.push_back({"waterfall_surface", {std::move(sheet), std::move(lip)}});
+    o.surface_materials = {{"surface", 0}, {"edge", 0}};
     return true;
 }
 }  // namespace
@@ -889,10 +1228,22 @@ bool params_from_glb(const std::vector<uint8_t>& b, Params& out, std::string& wh
 std::vector<XZ> ground_places(const Params& p, const XZ& origin) {
     std::vector<XZ> out;
     auto add = [&](XZ q) { out.push_back({q.x + origin.x, q.z + origin.z}); };
-    if (p.kind == "pond")
-        for (const auto& q : p.points) add(q);
-    if (p.kind == "river" && p.points.size() >= 2)
-        for (const auto& s : river_samples(p)) add(s.at);
+    if (p.kind == "pond" && p.points.size() >= 3) {
+        const Ring ring = pond_ring(p);
+        for (size_t i = 0; i < ring.q.size(); i++) {
+            add(ring.q[i]);
+            for (int k = 0; k < kToes; k++) add(toe_place(ring.q[i], ring.out[i], k));
+        }
+    }
+    if (p.kind == "river" && p.points.size() >= 2) {
+        const auto fine = river_samples(p);
+        for (const auto& s : fine) add(s.at);  // first: the centre line (its first point sets the river's height)
+        for (size_t k = 0; k < fine.size(); k++)
+            for (int side : {-1, 1}) {
+                add(offset_xz(fine[k].at, river_right(fine, k), side * p.width / 2.0));
+                for (int t = 0; t < kToes; t++) add(river_toe(fine, k, p.width, side, t));
+            }
+    }
     if (p.kind == "waterfall" && p.points.size() == 2) {
         for (const auto& q : p.points) add(q);
         add(waterfall_foot(p));
@@ -950,9 +1301,9 @@ bool build(const Params& p, const XZ& origin, int origin_y, Built& b, std::vecto
     for (const auto& e : problems)
         if (e.severity == "error") return false;
     Out o;
-    bool ok = p.kind == "pond" ? build_pond(p, origin, origin_y, o, problems) : p.kind == "river" ? build_river(p, origin, origin_y, o, b, problems) : build_waterfall(p, o);
+    bool ok = p.kind == "pond" ? build_pond(p, origin, origin_y, o, problems) : p.kind == "river" ? build_river(p, origin, origin_y, o, b, problems) : build_waterfall(p, origin, o);
     if (!ok) return false;
-    b.material = p.kind == "pond" ? "water" : p.kind;
+    b.material = p.kind == "pond" ? kPondMaterial : p.kind;
     // counts and bounds
     int64_t lo[3] = {INT64_MAX, INT64_MAX, INT64_MAX}, hi[3] = {INT64_MIN, INT64_MIN, INT64_MIN};
     for (size_t m = 0; m < o.main_meshes.size(); m++)
@@ -975,8 +1326,7 @@ bool build(const Params& p, const XZ& origin, int origin_y, Built& b, std::vecto
         if (e.severity == "error") return false;
     const std::string extras = params_text(p);
     b.main = write_glb(o.main_meshes, o.main_materials, o.main_images, extras);
-    std::vector<Material> surface_material = {{"water_surface", 0, false}};
-    b.surface = write_glb(o.surface_meshes, surface_material, {placeholder_texture()}, "");
+    b.surface = write_glb(o.surface_meshes, o.surface_materials, {placeholder_texture()}, "");
     return true;
 }
 }  // namespace editor::water

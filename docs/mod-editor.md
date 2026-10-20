@@ -268,8 +268,9 @@ The points show in the picture, numbered; click one to select it and drag its ha
 - **Pond:** click the shore's points in order round the pond (3 to 48). The water shows as a light fill at
   its level with a line down to each picked point; the blue handle in the middle moves the level up and
   down (or type it under **Level**; until you choose one it is the lowest bank under the outline). Set its
-  **Depth** (the floor below the water), **Banks above the water** (walls from the floor up to that far
-  above the water), **Foam at the shore** and the **Floor colour**.
+  **Depth** (the floor below the water), **Banks above the water** (how high its rim rises above the water
+  before it slopes down to the ground), **Foam at the shore** and the **Floor colour** (used where your game
+  files don't give the island's own ground texture). The outline's corners are rounded off.
 - **River:** click its middle from where it starts to where it flows (2 to 32 points): the order is the flow,
   and white arrows along the band show it (**Reverse flow** turns it round). It follows the ground and steps
   down where the ground drops; set its **Width**, its **Depth** (the water above its bed where Link swims)
@@ -291,13 +292,20 @@ areas and other mods' objects (its floor and banks may meet the island's ground)
 the picture with the first error next to it. **Create** (one Undo step) is possible once nothing is red.
 
 What it makes: two models in the package's `models/water/` folder (the water's ground, banks and
-collision; the water surface, drawn with the game's own pond, river or waterfall water from your game
-files), and a static world object that uses them, placed like any other: move, turn, copy and remove it as
+collision; the water surface, drawn with the game's own water from your game files: an island's calm
+shallows with wave lines and coast foam for a pond, Forest Haven's streams and falls for a river and a
+waterfall), and a static world object that uses them, placed like any other: move, turn, copy and remove it as
 usual (removing it takes its two models along). The game prepares the models while you work; the water
 appears when the status bar says they are ready. Selecting it shows **Water** in the Inspector: **Edit
 shape…** loads its points and settings into the Water window, where **Apply** builds it again where it
 stands (one Undo step; Undo brings the earlier models back). The generated files are the same on every
 computer for the same drawing.
+
+The banks are natural ones: a rim a little above the water, then a slope down to where it meets the island's
+ground, painted with the island's own grass, sand or rock there (read from your game files when the models
+are prepared). The island's ground can't be lowered, so water deep enough to swim in sits on top of it: a
+pond on a slope gets a grassy mound round it on the downhill side. See
+[Bodies of water made with the editor](world-objects.md#bodies-of-water-made-with-the-editor).
 
 Bodies of water are made on the sea's islands (the `sea` stage). The same works through the commands
 `check_water`, `add_pond`, `add_river`, `add_waterfall`, `edit_water` and `get_water` (below).
@@ -736,7 +744,7 @@ separated by `;`, or `@file` with one such line per row. Results go to the log.
 | `preview_dialogue` | `id`?, `lines`?, `close`?, `mod`? | show lines in the game's message box (or hide it) |
 | `pick` | `origin`, `direction`, `range`? | the first ground a ray meets |
 | `ground` | `position` | the ground height below a point |
-| `focus` | `id`, `distance`?, `yaw`?, `mod`? | fly the camera to an actor (a world object: its whole extent in view; `distance` back, looking along `yaw` degrees) |
+| `focus` | `id` or `position`, `distance`?, `yaw`?, `mod`? | fly the camera to an actor (a world object: its whole extent in view) or a place; `distance` back, looking along `yaw` degrees |
 | `check_model` | `file` | check a `.glb` file |
 | `import_model` | `file`, `id`?, `confirm`?, `mod`? | copy a `.glb` into the mod and add the model |
 | `place_world_object` | `id`, `model`, `collision`, `stage`, `room`, `position`, `behaviour`?, `buoyancy`?, `drift`?, `anchor`?, `grapple_points`?, `distant`?, `shoreline`?, `chart_marker`?, `arrival`?, `rotation`?, `scale`?, `mod`? | place a static, floating or drifting object of the mod with collision (one Undo step) |
@@ -744,7 +752,7 @@ separated by `;`, or `@file` with one such line per row. Results go to the log.
 | `preview_collision`, `placement_conflicts` | `id`, `mod`? | a world object's collision as a wireframe, and what its place conflicts with |
 | `prepare_collision` | `model`, `mod`? | prepare a static model's collision for placing world objects while the game runs |
 | `check_water` | `kind` (`pond`, `river`, `waterfall`), `points`?, `level`?, `depth`?, `rim`?, `foam`?, `floor`?, `width`?, `shallow`?, `top`?, `bottom`?, `side`?, `river`?, `step`?, `id`?, `mod`? | what a body of water would be and every problem with it (errors and warnings), without changing anything: its place, triangles, file size, a river's levels and steps; `id` a body being changed |
-| `add_pond` | `points`, `level`?, `depth`?, `rim`?, `foam`?, `floor`?, `id`?, `mod`? | a pond: its outline (world `{x, z}` points), its water's height (default: the lowest bank), the floor `depth` below (20–480, default 200), banks `rim` above the water (0–300), a foam ring, the floor colour `"#rrggbb"` (one Undo step) |
+| `add_pond` | `points`, `level`?, `depth`?, `rim`?, `foam`?, `floor`?, `id`?, `mod`? | a pond: its outline (world `{x, z}` points), its water's height (default: the lowest bank), the floor `depth` below (20–480, default 200), its rim `rim` above the water (0–300), coast foam at the shore, the floor colour `"#rrggbb"` (one Undo step) |
 | `add_river` | `points`, `width`?, `depth`?, `shallow`?, `floor`?, `id`?, `mod`? | a river: its centre line in the flow's order, `width` 100–2000 (default 400), deep water `depth` above the bed, `shallow` per section (or one for all) |
 | `add_waterfall` | `points` or `river` and `step`?, `top`?, `bottom`?, `side`?, `floor`?, `id`?, `mod`? | a waterfall: its top edge (two points; or a river's step), the top's and the ground's height (default: the ground there), `side` 1 or -1 (default: the lower side) |
 | `edit_water` | `id`, and what changes of the above, `mod`? | build a body of water made with the tool again with those changes (one Undo step) |

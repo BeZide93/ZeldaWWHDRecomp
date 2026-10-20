@@ -1475,7 +1475,7 @@ bool editor_prepare_model(const std::string& mod,const std::string& package_dir,
     if(collision&&model.kind!="static")return why="collision requires a static model",false;
     // a shoreline (preparation option, never a manifest field): "foam" or a water surface's material
     const auto& shore=entry.get("shoreline");const bool shoreline=shore.type==mods::json::Value::String;
-    if(shoreline&&(collision||model.kind!="static"||(shore.text!="foam"&&!story_notebook::water_surface_material(shore.text))))return why="a shoreline is a collision-free static model with the material foam, water, river or waterfall",false;
+    if(shoreline&&(collision||model.kind!="static"||(shore.text!="foam"&&!story_notebook::water_surface_material(shore.text))))return why="a shoreline is a collision-free static model with the material foam, water, pond, river or waterfall",false;
     try {
         const auto bridge=BuildBridge::installed(std::string());
         const auto tool=std::filesystem::path(bridge.builder).parent_path().parent_path()/"story_mods"/(model.kind=="skinned"?"skinned_actor_model.py":"actor_model.py");

@@ -28,7 +28,8 @@ int g_failures = 0;
         }                                                                           \
     } while (0)
 
-constexpr uint64_t RIVER_MAIN = 0x42199378bbb65107ULL, RIVER_SURFACE = 0xc1c6d3931125a023ULL, FALL_MAIN = 0xca2379ab31d9f446ULL, FALL_SURFACE = 0x67c8d11fae5fe8ecULL;  // the digests every platform makes
+constexpr uint64_t POND_MAIN = 0xd793489655682debULL, POND_SURFACE = 0xc636fe6488f047e4ULL, RIVER_MAIN = 0x1a7e16e653616448ULL, RIVER_SURFACE = 0x9905f734aeda6bccULL,
+                   FALL_MAIN = 0x0ac6154a1354baf7ULL, FALL_SURFACE = 0x59abc62557077e82ULL;  // the digests every platform makes
 uint64_t fnv(const std::vector<uint8_t>& b) {
     uint64_t h = 1469598103934665603ULL;
     for (uint8_t c : b) h = (h ^ c) * 1099511628211ULL;
@@ -53,6 +54,7 @@ std::vector<std::string> material_names(const Value& doc) {
     for (const auto& m : doc.get("materials").array) out.push_back(m.get("name").string());
     return out;
 }
+
 
 void pieces() {
     CHECK(metres(0) == "0" && metres(1536) == "1.5" && metres(-1) == "-0.0009765625" && metres(1024) == "1" && metres(-2048) == "-2" && metres(1) == "0.0009765625");
@@ -108,28 +110,41 @@ void pond() {
     Built b;
     std::vector<Problem> problems;
     CHECK(build(p, {1000, 2000}, 100, b, problems) && problems.empty());
-    CHECK(b.material == "water" && b.surface_triangles == 3 * 5 - 2 && b.collision_triangles > 0 && b.main_triangles > 0);
-    // the surface sits at the level (local 0), the floor `depth` below, the banks `rim` above, down to the ground
-    CHECK(b.min[1] <= -250 - 20 && b.max[1] >= 30 && b.max[1] <= 31);
+    CHECK(b.material == kPondMaterial && b.surface_triangles > 0 && b.collision_triangles > 0 && b.main_triangles > 0);
+    // the surface sits at the level (local 0), the floor `depth` below, the banks' crest `rim` above, down to the ground
+    // (and beyond the outline: the outline's corners rounded off, the banks sloping out to where they meet the ground)
+    CHECK(b.min[1] <= -250 && b.max[1] >= 30 && b.max[1] <= 31 && b.max[0] > 600 && b.min[0] < -600);
     static_models::ModelInfo info;
     std::string why;
     CHECK(valid(b.main, true, info, why));
     if (!why.empty()) std::fprintf(stderr, "pond main: %s\n", why.c_str());
-    CHECK(info.material_count == 2 && info.cutout_count == 1 && info.texture_bytes == 2 * 64 * 64 * 4);
-    CHECK(valid(b.surface, false, info, why) && info.triangle_count == b.surface_triangles && info.material_count == 1);
+    // the bowl and the bank in four arcs share one texture (the converter puts the island's own in where it can)
+    CHECK(info.material_count == 5 && info.cutout_count == 0 && info.texture_bytes == 64 * 64 * 4);
+    // the surface: the water, its wave lines and the coast foam along the shore
+    CHECK(valid(b.surface, false, info, why) && info.triangle_count == b.surface_triangles && info.material_count == 3);
+    CHECK((material_names(doc_of(b.surface)) == std::vector<std::string>{"surface", "waves", "edge"}));
     const Value doc = doc_of(b.main);
-    CHECK((material_names(doc) == std::vector<std::string>{"floor", "foam", "col_water", "col_sand", "col_stone"}));
+    CHECK((material_names(doc) == std::vector<std::string>{"bed", "bank1", "bank2", "bank3", "bank4", "col_water", "col_sand", "col_grass", "col_stone"}));
+    // no room: no request for the island's texture; on a sea room each bank asks for the ground where it meets it
+    CHECK(doc.get("materials").array[1].get("extras").type != Value::Object);
+    Params on_island = p;
+    on_island.room = 44;
+    Built island;
+    problems.clear();
+    CHECK(build(on_island, {1000, 2000}, 100, island, problems));
+    const Value ask = doc_of(island.main).get("materials").array[1].get("extras").get("wwhd_island");
+    CHECK(ask.get("room").number == 44 && !ask.get("points").array.empty() && ask.get("points").array.size() <= 64);
     CHECK(doc.get("nodes").array.size() == 2 && doc.get("nodes").array[1].get("name").string() == "pond_col");
     // the parameters ride along and come back as they were
     Params back;
     CHECK(params_from_glb(b.main, back, why) && params_text(back) == params_text(p));
     CHECK(!params_from_glb(b.surface, back, why));
-    // without foam: one material (the converter's single-material path)
+    // without foam: no coast foam on the surface
     Params plain = p;
     plain.foam = false;
     Built c;
     problems.clear();
-    CHECK(build(plain, {1000, 2000}, 100, c, problems) && valid(c.main, true, info, why) && info.material_count == 1);
+    CHECK(build(plain, {1000, 2000}, 100, c, problems) && valid(c.surface, false, info, why) && info.material_count == 2);
     // the same input, the same bytes; a changed depth, other bytes
     Built again;
     problems.clear();
@@ -140,8 +155,7 @@ void pond() {
     CHECK(build(deeper, {1000, 2000}, 100, again, problems) && again.main != b.main && again.surface == b.surface);
     // the bytes every platform makes (water.h: whole 1/1024 metres, stored DEFLATE, JSON by hand)
     std::printf("pond main %016llx surface %016llx (%zu, %zu bytes)\n", (unsigned long long)fnv(b.main), (unsigned long long)fnv(b.surface), b.main.size(), b.surface.size());
-    CHECK(fnv(b.main) == 0x4fd11be511c23643ULL);
-    CHECK(fnv(b.surface) == 0xe0dce06f5bdac303ULL);
+    CHECK(fnv(b.main) == POND_MAIN && fnv(b.surface) == POND_SURFACE);
     // problems: too few points, a crossing outline, too small, too many points
     Params bad = p;
     bad.points = {{0, 0}, {100, 0}};
@@ -169,7 +183,8 @@ void river() {
     const XZ origin{5000, -3000};
     // the ground: 100 along the first section, falling 300 at once after x 1100 (a cliff), then flat
     const auto places = ground_places(p, origin);
-    CHECK(places.size() >= 4 + 3 && places.front() == XZ({5000, -3000}) && places.back() == XZ({6800, -2700}));
+    // the centre line first (every 25 units), then at each of those both edges and five places beyond each bank
+    CHECK(places.front() == XZ({5000, -3000}) && places.size() % (1 + 2 * 6) == 0);
     for (const auto& q : places) p.ground.push_back({q.x, q.z, q.x - origin.x > 1100 ? -200 : 100});
     Built b;
     std::vector<Problem> problems;
@@ -186,15 +201,17 @@ void river() {
     CHECK(b.steps.size() == 2 && std::abs((b.steps[1].left.x + b.steps[1].right.x) / 2 - 1100) <= 25);
     static_models::ModelInfo info;
     std::string why;
-    CHECK(valid(b.main, true, info, why) && info.material_count == 1);
-    CHECK(valid(b.surface, false, info, why) && info.triangle_count == b.surface_triangles);
+    CHECK(valid(b.main, true, info, why) && info.material_count == 3);
+    CHECK(valid(b.surface, false, info, why) && info.triangle_count == b.surface_triangles && info.material_count == 2);
     const Value doc = doc_of(b.main);
-    CHECK((material_names(doc) == std::vector<std::string>{"bed", "col_water", "col_shallow"}));
+    // the bed and banks of each section (each painted with the island's ground along it), then the collision
+    CHECK((material_names(doc) == std::vector<std::string>{"bank1", "bank2", "bank3", "col_water", "col_shallow", "col_sand", "col_grass", "col_stone"}));
+    CHECK((material_names(doc_of(b.surface)) == std::vector<std::string>{"surface", "edge"}));
     std::printf("river main %016llx surface %016llx\n", (unsigned long long)fnv(b.main), (unsigned long long)fnv(b.surface));
     CHECK(fnv(b.main) == RIVER_MAIN && fnv(b.surface) == RIVER_SURFACE);  // the same bytes on every platform
     // a missing ground answer: refused with the place
     Params lost = p;
-    lost.ground.pop_back();
+    lost.ground.erase(lost.ground.begin() + 1);  // a place on the centre line
     problems.clear();
     CHECK(!build(lost, origin, 100, b, problems) && problems.back().message.find("no ground under the river") != std::string::npos);
     // a ledge in a cliff (two drops 50 units apart): one step, from the upper water past the ledge to the lower
@@ -228,10 +245,12 @@ void waterfall() {
     CHECK(fnv(b.main) == FALL_MAIN && fnv(b.surface) == FALL_SURFACE);
     static_models::ModelInfo info;
     std::string why;
-    CHECK(valid(b.main, true, info, why) && valid(b.surface, false, info, why) && b.surface_triangles == 18);
-    CHECK((material_names(doc_of(b.main)) == std::vector<std::string>{"rock", "col_waterfall", "col_wall"}));
+    // the sheet (2 x 3 quads), the foam over the lip, the ring of foam round its foot (12 quads)
+    CHECK(valid(b.main, true, info, why) && valid(b.surface, false, info, why) && b.surface_triangles == 12 + 2 + 24);
+    CHECK((material_names(doc_of(b.main)) == std::vector<std::string>{"bank", "col_waterfall", "col_wall"}));
+    CHECK((material_names(doc_of(b.surface)) == std::vector<std::string>{"surface", "edge"}));
     // it spans the fall (the sheet must stay inside the main model's bounds plus 512)
-    CHECK(b.min[1] <= -900 && b.max[1] >= 4);
+    CHECK(b.min[1] <= -900 && b.max[1] >= 2);
     // the foot to ask the ground at: in front of the edge, on the falling side
     const auto places = ground_places(p, {});
     CHECK(places.size() == 3 && places[2].x == 0 && places[2].z == -150);
@@ -274,7 +293,9 @@ int main(int argc, char** argv) {
             std::ofstream f(std::string(argv[2]) + "/" + name, std::ios::binary);
             f.write(reinterpret_cast<const char*>(bytes.data()), std::streamsize(bytes.size()));
         };
-        if (build(pond_params(), {1000, 2000}, 100, b, problems)) save("pond-main.glb", b.main), save("pond-surface.glb", b.surface);
+        Params pond = pond_params();
+        pond.room = 44;  // on Outset's beach: its banks read the island's sand
+        if (build(pond, {-204100, 314550}, 250, b, problems)) save("pond-main.glb", b.main), save("pond-surface.glb", b.surface);
         Params r = river_params();
         for (const auto& q : ground_places(r, {})) r.ground.push_back({q.x, q.z, q.x > 1100 ? -200 : 100});
         if (build(r, {}, 100, b, problems)) save("river-main.glb", b.main), save("river-surface.glb", b.surface);

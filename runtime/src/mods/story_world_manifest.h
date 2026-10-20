@@ -51,9 +51,10 @@ struct ManifestTalk {
     std::vector<QuestCondition> quests;std::vector<StoryAction> then;
 };
 // material (shoreline only): "" (the coast foam, the default; "foam" in a manifest), "water" (a still-water surface: a
-// pond, a pool), "river" (flowing water, scrolling along the model's V) or "waterfall" (falling water, faster)
+// spring pool), "pond" (an island's calm shore water with its coast foam), "river" (flowing water, scrolling along the
+// model's V) or "waterfall" (falling water)
 struct ManifestVisualModel {std::string model,material;};
-inline bool water_surface_material(const std::string& m){return m=="water"||m=="river"||m=="waterfall";}
+inline bool water_surface_material(const std::string& m){return m=="water"||m=="pond"||m=="river"||m=="waterfall";}
 struct ManifestChartMarker {bool enabled=false;std::string label,when_flag;};
 struct ManifestArrival {bool enabled=false;std::string name,flag;float radius=0;};
 struct ManifestGrapplePoint {std::string id;WorldPoint position;float yaw=0;};
@@ -571,7 +572,7 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
             out.model=value.get("model").text;
             return std::any_of(models.begin(),models.end(),[&](const auto&model){return model.id==out.model&&model.kind=="static";});
         };
-        if(!visual_model("distant",a.distant)||!visual_model("shoreline",a.shoreline))return why="distant and shoreline must name declared same-package rigid static models (a shoreline's material is foam, water, river or waterfall)",false;
+        if(!visual_model("distant",a.distant)||!visual_model("shoreline",a.shoreline))return why="distant and shoreline must name declared same-package rigid static models (a shoreline's material is foam, water, pond, river or waterfall)",false;
         auto island_text=[](const Value&value,std::string&out){std::u16string decoded;if(value.type!=Value::String||value.text.empty()||value.text.size()>96||!story_mail::append_utf16(value.text,false,decoded))return false;out=value.text;return true;};
         if(v.object.contains("arrival")){
             const auto&value=v.get("arrival");

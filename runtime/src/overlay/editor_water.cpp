@@ -232,7 +232,7 @@ void water_window(const Value& m) {
             ImGui::TextDisabled("(the lowest bank)");
         }
         slider("Depth", D.depth, 20, 480, "The floor below the water");
-        slider("Banks above the water", D.rim, 0, 300, "Walls from the floor up to this far above the water");
+        slider("Banks above the water", D.rim, 0, 300, "How high the rim rises above the water before it slopes down to the ground");
         ImGui::Checkbox("Foam at the shore", &D.foam);
         ImGui::ColorEdit3("Floor colour", D.floor, ImGuiColorEditFlags_NoInputs);
     } else if (D.kind == "river") {

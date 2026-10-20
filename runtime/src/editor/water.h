@@ -65,7 +65,10 @@ struct Params {
     std::vector<bool> shallow; // river: per section (points[i] -> points[i+1]), wading water instead of swimming water
     Colour floor;
     std::vector<Sample> ground;  // world places and heights asked of the game (river beds, pond banks)
+    int room = 0;                // the sea square (not stored: where the banks read the island's ground texture from)
 };
+// the shoreline material of a pond's surface (its kind in the game's own water, tools/story_mods/shoreline_model.py)
+inline constexpr const char* kPondMaterial = "pond";
 // What the tool found wrong (shown red when an error, else yellow).
 struct Problem {
     std::string message, field, severity = "error";  // "error" or "warning"
@@ -80,7 +83,7 @@ struct Step {
 };
 struct Built {
     std::vector<uint8_t> main, surface;  // the GLBs
-    std::string material;                // the surface's shoreline material: "water", "river" or "waterfall"
+    std::string material;                // the surface's shoreline material: "pond", "river" or "waterfall"
     unsigned main_vertices = 0, main_triangles = 0, surface_vertices = 0, surface_triangles = 0;
     unsigned collision_vertices = 0, collision_triangles = 0;
     int min[3] = {0, 0, 0}, max[3] = {0, 0, 0};  // the main model's local bounds, whole units (rounded outwards)

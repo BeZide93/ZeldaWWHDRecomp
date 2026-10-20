@@ -445,6 +445,25 @@ def build(game, glb_path, identity, out, collision_out=None):
             glb,info,collision=collision_mesh.read_static(snapshot, collision=collision_out is not None)
     except (KeyError, IndexError, TypeError, ValueError, OverflowError, struct.error, RecursionError) as exc: raise BuildError('malformed GLB: '+str(exc)) from exc
     multi = not isinstance(glb, tuple)  # Parts (the module may run as __main__: no isinstance on its classes)
+    # materials that ask for the island's own ground texture (island_texture.py): read from the player's room archive
+    island = {}
+    try:
+        jl = struct.unpack_from('<I', source_bytes, 12)[0]
+        doc = json.loads(source_bytes[20:20 + jl])
+        if any(isinstance(m, dict) and isinstance(m.get('extras'), dict) and 'wwhd_island' in m['extras'] for m in doc.get('materials', [])):
+            import island_texture
+            island = island_texture.island_images(game, doc)
+    except (ValueError, UnicodeError, struct.error):
+        island = {}
+    if island:
+        if multi:
+            for m in glb.materials:
+                if m.name in island:
+                    glb.images[m.image] = island[m.name][1]
+        else:
+            name = next((m.get('name', '') for m in doc.get('materials', []) if isinstance(m, dict)), '')
+            if name in island:
+                glb = glb[:4] + (island[name][1],)
     digest=hashlib.sha256()
     with open(__file__, 'rb') as source: converter_source = source.read()
     with open(collision_mesh.__file__, 'rb') as source: collision_source = source.read()
@@ -463,6 +482,10 @@ def build(game, glb_path, identity, out, collision_out=None):
     with open(os.path.join(game,archive),'rb') as source: files=dict(base.shaderprep.sarc(base.shaderprep.yaz0(source.read())))
     require(set(files)==set(names),'unexpected player template archive')
     template, shaders = files[names[0]], files[names[1]]
+    if island:
+        import island_texture
+        with open(island_texture.__file__, 'rb') as source: sources.append(source.read())
+        for name in sorted(island): sources.append(island[name][1])
     for body in sources+[str(bool(collision_out)).encode(),identity.encode(),source_bytes,template,shaders]:
         digest.update(struct.pack('>I',len(body))); digest.update(body)
     info.update(identity=identity,cache_key=digest.hexdigest(),converter_version=VERSION)
@@ -517,7 +540,7 @@ def build(game, glb_path, identity, out, collision_out=None):
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--glb',required=True); parser.add_argument('--inspect',action='store_true'); parser.add_argument('--game'); parser.add_argument('--identity'); parser.add_argument('--out'); parser.add_argument('--collision-out'); parser.add_argument('--shoreline',action='store_true'); parser.add_argument('--shoreline-material',choices=('foam','water','river','waterfall'),default='foam')
+    parser.add_argument('--glb',required=True); parser.add_argument('--inspect',action='store_true'); parser.add_argument('--game'); parser.add_argument('--identity'); parser.add_argument('--out'); parser.add_argument('--collision-out'); parser.add_argument('--shoreline',action='store_true'); parser.add_argument('--shoreline-material',choices=('foam','water','pond','river','waterfall'),default='foam')
     args=parser.parse_args()
     try:
         if args.inspect: result=inspect(args.glb)

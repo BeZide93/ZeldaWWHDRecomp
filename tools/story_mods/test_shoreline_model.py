@@ -130,23 +130,24 @@ class ShorelineTests(unittest.TestCase):
         self.assertEqual(f.dict(f.rel(model + 0x18))[0][0], coast.MATERIALS['water'])
         start = f.rel(f.rel(f.rel(f.dict(f.rel(model + 0x14))[0][1] + 0x20) + 0x18) + 0x14)
         self.assertEqual([struct.unpack_from('>4f', data, start + i * 64)[3] for i in range(9)], [0, 0, 0, 0, 1, 0, 0, 0, 0])
-        # a river's surface fades the same way; a waterfall gets Forest Haven's colours (blue 1 at the top, 0.3 at the foot)
-        fall = (pts, [(0, 0, 1)] * 9, [(p[0] / 100, p[2] / 100) for p in pts], idx, b'')
-        fall = ([(p[0], 200 - p[2], 0) for p in pts],) + fall[1:]
-        data = coast.build_bfres(template(coast.MATERIALS['waterfall'])[0], fall, 'mod_fall', coast.MATERIALS['waterfall'])
+        # each kind's parts get the colours the game's own models of that material have: a waterfall Forest Haven's
+        # (blue 1 at the top, 0.3 at the foot), a river's stream red 0.5 at its open edges, the pond's waves fading out
+        fall = [(p[0], 200 - p[2], 0) for p in pts]
+        colours = [tuple(round(v, 4) for v in c) for c in coast.part_colours('waterfall', 'surface', fall, idx)]
+        self.assertEqual((colours[0], colours[4], colours[8]), ((0.2, 0.0, 1.0, 1.0), (0.2, 0.0, 0.65, 1.0), (0.2, 0.0, 0.3, 1.0)))
+        self.assertEqual([c[0] for c in coast.part_colours('river', 'surface', pts, idx)], [0.5, 0.5, 0.5, 0.5, 0.0, 0.5, 0.5, 0.5, 0.5])
+        self.assertEqual([c[3] for c in coast.part_colours('pond', 'waves', pts, idx)], [0, 0, 0, 0, 1, 0, 0, 0, 0])
+        self.assertEqual(set(coast.part_colours('pond', 'edge', pts, idx)), {(1.0, 1.0, 1.0, 1.0)})
+        # a part's colours are written as given
+        data = coast.build_parts(template(coast.MATERIALS['waterfall'])[0], [(coast.MATERIALS['waterfall'], (fall,) + geometry[1:], coast.part_colours('waterfall', 'surface', fall, idx))], 'mod_fall')
         f = coast.base.Bfres(data)
         model = f.dict(f.rel(0x20))[0][1]
         start = f.rel(f.rel(f.rel(f.dict(f.rel(model + 0x14))[0][1] + 0x20) + 0x18) + 0x14)
-        colours = [tuple(round(v, 4) for v in struct.unpack_from('>4f', data, start + i * 64)) for i in range(9)]
-        self.assertEqual(colours[0], (0.2, 0.0, 1.0, 1.0))
-        self.assertEqual(colours[4], (0.2, 0.0, 0.65, 1.0))
-        self.assertEqual(colours[8], (0.2, 0.0, 0.3, 1.0))
-        for kind in ('river',):
-            data = coast.build_bfres(template(coast.MATERIALS[kind])[0], geometry, 'mod_' + kind, coast.MATERIALS[kind])
-            f = coast.base.Bfres(data)
-            model = f.dict(f.rel(0x20))[0][1]
-            start = f.rel(f.rel(f.rel(f.dict(f.rel(model + 0x14))[0][1] + 0x20) + 0x18) + 0x14)
-            self.assertEqual([struct.unpack_from('>4f', data, start + i * 64)[3] for i in range(9)], [0, 0, 0, 0, 1, 0, 0, 0, 0])
+        self.assertEqual(tuple(round(v, 4) for v in struct.unpack_from('>4f', data, start + 8 * 64)), (0.2, 0.0, 0.3, 1.0))
+        # one template room per kind, every part's material named
+        for kind, (room, parts) in coast.KINDS.items():
+            self.assertEqual(coast.TEMPLATE_ROOMS[kind], room)
+            self.assertTrue(set(parts) <= set(coast.ROLES) and 'surface' in parts)
         # the foam keeps full alpha; the water template needs its own material in the player's island
         with self.assertRaises(actor_model.BuildError):
             coast.build_bfres(template()[0], geometry, 'mod_pond', coast.MATERIALS['water'])

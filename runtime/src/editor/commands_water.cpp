@@ -205,6 +205,7 @@ static bool plan_water(Host* host, const Value& manifest, const std::string& kin
     auto ground = out.params.ground;
     if (!water::parse(kind, q, out.origin, out.origin_y, out.params, why)) return false;
     out.params.ground = std::move(ground);
+    out.params.room = out.room;
     water::build(out.params, out.origin, out.origin_y, out.built, out.problems);
 
     // what the package and the game allow

@@ -700,7 +700,7 @@ void water_tools() {
     }
     CHECK(found.size() == 6);
     Value v = call(h, "check_water", json(R"({"kind":"pond","points":[[100,-201800],[900,-201800],[900,-201100],[100,-201100]],"level":1100})"));
-    CHECK(!is_error(v) && text_of(v).find("\"ok\":true") != std::string::npos && text_of(v).find("\"surface_triangles\":10") != std::string::npos);
+    CHECK(!is_error(v) && text_of(v).find("\"ok\":true") != std::string::npos && text_of(v).find("\"material\":\"pond\"") != std::string::npos);
     v = call(h, "add_pond", json(R"({"id":"spring","points":[[100,-201800],[900,-201800],[900,-201100],[100,-201100]],"level":1100,"depth":250,"foam":true})"));
     CHECK(!is_error(v));
     v = call(h, "get_water", json(R"({"id":"spring"})"));
@@ -708,7 +708,7 @@ void water_tools() {
     v = call(h, "edit_water", json(R"({"id":"spring","level":1050})"));
     CHECK(!is_error(v));
     v = call(h, "get_actor", json(R"({"id":"spring"})"));
-    CHECK(!is_error(v) && text_of(v).find("\"y\":1050") != std::string::npos && text_of(v).find("\"material\":\"water\"") != std::string::npos);
+    CHECK(!is_error(v) && text_of(v).find("\"y\":1050") != std::string::npos && text_of(v).find("\"material\":\"pond\"") != std::string::npos);
     v = call(h, "undo", Value());
     CHECK(!is_error(v));
     v = call(h, "get_water", json(R"({"id":"spring"})"));

@@ -456,7 +456,9 @@ is low enough, as on the islands. `col_shallow` is for water too shallow to swim
 
 The surface is invisible by itself. Show it with a water surface model: a separate model declared as
 the actor's `shoreline` with `"material": "water"` (see "Island presentation"); the water of the
-game's spring pools moves on it.
+game's spring pools moves on it. `"material": "pond"` gives it the calm water of an island's own
+shallows instead (Outset's): the blue of the shallows, wave lines over them and the coast foam along the
+shore, each from its own material in the model (see "Water surfaces with several materials").
 
 The game looks for a pond only within the height range of the room's own ground (the highest point of
 the island, its houses and cliffs in that square). A pond whose surface is higher than that is not
@@ -466,13 +468,28 @@ square's island. A pond at sea level is always found.
 
 ### Rivers and waterfalls
 
-A shoreline can also carry flowing water: `"material": "river"` gives the model the flowing water of Mother
-& Child Isles' spring outflow, `"material": "waterfall"` Forest Haven's falling water (the same texture,
-three times as fast). Both scroll along the model's V: map V so that it grows downstream (downwards on a
+A shoreline can also carry flowing water: `"material": "river"` gives the model the flowing water of Forest
+Haven's streams, `"material": "waterfall"` Forest Haven's falling water (the same texture, three times as
+fast). Both scroll along the model's V: map V so that it grows downstream (downwards on a
 waterfall), about every 200 units on a river and every 700 units down a waterfall (as the game's own repeat it); U across,
 about every 200 units on a river and every 500 on a waterfall. A river fades out towards the mesh's open edges like the
 still water, so give it at least one row of inner points; a waterfall is drawn as Forest Haven's falls are, more opaque
 and foamy at the top than at the foot.
+
+#### Water surfaces with several materials
+
+A water surface model may have several materials, each named after its part: `surface` (the water
+itself, required), `waves` (lines on it), `edge` (the foam along a shore or over a fall's lip) and
+`splash` (where falling water lands). Each part gets its own material of the game's water there:
+
+| `"material"` | `surface` | `waves` | `edge` | `splash` |
+| --- | --- | --- | --- | --- |
+| `pond` | Outset's shallows | Outset's wave lines | Outset's coast foam | |
+| `water` | the spring pools' water | | | |
+| `river`, `waterfall` | Forest Haven's stream | | Forest Haven's bank foam | Forest Haven's spray |
+
+Map an `edge` part's V from 0 at the shore (or the lip) to 1 out on the water: the foam is strongest at 0.
+A model with one material is its `surface`, whatever its name. `foam` shorelines keep one material.
 
 `col_shallow` is the ground of shallow water: put it where Link walks (the river's bed), not at the
 water's surface. `col_waterfall` is the ground under a fall: Link standing on it gets the game's splash on
@@ -485,9 +502,21 @@ waterfalls from points clicked on an island's ground. Each is one static object 
 
 | Body | Its model (drawn, and its collision) | Its shoreline |
 | --- | --- | --- |
-| Pond | floor (`col_sand`), banks inside and out (`col_stone`) down to the ground, optional foam ring; `col_water` at the level | `water` |
-| River | its bed, a few units above the ground; `col_water` at the level in deep sections, `col_shallow` on the bed in shallow ones | `river` |
-| Waterfall | rock behind the fall (`col_wall`) and a splash pad below it (`col_waterfall`) | `waterfall` |
+| Pond | a bowl under the water (`col_sand`), a rim a little above the water that slopes down to the island's ground (`col_grass`, `col_stone` where it can't reach); `col_water` at the level | `pond`: the water, wave lines and (with `foam`) coast foam at the shore |
+| River | its bed, a few units above the ground, and banks on both sides that slope down to the ground; `col_water` at the level in deep sections, `col_shallow` on the bed in shallow ones | `river`: the stream, foam along both banks, over each step's lip and where the water lands |
+| Waterfall | rock behind the fall (`col_wall`) and a splash pad below it (`col_waterfall`) | `waterfall`: a thin sheet curling over the lip, foam over the lip and a ring of foam round its foot |
+
+A pond's outline is rounded off (each corner cut twice), and its rim and a river's banks are natural ones:
+a little above the water, then a slope (about 20 to 27 degrees, wandering a little from place to place) down
+to where it meets the island's ground, asked at five distances up to about 8 m out. Where the ground can't
+be reached that way (a cliff edge, the open sea) a short skirt goes down instead, and next to a river's step the
+banks stop at the lip. The game's island ground can't be lowered, so water that must be deep enough to swim
+in (about 200 units) sits that far above the ground: on a slope its rim becomes a mound on the downhill side.
+The banks are painted with the island's own ground: each part of a bank asks for the texture of the ground
+where its slope meets it (glTF material `extras`: `{"wwhd_island": {"room": n, "points": [[x, z], ...]}}`,
+world units), and the converter reads that texture (the band of the ground atlas it uses there) from your
+room archive into your model cache. Without the room (another stage, or a missing file) the model's own
+plain texture is used.
 
 A river's level follows the ground sampled every 150 units along its centre line: deep sections hold their
 depth of water above the bed, shallow ones 30 units; it never flows uphill (a rise is reported, its water
@@ -500,9 +529,10 @@ island's ground and walls (as island buildings do); everything else an object ke
 Limits: bodies of water are made on the `sea` stage; a body takes two of a mod's 8 models; a pond has 3 to
 48 points, a river 2 to 32 (turns of at most 120 degrees), a waterfall is 100 to 4,000 units wide and falls 80
 to 6,000; the water surface has at most 1,024 triangles. Each prepared body takes about 0.6 to 1 MiB of
-the room's model memory (the surface's water textures come from your game files). The game's own waterfall
-splash object (Ygstp00), spring (Ygush00) and the ambient water sounds of the islands (their sound emitters)
-are not added: they aren't game objects a mod can place yet.
+the room's model memory (the surface's water textures and the banks' ground texture come from your game
+files). The game's spring gush (Ygush00) and the ambient water sounds of the islands (their sound emitters)
+are not added: they aren't game objects a mod can place yet. A waterfall's splash is its own foam (the
+game's splash particles appear where Link lands in the water).
 
 A full save state made with an earlier version keeps its world objects' collision as it was then
 (before the water, ice and void materials, and with `col_metal` still hurting Link) until the room

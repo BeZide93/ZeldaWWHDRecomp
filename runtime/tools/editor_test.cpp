@@ -850,6 +850,8 @@ void building(const fs::path& examples) {
 
     // focus, play and stop
     CHECK(ok(s.run("focus", json(R"({"id": "guide"})"))) && host.focused == 1);
+    CHECK(ok(s.run("focus", json(R"({"position": {"x": 10, "y": 20, "z": 30}, "distance": 900})"))) && host.focused == 2);  // a place
+    CHECK(!ok(s.run("focus", json(R"({"id": "nobody"})"))));
     CHECK(ok(s.run("play", json(R"({"from": "link", "restore": false})"))) && host.is_playing && !host.last_from_camera && !host.last_restore);
     CHECK(ok(s.run("stop")) && !host.is_playing && !ok(s.run("stop")));
     CHECK(ok(s.run("play")) && host.last_from_camera && host.last_restore);
@@ -1532,11 +1534,13 @@ void water_tool() {
     fs::create_directories(dir);
     s.add_package("editor-test", "Editor test", dir.string(), json(kManifest));
     const char* pond = R"({"points": [{"x": 600, "y": 100, "z": -201800}, {"x": 1400, "z": -201800}, {"x": 1400, "z": -201100}, {"x": 600, "z": -201100}], "level": 400, "depth": 300, "rim": 20, "foam": true})";
-    // check: nothing changes; its place, room, counts; the ground was asked once per outline point
+    // check: nothing changes; its place, room, counts; the ground was asked at each point of the (rounded) outline and
+    // five places beyond it
     Value r = s.run("check_water", [&] { Value v = json(pond); v["kind"] = "pond"; return v; }());
     CHECK(ok(r) && r.get("result").get("ok").boolean && r.get("result").get("problems").array.empty() && s.undo_depth() == 0 && water_files(dir) == 0);
     CHECK(r.get("result").get("room").number == 11 && r.get("result").get("position").get("y").number == 400 && r.get("result").get("position").get("x").number == 1000);
-    CHECK(r.get("result").get("surface_triangles").number == 10 && r.get("result").get("material").string() == "water" && r.get("result").get("ground_samples").number == 4);
+    CHECK(r.get("result").get("surface_triangles").number > 10 && r.get("result").get("material").string() == "pond");
+    CHECK(int(r.get("result").get("ground_samples").number) % 6 == 0 && r.get("result").get("ground_samples").number >= 16 * 6);
     // the known limit: above the room's highest ground the game doesn't find the water (an error, said in red)
     host.room_top = 350;
     r = s.run("check_water", [&] { Value v = json(pond); v["kind"] = "pond"; return v; }());
@@ -1556,13 +1560,13 @@ void water_tool() {
     r = s.run("add_pond", json(pond));
     CHECK(ok(r) && r.get("result").get("id").string() == "pond" && s.undo_depth() == 1 && water_files(dir) == 2);
     const Value* a = actor_of(s, "pond");
-    CHECK(a && a->get("behaviour").string() == "static" && a->get("shoreline").get("material").string() == "water" && a->get("collision").get("mesh").string() == a->get("model").string());
+    CHECK(a && a->get("behaviour").string() == "static" && a->get("shoreline").get("material").string() == "pond" && a->get("collision").get("mesh").string() == a->get("model").string());
     CHECK(a && a->get("position").get("y").number == 400 && a->get("room").number == 11 && a->get("stage").string() == "sea");
     const std::string main = a ? a->get("model").string() : "", surface = a ? a->get("shoreline").get("model").string() : "";
     CHECK(main.rfind("pond-m", 0) == 0 && surface.rfind("pond-s", 0) == 0 && s.manifest("editor-test")->get("models").array.size() == 2);
     CHECK(fs::is_regular_file(dir / "models" / "water" / (main + ".glb")));
     // both prepared for the game: the main model with collision, the surface as a water shoreline
-    CHECK(host.prepared_models.size() == 2 && host.prepared_models[0].get("collision").boolean && host.prepared_models[1].get("shoreline").string() == "water");
+    CHECK(host.prepared_models.size() == 2 && host.prepared_models[0].get("collision").boolean && host.prepared_models[1].get("shoreline").string() == "pond");
     // get_water: the parameters back in world units
     r = s.run("get_water", json(R"({"id": "pond"})"));
     CHECK(ok(r) && r.get("result").get("kind").string() == "pond" && r.get("result").get("level").number == 400 && r.get("result").get("depth").number == 300 &&

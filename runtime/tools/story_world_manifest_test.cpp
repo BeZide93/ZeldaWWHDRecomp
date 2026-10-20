@@ -471,8 +471,8 @@ int main() {
         {auto water=island;water["actors"].array[0]["shoreline"]["material"]="water";assert(parse_actors(water,actors,why)&&actors[0].shoreline.material=="water"&&actors[0].shoreline.model=="coast");
          const auto foam_identity=story_actors::identity::fingerprint("m",original);auto water_spec=actors[0];assert(story_actors::identity::fingerprint("m",water_spec)!=foam_identity);
          assert(actors[0].water_body());
-         // river and waterfall surfaces (the editor's water tool): each its own identity, each a body of water
-         for(const char*flowing:{"river","waterfall"}){auto f=island;f["actors"].array[0]["shoreline"]["material"]=flowing;assert(parse_actors(f,actors,why)&&actors[0].shoreline.material==flowing&&actors[0].water_body());assert(story_actors::identity::fingerprint("m",actors[0])!=foam_identity&&story_actors::identity::fingerprint("m",actors[0])!=story_actors::identity::fingerprint("m",water_spec));}
+         // pond, river and waterfall surfaces (the editor's water tool): each its own identity, each a body of water
+         for(const char*flowing:{"pond","river","waterfall"}){auto f=island;f["actors"].array[0]["shoreline"]["material"]=flowing;assert(parse_actors(f,actors,why)&&actors[0].shoreline.material==flowing&&actors[0].water_body());assert(story_actors::identity::fingerprint("m",actors[0])!=foam_identity&&story_actors::identity::fingerprint("m",actors[0])!=story_actors::identity::fingerprint("m",water_spec));}
          water["actors"].array[0]["shoreline"]["material"]="foam";assert(parse_actors(water,actors,why)&&actors[0].shoreline.material.empty()&&!actors[0].water_body());
          for(const char*bad_material:{"lava","Water",""}){auto bad=island;bad["actors"].array[0]["shoreline"]["material"]=bad_material;rejected(bad);}
          auto bad=island;bad["actors"].array[0]["distant"]["material"]="water";rejected(bad);assert(parse_actors(island,actors,why));}

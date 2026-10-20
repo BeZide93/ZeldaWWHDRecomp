@@ -1005,7 +1005,8 @@ Value Session::dispatch_build(const std::string& command, const Value& p, std::s
         if (!pkg) return r;
         const Value* a = by_id(pkg->manifest.get("actors"), text(p, "id"));
         WorldPoint at;
-        if (!a || !read_point(a->get("position"), at)) return why = "no placed actor \"" + text(p, "id") + "\"", r;
+        const bool place = p.get("id").type == Value::Null && read_point(p.get("position"), at);  // a place instead of an actor
+        if (!place && (!a || !read_point(a->get("position"), at))) return why = "no placed actor \"" + text(p, "id") + "\"", r;
         if (!host_) return why = "the game is not running", r;
         // a world object (a building, a pond, a river): its whole extent in the picture, from its middle
         float distance = 700;
