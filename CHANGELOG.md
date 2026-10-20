@@ -7,6 +7,13 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Mod SDK v3 and the editor: paths, the wall cannon, warship routes and wandering Floormasters** (for mod makers).
+  A mod can draw lines and areas in a room (up to 16 per mod) and its enemies can use them. The game's wall cannon can
+  be placed with an area as its firing range: it turns to Link and fires while he is inside, and a bomb destroys it,
+  with the mod's own defeat flag and drops. An enemy warship can sail a route back and forth, firing at Link, and a
+  Floormaster can glide along a line. The editor draws and edits paths in the picture, and its Check warns when a
+  ship's route runs over land or a Floormaster's line leaves the floor; the same is available as MCP commands.
+
 - **Mod SDK v3 and the editor: sea and dungeon enemies** (for mod makers). The Kargaroc (flying or perched, without
   riders), the red Wizzrobe with its fireballs, the enemy warship (at sea only; its cannonballs hit only Link and his
   boat), groups of one to five Gyorgs (they appear once Link has the boomerang), the Floormaster (it grabs Link and lets
