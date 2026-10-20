@@ -14,6 +14,11 @@ what is on `devel` and not released yet (also in the
   Floormaster can glide along a line. The editor draws and edits paths in the picture, and its Check warns when a
   ship's route runs over land or a Floormaster's line leaves the floor; the same is available as MCP commands.
 
+- **Mod SDK v3 and the editor: every placeable villager can walk a route** (for mod makers). The Windfall villagers
+  without a walk of their own (the old women, the young women and the large sailors) now walk their routes with
+  another villager's walk, fitted to their own bodies when the game starts, from the player's own files. Feet stay on
+  the ground at any walking speed. Full save states made with the editor before this update can't be loaded.
+
 - **Mod SDK v3 and the editor: sea and dungeon enemies** (for mod makers). The Kargaroc (flying or perched, without
   riders), the red Wizzrobe with its fireballs, the enemy warship (at sea only; its cannonballs hit only Link and his
   boat), groups of one to five Gyorgs (they appear once Link has the boomerang), the Floormaster (it grabs Link and lets
