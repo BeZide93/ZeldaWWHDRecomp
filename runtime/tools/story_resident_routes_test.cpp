@@ -13,6 +13,7 @@
 #include <vector>
 #include "mods/story_resident_route.h"
 #include "mods/story_resident_routes.h"
+#include "mods/story_resident_walk_clip.h"
 #include "guest_addr.h"
 #include "runtime.h"
 #ifdef _WIN32
@@ -50,6 +51,8 @@ void sf(uint32_t a, float v) { st32(a, f32_as_u32(v)); }
 std::map<uint32_t, void (*)(Cpu*)> hooks;
 std::map<uint32_t, unsigned> originals;
 std::vector<std::pair<uint32_t, uint32_t>> set_modes;
+struct MorfCall { uint32_t morf, animation, mode; double blend, rate; };
+std::vector<MorfCall> morf_calls;
 uint32_t retail_route_calls = 0;
 
 // the actor's walk: the game's executeWalk in short, on our stand-in fields
@@ -102,10 +105,15 @@ void original(Cpu* c, uint32_t fn) {
         c->r[3] = 0;  // the retail test: never in these fixtures
     } else if (fn == routes::walk_function()) {
         native_walk(c->r[3]);
+    } else if (fn == routes::set_animation_function()) {  // the game's setAnm: the slot's animation, m744 used up
+        st32(c->r[3] + 0x8B8, f32_as_u32(-1.f));
+        st8(c->r[3] + 0x907, uint8_t(c->r[4]));
+        c->f[1].ps0 = 99, c->f[2].ps0 = 99;  // what the call leaves in the registers
     }
 }
-uint32_t call(Cpu*, uint32_t fn, std::initializer_list<uint32_t> args) {
+uint32_t call(Cpu* cpu, uint32_t fn, std::initializer_list<uint32_t> args) {
     const auto* a = args.begin();
+    if (fn == GC(0x025E4A98)) morf_calls.push_back({a[0], a[1], a[2], cpu->f[1].ps0, cpu->f[2].ps0});  // mDoExt_McaMorf::setAnm
     if (fn == GC(0x022C06F4)) {  // executeSetMode
         set_modes.push_back({a[0], a[1]});
         st8(a[0] + 0x903, uint8_t(a[1]));
@@ -252,7 +260,7 @@ int main() {
     routes::set_memory(kRecords);
     routes::configure(original, call);
     assert(routes::install([](uint32_t) { return std::string(); }, [](uint32_t a, void (*h)(Cpu*)) { hooks[a] = h; }));
-    assert(hooks.size() == 4);
+    assert(hooks.size() == 5);
     // another mod replacing one of them: nothing installed (fresh module state is not available here;
     // the refusal is the same check)
 
@@ -434,6 +442,93 @@ int main() {
         assert(routes::write(7, q, {0, 50, 0}, true) && routes::owner(7) == 508 && routes::view(7).status == route::Status::Walking);
         routes::clear(7);
         assert(!routes::view(7).valid && routes::owner(7) == 0);
+    }
+
+    // borrowed walks: a clip in its slot, bound to the character's skeleton by name, played in the walk slot
+    {
+        constexpr uint32_t kClips = 0x60200000, kMorfAt = kArena + 0x10000, kSkel = kArena + 0x11000, kAnimObj = kArena + 0x12000;
+        map_guest(kClips, routes::kClipMemoryBytes);
+        map_guest(GD(0x10160000), 0x10000);  // the animation object's initial frame constant
+        assert(!routes::clip_ready(0) && !routes::clip_memory());
+        routes::set_clip_memory(kClips);
+        assert(routes::missing_clip(3) == 0 && routes::missing_clip(7) == 1 && routes::missing_clip(12) == 2 && routes::missing_clip(9) == -1);  // ub1, uw1, sa1; um1 has its own
+        // a three-bone skeleton and a clip for it (the encoder's layout, as story_resident_walk_clip writes it)
+        std::vector<story_resident_walk_clip::Bone> bones(3);
+        const char* names[3] = {"world_root", "backbone", "waist"};
+        for (int i = 0; i < 3; ++i) bones[i].name = names[i], bones[i].parent = i ? 0 : -1, bones[i].tr[1] = i ? 50 : 0;
+        story_resident_walk_clip::Built built;
+        built.name = "ub_walk_borrowed", built.end = 10;
+        built.rot.assign(3, {}), built.tr.assign(3, {}), built.moves = {false, true, true};
+        for (unsigned f = 0; f <= 10; ++f)
+            for (int i = 0; i < 3; ++i) built.rot[i].push_back({0.1 * f, 0, 0}), built.tr[i].push_back({0, 50, 0});
+        const auto fska = story_resident_walk_clip::encode(built, bones);
+        assert(!routes::set_clip(0, std::vector<uint8_t>(routes::kClipSlotBytes)) && routes::set_clip(0, fska) && routes::clip_ready(0) && routes::missing_clip(3) == -1);
+        // the character's skeleton in guest memory: FSKL, three bones (0x40 each) with names
+        std::memset(mem::ptr(kSkel), 0, 0x400);
+        st32(kSkel, 0x46534B4C);
+        st16(kSkel + 8, 3);
+        st32(kSkel + 0x14, 0x40 - 0x14);  // bones at kSkel + 0x40
+        for (uint32_t i = 0; i < 3; ++i) {
+            const uint32_t b = kSkel + 0x40 + i * 0x40, name = kSkel + 0x200 + i * 0x20;
+            std::memcpy(mem::ptr(name), names[i], std::strlen(names[i]) + 1);
+            st32(b, name - b);
+            st16(b + 4, uint16_t(i));
+        }
+        // its motion: the skeleton it is bound to and the animation object it plays now (the game's layout)
+        std::memset(mem::ptr(kMorfAt), 0, 0x100);
+        st32(kMorfAt + 0x6C, kSkel);
+        std::memset(mem::ptr(kAnimObj), 0, 0x38);
+        st32(kAnimObj + 4, GD(0x1016E95C));
+        st32(kMorfAt + 0x94, kAnimObj);
+        sf(GD(0x1016E8E0), 0.f);
+        actor(kActor, 601, 3);  // ub1
+        st32(kActor + 0x44C, kMorfAt);
+        sf(kActor + 0x8B8, -1.f);
+        assert(routes::write(9, path_of({{100, 0, 0}}, "loop"), {0, 0, 0}, false));
+        routes::set_owner(9, 601);
+        // walk slot: the game's call first, then the borrowed walk with the same blend and rate
+        morf_calls.clear();
+        const unsigned before = originals[routes::set_animation_function()];
+        Cpu c{};
+        c.r[3] = kActor, c.r[4] = 2, c.r[5] = 2, c.f[1].ps0 = 8, c.f[2].ps0 = 1;
+        hooks.at(routes::set_animation_function())(&c);
+        assert(originals[routes::set_animation_function()] == before + 1 && morf_calls.size() == 1);
+        const uint32_t object = morf_calls[0].animation, clip = ld32(object + 8);
+        assert(morf_calls[0].morf == kMorfAt && morf_calls[0].mode == 2 && morf_calls[0].blend == 8 && morf_calls[0].rate == 1);
+        assert(ld32(object + 4) == GD(0x1016E95C) && ld32(object + 0xC) == object + 0x18 && std::string(reinterpret_cast<const char*>(mem::ptr(object + 0x18))) == "ub_walk_borrowed");
+        assert(uint32_t(clip + story_resident_walk_clip::kSkeletonField + ld32(clip + story_resident_walk_clip::kSkeletonField)) == kSkel);
+        // a one-time blend (m744) is the blend the game used
+        morf_calls.clear();
+        sf(kActor + 0x8B8, 12.f);
+        c = Cpu{};
+        c.r[3] = kActor, c.r[4] = 2, c.r[5] = 2, c.f[1].ps0 = 8, c.f[2].ps0 = 1.5;
+        hooks.at(routes::set_animation_function())(&c);
+        assert(morf_calls.size() == 1 && morf_calls[0].blend == 12 && morf_calls[0].rate == 1.5);
+        // other slots, other characters and characters without a route: the game's call only
+        morf_calls.clear();
+        c.r[3] = kActor, c.r[4] = 0;
+        hooks.at(routes::set_animation_function())(&c);
+        actor(kOther, 602, 3);
+        st32(kOther + 0x44C, kMorfAt);
+        c.r[3] = kOther, c.r[4] = 2;
+        hooks.at(routes::set_animation_function())(&c);
+        assert(morf_calls.empty());
+        // a skeleton with other bones: not played
+        std::memcpy(mem::ptr(kSkel + 0x220), "spine", 6);
+        st32(kMorfAt + 0x6C, kSkel);
+        st32(kClips + 8, 0);  // a skeleton not seen yet is checked again
+        assert(!routes::bind_clip(0, kActor));
+        std::memcpy(mem::ptr(kSkel + 0x220), "backbone", 9);
+        assert(routes::bind_clip(0, kActor) == object);
+        // a borrowed walker steers at its own step while walking (the game's 400 circles wide)
+        st8(kActor + 0x903, 2);
+        st32(kActor + 0x870, routes::route_address(9));
+        st16(kActor + 0x8F6, 400);
+        c = Cpu{};
+        c.r[3] = kActor;
+        hooks.at(routes::walk_function())(&c);
+        assert(int16_t(ld16(kActor + 0x8F6)) == route::kBorrowedSteer);
+        routes::clear(9);
     }
     std::puts("resident route tests passed");
     return 0;

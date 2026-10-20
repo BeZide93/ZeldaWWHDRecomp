@@ -57,6 +57,7 @@
 #include "story_actors.h"
 #include "story_room_paths.h"
 #include "story_resident_routes.h"
+#include "story_resident_walk_files.h"
 #include "story_game_pieces.h"
 #include "mod_actor.h"
 #include "mod_actor_behavior_core.h"
@@ -1304,6 +1305,14 @@ void init() {
         if(story_actors::resident_routes_declared()||editor::launch_mode())story_resident_routes::set_memory(mem::runtime_alloc(story_resident_route::kMemoryBytes,16));
         // the mod paths' records: only with a declared path (or the editor, which adds them live)
         if(story_room_paths::declared()||editor::launch_mode())story_room_paths::set_memory(mem::runtime_alloc(story_room_path::kMemoryBytes,16));
+        // the borrowed walks of the villagers without one (Ub, Uw, Sa), built from the player's own files:
+        // the ones a declared route needs (every one for the editor, which adds routes live)
+        {std::vector<unsigned> kinds;for(unsigned k=0;k<story_resident_types::kBorrowedWalkCount;++k)if(editor::launch_mode()||story_actors::borrowed_walk_declared(k))kinds.push_back(k);
+         if(!kinds.empty()&&story_resident_routes::memory()){story_resident_routes::set_clip_memory(mem::runtime_alloc(story_resident_routes::kClipMemoryBytes,16));
+          for(unsigned k:kinds){const auto&w=story_resident_types::kBorrowedWalks[k];story_resident_walk_files::Clip clip;std::string why;
+           if(!story_resident_walk_files::build(config::game_dir,k,clip,why))LOG("[actors] the borrowed walk %s (%s's) is not available: %s; those villagers stand",w.name,w.lender,why.c_str());
+           else if(!story_resident_routes::set_clip(k,clip.fska))LOG("[actors] the borrowed walk %s does not fit its memory (%zu bytes); those villagers stand",w.name,clip.fska.size());
+           else LOG("[actors] borrowed walk %s: %s's %s on %s, %u frames, stride %.1f, %zu bytes",w.name,w.lender,w.clip,w.target,clip.frames,clip.stride,clip.fska.size());}}}
         story_actors::set_scene_start(story_scenes::request);
         if(editor::launch_mode())story_actors::editor_live_kinds();  // --editor: native props, switches, doors and enemies placed live
         story_actors::install([](uint32_t addr) {

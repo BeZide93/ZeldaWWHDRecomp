@@ -583,17 +583,27 @@ void native_room_loaded(Cpu* c,int room){
     refresh_link();
     for(auto& a:g_actors)if(a.spec.room==unsigned(room)){if(a.spec.kind=="mod"&&(!a.spec.combat_enabled||(new_prop_epoch&&std::strncmp(reinterpret_cast<const char*>(mem::ptr(kStage)),a.spec.stage.c_str(),8)==0)))mod_actor::retry(a.mod_token);if(a.prop_token&&new_prop_epoch&&std::strncmp(reinterpret_cast<const char*>(mem::ptr(kStage)),a.spec.stage.c_str(),8)==0){a.restore_quarantined=false;story_props::retry(a.prop_token);}if(a.switch_token&&new_prop_epoch&&std::strncmp(reinterpret_cast<const char*>(mem::ptr(kStage)),a.spec.stage.c_str(),8)==0){a.restore_quarantined=false;story_switches::retry(a.switch_token);}
         if(a.game&&new_prop_epoch&&std::strncmp(reinterpret_cast<const char*>(mem::ptr(kStage)),a.spec.stage.c_str(),8)==0){a.game_attempts=0;a.restore_quarantined=a.game_mismatch;}}room_loaded(c,room);}
+// The route a resident walks: a villager with a borrowed walk walks at its table pace unless the route
+// gives a speed (the game's own route speed for them is a slow 30 units a second, made for gliding)
+story_notebook::ManifestPath walked_path(const ManifestActor& a){
+    auto p=a.path;
+    if(!p.speed_given&&a.actor=="resident"&&a.resident<256&&story_resident_types::borrowed_walk(uint8_t(a.resident))){p.speed_given=true;p.speed=story_resident_types::walker(uint8_t(a.resident))->pace;}
+    return p;}
 // A walking resident's route record: a free one is taken the first time; `fresh` writes the route
 // with its guard state cleared (a new copy starts at its position). False: no route (it stands).
 bool route_record(Actor& a,bool fresh){
     if(!walks(a.spec)){if(a.route_slot>=0)story_resident_routes::clear(unsigned(a.route_slot));a.route_slot=-1;return false;}
     if(!story_resident_routes::installed()){static bool told=false;if(!told)LOG("[actors] resident routes are not available in this session: residents with a path stand until a restart");told=true;return false;}
+    // a villager without a walk of its own walks only with its borrowed walk (built from the game files at start)
+    if(a.spec.actor=="resident"&&a.spec.resident<256)if(const int missing=story_resident_routes::missing_clip(uint8_t(a.spec.resident));missing>=0){
+        static std::set<std::string> told;if(told.insert(a.mod+":"+a.spec.id).second)LOG("[actors] %s:%s: its borrowed walk (%s) is not available in this session; it stands",a.mod.c_str(),a.spec.id.c_str(),story_resident_types::kBorrowedWalks[missing].name);
+        if(a.route_slot>=0)story_resident_routes::clear(unsigned(a.route_slot));a.route_slot=-1;return false;}
     if(a.route_slot<0){
         std::set<int> used;for(const auto& other:g_actors)if(other.route_slot>=0)used.insert(other.route_slot);
         for(int s=0;s<int(story_resident_route::kSlots);++s)if(!used.contains(s)){a.route_slot=s;break;}
         if(a.route_slot<0){LOG("[actors] %s:%s: no free route record; it stands",a.mod.c_str(),a.spec.id.c_str());return false;}
     }
-    if(!story_resident_routes::write(unsigned(a.route_slot),a.spec.path,a.spec.position,!fresh))return false;
+    if(!story_resident_routes::write(unsigned(a.route_slot),walked_path(a.spec),a.spec.position,!fresh))return false;
     if(fresh)story_resident_routes::set_owner(unsigned(a.route_slot),0);
     return true;
 }
@@ -983,13 +993,14 @@ bool route_in_place(Cpu* c,const std::string& mod,Actor& a,const ManifestActor& 
     ManifestActor same=a.spec;same.path=spec.path;if(!same_spec(mod,same,spec))return false;
     const uint32_t at=actor_address(c,mod,spec.id);if(!at||find(at)!=&a||ld8(at+0xC)==3||story_resident_routes::slot_of(at)!=a.route_slot)return false;
     a.spec=spec;refingerprint(mod,a);
-    if(!story_resident_routes::write(unsigned(a.route_slot),a.spec.path,a.spec.position,false))return false;
+    if(!story_resident_routes::write(unsigned(a.route_slot),walked_path(a.spec),a.spec.position,false))return false;
     story_resident_routes::set_owner(unsigned(a.route_slot),a.process);
     story_resident_routes::edited(c,at,unsigned(a.route_slot));
     LOG("[actors] %s:%s route changed in place by the editor (%zu points, %s)",mod.c_str(),spec.id.c_str(),spec.path.points.size(),spec.path.mode());
     return true;
 }
 bool editor_restart_only(const ManifestActor& a){return restart_kind(a)!=nullptr;}
+bool borrowed_walk_declared(unsigned kind){return std::any_of(g_actors.begin(),g_actors.end(),[kind](const Actor& a){if(!walks(a.spec)||a.spec.actor!="resident"||a.spec.resident>255)return false;const auto*w=story_resident_types::borrowed_walk(uint8_t(a.spec.resident));return w&&unsigned(w-story_resident_types::kBorrowedWalks)==kind;});}
 bool resident_routes_declared(){return std::any_of(g_actors.begin(),g_actors.end(),[](const Actor& a){return walks(a.spec);});}
 bool resident_route(const std::string& mod,const std::string& id,ResidentRoute& out){
     out={};for(const auto& a:g_actors)if(a.mod==mod&&a.spec.id==id&&!a.removed){

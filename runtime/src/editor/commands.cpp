@@ -91,7 +91,7 @@ const std::vector<CommandInfo> kCommands = {
     {"list_game_objects", "The game's own objects and island buildings a mod places by reference (add_actor type \"game:<id>\" or \"piece:<id>\"; a building is prepared from the player's game files when first placed: state preparing, ready or failed), by category, with their variants, turn and scale limits and whether the player's game files have them.",
      {{"category", "string", "only this category"}, {"query", "string", "only those whose id, label or description contains this"}}},
     // ---- an actor's route (commands_route.cpp): a placed resident who walks (uo1, uo2, uo3, um1, um2) or a skinned model
-    {"add_route_point", "Adds a point to an actor's route (its first point starts the route) at Link, the fly camera or a position, snapped to the ground. A resident starts at its position and walks to its points with its own walk; a model's route lists every point, its position first.",
+    {"add_route_point", "Adds a point to an actor's route (its first point starts the route) at Link, the fly camera or a position, snapped to the ground. A resident starts at its position and walks to its points with its own walk (ub, uw and sa: a walk borrowed from another villager, fitted to them); a model's route lists every point, its position first.",
      {{"id", "string", "the actor", true}, {"at", "string", "link (default), camera or position"}, {"position", "point", "with at = position"},
       {"after", "integer", "insert after this point number (0: first; default: at the end)"}, {"snap", "boolean", "onto the ground (default true)"}, {"mod", "string", ""}},
      true},

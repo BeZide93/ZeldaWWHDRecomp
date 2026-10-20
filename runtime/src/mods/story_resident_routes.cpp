@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MPL-2.0
 #include "story_resident_routes.h"
+#include "story_resident_walk_clip.h"
 #include "guest_addr.h"
 #include "runtime.h"
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <string>
@@ -13,12 +15,16 @@ namespace {
 // daNpcPeople_c (the Windfall townspeople class): its route walker and the fields the hooks use
 constexpr uint16_t kPeopleProfile = 0x175;
 constexpr uint32_t kPathRun = 0x870, kPathIndex = 0x875, kPathForward = 0x876, kNpcDat = 0x8A0, kTargetSpeed = 0x8B4,
-                   kTimer = 0x8E2, kTurnSpeed = 0x8F6, kSeesLink = 0x8FD, kLinkClose = 0x8FE, kMode = 0x903;
+                   kTimer = 0x8E2, kTurnSpeed = 0x8F6 /* m782: the turning step it steers with */, kSeesLink = 0x8FD, kLinkClose = 0x8FE, kMode = 0x903;
 constexpr uint32_t kSpeedF = 0x370, kSpeed = 0x33C, kOld = 0x300, kCurrent = 0x314;
 constexpr uint8_t kWalkMode = 2, kWaitMode = 0, kTurnMode = 3;
+constexpr uint32_t kMorf = 0x44C, kNpcNo = 0x905, kMorfOnce = 0x8B8;  // mpMorf, mNpcNo, m744 (a one-time blend length)
+constexpr uint32_t kMorfSkeleton = 0x6C, kMorfAnimation = 0x94;   // mDoExt_McaMorf: the bound skeleton, the animation object
+constexpr unsigned kWalkSlot = 2;                                 // l_bck_ix_tbl: 0 idle, 1 talk, 2 walk, ...
+const uint32_t kSetAnimation = GC(0x022BEB7C), kMorfSetAnimation = GC(0x025E4A98);
 const uint32_t kPassed = GC(0x0259E838), kSetRoute = GC(0x0259E6D0), kWalk = GC(0x022C46D0), kTurn = GC(0x022C4A04), kSetMode = GC(0x022C06F4);
 
-uint32_t g_memory = 0;
+uint32_t g_memory = 0, g_clips = 0;
 bool g_installed = false;
 void (*g_original)(Cpu*, uint32_t) = nullptr;
 uint32_t (*g_call)(Cpu*, uint32_t, std::initializer_list<uint32_t>) = nullptr;
@@ -49,6 +55,14 @@ void stop(Cpu* c, uint32_t actor) {
     set_mode(c, actor, kWaitMode);
 }
 bool trace() { static const bool on = std::getenv("WWHD_RESIDENT_ROUTE_TRACE") != nullptr; return on; }
+
+// The game's walk steers toward its point by the npc data's turning step (400 a step): a walker as slow
+// as the borrowed walks (36 units a second) then circles wide past a corner and the stuck guard takes it
+// for blocked. A walker with a borrowed walk steers at kBorrowedSteer, a tight corner at its pace.
+void steer(uint32_t actor, uint8_t mode) {
+    if (mode == kWalkMode && ld32(actor + kPathRun) && story_resident_types::borrowed_walk(ld8(actor + kNpcNo)))
+        st16(actor + kTurnSpeed, uint16_t(route::kBorrowedSteer));
+}
 
 // dNpc_PathRun_c::setInf(this, route number, room, forward)
 void set_route(Cpu* c) {
@@ -114,6 +128,7 @@ void walk(Cpu* c) {
     }
     g_original(c, kWalk);
     const uint8_t mode = ld8(actor + kMode);
+    steer(actor, mode);
     if (trace() && mode != kWalkMode)
         LOG("[resident_route] slot %d: stops walking (mode %u, link %u/%u, at point %u)", slot, mode, ld8(actor + kSeesLink), ld8(actor + kLinkClose), ld8(actor + kPathIndex));
     if ((config & route::kPauses) && mode == kWalkMode && ld32(actor + kPathRun)) {
@@ -141,7 +156,7 @@ void walk(Cpu* c) {
         static unsigned steps[route::kSlots];
         static const unsigned every = std::getenv("WWHD_RESIDENT_ROUTE_TRACE")[0] == '2' ? 1 : 30;
         if (++steps[slot] % every == 1 || every == 1)
-            LOG("[resident_route] slot %d: at %.1f,%.1f,%.1f point %u %s speed %.2f/%.2f mode %u link %u/%u timer %d", slot, f(actor + kCurrent), f(actor + kCurrent + 4), f(actor + kCurrent + 8),
+            LOG("[resident_route] slot %d: at %.1f,%.1f,%.1f yaw %04X steer %d/%d point %u %s speed %.2f/%.2f mode %u link %u/%u timer %d", slot, f(actor + kCurrent), f(actor + kCurrent + 4), f(actor + kCurrent + 8), ld16(actor + 0x322), int(int16_t(ld16(actor + kTurnSpeed))), int(int16_t(ld16(actor + kTurnSpeed + 2))),
                 ld8(actor + kPathIndex), ld8(actor + kPathForward) ? "forward" : "back", f(actor + kSpeedF), f(actor + kTargetSpeed), mode, ld8(actor + kSeesLink), ld8(actor + kLinkClose),
                 int(int16_t(ld16(actor + kTimer))));
     }
@@ -198,6 +213,30 @@ void turn(Cpu* c) {
     }
     g_original(c, kTurn);
 }
+
+// daNpcPeople_c::setAnm(this, slot, play mode, blend, rate): the game's walk slot of a villager without
+// a walk is its idle; an owned walker with a borrowed walk plays the borrowed one there. The game's own
+// call runs first (its head animation, its bookkeeping, the blend), then the motion gets the borrowed
+// walk with the same blend and rate.
+void set_animation(Cpu* c) {
+    const uint32_t actor = c->r[3], slot = c->r[4], mode = c->r[5];
+    const auto* walk = slot == kWalkSlot && slot_of(actor) >= 0 ? story_resident_types::borrowed_walk(ld8(actor + kNpcNo)) : nullptr;
+    const unsigned kind = walk ? unsigned(walk - story_resident_types::kBorrowedWalks) : 0;
+    if (!walk || !clip_ready(kind)) {
+        g_original(c, kSetAnimation);
+        return;
+    }
+    const float once = f(actor + kMorfOnce);
+    const double blend = once >= 0 ? double(once) : c->f[1].ps0, rate = c->f[2].ps0;
+    g_original(c, kSetAnimation);
+    const uint32_t morf = ld32(actor + kMorf), animation = morf ? bind_clip(kind, actor) : 0;
+    if (!animation) return;
+    Cpu call = *c;
+    call.f[1].ps0 = blend, call.f[2].ps0 = rate, call.f[3].ps0 = 0, call.f[4].ps0 = -1;
+    g_call(&call, kMorfSetAnimation, {morf, animation, mode, 0});
+    if (trace()) LOG("[resident_route] actor %08X walks with the borrowed %s (blend %.1f, rate %.2f)", actor, walk->name, blend, rate);
+}
+uint32_t clip_slot(unsigned kind) { return g_clips + kind * kClipSlotBytes; }
 }  // namespace
 
 void set_memory(uint32_t guest) {
@@ -212,7 +251,7 @@ void configure(void (*original)(Cpu*, uint32_t), uint32_t (*call)(Cpu*, uint32_t
 bool install(const std::function<std::string(uint32_t)>& replaced_by, const std::function<void(uint32_t, void (*)(Cpu*))>& replace) {
     if (g_installed) return true;
     if (!g_memory || !g_original || !g_call) return false;
-    for (uint32_t fn : {kPassed, kSetRoute, kWalk, kTurn})
+    for (uint32_t fn : {kPassed, kSetRoute, kWalk, kTurn, kSetAnimation})
         if (!replaced_by(fn).empty()) {
             LOG("[resident_route] %08X is replaced by %s: residents do not walk routes", fn, replaced_by(fn).c_str());
             return false;
@@ -221,6 +260,7 @@ bool install(const std::function<std::string(uint32_t)>& replaced_by, const std:
     replace(kSetRoute, set_route);
     replace(kWalk, walk);
     replace(kTurn, turn);
+    replace(kSetAnimation, set_animation);
     g_installed = true;
     return true;
 }
@@ -229,6 +269,73 @@ uint32_t set_route_function() { return kSetRoute; }
 uint32_t passed_function() { return kPassed; }
 uint32_t walk_function() { return kWalk; }
 uint32_t turn_function() { return kTurn; }
+uint32_t set_animation_function() { return kSetAnimation; }
+
+void set_clip_memory(uint32_t guest) {
+    g_clips = guest;
+    if (guest) std::memset(mem::ptr(guest), 0, kClipMemoryBytes);
+}
+uint32_t clip_memory() { return g_clips; }
+bool set_clip(unsigned kind, const std::vector<uint8_t>& fska) {
+    if (!g_clips || kind >= story_resident_types::kBorrowedWalkCount || fska.size() < 0x30 || fska.size() > kClipSlotBytes - kClipHeader) return false;
+    const uint32_t at = clip_slot(kind);
+    std::memset(mem::ptr(at), 0, kClipSlotBytes);
+    std::memcpy(mem::ptr(at + kClipHeader), fska.data(), fska.size());
+    st32(at + 4, uint32_t(fska.size()));
+    st32(at, kClipMagic);
+    return true;
+}
+bool clip_ready(unsigned kind) { return g_clips && kind < story_resident_types::kBorrowedWalkCount && ld32(clip_slot(kind)) == kClipMagic; }
+int missing_clip(uint8_t subtype) {
+    const auto* walk = story_resident_types::borrowed_walk(subtype);
+    if (!walk) return -1;
+    const unsigned kind = unsigned(walk - story_resident_types::kBorrowedWalks);
+    return clip_ready(kind) ? -1 : int(kind);
+}
+uint32_t bind_clip(unsigned kind, uint32_t actor) {
+    if (!clip_ready(kind)) return 0;
+    const uint32_t at = clip_slot(kind), fska = at + kClipHeader, object = at + 0x40;
+    const uint32_t morf = ld32(actor + kMorf);
+    if (!morf || morf < mem::kMem2Start || morf >= mem::kMem2End - 0x100) return 0;
+    const uint32_t skeleton = ld32(morf + kMorfSkeleton);
+    if (skeleton != ld32(at + 8)) {
+        // each copy of a character has a skeleton of its own: the walk is bound to the one of the copy that
+        // starts it (as the game binds its own clips when one is played); the copies' skeletons are alike,
+        // checked bone by bone (count, names, order)
+        if (!skeleton || skeleton < mem::kMem2Start || skeleton >= mem::kMem2End - 0x40 || ld32(skeleton) != 0x46534B4C /* FSKL */) return 0;
+        const unsigned count = ld16(skeleton + 8);
+        if (count != ld16(fska + 0x14)) return 0;
+        const uint32_t bones = skeleton + 0x14 + ld32(skeleton + 0x14), anims = fska + 0x20 + ld32(fska + 0x20);
+        auto text = [](uint32_t field) {
+            const uint32_t p = field + ld32(field);
+            std::string s;
+            for (uint32_t i = 0; i < 32 && ld8(p + i); ++i) s.push_back(char(ld8(p + i)));
+            return s;
+        };
+        for (unsigned i = 0; i < count; ++i)
+            if (text(bones + i * 0x40) != text(anims + i * 0x18 + 4) || ld16(bones + i * 0x40 + 4) != i) {
+                LOG("[resident_route] borrowed walk %u: the skeleton at %08X differs at bone %u: not played", kind, skeleton, i);
+                return 0;
+            }
+        st32(fska + story_resident_walk_clip::kSkeletonField, skeleton - (fska + story_resident_walk_clip::kSkeletonField));
+        st32(at + 8, skeleton);
+        if (trace()) LOG("[resident_route] borrowed walk %u bound to the skeleton at %08X", kind, skeleton);
+    }
+    if (ld32(object + 8) != fska) {
+        // the animation object: the game's own layout (as its archive loader makes it), copied from the
+        // one the character plays now, pointing at the borrowed walk and named after it
+        const uint32_t current = ld32(morf + kMorfAnimation);
+        if (!current || ld32(current + 4) != GD(0x1016E95C)) return 0;
+        for (uint32_t i = 0; i < 0x38; i += 4) st32(object + i, ld32(current + i));
+        st32(object, ld32(GD(0x1016E8E0)));
+        st32(object + 8, fska);
+        st32(object + 0xC, object + 0x18);  // its name's buffer (a fixed string of 0x20)
+        std::memset(mem::ptr(object + 0x18), 0, 0x20);
+        const auto* walk = &story_resident_types::kBorrowedWalks[kind];
+        std::memcpy(mem::ptr(object + 0x18), walk->name, std::min<size_t>(std::strlen(walk->name), 0x1F));
+    }
+    return object;
+}
 
 bool write(unsigned slot, const story_notebook::ManifestPath& path, const story_notebook::WorldPoint& start, bool keep_state) {
     if (!g_memory || slot >= route::kSlots || path.points.empty() || path.points.size() + 1 > route::kMaxPoints) return false;

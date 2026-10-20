@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "editor_panel.h"
+#include "../mods/story_resident_types.h"
 #include "imgui.h"
 #include "imgui_internal.h"
 
@@ -108,8 +109,16 @@ void route_section(const Value& m, const Value& a) {
         muted("Patrols its route with the game's own patrol: it walks from point to point, turns at the ends (back and forth) "
               "or goes round (loop), and fights Link when it sees him.");
     } else if (resident) {
-        muted("Walks with its own walk and stands with its own idle. Like the game's own walkers it stops and looks at Link "
-              "when he is close in front of it, turns on the spot at corners and talks as usual.");
+        const auto& who = a.get("parameters").get("resident");
+        const auto* type = who.type == Value::String ? story_resident_types::find(who.text) : nullptr;
+        const auto* lent = type ? story_resident_types::borrowed_walk(type->subtype) : nullptr;
+        if (lent)
+            muted(std::string("Has no walk of its own: walks with ") + lent->lender + "'s walk, fitted to its own body by the port "
+                  "from your game files, and stands with its own idle. Like the game's own walkers it stops and looks at Link "
+                  "when he is close in front of it and talks as usual.");
+        else
+            muted("Walks with its own walk and stands with its own idle. Like the game's own walkers it stops and looks at Link "
+                  "when he is close in front of it, turns on the spot at corners and talks as usual.");
         ImGui::BeginDisabled();
         bool on = true;
         ImGui::Checkbox("Look at Link", &on);

@@ -8,12 +8,17 @@
 //   walking resident gets its record, every other call is untouched;
 // - the point-passed test (dNpc_PathRun_c::chkPointPass) for an owned walker: along its way;
 // - its Walk step (daNpcPeople_c::executeWalk): the authored speed, pauses off, once, the guards;
-// - its Turn step (daNpcPeople_c::executeTurn): a turning speed when the character's own is 0.
+// - its Turn step (daNpcPeople_c::executeTurn): a turning speed when the character's own is 0;
+// - its animation change (daNpcPeople_c::setAnm): a walker with a borrowed walk (Ub, Uw, Sa:
+//   story_resident_types.h kBorrowedWalks) plays the retarget built from the player's files in place of
+//   its walk slot, which in the game's tables is its idle (the game itself never walks them).
 #pragma once
 #include <cstdint>
 #include <functional>
 #include <initializer_list>
+#include <vector>
 #include "story_resident_route.h"
+#include "story_resident_types.h"
 
 struct Cpu;
 
@@ -31,6 +36,24 @@ uint32_t set_route_function();
 uint32_t passed_function();
 uint32_t walk_function();
 uint32_t turn_function();
+uint32_t set_animation_function();
+
+// Borrowed walks: one slot per kBorrowedWalks entry, in guest memory that full save states capture.
+// Slot layout: 0x00 magic 'RWK1', 0x04 animation bytes, 0x08 the skeleton it is bound to (0: not yet),
+// 0x40 the animation object the character's motion plays (0x38 bytes, the game's layout), 0x80 the
+// animation (story_resident_walk_clip::encode).
+inline constexpr uint32_t kClipSlotBytes = 0x8000, kClipHeader = 0x80, kClipMagic = 0x52574B31;  // 'RWK1'
+inline constexpr uint32_t kClipMemoryBytes = kClipSlotBytes * story_resident_types::kBorrowedWalkCount;
+void set_clip_memory(uint32_t guest);
+uint32_t clip_memory();
+// copies borrowed walk `kind`'s animation into its slot (false: no memory, or too large)
+bool set_clip(unsigned kind, const std::vector<uint8_t>& fska);
+bool clip_ready(unsigned kind);
+// the borrowed walk a walking resident of this subtype needs and has not got (-1: none needed or ready)
+int missing_clip(uint8_t subtype);
+// Binds `kind` to the skeleton of the character `actor` and returns the animation object to play
+// (0: the skeleton is not the one the walk was built for). Game thread.
+uint32_t bind_clip(unsigned kind, uint32_t actor);
 
 // Writes `slot`'s route. keep_state: a record that already holds the same route keeps its owner and
 // guard state (a restored full state, an unchanged declaration).

@@ -95,6 +95,8 @@ bool editor_restart_only(const story_notebook::ManifestActor&);
 // needed), and one's state for the editor (declared: it has a route; live: its copy in the game
 // follows it; status: walking, skipped a blocked point, stopped, finished)
 bool resident_routes_declared();
+// a walking resident needs borrowed walk `kind` (story_resident_types::kBorrowedWalks)
+bool borrowed_walk_declared(unsigned kind);
 struct ResidentRoute {bool declared=false,live=false;std::string status;};
 bool resident_route(const std::string& mod,const std::string& id,ResidentRoute& out);
 // whether a new actor of this spec can be created while the game runs (else `why` says what waits)

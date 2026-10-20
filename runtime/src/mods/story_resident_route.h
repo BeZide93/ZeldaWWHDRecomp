@@ -38,6 +38,7 @@ inline constexpr uint8_t kRouteMarker = 0xFE;   // a placed resident's route num
 inline constexpr uint8_t kNoPoint = 0xFF;       // no point (the guards' blocked point)
 inline constexpr float kLogicRate = 30.f;        // logic steps per second (speeds are authored per second)
 inline constexpr int16_t kTurnFallback = 1500;   // turning speed for a character whose own is 0
+inline constexpr int16_t kBorrowedSteer = 1200;  // steering step of a walker with a borrowed walk (the game's walkers: 400)
 inline constexpr unsigned kMaxPoints = 16;       // the position and up to 15 points
 
 enum : uint32_t {

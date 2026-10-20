@@ -1437,6 +1437,11 @@ add_executable(story_resident_routes_test runtime/tools/story_resident_routes_te
 target_include_directories(story_resident_routes_test PRIVATE runtime/include runtime/src)
 target_compile_options(story_resident_routes_test PRIVATE -UNDEBUG)
 add_test(NAME story_resident_routes COMMAND story_resident_routes_test)
+# a borrowed walk (Ub, Uw, Sa): reading, retarget and writing on synthetic files, no game data
+add_executable(story_resident_walk_clip_test runtime/tools/story_resident_walk_clip_test.cpp runtime/src/mods/story_resident_walk_files.cpp)
+target_include_directories(story_resident_walk_clip_test PRIVATE runtime/include runtime/src)
+target_compile_options(story_resident_walk_clip_test PRIVATE -UNDEBUG)
+add_test(NAME story_resident_walk_clip COMMAND story_resident_walk_clip_test)
 add_executable(story_actors_test runtime/tools/story_actors_test.cpp)
 target_include_directories(story_actors_test PRIVATE runtime/src)
 target_compile_options(story_actors_test PRIVATE -UNDEBUG)

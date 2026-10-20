@@ -283,8 +283,11 @@ int main() {
      assert(actors[0].path.loop&&actors[0].path.speed_given&&actors[0].path.speed==90&&actors[0].path.pauses);
      v=route("uo3",R"({"points":[{"x":100,"y":0,"z":0}],"mode":"back_and_forth"})");assert(parse_actors(v,actors,why)&&actors[0].path.back_and_forth);
      for(const char* walker:{"uo1","uo2","uo3","um1","um2"}){v=route(walker,R"({"points":[{"x":50,"y":0,"z":0}]})");assert(parse_actors(v,actors,why));}
-     // the others are refused with the reason
-     for(const char* still:{"ub1","ub2","ub3","ub4","uw1","uw2","sa1","sa2","sa3","sa4"}){v=route(still,R"({"points":[{"x":50,"y":0,"z":0}]})");assert(!parse_actors(v,actors,why)&&why=="this villager has no walking animation of its own");}
+     // the women and sailors walk with a borrowed walk (story_resident_walk_clip.h), at their own pace's limits
+     for(const char* borrowed:{"ub1","ub2","ub3","ub4","uw1","uw2","sa1","sa2","sa3","sa4"}){v=route(borrowed,R"({"points":[{"x":50,"y":0,"z":0}],"mode":"loop"})");assert(parse_actors(v,actors,why)&&actors[0].path.loop);}
+     v=route("ub1",R"({"points":[{"x":50,"y":0,"z":0}],"speed":72})");assert(parse_actors(v,actors,why));
+     v=route("ub1",R"({"points":[{"x":50,"y":0,"z":0}],"speed":73})");assert(!parse_actors(v,actors,why)&&why.find("18 to 72")!=std::string::npos);
+     v=route("sa4",R"({"points":[{"x":50,"y":0,"z":0}],"speed":29})");assert(!parse_actors(v,actors,why));
      v=route("ym1",R"({"points":[{"x":50,"y":0,"z":0}]})");assert(!parse_actors(v,actors,why)&&why.find("seated")!=std::string::npos);
      // speed: 0.5..2 times the character's own pace (uo2: 30 units a second)
      v=route("uo2",R"({"points":[{"x":50,"y":0,"z":0}],"speed":15})");assert(parse_actors(v,actors,why));

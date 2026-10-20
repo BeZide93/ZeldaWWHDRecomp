@@ -1367,10 +1367,12 @@ void route_commands() {
     CHECK(!ok(s.run("set_route", json(R"({"id": "walker", "speed": 30})"))));  // no route yet
     CHECK(ok(s.run("undo")) && path().type == Value::Object);
     CHECK(ok(s.run("remove_route", json(R"({"id": "walker"})"))) && path().type == Value::Null);
-    // a villager without a walk of its own, the seated man and a sign: refused with the reason
-    CHECK(ok(s.run("add_actor", json(R"({"type": "resident", "id": "chatter", "options": {"resident": "ub1"}})"))));
-    r = s.run("add_route_point", json(R"({"id": "chatter"})"));
-    CHECK(!ok(r) && r.get("error").string().find("no walking animation of its own") != std::string::npos && actor_of(s, "chatter")->get("path").type == Value::Null);
+    // a villager without a walk of its own walks with a borrowed one; the seated man and a sign: refused with the reason
+    CHECK(ok(s.run("add_actor", json(R"({"type": "resident", "id": "chatter", "at": "position", "position": {"x": 300, "y": 5, "z": 0}, "stage": "sea", "room": 44, "options": {"resident": "ub1"}})"))));
+    r = s.run("add_route_point", json(R"({"id": "chatter", "at": "position", "position": {"x": 400, "y": 5, "z": 0}})"));
+    CHECK(ok(r) && actor_of(s, "chatter")->get("path").get("points").array.size() == 1);
+    CHECK(ok(s.run("set_route", json(R"({"id": "chatter", "speed": 72, "mode": "back_and_forth", "pauses": true})"))));
+    CHECK(!ok(s.run("set_route", json(R"({"id": "chatter", "speed": 80})"))));  // twice her pace of 36 at most
     CHECK(ok(s.run("add_actor", json(R"({"type": "resident", "id": "seated", "options": {"resident": "ym1"}})"))));
     CHECK(!ok(s.run("add_route_point", json(R"({"id": "seated"})"))));
     CHECK(ok(s.run("add_actor", json(R"({"type": "sign", "id": "board"})"))));
@@ -1389,7 +1391,8 @@ void route_commands() {
     CHECK(actor_of(s, "brute")->get("path").get("mode").string() == "back_and_forth" && !ok(s.run("set_route", json(R"({"id": "brute", "speed": 50})"))));
     CHECK(ok(s.run("add_actor", json(R"({"type": "keese", "id": "bat"})"))) && !ok(s.run("add_route_point", json(R"({"id": "bat"})"))));
     // the pure helpers the Inspector uses
-    CHECK(editor::resident_pace(*actor_of(s, "walker")) == 30 && editor::resident_pace(*actor_of(s, "chatter")) == 0 && editor::route_refusal(*actor_of(s, "walker")).empty());
+    CHECK(editor::resident_pace(*actor_of(s, "walker")) == 30 && editor::resident_pace(*actor_of(s, "chatter")) == 36 && editor::route_refusal(*actor_of(s, "walker")).empty() &&
+          editor::route_refusal(*actor_of(s, "chatter")).empty());
 }
 
 // Island buildings (commands_game_pieces.cpp): listed under Buildings with this mod's state, add_actor "piece:<id>"

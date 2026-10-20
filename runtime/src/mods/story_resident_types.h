@@ -100,19 +100,49 @@ inline const char* place_problem(uint8_t subtype, const std::string& stage, floa
     return nullptr;
 }
 
-// Walking a mod route ("path" on a placed resident, story_resident_route.h): only the characters
-// with a walking animation of their own walk; the rest are refused with the reason. `pace` is the
-// character's own walking speed by day in game units per second (its native route speed per logic
-// step at 30 steps a second); an authored speed may be 0.5 to 2 times it.
-struct Walker {const char* code;uint8_t subtype;float pace;};
+// Walking a mod route ("path" on a placed resident, story_resident_route.h). The characters with a
+// walking animation of their own walk with it; the women (ub, uw) and the sailors (sa) have none and
+// borrow another villager's walk, retargeted on the player's machine to their own skeleton from the
+// player's own files (story_resident_walk_clip.h, story_resident_walk_files): ub and uw the calm walk of
+// the man from the bar (uo_walk), the sailors the windmill keeper's (um_walk). `pace` is the
+// character's walking speed by day in game units per second (its native route speed per logic step at
+// 30 steps a second; for a borrowed walk the source's cadence at the borrowed stride); an authored
+// speed may be 0.5 to 2 times it. `borrowed`: the index into kBorrowedWalks, or -1 (its own walk).
+struct Walker {const char* code;uint8_t subtype;float pace;int8_t borrowed;};
+struct BorrowedWalk {
+    const char* target;          // the archive and body model of the villagers who borrow it
+    const char* target_model;
+    const char* source;          // the archive, body model and walk clip lent
+    const char* source_model;
+    const char* clip;
+    const char* source_idle;     // the two characters' idles (how each holds its head)
+    const char* target_idle;
+    const char* name;            // the retargeted clip's name
+    const char* lender;          // who it comes from, for people
+    float factor;                // the target's play rate per unit of speed (its npc data, 0x44)
+};
+inline constexpr BorrowedWalk kBorrowedWalks[] = {
+    {"Ub", "ub", "Uo", "uo", "uo_walk", "uo_wait01", "ub_wait01", "ub_walk_borrowed", "the man from the bar", 1.f},
+    {"Uw", "uw", "Uo", "uo", "uo_walk", "uo_wait01", "uw_wait01", "uw_walk_borrowed", "the man from the bar", 1.f},
+    {"Sa", "sa", "Um", "um", "um_walk", "um_wait01", "sa_wait01", "sa_walk_borrowed", "the windmill keeper", 1.f},
+};
+inline constexpr unsigned kBorrowedWalkCount = sizeof(kBorrowedWalks) / sizeof(kBorrowedWalks[0]);
 inline constexpr Walker kWalkers[] = {
-    {"uo1", 0, 30.f}, {"uo2", 1, 30.f}, {"uo3", 2, 60.f}, {"um1", 9, 63.f}, {"um2", 10, 72.f},
+    {"uo1", 0, 30.f, -1}, {"uo2", 1, 30.f, -1}, {"uo3", 2, 60.f, -1}, {"um1", 9, 63.f, -1}, {"um2", 10, 72.f, -1},
+    {"ub1", 3, 36.f, 0}, {"ub2", 4, 36.f, 0}, {"ub3", 5, 36.f, 0}, {"ub4", 6, 36.f, 0},
+    {"uw1", 7, 34.f, 1}, {"uw2", 8, 34.f, 1},
+    {"sa1", 12, 60.f, 2}, {"sa2", 13, 60.f, 2}, {"sa3", 14, 60.f, 2}, {"sa4", 15, 60.f, 2},
 };
 inline constexpr float kMinPaceFactor = 0.5f, kMaxPaceFactor = 2.f;
 inline const Walker* walker(uint8_t subtype) {
     for (const Walker& w : kWalkers)
         if (w.subtype == subtype) return &w;
     return nullptr;
+}
+// the borrowed walk of a walker (nullptr: its own walk, or it doesn't walk)
+inline const BorrowedWalk* borrowed_walk(uint8_t subtype) {
+    const Walker* w = walker(subtype);
+    return w && w->borrowed >= 0 && unsigned(w->borrowed) < kBorrowedWalkCount ? &kBorrowedWalks[w->borrowed] : nullptr;
 }
 // why a placed resident of this type cannot walk a route (nullptr: it can)
 inline const char* no_walk(uint8_t subtype) {
