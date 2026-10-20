@@ -1154,9 +1154,9 @@ bool apply_portable(Cpu* c, const pstate::State& s, std::string& why, bool& retr
     guest_call(c, fn_eventInit, {info + 0x1158});             // dSv_info_c::mTmp (temporary flags)
     apply_hd_sections(c, s);
     guest_call(c, fn_refreshGame, {0});  // SaveMgr: item buttons and equipment from the loaded data (does not use its object)
-    // Link's place: the void-out restart (dStage_restartRoom / dStage_playerInit point -1), or with the
-    // boat the restart the Song of Passing uses (daPy_lk_c tact, dStage_turnRestart: point -3, the
-    // boat back at its position by dStage_setShipPos, Link on it with start mode 2)
+    // Keep the ordinary restart record coherent, but enter through the independent turn-restart
+    // record below. Leaving the old stage can overwrite the ordinary room restart before the
+    // new Link reads it; that would put a dungeon resume at the previous sea position.
     const uint32_t rs = sv + kRestart;
     st8(rs + 0, (uint8_t)s.room);
     st16(rs + 0x16, (uint16_t)s.angle_y);
@@ -1168,18 +1168,18 @@ bool apply_portable(Cpu* c, const pstate::State& s, std::string& why, bool& retr
     char name[8] = {};
     memcpy(name, s.stage.data(), std::min<size_t>(s.stage.size(), 7));
     for (int i = 0; i < 8; i++) st8(kNextStage + i, (uint8_t)name[i]);
-    uint16_t point = 0xFFFF;  // point -1: the restart position
-    if (s.has_ship) {
+    const uint16_t point = 0xFFFD;  // dStage_playerInit reads the independent turn-restart record
+    {
         // daPy_lk_c::getDayNightParamData without the Wind Waker parts (event 0xCC, flag 0x40: the
-        // conducting animation): room, start mode 2 on the boat / 0 beside it, no event, boat flag 0x100
-        uint32_t param = (uint32_t)(s.room & 0x3F) | (uint32_t)(s.on_ship ? 2 : 0) << 12 | 0xFF000000u | 0x100u;
+        // conducting animation): standing on foot, or mode 2 on a restored boat; no start event.
+        // A foot-player restore must not create or reposition a boat.
+        uint32_t param = (uint32_t)(s.room & 0x3F) | (uint32_t)(s.has_ship && s.on_ship ? 2 : 0) << 12 | 0xFF000000u | (s.has_ship ? 0x100u : 0u);
         for (int i = 0; i < 3; i++) {
             stf32(buf + 4 * i, s.pos[i]);
             stf32(buf + 0x10 + 4 * i, s.ship_pos[i]);
         }
         guest_call(c, fn_turnRestartSet, {sv + kTurnRestart, buf, (uint32_t)(uint16_t)s.angle_y, (uint32_t)(uint8_t)s.room, param,
-                                          buf + 0x10, (uint32_t)(uint16_t)s.ship_angle_y, 1});
-        point = 0xFFFD;  // -3: the turn restart
+                                          buf + 0x10, (uint32_t)(uint16_t)s.ship_angle_y, (uint32_t)s.has_ship});
     }
     st16(kNextStage + 8, point);
     st8(kNextStage + 10, (uint8_t)s.room);
