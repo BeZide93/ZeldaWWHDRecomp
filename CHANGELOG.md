@@ -19,6 +19,10 @@ what is on `devel` and not released yet (also in the
   shores. Check marks problems in red in the picture. The same is available as MCP commands. On the sea only; a pond
   can't be dug into the ground, so on a slope it sits in a grassy mound.
 
+- **Fixed: the world editor no longer crashes at start when code mods are off.** With Code-mod support turned off
+  (and in the decomp version), `--editor` now starts; live editing is off and the editor says so, and edits are still
+  saved.
+
 - **Mod SDK v3 and the editor: paths, the wall cannon, warship routes and wandering Floormasters** (for mod makers).
   A mod can draw lines and areas in a room (up to 16 per mod) and its enemies can use them. The game's wall cannon can
   be placed with an area as its firing range: it turns to Link and fires while he is inside, and a bomb destroys it,
