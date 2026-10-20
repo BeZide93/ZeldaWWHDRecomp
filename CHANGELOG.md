@@ -11,6 +11,12 @@ what is on `devel` and not released yet (also in the
   speed. It suits screens that run at 40, 80 or 120 Hz, such as the Steam Deck LCD at 40 Hz or the OLED at 80 Hz, where
   every frame is shown for the same time. On Android the app asks for a matching screen rate; some phones choose the
   rate themselves, and on a 60 Hz screen 40 fps runs unevenly (Settings says so). Keep game speed works as at 60 fps.
+- **Mod SDK: new levels of their own** (for mod makers, preview). A mod can add a new cave or dungeon level with its
+  own rooms, reached from a box in a game level and left through a floor exit. The level is built from the player's
+  own game files when the game starts, with the look and music of a game level the mod names; doors between its rooms
+  work. Saving inside it is safe: the game's save always keeps a normal entrance, so the save still loads with the mod
+  removed, and with the mod the Quest Log continues inside. Save states made in a mod level ask for its mod. The editor
+  lists mod levels for warping. See the example "mod-stage-cave".
 
 - **Mod SDK v3 and the editor: Kargarocs with riders and Wizzrobe summoners** (for mod makers). A Kargaroc can carry a
   Moblin or Bokoblin along a mod path and drop it at the path's release point. A Wizzrobe summoner teleports between the
