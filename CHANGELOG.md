@@ -7,6 +7,10 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Water tool: new ponds are swimmable, and pond surfaces always appear.** A new pond's level now defaults to its
+  depth above the shore, so Link can swim in it right away; banks stay compact, and nothing reaches down to the sea
+  floor. Some pond outlines left the visible water out because its surface model couldn't be prepared; that is fixed,
+  and the editor names the reason if a model ever can't be prepared. Such a model no longer stops the game at start.
 - **Less render-thread work on the Vulkan renderer** (#178). Shader programs are fingerprinted again only after the
   game writes to them, and texture invalidation now looks only at the textures it can reach. On a Snapdragon phone this
   cut the render thread's CPU time by about 11% in Windfall; the picture is unchanged.
