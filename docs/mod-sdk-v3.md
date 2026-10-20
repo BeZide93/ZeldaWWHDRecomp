@@ -76,8 +76,10 @@ remain available. Other Ym1/Ym2 staff variants are unsupported.
 
 ### Residents walking a route
 
-A placed resident with a walking animation of its own can walk a route with the game's own walking:
-`uo1`, `uo2`, `uo3`, `um1` and `um2`. It starts at its `position` and walks to the route's points:
+Every placed Windfall resident except the seated `ym1` can walk a route with the game's own walking:
+`uo1`, `uo2`, `uo3`, `um1` and `um2` with their own walking animation, and the women and sailors
+(`ub1`–`ub4`, `uw1`, `uw2`, `sa1`–`sa4`), who have none, with a borrowed one (below). It starts at its
+`position` and walks to the route's points:
 
 ```json
 {
@@ -95,7 +97,7 @@ A placed resident with a walking animation of its own can walk a route with the 
 | --- | --- |
 | `points` | 1 to 15 points after the position; each more than one unit (across) from the one before |
 | `mode` | `once` (default: it walks to the last point and stands there), `loop` (back to its position and round again) or `back_and_forth` (it turns at each end) |
-| `speed` | game units per second, from half to twice the character's own pace; without it, its own pace (`uo1`, `uo2` 30, `uo3` 60, `um1` 63, `um2` 72) |
+| `speed` | game units per second, from half to twice the character's own pace; without it, its own pace (`uo1`, `uo2` 30, `uo3` 60, `um1` 63, `um2` 72, `ub1`–`ub4` 36, `uw1`, `uw2` 34, `sa1`–`sa4` 60) |
 | `pauses` | `true`: after walking for some seconds it stands for a moment, in the character's own rhythm as the game's walkers do; default `false` |
 
 It walks as the game's own walkers do: with its own walk and idle, turning on the spot at corners,
@@ -111,8 +113,19 @@ A route walks in the room where the resident is placed; when the room loads agai
 its position (a `once` route too). Full save states keep where it is on its route. At most 32 residents
 of all enabled mods have a route.
 
-The other villagers have no walking animation of their own and are refused with
-"this villager has no walking animation of its own"; the seated `ym1` does not walk. Each placed resident
+**Borrowed walks.** The women (`ub`, `uw`) and the sailors (`sa`) never walk in the game, so they
+have no walking animation. They walk with another villager's walk, fitted to their own body: the women
+with the calm walk of the man from the bar (`uo`), the sailors with the windmill keeper's walk (`um`).
+All the Windfall people share one skeleton, so only the joint rotations are taken over: each character
+keeps its own proportions, its feet stay on the ground, and the walk is timed to its own stride, so
+its feet don't slide at any speed. The port builds these walks when the game starts (or when the editor
+opens), from your own game files; nothing of the game is in your package or in the port. If your game
+files lack one of the archives, those villagers stand at their position and the log says why. They turn
+at corners in a tighter arc than the game's own walkers, so a slow walker doesn't circle wide past a
+corner. Their long skirts and coats hide most of the legs; the walk shows in the body, the arms and the
+steps below the hem.
+
+The seated `ym1` does not walk and is refused with "this villager is seated and does not walk". Each placed resident
 may have a route or none; `um3`, `sa5`, `ug1` and `ug2` stay unplaceable (see above).
 
 Other actor names and unsafe parameters are validator errors. Only ordinary chest
