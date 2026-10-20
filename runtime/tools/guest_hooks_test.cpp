@@ -247,7 +247,8 @@ uint32_t actor_address(Cpu*,const std::string&,const std::string&){return 0;}
 bool particle_position(Cpu*,const std::string&,const std::string&,unsigned,story_notebook::WorldPoint&){return false;}
 bool actions(const std::string&,const std::vector<story_notebook::StoryAction>&){return true;}
 }
-namespace story_resident_routes { void set_memory(uint32_t){} }
+namespace story_resident_routes { void set_memory(uint32_t){} uint32_t memory(){return 0;} void set_clip_memory(uint32_t){} bool set_clip(unsigned,const std::vector<uint8_t>&){return false;} }  // no route or clip memory here
+namespace story_resident_walk_files { bool build(const std::string&,unsigned,Clip&,std::string& why){why="not in this test";return false;} }
 namespace story_scenes {
 bool has_demo_steps(){return false;}
 uint32_t demo_arena_bytes(){return 0;}
