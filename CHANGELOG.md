@@ -12,6 +12,15 @@ what is on `devel` and not released yet (also in the
   and the charm's ring always landed there. It now runs once per game step at every frame rate, as at 30 fps; this
   also brings the interface's other small animations back to their original speed.
 
+- **Sky island example: the Helmaroc King carries Link there, and a textured island** (for mod makers). Stepping onto
+  Outset's pier walkway starts a scene: the Helmaroc King swoops down, grabs Link and carries him over the sea to the sky
+  island (the updraft stays as a second way in). The island now has grass, a path, cliffs and a rocky underside made
+  from Outset's own materials, and the arena a paved floor. A demo actor can ask for its own copy with
+  `"spawn": "always"` (the room's own Helmaroc King waits hidden for its story moment). A room without a material
+  mapping now uses the kit's main material instead of an arbitrary one, which fixes streaked or black ground. Scenes
+  without text, sounds or story actions no longer need the Story Notebook. New editor and MCP commands:
+  `list_kit_materials`, `edit_demo_actor`, `set_package_info`, and `focus` with an eye point.
+
 - **Mod dungeons: sky islands and boss rooms** (for mod makers). A stage can borrow the sky of a game stage (day
   sky, stars or dusk) over your own models; `list_stage_templates` in the editor and MCP lists which stages have a
   sky, a boss door and music to borrow, and the Stages tab can filter for skies. New entry style: an updraft that
