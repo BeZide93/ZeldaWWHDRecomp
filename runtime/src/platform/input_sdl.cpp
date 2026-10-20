@@ -4,6 +4,7 @@
 #include <jni.h>
 #include "phone_rumble.h"
 #include "overlay/hostui.h"
+#include "quest_theater.h"
 #endif
 #include "gfx/display_modes.h"
 #include "android_controller.h"
@@ -850,8 +851,15 @@ void update(){
  // SDL text input in every game window while the overlay's text prompt shows (typed text, input methods;
  // on Android it brings up the system keyboard); the input method's candidates open over the prompt
  // (also while a text field of the settings overlay has the keyboard)
+ // Not in the Quest theater: an immersive OpenXR session never shows Android's system keyboard, which
+ // would still take every controller press from the on-screen keyboard (the controllers type there).
+#ifdef __ANDROID__
+ const bool system_keyboard=!quest_theater::active();
+#else
+ const bool system_keyboard=true;
+#endif
  static bool entry_text=false;
- if((text_entry::active()||overlay::wants_text())!=entry_text&&!g_done){
+ if(system_keyboard&&(text_entry::active()||overlay::wants_text())!=entry_text&&!g_done){
   entry_text=!entry_text;int n=0;
   if(SDL_Window** ws=SDL_GetWindows(&n)){
    for(int i=0;i<n;i++){
