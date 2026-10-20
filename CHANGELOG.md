@@ -7,6 +7,11 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Mod SDK: a dungeon map for mod dungeons** (for mod makers, preview). A mod dungeon with a map shows it on the
+  GamePad's map page (and on the TV's map tab with the Pro Controller): rooms seen from above, made from the rooms'
+  floors, the rooms Link has visited, where he stands, and with the dungeon map every room; with the compass also the
+  chests (open or not) and the boss door. Only Link's floor is shown for now.
+
 - **40 fps mode.** A new frame rate next to 30, 60, 120 and 240 fps: three game steps over four frames, at full game
   speed. It suits screens that run at 40, 80 or 120 Hz, such as the Steam Deck LCD at 40 Hz or the OLED at 80 Hz, where
   every frame is shown for the same time. On Android the app asks for a matching screen rate; some phones choose the
