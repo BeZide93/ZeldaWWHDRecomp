@@ -107,6 +107,123 @@ Value Session::dispatch_stages(const std::string& command, const Value& p, std::
         spawn["angle"] = p.get("angle").type == Value::Number ? p.get("angle").number : 0.0;
     };
 
+    if (command == "place_in_stage") {
+        // what goes where Link (or the camera, or a position) is: in a room of the stage, or (an entry) in a game room
+        Package* pkg = package(p, why);
+        if (!pkg) return r;
+        Place place;
+        if (!where(p, place, why)) return r;
+        const std::string what = text(p, "what"), id = text(p, "stage");
+        std::string here_stage;  // the package's stage id Link is in ("" a game stage)
+        if (host_)
+            for (const auto& b : host_->mod_stages())
+                if (b.name == place.stage && b.mod == pkg->mod) here_stage = b.id;
+        // at = position: "stage" names the package's stage (its id), "room" one of its rooms
+        if (p.get("at").string() == "position" && place.stage == id) here_stage = id;
+        if (what != "entry" && here_stage != id)
+            return why = "go into stage " + id + " first (warp with \"stage\": \"stage:" + pkg->mod + "/" + id + "\"), or give at = position with \"room\"", r;
+        if (what == "entry" && !here_stage.empty()) return why = "an entry is in a room of the game (the way in): stand there first", r;
+        const double yaw = place.angle * 360.0 / 65536.0;
+        auto box = [&](double sx, double sy, double sz) {
+            Value b;
+            const double w = p.get("size").get("x").type == Value::Number ? p.get("size").get("x").number : sx;
+            const double h = p.get("size").get("y").type == Value::Number ? p.get("size").get("y").number : sy;
+            const double d = p.get("size").get("z").type == Value::Number ? p.get("size").get("z").number : sz;
+            b["min"] = point_value(place.position.x - w / 2, place.position.y - 50, place.position.z - d / 2);
+            b["max"] = point_value(place.position.x + w / 2, place.position.y - 50 + h, place.position.z + d / 2);
+            return b;
+        };
+        const std::string room = std::to_string(place.room);
+        stage_edit("Place " + what, [&](Value&, Value& s, std::string& w) {
+            auto list = [&](Value& parent, const char* key) -> Value& {
+                Value& l = parent[key];
+                if (l.type != Value::Array) l.type = Value::Array;
+                return l;
+            };
+            Value* rv = nullptr;
+            for (auto& v : s["rooms"].array)
+                if (v.get("room").number == place.room) rv = &v;
+            if (what != "entry" && !rv) return w = "the stage has no room " + room, false;
+            const std::string item_id = p.get("id").type == Value::String ? p.get("id").text : what + "-" + std::to_string(int(std::fabs(place.position.x)) % 10000);
+            if (what == "spawn") {
+                Value sp;
+                unsigned point = 0;
+                for (const auto& v : s["rooms"].array)
+                    for (const auto& q : v.get("spawns").array) point = std::max(point, unsigned(q.get("point").number) + 1);
+                if (p.get("point").type == Value::Number) {
+                    for (auto& q : list(*rv, "spawns").array)
+                        if (q.get("point").number == p.get("point").number) {
+                            q["position"] = point_value(place.position.x, place.position.y, place.position.z), q["angle"] = std::round(yaw);
+                            r["moved"] = q;
+                            return true;
+                        }
+                    point = unsigned(p.get("point").number);
+                }
+                sp["point"] = double(point);
+                sp["position"] = point_value(place.position.x, place.position.y, place.position.z);
+                sp["angle"] = std::round(yaw);
+                list(*rv, "spawns").array.push_back(sp);
+                r["added"] = sp;
+            } else if (what == "exit") {
+                if (p.get("to").type != Value::Object) return w = "an exit needs \"to\": a place of the game {stage, room, point}, or {room, point} of this stage", false;
+                Value e;
+                e["id"] = item_id;
+                e["box"] = box(400, 200, 400);
+                e["to"] = p.get("to");
+                list(*rv, "exits").array.push_back(e);
+                r["added"] = e;
+                r["note"] = "the floor inside the box takes Link out: keep it on floor (rebuild_stage reports a box on no floor)";
+            } else if (what == "door") {
+                if (p.get("to_room").type != Value::Number) return w = "a door needs \"to_room\": the room on its other side", false;
+                Value d;
+                d["position"] = point_value(place.position.x, place.position.y, place.position.z);
+                d["angle"] = std::round(yaw);
+                d["rooms"].type = Value::Array;
+                d["rooms"].array = {Value(double(place.room)), p.get("to_room")};
+                if (p.get("lock").type == Value::String) d["lock"] = p.get("lock").text;
+                if (p.get("switch").type == Value::Number) d["switch"] = p.get("switch").number;
+                list(s, "doors").array.push_back(d);
+                r["added"] = d;
+                r["note"] = "the door stands where Link stands, facing the way he faces: leave a 3 m wide, 3 m high opening in both rooms there";
+            } else if (what == "warp") {
+                Value wv;
+                wv["id"] = item_id;
+                wv["room"] = double(place.room);
+                wv["position"] = point_value(place.position.x, place.position.y, place.position.z);
+                wv["size"] = point_value(200, 200, 200);
+                if (p.get("to").type == Value::Object) wv["to"] = p.get("to");
+                list(s, "warps").array.push_back(wv);
+                r["added"] = wv;
+            } else if (what == "entry") {
+                Value e;
+                e["id"] = item_id;
+                e["stage"] = place.stage;
+                e["room"] = double(place.room);
+                e["position"] = point_value(place.position.x, place.position.y, place.position.z);
+                e["size"] = point_value(200, 200, 200);
+                e["to"]["room"] = p.get("to_room").type == Value::Number ? p.get("to_room").number : 0.0;
+                e["to"]["point"] = p.get("to_point").type == Value::Number ? p.get("to_point").number : 0.0;
+                list(s, "entries").array.push_back(e);
+                r["added"] = e;
+            } else if (what == "chest" || what == "enemy" || what == "pot" || what == "big_pot") {
+                Value a;
+                a["id"] = item_id;
+                a["actor"] = what == "enemy" ? (p.get("actor").type == Value::String ? p.get("actor").text : std::string("bokoblin")) : what;
+                if (p.get("variant").type == Value::String) a["variant"] = p.get("variant").text;
+                if (what == "chest") a["item"] = p.get("item").type == Value::String ? p.get("item").text : std::string("small_key");
+                // a chest or pot 1.5 m in front of Link, facing him (he opens a chest from its front); an enemy 3 m
+                const double ahead = what == "enemy" ? 300 : 150;
+                a["position"] = point_value(place.position.x + std::sin(yaw * 3.14159265358979 / 180) * ahead, place.position.y,
+                                            place.position.z + std::cos(yaw * 3.14159265358979 / 180) * ahead);
+                a["angle"] = std::round(std::fmod(yaw + 180, 360));
+                list(*rv, "actors").array.push_back(a);
+                r["added"] = a;
+            } else
+                return w = "\"what\" is spawn, exit, door, warp, entry, chest, enemy, pot or big_pot", false;
+            return true;
+        });
+        return r;
+    }
     if (command == "import_ground") {
         Package* pkg = package(p, why);
         if (!pkg) return r;

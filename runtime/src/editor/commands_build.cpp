@@ -9,6 +9,7 @@
 #include <set>
 #include <system_error>
 
+#include "../mods/mod_stages_manifest.h"
 #include "../mods/skinned_model_validation.h"
 #include "../mods/static_model_validation.h"
 #include "../mods/story_manifest.h"
@@ -406,6 +407,11 @@ std::vector<Problem> package_problems(const std::string& mod, const Value& manif
         else if (!check_icon_file(file.string(), w, h, why)) add({"item " + id + ": " + icon + ": " + why, "item", id, "icon"});
     }
     why.clear();
+    {  // a stage's room nothing leads to (kept while editing, validate_package)
+        std::vector<mod_stages::Stage> stages;
+        if (validate_package(mod, manifest, all, why) && !mod_stages::parse(manifest, stages, why)) add({"stages: " + why, "package", "", "stages"});
+        why.clear();
+    }
     if (validate_package(mod, manifest, all, why)) return out;
     const std::string whole = why;
     const size_t before = out.size();

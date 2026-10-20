@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -44,6 +45,7 @@ constexpr double kPi = 3.14159265358979323846;
 struct ShellState {
     bool outliner = true, inspector = true, problems = false, test = false, log = false;
     bool story_tab = false;  // show the Outliner's Story tab once
+    bool stages_tab = false;  // show the Outliner's Stages tab once
     bool focus_inspector = false, focus_problems = false;
     bool quests = false, flags = false, search = false, focus_quests = false;  // the quest editor's windows
     bool quests_focused = false;  // Ctrl+C / Ctrl+V are the quest editor's there
@@ -751,6 +753,99 @@ bool route_overlay(ImDrawList* dl, const View& v, const Value* sel, bool& handle
     return true;
 }
 
+// ---------------------------------------------------------------- the open mod's stages in the picture
+// In a room of one of the mod's stages: its spawns (green posts), exit boxes (blue), return warps (purple),
+// doors (orange frames) and actors (chests yellow, the rest white marks), each labelled. In a room of the
+// game: the stages' entries there (white boxes). The game name of each stage comes from list_stages (the
+// snapshot's, once a second).
+void box3(ImDrawList* dl, const View& v, const float lo[3], const float hi[3], ImU32 c, float t) {
+    ImVec2 q[8];
+    bool ok = true;
+    for (int k = 0; k < 8; k++) {
+        const float p[3] = {k & 1 ? hi[0] : lo[0], k & 2 ? hi[1] : lo[1], k & 4 ? hi[2] : lo[2]};
+        ok = ok && project(v, p, q[k]);
+    }
+    if (!ok) return;
+    static const int edges[12][2] = {{0, 1}, {2, 3}, {4, 5}, {6, 7}, {0, 2}, {1, 3}, {4, 6}, {5, 7}, {0, 4}, {1, 5}, {2, 6}, {3, 7}};
+    for (const auto& e : edges) dl->AddLine(q[e[0]], q[e[1]], c, t);
+}
+void label3(ImDrawList* dl, const View& v, const float p[3], ImU32 c, const std::string& text) {
+    ImVec2 at;
+    if (project(v, p, at)) dl->AddText(ImVec2(at.x + 6, at.y - 14), c, text.c_str());
+}
+void stages_overlay(ImDrawList* dl, const View& v, const Value& m, const std::string& stage, int room) {
+    if (m.get("stages").type != Value::Array) return;
+    std::map<std::string, std::string> id_of;  // game name -> stage id
+    for (const auto& s : editor_ui::snapshot().stages.get("stages").array)
+        if (s.get("game_name").type == Value::String) id_of[s.get("game_name").text] = s.get("id").string();
+    const auto it = id_of.find(stage);
+    for (const auto& s : m.get("stages").array) {
+        if (it == id_of.end()) {  // a game room: the entries into the mod's stages
+            for (const auto& e : s.get("entries").array) {
+                if (e.get("stage").string() != stage || int(num(e, "room")) != room) continue;
+                float p[3];
+                if (!point3(e.get("position"), p)) continue;
+                const float hx = float(num(e.get("size"), "x")) / 2, hz = float(num(e.get("size"), "z")) / 2, h = float(num(e.get("size"), "y"));
+                const float lo[3] = {p[0] - hx, p[1], p[2] - hz}, hi[3] = {p[0] + hx, p[1] + h, p[2] + hz};
+                box3(dl, v, lo, hi, IM_COL32(240, 240, 240, 220), 2);
+                label3(dl, v, hi, IM_COL32(240, 240, 240, 230), "entry " + e.get("id").string() + " -> " + s.get("id").string());
+            }
+            continue;
+        }
+        if (s.get("id").string() != it->second) continue;
+        for (const auto& r : s.get("rooms").array) {
+            if (int(num(r, "room")) != room) continue;
+            for (const auto& sp : r.get("spawns").array) {
+                float p[3];
+                if (!point3(sp.get("position"), p)) continue;
+                draw_cylinder(dl, v, p, 30, 120, IM_COL32(120, 230, 120, 220));
+                const float top[3] = {p[0], p[1] + 120, p[2]};
+                label3(dl, v, top, IM_COL32(150, 240, 150, 230), "spawn " + std::to_string(int(num(sp, "point"))));
+            }
+            for (const auto& e : r.get("exits").array) {
+                float lo[3], hi[3];
+                if (!point3(e.get("box").get("min"), lo) || !point3(e.get("box").get("max"), hi)) continue;
+                box3(dl, v, lo, hi, IM_COL32(90, 170, 255, 230), 2);
+                const auto& to = e.get("to");
+                label3(dl, v, hi, IM_COL32(150, 200, 255, 230),
+                       "exit " + e.get("id").string() + " -> " + (to.get("stage").type == Value::String ? to.get("stage").text + " " : std::string()) + "room " +
+                           std::to_string(int(num(to, "room"))) + " point " + std::to_string(int(num(to, "point"))));
+            }
+            for (const auto& a : r.get("actors").array) {
+                float p[3];
+                if (!point3(a.get("position"), p)) continue;
+                const bool chest = a.get("actor").string() == "chest";
+                const float lo[3] = {p[0] - 50, p[1], p[2] - 40}, hi[3] = {p[0] + 50, p[1] + 70, p[2] + 40};
+                box3(dl, v, lo, hi, chest ? IM_COL32(255, 210, 80, 230) : IM_COL32(230, 230, 230, 200), 1.5f);
+                label3(dl, v, hi, IM_COL32(240, 220, 150, 230), a.get("id").string() + " (" + a.get("actor").string() + (chest ? " " + a.get("item").string() : std::string()) + ")");
+            }
+        }
+        for (const auto& d : s.get("doors").array) {
+            const auto& rr = d.get("rooms").array;
+            if (rr.size() != 2 || (int(rr[0].number) != room && int(rr[1].number) != room)) continue;
+            float p[3];
+            if (!point3(d.get("position"), p)) continue;
+            const double a = num(d, "angle") * kPi / 180;
+            const float sx = float(std::cos(a)) * 150, sz = float(-std::sin(a)) * 150;  // across the door
+            const float l0[3] = {p[0] - sx, p[1], p[2] - sz}, l1[3] = {p[0] + sx, p[1], p[2] + sz};
+            const float u0[3] = {l0[0], p[1] + 300, l0[2]}, u1[3] = {l1[0], p[1] + 300, l1[2]};
+            const ImU32 c = IM_COL32(255, 160, 70, 230);
+            line3(dl, v, l0, l1, c, 2.5f), line3(dl, v, u0, u1, c, 2.5f), line3(dl, v, l0, u0, c, 2.5f), line3(dl, v, l1, u1, c, 2.5f);
+            label3(dl, v, u1, IM_COL32(255, 190, 120, 230),
+                   "door " + std::to_string(int(rr[0].number)) + "-" + std::to_string(int(rr[1].number)) + (d.get("lock").type == Value::String ? " " + d.get("lock").text : std::string()));
+        }
+        for (const auto& w : s.get("warps").array) {
+            if (int(num(w, "room")) != room) continue;
+            float p[3];
+            if (!point3(w.get("position"), p)) continue;
+            const float hx = float(num(w.get("size"), "x")) / 2, hz = float(num(w.get("size"), "z")) / 2, h = float(num(w.get("size"), "y"));
+            const float lo[3] = {p[0] - hx, p[1], p[2] - hz}, hi[3] = {p[0] + hx, p[1] + h, p[2] + hz};
+            box3(dl, v, lo, hi, IM_COL32(200, 120, 255, 230), 2);
+            label3(dl, v, hi, IM_COL32(220, 170, 255, 230), "warp " + w.get("id").string());
+        }
+    }
+}
+
 // ---------------------------------------------------------------- the mod's room paths in the picture
 // Every path of the open mod in this stage: a thin blue line (an area closes on its first point). The
 // selected actor's path: a thicker line, its numbered points and the selected point's move handle
@@ -1162,6 +1257,7 @@ void world(float w, float h) {
     // the water tool's draft: its outline, band or edge, and its handles (before the actor's handle)
     bool water_handle_busy = false;
     if (!point_handle && water_overlay(dl, v, water_handle_busy)) point_handle = true, point_handle_busy = point_handle_busy || water_handle_busy;
+    stages_overlay(dl, v, snap.manifest, stage, int(num(snap.state.get("link"), "room", -1)));
     // the selected actor: its cylinder and handles
     float model[16] = {};
     bool gizmo = false;
@@ -1593,6 +1689,11 @@ void panels(float w, float h) {
                     editor_ui::warp_area();
                     ImGui::EndTabItem();
                 }
+                if (ImGui::BeginTabItem("Stages", nullptr, S.stages_tab ? ImGuiTabItemFlags_SetSelected : 0)) {
+                    editor_ui::stages_area(snap.manifest);
+                    ImGui::EndTabItem();
+                }
+                S.stages_tab = false;
                 ImGui::EndTabBar();
             }
         }
@@ -1891,6 +1992,7 @@ void register_layers() {
         S.scenes = w.find("scenes") != std::string::npos;
         S.reset_layout = w.find("resetlayout") != std::string::npos;  // as Reset layout at the first frame
         if (w.find("nooutliner") != std::string::npos) S.outliner = false;
+        S.stages_tab = w.find("stages") != std::string::npos;  // the Outliner's Stages tab
         if (w.find("noinspector") != std::string::npos) S.inspector = false;
     }
     if (const char* e = std::getenv("WWHD_TEST_EDITOR_PLACING")) S.placing = e;

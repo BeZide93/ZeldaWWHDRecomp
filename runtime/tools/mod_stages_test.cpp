@@ -197,6 +197,14 @@ int main() {
         bad2 += !refuse("\"lock\": \"shutter\", \"switch\": 5", "\"lock\": \"shutter\", \"switch\": 100", "shutter opens on a switch");
         bad2 += !refuse("\"lock\": \"boss\"}", "\"lock\": \"golden\"}", "lock is none");
         bad2 += !refuse("\"joins\": [[2, 3]]", "\"joins\": []", "room 3 can't be reached");
+        {  // while editing (the editor's validation) a room nothing leads to yet is kept; the game's parse refuses it
+            std::string text = dungeon;
+            text.replace(text.find("\"joins\": [[2, 3]]"), std::strlen("\"joins\": [[2, 3]]"), "\"joins\": []");
+            std::vector<Stage> out;
+            std::string w;
+            assert(parse(parse_json(text), out, w, false) && out[0].rooms.size() == 4);
+            assert(!parse(parse_json(text), out, w));
+        }
         bad2 += !refuse("\"joins\": [[2, 3]]", "\"joins\": [[2, 2]]", "two different rooms");
         bad2 += !refuse("\"kit\": {\"stage\": \"M_NewD2\", \"room\": 3}", "\"kit\": {\"stage\": \"M_NewD2\"}", "kit is a room");
         bad2 += !refuse("\"id\": \"pot\", \"actor\": \"pot\"", "\"id\": \"pot\", \"actor\": \"pot\", \"item\": \"map\"", "only a chest holds an item");

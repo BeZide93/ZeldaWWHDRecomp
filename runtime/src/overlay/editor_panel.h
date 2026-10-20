@@ -27,6 +27,7 @@ struct Snapshot {
     Value state;      // read_state
     Value locations;  // list_locations (refreshed every second)
     Value villagers;  // list_villagers: the game's villagers the NPC catalogue knows, loaded now (twice a second)
+    Value stages;     // list_stages: the open mod's stages, built or not (once a second, when it has any)
     std::vector<editor::LogEntry> log;
 };
 void refresh();               // once per frame, before drawing: the snapshot and finished commands
@@ -46,6 +47,7 @@ void models_area(const Value& m);
 void scenes_area(const Value& m);
 void quests_area(const Value& m);
 void warp_area();
+void stages_area(const Value& m);      // the Stages tab (editor_stages.cpp): new stages, rooms, rebuild, warp, check, place here
 void camera_test_area();
 void log_area();
 void problems_area();                   // the last check's problems: a click selects the actor and its field

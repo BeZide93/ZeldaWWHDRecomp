@@ -112,6 +112,13 @@ const std::vector<CommandInfo> kCommands = {
     // ---- the mod's stages (commands_stages.cpp, docs/mod-stages.md): new places built from the package's models
     {"import_ground", "Copies a room's .glb (from Blender, say) into the package (assets/<name>.glb, or \"as\") for add_stage, add_room or a rebuild; reports its parts, the parts without UVs and its material names.",
      {{"file", "string", "the .glb", true}, {"as", "string", "its path in the package"}, {"confirm", "boolean", "replace a different file of that name"}, {"mod", "string", ""}}},
+    {"place_in_stage", "Places something of a stage where Link (or the fly camera, or a position) is: a spawn (\"point\" moves one), an exit box on the floor (\"to\": where it leads), a door facing his way (\"to_room\", \"lock\"), a return warp, a chest 1.5 m ahead facing him (\"item\"), an enemy (\"actor\", \"variant\"), a pot; or, standing in a game room, an entry (the way in, \"to_room\", \"to_point\").",
+     {{"stage", "string", "", true}, {"what", "string", "spawn, exit, door, warp, entry, chest, enemy, pot or big_pot", true}, {"at", "string", "link (default), camera or position"},
+      {"position", "point", "with at = position"}, {"room", "integer", "with at = position"}, {"id", "string", "its id"}, {"point", "integer", "a spawn's point"},
+      {"to", "object", "an exit's or warp's place"}, {"to_room", "integer", "a door's other room, an entry's room"}, {"to_point", "integer", "an entry's spawn point"},
+      {"lock", "string", "none, small_key, boss or shutter"}, {"switch", "integer", "a shutter's switch"}, {"item", "string", "a chest's: small_key, map, compass, boss_key"},
+      {"actor", "string", "an enemy: chuchu, bokoblin, keese, darknut"}, {"variant", "string", ""}, {"size", "point", "a box's size"}, {"angle", "number", ""}, {"mod", "string", ""}},
+     true},
     {"list_stages", "The mod's stages: id, template, kind, map, save group, rooms (ground, kit, floor, spawn points, exits, actors), doors, entries, whether the game has it built, and how to warp in.",
      {{"mod", "string", ""}}},
     {"add_stage", "Adds a stage with one room whose ground is a .glb in the package (named materials and UVs, see the docs). The spawn is the model's middle on its lowest point unless \"spawn\" is given. Then rebuild_stage and warp in.",
@@ -776,8 +783,10 @@ bool validate_package(const std::string& mod, const Value& manifest, const std::
         !story_notebook::parse_quests(manifest, quests, why) || !story_notebook::parse_charts(manifest, charts, why) ||
         !story_notebook::parse_letters(manifest, letters, why))
         return false;
-    std::vector<mod_stages::Stage> stages;  // the package's stages (mod_stages_manifest.h)
-    if (!mod_stages::parse(manifest, stages, why)) return why = "stages: " + why, false;
+    // the package's stages (mod_stages_manifest.h). A room nothing leads to yet is kept while editing (a new room
+    // before its door): Check and export list it (package_problems), the game does not build that stage
+    std::vector<mod_stages::Stage> stages;
+    if (!mod_stages::parse(manifest, stages, why, false)) return why = "stages: " + why, false;
     std::vector<std::pair<std::string, Value>> world;
     for (const auto& [id, m] : all)
         if (id != mod && (m.get("actors").type != Value::Null || m.get("scenes").type != Value::Null)) world.push_back({id, m});

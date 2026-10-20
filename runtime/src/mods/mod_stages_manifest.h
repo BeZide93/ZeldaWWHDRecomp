@@ -206,8 +206,9 @@ inline bool music_allowed(const std::string& stage) {
 // ... in order, every room with a spawn, spawn points unique in the stage, exits into the stage reaching a
 // spawn of it, doors joining two rooms of the stage, entries into a spawn of the stage, and references to the
 // package's other stages. The builder checks the rest against the player's files (the template, the kit
-// rooms and their materials, each exit box covering floor).
-inline bool parse(const Value& m, std::vector<Stage>& out, std::string& why) {
+// rooms and their materials, each exit box covering floor). Without `require_reachable` a room nothing leads
+// to yet passes (the editor keeps it while a stage is being made; its Check and export list it).
+inline bool parse(const Value& m, std::vector<Stage>& out, std::string& why, bool require_reachable = true) {
     using namespace detail;
     out.clear();
     const Value& list = m.get("stages");
@@ -500,7 +501,8 @@ inline bool parse(const Value& m, std::vector<Stage>& out, std::string& why) {
                 if (e.to.own && e.to.stage.empty()) reach(e.to.room);
         }
         for (unsigned room = 0; room < reached.size(); ++room)
-            if (!reached[room]) return why = "stage " + s.id + ": room " + std::to_string(room) + " can't be reached (no door, join, exit or entry leads to it)", false;
+            if (require_reachable && !reached[room])
+                return why = "stage " + s.id + ": room " + std::to_string(room) + " can't be reached (no door, join, exit or entry leads to it)", false;
     }
     return true;
 }

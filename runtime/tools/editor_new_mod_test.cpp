@@ -233,6 +233,93 @@ void command_layer(const fs::path& root) {
     CHECK(ok(s.run("open_mod", json(R"({"mod": "other"})"))) && s.open_mod() == "other");
     CHECK(*s.manifest("other") == other_manifest);
 }
+
+// a small ground model: a GLB with only its JSON chunk (what the editor reads of it: bounds, UVs, materials)
+void write_glb(const fs::path& file) {
+    std::string j = R"({"asset": {"version": "2.0"}, "materials": [{"name": "floor"}, {"name": "wall"}],
+        "accessors": [{"type": "VEC3", "componentType": 5126, "count": 3, "min": [-500, 0, -500], "max": [500, 400, 500]},
+                      {"type": "VEC2", "componentType": 5126, "count": 3}],
+        "meshes": [{"name": "room", "primitives": [{"attributes": {"POSITION": 0, "TEXCOORD_0": 1}, "material": 0},
+                                                   {"attributes": {"POSITION": 0, "TEXCOORD_0": 1}, "material": 1}]}],
+        "nodes": [{"name": "room", "mesh": 0}], "scenes": [{"nodes": [0]}], "scene": 0})";
+    while (j.size() % 4) j += ' ';
+    std::string b = "glTF";
+    auto u32 = [&](uint32_t v) { for (int i = 0; i < 4; ++i) b += char(v >> (8 * i) & 0xFF); };
+    u32(2);
+    u32(uint32_t(20 + j.size()));
+    u32(uint32_t(j.size()));
+    b += "JSON";
+    b += j;
+    fs::create_directories(file.parent_path());
+    std::ofstream(file, std::ios::binary) << b;
+}
+
+// a host whose Link can stand in a built mod stage
+struct StagesHost : FakeHost {
+    editor::Place where;
+    std::vector<ModStage> built;
+    editor::Place link() override { return where; }
+    std::vector<ModStage> mod_stages() override { return built; }
+};
+
+// the stage commands: a room added before its door is kept (and listed by Check and refused by export until a
+// door leads to it); place_in_stage where Link stands and at a position of the stage
+void stage_commands(const fs::path& root) {
+    const fs::path mods = root / "Mods";
+    fs::create_directories(mods);
+    StagesHost host;
+    host.mods_dir = mods.string();
+    host.where.valid = true;
+    host.where.stage = "sea", host.where.room = 34, host.where.position = {0, 0, 0};
+    editor::Session s(&host);
+    Value r = s.run("new_mod", json(R"({"id": "dun", "name": "Dungeon", "stages": true, "confirm": true})"));
+    CHECK(ok(r) && s.open_mod() == "dun");
+    CHECK(s.manifest("dun")->get("dependencies").array.empty());
+    write_glb(mods / "dun" / "assets" / "room.glb");
+    CHECK(ok(s.run("add_stage", json(R"({"id": "keep", "ground": "assets/room.glb"})"))));
+    r = s.run("add_room", json(R"({"stage": "keep", "ground": "assets/room.glb"})"));
+    CHECK(ok(r));
+    CHECK(s.manifest("dun")->get("stages").array[0].get("rooms").array.size() == 2);
+    // Check lists the room nothing leads to; export refuses it; saving keeps the work
+    auto reach_problem = [&] {
+        const Value checked = s.run("check_package");
+        for (const auto& pr : checked.get("result").get("problems").array)
+            if (pr.get("message").string().find("room 1 can't be reached") != std::string::npos) return true;
+        return false;
+    };
+    CHECK(reach_problem());
+    r = s.run("export_package", json((R"({"confirm": true, "path": ")" + (root / "export").generic_string() + R"("})").c_str()));
+    CHECK(!ok(r) && error_of(r).find("can't be reached") != std::string::npos && !fs::exists(root / "export"));
+    CHECK(ok(s.run("save_package", json(R"({"confirm": true})"))));
+    // outside the stage: refused, with the way in
+    r = s.run("place_in_stage", json(R"({"stage": "keep", "what": "chest", "item": "small_key"})"));
+    CHECK(!ok(r) && error_of(r).find("go into stage keep") != std::string::npos);
+    // in it (room 0, facing +z): a chest 1.5 m ahead, an enemy 3 m ahead, then the key door to room 1
+    host.built = {{"dun", "keep", "Zkeep00", {0, 1}}};
+    host.where.stage = "Zkeep00", host.where.room = 0, host.where.position = {100, 0, 200}, host.where.angle = 0;
+    r = s.run("place_in_stage", json(R"({"stage": "keep", "what": "door", "to_room": 1, "lock": "small_key"})"));
+    CHECK(!ok(r) && error_of(r).find("small key") != std::string::npos);  // no key in the stage yet
+    r = s.run("place_in_stage", json(R"({"stage": "keep", "what": "chest", "item": "small_key"})"));
+    CHECK(ok(r));
+    const Value& chest = r.get("result").get("added");
+    CHECK(chest.get("position").get("x").number == 100 && chest.get("position").get("z").number == 350 && chest.get("angle").number == 180);
+    r = s.run("place_in_stage", json(R"({"stage": "keep", "what": "enemy", "actor": "bokoblin"})"));
+    CHECK(ok(r) && r.get("result").get("added").get("position").get("z").number == 500);
+    r = s.run("place_in_stage", json(R"({"stage": "keep", "what": "door", "to_room": 1, "lock": "small_key"})"));
+    CHECK(ok(r));
+    CHECK(!reach_problem());
+    const Value check = s.run("check_stage", json(R"({"stage": "keep"})")).get("result");
+    CHECK(check.get("errors").number == 0);
+    // at = position, in a room of the stage while Link is elsewhere
+    host.where.stage = "sea", host.where.room = 34;
+    r = s.run("place_in_stage", json(R"({"stage": "keep", "what": "pot", "at": "position", "room": 1, "position": {"x": 10, "y": 0, "z": 10}})"));
+    CHECK(ok(r));
+    const Value& keep = s.manifest("dun")->get("stages").array[0];
+    CHECK(keep.get("rooms").array[1].get("actors").array.size() == 1 && keep.get("rooms").array[0].get("actors").array.size() == 2);
+    CHECK(keep.get("doors").array.size() == 1);
+    // one undo step each
+    CHECK(ok(s.run("undo")) && s.manifest("dun")->get("stages").array[0].get("rooms").array[1].get("actors").array.empty());
+}
 }  // namespace
 
 int main() {
@@ -241,6 +328,7 @@ int main() {
     ids_and_names();
     folders(root / "folders");
     command_layer(root / "manager");
+    stage_commands(root / "stages");
     std::error_code ec;
     fs::remove_all(root, ec);  // this test's own temporary folder
     if (g_failures) {

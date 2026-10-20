@@ -869,7 +869,7 @@ def build_room_archive(kit_files, kit_room, room, prims, recipe_room, dzb, dzr):
     require(default in mats, 'the kit room has no material "%s" (it has: %s)' % (default, ', '.join(sorted(mats))))
     mapping = recipe_room.get('materials', {})
     for glb_name, kit_name in mapping.items():
-        require(kit_name in mats, 'the kit room has no material "%s"' % kit_name)
+        require(kit_name in mats, 'the kit room has no material "%s" (it has: %s)' % (kit_name, ', '.join(sorted(mats))))
     # visible primitives grouped by the kit model their material comes from: one output model each (the
     # game looks a model's shader archive up by the model's name)
     # the parts drawn with one kit material become one shape (a model of a hundred parts draws as a few)

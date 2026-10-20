@@ -196,6 +196,11 @@ want it around the origin, and make the spawns, exits and doors fit it.
   stone (or on the surface a `col_` material name gives). Up to 20000 collision triangles per room.
 - Faces are seen from the side their normal points to; for a room seen from inside, the walls and ceiling
   face inwards.
+- **Give each kind of surface its own named material** (`floor`, `wall`, `ceiling`, ...) and map the names to
+  kit materials with `materials`. With one material, or materials without names, every surface is drawn
+  the same.
+- **Unwrap every visible mesh** (UVs; in Blender **UV → Smart UV Project** or **Cube Projection**). A surface
+  without texture coordinates shows a single colour of its texture. The editor's `check_stage` reports both.
 
 ### Kit materials
 
@@ -255,6 +260,23 @@ With `--editor`, the warp list (`list_locations`) has a group **Mod stages** wit
 installed packages' stages, named by the stage's id and package. The `warp` command takes a package's stage
 as `"stage": "stage:<package id>/<stage id>"`, for example
 `{"command": "warp", "params": {"stage": "stage:mod-stage-cave/chamber", "room": 0, "point": 0}}`.
+
+The editor's **Stages** tab (in the Outliner and under **Settings → Editor**) works on the open mod's stages:
+
+- **New stage**: a room model (`.glb`), a template and an optional map title; **Create, build and warp in**
+  copies the model into the mod, adds the stage, builds it and takes Link to its first spawn.
+- Each stage's rooms, **Add room** (another model), **Rebuild**, **Warp in** and **Check** (the problems, as
+  a list).
+- **Where Link stands**: inside the stage, a spawn, a return warp, an exit (to the sea outside the lava cave
+  or to a spawn of the stage), a door to another room with its lock, a chest with its item, an enemy or a
+  pot. In a room of the game, the stage's entry.
+- In the editor view, the stage's spawns, exits, doors, chests and warps show as boxes with their names.
+
+The same steps are commands, for scripts and MCP clients: `list_stages`, `import_ground`, `add_stage`,
+`add_room`, `set_stage_field`, `place_in_stage`, `remove_stage`, `check_stage`, `rebuild_stage` and
+`reset_stage_save` ([the list](mod-editor.md#commands)). `rebuild_stage` while Link is in the stage loads it
+again where he stands. [Building a dungeon with an AI assistant](mod-stages-ai.md) goes through a whole
+stage built this way, with Blender.
 
 ## Limits
 

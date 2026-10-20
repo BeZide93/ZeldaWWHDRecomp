@@ -431,6 +431,7 @@ void refresh() {
         if (want_locations) {
             g_snap.locations = s.run("list_locations", Value(), false).get("result");
             locations_at = frame;
+            g_snap.stages = m && m->get("stages").type == Value::Array ? s.run("list_stages", Value(), false).get("result") : Value();
         }
         if (frame - villagers_at >= 30) {
             g_snap.villagers = s.run("list_villagers", Value(), false).get("result");
@@ -1283,7 +1284,7 @@ void draw() {
     if (!U.message.empty()) wrapped(U.message_ok ? kGood : kBad, U.message);
     if (!status.empty()) wrapped(kMuted, status);
     mcp_prompt();
-    static const char* const kAreas[] = {"Actors", "Models", "Scenes", "Quests", "Story", "Warp", "Camera & test", "Problems", "Export", "Log", "Claude / MCP"};
+    static const char* const kAreas[] = {"Actors", "Models", "Scenes", "Quests", "Story", "Warp", "Camera & test", "Problems", "Export", "Log", "Stages", "Claude / MCP"};
     const int areas = int(sizeof kAreas / sizeof kAreas[0]) - (editor_mcp::available() ? 0 : 1);
     if (ImGui::BeginTabBar("editor_areas", ImGuiTabBarFlags_FittingPolicyShrink)) {
         for (int i = 0; i < areas; i++) {
@@ -1318,7 +1319,8 @@ void draw() {
     case 6: camera_test_area(); break;
     case 7: problems_area(); break;
     case 8: export_area(); break;
-    case 10: mcp_area(); break;
+    case 10: stages_area(m); break;
+    case 11: mcp_area(); break;
     default: log_area(); break;
     }
     ImGui::EndChild();
