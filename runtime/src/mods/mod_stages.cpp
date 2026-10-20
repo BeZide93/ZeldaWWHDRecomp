@@ -73,6 +73,22 @@ std::mutex g_mutex;
 std::deque<Built> g_stages;
 std::vector<Built> g_pending;  // rebuilt stages waiting for the game thread (under g_mutex)
 std::string g_game_dir;
+std::map<std::string, Value> g_manifests;  // each package's manifest (its stages' "then" actions name its quests)
+std::function<bool(const std::string&, const std::vector<story_notebook::StoryAction>&)> g_story_actions;
+unsigned g_record_generation = 0;  // counts the stage records the game took (getSave): a new record isn't a change
+// a "then" of the package's stage (JSON, checked when the manifest was read): its story actions run
+void run_then(const std::string& mod, const std::string& then, const std::string& what) {
+    if (then.empty()) return;
+    std::vector<story_notebook::StoryAction> list;
+    std::string why;
+    const auto it = g_manifests.find(mod);
+    if (it == g_manifests.end() || !story_notebook::world_manifest::actions(it->second, mods::json::parse(then), list, why)) {
+        LOG("[mod-stages] %s: %s: its actions can't run (%s)", mod.c_str(), what.c_str(), why.c_str());
+        return;
+    }
+    const bool ok = g_story_actions && g_story_actions(mod, list);
+    LOG("[mod-stages] %s: %s: %zu story action(s)%s", mod.c_str(), what.c_str(), list.size(), ok ? "" : " (not all ran)");
+}
 
 // the game's play state (savestate.cpp kPlay): the start stage (name[8], point s16, room s8, layer s8) and the
 // next stage (the same and enabled u8, wipe u8)
@@ -365,6 +381,7 @@ void declare(const std::string& mod, const Value& manifest, const std::string& p
     if (!parse(manifest, list, why)) exception_report::raise("Stages " + mod + ": " + why);
     if (list.empty()) return;
     g_game_dir = game_dir;
+    g_manifests[mod] = manifest;
     declare_stages(mod, list, package_dir, data_dir, python, tool, false);
 }
 
@@ -373,6 +390,7 @@ std::vector<BuildResult> rebuild(const std::string& mod, const Value& manifest, 
     std::vector<Stage> list;
     std::string why;
     if (!parse(manifest, list, why)) return {BuildResult{"", "", why}};
+    g_manifests[mod] = manifest;
     if (!only.empty()) {
         std::vector<Stage> one;
         for (const auto& s : list)
@@ -402,6 +420,8 @@ std::vector<BuildResult> rebuild(const std::string& mod, const Value& manifest, 
     }
     return results;
 }
+
+void set_story_actions(std::function<bool(const std::string&, const std::vector<story_notebook::StoryAction>&)> run) { g_story_actions = std::move(run); }
 
 bool declared() {
     std::lock_guard lock(g_mutex);
@@ -494,10 +514,12 @@ void enter(const std::string& name, unsigned room, unsigned point, uint8_t wipe)
     st8(next_stage() + 12, 1);     // enabled
 }
 
+void watch_stage_events();
 void logic(Cpu*) {
     apply_pending();
     if (g_stages.empty()) return;
     draw_map();
+    watch_stage_events();
     static std::string last_room;
     static std::set<std::string> armed;  // entries Link was outside of since he came into the room
     const auto p = ss::link_place();
@@ -527,6 +549,7 @@ void logic(Cpu*) {
             }
             if (!armed.count(key) || !ss::control_problem().empty()) continue;
             armed.erase(key);
+            run_then(b.info.mod, e.then, "entry " + e.id);
             if (e.style == "updraft") {
                 g_lift = Lift{true, b.info.name, e.id, room_key, e.to_room, e.to_point, p.pos[1], float(e.height), 0};
                 LOG("[mod-stages] updraft %s/%s: the wind lifts Link (%.0f units)", b.info.mod.c_str(), e.id.c_str(), e.height);
@@ -560,6 +583,7 @@ void logic(Cpu*) {
             if (!armed.count(key) || !ss::control_problem().empty()) continue;
             armed.erase(key);
             const std::string to = !w.to.own ? w.to.stage : w.to.stage.empty() ? b.info.name : b.names.at(w.to.stage);
+            run_then(b.info.mod, w.then, "warp " + w.id);
             enter(to, w.to.room, w.to.point, 9);  // wipe: the warp light (the game's own cave exits and its turn restart use it)
             LOG("[mod-stages] warp %s/%s: Link goes to %s room %u point %u", b.info.id.c_str(), w.id.c_str(), to.c_str(), w.to.room, w.to.point);
             return;
@@ -829,6 +853,37 @@ bool chest_open(unsigned flag) {
     if (!save || flag > 31 || !by_name(current_stage())) return false;
     return (ld32(save + 0x20 + kWorkingRecord) >> flag) & 1u;  // dSv_memBit_c's chests (u32, bit = flag)
 }
+// The stage's chests with a "then" (opened) and its darknuts with one (their defeat switch set): a change of the
+// working record while Link is in the stage runs the actions. The record the game takes on entering (or from
+// a save state) is where watching starts, never a change.
+void watch_stage_events() {
+    static unsigned generation = ~0u;
+    static const Built* stage = nullptr;
+    static uint32_t chests = 0;
+    static std::array<uint32_t, 4> switches{};
+    const Built* b = by_name(current_stage());
+    const uint32_t save = ld32(kSavePtr);
+    if (!b || !save || b != g_loaded_record) { stage = nullptr; return; }
+    const uint32_t rec = save + 0x20 + kWorkingRecord;
+    const uint32_t now_chests = ld32(rec);
+    std::array<uint32_t, 4> now_switches{};
+    for (unsigned i = 0; i < 4; ++i) now_switches[i] = ld32(rec + 4 + i * 4);  // dSv_memBit_c::mSwitch
+    if (b != stage || generation != g_record_generation) {
+        stage = b, generation = g_record_generation, chests = now_chests, switches = now_switches;
+        return;
+    }
+    if (now_chests == chests && now_switches == switches) return;
+    for (const auto& r : b->stage.rooms)
+        for (const auto& a : r.actors) {
+            if (a.then.empty()) continue;
+            if (a.actor == "chest" && ((now_chests >> a.flag) & 1u) && !((chests >> a.flag) & 1u)) run_then(b->info.mod, a.then, "chest " + a.id + " opened");
+            if (a.defeat_switch) {
+                const unsigned w = a.defeat_switch >> 5, bit = a.defeat_switch & 31;
+                if (((now_switches[w] >> bit) & 1u) && !((switches[w] >> bit) & 1u)) run_then(b->info.mod, a.then, a.actor + " " + a.id + " defeated");
+            }
+        }
+    chests = now_chests, switches = now_switches;
+}
 bool reset_save(const std::string& mod, const std::string& group, std::string& why) {
     const uint16_t key = save_key(mod, "group:" + group);
     g_session_records.erase(key);
@@ -857,6 +912,7 @@ extern "C" void hook_025B9C9C(Cpu* c) {
     const Built* b = loading_stage();
     g_loaded_record = b;
     if (!b) return;
+    ++g_record_generation;
     const auto bytes = read_record(*b);
     for (unsigned i = 0; i < kRecordBytes; ++i) st8(info + kWorkingRecord + i, bytes[i]);
     LOG("[mod-stages] %s: record of save group %s loaded (chests %02X%02X%02X%02X, keys %u, dungeon items %02X)%s", b->info.id.c_str(), b->stage.save_group.c_str(),

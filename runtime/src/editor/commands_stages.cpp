@@ -270,13 +270,51 @@ Value Session::dispatch_stages(const std::string& command, const Value& p, std::
         ok = true;
         return r;
     }
+    if (command == "notebook_page") {
+        if (!host_) return why = "the game is not running", r;
+        const bool open = p.get("open").type == Value::Bool ? p.get("open").boolean : true;
+        const bool give = p.get("give").type == Value::Bool && p.get("give").boolean;
+        if (!host_->notebook_page(open, give, why)) return r;
+        r["requested"] = true;
+        r["open"] = open;
+        if (open) r["next"] = "screenshot shows the page (the game's log says when it can't open: no notebook in this save, say); notebook_page with open false closes it";
+        ok = true;
+        return r;
+    }
     if (command == "set_package_info") {
         // the package's own name, description, version or author (shown in the mod manager)
         const std::string field = text(p, "field");
+        if (field == "story_notebook") {
+            // the package's dependency on the Story Notebook: "required" (its story plays only with the notebook
+            // and the package waits for it), "optional" (the package plays without it; its quests, letters and
+            // story actions come with it) or "none"
+            const std::string how = p.get("value").string();
+            if (how != "required" && how != "optional" && how != "none") return why = "\"value\" for story_notebook is required, optional or none", r;
+            Package* pkg = package(p, why);
+            if (!pkg) return r;
+            ok = change(*pkg, "Story Notebook " + how, [&](Value& m, std::string&) {
+                Value deps;
+                deps.type = Value::Array;
+                for (const auto& d : m.get("dependencies").array)
+                    if (d.get("id").string() != "story-notebook") deps.array.push_back(d);
+                if (how != "none") {
+                    Value d;
+                    d["id"] = std::string("story-notebook");
+                    d["minimum_version"] = std::string("0.0.0");
+                    if (how == "optional") d["optional"] = true;
+                    deps.array.push_back(d);
+                }
+                if (deps.array.empty()) m.object.erase("dependencies");
+                else m["dependencies"] = deps;
+                return true;
+            }, r, why);
+            if (ok) { r["field"] = field; r["next"] = "save_package writes it; the game takes it with its next start"; }
+            return r;
+        }
         static const std::pair<const char*, size_t> kFields[] = {{"name", 80}, {"description", 1000}, {"version", 32}, {"author", 80}};
         size_t limit = 0;
         for (const auto& [f, n] : kFields) if (field == f) limit = n;
-        if (!limit) return why = "\"field\" is name, description, version or author", r;
+        if (!limit) return why = "\"field\" is name, description, version, author or story_notebook", r;
         if (p.get("value").type != Value::String || p.get("value").text.empty() || p.get("value").text.size() > limit)
             return why = "\"value\": the new " + field + ", text of 1 to " + std::to_string(limit) + " bytes", r;
         if (field == "version") {

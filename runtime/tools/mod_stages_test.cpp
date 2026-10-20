@@ -343,6 +343,50 @@ int main() {
         assert(!parse(parse_json(pot), o, w) && w.find("names a chest") != std::string::npos);
     }
 
+    // the quest of a sky stage: a chest opened, a darknut defeated, an entry and a warp taken run the package's story
+    // actions; the darknut gets a defeat switch of its own (from the locked doors' numbers, below them)
+    {
+        const std::string sky = R"({"quests": [{"id": "sky", "title": "Sky", "steps": [{"n": 1, "text": "a"}, {"n": 2, "text": "b"}, {"n": 3, "text": "c"}]}],
+          "stages": [{"id": "sky", "template": "GTower", "kind": "dungeon", "entrance": {"stage": "sea", "room": 44, "point": 0},
+          "rooms": [
+            {"room": 0, "ground": "assets/island.glb", "spawns": [{"point": 0, "position": {"x": 0, "y": 30, "z": -1500}}],
+             "actors": [{"id": "key", "actor": "chest", "item": "boss_key", "position": {"x": -900, "y": 30, "z": 300}, "then": [{"action": "quest_step", "id": "sky", "step": 2}]},
+                        {"id": "guard", "actor": "darknut", "position": {"x": 0, "y": 0, "z": 0}, "then": [{"action": "quest_step", "id": "sky", "step": 3}]}]},
+            {"room": 1, "ground": "assets/arena.glb", "spawns": [{"point": 1, "position": {"x": 0, "y": 200, "z": 2650}}]}],
+          "doors": [{"position": {"x": 0, "y": 200, "z": 2400}, "angle": 180, "rooms": [0, 1], "lock": "boss"}],
+          "warps": [{"id": "home", "room": 1, "position": {"x": 600, "y": 200, "z": 4300}, "size": {"x": 250, "y": 250, "z": 250}, "then": [{"action": "quest_done", "id": "sky"}]}],
+          "entries": [{"id": "in", "stage": "sea", "room": 44, "position": {"x": 0, "y": 0, "z": 0}, "size": {"x": 400, "y": 800, "z": 400}, "to": {"room": 0, "point": 0},
+                       "then": [{"action": "quest_step", "id": "sky", "step": 1}]}]}]})";
+        std::vector<Stage> out;
+        std::string w;
+        if (!parse(parse_json(sky), out, w)) fprintf(stderr, "%s\n", w.c_str());
+        assert(parse(parse_json(sky), out, w));
+        const Stage& st = out[0];
+        assert(!st.rooms[0].actors[0].then.empty() && st.rooms[0].actors[0].defeat_switch == 0);
+        assert(st.doors[0].switch_no == kFirstDoorSwitch && st.rooms[0].actors[1].defeat_switch == kFirstDoorSwitch - 1);
+        assert(!st.warps[0].then.empty() && !st.entries[0].then.empty());
+        auto bad_then = [&](const std::string& from, const std::string& to, const std::string& part) {
+            std::string text = sky;
+            text.replace(text.find(from), from.size(), to);
+            std::vector<Stage> o;
+            std::string why2;
+            const bool ok = parse(parse_json(text), o, why2);
+            if (ok || why2.find(part) == std::string::npos) fprintf(stderr, "expected \"%s\", got %s \"%s\"\n", part.c_str(), ok ? "success" : "failure", why2.c_str());
+            return !ok && why2.find(part) != std::string::npos;
+        };
+        int bad = 0;
+        bad += !bad_then("\"step\": 2}]", "\"step\": 9}]", "undeclared quest step");
+        bad += !bad_then("\"id\": \"guard\", \"actor\": \"darknut\"", "\"id\": \"guard\", \"actor\": \"pot\"", "a chest (when it is opened) or a darknut");
+        bad += !bad_then("{\"action\": \"quest_done\", \"id\": \"sky\"}", "{\"action\": \"quest_done\", \"id\": \"other\"}", "undeclared");
+        assert(!bad);
+        // the darknut's defeat switch is in the recipe (its angle z, the game's own defeat switch)
+        const Value r = recipe(st, "Zsky0001", {}, [](const std::string& g) { return g; });
+        uint32_t z = 0;
+        for (const auto& a : r.get("rooms").array[0].get("actors").array)
+            if (a.get("name").string() == "Tn") z = uint32_t(a.get("angle_z").number);
+        assert((z & 0xFF) == kFirstDoorSwitch - 1);
+    }
+
     printf("mod_stages_test: ok\n");
     return 0;
 }

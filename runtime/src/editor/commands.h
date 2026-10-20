@@ -113,6 +113,12 @@ public:
         why = "the game's rooms can't be read here";
         return {};
     }
+    // The Story Notebook's page opened (or closed) over the game, as the player opens it from the bag.
+    virtual bool notebook_page(bool open, bool give, std::string& why) {
+        (void)open, (void)give;
+        why = "the notebook can't be opened here";
+        return false;
+    }
     // Test mode: the save group's stage record erased from the loaded Quest Log (and the working one).
     virtual bool reset_stage_save(const std::string& mod, const std::string& group, std::string& why) {
         (void)mod, (void)group;

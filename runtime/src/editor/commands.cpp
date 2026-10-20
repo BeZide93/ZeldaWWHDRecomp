@@ -120,8 +120,10 @@ const std::vector<CommandInfo> kCommands = {
       {"actor", "string", "an enemy: chuchu, bokoblin, keese, darknut"}, {"variant", "string", ""}, {"size", "point", "a box's size"},
       {"style", "string", "an entry's: walk (default) or updraft (the wind lifts Link first)"}, {"height", "number", "an updraft's lift in units (200..5000, default 1500)"}, {"after", "string", "a warp's: the chest (its id) that must be open first"}, {"angle", "number", ""}, {"mod", "string", ""}},
      true},
-    {"set_package_info", "Sets the open mod's name, description, version or author (as the mod manager shows them).",
-     {{"field", "string", "name, description, version or author", true}, {"value", "string", "", true}, {"mod", "string", ""}}, true},
+    {"notebook_page", "Opens (or closes) the Story Notebook's page over the game, as the player opens it from the Delivery Bag: the quests, their steps and where; take a screenshot to see it.",
+     {{"open", "boolean", "true (default) opens it, false closes it"}, {"give", "boolean", "test mode: the notebook goes into the loaded save first, as its letter would put it"}}},
+    {"set_package_info", "Sets the open mod's name, description, version or author (as the mod manager shows them), or how it needs the Story Notebook (story_notebook: required, optional or none).",
+     {{"field", "string", "name, description, version, author or story_notebook", true}, {"value", "string", "", true}, {"mod", "string", ""}}, true},
     {"list_kit_materials", "A kit room's materials, for a stage room's \"materials\": each one's textures (names), how many of the room's triangles use it and the texture coordinates the room itself gives it (an atlas shows as a range inside 0..1); the main one is the default.",
      {{"stage", "string", "the game's stage (GTower, sea, M_NewD2...)", true}, {"room", "integer", "its room", true}}},
     {"list_stage_templates", "The stages of the player's game files a mod stage can take as its template: their rooms (kit rooms), whether they have a sky (an open-air stage), the kinds of door they have models of (knob, boss, small_key, shutter), and whether their music can be borrowed (music_like). Filter with sky and door.",
@@ -904,6 +906,8 @@ std::vector<Location> build_locations(const std::vector<std::pair<std::string, s
                 l.label = q.get("id").string() + " step " + std::to_string(n) + "  (" + destination.stage + " room " + std::to_string(destination.room) + ")";
                 l.group = "Quest";
                 l.stage = destination.stage;
+                // a place in one of the package's own stages: the warp names it with the package
+                if (l.stage.rfind("stage:", 0) == 0 && l.stage.find('/') == std::string::npos) l.stage = "stage:" + mod + "/" + l.stage.substr(6);
                 l.room = int(destination.room);
                 l.point = destination.point;
                 l.position = destination.position;

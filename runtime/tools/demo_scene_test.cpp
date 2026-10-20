@@ -119,6 +119,10 @@ int main() {
         assert(needs(R"({"scenes":[{"id":"s","steps":[{"type":"end","then":[{"action":"give","id":"x"}]}]}]})"));
         assert(needs(R"({"scenes":[{"id":"s","trigger":{"type":"talk","actor":"a"},"steps":[{"type":"end"}]}]})"));
         assert(needs(R"({"actors":[]})") && !needs(R"({"stages":[]})"));
+        // the Story Notebook as an optional dependency
+        assert(N::story_optional(mods::json::parse(R"({"dependencies":[{"id":"story-notebook","optional":true}]})")));
+        assert(!N::story_optional(mods::json::parse(R"({"dependencies":[{"id":"story-notebook"}]})")));
+        assert(!N::story_optional(mods::json::parse(R"({})")));
     }
     // "spawn": "always": the demo's own copy even when the room has one (a room's actor may wait for its own event)
     const D::Demo own = parsed(R"({"type":"demo","frames":30,"actors":[{"id":"bird","actor":"Dk","spawn":"always","params":2}]})");

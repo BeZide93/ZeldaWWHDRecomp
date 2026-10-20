@@ -1,7 +1,14 @@
 {
   "author": "Lukas S",
   "content_dir": "content",
-  "description": "An island floating above the sea. On the pier of Outset Island, by the lookout, the Helmaroc King swoops down and carries Link there; an updraft off Outset is a second way up. Its boss arena holds a heart container; the warp out opens once it is taken.",
+  "dependencies": [
+    {
+      "id": "story-notebook",
+      "minimum_version": "0.0.0",
+      "optional": true
+    }
+  ],
+  "description": "An island floating above the sea. On the pier of Outset Island, by the lookout, the Helmaroc King swoops down and carries Link there; an updraft off Outset is a second way up. Its boss arena holds a heart container; the warp out opens once it is taken. With the Story Notebook it is a quest in the notebook, \"The island in the sky\", that starts with a letter and ends with a reward of 100 rupees.",
   "experimental": true,
   "format_version": 1,
   "game_id": "wwhd",
@@ -9,6 +16,101 @@
   "kind": "content",
   "minimum_manager_version": "1.5.0",
   "name": "The sky island",
+  "quests": [
+    {
+      "id": "sky",
+      "journal": "on_enable",
+      "letter": {
+        "id": "sky",
+        "sender": "An old sailor",
+        "text": "Dear Link, a great bird has been seen over the pier on Outset, near the lookout. They say it carries travellers up to an island floating in the sky. Walk out along the pier and see for yourself!"
+      },
+      "reward": {
+        "item": "rupee_orange",
+        "text": "A heart container from the island, and 100 rupees"
+      },
+      "start": {
+        "text": "Check a Rito postbox for a letter."
+      },
+      "steps": [
+        {
+          "n": 1,
+          "place": {
+            "x": -194790,
+            "z": 314530
+          },
+          "text": "Walk along Outset's pier towards the lookout, where a great bird has been seen.",
+          "where": "Outset Island"
+        },
+        {
+          "n": 2,
+          "place": {
+            "room": 0,
+            "sea": {
+              "x": -194790,
+              "z": 314530
+            },
+            "stage": "stage:sky",
+            "x": -900,
+            "y": 30,
+            "z": 300
+          },
+          "text": "Find the boss key on the sky island.",
+          "where": "The sky island"
+        },
+        {
+          "n": 3,
+          "place": {
+            "room": 1,
+            "sea": {
+              "x": -194790,
+              "z": 314530
+            },
+            "stage": "stage:sky",
+            "x": 0,
+            "y": 200,
+            "z": 3600
+          },
+          "text": "Open the boss door and defeat the guardian in the arena.",
+          "where": "The sky island"
+        },
+        {
+          "n": 4,
+          "place": {
+            "room": 1,
+            "sea": {
+              "x": -194790,
+              "z": 314530
+            },
+            "stage": "stage:sky",
+            "x": 0,
+            "y": 200,
+            "z": 4400
+          },
+          "text": "Claim the heart container from the big chest.",
+          "where": "The sky island's arena"
+        },
+        {
+          "n": 5,
+          "place": {
+            "room": 1,
+            "sea": {
+              "x": -194790,
+              "z": 314530
+            },
+            "stage": "stage:sky",
+            "x": 600,
+            "y": 200,
+            "z": 4300
+          },
+          "text": "Step into the warp light to return home.",
+          "where": "The sky island's arena"
+        }
+      ],
+      "title": "The island in the sky"
+    }
+  ],
+  "quests_format": 1,
   "scenes": [
     {
       "id": "bird",
@@ -371,6 +473,11 @@
               "id": "sky",
               "point": 0,
               "room": 0
+            },
+            {
+              "action": "quest_step",
+              "id": "sky",
+              "step": 2
             }
           ],
           "type": "end"
@@ -425,6 +532,13 @@
           },
           "stage": "sea",
           "style": "updraft",
+          "then": [
+            {
+              "action": "quest_step",
+              "id": "sky",
+              "step": 2
+            }
+          ],
           "to": {
             "point": 0,
             "room": 0
@@ -449,7 +563,14 @@
                 "x": -900,
                 "y": 30,
                 "z": 300
-              }
+              },
+              "then": [
+                {
+                  "action": "quest_step",
+                  "id": "sky",
+                  "step": 3
+                }
+              ]
             },
             {
               "actor": "bokoblin",
@@ -525,7 +646,14 @@
                 "x": 0,
                 "y": 200,
                 "z": 3600
-              }
+              },
+              "then": [
+                {
+                  "action": "quest_step",
+                  "id": "sky",
+                  "step": 4
+                }
+              ]
             },
             {
               "actor": "chest",
@@ -536,7 +664,14 @@
                 "x": 0,
                 "y": 200,
                 "z": 4400
-              }
+              },
+              "then": [
+                {
+                  "action": "quest_step",
+                  "id": "sky",
+                  "step": 5
+                }
+              ]
             }
           ],
           "ground": "assets/arena.glb",
@@ -577,7 +712,13 @@
             "x": 250,
             "y": 250,
             "z": 250
-          }
+          },
+          "then": [
+            {
+              "action": "quest_done",
+              "id": "sky"
+            }
+          ]
         }
       ]
     }

@@ -233,6 +233,7 @@ void declare(const std::string&,const Value&,const std::string&,const std::strin
 bool declared(){return false;}
 void logic(Cpu*){}
 bool enter_stage(const std::string&,const std::string&,unsigned,unsigned){return false;}
+void set_story_actions(std::function<bool(const std::string&,const std::vector<story_notebook::StoryAction>&)>){}
 }
 namespace story_game_pieces {
 std::vector<std::string> used(const std::vector<story_notebook::ManifestActor>& actors){std::vector<std::string> out;for(const auto&a:actors)if(a.game_piece())out.push_back(a.piece);return out;}

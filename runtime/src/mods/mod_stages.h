@@ -17,6 +17,8 @@
 //   - a game assertion is logged with the stage.
 // Save states made in a mod stage are refused when the package that makes it is not installed.
 #pragma once
+#include "story_world_manifest.h"
+#include <functional>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -85,6 +87,9 @@ void logic(Cpu* c);
 // The "stage" action of a mod's talk or scene: Link goes into the mod's own stage `id` (room, spawn point) with
 // a fade. False (and logged) when the stage isn't built or has no such spawn.
 bool enter_stage(const std::string& mod, const std::string& id, unsigned room, unsigned point);
+// The package's story actions (story_actors::actions) for a stage's "then": a chest opened, a darknut defeated,
+// an entry or a warp taken.
+void set_story_actions(std::function<bool(const std::string& mod, const std::vector<story_notebook::StoryAction>&)> run);
 // daPy_lk_c::execute, before and after the game's own (climb.cpp's hook): an updraft entry lifting Link
 void link_step(Cpu* c, uint32_t link, bool before);
 // Current room's existing map pixels and world bounds, for read-only corner maps.

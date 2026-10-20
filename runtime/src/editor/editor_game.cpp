@@ -985,6 +985,16 @@ public:
         }
         return out;
     }
+    bool notebook_page(bool open, bool give, std::string& why) override {
+        if (give && !g_test) return why = "\"give\" puts the notebook into the save only in test mode (test_mode on)", false;
+        // on the game thread at its next step (a script runs there too: never waited for); the log says how it went
+        post([open, give](Cpu*) {
+            if (give && !story_mail::notebook_owned()) story_mail::own_notebook_for_test();
+            if (open) story_notebook::open_page("the editor");
+            else if (story_notebook::page_open()) story_notebook::close_page();
+        });
+        return true;
+    }
     bool reset_stage_save(const std::string& mod, const std::string& group, std::string& why) override {
         struct State {
             std::mutex m;

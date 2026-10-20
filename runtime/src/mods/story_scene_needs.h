@@ -7,6 +7,7 @@
 // a wordless scene (a cutscene that flies Link to the package's stage, say) stands on its own.
 #pragma once
 #include "mod_json.h"
+#include <set>
 #include <string>
 
 namespace story_scene_needs {
@@ -53,6 +54,22 @@ inline bool needs_story(const mods::json::Value& manifest) {
         for (const auto& s : scenes.array)
             if (scene_needs_story(s)) return true;
     return false;
+}
+
+// {"id": "story-notebook", "optional": true} in "dependencies": the package plays without the notebook,
+// its story content (quests, letters, items, story actions) only with it.
+inline bool story_optional(const mods::json::Value& manifest) {
+    const auto& deps = manifest.get("dependencies");
+    if (deps.type != mods::json::Value::Array) return false;
+    for (const auto& d : deps.array)
+        if (d.get("id").string() == "story-notebook" && d.get("optional").type == mods::json::Value::Bool && d.get("optional").boolean) return true;
+    return false;
+}
+// The packages whose optional story content is off this session (the Story Notebook isn't there): their story
+// actions (quest steps, quest done, give, take, flags) are skipped; stage and scene actions still run.
+inline std::set<std::string>& story_off() {
+    static std::set<std::string> off;
+    return off;
 }
 
 }  // namespace story_scene_needs

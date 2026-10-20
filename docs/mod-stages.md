@@ -121,7 +121,7 @@ open-air ones; `"door": "boss"` the ones with a boss door.
 | `materials` | Optional: the model's material names mapped to kit materials, for a model with several materials. A model material that is also a kit material's name is drawn with that one. |
 | `spawns` | 1 to 8 spawn points: `point` (0 to 99, unique in the stage), `position`, `angle` in degrees (0 faces +z, 90 faces +x) and `start`: `stand` (the default) or `fall` (Link drops in from above). |
 | `exits` | Up to 8 exits: an `id`, a `box` (`min` and `max` corners) and the place it leads `to`. |
-| `actors` | Up to 16 of the game's actors (see [Actors](#actors)). |
+| `actors` | Up to 16 of the game's actors (see [Actors](#actors)). A chest or darknut can have `then` (see [A quest through the stage](#a-quest-through-the-stage)). |
 | `floor` | Optional: the dungeon map's floor the room is on: 1 (1F, the default) to 5, or -1 (B1) to -5. |
 
 An exit's box marks floor: the ground's floor triangles whose middle lies in the box take Link to the exit's
@@ -247,6 +247,46 @@ A boss room is a room behind the boss door, with something to beat, a reward and
 
 `examples/guest-mods/sky-island` is such a stage: an island in the sky with the boss key on it and an
 open-air arena behind the boss door.
+
+### A quest through the stage
+
+A stage's chests, darknuts, entries and warps can move a quest of the package on, with `then`: the same
+story actions as a talk's or a scene's (`quest_step`, `quest_done`, `flag`, `scene`):
+
+| On | `then` runs when |
+|---|---|
+| a chest (`"actor": "chest"`) | Link opens it |
+| a darknut (`"actor": "darknut"`) | it is defeated (by the sword, or falling off the stage) |
+| an entry | Link takes it (an updraft: when the wind starts to lift him) |
+| a return warp | Link steps into it, as the warp light takes him |
+
+```json
+{"id": "heart", "actor": "chest", "item": "heart_container", "position": {"x": 0, "y": 200, "z": 4400},
+ "then": [{"action": "quest_step", "id": "sky", "step": 5}]}
+```
+
+Quest steps only go forward, so a chest opened before the step it belongs to (the heart container before
+the guardian falls) moves the quest past the steps in between, and a step reached twice changes nothing.
+A defeated darknut stays defeated: the port gives it one of the save group's switches, which the game sets
+when it falls; the same numbers as the locked doors are used, up to 64 of both in a save group.
+
+A quest step's `place` can be inside one of the package's own stages: `{"stage": "stage:sky", "room": 1,
+"sea": {"x": -194790, "z": 314530}, "x": 0, "y": 200, "z": 3600}`. The sea chart's ring goes to the `sea`
+place (the way in), and the editor's Quest warp list takes Link into the stage there.
+
+**The Story Notebook as an optional dependency.** A package of stages can bring its quest without needing
+the Story Notebook: `"dependencies": [{"id": "story-notebook", "minimum_version": "0.0.0", "optional": true}]`
+(the editor's `set_package_info` with `"field": "story_notebook", "value": "optional"`). With the
+notebook installed, the quest, its letter and every story action work as in any story package. Without it,
+the package's stages and its wordless scenes play just the same, its quest and letters stay out, and its
+story actions are skipped (a line in the game's log says so); `stage` and `scene` actions still run. Only
+the Story Notebook can be an optional dependency.
+
+The sky island example does this. Its quest "The island in the sky" starts with a letter (from a Rito
+postbox) that sends Link to Outset's pier; the Helmaroc King's scene (or the updraft) takes him to the
+island (step 2), the boss key's chest moves it to the guardian (3), the darknut's defeat to the heart
+container (4), the big chest to the way home (5), and the return warp finishes it: the reward, 100 rupees,
+is given once.
 
 ## The ground model
 

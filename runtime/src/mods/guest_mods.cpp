@@ -576,7 +576,7 @@ void load_world(const std::string& mod,const mods::json::Value& manifest,const s
     if(g_package_observer)g_package_observer(mod,manifest.get("name").string(mod),package_dir,manifest);  // the world editor's inspector
     if(!actors.empty()||!scenes.empty()) {
         // wordless scenes run without the story system's required package (story_scene_needs.h)
-        if(!actors.empty()||story_scene_needs::needs_story(manifest)){story_notebook::note_import();story_mail::note_import();}
+        if((!actors.empty()||story_scene_needs::needs_story(manifest))&&!story_scene_needs::story_off().count(mod)){story_notebook::note_import();story_mail::note_import();}
         LOG("[world] %s: %zu actors, %zu scenes",mod.c_str(),actors.size(),scenes.size());
     }
 }
@@ -1228,6 +1228,15 @@ void init() {
         const std::string text{std::istreambuf_iterator<char>(file),{}};
         const auto manifest=mods::json::parse(text);
         const auto path=std::filesystem::path(packages::directory())/pkg.id;
+        // the Story Notebook as an optional dependency: without it, the package's stages and wordless scenes play
+        // and its story content stays out (no story import, so the story system doesn't go inactive for it)
+        const bool story_off=!g_story_package&&story_scene_needs::story_optional(manifest);
+        if(story_off){
+            story_scene_needs::story_off().insert(pkg.id);
+            LOG("[world] %s: the Story Notebook isn't installed: its quests and letters wait for it; its stages and scenes play",pkg.id.c_str());
+            load_world(pkg.id,manifest,path.string(),packages::package_data_directory(pkg.id));
+            continue;
+        }
         if(manifest.get("quests").type!=mods::json::Value::Null||manifest.get("charts").type!=mods::json::Value::Null||
            manifest.get("letters").type!=mods::json::Value::Null) {
             prepare_npc_catalogue();
@@ -1404,6 +1413,7 @@ void init() {
            else LOG("[actors] borrowed walk %s: %s's %s on %s, %u frames, stride %.1f, %zu bytes",w.name,w.lender,w.clip,w.target,clip.frames,clip.stride,clip.fska.size());}}}
         story_actors::set_scene_start(story_scenes::request);
         story_actors::set_stage_enter(mod_stages::enter_stage);
+        mod_stages::set_story_actions(story_actors::actions);
         if(editor::launch_mode())story_actors::editor_live_kinds();  // --editor: native props, switches, doors and enemies placed live
         story_actors::install([](uint32_t addr) {
             auto it=g_chains.find(addr);return it==g_chains.end()?std::string():it->second.replace_mod;

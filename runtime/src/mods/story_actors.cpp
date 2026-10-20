@@ -6,6 +6,7 @@
 #include <utility>
 #include <vector>
 #include "story_actors.h"
+#include "story_scene_needs.h"
 #include "story_world_visuals.h"
 #include "story_world_arrival.h"
 #include "story_chart.h"
@@ -1372,7 +1373,10 @@ bool prop_texture_identity(uint32_t actor,uint32_t pid,uint32_t& token,uint32_t&
 }
 bool actions(const std::string& mod,const std::vector<story_notebook::StoryAction>& list) {
     using Kind=story_notebook::StoryAction::Kind;
-    for(const auto& a:list){bool ok=false;switch(a.kind){
+    const bool story_off=story_scene_needs::story_off().count(mod)>0;  // optional story content without the notebook
+    for(const auto& a:list){bool ok=false;
+        if(story_off&&a.kind!=Kind::EnterStage&&a.kind!=Kind::StartScene){LOG("[actors] %s: story action on %s skipped (the Story Notebook isn't installed)",mod.c_str(),a.id.c_str());continue;}
+        switch(a.kind){
         case Kind::Give:ok=story_items::give(mod,a.id.substr(5),a.value,"actor dialogue")>=0;break;
         case Kind::Take:ok=story_items::take(mod,a.id.substr(5),a.value)>=0;break;
         case Kind::GiveChart:ok=story_chart::give(mod,a.id.substr(6))>=story_chart::kResultOwned;break;  // once: a chart Link has stays as it is

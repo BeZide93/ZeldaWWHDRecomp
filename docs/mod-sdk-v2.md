@@ -666,7 +666,8 @@ the player's machine), and it holds a first small quest. The mod manager downloa
 catalogue by itself, confirms it like the port's own code and keeps it enabled while the story
 system is on; it can't be switched off or removed on its own. Every story mod depends on it (a
 manifest with `quests`, `charts`, `letters`, `items`, `models`, `actors` or `scenes` gets the
-dependency even if it doesn't declare it). While it
+dependency even if it doesn't declare it; a package of [mod stages](mod-stages.md#a-quest-through-the-stage)
+can declare it `"optional": true` instead and plays without its story content then). While it
 isn't installed (offline, download failed), the story system is inactive: no letters, takeovers,
 chart marks or notebook; quest mods wait with "Needs the Story Notebook quest", the game is untouched
 and no save is changed; the next start tries again.
@@ -870,7 +871,8 @@ cave or dungeon, give its stage and room together with the sea entrance hint:
 
 `room` is 0–63 and `point` is a spawn number from 0–255. Omit `point` to use the room's normal entrance,
 or replace it with all three room coordinates: `"x":10,"y":0,"z":20`.
-Coordinates must be finite and within ±350000. Do not combine `point` and
+For one of the package's own [mod stages](mod-stages.md#a-quest-through-the-stage), `stage` is
+`"stage:<its id>"`. Coordinates must be finite and within ±350000. Do not combine `point` and
 coordinates. The explicit `sea` hint is required:
 a stage can have several entrances, so a stage name does not uniquely identify
 the island to mark. The notebook shows the step's `where` text, and the sea
