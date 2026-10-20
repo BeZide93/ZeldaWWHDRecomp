@@ -29,6 +29,12 @@ what is on `devel` and not released yet (also in the
   game writes to them, and texture invalidation now looks only at the textures it can reach. On a Snapdragon phone this
   cut the render thread's CPU time by about 11% in Windfall; the picture is unchanged.
 
+- **Eighteen more islands to place** (for mod makers). Shark, Horseshoe, Rock Spire, Thorned Fairy, Seven-Star,
+  Overlook, Stone Watcher, Cliff Plateau, Angular, Boating Course, Gale, Headstone, Greatfish, Cyclops Reef,
+  Two-Eye Reef, Diamond Steppe, Mother & Child and Fire Mountain join the island grounds, built from your own game
+  files. Diamond Steppe and Mother & Child keep their own moving water. Pits, holes and doorways send Link back to
+  the restart point. Fire Mountain comes without its lava for now, and Bird's Peak is too large to offer.
+
 - **World editor: building mod levels, also with an AI assistant** (for mod makers, preview). A new Stages tab creates
   a level from your room models (import, add, build, warp in), adds rooms, places entries, exits, doors with locks,
   chests, enemies, pots and return warps where Link stands, and moves them with handles in the picture. Check lists
