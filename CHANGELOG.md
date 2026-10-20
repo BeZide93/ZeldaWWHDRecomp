@@ -7,6 +7,11 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Mod SDK v3 and the editor: Kargarocs with riders and Wizzrobe summoners** (for mod makers). A Kargaroc can carry a
+  Moblin or Bokoblin along a mod path and drop it at the path's release point. A Wizzrobe summoner teleports between the
+  points of one path and calls waves of enemies at the points of the next, in the game's own wave sizes (up to 20);
+  summoned enemies give no drops. The editor sets up both paths when a summoner is placed.
+
 - **Mod SDK v3 and the editor: paths, the wall cannon, warship routes and wandering Floormasters** (for mod makers).
   A mod can draw lines and areas in a room (up to 16 per mod) and its enemies can use them. The game's wall cannon can
   be placed with an area as its firing range: it turns to Link and fires while he is inside, and a bomb destroys it,
