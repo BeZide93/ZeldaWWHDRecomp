@@ -381,8 +381,9 @@ vsyncs of 59.94 Hz (25.03 ms, 39.96 fps; the game keeps 29.97 steps a second, as
   through).
 - On a display whose rate is not a multiple of 40 (60, 90, 144 Hz) the frames still go out every
   25 ms, and the screen shows them for 1 and 2 refreshes in turn. Settings and the log say so; the
-  choice is left to the player (30 or 60 fps are even there). Android asks for 40 Hz (the system
-  then picks 40, 80 or 120 Hz) and prefers the lowest display mode that is a multiple of 40.
+  choice is left to the player (30 or 60 fps are even there). Android asks for 120 Hz and prefers the lowest
+  display mode above 60 Hz that is a multiple of 40 (80, else 120; 40 Hz only without one): asked
+  for 40 Hz, with its 40 Hz mode preferred, a Xiaomi 14 stayed at 60 Hz.
 - Android's automatic frame interpolation (Keep game speed off) pauses below 33.3 frames a second
   at 40 fps (5/6 of the rate) instead of 50, and resumes at 21 ms of render thread per 30 fps
   frame instead of 14. 60 fps and up are unchanged.
@@ -395,6 +396,17 @@ flips/s, 29.97 steps/s, every interval one frame; on 40/80/120 Hz (multiples of 
 1/2/3 refreshes, on 60 Hz half 1 and half 2; 26/28/31 ms passes skip 17/44/79 % of the in-between
 frames (as many as keep the speed) at 29.97 steps/s with no wait after a skip; hitches of 25/40 ms
 every 300 passes are made up for.
+
+Xiaomi 14 (adb), Windfall waters (portable state, scripted stick), 40 fps, Keep game speed on, warm
+shader cache, 60 s measured after 10 s. The panel rate is HyperOS's choice (the display service
+ignores the app's preferred rate): 60 Hz in run 1 (frames shown for 1 and 2 refreshes in turn, the
+Settings note shown), 120 Hz in run 2. Flips: the virtual vsync trace over the whole run; steps/s:
+the game's 300-step log (and the logic frames in the trace, which include two scene-load restarts).
+
+| Run | panel | steps/s | fps | flip interval p1 / p50 / p99, sd | in-between drawn |
+|---|---|---|---|---|---|
+| 1 | 60 Hz | 30.00 (29.86) | 39.8 | 21.0 / 25.03 / 30.2 ms, 3.4 ms | 99.5 % |
+| 2 | 120 Hz | 30.00 (29.93) | 40.0 | 21.0 / 25.02 / 30.4 ms, 2.4 ms | 99.8 % |
 
 ## Even frame pacing (2026-10-18)
 

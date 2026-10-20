@@ -7,9 +7,11 @@ inline int requested_hz(int mode, int interpolationFps, bool disabled) {
     if (disabled) return 0; // zero clears a previous request and lets Android choose
     // True 60 and original 30 both fit a 60 Hz panel. Use the chosen interpolation rate rather
     // than output_fps(), which is capped to the current display and cannot raise its own cap.
-    // 40 fps asks for 40 Hz: the system then picks 40, 80 or 120 Hz, whichever the panel offers
-    // (a rate that is a multiple of the content's).
-    if (mode == 1 && interpolationFps == 40) return 40;
+    // 40 fps asks for 120 Hz, a multiple of 40 (every frame 3 refreshes): a Xiaomi 14 asked for 40 Hz
+    // (and given its 40 Hz or 120 Hz mode as the preferred one) stayed at 60 Hz, where 40 fps is uneven;
+    // 120 Hz requests are granted there. A panel without 120 Hz gets what it has (the settings then
+    // say so when that is not a multiple of 40).
+    if (mode == 1 && interpolationFps == 40) return 120;
     return mode == 1 && interpolationFps > 60 ? interpolationFps : 60;
 }
 // The display's rate shows the requested one: at least it above 60 Hz; a whole multiple of it below

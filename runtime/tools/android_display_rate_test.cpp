@@ -3,10 +3,11 @@
 #include <initializer_list>
 using namespace android_display_rate;
 int main() {
+    assert(requested_hz(1, 40, false) == 120);  // 40 fps: a multiple of 40 that vendors grant
     for (int fps : {40, 60, 120, 240}) {
         assert(requested_hz(0, fps, false) == 60);
         assert(requested_hz(2, fps, false) == 60);
-        assert(requested_hz(1, fps, false) == fps);
+        if (fps != 40) assert(requested_hz(1, fps, false) == fps);
         for (int mode : {0, 1, 2}) assert(requested_hz(mode, fps, true) == 0);
     }
     RequestState state;
