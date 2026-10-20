@@ -197,6 +197,7 @@ bool build(const std::string& mod, const Stage& s, const std::string& name, cons
         const bool ours = file == name + "_Stage.szs" || (file.rfind(name + "_Room", 0) == 0 && file.size() > 4 && file.substr(file.size() - 4) == ".szs");
         if (!ours || !fs::is_regular_file(dir / file) || fs::is_symlink(dir / file)) return why = "the stage builder returned an unexpected file " + file, false;
         b.files[file] = (dir / file).string();
+        register_file(file, b.files[file]);
     }
     if (!b.files.count(name + "_Stage.szs")) return why = "the stage builder wrote no stage archive", false;
     for (const auto& r : s.rooms) {
@@ -270,21 +271,6 @@ void declare(const std::string& mod, const Value& manifest, const std::string& p
 bool declared() {
     std::lock_guard lock(g_mutex);
     return !g_stages.empty();
-}
-
-std::string archive_for(const std::string& guest_path) {
-    constexpr const char* prefix = "/vol/content/Common/Stage/";
-    if (guest_path.rfind(prefix, 0) != 0) return {};
-    return cached_file(guest_path.substr(strlen(prefix)));
-}
-
-std::string cached_file(const std::string& file) {
-    if (file.size() < 9 || file[7] != '_' || !allocated_name(file.substr(0, 7))) return {};
-    std::lock_guard lock(g_mutex);
-    const Built* b = by_name(file.substr(0, 7));
-    if (!b) return {};
-    auto it = b->files.find(file);
-    return it == b->files.end() ? std::string() : it->second;
 }
 
 std::vector<Info> stages() {

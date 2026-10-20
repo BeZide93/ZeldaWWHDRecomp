@@ -24,7 +24,7 @@
 #include "../runtime.h"
 #include "../write_watch.h"
 #include "../mods/content.h"
-#include "../mods/mod_stages.h"
+#include "../mods/mod_stages_files.h"
 #include "../game_languages.h"
 #include "../rtl_text.h"
 #include "save_root.h"

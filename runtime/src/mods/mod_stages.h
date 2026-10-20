@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "mod_json.h"
+#include "mod_stages_files.h"
 #include "mod_stages_manifest.h"
 
 struct Cpu;
@@ -35,10 +36,6 @@ void declare(const std::string& mod, const Value& manifest, const std::string& p
              const std::vector<std::string>& python, const std::string& tool, const std::string& game_dir);
 bool declared();  // any stage was built this session
 
-// The stage cache's file for a game read of /vol/content/Common/Stage/<name>_..., or "" (not a mod stage's).
-std::string archive_for(const std::string& guest_path);
-// The cached archive of a stage file name ("<name>_Room0.szs"), or "" (the editor's placement index, warp).
-std::string cached_file(const std::string& file_name);
 
 struct Info {
     std::string mod, id, name;  // the package, its stage id, the game name
