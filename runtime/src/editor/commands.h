@@ -107,6 +107,12 @@ public:
         why = "the game's stages can't be listed here";
         return {};
     }
+    // A kit room's materials: {materials: [{material, textures, triangles, uv_min, uv_max}], main}.
+    virtual Value kit_materials(const std::string& stage, unsigned room, std::string& why) {
+        (void)stage, (void)room;
+        why = "the game's rooms can't be read here";
+        return {};
+    }
     // Test mode: the save group's stage record erased from the loaded Quest Log (and the working one).
     virtual bool reset_stage_save(const std::string& mod, const std::string& group, std::string& why) {
         (void)mod, (void)group;

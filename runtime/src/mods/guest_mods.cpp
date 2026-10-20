@@ -55,6 +55,7 @@
 #include "story_chart.h"
 #include "story_treasure.h"
 #include "story_actors.h"
+#include "story_scene_needs.h"
 #include "story_room_paths.h"
 #include "story_resident_routes.h"
 #include "story_resident_walk_files.h"
@@ -574,7 +575,8 @@ void load_world(const std::string& mod,const mods::json::Value& manifest,const s
     g_world_scenes|=!scenes.empty();
     if(g_package_observer)g_package_observer(mod,manifest.get("name").string(mod),package_dir,manifest);  // the world editor's inspector
     if(!actors.empty()||!scenes.empty()) {
-        story_notebook::note_import();story_mail::note_import();
+        // wordless scenes run without the story system's required package (story_scene_needs.h)
+        if(!actors.empty()||story_scene_needs::needs_story(manifest)){story_notebook::note_import();story_mail::note_import();}
         LOG("[world] %s: %zu actors, %zu scenes",mod.c_str(),actors.size(),scenes.size());
     }
 }

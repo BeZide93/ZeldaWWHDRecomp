@@ -18,6 +18,7 @@
 #include "../platform/host.h"
 #include "wwhd_mod.h"
 #include "story_manifest.h"
+#include "story_scene_needs.h"
 #include "static_model_validation.h"
 #include "skinned_model_validation.h"
 #include <algorithm>
@@ -253,8 +254,9 @@ Manifest manifest(const fs::path& path){
     const auto& deps=v.get("dependencies");require(deps.type==Value::Null||deps.type==Value::Array,"Dependencies must be an array");
     for(const auto& dep:deps.array){Requirement r;r.id=string_field(dep,"id",false,80);r.version=string_field(dep,"minimum_version",true,64);if(r.version.empty())r.version="0.0.0";version(r.version);require(id_ok(r.id)||(r.id.starts_with("builtin:")&&manager::find(r.id.substr(8))),"Invalid dependency ID");m.dependencies.push_back(r);}
     // every story mod depends on the story system's required package (required.h), declared or not:
-    // without it the story system stays off, and its letters, charts, items, quests and actors with it
-    if(m.id!=story_notebook::kNotebookPackage&&story_sections&&
+    // without it the story system stays off, and its letters, charts, items, quests and actors with it.
+    // Wordless scenes (no text, sounds or story actions) don't need it (story_scene_needs.h).
+    if(m.id!=story_notebook::kNotebookPackage&&story_scene_needs::needs_story(v)&&
        std::none_of(m.dependencies.begin(),m.dependencies.end(),[](const Requirement& r){return r.id==story_notebook::kNotebookPackage;}))
         m.dependencies.push_back({story_notebook::kNotebookPackage,"0.0.0"});
     const auto& conflicts=v.get("conflicts");require(conflicts.type==Value::Null||conflicts.type==Value::Array,"Conflicts must be an array");

@@ -117,7 +117,7 @@ open-air ones; `"door": "boss"` the ones with a boss door.
 | `room` | The room's number: 0 for the first, then 1, 2, ... |
 | `kit` | A room of the game whose materials, textures and light the room uses: a room number of the template, or `{"stage": "M_NewD2", "room": 3}` for a room of any stage. Default: the template's room of the room's own number. |
 | `ground` | The room's model: a `.glb` file of the package (see [The ground model](#the-ground-model)), or `"kit"`: the kit room itself, its models and its collision, as the game has it. |
-| `material` | Optional: the kit room's material the model is drawn with. Default: the kit room's first. |
+| `material` | Optional: the kit room's material the model is drawn with. Default: the kit room's main material, the one most of its triangles use. |
 | `materials` | Optional: the model's material names mapped to kit materials, for a model with several materials. A model material that is also a kit material's name is drawn with that one. |
 | `spawns` | 1 to 8 spawn points: `point` (0 to 99, unique in the stage), `position`, `angle` in degrees (0 faces +z, 90 faces +x) and `start`: `stand` (the default) or `fall` (Link drops in from above). |
 | `exits` | Up to 8 exits: an `id`, a `box` (`min` and `max` corners) and the place it leads `to`. |
@@ -220,8 +220,20 @@ a spot Link can walk or swim into: off an island's shore, at the foot of a water
 A talk's or a scene's `then` can take Link into one of the package's own stages:
 `{"action": "stage", "id": "sky", "room": 0, "point": 0}` (`room` and `point` default to 0). With a scene's
 demo step that carries Link (`attach`, [mod SDK v3](mod-sdk-v3.md)), the Helmaroc King can fly him there:
-the scene's `end.then` holds the stage action. Scenes and talks need the Story Notebook; the stage itself
-does not.
+the scene's `end.then` holds the stage action.
+
+A scene without words needs nothing else: a package of stages with a scene of camera, demo, fade and
+wait steps, an `area` or `room` trigger and only `stage` and `scene` actions stands on its own. Text
+(`say`, `choice`, a demo's `messages`), sounds, music, talks, quests and the other actions are story
+content and need the Story Notebook.
+
+The sky island example's scene `bird` starts when Link walks along Outset's pier towards the lookout: the
+Helmaroc King comes down over the island, takes him in its talons and carries him up in a curve over the
+sea; a camera step holds the view of the sky, a fade step darkens it, and the stage action takes him to
+the island (a scene whose end changes the stage stays dark until the new stage fades in). Its bird is `{"actor": "Dk", "spawn": "always",
+"params": 2}`: the demo's own Helmaroc King, without ground collision. Outset has a Helmaroc King of its
+own, waiting hidden for its story event; without `"spawn": "always"` the demo would move that one, which
+doesn't show.
 
 ### Boss rooms
 
@@ -260,9 +272,29 @@ want it around the origin, and make the spawns, exits and doors fit it.
 
 ### Kit materials
 
-The materials are the template's own: their names are those of the kit room's model. When a name is wrong,
-the game's log says which ones the kit room has (`the kit room has no material "..." (it has: ...)`), so
-starting with any name and reading the log is a quick way to find them.
+The materials are the kit room's own: their names are those of the kit room's model. The editor's
+`list_kit_materials` command lists them for any room of the game (`{"stage": "sea", "room": 44}` is
+Outset Island): each one's textures, how many of the room's triangles use it and the texture coordinates
+the room gives it. When a name is wrong, the game's log also says which ones the kit room has (`the kit
+room has no material "..." (it has: ...)`).
+
+Pick materials by what their textures show, not by their names: a name like `test_lambert8_v` says nothing,
+and a kit room has backdrop materials (distant mountains, clouds) that look smeared and cut out on the
+ground. Without `material` and `materials`, the model is drawn with the kit room's main material, the one
+most of its triangles use.
+
+**Atlases.** Many of the game's textures hold several surfaces in bands: Outset's ground texture has grass
+at the top, a round clearing, an earth path strip and sand, one under the other. The room's own models
+give such a material texture coordinates that repeat along one axis (`uv_min` and `uv_max` beyond 0..1)
+and stay inside one band along the other (inside 0..1). A ground model that tiles the whole texture shows
+all the bands at once. Keep each surface's coordinates inside its band on that axis, and repeat only along
+the other; where a surface must repeat both ways, walk the band forwards and back (0 to 1 to 0) with
+vertices closer together than one band. The sky island example's `make_island.py` does both, with a table
+of the bands it uses.
+
+Give the model **vertex colours** (glTF `COLOR_0`) to shade it as the game's rooms are: the kit materials
+multiply their texture by them, and the game's own rooms darken corners, the foot of cliffs and the
+undersides this way. Without vertex colours every surface is drawn at full brightness.
 
 ## The dungeon map
 

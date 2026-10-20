@@ -450,6 +450,10 @@ Value Session::dispatch_scene(const std::string& command, const Value& p, std::s
             demo_change("Demo actor " + p.get("actor").get("id").string(), [&](Value& st, std::string& w) { return demo_add_actor(st, p.get("actor"), w); });
             return r;
         }
+        if (command == "edit_demo_actor") {
+            demo_change("Edit demo actor " + text(p, "id"), [&](Value& st, std::string& w) { return demo_edit_actor(st, text(p, "id"), p.get("fields"), w); });
+            return r;
+        }
         if (command == "remove_demo_actor") {
             demo_change("Remove demo actor " + text(p, "id"), [&](Value& st, std::string& w) { return demo_remove_actor(st, text(p, "id"), w); });
             return r;

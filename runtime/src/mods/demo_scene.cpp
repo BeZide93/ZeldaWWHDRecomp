@@ -84,7 +84,7 @@ bool compile(const Demo& d, const Resolver& resolve, Compiled& out, std::string&
         } else {
             out.participants.push_back(a.actor);
             if (a.kind == Actor::Kind::Game) {
-                Cast cast{a.actor, a.spawn, a.params, !a.position.keys.empty(), {}};
+                Cast cast{a.actor, a.spawn, a.params, !a.position.keys.empty(), {}, a.own};
                 if (cast.placed) cast.position = a.position.keys.front().value;
                 out.cast.push_back(cast);
             }

@@ -779,7 +779,7 @@ separated by `;`, or `@file` with one such line per row. Results go to the log.
 | `preview_dialogue` | `id`?, `lines`?, `close`?, `mod`? | show lines in the game's message box (or hide it) |
 | `pick` | `origin`, `direction`, `range`? | the first ground a ray meets |
 | `ground` | `position` | the ground height below a point |
-| `focus` | `id` or `position`, `distance`?, `yaw`?, `mod`? | fly the camera to an actor (a world object: its whole extent in view) or a place; `distance` back, looking along `yaw` degrees |
+| `focus` | `id` or `position`, `distance`?, `yaw`?, `eye`?, `mod`? | fly the camera to an actor (a world object: its whole extent in view) or a place; `distance` back, looking along `yaw` degrees, or from `eye` (any height, below an island say) |
 | `check_model` | `file` | check a `.glb` file |
 | `import_model` | `file`, `id`?, `confirm`?, `mod`? | copy a `.glb` into the mod and add the model |
 | `place_world_object` | `id`, `model`, `collision`, `stage`, `room`, `position`, `behaviour`?, `buoyancy`?, `drift`?, `anchor`?, `grapple_points`?, `distant`?, `shoreline`?, `chart_marker`?, `arrival`?, `rotation`?, `scale`?, `mod`? | place a static, floating or drifting object of the mod with collision (one Undo step) |
@@ -805,6 +805,8 @@ separated by `;`, or `@file` with one such line per row. Results go to the log.
 | `warp` | `stage`, `room`, `point`?, `position`?, `angle`? | warp to a room's entry point or a position; a package's stage is `"stage:<mod>/<id>"` |
 | `import_ground` | `file`, `as`?, `confirm`?, `mod`? | copy a room's `.glb` into the package (`assets/<name>.glb`), with its parts, the parts without UVs and its material names |
 | `place_in_stage` | `stage`, `what`, `at`?, `position`?, `room`?, `id`?, `point`?, `to`?, `to_room`?, `to_point`?, `lock`?, `switch`?, `item`?, `actor`?, `variant`?, `size`?, `style`?, `height`?, `after`?, `angle`?, `mod`? | put a spawn, an exit box, a door, a return warp, a chest, an enemy or a pot of a stage where Link stands; standing in a game room, its entry |
+| `set_package_info` | `field` (`name`, `description`, `version`, `author`), `value`, `mod`? | the package's name, description, version or author |
+| `list_kit_materials` | `stage`, `room` | a kit room's materials for `materials`: their textures' names, how many of its triangles use each and the texture coordinates the room gives them (a range inside 0..1 marks an atlas); `main` is the default |
 | `list_stage_templates` | `sky`?, `door`? | the stages of your game files a stage can take as its template: rooms, sky, door kinds, whether their music can be borrowed |
 | `list_stages` | `mod`? | the mod's stages ([mod stages](mod-stages.md)): rooms, grounds, kits, floors, spawn points, doors, entries, whether the game has it built |
 | `add_stage` | `id`, `ground`, `template`?, `kind`?, `kit`?, `materials`?, `material`?, `spawn`?, `angle`?, `title`?, `music_like`?, `entrance`?, `entry`?, `mod`? | a new stage with one room whose ground is a `.glb` in the package |
@@ -877,6 +879,7 @@ separated by `;`, or `@file` with one such line per row. Results go to the log.
 | `edit_demo_event` | `scene`, `step`, `list`, `actor`?, `index`, `fields`, `mod`? | fields of an event (`null` removes one) |
 | `remove_demo_event` | `scene`, `step`, `list`, `actor`?, `index`, `mod`? | remove an event |
 | `add_demo_actor` | `scene`, `step`, `actor`, `mod`? | an actor of the demo: `{"id", and "actor" (a game actor or Link), "model" {archive, file} or "character" (one of the mod's placed actors)}` |
+| `edit_demo_actor` | `scene`, `step`, `id`, `fields`, `mod`? | fields of an actor of the demo (`spawn`, `params`, ...; `null` removes one; its id stays) |
 | `remove_demo_actor` | `scene`, `step`, `id`, `mod`? | remove an actor (refused while a sound, particle or attachment names it) |
 | `demo_choices` | `what` (`sounds`, `particles`, `actors`, `link_modes`, `archives`, `files`, `joints`), `query`?, `archive`? | names for a demo's pickers: sound effects and particles (id and a readable name), actors (the game's name, a readable name, its archive, a suggested id), Link's modes, the game's object archives, an archive's files or its models' joints |
 | `play_sound` | `id` | play a sound effect with the game's own sound playback |

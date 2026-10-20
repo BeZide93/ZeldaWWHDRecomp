@@ -6,6 +6,7 @@
 // a change takes effect in the game with the next rebuild.
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -266,6 +267,37 @@ Value Session::dispatch_stages(const std::string& command, const Value& p, std::
             for (const auto& m : facts.materials) mats.array.push_back(Value(m));
         }
         r["next"] = "add_stage or add_room with \"ground\": \"" + as + "\" (or rebuild_stage when a room uses it already)";
+        ok = true;
+        return r;
+    }
+    if (command == "set_package_info") {
+        // the package's own name, description, version or author (shown in the mod manager)
+        const std::string field = text(p, "field");
+        static const std::pair<const char*, size_t> kFields[] = {{"name", 80}, {"description", 1000}, {"version", 32}, {"author", 80}};
+        size_t limit = 0;
+        for (const auto& [f, n] : kFields) if (field == f) limit = n;
+        if (!limit) return why = "\"field\" is name, description, version or author", r;
+        if (p.get("value").type != Value::String || p.get("value").text.empty() || p.get("value").text.size() > limit)
+            return why = "\"value\": the new " + field + ", text of 1 to " + std::to_string(limit) + " bytes", r;
+        if (field == "version") {
+            unsigned a, b, c;
+            char tail;
+            if (std::sscanf(p.get("value").text.c_str(), "%u.%u.%u%c", &a, &b, &c, &tail) != 3) return why = "a version is three numbers: 1.2.0", r;
+        }
+        Package* pkg = package(p, why);
+        if (!pkg) return r;
+        ok = change(*pkg, "Package " + field, [&](Value& m, std::string&) { m[field] = p.get("value").text; return true; }, r, why);
+        if (ok) { r["field"] = field; r["next"] = "save_package writes it"; }
+        return r;
+    }
+    if (command == "list_kit_materials") {
+        if (!host_) return why = "the game is not running", r;
+        if (p.get("room").type != Value::Number) return why = "give the kit room: stage and room", r;
+        Value got = host_->kit_materials(text(p, "stage"), unsigned(std::max(0.0, p.get("room").number)), why);
+        if (!why.empty()) return r;
+        r = got;
+        r["note"] = "a room's \"materials\" maps your model's material names to these; a texture used only inside part of 0..1 on one axis "
+                    "(uv_min, uv_max) is an atlas of several surfaces: keep your texture coordinates inside the surface's band there";
         ok = true;
         return r;
     }

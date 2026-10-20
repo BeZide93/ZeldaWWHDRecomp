@@ -336,6 +336,19 @@ class FromGameFiles(unittest.TestCase):
                 sb.check_room_table(dzs, r['doors'])
                 self.assertTrue(sb.build(game, path, out)['cached'])  # unchanged inputs: the cache
 
+    def test_kit_materials(self):
+        # Outset's room: names, textures, triangle counts and the texture coordinates of its own models; its ground
+        # texture is an atlas (u repeats, v stays inside 0..1); the default is the material most triangles use
+        game = os.environ['WWHD_TEST_GAME']
+        kit = sb.kit_room_materials(game, 'sea', 44)
+        mats = {m['material']: m for m in kit['materials']}
+        self.assertEqual(mats['A_jimen_a_v']['textures'], ['Txa_jimen_a'])
+        lo, hi = mats['A_jimen_a_v']['uv_min'], mats['A_jimen_a_v']['uv_max']
+        self.assertTrue(hi[0] - lo[0] > 1 and 0 <= lo[1] and hi[1] <= 1)
+        self.assertEqual(kit['main'], max(kit['materials'], key=lambda m: m['triangles'])['material'])
+        # the Tower of the Gods' outside room: its main material is the paving, not the alphabetically first backdrop
+        self.assertEqual(sb.kit_room_materials(game, 'GTower', 0)['main'], 'lambert5_v')
+
 
 if __name__ == '__main__':
     unittest.main()

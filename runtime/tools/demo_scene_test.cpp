@@ -5,6 +5,7 @@
 #include "mods/demo_stb.h"
 #include "mods/demo_attach_math.h"
 #include "mods/demo_start_gate.h"
+#include "mods/story_scene_needs.h"
 
 #include <cmath>
 
@@ -108,6 +109,24 @@ int main() {
     assert(has(refused(R"({"type":"demo","frames":30,"actors":[{"id":"a","actor":"Link","modes":[{"frame":0,"mode":"fly"}]}]})"), "unknown Link mode"));
     assert(has(refused(R"({"type":"demo","frames":30,"actors":[{"id":"a","character":"x","spawn":false}]})"), "spawn and params are for game actors"));
     assert(has(refused(R"({"type":"demo","frames":30,"actors":[{"id":"a","actor":"Dk","model":{"archive":"Dk","file":"dk.bdl"}}]})"), "one of actor, model or character"));
+    // a package of stages with a wordless scene stands on its own; text, sounds and story actions need the Story Notebook
+    {
+        namespace N = story_scene_needs;
+        auto needs = [](const char* j) { return N::needs_story(mods::json::parse(j)); };
+        assert(!needs(R"({"stages":[],"scenes":[{"id":"s","trigger":{"type":"area"},"steps":[{"type":"demo","frames":30},{"type":"fade","direction":"out","frames":10},{"type":"end","then":[{"action":"stage","id":"sky"}]}]}]})"));
+        assert(needs(R"({"scenes":[{"id":"s","steps":[{"type":"say","actor":"a","text":"hi","frames":10},{"type":"end"}]}]})"));
+        assert(needs(R"({"scenes":[{"id":"s","steps":[{"type":"demo","frames":30,"messages":[{"frame":1,"text":"hi"}]},{"type":"end"}]}]})"));
+        assert(needs(R"({"scenes":[{"id":"s","steps":[{"type":"end","then":[{"action":"give","id":"x"}]}]}]})"));
+        assert(needs(R"({"scenes":[{"id":"s","trigger":{"type":"talk","actor":"a"},"steps":[{"type":"end"}]}]})"));
+        assert(needs(R"({"actors":[]})") && !needs(R"({"stages":[]})"));
+    }
+    // "spawn": "always": the demo's own copy even when the room has one (a room's actor may wait for its own event)
+    const D::Demo own = parsed(R"({"type":"demo","frames":30,"actors":[{"id":"bird","actor":"Dk","spawn":"always","params":2}]})");
+    assert(own.actors[0].own && own.actors[0].spawn && own.actors[0].params == 2);
+    D::Compiled oc;
+    assert(D::compile(own, [](const D::Resource&) -> int32_t { return -1; }, oc, why) && oc.cast.size() == 1 && oc.cast[0].own && oc.cast[0].params == 2);
+    assert(!cast.actors[0].own && !cc.cast[0].own);
+    assert(has(refused(R"({"type":"demo","frames":30,"actors":[{"id":"a","actor":"Dk","spawn":"sometimes"}]})"), "spawn must be true, false or \"always\""));
 
     // the event image that plays it: one PACKAGE staff, PLAY cut naming the STB file
     demo_event_image::Spec spec;

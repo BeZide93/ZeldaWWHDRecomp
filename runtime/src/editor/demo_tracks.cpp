@@ -342,6 +342,17 @@ bool demo_add_actor(Value& step, const Value& actor, std::string& why) {
     step["actors"].array.push_back(actor);
     return true;
 }
+bool demo_edit_actor(Value& step, const std::string& id, const Value& fields, std::string& why) {
+    Value* a = actor_by_id(step, id);
+    if (!a) return fail(why, "the demo has no actor \"" + id + "\"");
+    if (fields.type != Value::Object) return fail(why, "fields are {name: value} (null removes one)");
+    for (const auto& [k, v] : fields.object) {
+        if (k == "id") return fail(why, "an actor keeps its id (events and attachments name it)");
+        if (v.type == Value::Null) a->object.erase(k);
+        else (*a)[k] = v;
+    }
+    return true;
+}
 bool demo_remove_actor(Value& step, const std::string& id, std::string& why) {
     if (!actor_by_id(step, id)) return fail(why, "the demo has no actor \"" + id + "\"");
     for (const char* l : {"sounds", "particles", "attach", "detach"})

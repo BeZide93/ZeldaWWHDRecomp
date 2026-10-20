@@ -845,6 +845,16 @@ def kit_materials(src):
     return out
 
 
+def main_material(src):
+    """the kit room's main ground material: the one most of its triangles are drawn with (the alphabetically first
+    is often a distant backdrop's, a cut-out picture of mountains or clouds made for one strip of the sky)"""
+    count = {}
+    for mname, _ in src.dict(src.rel(0x20)):
+        for s in gp.read_model(src, mname)[1]:
+            count[s.material] = count.get(s.material, 0) + len(s.tris)
+    return max(sorted(count), key=lambda m: count[m])
+
+
 def build_room_archive(kit_files, kit_room, room, prims, recipe_room, dzb, dzr):
     bname = 'Room%d.bfres' % kit_room
     require(bname in kit_files, 'the kit room archive has no ' + bname)
@@ -865,7 +875,7 @@ def build_room_archive(kit_files, kit_room, room, prims, recipe_room, dzb, dzr):
         return base.yaz0_stored(base.sarc(members)), tris
     mats = kit_materials(src)
     require(mats, 'the kit room has no background model')
-    default = recipe_room.get('material') or sorted(mats)[0]
+    default = recipe_room.get('material') or main_material(src)
     require(default in mats, 'the kit room has no material "%s" (it has: %s)' % (default, ', '.join(sorted(mats))))
     mapping = recipe_room.get('materials', {})
     for glb_name, kit_name in mapping.items():
@@ -1165,10 +1175,45 @@ def templates(game):
     return out
 
 
+def kit_room_materials(game, stage, room):
+    """a kit room's materials as a ground model can use them: name, the textures' names, how many of the room's
+    triangles use it and the texture coordinates the room's own models give it (a range inside 0..1 on one axis
+    means the texture is an atlas: several surfaces in bands, see docs/mod-stages.md). Names and numbers only."""
+    files = gp.room_files(game, '%s_Room%d.szs' % (stage, room))
+    bf = [n for n in files if n.endswith('.bfres')]
+    require(len(bf) == 1, 'the kit room has no room model')
+    src = base.Bfres(files[bf[0]])
+    out = {}
+    main = None
+    for mname, _ in src.dict(src.rel(0x20)):
+        _, shapes, materials = gp.read_model(src, mname)
+        mats = dict(materials)
+        for s in shapes:
+            e = out.get(s.material)
+            if e is None:
+                mat = mats[s.material]
+                refs = src.rel(mat + 0x28)
+                textures = [src.cstr(src.rel(refs + 8 * i)) for i in range(src.b[mat + 0x10])]
+                e = out[s.material] = {'material': s.material, 'textures': textures, 'triangles': 0, 'uv_min': None, 'uv_max': None}
+            e['triangles'] += len(s.tris)
+            attrs = src.rel(s.vertex + 0x10)
+            layout = {src.cstr(src.rel(attrs + i * 12)): (src.u16(attrs + i * 12 + 6), src.u32(attrs + i * 12 + 8)) for i in range(s.nattr)}
+            if layout.get('_u0', (0, 0))[1] in (0x80D, 0x808):
+                at, fmt = layout['_u0']
+                for r in s.records:
+                    uv = struct.unpack_from('>2f' if fmt == 0x80D else '>2e', r, at)
+                    e['uv_min'] = [round(min(a, b), 2) for a, b in zip(e['uv_min'] or uv, uv)]
+                    e['uv_max'] = [round(max(a, b), 2) for a, b in zip(e['uv_max'] or uv, uv)]
+    if out:
+        main = main_material(src)
+    return {'materials': sorted(out.values(), key=lambda e: -e['triangles']), 'main': main}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     parser.add_argument('--game', required=True)
     parser.add_argument('--templates', action='store_true', help='list the stages a mod stage can take as its template')
+    parser.add_argument('--kit-materials', metavar='STAGE:ROOM', help='list a kit room\'s materials')
     parser.add_argument('--recipe')
     parser.add_argument('--out')
     args = parser.parse_args()
@@ -1176,6 +1221,14 @@ def main():
         try:
             print(json.dumps({'ok': True, 'templates': templates(args.game)}, sort_keys=True))
         except OSError as exc:
+            print(json.dumps({'ok': False, 'error': str(exc)}))
+            sys.exit(1)
+        return
+    if args.kit_materials:
+        try:
+            stage, room = args.kit_materials.rsplit(':', 1)
+            print(json.dumps(dict(ok=True, **kit_room_materials(args.game, stage, int(room))), sort_keys=True))
+        except (BuildError, OSError, KeyError, IndexError, struct.error, ValueError) as exc:
             print(json.dumps({'ok': False, 'error': str(exc)}))
             sys.exit(1)
         return

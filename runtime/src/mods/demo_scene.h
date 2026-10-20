@@ -43,6 +43,7 @@ struct Actor {
     Resource model;         // Model
     std::string character;  // Character: an actor this mod placed (resident villager, mod actor, enemy) by its id
     bool spawn = true;      // Game: created for the demo when the room doesn't have one (and removed after)
+    bool own = false;       // Game ("spawn": "always"): created for the demo even when the room has one
     uint32_t params = 0;    // Game: the spawned actor's parameters
     std::vector<NamedClip> named_clips;  // Character: the mod actor's own clips
     Track position, rotation, scale;
@@ -113,7 +114,7 @@ inline uint32_t link_mode(const std::string& name) {
     return 0;
 }
 inline constexpr const char* kLinkClipArchives[] = {"LkD00", "LkD01"};  // Link's demo animations (one is loaded at a time)
-struct Cast { std::string name; bool spawn = true; uint32_t params = 0; bool placed = false; Vec position; };  // a game actor the demo names
+struct Cast { std::string name; bool spawn = true; uint32_t params = 0; bool placed = false; Vec position; bool own = false; };  // a game actor the demo names
 struct CharacterRef { std::string name, character; std::vector<NamedClip> clips; };                       // "MA00".. -> a mod-placed actor
 struct Compiled {
     std::vector<uint8_t> stb;

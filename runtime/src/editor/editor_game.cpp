@@ -954,6 +954,7 @@ public:
     }
     std::vector<std::pair<std::string, std::vector<int>>> stage_rooms() override { return game_stage_rooms(config::game_dir); }
     Value stage_templates(std::string& why) override { return ::mod_stages::templates(config::game_dir, why); }
+    Value kit_materials(const std::string& stage, unsigned room, std::string& why) override { return ::mod_stages::kit_materials(config::game_dir, stage, room, why); }
     Value rebuild_stages(const std::string& mod, const Value& manifest, const std::string& dir, const std::string& only, std::string& why) override {
         std::string data = mods::packages::package_data_directory(mod);
         if (data.empty() && !mods::packages::directory().empty()) data = (std::filesystem::path(mods::packages::directory()).parent_path() / "Data" / mod).string();
@@ -1444,7 +1445,9 @@ public:
                         fs::create_directories(fs::path(preview_file()).parent_path(), ec);
                         ss::request_save_portable_file(preview_file(), [request](bool ok2, const std::string& why2) {
                             g_scene.snapshot = ok2;
-                            if (!ok2) set_status("Preview: the world can't be restored afterwards (" + why2 + ")");
+                            // without the snapshot the world can't come back; and a scene that starts while the game
+                            // still changes rooms (the last preview's restore loading, say) doesn't start: try again then
+                            if (!ok2) return post([why2](Cpu*) { scene_preview_end("Preview not started: the world can't be saved to restore it afterwards (" + why2 + "); try again in a moment"); });
                             request(ok2);
                         });
                     });

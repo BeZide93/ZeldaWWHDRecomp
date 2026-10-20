@@ -163,6 +163,7 @@ void lookup_name(Cpu* c) {
 
 // fopAcM_searchFromName: the stand-in names MA00.. of a running demo are the mod-placed actors it
 // drives (the game's demo system finds its actors by name and gives each a demo slot)
+uint32_t spawned_actor(Cpu* c, const std::string& name);
 uint32_t character(uint32_t index) {
     if (!recorded() || index >= ld32(g_arena + CharacterCount)) return 0;
     const uint32_t entry = g_arena + Characters + index * 8, actor = ld32(entry);
@@ -173,6 +174,13 @@ void search_name(Cpu* c) {
     if (name.size() == 4 && name[0] == 'M' && name[1] == 'A' && std::isdigit(uint8_t(name[2])) && std::isdigit(uint8_t(name[3])) && recorded()) {
         c->r[3] = character(uint32_t((name[2] - '0') * 10 + (name[3] - '0')));
         return;
+    }
+    // the demo's own copy of a game actor (created for it) is the one its demo object binds to
+    if (!name.empty()) {
+        const Cpu saved = *c;
+        const uint32_t own = spawned_actor(c, name);
+        *c = saved;
+        if (own != ~0u) { c->r[3] = own; return; }
     }
     g_original(c, GC(0x025D9F38));
 }
@@ -272,7 +280,23 @@ std::function<int32_t(const demo_scene::Resource&)> resolver(Cpu* c) {
         return -1;
     };
 }
+// A game actor the port created for the running demo answers to its name before any of the room's
+// (the room's own one may be waiting for an event of its own and not draw, as Outset's Helmaroc King);
+// 0 while its creation is still pending. Not one of ours: ~0u.
+uint32_t spawned_actor(Cpu* c, const std::string& name) {
+    if (!recorded()) return ~0u;
+    const uint32_t count = ld32(g_arena + SpawnCount);
+    for (uint32_t i = 0; i < count && i < 8; ++i) {
+        if (cstr(g_arena + Spawned + i * 16 + 4, 12) != name) continue;
+        const uint32_t out = g_arena + Scratch + 0x74;
+        st32(out, 0);
+        call(c, kSearchById, {ld32(g_arena + Spawned + i * 16), out});
+        return ld32(out);
+    }
+    return ~0u;
+}
 uint32_t find_actor(Cpu* c, const std::string& name) {
+    if (const uint32_t own = spawned_actor(c, name); own != ~0u) return own;
     std::memset(mem::ptr(g_arena + Scratch), 0, 16);
     std::memcpy(mem::ptr(g_arena + Scratch), name.c_str(), std::min<size_t>(name.size(), 15));
     return call(c, kSearchFromName, {g_arena + Scratch, 0, 0});
@@ -291,7 +315,13 @@ bool spawn_missing(Cpu* c, std::string& why) {
     if (!demo_scene::compile(g_demo, resolver(c), compiled, why)) return false;
     uint32_t count = 0;
     for (const auto& cast : compiled.cast) {
-        if (find_actor(c, cast.name)) continue;
+        if (!cast.own) {
+            if (const uint32_t room = find_actor(c, cast.name)) {
+                LOG("[demo] %s: the room's own (params %08X) plays in the demo; its own code decides whether it shows (\"spawn\": \"always\" creates one for the demo)",
+                    cast.name.c_str(), ld32(room + 0xB0));
+                continue;
+            }
+        }
         if (!cast.spawn) return why = "actor " + cast.name + " is not in this room", false;
         if (count >= 8) return why = "a demo creates at most 8 game actors", false;
         const uint32_t name = g_arena + Scratch + 0x60;

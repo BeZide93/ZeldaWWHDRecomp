@@ -224,7 +224,12 @@ inline bool parse(const mods::json::Value& st, Demo& d, std::string& why) {
             }
             if (a.object.contains("spawn") || a.object.contains("params")) {
                 if (x.kind != Actor::Kind::Game) return fail(why, "demo actor " + x.id + ": spawn and params are for game actors");
-                if (a.object.contains("spawn")) { if (a.get("spawn").type != Value::Bool) return fail(why, "spawn must be true or false"); x.spawn = a.get("spawn").boolean; }
+                if (a.object.contains("spawn")) {
+                    const auto& v = a.get("spawn");
+                    if (v.type == Value::String && v.text == "always") x.own = true;
+                    else if (v.type != Value::Bool) return fail(why, "spawn must be true, false or \"always\"");
+                    else x.spawn = v.boolean;
+                }
                 if (a.object.contains("params")) {
                     const auto& v = a.get("params");
                     if (v.type == Value::String && v.text.size() > 2 && v.text.size() <= 10 && v.text.compare(0, 2, "0x") == 0 && v.text.find_first_not_of("0123456789abcdefABCDEF", 2) == std::string::npos)

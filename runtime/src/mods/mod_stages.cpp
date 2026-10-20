@@ -590,6 +590,30 @@ Value templates(const std::string& game_dir, std::string& why) {
     return cached;
 }
 
+Value kit_materials(const std::string& game_dir, const std::string& stage, unsigned room, std::string& why) {
+    if (stage.empty() || stage.size() > 8 || stage.find_first_not_of("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_") != std::string::npos || room > 63)
+        return why = "a kit room is a stage of the game and a room number", Value();
+    std::vector<std::string> command;
+    try {
+        const auto bridge = guestmods::BuildBridge::installed(std::string());
+        command = bridge.python;
+        command.push_back((std::filesystem::path(bridge.builder).parent_path().parent_path() / "story_mods" / "stage_builder.py").string());
+    } catch (const std::exception& e) {
+        return why = std::string("the stage builder is unavailable: ") + e.what(), Value();
+    }
+    command.insert(command.end(), {"--game", g_game_dir.empty() ? game_dir : g_game_dir, "--kit-materials", stage + ":" + std::to_string(room)});
+    const auto process = host::run_process(command);
+    Value result;
+    try {
+        result = mods::json::parse(process.output);
+    } catch (...) {
+    }
+    if (!process.error.empty() || process.code || !result.get("ok").boolean)
+        return why = "the kit room's materials can't be listed: " + result.get("error").string(process.error.empty() ? "no result" : process.error), Value();
+    result.object.erase("ok");
+    return result;
+}
+
 bool enter_stage(const std::string& mod, const std::string& id, unsigned room, unsigned point) {
     for (const auto& b : g_stages) {
         if (b.info.mod != mod || b.info.id != id) continue;

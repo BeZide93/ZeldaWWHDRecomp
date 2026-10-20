@@ -75,6 +75,9 @@ bool missing(const std::string& stage);
 // The stages of the player's game files a mod stage can take as its template (the stage builder's --templates:
 // {stage, rooms, sky, doors}), read once; empty with `why` when the builder can't run.
 Value templates(const std::string& game_dir, std::string& why);
+// A kit room's materials (the stage builder's --kit-materials): {materials: [{material, textures, triangles,
+// uv_min, uv_max}], main}, names and numbers only.
+Value kit_materials(const std::string& game_dir, const std::string& stage, unsigned room, std::string& why);
 // once per game logic pass (guest_mods logic_service): the entries' boxes
 void logic(Cpu* c);
 // The "stage" action of a mod's talk or scene: Link goes into the mod's own stage `id` (room, spawn point) with

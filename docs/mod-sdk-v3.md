@@ -1509,7 +1509,7 @@ the demo and ends it.
             "target": {"curve": "linear", "keys": [{"frame": 0, "value": {"x": -2500, "y": 1800, "z": 3000}},
                                                    {"frame": 240, "value": {"x": 2500, "y": 900, "z": 3000}}]},
             "fovy": {"keys": [{"frame": 0, "value": 55}]}},
- "actors": [{"id": "bird", "model": {"archive": "Dk", "file": "dk.bdl"},
+ "actors": [{"id": "bird", "actor": "Dk", "spawn": "always", "params": 2,
              "position": {"curve": "linear", "keys": [{"frame": 0, "value": {"x": -2500, "y": 1800, "z": 3000}},
                                                       {"frame": 240, "value": {"x": 2500, "y": 900, "z": 3000}}]},
              "rotation": {"keys": [{"frame": 0, "value": {"x": 0, "y": 90, "z": 0}}]},
@@ -1525,6 +1525,7 @@ the demo and ends it.
 - **Camera.** `eye` and `target` come together. `fovy` and `roll` are optional. Without a camera track, the camera keeps its gameplay view.
 - **Actors.** An actor names one of four things:
   - a game actor by its stage name, with `"actor": "Dk"`, for example. When the room has none, the port creates one for the demo at the first key of its position track (or beside Link) and removes it afterwards; `"params"` (a number or `"0x..."`) are its creation parameters. `"spawn": false` requires the room's own actor instead; without it the step fails with a reason in the log and the scene ends cleanly.
+  - When the room has one, the demo uses the room's own actor, and that actor's own code decides whether it shows: an actor that waits for an event of the game stays hidden (Outset's Helmaroc King waits for its story event). `"spawn": "always"` gives the demo its own one even then, created with `params` and removed afterwards; the room's stays as it is. The game's log names the room's actor when the demo uses it.
   - Link, with `"actor": "Link"`.
   - a model from the player's game, with `"model": {"archive", "file"}`.
   - an actor this mod placed (a resident villager, a mod actor, an enemy), with `"character": "<its id>"`. It follows the tracks even where its own code doesn't know cutscenes; a mod actor plays its own clips by name, as `"clips": [{"frame": 0, "clip": "walk", "loop": true}]`.

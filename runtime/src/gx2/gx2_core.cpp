@@ -216,6 +216,7 @@ static void apply_regs(uint32 first, const uint32* v, uint32 n) {
 // ---------------------------------------------------------------- display list recording
 struct Recording {
     uint32 start = 0, pos = 0, end = 0;
+    uint32 dropped = 0;  // bytes of commands that didn't fit (said once, when the list ends)
 };
 static thread_local Recording t_rec;
 bool recording_display_list() { return t_rec.start != 0; }
@@ -345,7 +346,11 @@ void emit(Op op, const uint32* payload, uint32 n) {
     if (t_rec.start) {
         uint32 bytes = 4 * (n + 1);
         if (t_rec.pos + bytes > t_rec.end) {
-            LOG("[gx2] display list overflow at %08X", t_rec.start);
+            if (!t_rec.dropped) {
+                static std::atomic<unsigned> full{0};
+                if (full.fetch_add(1) < 8) LOG("[gx2] display list at %08X (%u bytes) is full; its further commands are dropped", t_rec.start, t_rec.end - t_rec.start);
+            }
+            t_rec.dropped += bytes;  // the total is said at GX2EndDisplayList (a line per command filled the disk)
             return;
         }
         uint32* w = (uint32*)mem::ptr(t_rec.pos);
@@ -941,6 +946,11 @@ HLE(gx2, GX2BeginDisplayListEx) {
 }
 HLE(gx2, GX2EndDisplayList) {
     uint32 size = t_rec.pos - t_rec.start;
+    if (t_rec.dropped) {
+        static unsigned said = 0;
+        if (said < 32 && ++said) LOG("[gx2] display list overflow at %08X (%u bytes): %u bytes of commands dropped%s", t_rec.start, t_rec.end - t_rec.start, t_rec.dropped,
+                                     said == 32 ? " (no more of these lines)" : "");
+    }
     t_rec = Recording{};
     ret(c, size);
 }
