@@ -7,6 +7,13 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **World editor: scenes play right away, and easier demo steps** (for mod makers). A new scene can be played with
+  Play scene or Play step without saving and restarting first. In the Scenes window the step row no longer hides its
+  buttons on narrow panels; the buttons say "Duplicate scene" / "Remove scene…" and "Duplicate step" / "Remove step",
+  a step can be removed with right-click or Delete, and Undo brings back a removed scene. A demo step's actors and events
+  are now picked from lists instead of typed as JSON: game characters, models and your mod's characters; sounds (with a
+  Play button) and particles by name; joints, animations, Link's modes, time, rain and messages. The JSON stays under
+  "Advanced". Full save states made by an older build in editor mode can't be loaded by this one.
 - **Water tool: new ponds are swimmable, and pond surfaces always appear.** A new pond's level now defaults to its
   depth above the shore, so Link can swim in it right away; banks stay compact, and nothing reaches down to the sea
   floor. Some pond outlines left the visible water out because its surface model couldn't be prepared; that is fixed,
