@@ -7,6 +7,17 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Fixed: Continue last session after quitting inside a dungeon, cave or house.** Starting the game with
+  **At start → Continue last session** (or a save state chosen to load at start) put Link at the save file's start
+  point on Outset and then left the screen black. Link now arrives where you left off; loading states during play is
+  unchanged.
+- **Mod SDK: mod dungeon maps for HUD mods** (for mod makers). A guest mod can read the current room's map of a mod
+  dungeon (rooms, visited rooms, Link's position, and with the compass the chests), so minimap mods can show mod
+  dungeons too.
+- **Vulkan stereo (3D) improvements** (#257, thanks to the contributor). Formats that can't be scaled fall back to
+  full-size eyes instead of drawing into a cleared image, and stereo modes reuse their image memory between frames.
+  Nothing changes with stereo off.
+
 - **Fixed: the Pirate's Charm shook without ringing at 60 fps and above** (#262). With frame interpolation the
   game's on-screen interface logic also ran on the in-between frames, where sounds are skipped so nothing plays twice,
   and the charm's ring always landed there. It now runs once per game step at every frame rate, as at 30 fps; this
