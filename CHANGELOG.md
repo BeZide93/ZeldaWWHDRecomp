@@ -17,6 +17,9 @@ what is on `devel` and not released yet (also in the
   work. Saving inside it is safe: the game's save always keeps a normal entrance, so the save still loads with the mod
   removed, and with the mod the Quest Log continues inside. Save states made in a mod level ask for its mod. The editor
   lists mod levels for warping. See the example "mod-stage-cave".
+- **Automatic picture-in-picture shows the Wind Waker's song list** (#256). With the GamePad screen set to Automatic
+  picture-in-picture, the GamePad picture now also appears while Link conducts with the Wind Waker, with the song list
+  and the conducting guide, and goes away again when he stops.
 
 - **Mod SDK v3 and the editor: Kargarocs with riders and Wizzrobe summoners** (for mod makers). A Kargaroc can carry a
   Moblin or Bokoblin along a mod path and drop it at the path's release point. A Wizzrobe summoner teleports between the
