@@ -999,11 +999,10 @@ Pipeline &pipeline(const uint32_t *r, vk::Shader *vs, vk::Shader *ps,
   rs.polygonMode = VK_POLYGON_MODE_FILL;
   LATTE_PA_CL_CLIP_CNTL pipelineClip;
   std::memcpy(&pipelineClip, r + REGADDR::PA_CL_CLIP_CNTL, 4);
-  if (pipelineClip.get_ZCLIP_FAR_DISABLE()) {
-    if (!R.enabledFeatures.depthClamp)
-      exception_report::raise("device lacks depth clamp requested by guest");
+  // Far-plane clipping off: depth clamp, or without the device feature the vertex shader's clamp at
+  // the near plane (vk::depth_clamp_variant_wanted, part of the vertex shader's key)
+  if (pipelineClip.get_ZCLIP_FAR_DISABLE() && R.enabledFeatures.depthClamp)
     rs.depthClampEnable = VK_TRUE;
-  }
   rs.lineWidth = 1;
   rs.cullMode = (pm.get_CULL_FRONT() ? VK_CULL_MODE_FRONT_BIT : 0) |
                 (pm.get_CULL_BACK() ? VK_CULL_MODE_BACK_BIT : 0);

@@ -222,6 +222,28 @@ uint64_t program_hash(uint32_t address, uint32_t size, uint64_t frame) {
 // read by the GLSL translation (the Metal-only render-target-texture check is the one that does)
 // and are not in the key; the pipeline key has the attachment formats.
 constexpr size_t kLinkageWords = 3 + GPU7_PS_MAX_INPUTS + 32 + 4;
+// Depth clamp where the device has none (Mali-G52 and other GPUs without the depthClamp feature, or
+// WWHD_VK_FORCE_DEPTH_CLAMP_EMULATION=1): the game draws its shadow maps with far-plane clipping off
+// (PA_CL_CLIP_CNTL ZCLIP_FAR_DISABLE, which the pipeline turns into depth clamp), so casters in front
+// of a shadow cascade's near plane still land in the map at its nearest depth. Without the feature
+// the pipeline cannot clamp; the vertex shader is translated in a variant that clamps the position's
+// depth at the near plane, per vertex: exact for casters wholly in front of it, a triangle crossing
+// the plane comes out a little too deep (at worst a little less shadow). The far plane still clips:
+// nothing beyond it shadows anything in range, and big ground triangles clamped there per vertex
+// came out too near. The variant is part of the shader key (gather_linkage flag 64), so the shader
+// caches keep both. Approach from the GreenNaugahyde Android fork (v0.9.5, issue #45 there).
+bool depth_clamp_variant_wanted(const uint32_t* regs) {
+    return !R.enabledFeatures.depthClamp && (regs[REGADDR::PA_CL_CLIP_CNTL] & (1u << 27));  // ZCLIP_FAR_DISABLE
+}
+// the vertex shader variant: SET_POSITION (the Vulkan define of the decompiler's header) clamps z
+bool clamp_position_depth(std::string& glsl) {
+    static const std::string def = "#define SET_POSITION(_v) ";
+    const size_t d = glsl.find(def);
+    const size_t eol = d == std::string::npos ? d : glsl.find_first_of("\r\n", d);
+    if (eol == std::string::npos) return false;
+    glsl.insert(eol, "; if (gl_Position.w > 0.0) gl_Position.z = max(gl_Position.z, 0.0)");
+    return true;
+}
 size_t gather_linkage(const uint32_t* regs, bool vertex, const LatteFetchShader* fetch, uint32_t* out) {
     size_t count = 0;
     uint32_t flags = (regs[REGADDR::VGT_GS_MODE] & 3) != 0 ? 1u : 0u;
@@ -253,7 +275,8 @@ size_t gather_linkage(const uint32_t* regs, bool vertex, const LatteFetchShader*
         const uint32_t primitive = regs[REGADDR::VGT_PRIMITIVE_TYPE] & 0x3F;
         flags |= (primitive == 1 ? 2u : 0u) | (regs[mmVGT_STRMOUT_EN] ? 4u : 0u) |
                  ((vte & 0x15) != 0x15 ? 8u : 0u) |                       // any viewport scale off
-                 (regs[REGADDR::PA_CL_CLIP_CNTL] & (1u << 19) ? 16u : 0u); // DX clip space (half Z)
+                 (regs[REGADDR::PA_CL_CLIP_CNTL] & (1u << 19) ? 16u : 0u) | // DX clip space (half Z)
+                 (depth_clamp_variant_wanted(regs) ? 64u : 0u);               // emulated depth clamp
         if (mods::cemu::has_shaders()) {
             // graphics-pack shader names hash the whole VTE word and rect primitives
             out[count++] = vte;
@@ -383,7 +406,7 @@ uint64_t legacy_state_hash(const uint32_t* regs, uint64_t hash, bool vertex) {
     put(mmCB_SHADER_CONTROL, 1); put(mmDB_SHADER_CONTROL, 1);
     put(mmSPI_INPUT_Z, 1); put(REGADDR::SX_ALPHA_TEST_CONTROL, 1);
     uint32_t transformState[] = {regs[REGADDR::PA_CL_VTE_CNTL] & 0x3F,
-        regs[REGADDR::PA_CL_CLIP_CNTL] & (1u << 19),
+        regs[REGADDR::PA_CL_CLIP_CNTL] & ((1u << 19) | (depth_clamp_variant_wanted(regs) ? 1u << 27 : 0u)),
         regs[REGADDR::DB_DEPTH_CONTROL] & 0x83};
     append(transformState,3);
     put(REGADDR::CB_COLOR_CONTROL, 1); put(REGADDR::CB_TARGET_MASK, 1);
@@ -700,6 +723,14 @@ bool decompile(Shader& shader, const uint32_t* regs, bool vertex, LatteFetchShad
                 (unsigned long long)packBase,(unsigned long long)packAux,vertex?"vs":"ps",
                 accepted?"applied":"rejected: ",accepted?"":error.c_str());
         }
+    }
+    if (vertex && depth_clamp_variant_wanted(regs)) {
+        static int applied = 0, missed = 0;
+        if (clamp_position_depth(shader.glsl)) {
+            if (++applied <= 5 || (applied & (applied - 1)) == 0)
+                fprintf(stderr, "[vulkan] vertex shader %08X: near-plane depth clamp variant (%d so far)\n", address, applied);
+        } else if (missed++ < 10)  // a graphics-pack vertex shader without the decompiler's SET_POSITION: drawn unclamped
+            fprintf(stderr, "[vulkan] vertex shader %08X: depth clamp emulation not applied (no SET_POSITION)\n", address);
     }
     if (vertex && R.vertexFormats.fallbackMask) {
         uint32_t tailLocation = vertex_tail_location(shader.mapping.attributeMapping);

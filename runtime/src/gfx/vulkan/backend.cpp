@@ -4122,6 +4122,12 @@ static void init_device(std::vector<const char *> extensions,
   enabled.samplerAnisotropy = available.samplerAnisotropy;
   enabled.independentBlend = available.independentBlend;
   enabled.depthClamp = available.depthClamp;
+  // test switch: the path of devices without depth clamp (vertex shaders clamp at the near plane)
+  if (const char* e = getenv("WWHD_VK_FORCE_DEPTH_CLAMP_EMULATION"); e && strcmp(e, "0")) {
+    enabled.depthClamp = VK_FALSE;
+    LOG("[vulkan] WWHD_VK_FORCE_DEPTH_CLAMP_EMULATION: depth clamp emulated in vertex shaders");
+  } else if (!available.depthClamp)
+    LOG("[vulkan] device has no depth clamp: emulated in vertex shaders");
   enabled.depthBiasClamp = available.depthBiasClamp;
   enabled.shaderClipDistance = available.shaderClipDistance;
   enabled.shaderCullDistance = available.shaderCullDistance;
