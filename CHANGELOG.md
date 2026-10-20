@@ -19,6 +19,12 @@ what is on `devel` and not released yet (also in the
   another villager's walk, fitted to their own bodies when the game starts, from the player's own files. Feet stay on
   the ground at any walking speed. Full save states made with the editor before this update can't be loaded.
 
+- **Keep game speed at 60 fps holds full speed on devices just under 60 fps** (#254). With Keep game speed on, a
+  device that draws a little under 60 fps (for example a phone at 57-58 fps) no longer runs the game slightly slow, and
+  a short hitch no longer costs game time: the game skips exactly as many in-between frames as it needs, without
+  waiting after a skip. A slow device that takes 20-25 ms per frame now shows a third to two thirds of its in-between
+  frames instead of almost none, at full game speed. 30 fps, 120/240 fps and Keep game speed off are unchanged.
+
 - **Mod SDK v3 and the editor: sea and dungeon enemies** (for mod makers). The Kargaroc (flying or perched, without
   riders), the red Wizzrobe with its fireballs, the enemy warship (at sea only; its cannonballs hit only Link and his
   boat), groups of one to five Gyorgs (they appear once Link has the boomerang), the Floormaster (it grabs Link and lets
