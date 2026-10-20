@@ -16,6 +16,7 @@
       "template": "Cave01",
       "kind": "dungeon",
       "music_like": "Cave01",
+      "map": {"title": "Hidden Keep"},
       "entrance": {"stage": "sea", "room": 34, "point": 1},
       "rooms": [
         {
@@ -47,6 +48,10 @@
           "material": "lambert2_v",
           "materials": {"wall": "E3mR02roomKB_v"},
           "spawns": [{"point": 2, "position": {"x": -2100, "y": -200, "z": 1300}, "angle": 0}],
+          "actors": [
+            {"id": "map-chest", "actor": "chest", "item": "map", "position": {"x": -1800, "y": -200, "z": 1700}, "angle": 270},
+            {"id": "compass-chest", "actor": "chest", "item": "compass", "position": {"x": -1800, "y": -200, "z": 2100}, "angle": 270}
+          ],
           "exits": [
             {
               "id": "to-sea",

@@ -197,6 +197,23 @@ class Phase2(unittest.TestCase):
         self.assertEqual([g[0] for g in groups], [g[0] for g in groups0])
 
 
+class Map(unittest.TestCase):
+    def test_room_picture(self):
+        pos, tris = box_room(-10, 10)
+        prims = [{'collision': False, 'material': 'rock', 'positions': [tuple(100 * x for x in p) for p in pos], 'triangles': tris}]
+        verts, ctris, _ = sb.collision_from(prims, [])
+        floors = sb.floor_triangles(sb.build_dzb(verts, ctris, 0))
+        self.assertEqual(len(floors), 4)  # the floor's two strips, not the walls
+        x0, z0, w, h, rows = sb.room_map(floors, 20.0)
+        self.assertEqual((w, h), (102, 52))
+        px = lambda x, y: rows[y * (4 * w + 1) + 1 + 4 * x:y * (4 * w + 1) + 5 + 4 * x]
+        self.assertEqual(px(0, 0)[3], 0)               # outside the floor: clear
+        self.assertEqual(px(1, 25), b'\x60\x60\x60\xff')  # its edge: dark
+        self.assertEqual(px(50, 25)[3], 0xFF)          # inside
+        self.assertGreater(px(50, 25)[0], 0x60)
+        self.assertEqual(sb.png(w, h, rows)[:8], b'\x89PNG\r\n\x1a\n')
+
+
 class Collision(unittest.TestCase):
     def test_groups_exits_water(self):
         pos, tris = box_room(-10, 10)

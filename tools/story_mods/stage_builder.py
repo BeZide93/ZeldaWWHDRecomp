@@ -46,6 +46,7 @@ import re
 import struct
 import sys
 import tempfile
+import zlib
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import notebook_model as base  # noqa: E402  (Bfres, sarc, yaz0_stored, BuildError)
@@ -173,7 +174,7 @@ def build_dzs(template_dzs, recipe):
     s = bytearray(stag[2][:0x14])
     s[9] = (SAVE_SLOT << 1) | (1 if recipe.get('keys') else 0)  # the key counter
     mm, = struct.unpack_from('>H', s, 0xA)
-    struct.pack_into('>H', s, 0xA, mm & ~3)  # map mode 0: the sea chart (the dungeon map comes later)
+    struct.pack_into('>H', s, 0xA, (mm & ~3) | (1 if recipe.get('map_mode') == 1 else 0))  # 0 the sea chart, 1 the dungeon view
     t, = struct.unpack_from('>I', s, 0xC)
     struct.pack_into('>I', s, 0xC, (t & ~(7 << 16)) | (KINDS[recipe['kind']] << 16))
     rooms = recipe['rooms']
@@ -621,6 +622,93 @@ def kit_collision(dzb, room, exits):
     return bytes(body), taken
 
 
+# ---- the map (the port draws a stage's dungeon map from these; nothing of it goes to the game) -------------
+
+MAP_MAX = 512  # pixels per side of a room's picture
+
+
+def floor_triangles(dzb):
+    """the floors of a room.dzb: [(a, b, c) positions] of the triangles facing up (not swimmable water)"""
+    nv, ov, nt, ot, nb, ob, nn, on, ng, og, ni, oi = struct.unpack_from('>12I', dzb, 0)
+    verts = [struct.unpack_from('>3f', dzb, ov + 12 * i) for i in range(nv)]
+    water = set()
+    for i in range(ng):
+        inf, = struct.unpack_from('>I', dzb, og + 52 * i + 0x30)
+        if inf & 0x100:
+            water.add(i)
+    out = []
+    for i in range(nt):
+        a, b, c, inf, grp = struct.unpack_from('>5H', dzb, ot + 10 * i)
+        if grp in water:
+            continue
+        pa, pb, pc = verts[a], verts[b], verts[c]
+        u = [pb[k] - pa[k] for k in range(3)]
+        v = [pc[k] - pa[k] for k in range(3)]
+        n = (u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0])
+        ln = math.sqrt(sum(x * x for x in n))
+        if ln > 1e-6 and n[1] / ln > 0.5:
+            out.append((pa, pb, pc))
+    return out
+
+
+def room_map(tris, units):
+    """a room's floor seen from above: (x0, z0, width, height, RGBA rows) at `units` game units per pixel, north
+    (-z) up. Grey, lighter the higher the floor (a pit or a lava basin shows darker than the walkways), with a
+    dark edge where the floor ends or steps by more than 60 units; the port tints it."""
+    if not tris:
+        return None
+    xs = [p[0] for t in tris for p in t]
+    zs = [p[2] for t in tris for p in t]
+    x0, z0 = min(xs) - units, min(zs) - units
+    w = min(MAP_MAX, int(math.ceil((max(xs) + units - x0) / units)))
+    h = min(MAP_MAX, int(math.ceil((max(zs) + units - z0) / units)))
+    top = [None] * (w * h)
+    for pa, pb, pc in tris:
+        ax, az = (pa[0] - x0) / units, (pa[2] - z0) / units
+        bx, bz = (pb[0] - x0) / units, (pb[2] - z0) / units
+        cx, cz = (pc[0] - x0) / units, (pc[2] - z0) / units
+        area = (bx - ax) * (cz - az) - (bz - az) * (cx - ax)
+        if abs(area) < 1e-9:
+            continue
+        for py in range(max(0, int(min(az, bz, cz))), min(h, int(max(az, bz, cz)) + 1)):
+            for px in range(max(0, int(min(ax, bx, cx))), min(w, int(max(ax, bx, cx)) + 1)):
+                qx, qz = px + 0.5, py + 0.5
+                w0 = (bx - ax) * (qz - az) - (bz - az) * (qx - ax)
+                w1 = (cx - bx) * (qz - bz) - (cz - bz) * (qx - bx)
+                w2 = (ax - cx) * (qz - cz) - (az - cz) * (qx - cx)
+                if (w0 >= 0 and w1 >= 0 and w2 >= 0) or (w0 <= 0 and w1 <= 0 and w2 <= 0):
+                    # the floor's height there (barycentric)
+                    y = (w1 * pa[1] + w2 * pb[1] + w0 * pc[1]) / area  # w1, w2, w0: the weights of a, b, c
+                    k = py * w + px
+                    if top[k] is None or y > top[k]:
+                        top[k] = y
+    heights = [v for v in top if v is not None]
+    lo, hi = min(heights), max(heights)
+    rows = bytearray()
+    for y in range(h):
+        rows.append(0)  # PNG filter: none
+        for x in range(w):
+            v = top[y * w + x]
+            if v is None:
+                rows += b'\0\0\0\0'
+                continue
+            edge = False
+            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                n = top[(y + dy) * w + x + dx] if 0 <= x + dx < w and 0 <= y + dy < h else None
+                if n is None or n < v - 60:
+                    edge = True
+            g = 0x60 if edge else int(0x90 + 0x6F * ((v - lo) / (hi - lo) if hi > lo else 1.0))
+            rows += bytes((g, g, g, 0xFF))
+    return x0, z0, w, h, bytes(rows)
+
+
+def png(width, height, rows):
+    def chunk(kind, body):
+        return struct.pack('>I', len(body)) + kind + body + struct.pack('>I', zlib.crc32(kind + body) & 0xFFFFFFFF)
+    return (b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', width, height, 8, 6, 0, 0, 0)) +
+            chunk(b'IDAT', zlib.compress(rows, 9)) + chunk(b'IEND', b''))
+
+
 # ---- the room archive (graft) --------------------------------------------------------------------------------
 
 def mesh_shape(src, template, prim):
@@ -901,6 +989,7 @@ def build(game, recipe_path, out_dir):
     stage_members[stage_bfres[0]] = replace_embedded(stage_files[stage_bfres[0]], 'stage.dzs', dzs)
     outputs = {'%s_Stage.szs' % name: base.yaz0_stored(base.sarc(stage_members))}
     rooms_meta = []
+    floors = {}
     for r in recipe['rooms']:
         kit_files = kits[(r['kit']['stage'], r['kit']['room'])]
         kb = [n for n in kit_files if n.endswith('.bfres')]
@@ -922,6 +1011,21 @@ def build(game, recipe_path, out_dir):
         outputs['%s_Room%d.szs' % (name, r['room'])] = archive
         rooms_meta.append({'room': r['room'], 'visible_triangles': tris, 'collision_triangles': len(triangles),
                            'exit_triangles': taken, 'spawns': [{'point': s['point'], 'position': s['position'], 'angle': s.get('angle', 0)} for s in r['spawns']]})
+        floors[r['room']] = floor_triangles(dzb)
+    # the map: one picture per room, every room at the same scale (the stage's floors fit 400 pixels)
+    if recipe.get('map_mode') == 1:
+        pts = [p for tris_ in floors.values() for t in tris_ for p in t]
+        if pts:
+            span = max(max(p[0] for p in pts) - min(p[0] for p in pts), max(p[2] for p in pts) - min(p[2] for p in pts))
+            units = max(10.0, min(200.0, span / 400.0))
+            for meta_room, r in zip(rooms_meta, recipe['rooms']):
+                pic = room_map(floors[r['room']], units)
+                if not pic:
+                    continue
+                x0, z0, w, h, rows = pic
+                fname = '%s_map%d.png' % (name, r['room'])
+                outputs[fname] = png(w, h, rows)
+                meta_room['map'] = {'file': fname, 'x': x0, 'z': z0, 'units': units, 'width': w, 'height': h, 'floor': r.get('floor', 1)}
     os.makedirs(out_dir, exist_ok=True)
     files = {}
     for fname, body in sorted(outputs.items()):

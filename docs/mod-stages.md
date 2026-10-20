@@ -7,8 +7,8 @@ files when the game starts, and the game loads it like any of its own stages.
 
 Mod stages are experimental. A stage has rooms built from your models or taken from the game's rooms,
 spawn points, exits, doors (plain, small-key, boss and shutter doors), chests with small keys, the map, the
-compass and the boss key, enemies and pots, return warps, ways in from the game's rooms, and save flags of
-its own. The dungeon map screen comes later.
+compass and the boss key, enemies and pots, return warps, ways in from the game's rooms, save flags of its
+own and a dungeon map.
 
 A larger example, a three-room dungeon with a locked door, a key in a chest and an enemy, is
 `examples/guest-mods/mod-stage-dungeon` in the repository.
@@ -87,6 +87,7 @@ A package with stages needs no other package: stages are not story content.
 | `joins` | Optional: pairs of rooms joined by an open passage without a door, `[[2, 3]]`. Both rooms are kept loaded while Link is in either. |
 | `entries` | Optional, up to 4: boxes in rooms of the game that take Link into the stage. |
 | `warps` | Optional, up to 4: return warps (see [Return warps](#return-warps)). |
+| `map` | Optional: `{"title": "Hidden Keep"}` gives the stage a dungeon map (see [The dungeon map](#the-dungeon-map)); the title (up to 40 characters) shows above its floors. Without it the map screen shows the sea chart, as in the game's caves. |
 
 Every room must be reachable: from where Link comes in (the entries' rooms, room 0 without entries) through
 doors, joins and exits. Check names a room that can't be reached.
@@ -105,6 +106,7 @@ A package declares up to 4 stages.
 | `spawns` | 1 to 8 spawn points: `point` (0 to 99, unique in the stage), `position`, `angle` in degrees (0 faces +z, 90 faces +x) and `start`: `stand` (the default) or `fall` (Link drops in from above). |
 | `exits` | Up to 8 exits: an `id`, a `box` (`min` and `max` corners) and the place it leads `to`. |
 | `actors` | Up to 16 of the game's actors (see [Actors](#actors)). |
+| `floor` | Optional: the dungeon map's floor the room is on: 1 (1F, the default) to 5, or -1 (B1) to -5. |
 
 An exit's box marks floor: the ground's floor triangles whose middle lies in the box take Link to the exit's
 place when he steps on them, the way the game's own caves are left. Walls and ceilings in the box don't
@@ -201,6 +203,19 @@ The materials are the template's own: their names are those of the kit room's mo
 the game's log says which ones the kit room has (`the kit room has no material "..." (it has: ...)`), so
 starting with any name and reading the log is a quick way to find them.
 
+## The dungeon map
+
+A stage with `map` has a dungeon map on the map screen (the GamePad's MAP, or the menu's MAP tab with the
+Pro Controller). The port draws it from the rooms' floors, seen from above, on the game's dungeon map page:
+
+- the rooms Link has been in, and the room he is in, with his place and the way he faces;
+- with the stage's dungeon map (a chest with `"item": "map"`): every room, the ones he hasn't been in lighter;
+- with the compass: the chests (gold while closed, grey once open) and the boss door (a red mark);
+- the title, and each floor's name on the floor buttons, the floor Link is on marked.
+
+The map shows the floor Link is on; the floor buttons don't switch floors yet. Higher ground shows lighter
+and pits and basins darker, and a room's edge is drawn where its floor ends.
+
 ## Saves
 
 The game's save file never names a mod stage. When the player saves in the stage, the save file stores the
@@ -243,8 +258,7 @@ as `"stage": "stage:<package id>/<stage id>"`, for example
 
 ## Limits
 
-- No dungeon map yet: the map shows the sea chart, as in the game's caves and houses. The map and compass
-  can be found and are kept, for the map screen that comes later.
+- The dungeon map shows only the floor Link is on, and the map can't be zoomed or moved by touch.
 - Only the actors listed under [Actors](#actors); no boss yet, and no actors of a kit room's own.
 - The stage's rooms are lit by the template; a sky only comes with a template that has one.
 - Ballad of Gales and the blue warp don't lead to or from a mod stage.

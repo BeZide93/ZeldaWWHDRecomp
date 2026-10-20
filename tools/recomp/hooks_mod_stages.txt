@@ -8,3 +8,4 @@
 025B9C9C  # dSv_info_c::getSave: a mod stage's own record (the mod save area) instead of the test stages' slot 15
 025B9D24  # dSv_info_c::putSave: the same, back; slot 15 of the save file stays as it is
 025B9174  # dSv_danBit_c::init: each mod stage save group has its own dungeon switches
+026876F4  # hdMapDisplayCoordinator_c::updateMapKind: the GamePad map's state, for a mod stage's dungeon map

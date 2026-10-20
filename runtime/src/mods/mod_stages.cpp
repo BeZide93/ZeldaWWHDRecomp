@@ -17,6 +17,9 @@
 #include "guest_addr.h"
 #include "runtime.h"
 #include "story_store.h"
+#include "guest_hud.h"
+#include "guest_png.h"
+#include "../input.h"
 #include "story_world_placement.h"
 
 extern "C" void f_020277AC_orig(Cpu* c);
@@ -28,6 +31,7 @@ extern "C" void f_025B9D24_orig(Cpu* c);
 extern "C" void f_025B9174_orig(Cpu* c);
 
 namespace mod_stages {
+void draw_map();
 namespace {
 namespace fs = std::filesystem;
 
@@ -40,6 +44,16 @@ struct Built {
     uint16_t group_key = 0;                    // its save group's key (save_key of the group)
     unsigned group_index = 0;                  // the save group's number this session (its dungeon switches)
     std::map<std::string, std::string> names;  // the package's stage ids -> game names (its warps)
+    // the dungeon map: each room's picture (the builder's, seen from above) and where it lies
+    struct MapRoom {
+        unsigned room = 0;
+        int floor = 1;
+        double x = 0, z = 0, units = 1;
+        uint32_t width = 0, height = 0;
+        std::shared_ptr<std::vector<uint8_t>> rgba;
+        uint32_t image = 0;  // the HUD image while the stage is shown (0: none yet)
+    };
+    std::vector<MapRoom> map_rooms;
     std::string music_like;
     int music_id = -1;                         // spotNameToId's answer for the stage (-1: not looked up yet)
 };
@@ -194,6 +208,7 @@ bool build(const std::string& mod, const Stage& s, const std::string& name, cons
     }
     b.music_like = s.music_like;
     for (const auto& [file, digest] : result.get("files").object) {
+        if (file.rfind(name + "_map", 0) == 0 && file.size() > 4 && file.substr(file.size() - 4) == ".png") continue;  // the map's pictures (below)
         const bool ours = file == name + "_Stage.szs" || (file.rfind(name + "_Room", 0) == 0 && file.size() > 4 && file.substr(file.size() - 4) == ".szs");
         if (!ours || !fs::is_regular_file(dir / file) || fs::is_symlink(dir / file)) return why = "the stage builder returned an unexpected file " + file, false;
         b.files[file] = (dir / file).string();
@@ -205,6 +220,27 @@ bool build(const std::string& mod, const Stage& s, const std::string& name, cons
         b.info.rooms.push_back(r.room);
         for (const auto& sp : r.spawns) b.info.spawns.push_back({r.room, sp.point, sp.position, sp.angle});
     }
+    if (s.map)
+        for (const auto& room : result.get("rooms").array) {
+            const Value& m = room.get("map");
+            if (m.type != Value::Object) continue;
+            Built::MapRoom mr;
+            mr.room = unsigned(room.get("room").number);
+            mr.floor = int(m.get("floor").number);
+            mr.x = m.get("x").number, mr.z = m.get("z").number, mr.units = m.get("units").number;
+            const fs::path file = dir / m.get("file").string();
+            if (fs::is_symlink(file) || !fs::is_regular_file(file) || fs::file_size(file) > (4u << 20)) continue;
+            try {
+                const std::string bytes = read_file(file, 4u << 20);
+                auto pixels = guestmods::hud::decode_png(std::span<const uint8_t>(reinterpret_cast<const uint8_t*>(bytes.data()), bytes.size()));
+                mr.width = pixels.width, mr.height = pixels.height;
+                mr.rgba = std::make_shared<std::vector<uint8_t>>(std::move(pixels.rgba));
+            } catch (const std::exception& e) {
+                LOG("[mod-stages] %s: the map picture of room %u is unreadable (%s)", s.id.c_str(), mr.room, e.what());
+                continue;
+            }
+            b.map_rooms.push_back(std::move(mr));
+        }
     LOG("[mod-stages] %s: stage %s is %s (%zu rooms, %s)", mod.c_str(), s.id.c_str(), name.c_str(), s.rooms.size(),
         result.get("cached").boolean ? "from the stage cache" : "built from the game files");
     for (const auto& room : result.get("rooms").array)
@@ -313,6 +349,7 @@ bool missing(const std::string& stage) {
 
 void logic(Cpu*) {
     if (g_stages.empty()) return;  // appended only before the game runs
+    draw_map();
     static std::string last_room;
     static std::set<std::string> armed;  // entries Link was outside of since he came into the room
     const auto p = ss::link_place();
@@ -573,3 +610,162 @@ extern "C" void hook_025B9174(Cpu* c) {
         if (const Built* b = loading_stage()) c->r[4] = 0x20 + b->group_index;
     f_025B9174_orig(c);
 }
+
+// ---- the dungeon map ------------------------------------------------------------------------------------------
+// In a stage with a map (STAG map mode 1) the game's map screen shows its dungeon view: a title banner, five
+// floor buttons and an empty parchment (the game's maps are its own pictures per dungeon). The port draws the
+// stage's map over it, on the screen the menus are on (the GamePad, or the TV with the Pro Controller): the
+// rooms Link has been in (and, with the dungeon map, the others, lighter), the room he is in, his place and
+// heading, and with the compass the chests (closed, open) and the boss door; the title; each floor's name on
+// its button, the floor Link is on marked. Places in the GamePad's 854 x 480 units (the TV's are 1.5 times).
+namespace mod_stages_map {
+extern uint32_t g_coordinator;
+}
+namespace mod_stages {
+namespace {
+constexpr char kMapOwner[] = "mod-stages map";
+constexpr float kAreaX = 398, kAreaY = 88, kAreaW = 360, kAreaH = 346;  // the parchment
+constexpr float kButtonX = 155, kButtonH = 32;
+constexpr float kButtonY[5] = {329, 283, 237, 191, 144};  // the floor buttons' tops, from the bottom
+std::string floor_name(int f) { return f > 0 ? std::to_string(f) + "F" : "B" + std::to_string(-f); }
+const Built* g_shown = nullptr;
+uint32_t g_shown_screen = 2;
+void release_images() {
+    for (auto& b : g_stages)
+        for (auto& r : b.map_rooms)
+            if (r.image) {
+                guestmods::hud::store().release(kMapOwner, r.image);
+                r.image = 0;
+            }
+}
+void hide_map() {
+    if (!g_shown) return;
+    guestmods::hud::store().drop(kMapOwner);
+    release_images();
+    g_shown = nullptr;
+}
+}  // namespace
+
+void draw_map() {
+    namespace hud = guestmods::hud;
+    const uint32_t coord = mod_stages_map::g_coordinator;
+    const Built* b = by_name(current_stage());
+    const bool shown = b && b->stage.map && !b->map_rooms.empty() && coord && ld32(coord + 0x60) == 1 && ld8(coord + 0x69);
+    if (!shown) return hide_map();
+    const uint32_t screen = input::pro_controller() ? 0 : 1;
+    if (b != g_shown || screen != g_shown_screen) {
+        hide_map();
+        g_shown = b, g_shown_screen = screen;
+    }
+    Built& stage = const_cast<Built&>(*b);
+    const auto p = ss::link_place();
+    const uint32_t save = ld32(kSavePtr);
+    if (!save || !p.valid) return;
+    const uint32_t rec = save + 0x20 + 0x778;  // the working stage record
+    auto visited = [&](unsigned room) { return room < 64 && ((ld32(rec + 0x18 + 4 * (room >> 5)) >> (room & 31)) & 1); };
+    const uint8_t items = ld8(rec + 0x21);
+    const bool have_map = items & 1, have_compass = items & 2;
+    const uint32_t chests = ld32(rec);
+    int floor = 1;  // the floor Link is on: his room's
+    for (const auto& r : stage.map_rooms)
+        if (int(r.room) == p.room) floor = r.floor;
+    std::vector<int> floors;
+    for (const auto& r : stage.map_rooms)
+        if ((have_map || visited(r.room) || int(r.room) == p.room) && std::find(floors.begin(), floors.end(), r.floor) == floors.end()) floors.push_back(r.floor);
+    std::sort(floors.begin(), floors.end());
+    if (floors.size() > 5) floors.erase(floors.begin(), floors.end() - 5);
+    double x0 = 1e30, z0 = 1e30, x1 = -1e30, z1 = -1e30;  // every room of the floor: the map doesn't move as rooms are found
+    for (const auto& r : stage.map_rooms)
+        if (r.floor == floor) {
+            x0 = std::min(x0, r.x), z0 = std::min(z0, r.z);
+            x1 = std::max(x1, r.x + r.width * r.units), z1 = std::max(z1, r.z + r.height * r.units);
+        }
+    if (x1 <= x0 || z1 <= z0) return;
+    const float k = screen == 0 ? 1.5f : 1.0f;
+    const float margin = 12;
+    const float scale = float(std::min((kAreaW - 2 * margin) / (x1 - x0), (kAreaH - 2 * margin) / (z1 - z0)));
+    const float ox = kAreaX + (kAreaW - float(x1 - x0) * scale) / 2, oz = kAreaY + (kAreaH - float(z1 - z0) * scale) / 2;
+    auto mx = [&](double x) { return (ox + float(x - x0) * scale) * k; };
+    auto mz = [&](double z) { return (oz + float(z - z0) * scale) * k; };
+    hud::Store& store = hud::store();
+    const hud::Handle list = store.begin(kMapOwner, screen);
+    if (!list) return;
+    auto add = [&](hud::Command c) {
+        c.anchor = hud::Anchor::TopLeft;
+        store.append(kMapOwner, list, std::move(c));
+    };
+    hud::Command cover;
+    cover.kind = hud::Command::Rect, cover.x = kAreaX * k, cover.y = kAreaY * k, cover.w = kAreaW * k, cover.h = kAreaH * k, cover.rgba = 0xF4E09AFF;
+    add(cover);
+    hud::Command face = cover;  // the game's Link face at the lowest button: the port marks Link's floor instead
+    face.x = 94 * k, face.y = 326 * k, face.w = 50 * k, face.h = 46 * k, face.rgba = 0xF5E7BFFF;
+    add(face);
+    for (auto& r : stage.map_rooms) {
+        if (r.floor != floor) continue;
+        const bool here = int(r.room) == p.room, seen = visited(r.room);
+        if (!here && !seen && !have_map) continue;
+        if (!r.image) r.image = store.create_image(kMapOwner, r.width, r.height, r.width * 4, r.rgba->data(), r.rgba->size());
+        if (!r.image) continue;
+        hud::Command pic;
+        pic.x = mx(r.x), pic.y = mz(r.z), pic.w = float(r.width * r.units) * scale * k, pic.h = float(r.height * r.units) * scale * k;
+        pic.rgba = here ? 0xD9773CFF : seen ? 0xB98A4EFF : 0xD8C49A90;  // the room Link is in, rooms he has seen, the rest
+        pic.anchor = hud::Anchor::TopLeft;
+        store.picture(kMapOwner, list, r.image, pic);
+    }
+    if (have_compass) {
+        for (const auto& room : stage.stage.rooms) {
+            bool on_floor = false;
+            for (const auto& r : stage.map_rooms)
+                if (r.room == room.room && r.floor == floor) on_floor = true;
+            if (!on_floor) continue;
+            for (const auto& a : room.actors) {
+                if (a.actor != "chest") continue;
+                const bool open = (chests >> a.flag) & 1;
+                hud::Command c;
+                c.kind = hud::Command::Rect, c.x = mx(a.position.x) - 4 * k, c.y = mz(a.position.z) - 3 * k, c.w = 8 * k, c.h = 6 * k;
+                c.rgba = open ? 0x8A7A64FF : 0xE0A82EFF;
+                add(c);
+                c.kind = hud::Command::RectOutline, c.rgba = 0x4A3010FF, c.thickness = 1;
+                add(c);
+            }
+        }
+        for (const auto& d : stage.stage.doors) {
+            if (d.lock != "boss") continue;
+            hud::Command c;
+            c.kind = hud::Command::Circle, c.x = mx(d.position.x), c.y = mz(d.position.z), c.size = 5 * k, c.rgba = 0xC0302AFF;
+            add(c);
+        }
+    }
+    {  // Link: a red mark and his heading (angle 0 faces +z: down on the map)
+        const float lx = mx(p.pos[0]), lz = mz(p.pos[2]);
+        const double a = double(p.angle) * 3.14159265358979323846 / 32768.0;
+        hud::Command line;
+        line.kind = hud::Command::Line, line.x = lx, line.y = lz, line.w = float(std::sin(a) * 12 * k), line.h = float(std::cos(a) * 12 * k);
+        line.thickness = 3, line.rgba = 0xC8281EFF;
+        add(line);
+        hud::Command dot;
+        dot.kind = hud::Command::Circle, dot.x = lx, dot.y = lz, dot.size = 5 * k, dot.rgba = 0xC8281EFF;
+        add(dot);
+        dot.kind = hud::Command::CircleOutline, dot.rgba = 0xFFFFFFFF, dot.thickness = 1.5f;
+        add(dot);
+    }
+    if (!stage.stage.map_title.empty()) {
+        hud::Command t;
+        t.kind = hud::Command::Text, t.x = 92 * k, t.y = 98 * k, t.size = 20 * k, t.rgba = 0x5A3A16FF, t.text = stage.stage.map_title;
+        add(t);
+    }
+    for (size_t i = 0; i < floors.size(); ++i) {
+        hud::Command t;
+        t.kind = hud::Command::Text, t.x = (kButtonX + 32) * k, t.y = (kButtonY[i] + 6) * k, t.size = 20 * k;
+        t.rgba = floors[i] == floor ? 0xB0301CFF : 0x6A4A20FF, t.text = floor_name(floors[i]);
+        add(t);
+        if (floors[i] == floor) {
+            hud::Command m;
+            m.kind = hud::Command::Circle, m.x = (kButtonX - 22) * k, m.y = (kButtonY[i] + kButtonH / 2) * k, m.size = 7 * k, m.rgba = 0xC8281EFF;
+            add(m);
+        }
+    }
+    store.commit(kMapOwner, list);
+}
+
+}  // namespace mod_stages

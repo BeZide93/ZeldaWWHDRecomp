@@ -203,6 +203,23 @@ int main() {
         assert(!bad2);
     }
 
+    // phase 3: the dungeon map's title and the rooms' floors
+    {
+        std::string text = kValid;
+        text.replace(text.find("\"music_like\": \"Cave01\","), 0, "\"map\": {\"title\": \"Hidden Keep\"}, ");
+        text.replace(text.find("{\"room\": 1, \"ground\""), 1, "{\"floor\": -1, ");
+        std::vector<Stage> m;
+        assert(parse(parse_json(text), m, why) && m[0].map && m[0].map_title == "Hidden Keep" && m[0].rooms[1].floor == -1 && m[0].rooms[0].floor == 1);
+        const Value mr = recipe(m[0], "Zaaaaaa", {{"chamber", "Zaaaaaa"}, {"other", "Zbbbbbb"}}, [](const std::string& p) { return p; });
+        assert(mr.get("map_mode").number == 1 && mr.get("rooms").array[1].get("floor").number == -1);
+        std::string bad = text;
+        bad.replace(bad.find("\"floor\": -1"), 11, "\"floor\": 0");
+        assert(!parse(parse_json(bad), m, why) && why.find("floor") != std::string::npos);
+        bad = text;
+        bad.replace(bad.find("\"title\""), 7, "\"name\" ");
+        assert(!parse(parse_json(bad), m, why) && why.find("map") != std::string::npos);
+    }
+
     printf("mod_stages_test: ok\n");
     return 0;
 }

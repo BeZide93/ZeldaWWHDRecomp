@@ -76,6 +76,7 @@ struct Room {
     std::vector<Spawn> spawns;
     std::vector<Exit> exits;
     std::vector<RoomActor> actors;
+    int floor = 1;  // the map's floor: 1 (1F) and up, -1 (B1) and down
     bool operator==(const Room&) const = default;
 };
 struct Door {
@@ -113,6 +114,8 @@ struct Stage {
     std::vector<Entry> entries;
     std::vector<Warp> warps;
     bool keys = false;  // the key counter shows (a small-key door or a small key in the stage)
+    bool map = false;   // the stage has a dungeon map (the map screen's dungeon view, drawn by the port)
+    std::string map_title;  // its title on the map screen ("" none)
     bool operator==(const Stage&) const = default;
 };
 
@@ -212,7 +215,7 @@ inline bool parse(const Value& m, std::vector<Stage>& out, std::string& why) {
     if (list.type != Value::Array || list.array.size() > kMaxStagesPerMod) return why = "stages must be a list of up to " + std::to_string(kMaxStagesPerMod), false;
     for (const auto& v : list.array) {
         Stage s;
-        if (!keys(v, {"id", "template", "kind", "music_like", "save_group", "entrance", "rooms", "doors", "joins", "entries", "warps"})) return why = "unknown stage field", false;
+        if (!keys(v, {"id", "template", "kind", "music_like", "save_group", "entrance", "rooms", "doors", "joins", "entries", "warps", "map"})) return why = "unknown stage field", false;
         if (!id(v.get("id"))) return why = "invalid stage id", false;
         s.id = v.get("id").text;
         const std::string at = "stage " + s.id + ": ";
@@ -221,6 +224,13 @@ inline bool parse(const Value& m, std::vector<Stage>& out, std::string& why) {
         if (v.get("template").type != Value::String || !game_stage_name(v.get("template").text)) return why = at + "template names a stage of the game", false;
         s.template_stage = v.get("template").text;
         s.save_group = s.id;
+        if (v.get("map").type != Value::Null) {
+            const Value& mv = v.get("map");
+            if (!keys(mv, {"title"}) || (mv.get("title").type != Value::Null && (mv.get("title").type != Value::String || mv.get("title").text.size() > 40)))
+                return why = at + "map is {\"title\": up to 40 characters}", false;
+            s.map = true;
+            s.map_title = mv.get("title").string();
+        }
         if (v.get("save_group").type != Value::Null) {
             if (!id(v.get("save_group"))) return why = at + "invalid save_group", false;
             s.save_group = v.get("save_group").text;
@@ -240,9 +250,15 @@ inline bool parse(const Value& m, std::vector<Stage>& out, std::string& why) {
         std::set<unsigned> points;
         for (const auto& rv : rooms.array) {
             Room r;
-            if (!keys(rv, {"room", "kit", "ground", "material", "materials", "spawns", "exits", "actors"})) return why = at + "unknown room field", false;
+            if (!keys(rv, {"room", "kit", "ground", "material", "materials", "spawns", "exits", "actors", "floor"})) return why = at + "unknown room field", false;
             if (!integer(rv.get("room"), 0, 63, r.room) || r.room != s.rooms.size()) return why = at + "rooms are numbered 0, 1, ... in order", false;
             const std::string rat = at + "room " + std::to_string(r.room) + ": ";
+            if (rv.get("floor").type != Value::Null) {
+                const Value& f = rv.get("floor");
+                if (f.type != Value::Number || std::floor(f.number) != f.number || f.number < -5 || f.number > 5 || f.number == 0)
+                    return why = rat + "floor is 1..5 (1F..5F) or -1..-5 (B1..B5)", false;
+                r.floor = int(f.number);
+            }
             const Value& kit = rv.get("kit");
             if (kit.type == Value::Object) {  // a room of any stage of the game
                 if (!keys(kit, {"stage", "room"}) || kit.get("stage").type != Value::String || !game_stage_name(kit.get("stage").text) || !integer(kit.get("room"), 0, 63, r.kit))
@@ -543,6 +559,7 @@ inline Value recipe(const Stage& s, const std::string& name, const std::map<std:
     r["kind"] = s.kind;
     r["entrance"] = place(s.entrance);
     r["keys"] = Value(s.keys);
+    r["map_mode"] = Value(s.map ? 1 : 0);
     Value& rooms = r["rooms"];
     rooms.type = Value::Array;
     for (const auto& room : s.rooms) {
@@ -553,6 +570,7 @@ inline Value recipe(const Stage& s, const std::string& name, const std::map<std:
         kit["room"] = Value(double(room.kit));
         v["ground"] = room.kit_ground ? std::string() : ground(room.ground);
         v["kit_ground"] = Value(room.kit_ground);
+        v["floor"] = Value(double(room.floor));
         if (!room.material.empty()) v["material"] = room.material;
         Value& mats = v["materials"];
         mats.type = Value::Object;
