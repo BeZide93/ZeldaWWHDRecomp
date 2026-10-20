@@ -22,6 +22,7 @@
 #include "editor_panel.h"
 #include "editor_dock.h"
 #include "editor_resident.h"
+#include "../mods/guest_mods.h"
 #include "../mods/story_enemy_variants.h"
 #include "extensions.h"
 #include "hostui.h"
@@ -1504,6 +1505,9 @@ void toolbar(float w) {
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("The panels back to their default places (docked at the edges)");
     ImGui::SameLine();
     ImGui::TextDisabled("  Esc: cancel placing, else Settings");
+    // game code built without mod hooks (setup with code mods off): nothing placed shows in the game
+    if (!guestmods::hooks_built())
+        ImGui::TextColored(kHead, "Live editing is off: this game code has no code-mod support (Mods > More > Code-mod support). Edits are still saved.");
     ImGui::End();
 }
 

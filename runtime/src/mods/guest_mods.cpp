@@ -1099,6 +1099,19 @@ bool register_native_event_observer(NativeEventObserver observer){
  return g_native_event_observer.compare_exchange_strong(empty,observer,std::memory_order_release,std::memory_order_relaxed);
 }
 
+// The end of init(): the hook registry and the game-code dispatch table take no more start-up writes.
+static void seal_startup() {
+#ifndef WWHD_GUEST_HOOKS_STARTUP_FIXTURE
+    sealed_mod_flags=g_mod_hook_flags;sealed_mod_bodies=g_mod_bodies;sealed_mod_count=g_mod_hook_count;
+    // A safety seal, kept for every start: after this, the game-code dispatch table (dispatch::set on
+    // the .text range) takes no more writes. Nothing writes it after start-up (the recompiled table is
+    // built in dispatch::init, guest modules load above), so without native mods it changes nothing
+    // the game does; the native scene and hook checks require it (dispatch::native_text_sealed).
+    if(!dispatch::seal_native_text())native_hooks_fault=true;
+    native_hooks_sealed.store(true,std::memory_order_release);
+#endif
+}
+
 void init() {
     std::lock_guard mutation(native_hook_mutex());
     if(guest_init_started.exchange(true)||native_hooks_sealed.load()){native_hooks_fault=true;return;}
@@ -1178,6 +1191,16 @@ void init() {
         }
         item_icons::set_items(icons,g_icon_cache);
         story_items::set_frame_source(item_icons::frame);
+    }
+    // Every service below claims game functions in the hook-flag table (g_mod_hook_flags), which only game
+    // code translated with recomp.py --mod-hooks registers (setup builds it so when code mods are chosen).
+    // Without it no game function can be replaced: those services stay off and the game runs as it is; the
+    // packages' data above is still read (the editor opens and saves mods), the guest packages refused.
+    if(!hooks_built()) {
+        LOG("[guestmods] no code-mod support in this game code (translated without --mod-hooks): letters, charts, notebook, "
+            "mod items, world actors, scenes%s are off",editor::launch_mode()?" and the editor's live edits":"");
+        seal_startup();
+        return;
     }
     // The story system runs only with its required package, the Story Notebook (packages.cpp makes every
     // quest mod depend on it); without it: no letters, takeovers, chart marks or notebook, the game as it is.
@@ -1453,15 +1476,7 @@ void init() {
         NativeSceneRequestIssuer::startup(stage_pass_through,[]() -> uint64_t {
             return g_logic_step.load(std::memory_order_relaxed);
         });
-#ifndef WWHD_GUEST_HOOKS_STARTUP_FIXTURE
-    sealed_mod_flags=g_mod_hook_flags;sealed_mod_bodies=g_mod_bodies;sealed_mod_count=g_mod_hook_count;
-    // A safety seal, kept for every start: after this, the game-code dispatch table (dispatch::set on
-    // the .text range) takes no more writes. Nothing writes it after start-up (the recompiled table is
-    // built in dispatch::init, guest modules load above), so without native mods it changes nothing
-    // the game does; the native scene and hook checks require it (dispatch::native_text_sealed).
-    if(!dispatch::seal_native_text())native_hooks_fault=true;
-    native_hooks_sealed.store(true,std::memory_order_release);
-#endif
+    seal_startup();
 }
 
 void set_package_observer(PackageObserver observer){g_package_observer=observer;}

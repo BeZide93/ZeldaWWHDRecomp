@@ -531,6 +531,10 @@ int main(int argc, char** argv) {
     mods::cemu::set_vulkan(render::requested()==render::Api::Vulkan);
     mods::content::set_game_root(config::game_dir);  // loose imports (fan translations) find their game path
     mods::packages::set_code_mod_support(guestmods::hooks_built() && mods::code::enabled());
+    // game code with mod hooks while the code-mod setting is off: guest code mods stay unloaded, the port's own
+    // hooked services (story mods, the editor's live edits) still run; without hooks guestmods::init says so
+    if (guestmods::hooks_built() && !mods::code::enabled())
+        LOG("[code mods] off (setting or WWHD_CODE_MODS): guest code mods are not loaded; the port's own services keep their hooks");
     mods::packages::initialize();
     mem::init();
     auto valid_mod_memory = [](uint32_t address, size_t size) {

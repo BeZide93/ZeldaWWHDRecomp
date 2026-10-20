@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstdarg>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -140,7 +141,11 @@ void start_guests(const GuestInspect& inspect, const GuestLoad&) {
     in_startup_callback=true;
     try { inspect(GuestPackage{}); assert(false); }
     catch(const std::runtime_error& e) {
+#ifdef GUEST_HOOKS_TEST_NO_HOOKS
+        assert(std::string(e.what()).find("code-mod support")!=std::string::npos);
+#else
         assert(std::string(e.what()).find("build tools are unavailable")!=std::string::npos);
+#endif
         inspected=true;
     }
     in_startup_callback=false;
@@ -205,7 +210,11 @@ std::string prepare(const std::string&,const story_notebook::ManifestModel&,cons
 bool water_for(const std::string&){return false;}
 std::string material_for(const std::string&){return {};}
 }
+#ifdef GUEST_HOOKS_TEST_NO_HOOKS
+namespace editor { bool launch_mode(){return true;} }   // --editor with game code built without --mod-hooks
+#else
 namespace editor { bool launch_mode(){return false;} }  // a start without --editor
+#endif
 namespace story_room_paths { bool declare(const std::string&,const std::vector<story_room_path::Path>&,std::string&){return true;} bool declared(){return false;} void set_memory(uint32_t){} }  // the mod paths' records (none here)
 // Island buildings: the loader asks for the pieces its actors use (none here) and builds nothing.
 namespace story_game_pieces {
@@ -224,17 +233,21 @@ void service(Cpu*){}
 bool load(const std::string&,const std::vector<story_notebook::ManifestActor>&,std::string&){return true;}
 bool load(const std::string&,const std::vector<story_notebook::ManifestActor>&,std::string&,const std::vector<std::string>&){return true;}
 bool declared(){return false;}
+bool resident_routes_declared(){return false;}
 unsigned live_kinds=0;void editor_live_kinds(){++live_kinds;}
 void set_game_calls(void (*)(Cpu*,uint32_t),uint32_t (*)(Cpu*,uint32_t,std::initializer_list<uint32_t>)){}
 void set_scratch_memory(uint32_t){}
 void set_scene_start(std::function<bool(const std::string&,const std::string&)>){}
-void install(const std::function<std::string(uint32_t)>&,const std::function<void(uint32_t,void(*)(Cpu*))>&){}
+// like the real install: claims a game function, which marks its byte in the hook-flag table
+static unsigned installs=0;
+void install(const std::function<std::string(uint32_t)>&,const std::function<void(uint32_t,void(*)(Cpu*))>& replace){++installs;replace(0x02000000,[](Cpu*){});}
 void state_loaded(){}
 void restore_talk_text(){}
 uint32_t actor_address(Cpu*,const std::string&,const std::string&){return 0;}
 bool particle_position(Cpu*,const std::string&,const std::string&,unsigned,story_notebook::WorldPoint&){return false;}
 bool actions(const std::string&,const std::vector<story_notebook::StoryAction>&){return true;}
 }
+namespace story_resident_routes { void set_memory(uint32_t){} }
 namespace story_scenes {
 bool has_demo_steps(){return false;}
 uint32_t demo_arena_bytes(){return 0;}
@@ -459,7 +472,11 @@ uint32_t guest_call(Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args) {
     guestmods::svc_hud_emit(c);assert(c->r[3]==1);
     c->r[10]=0xBAD;return 0;
 }
-void log_msg(const char*, ...) {}
+static std::vector<std::string> logged;  // every LOG line, for the start-up checks
+void log_msg(const char* format, ...) {
+    char line[1024];va_list args;va_start(args,format);std::vsnprintf(line,sizeof line,format,args);va_end(args);
+    logged.push_back(line);
+}
 [[noreturn]] void fatal(const char*, ...) { std::abort(); }
 
 namespace native_observer_test {
@@ -742,6 +759,30 @@ bool guest_hooks_run_query(Cpu*c,const guestmods::NativeWaitNext&next){auto&t=*n
  assert(guestmods::native_camera_run_original_current(c,t));return true;
 }
 
+#ifdef GUEST_HOOKS_TEST_NO_HOOKS
+// Game code translated without --mod-hooks (setup with code mods off): nothing calls ppc_mod_register, so the
+// hook-flag table stays null. An --editor start must not claim game functions (that wrote through the null
+// table and crashed), must say once which features are off, and must keep everything else running.
+int main() {
+    assert(!guestmods::hooks_built()&&!g_mod_hook_flags&&!g_mod_bodies&&g_mod_hook_count==0);
+    const char* missing="__wwhd_nonexistent_guest_build_config_for_test__.json";
+#ifdef _WIN32
+    _putenv_s("WWHD_GUEST_BUILD_CONFIG",missing);
+#else
+    setenv("WWHD_GUEST_BUILD_CONFIG",missing,1);
+#endif
+    guestmods::init();
+    assert(mods::packages::inspected);       // the package start still ran (a guest package is refused, not run)
+    assert(story_actors::installs==0);        // no port service claimed a game function
+    assert(story_actors::live_kinds==0);      // so the editor has no live kinds
+    assert(!g_mod_hook_flags&&guestmods::g_chains.empty()&&!guestmods::hooks_built());
+    unsigned notes=0;
+    for(const auto& line:logged)if(line.find("no code-mod support")!=std::string::npos&&line.find("--mod-hooks")!=std::string::npos)++notes;
+    assert(notes==1);
+    assert(!guestmods::install_stage_owner_pass_through());
+    std::puts("guest mods start without mod hooks passed");
+}
+#else
 int main() {
     assert(!guestmods::hooks_built());
     ppc_mod_register(33, test_mod_flags, test_mod_bodies);
@@ -999,3 +1040,4 @@ int main() {
     guestmods::init();assert(native_hooks_fault.load());
     std::puts("guest hook ordering and original passed");
 }
+#endif

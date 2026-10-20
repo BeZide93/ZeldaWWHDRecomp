@@ -3533,3 +3533,14 @@ target_include_directories(state_load_result_test PRIVATE runtime/src)
 target_compile_options(state_load_result_test PRIVATE -UNDEBUG)
 target_link_libraries(state_load_result_test PRIVATE Threads::Threads)
 add_test(NAME state_load_result COMMAND state_load_result_test)
+
+# The guest-mod start-up harness again, for game code translated without --mod-hooks (setup with code mods
+# off): the hook-flag table stays null and an --editor start must still come up (last: after every source
+# the targets above add to guest_hooks_test).
+get_target_property(GUEST_HOOKS_TEST_SOURCES guest_hooks_test SOURCES)
+add_executable(guest_mods_no_hooks_test ${GUEST_HOOKS_TEST_SOURCES})
+target_compile_definitions(guest_mods_no_hooks_test PRIVATE GUEST_HOOKS_TEST_NO_HOOKS=1)
+target_include_directories(guest_mods_no_hooks_test PRIVATE runtime/include runtime/src)
+target_compile_options(guest_mods_no_hooks_test PRIVATE -UNDEBUG)
+target_link_libraries(guest_mods_no_hooks_test PRIVATE ZLIB::ZLIB ${CMAKE_DL_LIBS} Threads::Threads)
+add_test(NAME guest_mods_no_hooks COMMAND guest_mods_no_hooks_test)
