@@ -850,6 +850,56 @@ public:
         return true;
     }
     std::vector<std::pair<std::string, std::vector<int>>> stage_rooms() override { return game_stage_rooms(config::game_dir); }
+    Value rebuild_stages(const std::string& mod, const Value& manifest, const std::string& dir, const std::string& only, std::string& why) override {
+        std::string data = mods::packages::package_data_directory(mod);
+        if (data.empty() && !mods::packages::directory().empty()) data = (std::filesystem::path(mods::packages::directory()).parent_path() / "Data" / mod).string();
+        if (data.empty()) return why = "the mod manager's folder is unknown", Value();
+        Value out;
+        out.type = Value::Array;
+        const std::string here = ss::link_place().stage;
+        bool in_rebuilt = false;
+        for (const auto& r : ::mod_stages::rebuild(mod, manifest, dir, data, config::game_dir, only)) {
+            in_rebuilt |= r.ok && r.name == here;
+            Value v;
+            v["id"] = r.id;
+            v["ok"] = r.ok;
+            if (!r.name.empty()) v["game_name"] = r.name;
+            if (!r.error.empty()) v["problem"] = r.error;
+            v["rooms"] = double(r.rooms);
+            if (!r.notes.empty()) {
+                Value& notes = v["notes"];
+                notes.type = Value::Array;
+                for (const auto& n : r.notes) notes.array.push_back(Value(n));
+            }
+            out.array.push_back(v);
+        }
+        // Link is in a rebuilt stage: it loads again where he stands (after the rebuilt files take effect)
+        if (in_rebuilt) {
+            std::string ignored;
+            reload_room(ignored);
+        }
+        return out;
+    }
+    bool reset_stage_save(const std::string& mod, const std::string& group, std::string& why) override {
+        struct State {
+            std::mutex m;
+            std::condition_variable cv;
+            bool finished = false, done = false;
+            std::string failure;
+        };
+        auto state = std::make_shared<State>();
+        post([state, mod, group](Cpu*) {  // the game thread: the save area and the working record are the game's
+            std::string failure;
+            const bool done = ::mod_stages::reset_save(mod, group, failure);
+            std::lock_guard l(state->m);
+            state->done = done, state->failure = failure, state->finished = true;
+            state->cv.notify_all();
+        });
+        std::unique_lock l(state->m);
+        if (!state->cv.wait_for(l, std::chrono::seconds(5), [&] { return state->finished; })) return why = "the game didn't answer", false;
+        if (!state->done) why = state->failure;
+        return state->done;
+    }
     std::vector<ModStage> mod_stages() override {
         std::vector<ModStage> out;
         for (const auto& s : ::mod_stages::stages()) {
@@ -1677,7 +1727,7 @@ void set_launch_mode(bool on) {
 
 void register_package(const std::string& mod, const std::string& name, const std::string& dir, const Value& manifest) {
     bool content = false;  // world content, quests, letters, charts or items
-    for (const char* k : {"actors", "models", "scenes", "quests", "letters", "charts", "items", "paths"}) content = content || manifest.get(k).type != Value::Null;
+    for (const char* k : {"actors", "models", "scenes", "quests", "letters", "charts", "items", "paths", "stages"}) content = content || manifest.get(k).type != Value::Null;
     if (!content) return;
     std::lock_guard<std::recursive_mutex> lk(g_mu);
     g_session.add_package(mod, name, dir, manifest);

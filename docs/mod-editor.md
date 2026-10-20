@@ -708,7 +708,7 @@ separated by `;`, or `@file` with one such line per row. Results go to the log.
 | `help` | `command`? | the commands and their parameters |
 | `list_mods` | | the active mods the editor can open |
 | `open_mod` | `mod` | open another mod |
-| `new_mod` | `id`, `name`, `author`?, `description`?, `confirm` | create a new, empty mod, turn it on in the current mod profile and open it (needs `"confirm": true`; refused when the id is taken) |
+| `new_mod` | `id`, `name`, `author`?, `description`?, `stages`?, `confirm` | create a new, empty mod, turn it on in the current mod profile and open it (needs `"confirm": true`; refused when the id is taken); `"stages": true` makes a mod of stages only, which needs no Story Notebook |
 | `list_actors`, `list_models`, `list_scenes`, `list_quests` | `mod`? | the open mod's content |
 | `get_actor`, `get_scene` | `id`, `mod`? | one entry as the manifest declares it |
 | `list_actor_types` | | what `add_actor` places, and what appears without a restart |
@@ -766,8 +766,17 @@ separated by `;`, or `@file` with one such line per row. Results go to the log.
 | `revert_package` | `confirm`, `mod`? | forget unsaved changes (needs `"confirm": true`) |
 | `export_package` | `path`, `confirm`, `mod`? | check, then write the package into a new or empty folder |
 | `reload_room` | | enter the current room again |
-| `list_locations` | `group`? | warp destinations (`Islands`, `Rooms`, `Quest`) |
-| `warp` | `stage`, `room`, `point`?, `position`?, `angle`? | warp to a room's entry point or a position |
+| `list_locations` | `group`? | warp destinations (`Islands`, `Rooms`, `Mod stages`, `Quest`) |
+| `warp` | `stage`, `room`, `point`?, `position`?, `angle`? | warp to a room's entry point or a position; a package's stage is `"stage:<mod>/<id>"` |
+| `import_ground` | `file`, `as`?, `confirm`?, `mod`? | copy a room's `.glb` into the package (`assets/<name>.glb`), with its parts, the parts without UVs and its material names |
+| `list_stages` | `mod`? | the mod's stages ([mod stages](mod-stages.md)): rooms, grounds, kits, floors, spawn points, doors, entries, whether the game has it built |
+| `add_stage` | `id`, `ground`, `template`?, `kind`?, `kit`?, `materials`?, `material`?, `spawn`?, `angle`?, `title`?, `music_like`?, `entrance`?, `entry`?, `mod`? | a new stage with one room whose ground is a `.glb` in the package |
+| `add_room` | `stage`, `ground` (a `.glb` or `kit`), `kit`?, `floor`?, `materials`?, `material`?, `spawn`?, `angle`?, `mod`? | one more room |
+| `set_stage_field` | `stage`, `field`, `value`, `mod`? | one field of a stage by its path (`map`, `entrance`, `doors`, `joins`, `entries`, `warps`, `rooms/1/exits`, `rooms/0/actors`, ...); an index one past a list's end adds, `null` removes |
+| `remove_stage` | `stage`, `confirm`, `mod`? | remove a stage |
+| `check_stage` | `stage`?, `mod`? | the stages' problems as a list (`severity`, `stage`, `field`, `message`): rules, rooms that can't be reached with the keys given before each locked door, missing ground files, ground models without UVs or named materials |
+| `rebuild_stage` | `stage`?, `mod`? | build the stages again from the open manifest and the package's files; the stage Link is in loads again where he stands |
+| `reset_stage_save` | `stage`?, `confirm`, `mod`? | test mode: forget the stage flags of the loaded Quest Log (chests, doors, keys, map, compass) |
 | `warp_to` | `location` | warp to a `list_locations` entry |
 | `warp_back` | | back to before the last warp |
 | `read_state` | | Link's place, the camera, test mode, unsaved changes, the open mod's quest steps and flags |

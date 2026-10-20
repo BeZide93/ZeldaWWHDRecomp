@@ -94,6 +94,18 @@ public:
         std::vector<int> rooms;
     };
     virtual std::vector<ModStage> mod_stages() { return {}; }
+    // The open mod's stages built again from `manifest` and its files in `dir` (only the stage `only` when given):
+    // [{id, name, ok, error, rooms}]; `why` set when nothing could run. A stage Link is in loads again.
+    virtual Value rebuild_stages(const std::string& mod, const Value& manifest, const std::string& dir, const std::string& only, std::string& why) {
+        (void)mod, (void)manifest, (void)dir, (void)only;
+        why = "mod stages can't be built here";
+        return {};
+    }
+    // Test mode: the save group's stage record erased from the loaded Quest Log (and the working one).
+    virtual bool reset_stage_save(const std::string& mod, const std::string& group, std::string& why) {
+        (void)mod, (void)group;
+        return why = "mod stages can't be reset here", false;
+    }
     virtual bool warp(const Location& to, std::string& why) = 0;
     virtual Place link() = 0;
     // A cutscene, event, dialogue, menu or stage change is running: no warp, no fly camera.
@@ -385,6 +397,8 @@ private:
     Value dispatch_paths(const std::string& command, const Value& params, std::string& why, bool& ok, bool& handled);
     // the water tool: ponds, rivers, waterfalls (commands_water.cpp)
     Value dispatch_water(const std::string& command, const Value& params, std::string& why, bool& ok, bool& handled);
+    // the mod's stages: list, add, set, check, rebuild (commands_stages.cpp)
+    Value dispatch_stages(const std::string& command, const Value& params, std::string& why, bool& ok, bool& handled);
 };
 
 // One problem of a package, with what it is about (for the editor's problem list: a click selects it).

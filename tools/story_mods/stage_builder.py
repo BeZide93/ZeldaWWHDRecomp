@@ -651,6 +651,51 @@ def floor_triangles(dzb):
     return out
 
 
+def floor_below(tris, x, y, z):
+    """the height of the floor at (x, z) closest below y + 150 (a spawn a little above or in the floor stands on
+    it), or None"""
+    best = None
+    for pa, pb, pc in tris:
+        area = (pb[0] - pa[0]) * (pc[2] - pa[2]) - (pb[2] - pa[2]) * (pc[0] - pa[0])
+        if abs(area) < 1e-9:
+            continue
+        w0 = (pb[0] - pa[0]) * (z - pa[2]) - (pb[2] - pa[2]) * (x - pa[0])
+        w1 = (pc[0] - pb[0]) * (z - pb[2]) - (pc[2] - pb[2]) * (x - pb[0])
+        w2 = (pa[0] - pc[0]) * (z - pc[2]) - (pa[2] - pc[2]) * (x - pc[0])
+        if not ((w0 >= 0 and w1 >= 0 and w2 >= 0) or (w0 <= 0 and w1 <= 0 and w2 <= 0)):
+            continue
+        h = (w1 * pa[1] + w2 * pb[1] + w0 * pc[1]) / area
+        if h <= y + 150 and (best is None or h > best):
+            best = h
+    return best
+
+
+def snap_spawns(room, floors):
+    """each spawn stands on the floor below it (the recipe's spawns are changed in place); notes for the ones moved
+    or standing on nothing"""
+    notes = []
+    for s in room['spawns']:
+        x, y, z = s['position']
+        h = floor_below(floors, x, y, z)
+        if h is None:
+            # the nearest floor instead (the middle of the floor triangle nearest in the plan)
+            best = None
+            for t in floors:
+                cx, cy, cz = [sum(p[k] for p in t) / 3 for k in range(3)]
+                d = (cx - x) ** 2 + (cz - z) ** 2
+                if best is None or d < best[0]:
+                    best = (d, cx, cy, cz)
+            if best is None:
+                notes.append('spawn %d of room %d: the room has no floor' % (s['point'], room['room']))
+                continue
+            s['position'] = [best[1], best[2], best[3]]
+            notes.append('spawn %d of room %d had no floor below it: moved to the nearest floor (%.0f, %.0f, %.0f)' % (s['point'], room['room'], best[1], best[2], best[3]))
+        elif abs(h - y) > 1:
+            notes.append('spawn %d of room %d moved onto the floor (y %.0f -> %.0f)' % (s['point'], room['room'], y, h))
+            s['position'] = [x, h, z]
+    return notes
+
+
 def room_map(tris, units):
     """a room's floor seen from above: (x0, z0, width, height, RGBA rows) at `units` game units per pixel, north
     (-z) up. Grey, lighter the higher the floor (a pit or a lava basin shows darker than the walkways), with a
@@ -827,15 +872,28 @@ def build_room_archive(kit_files, kit_room, room, prims, recipe_room, dzb, dzr):
         require(kit_name in mats, 'the kit room has no material "%s"' % kit_name)
     # visible primitives grouped by the kit model their material comes from: one output model each (the
     # game looks a model's shader archive up by the model's name)
-    by_model = {}
+    # the parts drawn with one kit material become one shape (a model of a hundred parts draws as a few)
+    merged = {}
     tris = 0
     for p in prims:
         if p['collision']:
             continue
         kit_name = mapping.get(p['material']) or (p['material'] if p['material'] in mats else default)
-        kit_model, template = mats[kit_name]
-        by_model.setdefault(kit_model, []).append(mesh_shape(src, template, p))
+        m = merged.setdefault(kit_name, {'positions': [], 'normals': [], 'uvs': [], 'colors': [], 'triangles': [], 'has_colors': False})
+        base_index = len(m['positions'])
+        m['positions'] += p['positions']
+        m['normals'] += p['normals']
+        m['uvs'] += p['uvs']
+        m['colors'] += p['colors'] if p['colors'] else [(1.0, 1.0, 1.0, 1.0)] * len(p['positions'])
+        m['has_colors'] |= bool(p['colors'])
+        m['triangles'] += [(a + base_index, b + base_index, c + base_index) for a, b, c in p['triangles']]
         tris += len(p['triangles'])
+    by_model = {}
+    for kit_name, m in sorted(merged.items()):
+        if not m['has_colors']:
+            m['colors'] = None
+        kit_model, template = mats[kit_name]
+        by_model.setdefault(kit_model, []).append(mesh_shape(src, template, m))
     require(0 < tris <= MAX_TRIANGLES, 'the ground model has more than %d visible triangles' % MAX_TRIANGLES)
     require(len(by_model) <= 4, 'the ground model uses materials of more than four kit models')
     out = base.Bfres(data)
@@ -1006,11 +1064,13 @@ def build(game, recipe_path, out_dir):
             dzb = build_dzb(vertices, triangles, r['room'])
         for k, n in enumerate(taken):
             require(n > 0, 'room %d: exit %d covers no floor of the ground model' % (r['room'], k))
+        snapped = snap_spawns(r, floor_triangles(dzb))
         dzr = build_dzr(kit_embedded['room.dzr'], r['room'], r)
         archive, tris = build_room_archive(kit_files, int(kb[0][4:-6]), r['room'], prims, r, dzb, dzr)
         outputs['%s_Room%d.szs' % (name, r['room'])] = archive
         rooms_meta.append({'room': r['room'], 'visible_triangles': tris, 'collision_triangles': len(triangles),
-                           'exit_triangles': taken, 'spawns': [{'point': s['point'], 'position': s['position'], 'angle': s.get('angle', 0)} for s in r['spawns']]})
+                           'exit_triangles': taken, 'spawns': [{'point': s['point'], 'position': s['position'], 'angle': s.get('angle', 0)} for s in r['spawns']],
+                           'spawn_notes': snapped})
         floors[r['room']] = floor_triangles(dzb)
     # the map: one picture per room, every room at the same scale (the stage's floors fit 400 pixels)
     if recipe.get('map_mode') == 1:

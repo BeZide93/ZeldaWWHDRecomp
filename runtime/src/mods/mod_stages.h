@@ -36,6 +36,18 @@ void declare(const std::string& mod, const Value& manifest, const std::string& p
              const std::vector<std::string>& python, const std::string& tool, const std::string& game_dir);
 bool declared();  // any stage was built this session
 
+// The editor's rebuild: a package's stages (or the one with id `only`) built again from its manifest (unsaved
+// changes included) and its files; each takes effect on the game thread at the next logic pass, and when Link is
+// in one, the game loads it again where he stands. Any thread except the game's (it runs the builder).
+struct BuildResult {
+    std::string id, name, error;
+    bool ok = false;
+    unsigned rooms = 0;
+    std::vector<std::string> notes;  // the builder's remarks (a spawn moved onto the floor, ...)
+};
+std::vector<BuildResult> rebuild(const std::string& mod, const Value& manifest, const std::string& package_dir, const std::string& data_dir,
+                                 const std::string& game_dir, const std::string& only = {});
+
 
 struct Info {
     std::string mod, id, name;  // the package, its stage id, the game name
@@ -53,6 +65,9 @@ std::vector<Info> stages();
 bool find(const std::string& name, Info& out);
 // "stage:<mod>/<id>" or a game name -> the game name ("" when unknown)
 std::string resolve(const std::string& reference);
+// Test mode (game thread): what the loaded Quest Log keeps of the package's save group (its stage record) is
+// erased, and the working record too when Link is in one of the group's stages.
+bool reset_save(const std::string& mod, const std::string& group, std::string& why);
 // A stage name a save state names that can't be loaded now: a mod stage's name (by its form) that no
 // installed package makes and the game files don't have.
 bool missing(const std::string& stage);

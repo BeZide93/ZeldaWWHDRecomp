@@ -3,6 +3,7 @@
 #include "mod_stages.h"
 
 #include <algorithm>
+#include <deque>
 #include <array>
 #include <cstring>
 #include <filesystem>
@@ -17,6 +18,7 @@
 #include "guest_addr.h"
 #include "runtime.h"
 #include "story_store.h"
+#include "guest_build.h"
 #include "guest_hud.h"
 #include "guest_png.h"
 #include "../input.h"
@@ -54,11 +56,17 @@ struct Built {
         uint32_t image = 0;  // the HUD image while the stage is shown (0: none yet)
     };
     std::vector<MapRoom> map_rooms;
+    std::vector<std::string> notes;  // the builder's remarks
     std::string music_like;
     int music_id = -1;                         // spotNameToId's answer for the stage (-1: not looked up yet)
 };
 std::mutex g_mutex;
-std::vector<Built> g_stages;  // appended at start-up only (before the game runs), read after
+// The built stages. Changed only before the game runs (start-up) and then only on the game thread
+// (apply_pending: the editor's rebuilds), always under g_mutex; the game thread's own readers (hooks, logic) read
+// without it. A deque: an element keeps its address when stages are added, and a rebuilt stage replaces its
+// element in place.
+std::deque<Built> g_stages;
+std::vector<Built> g_pending;  // rebuilt stages waiting for the game thread (under g_mutex)
 std::string g_game_dir;
 
 // the game's play state (savestate.cpp kPlay): the start stage (name[8], point s16, room s8, layer s8) and the
@@ -136,7 +144,7 @@ bool write_file(const fs::path& p, const std::string& body) {
 // one stage: its recipe, the builder, the result checked and registered; false with a reason
 bool build(const std::string& mod, const Stage& s, const std::string& name, const std::map<std::string, std::string>& names,
            const std::string& package_dir, const std::string& data_dir, const std::vector<std::string>& python, const std::string& tool,
-           std::string& why) {
+           std::string& why, Built& b) {
     // what the player's game files must have: the template's archives, every kit room, the entrance and the
     // game rooms the exits and entries name (a missing archive stops the game)
     if (!game_stages().count(s.template_stage)) return why = "the game has no stage " + s.template_stage, false;
@@ -188,7 +196,7 @@ bool build(const std::string& mod, const Stage& s, const std::string& name, cons
     }
     if (!process.error.empty() || result.get("ok").type != Value::Bool || !result.get("ok").boolean || process.code)
         return why = "the stage builder failed: " + result.get("error").string(process.error.empty() ? "no result" : process.error), false;
-    Built b;
+    b = Built{};
     b.info.mod = mod;
     b.info.id = s.id;
     b.info.name = name;
@@ -200,11 +208,12 @@ bool build(const std::string& mod, const Stage& s, const std::string& name, cons
     b.names = names;
     {
         std::lock_guard lock(g_mutex);
-        std::set<uint16_t> seen;
-        for (const auto& o : g_stages) seen.insert(o.group_key);
-        b.group_index = unsigned(seen.size());
-        for (const auto& o : g_stages)
-            if (o.group_key == b.group_key) b.group_index = o.group_index;
+        std::map<uint16_t, unsigned> seen;
+        for (const auto* list : {&g_stages})
+            for (const auto& o : *list) seen.emplace(o.group_key, o.group_index);
+        for (const auto& o : g_pending) seen.emplace(o.group_key, o.group_index);
+        auto it = seen.find(b.group_key);
+        b.group_index = it != seen.end() ? it->second : unsigned(seen.size());
     }
     b.music_like = s.music_like;
     for (const auto& [file, digest] : result.get("files").object) {
@@ -243,11 +252,14 @@ bool build(const std::string& mod, const Stage& s, const std::string& name, cons
         }
     LOG("[mod-stages] %s: stage %s is %s (%zu rooms, %s)", mod.c_str(), s.id.c_str(), name.c_str(), s.rooms.size(),
         result.get("cached").boolean ? "from the stage cache" : "built from the game files");
-    for (const auto& room : result.get("rooms").array)
+    for (const auto& room : result.get("rooms").array) {
         LOG("[mod-stages] %s room %d: %d visible and %d collision triangles", name.c_str(), int(room.get("room").number),
             int(room.get("visible_triangles").number), int(room.get("collision_triangles").number));
-    std::lock_guard lock(g_mutex);
-    g_stages.push_back(std::move(b));
+        for (const auto& note : room.get("spawn_notes").array) {
+            LOG("[mod-stages] %s: %s", s.id.c_str(), note.string().c_str());
+            b.notes.push_back(note.string());
+        }
+    }
     return true;
 }
 
@@ -268,13 +280,12 @@ void write_next_stage(const std::string& name, unsigned room, unsigned point) {
 }
 }  // namespace
 
-void declare(const std::string& mod, const Value& manifest, const std::string& package_dir, const std::string& data_dir,
-             const std::vector<std::string>& python, const std::string& tool, const std::string& game_dir) {
-    std::vector<Stage> list;
-    std::string why;
-    if (!parse(manifest, list, why)) exception_report::raise("Stages " + mod + ": " + why);
-    if (list.empty()) return;
-    g_game_dir = game_dir;
+namespace {
+// a package's stages named and built; `live` (the editor's rebuild): queued for the game thread, else (start-up)
+// added at once
+std::vector<BuildResult> declare_stages(const std::string& mod, const std::vector<Stage>& list, const std::string& package_dir,
+                                        const std::string& data_dir, const std::vector<std::string>& python, const std::string& tool, bool live) {
+    std::vector<BuildResult> results;
     static bool sources = false;
     if (!sources) {  // the editor's spawn points and the placement index read the stage cache too
         sources = true;
@@ -288,20 +299,81 @@ void declare(const std::string& mod, const Value& manifest, const std::string& p
             for (const auto& [id, other] : names)
                 if (other == n) return true;
             std::lock_guard lock(g_mutex);
-            return by_name(n) != nullptr;
+            const Built* other = by_name(n);
+            return other != nullptr && !(other->info.mod == mod && other->info.id == s.id);  // its own earlier build is no other
         });
         if (name.empty()) exception_report::raise("Stages " + mod + ": no free stage name");
         names[s.id] = name;
     }
     for (const auto& s : list) {
-        std::string failure;
+        BuildResult r;
+        r.id = s.id, r.name = names[s.id];
+        Built b;
         try {
-            if (!build(mod, s, names[s.id], names, package_dir, data_dir, python, tool, failure) && failure.empty()) failure = "unknown";
+            r.ok = build(mod, s, names[s.id], names, package_dir, data_dir, python, tool, r.error, b);
+            if (!r.ok && r.error.empty()) r.error = "unknown";
         } catch (const std::exception& e) {
-            failure = e.what();
+            r.ok = false, r.error = e.what();
         }
-        if (!failure.empty()) LOG("[mod-stages] %s: stage %s is left out: %s", mod.c_str(), s.id.c_str(), failure.c_str());
+        if (!r.ok) {
+            LOG("[mod-stages] %s: stage %s is left out: %s", mod.c_str(), s.id.c_str(), r.error.c_str());
+            results.push_back(r);
+            continue;
+        }
+        r.rooms = unsigned(b.info.rooms.size());
+        r.notes = b.notes;
+        std::lock_guard lock(g_mutex);
+        if (live) g_pending.push_back(std::move(b));
+        else g_stages.push_back(std::move(b));
+        results.push_back(r);
     }
+    return results;
+}
+}  // namespace
+
+void declare(const std::string& mod, const Value& manifest, const std::string& package_dir, const std::string& data_dir,
+             const std::vector<std::string>& python, const std::string& tool, const std::string& game_dir) {
+    std::vector<Stage> list;
+    std::string why;
+    if (!parse(manifest, list, why)) exception_report::raise("Stages " + mod + ": " + why);
+    if (list.empty()) return;
+    g_game_dir = game_dir;
+    declare_stages(mod, list, package_dir, data_dir, python, tool, false);
+}
+
+std::vector<BuildResult> rebuild(const std::string& mod, const Value& manifest, const std::string& package_dir, const std::string& data_dir,
+                                 const std::string& game_dir, const std::string& only) {
+    std::vector<Stage> list;
+    std::string why;
+    if (!parse(manifest, list, why)) return {BuildResult{"", "", why}};
+    if (!only.empty()) {
+        std::vector<Stage> one;
+        for (const auto& s : list)
+            if (s.id == only) one.push_back(s);
+        if (one.empty()) return {BuildResult{only, "", "the package declares no stage \"" + only + "\""}};
+        // its exits and warps may name the package's other stages: their names come with them
+        for (const auto& s : list)
+            if (s.id != only) one.push_back(s);
+        list.swap(one);
+    }
+    if (g_game_dir.empty()) g_game_dir = game_dir;
+    std::vector<std::string> python;
+    std::string tool;
+    try {
+        const auto bridge = guestmods::BuildBridge::installed(std::string());
+        python = bridge.python;
+        tool = (std::filesystem::path(bridge.builder).parent_path().parent_path() / "story_mods" / "stage_builder.py").string();
+    } catch (const std::exception& e) {
+        return {BuildResult{only, "", std::string("the stage builder is unavailable: ") + e.what()}};
+    }
+    auto results = declare_stages(mod, list, package_dir, data_dir, python, tool, true);
+    if (!only.empty()) {
+        // only the asked one is applied; the others were built (or taken from the cache) for their names only
+        std::lock_guard lock(g_mutex);
+        std::erase_if(g_pending, [&](const Built& b) { return b.info.mod == mod && b.info.id != only && by_name(b.info.name); });
+        std::erase_if(results, [&](const BuildResult& r) { return r.id != only; });
+    }
+    return results;
 }
 
 bool declared() {
@@ -313,6 +385,8 @@ std::vector<Info> stages() {
     std::lock_guard lock(g_mutex);
     std::vector<Info> out;
     for (const auto& b : g_stages) out.push_back(b.info);
+    for (const auto& b : g_pending)  // rebuilt, about to take effect: a warp may name them already
+        if (std::none_of(out.begin(), out.end(), [&](const Info& i) { return i.name == b.info.name; })) out.push_back(b.info);
     return out;
 }
 
@@ -347,8 +421,34 @@ bool missing(const std::string& stage) {
     return g_game_dir.empty() || !fs::is_regular_file(fs::path(g_game_dir) / "content" / "Common" / "Stage" / (stage + "_Stage.szs"), ec);
 }
 
+void hide_map_for_rebuild();
+// the editor's rebuilt stages take effect here, on the game thread; the stage Link is in loads again
+void apply_pending() {
+    std::vector<Built> pending;
+    {
+        std::lock_guard lock(g_mutex);
+        if (g_pending.empty()) return;
+        pending.swap(g_pending);
+    }
+    hide_map_for_rebuild();
+    const std::string here = current_stage();
+    bool reload = false;
+    for (auto& b : pending) {
+        LOG("[mod-stages] %s: stage %s (%s) rebuilt", b.info.mod.c_str(), b.info.id.c_str(), b.info.name.c_str());
+        reload |= b.info.name == here;
+        std::lock_guard lock(g_mutex);
+        Built* old = nullptr;
+        for (auto& o : g_stages)
+            if (o.info.name == b.info.name) old = &o;
+        if (old) *old = std::move(b);
+        else g_stages.push_back(std::move(b));
+    }
+    (void)reload;  // the editor loads the stage again where Link stands (its reload_room, which waits for him to be free)
+}
+
 void logic(Cpu*) {
-    if (g_stages.empty()) return;  // appended only before the game runs
+    apply_pending();
+    if (g_stages.empty()) return;
     draw_map();
     static std::string last_room;
     static std::set<std::string> armed;  // entries Link was outside of since he came into the room
@@ -565,6 +665,27 @@ bool write_record(const Built& b, const std::array<uint8_t, kRecordBytes>& bytes
 }
 }  // namespace
 
+namespace mod_stages {
+bool reset_save(const std::string& mod, const std::string& group, std::string& why) {
+    const uint16_t key = save_key(mod, "group:" + group);
+    g_session_records.erase(key);
+    if (story_store::ready()) {
+        auto book = story_store::book();
+        if (const unsigned slot = group_slot(book, key, false)) {
+            for (unsigned i = 0; i < kRecordBytes; ++i) book.erase(story_mail::kRecordStageMemory, uint16_t(slot << 8 | i));
+            book.erase(story_mail::kRecordStageGroup, key);
+        }
+    }
+    const Built* here = by_name(current_stage());
+    const uint32_t save = ld32(kSavePtr);
+    if (here && here->group_key == key && save)
+        for (unsigned i = 0; i < kRecordBytes; ++i) st8(save + 0x20 + kWorkingRecord + i, 0);
+    LOG("[mod-stages] %s: the save group %s's record is reset", mod.c_str(), group.c_str());
+    (void)why;
+    return true;
+}
+}  // namespace mod_stages
+
 // dSv_info_c::getSave(info, stage number): the stage's record into the working copy
 extern "C" void hook_025B9C9C(Cpu* c) {
     const uint32_t info = c->r[3], number = c->r[4];
@@ -645,6 +766,8 @@ void hide_map() {
     g_shown = nullptr;
 }
 }  // namespace
+
+void hide_map_for_rebuild() { hide_map(); }
 
 void draw_map() {
     namespace hud = guestmods::hud;

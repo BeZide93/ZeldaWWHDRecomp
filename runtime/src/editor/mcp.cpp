@@ -372,6 +372,7 @@ const std::vector<PathParam>& path_params() {
     static const std::vector<PathParam> v = {
         {"check_model", "file", false},
         {"import_model", "file", false},
+        {"import_ground", "file", false},
         {"add_item", "icon_file", false},
         {"set_item", "icon_file", false},
         {"export_package", "path", true},
@@ -382,7 +383,7 @@ bool needs_allow(const std::string& command, const Value& args) {
     const editor::CommandInfo* c = editor::find_command(command);
     if (!c) return false;
     if (c->destructive) return true;
-    return command == "import_model" && args.get("confirm").type == Value::Bool && args.get("confirm").boolean;  // replaces a file
+    return (command == "import_model" || command == "import_ground") && args.get("confirm").type == Value::Bool && args.get("confirm").boolean;  // replaces a file
 }
 std::string describe(const std::string& command, const Value& args) {
     std::string s = command;

@@ -239,7 +239,7 @@ Manifest manifest(const fs::path& path){
     } else if(m.kind=="content") {
         // A content package that only declares story content (a chart and its letter, say) needs no
         // content folder: without "content_dir" it replaces no game files.
-        const bool story_only=story_sections&&v.get("content_dir").type==Value::Null;
+        const bool story_only=(story_sections||v.get("stages").type!=Value::Null)&&v.get("content_dir").type==Value::Null;  // or stages only
         if(!story_only){
             auto folder=string_field(v,"content_dir",false,512);
             require(archive::relative_path(folder),"Invalid content directory");

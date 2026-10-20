@@ -18,6 +18,7 @@
 #include <utility>
 #include <vector>
 #include "commands.h"
+#include "../mods/mod_stages_manifest.h"
 
 
 #include "../mods/story_items_core.h"
@@ -37,7 +38,7 @@ const std::vector<CommandInfo> kCommands = {
     {"open_mod", "Opens a mod: later commands without \"mod\" act on it.", {{"mod", "string", "the mod's id", true}}},
     {"new_mod", "Creates a new, empty mod (a package of its own in the mod manager's mods folder), turns it on in the current mod profile and opens it. Refused when a mod with that id exists; other mods are not touched. Not an undo step: remove a mod you don't want in Settings > Mods (turn it off, then Remove).",
      {{"id", "string", "the new mod's id: up to 64 of a-z, 0-9, '-', '_' and '.' (not starting with '.')", true}, {"name", "string", "the name players see (up to 128 characters)", true},
-      {"author", "string", "who made it"}, {"description", "string", "one or two sentences about it"},
+      {"author", "string", "who made it"}, {"description", "string", "one or two sentences about it"}, {"stages", "boolean", "a mod of stages only (no story content: it needs no Story Notebook)"},
       {"confirm", "boolean", "must be true: a new package folder is written and the mod is turned on", true}},
      false, true},
     {"list_actors", "The open mod's placed actors (game actors and mod models).", {{"mod", "string", "another mod than the open one"}}},
@@ -108,6 +109,34 @@ const std::vector<CommandInfo> kCommands = {
       {"walk", "string|null", "a model's walk clip (default walk)"}, {"idle", "string|null", "a model's idle clip (default idle)"}, {"mod", "string", ""}},
      true},
     {"remove_route", "Removes an actor's route: it stands where it is placed.", {{"id", "string", "", true}, {"mod", "string", ""}}, true},
+    // ---- the mod's stages (commands_stages.cpp, docs/mod-stages.md): new places built from the package's models
+    {"import_ground", "Copies a room's .glb (from Blender, say) into the package (assets/<name>.glb, or \"as\") for add_stage, add_room or a rebuild; reports its parts, the parts without UVs and its material names.",
+     {{"file", "string", "the .glb", true}, {"as", "string", "its path in the package"}, {"confirm", "boolean", "replace a different file of that name"}, {"mod", "string", ""}}},
+    {"list_stages", "The mod's stages: id, template, kind, map, save group, rooms (ground, kit, floor, spawn points, exits, actors), doors, entries, whether the game has it built, and how to warp in.",
+     {{"mod", "string", ""}}},
+    {"add_stage", "Adds a stage with one room whose ground is a .glb in the package (named materials and UVs, see the docs). The spawn is the model's middle on its lowest point unless \"spawn\" is given. Then rebuild_stage and warp in.",
+     {{"id", "string", "the stage's id", true}, {"ground", "string", "the room's .glb in the package (assets/hall.glb)", true}, {"template", "string", "the game stage it takes its light, camera, doors and kit room from (default Cave01)"},
+      {"kind", "string", "cave or dungeon (default dungeon)"}, {"kit", "integer", "the template's room whose materials the ground uses (default 0)"},
+      {"materials", "object", "the model's material names -> kit materials"}, {"material", "string", "the kit material for the rest"},
+      {"spawn", "point", "where Link stands in the room"}, {"angle", "number", "the way he faces (degrees)"}, {"title", "string", "the dungeon map's title (gives the stage a map)"},
+      {"music_like", "string", "a game stage whose music it plays"}, {"entrance", "object", "{stage, room, point}: where a save made in it continues without the package (default sea 34 point 1)"},
+      {"entry", "object", "a way in: {stage, room, position} of a box in a game room (size 200, into room 0 point 0)"}, {"mod", "string", ""}},
+     true},
+    {"add_room", "Adds a room to a stage: ground a .glb in the package (or \"kit\" with \"kit\": a game room as it is); join it with a door or a join.",
+     {{"stage", "string", "", true}, {"ground", "string", "a .glb in the package, or kit", true}, {"kit", "integer|object", "the template's room number, or {stage, room}"},
+      {"floor", "integer", "its floor on the map (1, 2, -1, ...)"}, {"materials", "object", ""}, {"material", "string", ""}, {"spawn", "point", "where Link stands in it"},
+      {"angle", "number", ""}, {"mod", "string", ""}},
+     true},
+    {"set_stage_field", "Sets one field of a stage by its path, e.g. map, entrance, music_like, doors, joins, entries, warps, rooms/1/exits, rooms/0/actors, rooms/0/spawns/0/position, rooms/2/materials; a list index one past the end adds, null removes. The value follows the manifest's format (docs/mod-stages.md).",
+     {{"stage", "string", "", true}, {"field", "string", "the path in the stage", true}, {"value", "any", "the new value (null removes)"}, {"mod", "string", ""}},
+     true},
+    {"remove_stage", "Removes a stage from the mod.", {{"stage", "string", "", true}, {"confirm", "boolean", "must be true", true}, {"mod", "string", ""}}, true, true},
+    {"check_stage", "Checks the mod's stages (or one): the manifest's rules, rooms that can't be reached in play with the keys the stage gives before each locked door, missing ground files, ground models without UVs or with one material for everything. Problems: {severity, stage, field, message}.",
+     {{"stage", "string", ""}, {"mod", "string", ""}}},
+    {"rebuild_stage", "Builds the mod's stages (or one) again from the open manifest and the package's files, in the player's stage cache. The stage Link is in loads again where he stands; others from their next way in. Reports each stage's problems from the builder.",
+     {{"stage", "string", ""}, {"mod", "string", ""}}},
+    {"reset_stage_save", "Test mode: forgets what the loaded Quest Log keeps of the mod's stages (opened chests and doors, keys, map, compass) for a fresh run.",
+     {{"stage", "string", "only its save group"}, {"confirm", "boolean", "must be true", true}, {"mod", "string", ""}}, false, true},
     // ---- the mod's room paths (commands_paths.cpp): lines and areas its actors name by id ("path": "<id>")
     {"list_paths", "The mod's room paths: id, stage, room, closed, points, the actors that use each and its state in the game (its number and whether its record is written).",
      {{"mod", "string", ""}}},
@@ -684,6 +713,11 @@ bool new_package_manifest(const Value& params, Value& out, std::string& why) {
     m["game_id"] = "wwhd";
     m["minimum_manager_version"] = "1.5.0";
     m["kind"] = "content";
+    if (params.get("stages").boolean) {  // a mod of stages only (docs/mod-stages.md): no story content, no Story Notebook
+        m["stages"].type = Value::Array;
+        out = m;
+        return true;
+    }
     // the story content (actors, quests, letters...) runs on the Story Notebook package
     Value dep;
     dep["id"] = story_notebook::kNotebookPackage;
@@ -742,6 +776,8 @@ bool validate_package(const std::string& mod, const Value& manifest, const std::
         !story_notebook::parse_quests(manifest, quests, why) || !story_notebook::parse_charts(manifest, charts, why) ||
         !story_notebook::parse_letters(manifest, letters, why))
         return false;
+    std::vector<mod_stages::Stage> stages;  // the package's stages (mod_stages_manifest.h)
+    if (!mod_stages::parse(manifest, stages, why)) return why = "stages: " + why, false;
     std::vector<std::pair<std::string, Value>> world;
     for (const auto& [id, m] : all)
         if (id != mod && (m.get("actors").type != Value::Null || m.get("scenes").type != Value::Null)) world.push_back({id, m});
@@ -1675,6 +1711,8 @@ Value Session::dispatch(const std::string& command, const Value& p, std::string&
     r = dispatch_paths(command, p, why, ok, handled);
     if (handled) return r;
     r = dispatch_water(command, p, why, ok, handled);
+    if (handled) return r;
+    r = dispatch_stages(command, p, why, ok, handled);
     if (handled) return r;
     why = "command \"" + command + "\" is not implemented";
     return r;

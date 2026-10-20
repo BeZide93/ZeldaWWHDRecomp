@@ -5,6 +5,7 @@
 #include <set>
 #include <string>
 
+#include "mods/mod_stages_check.h"
 #include "mods/mod_stages_manifest.h"
 
 using mods::json::Value;
@@ -218,6 +219,52 @@ int main() {
         bad = text;
         bad.replace(bad.find("\"title\""), 7, "\"name\" ");
         assert(!parse(parse_json(bad), m, why) && why.find("map") != std::string::npos);
+    }
+
+    // phase 4: Check's structured problems
+    {
+        // a key behind the door it opens: room 1 can't be reached
+        const char* locked = R"({"stages": [{"id": "k", "template": "Cave01", "entrance": {"stage": "sea", "room": 34, "point": 1},
+          "rooms": [{"room": 0, "ground": "a.glb", "spawns": [{"point": 0, "position": {"x": 0, "y": 0, "z": 0}}]},
+                    {"room": 1, "ground": "b.glb", "spawns": [{"point": 1, "position": {"x": 0, "y": 0, "z": 0}}],
+                     "actors": [{"id": "key", "actor": "chest", "item": "small_key", "position": {"x": 0, "y": 0, "z": 0}}]}],
+          "doors": [{"position": {"x": 0, "y": 0, "z": 0}, "rooms": [0, 1], "lock": "small_key"}]}]})";
+        // a minimal GLB: one mesh, one primitive without UVs, one unnamed material
+        auto glb = [](const std::string& json) {
+            std::vector<uint8_t> b = {'g', 'l', 'T', 'F', 2, 0, 0, 0, 0, 0, 0, 0};
+            std::string j = json;
+            while (j.size() % 4) j += ' ';
+            const uint32_t n = uint32_t(j.size());
+            for (int k = 0; k < 4; ++k) b.push_back(uint8_t(n >> (8 * k)));
+            for (char c : std::string("JSON")) b.push_back(uint8_t(c));
+            b.insert(b.end(), j.begin(), j.end());
+            return b;
+        };
+        const auto plain = glb(R"({"meshes":[{"name":"room","primitives":[{"attributes":{"POSITION":0},"material":0}]}],"nodes":[{"mesh":0}],"materials":[{}]})");
+        const auto good = glb(R"({"meshes":[{"name":"room","primitives":[{"attributes":{"POSITION":0,"TEXCOORD_0":1},"material":0},{"attributes":{"POSITION":2,"TEXCOORD_0":3},"material":1}]}],"nodes":[{"mesh":0}],"materials":[{"name":"floor"},{"name":"wall"}]})");
+        const auto probs = check(parse_json(locked), [&](const std::string& p) { return p == "a.glb" ? plain : good; });
+        bool unreachable = false, no_uvs = false, unnamed = false;
+        for (const auto& pr : probs) {
+            unreachable |= pr.severity == "error" && pr.field == "doors/0" && pr.message.find("room 1 can't be reached") != std::string::npos;
+            no_uvs |= pr.field == "rooms/0/ground" && pr.message.find("UVs") != std::string::npos;
+            unnamed |= pr.field == "rooms/0/ground" && pr.message.find("no named material") != std::string::npos;
+        }
+        assert(unreachable && no_uvs && unnamed && probs.size() == 3);  // b.glb: UVs and two named materials, no problem
+        GlbFacts f;
+        assert(glb_facts(good, f) && f.visible_primitives == 2 && !f.without_uvs && f.materials.size() == 2);
+        // the key in the first room: everything can be reached
+        const std::string fixed = R"({"stages": [{"id": "k", "template": "Cave01", "entrance": {"stage": "sea", "room": 34, "point": 1},
+          "rooms": [{"room": 0, "ground": "a.glb", "spawns": [{"point": 0, "position": {"x": 0, "y": 0, "z": 0}}],
+                     "actors": [{"id": "key", "actor": "chest", "item": "small_key", "position": {"x": 0, "y": 0, "z": 0}}]},
+                    {"room": 1, "ground": "b.glb", "spawns": [{"point": 1, "position": {"x": 0, "y": 0, "z": 0}}]}],
+          "doors": [{"position": {"x": 0, "y": 0, "z": 0}, "rooms": [0, 1], "lock": "small_key"}]}]})";
+        const auto ok_probs = check(parse_json(fixed), [&](const std::string&) { return good; });
+        if (!ok_probs.empty()) fprintf(stderr, "unexpected: %s\n", ok_probs[0].message.c_str());
+        assert(ok_probs.empty());
+        // one named material for everything (the user's graybox look): a warning
+        const auto one = glb(R"({"meshes":[{"name":"room","primitives":[{"attributes":{"POSITION":0,"TEXCOORD_0":1},"material":0}]}],"nodes":[{"mesh":0}],"materials":[{"name":"Graybox"}]})");
+        const auto one_probs = check(parse_json(fixed), [&](const std::string&) { return one; });
+        assert(one_probs.size() == 2 && one_probs[0].message.find("one material (Graybox)") != std::string::npos);
     }
 
     printf("mod_stages_test: ok\n");
