@@ -7,6 +7,11 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **40 fps mode.** A new frame rate next to 30, 60, 120 and 240 fps: three game steps over four frames, at full game
+  speed. It suits screens that run at 40, 80 or 120 Hz, such as the Steam Deck LCD at 40 Hz or the OLED at 80 Hz, where
+  every frame is shown for the same time. On Android the app asks for a matching screen rate; some phones choose the
+  rate themselves, and on a 60 Hz screen 40 fps runs unevenly (Settings says so). Keep game speed works as at 60 fps.
+
 - **Mod SDK v3 and the editor: Kargarocs with riders and Wizzrobe summoners** (for mod makers). A Kargaroc can carry a
   Moblin or Bokoblin along a mod path and drop it at the path's release point. A Wizzrobe summoner teleports between the
   points of one path and calls waves of enemies at the points of the next, in the game's own wave sizes (up to 20);
