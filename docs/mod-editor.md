@@ -493,15 +493,17 @@ Without `--editor` none of this runs.
 
 ## Scenes
 
-**Scenes** (toolbar) opens the scene editor: the scene at the top (**New scene…**, **Duplicate**,
-**Remove…**), and below it three parts.
+**Scenes** (toolbar) opens the scene editor: the scene at the top (**New scene…**, **Duplicate scene**,
+**Remove scene…**; **Undo** brings a removed scene back), and below it three parts.
 
 - **The steps** of the scene, in order. Steps that only one answer of a choice reaches are indented and
   say which choice and answer lead there. **Add step** adds one after the selected step (before the end):
   camera, camera path, a camera that follows an actor, say, choice, move, face, walk, animation, wait,
   fade, sound, music, particle, demo or end. New steps come with values that fit: a camera takes the fly
   camera's view, a say step the first resident, a walk two points by the actor. The arrows move a step,
-  **Duplicate** copies it, **Remove** takes it out (not while another step leads to it).
+  **Duplicate step** copies it, **Remove step** takes it out (not while another step leads to it); the
+  buttons wrap onto a second line when the panel is narrow. Right-click a step for the same, or press
+  **Delete** to remove the selected step.
 - **The timeline**: each step as a bar on a time axis (60 frames a second), the way the scene plays when
   every choice takes its default answer; camera keys are small diamonds. Click or drag on the ruler to put
   the cursor at a time: with **Camera follows the cursor** on, the fly camera shows the scene's camera

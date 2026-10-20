@@ -486,7 +486,11 @@ void copy_paste_remove() {
     // a scene the sign starts can't be removed; another one can
     CHECK(!ok(s.run("remove_scene", params(R"({"id": "harbor", "confirm": true})"))));
     CHECK(!ok(s.run("remove_scene", params(R"({"id": "other"})"))));  // needs confirm
+    const Value other_before = *scene_of(s, "other");
     CHECK(ok(s.run("remove_scene", params(R"({"id": "other", "confirm": true})"))) && !scene_of(s, "other"));
+    // Undo brings the removed scene back as it was (its steps too); Redo removes it again
+    CHECK(ok(s.run("undo")) && scene_of(s, "other") && *scene_of(s, "other") == other_before);
+    CHECK(ok(s.run("redo")) && !scene_of(s, "other"));
     CHECK(ok(s.run("duplicate_scene", params(R"({"id": "harbor", "new_id": "harbor-copy"})"))) && scene_of(s, "harbor-copy") &&
           !scene_of(s, "harbor-copy")->object.contains("trigger"));
     // search finds a scene by a step's text

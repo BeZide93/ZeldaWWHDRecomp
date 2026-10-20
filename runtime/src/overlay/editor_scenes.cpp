@@ -242,6 +242,24 @@ void preview(int from, int to) {
 }
 
 // ---------------------------------------------------------------- the step list
+// the selected step's own commands (the row's buttons, the list's right-click menu, Delete); removing is
+// refused while another step leads to it (the command says so in the status bar)
+void duplicate_step(int n) {
+    command("duplicate_scene_step", prm_step(n), [](const Value& r) {
+        if (r.get("ok").boolean) C.step = int(r.get("result").get("step").number), C.range_end = 0;
+    });
+}
+void remove_step(int n) {
+    command("remove_scene_step", prm_step(n), [](const Value& r) {
+        if (r.get("ok").boolean) C.step = std::max(1, C.step - 1), C.range_end = 0;
+    });
+}
+// A row of buttons that wraps: the next one goes on this line when it fits up to `right` (the row's
+// right edge, taken where the row starts), else it starts a new line. `width` is the next item's width.
+void flow(float right, float width) {
+    if (ImGui::GetItemRectMax().x + ImGui::GetStyle().ItemSpacing.x + width <= right) ImGui::SameLine();
+}
+float button_width(const char* label) { return ImGui::CalcTextSize(label, nullptr, true).x + 2 * ImGui::GetStyle().FramePadding.x; }
 void step_list(const Value& sc, const Value& timeline) {
     const auto& steps = sc.get("steps").array;
     const auto& rows = timeline.get("steps").array;
@@ -262,6 +280,13 @@ void step_list(const Value& sc, const Value& timeline) {
             if (i < rows.size() && rows[i].get("start").number >= 0 && ImGui::IsMouseDoubleClicked(0)) scrub_to(rows[i].get("start").number);
         }
         ImGui::PopStyleColor();
+        // right-click: the step's own menu (it selects the step too)
+        if (ImGui::BeginPopupContextItem("step_menu")) {
+            if (n != C.step) C.step = n, C.range_end = 0, C.key = 0, C.point = 0;
+            if (ImGui::MenuItem("Duplicate step")) duplicate_step(n);
+            if (ImGui::MenuItem("Remove step", "Delete")) remove_step(n);
+            ImGui::EndPopup();
+        }
         ImGui::SameLine(120);
         std::string text = summary(s);
         if (s.get("id").type == Value::String) text = "[" + s.get("id").text + "] " + text;
@@ -271,6 +296,7 @@ void step_list(const Value& sc, const Value& timeline) {
         ImGui::PopID();
     }
     ImGui::Spacing();
+    const float right = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x;  // the row wraps here
     if (ImGui::Button("Add step")) ImGui::OpenPopup("add_step");
     if (ImGui::BeginPopup("add_step")) {
         for (const char* t : kTypes)
@@ -287,7 +313,8 @@ void step_list(const Value& sc, const Value& timeline) {
         ImGui::EndPopup();
     }
     if (!C.step) return;
-    ImGui::SameLine();
+    const float arrow = ImGui::GetFrameHeight();
+    flow(right, arrow);
     if (ImGui::ArrowButton("##up", ImGuiDir_Up) && C.step > 1) {
         Value p = prm_step(C.step);
         p["to"] = C.step - 1;
@@ -295,7 +322,7 @@ void step_list(const Value& sc, const Value& timeline) {
             if (r.get("ok").boolean) C.step = int(r.get("result").get("step").number);
         });
     }
-    ImGui::SameLine();
+    flow(right, arrow);
     if (ImGui::ArrowButton("##down", ImGuiDir_Down) && C.step < int(steps.size())) {
         Value p = prm_step(C.step);
         p["to"] = C.step + 1;
@@ -303,14 +330,11 @@ void step_list(const Value& sc, const Value& timeline) {
             if (r.get("ok").boolean) C.step = int(r.get("result").get("step").number);
         });
     }
-    ImGui::SameLine();
-    if (ImGui::Button("Duplicate")) command("duplicate_scene_step", prm_step(C.step), [](const Value& r) {
-        if (r.get("ok").boolean) C.step = int(r.get("result").get("step").number);
-    });
-    ImGui::SameLine();
-    if (ImGui::Button("Remove")) command("remove_scene_step", prm_step(C.step), [](const Value& r) {
-        if (r.get("ok").boolean) C.step = std::max(1, C.step - 1), C.range_end = 0;
-    });
+    flow(right, button_width("Duplicate step"));
+    if (ImGui::Button("Duplicate step")) duplicate_step(C.step);
+    flow(right, button_width("Remove step"));
+    if (ImGui::Button("Remove step")) remove_step(C.step);
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Also Delete, or right-click a step. Refused while another step leads to it.");
 }
 
 // ---------------------------------------------------------------- the timeline
@@ -1254,7 +1278,7 @@ void scene_editor(const Value& m) {
         return;
     }
     ImGui::SameLine();
-    if (ImGui::Button("Duplicate")) {
+    if (ImGui::Button("Duplicate scene")) {
         Value p;
         p["id"] = C.scene;
         command("duplicate_scene", p, [](const Value& r) {
@@ -1262,7 +1286,7 @@ void scene_editor(const Value& m) {
         });
     }
     ImGui::SameLine();
-    if (ImGui::Button("Remove...")) C.ask_remove = true;
+    if (ImGui::Button("Remove scene...")) C.ask_remove = true;
     ImGui::SameLine();
     ImGui::TextDisabled("|");
     ImGui::SameLine();
@@ -1320,9 +1344,12 @@ void scene_editor(const Value& m) {
     if (ImGui::CollapsingHeader("Scene: what starts it, native version", C.open_settings ? ImGuiTreeNodeFlags_DefaultOpen : 0)) scene_settings(m, *sc);
     ImGui::EndChild();
     // copy and paste of steps while the window has the keyboard (Ctrl+C / Ctrl+V); Delete removes the
-    // selected demo key or event
+    // selected demo key or event, else the selected step
     ImGuiIO& io = ImGui::GetIO();
-    if (C.focused && !io.WantTextInput && C.d_start >= 0 && (ImGui::IsKeyPressed(ImGuiKey_Delete, false) || ImGui::IsKeyPressed(ImGuiKey_Backspace, false))) demo_remove_selected();
+    if (C.focused && !io.WantTextInput && (ImGui::IsKeyPressed(ImGuiKey_Delete, false) || ImGui::IsKeyPressed(ImGuiKey_Backspace, false))) {
+        if (C.d_start >= 0 && (C.d_key >= 0 || C.d_event >= 0)) demo_remove_selected();
+        else if (C.step) remove_step(C.step);
+    }
     if (C.focused && !io.WantTextInput && (io.KeyCtrl || io.KeySuper)) {
         if (ImGui::IsKeyPressed(ImGuiKey_C, false) && C.step) {
             Value p = prm(), list;
