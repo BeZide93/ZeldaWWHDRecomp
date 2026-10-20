@@ -330,6 +330,11 @@ if(WWHD_HAS_VULKAN)
   # VK_NO_PROTOTYPES: the renderer loads every Vulkan function at run time (gfx/vulkan/loader.h), so the
   # executable starts without a Vulkan loader or with an older one, and can say what is missing
   target_compile_definitions(wwhd PRIVATE WWHD_HAS_VULKAN=1 VK_NO_PROTOTYPES)
+  if(APPLE)
+    # gfx/vulkan/handoff_trace.cpp reads CACurrentMediaTime (the present observer's clock) on every
+    # Apple build with Vulkan, including Vulkan-only builds, where the Metal block above doesn't link it
+    target_link_libraries(wwhd PRIVATE "-framework QuartzCore")
+  endif()
   if(WWHD_HAS_METAL)
     # One app, two renderers: the Vulkan loader and glslang are weak imports, so the game still
     # starts (with Metal) on a Mac without them; the renderer checks for them before using Vulkan.
