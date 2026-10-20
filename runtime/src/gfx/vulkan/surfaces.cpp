@@ -147,13 +147,21 @@ static bool screen_shaped(uint32_t width, uint32_t height, bool compressed, uint
     return r > 0.97f && r < 1.03f;
 }
 bool stereo_screen_target(uint32_t w, uint32_t h) { return screen_shaped(w, h, false, 1, 1); }
+enum class ScaledCopy;
+static ScaledCopy scaled_copy_mode(const FormatInfo& fmt);
+// Half SBS and top-and-bottom eyes are smaller than the guest's surfaces, so CPU uploads into them
+// are scaled (upload_surface -> resample). A format this device can neither blit nor draw would be
+// cleared there instead of uploaded: then every eye keeps the full size, as in Full SBS, for the rest
+// of the session (all of a pass's attachments must keep one size).
+static bool g_eyeSizedTargets = true;
+static bool eye_sized(const FormatInfo& fmt);
 bool target_aspect_factors(uint32_t w, uint32_t h, float& kx, float& ky) {
     bool on = screen_shaped(w, h, false, 1, 1) && (g_aspect_kx != 1.0f || g_aspect_ky != 1.0f);
     kx = on ? g_aspect_kx : 1.0f;
     ky = on ? g_aspect_ky : 1.0f;
     return on;
 }
-static void target_aspect(const Surface* s, float& kx, float& ky) {
+static void target_aspect(const Surface* s, float& kx, float& ky, bool eyeSize = true) {
     uint32_t width,height;
     if(!s->fmt.compressed&&s->mips==1&&mods::cemu::texture_extent(s->width,s->height,s->format,s->slices,s->tileMode,width,height)){
         kx=float(width)/s->width;ky=float(height)/s->height;return;
@@ -164,8 +172,18 @@ static void target_aspect(const Surface* s, float& kx, float& ky) {
     // Half SBS and top-and-bottom show each eye at half the width (height): render it at that size
     // rather than drawing twice the pixels and squeezing half of them away. Allocation only: the
     // projections and layouts keep the picture's shape (target_aspect_factors).
-    if (on && stereo::frame.mode == stereo::HalfSBS) kx *= 0.5f;
-    if (on && stereo::frame.mode == stereo::TAB) ky *= 0.5f;
+    const bool halved = stereo::frame.mode == stereo::HalfSBS || stereo::frame.mode == stereo::TAB;
+    if (!eyeSize || !on || !halved || !eye_sized(s->fmt)) return;
+    if (stereo::frame.mode == stereo::HalfSBS) kx *= 0.5f;
+    else ky *= 0.5f;
+}
+// The current allocation of s is an eye-sized (halved) stereo target: its scan is shown at twice
+// that width (Half SBS) or height (top-and-bottom).
+void stereo_target_halves(const Surface* s, bool& halfWidth, bool& halfHeight) {
+    float kx, ky;
+    target_aspect(s, kx, ky, false);
+    halfWidth = s->ax * 2 == kx && kx != 0;
+    halfHeight = s->ay * 2 == ky && ky != 0;
 }
 
 // the factor a render target gets. Shadow maps (depth arrays: the game's cascades) scale with the
@@ -785,6 +803,19 @@ static ScaledCopy scaled_copy_mode(const FormatInfo& fmt) {
     }
     return mode;
 }
+static uint32_t g_eyeSizeGeneration = 0;
+void stereo_reset_eye_sized_targets() { g_eyeSizedTargets = true; ++g_eyeSizeGeneration; }
+uint32_t stereo_eye_size_generation() { return g_eyeSizeGeneration; }
+static bool eye_sized(const FormatInfo& fmt) {
+    if (!g_eyeSizedTargets) return false;
+    if (scaled_copy_mode(fmt) != ScaledCopy::Unsupported) return true;
+    g_eyeSizedTargets = false;
+    ++g_eyeSizeGeneration;
+    ++g_surface_epoch;  // continued draws hold the eye-sized targets' extents
+    LOG("[stereo] Vulkan format %d can be neither blitted nor drawn on this device: Half SBS and "
+        "top-and-bottom now render each eye at full size", int(fmt.pixel));
+    return false;
+}
 namespace {
 struct DepthCopyParams { float scaleX,scaleY;int32_t lastX,lastY;uint32_t bit; };
 struct DepthCopyResources {
@@ -1185,6 +1216,11 @@ void upload_surface(Surface* s) {
     // upload at the guest size, then scale into it.
     Surface guestSized;
     Surface* target=s;
+    const bool smaller=s->mips==1&&s->imageType==VK_IMAGE_TYPE_2D&&!s->fmt.compressed&&
+                       (s->extent.width<s->width||s->extent.height<s->height);
+    // an eye allocated before full-size eyes were chosen (eye_sized): full size now, no scaling
+    if(smaller&&!eye_sized(s->fmt)&&(s->usage&(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT|VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT)))
+        rescale(s);
     if(s->mips==1&&s->imageType==VK_IMAGE_TYPE_2D&&!s->fmt.compressed&&
        (s->extent.width<s->width||s->extent.height<s->height)) {
         guestSized.width=s->width;guestSized.height=s->height;guestSized.slices=s->slices;guestSized.dim=s->dim;

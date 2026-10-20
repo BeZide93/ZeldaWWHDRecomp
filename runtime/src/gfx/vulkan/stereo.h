@@ -70,6 +70,14 @@ struct RendererCommands {
 };
 void stereo_release_ao(); // retire only eye 1's scratch images
 bool stereo_screen_target(uint32_t width, uint32_t height);
+// s's allocation is a Half SBS (halfWidth) or top-and-bottom (halfHeight) eye of the guest's size;
+// false for both when its format cannot be scaled on this device (each eye then keeps full size)
+void stereo_target_halves(const Surface* s, bool& halfWidth, bool& halfHeight);
+// renderer smoke test: eye-sized targets again after a test of the full-size fallback
+void stereo_reset_eye_sized_targets();
+// advanced when eye-sized targets are switched off (or on): targets looked up before then may
+// still have the other size, so a draw resolves its attachments again (draw.cpp)
+uint32_t stereo_eye_size_generation();
 void stereo_latch();
 void load_saved_stereo_hdr(); // start-up, both hosts: 3D and HDR settings saved by the overlay
 }

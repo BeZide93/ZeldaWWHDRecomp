@@ -749,6 +749,51 @@ void stereo_resize_upload_check() {
   require(pixel(leftX,leftY,0)==255&&pixel(leftX,leftY,2)==0,"left eye placement/capture differs");
   require(pixel(rightX,rightY,mode==stereo::Off?0:2)==255,"right eye placement/capture differs");
  }
+ // A device that can neither blit nor draw a screen format (here depth, WWHD_VK_DEPTH_COPY=none):
+ // Half SBS eyes keep the full size, so the upload is copied, never scaled into a cleared target,
+ // and the scan keeps one eye's shape.
+ const auto oldDepthCopy=g_depthCopyOverride;
+ g_depthCopyOverride=DepthCopyOverride::Unsupported;
+ stereo::set_mode(stereo::HalfSBS);stereo_latch();
+ for(int eye=0;eye<2;++eye) {
+  stereo_select_eye(eye);
+  for(const auto& desc:{depth,color}) {
+   auto* surface=find_or_create_surface(desc,true);
+   require(surface->extent.width==64&&surface->extent.height==36,"unscalable format kept an eye-sized target");
+   surface->gpuWritten=false;surface->dirty=true;surface->lastCheckedFrame=~uint64_t{0};
+   upload_surface(surface);
+   if(!desc.isDepth) rgba_is(read_image(*surface,VK_IMAGE_ASPECT_COLOR_BIT,4),rgba,"full-size stereo color upload differs");
+   else {
+    const auto values=read_image(*surface,VK_IMAGE_ASPECT_DEPTH_BIT,4);
+    const auto stencil=read_image(*surface,VK_IMAGE_ASPECT_STENCIL_BIT,1);
+    for(size_t i=0;i<stencil.size();++i) {
+     float value;memcpy(&value,values.data()+i*4,4);
+     require(std::abs(value-0.5f)<0.00001f&&stencil[i]==0x5a,"full-size stereo depth/stencil upload was cleared");
+    }
+   }
+   mark_gpu_written(surface);
+  }
+  const float eyeColor[4]={eye?0.0f:1.0f,0,eye?1.0f:0.0f,1};
+  clear_image(*find_or_create_surface(color,true),eyeColor);
+  copy_to_scan(cb,1);
+  auto& screen=eye?stereoRight:R.tv;
+  require(screen.buildingScan&&screen.buildingScan->extent.width==64&&
+      screen.buildingScanDisplayExtent.width==64&&screen.buildingScanDisplayExtent.height==36,
+      "full-size eye scan lost its shape");
+  screen.scan.swap(screen.buildingScan);
+  std::swap(screen.scanDisplayExtent,screen.buildingScanDisplayExtent);
+  screen.scanSrgb=screen.buildingScanSrgb;screen.buildingScanDirty=false;
+ }
+ stereo_select_eye(0);
+ stereo_flush();
+ {
+  const auto packed=compose_offscreen(R.tv,64,36,false);
+  require(packed[(18*64+16)*4]==255&&packed[(18*64+16)*4+2]==0&&packed[(18*64+48)*4+2]==255,
+      "full-size Half SBS eyes placed wrong");
+ }
+ g_depthCopyOverride=oldDepthCopy;
+ stereo_reset_eye_sized_targets();
+ stereo::set_mode(stereo::Off);stereo_latch();
  stereo_select_eye(1);
  require(R.surfaces.empty(),"mode-switch test retained eye 1 targets after switch-off");
  stereo_select_eye(0);

@@ -2815,9 +2815,11 @@ void copy_to_scan(uint32_t cb, uint32_t target) {
   Screen &s = stereoEye ? stereoRight : (target == 4 ? R.drc : R.tv);
   const uint32_t width = src->extent.width, height = src->extent.height;
   s.buildingScanDisplayExtent = {width,height};
-  if (target != 4 && stereo_screen_target(src->width, src->height)) {
-    if (stereo::frame.mode == stereo::HalfSBS) s.buildingScanDisplayExtent.width *= 2;
-    if (stereo::frame.mode == stereo::TAB) s.buildingScanDisplayExtent.height *= 2;
+  if (target != 4) {
+    bool halfWidth, halfHeight;  // an eye-sized target (surfaces.cpp), not the full-size fallback
+    stereo_target_halves(src, halfWidth, halfHeight);
+    if (halfWidth) s.buildingScanDisplayExtent.width *= 2;
+    if (halfHeight) s.buildingScanDisplayExtent.height *= 2;
   }
   if (!s.buildingScan || s.buildingScan->extent.width != width ||
       s.buildingScan->extent.height != height ||

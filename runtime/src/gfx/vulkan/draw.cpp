@@ -2028,12 +2028,16 @@ void report_continued_stats() {
 // Render targets of a draw (both paths); false: the draw has no target.
 bool resolve_targets(const uint32_t* r, vk::Shader* ps, DrawTargets& t) {
   t = {};
+  const uint32_t eyeSize = stereo_eye_size_generation();
   const auto &lcr = *reinterpret_cast<const LatteContextRegister *>(r);
   auto mask = LatteMRT::GetActiveColorBufferMask(ps->dec, lcr);
   for (int i = 0; i < 8; i++)
     if (mask & (1 << i))
       t.colors[i] = color_target(r, i, &t.slices[i]);
   t.depth = LatteMRT::GetActiveDepthBufferMask(lcr) ? depth_target(r, &t.depthSlice) : nullptr;
+  // a lookup switched stereo eyes to full size (an unscalable format, surfaces.cpp): the targets
+  // looked up before it still have the eye size; looked up again, they are rescaled
+  if (eyeSize != stereo_eye_size_generation()) return resolve_targets(r, ps, t);
   if (t.depth && t.depth->width == 1280 && t.depth->height == 720) R.mainDepthAddr = t.depth->addr;
   auto& colors = t.colors;
   auto& depth = t.depth;
@@ -2082,17 +2086,18 @@ bool resolve_targets(const uint32_t* r, vk::Shader* ps, DrawTargets& t) {
 bool resolve_replay_targets(const uint32_t* r, vk::Shader* ps, DrawTargets& targets) {
   struct Cached {
     uint64_t frame = ~0ull, version = 0, epoch = 0;
+    uint32_t eyeSize = 0;
     vk::Shader* shader = nullptr;
     DrawTargets targets;
   };
   static Cached cache;
   if (cache.frame == R.frame && cache.version == gx2::g_full_state_version &&
-      cache.epoch == g_surface_epoch && cache.shader == ps) {
+      cache.epoch == g_surface_epoch && cache.eyeSize == stereo_eye_size_generation() && cache.shader == ps) {
     targets = cache.targets;
     return true;
   }
   if (!resolve_targets(r, ps, targets)) return false;
-  cache = {R.frame, gx2::g_full_state_version, g_surface_epoch, ps, targets};
+  cache = {R.frame, gx2::g_full_state_version, g_surface_epoch, stereo_eye_size_generation(), ps, targets};
   return true;
 }
 // A sampled texture of a stage (both paths): lookup, AO substitution and the write-tracking check.
