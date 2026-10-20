@@ -79,18 +79,21 @@ int32_t joint_index(Cpu* c, const Context& x, uint32_t model, const std::string&
     std::memcpy(mem::ptr(x.scratch), name.c_str(), std::min<size_t>(name.size(), 31));
     return int32_t(x.call(c, kNameIndex, {table, x.scratch}));
 }
-// for the log when a joint name is wrong: the model's joint names (JUTNameTab: u16 count, then
-// {u16 key, u16 offset} entries; offsets from the table)
+// for the log when a joint name is wrong: the model's joint names. HD's table is the BFRES name
+// dictionary: u32 size, u32 count, then a root entry and `count` entries of 16 bytes {u32 bit,
+// u16 left, u16 right, s32 name (from the field), s32 data}.
 std::string joint_names(Cpu* c, const Context& x, uint32_t model) {
     const uint32_t table = name_table(c, x, model);
     if (!table) return "(none)";
-    const uint32_t count = ld16(table);
+    const uint32_t count = ld32(table + 4);
     std::string out;
-    for (uint32_t k = 0; k < count && k < 96; ++k) {
-        const uint32_t at = table + ld16(table + 4 + k * 4 + 2);
+    for (uint32_t k = 1; k <= count && k <= 128; ++k) {
+        const uint32_t field = table + 8 + k * 16 + 8, rel = ld32(field);
+        if (!rel) continue;
+        const uint32_t at = field + rel;
         std::string n;
         for (uint32_t i = 0; i < 32; ++i) { const char ch = char(ld8(at + i)); if (!ch) break; n += ch; }
-        out += (k ? " " : "") + n;
+        out += (out.empty() ? "" : " ") + n;
     }
     return out;
 }

@@ -228,8 +228,9 @@ wait steps, an `area` or `room` trigger and only `stage` and `scene` actions sta
 content and need the Story Notebook.
 
 The sky island example's scene `bird` starts when Link walks along Outset's pier towards the lookout: the
-Helmaroc King comes down over the island, takes him in its talons and carries him up in a curve over the
-sea; a camera step holds the view of the sky, a fade step darkens it, and the stage action takes him to
+Helmaroc King swoops down over the pier (Link startled), opens its talons and closes them around him with
+the game's own grab animation, and carries him up in a curve over the sea while he struggles and then
+hangs; over the open sea it lets go and he falls; a camera step holds the view of the sky, a fade step darkens it, and the stage action takes him to
 the island (a scene whose end changes the stage stays dark until the new stage fades in). Its bird is `{"actor": "Dk", "spawn": "always",
 "params": 2}`: the demo's own Helmaroc King, without ground collision. Outset has a Helmaroc King of its
 own, waiting hidden for its story event; without `"spawn": "always"` the demo would move that one, which

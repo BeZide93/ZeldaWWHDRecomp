@@ -8,8 +8,9 @@
 //  "camera":{"eye":TRACK,"target":TRACK,"fovy":TRACK,"roll":TRACK},
 //  "actors":[{"id":"bird","actor":"Dk"|"Link"|"model":{"archive":"Kamome","file":"ka.bdl"},
 //             "position":TRACK,"rotation":TRACK,"scale":TRACK,
-//             "clips":[{"frame":0,"archive":"Dk","file":"fly1.bck","speed":1}],
-//             "modes":[{"frame":0,"mode":2,"data":"hex"}],          (Link: demo modes)
+//             "clips":[{"frame":0,"archive":"Dk","file":"fly1.bck","speed":1,"loop":true}],
+//             "modes":[{"frame":0,"mode":2,"data":"hex"},          (Link: demo modes)
+//                      {"frame":9,"clip":"x.bck","btp":"x.btp","btk":"x.btk","loop":false,"blend":5}],
 //             "data":[{"frame":0,"id":1,"bytes":"hex"}]}],           (raw actor data paragraphs)
 //  "sounds":[{"frame":30,"id":22820,"actor":"bird"|"position":{..},"volume":1,"pan":0.5}],
 //  "particles":[{"frame":50,"id":33059,"actor":"bird","joint":"j_dk_ashi_r3"|"position":{..}}],
@@ -33,8 +34,18 @@ enum class Curve { Linear, Smooth, BSpline, Step };
 struct Key { uint32_t frame = 0; Vec value; bool operator==(const Key&) const = default; };
 struct Track { Curve curve = Curve::Linear; std::vector<Key> keys; bool operator==(const Track&) const = default; };  // scalars use value.x
 struct Resource { std::string archive, file; bool operator==(const Resource&) const = default; };
-struct Clip { uint32_t frame = 0; Resource resource; float speed = 1; bool operator==(const Clip&) const = default; };
-struct Mode { uint32_t frame = 0, mode = 0; std::vector<uint8_t> data; std::string clip; bool operator==(const Mode&) const = default; };  // clip: Link's own demo animation (.bck)
+// loop: the clip repeats (the demo's animation mode 1); false plays it once and holds its last frame (mode 3)
+struct Clip { uint32_t frame = 0; Resource resource; float speed = 1; bool loop = true; bool operator==(const Clip&) const = default; };
+// clip: Link's own demo animation (.bck), with loop as for Clip, his face animations (btp, btk: both or
+// neither, from the same archive) and blend (frames from his previous pose, 0..60; -1: the game's default)
+struct Mode {
+    uint32_t frame = 0, mode = 0;
+    std::vector<uint8_t> data;
+    std::string clip, btp, btk;
+    bool loop = true;
+    int32_t blend = -1;
+    bool operator==(const Mode&) const = default;
+};
 struct NamedClip { uint32_t frame = 0; std::string clip; bool loop = true; bool operator==(const NamedClip&) const = default; };  // a mod character's own clip
 struct Data { uint32_t frame = 0, id = 0; std::vector<uint8_t> bytes; bool operator==(const Data&) const = default; };
 struct Actor {

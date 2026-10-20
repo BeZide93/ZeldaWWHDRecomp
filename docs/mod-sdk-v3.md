@@ -1530,12 +1530,14 @@ the demo and ends it.
   - a model from the player's game, with `"model": {"archive", "file"}`.
   - an actor this mod placed (a resident villager, a mod actor, an enemy), with `"character": "<its id>"`. It follows the tracks even where its own code doesn't know cutscenes; a mod actor plays its own clips by name, as `"clips": [{"frame": 0, "clip": "walk", "loop": true}]`.
 - **Actor tracks.** Every actor can have `position`, `rotation` (degrees) and `scale` tracks.
-- **Clips.** `clips` play a `.bck` from any archive at `speed` (default 1) on game actors whose code supports cutscenes (story characters, the Helmaroc King and other cutscene actors).
+- **Clips.** `clips` play a `.bck` from any archive at `speed` (default 1) on game actors whose code supports cutscenes (story characters, the Helmaroc King and other cutscene actors). A clip repeats until the next clip; `"loop": false` plays it once and holds its last pose, the way the game's own cutscenes play a grab, a landing or a turn before the next loop: `[{"frame": 50, "archive": "Demo04", "file": "04_dk_cut08_hokaku.bck", "loop": false}, {"frame": 81, "archive": "Demo04", "file": "04_dk_cut08_esc.bck"}]`.
 - **Link.** Link takes demo `modes` instead of clips:
   - `{"frame": 0, "mode": "walk"}` makes him walk along his position track. The names are `wait`, `walk`, `dash`, `turn`, `talk`, `holdup`, `keep`, `look_around`, `salute`, `surprised`, `lookup`, `nod`, `present` and `smile`; the game's own mode numbers work too.
-  - `{"frame": 60, "clip": "udeage_onetime.bck"}` plays one of his own cutscene animations (from the game's Link demo animation archive that is loaded at the time).
+  - `{"frame": 60, "clip": "udeage_onetime.bck"}` plays one of his own cutscene animations (from the game's Link demo animation archive that is loaded at the time: LkD00 in the early game, which has his Outset and Forsaken Fortress cutscenes). A clip repeats; `"loop": false` plays it once and holds its last pose.
+  - `"btp"` and `"btk"` (both) give him the cutscene's face, his eyes and mouth: `{"frame": 30, "clip": "04_cl_cut7_odoroki.bck", "btp": "04_cl_cut7_odoroki.btp", "btk": "04_cl_cut7_odoroki.btk", "loop": false}`. A clip's `.btk` often covers several cuts (`07b_cl_cut4_5_6_7_10.btk`); the editor's file list shows them.
+  - `"blend"` (0–60 frames) blends from his previous pose into the clip instead of the game's default.
   - `"data"` (hex) passes a raw cutscene data block, for modes the list doesn't cover.
-- **Archives.** Archive and file names refer to the player's own game. The port looks up their ids and loads the archives before the demo starts. Game demo archive names that the game treats specially are refused: Demo04, Demo08, Demo29, Demo37, Demo45 and Demo46.
+- **Archives.** Archive and file names refer to the player's own game. The port looks up their ids and loads the archives before the demo starts. The game's cutscene archives (`Demo02`, `Demo04`, `Demo07`, ...) lend their animations too: the Helmaroc King's Outset grab is in `Demo04`, its Forsaken Fortress beak grab and throw in `Demo07`. The demo itself always plays from the port's own data, so the game's special cases for its cutscenes by name don't apply.
 - **Sounds.** `sounds` play a game sound id at a `position` or following an actor, with `volume` and `pan` (0–1).
 - **Particles.** `particles` start a game particle id at a `position`, or on an actor, optionally on one of its joints (`joint`).
 - **Skip and save states.**
@@ -1585,6 +1587,15 @@ someone in its beak or claws.
   goes back to its waiting pose).
 - Link can only be carried while he plays one of his demo animations (`"clip"`),
   from the attach frame until the detach.
+- A grab that looks like one: time a one-shot clip of the carrier (`"loop": false`)
+  so that its claws close at the attach frame, with the carrier's position track
+  bringing the claws down to the actor; then the carrier's loop. The carried
+  actor's own clips do the rest (Link: startled, struggling, then hanging). The
+  sky island example (`examples/guest-mods/sky-island`, scene `bird`) does this
+  with the Helmaroc King's `04_dk_cut08_hokaku.bck` and Link's Outset clips.
+  When an offset is hard to find, attach to the joint with no offset first and
+  run with `WWHD_DEMO_TRACE=1`: the log gives the carried actor's place, the
+  carrier's and the joint's every second.
 - An actor has one carrier at a time, and a carried actor can't carry another.
   A demo has up to 8 attachments.
 - Villagers only turn around their vertical axis, so they hang upright whatever

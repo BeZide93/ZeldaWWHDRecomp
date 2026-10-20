@@ -78,6 +78,8 @@ struct SceneUi {
     int d_kind_shown = 0;  // the kind the fields below were filled for (a change starts them afresh)
     std::string d_added;  // the actor just added: the hint shows for it
     std::string e_query, e_actor, e_to, e_joint, e_text = "...", e_archive, e_file, e_mode = "walk", e_clip;
+    bool e_once = false, e_face = false;  // a clip played once (held at its end); Link's clip with his face animations
+    int e_blend = -1;                     // Link's clip: blend frames (-1: the game's default)
     uint32_t e_sound = 0, e_particle = 0;
     int e_hour = 12;
     float e_rain = 1;
@@ -1365,6 +1367,9 @@ void demo_inspector(int n, const Value& m, const Value& st) {
             if (!C.e_archive.empty()) list_state("files", C.e_archive);
             ev["archive"] = C.e_archive;
             ev["file"] = C.e_file;
+            ImGui::Checkbox("Play once##clip_once", &C.e_once);
+            help_mark("Plays the animation once and holds its last pose (a grab, a landing); otherwise it repeats. Follow it with the next clip.");
+            if (C.e_once) ev["loop"] = false;
         }
     } else if (list == "modes") {
         field_label("Mode", 70);
@@ -1384,6 +1389,34 @@ void demo_inspector(int n, const Value& m, const Value& st) {
             if (i >= 0) C.e_clip = anims[size_t(i)];
             ev["mode"] = std::string("clip");
             ev["clip"] = C.e_clip;
+            ImGui::Checkbox("Play once##link_once", &C.e_once);
+            help_mark("Plays the animation once and holds its last pose; otherwise it repeats.");
+            if (C.e_once) ev["loop"] = false;
+            // his face: the clip's own .btp (eyes and mouth) and a .btk of the same cutscene, when the archive has them
+            std::string btp, btk;
+            if (!C.e_clip.empty()) {
+                const std::string base = C.e_clip.substr(0, C.e_clip.size() - 4);
+                for (const char* archive : {"LkD00", "LkD01"})
+                    for (const auto& f : choices("files", archive).array) {
+                        const std::string n = f.string();
+                        if (btp.empty() && n == base + ".btp") btp = n;
+                        // a btk often covers several cuts (07b_cl_cut4_5_6_7_10.btk): the longest shared prefix wins
+                        if (ends_with(n, ".btk") && n.substr(0, 6) == base.substr(0, 6)) {
+                            auto common = [&](const std::string& x) { size_t k = 0; while (k < x.size() && k < base.size() && x[k] == base[k]) ++k; return k; };
+                            if (btk.empty() || common(n) > common(btk)) btk = n;
+                        }
+                    }
+            }
+            if (!btp.empty() && !btk.empty()) {
+                ImGui::Checkbox("His face too##link_face", &C.e_face);
+                help_mark(("The cutscene's face animations: " + btp + ", " + btk).c_str());
+                if (C.e_face) ev["btp"] = btp, ev["btk"] = btk;
+            }
+            field_label("Blend", 70);
+            ImGui::SetNextItemWidth(-help_width());
+            ImGui::SliderInt("##link_blend", &C.e_blend, -1, 30, C.e_blend < 0 ? "default" : "%d frames");
+            help_mark("Frames to blend from his previous pose into this clip.");
+            if (C.e_blend >= 0) ev["blend"] = C.e_blend;
         } else
             ev["mode"] = C.e_mode;
     } else

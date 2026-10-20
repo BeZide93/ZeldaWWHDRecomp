@@ -143,8 +143,13 @@ std::string lane_kind_label(const Value& a) {
     return a.get("actor").string() == "Link" ? "link" : "game";
 }
 std::string event_label(const std::string& list, const Value& e) {
-    if (list == "clips") return e.get("clip").type == Value::String ? e.get("clip").text : e.get("archive").string() + "/" + e.get("file").string();
-    if (list == "modes") return e.get("clip").type == Value::String ? "clip " + e.get("clip").text : e.get("mode").type == Value::String ? e.get("mode").text : "mode " + std::to_string(int(e.get("mode").number));
+    // a clip played once (and held) says so; a Link clip with his face or a blend too
+    const std::string once = e.get("loop").type == Value::Bool && !e.get("loop").boolean ? " (once)" : "";
+    if (list == "clips") return (e.get("clip").type == Value::String ? e.get("clip").text : e.get("archive").string() + "/" + e.get("file").string()) + once;
+    if (list == "modes" && e.get("clip").type == Value::String)
+        return "clip " + e.get("clip").text + once + (e.get("btp").type == Value::String ? " +face" : "") +
+               (e.get("blend").type == Value::Number ? " blend " + std::to_string(int(e.get("blend").number)) : "");
+    if (list == "modes") return e.get("mode").type == Value::String ? e.get("mode").text : "mode " + std::to_string(int(e.get("mode").number));
     if (list == "messages") return e.get("text").string();
     if (list == "sounds") return "sound " + std::to_string(long(e.get("id").number));
     if (list == "particles") return "particle " + std::to_string(long(e.get("id").number));

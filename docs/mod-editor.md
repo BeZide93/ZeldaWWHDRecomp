@@ -559,8 +559,10 @@ the game's sound effects by name and listen with **Play**, and pick the actor it
 **particles**: search the particles, pick the actor and one of its joints (or the demo's origin);
 **messages**: the text; **time**: the hour; **weather**: how much rain; **attach** / **detach**: the
 carried actor, the one that carries it and its joint; **clips**: an animation of the actor's archive (or
-another archive), for a mod character one of its model's clips; **modes**: one of Link's demo modes
-(**clip**: one of his demo animations). **Advanced** shows the event as JSON, for fields the controls
+another archive, the game's cutscene archives `DemoNN` included), for a mod character one of its model's
+clips, with **Play once** (it holds its last pose; otherwise it repeats); **modes**: one of Link's demo
+modes (**clip**: one of his demo animations, with **Play once**, **His face too** when the cutscene has his
+face animations, and **Blend**, the frames from his previous pose). **Advanced** shows the event as JSON, for fields the controls
 don't cover. Names of sounds and particles come from the decompilation's source code; a sound or particle
 without a name can still be entered by its number in Advanced.
 

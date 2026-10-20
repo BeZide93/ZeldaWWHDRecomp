@@ -81,7 +81,9 @@ int main() {
     // refusals with reasons
     assert(has(refused(R"({"type":"demo","frames":0})"), "frames"));
     assert(has(refused(R"({"type":"demo","frames":30,"bogus":1})"), "unknown demo field"));
-    assert(has(refused(R"({"type":"demo","frames":30,"actors":[{"id":"a","model":{"archive":"Demo04","file":"ka.bdl"}}]})"), "invalid archive name"));
+    assert(has(refused(R"({"type":"demo","frames":30,"actors":[{"id":"a","model":{"archive":"Demo 4","file":"ka.bdl"}}]})"), "invalid archive name"));
+    // the game's demo archives lend their files too (the demo itself plays from the port's virtual archive)
+    assert(parsed(R"({"type":"demo","frames":30,"actors":[{"id":"a","actor":"Dk","clips":[{"frame":0,"archive":"Demo04","file":"04_dk_cut08_esc.bck"}]}]})").actors[0].clips[0].resource.archive == "Demo04");
     assert(has(refused(R"({"type":"demo","frames":30,"actors":[{"id":"a","actor":"d_act1"}]})"), "invalid stage actor name"));
     assert(has(refused(R"({"type":"demo","frames":30,"actors":[{"id":"a","actor":"Dk","position":{"keys":[{"frame":20,"value":{"x":0,"y":0,"z":0}},{"frame":10,"value":{"x":0,"y":0,"z":0}}]}}]})"), "key frames must increase"));
     assert(has(refused(R"({"type":"demo","frames":30,"actors":[{"id":"a","actor":"Link","clips":[{"frame":0,"archive":"Link","file":"a.bck"}]}]})"), "Link plays demo modes"));
@@ -107,6 +109,40 @@ int main() {
     assert(has(ct, "== JACT \"MA00\"\n  f0 TXYZ = curves 0,1,2\n"));
     assert(has(ct, "  f45 ANIMATION = u32 512\n  f45 ANIM_MODE = int 1\n  f45 ANIM_FRAME = rate 30\n  f45 reserved 129 000000040000000032008f39020000\n"));
     assert(has(refused(R"({"type":"demo","frames":30,"actors":[{"id":"a","actor":"Link","modes":[{"frame":0,"mode":"fly"}]}]})"), "unknown Link mode"));
+    // a grab: the bird's one-shot clip then its loop; Link's clips with his face, held end, and a blend
+    {
+        const D::Demo g = parsed(R"({"type":"demo","frames":120,
+          "actors":[{"id":"bird","actor":"Dk","clips":[{"frame":0,"archive":"Demo04","file":"04_dk_cut08_hokaku.bck","loop":false},
+                                                     {"frame":30,"archive":"Demo04","file":"04_dk_cut08_esc.bck"}]},
+                    {"id":"hero","actor":"Link","modes":[{"frame":0,"clip":"04_cl_cut7_odoroki.bck","loop":false,"blend":4},
+                                                         {"frame":30,"clip":"07b_cl_cut8_hoba.bck","btp":"07b_cl_cut8_hoba.btp","btk":"07b_cl_cut8.btk"}]}]})");
+        assert(!g.actors[0].clips[0].loop && g.actors[0].clips[1].loop);
+        assert(!g.actors[1].modes[0].loop && g.actors[1].modes[0].blend == 4 && g.actors[1].modes[1].blend == -1 && g.actors[1].modes[1].btk == "07b_cl_cut8.btk");
+        D::Compiled gc;
+        auto ids = [](const D::Resource& r) -> int32_t {
+            if (r.archive == "Demo04") return r.file == "04_dk_cut08_hokaku.bck" ? 0x38 : 0x35;
+            if (r.file == "04_cl_cut7_odoroki.bck") return 0x77;
+            if (r.file == "07b_cl_cut8_hoba.bck") return 0x8a;
+            if (r.file == "07b_cl_cut8_hoba.btp") return 0x67;
+            if (r.file == "07b_cl_cut8.btk") return 0x6a;
+            return -1;
+        };
+        assert(D::compile(g, ids, gc, why));
+        demo_stb::File gf;
+        assert(demo_stb::parse(gc.stb, gf, why));
+        const std::string gt = demo_stb::dump(gf);
+        assert(has(gt, "  f0 ANIMATION = u32 65536\n  f0 ANIM_MODE = int 3\n"));
+        assert(has(gt, "  f30 ANIMATION = u32 65537\n  f30 ANIM_MODE = int 1\n"));
+        // Link: {bck} with hands and a 4-frame blend (the game's 3-byte form); {bck, btp, btk} as data id 1 (the retail layout)
+        assert(has(gt, "  f0 ANIMATION = u32 512\n  f0 ANIM_MODE = int 3\n  f0 ANIM_FRAME = rate 30\n  f0 reserved 129 00000004000000003200773903000004\n"));
+        assert(has(gt, "  f30 reserved 129 00000004000000013a03008a0067006a39020000"));
+        assert(has(refused(R"({"type":"demo","frames":30,"actors":[{"id":"a","actor":"Link","modes":[{"frame":0,"clip":"a.bck","btp":"a.btp"}]}]})"), "both btp"));
+        assert(has(refused(R"({"type":"demo","frames":30,"actors":[{"id":"a","actor":"Link","modes":[{"frame":0,"mode":"wait","loop":false}]}]})"), "go with a Link clip"));
+        assert(has(refused(R"({"type":"demo","frames":30,"actors":[{"id":"a","actor":"Link","modes":[{"frame":0,"clip":"a.bck","blend":61}]}]})"), "blend must be 0..60"));
+        assert(has(refused(R"({"type":"demo","frames":30,"actors":[{"id":"a","actor":"Dk","clips":[{"frame":0,"archive":"Dk","file":"fly1.bck","loop":1}]}]})"), "loop must be true or false"));
+        D::Compiled bad;
+        assert(!D::compile(g, [&](const D::Resource& r) { return r.file == "07b_cl_cut8.btk" ? -1 : ids(r); }, bad, why) && has(why, "Link has no demo animation 07b_cl_cut8.btk"));
+    }
     assert(has(refused(R"({"type":"demo","frames":30,"actors":[{"id":"a","character":"x","spawn":false}]})"), "spawn and params are for game actors"));
     assert(has(refused(R"({"type":"demo","frames":30,"actors":[{"id":"a","actor":"Dk","model":{"archive":"Dk","file":"dk.bdl"}}]})"), "one of actor, model or character"));
     // a package of stages with a wordless scene stands on its own; text, sounds and story actions need the Story Notebook
