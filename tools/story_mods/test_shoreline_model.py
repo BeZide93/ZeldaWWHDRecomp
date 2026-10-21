@@ -193,6 +193,12 @@ class ShorelineTests(unittest.TestCase):
         rows = f.rel(animation + 0x2C)
         self.assertEqual(f.cstr(f.rel(rows + 0x10)), 'Qkzyg_yougn_only_b_yougan_v')  # its scroll moves with it
         self.assertLess(len(data), 1024 * 1024)
+        # the streams' mask is one value all over (the pool glows everywhere): our own constant, none of its picture
+        textures = dict(f.dict(f.rel(0x24)))
+        mask = textures['Txy_yougan2']
+        image = f.rel(mask + 0xB0)
+        size = f.u32(mask + 4 + 0x20)
+        self.assertEqual(bytes(f.b[image:image + size]), bytes((255, 255, 0, 0, 0, 0, 0, 0)) * (size // 8))
 
     def test_missing_or_unsupported_player_template_refused(self):
         source,_,animation=template()

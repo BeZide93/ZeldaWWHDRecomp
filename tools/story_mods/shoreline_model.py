@@ -41,6 +41,11 @@ KINDS = {
     'lava': (('object', 'Ykzyg', 'qkzyg'), {'surface': 'Qkzyg_yougn_only_b_yougan_v'}),
 }
 ROLES = ('surface', 'waves', 'edge', 'splash')
+# Fire Mountain's lava runs in streams down the mountain: its first texture (Txy_yougan2) is a mask of vertical bands
+# laid by the texture coordinates: the molten lava glows bright where it is 1, between the streams it is a dull crust
+# (0). A pool is molten lava all over, so the mask is one value there: 255 (the converter fills that texture with it;
+# its point colours black, as most of the mountain's).
+FILLED_TEXTURES = {'lava': [('Txy_yougan2', 255)]}
 MATERIALS = {kind: parts['surface'] for kind, (_, parts) in KINDS.items()}
 MATERIAL = MATERIALS['foam']
 # the room archive whose water model (model1) holds each template material
@@ -501,7 +506,27 @@ def player_template(game, kind='foam'):
         files = room_archive(game, stage, room)
         bfres = 'Room%d.bfres' % room
     require(bfres in files and model + '.sharcfb' in files, 'player coast template unavailable')
-    return files[bfres], files[model + '.sharcfb']
+    template = files[bfres]
+    for texture, value in FILLED_TEXTURES.get(kind, ()):
+        template = fill_texture(template, texture, value)
+    return template, files[model + '.sharcfb']
+
+
+def fill_texture(template, name, value):
+    """the template with a one-channel (BC4) texture filled with one value (0..255) in its image and all its levels:
+    our own constant, nothing of the texture's own picture stays"""
+    f = base.Bfres(template)
+    textures = dict(f.dict(f.rel(0x24)))
+    require(name in textures, 'player coast texture unavailable')
+    texture = textures[name]
+    surface = texture + 4
+    require(f.u32(surface + 0x14) == 0x34, 'player coast texture of another format')
+    block = bytes((value, value, 0, 0, 0, 0, 0, 0))
+    for data, size in ((f.rel(texture + 0xB0), f.u32(surface + 0x20)), (f.rel(texture + 0xB4), f.u32(surface + 0x28))):
+        if data and size:
+            require(size % 8 == 0 and data + size <= len(f.b), 'player coast texture data outside the file')
+            f.b[data:data + size] = block * (size // 8)
+    return bytes(f.b)
 
 
 def shoreline_parts(geometry, kind):

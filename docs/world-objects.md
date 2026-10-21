@@ -554,8 +554,9 @@ pools out of the boat's way, above the sea or inland.
 
 The surface is invisible by itself. Show it with a lava surface model: a separate model declared as the
 actor's `shoreline` with `"material": "lava"` gets Fire Mountain's lava: the lava the volcano pours down its
-sides at sea, its molten layers and glowing grains moving as they do on the mountain, by day and by night. Repeat
-U and V about every 10 m (1000 units), as the mountain's own lava does. The water tool makes a lava pool with both models (below).
+sides at sea, its bright molten cells and red veins moving as they do on the mountain, by day and by night (a pool
+glows all over; the dark crust between the mountain's streams is left out). Repeat U and V about every 10 m (1000
+units), as the mountain's own lava does. The water tool makes a lava pool with both models (below).
 
 ### Rivers and waterfalls
 
