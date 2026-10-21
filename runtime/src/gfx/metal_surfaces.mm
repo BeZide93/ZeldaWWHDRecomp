@@ -992,7 +992,7 @@ void copy_surface_impl(uint32_t srcAddr, uint32_t srcMip, uint32_t srcSlice, uin
         auto key = [&](Surface* x) { return std::make_pair(x->format == (uint32_t)s->format.value(), x->writeSeq); };
         if (!gpuSrc || key(c) > key(gpuSrc)) gpuSrc = c;
     }
-    // Compile shaders in the background: a target copied from now and then keeps its draws exact
+    // Shader compile (background_shaders.h): a target copied from now and then keeps its draws exact
     if (gpuSrc && bgshaders::enabled()) bgshaders::tracker().copied(gpuSrc->addr, R.frame);
     if (gpuSrc) {
         Surface* src = adopt_newer_alias(gpuSrc);

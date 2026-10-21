@@ -842,11 +842,12 @@ static std::atomic<int> g_ao_mode{[] {
 int ao_mode() { return g_ao_mode.load(std::memory_order_relaxed); }
 void set_ao_mode(int m) { g_ao_mode = m % 3; LOG("[gfx] ambient occlusion mode %d", m % 3); }
 
-// Settings > Graphics > Compile shaders in the background (background_shaders.h), as on Vulkan.
-// Off (default): a draw whose shaders or pipeline are still compiling waits for them (exact frames).
-// On: a draw into the presented picture waits at most the frame's budget (WWHD_BG_SHADER_WAIT_MS)
-// and is left out of this frame if the compile is not done by then; every other draw keeps the exact
-// wait (bgshaders::classify). Skipping is only harmless for targets the game redraws every frame and
+// Settings > Graphics > Shader compile (background_shaders.h), as on Vulkan.
+// Off (exact): a draw whose shaders or pipeline are still compiling waits for them.
+// Safe (default) / Fast: a draw that may be left out (bgshaders::classify) waits at most the frame's
+// budget (WWHD_BG_SHADER_WAIT_MS) and is left out of this frame if the compile is not done by then;
+// every other draw keeps the exact wait. Before this setting Metal waited up to 25 ms per frame and then
+// skipped any draw into a target redrawn every frame. Skipping is only harmless for targets the game redraws every frame and
 // uses for nothing but the picture: a draw into a target that is new or wasn't drawn in the previous
 // frame may be the only one its result gets (issue #47: the light buffer sampled before its first
 // render, black shadows for the session; the Picto Box colour-grading volume).
@@ -1892,13 +1893,13 @@ void draw(const uint32_t* regs, uint32_t prim, uint32_t count, uint32_t indexTyp
             for (int i = 0; i < 8; i++)
                 if (writesColor(i)) written[n++] = bgshaders::tracker().facts(colors[i]->addr, R.frame);
             if (writesDepth) depthFacts = bgshaders::tracker().facts(depth->addr, R.frame);
-            g_draw_verdict = bgshaders::classify(true, written, n, writesDepth ? &depthFacts : nullptr, count);
+            g_draw_verdict = bgshaders::classify(bgshaders::level(), written, n, writesDepth ? &depthFacts : nullptr, count);
         }
         g_draw_must_run = g_draw_verdict != bgshaders::kSkippable;
         g_draw_counted = false;
     }
     struct MustRunReset { ~MustRunReset() { g_draw_must_run = false; } } mustRunReset;
-    // a draw left out while its compile goes on (Compile shaders in the background)
+    // a draw left out while its compile goes on (Shader compile Safe / Fast)
     auto leftOut = [&] {
         bgshaders::skipped(R.frame);
         for (int i = 0; i < 8; i++)
@@ -2092,7 +2093,7 @@ void draw(const uint32_t* regs, uint32_t prim, uint32_t count, uint32_t indexTyp
                         baseVertex:baseVertex
                       baseInstance:0];
     }
-    if (bgOn) {  // Compile shaders in the background: which targets are redrawn every frame
+    if (bgOn) {  // Shader compile Safe / Fast: which targets are redrawn every frame
         for (int i = 0; i < 8; i++)
             if (writesColor(i)) bgshaders::tracker().drawn(colors[i]->addr, R.frame);
         if (writesDepth) bgshaders::tracker().drawn(depth->addr, R.frame);

@@ -35,11 +35,11 @@ void peek_z(const uint32_t* cells, uint32_t n) {
     }
     uint32_t points = std::min(n / 3,64u);
     if (!depth || !points) return;
-    // Compile shaders in the background: the game reads this depth buffer back, so draws into it keep
-    // the exact wait from now on; a frame that already left a draw out answers no peek (the game keeps
-    // its previous answers, from a complete frame)
-    if (bgshaders::enabled()) bgshaders::tracker().read_back(depth->addr, R.frame);
-    if (bgshaders::skipped_in_frame(R.frame)) { bgshaders::peek_withheld(); return; }
+    // Shader compile Safe / Fast: the game reads this depth buffer back, so draws into it keep the exact
+    // wait from now on; if one was left out in this frame already, the frame answers no peek and the
+    // game keeps its previous answers, from a complete frame
+    if (bgshaders::enabled()) bgshaders::tracker().peeked(depth->addr, R.frame);
+    if (bgshaders::tracker().left_out_in(depth->addr, R.frame)) { bgshaders::peek_withheld(); return; }
     auto format = depth->tex.pixelFormat;
     if (format != MTLPixelFormatDepth16Unorm && format != MTLPixelFormatDepth32Float &&
         format != MTLPixelFormatDepth32Float_Stencil8) return;
@@ -305,7 +305,7 @@ void copy_to_scan(uint32_t cb, uint32_t target) {
     Screen& scr = (target & 1) ? R.tv : R.drc;
     Surface* s = surface_from_color_buffer(cb);
     if (!s || !s->tex) return;
-    // Compile shaders in the background: draws into the presented picture may be left out
+    // Shader compile (background_shaders.h): which target is the presented picture
     if (bgshaders::enabled()) bgshaders::tracker().presented(s->addr, R.frame);
     end_encoder();
     // the image as rendered (internal resolution); the present pass scales it to the window
