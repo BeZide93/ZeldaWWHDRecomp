@@ -727,10 +727,8 @@ bool build_pond(const Params& p, const XZ& origin, int origin_y, Out& o, std::ve
         if (!c->idx.empty()) col.prims.push_back(std::move(*c));
     o.main_meshes.push_back(std::move(col));
     if (p.lava) {
-        // the lava: one surface just under the level, Dragon Roost's lava glow (its texture is a mask: glowing where V is
-        // small, a wavy edge at V 0.25..0.36 that the game's animation moves, clear beyond). The glow fills the pool
-        // (V kLavaInside) and its wavy edge runs along the shore (V kLavaShore there), U along the shore (one repeat every
-        // 4 m); no wave lines, no foam
+        // the lava: one surface just under the level (the game's lava, tools/story_mods/shoreline_model.py), U along
+        // the shore (one repeat every 4 m), V from the shore inwards; no wave lines, no foam
         Prim lava;
         lava.material = "surface", lava.visible = true;
         for (size_t i = 0; i < n; i++) {

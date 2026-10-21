@@ -53,7 +53,7 @@ struct ManifestTalk {
 };
 // material (shoreline only): "" (the coast foam, the default; "foam" in a manifest), "water" (a still-water surface: a
 // spring pool), "pond" (an island's calm shore water with its coast foam), "river" (flowing water, scrolling along the
-// model's V), "waterfall" (falling water) or "lava" (Dragon Roost's glowing lava, its layers scrolling)
+// model's V), "waterfall" (falling water) or "lava" (the game's lava: the lava cave's, moving)
 struct ManifestVisualModel {std::string model,material;};
 // a body of water's (or lava's) surface material: its object is a body (it lies on or in the island's ground)
 inline bool water_surface_material(const std::string& m){return m=="water"||m=="pond"||m=="river"||m=="waterfall"||m=="lava";}

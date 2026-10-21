@@ -71,11 +71,10 @@ struct Params {
     int room = 0;                // the sea square (not stored: where the banks read the island's ground texture from)
 };
 // the shoreline material of a pond's surface (its kind in the game's own water, tools/story_mods/shoreline_model.py),
-// and of a lava pool's (Dragon Roost's lava)
+// and of a lava pool's (the game's lava)
 inline constexpr const char* kPondMaterial = "pond";
 inline constexpr const char* kLavaMaterial = "lava";
-// a lava pool's surface texture coordinate V: inside the pool, and at its shore (Dragon Roost's lava glow: glowing
-// where V is small, its wavy edge between about 0.25 and 0.36, clear beyond)
+// a lava pool's surface texture coordinate V: inside the pool, and at its shore (U runs along the shore)
 inline constexpr double kLavaInside = 0.12, kLavaShore = 0.36;
 // a lava pool's floor colour (dark rock) when none is given
 inline constexpr Colour kLavaFloor{0x3a, 0x2c, 0x26};

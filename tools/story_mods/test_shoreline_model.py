@@ -177,7 +177,7 @@ class ShorelineTests(unittest.TestCase):
     @unittest.skipUnless(__import__('os').environ.get('WWHD_GAME_DIR'), 'set WWHD_GAME_DIR to read the templates from a game folder')
     def test_lava_template_from_the_players_game(self):
         import os
-        # lava: Dragon Roost's (Adanmae room 0, its main model): one texture, the material's own texture scroll
+        # lava: the lava cave's (Cave01 room 0, its main model), moved by Dragon Roost's animation of the same material
         self.assertEqual(coast.template_model('lava'), 'model')
         pts = [(x * 100.0, 5.0, z * 100.0) for z in range(3) for x in range(3)]
         idx = [0, 3, 1, 1, 3, 4, 1, 4, 2, 2, 4, 5, 3, 6, 4, 4, 6, 7, 4, 7, 5, 5, 7, 8]

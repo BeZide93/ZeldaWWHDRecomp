@@ -4,8 +4,9 @@
 Island materials serve as templates (and Dragon Roost's lava): "foam", Outset's animated coast foam; "water", the spring pool's surface of
 Mother & Child Isles with its moving ripples (a pond standing above the sea); "river", the flowing water of the same
 island's spring outflow (its texture scrolls along V: V grows downstream); "waterfall", Forest Haven's falling water
-(the same flow texture, scrolling three times as fast; V grows downwards); "lava", the glowing lava of Dragon Roost's
-mountain path, its two layers scrolling. A water or river surface fades out towards
+(the same flow texture, scrolling three times as fast; V grows downwards); "lava", the glowing lava of the
+lava cave (an even glow; it carries the animation the same material has on Dragon Roost's mountain path, as every
+shoreline carries one). A water or river surface fades out towards
 its open edges (vertex alpha 0 on the mesh's boundary, 1 inside), as the island's own water does; a waterfall gets
 the vertex colours Forest Haven's falls give that material (its blue channel from 1 at the top to 0.3 at the foot).
 
@@ -36,10 +37,14 @@ KINDS = {
     'pond': (44, {'surface': 'SC_01_mizu_v_3_', 'waves': 'SC_01_mizuB_v_x', 'edge': 'SC_01_mizu_v_x'}),
     'river': (41, {'surface': 'SC_00_m_v_x', 'edge': 'SC_00_m', 'splash': 'SC_00_m_2_'}),
     'waterfall': (41, {'surface': 'SC_00_m_v_x', 'edge': 'SC_00_m', 'splash': 'SC_00_m_2_'}),
-    # lava: Dragon Roost's (the mountain path's pool below the Rito aerie, room 0 of the stage Adanmae): its glowing
-    # lava material, with its two layers' texture scroll, from that room's main model (model)
-    'lava': (('Adanmae', 0, 'model'), {'surface': 'E3mYOGAN_v'}),
+    # lava: the lava cave's lava (Cave01 room 0's main model): its glowing lava surface, an even glow over a whole pool.
+    # Its room has no texture animation, and a shoreline is drawn with one: it gets the animation of the same material
+    # in Dragon Roost's room (Adanmae room 0, ANIMATION_ROOMS). Dragon Roost's own lava material is a glow along the lava's rocks that the game draws by
+    # where it stands, not a surface: it lights only part of a pool.
+    'lava': (('Cave01', 0, 'model'), {'surface': 'E3mYOGAN_v'}),
 }
+# the room whose texture animation of a kind's material moves it, when the template room has none
+ANIMATION_ROOMS = {'lava': ('Adanmae', 0, 'model')}
 ROLES = ('surface', 'waves', 'edge', 'splash')
 MATERIALS = {kind: parts['surface'] for kind, (_, parts) in KINDS.items()}
 MATERIAL = MATERIALS['foam']
@@ -445,10 +450,8 @@ def compact(data, identity, model, shapes, materials, animation):
     return bytes(out.b)
 
 
-def player_template(game, kind='foam'):
-    room = TEMPLATE_ROOMS[kind]
-    model = template_model(kind)
-    stage, room = (room[0], room[1]) if isinstance(room, tuple) else ('sea', room)
+def room_archive(game, stage, room):
+    """the files of a room archive of the player's game: a loose stage file, or one in the permanent packs"""
     archive = '%s_Room%d.szs' % (stage, room)
     raw = None
     loose = os.path.join(game, 'content/Common/Stage', archive)
@@ -459,15 +462,45 @@ def player_template(game, kind='foam'):
         path = os.path.join(game, 'content/Common/Pack', pack)
         if not os.path.isfile(path):
             continue
-        with open(path,'rb') as source:
+        with open(path, 'rb') as source:
             packed = dict(base.shaderprep.sarc(source.read()))
         if archive in packed:
             raw = packed[archive]
             break
     require(raw is not None, 'player coast template unavailable')
-    files = dict(base.shaderprep.sarc(base.shaderprep.yaz0(raw)))
+    return dict(base.shaderprep.sarc(base.shaderprep.yaz0(raw)))
+
+
+def with_animation(template, kind, game):
+    """the template with the texture animation of its kind's material taken from another room (ANIMATION_ROOMS):
+    that room's animation rows of the material, bound to the template's model"""
+    import game_piece_model as gp
+    stage, room, model = ANIMATION_ROOMS[kind]
+    files = room_archive(game, stage, room)
+    require('Room%d.bfres' % room in files, 'player coast template unavailable')
+    out = base.Bfres(template)
+    require(not out.rel(0x34), 'player coast template has an animation of its own')
+    w = gp.Writer(files['Room%d.bfres' % room], out)
+    target = dict(out.dict(out.rel(0x20)))[template_model(kind)]
+    animation = gp.copy_animation(w, model, [KINDS[kind][1]['surface']], template_model(kind), target)
+    require(animation is not None, 'player coast animation unavailable')
+    out.set_rel(0x34, append_dictionary(out, [(template_model(kind), animation)]))
+    out.put('H', 0x5A, 1)
+    out.append(b'', 0x1000)
+    out.put('I', 0xC, len(out.b))
+    return bytes(out.b)
+
+
+def player_template(game, kind='foam'):
+    room = TEMPLATE_ROOMS[kind]
+    model = template_model(kind)
+    stage, room = (room[0], room[1]) if isinstance(room, tuple) else ('sea', room)
+    files = room_archive(game, stage, room)
     require('Room%d.bfres' % room in files and model + '.sharcfb' in files, 'player coast template unavailable')
-    return files['Room%d.bfres' % room], files[model + '.sharcfb']
+    template = files['Room%d.bfres' % room]
+    if kind in ANIMATION_ROOMS:
+        template = with_animation(template, kind, game)
+    return template, files[model + '.sharcfb']
 
 
 def shoreline_parts(geometry, kind):

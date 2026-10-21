@@ -340,14 +340,15 @@ them), and add `heat_shimmer` for the heat haze:
 ]
 ```
 
-For the lava's glowing edge, the room's lava faces can also be drawn with a lava material of a kit room. These
-are the kit materials of the game's lava (the material name, and kit rooms that have it):
+The room's lava faces can also be drawn with a lava material of a kit room (under the `lava` actor's surface, or
+on their own for an even glow). These are the kit materials of the game's lava (the material name, and kit rooms
+that have it):
 
 | Material | Kit rooms | |
 |---|---|---|
-| `E3mYOGAN_v` | `M_NewD2` rooms 2, 7, 8, 10, 11, 12, 13 and 15 (Dragon Roost Cavern), `Adanmae` room 0 (Dragon Roost's mountain path), `M_DragB` room 0, `M_Dra09` room 9 | the glowing edge of the lava, its two layers drifting |
-| `E3mYOGAN_v` | `Cave01` rooms 0 and 1 (the lava cave) | the lava cave's lava, still |
-| `R00_1015_3_lambert6_v` | `MiniKaz` room 0 (inside Fire Mountain) | Fire Mountain's lava, still |
+| `E3mYOGAN_v` | `Cave01` rooms 0 and 1 (the lava cave) | the lava cave's lava: an even orange glow |
+| `R00_1015_3_lambert6_v` | `MiniKaz` room 0 (inside Fire Mountain) | Fire Mountain's lava: an even orange glow |
+| `E3mYOGAN_v` | `M_NewD2` rooms 2, 7, 8, 10, 11, 12, 13 and 15 (Dragon Roost Cavern), `Adanmae` room 0 (Dragon Roost's mountain path) | the moving glow along the lava's rocks: the game lights it by where it stands, so on a model of your own it glows only in parts |
 
 Map them with `materials`, for example `"materials": {"col_lava": "E3mYOGAN_v"}` for faces whose material is
 `col_lava` (they are then drawn and are the lava's collision). A kit room used as it is (`"ground": "kit"`) keeps
