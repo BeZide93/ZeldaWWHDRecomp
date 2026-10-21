@@ -81,3 +81,5 @@
 @023FB49C # native boomerang launch: optional trace observation only
 023E048C  # daPy_lk_c::getAnmData: the boost can swap ANM_WALK for ANM_DASH (mods.cpp)
 023D6B30  # daPy_lk_c::jointBeforeCB: additive sprint pose, restored by the native jointAfterCB
+# Calm water (mods/story_world_calm.cpp): a mod island's calm_water zone feeds the sea's own flat factor
+0246B848  # daSea_packet_c::CalcFlatInterTarget: min with the mods' calm-water zones around the player

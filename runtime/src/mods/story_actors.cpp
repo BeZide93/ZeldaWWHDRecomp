@@ -425,8 +425,15 @@ bool sync_visuals(const std::string&mod,const std::vector<ManifestActor>&actors,
  if(g_installed&&!story_world_visuals::replace(mod,preview,why,false))return false;
  if(!apply)return true;g_visual_bindings.reserve(128);std::vector<story_world_visuals::Spec> specs;
  for(const auto&p:plan){const auto&r=g_models.at({mod,p.spec.model});uint32_t token=p.binding?p.binding->token:mod_actor::declare(mod,p.spec,r.archive,r.index,{},r.minimum,r.maximum);if(!token)return why="cannot reserve visual model declaration",false;if(p.binding&&!mod_actor::redeclare(token,p.spec,r.archive,r.index,r.minimum,r.maximum,false,{}, {},true))return why="cannot update visual model declaration",false;if(!mod_actor::visual_role(token,p.role==story_world_visuals::Role::Distant))return why="cannot make collision-free model variant",false;if(!p.binding)g_visual_bindings.push_back({mod,p.parent->id,p.role,token});specs.push_back({mod,p.parent->id,p.role,token,int(p.parent->room),p.parent->position,p.parent->rotation,p.parent->scale,identity::fingerprint(mod,*p.parent)});}
- if(g_installed&&!story_world_visuals::replace(mod,specs,why))return false;for(const auto&a:actors){if(a.arrival.enabled||a.chart_marker.enabled)g_island_mods.insert(mod);if(a.arrival.enabled)story_world_arrival::note_declared();}return true;
+ if(g_installed&&!story_world_visuals::replace(mod,specs,why))return false;for(const auto&a:actors){if(a.arrival.enabled||a.chart_marker.enabled)g_island_mods.insert(mod);if(a.arrival.enabled)story_world_arrival::note_declared();if(a.calm_water.enabled)story_world_calm::note_declared();}return true;
 }
+}
+size_t calm_zones(story_world_calm::Zone*out,size_t max){
+ size_t n=0;for(const auto&a:g_actors){if(!a.spec.calm_water.enabled||a.spec.stage!="sea"||!a.mod_token||!eligible(a))continue;  // (no token: its island was left out)
+ if(n==max)break;out[n++]=story_world_calm::zone_of(a.spec.calm_water,a.spec.position.x,a.spec.position.z,a.spec.rotation.y);}
+ return n;
+}
+namespace {
 void publish_islands(Cpu*c,uint32_t player){
  const auto book=story_store::book();std::map<std::string,std::vector<story_chart::WorldMarker>> markers;for(const auto&mod:g_island_mods)markers[mod];const bool sea=std::strncmp(reinterpret_cast<const char*>(mem::ptr(kStage)),"sea",8)==0;const int room=int8_t(ld8(player+0x326));
  for(const auto&a:g_actors){if(!a.spec.chart_marker.enabled&&!a.spec.arrival.enabled)continue;auto&own=markers[a.mod];if(!eligible(a))continue;

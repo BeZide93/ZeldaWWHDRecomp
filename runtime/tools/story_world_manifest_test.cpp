@@ -514,6 +514,30 @@ int main() {
         auto extra=many;extra["actors"].array.resize(1);extra["actors"].array[0]["room"]=4;selected.push_back({"fifth",extra});assert(!world_manifest::validate_world_packages(selected,why));
     }
 
+    { // Calm water: a static sea world object's zone, bounded, at most eight per mod, not part of the object's identity.
+        auto island=mods::json::parse(R"({"models":[{"id":"island","source":"assets/island.glb"}],"actors":[{"id":"island","kind":"mod","model":"island","behaviour":"static","stage":"sea","room":18,"position":{"x":100,"y":0,"z":-100000},"rotation":{"x":0,"y":90,"z":0},"collision":{"shape":"box","size":{"x":100,"y":100,"z":100}},"calm_water":{"radius":3000}}]})");
+        auto rejected=[&](Value data){assert(!parse_actors(data,actors,why));};
+        assert(parse_actors(island,actors,why)&&actors[0].calm_water.enabled&&actors[0].calm_water.radius==3000&&actors[0].calm_water.falloff==story_world_calm::kGameFalloff&&actors[0].calm_water.offset_x==0&&actors[0].calm_water.offset_z==0);
+        const auto with=story_actors::identity::fingerprint("own",actors[0]);auto plain=actors[0];plain.calm_water={};assert(story_actors::identity::fingerprint("own",plain)==with);
+        {auto data=island;data["actors"].array[0]["calm_water"]=mods::json::parse(R"({"radius":4500.5,"falloff":2000,"offset":{"x":-1200,"z":300}})");
+         assert(parse_actors(data,actors,why)&&actors[0].calm_water.radius==4500.5f&&actors[0].calm_water.falloff==2000&&actors[0].calm_water.offset_x==-1200&&actors[0].calm_water.offset_z==300);}
+        for(double radius:{100.,100000.}){auto data=island;data["actors"].array[0]["calm_water"]["radius"]=radius;assert(parse_actors(data,actors,why));}
+        for(double radius:{0.,99.9,100000.5,-5.}){auto data=island;data["actors"].array[0]["calm_water"]["radius"]=radius;rejected(data);}
+        for(double falloff:{800.,25600.}){auto data=island;data["actors"].array[0]["calm_water"]["falloff"]=falloff;assert(parse_actors(data,actors,why));}
+        for(double falloff:{0.,799.,25601.}){auto data=island;data["actors"].array[0]["calm_water"]["falloff"]=falloff;rejected(data);}
+        for(const char*text:{R"({})",R"({"falloff":1000})",R"({"radius":"3000"})",R"({"radius":3000,"height":2})",R"({"radius":3000,"offset":{"x":1}})",R"({"radius":3000,"offset":{"x":1,"y":2,"z":3}})",R"({"radius":3000,"offset":{"x":100001,"z":0}})",R"(true)"}){
+            auto data=island;data["actors"].array[0]["calm_water"]=mods::json::parse(text);rejected(data);}
+        {auto data=island;data["actors"].array[0]["calm_water"]=Value{};rejected(data);}
+        // only on a static sea world object
+        {auto bad=island;bad["actors"].array[0]["stage"]="Asoko";rejected(bad);}
+        {auto bad=island;bad["actors"].array[0]["behaviour"]="floating";rejected(bad);}
+        {auto bad=example();bad["actors"].array[0]["calm_water"]=mods::json::parse(R"({"radius":3000})");rejected(bad);}
+        // eight zones per mod
+        auto many=island;auto prototype=many["actors"].array[0];many["actors"].array.clear();
+        for(unsigned n=0;n<8;++n){auto a=prototype;a["id"]="island"+std::to_string(n);a["position"]["x"]=int(1000*n);many["actors"].array.push_back(a);}assert(parse_actors(many,actors,why));
+        auto nine=many;auto ninth=prototype;ninth["id"]="ninth";ninth["position"]["x"]=9000;nine["actors"].array.push_back(ninth);rejected(nine);
+    }
+
     std::vector<ManifestModel> models;assert(parse_models(valid_mod,models,why)&&models[0].kind=="static");
     mod=valid_mod;mod["models"].array[0]["kind"]="skinned";assert(parse_models(mod,models,why)&&models[0].kind=="skinned");
     mod["models"].array[0]["kind"]="static";assert(parse_models(mod,models,why)&&models[0].kind=="static");

@@ -3591,6 +3591,10 @@ add_executable(story_world_arrival_test runtime/tools/story_world_arrival_test.c
 target_include_directories(story_world_arrival_test PRIVATE runtime/src runtime/include)
 target_compile_options(story_world_arrival_test PRIVATE -UNDEBUG)
 add_test(NAME story_world_arrival COMMAND story_world_arrival_test)
+add_executable(story_world_calm_test runtime/tools/story_world_calm_test.cpp)
+target_include_directories(story_world_calm_test PRIVATE runtime/src runtime/include)
+target_compile_options(story_world_calm_test PRIVATE -UNDEBUG)
+add_test(NAME story_world_calm COMMAND story_world_calm_test)
 add_test(NAME story_world_visual_model_contract COMMAND mod_actor_runtime_test --world-visual)
 
 # Load completion belongs to the request across retries and asynchronous arrival.

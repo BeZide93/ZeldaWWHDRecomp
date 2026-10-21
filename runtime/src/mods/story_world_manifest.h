@@ -1,5 +1,6 @@
 // SDK v3 preview: bounded declarative world content. No game save bits are accepted here.
 #pragma once
+#include "story_world_calm.h"
 #include "story_world_collision_mesh.h"
 #include <algorithm>
 #include <cmath>
@@ -75,6 +76,7 @@ struct ManifestActor {
     ManifestBuoyancy buoyancy;ManifestDrift drift;ManifestAnchor anchor;
     std::vector<ManifestGrapplePoint> grapple_points;
     ManifestVisualModel distant,shoreline;ManifestChartMarker chart_marker;ManifestArrival arrival;
+    story_world_calm::Settings calm_water;  // still water around a sea island (story_world_calm.h)
     bool world_object()const{return !behaviour.empty();}
     bool water_object()const{return behaviour=="floating"||behaviour=="drifting";}
     // a body of water (the editor's water tool, docs/world-objects.md "Water"): a static object whose shoreline is a
@@ -484,9 +486,9 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
     if(list.type==Value::Null)return true;
     if(list.type!=Value::Array||list.array.size()>kMaxActorsPerMod)return why="actors must be a list of up to 64",false;
     unsigned need=0;if(m.get("requires").type==Value::Object&&!story_game_objects::required_version(m,std::max(story_game_objects::catalogue().version,story_game_pieces::catalogue().version),need,why))return false;
-    unsigned chart_marker_count=0;
+    unsigned chart_marker_count=0,calm_water_count=0;
     for(const auto& v:list.array){ManifestActor a;
-        if(!keys(v,{"id","actor","kind","model","animation","look_at","path","collision","behaviour","group","buoyancy","drift","anchor","grapple_points","distant","shoreline","chart_marker","arrival","attention","stage","room","position","rotation","scale","params","parameters","flag","broken_flag","defeated_flag","drops","carry","combat","native_drops","switch_flag","switch","defeat_switch","when","lines","then","texture","talks","variant"}))return why="unknown actor field",false;
+        if(!keys(v,{"id","actor","kind","model","animation","look_at","path","collision","behaviour","group","buoyancy","drift","anchor","grapple_points","distant","shoreline","chart_marker","arrival","calm_water","attention","stage","room","position","rotation","scale","params","parameters","flag","broken_flag","defeated_flag","drops","carry","combat","native_drops","switch_flag","switch","defeat_switch","when","lines","then","texture","talks","variant"}))return why="unknown actor field",false;
         if(!id(v.get("id")))return why="invalid actor id",false;a.id=v.get("id").text;a.actor=v.get("actor").string();
         if(story_game_pieces::is_reference(a.actor)){
             if(!game_piece_fields(v,need,a,why))return false;
@@ -603,8 +605,8 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
         if((v.object.contains("buoyancy")||v.object.contains("drift")||v.object.contains("anchor"))&&!a.water_object())return why="motion settings require floating or drifting behaviour",false;
         // a kit model: a static world object turned about the vertical axis only, at its own size (as game pieces)
         if(a.kit_model&&(a.behaviour!="static"||a.scale.x!=1||a.scale.y!=1||a.scale.z!=1||a.rotation.x!=0||a.rotation.z!=0))return why="actor "+a.id+": a kit model is a static world object, turned about the vertical axis only, at scale 1",false;
-        const bool island_fields=v.object.contains("distant")||v.object.contains("shoreline")||v.object.contains("chart_marker")||v.object.contains("arrival");
-        if(island_fields&&(!a.world_object()||a.behaviour!="static"||a.stage!="sea"))return why="distant, shoreline, chart_marker and arrival require a static sea world object",false;
+        const bool island_fields=v.object.contains("distant")||v.object.contains("shoreline")||v.object.contains("chart_marker")||v.object.contains("arrival")||v.object.contains("calm_water");
+        if(island_fields&&(!a.world_object()||a.behaviour!="static"||a.stage!="sea"))return why="distant, shoreline, chart_marker, arrival and calm_water require a static sea world object",false;
         auto visual_model=[&](const char*key,ManifestVisualModel&out){
             if(!v.object.contains(key))return true;const auto&value=v.get(key);
             const bool shore=std::string(key)=="shoreline";
@@ -620,6 +622,16 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
             const auto&value=v.get("arrival");
             if(!keys(value,{"name","radius","flag"})||!island_text(value.get("name"),a.arrival.name)||!number(value.get("radius"),100,double(story_world_collision::mesh::MaxExtent),a.arrival.radius)||!flag_id(value.get("flag")))return why="arrival requires a single-line name up to 96 bytes, radius 100..100000 and a mod-owned flag",false;
             a.arrival.enabled=true;a.arrival.flag=value.get("flag").text;
+        }
+        if(v.object.contains("calm_water")){
+            namespace calm=story_world_calm;const auto&value=v.get("calm_water");auto&c=a.calm_water;
+            if(!keys(value,{"radius","falloff","offset"})||!number(value.get("radius"),calm::kMinRadius,calm::kMaxRadius,c.radius))
+                return why="actor "+a.id+": calm_water requires a radius of 100..100000 (and may give falloff 800..25600 and offset {x, z})",false;
+            if(value.object.contains("falloff")&&!number(value.get("falloff"),calm::kMinFalloff,calm::kMaxFalloff,c.falloff))return why="actor "+a.id+": calm_water falloff must be 800..25600",false;
+            if(value.object.contains("offset")){const auto&o=value.get("offset");
+                if(!keys(o,{"x","z"})||!number(o.get("x"),-calm::kMaxOffset,calm::kMaxOffset,c.offset_x)||!number(o.get("z"),-calm::kMaxOffset,calm::kMaxOffset,c.offset_z))return why="actor "+a.id+": calm_water offset must be {x, z} within 100000",false;}
+            if(++calm_water_count>calm::kMaxPerMod)return why="a mod may declare at most eight calm_water zones",false;
+            c.enabled=true;
         }
         if(v.object.contains("chart_marker")){
             const auto&value=v.get("chart_marker");
