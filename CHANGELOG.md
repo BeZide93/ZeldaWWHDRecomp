@@ -7,6 +7,10 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Less GPU work on Vulkan** (idea and first versions from the GreenNaugahyde Android fork). Shaders use the slower
+  exact multiply only where a value may be infinite, and rendered mip chains are built only as deep as the game samples
+  them, starting from the first changed level. On our test phone the GPU time per frame fell by about 8–9%; pictures
+  match the previous version (a few pixels differ in the lowest bits).
 - **Export the game's islands for Blender** (for mod makers). The editor's new `export_glb` command (and
   `tools/story_mods/export_glb.py`) writes a game room, e.g. Outset or Windfall, or one building as a GLB file with
   textures, the game's material names and optionally collision by ground type and actor markers. It is a reference
