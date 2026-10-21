@@ -384,7 +384,7 @@ int main() {
         };
         int bad = 0;
         bad += !refuse("\"after\": \"heart\"", "\"after\": \"boss-key-x\"", "names a chest of the stage");
-        bad += !refuse("\"style\": \"updraft\"", "\"style\": \"geyser\"", "style is walk or updraft");
+        bad += !refuse("\"style\": \"updraft\"", "\"style\": \"geyser\"", "style is walk, updraft or hole");
         bad += !refuse("\"height\": 1500", "\"height\": 9000", "height is 200..5000");
         bad += !refuse("\"style\": \"updraft\", \"height\": 1500", "\"height\": 1500", "only an updraft has a height");
         bad += !refuse("\"shaders\": \"assets/sky.wwht\"", "\"shaders\": \"../sky.wwht\"", "is a .wwht file in the package");
@@ -396,6 +396,24 @@ int main() {
         pot.replace(pot.find("\"actor\": \"chest\", \"item\": \"heart_container\""), std::strlen("\"actor\": \"chest\", \"item\": \"heart_container\""), "\"actor\": \"pot\"");
         std::vector<Stage> o;
         assert(!parse(parse_json(pot), o, w) && w.find("names a chest") != std::string::npos);
+    }
+
+    // a hole into the stage: Link falls into the shaft under an opening and arrives falling ("fall" spawn only)
+    {
+        const std::string hole = R"({"stages": [{"id": "depths", "template": "GTower", "kind": "dungeon", "entrance": {"stage": "sea", "room": 44, "point": 0},
+          "rooms": [{"room": 0, "ground": "assets/hall.glb", "spawns": [{"point": 0, "position": {"x": 0, "y": 200, "z": 1600}, "start": "fall"},
+                                                                        {"point": 1, "position": {"x": 0, "y": 200, "z": 800}}]}],
+          "entries": [{"id": "hole", "stage": "sea", "room": 44, "style": "hole", "position": {"x": -200400, "y": 6700, "z": 302000},
+                       "size": {"x": 140, "y": 250, "z": 140}, "to": {"room": 0, "point": 0}}]}]})";
+        std::vector<Stage> o;
+        std::string why2;
+        assert(parse(parse_json(hole), o, why2) && o[0].entries[0].style == "hole");
+        std::string stand = hole;
+        stand.replace(stand.find("\"to\": {\"room\": 0, \"point\": 0}"), std::strlen("\"to\": {\"room\": 0, \"point\": 0}"), "\"to\": {\"room\": 0, \"point\": 1}");
+        assert(!parse(parse_json(stand), o, why2) && why2.find("isn't a \"fall\" spawn") != std::string::npos);
+        std::string high = hole;
+        high.replace(high.find("\"style\": \"hole\""), std::strlen("\"style\": \"hole\""), "\"style\": \"hole\", \"height\": 1500");
+        assert(!parse(parse_json(high), o, why2) && why2.find("only an updraft has a height") != std::string::npos);
     }
 
     // the quest of a sky stage: a chest opened, a darknut defeated, an entry and a warp taken run the package's story

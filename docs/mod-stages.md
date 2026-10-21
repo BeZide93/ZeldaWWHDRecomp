@@ -231,6 +231,18 @@ a spot Link can walk or swim into: off an island's shore, at the foot of a water
  "position": {"x": -194845, "y": 0, "z": 315400}, "size": {"x": 400, "y": 800, "z": 400}, "to": {"room": 0, "point": 0}}
 ```
 
+`"style": "hole"` makes the entry a hole Link falls into, as into the game's holes into caves: its box is the
+shaft under an opening in the ground (an opening in a world object's model and its collision, say), below the
+ground Link walks on, so only a fall reaches it. The screen fades as he falls, and he arrives at a spawn with
+`"start": "fall"`, dropping in from above (Check refuses a hole that leads to another spawn). Leave the shaft open
+at the bottom: a fall that doesn't take the hole (the game busy with a scene) goes on through the dark and out
+of the shaft rather than leaving Link stuck in it.
+
+```json
+{"id": "hole", "stage": "sea", "room": 44, "style": "hole", "position": {"x": -200300, "y": 6750, "z": 301900},
+ "size": {"x": 150, "y": 220, "z": 150}, "to": {"room": 0, "point": 0}}
+```
+
 ### Getting there by a scene
 
 A talk's or a scene's `then` can take Link into one of the package's own stages:

@@ -555,9 +555,9 @@ void logic(Cpu*) {
                 LOG("[mod-stages] updraft %s/%s: the wind lifts Link (%.0f units)", b.info.mod.c_str(), e.id.c_str(), e.height);
                 return;
             }
-            enter(b.info.name, e.to_room, e.to_point, 0);  // wipe: fade
-            LOG("[mod-stages] entry %s/%s: Link goes into %s (%s room %u point %u)", b.info.mod.c_str(), e.id.c_str(), b.info.id.c_str(),
-                b.info.name.c_str(), e.to_room, e.to_point);
+            enter(b.info.name, e.to_room, e.to_point, 0);  // wipe: fade (a hole's too: he falls on through the dark into the stage)
+            LOG("[mod-stages] %s %s/%s: Link %s %s (%s room %u point %u)", e.style == "hole" ? "hole" : "entry", b.info.mod.c_str(), e.id.c_str(),
+                e.style == "hole" ? "falls into" : "goes into", b.info.id.c_str(), b.info.name.c_str(), e.to_room, e.to_point);
             return;
         }
     // the return warps of the stage Link is in

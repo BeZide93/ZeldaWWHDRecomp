@@ -98,7 +98,9 @@ struct Entry {
     unsigned room = 0;
     Point position, size;  // the box: its centre bottom and full size
     unsigned to_room = 0, to_point = 0;
-    std::string style = "walk";  // "walk": the fade as he steps in; "updraft": the wind lifts him first
+    // "walk": the fade as he steps in; "updraft": the wind lifts him first; "hole": the box is the shaft under an
+    // opening Link falls into (as into the game's holes into caves), and he arrives falling (a "fall" spawn)
+    std::string style = "walk";
     double height = 1500;        // an updraft's lift (units) before the stage takes over
     std::string then;            // story actions (JSON) when Link takes it ("" none)
     bool operator==(const Entry&) const = default;
@@ -432,7 +434,7 @@ inline bool parse(const Value& m, std::vector<Stage>& out, std::string& why, boo
                 return why = at + "entry " + n.id + ": \"to\" is a room and spawn point of the stage", false;
             if (nv.get("style").type != Value::Null) {
                 n.style = nv.get("style").string();
-                if (n.style != "walk" && n.style != "updraft") return why = at + "entry " + n.id + ": style is walk or updraft", false;
+                if (n.style != "walk" && n.style != "updraft" && n.style != "hole") return why = at + "entry " + n.id + ": style is walk, updraft or hole", false;
             }
             if (nv.get("height").type != Value::Null) {
                 const Value& h = nv.get("height");
@@ -545,8 +547,13 @@ inline bool parse(const Value& m, std::vector<Stage>& out, std::string& why, boo
                 }
                 if (!spawn_of(*target, e.to.room, e.to.point)) return why = "stage " + s.id + ": exit " + e.id + " leads to a spawn its stage does not have", false;
             }
-        for (const auto& n : s.entries)
+        for (const auto& n : s.entries) {
             if (!spawn_of(s, n.to_room, n.to_point)) return why = "stage " + s.id + ": entry " + n.id + " leads to a spawn the stage does not have", false;
+            // a hole: Link falls in, so he arrives falling from above, as from the game's own holes
+            if (n.style == "hole")
+                for (const auto& sp : s.rooms[n.to_room].spawns)
+                    if (sp.point == n.to_point && sp.start != "fall") return why = "stage " + s.id + ": hole " + n.id + " leads to a spawn that isn't a \"fall\" spawn", false;
+        }
         for (const auto& w : s.warps)
             if (w.to.own) {
                 const Stage* target = &s;

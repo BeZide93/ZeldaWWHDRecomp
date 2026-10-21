@@ -118,7 +118,7 @@ const std::vector<CommandInfo> kCommands = {
       {"to", "object", "an exit's or warp's place"}, {"to_room", "integer", "a door's other room, an entry's room"}, {"to_point", "integer", "an entry's spawn point"},
       {"lock", "string", "none, small_key, boss or shutter"}, {"switch", "integer", "a shutter's switch"}, {"item", "string", "a chest's: small_key, map, compass, boss_key, heart_container"},
       {"actor", "string", "an enemy: chuchu, bokoblin, keese, darknut"}, {"variant", "string", ""}, {"size", "object", "a box's size {x, y, z}; lava's area {x, z}"},
-      {"style", "string", "an entry's: walk (default) or updraft (the wind lifts Link first)"}, {"height", "number", "an updraft's lift in units (200..5000, default 1500)"}, {"after", "string", "a warp's: the chest (its id) that must be open first"}, {"angle", "number", ""}, {"mod", "string", ""}},
+      {"style", "string", "an entry's: walk (default), updraft (the wind lifts Link first) or hole (Link falls in; the spawn is a fall spawn)"}, {"height", "number", "an updraft's lift in units (200..5000, default 1500)"}, {"after", "string", "a warp's: the chest (its id) that must be open first"}, {"angle", "number", ""}, {"mod", "string", ""}},
      true},
     {"notebook_page", "Opens (or closes) the Story Notebook's page over the game, as the player opens it from the Delivery Bag: the quests, their steps and where; take a screenshot to see it.",
      {{"open", "boolean", "true (default) opens it, false closes it"}, {"give", "boolean", "test mode: the notebook goes into the loaded save first, as its letter would put it"}}},

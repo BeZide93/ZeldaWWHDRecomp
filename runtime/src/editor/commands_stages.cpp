@@ -205,7 +205,7 @@ Value Session::dispatch_stages(const std::string& command, const Value& p, std::
                 e["size"] = point_value(200, 200, 200);
                 e["to"]["room"] = p.get("to_room").type == Value::Number ? p.get("to_room").number : 0.0;
                 e["to"]["point"] = p.get("to_point").type == Value::Number ? p.get("to_point").number : 0.0;
-                if (p.get("style").type == Value::String) e["style"] = p.get("style").text;  // walk or updraft
+                if (p.get("style").type == Value::String) e["style"] = p.get("style").text;  // walk, updraft or hole
                 if (p.get("height").type == Value::Number) e["height"] = p.get("height").number;
                 if (p.get("size").type == Value::Object) e["size"] = p.get("size");
                 else if (e.get("style").string() == "updraft") e["size"] = point_value(400, 800, 400);  // a column of wind
