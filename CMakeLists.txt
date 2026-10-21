@@ -3501,6 +3501,7 @@ if(Python3_Interpreter_FOUND)
   add_test(NAME story_world_objects_w0_assets COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/story_mods/test_world_objects_w0.py)
   add_test(NAME story_game_objects_tool COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/story_mods/test_game_objects.py)
   add_test(NAME story_game_pieces_tool COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/story_mods/test_game_piece_model.py)
+  add_test(NAME story_export_glb_tool COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/story_mods/test_export_glb.py)
 endif()
 
 target_sources(mod_content_fs_test PRIVATE runtime/src/mods/story_world_collision_mesh.cpp)

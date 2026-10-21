@@ -642,6 +642,31 @@ Value kit_materials(const std::string& game_dir, const std::string& stage, unsig
     return result;
 }
 
+Value export_glb(const std::string& game_dir, const std::string& out, const std::vector<std::string>& what, std::string& why) {
+    std::vector<std::string> command;
+    try {
+        const auto bridge = guestmods::BuildBridge::installed(std::string());
+        command = bridge.python;
+        command.push_back((std::filesystem::path(bridge.builder).parent_path().parent_path() / "story_mods" / "export_glb.py").string());
+    } catch (const std::exception& e) {
+        return why = std::string("the exporter is unavailable: ") + e.what(), Value();
+    }
+    command.insert(command.end(), {"--game", g_game_dir.empty() ? game_dir : g_game_dir, "--out", out, "--json"});
+    command.insert(command.end(), what.begin(), what.end());
+    const auto process = host::run_process(command);
+    Value result;
+    try {
+        const auto end = process.output.find_last_not_of("\r\n");
+        const auto line = end == std::string::npos ? std::string::npos : process.output.rfind('\n', end);
+        result = mods::json::parse(process.output.substr(line == std::string::npos ? 0 : line + 1));
+    } catch (...) {
+    }
+    if (!process.error.empty() || process.code || !result.get("ok").boolean)
+        return why = "the export failed: " + result.get("error").string(process.error.empty() ? "no result" : process.error), Value();
+    result.object.erase("ok");
+    return result;
+}
+
 bool enter_stage(const std::string& mod, const std::string& id, unsigned room, unsigned point) {
     for (const auto& b : g_stages) {
         if (b.info.mod != mod || b.info.id != id) continue;

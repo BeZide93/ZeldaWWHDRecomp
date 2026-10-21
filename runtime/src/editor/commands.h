@@ -119,6 +119,14 @@ public:
         why = "the notebook can't be opened here";
         return false;
     }
+    // A game room ({stage, room}) or a game piece ({piece}) exported as <name>.glb into the player's exports folder
+    // (<mod manager>/Exports; never a package): the exporter's summary with "file". Request: stage, room, piece,
+    // name, collision, actors, max_texture (checked by the command).
+    virtual Value export_glb(const Value& request, std::string& why) {
+        (void)request;
+        why = "the game's rooms can't be exported here";
+        return {};
+    }
     // Test mode: the save group's stage record erased from the loaded Quest Log (and the working one).
     virtual bool reset_stage_save(const std::string& mod, const std::string& group, std::string& why) {
         (void)mod, (void)group;

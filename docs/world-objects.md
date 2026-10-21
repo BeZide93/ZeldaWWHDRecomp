@@ -424,6 +424,74 @@ Ship only your original source models and package files. The game prepares its
 rendering resources and collision cache locally; generated cache archives and
 resources taken from the game do not belong in an exported mod.
 
+## Export the game's islands for reference
+
+Before modelling a new island, you can open the game's own islands and
+buildings in Blender to see how big things are, how the game shapes them and
+which materials it uses. The editor's `export_glb` command writes a `.glb` file
+from your own game files:
+
+```text
+export_glb {"stage":"sea","room":44,"collision":true,"actors":true}
+export_glb {"stage":"sea","room":11,"name":"windfall"}
+export_glb {"piece":"outset-house-ladder","collision":true}
+```
+
+- A **room** (`stage` and `room`; sea room 44 is Outset Island, 11 is Windfall
+  Island) exports every model of the room in place: the ground, cliffs, houses
+  and rocks, the shore and water models and the window glows. Each model of the
+  room is one object with its parts as children. Any stage of the game works
+  (`{"stage":"M_NewD2","room":3}`).
+- A **game piece** (`piece`: a building, island part or island from the editor's
+  Game objects palette, `list_game_objects`) exports exactly what the piece
+  places, with the piece's own origin.
+- `collision` adds the collision as one more object, `<name>_col`, with one
+  material per ground type: `col_grass`, `col_sand`, `col_wood`, `col_stone`,
+  `col_wall`, `col_water`, `col_shallow` and the others listed under
+  [Author collision in the GLB](#author-collision-in-the-glb). The names are the
+  ones your own collision meshes use.
+- `actors` adds an empty object for each actor placed in the room (trees,
+  grass, signs, doors and so on), named after the actor, at its position and
+  facing. Only the place is exported, not the actor's model.
+- `name` sets the file name (default `sea_room44` or the piece id), and
+  `max_texture` (128 to 2048) halves larger textures to keep the file small.
+
+The file goes to the `Exports` folder of the mod manager's storage
+(`<host config directory>/ModManager/Exports`), never into a package. An export
+takes a few seconds for a small island and up to a minute for a large one. The
+command returns the file's path and its triangle, material and texture counts.
+
+The file uses the same conventions as your own models. One metre is 100 game
+units, Y is up, and Blender's glTF importer turns it to Z up. The textures are
+embedded as PNG and the vertex colours are kept. A room is centred on its own
+sea square: the square's centre is the origin and the island sits where it sits
+in the square. A piece's origin is where the placed piece's origin is.
+
+**Material names are kit materials.** Every material in the file has the game's
+name for it, for example `A_jimen_a_v` for Outset's ground. That is the name a
+mod stage's `materials` and `material` fields take (see
+[Kit materials](mod-stages.md#kit-materials)). In Blender, give your own
+surfaces your own material names and map them to these names in the manifest,
+or look up a texture's name in the material's custom properties
+(`wwhd.samplers`, for example `{"_a0": "Txa_jimen_a"}`). The custom properties
+also hold the room's offset on the sea and each actor's parameters.
+
+Use the export as a reference only:
+
+- Build **original geometry**. Measure the export, copy its proportions and
+  style, then model your own island and buildings and paint your own textures.
+- Leave the game's textures in the game. Where your stage should use one, refer
+  to it by its material name as a kit material. The game draws it from the
+  player's own files.
+- **The exported models and textures are your own copy of Nintendo's content.**
+  Keep them on your machine. Do not share them, upload them, or put them or
+  anything traced from them into a mod package, an asset folder or a
+  screenshot set for a release.
+
+The same exporter runs outside the game:
+`python3 tools/story_mods/export_glb.py --game <game folder> --stage sea --room 44 --out outset.glb --collision --actors`
+(or `--piece <id>` in place of `--stage` and `--room`).
+
 ## Climbable walls and hookshot surfaces
 
 Assign `col_climb` to an outward-facing vertical collision wall. Leave clear

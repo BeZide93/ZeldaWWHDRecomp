@@ -1715,6 +1715,43 @@ void pond_on_terrace() {
     fs::remove_all(dir);
 }
 
+// export_glb: a game room or a game piece for Blender; the command checks the request and the host writes the file
+// into the player's exports folder (never a package)
+struct ExportHost : FakeHost {
+    Value last;
+    int calls = 0;
+    Value export_glb(const Value& request, std::string& why) override {
+        (void)why;
+        ++calls;
+        last = request;
+        Value r;
+        r["file"] = "/exports/" + request.get("name").string() + ".glb";
+        r["triangles"] = 9284.0;
+        return r;
+    }
+};
+void export_command() {
+    ExportHost host;
+    editor::Session s(&host);
+    Value r = s.run("export_glb", json(R"({"stage": "sea", "room": 44, "collision": true, "actors": true})"));
+    CHECK(ok(r) && host.calls == 1 && r.get("result").get("file").string() == "/exports/sea_room44.glb");
+    CHECK(host.last.get("stage").string() == "sea" && host.last.get("room").number == 44 && host.last.get("collision").boolean &&
+          host.last.get("actors").boolean && host.last.get("piece").string().empty());
+    CHECK(r.get("result").get("note").string().find("never share") != std::string::npos);
+    r = s.run("export_glb", json(R"({"piece": "outset-house-ladder", "name": "house_ref", "max_texture": 512})"));
+    CHECK(ok(r) && host.last.get("piece").string() == "outset-house-ladder" && host.last.get("name").string() == "house_ref" &&
+          host.last.get("max_texture").number == 512 && !host.last.get("collision").boolean);
+    // refused before the host runs: neither or both of room and piece, a path for a name, odd sizes, actors on a piece
+    for (const char* bad : {R"({})", R"({"stage": "sea"})", R"({"stage": "sea", "room": 44, "piece": "outset-house-ladder"})",
+                            R"({"stage": "sea", "room": 44, "name": "../outside"})", R"({"stage": "sea", "room": 64})",
+                            R"({"stage": "../x", "room": 1})", R"({"piece": "outset-house-ladder", "actors": true})",
+                            R"({"stage": "sea", "room": 44, "max_texture": 300})", R"({"piece": "a/b"})"}) {
+        r = s.run("export_glb", json(bad));
+        CHECK(!ok(r));
+    }
+    CHECK(host.calls == 2);
+}
+
 int main(int argc, char** argv) {
     // editor_test --game <game dir> [stage room]: what the editor reads from a game folder (manual check)
     if (argc >= 3 && std::string(argv[1]) == "--game") {
@@ -1751,6 +1788,7 @@ int main(int argc, char** argv) {
     stage_tables();
     ray_pick();
     water_tool();
+    export_command();
     if (g_failures) {
         std::fprintf(stderr, "editor_test: %d failure(s)\n", g_failures);
         return 1;

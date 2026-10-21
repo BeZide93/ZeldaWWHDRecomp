@@ -82,6 +82,11 @@ Value templates(const std::string& game_dir, std::string& why);
 // A kit room's materials (the stage builder's --kit-materials): {materials: [{material, textures, triangles,
 // uv_min, uv_max}], main}, names and numbers only.
 Value kit_materials(const std::string& game_dir, const std::string& stage, unsigned room, std::string& why);
+// A room of the game or a game piece as a GLB file for Blender (tools/story_mods/export_glb.py): `what` is the
+// tool's selection (--stage S --room N, or --piece ID --recipe FILE) and options; the result is the tool's summary
+// {file, bytes, triangles, vertices, materials, textures, texture_names, collision_triangles, surfaces, actors,
+// warnings}. The file is the player's own copy of game content: it goes to their exports folder only.
+Value export_glb(const std::string& game_dir, const std::string& out, const std::vector<std::string>& what, std::string& why);
 // once per game logic pass (guest_mods logic_service): the entries' boxes
 void logic(Cpu* c);
 // The "stage" action of a mod's talk or scene: Link goes into the mod's own stage `id` (room, spawn point) with

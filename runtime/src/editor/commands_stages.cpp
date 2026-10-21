@@ -339,6 +339,44 @@ Value Session::dispatch_stages(const std::string& command, const Value& p, std::
         ok = true;
         return r;
     }
+    if (command == "export_glb") {
+        // a game room or a game piece as a GLB for Blender, into the player's own exports folder (docs/world-objects.md)
+        if (!host_) return why = "the game is not running", r;
+        const std::string stage = text(p, "stage"), piece = text(p, "piece");
+        const bool room_given = p.get("room").type == Value::Number;
+        if (piece.empty() == stage.empty() || (!stage.empty() && !room_given) || (!piece.empty() && room_given))
+            return why = "give a room ({\"stage\": \"sea\", \"room\": 44}) or a game piece ({\"piece\": \"outset-house-ladder\"})", r;
+        const auto plain = [](const std::string& s, size_t longest, const char* extra) {
+            return !s.empty() && s.size() <= longest &&
+                   s.find_first_not_of(std::string("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789") + extra) == std::string::npos;
+        };
+        if (!stage.empty() && (!plain(stage, 8, "_") || p.get("room").number < 0 || p.get("room").number > 63 || p.get("room").number != std::floor(p.get("room").number)))
+            return why = "a room is a stage of the game and a room number (0..63)", r;
+        if (!piece.empty() && !plain(piece, 32, "-")) return why = "\"piece\" is a game piece id (list_game_objects)", r;
+        Value request;
+        request["stage"] = stage;
+        if (room_given) request["room"] = p.get("room").number;
+        request["piece"] = piece;
+        std::string name = text(p, "name");
+        if (name.empty()) name = piece.empty() ? stage + "_room" + std::to_string(int(p.get("room").number)) : piece;
+        if (!plain(name, 64, "_-")) return why = "\"name\": the file's name without .glb, letters, digits, _ and - (it goes into your exports folder)", r;
+        request["name"] = name;
+        request["collision"] = p.get("collision").type == Value::Bool && p.get("collision").boolean;
+        request["actors"] = p.get("actors").type == Value::Bool && p.get("actors").boolean;
+        if (request.get("actors").boolean && !piece.empty()) return why = "\"actors\" is for a room", r;
+        if (p.get("max_texture").type == Value::Number) {
+            const double m = p.get("max_texture").number;
+            if (m != 128 && m != 256 && m != 512 && m != 1024 && m != 2048) return why = "\"max_texture\" is 128, 256, 512, 1024 or 2048", r;
+            request["max_texture"] = m;
+        }
+        Value got = host_->export_glb(request, why);
+        if (!why.empty()) return r;
+        r = got;
+        r["note"] = "your own copy of the game's models and textures, for reference in Blender (scale, style, material names): "
+                    "never share it or put it into a mod. Build original geometry; a material's name is the kit material to use.";
+        ok = true;
+        return r;
+    }
     if (command == "list_stage_templates") {
         if (!host_) return why = "the game is not running", r;
         const Value all = host_->stage_templates(why);

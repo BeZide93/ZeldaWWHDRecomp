@@ -155,18 +155,11 @@ class Shape:
     pass
 
 
-def read_model(src, name):
-    """Shapes of one BG model: vertex records (room-local), indices, node, material."""
-    models = dict(src.dict(src.rel(0x20)))
-    require(name in models, 'the room has no BG model ' + name)
-    model = models[name]
-    skeleton = src.rel(model + 0xC)
+def bone_matrices(src, skeleton):
+    """bone index -> (3x3 world matrix incl. scale, world translation) of a BG model's skeleton"""
     bones = src.rel(skeleton + 0x14)
     nbones = src.u16(skeleton + 8)
     euler = (src.u32(skeleton + 4) >> 12) & 7 == 1
-    # each bone's world transform (3x3 and translation); a shape is taken when its bone's world rotation comes out as
-    # none (a parent's turn undone by the child's, as Five-Star's pillars): its positions are scaled and moved. A scale
-    # that differs between the axes is taken only for shapes without normals (an island's water surfaces)
     matrices = {}
     for i in range(nbones):
         b = bones + 0x40 * i
@@ -192,6 +185,18 @@ def read_model(src, name):
             m = [[sum(pm[j][q] * local[q][k] for q in range(3)) for k in range(3)] for j in range(3)]
             t = tuple(pt[j] + sum(pm[j][q] * tr[q] for q in range(3)) for j in range(3))
             matrices[i] = (m, t)
+    return matrices
+
+
+def read_model(src, name):
+    """Shapes of one BG model: vertex records (room-local), indices, node, material."""
+    models = dict(src.dict(src.rel(0x20)))
+    require(name in models, 'the room has no BG model ' + name)
+    model = models[name]
+    # each bone's world transform (3x3 and translation); a shape is taken when its bone's world rotation comes out as
+    # none (a parent's turn undone by the child's, as Five-Star's pillars): its positions are scaled and moved. A scale
+    # that differs between the axes is taken only for shapes without normals (an island's water surfaces)
+    matrices = bone_matrices(src, src.rel(model + 0xC))
     world = {}
     for i, (m, t) in matrices.items():
         unturned = all(abs(m[j][k]) < 1e-5 for j in range(3) for k in range(3) if j != k) and all(m[j][j] > 1e-3 for j in range(3))
@@ -669,6 +674,27 @@ def read_dzb(d):
     return verts, tris, names, infos, group_info
 
 
+def triangle_surface(pts, code, water, void=False):
+    """The world-object surface (col_*) of one room collision triangle: its raw attribute code's class on a floor
+    (stone for the other classes), a plain wall (wood stays wood) on a slope steeper than 60 degrees; the group's
+    water bit makes it swimmable water and a void group a void floor. None for a collapsed triangle."""
+    u = [pts[1][k] - pts[0][k] for k in range(3)]
+    v = [pts[2][k] - pts[0][k] for k in range(3)]
+    n = (u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0])
+    length = sum(x * x for x in n) ** .5
+    if length < 1e-6:
+        return None
+    floor = n[1] / length > 0.5
+    surface = SURFACES.get(code, 'col_stone' if floor else 'col_wall')
+    if not floor and surface != 'col_wall':
+        surface = 'col_wood' if surface == 'col_wood' else 'col_wall'
+    if water:
+        surface = 'col_water'
+    elif void:
+        surface = 'col_void' if floor else 'col_wall'
+    return surface
+
+
 def piece_collision(dzb, piece, room_origin, center):
     """WCOL bytes, metadata and the kept triangle count of one piece."""
     verts, tris, names, infos, group_info = dzb
@@ -692,20 +718,9 @@ def piece_collision(dzb, piece, room_origin, center):
         exit_id = (i0 >> 13) & 0x3F
         if strip_exits and exit_id != 0x3F and names[group] not in void:
             continue
-        u = [pts[1][k] - pts[0][k] for k in range(3)]
-        v = [pts[2][k] - pts[0][k] for k in range(3)]
-        n = (u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0])
-        length = sum(x * x for x in n) ** .5
-        if length < 1e-6:
+        surface = triangle_surface(pts, code, group_info[group] & WATER_GROUP, names[group] in void)
+        if surface is None:
             continue
-        floor = n[1] / length > 0.5
-        surface = SURFACES.get(code, 'col_stone' if floor else 'col_wall')
-        if not floor and surface != 'col_wall':
-            surface = 'col_wood' if surface == 'col_wood' else 'col_wall'
-        if group_info[group] & WATER_GROUP:
-            surface = 'col_water'
-        elif names[group] in void:
-            surface = 'col_void' if floor else 'col_wall'
         row = []
         for k, p in zip((a, b, c), pts):
             if k not in remap:

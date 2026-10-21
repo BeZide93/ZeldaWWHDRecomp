@@ -955,6 +955,36 @@ public:
     std::vector<std::pair<std::string, std::vector<int>>> stage_rooms() override { return game_stage_rooms(config::game_dir); }
     Value stage_templates(std::string& why) override { return ::mod_stages::templates(config::game_dir, why); }
     Value kit_materials(const std::string& stage, unsigned room, std::string& why) override { return ::mod_stages::kit_materials(config::game_dir, stage, room, why); }
+    Value export_glb(const Value& request, std::string& why) override {
+        // the player's own exports folder next to the mod manager's packages, never inside a package
+        if (mods::packages::directory().empty()) return why = "the mod manager's folder is unknown", Value();
+        const std::filesystem::path dir = std::filesystem::path(mods::packages::directory()).parent_path() / "Exports";
+        std::error_code ec;
+        std::filesystem::create_directories(dir, ec);
+        if (ec || std::filesystem::is_symlink(dir)) return why = "the exports folder can't be made: " + dir.string(), Value();
+        std::vector<std::string> what;
+        std::filesystem::path recipe;
+        const std::string piece = request.get("piece").string();
+        if (!piece.empty()) {
+            const auto* p = story_game_pieces::catalogue().find(piece);
+            const auto* set = p ? story_game_pieces::catalogue().set(p->set) : nullptr;
+            if (!set) return why = "\"" + piece + "\" is not in the game pieces catalogue (list_game_objects: Buildings, Island parts, Islands)", Value();
+            recipe = dir / (".piece-" + set->id + ".recipe.json");
+            std::ofstream f(recipe, std::ios::binary | std::ios::trunc);
+            f << set->recipe;
+            if (!f) return why = "the piece's recipe can't be written into the exports folder", Value();
+            what = {"--piece", piece, "--recipe", recipe.string()};
+        } else {
+            what = {"--stage", request.get("stage").string(), "--room", std::to_string(int(request.get("room").number))};
+            if (request.get("actors").boolean) what.push_back("--actors");
+        }
+        if (request.get("collision").boolean) what.push_back("--collision");
+        if (request.get("max_texture").type == Value::Number) what.insert(what.end(), {"--max-texture", std::to_string(int(request.get("max_texture").number))});
+        const std::filesystem::path out = dir / (request.get("name").string() + ".glb");
+        Value r = ::mod_stages::export_glb(config::game_dir, out.string(), what, why);
+        if (!recipe.empty()) std::filesystem::remove(recipe, ec);
+        return r;
+    }
     Value rebuild_stages(const std::string& mod, const Value& manifest, const std::string& dir, const std::string& only, std::string& why) override {
         std::string data = mods::packages::package_data_directory(mod);
         if (data.empty() && !mods::packages::directory().empty()) data = (std::filesystem::path(mods::packages::directory()).parent_path() / "Data" / mod).string();
