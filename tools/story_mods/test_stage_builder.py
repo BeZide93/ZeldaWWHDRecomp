@@ -171,6 +171,8 @@ class Phase2(unittest.TestCase):
         t = sb.chunk(chunks, 'RTBL')
         rows = sb.read_rtbl(d, t[3], t[1])
         self.assertEqual([[e & 0x3F for e in row[3]] for row in rows], [[0, 1], [1, 0, 2], [2, 1]])
+        # a room behind a door is loaded (no flag); a room joined by an open passage is drawn too (0x80)
+        self.assertEqual([row[3] for row in rows], [[0xC0, 1], [0xC1, 0, 0x82], [0xC2, 0x81]])
         dzr = sb.build_dzr(kit_dzr(), 2, r['rooms'][0])
         rc = sb.read_dz(dzr)
         tres = sb.chunk(rc, 'TRES')[2]

@@ -84,7 +84,7 @@ A package with stages needs no other package: stages are not story content.
 | `entrance` | A place of the game: `stage`, `room` and spawn `point`. A save made in the stage continues here when the package is not installed (see [Saves](#saves)). Usually the spot in front of the way in. |
 | `rooms` | 1 to 16 rooms, numbered 0, 1, 2, ... in order. |
 | `doors` | Optional, up to 16: the game's doors between two rooms (see [Doors](#doors)). |
-| `joins` | Optional: pairs of rooms joined by an open passage without a door, `[[2, 3]]`. Both rooms are kept loaded while Link is in either. |
+| `joins` | Optional: pairs of rooms joined by an open passage without a door, `[[2, 3]]`. Both rooms are kept loaded and drawn while Link is in either (a room behind a door is loaded but not drawn until the door opens). |
 | `entries` | Optional, up to 4: boxes in rooms of the game that take Link into the stage. |
 | `warps` | Optional, up to 4: return warps (see [Return warps](#return-warps)). |
 | `shaders` | Optional: a shader template (`.wwht`) in the package, so the stage's shaders are prepared before play (see [Shaders](#shaders)). |

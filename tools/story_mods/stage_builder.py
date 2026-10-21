@@ -53,7 +53,7 @@ import notebook_model as base  # noqa: E402  (Bfres, sarc, yaz0_stored, BuildErr
 import game_piece_model as gp  # noqa: E402  (room_files, read_model, Writer, write_model, ATTRIBUTE_CLASS)
 from skinned_actor_model import append_dictionary, append_string  # noqa: E402
 
-VERSION = 2
+VERSION = 3
 FORMAT = 1
 BuildError = base.BuildError
 MAX_ROOMS = 16
@@ -160,9 +160,11 @@ def read_rtbl(dzs, chunk_offset, count):
     return rows
 
 
-def room_entries(room, neighbours):
-    """a room's row: itself (drawn, 0xC0 as the game's rows have it) and the rooms behind its doors"""
-    return [0xC0 | room] + sorted(n for n in set(neighbours) if n != room)
+def room_entries(room, neighbours, drawn=()):
+    """a room's row: itself (drawn, 0xC0 as the game's rows have it), the rooms behind its doors (loaded) and the
+    rooms joined to it by an open passage (loaded and drawn: 0x80, as the sea's rows list the squares round an
+    island)"""
+    return [0xC0 | room] + sorted((0x80 if n in drawn else 0) | n for n in set(neighbours) if n != room)
 
 
 # ---- the stage file (stage.dzs) ----------------------------------------------------------------------------
@@ -182,14 +184,18 @@ def build_dzs(template_dzs, recipe):
     old_rtbl = chunk(chunks, 'RTBL')
     template_rows = read_rtbl(template_dzs, old_rtbl[3], old_rtbl[1]) if old_rtbl else []
     neighbours = {r['room']: [] for r in rooms}
+    joined = {r['room']: set() for r in rooms}
     for a, b in [d['rooms'] for d in recipe.get('doors', [])] + [tuple(j) for j in recipe.get('joins', [])]:
         neighbours[a].append(b)
         neighbours[b].append(a)
+    for a, b in [tuple(j) for j in recipe.get('joins', [])]:
+        joined[a].add(b)
+        joined[b].add(a)
     rows = []
     for r in rooms:
         kit = r['kit']['room'] if r['kit']['stage'] == recipe['template'] else -1
         reverb, b2, b3 = template_rows[kit][:3] if 0 <= kit < len(template_rows) else template_rows[0][:3] if template_rows else (0, 0, 0)
-        rows.append((reverb, b2, b3, room_entries(r['room'], neighbours[r['room']])))
+        rows.append((reverb, b2, b3, room_entries(r['room'], neighbours[r['room']], joined[r['room']])))
     mult = b''.join(struct.pack('>ffhBB', 0.0, 0.0, 0, r['room'], 0) for r in rooms)
     envr_old = chunk(chunks, 'EnvR')
     envr = b''
