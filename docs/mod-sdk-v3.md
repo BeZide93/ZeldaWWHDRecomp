@@ -253,7 +253,6 @@ the mod manager refuses it.
 | `game:nest` | A large bird's nest Link can stand in | `nest` | 1 |
 | `game:flag-rito`, `game:flag-sea` | Flags on poles that flutter in the wind | one each | 1 |
 | `game:lookout-tower` | A tall wooden lookout platform that stands in the sea | `tower-ladder` (Link climbs its ladder), `tower` | 1 |
-| `game:push-block` | The dungeons' heavy stone block: Link pushes and pulls it (catalogue version 2) | `stone` | 1 |
 
 **The volcanic kit** (catalogue version 6, `"requires": {"game_objects": 6}`; the palette's "Fire and
 lava" and "Trees and plants"): torches, flames, fire jets, lava bubbles and Dragon Roost's bomb flowers, the game's own actors with their own effects, sounds and behaviour.
@@ -264,7 +263,21 @@ lava" and "Trees and plants"): torches, flames, fire jets, lava bubbles and Drag
 | `game:flame` | A burning flame on its own with its light (no model, no collision): for a brazier or a torch of your own | `flame` | 1 |
 | `game:fire-jet` | A vent that shoots a column of fire every few seconds; the fire burns Link | `fire-jet`, `fire-jet-large` | 1 |
 | `game:lava-bubbles` | Bubbles that rise and burst over a lava lake, scattered in a wide ring (1300 to 2700 units) around it | `lava-bubbles` | 1 |
-| `game:bomb-flower` | Dragon Roost's bomb plant: Link picks its bomb (A), throws it (or holds it) and it explodes as a bomb does, breaking what a bomb breaks (pots, for example) and hurting Link when he is too close; a new bomb grows on the plant after a while | `bomb-flower` | 1 |
+| `game:bomb-flower` | Dragon Roost's bomb plant: Link picks its bomb (A), throws it (or holds it) and it explodes as a bomb does, breaking what a bomb breaks (pots, barrels and boulders, for example) and hurting Link when he is too close; a new bomb grows on the plant after a while | `bomb-flower` | 1 |
+
+**Rocks and blocks** (catalogue version 6, the palette's "Rocks and blocks"):
+
+| Id | What it is | Variants | Scale |
+| --- | --- | --- | --- |
+| `game:push-block` | The dungeons' stone block: Link grabs it (A) and pushes or pulls it | `stone`, `statue` (with a stone statue on top) | 1 |
+| `game:heavy-block` | A block too heavy to move without the Power Bracelets | `heavy-block` | 1 |
+| `game:rock` | A small rock Link lifts, carries and throws; it breaks | `rock` | 1 |
+| `game:boulder`, `game:boulder-small` | Boulders that block the way; a bomb blows them apart | one each | 1 |
+| `game:stone-head` | A heavy stone head; Link lifts it with the Power Bracelets, bombs don't break it | `stone-head` | 1 |
+
+A rock or boulder that is broken stays gone until its room loads again, and a pushed block starts at
+its place again then, as the game's own do when no switch keeps them: none of them uses a switch or a
+save bit.
 
 The torches and flames are always lit: a torch that Link lights with fire is not available (the game keeps
 whether it burns in a switch of the room, which a game object never uses). The bomb flower needs no bomb
@@ -293,7 +306,7 @@ moved batch goes from the game only when its room loads again.
 Objects whose collision keeps the game's size stay at scale 1, so what you see and what Link
 bumps into always match.
 
-The stone block (`game:push-block`, `"requires": {"game_objects": 2}`) slides on the ground Link pushes it
+The stone block (`game:push-block`, `"requires": {"game_objects": 6}`) slides on the ground Link pushes it
 over, the islands' or a world object's, and falls when it leaves it. It has no switch, so it starts at its
 placement whenever its room loads again, as the game's own blocks without one do: a block pushed into a
 corner, or off a cliff, is back after the next visit. It stands on its highest ground under it, so it can

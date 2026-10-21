@@ -192,14 +192,27 @@ int main() {
         bad.replace(bad.find(R"("params": "0x00000000"})"), std::strlen(R"("params": "0x00000000"})"), R"("params": "0x00000000", "units": 3})");
         assert(!t.add_table(bad, why) && why.find("units") != std::string::npos);  // units only on a batch
     }
-    // the stone block: the game's own block word and its home angle z "no path" (0xFFFF), catalogue version 2
+    // the stone block: the game's own block word and its home angle z "no path" (0xFFFF), catalogue version 6 (with the volcanic kit)
     {
         const auto* block = c.find("push-block");
-        assert(block && block->native_name == "osiBLK0" && block->archive == "Osiblk" && block->since == 2 && block->collision && !block->batch());
+        assert(block && block->native_name == "osiBLK0" && block->archive == "Osiblk" && block->since == 6 && block->collision && !block->batch());
         assert(block->variant("")->params == 0x8100FF00u && block->variant("stone")->angle_z == 0xFFFF && ((block->variant("")->params >> 8) & 0xFF) == 0xFF);  // no switch
-        assert(c.version >= 2 && c.find("palm")->variant("")->angle_z == -1);
-        assert(!parses(manifest(R"({"id": "b", "actor": "game:push-block", "stage": "sea", "room": 44, "position": {"x": 0, "y": 0, "z": 0}})"), why));  // needs version 2
-        assert(parses(manifest(R"({"id": "b", "actor": "game:push-block", "stage": "sea", "room": 44, "position": {"x": 0, "y": 0, "z": 0}})", R"({"game_objects": 2})"), why));
+        assert(c.version >= 6 && c.find("palm")->variant("")->angle_z == -1);
+        assert(!parses(manifest(R"({"id": "b", "actor": "game:push-block", "stage": "sea", "room": 44, "position": {"x": 0, "y": 0, "z": 0}})", R"({"game_objects": 5})"), why));  // needs version 6
+        assert(parses(manifest(R"({"id": "b", "actor": "game:push-block", "stage": "sea", "room": 44, "position": {"x": 0, "y": 0, "z": 0}})", R"({"game_objects": 6})"), why));
+        // the block with a statue (type 2, the game's osiBLK1 word) and the heavy block (MpwrB, type 3)
+        assert(block->variant("statue") && block->variant("statue")->params == 0x8200FF00u && block->variant("statue")->angle_z == 0xFFFF);
+        const auto* heavy = c.find("heavy-block");
+        assert(heavy && heavy->native_name == "MpwrB" && heavy->subtype == 10 && heavy->variant("")->params == 0x8300FF00u && heavy->variant("")->angle_z == 0xFFFF);
+        // rocks: the small rock (STONE, type 0, no item 0x3F, no switch 0xFF) and the boulders and the stone head (Stone2,
+        // their home angle z 0x00FF: no break event)
+        const auto* rock = c.find("rock");
+        assert(rock && rock->native_name == "koisi1" && rock->archive == "Always" && rock->variant("")->params == 0x707FFFFFu && ((rock->variant("")->params >> 24) & 7) == 0);
+        for (const char* id : {"boulder", "boulder-small", "stone-head"}) {
+            const auto* b = c.find(id);
+            assert(b && b->process == "Stone2" && b->variant("")->angle_z == 0x00FF && ((b->variant("")->params >> 8) & 0xFF) == 0xFF && (b->variant("")->params & 0x3F) == 0x3F);
+        }
+        assert(c.find("boulder")->native_name == "Ebrock" && c.find("boulder-small")->native_name == "Ebrock2" && c.find("stone-head")->native_name == "Ekao");
         story_game_objects::Catalogue t;
         for (const char* bad_z : {"0xFFFFF", "65535", "0xZZZZ"}) {
             std::string bad = good;

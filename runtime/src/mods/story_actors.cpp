@@ -52,7 +52,7 @@ namespace {
 using story_notebook::ManifestActor;
 struct Actor {std::string mod; ManifestActor spec; uint32_t process=0xFFFFFFFFu; bool deleting=false; uint32_t mod_token=0; bool restore_talk=false;uint32_t prop_token=0,switch_token=0,switch_source=0,enemy_token=0;story_items::EnemyMarkerHandle combat_marker{};story_items::PropMarkerHandle carry_marker=0;identity::Fingerprint fingerprint{};bool restore_quarantined=false;bool respawn=false;bool removed=false;uint32_t resident_event_token=0;bool redeclare=false;uint32_t held_started=0xFFFFFFFFu;/* editor: the process whose first Execute a held pose ran */
     // a game object (story_game_objects.h): created on the retail profile, tracked by process id, read back once made
-    bool game=false,game_batch=false,game_checked=false,game_mismatch=false;uint8_t game_attempts=0;uint32_t game_planted=0;story_game_objects::Native game_native{};
+    bool game=false,game_batch=false,game_checked=false,game_mismatch=false;uint8_t game_attempts=0;uint32_t game_planted=0,game_room=0;/* the room process a game object was made in */story_game_objects::Native game_native{};
     int route_slot=-1;/* a walking resident's route record (story_resident_routes) */};
 std::vector<Actor> g_actors;
 void native_redeclare(Actor& a);  // the editor: a changed native declaration, once its old copy is gone
@@ -745,7 +745,15 @@ void room_loaded(Cpu* c,int room) {
         if(a.process!=0xFFFFFFFFu) {
             Cpu probe=*c;st32(g_scratch+0x40,0);const uint32_t exists=g_call(&probe,kSearch,{a.process,g_scratch+0x40});
             if(exists)continue;  // also true while asynchronous actor creation is pending
+            // a game object the game itself took away once it was made (a boulder blown up, a rock thrown and broken):
+            // as the game's own without a switch, it is back when its room loads again, not before
+            if(a.game&&!a.game_batch&&a.game_checked&&!a.deleting&&a.game_room==ld32(GD(0x1047E8F0)+uint32_t(room)*0x22C)){
+                a.game_planted=story_game_objects::planted_mark(ld32(GD(0x1047E8F0)+uint32_t(room)*0x22C));a.process=0xFFFFFFFFu;
+                st32(g_scratch+128+uint32_t(&a-g_actors.data())*4,a.game_planted);
+                LOG("[game_objects] %s:%s is gone (the game removed it); back when its room loads again",a.mod.c_str(),a.spec.id.c_str());continue;}
         }
+        if(a.game&&!a.game_batch&&a.game_planted){const uint32_t now=ld32(GD(0x1047E8F0)+uint32_t(room)*0x22C);
+            if(a.game_planted==story_game_objects::planted_mark(now)&&a.game_room==now)continue;a.game_planted=0;}  // gone this visit; a new visit makes it again
         if(++count>story_notebook::kMaxActorsPerRoom)break;
         std::string reserved_flag=a.spec.flag;
         if(a.switch_token){const Actor* source=nullptr;for(const auto& candidate:g_actors)if(candidate.spec.actor=="switch"&&candidate.switch_token==a.switch_source&&candidate.mod==a.mod)source=&candidate;if(!source)continue;reserved_flag=source->spec.switch_flag;}
@@ -836,6 +844,7 @@ void room_loaded(Cpu* c,int room) {
             st32(g_scratch+128+uint32_t(&a-g_actors.data())*4,a.game_planted);LOG("[game_objects] %s:%s planted into the stage's batch (%s)",a.mod.c_str(),a.spec.id.c_str(),a.spec.variant.c_str());continue;
         }
         st32(g_scratch+128+uint32_t(&a-g_actors.data())*4,a.process);
+        if(a.game)a.game_room=ld32(GD(0x1047E8F0)+uint32_t(room)*0x22C);
         // Residents reuse their previously unused existing 40-byte identity row.
         // Distinct magic/token format: never interpret this as a prop record.
         if(a.resident_event_token&&a.process&&a.process!=0xFFFFFFFFu){const uint32_t row=g_scratch+kIdentityScratchOffset+uint32_t(&a-g_actors.data())*identity::kRecordBytes;st32(row,0x52455631);st32(row+4,a.resident_event_token);std::memcpy(mem::ptr(row+8),a.fingerprint.data(),a.fingerprint.size());}
@@ -945,6 +954,8 @@ void state_loaded(){if(combat_declared())story_enemy_ownership::state_loaded();i
         }
         if(a.game_batch){a.game_planted=story_game_objects::is_planted_mark(id)?id:0;a.process=0xFFFFFFFFu;a.restore_quarantined=a.game_mismatch;}
         else if(a.game){
+            if(story_game_objects::is_planted_mark(id)){a.game_planted=id;a.process=0xFFFFFFFFu;if(a.spec.room<64)a.game_room=ld32(GD(0x1047E8F0)+a.spec.room*0x22C);}  // gone this room visit (above)
+            else if(a.process!=0xFFFFFFFFu&&a.spec.room<64)a.game_room=ld32(GD(0x1047E8F0)+a.spec.room*0x22C);  // made in the restored room's visit
             a.game_checked=false;a.restore_quarantined=a.game_mismatch;const bool live=a.process!=0xFFFFFFFFu;
             if(live&&(!g_scratch||!identity::matches(mem::ptr(g_scratch+kIdentityScratchOffset+uint32_t(i)*identity::kRecordBytes),a.fingerprint))){a.process=0xFFFFFFFFu;a.restore_quarantined=true;if(slot)st32(slot,0xFFFFFFFFu);LOG("[game_objects] %s:%s restored declaration fingerprint rejected",a.mod.c_str(),a.spec.id.c_str());}
         }
@@ -1046,7 +1057,8 @@ void enemy_epoch(Actor& a){
     if(story_enemies::begin_epoch(a.enemy_token,epoch)){st32(counter,epoch);a.restore_quarantined=false;}
 }
 // After the old copy is gone: the native declaration takes the changed spec (props, enemies, doors).
-void native_redeclare(Actor& a){
+void native_redeclare(Actor& a){if(a.game&&!a.game_batch)a.game_planted=0;  // a changed game object comes back at once
+
     if(!a.redeclare)return;
     a.redeclare=false;std::string why;
     if(a.prop_token&&!story_props::editor_redeclare(a.prop_token,a.mod,a.spec,why)){LOG("[actors] %s:%s: %s (it appears after a restart)",a.mod.c_str(),a.spec.id.c_str(),why.c_str());story_props::quarantine(a.prop_token);return;}

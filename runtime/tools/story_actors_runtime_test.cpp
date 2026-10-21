@@ -299,6 +299,11 @@ int main(int argc,char** argv){
         const uint32_t palm_pid=ld32(kScratch+128),stool_pid=ld32(kScratch+132);assert(palm_pid!=0xFFFFFFFFu&&stool_pid!=0xFFFFFFFFu&&palm_pid!=stool_pid&&!story_actors::actor_address(&c,"test","tree"));
         assert(story_actors::actor_address(&c,"test","palm")==live[palm_pid]);
         story_actors::service(&c);assert(deleted==0&&game_object_creates.size()==2);  // read back: both match; nothing made again
+        {   // the game takes the stool away itself (a broken rock, a blown-up boulder): it stays gone this room visit
+            const uint32_t stool=ld32(kScratch+132);const uint32_t at=live[stool];live.erase(stool);
+            story_actors::native_room_loaded(&c,0);story_actors::service(&c);assert(game_object_creates.size()==2&&ld32(kScratch+132)>>24==0xFE);
+            live[stool]=at;st32(kScratch+132,stool);story_actors::state_loaded();story_actors::service(&c);  // (back as it was for the rest)
+        }
         // the saved identity row binds a full state load; a changed row drops the binding
         story_actors::state_loaded();story_actors::service(&c);assert(story_actors::actor_address(&c,"test","palm")==live[palm_pid]&&game_object_creates.size()==2);
         const uint32_t row=kScratch+story_actors::kIdentityScratchOffset;st8(row+39,uint8_t(ld8(row+39)^1));story_actors::state_loaded();
@@ -536,7 +541,7 @@ int main(int argc,char** argv){
         // parameters and gets every placed-copy guard; refused characters and places never load
         std::memcpy(mem::ptr(0x1046F0B0+0x5134),"sea",4);
         std::string why;story_notebook::ManifestActor bad;bad.id="stargazer";bad.actor="resident";bad.stage="sea";bad.room=1;
-        for(unsigned refused:{11u,16u,17u,18u,20u}){bad.resident=refused;assert(!story_actors::load("cat",{bad},why));}
+        for(unsigned refused:{11u,16u,17u,18u,23u}){bad.resident=refused;assert(!story_actors::load("cat",{bad},why));}
         bad.resident=6;bad.stage="Ocmera";bad.room=0;assert(!story_actors::load("cat",{bad},why)&&why.find("Ocmera")!=std::string::npos);
         story_notebook::ManifestActor young;young.id="young";young.actor="resident";young.stage="sea";young.room=1;young.resident=10;young.lines="Mod words";young.flag="young-talked";
         expect_people_subtype=10;expect_people_params=0x00FF00FF;expect_people_yaw=0;
