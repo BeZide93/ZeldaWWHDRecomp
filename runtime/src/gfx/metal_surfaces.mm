@@ -1,3 +1,4 @@
+#include "background_shaders.h"
 #include "gfx/render_mips.h"
 #include "mods/cemu_pack.h"
 #include <tuple>
@@ -960,6 +961,7 @@ void write_back_linear_targets() {
         if (!s->gpuWritten || s->writtenBackSeq == s->writeSeq || !s->tex) continue;
         s->writtenBackSeq = s->writeSeq;
         if (s->slices != 1 || !can_write_back(s)) continue;
+        if (bgshaders::enabled()) bgshaders::tracker().read_back(s->addr, R.frame);  // read by the CPU: draws stay exact
         const uint32_t addr = s->addr;
         const uint32_t bytes = s->fmt.bytesPerBlock, pitch = std::max(s->pitch, s->width);
         const uint64_t r0 = rprof::now_ns();
@@ -990,6 +992,8 @@ void copy_surface_impl(uint32_t srcAddr, uint32_t srcMip, uint32_t srcSlice, uin
         auto key = [&](Surface* x) { return std::make_pair(x->format == (uint32_t)s->format.value(), x->writeSeq); };
         if (!gpuSrc || key(c) > key(gpuSrc)) gpuSrc = c;
     }
+    // Compile shaders in the background: a target copied from now and then keeps its draws exact
+    if (gpuSrc && bgshaders::enabled()) bgshaders::tracker().copied(gpuSrc->addr, R.frame);
     if (gpuSrc) {
         Surface* src = adopt_newer_alias(gpuSrc);
         SurfaceDesc dd;
@@ -1061,6 +1065,7 @@ namespace gfx {
 // targets keep their GPU contents; the next frame redraws them)
 void ss_reset_surfaces() {
     R.mainDepthAddr = 0;
+    bgshaders::tracker().forget();
     for (auto& [a, s] : R.surfaces) {
         s->dirty = true;
         s->lastCheckedFrame = ~0ull;

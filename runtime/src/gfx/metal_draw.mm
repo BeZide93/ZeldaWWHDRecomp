@@ -1,3 +1,4 @@
+#include "background_shaders.h"
 #include "aspect.h"
 #include "aspect_panes.h"
 #include "renderer.h"
@@ -841,60 +842,58 @@ static std::atomic<int> g_ao_mode{[] {
 int ao_mode() { return g_ao_mode.load(std::memory_order_relaxed); }
 void set_ao_mode(int m) { g_ao_mode = m % 3; LOG("[gfx] ambient occlusion mode %d", m % 3); }
 
-// Draws whose shaders or pipeline are still compiling used to be skipped, which makes objects blink
-// for a few frames after entering a new area. Instead wait for the compile, up to a per-frame budget
-// (WWHD_COMPILE_WAIT_MS, default 25; the game's frame is 33 ms and the GPU needs ~4 ms of it).
+// Settings > Graphics > Compile shaders in the background (background_shaders.h), as on Vulkan.
+// Off (default): a draw whose shaders or pipeline are still compiling waits for them (exact frames).
+// On: a draw into the presented picture waits at most the frame's budget (WWHD_BG_SHADER_WAIT_MS)
+// and is left out of this frame if the compile is not done by then; every other draw keeps the exact
+// wait (bgshaders::classify). Skipping is only harmless for targets the game redraws every frame and
+// uses for nothing but the picture: a draw into a target that is new or wasn't drawn in the previous
+// frame may be the only one its result gets (issue #47: the light buffer sampled before its first
+// render, black shadows for the session; the Picto Box colour-grading volume).
 // Pipelines built ahead of use (cache replay, head start) never wait.
-// Skipping is only harmless for targets the game redraws every frame. A draw into a target that is
-// new or wasn't drawn in the previous frame may be the only one its result gets (a buffer rendered
-// once, at a load or after a photo, or a pass's first frame), and a skipped one would leave that
-// result missing for as long as the game keeps using it (issue #47: the light buffer sampled before
-// its first render, black shadows for the session; the Picto Box colour-grading volume). Those draws
-// wait for their compile without the budget, like the Vulkan renderer does for every draw.
 static bool g_building_ahead = false;
-static bool g_draw_must_run = false;  // the current draw writes a target that isn't redrawn every frame
-static std::unordered_map<uint32_t, gfx::TargetDrawHistory> g_target_drawn;
+static bool g_draw_must_run = false;  // the current draw waits for its compile without a budget
+static bgshaders::Verdict g_draw_verdict = bgshaders::kOff;  // ... and why (counted once a draw)
+static bool g_draw_counted = false;
 static uint64_t g_must_run_waits = 0;
 static double g_must_run_wait_ms = 0;
 // every wait for a compile (budgeted and must-run) and the budgeted ones that ran out (the draw is skipped)
 static uint64_t g_compile_waits = 0, g_compile_wait_timeouts = 0;
 static double g_compile_wait_ms = 0;
 static bool wait_compiled(const std::atomic<int>& st) {
-    static const double budgetMs = getenv("WWHD_COMPILE_WAIT_MS") ? atof(getenv("WWHD_COMPILE_WAIT_MS")) : 25.0;
     if (g_building_ahead) return st.load(std::memory_order_acquire) == CS_READY;
-    static uint64_t frame = ~0ull;
-    static double spent = 0;
-    if (frame != R.frame) { frame = R.frame; spent = 0; }
     if (st.load(std::memory_order_acquire) != CS_PENDING) return st.load(std::memory_order_acquire) == CS_READY;
     if (g_draw_must_run) {
+        if (!g_draw_counted) { g_draw_counted = true; bgshaders::exact(g_draw_verdict); }
         double t0 = now_ms();
         {
             std::unique_lock<std::mutex> lk(g_compile_mu);
             g_compile_cv.wait(lk, [&] { return st.load(std::memory_order_acquire) != CS_PENDING; });
         }
         double dt = now_ms() - t0;
-        spent += dt;
         g_must_run_waits++;
         g_must_run_wait_ms += dt;
         g_compile_waits++;
         g_compile_wait_ms += dt;
         static int logged = 0;
         if (dt >= 30 && logged++ < 50)
-            LOG("[gfx] frame %llu: waited %.0f ms for a compile (draw into a target not redrawn every frame)", (unsigned long long)R.frame, dt);
+            LOG("[gfx] frame %llu: waited %.0f ms for a compile (%s)", (unsigned long long)R.frame, dt,
+                bgshaders::verdict_name(g_draw_verdict));
         return st.load(std::memory_order_acquire) == CS_READY;
     }
-    if (spent >= budgetMs) { g_compile_wait_timeouts++; return false; }
+    const uint64_t left = bgshaders::budget_left_ns(R.frame);
     double t0 = now_ms();
-    {
+    if (left) {
         std::unique_lock<std::mutex> lk(g_compile_mu);
-        g_compile_cv.wait_for(lk, std::chrono::duration<double, std::milli>(budgetMs - spent),
+        g_compile_cv.wait_for(lk, std::chrono::nanoseconds(left),
                               [&] { return st.load(std::memory_order_acquire) != CS_PENDING; });
     }
     const double dt = now_ms() - t0;
-    spent += dt;
+    const bool ranOut = st.load(std::memory_order_acquire) == CS_PENDING;
+    bgshaders::spent(R.frame, uint64_t(dt * 1e6), ranOut);
     g_compile_waits++;
     g_compile_wait_ms += dt;
-    if (st.load(std::memory_order_acquire) == CS_PENDING) g_compile_wait_timeouts++;
+    if (ranOut) g_compile_wait_timeouts++;
     return st.load(std::memory_order_acquire) == CS_READY;
 }
 
@@ -1872,21 +1871,40 @@ void draw(const uint32_t* regs, uint32_t prim, uint32_t count, uint32_t indexTyp
     Shader* vs = get_shader(regs, true, fs, fsKey);
     Shader* ps = get_shader(regs, false, fs, fsKey);
     if (!vs || !ps || !vs->dec || !ps->dec) { g_skip[SK_NO_SHADER]++; return; }  // translation failed
-    // must this draw run even if its compile takes longer than the budget? (see wait_compiled)
     const LatteContextRegister& lcr = *(const LatteContextRegister*)regs;
     uint8_t mask = LatteMRT::GetActiveColorBufferMask(ps->dec, lcr);
+    Surface* colors[8] = {};
+    uint32_t colorSlices[8] = {}, depthSlice = 0;
+    for (int i = 0; i < 8; i++)
+        if (mask & (1 << i)) colors[i] = color_target(regs, i, &colorSlices[i]);
+    Surface* depth = LatteMRT::GetActiveDepthBufferMask(lcr) ? depth_target(regs, &depthSlice) : nullptr;
+    if (depth && depth->width == 1280 && depth->height == 720) R.mainDepthAddr = depth->addr;
+    // must this draw run even if its compile takes longer than the budget? (see wait_compiled)
+    const bool bgOn = bgshaders::enabled() && !g_hires_redraw;  // the hires redraw is never the picture
+    auto writesColor = [&](int i) { return colors[i] && ((regs[REGADDR::CB_TARGET_MASK] >> (4 * i)) & 15); };
+    const uint32_t depthControl = regs[REGADDR::DB_DEPTH_CONTROL];  // bit 0 stencil, bit 2 depth write
+    const bool writesDepth = depth && ((depthControl & 4) || ((depthControl & 1) && depth->fmt.stencil));
     {
-        auto notRedrawn = [](uint32_t addr) {
-            auto it = g_target_drawn.find(addr);
-            return it == g_target_drawn.end() || it->second.must_wait(R.frame);
-        };
-        bool must = false;
-        for (int i = 0; i < 8 && !must; i++)
-            if ((mask & (1 << i)) && regs[mmCB_COLOR0_BASE + i]) must = notRedrawn(regs[mmCB_COLOR0_BASE + i]);
-        if (!must && LatteMRT::GetActiveDepthBufferMask(lcr) && regs[mmDB_DEPTH_BASE]) must = notRedrawn(regs[mmDB_DEPTH_BASE]);
-        g_draw_must_run = must;
+        g_draw_verdict = bgshaders::enabled() ? bgshaders::kNotVisible : bgshaders::kOff;
+        if (bgOn) {
+            bgshaders::TargetFacts written[8], depthFacts;
+            int n = 0;
+            for (int i = 0; i < 8; i++)
+                if (writesColor(i)) written[n++] = bgshaders::tracker().facts(colors[i]->addr, R.frame);
+            if (writesDepth) depthFacts = bgshaders::tracker().facts(depth->addr, R.frame);
+            g_draw_verdict = bgshaders::classify(true, written, n, writesDepth ? &depthFacts : nullptr, count);
+        }
+        g_draw_must_run = g_draw_verdict != bgshaders::kSkippable;
+        g_draw_counted = false;
     }
     struct MustRunReset { ~MustRunReset() { g_draw_must_run = false; } } mustRunReset;
+    // a draw left out while its compile goes on (Compile shaders in the background)
+    auto leftOut = [&] {
+        bgshaders::skipped(R.frame);
+        for (int i = 0; i < 8; i++)
+            if (writesColor(i)) bgshaders::tracker().left_out(colors[i]->addr, R.frame);
+        if (writesDepth) bgshaders::tracker().left_out(depth->addr, R.frame);
+    };
     retry_failed_compile(vs, g_draw_must_run);
     retry_failed_compile(ps, g_draw_must_run);
     if (vs->state == CS_FAILED || ps->state == CS_FAILED) { g_skip[SK_NO_SHADER]++; return; }
@@ -1894,16 +1912,11 @@ void draw(const uint32_t* regs, uint32_t prim, uint32_t count, uint32_t indexTyp
     compile_deferred(ps);
     if (!wait_compiled(vs->state) || !wait_compiled(ps->state)) {
         g_skip[SK_COMPILING]++;
+        if (vs->state == CS_PENDING || ps->state == CS_PENDING) leftOut();
         return;
     }
     rprof::mark(rprof::kShader);
 
-    Surface* colors[8] = {};
-    uint32_t colorSlices[8] = {}, depthSlice = 0;
-    for (int i = 0; i < 8; i++)
-        if (mask & (1 << i)) colors[i] = color_target(regs, i, &colorSlices[i]);
-    Surface* depth = LatteMRT::GetActiveDepthBufferMask(lcr) ? depth_target(regs, &depthSlice) : nullptr;
-    if (depth && depth->width == 1280 && depth->height == 720) R.mainDepthAddr = depth->addr;
     uint32_t guestW = colors[0] ? colors[0]->width : 0;  // the game's target size (viewport registers refer to it)
     uint32_t guestH = colors[0] ? colors[0]->height : 0;
     if (g_hires_redraw) {
@@ -1969,7 +1982,11 @@ void draw(const uint32_t* regs, uint32_t prim, uint32_t count, uint32_t indexTyp
         if (colors[i]) tf.color[i] = colors[i]->format;
     if (depth) tf.depth = depth->format;
     id<MTLRenderPipelineState> pipe = get_pipeline(regs, vs, ps, fs, fsKey, tf);
-    if (!pipe) { g_skip[SK_PIPE_COMPILING]++; return; }
+    if (!pipe) {
+        g_skip[SK_PIPE_COMPILING]++;
+        if (!g_draw_must_run) leftOut();  // else the build failed for good
+        return;
+    }
     rprof::mark(rprof::kPipeline);
     id<MTLRenderCommandEncoder> enc = R.enc;
     [enc setRenderPipelineState:pipe];
@@ -2075,9 +2092,11 @@ void draw(const uint32_t* regs, uint32_t prim, uint32_t count, uint32_t indexTyp
                         baseVertex:baseVertex
                       baseInstance:0];
     }
-    for (int i = 0; i < 8; i++)
-        if (colors[i] && regs[mmCB_COLOR0_BASE + i]) g_target_drawn[regs[mmCB_COLOR0_BASE + i]].drawn(R.frame);
-    if (depth && regs[mmDB_DEPTH_BASE]) g_target_drawn[regs[mmDB_DEPTH_BASE]].drawn(R.frame);
+    if (bgOn) {  // Compile shaders in the background: which targets are redrawn every frame
+        for (int i = 0; i < 8; i++)
+            if (writesColor(i)) bgshaders::tracker().drawn(colors[i]->addr, R.frame);
+        if (writesDepth) bgshaders::tracker().drawn(depth->addr, R.frame);
+    }
     if (samplesSky) clouds_after_sky_composite(enc, regs, vp, depth != nullptr, get_depth_state(regs, depth != nullptr), ensure_pass);
     // debug: WWHD_DUMP_DRAWS=frame:i,j,k dumps color target 0 after those draws
     static uint64_t dumpFrame = ~0ull;
