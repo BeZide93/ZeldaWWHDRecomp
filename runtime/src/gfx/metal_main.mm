@@ -59,8 +59,7 @@ void peek_z(const uint32_t* cells, uint32_t n) {
     }
     [b endEncoding];
     uint64_t ticket = depth_peek::next_ticket();
-    [command_buffer() addCompletedHandler:^(id<MTLCommandBuffer> cb) {
-        if (cb.status != MTLCommandBufferStatusCompleted) return;
+    auto answer = [staging, destinations, points, format, ticket] {
         const uint8_t* raw = static_cast<const uint8_t*>(staging.contents);
         std::vector<uint32_t> depths(points);
         for (uint32_t i=0; i<points; i++) {
@@ -72,6 +71,17 @@ void peek_z(const uint32_t* cells, uint32_t n) {
             }
         }
         depth_peek::publish(ticket,destinations,depths);
+    };
+    // the game reads the answers at its next step: wait for this copy now (depth_peek.h)
+    if (depth_peek::synchronous()) {
+        void wait_idle();
+        id<MTLCommandBuffer> cmd = command_buffer();
+        wait_idle();
+        if (cmd.status == MTLCommandBufferStatusCompleted) answer();
+        return;
+    }
+    [command_buffer() addCompletedHandler:^(id<MTLCommandBuffer> cb) {
+        if (cb.status == MTLCommandBufferStatusCompleted) answer();
     }];
 }
 

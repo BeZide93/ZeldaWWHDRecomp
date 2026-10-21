@@ -17,8 +17,10 @@
 #include <cstdlib>
 #include <vector>
 
+#include "gfx/depth_peek.h"
 #include "gx2/gx2_cmd.h"
 #include "runtime.h"
+#include "interp.h"
 
 extern "C" void f_0252E388_orig(Cpu* c);  // dDlst_peekZ_c::peekData
 
@@ -38,18 +40,40 @@ extern "C" void hook_0252E388(Cpu* c) {
         cells.push_back(uint32_t(x));
         cells.push_back(uint32_t(y));
         cells.push_back(dst);
-        if (log) LOG("[peekz] request (%d,%d) in 640x480 -> %08X",
-                     int(x), int(y), dst);
+        // with the step and the answer the game has at dst now (from an earlier frame): runs whose
+        // games see the same answers at the same steps behave the same
+        if (log) LOG("[peekz] step %llu request (%d,%d) in 640x480 -> %08X (has %06X)",
+                     (unsigned long long)interp::logic_steps(), int(x), int(y), dst, ld32(dst));
     }
-    if (!cells.empty()) gx2::emit(gx2::OP_PEEK_Z, cells.data(), (uint32_t)cells.size());
+    if (!cells.empty()) {
+        gfx::depth_peek::issued();
+        gx2::emit(gx2::OP_PEEK_Z, cells.data(), (uint32_t)cells.size());
+    }
     st8(obj, 0);  // as the game's function: the cells are taken
 }
 
 #include "gfx/depth_peek.h"
 #include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <mutex>
 #include <unordered_map>
 namespace gfx::depth_peek {
+namespace {
+AnswerGate g_gate;
+}
+bool synchronous() {
+    static const bool on = [] { const char* e = getenv("WWHD_PEEKZ_SYNC"); return !e || atoi(e) != 0; }();
+    return on;
+}
+void issued() { g_gate.issue(); }
+void answered() { g_gate.answer(); }
+void wait_answered() {
+    if (!synchronous()) return;
+    // the render thread answers in command order; a generous limit guards against a lost request
+    if (!g_gate.wait(std::chrono::seconds(5)))
+        LOG("[peekz] depth peeks not answered after 5 s; going on without them");
+}
 uint64_t next_ticket() { static std::atomic<uint64_t> serial{0}; return ++serial; }
 void publish(uint64_t ticket, const std::vector<uint32_t>& destinations, const std::vector<uint32_t>& depths) {
     // Submission drains can retire newer fences before older ones. Never overwrite a newer answer.

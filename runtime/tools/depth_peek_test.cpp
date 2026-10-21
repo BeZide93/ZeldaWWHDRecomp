@@ -1,6 +1,8 @@
 #include "gfx/depth_peek.h"
 #include <cassert>
+#include <chrono>
 #include <limits>
+#include <thread>
 
 int main() {
     using gfx::depth_peek::pixel;
@@ -26,4 +28,23 @@ int main() {
     assert(from_float(-1) == 0);
     assert(from_float(2) == 0xFFFFFF);
     assert(from_float(std::numeric_limits<float>::quiet_NaN()) == 0);
+
+    // AnswerGate: the game thread waits at its swap until the render thread handled every request
+    using namespace std::chrono_literals;
+    gfx::depth_peek::AnswerGate gate;
+    assert(gate.wait(0ms));  // nothing issued: no wait
+    gate.issue();
+    gate.issue();
+    gate.answer();
+    assert(!gate.wait(10ms));  // one still open: the limit runs out ...
+    assert(gate.wait(0ms));    // ... and the count is resynchronised
+    gate.issue();
+    std::thread render([&] { std::this_thread::sleep_for(20ms); gate.answer(); });
+    const auto started = std::chrono::steady_clock::now();
+    assert(gate.wait(5s));  // answered by the other thread
+    assert(std::chrono::steady_clock::now() - started >= 15ms);
+    render.join();
+    gate.issue();
+    gate.answer();
+    assert(gate.wait(0ms));
 }

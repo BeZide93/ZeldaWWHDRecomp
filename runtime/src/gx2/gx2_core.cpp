@@ -1,3 +1,4 @@
+#include "gfx/depth_peek.h"
 #include "platform/present_observer.h"
 #include "platform/r5_slow_render.h"
 #include "gfx/display_modes.h"
@@ -696,7 +697,7 @@ static void execute_op(Op op, const uint32* p, uint32 n) {
     case OP_SET_CONTEXT: set_context(p[0]); break;
     case OP_INVALIDATE: render::invalidate(p[0], p[1], p[2]); break;
     case OP_EXPAND_COLOR: case OP_EXPAND_DEPTH: break;  // MSAA/HiZ decompression: nothing to do on the host
-    case OP_PEEK_Z: render::peek_z(p, n); break;
+    case OP_PEEK_Z: render::peek_z(p, n); gfx::depth_peek::answered(); break;
     case OP_FLUSH: render::guest_flush(); break;  // Vulkan: asynchronous submission
     case OP_DRAW_DONE:
         // The Vulkan renderer writes GPU results back to guest memory only for linear surfaces (guest data is copied
@@ -1245,6 +1246,9 @@ HLE(gx2, GX2SwapScanBuffers) {
             present_observer::fail("diagnostic swap ID ordering/reset mismatch");
         g_pending_flips.push_back({g_swap_count, std::chrono::steady_clock::now(), !hold});
     }
+    // depth peeks of this frame (the sun's glare test) are answered before the game's next step reads
+    // them, as on the Wii U (gfx/depth_peek.h)
+    gfx::depth_peek::wait_answered();
     dtrace::on_swap(g_swap_count, steps);
     // debug: WWHD_LOG_SLOW_SWAP=ms logs swaps that came more than ms after the previous one
     static const double slow_ms = getenv("WWHD_LOG_SLOW_SWAP") ? atof(getenv("WWHD_LOG_SLOW_SWAP")) : 0;

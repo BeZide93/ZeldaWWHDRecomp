@@ -68,6 +68,8 @@ void peek_z(const uint32_t* cells, uint32_t n) {
         ::gfx::depth_peek::publish(ticket,destinations,depths);
     });
     defer_buffer(staging);
+    // the game reads the answers at its next step: wait for this copy now (depth_peek.h)
+    if (::gfx::depth_peek::synchronous()) flush();
 }
 
 uint64_t frame_count();

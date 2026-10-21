@@ -551,6 +551,7 @@ add_test(NAME area_sample COMMAND area_sample_test)
 
 add_executable(depth_peek_test runtime/tools/depth_peek_test.cpp)
 target_include_directories(depth_peek_test PRIVATE runtime/src)
+target_link_libraries(depth_peek_test PRIVATE Threads::Threads)
 target_compile_options(depth_peek_test PRIVATE -UNDEBUG)
 add_test(NAME depth_peek COMMAND depth_peek_test)
 
