@@ -87,9 +87,9 @@ int main() {
     std::string background;
     hostui::g_loaded = false; hostui::g_values.clear();
     assert(!hostui::get(bgshaders::kSettingKey, background));
-    hostui::set(bgshaders::kSettingKey, "1");
+    hostui::set(bgshaders::kSettingKey, "fast");
     hostui::g_loaded = false; hostui::g_values.clear();
-    assert(hostui::get(bgshaders::kSettingKey, background) && background == "1");
+    assert(hostui::get(bgshaders::kSettingKey, background) && background == "fast");
     hostui::set(bgshaders::kSettingKey, "0");
     hostui::g_loaded = false; hostui::g_values.clear();
     assert(hostui::get(bgshaders::kSettingKey, background) && background == "0");

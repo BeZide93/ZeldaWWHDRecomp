@@ -525,8 +525,9 @@ int main(int argc, char** argv) {
         // Settings > Graphics > Detailed performance profiling (render_prof.h; WWHD_PROFILE wins)
         std::string saved;
         rprof::start(hostui::get(rprof::kSettingKey, saved) && saved == "1");
-        // Settings > Graphics > Compile shaders in the background (background_shaders.h; WWHD_BG_SHADERS wins)
-        bgshaders::start(hostui::get(bgshaders::kSettingKey, saved) && saved == "1");
+        // Settings > Graphics > Shader compile: off / safe (default) / fast (background_shaders.h;
+        // WWHD_BG_SHADERS wins)
+        bgshaders::start(bgshaders::parse_level(hostui::get(bgshaders::kSettingKey, saved) ? saved.c_str() : nullptr));
     }
     exception_report::sink.store(+[](const char* message) noexcept {
         static std::once_flag error_log;

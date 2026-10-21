@@ -745,7 +745,7 @@ std::string performance_report() {
     report += android_telemetry() + "\n";
 #endif
     report += "CPU time is thread running time per output frame. GPU submission intervals may include stalls; not GPU load.\n";
-    report += bgshaders::report_line();  // Compile shaders in the background: draws left out, waits
+    report += bgshaders::report_line();  // Shader compile level: draws left out, waits
     report += rprof::report_section();  // the detailed sections, or a line on how to turn them on
     // which build, system, GPU and rendering-path switches (report_header.h)
     reporthdr::Info h;
@@ -1046,16 +1046,29 @@ void tab_graphics() {
     flow::next(flow::check("Edge smoothing (FXAA)"), 30);
     if (check("Edge smoothing (FXAA)", render::fxaa(), &v, render::feature_available(render::kFeatureFXAA)))
         post_changed([v] { render::set_fxaa(v); });
-    // background_shaders.h: wait a few ms for a missing shader, then leave that draw out of the frame
-    if (check("Compile shaders in the background", bgshaders::enabled(), &v, !bgshaders::env_override())) {
-        bgshaders::set_requested(v);  // applies to the next draw
-        hostui::post([v] { hostui::set(bgshaders::kSettingKey, v ? "1" : "0"); });
+    // background_shaders.h: what a draw does while its shader compiles (off / safe / fast)
+    {
+        static const char* const names[] = {"Shader compile: Off (exact)", "Safe", "Fast (not exact)"};
+        static const char* const tips[] = {
+            "Every frame waits until its shaders are ready: complete pictures, but a first visit to a place "
+            "can stutter.",
+            "Default. Smoother first visits: when a shader is not ready, an object in the picture can be missing "
+            "for a moment. Shadows, reflections and effects still wait, so they are never wrong.",
+            "Fast: smoother first visits, objects, shadows or effects may be missing for a moment. Anything the "
+            "game reads back or keeps (photos, snapshots) still waits."};
+        const bool env = bgshaders::env_override() != nullptr;
+        const bgshaders::Level shown = env ? bgshaders::level() : bgshaders::requested();
+        for (int i = 0; i < bgshaders::kLevels; i++) {
+            if (i) flow::next(flow::check(names[i]));
+            if (radio(names[i], shown == i, !env)) {
+                const auto l = bgshaders::Level(i);
+                bgshaders::set_level(l);  // applies to the next draw
+                hostui::post([l] { hostui::set(bgshaders::kSettingKey, bgshaders::level_value(l)); });
+            }
+            help(tips[i]);
+        }
+        if (env) note("WWHD_BG_SHADERS=%s is set for this start and takes precedence.", bgshaders::env_override());
     }
-    if (bgshaders::env_override()) note("WWHD_BG_SHADERS=%s is set for this start and takes precedence.", bgshaders::env_override());
-    else help("Fewer stutters on a first visit: when a shader is not ready, the game no longer waits for it. That "
-              "object is missing for a moment and appears once its shader is ready. Shadows, reflections and other "
-              "effects still wait, so they are never wrong. Off: every frame waits until it is complete. "
-              "Takes effect at once. Off by default.");
 #if defined(WWHD_HAS_VULKAN) && !defined(__ANDROID__)
     if (render::vulkan()) {
         heading("GPU (Vulkan)");
@@ -2918,16 +2931,17 @@ ImDrawData* frame(float pw, float ph, void (*renderer_init)()) {
             tprof = nullptr;
         }
     }
-    // debug: WWHD_TEST_BG_SHADERS=1@600 (or 0@N) sets Graphics > Compile shaders in the background at TV
-    // frame N, as the checkbox does (saved too)
+    // debug: WWHD_TEST_BG_SHADERS=fast@600 (or safe@N, 0@N) sets Graphics > Shader compile at TV frame N,
+    // as the radio buttons do (saved too)
     static const char* tbg = getenv("WWHD_TEST_BG_SHADERS");
     if (tbg) {
         const char* at = strchr(tbg, '@');
         if (render::frame_count() + 1 >= (at ? strtoull(at + 1, nullptr, 10) : 1)) {
-            const bool on = tbg[0] == '1';
-            LOG("[overlay] test: compile shaders in the background %s", on ? "on" : "off");
-            bgshaders::set_requested(on);
-            hostui::post([on] { hostui::set(bgshaders::kSettingKey, on ? "1" : "0"); });
+            const std::string value(tbg, at ? size_t(at - tbg) : strlen(tbg));
+            const auto l = bgshaders::parse_level(value.c_str());
+            LOG("[overlay] test: shader compile %s", bgshaders::level_name(l));
+            bgshaders::set_level(l);
+            hostui::post([l] { hostui::set(bgshaders::kSettingKey, bgshaders::level_value(l)); });
             tbg = nullptr;
         }
     }

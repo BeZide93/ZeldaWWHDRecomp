@@ -28,7 +28,7 @@
 //   WWHD_TEST_PERF_REPORT_AT=<frame>            export at this presented frame (default 300)
 //   WWHD_TEST_PERF_REPORT=<file>@<frame>,...    several reports, each at its presented frame
 //   WWHD_TEST_PROFILING=1@<frame> (or 0@)       set Graphics > Detailed performance profiling at a TV frame
-//   WWHD_TEST_BG_SHADERS=1@<frame> (or 0@)      set Graphics > Compile shaders in the background at a TV frame
+//   WWHD_TEST_BG_SHADERS=fast@<frame> (safe@, 0@) set Graphics > Shader compile at a TV frame
 #pragma once
 #include <cstdint>
 
