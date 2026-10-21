@@ -1156,6 +1156,30 @@ package's local data cache; do not ship them in packages. Editing the model or
 changing the player template invalidates its cache key. Packages and this
 repository must never include game-derived material or shader templates.
 
+### Game materials by name
+
+A static world object's model can use the game's own materials instead of, or next to, its own textures: declare
+it with `"kind": "kit"` and a kit room, and leave the texture out of each material that names a game material.
+Name such a material exactly as the game names it (the editor's `export_glb` and `list_kit_materials` give the
+names):
+
+```json
+"models": [
+  {"id": "rock", "kind": "kit", "source": "assets/rock.glb", "kit": {"stage": "sea", "room": 13}}
+]
+```
+
+The materials `Txe_gake_v`, `Txe_hai_v` and `Txe_ita_v` of `rock.glb` then draw as Dragon Roost Island's rock,
+ash and planks: its textures, toon shading and any texture animation. They are built from the player's own game
+files when the game starts or when the editor imports the model. A misspelt name is refused with the names the
+room has. Materials with an embedded PNG stay your own, with the limits above; game materials don't count toward
+the 1 MiB of textures. A material that is a game material may never embed a texture, because a package never
+carries the game's pictures. The built model counts toward its room's 24 MiB for island buildings and grounds
+(the example's island with three Dragon Roost materials takes about 3.6 MiB, mostly its 2048 × 2048 rock
+texture). A kit model is a static world object at scale 1, turned about the vertical axis. Its distant model may
+be a kit model too. See [Game materials](world-objects.md#game-materials) for the naming rules, the limits, the
+editor commands (`import_model` with `kit`, `reload_model`, `set_model_kit`) and a Blender workflow.
+
 For walkable meshes and solid shapes that also block the ship, see
 [World objects](world-objects.md). The following cylinder form remains
 available for ordinary model actors.

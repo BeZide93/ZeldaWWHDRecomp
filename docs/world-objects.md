@@ -166,22 +166,27 @@ the waist, where its idle clip bends it. Its
 [`assets/make_reed_walker.py`](../examples/guest-mods/sdk-v3-skinned-materials/assets/make_reed_walker.py)
 reproduces the model, its textures and its idle and walk clips.
 
-## Kit models
+## Game materials
 
-A kit model is drawn with the materials of a room of the game instead of pictures of its own, as a mod
-stage's ground is ([Kit materials](mod-stages.md#kit-materials)): grass, rock and falling water of Forest
-Haven, the stone of Hyrule Castle. It is meant for large pieces of land and buildings in the open world, an
-island in the sky, a ruin on a sea square:
+A model can draw some or all of its surfaces with the game's own materials instead of pictures of its own:
+Dragon Roost Island's rock, Forest Haven's grass and falling water, the stone of Hyrule Castle. Such a model is a
+**kit model**. Each texture-free material of the GLB names a material of one room of the game, the kit room, as a
+[mod stage's ground](mod-stages.md#kit-materials) does. When the game starts (or when you import the model in the
+editor), the port builds it from the player's own game files into the player's model cache (`Data/.kit-models`),
+as it builds island buildings. The surfaces look exactly like the game's: its textures, toon shading, vertex-colour
+shading and moving textures (water, foam, lava) where the room animates them. Nothing of the game is in your
+package.
 
 ```json
 {
   "models": [
-    {"id": "island", "kind": "kit", "source": "assets/island.glb", "kit": {"stage": "sea", "room": 41},
-     "materials": {"grass": "m_kusa_v", "cliff": "m_iwa_v", "waterfall": "SC_00_m_v_x", "spray": "SC_00_m_2_"}}
+    {"id": "rock", "kind": "kit", "source": "assets/rock.glb", "kit": {"stage": "sea", "room": 13}},
+    {"id": "rock-far", "kind": "kit", "source": "assets/rock-far.glb", "kit": {"stage": "sea", "room": 13}}
   ],
   "actors": [
-    {"id": "island", "kind": "mod", "model": "island", "behaviour": "static", "collision": {"mesh": "island"},
-     "stage": "sea", "room": 44, "position": {"x": -200512, "y": 6640, "z": 301774}, "rotation": {"x": 0, "y": 198, "z": 0}}
+    {"id": "rock", "kind": "mod", "model": "rock", "behaviour": "static", "collision": {"mesh": "rock"},
+     "distant": {"model": "rock-far"},
+     "stage": "sea", "room": 13, "position": {"x": 214000, "y": 0, "z": -186000}}
   ]
 }
 ```
@@ -189,39 +194,124 @@ island in the sky, a ruin on a sea square:
 | Model field | |
 |---|---|
 | `kind` | `kit` |
-| `kit` | A room of the game: `{"stage": "sea", "room": 41}` (Forest Haven's square), `{"stage": "Hyroom", "room": 0}`, any stage's room. |
-| `materials` | The model's material names mapped to the kit room's materials (up to 16). A model material that is itself a kit material's name is drawn with that one. |
-| `material` | Optional: the kit material for the model's other materials. Default: the kit room's main material, the one most of its triangles use. |
+| `kit` | The kit room: `{"stage": "sea", "room": 13}` (Dragon Roost Island's square), `{"stage": "sea", "room": 41}` (Forest Haven), `{"stage": "Hyroom", "room": 0}`: any room of any stage. |
+| `materials` | Optional: the model's material names mapped to kit materials (up to 16), for materials whose names you want to keep. |
+| `material` | Optional: the kit material for every other texture-free material. |
 
-The editor's `list_kit_materials` lists a kit room's materials and their textures. The model brings texture
-coordinates and vertex colours (`COLOR_0`, which the kit materials multiply their texture by, as the game's
-rooms shade their corners and undersides) and no pictures; when the game starts, the port builds it from the
-player's own game files into the player's model cache (`Data/.kit-models`), as it builds island buildings.
-Nothing of the game is in the package.
+### Naming the materials
 
-- **Its light.** A kit model is drawn like the islands' own buildings: with the background light of the room
-  it stands in, so it has that place's colours through the day, at dusk and at night, its fog and its
-  weather. An island in the sky over the sea has the sea's light.
-- **Its parts.** The materials may come from two of the kit room's models (Forest Haven's ground model and
-  its water model, say). The first is drawn with the room's first background light set, the second with the
-  second; when the kit room moves the second model's textures (falling water, foam, spray), the kit model's
-  water moves the same way.
+A texture-free material is drawn with the kit material that `materials` maps it to, or else the kit material of
+its own name. A Blender copy suffix is ignored, so `Txe_gake_v.001` is `Txe_gake_v`. An unnamed material, or a
+`col_*` one, takes `material`, or the kit room's main material (the one most of its triangles use). A name the kit
+room doesn't have is refused. The game's log and the editor say which names the room has:
+
+```
+material "Txe_hia_v" has no texture, and "Txe_hia_v" is not a material of the kit room (sea room 13). It has:
+Txe_gake_v, Txe_hai_v, Txe_ita_v, ... The exact names are those of the room's materials in the editor's export_glb
+and list_kit_materials
+```
+
+The exact names come from the game itself. The editor's `export_glb` command writes a room as a GLB whose
+materials carry the game's names (see [Export the game's islands for reference](#export-the-games-islands-for-reference)),
+and `list_kit_materials` lists a room's materials with their textures, how many triangles use each and the
+texture coordinates the room gives them. Pick materials by what they show, not by their names. Some textures are
+atlases of several surfaces in bands; see [Kit materials](mod-stages.md#kit-materials).
+
+| Dragon Roost Island (`{"stage": "sea", "room": 13}`) | |
+|---|---|
+| `Txe_gake_v` | the island's grey-brown rock cliffs (texture 2048 × 2048) |
+| `Txe_hai_v` | the ash on its slopes |
+| `Txe_ita_v` | the wooden planks of its walkways |
+| `Txe_tesuri_v`, `Txe_rope_kui_v` | its railings and rope posts |
+| `Txe_jimen_v`, `Txe_gake_siba_v`, `Txe_gake_hai_v` | its ground, grassy cliffs and ashen cliffs |
+
+### Your own textures in the same model
+
+A material with an embedded PNG base-colour texture is your own, as in any mod model ([Several
+materials](#several-materials)): opaque or cut-out (`MASK`), optionally double-sided, up to 512 × 512, and 1 MiB
+of decoded texture for the model's own textures together. Game materials don't count toward that 1 MiB. The
+`lookout` of the example below has a rock base and a plank floor of Dragon Roost and a cloth roof of its own. The
+own materials are lit as objects are; the game materials are lit as the room lights its ground.
+
+**A game material never carries a texture.** A package never contains the game's pictures. A material that is a
+game material may not embed one, and the model is refused, in the editor, when the package is checked, and when
+the game builds it. That covers a material named after a game material or mapped to one in `materials`, and a
+material copied from an `export_glb` reference (it keeps the game's name in its extras even when renamed). Remove
+the material's image before you export, and the game draws its own from the player's files.
+
+### What a kit model is
+
+- **Its light.** The game materials are drawn like the islands' own buildings: with the background light of the
+  room the model stands in, so they have that place's colours through the day, at dusk and at night, its fog and
+  its weather. An island in the sky over the sea has the sea's light.
+- **Its parts.** A kit model is drawn in at most two parts: the game materials of each of the kit room's models
+  they come from (its ground model, its water model), and your own textures. So it can have game materials of one
+  of the room's models and textures of its own, or game materials of two of its models. The second of those is
+  drawn with the room's second background light set. When the kit room moves a material's texture (falling water,
+  foam, spray), the kit model's surface moves the same way; one part of a model can be animated.
 - **Its collision** is the model's own `*_col` meshes with `col_*` materials, as for any world object (the
-  visible triangles when it has none). `collision.mesh` names the model itself.
-- **Its place.** A static world object, turned about the vertical axis only, at scale 1 (as island
-  buildings). Its
-  placement is checked as any world object's; parts made together are [one composition](#limits-and-placement).
-- **Limits.** Up to 20,000 visible triangles, materials of two kit models, a GLB of up to 16 MiB, every point
-  within 20,000 units of the origin. The built model (its kit textures, shader archives and models) may have up
-  to 12 MiB; it counts toward the room's 24 MiB for island buildings and grounds
-  ([game pieces](mod-sdk-v3.md#island-buildings-game-pieces)). A model that can't be built (a kit material the
-  room doesn't have, another game version) is left out with the reason in the log, and its placements with it.
-- A kit model can't be held, used as a distant or shoreline model, or placed as an actor that isn't a
-  static world object. Changing its file takes effect when the game starts again.
+  visible triangles when it has none; a game material's surface is then stone). `collision.mesh` names the model
+  itself.
+- **Its place.** A static world object, turned about the vertical axis only, at scale 1 (as island buildings).
+  Its placement is checked as any world object's. Parts made together can form one
+  [composition](#limits-and-placement).
+- **Its distant model** may be a kit model too: `"distant": {"model": "rock-far"}`. That model has up to 1,024
+  triangles and draws in the eight squares around. Its game textures larger than 256 × 256 are drawn at 128 × 128
+  (the game's own distant views are small too), so it costs a fraction of the full model.
+- **Limits.** Up to 20,000 visible triangles, a GLB of up to 16 MiB, every point within 20,000 units of the
+  origin. The built model (its game textures, shader archives and models) may have up to 12 MiB. It counts
+  toward the room's 24 MiB for island buildings and grounds
+  ([game pieces](mod-sdk-v3.md#island-buildings-game-pieces)), not toward a mod model's 2 MiB.
+- A kit model can't be held or used as a shoreline. If it can't be built (a name the kit room doesn't have,
+  another game version), it is left out with the reason in the log, and its placements with it.
 
-The sky island package (`sky-island` in the mod repository) is built this way: its island is drawn with
-Forest Haven's materials and its ruins with Hyrule Castle's, two kit models placed with the same origin high
-above the sea north of Outset.
+What it costs, measured with the example's models (Dragon Roost's materials):
+
+| Model | Game textures | Shader archives | Archive (all) |
+|---|---|---|---|
+| `rock`: rock, ash, planks (262 triangles) | 3.0 MiB (the rock texture alone is 2.7 MiB) | 0.46 MiB | 3.6 MiB |
+| `lookout`: rock, planks and a cloth roof of its own | 2.8 MiB, and 64 KiB of its own | 0.56 MiB | 3.6 MiB |
+| `rock-far`: its distant model | 0.13 MiB | 0.46 MiB | 0.65 MiB |
+
+In the game, the room loads the archive as it is: the `rock` island took 3.6 MiB of its room's budget for island
+buildings and grounds, plus 57 KiB for its resource table and 17 KiB for its model. The textures of one material
+are the game's full size, so the cost is mostly that of the materials you pick, not of the model's size. Two models
+of one mod with the same kit materials each carry their own copy.
+
+### In the editor
+
+`import_model` with `kit` (and optionally `materials` and `material`) adds a kit model and builds it at once. Its
+actors appear as soon as it is ready, without a restart:
+
+```json
+{"command": "import_model", "file": "/Users/me/rock.glb", "kit": {"stage": "sea", "room": 13}}
+```
+
+After you change the model in Blender and export it over the package's file, `reload_model {"model": "rock"}`
+builds it again and the actors drawing it take the new one at once. `set_model_kit` changes a kit model's `kit`,
+`materials` or `material` and builds it again. The package and its actors save and load as any other.
+
+### A short Blender workflow
+
+1. In the editor, run `export_glb {"stage": "sea", "room": 13}`, or `list_kit_materials {"stage": "sea", "room":
+   13}`, and import the exported GLB into Blender as a reference. Note the names of the materials you want.
+2. Model your object in metres, with its origin at its foot (an island's at its sea level), Y up in the exported
+   file (Blender's glTF exporter does this).
+3. Give each surface a material named exactly as the game material, for example `Txe_gake_v`, with no Image
+   Texture node. A material appended from the reference keeps its name and texture: delete its Image Texture node.
+4. UV-map it at the game's scale. Dragon Roost's rock repeats about every 16.6 m, its ash every 6.5 m, its planks
+   every 3.9 m. Add a colour attribute (vertex colours, exported as `COLOR_0`) to darken the foot of cliffs and
+   undersides as the game's rooms do; white draws at full brightness, and Dragon Roost's own rock averages about
+   0.45.
+5. Model the collision as a separate mesh named `<name>_col` with `col_stone`, `col_sand`, `col_wood` ...
+   materials.
+6. Export glTF 2.0 Binary (.glb) with normals, UVs and vertex colours, no animation, then `import_model` it with
+   its `kit`.
+
+`examples/guest-mods/world-objects-kit` is an island built this way. A rock island next to Dragon Roost has
+Dragon Roost's rock, ash and planks, a distant model of the same materials, and a lookout with a roof texture of
+its own. Its [`assets/make_models.py`](../examples/guest-mods/world-objects-kit/assets/make_models.py) reproduces the
+models.
 
 ## Simple collision shapes
 
@@ -372,12 +462,12 @@ where the ground slopes under it, as the islands' own buildings do; only a real 
 geometry is in the way (a cliff, a pillar, a wall, the ground higher up the object). Floating and drifting
 objects keep their whole motion range clear.
 
-**Parts of one composition.** Static world objects of one mod placed with the same origin (the same
-`position`, `rotation` and `scale`) were made together in one model space: an island's ground and the ruins
-standing on it, say, each with materials of its own [kit room](#kit-models). Their collisions are not compared
-with each other, so the ruins' foundations may reach into the ground as the model has them. Everything else
-counts for each part as for any world object: the room, the island's own things, other world objects and
-other mods' objects.
+**Parts of one composition.** Static world objects of one mod that name the same `"group"` were made together:
+an island's ground and the ruins standing on it, say, each with materials of its own [kit room](#game-materials).
+Their collisions are not compared with each other, so the ruins' foundations may reach into the ground as the
+model has them. Everything else counts for each part as for any world object: the room, the island's own things,
+other world objects and other mods' objects. A group is an id (`"group": "rock-isle"`), for static world objects
+in one room; objects without one, or in another group, are compared as always, even when they share an origin.
 
 An object must stay inside the indexed room. A sea object that crosses into a neighbouring square is
 refused until coverage for that placement is available. Missing, malformed or unsupported collision, event

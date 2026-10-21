@@ -786,7 +786,9 @@ separated by `;`, or `@file` with one such line per row. Results go to the log.
 | `ground` | `position` | the ground height below a point |
 | `focus` | `id` or `position`, `distance`?, `yaw`?, `eye`?, `mod`? | fly the camera to an actor (a world object: its whole extent in view) or a place; `distance` back, looking along `yaw` degrees, or from `eye` (any height, below an island say) |
 | `check_model` | `file` | check a `.glb` file |
-| `import_model` | `file`, `id`?, `confirm`?, `mod`? | copy a `.glb` into the mod and add the model |
+| `import_model` | `file`, `id`?, `confirm`?, `kit`?, `materials`?, `material`?, `mod`? | copy a `.glb` into the mod and add the model; with `kit`, a model with game materials ([Game materials](world-objects.md#game-materials)) |
+| `set_model_kit` | `model`, `kit`?, `materials`?, `material`?, `mod`? | change a kit model's kit room and material names; built again, live |
+| `reload_model` | `model`, `mod`? | build a kit model again from its changed file; its actors take it live |
 | `place_world_object` | `id`, `model`, `collision`, `stage`, `room`, `position`, `behaviour`?, `buoyancy`?, `drift`?, `anchor`?, `grapple_points`?, `distant`?, `shoreline`?, `chart_marker`?, `arrival`?, `rotation`?, `scale`?, `mod`? | place a static, floating or drifting object of the mod with collision (one Undo step) |
 | `set_world_object` | `id`, `collision`?, `behaviour`?, `buoyancy`?, `drift`?, `anchor`?, `grapple_points`?, `distant`?, `shoreline`?, `chart_marker`?, `arrival`?, `mod`? | change a world object's collision, behaviour and motion together (`null` removes one) |
 | `preview_collision`, `placement_conflicts` | `id`, `mod`? | a world object's collision as a wireframe, and what its place conflicts with |
