@@ -7,6 +7,10 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Meta Quest: a floating theater** (#259, thanks to the contributor). On a Quest the game shows on a flat or
+  curved screen in your room, with controls for 2D/3D, size, distance, passthrough and recentering; the controllers
+  work the toolbar and the name keyboard, a gamepad plays the game. If the VR display stops during play, a "VR display
+  stopped" panel says so instead of a black view. Other Android devices are unchanged.
 ## v0.4.0
 
 - **Fixed: switches and doors waited for a restart in the world editor.** With all of the editor's live kinds
