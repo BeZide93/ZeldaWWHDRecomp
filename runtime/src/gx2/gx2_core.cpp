@@ -107,7 +107,7 @@ static bool g_reg_tables_ready = false;
 static bool g_fused_small = false;    // Vulkan: the per-word path for writes of up to 16 words
 static bool g_key_dirty = false;      // WWHD_VK_SHADER_KEY_DIRTY=1
 static bool g_collect_stats = false;  // WWHD_VK_STATS (Vulkan)
-static bool g_classify = false;       // render-thread profiler on (rprof::enabled())
+static bool g_classify = false;       // render-thread profiler on (rprof::enabled(); updated at each swap)
 
 static void build_reg_tables() {
     g_reg_classes.build(shader_address_memo(), [](uint32 r) { return rprof::fast_class_reg(r); });
@@ -634,7 +634,10 @@ static void execute_one(Op op, const uint32* p, uint32 n) {
     const uint64_t started = rprof::op_begin(kind);
     execute_op(op, p, n);
     rprof::op_end(kind, started);
-    if (op == OP_SWAP) rprof::frame_end(n >= 2 && p[1]);
+    if (op == OP_SWAP) {
+        rprof::frame_end(n >= 2 && p[1]);  // applies a change of the profiling setting
+        g_classify = rprof::enabled();
+    }
 }
 
 // Test only: WWHD_TEST_RENDER_LOAD_MS=x / WWHD_TEST_GAME_LOAD_MS=x busy-wait x ms per frame on the

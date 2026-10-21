@@ -34,6 +34,7 @@
 #include "gfx/renderer.h"
 #include "gfx/shader_prebuild.h"
 #include "overlay/hostui.h"
+#include "render_prof.h"
 #include "mods/cemu_pack.h"
 #include "mods/content.h"
 #include "gx2/gx2.h"
@@ -461,6 +462,11 @@ int main(int argc, char** argv) {
     index_game_functions();
     install_crash_handler();
     start_log_file();
+    {
+        // Settings > Graphics > Detailed performance profiling (render_prof.h; WWHD_PROFILE wins)
+        std::string saved;
+        rprof::start(hostui::get(rprof::kSettingKey, saved) && saved == "1");
+    }
     exception_report::sink.store(+[](const char* message) noexcept {
         static std::once_flag error_log;
         std::call_once(error_log, [] { if (g_log_fd < 0) start_log_file(true); });

@@ -99,6 +99,10 @@ directory) to check that the run still renders correctly. The "Sort by top of st
 `sample.txt` shows where the CPU time goes. `run.log` prints the shader and pipeline counts every
 few seconds.
 
+For a performance bug report, turn on Settings → Graphics → **Detailed performance profiling**, play
+a few seconds, then press **Copy performance report**. The setting is off by default and takes effect
+at once; without it the report leaves out the detailed timings, uploads and draw classes.
+
 Crash logs and the overlay's "Copy performance report" carry one line with the renderer's live
 objects (`runtime/src/render_objects.h`): `renderer objects: 572 shaders, 337 pipelines`, plus on
 Linux and Android `memory mappings N (limit L)` from `/proc/self/maps` and `vm.max_map_count`.

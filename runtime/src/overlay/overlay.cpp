@@ -97,6 +97,7 @@ namespace gfxvk { bool buffer_cache_enabled(); }  // gfx/vulkan/buffer_cache.h
 #include "template_export.h"
 #endif
 #include "../render_prof.h"
+#include <cctype>
 #include "../perf_metrics.h"
 #include "../build_info.h"
 #include "settings_shortcut.h"
@@ -743,9 +744,7 @@ std::string performance_report() {
     report += android_telemetry() + "\n";
 #endif
     report += "CPU time is thread running time per output frame. GPU submission intervals may include stalls; not GPU load.\n";
-    const std::string detailed = rprof::latest_report();
-    report += !detailed.empty() ? detailed : rprof::enabled()
-        ? "Detailed profiling report is warming up.\n" : "Detailed per-draw profiling is disabled.\n";
+    report += rprof::report_section();  // the detailed sections, or a line on how to turn them on
     // which build, system, GPU and rendering-path switches (report_header.h)
     reporthdr::Info h;
     h.version = build::version();
@@ -1096,6 +1095,15 @@ void tab_graphics() {
     heading("Overlay");
     if (check("Performance overlay (FPS, frame time)", perf_shown(), &v)) set_perf_shown(v);
     if (ImGui::Button("Reset performance averages")) { g_average.reset(); perf::reset(); }
+    // the render-thread profiler (render_prof.h): its report is the detailed part of the performance report
+    if (check("Detailed performance profiling", rprof::requested(), &v, !rprof::env_override())) {
+        rprof::set_requested(v);  // applied at the next frame
+        hostui::post([v] { hostui::set(rprof::kSettingKey, v ? "1" : "0"); });
+    }
+    if (rprof::env_override()) note("WWHD_PROFILE=%s is set for this start and takes precedence.", rprof::env_override());
+    else help("Adds timings, uploads and draw classes to Copy performance report. Takes effect at once; the first "
+              "report is ready a few seconds later. Costs a little speed, so leave it off unless you send a "
+              "performance report. Off by default.");
     // the render-thread profiler's latest report (render_prof.h), for performance bug reports
     if (ext::features().clipboard) {
         static double copiedAt = -10;
@@ -2876,6 +2884,19 @@ ImDrawData* frame(float pw, float ph, void (*renderer_init)()) {
         }
     }
 #endif
+    // debug: WWHD_TEST_PROFILING=1@600 (or 0@N) sets Graphics > Detailed performance profiling at TV
+    // frame N, as the checkbox does (saved too)
+    static const char* tprof = getenv("WWHD_TEST_PROFILING");
+    if (tprof) {
+        const char* at = strchr(tprof, '@');
+        if (render::frame_count() + 1 >= (at ? strtoull(at + 1, nullptr, 10) : 1)) {
+            const bool on = tprof[0] == '1';
+            LOG("[overlay] test: detailed performance profiling %s", on ? "on" : "off");
+            rprof::set_requested(on);
+            hostui::post([on] { hostui::set(rprof::kSettingKey, on ? "1" : "0"); });
+            tprof = nullptr;
+        }
+    }
     const double t = now_s();
     if (U.last_present > 0) {
         U.frame_ms[U.frame_i] = (float)((t - U.last_present) * 1000.0);
@@ -2897,17 +2918,32 @@ ImDrawData* frame(float pw, float ph, void (*renderer_init)()) {
     }
     perf::set_demand(perf, open && shown_builtin() == kGraphics);
     // Headless report QA uses the same formatter as the clipboard button; no clipboard mutation.
-    static const char* testReport = getenv("WWHD_TEST_PERF_REPORT");
-    static const uint64_t reportAt = getenv("WWHD_TEST_PERF_REPORT_AT")
-        ? strtoull(getenv("WWHD_TEST_PERF_REPORT_AT"), nullptr, 10) : 300;
-    static bool reportWritten = false;
-    if (testReport && !reportWritten && gx2::flips_presented() >= reportAt) {
-        if (FILE* f = fopen(testReport, "w")) {
-            const std::string report = performance_report();
-            fwrite(report.data(), 1, report.size(), f); fclose(f);
-            reportWritten = true;
+    // WWHD_TEST_PERF_REPORT=file (at WWHD_TEST_PERF_REPORT_AT presented frames, default 300), or
+    // file@frames,file@frames,... for several reports in one run
+    struct TestReport { std::string path; uint64_t at; bool written; };
+    static std::vector<TestReport> testReports = [] {
+        std::vector<TestReport> list;
+        const char* e = getenv("WWHD_TEST_PERF_REPORT");
+        const char* a = getenv("WWHD_TEST_PERF_REPORT_AT");
+        const uint64_t defaultAt = a ? strtoull(a, nullptr, 10) : 300;
+        for (std::string rest = e ? e : ""; !rest.empty();) {
+            const size_t comma = rest.find(',');
+            std::string item = rest.substr(0, comma);
+            rest = comma == std::string::npos ? "" : rest.substr(comma + 1);
+            const size_t at = item.rfind('@');
+            if (at != std::string::npos && at + 1 < item.size() && isdigit((unsigned char)item[at + 1]))
+                list.push_back({item.substr(0, at), strtoull(item.c_str() + at + 1, nullptr, 10), false});
+            else if (!item.empty()) list.push_back({item, defaultAt, false});
         }
-    }
+        return list;
+    }();
+    for (TestReport& r : testReports)
+        if (!r.written && gx2::flips_presented() >= r.at)
+            if (FILE* f = fopen(r.path.c_str(), "w")) {
+                const std::string report = performance_report();
+                fwrite(report.data(), 1, report.size(), f); fclose(f);
+                r.written = true;
+            }
     // save state notices (saved, refused during a cutscene, loaded into another Quest Log) show over the
     // game for a few seconds while the menu is closed (the window title is not visible everywhere)
     std::string toast = open ? std::string() : ss::last_message();

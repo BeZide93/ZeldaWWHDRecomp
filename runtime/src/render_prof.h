@@ -9,7 +9,13 @@
 //
 // Every 120 swaps the counters are turned into a text report: logged with WWHD_PROFILE=1,
 // WWHD_VK_STATS or WWHD_VK_CPU_ONLY_STATS=1, and kept for the overlay's "Copy performance report"
-// button (latest_report()). Disabled by default; WWHD_PROFILE=1 enables it.
+// button (latest_report()).
+//
+// Off by default. Settings > Graphics > "Detailed performance profiling" turns it on (saved as
+// detailedProfiling); WWHD_PROFILE=1 forces it on and WWHD_PROFILE=0 off for that start (the setting
+// is then not used). A change takes effect at the next swap, between two frames on the render
+// thread (frame_end): turning it on starts the counters afresh (the first report follows 120 frames
+// later), turning it off drops the last report.
 #pragma once
 #include <cstdint>
 #include <initializer_list>
@@ -27,7 +33,14 @@ enum Upload : int { kUpOther, kUpVertex, kUpIndex, kUpUbo, kUpUniformVars, kUpTe
 enum Wait : int { kWaitGpu, kWaitAcquire, kWaitPresent, kWaits };
 enum Sync : int { kSyncDrawDone, kSyncCopySurface, kSyncFlip, kSyncOther, kSyncs };
 
-bool enabled();
+bool enabled();               // collecting now (any thread)
+constexpr const char* kSettingKey = "detailedProfiling";  // hostui setting: "1" on, "0" off
+const char* env_override();   // WWHD_PROFILE when set (it wins over the setting), else nullptr
+bool requested();             // what is in effect from the next swap on: WWHD_PROFILE, else the setting
+void set_requested(bool on);  // the setting changed (any thread); applied at the next swap
+void start(bool saved);       // start-up, before the first frame: the saved setting; logs the state
+// the performance report's detailed part: the latest report, or one line saying why there is none
+std::string report_section();
 uint64_t now_ns();
 uint64_t thread_cpu_ns();  // CPU time of the calling thread (0: not available)
 

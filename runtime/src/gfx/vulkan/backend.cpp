@@ -4126,7 +4126,6 @@ static void init_device(std::vector<const char *> extensions,
     set_record_worker_saved_choice(::hostui::get("vkRecordWorker", value) ? value == "1" : defaultWorker);
   }
   nativeWorkerPresentation = false;
-  LOG("[vulkan] detailed per-draw profiling %s",rprof::enabled()?"enabled":"disabled");
   if (record_worker_requested()) {
     const char* nativeOption = std::getenv("WWHD_R5_NATIVE_PRESENT");
     const bool nativeRequested = nativeOption && !std::strcmp(nativeOption, "1");

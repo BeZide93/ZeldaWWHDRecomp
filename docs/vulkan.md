@@ -852,17 +852,21 @@ private; they contain game imagery.
 
 ## Render-thread profiler
 
-`runtime/src/render_prof.h` (both renderers) is **off by default**. Set `WWHD_PROFILE=1` to enable
-collection; `WWHD_PROFILE=0` explicitly disables it. When enabled, every 120 frames it builds a report that `WWHD_PROFILE=1`, `WWHD_VK_STATS` or
+`runtime/src/render_prof.h` (both renderers) is **off by default**. Settings → Graphics → Overlay →
+**Detailed performance profiling** turns it on (saved with the other settings, on every platform). It
+takes effect at once, between two frames; the first detailed report is ready about 120 frames later.
+`WWHD_PROFILE=1` forces it on and `WWHD_PROFILE=0` off for that start; the checkbox is then greyed
+out. The log records the state at start-up and each change (`[prof] detailed performance profiling
+on|off`). When on, every 120 frames it builds a report that `WWHD_PROFILE=1`, `WWHD_VK_STATS` or
 `WWHD_VK_CPU_ONLY_STATS=1` log as `[prof]` lines, and that the settings overlay's
 **Copy performance report** button (Graphics tab) puts on the clipboard. Its two header lines
 (`runtime/src/report_header.h`) say where the report comes from: the version and commit (release
 builds: the tag; others `git describe`, e.g. `v0.2.5+3`), the OS and version, the GPU with its driver
 version (decoded as vulkaninfo does) and Vulkan version, or the Metal device; then the renderer, host,
 frame mode, internal scale, buffer cache on/off, the gyro source when not off, and as `overrides:` the
-CPU paths not set to `1` and lazy DrawDone / async present when turned off. Without profiling,
-**Copy performance report** omits the detailed timing/upload/draw-class sections below; the overlay
-labels detailed profiling as disabled. `WWHD_VK_STATS` alone does not enable profiler collection.
+CPU paths not set to `1` and lazy DrawDone / async present when turned off. With profiling off,
+**Copy performance report** leaves out the detailed timing/upload/draw-class sections below and says
+in one line that the setting turns them on. `WWHD_VK_STATS` alone does not turn on the profiler.
 
 Periodic interpolation, swap-rate and continued-draw logging is also opt-in. Set
 `WWHD_LOG_FLIP_PACING` to restore interpolation and swap-rate lines; set
@@ -870,8 +874,9 @@ Periodic interpolation, swap-rate and continued-draw logging is also opt-in. Set
 continued-draw statistics and the periodic interpolation/swap lines (and additional Vulkan
 diagnostics). `WWHD_SCHED_STATS` also restores the swap-rate line and enables scheduler statistics;
 setting it to `2` additionally enables timed scheduler statistics. These logging switches check
-whether the variable is set, so even a value of `0` enables them. For a detailed shared report,
-enable `WWHD_PROFILE=1` before starting the game. The enabled profiler report contains:
+whether the variable is set, so even a value of `0` enables them. For a detailed shared report, turn
+on **Detailed performance profiling**, play a few seconds, then copy the report. The detailed report
+contains:
 
 - frame time, swaps/s, logic steps/s, render-thread CPU, time in GX2 ops and idle;
 - ms per frame per op and, sampled on one draw in 64, per draw phase (shader lookup, index
