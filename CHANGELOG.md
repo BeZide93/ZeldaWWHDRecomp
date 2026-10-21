@@ -7,6 +7,11 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Mod stages: the light of a place of the game, the game's trees, joined rooms** (for mod makers). A mod stage
+  can take its light from another place, e.g. `"light": {"stage": "sea", "room": 44}` for Outset's daylight that
+  follows the game's clock; it can place the game's own trees (small, bushy, large with a scale, palm) as room
+  actors; and rooms joined by an open passage are now drawn together. The editor accepts parameters of two types
+  (such as a kit given by number or by stage and room). See [mod stages](docs/mod-stages.md).
 - **Dynamic resolution** (all platforms, off by default; idea from the GreenNaugahyde Android fork). Settings →
   Graphics → Dynamic resolution lowers the internal resolution in small steps (down to 75% or 50%) while the
   graphics chip holds the game back, and raises it again when there is room. The picture keeps its size and is scaled
