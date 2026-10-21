@@ -1603,7 +1603,7 @@ extern "C" void hook_020CDF78(Cpu* c) { trail_draw(c, f_020CDF78_orig, 0x98, {0x
 // the hook are drawn blended. On blended passes it is built from the blended root and angles, with
 // the count from the blended root-tip distance (tip: current.pos +0x314).
 namespace {
-struct HookRec { uint64_t record = ~0ull; uint32_t hs = 0; float root[3], tip[3]; int16_t ax, ay; };
+struct HookRec { uint64_t record = ~0ull; uint32_t hs = 0; float root[3], tip[3]; int16_t ax, ay; int32_t count = 0; };
 HookRec g_hook;
 }  // namespace
 extern "C" void f_021768B0_orig(Cpu*);
@@ -1621,10 +1621,15 @@ extern "C" void hook_021768B0(Cpu* c) {
         for (int i = 0; i < 3; i++) { g_hook.root[i] = r[i]; g_hook.tip[i] = p[i]; }
         g_hook.ax = ax;
         g_hook.ay = ay;
+        g_hook.count = (int32_t)ld32(cnt);
         f_021768B0_orig(c);
         return;
     }
-    if (!halfway() || g_hook.hs != hs || g_hook.record != interp::hold_pass_count()) { f_021768B0_orig(c); return; }
+    // (no chain on either step: nothing to draw; the hook still in Link's hand)
+    if (!halfway() || g_hook.hs != hs || g_hook.record != interp::hold_pass_count() || (g_hook.count <= 0 && (int32_t)ld32(cnt) <= 0)) {
+        f_021768B0_orig(c);
+        return;
+    }
     const float t = interp::pass_t();
     float br[3], bp[3], dr = 0, dp = 0, d = 0;
     for (int i = 0; i < 3; i++) {
@@ -1641,12 +1646,11 @@ extern "C" void hook_021768B0(Cpu* c) {
     st16(ang + 2, (uint16_t)lerp_s16(g_hook.ay, ay, t));
     int32_t n = (int32_t)(std::sqrt(d) / 7.0f);
     if (n > 300) n = 300;
-    if ((int32_t)ld32(cnt) > 0 && n < 1) n = 1;
     st32(cnt, (uint32_t)n);
     static int tr = trace_left(7);
     if (tr) {
         tr--;
-        LOG("[interp-fx] hookshot chain t %.3f: root %.1f %.1f %.1f -> %.1f %.1f %.1f, drawn at %.1f %.1f %.1f, %d links (exact %d)", t, g_hook.root[0],
+        LOG("[interp-fx] hookshot chain pass %llu t %.3f: root %.1f %.1f %.1f -> %.1f %.1f %.1f, drawn at %.1f %.1f %.1f, %d links (exact %d)", (unsigned long long)interp::pass_count(), t, g_hook.root[0],
             g_hook.root[1], g_hook.root[2], r[0], r[1], r[2], br[0], br[1], br[2], n, (int32_t)saved[4]);
     }
     f_021768B0_orig(c);
