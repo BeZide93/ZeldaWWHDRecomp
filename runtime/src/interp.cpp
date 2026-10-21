@@ -417,6 +417,15 @@ static void camera_draw(Cpu* c) {
                 p->snap = cam_snap(p->s, cur);
                 p->snap_step = g_logic_steps;
                 p->dist_rule = camera::distance_rule_applies(step_info(cam, g_logic_steps), dist_rule_mode());
+                static int dist_trace = getenv("WWHD_INTERP_CAM_DIST_TRACE") ? atoi(getenv("WWHD_INTERP_CAM_DIST_TRACE")) : 0;
+                if (dist_trace > 0 && !p->snap) {
+                    const float la = camera::dist(p->s.eye, p->s.center), lb = camera::dist(cur.eye, cur.center);
+                    if (camera::distance_jump(la, lb)) {
+                        dist_trace--;
+                        LOG("[interp] camera %08X step %llu: distance %.1f -> %.1f (%s)", cam, (unsigned long long)g_logic_steps, la, lb,
+                            p->dist_rule ? "drawn exactly: collision pull-in or event camera" : "blended");
+                    }
+                }
             }
             if (p->snap_step == g_logic_steps && !p->snap) write_cam(cam, camera::blend(p->s, cur, pass_t(), p->dist_rule));
             // letterbox bars (interp_camera.h trim_blends): between the steps' heights
@@ -738,6 +747,16 @@ extern "C" void hook_027F55FC(Cpu* c) {
             p.stale.assign(n, 0);
             for (uint32_t j = 0; layout && j < n; j++)
                 p.stale[j] = joints::stale(joint_hidden(data, j), cur + 12 * j, before ? p.w.data() + 12 * j : nullptr);
+        }
+        // debug: WWHD_INTERP_MULTIDRAW=n logs n models whose joint block is drawn again on the same
+        // record pass with other matrices (one model placed several times per pass: only the last
+        // placement is recorded, so the next step's first placement would blend from another one)
+        static int multidraw = getenv("WWHD_INTERP_MULTIDRAW") ? atoi(getenv("WWHD_INTERP_MULTIDRAW")) : 0;
+        if (multidraw > 0 && p.pass == g_record_passes && p.w.size() == words && memcmp(p.w.data(), cur, 4 * words) != 0) {
+            multidraw--;
+            const float dx = wf(p.w[3]) - wf(cur[3]), dy = wf(p.w[7]) - wf(cur[7]), dz = wf(p.w[11]) - wf(cur[11]);
+            LOG("[interp] step %llu: model %08X (joints %08X, %u) drawn again on the record pass, root %.1f away (vtable caller %08X)",
+                (unsigned long long)g_logic_steps, model, jnt, n, std::sqrt(dx * dx + dy * dy + dz * dz), c->lr);
         }
         p.marker_cell = marker_cell;
         p.mtx = mtx;
