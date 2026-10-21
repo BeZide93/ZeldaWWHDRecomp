@@ -754,7 +754,16 @@ extern "C" void hook_027F55FC(Cpu* c) {
     std::vector<uint32_t> mid(words);
     const auto r = joints::blend(prev.data(), saved.data(), it->second.stale.size() == n ? it->second.stale.data() : nullptr, n,
                                  kCut, t, mid.data(), blend_mtx);
+    // debug: WWHD_INTERP_JOINT_TRACE=1 logs (on the logic pass) the hidden joints drawn at the current
+    // step and the joint that made a model's cut
+    static const bool joint_trace = getenv("WWHD_INTERP_JOINT_TRACE") != nullptr;
     if (r.cut) {  // teleport (or NaN): show the new step
+        if (joint_trace && !g_hold) {
+            const uint32_t* a = prev.data() + 12 * r.cut_joint;
+            const uint32_t* b = saved.data() + 12 * r.cut_joint;
+            LOG("[interp] step %llu: model %08X (%u joints) cut by joint %u: %.1f %.1f %.1f -> %.1f %.1f %.1f",
+                (unsigned long long)g_logic_steps, model, n, r.cut_joint, wf(a[3]), wf(a[7]), wf(a[11]), wf(b[3]), wf(b[7]), wf(b[11]));
+        }
         g_mstats.cut++;
         trace_model("cut", jnt, n, cur);
         f_027F55FC_orig(c);
@@ -762,9 +771,7 @@ extern "C" void hook_027F55FC(Cpu* c) {
     }
     g_mstats.blended++;
     g_mstats.shown += r.shown;
-    // debug: WWHD_INTERP_JOINT_TRACE=1 logs the hidden joints drawn at the current step (on the logic
-    // pass): how far the blend from their stale matrix would have moved them
-    static const bool joint_trace = getenv("WWHD_INTERP_JOINT_TRACE") != nullptr;
+    // (WWHD_INTERP_JOINT_TRACE: how far the blend from their stale matrix would have moved them)
     if (joint_trace && r.shown && !g_hold)
         for (uint32_t j = 0; j < n; j++) {
             const uint32_t* a = prev.data() + 12 * j;
