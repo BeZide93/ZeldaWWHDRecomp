@@ -62,4 +62,8 @@ std::vector<uint8_t> encode_pipeline_recipes(const PipelineRecipeFingerprint& fi
     const std::vector<std::shared_ptr<PipelineRecipe>>& recipes);
 std::vector<std::shared_ptr<PipelineRecipe>> decode_pipeline_recipes(
     const PipelineRecipeFingerprint& fingerprint, const std::vector<uint8_t>& bytes);
+// Why a stored fingerprint (backend.cpp layout) differs from the current one,
+// for the log; nullptr when they match. Bytes 28-35 mix the enabled-feature
+// checksum with the runtime build identity and cannot be told apart.
+const char* pipeline_recipe_mismatch(const PipelineRecipeFingerprint& current, const uint8_t* stored);
 }

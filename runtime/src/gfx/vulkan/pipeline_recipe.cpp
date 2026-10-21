@@ -289,10 +289,22 @@ std::vector<uint8_t> encode_pipeline_recipes(const PipelineRecipeFingerprint& fi
   word(60,uint32_t(crc32(0,out.bytes.data()+64,out.bytes.size()-64)));
   return std::move(out.bytes);
 }
+const char* pipeline_recipe_mismatch(const PipelineRecipeFingerprint& current, const uint8_t* stored) {
+  auto differs = [&](size_t at, size_t size) { return std::memcmp(current.data() + at, stored + at, size) != 0; };
+  // Schema first: an older layout may give the other fields another meaning.
+  if (differs(40, 4)) return "they use another recipe format; they will be rebuilt";
+  if (differs(0, 8)) return "they come from another GPU; they will be rebuilt";
+  if (differs(8, 20)) return "they come from another graphics driver version; they will be rebuilt";
+  if (differs(36, 4) || differs(44, 4)) return "they come from other device capabilities or vertex settings; they will be rebuilt";
+  if (differs(28, 8)) return "they come from another runtime build (or other enabled device features); they will be rebuilt";
+  return nullptr;
+}
 std::vector<std::shared_ptr<PipelineRecipe>> decode_pipeline_recipes(
     const PipelineRecipeFingerprint& fingerprint, const std::vector<uint8_t>& bytes) {
-  if (bytes.size() < 64 || bytes.size() > maxBytes || std::memcmp(bytes.data(), "WWVKPR01", 8) ||
-      std::memcmp(bytes.data() + 8, fingerprint.data(), fingerprint.size())) throw std::runtime_error("incompatible pipeline recipe database");
+  if (bytes.size() < 64 || bytes.size() > maxBytes || std::memcmp(bytes.data(), "WWVKPR01", 8))
+    throw std::runtime_error("incompatible pipeline recipe database: not a recipe file of this format");
+  if (auto reason = pipeline_recipe_mismatch(fingerprint, bytes.data() + 8))
+    throw std::runtime_error(std::string("incompatible pipeline recipe database: ") + reason);
   Reader in{bytes, 56}; uint32_t count = in.count(kPipelineRecipeMaxCount), checksum; in.scalar(checksum);
   if (checksum != crc32(0, bytes.data() + 64, bytes.size() - 64)) throw std::runtime_error("pipeline recipe checksum mismatch");
   std::vector<std::shared_ptr<PipelineRecipe>> recipes;

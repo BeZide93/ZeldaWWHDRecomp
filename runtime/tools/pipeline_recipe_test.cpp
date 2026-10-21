@@ -1,4 +1,5 @@
 #include "gfx/vulkan/pipeline_recipe.h"
+#include <string>
 #include "pipeline_state_fixture.h"
 #include <cassert>
 #include <thread>
@@ -167,6 +168,35 @@ int main(int argc, char** argv) {
   fingerprint[0] = 1;
   rejects([&] { decode_pipeline_recipes(fingerprint, database); });
   fingerprint[0] = 0;
+  // The log names the part of the fingerprint that changed.
+  {
+    auto reason = [&](size_t at) {
+      PipelineRecipeFingerprint stored = fingerprint;
+      stored[at] ^= 1;
+      const char* text = pipeline_recipe_mismatch(fingerprint, stored.data());
+      return std::string(text ? text : "");
+    };
+    assert(!pipeline_recipe_mismatch(fingerprint, fingerprint.data()));
+    assert(reason(0).find("another GPU") != std::string::npos);
+    assert(reason(4).find("another GPU") != std::string::npos);
+    assert(reason(8).find("driver") != std::string::npos);
+    assert(reason(12).find("driver") != std::string::npos);  // pipeline cache UUID
+    assert(reason(27).find("driver") != std::string::npos);
+    assert(reason(28).find("runtime build") != std::string::npos);
+    assert(reason(35).find("runtime build") != std::string::npos);
+    assert(reason(36).find("capabilities") != std::string::npos);
+    assert(reason(44).find("capabilities") != std::string::npos);
+    assert(reason(40).find("recipe format") != std::string::npos);
+    PipelineRecipeFingerprint rebuilt = fingerprint;  // schema wins over everything else
+    rebuilt[40] ^= 1; rebuilt[0] ^= 1; rebuilt[30] ^= 1;
+    assert(std::string(pipeline_recipe_mismatch(fingerprint, rebuilt.data())).find("recipe format") != std::string::npos);
+    PipelineRecipeFingerprint other = fingerprint;
+    other[29] ^= 0x80;
+    std::string message;
+    try { decode_pipeline_recipes(other, database); }
+    catch (const std::runtime_error& error) { message = error.what(); }
+    assert(message.find("incompatible pipeline recipe database: they come from another runtime build") == 0);
+  }
   for (size_t size : {size_t(0), size_t(63), database.size() - 1}) {
     auto truncated = database; truncated.resize(size);
     rejects([&] { decode_pipeline_recipes(fingerprint, truncated); });
