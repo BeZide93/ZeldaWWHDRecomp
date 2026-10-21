@@ -54,7 +54,6 @@ jobs:
           emulator-options: -no-window -no-snapshot -noaudio -no-boot-anim -gpu swiftshader_indirect -memory 2048
           disable-animations: true
           script: |
-            python3 tools/android/activity_routing_smoke.py --serial emulator-5554 --apk android/app/build/outputs/apk/debug/app-debug.apk --output build/activity-routing-result.json
             python3 tools/android/display_smoke.py --serial emulator-5554 --apk android/app/build/outputs/apk/debug/app-debug.apk --require-fence-retirement --require-present-worker --measure-timing --timing-report-only --exercise-primary-rotation --exercise-folds --exercise-dismissal --exercise-surface-loss --output build/display-smoke-result.json
             python3 tools/android/shared_image_smoke.py --serial emulator-5554 --apk android/app/build/outputs/apk/debug/app-debug.apk --output build/shared-image-result.json
             python3 tools/android/shared_image_smoke.py --serial emulator-5554 --apk android/app/build/outputs/apk/debug/app-debug.apk --general-layout --output build/shared-image-general-result.json
@@ -63,6 +62,7 @@ jobs:
             python3 tools/android/activity_recreation_smoke.py --serial emulator-5554 --output build/activity-recreation-result.json
             python3 tools/android/python_smoke.py --serial emulator-5554 --output build/python-smoke-result.json
             python3 tools/android/setup_update_smoke.py --serial emulator-5554 --apk android/app/build/outputs/apk/debug/app-debug.apk --output build/setup-update-result.json
+            python3 tools/android/activity_routing_smoke.py --serial emulator-5554 --apk android/app/build/outputs/apk/debug/app-debug.apk --output build/activity-routing-result.json
       - uses: actions/upload-artifact@v5
         if: always()
         with:
