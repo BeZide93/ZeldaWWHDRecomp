@@ -323,12 +323,14 @@ Metal used to wait up to 25 ms per frame and then skip any draw into a target re
 It now follows this setting like Vulkan.
 
 In a test on a Mac (MoltenVK; title screen, Windfall, a Hyrule room and the open sea at dusk, each
-first visit with empty game shader caches), Safe left out about 55 draws in 13 frames per run, such as
-title text for one frame; the pictures otherwise matched Off. Fast left out about 1,500 draws in 60
-frames: Link, a boat's wake, seagulls or enemies on the sea were missing for 2 to 4 frames. On the
-title screen Fast's longest frame was 0.9 s against 0.7 to 1.1 s with Off, with 4 instead of 1 to 9
-frames over 100 ms. With warm caches Safe changed nothing; Fast still left out 9 draws in 2 frames
-(enemies at sea, for 4 frames) whose pipelines were not yet cached.
+a first visit with empty game shader caches, two runs per level), the frames waited 2.1 to 3.6 s in all
+for shaders with Off, 1.9 to 4.2 s with Safe and 0.4 to 0.5 s with Fast; Fast's longest frame per
+place was 81 to 422 ms against 105 to 740 ms with Off. Safe left out about 57 draws in 14 frames
+(for example the title text for one frame) and made no measurable difference to stutter in this game,
+because most new shaders belong to draws Safe must wait for. Fast left out about 810 draws in 38
+frames: mostly for one to three frames, the most visible were a fade overlay that was missing for one
+frame (a flash on the file screen and when entering the Hyrule room) and enemies on the sea. With
+warm caches neither level left a draw out.
 
 `WWHD_BG_SHADERS=0|safe|fast` sets the level for that start (the buttons are then greyed out).
 `WWHD_BG_SHADER_WAIT_MS` sets the per-frame wait. The log records the level at start-up and each
