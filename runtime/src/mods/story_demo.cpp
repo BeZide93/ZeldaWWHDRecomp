@@ -29,6 +29,8 @@ const uint32_t kDemoRemove = GC(0x02528AC4), kSearchFromName = GC(0x025D9F38), k
 const uint32_t kManagerCreate = GC(0x02528CEC);  // dDemo_manager_c::create
 const uint32_t kLookupId = GC(0x026067F4), kLookupName = GC(0x02606900), kManagerUpdate = GC(0x025291C8);
 const uint32_t kSearchName = GC(0x025C109C), kActorCreate = GC(0x025D5834), kSearchById = GC(0x025D54C4), kActorDelete = GC(0x025D57E0);
+const uint32_t kCurrentLayer = GC(0x025DED64), kSetCurrentLayer = GC(0x025DEAB4);  // fpcLy_CurrentLayer, fpcLy_SetCurrentLayer
+constexpr uint32_t kProcessLayer = 0x2C;  // base_process_class: the layer the process lives in
 const uint32_t kResidentAnm = GC(0x022BED70), kResidentPlayAnm = GC(0x022C2D6C), kResidentPlayTex = GC(0x022C2CC0);
 const uint32_t kResidentWalk = GD(0x101C31BA), kResidentWait = GD(0x101C31B4);  // daNpcPeople_c walk/wait animation tables (as the routes use)
 const uint32_t kDemoActor = GC(0x02526E70), kDemoPool = GD(0x101D5FFC), kResidentMtx = GC(0x022BF3A0), kDemoFrame = GD(0x101D6008);
@@ -342,8 +344,27 @@ bool spawn_missing(Cpu* c, std::string& why) {
         std::memset(mem::ptr(args + 12), 0, 8);
         for (unsigned i = 0; i < 3; ++i) st32(args + 20 + i * 4, f32_as_u32(1.f));
         const uint32_t sub = ld8(entry + 0xA);
-        const uint32_t pid = call(c, kActorCreate, {ld16(entry + 8), cast.params, args, uint32_t(int8_t(ld8(link + 0x326))), args + 12, args + 20, sub == 0xFF ? 0xFFFFFFFFu : sub, 0});
+        // fopAcM_create puts the actor into the process layer that is current at the call. The scene
+        // player runs between the game's process handlers, where the current layer is whatever the last
+        // one left, often the root layer. An actor in the root layer is drawn twice a frame: by the root
+        // layer's own draw and by the actor draw queue the play scene draws. Its model packets then go
+        // into the same J3D draw bucket twice, the bucket's list loops on itself and
+        // J3DDrawBuffer::drawHead never returns (the scene preview hang). So the demo's actors are made
+        // in Link's layer (the play scene's), where the game keeps its own actors.
+        const uint32_t layer = ld32(link + kProcessLayer);
+        if (!layer) return why = "Link's process layer is unknown", false;
+        const uint32_t previous = call(c, kCurrentLayer, {});
+        uint32_t pid = 0xFFFFFFFFu;
+        call(c, kSetCurrentLayer, {layer});
+        try {
+            pid = call(c, kActorCreate, {ld16(entry + 8), cast.params, args, uint32_t(int8_t(ld8(link + 0x326))), args + 12, args + 20, sub == 0xFF ? 0xFFFFFFFFu : sub, 0});
+        } catch (...) {
+            call(c, kSetCurrentLayer, {previous});
+            throw;
+        }
+        call(c, kSetCurrentLayer, {previous});
         if (pid == 0xFFFFFFFFu) return why = "the game could not create " + cast.name, false;
+        if (previous != layer) LOG("[demo] %s goes into Link's process layer %08X (the current layer was %08X)", cast.name.c_str(), layer, previous);
         const uint32_t slot = g_arena + Spawned + count * 16;
         st32(slot, pid);
         text(slot + 4, cast.name);
