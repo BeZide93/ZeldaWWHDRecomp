@@ -857,7 +857,10 @@ an island remain recognizable from neighboring sea squares. Distant geometry
 adds visibility, not remote collision or permission to overlap another island.
 
 The full model draws in its home square. Its distant model draws in the eight
-neighboring squares, with no distant collision. Shoreline decoration draws in
+neighboring squares, with no distant collision. It is drawn as the game's distant islands are: from up to
+about 150,000 units away, hazing from where the room's own fog ends (a little over 300 m) to eight times that
+distance, so an island in the next square is a pale shape on the horizon. Paint a distant model's colours as
+plain areas; fine detail is lost at that distance. Shoreline decoration draws in
 the home square. Actors and their visual variants share 128 declaration slots;
 a sea square accepts at most 16 active visual variants. Removing objects in the
 editor retains their identities for undo and state restoration until restart.
