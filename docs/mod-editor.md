@@ -23,6 +23,11 @@ works too:
 
 A normal start has no editor at all: nothing that players see.
 
+The game program (`bin/wwhd`, on Windows `bin\wwhd.exe`, in the game's data folder) can be started from
+any folder: it finds its data folder from its own location and works there, as when the launcher starts
+it. `--game`, `--save` and `WWHD_` settings with relative paths still mean the folder you started it in;
+`--data-dir <folder>` names the data folder explicitly.
+
 The game starts as usual: the title screen, then your file. As soon as Link is in the world, the
 **editor view** begins: the camera flies freely, Link stands still, and the editor's own panels are over
 the picture. The settings menu still opens with Esc (or F1) and has an **Editor** tab with the same
