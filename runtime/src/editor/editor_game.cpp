@@ -1322,7 +1322,7 @@ public:
     bool focus_view(const WorldPoint& target, float distance, float yaw_degrees, std::string& why) override {
         if (!focus(target, why)) return false;
         std::lock_guard<std::mutex> lk(g_focus_mu);
-        g_focus_back = std::clamp(double(distance), 200.0, 20000.0);
+        g_focus_back = std::clamp(double(distance), 200.0, 100000.0);
         g_focus_turn = std::isfinite(yaw_degrees);
         if (g_focus_turn) g_focus_yaw = double(yaw_degrees) * 3.14159265358979323846 / 180;
         return true;

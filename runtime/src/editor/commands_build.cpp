@@ -1097,7 +1097,7 @@ Value Session::dispatch_build(const std::string& command, const Value& p, std::s
                     WorldPoint lo, hi;
                     if (!read_point(q.get("minimum"), lo) || !read_point(q.get("maximum"), hi)) break;
                     at = {(lo.x + hi.x) / 2, (lo.y + hi.y) / 2, (lo.z + hi.z) / 2};
-                    distance = std::clamp(std::max({hi.x - lo.x, hi.y - lo.y, hi.z - lo.z}) * 0.9f, 700.0f, 12000.0f);
+                    distance = std::clamp(std::max({hi.x - lo.x, hi.y - lo.y, hi.z - lo.z}) * 0.9f, 700.0f, 90000.0f);  // up to a square-wide one
                 }
         if (WorldPoint eye; read_point(p.get("eye"), eye)) {  // from a given place (below an island, say)
             if (!host_->look(eye, at, why)) return r;
@@ -1105,7 +1105,7 @@ Value Session::dispatch_build(const std::string& command, const Value& p, std::s
             ok = true;
             return r;
         }
-        if (p.get("distance").type == Value::Number) distance = float(std::clamp(p.get("distance").number, 200.0, 20000.0));
+        if (p.get("distance").type == Value::Number) distance = float(std::clamp(p.get("distance").number, 200.0, 100000.0));
         const float yaw = p.get("yaw").type == Value::Number ? float(p.get("yaw").number) : std::nanf("");
         if (!host_->focus_view(at, distance, yaw, why)) return r;
         r["requested"] = true;
