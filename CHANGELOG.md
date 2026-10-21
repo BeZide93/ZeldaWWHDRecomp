@@ -7,6 +7,20 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Smoother frame interpolation** (40, 60, 120 and 240 fps). More things now move smoothly between the game's
+  steps: the letterbox bars in cutscenes, the sword trail, the hookshot chain, the boomerang trail, the cannon's aiming
+  arc, hair, strings and ropes, the sun, moon, lens flare and sea spray, the ship's hull, grass, trees and flowers when
+  hit, and fallen trees as they fade out. Stage fades no longer run faster at higher frame rates, and the camera no
+  longer jumps when it moves closer to Link, except when a wall pushes it in (#251).
+- **The performance report shows the screen's refresh rate**: the rate the screen actually runs at, the rate the game
+  asked for on Android, and whether the chosen frame rate is shown evenly on it (e.g. 40 fps needs a 40, 80 or 120 Hz
+  screen) (#254).
+- **Fixed: the game only started through the launcher** (#266). Started directly (e.g. `bin/wwhd` or `wwhd.exe`) from
+  another folder, it couldn't find the game files. It now always works in its data folder; `--data-dir <folder>`
+  chooses one explicitly.
+- **A clear message when the mod compiler is missing** (#266). Code mods such as the Story Notebook need it; the game
+  now says so over the game and in the Mods tab, with how to restore it (setup → Repair). Content mods (signs, stages,
+  models) no longer need it.
 - **Fixed: `"Wind Waker HD.exe" --editor` started the game without the world editor** (#266). The launcher now passes
   game options such as `--editor` on to the game on Windows, macOS (`open "Wind Waker HD.app" --args --editor`) and
   Linux (`wind-waker-hd --editor`).
