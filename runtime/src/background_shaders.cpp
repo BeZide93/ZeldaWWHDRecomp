@@ -1,4 +1,4 @@
-// Compile shaders in the background (background_shaders.h).
+// Shader compile levels (background_shaders.h).
 #include "background_shaders.h"
 
 #include <atomic>
@@ -13,38 +13,48 @@ void log_msg(const char* fmt, ...);
 namespace bgshaders {
 
 namespace {
-std::atomic<bool> g_requested{false};  // the setting
-std::mutex g_counterMutex;              // the counters are read from the UI thread
+std::atomic<uint8_t> g_requested{kDefaultLevel};  // the setting
+std::mutex g_counterMutex;                    // the counters are read from the UI thread
 Counters g_counters;
 uint64_t g_budgetFrame = ~uint64_t{0}, g_budgetSpent = 0;  // render thread
 uint64_t g_skipFrame = ~uint64_t{0};
 }
 
+const char* level_name(Level l) {
+    static const char* const names[kLevels] = {"off", "safe", "fast"};
+    return l < kLevels ? names[l] : "off";
+}
+const char* level_value(Level l) { return l == kLevelOff || l >= kLevels ? "0" : level_name(l); }
+Level parse_level(const char* v) {
+    if (v && (!strcmp(v, "0") || !strcmp(v, "off"))) return kLevelOff;
+    if (v && !strcmp(v, "fast")) return kLevelFast;
+    return kLevelSafe;
+}
 const char* env_override() {
     static const char* const e = getenv("WWHD_BG_SHADERS");
     return e && *e ? e : nullptr;
 }
-static bool env_on() { return env_override() && strcmp(env_override(), "0") != 0; }
-static const char* source() {
-    return env_override() ? (env_on() ? "WWHD_BG_SHADERS=1" : "WWHD_BG_SHADERS=0") : "setting";
+static std::string source() {
+    return env_override() ? std::string("WWHD_BG_SHADERS=") + env_override() : std::string("setting");
 }
-bool enabled() { return env_override() ? env_on() : g_requested.load(std::memory_order_relaxed); }
-void set_requested(bool on) {
-    if (g_requested.exchange(on) == on) return;
+Level requested() { return Level(g_requested.load(std::memory_order_relaxed)); }
+Level level() { return env_override() ? parse_level(env_override()) : requested(); }
+void set_level(Level l) {
+    if (l >= kLevels) l = Level(kDefaultLevel);
+    if (Level(g_requested.exchange(l)) == l) return;
     if (env_override())
-        LOG("[shaders] compile in the background: setting %s; %s decides for this start", on ? "on" : "off", source());
+        LOG("[shaders] shader compile: setting %s; %s decides for this start", level_name(l), source().c_str());
     else
-        LOG("[shaders] compile in the background %s (setting)", on ? "on" : "off");
+        LOG("[shaders] shader compile %s (setting)", level_name(l));
 }
-void start(bool saved) {
-    g_requested = saved;
-    LOG("[shaders] compile in the background %s (%s); wait budget %.1f ms per frame", enabled() ? "on" : "off",
-        source(), wait_budget_ms());
+void start(Level saved) {
+    g_requested = saved < kLevels ? saved : Level(kDefaultLevel);
+    LOG("[shaders] shader compile %s (%s); wait budget %.1f ms per frame", level_name(level()), source().c_str(),
+        wait_budget_ms());
 }
 double wait_budget_ms() {
     static const double ms = [] {
         const char* e = getenv("WWHD_BG_SHADER_WAIT_MS");
-        if (!e || !*e) e = getenv("WWHD_COMPILE_WAIT_MS");  // the older name (Metal)
         const double v = e && *e ? atof(e) : kDefaultWaitMs;
         return v < 0 ? 0.0 : v > 1000 ? 1000.0 : v;
     }();
@@ -57,8 +67,22 @@ const char* verdict_name(Verdict v) {
     return v < kVerdicts ? names[v] : "?";
 }
 
-Verdict classify(bool on, const TargetFacts* colors, int colorCount, const TargetFacts* depth, uint32_t vertices) {
-    if (!on) return kOff;
+Verdict classify(Level level, const TargetFacts* colors, int colorCount, const TargetFacts* depth, uint32_t vertices) {
+    if (level == kLevelOff || level >= kLevels) return kOff;
+    if (level == kLevelFast) {
+        // only what could change the game or leave a lasting wrong picture waits
+        auto check = [](const TargetFacts& t) {
+            if (t.readBack || t.peeked) return kReadBack;
+            if (t.copiedOccasionally) return kCopied;
+            if (!t.redrawn && !t.regular) return kFirstFrame;
+            return kSkippable;
+        };
+        for (int i = 0; i < colorCount; i++)
+            if (Verdict v = check(colors[i]); v != kSkippable) return v;
+        if (depth)
+            if (Verdict v = check(*depth); v != kSkippable) return v;
+        return kSkippable;
+    }
     if (colorCount <= 0) return kNoColor;
     if (vertices <= kFullScreenVertices) return kFullScreen;
     // the picture: at least one written colour target is presented; the draw's other targets (more
@@ -68,7 +92,7 @@ Verdict classify(bool on, const TargetFacts* colors, int colorCount, const Targe
     if (!picture) return kNotVisible;
     auto check = [](const TargetFacts& t) {
         if (!t.redrawn) return kFirstFrame;
-        if (t.readBack) return kReadBack;
+        if (t.readBack || t.peeked) return kReadBack;
         if (t.copiedOccasionally) return kCopied;
         return kSkippable;
     };
@@ -79,6 +103,21 @@ Verdict classify(bool on, const TargetFacts* colors, int colorCount, const Targe
     return kSkippable;
 }
 
+void Tracker::drawn(uint32_t addr, uint64_t frame) {
+    Use& u = use_[addr];
+    const bool continues = u.history.valid && (u.history.last_frame == frame || u.history.last_frame + 1 == frame);
+    if (!continues) u.drawRunStart = frame;
+    u.history.drawn(frame);
+    if (u.drawRunStart != kNever && frame - u.drawRunStart + 1 >= kRegularFrames) u.regular = true;
+}
+void Tracker::forget() {
+    for (auto it = use_.begin(); it != use_.end();) {
+        if (!it->second.regular) { it = use_.erase(it); continue; }
+        it->second = Use{};
+        it->second.regular = true;
+        ++it;
+    }
+}
 bool Tracker::copied(uint32_t addr, uint64_t frame) {
     Use& u = use_[addr];
     if (u.copied != frame) {
@@ -101,6 +140,8 @@ TargetFacts Tracker::facts(uint32_t addr, uint64_t frame) const {
     f.presented = within(u.presented, 1);
     f.redrawn = !u.history.must_wait(frame);
     f.readBack = within(u.readBack, kQuietFrames);
+    f.peeked = within(u.peeked, kQuietFrames);
+    f.regular = u.regular;
     // copies in consecutive frames up to the previous one refresh their result every frame
     const bool everyFrame = within(u.copied, 1) && u.copyRunStart != kNever && u.copyRunStart < u.copied;
     f.copiedOccasionally = within(u.copied, kQuietFrames) && !everyFrame;
@@ -153,10 +194,10 @@ std::string report_line() {
     const Counters c = counters();
     char buf[512];
     int n = snprintf(buf, sizeof buf,
-        "Background shader compile: %s (%s). Draws left out while compiling: %llu in %llu frames; "
+        "Shader compile: %s (%s). Draws left out while compiling: %llu in %llu frames; "
         "budget waits %llu (%.0f ms, %llu ran out); depth peeks kept: %llu; copies after a left-out draw: %llu. "
         "Exact waits:",
-        enabled() ? "on" : "off", source(), (unsigned long long)c.skipped, (unsigned long long)c.skipFrames,
+        level_name(level()), source().c_str(), (unsigned long long)c.skipped, (unsigned long long)c.skipFrames,
         (unsigned long long)c.budgetWaits, c.budgetWaitNs / 1e6, (unsigned long long)c.budgetRanOut,
         (unsigned long long)c.peeksWithheld, (unsigned long long)c.copiesAfterSkip);
     std::string line(buf, n > 0 && n < int(sizeof buf) ? size_t(n) : strlen(buf));
