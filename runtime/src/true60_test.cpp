@@ -380,7 +380,8 @@ bool dumping() {
 // +0x10), a 64-bit FNV-1a hash of the whole process, the execute function (actors), and for actors
 // (size >= fopAc_ac_c 0x3AC) the raw words of current.pos (+0x314).
 // WWHD_PROC_DIGEST_SKIP=NAME:OFF:LEN[:STRIDE:COUNT],... leaves bytes out of the hash (known run-to-run
-// noise, e.g. bytes the game never initialises), optionally repeated COUNT times STRIDE apart.
+// noise, e.g. bytes the game never initialises), optionally repeated COUNT times STRIDE apart; NAME *
+// is any process.
 static FILE* proc_digest_file() {
     static FILE* f = getenv("WWHD_PROC_DIGEST") ? fopen(getenv("WWHD_PROC_DIGEST"), "w") : nullptr;
     return f;
@@ -407,6 +408,7 @@ void proc_digest(uint32_t proc) {
         for (const char* e = getenv("WWHD_PROC_DIGEST_SKIP"); e && *e;) {
             char* end;
             int name = (int)strtol(e, &end, 16);
+            if (*e == '*') { name = -1; end = (char*)e + 1; }  // any process
             if (*end != ':') break;
             uint32_t off = (uint32_t)strtoul(end + 1, &end, 16);
             if (*end != ':') break;
@@ -436,7 +438,7 @@ void proc_digest(uint32_t proc) {
     for (uint32_t i = 0; i < size; i++) {
         bool skip = false;
         for (uint32_t a : auto_skip) skip |= i == a;
-        for (auto& k : skips) skip |= k.name == pname && i - k.off < k.len;
+        for (auto& k : skips) skip |= (k.name == pname || k.name == -1) && i - k.off < k.len;
         if (!skip) h = (h ^ p[i]) * 0x100000001b3ull;
     }
     uint32_t sub = size >= 0x3AC ? ld32(proc + 0xF0) : 0, exec = 0;
