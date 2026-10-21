@@ -125,6 +125,15 @@ int main() {
         for (int i = 0; i < 3; i++) assert(m.eye[i] == 0.5f * (a.center[i] + b.center[i]) + dir[i] / ld * (0.5f * (la + lb)));
     }
 
+    // letterbox bars: eased heights blend, heights set at once are drawn at once
+    {
+        assert(trim_blends(2, 0.0f, 22.5f, 90.0f));     // easing in (25 % of 90)
+        assert(trim_blends(0, 90.0f, 67.5f, 90.0f));    // easing out
+        assert(!trim_blends(4, 90.0f, 0.0f, 90.0f));    // switched off at once
+        assert(!trim_blends(3, 0.0f, 90.0f, 90.0f));    // cinema scope set at once
+        assert(trim_blends(3, 90.0f, 67.5f, 90.0f));    // size 3 in an event eases out
+        assert(!trim_blends(1, 50.0f, 50.0f, 90.0f));
+    }
     printf("interp_camera: all tests passed\n");
     return 0;
 }

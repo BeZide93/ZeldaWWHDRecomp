@@ -225,6 +225,10 @@ uint64_t step_ticks(uint32_t game) {
 
 namespace {
 constexpr uint32_t kEye = 0xDC, kCenter = 0xE8, kUp = 0xF4, kFovy = 0xD4, kBank = 0x100;
+// the camera process's dCamera_c (+0x248): letterbox height mTrimHeight +0x5FC (eased by CalcTrimSize
+// 024FF8A0 in the camera's execute, used as the scissor by camera_draw), mTrimSize +0x600, the
+// cinema-scope height of its setup (mCamSetup +0x73C, +0x6C)
+constexpr uint32_t kCamBody = 0x248, kTrimHeight = 0x5FC, kTrimSize = 0x600, kCinemaTrim = 0x73C + 0x6C;
 
 using camera::CamState;
 
@@ -314,6 +318,7 @@ bool blended_hold() { return g_hold && g_phase < g_step_n; }
 struct Prev {
     uint32_t cam = 0; CamState s{}; bool valid = false; bool snap = true; uint64_t snap_step = ~0ull;
     bool dist_rule = true;     // the step's 10 % distance rule applies (decided with the snap)
+    float trim = 0;            // letterbox height (dCamera_c mTrimHeight) at the exact step
     CamState drawn{};          // the camera as camera_draw drew it on pass drawn_pass (blended or exact)
     uint64_t drawn_pass = ~0ull;
     uint32_t projection[16]{}; // raw projection-view words before true60's actor rollback
@@ -406,6 +411,7 @@ static void camera_draw(Cpu* c) {
     Prev* p = prev_for(cam);
     if (g_blend_draw && !true60::runs_60(cam)) {  // blended between the step drawn last (S) and the new one (S+1)
         CamState cur = read_cam(cam);
+        float trim_drawn = NAN;  // the exact letterbox height, when it was drawn blended
         if (p->valid) {
             if (!g_hold) {  // logic pass: the step's snap decision
                 p->snap = cam_snap(p->s, cur);
@@ -413,6 +419,21 @@ static void camera_draw(Cpu* c) {
                 p->dist_rule = camera::distance_rule_applies(step_info(cam, g_logic_steps), dist_rule_mode());
             }
             if (p->snap_step == g_logic_steps && !p->snap) write_cam(cam, camera::blend(p->s, cur, pass_t(), p->dist_rule));
+            // letterbox bars (interp_camera.h trim_blends): between the steps' heights
+            const uint32_t body = cam + kCamBody;
+            const float trim = (float)ldf32(body + kTrimHeight);
+            if (p->snap_step == g_logic_steps && !p->snap &&
+                camera::trim_blends((int32_t)ld32(body + kTrimSize), p->trim, trim, (float)ldf32(body + kCinemaTrim)))
+            {
+                trim_drawn = trim;
+                stf32(body + kTrimHeight, lerp_f(p->trim, trim, pass_t()));
+                static int trim_trace = getenv("WWHD_INTERP_CAM_TRACE") ? atoi(getenv("WWHD_INTERP_CAM_TRACE")) : 0;
+                if (trim_trace > 0) {
+                    trim_trace--;
+                    LOG("[interp] letterbox step %llu t %.3f: %.2f -> %.2f, drawn %.2f", (unsigned long long)g_logic_steps, pass_t(), p->trim, trim,
+                        (float)ldf32(body + kTrimHeight));
+                }
+            }
         }
         p->drawn = read_cam(cam);
         p->drawn_pass = g_passes;
@@ -423,9 +444,11 @@ static void camera_draw(Cpu* c) {
         capture_projection(*p);
         g_cam_blended = false;
         write_cam(cam, cur);
+        if (trim_drawn == trim_drawn) stf32(cam + kCamBody + kTrimHeight, trim_drawn);  // (exact back)
         return;
     }
     p->s = read_cam(cam);  // exact step: remember it for the next step's blended frames
+    p->trim = (float)ldf32(cam + kCamBody + kTrimHeight);
     p->valid = true;
     p->drawn = p->s;
     p->drawn_pass = g_passes;

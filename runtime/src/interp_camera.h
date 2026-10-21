@@ -125,4 +125,16 @@ inline CamState blend(const CamState& a, const CamState& b, float t, bool dist_r
     return m;
 }
 
+// Letterbox bars (dCamera_c mTrimHeight, the scissor camera_draw sets): CalcTrimSize eases the
+// height 25 % of the way to its target per step (events, talk), so on blended frames it is drawn
+// between the two steps' heights. Two sizes set it at once (and are drawn at once): 4 switches the
+// bars off (0), 3 sets the cinema-scope height outside events. The camera's own cuts are left to
+// the caller (not blended on a camera snap).
+inline bool trim_blends(int32_t size, float prev, float cur, float cinema) {
+    if (prev == cur) return false;
+    if (size == 4 && cur == 0.0f) return false;
+    if (size == 3 && cur == cinema) return false;
+    return true;
+}
+
 }  // namespace interp::camera
