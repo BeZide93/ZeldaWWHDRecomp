@@ -1494,10 +1494,10 @@ void install(const std::function<std::string(uint32_t)>& replaced_by,const std::
     const bool props=std::any_of(g_actors.begin(),g_actors.end(),[](const Actor&a){return a.prop_token!=0;});
     const bool switches=std::any_of(g_actors.begin(),g_actors.end(),[](const Actor&a){return a.switch_token!=0;});
     if(props&&!story_props::install(replaced_by,replace))exception_report::raise("Cannot install isolated native prop profile");
-    if(switches&&!story_switches::install(replaced_by,replace))exception_report::raise("Cannot install isolated native switch/door profiles");
+    if(switches){std::string why;if(!story_switches::install(replaced_by,replace,&why))exception_report::raise("Cannot install isolated native switch/door profiles: "+why);}
     // --editor: installed without declarations too (live placement); a failure means "after a restart"
     if(g_live_kinds&&!props&&!story_props::install(replaced_by,replace))LOG("[actors] the editor's live props are not available (they appear after a restart)");
-    if(g_live_kinds&&!switches&&!story_switches::install(replaced_by,replace))LOG("[actors] the editor's live switches and doors are not available (they appear after a restart)");
+    if(g_live_kinds&&!switches){std::string why;if(!story_switches::install(replaced_by,replace,&why))LOG("[actors] the editor's live switches and doors are not available (they appear after a restart): %s",why.c_str());}
     if(has_enemies&&!story_enemies::install(replaced_by,replace))exception_report::raise("Cannot install isolated native enemy profiles");
     // walking residents (only with their record memory: a declared route, or the editor)
     const bool patrol=g_live_kinds||std::any_of(g_actors.begin(),g_actors.end(),[](const Actor&a){return patrols(a.spec);});
