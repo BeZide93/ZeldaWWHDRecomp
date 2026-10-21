@@ -7,8 +7,8 @@ materials select the game's footstep sounds and surface effects.
 Static objects stay in place. Floating bodies follow the sea, and drifting bodies
 also move with wind or a current. Collision materials can make walls climbable
 and surfaces accept the hookshot. Objects can also declare grapple points.
-Static islands can add distant models, shore foam, sea-chart markers and arrival
-notices.
+Static islands can add distant models, shore foam, sea-chart markers, arrival
+notices and calm water for a boat landing.
 
 ## Place a model with collision
 
@@ -898,6 +898,41 @@ An arrival appears as a mod notice and is shown once per declared mod flag.
 Use `null` in an editor update to remove any island presentation block; omit a
 block to keep its current settings. Preparing a new visual model may require
 a reload or restart before the editor can use it.
+
+## Calm water
+
+Out on the open sea the waves can reach about 3 m. A pier or a beach just above the sea gets flooded:
+Link falls back into the water when he steps off the boat. The game's own landings (Windfall's pier,
+Outset's beach, Dragon Roost) have no such problem because the game calms the sea around its islands.
+A static sea object can ask for the same with `calm_water`:
+
+```json
+{
+  "calm_water": {"radius": 3000, "falloff": 12800, "offset": {"x": 0, "z": 1500}}
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `radius` | The still water: within this distance of the centre the waves are gone. 100 to 100000 units. |
+| `falloff` | Optional. How far beyond the radius the waves come back in full. 800 to 25600 units, default 12800 (the game's own fade around its islands). |
+| `offset` | Optional. The centre, from the object's position (`x` and `z`, turned with the object). Default: the object's position. |
+
+It works like the game's islands: the calm follows Link. As he sails towards the island the whole sea
+around him calms down, smoothly over the fade; inside the radius it is flat, at the sea's own still level
+(the level of the game's own landings). Everything uses this one sea: what you see, the water height Link
+swims and wades in, the boat's height and rocking. Sail away and the waves come back the same way.
+
+Choose a radius that covers the landing and the water the boat comes in on, and leave the fade at 12800
+unless the island is close to another one. A short fade makes the waves die down fast as the boat comes
+in; it can't be shorter than 800. A pier at the game's own heights stays dry in calm water: Windfall's
+boarding step is 35 units above the still sea, its pier about 95.
+
+A mod may have eight calm zones. Zones of several mods work together: where they meet, the calmer one
+counts. A save state keeps the sea as it was, and the zone works again after a room reload or a restart.
+Without `calm_water` the sea is exactly the game's. In the editor, **Calm water** in the Inspector of a
+static sea object turns it on and sets the radius, fade and centre; the zone shows in the picture
+(see [Calm water](mod-editor.md#calm-water)).
 
 `examples/guest-mods/world-objects-w4` contains Horizon Isle, with a 40-triangle
 full model, 26-triangle distant model and 8-triangle animated foam strip model. Its

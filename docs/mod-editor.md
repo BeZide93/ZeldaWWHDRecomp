@@ -315,6 +315,17 @@ pond on a slope gets a grassy mound round it on the downhill side. See
 Bodies of water are made on the sea's islands (the `sea` stage). The same works through the commands
 `check_water`, `add_pond`, `add_river`, `add_waterfall`, `edit_water` and `get_water` (below).
 
+## Calm water
+
+Select a static object on the sea (an island's ground) and tick **Calm water → Still sea around it** in
+the Inspector: the waves die down as Link comes near, as at the game's own islands, so the boat can land
+at a low pier (see [Calm water](world-objects.md#calm-water)). Set the **Radius** (still water inside),
+the **fade** (how far out the waves are back in full; the game's islands use 12800) and the **Centre**
+(from the object, for a landing at one side of the island). Each change is one Undo step. The zone shows in
+the picture at the sea's level, drawn like a pond of the water tool: the still water filled in blue with
+its outline, and a dashed ring where the waves are back in full; the selected object's zone is the bright
+one. The same works with `set_world_object` (or `set_actor`) and `calm_water`; `null` removes it.
+
 ## Dialogue and actions
 
 For signs, residents, chests and your own models, the Inspector has:
@@ -789,8 +800,8 @@ separated by `;`, or `@file` with one such line per row. Results go to the log.
 | `import_model` | `file`, `id`?, `confirm`?, `kit`?, `materials`?, `material`?, `mod`? | copy a `.glb` into the mod and add the model; with `kit`, a model with game materials ([Game materials](world-objects.md#game-materials)) |
 | `set_model_kit` | `model`, `kit`?, `materials`?, `material`?, `mod`? | change a kit model's kit room and material names; built again, live |
 | `reload_model` | `model`, `mod`? | build a kit model again from its changed file; its actors take it live |
-| `place_world_object` | `id`, `model`, `collision`, `stage`, `room`, `position`, `behaviour`?, `buoyancy`?, `drift`?, `anchor`?, `grapple_points`?, `distant`?, `shoreline`?, `chart_marker`?, `arrival`?, `rotation`?, `scale`?, `mod`? | place a static, floating or drifting object of the mod with collision (one Undo step) |
-| `set_world_object` | `id`, `collision`?, `behaviour`?, `buoyancy`?, `drift`?, `anchor`?, `grapple_points`?, `distant`?, `shoreline`?, `chart_marker`?, `arrival`?, `mod`? | change a world object's collision, behaviour and motion together (`null` removes one) |
+| `place_world_object` | `id`, `model`, `collision`, `stage`, `room`, `position`, `behaviour`?, `buoyancy`?, `drift`?, `anchor`?, `grapple_points`?, `distant`?, `shoreline`?, `chart_marker`?, `arrival`?, `calm_water`?, `rotation`?, `scale`?, `mod`? | place a static, floating or drifting object of the mod with collision (one Undo step) |
+| `set_world_object` | `id`, `collision`?, `behaviour`?, `buoyancy`?, `drift`?, `anchor`?, `grapple_points`?, `distant`?, `shoreline`?, `chart_marker`?, `arrival`?, `calm_water`?, `mod`? | change a world object's collision, behaviour and motion together (`null` removes one) |
 | `preview_collision`, `placement_conflicts` | `id`, `mod`? | a world object's collision as a wireframe, and what its place conflicts with |
 | `prepare_collision` | `model`, `mod`? | prepare a static model's collision for placing world objects while the game runs |
 | `check_water` | `kind` (`pond`, `river`, `waterfall`), `points`?, `level`?, `depth`?, `rim`?, `foam`?, `lava`?, `floor`?, `width`?, `shallow`?, `top`?, `bottom`?, `side`?, `river`?, `step`?, `id`?, `mod`? | what a body of water would be and every problem with it (errors and warnings), without changing anything: its place, triangles, file size, a river's levels and steps; `id` a body being changed |
