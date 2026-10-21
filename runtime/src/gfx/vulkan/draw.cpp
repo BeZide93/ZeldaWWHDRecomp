@@ -22,6 +22,7 @@
 #include "gx2/state_groups.h"
 #include "vertex_cpu_decode.h"
 #include "render_prof.h"
+#include "background_shaders.h"
 #include "runtime.h"
 #include "gx2/gx2.h"
 #include "shaders.h"
@@ -795,12 +796,14 @@ void capture_pipeline_failure(VkResult result, vk::Shader* vs, vk::Shader* ps,
     }
   } catch(...) { /* Diagnostic capture must never replace driver recovery with a crash. */ }
 }
-Pipeline& resolve_pending_pipeline(Pipeline& pipeline, bool wait = true, bool present = false) {
+// wait=false: poll, or wait at most budgetNs (Compile shaders in the background), and return with the
+// compile still pending when it is not done by then
+Pipeline& resolve_pending_pipeline(Pipeline& pipeline, bool wait = true, bool present = false, uint64_t budgetNs = 0) {
   if (pipeline.compileError) std::rethrow_exception(pipeline.compileError);
   if (!pipeline.pendingCompile) return pipeline;
   try {
     auto& pending = *pipeline.pendingCompile;
-    std::optional<PipelineBuildResult> built = pending.ticket->wait_for(0);
+    std::optional<PipelineBuildResult> built = pending.ticket->wait_for(wait ? 0 : budgetNs);
     if (!built && !wait) return pipeline;
     if (!built) {
       if (present) begin_pipeline_pending_frame();
@@ -829,6 +832,44 @@ Pipeline& resolve_pending_pipeline(Pipeline& pipeline, bool wait = true, bool pr
     pipeline.pendingCompile.reset();
     throw;
   }
+}
+// Compile shaders in the background (background_shaders.h): the targets a draw writes
+static bool writes_color(const uint32_t* r, int i) { return (r[REGADDR::CB_TARGET_MASK] >> (4 * i)) & 15; }
+static bool writes_depth(const uint32_t* r, const Surface* depth) {
+  const uint32_t dc = r[REGADDR::DB_DEPTH_CONTROL];  // bit 0 stencil, bit 2 depth write
+  return depth && ((dc & 4) || ((dc & 1) && depth->fmt.stencil));
+}
+static void track_drawn(const uint32_t* r, const std::array<Surface*, 8>& colors, Surface* depth) {
+  auto& t = bgshaders::tracker();
+  for (int i = 0; i < 8; i++)
+    if (colors[i] && writes_color(r, i)) t.drawn(colors[i]->addr, R.frame);
+  if (writes_depth(r, depth)) t.drawn(depth->addr, R.frame);
+}
+// The pipeline is still compiling: wait the frame's budget if this draw may be left out (true: draw
+// it now, ready or with the exact wait that follows), false: left out of this frame.
+static bool background_wait(const uint32_t* r, Pipeline& p, const std::array<Surface*, 8>& colors, Surface* depth,
+                            uint32_t vertices) {
+  auto& t = bgshaders::tracker();
+  bgshaders::TargetFacts written[8], depthFacts;
+  int count = 0;
+  for (int i = 0; i < 8; i++)
+    if (colors[i] && writes_color(r, i)) written[count++] = t.facts(colors[i]->addr, R.frame);
+  const bool depthWritten = writes_depth(r, depth);
+  if (depthWritten) depthFacts = t.facts(depth->addr, R.frame);
+  const auto verdict = bgshaders::classify(true, written, count, depthWritten ? &depthFacts : nullptr, vertices);
+  if (verdict != bgshaders::kSkippable) { bgshaders::exact(verdict); return true; }
+  const uint64_t left = bgshaders::budget_left_ns(R.frame);
+  const auto started = std::chrono::steady_clock::now();
+  resolve_pending_pipeline(p, false, false, left);
+  const bool ready = !p.pendingCompile;
+  bgshaders::spent(R.frame, uint64_t(std::chrono::duration_cast<std::chrono::nanoseconds>(
+      std::chrono::steady_clock::now() - started).count()), !ready);
+  if (ready) return true;
+  bgshaders::skipped(R.frame);
+  for (int i = 0; i < 8; i++)
+    if (colors[i] && writes_color(r, i)) t.left_out(colors[i]->addr, R.frame);
+  if (depthWritten) t.left_out(depth->addr, R.frame);
+  return false;
 }
 Pipeline &pipeline(const uint32_t *r, vk::Shader *vs, vk::Shader *ps,
                    LatteFetchShader *fs, VkPrimitiveTopology topology,
@@ -3090,7 +3131,14 @@ void draw(const uint32_t *r, uint32_t prim, uint32_t count, uint32_t indexType,
       : pipeline(r, vs, ps, fs, topology, colors, depth);
   rprof::mark(rprof::kPipeline);
   if (!p.pipeline && !p.pendingCompile) return;
+  // Compile shaders in the background (background_shaders.h): a draw into the presented picture
+  // only waits the frame's budget and is left out of this frame if its pipeline is not ready by then
+  const bool trackTargets = bgshaders::enabled() && !aoPrivateReplay;
+  if (p.pendingCompile && trackTargets && !background_wait(r, p, colors, depth, count)) return;
+  if (p.pendingCompile && !trackTargets)  // the AO pass's private copy of a draw is never the picture
+    bgshaders::exact(aoPrivateReplay && bgshaders::enabled() ? bgshaders::kNotVisible : bgshaders::kOff);
   if (p.pendingCompile && !begin_exact_preparation()) resolve_pending_pipeline(p);
+  if (trackTargets) track_drawn(r, colors, depth);
   if (!p.pipeline && !p.pendingCompile) return; // terminal driver failure, not pending
   if(feedback_stats_enabled()) report_feedback_stats();
   if(vertex_window_stats_enabled()) report_vertex_window_stats();

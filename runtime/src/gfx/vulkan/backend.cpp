@@ -1,3 +1,4 @@
+#include "background_shaders.h"
 #include "vertex_cpu_policy.h"
 #include "dynres.h"
 #include "platform/keycodes.h"
@@ -2873,6 +2874,8 @@ void copy_to_scan(uint32_t cb, uint32_t target) {
   Surface *src = surface_from_color_buffer(cb);
   if (!src)
     return;
+  // Compile shaders in the background: draws into the presented picture may be left out
+  if (bgshaders::enabled()) bgshaders::tracker().presented(src->addr, R.frame);
   if (stereoEye && target == 4) return; // GamePad is a shared 2D device.
   Screen &s = stereoEye ? stereoRight : (target == 4 ? R.drc : R.tv);
   auto fits = [src](const Surface *d) {

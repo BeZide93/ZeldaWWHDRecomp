@@ -1,3 +1,4 @@
+#include "background_shaders.h"
 #include "deferred_dispatch.h"
 #include "../../exception_report.h"
 #include "gfx/depth_peek.h"
@@ -27,6 +28,11 @@ void peek_z(const uint32_t* cells, uint32_t n) {
     }
     uint32_t points = std::min(n / 3, 64u);
     if (!depth || !points) return;
+    // Compile shaders in the background: the game reads this depth buffer back, so draws into it keep
+    // the exact wait from now on; a frame that already left a draw out answers no peek (the game keeps
+    // its previous answers, from a complete frame)
+    if (bgshaders::enabled()) bgshaders::tracker().read_back(depth->addr, R.frame);
+    if (bgshaders::skipped_in_frame(R.frame)) { bgshaders::peek_withheld(); return; }
     VkFormat format = depth->fmt.pixel;
     if (format != VK_FORMAT_D32_SFLOAT && format != VK_FORMAT_D32_SFLOAT_S8_UINT &&
         format != VK_FORMAT_D16_UNORM) return;

@@ -1,3 +1,4 @@
+#include "background_shaders.h"
 #include "pass.h"
 #include "deferred_dispatch.h"
 #include "../../exception_report.h"
@@ -1656,6 +1657,7 @@ void write_back_linear_targets() {
         if(!s->gpuWritten||s->writtenBackSeq==s->writeSeq||!s->image)continue;
         s->writtenBackSeq=s->writeSeq;
         if(s->arrayLayers!=1||!can_write_back(s))continue;
+        if(bgshaders::enabled())bgshaders::tracker().read_back(s->addr,R.frame);  // read by the CPU: draws stay exact
         const uint32_t addr=s->addr;
         const uint32_t bytes=s->fmt.bytesPerBlock,pitch=std::max(s->pitch,s->width);
         const uint64_t r0=rprof::now_ns();
@@ -1685,6 +1687,8 @@ void copy_surface_impl(uint32_t srcAddr,uint32_t srcMip,uint32_t srcSlice,uint32
             if(better(image.get())){gpuSrc=image.get();gpuLevel=srcMip;}
     }
     if(gpuSrc&&gpuLevel==0)gpuSrc=adopt_newer_alias(gpuSrc);
+    // Compile shaders in the background: a target copied from now and then keeps its draws exact
+    if(gpuSrc&&bgshaders::enabled())bgshaders::tracker().copied(gpuSrc->addr,R.frame);
     if(gpuSrc) {
         if(gpuSrc->imageType==VK_IMAGE_TYPE_3D)exception_report::raise("Vulkan GPU GX2CopySurface volume slices are unsupported");
         SurfaceDesc dd;dd.addr=dbase;dd.width=dw;dd.height=dh;dd.pitch=d->pitch;dd.format=uint32_t(d->format.value());
@@ -1877,6 +1881,7 @@ void invalidate_surface_cache(decltype(Renderer::surfaces)& surfaces,
 }
 void ss_reset_surfaces() {
     R.mainDepthAddr = 0;
+    bgshaders::tracker().forget();
     ++g_surface_epoch;
     reset_ao_private_cache();
     for(auto& [addr,s]:R.surfaces){s->guestLayout.reset();s->dirty=true;s->lastCheckedFrame=~0ull;}
