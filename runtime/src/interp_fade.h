@@ -86,4 +86,40 @@ void fader_call(FaderGate& g, uint64_t step, bool logic, float frac, Fader& f, C
     f = g.shown;
 }
 
+// Byte values a drawing function steps once per call (one per drawn frame): the fade-out of fallen
+// trees (dTree_packet_c::update 025CA6EC, run in the draw on every pass: chaseAlpha(alpha, 0, 8) per
+// fallen tree, 4x too fast at 120 fps). Gated like the fader: the call advances them on the logic
+// pass only (its advance taken back on the other passes), every pass shows them at its fraction
+// between the step's start and end; `owner` identifies the object (another one: a new gate).
+template <int N>
+struct BytesGate {
+    uint64_t step = ~0ull;
+    uint32_t owner = 0;
+    bool have = false;
+    uint8_t before[N], after[N], shown[N];
+};
+template <int N, class Child>
+void bytes_call(BytesGate<N>& g, uint32_t owner, uint64_t step, bool logic, float frac, uint8_t* v, Child&& child) {
+    const bool same = g.have && g.owner == owner;
+    if (same)
+        for (int i = 0; i < N; i++)
+            if (v[i] == g.shown[i]) v[i] = g.after[i];  // the step's exact values (nothing changed them since)
+    if (logic || !same || g.step != step) {
+        for (int i = 0; i < N; i++) g.before[i] = v[i];
+        child(v);
+        for (int i = 0; i < N; i++) g.after[i] = v[i];
+        g.step = step;
+        g.owner = owner;
+        g.have = true;
+    } else {
+        child(v);  // (the call's other work)
+        for (int i = 0; i < N; i++) v[i] = g.after[i];
+    }
+    for (int i = 0; i < N; i++) {
+        const uint8_t a = g.before[i], b = g.after[i];
+        g.shown[i] = frac < 1.0f && a != b ? (uint8_t)((1.0f - frac) * a + frac * b + 0.5f) : b;
+        v[i] = g.shown[i];
+    }
+}
+
 }  // namespace interp::fade

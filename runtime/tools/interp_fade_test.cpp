@@ -62,7 +62,30 @@ Run fader_run(int frames) {
     return r;
 }
 
+// dTree update's fade-out of a fallen tree: chaseAlpha(alpha, 0, 8) per call
+void tree_update(uint8_t* a) { a[0] = a[0] > 8 ? (uint8_t)(a[0] - 8) : 0; }
+int tree_fade_steps(int frames, std::vector<int>& shown) {
+    BytesGate<1> g;
+    uint8_t a[1] = {255};
+    for (int step = 1; step < 200; step++)
+        for (int k = 1; k <= frames; k++) {
+            if (frames == 1) tree_update(a);
+            else bytes_call(g, 1, step, k == 1, (float)k / frames, a, tree_update);
+            shown.push_back(a[0]);
+            if (k == frames && a[0] == 0) return step;
+        }
+    return -1;
+}
+
 int main() {
+    // fallen trees fade out in the same time at every frame rate, a step on every drawn frame
+    {
+        std::vector<int> s30, s60, s120;
+        const int n30 = tree_fade_steps(1, s30), n60 = tree_fade_steps(2, s60), n120 = tree_fade_steps(4, s120);
+        assert(n30 == 32 && n60 == n30 && n120 == n30);
+        for (size_t i = 0; i < s30.size(); i++) assert(s120[4 * i + 3] == s30[i]);
+        for (size_t i = 1; i < s120.size(); i++) assert(s120[i] < s120[i - 1]);
+    }
     // the display fader: the same duration at every frame rate, a new alpha on every drawn frame
     {
         const Run a30 = fader_run(1), a60 = fader_run(2), a120 = fader_run(4), a240 = fader_run(8);

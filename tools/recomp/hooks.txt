@@ -195,6 +195,7 @@
 025A8148  # dPa_control_c particle calc 7-8 (+ g_Counter.mTimer++ after it): held back on hold passes
 0254C6C4  # dGrass_packet_c::calc: halfway sway on logic passes
 025C9948  # dTree_packet_c::calc: halfway sway on logic passes
+025CA6EC  # dTree_packet_c::update: fallen trees fade out once per logic step (interp_fx.cpp)
 02548370  # dFlower_packet_c::calc: halfway sway on logic passes
 025D0994  # dWood::Packet_c::calc: held back on hold passes
 # effects interpolation, round 3 (runtime/src/interp_fx.cpp)

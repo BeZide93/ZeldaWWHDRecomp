@@ -44,6 +44,7 @@
 
 #include "guest_addr.h"
 #include "interp_pacing.h"
+#include "interp_fade.h"
 #include "interp_slots.h"
 #include "interp_trail.h"
 #include "runtime.h"
@@ -750,6 +751,31 @@ extern "C" void hook_025D0994(Cpu* c) {
     g_wood.pkt = pk;
     g_wood.step = interp::hold_pass_count();
     g_wood.w = std::move(cur);
+}
+// Fallen trees fade out in dTree_packet_c::update (025CA6EC, from the draw, every pass:
+// chaseAlpha(data +3, 0, 8) for each of the 64 trees whose state has bit 8): 2x/4x/8x too fast with
+// frame interpolation. Advanced once per logic step, shown at the pass's fraction
+// (interp_fade.h bytes_call). Tree data: packet +0x9C, 0xA8 apart, alpha at +3.
+extern "C" void f_025CA6EC_orig(Cpu* c);
+extern "C" void hook_025CA6EC(Cpu* c) {
+    if (!on(8) || true60::enabled() || interp::in_execute()) { f_025CA6EC_orig(c); return; }
+    const uint32_t pk = c->r[3];
+    static interp::fade::BytesGate<64> gate;
+    uint8_t v[64];
+    for (int i = 0; i < 64; i++) v[i] = ld8(pk + 0x9C + 0xA8 * i + 3);
+    interp::fade::bytes_call(gate, pk, interp::logic_steps(), !interp::hold_pass(), interp::pass_t(), v, [&](uint8_t* x) {
+        for (int i = 0; i < 64; i++) st8(pk + 0x9C + 0xA8 * i + 3, x[i]);
+        f_025CA6EC_orig(c);
+        for (int i = 0; i < 64; i++) x[i] = ld8(pk + 0x9C + 0xA8 * i + 3);
+    });
+    static int tr = trace_left(4);
+    for (int i = 0; i < 64; i++) {
+        if (tr && gate.before[i] != gate.after[i]) {
+            tr--;
+            LOG("[interp-fx] fallen tree %d fade t %.3f: %u -> %u, drawn %u", i, interp::pass_t(), gate.before[i], gate.after[i], v[i]);
+        }
+        st8(pk + 0x9C + 0xA8 * i + 3, v[i]);
+    }
 }
 extern "C" void hook_0254C6C4(Cpu* c) { sway_calc(c, 0, f_0254C6C4_orig); }
 extern "C" void hook_025C9948(Cpu* c) { sway_calc(c, 1, f_025C9948_orig); }
