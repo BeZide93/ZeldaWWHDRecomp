@@ -1582,6 +1582,66 @@ void trail_draw(Cpu* c, void (*orig)(Cpu*), uint32_t count, std::initializer_lis
 extern "C" void f_024142F0_orig(Cpu*);
 extern "C" void hook_024142F0(Cpu* c) { trail_draw(c, f_024142F0_orig, 0x9C, {0xBC, 0x38C}); }
 
+// The hookshot's chain (daHookshot_shape_draw 021768B0, from daHookshot_c::draw, every pass) is
+// built from Link's hookshot root (daPy_lk_c +0x72F0), the hookshot's shape angle (+0x328 x,
+// +0x32A y) and link count (+0xD504, |tip - root| / 7 from its execute), all exact, while Link and
+// the hook are drawn blended. On blended passes it is built from the blended root and angles, with
+// the count from the blended root-tip distance (tip: current.pos +0x314).
+namespace {
+struct HookRec { uint64_t record = ~0ull; uint32_t hs = 0; float root[3], tip[3]; int16_t ax, ay; };
+HookRec g_hook;
+}  // namespace
+extern "C" void f_021768B0_orig(Cpu*);
+extern "C" void hook_021768B0(Cpu* c) {
+    const uint32_t hs = ld32(c->r[3] + 0x18);
+    const uint32_t link = ld32(GD(0x1046F0B0) + 0x5B34);
+    if (!on(16) || !hs || !link || true60::enabled()) { f_021768B0_orig(c); return; }
+    const uint32_t root = link + 0x72F0, tip = hs + 0x314, ang = hs + 0x328, cnt = hs + 0xD504;
+    float r[3], p[3];
+    for (int i = 0; i < 3; i++) { r[i] = (float)ldf32(root + 4 * i); p[i] = (float)ldf32(tip + 4 * i); }
+    const int16_t ax = (int16_t)ld16(ang), ay = (int16_t)ld16(ang + 2);
+    if (interp::record_pass()) {
+        g_hook.record = interp::hold_pass_count();
+        g_hook.hs = hs;
+        for (int i = 0; i < 3; i++) { g_hook.root[i] = r[i]; g_hook.tip[i] = p[i]; }
+        g_hook.ax = ax;
+        g_hook.ay = ay;
+        f_021768B0_orig(c);
+        return;
+    }
+    if (!halfway() || g_hook.hs != hs || g_hook.record != interp::hold_pass_count()) { f_021768B0_orig(c); return; }
+    const float t = interp::pass_t();
+    float br[3], bp[3], dr = 0, dp = 0, d = 0;
+    for (int i = 0; i < 3; i++) {
+        br[i] = lerp_f(g_hook.root[i], r[i], t);
+        bp[i] = lerp_f(g_hook.tip[i], p[i], t);
+        dr += (r[i] - g_hook.root[i]) * (r[i] - g_hook.root[i]);
+        dp += (p[i] - g_hook.tip[i]) * (p[i] - g_hook.tip[i]);
+        d += (bp[i] - br[i]) * (bp[i] - br[i]);
+    }
+    if (!(dr < 400.0f * 400.0f) || !(dp < 2000.0f * 2000.0f)) { f_021768B0_orig(c); return; }  // a jump: drawn as it is
+    const uint32_t saved[6] = {ld32(root), ld32(root + 4), ld32(root + 8), ld32(ang), ld32(cnt), 0};
+    for (int i = 0; i < 3; i++) stf32(root + 4 * i, br[i]);
+    st16(ang, (uint16_t)lerp_s16(g_hook.ax, ax, t));
+    st16(ang + 2, (uint16_t)lerp_s16(g_hook.ay, ay, t));
+    int32_t n = (int32_t)(std::sqrt(d) / 7.0f);
+    if (n > 300) n = 300;
+    if ((int32_t)ld32(cnt) > 0 && n < 1) n = 1;
+    st32(cnt, (uint32_t)n);
+    static int tr = trace_left(7);
+    if (tr) {
+        tr--;
+        LOG("[interp-fx] hookshot chain t %.3f: root %.1f %.1f %.1f -> %.1f %.1f %.1f, drawn at %.1f %.1f %.1f, %d links (exact %d)", t, g_hook.root[0],
+            g_hook.root[1], g_hook.root[2], r[0], r[1], r[2], br[0], br[1], br[2], n, (int32_t)saved[4]);
+    }
+    f_021768B0_orig(c);
+    st32(root, saved[0]);
+    st32(root + 4, saved[1]);
+    st32(root + 8, saved[2]);
+    st32(ang, saved[3]);
+    st32(cnt, saved[4]);
+}
+
 // save state loaded: forget every effect history (the guest state jumped); interp.cpp also bumps the
 // hold pass count, which invalidates the step-stamped records
 namespace interp {
@@ -1601,6 +1661,7 @@ void fx_ss_reset() {
     g_line_layouts.clear();
     g_att.clear();
     g_trails.clear();
+    g_hook = HookRec{};
     for (auto& s : g_sway) s = SwayRec{};
     g_wood = WoodRec{};
     g_sea.packet = 0;
