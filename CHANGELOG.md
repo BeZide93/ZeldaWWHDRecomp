@@ -7,6 +7,9 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Calm water around mod islands** (for mod makers). An island on the open sea can set a calm-water zone, so the
+  waves fade out around it the way they do near the game's own islands, and the boat can land at a low pier without
+  Link being washed off. Set it in the manifest or in the world editor's Inspector. See [world objects](docs/world-objects.md).
 - **Lava for mods** (for mod makers). A `col_lava` ground burns Link exactly like the game's lava (he jumps, loses half
   a heart and is sent back) and makes bombs explode, in mod stages, world objects, island grounds and models with
   several materials. Mod stages and the world editor can place the game's moving lava floor and Dragon Roost's heat

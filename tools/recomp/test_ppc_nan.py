@@ -164,7 +164,7 @@ class PpcNanPropagation(unittest.TestCase):
         with open(src, "w") as f:
             f.write(HARNESS % {"funcs": "\n".join(funcs), "table": ", ".join(table), "A": A, "D": D,
                                "init": D_PS1_INIT})
-        cls.exe = os.path.join(cls.tmp, "harness")
+        cls.exe = os.path.join(cls.tmp, "harness.exe" if os.name == "nt" else "harness")
         # the flags the recompiled game code is built with (no FP contraction: fused multiply-adds
         # only where ppc2c writes fma)
         subprocess.run([cc, "-O2", "-ffp-contract=off", "-fno-strict-aliasing", "-w",
