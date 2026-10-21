@@ -258,8 +258,8 @@ the material's image before you export, and the game draws its own from the play
 - **Its distant model** may be a kit model too: `"distant": {"model": "rock-far"}`. That model has up to 1,024
   triangles and draws in the eight squares around. Its game textures larger than 256 × 256 are drawn at 128 × 128
   (the game's own distant views are small too), so it costs a fraction of the full model.
-- **Limits.** Up to 20,000 visible triangles, a GLB of up to 16 MiB, every point within 20,000 units of the
-  origin. The built model (its game textures, shader archives and models) may have up to 12 MiB. It counts
+- **Limits.** Up to 20,000 visible triangles, a GLB of up to 16 MiB, every point within 100,000 units (1 km) of
+  the origin. The built model (its game textures, shader archives and models) may have up to 12 MiB. It counts
   toward the room's 24 MiB for island buildings and grounds
   ([game pieces](mod-sdk-v3.md#island-buildings-game-pieces)), not toward a mod model's 2 MiB.
 - A kit model can't be held or used as a shoreline. If it can't be built (a name the kit room doesn't have,
@@ -324,7 +324,8 @@ accepts `stone`, `grass`, `wood`, `sand`, `metal` or `wall`.
 {"shape": "box", "size": {"x": 200, "y": 100, "z": 300}, "surface": "wood"}
 ```
 
-Box `size` gives full width, height and depth. A box with height 100 spans local
+Box `size` gives full width, height and depth, each up to 100,000 units; a cylinder's height
+is up to 100,000 and a cylinder's or sphere's radius up to 50,000. A box with height 100 spans local
 Y=-50 to Y=50. To rest it on ground height 0, place its origin at Y=50.
 
 ```json
@@ -423,8 +424,10 @@ side walls illustrate collision for both Link and the ship.
 Each collision mesh is limited to 8,192 vertices and 8,192 triangles. The storage budget below is the closer
 limit for a large mesh: a body of about 6,000 welded triangles fits in its 512 KiB, a mesh at the full 8,192 of
 each does not. Every local
-coordinate must stay within ±20,000 game units, and the extent along each axis
-must be at most 20,000 units. These bounds are checked again after actor scale
+coordinate must stay within ±100,000 game units, and the extent along each axis
+must be at most 100,000 units (1 km): one sea square, so a whole island fits in one
+collision mesh, without sections or seams. The object must still stay inside its own
+sea square. These bounds are checked again after actor scale
 is applied. Smaller meshes make collision checks cheaper.
 
 Admission also checks estimated native collision storage: at most 512 KiB per
@@ -814,7 +817,7 @@ rope, Link's swing and the landing. Collision geometry alone does not create a
 grapple point. Targeting, rope movement and release use the game's controls.
 
 Each object accepts at most eight points with unique IDs. Local coordinates
-must be within ±20,000 units, yaw within ±360 degrees, and points must lie inside
+must be within ±100,000 units, yaw within ±360 degrees, and points must lie inside
 the object's scaled collision bounds. On floating objects they must also fit
 its collision bounding radius. A room accepts at most 16 declared grapple
 points across enabled mods. Their actor storage is included in mod budgets.
@@ -882,7 +885,7 @@ game. Its lighting follows the environment. Shorelines supply no Link or ship
 collision, and native waves may cover low parts of the strips.
 
 Arrival names and chart labels allow up to 96 UTF-8 bytes. Arrival radius is
-100 to 20000 game units. Entering that radius produces the named flag in the
+100 to 100000 game units. Entering that radius produces the named flag in the
 mod's own progress; it never sets a retail game progression flag. A marker's
 `when_flag` can use that arrival flag to reveal the island after discovery.
 Use the same spelling in both fields. Keep collision placement within the
