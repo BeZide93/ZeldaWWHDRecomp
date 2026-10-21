@@ -553,10 +553,9 @@ game has no lava where its boat sails, and the boat has no lava handling: lava i
 pools out of the boat's way, above the sea or inland.
 
 The surface is invisible by itself. Show it with a lava surface model: a separate model declared as the
-actor's `shoreline` with `"material": "lava"` gets the game's lava: the glowing lava surface of the lava cave,
-an even orange glow over the whole surface, so any texture coordinates do. (The game's moving lava floor, with its
-drifting bright patches, is an actor of the game's lava rooms; mod stages can place it, see mod-stages.md "Lava",
-but it can't be placed on the sea.) The water tool makes a lava pool with both models (below).
+actor's `shoreline` with `"material": "lava"` gets Fire Mountain's lava: the lava the volcano pours down its
+sides at sea, its molten layers and glowing grains moving as they do on the mountain, by day and by night. Repeat
+U and V about every 10 m (1000 units), as the mountain's own lava does. The water tool makes a lava pool with both models (below).
 
 ### Rivers and waterfalls
 
@@ -577,7 +576,7 @@ itself, required), `waves` (lines on it), `edge` (the foam along a shore or over
 | `"material"` | `surface` | `waves` | `edge` | `splash` |
 | --- | --- | --- | --- | --- |
 | `pond` | Outset's shallows | Outset's wave lines | Outset's coast foam | |
-| `lava` | the lava cave's lava | | | |
+| `lava` | Fire Mountain's lava | | | |
 | `water` | the spring pools' water | | | |
 | `river`, `waterfall` | Forest Haven's stream | | Forest Haven's bank foam | Forest Haven's spray |
 
@@ -596,7 +595,7 @@ waterfalls from points clicked on an island's ground. Each is one static object 
 | Body | Its model (drawn, and its collision) | Its shoreline |
 | --- | --- | --- |
 | Pond | a bowl under the water (`col_sand`), a rim a little above the water that slopes down to the island's ground (`col_grass`, `col_stone` where it can't reach); `col_water` at the level | `pond`: the water, wave lines and (with `foam`) coast foam at the shore |
-| Lava pool (a pond with `lava`) | the same bowl and rim in rock (`col_stone`, dark rock unless you choose a floor colour); `col_lava` at the level | `lava`: the game's lava |
+| Lava pool (a pond with `lava`) | the same bowl and rim in rock (`col_stone`, dark rock unless you choose a floor colour); `col_lava` at the level | `lava`: Fire Mountain's lava |
 | River | its bed, a few units above the ground, and banks on both sides that slope down to the ground; `col_water` at the level in deep sections, `col_shallow` on the bed in shallow ones | `river`: the stream, foam along both banks, over each step's lip and where the water lands |
 | Waterfall | rock behind the fall (`col_wall`) and a splash pad below it (`col_waterfall`) | `waterfall`: a thin sheet curling over the lip, foam over the lip and a ring of foam round its foot |
 

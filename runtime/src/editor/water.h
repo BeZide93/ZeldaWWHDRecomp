@@ -71,11 +71,11 @@ struct Params {
     int room = 0;                // the sea square (not stored: where the banks read the island's ground texture from)
 };
 // the shoreline material of a pond's surface (its kind in the game's own water, tools/story_mods/shoreline_model.py),
-// and of a lava pool's (the game's lava)
+// and of a lava pool's (Fire Mountain's lava)
 inline constexpr const char* kPondMaterial = "pond";
 inline constexpr const char* kLavaMaterial = "lava";
-// a lava pool's surface texture coordinate V: inside the pool, and at its shore (U runs along the shore)
-inline constexpr double kLavaInside = 0.12, kLavaShore = 0.36;
+// a lava pool's surface: its texture repeats every this many units (Fire Mountain's lava repeats every 800 to 1100)
+inline constexpr double kLavaRepeat = 1000;
 // a lava pool's floor colour (dark rock) when none is given
 inline constexpr Colour kLavaFloor{0x3a, 0x2c, 0x26};
 // What the tool found wrong (shown red when an error, else yellow).

@@ -410,7 +410,7 @@ on the island. The splash and spring effects and the sound of the falls are the 
 along. Fire Mountain comes without its eruption (an actor and effects of the game, not part of the ground).
 Its crater can be filled with lava: the editor's water tool makes a lava pool there (a pond with **Lava**,
 `add_pond` with `"lava": true`; its outline round the crater's mouth, its level a little below the rim), drawn
-with the game's lava and burning Link as the game's lava does (see world-objects.md, "Lava").
+with the mountain's own moving lava and burning Link as the game's lava does (see world-objects.md, "Lava").
 An island also brings its own distant view: from the eight squares around its own, the island's
 low-detail model (the one the game shows for it from afar) stands where you placed it. Only Link's own
 square has the island's collision.

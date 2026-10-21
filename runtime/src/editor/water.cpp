@@ -727,20 +727,15 @@ bool build_pond(const Params& p, const XZ& origin, int origin_y, Out& o, std::ve
         if (!c->idx.empty()) col.prims.push_back(std::move(*c));
     o.main_meshes.push_back(std::move(col));
     if (p.lava) {
-        // the lava: one surface just under the level (the game's lava, tools/story_mods/shoreline_model.py), U along
-        // the shore (one repeat every 4 m), V from the shore inwards; no wave lines, no foam
+        // the lava: one surface just under the level, Fire Mountain's lava (tools/story_mods/shoreline_model.py) with its
+        // texture repeating every kLavaRepeat units, as on the mountain; no wave lines, no foam
         Prim lava;
         lava.material = "surface", lava.visible = true;
-        for (size_t i = 0; i < n; i++) {
-            const size_t j = (i + 1) % n;
-            const double u0 = ring.along[i] / 400, u1 = ring.along[i + 1] / 400;
-            const double a[2] = {u0, kLavaShore}, b[2] = {u1, kLavaShore}, c[2] = {u1, kLavaInside}, e[2] = {u0, kLavaInside};
-            lava.quad(at(q[i], -2), at(q[j], -2), at(inner[j], -2), at(inner[i], -2), up, a, b, c, e);
-        }
-        for (size_t t = 0; t < inner_tris.size(); t += 3) {
-            const XZ &x = inner[inner_tris[t]], &y = inner[inner_tris[t + 1]], &z = inner[inner_tris[t + 2]];
-            const double a[2] = {x.x / 400.0, kLavaInside}, b[2] = {y.x / 400.0, kLavaInside}, c[2] = {z.x / 400.0, kLavaInside};
-            lava.triangle(at(x, -2), at(y, -2), at(z, -2), up, a, b, c);
+        auto uv_l = [](XZ v, double t[2]) { t[0] = v.x / kLavaRepeat, t[1] = v.z / kLavaRepeat; };
+        for (size_t t = 0; t < tris.size(); t += 3) {
+            double a[2], b[2], c[2];
+            uv_l(q[tris[t]], a), uv_l(q[tris[t + 1]], b), uv_l(q[tris[t + 2]], c);
+            lava.triangle(at(q[tris[t]], -2), at(q[tris[t + 1]], -2), at(q[tris[t + 2]], -2), up, a, b, c);
         }
         o.surface_materials = {{"surface", 0}};
         o.surface_meshes.push_back(Mesh{"pond_surface", {std::move(lava)}});

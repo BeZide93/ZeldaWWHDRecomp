@@ -272,7 +272,7 @@ The points show in the picture, numbered; click one to select it and drag its ha
   **Depth** (the floor below the water), **Banks above the water** (how high its rim rises above the water
   before it slopes down to the ground), **Foam at the shore** and the **Floor colour** (used where your game
   files don't give the island's own ground texture). The outline's corners are rounded off.
-  **Lava** makes it a lava pool instead: the game's lava at the level, where Link burns as on
+  **Lava** makes it a lava pool instead: Fire Mountain's moving lava at the level, where Link burns as on
   the game's lava, with a rock floor and banks (see [Lava](world-objects.md#lava)). A lava pool has no foam,
   and it may stand higher than the square's island, for example in Fire Mountain's crater.
 - **River:** click its middle from where it starts to where it flows (2 to 32 points): the order is the flow,
