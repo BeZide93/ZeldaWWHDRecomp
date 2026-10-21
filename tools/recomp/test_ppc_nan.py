@@ -15,6 +15,7 @@ No game files are needed. Skipped when no C compiler is found.
 import itertools
 import os
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -256,6 +257,31 @@ class PpcNanPropagation(unittest.TestCase):
         # ps_add per slot
         r = self.run_cases([(idx["ps_add"], [QNAN_NEG, ONE_HALF, QNAN, SNAN_NEG, nums[0], nums[1]])])
         self.assertEqual(r[0][2:], (nan_to_single(QNAN_NEG), nan_to_single(quiet(SNAN_NEG))))
+
+
+    def test_multiply_add_family(self):
+        """fmadd/fmsub/fnmadd/fnmsub (double, single) and ps_madd/ps_msub/ps_nmadd/ps_nmsub: first NaN in
+        A, B, C order, quieted; the negating forms keep the NaN's sign; inf * 0 + x gives the positive
+        default NaN (single word 7FC00000)"""
+        idx = {name: i for i, (name, *_rest) in enumerate(INSNS)}
+        family = ["fmadd", "fmsub", "fnmadd", "fnmsub", "fmadds", "fmsubs", "fnmadds", "fnmsubs",
+                  "ps_madd", "ps_msub", "ps_nmadd", "ps_nmsub"]
+        for name in family:
+            single = INSNS[idx[name]][3]
+            sel = (lambda u: nan_to_single(u)) if single else (lambda u: u)
+            r = self.run_cases([
+                (idx[name], [QNAN_NEG, QNAN_NEG, QNAN, QNAN, SNAN_NEG, SNAN_NEG]),   # A, B, C NaN: A
+                (idx[name], [ONE_HALF, ONE_HALF, SNAN_NEG, SNAN_NEG, QNAN, QNAN]),   # B, C NaN: B (not C)
+                (idx[name], [ONE_HALF, ONE_HALF, TWO, TWO, QNAN_NEG, QNAN_NEG]),     # C only, negative
+                (idx[name], [INF, INF, ONE_HALF, ONE_HALF, ZERO, ZERO]),             # inf * 0 + x: invalid
+            ])
+            self.assertEqual(r[0][2], sel(QNAN_NEG), name)
+            self.assertEqual(r[1][2], sel(quiet(SNAN_NEG)), name)
+            self.assertEqual(r[2][2], sel(QNAN_NEG), name)       # sign kept by the negating forms too
+            self.assertEqual(r[3][2], DEFAULT_QNAN, name)
+            if single:
+                self.assertEqual(struct.unpack(">I", struct.pack(">f", struct.unpack(">d", struct.pack(">Q", r[3][2]))[0]))[0],
+                                 0x7FC00000, name)
 
 
 class OptionOff(unittest.TestCase):
