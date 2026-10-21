@@ -253,6 +253,7 @@ the mod manager refuses it.
 | `game:nest` | A large bird's nest Link can stand in | `nest` | 1 |
 | `game:flag-rito`, `game:flag-sea` | Flags on poles that flutter in the wind | one each | 1 |
 | `game:lookout-tower` | A tall wooden lookout platform that stands in the sea | `tower-ladder` (Link climbs its ladder), `tower` | 1 |
+| `game:stall` | A travelling trader's stall: posts, a counter and a cloth awning, as Zunari's on Windfall (catalogue version 6) | `stall-small`, `stall`, `stall-large` | 1 |
 
 **The volcanic kit** (catalogue version 6, `"requires": {"game_objects": 6}`; the palette's "Fire and
 lava" and "Trees and plants"): torches, flames, fire jets, lava bubbles and Dragon Roost's bomb flowers, the game's own actors with their own effects, sounds and behaviour.
@@ -264,6 +265,10 @@ lava" and "Trees and plants"): torches, flames, fire jets, lava bubbles and Drag
 | `game:fire-jet` | A vent that shoots a column of fire every few seconds; the fire burns Link | `fire-jet`, `fire-jet-large` | 1 |
 | `game:lava-bubbles` | Bubbles that rise and burst over a lava lake, scattered in a wide ring (1300 to 2700 units) around it | `lava-bubbles` | 1 |
 | `game:bomb-flower` | Dragon Roost's bomb plant: Link picks its bomb (A), throws it (or holds it) and it explodes as a bomb does, breaking what a bomb breaks (pots, barrels and boulders, for example) and hurting Link when he is too close; a new bomb grows on the plant after a while | `bomb-flower` | 1 |
+
+The stall is scenery with its own collision; it sells nothing, so a
+Goron or another resident behind it does the talking. On Windfall the game shows its stalls only once the
+player has gathered Delivery Bag items; a placed stall is always there.
 
 **Rocks and blocks** (catalogue version 6, the palette's "Rocks and blocks"):
 

@@ -33,7 +33,7 @@ int main() {
     // ---- the port's recipes
     const auto& c = story_game_objects::catalogue();
     assert(c.version == 6);  // the volcanic kit and the blocks came with version 6
-    for (const auto& e : c.entries) assert(e.since == 1 || ((e.group == "volcanic" || e.group == "blocks") && e.since == 6));
+    for (const auto& e : c.entries) assert(e.since == 1 || ((e.group == "volcanic" || e.group == "blocks" || e.id == "stall") && e.since == 6));
     {
         // the volcanic kit: always lit, no switch (0xFF fields), each the game's own stage actor name
         const auto* torch = c.find("torch");
@@ -212,6 +212,10 @@ int main() {
             const auto* b = c.find(id);
             assert(b && b->process == "Stone2" && b->variant("")->angle_z == 0x00FF && ((b->variant("")->params >> 8) & 0xFF) == 0xFF && (b->variant("")->params & 0x3F) == 0x3F);
         }
+        // the trader's stall (Obj_Roten, Zunari's on Windfall): three sizes by the parameter word's top byte
+        const auto* stall = c.find("stall");
+        assert(stall && stall->native_name == "Roten2" && stall->archive == "Roten" && stall->variant("stall-small")->params == 0 && stall->variant("stall")->params == 0x01000000u &&
+               stall->variant("stall-large")->params == 0x02000000u && stall->collision);
         assert(c.find("boulder")->native_name == "Ebrock" && c.find("boulder-small")->native_name == "Ebrock2" && c.find("stone-head")->native_name == "Ekao");
         story_game_objects::Catalogue t;
         for (const char* bad_z : {"0xFFFFF", "65535", "0xZZZZ"}) {

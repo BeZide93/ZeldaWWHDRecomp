@@ -455,6 +455,29 @@ void roten_execute(Cpu* c){
     if(g_talk.npc==npc&&ld16(npc+0xF8)==0){if(g_talk.terminal)end_talk();else cancel_talk("goron-nonterminal-cancel");}
 }
 void roten_delete(Cpu* c){Actor* a=find(c->r[3]);if(a&&a->spec.actor=="resident"&&goron_type(a->spec.resident)){if(g_talk.actor==a)cancel_talk("delete");talk_latch(a,0);a->restore_talk=false;native_trace(a,c->r[3],"goron-native-delete");a->process=0xFFFFFFFFu;st32(g_scratch+128+uint32_t(a-g_actors.data())*4,0xFFFFFFFFu);}g_original(c,kRotenDelete);}
+// ---- a placed trading stall (game:stall, Zunari's stall on Windfall, d_a_obj_roten). Its create stops unless
+// the player has gathered enough Delivery Bag items (3, 6 or 9 by its size): for a placed copy only, the bag
+// check answers "reserved" while that copy's create runs. Its matrix takes the position alone (the game's
+// stalls are placed unturned): a placed copy also takes its turn about the vertical axis, so its model and its
+// collision (which follows the model's matrix) face where the mod turns it. The game's own stalls are untouched.
+const uint32_t kStallCreate=GC(0x02388B50),kStallMtx=GC(0x02388A1C),kBagReserve=GC(0x025B7840);
+bool g_owned_stall_create=false;
+bool owned_stall(uint32_t a){Actor* o=find(a);return o&&o->game&&story_game_objects::reference(o->spec.actor)=="stall";}
+void stall_create(Cpu* c){const bool owned=owned_stall(c->r[3]);const bool keep=g_owned_stall_create;g_owned_stall_create=owned;g_original(c,kStallCreate);g_owned_stall_create=keep;}
+void bag_reserve(Cpu* c){if(g_owned_stall_create){c->r[3]=1;return;}g_original(c,kBagReserve);}
+void stall_mtx(Cpu* c){
+    const uint32_t a=c->r[3];g_original(c,kStallMtx);if(!owned_stall(a))return;
+    const uint32_t m=ld32(a+0x3B4);if(m<mem::kMem2Start||m>mem::kMem2End-0x100)return;
+    const double yaw=double(int16_t(ld16(a+0x322)))*3.14159265358979323846/32768.0;const float cs=float(std::cos(yaw)),sn=float(std::sin(yaw));
+    const float r[3][3]={{cs,0,sn},{0,1,0},{-sn,0,cs}};
+    // the three stall models stand where Zunari's stall is on Windfall, about 1600 units off their origin and 668 up (the
+    // game places them at the room's middle): the placed copy's position is the middle of its footprint at its foot
+    static constexpr float kFoot[3][3]={{1595.5f,668,-4126},{1449,668,-4113},{1938,668,-3882.5f}};
+    const unsigned type=std::min(2u,unsigned(ld32(a+0xB0)>>24));const float* o=kFoot[type];
+    const float pos[3]={float(ldf32(a+0x314)),float(ldf32(a+0x318)),float(ldf32(a+0x31C))};
+    for(unsigned i=0;i<3;++i){for(unsigned j=0;j<3;++j)st32(m+0xC8+i*16+j*4,f32_as_u32(r[i][j]));
+        st32(m+0xC8+i*16+12,f32_as_u32(pos[i]-(r[i][0]*o[0]+r[i][1]*o[1]+r[i][2]*o[2])));}
+}
 // the placed copy of `a` at `npc` through the accessor of its class
 Actor* placed_resident(const Actor* a,uint32_t npc){return a->spec.resident==kYm1?ym1(npc):goron_type(a->spec.resident)?goron(npc):people(npc);}
 void ym1_delete(Cpu* c){Actor* a=find(c->r[3]);if(a&&a->spec.resident==kYm1){if(g_talk.actor==a)cancel_talk("delete");talk_latch(a,0);a->restore_talk=false;native_trace(a,c->r[3],"ym1-native-delete");a->process=0xFFFFFFFFu;st32(g_scratch+128+uint32_t(a-g_actors.data())*4,0xFFFFFFFFu);}g_original(c,kYm1Delete);}
@@ -1533,6 +1556,8 @@ void install(const std::function<std::string(uint32_t)>& replaced_by,const std::
         hooks.insert(hooks.end(),std::begin(goron_hooks),std::end(goron_hooks));
         g_goron_hooks=true;
     }
+    if(g_live_kinds||std::any_of(g_actors.begin(),g_actors.end(),[](const Actor& a){return story_game_objects::reference(a.spec.actor)=="stall";})){
+        hooks.push_back({kStallCreate,stall_create});hooks.push_back({kStallMtx,stall_mtx});hooks.push_back({kBagReserve,bag_reserve});}
     if(!story_treasure::installed())hooks.push_back({kRoom,room_hook});
     if(replaced_by(kPeopleMsg).empty()) {hooks.push_back({kPeopleMsg,people_msg_hook});hooks.push_back({kPeopleNext,people_next_hook});hooks.push_back({kPeopleExecute,people_execute_hook});}
     for(const auto& h:hooks)if(!replaced_by(h.first).empty()){LOG("[actors] hook conflict %08X; world actors disabled",h.first);return;}
