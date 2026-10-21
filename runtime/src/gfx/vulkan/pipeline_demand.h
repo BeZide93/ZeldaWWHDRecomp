@@ -25,8 +25,8 @@ public:
   // Empty means pending, including a zero-budget poll. A populated failure is
   // terminal. A result can be consumed once; later consumption throws.
   std::optional<PipelineBuildResult> wait_for(uint64_t budgetNs);
-  // Move a still queued job to the front: the caller is about to wait for it (Shader compile Safe /
-  // Fast queue the pipelines of draws that were left out ahead of the ones that must wait).
+  // Move a still queued job to the front: the caller is about to wait for it (Shader compile Fast
+  // queues the pipelines of draws that were left out ahead of the ones that must wait).
   void prioritize();
   PipelineBuildResult wait(const std::function<void()>& presentWhilePending);
   // Drain without transferring a handle or emitting trace events; useful before

@@ -797,7 +797,7 @@ void capture_pipeline_failure(VkResult result, vk::Shader* vs, vk::Shader* ps,
     }
   } catch(...) { /* Diagnostic capture must never replace driver recovery with a crash. */ }
 }
-// wait=false: poll, or wait at most budgetNs (Shader compile Safe / Fast), and return with the
+// wait=false: poll, or wait at most budgetNs (Shader compile Fast), and return with the
 // compile still pending when it is not done by then
 Pipeline& resolve_pending_pipeline(Pipeline& pipeline, bool wait = true, bool present = false, uint64_t budgetNs = 0) {
   if (pipeline.compileError) std::rethrow_exception(pipeline.compileError);
@@ -808,7 +808,7 @@ Pipeline& resolve_pending_pipeline(Pipeline& pipeline, bool wait = true, bool pr
     if (!built && !wait) return pipeline;
     if (!built) {
       // something must wait for this pipeline now: its compile and its shaders' SPIR-V jump the queues
-      // (Shader compile Safe / Fast queue the work of draws that were left out)
+      // (Shader compile Fast queues the work of draws that were left out)
       if (bgshaders::enabled()) {
         for (auto* shader : pending.shaders)
           if (shader && shader->binary) {
@@ -858,8 +858,7 @@ static void track_drawn(const uint32_t* r, const std::array<Surface*, 8>& colors
 }
 // The pipeline is still compiling: wait the frame's budget if this draw may be left out (true: draw
 // it now, ready or with the exact wait that follows), false: left out of this frame.
-static bool background_wait(const uint32_t* r, Pipeline& p, const std::array<Surface*, 8>& colors, Surface* depth,
-                            uint32_t vertices) {
+static bool background_wait(const uint32_t* r, Pipeline& p, const std::array<Surface*, 8>& colors, Surface* depth) {
   auto& t = bgshaders::tracker();
   bgshaders::TargetFacts written[8], depthFacts;
   int count = 0;
@@ -867,7 +866,9 @@ static bool background_wait(const uint32_t* r, Pipeline& p, const std::array<Sur
     if (colors[i] && writes_color(r, i)) written[count++] = t.facts(colors[i]->addr, R.frame);
   const bool depthWritten = writes_depth(r, depth);
   if (depthWritten) depthFacts = t.facts(depth->addr, R.frame);
-  const auto verdict = bgshaders::classify(bgshaders::level(), written, count, depthWritten ? &depthFacts : nullptr, vertices);
+  // the depth buffer the game's sun check peeks (peek_z) waits even before the first peek
+  if (depthWritten && depth->addr == R.mainDepthAddr) depthFacts.peeked = true;
+  const auto verdict = bgshaders::classify(bgshaders::level(), written, count, depthWritten ? &depthFacts : nullptr);
   if (verdict != bgshaders::kSkippable) { bgshaders::exact(verdict); return true; }
   const uint64_t left = bgshaders::budget_left_ns(R.frame);
   const auto started = std::chrono::steady_clock::now();
@@ -3142,12 +3143,12 @@ void draw(const uint32_t *r, uint32_t prim, uint32_t count, uint32_t indexType,
       : pipeline(r, vs, ps, fs, topology, colors, depth);
   rprof::mark(rprof::kPipeline);
   if (!p.pipeline && !p.pendingCompile) return;
-  // Shader compile Safe / Fast (background_shaders.h): a draw that may be left out only waits the
-  // frame's budget and is left out of this frame if its pipeline is not ready by then
+  // Shader compile Fast (background_shaders.h): a draw that may be left out only waits the frame's
+  // budget and is left out of this frame if its pipeline is not ready by then
   const bool trackTargets = bgshaders::enabled() && !aoPrivateReplay;
-  if (p.pendingCompile && trackTargets && !background_wait(r, p, colors, depth, count)) return;
-  if (p.pendingCompile && !trackTargets)  // the AO pass's private copy of a draw is never the picture
-    bgshaders::exact(aoPrivateReplay && bgshaders::enabled() ? bgshaders::kNotVisible : bgshaders::kOff);
+  if (p.pendingCompile && trackTargets && !background_wait(r, p, colors, depth)) return;
+  if (p.pendingCompile && !bgshaders::enabled()) bgshaders::exact(bgshaders::kOff);  // (the AO pass's private
+                                                                                      // copy of a draw waits)
   if (p.pendingCompile && !begin_exact_preparation()) resolve_pending_pipeline(p);
   if (trackTargets) track_drawn(r, colors, depth);
   if (!p.pipeline && !p.pendingCompile) return; // terminal driver failure, not pending

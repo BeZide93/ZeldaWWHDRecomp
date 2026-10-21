@@ -28,7 +28,7 @@ void peek_z(const uint32_t* cells, uint32_t n) {
     }
     uint32_t points = std::min(n / 3, 64u);
     if (!depth || !points) return;
-    // Shader compile Safe / Fast: the game reads this depth buffer back, so draws into it keep the exact
+    // Shader compile Fast: the game reads this depth buffer back, so draws into it keep the exact
     // wait from now on; if one was left out in this frame already, the frame answers no peek and the
     // game keeps its previous answers, from a complete frame
     if (bgshaders::enabled()) bgshaders::tracker().peeked(depth->addr, R.frame);

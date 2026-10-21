@@ -1222,15 +1222,15 @@ target_compile_options(render_prof_test PRIVATE -UNDEBUG)
 add_test(NAME render_prof COMMAND render_prof_test)
 add_test(NAME render_prof_env_on COMMAND render_prof_test env-on)
 add_test(NAME render_prof_env_off COMMAND render_prof_test env-off)
-# Settings > Graphics > Shader compile (off / safe / fast): which draws may be left out, default, switch,
+# Settings > Graphics > Shader compile (off / fast): which draws may be left out, default, switch,
 # WWHD_BG_SHADERS, the wait budget and the report line
 add_executable(background_shaders_test runtime/tools/background_shaders_test.cpp runtime/src/background_shaders.cpp)
 target_include_directories(background_shaders_test PRIVATE runtime/src)
 target_compile_options(background_shaders_test PRIVATE -UNDEBUG)
 add_test(NAME background_shaders COMMAND background_shaders_test)
-add_test(NAME background_shaders_env_safe COMMAND background_shaders_test env-safe)
 add_test(NAME background_shaders_env_fast COMMAND background_shaders_test env-fast)
 add_test(NAME background_shaders_env_off COMMAND background_shaders_test env-off)
+add_test(NAME background_shaders_env_safe COMMAND background_shaders_test env-safe)
 add_test(NAME background_shaders_budget COMMAND background_shaders_test budget)
 add_test(NAME report_header COMMAND report_header_test)
 # renderer object counts and memory mappings for crash logs and performance reports (runtime/src/render_objects.h)

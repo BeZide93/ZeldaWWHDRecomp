@@ -13,23 +13,16 @@ void log_msg(const char* fmt, ...);
 namespace bgshaders {
 
 namespace {
-std::atomic<uint8_t> g_requested{kDefaultLevel};  // the setting
+std::atomic<uint8_t> g_requested{kLevelOff};  // the setting
 std::mutex g_counterMutex;                    // the counters are read from the UI thread
 Counters g_counters;
 uint64_t g_budgetFrame = ~uint64_t{0}, g_budgetSpent = 0;  // render thread
 uint64_t g_skipFrame = ~uint64_t{0};
 }
 
-const char* level_name(Level l) {
-    static const char* const names[kLevels] = {"off", "safe", "fast"};
-    return l < kLevels ? names[l] : "off";
-}
-const char* level_value(Level l) { return l == kLevelOff || l >= kLevels ? "0" : level_name(l); }
-Level parse_level(const char* v) {
-    if (v && (!strcmp(v, "0") || !strcmp(v, "off"))) return kLevelOff;
-    if (v && !strcmp(v, "fast")) return kLevelFast;
-    return kLevelSafe;
-}
+const char* level_name(Level l) { return l == kLevelFast ? "fast" : "off"; }
+const char* level_value(Level l) { return l == kLevelFast ? "fast" : "0"; }
+Level parse_level(const char* v) { return v && !strcmp(v, "fast") ? kLevelFast : kLevelOff; }
 const char* env_override() {
     static const char* const e = getenv("WWHD_BG_SHADERS");
     return e && *e ? e : nullptr;
@@ -40,7 +33,7 @@ static std::string source() {
 Level requested() { return Level(g_requested.load(std::memory_order_relaxed)); }
 Level level() { return env_override() ? parse_level(env_override()) : requested(); }
 void set_level(Level l) {
-    if (l >= kLevels) l = Level(kDefaultLevel);
+    if (l >= kLevels) l = kLevelOff;
     if (Level(g_requested.exchange(l)) == l) return;
     if (env_override())
         LOG("[shaders] shader compile: setting %s; %s decides for this start", level_name(l), source().c_str());
@@ -48,7 +41,9 @@ void set_level(Level l) {
         LOG("[shaders] shader compile %s (setting)", level_name(l));
 }
 void start(Level saved) {
-    g_requested = saved < kLevels ? saved : Level(kDefaultLevel);
+    g_requested = saved < kLevels ? saved : kLevelOff;
+    if (env_override() && !strcmp(env_override(), "safe"))
+        LOG("[shaders] WWHD_BG_SHADERS=safe: the Safe level was removed; using 0 (Off)");
     LOG("[shaders] shader compile %s (%s); wait budget %.1f ms per frame", level_name(level()), source().c_str(),
         wait_budget_ms());
 }
@@ -62,38 +57,18 @@ double wait_budget_ms() {
 }
 
 const char* verdict_name(Verdict v) {
-    static const char* const names[kVerdicts] = {"left out", "option off", "no colour target", "not the picture",
-                                                 "first frame", "read back", "copied", "full-screen pass"};
+    static const char* const names[kVerdicts] = {"left out", "option off", "new or one-off target", "read back",
+                                                 "copied"};
     return v < kVerdicts ? names[v] : "?";
 }
 
-Verdict classify(Level level, const TargetFacts* colors, int colorCount, const TargetFacts* depth, uint32_t vertices) {
-    if (level == kLevelOff || level >= kLevels) return kOff;
-    if (level == kLevelFast) {
-        // only what could change the game or leave a lasting wrong picture waits
-        auto check = [](const TargetFacts& t) {
-            if (t.readBack || t.peeked) return kReadBack;
-            if (t.copiedOccasionally) return kCopied;
-            if (!t.redrawn && !t.regular) return kFirstFrame;
-            return kSkippable;
-        };
-        for (int i = 0; i < colorCount; i++)
-            if (Verdict v = check(colors[i]); v != kSkippable) return v;
-        if (depth)
-            if (Verdict v = check(*depth); v != kSkippable) return v;
-        return kSkippable;
-    }
-    if (colorCount <= 0) return kNoColor;
-    if (vertices <= kFullScreenVertices) return kFullScreen;
-    // the picture: at least one written colour target is presented; the draw's other targets (more
-    // colour targets, the depth buffer) are drawn together with it, like its depth buffer
-    bool picture = false;
-    for (int i = 0; i < colorCount; i++) picture |= colors[i].presented;
-    if (!picture) return kNotVisible;
+Verdict classify(Level level, const TargetFacts* colors, int colorCount, const TargetFacts* depth) {
+    if (level != kLevelFast) return kOff;
+    // only what could change the game or leave a lasting wrong picture waits
     auto check = [](const TargetFacts& t) {
-        if (!t.redrawn) return kFirstFrame;
         if (t.readBack || t.peeked) return kReadBack;
         if (t.copiedOccasionally) return kCopied;
+        if (!t.redrawn && !t.regular) return kFirstFrame;
         return kSkippable;
     };
     for (int i = 0; i < colorCount; i++)
@@ -137,7 +112,6 @@ TargetFacts Tracker::facts(uint32_t addr, uint64_t frame) const {
     if (it == use_.end()) return f;
     const Use& u = it->second;
     auto within = [frame](uint64_t at, uint64_t frames) { return at != kNever && at <= frame && frame - at <= frames; };
-    f.presented = within(u.presented, 1);
     f.redrawn = !u.history.must_wait(frame);
     f.readBack = within(u.readBack, kQuietFrames);
     f.peeked = within(u.peeked, kQuietFrames);

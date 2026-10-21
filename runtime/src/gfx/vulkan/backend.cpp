@@ -2874,8 +2874,6 @@ void copy_to_scan(uint32_t cb, uint32_t target) {
   Surface *src = surface_from_color_buffer(cb);
   if (!src)
     return;
-  // Shader compile (background_shaders.h): which target is the presented picture
-  if (bgshaders::enabled()) bgshaders::tracker().presented(src->addr, R.frame);
   if (stereoEye && target == 4) return; // GamePad is a shared 2D device.
   Screen &s = stereoEye ? stereoRight : (target == 4 ? R.drc : R.tv);
   auto fits = [src](const Surface *d) {
@@ -2978,7 +2976,7 @@ static void frame_dumps(uint64_t frame) {
   static const auto frames = gfx::capture_schedule::parse(getenv("WWHD_DUMP_FRAMES"));
   const uint64_t dumpFrame = fixed_seed::script_frame(frame);  // (TV frame unless WWHD_TEST_FIXED_SEED)
   // test aid: WWHD_BG_SHADERS_DUMP=n writes the TV image of the first n frames that left a draw out
-  // (Shader compile Safe / Fast) and of the two frames after each, to check what went missing
+  // (Shader compile Fast) and of the two frames after each, to check what went missing
   static const uint64_t leftOutDumps = getenv("WWHD_BG_SHADERS_DUMP") ? strtoull(getenv("WWHD_BG_SHADERS_DUMP"), nullptr, 10) : 0;
   if (leftOutDumps) {
     static uint64_t until = 0, count = 0;
