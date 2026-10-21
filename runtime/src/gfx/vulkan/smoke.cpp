@@ -882,6 +882,10 @@ void sampled_mip_order_check(bool bindRenderedLevel = false) {
      base.addr>>8,base.mipAddr>>8,(1u<<19)|(2u<<22)|(3u<<25),0,0};
  words[5]=1;
  std::copy(words,words+7,registers.begin()+Latte::REGADDR::SQ_TEX_RESOURCE_WORD0_N_PS+7);
+ // unit 1's sampler filters between mips up to LOD 1: the chain is built only as far as its sampler
+ // reaches (with_mip_chain), so a sampler without mips would never assemble the rendered level 1
+ registers[Latte::REGADDR::SQ_TEX_SAMPLER_WORD0_0+3]=1u<<17;  // MIP_FILTER point
+ registers[Latte::REGADDR::SQ_TEX_SAMPLER_WORD0_0+4]=64u<<10;  // MAX_LOD 1.0
  words[5]=0;
  if(bindRenderedLevel){words[0]=1u|(1u<<3)|(7u<<19);words[1]=7u|(0x1au<<26);words[2]=base.mipAddr>>8;words[3]=0;}
  std::copy(words,words+7,registers.begin()+Latte::REGADDR::SQ_TEX_RESOURCE_WORD0_N_PS);
